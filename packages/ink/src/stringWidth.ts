@@ -3,6 +3,16 @@ import { eastAsianWidth } from 'get-east-asian-width';
 import stripAnsi from 'strip-ansi';
 import { getGraphemeSegmenter } from './_internal/intl.js';
 
+const isCJK = (() => {
+  try {
+    return /^(zh|ja|ko)/.test(Intl.DateTimeFormat().resolvedOptions().locale);
+  } catch {
+    return false;
+  }
+})();
+
+const eawOpts = { ambiguousAsWide: isCJK };  // eslint-disable-line @typescript-eslint/naming-convention
+
 const EMOJI_REGEX = emojiRegex();
 
 /** Compute how many terminal cells a string will occupy when printed. */
@@ -51,7 +61,7 @@ function stringWidthJavaScript(str: string): number {
     for (const char of str) {
       const codePoint = char.codePointAt(0)!;
       if (!isZeroWidth(codePoint)) {
-        width += eastAsianWidth(codePoint, { ambiguousAsWide: false });
+        width += eastAsianWidth(codePoint, eawOpts);
       }
     }
     return width;
@@ -75,7 +85,7 @@ function stringWidthJavaScript(str: string): number {
     for (const char of grapheme) {
       const codePoint = char.codePointAt(0)!;
       if (!isZeroWidth(codePoint)) {
-        width += eastAsianWidth(codePoint, { ambiguousAsWide: false });
+        width += eastAsianWidth(codePoint, eawOpts);
         break;
       }
     }
@@ -215,7 +225,7 @@ const bunStringWidth =
     ? Bun.stringWidth
     : null;
 
-const BUN_STRING_WIDTH_OPTS = { ambiguousIsNarrow: true } as const;
+const BUN_STRING_WIDTH_OPTS = { ambiguousIsNarrow: !isCJK } as const;
 
 export const stringWidth: (str: string) => number = bunStringWidth
   ? str => bunStringWidth(str, BUN_STRING_WIDTH_OPTS)

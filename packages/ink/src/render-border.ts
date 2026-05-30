@@ -6,6 +6,77 @@ import type Output from './output.js';
 import { stringWidth } from './stringWidth.js';
 import type { Color } from './styles.js';
 
+// ── CJK terminal mitigation ──────────────────────────────
+
+/** True when the system locale (or Windows console code page) biases
+ *  ambiguous-width characters (U+2500–U+257F box-drawing) toward double-cell
+ *  rendering.  Yoga-layout assumes single-cell, so borders overflow. */
+function isCJKLocale(): boolean {
+  try {
+    return /^(zh|ja|ko)/.test(
+      Intl.DateTimeFormat().resolvedOptions().locale,
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** Map common box-drawing Unicode graphemes to their single-cell ASCII
+ *  equivalents.  Only the ranges used by `cli-boxes` (and our custom
+ *  dashed style) are covered — anything unrecognised passes through. */
+const cjkAsciiEq: Record<string, string> = {
+  // Horizontal
+  '\u2500': '-', // ─
+  '\u2501': '=', // ━
+  '\u254C': '-', // ╌ (dashed)
+  '\u2550': '=', // ═
+  '\u2191': '-', // ↑
+  '\u2193': '-', // ↓
+  // Vertical
+  '\u2502': '|', // │
+  '\u2503': '|', // ┃
+  '\u254E': '|', // ╎ (dashed)
+  '\u2551': '|', // ║
+  '\u2190': '|', // ←
+  '\u2192': '|', // →
+  // Corners
+  '\u250C': '+', // ┌
+  '\u250F': '+', // ┏
+  '\u2510': '+', // ┐
+  '\u2513': '+', // ┓
+  '\u2514': '+', // └
+  '\u2517': '+', // ┗
+  '\u2518': '+', // ┘
+  '\u251B': '+', // ┛
+  '\u251C': '+', // ├
+  '\u2524': '+', // ┤
+  '\u252C': '+', // ┬
+  '\u2534': '+', // ┴
+  '\u253C': '+', // ┼
+  '\u2552': '+', // ╒
+  '\u2553': '+', // ╓
+  '\u2554': '+', // ╔
+  '\u2555': '+', // ╕
+  '\u2556': '+', // ╖
+  '\u2557': '+', // ╗
+  '\u2558': '+', // ╘
+  '\u2559': '+', // ╙
+  '\u255A': '+', // ╚
+  '\u255B': '+', // ╛
+  '\u255C': '+', // ╜
+  '\u255D': '+', // ╝
+  '\u256D': '+', // ╭
+  '\u256E': '+', // ╮
+  '\u256F': '+', // ╯
+  '\u2570': '+', // ╰
+  '\u2196': '+', // ↖
+  '\u2197': '+', // ↗
+  '\u2198': '+', // ↘
+  '\u2199': '+', // ↙
+};
+
+// ── Public types and style module ────────────────────────
+
 export type BorderTextOptions = {
   /** Pre-rendered string, may include SGR sequences. */
   content: string;
@@ -41,32 +112,52 @@ function embedTextInBorder(
   offset: number = 0,
   borderChar: string,
 ): [before: string, text: string, after: string] {
-  const textLength = stringWidth(text);
-  const borderLength = borderLine.length;
+  const textWidth = stringWidth(text);
+  const borderWidth = stringWidth(borderLine);
+  const charWidth = stringWidth(borderChar);
+  const hasLeftCorner = borderLine[0] !== borderChar;
+  const hasRightCorner = borderLine[borderLine.length - 1] !== borderChar;
+  const leftCornerWidth = hasLeftCorner ? stringWidth(borderLine[0]) : 0;
+  const rightCornerWidth = hasRightCorner
+    ? stringWidth(borderLine[borderLine.length - 1])
+    : 0;
 
-  if (textLength >= borderLength - 2) {
-    return ['', text.substring(0, borderLength), ''];
+  if (textWidth >= borderWidth - leftCornerWidth - rightCornerWidth) {
+    return ['', text.substring(0, borderWidth / charWidth), ''];
   }
 
-  let position: number;
+  let posCells: number;
   if (align === 'center') {
-    position = Math.floor((borderLength - textLength) / 2);
+    posCells =
+      leftCornerWidth +
+      Math.floor(
+        (borderWidth - leftCornerWidth - rightCornerWidth - textWidth) / 2,
+      );
   } else if (align === 'start') {
-    // +1 leaves room for the corner glyph.
-    position = offset + 1;
+    posCells = leftCornerWidth + offset;
   } else {
-    // align === 'end'
-    position = borderLength - textLength - offset - 1;
+    posCells = borderWidth - textWidth - offset - rightCornerWidth;
   }
 
-  // Clamp so the text never collides with a corner.
-  position = Math.max(1, Math.min(position, borderLength - textLength - 1));
-
-  const before = borderLine.substring(0, 1) + borderChar.repeat(position - 1);
+  posCells = Math.max(
+    leftCornerWidth,
+    Math.min(posCells, borderWidth - textWidth - rightCornerWidth),
+  );
+  const beforeChars = Math.max(
+    0,
+    Math.floor((posCells - leftCornerWidth) / charWidth),
+  );
+  const afterChars = Math.max(
+    0,
+    Math.floor(
+      (borderWidth - posCells - textWidth - rightCornerWidth) / charWidth,
+    ),
+  );
+  const before =
+    (hasLeftCorner ? borderLine[0] : '') + borderChar.repeat(beforeChars);
   const after =
-    borderChar.repeat(borderLength - position - textLength - 1) +
-    borderLine.substring(borderLength - 1);
-
+    borderChar.repeat(afterChars) +
+    (hasRightCorner ? borderLine[borderLine.length - 1] : '');
   return [before, text, after];
 }
 
@@ -101,6 +192,23 @@ const renderBorder = (
         ] ?? cliBoxes[node.style.borderStyle as keyof Boxes])
       : node.style.borderStyle;
 
+  // East Asian terminals render box-drawing chars as double-width cells,
+  // but yoga-layout assumes single-width — causing overflow and misalignment.
+  // Remap to ASCII so every character occupies exactly one column.
+  const safe = isCJKLocale()
+    ? {
+        ...box,
+        top: cjkAsciiEq[box.top] ?? box.top,
+        bottom: cjkAsciiEq[box.bottom] ?? box.bottom,
+        left: cjkAsciiEq[box.left] ?? box.left,
+        right: cjkAsciiEq[box.right] ?? box.right,
+        topLeft: cjkAsciiEq[box.topLeft] ?? box.topLeft,
+        topRight: cjkAsciiEq[box.topRight] ?? box.topRight,
+        bottomLeft: cjkAsciiEq[box.bottomLeft] ?? box.bottomLeft,
+        bottomRight: cjkAsciiEq[box.bottomRight] ?? box.bottomRight,
+      }
+    : box;
+
   // Per-side colour falls back to the catch-all borderColor; same for the
   // dim flag. This mirrors how every CSS-shaped border API behaves.
   const topBorderColor = node.style.borderTopColor ?? node.style.borderColor;
@@ -130,9 +238,9 @@ const renderBorder = (
   );
 
   const topBorderLine = showTopBorder
-    ? (showLeftBorder ? box.topLeft : '') +
-      box.top.repeat(contentWidth) +
-      (showRightBorder ? box.topRight : '')
+    ? (showLeftBorder ? safe.topLeft : '') +
+      safe.top.repeat(contentWidth) +
+      (showRightBorder ? safe.topRight : '')
     : '';
 
   let topBorder: string | undefined;
@@ -142,7 +250,7 @@ const renderBorder = (
       node.style.borderText.content,
       node.style.borderText.align,
       node.style.borderText.offset,
-      box.top,
+      safe.top,
     );
     // Style the border slices around the text but leave the text itself
     // alone — callers pass already-coloured content.
@@ -167,14 +275,14 @@ const renderBorder = (
   // Output.write will place each line at successive rows. Dim is applied
   // once at the end so the SGR pair brackets the whole column instead of
   // each character.
-  let leftBorder = (applyColor(box.left, leftBorderColor) + '\n').repeat(
+  let leftBorder = (applyColor(safe.left, leftBorderColor) + '\n').repeat(
     verticalBorderHeight,
   );
   if (dimLeftBorderColor) {
     leftBorder = chalk.dim(leftBorder);
   }
 
-  let rightBorder = (applyColor(box.right, rightBorderColor) + '\n').repeat(
+  let rightBorder = (applyColor(safe.right, rightBorderColor) + '\n').repeat(
     verticalBorderHeight,
   );
   if (dimRightBorderColor) {
@@ -182,9 +290,9 @@ const renderBorder = (
   }
 
   const bottomBorderLine = showBottomBorder
-    ? (showLeftBorder ? box.bottomLeft : '') +
-      box.bottom.repeat(contentWidth) +
-      (showRightBorder ? box.bottomRight : '')
+    ? (showLeftBorder ? safe.bottomLeft : '') +
+      safe.bottom.repeat(contentWidth) +
+      (showRightBorder ? safe.bottomRight : '')
     : '';
 
   let bottomBorder: string | undefined;
@@ -194,7 +302,7 @@ const renderBorder = (
       node.style.borderText.content,
       node.style.borderText.align,
       node.style.borderText.offset,
-      box.bottom,
+      safe.bottom,
     );
     bottomBorder =
       styleBorderLine(before, bottomBorderColor, dimBottomBorderColor) +
