@@ -117,10 +117,7 @@ export interface CacheFirstLoopOptions {
   confirmationGate?: PauseGate;
   /** Re-runs the prompt builder (applyMemoryStack / codeSystemPrompt) on /new so REASONIX.md edits take effect without a restart. Accepting a cache miss is the price. */
   rebuildSystem?: () => string;
-  /** When true, sends a minimal warmup request before the first API call each turn
-   *  to pre-establish DeepSeek's KV prefix cache. The warmup uses the same prefix +
-   *  tools but with tool_choice=none and a minimal completion target so the cached
-   *  unit covers the entire stable prefix. Default false (opt-in). */
+  /** Warmup: pre-seed DeepSeek KV cache with the stable prefix before each real turn. Default false. */
   cacheWarmup?: boolean;
 }
 
@@ -737,15 +734,9 @@ export class CacheFirstLoop {
     return userText;
   }
 
-  /** Send a minimal warmup request to pre-establish the DeepSeek KV prefix cache.
-   *  Uses the same system prompt + tools + conversation history as the real turn,
-   *  but caps output at 16 tokens and sets tool_choice=none so the model can't
-   *  inflate the uncached tail with tool calls.
-   *
-   *  After this call, the real request shares the same stable prefix and reaps a
-   *  near-100% cache hit on it. Cold-start turns go from ~58% to ~99% hit rate.
-   *
-   *  Failure is silent — a dead cache warmup must never block the real turn. */
+  /** Warmup: same prefix + history as real turn, but tool_choice=none + max_tokens=16.
+   *  Pre-establishes a KV cache unit so the real request gets ~99% hit rate.
+   *  Failure is silent — best-effort, never blocks the real turn. */
   private async warmupCache(model: string, signal?: AbortSignal): Promise<void> {
     const history = this.log.toFullHistory();
     // Peel off the last user message so the warmup prefix ends cleanly at a
