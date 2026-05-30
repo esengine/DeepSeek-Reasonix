@@ -15,11 +15,21 @@ export function resolveHistoryScrollMode({
 }: ResolveHistoryScrollModeInput = {}): ResolvedHistoryScrollMode {
   if (configured === "native") return "native";
   if (configured === "app") return "app";
+  // Apple Terminal has native renderer crashes when it receives
+  // private mouse-mode toggles — keep it on native so the terminal
+  // handles scrollback without any escape sequences.
+  if ((env.TERM_PROGRAM ?? "").toLowerCase() === "apple_terminal") return "native";
   if (isKnownJumpProneTerminal(env)) return "app";
+  // Classic Windows console (conhost) doesn't advertise TERM_PROGRAM
+  // and its alt-screen buffer doesn't forward wheel events — native
+  // scrollback is the safer default there.
   if (platform === "win32" && env.TERM_PROGRAM === undefined && env.MSYSTEM === undefined) {
     return "native";
   }
-  return "native";
+  // Default to app-managed scroll for all other terminals so the mouse
+  // wheel feeds into CardStream's scroll logic. Native scrollback
+  // cannot scroll TUI alt-screen content on most terminals.
+  return "app";
 }
 
 function isKnownJumpProneTerminal(env: NodeJS.ProcessEnv | Record<string, string | undefined>) {

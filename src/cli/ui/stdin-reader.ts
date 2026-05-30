@@ -131,8 +131,17 @@ function decodeSgrMouseBody(body: string): KeyEvent | null {
   if (!Number.isFinite(btn) || !Number.isFinite(col) || !Number.isFinite(row)) return null;
   const tail = m[4]!;
   if (tail === "m") return { input: "", mouseRelease: true, mouseRow: row, mouseCol: col };
-  if (btn === 64) return { input: "", mouseScrollUp: true, mouseRow: row, mouseCol: col };
-  if (btn === 65) return { input: "", mouseScrollDown: true, mouseRow: row, mouseCol: col };
+  // SGR encodes wheel events with bit 6 set (btn & 64).
+  // Modifier keys add bits 4/8/16 (e.g. 68 = wheel-up+Ctrl, 80 = wheel-up+Shift).
+  // Masking with bit 6 is stricter than `btn >= 64` — it rejects theoretical
+  // non-wheel codes that happen to fall >= 64. The wheel direction is in bit 0:
+  // 0 = up, 1 = down. Issue #2260: some terminals (especially Windows Terminal
+  // previews) send modified codes 68/69/80 etc. that the old exact-match missed.
+  if (btn & 64) {
+    const wheelDir = btn & 1;
+    if (wheelDir === 0) return { input: "", mouseScrollUp: true, mouseRow: row, mouseCol: col };
+    return { input: "", mouseScrollDown: true, mouseRow: row, mouseCol: col };
+  }
   if (btn === 0) return { input: "", mouseClick: true, mouseRow: row, mouseCol: col };
   if (btn === 32) return { input: "", mouseDrag: true, mouseRow: row, mouseCol: col };
   return null;

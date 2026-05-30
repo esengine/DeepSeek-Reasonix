@@ -314,11 +314,14 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
   const mcpSpecs = [...requestedSpecs];
   const mcpServers: McpServerSummary[] = [];
   const cfg = readConfig();
-  const historyScrollMode = resolveHistoryScrollMode({
-    configured: loadHistoryScrollMode(),
-    env: process.env,
-    platform: process.platform,
-  });
+  const historyScrollMode =
+    opts.noMouse || cfg.mouseTracking === false
+      ? "native"
+      : resolveHistoryScrollMode({
+          configured: loadHistoryScrollMode(),
+          env: process.env,
+          platform: process.platform,
+        });
   const startupInfoHints: string[] = [];
   const hasAnyMcp = normalizeMcpConfig(cfg).length > 0 || mcpSpecs.length > 0;
   if (cfg.setupCompleted === true && !hasAnyMcp) {
@@ -424,10 +427,10 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
   // path so N cards don't accumulate N native stdout listeners.
   installResizeBroadcaster();
 
-  // Wheel scrolling. Opt-out via `mouseTracking: false` for users who
-  // prefer native drag-select copy (Shift+drag still selects with mouse
-  // mode on in most terminals). exit hooks cover hard kills so the
-  // sequence doesn't leak into the parent shell.
+  // Wheel scrolling. Opt-out via `--no-mouse` / `mouseTracking: false` also
+  // forces native history mode so the terminal, not CardStream, owns wheel
+  // movement. Exit hooks cover hard kills so the sequence doesn't leak into
+  // the parent shell.
   if (!opts.noMouse && cfg.mouseTracking !== false) {
     enableMouseMode(historyScrollMode);
     process.once("exit", disableMouseMode);
