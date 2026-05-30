@@ -3616,6 +3616,9 @@ function AppInner({
         setSummary(loop.stats.summary());
         busyRef.current = false;
         setBusy(false);
+        // Re-pin after turn end so scrolled-up users still land on the
+        // final answer without needing to press End manually.
+        chatScroll.jumpToBottom();
         submittingRef.current = false;
         qq.clearTurnReply();
         telegram.clearTurnReply();
