@@ -3700,6 +3700,7 @@ function AppInner({
       generateCurrentSessionTitle,
       switchWorkspaceRoot,
       system,
+      chatScroll,
     ],
   );
 
