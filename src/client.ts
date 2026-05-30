@@ -231,6 +231,9 @@ export class DeepSeekClient {
     if (opts.reasoningEffort) {
       payload.reasoning_effort = opts.reasoningEffort;
     }
+    if (opts.toolChoice) {
+      payload.tool_choice = opts.toolChoice;
+    }
     return payload;
   }
 

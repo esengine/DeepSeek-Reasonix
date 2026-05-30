@@ -64,4 +64,6 @@ export interface ChatRequestOptions {
   responseFormat?: { type: "json_object" | "text" };
   thinking?: "enabled" | "disabled";
   reasoningEffort?: import("./config.js").ReasoningEffort;
+  /** OpenAI-compatible tool_choice. "none" prevents the model from calling any tools. */
+  toolChoice?: "none" | "auto" | "required";
 }

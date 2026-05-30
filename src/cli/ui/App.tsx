@@ -1059,6 +1059,7 @@ function AppInner({
       maxOutputTokens: loadMaxOutputTokens(),
       maxIterPerTurn: loadMaxIterPerTurn(),
       rebuildSystem,
+      cacheWarmup: true,
     });
     loopRef.current = l;
     return l;

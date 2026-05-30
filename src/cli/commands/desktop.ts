@@ -1390,6 +1390,7 @@ function buildRuntimeFor(tab: Tab): RuntimeState {
     maxIterPerTurn: loadMaxIterPerTurn(),
     hooks: tab.hooks,
     hookCwd: tab.rootDir,
+    cacheWarmup: true,
   });
   const eventizer = new Eventizer();
   const ctx = { model: tab.currentModel, prefixHash: prefix.fingerprint, reasoningEffort };
