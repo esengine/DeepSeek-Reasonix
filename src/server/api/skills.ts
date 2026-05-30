@@ -174,6 +174,8 @@ export async function handleSkills(
           path: s.path,
           size: 0,
           mtime: 0,
+          runAs: s.runAs,
+          model: s.model,
           runs7d: runs7d.get(s.name) ?? 0,
         }));
     return {
@@ -188,6 +190,8 @@ export async function handleSkills(
             name: s.name,
             scope: "builtin" as const,
             description: s.description,
+            runAs: s.runAs,
+            model: s.model,
             runs7d: runs7d.get(s.name) ?? 0,
           })),
         paths: {
