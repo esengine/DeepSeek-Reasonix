@@ -10,7 +10,11 @@ import {
   applyEditBlocks,
   snapshotBeforeEdits,
 } from "../../../code/edit-blocks.js";
-import { clearPendingEdits, savePendingEdits } from "../../../code/pending-edits.js";
+import {
+  clearPendingEdits,
+  loadPendingEdits,
+  savePendingEdits,
+} from "../../../code/pending-edits.js";
 import { t } from "../../../i18n/index.js";
 import { formatEditResults, partitionEdits } from "../edit-history.js";
 
@@ -39,10 +43,20 @@ export interface UseCodeModeOptions {
 export function useCodeMode(opts: UseCodeModeOptions): UseCodeModeResult {
   const { codeMode, pendingEdits, currentRootDir, session, syncPendingCount, recordEdit } = opts;
 
+  const activePendingEdits = useCallback((): EditBlock[] => {
+    if (pendingEdits.current.length > 0) return pendingEdits.current;
+    const restored = loadPendingEdits(session ?? null);
+    if (restored && restored.length > 0) {
+      pendingEdits.current = restored;
+      syncPendingCount();
+    }
+    return pendingEdits.current;
+  }, [session, syncPendingCount, pendingEdits]);
+
   const codeApply = useCallback(
     (indices?: readonly number[]): string => {
       if (!codeMode) return t("app.editHistoryNoCodeMode");
-      const blocks = pendingEdits.current;
+      const blocks = activePendingEdits();
       if (blocks.length === 0) {
         return t("app.noPendingEdits");
       }
@@ -67,12 +81,20 @@ export function useCodeMode(opts: UseCodeModeOptions): UseCodeModeResult {
         remaining.length > 0 ? `\n${t("app.blocksStillPending", { count: remaining.length })}` : "";
       return formatEditResults(results) + tail;
     },
-    [codeMode, currentRootDir, session, syncPendingCount, recordEdit, pendingEdits],
+    [
+      codeMode,
+      currentRootDir,
+      session,
+      syncPendingCount,
+      recordEdit,
+      pendingEdits,
+      activePendingEdits,
+    ],
   );
 
   const codeDiscard = useCallback(
     (indices?: readonly number[]): string => {
-      const blocks = pendingEdits.current;
+      const blocks = activePendingEdits();
       if (blocks.length === 0) return t("app.noPendingDiscard");
       const useSubset = indices !== undefined && indices.length > 0;
       const { selected, remaining } = useSubset
@@ -91,7 +113,7 @@ export function useCodeMode(opts: UseCodeModeOptions): UseCodeModeResult {
           : t("app.nothingWritten");
       return t("app.discardedCount", { count: selected.length }) + tail;
     },
-    [session, syncPendingCount, pendingEdits],
+    [session, syncPendingCount, pendingEdits, activePendingEdits],
   );
 
   return { codeApply, codeDiscard };
