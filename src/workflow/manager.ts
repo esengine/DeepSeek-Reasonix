@@ -13,6 +13,7 @@ import type {
   WorkflowRunSnapshot,
   WorkflowRunStatus,
   WorkflowSaveTarget,
+  WorkflowToolMode,
 } from "./types.js";
 
 export interface WorkflowRunManagerOptions {
@@ -26,11 +27,13 @@ export interface WorkflowRunManagerOptions {
 export interface WorkflowRunStartOptions {
   script: string;
   mode?: WorkflowMode;
+  background?: boolean;
   args?: unknown;
   concurrency?: number;
   maxAgents?: number;
   modelPolicy?: WorkflowModelPolicy;
   tokenBudget?: number | null;
+  toolMode?: WorkflowToolMode;
   runner?: WorkflowAgentRunner;
 }
 
@@ -74,6 +77,12 @@ export class WorkflowRunManager {
       description: parsed.meta.description,
       status: "running",
       mode: opts.mode ?? "run",
+      background: opts.background,
+      concurrency: opts.concurrency,
+      maxAgents: opts.maxAgents,
+      modelPolicy: opts.modelPolicy,
+      tokenBudget: opts.tokenBudget,
+      toolMode: opts.toolMode,
       startedAt,
       updatedAt: startedAt,
       phases: [],
@@ -163,11 +172,13 @@ export class WorkflowRunManager {
     return this.startRun({
       script: prior.script,
       mode: overrides.mode ?? prior.mode,
+      background: overrides.background ?? prior.background,
       args: overrides.args,
-      concurrency: overrides.concurrency,
-      maxAgents: overrides.maxAgents,
-      modelPolicy: overrides.modelPolicy,
-      tokenBudget: overrides.tokenBudget,
+      concurrency: overrides.concurrency ?? prior.concurrency,
+      maxAgents: overrides.maxAgents ?? prior.maxAgents,
+      modelPolicy: overrides.modelPolicy ?? prior.modelPolicy,
+      tokenBudget: overrides.tokenBudget ?? prior.tokenBudget,
+      toolMode: overrides.toolMode ?? prior.toolMode,
       runner: overrides.runner,
     });
   }

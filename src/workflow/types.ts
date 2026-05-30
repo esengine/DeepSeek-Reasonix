@@ -155,6 +155,12 @@ export interface WorkflowRunSnapshot<T = unknown> {
   description: string;
   status: WorkflowRunStatus;
   mode: WorkflowMode;
+  background?: boolean;
+  concurrency?: number;
+  maxAgents?: number;
+  modelPolicy?: WorkflowModelPolicy;
+  tokenBudget?: number | null;
+  toolMode?: WorkflowToolMode;
   startedAt: number;
   updatedAt: number;
   durationMs?: number;

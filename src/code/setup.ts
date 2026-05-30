@@ -41,6 +41,7 @@ import type {
   WorkflowAgentRunner,
   WorkflowModelPolicy,
   WorkflowRunEvent,
+  WorkflowToolMode,
 } from "../workflow/types.js";
 
 export interface CodeToolsetOpts {
@@ -61,6 +62,7 @@ export interface CodeToolset {
   jobs: JobRegistry;
   workflowManager: WorkflowRunManager;
   workflowRunner: WorkflowAgentRunner;
+  workflowRunnerForToolMode: (toolMode: WorkflowToolMode) => WorkflowAgentRunner;
   workflowModelPolicy: () => WorkflowModelPolicy;
   setWorkflowModelPolicy: (policy: WorkflowModelPolicy) => void;
   registerRooted: (root: string) => void;
@@ -122,8 +124,7 @@ export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeTools
     registerJavaSourceTool(tools, { projectRoot: opts.rootDir });
   }
   let workflowClient: DeepSeekClient | null = null;
-  let workflowModelPolicy = loadWorkflowModelPolicy(opts.configPath);
-  const workflowRunner: WorkflowAgentRunner = {
+  const workflowRunnerForToolMode = (toolMode: WorkflowToolMode): WorkflowAgentRunner => ({
     async run(prompt, agentOpts) {
       if (!workflowClient) {
         const ep = loadEndpoint();
@@ -133,9 +134,12 @@ export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeTools
         client: workflowClient,
         parentRegistry: tools,
         sink: opts.subagentSink ?? SHARED_SUBAGENT_SINK,
+        toolMode,
       }).run(prompt, agentOpts);
     },
-  };
+  });
+  let workflowModelPolicy = loadWorkflowModelPolicy(opts.configPath);
+  const workflowRunner = workflowRunnerForToolMode("read_only");
   const workflowManager = new WorkflowRunManager({
     runner: workflowRunner,
     rootDir: opts.rootDir,
@@ -189,6 +193,7 @@ export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeTools
     jobs,
     workflowManager,
     workflowRunner,
+    workflowRunnerForToolMode,
     workflowModelPolicy: () => workflowModelPolicy,
     setWorkflowModelPolicy: (policy) => {
       workflowModelPolicy = policy;

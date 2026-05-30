@@ -144,11 +144,13 @@ export function registerWorkflowTool(
         const started = opts.manager.startRun({
           script,
           mode,
+          background: true,
           args: args.args,
           concurrency: numberOption(args.concurrency),
           maxAgents: numberOption(args.max_agents),
           modelPolicy,
           tokenBudget: numberOption(args.token_budget) ?? null,
+          toolMode,
           runner,
         });
         return JSON.stringify({
@@ -163,11 +165,13 @@ export function registerWorkflowTool(
         const started = opts.manager.startRun({
           script,
           mode,
+          background: false,
           args: args.args,
           concurrency: numberOption(args.concurrency),
           maxAgents: numberOption(args.max_agents),
           modelPolicy,
           tokenBudget: numberOption(args.token_budget) ?? null,
+          toolMode,
           runner,
         });
         const abort = (): void => {

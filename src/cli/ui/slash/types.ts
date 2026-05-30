@@ -85,6 +85,9 @@ export interface SlashContext {
   jobs?: JobRegistry;
   workflowManager?: import("../../../workflow/manager.js").WorkflowRunManager;
   workflowRunner?: import("../../../workflow/types.js").WorkflowAgentRunner;
+  workflowRunnerForToolMode?: (
+    toolMode: import("../../../workflow/types.js").WorkflowToolMode,
+  ) => import("../../../workflow/types.js").WorkflowAgentRunner;
   workflowModelPolicy?: () => import("../../../workflow/types.js").WorkflowModelPolicy;
   setWorkflowModelPolicy?: (
     policy: import("../../../workflow/types.js").WorkflowModelPolicy,
@@ -194,7 +197,14 @@ export interface SlashCommandSpec {
   /** If the command takes args, hint text shown after the name. */
   argsHint?: string;
   /** First-arg picker source. `"path"` async-lists the filesystem for directory completion (used by `/cwd`). */
-  argCompleter?: "models" | "mcp-resources" | "mcp-prompts" | "skills" | "path" | readonly string[];
+  argCompleter?:
+    | "models"
+    | "mcp-resources"
+    | "mcp-prompts"
+    | "skills"
+    | "path"
+    | "workflows"
+    | readonly string[];
   /** Alternate names — typing any of these resolves to `cmd` for dispatch / suggestion / arg-context. */
   aliases?: readonly string[];
 }

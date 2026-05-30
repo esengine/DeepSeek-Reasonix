@@ -518,7 +518,7 @@
                 </tr>
                 <tr>
                   <td><code>/workflows show &lt;runId&gt;</code></td>
-                  <td>Inspect a workflow run: status, duration, agents, and final output</td>
+                  <td>Inspect a workflow run: meta, mode, fan-out settings, status, duration, phases, agents, errors, and previews</td>
                 </tr>
                 <tr>
                   <td><code>/workflows attach &lt;runId&gt;</code> (<code>use</code>)</td>
@@ -545,8 +545,8 @@
                   <td>Save the run's script to <code>.reasonix/workflows/&lt;name&gt;.js</code> or <code>~/.reasonix/workflows/&lt;name&gt;.js</code></td>
                 </tr>
                 <tr>
-                  <td><code>/workflows run &lt;name&gt; [input]</code></td>
-                  <td>Start a saved workflow and pass trailing text as <code>args.input</code></td>
+                  <td><code>/workflows run &lt;name&gt; [input] [--concurrency N] [--max-agents N] [--mode run|dry_run|validate_only] [--background] [--tool-mode read_only|full]</code></td>
+                  <td>Start a saved workflow, pass non-flag trailing text as <code>args.input</code>, and control fan-out directly</td>
                 </tr>
                 <tr>
                   <td><code>/kill &lt;id&gt;</code></td>
@@ -592,10 +592,11 @@
               <code>max_agents</code> when the model invokes it. Defaults are
               <code>concurrency: 3</code> and <code>max_agents: 8</code>. Higher fan-out runs are
               allowed, but formal <code>run</code> mode asks for confirmation when
-              <code>concurrency &gt; 4</code> or <code>max_agents &gt; 8</code>. The
-              <code>/workflows run &lt;name&gt; [input]</code> slash command currently starts a
-              saved workflow with its defaults and passes trailing text as <code>args.input</code>;
-              it does not parse <code>--concurrency</code> or <code>--max-agents</code>.
+              <code>concurrency &gt; 4</code> or <code>max_agents &gt; 8</code>. Saved workflows can
+              be run directly with <code>/workflows run &lt;name&gt; [input] --concurrency N
+              --max-agents N --mode run|dry_run|validate_only --background --tool-mode
+              read_only|full</code>; saved workflow names are suggested after
+              <code>/workflows run</code>.
             </p>
             <p>
               Use <code>verifyFindings([...])</code> for independent verifier subagents,

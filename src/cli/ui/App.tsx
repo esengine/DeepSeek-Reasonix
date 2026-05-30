@@ -306,6 +306,9 @@ export interface AppProps {
     reBootstrapSemantic?: (rootDir: string) => Promise<{ enabled: boolean }>;
     workflowManager?: import("../../workflow/manager.js").WorkflowRunManager;
     workflowRunner?: import("../../workflow/types.js").WorkflowAgentRunner;
+    workflowRunnerForToolMode?: (
+      toolMode: import("../../workflow/types.js").WorkflowToolMode,
+    ) => import("../../workflow/types.js").WorkflowAgentRunner;
     workflowModelPolicy?: () => import("../../workflow/types.js").WorkflowModelPolicy;
     setWorkflowModelPolicy?: (
       policy: import("../../workflow/types.js").WorkflowModelPolicy,
@@ -2892,6 +2895,7 @@ function AppInner({
               codeRoot: codeMode ? currentRootDir : undefined,
               workflowManager: codeMode?.workflowManager,
               workflowRunner: codeMode?.workflowRunner,
+              workflowRunnerForToolMode: codeMode?.workflowRunnerForToolMode,
               workflowModelPolicy: codeMode?.workflowModelPolicy,
               dispatch: agentStore.dispatch,
             });
@@ -3164,6 +3168,7 @@ function AppInner({
           sessionId: session,
           workflowManager: codeMode?.workflowManager,
           workflowRunner: codeMode?.workflowRunner,
+          workflowRunnerForToolMode: codeMode?.workflowRunnerForToolMode,
           workflowModelPolicy: codeMode?.workflowModelPolicy,
           setWorkflowModelPolicy: codeMode?.setWorkflowModelPolicy,
           getEngineeringLifecycleSnapshot: codeMode

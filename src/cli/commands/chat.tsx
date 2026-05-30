@@ -92,6 +92,9 @@ export interface ChatOptions {
     reBootstrapSemantic?: (rootDir: string) => Promise<{ enabled: boolean }>;
     workflowManager?: import("../../workflow/manager.js").WorkflowRunManager;
     workflowRunner?: import("../../workflow/types.js").WorkflowAgentRunner;
+    workflowRunnerForToolMode?: (
+      toolMode: import("../../workflow/types.js").WorkflowToolMode,
+    ) => import("../../workflow/types.js").WorkflowAgentRunner;
     workflowModelPolicy?: () => import("../../workflow/types.js").WorkflowModelPolicy;
     setWorkflowModelPolicy?: (
       policy: import("../../workflow/types.js").WorkflowModelPolicy,

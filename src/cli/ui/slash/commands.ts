@@ -344,7 +344,8 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
   {
     cmd: "workflows",
     group: "jobs",
-    argsHint: "[list|show|attach|continue|stop|retry|delete|save|run] [runId|name]",
+    argsHint:
+      "[list|show|attach|continue|stop|retry|delete|save|run] [runId|name] [--concurrency N --max-agents N]",
     summary: "list, inspect, attach, continue, stop, save, or run workflows",
     argCompleter: [
       "list",
@@ -509,6 +510,18 @@ export function detectSlashArgContext(input: string, codeMode = false): SlashArg
       const partial = policyMatch[1] ?? "";
       return {
         spec: { ...spec, argCompleter: WORKFLOW_MODEL_POLICY_ARG_COMPLETER },
+        partial,
+        partialOffset: input.length - partial.length,
+        kind: "picker",
+      };
+    }
+  }
+  if (cmdName === "workflows") {
+    const runMatch = /^run\s+(\S*)$/.exec(tail);
+    if (runMatch) {
+      const partial = runMatch[1] ?? "";
+      return {
+        spec: { ...spec, argCompleter: "workflows" },
         partial,
         partialOffset: input.length - partial.length,
         kind: "picker",

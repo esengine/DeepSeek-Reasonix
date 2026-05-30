@@ -121,14 +121,14 @@ Type `/` mid-chat to open the picker. Aliases shown in parentheses. Code-mode-on
 |---|---|
 | `/jobs` | List background jobs |
 | `/workflows` | List session-local workflow runs started by `workflow` with `background: true` |
-| `/workflows show <runId>` | Inspect a workflow run: status, duration, agents, and final output |
+| `/workflows show <runId>` | Inspect a workflow run: meta, mode, fan-out settings, status, duration, phases, agents, errors, and previews |
 | `/workflows attach <runId>` (`use`) | Attach a completed workflow result to the current conversation so the next prompt can reference it |
 | `/workflows continue <runId> [instruction]` | Attach a completed workflow result and immediately send the follow-up instruction to the model |
 | `/workflows stop <runId>` | Abort a running workflow |
 | `/workflows retry <runId>` | Start a new run from a completed, failed, or aborted run's original script |
 | `/workflows delete <runId>` | Remove a completed, failed, or aborted workflow from the session and persisted store |
 | `/workflows save <runId> project\|user [name]` | Save the run's script to `.reasonix/workflows/<name>.js` or `~/.reasonix/workflows/<name>.js` |
-| `/workflows run <name> [input]` | Start a saved workflow and pass trailing text as `args.input` |
+| `/workflows run <name> [input] [--concurrency N] [--max-agents N] [--mode run\|dry_run\|validate_only] [--background] [--tool-mode read_only\|full]` | Start a saved workflow, pass non-flag trailing text as `args.input`, and control fan-out directly |
 | `/kill <id>` | Stop a background job (SIGTERM → SIGKILL) |
 | `/logs <id> [lines]` | Tail a job's output (default 80 lines) |
 
@@ -140,7 +140,7 @@ Workflow scripts are JavaScript snippets that start with `export const meta = { 
 
 Use `parallel([() => agent(...), () => agent(...)])` for independent work. Consecutive `await agent(...)` calls are serial and should only be used when later steps depend on earlier results. For long runs, call the tool with `background: true`, then inspect it with `/workflows`. After a background run completes, use `/workflows attach <runId>` to bring its result into the current conversation, or `/workflows continue <runId> <instruction>` to continue from that result immediately.
 
-The `workflow` tool accepts `concurrency` and `max_agents` when the model invokes it. Defaults are `concurrency: 3` and `max_agents: 8`. Higher fan-out runs are allowed, but formal `run` mode asks for confirmation when `concurrency > 4` or `max_agents > 8`. The `/workflows run <name> [input]` slash command currently starts a saved workflow with its defaults and passes trailing text as `args.input`; it does not parse `--concurrency` or `--max-agents`.
+The `workflow` tool accepts `concurrency` and `max_agents` when the model invokes it. Defaults are `concurrency: 3` and `max_agents: 8`. Higher fan-out runs are allowed, but formal `run` mode asks for confirmation when `concurrency > 4` or `max_agents > 8`. Saved workflows can be run directly with `/workflows run <name> [input] --concurrency N --max-agents N --mode run|dry_run|validate_only --background --tool-mode read_only|full`; saved workflow names are suggested after `/workflows run`.
 
 Use `verifyFindings([...])` for independent verifier subagents, `adversarialReview(result)` to challenge a draft result, and `synthesize(inputs)` for final synthesis. These helpers are wrappers around internal `agent()` calls and still count toward `max_agents`.
 

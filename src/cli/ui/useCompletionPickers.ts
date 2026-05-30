@@ -12,6 +12,7 @@ import {
 } from "../../at-mentions.js";
 import { type ReasoningEffort, loadResolvedSkillPaths } from "../../config.js";
 import { SkillStore } from "../../skills.js";
+import { loadSavedWorkflows } from "../../workflow/saved.js";
 import { effortArgsHintFor } from "./effort-choices.js";
 import {
   type McpServerSummary,
@@ -283,6 +284,16 @@ export function useCompletionPickers({
         customSkillPaths: loadResolvedSkillPaths(baseDir),
       });
       const names = store.list().map((s) => s.name);
+      if (partial && names.some((n) => n.toLowerCase() === needle)) return null;
+      if (!partial) return names.slice(0, 40);
+      return names.filter((n) => n.toLowerCase().includes(needle)).slice(0, 40);
+    }
+    if (completer === "workflows") {
+      const baseDir = codeMode?.rootDir ?? process.cwd();
+      const names = loadSavedWorkflows({
+        rootDir: baseDir,
+        homeDir: process.env.HOME ?? baseDir,
+      }).map((workflow) => workflow.name);
       if (partial && names.some((n) => n.toLowerCase() === needle)) return null;
       if (!partial) return names.slice(0, 40);
       return names.filter((n) => n.toLowerCase().includes(needle)).slice(0, 40);

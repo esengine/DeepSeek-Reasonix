@@ -1,7 +1,11 @@
 import type { CacheFirstLoop } from "../../../../loop.js";
 import type { ChatMessage } from "../../../../types.js";
 import { loadSavedWorkflows } from "../../../../workflow/saved.js";
-import type { WorkflowRunSnapshot } from "../../../../workflow/types.js";
+import type {
+  WorkflowMode,
+  WorkflowRunSnapshot,
+  WorkflowToolMode,
+} from "../../../../workflow/types.js";
 import type { SlashHandler } from "../dispatch.js";
 import type { SlashContext, SlashResult } from "../types.js";
 
@@ -11,7 +15,12 @@ export function handleWorkflowsSlash(
   args: readonly string[],
   ctx: Pick<
     SlashContext,
-    "workflowManager" | "workflowRunner" | "workflowModelPolicy" | "codeRoot" | "homeDir"
+    | "workflowManager"
+    | "workflowRunner"
+    | "workflowRunnerForToolMode"
+    | "workflowModelPolicy"
+    | "codeRoot"
+    | "homeDir"
   >,
   loop?: WorkflowAttachLoop,
 ): SlashResult {
@@ -80,18 +89,27 @@ export function handleWorkflowsSlash(
     const homeDir = ctx.homeDir ?? process.env.HOME ?? rootDir;
     const workflow = loadSavedWorkflows({ rootDir, homeDir }).find((item) => item.name === runId);
     if (!workflow) return { info: `saved workflow not found: ${runId}` };
+    const parsed = parseRunArgs(args.slice(2));
+    if (parsed.error) return { info: parsed.error };
+    const toolMode = parsed.toolMode ?? "read_only";
     const started = manager.startRun({
       script: workflow.script,
-      mode: "run",
-      args: { input: args.slice(2).join(" ") },
-      runner: ctx.workflowRunner,
+      mode: parsed.mode ?? "run",
+      background: parsed.background,
+      args: { input: parsed.input },
+      concurrency: parsed.concurrency,
+      maxAgents: parsed.maxAgents,
+      toolMode,
+      runner: ctx.workflowRunnerForToolMode?.(toolMode) ?? ctx.workflowRunner,
       modelPolicy: ctx.workflowModelPolicy?.(),
     });
-    return { info: `workflow ${started.id} running ${workflow.name}` };
+    return {
+      info: `workflow ${started.id} running ${workflow.name}${parsed.background ? " background" : ""}`,
+    };
   }
 
   return {
-    info: "usage: /workflows [list] | /workflows show <runId> | /workflows attach <runId> | /workflows continue <runId> [instruction] | /workflows stop <runId> | /workflows retry <runId> | /workflows delete <runId> | /workflows save <runId> project|user [name] | /workflows run <name> [input]",
+    info: "usage: /workflows [list] | /workflows show <runId> | /workflows attach <runId> | /workflows continue <runId> [instruction] | /workflows stop <runId> | /workflows retry <runId> | /workflows delete <runId> | /workflows save <runId> project|user [name] | /workflows run <name> [input] [--concurrency N] [--max-agents N] [--mode run|dry_run|validate_only] [--background] [--tool-mode read_only|full]",
   };
 }
 
@@ -117,18 +135,92 @@ function formatRunDetail(run: WorkflowRunSnapshot): string {
   const agents = run.agents
     .map(
       (agent) =>
-        `- ${agent.status} ${agent.label}${agent.outputPreview ? `: ${agent.outputPreview}` : ""}${agent.error ? ` error=${agent.error}` : ""}`,
+        `- ${agent.status} ${agent.label}${agent.phase ? ` (${agent.phase})` : ""}${agent.outputPreview ? `: ${agent.outputPreview}` : ""}${agent.error ? ` error=${agent.error}` : ""}`,
     )
     .join("\n");
+  const phases = run.phases
+    .map((phase) => `- ${phase.title} agents=${phase.agentCount}`)
+    .join("\n");
   return [
-    `${run.id}  ${run.status}  ${run.name}`,
-    run.description,
-    `agents=${run.agentCount} duration=${run.durationMs ?? 0}ms`,
-    agents,
+    `run_id: ${run.id}`,
+    `status: ${run.status}`,
+    `name: ${run.name}`,
+    `description: ${run.description}`,
+    `mode: ${run.mode}`,
+    `background: ${run.background === true}`,
+    run.concurrency !== undefined ? `concurrency: ${run.concurrency}` : "",
+    run.maxAgents !== undefined ? `max_agents: ${run.maxAgents}` : "",
+    run.modelPolicy ? `model_policy: ${run.modelPolicy}` : "",
+    run.toolMode ? `tool_mode: ${run.toolMode}` : "",
+    `duration: ${run.durationMs ?? 0}ms`,
+    `agent_count: ${run.agentCount}`,
+    phases ? `phases:\n${phases}` : "",
+    agents ? `agents:\n${agents}` : "",
     run.error ? `error${run.errorKind ? ` (${run.errorKind})` : ""}: ${run.error}` : "",
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+interface ParsedRunArgs {
+  input: string;
+  mode?: WorkflowMode;
+  concurrency?: number;
+  maxAgents?: number;
+  toolMode?: WorkflowToolMode;
+  background: boolean;
+  error?: string;
+}
+
+function parseRunArgs(args: readonly string[]): ParsedRunArgs {
+  const input: string[] = [];
+  const out: ParsedRunArgs = { input: "", background: false };
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index];
+    if (arg === "--background") {
+      out.background = true;
+      continue;
+    }
+    if (arg === "--concurrency") {
+      const value = numberFlag(args[++index]);
+      if (value === undefined) return { ...out, error: "usage: --concurrency <positive number>" };
+      out.concurrency = value;
+      continue;
+    }
+    if (arg === "--max-agents") {
+      const value = numberFlag(args[++index]);
+      if (value === undefined) return { ...out, error: "usage: --max-agents <positive number>" };
+      out.maxAgents = value;
+      continue;
+    }
+    if (arg === "--mode") {
+      const value = args[++index];
+      if (value !== "run" && value !== "dry_run" && value !== "validate_only") {
+        return { ...out, error: "usage: --mode run|dry_run|validate_only" };
+      }
+      out.mode = value;
+      continue;
+    }
+    if (arg === "--tool-mode") {
+      const value = args[++index];
+      if (value !== "read_only" && value !== "full") {
+        return { ...out, error: "usage: --tool-mode read_only|full" };
+      }
+      out.toolMode = value;
+      continue;
+    }
+    if (arg?.startsWith("--")) return { ...out, error: `unknown workflow run option: ${arg}` };
+    if (arg !== undefined) input.push(arg);
+  }
+  out.input = input.join(" ");
+  return out;
+}
+
+function numberFlag(value: string | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1) return undefined;
+  return parsed;
 }
 
 function formatRunContext(run: WorkflowRunSnapshot): string {
