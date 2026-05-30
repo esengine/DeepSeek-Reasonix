@@ -208,7 +208,7 @@ import { VerboseContext } from "./state/verbose-context.js";
 import { ThemeProvider } from "./theme/context.js";
 import { FG, SURFACE, type ThemeName, listThemeNames } from "./theme/tokens.js";
 import { TickerProvider, useSlowTick } from "./ticker.js";
-import { handleTurnInterrupt } from "./turn-interrupt.js";
+import { decideBusySubmit, handleTurnInterrupt } from "./turn-interrupt.js";
 import { codeUndoContextMessage, codeUndoInfo } from "./undo-context.js";
 import { useCompletionPickers } from "./useCompletionPickers.js";
 import { useEditHistory } from "./useEditHistory.js";
@@ -2266,16 +2266,29 @@ function AppInner({
           };
         },
         submitPrompt: (text: string): SubmitResult => {
-          if (busyRef.current) {
-            if (isBusyPromptCommand(text)) {
+          const busySubmit = decideBusySubmit(text, {
+            busy: busyRef.current,
+            submitting: submittingRef.current,
+            aborted: abortedThisTurn.current,
+            isCommand: isBusyPromptCommand,
+          });
+          if (busySubmit !== "idle") {
+            if (busySubmit === "reject-command") {
               return {
                 accepted: false,
                 reason: "commands are disabled while steering a busy turn",
               };
             }
-            // Steer into current turn instead of rejecting
-            loop.steer(text);
-            return { accepted: true, reason: "steered" };
+            if (busySubmit === "queue-after-abort") {
+              setQueuedSubmit(text);
+              return { accepted: true, reason: "queued-after-abort" };
+            }
+            if (busySubmit === "steer") {
+              // Steer into current turn instead of rejecting.
+              loop.steer(text);
+              return { accepted: true, reason: "steered" };
+            }
+            return { accepted: false, reason: "loop is busy" };
           }
           const fn = handleSubmitRef.current;
           if (!fn) return { accepted: false, reason: "TUI not ready" };
@@ -2814,17 +2827,26 @@ function AppInner({
       if (incoming.handled) {
         return;
       }
-      if (busy || submittingRef.current) {
-        if (busy && text.trim()) {
-          if (isBusyPromptCommand(text)) {
-            log.pushInfo(t("app.steerCommandRejected"));
-            return;
-          }
+      const busySubmit = decideBusySubmit(text, {
+        busy,
+        submitting: submittingRef.current,
+        aborted: abortedThisTurn.current,
+        isCommand: isBusyPromptCommand,
+      });
+      if (busySubmit !== "idle") {
+        if (busySubmit === "reject-command") {
+          log.pushInfo(t("app.steerCommandRejected"));
+        } else if (busySubmit === "steer" || busySubmit === "queue-after-abort") {
           setInput("");
           resetCursor();
           pushHistory(text);
-          loop.steer(text);
-          log.pushInfo(t("app.steerInjected"));
+          if (busySubmit === "queue-after-abort") {
+            setQueuedSubmit(text);
+            log.pushInfo(t("app.submitQueuedAfterAbort"));
+          } else {
+            loop.steer(text);
+            log.pushInfo(t("app.steerInjected"));
+          }
           log.pushInfo(text, "ghost");
         }
         return;

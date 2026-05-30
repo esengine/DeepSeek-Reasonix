@@ -625,6 +625,7 @@ export const zhCN: TranslationSchema = {
     commandFailed: "! 命令失败",
     steerInjected: "▸ 已加入引导队列 — 将在当前步骤后注入",
     steerCommandRejected: "▸ 当前轮次忙碌时不能提交命令，只能输入普通引导消息",
+    submitQueuedAfterAbort: "▸ 追问已排队 — 会在被中断轮次停止后执行",
     btwUsage: "▸ /btw <问题> — 顺便问个题外话，不会写入当前会话上下文。",
     btwHeader: "≫ btw",
     btwFailed: "/btw 调用失败",

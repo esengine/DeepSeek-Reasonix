@@ -736,6 +736,8 @@ export const JA: TranslationSchema = {
     commandFailed: "! コマンドが失敗しました",
     steerInjected: "▸ ステアリングをキューに入れました — 現在のステップの後に追加されます",
     steerCommandRejected: "▸ ビジー状態のターンを操作中はコマンドが無効です",
+    submitQueuedAfterAbort:
+      "▸ フォローアップをキューに入れました — 中断中のターン停止後に実行します",
     btwUsage: "▸ /btw <question> — 会話コンテキストを汚さずに脇道の質問をします。",
     btwHeader: "≫ btw",
     btwFailed: "/btw が失敗しました",

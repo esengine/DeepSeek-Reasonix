@@ -641,6 +641,8 @@ export const de: TranslationSchema = {
     verboseOff: "▸ Ausführlicher Modus aus — head/tail-Kürzung wiederhergestellt",
     steerInjected: "▸ Steuerung in Warteschlange — wird nach dem aktuellen Schritt hinzugefügt",
     steerCommandRejected: "▸ Befehle sind deaktiviert, während ein Turn gesteuert wird",
+    submitQueuedAfterAbort:
+      "▸ Folgefrage in Warteschlange — läuft, sobald der unterbrochene Turn stoppt",
     btwUsage: "▸ /btw <Frage> — eine Randfrage stellen, ohne den Gesprächskontext zu verschmutzen.",
     btwHeader: "≫ btw",
     restoreCodeOnly: "▸ /restore ist nur im Code-Modus verfügbar",

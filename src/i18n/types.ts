@@ -201,6 +201,7 @@ export interface TranslationSchema {
     commandFailed: string;
     steerInjected: string;
     steerCommandRejected: string;
+    submitQueuedAfterAbort: string;
     btwUsage: string;
     btwHeader: string;
     btwFailed: string;

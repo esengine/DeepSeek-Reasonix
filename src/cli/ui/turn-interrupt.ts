@@ -1,5 +1,18 @@
 export type TurnInterruptKey = "escape" | "ctrl-c";
 export type TurnInterruptOutcome = "aborted" | "already-aborted" | "stopped-loop" | "idle" | "quit";
+export type BusySubmitDecision =
+  | "idle"
+  | "ignore"
+  | "reject-command"
+  | "queue-after-abort"
+  | "steer";
+
+export interface BusySubmitState {
+  busy: boolean;
+  submitting: boolean;
+  aborted: boolean;
+  isCommand: (text: string) => boolean;
+}
 
 export interface TurnInterruptController {
   turnActiveRef: { readonly current: boolean };
@@ -43,4 +56,14 @@ export function handleTurnInterrupt(
   }
 
   return "idle";
+}
+
+export function decideBusySubmit(text: string, state: BusySubmitState): BusySubmitDecision {
+  if (!state.busy && !state.submitting) return "idle";
+  const trimmed = text.trim();
+  if (!trimmed) return "ignore";
+  if (state.isCommand(trimmed)) return "reject-command";
+  if (state.aborted) return "queue-after-abort";
+  if (!state.busy) return "ignore";
+  return "steer";
 }

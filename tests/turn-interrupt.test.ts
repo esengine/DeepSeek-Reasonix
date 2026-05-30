@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { handleTurnInterrupt } from "../src/cli/ui/turn-interrupt.js";
+import { decideBusySubmit, handleTurnInterrupt } from "../src/cli/ui/turn-interrupt.js";
 
 describe("handleTurnInterrupt", () => {
   it("aborts an active Ctrl+C turn without quitting the process", () => {
@@ -88,5 +88,53 @@ describe("handleTurnInterrupt", () => {
     expect(resetPendingModals).not.toHaveBeenCalled();
     expect(abort).not.toHaveBeenCalled();
     expect(quitProcess).not.toHaveBeenCalled();
+  });
+});
+
+describe("decideBusySubmit", () => {
+  const isCommand = (text: string) => text.startsWith("/");
+
+  it("steers ordinary text into an active non-aborted turn", () => {
+    expect(
+      decideBusySubmit("please adjust that", {
+        busy: true,
+        submitting: true,
+        aborted: false,
+        isCommand,
+      }),
+    ).toBe("steer");
+  });
+
+  it("queues ordinary text once the active turn has already been interrupted", () => {
+    expect(
+      decideBusySubmit("actually do this instead", {
+        busy: true,
+        submitting: true,
+        aborted: true,
+        isCommand,
+      }),
+    ).toBe("queue-after-abort");
+  });
+
+  it("queues interrupted-turn text even if React busy state already dropped", () => {
+    expect(
+      decideBusySubmit("actually do this instead", {
+        busy: false,
+        submitting: true,
+        aborted: true,
+        isCommand,
+      }),
+    ).toBe("queue-after-abort");
+  });
+
+  it("still rejects commands while busy", () => {
+    expect(
+      decideBusySubmit("/new", {
+        busy: true,
+        submitting: true,
+        aborted: true,
+        isCommand,
+      }),
+    ).toBe("reject-command");
   });
 });

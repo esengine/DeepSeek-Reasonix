@@ -648,6 +648,7 @@ export const EN: TranslationSchema = {
     commandFailed: "! command failed",
     steerInjected: "▸ steering queued — will be added after the current step",
     steerCommandRejected: "▸ commands are disabled while steering a busy turn",
+    submitQueuedAfterAbort: "▸ follow-up queued — will run after the interrupted turn stops",
     btwUsage: "▸ /btw <question> — ask a side question without polluting the conversation context.",
     btwHeader: "≫ btw",
     btwFailed: "/btw failed",
