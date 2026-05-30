@@ -96,13 +96,7 @@ export class ImmutablePrefix {
     return true;
   }
 
-  /** Batch variant of `addTool` — adds multiple specs in a single operation
-   *  with one sort + one cache invalidation. Callers that register N tools
-   *  at once (e.g. MCP server startup) should use this instead of looping
-   *  `addTool` to avoid N redundant sorts and intermediate fingerprint churn.
-   *
-   *  Returns the number of tools actually added (skips duplicates and
-   *  nameless specs). */
+  /** Batch `addTool` — one sort + one invalidation for N specs. Returns count actually added. */
   addTools(specs: readonly ToolSpec[]): number {
     const existing = new Set(this._toolSpecs.map((t) => t.function?.name).filter(Boolean));
     const fresh: ToolSpec[] = [];
