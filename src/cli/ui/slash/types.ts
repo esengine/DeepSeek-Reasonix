@@ -63,6 +63,8 @@ export type PlanModeToggleSource = "slash" | "explicit-intent";
 
 export interface SlashContext {
   configPath?: string;
+  /** Snapshot the current list of agent cards — used by /copy to serialize chat content. */
+  getCards?: () => ReadonlyArray<import("../state/cards.js").Card>;
   mcpSpecs?: string[];
   codeUndo?: (args: readonly string[]) => CodeUndoOutput;
   codeApply?: (indices?: readonly number[]) => string;

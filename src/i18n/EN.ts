@@ -176,6 +176,10 @@ export const EN: TranslationSchema = {
             },
             { key: "paste", text: "Ctrl+V or Ctrl+Shift+V (Win/Linux) · Cmd+V (macOS)" },
             {
+              key: "/copy",
+              text: "copy the latest assistant response; `/copy all` copies the full chat",
+            },
+            {
               key: "bracketed paste",
               text: "multi-line pastes stay one block — no auto-submit on intermediate newlines",
             },
@@ -848,6 +852,17 @@ export const EN: TranslationSchema = {
       helpSessionNone: "  reasonix chat --no-session       disable persistence for this run",
       retryNone: "nothing to retry — no prior user message in this session's log.",
       retryInfo: '▸ retrying: "{preview}"',
+      copyUsage:
+        "{cmd} — copy the latest assistant reply (default), `all` for the chat, or `<N>` for last N items",
+      copyTuiOnly: "/copy needs an interactive TUI session (local terminal only).",
+      copyEmpty:
+        "nothing to copy — no non-empty content found in this session.",
+      copyOkOsc52:
+        "▸ copied {label} to clipboard via OSC 52 ({size} characters)",
+      copyOkFile:
+        "▸ copied {label} to temp file (OSC 52 unavailable) → {path}",
+      copyFailed:
+        "▸ copy failed — clipboard write returned no target (OSC 52 or file).",
       loopTuiOnly: "/loop is only available in the interactive TUI (not in run/replay).",
       loopStopped: "▸ loop stopped.",
       loopNoActive: "no active loop to stop.",

@@ -1,7 +1,9 @@
 import { wrapToCells } from "@/cli/ui/text-width.js";
 import { t, tObj } from "@/i18n/index.js";
 import { VERSION } from "@/version.js";
+import { writeClipboard } from "../../clipboard.js";
 import { formatDuration, formatLoopStatus, parseLoopCommand } from "../../loop.js";
+import { parseCopyHistoryArgs, selectCopyHistory } from "../../copy-history.js";
 import { SLASH_COMMANDS, SLASH_GROUP_ORDER, orderSlashCommandsByGroup } from "../commands.js";
 import type { SlashHandler } from "../dispatch.js";
 import type { SlashCommandSpec, SlashGroup } from "../types.js";
@@ -151,6 +153,36 @@ const keys: SlashHandler = (_args, _loop, ctx) => {
   return {};
 };
 
+const copy: SlashHandler = (args, _loop, ctx) => {
+  const mode = parseCopyHistoryArgs(args);
+  if ("error" in mode) {
+    return {
+      info: t("handlers.basic.copyUsage", { cmd: "/copy [all|last|N]" }),
+    };
+  }
+  if (!ctx.getCards) {
+    return { info: t("handlers.basic.copyTuiOnly") };
+  }
+  const cards = ctx.getCards();
+  if (!cards || cards.length === 0) {
+    return { info: t("handlers.basic.copyEmpty") };
+  }
+  const selection = selectCopyHistory(cards, mode);
+  if (!selection) {
+    return { info: t("handlers.basic.copyEmpty") };
+  }
+  const result = writeClipboard(selection.text);
+  if (result.osc52) {
+    return { info: t("handlers.basic.copyOkOsc52", { label: selection.label, size: result.size }) };
+  }
+  if (result.filePath) {
+    return {
+      info: t("handlers.basic.copyOkFile", { label: selection.label, path: result.filePath }),
+    };
+  }
+  return { info: t("handlers.basic.copyFailed") };
+};
+
 const about: SlashHandler = () => {
   const lines = [
     t("handlers.basic.aboutHeader", { version: VERSION }),
@@ -169,5 +201,6 @@ export const handlers: Record<string, SlashHandler> = {
   retry,
   loop,
   keys,
+  copy,
   about,
 };

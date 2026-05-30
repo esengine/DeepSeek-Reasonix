@@ -64,6 +64,13 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
     summary: "abort the current model turn (typed alternative to Esc)",
   },
   {
+    cmd: "copy",
+    group: "chat",
+    argsHint: "[all|last|N]",
+    summary:
+      "copy latest assistant reply through OSC 52; `all` copies the chat; `N` copies the last N items",
+  },
+  {
     cmd: "btw",
     group: "chat",
     argsHint: "<question>",
