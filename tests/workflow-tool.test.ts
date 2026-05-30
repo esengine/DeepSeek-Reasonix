@@ -52,6 +52,23 @@ describe("registerWorkflowTool", () => {
     expect(combined).toMatch(/cost-sensitive.*verifier/i);
   });
 
+  it("documents workflow helper return values to avoid .output misuse", () => {
+    const registry = new ToolRegistry();
+    registerWorkflowTool(registry);
+
+    const spec = registry.specs().find((item) => item.function.name === "workflow");
+    const description = spec?.function.description ?? "";
+    const scriptDescription =
+      spec?.function.parameters.properties?.script.description?.toString() ?? "";
+    const combined = `${description}\n${scriptDescription}`;
+
+    expect(combined).toMatch(/agent\(\).*synthesize\(\).*return string\|null/i);
+    expect(combined).toMatch(/do not read .*\.output/i);
+    expect(combined).toContain("agent({ instruction");
+    expect(combined).toContain("synthesize(inputs)");
+    expect(combined).toMatch(/concurrency.*workflow tool.*\/workflows run --concurrency/i);
+  });
+
   it("exposes a workflow model policy tool argument", () => {
     const registry = new ToolRegistry();
     registerWorkflowTool(registry);
