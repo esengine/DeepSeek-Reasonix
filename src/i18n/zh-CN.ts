@@ -1152,6 +1152,8 @@ export const zhCN: TranslationSchema = {
       statusCtxNone: "  上下文  尚无轮次",
       statusCost: "  成本    ${cost} · 缓存 {bar} {pct}% · 轮次 {turns}",
       statusCostCold: "  成本    ${cost} · 轮次 {turns}（缓存预热中）",
+      statusCacheDetail: "  缓存    未命中 {miss} 累计 · 最近 {last} · schema {schemas}{churn}",
+      statusCacheChurn: " · 前缀变化 {reasons}",
       statusBudget: "  预算    ${spent} / ${cap}（{pct}%）{tag}",
       statusSession: '  会话    "{name}" · 日志中 {count} 条消息（恢复了 {resumed} 条）',
       statusSessionEphemeral: "  会话    （临时 — 无持久化）",

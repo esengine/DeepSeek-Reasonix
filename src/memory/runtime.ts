@@ -28,9 +28,15 @@ function toolName(spec: ToolSpec): string {
 }
 
 export function sortToolSpecs(specs: readonly ToolSpec[]): ToolSpec[] {
+  // Locale-independent codepoint compare — localeCompare would let the host
+  // locale reshuffle the serialized tool prefix and reintroduce cache churn.
   return [...specs]
     .map((spec) => structuredClone(spec) as ToolSpec)
-    .sort((a, b) => toolName(a).localeCompare(toolName(b)));
+    .sort((a, b) => {
+      const an = toolName(a);
+      const bn = toolName(b);
+      return an < bn ? -1 : an > bn ? 1 : 0;
+    });
 }
 
 export class ImmutablePrefix {

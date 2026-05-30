@@ -1224,6 +1224,8 @@ export const EN: TranslationSchema = {
       statusCtxNone: "  ctx     no turns yet",
       statusCost: "  cost    ${cost} · cache {bar} {pct}% · turns {turns}",
       statusCostCold: "  cost    ${cost} · turns {turns} (cache warming up)",
+      statusCacheDetail: "  cache   miss {miss} total · last {last} · schemas {schemas}{churn}",
+      statusCacheChurn: " · churn {reasons}",
       statusBudget: "  budget  ${spent} / ${cap} ({pct}%){tag}",
       statusSession: '  session "{name}" · {count} messages in log (resumed {resumed})',
       statusSessionEphemeral: "  session (ephemeral — no persistence)",
