@@ -538,8 +538,9 @@ func (c *Controller) Resume(s *agent.Session, path string) {
 }
 
 // Snapshot writes the executor's conversation to the active session file. No-op
-// when persistence is unavailable. Called after every turn so a crash loses at
-// most one in-flight prompt.
+// when persistence is unavailable or the session has never been used (no user
+// interaction). Called after every turn so a crash loses at most one in-flight
+// prompt.
 func (c *Controller) Snapshot() error {
 	c.mu.Lock()
 	path := c.sessionPath
@@ -547,7 +548,11 @@ func (c *Controller) Snapshot() error {
 	if c.executor == nil || path == "" {
 		return nil
 	}
-	return c.executor.Session().Save(path)
+	s := c.executor.Session()
+	if !s.HasContent() {
+		return nil
+	}
+	return s.Save(path)
 }
 
 // SetSessionPath pins where auto-save lands (a fresh session file minted by the

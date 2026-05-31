@@ -108,6 +108,12 @@ func ListSessions(dir string) ([]SessionInfo, error) {
 		}
 		full := filepath.Join(dir, e.Name())
 		preview, turns := previewSession(full)
+		if turns == 0 {
+			// Skip sessions that have never had user interaction — they are
+			// empty conversations that should not appear in the history panel
+			// or the resume picker.
+			continue
+		}
 		out = append(out, SessionInfo{
 			Path:    full,
 			ModTime: info.ModTime(),

@@ -22,3 +22,15 @@ func NewSession(system string) *Session {
 func (s *Session) Add(m provider.Message) {
 	s.Messages = append(s.Messages, m)
 }
+
+// HasContent returns true when the session carries at least one user,
+// assistant, or tool message — i.e. more than just a system prompt. An
+// "empty" conversation that has never been used should not be persisted.
+func (s *Session) HasContent() bool {
+	for _, m := range s.Messages {
+		if m.Role != provider.RoleSystem {
+			return true
+		}
+	}
+	return false
+}
