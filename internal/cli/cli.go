@@ -293,6 +293,9 @@ func chatREPL(args []string) int {
 	}
 
 	m := newChatTUI(ctrl, missing, eventCh, termW)
+	if cfg, err := config.Load(); err == nil {
+		m.outputStyle = cfg.Agent.OutputStyle // shown as the active entry in /output-style
+	}
 
 	// /model support: a pure builder the TUI calls to rebuild on a different
 	// model (carrying the conversation). It must NOT touch the running model —

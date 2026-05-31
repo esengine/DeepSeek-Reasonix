@@ -130,6 +130,10 @@ type AgentConfig struct {
 	PlannerModel     string            `toml:"planner_model"`
 	SubagentModel    string            `toml:"subagent_model"`
 	SubagentModels   map[string]string `toml:"subagent_models"`
+	// OutputStyle selects a persona/tone block folded into the system prompt at
+	// startup (a built-in like "explanatory"/"learning"/"concise", or a custom
+	// .reasonix/output-styles/<name>.md). Empty = the unmodified prompt.
+	OutputStyle string `toml:"output_style"`
 }
 
 // ProviderEntry declares a model provider instance. ContextWindow is the model's

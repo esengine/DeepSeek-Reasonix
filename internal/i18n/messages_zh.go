@@ -42,6 +42,10 @@ var Chinese = Messages{
 	ChatStatusQuestion:     "↑/↓ 选 · 数字快选 · 空格多选 · Enter 确认 · ←/→ 切换问题 · Esc 取消",
 	ToolApprovalPromptFmt:  "允许 %s%s？— [y] 本次 · [a] 本会话 · [n] 拒绝",
 
+	OutputStyleNone:   "没有可用的输出风格",
+	OutputStyleHeader: "输出风格：",
+	OutputStyleHint:   "在 reasonix.toml 设置 agent.output_style 即可启用（下次会话生效）",
+
 	CompactionWorking: "正在压缩对话…",
 	CompactionTitle:   "上下文已压缩",
 	CompactionUnit:    "条消息",
@@ -68,6 +72,7 @@ var Chinese = Messages{
 	CmdMemory:       "查看记忆文件",
 	CmdMcp:          "MCP 服务器",
 	CmdHooks:        "管理 hooks",
+	CmdOutputStyle:  "列出输出风格",
 	CmdSkill:        "管理 skills",
 	CmdHelp:         "查看命令列表",
 	CmdTodo:         "清除任务清单",

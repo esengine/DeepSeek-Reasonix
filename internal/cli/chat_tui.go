@@ -21,6 +21,7 @@ import (
 	"reasonix/internal/event"
 	"reasonix/internal/i18n"
 	"reasonix/internal/memory"
+	"reasonix/internal/outputstyle"
 	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
 	"reasonix/internal/skill"
@@ -138,6 +139,10 @@ type chatTUI struct {
 	// modelRef is the active "provider/model" ref, marked current in the picker.
 	buildController func(ref string, carry []provider.Message) (*control.Controller, error)
 	modelRef        string
+
+	// outputStyle is the active output-style name (config agent.output_style),
+	// shown as the current entry in the /output-style listing. "" = default.
+	outputStyle string
 
 	// modelSwitchPending is true while an async /model build is in flight.
 	modelSwitchPending bool
@@ -1381,6 +1386,13 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 		m.runSkillSubcommand(input)
 	case "/hooks":
 		m.runHooksSubcommand(input)
+	case "/output-style", "/output-styles":
+		styles := outputstyle.List(outputstyle.Dirs())
+		if len(styles) == 0 {
+			m.notice(i18n.M.OutputStyleNone)
+		} else {
+			m.notice(i18n.M.OutputStyleHeader + "\n" + outputstyle.DescribeList(styles, m.outputStyle) + "\n" + i18n.M.OutputStyleHint)
+		}
 	case "/help":
 		m.notice(i18n.M.SlashHelp)
 		if names := m.commandNames(); names != "" {

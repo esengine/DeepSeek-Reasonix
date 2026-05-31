@@ -24,6 +24,7 @@ import (
 	"reasonix/internal/hook"
 	"reasonix/internal/jobs"
 	"reasonix/internal/memory"
+	"reasonix/internal/outputstyle"
 	"reasonix/internal/permission"
 	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
@@ -93,6 +94,12 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	sysPrompt, err := cfg.ResolveSystemPrompt()
 	if err != nil {
 		return nil, err
+	}
+	// Output style: fold the selected persona/tone block into the base prompt
+	// before language/memory/skills append, so a "replace" style (keep-coding
+	// false) still keeps those. Applied once, into the cache-stable prefix.
+	if st, ok := outputstyle.Resolve(cfg.Agent.OutputStyle, outputstyle.Dirs()); ok {
+		sysPrompt = outputstyle.Apply(sysPrompt, st)
 	}
 	// Append the language policy so the model answers in the user's own language
 	// (the UI `language` setting governs only the interface). Static text, so it

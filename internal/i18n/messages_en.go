@@ -41,6 +41,10 @@ var English = Messages{
 	ChatStatusQuestion:     "↑/↓ move · number to pick · space multi · Enter confirm · ←/→ switch · Esc cancel",
 	ToolApprovalPromptFmt:  "Allow %s%s? — [y] once · [a] this session · [n] no",
 
+	OutputStyleNone:   "no output styles available",
+	OutputStyleHeader: "output styles:",
+	OutputStyleHint:   "set agent.output_style in reasonix.toml to apply one (takes effect next session)",
+
 	CompactionWorking: "compacting conversation…",
 	CompactionTitle:   "Context compacted",
 	CompactionUnit:    "messages",
@@ -67,6 +71,7 @@ var English = Messages{
 	CmdMemory:       "show memory files",
 	CmdMcp:          "MCP servers",
 	CmdHooks:        "manage hooks",
+	CmdOutputStyle:  "list output styles",
 	CmdSkill:        "manage skills",
 	CmdHelp:         "list commands",
 	CmdTodo:         "dismiss the task list",
