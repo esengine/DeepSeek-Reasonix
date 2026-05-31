@@ -33,13 +33,29 @@ const log = document.getElementById('log');
 const input = document.getElementById('in');
 const approval = document.getElementById('approval');
 let asst = null; // current assistant text node being streamed
+let stick = true;
+let scrollFrame = 0;
+
+function atBottom() {
+  return log.scrollHeight - log.scrollTop - log.clientHeight < 80;
+}
+function followBottom() {
+  if (!stick) return;
+  if (scrollFrame) cancelAnimationFrame(scrollFrame);
+  scrollFrame = requestAnimationFrame(() => {
+    scrollFrame = 0;
+    if (!stick) return;
+    log.scrollTop = log.scrollHeight;
+  });
+}
+log.addEventListener('scroll', () => { stick = atBottom(); });
 
 function line(cls, text) {
   const el = document.createElement('div');
   if (cls) el.className = cls;
   el.textContent = text;
   log.appendChild(el);
-  log.scrollTop = log.scrollHeight;
+  followBottom();
   return el;
 }
 function post(path, body) {
@@ -71,10 +87,10 @@ const es = new EventSource('/events');
 es.onmessage = ev => {
   const e = JSON.parse(ev.data);
   switch (e.kind) {
-    case 'reasoning': (asst && asst.dataset.r ? asst : (asst = line('reason', ''), asst.dataset.r = '1')); asst.textContent += e.text; break;
+    case 'reasoning': (asst && asst.dataset.r ? asst : (asst = line('reason', ''), asst.dataset.r = '1')); asst.textContent += e.text; followBottom(); break;
     case 'text':
       if (!asst || asst.dataset.r) { asst = line('', ''); }
-      asst.textContent += e.text; break;
+      asst.textContent += e.text; followBottom(); break;
     case 'message': asst = null; break;
     case 'tool_dispatch': asst = null; line('tool', '→ ' + e.tool.name + ' ' + (e.tool.args || '')); break;
     case 'tool_result': if (e.tool && e.tool.err) line('err', '⊘ ' + e.tool.name + ' ' + e.tool.err); break;

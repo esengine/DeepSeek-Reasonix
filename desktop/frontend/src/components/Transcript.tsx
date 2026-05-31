@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Item } from "../lib/useController";
 import { AssistantMessage, UserMessage } from "./Message";
 import { ToolCard } from "./ToolCard";
@@ -16,10 +16,24 @@ export function Transcript({
   onRewind?: (turn: number, scope: string) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const frameRef = useRef<number | null>(null);
   // stick tracks whether the view is pinned to the bottom; once the user scrolls
   // up to read, we stop yanking them back down.
   const stick = useRef(true);
 
+  const followBottom = () => {
+    if (!stick.current) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  };
+  const queueFollowBottom = () => {
+    if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
+    frameRef.current = requestAnimationFrame(() => {
+      frameRef.current = null;
+      followBottom();
+    });
+  };
   const onScroll = () => {
     const el = scrollRef.current;
     if (el) stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
@@ -28,15 +42,24 @@ export function Transcript({
   // Follow new content by setting scrollTop directly (no scrollIntoView fighting
   // the browser's scroll anchoring), and inside rAF so layout has settled first —
   // together with plain-text streaming this keeps the view from jittering.
+  useLayoutEffect(() => {
+    followBottom();
+    queueFollowBottom();
+  }, [items]);
+
   useEffect(() => {
-    if (!stick.current) return;
     const el = scrollRef.current;
     if (!el) return;
-    const id = requestAnimationFrame(() => {
-      el.scrollTop = el.scrollHeight;
-    });
-    return () => cancelAnimationFrame(id);
-  }, [items]);
+    const mutation = new MutationObserver(queueFollowBottom);
+    mutation.observe(el, { childList: true, subtree: true, characterData: true });
+    const resize = new ResizeObserver(queueFollowBottom);
+    resize.observe(el);
+    return () => {
+      mutation.disconnect();
+      resize.disconnect();
+      if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
+    };
+  }, []);
 
   // Sub-agent calls carry a parentId; collect them under their parent `task`
   // call so the parent card can render them nested, and skip them at top level.
