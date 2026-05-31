@@ -291,3 +291,69 @@ func TestLsAndGlob(t *testing.T) {
 		t.Fatalf("glob result = %q", g)
 	}
 }
+
+func TestGlobRecursive(t *testing.T) {
+	dir := t.TempDir()
+	// Create a nested structure:
+	// dir/a.go
+	// dir/sub/b.go
+	// dir/sub/deep/c.go
+	// dir/sub/deep/c.txt
+	// dir/other.txt
+	os.WriteFile(filepath.Join(dir, "a.go"), []byte("package a"), 0o644)
+	os.MkdirAll(filepath.Join(dir, "sub", "deep"), 0o755)
+	os.WriteFile(filepath.Join(dir, "sub", "b.go"), []byte("package b"), 0o644)
+	os.WriteFile(filepath.Join(dir, "sub", "deep", "c.go"), []byte("package c"), 0o644)
+	os.WriteFile(filepath.Join(dir, "sub", "deep", "c.txt"), []byte("text"), 0o644)
+	os.WriteFile(filepath.Join(dir, "other.txt"), []byte("other"), 0o644)
+
+	// **  *.go should find all .go files recursively.
+	out := runTool(t, globTool{}, map[string]any{"pattern": filepath.Join(dir, "**", "*.go")})
+	if !strings.Contains(out, "a.go") {
+		t.Errorf("missing a.go in:\n%s", out)
+	}
+	if !strings.Contains(out, "b.go") {
+		t.Errorf("missing b.go in:\n%s", out)
+	}
+	if !strings.Contains(out, "c.go") {
+		t.Errorf("missing c.go in:\n%s", out)
+	}
+	// Should not include .txt files.
+	if strings.Contains(out, "other.txt") || strings.Contains(out, "c.txt") {
+		t.Errorf("should not include .txt files:\n%s", out)
+	}
+
+	// **  *.txt should find all .txt files recursively.
+	out2 := runTool(t, globTool{}, map[string]any{"pattern": filepath.Join(dir, "**", "*.txt")})
+	if !strings.Contains(out2, "other.txt") {
+		t.Errorf("missing other.txt in:\n%s", out2)
+	}
+	if !strings.Contains(out2, "c.txt") {
+		t.Errorf("missing c.txt in:\n%s", out2)
+	}
+
+	// **  with no suffix should find all files.
+	out3 := runTool(t, globTool{}, map[string]any{"pattern": filepath.Join(dir, "**")})
+	if !strings.Contains(out3, "a.go") || !strings.Contains(out3, "c.txt") {
+		t.Errorf("bare ** should find all files:\n%s", out3)
+	}
+}
+
+func TestGlobRecursiveNoMatches(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "sub"), 0o755)
+	os.WriteFile(filepath.Join(dir, "sub", "a.go"), []byte("package a"), 0o644)
+
+	out := runTool(t, globTool{}, map[string]any{"pattern": filepath.Join(dir, "**", "*.py")})
+	if !strings.Contains(out, "(no matches)") {
+		t.Errorf("expected (no matches), got:\n%s", out)
+	}
+}
+
+func TestGlobNoMatches(t *testing.T) {
+	dir := t.TempDir()
+	out := runTool(t, globTool{}, map[string]any{"pattern": filepath.Join(dir, "*.xyz")})
+	if !strings.Contains(out, "(no matches)") {
+		t.Errorf("expected (no matches), got:\n%s", out)
+	}
+}
