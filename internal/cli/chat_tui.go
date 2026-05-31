@@ -139,6 +139,11 @@ type chatTUI struct {
 	buildController func(ref string, carry []provider.Message) (*control.Controller, error)
 	modelRef        string
 
+	// modelSwitchPending is true while an async /model build is in flight.
+	modelSwitchPending bool
+	// pendingModelSwitch holds the tea.Cmd that triggers the async build.
+	pendingModelSwitch tea.Cmd
+
 	// completion is the live autocomplete menu (slash commands; @-refs later).
 	completion completion
 }
@@ -171,6 +176,20 @@ type forceRepaintMsg struct{}
 // balanceMsg carries the result of an async wallet-balance fetch; text is the
 // formatted readout ("" when none/failed).
 type balanceMsg struct{ text string }
+
+// modelSwitchMsg carries the result of an async /model switch. A nil err means
+// the new controller is ready in ctrl; label/commands/skills/host mirror the
+// fields that runModelSubcommand used to set synchronously.
+type modelSwitchMsg struct {
+	ref      string
+	ctrl     *control.Controller
+	label    string
+	commands []command.Command
+	skills   []skill.Skill
+	host     *plugin.Host
+	err      error
+}
+
 
 // fetchBalance queries the provider's wallet balance off the event loop. It's a
 // no-op readout ("") when the provider declares no balance_url or the fetch
@@ -414,6 +433,9 @@ func (m chatTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.state == tuiRunning {
 				return m, nil // ignore Enter while a turn is in flight
 			}
+			if m.modelSwitchPending {
+				return m, nil // ignore Enter while /model switch is building
+			}
 			line := strings.TrimSpace(m.input.Value())
 
 			if line == "" {
@@ -478,6 +500,24 @@ func (m chatTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.notice(fmt.Sprintf("%s: %v", i18n.M.SlashCompactFailed, msg.err))
 		} else {
 			_ = m.ctrl.Snapshot()
+		}
+
+	case modelSwitchMsg:
+		m.modelSwitchPending = false
+		m.pendingModelSwitch = nil
+		if msg.err != nil {
+			m.notice("model: " + msg.err.Error())
+		} else {
+			m.ctrl = msg.ctrl
+			m.label = msg.label
+			m.commands = msg.commands
+			m.skills = msg.skills
+			m.host = msg.host
+			m.modelRef = msg.ref
+			m.notice(fmt.Sprintf("switched to %s (conversation carried over; prompt cache resets)", m.label))
+			cmds = append(cmds, fetchBalance(m.ctrl))
+			// Re-issue waitForAgentEvent to keep the event loop alive.
+			cmds = append(cmds, waitForAgentEvent(m.eventCh))
 		}
 
 	case promptResolvedMsg:
@@ -1311,6 +1351,9 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 		m.runMCPSubcommand(input)
 	case "/model":
 		m.runModelSubcommand(input)
+		if m.pendingModelSwitch != nil {
+			return m.pendingModelSwitch
+		}
 	case "/skill", "/skills":
 		m.runSkillSubcommand(input)
 	case "/hooks":

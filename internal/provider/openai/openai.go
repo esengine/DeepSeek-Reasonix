@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"net"
 	"net/http"
 	"sort"
 	"strings"
@@ -43,7 +44,16 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		keyEnv:  keyEnv,
 		baseURL: strings.TrimRight(cfg.BaseURL, "/"),
 		model:   cfg.Model,
-		http:    &http.Client{}, // no overall timeout; lifecycle is ctx-driven
+		http: &http.Client{
+			Transport: &http.Transport{
+				DialContext: (&net.Dialer{
+					Timeout:   30 * time.Second,
+					KeepAlive: 30 * time.Second,
+				}).DialContext,
+				TLSHandshakeTimeout:   15 * time.Second,
+				ResponseHeaderTimeout: 120 * time.Second, // models can think for a while before the first token
+			},
+		},
 	}, nil
 }
 
@@ -70,7 +80,7 @@ func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provi
 	}
 
 	out := make(chan provider.Chunk)
-	go c.readStream(resp, out)
+	go c.readStream(ctx, resp, out)
 	return out, nil
 }
 
@@ -201,9 +211,16 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 // fragments internally, and emits complete ToolCalls (by index) when done. Each
 // call also gets a ChunkToolCallStart the moment its name is known, so a frontend
 // can show the tool card while the arguments are still streaming.
-func (c *client) readStream(resp *http.Response, out chan<- provider.Chunk) {
+func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<- provider.Chunk) {
 	defer resp.Body.Close()
 	defer close(out)
+
+	// Close the response body when the context is canceled so scanner.Scan()
+	// unblocks instead of hanging indefinitely on a stalled connection.
+	go func() {
+		<-ctx.Done()
+		resp.Body.Close()
+	}()
 
 	acc := map[int]*provider.ToolCall{}
 	started := map[int]bool{}
