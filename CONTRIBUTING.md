@@ -98,7 +98,9 @@ ci: add golangci-lint and govulncheck
 4. Add tests in `internal/tool/builtin/builtin_test.go` or a separate `mytool_test.go`
 5. The tool is automatically available — `main` blank-imports `builtin`
 
-## Adding a new MCP provider
+## Adding a new model provider
+
+(For MCP tool servers see `internal/plugin` instead — that's a different layer.)
 
 1. Create `internal/provider/myprovider/`
 2. Implement `provider.Provider`: `Name()`, `Stream()`
@@ -107,7 +109,7 @@ ci: add golangci-lint and govulncheck
 
 ## Adding i18n strings
 
-1. Add the field to `internal/i18n/messages.go` (`Messages` struct)
+1. Add the field to `internal/i18n/i18n.go` (`Messages` struct)
 2. Add the value in `internal/i18n/messages_en.go` and `messages_zh.go`
 3. The `TestCatalogsComplete` test will fail if you miss a locale
 
