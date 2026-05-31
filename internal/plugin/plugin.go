@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"strings"
 
@@ -35,6 +36,11 @@ type Spec struct {
 	// for cwd-aware servers like CodeGraph, which detect the project from the
 	// directory they are launched in — they must be pinned to the project root.
 	Dir string
+	// Stderr is the writer for plugin subprocess stderr output. When nil,
+	// defaults to os.Stderr. Set to io.Discard to suppress output (e.g. during
+	// model switch inside a bubbletea session where stderr writes to the
+	// terminal would corrupt the TUI's raw mode).
+	Stderr io.Writer
 }
 
 // transport carries JSON-RPC messages to and from one MCP server. call sends a

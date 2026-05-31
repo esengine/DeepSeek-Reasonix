@@ -11,6 +11,7 @@ package boot
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -43,6 +44,10 @@ type Options struct {
 	MaxSteps   int
 	RequireKey bool
 	Sink       event.Sink
+	// Stderr is the writer for plugin subprocess stderr output. When nil,
+	// defaults to os.Stderr. Set to io.Discard during model switch inside a
+	// bubbletea session to prevent plugin output from corrupting the TUI.
+	Stderr io.Writer
 }
 
 // Build loads config, resolves the model(s), and returns a Controller wrapping a
@@ -149,6 +154,12 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		}
 	}
 	if len(specs) > 0 {
+		// Apply caller-supplied stderr override to all plugin specs.
+		if opts.Stderr != nil {
+			for i := range specs {
+				specs[i].Stderr = opts.Stderr
+			}
+		}
 		host, ptools, err := plugin.StartAll(ctx, specs)
 		if err != nil {
 			return nil, fmt.Errorf("plugin: %w", err)

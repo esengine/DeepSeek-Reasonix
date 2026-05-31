@@ -35,7 +35,10 @@ func newStdioTransport(ctx context.Context, s Spec) (*stdioTransport, error) {
 	if s.Dir != "" {
 		cmd.Dir = s.Dir // pin cwd-aware servers (e.g. CodeGraph) to the project root
 	}
-	cmd.Stderr = os.Stderr // surface plugin logs to the terminal
+	cmd.Stderr = os.Stderr // default: surface plugin logs to the terminal
+	if s.Stderr != nil {
+		cmd.Stderr = s.Stderr // caller-supplied override (e.g. io.Discard)
+	}
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {

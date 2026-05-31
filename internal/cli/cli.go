@@ -91,6 +91,19 @@ func setup(ctx context.Context, modelName string, maxStepsOverride int, requireK
 	})
 }
 
+// setupQuiet is like setup but suppresses plugin subprocess stderr output.
+// Used during model switch inside a bubbletea session to prevent plugin logs
+// from corrupting the TUI's terminal raw mode.
+func setupQuiet(ctx context.Context, modelName string, maxStepsOverride int, requireKey bool, sink event.Sink) (*control.Controller, error) {
+	return boot.Build(ctx, boot.Options{
+		Model:      modelName,
+		MaxSteps:   maxStepsOverride,
+		RequireKey: requireKey,
+		Sink:       sink,
+		Stderr:     io.Discard,
+	})
+}
+
 func runAgent(args []string) int {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	model := fs.String("model", "", "provider name (default: config default_model)")
@@ -286,7 +299,7 @@ func chatREPL(args []string) int {
 	// runModelSubcommand performs the swap on the live copy. The same stable sink
 	// feeds the new controller, so events keep flowing to this TUI.
 	m.buildController = func(ref string, carry []provider.Message) (*control.Controller, error) {
-		c, err := setup(ctx, ref, *maxSteps, false, sink)
+		c, err := setupQuiet(ctx, ref, *maxSteps, false, sink)
 		if err != nil {
 			return nil, err
 		}
