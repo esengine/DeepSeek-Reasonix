@@ -88,6 +88,11 @@ type Gate interface {
 type ToolHooks interface {
 	PreToolUse(ctx context.Context, name string, args json.RawMessage) (block bool, message string)
 	PostToolUse(ctx context.Context, name string, args json.RawMessage, result string)
+	// SubagentStop fires when a `task` sub-agent finishes (foreground). PreCompact
+	// fires just before a compaction pass and returns extra summary guidance (its
+	// hooks' stdout) to fold into the summary prompt; "" when no hook contributes.
+	SubagentStop(ctx context.Context, last string)
+	PreCompact(ctx context.Context, trigger string) string
 }
 
 // Agent drives a single task: a Provider, a tool Registry, and a Session wired
@@ -214,11 +219,17 @@ func (a *Agent) SessionCache() (hit, miss int) { return a.sessCacheHit, a.sessCa
 // means compaction is disabled for this agent.
 func (a *Agent) ContextWindow() int { return a.contextWindow }
 
+// CompactRatio returns the fraction of the window at which auto-compaction
+// fires (e.g. 0.8). The status line uses it to show headroom to the next compact.
+func (a *Agent) CompactRatio() float64 { return a.compactRatio }
+
 // CompactNow runs one compaction pass immediately, regardless of the
 // usage-ratio threshold maybeCompact normally honours. Used by the chat
 // TUI's `/compact` command so the user can reset the prefix before it
 // naturally fills up.
-func (a *Agent) CompactNow(ctx context.Context) error { return a.compact(ctx, "manual") }
+func (a *Agent) CompactNow(ctx context.Context, instructions string) error {
+	return a.compact(ctx, "manual", instructions)
+}
 
 // Options configures an Agent.
 type Options struct {
@@ -591,8 +602,24 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 		body, truncMsg := truncateToolOutput(fmt.Sprintf("error: %v\n%s", err, result))
 		return toolOutcome{output: body, errMsg: firstLine(err.Error()), truncated: truncMsg != "", truncMsg: truncMsg}
 	}
+	// A foreground `task` sub-agent just finished — its result is the final answer.
+	// (A backgrounded one returns a "Started…" string and stops later in a job, so
+	// it doesn't fire here.) SubagentStop lets a hook react to delegated work.
+	if a.hooks != nil && call.Name == "task" && !isBackgroundTaskCall(call.Arguments) {
+		a.hooks.SubagentStop(ctx, result)
+	}
 	body, truncMsg := truncateToolOutput(result)
 	return toolOutcome{output: body, truncated: truncMsg != "", truncMsg: truncMsg}
+}
+
+// isBackgroundTaskCall reports whether a `task` call set run_in_background, so a
+// fire-and-return dispatch isn't mistaken for a sub-agent that has stopped.
+func isBackgroundTaskCall(args string) bool {
+	var p struct {
+		RunInBackground bool `json:"run_in_background"`
+	}
+	_ = json.Unmarshal([]byte(args), &p)
+	return p.RunInBackground
 }
 
 // toolReadOnly reports a tool's ReadOnly classification by name (false for an

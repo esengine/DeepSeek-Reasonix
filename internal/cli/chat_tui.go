@@ -854,18 +854,41 @@ func compactionCardLines(c event.Compaction) []string {
 	return lines
 }
 
-// contextTag renders the prompt-vs-context-window gauge for the status line.
+// contextTag renders the prompt-vs-context-window gauge for the status line,
+// framed around the auto-compaction threshold: it shows how much headroom is
+// left until the next compaction (mirroring Claude Code's "context left until
+// auto-compact"), and colours by proximity to that point rather than the raw
+// window. Falls back to a plain percentage when compaction is disabled.
 func (m chatTUI) contextTag() string {
 	used, window := m.ctrl.ContextSnapshot()
 	if used == 0 || window == 0 {
 		return ""
 	}
 	pct := used * 100 / window
-	body := fmt.Sprintf("%s / %s ctx (%d%%)", shortTokens(used), shortTokens(window), pct)
+	ratio := m.ctrl.CompactRatio()
+	if ratio <= 0 || ratio >= 1 {
+		// Compaction disabled: just the raw gauge, coloured on window fill.
+		body := fmt.Sprintf("%s / %s ctx (%d%%)", shortTokens(used), shortTokens(window), pct)
+		switch {
+		case pct >= 85:
+			return lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Render(body)
+		case pct >= 60:
+			return lipgloss.NewStyle().Foreground(lipgloss.Color("220")).Render(body)
+		default:
+			return dim(body)
+		}
+	}
+	threshold := int(ratio * 100)
+	// Headroom to the compaction point, as a percentage of the window (clamped at 0).
+	left := threshold - pct
+	if left < 0 {
+		left = 0
+	}
+	body := fmt.Sprintf("%s ctx (%d%%) · %d%% to compact", shortTokens(used), pct, left)
 	switch {
-	case pct >= 85:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Render(body)
-	case pct >= 60:
+	case pct >= threshold:
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Render(fmt.Sprintf("%s ctx (%d%%) · compacting soon", shortTokens(used), pct))
+	case left <= 10:
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("220")).Render(body)
 	default:
 		return dim(body)
@@ -1285,8 +1308,10 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 		// Compaction makes a (network) summarizer call; run it off the Update loop
 		// so the TUI doesn't freeze. The CompactionStarted/Done events render the
 		// card as they arrive; compactDoneMsg only handles the terminal error /
-		// snapshot once the pass returns.
-		return func() tea.Msg { return compactDoneMsg{err: m.ctrl.Compact(context.Background())} }
+		// snapshot once the pass returns. Any text after "/compact" is focus
+		// guidance steering what the summary keeps.
+		focus := strings.TrimSpace(strings.TrimPrefix(input, cmd))
+		return func() tea.Msg { return compactDoneMsg{err: m.ctrl.Compact(context.Background(), focus)} }
 	case "/new":
 		if err := m.ctrl.NewSession(); err != nil {
 			m.notice(fmt.Sprintf("%s: %v", i18n.M.SlashNewFailed, err))

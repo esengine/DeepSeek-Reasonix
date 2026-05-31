@@ -153,11 +153,13 @@ func (a *App) AnswerQuestion(id string, answers []QuestionAnswer) {
 }
 
 // Compact runs one compaction pass on demand.
+// Compact runs a plain compaction pass (the "compact now" button). Focus-guided
+// compaction goes through Submit("/compact <focus>") instead.
 func (a *App) Compact() error {
 	if a.ctrl == nil {
 		return nil
 	}
-	return a.ctrl.Compact(a.ctx)
+	return a.ctrl.Compact(a.ctx, "")
 }
 
 // NewSession snapshots the current conversation and rotates to a fresh one.

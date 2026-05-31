@@ -181,7 +181,7 @@ func (s *Server) plan(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) compact(w http.ResponseWriter, r *http.Request) {
-	if err := s.ctrl.Compact(r.Context()); err != nil {
+	if err := s.ctrl.Compact(r.Context(), ""); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

@@ -53,6 +53,7 @@ type Controller struct {
 	hooks        *hook.Runner // session hook runner; nil-safe (no hooks configured)
 	mem          *memory.Set
 	cleanup      func()
+	startedOnce  bool // guards the one-shot SessionStart hook on first turn
 
 	// balanceURL/balanceKey target the active provider's optional wallet-balance
 	// endpoint (empty when the provider declares none). Captured at build so a
@@ -304,6 +305,7 @@ const planApprovedMessage = "Plan approved — plan mode is off; you're cleared 
 // next turn can revise. Plan mode is only ever set interactively, so the headless
 // `Run` path (which doesn't call this) never blocks on a prompt.
 func (c *Controller) runTurn(ctx context.Context, input string) error {
+	c.maybeSessionStart(ctx)
 	// Open a checkpoint for this turn before the user message is appended, so the
 	// recorded message boundary precedes it and pre-edit snapshots land here.
 	c.beginCheckpoint(input)
@@ -380,9 +382,10 @@ func lastAssistantText(msgs []provider.Message) string {
 func (c *Controller) Submit(input string) {
 	trimmed := strings.TrimSpace(input)
 	switch {
-	case trimmed == "/compact":
+	case trimmed == "/compact" || strings.HasPrefix(trimmed, "/compact "):
+		focus := strings.TrimSpace(strings.TrimPrefix(trimmed, "/compact"))
 		go func() {
-			if err := c.Compact(context.Background()); err != nil {
+			if err := c.Compact(context.Background(), focus); err != nil {
 				c.notice("compaction failed: " + err.Error())
 			} else {
 				c.notice("compacted")
@@ -471,6 +474,7 @@ func (c *Controller) notice(text string) {
 // headless `reasonix run` path, where the Sink renders to stdout and the caller
 // just needs the exit status — no TurnDone event, no cancel bookkeeping.
 func (c *Controller) Run(ctx context.Context, input string) error {
+	c.maybeSessionStart(ctx)
 	if c.hooks.Enabled() {
 		c.turn++
 		if block, _ := c.hooks.PromptSubmit(ctx, input, c.turn); block {
@@ -576,15 +580,31 @@ func (c *Controller) SetPlanMode(v bool) {
 }
 
 // Compact runs one compaction pass on the executor's session on demand.
-func (c *Controller) Compact(ctx context.Context) error {
+// instructions is optional `/compact <focus>` guidance steering what to keep.
+func (c *Controller) Compact(ctx context.Context, instructions string) error {
 	if c.executor == nil {
 		return nil
 	}
-	return c.executor.CompactNow(ctx)
+	return c.executor.CompactNow(ctx, instructions)
+}
+
+// maybeSessionStart fires the SessionStart hook exactly once per session, lazily
+// on the first turn — by then the sink/notify is wired, and a resumed session
+// fires it too (its first post-resume turn).
+func (c *Controller) maybeSessionStart(ctx context.Context) {
+	c.mu.Lock()
+	if c.startedOnce {
+		c.mu.Unlock()
+		return
+	}
+	c.startedOnce = true
+	c.mu.Unlock()
+	c.hooks.SessionStart(ctx)
 }
 
 // NewSession snapshots the current conversation, rotates to a fresh file, and
-// resets the executor to a clean session carrying the same system prompt.
+// resets the executor to a clean session carrying the same system prompt. It
+// ends the old session and starts the new one for lifecycle hooks.
 func (c *Controller) NewSession() error {
 	if c.executor == nil {
 		return nil
@@ -592,6 +612,7 @@ func (c *Controller) NewSession() error {
 	if err := c.Snapshot(); err != nil {
 		return err
 	}
+	c.hooks.SessionEnd(context.Background())
 	if c.sessionDir != "" {
 		c.mu.Lock()
 		c.sessionPath = agent.NewSessionPath(c.sessionDir, c.label)
@@ -599,6 +620,10 @@ func (c *Controller) NewSession() error {
 	}
 	c.executor.SetSession(agent.NewSession(c.systemPrompt))
 	c.rebindCheckpoints(c.SessionPath())
+	c.mu.Lock()
+	c.startedOnce = true // NewSession fires SessionStart itself; don't re-fire on the next turn
+	c.mu.Unlock()
+	c.hooks.SessionStart(context.Background())
 	return nil
 }
 
@@ -844,6 +869,15 @@ func (c *Controller) ContextSnapshot() (int, int) {
 	return u.PromptTokens, c.executor.ContextWindow()
 }
 
+// CompactRatio returns the auto-compaction threshold as a fraction of the window
+// (0 when the executor is unset). The status line shows headroom against it.
+func (c *Controller) CompactRatio() float64 {
+	if c.executor == nil {
+		return 0
+	}
+	return c.executor.CompactRatio()
+}
+
 // LastUsage returns the most recent turn's token telemetry (nil before the first
 // turn), so frontends can derive the prompt cache-hit rate for the status line.
 func (c *Controller) LastUsage() *provider.Usage {
@@ -961,8 +995,15 @@ func (c *Controller) RemoveMCPServer(name string) (disconnected bool, err error)
 // Label returns the human-readable model label, e.g. "deepseek-flash".
 func (c *Controller) Label() string { return c.label }
 
-// Close stops plugin subprocesses and releases resources.
+// Close stops plugin subprocesses and releases resources. A session that ever
+// started fires SessionEnd so a teardown hook runs.
 func (c *Controller) Close() {
+	c.mu.Lock()
+	started := c.startedOnce
+	c.mu.Unlock()
+	if started {
+		c.hooks.SessionEnd(context.Background())
+	}
 	if c.jobs != nil {
 		c.jobs.Close() // cancel any still-running background jobs
 	}
@@ -1209,6 +1250,13 @@ func (c *Controller) requestApproval(ctx context.Context, tool, subject string) 
 	c.mu.Unlock()
 
 	c.sink.Emit(event.Event{Kind: event.ApprovalRequest, Approval: event.Approval{ID: id, Tool: tool, Subject: subject}})
+	// The agent now needs the user's attention; a Notification hook can ping an
+	// external channel (desktop notice, phone) while the run blocks on the reply.
+	if subject != "" {
+		go c.hooks.Notification(ctx, "approval needed: "+tool+" "+subject)
+	} else {
+		go c.hooks.Notification(ctx, "approval needed: "+tool)
+	}
 
 	select {
 	case r := <-reply:
