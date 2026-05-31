@@ -112,13 +112,13 @@ When Developer ID / Authenticode certificates are added, the release workflow's
 
 ### Verifying a download
 
-Artifacts are signed with minisign (public key ID `29FA7D2CA832AC6C`). The `.minisig`
+Artifacts are signed with minisign (public key ID `AF12CA46F4A9EBB0`). The `.minisig`
 signature sits next to each artifact in the release; verify with the
 [minisign](https://jedisct1.github.io/minisign/) CLI:
 
 ```sh
 minisign -Vm Reasonix-darwin-arm64.zip \
-  -P RWRsrDKoLH36KZpr4v2vY1myxnrvt+EBmv7mxRbhqzrq4762oOVsi4dq
+  -P RWSw66n0RsoSr6Zhh6qt5YO95YkpCayTOCMFVDNUQSjJYwxoYngNVBSq
 ```
 
 ## Editor seam (Monaco / CodeMirror)

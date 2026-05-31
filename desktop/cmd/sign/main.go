@@ -17,6 +17,7 @@
 package main
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -49,6 +50,16 @@ func main() {
 			usage()
 		}
 		err = genManifest(os.Args[2], os.Args[3], os.Args[4])
+	case "genkey":
+		if len(os.Args) != 3 {
+			usage()
+		}
+		err = genKey(os.Args[2])
+	case "verify":
+		if len(os.Args) != 3 {
+			usage()
+		}
+		err = verifyFile(os.Args[2])
 	default:
 		usage()
 	}
@@ -59,8 +70,65 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage:\n  sign <file>...\n  manifest <dir> <version> <tag>")
+	fmt.Fprintln(os.Stderr, "usage:\n  sign <file>...\n  manifest <dir> <version> <tag>\n  genkey <dir>\n  verify <file>")
 	os.Exit(2)
+}
+
+// verifyFile checks <file> against <file>.minisig using the embedded public key —
+// the same check the updater runs before applying. A self-test that the signing
+// key matches what's compiled in. Returns an error (nonzero exit) on mismatch.
+func verifyFile(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	sig, err := os.ReadFile(path + ".minisig")
+	if err != nil {
+		return err
+	}
+	if err := update.Verify(data, sig); err != nil {
+		return err
+	}
+	fmt.Printf("OK: %s verifies against the embedded public key\n", path)
+	return nil
+}
+
+// genKey generates a fresh minisign key pair, writing the encrypted private key
+// (reasonix.key) and the public key (reasonix.pub) into dir. The password comes
+// from $MINISIGN_PASSWORD. The public key is printed — it's safe to publish; embed
+// it in internal/update/verify.go. The private key never leaves dir.
+func genKey(dir string) error {
+	pw := os.Getenv("MINISIGN_PASSWORD")
+	if strings.TrimSpace(pw) == "" {
+		return fmt.Errorf("genkey: MINISIGN_PASSWORD is empty")
+	}
+	pub, priv, err := minisign.GenerateKey(rand.Reader)
+	if err != nil {
+		return err
+	}
+	enc, err := minisign.EncryptKey(pw, priv)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	keyPath := filepath.Join(dir, "reasonix.key")
+	pubPath := filepath.Join(dir, "reasonix.pub")
+	if err := os.WriteFile(keyPath, enc, 0o600); err != nil {
+		return err
+	}
+	pubText, err := pub.MarshalText()
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(pubPath, pubText, 0o644); err != nil {
+		return err
+	}
+	fmt.Printf("private key -> %s (keep secret; this is the MINISIGN_PRIVATE_KEY value)\n", keyPath)
+	fmt.Printf("public key  -> %s\n\n", pubPath)
+	fmt.Printf("public key (embed in internal/update/verify.go, key ID %016X):\n%s\n", pub.ID(), pubText)
+	return nil
 }
 
 // signFiles writes a detached .minisig next to each input file. The private key is
