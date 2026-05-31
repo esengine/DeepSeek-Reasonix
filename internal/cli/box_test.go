@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -77,7 +78,7 @@ func TestBoxedMultipleLines(t *testing.T) {
 	}
 	// All lines should be present.
 	for _, want := range []string{"line1", "longer line", "short"} {
-		if !containsStr(got, want) {
+		if !strings.Contains(got, want) {
 			t.Errorf("boxed missing %q", want)
 		}
 	}
@@ -88,13 +89,4 @@ func TestBoxedEmpty(t *testing.T) {
 	if len(got) == 0 {
 		t.Error("boxed empty should still produce a box")
 	}
-}
-
-func containsStr(s, sub string) bool {
-	for i := 0; i <= len(s)-len(sub); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
-	}
-	return false
 }
