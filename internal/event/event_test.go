@@ -153,15 +153,6 @@ func TestAskStructs(t *testing.T) {
 	}
 }
 
-// --- Event with Err ---
-
-func TestEventWithError(t *testing.T) {
-	e := Event{Kind: TurnDone, Err: nil}
-	if e.Err != nil {
-		t.Error("expected nil error")
-	}
-}
-
 // --- Multiple Emit via channel-backed sink ---
 
 func TestChannelBackedSink(t *testing.T) {
@@ -189,10 +180,14 @@ func TestChannelBackedSink(t *testing.T) {
 	}
 }
 
-// --- Concurrent safety of FuncSink (documented: serial Emit, but test that
-// the function itself doesn't race when called from a single goroutine) ---
+// --- FuncSink forwards every concurrent Emit exactly once ---
 
-func TestFuncSinkConcurrentRead(t *testing.T) {
+// FuncSink.Emit forwards to the wrapped func with no synchronization of its own,
+// so a concurrency-safe callback is the caller's responsibility (here a
+// mutex-guarded counter). This verifies that N concurrent Emits produce exactly
+// N forwarded calls, and under `go test -race` that the forwarding itself is
+// race-free.
+func TestFuncSinkForwardsEachConcurrentEmit(t *testing.T) {
 	var mu sync.Mutex
 	var count int
 	sink := FuncSink(func(e Event) {
