@@ -14,6 +14,7 @@ import (
 	"math/rand"
 	"net"
 	"net/http"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -230,12 +231,27 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
+	// Raw SSE logging: set REASONIX_LOG_SSE=/path/to/file.log to capture
+	// every data line verbatim. Useful for diagnosing server-side token
+	// ordering issues (e.g. garbled reasoning output from speculative decoding).
+	var sseLog *os.File
+	if path := os.Getenv("REASONIX_LOG_SSE"); path != "" {
+		sseLog, _ = os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		if sseLog != nil {
+			fmt.Fprintf(sseLog, "--- stream start model=%s ---\n", c.model)
+			defer sseLog.Close()
+		}
+	}
+
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || !strings.HasPrefix(line, "data:") {
 			continue
 		}
 		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if sseLog != nil {
+			fmt.Fprintln(sseLog, data)
+		}
 		if data == "[DONE]" {
 			break
 		}
