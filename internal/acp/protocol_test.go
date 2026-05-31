@@ -1,6 +1,9 @@
 package acp
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestFlattenPrompt(t *testing.T) {
 	tests := []struct {
@@ -80,4 +83,131 @@ func TestToolKindFor(t *testing.T) {
 			t.Errorf("toolKindFor(%q) = %q, want %q", name, got, want)
 		}
 	}
+}
+
+// --- newSessionID ---
+
+func TestNewSessionID(t *testing.T) {
+	id, err := newSessionID()
+	if err != nil {
+		t.Fatalf("newSessionID: %v", err)
+	}
+	parts := strings.Split(id, "-")
+	if len(parts) != 5 {
+		t.Fatalf("UUID format: %q has %d parts, want 5", id, len(parts))
+	}
+	if len(parts[0]) != 8 || len(parts[1]) != 4 || len(parts[2]) != 4 || len(parts[3]) != 4 || len(parts[4]) != 12 {
+		t.Errorf("UUID part lengths: %v", parts)
+	}
+	// Version 4: bits 4-7 of byte 6 are 0100.
+	if id[14] != '4' {
+		t.Errorf("UUID version: char at 14 = %c, want '4'", id[14])
+	}
+	// Variant: bits 6-7 of byte 8 are 10.
+	variant := id[19]
+	if variant != '8' && variant != '9' && variant != 'a' && variant != 'b' {
+		t.Errorf("UUID variant: char at 19 = %c, want 8/9/a/b", variant)
+	}
+}
+
+func TestNewSessionIDUnique(t *testing.T) {
+	seen := map[string]bool{}
+	for i := 0; i < 100; i++ {
+		id, err := newSessionID()
+		if err != nil {
+			t.Fatalf("newSessionID: %v", err)
+		}
+		if seen[id] {
+			t.Fatalf("duplicate session id: %s", id)
+		}
+		seen[id] = true
+	}
+}
+
+// --- mcpSpecs ---
+
+func TestMcpSpecsNil(t *testing.T) {
+	if got := mcpSpecs(nil); got != nil {
+		t.Errorf("mcpSpecs(nil) = %v, want nil", got)
+	}
+	if got := mcpSpecs([]MCPServerSpec{}); got != nil {
+		t.Errorf("mcpSpecs([]) = %v, want nil", got)
+	}
+}
+
+func TestMcpSpecsConversion(t *testing.T) {
+	in := []MCPServerSpec{
+		{Name: "codegraph", Command: "codegraph", Args: []string{"--stdio"}, Env: map[string]string{"HOME": "/tmp"}},
+	}
+	got := mcpSpecs(in)
+	if len(got) != 1 {
+		t.Fatalf("len = %d, want 1", len(got))
+	}
+	if got[0].Name != "codegraph" || got[0].Type != "stdio" || got[0].Command != "codegraph" {
+		t.Errorf("spec = %+v", got[0])
+	}
+	if got[0].Args[0] != "--stdio" {
+		t.Errorf("args = %v", got[0].Args)
+	}
+	if got[0].Env["HOME"] != "/tmp" {
+		t.Errorf("env = %v", got[0].Env)
+	}
+}
+
+// --- transcriptPath ---
+
+func TestTranscriptPath(t *testing.T) {
+	got := transcriptPath("/sessions", "abc-123")
+	if got != "/sessions/abc-123.jsonl" {
+		t.Errorf("transcriptPath = %q", got)
+	}
+}
+
+// --- Protocol constants ---
+
+func TestProtocolVersion(t *testing.T) {
+	if ProtocolVersion != 1 {
+		t.Errorf("ProtocolVersion = %d", ProtocolVersion)
+	}
+}
+
+func TestErrorCodes(t *testing.T) {
+	if ErrParse != -32700 {
+		t.Errorf("ErrParse = %d", ErrParse)
+	}
+	if ErrInvalidRequest != -32600 {
+		t.Errorf("ErrInvalidRequest = %d", ErrInvalidRequest)
+	}
+	if ErrMethodNotFound != -32601 {
+		t.Errorf("ErrMethodNotFound = %d", ErrMethodNotFound)
+	}
+	if ErrInvalidParams != -32602 {
+		t.Errorf("ErrInvalidParams = %d", ErrInvalidParams)
+	}
+	if ErrInternal != -32603 {
+		t.Errorf("ErrInternal = %d", ErrInternal)
+	}
+}
+
+// --- acpSession ---
+
+func TestAcpSessionSetCancelAbort(t *testing.T) {
+	sess := &acpSession{id: "test"}
+	aborted := false
+	sess.setCancel(func() { aborted = true })
+	sess.abort()
+	if !aborted {
+		t.Error("abort should call the cancel func")
+	}
+}
+
+func TestAcpSessionAbortNil(t *testing.T) {
+	sess := &acpSession{id: "test"}
+	sess.abort() // should not panic
+}
+
+func TestAcpSessionSetCancelNil(t *testing.T) {
+	sess := &acpSession{id: "test"}
+	sess.setCancel(nil)
+	sess.abort() // should not panic
 }
