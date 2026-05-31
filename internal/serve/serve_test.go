@@ -87,3 +87,151 @@ func TestServeEndpoints(t *testing.T) {
 		t.Errorf("empty submit should be 400, got %d", resp.StatusCode)
 	}
 }
+
+func TestServeCancelEndpoint(t *testing.T) {
+	bc := NewBroadcaster()
+	ctrl := control.New(control.Options{Sink: bc})
+	srv := httptest.NewServer(New(ctrl, bc).Handler())
+	defer srv.Close()
+
+	resp, err := http.Post(srv.URL+"/cancel", "application/json", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Errorf("cancel status = %d, want 204", resp.StatusCode)
+	}
+}
+
+func TestServeApproveMissingID(t *testing.T) {
+	bc := NewBroadcaster()
+	ctrl := control.New(control.Options{Sink: bc})
+	srv := httptest.NewServer(New(ctrl, bc).Handler())
+	defer srv.Close()
+
+	// Missing id should return 400.
+	resp, err := http.Post(srv.URL+"/approve", "application/json", strings.NewReader(`{"allow":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("approve missing id = %d, want 400", resp.StatusCode)
+	}
+
+	// Malformed JSON should return 400.
+	resp2, _ := http.Post(srv.URL+"/approve", "application/json", strings.NewReader(`{bad`))
+	resp2.Body.Close()
+	if resp2.StatusCode != http.StatusBadRequest {
+		t.Errorf("approve bad json = %d, want 400", resp2.StatusCode)
+	}
+}
+
+func TestServeNewSessionEndpoint(t *testing.T) {
+	bc := NewBroadcaster()
+	ctrl := control.New(control.Options{Sink: bc})
+	srv := httptest.NewServer(New(ctrl, bc).Handler())
+	defer srv.Close()
+
+	resp, err := http.Post(srv.URL+"/new", "application/json", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Errorf("new session = %d, want 204", resp.StatusCode)
+	}
+}
+
+func TestServeCompactEndpoint(t *testing.T) {
+	bc := NewBroadcaster()
+	ctrl := control.New(control.Options{Sink: bc})
+	srv := httptest.NewServer(New(ctrl, bc).Handler())
+	defer srv.Close()
+
+	resp, err := http.Post(srv.URL+"/compact", "application/json", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Errorf("compact = %d, want 204", resp.StatusCode)
+	}
+}
+
+func TestServeIndexPage(t *testing.T) {
+	bc := NewBroadcaster()
+	ctrl := control.New(control.Options{Sink: bc})
+	srv := httptest.NewServer(New(ctrl, bc).Handler())
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Errorf("index status = %d", resp.StatusCode)
+	}
+	ct := resp.Header.Get("Content-Type")
+	if !strings.Contains(ct, "text/html") {
+		t.Errorf("index content-type = %q, want text/html", ct)
+	}
+}
+
+func TestServeSubmitMalformedJSON(t *testing.T) {
+	bc := NewBroadcaster()
+	ctrl := control.New(control.Options{Sink: bc})
+	srv := httptest.NewServer(New(ctrl, bc).Handler())
+	defer srv.Close()
+
+	resp, err := http.Post(srv.URL+"/submit", "application/json", strings.NewReader(`{not json`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("malformed submit = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestServePlanMalformedJSON(t *testing.T) {
+	bc := NewBroadcaster()
+	ctrl := control.New(control.Options{Sink: bc})
+	srv := httptest.NewServer(New(ctrl, bc).Handler())
+	defer srv.Close()
+
+	resp, err := http.Post(srv.URL+"/plan", "application/json", strings.NewReader(`{bad`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("malformed plan = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestServeContextEndpoint(t *testing.T) {
+	bc := NewBroadcaster()
+	ctrl := control.New(control.Options{Sink: bc})
+	srv := httptest.NewServer(New(ctrl, bc).Handler())
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/context")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Errorf("context status = %d", resp.StatusCode)
+	}
+	var body map[string]int
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode context: %v", err)
+	}
+	// Before any turn, used should be 0.
+	if body["used"] != 0 {
+		t.Errorf("used = %d, want 0", body["used"])
+	}
+}
