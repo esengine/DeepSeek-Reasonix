@@ -29,6 +29,12 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
+// version is injected at build time via `wails build -ldflags "-X main.version=..."`,
+// mirroring cmd/reasonix/main.go. The auto-updater reads it (App.Version) to compare
+// against the published manifest; an un-injected dev build stays "dev" and never
+// prompts to update.
+var version = "dev"
+
 func main() {
 	app := NewApp()
 

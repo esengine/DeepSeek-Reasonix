@@ -188,6 +188,29 @@ body {
   color: var(--err);
   border-bottom: 1px solid var(--border-soft);
 }
+.banner--update {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--accent-soft);
+  color: var(--fg);
+  border-bottom: 1px solid var(--border-soft);
+}
+.banner__msg {
+  font-weight: 500;
+}
+.banner__hint {
+  color: var(--fg-dim);
+  font-size: 11.5px;
+}
+.banner__spacer {
+  flex: 1 1 auto;
+}
+.banner__progress {
+  width: 180px;
+  height: 8px;
+  accent-color: var(--accent);
+}
 
 /* ── transcript ──────────────────────────────────────────────────────────── */
 .main {

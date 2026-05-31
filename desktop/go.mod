@@ -9,7 +9,12 @@ go 1.25.0
 // transitive deps; the parent module's go build/test ./... skips this directory.
 require reasonix v0.0.0
 
-require github.com/wailsapp/wails/v2 v2.12.0
+require (
+	aead.dev/minisign v0.3.0
+	github.com/minio/selfupdate v0.6.0
+	github.com/wailsapp/wails/v2 v2.12.0
+	golang.org/x/mod v0.36.0
+)
 
 require (
 	git.sr.ht/~jackmordaunt/go-toast/v2 v2.0.3 // indirect

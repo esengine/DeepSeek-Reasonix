@@ -197,4 +197,23 @@ export const zh: Record<DictKey, string> = {
   "tool.editOther": "{n} 处编辑",
   "tool.emptyFile": "空文件",
   "tool.noOutput": "无输出",
+
+  // 软件更新
+  "updater.title": "软件更新",
+  "updater.currentVersion": "当前版本：{v}",
+  "updater.checkButton": "检查更新",
+  "updater.checking": "正在检查更新…",
+  "updater.upToDate": "已是最新版本。",
+  "updater.available": "发现新版本：{v}",
+  "updater.releaseNotes": "更新说明",
+  "updater.installNow": "立即更新",
+  "updater.goToDownload": "前往下载页",
+  "updater.macHint": "macOS 暂不支持自动更新，请前往下载页手动安装。",
+  "updater.downloading": "下载中… {done} / {total}（{pct}%）",
+  "updater.verifying": "正在验证签名…",
+  "updater.applying": "正在安装…",
+  "updater.done": "更新完成，正在重启…",
+  "updater.failed": "更新失败：{msg}",
+  "updater.retry": "重试",
+  "updater.dismiss": "稍后",
 };

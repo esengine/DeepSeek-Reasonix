@@ -1,0 +1,193 @@
+name: Release desktop
+
+# Desktop (Wails) release line. Tag namespace `desktop-v<semver>` triggers this —
+# plain `v<semver>` tags are the CLI release (release.yml) and intentionally do NOT
+# trigger here (GitHub glob `v*` does not match `desktop-v*`). Bump with:
+#   git tag desktop-vX.Y.Z && git push origin desktop-vX.Y.Z
+#
+# Wails cannot cross-compile a CGO/WebKit binary, so build/ fans out to one native
+# runner per platform. Artifacts are minisign-signed (MINISIGN_* secrets), a
+# latest.json manifest is generated, and everything is published to a GitHub
+# release and mirrored to R2 (the updater reads R2 first, GitHub as fallback).
+on:
+  push:
+    tags: ["desktop-v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to publish (e.g. desktop-v1.1.0). Required when run manually."
+        required: true
+        type: string
+
+permissions:
+  contents: write # create the release and upload artifacts
+
+jobs:
+  build:
+    name: build (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: macos-14, platform: darwin/arm64, name: darwin-arm64 }
+          - { runner: macos-13, platform: darwin/amd64, name: darwin-amd64 }
+          - { runner: windows-latest, platform: windows/amd64, name: windows-amd64 }
+          - { runner: ubuntu-22.04, platform: linux/amd64, name: linux-amd64 }
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash # desktop-build.sh is bash; windows runners default to pwsh otherwise
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: desktop/go.mod
+          cache: true
+          cache-dependency-path: desktop/go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      # Linux: WebKitGTK 4.0 toolchain (pinned to ubuntu-22.04; no webkit2_41 tag).
+      - name: Install Linux build deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc libgtk-3-dev libwebkit2gtk-4.0-dev
+
+      # Windows: NSIS provides makensis for `wails build -nsis`.
+      - name: Install NSIS
+        if: runner.os == 'Windows'
+        run: |
+          choco install nsis -y --no-progress
+          echo "C:\Program Files (x86)\NSIS" >> "$GITHUB_PATH"
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+
+      - name: Resolve version
+        id: ver
+        run: |
+          TAG="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#desktop-}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and package
+        run: scripts/desktop-build.sh "${{ matrix.platform }}" "${{ steps.ver.outputs.version }}"
+
+      - name: Sign artifacts (minisign)
+        working-directory: desktop
+        env:
+          MINISIGN_PRIVATE_KEY: ${{ secrets.MINISIGN_PRIVATE_KEY }}
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+        run: go run ./cmd/sign sign ../dist/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.name }}
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    name: publish release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: desktop/go.mod
+          cache: true
+          cache-dependency-path: desktop/go.sum
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: dist-*
+          merge-multiple: true
+
+      - name: Resolve version
+        id: ver
+        run: |
+          TAG="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#desktop-}" >> "$GITHUB_OUTPUT"
+
+      # Generate latest.json with GitHub release download URLs; the mirror step
+      # rewrites them to R2 afterwards. GITHUB_REPOSITORY is provided by the runner.
+      - name: Generate manifest
+        working-directory: desktop
+        run: go run ./cmd/sign manifest ../dist "${{ steps.ver.outputs.version }}" "${{ steps.ver.outputs.tag }}"
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.ver.outputs.tag }}" dist/* \
+            --title "Reasonix Desktop ${{ steps.ver.outputs.tag }}" \
+            --generate-notes
+
+  mirror:
+    name: mirror to R2
+    needs: publish
+    runs-on: ubuntu-latest
+    # Skip cleanly when R2 isn't configured; GitHub release still works as fallback.
+    if: ${{ github.repository_owner == 'esengine' }}
+    env:
+      HAS_R2: ${{ secrets.R2_ACCESS_KEY_ID != '' && secrets.R2_SECRET_ACCESS_KEY != '' && secrets.R2_ACCOUNT_ID != '' && secrets.R2_BUCKET != '' }}
+    steps:
+      - name: Resolve tag
+        id: ver
+        run: |
+          TAG="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Download release assets
+        if: env.HAS_R2 == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p assets
+          gh release download "${{ steps.ver.outputs.tag }}" -R "${{ github.repository }}" -D assets
+
+      # Rewrite both url and sig inside latest.json from github.com to the R2 CDN,
+      # so the updater pulls the manifest AND the heavy artifacts from R2.
+      - name: Rewrite latest.json URLs to R2
+        if: env.HAS_R2 == 'true'
+        env:
+          R2_PUBLIC_BASE: https://pub-147fb53b9c1e4bbf891a257968619ea7.r2.dev
+          TAG: ${{ steps.ver.outputs.tag }}
+        run: |
+          f=assets/latest.json
+          jq --arg base "$R2_PUBLIC_BASE" --arg tag "$TAG" '
+            .platforms |= with_entries(
+              .value.url |= sub("https://github.com/[^/]+/[^/]+/releases/download/[^/]+/"; "\($base)/\($tag)/")
+              | .value.sig |= sub("https://github.com/[^/]+/[^/]+/releases/download/[^/]+/"; "\($base)/\($tag)/")
+            )
+          ' "$f" > "$f.new"
+          mv "$f.new" "$f"
+          cat "$f"
+
+      - name: Configure AWS CLI for R2
+        if: env.HAS_R2 == 'true'
+        run: |
+          aws configure set aws_access_key_id "${{ secrets.R2_ACCESS_KEY_ID }}"
+          aws configure set aws_secret_access_key "${{ secrets.R2_SECRET_ACCESS_KEY }}"
+          aws configure set region auto
+
+      - name: Mirror to R2
+        if: env.HAS_R2 == 'true'
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          TAG: ${{ steps.ver.outputs.tag }}
+        run: |
+          ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          aws s3 cp assets/ "s3://${R2_BUCKET}/${TAG}/" --recursive --endpoint-url "$ENDPOINT"
+          aws s3 cp assets/ "s3://${R2_BUCKET}/latest/" --recursive --endpoint-url "$ENDPOINT"

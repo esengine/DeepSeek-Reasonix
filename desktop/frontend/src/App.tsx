@@ -11,6 +11,7 @@ import { StatusBar } from "./components/StatusBar";
 import { MemoryPanel } from "./components/MemoryPanel";
 import { HistoryPanel } from "./components/HistoryPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
+import { UpdateBanner } from "./components/UpdateBanner";
 import { parseTodos } from "./lib/tools";
 import type { MemoryView, Mode, SessionMeta } from "./lib/types";
 
@@ -205,6 +206,8 @@ export default function App() {
       {state.meta?.startupErr && (
         <div className="banner banner--error">{t("topbar.startupError", { msg: state.meta.startupErr })}</div>
       )}
+
+      <UpdateBanner />
 
       <main className="main">
         <Transcript items={state.items} onPrompt={send} onRewind={rewind} />

@@ -71,6 +71,56 @@ wails build          # → build/bin/Reasonix(.app/.exe)
 `.gitkeep` that keeps the Go `//go:embed all:frontend/dist` compilable on a fresh
 checkout). A bare `go build` without a prior `pnpm build` produces a blank window.
 
+## Releases & auto-update
+
+Desktop releases ride their own tag namespace, `desktop-v<semver>` (plain `v*`
+tags are the CLI release). Pushing one triggers `.github/workflows/release-desktop.yml`,
+which builds on a native runner per platform (Wails can't cross-compile a
+CGO/WebKit binary), packages each artifact, signs it with minisign, generates a
+`latest.json` manifest, publishes a GitHub release, and mirrors everything to R2.
+
+```sh
+git tag desktop-v1.1.0 && git push origin desktop-v1.1.0
+```
+
+The app checks `latest.json` on startup (R2 first, GitHub as fallback) and shows
+an update banner when a newer version is published; **Settings → Software update**
+has a manual check. Self-update behavior by platform:
+
+- **Linux / Windows** — download, verify the minisign signature, then update in
+  place: Linux replaces the binary and relaunches; Windows runs the per-user NSIS
+  installer (no admin rights needed).
+- **macOS** — *not* self-updating yet. The build is unsigned/un-notarized, so an
+  in-place swap would be blocked by Gatekeeper; the banner links to the download
+  page for a manual update instead.
+
+### Unsigned builds — first launch
+
+There are no Apple/Windows code-signing certificates yet, so a downloaded build
+trips the OS gatekeepers on first run:
+
+- **macOS** — Gatekeeper may report the app "is damaged" or is from an
+  unidentified developer. Clear the quarantine attribute, then open it:
+  ```sh
+  xattr -dr com.apple.quarantine /Applications/Reasonix.app
+  ```
+- **Windows** — SmartScreen shows "Windows protected your PC". Click *More info →
+  Run anyway*.
+
+When Developer ID / Authenticode certificates are added, the release workflow's
+`HAS_APPLE_CERT` gate flips to the signed path and these steps go away.
+
+### Verifying a download
+
+Artifacts are signed with minisign (public key ID `29FA7D2CA832AC6C`). The `.minisig`
+signature sits next to each artifact in the release; verify with the
+[minisign](https://jedisct1.github.io/minisign/) CLI:
+
+```sh
+minisign -Vm Reasonix-darwin-arm64.zip \
+  -P RWRsrDKoLH36KZpr4v2vY1myxnrvt+EBmv7mxRbhqzrq4762oOVsi4dq
+```
+
 ## Editor seam (Monaco / CodeMirror)
 
 Code and diff rendering go through two components with stable prop contracts and a

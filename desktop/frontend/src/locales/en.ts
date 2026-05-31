@@ -196,6 +196,25 @@ export const en = {
   "tool.editOther": "{n} edits",
   "tool.emptyFile": "empty file",
   "tool.noOutput": "no output",
+
+  // software update
+  "updater.title": "Software update",
+  "updater.currentVersion": "Current version: {v}",
+  "updater.checkButton": "Check for updates",
+  "updater.checking": "Checking for updates…",
+  "updater.upToDate": "You're on the latest version.",
+  "updater.available": "A new version is available: {v}",
+  "updater.releaseNotes": "Release notes",
+  "updater.installNow": "Update now",
+  "updater.goToDownload": "Go to download page",
+  "updater.macHint": "Automatic update isn't available on macOS yet — please download and install manually.",
+  "updater.downloading": "Downloading… {done} / {total} ({pct}%)",
+  "updater.verifying": "Verifying signature…",
+  "updater.applying": "Installing…",
+  "updater.done": "Update complete — restarting…",
+  "updater.failed": "Update failed: {msg}",
+  "updater.retry": "Retry",
+  "updater.dismiss": "Later",
 };
 
 export type DictKey = keyof typeof en;

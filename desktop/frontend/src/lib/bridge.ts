@@ -21,6 +21,8 @@ import type {
   SessionMeta,
   SettingsView,
   SlashArgsResult,
+  UpdateInfo,
+  UpdateProgress,
   WireEvent,
 } from "./types";
 
@@ -87,6 +89,13 @@ export interface AppBindings {
   // SetBypass toggles YOLO mode (auto-approve every tool call this session; deny
   // rules still apply). Runtime-only — not written to config.
   SetBypass(on: boolean): Promise<void>;
+  // Auto-updater (desktop/updater_app.go): the injected build version, a manifest
+  // check, applying an update (win/linux self-update; macOS opens the download
+  // page), and opening that page directly. Progress streams on "updater:progress".
+  Version(): Promise<string>;
+  CheckUpdate(): Promise<UpdateInfo | null>;
+  ApplyUpdate(): Promise<void>;
+  OpenDownloadPage(): Promise<void>;
 }
 
 interface WailsRuntime {
@@ -126,6 +135,19 @@ export function onEvent(cb: (e: WireEvent) => void): () => void {
   return mockSubscribe(cb);
 }
 
+// onUpdaterProgress subscribes to the auto-updater's progress events (a separate
+// channel from the agent stream); returns an unsubscribe. Must match the event
+// name emitted in desktop/updater_app.go.
+export function onUpdaterProgress(cb: (p: UpdateProgress) => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn("updater:progress", (p) => cb(p as UpdateProgress));
+  }
+  updaterListeners.add(cb);
+  return () => {
+    updaterListeners.delete(cb);
+  };
+}
+
 // app proxies each call to the live binding (or the dev mock only when truly
 // outside the shell), so a late-injected window.go is picked up transparently.
 export const app: AppBindings = new Proxy({} as AppBindings, {
@@ -160,6 +182,14 @@ function mockSubscribe(cb: (e: WireEvent) => void): () => void {
 
 function emit(e: WireEvent) {
   listeners.forEach((l) => l(e));
+}
+
+// Updater progress has its own listener set so the browser dev mock's ApplyUpdate
+// can stream a fake download through onUpdaterProgress.
+const updaterListeners = new Set<(p: UpdateProgress) => void>();
+
+function emitUpdater(p: UpdateProgress) {
+  updaterListeners.forEach((l) => l(p));
 }
 
 function delay(ms: number): Promise<void> {
@@ -450,6 +480,40 @@ function makeMockApp(): AppBindings {
     },
     async SetBypass(on: boolean) {
       settings.bypass = on;
+    },
+    async Version() {
+      return "v1.0.0 (browser dev)";
+    },
+    async CheckUpdate() {
+      // Dev mock advertises an update so the banner and apply flow are exercisable
+      // in the browser without a real release behind it.
+      return {
+        available: true,
+        current: "v1.0.0",
+        latest: "v1.1.0",
+        notes: "- Mock release notes\n- The **Update now** button streams a fake download here.",
+        canSelfUpdate: true,
+        downloadUrl: "https://github.com/esengine/reasonix/releases/latest",
+        assetSize: 12_345_678,
+      };
+    },
+    async ApplyUpdate() {
+      const total = 12_345_678;
+      for (let r = 0; r <= total; r += 1_800_000) {
+        emitUpdater({ phase: "downloading", received: Math.min(r, total), total });
+        await delay(120);
+      }
+      emitUpdater({ phase: "verifying", received: total, total });
+      await delay(500);
+      emitUpdater({ phase: "applying", received: total, total });
+      await delay(500);
+      emitUpdater({ phase: "done", received: total, total });
+      // The real shell relaunches here; the mock just stops.
+    },
+    async OpenDownloadPage() {
+      if (typeof window !== "undefined") {
+        window.open("https://github.com/esengine/reasonix/releases/latest", "_blank", "noopener");
+      }
     },
   };
 }

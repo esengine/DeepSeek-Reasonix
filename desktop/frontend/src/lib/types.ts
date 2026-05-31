@@ -247,3 +247,23 @@ export interface SettingsView {
   providerKinds: string[]; // provider implementations the kernel registered (for the kind picker)
   bypass: boolean; // live YOLO state (runtime-only) — whether approvals are skipped this session
 }
+
+// Auto-updater payloads (desktop/updater.go). UpdateInfo drives the update banner;
+// UpdateProgress streams on the "updater:progress" event during ApplyUpdate.
+export interface UpdateInfo {
+  available: boolean;
+  current: string;
+  latest: string;
+  notes: string;
+  canSelfUpdate: boolean; // win/linux true; macOS false (no cert → manual download)
+  downloadUrl: string; // human-facing releases page (macOS path / fallback link)
+  assetSize: number; // running platform's artifact size, for the progress bar
+  err?: string; // set when the check itself failed (both endpoints down)
+}
+
+export interface UpdateProgress {
+  phase: "downloading" | "verifying" | "applying" | "done" | "error";
+  received: number;
+  total: number;
+  err?: string;
+}
