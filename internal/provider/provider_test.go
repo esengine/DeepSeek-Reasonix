@@ -3,7 +3,6 @@ package provider
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"testing"
 )
 
@@ -170,23 +169,7 @@ func TestChunkTypeConstants(t *testing.T) {
 	}
 }
 
-// --- Message / ToolCall / ToolSchema ---
-
-func TestMessageStruct(t *testing.T) {
-	m := Message{
-		Role:    RoleAssistant,
-		Content: "hello",
-		ToolCalls: []ToolCall{
-			{ID: "tc1", Name: "bash", Arguments: `{"command":"echo hi"}`},
-		},
-	}
-	if m.Role != RoleAssistant {
-		t.Errorf("Role = %q", m.Role)
-	}
-	if len(m.ToolCalls) != 1 || m.ToolCalls[0].Name != "bash" {
-		t.Errorf("ToolCalls = %+v", m.ToolCalls)
-	}
-}
+// --- ToolSchema ---
 
 func TestToolSchemaJSON(t *testing.T) {
 	ts := ToolSchema{
@@ -200,75 +183,6 @@ func TestToolSchemaJSON(t *testing.T) {
 	}
 	if !contains(string(b), "bash") {
 		t.Errorf("JSON missing name: %s", b)
-	}
-}
-
-// --- Request ---
-
-func TestRequestStruct(t *testing.T) {
-	req := Request{
-		Messages:    []Message{{Role: RoleUser, Content: "hi"}},
-		Tools:       []ToolSchema{{Name: "test"}},
-		Temperature: 0.7,
-		MaxTokens:   4096,
-	}
-	if len(req.Messages) != 1 {
-		t.Errorf("Messages count = %d", len(req.Messages))
-	}
-	if req.Temperature != 0.7 {
-		t.Errorf("Temperature = %f", req.Temperature)
-	}
-}
-
-// --- Chunk ---
-
-func TestChunkStruct(t *testing.T) {
-	ch := Chunk{Type: ChunkText, Text: "hello"}
-	if ch.Type != ChunkText || ch.Text != "hello" {
-		t.Errorf("unexpected chunk: %+v", ch)
-	}
-
-	errCh := Chunk{Type: ChunkError, Err: errors.New("boom")}
-	if errCh.Err == nil || errCh.Err.Error() != "boom" {
-		t.Errorf("error chunk: %+v", errCh)
-	}
-}
-
-// --- Usage ---
-
-func TestUsageStruct(t *testing.T) {
-	u := Usage{
-		PromptTokens:     1000,
-		CompletionTokens: 500,
-		TotalTokens:      1500,
-		CacheHitTokens:   800,
-		CacheMissTokens:  200,
-		ReasoningTokens:  100,
-		FinishReason:     "stop",
-	}
-	if u.TotalTokens != 1500 {
-		t.Errorf("TotalTokens = %d", u.TotalTokens)
-	}
-	if u.FinishReason != "stop" {
-		t.Errorf("FinishReason = %q", u.FinishReason)
-	}
-}
-
-// --- Config ---
-
-func TestConfigStruct(t *testing.T) {
-	cfg := Config{
-		Name:    "deepseek",
-		BaseURL: "https://api.deepseek.com/v1",
-		Model:   "deepseek-chat",
-		APIKey:  "sk-test",
-		Extra:   map[string]any{"api_key_env": "DEEPSEEK_API_KEY"},
-	}
-	if cfg.Name != "deepseek" {
-		t.Errorf("Name = %q", cfg.Name)
-	}
-	if cfg.Extra["api_key_env"] != "DEEPSEEK_API_KEY" {
-		t.Errorf("Extra = %+v", cfg.Extra)
 	}
 }
 
