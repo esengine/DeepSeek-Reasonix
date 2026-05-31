@@ -55,14 +55,16 @@ func (m *chatTUI) runModelSubcommand(input string) {
 		if err != nil {
 			return modelSwitchMsg{ref: ref, err: err}
 		}
-		// Close the old controller (kills old plugins) in this goroutine
-		// so the Update handler only needs to swap references. Calling
-		// Close() inside bubbletea's Update disrupts the terminal's raw
-		// mode via the cancelReader, so it must happen here.
-		oldCtrl.Close()
+		// Do NOT close the old controller here. Controller.Close() runs
+		// SessionEnd hooks (arbitrary shell commands) and kills plugin
+		// subprocesses — operations that corrupt bubbletea's terminal raw
+		// mode when executed from a goroutine. Instead, pass the old
+		// controller back in the message so the Update handler can defer
+		// its cleanup as a tea.Cmd that runs after the next render.
 		return modelSwitchMsg{
 			ref:      ref,
 			ctrl:     c,
+			oldCtrl:  oldCtrl,
 			label:    c.Label(),
 			commands: c.Commands(),
 			skills:   c.Skills(),

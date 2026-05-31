@@ -333,11 +333,20 @@ func chatREPL(args []string) int {
 	// all work — the bubbletea-managed region is just the bottom input/status.
 	p := tea.NewProgram(m)
 	final, runErr := p.Run()
-	// Close the controller that's active at exit — /model may have swapped it
-	// (each prior controller was already closed at switch time), so close the
-	// final one here rather than the initial handle.
-	if fm, ok := final.(chatTUI); ok && fm.ctrl != nil {
-		fm.ctrl.Close()
+	// Close the active controller plus any retired ones from /model switches.
+	// Retired controllers were stashed rather than closed at switch time
+	// because Controller.Close() runs SessionEnd hooks and kills plugin
+	// subprocesses — operations that corrupt bubbletea's terminal raw mode
+	// when executed while the TUI is alive.
+	if fm, ok := final.(chatTUI); ok {
+		for _, oc := range fm.oldControllers {
+			oc.Close()
+		}
+		if fm.ctrl != nil {
+			fm.ctrl.Close()
+		} else {
+			ctrl.Close()
+		}
 	} else {
 		ctrl.Close()
 	}
