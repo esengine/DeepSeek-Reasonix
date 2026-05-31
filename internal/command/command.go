@@ -13,6 +13,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"reasonix/internal/frontmatter"
 )
 
 // Command is a custom slash command loaded from a .md file.
@@ -142,7 +144,7 @@ func parseFile(root, path string) (Command, error) {
 
 	// Normalise line endings and strip a leading UTF-8 BOM if present.
 	content := strings.TrimPrefix(strings.ReplaceAll(string(b), "\r\n", "\n"), string(rune(0xFEFF)))
-	fm, body := splitFrontmatter(content)
+	fm, body := frontmatter.Split(content)
 	return Command{
 		Name:        name,
 		Description: fm["description"],
@@ -152,25 +154,8 @@ func parseFile(root, path string) (Command, error) {
 	}, nil
 }
 
-// splitFrontmatter separates an optional leading ---fenced block of simple
-// "key: value" lines from the body. Returns the parsed keys (lowercased) and the
-// remaining body. With no opening/closing fence, the whole input is the body.
+// splitFrontmatter is a thin wrapper kept for test compatibility; the real
+// parser lives in internal/frontmatter.
 func splitFrontmatter(s string) (map[string]string, string) {
-	fm := map[string]string{}
-	lines := strings.Split(s, "\n")
-	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
-		return fm, s
-	}
-	for i := 1; i < len(lines); i++ {
-		if strings.TrimSpace(lines[i]) != "---" {
-			continue
-		}
-		for _, l := range lines[1:i] {
-			if k, v, ok := strings.Cut(l, ":"); ok {
-				fm[strings.ToLower(strings.TrimSpace(k))] = strings.Trim(strings.TrimSpace(v), `"'`)
-			}
-		}
-		return fm, strings.Join(lines[i+1:], "\n")
-	}
-	return fm, s // opened but never closed: treat all as body
+	return frontmatter.Split(s)
 }

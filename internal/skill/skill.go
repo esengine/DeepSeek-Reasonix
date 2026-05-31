@@ -19,6 +19,7 @@ import (
 	"strings"
 
 	"reasonix/internal/config"
+	"reasonix/internal/frontmatter"
 )
 
 // Scope records where a skill was loaded from. Higher-priority scopes win on a
@@ -491,26 +492,8 @@ func dedupePaths(paths []string) []string {
 	return out
 }
 
-// splitFrontmatter separates an optional leading ---fenced block of simple
-// "key: value" lines from the body, returning lowercased keys and the body. With
-// no opening/closing fence the whole input is the body. Mirrors the dependency-
-// free parser in internal/command (copied to avoid coupling the two packages).
+// splitFrontmatter is a thin wrapper kept for internal use; the real parser
+// lives in internal/frontmatter.
 func splitFrontmatter(s string) (map[string]string, string) {
-	fm := map[string]string{}
-	lines := strings.Split(s, "\n")
-	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
-		return fm, s
-	}
-	for i := 1; i < len(lines); i++ {
-		if strings.TrimSpace(lines[i]) != "---" {
-			continue
-		}
-		for _, l := range lines[1:i] {
-			if k, v, ok := strings.Cut(l, ":"); ok {
-				fm[strings.ToLower(strings.TrimSpace(k))] = strings.Trim(strings.TrimSpace(v), `"'`)
-			}
-		}
-		return fm, strings.Join(lines[i+1:], "\n")
-	}
-	return fm, s // opened but never closed: treat all as body
+	return frontmatter.Split(s)
 }

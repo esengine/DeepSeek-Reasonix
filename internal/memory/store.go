@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"reasonix/internal/frontmatter"
 )
 
 // Store is the per-project auto-memory: a directory of one-fact-per-file
@@ -211,35 +213,10 @@ func loadMemory(path string) (Memory, bool) {
 	return m, true
 }
 
-// splitFrontmatter parses a leading "---"-fenced block of "key: value" lines,
-// flattening the one nested key we emit (metadata.type → "type"). It mirrors the
-// command package's parser rather than pulling in a YAML dependency.
+// splitFrontmatter is a thin wrapper; the real parser lives in
+// internal/frontmatter.
 func splitFrontmatter(s string) (map[string]string, string) {
-	fm := map[string]string{}
-	s = strings.ReplaceAll(s, "\r\n", "\n")
-	lines := strings.Split(s, "\n")
-	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
-		return fm, s
-	}
-	for i := 1; i < len(lines); i++ {
-		if strings.TrimSpace(lines[i]) != "---" {
-			continue
-		}
-		for _, l := range lines[1:i] {
-			k, v, ok := strings.Cut(l, ":")
-			if !ok {
-				continue
-			}
-			key := strings.ToLower(strings.TrimSpace(k))
-			val := strings.Trim(strings.TrimSpace(v), `"'`)
-			if val == "" {
-				continue // a section header like "metadata:" — value lives on indented lines
-			}
-			fm[key] = val // "  type: x" flattens to fm["type"]; last write wins
-		}
-		return fm, strings.Join(lines[i+1:], "\n")
-	}
-	return fm, s // opened but never closed: treat all as body
+	return frontmatter.Split(s)
 }
 
 // slugRe strips everything but lowercase alphanumerics and dashes.
