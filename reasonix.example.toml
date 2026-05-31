@@ -50,6 +50,18 @@ model          = "mimo-v2-flash"   # thinking-mode off by default; cheaper / fas
 api_key_env    = "MIMO_API_KEY"
 context_window = 65536
 
+# Anthropic (Claude) — the "anthropic" kind speaks the Messages API directly (no
+# OpenAI shim). base_url is optional (defaults to https://api.anthropic.com). Note:
+# this provider does not enable extended thinking and does not send temperature —
+# current Claude models reject sampling params (see internal/provider/anthropic).
+[[providers]]
+name           = "claude"
+kind           = "anthropic"
+model          = "claude-opus-4-8"
+api_key_env    = "ANTHROPIC_API_KEY"
+context_window = 1000000
+price          = { cache_hit = 0.5, input = 5, output = 25, currency = "$" }   # per 1M tokens
+
 [tools]
 enabled = []   # empty = all built-in tools
 

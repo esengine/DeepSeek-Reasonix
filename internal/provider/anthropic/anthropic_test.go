@@ -1,0 +1,239 @@
+package anthropic
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"strings"
+	"testing"
+
+	"reasonix/internal/provider"
+)
+
+// TestBuildRequest covers the protocol conversion: system lift, tool_use /
+// tool_result blocks, coalescing consecutive tool results into one user turn,
+// cache_control placement, and the max_tokens fallback.
+func TestBuildRequest(t *testing.T) {
+	c := &client{name: "anthropic", model: "claude-opus-4-8"}
+	req := provider.Request{
+		Messages: []provider.Message{
+			{Role: provider.RoleSystem, Content: "You are helpful."},
+			{Role: provider.RoleUser, Content: "weather in Paris and Berlin?"},
+			{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{
+				{ID: "t1", Name: "get_weather", Arguments: `{"city":"Paris"}`},
+				{ID: "t2", Name: "get_weather", Arguments: `{"city":"Berlin"}`},
+			}},
+			{Role: provider.RoleTool, ToolCallID: "t1", Content: "sunny"},
+			{Role: provider.RoleTool, ToolCallID: "t2", Content: "cloudy"},
+		},
+		Tools: []provider.ToolSchema{{Name: "get_weather", Description: "w", Parameters: json.RawMessage(`{"type":"object"}`)}},
+	}
+	r := c.buildRequest(req)
+
+	if r.Model != "claude-opus-4-8" {
+		t.Fatalf("model = %q", r.Model)
+	}
+	if r.MaxTokens != defaultMaxTokens {
+		t.Fatalf("max_tokens = %d, want default %d", r.MaxTokens, defaultMaxTokens)
+	}
+	// System lifted to the top level, with a cache breakpoint on its last block.
+	if len(r.System) != 1 || r.System[0].Text != "You are helpful." {
+		t.Fatalf("system = %+v", r.System)
+	}
+	if r.System[0].CacheControl == nil {
+		t.Fatal("system block should carry cache_control")
+	}
+	// System present ⇒ the tool does NOT also get a breakpoint (system caches tools).
+	if r.Tools[0].CacheControl != nil {
+		t.Fatal("tool should not carry cache_control when system does")
+	}
+	// user, assistant(tool_use ×2), user(tool_result ×2 coalesced) = 3 messages.
+	if len(r.Messages) != 3 {
+		t.Fatalf("want 3 messages, got %d: %+v", len(r.Messages), r.Messages)
+	}
+	if r.Messages[0].Role != "user" || r.Messages[0].Content[0].Text != "weather in Paris and Berlin?" {
+		t.Fatalf("msg[0] = %+v", r.Messages[0])
+	}
+	if r.Messages[1].Role != "assistant" || len(r.Messages[1].Content) != 2 ||
+		r.Messages[1].Content[0].Type != "tool_use" || r.Messages[1].Content[0].ID != "t1" ||
+		string(r.Messages[1].Content[0].Input) != `{"city":"Paris"}` {
+		t.Fatalf("msg[1] = %+v", r.Messages[1])
+	}
+	last := r.Messages[2]
+	if last.Role != "user" || len(last.Content) != 2 {
+		t.Fatalf("tool results should coalesce into one user turn: %+v", last)
+	}
+	if last.Content[0].Type != "tool_result" || last.Content[0].ToolUseID != "t1" || last.Content[0].Content != "sunny" {
+		t.Fatalf("tool_result[0] = %+v", last.Content[0])
+	}
+	if last.Content[1].ToolUseID != "t2" {
+		t.Fatalf("tool_result[1] = %+v", last.Content[1])
+	}
+	// Conversation cache breakpoint on the last block of the last message.
+	if last.Content[len(last.Content)-1].CacheControl == nil {
+		t.Fatal("last message block should carry cache_control")
+	}
+}
+
+// TestBuildRequestNoSystem checks the breakpoint falls back to the last tool when
+// there is no system message.
+func TestBuildRequestNoSystem(t *testing.T) {
+	c := &client{model: "claude-opus-4-8"}
+	r := c.buildRequest(provider.Request{
+		Messages:  []provider.Message{{Role: provider.RoleUser, Content: "hi"}},
+		Tools:     []provider.ToolSchema{{Name: "a"}, {Name: "b"}},
+		MaxTokens: 1000,
+	})
+	if r.MaxTokens != 1000 {
+		t.Fatalf("explicit max_tokens should win: %d", r.MaxTokens)
+	}
+	if r.Tools[1].CacheControl == nil {
+		t.Fatal("last tool should carry cache_control when there is no system")
+	}
+	// A tool with no schema gets a minimal valid object schema.
+	if string(r.Tools[0].InputSchema) != `{"type":"object","properties":{}}` {
+		t.Fatalf("empty schema not defaulted: %s", r.Tools[0].InputSchema)
+	}
+}
+
+func TestMapStopReason(t *testing.T) {
+	cases := map[string]string{
+		"end_turn":      "stop",
+		"stop_sequence": "stop",
+		"tool_use":      "tool_calls",
+		"max_tokens":    "length",
+		"refusal":       "refusal",
+		"":              "",
+	}
+	for in, want := range cases {
+		if got := mapStopReason(in); got != want {
+			t.Errorf("mapStopReason(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+const sseFixture = `event: message_start
+data: {"type":"message_start","message":{"usage":{"input_tokens":100,"cache_creation_input_tokens":0,"cache_read_input_tokens":50,"output_tokens":1}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" world"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: content_block_start
+data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_1","name":"get_weather"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"city\":"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"\"Paris\"}"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":1}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":25}}
+
+event: message_stop
+data: {"type":"message_stop"}
+`
+
+// TestReadStream feeds a canned Messages API SSE stream through readStream and
+// asserts the emitted chunk sequence: text deltas, a tool-call start + complete,
+// a usage record, then done.
+func TestReadStream(t *testing.T) {
+	c := &client{name: "anthropic"}
+	resp := &http.Response{Body: io.NopCloser(strings.NewReader(sseFixture))}
+	ch := make(chan provider.Chunk)
+	go c.readStream(resp, ch)
+
+	var text strings.Builder
+	var started, full *provider.ToolCall
+	var usage *provider.Usage
+	done := false
+	for ck := range ch {
+		switch ck.Type {
+		case provider.ChunkText:
+			text.WriteString(ck.Text)
+		case provider.ChunkToolCallStart:
+			started = ck.ToolCall
+		case provider.ChunkToolCall:
+			full = ck.ToolCall
+		case provider.ChunkUsage:
+			usage = ck.Usage
+		case provider.ChunkDone:
+			done = true
+		case provider.ChunkError:
+			t.Fatalf("unexpected error chunk: %v", ck.Err)
+		}
+	}
+
+	if text.String() != "Hello world" {
+		t.Fatalf("text = %q", text.String())
+	}
+	if started == nil || started.ID != "toolu_1" || started.Name != "get_weather" {
+		t.Fatalf("tool start = %+v", started)
+	}
+	if full == nil || full.Arguments != `{"city":"Paris"}` {
+		t.Fatalf("tool full = %+v", full)
+	}
+	if usage == nil {
+		t.Fatal("expected a usage chunk")
+	}
+	if usage.PromptTokens != 150 || usage.CompletionTokens != 25 || usage.TotalTokens != 175 {
+		t.Fatalf("usage tokens = %+v", usage)
+	}
+	if usage.CacheHitTokens != 50 || usage.CacheMissTokens != 100 {
+		t.Fatalf("usage cache = hit %d miss %d", usage.CacheHitTokens, usage.CacheMissTokens)
+	}
+	if usage.FinishReason != "tool_calls" {
+		t.Fatalf("finish reason = %q", usage.FinishReason)
+	}
+	if !done {
+		t.Fatal("expected a done chunk")
+	}
+}
+
+// TestReadStreamError surfaces a mid-stream error event as a ChunkError.
+func TestReadStreamError(t *testing.T) {
+	sse := "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"overloaded\"}}\n\n"
+	c := &client{name: "anthropic"}
+	resp := &http.Response{Body: io.NopCloser(strings.NewReader(sse))}
+	ch := make(chan provider.Chunk)
+	go c.readStream(resp, ch)
+
+	var gotErr error
+	for ck := range ch {
+		if ck.Type == provider.ChunkError {
+			gotErr = ck.Err
+		}
+	}
+	if gotErr == nil || !strings.Contains(gotErr.Error(), "overloaded") {
+		t.Fatalf("expected an error chunk mentioning overloaded, got %v", gotErr)
+	}
+}
+
+// Ensure the package wires into the registry under the expected kind.
+func TestRegistered(t *testing.T) {
+	p, err := provider.New("anthropic", provider.Config{Model: "claude-opus-4-8", Name: "claude"})
+	if err != nil {
+		t.Fatalf("provider.New: %v", err)
+	}
+	if p.Name() != "claude" {
+		t.Fatalf("name = %q", p.Name())
+	}
+	// Missing model is rejected.
+	if _, err := provider.New("anthropic", provider.Config{}); err == nil {
+		t.Fatal("expected error for missing model")
+	}
+	_ = context.Background()
+}
