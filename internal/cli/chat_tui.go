@@ -895,9 +895,8 @@ func compactionCardLines(c event.Compaction) []string {
 
 // contextTag renders the prompt-vs-context-window gauge for the status line,
 // framed around the auto-compaction threshold: it shows how much headroom is
-// left until the next compaction (mirroring Claude Code's "context left until
-// auto-compact"), and colours by proximity to that point rather than the raw
-// window. Falls back to a plain percentage when compaction is disabled.
+// left until the next compaction, and colours by proximity to that point rather
+// than the raw window. Falls back to a plain percentage when compaction is disabled.
 func (m chatTUI) contextTag() string {
 	used, window := m.ctrl.ContextSnapshot()
 	if used == 0 || window == 0 {

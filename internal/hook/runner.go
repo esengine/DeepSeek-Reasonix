@@ -111,8 +111,8 @@ func (r *Runner) Notification(ctx context.Context, message string) {
 }
 
 // PreCompact fires just before a compaction pass and returns the concatenated
-// stdout of its hooks as extra summary guidance (CC's additionalContext), so a
-// hook can steer what the summary keeps. Non-pass outcomes are surfaced via notify.
+// stdout of its hooks as extra summary guidance, so a hook can steer what the
+// summary keeps. Non-pass outcomes are surfaced via notify.
 func (r *Runner) PreCompact(ctx context.Context, trigger string) string {
 	if !r.Enabled() {
 		return ""
