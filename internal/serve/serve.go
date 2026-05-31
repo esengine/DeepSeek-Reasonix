@@ -6,10 +6,13 @@
 package serve
 
 import (
+	"context"
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
+	"time"
 
 	"reasonix/internal/control"
 )
@@ -43,7 +46,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /plan", s.plan)
 	mux.HandleFunc("POST /compact", s.compact)
 	mux.HandleFunc("POST /new", s.newSession)
-	return mux
+	return corsMiddleware(logMiddleware(mux))
 }
 
 // Run serves until the process is killed. Interactive approval is enabled so
@@ -51,6 +54,35 @@ func (s *Server) Handler() http.Handler {
 func (s *Server) Run(addr string) error {
 	s.ctrl.EnableInteractiveApproval()
 	return http.ListenAndServe(addr, s.Handler())
+}
+
+// RunGraceful serves with graceful shutdown. It listens for SIGINT/SIGTERM on
+// the provided context and drains active connections for up to 10 seconds
+// before returning.
+func (s *Server) RunGraceful(ctx context.Context, addr string) error {
+	s.ctrl.EnableInteractiveApproval()
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           s.Handler(),
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- srv.ListenAndServe()
+	}()
+	select {
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+		slog.Info("serve: shutting down gracefully")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			slog.Warn("serve: graceful shutdown failed", "err", err)
+		}
+		return <-errCh
+	}
 }
 
 func (s *Server) index(w http.ResponseWriter, _ *http.Request) {
@@ -173,5 +205,49 @@ func (s *Server) context(w http.ResponseWriter, _ *http.Request) {
 
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(v)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		slog.Warn("serve: writeJSON encode failed", "err", err)
+	}
+}
+
+// corsMiddleware adds permissive CORS headers for local development. In
+// production the server is typically same-origin, but during development the
+// frontend (Vite, etc.) runs on a different port.
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// logMiddleware logs each request's method, path, and status.
+func logMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		rw := &responseWriter{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(rw, r)
+		slog.Info("serve: request",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", rw.status,
+			"duration", time.Since(start).String(),
+		)
+	})
+}
+
+// responseWriter captures the status code for logging.
+type responseWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (rw *responseWriter) WriteHeader(code int) {
+	rw.status = code
+	rw.ResponseWriter.WriteHeader(code)
 }
