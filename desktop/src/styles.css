@@ -1050,6 +1050,7 @@ html[data-platform="macos"] .titlebar .tb-left {
   align-items: center;
   flex-wrap: nowrap;
   gap: 8px;
+  overflow: hidden;
   padding: 0 10px;
   font-size: 14px;
   font-weight: 500;
@@ -1065,6 +1066,7 @@ html[data-platform="macos"] .titlebar .tb-left {
   flex: 0 0 auto;
 }
 .side-head .new-btn > span:not(.shortcut) {
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1095,12 +1097,12 @@ html[data-platform="macos"] .titlebar .tb-left {
   padding: 1px 5px;
   box-shadow: none;
 }
-@container sidebar (min-width: 191px) {
+@container sidebar (min-width: 280px) {
   .side-head .new-btn .shortcut {
     display: inline-flex;
   }
 }
-@container sidebar (max-width: 240px) {
+@container sidebar (max-width: 279px) {
   .side-head .new-btn .shortcut {
     display: none;
   }

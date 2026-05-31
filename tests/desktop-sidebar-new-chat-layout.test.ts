@@ -14,14 +14,17 @@ describe("desktop sidebar new chat button layout", () => {
     expect(cssRule(".sidebar")).toContain("container: sidebar / inline-size");
     expect(cssRule(".side-head .new-btn")).toContain("flex-wrap: nowrap");
     expect(cssRule(".side-head .new-btn")).toContain("min-width: 0");
+    expect(cssRule(".side-head .new-btn")).toContain("overflow: hidden");
     expect(cssRule(".side-head .new-btn svg")).toContain("flex: 0 0 auto");
+    expect(cssRule(".side-head .new-btn > span:not(.shortcut)")).toContain("flex: 0 1 auto");
     expect(cssRule(".side-head .new-btn > span:not(.shortcut)")).toContain("white-space: nowrap");
     expect(cssRule(".side-head .new-btn > span:not(.shortcut)")).toContain(
       "text-overflow: ellipsis",
     );
     expect(cssRule(".side-head .new-btn .shortcut")).toContain("flex: 0 0 auto");
     expect(cssRule(".side-head .new-btn .shortcut")).toContain("display: none");
-    expect(css).toContain("@container sidebar (min-width: 191px)");
+    expect(css).toContain("@container sidebar (min-width: 280px)");
+    expect(css).toContain("@container sidebar (max-width: 279px)");
     expect(css).toContain("display: inline-flex");
     expect(css).toContain("display: none");
     expect(cssRule(".side-head .icon-btn")).toContain("flex: 0 0 auto");
