@@ -1,0 +1,46 @@
+linters:
+  enable:
+    - errcheck
+    - staticcheck
+    - unused
+    - govet
+    - ineffassign
+    - typecheck
+
+linters-settings:
+  errcheck:
+    # Check-type assertions and type switches too.
+    check-type-assertions: false
+    # Don't report errors from deferred calls.
+    exclude-functions:
+      - (*os.File).Close
+      - (io.Closer).Close
+      - (*net/http.Response).Body.Close
+  staticcheck:
+    checks:
+      - all
+      - -ST1005  # error strings ending with punctuation — too strict for initial adoption
+      - -ST1018  # Unicode format characters — intentional in TUI code
+      - -QF1001  # De Morgan's law — readability preference
+
+issues:
+  exclude-rules:
+    # Test files can have unchecked errors (setup/teardown).
+    - path: _test\.go
+      linters:
+        - errcheck
+    # Pre-existing issues in confine_test.go — fix in a follow-up.
+    - path: confine_test\.go
+      linters:
+        - errcheck
+    # Pre-existing staticcheck in acp/server_test.go.
+    - path: acp/server_test\.go
+      linters:
+        - staticcheck
+    # Pre-existing unused func in sandbox.
+    - path: sandbox/sandbox\.go
+      linters:
+        - unused
+  # Don't limit the number of issues per linter.
+  max-issues-per-linter: 0
+  max-same-issues: 0
