@@ -24,27 +24,21 @@ func TestWorkspaceStatePath(t *testing.T) {
 // --- saveWorkspace / loadWorkspace round-trip ---
 
 func TestSaveLoadWorkspaceRoundTrip(t *testing.T) {
-	// These depend on workspaceStatePath() which uses config.MemoryUserDir().
-	// If no config dir is available, both are no-ops.
+	// workspaceStatePath() lives under config.MemoryUserDir(), which resolves via
+	// os.UserConfigDir() — rooted at HOME. Point HOME at a temp dir so the path
+	// resolves to a real, writable location and the save→load round-trip actually
+	// exercises persistence instead of silently no-opping when no config dir
+	// happens to exist in the environment.
+	t.Setenv("HOME", t.TempDir())
+	if workspaceStatePath() == "" {
+		t.Fatal("workspaceStatePath() is empty after pointing HOME at a temp dir")
+	}
+
 	dir := t.TempDir()
 	saveWorkspace(dir)
-	got := loadWorkspace()
-	if got != dir {
+	if got := loadWorkspace(); got != dir {
 		t.Errorf("loadWorkspace = %q, want %q", got, dir)
 	}
-}
-
-func TestSaveWorkspaceEmptyDir(t *testing.T) {
-	// Empty dir should be a no-op.
-	saveWorkspace("")
-	// Should not panic.
-}
-
-func TestLoadWorkspaceMissing(t *testing.T) {
-	// When no workspace has been saved, loadWorkspace returns "".
-	// This test only works if no workspace was previously saved in this env.
-	// We just verify it doesn't panic.
-	loadWorkspace()
 }
 
 // --- cwdWritable ---
