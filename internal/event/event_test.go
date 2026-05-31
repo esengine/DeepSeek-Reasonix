@@ -61,10 +61,10 @@ func TestEventFields(t *testing.T) {
 	pricing := &provider.Pricing{Input: 2.0, Output: 10.0, Currency: "$"}
 
 	e := Event{
-		Kind:      Usage,
-		Usage:     usage,
-		Pricing:   pricing,
-		SessionHit: 80,
+		Kind:        Usage,
+		Usage:       usage,
+		Pricing:     pricing,
+		SessionHit:  80,
 		SessionMiss: 20,
 	}
 	if e.Kind != Usage {
@@ -85,12 +85,12 @@ func TestEventFields(t *testing.T) {
 
 func TestToolStruct(t *testing.T) {
 	tool := Tool{
-		ID:        "call-1",
-		Name:      "bash",
-		Args:      `{"command":"echo hi"}`,
-		ReadOnly:  false,
-		Partial:   true,
-		ParentID:  "parent-1",
+		ID:       "call-1",
+		Name:     "bash",
+		Args:     `{"command":"echo hi"}`,
+		ReadOnly: false,
+		Partial:  true,
+		ParentID: "parent-1",
 	}
 	if tool.ID != "call-1" || tool.Name != "bash" {
 		t.Errorf("unexpected tool: %+v", tool)
