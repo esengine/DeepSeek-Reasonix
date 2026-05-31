@@ -93,6 +93,9 @@ func (*AskTool) Execute(ctx context.Context, args json.RawMessage) (string, erro
 		}
 		opts := make([]event.AskOption, len(q.Options))
 		for j, o := range q.Options {
+			if strings.TrimSpace(o.Label) == "" {
+				return "", fmt.Errorf("question %d: option %d has a blank label", i+1, j+1)
+			}
 			opts[j] = event.AskOption{Label: o.Label, Description: o.Description}
 		}
 		qs = append(qs, event.AskQuestion{
