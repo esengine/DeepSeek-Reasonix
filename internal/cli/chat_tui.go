@@ -190,7 +190,6 @@ type modelSwitchMsg struct {
 	err      error
 }
 
-
 // fetchBalance queries the provider's wallet balance off the event loop. It's a
 // no-op readout ("") when the provider declares no balance_url or the fetch
 // fails, so the status line stays quiet rather than surfacing an error.
