@@ -44,9 +44,10 @@ type Options struct {
 	MaxSteps   int
 	RequireKey bool
 	Sink       event.Sink
-	// Stderr is the writer for plugin subprocess stderr output. When nil,
-	// defaults to os.Stderr. Set to io.Discard during model switch inside a
-	// bubbletea session to prevent plugin output from corrupting the TUI.
+	// Stderr is the writer for diagnostic warnings and plugin subprocess
+	// stderr output. When nil, defaults to os.Stderr. Set to io.Discard
+	// during model switch inside a bubbletea session to prevent any output
+	// from corrupting the TUI's terminal raw mode.
 	Stderr io.Writer
 }
 
@@ -55,6 +56,10 @@ type Options struct {
 // returned controller owns plugin subprocesses; call Close (via Controller.Close)
 // to release them.
 func Build(ctx context.Context, opts Options) (*control.Controller, error) {
+	stderr := opts.Stderr
+	if stderr == nil {
+		stderr = os.Stderr
+	}
 	cfg, err := config.Load()
 	if err != nil {
 		return nil, err
@@ -107,16 +112,16 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// only; bodies load on demand via run_skill or "/<name>". Bodies never enter
 	// the prefix, so the index costs a fixed, small amount per turn.
 	cwd, _ := os.Getwd()
-	skillStore := skill.New(skill.Options{ProjectRoot: cwd, CustomPaths: cfg.SkillCustomPaths()})
+	skillStore := skill.New(skill.Options{ProjectRoot: cwd, CustomPaths: cfg.SkillCustomPaths(), Stderr: opts.Stderr})
 	skills := skillStore.List()
 	sysPrompt = skill.ApplyIndex(sysPrompt, skills)
 
 	reg := tool.NewRegistry()
 	bashSpec := sandbox.Spec{Mode: cfg.BashMode(), WriteRoots: cfg.WriteRoots(), Network: cfg.Sandbox.Network}
 	if bashSpec.Mode == "enforce" && !sandbox.Available() {
-		fmt.Fprintln(os.Stderr, "warning: bash sandbox requested but unavailable on this platform; running bash unconfined")
+		fmt.Fprintln(stderr, "warning: bash sandbox requested but unavailable on this platform; running bash unconfined")
 	}
-	addBuiltins(reg, cfg.Tools.Enabled, cfg.WriteRoots(), bashSpec)
+	addBuiltins(reg, cfg.Tools.Enabled, cfg.WriteRoots(), bashSpec, stderr)
 	// Always construct a host, even with no plugins configured, so the controller's
 	// host pointer is stable for the session and `/mcp add` can hot-add into it.
 	pluginHost := plugin.NewHost()
@@ -340,7 +345,7 @@ func NewProvider(e *config.ProviderEntry) (provider.Provider, error) {
 // them. writeRoots confines the file-writing built-ins to the workspace: after
 // the (unconfined) defaults are added, each enabled writer is replaced by an
 // instance bound to writeRoots (preserving registry order).
-func addBuiltins(reg *tool.Registry, enabled, writeRoots []string, bashSpec sandbox.Spec) {
+func addBuiltins(reg *tool.Registry, enabled, writeRoots []string, bashSpec sandbox.Spec, stderr io.Writer) {
 	if len(enabled) == 0 {
 		for _, t := range tool.Builtins() {
 			reg.Add(t)
@@ -350,7 +355,7 @@ func addBuiltins(reg *tool.Registry, enabled, writeRoots []string, bashSpec sand
 			if t, ok := tool.LookupBuiltin(name); ok {
 				reg.Add(t)
 			} else {
-				fmt.Fprintf(os.Stderr, "warning: unknown built-in tool %q\n", name)
+				fmt.Fprintf(stderr, "warning: unknown built-in tool %q\n", name)
 			}
 		}
 	}
