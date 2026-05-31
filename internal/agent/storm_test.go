@@ -18,7 +18,7 @@ import (
 // the model re-words the payload).
 type failTool struct{ name string }
 
-func (f failTool) Name() string           { return f.name }
+func (f failTool) Name() string            { return f.name }
 func (f failTool) Description() string     { return "always fails" }
 func (f failTool) Schema() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
 func (f failTool) ReadOnly() bool          { return true }
@@ -29,10 +29,10 @@ func (f failTool) Execute(context.Context, json.RawMessage) (string, error) {
 // okTool always succeeds — a turn of real progress that breaks a failing run.
 type okTool struct{ name string }
 
-func (o okTool) Name() string                                   { return o.name }
-func (o okTool) Description() string                            { return "always succeeds" }
-func (o okTool) Schema() json.RawMessage                        { return json.RawMessage(`{"type":"object"}`) }
-func (o okTool) ReadOnly() bool                                 { return true }
+func (o okTool) Name() string                                             { return o.name }
+func (o okTool) Description() string                                      { return "always succeeds" }
+func (o okTool) Schema() json.RawMessage                                  { return json.RawMessage(`{"type":"object"}`) }
+func (o okTool) ReadOnly() bool                                           { return true }
 func (o okTool) Execute(context.Context, json.RawMessage) (string, error) { return "ok", nil }
 
 func warnNoticeRecorder() (event.Sink, *[]string) {
@@ -113,10 +113,10 @@ func TestStormBreakerResetsOnSuccess(t *testing.T) {
 	good := provider.ToolCall{Name: "read_file", Arguments: `{"path":"x"}`}
 	ctx := context.Background()
 
-	a.executeBatch(ctx, []provider.ToolCall{fail}) // count 1
-	a.executeBatch(ctx, []provider.ToolCall{fail}) // count 2
-	a.executeBatch(ctx, []provider.ToolCall{good}) // success → reset
-	a.executeBatch(ctx, []provider.ToolCall{fail}) // count 1
+	a.executeBatch(ctx, []provider.ToolCall{fail})            // count 1
+	a.executeBatch(ctx, []provider.ToolCall{fail})            // count 2
+	a.executeBatch(ctx, []provider.ToolCall{good})            // success → reset
+	a.executeBatch(ctx, []provider.ToolCall{fail})            // count 1
 	last := a.executeBatch(ctx, []provider.ToolCall{fail})[0] // count 2 — still below threshold
 
 	if strings.Contains(last, "[loop guard]") {
