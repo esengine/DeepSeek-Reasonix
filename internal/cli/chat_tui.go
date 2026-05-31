@@ -534,8 +534,11 @@ func (m chatTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.notice(fmt.Sprintf("switched to %s (conversation carried over; prompt cache resets)", m.label))
 			cmds = append(cmds, fetchBalance(m.ctrl))
-			// Re-issue waitForAgentEvent to keep the event loop alive.
-			cmds = append(cmds, waitForAgentEvent(m.eventCh))
+			// Do NOT re-issue waitForAgentEvent here — the goroutine from the
+			// last agentEventMsg handler is still blocked on the same channel.
+			// Starting a second one creates a race: two goroutines compete on
+			// p.Send (unbuffered), and the receiver may read them out of order,
+			// garbling the streamed text (words appear reordered).
 		}
 
 	case promptResolvedMsg:

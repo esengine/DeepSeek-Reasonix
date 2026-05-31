@@ -231,12 +231,12 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
-	// Raw SSE logging: set REASONIX_LOG_SSE=/path/to/file.log to capture
-	// every data line verbatim. Useful for diagnosing server-side token
-	// ordering issues (e.g. garbled reasoning output from speculative decoding).
+	// Raw SSE logging: always log to /tmp/reasonix-sse.log for diagnostics.
+	// Set REASONIX_LOG_SSE=0 to disable. Useful for diagnosing server-side
+	// token ordering issues (e.g. garbled reasoning output).
 	var sseLog *os.File
-	if path := os.Getenv("REASONIX_LOG_SSE"); path != "" {
-		sseLog, _ = os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if os.Getenv("REASONIX_LOG_SSE") != "0" {
+		sseLog, _ = os.OpenFile("/tmp/reasonix-sse.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		if sseLog != nil {
 			fmt.Fprintf(sseLog, "--- stream start model=%s ---\n", c.model)
 			defer sseLog.Close()
