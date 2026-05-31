@@ -113,6 +113,9 @@ func (c *client) sendWithRetry(ctx context.Context, body []byte) (*http.Response
 			return resp, nil
 		}
 		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		// Drain any remaining body so the HTTP connection can be reused by the
+		// transport pool, then close.
+		_, _ = io.Copy(io.Discard, resp.Body)
 		resp.Body.Close()
 		// A rejected key is a configuration problem, not a transient one — give
 		// an actionable error instead of dumping the raw status body.
