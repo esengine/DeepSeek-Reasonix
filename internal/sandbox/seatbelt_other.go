@@ -2,11 +2,7 @@
 
 package sandbox
 
-import (
-	"fmt"
-	"os"
-	"os/exec"
-)
+import "os/exec"
 
 // Command runs the command unwrapped: no OS sandbox is implemented for this
 // platform yet (Linux bubblewrap/landlock is the next step). The permission
@@ -15,8 +11,8 @@ import (
 // When spec.Mode is "enforce" and bubblewrap (bwrap) is available on PATH,
 // the command is wrapped in a bubblewrap sandbox with a profile analogous to
 // macOS Seatbelt: writes confined to WriteRoots, network denied unless
-// spec.Network is true. When bwrap is unavailable, a one-time warning is
-// printed to stderr and the command runs unconfined.
+// spec.Network is true. When bwrap is unavailable the command runs unconfined
+// (boot and acp warn about this once at startup).
 func Command(spec Spec, shell, command string) ([]string, bool) {
 	if !spec.enforce() {
 		return []string{shell, "-c", command}, false
@@ -25,8 +21,8 @@ func Command(spec Spec, shell, command string) ([]string, bool) {
 		argv := append([]string{bwrap}, bwrapArgs(spec, shell, command)...)
 		return argv, true
 	}
-	// Log a one-time warning when enforce is requested but unavailable.
-	fmt.Fprintf(os.Stderr, "sandbox: mode=enforce but no OS sandbox available on this platform; running unconfined\n")
+	// enforce requested but bwrap unavailable — boot/acp already warned at
+	// startup; fall back to unconfined (the false result signals "not sandboxed").
 	return []string{shell, "-c", command}, false
 }
 
@@ -59,5 +55,3 @@ func bwrapArgs(spec Spec, shell, command string) []string {
 	args = append(args, shell, "-c", command)
 	return args
 }
-
-// os is needed for the stderr import on non-darwin platforms.
