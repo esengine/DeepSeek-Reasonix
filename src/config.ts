@@ -1021,8 +1021,6 @@ export function saveSubagentModels(
   writeConfig(cfg, path);
 }
 
-// --- skillDir ---
-
 export function loadSkillDir(
   baseDir: string = process.cwd(),
   path: string = defaultConfigPath(),
@@ -1042,8 +1040,6 @@ export function resolveSkillDir(
   if (envDir?.trim()) return resolveSkillPath(envDir.trim(), baseDir);
   return loadSkillDir(baseDir, path);
 }
-
-// --- disabledSkills ---
 
 export function loadDisabledSkills(path: string = defaultConfigPath()): string[] {
   const raw = readConfig(path).skills?.disabled;

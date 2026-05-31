@@ -318,6 +318,32 @@ describe("SkillStore", () => {
     }
   });
 
+  it("orders roots project > custom > skillDir > global in one chain", () => {
+    const custom = mkdtempSync(join(tmpdir(), "reasonix-skills-custom-"));
+    const skillDir = mkdtempSync(join(tmpdir(), "reasonix-skills-dir-"));
+    try {
+      const projectDir = join(projectRoot, ".reasonix", "skills");
+      const globalDir = join(home, ".reasonix", "skills");
+      const store = new SkillStore({
+        homeDir: home,
+        projectRoot,
+        customSkillPaths: [custom],
+        skillDir,
+        disableBuiltins: true,
+      });
+      const labels = store
+        .roots()
+        .filter((root) => [projectDir, custom, skillDir, globalDir].some((dir) => root.dir === dir))
+        .map((root) =>
+          root.dir === skillDir ? "skillDir" : root.dir === custom ? "custom" : root.scope,
+        );
+      expect(labels).toEqual(["project", "custom", "skillDir", "global"]);
+    } finally {
+      rmSync(custom, { recursive: true, force: true });
+      rmSync(skillDir, { recursive: true, force: true });
+    }
+  });
+
   it("reports invalid custom root status without throwing", () => {
     const missing = join(projectRoot, "missing-skills");
     const notDir = join(projectRoot, "file.txt");
@@ -781,7 +807,7 @@ describe("Built-in skills", () => {
     rmSync(home, { recursive: true, force: true });
   });
 
-  it("ships explore/research/review/security-review/test as builtins", () => {
+  it("ships explore/research/review/security-review/test/qq as builtins", () => {
     const store = new SkillStore({ homeDir: home }); // builtins ON
     const names = store.list().map((s) => s.name);
     expect(names).toContain("explore");
@@ -789,6 +815,7 @@ describe("Built-in skills", () => {
     expect(names).toContain("review");
     expect(names).toContain("security-review");
     expect(names).toContain("test");
+    expect(names).toContain("qq");
     const explore = store.read("explore");
     expect(explore?.runAs).toBe("subagent");
     expect(explore?.scope).toBe("builtin");
@@ -809,6 +836,11 @@ describe("Built-in skills", () => {
     expect(test?.runAs).toBe("inline");
     expect(test?.body).toMatch(/run_command/);
     expect(test?.body).toMatch(/SEARCH\/REPLACE/);
+    const qq = store.read("qq");
+    expect(qq?.runAs).toBe("inline");
+    expect(qq?.scope).toBe("builtin");
+    expect(qq?.body).toMatch(/\/qq connect/);
+    expect(qq?.body).toMatch(/QQ Channel/);
   });
 
   it("user-authored skills override a builtin with the same name", () => {
@@ -835,6 +867,8 @@ describe("Built-in skills", () => {
     // /test is inline → no subagent tag
     expect(out).toContain("test —");
     expect(out).not.toContain("test [🧬 subagent]");
+    expect(out).toContain("qq —");
+    expect(out).not.toContain("qq [🧬 subagent]");
   });
 });
 

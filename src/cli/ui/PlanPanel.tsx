@@ -16,7 +16,9 @@
  */
 
 import { Box, type Color, Text } from "ink";
-import React, { useMemo, useState } from "react";
+// biome-ignore lint/style/useImportType: this file's JSX emit still needs React as a runtime value.
+import * as React from "react";
+import { useMemo, useState } from "react";
 import { t } from "../../i18n/index.js";
 import type { PlanStep, StepCompletion } from "../../tools/plan.js";
 import type { CheckpointChoice } from "./PlanCheckpointConfirm.js";
