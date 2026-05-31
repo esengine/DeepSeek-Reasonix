@@ -8,15 +8,26 @@ import "reasonix/internal/event"
 // error becomes a message — so a browser frontend renders the same typed stream
 // the TUI does.
 type wireEvent struct {
-	Kind      string        `json:"kind"`
-	Text      string        `json:"text,omitempty"`
-	Reasoning string        `json:"reasoning,omitempty"`
-	Level     string        `json:"level,omitempty"`
-	Tool      *wireTool     `json:"tool,omitempty"`
-	Usage     *wireUsage    `json:"usage,omitempty"`
-	Approval  *wireApproval `json:"approval,omitempty"`
-	Ask       *wireAsk      `json:"ask,omitempty"`
-	Err       string        `json:"err,omitempty"`
+	Kind       string          `json:"kind"`
+	Text       string          `json:"text,omitempty"`
+	Reasoning  string          `json:"reasoning,omitempty"`
+	Level      string          `json:"level,omitempty"`
+	Tool       *wireTool       `json:"tool,omitempty"`
+	Usage      *wireUsage      `json:"usage,omitempty"`
+	Approval   *wireApproval   `json:"approval,omitempty"`
+	Ask        *wireAsk        `json:"ask,omitempty"`
+	Compaction *wireCompaction `json:"compaction,omitempty"`
+	Err        string          `json:"err,omitempty"`
+}
+
+// wireCompaction is the JSON form of an event.Compaction. On a compaction_started
+// event only Trigger is set; compaction_done carries the rest (an aborted pass
+// leaves Summary empty so the frontend drops its placeholder).
+type wireCompaction struct {
+	Trigger  string `json:"trigger,omitempty"`
+	Messages int    `json:"messages,omitempty"`
+	Summary  string `json:"summary,omitempty"`
+	Archive  string `json:"archive,omitempty"`
 }
 
 type wireAskOption struct {
@@ -71,18 +82,20 @@ type wireApproval struct {
 
 // kindNames maps the event.Kind enum to stable wire strings.
 var kindNames = map[event.Kind]string{
-	event.TurnStarted:     "turn_started",
-	event.Reasoning:       "reasoning",
-	event.Text:            "text",
-	event.Message:         "message",
-	event.ToolDispatch:    "tool_dispatch",
-	event.ToolResult:      "tool_result",
-	event.Usage:           "usage",
-	event.Notice:          "notice",
-	event.Phase:           "phase",
-	event.ApprovalRequest: "approval_request",
-	event.AskRequest:      "ask_request",
-	event.TurnDone:        "turn_done",
+	event.TurnStarted:       "turn_started",
+	event.Reasoning:         "reasoning",
+	event.Text:              "text",
+	event.Message:           "message",
+	event.ToolDispatch:      "tool_dispatch",
+	event.ToolResult:        "tool_result",
+	event.Usage:             "usage",
+	event.Notice:            "notice",
+	event.Phase:             "phase",
+	event.ApprovalRequest:   "approval_request",
+	event.AskRequest:        "ask_request",
+	event.TurnDone:          "turn_done",
+	event.CompactionStarted: "compaction_started",
+	event.CompactionDone:    "compaction_done",
 }
 
 // toWireAsk converts an event.Ask into its JSON wire form.
@@ -131,6 +144,11 @@ func toWire(e event.Event) wireEvent {
 		w.Approval = &wireApproval{ID: e.Approval.ID, Tool: e.Approval.Tool, Subject: e.Approval.Subject}
 	case event.AskRequest:
 		w.Ask = toWireAsk(e.Ask)
+	case event.CompactionStarted, event.CompactionDone:
+		w.Compaction = &wireCompaction{
+			Trigger: e.Compaction.Trigger, Messages: e.Compaction.Messages,
+			Summary: e.Compaction.Summary, Archive: e.Compaction.Archive,
+		}
 	case event.TurnDone:
 		if e.Err != nil {
 			w.Err = e.Err.Error()

@@ -111,8 +111,40 @@ export function Transcript({
                 {it.text}
               </div>
             );
+          case "compaction":
+            return <CompactionCard key={it.id} item={it} />;
         }
       })}
+    </div>
+  );
+}
+
+type CompactionItem = Extract<Item, { kind: "compaction" }>;
+
+// CompactionCard marks a context-compaction boundary in the transcript. While
+// the pass runs it shows a "compacting…" placeholder; once done it shows the
+// message count and trigger with the summary collapsed behind a toggle (the
+// summary is the new context base, so it's available but doesn't flood the view).
+function CompactionCard({ item }: { item: CompactionItem }) {
+  const [open, setOpen] = useState(false);
+  if (item.pending) {
+    return (
+      <div className="compaction compaction--pending">
+        <span className="compaction__spinner">⋯</span> Compacting conversation…
+      </div>
+    );
+  }
+  return (
+    <div className="compaction">
+      <button className="compaction__head" onClick={() => setOpen((v) => !v)}>
+        <span className="compaction__icon">◆</span>
+        <span className="compaction__title">Context compacted</span>
+        <span className="compaction__meta">
+          {item.messages} messages · {item.trigger}
+        </span>
+        <span className="compaction__toggle">{open ? "hide summary" : "show summary"}</span>
+      </button>
+      {open && <pre className="compaction__summary">{item.summary}</pre>}
     </div>
   );
 }

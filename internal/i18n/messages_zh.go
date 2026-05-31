@@ -42,6 +42,12 @@ var Chinese = Messages{
 	ChatStatusQuestion:     "↑/↓ 选 · 数字快选 · 空格多选 · Enter 确认 · ←/→ 切换问题 · Esc 取消",
 	ToolApprovalPromptFmt:  "允许 %s%s？— [y] 本次 · [a] 本会话 · [n] 拒绝",
 
+	CompactionWorking: "正在压缩对话…",
+	CompactionTitle:   "上下文已压缩",
+	CompactionUnit:    "条消息",
+	CompactionAuto:    "自动",
+	CompactionManual:  "手动",
+
 	SlashCompactDone:   "已压缩 — 旧的中段换成一段摘要，最近几轮保留原样",
 	SlashCompactFailed: "压缩失败",
 	SlashNewDone:       "已新建会话 — 之前的对话已存档",

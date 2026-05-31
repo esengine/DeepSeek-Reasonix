@@ -153,6 +153,11 @@ const (
 // agentEventMsg is one typed event from the agent's run loop.
 type agentEventMsg event.Event
 
+// compactDoneMsg reports that an async /compact pass returned. The card was
+// already drawn from the CompactionDone event; this only surfaces a failure and
+// snapshots on success.
+type compactDoneMsg struct{ err error }
+
 // elapsedTickMsg fires once a second while a turn runs, driving the "thinking
 // Ns" counter in the status line.
 type elapsedTickMsg struct{}
@@ -467,6 +472,13 @@ func (m chatTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case balanceMsg:
 		m.balance = msg.text
+
+	case compactDoneMsg:
+		if msg.err != nil {
+			m.notice(fmt.Sprintf("%s: %v", i18n.M.SlashCompactFailed, msg.err))
+		} else {
+			_ = m.ctrl.Snapshot()
+		}
 
 	case promptResolvedMsg:
 		switch {
@@ -819,6 +831,29 @@ func (m chatTUI) View() tea.View {
 	return v
 }
 
+// compactionCardLines renders a finished compaction as a titled card: a header
+// with the message count and trigger, then the structured summary under a dim
+// gutter so it reads as one block in scrollback. The summary is also the new
+// context base, so this card is the user's window into exactly what was kept.
+func compactionCardLines(c event.Compaction) []string {
+	trigger := c.Trigger
+	switch c.Trigger {
+	case "auto":
+		trigger = i18n.M.CompactionAuto
+	case "manual":
+		trigger = i18n.M.CompactionManual
+	}
+	header := fmt.Sprintf("%s · %d %s · %s", i18n.M.CompactionTitle, c.Messages, i18n.M.CompactionUnit, trigger)
+	lines := []string{accent("◆ " + header)}
+	for _, ln := range strings.Split(strings.TrimRight(c.Summary, "\n"), "\n") {
+		lines = append(lines, dim("  │ "+ln))
+	}
+	if c.Archive != "" {
+		lines = append(lines, dim("  │ archived "+c.Archive))
+	}
+	return lines
+}
+
 // contextTag renders the prompt-vs-context-window gauge for the status line.
 func (m chatTUI) contextTag() string {
 	used, window := m.ctrl.ContextSnapshot()
@@ -1162,6 +1197,21 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 		m.finalizeStreamed()
 		m.commitLine(fmt.Sprintf("  %s %s", glyph, e.Text))
 
+	case event.CompactionStarted:
+		m.finalizeStreamed()
+		m.commitLine(dim("  ⋯ " + i18n.M.CompactionWorking))
+
+	case event.CompactionDone:
+		// An aborted pass carries no summary; the accompanying Notice (auto) or
+		// compactDoneMsg error (manual) explains why, so don't draw an empty card.
+		if e.Compaction.Summary == "" {
+			break
+		}
+		m.finalizeStreamed()
+		for _, ln := range compactionCardLines(e.Compaction) {
+			m.commitLine(ln)
+		}
+
 	case event.Phase:
 		m.finalizeStreamed()
 		m.commitLine(fmt.Sprintf("[%s]", e.Text))
@@ -1232,12 +1282,11 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 
 	switch cmd {
 	case "/compact":
-		if err := m.ctrl.Compact(context.Background()); err != nil {
-			m.notice(fmt.Sprintf("%s: %v", i18n.M.SlashCompactFailed, err))
-			return nil
-		}
-		m.notice(i18n.M.SlashCompactDone)
-		_ = m.ctrl.Snapshot()
+		// Compaction makes a (network) summarizer call; run it off the Update loop
+		// so the TUI doesn't freeze. The CompactionStarted/Done events render the
+		// card as they arrive; compactDoneMsg only handles the terminal error /
+		// snapshot once the pass returns.
+		return func() tea.Msg { return compactDoneMsg{err: m.ctrl.Compact(context.Background())} }
 	case "/new":
 		if err := m.ctrl.NewSession(); err != nil {
 			m.notice(fmt.Sprintf("%s: %v", i18n.M.SlashNewFailed, err))

@@ -796,6 +796,67 @@ body {
   color: var(--fg-faint);
 }
 
+/* ── compaction card ─────────────────────────────────────────────────────── */
+.compaction {
+  margin: 12px auto;
+  border: 1px solid var(--accent-soft, var(--border));
+  border-radius: var(--radius, 6px);
+  background: var(--bg-soft);
+  overflow: hidden;
+}
+.compaction--pending {
+  padding: 7px 12px;
+  font-size: 12.5px;
+  color: var(--fg-dim);
+  border-style: dashed;
+}
+.compaction__spinner {
+  color: var(--accent);
+}
+.compaction__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 12px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--fg);
+  text-align: left;
+}
+.compaction__head:hover {
+  background: var(--bg-elev);
+}
+.compaction__icon {
+  color: var(--accent);
+}
+.compaction__title {
+  font-weight: 600;
+}
+.compaction__meta {
+  color: var(--fg-dim);
+}
+.compaction__toggle {
+  margin-left: auto;
+  color: var(--clickable, var(--accent));
+  font-size: 11.5px;
+}
+.compaction__summary {
+  margin: 0;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg-dim);
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 /* ── footer: composer + status line ──────────────────────────────────────── */
 .footer {
   flex: 0 0 auto;

@@ -41,6 +41,12 @@ var English = Messages{
 	ChatStatusQuestion:     "↑/↓ move · number to pick · space multi · Enter confirm · ←/→ switch · Esc cancel",
 	ToolApprovalPromptFmt:  "Allow %s%s? — [y] once · [a] this session · [n] no",
 
+	CompactionWorking: "compacting conversation…",
+	CompactionTitle:   "Context compacted",
+	CompactionUnit:    "messages",
+	CompactionAuto:    "auto",
+	CompactionManual:  "manual",
+
 	SlashCompactDone:   "session compacted — older middle replaced by a summary, recent turns kept",
 	SlashCompactFailed: "compaction failed",
 	SlashNewDone:       "fresh session started — previous transcript saved",

@@ -218,7 +218,7 @@ func (a *Agent) ContextWindow() int { return a.contextWindow }
 // usage-ratio threshold maybeCompact normally honours. Used by the chat
 // TUI's `/compact` command so the user can reset the prefix before it
 // naturally fills up.
-func (a *Agent) CompactNow(ctx context.Context) error { return a.compact(ctx) }
+func (a *Agent) CompactNow(ctx context.Context) error { return a.compact(ctx, "manual") }
 
 // Options configures an Agent.
 type Options struct {

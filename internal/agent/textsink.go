@@ -102,6 +102,21 @@ func (s *TextSink) Emit(e event.Event) {
 		}
 		fmt.Fprintf(s.out, "[%s]\n", e.Text)
 		s.wroteAnything = true
+
+	case event.CompactionStarted:
+		fmt.Fprintln(s.out, dimText("  ⋯ compacting conversation…"))
+		s.wroteAnything = true
+
+	case event.CompactionDone:
+		c := e.Compaction
+		if c.Summary == "" {
+			break // aborted pass — the caller's Notice already explained why
+		}
+		fmt.Fprintln(s.out, dimText(fmt.Sprintf("  ⋯ compacted %d messages (%s)", c.Messages, c.Trigger)))
+		for _, ln := range strings.Split(strings.TrimRight(c.Summary, "\n"), "\n") {
+			fmt.Fprintln(s.out, dimText("    "+ln))
+		}
+		s.wroteAnything = true
 	}
 }
 

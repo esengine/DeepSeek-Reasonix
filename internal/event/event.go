@@ -54,6 +54,15 @@ const (
 	// nil also for a user cancellation, which is not an error). Always the
 	// last event of a turn.
 	TurnDone
+	// CompactionStarted marks the start of a context-compaction pass (Compaction
+	// payload: Trigger). A frontend shows a "compacting…" placeholder while the
+	// summarizer runs; CompactionDone replaces it. Mirrors ToolDispatch/ToolResult.
+	CompactionStarted
+	// CompactionDone reports a finished compaction pass (Compaction payload:
+	// Trigger/Messages/Summary/Archive). An aborted pass emits this with an empty
+	// Summary so the placeholder still resolves. Replaces the older plain Notice
+	// so a sink can render a distinct, expandable card.
+	CompactionDone
 )
 
 // Level classifies a Notice so sinks can style or filter it.
@@ -115,6 +124,18 @@ type Ask struct {
 	Questions []AskQuestion
 }
 
+// Compaction carries a context-compaction pass for the CompactionStarted /
+// CompactionDone events. On CompactionStarted only Trigger is set. On
+// CompactionDone, Messages/Summary/Archive are filled in (an aborted pass leaves
+// Summary empty). Trigger is "auto" (the prompt reached the window threshold) or
+// "manual" (the user ran /compact).
+type Compaction struct {
+	Trigger  string // "auto" | "manual"
+	Messages int    // Done: how many messages were folded into the summary
+	Summary  string // Done: the briefing the agent keeps relying on
+	Archive  string // Done: path the dropped originals were archived to ("" if none)
+}
+
 // AskAnswer is the user's reply to one AskQuestion: the chosen option label(s)
 // (a free-typed answer is carried as a single Selected entry).
 type AskAnswer struct {
@@ -135,12 +156,13 @@ type Event struct {
 	// session (Usage events only), so a frontend can show the aggregate hit-rate
 	// — which doesn't crater on a short turn or after compaction — alongside
 	// Usage's single-turn numbers.
-	SessionHit  int      // Usage: cumulative cache-hit prompt tokens this session
-	SessionMiss int      // Usage: cumulative cache-miss prompt tokens this session
-	Level       Level    // Notice
-	Approval    Approval // ApprovalRequest
-	Ask         Ask      // AskRequest
-	Err         error    // TurnDone: non-nil on failure
+	SessionHit  int        // Usage: cumulative cache-hit prompt tokens this session
+	SessionMiss int        // Usage: cumulative cache-miss prompt tokens this session
+	Level       Level      // Notice
+	Approval    Approval   // ApprovalRequest
+	Ask         Ask        // AskRequest
+	Err         error      // TurnDone: non-nil on failure
+	Compaction  Compaction // Compaction
 }
 
 // Sink consumes a turn's events. The agent calls Emit serially from its run

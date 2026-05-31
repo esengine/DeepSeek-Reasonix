@@ -87,7 +87,7 @@ func TestCompactReplacesHistory(t *testing.T) {
 	dir := t.TempDir()
 	a := New(prov, tool.NewRegistry(), sess, Options{RecentKeep: 2, ArchiveDir: dir}, event.Discard)
 
-	if err := a.compact(context.Background()); err != nil {
+	if err := a.compact(context.Background(), "manual"); err != nil {
 		t.Fatalf("compact: %v", err)
 	}
 
@@ -120,6 +120,55 @@ func TestCompactReplacesHistory(t *testing.T) {
 	}
 	if !strings.HasSuffix(entries[0].Name(), ".jsonl") {
 		t.Errorf("archive name = %q, want .jsonl", entries[0].Name())
+	}
+}
+
+// TestCompactEmitsEvents covers the card-driving signals: a CompactionStarted
+// (before the summarizer runs) then a CompactionDone carrying the trigger,
+// message count, and summary — in that order.
+func TestCompactEmitsEvents(t *testing.T) {
+	prov := &fakeProvider{reply: "- goal: do X"}
+	sess := &Session{Messages: []provider.Message{
+		{Role: provider.RoleSystem, Content: "sys"},
+		{Role: provider.RoleUser, Content: "task"},
+		{Role: provider.RoleAssistant, Content: "step one"},
+		{Role: provider.RoleUser, Content: "more"},
+		{Role: provider.RoleAssistant, Content: "step two"},
+		{Role: provider.RoleUser, Content: "next"},
+		{Role: provider.RoleAssistant, Content: "ok"},
+	}}
+	var got []event.Event
+	sink := event.FuncSink(func(e event.Event) { got = append(got, e) })
+	a := New(prov, tool.NewRegistry(), sess, Options{RecentKeep: 2}, sink)
+
+	if err := a.compact(context.Background(), "auto"); err != nil {
+		t.Fatalf("compact: %v", err)
+	}
+
+	startedAt, doneAt := -1, -1
+	for i, e := range got {
+		switch e.Kind {
+		case event.CompactionStarted:
+			startedAt = i
+			if e.Compaction.Trigger != "auto" {
+				t.Errorf("started trigger = %q, want auto", e.Compaction.Trigger)
+			}
+		case event.CompactionDone:
+			doneAt = i
+			c := e.Compaction
+			if c.Trigger != "auto" || c.Messages == 0 || !strings.Contains(c.Summary, "do X") {
+				t.Errorf("done event = %+v", c)
+			}
+		}
+	}
+	if startedAt < 0 {
+		t.Fatal("no CompactionStarted event emitted")
+	}
+	if doneAt < 0 {
+		t.Fatal("no CompactionDone event emitted")
+	}
+	if startedAt > doneAt {
+		t.Errorf("CompactionStarted (%d) must precede CompactionDone (%d)", startedAt, doneAt)
 	}
 }
 

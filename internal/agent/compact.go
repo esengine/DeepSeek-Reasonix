@@ -24,15 +24,34 @@ const (
 )
 
 // summarySystemPrompt steers the executor to distill older history into a
-// briefing it can keep relying on after the originals are dropped.
+// structured briefing it can keep relying on after the originals are dropped.
+// The section layout mirrors what a coding agent actually needs to resume work
+// mid-task: the goal verbatim, the concrete state of the code, and an explicit
+// next step — so the post-compaction turn doesn't lose the thread or re-derive
+// decisions already made.
 const summarySystemPrompt = `You are compacting the earlier part of a coding agent's conversation to save context.
-Summarize the messages below into a compact briefing the agent can rely on to continue the task. Preserve:
-- the user's goal and any explicit requirements or constraints
-- key decisions made and their rationale
-- files read or modified and the important facts learned about them
-- commands run and their relevant outcomes
-- what is still pending or in progress
-Omit small talk and redundant detail. Use terse bullet points. Do not invent information.`
+The agent will keep ONLY your summary (the original messages are dropped), so it must be able to resume the task from it alone.
+Write a briefing under these exact headings, omitting a heading only if it has no content:
+
+## Goal
+The user's request and intent, kept close to their own words. Include explicit requirements, constraints, and preferences.
+
+## Decisions & rationale
+Key choices made so far and why — so they are not re-litigated or reversed.
+
+## Files & code
+Files read or modified, with the specific facts that matter: signatures, line locations, data shapes, and exact edits applied. Be concrete; this is what lets the agent act without re-reading everything.
+
+## Commands & outcomes
+Commands run (builds, tests, git) and their relevant results — what passed, what failed, and the error text that matters.
+
+## Errors & fixes
+Problems hit and how they were resolved (or not), so the same dead ends are not repeated.
+
+## Pending & next step
+What is still in progress or unstarted, and the single most concrete next action to take.
+
+Rules: be terse — bullet points and fragments, not prose. Preserve identifiers, paths, and numbers exactly. Do NOT invent anything not present in the messages; if something is unknown, leave it out rather than guessing.`
 
 // maybeCompact compacts the session when the last turn's prompt has grown to the
 // configured fraction of the context window. It is a no-op when compaction is
@@ -44,15 +63,19 @@ func (a *Agent) maybeCompact(ctx context.Context, u *provider.Usage) {
 	if u.PromptTokens < int(float64(a.contextWindow)*a.compactRatio) {
 		return
 	}
-	if err := a.compact(ctx); err != nil {
+	if err := a.compact(ctx, "auto"); err != nil {
 		a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: fmt.Sprintf("compaction skipped: %v", err)})
 	}
 }
 
 // compact summarizes the older middle of the session and replaces it in place:
 // the session becomes system + summary + recent tail. The dropped originals are
-// archived first, so the full history stays traceable.
-func (a *Agent) compact(ctx context.Context) error {
+// archived first, so the full history stays traceable. trigger is "auto" (the
+// window threshold) or "manual" (/compact); it rides the Compaction events so a
+// frontend can label the card. A Started event is emitted before the (network)
+// summarize so the UI can show a "compacting…" placeholder, and a Done event
+// (carrying the summary) replaces it.
+func (a *Agent) compact(ctx context.Context, trigger string) error {
 	msgs := a.session.Messages
 	head, start, ok := compactBounds(msgs, a.recentKeep, minCompactMessages)
 	if !ok {
@@ -60,10 +83,13 @@ func (a *Agent) compact(ctx context.Context) error {
 	}
 	region := msgs[head:start]
 
+	a.sink.Emit(event.Event{Kind: event.CompactionStarted, Compaction: event.Compaction{Trigger: trigger}})
+
 	archived := ""
 	if a.archiveDir != "" {
 		path, err := archiveMessages(a.archiveDir, region)
 		if err != nil {
+			a.emitCompactionAborted(trigger)
 			return fmt.Errorf("archive: %w", err)
 		}
 		archived = path
@@ -71,6 +97,7 @@ func (a *Agent) compact(ctx context.Context) error {
 
 	summary, err := a.summarize(ctx, region)
 	if err != nil {
+		a.emitCompactionAborted(trigger)
 		return err
 	}
 
@@ -83,12 +110,18 @@ func (a *Agent) compact(ctx context.Context) error {
 	compacted = append(compacted, msgs[start:]...)
 	a.session.Messages = compacted
 
-	note := fmt.Sprintf("compacted %d messages → summary", len(region))
-	if archived != "" {
-		note += " (archived " + archived + ")"
-	}
-	a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: note})
+	a.sink.Emit(event.Event{Kind: event.CompactionDone, Compaction: event.Compaction{
+		Trigger: trigger, Messages: len(region), Summary: summary, Archive: archived,
+	}})
 	return nil
+}
+
+// emitCompactionAborted resolves a "compacting…" placeholder when a pass fails
+// after the Started event: a Done with no summary tells a frontend to drop the
+// placeholder. The caller still surfaces the reason (a Notice), so this carries
+// no text of its own.
+func (a *Agent) emitCompactionAborted(trigger string) {
+	a.sink.Emit(event.Event{Kind: event.CompactionDone, Compaction: event.Compaction{Trigger: trigger}})
 }
 
 // SummarizeFrom replaces the messages from fromIdx onward with a single summary,

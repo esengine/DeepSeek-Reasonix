@@ -68,6 +68,13 @@ type Messages struct {
 	AskChatInstead     string // the "don't pick, just chat" option label
 	ChatStatusQuestion string // shortcuts hint while a question card is open
 
+	// context compaction card (CompactionStarted / CompactionDone events).
+	CompactionWorking string // shown while the summarizer runs
+	CompactionTitle   string // card header before "· N messages · <trigger>"
+	CompactionUnit    string // the noun counted, e.g. "messages"
+	CompactionAuto    string // trigger label: reached the window threshold
+	CompactionManual  string // trigger label: user ran /compact
+
 	// chat TUI slash commands.
 	SlashCompactDone   string // "/compact" succeeded
 	SlashCompactFailed string // "/compact" errored, prefixed before the underlying error

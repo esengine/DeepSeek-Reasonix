@@ -3,6 +3,7 @@ package acp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -102,6 +103,16 @@ func (s *updateSink) Emit(e event.Event) {
 			s.send(messageChunk{
 				SessionUpdate: "agent_message_chunk",
 				Content:       textBlock("\n\n[warning] " + e.Text),
+			})
+		}
+
+	case event.CompactionDone:
+		// ACP has no compaction-card concept; surface a one-line note so the host
+		// knows the context was summarized (an aborted pass has no summary).
+		if e.Compaction.Summary != "" {
+			s.send(messageChunk{
+				SessionUpdate: "agent_message_chunk",
+				Content:       textBlock(fmt.Sprintf("\n\n[compacted %d earlier messages to save context]", e.Compaction.Messages)),
 			})
 		}
 

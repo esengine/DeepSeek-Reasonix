@@ -30,6 +30,15 @@ export type Item =
   | { kind: "phase"; id: string; text: string }
   | { kind: "notice"; id: string; level: "info" | "warn"; text: string }
   | {
+      kind: "compaction";
+      id: string;
+      pending: boolean; // true between compaction_started and compaction_done
+      trigger: string; // "auto" | "manual"
+      messages: number;
+      summary: string;
+      archive: string;
+    }
+  | {
       kind: "tool";
       id: string;
       name: string;
@@ -258,6 +267,49 @@ function applyEvent(s: State, e: WireEvent): State {
         seq: s.seq + 1,
         items: [...s.items, { kind: "phase", id: `p${s.seq}`, text: e.text ?? "" }],
       };
+
+    case "compaction_started":
+      // Drop a pending card the moment the summarizer starts, so the user sees
+      // the pass is running rather than a frozen window.
+      return {
+        ...s,
+        seq: s.seq + 1,
+        items: [
+          ...s.items,
+          {
+            kind: "compaction",
+            id: `c${s.seq}`,
+            pending: true,
+            trigger: e.compaction?.trigger ?? "",
+            messages: 0,
+            summary: "",
+            archive: "",
+          },
+        ],
+      };
+
+    case "compaction_done": {
+      const c = e.compaction;
+      // An aborted pass (no summary) drops the pending placeholder; the
+      // accompanying notice explains why. Otherwise fill the last pending card.
+      const idx = [...s.items].reverse().findIndex((it) => it.kind === "compaction" && it.pending);
+      const at = idx < 0 ? -1 : s.items.length - 1 - idx;
+      if (!c?.summary) {
+        const items = at < 0 ? s.items : s.items.filter((_, i) => i !== at);
+        return { ...s, running: s.turnActive ? s.running : false, items };
+      }
+      const filled: Item = {
+        kind: "compaction",
+        id: at < 0 ? `c${s.seq}` : (s.items[at] as Extract<Item, { kind: "compaction" }>).id,
+        pending: false,
+        trigger: c.trigger ?? "",
+        messages: c.messages ?? 0,
+        summary: c.summary,
+        archive: c.archive ?? "",
+      };
+      const items = at < 0 ? [...s.items, filled] : s.items.map((it, i) => (i === at ? filled : it));
+      return { ...s, running: s.turnActive ? s.running : false, seq: s.seq + 1, items };
+    }
 
     case "approval_request":
       return { ...s, approval: e.approval };
