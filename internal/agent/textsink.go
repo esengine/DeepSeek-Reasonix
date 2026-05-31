@@ -68,7 +68,7 @@ func (s *TextSink) Emit(e event.Event) {
 		s.closeTextStream(e.Text, e.Reasoning)
 
 	case event.ToolDispatch:
-		fmt.Fprintf(s.out, "  -> %s %s\n", e.Tool.Name, compactArgs(e.Tool.Args))
+		fmt.Fprintf(s.out, "  -> %s %s\n", e.Tool.Name, CompactArgs(e.Tool.Args))
 		s.wroteAnything = true
 
 	case event.ToolResult:
@@ -181,8 +181,9 @@ func FormatUsageLine(u *provider.Usage, p *provider.Pricing) string {
 // recede from the final answer.
 func dimText(s string) string { return "\x1b[2m" + s + "\x1b[0m" }
 
-// compactArgs trims and caps a tool's raw JSON arguments for the dispatch line.
-func compactArgs(s string) string {
+// CompactArgs trims and caps a tool's raw JSON arguments for the dispatch line.
+// Exported so the CLI can reuse the same rendering without duplicating the logic.
+func CompactArgs(s string) string {
 	s = strings.TrimSpace(s)
 	r := []rune(s)
 	if len(r) > 120 {

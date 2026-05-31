@@ -1477,13 +1477,6 @@ type eventSink struct {
 
 func (s *eventSink) Emit(e event.Event) { s.ch <- e }
 
-// compactArgs trims and caps a tool's raw JSON arguments for the dispatch line,
-// matching the agent's headless rendering so the chat timeline reads the same.
-func compactArgs(s string) string {
-	s = strings.TrimSpace(s)
-	r := []rune(s)
-	if len(r) > 120 {
-		return string(r[:120]) + "..."
-	}
-	return s
-}
+// compactArgs delegates to agent.CompactArgs so the CLI and headless rendering
+// stay identical.
+func compactArgs(s string) string { return agent.CompactArgs(s) }
