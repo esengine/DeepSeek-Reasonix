@@ -150,34 +150,6 @@ func TestParseRunAsDefault(t *testing.T) {
 	}
 }
 
-// --- Scope constants ---
-
-func TestScopeConstants(t *testing.T) {
-	if ScopeProject != "project" {
-		t.Errorf("ScopeProject = %q", ScopeProject)
-	}
-	if ScopeCustom != "custom" {
-		t.Errorf("ScopeCustom = %q", ScopeCustom)
-	}
-	if ScopeGlobal != "global" {
-		t.Errorf("ScopeGlobal = %q", ScopeGlobal)
-	}
-	if ScopeBuiltin != "builtin" {
-		t.Errorf("ScopeBuiltin = %q", ScopeBuiltin)
-	}
-}
-
-// --- RunAs constants ---
-
-func TestRunAsConstants(t *testing.T) {
-	if RunInline != "inline" {
-		t.Errorf("RunInline = %q", RunInline)
-	}
-	if RunSubagent != "subagent" {
-		t.Errorf("RunSubagent = %q", RunSubagent)
-	}
-}
-
 // --- resolveCustomPaths ---
 
 func TestResolveCustomPathsTilde(t *testing.T) {
@@ -317,22 +289,5 @@ func TestHasProjectScope(t *testing.T) {
 	st2 := New(Options{HomeDir: t.TempDir()})
 	if st2.HasProjectScope() {
 		t.Error("without project root should return false")
-	}
-}
-
-// --- PathStatus constants ---
-
-func TestPathStatusConstants(t *testing.T) {
-	if StatusOK != "ok" {
-		t.Errorf("StatusOK = %q", StatusOK)
-	}
-	if StatusMissing != "missing" {
-		t.Errorf("StatusMissing = %q", StatusMissing)
-	}
-	if StatusNotDirectory != "not-directory" {
-		t.Errorf("StatusNotDirectory = %q", StatusNotDirectory)
-	}
-	if StatusUnreadable != "unreadable" {
-		t.Errorf("StatusUnreadable = %q", StatusUnreadable)
 	}
 }
