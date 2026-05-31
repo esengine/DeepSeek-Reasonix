@@ -34,7 +34,20 @@ func New(ctrl *control.Controller, bc *Broadcaster) *Server {
 
 // Handler returns the HTTP routes: GET / (a minimal browser client), GET /events
 // (SSE), GET /history, GET /context, and POST command endpoints.
+// CORS is NOT applied by default — same-origin policy protects the unauthenticated
+// agent endpoints. Call HandlerWithCORS to opt in for local development.
 func (s *Server) Handler() http.Handler {
+	return s.handler(false)
+}
+
+// HandlerWithCORS returns the same routes as Handler but adds permissive CORS
+// headers so a dev frontend on a different origin (e.g. Vite on :5173) can
+// reach the server. Do NOT use in production — the server has no auth.
+func (s *Server) HandlerWithCORS(origin string) http.Handler {
+	return corsMiddleware(s.handler(false), origin)
+}
+
+func (s *Server) handler(_ bool) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", s.index)
 	mux.HandleFunc("GET /events", s.events)
@@ -46,7 +59,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /plan", s.plan)
 	mux.HandleFunc("POST /compact", s.compact)
 	mux.HandleFunc("POST /new", s.newSession)
-	return corsMiddleware(logMiddleware(mux))
+	return logMiddleware(mux)
 }
 
 // Run serves until the process is killed. Interactive approval is enabled so
@@ -210,12 +223,16 @@ func writeJSON(w http.ResponseWriter, v any) {
 	}
 }
 
-// corsMiddleware adds permissive CORS headers for local development. In
-// production the server is typically same-origin, but during development the
-// frontend (Vite, etc.) runs on a different port.
-func corsMiddleware(next http.Handler) http.Handler {
+// corsMiddleware adds CORS headers for a specific allowed origin. Only use for
+// local development — the server has no auth, so broad CORS would let any site
+// drive the agent. origin is the exact origin to allow (e.g.
+// "http://localhost:5173"); empty origin skips CORS entirely.
+func corsMiddleware(next http.Handler, origin string) http.Handler {
+	if origin == "" {
+		return next
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Origin", origin)
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		if r.Method == http.MethodOptions {
