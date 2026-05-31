@@ -158,6 +158,18 @@ type Agent struct {
 	compactRatio  float64
 	recentKeep    int
 	archiveDir    string
+
+	// stormSig / stormCount track a run of tool calls that keep failing the same
+	// way so the loop can break a death-spiral. The signature is (tool, error),
+	// NOT (tool, args): a stuck model reliably reworks the arguments cosmetically
+	// (a re-worded essay, a reordered object) while the call fails identically
+	// every time — keying on args misses the loop entirely (observed live against
+	// truncated tool-call arguments). Because errors that embed their subject
+	// (e.g. "file not found: /x") differ per target, genuine varied probing does
+	// not collapse to one signature. Reset whenever a turn does anything else
+	// (a different failure, more than one call, or any success). See applyStormBreaker.
+	stormSig   string
+	stormCount int
 }
 
 // SetPlanMode flips the read-only gate. While true, executeOne refuses any
@@ -447,7 +459,48 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) []s
 			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: o.truncMsg})
 		}
 	}
+	a.applyStormBreaker(calls, outcomes, results)
 	return results
+}
+
+// stormBreakThreshold is how many times in a row the same tool may fail the same
+// way before the loop stops echoing the raw error back and instead returns a
+// directive to change approach. Two natural self-corrections are healthy; the
+// third identical failure is a death-spiral — the dominant case being a tool call
+// whose arguments are truncated at the output-token ceiling, which the model then
+// re-emits (re-worded but still over-long), truncating the same way again.
+const stormBreakThreshold = 3
+
+// applyStormBreaker detects a run of same-tool, same-error failures and, past the
+// threshold, rewrites the model-facing result (results[0]) into a directive to
+// change approach. It keys on (tool, error) rather than (tool, args) because a
+// stuck model reworks the arguments cosmetically while failing identically — see
+// the stormSig field doc. It targets only the single-call fixation that produces
+// the loop: a turn with exactly one call that errored (and was not merely blocked
+// by plan mode / permissions, which already carry a clear, distinct message). Any
+// other shape — multiple calls, or any success — is varied work, so it resets the
+// counter. The hard maxSteps guard remains the ultimate backstop; this just keeps
+// the loop from burning that whole budget bouncing off the same failure.
+func (a *Agent) applyStormBreaker(calls []provider.ToolCall, outcomes []toolOutcome, results []string) {
+	if len(calls) != 1 || outcomes[0].errMsg == "" || outcomes[0].blocked {
+		a.stormSig, a.stormCount = "", 0
+		return
+	}
+	sig := calls[0].Name + "\x00" + outcomes[0].errMsg
+	if sig != a.stormSig {
+		a.stormSig, a.stormCount = sig, 1
+		return
+	}
+	a.stormCount++
+	if a.stormCount < stormBreakThreshold {
+		return
+	}
+	results[0] = outcomes[0].output + fmt.Sprintf(
+		"\n\n[loop guard] %q has now failed %d times in a row with the same error. Re-sending it — even with the wording changed — will not help: the call keeps failing the same way. Change approach: if an argument is being truncated, write less in one call and split the work into several smaller calls; otherwise fix the argument, use a different tool, or explain the blocker in your final answer.",
+		calls[0].Name, a.stormCount)
+	a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: fmt.Sprintf(
+		"loop guard: %s failed %d× the same way — nudging the model to change approach",
+		calls[0].Name, a.stormCount)})
 }
 
 // toolOutcome is one tool call's result, split into the model-facing output and
