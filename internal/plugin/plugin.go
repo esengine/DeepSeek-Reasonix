@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"reasonix/internal/tool"
@@ -216,11 +217,15 @@ func (h *Host) Add(ctx context.Context, s Spec) ([]tool.Tool, error) {
 	if c.hasPrompts {
 		if ps, perr := c.listPrompts(ctx); perr == nil {
 			h.prompts = append(h.prompts, ps...)
+		} else {
+			slog.Warn("plugin: listPrompts failed", "server", s.Name, "err", perr)
 		}
 	}
 	if c.hasResources {
 		if rs, rerr := c.listResources(ctx); rerr == nil {
 			h.resources = append(h.resources, rs...)
+		} else {
+			slog.Warn("plugin: listResources failed", "server", s.Name, "err", rerr)
 		}
 	}
 	return ts, nil
