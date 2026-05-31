@@ -2,7 +2,12 @@ import { type DeepSeekClient, Usage } from "./client.js";
 import type { ReasoningEffort } from "./config.js";
 import type { PauseGate } from "./core/pause-gate.js";
 import { pauseGate as defaultPauseGate } from "./core/pause-gate.js";
-import { type HookPayload, type ResolvedHook, runHooks } from "./hooks.js";
+import {
+  type HookPayload,
+  type ResolvedHook,
+  formatHookOutcomeMessage,
+  runHooks,
+} from "./hooks.js";
 import {
   DEFAULT_MAX_RESULT_CHARS,
   DEFAULT_MAX_RESULT_TOKENS,
@@ -220,6 +225,9 @@ export class CacheFirstLoop {
 
   private _turnSelfCorrected = false;
   private _foldedThisTurn = false;
+  private _preModelBlockCount = 0;
+  private _turnEndBlockCount = 0;
+  private _sessionStartExecuted = false;
   private context!: ContextManager;
   private _lastCacheShape: CacheShapeSnapshot | null = null;
 
@@ -782,6 +790,80 @@ export class CacheFirstLoop {
 
     this._turn++;
     this.scratch.reset();
+
+    if (!this._sessionStartExecuted) {
+      this._sessionStartExecuted = true;
+      if (this.hooks.some((h) => h.event === "SessionStart")) {
+        try {
+          const sessionStartReport = await runHooks({
+            hooks: this.hooks,
+            payload: {
+              event: "SessionStart",
+              cwd: this.hookCwd,
+              sessionName: this.sessionName ?? undefined,
+              turn: 0,
+            },
+          });
+          const fragments = sessionStartReport.outcomes
+            .filter((o) => o.decision === "pass" && o.stdout.trim())
+            .map((o) => o.stdout.trim().slice(0, 4096));
+          if (fragments.length > 0) {
+            this.prefix.replaceSystem(
+              `${this.prefix.system}\n\n[Session context]\n${fragments.join("\n")}`,
+            );
+          }
+          for (const o of sessionStartReport.outcomes) {
+            if (o.decision !== "pass") {
+              yield {
+                turn: this._turn,
+                role: "warning" as const,
+                content: formatHookOutcomeMessage(o),
+              };
+            }
+          }
+        } catch (err) {
+          const msg = (err as Error).message ?? String(err);
+          console.warn(`[hooks] SessionStart error: ${msg}`);
+          yield {
+            turn: this._turn,
+            role: "warning" as const,
+            content: `[hooks] SessionStart error: ${msg}`,
+          };
+        }
+      }
+    }
+
+    if (this.hooks.some((h) => h.event === "TurnStart")) {
+      const turnStartReport = await runHooks({
+        hooks: this.hooks,
+        payload: {
+          event: "TurnStart",
+          cwd: this.hookCwd,
+          turn: this._turn,
+        },
+      });
+      if (turnStartReport.blocked) {
+        const blocking = turnStartReport.outcomes[turnStartReport.outcomes.length - 1];
+        const reason = (blocking?.stderr || blocking?.stdout || "TurnStart hook blocked").trim();
+        yield {
+          turn: this._turn,
+          role: "warning" as const,
+          content: `[hook block] ${blocking?.hook.command ?? "<unknown>"}\n${reason}`,
+        };
+        this._steerQueue.length = 0;
+        return;
+      }
+      for (const o of turnStartReport.outcomes) {
+        if (o.decision !== "pass") {
+          yield {
+            turn: this._turn,
+            role: "warning" as const,
+            content: formatHookOutcomeMessage(o),
+          };
+        }
+      }
+    }
+
     // A fresh user turn is a new intent — don't let StormBreaker's
     // old sliding window of (name, args) signatures keep blocking
     // calls that are now legitimately on-task. The window repopulates
@@ -789,6 +871,8 @@ export class CacheFirstLoop {
     this.repair.resetStorm();
     this._turnSelfCorrected = false;
     this._foldedThisTurn = false;
+    this._preModelBlockCount = 0;
+    this._turnEndBlockCount = 0;
     // Fresh controller for this turn: the prior step's signal has
     // already fired (or stayed clean); either way we don't want its
     // state to bleed into the new turn.
@@ -935,6 +1019,56 @@ export class CacheFirstLoop {
           role: "steer",
           content: steer,
         };
+      }
+
+      if (this.hooks.some((h) => h.event === "PreModelCall")) {
+        const preModelReport = await runHooks({
+          hooks: this.hooks,
+          payload: {
+            event: "PreModelCall",
+            cwd: this.hookCwd,
+            turn: this._turn,
+            model: this.model,
+            modelMessages: messages.map((m) => ({
+              role: m.role,
+              content: typeof m.content === "string" ? m.content : JSON.stringify(m.content),
+            })),
+          },
+        });
+        if (preModelReport.blocked) {
+          this._preModelBlockCount++;
+          const blocking = preModelReport.outcomes[preModelReport.outcomes.length - 1];
+          const reason = (
+            blocking?.stderr ||
+            blocking?.stdout ||
+            "PreModelCall hook blocked"
+          ).trim();
+          if (this._preModelBlockCount >= 3) {
+            yield {
+              turn: this._turn,
+              role: "warning" as const,
+              content: `[hook block] PreModelCall blocked ${this._preModelBlockCount} consecutive times — aborting turn to prevent infinite loop. ${reason}`,
+            };
+            this._steerQueue.length = 0;
+            return;
+          }
+          yield {
+            turn: this._turn,
+            role: "warning" as const,
+            content: `[hook block] PreModelCall: ${reason}`,
+          };
+          continue;
+        }
+        this._preModelBlockCount = 0;
+        for (const o of preModelReport.outcomes) {
+          if (o.decision !== "pass") {
+            yield {
+              turn: this._turn,
+              role: "warning" as const,
+              content: formatHookOutcomeMessage(o),
+            };
+          }
+        }
       }
 
       let assistantContent = "";
@@ -1090,6 +1224,39 @@ export class CacheFirstLoop {
 
       this.scratch.reasoning = reasoningContent || null;
 
+      if (this.hooks.some((h) => h.event === "PostModelCall")) {
+        const postModelReport = await runHooks({
+          hooks: this.hooks,
+          payload: {
+            event: "PostModelCall",
+            cwd: this.hookCwd,
+            turn: this._turn,
+            modelResponse: {
+              role: "assistant",
+              content: assistantContent,
+              reasoning_content: reasoningContent || undefined,
+            },
+            usage: usage
+              ? {
+                  promptTokens: usage.promptTokens,
+                  completionTokens: usage.completionTokens,
+                  cacheHitTokens: usage.promptCacheHitTokens ?? 0,
+                  cacheMissTokens: usage.promptCacheMissTokens ?? 0,
+                }
+              : undefined,
+          },
+        });
+        for (const o of postModelReport.outcomes) {
+          if (o.decision !== "pass") {
+            yield {
+              turn: this._turn,
+              role: "warning" as const,
+              content: formatHookOutcomeMessage(o),
+            };
+          }
+        }
+      }
+
       const { calls: repairedCalls, report } = this.repair.process(
         toolCalls,
         reasoningContent || null,
@@ -1165,6 +1332,82 @@ export class CacheFirstLoop {
           }
           return;
         }
+
+        if (this.hooks.some((h) => h.event === "TurnEnd")) {
+          const turnEndReport = await runHooks({
+            hooks: this.hooks,
+            payload: {
+              event: "TurnEnd",
+              cwd: this.hookCwd,
+              turn: this._turn,
+              lastAssistantText: assistantContent,
+              last_assistant_message: assistantContent,
+            },
+          });
+          if (turnEndReport.blocked) {
+            this._turnEndBlockCount++;
+            const blocking = turnEndReport.outcomes[turnEndReport.outcomes.length - 1];
+            const reason = (blocking?.stderr || blocking?.stdout || "TurnEnd hook blocked").trim();
+            if (this._turnEndBlockCount >= 3) {
+              yield {
+                turn: this._turn,
+                role: "warning" as const,
+                content: `[hook gate] TurnEnd blocked ${this._turnEndBlockCount} consecutive times — ending turn to prevent infinite loop. ${reason}`,
+              };
+              yield { turn: this._turn, role: "done", content: assistantContent };
+              this._steerQueue.length = 0;
+              return;
+            }
+            yield {
+              turn: this._turn,
+              role: "warning" as const,
+              content: `[hook gate] TurnEnd rejected assistant_final — ${reason}`,
+            };
+
+            const injectMessages: string[] = [];
+            const warnMessages: string[] = [];
+            for (const o of turnEndReport.outcomes) {
+              if (typeof o.stdout === "string" && o.stdout) {
+                for (const m of o.stdout.matchAll(/@@INJECT:\s*(.*?)(?:\n|$)/g)) {
+                  if (m[1]?.trim()) injectMessages.push(m[1].trim());
+                }
+                for (const m of o.stdout.matchAll(/@@WARN:\s*(.*?)(?:\n|$)/g)) {
+                  if (m[1]?.trim()) warnMessages.push(m[1].trim());
+                }
+              }
+            }
+
+            for (const w of warnMessages) {
+              yield { turn: this._turn, role: "warning" as const, content: w };
+            }
+
+            if (injectMessages.length > 0) {
+              this.appendAndPersist({
+                role: "user" as const,
+                content: injectMessages.join("\n"),
+              });
+            } else {
+              this.appendAndPersist({
+                role: "user" as const,
+                content: `[TurnEnd gate] The previous response was rejected. Reason: ${reason}. Please address the feedback and respond differently.`,
+              });
+            }
+
+            this._steerQueue.push(`[TurnEnd hook blocked] ${reason}`);
+            continue;
+          }
+          this._turnEndBlockCount = 0;
+          for (const o of turnEndReport.outcomes) {
+            if (o.decision !== "pass") {
+              yield {
+                turn: this._turn,
+                role: "warning" as const,
+                content: formatHookOutcomeMessage(o),
+              };
+            }
+          }
+        }
+
         restoreModelIfNeeded();
         yield { turn: this._turn, role: "done", content: assistantContent };
         this._steerQueue.length = 0;
@@ -1223,6 +1466,11 @@ export class CacheFirstLoop {
         }
         return;
       }
+
+      // Successful tool dispatch means the model did useful work between
+      // consecutive TurnEnd blocks — reset counter to measure truly
+      // consecutive blocks only (V-TE-03).
+      this._turnEndBlockCount = 0;
 
       yield* dispatchToolCallsChunked(repairedCalls, {
         turn: this._turn,

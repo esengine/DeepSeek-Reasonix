@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  BLOCKING_EVENTS,
+  HOOK_EVENTS,
   type HookSpawnInput,
   type HookSpawnResult,
   type ResolvedHook,
@@ -307,6 +309,74 @@ describe("runHooks", () => {
     expect(log[1]?.timeoutMs).toBe(30_000);
   });
 
+  it("TurnStart is a blocking event (exit code 2 → block)", async () => {
+    const spawner = makeSpawner([ok({ exitCode: 2, stderr: "nope" })]);
+    const report = await runHooks({
+      hooks: [hook({ event: "TurnStart", command: "gate" })],
+      spawner,
+      payload: { event: "TurnStart", cwd: "/tmp", turn: 1 },
+    });
+    expect(report.blocked).toBe(true);
+  });
+
+  it("PreModelCall is a blocking event (exit code 2 → block)", async () => {
+    const spawner = makeSpawner([ok({ exitCode: 2, stderr: "budget" })]);
+    const report = await runHooks({
+      hooks: [hook({ event: "PreModelCall", command: "budget-check" })],
+      spawner,
+      payload: { event: "PreModelCall", cwd: "/tmp", turn: 1, model: "deepseek-r1" },
+    });
+    expect(report.blocked).toBe(true);
+  });
+
+  it("TurnEnd is a blocking event (exit code 2 → block)", async () => {
+    const spawner = makeSpawner([ok({ exitCode: 2, stderr: "incomplete" })]);
+    const report = await runHooks({
+      hooks: [hook({ event: "TurnEnd", command: "completeness" })],
+      spawner,
+      payload: {
+        event: "TurnEnd",
+        cwd: "/tmp",
+        turn: 1,
+        lastAssistantText: "partial answer",
+      },
+    });
+    expect(report.blocked).toBe(true);
+  });
+
+  it("PostModelCall is a non-blocking event (exit code 2 → warn, not block)", async () => {
+    const spawner = makeSpawner([ok({ exitCode: 2, stderr: "log" })]);
+    const report = await runHooks({
+      hooks: [hook({ event: "PostModelCall", command: "logger" })],
+      spawner,
+      payload: { event: "PostModelCall", cwd: "/tmp", turn: 1 },
+    });
+    expect(report.blocked).toBe(false);
+    expect(report.outcomes[0]?.decision).toBe("warn");
+  });
+
+  it("new events use their configured default timeouts", async () => {
+    const log: HookSpawnInput[] = [];
+    const spawner = makeSpawner([ok(), ok(), ok(), ok(), ok()], log);
+    const h: ResolvedHook[] = [
+      hook({ event: "SessionStart", command: "s" }),
+      hook({ event: "TurnStart", command: "ts" }),
+      hook({ event: "PreModelCall", command: "pm" }),
+      hook({ event: "PostModelCall", command: "pom" }),
+      hook({ event: "TurnEnd", command: "te" }),
+    ];
+    await runHooks({ hooks: [h[0]!], spawner, payload: { event: "SessionStart", cwd: "/tmp" } });
+    await runHooks({ hooks: [h[1]!], spawner, payload: { event: "TurnStart", cwd: "/tmp" } });
+    await runHooks({ hooks: [h[2]!], spawner, payload: { event: "PreModelCall", cwd: "/tmp" } });
+    await runHooks({ hooks: [h[3]!], spawner, payload: { event: "PostModelCall", cwd: "/tmp" } });
+    await runHooks({ hooks: [h[4]!], spawner, payload: { event: "TurnEnd", cwd: "/tmp" } });
+    expect(log[0]?.timeoutMs).toBe(10_000);
+    expect(log[1]?.timeoutMs).toBe(5_000);
+    expect(log[2]?.timeoutMs).toBe(10_000);
+    expect(log[3]?.timeoutMs).toBe(30_000);
+    expect(log[4]?.timeoutMs).toBe(10_000);
+  });
+
   it("per-hook timeout overrides the default", async () => {
     const log: HookSpawnInput[] = [];
     const spawner = makeSpawner([ok()], log);
@@ -416,5 +486,52 @@ describe("runHooks output truncation", () => {
       spawner,
     });
     expect(report.outcomes[0]?.truncated).toBeUndefined();
+  });
+});
+
+describe("V-TE-05: HookEvent phase type synchronization", () => {
+  it("HOOK_EVENTS array matches all phase values in events.ts and hooks-events.ts", () => {
+    const canonicalPhases = new Set<string>(HOOK_EVENTS);
+
+    const eventsTsPhases = new Set<string>([
+      "SessionStart",
+      "TurnStart",
+      "PreToolUse",
+      "PostToolUse",
+      "UserPromptSubmit",
+      "PreModelCall",
+      "PostModelCall",
+      "TurnEnd",
+      "Stop",
+      "SessionEnd",
+    ]);
+
+    const hooksEventsTsPhases = new Set<string>([
+      "SessionStart",
+      "TurnStart",
+      "PreToolUse",
+      "PostToolUse",
+      "UserPromptSubmit",
+      "PreModelCall",
+      "PostModelCall",
+      "TurnEnd",
+      "Stop",
+      "SessionEnd",
+    ]);
+
+    expect(canonicalPhases).toEqual(eventsTsPhases);
+    expect(canonicalPhases).toEqual(hooksEventsTsPhases);
+  });
+
+  it("HOOK_EVENTS array has no duplicates", () => {
+    const unique = new Set(HOOK_EVENTS);
+    expect(unique.size).toBe(HOOK_EVENTS.length);
+  });
+
+  it("BLOCKING_EVENTS is a subset of HOOK_EVENTS", () => {
+    const allEvents = new Set<string>(HOOK_EVENTS);
+    for (const b of BLOCKING_EVENTS) {
+      expect(allEvents.has(b)).toBe(true);
+    }
   });
 });

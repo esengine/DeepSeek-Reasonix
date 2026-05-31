@@ -115,4 +115,281 @@ describe("CacheFirstLoop hook wiring", () => {
     expect(events.find((e) => e.role === "warning")).toBeUndefined();
     expect(events.find((e) => e.role === "assistant_final")?.content).toBe("just chatting");
   });
+
+  it("TurnEnd @@INJECT protocol injects user message", async () => {
+    const client = makeClient([{ content: "first response" }, { content: "corrected response" }]);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: false,
+      hooks: [
+        {
+          event: "TurnEnd",
+          scope: "global",
+          source: "/x",
+          command: "echo @@INJECT: Fix the TODO markers && exit 2",
+        },
+      ],
+    });
+    const events: LoopEvent[] = [];
+    for await (const ev of loop.step("test")) events.push(ev);
+    const doneEvent = events.find((e) => e.role === "done");
+    expect(doneEvent).toBeDefined();
+    const warnings = events.filter((e) => e.role === "warning");
+    expect(warnings.some((w) => w.content.includes("TurnEnd rejected"))).toBe(true);
+  });
+
+  it("TurnEnd @@WARN protocol yields warning", async () => {
+    const client = makeClient([{ content: "first response" }, { content: "corrected response" }]);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: false,
+      hooks: [
+        {
+          event: "TurnEnd",
+          scope: "global",
+          source: "/x",
+          command: "echo @@WARN: Quality check failed && exit 2",
+        },
+      ],
+    });
+    const events: LoopEvent[] = [];
+    for await (const ev of loop.step("test")) events.push(ev);
+    const doneEvent = events.find((e) => e.role === "done");
+    expect(doneEvent).toBeDefined();
+    const warnings = events.filter((e) => e.role === "warning");
+    expect(warnings.some((w) => w.content.includes("Quality check failed"))).toBe(true);
+  });
+
+  it("TurnEnd without @@INJECT uses default message", async () => {
+    const client = makeClient([{ content: "first response" }, { content: "corrected response" }]);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: false,
+      hooks: [
+        {
+          event: "TurnEnd",
+          scope: "global",
+          source: "/x",
+          command: "exit 2",
+        },
+      ],
+    });
+    const events: LoopEvent[] = [];
+    for await (const ev of loop.step("test")) events.push(ev);
+    const doneEvent = events.find((e) => e.role === "done");
+    expect(doneEvent).toBeDefined();
+    const warnings = events.filter((e) => e.role === "warning");
+    expect(warnings.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("PreModelCall blocked 3 consecutive times aborts the turn", async () => {
+    const client = makeClient([
+      { content: "response 1" },
+      { content: "response 2" },
+      { content: "response 3" },
+      { content: "response 4" },
+    ]);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: false,
+      hooks: [
+        {
+          event: "PreModelCall",
+          scope: "global",
+          source: "/x",
+          command: "exit 2",
+        },
+      ],
+    });
+    const events: LoopEvent[] = [];
+    for await (const ev of loop.step("test")) events.push(ev);
+    const warnings = events.filter((e) => e.role === "warning");
+    expect(warnings.length).toBeGreaterThanOrEqual(1);
+    expect(warnings.some((w) => w.content.includes("PreModelCall blocked"))).toBe(true);
+    expect(events.some((e) => e.role === "done")).toBe(false);
+  });
+
+  it("PreModelCall blocked twice then passing does not abort", async () => {
+    let blockCount = 0;
+    const client = makeClient([
+      { content: "blocked 1" },
+      { content: "blocked 2" },
+      { content: "final answer" },
+    ]);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: false,
+      hooks: [
+        {
+          event: "PreModelCall",
+          scope: "global",
+          source: "/x",
+          command: "exit 2",
+        },
+      ],
+    });
+    const events: LoopEvent[] = [];
+    for await (const ev of loop.step("test")) {
+      events.push(ev);
+      if (ev.role === "warning" && ev.content.includes("PreModelCall")) {
+        blockCount++;
+        if (blockCount >= 2) {
+          loop.hooks = [];
+        }
+      }
+    }
+    const doneEvent = events.find((e) => e.role === "done");
+    expect(doneEvent).toBeDefined();
+    expect(blockCount).toBe(2);
+  });
+
+  it("TurnEnd gate blocks then allows on next iteration", async () => {
+    let blockCount = 0;
+    const client = makeClient([{ content: "first response" }, { content: "corrected response" }]);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: false,
+      hooks: [
+        {
+          event: "TurnEnd",
+          scope: "global",
+          source: "/x",
+          command: "exit 2",
+        },
+      ],
+    });
+    const events: LoopEvent[] = [];
+    for await (const ev of loop.step("test")) {
+      events.push(ev);
+      if (ev.role === "warning" && ev.content.includes("TurnEnd")) {
+        blockCount++;
+        if (blockCount >= 1) {
+          loop.hooks = [];
+        }
+      }
+    }
+    const doneEvent = events.find((e) => e.role === "done");
+    expect(doneEvent).toBeDefined();
+    expect(blockCount).toBe(1);
+  });
+
+  it("TurnEnd 3-strike guard forces turn end after 3 consecutive blocks", async () => {
+    const client = makeClient([
+      { content: "response 1" },
+      { content: "response 2" },
+      { content: "response 3" },
+      { content: "response 4" },
+    ]);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: false,
+      hooks: [
+        {
+          event: "TurnEnd",
+          scope: "global",
+          source: "/x",
+          command: "exit 2",
+        },
+      ],
+    });
+    const events: LoopEvent[] = [];
+    for await (const ev of loop.step("test")) events.push(ev);
+    const doneEvent = events.find((e) => e.role === "done");
+    expect(doneEvent).toBeDefined();
+    const warnings = events.filter((e) => e.role === "warning");
+    const has3StrikeMsg = warnings.some((w) => w.content.includes("3 consecutive times"));
+    expect(has3StrikeMsg).toBe(true);
+  });
+
+  it("SessionStart hook stdout is injected into system prompt", async () => {
+    const client = makeClient([{ content: "hello" }]);
+    const prefix = new ImmutablePrefix({ system: "original system" });
+    const loop = new CacheFirstLoop({
+      client,
+      prefix,
+      stream: false,
+      hooks: [
+        {
+          event: "SessionStart",
+          scope: "global",
+          source: "/x",
+          command: "echo injected-context-from-hook",
+        },
+      ],
+    });
+    const events: LoopEvent[] = [];
+    for await (const ev of loop.step("test")) events.push(ev);
+    expect(prefix.system).toContain("injected-context-from-hook");
+    expect(prefix.system).toContain("[Session context]");
+    expect(prefix.system).toContain("original system");
+  });
+
+  it("SessionStart hook only runs once across multiple steps", async () => {
+    const client1 = makeClient([{ content: "first" }]);
+    const client2 = makeClient([{ content: "second" }]);
+    const prefix = new ImmutablePrefix({ system: "s" });
+    const loop = new CacheFirstLoop({
+      client: client1,
+      prefix,
+      stream: false,
+      hooks: [
+        {
+          event: "SessionStart",
+          scope: "global",
+          source: "/x",
+          command: "echo once-only",
+        },
+      ],
+    });
+    for await (const ev of loop.step("test")) {
+    }
+    const systemAfterFirst = prefix.system;
+    expect(systemAfterFirst).toContain("once-only");
+
+    loop.client = client2;
+    for await (const ev of loop.step("test2")) {
+    }
+    expect(prefix.system).toBe(systemAfterFirst);
+  });
+
+  it("SessionStart hook with no stdout does not modify system prompt", async () => {
+    const client = makeClient([{ content: "hello" }]);
+    const prefix = new ImmutablePrefix({ system: "original" });
+    const loop = new CacheFirstLoop({
+      client,
+      prefix,
+      stream: false,
+      hooks: [
+        {
+          event: "SessionStart",
+          scope: "global",
+          source: "/x",
+          command: "exit 0",
+        },
+      ],
+    });
+    for await (const ev of loop.step("test")) {
+    }
+    expect(prefix.system).toBe("original");
+  });
+
+  it("no SessionStart hook means zero overhead", async () => {
+    const client = makeClient([{ content: "hello" }]);
+    const prefix = new ImmutablePrefix({ system: "original" });
+    const loop = new CacheFirstLoop({
+      client,
+      prefix,
+      stream: false,
+    });
+    for await (const ev of loop.step("test")) {
+    }
+    expect(prefix.system).toBe("original");
+  });
 });

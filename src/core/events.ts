@@ -156,7 +156,18 @@ export interface CheckpointRestoredEvent extends EventBase {
 export interface HookFiredEvent extends EventBase {
   type: "hook.fired";
   hookName: string;
-  phase: "PreToolUse" | "PostToolUse" | "UserPromptSubmit" | "Stop";
+  /** Must match HookEvent type in src/hooks.ts — keep in sync (V-TE-05). */
+  phase:
+    | "SessionStart"
+    | "TurnStart"
+    | "PreToolUse"
+    | "PostToolUse"
+    | "UserPromptSubmit"
+    | "PreModelCall"
+    | "PostModelCall"
+    | "TurnEnd"
+    | "Stop"
+    | "SessionEnd";
   outcome: "ok" | "blocked" | "modified" | "error";
 }
 
