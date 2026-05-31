@@ -37,17 +37,17 @@ func New(ctrl *control.Controller, bc *Broadcaster) *Server {
 // CORS is NOT applied by default — same-origin policy protects the unauthenticated
 // agent endpoints. Call HandlerWithCORS to opt in for local development.
 func (s *Server) Handler() http.Handler {
-	return s.handler(false)
+	return s.handler()
 }
 
 // HandlerWithCORS returns the same routes as Handler but adds permissive CORS
 // headers so a dev frontend on a different origin (e.g. Vite on :5173) can
 // reach the server. Do NOT use in production — the server has no auth.
 func (s *Server) HandlerWithCORS(origin string) http.Handler {
-	return corsMiddleware(s.handler(false), origin)
+	return corsMiddleware(s.handler(), origin)
 }
 
-func (s *Server) handler(_ bool) http.Handler {
+func (s *Server) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", s.index)
 	mux.HandleFunc("GET /events", s.events)
