@@ -61,6 +61,10 @@ model          = "claude-opus-4-8"
 api_key_env    = "ANTHROPIC_API_KEY"
 context_window = 1000000
 price          = { cache_hit = 0.5, input = 5, output = 25, currency = "$" }   # per 1M tokens
+# Extended thinking (anthropic kind only; round-trips the signed reasoning block
+# across tool calls). Omit to disable. effort: low | medium | high | xhigh | max.
+thinking       = "adaptive"
+effort         = "high"
 
 [tools]
 enabled = []   # empty = all built-in tools

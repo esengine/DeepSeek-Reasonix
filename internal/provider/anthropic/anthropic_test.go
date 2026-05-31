@@ -222,6 +222,112 @@ func TestReadStreamError(t *testing.T) {
 	}
 }
 
+// TestBuildRequestThinking checks that, with thinking enabled, the request carries
+// the adaptive thinking + effort config and the prior assistant turn's signed
+// thinking block is replayed first (before its tool_use).
+func TestBuildRequestThinking(t *testing.T) {
+	c := &client{model: "claude-opus-4-8", thinking: "adaptive", effort: "high"}
+	r := c.buildRequest(provider.Request{
+		Messages: []provider.Message{
+			{Role: provider.RoleUser, Content: "weather?"},
+			{Role: provider.RoleAssistant, ReasoningContent: "Let me check.", ReasoningSignature: "sig-abc",
+				ToolCalls: []provider.ToolCall{{ID: "t1", Name: "get_weather", Arguments: `{"city":"Paris"}`}}},
+			{Role: provider.RoleTool, ToolCallID: "t1", Content: "sunny"},
+		},
+	})
+	if r.Thinking == nil || r.Thinking.Type != "adaptive" || r.Thinking.Display != "summarized" {
+		t.Fatalf("thinking config = %+v", r.Thinking)
+	}
+	if r.OutputConfig == nil || r.OutputConfig.Effort != "high" {
+		t.Fatalf("output config = %+v", r.OutputConfig)
+	}
+	asst := r.Messages[1]
+	if asst.Role != "assistant" || len(asst.Content) != 2 {
+		t.Fatalf("assistant msg = %+v", asst)
+	}
+	if asst.Content[0].Type != "thinking" || asst.Content[0].Thinking != "Let me check." || asst.Content[0].Signature != "sig-abc" {
+		t.Fatalf("first block should be the signed thinking block: %+v", asst.Content[0])
+	}
+	if asst.Content[1].Type != "tool_use" {
+		t.Fatalf("tool_use should follow the thinking block: %+v", asst.Content[1])
+	}
+}
+
+// TestBuildRequestThinkingOff is the default: no thinking field, and reasoning is
+// NOT replayed (even with a signature present) since the model wasn't asked to think.
+func TestBuildRequestThinkingOff(t *testing.T) {
+	c := &client{model: "claude-opus-4-8"}
+	r := c.buildRequest(provider.Request{Messages: []provider.Message{
+		{Role: provider.RoleUser, Content: "hi"},
+		{Role: provider.RoleAssistant, Content: "ok", ReasoningContent: "x", ReasoningSignature: "sig"},
+	}})
+	if r.Thinking != nil || r.OutputConfig != nil {
+		t.Fatalf("thinking should be off by default: %+v / %+v", r.Thinking, r.OutputConfig)
+	}
+	for _, b := range r.Messages[1].Content {
+		if b.Type == "thinking" {
+			t.Fatal("thinking block must not be replayed when thinking is off")
+		}
+	}
+}
+
+const sseThinking = `event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Let me "}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"think."}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"SIG123"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Hi"}}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":10}}
+
+event: message_stop
+data: {"type":"message_stop"}
+`
+
+// TestReadStreamThinking checks thinking_delta streams as reasoning text and
+// signature_delta carries the signature back on a ChunkReasoning.
+func TestReadStreamThinking(t *testing.T) {
+	c := &client{name: "anthropic"}
+	resp := &http.Response{Body: io.NopCloser(strings.NewReader(sseThinking))}
+	ch := make(chan provider.Chunk)
+	go c.readStream(resp, ch)
+
+	var reasoning, text strings.Builder
+	var sig string
+	for ck := range ch {
+		switch ck.Type {
+		case provider.ChunkReasoning:
+			reasoning.WriteString(ck.Text)
+			if ck.Signature != "" {
+				sig = ck.Signature
+			}
+		case provider.ChunkText:
+			text.WriteString(ck.Text)
+		}
+	}
+	if reasoning.String() != "Let me think." {
+		t.Fatalf("reasoning = %q", reasoning.String())
+	}
+	if sig != "SIG123" {
+		t.Fatalf("signature = %q", sig)
+	}
+	if text.String() != "Hi" {
+		t.Fatalf("text = %q", text.String())
+	}
+}
+
 // Ensure the package wires into the registry under the expected kind.
 func TestRegistered(t *testing.T) {
 	p, err := provider.New("anthropic", provider.Config{Model: "claude-opus-4-8", Name: "claude"})

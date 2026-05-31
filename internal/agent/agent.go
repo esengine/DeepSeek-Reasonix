@@ -275,7 +275,7 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 	a.session.Add(provider.Message{Role: provider.RoleUser, Content: input})
 
 	for step := 0; a.maxSteps <= 0 || step < a.maxSteps; step++ {
-		text, reasoning, calls, usage, err := a.stream(ctx)
+		text, reasoning, signature, calls, usage, err := a.stream(ctx)
 		if err != nil {
 			return err
 		}
@@ -292,10 +292,11 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 		// when building the request, since DeepSeek bills re-sent reasoning as
 		// ordinary prompt input (~500 tok/turn) for no cache or coherence gain.
 		a.session.Add(provider.Message{
-			Role:             provider.RoleAssistant,
-			Content:          text,
-			ReasoningContent: reasoning,
-			ToolCalls:        calls,
+			Role:               provider.RoleAssistant,
+			Content:            text,
+			ReasoningContent:   reasoning,
+			ReasoningSignature: signature,
+			ToolCalls:          calls,
 		})
 
 		if len(calls) == 0 {
@@ -327,24 +328,30 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 // stream so a sink can re-render the streamed raw text as styled markdown. The
 // accumulated text and reasoning are also returned so the caller can round-trip
 // reasoning on the next turn.
-func (a *Agent) stream(ctx context.Context) (string, string, []provider.ToolCall, *provider.Usage, error) {
+func (a *Agent) stream(ctx context.Context) (string, string, string, []provider.ToolCall, *provider.Usage, error) {
 	ch, err := a.prov.Stream(ctx, provider.Request{
 		Messages:    a.session.Messages,
 		Tools:       a.tools.Schemas(),
 		Temperature: a.temperature,
 	})
 	if err != nil {
-		return "", "", nil, nil, err
+		return "", "", "", nil, nil, err
 	}
 
 	var text, reasoning strings.Builder
+	var signature string // provider-issued proof for the reasoning (Anthropic thinking)
 	var calls []provider.ToolCall
 	var usage *provider.Usage
 	for chunk := range ch {
 		switch chunk.Type {
 		case provider.ChunkReasoning:
 			reasoning.WriteString(chunk.Text)
-			a.sink.Emit(event.Event{Kind: event.Reasoning, Text: chunk.Text})
+			if chunk.Signature != "" {
+				signature = chunk.Signature
+			}
+			if chunk.Text != "" {
+				a.sink.Emit(event.Event{Kind: event.Reasoning, Text: chunk.Text})
+			}
 		case provider.ChunkText:
 			text.WriteString(chunk.Text)
 			a.sink.Emit(event.Event{Kind: event.Text, Text: chunk.Text})
@@ -366,7 +373,7 @@ func (a *Agent) stream(ctx context.Context) (string, string, []provider.ToolCall
 			a.sessCacheHit += chunk.Usage.CacheHitTokens
 			a.sessCacheMiss += chunk.Usage.CacheMissTokens
 		case provider.ChunkError:
-			return "", "", nil, nil, chunk.Err
+			return "", "", "", nil, nil, chunk.Err
 		}
 	}
 	// Close the text stream: a sink may re-render the streamed raw text as
@@ -375,7 +382,7 @@ func (a *Agent) stream(ctx context.Context) (string, string, []provider.ToolCall
 	if text.Len() > 0 || reasoning.Len() > 0 {
 		a.sink.Emit(event.Event{Kind: event.Message, Text: text.String(), Reasoning: reasoning.String()})
 	}
-	return text.String(), reasoning.String(), calls, usage, nil
+	return text.String(), reasoning.String(), signature, calls, usage, nil
 }
 
 // executeBatch dispatches one model turn's tool calls. A ToolDispatch event is

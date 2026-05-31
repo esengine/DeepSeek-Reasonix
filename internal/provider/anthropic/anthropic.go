@@ -3,15 +3,15 @@
 // self-registers under the "anthropic" kind, so any Claude model is a config
 // instance rather than code.
 //
-// Two deliberate v1 scope limits, both driven by the transport-agnostic
-// provider.Message abstraction:
+// Two notes, both rooted in the transport-agnostic provider.Message abstraction:
 //
-//   - No extended/adaptive thinking. Anthropic requires the signed `thinking`
-//     block be replayed on the next turn when a tool call followed thinking;
-//     provider.Message.ReasoningContent is a plain string with no signature, so it
-//     can't be round-tripped faithfully. Since reasonix is tool-heavy, enabling
-//     thinking would break multi-turn tool use — so the `thinking` field is omitted
-//     entirely. (Supporting it means extending Message to carry the signed block.)
+//   - Extended thinking is opt-in (provider config thinking="adaptive"). Anthropic
+//     requires the *signed* thinking block be replayed on the next turn when a tool
+//     call followed thinking, so Message carries ReasoningSignature alongside
+//     ReasoningContent and this provider replays the signed block on the next
+//     request. Off by default because the field is Anthropic-specific — an
+//     OpenAI-compatible gateway (e.g. DeepSeek's) would reject it. (redacted_thinking
+//     blocks are not yet captured/replayed.)
 //   - No temperature/top_p. Current Claude models (Opus 4.8/4.7) reject sampling
 //     parameters with a 400; Anthropic steers behavior via prompting instead.
 package anthropic
@@ -63,23 +63,29 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		baseURL = defaultBaseURL
 	}
 	keyEnv, _ := cfg.Extra["api_key_env"].(string) // for actionable auth errors
+	thinking, _ := cfg.Extra["thinking"].(string)
+	effort, _ := cfg.Extra["effort"].(string)
 	return &client{
-		name:    name,
-		apiKey:  cfg.APIKey,
-		keyEnv:  keyEnv,
-		baseURL: strings.TrimRight(baseURL, "/"),
-		model:   cfg.Model,
-		http:    &http.Client{}, // no overall timeout; lifecycle is ctx-driven
+		name:     name,
+		apiKey:   cfg.APIKey,
+		keyEnv:   keyEnv,
+		baseURL:  strings.TrimRight(baseURL, "/"),
+		model:    cfg.Model,
+		thinking: thinking,
+		effort:   effort,
+		http:     &http.Client{}, // no overall timeout; lifecycle is ctx-driven
 	}, nil
 }
 
 type client struct {
-	name    string
-	apiKey  string
-	keyEnv  string // api_key_env name, surfaced in auth errors
-	baseURL string
-	model   string
-	http    *http.Client
+	name     string
+	apiKey   string
+	keyEnv   string // api_key_env name, surfaced in auth errors
+	baseURL  string
+	model    string
+	thinking string // "adaptive" enables extended thinking; "" = off (config-driven)
+	effort   string // output_config.effort: low|medium|high|xhigh|max; "" = provider default
+	http     *http.Client
 }
 
 func (c *client) Name() string { return c.name }
@@ -210,6 +216,13 @@ func (c *client) buildRequest(req provider.Request) anthRequest {
 			appendBlocks("user", contentBlock{Type: "tool_result", ToolUseID: m.ToolCallID, Content: content})
 		case provider.RoleAssistant:
 			var blocks []contentBlock
+			// Replay the signed thinking block first (Anthropic requires it precede
+			// the tool_use it led to). Only when thinking is on and we have both the
+			// text and its signature — reasoning without a signature (e.g. from an
+			// openai-compatible provider) can't be replayed as a thinking block.
+			if c.thinking != "" && m.ReasoningContent != "" && m.ReasoningSignature != "" {
+				blocks = append(blocks, contentBlock{Type: "thinking", Thinking: m.ReasoningContent, Signature: m.ReasoningSignature})
+			}
 			if m.Content != "" {
 				blocks = append(blocks, contentBlock{Type: "text", Text: m.Content})
 			}
@@ -253,7 +266,7 @@ func (c *client) buildRequest(req provider.Request) anthRequest {
 	if maxTokens <= 0 {
 		maxTokens = defaultMaxTokens
 	}
-	return anthRequest{
+	r := anthRequest{
 		Model:     c.model,
 		MaxTokens: maxTokens,
 		System:    system,
@@ -261,6 +274,16 @@ func (c *client) buildRequest(req provider.Request) anthRequest {
 		Tools:     tools,
 		Stream:    true,
 	}
+	// Extended thinking is opt-in and Anthropic-specific (a compatible gateway like
+	// DeepSeek's would reject the field). "summarized" display streams the reasoning
+	// text; the default omits it but still emits the signature we round-trip.
+	if c.thinking == "adaptive" {
+		r.Thinking = &thinkingConfig{Type: "adaptive", Display: "summarized"}
+		if c.effort != "" {
+			r.OutputConfig = &outputConfig{Effort: c.effort}
+		}
+	}
+	return r
 }
 
 // readStream parses the Messages API SSE stream into Chunks. Text deltas emit live;
@@ -320,6 +343,14 @@ func (c *client) readStream(resp *http.Response, out chan<- provider.Chunk) {
 			case "text_delta":
 				if ev.Delta.Text != "" {
 					out <- provider.Chunk{Type: provider.ChunkText, Text: ev.Delta.Text}
+				}
+			case "thinking_delta":
+				if ev.Delta.Thinking != "" {
+					out <- provider.Chunk{Type: provider.ChunkReasoning, Text: ev.Delta.Thinking}
+				}
+			case "signature_delta":
+				if ev.Delta.Signature != "" {
+					out <- provider.Chunk{Type: provider.ChunkReasoning, Signature: ev.Delta.Signature}
 				}
 			case "input_json_delta":
 				if tc := tools[ev.Index]; tc != nil {
@@ -393,12 +424,23 @@ type cacheControl struct {
 }
 
 type anthRequest struct {
-	Model     string        `json:"model"`
-	MaxTokens int           `json:"max_tokens"`
-	System    []textBlock   `json:"system,omitempty"`
-	Messages  []anthMessage `json:"messages"`
-	Tools     []anthTool    `json:"tools,omitempty"`
-	Stream    bool          `json:"stream"`
+	Model        string          `json:"model"`
+	MaxTokens    int             `json:"max_tokens"`
+	System       []textBlock     `json:"system,omitempty"`
+	Messages     []anthMessage   `json:"messages"`
+	Tools        []anthTool      `json:"tools,omitempty"`
+	Thinking     *thinkingConfig `json:"thinking,omitempty"`
+	OutputConfig *outputConfig   `json:"output_config,omitempty"`
+	Stream       bool            `json:"stream"`
+}
+
+type thinkingConfig struct {
+	Type    string `json:"type"`              // "adaptive"
+	Display string `json:"display,omitempty"` // "summarized" to stream the reasoning text
+}
+
+type outputConfig struct {
+	Effort string `json:"effort,omitempty"` // low | medium | high | xhigh | max
 }
 
 type textBlock struct {
@@ -418,6 +460,8 @@ type anthMessage struct {
 type contentBlock struct {
 	Type         string          `json:"type"`
 	Text         string          `json:"text,omitempty"`        // text
+	Thinking     string          `json:"thinking,omitempty"`    // thinking
+	Signature    string          `json:"signature,omitempty"`   // thinking
 	ID           string          `json:"id,omitempty"`          // tool_use
 	Name         string          `json:"name,omitempty"`        // tool_use
 	Input        json.RawMessage `json:"input,omitempty"`       // tool_use
@@ -446,8 +490,10 @@ type streamEvent struct {
 		Name string `json:"name"`
 	} `json:"content_block"`
 	Delta *struct {
-		Type        string `json:"type"`         // text_delta | input_json_delta | thinking_delta
+		Type        string `json:"type"`         // text_delta | thinking_delta | signature_delta | input_json_delta
 		Text        string `json:"text"`         // text_delta
+		Thinking    string `json:"thinking"`     // thinking_delta
+		Signature   string `json:"signature"`    // signature_delta
 		PartialJSON string `json:"partial_json"` // input_json_delta
 		StopReason  string `json:"stop_reason"`  // message_delta
 	} `json:"delta"`

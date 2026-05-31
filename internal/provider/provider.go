@@ -23,12 +23,18 @@ const (
 
 // Message is a single conversation message.
 type Message struct {
-	Role             Role       `json:"role"`
-	Content          string     `json:"content,omitempty"`
-	ReasoningContent string     `json:"reasoning_content,omitempty"` // assistant: thinking-mode chain-of-thought, round-tripped on multi-turn
-	ToolCalls        []ToolCall `json:"tool_calls,omitempty"`        // set by assistant
-	ToolCallID       string     `json:"tool_call_id,omitempty"`      // links a tool result to its call
-	Name             string     `json:"name,omitempty"`              // tool message: tool name
+	Role             Role   `json:"role"`
+	Content          string `json:"content,omitempty"`
+	ReasoningContent string `json:"reasoning_content,omitempty"` // assistant: thinking-mode chain-of-thought, round-tripped on multi-turn
+	// ReasoningSignature is an opaque, provider-issued proof that ReasoningContent
+	// is genuine model output. Anthropic requires the signed thinking block be
+	// replayed on the next turn when a tool call followed thinking; providers
+	// without signed reasoning (e.g. the openai-compatible ones) leave it empty.
+	// Round-tripped alongside ReasoningContent.
+	ReasoningSignature string     `json:"reasoning_signature,omitempty"`
+	ToolCalls          []ToolCall `json:"tool_calls,omitempty"`   // set by assistant
+	ToolCallID         string     `json:"tool_call_id,omitempty"` // links a tool result to its call
+	Name               string     `json:"name,omitempty"`         // tool message: tool name
 }
 
 // ToolCall is a tool invocation requested by the model. Arguments is raw JSON.
@@ -112,11 +118,12 @@ func (p *Pricing) Symbol() string {
 
 // Chunk is a single streamed event. Read the field matching Type.
 type Chunk struct {
-	Type     ChunkType
-	Text     string    // ChunkText, ChunkReasoning
-	ToolCall *ToolCall // ChunkToolCallStart (ID+Name only), ChunkToolCall (complete)
-	Usage    *Usage    // ChunkUsage
-	Err      error     // ChunkError
+	Type      ChunkType
+	Text      string    // ChunkText, ChunkReasoning
+	Signature string    // ChunkReasoning: opaque proof for the reasoning (Anthropic thinking signature), when issued
+	ToolCall  *ToolCall // ChunkToolCallStart (ID+Name only), ChunkToolCall (complete)
+	Usage     *Usage    // ChunkUsage
+	Err       error     // ChunkError
 }
 
 // Provider is a chat-capable model backend.

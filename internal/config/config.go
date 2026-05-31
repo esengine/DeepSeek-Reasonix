@@ -143,6 +143,12 @@ type ProviderEntry struct {
 	BalanceURL    string            `toml:"balance_url"` // optional; a provider-specific wallet-balance endpoint (DeepSeek: https://api.deepseek.com/user/balance). Empty = no balance readout.
 	ContextWindow int               `toml:"context_window"`
 	Price         *provider.Pricing `toml:"price"`
+	// Thinking / Effort are provider-kind-specific knobs forwarded to the provider
+	// via Config.Extra. The anthropic provider reads Thinking="adaptive" to enable
+	// extended thinking and Effort ("low".."max") to tune depth; the
+	// openai-compatible provider ignores them. Empty = off / provider default.
+	Thinking string `toml:"thinking"`
+	Effort   string `toml:"effort"`
 }
 
 // ModelList returns the models this provider exposes: the explicit `models` list,

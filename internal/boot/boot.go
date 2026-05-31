@@ -314,8 +314,14 @@ func NewProvider(e *config.ProviderEntry) (provider.Provider, error) {
 		BaseURL: e.BaseURL,
 		Model:   e.Model,
 		APIKey:  e.APIKey(),
-		// Pass the key's env var so auth failures can name where to fix it.
-		Extra: map[string]any{"api_key_env": e.APIKeyEnv},
+		// Pass the key's env var so auth failures can name where to fix it, plus
+		// provider-kind-specific knobs (the anthropic provider reads thinking/effort;
+		// the openai one ignores them).
+		Extra: map[string]any{
+			"api_key_env": e.APIKeyEnv,
+			"thinking":    e.Thinking,
+			"effort":      e.Effort,
+		},
 	})
 }
 
