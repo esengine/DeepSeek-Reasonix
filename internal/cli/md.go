@@ -49,6 +49,7 @@ func (r *mdRenderer) Render(input string) string {
 	if strings.TrimSpace(input) == "" {
 		return ""
 	}
+	input = fixCJKEmphasis(input)
 	src := []byte(input)
 	doc := r.md.Parser().Parse(text.NewReader(src))
 	var buf strings.Builder
@@ -58,6 +59,45 @@ func (r *mdRenderer) Render(input string) string {
 		return ""
 	}
 	return out + "\n"
+}
+
+// fixCJKEmphasis works around goldmark's CommonMark parser not recognising
+// CJK punctuation (full-width comma, period, exclamation, etc.) as Unicode
+// punctuation. The CommonMark "right-flanking delimiter run" check requires
+// the character before a closing ** to be punctuation or the character after
+// it to be punctuation; CJK punctuation fails both checks, so **X，**Y is
+// not parsed as bold. The fix inserts a space after closing ** when it is
+// immediately preceded by a non-ASCII character, so the delimiter run is
+// properly flanked.
+func fixCJKEmphasis(s string) string {
+	runes := []rune(s)
+	var b strings.Builder
+	b.Grow(len(s) + 16)
+
+	inEmphasis := false // tracks whether we're inside **...**
+	for i := 0; i < len(runes); i++ {
+		if runes[i] == '*' && i+1 < len(runes) && runes[i+1] == '*' {
+			if inEmphasis {
+				// Closing **
+				b.WriteString("**")
+				i++
+				// If preceded by non-ASCII, add space so goldmark sees
+				// it as right-flanking.
+				if i > 1 && runes[i-2] > 0x7F {
+					b.WriteByte(' ')
+				}
+				inEmphasis = false
+			} else {
+				// Opening **
+				b.WriteString("**")
+				i++
+				inEmphasis = true
+			}
+			continue
+		}
+		b.WriteRune(runes[i])
+	}
+	return b.String()
 }
 
 func (r *mdRenderer) renderBlocks(buf *strings.Builder, parent ast.Node, src []byte, indent int) {
