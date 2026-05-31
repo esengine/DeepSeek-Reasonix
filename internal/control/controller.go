@@ -14,6 +14,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 	"sync"
@@ -385,7 +386,9 @@ func (c *Controller) Submit(input string) {
 				c.notice("compaction failed: " + err.Error())
 			} else {
 				c.notice("compacted")
-				_ = c.Snapshot()
+				if err := c.Snapshot(); err != nil {
+					slog.Warn("controller: snapshot after compact", "err", err)
+				}
 			}
 		}()
 	case trimmed == "/new":
@@ -665,7 +668,9 @@ func (c *Controller) Rewind(turn int, scope RewindScope) error {
 				}
 			}
 			c.mu.Unlock()
-			_ = c.Snapshot()
+			if err := c.Snapshot(); err != nil {
+				slog.Warn("controller: snapshot after rewind", "err", err)
+			}
 		}
 		c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
 			Text: fmt.Sprintf("rewound conversation to turn %d", turn)})

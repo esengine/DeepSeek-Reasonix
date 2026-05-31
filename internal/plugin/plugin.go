@@ -327,7 +327,9 @@ func (c *Client) initialize(ctx context.Context) error {
 	var ir struct {
 		Capabilities map[string]json.RawMessage `json:"capabilities"`
 	}
-	_ = json.Unmarshal(res, &ir)
+	if err := json.Unmarshal(res, &ir); err != nil {
+		slog.Warn("plugin: parse initialize capabilities", "server", c.name, "err", err)
+	}
 	_, c.hasPrompts = ir.Capabilities["prompts"]
 	_, c.hasResources = ir.Capabilities["resources"]
 

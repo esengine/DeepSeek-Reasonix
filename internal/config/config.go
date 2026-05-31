@@ -6,6 +6,7 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -307,7 +308,9 @@ func Load() (*Config, error) {
 func LoadForEdit(path string) *Config {
 	loadDotEnv()
 	cfg := Default()
-	_ = mergeFile(cfg, path)
+	if err := mergeFile(cfg, path); err != nil {
+		slog.Warn("config: load for edit failed, using defaults", "path", path, "err", err)
+	}
 	return cfg
 }
 

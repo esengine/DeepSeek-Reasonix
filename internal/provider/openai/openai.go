@@ -112,7 +112,10 @@ func (c *client) sendWithRetry(ctx context.Context, body []byte) (*http.Response
 		if resp.StatusCode == http.StatusOK {
 			return resp, nil
 		}
-		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		msg, readErr := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		if readErr != nil {
+			msg = []byte(fmt.Sprintf("(could not read error body: %v)", readErr))
+		}
 		// Drain any remaining body so the HTTP connection can be reused by the
 		// transport pool, then close.
 		_, _ = io.Copy(io.Discard, resp.Body)

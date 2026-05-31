@@ -13,6 +13,7 @@ package checkpoint
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -69,7 +70,9 @@ type Store struct {
 func New(dir, root string) *Store {
 	s := &Store{dir: dir, root: root, seen: map[string]bool{}}
 	if dir != "" {
-		_ = os.MkdirAll(dir, 0o755)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			slog.Warn("checkpoint: create dir failed, persistence disabled", "dir", dir, "err", err)
+		}
 		s.load()
 	}
 	return s
@@ -152,7 +155,9 @@ func (s *Store) persist(c *Checkpoint) {
 	if err != nil {
 		return
 	}
-	_ = os.WriteFile(filepath.Join(s.dir, fmt.Sprintf("turn-%d.json", c.Turn)), b, 0o644)
+	if err := os.WriteFile(filepath.Join(s.dir, fmt.Sprintf("turn-%d.json", c.Turn)), b, 0o644); err != nil {
+		slog.Warn("checkpoint: persist failed", "turn", c.Turn, "err", err)
+	}
 }
 
 // NextTurn returns the turn number a new checkpoint should take: one past the

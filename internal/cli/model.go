@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"reasonix/internal/config"
@@ -31,7 +32,9 @@ func (m *chatTUI) runModelSubcommand(input string) {
 		return
 	}
 	carried := m.ctrl.History()
-	_ = m.ctrl.Snapshot()
+	if err := m.ctrl.Snapshot(); err != nil {
+		slog.Warn("model switch: snapshot failed", "err", err)
+	}
 	c, err := m.buildController(ref, carried)
 	if err != nil {
 		m.notice("model: " + err.Error())
