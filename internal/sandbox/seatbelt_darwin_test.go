@@ -8,6 +8,137 @@ import (
 	"testing"
 )
 
+// --- sbplString ---
+
+func TestSbplString(t *testing.T) {
+	cases := []struct {
+		input string
+		want  string
+	}{
+		{"/tmp", `"/tmp"`},
+		{`/path/with"quote`, `"/path/with\"quote"`},
+		{`/path/with\backslash`, `"/path/with\\backslash"`},
+		{`/both"and\`, `"/both\"and\\"`},
+		{"", `""`},
+	}
+	for _, c := range cases {
+		got := sbplString(c.input)
+		if got != c.want {
+			t.Errorf("sbplString(%q) = %q, want %q", c.input, got, c.want)
+		}
+	}
+}
+
+// --- writeAllowDirs ---
+
+func TestWriteAllowDirsDeduplication(t *testing.T) {
+	dirs := writeAllowDirs([]string{"/tmp", "/tmp", "/tmp"})
+	seen := map[string]bool{}
+	for _, d := range dirs {
+		if seen[d] {
+			t.Errorf("duplicate dir: %s", d)
+		}
+		seen[d] = true
+	}
+}
+
+func TestWriteAllowDirsIncludesRoots(t *testing.T) {
+	root := t.TempDir()
+	dirs := writeAllowDirs([]string{root})
+	found := false
+	for _, d := range dirs {
+		real, _ := filepath.EvalSymlinks(root)
+		if d == real {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("writeAllowDirs should include root %s, got %v", root, dirs)
+	}
+}
+
+func TestWriteAllowDirsIncludesTemp(t *testing.T) {
+	dirs := writeAllowDirs(nil)
+	tmpDir := os.TempDir()
+	realTmp, _ := filepath.EvalSymlinks(tmpDir)
+	found := false
+	for _, d := range dirs {
+		if d == realTmp {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("writeAllowDirs should include temp dir %s, got %v", tmpDir, dirs)
+	}
+}
+
+func TestWriteAllowDirsSkipsEmpty(t *testing.T) {
+	dirs := writeAllowDirs([]string{"", "", ""})
+	for _, d := range dirs {
+		if d == "" {
+			t.Error("writeAllowDirs should skip empty strings")
+		}
+	}
+}
+
+func TestWriteAllowDirsNoDuplicates(t *testing.T) {
+	roots := []string{"/tmp", "/private/tmp", os.TempDir()}
+	dirs := writeAllowDirs(roots)
+	seen := map[string]bool{}
+	for _, d := range dirs {
+		if seen[d] {
+			t.Errorf("duplicate: %s", d)
+		}
+		seen[d] = true
+	}
+}
+
+// --- seatbeltProfile ---
+
+func TestSeatbeltProfileDeniesNetwork(t *testing.T) {
+	spec := Spec{Mode: "enforce", Network: false, WriteRoots: []string{"/workspace"}}
+	profile := seatbeltProfile(spec)
+	if !strings.Contains(profile, "(deny network*)") {
+		t.Error("profile should deny network when Network=false")
+	}
+}
+
+func TestSeatbeltProfileAllowsNetwork(t *testing.T) {
+	spec := Spec{Mode: "enforce", Network: true, WriteRoots: []string{"/workspace"}}
+	profile := seatbeltProfile(spec)
+	if strings.Contains(profile, "(deny network*)") {
+		t.Error("profile should not deny network when Network=true")
+	}
+}
+
+func TestSeatbeltProfileContainsVersion(t *testing.T) {
+	spec := Spec{Mode: "enforce", WriteRoots: []string{"/workspace"}}
+	profile := seatbeltProfile(spec)
+	if !strings.Contains(profile, "(version 1)") {
+		t.Error("profile should contain version 1")
+	}
+	if !strings.Contains(profile, "(allow default)") {
+		t.Error("profile should allow default")
+	}
+	if !strings.Contains(profile, "(deny file-write*)") {
+		t.Error("profile should deny file-write")
+	}
+}
+
+func TestSeatbeltProfileContainsRoots(t *testing.T) {
+	root := t.TempDir()
+	spec := Spec{Mode: "enforce", WriteRoots: []string{root}}
+	profile := seatbeltProfile(spec)
+	if !strings.Contains(profile, "(allow file-write*") {
+		t.Error("profile should have allow file-write section")
+	}
+	if !strings.Contains(profile, "(subpath ") {
+		t.Error("profile should contain subpath entries")
+	}
+}
+
 func TestCommandUnwrappedWhenOff(t *testing.T) {
 	argv, wrapped := Command(Spec{Mode: "off"}, "bash", "echo hi")
 	if wrapped {

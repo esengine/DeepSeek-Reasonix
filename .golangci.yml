@@ -1,0 +1,13 @@
+version: "2"
+
+linters:
+  enable:
+    - errcheck
+    - staticcheck
+    - unused
+    - govet
+    - ineffassign
+
+issues:
+  # Only report issues introduced by the PR, not pre-existing code.
+  new-from-rev: main-v2
