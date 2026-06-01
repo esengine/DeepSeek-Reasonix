@@ -169,8 +169,12 @@ func isTransientErr(err error) bool {
 }
 
 func (c *client) buildRequest(req provider.Request) chatRequest {
-	msgs := make([]chatMessage, len(req.Messages))
-	for i, m := range req.Messages {
+	// Repair tool-call pairing before sending: an interrupted/resumed history can
+	// carry an assistant tool_calls turn whose results never landed, which DeepSeek
+	// rejects with a 400 ("must be followed by tool messages …").
+	src := provider.SanitizeToolPairing(req.Messages)
+	msgs := make([]chatMessage, len(src))
+	for i, m := range src {
 		// reasoning_content is deliberately NOT sent back: it's a response-only
 		// field. DeepSeek accepts it but counts it as ordinary prompt input
 		// (measured ~500 extra tokens per turn on a reasoner chain), and the
@@ -230,6 +234,7 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 	started := map[int]bool{}
 	var order []int
 	var lastFinishReason string
+	var think thinkSplitter
 
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -270,7 +275,13 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 			out <- provider.Chunk{Type: provider.ChunkReasoning, Text: delta.ReasoningContent}
 		}
 		if delta.Content != "" {
-			out <- provider.Chunk{Type: provider.ChunkText, Text: delta.Content}
+			r, txt := think.push(delta.Content)
+			if r != "" {
+				out <- provider.Chunk{Type: provider.ChunkReasoning, Text: r}
+			}
+			if txt != "" {
+				out <- provider.Chunk{Type: provider.ChunkText, Text: txt}
+			}
 		}
 		for _, tc := range delta.ToolCalls {
 			cur, ok := acc[tc.Index]
@@ -299,6 +310,15 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 	if err := scanner.Err(); err != nil {
 		out <- provider.Chunk{Type: provider.ChunkError, Err: fmt.Errorf("%s: read stream: %w", c.name, err)}
 		return
+	}
+
+	if r, txt := think.flush(); r != "" || txt != "" {
+		if r != "" {
+			out <- provider.Chunk{Type: provider.ChunkReasoning, Text: r}
+		}
+		if txt != "" {
+			out <- provider.Chunk{Type: provider.ChunkText, Text: txt}
+		}
 	}
 
 	sort.Ints(order)

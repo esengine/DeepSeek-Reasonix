@@ -23,6 +23,7 @@ import (
 	"reasonix/internal/event"
 	"reasonix/internal/hook"
 	"reasonix/internal/jobs"
+	"reasonix/internal/lsp"
 	"reasonix/internal/memory"
 	"reasonix/internal/outputstyle"
 	"reasonix/internal/permission"
@@ -135,7 +136,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// Always construct a host, even with no plugins configured, so the controller's
 	// host pointer is stable for the session and `/mcp add` can hot-add into it.
 	pluginHost := plugin.NewHost()
-	specs := PluginSpecs(cfg.Plugins)
+	specs := PluginSpecs(cfg.AutoStartPlugins())
 	// CodeGraph is a built-in MCP server fetched on first use. When it resolves,
 	// inject it as one more stdio plugin pinned to the project root (it is
 	// cwd-aware); EnsureInit only creates .codegraph/ (fast, size-independent),
@@ -175,16 +176,29 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 				specs[i].Stderr = opts.Stderr
 			}
 		}
-		host, ptools, err := plugin.StartAll(ctx, specs)
-		if err != nil {
-			return nil, fmt.Errorf("plugin: %w", err)
-		}
+		host, ptools := plugin.StartAvailable(ctx, specs)
 		pluginHost = host
 		for _, t := range ptools {
 			reg.Add(t)
 		}
+		if text, ok := MCPStartupNotice(host.Failures()); ok {
+			sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: text})
+		}
 	}
 	cleanup := pluginHost.Close
+
+	// LSP tools resolve their servers on PATH and spawn lazily on first query, so
+	// registering them is cheap even when no server is installed (a query then
+	// returns an install hint). The manager is session-scoped; chain its shutdown
+	// into the controller's cleanup so servers stop with the session, not the turn.
+	if cfg.LSP.Enabled {
+		lspMgr := lsp.NewManager(cwd, LSPSpecs(cfg.LSP))
+		for _, t := range lsp.Tools(lspMgr) {
+			reg.Add(t)
+		}
+		prev := cleanup
+		cleanup = func() { prev(); lspMgr.Close() }
+	}
 
 	maxSteps := cfg.Agent.MaxSteps
 	if opts.MaxSteps > 0 {
@@ -464,6 +478,60 @@ func PluginSpecs(entries []config.PluginEntry) []plugin.Spec {
 			URL:     e.URL,
 			Headers: e.Headers,
 		}
+	}
+	return specs
+}
+
+// MCPStartupNotice formats the warning shown when configured MCP servers failed
+// to connect, naming the first few; ok is false when none failed.
+func MCPStartupNotice(failures []plugin.Failure) (text string, ok bool) {
+	if len(failures) == 0 {
+		return "", false
+	}
+	names := make([]string, 0, min(len(failures), 3))
+	for i, f := range failures {
+		if i >= 3 {
+			break
+		}
+		names = append(names, f.Name)
+	}
+	more := ""
+	if len(failures) > len(names) {
+		more = fmt.Sprintf(" (+%d more)", len(failures)-len(names))
+	}
+	return fmt.Sprintf("%d MCP server(s) failed to start: %s%s — run /mcp for details",
+		len(failures), strings.Join(names, ", "), more), true
+}
+
+// LSPSpecs returns the language → server map: the built-in defaults overlaid with
+// any user overrides. A user entry may set only the fields it wants to change;
+// empty fields keep the default for that language.
+func LSPSpecs(cfg config.LSPConfig) map[string]lsp.ServerSpec {
+	specs := lsp.DefaultSpecs()
+	for lang, s := range cfg.Servers {
+		spec := specs[lang]
+		if s.Command != "" {
+			spec.Command = s.Command
+		}
+		if s.Args != nil {
+			spec.Args = s.Args
+		}
+		if s.Env != nil {
+			spec.Env = s.Env
+		}
+		if s.LanguageID != "" {
+			spec.LanguageID = s.LanguageID
+		}
+		if s.Extensions != nil {
+			spec.Extensions = s.Extensions
+		}
+		if s.InstallHint != "" {
+			spec.InstallHint = s.InstallHint
+		}
+		if spec.LanguageID == "" {
+			spec.LanguageID = lang
+		}
+		specs[lang] = spec
 	}
 	return specs
 }

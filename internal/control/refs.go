@@ -138,27 +138,51 @@ func appendRefBlock(b *strings.Builder, tag, attr, body string) {
 }
 
 // readFileRef reads an @-referenced path for injection. A directory yields a
-// one-level listing; a binary file (NUL in the first 8 KiB) is noted rather than
-// dumped; a large file is truncated to maxFileRefBytes with a marker. isDir lets
-// the caller pick the wrapping tag.
+// recursive listing (walked depth-first so the model sees the full tree); a
+// binary file (NUL in the first 8 KiB) is noted rather than dumped; a large file
+// is truncated to maxFileRefBytes with a marker. isDir lets the caller pick the
+// wrapping tag. Common noise directories (.git, node_modules, .DS_Store) are
+// skipped during the walk.
 func readFileRef(path string) (content string, isDir bool, err error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		return "", false, err
 	}
 	if info.IsDir() {
-		entries, err := os.ReadDir(path)
+		var b strings.Builder
+		err := filepath.WalkDir(path, func(p string, d os.DirEntry, wErr error) error {
+			if wErr != nil {
+				return wErr
+			}
+			// Skip the root itself — we only list its children.
+			if p == path {
+				return nil
+			}
+			name := d.Name()
+			// Skip common noise directories.
+			if d.IsDir() {
+				switch name {
+				case ".git", "node_modules", ".DS_Store", "__pycache__", ".idea", ".vscode":
+					return filepath.SkipDir
+				}
+			}
+			// Render the path relative to the referenced directory so the
+			// listing is concise and unambiguous. Use forward slashes for
+			// cross-platform consistency.
+			rel, rErr := filepath.Rel(path, p)
+			if rErr != nil {
+				rel = p
+			}
+			rel = strings.ReplaceAll(rel, string(os.PathSeparator), "/")
+			if d.IsDir() {
+				rel += "/"
+			}
+			b.WriteString(rel)
+			b.WriteByte('\n')
+			return nil
+		})
 		if err != nil {
 			return "", true, err
-		}
-		var b strings.Builder
-		for _, e := range entries {
-			name := e.Name()
-			if e.IsDir() {
-				name += "/"
-			}
-			b.WriteString(name)
-			b.WriteByte('\n')
 		}
 		return b.String(), true, nil
 	}

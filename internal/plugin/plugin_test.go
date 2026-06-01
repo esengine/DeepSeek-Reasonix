@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -49,10 +50,62 @@ func TestStdioEndToEnd(t *testing.T) {
 	}
 }
 
+func TestStartAvailableKeepsGoodServers(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	good := Spec{
+		Name:    "good",
+		Command: os.Args[0],
+		Args:    []string{"-test.run=TestHelperProcess", "--"},
+		Env:     map[string]string{"GO_WANT_HELPER_PROCESS": "1"},
+	}
+	bad := Spec{Name: "bad", Command: "reasonix-missing-mcp-binary"}
+
+	host, tools := StartAvailable(ctx, []Spec{bad, good})
+	defer host.Close()
+
+	if len(tools) != 2 {
+		t.Fatalf("want tools from the good server, got %d", len(tools))
+	}
+	if got := host.ServerNames(); len(got) != 1 || got[0] != "good" {
+		t.Fatalf("connected servers = %v, want [good]", got)
+	}
+	failures := host.Failures()
+	if len(failures) != 1 || failures[0].Name != "bad" {
+		t.Fatalf("failures = %+v, want bad", failures)
+	}
+}
+
+func TestStdioFailureCapturesStderr(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	host, _ := StartAvailable(ctx, []Spec{{
+		Name:    "stderr",
+		Command: os.Args[0],
+		Args:    []string{"-test.run=TestHelperProcess", "--"},
+		Env:     map[string]string{"GO_WANT_HELPER_STDERR_EXIT": "1"},
+	}})
+	defer host.Close()
+
+	failures := host.Failures()
+	if len(failures) != 1 {
+		t.Fatalf("failures = %+v, want one", failures)
+	}
+	if !strings.Contains(failures[0].Error, "helper stderr boom") {
+		t.Fatalf("failure should include stderr, got %q", failures[0].Error)
+	}
+}
+
 // TestHelperProcess is not a real test; it acts as a minimal MCP stdio server
 // when invoked by TestStdioEndToEnd. It exits before the test framework can
 // print to stdout, keeping the JSON-RPC channel clean.
 func TestHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_STDERR_EXIT") == "1" {
+		os.Stderr.WriteString("helper stderr boom\n")
+		os.Exit(2)
+	}
 	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
 		return
 	}

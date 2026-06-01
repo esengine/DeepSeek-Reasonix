@@ -29,6 +29,31 @@ type Config struct {
 	Skills       SkillsConfig      `toml:"skills"`
 	Codegraph    CodegraphConfig   `toml:"codegraph"`
 	Statusline   StatuslineConfig  `toml:"statusline"`
+	LSP          LSPConfig         `toml:"lsp"`
+}
+
+// LSPConfig governs the optional Language Server Protocol tools (lsp_definition,
+// lsp_references, lsp_hover, lsp_diagnostics). Enabled defaults to true; the
+// servers themselves are never bundled — each resolves on PATH and the tool
+// returns an install hint when it is missing, so the capability is dormant until
+// the user installs a server. Servers overrides or extends the built-in language
+// → server map, keyed by language id (e.g. "go", "rust", "python").
+type LSPConfig struct {
+	Enabled bool                 `toml:"enabled"`
+	Servers map[string]LSPServer `toml:"servers"`
+}
+
+// LSPServer overrides a built-in language's server or, when keyed by a new
+// language, adds one. An empty field falls back to the built-in default for that
+// language; Extensions is required when adding a language the built-ins don't
+// cover (e.g. ".ex" for Elixir) so files route to it.
+type LSPServer struct {
+	Command     string            `toml:"command"`
+	Args        []string          `toml:"args"`
+	Env         map[string]string `toml:"env"`
+	LanguageID  string            `toml:"language_id"`
+	Extensions  []string          `toml:"extensions"`
+	InstallHint string            `toml:"install_hint"`
 }
 
 // StatuslineConfig configures a custom status line. Command, when set, is run at
@@ -233,6 +258,23 @@ type PluginEntry struct {
 	Env     map[string]string `toml:"env"`
 	URL     string            `toml:"url"`
 	Headers map[string]string `toml:"headers"`
+	// AutoStart controls whether the server connects during session startup.
+	// Nil preserves historical behavior: configured servers start automatically.
+	AutoStart *bool `toml:"auto_start"`
+}
+
+func (e PluginEntry) ShouldAutoStart() bool {
+	return e.AutoStart == nil || *e.AutoStart
+}
+
+func (c *Config) AutoStartPlugins() []PluginEntry {
+	out := make([]PluginEntry, 0, len(c.Plugins))
+	for _, p := range c.Plugins {
+		if p.ShouldAutoStart() {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // DefaultSystemPrompt is used when config provides none.
@@ -287,6 +329,9 @@ func Default() *Config {
 		// first use. Set enabled = false to opt out, or auto_install = false to
 		// require an explicit `reasonix codegraph install`.
 		Codegraph: CodegraphConfig{Enabled: true, AutoInstall: true},
+		// LSP tools on by default, but dormant until a language server is on PATH;
+		// a missing server yields an install hint rather than an error.
+		LSP: LSPConfig{Enabled: true},
 		Providers: []ProviderEntry{
 			{Name: "deepseek-flash", Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash", APIKeyEnv: "DEEPSEEK_API_KEY", BalanceURL: "https://api.deepseek.com/user/balance", ContextWindow: 1_000_000, Price: &provider.Pricing{CacheHit: 0.02, Input: 1, Output: 2, Currency: "¥"}},
 			{Name: "deepseek-pro", Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro", APIKeyEnv: "DEEPSEEK_API_KEY", BalanceURL: "https://api.deepseek.com/user/balance", ContextWindow: 1_000_000, Price: &provider.Pricing{CacheHit: 0.025, Input: 3, Output: 6, Currency: "¥"}},

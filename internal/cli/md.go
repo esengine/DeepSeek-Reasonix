@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"strings"
+	"unicode"
 
 	"github.com/charmbracelet/x/ansi"
 	"github.com/yuin/goldmark"
@@ -49,6 +50,7 @@ func (r *mdRenderer) Render(input string) string {
 	if strings.TrimSpace(input) == "" {
 		return ""
 	}
+	input = fixCJKEmphasis(input)
 	src := []byte(input)
 	doc := r.md.Parser().Parse(text.NewReader(src))
 	var buf strings.Builder
@@ -58,6 +60,100 @@ func (r *mdRenderer) Render(input string) string {
 		return ""
 	}
 	return out + "\n"
+}
+
+// fixCJKEmphasis works around goldmark's CommonMark parser not recognising
+// CJK punctuation as Unicode punctuation: a closing ** is only right-flanking
+// when the char before it is punctuation, so **X，**Y (， = U+FF0C) is not bold.
+// Inserting a space after such a closer fixes the flanking. The space must go
+// only on a *closer* — putting it after an opener (，**X** → ，** X**) would
+// instead break the left-flanking — so emphasis open/close is tracked by a
+// running toggle. Inline code spans and fenced blocks are passed through so
+// literal ** inside code is never touched.
+func fixCJKEmphasis(s string) string {
+	runes := []rune(s)
+	n := len(runes)
+	var b strings.Builder
+	b.Grow(len(s) + 16)
+
+	inFenced := false   // inside ``` fenced code block
+	inCode := false     // inside ` inline code span
+	inEmphasis := false // between an opening ** and its closer
+
+	for i := 0; i < n; i++ {
+		r := runes[i]
+
+		// Fenced code block: ``` toggles in/out.
+		if r == '`' && i+2 < n && runes[i+1] == '`' && runes[i+2] == '`' {
+			inFenced = !inFenced
+			b.WriteString("```")
+			i += 2
+			continue
+		}
+		// Inline code span: ` toggles in/out (but not inside fenced blocks).
+		if r == '`' && !inFenced {
+			inCode = !inCode
+			b.WriteRune(r)
+			continue
+		}
+		// Inside code — pass through verbatim.
+		if inCode || inFenced {
+			b.WriteRune(r)
+			continue
+		}
+		// Emphasis cannot span a hard line break; reset so an unclosed ** on a
+		// previous line can't make the next line's opener look like a closer.
+		if r == '\n' {
+			inEmphasis = false
+			b.WriteRune(r)
+			continue
+		}
+
+		if r == '*' && i+1 < n && runes[i+1] == '*' {
+			b.WriteString("**")
+			i++
+			inEmphasis = !inEmphasis
+
+			// Only a closer (emphasis just ended) hugging CJK punctuation needs
+			// the trailing space; the same space after an opener would break it.
+			if !inEmphasis && i >= 2 && !isSpace(runes[i-2]) && isCJKPunct(runes[i-2]) {
+				b.WriteByte(' ')
+			}
+			continue
+		}
+
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+// isCJKPunct reports whether r is a CJK full-width punctuation character.
+// These are not classified as Unicode punctuation by the CommonMark spec,
+// which breaks the "right-flanking delimiter run" check for emphasis.
+func isCJKPunct(r rune) bool {
+	if r <= 0x7F {
+		return false // ASCII punctuation is handled correctly by CommonMark
+	}
+	// Fast path: common CJK punctuation ranges.
+	switch {
+	case r >= 0x3000 && r <= 0x303F: // CJK Symbols and Punctuation (。、etc.)
+		return true
+	case r >= 0xFF01 && r <= 0xFF0F: // Fullwidth Forms I (! " # $ etc.)
+		return true
+	case r >= 0xFF1A && r <= 0xFF20: // Fullwidth Forms II (: ; < = etc.)
+		return true
+	case r >= 0xFF3B && r <= 0xFF3F: // Fullwidth Forms III ([ \ ] ^ _)
+		return true
+	case r >= 0xFF5B && r <= 0xFF65: // Fullwidth Forms IV ({ | } ~ etc.)
+		return true
+	}
+	// Fallback: any non-ASCII punctuation (e.g. Tibetan, Armenian).
+	return unicode.IsPunct(r)
+}
+
+// isSpace reports whether r is a whitespace character.
+func isSpace(r rune) bool {
+	return r == ' ' || r == '\t' || r == '\n' || r == '\r'
 }
 
 func (r *mdRenderer) renderBlocks(buf *strings.Builder, parent ast.Node, src []byte, indent int) {

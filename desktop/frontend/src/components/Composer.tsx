@@ -13,6 +13,27 @@ interface Attachment {
   previewUrl: string;
 }
 
+const LONG_PASTE_MIN_CHARS = 1000;
+const LONG_PASTE_MIN_LINES = 5;
+
+type PastedBlock = {
+  label: string;
+  text: string;
+};
+
+function lineCount(s: string): number {
+  if (s === "") return 0;
+  return s.split(/\r\n|\r|\n/).length;
+}
+
+function shouldFoldPaste(s: string): boolean {
+  return s.length >= LONG_PASTE_MIN_CHARS || lineCount(s) >= LONG_PASTE_MIN_LINES;
+}
+
+function renderPastedBlock(block: PastedBlock): string {
+  return `${block.label}\n\n--- Begin ${block.label} ---\n${block.text}\n--- End ${block.label} ---`;
+}
+
 export function Composer({
   running,
   mode,
@@ -22,7 +43,7 @@ export function Composer({
 }: {
   running: boolean;
   mode: Mode;
-  onSend: (text: string) => void;
+  onSend: (displayText: string, submitText?: string) => void;
   // Returns the un-sent text when cancelling before the server replied (so it can
   // be restored to the input); undefined for a normal cancel.
   onCancel: () => string | undefined;
@@ -32,10 +53,20 @@ export function Composer({
   const [text, setText] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [pendingPaste, setPendingPaste] = useState(0);
+  const pastedBlocksRef = useRef<PastedBlock[]>([]);
+  const nextPasteId = useRef(1);
   const [active, setActive] = useState(0);
   const [dismissed, setDismissed] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const taRef = useRef<HTMLTextAreaElement>(null);
+  const wasRunning = useRef(running);
+
+  useEffect(() => {
+    if (wasRunning.current && !running && text.trim() === "") {
+      pastedBlocksRef.current = [];
+    }
+    wasRunning.current = running;
+  }, [running, text]);
 
   // --- slash commands (whole-input "/token") ---
   const [commands, setCommands] = useState<CommandInfo[]>([]);
@@ -166,11 +197,23 @@ export function Composer({
     });
   };
 
+  const expandPastedBlocks = (displayText: string): string => {
+    let expanded = displayText;
+    for (const block of pastedBlocksRef.current) {
+      if (expanded.includes(block.label)) {
+        expanded = expanded.split(block.label).join(renderPastedBlock(block));
+      }
+    }
+    return expanded;
+  };
+
   const submit = () => {
     const t = text.trim();
     if ((!t && attachments.length === 0) || pendingPaste > 0) return;
     const refs = attachments.map((a) => `@${a.path}`).join(" ");
-    onSend([t, refs].filter(Boolean).join(t && refs ? " " : ""));
+    const displayText = [t, refs].filter(Boolean).join(t && refs ? " " : "");
+    const submitText = [expandPastedBlocks(t), refs].filter(Boolean).join(t && refs ? " " : "");
+    onSend(displayText, submitText);
     setText("");
     setAttachments([]);
   };
@@ -200,9 +243,34 @@ export function Composer({
 
   const onPaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
     const files = Array.from(e.clipboardData.files).filter((f) => f.type.startsWith("image/"));
-    if (files.length === 0) return;
+    if (files.length > 0) {
+      e.preventDefault();
+      void attachImageFiles(files);
+      return;
+    }
+
+    const pasted = e.clipboardData.getData("text");
+    if (!shouldFoldPaste(pasted)) return;
+
     e.preventDefault();
-    void attachImageFiles(files);
+    const ta = e.currentTarget;
+    const start = ta.selectionStart ?? text.length;
+    const end = ta.selectionEnd ?? text.length;
+    const id = nextPasteId.current++;
+    const lines = lineCount(pasted);
+    const label = `[Pasted text #${id} · ${lines} lines]`;
+    const block: PastedBlock = { label, text: pasted };
+    const next = text.slice(0, start) + label + text.slice(end);
+
+    pastedBlocksRef.current = [...pastedBlocksRef.current, block];
+    setText(next);
+    requestAnimationFrame(() => {
+      const node = taRef.current;
+      if (!node) return;
+      const pos = start + label.length;
+      node.focus();
+      node.selectionStart = node.selectionEnd = pos;
+    });
   };
 
   const onDrop = (e: DragEvent<HTMLDivElement>) => {

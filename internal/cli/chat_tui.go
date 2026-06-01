@@ -58,6 +58,9 @@ type chatTUI struct {
 	input   textarea.Model
 	spinner spinner.Model
 
+	pastedBlocks []pastedBlock
+	nextPasteID  int
+
 	state    tuiState
 	runStart time.Time
 	elapsed  int
@@ -87,7 +90,7 @@ type chatTUI struct {
 
 	// reasoning accumulates the in-progress thinking stream (dim); pending
 	// accumulates the in-progress answer (raw markdown). They are committed to
-	// scrollback (reasoning verbatim, answer markdown-rendered) when they
+	// scrollback (reasoning collapsed by default, answer markdown-rendered) when they
 	// finalize — at a tool/usage boundary or turn end — not previewed live, so
 	// the bottom region stays a stable height. pendingCommit queues finalized
 	// lines so a single Update emits exactly one ordered tea.Println.
@@ -95,8 +98,22 @@ type chatTUI struct {
 	pending       *strings.Builder
 	pendingCommit *[]string
 	renderer      *mdRenderer
-	eventCh       chan event.Event
-	started       bool // banner + resumed history committed once
+	showReasoning bool // Ctrl+O / /verbose: show raw thinking text in the CLI
+	// reasoningLineIdx is the transcript index of the live "▎ thinking…" marker
+	// while a reasoning block streams; it's rewritten to "▎ thought for Ns" when
+	// the block closes. -1 when no block is open. transcriptDirty forces a
+	// viewport re-feed after that in-place rewrite (length is unchanged).
+	reasoningLineIdx int
+	thinkStart       time.Time
+	// answerIdx is the transcript index of the streaming answer block (rewritten in
+	// place as completed paragraphs arrive); -1 when none is open. answerFlushed is
+	// how many bytes of pending have already been rendered into it, so a Text packet
+	// that doesn't close a new paragraph re-renders nothing.
+	answerIdx       int
+	answerFlushed   int
+	transcriptDirty bool
+	eventCh         chan event.Event
+	started         bool // banner + resumed history committed once
 
 	// transcript holds every finalized line commitLine emits; the viewport
 	// renders a scrollable window of it (alt-screen owns the grid, so there's no
@@ -110,16 +127,18 @@ type chatTUI struct {
 	autoScroll int
 	dragX      int
 
-	// The user bubble for an in-flight turn is deferred, not echoed on Enter: it's
-	// held in pendingBubble and committed to scrollback only when the first
-	// response packet arrives (commitPendingBubble). Pressing Esc/Ctrl+C before
-	// then "un-sends" the message — its text returns to the input box and nothing
-	// reaches scrollback. bubblePending is true from startTurn until the bubble
-	// commits or is un-sent; turnDiscarded then swallows the turn's already-buffered
-	// events until its TurnDone settles.
-	pendingBubble string
-	bubblePending bool
-	turnDiscarded bool
+	// The user bubble is echoed to scrollback immediately on Enter (bubbleStartIdx
+	// marks where in the transcript it landed). It stays "un-sendable" until the
+	// first response packet arrives: pressing Esc/Ctrl+C before then pops those
+	// lines back off the transcript and restores the text to the input box, leaving
+	// no trace. bubblePending is true from startTurn until the first packet confirms
+	// the send or it's un-sent; turnDiscarded then swallows the turn's
+	// already-buffered events until its TurnDone settles.
+	pendingRestore string
+	pendingPastes  []string
+	bubbleStartIdx int
+	bubblePending  bool
+	turnDiscarded  bool
 	// attachments are image refs queued for the next user turn. They render as a
 	// tray above the input and are appended to the provider-facing prompt as
 	// @-references only when the turn is sent.
@@ -140,6 +159,10 @@ type chatTUI struct {
 	// gesture that opens it on an empty composer.
 	rewind  *rewindPicker
 	lastEsc time.Time
+
+	// lastCtrlCAt records when Ctrl+C was pressed while idle, enabling a
+	// "press again to quit" confirmation pattern (1.5s window).
+	lastCtrlCAt time.Time
 
 	// host is the running MCP servers (nil when no plugins). The TUI reads
 	// prompts (slash commands), resources (@-references), and server status
@@ -293,6 +316,7 @@ type promptResolvedMsg struct {
 type refsResolvedMsg struct {
 	sent        string
 	display     string
+	restore     string
 	attachments []chatAttachment
 	block       string
 	errs        []string
@@ -337,21 +361,24 @@ func newChatTUI(ctrl *control.Controller, missing string, eventCh chan event.Eve
 
 	commitBuf := []string{}
 	return chatTUI{
-		ctrl:          ctrl,
-		label:         ctrl.Label(),
-		missing:       missing,
-		input:         ti,
-		spinner:       sp,
-		reasoning:     &strings.Builder{},
-		pending:       &strings.Builder{},
-		pendingCommit: &commitBuf,
-		renderer:      newMarkdownRenderer(termW),
-		eventCh:       eventCh,
-		history:       ctrl.History(),
-		host:          ctrl.Host(),
-		commands:      ctrl.Commands(),
-		skills:        ctrl.Skills(),
-		viewport:      viewport.New(viewport.WithWidth(termW)),
+		ctrl:             ctrl,
+		label:            ctrl.Label(),
+		missing:          missing,
+		input:            ti,
+		spinner:          sp,
+		nextPasteID:      1,
+		reasoningLineIdx: -1,
+		answerIdx:        -1,
+		reasoning:        &strings.Builder{},
+		pending:          &strings.Builder{},
+		pendingCommit:    &commitBuf,
+		renderer:         newMarkdownRenderer(termW),
+		eventCh:          eventCh,
+		history:          ctrl.History(),
+		host:             ctrl.Host(),
+		commands:         ctrl.Commands(),
+		skills:           ctrl.Skills(),
+		viewport:         viewport.New(viewport.WithWidth(termW)),
 	}
 }
 
@@ -389,7 +416,7 @@ func (m chatTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	cm.viewport.SetHeight(cm.transcriptHeight())
 	// Re-feed only when the content grew or the width changed (re-wrapping is
 	// the expensive part); a bare scroll or spinner tick keeps the offset.
-	if len(cm.transcript) != prevLines || cm.width != prevWidth {
+	if len(cm.transcript) != prevLines || cm.width != prevWidth || cm.transcriptDirty {
 		wrapped := wrapTranscript(strings.Join(cm.transcript, "\n"), contentW)
 		cm.viewport.SetContent(wrapped)
 		cm.wrappedLines = strings.Split(wrapped, "\n")
@@ -397,6 +424,7 @@ func (m chatTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cm.viewport.GotoBottom() // tail-follow: stay pinned to newest output
 		}
 	}
+	cm.transcriptDirty = false
 	// Any viewport scroll (wheel, PgUp/PgDn, edge auto-scroll, or tail-follow to
 	// newest output) shifts the whole window. Some terminals (Warp) mishandle
 	// the renderer's scroll/insert-line optimization and strand stale rows, so
@@ -444,7 +472,13 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.MouseClickMsg:
-		// Left-press in the transcript region begins a text selection.
+		// Right-click copies the active selection (Windows Terminal convention);
+		// left-press in the transcript region begins a text selection.
+		if msg.Button == tea.MouseRight && m.sel.active && !m.sel.empty() {
+			text := m.selectedText()
+			m.sel = selection{}
+			return m, tea.Batch(copyToClipboard(text), finalize(m, cmds))
+		}
 		if msg.Button == tea.MouseLeft && msg.Y < m.viewport.Height() {
 			at := m.transcriptCaret(msg.X, msg.Y)
 			m.sel = selection{active: true, anchor: at, head: at}
@@ -492,8 +526,8 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.MouseReleaseMsg:
 		// Release finalizes the selection; the highlight stays on as the visual
-		// "what's selected" cue and Ctrl+C copies it. A plain click (no drag)
-		// clears any prior selection.
+		// "what's selected" cue and a right-click copies it. A plain click (no
+		// drag) clears any prior selection.
 		m.autoScroll = 0 // stop edge auto-scroll
 		if msg.Button == tea.MouseLeft && m.sel.active && m.sel.empty() {
 			m.sel = selection{}
@@ -504,16 +538,15 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.state != tuiRunning && m.attachPastedImages(msg.Content) {
 			return m, finalize(m, cmds)
 		}
+		if !m.chooserTyping() && m.pendingApproval == nil && m.rewind == nil && m.shouldFoldPaste(msg.Content) {
+			m.insertFoldedPaste(msg.Content)
+			m.growInputToFit()
+			m.updateCompletion()
+			return m, finalize(m, cmds)
+		}
 
 	case tea.KeyPressMsg:
-		// Ctrl+C copies the active selection (terminal convention: copy when
-		// something is selected, otherwise interrupt/quit below).
-		if msg.String() == "ctrl+c" && m.sel.active && !m.sel.empty() {
-			text := m.selectedText()
-			m.sel = selection{}
-			return m, tea.Batch(copyToClipboard(text), finalize(m, cmds))
-		}
-		// Any other keystroke dismisses a finished selection.
+		// Any keystroke dismisses a finished selection (copy is a right-click).
 		m.sel = selection{}
 		// Transcript scroll keys work in any state (PgUp/PgDn are never text).
 		switch msg.String() {
@@ -614,6 +647,7 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				} else {
 					m.input.Reset()
+					m.pastedBlocks = nil
 				}
 			}
 			return m, nil
@@ -626,7 +660,13 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
-			return m, tea.Quit
+			// Idle: require double-press within 1.5s to prevent accidental exits.
+			if !m.lastCtrlCAt.IsZero() && time.Since(m.lastCtrlCAt) < 1500*time.Millisecond {
+				return m, tea.Quit
+			}
+			m.lastCtrlCAt = time.Now()
+			m.notice(i18n.M.CtrlCQuitHint)
+			return m, finalize(m, nil)
 		case "ctrl+d":
 			return m, tea.Quit
 		case "ctrl+v", "ctrl+shift+v", "super+v", "meta+v":
@@ -640,6 +680,9 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			cmds = append(cmds, pasteClipboardImage())
+			return m, finalize(m, cmds)
+		case "ctrl+o":
+			m.toggleVerboseReasoning(m.state != tuiRunning)
 			return m, finalize(m, cmds)
 		case "tab":
 			if m.state == tuiRunning {
@@ -668,6 +711,7 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if strings.HasPrefix(line, "#") {
 				m.input.Reset()
 				m.input.SetHeight(1)
+				m.pastedBlocks = nil
 				note := strings.TrimSpace(strings.TrimPrefix(line, "#"))
 				if note == "" {
 					m.notice("nothing to remember")
@@ -684,13 +728,15 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if strings.HasPrefix(line, "/") && len(m.attachments) == 0 {
 				m.input.Reset()
 				m.input.SetHeight(1)
+				m.pastedBlocks = nil
 				cmds = append(cmds, m.runSlashCommand(line))
 				return m, finalize(m, cmds)
 			}
 
 			attachments := cloneAttachments(m.attachments)
-			sentLine := withAttachmentRefs(line, attachments)
-			displayLine := withAttachmentLabels(line, attachments)
+			sentText := m.expandPastedBlocks(line)
+			sentLine := withAttachmentRefs(sentText, attachments)
+			displayLine := withAttachmentLabels(sentText, attachments)
 			m.input.Reset()
 			m.input.SetHeight(1)
 			m.attachments = nil
@@ -699,11 +745,11 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// loop by the controller; the turn starts when they resolve
 			// (refsResolvedMsg).
 			if m.ctrl.HasRefs(sentLine) {
-				cmds = append(cmds, m.resolveRefs(sentLine, displayLine, attachments))
+				cmds = append(cmds, m.resolveRefs(sentLine, displayLine, line, attachments))
 				return m, finalize(m, cmds)
 			}
 
-			cmds = append(cmds, m.startTurn(m.ctrl.Compose(sentLine), displayLine, attachments))
+			cmds = append(cmds, m.startTurn(m.ctrl.Compose(sentLine), displayLine, line, attachments))
 			return m, finalize(m, cmds)
 		}
 
@@ -768,7 +814,7 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case strings.TrimSpace(msg.sent) == "":
 			m.notice(i18n.M.SlashPromptEmpty)
 		default:
-			cmds = append(cmds, m.startTurn(m.ctrl.Compose(msg.sent), msg.display, nil))
+			cmds = append(cmds, m.startTurn(m.ctrl.Compose(msg.sent), msg.display, msg.display, nil))
 		}
 
 	case refsResolvedMsg:
@@ -779,7 +825,7 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.block != "" {
 			sent = "Referenced context:\n\n" + msg.block + "\n\n" + msg.sent
 		}
-		cmds = append(cmds, m.startTurn(m.ctrl.Compose(sent), msg.display, msg.attachments))
+		cmds = append(cmds, m.startTurn(m.ctrl.Compose(sent), msg.display, msg.restore, msg.attachments))
 
 	case clipboardImageMsg:
 		if msg.err != nil {
@@ -796,7 +842,11 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.attachments = append(m.attachments, chatAttachment{Path: msg.path})
 		case msg.text != "":
 			if !m.attachPastedImages(msg.text) {
-				m.input.InsertString(msg.text)
+				if m.shouldFoldPaste(msg.text) {
+					m.insertFoldedPaste(msg.text)
+				} else {
+					m.input.InsertString(msg.text)
+				}
 				m.growInputToFit()
 				m.updateCompletion()
 				return m, finalize(m, cmds)
@@ -888,41 +938,61 @@ func (m chatTUI) transcriptHeight() int {
 	return 1
 }
 
-// commitReasoning freezes the accumulated thinking stream (verbatim, already
-// dim) into scrollback and clears the live buffer.
+// commitReasoning closes the live thinking block: the "▎ thinking…" marker is
+// rewritten in place to a dim "▎ thought for Ns" summary, and in verbose mode the
+// accumulated reasoning text is inserted beneath it. The viewport re-wraps from
+// m.transcript, so the in-place rewrite is flagged via transcriptDirty.
 func (m *chatTUI) commitReasoning() {
-	if m.reasoning.Len() == 0 {
+	if m.reasoningLineIdx < 0 {
 		return
 	}
-	// Wrap to the viewport width before committing. bubbletea's non-alt-screen
-	// Println adds an erase-to-end only for message lines *narrower* than the
-	// terminal and never truncates them, so an over-wide reasoning line wraps
-	// and its short final row leaves the old input-box border (the live region
-	// it printed over) bleeding through on the right — the "ghost ────". The
-	// rendered answer is already wrapped, which is why only reasoning stranded.
-	// Wrap each over-long line; keep short ones (the "▎ thinking" header)
-	// verbatim so their indent survives.
-	raw := strings.TrimRight(m.reasoning.String(), "\n")
-	var b strings.Builder
-	for i, line := range strings.Split(raw, "\n") {
-		if i > 0 {
-			b.WriteByte('\n')
-		}
-		if m.width > 0 && visibleWidth(line) > m.width {
-			b.WriteString(wrapAnsi(line, m.width))
-		} else {
-			b.WriteString(line) // width unknown (pre-sizing) or already fits: verbatim
-		}
+	secs := int(time.Since(m.thinkStart).Seconds())
+	m.transcript[m.reasoningLineIdx] = dim(fmt.Sprintf("  ▎ "+i18n.M.ChatThoughtForFmt, secs))
+	if m.showReasoning && m.reasoning.Len() > 0 {
+		raw := strings.TrimRight(m.reasoning.String(), "\n")
+		at := m.reasoningLineIdx + 1
+		lines := strings.Split(raw, "\n")
+		m.transcript = append(m.transcript[:at], append(lines, m.transcript[at:]...)...)
 	}
-	m.commitLine(b.String())
+	m.transcriptDirty = true
 	m.reasoning.Reset()
+	m.reasoningLineIdx = -1
 }
 
-// commitPending renders the accumulated answer as markdown and freezes it into
-// scrollback. Joining commitReasoning then commitPending puts the answer on its
-// own line, restoring the thinking→answer break the renderer strips.
+// streamAnswer renders the answer streamed so far up to its last completed
+// paragraph (flushableMarkdownPrefix) and writes it as one transcript block,
+// rewritten in place as later paragraphs land — so a long reply appears chunk by
+// chunk instead of all at once on turn end. The trailing, still-streaming block
+// stays buffered (a half-written fence/list never renders early), and it only
+// re-renders when a new paragraph actually closes.
+func (m *chatTUI) streamAnswer() {
+	prefix := flushableMarkdownPrefix(m.pending.String())
+	if len(prefix) <= m.answerFlushed {
+		return
+	}
+	rendered := m.renderer.Render(prefix)
+	if rendered == "" {
+		return
+	}
+	m.answerFlushed = len(prefix)
+	block := strings.TrimRight(rendered, "\n")
+	if m.answerIdx < 0 {
+		m.answerIdx = len(m.transcript)
+		m.commitLine(block)
+	} else {
+		m.transcript[m.answerIdx] = block
+		m.transcriptDirty = true
+	}
+}
+
+// commitPending freezes the full accumulated answer as markdown — overwriting the
+// streamed block if one is open (streamAnswer), else committing fresh. Joining
+// commitReasoning then commitPending puts the answer on its own line, restoring
+// the thinking→answer break the renderer strips.
 func (m *chatTUI) commitPending() {
 	if m.pending.Len() == 0 {
+		m.answerIdx = -1
+		m.answerFlushed = 0
 		return
 	}
 	raw := m.pending.String()
@@ -930,8 +1000,40 @@ func (m *chatTUI) commitPending() {
 	if rendered == "" {
 		rendered = raw
 	}
-	m.commitLine(strings.TrimRight(rendered, "\n"))
+	block := strings.TrimRight(rendered, "\n")
+	if m.answerIdx < 0 {
+		m.commitLine(block)
+	} else {
+		m.transcript[m.answerIdx] = block
+		m.transcriptDirty = true
+	}
 	m.pending.Reset()
+	m.answerIdx = -1
+	m.answerFlushed = 0
+}
+
+// flushableMarkdownPrefix returns the longest prefix of buf made of complete
+// markdown blocks — text up to the last blank line outside any open fenced code
+// block. A blank line inside a ``` / ~~~ fence isn't a boundary, so a half-written
+// code block stays buffered until it closes.
+func flushableMarkdownPrefix(buf string) string {
+	lines := strings.Split(buf, "\n")
+	inFence := false
+	boundary := -1
+	for i, ln := range lines {
+		t := strings.TrimSpace(ln)
+		if strings.HasPrefix(t, "```") || strings.HasPrefix(t, "~~~") {
+			inFence = !inFence
+			continue
+		}
+		if !inFence && t == "" {
+			boundary = i
+		}
+	}
+	if boundary <= 0 {
+		return ""
+	}
+	return strings.Join(lines[:boundary], "\n")
 }
 
 // planApprovalTool is the Tool name the controller puts on the ApprovalRequest it
@@ -1284,6 +1386,7 @@ func (m chatTUI) renderTodoPanel() string {
 			Content    string `json:"content"`
 			Status     string `json:"status"`
 			ActiveForm string `json:"activeForm"`
+			Level      int    `json:"level"`
 		} `json:"todos"`
 	}
 	if err := json.Unmarshal([]byte(m.todoArgs), &p); err != nil || len(p.Todos) == 0 {
@@ -1308,17 +1411,21 @@ func (m chatTUI) renderTodoPanel() string {
 			break
 		}
 		shown++
+		indent := "  "
+		if t.Level >= 1 {
+			indent = "      " // sub-steps sit under their phase
+		}
 		switch t.Status {
 		case "completed":
-			b.WriteString("  " + green("✔") + " " + dim(t.Content) + "\n")
+			b.WriteString(indent + green("✔") + " " + dim(t.Content) + "\n")
 		case "in_progress":
 			label := t.Content
 			if t.ActiveForm != "" {
 				label = t.ActiveForm
 			}
-			b.WriteString("  " + yellow("▶ "+label) + "\n")
+			b.WriteString(indent + yellow("▶ "+label) + "\n")
 		default:
-			b.WriteString("  " + dim("○ "+t.Content) + "\n")
+			b.WriteString(indent + dim("○ "+t.Content) + "\n")
 		}
 	}
 	return todoPanelStyle.Width(max(m.width, 10)).Render(strings.TrimRight(b.String(), "\n"))
@@ -1361,6 +1468,85 @@ func clampStatusLine(s string, width int) string {
 // growInputToFit resizes the textarea to the number of lines its value spans,
 // capped at maxInputRows so a long paste doesn't crowd the screen.
 const maxInputRows = 5
+const foldedPasteMinChars = 1000
+const foldedPasteMinLines = 5
+
+type pastedBlock struct {
+	label string
+	text  string
+}
+
+func pastedLineCount(s string) int {
+	if s == "" {
+		return 0
+	}
+	return strings.Count(strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\r", "\n"), "\n") + 1
+}
+
+func foldedPasteLabel(id, lines int) string {
+	return fmt.Sprintf("[Pasted text #%d · %d lines]", id, lines)
+}
+
+func renderFoldedPasteBlock(block pastedBlock) string {
+	return fmt.Sprintf("%s\n\n--- Begin %s ---\n%s\n--- End %s ---", block.label, block.label, block.text, block.label)
+}
+
+func shouldFoldPastedText(s string) bool {
+	return len([]rune(s)) >= foldedPasteMinChars || pastedLineCount(s) >= foldedPasteMinLines
+}
+
+func (m *chatTUI) chooserTyping() bool {
+	return m.chooser != nil && m.chooser.typing
+}
+
+func (m *chatTUI) shouldFoldPaste(s string) bool {
+	return shouldFoldPastedText(s)
+}
+
+func (m *chatTUI) insertFoldedPaste(s string) {
+	label := foldedPasteLabel(m.nextPasteID, pastedLineCount(s))
+	m.nextPasteID++
+	m.pastedBlocks = append(m.pastedBlocks, pastedBlock{label: label, text: s})
+	m.input.InsertString(label + " ")
+}
+
+func (m *chatTUI) expandPastedBlocks(displayed string) string {
+	sent := displayed
+	for _, block := range m.pastedBlocks {
+		if strings.Contains(sent, block.label) {
+			sent = strings.ReplaceAll(sent, block.label, renderFoldedPasteBlock(block))
+		}
+	}
+	return sent
+}
+
+func (m *chatTUI) pasteLabelsIn(s string) []string {
+	var labels []string
+	for _, block := range m.pastedBlocks {
+		if strings.Contains(s, block.label) {
+			labels = append(labels, block.label)
+		}
+	}
+	return labels
+}
+
+func (m *chatTUI) clearSubmittedPastes() {
+	if len(m.pendingPastes) == 0 {
+		return
+	}
+	submitted := make(map[string]bool, len(m.pendingPastes))
+	for _, label := range m.pendingPastes {
+		submitted[label] = true
+	}
+	kept := m.pastedBlocks[:0]
+	for _, block := range m.pastedBlocks {
+		if !submitted[block.label] {
+			kept = append(kept, block)
+		}
+	}
+	m.pastedBlocks = kept
+	m.pendingPastes = nil
+}
 
 func (m *chatTUI) growInputToFit() {
 	lines := strings.Count(m.input.Value(), "\n") + 1
@@ -1594,19 +1780,37 @@ func (m *chatTUI) cycleMode() {
 	}
 }
 
+func (m *chatTUI) toggleVerboseReasoning(notify bool) {
+	m.showReasoning = !m.showReasoning
+	if !notify {
+		return
+	}
+	if m.showReasoning {
+		m.notice("verbose on — thinking text will be shown")
+	} else {
+		m.notice("verbose off — thinking text will stay collapsed")
+	}
+}
+
 // startTurn commits the user bubble to scrollback, resets the turn accumulator,
 // and kicks off runner.Run. `sent` goes to the model (may carry a plan-mode
-// marker); `displayed` is what the transcript shows.
-func (m *chatTUI) startTurn(sent, displayed string, attachments []chatAttachment) tea.Cmd {
+// marker), `displayed` is what the transcript shows, and `restore` is what Esc
+// puts back into the input while the bubble is still deferred.
+func (m *chatTUI) startTurn(sent, displayed, restore string, attachments []chatAttachment) tea.Cmd {
 	// Flush any half-streamed leftover before the new turn (defensive).
 	m.commitReasoning()
 	m.commitPending()
 
-	// Defer the user bubble until the first response packet (commitPendingBubble):
-	// pressing Esc before the server replies un-sends the message, restoring its
-	// text to the input box with nothing stranded in scrollback.
-	m.pendingBubble = displayed
+	// Echo the user bubble to scrollback now so it appears the instant Enter is
+	// pressed, not when the server's first packet lands. It stays un-sendable until
+	// then: Esc before the reply pops these lines back off (unsendPending) and
+	// restores the text to the input box, leaving nothing stranded.
+	m.pendingRestore = restore
+	m.pendingPastes = m.pasteLabelsIn(restore)
 	m.pendingAttachments = cloneAttachments(attachments)
+	m.bubbleStartIdx = len(m.transcript)
+	m.commitLine("") // blank line separating turns
+	m.commitLine(renderUserBubble(displayed, m.width, m.planMode))
 	m.bubblePending = true
 	m.turnDiscarded = false
 
@@ -1620,33 +1824,33 @@ func (m *chatTUI) startTurn(sent, displayed string, attachments []chatAttachment
 	return tea.Batch(m.spinner.Tick, elapsedTick())
 }
 
-// commitPendingBubble flushes the deferred user bubble into scrollback — a blank
-// separator then the bubble. Called when a turn's first response packet arrives
-// (the message is now really sent) and, defensively, at turn end if it wasn't
-// un-sent. A no-op once committed.
-func (m *chatTUI) commitPendingBubble() {
+// confirmBubbleSent marks the already-echoed user bubble as really sent once a
+// turn's first response packet arrives, so Esc no longer un-sends it (it cancels
+// the stream instead). Also called defensively at turn end. A no-op once confirmed.
+func (m *chatTUI) confirmBubbleSent() {
 	if !m.bubblePending {
 		return
 	}
 	m.bubblePending = false
-	m.commitLine("") // blank line separating turns
-	m.commitLine(renderUserBubble(m.pendingBubble, m.width, m.planMode))
-	m.pendingBubble = ""
+	m.pendingRestore = ""
 	m.pendingAttachments = nil
 }
 
 // unsendPending "un-sends" the in-flight turn while the server hasn't replied yet
-// (bubblePending): it restores the just-sent text to the input box, drops the
-// deferred bubble, and cancels the request — marking the turn discarded so its
-// already-buffered events reach nothing. Once a packet has arrived the bubble is
-// committed and this path isn't taken (Esc cancels normally instead).
+// (bubblePending): it pops the echoed bubble back off the transcript, restores the
+// just-sent text to the input box, and cancels the request — marking the turn
+// discarded so its already-buffered events reach nothing. Once a packet has arrived
+// the bubble is confirmed and this path isn't taken (Esc cancels normally instead).
 func (m *chatTUI) unsendPending() {
-	m.input.SetValue(m.pendingBubble)
+	m.input.SetValue(m.pendingRestore)
 	m.growInputToFit()
 	m.attachments = cloneAttachments(m.pendingAttachments)
 	m.pendingAttachments = nil
+	m.transcript = m.transcript[:m.bubbleStartIdx]
+	m.transcriptDirty = true
 	m.bubblePending = false
-	m.pendingBubble = ""
+	m.pendingRestore = ""
+	m.pendingPastes = nil
 	m.turnDiscarded = true
 	m.ctrl.Cancel()
 }
@@ -1666,22 +1870,29 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 		}
 		return
 	}
-	// The first packet of any kind means the server replied — commit the deferred
-	// user bubble before rendering it. TurnStarted is local (emitted before the
-	// request) and TurnDone is handled in its own case, so neither triggers it.
+	// The first packet of any kind means the server replied — confirm the send so
+	// Esc cancels the stream instead of un-sending. TurnStarted is local (emitted
+	// before the request) and TurnDone is handled in its own case.
 	if e.Kind != event.TurnStarted && e.Kind != event.TurnDone {
-		m.commitPendingBubble()
+		m.confirmBubbleSent()
 	}
 	switch e.Kind {
 	case event.Reasoning:
-		if m.reasoning.Len() == 0 {
-			m.reasoning.WriteString(dim("  ▎ thinking") + "\n")
+		if m.reasoningLineIdx < 0 {
+			// Show the marker the moment thinking starts so the user sees the model
+			// working; it's rewritten to "thought for Ns" when the block closes.
+			m.thinkStart = time.Now()
+			m.reasoningLineIdx = len(m.transcript)
+			m.commitLine(dim("  ▎ " + i18n.M.ChatThinking))
 		}
-		m.reasoning.WriteString(dim(e.Text))
+		if m.showReasoning {
+			m.reasoning.WriteString(dim(e.Text))
+		}
 
 	case event.Text:
 		m.commitReasoning() // reasoning ends as the answer begins
 		m.pending.WriteString(e.Text)
+		m.streamAnswer()
 
 	case event.Message:
 		// The answer stream is complete — freeze reasoning + the markdown answer.
@@ -1769,18 +1980,12 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 		// real error, and gate a plan-mode proposal on the user's approval.
 		m.commitReasoning()
 		m.commitPending()
-		// If the bubble is still deferred at turn end, the message was sent but
-		// produced nothing visible (an error before any reply, or an empty turn):
-		// commit it so the user sees what they sent — unless this is a user cancel,
-		// where it was already un-sent (handled above) or should leave no trace.
-		if e.Err == nil || !strings.Contains(e.Err.Error(), "context canceled") {
-			m.commitPendingBubble()
-		} else {
-			m.bubblePending = false
-			m.pendingBubble = ""
-			m.pendingAttachments = nil
-		}
+		// The bubble was echoed on Enter and an un-sent turn is swallowed above
+		// (turnDiscarded), so any turn reaching here keeps its bubble in scrollback;
+		// just clear the un-sendable flag.
+		m.confirmBubbleSent()
 		m.state = tuiIdle
+		m.clearSubmittedPastes()
 		_ = m.ctrl.Snapshot() // best-effort; never the user's problem mid-chat
 		if e.Err != nil && e.Err.Error() != "" && !strings.Contains(e.Err.Error(), "context canceled") {
 			m.commitLine(wrapForViewport(i18n.M.ErrorPrefix+" "+e.Err.Error(), m.width, lipgloss.Color("3")))
@@ -1844,6 +2049,8 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 		// Dismiss the pinned task list; a later todo_write brings it back.
 		m.todoArgs = ""
 		m.notice(i18n.M.SlashTodoCleared)
+	case "/verbose":
+		m.toggleVerboseReasoning(true)
 	case "/rewind":
 		m.openRewind()
 	case "/tree":
@@ -1882,10 +2089,10 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 	default:
 		// A custom command wins over a skill of the same name; both resolve to a turn.
 		if sent, ok := m.ctrl.CustomCommand(input); ok {
-			return m.startTurn(m.ctrl.Compose(sent), input, nil)
+			return m.startTurn(m.ctrl.Compose(sent), input, input, nil)
 		}
 		if sent, ok := m.ctrl.RunSkill(input); ok {
-			return m.startTurn(m.ctrl.Compose(sent), input, nil)
+			return m.startTurn(m.ctrl.Compose(sent), input, input, nil)
 		}
 		m.notice(fmt.Sprintf("%s: %s", i18n.M.SlashUnknown, cmd))
 	}
@@ -1931,6 +2138,18 @@ func (m *chatTUI) runMCPSubcommand(input string) {
 			return
 		}
 		m.notice(fmt.Sprintf("connected %s — %d tools, saved to config (available next message)", entry.Name, n))
+	case "connect":
+		if len(args) < 3 {
+			m.notice("usage: /mcp connect <name>")
+			return
+		}
+		n, err := m.ctrl.ConnectConfiguredMCPServer(args[2])
+		if err != nil {
+			m.notice("mcp connect: " + err.Error())
+			return
+		}
+		m.host = m.ctrl.Host()
+		m.notice(fmt.Sprintf("connected %s — %d tools (available next message)", args[2], n))
 	case "remove", "rm":
 		if len(args) < 3 {
 			m.notice("usage: /mcp remove <name>")
@@ -1948,14 +2167,14 @@ func (m *chatTUI) runMCPSubcommand(input string) {
 			m.notice("removed " + name + " from config")
 		}
 	default:
-		m.notice("unknown /mcp subcommand " + args[1] + " — try: /mcp, /mcp add, /mcp remove")
+		m.notice("unknown /mcp subcommand " + args[1] + " — try: /mcp, /mcp add, /mcp connect, /mcp remove")
 	}
 }
 
 // showMCPStatus queues the connected MCP servers, their counts, and the prompt
 // commands / resource refs they expose — the discovery surface for /mcp.
 func (m *chatTUI) showMCPStatus() {
-	if m.host == nil || len(m.host.Servers()) == 0 {
+	if m.host == nil || (len(m.host.Servers()) == 0 && len(m.host.Failures()) == 0) {
 		m.notice(i18n.M.SlashMCPNone)
 		return
 	}
@@ -1976,6 +2195,9 @@ func (m *chatTUI) showMCPStatus() {
 		}
 		fmt.Fprintf(&b, "      %s  %s\n", "@"+r.Server+":"+r.URI, dim(label))
 	}
+	for _, f := range m.host.Failures() {
+		fmt.Fprintf(&b, "    %s %s %s\n", yellow("!"), bold(f.Name), dim(fmt.Sprintf("(%s) — %s", f.Transport, f.Error)))
+	}
 	m.commitLine(strings.TrimRight(b.String(), "\n"))
 }
 
@@ -1986,10 +2208,10 @@ func (m *chatTUI) notice(note string) {
 
 // resolveRefs resolves a line's @references off the event loop via the
 // controller, delivering a refsResolvedMsg with the tagged context block.
-func (m *chatTUI) resolveRefs(sent, display string, attachments []chatAttachment) tea.Cmd {
+func (m *chatTUI) resolveRefs(sent, display, restore string, attachments []chatAttachment) tea.Cmd {
 	return func() tea.Msg {
 		block, errs := m.ctrl.ResolveRefs(context.Background(), sent)
-		return refsResolvedMsg{sent: sent, display: display, attachments: attachments, block: block, errs: errs}
+		return refsResolvedMsg{sent: sent, display: display, restore: restore, attachments: attachments, block: block, errs: errs}
 	}
 }
 

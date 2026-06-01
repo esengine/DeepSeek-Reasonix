@@ -39,7 +39,10 @@ export function TodoPanel({ todos, onDismiss }: { todos: Todo[]; onDismiss: () =
       {open && (
         <ul className="todobar__list">
           {todos.map((t, i) => (
-            <li key={i} className={`todobar__item todobar__item--${t.status}`}>
+            <li
+              key={i}
+              className={`todobar__item todobar__item--${t.status}${t.level ? " todobar__item--sub" : ""}`}
+            >
               {t.status === "completed" ? (
                 <Check size={14} className="todobar__ico todobar__ico--done" />
               ) : t.status === "in_progress" ? (
