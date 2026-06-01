@@ -63,7 +63,14 @@ func RenderTOML(c *Config) string {
 		fmt.Fprintf(&b, "name        = %q\n", p.Name)
 		fmt.Fprintf(&b, "kind        = %q\n", p.Kind)
 		fmt.Fprintf(&b, "base_url    = %q\n", p.BaseURL)
-		fmt.Fprintf(&b, "model       = %q\n", p.Model)
+		if len(p.Models) > 0 {
+			fmt.Fprintf(&b, "models      = %s\n", renderStringArray(p.Models))
+			if p.Default != "" {
+				fmt.Fprintf(&b, "default     = %q\n", p.Default)
+			}
+		} else if p.Model != "" {
+			fmt.Fprintf(&b, "model       = %q\n", p.Model)
+		}
 		fmt.Fprintf(&b, "api_key_env = %q\n", p.APIKeyEnv)
 		if p.BalanceURL != "" {
 			fmt.Fprintf(&b, "balance_url = %q   # optional; wallet-balance endpoint shown in the status bar\n", p.BalanceURL)
@@ -74,6 +81,13 @@ func RenderTOML(c *Config) string {
 		if p.Price != nil {
 			fmt.Fprintf(&b, "price       = { cache_hit = %v, input = %v, output = %v, currency = %q }   # per 1M tokens\n",
 				p.Price.CacheHit, p.Price.Input, p.Price.Output, p.Price.Symbol())
+		}
+		for model, mp := range p.ModelPrices {
+			fmt.Fprintf(&b, "\n[providers.model_prices.%q]\n", model)
+			fmt.Fprintf(&b, "cache_hit = %v\n", mp.CacheHit)
+			fmt.Fprintf(&b, "input     = %v\n", mp.Input)
+			fmt.Fprintf(&b, "output    = %v\n", mp.Output)
+			fmt.Fprintf(&b, "currency  = %q\n", mp.Currency)
 		}
 		b.WriteString("\n")
 	}

@@ -105,6 +105,11 @@ var English = Messages{
 	ArgHooksTrust:   "trust this project's hooks",
 	ArgModelCurrent: "current",
 
+	CmdProviders:       "manage providers",
+	ArgProvidersAdd:    "add a preset provider",
+	ArgProvidersRemove: "remove a provider",
+	ArgProvidersList:   "list configured providers",
+
 	ListModelsHeaderFmt: "models (active: %s)",
 	ListModelsHint:      "switch with the model switcher, or type /model <provider/model>",
 	ListMemoryHeader:    "memory files",
@@ -115,6 +120,8 @@ var English = Messages{
 	ListHooksNone:       "hooks: none active — configure in .reasonix/settings.json (project, after trust) or ~/.reasonix/settings.json (global)",
 	ListMcpHeader:       "mcp servers",
 	ListMcpNone:         "mcp: no servers connected — add one in reasonix.toml ([[plugins]]) or a project .mcp.json",
+	ListProvidersHeader: "providers",
+	ListProvidersNone:   "no providers configured",
 
 	SelectProvidersLabel:  "Select providers to enable",
 	EnterAPIKeysHeader:    "Enter API keys (Enter to skip and set later in .env):",

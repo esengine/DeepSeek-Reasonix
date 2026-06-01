@@ -172,6 +172,11 @@ type AgentConfig struct {
 // ProviderEntry declares a model provider instance. ContextWindow is the model's
 // token budget; the harness compacts older history as a turn's prompt approaches
 // it (see agent compaction). 0 disables compaction for the instance.
+//
+// When Models is set (grouped provider), Price is the default pricing for all
+// models in the group; ModelPrices overrides it per model id. ResolveModel
+// automatically resolves the correct price for the selected model so downstream
+// code (boot, acp) always reads the accurate per-model cost.
 type ProviderEntry struct {
 	Name          string            `toml:"name"`
 	Kind          string            `toml:"kind"`
@@ -182,7 +187,8 @@ type ProviderEntry struct {
 	APIKeyEnv     string            `toml:"api_key_env"`
 	BalanceURL    string            `toml:"balance_url"` // optional; a provider-specific wallet-balance endpoint (DeepSeek: https://api.deepseek.com/user/balance). Empty = no balance readout.
 	ContextWindow int               `toml:"context_window"`
-	Price         *provider.Pricing `toml:"price"`
+	Price         *provider.Pricing `toml:"price"`                      // default pricing (all models unless overridden by ModelPrices)
+	ModelPrices   map[string]*provider.Pricing `toml:"model_prices"`   // per-model price overrides; key = model id
 	// Thinking / Effort are provider-kind-specific knobs forwarded to the provider
 	// via Config.Extra. The anthropic provider reads Thinking="adaptive" to enable
 	// extended thinking and Effort ("low".."max") to tune depth. The
@@ -190,6 +196,17 @@ type ProviderEntry struct {
 	// thinking-capable models (e.g. MiMo) and ignores Thinking. Empty = provider default.
 	Thinking string `toml:"thinking"`
 	Effort   string `toml:"effort"`
+}
+
+// PriceFor returns the per-1M-token pricing for a specific model within this
+// provider. If ModelPrices contains an entry for the given model, that override
+// is returned; otherwise the provider's default Price is used. Returns nil when
+// neither is set.
+func (e *ProviderEntry) PriceFor(model string) *provider.Pricing {
+	if p, ok := e.ModelPrices[model]; ok {
+		return p
+	}
+	return e.Price
 }
 
 // ModelList returns the models this provider exposes: the explicit `models` list,
@@ -303,40 +320,65 @@ const LanguagePolicy = `Reply in the same language the user is using in their mo
 	`whenever they switch. Let this also guide the language you think in. Always keep code, ` +
 	`identifiers, file paths, shell commands, and technical terms in their original form — never translate them.`
 
-// Default returns the built-in default configuration (DeepSeek + MiMo presets).
+// Default returns the built-in default configuration. Only DeepSeek is included
+// as the always-on provider; third-party providers (MiMo, Claude, …) are
+// available via ProviderPresets and opt-in through the setup wizard's "/" reveal.
 func Default() *Config {
 	return &Config{
-		DefaultModel: "deepseek-flash",
+		DefaultModel: "deepseek",
 		Agent: AgentConfig{
 			SystemPrompt: DefaultSystemPrompt,
-			// 0 = no step cap: the agent loops until the model gives a final answer,
-			// the user cancels, or the provider errors. Context stays bounded by
-			// compaction, not by a round count. Set a positive agent.max_steps only
-			// if you want a hard guard against runaway.
-			MaxSteps: 0,
+			MaxSteps:     0,
 		},
-		// Mode "ask" with no rules keeps `reasonix run` autonomous (no TTY → ask
-		// resolves to allow) while `reasonix chat` prompts before writers. Users add
-		// deny/allow rules to harden or quiet specific tools.
 		Permissions: PermissionsConfig{Mode: "ask"},
-		// Sandbox on by default: bash is jailed (macOS), network allowed so
-		// builds/downloads work. Set bash = "off" to disable. Network=true here
-		// so an absent [sandbox] in a user's file keeps egress (zero value would
-		// wrongly deny it).
-		Sandbox: SandboxConfig{Bash: "enforce", Network: true},
-		// CodeGraph code-intelligence on by default: when it resolves it is injected
-		// as a built-in MCP server, and AutoInstall fetches it into the cache on
-		// first use. Set enabled = false to opt out, or auto_install = false to
-		// require an explicit `reasonix codegraph install`.
-		Codegraph: CodegraphConfig{Enabled: true, AutoInstall: true},
-		// LSP tools on by default, but dormant until a language server is on PATH;
-		// a missing server yields an install hint rather than an error.
-		LSP: LSPConfig{Enabled: true},
-		Providers: []ProviderEntry{
-			{Name: "deepseek-flash", Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash", APIKeyEnv: "DEEPSEEK_API_KEY", BalanceURL: "https://api.deepseek.com/user/balance", ContextWindow: 1_000_000, Price: &provider.Pricing{CacheHit: 0.02, Input: 1, Output: 2, Currency: "¥"}},
-			{Name: "deepseek-pro", Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro", APIKeyEnv: "DEEPSEEK_API_KEY", BalanceURL: "https://api.deepseek.com/user/balance", ContextWindow: 1_000_000, Price: &provider.Pricing{CacheHit: 0.025, Input: 3, Output: 6, Currency: "¥"}},
-			{Name: "mimo-pro", Kind: "openai", BaseURL: "https://api.xiaomimimo.com/v1", Model: "mimo-v2.5-pro", APIKeyEnv: "MIMO_API_KEY", ContextWindow: 1_000_000},
-			{Name: "mimo-flash", Kind: "openai", BaseURL: "https://api.xiaomimimo.com/v1", Model: "mimo-v2-flash", APIKeyEnv: "MIMO_API_KEY", ContextWindow: 65_536},
+		Sandbox:     SandboxConfig{Bash: "enforce", Network: true},
+		Codegraph:   CodegraphConfig{Enabled: true, AutoInstall: true},
+		LSP:         LSPConfig{Enabled: true},
+		Providers:   []ProviderEntry{deepseekPreset()},
+	}
+}
+
+// ProviderPresets returns the full catalogue of available providers. DeepSeek is
+// the built-in default; MiMo Token Plan and MiMo Pay-per-use are opt-in third-
+// party entries the setup wizard reveals via "/". The two MiMo variants share
+// models and pricing but differ in base_url and api_key_env.
+//
+// Adding a new provider here makes it available in the setup wizard; it does NOT
+// add it to Default() — users must opt in.
+func ProviderPresets() []ProviderEntry {
+	return []ProviderEntry{
+		deepseekPreset(),
+		{
+			Name: "mimo-tp", Kind: "openai", BaseURL: "https://token-plan-cn.xiaomimimo.com/v1",
+			Models: []string{"mimo-v2.5-pro", "mimo-v2.5"}, Default: "mimo-v2.5-pro",
+			APIKeyEnv: "MIMO_API_KEY", ContextWindow: 1_000_000,
+			Price: &provider.Pricing{CacheHit: 0.02, Input: 1, Output: 2, Currency: "¥"},
+			ModelPrices: map[string]*provider.Pricing{
+				"mimo-v2.5-pro": {CacheHit: 0.025, Input: 3, Output: 6, Currency: "¥"},
+			},
+		},
+		{
+			Name: "mimo-ppu", Kind: "openai", BaseURL: "https://api.xiaomimimo.com/v1",
+			Models: []string{"mimo-v2.5-pro", "mimo-v2.5"}, Default: "mimo-v2.5-pro",
+			APIKeyEnv: "MIMO_API_KEY", ContextWindow: 1_000_000,
+			Price: &provider.Pricing{CacheHit: 0.02, Input: 1, Output: 2, Currency: "¥"},
+			ModelPrices: map[string]*provider.Pricing{
+				"mimo-v2.5-pro": {CacheHit: 0.025, Input: 3, Output: 6, Currency: "¥"},
+			},
+		},
+	}
+}
+
+// deepseekPreset is the always-on built-in provider.
+func deepseekPreset() ProviderEntry {
+	return ProviderEntry{
+		Name: "deepseek", Kind: "openai", BaseURL: "https://api.deepseek.com",
+		Models: []string{"deepseek-v4-flash", "deepseek-v4-pro"}, Default: "deepseek-v4-flash",
+		APIKeyEnv: "DEEPSEEK_API_KEY", BalanceURL: "https://api.deepseek.com/user/balance",
+		ContextWindow: 1_000_000,
+		Price: &provider.Pricing{CacheHit: 0.02, Input: 1, Output: 2, Currency: "¥"},
+		ModelPrices: map[string]*provider.Pricing{
+			"deepseek-v4-pro": {CacheHit: 0.025, Input: 3, Output: 6, Currency: "¥"},
 		},
 	}
 }
@@ -514,6 +556,9 @@ func (c *Config) Provider(name string) (*ProviderEntry, bool) {
 // so a single "vendor with many models" entry yields one instance per model
 // without duplicating base_url/api_key_env. Single-`model` entries still resolve
 // by provider name, keeping older configs working unchanged.
+//
+// Price is automatically resolved to the per-model override (from ModelPrices)
+// when one exists, so downstream code always reads the accurate per-model cost.
 func (c *Config) ResolveModel(ref string) (*ProviderEntry, bool) {
 	if ref == "" {
 		return nil, false
@@ -523,6 +568,7 @@ func (c *Config) ResolveModel(ref string) (*ProviderEntry, bool) {
 		if e, found := c.Provider(prov); found && e.HasModel(model) {
 			cp := *e
 			cp.Model = model
+			cp.Price = e.PriceFor(model)
 			return &cp, true
 		}
 	}
@@ -530,6 +576,7 @@ func (c *Config) ResolveModel(ref string) (*ProviderEntry, bool) {
 	if e, found := c.Provider(ref); found {
 		cp := *e
 		cp.Model = e.DefaultModel()
+		cp.Price = e.PriceFor(cp.Model)
 		return &cp, true
 	}
 	// a bare model name → the provider that lists it
@@ -537,6 +584,7 @@ func (c *Config) ResolveModel(ref string) (*ProviderEntry, bool) {
 		if c.Providers[i].HasModel(ref) {
 			cp := c.Providers[i]
 			cp.Model = ref
+			cp.Price = c.Providers[i].PriceFor(ref)
 			return &cp, true
 		}
 	}

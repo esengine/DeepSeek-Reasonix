@@ -80,28 +80,32 @@ func Providers(cfg *config.Config) []ProviderInfo {
 	if cfg == nil {
 		return nil
 	}
+	defaultEntry, _ := cfg.ResolveModel(cfg.DefaultModel)
 	out := make([]ProviderInfo, 0, len(cfg.Providers))
 	for i := range cfg.Providers {
 		e := &cfg.Providers[i]
-		info := ProviderInfo{
-			Name:          e.Name,
-			Kind:          e.Kind,
-			Model:         e.Model,
-			BaseURL:       e.BaseURL,
-			APIKeyEnv:     e.APIKeyEnv,
-			KeyReady:      e.APIKey() != "",
-			ContextWindow: e.ContextWindow,
-			IsDefault:     e.Name == cfg.DefaultModel,
-		}
-		if p := e.Price; p != nil {
-			info.Pricing = &PricingInfo{
-				CacheHit: p.CacheHit,
-				Input:    p.Input,
-				Output:   p.Output,
-				Currency: p.Symbol(),
+		for _, model := range e.ModelList() {
+			isDefault := defaultEntry != nil && defaultEntry.Name == e.Name && defaultEntry.Model == model
+			info := ProviderInfo{
+				Name:          e.Name,
+				Kind:          e.Kind,
+				Model:         model,
+				BaseURL:       e.BaseURL,
+				APIKeyEnv:     e.APIKeyEnv,
+				KeyReady:      e.APIKey() != "",
+				ContextWindow: e.ContextWindow,
+				IsDefault:     isDefault,
 			}
+			if p := e.PriceFor(model); p != nil {
+				info.Pricing = &PricingInfo{
+					CacheHit: p.CacheHit,
+					Input:    p.Input,
+					Output:   p.Output,
+					Currency: p.Symbol(),
+				}
+			}
+			out = append(out, info)
 		}
-		out = append(out, info)
 	}
 	return out
 }

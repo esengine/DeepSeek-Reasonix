@@ -138,6 +138,12 @@ type Messages struct {
 	ArgHooksTrust   string // /hooks trust
 	ArgModelCurrent string // /model <ref> active tag
 
+	// /providers sub-commands
+	CmdProviders      string // /providers
+	ArgProvidersAdd   string // /providers add
+	ArgProvidersRemove string // /providers remove
+	ArgProvidersList  string // /providers list
+
 	// management listing notices (the Submit path: desktop / HTTP frontends)
 	ListModelsHeaderFmt string // "models (active: %s)"
 	ListModelsHint      string // how to switch
@@ -149,6 +155,8 @@ type Messages struct {
 	ListHooksNone       string // no hooks
 	ListMcpHeader       string // "mcp servers"
 	ListMcpNone         string // no mcp servers
+	ListProvidersHeader string // "providers"
+	ListProvidersNone   string // no providers
 
 	// init wizard
 	SelectProvidersLabel  string // multi-select label

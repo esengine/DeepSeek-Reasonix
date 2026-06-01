@@ -106,6 +106,11 @@ var Chinese = Messages{
 	ArgHooksTrust:   "信任本项目的 hooks",
 	ArgModelCurrent: "当前",
 
+	CmdProviders:       "管理 provider",
+	ArgProvidersAdd:    "添加预设 provider",
+	ArgProvidersRemove: "移除 provider",
+	ArgProvidersList:   "列出已配置的 provider",
+
 	ListModelsHeaderFmt: "模型（当前：%s）",
 	ListModelsHint:      "用底部的模型切换器，或输入 /model <provider/model>",
 	ListMemoryHeader:    "记忆文件",
@@ -116,6 +121,8 @@ var Chinese = Messages{
 	ListHooksNone:       "无生效 hooks — 在 .reasonix/settings.json（项目，需信任后）或 ~/.reasonix/settings.json（全局）配置",
 	ListMcpHeader:       "MCP 服务器",
 	ListMcpNone:         "未连接 MCP 服务器 — 在 reasonix.toml（[[plugins]]）或项目 .mcp.json 中添加",
+	ListProvidersHeader: "providers",
+	ListProvidersNone:   "未配置 provider",
 
 	SelectProvidersLabel:  "选择要启用的 provider",
 	EnterAPIKeysHeader:    "输入 API key（回车跳过、稍后写入 .env）：",

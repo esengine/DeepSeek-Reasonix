@@ -94,6 +94,7 @@ func (c *Config) RemoveProvider(name string) error {
 }
 
 // validateProvider checks the fields a provider can't function without.
+// Model (singular) or Models (array) — at least one must be set.
 func validateProvider(e ProviderEntry) error {
 	switch {
 	case strings.TrimSpace(e.Name) == "":
@@ -102,7 +103,7 @@ func validateProvider(e ProviderEntry) error {
 		return fmt.Errorf("provider %q: kind is required", e.Name)
 	case strings.TrimSpace(e.BaseURL) == "":
 		return fmt.Errorf("provider %q: base_url is required", e.Name)
-	case strings.TrimSpace(e.Model) == "":
+	case strings.TrimSpace(e.Model) == "" && len(e.Models) == 0:
 		return fmt.Errorf("provider %q: model is required", e.Name)
 	}
 	return nil
