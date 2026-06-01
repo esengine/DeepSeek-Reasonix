@@ -162,12 +162,17 @@ type Agent struct {
 	evidence *evidence.Ledger
 
 	// Context management: when a turn's prompt nears contextWindow, the older
-	// middle of the session is summarized away, keeping recentKeep messages
-	// verbatim and archiving the originals under archiveDir.
-	contextWindow int
-	compactRatio  float64
-	recentKeep    int
-	archiveDir    string
+	// middle of the session is summarized away, keeping a token-bounded recent
+	// tail verbatim (recentKeep is the message floor) and archiving the originals
+	// under archiveDir. compactStuck latches when compaction can't get the prompt
+	// under the window (consecutiveCompacts crosses the limit), so auto-compaction
+	// pauses instead of looping.
+	contextWindow       int
+	compactRatio        float64
+	recentKeep          int
+	archiveDir          string
+	compactStuck        bool
+	consecutiveCompacts int
 
 	// stormSig / stormCount track a run of turns that keep failing the same way so
 	// the loop can break a death-spiral. The signature is each call's (tool, error)
@@ -253,7 +258,8 @@ type Options struct {
 	Jobs *jobs.Manager
 
 	// Context management. ContextWindow <= 0 disables compaction. CompactRatio
-	// and RecentKeep fall back to defaults when unset.
+	// is the trigger fraction; RecentKeep is the minimum recent messages kept
+	// verbatim (the tail is otherwise token-bounded). Both fall back to defaults.
 	ContextWindow int
 	CompactRatio  float64
 	RecentKeep    int
@@ -269,7 +275,7 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		opts.CompactRatio = defaultCompactRatio
 	}
 	if opts.RecentKeep <= 0 {
-		opts.RecentKeep = defaultRecentKeep
+		opts.RecentKeep = minRecentKeep
 	}
 	if sink == nil {
 		sink = event.Discard
