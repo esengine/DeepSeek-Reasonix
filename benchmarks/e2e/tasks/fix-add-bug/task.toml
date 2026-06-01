@@ -1,0 +1,3 @@
+prompt = "The file calc.py has a bug: add(a, b) returns the wrong result. Fix add so it returns the sum of a and b. Keep the other functions unchanged."
+max_steps = 12
+timeout_sec = 180

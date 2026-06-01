@@ -1,0 +1,111 @@
+name: e2e-bot
+
+# Comment "/e2e" on a pull request to run the committed e2e suite (benchmarks/e2e)
+# against the real provider and post an accuracy / cache-hit / token / cost report
+# back to the PR. Gated to trusted authors: the job checks out PR-head code and
+# runs it with the provider API key, so only the repo owner, members, and
+# collaborators may trigger it.
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: e2e-bot-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    if: >-
+      github.event.issue.pull_request &&
+      contains(github.event.comment.body, '/e2e') &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Acknowledge
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.reactions.createForIssueComment({
+              owner: context.repo.owner, repo: context.repo.repo,
+              comment_id: context.payload.comment.id, content: 'eyes',
+            });
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check out the PR head
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh pr checkout ${{ github.event.issue.number }}
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Write provider config
+        run: |
+          mkdir -p ~/.config/reasonix
+          cat > ~/.config/reasonix/config.toml <<EOF
+          default_model = "e2e"
+
+          [[providers]]
+          name = "e2e"
+          kind = "openai"
+          base_url = "${{ vars.REASONIX_E2E_BASE_URL || 'https://api.deepseek.com' }}"
+          model = "${{ vars.REASONIX_E2E_MODEL || 'deepseek-chat' }}"
+          api_key_env = "DEEPSEEK_API_KEY"
+          context_window = 65536
+
+          [providers.price]
+          cache_hit = 0.5
+          input = 2
+          output = 8
+          currency = "¥"
+
+          [permissions]
+          mode = "allow"
+
+          [codegraph]
+          enabled = false
+          EOF
+
+      - name: Build
+        run: |
+          go build -o ./bin/reasonix ./cmd/reasonix
+          go build -o ./bin/e2ebench ./cmd/e2ebench
+
+      - name: Run e2e suite
+        id: bench
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: |
+          if [ -z "$DEEPSEEK_API_KEY" ]; then
+            echo "missing DEEPSEEK_API_KEY secret" > report.md
+            echo "Add a repository secret named DEEPSEEK_API_KEY to enable the e2e bot." >> report.md
+            exit 0
+          fi
+          ./bin/e2ebench -bin ./bin/reasonix -suite benchmarks/e2e -out report.md -json report.json -budget 400000
+
+      - name: Post report
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf '\n> commit %s · triggered by @%s\n' "$(git rev-parse --short HEAD)" "${{ github.event.comment.user.login }}" >> report.md
+          gh pr comment ${{ github.event.issue.number }} --body-file report.md
+
+      - name: Report failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh pr comment ${{ github.event.issue.number }} --body "🤖 e2e bot failed — see the [run log](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})."
