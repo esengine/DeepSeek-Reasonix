@@ -52,6 +52,8 @@ func SlashArgItems(line string, d ArgData) ([]SlashItem, int) {
 		raw = mcpArgItems(prior, cur, d)
 	case "/model":
 		raw = modelArgItems(prior, d)
+	case "/providers":
+		raw = providerArgItems(prior)
 	case "/skill", "/skills":
 		raw = skillArgItems(prior, d)
 	case "/hooks":
@@ -198,6 +200,31 @@ func (c *Controller) managementNotice(trimmed string) bool {
 			return true
 		}
 		c.notice(c.mcpListText())
+	case "/providers":
+		if len(fields) >= 3 {
+			switch fields[1] {
+			case "add":
+				c.addProviderFromPreset(fields[2])
+				return true
+			case "remove", "rm":
+				c.removeProvider(fields[2])
+				return true
+			}
+		}
+		if len(fields) >= 2 {
+			switch fields[1] {
+			case "add":
+				c.showAvailablePresets()
+				return true
+			case "remove", "rm":
+				c.notice("usage: /providers remove <name>")
+				return true
+			case "list", "ls":
+				c.notice(c.providerListText())
+				return true
+			}
+		}
+		c.notice(c.providerListText())
 	default:
 		return false
 	}
@@ -290,4 +317,144 @@ func (c *Controller) mcpListText() string {
 		}
 	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+// providerListText lists the configured providers for the desktop/HTTP frontend.
+func (c *Controller) providerListText() string {
+	cfg, err := config.Load()
+	if err != nil || len(cfg.Providers) == 0 {
+		return i18n.M.ListProvidersNone
+	}
+	var b strings.Builder
+	b.WriteString(i18n.M.ListProvidersHeader + "\n")
+	for _, p := range cfg.Providers {
+		for _, m := range p.ModelList() {
+			fmt.Fprintf(&b, "  %s/%s\n", p.Name, m)
+		}
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// showAvailablePresets lists presets not yet in the config.
+func (c *Controller) showAvailablePresets() {
+	presets := config.ProviderPresets()
+	cfg, _ := config.Load()
+	existing := map[string]bool{}
+	if cfg != nil {
+		for _, p := range cfg.Providers {
+			existing[p.Name] = true
+		}
+	}
+	var b strings.Builder
+	b.WriteString("available presets (/providers add <name>)\n")
+	for _, p := range presets {
+		if existing[p.Name] {
+			continue
+		}
+		fmt.Fprintf(&b, "  %s — %s\n", p.Name, strings.Join(p.ModelList(), ", "))
+	}
+	out := strings.TrimRight(b.String(), "\n")
+	if out == "" {
+		c.notice("all presets already added")
+		return
+	}
+	c.notice(out)
+}
+
+// addProviderFromPreset adds a preset provider to the config and saves.
+func (c *Controller) addProviderFromPreset(name string) {
+	presets := config.ProviderPresets()
+	var preset *config.ProviderEntry
+	for i := range presets {
+		if presets[i].Name == name {
+			preset = &presets[i]
+			break
+		}
+	}
+	if preset == nil {
+		c.notice(fmt.Sprintf("unknown preset %q — use /providers add to see available", name))
+		return
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		c.notice("providers: " + err.Error())
+		return
+	}
+	if _, exists := cfg.Provider(name); exists {
+		c.notice(fmt.Sprintf("%s is already configured", name))
+		return
+	}
+	if err := cfg.UpsertProvider(*preset); err != nil {
+		c.notice("providers add: " + err.Error())
+		return
+	}
+	if err := cfg.Save(); err != nil {
+		c.notice("providers add: " + err.Error())
+		return
+	}
+	c.notice(fmt.Sprintf("Added %s (%s) — use /model %s/%s to switch",
+		name, strings.Join(preset.ModelList(), ", "), name, preset.DefaultModel()))
+
+	if preset.APIKeyEnv != "" {
+		if err := cfg.Validate(name + "/" + preset.DefaultModel()); err != nil {
+			c.notice(fmt.Sprintf("  %s not set — add it to .env or export it", preset.APIKeyEnv))
+		}
+	}
+}
+
+// removeProvider removes a provider from the config and saves.
+func (c *Controller) removeProvider(name string) {
+	cfg, err := config.Load()
+	if err != nil {
+		c.notice("providers: " + err.Error())
+		return
+	}
+	if err := cfg.RemoveProvider(name); err != nil {
+		c.notice("providers remove: " + err.Error())
+		return
+	}
+	if err := cfg.Save(); err != nil {
+		c.notice("providers remove: " + err.Error())
+		return
+	}
+	c.notice(fmt.Sprintf("Removed %s", name))
+}
+
+// providerArgItems completes /providers arguments: sub-commands at the first
+// position, and preset names after "add" or provider names after "remove".
+func providerArgItems(prior []string) []SlashItem {
+	if len(prior) <= 1 {
+		return []SlashItem{
+			{Label: "add", Insert: "add ", Hint: i18n.M.ArgProvidersAdd, Descend: true},
+			{Label: "remove", Insert: "remove ", Hint: i18n.M.ArgProvidersRemove, Descend: true},
+			{Label: "list", Insert: "list", Hint: i18n.M.ArgProvidersList},
+		}
+	}
+	switch prior[1] {
+	case "add":
+		cfg, _ := config.Load()
+		existing := map[string]bool{}
+		if cfg != nil {
+			for _, p := range cfg.Providers {
+				existing[p.Name] = true
+			}
+		}
+		var items []SlashItem
+		for _, p := range config.ProviderPresets() {
+			if existing[p.Name] {
+				continue
+			}
+			items = append(items, SlashItem{Label: p.Name, Insert: p.Name})
+		}
+		return items
+	case "remove", "rm":
+		if cfg, err := config.Load(); err == nil {
+			var items []SlashItem
+			for _, p := range cfg.Providers {
+				items = append(items, SlashItem{Label: p.Name, Insert: p.Name})
+			}
+			return items
+		}
+	}
+	return nil
 }

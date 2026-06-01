@@ -518,6 +518,7 @@ func (a *App) Commands() []CommandInfo {
 		{Name: "mcp", Description: i18n.M.CmdMcp, Kind: "builtin"},
 		{Name: "hooks", Description: i18n.M.CmdHooks, Kind: "builtin"},
 		{Name: "skill", Description: i18n.M.CmdSkill, Kind: "builtin"},
+		{Name: "providers", Description: i18n.M.CmdProviders, Kind: "builtin"},
 	}
 	if a.ctrl == nil {
 		return out
