@@ -148,6 +148,7 @@ var Chinese = Messages{
   reasonix serve [--model NAME] [--addr HOST:PORT]      通过 HTTP+SSE 提供会话（浏览器客户端在 /）
   reasonix setup [path]                                 交互式配置向导；生成 reasonix.toml（及 .env）
   reasonix mcp <add|remove|list>                        管理 reasonix.toml 里的 MCP 服务器
+  reasonix doctor [--json]                              输出脱敏的本地诊断信息
   reasonix version
   reasonix help
 
