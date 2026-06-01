@@ -5,9 +5,28 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 )
+
+// TodoItem mirrors the todo_write item shape the host needs for step matching.
+type TodoItem struct {
+	Content    string `json:"content"`
+	Status     string `json:"status"`
+	ActiveForm string `json:"activeForm,omitempty"`
+	Level      int    `json:"level,omitempty"`
+}
+
+// TodoStepMatch is the result of matching complete_step.step against the latest
+// successful todo_write list in this turn.
+type TodoStepMatch struct {
+	Found      bool
+	Index      int
+	Content    string
+	Status     string
+	ActiveForm string
+}
 
 // Receipt is the host-runtime record of one tool call. It stays in memory for
 // the current agent turn and is not serialized into prompts or session state.
@@ -19,6 +38,7 @@ type Receipt struct {
 	Paths    []string        `json:"paths,omitempty"`
 	Read     bool            `json:"read,omitempty"`
 	Write    bool            `json:"write,omitempty"`
+	Todos    []TodoItem      `json:"todos,omitempty"`
 }
 
 // Ledger stores the receipts available to complete_step for the current turn.
@@ -47,6 +67,7 @@ func (l *Ledger) Record(r Receipt) {
 	}
 	r.Command = strings.TrimSpace(r.Command)
 	r.Paths = normalizePaths(r.Paths)
+	r.Todos = normalizeTodos(r.Todos)
 	if r.Args != nil {
 		cp := make(json.RawMessage, len(r.Args))
 		copy(cp, r.Args)
@@ -79,6 +100,23 @@ func (l *Ledger) HasSuccessfulWrite(paths []string) bool {
 
 func (l *Ledger) HasSuccessfulReadOrWrite(paths []string) bool {
 	return l.hasSuccessfulPaths(paths, func(r Receipt) bool { return r.Read || r.Write })
+}
+
+func (l *Ledger) MatchLatestTodoStep(step string) (TodoStepMatch, bool) {
+	step = strings.TrimSpace(step)
+	if l == nil || step == "" {
+		return TodoStepMatch{}, false
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for i := len(l.receipts) - 1; i >= 0; i-- {
+		r := l.receipts[i]
+		if !r.Success || r.ToolName != "todo_write" {
+			continue
+		}
+		return matchTodoStep(step, r.Todos), true
+	}
+	return TodoStepMatch{}, false
 }
 
 func (l *Ledger) hasSuccessfulPaths(paths []string, accept func(Receipt) bool) bool {
@@ -128,6 +166,9 @@ func ReceiptFromToolCall(toolName string, args json.RawMessage, success bool, re
 	if err := json.Unmarshal(args, &fields); err == nil {
 		if toolName == "bash" {
 			r.Command = stringField(fields, "command")
+		}
+		if toolName == "todo_write" {
+			r.Todos = todoItemsField(fields, "todos")
 		}
 		r.Paths = extractPaths(fields)
 	}
@@ -193,6 +234,54 @@ func stringSliceField(fields map[string]json.RawMessage, key string) []string {
 		return nil
 	}
 	return values
+}
+
+func todoItemsField(fields map[string]json.RawMessage, key string) []TodoItem {
+	raw, ok := fields[key]
+	if !ok {
+		return nil
+	}
+	var todos []TodoItem
+	if err := json.Unmarshal(raw, &todos); err != nil {
+		return nil
+	}
+	return normalizeTodos(todos)
+}
+
+func normalizeTodos(todos []TodoItem) []TodoItem {
+	out := make([]TodoItem, 0, len(todos))
+	for _, t := range todos {
+		t.Content = strings.TrimSpace(t.Content)
+		t.Status = strings.TrimSpace(t.Status)
+		t.ActiveForm = strings.TrimSpace(t.ActiveForm)
+		out = append(out, t)
+	}
+	return out
+}
+
+func matchTodoStep(step string, todos []TodoItem) TodoStepMatch {
+	if n, ok := parseStepIndex(step); ok && n >= 1 && n <= len(todos) {
+		t := todos[n-1]
+		return TodoStepMatch{Found: true, Index: n, Content: t.Content, Status: t.Status, ActiveForm: t.ActiveForm}
+	}
+	for i, t := range todos {
+		if sameStepText(step, t.Content) || sameStepText(step, t.ActiveForm) {
+			return TodoStepMatch{Found: true, Index: i + 1, Content: t.Content, Status: t.Status, ActiveForm: t.ActiveForm}
+		}
+	}
+	return TodoStepMatch{}
+}
+
+func parseStepIndex(step string) (int, bool) {
+	step = strings.TrimSpace(strings.TrimSuffix(step, "."))
+	n, err := strconv.Atoi(step)
+	return n, err == nil
+}
+
+func sameStepText(a, b string) bool {
+	a = strings.TrimSpace(a)
+	b = strings.TrimSpace(b)
+	return a != "" && b != "" && strings.EqualFold(a, b)
 }
 
 func pathSet(paths []string) map[string]bool {

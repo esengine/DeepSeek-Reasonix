@@ -89,3 +89,59 @@ func TestReceiptFromToolCallExtractsEvidenceFields(t *testing.T) {
 		t.Fatalf("read receipt not extracted: %+v", read)
 	}
 }
+
+func TestReceiptFromToolCallExtractsTodoWriteItems(t *testing.T) {
+	receipt := ReceiptFromToolCall("todo_write", json.RawMessage(`{"todos":[
+		{"content":"Add parser","status":"in_progress","activeForm":"Adding parser"},
+		{"content":"Wire parser","status":"pending","level":1}
+	]}`), true, true)
+
+	if len(receipt.Todos) != 2 {
+		t.Fatalf("todos not extracted: %+v", receipt)
+	}
+	if receipt.Todos[0].Content != "Add parser" || receipt.Todos[0].Status != "in_progress" || receipt.Todos[0].ActiveForm != "Adding parser" {
+		t.Fatalf("first todo not extracted: %+v", receipt.Todos[0])
+	}
+	if receipt.Todos[1].Level != 1 {
+		t.Fatalf("todo level not extracted: %+v", receipt.Todos[1])
+	}
+}
+
+func TestLedgerMatchesLatestSuccessfulTodoStep(t *testing.T) {
+	ledger := NewLedger()
+	ledger.Record(Receipt{
+		ToolName: "todo_write",
+		Success:  false,
+		Todos:    []TodoItem{{Content: "Failed only", Status: "in_progress"}},
+	})
+	ledger.Record(Receipt{
+		ToolName: "todo_write",
+		Success:  true,
+		Todos: []TodoItem{
+			{Content: "Add parser", Status: "in_progress", ActiveForm: "Adding parser"},
+			{Content: "Wire parser", Status: "completed"},
+			{Content: "Document parser", Status: "pending"},
+		},
+	})
+
+	for _, step := range []string{"Add parser", "Adding parser", "2"} {
+		match, ok := ledger.MatchLatestTodoStep(step)
+		if !ok {
+			t.Fatalf("latest todo receipt missing for %q", step)
+		}
+		if !match.Found {
+			t.Fatalf("step %q did not match latest todo list", step)
+		}
+		if step == "2" && match.Content != "Wire parser" {
+			t.Fatalf("numeric step matched %q, want Wire parser", match.Content)
+		}
+	}
+
+	match, ok := ledger.MatchLatestTodoStep("Failed only")
+	if !ok {
+		t.Fatal("successful todo receipt should exist")
+	}
+	if match.Found {
+		t.Fatal("failed todo_write receipt must not match")
+	}
+}

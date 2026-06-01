@@ -119,3 +119,40 @@ func TestEvidenceFlowRejectsUncitedCommand(t *testing.T) {
 		t.Fatalf("uncited command should not verify, got %q", got)
 	}
 }
+
+func TestEvidenceFlowRejectsStepMissingFromTodoWrite(t *testing.T) {
+	todoWrite, ok := tool.LookupBuiltin("todo_write")
+	if !ok {
+		t.Fatal("todo_write builtin not registered")
+	}
+	completeStep, ok := tool.LookupBuiltin("complete_step")
+	if !ok {
+		t.Fatal("complete_step builtin not registered")
+	}
+	reg := tool.NewRegistry()
+	reg.Add(todoWrite)
+	reg.Add(completeStep)
+
+	prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{
+		{
+			toolCallChunk("c1", "todo_write", `{"todos":[{"content":"Add parser","status":"in_progress"}]}`),
+			toolCallChunk("c2", "complete_step", `{
+				"step":"Ship parser",
+				"result":"step is complete",
+				"evidence":[{"kind":"manual","summary":"checked manually"}]
+			}`),
+			{Type: provider.ChunkDone},
+		},
+		{{Type: provider.ChunkText, Text: "done"}, {Type: provider.ChunkDone}},
+	}}
+
+	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
+	if err := a.Run(context.Background(), "update todos then sign off the wrong step"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	got := toolResult(a.session, "complete_step")
+	if !strings.Contains(got, "matching todo_write item") {
+		t.Fatalf("complete_step result = %q, want todo-backed rejection", got)
+	}
+}
