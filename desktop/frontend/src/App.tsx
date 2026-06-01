@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
-import { SquarePen, Brain, History, Settings as SettingsIcon } from "lucide-react";
+import { SquarePen, Brain, History, Settings as SettingsIcon, SlidersHorizontal, Blocks } from "lucide-react";
 import { useT } from "./lib/i18n";
 import { useController } from "./lib/useController";
 import { Transcript } from "./components/Transcript";
@@ -11,6 +11,7 @@ import { StatusBar } from "./components/StatusBar";
 import { MemoryPanel } from "./components/MemoryPanel";
 import { HistoryPanel } from "./components/HistoryPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
+import { CapabilitiesPanel } from "./components/CapabilitiesPanel";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { parseTodos } from "./lib/tools";
 import type { MemoryView, Mode, SessionMeta } from "./lib/types";
@@ -42,6 +43,8 @@ export default function App() {
   const [memView, setMemView] = useState<MemoryView | null>(null);
   const [histView, setHistView] = useState<SessionMeta[] | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [capsOpen, setCapsOpen] = useState(false);
+  const [customizeOpen, setCustomizeOpen] = useState(false);
 
   // applyMode is the single source of truth for the input mode: it updates the
   // local pill and pushes the matching gate state to the controller (plan = read
@@ -179,6 +182,53 @@ export default function App() {
       <header className="topbar">
         <span className="topbar__model">{state.meta?.label ?? "…"}</span>
         <div className="topbar__spacer" />
+        <div className="customize">
+          <button
+            className={`chip chip--icon ${customizeOpen ? "chip--on" : ""}`}
+            onClick={() => setCustomizeOpen((v) => !v)}
+            title={t("topbar.customize")}
+          >
+            <SlidersHorizontal size={13} />
+          </button>
+          {customizeOpen && (
+            <>
+              <div className="menu-backdrop" onClick={() => setCustomizeOpen(false)} />
+              <div className="menu">
+                <button
+                  className="menu__item"
+                  disabled={state.running}
+                  onClick={() => {
+                    setCustomizeOpen(false);
+                    setSettingsOpen(true);
+                  }}
+                >
+                  <SettingsIcon size={14} />
+                  {t("topbar.settings")}
+                </button>
+                <button
+                  className="menu__item"
+                  onClick={() => {
+                    setCustomizeOpen(false);
+                    setCapsOpen(true);
+                  }}
+                >
+                  <Blocks size={14} />
+                  {t("caps.title")}
+                </button>
+                <button
+                  className="menu__item"
+                  onClick={() => {
+                    setCustomizeOpen(false);
+                    void openMemory();
+                  }}
+                >
+                  <Brain size={14} />
+                  {t("topbar.memory")}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
         <button
           className="chip chip--icon"
           onClick={() => void openHistory()}
@@ -186,17 +236,6 @@ export default function App() {
           title={state.running ? t("common.busyHint") : t("topbar.history")}
         >
           <History size={13} />
-        </button>
-        <button className="chip chip--icon" onClick={() => void openMemory()} title={t("topbar.memory")}>
-          <Brain size={13} />
-        </button>
-        <button
-          className="chip chip--icon"
-          onClick={() => setSettingsOpen(true)}
-          disabled={state.running}
-          title={state.running ? t("common.busyHint") : t("topbar.settings")}
-        >
-          <SettingsIcon size={13} />
         </button>
         <button className="chip chip--icon" onClick={newSession} title={t("topbar.newSession")}>
           <SquarePen size={13} />
@@ -271,6 +310,8 @@ export default function App() {
       )}
 
       {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} onChanged={() => void refreshMeta()} />}
+
+      {capsOpen && <CapabilitiesPanel onClose={() => setCapsOpen(false)} />}
     </div>
   );
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -581,6 +582,140 @@ func (a *App) SlashArgs(input string) SlashArgsResult {
 		out.Items = append(out.Items, SlashArgItem{Label: it.Label, Insert: it.Insert, Hint: it.Hint, Descend: it.Descend})
 	}
 	return out
+}
+
+// CapabilitiesView is the MCP & Skills drawer's data: connected/failed MCP
+// servers and the discoverable skills, the GUI counterpart to `/mcp` + `/skill`.
+type CapabilitiesView struct {
+	Servers []ServerView `json:"servers"`
+	Skills  []SkillView  `json:"skills"`
+}
+
+// ServerView is one MCP server for the drawer. Status is "connected" (with
+// tool/prompt/resource counts) or "failed" (with the connection error).
+type ServerView struct {
+	Name      string `json:"name"`
+	Transport string `json:"transport"`
+	Status    string `json:"status"`
+	Tools     int    `json:"tools"`
+	Prompts   int    `json:"prompts"`
+	Resources int    `json:"resources"`
+	Error     string `json:"error,omitempty"`
+}
+
+// SkillView is one discoverable skill for the drawer.
+type SkillView struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Scope       string `json:"scope"`
+	RunAs       string `json:"runAs"`
+}
+
+// Capabilities projects the session's MCP servers (connected + failed) and skills
+// for the MCP & Skills drawer. Non-nil slices so the frontend can map over them.
+func (a *App) Capabilities() CapabilitiesView {
+	out := CapabilitiesView{Servers: []ServerView{}, Skills: []SkillView{}}
+	if a.ctrl == nil {
+		return out
+	}
+	seen := map[string]bool{}
+	if h := a.ctrl.Host(); h != nil {
+		for _, s := range h.Servers() {
+			seen[s.Name] = true
+			out.Servers = append(out.Servers, ServerView{
+				Name: s.Name, Transport: s.Transport, Status: "connected",
+				Tools: s.Tools, Prompts: s.Prompts, Resources: s.Resources,
+			})
+		}
+		for _, f := range h.Failures() {
+			seen[f.Name] = true
+			out.Servers = append(out.Servers, ServerView{
+				Name: f.Name, Transport: f.Transport, Status: "failed", Error: f.Error,
+			})
+		}
+	}
+	// Configured servers that are neither connected nor failed are toggled off
+	// (disconnected this session, or auto_start=false) — shown with an off switch.
+	if cfg, err := config.Load(); err == nil {
+		for _, p := range cfg.Plugins {
+			if seen[p.Name] {
+				continue
+			}
+			tt := p.Type
+			if tt == "" {
+				tt = "stdio"
+			}
+			out.Servers = append(out.Servers, ServerView{Name: p.Name, Transport: tt, Status: "disabled"})
+		}
+	}
+	for _, s := range a.ctrl.Skills() {
+		out.Skills = append(out.Skills, SkillView{
+			Name: s.Name, Description: s.Description,
+			Scope: string(s.Scope), RunAs: string(s.RunAs),
+		})
+	}
+	return out
+}
+
+// MCPServerInput is the drawer's "add server" form. Transport is "stdio" (Command
+// + Args + Env) or "http"/"sse" (URL). Mirrors config.PluginEntry's writable shape.
+type MCPServerInput struct {
+	Name      string            `json:"name"`
+	Transport string            `json:"transport"`
+	Command   string            `json:"command"`
+	Args      []string          `json:"args"`
+	URL       string            `json:"url"`
+	Env       map[string]string `json:"env"`
+}
+
+// AddMCPServer connects a server live and persists it to config (Customize → MCP →
+// Add). Returns the number of tools it exposed.
+func (a *App) AddMCPServer(in MCPServerInput) (int, error) {
+	if a.ctrl == nil {
+		return 0, fmt.Errorf("no active session")
+	}
+	return a.ctrl.AddMCPServer(config.PluginEntry{
+		Name:    in.Name,
+		Type:    in.Transport,
+		Command: in.Command,
+		Args:    in.Args,
+		URL:     in.URL,
+		Env:     in.Env,
+	})
+}
+
+// RemoveMCPServer disconnects a live server and drops it from config (the row's ✕).
+func (a *App) RemoveMCPServer(name string) error {
+	if a.ctrl == nil {
+		return fmt.Errorf("no active session")
+	}
+	_, err := a.ctrl.RemoveMCPServer(name)
+	return err
+}
+
+// RetryMCPServer reconnects a configured server that failed or was disconnected,
+// without touching config (the failed row's retry button).
+func (a *App) RetryMCPServer(name string) error {
+	if a.ctrl == nil {
+		return fmt.Errorf("no active session")
+	}
+	_, err := a.ctrl.ConnectConfiguredMCPServer(name)
+	return err
+}
+
+// SetMCPServerEnabled is the connector toggle: on reconnects a configured server
+// for this session, off disconnects it (config untouched either way — like Claude
+// Code's per-conversation enable/disable, it resets on the next session start).
+func (a *App) SetMCPServerEnabled(name string, enabled bool) error {
+	if a.ctrl == nil {
+		return fmt.Errorf("no active session")
+	}
+	if enabled {
+		_, err := a.ctrl.ConnectConfiguredMCPServer(name)
+		return err
+	}
+	a.ctrl.DisconnectMCPServer(name)
+	return nil
 }
 
 // ModelInfo is one (provider, model) the bottom switcher can pick. Ref ("provider/

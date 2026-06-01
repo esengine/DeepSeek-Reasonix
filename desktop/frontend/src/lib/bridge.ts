@@ -7,19 +7,23 @@
 
 import type {
   BalanceInfo,
+  CapabilitiesView,
   CheckpointMeta,
   CommandInfo,
   ContextInfo,
   DirEntry,
   HistoryMessage,
   JobView,
+  MCPServerInput,
   MemoryView,
   Meta,
   ModelInfo,
   ProviderView,
   QuestionAnswer,
+  ServerView,
   SessionMeta,
   SettingsView,
+  SkillView,
   SlashArgsResult,
   UpdateInfo,
   UpdateProgress,
@@ -63,6 +67,16 @@ export interface AppBindings {
   Jobs(): Promise<JobView[]>;
   Meta(): Promise<Meta>;
   Commands(): Promise<CommandInfo[]>;
+  // Capabilities feeds the MCP & Skills drawer: connected/failed servers + skills.
+  // Add connects + persists a server; Remove disconnects + drops it from config;
+  // Retry reconnects a configured server that failed (config untouched).
+  Capabilities(): Promise<CapabilitiesView>;
+  AddMCPServer(input: MCPServerInput): Promise<number>;
+  RemoveMCPServer(name: string): Promise<void>;
+  RetryMCPServer(name: string): Promise<void>;
+  // SetMCPServerEnabled is the per-session connector toggle (on reconnects, off
+  // disconnects; config untouched).
+  SetMCPServerEnabled(name: string, enabled: boolean): Promise<void>;
   SlashArgs(input: string): Promise<SlashArgsResult>;
   ListDir(rel: string): Promise<DirEntry[]>;
   SavePastedImage(dataUrl: string): Promise<string>;
@@ -204,6 +218,18 @@ function makeMockApp(): AppBindings {
   let cwd = "~/projects/reasonix"; // mutable so PickWorkspace is visible in dev
   const day = 86_400_000;
   const t0 = Date.now();
+  // Mutable so MCP add/remove/retry are observable in browser dev.
+  let capServers: ServerView[] = [
+    { name: "codegraph", transport: "stdio", status: "connected", tools: 4, prompts: 0, resources: 1 },
+    { name: "github", transport: "stdio", status: "connected", tools: 12, prompts: 2, resources: 0 },
+    { name: "linear", transport: "http", status: "connected", tools: 8, prompts: 0, resources: 0 },
+    { name: "figma", transport: "http", status: "failed", tools: 0, prompts: 0, resources: 0, error: "connect: 401 unauthorized" },
+  ];
+  const capSkills: SkillView[] = [
+    { name: "explore", description: "Investigate the codebase in an isolated subagent", scope: "builtin", runAs: "subagent" },
+    { name: "review", description: "Review the staged diff", scope: "project", runAs: "inline" },
+    { name: "init", description: "Scaffold a REASONIX.md for this repo", scope: "builtin", runAs: "inline" },
+  ];
   // Mutable so delete/rename are observable in browser dev.
   const sessions: SessionMeta[] = [
     { path: "/mock/sessions/a.jsonl", preview: "fix the login bug in auth.go", turns: 12, modTime: t0 - 3_600_000, current: true },
@@ -350,6 +376,29 @@ function makeMockApp(): AppBindings {
         { name: "explore", description: "Investigate the codebase in an isolated subagent", kind: "skill" as const },
         { name: "review", description: "Review the staged diff", hint: "[focus]", kind: "custom" as const },
       ];
+    },
+    async Capabilities() {
+      return { servers: capServers.map((s) => ({ ...s })), skills: capSkills.map((s) => ({ ...s })) };
+    },
+    async AddMCPServer(input: MCPServerInput) {
+      const tools = input.transport === "stdio" ? 3 : 5;
+      capServers.push({ name: input.name, transport: input.transport, status: "connected", tools, prompts: 0, resources: 0 });
+      return tools;
+    },
+    async RemoveMCPServer(name: string) {
+      capServers = capServers.filter((s) => s.name !== name);
+    },
+    async RetryMCPServer(name: string) {
+      capServers = capServers.map((s) =>
+        s.name === name ? { ...s, status: "connected", tools: s.tools || 4, error: undefined } : s,
+      );
+    },
+    async SetMCPServerEnabled(name: string, enabled: boolean) {
+      capServers = capServers.map((s) =>
+        s.name === name
+          ? { ...s, status: enabled ? "connected" : "disabled", tools: enabled ? s.tools || 4 : 0, error: undefined }
+          : s,
+      );
     },
     async SlashArgs(input: string) {
       // Mirror a slice of the real arg hints so the menu is exercisable in browser dev.
