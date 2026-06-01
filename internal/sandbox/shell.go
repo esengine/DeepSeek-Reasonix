@@ -40,18 +40,19 @@ type Shell struct {
 // is usually absent from PATH, it probes the Git-for-Windows install locations
 // and only then falls back to PowerShell so the tool still functions.
 func ResolveShell() Shell {
-	return resolveShell(runtime.GOOS, exec.LookPath, fileExists)
+	return resolveShell(runtime.GOOS, exec.LookPath, fileExists, windowsBashCandidates())
 }
 
-// resolveShell is ResolveShell with its environment lookups injected, so the
-// decision table — including the no-bash PowerShell fallback that can't be
-// triggered on a host that has bash installed — is deterministically testable.
-func resolveShell(goos string, lookPath func(string) (string, error), exists func(string) bool) Shell {
+// resolveShell is ResolveShell with its environment lookups injected — including
+// the Git-for-Windows bash candidates, which derive from %ProgramFiles% and so
+// are empty off Windows — so the decision table is deterministically testable on
+// any host.
+func resolveShell(goos string, lookPath func(string) (string, error), exists func(string) bool, winBashCandidates []string) Shell {
 	if p, err := lookPath("bash"); err == nil {
 		return Shell{Kind: ShellBash, Path: p}
 	}
 	if goos == "windows" {
-		for _, p := range windowsBashCandidates() {
+		for _, p := range winBashCandidates {
 			if exists(p) {
 				return Shell{Kind: ShellBash, Path: p}
 			}
@@ -110,6 +111,9 @@ func (s Shell) SupportsChaining() bool {
 	if s.Kind != ShellPowerShell {
 		return true
 	}
-	base := strings.ToLower(filepath.Base(s.Path))
+	base := strings.ToLower(s.Path)
+	if i := strings.LastIndexAny(base, `/\`); i >= 0 {
+		base = base[i+1:] // Windows path; split on either separator off-Windows too
+	}
 	return base == "pwsh" || base == "pwsh.exe"
 }

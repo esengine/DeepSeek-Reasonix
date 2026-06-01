@@ -95,22 +95,26 @@ func TestResolveShellDecisionTable(t *testing.T) {
 			return "", exec.ErrNotFound
 		}
 	}
+	gitBash := []string{`C:\fake\Git\bin\bash.exe`}
+	always := func(string) bool { return true }
+	never := func(string) bool { return false }
 	cases := []struct {
-		name     string
-		goos     string
-		lookPath func(string) (string, error)
-		exists   func(string) bool
-		wantKind ShellKind
+		name       string
+		goos       string
+		lookPath   func(string) (string, error)
+		candidates []string
+		exists     func(string) bool
+		wantKind   ShellKind
 	}{
-		{"bash on PATH wins", "windows", onPath("bash", "powershell"), func(string) bool { return false }, ShellBash},
-		{"no bash, git-bash on disk", "windows", onPath("powershell"), func(string) bool { return true }, ShellBash},
-		{"no bash anywhere, pwsh", "windows", onPath("pwsh", "powershell"), func(string) bool { return false }, ShellPowerShell},
-		{"no bash, only powershell", "windows", onPath("powershell"), func(string) bool { return false }, ShellPowerShell},
-		{"windows, nothing found", "windows", onPath(), func(string) bool { return false }, ShellBash},
-		{"linux, no bash → no PS fallback", "linux", onPath("powershell"), func(string) bool { return true }, ShellBash},
+		{"bash on PATH wins", "windows", onPath("bash", "powershell"), gitBash, never, ShellBash},
+		{"no bash, git-bash on disk", "windows", onPath("powershell"), gitBash, always, ShellBash},
+		{"no bash anywhere, pwsh", "windows", onPath("pwsh", "powershell"), gitBash, never, ShellPowerShell},
+		{"no bash, only powershell", "windows", onPath("powershell"), gitBash, never, ShellPowerShell},
+		{"windows, nothing found", "windows", onPath(), nil, never, ShellBash},
+		{"linux, no bash → no PS fallback", "linux", onPath("powershell"), gitBash, always, ShellBash},
 	}
 	for _, c := range cases {
-		got := resolveShell(c.goos, c.lookPath, c.exists)
+		got := resolveShell(c.goos, c.lookPath, c.exists, c.candidates)
 		if got.Kind != c.wantKind {
 			t.Errorf("%s: kind = %s, want %s (path=%s)", c.name, got.Kind, c.wantKind, got.Path)
 		}
