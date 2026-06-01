@@ -1,11 +1,13 @@
 package sandbox
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 )
 
 // psUTF8Prologue forces PowerShell to emit UTF-8 instead of the host's OEM code
@@ -66,19 +68,16 @@ func resolveShell(goos string, lookPath func(string) (string, error), exists fun
 	return Shell{Kind: ShellBash, Path: "bash"}
 }
 
-// probeBash returns true iff path is a working bash that can run a trivial
-// command. Windows ships a `bash.exe` launcher stub in %SystemRoot% that opens
-// the WSL install prompt when invoked; we must skip it, otherwise the bash
-// tool hangs/errors on every call. The probe runs `true` because that exists
-// in both bash and Git Bash (not WSL's stub) and exits fast.
+// Windows ships a bash.exe launcher stub in %SystemRoot% that opens the WSL
+// install prompt instead of running anything, so confirm bash actually works
+// before trusting it. Timeout-bounded in case the stub blocks on that prompt.
 func probeBash(path string) bool {
 	if runtime.GOOS != "windows" {
 		return true
 	}
-	cmd := exec.Command(path, "-c", "true")
-	cmd.Stdout = nil
-	cmd.Stderr = nil
-	return cmd.Run() == nil
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	return exec.CommandContext(ctx, path, "-c", "true").Run() == nil
 }
 
 func fileExists(p string) bool {
