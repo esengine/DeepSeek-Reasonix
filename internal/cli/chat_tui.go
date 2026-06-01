@@ -92,12 +92,12 @@ type chatTUI struct {
 	eventCh       chan event.Event
 	started       bool // banner + resumed history committed once
 
-	// transcript mirrors every finalized line commitLine emits — the same
-	// content that today goes to native scrollback via tea.Println. The
-	// alt-screen refactor renders it through this viewport instead; for now it's
-	// maintained in parallel (not yet shown) so the migration lands in stages.
+	// transcript holds every finalized line commitLine emits; the viewport
+	// renders a scrollable window of it (alt-screen owns the grid, so there's no
+	// native terminal scrollback). sel is the live left-drag text selection.
 	transcript []string
 	viewport   viewport.Model
+	sel        selection
 
 	// The user bubble for an in-flight turn is deferred, not echoed on Enter: it's
 	// held in pendingBubble and committed to scrollback only when the first
@@ -347,12 +347,16 @@ func (m chatTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	next, cmd := m.update(msg)
 	cm := next.(chatTUI)
 
-	cm.viewport.SetWidth(cm.width)
+	contentW := cm.width - 1 // last column is the scrollbar
+	if contentW < 1 {
+		contentW = 1
+	}
+	cm.viewport.SetWidth(contentW)
 	cm.viewport.SetHeight(cm.transcriptHeight())
 	// Re-feed only when the content grew or the width changed (re-wrapping is
 	// the expensive part); a bare scroll or spinner tick keeps the offset.
 	if len(cm.transcript) != prevLines || cm.width != prevWidth {
-		cm.viewport.SetContent(clampWidth(strings.Join(cm.transcript, "\n"), cm.width))
+		cm.viewport.SetContent(clampWidth(strings.Join(cm.transcript, "\n"), contentW))
 		if wasAtBottom {
 			cm.viewport.GotoBottom() // tail-follow: stay pinned to newest output
 		}
@@ -396,7 +400,41 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case tea.MouseClickMsg:
+		// Left-press in the transcript region begins a text selection.
+		if msg.Button == tea.MouseLeft && msg.Y < m.viewport.Height() {
+			at := m.transcriptCaret(msg.X, msg.Y)
+			m.sel = selection{active: true, anchor: at, head: at}
+		}
+		return m, nil
+
+	case tea.MouseMotionMsg:
+		// Drag extends the live selection (CellMotion only reports motion while
+		// a button is held, so this is a drag).
+		if m.sel.active {
+			m.sel.head = m.transcriptCaret(msg.X, msg.Y)
+		}
+		return m, nil
+
+	case tea.MouseReleaseMsg:
+		// Release finalizes the selection; the highlight stays on as the visual
+		// "what's selected" cue and Ctrl+C copies it. A plain click (no drag)
+		// clears any prior selection.
+		if msg.Button == tea.MouseLeft && m.sel.active && m.sel.empty() {
+			m.sel = selection{}
+		}
+		return m, nil
+
 	case tea.KeyPressMsg:
+		// Ctrl+C copies the active selection (terminal convention: copy when
+		// something is selected, otherwise interrupt/quit below).
+		if msg.String() == "ctrl+c" && m.sel.active && !m.sel.empty() {
+			text := m.selectedText()
+			m.sel = selection{}
+			return m, tea.Batch(copyToClipboard(text), finalize(m, cmds))
+		}
+		// Any other keystroke dismisses a finished selection.
+		m.sel = selection{}
 		// Transcript scroll keys work in any state (PgUp/PgDn are never text).
 		switch msg.String() {
 		case "pgup":
@@ -932,7 +970,7 @@ func (m chatTUI) View() tea.View {
 	// Full-screen frame: the transcript viewport on top (it pads to exactly its
 	// height), the pinned bottom region beneath. Alt-screen owns the grid, so
 	// resize repaints cleanly — no scrollback reflow, no ghost borders.
-	v := tea.NewView(m.viewport.View() + "\n" + strings.Join(parts, "\n"))
+	v := tea.NewView(m.renderTranscript() + "\n" + strings.Join(parts, "\n"))
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeCellMotion // wheel scrolls the transcript
 	// Anchor the real terminal cursor at the textarea's insertion point so IME

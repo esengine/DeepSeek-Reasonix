@@ -42,8 +42,8 @@ func TestTranscriptViewportSizing(t *testing.T) {
 	if got := m.bottomRows(); got != 5 {
 		t.Fatalf("bottomRows with an empty composer = %d, want 5 (input 1 + border 2 + status 2)", got)
 	}
-	if m.viewport.Width() != 80 {
-		t.Errorf("viewport width = %d, want 80", m.viewport.Width())
+	if m.viewport.Width() != 79 {
+		t.Errorf("viewport content width = %d, want 79 (terminal 80 - 1 scrollbar column)", m.viewport.Width())
 	}
 	if want := m.transcriptHeight(); m.viewport.Height() != want || want != 19 {
 		t.Errorf("viewport height = %d, transcriptHeight = %d, want 19 (24-5)", m.viewport.Height(), want)
