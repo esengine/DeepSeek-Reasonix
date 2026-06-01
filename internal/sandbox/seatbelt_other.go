@@ -13,17 +13,17 @@ import "os/exec"
 // macOS Seatbelt: writes confined to WriteRoots, network denied unless
 // spec.Network is true. When bwrap is unavailable the command runs unconfined
 // (boot and acp warn about this once at startup).
-func Command(spec Spec, shell, command string) ([]string, bool) {
+func Command(spec Spec, sh Shell, command string) ([]string, bool) {
 	if !spec.enforce() {
-		return []string{shell, "-c", command}, false
+		return sh.argv(command), false
 	}
 	if bwrap, err := exec.LookPath("bwrap"); err == nil {
-		argv := append([]string{bwrap}, bwrapArgs(spec, shell, command)...)
+		argv := append([]string{bwrap}, bwrapArgs(spec, sh, command)...)
 		return argv, true
 	}
 	// enforce requested but bwrap unavailable — boot/acp already warned at
 	// startup; fall back to unconfined (the false result signals "not sandboxed").
-	return []string{shell, "-c", command}, false
+	return sh.argv(command), false
 }
 
 // Available reports whether an OS sandbox is available on this platform.
@@ -37,7 +37,7 @@ func Available() bool {
 // shell command to the write roots, deny network unless allowed, and allow
 // read access to the whole filesystem (matching the macOS Seatbelt profile's
 // read-open policy).
-func bwrapArgs(spec Spec, shell, command string) []string {
+func bwrapArgs(spec Spec, sh Shell, command string) []string {
 	args := []string{
 		"--unshare-net", // deny network by default
 		"--ro-bind", "/", "/",
@@ -52,6 +52,5 @@ func bwrapArgs(spec Spec, shell, command string) []string {
 	for _, root := range spec.WriteRoots {
 		args = append(args, "--bind", root, root)
 	}
-	args = append(args, shell, "-c", command)
-	return args
+	return append(args, sh.argv(command)...)
 }

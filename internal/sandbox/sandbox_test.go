@@ -45,7 +45,7 @@ func TestSpecZeroValue(t *testing.T) {
 
 func TestCommandNonEnforce(t *testing.T) {
 	spec := Spec{Mode: "off"}
-	cmd, wrapped := Command(spec, "bash", "ls")
+	cmd, wrapped := Command(spec, Shell{Kind: ShellBash, Path: "bash"}, "ls")
 	if wrapped {
 		t.Error("non-enforce should not wrap")
 	}
@@ -56,12 +56,55 @@ func TestCommandNonEnforce(t *testing.T) {
 
 func TestCommandEmptyMode(t *testing.T) {
 	spec := Spec{}
-	cmd, wrapped := Command(spec, "sh", "echo hi")
+	cmd, wrapped := Command(spec, Shell{Kind: ShellBash, Path: "sh"}, "echo hi")
 	if wrapped {
 		t.Error("empty mode should not wrap")
 	}
 	if len(cmd) != 3 {
 		t.Errorf("cmd length = %d, want 3", len(cmd))
+	}
+}
+
+func TestCommandPowerShell(t *testing.T) {
+	cmd, wrapped := Command(Spec{Mode: "off"}, Shell{Kind: ShellPowerShell, Path: "powershell"}, "Get-ChildItem")
+	if wrapped {
+		t.Error("non-enforce should not wrap")
+	}
+	want := []string{"powershell", "-NoProfile", "-NonInteractive", "-Command", psUTF8Prologue + "Get-ChildItem"}
+	if len(cmd) != len(want) {
+		t.Fatalf("argv = %v, want %v", cmd, want)
+	}
+	for i := range want {
+		if cmd[i] != want[i] {
+			t.Fatalf("argv[%d] = %q, want %q", i, cmd[i], want[i])
+		}
+	}
+}
+
+func TestSupportsChaining(t *testing.T) {
+	cases := []struct {
+		sh   Shell
+		want bool
+	}{
+		{Shell{Kind: ShellBash, Path: "bash"}, true},
+		{Shell{Kind: ShellPowerShell, Path: `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`}, false},
+		{Shell{Kind: ShellPowerShell, Path: "powershell"}, false},
+		{Shell{Kind: ShellPowerShell, Path: `C:\Program Files\PowerShell\7\pwsh.exe`}, true},
+		{Shell{Kind: ShellPowerShell, Path: "pwsh"}, true},
+	}
+	for _, c := range cases {
+		if got := c.sh.SupportsChaining(); got != c.want {
+			t.Errorf("SupportsChaining(%+v) = %v, want %v", c.sh, got, c.want)
+		}
+	}
+}
+
+func TestShellArgvDefaultsPath(t *testing.T) {
+	if got := (Shell{Kind: ShellBash}).argv("ls"); got[0] != "bash" {
+		t.Errorf("empty bash path argv[0] = %q, want bash", got[0])
+	}
+	if got := (Shell{Kind: ShellPowerShell}).argv("ls"); got[0] != "powershell" {
+		t.Errorf("empty powershell path argv[0] = %q, want powershell", got[0])
 	}
 }
 
@@ -72,7 +115,7 @@ func TestCommandNonDarwin(t *testing.T) {
 		t.Skip("testing non-darwin path")
 	}
 	spec := Spec{Mode: "enforce", WriteRoots: []string{"/tmp"}}
-	cmd, wrapped := Command(spec, "sh", "echo hi")
+	cmd, wrapped := Command(spec, Shell{Kind: ShellBash, Path: "sh"}, "echo hi")
 	if wrapped {
 		t.Error("non-darwin should never wrap")
 	}
@@ -89,7 +132,7 @@ func TestCommandDarwinEnforce(t *testing.T) {
 		t.Skip("sandbox-exec not available")
 	}
 	spec := Spec{Mode: "enforce", WriteRoots: []string{"/workspace"}}
-	cmd, wrapped := Command(spec, "sh", "echo hi")
+	cmd, wrapped := Command(spec, Shell{Kind: ShellBash, Path: "sh"}, "echo hi")
 	if !wrapped {
 		t.Error("darwin enforce with sandbox-exec should wrap")
 	}
@@ -106,7 +149,7 @@ func TestCommandDarwinNonEnforce(t *testing.T) {
 		t.Skip("darwin-only test")
 	}
 	spec := Spec{Mode: "off", WriteRoots: []string{"/workspace"}}
-	_, wrapped := Command(spec, "sh", "echo hi")
+	_, wrapped := Command(spec, Shell{Kind: ShellBash, Path: "sh"}, "echo hi")
 	if wrapped {
 		t.Error("non-enforce should not wrap even on darwin")
 	}
