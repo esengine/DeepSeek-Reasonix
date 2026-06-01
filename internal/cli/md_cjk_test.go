@@ -62,6 +62,21 @@ func TestFixCJKEmphasis(t *testing.T) {
 			want:  "**第一，** 和**第二，** 都",
 		},
 		{
+			name:  "cjk punct before opener stays untouched (colon)",
+			input: "注意：**重要**事项",
+			want:  "注意：**重要**事项",
+		},
+		{
+			name:  "cjk punct before opener stays untouched (comma)",
+			input: "他说，**重点**是",
+			want:  "他说，**重点**是",
+		},
+		{
+			name:  "opener after punct, closer after punct",
+			input: "他说：**注意，**然后",
+			want:  "他说：**注意，** 然后",
+		},
+		{
 			name:  "empty input",
 			input: "",
 			want:  "",
@@ -113,6 +128,15 @@ func TestFixCJKEmphasisRenderIntegration(t *testing.T) {
 				t.Errorf("rendered output missing %q:\n%s", tt.wantText, rendered)
 			}
 		})
+	}
+}
+
+func TestFixCJKEmphasisPunctBeforeOpenerRendersBold(t *testing.T) {
+	r := newMarkdownRenderer(80)
+	for _, in := range []string{"注意：**重要**事项", "他说，**重点**是"} {
+		if rendered := r.Render(in); strings.Contains(rendered, "**") {
+			t.Errorf("punct before opener left literal ** (not bold):\n%s", rendered)
+		}
 	}
 }
 

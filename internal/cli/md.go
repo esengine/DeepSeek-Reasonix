@@ -63,24 +63,22 @@ func (r *mdRenderer) Render(input string) string {
 }
 
 // fixCJKEmphasis works around goldmark's CommonMark parser not recognising
-// CJK punctuation (full-width comma, period, exclamation, etc.) as Unicode
-// punctuation. The CommonMark "right-flanking delimiter run" check requires
-// the character before a closing ** to be punctuation or the character after
-// it to be punctuation; CJK punctuation fails both checks, so **X，**Y is
-// not parsed as bold. The fix inserts a space after closing ** when it is
-// immediately preceded by CJK punctuation, so the delimiter run is properly
-// flanked.
-//
-// The function skips inline code spans (`...`) and fenced code blocks
-// (```...```) so literal ** inside code is never modified.
+// CJK punctuation as Unicode punctuation: a closing ** is only right-flanking
+// when the char before it is punctuation, so **X，**Y (， = U+FF0C) is not bold.
+// Inserting a space after such a closer fixes the flanking. The space must go
+// only on a *closer* — putting it after an opener (，**X** → ，** X**) would
+// instead break the left-flanking — so emphasis open/close is tracked by a
+// running toggle. Inline code spans and fenced blocks are passed through so
+// literal ** inside code is never touched.
 func fixCJKEmphasis(s string) string {
 	runes := []rune(s)
 	n := len(runes)
 	var b strings.Builder
 	b.Grow(len(s) + 16)
 
-	inFenced := false // inside ``` fenced code block
-	inCode := false   // inside ` inline code span
+	inFenced := false   // inside ``` fenced code block
+	inCode := false     // inside ` inline code span
+	inEmphasis := false // between an opening ** and its closer
 
 	for i := 0; i < n; i++ {
 		r := runes[i]
@@ -103,21 +101,23 @@ func fixCJKEmphasis(s string) string {
 			b.WriteRune(r)
 			continue
 		}
+		// Emphasis cannot span a hard line break; reset so an unclosed ** on a
+		// previous line can't make the next line's opener look like a closer.
+		if r == '\n' {
+			inEmphasis = false
+			b.WriteRune(r)
+			continue
+		}
 
-		// Look for ** (opening or closing emphasis).
 		if r == '*' && i+1 < n && runes[i+1] == '*' {
-			// Skip past the pair.
 			b.WriteString("**")
 			i++
+			inEmphasis = !inEmphasis
 
-			// If this is a closing ** (not at start of input, not preceded
-			// by whitespace) and the character before it is CJK punctuation,
-			// insert a trailing space so goldmark sees right-flanking.
-			if i >= 2 && !isSpace(runes[i-2]) {
-				prev := runes[i-2]
-				if isCJKPunct(prev) {
-					b.WriteByte(' ')
-				}
+			// Only a closer (emphasis just ended) hugging CJK punctuation needs
+			// the trailing space; the same space after an opener would break it.
+			if !inEmphasis && i >= 2 && !isSpace(runes[i-2]) && isCJKPunct(runes[i-2]) {
+				b.WriteByte(' ')
 			}
 			continue
 		}
