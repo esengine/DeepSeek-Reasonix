@@ -132,17 +132,20 @@ func orDefault(s, def string) string {
 
 // --- apply (write config, then rebuild the controller so it's live) ---
 
-// applyConfigChange loads the config, applies mutate, saves it, and rebuilds the
-// controller so the change takes effect this session.
+// applyConfigChange mutates the user-global config and rebuilds the controller so
+// the change takes effect this session. Desktop settings (providers, keys,
+// language) are account-level, not per-project: writing them to the global config
+// rather than the cwd's reasonix.toml is what lets them survive a workspace switch.
 func (a *App) applyConfigChange(mutate func(*config.Config) error) error {
-	cfg, err := config.Load()
-	if err != nil {
-		return err
+	path := config.UserConfigPath()
+	if path == "" {
+		return fmt.Errorf("cannot resolve user config directory")
 	}
+	cfg := config.LoadForEdit(path)
 	if err := mutate(cfg); err != nil {
 		return err
 	}
-	if err := cfg.Save(); err != nil {
+	if err := cfg.SaveTo(path); err != nil {
 		return err
 	}
 	return a.rebuild()

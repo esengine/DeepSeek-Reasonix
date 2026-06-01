@@ -355,6 +355,10 @@ func userConfigPath() string {
 	return filepath.Join(dir, "reasonix", "config.toml")
 }
 
+// UserConfigPath is the user-global config file (~/.config/reasonix/config.toml),
+// or "" when the user config dir can't be resolved.
+func UserConfigPath() string { return userConfigPath() }
+
 // ArchiveDir is where compacted conversation history is archived for
 // traceability (one timestamped .jsonl per compaction). Empty if the user config
 // directory cannot be resolved, in which case archiving is skipped.
