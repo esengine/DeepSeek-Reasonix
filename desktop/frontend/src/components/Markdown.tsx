@@ -39,11 +39,19 @@ const components: Components = {
   ),
 };
 
+// DeepSeek and most LLMs emit \( \) and \[ \] math delimiters; remark-math only
+// parses $ / $$. Convert so the math actually reaches KaTeX.
+function normalizeMath(s: string): string {
+  return s
+    .replace(/\\\[([\s\S]+?)\\\]/g, (_m, body) => `$$${body}$$`)
+    .replace(/\\\(([\s\S]+?)\\\)/g, (_m, body) => `$${body}$`);
+}
+
 export function Markdown({ text }: { text: string }) {
   return (
     <div className="md">
       <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]} components={components}>
-        {text}
+        {normalizeMath(text)}
       </ReactMarkdown>
     </div>
   );
