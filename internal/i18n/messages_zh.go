@@ -126,9 +126,9 @@ var Chinese = Messages{
 	ListProvidersHeader: "providers",
 	ListProvidersNone:   "未配置 provider",
 
-	SelectProvidersLabel:   "选择要启用的 provider",
-	SelectProvidersReveal:  "按 / 查看更多 provider",
-	BillingModeLabel:       "选择 %s 计费模式",
+	SelectProvidersLabel:  "选择要启用的 provider",
+	SelectProvidersReveal: "按 / 查看更多 provider",
+	BillingModeLabel:      "选择 %s 计费模式",
 	EnterAPIKeysHeader:    "输入 API key（回车跳过、稍后写入 .env）：",
 	MissingKeyIntro:       "reasonix.toml 已配置好 — 只差一个 API key 就可以开始。",
 	WroteFileFmt:          "已写入 %s",
