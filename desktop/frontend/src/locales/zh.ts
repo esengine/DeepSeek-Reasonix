@@ -15,6 +15,7 @@ export const zh: Record<DictKey, string> = {
   "common.submit": "提交",
   "common.none": "无",
   "common.busyHint": "请先完成或停止当前回合",
+  "common.loading": "加载中…",
 
   // 顶栏
   "topbar.history": "历史",
