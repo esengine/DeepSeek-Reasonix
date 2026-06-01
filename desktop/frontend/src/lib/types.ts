@@ -221,6 +221,7 @@ export interface MemoryDoc {
 
 export interface MemoryFact {
   name: string;
+  title?: string;
   description: string;
   type: string; // "user" | "feedback" | "project" | "reference"
   body: string;

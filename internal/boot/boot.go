@@ -236,8 +236,10 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		entry.ContextWindow, cfg.Agent.Temperature, config.ArchiveDir(), "", headlessGate))
 
 	// The `remember` tool lets the model persist durable facts to the project's
-	// auto-memory store; the saved index loads into the prefix on the next session.
+	// auto-memory store; `forget` prunes ones that turn out wrong. The saved index
+	// loads into the prefix on the next session.
 	reg.Add(memory.NewRememberTool(mem.Store))
+	reg.Add(memory.NewForgetTool(mem.Store))
 
 	// The `ask` tool puts structured multiple-choice questions to the user. It
 	// reaches them through the Asker on the call context, which interactive

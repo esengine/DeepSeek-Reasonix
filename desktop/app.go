@@ -1200,6 +1200,7 @@ type MemoryDoc struct {
 // MemoryFact is one saved auto-memory, surfaced read-only in the panel.
 type MemoryFact struct {
 	Name        string `json:"name"`
+	Title       string `json:"title,omitempty"`
 	Description string `json:"description"`
 	Type        string `json:"type"`
 	Body        string `json:"body"`
@@ -1248,7 +1249,7 @@ func (a *App) Memory() MemoryView {
 	}
 	for _, f := range set.Store.List() {
 		view.Facts = append(view.Facts, MemoryFact{
-			Name: f.Name, Description: f.Description, Type: string(f.Type), Body: f.Body,
+			Name: f.Name, Title: f.Title, Description: f.Description, Type: string(f.Type), Body: f.Body,
 		})
 	}
 	for _, sc := range writableScopes {
