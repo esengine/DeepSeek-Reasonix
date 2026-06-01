@@ -1212,6 +1212,21 @@ func (c *Controller) RemoveMCPServer(name string) (disconnected bool, err error)
 	return disconnected, nil
 }
 
+// DisconnectMCPServer disconnects a live server for this session without touching
+// config — the connector toggle's "off". Its tools vanish next turn; it reconnects
+// on the next session start, or now via ConnectConfiguredMCPServer (the "on").
+// Reports whether a live server was actually disconnected.
+func (c *Controller) DisconnectMCPServer(name string) bool {
+	if c.host == nil {
+		return false
+	}
+	prefix, ok := c.host.Remove(name)
+	if ok && c.reg != nil {
+		c.reg.RemovePrefix(prefix)
+	}
+	return ok
+}
+
 // Label returns the human-readable model label, e.g. "deepseek-flash".
 func (c *Controller) Label() string { return c.label }
 
