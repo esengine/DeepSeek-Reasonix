@@ -141,10 +141,10 @@ type Messages struct {
 	ArgModelCurrent string // /model <ref> active tag
 
 	// /providers sub-commands
-	CmdProviders      string // /providers
-	ArgProvidersAdd   string // /providers add
+	CmdProviders       string // /providers
+	ArgProvidersAdd    string // /providers add
 	ArgProvidersRemove string // /providers remove
-	ArgProvidersList  string // /providers list
+	ArgProvidersList   string // /providers list
 
 	// management listing notices (the Submit path: desktop / HTTP frontends)
 	ListModelsHeaderFmt string // "models (active: %s)"
