@@ -20,7 +20,7 @@ export function ApprovalModal({
   const choosePlanAction = (key: string) => {
     if (key === "1") onAnswer(false, false);
     else if (key === "2") onAnswer(true, false);
-    else if (key === "3") setRevisionOpen(true);
+    else if (key === "3") setRevisionOpen((open) => !open);
     else if (key === "Escape") onAnswer(false, false);
   };
 
@@ -55,9 +55,7 @@ export function ApprovalModal({
     onRevisePlan?.(text);
   };
 
-  // A plan approval is special: the controller proposes it when a plan-mode turn
-  // ends with a proposal. The plan itself is already shown above as the assistant's
-  // reply, so this is just the gate — start coding vs keep planning.
+  // The plan is already shown above as the assistant's reply; this is just the gate.
   if (approval.tool === "exit_plan_mode") {
     return (
       <div className="plan-approval-dock" aria-live="polite">
