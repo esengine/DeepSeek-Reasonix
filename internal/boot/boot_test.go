@@ -125,6 +125,9 @@ func TestBuildRecordsMCPStartupFailure(t *testing.T) {
 	writeFile(t, dir, "reasonix.toml", `
 default_model = "test-model"
 
+[codegraph]
+enabled = false
+
 [agent]
 system_prompt = "BASE"
 
