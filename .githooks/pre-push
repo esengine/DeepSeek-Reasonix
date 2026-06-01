@@ -1,0 +1,5 @@
+#!/bin/sh
+# Go-native pre-push gate replacing the retired v1 npm hook (install: make hooks).
+# Full tests run in CI; vet is the fast, cross-platform local check.
+set -e
+go vet ./...

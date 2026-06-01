@@ -5,7 +5,7 @@ LDFLAGS := -s -w -X main.version=$(VERSION)
 # with any change to the integration in internal/codegraph.
 CODEGRAPH_VERSION := v0.9.7
 
-.PHONY: build vet fmt test cross clean e2e-codegraph
+.PHONY: build vet fmt test hooks cross clean e2e-codegraph
 
 build:
 	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o bin/reasonix ./cmd/reasonix
@@ -19,6 +19,10 @@ fmt:
 
 test:
 	go test ./...
+
+hooks:
+	@git config core.hooksPath .githooks
+	@echo "installed: core.hooksPath -> .githooks (pre-push runs go vet)"
 
 cross:
 	@mkdir -p dist
