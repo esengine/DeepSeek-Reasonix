@@ -56,8 +56,8 @@ func main() {
 	repo := flag.String("repo", ".", "repo root (diff mode)")
 	base := flag.String("base", "", "base ref to diff the PR head against (diff mode)")
 	testCmd := flag.String("test-cmd", "go test", "grader command run on the affected packages (diff mode)")
-	maxSteps := flag.Int("max-steps", 40, "agent tool-call cap for the diff task")
-	timeoutSec := flag.Int("timeout", 900, "agent timeout in seconds (diff mode)")
+	maxSteps := flag.Int("max-steps", 80, "agent tool-call cap for the diff task")
+	timeoutSec := flag.Int("timeout", 1200, "agent timeout in seconds (diff mode)")
 	flag.Parse()
 
 	if *mode == "diff" {

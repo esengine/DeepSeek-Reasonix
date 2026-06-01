@@ -60,17 +60,38 @@ func runDiff(o diffOpts) string {
 	// Differential check: the new tests must FAIL when the PR's source is reverted
 	// to its pre-change state, proving they actually capture the change rather than
 	// asserting behavior that already held. Only meaningful once the tests are green.
+	diffChecked := newTestFuncs > 0 && testsPass
 	diffVerified := false
-	if newTestFuncs > 0 && testsPass {
+	if diffChecked {
 		diffVerified = differentialCheck(o.repo, o.base, srcFiles, o.testCmd, pkgs)
 	}
 
-	passed := newTestFuncs > 0 && testsPass && diffVerified
+	passed := diffChecked && diffVerified
 	return renderDiff(diffReport{
 		srcFiles: srcFiles, pkgs: pkgs, addedTestLines: addedTestLines,
 		newTestFuncs: newTestFuncs, sourceTouched: sourceTouched, testsPass: testsPass,
-		diffVerified: diffVerified, passed: passed, m: m, runErr: runErr, testOut: testOut,
+		diffChecked: diffChecked, diffVerified: diffVerified, failing: failingTestNames(testOut),
+		passed: passed, m: m, runErr: runErr, testOut: testOut,
 	})
+}
+
+// failingTestNames pulls the names out of `--- FAIL: TestX (…)` lines.
+func failingTestNames(out string) []string {
+	var names []string
+	seen := map[string]bool{}
+	for _, ln := range strings.Split(out, "\n") {
+		ln = strings.TrimSpace(ln)
+		if !strings.HasPrefix(ln, "--- FAIL:") {
+			continue
+		}
+		rest := strings.TrimSpace(strings.TrimPrefix(ln, "--- FAIL:"))
+		name := strings.Fields(rest)
+		if len(name) > 0 && !seen[name[0]] {
+			seen[name[0]] = true
+			names = append(names, name[0])
+		}
+	}
+	return names
 }
 
 // differentialCheck reverts the PR's changed source to base (deleting files that
@@ -110,8 +131,9 @@ type diffReport struct {
 	srcFiles, pkgs               []string
 	addedTestLines, newTestFuncs int
 	sourceTouched                int
-	testsPass, diffVerified      bool
-	passed                       bool
+	testsPass, diffChecked       bool
+	diffVerified, passed         bool
+	failing                      []string
 	m                            runMetrics
 	runErr                       error
 	testOut                      string
@@ -130,7 +152,14 @@ func renderDiff(r diffReport) string {
 	fmt.Fprintf(&b, "| New test functions added | %d |\n", r.newTestFuncs)
 	fmt.Fprintf(&b, "| Test lines added | +%d |\n", r.addedTestLines)
 	fmt.Fprintf(&b, "| `%s` on affected pkgs | %s |\n", "go test", passFail(r.testsPass))
-	fmt.Fprintf(&b, "| Differential (fails on pre-PR code) | %s |\n", yesNo(r.diffVerified))
+	diffCell := "n/a (tests not green)"
+	if r.diffChecked {
+		diffCell = yesNo(r.diffVerified)
+	}
+	fmt.Fprintf(&b, "| Differential (fails on pre-PR code) | %s |\n", diffCell)
+	if len(r.failing) > 0 {
+		fmt.Fprintf(&b, "| Failing tests | `%s` |\n", strings.Join(r.failing, "`, `"))
+	}
 	fmt.Fprintf(&b, "| Non-test source touched by agent | %d file(s) |\n", r.sourceTouched)
 	fmt.Fprintf(&b, "| Cache hit | %s |\n", pct(r.m.CacheHitTokens, r.m.CacheHitTokens+r.m.CacheMissTokens))
 	fmt.Fprintf(&b, "| Tokens (prompt / completion) | %s / %s |\n", comma(r.m.PromptTokens), comma(r.m.CompletionTokens))
