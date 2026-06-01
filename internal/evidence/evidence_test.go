@@ -107,6 +107,18 @@ func TestReceiptFromToolCallExtractsTodoWriteItems(t *testing.T) {
 	}
 }
 
+func TestReceiptFromToolCallExtractsCompleteStep(t *testing.T) {
+	receipt := ReceiptFromToolCall("complete_step", json.RawMessage(`{
+		"step":"Add parser",
+		"result":"parser added",
+		"evidence":[{"kind":"manual","summary":"checked manually"}]
+	}`), true, true)
+
+	if receipt.Step != "Add parser" {
+		t.Fatalf("complete_step step = %q", receipt.Step)
+	}
+}
+
 func TestLedgerMatchesLatestSuccessfulTodoStep(t *testing.T) {
 	ledger := NewLedger()
 	ledger.Record(Receipt{
@@ -143,5 +155,99 @@ func TestLedgerMatchesLatestSuccessfulTodoStep(t *testing.T) {
 	}
 	if match.Found {
 		t.Fatal("failed todo_write receipt must not match")
+	}
+}
+
+func TestLedgerRequiresCompleteStepForNewCompletedTodos(t *testing.T) {
+	ledger := NewLedger()
+	ledger.Record(Receipt{
+		ToolName: "todo_write",
+		Success:  true,
+		Todos: []TodoItem{
+			{Content: "Add parser", Status: "in_progress"},
+			{Content: "Already done", Status: "completed"},
+		},
+	})
+
+	current := []TodoItem{
+		{Content: "Add parser", Status: "completed"},
+		{Content: "Already done", Status: "completed"},
+	}
+	missing, hasBaseline := ledger.UnverifiedCompletedTodos(current)
+	if !hasBaseline {
+		t.Fatal("expected prior todo_write baseline")
+	}
+	if len(missing) != 1 || missing[0].Content != "Add parser" {
+		t.Fatalf("missing = %+v, want only Add parser", missing)
+	}
+
+	ledger.Record(Receipt{ToolName: "complete_step", Success: false, Step: "Add parser"})
+	missing, hasBaseline = ledger.UnverifiedCompletedTodos(current)
+	if !hasBaseline {
+		t.Fatal("expected prior todo_write baseline after failed complete_step")
+	}
+	if len(missing) != 1 || missing[0].Content != "Add parser" {
+		t.Fatalf("failed complete_step should not authorize completion, missing = %+v", missing)
+	}
+
+	ledger.Record(Receipt{ToolName: "complete_step", Success: true, Step: "Add parser"})
+	missing, hasBaseline = ledger.UnverifiedCompletedTodos(current)
+	if !hasBaseline {
+		t.Fatal("expected prior todo_write baseline after successful complete_step")
+	}
+	if len(missing) != 0 {
+		t.Fatalf("successful complete_step should authorize completion, missing = %+v", missing)
+	}
+}
+
+func TestLedgerMatchesCompletionByActiveFormAndNumber(t *testing.T) {
+	ledger := NewLedger()
+	ledger.Record(Receipt{
+		ToolName: "todo_write",
+		Success:  true,
+		Todos: []TodoItem{
+			{Content: "Add parser", Status: "in_progress", ActiveForm: "Adding parser"},
+			{Content: "Wire parser", Status: "in_progress"},
+		},
+	})
+
+	current := []TodoItem{
+		{Content: "Add parser", Status: "completed", ActiveForm: "Adding parser"},
+		{Content: "Wire parser", Status: "in_progress"},
+	}
+	ledger.Record(Receipt{ToolName: "complete_step", Success: true, Step: "Adding parser"})
+	missing, hasBaseline := ledger.UnverifiedCompletedTodos(current)
+	if !hasBaseline {
+		t.Fatal("expected prior todo_write baseline")
+	}
+	if len(missing) != 0 {
+		t.Fatalf("activeForm complete_step should authorize completion, missing = %+v", missing)
+	}
+
+	current = []TodoItem{
+		{Content: "Add parser", Status: "completed", ActiveForm: "Adding parser"},
+		{Content: "Wire parser", Status: "completed"},
+	}
+	ledger.Record(Receipt{ToolName: "complete_step", Success: true, Step: "2"})
+	missing, hasBaseline = ledger.UnverifiedCompletedTodos(current)
+	if !hasBaseline {
+		t.Fatal("expected prior todo_write baseline")
+	}
+	if len(missing) != 0 {
+		t.Fatalf("numeric complete_step should authorize completion, missing = %+v", missing)
+	}
+}
+
+func TestLedgerNoBaselineDoesNotConstrainCompletedTodos(t *testing.T) {
+	ledger := NewLedger()
+	missing, hasBaseline := ledger.UnverifiedCompletedTodos([]TodoItem{
+		{Content: "Add parser", Status: "completed"},
+	})
+
+	if hasBaseline {
+		t.Fatal("empty ledger should not report a prior todo_write baseline")
+	}
+	if len(missing) != 0 {
+		t.Fatalf("no baseline should not report missing completions, got %+v", missing)
 	}
 }

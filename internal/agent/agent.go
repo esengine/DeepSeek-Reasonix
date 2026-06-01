@@ -487,8 +487,9 @@ type toolCallBatch struct {
 // partitionToolCalls keeps provider order while letting contiguous known
 // read-only tools run together. Unknown and writer tools are single-call serial
 // batches so they cannot reorder around reads or produce surprising errors.
-// complete_step is read-only but never joins a parallel run: it reads the turn's
-// evidence ledger, so every prior call's receipt must be recorded before it runs.
+// complete_step and todo_write are read-only but never join a parallel run: they
+// read the turn's evidence ledger, so every prior call's receipt must be recorded
+// before they run.
 func partitionToolCalls(r *tool.Registry, calls []provider.ToolCall) []toolCallBatch {
 	var batches []toolCallBatch
 	for i := 0; i < len(calls); {
@@ -508,7 +509,7 @@ func partitionToolCalls(r *tool.Registry, calls []provider.ToolCall) []toolCallB
 }
 
 func parallelisable(r *tool.Registry, name string) bool {
-	if name == "complete_step" {
+	if name == "complete_step" || name == "todo_write" {
 		return false
 	}
 	t, ok := r.Get(name)
@@ -684,8 +685,14 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 		cctx = jobs.WithManager(cctx, a.jobs)
 	}
 	result, err := t.Execute(cctx, json.RawMessage(call.Arguments))
-	if a.evidence != nil && call.Name != "complete_step" {
-		a.evidence.Record(evidence.ReceiptFromToolCall(call.Name, json.RawMessage(call.Arguments), err == nil, t.ReadOnly()))
+	if a.evidence != nil {
+		if call.Name == "complete_step" {
+			if err == nil {
+				a.evidence.Record(evidence.ReceiptFromToolCall(call.Name, json.RawMessage(call.Arguments), true, t.ReadOnly()))
+			}
+		} else {
+			a.evidence.Record(evidence.ReceiptFromToolCall(call.Name, json.RawMessage(call.Arguments), err == nil, t.ReadOnly()))
+		}
 	}
 	// PostToolUse hooks observe the result (they can't block); fired whether the
 	// call succeeded or errored, since the tool did run.

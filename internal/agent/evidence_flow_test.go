@@ -47,6 +47,16 @@ func toolResult(s *Session, name string) string {
 	return ""
 }
 
+func lastToolResult(s *Session, name string) string {
+	var result string
+	for _, m := range s.Messages {
+		if m.Role == provider.RoleTool && m.Name == name {
+			result = m.Content
+		}
+	}
+	return result
+}
+
 // TestEvidenceFlowEndToEnd drives a full Run(): turn 1 runs bash then signs the
 // step off citing that exact command; complete_step must see the host receipt
 // recorded earlier in the same batch and report it host-verified.
@@ -154,5 +164,108 @@ func TestEvidenceFlowRejectsStepMissingFromTodoWrite(t *testing.T) {
 	got := toolResult(a.session, "complete_step")
 	if !strings.Contains(got, "matching todo_write item") {
 		t.Fatalf("complete_step result = %q, want todo-backed rejection", got)
+	}
+}
+
+func TestEvidenceFlowAcceptsTodoCompletionAfterCompleteStep(t *testing.T) {
+	todoWrite, ok := tool.LookupBuiltin("todo_write")
+	if !ok {
+		t.Fatal("todo_write builtin not registered")
+	}
+	completeStep, ok := tool.LookupBuiltin("complete_step")
+	if !ok {
+		t.Fatal("complete_step builtin not registered")
+	}
+	reg := tool.NewRegistry()
+	reg.Add(todoWrite)
+	reg.Add(completeStep)
+
+	prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{
+		{
+			toolCallChunk("c1", "todo_write", `{"todos":[{"content":"Add parser","status":"in_progress"}]}`),
+			toolCallChunk("c2", "complete_step", `{
+				"step":"Add parser",
+				"result":"parser added",
+				"evidence":[{"kind":"manual","summary":"checked manually"}]
+			}`),
+			toolCallChunk("c3", "todo_write", `{"todos":[{"content":"Add parser","status":"completed"}]}`),
+			{Type: provider.ChunkDone},
+		},
+		{{Type: provider.ChunkText, Text: "done"}, {Type: provider.ChunkDone}},
+	}}
+
+	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
+	if err := a.Run(context.Background(), "complete the todo with a sign-off first"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if got := lastToolResult(a.session, "todo_write"); !strings.Contains(got, "Todos updated") {
+		t.Fatalf("final todo_write result = %q, want update accepted", got)
+	}
+}
+
+func TestEvidenceFlowRejectsTodoCompletionWithoutCompleteStep(t *testing.T) {
+	todoWrite, ok := tool.LookupBuiltin("todo_write")
+	if !ok {
+		t.Fatal("todo_write builtin not registered")
+	}
+	reg := tool.NewRegistry()
+	reg.Add(todoWrite)
+
+	prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{
+		{
+			toolCallChunk("c1", "todo_write", `{"todos":[{"content":"Add parser","status":"in_progress"}]}`),
+			toolCallChunk("c2", "todo_write", `{"todos":[{"content":"Add parser","status":"completed"}]}`),
+			{Type: provider.ChunkDone},
+		},
+		{{Type: provider.ChunkText, Text: "done"}, {Type: provider.ChunkDone}},
+	}}
+
+	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
+	if err := a.Run(context.Background(), "complete the todo without a sign-off"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	got := lastToolResult(a.session, "todo_write")
+	if !strings.Contains(got, "complete_step") {
+		t.Fatalf("final todo_write result = %q, want completion rejected until complete_step", got)
+	}
+}
+
+func TestEvidenceFlowFailedCompleteStepDoesNotAuthorizeTodoCompletion(t *testing.T) {
+	todoWrite, ok := tool.LookupBuiltin("todo_write")
+	if !ok {
+		t.Fatal("todo_write builtin not registered")
+	}
+	completeStep, ok := tool.LookupBuiltin("complete_step")
+	if !ok {
+		t.Fatal("complete_step builtin not registered")
+	}
+	reg := tool.NewRegistry()
+	reg.Add(todoWrite)
+	reg.Add(completeStep)
+
+	prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{
+		{
+			toolCallChunk("c1", "todo_write", `{"todos":[{"content":"Add parser","status":"in_progress"}]}`),
+			toolCallChunk("c2", "complete_step", `{
+				"step":"Ship parser",
+				"result":"parser shipped",
+				"evidence":[{"kind":"manual","summary":"checked manually"}]
+			}`),
+			toolCallChunk("c3", "todo_write", `{"todos":[{"content":"Add parser","status":"completed"}]}`),
+			{Type: provider.ChunkDone},
+		},
+		{{Type: provider.ChunkText, Text: "done"}, {Type: provider.ChunkDone}},
+	}}
+
+	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
+	if err := a.Run(context.Background(), "attempt completion after a failed sign-off"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	got := lastToolResult(a.session, "todo_write")
+	if !strings.Contains(got, "complete_step") {
+		t.Fatalf("final todo_write result = %q, want failed complete_step not to authorize completion", got)
 	}
 }

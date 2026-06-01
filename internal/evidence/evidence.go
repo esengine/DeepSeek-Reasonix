@@ -35,6 +35,7 @@ type Receipt struct {
 	Args     json.RawMessage `json:"args,omitempty"`
 	Success  bool            `json:"success"`
 	Command  string          `json:"command,omitempty"`
+	Step     string          `json:"step,omitempty"`
 	Paths    []string        `json:"paths,omitempty"`
 	Read     bool            `json:"read,omitempty"`
 	Write    bool            `json:"write,omitempty"`
@@ -66,6 +67,7 @@ func (l *Ledger) Record(r Receipt) {
 		return
 	}
 	r.Command = strings.TrimSpace(r.Command)
+	r.Step = strings.TrimSpace(r.Step)
 	r.Paths = normalizePaths(r.Paths)
 	r.Todos = normalizeTodos(r.Todos)
 	if r.Args != nil {
@@ -119,6 +121,57 @@ func (l *Ledger) MatchLatestTodoStep(step string) (TodoStepMatch, bool) {
 	return TodoStepMatch{}, false
 }
 
+// UnverifiedCompletedTodos reports current completed todos that transitioned
+// from the latest prior successful todo_write receipt without a matching
+// successful complete_step receipt earlier in the same turn. If this turn has no
+// prior todo_write baseline, hasBaseline is false and callers should preserve
+// the existing loose validation behavior.
+func (l *Ledger) UnverifiedCompletedTodos(current []TodoItem) (missing []TodoStepMatch, hasBaseline bool) {
+	current = normalizeTodos(current)
+	if l == nil {
+		return nil, false
+	}
+
+	l.mu.Lock()
+	receipts := append([]Receipt(nil), l.receipts...)
+	l.mu.Unlock()
+
+	var previous []TodoItem
+	for i := len(receipts) - 1; i >= 0; i-- {
+		r := receipts[i]
+		if !r.Success || r.ToolName != "todo_write" {
+			continue
+		}
+		previous = r.Todos
+		hasBaseline = true
+		break
+	}
+	if !hasBaseline {
+		return nil, false
+	}
+
+	for i, t := range current {
+		if todoStatus(t.Status) != "completed" {
+			continue
+		}
+		index := i + 1
+		if previousTodoCompleted(index, t, previous) {
+			continue
+		}
+		if hasSuccessfulCompleteStepForTodo(receipts, index, current) {
+			continue
+		}
+		missing = append(missing, TodoStepMatch{
+			Found:      true,
+			Index:      index,
+			Content:    t.Content,
+			Status:     todoStatus(t.Status),
+			ActiveForm: t.ActiveForm,
+		})
+	}
+	return missing, true
+}
+
 func (l *Ledger) hasSuccessfulPaths(paths []string, accept func(Receipt) bool) bool {
 	wanted := pathSet(normalizePaths(paths))
 	if l == nil || len(wanted) == 0 {
@@ -166,6 +219,9 @@ func ReceiptFromToolCall(toolName string, args json.RawMessage, success bool, re
 	if err := json.Unmarshal(args, &fields); err == nil {
 		if toolName == "bash" {
 			r.Command = stringField(fields, "command")
+		}
+		if toolName == "complete_step" {
+			r.Step = stringField(fields, "step")
 		}
 		if toolName == "todo_write" {
 			r.Todos = todoItemsField(fields, "todos")
@@ -257,6 +313,46 @@ func normalizeTodos(todos []TodoItem) []TodoItem {
 		out = append(out, t)
 	}
 	return out
+}
+
+func todoStatus(status string) string {
+	status = strings.TrimSpace(status)
+	if status == "" {
+		return "pending"
+	}
+	return status
+}
+
+func previousTodoCompleted(index int, current TodoItem, previous []TodoItem) bool {
+	if index >= 1 && index <= len(previous) {
+		p := previous[index-1]
+		if todoStatus(p.Status) == "completed" && sameTodoIdentity(current, p) {
+			return true
+		}
+	}
+	for _, p := range previous {
+		if todoStatus(p.Status) == "completed" && sameTodoIdentity(current, p) {
+			return true
+		}
+	}
+	return false
+}
+
+func sameTodoIdentity(a, b TodoItem) bool {
+	return sameStepText(a.Content, b.Content) || sameStepText(a.ActiveForm, b.ActiveForm)
+}
+
+func hasSuccessfulCompleteStepForTodo(receipts []Receipt, index int, current []TodoItem) bool {
+	for _, r := range receipts {
+		if !r.Success || r.ToolName != "complete_step" || strings.TrimSpace(r.Step) == "" {
+			continue
+		}
+		match := matchTodoStep(r.Step, current)
+		if match.Found && match.Index == index {
+			return true
+		}
+	}
+	return false
 }
 
 func matchTodoStep(step string, todos []TodoItem) TodoStepMatch {
