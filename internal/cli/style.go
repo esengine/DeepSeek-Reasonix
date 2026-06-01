@@ -32,11 +32,11 @@ const (
 	ansiCyan    = "\033[38;5;44m"
 	ansiMagenta = "\033[38;5;176m"
 	ansiReverse = "\033[7m"
-	// ansiAccent is reasonix's brand colour: a warm copper (xterm-256 #173) chosen
-	// to read on both dark and light terminals. It marks titles, prompts, and
-	// box borders so the eye finds the same hue every time.
-	ansiAccent = "\033[38;5;173m"
 )
+
+// ansiAccent is reasonix's current accent colour. The CLI /theme command updates
+// it at runtime so titles, prompts, and box borders switch together.
+var ansiAccent = "\033[38;5;173m"
 
 func sgr(code, s string) string {
 	if !colorEnabled {

@@ -72,6 +72,7 @@ func (m *chatTUI) slashItems() []compItem {
 		{label: "/output-style", insert: "/output-style", hint: i18n.M.CmdOutputStyle},
 		{label: "/verbose", insert: "/verbose", hint: i18n.M.CmdVerbose},
 		{label: "/effort", insert: "/effort ", hint: i18n.M.CmdEffort, descend: true},
+		{label: "/theme", insert: "/theme ", hint: i18n.M.CmdTheme, descend: true},
 		{label: "/help", insert: "/help ", hint: i18n.M.CmdHelp},
 		{label: "/memory", insert: "/memory ", hint: i18n.M.CmdMemory},
 		{label: "/forget", insert: "/forget ", hint: i18n.M.CmdForget},
@@ -136,6 +137,9 @@ func (m *chatTUI) slashArgItems(val string) ([]compItem, int, bool) {
 		return items, from, len(items) > 0
 	}
 	if items, from, ok := m.resumeArgItems(val); ok {
+		return items, from, len(items) > 0
+	}
+	if items, from, ok := m.themeArgItems(val); ok {
 		return items, from, len(items) > 0
 	}
 	// Delegate to the shared completion logic so the chat TUI and the desktop

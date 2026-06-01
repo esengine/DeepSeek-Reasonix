@@ -89,6 +89,10 @@ type Messages struct {
 	OutputStyleNone   string // no styles available
 	OutputStyleHeader string // header above the listing
 	OutputStyleHint   string // how to select one
+	ThemeHeader       string // header above the /theme listing
+	ThemeHint         string // how to select a theme
+	ThemeChangedFmt   string // "/theme <name>" succeeded
+	ThemeUnknownFmt   string // "/theme <name>" unknown
 
 	// context compaction card (CompactionStarted / CompactionDone events).
 	CompactionWorking string // shown while the summarizer runs
@@ -128,6 +132,7 @@ type Messages struct {
 	CmdHooks        string // /hooks
 	CmdPasteImage   string // /paste-image
 	CmdOutputStyle  string // /output-style
+	CmdTheme        string // /theme
 	CmdSkill        string // /skill
 	CmdVerbose      string // /verbose
 	CmdEffort       string // /effort
@@ -151,6 +156,7 @@ type Messages struct {
 	ArgEffortHigh   string // /effort high
 	ArgEffortXHigh  string // /effort xhigh
 	ArgEffortMax    string // /effort max
+	ArgThemeCurrent string // /theme <style> active tag
 
 	// management listing notices (the Submit path: desktop / HTTP frontends)
 	ListModelsHeaderFmt string // "models (active: %s)"
