@@ -37,6 +37,8 @@ var Chinese = Messages{
 	ResumeAlreadyActive: "已在该会话中",
 	ResumedTitle:        "已恢复会话",
 
+	ChatThinking:           "思考中…",
+	ChatThoughtForFmt:      "思考了 %d 秒",
 	ChatStatusThinkingFmt:  "%s 思考中… (%d 秒 · Esc 取消)",
 	ChatStatusIdle:         "Tab 切换 plan · Ctrl-O 切换 verbose thinking · Enter 发送 · Esc 退出当前状态 · PgUp/PgDn 滚动 · Ctrl-D 退出",
 	ChatStatusPlanApproval: "Enter/y 批准并执行 · n/Esc 继续规划 · PgUp/PgDn 滚动",

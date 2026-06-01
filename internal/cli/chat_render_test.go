@@ -16,33 +16,33 @@ func newTestChatTUI() chatTUI {
 	ti := textarea.New()
 	ti.SetWidth(80)
 	return chatTUI{
-		input:         ti,
-		nextPasteID:   1,
-		reasoning:     &strings.Builder{},
-		pending:       &strings.Builder{},
-		pendingCommit: &commit,
-		renderer:      newMarkdownRenderer(80),
+		input:            ti,
+		nextPasteID:      1,
+		reasoningLineIdx: -1,
+		reasoning:        &strings.Builder{},
+		pending:          &strings.Builder{},
+		pendingCommit:    &commit,
+		renderer:         newMarkdownRenderer(80),
 	}
 }
 
-// TestIngestSeparatesReasoningFromAnswer proves the print-above model commits
-// the collapsed reasoning marker and the answer as distinct scrollback entries
-// (joined with a newline downstream), so the answer never butts up against the
-// thinking marker — and that the answer stays live until it's flushed.
+// TestIngestSeparatesReasoningFromAnswer proves the thinking marker appears the
+// moment reasoning starts, collapses in place to a "thought for Ns" summary when
+// the answer begins, and the answer commits as its own distinct entry.
 func TestIngestSeparatesReasoningFromAnswer(t *testing.T) {
 	m := newTestChatTUI()
 
-	m.ingestEvent(event.Event{Kind: event.Reasoning, Text: "…reasoning…"}) // header + fragment → live buffer
-	if len(*m.pendingCommit) != 0 {
-		t.Fatalf("reasoning should stay live until the answer begins, committed=%v", *m.pendingCommit)
+	m.ingestEvent(event.Event{Kind: event.Reasoning, Text: "…reasoning…"}) // thinking starts → live marker
+	if len(m.transcript) != 1 || !strings.Contains(m.transcript[0], "thinking") {
+		t.Fatalf("thinking marker should appear at once, transcript=%v", m.transcript)
+	}
+	if strings.Contains(m.transcript[0], "…reasoning…") {
+		t.Fatalf("raw reasoning text should stay collapsed by default, transcript=%v", m.transcript)
 	}
 
-	m.ingestEvent(event.Event{Kind: event.Text, Text: "Hello answer"}) // answer begins → reasoning finalizes
-	if n := len(*m.pendingCommit); n != 1 || !strings.Contains((*m.pendingCommit)[0], "thinking") {
-		t.Fatalf("reasoning should commit when the answer begins, committed=%v", *m.pendingCommit)
-	}
-	if strings.Contains((*m.pendingCommit)[0], "…reasoning…") {
-		t.Fatalf("reasoning text should stay collapsed by default, committed=%v", *m.pendingCommit)
+	m.ingestEvent(event.Event{Kind: event.Text, Text: "Hello answer"}) // answer begins → marker collapses
+	if len(m.transcript) != 1 || !strings.Contains(m.transcript[0], "thought for") {
+		t.Fatalf("marker should collapse to a duration summary in place, transcript=%v", m.transcript)
 	}
 	if m.pending.String() != "Hello answer" {
 		t.Errorf("answer should be live in pending, got %q", m.pending.String())
@@ -52,8 +52,29 @@ func TestIngestSeparatesReasoningFromAnswer(t *testing.T) {
 	}
 
 	m.commitPending() // turn end
-	if n := len(*m.pendingCommit); n != 2 || !strings.Contains((*m.pendingCommit)[1], "Hello") {
-		t.Fatalf("answer should commit on flush as a separate entry, committed=%v", *m.pendingCommit)
+	if len(m.transcript) != 2 || !strings.Contains(m.transcript[1], "Hello") {
+		t.Fatalf("answer should commit as a separate entry, transcript=%v", m.transcript)
+	}
+}
+
+// TestVerboseReasoningInsertsTextUnderSummary proves /verbose mode keeps the full
+// thinking text, placed beneath the collapsed duration summary.
+func TestVerboseReasoningInsertsTextUnderSummary(t *testing.T) {
+	m := newTestChatTUI()
+	m.showReasoning = true
+
+	m.ingestEvent(event.Event{Kind: event.Reasoning, Text: "step one "})
+	m.ingestEvent(event.Event{Kind: event.Reasoning, Text: "step two"})
+	m.ingestEvent(event.Event{Kind: event.Text, Text: "Answer"}) // closes the block
+
+	if len(m.transcript) != 2 {
+		t.Fatalf("verbose block should be summary + text, transcript=%v", m.transcript)
+	}
+	if !strings.Contains(m.transcript[0], "thought for") {
+		t.Errorf("first line should be the duration summary, got %q", m.transcript[0])
+	}
+	if !strings.Contains(m.transcript[1], "step one") || !strings.Contains(m.transcript[1], "step two") {
+		t.Errorf("verbose text should appear under the summary, got %q", m.transcript[1])
 	}
 }
 

@@ -54,22 +54,18 @@ func TestTranscriptViewportSizing(t *testing.T) {
 }
 
 // TestIngestEventRoutesByKind proves each event Kind lands in the right place:
-// reasoning accumulates as a collapsed live marker (uncommitted), while tool
-// dispatch, blocked results, usage, notices, and coordinator phases each commit
-// as their own scrollback line. Routing is by Kind, not by sniffing line
-// prefixes.
+// reasoning shows a collapsed live marker at once, while tool dispatch, blocked
+// results, usage, notices, and coordinator phases each commit as their own
+// scrollback line. Routing is by Kind, not by sniffing line prefixes.
 func TestIngestEventRoutesByKind(t *testing.T) {
-	// Reasoning stays live as a collapsed marker, not committed.
+	// Reasoning shows a collapsed live marker at once, without the raw thinking.
 	m := newTestChatTUI()
 	m.ingestEvent(event.Event{Kind: event.Reasoning, Text: "weighing options"})
-	if len(*m.pendingCommit) != 0 {
-		t.Errorf("reasoning should stay live, committed=%v", *m.pendingCommit)
+	if len(m.transcript) != 1 || !strings.Contains(m.transcript[0], "thinking") {
+		t.Errorf("reasoning should show a live marker, transcript=%v", m.transcript)
 	}
-	if !strings.Contains(m.reasoning.String(), "thinking") {
-		t.Errorf("reasoning should buffer the collapsed marker, got %q", m.reasoning.String())
-	}
-	if strings.Contains(m.reasoning.String(), "weighing options") {
-		t.Errorf("reasoning text should stay hidden by default, got %q", m.reasoning.String())
+	if strings.Contains(m.transcript[0], "weighing options") {
+		t.Errorf("reasoning text should stay hidden by default, transcript=%v", m.transcript)
 	}
 
 	for _, tc := range []struct {
@@ -127,16 +123,20 @@ func TestDeferredUserBubble(t *testing.T) {
 		t.Fatalf("TurnStarted should not commit the deferred bubble, pending=%v committed=%v", m.bubblePending, *m.pendingCommit)
 	}
 
-	// The first real packet commits the bubble (blank + bubble) ahead of itself.
+	// The first real packet commits the bubble (blank + bubble) ahead of itself;
+	// a reasoning packet then also shows its live thinking marker.
 	m.ingestEvent(event.Event{Kind: event.Reasoning, Text: "thinking…"})
 	if m.bubblePending {
 		t.Fatalf("first packet should commit the deferred bubble")
 	}
-	if n := len(*m.pendingCommit); n != 2 {
-		t.Fatalf("expected a blank separator + the bubble, got %d: %v", n, *m.pendingCommit)
+	if n := len(*m.pendingCommit); n != 3 {
+		t.Fatalf("expected blank + bubble + thinking marker, got %d: %v", n, *m.pendingCommit)
 	}
 	if !strings.Contains((*m.pendingCommit)[1], "hello world") {
 		t.Errorf("committed bubble should carry the user text, got %q", (*m.pendingCommit)[1])
+	}
+	if !strings.Contains((*m.pendingCommit)[2], "thinking") {
+		t.Errorf("reasoning packet should show the thinking marker, got %q", (*m.pendingCommit)[2])
 	}
 }
 

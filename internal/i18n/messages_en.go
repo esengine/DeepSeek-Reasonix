@@ -36,6 +36,8 @@ var English = Messages{
 	ResumeAlreadyActive: "already in that session",
 	ResumedTitle:        "resumed session",
 
+	ChatThinking:           "thinking…",
+	ChatThoughtForFmt:      "thought for %ds",
 	ChatStatusThinkingFmt:  "%s thinking… (%ds · Esc cancels)",
 	ChatStatusIdle:         "Tab toggles plan · Ctrl-O toggles verbose thinking · Enter sends · Esc clears/exits state · PgUp/PgDn scrolls · Ctrl-D quits",
 	ChatStatusPlanApproval: "Enter/y approves & executes · n/Esc keeps planning · PgUp/PgDn scrolls",
