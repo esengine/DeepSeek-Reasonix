@@ -40,20 +40,20 @@ type Shell struct {
 // is usually absent from PATH, it probes the Git-for-Windows install locations
 // and only then falls back to PowerShell so the tool still functions.
 func ResolveShell() Shell {
-	return resolveShell(runtime.GOOS, exec.LookPath, fileExists, windowsBashCandidates())
+	return resolveShell(runtime.GOOS, exec.LookPath, fileExists, windowsBashCandidates(), probeBash)
 }
 
 // resolveShell is ResolveShell with its environment lookups injected — including
 // the Git-for-Windows bash candidates, which derive from %ProgramFiles% and so
 // are empty off Windows — so the decision table is deterministically testable on
 // any host.
-func resolveShell(goos string, lookPath func(string) (string, error), exists func(string) bool, winBashCandidates []string) Shell {
-	if p, err := lookPath("bash"); err == nil {
+func resolveShell(goos string, lookPath func(string) (string, error), exists func(string) bool, winBashCandidates []string, probe func(string) bool) Shell {
+	if p, err := lookPath("bash"); err == nil && probe(p) {
 		return Shell{Kind: ShellBash, Path: p}
 	}
 	if goos == "windows" {
 		for _, p := range winBashCandidates {
-			if exists(p) {
+			if exists(p) && probe(p) {
 				return Shell{Kind: ShellBash, Path: p}
 			}
 		}
@@ -64,6 +64,21 @@ func resolveShell(goos string, lookPath func(string) (string, error), exists fun
 		}
 	}
 	return Shell{Kind: ShellBash, Path: "bash"}
+}
+
+// probeBash returns true iff path is a working bash that can run a trivial
+// command. Windows ships a `bash.exe` launcher stub in %SystemRoot% that opens
+// the WSL install prompt when invoked; we must skip it, otherwise the bash
+// tool hangs/errors on every call. The probe runs `true` because that exists
+// in both bash and Git Bash (not WSL's stub) and exits fast.
+func probeBash(path string) bool {
+	if runtime.GOOS != "windows" {
+		return true
+	}
+	cmd := exec.Command(path, "-c", "true")
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+	return cmd.Run() == nil
 }
 
 func fileExists(p string) bool {

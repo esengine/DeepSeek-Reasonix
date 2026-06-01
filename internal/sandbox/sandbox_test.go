@@ -104,17 +104,20 @@ func TestResolveShellDecisionTable(t *testing.T) {
 		lookPath   func(string) (string, error)
 		candidates []string
 		exists     func(string) bool
+		probe      func(string) bool
 		wantKind   ShellKind
 	}{
-		{"bash on PATH wins", "windows", onPath("bash", "powershell"), gitBash, never, ShellBash},
-		{"no bash, git-bash on disk", "windows", onPath("powershell"), gitBash, always, ShellBash},
-		{"no bash anywhere, pwsh", "windows", onPath("pwsh", "powershell"), gitBash, never, ShellPowerShell},
-		{"no bash, only powershell", "windows", onPath("powershell"), gitBash, never, ShellPowerShell},
-		{"windows, nothing found", "windows", onPath(), nil, never, ShellBash},
-		{"linux, no bash → no PS fallback", "linux", onPath("powershell"), gitBash, always, ShellBash},
+		{"bash on PATH wins", "windows", onPath("bash", "powershell"), gitBash, never, always, ShellBash},
+		{"bash on PATH but probe fails", "windows", onPath("bash", "powershell"), gitBash, never, never, ShellPowerShell},
+		{"no bash, git-bash on disk", "windows", onPath("powershell"), gitBash, always, always, ShellBash},
+		{"git-bash on disk but probe fails", "windows", onPath("powershell"), gitBash, always, never, ShellPowerShell},
+		{"no bash anywhere, pwsh", "windows", onPath("pwsh", "powershell"), gitBash, never, never, ShellPowerShell},
+		{"no bash, only powershell", "windows", onPath("powershell"), gitBash, never, never, ShellPowerShell},
+		{"windows, nothing found", "windows", onPath(), nil, never, never, ShellBash},
+		{"linux, no bash → no PS fallback", "linux", onPath("powershell"), gitBash, always, always, ShellBash},
 	}
 	for _, c := range cases {
-		got := resolveShell(c.goos, c.lookPath, c.exists, c.candidates)
+		got := resolveShell(c.goos, c.lookPath, c.exists, c.candidates, c.probe)
 		if got.Kind != c.wantKind {
 			t.Errorf("%s: kind = %s, want %s (path=%s)", c.name, got.Kind, c.wantKind, got.Path)
 		}
