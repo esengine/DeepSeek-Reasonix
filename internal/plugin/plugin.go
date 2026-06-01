@@ -155,18 +155,27 @@ func StartAll(ctx context.Context, specs []Spec) (*Host, []tool.Tool, error) {
 		results[r.idx] = r
 	}
 
+	// Collect every started client into the Host first, so that if any plugin
+	// failed, h.Close() tears down all of them — including ones whose index sits
+	// after the failure (parallel start means they're already running).
 	h := &Host{}
 	var tools []tool.Tool
+	var firstErr error
 	for _, r := range results {
 		if r.err != nil {
-			// Close any plugins that already started before returning the error.
-			h.Close()
-			return nil, nil, r.err
+			if firstErr == nil {
+				firstErr = r.err
+			}
+			continue
 		}
 		h.clients = append(h.clients, r.client)
 		tools = append(tools, r.tools...)
 		h.prompts = append(h.prompts, r.client.prompts...)
 		h.resources = append(h.resources, r.client.resources...)
+	}
+	if firstErr != nil {
+		h.Close()
+		return nil, nil, firstErr
 	}
 	return h, tools, nil
 }
