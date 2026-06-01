@@ -410,11 +410,11 @@ func (a *Agent) stream(ctx context.Context) (string, string, string, []provider.
 
 // executeBatch dispatches one model turn's tool calls. A ToolDispatch event is
 // emitted for every call up front, in call order, so a frontend can show the
-// timeline chronologically. Calls fan out across goroutines only when every
-// call's tool is ReadOnly (canParallelise); a single non-ReadOnly call drops
-// the whole batch back to sequential to preserve write/read ordering. ToolResult
-// events are emitted after the batch in call order, so emission stays serial
-// even when execution parallelised.
+// timeline chronologically. Contiguous known ReadOnly calls fan out across
+// goroutines; unknown and writer calls run as single-call serial segments so
+// write/read ordering stays provider-ordered. ToolResult events are emitted
+// after the batch in call order, so emission stays serial even when execution
+// parallelised.
 func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) []string {
 	for _, c := range calls {
 		t, ok := a.tools.Get(c.Name)
@@ -433,23 +433,12 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) []s
 		results[i] = outcomes[i].output
 	}
 
-	if canParallelise(a.tools, calls) && len(calls) > 1 {
-		const maxParallel = 8
-		sem := make(chan struct{}, maxParallel)
-		var wg sync.WaitGroup
-		for i := range calls {
-			i := i
-			sem <- struct{}{}
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				defer func() { <-sem }()
-				run(i)
-			}()
+	for _, batch := range partitionToolCalls(a.tools, calls) {
+		if batch.parallel && batch.end-batch.start > 1 {
+			runParallel(batch.start, batch.end, run)
+			continue
 		}
-		wg.Wait()
-	} else {
-		for i := range calls {
+		for i := batch.start; i < batch.end; i++ {
 			run(i)
 		}
 	}
@@ -472,6 +461,54 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) []s
 	}
 	a.applyStormBreaker(calls, outcomes, results)
 	return results
+}
+
+type toolCallBatch struct {
+	start    int
+	end      int
+	parallel bool
+}
+
+// partitionToolCalls keeps provider order while letting contiguous known
+// read-only tools run together. Unknown and writer tools are single-call serial
+// batches so they cannot reorder around reads or produce surprising errors.
+func partitionToolCalls(r *tool.Registry, calls []provider.ToolCall) []toolCallBatch {
+	var batches []toolCallBatch
+	for i := 0; i < len(calls); {
+		if t, ok := r.Get(calls[i].Name); ok && t.ReadOnly() {
+			start := i
+			i++
+			for i < len(calls) {
+				next, ok := r.Get(calls[i].Name)
+				if !ok || !next.ReadOnly() {
+					break
+				}
+				i++
+			}
+			batches = append(batches, toolCallBatch{start: start, end: i, parallel: true})
+			continue
+		}
+		batches = append(batches, toolCallBatch{start: i, end: i + 1})
+		i++
+	}
+	return batches
+}
+
+func runParallel(start, end int, run func(int)) {
+	const maxParallel = 8
+	sem := make(chan struct{}, maxParallel)
+	var wg sync.WaitGroup
+	for i := start; i < end; i++ {
+		i := i
+		sem <- struct{}{}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			run(i)
+		}()
+	}
+	wg.Wait()
 }
 
 // stormBreakThreshold is how many times in a row the same tool may fail the same
@@ -636,19 +673,6 @@ func firstLine(s string) string {
 		return s[:i]
 	}
 	return s
-}
-
-// canParallelise returns true iff every call targets a known, ReadOnly tool.
-// Any unknown tool name (let the sequential path produce a clean error) or any
-// non-ReadOnly tool (preserve write ordering) forces serial execution.
-func canParallelise(r *tool.Registry, calls []provider.ToolCall) bool {
-	for _, c := range calls {
-		t, ok := r.Get(c.Name)
-		if !ok || !t.ReadOnly() {
-			return false
-		}
-	}
-	return true
 }
 
 // truncateToolOutput head+tails s when it exceeds maxToolOutputBytes, slicing
