@@ -3,6 +3,7 @@ package cli
 import (
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"reasonix/internal/agent"
@@ -10,6 +11,69 @@ import (
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
 )
+
+// TestResumeDispatchListsSessions drives the real keystroke path
+// (runSlashCommand) for a bare "/resume" and asserts the session list with
+// previews lands in the transcript.
+func TestResumeDispatchListsSessions(t *testing.T) {
+	dir := t.TempDir()
+	saveTestSession(t, filepath.Join(dir, "a.jsonl"), "alpha prompt")
+	saveTestSession(t, filepath.Join(dir, "b.jsonl"), "beta prompt")
+
+	exec := agent.New(nil, nil, agent.NewSession("sys"), agent.Options{}, event.Discard)
+	m := newTestChatTUI()
+	m.width = 80
+	m.ctrl = control.New(control.Options{Executor: exec, SessionDir: dir, Label: "test"})
+
+	if cmd := m.runSlashCommand("/resume"); cmd != nil {
+		t.Fatal("/resume list should not return a tea.Cmd")
+	}
+	out := strings.Join(m.transcript, "\n")
+	if !strings.Contains(out, "alpha prompt") || !strings.Contains(out, "beta prompt") {
+		t.Fatalf("session list missing previews:\n%s", out)
+	}
+}
+
+// TestResumeDispatchSwitchesAndReplays drives "/resume <n>" through the slash
+// dispatcher and asserts the controller switched session AND the resumed
+// transcript was replayed into the scrollback.
+func TestResumeDispatchSwitchesAndReplays(t *testing.T) {
+	dir := t.TempDir()
+	active := agent.NewSession("sys")
+	active.Add(provider.Message{Role: provider.RoleUser, Content: "active prompt"})
+	exec := agent.New(nil, nil, active, agent.Options{}, event.Discard)
+	ctrl := control.New(control.Options{Executor: exec, SessionDir: dir, Label: "test"})
+	ctrl.SetSessionPath(filepath.Join(dir, "active.jsonl"))
+	if err := ctrl.Snapshot(); err != nil {
+		t.Fatal(err)
+	}
+
+	otherPath := filepath.Join(dir, "other.jsonl")
+	saveTestSession(t, otherPath, "OTHER-SESSION-PROMPT")
+
+	m := newTestChatTUI()
+	m.width = 80
+	m.ctrl = ctrl
+
+	target := 0
+	for i, s := range recentSessions(dir) {
+		if s.Path == otherPath {
+			target = i + 1
+		}
+	}
+	if target == 0 {
+		t.Fatal("other session not listed by recentSessions")
+	}
+
+	m.runSlashCommand("/resume " + strconv.Itoa(target))
+
+	if got := ctrl.SessionPath(); got != otherPath {
+		t.Fatalf("session path = %q, want %q", got, otherPath)
+	}
+	if out := strings.Join(m.transcript, "\n"); !strings.Contains(out, "OTHER-SESSION-PROMPT") {
+		t.Fatalf("transcript should replay the resumed session:\n%s", out)
+	}
+}
 
 func saveTestSession(t *testing.T, path, prompt string) {
 	t.Helper()
