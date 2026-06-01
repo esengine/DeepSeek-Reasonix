@@ -192,6 +192,9 @@ func (c *Controller) modelListText() string {
 	fmt.Fprintf(&b, i18n.M.ListModelsHeaderFmt+"\n", c.label)
 	for i := range cfg.Providers {
 		p := &cfg.Providers[i]
+		if !p.Configured() {
+			continue
+		}
 		for _, m := range p.ModelList() {
 			fmt.Fprintf(&b, "  %s/%s\n", p.Name, m)
 		}

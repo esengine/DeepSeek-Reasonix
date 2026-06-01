@@ -506,6 +506,14 @@ func (e *ProviderEntry) APIKey() string {
 	return os.Getenv(e.APIKeyEnv)
 }
 
+// Configured reports whether this provider's API key is set, i.e. its models can
+// actually be selected. It mirrors the key check in Validate, so a provider that
+// fails Configured would also fail Validate at build time — model pickers filter
+// on it to avoid listing models the user hasn't set up yet.
+func (e *ProviderEntry) Configured() bool {
+	return e.APIKey() != ""
+}
+
 // ResolveSystemPrompt returns the system prompt, reading system_prompt_file if set.
 func (c *Config) ResolveSystemPrompt() (string, error) {
 	if c.Agent.SystemPromptFile != "" {
