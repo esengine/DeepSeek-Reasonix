@@ -38,12 +38,13 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		name = "openai"
 	}
 	keyEnv, _ := cfg.Extra["api_key_env"].(string) // for actionable auth errors
+	base := strings.TrimRight(cfg.BaseURL, "/")
 	effort, _ := cfg.Extra["effort"].(string)
 	return &client{
 		name:    name,
 		apiKey:  cfg.APIKey,
 		keyEnv:  keyEnv,
-		baseURL: strings.TrimRight(cfg.BaseURL, "/"),
+		baseURL: base,
 		model:   cfg.Model,
 		effort:  effort,
 		http: &http.Client{
@@ -176,10 +177,11 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 	msgs := make([]chatMessage, len(src))
 	for i, m := range src {
 		// reasoning_content is deliberately NOT sent back: it's a response-only
-		// field. DeepSeek accepts it but counts it as ordinary prompt input
-		// (measured ~500 extra tokens per turn on a reasoner chain), and the
-		// OpenAI-compatible convention is not to echo it. The session still keeps
-		// it (for display/archive); we just don't pay to re-upload it every turn.
+		// field. DeepSeek counts re-sent reasoning as billable prompt input
+		// (measured ~500 extra tokens per turn on a reasoner chain); MiMo accepts
+		// it but does not require it (verified empirically: multi-turn tool-call
+		// sessions work fine without it, saving ~18 tokens/turn). The session
+		// still keeps it (for display/archive); we just don't pay to re-upload it.
 		cm := chatMessage{
 			Role:       string(m.Role),
 			Content:    m.Content,
@@ -386,7 +388,7 @@ type chatMessage struct {
 	ToolCallID string         `json:"tool_call_id,omitempty"`
 	Name       string         `json:"name,omitempty"`
 	// no reasoning_content field: it is a response-only signal and is never sent
-	// back upstream (see buildRequest) — re-uploading it is paid prompt input.
+	// back upstream — re-uploading it is paid prompt input.
 }
 
 type chatTool struct {

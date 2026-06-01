@@ -63,7 +63,14 @@ func RenderTOML(c *Config) string {
 		fmt.Fprintf(&b, "name        = %q\n", p.Name)
 		fmt.Fprintf(&b, "kind        = %q\n", p.Kind)
 		fmt.Fprintf(&b, "base_url    = %q\n", p.BaseURL)
-		fmt.Fprintf(&b, "model       = %q\n", p.Model)
+		if len(p.Models) > 0 {
+			fmt.Fprintf(&b, "models      = %s\n", renderStringArray(p.Models))
+			if p.Default != "" {
+				fmt.Fprintf(&b, "default     = %q\n", p.Default)
+			}
+		} else if p.Model != "" {
+			fmt.Fprintf(&b, "model       = %q\n", p.Model)
+		}
 		fmt.Fprintf(&b, "api_key_env = %q\n", p.APIKeyEnv)
 		if p.BalanceURL != "" {
 			fmt.Fprintf(&b, "balance_url = %q   # optional; wallet-balance endpoint shown in the status bar\n", p.BalanceURL)
