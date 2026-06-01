@@ -39,12 +39,22 @@ const components: Components = {
   ),
 };
 
-// DeepSeek and most LLMs emit \( \) and \[ \] math delimiters; remark-math only
-// parses $ / $$. Convert so the math actually reaches KaTeX.
+// LLMs emit \( \) \[ \] delimiters (remark-math only parses $/$$); convert them,
+// but protect LaTeX line-break spacing \\[ (e.g. \\[4pt]) from the rewrite, and
+// swap | for \vert inside math so remark-gfm can't read the bar as a table column.
 function normalizeMath(s: string): string {
-  return s
-    .replace(/\\\[([\s\S]+?)\\\]/g, (_m, body) => `$$${body}$$`)
-    .replace(/\\\(([\s\S]+?)\\\)/g, (_m, body) => `$${body}$`);
+  const lb = "\x00LB\x00";
+  let r = s.replace(/\\\\\[/g, lb);
+  r = r
+    .replace(/\\\[/g, () => "$$")
+    .replace(/\\\]/g, () => "$$")
+    .replace(/\\\(/g, () => "$")
+    .replace(/\\\)/g, () => "$");
+  r = r.replace(/\x00LB\x00/g, "\\\\[");
+  const vert = (m: string) => m.replace(/\|/g, "\\vert ");
+  r = r.replace(/\$\$([\s\S]*?)\$\$/g, (_m, m) => `$$${vert(m)}$$`);
+  r = r.replace(/\$([^$\n]+)\$/g, (_m, m) => `$${vert(m)}$`);
+  return r;
 }
 
 export function Markdown({ text }: { text: string }) {
