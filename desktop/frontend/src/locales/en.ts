@@ -121,7 +121,6 @@ export const en = {
   "composer.searchProjects": "Search projects",
   "composer.noProjectMatches": "No matching projects",
   "composer.addProject": "Add new project",
-  "composer.noProject": "No project",
   "composer.send": "Send (Enter)",
   "composer.stop": "Stop (Esc)",
 

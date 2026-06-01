@@ -122,7 +122,6 @@ export const zh: Record<DictKey, string> = {
   "composer.searchProjects": "搜索项目",
   "composer.noProjectMatches": "没有匹配的项目",
   "composer.addProject": "添加新项目",
-  "composer.noProject": "不使用项目",
   "composer.send": "发送（Enter）",
   "composer.stop": "停止（Esc）",
 
