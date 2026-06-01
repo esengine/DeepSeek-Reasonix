@@ -45,13 +45,29 @@ type result struct {
 }
 
 func main() {
+	mode := flag.String("mode", "suite", "suite | diff (diff = generate tests for the PR diff and grade with the repo's tests)")
 	suite := flag.String("suite", "benchmarks/e2e", "suite root (contains tasks/<id>/)")
 	bin := flag.String("bin", "reasonix", "path to the reasonix binary")
 	model := flag.String("model", "", "provider/model name (default: config default)")
 	outMD := flag.String("out", "", "write the markdown report here (default: stdout)")
 	outJSON := flag.String("json", "", "write the JSON report here (optional)")
 	budget := flag.Int("budget", 400_000, "abort once total tokens cross this (0 = no cap)")
+	// diff-mode flags
+	repo := flag.String("repo", ".", "repo root (diff mode)")
+	base := flag.String("base", "", "base ref to diff the PR head against (diff mode)")
+	testCmd := flag.String("test-cmd", "go test", "grader command run on the affected packages (diff mode)")
+	maxSteps := flag.Int("max-steps", 40, "agent tool-call cap for the diff task")
+	timeoutSec := flag.Int("timeout", 900, "agent timeout in seconds (diff mode)")
 	flag.Parse()
+
+	if *mode == "diff" {
+		report := runDiff(diffOpts{
+			bin: *bin, model: *model, repo: *repo, base: *base,
+			testCmd: *testCmd, maxSteps: *maxSteps, timeoutSec: *timeoutSec,
+		})
+		emit(report, *outMD, "")
+		return
+	}
 
 	tasks, err := loadTasks(*suite)
 	if err != nil {
@@ -88,6 +104,17 @@ func main() {
 		b, _ := json.MarshalIndent(results, "", "  ")
 		_ = os.WriteFile(*outJSON, b, 0o644)
 	}
+}
+
+func emit(report, outMD, _ string) {
+	if outMD != "" {
+		if err := os.WriteFile(outMD, []byte(report), 0o644); err != nil {
+			fmt.Fprintln(os.Stderr, "write report:", err)
+			os.Exit(1)
+		}
+		return
+	}
+	fmt.Print(report)
 }
 
 func loadTasks(suite string) ([]task, error) {
