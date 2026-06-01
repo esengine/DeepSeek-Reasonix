@@ -493,7 +493,7 @@ func (m chatTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.lastCtrlCAt = time.Now()
 			m.notice(i18n.M.CtrlCQuitHint)
-			return m, nil
+			return m, finalize(m, nil)
 		case "ctrl+d":
 			return m, tea.Quit
 		case "tab":

@@ -9,7 +9,7 @@ import (
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // TestIngestEventRoutesByKind proves each event Kind lands in the right place:
@@ -172,12 +172,12 @@ func TestApprovalToolDetailsShortensMCPNames(t *testing.T) {
 func TestDoubleCtrlCQuit(t *testing.T) {
 	ctrl := control.New(control.Options{})
 	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
-	ctrlC := tea.KeyMsg{Type: tea.KeyCtrlC}
+	ctrlC := tea.KeyPressMsg{Code: 'c', Mod: 4} // 4 = ModCtrl
 
-	// First Ctrl+C while idle: arms quit, does NOT return a quit cmd.
+	// First Ctrl+C while idle: arms quit, flushes hint via finalize cmd.
 	out, cmd := m.Update(ctrlC)
-	if cmd != nil {
-		t.Errorf("first Ctrl+C should not quit, got cmd=%v", cmd)
+	if cmd == nil {
+		t.Error("first Ctrl+C should return a finalize cmd to flush the hint")
 	}
 	m2, ok := out.(chatTUI)
 	if !ok {
@@ -194,12 +194,12 @@ func TestDoubleCtrlCQuit(t *testing.T) {
 	}
 	_ = out2
 
-	// Window expired: re-arms instead of quitting.
+	// Window expired: re-arms instead of quitting (still flushes hint via finalize).
 	m3 := m2
 	m3.lastCtrlCAt = time.Now().Add(-2 * time.Second)
 	out4, cmd4 := m3.Update(ctrlC)
-	if cmd4 != nil {
-		t.Errorf("Ctrl+C after window should not quit, got cmd=%v", cmd4)
+	if cmd4 == nil {
+		t.Error("expired Ctrl+C should return a finalize cmd to flush the re-armed hint")
 	}
 	m4, ok := out4.(chatTUI)
 	if !ok {
