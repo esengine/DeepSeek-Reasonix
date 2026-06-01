@@ -463,14 +463,20 @@ func (c *Controller) Submit(input string) {
 			if turn, name, fromTurn, err := ParseBranchTarget(args); err != nil {
 				c.notice(err.Error())
 			} else if fromTurn {
-				_, _ = c.ForkNamed(turn-1, name)
+				if _, err := c.ForkNamed(turn-1, name); err != nil {
+					c.notice(err.Error())
+				}
 			} else {
-				_, _ = c.Branch(name)
+				if _, err := c.Branch(name); err != nil {
+					c.notice(err.Error())
+				}
 			}
 			return
 		case "/switch":
 			ref := strings.TrimSpace(strings.TrimPrefix(trimmed, fields[0]))
-			_, _ = c.SwitchBranch(ref)
+			if _, err := c.SwitchBranch(ref); err != nil {
+				c.notice(err.Error())
+			}
 			return
 		}
 		if c.managementNotice(trimmed) {
@@ -781,7 +787,9 @@ func (c *Controller) ForkNamed(turn int, name string) (string, error) {
 
 	// Persist the current conversation first so the branch point survives, then
 	// seed a fresh session with the messages up to the fork and switch to it.
-	_ = c.Snapshot()
+	if err := c.Snapshot(); err != nil {
+		slog.Warn("controller: pre-fork snapshot", "err", err)
+	}
 	parentPath := c.SessionPath()
 	parentID := agent.BranchID(parentPath)
 	src := c.executor.Session().Snapshot()
@@ -985,7 +993,9 @@ func (c *Controller) summarizeAt(ctx context.Context, turn int, from bool) error
 	c.mu.Lock()
 	c.cpBound = map[int]int{}
 	c.mu.Unlock()
-	_ = c.Snapshot()
+	if err := c.Snapshot(); err != nil {
+		slog.Warn("controller: post-summarize snapshot", "err", err)
+	}
 	return nil
 }
 
