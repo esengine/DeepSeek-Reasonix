@@ -23,7 +23,6 @@ const COMPOSER_MAX_VIEWPORT_RATIO = 0.4;
 type PastedBlock = {
   label: string;
   text: string;
-  lines: number;
 };
 
 function lineCount(s: string): number {
@@ -296,7 +295,7 @@ export function Composer({
     const id = nextPasteId.current++;
     const lines = lineCount(pasted);
     const label = t("composer.pastedLabel", { id, lines });
-    const block: PastedBlock = { label, text: pasted, lines };
+    const block: PastedBlock = { label, text: pasted };
     const next = text.slice(0, start) + label + text.slice(end);
 
     pastedBlocksRef.current = [...pastedBlocksRef.current, block];
