@@ -16,6 +16,7 @@ export function ApprovalModal({
   const [revisionText, setRevisionText] = useState("");
   const cardRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const isPlanApproval = approval.tool === "exit_plan_mode";
 
   const choosePlanAction = (key: string) => {
     if (key === "1") onAnswer(false, false);
@@ -24,23 +25,29 @@ export function ApprovalModal({
     else if (key === "Escape") onAnswer(false, false);
   };
 
-  useEffect(() => {
-    if (approval.tool === "exit_plan_mode") cardRef.current?.focus();
-  }, [approval.tool]);
+  const chooseToolAction = (key: string) => {
+    if (key === "1" || key === "Escape") onAnswer(false, false);
+    else if (key === "2") onAnswer(true, false);
+    else if (key === "3") onAnswer(true, true);
+  };
 
   useEffect(() => {
-    if (approval.tool !== "exit_plan_mode") return;
+    cardRef.current?.focus();
+  }, [approval.id]);
+
+  useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       const tag = target?.tagName.toLowerCase();
       if (tag === "input" || tag === "textarea" || target?.isContentEditable) return;
       if (event.key !== "1" && event.key !== "2" && event.key !== "3" && event.key !== "Escape") return;
       event.preventDefault();
-      choosePlanAction(event.key);
+      if (isPlanApproval) choosePlanAction(event.key);
+      else chooseToolAction(event.key);
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [approval.tool, onAnswer]);
+  }, [isPlanApproval, onAnswer]);
 
   useEffect(() => {
     if (revisionOpen) inputRef.current?.focus();
@@ -56,7 +63,7 @@ export function ApprovalModal({
   };
 
   // The plan is already shown above as the assistant's reply; this is just the gate.
-  if (approval.tool === "exit_plan_mode") {
+  if (isPlanApproval) {
     return (
       <div className="plan-approval-dock" aria-live="polite">
         <div
@@ -128,22 +135,49 @@ export function ApprovalModal({
   }
 
   return (
-    <div className="modal-backdrop">
-      <div className="modal">
-        <div className="modal__title">{t("approval.toolTitle")}</div>
-        <div className="modal__tool">
+    <div className="plan-approval-dock" aria-live="polite">
+      <div
+        ref={cardRef}
+        className="plan-approval-card"
+        role="dialog"
+        aria-modal="false"
+        aria-labelledby="tool-approval-title"
+        tabIndex={-1}
+      >
+        <div className="plan-approval-card__header">
+          <div>
+            <div id="tool-approval-title" className="plan-approval-card__title">
+              {t("approval.toolTitle")}
+            </div>
+            <div className="plan-approval-card__note">{t("approval.toolNote")}</div>
+          </div>
+        </div>
+        <div className="approval-tool">
+          <span className="approval-tool__label">{t("approval.toolLabel")}</span>
           <span className="tool__name">{approval.tool}</span>
         </div>
-        {approval.subject && <pre className="modal__subject">{approval.subject}</pre>}
-        <div className="modal__actions">
-          <button className="btn" onClick={() => onAnswer(false, false)}>
-            {t("approval.deny")}
+        {approval.subject && <pre className="approval-subject">{approval.subject}</pre>}
+        <div className="plan-approval-card__choices">
+          <button className="plan-choice" onClick={() => onAnswer(false, false)}>
+            <span className="plan-choice__key">1</span>
+            <span className="plan-choice__copy">
+              <span className="plan-choice__label">{t("approval.deny")}</span>
+              <span className="plan-choice__hint">{t("approval.denyHint")}</span>
+            </span>
           </button>
-          <button className="btn" onClick={() => onAnswer(true, false)}>
-            {t("approval.allowOnce")}
+          <button className="plan-choice plan-choice--primary" onClick={() => onAnswer(true, false)}>
+            <span className="plan-choice__key">2</span>
+            <span className="plan-choice__copy">
+              <span className="plan-choice__label">{t("approval.allowOnce")}</span>
+              <span className="plan-choice__hint">{t("approval.allowOnceHint")}</span>
+            </span>
           </button>
-          <button className="btn btn--primary" onClick={() => onAnswer(true, true)}>
-            {t("approval.allowSession")}
+          <button className="plan-choice" onClick={() => onAnswer(true, true)}>
+            <span className="plan-choice__key">3</span>
+            <span className="plan-choice__copy">
+              <span className="plan-choice__label">{t("approval.allowSession")}</span>
+              <span className="plan-choice__hint">{t("approval.allowSessionHint")}</span>
+            </span>
           </button>
         </div>
       </div>

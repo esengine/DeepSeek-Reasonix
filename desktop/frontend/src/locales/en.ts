@@ -159,9 +159,14 @@ export const en = {
   "approval.sendRevision": "Send update",
   "approval.proceed": "Proceed",
   "approval.toolTitle": "Allow this tool call?",
+  "approval.toolNote": "Review the requested tool before letting it run.",
+  "approval.toolLabel": "Tool",
   "approval.deny": "Deny",
+  "approval.denyHint": "Do not run this tool call",
   "approval.allowOnce": "Allow once",
+  "approval.allowOnceHint": "Run this request one time",
   "approval.allowSession": "Allow for session",
+  "approval.allowSessionHint": "Remember this grant for matching requests",
 
   // ask card
   "ask.customPlaceholder": "Type your own answer…",

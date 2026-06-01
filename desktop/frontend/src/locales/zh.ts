@@ -160,9 +160,14 @@ export const zh: Record<DictKey, string> = {
   "approval.sendRevision": "发送修改意见",
   "approval.proceed": "继续",
   "approval.toolTitle": "允许这次工具调用吗？",
+  "approval.toolNote": "先确认模型申请的工具调用，再决定是否放行。",
+  "approval.toolLabel": "工具",
   "approval.deny": "拒绝",
+  "approval.denyHint": "不执行这次工具调用",
   "approval.allowOnce": "允许一次",
+  "approval.allowOnceHint": "只放行当前这一次请求",
   "approval.allowSession": "本会话内允许",
+  "approval.allowSessionHint": "记住这类匹配请求的授权",
 
   // 提问卡片
   "ask.customPlaceholder": "输入你自己的答案…",
