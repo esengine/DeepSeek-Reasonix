@@ -1,10 +1,10 @@
 name: e2e-bot
 
-# Comment "/e2e" on a pull request to run the committed e2e suite (benchmarks/e2e)
-# against the real provider and post an accuracy / cache-hit / token / cost report
-# back to the PR. Gated to trusted authors: the job checks out PR-head code and
-# runs it with the provider API key, so only the repo owner, members, and
-# collaborators may trigger it.
+# Comment "/e2e" (fixed suite) or "/e2e diff" (generate tests for the PR's diff)
+# on a pull request to run the e2e benchmark against the real provider and post a
+# report back. Gated to trusted authors: the job checks out PR-head code and runs
+# it with the provider API key, so only the repo owner, members, and collaborators
+# may trigger it.
 
 on:
   issue_comment:
@@ -35,14 +35,11 @@ jobs:
               comment_id: context.payload.comment.id, content: 'eyes',
             });
 
+      # Default-branch checkout: this is where the harness (cmd/e2ebench), the
+      # suite, and a run --metrics-capable agent live.
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Check out the PR head
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh pr checkout ${{ github.event.issue.number }}
 
       - uses: actions/setup-go@v5
         with:
@@ -53,9 +50,23 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Build harness + agent from the default branch
+        # The PR head may predate the bot (no cmd/e2ebench, no `run --metrics`), so
+        # build both here and stash them + the suite outside the tree before the
+        # working tree is switched to the PR head.
+        run: |
+          go build -o "$RUNNER_TEMP/reasonix" ./cmd/reasonix
+          go build -o "$RUNNER_TEMP/e2ebench" ./cmd/e2ebench
+          cp -r benchmarks/e2e "$RUNNER_TEMP/suite"
+
+      - name: Check out the PR head
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh pr checkout ${{ github.event.issue.number }}
+
       - name: Write provider config
-        # Written to the user config (suite tasks run in temp dirs) and to the repo
-        # root (diff mode runs the agent there, where project config wins).
+        # User config covers suite tasks (they run in temp dirs); the repo-root copy
+        # covers diff mode (the agent runs in the repo root, where project config wins).
         run: |
           mkdir -p ~/.config/reasonix
           cat > /tmp/reasonix-e2e.toml <<EOF
@@ -84,13 +95,7 @@ jobs:
           cp /tmp/reasonix-e2e.toml ~/.config/reasonix/config.toml
           cp /tmp/reasonix-e2e.toml ./reasonix.toml
 
-      - name: Build
-        run: |
-          go build -o ./bin/reasonix ./cmd/reasonix
-          go build -o ./bin/e2ebench ./cmd/e2ebench
-
       - name: Run e2e
-        id: bench
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -104,16 +109,16 @@ jobs:
             BASE_REF=$(gh pr view ${{ github.event.issue.number }} --json baseRefName -q .baseRefName)
             git fetch -q origin "$BASE_REF"
             BASE=$(git merge-base "origin/$BASE_REF" HEAD)
-            ./bin/e2ebench -mode diff -bin ./bin/reasonix -repo . -base "$BASE" -model e2e -out report.md
+            "$RUNNER_TEMP/e2ebench" -mode diff -bin "$RUNNER_TEMP/reasonix" -repo . -base "$BASE" -model e2e -out report.md
           else
-            ./bin/e2ebench -bin ./bin/reasonix -suite benchmarks/e2e -out report.md -json report.json -budget 400000
+            "$RUNNER_TEMP/e2ebench" -bin "$RUNNER_TEMP/reasonix" -suite "$RUNNER_TEMP/suite" -model e2e -out report.md -json report.json -budget 400000
           fi
 
       - name: Post report
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          printf '\n> commit %s · triggered by @%s\n' "$(git rev-parse --short HEAD)" "${{ github.event.comment.user.login }}" >> report.md
+          printf '\n> agent built from main-v2 · PR head %s · triggered by @%s\n' "$(git rev-parse --short HEAD)" "${{ github.event.comment.user.login }}" >> report.md
           gh pr comment ${{ github.event.issue.number }} --body-file report.md
 
       - name: Report failure
