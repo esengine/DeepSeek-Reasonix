@@ -2047,6 +2047,9 @@ body {
 .todobar__item--pending .todobar__text {
   color: var(--fg-dim);
 }
+.todobar__item--sub {
+  padding-left: 20px;
+}
 
 /* ── composer mode indicator (pinned above the input) ─────────────────────── */
 .composer__mode {
