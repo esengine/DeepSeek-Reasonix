@@ -57,12 +57,36 @@ func runDiff(o diffOpts) string {
 	sourceTouched := len(changedGoFilesWorktree(o.repo, false))
 	testsPass, testOut := runTests(o.repo, o.testCmd, pkgs)
 
-	passed := newTestFuncs > 0 && testsPass
+	// Differential check: the new tests must FAIL when the PR's source is reverted
+	// to its pre-change state, proving they actually capture the change rather than
+	// asserting behavior that already held. Only meaningful once the tests are green.
+	diffVerified := false
+	if newTestFuncs > 0 && testsPass {
+		diffVerified = differentialCheck(o.repo, o.base, srcFiles, o.testCmd, pkgs)
+	}
+
+	passed := newTestFuncs > 0 && testsPass && diffVerified
 	return renderDiff(diffReport{
 		srcFiles: srcFiles, pkgs: pkgs, addedTestLines: addedTestLines,
 		newTestFuncs: newTestFuncs, sourceTouched: sourceTouched, testsPass: testsPass,
-		passed: passed, m: m, runErr: runErr, testOut: testOut,
+		diffVerified: diffVerified, passed: passed, m: m, runErr: runErr, testOut: testOut,
 	})
+}
+
+// differentialCheck reverts the PR's changed source to base (deleting files that
+// were new in the PR), runs the now-present tests, and restores the source. The
+// tests should fail against the old code; !green means they pin the change.
+func differentialCheck(repo, base string, srcFiles []string, testCmd string, pkgs []string) bool {
+	for _, f := range srcFiles {
+		if err := exec.Command("git", "-C", repo, "checkout", base, "--", f).Run(); err != nil {
+			_ = os.Remove(filepath.Join(repo, filepath.FromSlash(f)))
+		}
+	}
+	green, _ := runTests(repo, testCmd, pkgs)
+	for _, f := range srcFiles {
+		_ = exec.Command("git", "-C", repo, "checkout", "HEAD", "--", f).Run()
+	}
+	return !green
 }
 
 func buildDiffPrompt(srcFiles, pkgs []string, diffText string) string {
@@ -86,7 +110,8 @@ type diffReport struct {
 	srcFiles, pkgs               []string
 	addedTestLines, newTestFuncs int
 	sourceTouched                int
-	testsPass, passed            bool
+	testsPass, diffVerified      bool
+	passed                       bool
 	m                            runMetrics
 	runErr                       error
 	testOut                      string
@@ -105,6 +130,7 @@ func renderDiff(r diffReport) string {
 	fmt.Fprintf(&b, "| New test functions added | %d |\n", r.newTestFuncs)
 	fmt.Fprintf(&b, "| Test lines added | +%d |\n", r.addedTestLines)
 	fmt.Fprintf(&b, "| `%s` on affected pkgs | %s |\n", "go test", passFail(r.testsPass))
+	fmt.Fprintf(&b, "| Differential (fails on pre-PR code) | %s |\n", yesNo(r.diffVerified))
 	fmt.Fprintf(&b, "| Non-test source touched by agent | %d file(s) |\n", r.sourceTouched)
 	fmt.Fprintf(&b, "| Cache hit | %s |\n", pct(r.m.CacheHitTokens, r.m.CacheHitTokens+r.m.CacheMissTokens))
 	fmt.Fprintf(&b, "| Tokens (prompt / completion) | %s / %s |\n", comma(r.m.PromptTokens), comma(r.m.CompletionTokens))
@@ -121,7 +147,7 @@ func renderDiff(r diffReport) string {
 	if r.runErr != nil {
 		fmt.Fprintf(&b, "\n<sub>agent run note: %v</sub>\n", r.runErr)
 	}
-	fmt.Fprintf(&b, "\n<sub>Pass = the agent added ≥1 new test function AND the affected packages' tests are green. Coverage-of-change is not differentially verified.</sub>\n")
+	fmt.Fprintf(&b, "\n<sub>Pass = the agent added ≥1 new test function, the affected packages' tests are green, AND those tests fail when the PR's source is reverted (so they genuinely cover the change).</sub>\n")
 	return b.String()
 }
 
@@ -130,6 +156,13 @@ func passFail(ok bool) string {
 		return "pass"
 	}
 	return "fail"
+}
+
+func yesNo(ok bool) string {
+	if ok {
+		return "yes"
+	}
+	return "no"
 }
 
 // changedGoFiles lists .go files changed by base...HEAD. When includeTests is

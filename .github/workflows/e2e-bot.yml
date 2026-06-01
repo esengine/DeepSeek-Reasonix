@@ -65,14 +65,14 @@ jobs:
           name = "e2e"
           kind = "openai"
           base_url = "${{ vars.REASONIX_E2E_BASE_URL || 'https://api.deepseek.com' }}"
-          model = "${{ vars.REASONIX_E2E_MODEL || 'deepseek-chat' }}"
+          model = "${{ vars.REASONIX_E2E_MODEL || 'deepseek-v4-flash' }}"
           api_key_env = "DEEPSEEK_API_KEY"
           context_window = 65536
 
           [providers.price]
-          cache_hit = 0.5
-          input = 2
-          output = 8
+          cache_hit = 0.02
+          input = 1
+          output = 2
           currency = "¥"
 
           [permissions]
