@@ -93,6 +93,9 @@ func RenderTOML(c *Config) string {
 				p.Price.CacheHit, p.Price.Input, p.Price.Output, p.Price.Symbol())
 		}
 		for model, mp := range p.ModelPrices {
+			if mp == nil {
+				continue
+			}
 			fmt.Fprintf(&b, "\n[providers.model_prices.%q]\n", model)
 			fmt.Fprintf(&b, "cache_hit = %v\n", mp.CacheHit)
 			fmt.Fprintf(&b, "input     = %v\n", mp.Input)
