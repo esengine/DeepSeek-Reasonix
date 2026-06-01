@@ -77,6 +77,46 @@ func TestStartAvailableKeepsGoodServers(t *testing.T) {
 	}
 }
 
+// TestStartAllAllOrNothingOnFailure pins the strict StartAll contract the
+// parallel rewrite must preserve: any single plugin failing aborts the whole
+// set, returns no Host or tools, and tears down every server that did start —
+// including, under parallel start, a good server whose index sits after the
+// failing one ([bad, good]). On error the Host is nil, so callers never see a
+// half-built set; the started servers are closed before StartAll returns.
+func TestStartAllAllOrNothingOnFailure(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	good := Spec{
+		Name:    "good",
+		Command: os.Args[0],
+		Args:    []string{"-test.run=TestHelperProcess", "--"},
+		Env:     map[string]string{"GO_WANT_HELPER_PROCESS": "1"},
+	}
+	bad := Spec{Name: "bad", Command: "reasonix-missing-mcp-binary"}
+
+	for _, tc := range []struct {
+		name  string
+		specs []Spec
+	}{
+		{"failure first", []Spec{bad, good}},
+		{"failure last", []Spec{good, bad}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			host, tools, err := StartAll(ctx, tc.specs)
+			if err == nil {
+				if host != nil {
+					host.Close()
+				}
+				t.Fatal("StartAll should fail when a plugin can't start")
+			}
+			if host != nil || tools != nil {
+				t.Fatalf("failed StartAll must return nil host/tools, got host=%v tools=%d", host, len(tools))
+			}
+		})
+	}
+}
+
 func TestStdioFailureCapturesStderr(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

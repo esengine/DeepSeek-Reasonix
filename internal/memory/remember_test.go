@@ -21,7 +21,7 @@ func TestRememberToolSaves(t *testing.T) {
 		t.Fatal("remember schema is not valid JSON")
 	}
 
-	args := []byte(`{"name":"likes-go","description":"User likes Go","type":"user","body":"Default to Go for backend work."}`)
+	args := []byte(`{"name":"likes-go","title":"Likes Go","description":"User likes Go","type":"user","body":"Default to Go for backend work."}`)
 	out, err := tl.Execute(context.Background(), args)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -34,6 +34,9 @@ func TestRememberToolSaves(t *testing.T) {
 	if len(list) != 1 || list[0].Name != "likes-go" || list[0].Type != TypeUser {
 		t.Fatalf("memory not saved correctly: %+v", list)
 	}
+	if list[0].Title != "Likes Go" {
+		t.Fatalf("title not persisted through the tool: %q", list[0].Title)
+	}
 }
 
 // TestRememberToolValidates rejects calls missing required fields rather than
@@ -45,5 +48,19 @@ func TestRememberToolValidates(t *testing.T) {
 	}
 	if _, err := tl.Execute(context.Background(), []byte(`{"body":"b"}`)); err == nil {
 		t.Fatal("expected error when description is missing")
+	}
+}
+
+// TestRememberToolQueuesNote verifies a save injects a turn-tail note so the
+// fact applies this session, not only the next.
+func TestRememberToolQueuesNote(t *testing.T) {
+	q := &fakeQueue{}
+	ctx := WithQueue(context.Background(), q)
+	tl := NewRememberTool(Store{Dir: t.TempDir()})
+	if _, err := tl.Execute(ctx, []byte(`{"name":"uses-rmb","description":"balance is RMB","type":"user","body":"b"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if len(q.notes) != 1 || !strings.Contains(q.notes[0], "uses-rmb") {
+		t.Fatalf("expected one queued note naming the saved memory, got %v", q.notes)
 	}
 }

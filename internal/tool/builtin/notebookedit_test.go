@@ -73,6 +73,28 @@ func TestNotebookReplaceBySource(t *testing.T) {
 	}
 }
 
+func TestNotebookRetypeNormalizesOutputs(t *testing.T) {
+	p := writeNotebook(t)
+	if _, err := runNotebookEdit(t, p, map[string]any{"cell_number": 1, "cell_type": "markdown", "new_source": "# now md"}); err != nil {
+		t.Fatal(err)
+	}
+	md := readCells(t, p)[1]
+	if _, has := md["outputs"]; has {
+		t.Errorf("code→markdown left 'outputs' (invalid nbformat): %s", md["outputs"])
+	}
+	if _, has := md["execution_count"]; has {
+		t.Errorf("code→markdown left 'execution_count' (invalid nbformat): %s", md["execution_count"])
+	}
+
+	if _, err := runNotebookEdit(t, p, map[string]any{"cell_number": 0, "cell_type": "code", "new_source": "y = 2\n"}); err != nil {
+		t.Fatal(err)
+	}
+	code := readCells(t, p)[0]
+	if string(code["outputs"]) != "[]" || string(code["execution_count"]) != "null" {
+		t.Errorf("markdown→code missing output scaffolding: outputs=%s exec=%s", code["outputs"], code["execution_count"])
+	}
+}
+
 func TestNotebookReplaceByID(t *testing.T) {
 	p := writeNotebook(t)
 	if _, err := runNotebookEdit(t, p, map[string]any{"cell_id": "intro", "new_source": "# New"}); err != nil {

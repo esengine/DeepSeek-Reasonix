@@ -78,20 +78,12 @@ func SanitizeToolPairing(msgs []Message) []Message {
 	for i := 0; i < len(msgs); {
 		m := msgs[i]
 		if m.Role == RoleAssistant && len(m.ToolCalls) > 0 {
-			results := map[string]Message{}
 			j := i + 1
 			for j < len(msgs) && msgs[j].Role == RoleTool {
-				results[msgs[j].ToolCallID] = msgs[j]
 				j++
 			}
 			out = append(out, m)
-			for _, tc := range m.ToolCalls {
-				if r, ok := results[tc.ID]; ok {
-					out = append(out, r)
-				} else {
-					out = append(out, Message{Role: RoleTool, ToolCallID: tc.ID, Name: tc.Name, Content: interruptedToolResult})
-				}
-			}
+			out = append(out, pairToolResults(m.ToolCalls, msgs[i+1:j])...)
 			i = j // tool messages consumed here; any non-matching ones are orphans, dropped
 			continue
 		}
@@ -103,6 +95,56 @@ func SanitizeToolPairing(msgs []Message) []Message {
 		i++
 	}
 	return out
+}
+
+// pairToolResults answers each tool_call with its result, backfilling a
+// placeholder for any unanswered one. Distinct non-empty ids pair by id (so
+// reordered results re-sort to call order); empty or duplicate ids pair by
+// position instead — some gateways stream tool calls by index with no id, and a
+// map keyed on id would collapse those results into one (call order is preserved
+// because the loop appends results in call order).
+func pairToolResults(calls []ToolCall, avail []Message) []Message {
+	out := make([]Message, 0, len(calls))
+	if idDistinct(calls) {
+		byID := make(map[string]Message, len(avail))
+		for _, r := range avail {
+			byID[r.ToolCallID] = r
+		}
+		for _, tc := range calls {
+			if r, ok := byID[tc.ID]; ok {
+				out = append(out, r)
+			} else {
+				out = append(out, Message{Role: RoleTool, ToolCallID: tc.ID, Name: tc.Name, Content: interruptedToolResult})
+			}
+		}
+		return out
+	}
+	for k, tc := range calls {
+		if k < len(avail) {
+			r := avail[k]
+			r.ToolCallID = tc.ID
+			out = append(out, r)
+		} else {
+			out = append(out, Message{Role: RoleTool, ToolCallID: tc.ID, Name: tc.Name, Content: interruptedToolResult})
+		}
+	}
+	return out
+}
+
+// idDistinct reports whether every call carries a non-empty id unique within the
+// batch — the condition under which id-keyed pairing is safe.
+func idDistinct(calls []ToolCall) bool {
+	seen := make(map[string]struct{}, len(calls))
+	for _, tc := range calls {
+		if tc.ID == "" {
+			return false
+		}
+		if _, dup := seen[tc.ID]; dup {
+			return false
+		}
+		seen[tc.ID] = struct{}{}
+	}
+	return true
 }
 
 // ChunkType identifies the kind of a streamed increment.

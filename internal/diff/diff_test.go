@@ -128,7 +128,7 @@ func TestApplyOpsReconstruct(t *testing.T) {
 	for _, tc := range cases {
 		oldLines, _ := splitLines(tc[0])
 		newLines, _ := splitLines(tc[1])
-		ops := myers(oldLines, newLines)
+		ops, _ := myers(oldLines, newLines)
 		var gotOld, gotNew []string
 		for _, o := range ops {
 			switch o.typ {

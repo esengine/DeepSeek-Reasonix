@@ -1,0 +1,3 @@
+prompt = "Create a file named fizzbuzz.py containing a function fizzbuzz(n) that returns the string 'Fizz' when n is divisible by 3, 'Buzz' when divisible by 5, 'FizzBuzz' when divisible by both 3 and 5, and otherwise the number as a string. Do not print anything at import time."
+max_steps = 12
+timeout_sec = 180

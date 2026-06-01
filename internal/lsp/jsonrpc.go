@@ -164,6 +164,12 @@ func (c *conn) fail(err error) {
 	})
 }
 
+// maxFrameBytes caps a single LSP message body. Generous for any real response
+// (document symbols, semantic tokens for a huge file) while stopping a corrupt or
+// desynced Content-Length from triggering an unbounded allocation that OOMs the
+// whole process.
+const maxFrameBytes = 64 << 20 // 64 MiB
+
 // readFrame reads one LSP message: header lines terminated by a blank line, then
 // exactly Content-Length bytes of JSON body.
 func readFrame(r *bufio.Reader) ([]byte, error) {
@@ -187,6 +193,9 @@ func readFrame(r *bufio.Reader) ([]byte, error) {
 	}
 	if n < 0 {
 		return nil, fmt.Errorf("missing Content-Length header")
+	}
+	if n > maxFrameBytes {
+		return nil, fmt.Errorf("Content-Length %d exceeds the %d-byte frame cap", n, maxFrameBytes)
 	}
 	buf := make([]byte, n)
 	if _, err := io.ReadFull(r, buf); err != nil {

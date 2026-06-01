@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ClipboardEvent, DragEvent, KeyboardEvent } from "react";
-import { ArrowUp, Square, X } from "lucide-react";
+import type { CSSProperties, ClipboardEvent, DragEvent, KeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
+import { ArrowUp, Check, ChevronDown, FolderGit2, FolderPlus, FolderX, Search, Square, X } from "lucide-react";
 import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
-import type { CommandInfo, DirEntry, Mode, SlashArgItem, SlashArgsResult } from "../lib/types";
+import { clearLayoutSize, loadOptionalLayoutSize, saveLayoutSize } from "../lib/layoutPreferences";
+import type { CommandInfo, DirEntry, Mode, SlashArgItem, SlashArgsResult, WorkspaceView } from "../lib/types";
 import { SlashMenu } from "./SlashMenu";
 import { ArgMenu } from "./ArgMenu";
 import { FileMenu } from "./FileMenu";
@@ -15,6 +16,9 @@ interface Attachment {
 
 const LONG_PASTE_MIN_CHARS = 1000;
 const LONG_PASTE_MIN_LINES = 5;
+const COMPOSER_MIN_HEIGHT = 86;
+const COMPOSER_MAX_HEIGHT = 360;
+const COMPOSER_MAX_VIEWPORT_RATIO = 0.4;
 
 type PastedBlock = {
   label: string;
@@ -34,20 +38,39 @@ function renderPastedBlock(block: PastedBlock): string {
   return `${block.label}\n\n--- Begin ${block.label} ---\n${block.text}\n--- End ${block.label} ---`;
 }
 
+function composerMaxHeight(): number {
+  if (typeof window === "undefined") return COMPOSER_MAX_HEIGHT;
+  return Math.max(COMPOSER_MIN_HEIGHT, Math.min(COMPOSER_MAX_HEIGHT, Math.floor(window.innerHeight * COMPOSER_MAX_VIEWPORT_RATIO)));
+}
+
+function clampComposerHeight(height: number): number {
+  return Math.min(Math.max(Math.round(height), COMPOSER_MIN_HEIGHT), composerMaxHeight());
+}
+
+function loadComposerHeight(): number | null {
+  return loadOptionalLayoutSize("composerHeight", clampComposerHeight);
+}
+
 export function Composer({
   running,
   mode,
+  cwd,
   onSend,
   onCancel,
   onCycleMode,
+  onPickFolder,
+  disabled,
 }: {
   running: boolean;
   mode: Mode;
+  cwd?: string;
   onSend: (displayText: string, submitText?: string) => void;
   // Returns the un-sent text when cancelling before the server replied (so it can
   // be restored to the input); undefined for a normal cancel.
   onCancel: () => string | undefined;
   onCycleMode: () => void;
+  onPickFolder: (path?: string) => Promise<string>;
+  disabled?: boolean;
 }) {
   const t = useT();
   const [text, setText] = useState("");
@@ -58,7 +81,15 @@ export function Composer({
   const [active, setActive] = useState(0);
   const [dismissed, setDismissed] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
+  const [workspaceQuery, setWorkspaceQuery] = useState("");
+  const [workspaces, setWorkspaces] = useState<WorkspaceView[]>([]);
+  const [composerHeight, setComposerHeight] = useState<number | null>(loadComposerHeight);
+  const [composerResizing, setComposerResizing] = useState(false);
   const taRef = useRef<HTMLTextAreaElement>(null);
+  const composerCardRef = useRef<HTMLDivElement>(null);
+  const workspaceAnchorRef = useRef<HTMLDivElement>(null);
+  const workspaceMenuRef = useRef<HTMLDivElement>(null);
   const wasRunning = useRef(running);
 
   useEffect(() => {
@@ -208,6 +239,7 @@ export function Composer({
   };
 
   const submit = () => {
+    if (disabled) return;
     const t = text.trim();
     if ((!t && attachments.length === 0) || pendingPaste > 0) return;
     const refs = attachments.map((a) => `@${a.path}`).join(" ");
@@ -298,6 +330,92 @@ export function Composer({
 
   const pickCommand = (c: CommandInfo) => setTextCaretEnd("/" + c.name + " ");
 
+  const workspaceName = useMemo(() => {
+    if (!cwd) return "";
+    const parts = cwd.split(/[/\\]/).filter(Boolean);
+    return parts.length > 0 ? parts[parts.length - 1] : cwd;
+  }, [cwd]);
+
+  const loadWorkspaces = () => {
+    app.ListWorkspaces().then(setWorkspaces).catch(() => setWorkspaces([]));
+  };
+
+  useEffect(() => {
+    if (workspaceMenuOpen) loadWorkspaces();
+  }, [workspaceMenuOpen, cwd]);
+
+  useEffect(() => {
+    if (!workspaceMenuOpen) return;
+    const close = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (workspaceAnchorRef.current?.contains(target) || workspaceMenuRef.current?.contains(target)) return;
+      setWorkspaceMenuOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [workspaceMenuOpen]);
+
+  const filteredWorkspaces = useMemo(() => {
+    const q = workspaceQuery.trim().toLowerCase();
+    if (!q) return workspaces;
+    return workspaces.filter((w) => `${w.name} ${w.path}`.toLowerCase().includes(q));
+  }, [workspaceQuery, workspaces]);
+
+  const chooseWorkspace = async (path?: string) => {
+    const next = await onPickFolder(path);
+    if (next) {
+      setWorkspaceMenuOpen(false);
+      setWorkspaceQuery("");
+    }
+  };
+
+  useEffect(() => {
+    const onResize = () => setComposerHeight((height) => (height === null ? null : clampComposerHeight(height)));
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  const saveComposerHeight = (height: number) => {
+    saveLayoutSize("composerHeight", height, clampComposerHeight);
+  };
+
+  const resetComposerHeight = () => {
+    setComposerHeight(null);
+    clearLayoutSize("composerHeight");
+  };
+
+  const onComposerResizeStart = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    const card = composerCardRef.current;
+    if (!card) return;
+
+    e.preventDefault();
+    const startY = e.clientY;
+    const startHeight = composerHeight ?? card.getBoundingClientRect().height;
+    let nextHeight = clampComposerHeight(startHeight);
+    let moved = false;
+    setComposerResizing(true);
+    document.body.classList.add("composer-resizing");
+
+    const onMove = (event: PointerEvent) => {
+      moved = true;
+      nextHeight = clampComposerHeight(startHeight + startY - event.clientY);
+      setComposerHeight(nextHeight);
+    };
+    const onUp = () => {
+      setComposerResizing(false);
+      document.body.classList.remove("composer-resizing");
+      if (moved) saveComposerHeight(nextHeight);
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+      document.removeEventListener("pointercancel", onUp);
+    };
+
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+    document.addEventListener("pointercancel", onUp);
+  };
+
   const pickEntry = (e: DirEntry) => {
     const atPos = text.length - (atRaw?.length ?? 0) - 1; // index of '@'
     const prefix = text.slice(0, atPos);
@@ -366,8 +484,57 @@ export function Composer({
     }
   };
 
+  const composerCardStyle = composerHeight === null ? undefined : ({ "--composer-height": `${composerHeight}px` } as CSSProperties);
+
   return (
     <div className="composer-wrap">
+      {workspaceMenuOpen && cwd && (
+        <div className="workspace-switcher" ref={workspaceMenuRef}>
+          <label className="workspace-switcher__search">
+            <Search size={14} />
+            <input
+              autoFocus
+              value={workspaceQuery}
+              onChange={(e) => setWorkspaceQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") setWorkspaceMenuOpen(false);
+              }}
+              placeholder={t("composer.searchProjects")}
+            />
+          </label>
+          <div className="workspace-switcher__list">
+            {filteredWorkspaces.map((w) => (
+              <button
+                key={w.path}
+                className="workspace-switcher__item"
+                onClick={() => {
+                  if (w.current) {
+                    setWorkspaceMenuOpen(false);
+                    return;
+                  }
+                  void chooseWorkspace(w.path);
+                }}
+                title={w.path}
+              >
+                <FolderGit2 size={15} />
+                <span>{w.name}</span>
+                {w.current && <Check size={15} />}
+              </button>
+            ))}
+            {filteredWorkspaces.length === 0 && <div className="workspace-switcher__empty">{t("composer.noProjectMatches")}</div>}
+          </div>
+          <div className="workspace-switcher__actions">
+            <button onClick={() => void chooseWorkspace()}>
+              <FolderPlus size={15} />
+              <span>{t("composer.addProject")}</span>
+            </button>
+            <button onClick={() => void chooseWorkspace("")}>
+              <FolderX size={15} />
+              <span>{t("composer.noProject")}</span>
+            </button>
+          </div>
+        </div>
+      )}
       {menuMode === "slash" && (
         <SlashMenu items={slashMatches} activeIndex={active} onPick={pickCommand} onHover={setActive} />
       )}
@@ -392,46 +559,76 @@ export function Composer({
           ))}
         </div>
       )}
-      <button
-        className={`composer__mode composer__mode--${mode}`}
-        onClick={onCycleMode}
-        title={t("composer.modeTitle")}
-      >
-        <span className="composer__mode-dot" />
-        {mode === "yolo" ? t("composer.modeYolo") : mode === "plan" ? t("composer.modePlan") : t("composer.modeNormal")}
-        <span className="composer__mode-hint">{t("composer.modeHint")}</span>
-      </button>
       <div
-        className={`composer${dragOver ? " composer--dragover" : ""}`}
-        onDrop={onDrop}
-        onDragOver={onDragOver}
-        onDragLeave={onDragLeave}
+        className={`composer-card${composerHeight !== null ? " composer-card--resized" : ""}${composerResizing ? " composer-card--resizing" : ""}`}
+        ref={composerCardRef}
+        style={composerCardStyle}
       >
-        <span className="composer__caret">›</span>
-        <textarea
-          ref={taRef}
-          className="composer__input"
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onPaste={onPaste}
-          onKeyDown={onKeyDown}
-          placeholder={t("composer.placeholder")}
-          rows={1}
+        <div
+          className="composer-resize-handle"
+          onPointerDown={onComposerResizeStart}
+          onDoubleClick={resetComposerHeight}
         />
-        {running ? (
-          <button className="composer__btn composer__btn--stop" onClick={handleCancel} title={t("composer.stop")}>
-            <Square size={14} fill="currentColor" />
-          </button>
-        ) : (
+        <div
+          className={`composer${dragOver ? " composer--dragover" : ""}${disabled ? " composer--disabled" : ""}`}
+          onDrop={onDrop}
+          onDragOver={onDragOver}
+          onDragLeave={onDragLeave}
+        >
+          <span className="composer__caret">›</span>
+          <textarea
+            ref={taRef}
+            className="composer__input"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onPaste={onPaste}
+            onKeyDown={onKeyDown}
+            placeholder={disabled ? t("common.loading") : t("composer.placeholder")}
+            rows={1}
+            disabled={disabled}
+          />
+          {running ? (
+            <button className="composer__btn composer__btn--stop" onClick={handleCancel} title={t("composer.stop")}>
+              <Square size={14} fill="currentColor" />
+            </button>
+          ) : (
+            <button
+              className="composer__btn composer__btn--send"
+              onClick={submit}
+              disabled={pendingPaste > 0 || (!text.trim() && attachments.length === 0) || disabled}
+              title={t("composer.send")}
+            >
+              <ArrowUp size={16} />
+            </button>
+          )}
+        </div>
+        <div className="composer-meta">
+          {cwd && (
+            <div className="composer-workspace-wrap" ref={workspaceAnchorRef}>
+              <button
+                className={`composer__workspace${workspaceMenuOpen ? " composer__workspace--open" : ""}`}
+                onClick={() => {
+                  if (!running) setWorkspaceMenuOpen((open) => !open);
+                }}
+                disabled={running}
+                title={running ? t("common.busyHint") : t("status.switchFolder", { cwd })}
+              >
+                <FolderGit2 size={13} />
+                <span>{workspaceName}</span>
+                <ChevronDown size={12} />
+              </button>
+            </div>
+          )}
           <button
-            className="composer__btn composer__btn--send"
-            onClick={submit}
-            disabled={pendingPaste > 0 || (!text.trim() && attachments.length === 0)}
-            title={t("composer.send")}
+            className={`composer__mode composer__mode--${mode}`}
+            onClick={onCycleMode}
+            title={t("composer.modeTitle")}
           >
-            <ArrowUp size={16} />
+            <span className="composer__mode-dot" />
+            {mode === "yolo" ? t("composer.modeYolo") : mode === "plan" ? t("composer.modePlan") : t("composer.modeNormal")}
+            <span className="composer__mode-hint">{t("composer.modeHint")}</span>
           </button>
-        )}
+        </div>
       </div>
     </div>
   );

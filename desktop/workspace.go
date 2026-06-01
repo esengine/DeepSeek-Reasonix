@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,6 +26,14 @@ func workspaceStatePath() string {
 	return filepath.Join(dir, "desktop-workspace")
 }
 
+func workspaceListPath() string {
+	dir := config.MemoryUserDir()
+	if dir == "" {
+		return ""
+	}
+	return filepath.Join(dir, "desktop-workspaces.json")
+}
+
 // saveWorkspace records dir as the last working folder.
 func saveWorkspace(dir string) {
 	p := workspaceStatePath()
@@ -35,6 +44,7 @@ func saveWorkspace(dir string) {
 		return
 	}
 	_ = os.WriteFile(p, []byte(dir), 0o644)
+	rememberWorkspace(dir)
 }
 
 // loadWorkspace returns the remembered working folder, or "" if none.
@@ -48,6 +58,58 @@ func loadWorkspace() string {
 		return ""
 	}
 	return strings.TrimSpace(string(b))
+}
+
+func loadWorkspaces() []string {
+	p := workspaceListPath()
+	if p == "" {
+		return nil
+	}
+	var paths []string
+	b, err := os.ReadFile(p)
+	if err != nil || json.Unmarshal(b, &paths) != nil {
+		return nil
+	}
+	out := make([]string, 0, len(paths))
+	seen := map[string]bool{}
+	for _, path := range paths {
+		path = strings.TrimSpace(path)
+		if path == "" || seen[path] {
+			continue
+		}
+		seen[path] = true
+		out = append(out, path)
+	}
+	return out
+}
+
+func rememberWorkspace(dir string) {
+	dir = strings.TrimSpace(dir)
+	if dir == "" {
+		return
+	}
+	if abs, err := filepath.Abs(dir); err == nil {
+		dir = abs
+	}
+	paths := []string{dir}
+	for _, path := range loadWorkspaces() {
+		if path != dir {
+			paths = append(paths, path)
+		}
+		if len(paths) >= 12 {
+			break
+		}
+	}
+	p := workspaceListPath()
+	if p == "" {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		return
+	}
+	if b, err := json.MarshalIndent(paths, "", "  "); err == nil {
+		_ = os.WriteFile(p, b, 0o644)
+	}
 }
 
 // ensureWorkspace establishes a writable working directory at startup: the

@@ -97,6 +97,65 @@ func TestParseBranchTarget(t *testing.T) {
 	}
 }
 
+func TestSubmitSwitchEmitsErrorNotice(t *testing.T) {
+	var notices []string
+	sess := agent.NewSession("sys")
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "hi"})
+	exec := agent.New(nil, nil, sess, agent.Options{}, event.Discard)
+	c := New(Options{
+		Executor: exec,
+		Sink: event.FuncSink(func(e event.Event) {
+			if e.Kind == event.Notice {
+				notices = append(notices, e.Text)
+			}
+		}),
+	})
+
+	c.Submit("/switch")
+	if len(notices) == 0 {
+		t.Fatal("/switch with empty ref should emit an error notice")
+	}
+	if !strings.Contains(notices[len(notices)-1], "usage") {
+		t.Fatalf("notice = %q, want usage hint", notices[len(notices)-1])
+	}
+
+	notices = notices[:0]
+	c.Submit("/switch nonexistent")
+	if len(notices) == 0 {
+		t.Fatal("/switch with unknown ref should emit an error notice")
+	}
+}
+
+func TestSubmitBranchEmitsErrorNoticeWhileRunning(t *testing.T) {
+	var notices []string
+	sess := agent.NewSession("sys")
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "hi"})
+	exec := agent.New(nil, nil, sess, agent.Options{}, event.Discard)
+	c := New(Options{
+		Executor:   exec,
+		SessionDir: t.TempDir(),
+		Label:      "test",
+		Sink: event.FuncSink(func(e event.Event) {
+			if e.Kind == event.Notice {
+				notices = append(notices, e.Text)
+			}
+		}),
+	})
+	c.SetSessionPath(agent.NewSessionPath(c.sessionDir, "test"))
+
+	c.mu.Lock()
+	c.running = true
+	c.mu.Unlock()
+
+	c.Submit("/branch experiment")
+	if len(notices) == 0 {
+		t.Fatal("/branch while running should emit an error notice")
+	}
+	if !strings.Contains(notices[len(notices)-1], "cannot branch") {
+		t.Fatalf("notice = %q, want 'cannot branch' error", notices[len(notices)-1])
+	}
+}
+
 func TestFormatBranchTreeMarksCurrent(t *testing.T) {
 	branches := []agent.BranchInfo{
 		{BranchMeta: agent.BranchMeta{ID: "root"}, Preview: "root", Turns: 1},

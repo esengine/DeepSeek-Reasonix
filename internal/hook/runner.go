@@ -36,6 +36,25 @@ func (r *Runner) Hooks() []ResolvedHook {
 // Enabled reports whether any hooks are configured.
 func (r *Runner) Enabled() bool { return r != nil && len(r.hooks) > 0 }
 
+// Has reports whether any configured hook listens for the given event. Callers
+// use it to skip work that only matters when a specific hook exists (e.g. the
+// agent buffers reasoning for transform only when a PostLLMCall hook is set).
+func (r *Runner) Has(event Event) bool {
+	if r == nil {
+		return false
+	}
+	for _, h := range r.hooks {
+		if h.Event == event {
+			return true
+		}
+	}
+	return false
+}
+
+// HasPostLLMCall reports whether a PostLLMCall hook is configured, so the agent
+// keeps streaming reasoning live unless a transform is actually wired up.
+func (r *Runner) HasPostLLMCall() bool { return r.Has(PostLLMCall) }
+
 // PreToolUse fires before a tool call. block=true means the call must be
 // refused; message is the reason (fed back to the model and shown to the user).
 func (r *Runner) PreToolUse(ctx context.Context, name string, args json.RawMessage) (block bool, message string) {
@@ -108,6 +127,27 @@ func (r *Runner) Notification(ctx context.Context, message string) {
 		return
 	}
 	r.handle(Run(ctx, Payload{Event: Notification, Cwd: r.cwd, Message: message}, r.hooks, r.spawner))
+}
+
+// PostLLMCall fires after every model turn completes but before the
+// reasoning_content is stored in the session. It returns the hook's stdout as
+// the new reasoning text, or the original reasoning if the hook passes with
+// empty stdout / doesn't exist / fails. A non-pass outcome is surfaced via
+// notify but doesn't block.
+func (r *Runner) PostLLMCall(ctx context.Context, reasoning string, turn int) string {
+	if !r.Has(PostLLMCall) {
+		return reasoning
+	}
+	rep := Run(ctx, Payload{Event: PostLLMCall, Cwd: r.cwd, Reasoning: reasoning, Turn: turn}, r.hooks, r.spawner)
+	r.handle(rep)
+	for _, o := range rep.Outcomes {
+		if o.Decision == DecisionPass {
+			if s := strings.TrimSpace(o.Stdout); s != "" {
+				return s
+			}
+		}
+	}
+	return reasoning
 }
 
 // PreCompact fires just before a compaction pass and returns the concatenated

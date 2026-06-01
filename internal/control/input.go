@@ -32,7 +32,7 @@ func (c *Controller) Compose(text string) string {
 	if len(notes) > 0 {
 		var b strings.Builder
 		b.WriteString("<memory-update>\n")
-		b.WriteString("The following was just saved to project memory and applies from now on:\n")
+		b.WriteString("The following project-memory changes were just made and apply from now on:\n")
 		for _, n := range notes {
 			b.WriteString("- " + n + "\n")
 		}

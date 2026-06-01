@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"reasonix/internal/control"
@@ -59,7 +60,30 @@ func (s *Server) handler() http.Handler {
 	mux.HandleFunc("POST /plan", s.plan)
 	mux.HandleFunc("POST /compact", s.compact)
 	mux.HandleFunc("POST /new", s.newSession)
-	return logMiddleware(mux)
+	return logMiddleware(csrfGuard(mux))
+}
+
+// csrfGuard rejects state-changing requests that don't carry a JSON content type.
+// The command endpoints have no auth and bind to localhost, so a page the user
+// visits could otherwise drive them with a simple cross-origin POST (text/plain,
+// no preflight) — submitting prompts or auto-approving tool calls. Requiring
+// application/json forces a CORS preflight the unauthenticated server never
+// answers, blocking cross-site requests; the same-origin frontend (which always
+// sends JSON) is unaffected.
+func csrfGuard(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			ct := r.Header.Get("Content-Type")
+			if i := strings.IndexByte(ct, ';'); i >= 0 {
+				ct = ct[:i]
+			}
+			if strings.TrimSpace(ct) != "application/json" {
+				http.Error(w, "Content-Type must be application/json", http.StatusUnsupportedMediaType)
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // Run serves until the process is killed. Interactive approval is enabled so
@@ -267,4 +291,13 @@ type responseWriter struct {
 func (rw *responseWriter) WriteHeader(code int) {
 	rw.status = code
 	rw.ResponseWriter.WriteHeader(code)
+}
+
+// Flush delegates to the underlying ResponseWriter if it supports flushing
+// (required for SSE /events). Without this the type assertion in the events
+// handler fails and the stream endpoint returns 500.
+func (rw *responseWriter) Flush() {
+	if f, ok := rw.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
 }

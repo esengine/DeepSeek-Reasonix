@@ -33,7 +33,7 @@ func (s *Session) Save(path string) error {
 	}
 	tmpPath := tmp.Name()
 	enc := json.NewEncoder(tmp)
-	for _, m := range s.Messages {
+	for _, m := range s.Snapshot() { // copy under the lock — a turn may be appending
 		if err := enc.Encode(m); err != nil {
 			tmp.Close()
 			os.Remove(tmpPath)
