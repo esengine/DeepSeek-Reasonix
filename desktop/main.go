@@ -46,8 +46,9 @@ func main() {
 		MinWidth:  760,
 		MinHeight: 480,
 		// Match the dark UI shell so first paint (before CSS loads) doesn't flash
-		// white — particularly visible on WebKitGTK.
-		BackgroundColour: &options.RGBA{R: 16, G: 17, B: 20, A: 255},
+		// white — particularly visible on WebKitGTK. Uses the dark theme's --bg
+		// colour (#1a1a2e = RGB 26,26,46).
+		BackgroundColour: &options.RGBA{R: 26, G: 26, B: 46, A: 255},
 		AssetServer:      &assetserver.Options{Assets: assets},
 		OnStartup:        app.startup,
 		OnShutdown:       app.shutdown,

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
@@ -36,9 +37,14 @@ type App struct {
 	sink *eventSink
 	ctrl *control.Controller
 
+	// mu protects ctrl, label, model, startupErr, and ready during the async
+	// boot sequence. startup() spawns a goroutine for boot.Build(); all methods
+	// that touch the controller acquire the lock.
+	mu         sync.RWMutex
 	startupErr string
 	label      string
 	model      string // active provider name (for the bottom model switcher)
+	ready      bool   // true once boot.Build completes (success or failure)
 }
 
 // NewApp constructs the bound object. The controller is built later, in startup,
@@ -47,13 +53,29 @@ func NewApp() *App { return &App{sink: &eventSink{}} }
 
 // startup runs once the webview process is up, before the frontend can issue any
 // bound call. It captures the Wails context (needed for EventsEmit), points the
-// sink at it, then builds the controller with that sink — so the event bridge is
-// live before the first command lands. RequireKey is false so a missing API key
-// opens the window in a "set your key" state rather than failing to launch; a
-// build error is surfaced through Meta instead of crashing the window.
+// sink at it, then kicks off the entire initialization (workspace, config, build)
+// in a background goroutine so the webview loads immediately. The frontend polls
+// Meta() and sees Ready flip to true once the controller is assembled. RequireKey
+// is false so a missing API key opens the window in a "set your key" state rather
+// than failing to launch; a build error is surfaced through Meta instead of
+// crashing the window.
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	a.sink.ctx = ctx
+
+	// Everything else — workspace resolution, config loading, i18n setup, and
+	// boot.Build — runs in the background so the webview appears instantly.
+	// During this window Meta().Ready is false and the frontend shows a loading
+	// state; bound calls are no-ops (ctrl is nil).
+	go a.buildController()
+}
+
+// buildController runs the full initialization sequence in a background goroutine:
+// workspace resolution, config loading, i18n setup, and boot.Build. On success it
+// wires up the controller and flips ready; on failure it stores the error so
+// Meta().StartupErr surfaces it.
+func (a *App) buildController() {
+	ctx := a.ctx // captured by startup before this goroutine starts
 
 	// A GUI launch starts in "/" (read-only); move into a real, writable working
 	// folder (the remembered one, else home) before anything reads/writes config,
@@ -62,24 +84,37 @@ func (a *App) startup(ctx context.Context) {
 
 	// Resolve the active model to its canonical "provider/model" ref up front so
 	// the switcher can mark it current.
+	model := ""
 	if cfg, err := config.Load(); err == nil {
 		// Drive the Go-side catalogue (i18n.M) from the configured language so the
 		// backend-provided slash UI — command descriptions, sub-command hints,
 		// listing notices — comes through localized, matching the frontend.
 		i18n.DetectLanguage(cfg.Language)
-		a.model = cfg.DefaultModel
+		model = cfg.DefaultModel
 		if e, ok := cfg.ResolveModel(cfg.DefaultModel); ok {
-			a.model = e.Name + "/" + e.Model
+			model = e.Name + "/" + e.Model
 		}
 	}
 
-	ctrl, err := boot.Build(ctx, boot.Options{Model: a.model, RequireKey: false, Sink: a.sink})
+	a.mu.Lock()
+	a.model = model
+	a.mu.Unlock()
+
+	ctrl, err := boot.Build(ctx, boot.Options{Model: model, RequireKey: false, Sink: a.sink})
 	if err != nil {
+		a.mu.Lock()
 		a.startupErr = err.Error()
+		a.ready = true
+		a.mu.Unlock()
+		runtime.EventsEmit(ctx, "agent:ready")
 		return
 	}
+
+	a.mu.Lock()
 	a.ctrl = ctrl
 	a.label = ctrl.Label()
+	a.ready = true
+	a.mu.Unlock()
 
 	// Desktop is interactive: route "ask" gate decisions to the frontend as
 	// approval_request events, answered via Approve.
@@ -89,13 +124,20 @@ func (a *App) startup(ctx context.Context) {
 	if dir := ctrl.SessionDir(); dir != "" {
 		ctrl.SetSessionPath(agent.NewSessionPath(dir, ctrl.Label()))
 	}
+
+	// Notify the frontend that the controller is ready — it re-fetches Meta,
+	// ContextUsage, and History.
+	runtime.EventsEmit(ctx, "agent:ready")
 }
 
 // shutdown snapshots the conversation and stops plugin subprocesses on close.
 func (a *App) shutdown(context.Context) {
-	if a.ctrl != nil {
-		_ = a.ctrl.Snapshot()
-		a.ctrl.Close()
+	a.mu.RLock()
+	ctrl := a.ctrl
+	a.mu.RUnlock()
+	if ctrl != nil {
+		_ = ctrl.Snapshot()
+		ctrl.Close()
 	}
 }
 
@@ -106,30 +148,42 @@ func (a *App) shutdown(context.Context) {
 // Submit runs raw user input as a turn; slash commands and @-references are
 // resolved by the controller. Output arrives asynchronously on eventChannel.
 func (a *App) Submit(input string) {
-	if a.ctrl != nil {
-		a.ctrl.Submit(input)
+	a.mu.RLock()
+	ctrl := a.ctrl
+	a.mu.RUnlock()
+	if ctrl != nil {
+		ctrl.Submit(input)
 	}
 }
 
 // Cancel aborts the in-flight turn.
 func (a *App) Cancel() {
-	if a.ctrl != nil {
-		a.ctrl.Cancel()
+	a.mu.RLock()
+	ctrl := a.ctrl
+	a.mu.RUnlock()
+	if ctrl != nil {
+		ctrl.Cancel()
 	}
 }
 
 // Approve answers a pending approval_request by ID: allow runs the call, session
 // also remembers the grant for the rest of the session.
 func (a *App) Approve(id string, allow, session bool) {
-	if a.ctrl != nil {
-		a.ctrl.Approve(id, allow, session)
+	a.mu.RLock()
+	ctrl := a.ctrl
+	a.mu.RUnlock()
+	if ctrl != nil {
+		ctrl.Approve(id, allow, session)
 	}
 }
 
 // SetPlanMode toggles read-only plan mode.
 func (a *App) SetPlanMode(on bool) {
-	if a.ctrl != nil {
-		a.ctrl.SetPlanMode(on)
+	a.mu.RLock()
+	ctrl := a.ctrl
+	a.mu.RUnlock()
+	if ctrl != nil {
+		ctrl.SetPlanMode(on)
 	}
 }
 
@@ -142,30 +196,39 @@ type QuestionAnswer struct {
 // AnswerQuestion resolves a pending ask_request (the `ask` tool) by ID with the
 // user's selections per question.
 func (a *App) AnswerQuestion(id string, answers []QuestionAnswer) {
-	if a.ctrl == nil {
+	a.mu.RLock()
+	ctrl := a.ctrl
+	a.mu.RUnlock()
+	if ctrl == nil {
 		return
 	}
 	out := make([]event.AskAnswer, len(answers))
 	for i, an := range answers {
 		out[i] = event.AskAnswer{QuestionID: an.QuestionID, Selected: an.Selected}
 	}
-	a.ctrl.AnswerQuestion(id, out)
+	ctrl.AnswerQuestion(id, out)
 }
 
 // Compact runs one compaction pass on demand.
 func (a *App) Compact() error {
-	if a.ctrl == nil {
+	a.mu.RLock()
+	ctrl := a.ctrl
+	a.mu.RUnlock()
+	if ctrl == nil {
 		return nil
 	}
-	return a.ctrl.Compact(a.ctx)
+	return ctrl.Compact(a.ctx)
 }
 
 // NewSession snapshots the current conversation and rotates to a fresh one.
 func (a *App) NewSession() error {
-	if a.ctrl == nil {
+	a.mu.RLock()
+	ctrl := a.ctrl
+	a.mu.RUnlock()
+	if ctrl == nil {
 		return nil
 	}
-	return a.ctrl.NewSession()
+	return ctrl.NewSession()
 }
 
 // CheckpointMeta summarises one rewind point (a user turn) for the desktop.
@@ -178,10 +241,13 @@ type CheckpointMeta struct {
 
 // Checkpoints lists the session's rewind points, oldest first, for the rewind UI.
 func (a *App) Checkpoints() []CheckpointMeta {
-	if a.ctrl == nil {
+	a.mu.RLock()
+	ctrl := a.ctrl
+	a.mu.RUnlock()
+	if ctrl == nil {
 		return []CheckpointMeta{}
 	}
-	metas := a.ctrl.Checkpoints()
+	metas := ctrl.Checkpoints()
 	out := make([]CheckpointMeta, 0, len(metas))
 	for _, m := range metas {
 		out = append(out, CheckpointMeta{Turn: m.Turn, Prompt: m.Prompt, Files: m.Paths, Time: m.Time.UnixMilli()})
@@ -193,7 +259,10 @@ func (a *App) Checkpoints() []CheckpointMeta {
 // "conversation", or "both" (anything else is treated as "both"). The frontend
 // re-reads History after this resolves.
 func (a *App) Rewind(turn int, scope string) error {
-	if a.ctrl == nil {
+	a.mu.RLock()
+	ctrl := a.ctrl
+	a.mu.RUnlock()
+	if ctrl == nil {
 		return nil
 	}
 	s := control.RewindBoth
@@ -203,17 +272,20 @@ func (a *App) Rewind(turn int, scope string) error {
 	case "conversation":
 		s = control.RewindConversation
 	}
-	return a.ctrl.Rewind(turn, s)
+	return ctrl.Rewind(turn, s)
 }
 
 // Fork branches the conversation at the start of turn into a new session
 // (preserving the current one), keeping code intact, and switches to the branch.
 // The frontend re-reads History after this resolves.
 func (a *App) Fork(turn int) error {
-	if a.ctrl == nil {
+	a.mu.RLock()
+	ctrl := a.ctrl
+	a.mu.RUnlock()
+	if ctrl == nil {
 		return nil
 	}
-	_, err := a.ctrl.Fork(turn)
+	_, err := ctrl.Fork(turn)
 	return err
 }
 
@@ -221,17 +293,23 @@ func (a *App) Fork(turn int) error {
 // of turn into one summary (Claude Code's "summarize from/up to here"), keeping
 // code intact. The frontend re-reads History after this resolves.
 func (a *App) SummarizeFrom(turn int) error {
-	if a.ctrl == nil {
+	a.mu.RLock()
+	ctrl := a.ctrl
+	a.mu.RUnlock()
+	if ctrl == nil {
 		return nil
 	}
-	return a.ctrl.SummarizeFrom(a.ctx, turn)
+	return ctrl.SummarizeFrom(a.ctx, turn)
 }
 
 func (a *App) SummarizeUpTo(turn int) error {
-	if a.ctrl == nil {
+	a.mu.RLock()
+	ctrl := a.ctrl
+	a.mu.RUnlock()
+	if ctrl == nil {
 		return nil
 	}
-	return a.ctrl.SummarizeUpTo(a.ctx, turn)
+	return ctrl.SummarizeUpTo(a.ctx, turn)
 }
 
 // SessionMeta summarises one saved session for the history panel.
@@ -254,9 +332,12 @@ func (a *App) ListSessions() []SessionMeta {
 		return []SessionMeta{}
 	}
 	titles := loadSessionTitles(dir)
+	a.mu.RLock()
+	ctrl := a.ctrl
+	a.mu.RUnlock()
 	cur := ""
-	if a.ctrl != nil {
-		cur = a.ctrl.SessionPath()
+	if ctrl != nil {
+		cur = ctrl.SessionPath()
 	}
 	out := make([]SessionMeta, 0, len(infos))
 	for _, s := range infos {
@@ -276,7 +357,10 @@ func (a *App) ListSessions() []SessionMeta {
 // session — that's the conversation on screen, and auto-save would recreate the
 // file on the next turn; start a new session first to retire it.
 func (a *App) DeleteSession(path string) error {
-	if a.ctrl != nil && a.ctrl.SessionPath() == path {
+	a.mu.RLock()
+	ctrl := a.ctrl
+	a.mu.RUnlock()
+	if ctrl != nil && ctrl.SessionPath() == path {
 		return errActiveSession
 	}
 	return deleteSessionFile(config.SessionDir(), path)
@@ -293,15 +377,18 @@ func (a *App) RenameSession(path, title string) error {
 // working folder are unchanged (same controller); only the transcript is swapped.
 // Returns the resumed messages for the frontend to render.
 func (a *App) ResumeSession(path string) ([]HistoryMessage, error) {
-	if a.ctrl == nil {
+	a.mu.RLock()
+	ctrl := a.ctrl
+	a.mu.RUnlock()
+	if ctrl == nil {
 		return []HistoryMessage{}, nil
 	}
 	loaded, err := agent.LoadSession(path)
 	if err != nil {
 		return nil, err
 	}
-	_ = a.ctrl.Snapshot() // persist the current session before switching away
-	a.ctrl.Resume(loaded, path)
+	_ = ctrl.Snapshot() // persist the current session before switching away
+	ctrl.Resume(loaded, path)
 	return a.History(), nil
 }
 
@@ -345,6 +432,7 @@ func (a *App) PickWorkspace() (string, error) {
 	}
 	// Commit the switch: save and tear down the old session, then swap in the new
 	// project's controller with a fresh session file.
+	a.mu.Lock()
 	if a.ctrl != nil {
 		_ = a.ctrl.Snapshot()
 		a.ctrl.Close()
@@ -353,6 +441,7 @@ func (a *App) PickWorkspace() (string, error) {
 	a.model = model
 	a.label = ctrl.Label()
 	a.startupErr = ""
+	a.mu.Unlock()
 	ctrl.EnableInteractiveApproval()
 	if d := ctrl.SessionDir(); d != "" {
 		ctrl.SetSessionPath(agent.NewSessionPath(d, ctrl.Label()))
@@ -369,10 +458,13 @@ type HistoryMessage struct {
 
 // History returns the session's message log.
 func (a *App) History() []HistoryMessage {
-	if a.ctrl == nil {
+	a.mu.RLock()
+	ctrl := a.ctrl
+	a.mu.RUnlock()
+	if ctrl == nil {
 		return nil
 	}
-	msgs := a.ctrl.History()
+	msgs := ctrl.History()
 	out := make([]HistoryMessage, 0, len(msgs))
 	for _, m := range msgs {
 		out = append(out, HistoryMessage{Role: string(m.Role), Content: m.Content})
@@ -388,10 +480,13 @@ type ContextInfo struct {
 
 // ContextUsage returns the latest context-window gauge numbers.
 func (a *App) ContextUsage() ContextInfo {
-	if a.ctrl == nil {
+	a.mu.RLock()
+	ctrl := a.ctrl
+	a.mu.RUnlock()
+	if ctrl == nil {
 		return ContextInfo{}
 	}
-	used, window := a.ctrl.ContextSnapshot()
+	used, window := ctrl.ContextSnapshot()
 	return ContextInfo{Used: used, Window: window}
 }
 
@@ -410,10 +505,13 @@ type BalanceInfo struct {
 // controller is down, or the fetch fails — so the status bar simply shows nothing
 // rather than an error.
 func (a *App) Balance() BalanceInfo {
-	if a.ctrl == nil {
+	a.mu.RLock()
+	ctrl := a.ctrl
+	a.mu.RUnlock()
+	if ctrl == nil {
 		return BalanceInfo{}
 	}
-	b, err := a.ctrl.Balance(a.ctx)
+	b, err := ctrl.Balance(a.ctx)
 	if err != nil {
 		return BalanceInfo{Err: err.Error()}
 	}
@@ -437,10 +535,13 @@ type JobView struct {
 // on demand (mount, turn end, and on each notice the frontend receives).
 func (a *App) Jobs() []JobView {
 	out := []JobView{}
-	if a.ctrl == nil {
+	a.mu.RLock()
+	ctrl := a.ctrl
+	a.mu.RUnlock()
+	if ctrl == nil {
 		return out
 	}
-	for _, v := range a.ctrl.Jobs() {
+	for _, v := range ctrl.Jobs() {
 		out = append(out, JobView{ID: v.ID, Kind: v.Kind, Label: v.Label, Status: v.Status, StartedAt: v.StartedAt})
 	}
 	return out
@@ -460,14 +561,20 @@ type Meta struct {
 // directory (for the status line), and the runtime event channel the frontend
 // subscribes to.
 func (a *App) Meta() Meta {
+	a.mu.RLock()
+	label := a.label
+	startupErr := a.startupErr
+	ready := a.ready
+	ctrl := a.ctrl
+	a.mu.RUnlock()
 	cwd, _ := os.Getwd()
 	return Meta{
-		Label:        a.label,
-		Ready:        a.ctrl != nil,
-		StartupErr:   a.startupErr,
+		Label:        label,
+		Ready:        ready,
+		StartupErr:   startupErr,
 		EventChannel: eventChannel,
 		Cwd:          cwd,
-		Bypass:       a.ctrl != nil && a.ctrl.Bypass(),
+		Bypass:       ctrl != nil && ctrl.Bypass(),
 	}
 }
 
@@ -475,8 +582,11 @@ func (a *App) Meta() Meta {
 // (writers and bash run without asking). Deny rules still apply. Runtime-only —
 // not written to config, so it resets on relaunch.
 func (a *App) SetBypass(on bool) {
-	if a.ctrl != nil {
-		a.ctrl.SetBypass(on)
+	a.mu.RLock()
+	ctrl := a.ctrl
+	a.mu.RUnlock()
+	if ctrl != nil {
+		ctrl.SetBypass(on)
 	}
 }
 
@@ -501,20 +611,23 @@ func (a *App) Commands() []CommandInfo {
 		{Name: "hooks", Description: i18n.M.CmdHooks, Kind: "builtin"},
 		{Name: "skill", Description: i18n.M.CmdSkill, Kind: "builtin"},
 	}
-	if a.ctrl == nil {
+	a.mu.RLock()
+	ctrl := a.ctrl
+	a.mu.RUnlock()
+	if ctrl == nil {
 		return out
 	}
 	// Skills are invocable as /<name> (the model runs inline ones; subagent ones
 	// run isolated). Listing them here is what surfaces /init, /explore, … in the
 	// composer's slash menu; selecting one submits "/<name>", which the controller
 	// resolves via RunSkill.
-	for _, s := range a.ctrl.Skills() {
+	for _, s := range ctrl.Skills() {
 		out = append(out, CommandInfo{Name: s.Name, Description: s.Description, Kind: "skill"})
 	}
-	for _, c := range a.ctrl.Commands() {
+	for _, c := range ctrl.Commands() {
 		out = append(out, CommandInfo{Name: c.Name, Description: c.Description, Hint: c.ArgHint, Kind: "custom"})
 	}
-	if h := a.ctrl.Host(); h != nil {
+	if h := ctrl.Host(); h != nil {
 		for _, p := range h.Prompts() {
 			out = append(out, CommandInfo{Name: p.Name, Description: p.Description, Kind: "mcp"})
 		}
@@ -543,17 +656,21 @@ type SlashArgsResult struct {
 // /skill, /hooks) for the composer — the same logic the chat TUI uses. Empty
 // Items means the input has no structured arguments to complete.
 func (a *App) SlashArgs(input string) SlashArgsResult {
-	if a.ctrl == nil {
+	a.mu.RLock()
+	ctrl := a.ctrl
+	model := a.model
+	a.mu.RUnlock()
+	if ctrl == nil {
 		return SlashArgsResult{}
 	}
 	data := control.ArgData{
-		Skills:       a.ctrl.Skills(),
-		CurrentModel: a.model,
+		Skills:       ctrl.Skills(),
+		CurrentModel: model,
 	}
 	for _, m := range a.Models() {
 		data.ModelRefs = append(data.ModelRefs, m.Ref)
 	}
-	if h := a.ctrl.Host(); h != nil {
+	if h := ctrl.Host(); h != nil {
 		data.ServerNames = h.ServerNames()
 	}
 	items, from := control.SlashArgItems(input, data)
@@ -579,16 +696,19 @@ type ModelInfo struct {
 // the switcher's options — marking the active one. A vendor with a `models` list
 // yields one entry per model, all sharing the same endpoint/key.
 func (a *App) Models() []ModelInfo {
+	a.mu.RLock()
+	curModel := a.model
+	a.mu.RUnlock()
 	cfg, err := config.Load()
 	if err != nil {
 		return nil
 	}
-	var out []ModelInfo
+	out := []ModelInfo{}
 	for i := range cfg.Providers {
 		p := &cfg.Providers[i]
 		for _, m := range p.ModelList() {
 			ref := p.Name + "/" + m
-			out = append(out, ModelInfo{Ref: ref, Provider: p.Name, Model: m, Current: ref == a.model})
+			out = append(out, ModelInfo{Ref: ref, Provider: p.Name, Model: m, Current: ref == curModel})
 		}
 	}
 	return out
@@ -599,36 +719,45 @@ func (a *App) Models() []ModelInfo {
 // the new model. (Switching models necessarily resets the prompt cache; that's the
 // cost of the switch.) No-op if name is already active or the controller is down.
 func (a *App) SetModel(name string) error {
-	if a.ctx == nil || name == "" || name == a.model {
+	if a.ctx == nil || name == "" {
+		return nil
+	}
+	a.mu.RLock()
+	curModel := a.model
+	ctrl := a.ctrl
+	a.mu.RUnlock()
+	if name == curModel {
 		return nil
 	}
 
 	var carried []provider.Message
-	if a.ctrl != nil {
-		_ = a.ctrl.Snapshot()
-		carried = a.ctrl.History()
-		a.ctrl.Close()
+	if ctrl != nil {
+		_ = ctrl.Snapshot()
+		carried = ctrl.History()
+		ctrl.Close()
 	}
 
-	ctrl, err := boot.Build(a.ctx, boot.Options{Model: name, RequireKey: false, Sink: a.sink})
+	newCtrl, err := boot.Build(a.ctx, boot.Options{Model: name, RequireKey: false, Sink: a.sink})
 	if err != nil {
 		return err
 	}
-	a.ctrl = ctrl
+	a.mu.Lock()
+	a.ctrl = newCtrl
 	a.model = name
-	a.label = ctrl.Label()
-	ctrl.EnableInteractiveApproval()
+	a.label = newCtrl.Label()
+	a.mu.Unlock()
+	newCtrl.EnableInteractiveApproval()
 
 	path := ""
-	if dir := ctrl.SessionDir(); dir != "" {
-		path = agent.NewSessionPath(dir, ctrl.Label())
+	if dir := newCtrl.SessionDir(); dir != "" {
+		path = agent.NewSessionPath(dir, newCtrl.Label())
 	}
 	// Carry the prior conversation (full provider.Message log, incl. the system
 	// prompt) into the new session so history is preserved across the switch.
 	if len(carried) > 0 {
-		ctrl.Resume(&agent.Session{Messages: carried}, path)
+		newCtrl.Resume(&agent.Session{Messages: carried}, path)
 	} else if path != "" {
-		ctrl.SetSessionPath(path)
+		newCtrl.SetSessionPath(path)
 	}
 	return nil
 }
@@ -723,10 +852,13 @@ func (a *App) Memory() MemoryView {
 	// Always return non-nil slices: a nil Go slice marshals to JSON `null`, which
 	// would crash the panel's `view.facts.length` / `.map`.
 	view := MemoryView{Docs: []MemoryDoc{}, Facts: []MemoryFact{}, Scopes: []MemoryScope{}}
-	if a.ctrl == nil {
+	a.mu.RLock()
+	ctrl := a.ctrl
+	a.mu.RUnlock()
+	if ctrl == nil {
 		return view
 	}
-	set := a.ctrl.Memory()
+	set := ctrl.Memory()
 	if set == nil {
 		return view
 	}
@@ -752,19 +884,25 @@ func (a *App) Memory() MemoryView {
 // panel's explicit "remember" action, equivalent to typing "#<note>". An unknown
 // scope falls back to project. Returns the file written.
 func (a *App) Remember(scope, note string) (string, error) {
-	if a.ctrl == nil {
+	a.mu.RLock()
+	ctrl := a.ctrl
+	a.mu.RUnlock()
+	if ctrl == nil {
 		return "", nil
 	}
-	return a.ctrl.QuickAdd(parseScope(scope), note)
+	return ctrl.QuickAdd(parseScope(scope), note)
 }
 
 // SaveDoc overwrites a memory doc with the panel editor's contents. The controller
 // validates path against the recognized memory files. Returns the file written.
 func (a *App) SaveDoc(path, body string) (string, error) {
-	if a.ctrl == nil {
+	a.mu.RLock()
+	ctrl := a.ctrl
+	a.mu.RUnlock()
+	if ctrl == nil {
 		return "", nil
 	}
-	return a.ctrl.SaveDoc(path, body)
+	return ctrl.SaveDoc(path, body)
 }
 
 // parseScope maps a frontend scope id to a memory.Scope, defaulting to project.

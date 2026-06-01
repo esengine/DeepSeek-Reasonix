@@ -14,6 +14,7 @@ export function Composer({
   onSend,
   onCancel,
   onCycleMode,
+  disabled,
 }: {
   running: boolean;
   mode: Mode;
@@ -22,6 +23,7 @@ export function Composer({
   // be restored to the input); undefined for a normal cancel.
   onCancel: () => string | undefined;
   onCycleMode: () => void;
+  disabled?: boolean;
 }) {
   const t = useT();
   const [text, setText] = useState("");
@@ -260,7 +262,7 @@ export function Composer({
         {mode === "yolo" ? t("composer.modeYolo") : mode === "plan" ? t("composer.modePlan") : t("composer.modeNormal")}
         <span className="composer__mode-hint">{t("composer.modeHint")}</span>
       </button>
-      <div className="composer">
+      <div className={`composer${disabled ? " composer--disabled" : ""}`}>
         <span className="composer__caret">›</span>
         <textarea
           ref={taRef}
@@ -268,8 +270,9 @@ export function Composer({
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKeyDown}
-          placeholder={t("composer.placeholder")}
+          placeholder={disabled ? t("common.loading") : t("composer.placeholder")}
           rows={1}
+          disabled={disabled}
         />
         {running ? (
           <button className="composer__btn composer__btn--stop" onClick={handleCancel} title={t("composer.stop")}>
@@ -279,7 +282,7 @@ export function Composer({
           <button
             className="composer__btn composer__btn--send"
             onClick={submit}
-            disabled={!text.trim()}
+            disabled={!text.trim() || disabled}
             title={t("composer.send")}
           >
             <ArrowUp size={16} />
