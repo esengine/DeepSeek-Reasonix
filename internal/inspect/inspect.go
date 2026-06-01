@@ -76,6 +76,11 @@ type PricingInfo struct {
 
 // Providers projects cfg.Providers, marking the default model and resolving key
 // readiness from the environment. Returns nil for a nil config.
+//
+// Default-detection follows the grouped shape: when cfg.DefaultModel names a
+// provider, every model in that provider is flagged as the default (matching
+// the old per-model-provider behavior). When it names a specific model
+// ("<provider>/<model>" or just "<model>"), only that exact model is flagged.
 func Providers(cfg *config.Config) []ProviderInfo {
 	if cfg == nil {
 		return nil
@@ -85,7 +90,13 @@ func Providers(cfg *config.Config) []ProviderInfo {
 	for i := range cfg.Providers {
 		e := &cfg.Providers[i]
 		for _, model := range e.ModelList() {
-			isDefault := defaultEntry != nil && defaultEntry.Name == e.Name && defaultEntry.Model == model
+			isDefault := false
+			switch {
+			case defaultEntry != nil && defaultEntry.Name == e.Name && defaultEntry.Model == model:
+				isDefault = true
+			case e.Name == cfg.DefaultModel:
+				isDefault = true
+			}
 			info := ProviderInfo{
 				Name:          e.Name,
 				Kind:          e.Kind,

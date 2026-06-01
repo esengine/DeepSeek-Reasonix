@@ -14,7 +14,7 @@ import (
 // TestConfigureKeys verifies that a shared api_key_env (each vendor's SKUs use
 // the same env var) is asked only once, and entered keys become env lines.
 func TestConfigureKeys(t *testing.T) {
-	selected := config.Default().Providers // deepseek-flash, deepseek-pro, mimo-pro, mimo-flash
+	selected := config.ProviderPresets() // deepseek + mimo-tp + mimo-ppu
 
 	// Two distinct keys to enter: DEEPSEEK_API_KEY, then MIMO_API_KEY.
 	input := "ds-key\nmi-key\n"
@@ -68,20 +68,20 @@ func TestAppendEnvUpsertHandlesExportPrefix(t *testing.T) {
 	}
 }
 
-// TestGroupByFamily verifies the wizard groups the default preset into
-// "deepseek" (flash + pro) and "mimo" (pro + flash), preserving the order
+// TestGroupByFamily verifies the wizard groups the presets into "deepseek"
+// (1 grouped entry) and "mimo" (mimo-tp + mimo-ppu), preserving the order
 // each family first appears in.
 func TestGroupByFamily(t *testing.T) {
-	order, members, info := groupByFamily(config.Default().Providers)
+	order, members, info := groupByFamily(config.ProviderPresets())
 
 	if got := order; !reflect.DeepEqual(got, []string{"deepseek", "mimo"}) {
 		t.Fatalf("family order = %v, want [deepseek mimo]", got)
 	}
-	if got := members["deepseek"]; !reflect.DeepEqual(got, []int{0, 1}) {
-		t.Errorf("deepseek members = %v, want [0 1]", got)
+	if got := members["deepseek"]; !reflect.DeepEqual(got, []int{0}) {
+		t.Errorf("deepseek members = %v, want [0]", got)
 	}
-	if got := members["mimo"]; !reflect.DeepEqual(got, []int{2, 3}) {
-		t.Errorf("mimo members = %v, want [2 3]", got)
+	if got := members["mimo"]; !reflect.DeepEqual(got, []int{1, 2}) {
+		t.Errorf("mimo members = %v, want [1 2]", got)
 	}
 	if info["deepseek"].name != "DeepSeek" || info["mimo"].name != "MiMo (Xiaomi)" {
 		t.Errorf("display names = %q / %q", info["deepseek"].name, info["mimo"].name)
