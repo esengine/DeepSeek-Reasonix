@@ -38,12 +38,14 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		name = "openai"
 	}
 	keyEnv, _ := cfg.Extra["api_key_env"].(string) // for actionable auth errors
+	effort, _ := cfg.Extra["effort"].(string)
 	return &client{
 		name:    name,
 		apiKey:  cfg.APIKey,
 		keyEnv:  keyEnv,
 		baseURL: strings.TrimRight(cfg.BaseURL, "/"),
 		model:   cfg.Model,
+		effort:  effort,
 		http: &http.Client{
 			Transport: &http.Transport{
 				DialContext: (&net.Dialer{
@@ -64,6 +66,7 @@ type client struct {
 	baseURL string
 	model   string
 	http    *http.Client
+	effort  string // reasoning_effort forwarded to thinking-capable models; "" = omit
 }
 
 func (c *client) Name() string { return c.name }
@@ -197,13 +200,14 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 	}
 
 	return chatRequest{
-		Model:         c.model,
-		Messages:      msgs,
-		Tools:         tools,
-		Stream:        true,
-		StreamOptions: &streamOptions{IncludeUsage: true},
-		Temperature:   req.Temperature,
-		MaxTokens:     req.MaxTokens,
+		Model:           c.model,
+		Messages:        msgs,
+		Tools:           tools,
+		Stream:          true,
+		StreamOptions:   &streamOptions{IncludeUsage: true},
+		Temperature:     req.Temperature,
+		MaxTokens:       req.MaxTokens,
+		ReasoningEffort: c.effort,
 	}
 }
 
@@ -335,13 +339,14 @@ func normaliseUsage(u *wireUsage) *provider.Usage {
 // --- OpenAI-compatible wire protocol ---
 
 type chatRequest struct {
-	Model         string         `json:"model"`
-	Messages      []chatMessage  `json:"messages"`
-	Tools         []chatTool     `json:"tools,omitempty"`
-	Stream        bool           `json:"stream"`
-	StreamOptions *streamOptions `json:"stream_options,omitempty"`
-	Temperature   float64        `json:"temperature,omitempty"`
-	MaxTokens     int            `json:"max_tokens,omitempty"`
+	Model           string         `json:"model"`
+	Messages        []chatMessage  `json:"messages"`
+	Tools           []chatTool     `json:"tools,omitempty"`
+	Stream          bool           `json:"stream"`
+	StreamOptions   *streamOptions `json:"stream_options,omitempty"`
+	Temperature     float64        `json:"temperature,omitempty"`
+	MaxTokens       int            `json:"max_tokens,omitempty"`
+	ReasoningEffort string         `json:"reasoning_effort,omitempty"`
 }
 
 type streamOptions struct {

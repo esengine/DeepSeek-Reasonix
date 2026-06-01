@@ -951,6 +951,10 @@ body {
 .composer:focus-within {
   border-color: var(--fg-faint);
 }
+.composer--dragover {
+  border-color: var(--accent);
+  border-style: dashed;
+}
 .composer__caret {
   color: var(--accent);
   font-family: var(--mono);
@@ -2106,4 +2110,52 @@ body {
 }
 .composer__mode--yolo .composer__mode-hint {
   color: rgba(255, 255, 255, 0.8);
+}
+
+.composer__attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.composer__attachment {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 220px;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--fg-dim);
+  font-size: 12px;
+}
+.composer__attachment img {
+  width: 28px;
+  height: 28px;
+  object-fit: cover;
+  border-radius: 4px;
+}
+.composer__attachment span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.composer__attachment button {
+  --wails-draggable: no-drag;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg-faint);
+  cursor: pointer;
+}
+.composer__attachment button:hover {
+  color: var(--fg);
+  background: var(--hover);
 }

@@ -27,6 +27,8 @@ func ConfineWriters(roots []string) []tool.Tool {
 		editFile{roots: rs},
 		multiEdit{roots: rs},
 		notebookEdit{roots: rs},
+		deleteRange{roots: rs},
+		deleteSymbol{roots: rs},
 	}
 }
 

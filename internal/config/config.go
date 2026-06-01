@@ -160,8 +160,9 @@ type ProviderEntry struct {
 	Price         *provider.Pricing `toml:"price"`
 	// Thinking / Effort are provider-kind-specific knobs forwarded to the provider
 	// via Config.Extra. The anthropic provider reads Thinking="adaptive" to enable
-	// extended thinking and Effort ("low".."max") to tune depth; the
-	// openai-compatible provider ignores them. Empty = off / provider default.
+	// extended thinking and Effort ("low".."max") to tune depth. The
+	// openai-compatible provider forwards Effort as reasoning_effort for
+	// thinking-capable models (e.g. MiMo) and ignores Thinking. Empty = provider default.
 	Thinking string `toml:"thinking"`
 	Effort   string `toml:"effort"`
 }
@@ -353,6 +354,10 @@ func userConfigPath() string {
 	}
 	return filepath.Join(dir, "reasonix", "config.toml")
 }
+
+// UserConfigPath is the user-global config file (~/.config/reasonix/config.toml),
+// or "" when the user config dir can't be resolved.
+func UserConfigPath() string { return userConfigPath() }
 
 // ArchiveDir is where compacted conversation history is archived for
 // traceability (one timestamped .jsonl per compaction). Empty if the user config

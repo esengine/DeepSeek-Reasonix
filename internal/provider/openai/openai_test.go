@@ -186,3 +186,33 @@ func TestBuildRequestDropsReasoningContent(t *testing.T) {
 		t.Errorf("assistant content was dropped along with reasoning: %s", b)
 	}
 }
+
+func TestBuildRequestForwardsReasoningEffort(t *testing.T) {
+	c := &client{model: "mimo-v2", effort: "high"}
+	if got := c.buildRequest(provider.Request{}).ReasoningEffort; got != "high" {
+		t.Errorf("ReasoningEffort = %q, want high", got)
+	}
+
+	b, err := json.Marshal((&client{model: "deepseek-v4"}).buildRequest(provider.Request{}))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(b), "reasoning_effort") {
+		t.Errorf("empty effort must be omitted from the payload: %s", b)
+	}
+}
+
+func TestNewReadsEffortFromConfig(t *testing.T) {
+	p, err := New(provider.Config{
+		Name:    "mimo",
+		BaseURL: "https://api.example.com",
+		Model:   "mimo-v2",
+		Extra:   map[string]any{"effort": "medium"},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if got := p.(*client).effort; got != "medium" {
+		t.Errorf("effort = %q, want medium", got)
+	}
+}

@@ -5,6 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"image/color"
+	"net/url"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,6 +19,7 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/x/ansi"
 
 	"reasonix/internal/agent"
@@ -114,6 +120,11 @@ type chatTUI struct {
 	pendingBubble string
 	bubblePending bool
 	turnDiscarded bool
+	// attachments are image refs queued for the next user turn. They render as a
+	// tray above the input and are appended to the provider-facing prompt as
+	// @-references only when the turn is sent.
+	attachments        []chatAttachment
+	pendingAttachments []chatAttachment
 
 	// pendingApproval holds the tool-call approval currently shown in the banner
 	// (nil when none). While set, the controller's run goroutine is blocked
@@ -280,9 +291,26 @@ type promptResolvedMsg struct {
 // refsResolvedMsg carries the result of resolving the @references in a
 // submitted line (async file reads / MCP resources/read).
 type refsResolvedMsg struct {
-	line  string
-	block string
-	errs  []string
+	sent        string
+	display     string
+	attachments []chatAttachment
+	block       string
+	errs        []string
+}
+
+type clipboardImageMsg struct {
+	path string
+	err  error
+}
+
+type clipboardPasteMsg struct {
+	path string
+	text string
+	err  error
+}
+
+type chatAttachment struct {
+	Path string
 }
 
 // newChatTUI assembles the initial model. The controller has already been wired
@@ -472,6 +500,11 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case tea.PasteMsg:
+		if m.state != tuiRunning && m.attachPastedImages(msg.Content) {
+			return m, finalize(m, cmds)
+		}
+
 	case tea.KeyPressMsg:
 		// Ctrl+C copies the active selection (terminal convention: copy when
 		// something is selected, otherwise interrupt/quit below).
@@ -566,6 +599,8 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case m.planMode:
 				m.planMode = false
 				m.ctrl.SetPlanMode(false)
+			case len(m.attachments) > 0 && strings.TrimSpace(m.input.Value()) == "":
+				m.attachments = nil
 			default:
 				// Idle with nothing to back out: a double-Esc on an empty composer
 				// opens the rewind picker (Claude Code's gesture); a first Esc just
@@ -594,6 +629,18 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case "ctrl+d":
 			return m, tea.Quit
+		case "ctrl+v", "ctrl+shift+v", "super+v", "meta+v":
+			if m.state == tuiRunning {
+				return m, nil
+			}
+			cmds = append(cmds, pasteClipboard())
+			return m, finalize(m, cmds)
+		case "ctrl+y":
+			if m.state == tuiRunning {
+				return m, nil
+			}
+			cmds = append(cmds, pasteClipboardImage())
+			return m, finalize(m, cmds)
 		case "tab":
 			if m.state == tuiRunning {
 				break
@@ -609,7 +656,7 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			line := strings.TrimSpace(m.input.Value())
 
-			if line == "" {
+			if line == "" && len(m.attachments) == 0 {
 				return m, nil
 			}
 			if line == "exit" || line == "quit" || line == ":q" {
@@ -632,26 +679,31 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, finalize(m, cmds)
 			}
 
-			// Slash commands run locally without going through the model.
-			if strings.HasPrefix(line, "/") {
+			// Slash commands run locally without going through the model unless
+			// attachments are queued; then the line is a normal multimodal prompt.
+			if strings.HasPrefix(line, "/") && len(m.attachments) == 0 {
 				m.input.Reset()
 				m.input.SetHeight(1)
 				cmds = append(cmds, m.runSlashCommand(line))
 				return m, finalize(m, cmds)
 			}
 
+			attachments := cloneAttachments(m.attachments)
+			sentLine := withAttachmentRefs(line, attachments)
+			displayLine := withAttachmentLabels(line, attachments)
 			m.input.Reset()
 			m.input.SetHeight(1)
+			m.attachments = nil
 
 			// @references (local files / MCP resources) are resolved off the event
 			// loop by the controller; the turn starts when they resolve
 			// (refsResolvedMsg).
-			if m.ctrl.HasRefs(line) {
-				cmds = append(cmds, m.resolveRefs(line))
+			if m.ctrl.HasRefs(sentLine) {
+				cmds = append(cmds, m.resolveRefs(sentLine, displayLine, attachments))
 				return m, finalize(m, cmds)
 			}
 
-			cmds = append(cmds, m.startTurn(m.ctrl.Compose(line), line))
+			cmds = append(cmds, m.startTurn(m.ctrl.Compose(sentLine), displayLine, attachments))
 			return m, finalize(m, cmds)
 		}
 
@@ -716,18 +768,40 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case strings.TrimSpace(msg.sent) == "":
 			m.notice(i18n.M.SlashPromptEmpty)
 		default:
-			cmds = append(cmds, m.startTurn(m.ctrl.Compose(msg.sent), msg.display))
+			cmds = append(cmds, m.startTurn(m.ctrl.Compose(msg.sent), msg.display, nil))
 		}
 
 	case refsResolvedMsg:
 		for _, e := range msg.errs {
 			m.notice(e) // surface a fetch failure but still send the turn
 		}
-		sent := msg.line
+		sent := msg.sent
 		if msg.block != "" {
-			sent = "Referenced context:\n\n" + msg.block + "\n\n" + msg.line
+			sent = "Referenced context:\n\n" + msg.block + "\n\n" + msg.sent
 		}
-		cmds = append(cmds, m.startTurn(m.ctrl.Compose(sent), msg.line))
+		cmds = append(cmds, m.startTurn(m.ctrl.Compose(sent), msg.display, msg.attachments))
+
+	case clipboardImageMsg:
+		if msg.err != nil {
+			m.notice("paste image: " + msg.err.Error())
+			break
+		}
+		m.attachments = append(m.attachments, chatAttachment{Path: msg.path})
+
+	case clipboardPasteMsg:
+		switch {
+		case msg.err != nil:
+			m.notice("paste: " + msg.err.Error())
+		case msg.path != "":
+			m.attachments = append(m.attachments, chatAttachment{Path: msg.path})
+		case msg.text != "":
+			if !m.attachPastedImages(msg.text) {
+				m.input.InsertString(msg.text)
+				m.growInputToFit()
+				m.updateCompletion()
+				return m, finalize(m, cmds)
+			}
+		}
 
 	case elapsedTickMsg:
 		if m.state == tuiRunning {
@@ -1005,6 +1079,10 @@ func (m chatTUI) View() tea.View {
 		parts = append(parts, card)
 		rowsAboveBox += strings.Count(card, "\n") + 1
 	}
+	if tray := m.renderAttachmentTray(); tray != "" {
+		parts = append(parts, tray)
+		rowsAboveBox += strings.Count(tray, "\n") + 1
+	}
 	if menu := m.renderCompletion(); menu != "" {
 		parts = append(parts, menu)
 		rowsAboveBox += strings.Count(menu, "\n") + 1
@@ -1246,6 +1324,15 @@ func (m chatTUI) renderTodoPanel() string {
 	return todoPanelStyle.Width(max(m.width, 10)).Render(strings.TrimRight(b.String(), "\n"))
 }
 
+func (m chatTUI) renderAttachmentTray() string {
+	if len(m.attachments) == 0 {
+		return ""
+	}
+	labels := attachmentLabels(m.attachments)
+	body := strings.Join(labels, "  ")
+	return todoPanelStyle.Width(max(m.width, 10)).Render(body)
+}
+
 // truncateSubject trims a tool subject so the approval banner fits one line.
 func truncateSubject(s string, width int) string {
 	max := width - 28
@@ -1288,6 +1375,207 @@ func (m *chatTUI) growInputToFit() {
 	}
 }
 
+func pasteClipboardImage() tea.Cmd {
+	return func() tea.Msg {
+		path, err := control.SaveClipboardImage()
+		return clipboardImageMsg{path: path, err: err}
+	}
+}
+
+func pasteClipboard() tea.Cmd {
+	return func() tea.Msg {
+		path, imageErr := control.SaveClipboardImage()
+		if imageErr == nil {
+			return clipboardPasteMsg{path: path}
+		}
+		text, textErr := clipboard.ReadAll()
+		if textErr == nil && text != "" {
+			return clipboardPasteMsg{text: text}
+		}
+		if textErr != nil {
+			return clipboardPasteMsg{err: fmt.Errorf("%v; text paste failed: %w", imageErr, textErr)}
+		}
+		return clipboardPasteMsg{err: imageErr}
+	}
+}
+
+func cloneAttachments(in []chatAttachment) []chatAttachment {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]chatAttachment, len(in))
+	copy(out, in)
+	return out
+}
+
+func attachmentLabels(in []chatAttachment) []string {
+	labels := make([]string, len(in))
+	for i := range in {
+		labels[i] = accent(fmt.Sprintf("[image%d]", i+1))
+	}
+	return labels
+}
+
+func withAttachmentLabels(line string, attachments []chatAttachment) string {
+	line = strings.TrimSpace(line)
+	if len(attachments) == 0 {
+		return line
+	}
+	labels := strings.Join(attachmentLabels(attachments), " ")
+	if line == "" {
+		return labels
+	}
+	return line + "\n" + labels
+}
+
+func withAttachmentRefs(line string, attachments []chatAttachment) string {
+	line = strings.TrimSpace(line)
+	if len(attachments) == 0 {
+		return line
+	}
+	refs := make([]string, len(attachments))
+	for i, a := range attachments {
+		refs[i] = "@" + a.Path
+	}
+	if line == "" {
+		return strings.Join(refs, " ")
+	}
+	return line + " " + strings.Join(refs, " ")
+}
+
+func (m *chatTUI) attachPastedImages(text string) bool {
+	sources, ok := pastedImageSources(text)
+	if !ok {
+		return false
+	}
+	for _, src := range sources {
+		path, err := savePastedImageSource(src)
+		if err != nil {
+			m.notice("paste image: " + err.Error())
+			continue
+		}
+		m.attachments = append(m.attachments, chatAttachment{Path: path})
+	}
+	return true
+}
+
+var markdownImageSourceRe = regexp.MustCompile(`!\[[^\]]*\]\(([^)]+)\)`)
+
+func pastedImageSources(text string) ([]string, bool) {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return nil, false
+	}
+	if isDataImage(trimmed) {
+		return []string{trimmed}, true
+	}
+	if matches := markdownImageSourceRe.FindAllStringSubmatch(trimmed, -1); len(matches) > 0 {
+		rest := strings.TrimSpace(markdownImageSourceRe.ReplaceAllString(trimmed, ""))
+		if rest == "" {
+			sources := make([]string, 0, len(matches))
+			for _, m := range matches {
+				sources = append(sources, m[1])
+			}
+			return sources, true
+		}
+	}
+
+	lines := nonEmptyPasteLines(trimmed)
+	if len(lines) > 0 && allImageSources(lines) {
+		return lines, true
+	}
+	fields := strings.Fields(trimmed)
+	if len(fields) > 1 && allImageSources(fields) {
+		return fields, true
+	}
+	return nil, false
+}
+
+func nonEmptyPasteLines(text string) []string {
+	var out []string
+	for _, line := range strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
+func allImageSources(sources []string) bool {
+	if len(sources) == 0 {
+		return false
+	}
+	for _, src := range sources {
+		if !looksLikeImageSource(src) {
+			return false
+		}
+	}
+	return true
+}
+
+func looksLikeImageSource(src string) bool {
+	if isDataImage(strings.TrimSpace(src)) {
+		return true
+	}
+	path, ok := pastedImagePath(src)
+	if !ok {
+		return false
+	}
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".png", ".jpg", ".jpeg", ".gif", ".webp":
+		return true
+	}
+	return false
+}
+
+func savePastedImageSource(src string) (string, error) {
+	src = strings.TrimSpace(src)
+	if isDataImage(src) {
+		return control.SaveImageDataURL(src)
+	}
+	path, ok := pastedImagePath(src)
+	if !ok {
+		return "", fmt.Errorf("unsupported pasted image source")
+	}
+	return control.SaveImageFile(path)
+}
+
+func isDataImage(src string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(src)), "data:image/")
+}
+
+func pastedImagePath(src string) (string, bool) {
+	src = strings.TrimSpace(src)
+	src = strings.TrimPrefix(src, "@")
+	quoted := (strings.HasPrefix(src, `"`) && strings.HasSuffix(src, `"`)) || (strings.HasPrefix(src, `'`) && strings.HasSuffix(src, `'`))
+	src = strings.Trim(src, "\"'")
+	if src == "" {
+		return "", false
+	}
+	if !quoted && strings.ContainsAny(src, " \t\r\n") {
+		return "", false
+	}
+	lower := strings.ToLower(src)
+	if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
+		return "", false
+	}
+	if strings.HasPrefix(lower, "file://") {
+		u, err := url.Parse(src)
+		if err != nil || u.Path == "" {
+			return "", false
+		}
+		src = u.Path
+	}
+	if strings.HasPrefix(src, "~/") {
+		home, err := os.UserHomeDir()
+		if err == nil && home != "" {
+			src = filepath.Join(home, strings.TrimPrefix(src, "~/"))
+		}
+	}
+	return filepath.Clean(src), true
+}
+
 // cycleMode advances the input mode normal → plan → YOLO → normal (Tab),
 // mirroring the desktop composer's Shift+Tab. plan is read-only; YOLO
 // auto-approves every tool call for the session (deny rules still apply). The
@@ -1309,7 +1597,7 @@ func (m *chatTUI) cycleMode() {
 // startTurn commits the user bubble to scrollback, resets the turn accumulator,
 // and kicks off runner.Run. `sent` goes to the model (may carry a plan-mode
 // marker); `displayed` is what the transcript shows.
-func (m *chatTUI) startTurn(sent, displayed string) tea.Cmd {
+func (m *chatTUI) startTurn(sent, displayed string, attachments []chatAttachment) tea.Cmd {
 	// Flush any half-streamed leftover before the new turn (defensive).
 	m.commitReasoning()
 	m.commitPending()
@@ -1318,6 +1606,7 @@ func (m *chatTUI) startTurn(sent, displayed string) tea.Cmd {
 	// pressing Esc before the server replies un-sends the message, restoring its
 	// text to the input box with nothing stranded in scrollback.
 	m.pendingBubble = displayed
+	m.pendingAttachments = cloneAttachments(attachments)
 	m.bubblePending = true
 	m.turnDiscarded = false
 
@@ -1343,6 +1632,7 @@ func (m *chatTUI) commitPendingBubble() {
 	m.commitLine("") // blank line separating turns
 	m.commitLine(renderUserBubble(m.pendingBubble, m.width, m.planMode))
 	m.pendingBubble = ""
+	m.pendingAttachments = nil
 }
 
 // unsendPending "un-sends" the in-flight turn while the server hasn't replied yet
@@ -1353,6 +1643,8 @@ func (m *chatTUI) commitPendingBubble() {
 func (m *chatTUI) unsendPending() {
 	m.input.SetValue(m.pendingBubble)
 	m.growInputToFit()
+	m.attachments = cloneAttachments(m.pendingAttachments)
+	m.pendingAttachments = nil
 	m.bubblePending = false
 	m.pendingBubble = ""
 	m.turnDiscarded = true
@@ -1486,6 +1778,7 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 		} else {
 			m.bubblePending = false
 			m.pendingBubble = ""
+			m.pendingAttachments = nil
 		}
 		m.state = tuiIdle
 		_ = m.ctrl.Snapshot() // best-effort; never the user's problem mid-chat
@@ -1568,6 +1861,8 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 		m.runSkillSubcommand(input)
 	case "/hooks":
 		m.runHooksSubcommand(input)
+	case "/paste-image":
+		return pasteClipboardImage()
 	case "/output-style", "/output-styles":
 		styles := outputstyle.List(outputstyle.Dirs())
 		if len(styles) == 0 {
@@ -1585,10 +1880,10 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 	default:
 		// A custom command wins over a skill of the same name; both resolve to a turn.
 		if sent, ok := m.ctrl.CustomCommand(input); ok {
-			return m.startTurn(m.ctrl.Compose(sent), input)
+			return m.startTurn(m.ctrl.Compose(sent), input, nil)
 		}
 		if sent, ok := m.ctrl.RunSkill(input); ok {
-			return m.startTurn(m.ctrl.Compose(sent), input)
+			return m.startTurn(m.ctrl.Compose(sent), input, nil)
 		}
 		m.notice(fmt.Sprintf("%s: %s", i18n.M.SlashUnknown, cmd))
 	}
@@ -1689,10 +1984,10 @@ func (m *chatTUI) notice(note string) {
 
 // resolveRefs resolves a line's @references off the event loop via the
 // controller, delivering a refsResolvedMsg with the tagged context block.
-func (m *chatTUI) resolveRefs(line string) tea.Cmd {
+func (m *chatTUI) resolveRefs(sent, display string, attachments []chatAttachment) tea.Cmd {
 	return func() tea.Msg {
-		block, errs := m.ctrl.ResolveRefs(context.Background(), line)
-		return refsResolvedMsg{line: line, block: block, errs: errs}
+		block, errs := m.ctrl.ResolveRefs(context.Background(), sent)
+		return refsResolvedMsg{sent: sent, display: display, attachments: attachments, block: block, errs: errs}
 	}
 }
 
@@ -1759,6 +2054,7 @@ func wrapForViewport(text string, width int, fg color.Color) string {
 
 // renderUserBubble styles the just-submitted line with a filled dim background.
 func renderUserBubble(line string, width int, planMode bool) string {
+	line = displayLineForImageRefs(line)
 	prefix := "› "
 	if planMode {
 		prefix = "› [plan] "
@@ -1775,6 +2071,17 @@ func renderUserBubble(line string, width int, planMode bool) string {
 		Width(w).
 		Padding(0, 1)
 	return bubble.Render(prefix + line)
+}
+
+var cliImageRefRe = regexp.MustCompile(`(?:^|\s)@\.reasonix/attachments/clipboard-\d{8}-\d{6}\.\d+(?:-(?:\d{6}|[a-f0-9]{8}))?\.(?:png|jpg|jpeg|gif|webp)`)
+
+func displayLineForImageRefs(line string) string {
+	idx := 0
+	out := cliImageRefRe.ReplaceAllStringFunc(line, func(_ string) string {
+		idx++
+		return " [image" + strconv.Itoa(idx) + "]"
+	})
+	return strings.TrimSpace(out)
 }
 
 // eventSink is the event.Sink the agent emits to in TUI mode. Each event

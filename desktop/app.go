@@ -682,6 +682,17 @@ func (a *App) ListDir(rel string) []DirEntry {
 	return append(dirs, files...)
 }
 
+// SavePastedImage stores a browser clipboard image data URL under
+// .reasonix/attachments and returns the relative @-reference path.
+func (a *App) SavePastedImage(dataURL string) (string, error) {
+	return control.SaveImageDataURL(dataURL)
+}
+
+// AttachmentDataURL returns a safe data URL for a stored image attachment.
+func (a *App) AttachmentDataURL(path string) (string, error) {
+	return control.ImageDataURL(path)
+}
+
 // --- memory panel (frontend ⇄ controller) ---
 
 // MemoryDoc is one loaded doc-memory file for the panel: path, scope, and body.

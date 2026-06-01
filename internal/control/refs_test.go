@@ -32,7 +32,7 @@ func TestParseRefTokens(t *testing.T) {
 
 func TestClassifyRef(t *testing.T) {
 	known := map[string]bool{"docs": true}
-	files := map[string]bool{"src/main.go": true, "README.md": true}
+	files := map[string]bool{"src/main.go": true, "README.md": true, ".reasonix/attachments/clipboard-20260601-010203.000000.png": true}
 	exists := func(p string) bool { return files[p] }
 
 	cases := []struct {
@@ -43,9 +43,10 @@ func TestClassifyRef(t *testing.T) {
 		{"docs:doc://style", true, refResource}, // known server + uri
 		{"src/main.go", true, refFile},          // existing file
 		{"README.md", true, refFile},            // existing file
-		{"ghost:issue://1", false, 0},           // unknown server, no such file
-		{"missing.go", false, 0},                // nonexistent path → not a ref
-		{"docs:", false, 0},                     // empty uri → not a resource, no file
+		{".reasonix/attachments/clipboard-20260601-010203.000000.png", true, refImage},
+		{"ghost:issue://1", false, 0}, // unknown server, no such file
+		{"missing.go", false, 0},      // nonexistent path → not a ref
+		{"docs:", false, 0},           // empty uri → not a resource, no file
 	}
 	for _, c := range cases {
 		r, ok := classifyRef(c.token, known, exists)
@@ -74,6 +75,10 @@ func TestReadFileRef(t *testing.T) {
 	if err := os.WriteFile(bigPath, []byte(strings.Repeat("a", maxFileRefBytes+100)), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	imagePath := filepath.Join(dir, "shot.png")
+	if err := os.WriteFile(imagePath, []byte("\x89PNG\r\n\x1a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	// Text file: content verbatim, not a directory.
 	if got, isDir, err := readFileRef(textPath); err != nil || isDir || got != "line one\nline two\n" {
@@ -83,6 +88,11 @@ func TestReadFileRef(t *testing.T) {
 	// Binary file: noted, not dumped.
 	if got, _, err := readFileRef(binPath); err != nil || !strings.Contains(got, "binary file") {
 		t.Errorf("binary file = (%q, %v), want a binary note", got, err)
+	}
+
+	// Image file: identified as image-specific guidance, not generic binary.
+	if got, _, err := readFileRef(imagePath); err != nil || !strings.Contains(got, "image file") {
+		t.Errorf("image file = (%q, %v), want an image note", got, err)
 	}
 
 	// Large file: truncated with a marker.

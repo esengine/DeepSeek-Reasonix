@@ -284,6 +284,30 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// file is skipped, and a load error never blocks the session.
 	cmds, _ := command.Load(config.CommandDirs()...)
 
+	// Expose the loaded slash commands (skills + custom commands) to the model via
+	// the slash_command tool, so it can invoke a project playbook by name the way a
+	// user types "/name". Skills are added first, then commands, so a command wins
+	// a name clash — matching the prompt's command-over-skill precedence.
+	var slashEntries []command.SlashEntry
+	for _, sk := range skills {
+		sk := sk
+		slashEntries = append(slashEntries, command.SlashEntry{
+			Name:        sk.Name,
+			Description: sk.Description,
+			Render:      func(args []string) string { return skill.Render(sk, strings.Join(args, " ")) },
+		})
+	}
+	for _, cmd := range cmds {
+		cmd := cmd
+		slashEntries = append(slashEntries, command.SlashEntry{
+			Name:        cmd.Name,
+			Description: cmd.Description,
+			ArgHint:     cmd.ArgHint,
+			Render:      func(args []string) string { return cmd.Render(args) },
+		})
+	}
+	reg.Add(command.NewSlashCommandTool(slashEntries))
+
 	var runner agent.Runner = executor
 	label := entry.Model
 

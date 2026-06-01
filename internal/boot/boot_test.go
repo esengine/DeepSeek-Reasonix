@@ -26,6 +26,9 @@ func TestBuildFoldsProjectMemoryIntoSystemPrompt(t *testing.T) {
 	writeFile(t, dir, "reasonix.toml", `
 default_model = "test-model"
 
+[codegraph]
+enabled = false
+
 [agent]
 system_prompt = "BASE SYSTEM PROMPT"
 
@@ -71,6 +74,9 @@ func TestBuildDiscoversSkills(t *testing.T) {
 	t.Chdir(dir)
 	writeFile(t, dir, "reasonix.toml", `
 default_model = "test-model"
+
+[codegraph]
+enabled = false
 
 [agent]
 system_prompt = "BASE"
@@ -120,6 +126,9 @@ func TestBuildWithoutMemoryLeavesPromptUnchanged(t *testing.T) {
 	t.Chdir(dir)
 	writeFile(t, dir, "reasonix.toml", `
 default_model = "test-model"
+
+[codegraph]
+enabled = false
 
 [agent]
 system_prompt = "JUST THE BASE"

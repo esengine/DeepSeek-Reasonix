@@ -64,6 +64,8 @@ export interface AppBindings {
   Commands(): Promise<CommandInfo[]>;
   SlashArgs(input: string): Promise<SlashArgsResult>;
   ListDir(rel: string): Promise<DirEntry[]>;
+  SavePastedImage(dataUrl: string): Promise<string>;
+  AttachmentDataURL(path: string): Promise<string>;
   Models(): Promise<ModelInfo[]>;
   SetModel(name: string): Promise<void>;
   // Memory panel: read the loaded REASONIX.md hierarchy + saved auto-memories,
@@ -389,6 +391,12 @@ function makeMockApp(): AppBindings {
         ];
       }
       return [{ name: "file.go", isDir: false }];
+    },
+    async SavePastedImage(_dataUrl: string) {
+      return ".reasonix/attachments/mock.png";
+    },
+    async AttachmentDataURL(_path: string) {
+      return "data:image/png;base64,iVBORw0KGgo=";
     },
     async Models() {
       return [

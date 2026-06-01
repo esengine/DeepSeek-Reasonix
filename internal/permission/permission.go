@@ -230,6 +230,12 @@ func NewGate(p Policy, a Approver) *Gate { return &Gate{Policy: p, Approver: a} 
 // interface expects. A denied or refused call returns allow=false with a short
 // reason the agent feeds back to the model.
 func (g *Gate) Check(ctx context.Context, toolName string, args json.RawMessage, readOnly bool) (bool, string, error) {
+	if toolName == "bash" && !readOnly {
+		subject := Subject(args)
+		if isReadOnlyBashSubject(subject) {
+			readOnly = true
+		}
+	}
 	switch g.Policy.Decide(toolName, readOnly, args) {
 	case Deny:
 		return false, "denied by permission policy — this tool/command is on the deny list. Do not retry it; choose another approach or stop and explain.", nil

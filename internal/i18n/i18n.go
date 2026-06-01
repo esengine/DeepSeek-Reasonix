@@ -109,6 +109,7 @@ type Messages struct {
 	CmdMemory       string // /memory
 	CmdMcp          string // /mcp
 	CmdHooks        string // /hooks
+	CmdPasteImage   string // /paste-image
 	CmdOutputStyle  string // /output-style
 	CmdSkill        string // /skill
 	CmdHelp         string // /help

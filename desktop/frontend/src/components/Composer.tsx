@@ -1,12 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { KeyboardEvent } from "react";
-import { ArrowUp, Square } from "lucide-react";
+import type { ClipboardEvent, DragEvent, KeyboardEvent } from "react";
+import { ArrowUp, Square, X } from "lucide-react";
 import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
 import type { CommandInfo, DirEntry, Mode, SlashArgItem, SlashArgsResult } from "../lib/types";
 import { SlashMenu } from "./SlashMenu";
 import { ArgMenu } from "./ArgMenu";
 import { FileMenu } from "./FileMenu";
+
+interface Attachment {
+  path: string;
+  previewUrl: string;
+}
 
 export function Composer({
   running,
@@ -25,8 +30,11 @@ export function Composer({
 }) {
   const t = useT();
   const [text, setText] = useState("");
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [pendingPaste, setPendingPaste] = useState(0);
   const [active, setActive] = useState(0);
   const [dismissed, setDismissed] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
   const taRef = useRef<HTMLTextAreaElement>(null);
 
   // --- slash commands (whole-input "/token") ---
@@ -160,10 +168,58 @@ export function Composer({
 
   const submit = () => {
     const t = text.trim();
-    if (!t) return;
-    onSend(t);
+    if ((!t && attachments.length === 0) || pendingPaste > 0) return;
+    const refs = attachments.map((a) => `@${a.path}`).join(" ");
+    onSend([t, refs].filter(Boolean).join(t && refs ? " " : ""));
     setText("");
+    setAttachments([]);
   };
+
+  const attachImageFiles = async (files: File[]) => {
+    const images = files.filter((f) => f.type.startsWith("image/"));
+    if (images.length === 0) return;
+    for (const file of images) {
+      setPendingPaste((n) => n + 1);
+      try {
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result));
+          reader.onerror = () => reject(reader.error);
+          reader.readAsDataURL(file);
+        });
+        const path = await app.SavePastedImage(dataUrl);
+        const previewUrl = await app.AttachmentDataURL(path);
+        setAttachments((prev) => [...prev, { path, previewUrl }]);
+      } catch {
+        // non-fatal: a failed image attach must not block normal text input
+      } finally {
+        setPendingPaste((n) => Math.max(0, n - 1));
+      }
+    }
+  };
+
+  const onPaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
+    const files = Array.from(e.clipboardData.files).filter((f) => f.type.startsWith("image/"));
+    if (files.length === 0) return;
+    e.preventDefault();
+    void attachImageFiles(files);
+  };
+
+  const onDrop = (e: DragEvent<HTMLDivElement>) => {
+    const files = Array.from(e.dataTransfer.files);
+    if (!files.some((f) => f.type.startsWith("image/"))) return;
+    e.preventDefault();
+    setDragOver(false);
+    void attachImageFiles(files);
+  };
+
+  const onDragOver = (e: DragEvent<HTMLDivElement>) => {
+    if (!Array.from(e.dataTransfer.items).some((it) => it.kind === "file")) return;
+    e.preventDefault(); // required for the drop event to fire
+    setDragOver(true);
+  };
+
+  const onDragLeave = () => setDragOver(false);
 
   // handleCancel stops the in-flight turn; if it was cancelled before the server
   // replied, the just-sent text is handed back so we drop it back into the input.
@@ -251,6 +307,23 @@ export function Composer({
         <ArgMenu items={argRes.items} activeIndex={active} onPick={pickArg} onHover={setActive} />
       )}
       {menuMode === "at" && <FileMenu items={atMatches} activeIndex={active} onPick={pickEntry} onHover={setActive} />}
+      {attachments.length > 0 && (
+        <div className="composer__attachments">
+          {attachments.map((a) => (
+            <div className="composer__attachment" key={a.path}>
+              <img src={a.previewUrl} alt="" />
+              <span>{a.path.split("/").pop()}</span>
+              <button
+                type="button"
+                title="Remove image"
+                onClick={() => setAttachments((prev) => prev.filter((x) => x.path !== a.path))}
+              >
+                <X size={14} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
       <button
         className={`composer__mode composer__mode--${mode}`}
         onClick={onCycleMode}
@@ -260,13 +333,19 @@ export function Composer({
         {mode === "yolo" ? t("composer.modeYolo") : mode === "plan" ? t("composer.modePlan") : t("composer.modeNormal")}
         <span className="composer__mode-hint">{t("composer.modeHint")}</span>
       </button>
-      <div className="composer">
+      <div
+        className={`composer${dragOver ? " composer--dragover" : ""}`}
+        onDrop={onDrop}
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+      >
         <span className="composer__caret">›</span>
         <textarea
           ref={taRef}
           className="composer__input"
           value={text}
           onChange={(e) => setText(e.target.value)}
+          onPaste={onPaste}
           onKeyDown={onKeyDown}
           placeholder={t("composer.placeholder")}
           rows={1}
@@ -279,7 +358,7 @@ export function Composer({
           <button
             className="composer__btn composer__btn--send"
             onClick={submit}
-            disabled={!text.trim()}
+            disabled={pendingPaste > 0 || (!text.trim() && attachments.length === 0)}
             title={t("composer.send")}
           >
             <ArrowUp size={16} />

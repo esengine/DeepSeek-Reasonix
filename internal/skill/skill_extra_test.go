@@ -153,22 +153,25 @@ func TestParseRunAsDefault(t *testing.T) {
 // --- resolveCustomPaths ---
 
 func TestResolveCustomPathsTilde(t *testing.T) {
-	got := resolveCustomPaths([]string{"~/skills"}, "/base", "/home/user")
-	if len(got) != 1 || got[0] != "/home/user/skills" {
+	home := t.TempDir()
+	got := resolveCustomPaths([]string{"~/skills"}, "/base", home)
+	if len(got) != 1 || got[0] != filepath.Join(home, "skills") {
 		t.Errorf("tilde expansion = %v", got)
 	}
 }
 
 func TestResolveCustomPathsRelative(t *testing.T) {
-	got := resolveCustomPaths([]string{"./my-skills"}, "/base", "/home")
-	if len(got) != 1 || got[0] != "/base/my-skills" {
+	base := t.TempDir()
+	got := resolveCustomPaths([]string{"./my-skills"}, base, "/home")
+	if len(got) != 1 || got[0] != filepath.Join(base, "my-skills") {
 		t.Errorf("relative = %v", got)
 	}
 }
 
 func TestResolveCustomPathsAbsolute(t *testing.T) {
-	got := resolveCustomPaths([]string{"/absolute/path"}, "/base", "/home")
-	if len(got) != 1 || got[0] != "/absolute/path" {
+	abs := filepath.Join(t.TempDir(), "absolute", "path")
+	got := resolveCustomPaths([]string{abs}, "/base", "/home")
+	if len(got) != 1 || got[0] != abs {
 		t.Errorf("absolute = %v", got)
 	}
 }
