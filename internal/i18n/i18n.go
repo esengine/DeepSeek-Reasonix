@@ -141,10 +141,10 @@ type Messages struct {
 	ArgModelCurrent string // /model <ref> active tag
 
 	// /providers sub-commands
-	CmdProviders      string // /providers
-	ArgProvidersAdd   string // /providers add
+	CmdProviders       string // /providers
+	ArgProvidersAdd    string // /providers add
 	ArgProvidersRemove string // /providers remove
-	ArgProvidersList  string // /providers list
+	ArgProvidersList   string // /providers list
 
 	// management listing notices (the Submit path: desktop / HTTP frontends)
 	ListModelsHeaderFmt string // "models (active: %s)"
@@ -161,10 +161,10 @@ type Messages struct {
 	ListProvidersNone   string // no providers
 
 	// init wizard
-	SelectProvidersLabel   string // multi-select label
-	SelectProvidersReveal  string // hint to press "/" to reveal third-party providers
-	BillingModeLabel       string // billing mode selection label
-	EnterAPIKeysHeader     string // header before the per-env-var prompts
+	SelectProvidersLabel  string // multi-select label
+	SelectProvidersReveal string // hint to press "/" to reveal third-party providers
+	BillingModeLabel      string // billing mode selection label
+	EnterAPIKeysHeader    string // header before the per-env-var prompts
 	MissingKeyIntro       string // shown when re-running the key step on a configured setup
 	WroteFileFmt          string // "Wrote %s" — used for reasonix.toml and .env both
 	SetupComplete         string // success line at end of init

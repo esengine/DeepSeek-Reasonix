@@ -184,17 +184,17 @@ type AgentConfig struct {
 // automatically resolves the correct price for the selected model so downstream
 // code (boot, acp) always reads the accurate per-model cost.
 type ProviderEntry struct {
-	Name          string            `toml:"name"`
-	Kind          string            `toml:"kind"`
-	BaseURL       string            `toml:"base_url"`
-	Model         string            `toml:"model"`   // a single model (back-compat)
-	Models        []string          `toml:"models"`  // a vendor's model list (one base_url/key, many models)
-	Default       string            `toml:"default"` // default model when Models is set (else Models[0])
-	APIKeyEnv     string            `toml:"api_key_env"`
-	BalanceURL    string            `toml:"balance_url"` // optional; a provider-specific wallet-balance endpoint (DeepSeek: https://api.deepseek.com/user/balance). Empty = no balance readout.
-	ContextWindow int               `toml:"context_window"`
-	Price         *provider.Pricing `toml:"price"`                      // default pricing (all models unless overridden by ModelPrices)
-	ModelPrices   map[string]*provider.Pricing `toml:"model_prices"`   // per-model price overrides; key = model id
+	Name          string                       `toml:"name"`
+	Kind          string                       `toml:"kind"`
+	BaseURL       string                       `toml:"base_url"`
+	Model         string                       `toml:"model"`   // a single model (back-compat)
+	Models        []string                     `toml:"models"`  // a vendor's model list (one base_url/key, many models)
+	Default       string                       `toml:"default"` // default model when Models is set (else Models[0])
+	APIKeyEnv     string                       `toml:"api_key_env"`
+	BalanceURL    string                       `toml:"balance_url"` // optional; a provider-specific wallet-balance endpoint (DeepSeek: https://api.deepseek.com/user/balance). Empty = no balance readout.
+	ContextWindow int                          `toml:"context_window"`
+	Price         *provider.Pricing            `toml:"price"`        // default pricing (all models unless overridden by ModelPrices)
+	ModelPrices   map[string]*provider.Pricing `toml:"model_prices"` // per-model price overrides; key = model id
 	// Thinking / Effort are provider-kind-specific knobs forwarded to the provider
 	// via Config.Extra. The anthropic provider reads Thinking="adaptive" to enable
 	// extended thinking and Effort ("low".."max") to tune depth. The
@@ -380,7 +380,7 @@ func deepseekPreset() ProviderEntry {
 		Models: []string{"deepseek-v4-flash", "deepseek-v4-pro"}, Default: "deepseek-v4-flash",
 		APIKeyEnv: "DEEPSEEK_API_KEY", BalanceURL: "https://api.deepseek.com/user/balance",
 		ContextWindow: 1_000_000,
-		Price: &provider.Pricing{CacheHit: 0.02, Input: 1, Output: 2, Currency: "¥"},
+		Price:         &provider.Pricing{CacheHit: 0.02, Input: 1, Output: 2, Currency: "¥"},
 		ModelPrices: map[string]*provider.Pricing{
 			"deepseek-v4-pro": {CacheHit: 0.025, Input: 3, Output: 6, Currency: "¥"},
 		},
