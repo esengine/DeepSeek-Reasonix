@@ -270,9 +270,10 @@ func TestConfineEmptyRootsAllowsAll(t *testing.T) {
 // --- resolveIn tests ---
 
 func TestResolveInAbsolute(t *testing.T) {
-	got := resolveIn("/workdir", "/absolute/path")
-	if got != "/absolute/path" {
-		t.Errorf("resolveIn absolute = %q", got)
+	abs := filepath.Join(t.TempDir(), "absolute", "path")
+	got := resolveIn("/workdir", abs)
+	if got != abs {
+		t.Errorf("resolveIn absolute = %q, want %q", got, abs)
 	}
 }
 
