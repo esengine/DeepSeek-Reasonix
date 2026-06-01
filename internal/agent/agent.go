@@ -169,15 +169,15 @@ type Agent struct {
 	recentKeep    int
 	archiveDir    string
 
-	// stormSig / stormCount track a run of tool calls that keep failing the same
-	// way so the loop can break a death-spiral. The signature is (tool, error),
-	// NOT (tool, args): a stuck model reliably reworks the arguments cosmetically
-	// (a re-worded essay, a reordered object) while the call fails identically
-	// every time — keying on args misses the loop entirely (observed live against
-	// truncated tool-call arguments). Because errors that embed their subject
-	// (e.g. "file not found: /x") differ per target, genuine varied probing does
-	// not collapse to one signature. Reset whenever a turn does anything else
-	// (a different failure, more than one call, or any success). See applyStormBreaker.
+	// stormSig / stormCount track a run of turns that keep failing the same way so
+	// the loop can break a death-spiral. The signature is each call's (tool, error)
+	// in order, NOT (tool, args): a stuck model reliably reworks the arguments
+	// cosmetically (a re-worded essay, a reordered object) while the call fails
+	// identically every time — keying on args misses the loop entirely (observed
+	// live against truncated tool-call arguments). Because errors that embed their
+	// subject (e.g. "file not found: /x") differ per target, genuine varied probing
+	// does not collapse to one signature. Reset whenever a turn does anything else
+	// (a different failure shape, or any success). See applyStormBreaker.
 	stormSig   string
 	stormCount int
 }
@@ -534,22 +534,23 @@ func runParallel(start, end int, run func(int)) {
 // re-emits (re-worded but still over-long), truncating the same way again.
 const stormBreakThreshold = 3
 
-// applyStormBreaker detects a run of same-tool, same-error failures and, past the
+// applyStormBreaker detects a run of identically-failing turns and, past the
 // threshold, rewrites the model-facing result (results[0]) into a directive to
-// change approach. It keys on (tool, error) rather than (tool, args) because a
-// stuck model reworks the arguments cosmetically while failing identically — see
-// the stormSig field doc. It targets only the single-call fixation that produces
-// the loop: a turn with exactly one call that errored (and was not merely blocked
-// by plan mode / permissions, which already carry a clear, distinct message). Any
-// other shape — multiple calls, or any success — is varied work, so it resets the
-// counter. The hard maxSteps guard remains the ultimate backstop; this just keeps
-// the loop from burning that whole budget bouncing off the same failure.
+// change approach. It keys on each call's (tool, error) — not its args — because a
+// stuck model reworks the arguments cosmetically while failing identically (see
+// the stormSig field doc). A turn is a fixation candidate only when every one of
+// its calls errored and none was merely blocked by plan mode / permissions (those
+// carry a clear, distinct message the model can already act on). Any success, any
+// block, or a different batch shape is varied work, so it resets the counter. This
+// covers both the single-call spiral and a repeated multi-call batch. The hard
+// maxSteps guard remains the ultimate backstop; this just keeps the loop from
+// burning that whole budget bouncing off the same failure.
 func (a *Agent) applyStormBreaker(calls []provider.ToolCall, outcomes []toolOutcome, results []string) {
-	if len(calls) != 1 || outcomes[0].errMsg == "" || outcomes[0].blocked {
+	sig, ok := batchStormSignature(calls, outcomes)
+	if !ok {
 		a.stormSig, a.stormCount = "", 0
 		return
 	}
-	sig := calls[0].Name + "\x00" + outcomes[0].errMsg
 	if sig != a.stormSig {
 		a.stormSig, a.stormCount = sig, 1
 		return
@@ -558,12 +559,41 @@ func (a *Agent) applyStormBreaker(calls []provider.ToolCall, outcomes []toolOutc
 	if a.stormCount < stormBreakThreshold {
 		return
 	}
+	subject := fmt.Sprintf("%q", calls[0].Name)
+	short := calls[0].Name
+	if len(calls) > 1 {
+		subject = fmt.Sprintf("this batch of %d tool calls", len(calls))
+		short = fmt.Sprintf("a batch of %d calls", len(calls))
+	}
 	results[0] = outcomes[0].output + fmt.Sprintf(
-		"\n\n[loop guard] %q has now failed %d times in a row with the same error. Re-sending it — even with the wording changed — will not help: the call keeps failing the same way. Change approach: if an argument is being truncated, write less in one call and split the work into several smaller calls; otherwise fix the argument, use a different tool, or explain the blocker in your final answer.",
-		calls[0].Name, a.stormCount)
+		"\n\n[loop guard] %s has now failed %d times in a row with the same error. Re-sending it — even with the wording changed — will not help: the calls keep failing the same way. Change approach: if an argument is being truncated, write less in one call and split the work into several smaller calls; otherwise fix the arguments, use a different tool, or explain the blocker in your final answer.",
+		subject, a.stormCount)
 	a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: fmt.Sprintf(
 		"loop guard: %s failed %d× the same way — nudging the model to change approach",
-		calls[0].Name, a.stormCount)})
+		short, a.stormCount)})
+}
+
+// batchStormSignature returns a per-turn fixation signature — each call's
+// (name, error) in order — and ok=true only when every call errored and none was
+// merely blocked. ok=false (any success or block) means the turn made varied
+// progress, so the caller resets the counter. Keying on the error rather than the
+// args is deliberate: a stuck model reworks the arguments while failing the same
+// way, so identical-args matching would miss the loop.
+func batchStormSignature(calls []provider.ToolCall, outcomes []toolOutcome) (string, bool) {
+	if len(calls) == 0 {
+		return "", false
+	}
+	var sb strings.Builder
+	for i := range calls {
+		if outcomes[i].errMsg == "" || outcomes[i].blocked {
+			return "", false
+		}
+		sb.WriteString(calls[i].Name)
+		sb.WriteByte(0)
+		sb.WriteString(outcomes[i].errMsg)
+		sb.WriteByte(0)
+	}
+	return sb.String(), true
 }
 
 // toolOutcome is one tool call's result, split into the model-facing output and

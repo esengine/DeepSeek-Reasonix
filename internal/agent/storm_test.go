@@ -78,6 +78,63 @@ func TestStormBreakerEscalatesRepeatedFailure(t *testing.T) {
 	}
 }
 
+// TestStormBreakerEscalatesRepeatedBatch: a multi-call batch that fails the same
+// way every round is just as much a death-spiral as a single call — once the whole
+// batch repeats stormBreakThreshold times, the guard must fire and name the batch.
+func TestStormBreakerEscalatesRepeatedBatch(t *testing.T) {
+	reg := tool.NewRegistry()
+	reg.Add(failTool{name: "write_a"})
+	reg.Add(failTool{name: "write_b"})
+	sink, notices := warnNoticeRecorder()
+	a := New(nil, reg, NewSession(""), Options{}, sink)
+
+	batch := []provider.ToolCall{
+		{Name: "write_a", Arguments: `{"content":"x`},
+		{Name: "write_b", Arguments: `{"content":"y`},
+	}
+	var first string
+	for i := 0; i < stormBreakThreshold; i++ {
+		first = a.executeBatch(context.Background(), batch)[0]
+	}
+
+	if !strings.Contains(first, "[loop guard]") {
+		t.Fatalf("a repeated all-failing batch should trip the guard, got: %q", first)
+	}
+	if !strings.Contains(first, "batch of 2") {
+		t.Errorf("guard should name the repeated batch, got: %q", first)
+	}
+	if len(*notices) == 0 {
+		t.Errorf("loop guard should emit a warn notice for a repeated batch")
+	}
+}
+
+// TestStormBreakerBatchResetsOnPartialSuccess: a batch where even one call
+// succeeds is progress, not a fixation — the guard must never fire, however many
+// times the batch repeats.
+func TestStormBreakerBatchResetsOnPartialSuccess(t *testing.T) {
+	reg := tool.NewRegistry()
+	reg.Add(failTool{name: "write_file"})
+	reg.Add(okTool{name: "read_file"})
+	sink, notices := warnNoticeRecorder()
+	a := New(nil, reg, NewSession(""), Options{}, sink)
+
+	batch := []provider.ToolCall{
+		{Name: "write_file", Arguments: `{"content":"x`},
+		{Name: "read_file", Arguments: `{"path":"x"}`},
+	}
+	var first string
+	for i := 0; i < stormBreakThreshold+2; i++ {
+		first = a.executeBatch(context.Background(), batch)[0]
+	}
+
+	if strings.Contains(first, "[loop guard]") {
+		t.Fatalf("a batch with a succeeding call should never trip the guard, got: %q", first)
+	}
+	if len(*notices) != 0 {
+		t.Errorf("no warn notice expected when part of the batch succeeds, got %v", *notices)
+	}
+}
+
 // TestStormBreakerSilentBelowThreshold: the first few self-corrections are
 // healthy — the guard must not fire before the threshold.
 func TestStormBreakerSilentBelowThreshold(t *testing.T) {
