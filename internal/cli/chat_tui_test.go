@@ -190,6 +190,55 @@ func TestInsertNewlineKeyBinding(t *testing.T) {
 	}
 }
 
+// TestViewAltScreenFillsHeight proves the switch to alt-screen: View requests
+// the alt buffer + mouse, and the frame is exactly the terminal height (the
+// transcript viewport pads to fill above the pinned bottom region).
+func TestViewAltScreenFillsHeight(t *testing.T) {
+	ctrl := control.New(control.Options{})
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
+	m0, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	v := m0.(chatTUI).View()
+
+	if !v.AltScreen {
+		t.Error("View must request alt-screen so resize repaints the whole grid")
+	}
+	if v.MouseMode != tea.MouseModeCellMotion {
+		t.Error("View must enable mouse so the wheel scrolls the transcript")
+	}
+	if lines := strings.Count(v.Content, "\n") + 1; lines != 24 {
+		t.Errorf("alt-screen frame = %d lines, want 24 (full terminal height)", lines)
+	}
+}
+
+// TestTranscriptTailFollow proves the viewport pins to newest output while the
+// user is at the bottom, and stops yanking once the user scrolls up.
+func TestTranscriptTailFollow(t *testing.T) {
+	ctrl := control.New(control.Options{})
+	adv := func(m chatTUI, msg tea.Msg) chatTUI {
+		n, _ := m.Update(msg)
+		return n.(chatTUI)
+	}
+	notice := agentEventMsg(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "line"})
+
+	cur := adv(newChatTUI(ctrl, "", make(chan event.Event, 1), 80), tea.WindowSizeMsg{Width: 80, Height: 8})
+	for i := 0; i < 12; i++ { // overflow the short viewport so there's room to scroll
+		cur = adv(cur, notice)
+	}
+	if !cur.viewport.AtBottom() {
+		t.Fatal("new output while pinned should keep the viewport at the bottom")
+	}
+
+	cur = adv(cur, tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+	if cur.viewport.AtBottom() {
+		t.Fatal("wheel-up should break the bottom pin")
+	}
+
+	cur = adv(cur, notice)
+	if cur.viewport.AtBottom() {
+		t.Error("new output while scrolled up must preserve the reading position")
+	}
+}
+
 func TestApprovalToolDetailsShortensMCPNames(t *testing.T) {
 	name, detail := approvalToolDetails("mcp__minimax-coding-plan-mcp__understand_image")
 	if name != "understand_image" {
