@@ -17,6 +17,7 @@ func newTestChatTUI() chatTUI {
 	ti.SetWidth(80)
 	return chatTUI{
 		input:         ti,
+		nextPasteID:   1,
 		reasoning:     &strings.Builder{},
 		pending:       &strings.Builder{},
 		pendingCommit: &commit,

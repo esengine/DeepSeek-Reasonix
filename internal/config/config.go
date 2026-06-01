@@ -233,6 +233,23 @@ type PluginEntry struct {
 	Env     map[string]string `toml:"env"`
 	URL     string            `toml:"url"`
 	Headers map[string]string `toml:"headers"`
+	// AutoStart controls whether the server connects during session startup.
+	// Nil preserves historical behavior: configured servers start automatically.
+	AutoStart *bool `toml:"auto_start"`
+}
+
+func (e PluginEntry) ShouldAutoStart() bool {
+	return e.AutoStart == nil || *e.AutoStart
+}
+
+func (c *Config) AutoStartPlugins() []PluginEntry {
+	out := make([]PluginEntry, 0, len(c.Plugins))
+	for _, p := range c.Plugins {
+		if p.ShouldAutoStart() {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // DefaultSystemPrompt is used when config provides none.
@@ -504,6 +521,12 @@ func (e *ProviderEntry) APIKey() string {
 		return ""
 	}
 	return os.Getenv(e.APIKeyEnv)
+}
+
+// Configured reports whether the provider's api_key_env is set — the same check
+// Validate enforces, so pickers can filter on it.
+func (e *ProviderEntry) Configured() bool {
+	return e.APIKey() != ""
 }
 
 // ResolveSystemPrompt returns the system prompt, reading system_prompt_file if set.

@@ -128,11 +128,14 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	if bashSpec.Mode == "enforce" && !sandbox.Available() {
 		fmt.Fprintln(stderr, "warning: bash sandbox requested but unavailable on this platform; running bash unconfined")
 	}
+	if sandbox.ResolveShell().Kind == sandbox.ShellPowerShell {
+		fmt.Fprintln(stderr, "warning: bash not found on PATH; the shell tool will run commands under Windows PowerShell. Install Git for Windows or WSL to use bash.")
+	}
 	addBuiltins(reg, cfg.Tools.Enabled, cfg.WriteRoots(), bashSpec, stderr)
 	// Always construct a host, even with no plugins configured, so the controller's
 	// host pointer is stable for the session and `/mcp add` can hot-add into it.
 	pluginHost := plugin.NewHost()
-	specs := PluginSpecs(cfg.Plugins)
+	specs := PluginSpecs(cfg.AutoStartPlugins())
 	// CodeGraph is a built-in MCP server fetched on first use. When it resolves,
 	// inject it as one more stdio plugin pinned to the project root (it is
 	// cwd-aware); EnsureInit only creates .codegraph/ (fast, size-independent),
@@ -172,13 +175,13 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 				specs[i].Stderr = opts.Stderr
 			}
 		}
-		host, ptools, err := plugin.StartAll(ctx, specs)
-		if err != nil {
-			return nil, fmt.Errorf("plugin: %w", err)
-		}
+		host, ptools := plugin.StartAvailable(ctx, specs)
 		pluginHost = host
 		for _, t := range ptools {
 			reg.Add(t)
+		}
+		if text, ok := MCPStartupNotice(host.Failures()); ok {
+			sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: text})
 		}
 	}
 	cleanup := pluginHost.Close
@@ -463,6 +466,27 @@ func PluginSpecs(entries []config.PluginEntry) []plugin.Spec {
 		}
 	}
 	return specs
+}
+
+// MCPStartupNotice formats the warning shown when configured MCP servers failed
+// to connect, naming the first few; ok is false when none failed.
+func MCPStartupNotice(failures []plugin.Failure) (text string, ok bool) {
+	if len(failures) == 0 {
+		return "", false
+	}
+	names := make([]string, 0, min(len(failures), 3))
+	for i, f := range failures {
+		if i >= 3 {
+			break
+		}
+		names = append(names, f.Name)
+	}
+	more := ""
+	if len(failures) > len(names) {
+		more = fmt.Sprintf(" (+%d more)", len(failures)-len(names))
+	}
+	return fmt.Sprintf("%d MCP server(s) failed to start: %s%s — run /mcp for details",
+		len(failures), strings.Join(names, ", "), more), true
 }
 
 func providerNames(cfg *config.Config) string {

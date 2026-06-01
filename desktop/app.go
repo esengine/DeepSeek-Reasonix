@@ -111,6 +111,16 @@ func (a *App) Submit(input string) {
 	}
 }
 
+// SubmitDisplay runs input as a turn while recording a shorter UI-only display
+// string for the saved desktop transcript. The model still receives input.
+func (a *App) SubmitDisplay(display, input string) {
+	if a.ctrl == nil {
+		return
+	}
+	_ = recordSessionDisplay(config.SessionDir(), a.ctrl.SessionPath(), input, display)
+	a.ctrl.Submit(input)
+}
+
 // Cancel aborts the in-flight turn.
 func (a *App) Cancel() {
 	if a.ctrl != nil {
@@ -375,9 +385,14 @@ func (a *App) History() []HistoryMessage {
 		return nil
 	}
 	msgs := a.ctrl.History()
+	resolve := sessionDisplayResolver(config.SessionDir(), a.ctrl.SessionPath())
 	out := make([]HistoryMessage, 0, len(msgs))
 	for _, m := range msgs {
-		out = append(out, HistoryMessage{Role: string(m.Role), Content: m.Content})
+		content := m.Content
+		if m.Role == provider.RoleUser {
+			content = resolve(m.Content)
+		}
+		out = append(out, HistoryMessage{Role: string(m.Role), Content: content})
 	}
 	return out
 }
@@ -579,15 +594,20 @@ type ModelInfo struct {
 
 // Models flattens the configured providers into their (provider, model) pairs —
 // the switcher's options — marking the active one. A vendor with a `models` list
-// yields one entry per model, all sharing the same endpoint/key.
+// yields one entry per model, all sharing the same endpoint/key. Unconfigured
+// providers are skipped. Result is non-nil: the frontend reads .length, so a nil
+// slice (JSON null) would crash the switcher on an empty list.
 func (a *App) Models() []ModelInfo {
+	out := []ModelInfo{}
 	cfg, err := config.Load()
 	if err != nil {
-		return nil
+		return out
 	}
-	var out []ModelInfo
 	for i := range cfg.Providers {
 		p := &cfg.Providers[i]
+		if !p.Configured() {
+			continue
+		}
 		for _, m := range p.ModelList() {
 			ref := p.Name + "/" + m
 			out = append(out, ModelInfo{Ref: ref, Provider: p.Name, Model: m, Current: ref == a.model})
@@ -680,6 +700,17 @@ func (a *App) ListDir(rel string) []DirEntry {
 	sort.Slice(dirs, func(i, j int) bool { return strings.ToLower(dirs[i].Name) < strings.ToLower(dirs[j].Name) })
 	sort.Slice(files, func(i, j int) bool { return strings.ToLower(files[i].Name) < strings.ToLower(files[j].Name) })
 	return append(dirs, files...)
+}
+
+// SavePastedImage stores a browser clipboard image data URL under
+// .reasonix/attachments and returns the relative @-reference path.
+func (a *App) SavePastedImage(dataURL string) (string, error) {
+	return control.SaveImageDataURL(dataURL)
+}
+
+// AttachmentDataURL returns a safe data URL for a stored image attachment.
+func (a *App) AttachmentDataURL(path string) (string, error) {
+	return control.ImageDataURL(path)
 }
 
 // --- memory panel (frontend ⇄ controller) ---

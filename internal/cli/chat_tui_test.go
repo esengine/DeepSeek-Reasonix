@@ -4,10 +4,54 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
 )
+
+// TestTranscriptMirrorsCommits proves the alt-screen migration's foundation:
+// every line commitLine sends to native scrollback is also captured in the
+// transcript buffer (the future viewport's content source), in order.
+func TestTranscriptMirrorsCommits(t *testing.T) {
+	m := newTestChatTUI()
+	m.ingestEvent(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{Name: "read_file", Args: `{"path":"x"}`}})
+	m.ingestEvent(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "compacted"})
+
+	if len(m.transcript) != len(*m.pendingCommit) {
+		t.Fatalf("transcript (%d) and pendingCommit (%d) should hold the same lines", len(m.transcript), len(*m.pendingCommit))
+	}
+	for i := range m.transcript {
+		if m.transcript[i] != (*m.pendingCommit)[i] {
+			t.Errorf("line %d mismatch: transcript=%q pendingCommit=%q", i, m.transcript[i], (*m.pendingCommit)[i])
+		}
+	}
+}
+
+// TestTranscriptViewportSizing proves the viewport tracks the terminal size and
+// gets the rows left over after the pinned bottom region (input box + 2 status
+// rows = 5 with an empty 1-line composer), and is fed the committed transcript.
+func TestTranscriptViewportSizing(t *testing.T) {
+	ctrl := control.New(control.Options{})
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
+
+	m0, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = m0.(chatTUI)
+
+	if got := m.bottomRows(); got != 5 {
+		t.Fatalf("bottomRows with an empty composer = %d, want 5 (input 1 + border 2 + status 2)", got)
+	}
+	if m.viewport.Width() != 79 {
+		t.Errorf("viewport content width = %d, want 79 (terminal 80 - 1 scrollbar column)", m.viewport.Width())
+	}
+	if want := m.transcriptHeight(); m.viewport.Height() != want || want != 19 {
+		t.Errorf("viewport height = %d, transcriptHeight = %d, want 19 (24-5)", m.viewport.Height(), want)
+	}
+	if m.viewport.TotalLineCount() == 0 {
+		t.Errorf("viewport should hold the committed banner after the first resize")
+	}
+}
 
 // TestIngestEventRoutesByKind proves each event Kind lands in the right place:
 // reasoning accumulates as a collapsed live marker (uncommitted), while tool
@@ -157,6 +201,110 @@ func TestInsertNewlineKeyBinding(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("newChatTUI InsertNewline should include shift+enter, got %v", keys)
+	}
+}
+
+// TestViewAltScreenFillsHeight proves the switch to alt-screen: View requests
+// the alt buffer + mouse, and the frame is exactly the terminal height (the
+// transcript viewport pads to fill above the pinned bottom region).
+func TestViewAltScreenFillsHeight(t *testing.T) {
+	ctrl := control.New(control.Options{})
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
+	m0, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	v := m0.(chatTUI).View()
+
+	if !v.AltScreen {
+		t.Error("View must request alt-screen so resize repaints the whole grid")
+	}
+	if v.MouseMode != tea.MouseModeCellMotion {
+		t.Error("View must enable mouse so the wheel scrolls the transcript")
+	}
+	if lines := strings.Count(v.Content, "\n") + 1; lines != 24 {
+		t.Errorf("alt-screen frame = %d lines, want 24 (full terminal height)", lines)
+	}
+}
+
+// TestTranscriptTailFollow proves the viewport pins to newest output while the
+// user is at the bottom, and stops yanking once the user scrolls up.
+func TestTranscriptTailFollow(t *testing.T) {
+	ctrl := control.New(control.Options{})
+	adv := func(m chatTUI, msg tea.Msg) chatTUI {
+		n, _ := m.Update(msg)
+		return n.(chatTUI)
+	}
+	notice := agentEventMsg(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "line"})
+
+	cur := adv(newChatTUI(ctrl, "", make(chan event.Event, 1), 80), tea.WindowSizeMsg{Width: 80, Height: 8})
+	for i := 0; i < 12; i++ { // overflow the short viewport so there's room to scroll
+		cur = adv(cur, notice)
+	}
+	if !cur.viewport.AtBottom() {
+		t.Fatal("new output while pinned should keep the viewport at the bottom")
+	}
+
+	cur = adv(cur, tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+	if cur.viewport.AtBottom() {
+		t.Fatal("wheel-up should break the bottom pin")
+	}
+
+	cur = adv(cur, notice)
+	if cur.viewport.AtBottom() {
+		t.Error("new output while scrolled up must preserve the reading position")
+	}
+}
+
+func TestFoldedPasteUsesPlaceholderAndExpandsOnSend(t *testing.T) {
+	m := newTestChatTUI()
+	pasted := "{\n  \"a\": 1,\n  \"b\": 2,\n  \"c\": 3,\n  \"d\": 4\n}"
+	if !shouldFoldPastedText(pasted) {
+		t.Fatal("five-line paste should fold")
+	}
+
+	m.insertFoldedPaste(pasted)
+	display := m.input.Value()
+	if display != "[Pasted text #1 · 6 lines] " {
+		t.Fatalf("display = %q", display)
+	}
+
+	sent := m.expandPastedBlocks(display)
+	for _, want := range []string{
+		"--- Begin [Pasted text #1 · 6 lines] ---",
+		`"d": 4`,
+		"--- End [Pasted text #1 · 6 lines] ---",
+	} {
+		if !strings.Contains(sent, want) {
+			t.Fatalf("expanded paste missing %q in:\n%s", want, sent)
+		}
+	}
+}
+
+func TestPasteMsgFoldsBeforeTextareaConsumesNewlines(t *testing.T) {
+	m := newTestChatTUI()
+	model, _ := m.Update(tea.PasteMsg{Content: "1\n2\n3\n4\n5"})
+	got := model.(chatTUI)
+	if got.input.Value() != "[Pasted text #1 · 5 lines] " {
+		t.Fatalf("input = %q", got.input.Value())
+	}
+	if got.input.Height() != 1 {
+		t.Fatalf("folded paste should keep one input row, got %d", got.input.Height())
+	}
+}
+
+func TestUnsendRestoresFoldedPastePlaceholder(t *testing.T) {
+	m := newTestChatTUI()
+	m.ctrl = control.New(control.Options{})
+	m.pendingBubble = "expanded JSON"
+	m.pendingRestore = "[Pasted text #1 · 5 lines] 这是什么?"
+	m.bubblePending = true
+	m.state = tuiRunning
+
+	m.unsendPending()
+
+	if got := m.input.Value(); got != "[Pasted text #1 · 5 lines] 这是什么?" {
+		t.Fatalf("restored input = %q", got)
+	}
+	if m.pendingBubble != "" || m.pendingRestore != "" || m.bubblePending {
+		t.Fatalf("pending state not cleared: bubble=%q restore=%q pending=%v", m.pendingBubble, m.pendingRestore, m.bubblePending)
 	}
 }
 

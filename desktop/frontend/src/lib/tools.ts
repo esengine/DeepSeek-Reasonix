@@ -87,6 +87,7 @@ export interface Todo {
   content: string;
   status: TodoStatus | string;
   activeForm?: string;
+  level?: number; // 0 = phase, 1 = sub-step of the phase above it
 }
 
 // parseTodos pulls the task list out of a todo_write call's args.

@@ -106,8 +106,8 @@ export default function App() {
   // (/skill, /hooks, /mcp) — goes straight to Submit, which the controller
   // resolves (a turn, or a listing Notice).
   const handleSend = useCallback(
-    (text: string) => {
-      const t = text.trim();
+    (displayText: string, submitText = displayText) => {
+      const t = displayText.trim();
       const model = /^\/model\s+(\S+)$/.exec(t);
       if (model) {
         void switchModel(model[1]);
@@ -117,7 +117,7 @@ export default function App() {
         void openMemory();
         return;
       }
-      send(t);
+      send(t, submitText.trim());
     },
     [switchModel, openMemory, send],
   );

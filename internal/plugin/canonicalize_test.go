@@ -3,6 +3,8 @@ package plugin
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 
 	"reasonix/internal/tool"
@@ -90,6 +92,40 @@ func TestSortToolsByName(t *testing.T) {
 	// Original should be unchanged
 	if tools[0].Name() != "zulu" {
 		t.Error("original slice was mutated")
+	}
+}
+
+func TestNormalizeNameForToolNames(t *testing.T) {
+	if got := normalizeName("valid_name-1"); got != "valid_name-1" {
+		t.Fatalf("valid name changed: %q", got)
+	}
+	cases := []string{"@modelcontextprotocol/server-memory", "mcp server/fetch", "   "}
+	for _, in := range cases {
+		got := normalizeName(in)
+		if got == "" || strings.ContainsAny(got, " @/") {
+			t.Errorf("normalizeName(%q) = %q, want non-empty safe identifier", in, got)
+		}
+	}
+}
+
+func TestNormalizeNameAvoidsSanitizedCollisions(t *testing.T) {
+	a := normalizeName("search/code")
+	b := normalizeName("search_code")
+	if a == b {
+		t.Fatalf("normalized names collided: %q", a)
+	}
+	if b != "search_code" {
+		t.Fatalf("valid identifier should stay stable, got %q", b)
+	}
+	if normalizeName("@foo") == normalizeName("foo") {
+		t.Fatal("trimmed invalid prefix should not collapse onto valid name")
+	}
+}
+
+func TestSummarizeFailureErrorSingleLine(t *testing.T) {
+	got := summarizeFailureError(errors.New("npm error code ENOTEMPTY\nnpm error path /tmp/x"))
+	if strings.Contains(got, "\n") || !strings.Contains(got, "ENOTEMPTY") {
+		t.Fatalf("summary = %q", got)
 	}
 }
 

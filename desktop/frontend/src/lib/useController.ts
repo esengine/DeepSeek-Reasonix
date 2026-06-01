@@ -449,9 +449,12 @@ export function useController() {
     return off;
   }, []);
 
-  const send = useCallback((text: string) => {
-    dispatch({ type: "user", text });
-    app.Submit(text).catch(() => {});
+  const send = useCallback((displayText: string, submitText = displayText) => {
+    dispatch({ type: "user", text: displayText });
+    const display = displayText.trim();
+    const submit = submitText.trim();
+    const call = display !== submit ? app.SubmitDisplay(display, submit) : app.Submit(submit);
+    call.catch(() => {});
   }, []);
 
   // cancel aborts the in-flight turn. If the server hasn't replied yet (the user

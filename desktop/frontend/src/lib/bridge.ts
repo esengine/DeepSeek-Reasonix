@@ -30,6 +30,7 @@ import type {
 // (or regenerate with `wails generate module` and import wailsjs instead).
 export interface AppBindings {
   Submit(input: string): Promise<void>;
+  SubmitDisplay(display: string, input: string): Promise<void>;
   Cancel(): Promise<void>;
   Approve(id: string, allow: boolean, session: boolean): Promise<void>;
   AnswerQuestion(id: string, answers: QuestionAnswer[]): Promise<void>;
@@ -64,6 +65,8 @@ export interface AppBindings {
   Commands(): Promise<CommandInfo[]>;
   SlashArgs(input: string): Promise<SlashArgsResult>;
   ListDir(rel: string): Promise<DirEntry[]>;
+  SavePastedImage(dataUrl: string): Promise<string>;
+  AttachmentDataURL(path: string): Promise<string>;
   Models(): Promise<ModelInfo[]>;
   SetModel(name: string): Promise<void>;
   // Memory panel: read the loaded REASONIX.md hierarchy + saved auto-memories,
@@ -272,6 +275,9 @@ function makeMockApp(): AppBindings {
       });
       emit({ kind: "turn_done" });
     },
+    async SubmitDisplay(_display, input) {
+      await this.Submit(input);
+    },
     async Cancel() {
       cancelled = true;
       emit({ kind: "turn_done" });
@@ -389,6 +395,12 @@ function makeMockApp(): AppBindings {
         ];
       }
       return [{ name: "file.go", isDir: false }];
+    },
+    async SavePastedImage(_dataUrl: string) {
+      return ".reasonix/attachments/mock.png";
+    },
+    async AttachmentDataURL(_path: string) {
+      return "data:image/png;base64,iVBORw0KGgo=";
     },
     async Models() {
       return [

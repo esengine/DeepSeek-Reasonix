@@ -69,19 +69,3 @@ func TestCommitReasoningWrapsToWidth(t *testing.T) {
 		t.Error("reasoning buffer not reset")
 	}
 }
-
-// TestChunkLines guards the overflow fix: long blocks split into screen-bounded
-// pieces (order + content preserved); short blocks pass through whole.
-func TestChunkLines(t *testing.T) {
-	if got := chunkLines("a\nb\nc", 5); len(got) != 1 || got[0] != "a\nb\nc" {
-		t.Errorf("short block should pass whole: %q", got)
-	}
-	got := chunkLines("1\n2\n3\n4\n5", 2)
-	if len(got) != 3 || got[0] != "1\n2" || got[1] != "3\n4" || got[2] != "5" {
-		t.Errorf("chunking wrong: %q", got)
-	}
-	// Rejoining the chunks reproduces the original.
-	if strings.Join(got, "\n") != "1\n2\n3\n4\n5" {
-		t.Error("chunkLines lost content/order")
-	}
-}

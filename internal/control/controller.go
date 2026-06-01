@@ -293,7 +293,7 @@ const planApprovalTool = "exit_plan_mode"
 
 // planApprovedMessage is the follow-up turn sent once the user approves a plan —
 // the in-context nudge to execute and keep the (already-seeded) task list honest.
-const planApprovedMessage = "Plan approved — plan mode is off; you're cleared to make the changes without asking again. Implement the plan now. Keep the task list current with todo_write (mark the step you start as in_progress; one in_progress at a time), and sign off each finished step with complete_step, attaching the evidence it's done — the verification you ran, the diff/files you changed, or a manual check. Don't claim a step is done without evidence."
+const planApprovedMessage = "Plan approved — plan mode is off; you're cleared to make the changes without asking again. Implement the plan now. Keep the task list current with todo_write, preserving its two-level shape (phases at level 0, their sub-steps at level 1): mark the sub-step you start as in_progress, one in_progress at a time. Sign off each finished sub-step with complete_step, attaching the evidence it's done — the verification you ran, the diff/files you changed, or a manual check. Don't claim a step is done without evidence."
 
 // runTurn runs one model turn, then applies the plan-approval gate. This is the
 // single, frontend-agnostic plan flow: in plan mode the model just researches
@@ -1095,6 +1095,24 @@ func (c *Controller) HookRunner() *hook.Runner { return c.hooks }
 // of tools the server exposed. A save failure after a successful connect is
 // reported but non-fatal: the server still works this session.
 func (c *Controller) AddMCPServer(e config.PluginEntry) (int, error) {
+	n, err := c.connectMCPServer(e)
+	if err != nil {
+		return 0, err
+	}
+	cfg, lerr := config.Load()
+	if lerr != nil {
+		return n, fmt.Errorf("connected, but reloading config to save failed: %w", lerr)
+	}
+	if err := cfg.UpsertPlugin(e); err != nil {
+		return n, fmt.Errorf("connected, but config rejected the entry: %w", err)
+	}
+	if err := cfg.Save(); err != nil {
+		return n, fmt.Errorf("connected, but saving config failed: %w", err)
+	}
+	return n, nil
+}
+
+func (c *Controller) connectMCPServer(e config.PluginEntry) (int, error) {
 	if c.host == nil {
 		c.host = plugin.NewHost()
 	}
@@ -1116,17 +1134,52 @@ func (c *Controller) AddMCPServer(e config.PluginEntry) (int, error) {
 			c.reg.Add(t)
 		}
 	}
-	cfg, lerr := config.Load()
-	if lerr != nil {
-		return len(tools), fmt.Errorf("connected, but reloading config to save failed: %w", lerr)
-	}
-	if err := cfg.UpsertPlugin(e); err != nil {
-		return len(tools), fmt.Errorf("connected, but config rejected the entry: %w", err)
-	}
-	if err := cfg.Save(); err != nil {
-		return len(tools), fmt.Errorf("connected, but saving config failed: %w", err)
-	}
 	return len(tools), nil
+}
+
+func (c *Controller) ConfiguredMCPNames() []string {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil
+	}
+	names := make([]string, 0, len(cfg.Plugins))
+	for _, p := range cfg.Plugins {
+		names = append(names, p.Name)
+	}
+	return names
+}
+
+func (c *Controller) DisconnectedMCPNames() []string {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil
+	}
+	connected := map[string]bool{}
+	if c.host != nil {
+		for _, name := range c.host.ServerNames() {
+			connected[name] = true
+		}
+	}
+	var names []string
+	for _, p := range cfg.Plugins {
+		if !connected[p.Name] {
+			names = append(names, p.Name)
+		}
+	}
+	return names
+}
+
+func (c *Controller) ConnectConfiguredMCPServer(name string) (int, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return 0, err
+	}
+	for _, p := range cfg.Plugins {
+		if p.Name == name {
+			return c.connectMCPServer(p)
+		}
+	}
+	return 0, fmt.Errorf("no configured MCP server named %q", name)
 }
 
 // RemoveMCPServer disconnects a live MCP server — its tools vanish from the next
@@ -1295,6 +1348,7 @@ func (g gateApprover) Approve(ctx context.Context, tool, subject string, args js
 type seedTodo struct {
 	Content string `json:"content"`
 	Status  string `json:"status"`
+	Level   int    `json:"level,omitempty"`
 }
 
 // seedPlanTodos turns an approved plan into a starter task list and emits it as a
@@ -1341,15 +1395,15 @@ func PlanTodosJSON(plan string) string {
 func parsePlanTodos(plan string) []seedTodo {
 	var todos []seedTodo
 	for _, raw := range strings.Split(plan, "\n") {
-		item := listItemContent(raw)
-		if item == "" {
+		item, level, ok := listItem(raw)
+		if !ok {
 			continue
 		}
 		status := "pending"
 		if len(todos) == 0 {
 			status = "in_progress"
 		}
-		todos = append(todos, seedTodo{Content: item, Status: status})
+		todos = append(todos, seedTodo{Content: item, Status: status, Level: level})
 		if len(todos) >= 20 {
 			break
 		}
@@ -1357,13 +1411,33 @@ func parsePlanTodos(plan string) []seedTodo {
 	return todos
 }
 
-// listItemContent returns the task text of a markdown list line ("- x", "* x",
-// "1. x", "2) x"), or "" if the line isn't a list item. Light inline-markdown
+// listItem parses a markdown list line ("- x", "* x", "1. x", "2) x") into its
+// task text and a nesting level derived from leading indentation (0 for a
+// top-level item, 1 for an indented sub-step — capped at 1 since the plan is
+// two-level). ok is false when the line isn't a list item. Light inline-markdown
 // stripping keeps the checklist readable.
-func listItemContent(line string) string {
-	s := strings.TrimSpace(line)
-	if s == "" {
-		return ""
+func listItem(line string) (content string, level int, ok bool) {
+	trimmed := strings.TrimLeft(line, " \t")
+	if trimmed == "" {
+		return "", 0, false
+	}
+	indent := 0
+	for _, c := range line[:len(line)-len(trimmed)] {
+		if c == '\t' {
+			indent += 4
+		} else {
+			indent++
+		}
+	}
+	s := trimmed
+	// A numbered markdown heading ("### 1. Add the loader") is how models often
+	// write a phase even when asked for a list; strip the heading marker and
+	// treat it as a top-level phase. A heading without a number (a section
+	// title like "## Plan") falls through and is ignored.
+	heading := false
+	if h := strings.TrimLeft(s, "#"); h != s && strings.HasPrefix(h, " ") {
+		heading = true
+		s = strings.TrimSpace(h)
 	}
 	switch {
 	case strings.HasPrefix(s, "- "), strings.HasPrefix(s, "* "), strings.HasPrefix(s, "+ "):
@@ -1375,7 +1449,7 @@ func listItemContent(line string) string {
 			i++
 		}
 		if i == 0 || i+1 >= len(s) || (s[i] != '.' && s[i] != ')') || s[i+1] != ' ' {
-			return ""
+			return "", 0, false
 		}
 		s = s[i+2:]
 	}
@@ -1384,7 +1458,17 @@ func listItemContent(line string) string {
 	s = strings.TrimPrefix(s, "[x] ")
 	s = strings.ReplaceAll(s, "`", "")
 	s = strings.ReplaceAll(s, "**", "")
-	return strings.TrimSpace(s)
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "", 0, false
+	}
+	if heading {
+		return s, 0, true // a heading is always a top-level phase
+	}
+	if indent >= 2 {
+		return s, 1, true
+	}
+	return s, 0, true
 }
 
 // requestApproval emits an ApprovalRequest and blocks until Approve(ID, …)

@@ -16,6 +16,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/atotto/clipboard"
@@ -53,14 +54,12 @@ type chatTUI struct {
 
 	width  int
 	height int
-	// repaintToggle flips on each resize-triggered forceRepaintMsg so the View
-	// differs byte-for-byte, defeating the renderer's "unchanged view → skip
-	// render" optimization and forcing the one extra repaint that clears the
-	// resize ghost (the same repaint a keystroke would have triggered).
-	repaintToggle bool
 
 	input   textarea.Model
 	spinner spinner.Model
+
+	pastedBlocks []pastedBlock
+	nextPasteID  int
 
 	state    tuiState
 	runStart time.Time
@@ -103,6 +102,18 @@ type chatTUI struct {
 	eventCh       chan event.Event
 	started       bool // banner + resumed history committed once
 
+	// transcript holds every finalized line commitLine emits; the viewport
+	// renders a scrollable window of it (alt-screen owns the grid, so there's no
+	// native terminal scrollback). sel is the live left-drag text selection.
+	transcript   []string
+	wrappedLines []string // transcript wrapped to viewport width (rendered each frame)
+	viewport     viewport.Model
+	sel          selection
+	// autoScroll drives edge-drag scrolling: -1 up, +1 down, 0 off. dragX is the
+	// column the drag is held at, so the ticker can extend the selection head.
+	autoScroll int
+	dragX      int
+
 	// The user bubble for an in-flight turn is deferred, not echoed on Enter: it's
 	// held in pendingBubble and committed to scrollback only when the first
 	// response packet arrives (commitPendingBubble). Pressing Esc/Ctrl+C before
@@ -110,9 +121,11 @@ type chatTUI struct {
 	// reaches scrollback. bubblePending is true from startTurn until the bubble
 	// commits or is un-sent; turnDiscarded then swallows the turn's already-buffered
 	// events until its TurnDone settles.
-	pendingBubble string
-	bubblePending bool
-	turnDiscarded bool
+	pendingBubble  string
+	pendingRestore string
+	pendingPastes  []string
+	bubblePending  bool
+	turnDiscarded  bool
 	// attachments are image refs queued for the next user turn. They render as a
 	// tray above the input and are appended to the provider-facing prompt as
 	// @-references only when the turn is sent.
@@ -198,12 +211,6 @@ type compactDoneMsg struct{ err error }
 // elapsedTickMsg fires once a second while a turn runs, driving the "thinking
 // Ns" counter in the status line.
 type elapsedTickMsg struct{}
-
-// forceRepaintMsg is queued after a real terminal resize to trigger one extra
-// render. In inline mode bubbletea's resize redraw can leave the prior frame's
-// border on screen until the next normal render (typing clears it); this fires
-// that render automatically so the user doesn't have to.
-type forceRepaintMsg struct{}
 
 // balanceMsg carries the result of an async wallet-balance fetch; text is the
 // formatted readout ("" when none/failed).
@@ -292,6 +299,7 @@ type promptResolvedMsg struct {
 type refsResolvedMsg struct {
 	sent        string
 	display     string
+	restore     string
 	attachments []chatAttachment
 	block       string
 	errs        []string
@@ -341,6 +349,7 @@ func newChatTUI(ctrl *control.Controller, missing string, eventCh chan event.Eve
 		missing:       missing,
 		input:         ti,
 		spinner:       sp,
+		nextPasteID:   1,
 		reasoning:     &strings.Builder{},
 		pending:       &strings.Builder{},
 		pendingCommit: &commitBuf,
@@ -350,6 +359,7 @@ func newChatTUI(ctrl *control.Controller, missing string, eventCh chan event.Eve
 		host:          ctrl.Host(),
 		commands:      ctrl.Commands(),
 		skills:        ctrl.Skills(),
+		viewport:      viewport.New(viewport.WithWidth(termW)),
 	}
 }
 
@@ -371,24 +381,53 @@ func (m chatTUI) Init() tea.Cmd {
 }
 
 func (m chatTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	wasAtBottom := m.viewport.AtBottom()
+	prevLines := len(m.transcript)
+	prevWidth := m.width
+	prevYOff := m.viewport.YOffset()
+
+	next, cmd := m.update(msg)
+	cm := next.(chatTUI)
+
+	contentW := cm.width - 1 // last column is the scrollbar
+	if contentW < 1 {
+		contentW = 1
+	}
+	cm.viewport.SetWidth(contentW)
+	cm.viewport.SetHeight(cm.transcriptHeight())
+	// Re-feed only when the content grew or the width changed (re-wrapping is
+	// the expensive part); a bare scroll or spinner tick keeps the offset.
+	if len(cm.transcript) != prevLines || cm.width != prevWidth {
+		wrapped := wrapTranscript(strings.Join(cm.transcript, "\n"), contentW)
+		cm.viewport.SetContent(wrapped)
+		cm.wrappedLines = strings.Split(wrapped, "\n")
+		if wasAtBottom {
+			cm.viewport.GotoBottom() // tail-follow: stay pinned to newest output
+		}
+	}
+	// Any viewport scroll (wheel, PgUp/PgDn, edge auto-scroll, or tail-follow to
+	// newest output) shifts the whole window. Some terminals (Warp) mishandle
+	// the renderer's scroll/insert-line optimization and strand stale rows, so
+	// force a full clear+redraw whenever the offset actually moved.
+	if cm.viewport.YOffset() != prevYOff {
+		return cm, tea.Batch(tea.ClearScreen, cmd)
+	}
+	return cm, cmd
+}
+
+// update runs the model's message handling. Update wraps it to keep the
+// transcript viewport sized, fed, and tail-following after every message.
+func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		// bubbletea already resizes+redraws the renderer on a size change, but in
-		// inline mode that single redraw can strand the prior frame's border until
-		// the next normal render (a keystroke clears it). We must NOT use
-		// tea.ClearScreen: inline-mode clearScreen does MoveTo(0,0) into the
-		// scrollback region and repaints there, doubling the frame. Instead, after
-		// an actual size change we queue one forceRepaintMsg — an automatic "nudge"
-		// that fires exactly that extra render and wipes the ghost.
-		resized := m.started && (m.width != msg.Width || m.height != msg.Height)
 		m.width = msg.Width
 		m.height = msg.Height
 		m.input.SetWidth(msg.Width - 4)
 		m.renderer = newMarkdownRenderer(msg.Width)
-		// Commit the banner — and a resumed session's transcript — to scrollback
-		// once, now that the width is known.
+		// Commit the banner — and a resumed session's transcript — once, now
+		// that the width is known.
 		if !m.started {
 			m.started = true
 			var b strings.Builder
@@ -402,21 +441,103 @@ func (m chatTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.commitLine(strings.TrimRight(b.String(), "\n"))
 		}
-		if resized {
-			cmds = append(cmds, func() tea.Msg { return forceRepaintMsg{} })
-		}
 
-	case forceRepaintMsg:
-		// Flip the toggle so the next View differs (a zero-width char in the
-		// status line) and the renderer can't skip it — repainting over the ghost.
-		m.repaintToggle = !m.repaintToggle
+	case tea.MouseWheelMsg:
+		switch msg.Button {
+		case tea.MouseWheelUp:
+			m.viewport.ScrollUp(3)
+		case tea.MouseWheelDown:
+			m.viewport.ScrollDown(3)
+		}
+		return m, nil
+
+	case tea.MouseClickMsg:
+		// Left-press in the transcript region begins a text selection.
+		if msg.Button == tea.MouseLeft && msg.Y < m.viewport.Height() {
+			at := m.transcriptCaret(msg.X, msg.Y)
+			m.sel = selection{active: true, anchor: at, head: at}
+			m.autoScroll = 0
+		}
+		return m, nil
+
+	case tea.MouseMotionMsg:
+		// Drag extends the live selection (CellMotion only reports motion while
+		// a button is held, so this is a drag). A drag held against the top or
+		// bottom edge starts an auto-scroll ticker so the selection can run past
+		// the visible window.
+		if m.sel.active {
+			m.sel.head = m.transcriptCaret(msg.X, msg.Y)
+			m.dragX = msg.X
+			prev := m.autoScroll
+			m.autoScroll = edgeScrollDir(msg.Y, m.viewport.Height())
+			if m.autoScroll != 0 && prev == 0 {
+				return m, autoScrollTick()
+			}
+		}
+		return m, nil
+
+	case autoScrollMsg:
+		// One edge-scroll step: scroll a single line, drag the selection head to
+		// the edge row, and keep ticking until the drag ends, leaves the edge, or
+		// the viewport can't scroll further (so it can't run away to the end).
+		if !m.sel.active || m.autoScroll == 0 {
+			return m, nil
+		}
+		edgeY := 0
+		if m.autoScroll > 0 {
+			m.viewport.ScrollDown(1)
+			edgeY = m.viewport.Height() - 1
+		} else {
+			m.viewport.ScrollUp(1)
+		}
+		m.sel.head = m.transcriptCaret(m.dragX, edgeY)
+		// Stop at the boundary so a held edge can't run away to the very end.
+		if (m.autoScroll > 0 && m.viewport.AtBottom()) || (m.autoScroll < 0 && m.viewport.AtTop()) {
+			m.autoScroll = 0
+			return m, nil
+		}
+		return m, autoScrollTick()
+
+	case tea.MouseReleaseMsg:
+		// Release finalizes the selection; the highlight stays on as the visual
+		// "what's selected" cue and Ctrl+C copies it. A plain click (no drag)
+		// clears any prior selection.
+		m.autoScroll = 0 // stop edge auto-scroll
+		if msg.Button == tea.MouseLeft && m.sel.active && m.sel.empty() {
+			m.sel = selection{}
+		}
+		return m, nil
 
 	case tea.PasteMsg:
 		if m.state != tuiRunning && m.attachPastedImages(msg.Content) {
 			return m, finalize(m, cmds)
 		}
+		if !m.chooserTyping() && m.pendingApproval == nil && m.rewind == nil && m.shouldFoldPaste(msg.Content) {
+			m.insertFoldedPaste(msg.Content)
+			m.growInputToFit()
+			m.updateCompletion()
+			return m, finalize(m, cmds)
+		}
 
 	case tea.KeyPressMsg:
+		// Ctrl+C copies the active selection (terminal convention: copy when
+		// something is selected, otherwise interrupt/quit below).
+		if msg.String() == "ctrl+c" && m.sel.active && !m.sel.empty() {
+			text := m.selectedText()
+			m.sel = selection{}
+			return m, tea.Batch(copyToClipboard(text), finalize(m, cmds))
+		}
+		// Any other keystroke dismisses a finished selection.
+		m.sel = selection{}
+		// Transcript scroll keys work in any state (PgUp/PgDn are never text).
+		switch msg.String() {
+		case "pgup":
+			m.viewport.PageUp()
+			return m, finalize(m, cmds)
+		case "pgdown":
+			m.viewport.PageDown()
+			return m, finalize(m, cmds)
+		}
 		// A question card is modal: keys drive it. In its free-text ("Type
 		// something") mode, the keystroke goes to the textarea — Enter confirms the
 		// custom answer, Esc backs out of typing — so input/IME work as usual.
@@ -507,6 +628,7 @@ func (m chatTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				} else {
 					m.input.Reset()
+					m.pastedBlocks = nil
 				}
 			}
 			return m, nil
@@ -564,6 +686,7 @@ func (m chatTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if strings.HasPrefix(line, "#") {
 				m.input.Reset()
 				m.input.SetHeight(1)
+				m.pastedBlocks = nil
 				note := strings.TrimSpace(strings.TrimPrefix(line, "#"))
 				if note == "" {
 					m.notice("nothing to remember")
@@ -580,13 +703,15 @@ func (m chatTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if strings.HasPrefix(line, "/") && len(m.attachments) == 0 {
 				m.input.Reset()
 				m.input.SetHeight(1)
+				m.pastedBlocks = nil
 				cmds = append(cmds, m.runSlashCommand(line))
 				return m, finalize(m, cmds)
 			}
 
 			attachments := cloneAttachments(m.attachments)
-			sentLine := withAttachmentRefs(line, attachments)
-			displayLine := withAttachmentLabels(line, attachments)
+			sentText := m.expandPastedBlocks(line)
+			sentLine := withAttachmentRefs(sentText, attachments)
+			displayLine := withAttachmentLabels(sentText, attachments)
 			m.input.Reset()
 			m.input.SetHeight(1)
 			m.attachments = nil
@@ -595,11 +720,11 @@ func (m chatTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// loop by the controller; the turn starts when they resolve
 			// (refsResolvedMsg).
 			if m.ctrl.HasRefs(sentLine) {
-				cmds = append(cmds, m.resolveRefs(sentLine, displayLine, attachments))
+				cmds = append(cmds, m.resolveRefs(sentLine, displayLine, line, attachments))
 				return m, finalize(m, cmds)
 			}
 
-			cmds = append(cmds, m.startTurn(m.ctrl.Compose(sentLine), displayLine, attachments))
+			cmds = append(cmds, m.startTurn(m.ctrl.Compose(sentLine), displayLine, line, attachments))
 			return m, finalize(m, cmds)
 		}
 
@@ -664,7 +789,7 @@ func (m chatTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case strings.TrimSpace(msg.sent) == "":
 			m.notice(i18n.M.SlashPromptEmpty)
 		default:
-			cmds = append(cmds, m.startTurn(m.ctrl.Compose(msg.sent), msg.display, nil))
+			cmds = append(cmds, m.startTurn(m.ctrl.Compose(msg.sent), msg.display, msg.display, nil))
 		}
 
 	case refsResolvedMsg:
@@ -675,7 +800,7 @@ func (m chatTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.block != "" {
 			sent = "Referenced context:\n\n" + msg.block + "\n\n" + msg.sent
 		}
-		cmds = append(cmds, m.startTurn(m.ctrl.Compose(sent), msg.display, msg.attachments))
+		cmds = append(cmds, m.startTurn(m.ctrl.Compose(sent), msg.display, msg.restore, msg.attachments))
 
 	case clipboardImageMsg:
 		if msg.err != nil {
@@ -692,7 +817,11 @@ func (m chatTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.attachments = append(m.attachments, chatAttachment{Path: msg.path})
 		case msg.text != "":
 			if !m.attachPastedImages(msg.text) {
-				m.input.InsertString(msg.text)
+				if m.shouldFoldPaste(msg.text) {
+					m.insertFoldedPaste(msg.text)
+				} else {
+					m.input.InsertString(msg.text)
+				}
 				m.growInputToFit()
 				m.updateCompletion()
 				return m, finalize(m, cmds)
@@ -725,62 +854,11 @@ func (m chatTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, finalize(m, cmds)
 }
 
-// finalize flushes any queued scrollback lines into a single ordered tea.Println
-// (Batch doesn't preserve order across multiple Println cmds, so we coalesce per
-// Update) and batches it with the turn's other commands.
+// finalize drains the committed-line queue (its content is already mirrored in
+// the transcript, which the viewport renders) and batches the turn's commands.
 func finalize(m chatTUI, cmds []tea.Cmd) tea.Cmd {
-	if len(*m.pendingCommit) > 0 {
-		out := strings.TrimRight(clampWidth(strings.Join(*m.pendingCommit, "\n"), m.width), "\n")
-		*m.pendingCommit = (*m.pendingCommit)[:0]
-		// Commit in screen-bounded chunks. v2's inline renderer commits scrollback
-		// via insertAbove, which scrolls the screen and InsertLine()s by the
-		// block's line count; a single block taller than the screen makes its
-		// CursorUp clamp at the top and the inserts misalign — the whole frame
-		// (input box, banner) corrupts. Splitting so each Println is at most a
-		// screenful keeps insertAbove within bounds. Sequence preserves order
-		// (Batch does not across multiple Printlns).
-		var prints []tea.Cmd
-		for _, chunk := range chunkLines(out, m.scrollChunkHeight()) {
-			prints = append(prints, tea.Println(chunk))
-		}
-		cmds = append(cmds, tea.Sequence(prints...))
-	}
+	*m.pendingCommit = (*m.pendingCommit)[:0]
 	return tea.Batch(cmds...)
-}
-
-// scrollChunkHeight is the largest block (in lines) finalize prints at once so
-// v2's insertAbove stays within the screen. It leaves room for the pinned
-// bottom frame (input box + status). Falls back to a generous default before
-// the first WindowSizeMsg sets the height.
-func (m chatTUI) scrollChunkHeight() int {
-	if m.height <= 0 {
-		return 100
-	}
-	if n := m.height - 5; n > 1 {
-		return n
-	}
-	return 1
-}
-
-// chunkLines splits s into blocks of at most n lines each, preserving order and
-// line content. A single block is returned when it already fits.
-func chunkLines(s string, n int) []string {
-	if n < 1 {
-		n = 1
-	}
-	lines := strings.Split(s, "\n")
-	if len(lines) <= n {
-		return []string{s}
-	}
-	var out []string
-	for i := 0; i < len(lines); i += n {
-		end := i + n
-		if end > len(lines) {
-			end = len(lines)
-		}
-		out = append(out, strings.Join(lines[i:end], "\n"))
-	}
-	return out
 }
 
 // clampWidth hard-breaks any line wider than width so no scrollback line wraps
@@ -804,6 +882,35 @@ func clampWidth(s string, width int) string {
 // commitLine queues one finalized block for the next scrollback flush.
 func (m *chatTUI) commitLine(s string) {
 	*m.pendingCommit = append(*m.pendingCommit, s)
+	m.transcript = append(m.transcript, s)
+}
+
+// bottomRows is the terminal-row height of the pinned bottom region: any open
+// panels (todo / approval / chooser / rewind / completion), the input box (its
+// line count plus top+bottom border), and the two fixed status rows.
+func (m chatTUI) bottomRows() int {
+	rows := 0
+	for _, s := range []string{
+		m.renderTodoPanel(),
+		m.renderApprovalBanner(),
+		m.renderChooser(),
+		m.renderRewind(),
+		m.renderCompletion(),
+	} {
+		if s != "" {
+			rows += strings.Count(s, "\n") + 1
+		}
+	}
+	return rows + m.input.Height() + 2 + 2
+}
+
+// transcriptHeight is the row budget left for the transcript viewport once the
+// pinned bottom region is accounted for (at least one row).
+func (m chatTUI) transcriptHeight() int {
+	if h := m.height - m.bottomRows(); h > 1 {
+		return h
+	}
+	return 1
 }
 
 // commitReasoning freezes the accumulated thinking stream (verbatim, already
@@ -976,20 +1083,11 @@ func (m chatTUI) View() tea.View {
 		dataLine = "  " + m.statuslineOut
 	}
 
-	// The bottom region must stay a stable height: bubbletea's non-alt-screen
-	// renderer commits scrollback via tea.Println by clearing the previous
-	// frame's lines, so a frame whose height changed every streamed token (a
-	// growing live preview) drifts and strands input-box border lines in the
-	// history. So we don't preview the streaming text here — it lands in
-	// scrollback at boundaries (tool lines stream live; reasoning and the
-	// rendered answer commit at their edges). The menu/banner change height only
-	// on discrete user actions, never mid-stream.
+	// Bottom region pinned under the transcript viewport: optional panels, the
+	// input box, then the two status rows. Its height feeds transcriptHeight so
+	// the viewport above fills exactly the rest of the screen.
 	var parts []string
 	rowsAboveBox := 0 // terminal rows occupied by todo/banner/menu before the input box
-	// The task list is pinned above the input, updating in place. Its height
-	// changes only on a todo_write event (a handful per turn),
-	// not per streamed token, so it doesn't thrash the scrollback the way a live
-	// text preview would.
 	if todo := m.renderTodoPanel(); todo != "" {
 		parts = append(parts, todo)
 		rowsAboveBox += strings.Count(todo, "\n") + 1
@@ -1014,25 +1112,27 @@ func (m chatTUI) View() tea.View {
 		parts = append(parts, menu)
 		rowsAboveBox += strings.Count(menu, "\n") + 1
 	}
-	if m.repaintToggle {
-		// Zero-width space at the front (survives clampStatusLine, which only trims
-		// the tail) so a post-resize repaint produces a byte-different View and
-		// isn't skipped by the renderer. Invisible: width 0, no glyph.
-		dataLine = "​" + dataLine
-	}
 	// Fixed two-row status: line 1 = mode + keybinding/state hints, line 2 = live
 	// data. Each row is clamped to width independently so neither wraps.
 	statusBlock := clampStatusLine(status, boxW) + "\n" + clampStatusLine(dataLine, boxW)
-	parts = append(parts, box, statusStyle.Render(statusBlock))
+	// Pad to the full width so the status rows overwrite the whole line — an
+	// unpadded (short) status leaves stale cells from the prior frame on the
+	// right (alt-screen only writes the cells the frame actually contains).
+	parts = append(parts, box, statusStyle.Width(boxW).MaxWidth(boxW).Render(statusBlock))
 
-	v := tea.NewView(strings.Join(parts, "\n"))
+	// Full-screen frame: the transcript viewport on top (it pads to exactly its
+	// height), the pinned bottom region beneath. Alt-screen owns the grid, so
+	// resize repaints cleanly — no scrollback reflow, no ghost borders.
+	v := tea.NewView(m.renderTranscript() + "\n" + strings.Join(parts, "\n"))
+	v.AltScreen = true
+	v.MouseMode = tea.MouseModeCellMotion // wheel scrolls the transcript
 	// Anchor the real terminal cursor at the textarea's insertion point so IME
-	// candidate windows appear in the input box, not at the bottom of the frame.
-	// input.Cursor() is relative to the textarea; offset it by the box's screen
-	// position (rows above + the box's top border row; +1 column for PaddingLeft).
+	// candidate windows appear in the input box. input.Cursor() is relative to
+	// the textarea; offset by the viewport height + rows above + the box's top
+	// border row (+1 column for PaddingLeft).
 	if cur := m.input.Cursor(); cur != nil {
 		cur.X += 1
-		cur.Y += rowsAboveBox + 1
+		cur.Y += m.viewport.Height() + rowsAboveBox + 1
 		v.Cursor = cur
 	}
 	return v
@@ -1209,6 +1309,7 @@ func (m chatTUI) renderTodoPanel() string {
 			Content    string `json:"content"`
 			Status     string `json:"status"`
 			ActiveForm string `json:"activeForm"`
+			Level      int    `json:"level"`
 		} `json:"todos"`
 	}
 	if err := json.Unmarshal([]byte(m.todoArgs), &p); err != nil || len(p.Todos) == 0 {
@@ -1233,17 +1334,21 @@ func (m chatTUI) renderTodoPanel() string {
 			break
 		}
 		shown++
+		indent := "  "
+		if t.Level >= 1 {
+			indent = "      " // sub-steps sit under their phase
+		}
 		switch t.Status {
 		case "completed":
-			b.WriteString("  " + green("✔") + " " + dim(t.Content) + "\n")
+			b.WriteString(indent + green("✔") + " " + dim(t.Content) + "\n")
 		case "in_progress":
 			label := t.Content
 			if t.ActiveForm != "" {
 				label = t.ActiveForm
 			}
-			b.WriteString("  " + yellow("▶ "+label) + "\n")
+			b.WriteString(indent + yellow("▶ "+label) + "\n")
 		default:
-			b.WriteString("  " + dim("○ "+t.Content) + "\n")
+			b.WriteString(indent + dim("○ "+t.Content) + "\n")
 		}
 	}
 	return todoPanelStyle.Width(max(m.width, 10)).Render(strings.TrimRight(b.String(), "\n"))
@@ -1286,6 +1391,85 @@ func clampStatusLine(s string, width int) string {
 // growInputToFit resizes the textarea to the number of lines its value spans,
 // capped at maxInputRows so a long paste doesn't crowd the screen.
 const maxInputRows = 5
+const foldedPasteMinChars = 1000
+const foldedPasteMinLines = 5
+
+type pastedBlock struct {
+	label string
+	text  string
+}
+
+func pastedLineCount(s string) int {
+	if s == "" {
+		return 0
+	}
+	return strings.Count(strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\r", "\n"), "\n") + 1
+}
+
+func foldedPasteLabel(id, lines int) string {
+	return fmt.Sprintf("[Pasted text #%d · %d lines]", id, lines)
+}
+
+func renderFoldedPasteBlock(block pastedBlock) string {
+	return fmt.Sprintf("%s\n\n--- Begin %s ---\n%s\n--- End %s ---", block.label, block.label, block.text, block.label)
+}
+
+func shouldFoldPastedText(s string) bool {
+	return len([]rune(s)) >= foldedPasteMinChars || pastedLineCount(s) >= foldedPasteMinLines
+}
+
+func (m *chatTUI) chooserTyping() bool {
+	return m.chooser != nil && m.chooser.typing
+}
+
+func (m *chatTUI) shouldFoldPaste(s string) bool {
+	return shouldFoldPastedText(s)
+}
+
+func (m *chatTUI) insertFoldedPaste(s string) {
+	label := foldedPasteLabel(m.nextPasteID, pastedLineCount(s))
+	m.nextPasteID++
+	m.pastedBlocks = append(m.pastedBlocks, pastedBlock{label: label, text: s})
+	m.input.InsertString(label + " ")
+}
+
+func (m *chatTUI) expandPastedBlocks(displayed string) string {
+	sent := displayed
+	for _, block := range m.pastedBlocks {
+		if strings.Contains(sent, block.label) {
+			sent = strings.ReplaceAll(sent, block.label, renderFoldedPasteBlock(block))
+		}
+	}
+	return sent
+}
+
+func (m *chatTUI) pasteLabelsIn(s string) []string {
+	var labels []string
+	for _, block := range m.pastedBlocks {
+		if strings.Contains(s, block.label) {
+			labels = append(labels, block.label)
+		}
+	}
+	return labels
+}
+
+func (m *chatTUI) clearSubmittedPastes() {
+	if len(m.pendingPastes) == 0 {
+		return
+	}
+	submitted := make(map[string]bool, len(m.pendingPastes))
+	for _, label := range m.pendingPastes {
+		submitted[label] = true
+	}
+	kept := m.pastedBlocks[:0]
+	for _, block := range m.pastedBlocks {
+		if !submitted[block.label] {
+			kept = append(kept, block)
+		}
+	}
+	m.pastedBlocks = kept
+	m.pendingPastes = nil
+}
 
 func (m *chatTUI) growInputToFit() {
 	lines := strings.Count(m.input.Value(), "\n") + 1
@@ -1533,8 +1717,9 @@ func (m *chatTUI) toggleVerboseReasoning(notify bool) {
 
 // startTurn commits the user bubble to scrollback, resets the turn accumulator,
 // and kicks off runner.Run. `sent` goes to the model (may carry a plan-mode
-// marker); `displayed` is what the transcript shows.
-func (m *chatTUI) startTurn(sent, displayed string, attachments []chatAttachment) tea.Cmd {
+// marker), `displayed` is what the transcript shows, and `restore` is what Esc
+// puts back into the input while the bubble is still deferred.
+func (m *chatTUI) startTurn(sent, displayed, restore string, attachments []chatAttachment) tea.Cmd {
 	// Flush any half-streamed leftover before the new turn (defensive).
 	m.commitReasoning()
 	m.commitPending()
@@ -1543,6 +1728,8 @@ func (m *chatTUI) startTurn(sent, displayed string, attachments []chatAttachment
 	// pressing Esc before the server replies un-sends the message, restoring its
 	// text to the input box with nothing stranded in scrollback.
 	m.pendingBubble = displayed
+	m.pendingRestore = restore
+	m.pendingPastes = m.pasteLabelsIn(restore)
 	m.pendingAttachments = cloneAttachments(attachments)
 	m.bubblePending = true
 	m.turnDiscarded = false
@@ -1569,6 +1756,7 @@ func (m *chatTUI) commitPendingBubble() {
 	m.commitLine("") // blank line separating turns
 	m.commitLine(renderUserBubble(m.pendingBubble, m.width, m.planMode))
 	m.pendingBubble = ""
+	m.pendingRestore = ""
 	m.pendingAttachments = nil
 }
 
@@ -1578,12 +1766,14 @@ func (m *chatTUI) commitPendingBubble() {
 // already-buffered events reach nothing. Once a packet has arrived the bubble is
 // committed and this path isn't taken (Esc cancels normally instead).
 func (m *chatTUI) unsendPending() {
-	m.input.SetValue(m.pendingBubble)
+	m.input.SetValue(m.pendingRestore)
 	m.growInputToFit()
 	m.attachments = cloneAttachments(m.pendingAttachments)
 	m.pendingAttachments = nil
 	m.bubblePending = false
 	m.pendingBubble = ""
+	m.pendingRestore = ""
+	m.pendingPastes = nil
 	m.turnDiscarded = true
 	m.ctrl.Cancel()
 }
@@ -1718,8 +1908,11 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 			m.bubblePending = false
 			m.pendingBubble = ""
 			m.pendingAttachments = nil
+			m.pendingRestore = ""
+			m.pendingPastes = nil
 		}
 		m.state = tuiIdle
+		m.clearSubmittedPastes()
 		_ = m.ctrl.Snapshot() // best-effort; never the user's problem mid-chat
 		if e.Err != nil && e.Err.Error() != "" && !strings.Contains(e.Err.Error(), "context canceled") {
 			m.commitLine(wrapForViewport(i18n.M.ErrorPrefix+" "+e.Err.Error(), m.width, lipgloss.Color("3")))
@@ -1777,6 +1970,8 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 		m.commitLine("")
 		m.commitLine(strings.TrimRight(renderTUIBanner(m.label, "", m.width), "\n"))
 		m.notice(i18n.M.SlashNewDone)
+	case "/resume":
+		m.runResumeCommand(input)
 	case "/todo":
 		// Dismiss the pinned task list; a later todo_write brings it back.
 		m.todoArgs = ""
@@ -1821,10 +2016,10 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 	default:
 		// A custom command wins over a skill of the same name; both resolve to a turn.
 		if sent, ok := m.ctrl.CustomCommand(input); ok {
-			return m.startTurn(m.ctrl.Compose(sent), input, nil)
+			return m.startTurn(m.ctrl.Compose(sent), input, input, nil)
 		}
 		if sent, ok := m.ctrl.RunSkill(input); ok {
-			return m.startTurn(m.ctrl.Compose(sent), input, nil)
+			return m.startTurn(m.ctrl.Compose(sent), input, input, nil)
 		}
 		m.notice(fmt.Sprintf("%s: %s", i18n.M.SlashUnknown, cmd))
 	}
@@ -1870,6 +2065,18 @@ func (m *chatTUI) runMCPSubcommand(input string) {
 			return
 		}
 		m.notice(fmt.Sprintf("connected %s — %d tools, saved to config (available next message)", entry.Name, n))
+	case "connect":
+		if len(args) < 3 {
+			m.notice("usage: /mcp connect <name>")
+			return
+		}
+		n, err := m.ctrl.ConnectConfiguredMCPServer(args[2])
+		if err != nil {
+			m.notice("mcp connect: " + err.Error())
+			return
+		}
+		m.host = m.ctrl.Host()
+		m.notice(fmt.Sprintf("connected %s — %d tools (available next message)", args[2], n))
 	case "remove", "rm":
 		if len(args) < 3 {
 			m.notice("usage: /mcp remove <name>")
@@ -1887,14 +2094,14 @@ func (m *chatTUI) runMCPSubcommand(input string) {
 			m.notice("removed " + name + " from config")
 		}
 	default:
-		m.notice("unknown /mcp subcommand " + args[1] + " — try: /mcp, /mcp add, /mcp remove")
+		m.notice("unknown /mcp subcommand " + args[1] + " — try: /mcp, /mcp add, /mcp connect, /mcp remove")
 	}
 }
 
 // showMCPStatus queues the connected MCP servers, their counts, and the prompt
 // commands / resource refs they expose — the discovery surface for /mcp.
 func (m *chatTUI) showMCPStatus() {
-	if m.host == nil || len(m.host.Servers()) == 0 {
+	if m.host == nil || (len(m.host.Servers()) == 0 && len(m.host.Failures()) == 0) {
 		m.notice(i18n.M.SlashMCPNone)
 		return
 	}
@@ -1915,6 +2122,9 @@ func (m *chatTUI) showMCPStatus() {
 		}
 		fmt.Fprintf(&b, "      %s  %s\n", "@"+r.Server+":"+r.URI, dim(label))
 	}
+	for _, f := range m.host.Failures() {
+		fmt.Fprintf(&b, "    %s %s %s\n", yellow("!"), bold(f.Name), dim(fmt.Sprintf("(%s) — %s", f.Transport, f.Error)))
+	}
 	m.commitLine(strings.TrimRight(b.String(), "\n"))
 }
 
@@ -1925,10 +2135,10 @@ func (m *chatTUI) notice(note string) {
 
 // resolveRefs resolves a line's @references off the event loop via the
 // controller, delivering a refsResolvedMsg with the tagged context block.
-func (m *chatTUI) resolveRefs(sent, display string, attachments []chatAttachment) tea.Cmd {
+func (m *chatTUI) resolveRefs(sent, display, restore string, attachments []chatAttachment) tea.Cmd {
 	return func() tea.Msg {
 		block, errs := m.ctrl.ResolveRefs(context.Background(), sent)
-		return refsResolvedMsg{sent: sent, display: display, attachments: attachments, block: block, errs: errs}
+		return refsResolvedMsg{sent: sent, display: display, restore: restore, attachments: attachments, block: block, errs: errs}
 	}
 }
 

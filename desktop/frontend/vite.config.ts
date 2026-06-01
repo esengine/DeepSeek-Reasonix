@@ -12,6 +12,8 @@ export default defineConfig({
     target: "es2021",
   },
   server: {
+    // Bind IPv4 — unset host listens on ::1, and the Wails dev proxy's [::1]
+    // dial fails on Windows hosts where IPv6 loopback is filtered.
     host: "127.0.0.1",
     port: 5173,
     strictPort: true,

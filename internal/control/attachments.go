@@ -115,9 +115,50 @@ func SaveClipboardImage() (string, error) {
 	switch runtime.GOOS {
 	case "darwin":
 		return saveDarwinClipboardImage()
+	case "windows":
+		return saveWindowsClipboardImage()
+	case "linux":
+		return saveLinuxClipboardImage()
 	default:
 		return "", fmt.Errorf("clipboard image paste is not supported on %s yet", runtime.GOOS)
 	}
+}
+
+func saveWindowsClipboardImage() (string, error) {
+	// Windows PowerShell 5.1 (preinstalled) reaches the GUI clipboard; pwsh (Core)
+	// lacks Get-Clipboard -Format Image, so invoke powershell.exe. The PNG is
+	// returned as base64 on stdout so no temp file is involved.
+	script := `Add-Type -AssemblyName System.Drawing
+$img = Get-Clipboard -Format Image
+if ($null -eq $img) { [Console]::Error.WriteLine('clipboard has no image'); exit 1 }
+$ms = New-Object System.IO.MemoryStream
+$img.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
+[Convert]::ToBase64String($ms.ToArray())`
+	out, err := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", script).Output()
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok && len(ee.Stderr) > 0 {
+			return "", fmt.Errorf("read clipboard image: %s", strings.TrimSpace(string(ee.Stderr)))
+		}
+		return "", fmt.Errorf("read clipboard image: %w", err)
+	}
+	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(out)))
+	if err != nil {
+		return "", fmt.Errorf("decode clipboard image: %w", err)
+	}
+	return SaveImageBytes("", raw)
+}
+
+func saveLinuxClipboardImage() (string, error) {
+	// Wayland (wl-paste) then X11 (xclip); both write image bytes to stdout.
+	for _, c := range [][]string{
+		{"wl-paste", "--type", "image/png", "--no-newline"},
+		{"xclip", "-selection", "clipboard", "-t", "image/png", "-o"},
+	} {
+		if out, err := exec.Command(c[0], c[1:]...).Output(); err == nil && len(out) > 0 {
+			return SaveImageBytes("", out)
+		}
+	}
+	return "", fmt.Errorf("clipboard image paste needs wl-paste (Wayland) or xclip (X11)")
 }
 
 func ImageDataURL(path string) (string, error) {

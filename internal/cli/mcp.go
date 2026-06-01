@@ -197,11 +197,15 @@ func mcpList() int {
 		if typ == "" {
 			typ = "stdio"
 		}
+		auto := ""
+		if !p.ShouldAutoStart() {
+			auto = " [auto_start=false]"
+		}
 		if typ == "stdio" {
 			line := strings.TrimSpace(p.Command + " " + strings.Join(p.Args, " "))
-			fmt.Printf("%-16s (stdio)  %s\n", p.Name, line)
+			fmt.Printf("%-16s (stdio)%s  %s\n", p.Name, auto, line)
 		} else {
-			fmt.Printf("%-16s (%s)  %s\n", p.Name, typ, p.URL)
+			fmt.Printf("%-16s (%s)%s  %s\n", p.Name, typ, auto, p.URL)
 		}
 		listed++
 	}

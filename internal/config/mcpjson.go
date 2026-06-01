@@ -16,12 +16,13 @@ const mcpJSONFile = ".mcp.json"
 // names and semantics match PluginEntry (and Claude): command/args/env describe
 // a local stdio server; type/url/headers describe a remote one.
 type mcpServerSpec struct {
-	Type    string            `json:"type"`
-	Command string            `json:"command"`
-	Args    []string          `json:"args"`
-	Env     map[string]string `json:"env"`
-	URL     string            `json:"url"`
-	Headers map[string]string `json:"headers"`
+	Type      string            `json:"type"`
+	Command   string            `json:"command"`
+	Args      []string          `json:"args"`
+	Env       map[string]string `json:"env"`
+	URL       string            `json:"url"`
+	Headers   map[string]string `json:"headers"`
+	AutoStart *bool             `json:"auto_start"`
 }
 
 // loadMCPJSON reads path (Claude Code's .mcp.json) and returns its servers as
@@ -51,13 +52,14 @@ func loadMCPJSON(path string) ([]PluginEntry, error) {
 	for _, name := range names {
 		s := doc.MCPServers[name]
 		entries = append(entries, PluginEntry{
-			Name:    name,
-			Type:    s.Type,
-			Command: s.Command,
-			Args:    s.Args,
-			Env:     s.Env,
-			URL:     s.URL,
-			Headers: s.Headers,
+			Name:      name,
+			Type:      s.Type,
+			Command:   s.Command,
+			Args:      s.Args,
+			Env:       s.Env,
+			URL:       s.URL,
+			Headers:   s.Headers,
+			AutoStart: s.AutoStart,
 		})
 	}
 	return entries, nil
