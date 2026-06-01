@@ -11,6 +11,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -95,6 +96,13 @@ type chatTUI struct {
 	renderer      *mdRenderer
 	eventCh       chan event.Event
 	started       bool // banner + resumed history committed once
+
+	// transcript mirrors every finalized line commitLine emits — the same
+	// content that today goes to native scrollback via tea.Println. The
+	// alt-screen refactor renders it through this viewport instead; for now it's
+	// maintained in parallel (not yet shown) so the migration lands in stages.
+	transcript []string
+	viewport   viewport.Model
 
 	// The user bubble for an in-flight turn is deferred, not echoed on Enter: it's
 	// held in pendingBubble and committed to scrollback only when the first
@@ -321,6 +329,7 @@ func newChatTUI(ctrl *control.Controller, missing string, eventCh chan event.Eve
 		host:          ctrl.Host(),
 		commands:      ctrl.Commands(),
 		skills:        ctrl.Skills(),
+		viewport:      viewport.New(viewport.WithWidth(termW)),
 	}
 }
 
@@ -376,6 +385,7 @@ func (m chatTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if resized {
 			cmds = append(cmds, func() tea.Msg { return forceRepaintMsg{} })
 		}
+		m.syncTranscriptViewport()
 
 	case forceRepaintMsg:
 		// Flip the toggle so the next View differs (a zero-width char in the
@@ -726,6 +736,44 @@ func clampWidth(s string, width int) string {
 // commitLine queues one finalized block for the next scrollback flush.
 func (m *chatTUI) commitLine(s string) {
 	*m.pendingCommit = append(*m.pendingCommit, s)
+	m.transcript = append(m.transcript, s)
+}
+
+// bottomRows is the terminal-row height of the pinned bottom region: any open
+// panels (todo / approval / chooser / rewind / completion), the input box (its
+// line count plus top+bottom border), and the two fixed status rows.
+func (m chatTUI) bottomRows() int {
+	rows := 0
+	for _, s := range []string{
+		m.renderTodoPanel(),
+		m.renderApprovalBanner(),
+		m.renderChooser(),
+		m.renderRewind(),
+		m.renderCompletion(),
+	} {
+		if s != "" {
+			rows += strings.Count(s, "\n") + 1
+		}
+	}
+	return rows + m.input.Height() + 2 + 2
+}
+
+// transcriptHeight is the row budget left for the transcript viewport once the
+// pinned bottom region is accounted for (at least one row).
+func (m chatTUI) transcriptHeight() int {
+	if h := m.height - m.bottomRows(); h > 1 {
+		return h
+	}
+	return 1
+}
+
+// syncTranscriptViewport mirrors the committed transcript and current dimensions
+// into the viewport. Not yet rendered (View still prints to scrollback); it
+// keeps the viewport ready for the alt-screen switch.
+func (m *chatTUI) syncTranscriptViewport() {
+	m.viewport.SetWidth(m.width)
+	m.viewport.SetHeight(m.transcriptHeight())
+	m.viewport.SetContent(strings.Join(m.transcript, "\n"))
 }
 
 // commitReasoning freezes the accumulated thinking stream (verbatim, already

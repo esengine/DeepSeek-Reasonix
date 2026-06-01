@@ -4,10 +4,54 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
 )
+
+// TestTranscriptMirrorsCommits proves the alt-screen migration's foundation:
+// every line commitLine sends to native scrollback is also captured in the
+// transcript buffer (the future viewport's content source), in order.
+func TestTranscriptMirrorsCommits(t *testing.T) {
+	m := newTestChatTUI()
+	m.ingestEvent(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{Name: "read_file", Args: `{"path":"x"}`}})
+	m.ingestEvent(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "compacted"})
+
+	if len(m.transcript) != len(*m.pendingCommit) {
+		t.Fatalf("transcript (%d) and pendingCommit (%d) should hold the same lines", len(m.transcript), len(*m.pendingCommit))
+	}
+	for i := range m.transcript {
+		if m.transcript[i] != (*m.pendingCommit)[i] {
+			t.Errorf("line %d mismatch: transcript=%q pendingCommit=%q", i, m.transcript[i], (*m.pendingCommit)[i])
+		}
+	}
+}
+
+// TestTranscriptViewportSizing proves the viewport tracks the terminal size and
+// gets the rows left over after the pinned bottom region (input box + 2 status
+// rows = 5 with an empty 1-line composer), and is fed the committed transcript.
+func TestTranscriptViewportSizing(t *testing.T) {
+	ctrl := control.New(control.Options{})
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
+
+	m0, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = m0.(chatTUI)
+
+	if got := m.bottomRows(); got != 5 {
+		t.Fatalf("bottomRows with an empty composer = %d, want 5 (input 1 + border 2 + status 2)", got)
+	}
+	if m.viewport.Width() != 80 {
+		t.Errorf("viewport width = %d, want 80", m.viewport.Width())
+	}
+	if want := m.transcriptHeight(); m.viewport.Height() != want || want != 19 {
+		t.Errorf("viewport height = %d, transcriptHeight = %d, want 19 (24-5)", m.viewport.Height(), want)
+	}
+	if m.viewport.TotalLineCount() == 0 {
+		t.Errorf("viewport should hold the committed banner after the first resize")
+	}
+}
 
 // TestIngestEventRoutesByKind proves each event Kind lands in the right place:
 // reasoning accumulates in its live buffer (uncommitted), while tool dispatch,
