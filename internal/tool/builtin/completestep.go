@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"reasonix/internal/evidence"
 	"reasonix/internal/tool"
 )
 
@@ -103,6 +104,54 @@ func (completeStep) Execute(ctx context.Context, args json.RawMessage) (string, 
 		}
 		kinds = append(kinds, e.Kind)
 	}
-	return fmt.Sprintf("Step %q signed off with %d evidence item(s) [%s]. Move the next step to in_progress with todo_write.",
-		p.Step, len(p.Evidence), strings.Join(kinds, ", ")), nil
+
+	hostVerified, manualUnverified, err := verifyStepEvidence(ctx, p.Evidence)
+	if err != nil {
+		return "", err
+	}
+	hostStatus := ""
+	if _, ok := evidence.FromContext(ctx); ok {
+		hostStatus = fmt.Sprintf(" Host evidence: host-verified %d, manual/unverified %d.", hostVerified, manualUnverified)
+	}
+	return fmt.Sprintf("Step %q signed off with %d evidence item(s) [%s].%s Move the next step to in_progress with todo_write.",
+		p.Step, len(p.Evidence), strings.Join(kinds, ", "), hostStatus), nil
+}
+
+func verifyStepEvidence(ctx context.Context, items []stepEvidence) (hostVerified int, manualUnverified int, err error) {
+	ledger, ok := evidence.FromContext(ctx)
+	if !ok {
+		return 0, 0, nil
+	}
+	for i, e := range items {
+		switch e.Kind {
+		case "verification":
+			command := strings.TrimSpace(e.Command)
+			if command == "" {
+				return 0, 0, fmt.Errorf("evidence %d: verification command is required for host verification", i+1)
+			}
+			if !ledger.HasSuccessfulCommand(command) {
+				return 0, 0, fmt.Errorf("evidence %d: verification command %q has no matching successful bash receipt in this turn", i+1, command)
+			}
+			hostVerified++
+		case "diff":
+			if len(e.Paths) == 0 {
+				return 0, 0, fmt.Errorf("evidence %d: diff evidence requires paths for host verification", i+1)
+			}
+			if !ledger.HasSuccessfulWrite(e.Paths) {
+				return 0, 0, fmt.Errorf("evidence %d: diff paths have no matching successful writer receipt in this turn", i+1)
+			}
+			hostVerified++
+		case "files":
+			if len(e.Paths) == 0 {
+				return 0, 0, fmt.Errorf("evidence %d: files evidence requires paths for host verification", i+1)
+			}
+			if !ledger.HasSuccessfulReadOrWrite(e.Paths) {
+				return 0, 0, fmt.Errorf("evidence %d: file paths have no matching successful read/write receipt in this turn", i+1)
+			}
+			hostVerified++
+		case "manual":
+			manualUnverified++
+		}
+	}
+	return hostVerified, manualUnverified, nil
 }
