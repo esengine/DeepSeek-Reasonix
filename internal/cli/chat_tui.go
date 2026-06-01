@@ -1838,6 +1838,8 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 		m.commitLine("")
 		m.commitLine(strings.TrimRight(renderTUIBanner(m.label, "", m.width), "\n"))
 		m.notice(i18n.M.SlashNewDone)
+	case "/resume":
+		m.runResumeCommand(input)
 	case "/todo":
 		// Dismiss the pinned task list; a later todo_write brings it back.
 		m.todoArgs = ""
