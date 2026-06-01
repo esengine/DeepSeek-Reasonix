@@ -53,6 +53,8 @@ type Controller struct {
 	hooks        *hook.Runner // session hook runner; nil-safe (no hooks configured)
 	mem          *memory.Set
 	cleanup      func()
+	autoPlan     string
+	classifier   autoPlanClassifier
 	startedOnce  bool // guards the one-shot SessionStart hook on first turn
 
 	// balanceURL/balanceKey target the active provider's optional wallet-balance
@@ -164,6 +166,8 @@ type Options struct {
 	// WorkspaceRoot is the project root checkpoint restores are confined to ("" =
 	// no confinement). Frontends pass the cwd they launched the session in.
 	WorkspaceRoot string
+	AutoPlan      string
+	Classifier    autoPlanClassifier
 }
 
 // New builds a Controller. A nil Sink is replaced with event.Discard.
@@ -191,6 +195,8 @@ func New(opts Options) *Controller {
 		hooks:        opts.Hooks,
 		mem:          opts.Memory,
 		cleanup:      opts.Cleanup,
+		autoPlan:     normalizeAutoPlan(opts.AutoPlan),
+		classifier:   opts.Classifier,
 		balanceURL:   opts.BalanceURL,
 		balanceKey:   opts.BalanceKey,
 		jobs:         opts.Jobs,
@@ -279,11 +285,19 @@ func (c *Controller) runGuarded(body func(ctx context.Context) error) {
 	}()
 }
 
-// Send starts a turn with an already-composed message (the caller applied any
-// plan-mode marker and @-ref expansion). Used by the chat TUI, which resolves
-// those itself for live UI feedback.
+// Send starts a turn with an uncomposed message. The controller applies
+// auto-plan, plan-mode, memory, and background-job framing inside the async turn
+// path so frontends do not block on classifier I/O.
 func (c *Controller) Send(input string) {
-	c.runGuarded(func(ctx context.Context) error { return c.runTurn(ctx, input) })
+	c.SendWithRaw(input, input)
+}
+
+// SendWithRaw starts a turn with separate model input and raw prompt text. The
+// raw prompt is used only for auto-plan scoring; it deliberately excludes
+// resolved @-reference payloads so referenced file contents cannot inflate the
+// complexity score.
+func (c *Controller) SendWithRaw(input, raw string) {
+	c.runGuarded(func(ctx context.Context) error { return c.runTurnWithRaw(ctx, input, raw) })
 }
 
 // planApprovalTool is the Tool name on the ApprovalRequest the controller emits
@@ -305,7 +319,13 @@ const planApprovedMessage = "Plan approved — plan mode is off; you're cleared 
 // next turn can revise. Plan mode is only ever set interactively, so the headless
 // `Run` path (which doesn't call this) never blocks on a prompt.
 func (c *Controller) runTurn(ctx context.Context, input string) error {
+	return c.runTurnWithRaw(ctx, input, input)
+}
+
+func (c *Controller) runTurnWithRaw(ctx context.Context, input, raw string) error {
 	c.maybeSessionStart(ctx)
+	c.maybeAutoPlan(ctx, raw)
+	input = c.Compose(input)
 	// Open a checkpoint for this turn before the user message is appended, so the
 	// recorded message boundary precedes it and pre-edit snapshots land here.
 	c.beginCheckpoint(input)
@@ -426,7 +446,7 @@ func (c *Controller) Submit(input string) {
 				c.notice("unknown command: " + trimmed)
 				return nil
 			}
-			return c.runner.Run(ctx, c.Compose(sent))
+			return c.runTurnWithRaw(ctx, sent, sent)
 		})
 	case strings.HasPrefix(trimmed, "/"):
 		// Read-only management verbs (/model /memory /skill /hooks /mcp) emit a
@@ -459,13 +479,13 @@ func (c *Controller) Submit(input string) {
 		// turn. (Built-in slash verbs like /compact are handled above.)
 		if sent, ok := c.CustomCommand(trimmed); ok {
 			c.runGuarded(func(ctx context.Context) error {
-				return c.runTurn(ctx, c.Compose(sent))
+				return c.runTurnWithRaw(ctx, sent, sent)
 			})
 			return
 		}
 		if sent, ok := c.RunSkill(trimmed); ok {
 			c.runGuarded(func(ctx context.Context) error {
-				return c.runTurn(ctx, c.Compose(sent))
+				return c.runTurnWithRaw(ctx, sent, sent)
 			})
 			return
 		}
@@ -480,7 +500,7 @@ func (c *Controller) Submit(input string) {
 			if block != "" {
 				sent = "Referenced context:\n\n" + block + "\n\n" + input
 			}
-			return c.runTurn(ctx, c.Compose(sent))
+			return c.runTurnWithRaw(ctx, sent, input)
 		})
 	}
 }
@@ -597,6 +617,14 @@ func (c *Controller) SetPlanMode(v bool) {
 	if c.executor != nil {
 		c.executor.SetPlanMode(v)
 	}
+}
+
+// PlanMode reports whether outgoing turns currently receive the plan-mode
+// marker. Frontends use it after Compose because auto-plan may flip the mode.
+func (c *Controller) PlanMode() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.planMode
 }
 
 // Compact runs one compaction pass on the executor's session on demand.
@@ -1210,6 +1238,21 @@ func (c *Controller) RemoveMCPServer(name string) (disconnected bool, err error)
 		return false, fmt.Errorf("no MCP server named %q", name)
 	}
 	return disconnected, nil
+}
+
+// DisconnectMCPServer disconnects a live server for this session without touching
+// config — the connector toggle's "off". Its tools vanish next turn; it reconnects
+// on the next session start, or now via ConnectConfiguredMCPServer (the "on").
+// Reports whether a live server was actually disconnected.
+func (c *Controller) DisconnectMCPServer(name string) bool {
+	if c.host == nil {
+		return false
+	}
+	prefix, ok := c.host.Remove(name)
+	if ok && c.reg != nil {
+		c.reg.RemovePrefix(prefix)
+	}
+	return ok
 }
 
 // Label returns the human-readable model label, e.g. "deepseek-flash".

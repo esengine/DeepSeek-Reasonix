@@ -49,10 +49,17 @@ func (g globTool) Execute(ctx context.Context, args json.RawMessage) (string, er
 		return globRecursive(p.Pattern)
 	}
 
-	// Standard filepath.Glob for patterns without **.
+	// For patterns without **, try filepath.Glob first. If no matches are
+	// found and the pattern is a simple filename (no path separator), retry
+	// with a recursive walk (equivalent to "**/<pattern>") so the tool finds
+	// files anywhere in the tree — the common case where the model only knows
+	// a filename but not its exact location.
 	matches, err := filepath.Glob(p.Pattern)
 	if err != nil {
 		return "", fmt.Errorf("glob %q: %w", p.Pattern, err)
+	}
+	if len(matches) == 0 && !strings.ContainsAny(p.Pattern, "/\\") {
+		return globRecursive(filepath.Join("**", p.Pattern))
 	}
 	if len(matches) == 0 {
 		return "(no matches)", nil

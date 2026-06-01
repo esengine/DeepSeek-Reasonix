@@ -13,14 +13,18 @@ import (
 	"reasonix/internal/provider"
 )
 
-// Compaction defaults. Compaction is a low-frequency cache-reset point: prompts
-// grow prepend-only (high cache hits) until a turn's prompt nears the model's
-// context window, then we compact once — summarizing the older history and
-// archiving the originals — so a long task can keep going.
+// Compaction is a low-frequency cache-reset point: the prompt grows append-only
+// (high cache hits) until a turn nears compactRatio of the window, then it is
+// compacted down to a tail budget. The budget is a fixed token count, not a
+// fraction of the window, so a huge window still compacts rarely while a small
+// one still lands below the trigger (which is what stops the re-compaction loop).
 const (
-	defaultCompactRatio = 0.8 // compact when prompt_tokens reach this fraction of the window
-	defaultRecentKeep   = 8   // recent messages kept verbatim, never summarized
-	minCompactMessages  = 2   // skip compaction below this many compactable messages
+	defaultCompactRatio  = 0.8   // trigger: prompt at this fraction of the window compacts
+	defaultCompactTarget = 0.5   // safety cap: the kept tail never exceeds this fraction of the window
+	defaultTailTokens    = 16384 // verbatim recent-tail budget, in tokens
+	minRecentKeep        = 2     // never keep fewer recent messages than this
+	minCompactMessages   = 2     // skip compaction below this many compactable messages
+	fallbackTokPerChar   = 0.25  // ~4 chars/token, used before any usage is available to calibrate
 )
 
 // summarySystemPrompt steers the executor to distill older history into a
@@ -60,11 +64,32 @@ func (a *Agent) maybeCompact(ctx context.Context, u *provider.Usage) {
 	if a.contextWindow <= 0 || u == nil || u.PromptTokens == 0 {
 		return
 	}
-	if u.PromptTokens < int(float64(a.contextWindow)*a.compactRatio) {
+	high := int(float64(a.contextWindow) * a.compactRatio)
+	if u.PromptTokens < high {
+		// A turn that sits under the trigger is the breathing room a healthy
+		// compaction buys; it clears the stuck latch and the run counter.
+		a.consecutiveCompacts = 0
+		a.compactStuck = false
+		return
+	}
+	if a.compactStuck {
 		return
 	}
 	if err := a.compact(ctx, "auto", ""); err != nil {
 		a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: fmt.Sprintf("compaction skipped: %v", err)})
+		return
+	}
+	// A healthy compaction drops the prompt under the trigger, so the next turn
+	// won't compact. Compacting on consecutive turns means the kept tail alone
+	// exceeds the trigger — the system prompt plus one verbatim turn is bigger than
+	// the window allows. Re-firing every turn is the loop users hit, so pause
+	// auto-compaction and say why, once.
+	a.consecutiveCompacts++
+	if a.consecutiveCompacts >= 2 {
+		a.compactStuck = true
+		a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: fmt.Sprintf(
+			"context_window=%d is too small for compaction to help (the system prompt plus one turn already exceeds %.0f%% of it); raise context_window or shrink tool output. Auto-compaction paused until the prompt drops.",
+			a.contextWindow, a.compactRatio*100)})
 	}
 }
 
@@ -78,7 +103,7 @@ func (a *Agent) maybeCompact(ctx context.Context, u *provider.Usage) {
 // "compacting…" placeholder, and a Done event (carrying the summary) replaces it.
 func (a *Agent) compact(ctx context.Context, trigger, instructions string) error {
 	msgs := a.session.Messages
-	head, start, ok := compactBounds(msgs, a.recentKeep, minCompactMessages)
+	head, start, ok := a.planCompaction(msgs)
 	if !ok {
 		return nil // recent tail already covers everything worth keeping
 	}
@@ -198,27 +223,101 @@ func (a *Agent) SummarizeUpTo(ctx context.Context, toIdx int) error {
 	return nil
 }
 
-// compactBounds locates the region to summarize. head is the count of leading
+// planCompaction locates the region to summarize. head is the count of leading
 // messages preserved verbatim (the system prompt, if any); start is where the
-// preserved recent tail begins, so msgs[head:start] is compacted. The boundary
-// is aligned backward off any tool result so the recent tail never begins with
-// an orphan tool message whose assistant tool_calls were summarized away. ok is
-// false when there is too little to compact.
-func compactBounds(msgs []provider.Message, recentKeep, minCompact int) (head, start int, ok bool) {
+// preserved recent tail begins, so msgs[head:start] is compacted. The tail is
+// bounded by a token budget (not a message count), so a few large tool outputs
+// can't keep it above the trigger and re-fire compaction every turn. ok is false
+// when there is too little to compact.
+func (a *Agent) planCompaction(msgs []provider.Message) (head, start int, ok bool) {
 	if len(msgs) > 0 && msgs[0].Role == provider.RoleSystem {
 		head = 1
 	}
-	start = len(msgs) - recentKeep
-	if start <= head {
+	if a.contextWindow > 0 {
+		budget := defaultTailTokens
+		if maxByWin := int(float64(a.contextWindow) * defaultCompactTarget); maxByWin < budget {
+			budget = maxByWin
+		}
+		start = tailStart(msgs, head, budget, a.tokPerChar(), a.tailFloor())
+	} else {
+		// No window to budget against (manual /compact on an unconfigured
+		// provider): keep a fixed count of recent messages, aligned off any tool.
+		start = len(msgs) - a.tailFloor()
+		for start > head && msgs[start].Role == provider.RoleTool {
+			start--
+		}
+	}
+	if start < head {
+		start = head
+	}
+	if start-head < minCompactMessages {
 		return head, start, false
+	}
+	return head, start, true
+}
+
+func (a *Agent) tailFloor() int {
+	if a.recentKeep > minRecentKeep {
+		return a.recentKeep
+	}
+	return minRecentKeep
+}
+
+// tailStart walks newest→oldest, growing the verbatim tail until the next
+// message would push its token estimate past budgetTokens (but never below
+// minKeep messages), then aligns the boundary back off any tool result so the
+// tail never begins with an orphan whose assistant tool_calls were summarized
+// away.
+func tailStart(msgs []provider.Message, head, budgetTokens int, tokPerChar float64, minKeep int) int {
+	start := len(msgs)
+	acc := 0
+	for i := len(msgs) - 1; i > head; i-- {
+		c := int(float64(msgChars(msgs[i])) * tokPerChar)
+		if len(msgs)-i > minKeep && acc+c > budgetTokens {
+			break
+		}
+		acc += c
+		start = i
 	}
 	for start > head && msgs[start].Role == provider.RoleTool {
 		start--
 	}
-	if start-head < minCompact {
-		return head, start, false
+	return start
+}
+
+// tokPerChar derives a tokens-per-character ratio from the last turn's real
+// usage so per-message estimates track the provider's tokenizer without a local
+// one. Reasoning content is excluded from the char count to match the prompt
+// actually sent (the provider strips it). Falls back to ~4 chars/token before
+// any usage is known, and ignores absurd ratios.
+func (a *Agent) tokPerChar() float64 {
+	if a.lastUsage != nil && a.lastUsage.PromptTokens > 0 {
+		if c := charsOfMessages(a.session.Messages); c > 0 {
+			if r := float64(a.lastUsage.PromptTokens) / float64(c); r > 0.05 && r < 2 {
+				return r
+			}
+		}
 	}
-	return head, start, true
+	return fallbackTokPerChar
+}
+
+// msgChars counts the characters that ride to the provider for one message —
+// content plus tool-call names and arguments, but not reasoning (stripped on
+// send).
+func msgChars(m provider.Message) int {
+	n := len(m.Content)
+	for _, tc := range m.ToolCalls {
+		n += len(tc.Name) + len(tc.Arguments)
+	}
+	return n
+}
+
+func charsOfMessages(msgs []provider.Message) int {
+	n := 0
+	for _, m := range msgs {
+		n += msgChars(m)
+	}
+	return n
 }
 
 // summarize asks the executor's own provider (no tools) to distill the region
