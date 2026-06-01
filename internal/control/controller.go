@@ -1377,6 +1377,15 @@ func listItem(line string) (content string, level int, ok bool) {
 		}
 	}
 	s := trimmed
+	// A numbered markdown heading ("### 1. Add the loader") is how models often
+	// write a phase even when asked for a list; strip the heading marker and
+	// treat it as a top-level phase. A heading without a number (a section
+	// title like "## Plan") falls through and is ignored.
+	heading := false
+	if h := strings.TrimLeft(s, "#"); h != s && strings.HasPrefix(h, " ") {
+		heading = true
+		s = strings.TrimSpace(h)
+	}
 	switch {
 	case strings.HasPrefix(s, "- "), strings.HasPrefix(s, "* "), strings.HasPrefix(s, "+ "):
 		s = s[2:]
@@ -1399,6 +1408,9 @@ func listItem(line string) (content string, level int, ok bool) {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return "", 0, false
+	}
+	if heading {
+		return s, 0, true // a heading is always a top-level phase
 	}
 	if indent >= 2 {
 		return s, 1, true

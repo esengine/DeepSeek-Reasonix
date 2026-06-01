@@ -71,6 +71,20 @@ func TestParsePlanTodos(t *testing.T) {
 				{Content: "nested by tab", Status: "pending", Level: 1},
 			},
 		},
+		{
+			// The real model wrote phases as numbered ### headings with indented
+			// bullet sub-steps, and a leading "## Plan" title — the shape a live
+			// run surfaced that flat list-only parsing collapsed to all level 1.
+			name: "numbered headings are phases; title is ignored; bullets are sub-steps",
+			plan: "## Plan: add a flag\n\n### 1. Define the field\n   - add Verbose bool\n   - document it\n\n### 2. Wire it up\n   - read from config",
+			want: []seedTodo{
+				{Content: "Define the field", Status: "in_progress", Level: 0},
+				{Content: "add Verbose bool", Status: "pending", Level: 1},
+				{Content: "document it", Status: "pending", Level: 1},
+				{Content: "Wire it up", Status: "pending", Level: 0},
+				{Content: "read from config", Status: "pending", Level: 1},
+			},
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
