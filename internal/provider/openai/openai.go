@@ -14,7 +14,6 @@ import (
 	"math/rand"
 	"net"
 	"net/http"
-	"os"
 	"sort"
 	"strings"
 	"time"
@@ -231,27 +230,12 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
-	// Raw SSE logging: always log to /tmp/reasonix-sse.log for diagnostics.
-	// Set REASONIX_LOG_SSE=0 to disable. Useful for diagnosing server-side
-	// token ordering issues (e.g. garbled reasoning output).
-	var sseLog *os.File
-	if os.Getenv("REASONIX_LOG_SSE") != "0" {
-		sseLog, _ = os.OpenFile("/tmp/reasonix-sse.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-		if sseLog != nil {
-			fmt.Fprintf(sseLog, "--- stream start model=%s ---\n", c.model)
-			defer sseLog.Close()
-		}
-	}
-
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || !strings.HasPrefix(line, "data:") {
 			continue
 		}
 		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		if sseLog != nil {
-			fmt.Fprintln(sseLog, data)
-		}
 		if data == "[DONE]" {
 			break
 		}
