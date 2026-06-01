@@ -58,9 +58,10 @@ function avgRate(u?: WireUsage): number | null {
 }
 
 // shortCwd trims a path to its last two segments so the status line stays compact
-// (e.g. /Users/x/projects/reasonix → …/projects/reasonix).
+// (e.g. /Users/x/projects/reasonix → …/projects/reasonix). Splits on both
+// separators so Windows backslash paths (C:\…\reasonix) shorten too.
 function shortCwd(cwd: string): string {
-  const parts = cwd.split("/").filter(Boolean);
+  const parts = cwd.split(/[/\\]/).filter(Boolean);
   if (parts.length <= 2) return cwd;
   return "…/" + parts.slice(-2).join("/");
 }
