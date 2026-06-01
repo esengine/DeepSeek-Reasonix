@@ -1,11 +1,15 @@
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import "katex/dist/katex.min.css";
 import { CodeViewer } from "./CodeViewer";
 import { openExternal } from "../lib/bridge";
 
 // Markdown rendering via react-markdown + remark-gfm (tables, task lists, strike,
-// autolinks). Fenced code blocks are routed through the editor seam (CodeViewer)
+// autolinks) and remark-math + rehype-katex for $inline$/$$block$$ KaTeX math.
+// Fenced code blocks are routed through the editor seam (CodeViewer)
 // so syntax highlighting stays owned by one place; inline code is a styled <code>.
 // Links open in the system browser rather than navigating the webview.
 
@@ -38,7 +42,7 @@ const components: Components = {
 export function Markdown({ text }: { text: string }) {
   return (
     <div className="md">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+      <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]} components={components}>
         {text}
       </ReactMarkdown>
     </div>
