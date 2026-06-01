@@ -87,6 +87,14 @@ func selectOne(label string, items []menuItem) (int, error) {
 // Space toggles, Enter confirms (at least one required), q/Ctrl-C aborts. It
 // returns the checked indices in order and requires a TTY.
 func selectMany(label string, items []menuItem) ([]int, error) {
+	return selectManyWithReveal(label, items, len(items), "")
+}
+
+// selectManyWithReveal is like selectMany but supports a "/" key to reveal
+// hidden items. builtinCount items are shown initially; pressing "/" reveals
+// the rest (if any) and shows revealHint as a dimmed line at the bottom.
+// When revealHint is empty, "/" does nothing (all items visible).
+func selectManyWithReveal(label string, items []menuItem, builtinCount int, revealHint string) ([]int, error) {
 	fd := int(os.Stdin.Fd())
 	old, err := term.MakeRaw(fd)
 	if err != nil {
@@ -98,9 +106,15 @@ func selectMany(label string, items []menuItem) ([]int, error) {
 	fmt.Fprintf(w, "%s %s  %s\r\n\r\n", accent("▌"), bold(label), dim(i18n.M.SelectManyHint))
 
 	cur := 0
+	visible := builtinCount
+	if visible > len(items) {
+		visible = len(items)
+	}
+	revealed := visible == len(items) // all visible from the start
 	checked := make([]bool, len(items))
 	render := func() {
-		for i, it := range items {
+		for i := 0; i < visible; i++ {
+			it := items[i]
 			box := "[ ]"
 			if checked[i] {
 				box = "[x]"
@@ -111,6 +125,9 @@ func selectMany(label string, items []menuItem) ([]int, error) {
 			} else {
 				fmt.Fprintf(w, "\r\033[K   %s %s %s\r\n", box, name, dim(it.desc))
 			}
+		}
+		if !revealed && revealHint != "" {
+			fmt.Fprintf(w, "\r\033[K  %s\r\n", dim(revealHint))
 		}
 	}
 	render()
@@ -140,12 +157,15 @@ func selectMany(label string, items []menuItem) ([]int, error) {
 			return nil, errCancelled
 		case k[0] == ' ':
 			checked[cur] = !checked[cur]
+		case k[0] == '/' && !revealed:
+			revealed = true
+			visible = len(items)
 		case len(k) >= 3 && k[0] == 27 && k[1] == '[' && k[2] == 'A':
 			if cur > 0 {
 				cur--
 			}
 		case len(k) >= 3 && k[0] == 27 && k[1] == '[' && k[2] == 'B':
-			if cur < len(items)-1 {
+			if cur < visible-1 {
 				cur++
 			}
 		case k[0] == 'k':
@@ -153,13 +173,21 @@ func selectMany(label string, items []menuItem) ([]int, error) {
 				cur--
 			}
 		case k[0] == 'j':
-			if cur < len(items)-1 {
+			if cur < visible-1 {
 				cur++
 			}
 		default:
 			continue
 		}
-		fmt.Fprintf(w, "\033[%dA", len(items))
+		if revealed && cur >= visible {
+			cur = visible - 1
+		}
+		// re-render: move cursor up by the number of lines we wrote last time
+		lines := visible
+		if !revealed && revealHint != "" {
+			lines++
+		}
+		fmt.Fprintf(w, "\033[%dA", lines)
 		render()
 	}
 }

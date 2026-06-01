@@ -159,8 +159,10 @@ type Messages struct {
 	ListProvidersNone   string // no providers
 
 	// init wizard
-	SelectProvidersLabel  string // multi-select label
-	EnterAPIKeysHeader    string // header before the per-env-var prompts
+	SelectProvidersLabel   string // multi-select label
+	SelectProvidersReveal  string // hint to press "/" to reveal third-party providers
+	BillingModeLabel       string // billing mode selection label
+	EnterAPIKeysHeader     string // header before the per-env-var prompts
 	MissingKeyIntro       string // shown when re-running the key step on a configured setup
 	WroteFileFmt          string // "Wrote %s" — used for reasonix.toml and .env both
 	SetupComplete         string // success line at end of init

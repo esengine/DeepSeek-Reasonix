@@ -545,28 +545,69 @@ func selectLanguage() (string, error) {
 }
 
 // selectEnabledProviders prompts a single multi-select of provider families
-// (DeepSeek / MiMo / …) and returns every SKU of every chosen family. Picking
-// a family enables all of its SKUs; users who want to exclude a specific SKU
-// edit reasonix.toml afterward — keeping first-run a single decision instead of two.
+// (DeepSeek / MiMo / …) and returns every SKU of every chosen family. Third-
+// party families are hidden by default and revealed with "/". Families with
+// multiple billing variants (e.g. mimo-tp + mimo-ppu) show a billing-mode
+// sub-selection after the family is chosen.
 func selectEnabledProviders(providers []config.ProviderEntry) ([]config.ProviderEntry, error) {
 	famOrder, famMembers, famInfo := groupByFamily(providers)
 
-	famItems := make([]menuItem, len(famOrder))
-	for i, k := range famOrder {
+	// Separate builtin (always visible) and third-party (hidden until "/").
+	builtin := config.ProviderPresets()
+	builtinKeys := map[string]bool{}
+	for _, p := range builtin {
+		builtinKeys[familyOf(p.Name).key] = true
+	}
+	var builtinFams, thirdPartyFams []string
+	for _, k := range famOrder {
+		if builtinKeys[k] {
+			builtinFams = append(builtinFams, k)
+		} else {
+			thirdPartyFams = append(thirdPartyFams, k)
+		}
+	}
+	ordered := append(builtinFams, thirdPartyFams...)
+
+	famItems := make([]menuItem, len(ordered))
+	for i, k := range ordered {
 		famItems[i] = menuItem{name: famInfo[k].name, desc: famInfo[k].desc}
 	}
-	famIdxs, err := selectMany(i18n.M.SelectProvidersLabel, famItems)
+	famIdxs, err := selectManyWithReveal(i18n.M.SelectProvidersLabel, famItems, len(builtinFams), i18n.M.SelectProvidersReveal)
 	if err != nil {
 		return nil, err
 	}
 
 	var enabled []config.ProviderEntry
 	for _, fi := range famIdxs {
-		for _, mi := range famMembers[famOrder[fi]] {
-			enabled = append(enabled, providers[mi])
+		famKey := ordered[fi]
+		members := famMembers[famKey]
+		// If the family has multiple billing variants, ask the user to pick one.
+		if len(members) > 1 {
+			chosen, err := selectBillingMode(famInfo[famKey].name, members, providers)
+			if err != nil {
+				return nil, err
+			}
+			enabled = append(enabled, providers[chosen])
+		} else {
+			enabled = append(enabled, providers[members[0]])
 		}
 	}
 	return enabled, nil
+}
+
+// selectBillingMode shows a single-choice menu for billing variants within a
+// provider family (e.g. "Token Plan" vs "Pay-per-use" for MiMo).
+func selectBillingMode(familyName string, memberIdxs []int, catalog []config.ProviderEntry) (int, error) {
+	items := make([]menuItem, len(memberIdxs))
+	for i, mi := range memberIdxs {
+		items[i] = menuItem{name: catalog[mi].Name, desc: catalog[mi].BaseURL}
+	}
+	label := fmt.Sprintf(i18n.M.BillingModeLabel, familyName)
+	idx, err := selectOne(label, items)
+	if err != nil {
+		return 0, err
+	}
+	return memberIdxs[idx], nil
 }
 
 // providerFamily is a wizard-only grouping of provider SKUs by vendor; it does

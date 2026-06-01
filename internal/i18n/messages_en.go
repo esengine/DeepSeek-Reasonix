@@ -123,7 +123,9 @@ var English = Messages{
 	ListProvidersHeader: "providers",
 	ListProvidersNone:   "no providers configured",
 
-	SelectProvidersLabel:  "Select providers to enable",
+	SelectProvidersLabel:   "Select providers to enable",
+	SelectProvidersReveal:  "press / for more providers",
+	BillingModeLabel:       "Select %s billing mode",
 	EnterAPIKeysHeader:    "Enter API keys (Enter to skip and set later in .env):",
 	MissingKeyIntro:       "reasonix.toml is ready — just an API key away.",
 	WroteFileFmt:          "Wrote %s",
