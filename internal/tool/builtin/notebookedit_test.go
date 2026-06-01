@@ -174,7 +174,7 @@ func TestNotebookPreviewMatchesExecute(t *testing.T) {
 	if err != nil {
 		t.Fatalf("preview: %v", err)
 	}
-	if _, err := notebookEdit{}.Execute(context.Background(), raw); err != nil {
+	if _, err := (notebookEdit{}).Execute(context.Background(), raw); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
 	persisted, _ := os.ReadFile(p)
