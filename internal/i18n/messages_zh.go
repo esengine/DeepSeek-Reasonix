@@ -31,16 +31,29 @@ var Chinese = Messages{
 	ResumeRequiresTTY: "--resume 需要交互式终端；用 --continue 直接恢复最近一次",
 	PickSessionLabel:  "恢复哪个会话？",
 
+	ResumeListHeader:    "会话（/resume <n> 切换）",
+	ResumeBusy:          "请先完成或取消当前这一轮再恢复会话",
+	ResumeBadIndexFmt:   "请选择 1–%d 的会话（用 /resume 查看列表）",
+	ResumeAlreadyActive: "已在该会话中",
+	ResumedTitle:        "已恢复会话",
+
 	ChatStatusThinkingFmt:  "%s 思考中… (%d 秒 · Esc 取消)",
 	ChatStatusIdle:         "Tab 切换 plan · Enter 发送 · Esc 退出当前状态 · PgUp/PgDn 滚动 · Ctrl-D 退出",
 	ChatStatusPlanApproval: "Enter/y 批准并执行 · n/Esc 继续规划 · PgUp/PgDn 滚动",
 	PlanApprovalPrompt:     "计划已生成（见上方）— Enter/y 批准执行,n/Esc 继续规划",
-	ChatStatusToolApproval: "y 同意一次 · a 本会话允许 · n 拒绝 · Ctrl-C 取消本轮",
+	ChatStatusToolApproval: "y/1 同意一次 · a/2 本会话允许 · n/3 拒绝 · Ctrl-C 取消本轮",
 	AskTypeSomething:       "其它(自己输入)",
 	AskTypingHint:          "在下方输入框输入,回车确认",
 	AskChatInstead:         "都不选,直接聊聊",
 	ChatStatusQuestion:     "↑/↓ 选 · 数字快选 · 空格多选 · Enter 确认 · ←/→ 切换问题 · Esc 取消",
-	ToolApprovalPromptFmt:  "允许 %s%s？— [y] 本次 · [a] 本会话 · [n] 拒绝",
+	ToolApprovalPromptFmt:  "需要你的许可\n\n将调用工具 %s%s。\n%s\n[y] 本次允许    [a] 本会话允许    [n] 拒绝",
+	ToolApprovalSourceFmt:  "来源: %s",
+	ToolApprovalBuiltIn:    "内置工具",
+	ToolApprovalImageUse:   "将读取提供的图片用于图像理解。",
+
+	OutputStyleNone:   "没有可用的输出风格",
+	OutputStyleHeader: "输出风格：",
+	OutputStyleHint:   "在 reasonix.toml 设置 agent.output_style 即可启用（下次会话生效）",
 
 	CompactionWorking: "正在压缩对话…",
 	CompactionTitle:   "上下文已压缩",
@@ -55,7 +68,7 @@ var Chinese = Messages{
 	SlashUnavailable:   "当前构建不支持该命令",
 	SlashUnknown:       "未知命令",
 	SlashTodoCleared:   "已清除任务清单",
-	SlashHelp:          "命令：/compact · /new · /todo · /model（切换模型）· /mcp · /skill · /hooks · /memory · /help · 以及 skills（/init、/explore …）",
+	SlashHelp:          "命令：/compact · /new · /resume · /rewind · /tree · /branch · /switch · /todo · /model（切换模型）· /mcp · /skill · /hooks · /paste-image · /memory · /help · 以及 skills（/init、/explore …）",
 	SlashPromptEmpty:   "该 MCP prompt 没有返回可发送的内容",
 	SlashMCPNone:       "没有配置 MCP 服务器 — 在 reasonix.toml 加一个 [[plugins]] 条目",
 	CompHintSlash:      "↑/↓ 移动 · Tab/Enter 选中 · Esc 关闭",
@@ -64,10 +77,16 @@ var Chinese = Messages{
 	CmdNew:          "开启新会话",
 	CmdCompact:      "压缩上下文",
 	CmdRewind:       "回滚到更早的一轮",
+	CmdTree:         "查看对话分支树",
+	CmdBranch:       "创建对话分支",
+	CmdSwitchBranch: "切换对话分支",
+	CmdResume:       "恢复已保存的会话",
 	CmdModel:        "切换模型",
 	CmdMemory:       "查看记忆文件",
 	CmdMcp:          "MCP 服务器",
 	CmdHooks:        "管理 hooks",
+	CmdPasteImage:   "粘贴剪贴板图片",
+	CmdOutputStyle:  "列出输出风格",
 	CmdSkill:        "管理 skills",
 	CmdHelp:         "查看命令列表",
 	CmdTodo:         "清除任务清单",
@@ -118,7 +137,7 @@ var Chinese = Messages{
 	UsageBody: `reasonix — 由配置和插件驱动的 coding agent（多模型）
 
 用法：
-  reasonix chat [--model NAME]                          交互式会话（多轮）
+  reasonix chat [--model NAME] [-c|--continue] [--resume]   交互式会话（多轮；-c 恢复最近一次，--resume 选择一个）
   reasonix run  [--model NAME] [--max-steps N] <task>   执行单次任务后退出
   reasonix serve [--model NAME] [--addr HOST:PORT]      通过 HTTP+SSE 提供会话（浏览器客户端在 /）
   reasonix setup [path]                                 交互式配置向导；生成 reasonix.toml（及 .env）
@@ -128,6 +147,7 @@ var Chinese = Messages{
 
 示例：
   reasonix chat
+  reasonix chat --continue
   reasonix run "把 main.go 里的 TODO 实现掉"
   reasonix run --model mimo-pro "给这个函数补单元测试"
   echo "解释这段代码" | reasonix run

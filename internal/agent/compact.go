@@ -63,7 +63,7 @@ func (a *Agent) maybeCompact(ctx context.Context, u *provider.Usage) {
 	if u.PromptTokens < int(float64(a.contextWindow)*a.compactRatio) {
 		return
 	}
-	if err := a.compact(ctx, "auto"); err != nil {
+	if err := a.compact(ctx, "auto", ""); err != nil {
 		a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: fmt.Sprintf("compaction skipped: %v", err)})
 	}
 }
@@ -72,10 +72,11 @@ func (a *Agent) maybeCompact(ctx context.Context, u *provider.Usage) {
 // the session becomes system + summary + recent tail. The dropped originals are
 // archived first, so the full history stays traceable. trigger is "auto" (the
 // window threshold) or "manual" (/compact); it rides the Compaction events so a
-// frontend can label the card. A Started event is emitted before the (network)
-// summarize so the UI can show a "compacting…" placeholder, and a Done event
-// (carrying the summary) replaces it.
-func (a *Agent) compact(ctx context.Context, trigger string) error {
+// frontend can label the card. instructions is optional extra summary guidance
+// (the user's `/compact <focus>` text); a PreCompact hook can contribute more. A
+// Started event is emitted before the (network) summarize so the UI can show a
+// "compacting…" placeholder, and a Done event (carrying the summary) replaces it.
+func (a *Agent) compact(ctx context.Context, trigger, instructions string) error {
 	msgs := a.session.Messages
 	head, start, ok := compactBounds(msgs, a.recentKeep, minCompactMessages)
 	if !ok {
@@ -84,6 +85,17 @@ func (a *Agent) compact(ctx context.Context, trigger string) error {
 	region := msgs[head:start]
 
 	a.sink.Emit(event.Event{Kind: event.CompactionStarted, Compaction: event.Compaction{Trigger: trigger}})
+
+	// A PreCompact hook can steer what the summary keeps; its stdout joins any
+	// explicit /compact <focus> text.
+	if a.hooks != nil {
+		if hookInstr := a.hooks.PreCompact(ctx, trigger); hookInstr != "" {
+			if instructions != "" {
+				instructions += "\n"
+			}
+			instructions += hookInstr
+		}
+	}
 
 	archived := ""
 	if a.archiveDir != "" {
@@ -95,7 +107,7 @@ func (a *Agent) compact(ctx context.Context, trigger string) error {
 		archived = path
 	}
 
-	summary, err := a.summarize(ctx, region)
+	summary, err := a.summarize(ctx, region, instructions)
 	if err != nil {
 		a.emitCompactionAborted(trigger)
 		return err
@@ -137,7 +149,7 @@ func (a *Agent) SummarizeFrom(ctx context.Context, fromIdx int) error {
 	if a.archiveDir != "" {
 		_, _ = archiveMessages(a.archiveDir, region) // best-effort traceability
 	}
-	summary, err := a.summarize(ctx, region)
+	summary, err := a.summarize(ctx, region, "")
 	if err != nil {
 		return err
 	}
@@ -169,7 +181,7 @@ func (a *Agent) SummarizeUpTo(ctx context.Context, toIdx int) error {
 	if a.archiveDir != "" {
 		_, _ = archiveMessages(a.archiveDir, region)
 	}
-	summary, err := a.summarize(ctx, region)
+	summary, err := a.summarize(ctx, region, "")
 	if err != nil {
 		return err
 	}
@@ -210,11 +222,17 @@ func compactBounds(msgs []provider.Message, recentKeep, minCompact int) (head, s
 }
 
 // summarize asks the executor's own provider (no tools) to distill the region
-// into a briefing, returning the collected text.
-func (a *Agent) summarize(ctx context.Context, region []provider.Message) (string, error) {
+// into a briefing, returning the collected text. instructions, when non-empty,
+// is appended to the system prompt as extra focus guidance (from /compact <focus>
+// and/or a PreCompact hook).
+func (a *Agent) summarize(ctx context.Context, region []provider.Message, instructions string) (string, error) {
+	sys := summarySystemPrompt
+	if strings.TrimSpace(instructions) != "" {
+		sys += "\n\nAdditional focus for this compaction (prioritize keeping this):\n" + strings.TrimSpace(instructions)
+	}
 	ch, err := a.prov.Stream(ctx, provider.Request{
 		Messages: []provider.Message{
-			{Role: provider.RoleSystem, Content: summarySystemPrompt},
+			{Role: provider.RoleSystem, Content: sys},
 			{Role: provider.RoleUser, Content: renderTranscript(region)},
 		},
 		Temperature: a.temperature,

@@ -13,6 +13,7 @@ import (
 	"reasonix/internal/command"
 	"reasonix/internal/config"
 	"reasonix/internal/control"
+	"reasonix/internal/event"
 	"reasonix/internal/i18n"
 	"reasonix/internal/permission"
 	"reasonix/internal/plugin"
@@ -113,16 +114,16 @@ func (f *acpFactory) NewSession(ctx context.Context, p acp.SessionParams) (*cont
 	// session/new, all connected for the session's lifetime.
 	cleanup := func() {}
 	var host *plugin.Host
-	specs := append(boot.PluginSpecs(cfg.Plugins), p.MCPServers...)
+	specs := append(boot.PluginSpecs(cfg.AutoStartPlugins()), p.MCPServers...)
 	if len(specs) > 0 {
-		h, ptools, err := plugin.StartAll(ctx, specs)
-		if err != nil {
-			return nil, fmt.Errorf("plugin: %w", err)
-		}
+		h, ptools := plugin.StartAvailable(ctx, specs)
 		host = h
 		cleanup = h.Close
 		for _, t := range ptools {
 			reg.Add(t)
+		}
+		if text, ok := boot.MCPStartupNotice(h.Failures()); ok {
+			p.Sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: text})
 		}
 	}
 

@@ -21,17 +21,35 @@ func init() { tool.RegisterBuiltin(bash{}) }
 
 // bash runs a shell command with a timeout to avoid hangs. sb, when it enforces,
 // wraps the command in an OS sandbox; the zero value registered at init runs
-// unconfined and is overridden per run by ConfineBash. workDir, when non-empty,
-// is the directory the command runs in (cmd.Dir); empty uses the process cwd.
+// unconfined and is overridden per run by ConfineBash. shell is the resolved
+// interpreter (real bash, or PowerShell on a Windows host without bash); the
+// zero value resolves lazily. workDir, when non-empty, is the directory the
+// command runs in (cmd.Dir); empty uses the process cwd.
 type bash struct {
 	sb      sandbox.Spec
+	shell   sandbox.Shell
 	workDir string
 }
 
 func (bash) Name() string { return "bash" }
 
-func (bash) Description() string {
+func (b bash) Description() string {
+	if b.resolved().Kind == sandbox.ShellPowerShell {
+		return "Execute a command in the shell and return combined stdout/stderr. " +
+			"NOTE: bash is not available on this host — commands run under Windows PowerShell, " +
+			"so write PowerShell syntax (e.g. $null not /dev/null; ';' or separate calls, not '&&'; " +
+			"Get-ChildItem/Select-String, not ls/grep). Use for builds, tests, git, etc."
+	}
 	return "Execute a command in the shell and return combined stdout/stderr. Use for builds, tests, git, etc."
+}
+
+// resolved returns the bound shell, resolving lazily for the zero-value instance
+// (e.g. a registry that never went through ConfineBash).
+func (b bash) resolved() sandbox.Shell {
+	if b.shell.Path != "" {
+		return b.shell
+	}
+	return sandbox.ResolveShell()
 }
 
 func (bash) Schema() json.RawMessage {
@@ -55,8 +73,15 @@ func (b bash) Execute(ctx context.Context, args json.RawMessage) (string, error)
 		return "", fmt.Errorf("command is required")
 	}
 
-	// Wrap in the OS sandbox when configured; otherwise argv is just bash -c.
-	argv, _ := sandbox.Command(b.sb, "bash", p.Command)
+	sh := b.resolved()
+	if !sh.SupportsChaining() && (hasUnquotedSeq(p.Command, "&&") || hasUnquotedSeq(p.Command, "||")) {
+		return "", fmt.Errorf("this shell is Windows PowerShell, which does not parse '&&' or '||'. " +
+			"Sequence with ';' (both run regardless of the first's result), use 'if ($?) { ... }' for " +
+			"conditional chaining, or issue the commands as separate calls")
+	}
+
+	// Wrap in the OS sandbox when configured; otherwise argv is just the shell.
+	argv, _ := sandbox.Command(b.sb, sh, p.Command)
 
 	if p.RunInBackground {
 		jm, ok := jobs.FromContext(ctx)
@@ -95,6 +120,30 @@ func (b bash) Execute(ctx context.Context, args json.RawMessage) (string, error)
 		return out, fmt.Errorf("command exited: %w", err)
 	}
 	return out, nil
+}
+
+// hasUnquotedSeq reports whether seq appears in s outside any single- or
+// double-quoted span, so a literal "a && b" string argument doesn't trip the
+// PowerShell chaining guard.
+func hasUnquotedSeq(s, seq string) bool {
+	var quote byte
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if quote != 0 {
+			if c == quote {
+				quote = 0
+			}
+			continue
+		}
+		if c == '\'' || c == '"' {
+			quote = c
+			continue
+		}
+		if strings.HasPrefix(s[i:], seq) {
+			return true
+		}
+	}
+	return false
 }
 
 // commandPreview is a short single-line label for a background bash job, surfaced

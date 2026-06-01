@@ -291,14 +291,15 @@ func TestPreviewSessionMalformed(t *testing.T) {
 // --- NewSessionPath ---
 
 func TestNewSessionPath(t *testing.T) {
-	path := NewSessionPath("/sessions", "deepseek-chat")
+	dir := t.TempDir()
+	path := NewSessionPath(dir, "deepseek-chat")
 	if !strings.HasSuffix(path, ".jsonl") {
 		t.Errorf("should end with .jsonl: %s", path)
 	}
 	if !strings.Contains(path, "deepseek-chat") {
 		t.Errorf("should contain model name: %s", path)
 	}
-	if !strings.HasPrefix(path, "/sessions/") {
+	if !strings.HasPrefix(path, dir) {
 		t.Errorf("should be under dir: %s", path)
 	}
 }

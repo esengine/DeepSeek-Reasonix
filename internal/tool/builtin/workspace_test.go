@@ -11,17 +11,19 @@ import (
 )
 
 func TestResolveIn(t *testing.T) {
+	workDir := filepath.Join(t.TempDir(), "proj")
+	absolute := filepath.Join(t.TempDir(), "etc", "passwd")
 	cases := []struct {
 		workDir, p, want string
 	}{
-		{"", "foo.go", "foo.go"},                          // empty workDir: unchanged
-		{"", "", ""},                                      // empty workDir: unchanged
-		{"/proj", "foo.go", "/proj/foo.go"},               // relative joins
-		{"/proj", "a/b.go", "/proj/a/b.go"},               // nested relative
-		{"/proj", ".", "/proj"},                           // "." targets the root
-		{"/proj", "", "/proj"},                            // empty targets the root
-		{"/proj", "/etc/passwd", "/etc/passwd"},           // absolute honored verbatim
-		{"/proj", "../escape", filepath.Clean("/escape")}, // join cleans (confiner enforces)
+		{"", "foo.go", "foo.go"}, // empty workDir: unchanged
+		{"", "", ""},             // empty workDir: unchanged
+		{workDir, "foo.go", filepath.Join(workDir, "foo.go")},                  // relative joins
+		{workDir, "a/b.go", filepath.Join(workDir, "a", "b.go")},               // nested relative
+		{workDir, ".", workDir},                                                // "." targets the root
+		{workDir, "", workDir},                                                 // empty targets the root
+		{workDir, absolute, absolute},                                          // absolute honored verbatim
+		{workDir, "../escape", filepath.Join(filepath.Dir(workDir), "escape")}, // join cleans (confiner enforces)
 	}
 	for _, c := range cases {
 		if got := resolveIn(c.workDir, c.p); got != c.want {

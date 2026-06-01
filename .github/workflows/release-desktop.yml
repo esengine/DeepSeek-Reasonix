@@ -23,8 +23,23 @@ permissions:
   contents: write # create the release and upload artifacts
 
 jobs:
+  cache-guard:
+    name: cache hit guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Cache hit guard
+        run: ./scripts/cache-guard.sh
+
   build:
     name: build (${{ matrix.name }})
+    needs: cache-guard
     strategy:
       fail-fast: false
       matrix:

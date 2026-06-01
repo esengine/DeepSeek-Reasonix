@@ -149,15 +149,13 @@ func Tools(reg *tool.Registry) []ToolInfo {
 // toolSource classifies a tool by its name: an mcp__<server>__<tool> name maps
 // to "mcp:<server>", anything else is a compiled-in "builtin".
 func toolSource(name string) string {
-	const prefix = "mcp__"
-	if !strings.HasPrefix(name, prefix) {
-		return "builtin"
+	if server, _, ok := tool.SplitMCPName(name); ok {
+		return "mcp:" + server
 	}
-	rest := name[len(prefix):]
-	if i := strings.Index(rest, "__"); i > 0 {
-		return "mcp:" + rest[:i]
+	if strings.HasPrefix(name, tool.MCPNamePrefix) {
+		return "mcp" // carries the namespace but malformed (missing a part)
 	}
-	return "mcp"
+	return "builtin"
 }
 
 // ServerInfo is one connected MCP server and its exposed-surface counts.

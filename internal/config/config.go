@@ -28,6 +28,14 @@ type Config struct {
 	Plugins      []PluginEntry     `toml:"plugins"`
 	Skills       SkillsConfig      `toml:"skills"`
 	Codegraph    CodegraphConfig   `toml:"codegraph"`
+	Statusline   StatuslineConfig  `toml:"statusline"`
+}
+
+// StatuslineConfig configures a custom status line. Command, when set, is run at
+// startup and after each turn; its first line of stdout replaces the built-in
+// status data row. A JSON payload (model, context tokens, cwd) is fed on stdin.
+type StatuslineConfig struct {
+	Command string `toml:"command"`
 }
 
 // CodegraphConfig governs the built-in CodeGraph MCP server — symbol/call-graph
@@ -120,13 +128,20 @@ func (c *Config) BashMode() string {
 // AgentConfig configures the harness loop. PlannerModel is optional: when set
 // to another provider's name it enables two-model collaboration, where the
 // planner handles low-frequency planning in its own session (kept separate so
-// each model's prompt prefix stays cache-stable).
+// each model's prompt prefix stays cache-stable). SubagentModel is the optional
+// default for runAs=subagent skills; SubagentModels overrides it per skill name.
 type AgentConfig struct {
-	SystemPrompt     string  `toml:"system_prompt"`
-	SystemPromptFile string  `toml:"system_prompt_file"`
-	MaxSteps         int     `toml:"max_steps"` // tool-call rounds per turn; 0 = unlimited
-	Temperature      float64 `toml:"temperature"`
-	PlannerModel     string  `toml:"planner_model"`
+	SystemPrompt     string            `toml:"system_prompt"`
+	SystemPromptFile string            `toml:"system_prompt_file"`
+	MaxSteps         int               `toml:"max_steps"` // tool-call rounds per turn; 0 = unlimited
+	Temperature      float64           `toml:"temperature"`
+	PlannerModel     string            `toml:"planner_model"`
+	SubagentModel    string            `toml:"subagent_model"`
+	SubagentModels   map[string]string `toml:"subagent_models"`
+	// OutputStyle selects a persona/tone block folded into the system prompt at
+	// startup (a built-in like "explanatory"/"learning"/"concise", or a custom
+	// .reasonix/output-styles/<name>.md). Empty = the unmodified prompt.
+	OutputStyle string `toml:"output_style"`
 }
 
 // ProviderEntry declares a model provider instance. ContextWindow is the model's
@@ -145,8 +160,9 @@ type ProviderEntry struct {
 	Price         *provider.Pricing `toml:"price"`
 	// Thinking / Effort are provider-kind-specific knobs forwarded to the provider
 	// via Config.Extra. The anthropic provider reads Thinking="adaptive" to enable
-	// extended thinking and Effort ("low".."max") to tune depth; the
-	// openai-compatible provider ignores them. Empty = off / provider default.
+	// extended thinking and Effort ("low".."max") to tune depth. The
+	// openai-compatible provider forwards Effort as reasoning_effort for
+	// thinking-capable models (e.g. MiMo) and ignores Thinking. Empty = provider default.
 	Thinking string `toml:"thinking"`
 	Effort   string `toml:"effort"`
 }
@@ -217,6 +233,23 @@ type PluginEntry struct {
 	Env     map[string]string `toml:"env"`
 	URL     string            `toml:"url"`
 	Headers map[string]string `toml:"headers"`
+	// AutoStart controls whether the server connects during session startup.
+	// Nil preserves historical behavior: configured servers start automatically.
+	AutoStart *bool `toml:"auto_start"`
+}
+
+func (e PluginEntry) ShouldAutoStart() bool {
+	return e.AutoStart == nil || *e.AutoStart
+}
+
+func (c *Config) AutoStartPlugins() []PluginEntry {
+	out := make([]PluginEntry, 0, len(c.Plugins))
+	for _, p := range c.Plugins {
+		if p.ShouldAutoStart() {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // DefaultSystemPrompt is used when config provides none.
@@ -338,6 +371,10 @@ func userConfigPath() string {
 	}
 	return filepath.Join(dir, "reasonix", "config.toml")
 }
+
+// UserConfigPath is the user-global config file (~/.config/reasonix/config.toml),
+// or "" when the user config dir can't be resolved.
+func UserConfigPath() string { return userConfigPath() }
 
 // ArchiveDir is where compacted conversation history is archived for
 // traceability (one timestamped .jsonl per compaction). Empty if the user config
@@ -484,6 +521,12 @@ func (e *ProviderEntry) APIKey() string {
 		return ""
 	}
 	return os.Getenv(e.APIKeyEnv)
+}
+
+// Configured reports whether the provider's api_key_env is set — the same check
+// Validate enforces, so pickers can filter on it.
+func (e *ProviderEntry) Configured() bool {
+	return e.APIKey() != ""
 }
 
 // ResolveSystemPrompt returns the system prompt, reading system_prompt_file if set.

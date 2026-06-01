@@ -121,7 +121,9 @@ func (m chatTUI) applyRewind() (tea.Model, tea.Cmd) {
 	// these, so the picker doesn't add its own — it would double on the CLI.
 	switch act.kind {
 	case "fork":
-		_, _ = m.ctrl.Fork(meta.Turn)
+		if _, err := m.ctrl.Fork(meta.Turn); err == nil {
+			m.replayActiveBranch(fmt.Sprintf("branched from turn %d", meta.Turn+1))
+		}
 		return m, nil // the branch is a new session
 	case "summ-from":
 		_ = m.ctrl.SummarizeFrom(context.Background(), meta.Turn)

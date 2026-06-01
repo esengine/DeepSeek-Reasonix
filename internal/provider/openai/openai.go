@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"net"
 	"net/http"
 	"sort"
 	"strings"
@@ -37,13 +38,24 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		name = "openai"
 	}
 	keyEnv, _ := cfg.Extra["api_key_env"].(string) // for actionable auth errors
+	effort, _ := cfg.Extra["effort"].(string)
 	return &client{
 		name:    name,
 		apiKey:  cfg.APIKey,
 		keyEnv:  keyEnv,
 		baseURL: strings.TrimRight(cfg.BaseURL, "/"),
 		model:   cfg.Model,
-		http:    &http.Client{}, // no overall timeout; lifecycle is ctx-driven
+		effort:  effort,
+		http: &http.Client{
+			Transport: &http.Transport{
+				DialContext: (&net.Dialer{
+					Timeout:   30 * time.Second,
+					KeepAlive: 30 * time.Second,
+				}).DialContext,
+				TLSHandshakeTimeout:   15 * time.Second,
+				ResponseHeaderTimeout: 120 * time.Second, // models can think for a while before the first token
+			},
+		},
 	}, nil
 }
 
@@ -54,6 +66,7 @@ type client struct {
 	baseURL string
 	model   string
 	http    *http.Client
+	effort  string // reasoning_effort forwarded to thinking-capable models; "" = omit
 }
 
 func (c *client) Name() string { return c.name }
@@ -70,7 +83,7 @@ func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provi
 	}
 
 	out := make(chan provider.Chunk)
-	go c.readStream(resp, out)
+	go c.readStream(ctx, resp, out)
 	return out, nil
 }
 
@@ -187,13 +200,14 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 	}
 
 	return chatRequest{
-		Model:         c.model,
-		Messages:      msgs,
-		Tools:         tools,
-		Stream:        true,
-		StreamOptions: &streamOptions{IncludeUsage: true},
-		Temperature:   req.Temperature,
-		MaxTokens:     req.MaxTokens,
+		Model:           c.model,
+		Messages:        msgs,
+		Tools:           tools,
+		Stream:          true,
+		StreamOptions:   &streamOptions{IncludeUsage: true},
+		Temperature:     req.Temperature,
+		MaxTokens:       req.MaxTokens,
+		ReasoningEffort: c.effort,
 	}
 }
 
@@ -201,9 +215,16 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 // fragments internally, and emits complete ToolCalls (by index) when done. Each
 // call also gets a ChunkToolCallStart the moment its name is known, so a frontend
 // can show the tool card while the arguments are still streaming.
-func (c *client) readStream(resp *http.Response, out chan<- provider.Chunk) {
+func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<- provider.Chunk) {
 	defer resp.Body.Close()
 	defer close(out)
+
+	// Close the response body when the context is canceled so scanner.Scan()
+	// unblocks instead of hanging indefinitely on a stalled connection.
+	go func() {
+		<-ctx.Done()
+		resp.Body.Close()
+	}()
 
 	acc := map[int]*provider.ToolCall{}
 	started := map[int]bool{}
@@ -318,13 +339,14 @@ func normaliseUsage(u *wireUsage) *provider.Usage {
 // --- OpenAI-compatible wire protocol ---
 
 type chatRequest struct {
-	Model         string         `json:"model"`
-	Messages      []chatMessage  `json:"messages"`
-	Tools         []chatTool     `json:"tools,omitempty"`
-	Stream        bool           `json:"stream"`
-	StreamOptions *streamOptions `json:"stream_options,omitempty"`
-	Temperature   float64        `json:"temperature,omitempty"`
-	MaxTokens     int            `json:"max_tokens,omitempty"`
+	Model           string         `json:"model"`
+	Messages        []chatMessage  `json:"messages"`
+	Tools           []chatTool     `json:"tools,omitempty"`
+	Stream          bool           `json:"stream"`
+	StreamOptions   *streamOptions `json:"stream_options,omitempty"`
+	Temperature     float64        `json:"temperature,omitempty"`
+	MaxTokens       int            `json:"max_tokens,omitempty"`
+	ReasoningEffort string         `json:"reasoning_effort,omitempty"`
 }
 
 type streamOptions struct {

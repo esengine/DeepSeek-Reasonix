@@ -54,19 +54,34 @@ type Messages struct {
 	ResumeRequiresTTY string // shown when --resume runs piped instead of on a terminal
 	PickSessionLabel  string // header on the --resume picker
 
+	// in-chat /resume command
+	ResumeListHeader    string // header above the /resume session list
+	ResumeBusy          string // shown when /resume is used mid-turn
+	ResumeBadIndexFmt   string // shown when /resume gets an out-of-range index (one %d)
+	ResumeAlreadyActive string // shown when /resume targets the current session
+	ResumedTitle        string // banner title after a /resume switch
+
 	// chat TUI status line / approval banner.
 	ChatStatusThinkingFmt  string // "%s thinking… (%ds · <cancel hint>)" — %s = spinner, %d = elapsed s
 	ChatStatusIdle         string // shortcuts hint when idle
 	ChatStatusPlanApproval string // shortcuts hint while a plan is pending
 	PlanApprovalPrompt     string // one-line "plan above is ready" banner shown above the input
 	ChatStatusToolApproval string // shortcuts hint while a tool call awaits approval
-	ToolApprovalPromptFmt  string // "Allow %s%s?" banner — %s = tool name, %s = subject (leading space, or empty)
+	ToolApprovalPromptFmt  string // approval banner — tool, subject suffix, and source/intent detail
+	ToolApprovalSourceFmt  string // "Source: %s" / "来源: %s"
+	ToolApprovalBuiltIn    string // built-in tool source label
+	ToolApprovalImageUse   string // image-understanding detail for understand_image-style tools
 
 	// `ask` tool question card.
 	AskTypeSomething   string // the "type your own answer" option label
 	AskTypingHint      string // shown on that row while entering free text
 	AskChatInstead     string // the "don't pick, just chat" option label
 	ChatStatusQuestion string // shortcuts hint while a question card is open
+
+	// output style listing (/output-style).
+	OutputStyleNone   string // no styles available
+	OutputStyleHeader string // header above the listing
+	OutputStyleHint   string // how to select one
 
 	// context compaction card (CompactionStarted / CompactionDone events).
 	CompactionWorking string // shown while the summarizer runs
@@ -94,10 +109,16 @@ type Messages struct {
 	CmdNew          string // /new
 	CmdCompact      string // /compact
 	CmdRewind       string // /rewind
+	CmdTree         string // /tree
+	CmdBranch       string // /branch
+	CmdSwitchBranch string // /switch
+	CmdResume       string // /resume
 	CmdModel        string // /model
 	CmdMemory       string // /memory
 	CmdMcp          string // /mcp
 	CmdHooks        string // /hooks
+	CmdPasteImage   string // /paste-image
+	CmdOutputStyle  string // /output-style
 	CmdSkill        string // /skill
 	CmdHelp         string // /help
 	CmdTodo         string // /todo

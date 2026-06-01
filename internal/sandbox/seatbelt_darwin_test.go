@@ -140,7 +140,7 @@ func TestSeatbeltProfileContainsRoots(t *testing.T) {
 }
 
 func TestCommandUnwrappedWhenOff(t *testing.T) {
-	argv, wrapped := Command(Spec{Mode: "off"}, "bash", "echo hi")
+	argv, wrapped := Command(Spec{Mode: "off"}, Shell{Kind: ShellBash, Path: "bash"}, "echo hi")
 	if wrapped {
 		t.Error("Mode=off should not wrap")
 	}
@@ -192,7 +192,7 @@ func TestSandboxEnforcesWrites(t *testing.T) {
 
 	spec := Spec{Mode: "enforce", WriteRoots: []string{workRoot}, Network: true}
 	run := func(command string) error {
-		argv, wrapped := Command(spec, "bash", command)
+		argv, wrapped := Command(spec, Shell{Kind: ShellBash, Path: "bash"}, command)
 		if !wrapped {
 			t.Fatalf("expected wrapping for command %q", command)
 		}
@@ -252,7 +252,7 @@ func TestGoBuildUnderSandbox(t *testing.T) {
 	write("main.go", "package main\nfunc main() { println(\"ok\") }\n")
 
 	spec := Spec{Mode: "enforce", WriteRoots: []string{work}, Network: true}
-	argv, _ := Command(spec, "bash", "cd "+work+" && go build -o sbtest .")
+	argv, _ := Command(spec, Shell{Kind: ShellBash, Path: "bash"}, "cd "+work+" && go build -o sbtest .")
 	if out, err := exec.Command(argv[0], argv[1:]...).CombinedOutput(); err != nil {
 		t.Fatalf("go build under sandbox failed (profile too tight?): %v\n%s", err, out)
 	}

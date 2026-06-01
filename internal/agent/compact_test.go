@@ -87,7 +87,7 @@ func TestCompactReplacesHistory(t *testing.T) {
 	dir := t.TempDir()
 	a := New(prov, tool.NewRegistry(), sess, Options{RecentKeep: 2, ArchiveDir: dir}, event.Discard)
 
-	if err := a.compact(context.Background(), "manual"); err != nil {
+	if err := a.compact(context.Background(), "manual", ""); err != nil {
 		t.Fatalf("compact: %v", err)
 	}
 
@@ -141,7 +141,7 @@ func TestCompactEmitsEvents(t *testing.T) {
 	sink := event.FuncSink(func(e event.Event) { got = append(got, e) })
 	a := New(prov, tool.NewRegistry(), sess, Options{RecentKeep: 2}, sink)
 
-	if err := a.compact(context.Background(), "auto"); err != nil {
+	if err := a.compact(context.Background(), "auto", ""); err != nil {
 		t.Fatalf("compact: %v", err)
 	}
 
@@ -169,6 +169,36 @@ func TestCompactEmitsEvents(t *testing.T) {
 	}
 	if startedAt > doneAt {
 		t.Errorf("CompactionStarted (%d) must precede CompactionDone (%d)", startedAt, doneAt)
+	}
+}
+
+// TestCompactInjectsFocusAndPreCompactHook checks that /compact <focus> text and
+// a PreCompact hook's output both reach the summarizer's system prompt.
+func TestCompactInjectsFocusAndPreCompactHook(t *testing.T) {
+	prov := &fakeProvider{reply: "- ok"}
+	sess := &Session{Messages: []provider.Message{
+		{Role: provider.RoleSystem, Content: "sys"},
+		{Role: provider.RoleUser, Content: "task"},
+		{Role: provider.RoleAssistant, Content: "step one"},
+		{Role: provider.RoleUser, Content: "more"},
+		{Role: provider.RoleAssistant, Content: "step two"},
+		{Role: provider.RoleUser, Content: "next"},
+		{Role: provider.RoleAssistant, Content: "ok"},
+	}}
+	a := New(prov, tool.NewRegistry(), sess, Options{RecentKeep: 2, Hooks: &stubHooks{preCompactOut: "KEEP-THE-MIGRATION-PLAN"}}, event.Discard)
+
+	if err := a.compact(context.Background(), "manual", "focus on the auth refactor"); err != nil {
+		t.Fatalf("compact: %v", err)
+	}
+	if len(prov.got) == 0 || prov.got[0].Role != provider.RoleSystem {
+		t.Fatalf("summarizer wasn't asked with a system prompt: %+v", prov.got)
+	}
+	sys := prov.got[0].Content
+	if !strings.Contains(sys, "focus on the auth refactor") {
+		t.Errorf("summary system prompt missing the /compact focus text: %q", sys)
+	}
+	if !strings.Contains(sys, "KEEP-THE-MIGRATION-PLAN") {
+		t.Errorf("summary system prompt missing the PreCompact hook output: %q", sys)
 	}
 }
 

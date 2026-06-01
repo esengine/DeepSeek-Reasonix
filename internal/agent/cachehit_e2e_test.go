@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -338,6 +340,179 @@ func TestSessionAggregateCacheRate(t *testing.T) {
 	if agg <= 0 || agg > 100 {
 		t.Errorf("aggregate rate out of range: %d%%", agg)
 	}
+}
+
+func TestReleaseCacheHitGuard(t *testing.T) {
+	if os.Getenv("REASONIX_RELEASE_CACHE_GUARD") == "" {
+		t.Skip("set REASONIX_RELEASE_CACHE_GUARD=1 to run the release cache guard")
+	}
+
+	threshold := envInt("REASONIX_CACHE_GUARD_THRESHOLD", 90)
+	maxLowCases := envInt("REASONIX_CACHE_GUARD_MAX_LOW_CASES", 1)
+
+	cases := []struct {
+		name string
+		run  func(*testing.T) []int
+	}{
+		{
+			name: "plain-dialogue",
+			run: func(t *testing.T) []int {
+				return cacheCurve(t, &mockDeepSeek{t: t, reasoning: longReasoning}, 14)
+			},
+		},
+		{
+			name: "plain-dialogue-no-reasoning",
+			run: func(t *testing.T) []int {
+				return cacheCurve(t, &mockDeepSeek{t: t}, 14)
+			},
+		},
+		{
+			name: "long-dialogue",
+			run: func(t *testing.T) []int {
+				return cacheCurveWithMessages(t, &mockDeepSeek{t: t, reasoning: longReasoning}, repeatedMessages(18, 18))
+			},
+		},
+		{
+			name: "mixed-message-sizes",
+			run: func(t *testing.T) []int {
+				msgs := make([]string, 0, 20)
+				for i := 0; i < 20; i++ {
+					repeats := 4
+					if i%3 == 2 {
+						repeats = 20
+					}
+					msgs = append(msgs, fmt.Sprintf("Turn %d: ", i)+strings.Repeat("preserve the request prefix while handling varied input. ", repeats))
+				}
+				return cacheCurveWithMessages(t, &mockDeepSeek{t: t, reasoning: longReasoning}, msgs)
+			},
+		},
+		{
+			name: "tool-loop",
+			run: func(t *testing.T) []int {
+				return toolLoopCurve(t, &mockDeepSeek{t: t, withTools: true, reasoning: longReasoning, toolRounds: 14})
+			},
+		},
+		{
+			name: "tool-loop-no-reasoning",
+			run: func(t *testing.T) []int {
+				return toolLoopCurve(t, &mockDeepSeek{t: t, withTools: true, toolRounds: 14})
+			},
+		},
+		{
+			name: "long-tool-loop",
+			run: func(t *testing.T) []int {
+				return toolLoopCurve(t, &mockDeepSeek{t: t, withTools: true, reasoning: longReasoning, toolRounds: 24})
+			},
+		},
+		{
+			name: "long-tool-loop-no-reasoning",
+			run: func(t *testing.T) []int {
+				return toolLoopCurve(t, &mockDeepSeek{t: t, withTools: true, toolRounds: 24})
+			},
+		},
+	}
+
+	type result struct {
+		name string
+		rate int
+		all  []int
+	}
+	var lows []result
+	for _, c := range cases {
+		rates := c.run(t)
+		rate := tailAverage(rates, 3)
+		status := "pass"
+		if rate < threshold {
+			status = "low"
+			lows = append(lows, result{name: c.name, rate: rate, all: rates})
+		}
+		t.Logf("CACHE_GUARD_RESULT: case=%s tail_avg=%d threshold=%d status=%s rates=%v",
+			c.name, rate, threshold, status, rates)
+	}
+
+	if len(lows) > maxLowCases {
+		var parts []string
+		for _, low := range lows {
+			parts = append(parts, fmt.Sprintf("%s=%d%%", low.name, low.rate))
+		}
+		msg := fmt.Sprintf("%d cache guard cases are below %d%%: %s", len(lows), threshold, strings.Join(parts, ", "))
+		t.Logf("CACHE_GUARD_WARNING: %s", msg)
+		if os.Getenv("REASONIX_CACHE_GUARD_STRICT") != "" {
+			t.Fatal(msg)
+		}
+	}
+}
+
+func cacheCurve(t *testing.T, mock *mockDeepSeek, turns int) []int {
+	return cacheCurveWithMessages(t, mock, repeatedMessages(turns, 6))
+}
+
+func repeatedMessages(turns, repeats int) []string {
+	msgs := make([]string, 0, turns)
+	for i := 0; i < turns; i++ {
+		msgs = append(msgs, "Turn "+fmt.Sprint(i)+": "+strings.Repeat("please consider this requirement. ", repeats))
+	}
+	return msgs
+}
+
+func cacheCurveWithMessages(t *testing.T, mock *mockDeepSeek, messages []string) []int {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(mock.handler))
+	defer srv.Close()
+
+	a, sink := newAgent(t, srv.URL, mock.tools(), 0, 0)
+	for i, userMsg := range messages {
+		if err := a.Run(context.Background(), userMsg); err != nil {
+			t.Fatalf("Run %d: %v", i, err)
+		}
+	}
+	return usageRates(sink.usages)
+}
+
+func toolLoopCurve(t *testing.T, mock *mockDeepSeek) []int {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(mock.handler))
+	defer srv.Close()
+
+	a, sink := newAgent(t, srv.URL, mock.tools(), 0, 0)
+	if err := a.Run(context.Background(), strings.Repeat("please consider this requirement. ", 6)); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	return usageRates(sink.usages)
+}
+
+func usageRates(usages []*provider.Usage) []int {
+	out := make([]int, len(usages))
+	for i, u := range usages {
+		out[i] = hitRate(u)
+	}
+	return out
+}
+
+func tailAverage(xs []int, n int) int {
+	if len(xs) == 0 {
+		return 0
+	}
+	if n > len(xs) {
+		n = len(xs)
+	}
+	sum := 0
+	for _, x := range xs[len(xs)-n:] {
+		sum += x
+	}
+	return sum / n
+}
+
+func envInt(name string, fallback int) int {
+	raw := os.Getenv(name)
+	if raw == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 0 {
+		return fallback
+	}
+	return n
 }
 
 // newAgent wires a real openai.Provider at url into a real Agent.

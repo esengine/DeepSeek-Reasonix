@@ -22,7 +22,8 @@ func TestLoadDotEnvFallsBackToHome(t *testing.T) {
 	}
 
 	t.Chdir(cwd)
-	t.Setenv("HOME", home) // os.UserHomeDir() reads $HOME on unix
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // os.UserHomeDir reads HOME on Unix and USERPROFILE on Windows.
 
 	// Start clean so the file values are what land (Setenv auto-restores).
 	t.Setenv("KEY_CWD", "")
@@ -53,7 +54,9 @@ func TestLoadDotEnvDoesNotOverrideEnv(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Chdir(cwd)
-	t.Setenv("HOME", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("PINNED", "from_env")
 
 	loadDotEnv()

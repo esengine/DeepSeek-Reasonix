@@ -82,7 +82,7 @@ command = "local-bin"
 	}
 	mcp := `{ "mcpServers": {
   "shared": { "type": "http", "url": "https://override.example" },
-  "extra":  { "command": "extra-bin" }
+  "extra":  { "command": "extra-bin", "auto_start": false }
 } }`
 	if err := os.WriteFile(mcpJSONFile, []byte(mcp), 0o644); err != nil {
 		t.Fatal(err)
@@ -104,6 +104,9 @@ command = "local-bin"
 	}
 	if byName["extra"].Command != "extra-bin" {
 		t.Errorf("extra not merged from .mcp.json, got %+v", byName["extra"])
+	}
+	if byName["extra"].AutoStart == nil || *byName["extra"].AutoStart {
+		t.Errorf("extra auto_start=false not preserved, got %+v", byName["extra"].AutoStart)
 	}
 }
 

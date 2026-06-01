@@ -157,8 +157,9 @@ func TestDeleteSessionFileMissing(t *testing.T) {
 
 func TestSessionTitlesPath(t *testing.T) {
 	got := sessionTitlesPath("/sessions")
-	if got != "/sessions/.titles.json" {
-		t.Errorf("sessionTitlesPath = %q", got)
+	want := filepath.Join("/sessions", ".titles.json")
+	if got != want {
+		t.Errorf("sessionTitlesPath = %q, want %q", got, want)
 	}
 }
 

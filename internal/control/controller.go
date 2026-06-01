@@ -53,6 +53,7 @@ type Controller struct {
 	hooks        *hook.Runner // session hook runner; nil-safe (no hooks configured)
 	mem          *memory.Set
 	cleanup      func()
+	startedOnce  bool // guards the one-shot SessionStart hook on first turn
 
 	// balanceURL/balanceKey target the active provider's optional wallet-balance
 	// endpoint (empty when the provider declares none). Captured at build so a
@@ -292,7 +293,7 @@ const planApprovalTool = "exit_plan_mode"
 
 // planApprovedMessage is the follow-up turn sent once the user approves a plan —
 // the in-context nudge to execute and keep the (already-seeded) task list honest.
-const planApprovedMessage = "Plan approved — plan mode is off; you're cleared to make the changes without asking again. Implement the plan now. Keep the task list current with todo_write (mark the step you start as in_progress; one in_progress at a time), and sign off each finished step with complete_step, attaching the evidence it's done — the verification you ran, the diff/files you changed, or a manual check. Don't claim a step is done without evidence."
+const planApprovedMessage = "Plan approved — plan mode is off; you're cleared to make the changes without asking again. Implement the plan now. Keep the task list current with todo_write, preserving its two-level shape (phases at level 0, their sub-steps at level 1): mark the sub-step you start as in_progress, one in_progress at a time. Sign off each finished sub-step with complete_step, attaching the evidence it's done — the verification you ran, the diff/files you changed, or a manual check. Don't claim a step is done without evidence."
 
 // runTurn runs one model turn, then applies the plan-approval gate. This is the
 // single, frontend-agnostic plan flow: in plan mode the model just researches
@@ -304,6 +305,7 @@ const planApprovedMessage = "Plan approved — plan mode is off; you're cleared 
 // next turn can revise. Plan mode is only ever set interactively, so the headless
 // `Run` path (which doesn't call this) never blocks on a prompt.
 func (c *Controller) runTurn(ctx context.Context, input string) error {
+	c.maybeSessionStart(ctx)
 	// Open a checkpoint for this turn before the user message is appended, so the
 	// recorded message boundary precedes it and pre-edit snapshots land here.
 	c.beginCheckpoint(input)
@@ -380,9 +382,10 @@ func lastAssistantText(msgs []provider.Message) string {
 func (c *Controller) Submit(input string) {
 	trimmed := strings.TrimSpace(input)
 	switch {
-	case trimmed == "/compact":
+	case trimmed == "/compact" || strings.HasPrefix(trimmed, "/compact "):
+		focus := strings.TrimSpace(strings.TrimPrefix(trimmed, "/compact"))
 		go func() {
-			if err := c.Compact(context.Background()); err != nil {
+			if err := c.Compact(context.Background(), focus); err != nil {
 				c.notice("compaction failed: " + err.Error())
 			} else {
 				c.notice("compacted")
@@ -429,6 +432,26 @@ func (c *Controller) Submit(input string) {
 		// Read-only management verbs (/model /memory /skill /hooks /mcp) emit a
 		// listing Notice, so Submit-based frontends (desktop, HTTP) get them with
 		// no extra wiring. (The chat TUI handles these itself with richer output.)
+		fields := strings.Fields(trimmed)
+		switch fields[0] {
+		case "/tree":
+			c.notice(c.BranchTreeText())
+			return
+		case "/branch":
+			args := strings.TrimSpace(strings.TrimPrefix(trimmed, fields[0]))
+			if turn, name, fromTurn, err := ParseBranchTarget(args); err != nil {
+				c.notice(err.Error())
+			} else if fromTurn {
+				_, _ = c.ForkNamed(turn-1, name)
+			} else {
+				_, _ = c.Branch(name)
+			}
+			return
+		case "/switch":
+			ref := strings.TrimSpace(strings.TrimPrefix(trimmed, fields[0]))
+			_, _ = c.SwitchBranch(ref)
+			return
+		}
 		if c.managementNotice(trimmed) {
 			return
 		}
@@ -471,6 +494,7 @@ func (c *Controller) notice(text string) {
 // headless `reasonix run` path, where the Sink renders to stdout and the caller
 // just needs the exit status — no TurnDone event, no cancel bookkeeping.
 func (c *Controller) Run(ctx context.Context, input string) error {
+	c.maybeSessionStart(ctx)
 	if c.hooks.Enabled() {
 		c.turn++
 		if block, _ := c.hooks.PromptSubmit(ctx, input, c.turn); block {
@@ -576,15 +600,31 @@ func (c *Controller) SetPlanMode(v bool) {
 }
 
 // Compact runs one compaction pass on the executor's session on demand.
-func (c *Controller) Compact(ctx context.Context) error {
+// instructions is optional `/compact <focus>` guidance steering what to keep.
+func (c *Controller) Compact(ctx context.Context, instructions string) error {
 	if c.executor == nil {
 		return nil
 	}
-	return c.executor.CompactNow(ctx)
+	return c.executor.CompactNow(ctx, instructions)
+}
+
+// maybeSessionStart fires the SessionStart hook exactly once per session, lazily
+// on the first turn — by then the sink/notify is wired, and a resumed session
+// fires it too (its first post-resume turn).
+func (c *Controller) maybeSessionStart(ctx context.Context) {
+	c.mu.Lock()
+	if c.startedOnce {
+		c.mu.Unlock()
+		return
+	}
+	c.startedOnce = true
+	c.mu.Unlock()
+	c.hooks.SessionStart(ctx)
 }
 
 // NewSession snapshots the current conversation, rotates to a fresh file, and
-// resets the executor to a clean session carrying the same system prompt.
+// resets the executor to a clean session carrying the same system prompt. It
+// ends the old session and starts the new one for lifecycle hooks.
 func (c *Controller) NewSession() error {
 	if c.executor == nil {
 		return nil
@@ -592,6 +632,7 @@ func (c *Controller) NewSession() error {
 	if err := c.Snapshot(); err != nil {
 		return err
 	}
+	c.hooks.SessionEnd(context.Background())
 	if c.sessionDir != "" {
 		c.mu.Lock()
 		c.sessionPath = agent.NewSessionPath(c.sessionDir, c.label)
@@ -599,6 +640,10 @@ func (c *Controller) NewSession() error {
 	}
 	c.executor.SetSession(agent.NewSession(c.systemPrompt))
 	c.rebindCheckpoints(c.SessionPath())
+	c.mu.Lock()
+	c.startedOnce = true // NewSession fires SessionStart itself; don't re-fire on the next turn
+	c.mu.Unlock()
+	c.hooks.SessionStart(context.Background())
 	return nil
 }
 
@@ -684,6 +729,10 @@ func (c *Controller) Rewind(turn int, scope RewindScope) error {
 // the live boundary, so it is unavailable for resumed-session turns and refused
 // while a turn runs. Returns the new session path.
 func (c *Controller) Fork(turn int) (string, error) {
+	return c.ForkNamed(turn, "")
+}
+
+func (c *Controller) ForkNamed(turn int, name string) (string, error) {
 	if c.executor == nil {
 		return "", c.rewindFail(fmt.Errorf("checkpoints unavailable"))
 	}
@@ -704,6 +753,8 @@ func (c *Controller) Fork(turn int) (string, error) {
 	// Persist the current conversation first so the branch point survives, then
 	// seed a fresh session with the messages up to the fork and switch to it.
 	_ = c.Snapshot()
+	parentPath := c.SessionPath()
+	parentID := agent.BranchID(parentPath)
 	src := c.executor.Session().Messages
 	if boundary > len(src) {
 		boundary = len(src)
@@ -713,15 +764,153 @@ func (c *Controller) Fork(turn int) (string, error) {
 	sess.Messages = forked
 
 	newPath := agent.NewSessionPath(c.sessionDir, c.label)
+	if err := sess.Save(newPath); err != nil {
+		return "", c.rewindFail(err)
+	}
+	if err := agent.SaveBranchMeta(newPath, agent.BranchMeta{
+		Name:             strings.TrimSpace(name),
+		ParentID:         parentID,
+		ForkTurn:         turn,
+		ForkMessageIndex: boundary,
+	}); err != nil {
+		return "", c.rewindFail(err)
+	}
 	c.executor.SetSession(sess)
 	c.mu.Lock()
 	c.sessionPath = newPath
 	c.mu.Unlock()
 	c.rebindCheckpoints(newPath)
-	_ = c.Snapshot()
 	c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
 		Text: fmt.Sprintf("forked conversation at turn %d into a new session", turn)})
 	return newPath, nil
+}
+
+// Branch copies the current conversation into a child branch and switches to it.
+// Unlike Fork, it branches at the current tip and does not require a checkpoint.
+func (c *Controller) Branch(name string) (string, error) {
+	if c.executor == nil {
+		return "", c.rewindFail(fmt.Errorf("branch unavailable"))
+	}
+	if c.sessionDir == "" {
+		return "", c.rewindFail(fmt.Errorf("branch needs session persistence, which is disabled"))
+	}
+	c.mu.Lock()
+	running := c.running
+	c.mu.Unlock()
+	if running {
+		return "", c.rewindFail(fmt.Errorf("cannot branch while a turn is running"))
+	}
+	if !c.executor.Session().HasContent() {
+		return "", c.rewindFail(fmt.Errorf("nothing to branch yet"))
+	}
+	if err := c.Snapshot(); err != nil {
+		return "", c.rewindFail(err)
+	}
+	parentPath := c.SessionPath()
+	parentID := agent.BranchID(parentPath)
+	src := c.executor.Session().Messages
+	branched := append([]provider.Message(nil), src...)
+	sess := agent.NewSession("")
+	sess.Messages = branched
+
+	newPath := agent.NewSessionPath(c.sessionDir, c.label)
+	if err := sess.Save(newPath); err != nil {
+		return "", c.rewindFail(err)
+	}
+	if err := agent.SaveBranchMeta(newPath, agent.BranchMeta{
+		Name:             strings.TrimSpace(name),
+		ParentID:         parentID,
+		ForkTurn:         -1,
+		ForkMessageIndex: len(branched),
+	}); err != nil {
+		return "", c.rewindFail(err)
+	}
+	c.executor.SetSession(sess)
+	c.mu.Lock()
+	c.sessionPath = newPath
+	c.mu.Unlock()
+	c.rebindCheckpoints(newPath)
+	c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
+		Text: fmt.Sprintf("created branch %s", agent.BranchID(newPath))})
+	return newPath, nil
+}
+
+// Branches lists saved conversation branches in this controller's session dir.
+func (c *Controller) Branches() ([]agent.BranchInfo, error) {
+	if c.sessionDir == "" {
+		return nil, fmt.Errorf("session persistence is disabled")
+	}
+	if err := c.Snapshot(); err != nil {
+		return nil, err
+	}
+	return agent.ListBranches(c.sessionDir)
+}
+
+func (c *Controller) SwitchBranch(ref string) (agent.BranchInfo, error) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return agent.BranchInfo{}, c.rewindFail(fmt.Errorf("usage: /switch <branch id|name>"))
+	}
+	c.mu.Lock()
+	running := c.running
+	c.mu.Unlock()
+	if running {
+		return agent.BranchInfo{}, c.rewindFail(fmt.Errorf("cannot switch branches while a turn is running"))
+	}
+	branches, err := c.Branches()
+	if err != nil {
+		return agent.BranchInfo{}, c.rewindFail(err)
+	}
+	match, err := resolveBranch(branches, ref)
+	if err != nil {
+		return agent.BranchInfo{}, c.rewindFail(err)
+	}
+	loaded, err := agent.LoadSession(match.Path)
+	if err != nil {
+		return agent.BranchInfo{}, c.rewindFail(err)
+	}
+	if c.executor != nil {
+		c.executor.SetSession(loaded)
+	}
+	c.mu.Lock()
+	c.sessionPath = match.Path
+	c.mu.Unlock()
+	c.rebindCheckpoints(match.Path)
+	c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
+		Text: fmt.Sprintf("switched to branch %s", branchDisplayName(match))})
+	return match, nil
+}
+
+func resolveBranch(branches []agent.BranchInfo, ref string) (agent.BranchInfo, error) {
+	refLower := strings.ToLower(ref)
+	var matches []agent.BranchInfo
+	for _, b := range branches {
+		nameLower := strings.ToLower(strings.TrimSpace(b.Name))
+		switch {
+		case b.ID == ref || strings.EqualFold(b.ID, ref):
+			return b, nil
+		case b.Name != "" && nameLower == refLower:
+			matches = append(matches, b)
+		case strings.HasPrefix(strings.ToLower(b.ID), refLower):
+			matches = append(matches, b)
+		case b.Path == ref:
+			return b, nil
+		}
+	}
+	if len(matches) == 1 {
+		return matches[0], nil
+	}
+	if len(matches) > 1 {
+		return agent.BranchInfo{}, fmt.Errorf("branch %q is ambiguous", ref)
+	}
+	return agent.BranchInfo{}, fmt.Errorf("branch %q not found", ref)
+}
+
+func branchDisplayName(b agent.BranchInfo) string {
+	if strings.TrimSpace(b.Name) != "" {
+		return fmt.Sprintf("%s (%s)", b.Name, b.ID)
+	}
+	return b.ID
 }
 
 // SummarizeFrom compresses the conversation from turn onward into one summary;
@@ -798,7 +987,10 @@ func (c *Controller) Snapshot() error {
 	if !s.HasContent() {
 		return nil
 	}
-	return s.Save(path)
+	if err := s.Save(path); err != nil {
+		return err
+	}
+	return agent.TouchBranchMeta(path)
 }
 
 // SetSessionPath pins where auto-save lands (a fresh session file minted by the
@@ -842,6 +1034,15 @@ func (c *Controller) ContextSnapshot() (int, int) {
 		return 0, c.executor.ContextWindow()
 	}
 	return u.PromptTokens, c.executor.ContextWindow()
+}
+
+// CompactRatio returns the auto-compaction threshold as a fraction of the window
+// (0 when the executor is unset). The status line shows headroom against it.
+func (c *Controller) CompactRatio() float64 {
+	if c.executor == nil {
+		return 0
+	}
+	return c.executor.CompactRatio()
 }
 
 // LastUsage returns the most recent turn's token telemetry (nil before the first
@@ -894,6 +1095,24 @@ func (c *Controller) HookRunner() *hook.Runner { return c.hooks }
 // of tools the server exposed. A save failure after a successful connect is
 // reported but non-fatal: the server still works this session.
 func (c *Controller) AddMCPServer(e config.PluginEntry) (int, error) {
+	n, err := c.connectMCPServer(e)
+	if err != nil {
+		return 0, err
+	}
+	cfg, lerr := config.Load()
+	if lerr != nil {
+		return n, fmt.Errorf("connected, but reloading config to save failed: %w", lerr)
+	}
+	if err := cfg.UpsertPlugin(e); err != nil {
+		return n, fmt.Errorf("connected, but config rejected the entry: %w", err)
+	}
+	if err := cfg.Save(); err != nil {
+		return n, fmt.Errorf("connected, but saving config failed: %w", err)
+	}
+	return n, nil
+}
+
+func (c *Controller) connectMCPServer(e config.PluginEntry) (int, error) {
 	if c.host == nil {
 		c.host = plugin.NewHost()
 	}
@@ -915,17 +1134,52 @@ func (c *Controller) AddMCPServer(e config.PluginEntry) (int, error) {
 			c.reg.Add(t)
 		}
 	}
-	cfg, lerr := config.Load()
-	if lerr != nil {
-		return len(tools), fmt.Errorf("connected, but reloading config to save failed: %w", lerr)
-	}
-	if err := cfg.UpsertPlugin(e); err != nil {
-		return len(tools), fmt.Errorf("connected, but config rejected the entry: %w", err)
-	}
-	if err := cfg.Save(); err != nil {
-		return len(tools), fmt.Errorf("connected, but saving config failed: %w", err)
-	}
 	return len(tools), nil
+}
+
+func (c *Controller) ConfiguredMCPNames() []string {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil
+	}
+	names := make([]string, 0, len(cfg.Plugins))
+	for _, p := range cfg.Plugins {
+		names = append(names, p.Name)
+	}
+	return names
+}
+
+func (c *Controller) DisconnectedMCPNames() []string {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil
+	}
+	connected := map[string]bool{}
+	if c.host != nil {
+		for _, name := range c.host.ServerNames() {
+			connected[name] = true
+		}
+	}
+	var names []string
+	for _, p := range cfg.Plugins {
+		if !connected[p.Name] {
+			names = append(names, p.Name)
+		}
+	}
+	return names
+}
+
+func (c *Controller) ConnectConfiguredMCPServer(name string) (int, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return 0, err
+	}
+	for _, p := range cfg.Plugins {
+		if p.Name == name {
+			return c.connectMCPServer(p)
+		}
+	}
+	return 0, fmt.Errorf("no configured MCP server named %q", name)
 }
 
 // RemoveMCPServer disconnects a live MCP server — its tools vanish from the next
@@ -961,8 +1215,15 @@ func (c *Controller) RemoveMCPServer(name string) (disconnected bool, err error)
 // Label returns the human-readable model label, e.g. "deepseek-flash".
 func (c *Controller) Label() string { return c.label }
 
-// Close stops plugin subprocesses and releases resources.
+// Close stops plugin subprocesses and releases resources. A session that ever
+// started fires SessionEnd so a teardown hook runs.
 func (c *Controller) Close() {
+	c.mu.Lock()
+	started := c.startedOnce
+	c.mu.Unlock()
+	if started {
+		c.hooks.SessionEnd(context.Background())
+	}
 	if c.jobs != nil {
 		c.jobs.Close() // cancel any still-running background jobs
 	}
@@ -1087,6 +1348,7 @@ func (g gateApprover) Approve(ctx context.Context, tool, subject string, args js
 type seedTodo struct {
 	Content string `json:"content"`
 	Status  string `json:"status"`
+	Level   int    `json:"level,omitempty"`
 }
 
 // seedPlanTodos turns an approved plan into a starter task list and emits it as a
@@ -1133,15 +1395,15 @@ func PlanTodosJSON(plan string) string {
 func parsePlanTodos(plan string) []seedTodo {
 	var todos []seedTodo
 	for _, raw := range strings.Split(plan, "\n") {
-		item := listItemContent(raw)
-		if item == "" {
+		item, level, ok := listItem(raw)
+		if !ok {
 			continue
 		}
 		status := "pending"
 		if len(todos) == 0 {
 			status = "in_progress"
 		}
-		todos = append(todos, seedTodo{Content: item, Status: status})
+		todos = append(todos, seedTodo{Content: item, Status: status, Level: level})
 		if len(todos) >= 20 {
 			break
 		}
@@ -1149,13 +1411,33 @@ func parsePlanTodos(plan string) []seedTodo {
 	return todos
 }
 
-// listItemContent returns the task text of a markdown list line ("- x", "* x",
-// "1. x", "2) x"), or "" if the line isn't a list item. Light inline-markdown
+// listItem parses a markdown list line ("- x", "* x", "1. x", "2) x") into its
+// task text and a nesting level derived from leading indentation (0 for a
+// top-level item, 1 for an indented sub-step — capped at 1 since the plan is
+// two-level). ok is false when the line isn't a list item. Light inline-markdown
 // stripping keeps the checklist readable.
-func listItemContent(line string) string {
-	s := strings.TrimSpace(line)
-	if s == "" {
-		return ""
+func listItem(line string) (content string, level int, ok bool) {
+	trimmed := strings.TrimLeft(line, " \t")
+	if trimmed == "" {
+		return "", 0, false
+	}
+	indent := 0
+	for _, c := range line[:len(line)-len(trimmed)] {
+		if c == '\t' {
+			indent += 4
+		} else {
+			indent++
+		}
+	}
+	s := trimmed
+	// A numbered markdown heading ("### 1. Add the loader") is how models often
+	// write a phase even when asked for a list; strip the heading marker and
+	// treat it as a top-level phase. A heading without a number (a section
+	// title like "## Plan") falls through and is ignored.
+	heading := false
+	if h := strings.TrimLeft(s, "#"); h != s && strings.HasPrefix(h, " ") {
+		heading = true
+		s = strings.TrimSpace(h)
 	}
 	switch {
 	case strings.HasPrefix(s, "- "), strings.HasPrefix(s, "* "), strings.HasPrefix(s, "+ "):
@@ -1167,7 +1449,7 @@ func listItemContent(line string) string {
 			i++
 		}
 		if i == 0 || i+1 >= len(s) || (s[i] != '.' && s[i] != ')') || s[i+1] != ' ' {
-			return ""
+			return "", 0, false
 		}
 		s = s[i+2:]
 	}
@@ -1176,7 +1458,17 @@ func listItemContent(line string) string {
 	s = strings.TrimPrefix(s, "[x] ")
 	s = strings.ReplaceAll(s, "`", "")
 	s = strings.ReplaceAll(s, "**", "")
-	return strings.TrimSpace(s)
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "", 0, false
+	}
+	if heading {
+		return s, 0, true // a heading is always a top-level phase
+	}
+	if indent >= 2 {
+		return s, 1, true
+	}
+	return s, 0, true
 }
 
 // requestApproval emits an ApprovalRequest and blocks until Approve(ID, …)
@@ -1209,6 +1501,13 @@ func (c *Controller) requestApproval(ctx context.Context, tool, subject string) 
 	c.mu.Unlock()
 
 	c.sink.Emit(event.Event{Kind: event.ApprovalRequest, Approval: event.Approval{ID: id, Tool: tool, Subject: subject}})
+	// The agent now needs the user's attention; a Notification hook can ping an
+	// external channel (desktop notice, phone) while the run blocks on the reply.
+	if subject != "" {
+		go c.hooks.Notification(ctx, "approval needed: "+tool+" "+subject)
+	} else {
+		go c.hooks.Notification(ctx, "approval needed: "+tool)
+	}
 
 	select {
 	case r := <-reply:

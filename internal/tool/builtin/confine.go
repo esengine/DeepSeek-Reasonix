@@ -12,12 +12,14 @@ import (
 // ConfineBash returns the bash built-in bound to an OS-sandbox spec, overriding
 // the unconfined instance registered at init. When the spec enforces, bash runs
 // each command through the sandbox (see package sandbox).
-func ConfineBash(spec sandbox.Spec) tool.Tool { return bash{sb: spec} }
+func ConfineBash(spec sandbox.Spec) tool.Tool {
+	return bash{sb: spec, shell: sandbox.ResolveShell()}
+}
 
 // ConfineWriters returns the file-writing built-ins (write_file, edit_file,
-// multi_edit) bound to roots — the only directories they may modify. The
-// composition root adds these to the per-run registry to override the
-// unconfined instances registered at init time, so writes stay inside the
+// multi_edit, notebook_edit) bound to roots — the only directories they may
+// modify. The composition root adds these to the per-run registry to override
+// the unconfined instances registered at init time, so writes stay inside the
 // workspace by default. roots may be relative; they are resolved to absolute,
 // symlink-free paths once here. An empty roots slice yields unconfined writers.
 func ConfineWriters(roots []string) []tool.Tool {
@@ -26,6 +28,9 @@ func ConfineWriters(roots []string) []tool.Tool {
 		writeFile{roots: rs},
 		editFile{roots: rs},
 		multiEdit{roots: rs},
+		notebookEdit{roots: rs},
+		deleteRange{roots: rs},
+		deleteSymbol{roots: rs},
 	}
 }
 

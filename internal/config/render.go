@@ -41,6 +41,21 @@ func RenderTOML(c *Config) string {
 	} else {
 		b.WriteString("# planner_model = \"mimo\"   # optional: enable two-model collaboration\n")
 	}
+	if c.Agent.SubagentModel != "" {
+		fmt.Fprintf(&b, "subagent_model = %q   # default model for runAs=subagent skills\n", c.Agent.SubagentModel)
+	} else {
+		b.WriteString("# subagent_model = \"deepseek-pro\"   # optional default for runAs=subagent skills\n")
+	}
+	if len(c.Agent.SubagentModels) > 0 {
+		fmt.Fprintf(&b, "subagent_models = %s   # per-skill overrides\n", renderStringMap(c.Agent.SubagentModels))
+	} else {
+		b.WriteString("# subagent_models = { review = \"deepseek-pro\", security_review = \"deepseek-pro\" }   # per-skill overrides\n")
+	}
+	if c.Agent.OutputStyle != "" {
+		fmt.Fprintf(&b, "output_style = %q   # persona/tone folded into the prompt\n", c.Agent.OutputStyle)
+	} else {
+		b.WriteString("# output_style = \"explanatory\"   # explanatory | learning | concise | custom; empty = default\n")
+	}
 	b.WriteString("\n")
 
 	for _, p := range c.Providers {
@@ -110,6 +125,16 @@ func RenderTOML(c *Config) string {
 	fmt.Fprintf(&b, "network = %v\n", c.Sandbox.Network)
 	b.WriteString("\n")
 
+	b.WriteString("[statusline]\n")
+	b.WriteString("# A custom status line: a command whose first stdout line replaces the built-in\n")
+	b.WriteString("# data row. It receives {\"model\",\"contextUsed\",\"contextWindow\"} as JSON on stdin.\n")
+	if c.Statusline.Command != "" {
+		fmt.Fprintf(&b, "command = %q\n", c.Statusline.Command)
+	} else {
+		b.WriteString("# command = \"my-statusline.sh\"\n")
+	}
+	b.WriteString("\n")
+
 	b.WriteString("# External MCP servers. type: \"stdio\" (default, a subprocess) | \"http\" | \"sse\".\n")
 	b.WriteString("# ${VAR} / ${VAR:-default} are expanded from the environment in command/args/env/url/headers.\n")
 	if len(c.Plugins) == 0 {
@@ -142,6 +167,9 @@ func RenderTOML(c *Config) string {
 			}
 			if len(pl.Env) > 0 {
 				fmt.Fprintf(&b, "env     = %s\n", renderStringMap(pl.Env))
+			}
+			if pl.AutoStart != nil {
+				fmt.Fprintf(&b, "auto_start = %v\n", *pl.AutoStart)
 			}
 		}
 	}

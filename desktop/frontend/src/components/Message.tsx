@@ -23,10 +23,11 @@ export function UserMessage({
   const t = useT();
   const canRewind = onRewind != null && turn != null;
   const rewind = (scope: string) => onRewind?.(turn as number, scope);
+  const displayText = text.replace(/@\.reasonix\/attachments\/[^\s]+/g, "[image]");
   return (
     <div className="msg msg--user">
       <span className="msg__caret">›</span>
-      <div className="msg__text">{text}</div>
+      <div className="msg__text">{displayText}</div>
       {canRewind && (
         <div className="rewind">
           <button className="rewind__btn" title={t("rewind.label")} onClick={onToggle}>

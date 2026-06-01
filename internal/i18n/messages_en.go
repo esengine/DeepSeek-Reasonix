@@ -30,16 +30,29 @@ var English = Messages{
 	ResumeRequiresTTY: "--resume needs an interactive terminal; pass --continue for the most recent session",
 	PickSessionLabel:  "Resume which session?",
 
+	ResumeListHeader:    "sessions (/resume <n> to switch)",
+	ResumeBusy:          "finish or cancel the current turn before resuming",
+	ResumeBadIndexFmt:   "pick a session 1–%d (run /resume to list)",
+	ResumeAlreadyActive: "already in that session",
+	ResumedTitle:        "resumed session",
+
 	ChatStatusThinkingFmt:  "%s thinking… (%ds · Esc cancels)",
 	ChatStatusIdle:         "Tab toggles plan · Enter sends · Esc clears/exits state · PgUp/PgDn scrolls · Ctrl-D quits",
 	ChatStatusPlanApproval: "Enter/y approves & executes · n/Esc keeps planning · PgUp/PgDn scrolls",
 	PlanApprovalPrompt:     "Plan ready above — Enter/y to approve & execute, n/Esc to keep planning",
-	ChatStatusToolApproval: "y approve once · a allow this session · n deny · Ctrl-C cancels turn",
+	ChatStatusToolApproval: "y/1 approve once · a/2 allow this session · n/3 deny · Ctrl-C cancels turn",
 	AskTypeSomething:       "Type something else",
 	AskTypingHint:          "type below, Enter to confirm",
 	AskChatInstead:         "None — just chat",
 	ChatStatusQuestion:     "↑/↓ move · number to pick · space multi · Enter confirm · ←/→ switch · Esc cancel",
-	ToolApprovalPromptFmt:  "Allow %s%s? — [y] once · [a] this session · [n] no",
+	ToolApprovalPromptFmt:  "Permission required\n\nWill call tool %s%s.\n%s\n[y] allow once    [a] allow this session    [n] deny",
+	ToolApprovalSourceFmt:  "Source: %s",
+	ToolApprovalBuiltIn:    "built-in tool",
+	ToolApprovalImageUse:   "It will read provided image input for image understanding.",
+
+	OutputStyleNone:   "no output styles available",
+	OutputStyleHeader: "output styles:",
+	OutputStyleHint:   "set agent.output_style in reasonix.toml to apply one (takes effect next session)",
 
 	CompactionWorking: "compacting conversation…",
 	CompactionTitle:   "Context compacted",
@@ -54,7 +67,7 @@ var English = Messages{
 	SlashUnavailable:   "command unavailable in this build",
 	SlashUnknown:       "unknown command",
 	SlashTodoCleared:   "task list dismissed",
-	SlashHelp:          "commands: /compact · /new · /todo · /model (switch model) · /mcp · /skill · /hooks · /memory · /help · plus skills (/init, /explore, …)",
+	SlashHelp:          "commands: /compact · /new · /resume · /rewind · /tree · /branch · /switch · /todo · /model (switch model) · /mcp · /skill · /hooks · /paste-image · /memory · /help · plus skills (/init, /explore, …)",
 	SlashPromptEmpty:   "the MCP prompt returned no content to send",
 	SlashMCPNone:       "no MCP servers configured — add a [[plugins]] entry in reasonix.toml",
 	CompHintSlash:      "↑/↓ move · Tab/Enter select · Esc close",
@@ -63,10 +76,16 @@ var English = Messages{
 	CmdNew:          "fork a fresh session",
 	CmdCompact:      "compact context",
 	CmdRewind:       "rewind to an earlier turn",
+	CmdTree:         "show conversation branches",
+	CmdBranch:       "create a conversation branch",
+	CmdSwitchBranch: "switch conversation branch",
+	CmdResume:       "resume a saved session",
 	CmdModel:        "switch model",
 	CmdMemory:       "show memory files",
 	CmdMcp:          "MCP servers",
 	CmdHooks:        "manage hooks",
+	CmdPasteImage:   "paste clipboard image",
+	CmdOutputStyle:  "list output styles",
 	CmdSkill:        "manage skills",
 	CmdHelp:         "list commands",
 	CmdTodo:         "dismiss the task list",
@@ -117,7 +136,7 @@ var English = Messages{
 	UsageBody: `reasonix — a config- and plugin-driven coding agent (multi-model)
 
 Usage:
-  reasonix chat [--model NAME]                          interactive session (multi-turn)
+  reasonix chat [--model NAME] [-c|--continue] [--resume]   interactive session (multi-turn; -c resumes the latest, --resume picks one)
   reasonix run  [--model NAME] [--max-steps N] <task>   run one task and exit
   reasonix serve [--model NAME] [--addr HOST:PORT]      serve the session over HTTP+SSE (browser client at /)
   reasonix setup [path]                                 interactive config wizard; writes reasonix.toml (+ .env)
@@ -127,6 +146,7 @@ Usage:
 
 Examples:
   reasonix chat
+  reasonix chat --continue
   reasonix run "implement the TODOs in main.go"
   reasonix run --model mimo-pro "add unit tests for this function"
   echo "explain this code" | reasonix run

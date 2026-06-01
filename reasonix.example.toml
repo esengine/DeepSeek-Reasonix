@@ -15,6 +15,10 @@ guessing; keep changes minimal and correct; briefly summarize what you did."""
 max_steps   = 25
 temperature = 0.0
 # planner_model = "mimo-pro"   # optional: enable two-model collaboration
+# subagent_model = "deepseek-pro"   # optional default for runAs=subagent skills
+# subagent_models = { review = "deepseek-pro", security_review = "deepseek-pro" }   # per-skill overrides
+# output_style = "explanatory"   # persona/tone folded into the prompt: explanatory | learning | concise,
+#                                  or a custom .reasonix/output-styles/<name>.md ; empty = default
 
 # A provider is a vendor endpoint (one base_url + key) that offers one or more
 # models. Use `models = [...]` to expose several under a single entry — switching
@@ -99,6 +103,11 @@ enabled = []   # empty = all built-in tools
 #       "PreToolUse":  [ { "match": "bash", "command": "my-guard.sh" } ],
 #       "PostToolUse": [ { "match": ".*file", "command": "gofmt -w ." } ],
 #       "Stop":        [ { "command": "notify-send 'turn done'" } ] } }
+
+# A custom status line: a command whose first stdout line replaces the built-in
+# data row. It receives {"model","contextUsed","contextWindow"} as JSON on stdin.
+# [statusline]
+# command = "my-statusline.sh"
 
 # External stdio plugins (MCP-compatible); each is a standalone executable.
 # [[plugins]]

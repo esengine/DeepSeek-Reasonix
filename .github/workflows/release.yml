@@ -21,6 +21,9 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Cache hit guard
+        run: ./scripts/cache-guard.sh
+
       - name: Build, bundle CodeGraph, and package
         run: ./scripts/release.sh
 

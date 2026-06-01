@@ -41,6 +41,8 @@ func (w Workspace) Tools(enabled ...string) []tool.Tool {
 		writeFile{workDir: w.Dir, roots: roots},
 		editFile{workDir: w.Dir, roots: roots},
 		multiEdit{workDir: w.Dir, roots: roots},
+		deleteRange{workDir: w.Dir, roots: roots},
+		deleteSymbol{workDir: w.Dir, roots: roots},
 		bash{workDir: w.Dir, sb: w.Bash},
 		listDir{workDir: w.Dir},
 		globTool{workDir: w.Dir},

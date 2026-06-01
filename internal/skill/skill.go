@@ -12,6 +12,7 @@ package skill
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -78,6 +79,10 @@ type Options struct {
 	ProjectRoot     string
 	CustomPaths     []string
 	DisableBuiltins bool // suppress shipped built-ins (test-only knob)
+	// Stderr is the writer for diagnostic warnings. When nil, defaults to
+	// os.Stderr. Set to io.Discard to suppress output (e.g. during model
+	// switch inside a bubbletea session).
+	Stderr io.Writer
 }
 
 // Store resolves skills across the configured roots.
@@ -86,6 +91,7 @@ type Store struct {
 	projectRoot     string
 	customPaths     []string
 	disableBuiltins bool
+	stderr          io.Writer
 }
 
 // New builds a Store. Relative custom paths and a relative project root are made
@@ -110,11 +116,16 @@ func New(opts Options) *Store {
 		}
 	}
 	custom := dedupePaths(resolveCustomPaths(opts.CustomPaths, base, home))
+	stderr := opts.Stderr
+	if stderr == nil {
+		stderr = os.Stderr
+	}
 	return &Store{
 		homeDir:         home,
 		projectRoot:     root,
 		customPaths:     custom,
 		disableBuiltins: opts.DisableBuiltins,
+		stderr:          stderr,
 	}
 }
 
@@ -311,7 +322,7 @@ func (s *Store) parse(path, stem string, scope Scope) (Skill, bool) {
 	}
 	desc := strings.TrimSpace(fm["description"])
 	if desc == "" {
-		fmt.Fprintf(os.Stderr, "warning: skill %q at %s has no description: — it will load but won't appear in the skills index\n", name, path)
+		fmt.Fprintf(s.stderr, "warning: skill %q at %s has no description: — it will load but won't appear in the skills index\n", name, path)
 	}
 	return Skill{
 		Name:         name,

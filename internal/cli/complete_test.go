@@ -5,7 +5,11 @@ import (
 	"path/filepath"
 	"testing"
 
+	"reasonix/internal/agent"
 	"reasonix/internal/command"
+	"reasonix/internal/control"
+	"reasonix/internal/event"
+	"reasonix/internal/provider"
 )
 
 // writeAt creates dir/rel (with parents) holding content, for fs-backed tests.
@@ -175,7 +179,7 @@ func TestSlashArgCompletionMCPSubcommands(t *testing.T) {
 	if !m.completion.active || m.completion.kind != compSlashArg {
 		t.Fatalf("/mcp <space> should open the argument menu: %+v", m.completion)
 	}
-	for _, want := range []string{"add", "remove", "list"} {
+	for _, want := range []string{"add", "connect", "remove", "list"} {
 		if !hasLabel(m.completion.items, want) {
 			t.Errorf("subcommand %q missing: %v", want, labels(m.completion.items))
 		}
@@ -240,6 +244,39 @@ func TestSlashArgCompletionRemoveNoHost(t *testing.T) {
 	m.updateCompletion()
 	if m.completion.active {
 		t.Error("remove with no connected servers should not open a menu")
+	}
+}
+
+func TestSlashArgCompletionSwitchBranches(t *testing.T) {
+	dir := t.TempDir()
+	exec := agent.New(nil, nil, agent.NewSession("sys"), agent.Options{}, event.Discard)
+	exec.Session().Add(provider.Message{Role: provider.RoleUser, Content: "root prompt"})
+	ctrl := control.New(control.Options{Executor: exec, SessionDir: dir, Label: "test"})
+	rootPath := filepath.Join(dir, "root.jsonl")
+	ctrl.SetSessionPath(rootPath)
+	if err := ctrl.Snapshot(); err != nil {
+		t.Fatal(err)
+	}
+
+	child := agent.NewSession("sys")
+	child.Add(provider.Message{Role: provider.RoleUser, Content: "child prompt"})
+	childPath := filepath.Join(dir, "child.jsonl")
+	if err := child.Save(childPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := agent.SaveBranchMeta(childPath, agent.BranchMeta{Name: "experiment", ParentID: agent.BranchID(rootPath)}); err != nil {
+		t.Fatal(err)
+	}
+
+	m := newTestChatTUI()
+	m.ctrl = ctrl
+	m.input.SetValue("/switch exp")
+	m.updateCompletion()
+	if !m.completion.active || m.completion.kind != compSlashArg {
+		t.Fatalf("/switch should open branch completion: %+v", m.completion)
+	}
+	if len(m.completion.items) != 1 || m.completion.items[0].label != "child" {
+		t.Fatalf("branch completion = %v, want child", labels(m.completion.items))
 	}
 }
 

@@ -11,6 +11,7 @@ package boot
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -23,6 +24,7 @@ import (
 	"reasonix/internal/hook"
 	"reasonix/internal/jobs"
 	"reasonix/internal/memory"
+	"reasonix/internal/outputstyle"
 	"reasonix/internal/permission"
 	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
@@ -43,6 +45,11 @@ type Options struct {
 	MaxSteps   int
 	RequireKey bool
 	Sink       event.Sink
+	// Stderr is the writer for diagnostic warnings and plugin subprocess
+	// stderr output. When nil, defaults to os.Stderr. Set to io.Discard
+	// during model switch inside a bubbletea session to prevent any output
+	// from corrupting the TUI's terminal raw mode.
+	Stderr io.Writer
 }
 
 // Build loads config, resolves the model(s), and returns a Controller wrapping a
@@ -50,6 +57,10 @@ type Options struct {
 // returned controller owns plugin subprocesses; call Close (via Controller.Close)
 // to release them.
 func Build(ctx context.Context, opts Options) (*control.Controller, error) {
+	stderr := opts.Stderr
+	if stderr == nil {
+		stderr = os.Stderr
+	}
 	cfg, err := config.Load()
 	if err != nil {
 		return nil, err
@@ -84,6 +95,12 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Output style: fold the selected persona/tone block into the base prompt
+	// before language/memory/skills append, so a "replace" style (keep-coding
+	// false) still keeps those. Applied once, into the cache-stable prefix.
+	if st, ok := outputstyle.Resolve(cfg.Agent.OutputStyle, outputstyle.Dirs()); ok {
+		sysPrompt = outputstyle.Apply(sysPrompt, st)
+	}
 	// Append the language policy so the model answers in the user's own language
 	// (the UI `language` setting governs only the interface). Static text, so it
 	// stays in the cache-stable prefix and costs nothing per turn.
@@ -102,20 +119,23 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// only; bodies load on demand via run_skill or "/<name>". Bodies never enter
 	// the prefix, so the index costs a fixed, small amount per turn.
 	cwd, _ := os.Getwd()
-	skillStore := skill.New(skill.Options{ProjectRoot: cwd, CustomPaths: cfg.SkillCustomPaths()})
+	skillStore := skill.New(skill.Options{ProjectRoot: cwd, CustomPaths: cfg.SkillCustomPaths(), Stderr: opts.Stderr})
 	skills := skillStore.List()
 	sysPrompt = skill.ApplyIndex(sysPrompt, skills)
 
 	reg := tool.NewRegistry()
 	bashSpec := sandbox.Spec{Mode: cfg.BashMode(), WriteRoots: cfg.WriteRoots(), Network: cfg.Sandbox.Network}
 	if bashSpec.Mode == "enforce" && !sandbox.Available() {
-		fmt.Fprintln(os.Stderr, "warning: bash sandbox requested but unavailable on this platform; running bash unconfined")
+		fmt.Fprintln(stderr, "warning: bash sandbox requested but unavailable on this platform; running bash unconfined")
 	}
-	addBuiltins(reg, cfg.Tools.Enabled, cfg.WriteRoots(), bashSpec)
+	if sandbox.ResolveShell().Kind == sandbox.ShellPowerShell {
+		fmt.Fprintln(stderr, "warning: bash not found on PATH; the shell tool will run commands under Windows PowerShell. Install Git for Windows or WSL to use bash.")
+	}
+	addBuiltins(reg, cfg.Tools.Enabled, cfg.WriteRoots(), bashSpec, stderr)
 	// Always construct a host, even with no plugins configured, so the controller's
 	// host pointer is stable for the session and `/mcp add` can hot-add into it.
 	pluginHost := plugin.NewHost()
-	specs := PluginSpecs(cfg.Plugins)
+	specs := PluginSpecs(cfg.AutoStartPlugins())
 	// CodeGraph is a built-in MCP server fetched on first use. When it resolves,
 	// inject it as one more stdio plugin pinned to the project root (it is
 	// cwd-aware); EnsureInit only creates .codegraph/ (fast, size-independent),
@@ -149,13 +169,19 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		}
 	}
 	if len(specs) > 0 {
-		host, ptools, err := plugin.StartAll(ctx, specs)
-		if err != nil {
-			return nil, fmt.Errorf("plugin: %w", err)
+		// Apply caller-supplied stderr override to all plugin specs.
+		if opts.Stderr != nil {
+			for i := range specs {
+				specs[i].Stderr = opts.Stderr
+			}
 		}
+		host, ptools := plugin.StartAvailable(ctx, specs)
 		pluginHost = host
 		for _, t := range ptools {
 			reg.Add(t)
+		}
+		if text, ok := MCPStartupNotice(host.Failures()); ok {
+			sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: text})
 		}
 	}
 	cleanup := pluginHost.Close
@@ -216,8 +242,8 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// Its tool activity nests under the invoking call, like `task`.
 	skillRunner := func(sctx context.Context, sk skill.Skill, task string) (string, error) {
 		prov, price, ctxWin := execProv, entry.Price, entry.ContextWindow
-		if sk.Model != "" {
-			if me, ok := cfg.ResolveModel(sk.Model); ok {
+		if modelRef := subagentModelRef(cfg, sk); modelRef != "" {
+			if me, ok := cfg.ResolveModel(modelRef); ok {
 				if p, err := NewProvider(me); err == nil {
 					prov, price, ctxWin = p, me.Price, me.ContextWindow
 				}
@@ -260,6 +286,30 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// Custom slash commands (.reasonix/commands + user dir). Best-effort: a malformed
 	// file is skipped, and a load error never blocks the session.
 	cmds, _ := command.Load(config.CommandDirs()...)
+
+	// Expose the loaded slash commands (skills + custom commands) to the model via
+	// the slash_command tool, so it can invoke a project playbook by name the way a
+	// user types "/name". Skills are added first, then commands, so a command wins
+	// a name clash — matching the prompt's command-over-skill precedence.
+	var slashEntries []command.SlashEntry
+	for _, sk := range skills {
+		sk := sk
+		slashEntries = append(slashEntries, command.SlashEntry{
+			Name:        sk.Name,
+			Description: sk.Description,
+			Render:      func(args []string) string { return skill.Render(sk, strings.Join(args, " ")) },
+		})
+	}
+	for _, cmd := range cmds {
+		cmd := cmd
+		slashEntries = append(slashEntries, command.SlashEntry{
+			Name:        cmd.Name,
+			Description: cmd.Description,
+			ArgHint:     cmd.ArgHint,
+			Render:      func(args []string) string { return cmd.Render(args) },
+		})
+	}
+	reg.Add(command.NewSlashCommandTool(slashEntries))
 
 	var runner agent.Runner = executor
 	label := entry.Model
@@ -305,6 +355,50 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	}), nil
 }
 
+func subagentModelRef(cfg *config.Config, sk skill.Skill) string {
+	if cfg != nil {
+		for _, key := range subagentModelKeys(sk.Name) {
+			if m := strings.TrimSpace(cfg.Agent.SubagentModels[key]); m != "" {
+				return m
+			}
+		}
+	}
+	if m := strings.TrimSpace(sk.Model); m != "" {
+		return m
+	}
+	if cfg == nil {
+		return ""
+	}
+	return strings.TrimSpace(cfg.Agent.SubagentModel)
+}
+
+func subagentModelKeys(name string) []string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil
+	}
+	keys := []string{name}
+	for _, alias := range []string{
+		strings.ReplaceAll(name, "-", "_"),
+		strings.ReplaceAll(name, "_", "-"),
+	} {
+		if alias == "" {
+			continue
+		}
+		seen := false
+		for _, key := range keys {
+			if key == alias {
+				seen = true
+				break
+			}
+		}
+		if !seen {
+			keys = append(keys, alias)
+		}
+	}
+	return keys
+}
+
 // NewProvider builds a provider.Provider from a configured entry. Exported so
 // custom assemblers (e.g. the ACP per-session factory) can reuse it without
 // going through the full Build.
@@ -329,7 +423,7 @@ func NewProvider(e *config.ProviderEntry) (provider.Provider, error) {
 // them. writeRoots confines the file-writing built-ins to the workspace: after
 // the (unconfined) defaults are added, each enabled writer is replaced by an
 // instance bound to writeRoots (preserving registry order).
-func addBuiltins(reg *tool.Registry, enabled, writeRoots []string, bashSpec sandbox.Spec) {
+func addBuiltins(reg *tool.Registry, enabled, writeRoots []string, bashSpec sandbox.Spec, stderr io.Writer) {
 	if len(enabled) == 0 {
 		for _, t := range tool.Builtins() {
 			reg.Add(t)
@@ -339,7 +433,7 @@ func addBuiltins(reg *tool.Registry, enabled, writeRoots []string, bashSpec sand
 			if t, ok := tool.LookupBuiltin(name); ok {
 				reg.Add(t)
 			} else {
-				fmt.Fprintf(os.Stderr, "warning: unknown built-in tool %q\n", name)
+				fmt.Fprintf(stderr, "warning: unknown built-in tool %q\n", name)
 			}
 		}
 	}
@@ -372,6 +466,27 @@ func PluginSpecs(entries []config.PluginEntry) []plugin.Spec {
 		}
 	}
 	return specs
+}
+
+// MCPStartupNotice formats the warning shown when configured MCP servers failed
+// to connect, naming the first few; ok is false when none failed.
+func MCPStartupNotice(failures []plugin.Failure) (text string, ok bool) {
+	if len(failures) == 0 {
+		return "", false
+	}
+	names := make([]string, 0, min(len(failures), 3))
+	for i, f := range failures {
+		if i >= 3 {
+			break
+		}
+		names = append(names, f.Name)
+	}
+	more := ""
+	if len(failures) > len(names) {
+		more = fmt.Sprintf(" (+%d more)", len(failures)-len(names))
+	}
+	return fmt.Sprintf("%d MCP server(s) failed to start: %s%s — run /mcp for details",
+		len(failures), strings.Join(names, ", "), more), true
 }
 
 func providerNames(cfg *config.Config) string {

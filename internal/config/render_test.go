@@ -12,6 +12,8 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	orig := Default()
 	orig.DefaultModel = "mimo-pro"
 	orig.Language = "zh"
+	orig.Agent.SubagentModel = "mimo-pro"
+	orig.Agent.SubagentModels = map[string]string{"review": "deepseek-pro"}
 	orig.Permissions = PermissionsConfig{
 		Mode:  "deny",
 		Deny:  []string{"bash(rm -rf*)"},
@@ -19,7 +21,7 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	}
 	orig.Plugins = []PluginEntry{
 		{Name: "example", Command: "reasonix-plugin-example"},
-		{Name: "stripe", Type: "http", URL: "https://mcp.stripe.com", Headers: map[string]string{"Authorization": "Bearer x"}},
+		{Name: "stripe", Type: "http", URL: "https://mcp.stripe.com", Headers: map[string]string{"Authorization": "Bearer x"}, AutoStart: boolPtr(false)},
 	}
 	mm, _ := orig.Provider("mimo-pro")
 	mm.BaseURL = "http://localhost:8000/v1"
@@ -46,6 +48,12 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	if got.Agent.SystemPrompt != orig.Agent.SystemPrompt {
 		t.Errorf("system_prompt mismatch:\n got %q\nwant %q", got.Agent.SystemPrompt, orig.Agent.SystemPrompt)
 	}
+	if got.Agent.SubagentModel != "mimo-pro" {
+		t.Errorf("subagent_model = %q, want mimo-pro", got.Agent.SubagentModel)
+	}
+	if got.Agent.SubagentModels["review"] != "deepseek-pro" {
+		t.Errorf("subagent_models.review = %q, want deepseek-pro", got.Agent.SubagentModels["review"])
+	}
 	if g, _ := got.Provider("mimo-pro"); g == nil || g.BaseURL != "http://localhost:8000/v1" {
 		t.Errorf("mimo-pro base_url not preserved: %+v", g)
 	}
@@ -71,4 +79,9 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	if stripe.Headers["Authorization"] != "Bearer x" {
 		t.Errorf("plugin headers not preserved: %v", stripe.Headers)
 	}
+	if stripe.AutoStart == nil || *stripe.AutoStart {
+		t.Errorf("auto_start should render and parse as false, got %+v", stripe.AutoStart)
+	}
 }
+
+func boolPtr(v bool) *bool { return &v }
