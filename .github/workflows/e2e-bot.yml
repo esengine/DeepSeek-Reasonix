@@ -81,10 +81,10 @@ jobs:
           context_window = 65536
 
           [providers.price]
-          cache_hit = 0.02
-          input = 1
-          output = 2
-          currency = "¥"
+          cache_hit = ${{ vars.REASONIX_E2E_PRICE_CACHE_HIT || '0.02' }}
+          input = ${{ vars.REASONIX_E2E_PRICE_INPUT || '1' }}
+          output = ${{ vars.REASONIX_E2E_PRICE_OUTPUT || '2' }}
+          currency = "${{ vars.REASONIX_E2E_PRICE_CURRENCY || '¥' }}"
 
           [permissions]
           mode = "allow"
@@ -106,10 +106,13 @@ jobs:
             exit 0
           fi
           if printf '%s' "$COMMENT_BODY" | grep -q '/e2e[[:space:]]\+diff'; then
+            ATTEMPTS=$(printf '%s' "$COMMENT_BODY" | sed -nE 's@.*/e2e[[:space:]]+diff[[:space:]]+x([0-9]+).*@\1@p' | head -1)
+            [ -z "$ATTEMPTS" ] && ATTEMPTS=1
+            [ "$ATTEMPTS" -gt 5 ] && ATTEMPTS=5
             BASE_REF=$(gh pr view ${{ github.event.issue.number }} --json baseRefName -q .baseRefName)
             git fetch -q origin "$BASE_REF"
             BASE=$(git merge-base "origin/$BASE_REF" HEAD)
-            "$RUNNER_TEMP/e2ebench" -mode diff -bin "$RUNNER_TEMP/reasonix" -repo . -base "$BASE" -model e2e -out report.md
+            "$RUNNER_TEMP/e2ebench" -mode diff -bin "$RUNNER_TEMP/reasonix" -repo . -base "$BASE" -model e2e -attempts "$ATTEMPTS" -out report.md
           else
             "$RUNNER_TEMP/e2ebench" -bin "$RUNNER_TEMP/reasonix" -suite "$RUNNER_TEMP/suite" -model e2e -out report.md -json report.json -budget 400000
           fi
@@ -117,8 +120,9 @@ jobs:
       - name: Post report
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TRIGGER_USER: ${{ github.event.comment.user.login }}
         run: |
-          printf '\n> agent built from main-v2 · PR head %s · triggered by @%s\n' "$(git rev-parse --short HEAD)" "${{ github.event.comment.user.login }}" >> report.md
+          printf '\n> agent built from main-v2 · PR head %s · triggered by @%s\n' "$(git rev-parse --short HEAD)" "$TRIGGER_USER" >> report.md
           gh pr comment ${{ github.event.issue.number }} --body-file report.md
 
       - name: Report failure

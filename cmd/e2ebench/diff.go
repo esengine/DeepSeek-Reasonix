@@ -13,7 +13,7 @@ import (
 
 type diffOpts struct {
 	bin, model, repo, base, testCmd string
-	maxSteps, timeoutSec            int
+	maxSteps, timeoutSec, attempts  int
 }
 
 type testRef struct{ name, pkg string }
@@ -28,21 +28,44 @@ type pinResult struct {
 	byAssertion bool
 }
 
-// runDiff asks the agent to write tests covering what the PR changed, on the PR
-// branch, then grades with the repo's own tests: the new tests must pass on the
-// PR code, and at least one must fail when the source is reverted to its pre-PR
-// state. Returns a markdown report that includes the generated test diff so the
-// assertions can be audited, not just trusted.
+// runDiff asks the agent to write tests covering what the PR changed, grades
+// them against the repo's own tests, and — because the agent is stochastic —
+// retries up to o.attempts times until a run passes, keeping the best result.
 func runDiff(o diffOpts) string {
 	srcFiles := changedGoFiles(o.repo, o.base, false)
 	if len(srcFiles) == 0 {
 		return "## 🤖 Reasonix e2e — diff test-gen\n\nNo Go source changes in this PR (excluding `_test.go`); nothing to generate tests for.\n"
 	}
 	pkgs := packagesOf(srcFiles)
-	diffText := truncate(gitOut(o.repo, "diff", o.base+"...HEAD", "--"))
+	prompt := buildDiffPrompt(srcFiles, pkgs, truncate(gitOut(o.repo, "diff", o.base+"...HEAD", "--")))
 
-	prompt := buildDiffPrompt(srcFiles, pkgs, diffText)
+	attempts := o.attempts
+	if attempts < 1 {
+		attempts = 1
+	}
+	var best diffReport
+	made := 0
+	for i := 1; i <= attempts; i++ {
+		if i > 1 {
+			resetTree(o.repo)
+		}
+		r := runOnce(o, srcFiles, pkgs, prompt)
+		made = i
+		if i == 1 || better(r, best) {
+			best = r
+		}
+		if best.passed {
+			break // stop at the first passing run; attempts is a retry budget
+		}
+	}
+	best.attempt, best.attempts = made, attempts
+	return renderDiff(best)
+}
 
+// runOnce does one agent run + grade: generate tests, check they pass on HEAD,
+// differential-check each against the reverted source, measure changed-line
+// coverage, and confirm the agent didn't break the build anywhere.
+func runOnce(o diffOpts, srcFiles, pkgs []string, prompt string) diffReport {
 	metricsPath := filepath.Join(o.repo, ".e2e-diff-metrics.json")
 	_ = os.Remove(metricsPath)
 	defer os.Remove(metricsPath)
@@ -72,17 +95,58 @@ func runDiff(o diffOpts) string {
 	testsPass, testOut := runTests(o.repo, o.testCmd, pkgs)
 
 	var pins []pinResult
+	covered, coverTotal := 0, 0
 	if len(refs) > 0 && testsPass {
+		covered, coverTotal = changedLineCoverage(o.repo, o.base, pkgs, srcFiles)
 		pins = differentialPerTest(o.repo, o.base, srcFiles, refs)
 	}
+	buildOK, buildOut := goBuildAll(o.repo)
 
-	passed := len(refs) > 0 && testsPass && countPins(pins) > 0
-	return renderDiff(diffReport{
+	passed := len(refs) > 0 && testsPass && buildOK && countPins(pins) > 0
+	return diffReport{
 		srcFiles: srcFiles, pkgs: pkgs, addedTestLines: countAdded(testDiff),
 		newTests: refs, sourceTouched: sourceTouched, testsPass: testsPass,
-		pins: pins, failing: failingTestNames(testOut), passed: passed,
-		m: m, runErr: runErr, testOut: testOut, testDiff: testDiff,
-	})
+		pins: pins, covered: covered, coverTotal: coverTotal,
+		buildOK: buildOK, buildOut: buildOut, failing: failingTestNames(testOut),
+		passed: passed, m: m, runErr: runErr, testOut: testOut, testDiff: testDiff,
+	}
+}
+
+// better reports whether candidate a is a stronger result than b: a pass beats a
+// fail, then more assertion-pins, then more pins, then higher changed-line
+// coverage.
+func better(a, b diffReport) bool {
+	if a.passed != b.passed {
+		return a.passed
+	}
+	if x, y := countAssertionPins(a.pins), countAssertionPins(b.pins); x != y {
+		return x > y
+	}
+	if x, y := countPins(a.pins), countPins(b.pins); x != y {
+		return x > y
+	}
+	return ratio(a.covered, a.coverTotal) > ratio(b.covered, b.coverTotal)
+}
+
+func ratio(n, d int) float64 {
+	if d == 0 {
+		return 0
+	}
+	return float64(n) / float64(d)
+}
+
+// resetTree restores the PR-head tree between attempts, dropping the previous
+// attempt's generated tests but keeping the provider config the workflow wrote.
+func resetTree(repo string) {
+	_ = exec.Command("git", "-C", repo, "checkout", "--", ".").Run()
+	_ = exec.Command("git", "-C", repo, "clean", "-fd", "-e", "reasonix.toml").Run()
+}
+
+func goBuildAll(repo string) (bool, string) {
+	cmd := exec.Command("go", "build", "./...")
+	cmd.Dir = repo
+	out, err := cmd.CombinedOutput()
+	return err == nil, string(out)
 }
 
 func buildDiffPrompt(srcFiles, pkgs []string, diffText string) string {
@@ -104,18 +168,22 @@ func buildDiffPrompt(srcFiles, pkgs []string, diffText string) string {
 }
 
 type diffReport struct {
-	srcFiles, pkgs []string
-	addedTestLines int
-	newTests       []testRef
-	sourceTouched  int
-	testsPass      bool
-	pins           []pinResult
-	failing        []string
-	passed         bool
-	m              runMetrics
-	runErr         error
-	testOut        string
-	testDiff       string
+	srcFiles, pkgs      []string
+	addedTestLines      int
+	newTests            []testRef
+	sourceTouched       int
+	testsPass           bool
+	pins                []pinResult
+	covered, coverTotal int
+	buildOK             bool
+	buildOut            string
+	failing             []string
+	passed              bool
+	attempt, attempts   int
+	m                   runMetrics
+	runErr              error
+	testOut             string
+	testDiff            string
 }
 
 func renderDiff(r diffReport) string {
@@ -136,6 +204,8 @@ func renderDiff(r diffReport) string {
 	if pinned > 0 {
 		fmt.Fprintf(&b, "| ↳ pin by assertion / by compile only | %d / %d |\n", byAssert, pinned-byAssert)
 	}
+	fmt.Fprintf(&b, "| Changed-line coverage | %s |\n", coverageCell(r))
+	fmt.Fprintf(&b, "| `go build ./...` (regression) | %s |\n", passFail(r.buildOK))
 	fmt.Fprintf(&b, "| Non-test source touched by agent | %d file(s) |\n", r.sourceTouched)
 	fmt.Fprintf(&b, "| Cache hit | %s |\n", pct(r.m.CacheHitTokens, r.m.CacheHitTokens+r.m.CacheMissTokens))
 	fmt.Fprintf(&b, "| Tokens (prompt / completion) | %s / %s |\n", comma(r.m.PromptTokens), comma(r.m.CompletionTokens))
@@ -144,8 +214,21 @@ func renderDiff(r diffReport) string {
 	if len(r.failing) > 0 {
 		fmt.Fprintf(&b, "| Failing tests | `%s` |\n", strings.Join(r.failing, "`, `"))
 	}
+	if r.attempts > 1 {
+		status := "none passed"
+		if r.passed {
+			status = "passed"
+		}
+		fmt.Fprintf(&b, "| Attempts | %d of up to %d (%s) |\n", r.attempt, r.attempts, status)
+	}
 
 	fmt.Fprintf(&b, "\n**Packages:** %s\n", strings.Join(r.pkgs, ", "))
+	if r.attempts <= 1 {
+		fmt.Fprintf(&b, "\n<sub>Single stochastic run — a green result is one sample, not a guarantee. Comment `/e2e diff x3` to retry up to 3×.</sub>\n")
+	}
+	if !r.buildOK && strings.TrimSpace(r.buildOut) != "" {
+		fmt.Fprintf(&b, "\n<details><summary>go build ./... output (tail)</summary>\n\n```\n%s\n```\n</details>\n", tail(r.buildOut, 40))
+	}
 	if r.sourceTouched > 0 {
 		fmt.Fprintf(&b, "\n⚠️ The agent modified %d non-test source file(s); a green run may not reflect the PR's code. Review the diff.\n", r.sourceTouched)
 	}
@@ -175,6 +258,13 @@ func differentialCell(r diffReport) string {
 		return "n/a (tests not green)"
 	}
 	return fmt.Sprintf("%d/%d new tests", countPins(r.pins), len(r.pins))
+}
+
+func coverageCell(r diffReport) string {
+	if r.coverTotal == 0 {
+		return "n/a"
+	}
+	return fmt.Sprintf("%s (%d/%d changed lines)", pct(r.covered, r.coverTotal), r.covered, r.coverTotal)
 }
 
 func pinCell(p pinResult) string {
@@ -210,6 +300,110 @@ func differentialPerTest(repo, base string, srcFiles []string, refs []testRef) [
 	}
 	for _, f := range srcFiles {
 		_ = exec.Command("git", "-C", repo, "checkout", "HEAD", "--", f).Run()
+	}
+	return out
+}
+
+// changedLineCoverage runs the affected packages with a coverage profile and
+// reports how many of the PR's changed source statement-lines the (new+existing)
+// tests actually execute. covered/total are over changed lines that fall inside
+// a coverage block; lines that aren't statements are ignored.
+func changedLineCoverage(repo, base string, pkgs, srcFiles []string) (covered, total int) {
+	profile := filepath.Join(repo, ".e2e-cover.out")
+	defer os.Remove(profile)
+	args := append([]string{"test", "-covermode=set", "-coverprofile=" + profile, "-coverpkg=" + strings.Join(pkgs, ",")}, pkgs...)
+	cmd := exec.Command("go", args...)
+	cmd.Dir = repo
+	_ = cmd.Run() // a non-zero exit still writes the profile for the tests that ran
+
+	blocks := parseCoverProfile(repo, profile)
+	for file, lines := range changedLineSet(repo, base, srcFiles) {
+		fileBlocks := blocks[file]
+		for ln := range lines {
+			for _, blk := range fileBlocks {
+				if ln >= blk.start && ln <= blk.end {
+					total++
+					if blk.count > 0 {
+						covered++
+					}
+					break
+				}
+			}
+		}
+	}
+	return covered, total
+}
+
+type coverBlock struct {
+	start, end, count int
+}
+
+// parseCoverProfile reads a Go coverage profile, keyed by repo-relative file path
+// (the profile uses module-qualified paths; we match by repo-relative suffix).
+func parseCoverProfile(repo, path string) map[string][]coverBlock {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	out := map[string][]coverBlock{}
+	for _, ln := range strings.Split(string(data), "\n") {
+		if ln == "" || strings.HasPrefix(ln, "mode:") {
+			continue
+		}
+		colon := strings.LastIndexByte(ln, ':')
+		if colon < 0 {
+			continue
+		}
+		modPath, rest := ln[:colon], ln[colon+1:]
+		var sl, sc, el, ec, nstmt, count int
+		if _, err := fmt.Sscanf(rest, "%d.%d,%d.%d %d %d", &sl, &sc, &el, &ec, &nstmt, &count); err != nil {
+			continue
+		}
+		rel := repoRelFromModulePath(modPath)
+		out[rel] = append(out[rel], coverBlock{start: sl, end: el, count: count})
+	}
+	return out
+}
+
+// repoRelFromModulePath turns "reasonix/internal/agent/foo.go" into
+// "internal/agent/foo.go" by dropping the first path element (the module root).
+func repoRelFromModulePath(p string) string {
+	if i := strings.IndexByte(p, '/'); i >= 0 {
+		return p[i+1:]
+	}
+	return p
+}
+
+// changedLineSet returns, per repo-relative source file, the set of new line
+// numbers the PR added or changed (from a zero-context diff).
+func changedLineSet(repo, base string, srcFiles []string) map[string]map[int]bool {
+	args := append([]string{"diff", "--unified=0", base + "...HEAD", "--"}, srcFiles...)
+	diff := gitOut(repo, args...)
+	out := map[string]map[int]bool{}
+	file := ""
+	newLine := 0
+	for _, ln := range strings.Split(diff, "\n") {
+		switch {
+		case strings.HasPrefix(ln, "+++ b/"):
+			file = strings.TrimPrefix(ln, "+++ b/")
+			out[file] = map[int]bool{}
+		case strings.HasPrefix(ln, "@@"):
+			// @@ -a,b +c,d @@ — start collecting at new-side line c.
+			if plus := strings.Index(ln, "+"); plus >= 0 {
+				num := ln[plus+1:]
+				if sp := strings.IndexAny(num, ", "); sp >= 0 {
+					num = num[:sp]
+				}
+				fmt.Sscanf(num, "%d", &newLine)
+			}
+		case strings.HasPrefix(ln, "+") && !strings.HasPrefix(ln, "+++"):
+			if file != "" {
+				out[file][newLine] = true
+			}
+			newLine++
+		case strings.HasPrefix(ln, "-"):
+			// deletion: does not advance the new-side counter
+		}
 	}
 	return out
 }

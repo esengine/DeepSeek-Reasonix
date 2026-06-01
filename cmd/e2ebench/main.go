@@ -58,12 +58,13 @@ func main() {
 	testCmd := flag.String("test-cmd", "go test", "grader command run on the affected packages (diff mode)")
 	maxSteps := flag.Int("max-steps", 80, "agent tool-call cap for the diff task")
 	timeoutSec := flag.Int("timeout", 1200, "agent timeout in seconds (diff mode)")
+	attempts := flag.Int("attempts", 1, "diff mode: retry up to N times until a run passes (stochastic agent)")
 	flag.Parse()
 
 	if *mode == "diff" {
 		report := runDiff(diffOpts{
 			bin: *bin, model: *model, repo: *repo, base: *base,
-			testCmd: *testCmd, maxSteps: *maxSteps, timeoutSec: *timeoutSec,
+			testCmd: *testCmd, maxSteps: *maxSteps, timeoutSec: *timeoutSec, attempts: *attempts,
 		})
 		emit(report, *outMD, "")
 		return
