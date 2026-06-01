@@ -95,10 +95,12 @@ func runOnce(o diffOpts, srcFiles, pkgs []string, prompt string) diffReport {
 	testsPass, testOut := runTests(o.repo, o.testCmd, pkgs)
 
 	var pins []pinResult
+	var mut mutationResult
 	covered, coverTotal := 0, 0
 	if len(refs) > 0 && testsPass {
 		covered, coverTotal = changedLineCoverage(o.repo, o.base, pkgs, srcFiles)
 		pins = differentialPerTest(o.repo, o.base, srcFiles, refs)
+		mut = runMutation(o.repo, o.base, srcFiles, refs)
 	}
 	buildOK, buildOut := goBuildAll(o.repo)
 
@@ -106,7 +108,7 @@ func runOnce(o diffOpts, srcFiles, pkgs []string, prompt string) diffReport {
 	return diffReport{
 		srcFiles: srcFiles, pkgs: pkgs, addedTestLines: countAdded(testDiff),
 		newTests: refs, sourceTouched: sourceTouched, testsPass: testsPass,
-		pins: pins, covered: covered, coverTotal: coverTotal,
+		pins: pins, mut: mut, covered: covered, coverTotal: coverTotal,
 		buildOK: buildOK, buildOut: buildOut, failing: failingTestNames(testOut),
 		passed: passed, m: m, runErr: runErr, testOut: testOut, testDiff: testDiff,
 	}
@@ -124,6 +126,9 @@ func better(a, b diffReport) bool {
 	}
 	if x, y := countPins(a.pins), countPins(b.pins); x != y {
 		return x > y
+	}
+	if a.mut.caught != b.mut.caught {
+		return a.mut.caught > b.mut.caught
 	}
 	return ratio(a.covered, a.coverTotal) > ratio(b.covered, b.coverTotal)
 }
@@ -174,6 +179,7 @@ type diffReport struct {
 	sourceTouched       int
 	testsPass           bool
 	pins                []pinResult
+	mut                 mutationResult
 	covered, coverTotal int
 	buildOK             bool
 	buildOut            string
@@ -205,6 +211,7 @@ func renderDiff(r diffReport) string {
 		fmt.Fprintf(&b, "| ↳ pin by assertion / by compile only | %d / %d |\n", byAssert, pinned-byAssert)
 	}
 	fmt.Fprintf(&b, "| Changed-line coverage | %s |\n", coverageCell(r))
+	fmt.Fprintf(&b, "| Mutation (changed funcs caught) | %s |\n", mutationCell(r))
 	fmt.Fprintf(&b, "| `go build ./...` (regression) | %s |\n", passFail(r.buildOK))
 	fmt.Fprintf(&b, "| Non-test source touched by agent | %d file(s) |\n", r.sourceTouched)
 	fmt.Fprintf(&b, "| Cache hit | %s |\n", pct(r.m.CacheHitTokens, r.m.CacheHitTokens+r.m.CacheMissTokens))
@@ -249,7 +256,7 @@ func renderDiff(r diffReport) string {
 	if r.runErr != nil {
 		fmt.Fprintf(&b, "\n<sub>agent run note: %v</sub>\n", r.runErr)
 	}
-	fmt.Fprintf(&b, "\n<sub>Pass = the agent added ≥1 test, the affected packages are green, AND ≥1 new test fails when the PR's source is reverted. \"By assertion\" pins are strong (they check changed behavior); \"by compile only\" pins just need a PR-added symbol — and since Go compiles per package, one compile-coupled test marks every test in its package that way, so read the diff above to judge the rest.</sub>\n")
+	fmt.Fprintf(&b, "\n<sub>Pass = the agent added ≥1 test, the affected packages are green, AND ≥1 new test fails when the PR's source is reverted. \"By assertion\" pins are strong (they check changed behavior); \"by compile only\" pins just need a PR-added symbol — and since Go compiles per package, one compile-coupled test marks every test in its package that way. Mutation is the behavioral signal for additive PRs: each changed function's return is replaced with zero values and the new tests are re-run; \"caught\" means a test asserts that output, \"survived\" means it doesn't. Read the generated tests above to judge the rest.</sub>\n")
 	return b.String()
 }
 
@@ -265,6 +272,17 @@ func coverageCell(r diffReport) string {
 		return "n/a"
 	}
 	return fmt.Sprintf("%s (%d/%d changed lines)", pct(r.covered, r.coverTotal), r.covered, r.coverTotal)
+}
+
+func mutationCell(r diffReport) string {
+	if r.mut.total == 0 {
+		return "n/a"
+	}
+	cell := fmt.Sprintf("%d/%d (%s)", r.mut.caught, r.mut.total, pct(r.mut.caught, r.mut.total))
+	if len(r.mut.survivors) > 0 {
+		cell += fmt.Sprintf(" · survived: `%s`", strings.Join(r.mut.survivors, "`, `"))
+	}
+	return cell
 }
 
 func pinCell(p pinResult) string {
