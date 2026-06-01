@@ -1873,10 +1873,18 @@ body {
   border-radius: 12px;
   padding: 18px;
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
+  --wails-draggable: no-drag;
+}
+.modal--dragging {
+  user-select: none;
 }
 .modal__title {
   font-weight: 600;
   margin-bottom: 12px;
+}
+.modal__drag-handle {
+  cursor: move;
+  touch-action: none;
 }
 .modal__tool {
   margin-bottom: 8px;
