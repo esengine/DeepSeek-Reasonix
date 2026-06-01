@@ -1691,6 +1691,7 @@ function AppInner({
 
   // Esc handles "abort the current turn" separately; Ctrl+C is the universal "I'm done" key.
   const quitProcess = useQuit(transcriptRef);
+  const quitArmedAt = useRef<number | null>(null);
 
   // Ctrl+D = standard TUI exit (matches the boot-banner hint). Always-on
   // — no modal / picker should swallow it.
@@ -1785,7 +1786,7 @@ function AppInner({
       return;
     }
     if (key.ctrl && key.input === "c") {
-      handleTurnInterrupt("ctrl-c", {
+      const outcome = handleTurnInterrupt("ctrl-c", {
         turnActiveRef: submittingRef,
         abortedThisTurn,
         resetPendingModals,
@@ -1793,7 +1794,9 @@ function AppInner({
         stopLoop,
         loop,
         quitProcess,
+        quitArmedAt,
       });
+      if (outcome === "quit-armed") log.pushInfo(t("app.quitArmed"));
       return;
     }
     if (key.ctrl && key.input === "p" && !busy && (!modalOpen || pendingShortcuts)) {
@@ -1821,6 +1824,7 @@ function AppInner({
         stopLoop,
         loop,
         quitProcess,
+        quitArmedAt,
       });
       return;
     }

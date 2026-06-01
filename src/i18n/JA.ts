@@ -764,6 +764,7 @@ export const JA: TranslationSchema = {
     startingBackground: "▸ 起動中（バックグラウンド）: {cmd}",
     checkpointSaved:
       "⛁ チェックポイント保存 · {id} · {count} ファイル · /restore {id} でこのステップをロールバック",
+    quitArmed: "もう一度 Ctrl+C で終了します。",
     continuingAfter: "▸ {label}{counter} の後に続行",
     planStoppedAt: "▸ {label}{counter} でプランを停止",
     revisingAfter: "▸ {label} の後に修正 — {feedback}",

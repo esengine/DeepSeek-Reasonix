@@ -674,6 +674,7 @@ export const EN: TranslationSchema = {
     startingBackground: "▸ starting (background): {cmd}",
     checkpointSaved:
       "⛁ checkpoint saved · {id} · {count} file{s} · /restore {id} to roll back this step",
+    quitArmed: "Press Ctrl+C again to exit.",
     continuingAfter: "▸ continuing after {label}{counter}",
     planStoppedAt: "▸ plan stopped at {label}{counter}",
     revisingAfter: "▸ revising after {label} — {feedback}",

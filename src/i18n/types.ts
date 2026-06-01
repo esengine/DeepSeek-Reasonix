@@ -226,6 +226,7 @@ export interface TranslationSchema {
     runningCommand: string;
     startingBackground: string;
     checkpointSaved: string;
+    quitArmed: string;
     continuingAfter: string;
     planStoppedAt: string;
     revisingAfter: string;

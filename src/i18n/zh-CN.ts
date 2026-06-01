@@ -650,6 +650,7 @@ export const zhCN: TranslationSchema = {
     runningCommand: "▸ 正在执行：{cmd}",
     startingBackground: "▸ 后台启动：{cmd}",
     checkpointSaved: "⛁ 已保存检查点 · {id} · {count} 个文件 · /restore {id} 可回滚此步",
+    quitArmed: "再按一次 Ctrl+C 即可退出。",
     continuingAfter: "▸ 在 {label}{counter} 之后继续",
     planStoppedAt: "▸ 计划在 {label}{counter} 处停止",
     revisingAfter: "▸ 在 {label} 之后修订 — {feedback}",

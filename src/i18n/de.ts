@@ -666,6 +666,7 @@ export const de: TranslationSchema = {
     startingBackground: "▸ starte (Hintergrund): {cmd}",
     checkpointSaved:
       "⛁ Checkpoint gespeichert · {id} · {count} Datei(en) · /restore {id} zum Zurücksetzen",
+    quitArmed: "Erneut Ctrl+C drücken zum Beenden.",
     continuingAfter: "▸ fortgesetzt nach {label}{counter}",
     planStoppedAt: "▸ Plan angehalten bei {label}{counter}",
     revisingAfter: "▸ überarbeite nach {label} — {feedback}",
