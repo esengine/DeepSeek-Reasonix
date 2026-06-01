@@ -65,6 +65,7 @@ var Chinese = Messages{
 	SlashHelp:          "命令：/compact · /new · /rewind · /tree · /branch · /switch · /todo · /model（切换模型）· /mcp · /skill · /hooks · /memory · /help · 以及 skills（/init、/explore …）",
 	SlashPromptEmpty:   "该 MCP prompt 没有返回可发送的内容",
 	SlashMCPNone:       "没有配置 MCP 服务器 — 在 reasonix.toml 加一个 [[plugins]] 条目",
+	CtrlCQuitHint:      "再按一次 Ctrl+C 退出",
 	CompHintSlash:      "↑/↓ 移动 · Tab/Enter 选中 · Esc 关闭",
 	CompHintFile:       "↑/↓ 移动 · Tab/Enter 进入文件夹或选中文件 · Esc 关闭",
 

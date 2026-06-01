@@ -3,10 +3,13 @@ package cli
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // TestIngestEventRoutesByKind proves each event Kind lands in the right place:
@@ -160,5 +163,50 @@ func TestApprovalToolDetailsShortensMCPNames(t *testing.T) {
 	name, detail = approvalToolDetails("bash")
 	if name != "bash" || !strings.Contains(detail, "built-in") {
 		t.Errorf("built-in details = (%q, %q), want bash + built-in source", name, detail)
+	}
+}
+
+// TestDoubleCtrlCQuit verifies that Ctrl+C while idle requires a double-press
+// within the 1.5s window to actually quit. A single press shows a hint; a
+// second press within the window returns tea.Quit.
+func TestDoubleCtrlCQuit(t *testing.T) {
+	ctrl := control.New(control.Options{})
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
+	ctrlC := tea.KeyMsg{Type: tea.KeyCtrlC}
+
+	// First Ctrl+C while idle: arms quit, does NOT return a quit cmd.
+	out, cmd := m.Update(ctrlC)
+	if cmd != nil {
+		t.Errorf("first Ctrl+C should not quit, got cmd=%v", cmd)
+	}
+	m2, ok := out.(chatTUI)
+	if !ok {
+		t.Fatalf("Update returned %T, want chatTUI", out)
+	}
+	if m2.lastCtrlCAt.IsZero() {
+		t.Error("first Ctrl+C should set lastCtrlCAt")
+	}
+
+	// Second Ctrl+C within window: returns tea.Quit.
+	out2, cmd2 := m2.Update(ctrlC)
+	if cmd2 == nil {
+		t.Error("second Ctrl+C within window should return a quit cmd")
+	}
+	_ = out2
+
+	// Window expired: re-arms instead of quitting.
+	m3 := m2
+	m3.lastCtrlCAt = time.Now().Add(-2 * time.Second)
+	out4, cmd4 := m3.Update(ctrlC)
+	if cmd4 != nil {
+		t.Errorf("Ctrl+C after window should not quit, got cmd=%v", cmd4)
+	}
+	m4, ok := out4.(chatTUI)
+	if !ok {
+		t.Fatalf("Update returned %T, want chatTUI", out4)
+	}
+	// lastCtrlCAt should be refreshed to now.
+	if time.Since(m4.lastCtrlCAt) > time.Second {
+		t.Error("expired Ctrl+C should refresh lastCtrlCAt")
 	}
 }

@@ -94,6 +94,7 @@ type Messages struct {
 	SlashHelp          string // listed commands
 	SlashPromptEmpty   string // an MCP prompt returned no text to send
 	SlashMCPNone       string // /mcp when no MCP servers are connected
+	CtrlCQuitHint      string // shown on first Ctrl+C while idle; second press exits
 	CompHintSlash      string // key hint footer under the slash-command menu
 	CompHintFile       string // key hint footer under the @ file/resource menu
 

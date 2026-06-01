@@ -122,6 +122,10 @@ type chatTUI struct {
 	rewind  *rewindPicker
 	lastEsc time.Time
 
+	// lastCtrlCAt records when Ctrl+C was pressed while idle, enabling a
+	// "press again to quit" confirmation pattern (1.5s window).
+	lastCtrlCAt time.Time
+
 	// host is the running MCP servers (nil when no plugins). The TUI reads
 	// prompts (slash commands), resources (@-references), and server status
 	// (/mcp) from it.
@@ -483,7 +487,13 @@ func (m chatTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
-			return m, tea.Quit
+			// Idle: require double-press within 1.5s to prevent accidental exits.
+			if !m.lastCtrlCAt.IsZero() && time.Since(m.lastCtrlCAt) < 1500*time.Millisecond {
+				return m, tea.Quit
+			}
+			m.lastCtrlCAt = time.Now()
+			m.notice(i18n.M.CtrlCQuitHint)
+			return m, nil
 		case "ctrl+d":
 			return m, tea.Quit
 		case "tab":

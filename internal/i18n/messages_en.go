@@ -64,6 +64,7 @@ var English = Messages{
 	SlashHelp:          "commands: /compact · /new · /rewind · /tree · /branch · /switch · /todo · /model (switch model) · /mcp · /skill · /hooks · /memory · /help · plus skills (/init, /explore, …)",
 	SlashPromptEmpty:   "the MCP prompt returned no content to send",
 	SlashMCPNone:       "no MCP servers configured — add a [[plugins]] entry in reasonix.toml",
+	CtrlCQuitHint:      "press Ctrl+C again to quit",
 	CompHintSlash:      "↑/↓ move · Tab/Enter select · Esc close",
 	CompHintFile:       "↑/↓ move · Tab/Enter open folder or pick file · Esc close",
 
