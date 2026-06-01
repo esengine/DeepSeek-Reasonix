@@ -5,11 +5,16 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 func TestAssetNameForCurrentPlatform(t *testing.T) {
@@ -129,5 +134,65 @@ func TestInstallReturnsCachedWithoutNetwork(t *testing.T) {
 	// Resolve should also find it (no override, cache wins).
 	if p, ok := Resolve(""); !ok || p != launcher {
 		t.Fatalf("Resolve = %q, %v; want %q", p, ok, launcher)
+	}
+}
+
+func TestHTTPGetDetachedCtxSurvivesParentCancel(t *testing.T) {
+	started := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		select {
+		case <-time.After(300 * time.Millisecond):
+		case <-r.Context().Done():
+		}
+		w.Write([]byte("payload"))
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var wg sync.WaitGroup
+	var got []byte
+	var gotErr error
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		got, gotErr = httpGet(context.WithoutCancel(ctx), srv.URL)
+	}()
+
+	<-started
+	cancel()
+	wg.Wait()
+
+	if gotErr != nil {
+		t.Fatalf("detached download aborted after parent cancel: %v", gotErr)
+	}
+	if string(got) != "payload" {
+		t.Fatalf("got %q, want payload", got)
+	}
+}
+
+func TestHTTPGetPlainCtxAbortsOnParentCancel(t *testing.T) {
+	started := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		<-r.Context().Done()
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var wg sync.WaitGroup
+	var gotErr error
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		_, gotErr = httpGet(ctx, srv.URL)
+	}()
+
+	<-started
+	cancel()
+	wg.Wait()
+
+	if !errors.Is(gotErr, context.Canceled) {
+		t.Fatalf("plain ctx should abort on parent cancel, got %v", gotErr)
 	}
 }
