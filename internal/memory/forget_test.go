@@ -43,3 +43,25 @@ func TestForgetToolValidates(t *testing.T) {
 		t.Fatal("expected error when name is missing")
 	}
 }
+
+// fakeQueue records the turn-tail notes the remember/forget tools queue.
+type fakeQueue struct{ notes []string }
+
+func (f *fakeQueue) QueueMemory(note string) { f.notes = append(f.notes, note) }
+
+// TestForgetToolQueuesDisregardNote verifies a forget injects a turn-tail note so
+// the model stops trusting the still-cached index line this session.
+func TestForgetToolQueuesDisregardNote(t *testing.T) {
+	store := Store{Dir: t.TempDir()}
+	if _, err := store.Save(Memory{Name: "old-fact", Description: "d", Type: TypeProject, Body: "b"}); err != nil {
+		t.Fatal(err)
+	}
+	q := &fakeQueue{}
+	ctx := WithQueue(context.Background(), q)
+	if _, err := NewForgetTool(store).Execute(ctx, []byte(`{"name":"old-fact"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if len(q.notes) != 1 || !strings.Contains(q.notes[0], "old-fact") {
+		t.Fatalf("expected one queued note naming the deleted memory, got %v", q.notes)
+	}
+}

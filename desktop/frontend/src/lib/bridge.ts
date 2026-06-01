@@ -95,6 +95,7 @@ export interface AppBindings {
   // from the in-place editor.
   Memory(): Promise<MemoryView>;
   Remember(scope: string, note: string): Promise<string>;
+  Forget(name: string): Promise<void>;
   SaveDoc(path: string, body: string): Promise<string>;
   // Settings panel: read the resolved config and apply edits (each writes config
   // and rebuilds the controller live). Secrets go through SetProviderKey (→ .env).
@@ -544,6 +545,9 @@ function makeMockApp(): AppBindings {
     async Remember(scope: string, note: string) {
       emit({ kind: "notice", level: "info", text: `remembered → ${scope}` });
       return `${scope} REASONIX.md (mock): ${note}`;
+    },
+    async Forget(name: string) {
+      emit({ kind: "notice", level: "info", text: `forgot → ${name}` });
     },
     async SaveDoc(path: string, _body: string) {
       emit({ kind: "notice", level: "info", text: `saved → ${path}` });

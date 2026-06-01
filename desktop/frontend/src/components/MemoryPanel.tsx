@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { useT } from "../lib/i18n";
 import type { MemoryView } from "../lib/types";
 import { ResizableDrawer } from "./ResizableDrawer";
@@ -13,11 +13,13 @@ export function MemoryPanel({
   view,
   onClose,
   onRemember,
+  onForget,
   onSaveDoc,
 }: {
   view: MemoryView | null;
   onClose: () => void;
   onRemember: (scope: string, note: string) => Promise<void> | void;
+  onForget: (name: string) => Promise<void> | void;
   onSaveDoc: (path: string, body: string) => Promise<void> | void;
 }) {
   const t = useT();
@@ -26,6 +28,63 @@ export function MemoryPanel({
   const [editingPath, setEditingPath] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
+  const [highlight, setHighlight] = useState<string | null>(null);
+  const factRefs = useRef<Record<string, HTMLDivElement | null>>({});
+
+  const facts = view?.facts ?? [];
+  const factNames = new Set(facts.map((f) => f.name));
+
+  // jumpTo scrolls a [[name]] target into view and flashes it, so cross-links
+  // between saved memories are navigable inside the panel.
+  const jumpTo = (name: string) => {
+    const el = factRefs.current[name];
+    if (!el) return;
+    el.scrollIntoView({ block: "center", behavior: "smooth" });
+    setHighlight(name);
+    window.setTimeout(() => setHighlight((h) => (h === name ? null : h)), 1200);
+  };
+
+  // renderWithLinks turns [[name]] tokens into in-panel jumps; a token with no
+  // matching saved memory renders as a flagged dead link.
+  const renderWithLinks = (text: string): ReactNode[] => {
+    const out: ReactNode[] = [];
+    const re = /\[\[([^\]]+)\]\]/g;
+    let last = 0;
+    let k = 0;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text)) !== null) {
+      if (m.index > last) out.push(text.slice(last, m.index));
+      const target = m[1].trim();
+      out.push(
+        factNames.has(target) ? (
+          <button key={k++} type="button" className="mem-link" onClick={() => jumpTo(target)}>
+            {target}
+          </button>
+        ) : (
+          <span
+            key={k++}
+            className="mem-link mem-link--dead"
+            title={t("memory.deadLink", { name: target })}
+          >
+            {target}
+          </span>
+        ),
+      );
+      last = re.lastIndex;
+    }
+    if (last < text.length) out.push(text.slice(last));
+    return out;
+  };
+
+  const forgetFact = async (name: string) => {
+    if (busy || !window.confirm(t("memory.confirmForget", { name }))) return;
+    setBusy(true);
+    try {
+      await onForget(name);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const scopes = view?.scopes ?? [];
   // Default the scope selector to "project" when present, else the first option.
@@ -168,19 +227,37 @@ export function MemoryPanel({
               })}
             </section>
 
-            {/* Saved auto-memories — read-only; the model owns these. */}
+            {/* Saved auto-memories — the model owns these via remember/forget;
+                the panel can delete one and follow [[name]] cross-links. */}
             <section className="mem-section">
               <div className="mem-section__title">{t("memory.savedMemories")}</div>
-              {view.facts.length === 0 ? (
+              {facts.length === 0 ? (
                 <div className="mem-empty">{t("memory.noFacts")}</div>
               ) : (
-                view.facts.map((f) => (
-                  <div className="mem-fact" key={f.name} title={f.body}>
+                facts.map((f) => (
+                  <div
+                    className={`mem-fact${highlight === f.name ? " mem-fact--hl" : ""}`}
+                    key={f.name}
+                    ref={(el) => {
+                      factRefs.current[f.name] = el;
+                    }}
+                  >
                     <span className={`badge badge--${f.type}`}>{f.type}</span>
                     <div className="mem-fact__text">
-                      <div className="mem-fact__name">{f.name}</div>
+                      <div className="mem-fact__name">{f.title || f.name}</div>
                       <div className="mem-fact__desc">{f.description}</div>
+                      {f.body && (
+                        <div className="mem-fact__body">{renderWithLinks(f.body)}</div>
+                      )}
                     </div>
+                    <button
+                      className="btn btn--small mem-fact__forget"
+                      onClick={() => void forgetFact(f.name)}
+                      disabled={busy}
+                      title={t("memory.forget")}
+                    >
+                      ✕
+                    </button>
                   </div>
                 ))
               )}

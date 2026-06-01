@@ -13,6 +13,7 @@ import (
 	"reasonix/internal/event"
 	"reasonix/internal/evidence"
 	"reasonix/internal/jobs"
+	"reasonix/internal/memory"
 	"reasonix/internal/provider"
 	"reasonix/internal/tool"
 )
@@ -171,6 +172,11 @@ type Agent struct {
 	// complete_step validate that cited evidence happened before the claim.
 	evidence *evidence.Ledger
 
+	// memQueue, when non-nil, lets the remember/forget tools fold a turn-tail note
+	// about a just-made memory change into the next turn, so it applies this
+	// session without touching the cache-stable prefix. Set via SetMemoryQueue.
+	memQueue memory.Queue
+
 	// Context management: when a turn's prompt nears contextWindow, the older
 	// middle of the session is summarized away, keeping a token-bounded recent
 	// tail verbatim (recentKeep is the message floor) and archiving the originals
@@ -211,6 +217,10 @@ func (a *Agent) SetGate(g Gate) { a.gate = g }
 // SetAsker installs the asker the `ask` tool uses to question the user.
 // Interactive frontends wire one in; headless runs leave it nil.
 func (a *Agent) SetAsker(as Asker) { a.asker = as }
+
+// SetMemoryQueue installs the sink the remember/forget tools use to apply a
+// memory change in the current session. The controller wires itself in.
+func (a *Agent) SetMemoryQueue(q memory.Queue) { a.memQueue = q }
 
 // SetPreEditHook installs the pre-edit snapshot hook (see onPreEdit). The
 // controller wires it to its per-session checkpoint store; nil disables capture.
@@ -733,6 +743,9 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 	}
 	if a.jobs != nil {
 		cctx = jobs.WithManager(cctx, a.jobs)
+	}
+	if a.memQueue != nil {
+		cctx = memory.WithQueue(cctx, a.memQueue)
 	}
 	result, err := t.Execute(cctx, json.RawMessage(call.Arguments))
 	if a.evidence != nil {

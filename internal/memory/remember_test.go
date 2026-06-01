@@ -50,3 +50,17 @@ func TestRememberToolValidates(t *testing.T) {
 		t.Fatal("expected error when description is missing")
 	}
 }
+
+// TestRememberToolQueuesNote verifies a save injects a turn-tail note so the
+// fact applies this session, not only the next.
+func TestRememberToolQueuesNote(t *testing.T) {
+	q := &fakeQueue{}
+	ctx := WithQueue(context.Background(), q)
+	tl := NewRememberTool(Store{Dir: t.TempDir()})
+	if _, err := tl.Execute(ctx, []byte(`{"name":"uses-rmb","description":"balance is RMB","type":"user","body":"b"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if len(q.notes) != 1 || !strings.Contains(q.notes[0], "uses-rmb") {
+		t.Fatalf("expected one queued note naming the saved memory, got %v", q.notes)
+	}
+}

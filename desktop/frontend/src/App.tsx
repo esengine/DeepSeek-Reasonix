@@ -135,6 +135,7 @@ export default function App() {
     setModel,
     fetchMemory,
     remember,
+    forget,
     saveDoc,
   } = useController();
   const t = useT();
@@ -446,6 +447,14 @@ export default function App() {
     [remember, fetchMemory],
   );
 
+  const onForget = useCallback(
+    async (name: string) => {
+      await forget(name);
+      setMemView(await fetchMemory());
+    },
+    [forget, fetchMemory],
+  );
+
   const onSaveDoc = useCallback(
     async (path: string, body: string) => {
       await saveDoc(path, body);
@@ -720,6 +729,7 @@ export default function App() {
           view={memView}
           onClose={closeMemory}
           onRemember={onRemember}
+          onForget={onForget}
           onSaveDoc={onSaveDoc}
         />
       )}

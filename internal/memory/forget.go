@@ -47,7 +47,10 @@ func (t forgetTool) Execute(ctx context.Context, args json.RawMessage) (string, 
 	if err := t.store.Delete(in.Name); err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("Forgot memory %q (it will no longer load in future sessions).", in.Name), nil
+	if q, ok := QueueFromContext(ctx); ok {
+		q.QueueMemory("Deleted memory \"" + slug(in.Name) + "\" — disregard its line still shown in the saved-memories index until next session.")
+	}
+	return fmt.Sprintf("Forgot memory %q (it no longer applies and will not load in future sessions).", in.Name), nil
 }
 
 func (forgetTool) ReadOnly() bool { return false }

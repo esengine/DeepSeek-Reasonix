@@ -86,6 +86,7 @@ var Chinese = Messages{
 	CmdResume:       "恢复已保存的会话",
 	CmdModel:        "切换模型",
 	CmdMemory:       "查看记忆文件",
+	CmdForget:       "删除一条已存记忆",
 	CmdMcp:          "MCP 服务器",
 	CmdHooks:        "管理 hooks",
 	CmdPasteImage:   "粘贴剪贴板图片",

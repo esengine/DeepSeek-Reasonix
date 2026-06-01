@@ -2095,6 +2095,8 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 		m.showMemory()
 	case "/quit", "/exit":
 		return tea.Quit
+	case "/forget":
+		m.forgetMemory(strings.TrimSpace(strings.TrimPrefix(input, cmd)))
 	default:
 		// A custom command wins over a skill of the same name; both resolve to a turn.
 		if sent, ok := m.ctrl.CustomCommand(input); ok {

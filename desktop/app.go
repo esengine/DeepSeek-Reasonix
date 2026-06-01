@@ -1273,6 +1273,18 @@ func (a *App) Remember(scope, note string) (string, error) {
 	return ctrl.QuickAdd(parseScope(scope), note)
 }
 
+// Forget deletes a saved auto-memory by name — the panel's delete action for a
+// fact the model owns. A no-op when no controller is attached.
+func (a *App) Forget(name string) error {
+	a.mu.RLock()
+	ctrl := a.ctrl
+	a.mu.RUnlock()
+	if ctrl == nil {
+		return nil
+	}
+	return ctrl.ForgetMemory(name)
+}
+
 // SaveDoc overwrites a memory doc with the panel editor's contents. The controller
 // validates path against the recognized memory files. Returns the file written.
 func (a *App) SaveDoc(path, body string) (string, error) {

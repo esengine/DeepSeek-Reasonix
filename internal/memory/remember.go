@@ -79,7 +79,10 @@ func (t rememberTool) Execute(ctx context.Context, args json.RawMessage) (string
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("Saved memory to %s (it will load automatically in future sessions).", path), nil
+	if q, ok := QueueFromContext(ctx); ok {
+		q.QueueMemory("Saved memory \"" + slug(name) + "\": " + oneLine(in.Description))
+	}
+	return fmt.Sprintf("Saved memory to %s (it applies now and loads automatically in future sessions).", path), nil
 }
 
 func (rememberTool) ReadOnly() bool { return false }

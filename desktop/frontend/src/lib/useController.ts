@@ -608,6 +608,10 @@ export function useController() {
     await app.Remember(scope, note).catch(() => {});
   }, []);
 
+  const forget = useCallback(async (name: string) => {
+    await app.Forget(name).catch(() => {});
+  }, []);
+
   const saveDoc = useCallback(async (path: string, body: string) => {
     await app.SaveDoc(path, body).catch(() => {});
   }, []);
@@ -658,6 +662,7 @@ export function useController() {
     setModel,
     fetchMemory,
     remember,
+    forget,
     saveDoc,
   };
 }

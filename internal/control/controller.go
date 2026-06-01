@@ -215,6 +215,7 @@ func New(opts Options) *Controller {
 				c.cp.Snapshot(ch)
 			}
 		})
+		c.executor.SetMemoryQueue(c)
 	}
 	return c
 }
@@ -1349,6 +1350,36 @@ func (c *Controller) SaveDoc(path, body string) (string, error) {
 		"Memory file "+written+" was just edited. Its current contents:\n"+strings.TrimSpace(body))
 	c.refreshMemoryLocked()
 	return written, nil
+}
+
+// ForgetMemory deletes a saved auto-memory by name — the panel/TUI delete action,
+// the manual counterpart to the model's `forget` tool. It queues a turn-tail note
+// so the deletion applies this session (the cached prefix still lists the fact
+// until the next session re-folds the index).
+func (c *Controller) ForgetMemory(name string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.mem == nil {
+		return nil
+	}
+	if err := c.mem.Store.Delete(name); err != nil {
+		return err
+	}
+	c.pendingMemory = append(c.pendingMemory,
+		"Deleted memory \""+name+"\" — disregard its line still shown in the saved-memories index until next session.")
+	c.refreshMemoryLocked()
+	return nil
+}
+
+// QueueMemory implements memory.Queue: when the model runs the remember/forget
+// tool, the tool calls this with a note that rides the next turn so the change
+// applies this session without touching the cache-stable prefix. It also
+// refreshes the snapshot a memory panel reads.
+func (c *Controller) QueueMemory(note string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.pendingMemory = append(c.pendingMemory, note)
+	c.refreshMemoryLocked()
 }
 
 // Memory returns the loaded memory snapshot (nil when memory is disabled), for

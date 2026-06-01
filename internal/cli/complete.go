@@ -73,6 +73,7 @@ func (m *chatTUI) slashItems() []compItem {
 		{label: "/verbose", insert: "/verbose", hint: i18n.M.CmdVerbose},
 		{label: "/help", insert: "/help ", hint: i18n.M.CmdHelp},
 		{label: "/memory", insert: "/memory ", hint: i18n.M.CmdMemory},
+		{label: "/forget", insert: "/forget ", hint: i18n.M.CmdForget},
 		{label: "/quit", insert: "/quit", hint: i18n.M.CmdQuit},
 	}
 	for _, c := range m.commands {

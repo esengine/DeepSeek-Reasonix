@@ -85,6 +85,7 @@ var English = Messages{
 	CmdResume:       "resume a saved session",
 	CmdModel:        "switch model",
 	CmdMemory:       "show memory files",
+	CmdForget:       "delete a saved memory",
 	CmdMcp:          "MCP servers",
 	CmdHooks:        "manage hooks",
 	CmdPasteImage:   "paste clipboard image",

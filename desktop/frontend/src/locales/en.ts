@@ -180,6 +180,9 @@ export const en = {
   "memory.savedMemories": "Saved memories",
   "memory.noFacts": "Nothing saved yet. The agent writes these with the remember tool.",
   "memory.storedUnder": "stored under {dir}",
+  "memory.forget": "Forget",
+  "memory.confirmForget": "Forget “{name}”? This deletes the saved memory.",
+  "memory.deadLink": "No memory named “{name}”",
 
   // settings drawer
   "settings.title": "Settings",

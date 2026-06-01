@@ -181,6 +181,9 @@ export const zh: Record<DictKey, string> = {
   "memory.savedMemories": "已保存的记忆",
   "memory.noFacts": "还没有保存任何内容。智能体会通过 remember 工具写入这些。",
   "memory.storedUnder": "存放于 {dir}",
+  "memory.forget": "删除",
+  "memory.confirmForget": "删除「{name}」？这会移除这条已存记忆。",
+  "memory.deadLink": "没有名为「{name}」的记忆",
 
   // 设置抽屉
   "settings.title": "设置",

@@ -59,6 +59,22 @@ func TestComposePlanModeMarker(t *testing.T) {
 	}
 }
 
+func TestComposeDrainsQueuedMemory(t *testing.T) {
+	c := New(Options{}) // no executor/memory — QueueMemory still queues a turn-tail note
+
+	c.QueueMemory("Saved memory \"rmb\": user's balance is in RMB")
+	got := c.Compose("hello")
+	if !strings.Contains(got, "<memory-update>") || !strings.Contains(got, "user's balance is in RMB") {
+		t.Fatalf("queued memory should ride the turn: %q", got)
+	}
+	if !strings.HasSuffix(got, "hello") {
+		t.Fatalf("user text should follow the memory block: %q", got)
+	}
+	if got2 := c.Compose("again"); got2 != "again" {
+		t.Fatalf("pendingMemory should drain after one turn, got %q", got2)
+	}
+}
+
 func TestRunTurnAutoPlanComplexTask(t *testing.T) {
 	var notices []string
 	runner := &fakeTurnRunner{}
