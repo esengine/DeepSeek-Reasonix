@@ -73,6 +73,11 @@ func (s *updateSink) Emit(e event.Event) {
 		s.send(messageChunk{SessionUpdate: "agent_message_chunk", Content: textBlock(e.Text)})
 
 	case event.ToolDispatch:
+		// Skip the early (Partial) dispatch: it carries no args, and the full one
+		// that follows is the single pending tool_call the protocol expects.
+		if e.Tool.Partial {
+			return
+		}
 		s.send(toolCall{
 			SessionUpdate: "tool_call",
 			ToolCallID:    e.Tool.ID,
