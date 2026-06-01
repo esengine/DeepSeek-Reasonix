@@ -92,7 +92,10 @@ type ToolHooks interface {
 	// PostLLMCall fires after each model turn completes (streaming finishes)
 	// but before reasoning_content is stored. It returns the (possibly
 	// translated) reasoning string — the original when no hook is configured.
+	// HasPostLLMCall reports whether such a hook exists, so the agent keeps
+	// streaming reasoning live when none is wired up.
 	PostLLMCall(ctx context.Context, reasoning string, turn int) string
+	HasPostLLMCall() bool
 	// SubagentStop fires when a `task` sub-agent finishes (foreground). PreCompact
 	// fires just before a compaction pass and returns extra summary guidance (its
 	// hooks' stdout) to fold into the summary prompt; "" when no hook contributes.
@@ -317,7 +320,7 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 	a.session.Add(provider.Message{Role: provider.RoleUser, Content: input})
 
 	for step := 0; a.maxSteps <= 0 || step < a.maxSteps; step++ {
-		text, reasoning, signature, calls, usage, err := a.stream(ctx)
+		text, reasoning, signature, calls, usage, err := a.stream(ctx, step+1)
 		if err != nil {
 			return err
 		}
@@ -370,7 +373,7 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 // stream so a sink can re-render the streamed raw text as styled markdown. The
 // accumulated text and reasoning are also returned so the caller can round-trip
 // reasoning on the next turn.
-func (a *Agent) stream(ctx context.Context) (string, string, string, []provider.ToolCall, *provider.Usage, error) {
+func (a *Agent) stream(ctx context.Context, turn int) (string, string, string, []provider.ToolCall, *provider.Usage, error) {
 	ch, err := a.prov.Stream(ctx, provider.Request{
 		Messages:    a.session.Messages,
 		Tools:       a.tools.Schemas(),
@@ -379,6 +382,12 @@ func (a *Agent) stream(ctx context.Context) (string, string, string, []provider.
 	if err != nil {
 		return "", "", "", nil, nil, err
 	}
+
+	// A PostLLMCall hook rewrites the whole reasoning block, so when one is wired
+	// up we buffer reasoning silently and emit the transformed text once after the
+	// stream. With no such hook the reasoning streams live, chunk by chunk, as
+	// before — the common case must not lose its live "thinking…" display.
+	transformReasoning := a.hooks != nil && a.hooks.HasPostLLMCall()
 
 	var text, reasoning strings.Builder
 	var signature string // provider-issued proof for the reasoning (Anthropic thinking)
@@ -391,8 +400,9 @@ func (a *Agent) stream(ctx context.Context) (string, string, string, []provider.
 			if chunk.Signature != "" {
 				signature = chunk.Signature
 			}
-			// Buffer silently: PostLLMCall hook will translate the full
-			// reasoning text after streaming completes, then emit once.
+			if chunk.Text != "" && !transformReasoning {
+				a.sink.Emit(event.Event{Kind: event.Reasoning, Text: chunk.Text})
+			}
 		case provider.ChunkText:
 			text.WriteString(chunk.Text)
 			a.sink.Emit(event.Event{Kind: event.Text, Text: chunk.Text})
@@ -417,17 +427,15 @@ func (a *Agent) stream(ctx context.Context) (string, string, string, []provider.
 			return "", "", "", nil, nil, chunk.Err
 		}
 	}
-	// Run PostLLMCall hook: translate/tweak the full reasoning before it is
-	// emitted to the UI. Moved here (inside stream) so the sink never sees the
-	// untranslated text; the previous position after stream() was too late —
-	// Reasoning events had already been sent chunk-by-chunk.
+	// With a PostLLMCall hook, the live stream was suppressed above; transform the
+	// full reasoning now and emit it once so the sink never sees the untranslated
+	// text. Without a hook this is skipped — the chunk-by-chunk events already fired.
 	reasoningStr := reasoning.String()
-	if a.hooks != nil && reasoningStr != "" {
-		reasoningStr = a.hooks.PostLLMCall(ctx, reasoningStr, 0)
-	}
-	// Emit the (possibly translated) reasoning as a single event.
-	if reasoningStr != "" {
-		a.sink.Emit(event.Event{Kind: event.Reasoning, Text: reasoningStr})
+	if transformReasoning && reasoningStr != "" {
+		reasoningStr = a.hooks.PostLLMCall(ctx, reasoningStr, turn)
+		if reasoningStr != "" {
+			a.sink.Emit(event.Event{Kind: event.Reasoning, Text: reasoningStr})
+		}
 	}
 	// Close the text stream: a sink may re-render the streamed raw text as
 	// styled markdown now that it is complete. Reasoning rides along so the sink

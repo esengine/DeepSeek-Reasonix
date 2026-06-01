@@ -232,9 +232,9 @@ type Payload struct {
 	Prompt        string          `json:"prompt,omitempty"`
 	LastAssistant string          `json:"lastAssistantText,omitempty"`
 	Turn          int             `json:"turn,omitempty"`
-	Message       string          `json:"message,omitempty"`    // Notification: what needs attention
-	Trigger       string          `json:"trigger,omitempty"`    // PreCompact: "auto" | "manual"
-	Reasoning     string          `json:"reasoning,omitempty"`  // PostLLMCall: the model's raw reasoning text
+	Message       string          `json:"message,omitempty"`   // Notification: what needs attention
+	Trigger       string          `json:"trigger,omitempty"`   // PreCompact: "auto" | "manual"
+	Reasoning     string          `json:"reasoning,omitempty"` // PostLLMCall: the model's raw reasoning text
 }
 
 // Decision is a single hook invocation's verdict.
