@@ -1284,6 +1284,7 @@ func (m chatTUI) renderTodoPanel() string {
 			Content    string `json:"content"`
 			Status     string `json:"status"`
 			ActiveForm string `json:"activeForm"`
+			Level      int    `json:"level"`
 		} `json:"todos"`
 	}
 	if err := json.Unmarshal([]byte(m.todoArgs), &p); err != nil || len(p.Todos) == 0 {
@@ -1308,17 +1309,21 @@ func (m chatTUI) renderTodoPanel() string {
 			break
 		}
 		shown++
+		indent := "  "
+		if t.Level >= 1 {
+			indent = "      " // sub-steps sit under their phase
+		}
 		switch t.Status {
 		case "completed":
-			b.WriteString("  " + green("✔") + " " + dim(t.Content) + "\n")
+			b.WriteString(indent + green("✔") + " " + dim(t.Content) + "\n")
 		case "in_progress":
 			label := t.Content
 			if t.ActiveForm != "" {
 				label = t.ActiveForm
 			}
-			b.WriteString("  " + yellow("▶ "+label) + "\n")
+			b.WriteString(indent + yellow("▶ "+label) + "\n")
 		default:
-			b.WriteString("  " + dim("○ "+t.Content) + "\n")
+			b.WriteString(indent + dim("○ "+t.Content) + "\n")
 		}
 	}
 	return todoPanelStyle.Width(max(m.width, 10)).Render(strings.TrimRight(b.String(), "\n"))

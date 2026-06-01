@@ -293,7 +293,7 @@ const planApprovalTool = "exit_plan_mode"
 
 // planApprovedMessage is the follow-up turn sent once the user approves a plan —
 // the in-context nudge to execute and keep the (already-seeded) task list honest.
-const planApprovedMessage = "Plan approved — plan mode is off; you're cleared to make the changes without asking again. Implement the plan now. Keep the task list current with todo_write (mark the step you start as in_progress; one in_progress at a time), and sign off each finished step with complete_step, attaching the evidence it's done — the verification you ran, the diff/files you changed, or a manual check. Don't claim a step is done without evidence."
+const planApprovedMessage = "Plan approved — plan mode is off; you're cleared to make the changes without asking again. Implement the plan now. Keep the task list current with todo_write, preserving its two-level shape (phases at level 0, their sub-steps at level 1): mark the sub-step you start as in_progress, one in_progress at a time. Sign off each finished sub-step with complete_step, attaching the evidence it's done — the verification you ran, the diff/files you changed, or a manual check. Don't claim a step is done without evidence."
 
 // runTurn runs one model turn, then applies the plan-approval gate. This is the
 // single, frontend-agnostic plan flow: in plan mode the model just researches
@@ -1295,6 +1295,7 @@ func (g gateApprover) Approve(ctx context.Context, tool, subject string, args js
 type seedTodo struct {
 	Content string `json:"content"`
 	Status  string `json:"status"`
+	Level   int    `json:"level,omitempty"`
 }
 
 // seedPlanTodos turns an approved plan into a starter task list and emits it as a
@@ -1341,15 +1342,15 @@ func PlanTodosJSON(plan string) string {
 func parsePlanTodos(plan string) []seedTodo {
 	var todos []seedTodo
 	for _, raw := range strings.Split(plan, "\n") {
-		item := listItemContent(raw)
-		if item == "" {
+		item, level, ok := listItem(raw)
+		if !ok {
 			continue
 		}
 		status := "pending"
 		if len(todos) == 0 {
 			status = "in_progress"
 		}
-		todos = append(todos, seedTodo{Content: item, Status: status})
+		todos = append(todos, seedTodo{Content: item, Status: status, Level: level})
 		if len(todos) >= 20 {
 			break
 		}
@@ -1357,14 +1358,25 @@ func parsePlanTodos(plan string) []seedTodo {
 	return todos
 }
 
-// listItemContent returns the task text of a markdown list line ("- x", "* x",
-// "1. x", "2) x"), or "" if the line isn't a list item. Light inline-markdown
+// listItem parses a markdown list line ("- x", "* x", "1. x", "2) x") into its
+// task text and a nesting level derived from leading indentation (0 for a
+// top-level item, 1 for an indented sub-step — capped at 1 since the plan is
+// two-level). ok is false when the line isn't a list item. Light inline-markdown
 // stripping keeps the checklist readable.
-func listItemContent(line string) string {
-	s := strings.TrimSpace(line)
-	if s == "" {
-		return ""
+func listItem(line string) (content string, level int, ok bool) {
+	trimmed := strings.TrimLeft(line, " \t")
+	if trimmed == "" {
+		return "", 0, false
 	}
+	indent := 0
+	for _, c := range line[:len(line)-len(trimmed)] {
+		if c == '\t' {
+			indent += 4
+		} else {
+			indent++
+		}
+	}
+	s := trimmed
 	switch {
 	case strings.HasPrefix(s, "- "), strings.HasPrefix(s, "* "), strings.HasPrefix(s, "+ "):
 		s = s[2:]
@@ -1375,7 +1387,7 @@ func listItemContent(line string) string {
 			i++
 		}
 		if i == 0 || i+1 >= len(s) || (s[i] != '.' && s[i] != ')') || s[i+1] != ' ' {
-			return ""
+			return "", 0, false
 		}
 		s = s[i+2:]
 	}
@@ -1384,7 +1396,14 @@ func listItemContent(line string) string {
 	s = strings.TrimPrefix(s, "[x] ")
 	s = strings.ReplaceAll(s, "`", "")
 	s = strings.ReplaceAll(s, "**", "")
-	return strings.TrimSpace(s)
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "", 0, false
+	}
+	if indent >= 2 {
+		return s, 1, true
+	}
+	return s, 0, true
 }
 
 // requestApproval emits an ApprovalRequest and blocks until Approve(ID, …)
