@@ -155,7 +155,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			notify := func(msg string) { sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: msg}) }
 			notify("codegraph: fetching code-intelligence runtime in the background (one-time) — symbol-graph tools available next session")
 			go func() {
-				if _, err := codegraph.Install(ctx, nil); err != nil {
+				if _, err := codegraph.Install(context.WithoutCancel(ctx), nil); err != nil {
 					notify("codegraph: install failed (" + err.Error() + ") — using grep/glob; retries next session")
 				} else {
 					notify("codegraph: installed — symbol-graph tools available next session")
