@@ -38,13 +38,12 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		name = "openai"
 	}
 	keyEnv, _ := cfg.Extra["api_key_env"].(string) // for actionable auth errors
-	base := strings.TrimRight(cfg.BaseURL, "/")
 	effort, _ := cfg.Extra["effort"].(string)
 	return &client{
 		name:    name,
 		apiKey:  cfg.APIKey,
 		keyEnv:  keyEnv,
-		baseURL: base,
+		baseURL: strings.TrimRight(cfg.BaseURL, "/"),
 		model:   cfg.Model,
 		effort:  effort,
 		http: &http.Client{
