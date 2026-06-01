@@ -36,6 +36,7 @@ type Receipt struct {
 	Success  bool            `json:"success"`
 	Command  string          `json:"command,omitempty"`
 	Step     string          `json:"step,omitempty"`
+	TodoStep *TodoStepMatch  `json:"todo_step,omitempty"`
 	Paths    []string        `json:"paths,omitempty"`
 	Read     bool            `json:"read,omitempty"`
 	Write    bool            `json:"write,omitempty"`
@@ -78,6 +79,11 @@ func (l *Ledger) Record(r Receipt) {
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if r.Success && r.ToolName == "complete_step" && r.Step != "" && r.TodoStep == nil {
+		if match := latestTodoStep(r.Step, l.receipts); match.Found {
+			r.TodoStep = &match
+		}
+	}
 	l.receipts = append(l.receipts, r)
 }
 
@@ -347,12 +353,33 @@ func hasSuccessfulCompleteStepForTodo(receipts []Receipt, index int, current []T
 		if !r.Success || r.ToolName != "complete_step" || strings.TrimSpace(r.Step) == "" {
 			continue
 		}
+		if r.TodoStep != nil && r.TodoStep.Found {
+			if index >= 1 && index <= len(current) && sameTodoMatch(current[index-1], *r.TodoStep) {
+				return true
+			}
+			continue
+		}
 		match := matchTodoStep(r.Step, current)
 		if match.Found && match.Index == index {
 			return true
 		}
 	}
 	return false
+}
+
+func latestTodoStep(step string, receipts []Receipt) TodoStepMatch {
+	for i := len(receipts) - 1; i >= 0; i-- {
+		r := receipts[i]
+		if !r.Success || r.ToolName != "todo_write" {
+			continue
+		}
+		return matchTodoStep(step, r.Todos)
+	}
+	return TodoStepMatch{}
+}
+
+func sameTodoMatch(todo TodoItem, match TodoStepMatch) bool {
+	return sameStepText(todo.Content, match.Content) || sameStepText(todo.ActiveForm, match.ActiveForm)
 }
 
 func matchTodoStep(step string, todos []TodoItem) TodoStepMatch {

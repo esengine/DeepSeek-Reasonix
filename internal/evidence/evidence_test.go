@@ -238,6 +238,50 @@ func TestLedgerMatchesCompletionByActiveFormAndNumber(t *testing.T) {
 	}
 }
 
+func TestLedgerNumericCompleteStepDoesNotAuthorizeReplacedTodo(t *testing.T) {
+	ledger := NewLedger()
+	ledger.Record(Receipt{
+		ToolName: "todo_write",
+		Success:  true,
+		Todos:    []TodoItem{{Content: "Add parser", Status: "in_progress"}},
+	})
+	ledger.Record(Receipt{ToolName: "complete_step", Success: true, Step: "1"})
+
+	missing, hasBaseline := ledger.UnverifiedCompletedTodos([]TodoItem{
+		{Content: "Ship parser", Status: "completed"},
+	})
+	if !hasBaseline {
+		t.Fatal("expected prior todo_write baseline")
+	}
+	if len(missing) != 1 || missing[0].Content != "Ship parser" {
+		t.Fatalf("numeric complete_step should not authorize a replaced todo, missing = %+v", missing)
+	}
+}
+
+func TestLedgerNumericCompleteStepFollowsReorderedSignedTodo(t *testing.T) {
+	ledger := NewLedger()
+	ledger.Record(Receipt{
+		ToolName: "todo_write",
+		Success:  true,
+		Todos: []TodoItem{
+			{Content: "Add parser", Status: "in_progress"},
+			{Content: "Write tests", Status: "pending"},
+		},
+	})
+	ledger.Record(Receipt{ToolName: "complete_step", Success: true, Step: "1"})
+
+	missing, hasBaseline := ledger.UnverifiedCompletedTodos([]TodoItem{
+		{Content: "Write tests", Status: "pending"},
+		{Content: "Add parser", Status: "completed"},
+	})
+	if !hasBaseline {
+		t.Fatal("expected prior todo_write baseline")
+	}
+	if len(missing) != 0 {
+		t.Fatalf("numeric complete_step should follow the signed todo identity after reorder, missing = %+v", missing)
+	}
+}
+
 func TestLedgerNoBaselineDoesNotConstrainCompletedTodos(t *testing.T) {
 	ledger := NewLedger()
 	missing, hasBaseline := ledger.UnverifiedCompletedTodos([]TodoItem{
