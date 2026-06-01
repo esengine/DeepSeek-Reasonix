@@ -19,6 +19,7 @@ const LONG_PASTE_MIN_LINES = 5;
 const COMPOSER_MIN_HEIGHT = 86;
 const COMPOSER_MAX_HEIGHT = 360;
 const COMPOSER_MAX_VIEWPORT_RATIO = 0.4;
+const IME_CONFIRM_GRACE_MS = 250;
 
 type PastedBlock = {
   label: string;
@@ -49,6 +50,23 @@ function clampComposerHeight(height: number): number {
 
 function loadComposerHeight(): number | null {
   return loadOptionalLayoutSize("composerHeight", clampComposerHeight);
+}
+
+function isImeKeyEvent(
+  e: KeyboardEvent<HTMLTextAreaElement>,
+  composing: boolean,
+  lastCompositionEndAt: number,
+): boolean {
+  const native = e.nativeEvent as globalThis.KeyboardEvent & {
+    isComposing?: boolean;
+    keyCode?: number;
+  };
+  return (
+    composing ||
+    native.isComposing === true ||
+    native.keyCode === 229 ||
+    Date.now() - lastCompositionEndAt < IME_CONFIRM_GRACE_MS
+  );
 }
 
 export function Composer({
@@ -91,6 +109,8 @@ export function Composer({
   const workspaceAnchorRef = useRef<HTMLDivElement>(null);
   const workspaceMenuRef = useRef<HTMLDivElement>(null);
   const wasRunning = useRef(running);
+  const composingRef = useRef(false);
+  const lastCompositionEndAt = useRef(0);
 
   useEffect(() => {
     if (wasRunning.current && !running && text.trim() === "") {
@@ -438,7 +458,8 @@ export function Composer({
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    const composing = e.nativeEvent.isComposing;
+    const composing = isImeKeyEvent(e, composingRef.current, lastCompositionEndAt.current);
+    if (e.key === "Enter" && composing) return;
 
     // Shift+Tab cycles the input mode (normal → plan → YOLO → normal). Handled
     // before the menus so it works even while one is open.
@@ -471,7 +492,7 @@ export function Composer({
       }
     }
 
-    // Enter sends; Shift+Enter newline. isComposing guards IME (pinyin) confirms.
+    // Enter sends; Shift+Enter newline. `composing` guards IME confirms.
     if (e.key === "Enter" && !e.shiftKey && !composing) {
       e.preventDefault();
       submit();
@@ -579,6 +600,13 @@ export function Composer({
             onChange={(e) => setText(e.target.value)}
             onPaste={onPaste}
             onKeyDown={onKeyDown}
+            onCompositionStart={() => {
+              composingRef.current = true;
+            }}
+            onCompositionEnd={() => {
+              composingRef.current = false;
+              lastCompositionEndAt.current = Date.now();
+            }}
             placeholder={disabled ? t("common.loading") : t("composer.placeholder")}
             rows={1}
             disabled={disabled}
