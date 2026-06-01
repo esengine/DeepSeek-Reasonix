@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 )
 
@@ -21,9 +22,11 @@ type stdioTransport struct {
 	cmd    *exec.Cmd
 	stdin  io.WriteCloser
 	stdout *bufio.Reader
+	stderr *tailBuffer
 
-	mu     sync.Mutex
-	nextID int
+	mu       sync.Mutex
+	nextID   int
+	waitOnce sync.Once
 }
 
 func newStdioTransport(ctx context.Context, s Spec) (*stdioTransport, error) {
@@ -35,9 +38,10 @@ func newStdioTransport(ctx context.Context, s Spec) (*stdioTransport, error) {
 	if s.Dir != "" {
 		cmd.Dir = s.Dir // pin cwd-aware servers (e.g. CodeGraph) to the project root
 	}
-	cmd.Stderr = os.Stderr // default: surface plugin logs to the terminal
+	stderr := &tailBuffer{limit: 16 * 1024}
+	cmd.Stderr = stderr
 	if s.Stderr != nil {
-		cmd.Stderr = s.Stderr // caller-supplied override (e.g. io.Discard)
+		cmd.Stderr = io.MultiWriter(stderr, s.Stderr)
 	}
 
 	stdin, err := cmd.StdinPipe()
@@ -51,7 +55,7 @@ func newStdioTransport(ctx context.Context, s Spec) (*stdioTransport, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	return &stdioTransport{name: s.Name, cmd: cmd, stdin: stdin, stdout: bufio.NewReader(stdout)}, nil
+	return &stdioTransport{name: s.Name, cmd: cmd, stdin: stdin, stdout: bufio.NewReader(stdout), stderr: stderr}, nil
 }
 
 func (t *stdioTransport) call(ctx context.Context, method string, params any) (json.RawMessage, error) {
@@ -70,7 +74,7 @@ func (t *stdioTransport) call(ctx context.Context, method string, params any) (j
 		}
 		line, err := t.stdout.ReadBytes('\n')
 		if err != nil {
-			return nil, fmt.Errorf("plugin %q: read: %w", t.name, err)
+			return nil, t.withStderr(fmt.Errorf("plugin %q: read: %w", t.name, err))
 		}
 		line = bytes.TrimSpace(line)
 		if len(line) == 0 {
@@ -110,7 +114,32 @@ func (t *stdioTransport) write(v any) error {
 		return err
 	}
 	_, err = t.stdin.Write(append(b, '\n'))
-	return err
+	if err != nil {
+		return t.withStderr(err)
+	}
+	return nil
+}
+
+func (t *stdioTransport) withStderr(err error) error {
+	if t.stderr == nil {
+		return err
+	}
+	t.wait() // reap the exited child so its stderr copy goroutine has flushed the tail
+	msg := t.stderr.String()
+	if msg == "" {
+		return err
+	}
+	return fmt.Errorf("%w: stderr: %s", err, msg)
+}
+
+// wait reaps the child exactly once; cmd.Wait blocks until the stderr-copy
+// goroutine completes, so the tail buffer is settled before anyone reads it.
+func (t *stdioTransport) wait() {
+	t.waitOnce.Do(func() {
+		if t.cmd != nil && t.cmd.Process != nil {
+			_ = t.cmd.Wait()
+		}
+	})
 }
 
 func (t *stdioTransport) close() {
@@ -119,6 +148,28 @@ func (t *stdioTransport) close() {
 	}
 	if t.cmd != nil && t.cmd.Process != nil {
 		_ = t.cmd.Process.Kill()
-		_ = t.cmd.Wait()
+		t.wait()
 	}
+}
+
+type tailBuffer struct {
+	mu    sync.Mutex
+	limit int
+	buf   []byte
+}
+
+func (b *tailBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.buf = append(b.buf, p...)
+	if b.limit > 0 && len(b.buf) > b.limit {
+		b.buf = append([]byte(nil), b.buf[len(b.buf)-b.limit:]...)
+	}
+	return len(p), nil
+}
+
+func (b *tailBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return strings.TrimSpace(string(b.buf))
 }

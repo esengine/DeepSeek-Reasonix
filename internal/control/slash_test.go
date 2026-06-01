@@ -25,10 +25,11 @@ func has(items []SlashItem, label string) bool {
 
 func TestSlashArgItems(t *testing.T) {
 	data := ArgData{
-		Skills:       []skill.Skill{{Name: "explore", Scope: skill.ScopeBuiltin}, {Name: "review", Scope: skill.ScopeBuiltin}},
-		ServerNames:  []string{"fs", "git"},
-		ModelRefs:    []string{"deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-pro"},
-		CurrentModel: "deepseek/deepseek-v4-flash",
+		Skills:          []skill.Skill{{Name: "explore", Scope: skill.ScopeBuiltin}, {Name: "review", Scope: skill.ScopeBuiltin}},
+		ServerNames:     []string{"fs", "git"},
+		DisconnectedMCP: []string{"optional"},
+		ModelRefs:       []string{"deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-pro"},
+		CurrentModel:    "deepseek/deepseek-v4-flash",
 	}
 
 	// /skill subcommands
@@ -55,6 +56,11 @@ func TestSlashArgItems(t *testing.T) {
 	items, _ = SlashArgItems("/mcp remove ", data)
 	if !has(items, "fs") || !has(items, "git") {
 		t.Errorf("/mcp remove should list servers; got %v", labelsOf(items))
+	}
+	// /mcp connect -> disconnected configured server names
+	items, _ = SlashArgItems("/mcp connect ", data)
+	if !has(items, "optional") {
+		t.Errorf("/mcp connect should list disconnected configured servers; got %v", labelsOf(items))
 	}
 	// /model → refs, current marked
 	items, _ = SlashArgItems("/model ", data)

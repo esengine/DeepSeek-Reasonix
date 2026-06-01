@@ -168,6 +168,9 @@ func RenderTOML(c *Config) string {
 			if len(pl.Env) > 0 {
 				fmt.Fprintf(&b, "env     = %s\n", renderStringMap(pl.Env))
 			}
+			if pl.AutoStart != nil {
+				fmt.Fprintf(&b, "auto_start = %v\n", *pl.AutoStart)
+			}
 		}
 	}
 

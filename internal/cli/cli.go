@@ -108,6 +108,7 @@ func runAgent(args []string) int {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	model := fs.String("model", "", "provider name (default: config default_model)")
 	maxSteps := fs.Int("max-steps", 0, "max tool-call rounds (0 = use config/default)")
+	showThinking := fs.Bool("show-thinking", false, "show thinking text instead of the collapsed thinking marker")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -135,7 +136,9 @@ func runAgent(args []string) int {
 		}
 		renderer = newMarkdownRenderer(termW)
 	}
-	ctrl, err := setup(ctx, *model, *maxSteps, true, agent.NewTextSink(os.Stdout, renderer, termW))
+	sink := agent.NewTextSink(os.Stdout, renderer, termW)
+	sink.SetShowReasoning(*showThinking)
+	ctrl, err := setup(ctx, *model, *maxSteps, true, sink)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 1

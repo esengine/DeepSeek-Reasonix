@@ -54,7 +54,16 @@ type Messages struct {
 	ResumeRequiresTTY string // shown when --resume runs piped instead of on a terminal
 	PickSessionLabel  string // header on the --resume picker
 
+	// in-chat /resume command
+	ResumeListHeader    string // header above the /resume session list
+	ResumeBusy          string // shown when /resume is used mid-turn
+	ResumeBadIndexFmt   string // shown when /resume gets an out-of-range index (one %d)
+	ResumeAlreadyActive string // shown when /resume targets the current session
+	ResumedTitle        string // banner title after a /resume switch
+
 	// chat TUI status line / approval banner.
+	ChatThinking           string // live reasoning marker label, e.g. "thinking…"
+	ChatThoughtForFmt      string // collapsed reasoning summary, "%d" = elapsed s
 	ChatStatusThinkingFmt  string // "%s thinking… (%ds · <cancel hint>)" — %s = spinner, %d = elapsed s
 	ChatStatusIdle         string // shortcuts hint when idle
 	ChatStatusPlanApproval string // shortcuts hint while a plan is pending
@@ -106,12 +115,15 @@ type Messages struct {
 	CmdTree         string // /tree
 	CmdBranch       string // /branch
 	CmdSwitchBranch string // /switch
+	CmdResume       string // /resume
 	CmdModel        string // /model
 	CmdMemory       string // /memory
 	CmdMcp          string // /mcp
 	CmdHooks        string // /hooks
+	CmdPasteImage   string // /paste-image
 	CmdOutputStyle  string // /output-style
 	CmdSkill        string // /skill
+	CmdVerbose      string // /verbose
 	CmdHelp         string // /help
 	CmdTodo         string // /todo
 	ArgSkillList    string // /skill list

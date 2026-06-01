@@ -179,7 +179,7 @@ func TestSlashArgCompletionMCPSubcommands(t *testing.T) {
 	if !m.completion.active || m.completion.kind != compSlashArg {
 		t.Fatalf("/mcp <space> should open the argument menu: %+v", m.completion)
 	}
-	for _, want := range []string{"add", "remove", "list"} {
+	for _, want := range []string{"add", "connect", "remove", "list"} {
 		if !hasLabel(m.completion.items, want) {
 			t.Errorf("subcommand %q missing: %v", want, labels(m.completion.items))
 		}

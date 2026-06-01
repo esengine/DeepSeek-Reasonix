@@ -27,7 +27,9 @@ type TextSink struct {
 
 	// Per-stream state, reset on Message / TurnStarted.
 	wroteReasoningHeader bool
+	wroteReasoningBody   bool
 	textWritten          bool
+	showReasoning        bool
 	// Per-turn state, reset on TurnStarted. Tracks whether anything has been
 	// written this turn so a coordinator Phase marker leads with a blank line
 	// only when it follows earlier output.
@@ -40,11 +42,17 @@ func NewTextSink(out io.Writer, renderer Renderer, termWidth int) *TextSink {
 	return &TextSink{out: out, renderer: renderer, termWidth: termWidth}
 }
 
+// SetShowReasoning toggles Claude Code-style verbose display for thinking-mode
+// reasoning. Reasoning is still kept in session state by the agent; this only
+// controls terminal rendering.
+func (s *TextSink) SetShowReasoning(show bool) { s.showReasoning = show }
+
 // Emit renders one event. Called serially by the run loop.
 func (s *TextSink) Emit(e event.Event) {
 	switch e.Kind {
 	case event.TurnStarted:
 		s.wroteReasoningHeader = false
+		s.wroteReasoningBody = false
 		s.textWritten = false
 		s.wroteAnything = false
 
@@ -53,11 +61,14 @@ func (s *TextSink) Emit(e event.Event) {
 			fmt.Fprintln(s.out, dimText("  ▎ thinking"))
 			s.wroteReasoningHeader = true
 		}
-		fmt.Fprint(s.out, dimText(e.Text))
+		if s.showReasoning && e.Text != "" {
+			fmt.Fprint(s.out, dimText(e.Text))
+			s.wroteReasoningBody = true
+		}
 		s.wroteAnything = true
 
 	case event.Text:
-		if s.wroteReasoningHeader && !s.textWritten {
+		if s.wroteReasoningHeader && s.wroteReasoningBody && !s.textWritten {
 			fmt.Fprintln(s.out) // separate the reasoning block from the answer
 		}
 		fmt.Fprint(s.out, e.Text)
@@ -128,6 +139,7 @@ func (s *TextSink) Emit(e event.Event) {
 func (s *TextSink) closeTextStream(text, reasoning string) {
 	defer func() {
 		s.wroteReasoningHeader = false
+		s.wroteReasoningBody = false
 		s.textWritten = false
 	}()
 	if len(text) > 0 {
@@ -144,7 +156,7 @@ func (s *TextSink) closeTextStream(text, reasoning string) {
 			return
 		}
 	}
-	if len(text) > 0 || len(reasoning) > 0 {
+	if len(text) > 0 || (len(reasoning) > 0 && s.wroteReasoningBody) {
 		fmt.Fprintln(s.out)
 	}
 }

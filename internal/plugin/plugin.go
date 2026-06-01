@@ -10,8 +10,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"log/slog"
+	"regexp"
 	"strings"
 
 	"reasonix/internal/tool"
@@ -36,10 +38,9 @@ type Spec struct {
 	// for cwd-aware servers like CodeGraph, which detect the project from the
 	// directory they are launched in — they must be pinned to the project root.
 	Dir string
-	// Stderr is the writer for plugin subprocess stderr output. When nil,
-	// defaults to os.Stderr. Set to io.Discard to suppress output (e.g. during
-	// model switch inside a bubbletea session where stderr writes to the
-	// terminal would corrupt the TUI's raw mode).
+	// Stderr optionally mirrors plugin subprocess stderr output. Stderr is always
+	// captured in a bounded buffer for failure diagnostics; nil keeps it out of
+	// the terminal so child logs cannot corrupt interactive UIs.
 	Stderr io.Writer
 }
 
@@ -61,6 +62,7 @@ type Host struct {
 	clients   []*Client
 	prompts   []Prompt
 	resources []Resource
+	failures  []Failure
 }
 
 // Prompts returns every MCP prompt discovered across connected servers.
@@ -100,36 +102,31 @@ func StartAll(ctx context.Context, specs []Spec) (*Host, []tool.Tool, error) {
 	h := &Host{}
 	var tools []tool.Tool
 	for _, s := range specs {
-		c, err := start(ctx, s)
+		ts, err := h.addConnected(ctx, s)
 		if err != nil {
 			h.Close()
 			return nil, nil, fmt.Errorf("start plugin %q: %w", s.Name, err)
 		}
-		h.clients = append(h.clients, c)
-
-		ts, err := c.listTools(ctx)
-		if err != nil {
-			h.Close()
-			return nil, nil, fmt.Errorf("list tools from %q: %w", s.Name, err)
-		}
 		tools = append(tools, ts...)
-		c.toolCount = len(ts)
-
-		// Prompts and resources are auxiliary: only fetched when the server
-		// advertised the capability, and a listing error is tolerated (skipped)
-		// rather than failing the whole session over a non-essential surface.
-		if c.hasPrompts {
-			if ps, perr := c.listPrompts(ctx); perr == nil {
-				h.prompts = append(h.prompts, ps...)
-			}
-		}
-		if c.hasResources {
-			if rs, rerr := c.listResources(ctx); rerr == nil {
-				h.resources = append(h.resources, rs...)
-			}
-		}
 	}
 	return h, tools, nil
+}
+
+// StartAvailable connects every plugin it can and records failures on the host
+// instead of aborting the whole session. The returned tools are the union of the
+// successfully connected servers.
+func StartAvailable(ctx context.Context, specs []Spec) (*Host, []tool.Tool) {
+	h := &Host{}
+	var tools []tool.Tool
+	for _, s := range specs {
+		ts, err := h.addConnected(ctx, s)
+		if err != nil {
+			h.RecordFailure(s, err)
+			continue
+		}
+		tools = append(tools, ts...)
+	}
+	return h, tools
 }
 
 // Close terminates all plugin connections.
@@ -165,6 +162,13 @@ type ServerStatus struct {
 	Resources int
 }
 
+// Failure records one MCP server that was configured but could not connect.
+type Failure struct {
+	Name      string
+	Transport string
+	Error     string
+}
+
 // Servers returns a status summary per connected server, in connection order.
 func (h *Host) Servers() []ServerStatus {
 	out := make([]ServerStatus, 0, len(h.clients))
@@ -183,6 +187,39 @@ func (h *Host) Servers() []ServerStatus {
 		out = append(out, s)
 	}
 	return out
+}
+
+// Failures returns configured MCP servers that failed to connect.
+func (h *Host) Failures() []Failure {
+	out := make([]Failure, len(h.failures))
+	copy(out, h.failures)
+	return out
+}
+
+// RecordFailure stores a failed MCP connection attempt for status UIs.
+func (h *Host) RecordFailure(s Spec, err error) {
+	tt := strings.ToLower(strings.TrimSpace(s.Type))
+	if tt == "" {
+		tt = "stdio"
+	}
+	f := Failure{Name: s.Name, Transport: tt, Error: summarizeFailureError(err)}
+	for i := range h.failures {
+		if h.failures[i].Name == s.Name {
+			h.failures[i] = f
+			return
+		}
+	}
+	h.failures = append(h.failures, f)
+}
+
+func (h *Host) clearFailure(name string) {
+	kept := h.failures[:0]
+	for _, f := range h.failures {
+		if f.Name != name {
+			kept = append(kept, f)
+		}
+	}
+	h.failures = kept
 }
 
 // NewHost returns an empty Host. Boot always constructs one — even with no
@@ -209,6 +246,10 @@ func (h *Host) Add(ctx context.Context, s Spec) ([]tool.Tool, error) {
 	if h.has(s.Name) {
 		return nil, fmt.Errorf("server %q is already connected", s.Name)
 	}
+	return h.addConnected(ctx, s)
+}
+
+func (h *Host) addConnected(ctx context.Context, s Spec) ([]tool.Tool, error) {
 	c, err := start(ctx, s)
 	if err != nil {
 		return nil, err
@@ -234,6 +275,7 @@ func (h *Host) Add(ctx context.Context, s Spec) ([]tool.Tool, error) {
 			slog.Warn("plugin: listResources failed", "server", s.Name, "err", rerr)
 		}
 	}
+	h.clearFailure(s.Name)
 	return ts, nil
 }
 
@@ -269,6 +311,7 @@ func (h *Host) Remove(name string) (toolPrefix string, found bool) {
 		}
 	}
 	h.resources = keptR
+	h.clearFailure(name)
 
 	return "mcp__" + normalizeName(name) + "__", true
 }
@@ -388,7 +431,34 @@ func toolName(server, raw string) string {
 	return "mcp__" + normalizeName(server) + "__" + normalizeName(raw)
 }
 
-func normalizeName(s string) string { return strings.ReplaceAll(s, " ", "_") }
+var invalidNameChars = regexp.MustCompile(`[^a-zA-Z0-9_-]+`)
+
+func normalizeName(s string) string {
+	raw := s
+	s = strings.Trim(invalidNameChars.ReplaceAllString(s, "_"), "_")
+	if s == "" {
+		s = "unnamed"
+	}
+	if s != raw {
+		s += "_" + shortNameHash(raw)
+	}
+	return s
+}
+
+func shortNameHash(s string) string {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(s))
+	return fmt.Sprintf("%08x", h.Sum32())[:6]
+}
+
+func summarizeFailureError(err error) string {
+	msg := strings.Join(strings.Fields(err.Error()), " ")
+	const max = 500
+	if len(msg) > max {
+		msg = msg[:max] + "..."
+	}
+	return msg
+}
 
 // --- JSON-RPC message types (shared by every transport) ---
 

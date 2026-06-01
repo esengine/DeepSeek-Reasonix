@@ -1,6 +1,7 @@
 package acp
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -157,9 +158,10 @@ func TestMcpSpecsConversion(t *testing.T) {
 // --- transcriptPath ---
 
 func TestTranscriptPath(t *testing.T) {
-	got := transcriptPath("/sessions", "abc-123")
-	if got != "/sessions/abc-123.jsonl" {
-		t.Errorf("transcriptPath = %q", got)
+	dir := t.TempDir()
+	got := transcriptPath(dir, "abc-123")
+	if want := filepath.Join(dir, "abc-123.jsonl"); got != want {
+		t.Errorf("transcriptPath = %q, want %q", got, want)
 	}
 }
 

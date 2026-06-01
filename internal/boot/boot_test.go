@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"reasonix/internal/config"
+	"reasonix/internal/event"
 	"reasonix/internal/provider"
 
 	// Blank imports register the provider kind and built-in tools the same way
@@ -25,6 +26,9 @@ func TestBuildFoldsProjectMemoryIntoSystemPrompt(t *testing.T) {
 
 	writeFile(t, dir, "reasonix.toml", `
 default_model = "test-model"
+
+[codegraph]
+enabled = false
 
 [agent]
 system_prompt = "BASE SYSTEM PROMPT"
@@ -72,6 +76,9 @@ func TestBuildDiscoversSkills(t *testing.T) {
 	writeFile(t, dir, "reasonix.toml", `
 default_model = "test-model"
 
+[codegraph]
+enabled = false
+
 [agent]
 system_prompt = "BASE"
 
@@ -112,6 +119,57 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 	}
 }
 
+func TestBuildRecordsMCPStartupFailure(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "test-model"
+
+[codegraph]
+enabled = false
+
+[agent]
+system_prompt = "BASE"
+
+[[providers]]
+name = "test-model"
+kind = "openai"
+base_url = "https://example.invalid"
+model = "x"
+api_key_env = "REASONIX_TEST_KEY_UNSET"
+
+[[plugins]]
+name = "missing"
+command = "reasonix-missing-mcp-binary"
+`)
+	var notices []event.Event
+	ctrl, err := Build(context.Background(), Options{
+		Sink: event.FuncSink(func(e event.Event) {
+			if e.Kind == event.Notice {
+				notices = append(notices, e)
+			}
+		}),
+	})
+	if err != nil {
+		t.Fatalf("Build should not fail when an MCP server is unavailable: %v", err)
+	}
+	defer ctrl.Close()
+	failures := ctrl.Host().Failures()
+	if len(failures) != 1 || failures[0].Name != "missing" {
+		t.Fatalf("failures = %+v, want missing", failures)
+	}
+	foundNotice := false
+	for _, n := range notices {
+		if strings.Contains(n.Text, "failed to start") {
+			foundNotice = true
+			break
+		}
+	}
+	if !foundNotice {
+		t.Fatalf("missing startup warning notice: %+v", notices)
+	}
+}
+
 // TestBuildWithoutMemoryLeavesPromptUnchanged is the inverse invariant: with no
 // memory files, the system prompt is exactly the configured base — the cache
 // prefix is untouched by the memory feature.
@@ -120,6 +178,9 @@ func TestBuildWithoutMemoryLeavesPromptUnchanged(t *testing.T) {
 	t.Chdir(dir)
 	writeFile(t, dir, "reasonix.toml", `
 default_model = "test-model"
+
+[codegraph]
+enabled = false
 
 [agent]
 system_prompt = "JUST THE BASE"

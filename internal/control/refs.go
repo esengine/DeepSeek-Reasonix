@@ -5,7 +5,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -21,6 +23,7 @@ type refKind int
 const (
 	refResource refKind = iota // an MCP resource: @<server>:<uri>
 	refFile                    // a local file or directory: @<path>
+	refImage                   // a local image attachment: @.reasonix/attachments/<file>
 )
 
 // ref is a resolved @reference found in a submitted line.
@@ -58,6 +61,9 @@ func parseRefTokens(line string) []string {
 func classifyRef(token string, known map[string]bool, exists func(string) bool) (ref, bool) {
 	if i := strings.Index(token, ":"); i > 0 && i+1 < len(token) && known[token[:i]] {
 		return ref{kind: refResource, server: token[:i], uri: token[i+1:], raw: token}, true
+	}
+	if strings.HasPrefix(filepath.ToSlash(token), ".reasonix/attachments/") && exists(token) {
+		return ref{kind: refImage, path: token, raw: token}, true
 	}
 	if exists(token) {
 		return ref{kind: refFile, path: token, raw: token}, true
@@ -117,6 +123,8 @@ func (c *Controller) ResolveRefs(ctx context.Context, line string) (block string
 				tag = "dir"
 			}
 			appendRefBlock(&b, tag, `path="`+r.path+`"`, text)
+		case refImage:
+			appendRefBlock(&b, "image", `path="`+r.path+`"`, "[image attachment available at @"+r.path+"; use an image/OCR/vision MCP tool if visual understanding is needed]")
 		}
 	}
 	return b.String(), errs
@@ -130,27 +138,51 @@ func appendRefBlock(b *strings.Builder, tag, attr, body string) {
 }
 
 // readFileRef reads an @-referenced path for injection. A directory yields a
-// one-level listing; a binary file (NUL in the first 8 KiB) is noted rather than
-// dumped; a large file is truncated to maxFileRefBytes with a marker. isDir lets
-// the caller pick the wrapping tag.
+// recursive listing (walked depth-first so the model sees the full tree); a
+// binary file (NUL in the first 8 KiB) is noted rather than dumped; a large file
+// is truncated to maxFileRefBytes with a marker. isDir lets the caller pick the
+// wrapping tag. Common noise directories (.git, node_modules, .DS_Store) are
+// skipped during the walk.
 func readFileRef(path string) (content string, isDir bool, err error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		return "", false, err
 	}
 	if info.IsDir() {
-		entries, err := os.ReadDir(path)
+		var b strings.Builder
+		err := filepath.WalkDir(path, func(p string, d os.DirEntry, wErr error) error {
+			if wErr != nil {
+				return wErr
+			}
+			// Skip the root itself — we only list its children.
+			if p == path {
+				return nil
+			}
+			name := d.Name()
+			// Skip common noise directories.
+			if d.IsDir() {
+				switch name {
+				case ".git", "node_modules", ".DS_Store", "__pycache__", ".idea", ".vscode":
+					return filepath.SkipDir
+				}
+			}
+			// Render the path relative to the referenced directory so the
+			// listing is concise and unambiguous. Use forward slashes for
+			// cross-platform consistency.
+			rel, rErr := filepath.Rel(path, p)
+			if rErr != nil {
+				rel = p
+			}
+			rel = strings.ReplaceAll(rel, string(os.PathSeparator), "/")
+			if d.IsDir() {
+				rel += "/"
+			}
+			b.WriteString(rel)
+			b.WriteByte('\n')
+			return nil
+		})
 		if err != nil {
 			return "", true, err
-		}
-		var b strings.Builder
-		for _, e := range entries {
-			name := e.Name()
-			if e.IsDir() {
-				name += "/"
-			}
-			b.WriteString(name)
-			b.WriteByte('\n')
 		}
 		return b.String(), true, nil
 	}
@@ -168,6 +200,9 @@ func readFileRef(path string) (content string, isDir bool, err error) {
 	}
 	data := buf[:n]
 
+	if mime := imageMime(data, path); mime != "" {
+		return fmt.Sprintf("[image file %s, mime=%s, %d bytes — image bytes are not inlined. Use an available MCP image/OCR/vision tool with this path when visual understanding is needed.]", path, mime, info.Size()), false, nil
+	}
 	if bytes.IndexByte(data[:min(n, 8192)], 0) >= 0 {
 		return fmt.Sprintf("[binary file %s, %d bytes — not shown]", path, info.Size()), false, nil
 	}
@@ -175,4 +210,24 @@ func readFileRef(path string) (content string, isDir bool, err error) {
 		return string(data[:maxFileRefBytes]) + fmt.Sprintf("\n…[truncated; file is %d bytes]…", info.Size()), false, nil
 	}
 	return string(data), false, nil
+}
+
+func imageMime(data []byte, path string) string {
+	mime := http.DetectContentType(data[:min(len(data), 512)])
+	if strings.HasPrefix(mime, "image/") {
+		return mime
+	}
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".png":
+		return "image/png"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".gif":
+		return "image/gif"
+	case ".webp":
+		return "image/webp"
+	case ".tiff", ".tif":
+		return "image/tiff"
+	}
+	return ""
 }

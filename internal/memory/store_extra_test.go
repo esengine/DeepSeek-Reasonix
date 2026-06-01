@@ -260,9 +260,10 @@ func TestSaveCreatesDir(t *testing.T) {
 // --- Store.Path ---
 
 func TestStorePath(t *testing.T) {
-	s := Store{Dir: "/tmp/memory"}
+	dir := filepath.Join(t.TempDir(), "memory")
+	s := Store{Dir: dir}
 	got := s.Path("My Fact")
-	if got != "/tmp/memory/my-fact.md" {
-		t.Errorf("Path = %q", got)
+	if want := filepath.Join(dir, "my-fact.md"); got != want {
+		t.Errorf("Path = %q, want %q", got, want)
 	}
 }

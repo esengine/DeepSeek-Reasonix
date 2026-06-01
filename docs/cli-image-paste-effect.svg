@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="675" viewBox="0 0 1200 675" role="img" aria-label="CLI image paste attachment effect">
+  <rect width="1200" height="675" fill="#353647"/>
+  <text x="44" y="62" fill="#d9def5" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="30" font-weight="700">Reasonix CLI image paste</text>
+  <text x="44" y="100" fill="#aeb4d2" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="18">Clipboard images become queued attachments, shown as compact labels instead of raw file paths.</text>
+
+  <rect x="44" y="142" width="1112" height="118" rx="2" fill="#2b2d31"/>
+  <text x="72" y="192" fill="#dce2f8" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="28">› 这是什么</text>
+  <text x="72" y="235" fill="#ff9e64" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="28">[image1]</text>
+
+  <path d="M79 260 L79 314" stroke="#c5cae3" stroke-width="4"/>
+  <text x="104" y="305" fill="#aeb4d2" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="28">thinking</text>
+
+  <text x="44" y="366" fill="#aeb4d2" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="26">The model receives the saved image as an attachment reference:</text>
+  <rect x="44" y="398" width="1112" height="82" rx="6" fill="#242633" stroke="#5d627c"/>
+  <text x="74" y="448" fill="#d9def5" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="22">这是什 @.reasonix/attachments/clipboard-20260601-122502.031951-000002.png</text>
+
+  <rect x="44" y="528" width="1112" height="1" fill="#626783"/>
+  <text x="44" y="574" fill="#9ece6a" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="21">Ctrl/Cmd+V: try image first, fall back to text paste</text>
+  <text x="44" y="612" fill="#9ece6a" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="21">PasteMsg: data URLs, markdown image links, and local image paths become attachments</text>
+</svg>

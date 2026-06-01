@@ -32,7 +32,7 @@ func TestParseRefTokens(t *testing.T) {
 
 func TestClassifyRef(t *testing.T) {
 	known := map[string]bool{"docs": true}
-	files := map[string]bool{"src/main.go": true, "README.md": true}
+	files := map[string]bool{"src/main.go": true, "README.md": true, ".reasonix/attachments/clipboard-20260601-010203.000000.png": true}
 	exists := func(p string) bool { return files[p] }
 
 	cases := []struct {
@@ -43,9 +43,10 @@ func TestClassifyRef(t *testing.T) {
 		{"docs:doc://style", true, refResource}, // known server + uri
 		{"src/main.go", true, refFile},          // existing file
 		{"README.md", true, refFile},            // existing file
-		{"ghost:issue://1", false, 0},           // unknown server, no such file
-		{"missing.go", false, 0},                // nonexistent path → not a ref
-		{"docs:", false, 0},                     // empty uri → not a resource, no file
+		{".reasonix/attachments/clipboard-20260601-010203.000000.png", true, refImage},
+		{"ghost:issue://1", false, 0}, // unknown server, no such file
+		{"missing.go", false, 0},      // nonexistent path → not a ref
+		{"docs:", false, 0},           // empty uri → not a resource, no file
 	}
 	for _, c := range cases {
 		r, ok := classifyRef(c.token, known, exists)
@@ -74,6 +75,10 @@ func TestReadFileRef(t *testing.T) {
 	if err := os.WriteFile(bigPath, []byte(strings.Repeat("a", maxFileRefBytes+100)), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	imagePath := filepath.Join(dir, "shot.png")
+	if err := os.WriteFile(imagePath, []byte("\x89PNG\r\n\x1a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	// Text file: content verbatim, not a directory.
 	if got, isDir, err := readFileRef(textPath); err != nil || isDir || got != "line one\nline two\n" {
@@ -85,21 +90,29 @@ func TestReadFileRef(t *testing.T) {
 		t.Errorf("binary file = (%q, %v), want a binary note", got, err)
 	}
 
+	// Image file: identified as image-specific guidance, not generic binary.
+	if got, _, err := readFileRef(imagePath); err != nil || !strings.Contains(got, "image file") {
+		t.Errorf("image file = (%q, %v), want an image note", got, err)
+	}
+
 	// Large file: truncated with a marker.
 	if got, _, err := readFileRef(bigPath); err != nil || !strings.Contains(got, "truncated") {
 		t.Errorf("big file should be truncated, got len=%d err=%v", len(got), err)
 	}
 
-	// Directory: one-level listing including a trailing slash for subdirs.
+	// Directory: recursive listing with relative paths including a trailing slash for subdirs.
 	if err := os.Mkdir(filepath.Join(dir, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "sub", "nested.txt"), []byte("nested"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	got, isDir, err := readFileRef(dir)
 	if err != nil || !isDir {
 		t.Fatalf("dir = (isDir=%v, err=%v)", isDir, err)
 	}
-	if !strings.Contains(got, "hello.txt") || !strings.Contains(got, "sub/") {
-		t.Errorf("dir listing = %q, want hello.txt and sub/", got)
+	if !strings.Contains(got, "hello.txt") || !strings.Contains(got, "sub/") || !strings.Contains(got, "sub/nested.txt") {
+		t.Errorf("dir listing = %q, want hello.txt, sub/, and sub/nested.txt", got)
 	}
 
 	// Missing path: error.

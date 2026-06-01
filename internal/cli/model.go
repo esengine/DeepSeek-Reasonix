@@ -84,6 +84,9 @@ func (m *chatTUI) showModels() {
 	b.WriteString(dim("  · models (/model <provider/model> to switch)\n"))
 	for i := range cfg.Providers {
 		p := &cfg.Providers[i]
+		if !p.Configured() {
+			continue
+		}
 		for _, model := range p.ModelList() {
 			ref := p.Name + "/" + model
 			marker := "  "
@@ -105,6 +108,9 @@ func modelRefs() []string {
 	var out []string
 	for i := range cfg.Providers {
 		p := &cfg.Providers[i]
+		if !p.Configured() {
+			continue
+		}
 		for _, model := range p.ModelList() {
 			out = append(out, p.Name+"/"+model)
 		}

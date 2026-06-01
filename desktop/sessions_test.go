@@ -117,6 +117,9 @@ func TestDeleteSessionFile(t *testing.T) {
 
 	// Set a title first.
 	setSessionTitle(dir, sessionPath, "My Title")
+	if err := recordSessionDisplay(dir, sessionPath, "expanded prompt", "[Pasted text #1 · 5 lines]"); err != nil {
+		t.Fatalf("record display: %v", err)
+	}
 
 	if err := deleteSessionFile(dir, sessionPath); err != nil {
 		t.Fatalf("delete: %v", err)
@@ -129,6 +132,9 @@ func TestDeleteSessionFile(t *testing.T) {
 	m := loadSessionTitles(dir)
 	if _, ok := m["session.jsonl"]; ok {
 		t.Error("title should be removed after delete")
+	}
+	if got := resolveSessionDisplay(dir, sessionPath, "expanded prompt"); got != "expanded prompt" {
+		t.Errorf("display sidecar should be removed after delete, got %q", got)
 	}
 }
 
@@ -157,8 +163,9 @@ func TestDeleteSessionFileMissing(t *testing.T) {
 
 func TestSessionTitlesPath(t *testing.T) {
 	got := sessionTitlesPath("/sessions")
-	if got != "/sessions/.titles.json" {
-		t.Errorf("sessionTitlesPath = %q", got)
+	want := filepath.Join("/sessions", ".titles.json")
+	if got != want {
+		t.Errorf("sessionTitlesPath = %q, want %q", got, want)
 	}
 }
 
@@ -167,5 +174,32 @@ func TestSessionTitlesPath(t *testing.T) {
 func TestErrActiveSession(t *testing.T) {
 	if errActiveSession.Error() == "" {
 		t.Error("errActiveSession should have a message")
+	}
+}
+
+func TestSessionDisplayRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	sessionPath := filepath.Join(dir, "s.jsonl")
+	content := "prefix\n--- Begin [Pasted text #1 · 5 lines] ---\nfull text\n--- End [Pasted text #1 · 5 lines] ---"
+	display := "[Pasted text #1 · 5 lines]"
+	if err := recordSessionDisplay(dir, sessionPath, content, display); err != nil {
+		t.Fatalf("record display: %v", err)
+	}
+	if got := resolveSessionDisplay(dir, sessionPath, content); got != display {
+		t.Fatalf("display = %q, want %q", got, display)
+	}
+	if got := resolveSessionDisplay(dir, sessionPath, "other"); got != "other" {
+		t.Fatalf("unknown content should pass through, got %q", got)
+	}
+}
+
+func TestRecordSessionDisplaySkipsNoop(t *testing.T) {
+	dir := t.TempDir()
+	sessionPath := filepath.Join(dir, "s.jsonl")
+	if err := recordSessionDisplay(dir, sessionPath, "same", "same"); err != nil {
+		t.Fatalf("record display: %v", err)
+	}
+	if _, err := os.Stat(sessionDisplayPath(dir)); !os.IsNotExist(err) {
+		t.Fatalf("noop display should not create sidecar, stat err = %v", err)
 	}
 }

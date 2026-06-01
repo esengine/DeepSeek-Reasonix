@@ -3,13 +3,14 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"reasonix/internal/event"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 	"unicode/utf8"
 
+	"reasonix/internal/event"
 	"reasonix/internal/provider"
 	"reasonix/internal/tool"
 )
@@ -108,36 +109,50 @@ func (f fakeTool) Execute(ctx context.Context, _ json.RawMessage) (string, error
 	return f.name + " done", nil
 }
 
-func TestCanParalleliseAllReadOnly(t *testing.T) {
+func TestPartitionToolCallsAllReadOnly(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(fakeTool{name: "ro1", readOnly: true})
 	reg.Add(fakeTool{name: "ro2", readOnly: true})
 	calls := []provider.ToolCall{{Name: "ro1"}, {Name: "ro2"}}
-	if !canParallelise(reg, calls) {
-		t.Error("all-readonly batch should be parallelisable")
+	got := partitionToolCalls(reg, calls)
+	want := []toolCallBatch{{start: 0, end: 2, parallel: true}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("partitionToolCalls = %+v, want %+v", got, want)
 	}
 }
 
-// TestCanParalleliseMixedSerial verifies that a single write in a batch flips
-// the whole batch back to serial, so read-after-write hazards can't reorder.
-func TestCanParalleliseMixedSerial(t *testing.T) {
+// TestPartitionToolCallsSegmentsAroundWriters verifies a writer only serializes
+// its own provider-order position; read-only runs on either side stay batchable.
+func TestPartitionToolCallsSegmentsAroundWriters(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(fakeTool{name: "ro", readOnly: true})
 	reg.Add(fakeTool{name: "rw", readOnly: false})
 	calls := []provider.ToolCall{{Name: "ro"}, {Name: "rw"}, {Name: "ro"}}
-	if canParallelise(reg, calls) {
-		t.Error("mixed batch must be sequential")
+	got := partitionToolCalls(reg, calls)
+	want := []toolCallBatch{
+		{start: 0, end: 1, parallel: true},
+		{start: 1, end: 2},
+		{start: 2, end: 3, parallel: true},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("partitionToolCalls = %+v, want %+v", got, want)
 	}
 }
 
-// TestCanParalleliseUnknownToolSerial keeps unknown-tool errors deterministic
-// by forcing the batch through the sequential path.
-func TestCanParalleliseUnknownToolSerial(t *testing.T) {
+// TestPartitionToolCallsUnknownToolSerial keeps unknown-tool errors
+// deterministic by forcing unknown calls into single-call serial batches.
+func TestPartitionToolCallsUnknownToolSerial(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(fakeTool{name: "ro", readOnly: true})
-	calls := []provider.ToolCall{{Name: "ro"}, {Name: "vanished"}}
-	if canParallelise(reg, calls) {
-		t.Error("unknown tool should force sequential dispatch")
+	calls := []provider.ToolCall{{Name: "ro"}, {Name: "vanished"}, {Name: "ro"}}
+	got := partitionToolCalls(reg, calls)
+	want := []toolCallBatch{
+		{start: 0, end: 1, parallel: true},
+		{start: 1, end: 2},
+		{start: 2, end: 3, parallel: true},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("partitionToolCalls = %+v, want %+v", got, want)
 	}
 }
 
@@ -169,22 +184,45 @@ func TestExecuteBatchParallelReadOnly(t *testing.T) {
 	}
 }
 
-// TestExecuteBatchSerialOnWrite ensures a single write turn forces total
-// serial time even though the other calls would otherwise parallelise.
-func TestExecuteBatchSerialOnWrite(t *testing.T) {
+// TestExecuteBatchSegmentsAroundWrites ensures a write call only serializes its
+// own position in the provider-ordered batch: read-only runs before and after it
+// may still parallelise within their contiguous segments.
+func TestExecuteBatchSegmentsAroundWrites(t *testing.T) {
 	const delay = 40 * time.Millisecond
 	reg := tool.NewRegistry()
-	reg.Add(fakeTool{name: "ro", readOnly: true, delay: delay})
+	reg.Add(fakeTool{name: "ro1", readOnly: true, delay: delay})
+	reg.Add(fakeTool{name: "ro2", readOnly: true, delay: delay})
+	reg.Add(fakeTool{name: "ro3", readOnly: true, delay: delay})
+	reg.Add(fakeTool{name: "ro4", readOnly: true, delay: delay})
 	reg.Add(fakeTool{name: "rw", readOnly: false, delay: delay})
 
 	a := New(nil, reg, NewSession(""), Options{}, event.Discard)
 
 	start := time.Now()
-	a.executeBatch(context.Background(), []provider.ToolCall{{Name: "ro"}, {Name: "rw"}, {Name: "ro"}})
+	results := a.executeBatch(context.Background(), []provider.ToolCall{
+		{Name: "ro1"},
+		{Name: "ro2"},
+		{Name: "rw"},
+		{Name: "ro3"},
+		{Name: "ro4"},
+	})
 	elapsed := time.Since(start)
 
-	// Three calls of `delay` in serial ≈ 3*delay; permit some slack.
+	want := []string{"ro1 done", "ro2 done", "rw done", "ro3 done", "ro4 done"}
+	if len(results) != len(want) {
+		t.Fatalf("got %d results, want %d: %v", len(results), len(want), results)
+	}
+	for i := range want {
+		if results[i] != want[i] {
+			t.Fatalf("results out of order or wrong: got %v want %v", results, want)
+		}
+	}
+	// Desired shape is roughly 3*delay: (ro1|ro2), then rw, then (ro3|ro4).
+	// Old all-serial behaviour is roughly 5*delay and should fail this bound.
+	if elapsed >= 4*delay {
+		t.Errorf("mixed batch took %v (>= %v) — read-only segments did not parallelise", elapsed, 4*delay)
+	}
 	if elapsed < 2*delay {
-		t.Errorf("mixed batch took only %v — looks like it ran in parallel", elapsed)
+		t.Errorf("mixed batch took only %v — write call appears to have overlapped a read-only segment", elapsed)
 	}
 }

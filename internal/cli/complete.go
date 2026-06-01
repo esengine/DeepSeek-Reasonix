@@ -59,6 +59,7 @@ func (m *chatTUI) slashItems() []compItem {
 	items := []compItem{
 		{label: "/compact", insert: "/compact ", hint: i18n.M.CmdCompact},
 		{label: "/new", insert: "/new ", hint: i18n.M.CmdNew},
+		{label: "/resume", insert: "/resume ", hint: i18n.M.CmdResume},
 		{label: "/rewind", insert: "/rewind", hint: i18n.M.CmdRewind},
 		{label: "/tree", insert: "/tree", hint: i18n.M.CmdTree},
 		{label: "/branch", insert: "/branch ", hint: i18n.M.CmdBranch},
@@ -67,7 +68,9 @@ func (m *chatTUI) slashItems() []compItem {
 		{label: "/model", insert: "/model ", hint: i18n.M.CmdModel, descend: true},
 		{label: "/skill", insert: "/skill ", hint: i18n.M.CmdSkill, descend: true},
 		{label: "/hooks", insert: "/hooks ", hint: i18n.M.CmdHooks, descend: true},
+		{label: "/paste-image", insert: "/paste-image", hint: i18n.M.CmdPasteImage},
 		{label: "/output-style", insert: "/output-style", hint: i18n.M.CmdOutputStyle},
+		{label: "/verbose", insert: "/verbose", hint: i18n.M.CmdVerbose},
 		{label: "/help", insert: "/help ", hint: i18n.M.CmdHelp},
 		{label: "/memory", insert: "/memory ", hint: i18n.M.CmdMemory},
 	}
@@ -129,6 +132,9 @@ func (m *chatTUI) slashArgItems(val string) ([]compItem, int, bool) {
 	if items, from, ok := m.branchArgItems(val); ok {
 		return items, from, len(items) > 0
 	}
+	if items, from, ok := m.resumeArgItems(val); ok {
+		return items, from, len(items) > 0
+	}
 	// Delegate to the shared completion logic so the chat TUI and the desktop
 	// offer identical sub-command hints. We supply the data from the TUI's own
 	// cached lists (no live controller needed), build the items, and adapt them
@@ -137,6 +143,10 @@ func (m *chatTUI) slashArgItems(val string) ([]compItem, int, bool) {
 		Skills:       m.skills,
 		ModelRefs:    modelRefs(),
 		CurrentModel: m.modelRef,
+	}
+	if m.ctrl != nil {
+		data.ConfiguredMCP = m.ctrl.ConfiguredMCPNames()
+		data.DisconnectedMCP = m.ctrl.DisconnectedMCPNames()
 	}
 	if m.host != nil {
 		data.ServerNames = m.host.ServerNames()

@@ -174,6 +174,21 @@ func TestPluginMutators(t *testing.T) {
 	}
 }
 
+func TestAutoStartPlugins(t *testing.T) {
+	c := Default()
+	off := false
+	on := true
+	c.Plugins = []PluginEntry{
+		{Name: "implicit", Command: "implicit-bin"},
+		{Name: "disabled", Command: "disabled-bin", AutoStart: &off},
+		{Name: "enabled", Command: "enabled-bin", AutoStart: &on},
+	}
+	got := c.AutoStartPlugins()
+	if len(got) != 2 || got[0].Name != "implicit" || got[1].Name != "enabled" {
+		t.Fatalf("AutoStartPlugins = %+v, want implicit + enabled", got)
+	}
+}
+
 // TestSaveToRoundTrips stages several mutations, persists atomically, and
 // re-decodes the file to confirm the changes survived a write/read cycle.
 func TestSaveToRoundTrips(t *testing.T) {
@@ -193,7 +208,8 @@ func TestSaveToRoundTrips(t *testing.T) {
 	if err := c.AddPermissionRule("allow", "bash(go test*)"); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.UpsertPlugin(PluginEntry{Name: "stripe", Type: "http", URL: "https://mcp.stripe.com"}); err != nil {
+	autoStart := false
+	if err := c.UpsertPlugin(PluginEntry{Name: "stripe", Type: "http", URL: "https://mcp.stripe.com", AutoStart: &autoStart}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -223,5 +239,8 @@ func TestSaveToRoundTrips(t *testing.T) {
 	}
 	if len(got.Plugins) != 1 || got.Plugins[0].Name != "stripe" {
 		t.Errorf("plugins = %+v", got.Plugins)
+	}
+	if got.Plugins[0].AutoStart == nil || *got.Plugins[0].AutoStart {
+		t.Errorf("auto_start should round-trip false, got %+v", got.Plugins[0].AutoStart)
 	}
 }

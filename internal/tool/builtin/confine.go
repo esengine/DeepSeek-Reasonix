@@ -12,7 +12,9 @@ import (
 // ConfineBash returns the bash built-in bound to an OS-sandbox spec, overriding
 // the unconfined instance registered at init. When the spec enforces, bash runs
 // each command through the sandbox (see package sandbox).
-func ConfineBash(spec sandbox.Spec) tool.Tool { return bash{sb: spec} }
+func ConfineBash(spec sandbox.Spec) tool.Tool {
+	return bash{sb: spec, shell: sandbox.ResolveShell()}
+}
 
 // ConfineWriters returns the file-writing built-ins (write_file, edit_file,
 // multi_edit, notebook_edit) bound to roots — the only directories they may

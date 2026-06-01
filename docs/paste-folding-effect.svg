@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="675" viewBox="0 0 1200 675" role="img" aria-label="Paste folding effect in Reasonix CLI and desktop">
+  <rect width="1200" height="675" fill="#313242"/>
+  <text x="48" y="58" fill="#d8dcf2" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="28" font-weight="700">Reasonix pasted text folding</text>
+  <text x="48" y="94" fill="#aab0ce" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="18">Long JSON stays compact while editing, then expands for the model and transcript.</text>
+
+  <rect x="48" y="132" width="520" height="430" rx="10" fill="#242633" stroke="#5b6078"/>
+  <rect x="632" y="132" width="520" height="430" rx="10" fill="#242633" stroke="#5b6078"/>
+
+  <text x="78" y="177" fill="#ff9e64" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="22" font-weight="700">Before</text>
+  <text x="662" y="177" fill="#9ece6a" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="22" font-weight="700">After</text>
+
+  <rect x="78" y="210" width="460" height="250" rx="4" fill="#3a3d50"/>
+  <text x="104" y="250" fill="#c9d1ee" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="22">{</text>
+  <text x="104" y="288" fill="#c9d1ee" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="22">  "avatar": "https://cdn.example/...</text>
+  <text x="104" y="326" fill="#c9d1ee" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="22">  "current_star_master_list": [</text>
+  <text x="104" y="364" fill="#c9d1ee" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="22">    ... 26 lines ...</text>
+  <text x="104" y="402" fill="#c9d1ee" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="22">}</text>
+  <text x="92" y="510" fill="#aab0ce" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="19">Composer grows, scrolls to the last line,</text>
+  <text x="92" y="538" fill="#aab0ce" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="19">and the prompt becomes hard to edit.</text>
+
+  <rect x="662" y="210" width="460" height="76" rx="4" fill="#3a3d50"/>
+  <text x="690" y="257" fill="#d8dcf2" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="23">› [Pasted text #1 · 26 lines] 这是什么?</text>
+  <text x="676" y="336" fill="#aab0ce" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="19">Input stays one compact line.</text>
+  <text x="676" y="374" fill="#aab0ce" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="19">Enter sends the full JSON to the model.</text>
+  <text x="676" y="412" fill="#aab0ce" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="19">The CLI transcript renders the expanded</text>
+  <text x="676" y="440" fill="#aab0ce" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="19">user message, matching Claude Code.</text>
+
+  <rect x="48" y="596" width="1104" height="1" fill="#5b6078"/>
+  <text x="48" y="630" fill="#c9d1ee" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="18">Desktop keeps display/submit text in sync with a session sidecar; CLI folds bracketed paste before textarea handles it.</text>
+</svg>

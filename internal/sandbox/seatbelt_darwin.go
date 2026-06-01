@@ -8,16 +8,16 @@ import (
 	"strings"
 )
 
-// Command returns the argv to run `command` through `shell -c`, wrapped in
-// sandbox-exec when the spec enforces and the tool is available. The second
-// return is whether wrapping happened; false means the command runs unconfined
-// (sandbox off, or sandbox-exec missing — a graceful fallback rather than a
-// hard failure, since the permission layer still gates the call).
-func Command(spec Spec, shell, command string) ([]string, bool) {
+// Command returns the argv to run `command` through sh, wrapped in sandbox-exec
+// when the spec enforces and the tool is available. The second return is whether
+// wrapping happened; false means the command runs unconfined (sandbox off, or
+// sandbox-exec missing — a graceful fallback rather than a hard failure, since
+// the permission layer still gates the call).
+func Command(spec Spec, sh Shell, command string) ([]string, bool) {
 	if !spec.enforce() || !Available() {
-		return []string{shell, "-c", command}, false
+		return sh.argv(command), false
 	}
-	return []string{"sandbox-exec", "-p", seatbeltProfile(spec), shell, "-c", command}, true
+	return append([]string{"sandbox-exec", "-p", seatbeltProfile(spec)}, sh.argv(command)...), true
 }
 
 // Available reports whether sandbox-exec is on PATH (it ships with macOS).
