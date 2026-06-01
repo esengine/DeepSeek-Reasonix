@@ -181,6 +181,23 @@ func TestPartitionToolCallsCompleteStepSerial(t *testing.T) {
 	}
 }
 
+func TestPartitionToolCallsTodoWriteSerial(t *testing.T) {
+	reg := tool.NewRegistry()
+	reg.Add(fakeTool{name: "read_file", readOnly: true})
+	reg.Add(fakeTool{name: "todo_write", readOnly: true})
+
+	calls := []provider.ToolCall{{Name: "read_file"}, {Name: "todo_write"}, {Name: "read_file"}}
+	got := partitionToolCalls(reg, calls)
+	want := []toolCallBatch{
+		{start: 0, end: 1, parallel: true},
+		{start: 1, end: 2},
+		{start: 2, end: 3, parallel: true},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("partitionToolCalls = %+v, want %+v", got, want)
+	}
+}
+
 // TestExecuteBatchParallelReadOnly checks that three 80ms read-only calls
 // complete in well under 3×80ms — the wall-clock proof of true parallelism.
 func TestExecuteBatchParallelReadOnly(t *testing.T) {

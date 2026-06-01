@@ -48,6 +48,7 @@ func NormalizeType(s string) Type {
 // Memory is one stored fact.
 type Memory struct {
 	Name        string // kebab-case slug; also the file stem (<name>.md)
+	Title       string // human-readable index label; falls back to a de-kebabed Name
 	Description string // one-line summary used for the index and recall
 	Type        Type
 	Body        string // the fact itself (Markdown)
@@ -118,6 +119,23 @@ func (s Store) Save(m Memory) (string, error) {
 	return path, nil
 }
 
+// Delete removes a memory file and its MEMORY.md line — the model's `forget`
+// path and the user's way to prune a stale fact. A missing file is not an error;
+// the goal state (gone) holds either way.
+func (s Store) Delete(name string) error {
+	if s.Dir == "" {
+		return fmt.Errorf("memory store unavailable (no user config dir)")
+	}
+	name = slug(name)
+	if name == "" {
+		return fmt.Errorf("memory needs a name")
+	}
+	if err := os.Remove(filepath.Join(s.Dir, name+".md")); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return s.flushIndex(s.indexLinesExcept(name))
+}
+
 // render serializes a memory to frontmatter + body. The frontmatter mirrors the
 // auto-memory shape (name / description / metadata.type) so the files are
 // interchangeable with that ecosystem and re-readable by loadMemory.
@@ -125,6 +143,9 @@ func render(m Memory, name string) string {
 	var b strings.Builder
 	b.WriteString("---\n")
 	b.WriteString("name: " + name + "\n")
+	if t := oneLine(m.Title); t != "" {
+		b.WriteString("title: " + t + "\n")
+	}
 	b.WriteString("description: " + oneLine(m.Description) + "\n")
 	b.WriteString("metadata:\n")
 	b.WriteString("  type: " + string(NormalizeType(string(m.Type))) + "\n")
@@ -134,27 +155,28 @@ func render(m Memory, name string) string {
 	return b.String()
 }
 
-// indexLineRe matches a managed index line so reindex can replace the line for a
-// given memory without disturbing the rest of a hand-edited MEMORY.md.
+// indexLineRe matches a managed index line so reindex/Delete can target the line
+// for one memory by its filename without disturbing the rest of a hand-edited
+// MEMORY.md.
 var indexLineRe = regexp.MustCompile(`\]\(([^)]+)\.md\)`)
 
-// reindex rewrites the MEMORY.md line for name, preserving every other line and
-// keeping the list sorted by filename. The line format matches the auto-memory
-// index: "- [<name>](<name>.md) — <description>".
-func (s Store) reindex(name string, m Memory) error {
-	path := filepath.Join(s.Dir, indexFile)
-	existing, _ := os.ReadFile(path) // missing → start fresh
-
+// indexLinesExcept returns the managed MEMORY.md lines keyed by filename stem,
+// dropping the entry for name (a missing index → empty map).
+func (s Store) indexLinesExcept(name string) map[string]string {
+	existing, _ := os.ReadFile(filepath.Join(s.Dir, indexFile))
 	keep := map[string]string{}
 	for _, line := range strings.Split(string(existing), "\n") {
 		if mt := indexLineRe.FindStringSubmatch(line); mt != nil && mt[1] != name {
 			keep[mt[1]] = strings.TrimRight(line, "\r")
 		}
 	}
-	keep[name] = fmt.Sprintf("- [%s](%s.md) — %s", name, name, oneLine(m.Description))
+	return keep
+}
 
-	names := make([]string, 0, len(keep))
-	for n := range keep {
+// flushIndex rewrites MEMORY.md from the managed lines, sorted by filename.
+func (s Store) flushIndex(lines map[string]string) error {
+	names := make([]string, 0, len(lines))
+	for n := range lines {
 		names = append(names, n)
 	}
 	sort.Strings(names)
@@ -162,10 +184,19 @@ func (s Store) reindex(name string, m Memory) error {
 	var b strings.Builder
 	b.WriteString("# Memory\n\n")
 	for _, n := range names {
-		b.WriteString(keep[n])
+		b.WriteString(lines[n])
 		b.WriteString("\n")
 	}
-	return os.WriteFile(path, []byte(b.String()), 0o644)
+	return os.WriteFile(filepath.Join(s.Dir, indexFile), []byte(b.String()), 0o644)
+}
+
+// reindex rewrites the MEMORY.md line for name, preserving every other managed
+// line. The line is "- [<title>](<name>.md) — <description>"; title falls back
+// to a de-kebabed name so the index reads as a label, never a bare slug.
+func (s Store) reindex(name string, m Memory) error {
+	lines := s.indexLinesExcept(name)
+	lines[name] = fmt.Sprintf("- [%s](%s.md) — %s", displayTitle(m.Title, name), name, oneLine(m.Description))
+	return s.flushIndex(lines)
 }
 
 // List returns the saved memories parsed from their files, sorted by name. Used
@@ -203,6 +234,7 @@ func loadMemory(path string) (Memory, bool) {
 	fm, body := splitFrontmatter(string(b))
 	m := Memory{
 		Name:        fm["name"],
+		Title:       fm["title"],
 		Description: fm["description"],
 		Type:        NormalizeType(fm["type"]),
 		Body:        strings.TrimSpace(body),
@@ -231,4 +263,13 @@ func slug(s string) string {
 // index or frontmatter format.
 func oneLine(s string) string {
 	return strings.Join(strings.Fields(s), " ")
+}
+
+// displayTitle is the index link label: the given title, or a de-kebabed name
+// when none was supplied, so a bare slug never leaks into the index.
+func displayTitle(title, name string) string {
+	if t := oneLine(title); t != "" {
+		return t
+	}
+	return strings.ReplaceAll(name, "-", " ")
 }

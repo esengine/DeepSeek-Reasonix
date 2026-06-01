@@ -331,6 +331,23 @@ func TestApprovalToolDetailsShortensMCPNames(t *testing.T) {
 	}
 }
 
+// TestSlashQuitExit verifies that /quit and /exit slash commands return tea.Quit,
+// providing an alternative to Ctrl+D and the bare "quit"/"exit" text commands.
+func TestSlashQuitExit(t *testing.T) {
+	m := newTestChatTUI()
+	for _, cmd := range []string{"/quit", "/exit"} {
+		got := m.runSlashCommand(cmd)
+		if got == nil {
+			t.Errorf("%s should return a quit cmd, got nil", cmd)
+			continue
+		}
+		msg := got()
+		if _, ok := msg.(tea.QuitMsg); !ok {
+			t.Errorf("%s cmd should produce QuitMsg, got %T", cmd, msg)
+		}
+	}
+}
+
 // TestDoubleCtrlCQuit verifies that Ctrl+C while idle requires a double-press
 // within the 1.5s window to actually quit. A single press shows a hint; a
 // second press within the window returns tea.Quit.

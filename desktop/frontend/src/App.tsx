@@ -1,5 +1,18 @@
-import { useCallback, useMemo, useState } from "react";
-import { SquarePen, Brain, History, Settings as SettingsIcon, SlidersHorizontal, Blocks } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { CSSProperties, KeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
+import {
+  SquarePen,
+  Brain,
+  Blocks,
+  History,
+  Settings as SettingsIcon,
+  MessageSquare,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
+} from "lucide-react";
+import logo from "./assets/logo.svg";
 import { useT } from "./lib/i18n";
 import { useController } from "./lib/useController";
 import { Transcript } from "./components/Transcript";
@@ -13,8 +26,93 @@ import { HistoryPanel } from "./components/HistoryPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { CapabilitiesPanel } from "./components/CapabilitiesPanel";
 import { UpdateBanner } from "./components/UpdateBanner";
+import { WorkspacePanel } from "./components/WorkspacePanel";
 import { parseTodos } from "./lib/tools";
 import type { MemoryView, Mode, SessionMeta } from "./lib/types";
+import { loadLayoutSize, saveLayoutSize } from "./lib/layoutPreferences";
+
+const SIDEBAR_COLLAPSED_KEY = "reasonix.sidebar.collapsed";
+const WORKSPACE_PANEL_OPEN_KEY = "reasonix.workspacePanel.open";
+const SIDEBAR_COLLAPSED_WIDTH = 68;
+const SIDEBAR_DEFAULT_WIDTH = 264;
+const SIDEBAR_MIN_WIDTH = 228;
+const SIDEBAR_MAX_WIDTH = 420;
+const CHAT_MIN_WIDTH = 420;
+const WORKSPACE_PANEL_DEFAULT_WIDTH = 760;
+const WORKSPACE_PANEL_MIN_WIDTH = 420;
+const WORKSPACE_PANEL_MAX_WIDTH = 980;
+const WORKSPACE_PANEL_MAX_RATIO = 0.68;
+
+function clampSidebarWidth(width: number): number {
+  return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(width)));
+}
+
+function clampWorkspacePanelWidth(width: number, sidebarWidth = SIDEBAR_DEFAULT_WIDTH, viewportWidth = 1440): number {
+  const maxByRatio = Math.floor(viewportWidth * WORKSPACE_PANEL_MAX_RATIO);
+  const maxByChat = Math.floor(viewportWidth - sidebarWidth - CHAT_MIN_WIDTH);
+  const max = Math.max(WORKSPACE_PANEL_MIN_WIDTH, Math.min(WORKSPACE_PANEL_MAX_WIDTH, maxByRatio, maxByChat));
+  return Math.min(max, Math.max(WORKSPACE_PANEL_MIN_WIDTH, Math.round(width)));
+}
+
+function loadSidebarCollapsed(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function saveSidebarCollapsed(collapsed: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, collapsed ? "1" : "0");
+  } catch {
+    /* ignore storage failures */
+  }
+}
+
+function loadSidebarWidth(): number {
+  return loadLayoutSize("sidebarWidth", SIDEBAR_DEFAULT_WIDTH, clampSidebarWidth);
+}
+
+function saveSidebarWidth(width: number): void {
+  saveLayoutSize("sidebarWidth", width, clampSidebarWidth);
+}
+
+function loadWorkspacePanelOpen(): boolean {
+  if (typeof window === "undefined") return true;
+  try {
+    return window.localStorage.getItem(WORKSPACE_PANEL_OPEN_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+function saveWorkspacePanelOpen(open: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(WORKSPACE_PANEL_OPEN_KEY, open ? "1" : "0");
+  } catch {
+    /* ignore storage failures */
+  }
+}
+
+function loadWorkspacePanelWidth(): number {
+  return loadLayoutSize("workspacePanelWidth", WORKSPACE_PANEL_DEFAULT_WIDTH, clampWorkspacePanelWidth);
+}
+
+function saveWorkspacePanelWidth(width: number): void {
+  saveLayoutSize("workspacePanelWidth", width);
+}
+
+function sessionTitle(session: SessionMeta, fallback: string): string {
+  return session.title || session.preview || fallback;
+}
+
+function sessionTime(ms: number): string {
+  return new Date(ms).toLocaleDateString([], { month: "short", day: "numeric" });
+}
 
 export default function App() {
   const {
@@ -32,19 +130,35 @@ export default function App() {
     renameSession,
     refreshMeta,
     pickWorkspace,
+    switchWorkspace,
     rewind,
     setModel,
     fetchMemory,
     remember,
+    forget,
     saveDoc,
   } = useController();
   const t = useT();
   const [mode, setMode] = useState<Mode>("normal");
   const [memView, setMemView] = useState<MemoryView | null>(null);
   const [histView, setHistView] = useState<SessionMeta[] | null>(null);
+  const [sidebarSessions, setSidebarSessions] = useState<SessionMeta[]>([]);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(loadSidebarCollapsed);
+  const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidth);
+  const [sidebarResizing, setSidebarResizing] = useState(false);
+  const [workspacePanelOpen, setWorkspacePanelOpen] = useState(loadWorkspacePanelOpen);
+  const [workspacePanelWidth, setWorkspacePanelWidth] = useState(loadWorkspacePanelWidth);
+  const [workspacePanelResizing, setWorkspacePanelResizing] = useState(false);
+  const [workspacePanelMaximized, setWorkspacePanelMaximized] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [capsOpen, setCapsOpen] = useState(false);
-  const [customizeOpen, setCustomizeOpen] = useState(false);
+  const [pendingPlanRevision, setPendingPlanRevision] = useState<string | null>(null);
+  const [viewportWidth, setViewportWidth] = useState(() => (typeof window === "undefined" ? 1440 : window.innerWidth));
+  const effectiveSidebarWidth = sidebarCollapsed ? SIDEBAR_COLLAPSED_WIDTH : sidebarWidth;
+  const effectiveWorkspacePanelWidth = useMemo(
+    () => clampWorkspacePanelWidth(workspacePanelWidth, effectiveSidebarWidth, viewportWidth),
+    [effectiveSidebarWidth, viewportWidth, workspacePanelWidth],
+  );
 
   // applyMode is the single source of truth for the input mode: it updates the
   // local pill and pushes the matching gate state to the controller (plan = read
@@ -94,6 +208,13 @@ export default function App() {
     todos.length > 0 &&
     todos.some((t) => t.status !== "completed");
 
+  useEffect(() => {
+    if (!pendingPlanRevision || state.running) return;
+    const text = pendingPlanRevision;
+    setPendingPlanRevision(null);
+    send(text);
+  }, [pendingPlanRevision, send, state.running]);
+
   // Memory drawer: opening fetches a fresh snapshot; writes re-fetch so the
   // panel reflects what landed on disk.
   const openMemory = useCallback(async () => {
@@ -125,41 +246,206 @@ export default function App() {
     [switchModel, openMemory, send],
   );
 
+  const refreshSessions = useCallback(async () => {
+    const sessions = await listSessions();
+    setSidebarSessions(sessions.slice(0, 10));
+    return sessions;
+  }, [listSessions]);
+
+  useEffect(() => {
+    void refreshSessions();
+  }, [refreshSessions]);
+
+  useEffect(() => {
+    const onResize = () => setViewportWidth(window.innerWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  useEffect(() => {
+    if (!state.running && state.items.length > 0) void refreshSessions();
+  }, [state.running, state.items.length, refreshSessions]);
+
+  const startNewSession = useCallback(async () => {
+    await newSession();
+    await refreshSessions();
+  }, [newSession, refreshSessions]);
+
+  const toggleSidebar = useCallback(() => {
+    setSidebarCollapsed((collapsed) => {
+      const next = !collapsed;
+      saveSidebarCollapsed(next);
+      return next;
+    });
+  }, []);
+
+  const setExpandedSidebarWidth = useCallback((width: number) => {
+    const next = clampSidebarWidth(width);
+    setSidebarWidth(next);
+    saveSidebarWidth(next);
+  }, []);
+
+  const startSidebarResize = useCallback(
+    (event: ReactPointerEvent<HTMLButtonElement>) => {
+      if (sidebarCollapsed) return;
+      event.preventDefault();
+      setSidebarResizing(true);
+      let nextWidth = sidebarWidth;
+      const onMove = (moveEvent: PointerEvent) => {
+        nextWidth = clampSidebarWidth(moveEvent.clientX);
+        setSidebarWidth(nextWidth);
+      };
+      const onDone = () => {
+        setSidebarWidth(nextWidth);
+        saveSidebarWidth(nextWidth);
+        setSidebarResizing(false);
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onDone);
+        window.removeEventListener("pointercancel", onDone);
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+      };
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onDone);
+      window.addEventListener("pointercancel", onDone);
+    },
+    [sidebarCollapsed, sidebarWidth],
+  );
+
+  const resizeSidebarWithKeyboard = useCallback(
+    (event: KeyboardEvent<HTMLButtonElement>) => {
+      if (sidebarCollapsed) return;
+      if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+        event.preventDefault();
+        setExpandedSidebarWidth(sidebarWidth + (event.key === "ArrowRight" ? 16 : -16));
+      } else if (event.key === "Home") {
+        event.preventDefault();
+        setExpandedSidebarWidth(SIDEBAR_MIN_WIDTH);
+      } else if (event.key === "End") {
+        event.preventDefault();
+        setExpandedSidebarWidth(SIDEBAR_MAX_WIDTH);
+      }
+    },
+    [setExpandedSidebarWidth, sidebarCollapsed, sidebarWidth],
+  );
+
+  const setSavedWorkspacePanelWidth = useCallback(
+    (width: number) => {
+      const next = clampWorkspacePanelWidth(width, effectiveSidebarWidth, viewportWidth);
+      setWorkspacePanelWidth(next);
+      saveWorkspacePanelWidth(next);
+    },
+    [effectiveSidebarWidth, viewportWidth],
+  );
+
+  const startWorkspacePanelResize = useCallback(
+    (event: ReactPointerEvent<HTMLButtonElement>) => {
+      if (!workspacePanelOpen || workspacePanelMaximized) return;
+      event.preventDefault();
+      setWorkspacePanelResizing(true);
+      let nextWidth = effectiveWorkspacePanelWidth;
+      const onMove = (moveEvent: PointerEvent) => {
+        nextWidth = clampWorkspacePanelWidth(window.innerWidth - moveEvent.clientX, effectiveSidebarWidth, window.innerWidth);
+        setWorkspacePanelWidth(nextWidth);
+      };
+      const onDone = () => {
+        setWorkspacePanelWidth(nextWidth);
+        saveWorkspacePanelWidth(nextWidth);
+        setWorkspacePanelResizing(false);
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onDone);
+        window.removeEventListener("pointercancel", onDone);
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+      };
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onDone);
+      window.addEventListener("pointercancel", onDone);
+    },
+    [effectiveSidebarWidth, effectiveWorkspacePanelWidth, workspacePanelMaximized, workspacePanelOpen],
+  );
+
+  const resizeWorkspacePanelWithKeyboard = useCallback(
+    (event: KeyboardEvent<HTMLButtonElement>) => {
+      if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+        event.preventDefault();
+        setSavedWorkspacePanelWidth(effectiveWorkspacePanelWidth + (event.key === "ArrowLeft" ? 16 : -16));
+      } else if (event.key === "Home") {
+        event.preventDefault();
+        setSavedWorkspacePanelWidth(WORKSPACE_PANEL_MIN_WIDTH);
+      } else if (event.key === "End") {
+        event.preventDefault();
+        setSavedWorkspacePanelWidth(WORKSPACE_PANEL_MAX_WIDTH);
+      }
+    },
+    [effectiveWorkspacePanelWidth, setSavedWorkspacePanelWidth],
+  );
+
+  const layoutStyle = useMemo(
+    () =>
+      ({
+        "--sidebar-expanded-width": `${sidebarWidth}px`,
+        "--workspace-width": `${effectiveWorkspacePanelWidth}px`,
+      }) as CSSProperties,
+    [effectiveWorkspacePanelWidth, sidebarWidth],
+  );
+
+  const setWorkspacePanel = useCallback((open: boolean) => {
+    setWorkspacePanelOpen(open);
+    if (!open) setWorkspacePanelMaximized(false);
+    saveWorkspacePanelOpen(open);
+  }, []);
+
+  const toggleWorkspacePanel = useCallback(() => {
+    setWorkspacePanelOpen((open) => {
+      const next = !open;
+      saveWorkspacePanelOpen(next);
+      return next;
+    });
+  }, []);
+
   // History drawer: opening fetches the saved-session list; picking one resumes it
   // (the transcript swaps in; the model/folder are unchanged).
   const openHistory = useCallback(async () => {
-    setHistView(await listSessions());
-  }, [listSessions]);
+    setHistView(await refreshSessions());
+  }, [refreshSessions]);
   const closeHistory = useCallback(() => setHistView(null), []);
   const onResumeSession = useCallback(
     async (path: string) => {
       setHistView(null);
       await resumeSession(path);
+      await refreshSessions();
     },
-    [resumeSession],
+    [resumeSession, refreshSessions],
   );
   // Delete / rename act on disk, then re-fetch so the panel reflects the change.
   const onDeleteSession = useCallback(
     async (path: string) => {
       await deleteSession(path);
-      setHistView(await listSessions());
+      setHistView(await refreshSessions());
     },
-    [deleteSession, listSessions],
+    [deleteSession, refreshSessions],
   );
   const onRenameSession = useCallback(
     async (path: string, title: string) => {
       await renameSession(path, title);
-      setHistView(await listSessions());
+      setHistView(await refreshSessions());
     },
-    [renameSession, listSessions],
+    [renameSession, refreshSessions],
   );
 
-  // Workspace: open the folder chooser and switch projects (from the status bar's
-  // folder button). The hook resets the transcript and refreshes meta on a pick; a
-  // cancel is a no-op.
-  const switchFolder = useCallback(async () => {
-    await pickWorkspace();
-  }, [pickWorkspace]);
+  // Workspace: open the folder chooser and switch projects. The hook resets the
+  // transcript and refreshes meta on a pick; refresh the sidebar sessions too so
+  // the recent list belongs to the newly selected workspace. A cancel is a no-op.
+  const switchFolder = useCallback(async (path?: string) => {
+    const picked = path === undefined ? await pickWorkspace() : await switchWorkspace(path);
+    if (picked) await refreshSessions();
+    return picked;
+  }, [pickWorkspace, switchWorkspace, refreshSessions]);
 
   const onRemember = useCallback(
     async (scope: string, note: string) => {
@@ -167,6 +453,14 @@ export default function App() {
       setMemView(await fetchMemory());
     },
     [remember, fetchMemory],
+  );
+
+  const onForget = useCallback(
+    async (name: string) => {
+      await forget(name);
+      setMemView(await fetchMemory());
+    },
+    [forget, fetchMemory],
   );
 
   const onSaveDoc = useCallback(
@@ -179,108 +473,259 @@ export default function App() {
 
   return (
     <div className="app">
-      <header className="topbar">
-        <span className="topbar__model">{state.meta?.label ?? "…"}</span>
-        <div className="topbar__spacer" />
-        <div className="customize">
+      <div
+        className={[
+          "layout",
+          sidebarCollapsed ? "layout--sidebar-collapsed" : "",
+          sidebarResizing ? "layout--resizing layout--sidebar-resizing" : "",
+          workspacePanelOpen ? "layout--workspace-open" : "",
+          workspacePanelResizing ? "layout--resizing layout--workspace-resizing" : "",
+          workspacePanelOpen && workspacePanelMaximized ? "layout--workspace-maximized" : "",
+        ]
+          .filter(Boolean)
+          .join(" ")}
+        style={layoutStyle}
+      >
+        <aside className={`sidebar${sidebarCollapsed ? " sidebar--collapsed" : ""}`} aria-label="Reasonix navigation">
+          <div className="sidebar__brand">
+            <img src={logo} alt="" className="sidebar__logo" />
+            <span>Reasonix</span>
+            <button
+              className="sidebar__toggle"
+              onClick={toggleSidebar}
+              title={sidebarCollapsed ? t("sidebar.expand") : t("sidebar.collapse")}
+              aria-label={sidebarCollapsed ? t("sidebar.expand") : t("sidebar.collapse")}
+            >
+              {sidebarCollapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
+            </button>
+          </div>
+
           <button
-            className={`chip chip--icon ${customizeOpen ? "chip--on" : ""}`}
-            onClick={() => setCustomizeOpen((v) => !v)}
-            title={t("topbar.customize")}
+            className="sidebar__new"
+            onClick={() => void startNewSession()}
+            disabled={state.running}
+            title={state.running ? t("common.busyHint") : t("topbar.newSession")}
           >
-            <SlidersHorizontal size={13} />
+            <SquarePen size={15} />
+            <span>{t("topbar.newSession")}</span>
           </button>
-          {customizeOpen && (
-            <>
-              <div className="menu-backdrop" onClick={() => setCustomizeOpen(false)} />
-              <div className="menu">
-                <button
-                  className="menu__item"
-                  disabled={state.running}
-                  onClick={() => {
-                    setCustomizeOpen(false);
-                    setSettingsOpen(true);
-                  }}
-                >
-                  <SettingsIcon size={14} />
-                  {t("topbar.settings")}
-                </button>
-                <button
-                  className="menu__item"
-                  onClick={() => {
-                    setCustomizeOpen(false);
-                    setCapsOpen(true);
-                  }}
-                >
-                  <Blocks size={14} />
-                  {t("caps.title")}
-                </button>
-                <button
-                  className="menu__item"
-                  onClick={() => {
-                    setCustomizeOpen(false);
-                    void openMemory();
-                  }}
-                >
-                  <Brain size={14} />
-                  {t("topbar.memory")}
-                </button>
-              </div>
-            </>
-          )}
-        </div>
+
+          <section className="sidebar__section">
+            <div className="sidebar__section-head">
+              <div className="sidebar__section-title">{t("sidebar.conversations")}</div>
+              <button
+                className="sidebar__view-all"
+                onClick={() => void openHistory()}
+                disabled={state.running}
+                title={state.running ? t("common.busyHint") : t("topbar.history")}
+              >
+                {t("sidebar.viewAll")}
+              </button>
+            </div>
+            <div className="sidebar__sessions">
+              {sidebarSessions.length === 0 ? (
+                <div className="sidebar__empty">{t("sidebar.noRecent")}</div>
+              ) : (
+                sidebarSessions.map((session) => (
+                  <button
+                    className={`sidebar-session${session.current ? " sidebar-session--current" : ""}`}
+                    key={session.path}
+                    onClick={() => void onResumeSession(session.path)}
+                    disabled={state.running || session.current}
+                    title={session.path}
+                  >
+                    <MessageSquare size={14} />
+                    <span className="sidebar-session__body">
+                      <span className="sidebar-session__title">{sessionTitle(session, t("history.emptySession"))}</span>
+                      <span className="sidebar-session__meta">
+                        {session.current ? t("history.current") : sessionTime(session.modTime)}
+                      </span>
+                    </span>
+                  </button>
+                ))
+              )}
+            </div>
+          </section>
+
+          <nav className="sidebar__nav">
+            <button
+              className="sidebar__navitem sidebar__navitem--sessions"
+              onClick={() => void openHistory()}
+              disabled={state.running}
+              title={state.running ? t("common.busyHint") : t("topbar.history")}
+            >
+              <History size={15} />
+              <span>{t("topbar.history")}</span>
+            </button>
+            <button className="sidebar__navitem" onClick={() => void openMemory()} title={t("topbar.memory")}>
+              <Brain size={15} />
+              <span>{t("topbar.memory")}</span>
+            </button>
+            <button className="sidebar__navitem" onClick={() => setCapsOpen(true)} title={t("caps.title")}>
+              <Blocks size={15} />
+              <span>{t("caps.title")}</span>
+            </button>
+            <button
+              className="sidebar__navitem"
+              onClick={() => setSettingsOpen(true)}
+              disabled={state.running}
+              title={state.running ? t("common.busyHint") : t("topbar.settings")}
+            >
+              <SettingsIcon size={15} />
+              <span>{t("topbar.settings")}</span>
+            </button>
+          </nav>
+
+        </aside>
         <button
-          className="chip chip--icon"
-          onClick={() => void openHistory()}
-          disabled={state.running}
-          title={state.running ? t("common.busyHint") : t("topbar.history")}
-        >
-          <History size={13} />
-        </button>
-        <button className="chip chip--icon" onClick={newSession} title={t("topbar.newSession")}>
-          <SquarePen size={13} />
-        </button>
-      </header>
-
-      {state.meta?.startupErr && (
-        <div className="banner banner--error">{t("topbar.startupError", { msg: state.meta.startupErr })}</div>
-      )}
-
-      <UpdateBanner />
-
-      <main className="main">
-        <Transcript items={state.items} onPrompt={send} onRewind={rewind} />
-      </main>
-
-      <footer className="footer">
-        {showTodos && <TodoPanel todos={todos} onDismiss={() => setDismissedTodo(todoItem!.id)} />}
-        <Composer running={state.running} mode={mode} onSend={handleSend} onCancel={cancel} onCycleMode={cycleMode} />
-        <StatusBar
-          meta={state.meta}
-          context={state.context}
-          usage={state.usage}
-          balance={state.balance}
-          jobs={state.jobs}
-          running={state.running}
-          mode={mode}
-          turnStartAt={state.turnStartAt}
-          turnTokens={state.turnTokens}
-          onSwitchModel={switchModel}
-          onPickFolder={() => void switchFolder()}
+          className="sidebar-resizer"
+          type="button"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label={t("sidebar.resize")}
+          aria-valuemin={SIDEBAR_MIN_WIDTH}
+          aria-valuemax={SIDEBAR_MAX_WIDTH}
+          aria-valuenow={sidebarWidth}
+          onPointerDown={startSidebarResize}
+          onKeyDown={resizeSidebarWithKeyboard}
+          onDoubleClick={() => setExpandedSidebarWidth(SIDEBAR_DEFAULT_WIDTH)}
+          title={t("sidebar.resize")}
         />
-      </footer>
 
-      {state.approval && (
-        <ApprovalModal
-          approval={state.approval}
-          onAnswer={(allow, session) => {
-            // Approving an exit_plan_mode plan leaves plan mode (the controller
-            // flips the executor; mirror it here for the indicator).
-            if (state.approval!.tool === "exit_plan_mode" && allow) setMode("normal");
-            approve(state.approval!.id, allow, session);
-          }}
+        <section className="chat-pane">
+          <header className="topbar">
+            <div className="topbar__identity">
+              <span className="topbar__title">Reasonix</span>
+              <span className="topbar__model">{state.meta?.label ?? "…"}</span>
+            </div>
+            <div className="topbar__spacer" />
+            <button
+              className="chip chip--icon topbar__workspace-toggle"
+              onClick={toggleWorkspacePanel}
+              title={workspacePanelOpen ? t("workspace.close") : t("workspace.open")}
+            >
+              {workspacePanelOpen ? <PanelRightClose size={13} /> : <PanelRightOpen size={13} />}
+            </button>
+            <div className="topbar__actions">
+              <button
+                className="chip chip--icon"
+                onClick={() => void openHistory()}
+                disabled={state.running}
+                title={state.running ? t("common.busyHint") : t("topbar.history")}
+              >
+                <History size={13} />
+              </button>
+              <button className="chip chip--icon" onClick={() => void openMemory()} title={t("topbar.memory")}>
+                <Brain size={13} />
+              </button>
+              <button className="chip chip--icon" onClick={() => setCapsOpen(true)} title={t("caps.title")}>
+                <Blocks size={13} />
+              </button>
+              <button
+                className="chip chip--icon"
+                onClick={() => setSettingsOpen(true)}
+                disabled={state.running}
+                title={state.running ? t("common.busyHint") : t("topbar.settings")}
+              >
+                <SettingsIcon size={13} />
+              </button>
+              <button
+                className="chip chip--icon"
+                onClick={() => void startNewSession()}
+                disabled={state.running}
+                title={state.running ? t("common.busyHint") : t("topbar.newSession")}
+              >
+                <SquarePen size={13} />
+              </button>
+            </div>
+          </header>
+
+          {state.meta?.startupErr && (
+            <div className="banner banner--error">{t("topbar.startupError", { msg: state.meta.startupErr })}</div>
+          )}
+
+          <UpdateBanner />
+
+          <main className="main">
+            {state.meta?.ready === false && !state.meta?.startupErr ? (
+              <div className="loading-screen">
+                <div className="loading-screen__spinner" />
+                <span className="loading-screen__text">{t("common.loading")}</span>
+              </div>
+            ) : (
+              <Transcript items={state.items} onPrompt={send} onRewind={rewind} />
+            )}
+          </main>
+
+          <footer className="footer">
+            {showTodos && <TodoPanel todos={todos} onDismiss={() => setDismissedTodo(todoItem!.id)} />}
+            {state.approval && (
+              <ApprovalModal
+                approval={state.approval}
+                onAnswer={(allow, session) => {
+                  // Approving an exit_plan_mode plan leaves plan mode (the controller
+                  // flips the executor; mirror it here for the indicator).
+                  if (state.approval!.tool === "exit_plan_mode" && allow) setMode("normal");
+                  approve(state.approval!.id, allow, session);
+                }}
+                onRevisePlan={(text) => {
+                  setPendingPlanRevision(text);
+                  approve(state.approval!.id, false, false);
+                }}
+              />
+            )}
+            <Composer
+              running={state.running}
+              mode={mode}
+              cwd={state.meta?.cwd}
+              onSend={handleSend}
+              onCancel={cancel}
+              onCycleMode={cycleMode}
+              onPickFolder={switchFolder}
+              disabled={state.meta?.ready === false}
+            />
+            <StatusBar
+              meta={state.meta}
+              context={state.context}
+              usage={state.usage}
+              balance={state.balance}
+              jobs={state.jobs}
+              running={state.running}
+              mode={mode}
+              turnStartAt={state.turnStartAt}
+              turnTokens={state.turnTokens}
+              onSwitchModel={switchModel}
+              onPickFolder={() => void switchFolder()}
+            />
+          </footer>
+        </section>
+
+        {workspacePanelOpen && !workspacePanelMaximized && (
+          <button
+            className="workspace-panel-resizer"
+            type="button"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label={t("workspace.resizePanel")}
+            aria-valuemin={WORKSPACE_PANEL_MIN_WIDTH}
+            aria-valuemax={WORKSPACE_PANEL_MAX_WIDTH}
+            aria-valuenow={effectiveWorkspacePanelWidth}
+            onPointerDown={startWorkspacePanelResize}
+            onKeyDown={resizeWorkspacePanelWithKeyboard}
+            onDoubleClick={() => setSavedWorkspacePanelWidth(WORKSPACE_PANEL_DEFAULT_WIDTH)}
+            title={t("workspace.resizePanel")}
+          />
+        )}
+
+        <WorkspacePanel
+          open={workspacePanelOpen}
+          cwd={state.meta?.cwd}
+          maximized={workspacePanelMaximized}
+          panelWidth={workspacePanelMaximized ? viewportWidth - effectiveSidebarWidth : effectiveWorkspacePanelWidth}
+          onClose={() => setWorkspacePanel(false)}
+          onToggleMaximized={() => setWorkspacePanelMaximized((value) => !value)}
         />
-      )}
+      </div>
 
       {state.ask && (
         <AskCard
@@ -295,6 +740,7 @@ export default function App() {
           view={memView}
           onClose={closeMemory}
           onRemember={onRemember}
+          onForget={onForget}
           onSaveDoc={onSaveDoc}
         />
       )}

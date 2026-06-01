@@ -96,7 +96,7 @@ func (g grepTool) Execute(ctx context.Context, args json.RawMessage) (string, er
 				return nil
 			}
 			if d.IsDir() {
-				if d.Name() == ".git" {
+				if skipWalkDir(p.Path, path, d.Name()) {
 					return filepath.SkipDir
 				}
 				return nil

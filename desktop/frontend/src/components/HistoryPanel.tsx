@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Pencil, Trash2, Check, X } from "lucide-react";
 import { t, useT } from "../lib/i18n";
 import type { SessionMeta } from "../lib/types";
+import { ResizableDrawer } from "./ResizableDrawer";
 
 // HistoryPanel is the desktop session switcher: a right-side drawer listing saved
 // sessions newest-first, grouped by day. Each row resumes on click, and carries
@@ -47,8 +48,7 @@ export function HistoryPanel({
   }
 
   return (
-    <div className="drawer-backdrop" onClick={onClose}>
-      <aside className="drawer" onClick={(e) => e.stopPropagation()}>
+    <ResizableDrawer onClose={onClose}>
         <header className="drawer__head">
           <div className="drawer__title">{tr("history.title")}</div>
           <button className="chip" onClick={onClose} title={tr("common.close")}>
@@ -128,8 +128,7 @@ export function HistoryPanel({
             ))
           )}
         </div>
-      </aside>
-    </div>
+    </ResizableDrawer>
   );
 }
 

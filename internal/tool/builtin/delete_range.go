@@ -122,6 +122,12 @@ func (d deleteRange) preview(args json.RawMessage) (diff.Change, error) {
 		keep = append(keep, lines[:startLine]...)
 		keep = append(keep, lines[endLine+1:]...)
 	} else {
+		// Same line for both anchors: the kept prefix and suffix would overlap at
+		// that line and duplicate it. There is nothing strictly between a line and
+		// itself, so the exclusive deletion is contradictory — reject it.
+		if startLine == endLine {
+			return diff.Change{}, fmt.Errorf("start_anchor and end_anchor match the same line in %s; with inclusive=false there is nothing between them to delete", p.Path)
+		}
 		keep = append(keep, lines[:startLine+1]...)
 		keep = append(keep, lines[endLine:]...)
 	}

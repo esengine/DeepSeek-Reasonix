@@ -30,43 +30,49 @@ func (f *fakeProvider) Stream(_ context.Context, req provider.Request) (<-chan p
 	return ch, nil
 }
 
-func TestCompactBounds(t *testing.T) {
-	sys := provider.Message{Role: provider.RoleSystem}
-	u := provider.Message{Role: provider.RoleUser}
-	as := provider.Message{Role: provider.RoleAssistant}
-	ac := provider.Message{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "1", Name: "f"}}}
-	to := provider.Message{Role: provider.RoleTool, ToolCallID: "1", Name: "f"}
+func TestTailStart(t *testing.T) {
+	// 10-char content → with tokPerChar 1.0, each non-empty message costs 10
+	// "tokens"; tool-call messages carry name+args instead.
+	msg := func(role provider.Role, n int) provider.Message {
+		return provider.Message{Role: role, Content: strings.Repeat("x", n)}
+	}
+	u := func(n int) provider.Message { return msg(provider.RoleUser, n) }
+	as := func(n int) provider.Message { return msg(provider.RoleAssistant, n) }
+	ac := provider.Message{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "1", Name: "f", Arguments: "{}"}}}
+	to := func(n int) provider.Message {
+		return provider.Message{Role: provider.RoleTool, ToolCallID: "1", Name: "f", Content: strings.Repeat("x", n)}
+	}
 
+	sys := provider.Message{Role: provider.RoleSystem}
 	cases := []struct {
-		name              string
-		msgs              []provider.Message
-		keep              int
-		wantHead, wantStr int
-		wantOK            bool
+		name    string
+		msgs    []provider.Message
+		head    int
+		budget  int
+		minKeep int
+		wantStr int
 	}{
-		{"no-system", []provider.Message{u, as, u, as, u, as}, 2, 0, 4, true},
-		{"with-system", []provider.Message{sys, u, as, u, as, u, as}, 3, 1, 4, true},
-		// Recent tail of 1 lands on an orphan tool result; the boundary must move
-		// back onto its assistant so the tail starts with the tool_calls.
-		{"align-off-tool", []provider.Message{sys, u, ac, to, as, u, ac, to}, 1, 1, 6, true},
-		{"too-short", []provider.Message{sys, u, as}, 8, 1, 0, false},
-		{"below-min-compact", []provider.Message{sys, u, as, u}, 2, 1, 0, false},
+		// Budget 25 fits the two newest 10-char messages (20) but not a third (30);
+		// the tail stops at the third-from-last.
+		{"budget-bounds-tail", []provider.Message{u(10), as(10), u(10), as(10), u(10)}, 0, 25, 2, 3},
+		// A single huge recent message can't blow the budget below minKeep: the last
+		// two are kept regardless.
+		{"min-keep-floor", []provider.Message{u(10), as(10), u(10), as(10), to(9999)}, 0, 25, 2, 3},
+		// The boundary lands on an orphan tool result and must move back onto its
+		// assistant so the tail begins with the tool_calls.
+		{"align-off-tool", []provider.Message{sys, u(10), ac, to(10), ac, to(10)}, 1, 0, 1, 4},
+		// A generous budget keeps everything down to the first compactable message
+		// after the head.
+		{"budget-keeps-all", []provider.Message{sys, u(10), as(10), u(10)}, 1, 100000, 2, 2},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			head, start, ok := compactBounds(tc.msgs, tc.keep, minCompactMessages)
-			if ok != tc.wantOK {
-				t.Fatalf("ok = %v, want %v", ok, tc.wantOK)
-			}
-			if head != tc.wantHead {
-				t.Errorf("head = %d, want %d", head, tc.wantHead)
-			}
-			if ok && start != tc.wantStr {
+			start := tailStart(tc.msgs, tc.head, tc.budget, 1.0, tc.minKeep)
+			if start != tc.wantStr {
 				t.Errorf("start = %d, want %d", start, tc.wantStr)
 			}
-			// The aligned tail must never begin with an orphan tool result.
-			if ok && tc.msgs[start].Role == provider.RoleTool {
+			if tc.msgs[start].Role == provider.RoleTool {
 				t.Errorf("recent tail begins with orphan tool message at %d", start)
 			}
 		})
@@ -203,30 +209,34 @@ func TestCompactInjectsFocusAndPreCompactHook(t *testing.T) {
 }
 
 func TestMaybeCompactThreshold(t *testing.T) {
+	// 40-char contents → ~10 tokens each at the fallback ratio; with a 20-token
+	// window the tail budget (10) keeps only the last couple, leaving a region to
+	// compact once the trigger is crossed.
+	body := strings.Repeat("x", 40)
 	newSess := func() *Session {
 		return &Session{Messages: []provider.Message{
-			{Role: provider.RoleSystem, Content: "sys"},
-			{Role: provider.RoleUser, Content: "a"},
-			{Role: provider.RoleAssistant, Content: "b"},
-			{Role: provider.RoleUser, Content: "c"},
-			{Role: provider.RoleAssistant, Content: "d"},
-			{Role: provider.RoleUser, Content: "e"},
-			{Role: provider.RoleAssistant, Content: "f"},
+			{Role: provider.RoleSystem, Content: body},
+			{Role: provider.RoleUser, Content: body},
+			{Role: provider.RoleAssistant, Content: body},
+			{Role: provider.RoleUser, Content: body},
+			{Role: provider.RoleAssistant, Content: body},
+			{Role: provider.RoleUser, Content: body},
+			{Role: provider.RoleAssistant, Content: body},
 		}}
 	}
 
 	// Below 80% of the window: untouched.
 	sess := newSess()
-	a := New(&fakeProvider{reply: "s"}, tool.NewRegistry(), sess, Options{ContextWindow: 100, RecentKeep: 2, ArchiveDir: t.TempDir()}, event.Discard)
-	a.maybeCompact(context.Background(), &provider.Usage{PromptTokens: 50})
+	a := New(&fakeProvider{reply: "s"}, tool.NewRegistry(), sess, Options{ContextWindow: 20, RecentKeep: 2, ArchiveDir: t.TempDir()}, event.Discard)
+	a.maybeCompact(context.Background(), &provider.Usage{PromptTokens: 8})
 	if len(sess.Messages) != 7 {
 		t.Errorf("below threshold should not compact, len = %d", len(sess.Messages))
 	}
 
 	// At/above 80%: compacts.
 	sess = newSess()
-	a = New(&fakeProvider{reply: "s"}, tool.NewRegistry(), sess, Options{ContextWindow: 100, RecentKeep: 2, ArchiveDir: t.TempDir()}, event.Discard)
-	a.maybeCompact(context.Background(), &provider.Usage{PromptTokens: 90})
+	a = New(&fakeProvider{reply: "s"}, tool.NewRegistry(), sess, Options{ContextWindow: 20, RecentKeep: 2, ArchiveDir: t.TempDir()}, event.Discard)
+	a.maybeCompact(context.Background(), &provider.Usage{PromptTokens: 18})
 	if len(sess.Messages) >= 7 {
 		t.Errorf("above threshold should compact, len = %d", len(sess.Messages))
 	}

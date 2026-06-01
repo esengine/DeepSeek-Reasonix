@@ -5,13 +5,12 @@
 // non-React code (lib/tools.ts) translate too; it stays fresh because the provider
 // updates it on every render.
 //
-// The kernel's reasonix.toml `language` is the cross-surface source of truth (CLI +
-// desktop share it); localStorage is a fast cache so the first paint isn't blank.
-// On boot we reconcile the cache against the kernel; the language picker writes both.
+// Desktop UI language is intentionally frontend-only. The CLI/kernel may still
+// have its own `language` config for prompts and terminal text, but switching the
+// desktop setting must not rewrite config or rebuild the model controller.
 
-import { createContext, useCallback, useContext, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useState } from "react";
 import type { ReactNode } from "react";
-import { app } from "./bridge";
 import { en, type DictKey } from "../locales/en";
 import { zh } from "../locales/zh";
 
@@ -96,31 +95,10 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
   const locale = detectLocale(pref);
   currentLocale = locale; // keep the mirror fresh for non-React callers
 
-  // Reconcile the cached preference against the kernel's stored language once on
-  // boot, so a language chosen in the CLI/config shows here too. Ignored when the
-  // binding isn't reachable yet (browser dev / pre-startup).
-  useEffect(() => {
-    let live = true;
-    app
-      .Settings()
-      .then((s) => {
-        const backend: LangPref = s.language === "en" || s.language === "zh" ? s.language : "";
-        if (live && backend !== readPref()) {
-          writePref(backend);
-          setPrefState(backend);
-        }
-      })
-      .catch(() => {});
-    return () => {
-      live = false;
-    };
-  }, []);
-
-  // setPref updates the live UI, the cache, and the kernel config in one step.
+  // setPref updates only the live UI and the browser cache.
   const setPref = useCallback((next: LangPref) => {
     writePref(next);
     setPrefState(next);
-    app.SetLanguage(next).catch(() => {});
   }, []);
 
   const tt = useCallback<Translator>((key, vars) => translate(detectLocale(pref), key, vars), [pref]);

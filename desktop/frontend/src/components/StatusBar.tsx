@@ -57,15 +57,6 @@ function avgRate(u?: WireUsage): number | null {
   return Math.round((u.sessionCacheHitTokens / denom) * 100);
 }
 
-// shortCwd trims a path to its last two segments so the status line stays compact
-// (e.g. /Users/x/projects/reasonix → …/projects/reasonix). Splits on both
-// separators so Windows backslash paths (C:\…\reasonix) shorten too.
-function shortCwd(cwd: string): string {
-  const parts = cwd.split(/[/\\]/).filter(Boolean);
-  if (parts.length <= 2) return cwd;
-  return "…/" + parts.slice(-2).join("/");
-}
-
 function fmtTokens(n: number): string {
   if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, "") + "k";
   return String(n);
@@ -75,6 +66,11 @@ function fmtElapsed(ms: number): string {
   const s = Math.floor(ms / 1000);
   if (s < 60) return `${s}s`;
   return `${Math.floor(s / 60)}m ${s % 60}s`;
+}
+
+function basename(path: string): string {
+  const parts = path.split(/[/\\]/).filter(Boolean);
+  return parts[parts.length - 1] || path;
 }
 
 // useTick re-renders once a second while `on`, so the elapsed clock advances.
@@ -111,7 +107,7 @@ export function StatusBar({
   turnStartAt: number;
   turnTokens: number;
   onSwitchModel: (name: string) => void;
-  onPickFolder: () => void;
+  onPickFolder?: () => void;
 }) {
   const { t, locale } = useI18n();
   const now = useTick(running);
@@ -174,17 +170,18 @@ export function StatusBar({
           </span>
         </>
       )}
-      {meta?.cwd && (
+      {meta?.cwd && onPickFolder && (
         <>
           <span className="statusbar__sep">·</span>
           <button
-            className="statusbar__cwd"
+            className="statusbar__workspace"
+            type="button"
             onClick={onPickFolder}
             disabled={running}
             title={running ? t("common.busyHint") : t("status.switchFolder", { cwd: meta.cwd })}
           >
             <FolderGit2 size={11} />
-            {shortCwd(meta.cwd)}
+            <span>{basename(meta.cwd)}</span>
           </button>
         </>
       )}

@@ -109,12 +109,20 @@ func (completeStep) Execute(ctx context.Context, args json.RawMessage) (string, 
 	if err != nil {
 		return "", err
 	}
+	todoMatch, hasTodo, err := verifyTodoStep(ctx, p.Step)
+	if err != nil {
+		return "", err
+	}
 	hostStatus := ""
 	if _, ok := evidence.FromContext(ctx); ok {
 		hostStatus = fmt.Sprintf(" Host evidence: host-verified %d, manual/unverified %d.", hostVerified, manualUnverified)
 	}
+	todoStatus := ""
+	if hasTodo {
+		todoStatus = fmt.Sprintf(" Todo step: todo-matched %d.", todoMatch.Index)
+	}
 	return fmt.Sprintf("Step %q signed off with %d evidence item(s) [%s].%s Move the next step to in_progress with todo_write.",
-		p.Step, len(p.Evidence), strings.Join(kinds, ", "), hostStatus), nil
+		p.Step, len(p.Evidence), strings.Join(kinds, ", "), hostStatus+todoStatus), nil
 }
 
 func verifyStepEvidence(ctx context.Context, items []stepEvidence) (hostVerified int, manualUnverified int, err error) {
@@ -154,4 +162,26 @@ func verifyStepEvidence(ctx context.Context, items []stepEvidence) (hostVerified
 		}
 	}
 	return hostVerified, manualUnverified, nil
+}
+
+func verifyTodoStep(ctx context.Context, step string) (evidence.TodoStepMatch, bool, error) {
+	ledger, ok := evidence.FromContext(ctx)
+	if !ok {
+		return evidence.TodoStepMatch{}, false, nil
+	}
+	match, hasTodo := ledger.MatchLatestTodoStep(step)
+	if !hasTodo {
+		return evidence.TodoStepMatch{}, false, nil
+	}
+	if !match.Found {
+		return evidence.TodoStepMatch{}, true, fmt.Errorf("step %q has no matching todo_write item in this turn", step)
+	}
+	switch match.Status {
+	case "in_progress", "completed":
+		return match, true, nil
+	case "":
+		return evidence.TodoStepMatch{}, true, fmt.Errorf("step %q matches todo %d (%q) but its status is pending; complete_step requires in_progress or completed", step, match.Index, match.Content)
+	default:
+		return evidence.TodoStepMatch{}, true, fmt.Errorf("step %q matches todo %d (%q) but its status is %q; complete_step requires in_progress or completed", step, match.Index, match.Content, match.Status)
+	}
 }

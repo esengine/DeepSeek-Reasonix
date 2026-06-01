@@ -185,6 +185,22 @@ func safeJoin(dir, name string) (string, error) {
 	return p, nil
 }
 
+// safeSymlink rejects a symlink whose destination escapes dir. linkPath is the
+// symlink's own (already safeJoin'd) location; linkname is its raw target. Without
+// this a symlink to ../../etc lets a later archive entry written "through" it land
+// outside dir — the tar-slip-via-symlink the path check alone misses.
+func safeSymlink(dir, linkPath, linkname string) error {
+	dest := linkname
+	if !filepath.IsAbs(dest) {
+		dest = filepath.Join(filepath.Dir(linkPath), linkname)
+	}
+	dest = filepath.Clean(dest)
+	if dest != dir && !strings.HasPrefix(dest, dir+string(os.PathSeparator)) {
+		return fmt.Errorf("unsafe symlink %q -> %q in archive", linkPath, linkname)
+	}
+	return nil
+}
+
 func extractTarGz(data []byte, dir string) error {
 	gz, err := gzip.NewReader(bytes.NewReader(data))
 	if err != nil {
@@ -210,6 +226,9 @@ func extractTarGz(data []byte, dir string) error {
 				return err
 			}
 		case tar.TypeSymlink:
+			if err := safeSymlink(dir, target, hdr.Linkname); err != nil {
+				return err
+			}
 			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 				return err
 			}

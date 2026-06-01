@@ -2,10 +2,19 @@
 // harness loop that drives a coding task to completion.
 package agent
 
-import "reasonix/internal/provider"
+import (
+	"sync"
 
-// Session holds the conversation history for one task.
+	"reasonix/internal/provider"
+)
+
+// Session holds the conversation history for one task. The run loop (one turn at
+// a time) is the only writer, but a frontend can read History/Save from another
+// goroutine while a turn appends, so mu guards Messages. Direct Messages reads on
+// the run-loop goroutine stay lock-free (serial with its own writes); cross-
+// goroutine access goes through Snapshot.
 type Session struct {
+	mu       sync.RWMutex
 	Messages []provider.Message
 }
 
@@ -20,13 +29,34 @@ func NewSession(system string) *Session {
 
 // Add appends a message.
 func (s *Session) Add(m provider.Message) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.Messages = append(s.Messages, m)
+}
+
+// Replace swaps the whole message log — used by compaction, which rewrites the
+// middle of the history.
+func (s *Session) Replace(msgs []provider.Message) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Messages = msgs
+}
+
+// Snapshot returns a copy of the messages, safe to read from another goroutine
+// while a turn appends. Frontends (History, Save) use it instead of touching the
+// live slice.
+func (s *Session) Snapshot() []provider.Message {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return append([]provider.Message(nil), s.Messages...)
 }
 
 // HasContent returns true when the session carries at least one user,
 // assistant, or tool message — i.e. more than just a system prompt. An
 // "empty" conversation that has never been used should not be persisted.
 func (s *Session) HasContent() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	for _, m := range s.Messages {
 		if m.Role != provider.RoleSystem {
 			return true

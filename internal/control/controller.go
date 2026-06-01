@@ -53,6 +53,8 @@ type Controller struct {
 	hooks        *hook.Runner // session hook runner; nil-safe (no hooks configured)
 	mem          *memory.Set
 	cleanup      func()
+	autoPlan     string
+	classifier   autoPlanClassifier
 	startedOnce  bool // guards the one-shot SessionStart hook on first turn
 
 	// balanceURL/balanceKey target the active provider's optional wallet-balance
@@ -164,6 +166,8 @@ type Options struct {
 	// WorkspaceRoot is the project root checkpoint restores are confined to ("" =
 	// no confinement). Frontends pass the cwd they launched the session in.
 	WorkspaceRoot string
+	AutoPlan      string
+	Classifier    autoPlanClassifier
 }
 
 // New builds a Controller. A nil Sink is replaced with event.Discard.
@@ -191,6 +195,8 @@ func New(opts Options) *Controller {
 		hooks:        opts.Hooks,
 		mem:          opts.Memory,
 		cleanup:      opts.Cleanup,
+		autoPlan:     normalizeAutoPlan(opts.AutoPlan),
+		classifier:   opts.Classifier,
 		balanceURL:   opts.BalanceURL,
 		balanceKey:   opts.BalanceKey,
 		jobs:         opts.Jobs,
@@ -209,6 +215,7 @@ func New(opts Options) *Controller {
 				c.cp.Snapshot(ch)
 			}
 		})
+		c.executor.SetMemoryQueue(c)
 	}
 	return c
 }
@@ -279,11 +286,19 @@ func (c *Controller) runGuarded(body func(ctx context.Context) error) {
 	}()
 }
 
-// Send starts a turn with an already-composed message (the caller applied any
-// plan-mode marker and @-ref expansion). Used by the chat TUI, which resolves
-// those itself for live UI feedback.
+// Send starts a turn with an uncomposed message. The controller applies
+// auto-plan, plan-mode, memory, and background-job framing inside the async turn
+// path so frontends do not block on classifier I/O.
 func (c *Controller) Send(input string) {
-	c.runGuarded(func(ctx context.Context) error { return c.runTurn(ctx, input) })
+	c.SendWithRaw(input, input)
+}
+
+// SendWithRaw starts a turn with separate model input and raw prompt text. The
+// raw prompt is used only for auto-plan scoring; it deliberately excludes
+// resolved @-reference payloads so referenced file contents cannot inflate the
+// complexity score.
+func (c *Controller) SendWithRaw(input, raw string) {
+	c.runGuarded(func(ctx context.Context) error { return c.runTurnWithRaw(ctx, input, raw) })
 }
 
 // planApprovalTool is the Tool name on the ApprovalRequest the controller emits
@@ -305,7 +320,13 @@ const planApprovedMessage = "Plan approved — plan mode is off; you're cleared 
 // next turn can revise. Plan mode is only ever set interactively, so the headless
 // `Run` path (which doesn't call this) never blocks on a prompt.
 func (c *Controller) runTurn(ctx context.Context, input string) error {
+	return c.runTurnWithRaw(ctx, input, input)
+}
+
+func (c *Controller) runTurnWithRaw(ctx context.Context, input, raw string) error {
 	c.maybeSessionStart(ctx)
+	c.maybeAutoPlan(ctx, raw)
+	input = c.Compose(input)
 	// Open a checkpoint for this turn before the user message is appended, so the
 	// recorded message boundary precedes it and pre-edit snapshots land here.
 	c.beginCheckpoint(input)
@@ -426,7 +447,7 @@ func (c *Controller) Submit(input string) {
 				c.notice("unknown command: " + trimmed)
 				return nil
 			}
-			return c.runner.Run(ctx, c.Compose(sent))
+			return c.runTurnWithRaw(ctx, sent, sent)
 		})
 	case strings.HasPrefix(trimmed, "/"):
 		// Read-only management verbs (/model /memory /skill /hooks /mcp) emit a
@@ -442,14 +463,20 @@ func (c *Controller) Submit(input string) {
 			if turn, name, fromTurn, err := ParseBranchTarget(args); err != nil {
 				c.notice(err.Error())
 			} else if fromTurn {
-				_, _ = c.ForkNamed(turn-1, name)
+				if _, err := c.ForkNamed(turn-1, name); err != nil {
+					c.notice(err.Error())
+				}
 			} else {
-				_, _ = c.Branch(name)
+				if _, err := c.Branch(name); err != nil {
+					c.notice(err.Error())
+				}
 			}
 			return
 		case "/switch":
 			ref := strings.TrimSpace(strings.TrimPrefix(trimmed, fields[0]))
-			_, _ = c.SwitchBranch(ref)
+			if _, err := c.SwitchBranch(ref); err != nil {
+				c.notice(err.Error())
+			}
 			return
 		}
 		if c.managementNotice(trimmed) {
@@ -459,13 +486,13 @@ func (c *Controller) Submit(input string) {
 		// turn. (Built-in slash verbs like /compact are handled above.)
 		if sent, ok := c.CustomCommand(trimmed); ok {
 			c.runGuarded(func(ctx context.Context) error {
-				return c.runTurn(ctx, c.Compose(sent))
+				return c.runTurnWithRaw(ctx, sent, sent)
 			})
 			return
 		}
 		if sent, ok := c.RunSkill(trimmed); ok {
 			c.runGuarded(func(ctx context.Context) error {
-				return c.runTurn(ctx, c.Compose(sent))
+				return c.runTurnWithRaw(ctx, sent, sent)
 			})
 			return
 		}
@@ -480,7 +507,7 @@ func (c *Controller) Submit(input string) {
 			if block != "" {
 				sent = "Referenced context:\n\n" + block + "\n\n" + input
 			}
-			return c.runTurn(ctx, c.Compose(sent))
+			return c.runTurnWithRaw(ctx, sent, input)
 		})
 	}
 }
@@ -597,6 +624,14 @@ func (c *Controller) SetPlanMode(v bool) {
 	if c.executor != nil {
 		c.executor.SetPlanMode(v)
 	}
+}
+
+// PlanMode reports whether outgoing turns currently receive the plan-mode
+// marker. Frontends use it after Compose because auto-plan may flip the mode.
+func (c *Controller) PlanMode() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.planMode
 }
 
 // Compact runs one compaction pass on the executor's session on demand.
@@ -752,10 +787,12 @@ func (c *Controller) ForkNamed(turn int, name string) (string, error) {
 
 	// Persist the current conversation first so the branch point survives, then
 	// seed a fresh session with the messages up to the fork and switch to it.
-	_ = c.Snapshot()
+	if err := c.Snapshot(); err != nil {
+		slog.Warn("controller: pre-fork snapshot", "err", err)
+	}
 	parentPath := c.SessionPath()
 	parentID := agent.BranchID(parentPath)
-	src := c.executor.Session().Messages
+	src := c.executor.Session().Snapshot()
 	if boundary > len(src) {
 		boundary = len(src)
 	}
@@ -808,7 +845,7 @@ func (c *Controller) Branch(name string) (string, error) {
 	}
 	parentPath := c.SessionPath()
 	parentID := agent.BranchID(parentPath)
-	src := c.executor.Session().Messages
+	src := c.executor.Session().Snapshot()
 	branched := append([]provider.Message(nil), src...)
 	sess := agent.NewSession("")
 	sess.Messages = branched
@@ -956,7 +993,9 @@ func (c *Controller) summarizeAt(ctx context.Context, turn int, from bool) error
 	c.mu.Lock()
 	c.cpBound = map[int]int{}
 	c.mu.Unlock()
-	_ = c.Snapshot()
+	if err := c.Snapshot(); err != nil {
+		slog.Warn("controller: post-summarize snapshot", "err", err)
+	}
 	return nil
 }
 
@@ -1020,7 +1059,7 @@ func (c *Controller) History() []provider.Message {
 	if c.executor == nil {
 		return nil
 	}
-	return c.executor.Session().Messages
+	return c.executor.Session().Snapshot() // copy — a turn may be appending concurrently
 }
 
 // ContextSnapshot returns (promptTokens, contextWindow) from the most recent
@@ -1321,6 +1360,36 @@ func (c *Controller) SaveDoc(path, body string) (string, error) {
 		"Memory file "+written+" was just edited. Its current contents:\n"+strings.TrimSpace(body))
 	c.refreshMemoryLocked()
 	return written, nil
+}
+
+// ForgetMemory deletes a saved auto-memory by name — the panel/TUI delete action,
+// the manual counterpart to the model's `forget` tool. It queues a turn-tail note
+// so the deletion applies this session (the cached prefix still lists the fact
+// until the next session re-folds the index).
+func (c *Controller) ForgetMemory(name string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.mem == nil {
+		return nil
+	}
+	if err := c.mem.Store.Delete(name); err != nil {
+		return err
+	}
+	c.pendingMemory = append(c.pendingMemory,
+		"Deleted memory \""+name+"\" — disregard its line still shown in the saved-memories index until next session.")
+	c.refreshMemoryLocked()
+	return nil
+}
+
+// QueueMemory implements memory.Queue: when the model runs the remember/forget
+// tool, the tool calls this with a note that rides the next turn so the change
+// applies this session without touching the cache-stable prefix. It also
+// refreshes the snapshot a memory panel reads.
+func (c *Controller) QueueMemory(note string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.pendingMemory = append(c.pendingMemory, note)
+	c.refreshMemoryLocked()
 }
 
 // Memory returns the loaded memory snapshot (nil when memory is disabled), for

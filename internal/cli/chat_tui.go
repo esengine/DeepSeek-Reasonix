@@ -749,7 +749,7 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, finalize(m, cmds)
 			}
 
-			cmds = append(cmds, m.startTurn(m.ctrl.Compose(sentLine), displayLine, line, attachments))
+			cmds = append(cmds, m.startTurnWithRaw(sentLine, displayLine, line, line, attachments))
 			return m, finalize(m, cmds)
 		}
 
@@ -814,7 +814,7 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case strings.TrimSpace(msg.sent) == "":
 			m.notice(i18n.M.SlashPromptEmpty)
 		default:
-			cmds = append(cmds, m.startTurn(m.ctrl.Compose(msg.sent), msg.display, msg.display, nil))
+			cmds = append(cmds, m.startTurn(msg.sent, msg.display, msg.display, nil))
 		}
 
 	case refsResolvedMsg:
@@ -825,7 +825,7 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.block != "" {
 			sent = "Referenced context:\n\n" + msg.block + "\n\n" + msg.sent
 		}
-		cmds = append(cmds, m.startTurn(m.ctrl.Compose(sent), msg.display, msg.restore, msg.attachments))
+		cmds = append(cmds, m.startTurnWithRaw(sent, msg.display, msg.restore, msg.restore, msg.attachments))
 
 	case clipboardImageMsg:
 		if msg.err != nil {
@@ -1793,10 +1793,17 @@ func (m *chatTUI) toggleVerboseReasoning(notify bool) {
 }
 
 // startTurn commits the user bubble to scrollback, resets the turn accumulator,
-// and kicks off runner.Run. `sent` goes to the model (may carry a plan-mode
-// marker), `displayed` is what the transcript shows, and `restore` is what Esc
-// puts back into the input while the bubble is still deferred.
+// and kicks off the controller turn. `sent` goes to the model uncomposed (the
+// controller frames it with any plan marker); `displayed` is what the transcript
+// shows, and `restore` is what Esc puts back while the bubble is still deferred.
 func (m *chatTUI) startTurn(sent, displayed, restore string, attachments []chatAttachment) tea.Cmd {
+	return m.startTurnWithRaw(sent, displayed, restore, sent, attachments)
+}
+
+// startTurnWithRaw is startTurn plus an explicit `raw` (the un-resolved user
+// prompt) used only for the controller's auto-plan scoring, so resolved
+// @-reference payloads can't inflate the complexity signal.
+func (m *chatTUI) startTurnWithRaw(sent, displayed, restore, raw string, attachments []chatAttachment) tea.Cmd {
 	// Flush any half-streamed leftover before the new turn (defensive).
 	m.commitReasoning()
 	m.commitPending()
@@ -1820,7 +1827,7 @@ func (m *chatTUI) startTurn(sent, displayed, restore string, attachments []chatA
 	m.turnTokens = 0
 	// The controller owns the run goroutine, its context, and cancellation; it
 	// streams events to eventCh and emits TurnDone when the turn settles.
-	m.ctrl.Send(sent)
+	m.ctrl.SendWithRaw(sent, raw)
 	return tea.Batch(m.spinner.Tick, elapsedTick())
 }
 
@@ -2088,13 +2095,17 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 		}
 	case "/memory":
 		m.showMemory()
+	case "/quit", "/exit":
+		return tea.Quit
+	case "/forget":
+		m.forgetMemory(strings.TrimSpace(strings.TrimPrefix(input, cmd)))
 	default:
 		// A custom command wins over a skill of the same name; both resolve to a turn.
 		if sent, ok := m.ctrl.CustomCommand(input); ok {
-			return m.startTurn(m.ctrl.Compose(sent), input, input, nil)
+			return m.startTurn(sent, input, input, nil)
 		}
 		if sent, ok := m.ctrl.RunSkill(input); ok {
-			return m.startTurn(m.ctrl.Compose(sent), input, input, nil)
+			return m.startTurn(sent, input, input, nil)
 		}
 		m.notice(fmt.Sprintf("%s: %s", i18n.M.SlashUnknown, cmd))
 	}

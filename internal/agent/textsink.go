@@ -79,6 +79,11 @@ func (s *TextSink) Emit(e event.Event) {
 		s.closeTextStream(e.Text, e.Reasoning)
 
 	case event.ToolDispatch:
+		// The early (Partial) dispatch carries no args — the full one prints the
+		// line. Without this the headless stream shows every call twice.
+		if e.Tool.Partial {
+			break
+		}
 		fmt.Fprintf(s.out, "  -> %s %s\n", e.Tool.Name, CompactArgs(e.Tool.Args))
 		s.wroteAnything = true
 

@@ -64,6 +64,7 @@ type Job struct {
 	readOffset int
 	status     Status
 	result     string
+	resultRead bool // result already surfaced by Output (task jobs stream nothing to buf)
 	startedAt  int64
 	cancel     context.CancelFunc
 	done       chan struct{}
@@ -185,6 +186,13 @@ func (m *Manager) Output(id string) (text string, status Status, ok bool) {
 	full := j.buf.String()
 	text = full[j.readOffset:]
 	j.readOffset = len(full)
+	// A task job streams nothing to the buffer — its answer lands in result. Once
+	// it is terminal with no buffered output, surface that result once so a task's
+	// answer is visible here too (bash_output's description promises task support).
+	if text == "" && j.status != Running && j.result != "" && !j.resultRead {
+		text = j.result
+		j.resultRead = true
+	}
 	return text, j.status, true
 }
 

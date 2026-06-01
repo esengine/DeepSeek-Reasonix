@@ -1,7 +1,9 @@
 package builtin
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -10,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf16"
 
 	"reasonix/internal/tool"
 )
@@ -131,6 +134,37 @@ func TestReadFileBinary(t *testing.T) {
 	_, err := readFile{}.Execute(context.Background(), argsJSON(t, map[string]any{"path": f}))
 	if err == nil || !strings.Contains(err.Error(), "binary") {
 		t.Errorf("expected binary-file error, got %v", err)
+	}
+}
+
+func TestReadFileBOM(t *testing.T) {
+	enc := func(order binary.ByteOrder, s string) []byte {
+		var b bytes.Buffer
+		if order == binary.LittleEndian {
+			b.Write([]byte{0xFF, 0xFE})
+		} else {
+			b.Write([]byte{0xFE, 0xFF})
+		}
+		for _, r := range utf16.Encode([]rune(s)) {
+			_ = binary.Write(&b, order, r)
+		}
+		return b.Bytes()
+	}
+	cases := map[string][]byte{
+		"utf16le.txt": enc(binary.LittleEndian, "hello world\nsecond line"),
+		"utf16be.txt": enc(binary.BigEndian, "hello world\nsecond line"),
+		"utf8bom.txt": append([]byte{0xEF, 0xBB, 0xBF}, []byte("hello world\nsecond line")...),
+	}
+	for name, content := range cases {
+		f := filepath.Join(t.TempDir(), name)
+		os.WriteFile(f, content, 0o644)
+		out := runTool(t, readFile{}, map[string]any{"path": f})
+		if !strings.Contains(out, "hello world") || !strings.Contains(out, "second line") {
+			t.Errorf("%s: expected decoded text, got %q", name, out)
+		}
+		if strings.Contains(out, "\ufeff") || strings.IndexByte(out, 0) >= 0 {
+			t.Errorf("%s: BOM/NUL leaked into output: %q", name, out)
+		}
 	}
 }
 
@@ -336,6 +370,19 @@ func TestGlobRecursive(t *testing.T) {
 	out3 := runTool(t, globTool{}, map[string]any{"pattern": filepath.Join(dir, "**")})
 	if !strings.Contains(out3, "a.go") || !strings.Contains(out3, "c.txt") {
 		t.Errorf("bare ** should find all files:\n%s", out3)
+	}
+}
+
+func TestGlobForwardSlashPattern(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "sub", "deep"), 0o755)
+	os.WriteFile(filepath.Join(dir, "top.txt"), []byte("x"), 0o644)
+	os.WriteFile(filepath.Join(dir, "sub", "deep", "nested.txt"), []byte("y"), 0o644)
+	t.Chdir(dir)
+
+	out := runTool(t, globTool{}, map[string]any{"pattern": "**/*.txt"})
+	if !strings.Contains(out, "top.txt") || !strings.Contains(out, "nested.txt") {
+		t.Errorf("forward-slash recursive pattern should match every .txt:\n%s", out)
 	}
 }
 

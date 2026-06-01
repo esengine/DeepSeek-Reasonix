@@ -205,7 +205,7 @@ func applyNotebookEdit(nb *notebook, a notebookArgs) (int, string, error) {
 	if a.CellType != "" {
 		nb.cells[idx]["cell_type"] = jsonString(a.CellType)
 	}
-	clearCellOutputs(nb.cells[idx])
+	normalizeOutputs(nb.cells[idx], cellTypeOf(nb.cells[idx]))
 	return idx, "replaced cell source", nil
 }
 
@@ -287,15 +287,23 @@ func setCellSource(cell map[string]json.RawMessage, source string) {
 	cell["source"] = sourceLines(source)
 }
 
-// clearCellOutputs resets a code cell's outputs/execution_count after an edit, so
-// stale results don't linger; no-op for markdown cells.
-func clearCellOutputs(cell map[string]json.RawMessage) {
-	if _, ok := cell["outputs"]; ok {
-		cell["outputs"] = json.RawMessage(`[]`)
+// normalizeOutputs makes a cell's output fields match its (possibly just-retyped)
+// type: a code cell's stale results are cleared; a markdown cell must not carry
+// outputs/execution_count at all, so a code→markdown retype drops them.
+func normalizeOutputs(cell map[string]json.RawMessage, cellType string) {
+	if cellType == "markdown" {
+		delete(cell, "outputs")
+		delete(cell, "execution_count")
+		return
 	}
-	if _, ok := cell["execution_count"]; ok {
-		cell["execution_count"] = json.RawMessage(`null`)
-	}
+	cell["outputs"] = json.RawMessage(`[]`)
+	cell["execution_count"] = json.RawMessage(`null`)
+}
+
+func cellTypeOf(cell map[string]json.RawMessage) string {
+	var t string
+	_ = json.Unmarshal(cell["cell_type"], &t)
+	return t
 }
 
 func cellID(cell map[string]json.RawMessage) string {
