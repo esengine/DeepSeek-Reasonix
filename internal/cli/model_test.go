@@ -10,8 +10,7 @@ import (
 // only those whose provider API key is set.
 func TestModelRefsFromConfig(t *testing.T) {
 	t.Chdir(t.TempDir()) // no reasonix.toml → built-in default providers
-	// The built-in providers split across two keys (DeepSeek, MiMo). With only
-	// DeepSeek set, the picker must list DeepSeek refs and omit the MiMo ones.
+	// Only DeepSeek keyed → MiMo refs must be filtered out.
 	t.Setenv("DEEPSEEK_API_KEY", "test-key")
 	t.Setenv("MIMO_API_KEY", "")
 	refs := modelRefs()

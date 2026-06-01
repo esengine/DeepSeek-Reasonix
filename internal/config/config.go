@@ -506,10 +506,8 @@ func (e *ProviderEntry) APIKey() string {
 	return os.Getenv(e.APIKeyEnv)
 }
 
-// Configured reports whether this provider's API key is set, i.e. its models can
-// actually be selected. It mirrors the key check in Validate, so a provider that
-// fails Configured would also fail Validate at build time — model pickers filter
-// on it to avoid listing models the user hasn't set up yet.
+// Configured reports whether the provider's api_key_env is set — the same check
+// Validate enforces, so pickers can filter on it.
 func (e *ProviderEntry) Configured() bool {
 	return e.APIKey() != ""
 }

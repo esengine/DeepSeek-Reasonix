@@ -579,11 +579,9 @@ type ModelInfo struct {
 
 // Models flattens the configured providers into their (provider, model) pairs —
 // the switcher's options — marking the active one. A vendor with a `models` list
-// yields one entry per model, all sharing the same endpoint/key. Providers whose
-// API key isn't set are skipped: the switcher only offers models you can select.
-// The result is non-nil so it serializes as a JSON array, never null — the
-// frontend reads .length and maps over it directly (an empty list is the normal
-// "no keys configured yet" state, not an error).
+// yields one entry per model, all sharing the same endpoint/key. Unconfigured
+// providers are skipped. Result is non-nil: the frontend reads .length, so a nil
+// slice (JSON null) would crash the switcher on an empty list.
 func (a *App) Models() []ModelInfo {
 	out := []ModelInfo{}
 	cfg, err := config.Load()
