@@ -14,6 +14,7 @@ export const en = {
   "common.submit": "Submit",
   "common.none": "none",
   "common.busyHint": "Finish or stop the current turn first",
+  "common.loading": "Loading…",
 
   // top bar
   "topbar.history": "History",

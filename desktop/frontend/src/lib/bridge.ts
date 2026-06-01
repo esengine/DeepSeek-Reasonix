@@ -151,6 +151,17 @@ export function onUpdaterProgress(cb: (p: UpdateProgress) => void): () => void {
   };
 }
 
+// onReady subscribes to the agent:ready event fired when boot.Build completes.
+// The frontend re-fetches Meta/Context/History when this lands.
+export function onReady(cb: () => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn("agent:ready", () => cb());
+  }
+  // In dev mock, fire immediately since there's no real boot sequence.
+  cb();
+  return () => {};
+}
+
 // app proxies each call to the live binding (or the dev mock only when truly
 // outside the shell), so a late-injected window.go is picked up transparently.
 export const app: AppBindings = new Proxy({} as AppBindings, {

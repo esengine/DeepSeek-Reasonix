@@ -6,7 +6,7 @@
 // update loop — same controller, different renderer.
 
 import { useCallback, useEffect, useReducer, useRef } from "react";
-import { app, onEvent } from "./bridge";
+import { app, onEvent, onReady } from "./bridge";
 import type {
   BalanceInfo,
   ContextInfo,
@@ -397,6 +397,20 @@ export function useController() {
   const stateRef = useRef(state);
   stateRef.current = state;
 
+  // loadSessionData fetches Meta, ContextUsage, and History — called on mount
+  // and again when agent:ready fires (boot.Build completed in the background).
+  const loadSessionData = useCallback(async () => {
+    try {
+      dispatch({ type: "meta", meta: await app.Meta() });
+      dispatch({ type: "context", context: await app.ContextUsage() });
+      const history = await app.History();
+      if (history && history.length) dispatch({ type: "history", messages: history });
+    } catch {
+      // Bound methods unavailable (pre-startup / build error) — ignore; Meta's
+      // startupErr surfaces the reason once it's reachable.
+    }
+  }, []);
+
   useEffect(() => {
     const off = onEvent((e) => {
       dispatch({ type: "event", e });
@@ -423,17 +437,23 @@ export function useController() {
       }
     });
 
-    void (async () => {
-      try {
-        dispatch({ type: "meta", meta: await app.Meta() });
-        dispatch({ type: "context", context: await app.ContextUsage() });
-        const history = await app.History();
-        if (history && history.length) dispatch({ type: "history", messages: history });
-      } catch {
-        // Bound methods unavailable (pre-startup / build error) — ignore; Meta's
-        // startupErr surfaces the reason once it's reachable.
-      }
-    })();
+    // When boot.Build completes asynchronously, the Go side emits agent:ready.
+    // Re-fetch session data so the UI reflects the now-available controller.
+    const offReady = onReady(() => {
+      void loadSessionData();
+      app
+        .Balance()
+        .then((balance) => dispatch({ type: "balance", balance }))
+        .catch(() => {});
+      app
+        .Jobs()
+        .then((jobs) => dispatch({ type: "jobs", jobs }))
+        .catch(() => {});
+    });
+
+    // Initial load — picks up the pre-build Meta (ready=false) and, if the
+    // build already finished, the full session.
+    void loadSessionData();
 
     // Wallet balance is a network call — fetch it independently so it never delays
     // the transcript/meta load (and is a no-op readout when not configured).
@@ -446,8 +466,11 @@ export function useController() {
       .then((jobs) => dispatch({ type: "jobs", jobs }))
       .catch(() => {});
 
-    return off;
-  }, []);
+    return () => {
+      off();
+      offReady();
+    };
+  }, [loadSessionData]);
 
   const send = useCallback((displayText: string, submitText = displayText) => {
     dispatch({ type: "user", text: displayText });

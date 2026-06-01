@@ -210,12 +210,26 @@ export default function App() {
       <UpdateBanner />
 
       <main className="main">
-        <Transcript items={state.items} onPrompt={send} onRewind={rewind} />
+        {state.meta?.ready === false && !state.meta?.startupErr ? (
+          <div className="loading-screen">
+            <div className="loading-screen__spinner" />
+            <span className="loading-screen__text">{t("common.loading")}</span>
+          </div>
+        ) : (
+          <Transcript items={state.items} onPrompt={send} onRewind={rewind} />
+        )}
       </main>
 
       <footer className="footer">
         {showTodos && <TodoPanel todos={todos} onDismiss={() => setDismissedTodo(todoItem!.id)} />}
-        <Composer running={state.running} mode={mode} onSend={handleSend} onCancel={cancel} onCycleMode={cycleMode} />
+        <Composer
+          running={state.running}
+          mode={mode}
+          onSend={handleSend}
+          onCancel={cancel}
+          onCycleMode={cycleMode}
+          disabled={state.meta?.ready === false}
+        />
         <StatusBar
           meta={state.meta}
           context={state.context}
