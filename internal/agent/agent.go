@@ -88,6 +88,10 @@ type Gate interface {
 type ToolHooks interface {
 	PreToolUse(ctx context.Context, name string, args json.RawMessage) (block bool, message string)
 	PostToolUse(ctx context.Context, name string, args json.RawMessage, result string)
+	// PostLLMCall fires after each model turn completes (streaming finishes)
+	// but before reasoning_content is stored. It returns the (possibly
+	// translated) reasoning string — the original when no hook is configured.
+	PostLLMCall(ctx context.Context, reasoning string, turn int) string
 	// SubagentStop fires when a `task` sub-agent finishes (foreground). PreCompact
 	// fires just before a compaction pass and returns extra summary guidance (its
 	// hooks' stdout) to fold into the summary prompt; "" when no hook contributes.
@@ -372,9 +376,8 @@ func (a *Agent) stream(ctx context.Context) (string, string, string, []provider.
 			if chunk.Signature != "" {
 				signature = chunk.Signature
 			}
-			if chunk.Text != "" {
-				a.sink.Emit(event.Event{Kind: event.Reasoning, Text: chunk.Text})
-			}
+			// Buffer silently: PostLLMCall hook will translate the full
+			// reasoning text after streaming completes, then emit once.
 		case provider.ChunkText:
 			text.WriteString(chunk.Text)
 			a.sink.Emit(event.Event{Kind: event.Text, Text: chunk.Text})
@@ -399,13 +402,25 @@ func (a *Agent) stream(ctx context.Context) (string, string, string, []provider.
 			return "", "", "", nil, nil, chunk.Err
 		}
 	}
+	// Run PostLLMCall hook: translate/tweak the full reasoning before it is
+	// emitted to the UI. Moved here (inside stream) so the sink never sees the
+	// untranslated text; the previous position after stream() was too late —
+	// Reasoning events had already been sent chunk-by-chunk.
+	reasoningStr := reasoning.String()
+	if a.hooks != nil && reasoningStr != "" {
+		reasoningStr = a.hooks.PostLLMCall(ctx, reasoningStr, 0)
+	}
+	// Emit the (possibly translated) reasoning as a single event.
+	if reasoningStr != "" {
+		a.sink.Emit(event.Event{Kind: event.Reasoning, Text: reasoningStr})
+	}
 	// Close the text stream: a sink may re-render the streamed raw text as
 	// styled markdown now that it is complete. Reasoning rides along so the sink
 	// has the full chain if it wants it.
-	if text.Len() > 0 || reasoning.Len() > 0 {
-		a.sink.Emit(event.Event{Kind: event.Message, Text: text.String(), Reasoning: reasoning.String()})
+	if text.Len() > 0 || reasoningStr != "" {
+		a.sink.Emit(event.Event{Kind: event.Message, Text: text.String(), Reasoning: reasoningStr})
 	}
-	return text.String(), reasoning.String(), signature, calls, usage, nil
+	return text.String(), reasoningStr, signature, calls, usage, nil
 }
 
 // executeBatch dispatches one model turn's tool calls. A ToolDispatch event is

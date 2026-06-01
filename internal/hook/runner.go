@@ -110,6 +110,27 @@ func (r *Runner) Notification(ctx context.Context, message string) {
 	r.handle(Run(ctx, Payload{Event: Notification, Cwd: r.cwd, Message: message}, r.hooks, r.spawner))
 }
 
+// PostLLMCall fires after every model turn completes but before the
+// reasoning_content is stored in the session. It returns the hook's stdout as
+// the new reasoning text, or the original reasoning if the hook passes with
+// empty stdout / doesn't exist / fails. A non-pass outcome is surfaced via
+// notify but doesn't block.
+func (r *Runner) PostLLMCall(ctx context.Context, reasoning string, turn int) string {
+	if !r.Enabled() {
+		return reasoning
+	}
+	rep := Run(ctx, Payload{Event: PostLLMCall, Cwd: r.cwd, Reasoning: reasoning, Turn: turn}, r.hooks, r.spawner)
+	r.handle(rep)
+	for _, o := range rep.Outcomes {
+		if o.Decision == DecisionPass {
+			if s := strings.TrimSpace(o.Stdout); s != "" {
+				return s
+			}
+		}
+	}
+	return reasoning
+}
+
 // PreCompact fires just before a compaction pass and returns the concatenated
 // stdout of its hooks as extra summary guidance, so a hook can steer what the
 // summary keeps. Non-pass outcomes are surfaced via notify.
