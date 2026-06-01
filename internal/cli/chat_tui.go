@@ -95,9 +95,14 @@ type chatTUI struct {
 	// transcript holds every finalized line commitLine emits; the viewport
 	// renders a scrollable window of it (alt-screen owns the grid, so there's no
 	// native terminal scrollback). sel is the live left-drag text selection.
-	transcript []string
-	viewport   viewport.Model
-	sel        selection
+	transcript   []string
+	wrappedLines []string // transcript wrapped to viewport width (rendered each frame)
+	viewport     viewport.Model
+	sel          selection
+	// autoScroll drives edge-drag scrolling: -1 up, +1 down, 0 off. dragX is the
+	// column the drag is held at, so the ticker can extend the selection head.
+	autoScroll int
+	dragX      int
 
 	// The user bubble for an in-flight turn is deferred, not echoed on Enter: it's
 	// held in pendingBubble and committed to scrollback only when the first
@@ -343,6 +348,7 @@ func (m chatTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	wasAtBottom := m.viewport.AtBottom()
 	prevLines := len(m.transcript)
 	prevWidth := m.width
+	prevYOff := m.viewport.YOffset()
 
 	next, cmd := m.update(msg)
 	cm := next.(chatTUI)
@@ -356,10 +362,19 @@ func (m chatTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Re-feed only when the content grew or the width changed (re-wrapping is
 	// the expensive part); a bare scroll or spinner tick keeps the offset.
 	if len(cm.transcript) != prevLines || cm.width != prevWidth {
-		cm.viewport.SetContent(clampWidth(strings.Join(cm.transcript, "\n"), contentW))
+		wrapped := wrapTranscript(strings.Join(cm.transcript, "\n"), contentW)
+		cm.viewport.SetContent(wrapped)
+		cm.wrappedLines = strings.Split(wrapped, "\n")
 		if wasAtBottom {
 			cm.viewport.GotoBottom() // tail-follow: stay pinned to newest output
 		}
+	}
+	// Any viewport scroll (wheel, PgUp/PgDn, edge auto-scroll, or tail-follow to
+	// newest output) shifts the whole window. Some terminals (Warp) mishandle
+	// the renderer's scroll/insert-line optimization and strand stale rows, so
+	// force a full clear+redraw whenever the offset actually moved.
+	if cm.viewport.YOffset() != prevYOff {
+		return cm, tea.Batch(tea.ClearScreen, cmd)
 	}
 	return cm, cmd
 }
@@ -405,21 +420,53 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Button == tea.MouseLeft && msg.Y < m.viewport.Height() {
 			at := m.transcriptCaret(msg.X, msg.Y)
 			m.sel = selection{active: true, anchor: at, head: at}
+			m.autoScroll = 0
 		}
 		return m, nil
 
 	case tea.MouseMotionMsg:
 		// Drag extends the live selection (CellMotion only reports motion while
-		// a button is held, so this is a drag).
+		// a button is held, so this is a drag). A drag held against the top or
+		// bottom edge starts an auto-scroll ticker so the selection can run past
+		// the visible window.
 		if m.sel.active {
 			m.sel.head = m.transcriptCaret(msg.X, msg.Y)
+			m.dragX = msg.X
+			prev := m.autoScroll
+			m.autoScroll = edgeScrollDir(msg.Y, m.viewport.Height())
+			if m.autoScroll != 0 && prev == 0 {
+				return m, autoScrollTick()
+			}
 		}
 		return m, nil
+
+	case autoScrollMsg:
+		// One edge-scroll step: scroll a single line, drag the selection head to
+		// the edge row, and keep ticking until the drag ends, leaves the edge, or
+		// the viewport can't scroll further (so it can't run away to the end).
+		if !m.sel.active || m.autoScroll == 0 {
+			return m, nil
+		}
+		edgeY := 0
+		if m.autoScroll > 0 {
+			m.viewport.ScrollDown(1)
+			edgeY = m.viewport.Height() - 1
+		} else {
+			m.viewport.ScrollUp(1)
+		}
+		m.sel.head = m.transcriptCaret(m.dragX, edgeY)
+		// Stop at the boundary so a held edge can't run away to the very end.
+		if (m.autoScroll > 0 && m.viewport.AtBottom()) || (m.autoScroll < 0 && m.viewport.AtTop()) {
+			m.autoScroll = 0
+			return m, nil
+		}
+		return m, autoScrollTick()
 
 	case tea.MouseReleaseMsg:
 		// Release finalizes the selection; the highlight stays on as the visual
 		// "what's selected" cue and Ctrl+C copies it. A plain click (no drag)
 		// clears any prior selection.
+		m.autoScroll = 0 // stop edge auto-scroll
 		if msg.Button == tea.MouseLeft && m.sel.active && m.sel.empty() {
 			m.sel = selection{}
 		}
@@ -965,7 +1012,10 @@ func (m chatTUI) View() tea.View {
 	// Fixed two-row status: line 1 = mode + keybinding/state hints, line 2 = live
 	// data. Each row is clamped to width independently so neither wraps.
 	statusBlock := clampStatusLine(status, boxW) + "\n" + clampStatusLine(dataLine, boxW)
-	parts = append(parts, box, statusStyle.Render(statusBlock))
+	// Pad to the full width so the status rows overwrite the whole line — an
+	// unpadded (short) status leaves stale cells from the prior frame on the
+	// right (alt-screen only writes the cells the frame actually contains).
+	parts = append(parts, box, statusStyle.Width(boxW).MaxWidth(boxW).Render(statusBlock))
 
 	// Full-screen frame: the transcript viewport on top (it pads to exactly its
 	// height), the pinned bottom region beneath. Alt-screen owns the grid, so

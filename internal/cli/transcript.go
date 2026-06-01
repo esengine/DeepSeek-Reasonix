@@ -2,6 +2,7 @@ package cli
 
 import (
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -9,11 +10,44 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
+// wrapTranscript wraps the joined transcript to width for the viewport, keeping
+// SGR balanced across wrap points. ansi.Hardwrap leaves a style that spans a
+// break open at the line end (e.g. a wrapped dim link tail), which bleeds the
+// attribute into the padding and the next row on stricter terminals (Warp).
+// lipgloss closes the active style at each line end and reopens it at the next.
+func wrapTranscript(s string, width int) string {
+	if width <= 0 {
+		return s
+	}
+	return lipgloss.NewStyle().Width(width).Render(s)
+}
+
 // copyToClipboard writes text to the system clipboard off the event loop.
 func copyToClipboard(text string) tea.Cmd {
 	return func() tea.Msg {
 		_ = clipboard.WriteAll(text)
 		return nil
+	}
+}
+
+// autoScrollMsg drives one step of edge-drag scrolling while a selection is held
+// against the top or bottom of the transcript.
+type autoScrollMsg struct{}
+
+func autoScrollTick() tea.Cmd {
+	return tea.Tick(80*time.Millisecond, func(time.Time) tea.Msg { return autoScrollMsg{} })
+}
+
+// edgeScrollDir reports the auto-scroll direction for a drag at screen row y in
+// a viewport of `height` rows: -1 at the top edge, +1 at the bottom, 0 between.
+func edgeScrollDir(y, height int) int {
+	switch {
+	case y <= 0:
+		return -1
+	case y >= height-1:
+		return 1
+	default:
+		return 0
 	}
 }
 
@@ -39,48 +73,45 @@ func (s selection) ordered() (start, end selPos) {
 func (s selection) empty() bool { return s.anchor == s.head }
 
 var (
-	selStyle      = lipgloss.NewStyle().Reverse(true)
-	scrollThumb   = accent("█")
-	scrollTrack   = dim("│")
-	scrollNoTrack = " "
+	selStyle         = lipgloss.NewStyle().Reverse(true)
+	scrollThumbStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("173"))
+	scrollTrackStyle = lipgloss.NewStyle().Faint(true)
 )
 
 // renderTranscript draws the viewport's visible window with a scrollbar in the
-// last column and the active selection reverse-highlighted. It reads scroll
-// state from the viewport but renders the cells itself, so selection styling
-// never fights the viewport's own search-highlight machinery.
+// last column and the active selection reverse-highlighted. The content lines
+// (m.wrappedLines) are already padded to cw by wrapTranscript, so this stays
+// cheap per frame — important because a drag re-renders on every mouse move.
 func (m chatTUI) renderTranscript() string {
 	h := m.viewport.Height()
 	if h <= 0 {
 		return ""
 	}
 	cw := m.viewport.Width() // content width; the scrollbar occupies one more column
-	lines := strings.Split(m.viewport.GetContent(), "\n")
+	lines := m.wrappedLines
 	total := len(lines)
 	yoff := m.viewport.YOffset()
 	start, end := m.sel.ordered()
 	thumbStart, thumbSize := scrollbarThumb(h, yoff, total)
+	blank := strings.Repeat(" ", cw)
 
-	var b strings.Builder
+	rows := make([]string, h)
+	bar := make([]string, h)
 	for r := 0; r < h; r++ {
-		if r > 0 {
-			b.WriteByte('\n')
-		}
 		idx := yoff + r
-		line := ""
+		line := blank // off-content rows fill to width
 		if idx >= 0 && idx < total {
-			line = lines[idx]
+			line = lines[idx] // already cw-wide from wrapTranscript
 		}
-		line = padRight(line, cw)
 		if m.sel.active && !m.sel.empty() {
 			if lo, hi, ok := selSpan(idx, start, end, cw); ok {
 				line = lipgloss.StyleRanges(line, lipgloss.NewRange(lo, hi, selStyle))
 			}
 		}
-		b.WriteString(line)
-		b.WriteString(scrollbarCell(r, total, h, thumbStart, thumbSize))
+		rows[r] = line
+		bar[r] = scrollbarCell(r, total, h, thumbStart, thumbSize)
 	}
-	return b.String()
+	return lipgloss.JoinHorizontal(lipgloss.Top, strings.Join(rows, "\n"), strings.Join(bar, "\n"))
 }
 
 // selSpan returns the [lo, hi) visual-column span of the selection on content
@@ -112,7 +143,7 @@ func (m chatTUI) selectedText() string {
 	if !m.sel.active || m.sel.empty() {
 		return ""
 	}
-	lines := strings.Split(m.viewport.GetContent(), "\n")
+	lines := m.wrappedLines
 	start, end := m.sel.ordered()
 	var out []string
 	for idx := start.line; idx <= end.line && idx < len(lines); idx++ {
@@ -148,12 +179,12 @@ func scrollbarThumb(height, yoff, total int) (start, size int) {
 
 func scrollbarCell(row, total, height, thumbStart, thumbSize int) string {
 	if total <= height {
-		return scrollNoTrack
+		return " "
 	}
 	if row >= thumbStart && row < thumbStart+thumbSize {
-		return scrollThumb
+		return scrollThumbStyle.Render("█")
 	}
-	return scrollTrack
+	return scrollTrackStyle.Render("│")
 }
 
 // transcriptCaret maps a screen cell (x, y) in the transcript region to an

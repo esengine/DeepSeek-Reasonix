@@ -15,6 +15,19 @@ func TestScrollbarThumb(t *testing.T) {
 	}
 }
 
+func TestEdgeScrollDir(t *testing.T) {
+	const h = 10
+	if got := edgeScrollDir(0, h); got != -1 {
+		t.Errorf("top edge dir = %d, want -1", got)
+	}
+	if got := edgeScrollDir(h-1, h); got != 1 {
+		t.Errorf("bottom edge dir = %d, want 1", got)
+	}
+	if got := edgeScrollDir(h/2, h); got != 0 {
+		t.Errorf("middle dir = %d, want 0", got)
+	}
+}
+
 func TestSelSpan(t *testing.T) {
 	start, end, cw := selPos{line: 1, col: 3}, selPos{line: 3, col: 5}, 20
 	for _, tc := range []struct {
@@ -37,8 +50,7 @@ func TestSelSpan(t *testing.T) {
 
 func TestSelectedTextMultiLine(t *testing.T) {
 	m := newTestChatTUI()
-	m.viewport.SetWidth(20)
-	m.viewport.SetContent("hello world\nsecond line\nthird row")
+	m.wrappedLines = []string{"hello world", "second line", "third row"}
 	m.sel = selection{active: true, anchor: selPos{line: 0, col: 6}, head: selPos{line: 2, col: 5}}
 
 	if got, want := m.selectedText(), "world\nsecond line\nthird"; got != want {
