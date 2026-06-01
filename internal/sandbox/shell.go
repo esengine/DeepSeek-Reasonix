@@ -40,22 +40,34 @@ type Shell struct {
 // is usually absent from PATH, it probes the Git-for-Windows install locations
 // and only then falls back to PowerShell so the tool still functions.
 func ResolveShell() Shell {
-	if p, err := exec.LookPath("bash"); err == nil {
+	return resolveShell(runtime.GOOS, exec.LookPath, fileExists)
+}
+
+// resolveShell is ResolveShell with its environment lookups injected, so the
+// decision table — including the no-bash PowerShell fallback that can't be
+// triggered on a host that has bash installed — is deterministically testable.
+func resolveShell(goos string, lookPath func(string) (string, error), exists func(string) bool) Shell {
+	if p, err := lookPath("bash"); err == nil {
 		return Shell{Kind: ShellBash, Path: p}
 	}
-	if runtime.GOOS == "windows" {
+	if goos == "windows" {
 		for _, p := range windowsBashCandidates() {
-			if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
+			if exists(p) {
 				return Shell{Kind: ShellBash, Path: p}
 			}
 		}
 		for _, name := range []string{"pwsh", "powershell"} {
-			if p, err := exec.LookPath(name); err == nil {
+			if p, err := lookPath(name); err == nil {
 				return Shell{Kind: ShellPowerShell, Path: p}
 			}
 		}
 	}
 	return Shell{Kind: ShellBash, Path: "bash"}
+}
+
+func fileExists(p string) bool {
+	fi, err := os.Stat(p)
+	return err == nil && !fi.IsDir()
 }
 
 // windowsBashCandidates lists the bash.exe paths a Git-for-Windows install

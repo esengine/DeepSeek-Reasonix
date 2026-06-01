@@ -1,6 +1,7 @@
 package sandbox
 
 import (
+	"os/exec"
 	"runtime"
 	"testing"
 )
@@ -77,6 +78,41 @@ func TestCommandPowerShell(t *testing.T) {
 	for i := range want {
 		if cmd[i] != want[i] {
 			t.Fatalf("argv[%d] = %q, want %q", i, cmd[i], want[i])
+		}
+	}
+}
+
+func TestResolveShellDecisionTable(t *testing.T) {
+	onPath := func(names ...string) func(string) (string, error) {
+		set := map[string]bool{}
+		for _, n := range names {
+			set[n] = true
+		}
+		return func(name string) (string, error) {
+			if set[name] {
+				return `C:\fake\` + name + ".exe", nil
+			}
+			return "", exec.ErrNotFound
+		}
+	}
+	cases := []struct {
+		name     string
+		goos     string
+		lookPath func(string) (string, error)
+		exists   func(string) bool
+		wantKind ShellKind
+	}{
+		{"bash on PATH wins", "windows", onPath("bash", "powershell"), func(string) bool { return false }, ShellBash},
+		{"no bash, git-bash on disk", "windows", onPath("powershell"), func(string) bool { return true }, ShellBash},
+		{"no bash anywhere, pwsh", "windows", onPath("pwsh", "powershell"), func(string) bool { return false }, ShellPowerShell},
+		{"no bash, only powershell", "windows", onPath("powershell"), func(string) bool { return false }, ShellPowerShell},
+		{"windows, nothing found", "windows", onPath(), func(string) bool { return false }, ShellBash},
+		{"linux, no bash → no PS fallback", "linux", onPath("powershell"), func(string) bool { return true }, ShellBash},
+	}
+	for _, c := range cases {
+		got := resolveShell(c.goos, c.lookPath, c.exists)
+		if got.Kind != c.wantKind {
+			t.Errorf("%s: kind = %s, want %s (path=%s)", c.name, got.Kind, c.wantKind, got.Path)
 		}
 	}
 }
