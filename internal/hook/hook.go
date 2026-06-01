@@ -33,6 +33,12 @@ const (
 	PostToolUse      Event = "PostToolUse"
 	UserPromptSubmit Event = "UserPromptSubmit"
 	Stop             Event = "Stop"
+	// PostLLMCall fires after every model turn completes (streaming finishes) but
+	// before the reasoning_content is stored in the session. The hook receives the
+	// raw reasoning text in the payload; its stdout, if non-empty on exit 0,
+	// replaces the reasoning stored and displayed to the user. It can't block — a
+	// non-zero exit or empty stdout leaves the reasoning unchanged.
+	PostLLMCall Event = "PostLLMCall"
 	// SessionStart fires once when a session becomes active (fresh, resumed, or
 	// after /new). SessionEnd fires when it is closed or rotated. SubagentStop
 	// fires when a `task` sub-agent finishes. Notification fires when the agent
@@ -48,6 +54,7 @@ const (
 // Events is every event, in a stable order — drives loading and `/hooks`.
 var Events = []Event{
 	PreToolUse, PostToolUse, UserPromptSubmit, Stop,
+	PostLLMCall,
 	SessionStart, SessionEnd, SubagentStop, Notification, PreCompact,
 }
 
@@ -225,8 +232,9 @@ type Payload struct {
 	Prompt        string          `json:"prompt,omitempty"`
 	LastAssistant string          `json:"lastAssistantText,omitempty"`
 	Turn          int             `json:"turn,omitempty"`
-	Message       string          `json:"message,omitempty"` // Notification: what needs attention
-	Trigger       string          `json:"trigger,omitempty"` // PreCompact: "auto" | "manual"
+	Message       string          `json:"message,omitempty"`   // Notification: what needs attention
+	Trigger       string          `json:"trigger,omitempty"`   // PreCompact: "auto" | "manual"
+	Reasoning     string          `json:"reasoning,omitempty"` // PostLLMCall: the model's raw reasoning text
 }
 
 // Decision is a single hook invocation's verdict.

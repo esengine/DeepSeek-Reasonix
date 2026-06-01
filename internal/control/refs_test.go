@@ -100,16 +100,19 @@ func TestReadFileRef(t *testing.T) {
 		t.Errorf("big file should be truncated, got len=%d err=%v", len(got), err)
 	}
 
-	// Directory: one-level listing including a trailing slash for subdirs.
+	// Directory: recursive listing with relative paths including a trailing slash for subdirs.
 	if err := os.Mkdir(filepath.Join(dir, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "sub", "nested.txt"), []byte("nested"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	got, isDir, err := readFileRef(dir)
 	if err != nil || !isDir {
 		t.Fatalf("dir = (isDir=%v, err=%v)", isDir, err)
 	}
-	if !strings.Contains(got, "hello.txt") || !strings.Contains(got, "sub/") {
-		t.Errorf("dir listing = %q, want hello.txt and sub/", got)
+	if !strings.Contains(got, "hello.txt") || !strings.Contains(got, "sub/") || !strings.Contains(got, "sub/nested.txt") {
+		t.Errorf("dir listing = %q, want hello.txt, sub/, and sub/nested.txt", got)
 	}
 
 	// Missing path: error.

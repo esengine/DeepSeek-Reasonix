@@ -147,6 +147,36 @@ export interface DirEntry {
   isDir: boolean;
 }
 
+// MCP & Skills drawer (desktop/app.go Capabilities) — the GUI counterpart to
+// /mcp + /skill: connected/failed servers and discoverable skills.
+export interface ServerView {
+  name: string;
+  transport: string;
+  status: "connected" | "failed" | "disabled";
+  tools: number;
+  prompts: number;
+  resources: number;
+  error?: string;
+}
+export interface SkillView {
+  name: string;
+  description: string;
+  scope: string;
+  runAs: string;
+}
+export interface CapabilitiesView {
+  servers: ServerView[];
+  skills: SkillView[];
+}
+export interface MCPServerInput {
+  name: string;
+  transport: string; // stdio | http | sse
+  command: string;
+  args: string[];
+  url: string;
+  env: Record<string, string>;
+}
+
 export interface ModelInfo {
   ref: string; // "provider/model" — pass to SetModel
   provider: string;

@@ -18,6 +18,10 @@ type stubHooks struct {
 	postSeen      []string
 	preCompactOut string   // returned from PreCompact (extra summary guidance)
 	subagentSeen  []string // last-answer text passed to each SubagentStop
+	hasPostLLM    bool     // whether HasPostLLMCall reports a PostLLMCall hook
+	postLLMOut    string   // replacement returned from PostLLMCall (when hasPostLLM)
+	postLLMSeen   []string // reasoning text each PostLLMCall received
+	postLLMTurns  []int    // turn number each PostLLMCall received
 }
 
 func (h *stubHooks) PreToolUse(_ context.Context, name string, _ json.RawMessage) (bool, string) {
@@ -36,6 +40,17 @@ func (h *stubHooks) SubagentStop(_ context.Context, last string) {
 	h.subagentSeen = append(h.subagentSeen, last)
 }
 func (h *stubHooks) PreCompact(context.Context, string) string { return h.preCompactOut }
+
+func (h *stubHooks) PostLLMCall(_ context.Context, reasoning string, turn int) string {
+	h.postLLMSeen = append(h.postLLMSeen, reasoning)
+	h.postLLMTurns = append(h.postLLMTurns, turn)
+	if h.hasPostLLM && h.postLLMOut != "" {
+		return h.postLLMOut
+	}
+	return reasoning
+}
+
+func (h *stubHooks) HasPostLLMCall() bool { return h.hasPostLLM }
 
 // TestSubagentStopFiresForForegroundTask checks SubagentStop fires (with the
 // sub-agent's answer) when a foreground `task` call completes, but not for a

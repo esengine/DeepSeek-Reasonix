@@ -222,43 +222,56 @@ func TestCacheHitClimbsWithoutCompaction(t *testing.T) {
 	}
 }
 
-// TestCacheHitCollapsesOnCompaction is the smoking gun: a long tool-loop with
-// compaction enabled. maybeCompact only runs after a tool-call step (agent.go
-// returns before it on a no-tool turn), so we drive a steady stream of tool
-// calls. Each time the prompt nears the window the prefix is rewritten to
-// system + summary + tail and the hit rate craters on the very next step.
-func TestCacheHitCollapsesOnCompaction(t *testing.T) {
+// TestCacheHitSurvivesTooSmallWindow drives a long tool-loop against a window so
+// small a single turn can't be summarized under it — the misconfigured regime
+// that used to make compaction rewrite the prefix every step, cratering the
+// cache turn after turn. The stuck guard now detects that compaction can't make
+// progress, pauses it (with a notice), and lets the prefix grow append-only — so
+// the hit rate recovers and stays high instead of collapsing repeatedly.
+func TestCacheHitSurvivesTooSmallWindow(t *testing.T) {
 	mock := &mockDeepSeek{t: t, withTools: true, reasoning: longReasoning, toolRounds: 30}
 	srv := httptest.NewServer(http.HandlerFunc(mock.handler))
 	defer srv.Close()
 
-	// Small window + small recentKeep so compaction fires several times over the
-	// loop — exactly the regime a misconfigured context_window puts a long
-	// session in.
 	a, sink := newAgent(t, srv.URL, mock.tools(), 900 /*window tok*/, 4 /*recentKeep*/)
 
-	// One Run; the model keeps calling the tool, so the loop spans 31 steps.
 	if err := a.Run(context.Background(), strings.Repeat("please consider this requirement. ", 6)); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
-	t.Logf("==== hit-rate curve, compaction ON (window=900 tok, recentKeep=4) ====")
+	t.Logf("==== hit-rate curve, too-small window (900 tok) ====")
 	collapses := 0
 	for i, u := range sink.usages {
 		r := hitRate(u)
 		marker := ""
 		if i > 0 && r+20 < hitRate(sink.usages[i-1]) {
-			marker = "   <<< COLLAPSED — prefix rewritten by compaction"
+			marker = "   <<< collapse"
 			collapses++
 		}
 		t.Logf("step %2d: prompt=%5d hit=%5d miss=%4d → cache %3d%%%s", i, u.PromptTokens, u.CacheHitTokens, u.CacheMissTokens, r, marker)
 	}
+
+	paused := false
 	for _, n := range sink.notices {
 		t.Logf("notice: %s", n)
+		if strings.Contains(n, "Auto-compaction paused") {
+			paused = true
+		}
 	}
-	t.Logf("compaction-induced hit-rate collapses: %d", collapses)
-	if collapses == 0 {
-		t.Errorf("expected compaction to crater the hit rate at least once, saw none")
+
+	// The guard caps the damage: a couple of compactions at most, not one per step.
+	if collapses > 2 {
+		t.Errorf("compaction cratered the cache %d times; the stuck guard should cap it at ≤2", collapses)
+	}
+	if !paused {
+		t.Errorf("expected an auto-compaction-paused notice for the too-small window")
+	}
+	// Once paused, the prefix grows append-only again, so the tail of the run
+	// recovers to a high, stable hit rate instead of collapsing every step.
+	if n := len(sink.usages); n >= 6 {
+		if tail := tailAverage(usageRates(sink.usages), 5); tail < 85 {
+			t.Errorf("tail hit rate after the guard kicked in = %d%%, want ≥85%%", tail)
+		}
 	}
 }
 

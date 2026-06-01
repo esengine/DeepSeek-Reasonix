@@ -23,6 +23,7 @@ import (
 	"reasonix/internal/event"
 	"reasonix/internal/hook"
 	"reasonix/internal/jobs"
+	"reasonix/internal/lsp"
 	"reasonix/internal/memory"
 	"reasonix/internal/outputstyle"
 	"reasonix/internal/permission"
@@ -186,6 +187,19 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	}
 	cleanup := pluginHost.Close
 
+	// LSP tools resolve their servers on PATH and spawn lazily on first query, so
+	// registering them is cheap even when no server is installed (a query then
+	// returns an install hint). The manager is session-scoped; chain its shutdown
+	// into the controller's cleanup so servers stop with the session, not the turn.
+	if cfg.LSP.Enabled {
+		lspMgr := lsp.NewManager(cwd, LSPSpecs(cfg.LSP))
+		for _, t := range lsp.Tools(lspMgr) {
+			reg.Add(t)
+		}
+		prev := cleanup
+		cleanup = func() { prev(); lspMgr.Close() }
+	}
+
 	maxSteps := cfg.Agent.MaxSteps
 	if opts.MaxSteps > 0 {
 		maxSteps = opts.MaxSteps
@@ -313,6 +327,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 
 	var runner agent.Runner = executor
 	label := entry.Model
+	var classifier *control.ProviderAutoPlanClassifier
 
 	// Two-model collaboration: a distinct planner_model wraps the executor in a
 	// Coordinator with its own session, kept separate for cache stability.
@@ -330,6 +345,18 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			runner = agent.NewCoordinator(plannerProv, plannerSess, pe.Price, executor, cfg.Agent.Temperature, sink)
 			label = entry.Model + " + planner " + pe.Model
 		}
+	}
+	if !strings.EqualFold(strings.TrimSpace(cfg.Agent.AutoPlan), "off") && cfg.Agent.AutoPlanClassifier != "" {
+		cm := cfg.Agent.AutoPlanClassifier
+		ce, ok := cfg.ResolveModel(cm)
+		if !ok {
+			return nil, fmt.Errorf("auto_plan_classifier %q is not a configured provider", cm)
+		}
+		classifierProv, err := NewProvider(ce)
+		if err != nil {
+			return nil, fmt.Errorf("auto_plan_classifier %q: %w", cm, err)
+		}
+		classifier = control.NewProviderAutoPlanClassifier(classifierProv)
 	}
 
 	return control.New(control.Options{
@@ -352,6 +379,8 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		Registry:      reg,
 		PluginCtx:     ctx,
 		WorkspaceRoot: cwd,
+		AutoPlan:      cfg.Agent.AutoPlan,
+		Classifier:    classifier,
 	}), nil
 }
 
@@ -487,6 +516,39 @@ func MCPStartupNotice(failures []plugin.Failure) (text string, ok bool) {
 	}
 	return fmt.Sprintf("%d MCP server(s) failed to start: %s%s — run /mcp for details",
 		len(failures), strings.Join(names, ", "), more), true
+}
+
+// LSPSpecs returns the language → server map: the built-in defaults overlaid with
+// any user overrides. A user entry may set only the fields it wants to change;
+// empty fields keep the default for that language.
+func LSPSpecs(cfg config.LSPConfig) map[string]lsp.ServerSpec {
+	specs := lsp.DefaultSpecs()
+	for lang, s := range cfg.Servers {
+		spec := specs[lang]
+		if s.Command != "" {
+			spec.Command = s.Command
+		}
+		if s.Args != nil {
+			spec.Args = s.Args
+		}
+		if s.Env != nil {
+			spec.Env = s.Env
+		}
+		if s.LanguageID != "" {
+			spec.LanguageID = s.LanguageID
+		}
+		if s.Extensions != nil {
+			spec.Extensions = s.Extensions
+		}
+		if s.InstallHint != "" {
+			spec.InstallHint = s.InstallHint
+		}
+		if spec.LanguageID == "" {
+			spec.LanguageID = lang
+		}
+		specs[lang] = spec
+	}
+	return specs
 }
 
 func providerNames(cfg *config.Config) string {

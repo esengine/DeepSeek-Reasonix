@@ -144,6 +144,53 @@ func TestRunnerStopWithHooks(t *testing.T) {
 	r.Stop(context.Background(), "done", 1)
 }
 
+// --- Runner.PostLLMCall ---
+
+func TestRunnerHasPostLLMCall(t *testing.T) {
+	with := NewRunner([]ResolvedHook{{HookConfig: HookConfig{Command: "x"}, Event: PostLLMCall}}, "/tmp", nil, nil)
+	if !with.HasPostLLMCall() {
+		t.Error("a configured PostLLMCall hook should report HasPostLLMCall")
+	}
+	without := NewRunner([]ResolvedHook{{HookConfig: HookConfig{Command: "x"}, Event: Stop}}, "/tmp", nil, nil)
+	if without.HasPostLLMCall() {
+		t.Error("only a Stop hook should not report HasPostLLMCall")
+	}
+	if (*Runner)(nil).HasPostLLMCall() {
+		t.Error("nil runner should report no PostLLMCall hook")
+	}
+}
+
+func TestRunnerPostLLMCallReplacesReasoning(t *testing.T) {
+	hooks := []ResolvedHook{{HookConfig: HookConfig{Command: "translate"}, Event: PostLLMCall}}
+	spawner := func(_ context.Context, in SpawnInput) SpawnResult {
+		return SpawnResult{ExitCode: 0, Stdout: "  译文  "}
+	}
+	r := NewRunner(hooks, "/tmp", spawner, nil)
+	if got := r.PostLLMCall(context.Background(), "raw reasoning", 2); got != "译文" {
+		t.Fatalf("PostLLMCall = %q, want trimmed hook stdout", got)
+	}
+}
+
+func TestRunnerPostLLMCallKeepsOriginal(t *testing.T) {
+	cases := []struct {
+		name  string
+		hooks []ResolvedHook
+		spawn SpawnResult
+	}{
+		{"no PostLLMCall hook", []ResolvedHook{{HookConfig: HookConfig{Command: "x"}, Event: Stop}}, SpawnResult{ExitCode: 0, Stdout: "ignored"}},
+		{"empty stdout", []ResolvedHook{{HookConfig: HookConfig{Command: "x"}, Event: PostLLMCall}}, SpawnResult{ExitCode: 0, Stdout: "   "}},
+		{"non-zero exit", []ResolvedHook{{HookConfig: HookConfig{Command: "x"}, Event: PostLLMCall}}, SpawnResult{ExitCode: 1, Stdout: "should be ignored"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := NewRunner(tc.hooks, "/tmp", func(context.Context, SpawnInput) SpawnResult { return tc.spawn }, nil)
+			if got := r.PostLLMCall(context.Background(), "raw", 1); got != "raw" {
+				t.Fatalf("PostLLMCall = %q, want original reasoning preserved", got)
+			}
+		})
+	}
+}
+
 // --- FormatOutcome ---
 
 func TestFormatOutcomePass(t *testing.T) {

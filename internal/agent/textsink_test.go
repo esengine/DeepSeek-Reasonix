@@ -9,8 +9,7 @@ import (
 )
 
 // TestTextSinkReproducesInlineOutput pins the byte-exact rendering of a turn's
-// event stream with no markdown renderer (the piped / chat-bridge path). This
-// is the same output the agent used to print inline before the event refactor.
+// event stream with no markdown renderer (the piped / chat-bridge path).
 func TestTextSinkReproducesInlineOutput(t *testing.T) {
 	var b strings.Builder
 	s := NewTextSink(&b, nil, 80)
@@ -30,8 +29,6 @@ func TestTextSinkReproducesInlineOutput(t *testing.T) {
 	s.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "response truncated: hit max output tokens"})
 
 	want := "\x1b[2m  ▎ thinking\x1b[0m\n" + // reasoning header
-		"\x1b[2mlet me think\x1b[0m" + // reasoning delta
-		"\n" + // reasoning→answer separator
 		"Hello" + // answer delta
 		"\n" + // Message close (no renderer)
 		"  · 1200 tok · in 1000 (900 cached / 100 new) · out 200\n" + // usage
@@ -43,6 +40,25 @@ func TestTextSinkReproducesInlineOutput(t *testing.T) {
 
 	if got := b.String(); got != want {
 		t.Errorf("TextSink output mismatch:\n got: %q\nwant: %q", got, want)
+	}
+}
+
+func TestTextSinkCanShowReasoningInVerboseMode(t *testing.T) {
+	var b strings.Builder
+	s := NewTextSink(&b, nil, 80)
+	s.SetShowReasoning(true)
+
+	s.Emit(event.Event{Kind: event.TurnStarted})
+	s.Emit(event.Event{Kind: event.Reasoning, Text: "let me think"})
+	s.Emit(event.Event{Kind: event.Text, Text: "Hello"})
+	s.Emit(event.Event{Kind: event.Message, Text: "Hello", Reasoning: "let me think"})
+
+	want := "\x1b[2m  ▎ thinking\x1b[0m\n" +
+		"\x1b[2mlet me think\x1b[0m" +
+		"\n" +
+		"Hello\n"
+	if got := b.String(); got != want {
+		t.Errorf("verbose TextSink output mismatch:\n got: %q\nwant: %q", got, want)
 	}
 }
 

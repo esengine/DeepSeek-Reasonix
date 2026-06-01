@@ -36,6 +36,16 @@ func RenderTOML(c *Config) string {
 	}
 	fmt.Fprintf(&b, "max_steps   = %d\n", c.Agent.MaxSteps)
 	fmt.Fprintf(&b, "temperature = %s\n", formatFloat(c.Agent.Temperature))
+	autoPlan := c.Agent.AutoPlan
+	if autoPlan == "" {
+		autoPlan = "ask"
+	}
+	fmt.Fprintf(&b, "auto_plan   = %q   # off|ask|on; ask/on auto-enter plan mode for complex tasks\n", autoPlan)
+	if c.Agent.AutoPlanClassifier != "" {
+		fmt.Fprintf(&b, "auto_plan_classifier = %q   # optional provider/model for borderline auto-plan decisions\n", c.Agent.AutoPlanClassifier)
+	} else {
+		b.WriteString("# auto_plan_classifier = \"deepseek-flash\"   # optional; only used for borderline tasks\n")
+	}
 	if c.Agent.PlannerModel != "" {
 		fmt.Fprintf(&b, "planner_model = %q   # low-frequency planner (two-model collaboration)\n", c.Agent.PlannerModel)
 	} else {
