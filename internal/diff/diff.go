@@ -60,7 +60,14 @@ func Build(path, oldText, newText string, kind Kind) Change {
 
 	oldLines, oldEOL := splitLines(oldText)
 	newLines, newEOL := splitLines(newText)
-	ops := myers(oldLines, newLines)
+	ops, ok := myers(oldLines, newLines)
+	if !ok {
+		// Change too large for an O(N²) line diff (a big rewrite). Give cheap,
+		// order-insensitive tallies and omit the unreadable diff.
+		c.Added, c.Removed = approxTally(oldLines, newLines)
+		c.Diff = "(diff omitted: change too large to render — +" + itoa(c.Added) + " / -" + itoa(c.Removed) + " lines)"
+		return c
+	}
 
 	for _, op := range ops {
 		switch op.typ {
@@ -72,6 +79,26 @@ func Build(path, oldText, newText string, kind Kind) Change {
 	}
 	c.Diff = unified(path, ops, oldEOL, newEOL, defaultContext)
 	return c
+}
+
+// approxTally counts added/removed lines by multiset difference — order-
+// insensitive but O(n+m), used when the exact diff is skipped for being too large.
+func approxTally(oldLines, newLines []string) (added, removed int) {
+	counts := make(map[string]int, len(oldLines))
+	for _, l := range oldLines {
+		counts[l]++
+	}
+	for _, l := range newLines {
+		if counts[l] > 0 {
+			counts[l]--
+		} else {
+			added++
+		}
+	}
+	for _, c := range counts {
+		removed += c
+	}
+	return added, removed
 }
 
 // isBinary reports whether s looks non-textual. A NUL byte never appears in
@@ -109,14 +136,27 @@ type op struct {
 	line string
 }
 
-// myers returns the shortest edit script transforming a into b, line by line.
-// It records the search trace, then backtracks it into an ordered op list.
-func myers(a, b []string) []op {
+// maxDiffEdits caps the edit distance Myers will explore. The trace it records is
+// O(D) snapshots of an O(D)-wide vector, so an unbounded D (a full rewrite of a
+// large file) is O(D²) ≈ O(N²) time and memory — gigabytes for a few-thousand-line
+// rewrite, which would OOM the synchronous preview. Small edits converge well
+// below this regardless of file size; a change that exceeds it is a near-total
+// rewrite whose line-by-line diff is unreadable anyway, so we fall back to tallies.
+const maxDiffEdits = 2000
+
+// myers returns the shortest edit script transforming a into b, line by line, and
+// ok=true. It records the search trace, then backtracks it into an ordered op
+// list. ok is false when the edit distance exceeds maxDiffEdits — the caller then
+// skips the rendered diff rather than pay O(N²).
+func myers(a, b []string) ([]op, bool) {
 	n, m := len(a), len(b)
 	if n == 0 && m == 0 {
-		return nil
+		return nil, true
 	}
 	maxD := n + m
+	if maxD > maxDiffEdits {
+		maxD = maxDiffEdits // bound the trace's O(D²) footprint
+	}
 	offset := maxD // shift negative k into a non-negative array index
 	v := make([]int, 2*maxD+1)
 	var trace [][]int
@@ -141,11 +181,11 @@ func myers(a, b []string) []op {
 			}
 			v[offset+k] = x
 			if x >= n && y >= m {
-				return backtrack(trace, a, b, offset)
+				return backtrack(trace, a, b, offset), true
 			}
 		}
 	}
-	return nil // unreachable: a path is always found by d == n+m
+	return nil, false // edit distance exceeded maxDiffEdits — caller falls back
 }
 
 // backtrack walks the recorded trace from the end back to the origin,

@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -74,6 +75,74 @@ func TestStoreIndexPreservesHandEdits(t *testing.T) {
 	idx := s.Index()
 	if !strings.Contains(idx, "alpha.md") || !strings.Contains(idx, "beta.md") {
 		t.Fatalf("an entry was lost on the second save:\n%s", idx)
+	}
+}
+
+// TestStoreSaveTitleInIndexAndFrontmatter verifies an explicit title becomes the
+// index link label and round-trips through the file's frontmatter.
+func TestStoreSaveTitleInIndexAndFrontmatter(t *testing.T) {
+	s := Store{Dir: t.TempDir()}
+	if _, err := s.Save(Memory{
+		Name:        "tabs-rule",
+		Title:       "Prefers tabs",
+		Description: "indent with tabs",
+		Type:        TypeUser,
+		Body:        "b",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if idx := s.Index(); !strings.Contains(idx, "[Prefers tabs](tabs-rule.md)") {
+		t.Fatalf("index link should use the title label:\n%s", idx)
+	}
+	if got := s.List()[0].Title; got != "Prefers tabs" {
+		t.Fatalf("title not round-tripped: %q", got)
+	}
+}
+
+// TestStoreIndexLabelFallsBackToDeKebabbedName checks a title-less memory still
+// gets a readable label instead of a bare slug.
+func TestStoreIndexLabelFallsBackToDeKebabbedName(t *testing.T) {
+	s := Store{Dir: t.TempDir()}
+	if _, err := s.Save(Memory{Name: "likes-go", Description: "d", Type: TypeUser, Body: "b"}); err != nil {
+		t.Fatal(err)
+	}
+	if idx := s.Index(); !strings.Contains(idx, "[likes go](likes-go.md)") {
+		t.Fatalf("missing-title label should de-kebab the name:\n%s", idx)
+	}
+}
+
+// TestStoreDelete removes a fact's file and its index line while leaving others.
+func TestStoreDelete(t *testing.T) {
+	s := Store{Dir: t.TempDir()}
+	for _, n := range []string{"alpha", "beta"} {
+		if _, err := s.Save(Memory{Name: n, Description: "d", Type: TypeProject, Body: "b"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.Delete("alpha"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(s.Dir, "alpha.md")); !os.IsNotExist(err) {
+		t.Fatalf("alpha.md should be gone, stat err = %v", err)
+	}
+	idx := s.Index()
+	if strings.Contains(idx, "alpha.md") {
+		t.Fatalf("deleted entry still in index:\n%s", idx)
+	}
+	if !strings.Contains(idx, "beta.md") {
+		t.Fatalf("unrelated entry lost on delete:\n%s", idx)
+	}
+	if names := s.List(); len(names) != 1 || names[0].Name != "beta" {
+		t.Fatalf("List after delete = %+v, want only beta", names)
+	}
+}
+
+// TestStoreDeleteMissingIsNoError treats deleting an absent memory as success —
+// the goal state (gone) already holds.
+func TestStoreDeleteMissingIsNoError(t *testing.T) {
+	s := Store{Dir: t.TempDir()}
+	if err := s.Delete("never-saved"); err != nil {
+		t.Fatalf("deleting a missing memory should not error: %v", err)
 	}
 }
 

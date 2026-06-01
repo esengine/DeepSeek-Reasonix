@@ -298,3 +298,72 @@ func TestNewReadsEffortFromConfig(t *testing.T) {
 		t.Errorf("effort = %q, want medium", got)
 	}
 }
+
+// TestBuildRequestPreservesEmptyIDToolResults proves a multi-tool turn whose
+// calls carry no id (some OpenAI-compatible gateways omit it, sending only the
+// index) keeps every tool result through buildRequest. SanitizeToolPairing keys
+// on tool_call_id, so empty ids collapse and all but the last result is dropped.
+func TestBuildRequestPreservesEmptyIDToolResults(t *testing.T) {
+	c := &client{model: "deepseek-v4"}
+	req := c.buildRequest(provider.Request{
+		Messages: []provider.Message{
+			{Role: provider.RoleUser, Content: "scan"},
+			{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{
+				{ID: "", Name: "read_file", Arguments: `{"p":"a"}`},
+				{ID: "", Name: "read_file", Arguments: `{"p":"b"}`},
+			}},
+			{Role: provider.RoleTool, ToolCallID: "", Name: "read_file", Content: "RESULT-A"},
+			{Role: provider.RoleTool, ToolCallID: "", Name: "read_file", Content: "RESULT-B"},
+		},
+	})
+	var toolContents []string
+	for _, m := range req.Messages {
+		if m.Role == string(provider.RoleTool) {
+			toolContents = append(toolContents, m.Content)
+		}
+	}
+	if len(toolContents) != 2 {
+		t.Fatalf("want 2 tool results in request, got %d: %v", len(toolContents), toolContents)
+	}
+	if toolContents[0] == toolContents[1] {
+		t.Errorf("tool results collapsed to %q — a result was dropped from the model's context", toolContents[0])
+	}
+}
+
+// TestStreamSynthesizesMissingToolCallIDs covers a gateway that streams tool
+// calls by index with no id (vLLM / llama.cpp do this). Each completed call must
+// come back with a stable, distinct synthetic id so its result can pair back.
+func TestStreamSynthesizesMissingToolCallIDs(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"read_file","arguments":"{\"p\":\"a\"}"}}]}}]}`+"\n\n")
+		_, _ = io.WriteString(w, `data: {"choices":[{"delta":{"tool_calls":[{"index":1,"function":{"name":"read_file","arguments":"{\"p\":\"b\"}"}}]}}]}`+"\n\n")
+		_, _ = io.WriteString(w, `data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7}}`+"\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+
+	p, err := New(provider.Config{Name: "local", BaseURL: srv.URL, Model: "qwen", APIKey: "k"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ch, err := p.Stream(context.Background(), provider.Request{})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	var ids []string
+	for chunk := range ch {
+		if chunk.Type == provider.ChunkToolCall && chunk.ToolCall != nil {
+			ids = append(ids, chunk.ToolCall.ID)
+		}
+	}
+	if len(ids) != 2 {
+		t.Fatalf("want 2 tool calls, got %d: %v", len(ids), ids)
+	}
+	if ids[0] == "" || ids[1] == "" {
+		t.Errorf("a tool call came back with an empty id: %v", ids)
+	}
+	if ids[0] == ids[1] {
+		t.Errorf("synthesized ids must be distinct, got %v", ids)
+	}
+}

@@ -2,6 +2,8 @@ package builtin
 
 import (
 	"context"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"strings"
@@ -62,6 +64,29 @@ func TestDeleteSymbolType(t *testing.T) {
 	}
 	if !strings.Contains(string(got), "Admin") {
 		t.Error("Admin was incorrectly deleted")
+	}
+}
+
+func TestDeleteSymbolMultiLineValueSpec(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "example.go")
+	src := "package example\n\nvar Tools = []string{\n\t\"a\",\n\t\"b\",\n}\n\nconst Banner = `line1\nline2`\n\nfunc Keep() {}\n"
+	os.WriteFile(f, []byte(src), 0o644)
+
+	runTool(t, deleteSymbol{}, map[string]any{"path": f, "name": "Tools", "kind": "var"})
+	runTool(t, deleteSymbol{}, map[string]any{"path": f, "name": "Banner", "kind": "const"})
+
+	got, _ := os.ReadFile(f)
+	if _, err := parser.ParseFile(token.NewFileSet(), f, got, parser.ParseComments); err != nil {
+		t.Fatalf("result no longer parses: %v\n%s", err, got)
+	}
+	for _, leftover := range []string{"Tools", "Banner", "line1", "\"a\""} {
+		if strings.Contains(string(got), leftover) {
+			t.Errorf("multi-line value left %q dangling:\n%s", leftover, got)
+		}
+	}
+	if !strings.Contains(string(got), "func Keep") {
+		t.Error("Keep was incorrectly deleted")
 	}
 }
 

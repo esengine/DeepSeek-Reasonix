@@ -8,7 +8,6 @@ import (
 	"reasonix/internal/agent"
 	"reasonix/internal/boot"
 	"reasonix/internal/config"
-	"reasonix/internal/i18n"
 	"reasonix/internal/provider"
 )
 
@@ -61,7 +60,6 @@ type SettingsView struct {
 	Permissions  PermissionsView `json:"permissions"`
 	Sandbox      SandboxView     `json:"sandbox"`
 	Agent        AgentView       `json:"agent"`
-	Language     string          `json:"language"`
 	ConfigPath   string          `json:"configPath"`
 	// ProviderKinds lists the provider implementations the kernel actually
 	// registered (provider.Kinds()), so the editor's "kind" picker offers only
@@ -104,7 +102,6 @@ func (a *App) Settings() SettingsView {
 			WorkspaceRoot: cfg.Sandbox.WorkspaceRoot, AllowWrite: nonNil(cfg.Sandbox.AllowWrite),
 		},
 		Agent:         AgentView{Temperature: cfg.Agent.Temperature, MaxSteps: cfg.Agent.MaxSteps, SystemPrompt: cfg.Agent.SystemPrompt},
-		Language:      cfg.Language,
 		ConfigPath:    config.SourcePath(),
 		ProviderKinds: provider.Kinds(),
 		Bypass:        a.ctrl != nil && a.ctrl.Bypass(),
@@ -133,8 +130,8 @@ func orDefault(s, def string) string {
 // --- apply (write config, then rebuild the controller so it's live) ---
 
 // applyConfigChange mutates the user-global config and rebuilds the controller so
-// the change takes effect this session. Desktop settings (providers, keys,
-// language) are account-level, not per-project: writing them to the global config
+// the change takes effect this session. Desktop settings such as providers and
+// keys are account-level, not per-project: writing them to the global config
 // rather than the cwd's reasonix.toml is what lets them survive a workspace switch.
 func (a *App) applyConfigChange(mutate func(*config.Config) error) error {
 	path := config.UserConfigPath()
@@ -189,11 +186,40 @@ func (a *App) rebuild() error {
 		path = agent.NewSessionPath(dir, ctrl.Label())
 	}
 	if len(carried) > 0 {
+		carried = withFreshSystemPrompt(carried, systemPromptFrom(ctrl.History()))
 		ctrl.Resume(&agent.Session{Messages: carried}, path)
 	} else if path != "" {
 		ctrl.SetSessionPath(path)
 	}
 	return nil
+}
+
+func systemPromptFrom(messages []provider.Message) string {
+	for _, m := range messages {
+		if m.Role == provider.RoleSystem {
+			return m.Content
+		}
+	}
+	return ""
+}
+
+func withFreshSystemPrompt(messages []provider.Message, system string) []provider.Message {
+	if strings.TrimSpace(system) == "" {
+		return messages
+	}
+	out := append([]provider.Message(nil), messages...)
+	for i := range out {
+		if out[i].Role == provider.RoleSystem {
+			out[i].Content = system
+			out[i].ReasoningContent = ""
+			out[i].ReasoningSignature = ""
+			out[i].ToolCalls = nil
+			out[i].ToolCallID = ""
+			out[i].Name = ""
+			return out
+		}
+	}
+	return append([]provider.Message{{Role: provider.RoleSystem, Content: system}}, out...)
 }
 
 // SetDefaultModel sets the config default and switches the live model to it.
@@ -300,20 +326,6 @@ func (a *App) SetAgentParams(temperature float64, maxSteps int, systemPrompt str
 		c.Agent.SystemPrompt = systemPrompt
 		return nil
 	})
-}
-
-// SetLanguage sets the UI language tag ("zh" | "en" | "" for auto). It only
-// rewrites config — no controller rebuild needed.
-func (a *App) SetLanguage(lang string) error {
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-	cfg.Language = strings.TrimSpace(lang)
-	// Keep the Go-side catalogue in sync so backend-provided slash UI re-localizes
-	// on the next fetch (matches the frontend's language switch).
-	i18n.DetectLanguage(cfg.Language)
-	return cfg.Save()
 }
 
 // trimList drops blank entries from a string slice (and returns a non-nil slice).

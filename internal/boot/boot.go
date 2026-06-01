@@ -102,9 +102,6 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	if st, ok := outputstyle.Resolve(cfg.Agent.OutputStyle, outputstyle.Dirs()); ok {
 		sysPrompt = outputstyle.Apply(sysPrompt, st)
 	}
-	// Append the language policy so the model answers in the user's own language
-	// (the UI `language` setting governs only the interface). Static text, so it
-	// stays in the cache-stable prefix and costs nothing per turn.
 	sysPrompt += "\n\n" + config.LanguagePolicy
 
 	// Persistent memory (REASONIX.md / AGENTS.md hierarchy + auto-memory index)
@@ -239,8 +236,10 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		entry.ContextWindow, cfg.Agent.Temperature, config.ArchiveDir(), "", headlessGate))
 
 	// The `remember` tool lets the model persist durable facts to the project's
-	// auto-memory store; the saved index loads into the prefix on the next session.
+	// auto-memory store; `forget` prunes ones that turn out wrong. The saved index
+	// loads into the prefix on the next session.
 	reg.Add(memory.NewRememberTool(mem.Store))
+	reg.Add(memory.NewForgetTool(mem.Store))
 
 	// The `ask` tool puts structured multiple-choice questions to the user. It
 	// reaches them through the Asker on the call context, which interactive
@@ -327,6 +326,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 
 	var runner agent.Runner = executor
 	label := entry.Model
+	var classifier *control.ProviderAutoPlanClassifier
 
 	// Two-model collaboration: a distinct planner_model wraps the executor in a
 	// Coordinator with its own session, kept separate for cache stability.
@@ -344,6 +344,18 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			runner = agent.NewCoordinator(plannerProv, plannerSess, pe.Price, executor, cfg.Agent.Temperature, sink)
 			label = entry.Model + " + planner " + pe.Model
 		}
+	}
+	if !strings.EqualFold(strings.TrimSpace(cfg.Agent.AutoPlan), "off") && cfg.Agent.AutoPlanClassifier != "" {
+		cm := cfg.Agent.AutoPlanClassifier
+		ce, ok := cfg.ResolveModel(cm)
+		if !ok {
+			return nil, fmt.Errorf("auto_plan_classifier %q is not a configured provider", cm)
+		}
+		classifierProv, err := NewProvider(ce)
+		if err != nil {
+			return nil, fmt.Errorf("auto_plan_classifier %q: %w", cm, err)
+		}
+		classifier = control.NewProviderAutoPlanClassifier(classifierProv)
 	}
 
 	return control.New(control.Options{
@@ -366,6 +378,8 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		Registry:      reg,
 		PluginCtx:     ctx,
 		WorkspaceRoot: cwd,
+		AutoPlan:      cfg.Agent.AutoPlan,
+		Classifier:    classifier,
 	}), nil
 }
 

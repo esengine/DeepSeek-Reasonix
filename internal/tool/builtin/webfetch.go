@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -41,6 +42,61 @@ func (webFetch) Schema() json.RawMessage {
 
 func (webFetch) ReadOnly() bool { return true }
 
+// ssrfGuardedClient is an HTTP client whose dialer refuses to connect to private,
+// link-local, or unspecified addresses — the SSRF surface a prompt-injected fetch
+// would aim at (cloud metadata at 169.254.169.254, RFC1918 internal services).
+// Loopback is allowed: the agent can already reach localhost via bash, so a local
+// dev server stays fetchable. The check runs at dial time on the resolved IP, so a
+// public host that redirects or DNS-rebinds to an internal address is caught too.
+func ssrfGuardedClient() *http.Client {
+	dialer := &net.Dialer{Timeout: webFetchTimeout}
+	return &http.Client{
+		Timeout: webFetchTimeout,
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				host, port, err := net.SplitHostPort(addr)
+				if err != nil {
+					return nil, err
+				}
+				ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+				if err != nil {
+					return nil, err
+				}
+				for _, ip := range ips {
+					if blockedFetchIP(ip.IP) {
+						return nil, fmt.Errorf("refusing to fetch internal address %s (resolves to %s)", host, ip.IP)
+					}
+				}
+				// Dial the IP we just vetted, not the hostname, so the connection
+				// can't re-resolve to a different (internal) address (DNS rebinding).
+				return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].IP.String(), port))
+			},
+		},
+	}
+}
+
+// cgnatRange is RFC 6598 shared address space (100.64.0.0/10). Go's IsPrivate
+// doesn't cover it, yet some clouds host instance metadata there (Alibaba Cloud
+// at 100.100.100.200), so it's an SSRF target web_fetch must refuse too.
+var cgnatRange = mustCIDR("100.64.0.0/10")
+
+func mustCIDR(s string) *net.IPNet {
+	_, n, err := net.ParseCIDR(s)
+	if err != nil {
+		panic(err)
+	}
+	return n
+}
+
+// blockedFetchIP reports whether ip is an address web_fetch must not reach.
+func blockedFetchIP(ip net.IP) bool {
+	return ip.IsPrivate() || // RFC1918 + IPv6 unique-local (fc00::/7)
+		ip.IsLinkLocalUnicast() || // 169.254.0.0/16 (incl. cloud metadata) + fe80::/10
+		ip.IsLinkLocalMulticast() ||
+		ip.IsUnspecified() || // 0.0.0.0 / ::
+		cgnatRange.Contains(ip) // 100.64.0.0/10 (incl. Alibaba Cloud metadata)
+}
+
 func (webFetch) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var p struct {
 		URL string `json:"url"`
@@ -67,7 +123,7 @@ func (webFetch) Execute(ctx context.Context, args json.RawMessage) (string, erro
 	req.Header.Set("User-Agent", "reasonix-web-fetch/1.0")
 	req.Header.Set("Accept", "text/html,text/plain,text/markdown,application/json,*/*;q=0.5")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := ssrfGuardedClient().Do(req)
 	if err != nil {
 		return "", fmt.Errorf("fetch %s: %w", p.URL, err)
 	}

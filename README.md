@@ -93,6 +93,8 @@ default_model = "deepseek-flash"   # executor; set [agent].planner_model to add 
 # planner_model = "mimo-pro"          # optional low-frequency planner
 # subagent_model = "deepseek-pro"     # optional default for runAs=subagent skills
 # subagent_models = { review = "deepseek-pro", security_review = "deepseek-pro" }
+auto_plan = "ask"                  # off|ask|on; complex chat tasks start in plan mode
+# auto_plan_classifier = "deepseek-flash"   # optional; only borderline tasks call it
 
 [[providers]]
 name        = "deepseek-flash"
@@ -225,6 +227,12 @@ planner_model = "deepseek-pro"   # used as the low-frequency planner
 Subagent skills inherit the executor model by default. Set `subagent_model` to
 run them on another configured model, or use `subagent_models` to override only
 specific skills such as `review` or `security_review`.
+
+For interactive frontends, `agent.auto_plan = "ask"` makes complex-looking tasks
+enter plan mode automatically: Reasonix first drafts a read-only plan, then waits
+for approval before editing or running side-effecting commands. `auto_plan_classifier`
+can name a cheap provider such as `deepseek-flash`; it is only called for
+borderline inputs and falls back to the heuristic if classification fails.
 
 ## Architecture
 

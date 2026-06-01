@@ -211,9 +211,41 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 	}
 	// The language policy is always appended at boot; strip it so this assertion
 	// is purely about whether project/ancestor memory leaked into the base.
-	base = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(base), config.LanguagePolicy))
+	base = stripLanguagePolicy(base)
 	if base != "JUST THE BASE" {
 		t.Fatalf("expected untouched base prompt, got:\n%s", sys)
+	}
+}
+
+func TestBuildLanguagePolicyIsAppended(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "test-model"
+
+[codegraph]
+enabled = false
+
+[agent]
+system_prompt = "BASE"
+
+[[providers]]
+name = "test-model"
+kind = "openai"
+base_url = "https://example.invalid"
+model = "x"
+api_key_env = "REASONIX_TEST_KEY_UNSET"
+`)
+
+	ctrl, err := Build(context.Background(), Options{})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer ctrl.Close()
+
+	sys := systemMessage(ctrl.History())
+	if !strings.Contains(sys, config.LanguagePolicy) {
+		t.Fatalf("language policy missing from system prompt:\n%s", sys)
 	}
 }
 
@@ -224,6 +256,16 @@ func systemMessage(msgs []provider.Message) string {
 		}
 	}
 	return ""
+}
+
+func stripLanguagePolicy(s string) string {
+	s = strings.TrimSpace(s)
+	for _, policy := range []string{
+		config.LanguagePolicy,
+	} {
+		s = strings.TrimSpace(strings.TrimSuffix(s, policy))
+	}
+	return s
 }
 
 func writeFile(t *testing.T, dir, name, body string) {
