@@ -7,12 +7,12 @@ Unicode true
 ## untouched and only regenerates wails_tools.nsh). The two customizations vs.
 ## Wails' default template:
 ##
-##   1. REQUEST_EXECUTION_LEVEL "user" + InstallDir under $LOCALAPPDATA — install
+##   1. REQUEST_EXECUTION_LEVEL "user" + InstallDir under $LOCALAPPDATA - install
 ##      without administrator rights. This is what lets the auto-updater re-run a
 ##      freshly downloaded installer silently (`/S`) with no UAC prompt.
 ##   2. Uninstall registry under HKCU (not HKLM). Wails' wails.writeUninstaller /
 ##      wails.deleteUninstaller macros hard-code HKLM, which a non-admin install
-##      cannot write — so we inline HKCU versions below instead.
+##      cannot write - so we inline HKCU versions below instead.
 ##
 ## Everything else mirrors Wails' generated default. Defines below override the
 ## ProjectInfo values that wails_tools.nsh would otherwise populate.
