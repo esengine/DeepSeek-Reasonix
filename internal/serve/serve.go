@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/boot"
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
@@ -67,6 +68,44 @@ func (s *Server) initTitleProvider() {
 		return
 	}
 	s.titleProv = prov
+}
+
+// switchModel rebuilds the controller with a new model, carrying over the
+// conversation history. This replicates the TUI/desktop model-switch path.
+func (s *Server) switchModel(ctx context.Context, ref string) error {
+	if s.ctrl.Running() {
+		return fmt.Errorf("cannot switch model while a turn is running")
+	}
+	// Snapshot current session so nothing is lost.
+	if err := s.ctrl.Snapshot(); err != nil {
+		slog.Warn("serve: snapshot before model switch", "err", err)
+	}
+	carried := s.ctrl.History()
+
+	newCtrl, err := boot.Build(ctx, boot.Options{
+		Model:  ref,
+		Sink:   s.bc,
+		Stderr: os.Stderr,
+	})
+	if err != nil {
+		return fmt.Errorf("switch model: %w", err)
+	}
+	// Wire session path and carry history.
+	newPath := ""
+	if dir := newCtrl.SessionDir(); dir != "" {
+		newPath = agent.NewSessionPath(dir, newCtrl.Label())
+	}
+	if len(carried) > 0 {
+		newCtrl.Resume(&agent.Session{Messages: carried}, newPath)
+	} else if newPath != "" {
+		newCtrl.SetSessionPath(newPath)
+	}
+
+	// Close old controller resources (plugins, jobs) but not the session —
+	// it was already snapshotted.
+	s.ctrl.Close()
+	s.ctrl = newCtrl
+	return nil
 }
 
 // Handler returns the HTTP routes: GET / (a minimal browser client), GET /events
@@ -216,6 +255,19 @@ func (s *Server) submit(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Input == "" {
 		http.Error(w, "missing input", http.StatusBadRequest)
 		return
+	}
+	// Intercept /model <ref> for runtime model switching (the controller's
+	// Submit path only lists models — switching is frontend-specific).
+	if trimmed := strings.TrimSpace(body.Input); strings.HasPrefix(trimmed, "/model ") {
+		ref := strings.TrimSpace(strings.TrimPrefix(trimmed, "/model"))
+		if ref != "" {
+			if err := s.switchModel(r.Context(), ref); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 	}
 	s.ctrl.Submit(body.Input)
 	w.WriteHeader(http.StatusAccepted)

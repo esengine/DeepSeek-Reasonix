@@ -672,7 +672,7 @@ function loadSessions(){
 loadSessions();
 
 // ── input handling ──
-function send(){ const v=input.value.trim(); if(!v)return; addUserMsg(v); post('/submit',{input:v}); input.value='';input.style.height='';closeSlashMenu(); }
+function send(){ const v=input.value.trim(); if(!v)return; addUserMsg(v); post('/submit',{input:v}).then(r=>{if(r.ok&&r.status===204){fetchStatus();loadSessions();}}); input.value='';input.style.height='';closeSlashMenu(); }
 
 input.addEventListener('input',()=>{input.style.height='auto';input.style.height=Math.min(input.scrollHeight,140)+'px';updateSlashMenu();});
 input.addEventListener('keydown',e=>{
