@@ -101,14 +101,17 @@ type Registry struct {
 	mu    sync.RWMutex
 	tools map[string]Tool
 	order []string
+	canon map[string]json.RawMessage
 }
 
 // NewRegistry returns an empty registry.
 func NewRegistry() *Registry {
-	return &Registry{tools: map[string]Tool{}}
+	return &Registry{tools: map[string]Tool{}, canon: map[string]json.RawMessage{}}
 }
 
-// Add inserts (or replaces) a tool, preserving first-seen order.
+// Add inserts (or replaces) a tool, preserving first-seen order. The schema is
+// canonicalized once here — it never changes after registration, so Schemas()
+// (called every turn) reuses the result instead of re-marshaling.
 func (r *Registry) Add(t Tool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -118,6 +121,7 @@ func (r *Registry) Add(t Tool) {
 		r.order = append(r.order, name)
 	}
 	r.tools[name] = t
+	r.canon[name] = provider.CanonicalizeSchema(t.Schema())
 }
 
 // MCPNamePrefix is the namespace every MCP tool name carries: the
@@ -151,6 +155,7 @@ func (r *Registry) RemovePrefix(prefix string) int {
 	for _, name := range r.order {
 		if strings.HasPrefix(name, prefix) {
 			delete(r.tools, name)
+			delete(r.canon, name)
 			removed++
 			continue
 		}
@@ -190,23 +195,22 @@ func (r *Registry) Names() []string {
 // Schemas exports tool definitions in stable name order for the provider.
 func (r *Registry) Schemas() []provider.ToolSchema {
 	r.mu.RLock()
+	defer r.mu.RUnlock()
+
 	names := make([]string, len(r.order))
 	copy(names, r.order)
 	sort.Strings(names)
-	tools := make([]Tool, 0, len(names))
-	for _, name := range names {
-		if t := r.tools[name]; t != nil {
-			tools = append(tools, t)
-		}
-	}
-	r.mu.RUnlock()
 
-	out := make([]provider.ToolSchema, 0, len(tools))
-	for _, t := range tools {
+	out := make([]provider.ToolSchema, 0, len(names))
+	for _, name := range names {
+		t := r.tools[name]
+		if t == nil {
+			continue
+		}
 		out = append(out, provider.ToolSchema{
 			Name:        t.Name(),
 			Description: t.Description(),
-			Parameters:  provider.CanonicalizeSchema(t.Schema()),
+			Parameters:  r.canon[name],
 		})
 	}
 	return out
