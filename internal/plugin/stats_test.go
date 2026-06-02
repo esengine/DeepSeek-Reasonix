@@ -137,6 +137,22 @@ func TestRecommendAboveBudgetDemotes(t *testing.T) {
 	}
 }
 
+func TestRecommendAtBudgetDemotes(t *testing.T) {
+	withTempCache(t)
+
+	budget := 5 * time.Second
+	for i := 0; i < 3; i++ {
+		if err := RecordStartup("timeout-plugin", budget); err != nil {
+			t.Fatalf("RecordStartup #%d: %v", i, err)
+		}
+	}
+
+	got := Recommend("timeout-plugin", budget, 3)
+	if !got.Demote {
+		t.Fatalf("Demote = false, want true for repeated budget hits (samples=%+v)", readStats(t, "timeout-plugin").SamplesMs)
+	}
+}
+
 func TestRecommendMissingStatsNoDemote(t *testing.T) {
 	withTempCache(t)
 

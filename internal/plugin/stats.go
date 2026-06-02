@@ -102,10 +102,10 @@ func RecordStartup(name string, dur time.Duration) error {
 }
 
 // Recommend inspects the recent samples for name and decides whether the
-// plugin should be demoted to "lazy" this session. The rule is simple and
-// matches what the user asked for: demote when the last demoteAfter samples
-// are all strictly above budget*2. Missing/empty stats → no demote (a fresh
-// plugin gets the benefit of the doubt and one normal startup attempt).
+// plugin should be demoted to "lazy" this session. The rule is simple: demote
+// when the last demoteAfter samples all hit or exceed the blocking startup
+// budget. Missing/empty stats → no demote (a fresh plugin gets the benefit of
+// the doubt and one normal startup attempt).
 //
 // budget == 0 disables the check (returns no-demote). demoteAfter <= 0 falls
 // back to defaultDemoteAfter so callers can pass the config value verbatim
@@ -135,10 +135,10 @@ func Recommend(name string, budget time.Duration, demoteAfter int) Recommendatio
 		return rec
 	}
 
-	threshold := (budget * 2).Milliseconds()
+	threshold := budget.Milliseconds()
 	tail := stats.SamplesMs[len(stats.SamplesMs)-demoteAfter:]
 	for _, ms := range tail {
-		if ms <= threshold {
+		if ms < threshold {
 			return rec
 		}
 	}
@@ -233,4 +233,3 @@ func p99(samples []int64) time.Duration {
 	}
 	return time.Duration(sorted[idx]) * time.Millisecond
 }
-

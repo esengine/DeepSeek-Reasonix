@@ -350,6 +350,45 @@ func TestStartPolicyPerPluginTimeout(t *testing.T) {
 	}
 }
 
+func TestStartRecordsTimeoutStats(t *testing.T) {
+	withTempCache(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	slow := Spec{
+		Name:    "slow-stats",
+		Command: os.Args[0],
+		Args:    []string{"-test.run=TestHelperProcess", "--"},
+		Env: map[string]string{
+			"GO_WANT_HELPER_PROCESS": "1",
+			"GO_WANT_HELPER_INIT_MS": "300",
+		},
+	}
+	for i := 0; i < 3; i++ {
+		host, _, err := Start(ctx, []Spec{slow}, StartPolicy{
+			PerPluginTimeout: 50 * time.Millisecond,
+			Concurrency:      1,
+			AbortOnError:     false,
+		})
+		if err != nil {
+			t.Fatalf("Start #%d: %v", i, err)
+		}
+		host.Close()
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		rec := Recommend("slow-stats", 50*time.Millisecond, 3)
+		if rec.Demote {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timeout samples did not trigger demote; stats=%+v rec=%+v", readStats(t, "slow-stats"), rec)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 // TestStartPhaseAReturnsBeforePhaseB pins the two-phase handshake contract.
 // The helper advertises prompts and stalls prompts/list by 200ms; StartAvailable
 // must return as soon as tools are ready (well before that 200ms), and the

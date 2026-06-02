@@ -229,14 +229,18 @@ func Start(ctx context.Context, specs []Spec, p StartPolicy) (*Host, []tool.Tool
 			// stdio child must outlive the startup scope and later phase-B calls.
 			c, err := start(ctx, callCtx, spec)
 			if err != nil {
+				phaseADur := time.Since(phaseAStart)
 				cancelStartup()
+				go func() { _ = RecordStartup(spec.Name, phaseADur) }()
 				ch <- result{idx: idx, spec: spec, err: fmt.Errorf("start plugin %q: %w", spec.Name, err)}
 				return
 			}
 
 			ts, err := c.listTools(callCtx)
 			if err != nil {
+				phaseADur := time.Since(phaseAStart)
 				cancelStartup()
+				go func() { _ = RecordStartup(spec.Name, phaseADur) }()
 				c.close()
 				ch <- result{idx: idx, spec: spec, err: fmt.Errorf("list tools from %q: %w", spec.Name, err)}
 				return
@@ -246,8 +250,8 @@ func Start(ctx context.Context, specs []Spec, p StartPolicy) (*Host, []tool.Tool
 			// Persist for next launch on the side: a slow stats/cache write
 			// must not delay tools coming online, and either failure is
 			// recoverable (we just re-handshake or skip auto-demote).
-			cancelStartup()
 			phaseADur := time.Since(phaseAStart)
+			cancelStartup()
 			go func() {
 				_ = RecordStartup(spec.Name, phaseADur)
 				_ = SaveCachedSchema(spec.Name, CachedSchema{
