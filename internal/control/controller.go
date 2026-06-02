@@ -288,6 +288,7 @@ func (c *Controller) runGuarded(body func(ctx context.Context) error) {
 	c.mu.Unlock()
 
 	go func() {
+		defer cancel()
 		err := body(ctx)
 		c.mu.Lock()
 		c.running = false
