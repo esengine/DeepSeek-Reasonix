@@ -379,7 +379,16 @@ func (m *chatTUI) acceptCompletion() {
 		m.updateCompletion() // re-list the directory we just descended into
 		return
 	}
-	m.completion = completion{}
+	m.updateCompletion() // re-filter for arg completion (e.g. /resume → numbered sessions)
+	// If the completion re-opened with the same single item the user just
+	// selected (i.e. the token was already typed), close it so the next Enter
+	// submits the command rather than being captured again by acceptCompletion.
+	if m.completion.active && len(m.completion.items) == 1 {
+		tok := m.input.Value()[m.completion.replaceFrom:]
+		if tok == m.completion.items[0].insert {
+			m.completion = completion{}
+		}
+	}
 }
 
 var compSelStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("173")).Bold(true)

@@ -35,6 +35,8 @@ var English = Messages{
 	ResumeBadIndexFmt:   "pick a session 1–%d (run /resume to list)",
 	ResumeAlreadyActive: "already in that session",
 	ResumedTitle:        "resumed session",
+	ResumePickTitle:     "Resume a saved session",
+	ResumePickHint:      "↑/↓ move · Enter resume · Esc cancel",
 
 	ChatThinking:           "thinking…",
 	ChatThoughtForFmt:      "thought for %ds",
@@ -47,6 +49,7 @@ var English = Messages{
 	AskTypingHint:          "type below, Enter to confirm",
 	AskChatInstead:         "None — just chat",
 	ChatStatusQuestion:     "↑/↓ move · number to pick · space multi · Enter confirm · ←/→ switch · Esc cancel",
+	StatusResumePicker: "↑/↓ move · Enter resume · Esc cancel",
 	AskSubmitTitle:         "Submit answers",
 	AskUnanswered:          "(unanswered)",
 	AskSubmitHint:          "Enter submits · ← returns to edit",

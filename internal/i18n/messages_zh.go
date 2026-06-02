@@ -36,6 +36,8 @@ var Chinese = Messages{
 	ResumeBadIndexFmt:   "请选择 1–%d 的会话（用 /resume 查看列表）",
 	ResumeAlreadyActive: "已在该会话中",
 	ResumedTitle:        "已恢复会话",
+	ResumePickTitle:     "选择要恢复的会话",
+	ResumePickHint:      "↑/↓ 移动 · Enter 恢复 · Esc 取消",
 
 	ChatThinking:           "思考中…",
 	ChatThoughtForFmt:      "思考了 %d 秒",
@@ -48,6 +50,7 @@ var Chinese = Messages{
 	AskTypingHint:          "输入后按 Enter 确认",
 	AskChatInstead:         "先不选择，直接回复",
 	ChatStatusQuestion:     "↑/↓ 选 · 数字快选 · 空格多选 · Enter 确认 · ←/→ 切换问题 · Esc 取消",
+	StatusResumePicker: "↑/↓ 移动 · Enter 恢复 · Esc 取消",
 	AskSubmitTitle:         "提交答案",
 	AskUnanswered:          "(未答)",
 	AskSubmitHint:          "Enter 提交 · ← 返回修改",

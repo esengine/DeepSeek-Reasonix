@@ -6,16 +6,17 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+
 	"reasonix/internal/agent"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
 )
 
-// TestResumeDispatchListsSessions drives the real keystroke path
-// (runSlashCommand) for a bare "/resume" and asserts the session list with
-// previews lands in the transcript.
-func TestResumeDispatchListsSessions(t *testing.T) {
+// TestResumeDispatchOpensPicker proves bare "/resume" writes the session list
+// to the scrollback (above the input) AND opens the interactive picker overlay.
+func TestResumeDispatchOpensPicker(t *testing.T) {
 	dir := t.TempDir()
 	saveTestSession(t, filepath.Join(dir, "a.jsonl"), "alpha prompt")
 	saveTestSession(t, filepath.Join(dir, "b.jsonl"), "beta prompt")
@@ -26,11 +27,82 @@ func TestResumeDispatchListsSessions(t *testing.T) {
 	m.ctrl = control.New(control.Options{Executor: exec, SessionDir: dir, Label: "test"})
 
 	if cmd := m.runSlashCommand("/resume"); cmd != nil {
-		t.Fatal("/resume list should not return a tea.Cmd")
+		t.Fatal("/resume should not return a tea.Cmd")
 	}
+	if m.resumePick == nil {
+		t.Fatal("bare /resume should open the picker")
+	}
+	if len(m.resumePick.sessions) != 2 {
+		t.Fatalf("picker should have 2 sessions, got %d", len(m.resumePick.sessions))
+	}
+	// Session list must also appear in the scrollback transcript (above input).
 	out := strings.Join(m.transcript, "\n")
 	if !strings.Contains(out, "alpha prompt") || !strings.Contains(out, "beta prompt") {
-		t.Fatalf("session list missing previews:\n%s", out)
+		t.Fatalf("scrollback should contain session previews:\n%s", out)
+	}
+}
+
+// TestResumePickerNavigateAndSelect proves the picker's up/down navigation and
+// Enter to resume the selected session.
+func TestResumePickerNavigateAndSelect(t *testing.T) {
+	dir := t.TempDir()
+	exec := agent.New(nil, nil, agent.NewSession("sys"), agent.Options{}, event.Discard)
+	ctrl := control.New(control.Options{Executor: exec, SessionDir: dir, Label: "test"})
+
+	// Create two saved sessions.
+	aPath := filepath.Join(dir, "a.jsonl")
+	saveTestSession(t, aPath, "first session prompt")
+	bPath := filepath.Join(dir, "b.jsonl")
+	saveTestSession(t, bPath, "SECOND-SESSION-PROMPT")
+
+	m := newTestChatTUI()
+	m.width = 80
+	m.ctrl = ctrl
+
+	// Open the picker via bare /resume.
+	m.runSlashCommand("/resume")
+	if m.resumePick == nil {
+		t.Fatal("bare /resume should open the picker")
+	}
+	if len(m.resumePick.sessions) != 2 {
+		t.Fatalf("picker should have 2 sessions, got %d", len(m.resumePick.sessions))
+	}
+
+	// The first session (default selection) is the most recent, which is b.jsonl.
+	// Press Enter to resume it.
+	next, _ := m.handleResumePickerKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = next.(chatTUI)
+
+	if got := ctrl.SessionPath(); got != bPath {
+		t.Fatalf("session path = %q, want %q", got, bPath)
+	}
+	if out := strings.Join(m.transcript, "\n"); !strings.Contains(out, "SECOND-SESSION-PROMPT") {
+		t.Fatalf("transcript should replay the resumed session:\n%s", out)
+	}
+	if m.resumePick != nil {
+		t.Fatal("picker should close after resume")
+	}
+}
+
+// TestResumePickerEscDismisses proves pressing Esc closes the picker without
+// switching sessions.
+func TestResumePickerEscDismisses(t *testing.T) {
+	dir := t.TempDir()
+	saveTestSession(t, filepath.Join(dir, "a.jsonl"), "alpha prompt")
+
+	exec := agent.New(nil, nil, agent.NewSession("sys"), agent.Options{}, event.Discard)
+	m := newTestChatTUI()
+	m.ctrl = control.New(control.Options{Executor: exec, SessionDir: dir, Label: "test"})
+
+	m.runSlashCommand("/resume")
+	if m.resumePick == nil {
+		t.Fatal("bare /resume should open the picker")
+	}
+
+	next, _ := m.handleResumePickerKey(tea.KeyPressMsg{Code: tea.KeyEsc})
+	m = next.(chatTUI)
+	if m.resumePick != nil {
+		t.Fatal("picker should close on Esc")
 	}
 }
 
