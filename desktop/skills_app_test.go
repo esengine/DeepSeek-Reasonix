@@ -102,5 +102,5 @@ func realTestPath(path string) string {
 	if p, err := filepath.EvalSymlinks(path); err == nil {
 		path = p
 	}
-	return cleanAbsPath(path)
+	return config.CanonicalSkillPath(path)
 }

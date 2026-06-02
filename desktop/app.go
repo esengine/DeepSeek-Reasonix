@@ -934,17 +934,17 @@ func skillRootsView() []SkillRootView {
 	st := skill.New(skill.Options{ProjectRoot: cwd, CustomPaths: custom, DisableBuiltins: true, Stderr: io.Discard})
 	counts := map[string]int{}
 	for _, sk := range st.List() {
-		counts[cleanAbsPath(filepath.Dir(skillRootPath(sk.Path)))]++
+		counts[config.CanonicalSkillPath(filepath.Dir(skillRootPath(sk.Path)))]++
 	}
 	userConfigured := map[string]bool{}
 	if userCfg != nil {
 		for _, p := range userCfg.Skills.Paths {
-			userConfigured[cleanAbsPath(p)] = true
+			userConfigured[config.CanonicalSkillPath(p)] = true
 		}
 	}
 	var out []SkillRootView
 	for _, r := range st.Roots() {
-		dir := cleanAbsPath(r.Dir)
+		dir := config.CanonicalSkillPath(r.Dir)
 		view := SkillRootView{
 			Dir:        r.Dir,
 			Scope:      string(r.Scope),
@@ -973,9 +973,9 @@ func skillRootsView() []SkillRootView {
 }
 
 func rootActive(roots []SkillRootView, path string) bool {
-	want := cleanAbsPath(path)
+	want := config.CanonicalSkillPath(path)
 	for _, r := range roots {
-		if r.Scope == string(skill.ScopeCustom) && cleanAbsPath(r.Dir) == want {
+		if r.Scope == string(skill.ScopeCustom) && config.CanonicalSkillPath(r.Dir) == want {
 			return true
 		}
 	}
@@ -1063,23 +1063,6 @@ func skillRootPath(path string) string {
 		return filepath.Dir(path)
 	}
 	return path
-}
-
-func cleanAbsPath(path string) string {
-	path = config.ExpandVars(strings.TrimSpace(path))
-	if path == "~" || strings.HasPrefix(path, "~/") || strings.HasPrefix(path, `~\`) {
-		if home, err := os.UserHomeDir(); err == nil {
-			if path == "~" {
-				path = home
-			} else {
-				path = filepath.Join(home, path[2:])
-			}
-		}
-	}
-	if abs, err := filepath.Abs(path); err == nil {
-		path = abs
-	}
-	return filepath.Clean(path)
 }
 
 // MCPServerInput is the drawer's "add server" form. Transport is "stdio" (Command

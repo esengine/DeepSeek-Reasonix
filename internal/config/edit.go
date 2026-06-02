@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"reasonix/internal/fileutil"
@@ -193,9 +194,9 @@ func (c *Config) AddSkillPath(path string) error {
 	if path == "" {
 		return fmt.Errorf("skill path: empty path")
 	}
-	want := canonicalSkillPath(path)
+	want := CanonicalSkillPath(path)
 	for _, existing := range c.Skills.Paths {
-		if canonicalSkillPath(existing) == want {
+		if CanonicalSkillPath(existing) == want {
 			return nil
 		}
 	}
@@ -210,9 +211,9 @@ func (c *Config) RemoveSkillPath(path string) (bool, error) {
 	if path == "" {
 		return false, fmt.Errorf("skill path: empty path")
 	}
-	want := canonicalSkillPath(path)
+	want := CanonicalSkillPath(path)
 	for i, existing := range c.Skills.Paths {
-		if canonicalSkillPath(existing) == want {
+		if CanonicalSkillPath(existing) == want {
 			c.Skills.Paths = append(c.Skills.Paths[:i], c.Skills.Paths[i+1:]...)
 			return true, nil
 		}
@@ -220,7 +221,10 @@ func (c *Config) RemoveSkillPath(path string) (bool, error) {
 	return false, nil
 }
 
-func canonicalSkillPath(path string) string {
+// CanonicalSkillPath expands env vars, ~ and relative segments to an absolute
+// cleaned path for comparing skill roots. On Windows it folds case so paths that
+// differ only in casing dedupe. Use only for comparison, never as stored config.
+func CanonicalSkillPath(path string) string {
 	path = ExpandVars(strings.TrimSpace(path))
 	if strings.HasPrefix(path, "~/") || strings.HasPrefix(path, `~\`) {
 		if home, err := os.UserHomeDir(); err == nil {
@@ -234,7 +238,11 @@ func canonicalSkillPath(path string) string {
 	if abs, err := filepath.Abs(path); err == nil {
 		path = abs
 	}
-	return filepath.Clean(path)
+	path = filepath.Clean(path)
+	if runtime.GOOS == "windows" {
+		return strings.ToLower(path)
+	}
+	return path
 }
 
 // UpsertPlugin adds e, or replaces an MCP server with the same name (preserving
