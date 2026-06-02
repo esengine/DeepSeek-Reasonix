@@ -123,6 +123,40 @@ func (l *Ledger) HasSuccessfulCommandAfter(command string, after int) bool {
 	return false
 }
 
+func (l *Ledger) HasSuccessfulCompleteStepAfter(after int) bool {
+	if l == nil {
+		return false
+	}
+	start := after + 1
+	if start < 0 {
+		start = 0
+	}
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for i := start; i < len(l.receipts); i++ {
+		r := l.receipts[i]
+		if r.Success && r.ToolName == "complete_step" {
+			return true
+		}
+	}
+	return false
+}
+
+func (l *Ledger) HasSuccessfulTodoWrite() bool {
+	if l == nil {
+		return false
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, r := range l.receipts {
+		if r.Success && r.ToolName == "todo_write" {
+			return true
+		}
+	}
+	return false
+}
+
 func (l *Ledger) HasSuccessfulWrite(paths []string) bool {
 	return l.hasSuccessfulPaths(paths, func(r Receipt) bool { return r.Write })
 }
@@ -149,6 +183,22 @@ func (l *Ledger) LatestSuccessfulWriteIndex(paths []string) (int, bool) {
 				latest = i
 				break
 			}
+		}
+	}
+	return latest, latest >= 0
+}
+
+func (l *Ledger) LatestSuccessfulWriterIndex() (int, bool) {
+	if l == nil {
+		return 0, false
+	}
+	latest := -1
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for i, r := range l.receipts {
+		if r.Success && r.Write {
+			latest = i
 		}
 	}
 	return latest, latest >= 0

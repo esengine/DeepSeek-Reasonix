@@ -46,6 +46,40 @@ func TestLedgerMatchesFileReadAndWriteReceipts(t *testing.T) {
 	}
 }
 
+func TestLedgerReportsFinalReadinessReceiptsAfterWriter(t *testing.T) {
+	ledger := NewLedger()
+	ledger.Record(Receipt{ToolName: "bash", Success: true, Command: "go test ./..."})
+	ledger.Record(Receipt{ToolName: "write_file", Success: true, Paths: []string{"changed.go"}, Write: true})
+	ledger.Record(Receipt{ToolName: "bash", Success: false, Command: "git diff --check"})
+	ledger.Record(Receipt{ToolName: "todo_write", Success: true, Todos: []TodoItem{{Content: "Edit code", Status: "in_progress"}}})
+
+	writer, ok := ledger.LatestSuccessfulWriterIndex()
+	if !ok {
+		t.Fatal("expected latest successful writer")
+	}
+	if ledger.HasSuccessfulCommandAfter("go test ./...", writer) {
+		t.Fatal("command before latest writer must not satisfy final readiness")
+	}
+	if ledger.HasSuccessfulCommandAfter("git diff --check", writer) {
+		t.Fatal("failed command must not satisfy final readiness")
+	}
+	if ledger.HasSuccessfulCompleteStepAfter(writer) {
+		t.Fatal("missing complete_step must not satisfy final readiness")
+	}
+	if !ledger.HasSuccessfulTodoWrite() {
+		t.Fatal("successful todo_write receipt should be reported")
+	}
+
+	ledger.Record(Receipt{ToolName: "bash", Success: true, Command: "git diff --check"})
+	ledger.Record(Receipt{ToolName: "complete_step", Success: true, Step: "Edit code"})
+	if !ledger.HasSuccessfulCommandAfter("git diff --check", writer) {
+		t.Fatal("command after latest writer should satisfy final readiness")
+	}
+	if !ledger.HasSuccessfulCompleteStepAfter(writer) {
+		t.Fatal("complete_step after latest writer should satisfy final readiness")
+	}
+}
+
 func TestLedgerResetClearsTurnReceipts(t *testing.T) {
 	ledger := NewLedger()
 	ledger.Record(Receipt{ToolName: "bash", Success: true, Command: "go test ./..."})

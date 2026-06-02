@@ -26,6 +26,8 @@ import (
 // window before the next compaction runs.
 const maxToolOutputBytes = 32 * 1024
 
+const maxFinalReadinessBlocks = 3
+
 // Renderer redraws the assistant's final-answer text as styled output. It is
 // applied only after a turn's text stream completes, so the user sees raw
 // markdown stream live, then a single redraw replaces it with formatted
@@ -369,6 +371,7 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 	a.sink.Emit(event.Event{Kind: event.TurnStarted})
 	a.session.Add(provider.Message{Role: provider.RoleUser, Content: input})
 
+	finalReadinessBlocks := 0
 	for step := 0; a.maxSteps <= 0 || step < a.maxSteps; step++ {
 		text, reasoning, signature, calls, usage, err := a.stream(ctx, step+1)
 		if err != nil {
@@ -395,6 +398,16 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 		})
 
 		if len(calls) == 0 {
+			if reason := a.finalReadinessFailure(); reason != "" {
+				finalReadinessBlocks++
+				if finalReadinessBlocks >= maxFinalReadinessBlocks {
+					return fmt.Errorf("final-answer readiness failed %d times: %s", finalReadinessBlocks, reason)
+				}
+				a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "final-answer readiness blocked: " + reason})
+				a.session.Add(provider.Message{Role: provider.RoleUser, Content: finalReadinessRetryMessage(reason)})
+				a.maybeCompact(ctx, usage)
+				continue
+			}
 			return nil // model gave a final answer
 		}
 
@@ -416,6 +429,54 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 	// is already in the session, so the user can just send another message to pick
 	// up where it left off.
 	return fmt.Errorf("paused after %d tool-call rounds (agent.max_steps) — the work so far is saved; send another message to continue, or set max_steps higher or to 0 for no limit", a.maxSteps)
+}
+
+func (a *Agent) finalReadinessFailure() string {
+	if a.evidence == nil {
+		return ""
+	}
+	writer, hasWriter := a.evidence.LatestSuccessfulWriterIndex()
+	if !hasWriter {
+		return ""
+	}
+	hasProjectChecks := len(a.projectChecks) > 0
+	hasTodoReceipt := a.evidence.HasSuccessfulTodoWrite()
+	if !hasProjectChecks && !hasTodoReceipt {
+		return ""
+	}
+
+	var missing []string
+	for _, check := range a.projectChecks {
+		command := strings.TrimSpace(check.Command)
+		if command == "" {
+			continue
+		}
+		if !a.evidence.HasSuccessfulCommandAfter(command, writer) {
+			missing = append(missing, fmt.Sprintf("run %q from %s after the latest write", command, finalReadinessCheckSource(check)))
+		}
+	}
+	if hasTodoReceipt && !a.evidence.HasSuccessfulCompleteStepAfter(writer) {
+		missing = append(missing, "call complete_step after the latest write")
+	}
+	if len(missing) == 0 {
+		return ""
+	}
+	return strings.Join(missing, "; ")
+}
+
+func finalReadinessCheckSource(check instruction.VerifyCheck) string {
+	source := strings.TrimSpace(check.SourcePath)
+	if source == "" {
+		source = "project memory"
+	}
+	if check.Line > 0 {
+		return fmt.Sprintf("%s:%d", source, check.Line)
+	}
+	return source
+}
+
+func finalReadinessRetryMessage(reason string) string {
+	return "Host final-answer readiness check failed. Before giving a final answer, address the missing host-observable receipts: " + reason + ". Run the required tool calls, then answer when readiness is satisfied."
 }
 
 // stream runs one completion, emitting reasoning and text deltas as typed
