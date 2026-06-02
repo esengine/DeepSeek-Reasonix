@@ -103,6 +103,17 @@ func TestCollectReportDoesNotRequireAPIKey(t *testing.T) {
 	}
 }
 
+func TestRenderTextSurfacesWarningsUpTop(t *testing.T) {
+	text := RenderText(Report{Warnings: []string{"config reasonix.toml: parse boom"}})
+	w := strings.Index(text, "parse boom")
+	if w < 0 {
+		t.Fatalf("warning missing from report:\n%s", text)
+	}
+	if p := strings.Index(text, "\nproviders\n"); p >= 0 && w > p {
+		t.Fatalf("warning should appear before the providers section, not buried below:\n%s", text)
+	}
+}
+
 func TestRenderTextFlagsInactiveSandbox(t *testing.T) {
 	inactive := RenderText(Report{Sandbox: SandboxReport{Bash: "enforce", Available: false}})
 	if !strings.Contains(inactive, "inactive") {

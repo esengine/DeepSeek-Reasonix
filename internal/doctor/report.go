@@ -205,6 +205,12 @@ func RenderText(r Report) string {
 	fmt.Fprintf(&b, "  user config  %s\n", valueOr(r.Config.UserPath, "unavailable"))
 	fmt.Fprintf(&b, "  model        %s\n", valueOr(r.Config.DefaultModel, "(none)"))
 
+	// Warnings (e.g. a config that failed to parse and fell back to defaults) go
+	// up top, not buried under the full report where they read as "all fine".
+	for _, w := range r.Warnings {
+		fmt.Fprintf(&b, "  warning: %s\n", w)
+	}
+
 	fmt.Fprintf(&b, "\nproviders\n")
 	for _, p := range r.Providers {
 		key := "missing"
@@ -266,9 +272,6 @@ func RenderText(r Report) string {
 	fmt.Fprintf(&b, "\npermissions\n")
 	fmt.Fprintf(&b, "  mode         %s\n", valueOr(r.Permission.Mode, "ask"))
 	fmt.Fprintf(&b, "  rules        allow:%d ask:%d deny:%d\n", r.Permission.AllowRules, r.Permission.AskRules, r.Permission.DenyRules)
-	for _, w := range r.Warnings {
-		fmt.Fprintf(&b, "\nwarning: %s\n", w)
-	}
 	return b.String()
 }
 
