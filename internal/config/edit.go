@@ -68,6 +68,17 @@ func (c *Config) UpsertProvider(e ProviderEntry) error {
 	return nil
 }
 
+// SetProviderEffort updates a provider's provider-specific thinking effort knob.
+func (c *Config) SetProviderEffort(name, effort string) error {
+	for i := range c.Providers {
+		if c.Providers[i].Name == name {
+			c.Providers[i].Effort = strings.ToLower(strings.TrimSpace(effort))
+			return nil
+		}
+	}
+	return fmt.Errorf("set provider effort: no provider %q", name)
+}
+
 // RemoveProvider deletes the named provider. It refuses to remove the current
 // default_model (reassign it first, so the config never points at a missing
 // model); if the removed provider was the planner, planner_model is cleared as

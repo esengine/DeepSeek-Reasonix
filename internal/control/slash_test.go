@@ -77,6 +77,11 @@ func TestSlashArgItems(t *testing.T) {
 	if !has(items, "list") || !has(items, "trust") {
 		t.Errorf("/hooks should offer list/trust; got %v", labelsOf(items))
 	}
+	// /thinking
+	items, _ = SlashArgItems("/thinking ", data)
+	if !has(items, "high") || !has(items, "max") || !has(items, "off") {
+		t.Errorf("/thinking should offer high/max/off; got %v", labelsOf(items))
+	}
 	// a non-structured command yields nothing
 	if items, _ := SlashArgItems("/help ", data); len(items) != 0 {
 		t.Errorf("/help should have no arg items; got %v", labelsOf(items))

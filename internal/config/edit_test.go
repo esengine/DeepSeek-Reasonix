@@ -73,6 +73,41 @@ func TestUpsertProvider(t *testing.T) {
 	}
 }
 
+func TestSetProviderEffort(t *testing.T) {
+	c := Default()
+	if err := c.SetProviderEffort("deepseek-flash", "MAX"); err != nil {
+		t.Fatalf("SetProviderEffort: %v", err)
+	}
+	p, _ := c.Provider("deepseek-flash")
+	if p.Effort != "max" {
+		t.Fatalf("effort = %q, want max", p.Effort)
+	}
+	if err := c.SetProviderEffort("missing", "high"); err == nil {
+		t.Fatal("SetProviderEffort should reject unknown provider")
+	}
+}
+
+func TestResolveModelPreservesProviderEffort(t *testing.T) {
+	c := Default()
+	c.Providers = append(c.Providers, ProviderEntry{
+		Name:      "deepseek",
+		Kind:      "openai",
+		BaseURL:   "https://api.deepseek.com",
+		Model:     "deepseek-v4-flash",
+		Models:    []string{"deepseek-v4-flash", "deepseek-v4-pro"},
+		Default:   "deepseek-v4-flash",
+		APIKeyEnv: "DEEPSEEK_API_KEY",
+		Effort:    "max",
+	})
+	e, ok := c.ResolveModel("deepseek/deepseek-v4-pro")
+	if !ok {
+		t.Fatal("ResolveModel did not find deepseek/deepseek-v4-pro")
+	}
+	if e.Name != "deepseek" || e.Model != "deepseek-v4-pro" || e.Effort != "max" {
+		t.Fatalf("resolved entry = %+v, want provider deepseek model deepseek-v4-pro effort max", e)
+	}
+}
+
 func TestRemoveProvider(t *testing.T) {
 	c := Default()
 	c.Agent.PlannerModel = "deepseek-pro"

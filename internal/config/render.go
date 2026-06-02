@@ -92,6 +92,12 @@ func RenderTOML(c *Config) string {
 			fmt.Fprintf(&b, "price       = { cache_hit = %v, input = %v, output = %v, currency = %q }   # per 1M tokens\n",
 				p.Price.CacheHit, p.Price.Input, p.Price.Output, p.Price.Symbol())
 		}
+		if p.Thinking != "" {
+			fmt.Fprintf(&b, "thinking    = %q\n", p.Thinking)
+		}
+		if p.Effort != "" {
+			fmt.Fprintf(&b, "effort      = %q\n", p.Effort)
+		}
 		b.WriteString("\n")
 	}
 

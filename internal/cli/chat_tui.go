@@ -2121,6 +2121,8 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 		m.notice(i18n.M.SlashTodoCleared)
 	case "/verbose":
 		m.toggleVerboseReasoning(true)
+	case "/thinking":
+		return m.runThinkingCommand(input)
 	case "/rewind":
 		m.openRewind()
 	case "/tree":

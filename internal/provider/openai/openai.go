@@ -14,6 +14,7 @@ import (
 	"math/rand"
 	"net"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -39,13 +40,25 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	}
 	keyEnv, _ := cfg.Extra["api_key_env"].(string) // for actionable auth errors
 	effort, _ := cfg.Extra["effort"].(string)
+	deepseek := isDeepSeekBaseURL(cfg.BaseURL)
+	if deepseek {
+		effort = strings.ToLower(strings.TrimSpace(effort))
+		switch effort {
+		case "":
+			effort = "high"
+		case "high", "max", "off":
+		default:
+			return nil, fmt.Errorf("openai: provider %q uses DeepSeek thinking; effort must be high, max, or off", name)
+		}
+	}
 	return &client{
-		name:    name,
-		apiKey:  cfg.APIKey,
-		keyEnv:  keyEnv,
-		baseURL: strings.TrimRight(cfg.BaseURL, "/"),
-		model:   cfg.Model,
-		effort:  effort,
+		name:     name,
+		apiKey:   cfg.APIKey,
+		keyEnv:   keyEnv,
+		baseURL:  strings.TrimRight(cfg.BaseURL, "/"),
+		model:    cfg.Model,
+		deepseek: deepseek,
+		effort:   effort,
 		http: &http.Client{
 			Transport: &http.Transport{
 				DialContext: (&net.Dialer{
@@ -60,16 +73,26 @@ func New(cfg provider.Config) (provider.Provider, error) {
 }
 
 type client struct {
-	name    string
-	apiKey  string
-	keyEnv  string // api_key_env name, surfaced in auth errors
-	baseURL string
-	model   string
-	http    *http.Client
-	effort  string // reasoning_effort forwarded to thinking-capable models; "" = omit
+	name     string
+	apiKey   string
+	keyEnv   string // api_key_env name, surfaced in auth errors
+	baseURL  string
+	model    string
+	http     *http.Client
+	deepseek bool
+	effort   string // reasoning_effort forwarded to thinking-capable models; "" = omit
 }
 
 func (c *client) Name() string { return c.name }
+
+func isDeepSeekBaseURL(baseURL string) bool {
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	return host == "api.deepseek.com" || strings.HasSuffix(host, ".deepseek.com")
+}
 
 func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provider.Chunk, error) {
 	body, err := json.Marshal(c.buildRequest(req))
@@ -204,7 +227,7 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 		})
 	}
 
-	return chatRequest{
+	out := chatRequest{
 		Model:           c.model,
 		Messages:        msgs,
 		Tools:           tools,
@@ -214,6 +237,14 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 		MaxTokens:       req.MaxTokens,
 		ReasoningEffort: c.effort,
 	}
+	if c.deepseek {
+		out.Thinking = &thinkingMode{Type: "enabled"}
+		if c.effort == "off" {
+			out.Thinking.Type = "disabled"
+			out.ReasoningEffort = ""
+		}
+	}
+	return out
 }
 
 // readStream parses the SSE stream, emits text deltas live, accumulates tool-call
@@ -375,6 +406,11 @@ type chatRequest struct {
 	Temperature     float64        `json:"temperature,omitempty"`
 	MaxTokens       int            `json:"max_tokens,omitempty"`
 	ReasoningEffort string         `json:"reasoning_effort,omitempty"`
+	Thinking        *thinkingMode  `json:"thinking,omitempty"`
+}
+
+type thinkingMode struct {
+	Type string `json:"type"`
 }
 
 type streamOptions struct {

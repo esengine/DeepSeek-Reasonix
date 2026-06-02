@@ -284,6 +284,76 @@ func TestBuildRequestForwardsReasoningEffort(t *testing.T) {
 	}
 }
 
+func TestBuildRequestDeepSeekThinking(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		effort        string
+		wantThinking  string
+		wantReasoning string
+	}{
+		{name: "default high", effort: "high", wantThinking: "enabled", wantReasoning: "high"},
+		{name: "max", effort: "max", wantThinking: "enabled", wantReasoning: "max"},
+		{name: "off", effort: "off", wantThinking: "disabled", wantReasoning: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := (&client{model: "deepseek-v4", deepseek: true, effort: tc.effort}).buildRequest(provider.Request{})
+			if req.Thinking == nil || req.Thinking.Type != tc.wantThinking {
+				t.Fatalf("Thinking = %+v, want %q", req.Thinking, tc.wantThinking)
+			}
+			if req.ReasoningEffort != tc.wantReasoning {
+				t.Fatalf("ReasoningEffort = %q, want %q", req.ReasoningEffort, tc.wantReasoning)
+			}
+		})
+	}
+}
+
+func TestBuildRequestNonDeepSeekOmitsThinking(t *testing.T) {
+	req := (&client{model: "mimo-v2", effort: "high"}).buildRequest(provider.Request{})
+	if req.Thinking != nil {
+		t.Fatalf("non-DeepSeek request must not include thinking, got %+v", req.Thinking)
+	}
+	if req.ReasoningEffort != "high" {
+		t.Fatalf("ReasoningEffort = %q, want high", req.ReasoningEffort)
+	}
+}
+
+func TestNewDeepSeekThinkingDefaultsAndValidation(t *testing.T) {
+	p, err := New(provider.Config{
+		Name:    "deepseek",
+		BaseURL: "https://api.deepseek.com",
+		Model:   "deepseek-v4",
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	c := p.(*client)
+	if !c.deepseek || c.effort != "high" {
+		t.Fatalf("deepseek=%v effort=%q, want true/high", c.deepseek, c.effort)
+	}
+
+	p, err = New(provider.Config{
+		Name:    "deepseek",
+		BaseURL: "https://api.deepseek.com/v1",
+		Model:   "deepseek-v4",
+		Extra:   map[string]any{"effort": "max"},
+	})
+	if err != nil {
+		t.Fatalf("New max: %v", err)
+	}
+	if got := p.(*client).effort; got != "max" {
+		t.Fatalf("effort = %q, want max", got)
+	}
+
+	if _, err := New(provider.Config{
+		Name:    "deepseek",
+		BaseURL: "https://api.deepseek.com",
+		Model:   "deepseek-v4",
+		Extra:   map[string]any{"effort": "medium"},
+	}); err == nil {
+		t.Fatal("New should reject invalid DeepSeek effort")
+	}
+}
+
 func TestNewReadsEffortFromConfig(t *testing.T) {
 	p, err := New(provider.Config{
 		Name:    "mimo",

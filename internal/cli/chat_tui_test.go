@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -236,6 +238,53 @@ func TestSubmittedInputRecallWithArrowKeys(t *testing.T) {
 	m = model.(chatTUI)
 	if got := m.input.Value(); got != "draft" {
 		t.Fatalf("down past newest should restore draft, got %q", got)
+	}
+}
+
+func TestThinkingCommandWritesCurrentDeepSeekProvider(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
+	t.Chdir(root)
+
+	m := newTestChatTUI()
+	m.ctrl = control.New(control.Options{Label: "deepseek-flash"})
+	m.modelRef = "deepseek-flash/deepseek-v4-flash"
+	m.buildController = func(_ string, _ []provider.Message) (*control.Controller, error) {
+		return control.New(control.Options{Label: "deepseek-flash"}), nil
+	}
+
+	cmd := m.runThinkingCommand("/thinking max")
+	if cmd == nil {
+		t.Fatal("/thinking max should return a rebuild command")
+	}
+
+	configPath := filepath.Join(root, "config", "reasonix", "config.toml")
+	body, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read saved config: %v", err)
+	}
+	if !strings.Contains(string(body), `effort      = "max"`) {
+		t.Fatalf("saved config missing effort=max:\n%s", body)
+	}
+}
+
+func TestThinkingCommandRejectsNonDeepSeekProvider(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
+	t.Chdir(root)
+
+	m := newTestChatTUI()
+	m.ctrl = control.New(control.Options{Label: "mimo-pro"})
+	m.modelRef = "mimo-pro/mimo-v2.5-pro"
+	m.buildController = func(_ string, _ []provider.Message) (*control.Controller, error) {
+		return control.New(control.Options{Label: "mimo-pro"}), nil
+	}
+
+	if cmd := m.runThinkingCommand("/thinking max"); cmd != nil {
+		t.Fatal("non-DeepSeek provider should not rebuild")
+	}
+	if _, err := os.Stat(filepath.Join(root, "config", "reasonix", "config.toml")); !os.IsNotExist(err) {
+		t.Fatalf("non-DeepSeek provider should not write config, stat err=%v", err)
 	}
 }
 

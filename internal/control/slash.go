@@ -37,7 +37,8 @@ type ArgData struct {
 // (everything after the command word). It returns the suggestions filtered by
 // the token being typed and the byte offset where that token begins, so a caller
 // replaces just that token. Only structured commands participate (/mcp /model
-// /skill /hooks); others yield nil. Single source of truth for CLI + desktop.
+// /skill /hooks /thinking); others yield nil. Single source of truth for CLI +
+// desktop.
 func SlashArgItems(line string, d ArgData) ([]SlashItem, int) {
 	cmdEnd := strings.IndexAny(line, " \t")
 	if cmdEnd < 0 {
@@ -56,10 +57,23 @@ func SlashArgItems(line string, d ArgData) ([]SlashItem, int) {
 		raw = skillArgItems(prior, d)
 	case "/hooks":
 		raw = hooksArgItems(prior)
+	case "/thinking":
+		raw = thinkingArgItems(prior)
 	default:
 		return nil, from
 	}
 	return filterSlash(raw, line, from, cur), from
+}
+
+func thinkingArgItems(prior []string) []SlashItem {
+	if len(prior) <= 1 {
+		return []SlashItem{
+			{Label: "high", Insert: "high", Hint: i18n.M.ArgThinkingHigh},
+			{Label: "max", Insert: "max", Hint: i18n.M.ArgThinkingMax},
+			{Label: "off", Insert: "off", Hint: i18n.M.ArgThinkingOff},
+		}
+	}
+	return nil
 }
 
 func mcpArgItems(prior []string, cur string, d ArgData) []SlashItem {
