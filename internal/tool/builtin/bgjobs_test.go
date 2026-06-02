@@ -57,7 +57,7 @@ func TestBackgroundKill(t *testing.T) {
 	defer m.Close()
 	ctx := jobs.WithManager(context.Background(), m)
 
-	if _, err := (bash{}).Execute(ctx, []byte(`{"command":"sleep 10","run_in_background":true}`)); err != nil {
+	if _, err := (bash{}).Execute(ctx, []byte(`{"command":"sleep 120","run_in_background":true}`)); err != nil {
 		t.Fatalf("bash background: %v", err)
 	}
 	id := m.Running()[0].ID
@@ -69,9 +69,12 @@ func TestBackgroundKill(t *testing.T) {
 	if !strings.Contains(kout, "Killed") {
 		t.Errorf("kill_shell = %q, want it to report Killed", kout)
 	}
-	// Windows exec can spend up to bashWaitDelay returning from a cancelled
-	// process tree while it tears down descendants and pipes.
-	res := m.Wait(ctx, []string{id}, int(bashWaitDelay.Seconds())+5)
+	// 120s natural duration keeps the job far from finishing on its own, so the
+	// reap window is the only thing this measures: a loaded machine's slow
+	// process-tree teardown (up to ~bashWaitDelay) still fits, while a genuinely
+	// broken kill trips the 40s timeout. Pairing the sleep with the timeout (as
+	// 10/10 did) raced natural completion against the reap.
+	res := m.Wait(ctx, []string{id}, 40)
 	if len(res) != 1 || res[0].Status != jobs.Killed {
 		t.Fatalf("want killed, got %+v", res)
 	}
