@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"reasonix/internal/fileutil"
 )
 
 // BranchMeta is the small sidecar record that turns flat session files into a
@@ -108,7 +110,7 @@ func SaveBranchMeta(sessionPath string, m BranchMeta) error {
 		os.Remove(tmpPath)
 		return err
 	}
-	return os.Rename(tmpPath, metaPath)
+	return fileutil.ReplaceFile(tmpPath, metaPath)
 }
 
 func EnsureBranchMeta(sessionPath string) (BranchMeta, error) {

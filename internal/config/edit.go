@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"reasonix/internal/fileutil"
 	"reasonix/internal/permission"
 )
 
@@ -259,7 +260,7 @@ func (c *Config) SaveTo(path string) error {
 		os.Remove(tmpPath)
 		return fmt.Errorf("save: close temp: %w", err)
 	}
-	return os.Rename(tmpPath, path)
+	return fileutil.ReplaceFile(tmpPath, path)
 }
 
 // Save writes the configuration back to the file it was loaded from

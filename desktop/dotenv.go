@@ -3,6 +3,8 @@ package main
 import (
 	"os"
 	"strings"
+
+	"reasonix/internal/fileutil"
 )
 
 // dotEnvPath is the project-root .env the kernel reads keys from (config.loadDotEnv
@@ -52,7 +54,7 @@ func upsertDotEnv(key, value string) error {
 		os.Remove(tmpPath)
 		return err
 	}
-	if err := os.Rename(tmpPath, dotEnvPath); err != nil {
+	if err := fileutil.ReplaceFile(tmpPath, dotEnvPath); err != nil {
 		os.Remove(tmpPath)
 		return err
 	}

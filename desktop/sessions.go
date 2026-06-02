@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"reasonix/internal/fileutil"
 )
 
 // errActiveSession is returned when a delete targets the session in use.
@@ -60,7 +62,7 @@ func saveSessionTitles(dir string, m map[string]string) error {
 		os.Remove(tmpPath)
 		return err
 	}
-	return os.Rename(tmpPath, sessionTitlesPath(dir))
+	return fileutil.ReplaceFile(tmpPath, sessionTitlesPath(dir))
 }
 
 // setSessionTitle sets (or, with an empty title, clears) a session's custom name.
@@ -135,7 +137,7 @@ func saveSessionDisplays(dir string, m sessionDisplayMap) error {
 		os.Remove(tmpPath)
 		return err
 	}
-	return os.Rename(tmpPath, sessionDisplayPath(dir))
+	return fileutil.ReplaceFile(tmpPath, sessionDisplayPath(dir))
 }
 
 func recordSessionDisplay(dir, sessionPath, content, display string) error {

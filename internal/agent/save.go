@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"reasonix/internal/fileutil"
 	"reasonix/internal/provider"
 )
 
@@ -45,7 +46,7 @@ func (s *Session) Save(path string) error {
 		os.Remove(tmpPath)
 		return err
 	}
-	return os.Rename(tmpPath, path)
+	return fileutil.ReplaceFile(tmpPath, path)
 }
 
 // LoadSession reads a JSONL file written by Save into a fresh Session value.
