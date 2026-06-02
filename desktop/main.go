@@ -37,14 +37,24 @@ var assets embed.FS
 var version = "dev"
 
 func main() {
+	// Load desktop-level settings (auto-start, silent-start) before the
+	// window is created so StartHidden can be set conditionally.
+	loadDesktopSettings()
+	ds := getDesktopSettings()
+
 	app := NewApp()
 
+	// Silent start: create the window hidden (taskbar icon still shows;
+	// clicking it brings the window up).
+	startHidden := ds.SilentStart
+
 	err := wails.Run(&options.App{
-		Title:     "Reasonix",
-		Width:     1240,
-		Height:    720,
-		MinWidth:  760,
-		MinHeight: 480,
+		Title:       "Reasonix",
+		Width:       1240,
+		Height:      720,
+		MinWidth:    760,
+		MinHeight:   480,
+		StartHidden: startHidden,
 		// Match the dark UI shell so first paint (before CSS loads) doesn't flash
 		// white — particularly visible on WebKitGTK. Uses the dark theme's --bg
 		// colour (#1a1a2e = RGB 26,26,46).

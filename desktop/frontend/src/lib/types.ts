@@ -394,6 +394,8 @@ export interface SettingsView {
   configPath: string;
   providerKinds: string[]; // provider implementations the kernel registered (for the kind picker)
   bypass: boolean; // live YOLO state (runtime-only) — whether approvals are skipped this session
+  autoStart: boolean; // launch on user login
+  silentStart: boolean; // start window hidden
 }
 
 // Auto-updater payloads (desktop/updater.go). UpdateInfo drives the update banner;

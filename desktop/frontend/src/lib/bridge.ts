@@ -139,6 +139,12 @@ export interface AppBindings {
   // SetBypass toggles YOLO mode (auto-approve every tool call this session; deny
   // rules still apply). Runtime-only — not written to config.
   SetBypass(on: boolean): Promise<void>;
+  // Desktop settings: auto-start on login and silent (hidden-window) start.
+  // Persisted outside project-scoped config — survive config resets.
+  SetAutoStart(enabled: boolean): Promise<void>;
+  AutoStart(): Promise<boolean>;
+  SetSilentStart(enabled: boolean): Promise<void>;
+  SilentStart(): Promise<boolean>;
   // Auto-updater (desktop/updater_app.go): the injected build version, a manifest
   // check, applying an update (win/linux self-update; macOS opens the download
   // page), and opening that page directly. Progress streams on "updater:progress".
@@ -394,6 +400,8 @@ function makeMockApp(): AppBindings {
     configPath: "~/projects/reasonix/reasonix.toml",
     providerKinds: ["openai"],
     bypass: false,
+    autoStart: false,
+    silentStart: false,
   };
   return {
     async Submit(input) {
@@ -965,6 +973,18 @@ function makeMockApp(): AppBindings {
     },
     async SetBypass(on: boolean) {
       settings.bypass = on;
+    },
+    async SetAutoStart(enabled: boolean) {
+      settings.autoStart = enabled;
+    },
+    async AutoStart() {
+      return settings.autoStart;
+    },
+    async SetSilentStart(enabled: boolean) {
+      settings.silentStart = enabled;
+    },
+    async SilentStart() {
+      return settings.silentStart;
     },
     async Version() {
       return "v1.0.0 (browser dev)";

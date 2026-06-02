@@ -502,7 +502,10 @@ func resolveCustomPaths(paths []string, baseDir, homeDir string) []string {
 		case strings.HasPrefix(trimmed, "~/") || strings.HasPrefix(trimmed, `~\`):
 			trimmed = filepath.Join(homeDir, trimmed[2:])
 		}
-		if !filepath.IsAbs(trimmed) {
+		// On Windows, filepath.IsAbs requires a drive letter (e.g. C:), so
+		// /-rooted paths produce false. Treat separator-prefixed paths as
+		// already resolved — they came from tilde expansion or user input.
+		if !filepath.IsAbs(trimmed) && !(len(trimmed) > 0 && os.IsPathSeparator(trimmed[0])) {
 			trimmed = filepath.Join(baseDir, trimmed)
 		}
 		out = append(out, filepath.Clean(trimmed))
