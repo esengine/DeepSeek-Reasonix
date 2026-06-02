@@ -222,6 +222,8 @@ func Start(ctx context.Context, specs []Spec, p StartPolicy) (*Host, []tool.Tool
 				cancelStartup = cancel
 			}
 
+			phaseAStart := time.Now()
+
 			// Transport on the parent ctx, startup RPCs on the timed callCtx: the
 			// per-plugin timeout caps initialize+listTools, but the long-lived
 			// stdio child must outlive the startup scope and later phase-B calls.
@@ -241,7 +243,22 @@ func Start(ctx context.Context, specs []Spec, p StartPolicy) (*Host, []tool.Tool
 			}
 			c.toolCount = len(ts)
 
+			// Persist for next launch on the side: a slow stats/cache write
+			// must not delay tools coming online, and either failure is
+			// recoverable (we just re-handshake or skip auto-demote).
 			cancelStartup()
+			phaseADur := time.Since(phaseAStart)
+			go func() {
+				_ = RecordStartup(spec.Name, phaseADur)
+				_ = SaveCachedSchema(spec.Name, CachedSchema{
+					SpecHash: SpecFingerprint(spec),
+					Capabilities: map[string]bool{
+						"prompts":   c.hasPrompts,
+						"resources": c.hasResources,
+					},
+					Tools: cacheableToolsOf(ts),
+				})
+			}()
 
 			// Prompts and resources are deferred to StartPhaseB so the boot path
 			// can return as soon as tools are ready — the slow-to-list surfaces

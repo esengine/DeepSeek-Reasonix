@@ -526,6 +526,19 @@ func SessionDir() string {
 	return filepath.Join(dir, "reasonix", "sessions")
 }
 
+// CacheDir is the per-user cache root for derived/regenerable artefacts: MCP
+// handshake snapshots, plugin startup-latency telemetry. Lives beside the
+// existing dirs (UserConfigDir/reasonix/...) so the whole reasonix state tree
+// shares one root the user can wipe in a single rm. Empty when the OS dir is
+// unavailable — callers must tolerate that (caching is best-effort).
+func CacheDir() string {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(dir, "reasonix", "cache")
+}
+
 // MemoryUserDir returns the reasonix user config root (…/reasonix), under which
 // the user-global REASONIX.md and the per-project auto-memory store live. Empty
 // when the user config dir can't be resolved, which disables user-scoped memory.
