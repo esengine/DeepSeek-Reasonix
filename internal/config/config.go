@@ -364,14 +364,25 @@ func Load() (*Config, error) {
 	loadDotEnv()
 	cfg := Default()
 
+	var tomlSources []string
 	if uc := userConfigPath(); uc != "" {
-		if err := mergeFile(cfg, uc); err != nil {
+		tomlSources = append(tomlSources, uc)
+	}
+	tomlSources = append(tomlSources, "reasonix.toml")
+	for _, path := range tomlSources {
+		if err := mergeFile(cfg, path); err != nil {
 			return nil, err
 		}
 	}
-	if err := mergeFile(cfg, "reasonix.toml"); err != nil {
+	// toml.DecodeFile replaces [[plugins]] wholesale, so cfg.Plugins now holds
+	// only the last file's. Re-merge by name across all sources (later wins) so a
+	// project reasonix.toml doesn't drop the global config's MCP servers.
+	plugins, err := mergeTOMLPlugins(tomlSources)
+	if err != nil {
 		return nil, err
 	}
+	cfg.Plugins = plugins
+
 	// Claude Code's .mcp.json (project root) is read last and merged into
 	// [[plugins]], so a server configured for Claude works here unchanged.
 	// reasonix.toml wins on a name collision (see mergeMCPJSON).
@@ -381,6 +392,30 @@ func Load() (*Config, error) {
 	}
 	cfg.mergeMCPJSON(entries)
 	return cfg, nil
+}
+
+// mergeTOMLPlugins merges [[plugins]] across TOML sources by name (later source wins).
+func mergeTOMLPlugins(paths []string) ([]PluginEntry, error) {
+	var merged []PluginEntry
+	index := map[string]int{}
+	for _, path := range paths {
+		if _, err := os.Stat(path); err != nil {
+			continue
+		}
+		var f Config
+		if _, err := toml.DecodeFile(path, &f); err != nil {
+			return nil, fmt.Errorf("config %s: %w", path, err)
+		}
+		for _, p := range f.Plugins {
+			if i, ok := index[p.Name]; ok {
+				merged[i] = p
+				continue
+			}
+			index[p.Name] = len(merged)
+			merged = append(merged, p)
+		}
+	}
+	return merged, nil
 }
 
 // LoadForEdit returns a config to seed the `reasonix setup` wizard when reconfiguring:

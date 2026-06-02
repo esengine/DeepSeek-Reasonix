@@ -110,6 +110,40 @@ command = "local-bin"
 	}
 }
 
+func TestLoadMergesPluginsAcrossTOMLSources(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("HOME", root)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "xdg"))
+	t.Setenv("AppData", filepath.Join(root, "AppData")) // os.UserConfigDir reads AppData on Windows
+	t.Chdir(t.TempDir())
+
+	gpath := UserConfigPath()
+	if gpath == "" {
+		t.Fatal("UserConfigPath empty under isolated env")
+	}
+	if err := os.MkdirAll(filepath.Dir(gpath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(gpath, []byte("[[plugins]]\nname = \"globalmcp\"\ncommand = \"global-bin\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile("reasonix.toml", []byte("[[plugins]]\nname = \"projectmcp\"\ncommand = \"project-bin\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := map[string]bool{}
+	for _, p := range cfg.Plugins {
+		names[p.Name] = true
+	}
+	if !names["globalmcp"] || !names["projectmcp"] {
+		t.Fatalf("a project reasonix.toml [[plugins]] dropped the global config's server; got %+v", cfg.Plugins)
+	}
+}
+
 func TestMergeMCPJSONPrecedence(t *testing.T) {
 	// reasonix.toml already declares "shared" (stdio); .mcp.json offers a colliding
 	// "shared" (http) plus a fresh "extra". reasonix.toml must win on the collision;
