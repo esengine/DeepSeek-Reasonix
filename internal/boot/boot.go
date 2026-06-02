@@ -151,8 +151,8 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// slow the next launch unless the user explicitly opts in to eager.
 	eagerEntries, lazyEntries, bgEntries := partitionByTier(cfg.AutoStartPlugins())
 
-	// Auto-demote: any eager plugin that has been chronically slow (Phase 5
-	// telemetry says p99 > 2*budget over the last few starts) drops to lazy
+	// Auto-demote: any eager plugin that has been chronically slow (recent
+	// samples repeatedly hit the blocking startup budget) drops to lazy
 	// for this session. The user keeps eager intent, just doesn't pay for it
 	// on a server that's been misbehaving. A notice surfaces the demotion.
 	var demoteMessages []string

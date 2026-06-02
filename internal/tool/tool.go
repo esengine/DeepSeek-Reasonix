@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"sort"
 	"strings"
+	"sync"
 
 	"reasonix/internal/diff"
 	"reasonix/internal/provider"
@@ -97,6 +98,7 @@ func LookupBuiltin(name string) (Tool, bool) {
 
 // Registry is a per-run set of tools: enabled built-ins plus plugin tools.
 type Registry struct {
+	mu    sync.RWMutex
 	tools map[string]Tool
 	order []string
 }
@@ -108,6 +110,9 @@ func NewRegistry() *Registry {
 
 // Add inserts (or replaces) a tool, preserving first-seen order.
 func (r *Registry) Add(t Tool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	name := t.Name()
 	if _, ok := r.tools[name]; !ok {
 		r.order = append(r.order, name)
@@ -138,6 +143,9 @@ func SplitMCPName(name string) (server, tool string, ok bool) {
 // drop an MCP server's "mcp__<server>__" namespace when it's disconnected — and
 // returns the count removed.
 func (r *Registry) RemovePrefix(prefix string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	kept := r.order[:0]
 	removed := 0
 	for _, name := range r.order {
@@ -154,15 +162,26 @@ func (r *Registry) RemovePrefix(prefix string) int {
 
 // Get looks up a tool by name.
 func (r *Registry) Get(name string) (Tool, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
 	t, ok := r.tools[name]
 	return t, ok
 }
 
 // Len returns the number of registered tools.
-func (r *Registry) Len() int { return len(r.order) }
+func (r *Registry) Len() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	return len(r.order)
+}
 
 // Names returns the registered tool names in insertion order.
 func (r *Registry) Names() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
 	out := make([]string, len(r.order))
 	copy(out, r.order)
 	return out
@@ -170,11 +189,20 @@ func (r *Registry) Names() []string {
 
 // Schemas exports tool definitions in stable name order for the provider.
 func (r *Registry) Schemas() []provider.ToolSchema {
-	names := r.Names()
+	r.mu.RLock()
+	names := make([]string, len(r.order))
+	copy(names, r.order)
 	sort.Strings(names)
-	out := make([]provider.ToolSchema, 0, len(names))
+	tools := make([]Tool, 0, len(names))
 	for _, name := range names {
-		t := r.tools[name]
+		if t := r.tools[name]; t != nil {
+			tools = append(tools, t)
+		}
+	}
+	r.mu.RUnlock()
+
+	out := make([]provider.ToolSchema, 0, len(tools))
+	for _, t := range tools {
 		out = append(out, provider.ToolSchema{
 			Name:        t.Name(),
 			Description: t.Description(),

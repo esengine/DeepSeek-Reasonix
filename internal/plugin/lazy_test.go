@@ -145,10 +145,10 @@ func TestLazyCacheHitSyncSpawn(t *testing.T) {
 
 // TestLazyCacheMissAsyncSpawn drives the cache-miss branch: with no cache, a
 // single "connect" placeholder shows up; first Execute returns a retry hint and
-// kicks the spawn async; the real tools surface on the next turn under their
-// real names, and the connect stub is dropped. This is the "model warm-up"
-// contract — the model must not see stale schemas, so we refuse to forward
-// the first call and instead ask for one more turn.
+// kicks the spawn async; once that spawn finishes, the registry swaps to the
+// real tools under their real names, and the connect stub is dropped. This is
+// the "model warm-up" contract — the model must not see stale schemas, so we
+// refuse to forward the first call and instead ask for one more turn.
 func TestLazyCacheMissAsyncSpawn(t *testing.T) {
 	redirectCache(t)
 	spec := helperSpec()
@@ -184,13 +184,10 @@ func TestLazyCacheMissAsyncSpawn(t *testing.T) {
 	}
 
 	// Wait for the async spawn to complete (host.Add happens on the run()
-	// goroutine kicked by Execute).
+	// goroutine kicked by Execute). The goroutine swaps the registry itself, so
+	// the next model request sees the real schemas without another placeholder
+	// Execute call.
 	waitForServer(t, host, "mock", 5*time.Second)
-
-	// Second Execute on the placeholder triggers trySwap (caught by the
-	// spawnReady branch). The real tools land in the registry under their
-	// real names; the connect stub is dropped.
-	_, _ = connect.Execute(ctx, json.RawMessage(`{}`))
 
 	if _, found := reg.Get("mcp__mock__connect"); found {
 		t.Errorf("connect stub should be removed after swap, names=%v", reg.Names())
@@ -200,6 +197,54 @@ func TestLazyCacheMissAsyncSpawn(t *testing.T) {
 	}
 	if _, found := reg.Get("mcp__mock__zed"); !found {
 		t.Errorf("real mcp__mock__zed missing after swap, names=%v", reg.Names())
+	}
+}
+
+func TestLazySwapDoesNotRaceRegistrySchemas(t *testing.T) {
+	redirectCache(t)
+	spec := helperSpec()
+	spec.Env["GO_WANT_HELPER_INIT_MS"] = "50"
+	writeMockCache(t, spec)
+	cs, _ := LoadCachedSchema(spec.Name, SpecFingerprint(spec))
+
+	host := NewHost()
+	defer host.Close()
+	reg := tool.NewRegistry()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	tools := LazyToolset(spec, cs, host, reg, ctx, false)
+	for _, lt := range tools {
+		reg.Add(lt)
+	}
+	echo, _ := reg.Get("mcp__mock__echo")
+	if echo == nil {
+		t.Fatal("missing mcp__mock__echo placeholder")
+	}
+
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-done:
+				return
+			default:
+				_ = reg.Schemas()
+			}
+		}
+	}()
+
+	out, err := echo.Execute(ctx, json.RawMessage(`{"msg":"race"}`))
+	close(done)
+	wg.Wait()
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if out != "echo: race" {
+		t.Fatalf("Execute result = %q, want %q", out, "echo: race")
 	}
 }
 

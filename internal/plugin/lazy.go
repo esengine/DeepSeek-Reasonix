@@ -4,12 +4,11 @@
 // model call. A "background" plugin is identical except it also kicks the
 // spawn off at boot so by the time the model calls, the swap is already done.
 //
-// Why the indirection: tool.Registry has no mutex (agent dispatch is
-// single-threaded), so we cannot mutate it from a background goroutine while
-// the agent is reading reg.Schemas(). Swaps are therefore performed inside
-// lazyTool.Execute, which runs in turn-synchronous code. Background spawns
-// merely populate lazySpawn's shared state; the swap fires on the next
-// Execute call against any tool tied to that server.
+// Why the indirection: a lazy/background server still needs stable placeholder
+// tools before the real handshake finishes. Once it does finish, lazySpawn swaps
+// the placeholders for real tools through tool.Registry's own lock, so the next
+// model request sees the real schemas without waiting for another placeholder
+// Execute call.
 package plugin
 
 import (
@@ -93,11 +92,11 @@ func (s *lazySpawn) run() {
 		s.real[t.Name()] = t
 	}
 	s.state = spawnReady
+	s.trySwap()
 }
 
 // trySwap installs the real tools into reg if the spawn is ready and the
-// swap hasn't happened. Caller must hold s.mu AND must be running in a
-// turn-synchronous code path (an Execute body) — the Registry is unlocked.
+// swap hasn't happened. Caller must hold s.mu.
 func (s *lazySpawn) trySwap() {
 	if s.swapped || s.state != spawnReady {
 		return
@@ -177,8 +176,7 @@ func (lt *lazyTool) Execute(ctx context.Context, args json.RawMessage) (string, 
 			return "", fmt.Errorf("MCP server %q is initializing on first use — call again on the next turn for its real tools", sp.spec.Name)
 		}
 		// Cache-hit: run the handshake synchronously so this one Execute can
-		// forward through, and so the swap happens in turn-sync (registry is
-		// unlocked).
+		// forward through.
 		sp.state = spawnInFlight
 		sp.mu.Unlock()
 		real, err := sp.host.Add(sp.ctx, sp.spec)
@@ -231,7 +229,7 @@ func LazyToolset(spec Spec, cs *CachedSchema, host *Host, reg *tool.Registry, se
 
 	var out []tool.Tool
 	if cs == nil {
-		shared.removePrefix = "mcp__" + normalizeName(spec.Name) + "__"
+		shared.removePrefix = ToolPrefix(spec.Name)
 		out = []tool.Tool{&lazyTool{
 			shared:   shared,
 			name:     shared.removePrefix + "connect",

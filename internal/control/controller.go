@@ -1236,6 +1236,7 @@ func (c *Controller) connectMCPSpec(s plugin.Spec) (int, error) {
 		return 0, err
 	}
 	if c.reg != nil {
+		c.reg.RemovePrefix(plugin.ToolPrefix(s.Name))
 		for _, t := range tools {
 			c.reg.Add(t)
 		}
@@ -1329,6 +1330,9 @@ func (c *Controller) RemoveMCPServer(name string) (disconnected bool, err error)
 	}
 	inConfig := cfg.RemovePlugin(name)
 	if inConfig {
+		if !disconnected && c.reg != nil {
+			c.reg.RemovePrefix(plugin.ToolPrefix(name))
+		}
 		if serr := cfg.Save(); serr != nil {
 			return disconnected, serr
 		}
@@ -1344,14 +1348,20 @@ func (c *Controller) RemoveMCPServer(name string) (disconnected bool, err error)
 // on the next session start, or now via ConnectConfiguredMCPServer (the "on").
 // Reports whether a live server was actually disconnected.
 func (c *Controller) DisconnectMCPServer(name string) bool {
-	if c.host == nil {
-		return false
+	disconnected := false
+	if c.host != nil {
+		if prefix, ok := c.host.Remove(name); ok {
+			disconnected = true
+			if c.reg != nil {
+				c.reg.RemovePrefix(prefix)
+			}
+		}
 	}
-	prefix, ok := c.host.Remove(name)
-	if ok && c.reg != nil {
-		c.reg.RemovePrefix(prefix)
+	removedPlaceholder := 0
+	if !disconnected && c.reg != nil {
+		removedPlaceholder = c.reg.RemovePrefix(plugin.ToolPrefix(name))
 	}
-	return ok
+	return disconnected || removedPlaceholder > 0
 }
 
 // Label returns the human-readable model label, e.g. "deepseek-flash".

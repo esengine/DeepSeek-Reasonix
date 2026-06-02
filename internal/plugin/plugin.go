@@ -736,7 +736,12 @@ func (c *Client) listTools(ctx context.Context) ([]tool.Tool, error) {
 // matching Claude Code. Spaces in either part are normalised to underscores so
 // the name is a clean identifier the model can call.
 func toolName(server, raw string) string {
-	return "mcp__" + normalizeName(server) + "__" + normalizeName(raw)
+	return ToolPrefix(server) + normalizeName(raw)
+}
+
+// ToolPrefix is the model-visible namespace prefix for every tool from server.
+func ToolPrefix(server string) string {
+	return "mcp__" + normalizeName(server) + "__"
 }
 
 var invalidNameChars = regexp.MustCompile(`[^a-zA-Z0-9_-]+`)

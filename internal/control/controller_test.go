@@ -2,13 +2,16 @@ package control
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/event"
+	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
+	"reasonix/internal/tool"
 )
 
 type typedNilControllerSink struct{}
@@ -23,6 +26,20 @@ func (r appendingRunner) Run(_ context.Context, input string) error {
 	r.session.Add(provider.Message{Role: provider.RoleUser, Content: input})
 	return nil
 }
+
+type fakeControlTool struct{ name string }
+
+func (t fakeControlTool) Name() string { return t.name }
+func (fakeControlTool) Description() string {
+	return "fake"
+}
+func (fakeControlTool) Schema() json.RawMessage {
+	return json.RawMessage(`{"type":"object"}`)
+}
+func (fakeControlTool) Execute(context.Context, json.RawMessage) (string, error) {
+	return "", nil
+}
+func (fakeControlTool) ReadOnly() bool { return true }
 
 func TestNewTreatsTypedNilSinkAsDiscard(t *testing.T) {
 	var sink *typedNilControllerSink
@@ -115,6 +132,19 @@ func TestSnapshotActivityRefreshesSessionActivity(t *testing.T) {
 	}
 	if !second.UpdatedAt.After(first.UpdatedAt) {
 		t.Fatalf("SnapshotActivity did not refresh activity: first=%s second=%s", first.UpdatedAt, second.UpdatedAt)
+	}
+}
+
+func TestDisconnectMCPServerRemovesLazyPlaceholder(t *testing.T) {
+	reg := tool.NewRegistry()
+	reg.Add(fakeControlTool{name: "mcp__mock__connect"})
+	c := New(Options{Host: plugin.NewHost(), Registry: reg})
+
+	if ok := c.DisconnectMCPServer("mock"); !ok {
+		t.Fatal("DisconnectMCPServer returned false for a registered lazy placeholder")
+	}
+	if _, found := reg.Get("mcp__mock__connect"); found {
+		t.Fatalf("lazy placeholder still registered after disconnect; names=%v", reg.Names())
 	}
 }
 
