@@ -2,11 +2,35 @@ package doctor
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"reasonix/internal/config"
 )
+
+func TestRedactHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)        // os.UserHomeDir on unix
+	t.Setenv("USERPROFILE", home) // os.UserHomeDir on windows
+	sep := string(os.PathSeparator)
+
+	if got := redactHome(home); got != "~" {
+		t.Fatalf("home itself: got %q, want ~", got)
+	}
+	under := filepath.Join(home, "projects", "x")
+	if got, want := redactHome(under), "~"+sep+"projects"+sep+"x"; got != want {
+		t.Fatalf("under home: got %q, want %q", got, want)
+	}
+	outside := filepath.Join(t.TempDir(), "elsewhere") // sibling temp, not under home
+	if got := redactHome(outside); got != outside {
+		t.Fatalf("outside home must be unchanged: got %q", got)
+	}
+	if got := redactHome(""); got != "" {
+		t.Fatalf("empty must stay empty: got %q", got)
+	}
+}
 
 func TestCollectReportRedactsSecrets(t *testing.T) {
 	t.Setenv("REASONIX_TEST_SECRET", "sk-live-secret")

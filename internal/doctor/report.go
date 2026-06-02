@@ -110,17 +110,17 @@ func Collect(opts Options) Report {
 		Version: opts.Version,
 		OS:      runtime.GOOS,
 		Arch:    runtime.GOARCH,
-		CWD:     cwd,
+		CWD:     redactHome(cwd),
 		Config: ConfigReport{
-			SourcePath:   config.SourcePath(),
-			UserPath:     config.UserConfigPath(),
+			SourcePath:   redactHome(config.SourcePath()),
+			UserPath:     redactHome(config.UserConfigPath()),
 			DefaultModel: cfg.DefaultModel,
 		},
 		Codegraph: CodegraphReport{
 			Enabled:     cfg.Codegraph.Enabled,
 			AutoInstall: cfg.Codegraph.AutoInstall,
 			Version:     codegraph.Version,
-			CacheDir:    codegraph.CacheDir(),
+			CacheDir:    redactHome(codegraph.CacheDir()),
 		},
 		LSP: LSPReport{
 			Enabled: cfg.LSP.Enabled,
@@ -130,7 +130,7 @@ func Collect(opts Options) Report {
 		Sandbox: SandboxReport{
 			Bash:       cfg.BashMode(),
 			Network:    cfg.Sandbox.Network,
-			WriteRoots: cfg.WriteRoots(),
+			WriteRoots: redactHomeAll(cfg.WriteRoots()),
 		},
 		Permission: PermissionReport{
 			Mode:       cfg.Permissions.Mode,
@@ -140,9 +140,10 @@ func Collect(opts Options) Report {
 		},
 		Warnings: warnings,
 	}
+	report.Sessions.Dir = redactHome(report.Sessions.Dir)
 	if p, ok := codegraph.Resolve(cfg.Codegraph.Path); ok {
 		report.Codegraph.Resolved = true
-		report.Codegraph.Path = p
+		report.Codegraph.Path = redactHome(p)
 	}
 	for i := range cfg.Providers {
 		p := cfg.Providers[i]
@@ -293,4 +294,32 @@ func valueOr(s, fallback string) string {
 		return fallback
 	}
 	return s
+}
+
+// redactHome rewrites a path under the user's home directory to start with "~",
+// so a shared diagnostics report doesn't carry the account name. Paths outside
+// home are returned unchanged.
+func redactHome(p string) string {
+	if p == "" {
+		return p
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return p
+	}
+	if p == home {
+		return "~"
+	}
+	if sep := string(os.PathSeparator); strings.HasPrefix(p, home+sep) {
+		return "~" + sep + p[len(home)+1:]
+	}
+	return p
+}
+
+func redactHomeAll(paths []string) []string {
+	out := make([]string, len(paths))
+	for i, p := range paths {
+		out[i] = redactHome(p)
+	}
+	return out
 }
