@@ -100,6 +100,7 @@ var kindNames = map[event.Kind]string{
 	event.TurnDone:          "turn_done",
 	event.CompactionStarted: "compaction_started",
 	event.CompactionDone:    "compaction_done",
+	event.ToolProgress:      "tool_progress",
 }
 
 // toWireAsk converts an event.Ask into its JSON wire form.
@@ -125,7 +126,7 @@ func toWire(e event.Event) wireEvent {
 		} else {
 			w.Level = "info"
 		}
-	case event.ToolDispatch, event.ToolResult:
+	case event.ToolDispatch, event.ToolResult, event.ToolProgress:
 		w.Tool = &wireTool{
 			ID: e.Tool.ID, Name: e.Tool.Name, Args: e.Tool.Args,
 			Output: e.Tool.Output, Err: e.Tool.Err,

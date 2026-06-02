@@ -8,6 +8,7 @@ export type EventKind =
   | "message"
   | "tool_dispatch"
   | "tool_result"
+  | "tool_progress"
   | "usage"
   | "notice"
   | "phase"

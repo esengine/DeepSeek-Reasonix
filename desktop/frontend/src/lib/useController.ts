@@ -242,6 +242,17 @@ function applyEvent(s: State, e: WireEvent): State {
       return { ...s, items: next };
     }
 
+    case "tool_progress": {
+      const t = e.tool;
+      if (!t?.id) return s;
+      const idx = s.items.findIndex((it) => it.kind === "tool" && it.id === t.id);
+      if (idx < 0) return s;
+      const next = [...s.items];
+      const it = next[idx];
+      if (it.kind === "tool") next[idx] = { ...it, output: (it.output ?? "") + (t.output ?? "") };
+      return { ...s, items: next };
+    }
+
     case "usage": {
       const used = e.usage && s.context.window ? e.usage.promptTokens : s.context.used;
       // Usage arrives once per model step; sum the output across steps for the
@@ -335,6 +346,10 @@ function applyEvent(s: State, e: WireEvent): State {
         : finalized;
       return { ...s, items, running: false, turnActive: false, currentAssistant: undefined, approval: undefined, ask: undefined, seq: s.seq + 1 };
     }
+    // An unrecognized event kind (e.g. one the kernel added but this build's wire
+    // map doesn't name yet) must not collapse state to undefined — ignore it.
+    default:
+      return s;
   }
 }
 
@@ -387,6 +402,8 @@ function reducer(s: State, a: Action): State {
       return { ...initialState, meta: s.meta, context: { ...s.context, used: 0 }, balance: s.balance, jobs: s.jobs };
     case "event":
       return applyEvent(s, a.e);
+    default:
+      return s;
   }
 }
 

@@ -59,6 +59,14 @@ func TestToWireToolResult(t *testing.T) {
 	}
 }
 
+func TestToWireToolProgress(t *testing.T) {
+	e := event.Event{Kind: event.ToolProgress, Tool: event.Tool{ID: "1", Output: "chunk"}}
+	w := toWire(e)
+	if w.Kind != "tool_progress" || w.Tool == nil || w.Tool.Output != "chunk" {
+		t.Errorf("tool progress = kind:%q tool:%+v", w.Kind, w.Tool)
+	}
+}
+
 func TestToWireUsage(t *testing.T) {
 	e := event.Event{
 		Kind:        event.Usage,
@@ -128,14 +136,11 @@ func TestToWireTurnDoneNoError(t *testing.T) {
 // --- kindNames completeness ---
 
 func TestKindNamesComplete(t *testing.T) {
-	allKinds := []event.Kind{
-		event.TurnStarted, event.Reasoning, event.Text, event.Message,
-		event.ToolDispatch, event.ToolResult, event.Usage, event.Notice,
-		event.Phase, event.ApprovalRequest, event.AskRequest, event.TurnDone,
-	}
-	for _, k := range allKinds {
-		if _, ok := kindNames[k]; !ok {
-			t.Errorf("kind %d not in kindNames", k)
+	// ToolProgress is the last Kind; every value through it must have a wire name,
+	// or toWire emits kind:"" and the frontend reducer falls through to undefined.
+	for k := event.Kind(0); k <= event.ToolProgress; k++ {
+		if kindNames[k] == "" {
+			t.Errorf("kind %d has no wire name — toWire would emit kind:\"\"", k)
 		}
 	}
 }
