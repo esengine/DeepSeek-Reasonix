@@ -276,7 +276,7 @@ func TestProviderSlug(t *testing.T) {
 func TestFilterStaleCustomEntries(t *testing.T) {
 	in := []config.ProviderEntry{
 		{Name: "deepseek", Kind: "openai", BaseURL: "https://api.deepseek.com"},
-		{Name: "custom", Kind: "openai", BaseURL: "https://old.example/v1"},     // stale
+		{Name: "custom", Kind: "openai", BaseURL: "https://old.example/v1"},                // stale
 		{Name: "anthropic", Kind: "anthropic", BaseURL: "https://old.example/v1/messages"}, // stale
 		{Name: "mimo-tp", Kind: "openai", BaseURL: "https://token-plan-cn.xiaomimimo.com/v1"},
 	}
