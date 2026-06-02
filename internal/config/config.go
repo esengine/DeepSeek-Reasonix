@@ -189,6 +189,10 @@ type ProviderEntry struct {
 	BalanceURL    string            `toml:"balance_url"` // optional; a provider-specific wallet-balance endpoint (DeepSeek: https://api.deepseek.com/user/balance). Empty = no balance readout.
 	ContextWindow int               `toml:"context_window"`
 	Price         *provider.Pricing `toml:"price"`
+	// ModelPrices overrides Price per model within a grouped provider. When set,
+	// PriceFor(model) checks here first and falls back to Price. This lets one
+	// provider entry (e.g. "deepseek") expose models with different rates.
+	ModelPrices map[string]*provider.Pricing `toml:"model_prices"`
 	// Thinking / Effort are provider-kind-specific knobs forwarded to the provider
 	// via Config.Extra. The anthropic provider reads Thinking="adaptive" to enable
 	// extended thinking and Effort ("low".."max") to tune depth. The
@@ -230,6 +234,18 @@ func (e *ProviderEntry) HasModel(m string) bool {
 		}
 	}
 	return false
+}
+
+// PriceFor returns the pricing for a specific model within this provider. It
+// checks ModelPrices first, then falls back to the provider-level Price.
+// Returns nil if neither is set.
+func (e *ProviderEntry) PriceFor(model string) *provider.Pricing {
+	if e.ModelPrices != nil {
+		if p, ok := e.ModelPrices[model]; ok && p != nil {
+			return p
+		}
+	}
+	return e.Price
 }
 
 // ToolsConfig selects which built-in tools are enabled. Empty means all of them.
@@ -307,10 +323,11 @@ const LanguagePolicy = `Reply in the same language the user is using in their mo
 	`whenever they switch. Let this also guide the language you think in. Always keep code, ` +
 	`identifiers, file paths, shell commands, and technical terms in their original form — never translate them.`
 
-// Default returns the built-in default configuration (DeepSeek + MiMo presets).
+// Default returns the built-in default configuration (DeepSeek-only).
+// Everything else lives in ProviderPresets() for opt-in via setup wizard.
 func Default() *Config {
 	return &Config{
-		DefaultModel: "deepseek-flash",
+		DefaultModel: "deepseek",
 		Agent: AgentConfig{
 			SystemPrompt: DefaultSystemPrompt,
 			// 0 = no step cap: the agent loops until the model gives a final answer,
@@ -338,10 +355,72 @@ func Default() *Config {
 		// a missing server yields an install hint rather than an error.
 		LSP: LSPConfig{Enabled: true},
 		Providers: []ProviderEntry{
-			{Name: "deepseek-flash", Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash", APIKeyEnv: "DEEPSEEK_API_KEY", BalanceURL: "https://api.deepseek.com/user/balance", ContextWindow: 1_000_000, Price: &provider.Pricing{CacheHit: 0.02, Input: 1, Output: 2, Currency: "¥"}},
-			{Name: "deepseek-pro", Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro", APIKeyEnv: "DEEPSEEK_API_KEY", BalanceURL: "https://api.deepseek.com/user/balance", ContextWindow: 1_000_000, Price: &provider.Pricing{CacheHit: 0.025, Input: 3, Output: 6, Currency: "¥"}},
-			{Name: "mimo-pro", Kind: "openai", BaseURL: "https://token-plan-cn.xiaomimimo.com/v1", Model: "mimo-v2.5-pro", APIKeyEnv: "MIMO_API_KEY", ContextWindow: 1_000_000, Price: &provider.Pricing{CacheHit: 0.025, Input: 3, Output: 6, Currency: "¥"}},
-			{Name: "mimo-flash", Kind: "openai", BaseURL: "https://token-plan-cn.xiaomimimo.com/v1", Model: "mimo-v2.5", APIKeyEnv: "MIMO_API_KEY", ContextWindow: 1_000_000, Price: &provider.Pricing{CacheHit: 0.02, Input: 1, Output: 2, Currency: "¥"}},
+			deepseekPreset(),
+		},
+	}
+}
+
+// ProviderPresets returns the full catalogue of built-in provider presets.
+// Default() ships DeepSeek-only; this adds MiMo variants (Token Plan and
+// Pay-Per-Use) for opt-in via the setup wizard's "/" reveal. Each preset is a
+// grouped provider with Models array and ModelPrices for per-model pricing.
+func ProviderPresets() []ProviderEntry {
+	return []ProviderEntry{
+		deepseekPreset(),
+		mimoTPPreset(),
+		mimoPPUPreset(),
+	}
+}
+
+// deepseekPreset returns the DeepSeek grouped provider with both flash and pro
+// models sharing one base_url and API key.
+func deepseekPreset() ProviderEntry {
+	return ProviderEntry{
+		Name:      "deepseek",
+		Kind:      "openai",
+		BaseURL:   "https://api.deepseek.com",
+		Models:    []string{"deepseek-v4-flash", "deepseek-v4-pro"},
+		Default:   "deepseek-v4-flash",
+		APIKeyEnv: "DEEPSEEK_API_KEY",
+		BalanceURL: "https://api.deepseek.com/user/balance",
+		ContextWindow: 1_000_000,
+		Price: &provider.Pricing{CacheHit: 0.02, Input: 1, Output: 2, Currency: "¥"},
+		ModelPrices: map[string]*provider.Pricing{
+			"deepseek-v4-pro": {CacheHit: 0.025, Input: 3, Output: 6, Currency: "¥"},
+		},
+	}
+}
+
+// mimoTPPreset returns the MiMo Token Plan provider (subscription billing).
+func mimoTPPreset() ProviderEntry {
+	return ProviderEntry{
+		Name:      "mimo-tp",
+		Kind:      "openai",
+		BaseURL:   "https://token-plan-cn.xiaomimimo.com/v1",
+		Models:    []string{"mimo-v2.5", "mimo-v2.5-pro"},
+		Default:   "mimo-v2.5",
+		APIKeyEnv: "MIMO_API_KEY",
+		ContextWindow: 1_000_000,
+		Price: &provider.Pricing{CacheHit: 0.02, Input: 1, Output: 2, Currency: "¥"},
+		ModelPrices: map[string]*provider.Pricing{
+			"mimo-v2.5-pro": {CacheHit: 0.025, Input: 3, Output: 6, Currency: "¥"},
+		},
+	}
+}
+
+// mimoPPUPreset returns the MiMo Pay-Per-Use provider (per-token billing).
+func mimoPPUPreset() ProviderEntry {
+	return ProviderEntry{
+		Name:      "mimo-ppu",
+		Kind:      "openai",
+		BaseURL:   "https://api.xiaomimimo.com/v1",
+		Models:    []string{"mimo-v2.5", "mimo-v2.5-pro"},
+		Default:   "mimo-v2.5",
+		APIKeyEnv: "MIMO_API_KEY",
+		ContextWindow: 1_000_000,
+		Price: &provider.Pricing{CacheHit: 0.02, Input: 1, Output: 2, Currency: "¥"},
+		ModelPrices: map[string]*provider.Pricing{
+			"mimo-v2.5-pro": {CacheHit: 0.025, Input: 3, Output: 6, Currency: "¥"},
 		},
 	}
 }

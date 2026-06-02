@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"time"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/boot"
@@ -444,7 +445,7 @@ func interactiveSetup(path string) int {
 
 	lang, err := selectLanguage()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "\nsetup cancelled.")
+		fmt.Fprintln(os.Stderr, "\n"+i18n.M.SetupCancelled)
 		return 1
 	}
 	cfg.Language = lang
@@ -460,13 +461,42 @@ func interactiveSetup(path string) int {
 	}))
 	fmt.Println()
 
-	enabled, err := selectEnabledProviders(cfg.Providers)
+	enabled, err := selectEnabledProviders(config.ProviderPresets())
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "\n"+i18n.M.SetupCancelled)
 		return 1
 	}
 
 	envLines := configureKeys(enabled, os.Stdin, os.Stdout)
+
+	// Set env vars from the just-entered keys so FetchModels can use them.
+	for _, line := range envLines {
+		if k, v, ok := strings.Cut(line, "="); ok {
+			os.Setenv(k, v)
+		}
+	}
+
+	// Auto-detect MiMo billing mode from the API key prefix.
+	mimoKey := os.Getenv("MIMO_API_KEY")
+	if mimoKey != "" {
+		mode := detectMiMoBillingMode(mimoKey)
+		if mode != "" {
+			// Filter enabled providers to only include the matching MiMo variant.
+			filtered := filterMiMoProviders(enabled, mode)
+			if len(filtered) > 0 {
+				enabled = filtered
+				if mode == "tp" {
+					fmt.Printf("  %s\n", dim(i18n.M.MiMoTPDetected))
+				} else {
+					fmt.Printf("  %s\n", dim(i18n.M.MiMoPPUDetected))
+				}
+			}
+		}
+	}
+
+	// Auto-discover models from provider APIs (falls back to presets on error).
+	fmt.Println()
+	enabled = fetchAndSelectModels(enabled)
 
 	cfg.Providers = enabled
 	// Keep the previous default model if it's still enabled; otherwise fall back
@@ -557,29 +587,139 @@ func selectLanguage() (string, error) {
 	return tags[idx], nil
 }
 
-// selectEnabledProviders prompts a single multi-select of provider families
-// (DeepSeek / MiMo / …) and returns every SKU of every chosen family. Picking
-// a family enables all of its SKUs; users who want to exclude a specific SKU
-// edit reasonix.toml afterward — keeping first-run a single decision instead of two.
-func selectEnabledProviders(providers []config.ProviderEntry) ([]config.ProviderEntry, error) {
-	famOrder, famMembers, famInfo := groupByFamily(providers)
+// selectEnabledProviders prompts a multi-select of provider families
+// (DeepSeek / MiMo / …). DeepSeek is always visible; MiMo variants are hidden
+// behind a "/" reveal to keep first-run simple.
+func selectEnabledProviders(catalog []config.ProviderEntry) ([]config.ProviderEntry, error) {
+	// Split catalogue into builtin (always visible) and third-party (hidden behind "/").
+	var builtin, extra []config.ProviderEntry
+	for _, p := range catalog {
+		if strings.HasPrefix(p.Name, "deepseek") {
+			builtin = append(builtin, p)
+		} else {
+			extra = append(extra, p)
+		}
+	}
 
+	// Build family items from builtin only initially.
+	famOrder, famMembers, famInfo := groupByFamily(builtin)
 	famItems := make([]menuItem, len(famOrder))
 	for i, k := range famOrder {
 		famItems[i] = menuItem{name: famInfo[k].name, desc: famInfo[k].desc}
 	}
-	famIdxs, err := selectMany(i18n.M.SelectProvidersLabel, famItems)
+
+	// Use reveal-aware selection if there are hidden items.
+	var famIdxs []int
+	var err error
+	if len(extra) > 0 {
+		famIdxs, famOrder, famMembers, famInfo, err = selectManyWithReveal(i18n.M.SelectProvidersLabel, famItems, i18n.M.SelectProvidersReveal, extra, famOrder, famMembers, famInfo)
+	} else {
+		famIdxs, err = selectMany(i18n.M.SelectProvidersLabel, famItems)
+	}
 	if err != nil {
 		return nil, err
 	}
 
+	// Map selected family indices back to provider entries from the full catalog.
 	var enabled []config.ProviderEntry
 	for _, fi := range famIdxs {
-		for _, mi := range famMembers[famOrder[fi]] {
-			enabled = append(enabled, providers[mi])
+		familyKey := famOrder[fi]
+		for _, mi := range famMembers[familyKey] {
+			enabled = append(enabled, catalog[mi])
 		}
 	}
 	return enabled, nil
+}
+
+// selectManyWithReveal extends selectMany with a "/" key to reveal hidden items.
+// When "/" is pressed, the extra items are appended to the list and can be selected.
+// Returns: selected family indices, updated famOrder, famMembers, famInfo, error.
+func selectManyWithReveal(label string, items []menuItem, revealHint string, extra []config.ProviderEntry, famOrder []string, famMembers map[string][]int, famInfo map[string]providerFamily) ([]int, []string, map[string][]int, map[string]providerFamily, error) {
+	fd := int(os.Stdin.Fd())
+	old, err := term.MakeRaw(fd)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	defer term.Restore(fd, old)
+
+	w := os.Stdout
+	revealed := false
+	allItems := make([]menuItem, len(items))
+	copy(allItems, items)
+	selected := map[int]bool{}
+	sel := 0
+	offset := len(items) // offset from builtin to extra in the catalog
+
+	render := func() {
+		fmt.Fprintf(w, "\033[2J\033[H") // clear screen
+		fmt.Fprintf(w, "%s %s  %s\r\n\r\n", accent("▌"), bold(label), dim(i18n.M.SelectManyHint))
+		for i, it := range allItems {
+			box := "[ ]"
+			if selected[i] {
+				box = green("[✓]")
+			}
+			name := fmt.Sprintf("%-14s", it.name)
+			marker := "   "
+			if i == sel {
+				marker = accent("❯ ")
+			}
+			fmt.Fprintf(w, "\r\033[K%s%s %s %s\r\n", marker, box, name, dim(it.desc))
+		}
+		if !revealed && len(extra) > 0 {
+			fmt.Fprintf(w, "\r\n\033[K%s\r\n", dim(revealHint))
+		}
+		fmt.Fprintf(w, "\r\n\033[K%s", dim(i18n.M.SelectManyHint))
+	}
+	render()
+
+	buf := make([]byte, 8)
+	for {
+		n, err := os.Stdin.Read(buf)
+		if err != nil {
+			return nil, nil, nil, nil, err
+		}
+		key := buf[:n]
+		switch {
+		case key[0] == 'q' || key[0] == 3: // q or Ctrl-C
+			return nil, nil, nil, nil, errCancelled
+		case key[0] == 'j' || (key[0] == 27 && n >= 3 && key[1] == '[' && key[2] == 'B'): // down
+			if sel < len(allItems)-1 {
+				sel++
+			}
+		case key[0] == 'k' || (key[0] == 27 && n >= 3 && key[1] == '[' && key[2] == 'A'): // up
+			if sel > 0 {
+				sel--
+			}
+		case key[0] == ' ': // space toggle
+			selected[sel] = !selected[sel]
+		case key[0] == '/': // reveal
+			if !revealed && len(extra) > 0 {
+				revealed = true
+				// Add extra family items, offsetting indices to catalog space.
+				extraOrder, extraMembers, extraInfo := groupByFamily(extra)
+				for _, k := range extraOrder {
+					allItems = append(allItems, menuItem{name: extraInfo[k].name, desc: extraInfo[k].desc})
+					famOrder = append(famOrder, k)
+					// Offset extra indices to catalog space (builtin + extra).
+					offsetIndices := make([]int, len(extraMembers[k]))
+					for i, idx := range extraMembers[k] {
+						offsetIndices[i] = idx + offset
+					}
+					famMembers[k] = offsetIndices
+					famInfo[k] = extraInfo[k]
+				}
+			}
+		case key[0] == 13 || key[0] == 10: // enter
+			var result []int
+			for i := range allItems {
+				if selected[i] {
+					result = append(result, i)
+				}
+			}
+			return result, famOrder, famMembers, famInfo, nil
+		}
+		render()
+	}
 }
 
 // providerFamily is a wizard-only grouping of provider SKUs by vendor; it does
@@ -618,7 +758,125 @@ func groupByFamily(providers []config.ProviderEntry) ([]string, map[string][]int
 	return order, members, info
 }
 
+// detectMiMoBillingMode detects the MiMo billing mode from the API key prefix.
+// Returns "tp" for Token Plan, "ppu" for Pay Per Use, or "" if unknown.
+func detectMiMoBillingMode(apiKey string) string {
+	switch {
+	case strings.HasPrefix(apiKey, "tp-"):
+		return "tp"
+	case strings.HasPrefix(apiKey, "sk-"):
+		return "ppu"
+	default:
+		return ""
+	}
+}
+
+// filterMiMoProviders filters the extra providers list to only include the
+// MiMo variant matching the detected billing mode. If mode is empty (unknown),
+// all MiMo providers are returned unchanged.
+func filterMiMoProviders(extra []config.ProviderEntry, mode string) []config.ProviderEntry {
+	if mode == "" {
+		return extra
+	}
+	var filtered []config.ProviderEntry
+	for _, p := range extra {
+		if !strings.HasPrefix(p.Name, "mimo") {
+			filtered = append(filtered, p)
+			continue
+		}
+		// Keep only the matching MiMo variant.
+		if (mode == "tp" && strings.HasSuffix(p.Name, "-tp")) ||
+			(mode == "ppu" && strings.HasSuffix(p.Name, "-ppu")) {
+			filtered = append(filtered, p)
+		}
+	}
+	return filtered
+}
+
 // promptMissingKeys re-runs the wizard's key-entry step for any enabled
+
+// fetchAndSelectModels attempts to auto-discover available models from each
+// provider's GET /models endpoint. For grouped providers (len(Models) > 0),
+// it fetches the full list and lets the user pick. For single-model providers
+// (len(Models) == 0 && Model != ""), it keeps the preset as-is without fetching.
+// Providers that fail (no key, network error) keep their hardcoded preset models.
+func fetchAndSelectModels(providers []config.ProviderEntry) []config.ProviderEntry {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	var result []config.ProviderEntry
+	fetched := map[string][]string{} // cache fetched models by base_url+key
+
+	for _, p := range providers {
+		// Single-model providers (legacy flat format) keep their preset model.
+		if len(p.Models) == 0 && p.Model != "" {
+			result = append(result, p)
+			continue
+		}
+
+		// Grouped providers (Models list) — fetch from API.
+		cacheKey := p.BaseURL + "|" + p.APIKeyEnv
+		if cached, ok := fetched[cacheKey]; ok {
+			// Same endpoint+key already fetched; reuse.
+			p.Models = cached
+			if p.Default == "" && len(cached) > 0 {
+				p.Default = cached[0]
+			}
+			result = append(result, p)
+			continue
+		}
+
+		fmt.Printf("  %s\n", dim(fmt.Sprintf(i18n.M.FetchingModelsFmt, p.Name)))
+		models, err := p.FetchModels(ctx)
+		if err != nil {
+			fmt.Printf("  %s\n", dim(fmt.Sprintf(i18n.M.FetchModelsFailedFmt, p.Name, err)))
+			result = append(result, p)
+			continue
+		}
+		if len(models) == 0 {
+			fmt.Printf("  %s\n", dim(fmt.Sprintf(i18n.M.FetchModelsFailedFmt, p.Name, "empty list")))
+			result = append(result, p)
+			continue
+		}
+
+		fetched[cacheKey] = models
+		fmt.Printf("  %s\n", green(fmt.Sprintf(i18n.M.FetchModelsSuccessFmt, len(models), p.Name)))
+
+		// If only one model, auto-select it.
+		if len(models) == 1 {
+			p.Models = models
+			p.Model = models[0]
+			result = append(result, p)
+			continue
+		}
+
+		// Let the user pick which models to enable.
+		items := make([]menuItem, len(models))
+		for i, m := range models {
+			items[i] = menuItem{name: m}
+		}
+		label := fmt.Sprintf(i18n.M.SelectModelsLabel, p.Name)
+		idxs, err := selectMany(label, items)
+		if err != nil || len(idxs) == 0 {
+			// User cancelled or picked nothing — keep presets.
+			fmt.Printf("  %s\n", dim(i18n.M.FetchModelsUsingPresets))
+			result = append(result, p)
+			continue
+		}
+
+		var selected []string
+		for _, i := range idxs {
+			selected = append(selected, models[i])
+		}
+		p.Models = selected
+		p.Model = selected[0]
+		if p.Default != "" && !p.HasModel(p.Default) {
+			p.Default = selected[0]
+		}
+		result = append(result, p)
+	}
+	return result
+}
 // provider whose api_key_env is unset. Newly entered values are appended to
 // .env so the chat session that follows picks them up via config.Load. The
 // user can hit Enter to skip — the chat banner falls back to a one-line

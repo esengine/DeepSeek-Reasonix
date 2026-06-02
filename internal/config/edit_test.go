@@ -9,11 +9,15 @@ import (
 
 func TestSetDefaultModel(t *testing.T) {
 	c := Default()
-	if err := c.SetDefaultModel("mimo-pro"); err != nil {
+	// Add a second provider for testing.
+	if err := c.UpsertProvider(ProviderEntry{Name: "other", Kind: "openai", BaseURL: "http://localhost", Model: "m"}); err != nil {
+		t.Fatalf("add provider: %v", err)
+	}
+	if err := c.SetDefaultModel("other"); err != nil {
 		t.Fatalf("set valid default: %v", err)
 	}
-	if c.DefaultModel != "mimo-pro" {
-		t.Errorf("default = %q, want mimo-pro", c.DefaultModel)
+	if c.DefaultModel != "other" {
+		t.Errorf("default = %q, want other", c.DefaultModel)
 	}
 	if err := c.SetDefaultModel("nope"); err == nil {
 		t.Error("expected error for unknown provider")
@@ -22,10 +26,14 @@ func TestSetDefaultModel(t *testing.T) {
 
 func TestSetPlannerModel(t *testing.T) {
 	c := Default()
-	if err := c.SetPlannerModel("deepseek-pro"); err != nil {
+	// Add a second provider for testing.
+	if err := c.UpsertProvider(ProviderEntry{Name: "planner", Kind: "openai", BaseURL: "http://localhost", Model: "m"}); err != nil {
+		t.Fatalf("add provider: %v", err)
+	}
+	if err := c.SetPlannerModel("planner"); err != nil {
 		t.Fatalf("set planner: %v", err)
 	}
-	if c.Agent.PlannerModel != "deepseek-pro" {
+	if c.Agent.PlannerModel != "planner" {
 		t.Errorf("planner = %q", c.Agent.PlannerModel)
 	}
 	if err := c.SetPlannerModel(""); err != nil || c.Agent.PlannerModel != "" {
@@ -75,20 +83,24 @@ func TestUpsertProvider(t *testing.T) {
 
 func TestRemoveProvider(t *testing.T) {
 	c := Default()
-	c.Agent.PlannerModel = "deepseek-pro"
+	// Add a second provider to use as planner.
+	if err := c.UpsertProvider(ProviderEntry{Name: "planner", Kind: "openai", BaseURL: "http://localhost", Model: "m"}); err != nil {
+		t.Fatalf("add provider: %v", err)
+	}
+	c.Agent.PlannerModel = "planner"
 
 	// Cannot remove the default model.
 	if err := c.RemoveProvider(c.DefaultModel); err == nil {
 		t.Error("expected error removing the default model")
 	}
 	// Removing the planner provider clears planner_model.
-	if err := c.RemoveProvider("deepseek-pro"); err != nil {
+	if err := c.RemoveProvider("planner"); err != nil {
 		t.Fatalf("remove planner provider: %v", err)
 	}
 	if c.Agent.PlannerModel != "" {
 		t.Errorf("planner should be cleared, got %q", c.Agent.PlannerModel)
 	}
-	if _, ok := c.Provider("deepseek-pro"); ok {
+	if _, ok := c.Provider("planner"); ok {
 		t.Error("provider not actually removed")
 	}
 	// Unknown name errors.
@@ -193,10 +205,14 @@ func TestAutoStartPlugins(t *testing.T) {
 // re-decodes the file to confirm the changes survived a write/read cycle.
 func TestSaveToRoundTrips(t *testing.T) {
 	c := Default()
-	if err := c.SetDefaultModel("mimo-pro"); err != nil {
+	// Add a second provider for testing.
+	if err := c.UpsertProvider(ProviderEntry{Name: "other", Kind: "openai", BaseURL: "http://localhost", Model: "m"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.SetPlannerModel("deepseek-pro"); err != nil {
+	if err := c.SetDefaultModel("other"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.SetPlannerModel("deepseek"); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.UpsertProvider(ProviderEntry{Name: "local", Kind: "openai", BaseURL: "http://localhost:1234/v1", Model: "llama"}); err != nil {
@@ -222,10 +238,10 @@ func TestSaveToRoundTrips(t *testing.T) {
 	if _, err := toml.DecodeFile(path, &got); err != nil {
 		t.Fatalf("saved file does not parse: %v", err)
 	}
-	if got.DefaultModel != "mimo-pro" {
+	if got.DefaultModel != "other" {
 		t.Errorf("default_model = %q", got.DefaultModel)
 	}
-	if got.Agent.PlannerModel != "deepseek-pro" {
+	if got.Agent.PlannerModel != "deepseek" {
 		t.Errorf("planner_model = %q", got.Agent.PlannerModel)
 	}
 	if _, ok := got.Provider("local"); !ok {

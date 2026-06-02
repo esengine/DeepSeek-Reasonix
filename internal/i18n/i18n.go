@@ -164,6 +164,17 @@ type Messages struct {
 	ConfirmReconfigureFmt string // "%s already exists. Reconfigure and overwrite?"
 	KeepingExisting       string // when the user declines to overwrite
 	NotOverwritingFmt     string // non-interactive overwrite refusal
+	FetchingModelsFmt       string // "Fetching models for %s..."
+	FetchModelsSuccessFmt   string // "Found %d models for %s"
+	FetchModelsFailedFmt    string // "Failed to fetch models for %s: %v (using presets)"
+	SelectModelsLabel       string // "Select models to enable for %s"
+	FetchModelsUsingPresets string // "Using preset models (API unavailable)"
+	SelectProvidersReveal   string // "Press / for more providers"
+	BillingModeLabel        string // "Select %s billing mode"
+	BillingModeTP           string // "Token Plan (subscription)"
+	BillingModePPU          string // "Pay Per Use (per-token)"
+	MiMoTPDetected          string // "Detected Token Plan API key (tp- prefix)"
+	MiMoPPUDetected         string // "Detected Pay Per Use API key (sk- prefix)"
 
 	// top-level / runAgent
 	UnknownCommandFmt string // "unknown command %q"

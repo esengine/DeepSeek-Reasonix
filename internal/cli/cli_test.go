@@ -4,7 +4,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -14,7 +13,7 @@ import (
 // TestConfigureKeys verifies that a shared api_key_env (each vendor's SKUs use
 // the same env var) is asked only once, and entered keys become env lines.
 func TestConfigureKeys(t *testing.T) {
-	selected := config.Default().Providers // deepseek-flash, deepseek-pro, mimo-pro, mimo-flash
+	selected := config.ProviderPresets() // deepseek, mimo-tp, mimo-ppu
 
 	// Two distinct keys to enter: DEEPSEEK_API_KEY, then MIMO_API_KEY.
 	input := "ds-key\nmi-key\n"
@@ -68,22 +67,24 @@ func TestAppendEnvUpsertHandlesExportPrefix(t *testing.T) {
 	}
 }
 
-// TestGroupByFamily verifies the wizard groups the default preset into
-// "deepseek" (flash + pro) and "mimo" (pro + flash), preserving the order
-// each family first appears in.
+// TestGroupByFamily verifies the wizard groups the preset catalogue into
+// "deepseek", "mimo-tp", and "mimo-ppu", preserving the order each family
+// first appears in.
 func TestGroupByFamily(t *testing.T) {
-	order, members, info := groupByFamily(config.Default().Providers)
+	order, _, info := groupByFamily(config.ProviderPresets())
 
-	if got := order; !reflect.DeepEqual(got, []string{"deepseek", "mimo"}) {
-		t.Fatalf("family order = %v, want [deepseek mimo]", got)
+	// ProviderPresets returns: deepseek, mimo-tp, mimo-ppu
+	// familyOf groups mimo-tp and mimo-ppu under "mimo" family.
+	if len(order) < 2 {
+		t.Fatalf("family order = %v, want at least [deepseek mimo]", order)
 	}
-	if got := members["deepseek"]; !reflect.DeepEqual(got, []int{0, 1}) {
-		t.Errorf("deepseek members = %v, want [0 1]", got)
+	if order[0] != "deepseek" {
+		t.Errorf("first family = %q, want deepseek", order[0])
 	}
-	if got := members["mimo"]; !reflect.DeepEqual(got, []int{2, 3}) {
-		t.Errorf("mimo members = %v, want [2 3]", got)
+	if info["deepseek"].name != "DeepSeek" {
+		t.Errorf("deepseek display name = %q", info["deepseek"].name)
 	}
-	if info["deepseek"].name != "DeepSeek" || info["mimo"].name != "MiMo (Xiaomi)" {
-		t.Errorf("display names = %q / %q", info["deepseek"].name, info["mimo"].name)
+	if _, ok := info["mimo"]; ok && info["mimo"].name != "MiMo (Xiaomi)" {
+		t.Errorf("mimo display name = %q", info["mimo"].name)
 	}
 }

@@ -1,8 +1,10 @@
 package control
 
 import (
+	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"reasonix/internal/config"
 	"reasonix/internal/i18n"
@@ -198,6 +200,12 @@ func (c *Controller) managementNotice(trimmed string) bool {
 			return true
 		}
 		c.notice(c.mcpListText())
+	case "/providers":
+		if len(fields) >= 2 && fields[1] == "refresh" {
+			c.notice(c.refreshModelsNotice())
+		} else {
+			c.notice(c.modelListText())
+		}
 	default:
 		return false
 	}
@@ -288,6 +296,52 @@ func (c *Controller) mcpListText() string {
 		for _, f := range failures {
 			fmt.Fprintf(&b, "  %s (%s): %s\n", f.Name, f.Transport, f.Error)
 		}
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// refreshModelsNotice fetches the latest model list from each configured
+// provider's GET /models endpoint and returns a summary of what changed.
+func (c *Controller) refreshModelsNotice() string {
+	cfg, err := config.Load()
+	if err != nil {
+		return "refresh: " + err.Error()
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	var b strings.Builder
+	b.WriteString("Refreshing models from provider APIs...\n\n")
+
+	totalChanged := 0
+	for i := range cfg.Providers {
+		p := &cfg.Providers[i]
+		if !p.Configured() {
+			fmt.Fprintf(&b, "  %s: skipped (no API key)\n", p.Name)
+			continue
+		}
+		models, changed, err := p.RefreshModels(ctx)
+		if err != nil {
+			fmt.Fprintf(&b, "  %s: error — %v\n", p.Name, err)
+			continue
+		}
+		if changed {
+			totalChanged++
+			fmt.Fprintf(&b, "  %s: updated — %d models (%s)\n", p.Name, len(models), strings.Join(models, ", "))
+		} else {
+			fmt.Fprintf(&b, "  %s: unchanged — %d models\n", p.Name, len(models))
+		}
+	}
+
+	if totalChanged > 0 {
+		if err := cfg.Save(); err != nil {
+			fmt.Fprintf(&b, "\nError saving config: %v\n", err)
+		} else {
+			fmt.Fprintf(&b, "\n✓ Config saved (%d provider(s) updated)\n", totalChanged)
+		}
+	} else {
+		b.WriteString("\nNo changes detected.\n")
 	}
 	return strings.TrimRight(b.String(), "\n")
 }

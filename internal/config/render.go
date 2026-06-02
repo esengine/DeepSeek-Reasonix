@@ -92,6 +92,21 @@ func RenderTOML(c *Config) string {
 			fmt.Fprintf(&b, "price       = { cache_hit = %v, input = %v, output = %v, currency = %q }   # per 1M tokens\n",
 				p.Price.CacheHit, p.Price.Input, p.Price.Output, p.Price.Symbol())
 		}
+		// Render per-model price overrides as a TOML sub-table.
+		if len(p.ModelPrices) > 0 {
+			for model, mp := range p.ModelPrices {
+				if mp == nil {
+					continue
+				}
+				fmt.Fprintf(&b, "\n[providers.model_prices.%q]\n", model)
+				fmt.Fprintf(&b, "cache_hit = %v\n", mp.CacheHit)
+				fmt.Fprintf(&b, "input     = %v\n", mp.Input)
+				fmt.Fprintf(&b, "output    = %v\n", mp.Output)
+				if mp.Currency != "" {
+					fmt.Fprintf(&b, "currency  = %q\n", mp.Currency)
+				}
+			}
+		}
 		b.WriteString("\n")
 	}
 

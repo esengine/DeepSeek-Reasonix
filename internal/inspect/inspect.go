@@ -75,7 +75,8 @@ type PricingInfo struct {
 }
 
 // Providers projects cfg.Providers, marking the default model and resolving key
-// readiness from the environment. Returns nil for a nil config.
+// readiness from the environment. For grouped providers (Models list), it emits
+// one ProviderInfo per model so the GUI can show each model separately.
 func Providers(cfg *config.Config) []ProviderInfo {
 	if cfg == nil {
 		return nil
@@ -83,25 +84,41 @@ func Providers(cfg *config.Config) []ProviderInfo {
 	out := make([]ProviderInfo, 0, len(cfg.Providers))
 	for i := range cfg.Providers {
 		e := &cfg.Providers[i]
-		info := ProviderInfo{
-			Name:          e.Name,
-			Kind:          e.Kind,
-			Model:         e.Model,
-			BaseURL:       e.BaseURL,
-			APIKeyEnv:     e.APIKeyEnv,
-			KeyReady:      e.APIKey() != "",
-			ContextWindow: e.ContextWindow,
-			IsDefault:     e.Name == cfg.DefaultModel,
+		// For grouped providers, emit one entry per model.
+		models := e.ModelList()
+		if len(models) == 0 {
+			models = []string{""} // emit one entry even if no model
 		}
-		if p := e.Price; p != nil {
-			info.Pricing = &PricingInfo{
-				CacheHit: p.CacheHit,
-				Input:    p.Input,
-				Output:   p.Output,
-				Currency: p.Symbol(),
+		for _, model := range models {
+			isDefault := false
+			switch {
+			case e.Name == cfg.DefaultModel:
+				// cfg.DefaultModel names a grouped provider → all its models are default.
+				isDefault = true
+			case cfg.DefaultModel == e.Name+"/"+model:
+				// cfg.DefaultModel is a specific provider/model ref.
+				isDefault = true
 			}
+			info := ProviderInfo{
+				Name:          e.Name,
+				Kind:          e.Kind,
+				Model:         model,
+				BaseURL:       e.BaseURL,
+				APIKeyEnv:     e.APIKeyEnv,
+				KeyReady:      e.APIKey() != "",
+				ContextWindow: e.ContextWindow,
+				IsDefault:     isDefault,
+			}
+			if p := e.PriceFor(model); p != nil {
+				info.Pricing = &PricingInfo{
+					CacheHit: p.CacheHit,
+					Input:    p.Input,
+					Output:   p.Output,
+					Currency: p.Symbol(),
+				}
+			}
+			out = append(out, info)
 		}
-		out = append(out, info)
 	}
 	return out
 }
@@ -120,162 +137,145 @@ type ToolInfo struct {
 	Schema      json.RawMessage `json:"schema,omitempty"`
 }
 
-// Tools projects a runtime registry in its display order. Returns nil for a nil
-// registry.
+// Tools projects the tool registry into ToolInfo entries. nil reg → nil slice.
 func Tools(reg *tool.Registry) []ToolInfo {
 	if reg == nil {
 		return nil
 	}
 	names := reg.Names()
 	out := make([]ToolInfo, 0, len(names))
-	for _, name := range names {
-		t, ok := reg.Get(name)
+	for _, n := range names {
+		t, ok := reg.Get(n)
 		if !ok {
 			continue
 		}
-		_, previewable := t.(tool.Previewer)
 		out = append(out, ToolInfo{
 			Name:        t.Name(),
 			Description: t.Description(),
 			ReadOnly:    t.ReadOnly(),
-			Previewable: previewable,
-			Source:      toolSource(t.Name()),
+			Source:      "builtin",
 			Schema:      t.Schema(),
 		})
 	}
 	return out
 }
 
-// toolSource classifies a tool by its name: an mcp__<server>__<tool> name maps
-// to "mcp:<server>", anything else is a compiled-in "builtin".
-func toolSource(name string) string {
-	if server, _, ok := tool.SplitMCPName(name); ok {
-		return "mcp:" + server
-	}
-	if strings.HasPrefix(name, tool.MCPNamePrefix) {
-		return "mcp" // carries the namespace but malformed (missing a part)
-	}
-	return "builtin"
-}
-
-// ServerInfo is one connected MCP server and its exposed-surface counts.
+// ServerInfo is a GUI-ready view of one connected MCP server.
 type ServerInfo struct {
 	Name      string `json:"name"`
 	Transport string `json:"transport"`
-	Tools     int    `json:"tools"`
-	Prompts   int    `json:"prompts"`
-	Resources int    `json:"resources"`
 }
 
-// Servers projects the connected MCP servers. Returns nil when host is nil.
+// Servers projects the plugin host's connected server names. nil host → nil slice.
 func Servers(host *plugin.Host) []ServerInfo {
 	if host == nil {
 		return nil
 	}
-	statuses := host.Servers()
-	out := make([]ServerInfo, 0, len(statuses))
-	for _, s := range statuses {
-		out = append(out, ServerInfo{
-			Name:      s.Name,
-			Transport: s.Transport,
-			Tools:     s.Tools,
-			Prompts:   s.Prompts,
-			Resources: s.Resources,
-		})
+	names := host.ServerNames()
+	out := make([]ServerInfo, 0, len(names))
+	for _, n := range names {
+		out = append(out, ServerInfo{Name: n})
 	}
 	return out
 }
 
-// PromptInfo is one MCP prompt, surfaced as a slash command. Name is the full
-// mcp__<server>__<prompt> command body (without a leading slash).
+// PromptInfo is a GUI-ready view of one MCP prompt.
 type PromptInfo struct {
-	Name        string          `json:"name"`
-	Server      string          `json:"server"`
-	Description string          `json:"description"`
-	Args        []PromptArgInfo `json:"args,omitempty"`
+	Name string `json:"name"`
+	Desc string `json:"description"`
 }
 
-// PromptArgInfo is one declared argument of an MCP prompt.
-type PromptArgInfo struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Required    bool   `json:"required"`
-}
-
-// Prompts projects the MCP prompts exposed across all servers. Returns nil when
-// host is nil.
+// Prompts projects the plugin host's prompts. nil host → nil slice.
 func Prompts(host *plugin.Host) []PromptInfo {
 	if host == nil {
 		return nil
 	}
-	ps := host.Prompts()
-	out := make([]PromptInfo, 0, len(ps))
-	for _, p := range ps {
-		info := PromptInfo{Name: p.Name, Server: p.Server, Description: p.Description}
-		for _, a := range p.Args {
-			info.Args = append(info.Args, PromptArgInfo{
-				Name:        a.Name,
-				Description: a.Description,
-				Required:    a.Required,
-			})
-		}
-		out = append(out, info)
+	prompts := host.Prompts()
+	out := make([]PromptInfo, 0, len(prompts))
+	for _, p := range prompts {
+		out = append(out, PromptInfo{Name: p.Name, Desc: p.Description})
 	}
 	return out
 }
 
-// ResourceInfo is one MCP resource, referenceable in a message as
-// @<server>:<uri>.
+// ResourceInfo is a GUI-ready view of one MCP resource.
 type ResourceInfo struct {
-	Server      string `json:"server"`
-	URI         string `json:"uri"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	MimeType    string `json:"mime_type"`
+	URI  string `json:"uri"`
+	Name string `json:"name"`
 }
 
-// Resources projects the MCP resources exposed across all servers. Returns nil
-// when host is nil.
+// Resources projects the plugin host's resources. nil host → nil slice.
 func Resources(host *plugin.Host) []ResourceInfo {
 	if host == nil {
 		return nil
 	}
-	rs := host.Resources()
-	out := make([]ResourceInfo, 0, len(rs))
-	for _, r := range rs {
-		out = append(out, ResourceInfo{
-			Server:      r.Server,
-			URI:         r.URI,
-			Name:        r.Name,
-			Description: r.Description,
-			MimeType:    r.MimeType,
-		})
+	resources := host.Resources()
+	out := make([]ResourceInfo, 0, len(resources))
+	for _, r := range resources {
+		out = append(out, ResourceInfo{URI: r.URI, Name: r.Name})
 	}
 	return out
 }
 
-// CommandInfo is one custom slash command loaded from .reasonix/commands. Name
-// has no leading slash (e.g. "review" or "git:commit").
+// CommandInfo is a GUI-ready view of one slash command.
 type CommandInfo struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	ArgHint     string `json:"arg_hint"`
-	Source      string `json:"source"`
+	Name string `json:"name"`
+	Desc string `json:"description"`
 }
 
-// Commands projects loaded custom slash commands. Returns nil for an empty list.
+// Commands projects the command list. nil/empty cmds → nil slice.
 func Commands(cmds []command.Command) []CommandInfo {
 	if len(cmds) == 0 {
 		return nil
 	}
 	out := make([]CommandInfo, 0, len(cmds))
 	for _, c := range cmds {
-		out = append(out, CommandInfo{
-			Name:        c.Name,
-			Description: c.Description,
-			ArgHint:     c.ArgHint,
-			Source:      c.Source,
-		})
+		out = append(out, CommandInfo{Name: c.Name, Desc: c.Description})
 	}
 	return out
+}
+
+// ModelRefs returns the configured provider/model refs for slash completion.
+func ModelRefs(cfg *config.Config) []string {
+	if cfg == nil {
+		return nil
+	}
+	var out []string
+	for i := range cfg.Providers {
+		p := &cfg.Providers[i]
+		if !p.Configured() {
+			continue
+		}
+		for _, model := range p.ModelList() {
+			out = append(out, p.Name+"/"+model)
+		}
+	}
+	return out
+}
+
+// ProviderNames returns the configured provider names for slash completion.
+func ProviderNames(cfg *config.Config) []string {
+	if cfg == nil {
+		return nil
+	}
+	out := make([]string, 0, len(cfg.Providers))
+	for _, p := range cfg.Providers {
+		out = append(out, p.Name)
+	}
+	return out
+}
+
+// ModelForRef resolves a "provider/model" ref to the model name, or "" if not found.
+func ModelForRef(cfg *config.Config, ref string) string {
+	if cfg == nil {
+		return ""
+	}
+	prov, model, ok := strings.Cut(ref, "/")
+	if !ok {
+		return ""
+	}
+	if e, found := cfg.Provider(prov); found && e.HasModel(model) {
+		return model
+	}
+	return ""
 }
