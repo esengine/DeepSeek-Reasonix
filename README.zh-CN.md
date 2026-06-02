@@ -62,7 +62,7 @@
 
 ```sh
 npm i -g reasonix                  # 任意系统;自动拉取对应平台的原生二进制
-brew install esengine/reasonix/reasonix   # macOS / Linux
+brew install esengine/reasonix/reasonix   # macOS
 ```
 
 预编译归档(`darwin|linux|windows × amd64|arm64`)和 `SHA256SUMS` 见每个

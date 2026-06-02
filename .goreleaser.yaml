@@ -31,7 +31,7 @@ checksum:
   name_template: SHA256SUMS
   algorithm: sha256
 
-brews:
+homebrew_casks:
   - name: reasonix
     ids: [reasonix]
     repository:
@@ -41,14 +41,15 @@ brews:
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     homepage: "https://github.com/esengine/DeepSeek-Reasonix"
     description: "Cache-first DeepSeek coding agent for the terminal."
-    license: MIT
     commit_author:
       name: reasonix
       email: reasonix@deepseek.com
-    install: |
-      bin.install "reasonix"
-    test: |
-      assert_match "reasonix", shell_output("#{bin}/reasonix --version")
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/reasonix"]
+          end
 
 release:
   prerelease: auto

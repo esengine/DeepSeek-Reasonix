@@ -98,15 +98,12 @@ if (!publish) {
   process.exit(0);
 }
 
+const distTag = version.includes("-") ? "next" : "latest";
+const publishArgs = ["publish", "--access", "public", "--tag", distTag];
+
 for (const sub of subPackages) {
-  console.log(`publish ${sub.name}@${version}`);
-  execFileSync("npm", ["publish", "--access", "public"], {
-    cwd: sub.dir,
-    stdio: "inherit",
-  });
+  console.log(`publish ${sub.name}@${version} (${distTag})`);
+  execFileSync("npm", publishArgs, { cwd: sub.dir, stdio: "inherit" });
 }
-console.log(`publish reasonix@${version}`);
-execFileSync("npm", ["publish", "--access", "public"], {
-  cwd: mainDir,
-  stdio: "inherit",
-});
+console.log(`publish reasonix@${version} (${distTag})`);
+execFileSync("npm", publishArgs, { cwd: mainDir, stdio: "inherit" });

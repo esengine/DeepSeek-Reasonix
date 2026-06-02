@@ -65,7 +65,7 @@
 
 ```sh
 npm i -g reasonix                  # any OS; pulls the prebuilt native binary
-brew install esengine/reasonix/reasonix   # macOS / Linux
+brew install esengine/reasonix/reasonix   # macOS
 ```
 
 Prebuilt archives (`darwin|linux|windows × amd64|arm64`) and `SHA256SUMS` are on
