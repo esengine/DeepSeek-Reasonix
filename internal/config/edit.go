@@ -82,9 +82,7 @@ func (c *Config) SetProviderEffort(name, effort string) error {
 	return fmt.Errorf("set provider effort: no provider %q", name)
 }
 
-// SetLanguage pins the CLI UI language. Empty clears the override so runtime
-// detection falls back to REASONIX_LANG / locale env. Only short supported tags
-// are stored to keep config round-trips predictable.
+// SetLanguage pins the CLI UI language; empty/auto clears the override so runtime detection falls back to REASONIX_LANG / locale.
 func (c *Config) SetLanguage(lang string) error {
 	switch strings.ToLower(strings.TrimSpace(lang)) {
 	case "", "auto":
