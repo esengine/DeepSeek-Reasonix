@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -145,6 +146,37 @@ func TestDisconnectMCPServerRemovesLazyPlaceholder(t *testing.T) {
 	}
 	if _, found := reg.Get("mcp__mock__connect"); found {
 		t.Fatalf("lazy placeholder still registered after disconnect; names=%v", reg.Names())
+	}
+}
+
+func TestRemoveMCPServerRemovesUnconnectedLazyPlaceholder(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	if err := os.WriteFile("reasonix.toml", []byte(`
+[[plugins]]
+name = "mock"
+command = "mock-mcp"
+tier = "lazy"
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	reg := tool.NewRegistry()
+	reg.Add(fakeControlTool{name: "mcp__mock__connect"})
+	c := New(Options{Host: plugin.NewHost(), Registry: reg})
+
+	disconnected, err := c.RemoveMCPServer("mock")
+	if err != nil {
+		t.Fatalf("RemoveMCPServer: %v", err)
+	}
+	if disconnected {
+		t.Fatal("RemoveMCPServer reported a live disconnect for an unconnected lazy placeholder")
+	}
+	if _, found := reg.Get("mcp__mock__connect"); found {
+		t.Fatalf("lazy placeholder still registered after remove; names=%v", reg.Names())
+	}
+	if names := c.ConfiguredMCPNames(); len(names) != 0 {
+		t.Fatalf("ConfiguredMCPNames() = %v, want empty after remove", names)
 	}
 }
 
