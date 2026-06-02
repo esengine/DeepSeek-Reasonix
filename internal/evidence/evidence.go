@@ -102,12 +102,56 @@ func (l *Ledger) HasSuccessfulCommand(command string) bool {
 	return false
 }
 
+func (l *Ledger) HasSuccessfulCommandAfter(command string, after int) bool {
+	command = strings.TrimSpace(command)
+	if l == nil || command == "" {
+		return false
+	}
+	start := after + 1
+	if start < 0 {
+		start = 0
+	}
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for i := start; i < len(l.receipts); i++ {
+		r := l.receipts[i]
+		if r.Success && r.ToolName == "bash" && r.Command == command {
+			return true
+		}
+	}
+	return false
+}
+
 func (l *Ledger) HasSuccessfulWrite(paths []string) bool {
 	return l.hasSuccessfulPaths(paths, func(r Receipt) bool { return r.Write })
 }
 
 func (l *Ledger) HasSuccessfulReadOrWrite(paths []string) bool {
 	return l.hasSuccessfulPaths(paths, func(r Receipt) bool { return r.Read || r.Write })
+}
+
+func (l *Ledger) LatestSuccessfulWriteIndex(paths []string) (int, bool) {
+	wanted := pathSet(normalizePaths(paths))
+	if l == nil || len(wanted) == 0 {
+		return 0, false
+	}
+	latest := -1
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for i, r := range l.receipts {
+		if !r.Success || !r.Write {
+			continue
+		}
+		for _, p := range r.Paths {
+			if wanted[p] {
+				latest = i
+				break
+			}
+		}
+	}
+	return latest, latest >= 0
 }
 
 func (l *Ledger) MatchLatestTodoStep(step string) (TodoStepMatch, bool) {

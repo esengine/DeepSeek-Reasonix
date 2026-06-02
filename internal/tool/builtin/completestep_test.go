@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"reasonix/internal/evidence"
+	"reasonix/internal/instruction"
 )
 
 func TestCompleteStepRejectsMissingEvidence(t *testing.T) {
@@ -160,6 +161,87 @@ func TestCompleteStepAllowsManualAsUnverified(t *testing.T) {
 	}
 	if !strings.Contains(out, "manual/unverified 1") {
 		t.Fatalf("manual evidence should be marked unverified, got %q", out)
+	}
+}
+
+func TestCompleteStepRejectsMissingProjectCheckAfterWrite(t *testing.T) {
+	ledger := evidence.NewLedger()
+	ledger.Record(evidence.Receipt{ToolName: "write_file", Success: true, Paths: []string{"changed.go"}, Write: true})
+	ctx := instruction.WithChecks(evidence.WithLedger(context.Background(), ledger), []instruction.VerifyCheck{
+		{Command: "go test ./...", SourcePath: "AGENTS.md", Line: 3},
+	})
+
+	_, err := completeStep{}.Execute(ctx, json.RawMessage(`{
+		"step":"Edit code",
+		"result":"code changed",
+		"evidence":[{"kind":"diff","summary":"changed code","paths":["changed.go"]}]
+	}`))
+	if err == nil {
+		t.Fatal("write-backed completion should require project verify checks")
+	}
+	for _, want := range []string{"project check", "go test ./...", "AGENTS.md:3"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q missing %q", err, want)
+		}
+	}
+}
+
+func TestCompleteStepRejectsProjectCheckBeforeWrite(t *testing.T) {
+	ledger := evidence.NewLedger()
+	ledger.Record(evidence.Receipt{ToolName: "bash", Success: true, Command: "go test ./..."})
+	ledger.Record(evidence.Receipt{ToolName: "write_file", Success: true, Paths: []string{"changed.go"}, Write: true})
+	ctx := instruction.WithChecks(evidence.WithLedger(context.Background(), ledger), []instruction.VerifyCheck{
+		{Command: "go test ./...", SourcePath: "AGENTS.md", Line: 3},
+	})
+
+	_, err := completeStep{}.Execute(ctx, json.RawMessage(`{
+		"step":"Edit code",
+		"result":"code changed",
+		"evidence":[{"kind":"diff","summary":"changed code","paths":["changed.go"]}]
+	}`))
+	if err == nil || !strings.Contains(err.Error(), "after the latest matching write") {
+		t.Fatalf("check before write should be rejected, got %v", err)
+	}
+}
+
+func TestCompleteStepAcceptsProjectChecksAfterWrite(t *testing.T) {
+	ledger := evidence.NewLedger()
+	ledger.Record(evidence.Receipt{ToolName: "write_file", Success: true, Paths: []string{"changed.go"}, Write: true})
+	ledger.Record(evidence.Receipt{ToolName: "bash", Success: true, Command: "go test ./..."})
+	ledger.Record(evidence.Receipt{ToolName: "bash", Success: true, Command: "git diff --check"})
+	ctx := instruction.WithChecks(evidence.WithLedger(context.Background(), ledger), []instruction.VerifyCheck{
+		{Command: "go test ./...", SourcePath: "AGENTS.md", Line: 3},
+		{Command: "git diff --check", SourcePath: "AGENTS.md", Line: 4},
+	})
+
+	out, err := completeStep{}.Execute(ctx, json.RawMessage(`{
+		"step":"Edit code",
+		"result":"code changed",
+		"evidence":[{"kind":"diff","summary":"changed code","paths":["changed.go"]}]
+	}`))
+	if err != nil {
+		t.Fatalf("project checks after write should pass: %v", err)
+	}
+	if !strings.Contains(out, "project checks 2") {
+		t.Fatalf("ack should mention project checks, got %q", out)
+	}
+}
+
+func TestCompleteStepProjectChecksOnlyGateWriteBackedCompletions(t *testing.T) {
+	ledger := evidence.NewLedger()
+	ledger.Record(evidence.Receipt{ToolName: "read_file", Success: true, Paths: []string{"notes.md"}, Read: true})
+	ctx := instruction.WithChecks(evidence.WithLedger(context.Background(), ledger), []instruction.VerifyCheck{
+		{Command: "go test ./...", SourcePath: "AGENTS.md", Line: 3},
+	})
+
+	cases := []string{
+		`{"step":"Manual","result":"checked","evidence":[{"kind":"manual","summary":"operator checked"}]}`,
+		`{"step":"Inspect","result":"read file","evidence":[{"kind":"files","summary":"inspected file","paths":["notes.md"]}]}`,
+	}
+	for _, body := range cases {
+		if _, err := (completeStep{}).Execute(ctx, json.RawMessage(body)); err != nil {
+			t.Fatalf("non-write-backed completion should not require project checks: %v", err)
+		}
 	}
 }
 

@@ -24,6 +24,7 @@ import (
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/hook"
+	"reasonix/internal/instruction"
 	"reasonix/internal/jobs"
 	"reasonix/internal/lsp"
 	"reasonix/internal/memory"
@@ -134,6 +135,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// turn. Mid-session changes never touch this prefix — they ride the
 	// controller's transient turn-injection and fold in on the next session.
 	mem := memory.Load(memory.Options{CWD: ".", UserDir: config.MemoryUserDir()})
+	projectChecks := instruction.ExtractHostChecks(mem.Docs)
 	sysPrompt = memory.Compose(sysPrompt, mem)
 
 	// Skills: discover playbooks (built-in + project/custom/global) and fold their
@@ -385,6 +387,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		Gate:          headlessGate,
 		Hooks:         hookRunner,
 		Jobs:          jm,
+		ProjectChecks: projectChecks,
 		ContextWindow: entry.ContextWindow,
 		ArchiveDir:    config.ArchiveDir(),
 	}, sink)

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"reasonix/internal/event"
+	"reasonix/internal/instruction"
 	"reasonix/internal/provider"
 	"reasonix/internal/tool"
 )
@@ -89,6 +90,43 @@ func TestEvidenceFlowEndToEnd(t *testing.T) {
 
 	if got := toolResult(a.session, "complete_step"); !strings.Contains(got, "host-verified 1") {
 		t.Fatalf("complete_step result = %q, want it host-verified from the bash receipt", got)
+	}
+}
+
+func TestEvidenceFlowEnforcesProjectChecksAfterWrite(t *testing.T) {
+	completeStep, ok := tool.LookupBuiltin("complete_step")
+	if !ok {
+		t.Fatal("complete_step builtin not registered")
+	}
+	reg := tool.NewRegistry()
+	reg.Add(fakeTool{name: "write_file", readOnly: false})
+	reg.Add(fakeTool{name: "bash", readOnly: false})
+	reg.Add(completeStep)
+
+	prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{
+		{
+			toolCallChunk("c1", "write_file", `{"path":"changed.go","content":"package main"}`),
+			toolCallChunk("c2", "bash", `{"command":"go test ./..."}`),
+			toolCallChunk("c3", "complete_step", `{
+				"step":"Edit code",
+				"result":"changed.go updated",
+				"evidence":[{"kind":"diff","summary":"updated code","paths":["changed.go"]}]
+			}`),
+			{Type: provider.ChunkDone},
+		},
+		{{Type: provider.ChunkText, Text: "done"}, {Type: provider.ChunkDone}},
+	}}
+
+	a := New(prov, reg, NewSession(""), Options{
+		ProjectChecks: []instruction.VerifyCheck{{Command: "go test ./...", SourcePath: "AGENTS.md", Line: 3}},
+	}, event.Discard)
+	if err := a.Run(context.Background(), "edit and verify"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	got := toolResult(a.session, "complete_step")
+	if !strings.Contains(got, "project checks 1") {
+		t.Fatalf("complete_step result = %q, want project check verified from same batch", got)
 	}
 }
 

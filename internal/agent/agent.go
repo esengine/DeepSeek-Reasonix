@@ -12,6 +12,7 @@ import (
 	"reasonix/internal/diff"
 	"reasonix/internal/event"
 	"reasonix/internal/evidence"
+	"reasonix/internal/instruction"
 	"reasonix/internal/jobs"
 	"reasonix/internal/memory"
 	"reasonix/internal/nilutil"
@@ -173,6 +174,10 @@ type Agent struct {
 	// complete_step validate that cited evidence happened before the claim.
 	evidence *evidence.Ledger
 
+	// projectChecks are structured project instructions that complete_step can
+	// verify against same-turn bash receipts after a write-backed completion.
+	projectChecks []instruction.VerifyCheck
+
 	// memQueue, when non-nil, lets the remember/forget tools fold a turn-tail note
 	// about a just-made memory change into the next turn, so it applies this
 	// session without touching the cache-stable prefix. Set via SetMemoryQueue.
@@ -297,6 +302,9 @@ type Options struct {
 	// Jobs is the session's background-job manager (nil disables background tools).
 	Jobs *jobs.Manager
 
+	// ProjectChecks are host-observable structured checks extracted during boot.
+	ProjectChecks []instruction.VerifyCheck
+
 	// Context management. ContextWindow <= 0 disables compaction. CompactRatio
 	// is the trigger fraction; RecentKeep is the minimum recent messages kept
 	// verbatim (the tail is otherwise token-bounded). Both fall back to defaults.
@@ -340,6 +348,7 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		hooks:         hooks,
 		jobs:          opts.Jobs,
 		evidence:      evidence.NewLedger(),
+		projectChecks: append([]instruction.VerifyCheck(nil), opts.ProjectChecks...),
 		contextWindow: opts.ContextWindow,
 		compactRatio:  opts.CompactRatio,
 		recentKeep:    opts.RecentKeep,
@@ -755,6 +764,9 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 	cctx := withCallContext(ctx, call.ID, a.sink, a.asker)
 	if a.evidence != nil {
 		cctx = evidence.WithLedger(cctx, a.evidence)
+	}
+	if len(a.projectChecks) > 0 {
+		cctx = instruction.WithChecks(cctx, a.projectChecks)
 	}
 	if a.jobs != nil {
 		cctx = jobs.WithManager(cctx, a.jobs)
