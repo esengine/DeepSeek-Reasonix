@@ -5,6 +5,7 @@ import type {
   KeyboardEvent,
   MouseEvent as ReactMouseEvent,
   PointerEvent as ReactPointerEvent,
+  ReactElement,
 } from "react";
 import {
   ChevronDown,
@@ -543,7 +544,7 @@ export function WorkspacePanel({
     });
   };
 
-  const renderRows = (dir: string, depth: number): JSX.Element[] => {
+  const renderRows = (dir: string, depth: number): ReactElement[] => {
     const entries = entriesByDir[dir] ?? [];
     return entries.flatMap((entry) => {
       const path = entryPath(dir, entry);

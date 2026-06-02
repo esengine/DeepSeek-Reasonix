@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -87,6 +89,61 @@ func TestSetEffortRebuildsController(t *testing.T) {
 	}
 	if got := app.Effort().Current; got != "max" {
 		t.Fatalf("Effort current = %q, want max", got)
+	}
+}
+
+func TestSetModelFailureKeepsExistingController(t *testing.T) {
+	isolateDesktopConfig(t)
+
+	app := NewApp()
+	app.ctx = context.Background()
+	app.model = "deepseek-flash/deepseek-v4-flash"
+	closed := false
+	old := control.New(control.Options{
+		Label:   "old-controller",
+		Cleanup: func() { closed = true },
+	})
+	app.ctrl = old
+	defer func() {
+		if app.ctrl != nil {
+			app.ctrl.Close()
+		}
+	}()
+
+	err := app.SetModel("missing/model")
+	if err == nil || !strings.Contains(err.Error(), "unknown model") {
+		t.Fatalf("SetModel missing/model error = %v, want unknown model", err)
+	}
+	if closed {
+		t.Fatal("failed model switch closed the existing controller")
+	}
+	if app.ctrl != old {
+		t.Fatal("failed model switch replaced the existing controller")
+	}
+	if app.model != "deepseek-flash/deepseek-v4-flash" {
+		t.Fatalf("model = %q, want previous model", app.model)
+	}
+}
+
+func TestSetModelSuppressesDesktopBootWarnings(t *testing.T) {
+	isolateDesktopConfig(t)
+	if err := os.WriteFile("reasonix.toml", []byte("[codegraph]\nenabled = false\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	app := NewApp()
+	app.ctx = context.Background()
+	app.model = "missing/model"
+
+	stderr := captureStderr(t, func() {
+		if err := app.SetModel("deepseek-flash/deepseek-v4-flash"); err != nil {
+			t.Fatalf("SetModel: %v", err)
+		}
+	})
+	defer app.ctrl.Close()
+
+	if strings.Contains(stderr, "bash sandbox requested") {
+		t.Fatalf("SetModel leaked boot warning to process stderr: %q", stderr)
 	}
 }
 
@@ -694,6 +751,41 @@ tier = "eager"
 		}
 	}
 	t.Fatalf("broken MCP missing from Capabilities: %+v", view.Servers)
+}
+
+func isolateDesktopConfig(t *testing.T) {
+	t.Helper()
+	root := t.TempDir()
+	t.Setenv("HOME", root)
+	t.Setenv("USERPROFILE", root)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, ".config"))
+	t.Setenv("APPDATA", filepath.Join(root, "AppData", "Roaming"))
+	t.Setenv("AppData", filepath.Join(root, "AppData", "Roaming"))
+	t.Chdir(t.TempDir())
+}
+
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	old := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe stderr: %v", err)
+	}
+	os.Stderr = w
+	defer func() { os.Stderr = old }()
+
+	fn()
+	if err := w.Close(); err != nil {
+		t.Fatalf("close stderr pipe: %v", err)
+	}
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, r); err != nil {
+		t.Fatalf("read stderr pipe: %v", err)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatalf("close stderr reader: %v", err)
+	}
+	return buf.String()
 }
 
 type blockingRunner struct {

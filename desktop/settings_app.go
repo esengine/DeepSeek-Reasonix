@@ -185,11 +185,11 @@ func (a *App) rebuild() error {
 	}
 	var carried []provider.Message
 	prevPath := ""
-	if a.ctrl != nil {
-		prevPath = a.ctrl.SessionPath()
-		_ = a.ctrl.Snapshot()
-		carried = a.ctrl.History()
-		a.ctrl.Close()
+	old := a.ctrl
+	if old != nil {
+		prevPath = old.SessionPath()
+		_ = old.Snapshot()
+		carried = old.History()
 	}
 	model := a.model
 	if cfg, err := config.Load(); err == nil {
@@ -200,9 +200,8 @@ func (a *App) rebuild() error {
 			}
 		}
 	}
-	ctrl, err := boot.Build(a.ctx, boot.Options{Model: model, RequireKey: false, Sink: a.sink})
+	ctrl, err := boot.Build(a.ctx, boot.Options{Model: model, RequireKey: false, Sink: a.sink, Stderr: a.stderr})
 	if err != nil {
-		a.ctrl = nil
 		a.startupErr = err.Error()
 		return err
 	}
@@ -210,6 +209,9 @@ func (a *App) rebuild() error {
 	a.model = model
 	a.label = ctrl.Label()
 	a.startupErr = ""
+	if old != nil {
+		old.Close()
+	}
 	ctrl.EnableInteractiveApproval()
 	path := agent.ContinueSessionPath(prevPath, ctrl.SessionDir(), ctrl.Label())
 	if len(carried) > 0 {

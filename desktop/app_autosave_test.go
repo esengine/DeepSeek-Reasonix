@@ -46,6 +46,21 @@ func waitForFile(t *testing.T, path, want string) {
 	t.Fatalf("session file %q never contained %q", path, want)
 }
 
+func waitForSnapshotIdle(t *testing.T, a *App) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		a.saveMu.Lock()
+		idle := !a.saving && !a.saveAgain
+		a.saveMu.Unlock()
+		if idle {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("desktop autosave did not become idle")
+}
+
 // TestTurnDonePersistsSession proves a completed turn is written to disk without
 // any explicit Snapshot call — the desktop autosave the data-loss fix adds. A
 // nil sink ctx (no webview) must not disable persistence.
@@ -57,6 +72,7 @@ func TestTurnDonePersistsSession(t *testing.T) {
 	a.sink.Emit(event.Event{Kind: event.TurnDone})
 
 	waitForFile(t, path, "remember this turn")
+	waitForSnapshotIdle(t, a)
 }
 
 // TestNonTurnDoneDoesNotPersist confirms only TurnDone triggers a save, so the
@@ -86,4 +102,5 @@ func TestScheduleSnapshotCoalesces(t *testing.T) {
 	}
 
 	waitForFile(t, path, "acknowledged")
+	waitForSnapshotIdle(t, a)
 }

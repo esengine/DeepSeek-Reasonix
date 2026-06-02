@@ -121,6 +121,10 @@ const initialState: State = {
   seq: 0,
 };
 
+function errorMessage(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
+
 type Action =
   | { type: "event"; e: WireEvent }
   | { type: "user"; text: string }
@@ -676,7 +680,12 @@ export function useController() {
   // setModel switches the active model (the backend carries the conversation into
   // the new model's session); refresh the header/gauge to reflect the new label.
   const setModel = useCallback(async (name: string) => {
-    await app.SetModel(name).catch(() => {});
+    try {
+      await app.SetModel(name);
+    } catch (e) {
+      dispatch({ type: "local_notice", level: "warn", text: errorMessage(e) });
+      return;
+    }
     try {
       dispatch({ type: "meta", meta: await app.Meta() });
       dispatch({ type: "context", context: await app.ContextUsage() });

@@ -61,6 +61,7 @@ type App struct {
 	ready       bool   // true once boot.Build completes (success or failure)
 	disabledMCP map[string]ServerView
 	mcpOrder    []string
+	stderr      io.Writer // boot diagnostics; quiet by default for GUI launches
 
 	// Per-turn autosave runs off the event goroutine so disk I/O never delays
 	// event delivery; overlapping requests coalesce into one trailing write.
@@ -72,7 +73,7 @@ type App struct {
 // NewApp constructs the bound object. The controller is built later, in startup,
 // once the Wails context exists.
 func NewApp() *App {
-	a := &App{sink: &eventSink{}, disabledMCP: map[string]ServerView{}}
+	a := &App{sink: &eventSink{}, disabledMCP: map[string]ServerView{}, stderr: io.Discard}
 	a.sink.app = a
 	return a
 }
@@ -126,7 +127,7 @@ func (a *App) buildController() {
 	a.model = model
 	a.mu.Unlock()
 
-	ctrl, err := boot.Build(ctx, boot.Options{Model: model, RequireKey: false, Sink: a.sink})
+	ctrl, err := boot.Build(ctx, boot.Options{Model: model, RequireKey: false, Sink: a.sink, Stderr: a.stderr})
 	if err != nil {
 		a.mu.Lock()
 		a.startupErr = err.Error()
@@ -578,7 +579,7 @@ func (a *App) SwitchWorkspace(dir string) (string, error) {
 			model = e.Name + "/" + e.Model
 		}
 	}
-	ctrl, err := boot.Build(a.ctx, boot.Options{Model: model, RequireKey: false, Sink: a.sink})
+	ctrl, err := boot.Build(a.ctx, boot.Options{Model: model, RequireKey: false, Sink: a.sink, Stderr: a.stderr})
 	if err != nil {
 		_ = os.Chdir(cur) // roll back; the current session stays intact
 		return "", err
@@ -1777,10 +1778,9 @@ func (a *App) SetModel(name string) error {
 		prevPath = ctrl.SessionPath()
 		_ = ctrl.Snapshot()
 		carried = ctrl.History()
-		ctrl.Close()
 	}
 
-	newCtrl, err := boot.Build(a.ctx, boot.Options{Model: name, RequireKey: false, Sink: a.sink})
+	newCtrl, err := boot.Build(a.ctx, boot.Options{Model: name, RequireKey: false, Sink: a.sink, Stderr: a.stderr})
 	if err != nil {
 		return err
 	}
@@ -1789,6 +1789,9 @@ func (a *App) SetModel(name string) error {
 	a.model = name
 	a.label = newCtrl.Label()
 	a.mu.Unlock()
+	if ctrl != nil {
+		ctrl.Close()
+	}
 	newCtrl.EnableInteractiveApproval()
 
 	// Carry the prior conversation (full provider.Message log, incl. the system
