@@ -21,6 +21,23 @@ function scrollVersion(items: Item[]): string {
     .join("|");
 }
 
+function repinIfWasPinned(
+  el: HTMLDivElement,
+  stick: { current: boolean },
+  frame: { current: number | null },
+  containerHeightDelta: number,
+) {
+  const bottomDistance = el.scrollHeight - el.scrollTop - el.clientHeight;
+  // + delta reconstructs the bottom distance from before the height changed
+  if (!stick.current && bottomDistance + containerHeightDelta >= 80) return;
+  stick.current = true;
+  if (frame.current !== null) cancelAnimationFrame(frame.current);
+  frame.current = requestAnimationFrame(() => {
+    if (stick.current) el.scrollTop = el.scrollHeight;
+    frame.current = null;
+  });
+}
+
 export function Transcript({
   items,
   footerHeight = 0,
@@ -66,18 +83,9 @@ export function Transcript({
     if (!el || typeof ResizeObserver === "undefined") return;
     lastClientHeight.current = el.clientHeight;
     const observer = new ResizeObserver(() => {
-      const previousHeight = lastClientHeight.current ?? el.clientHeight;
-      const heightDelta = el.clientHeight - previousHeight;
+      const previous = lastClientHeight.current ?? el.clientHeight;
       lastClientHeight.current = el.clientHeight;
-      const bottomDistance = el.scrollHeight - el.scrollTop - el.clientHeight;
-      const wasPinnedBeforeResize = bottomDistance + heightDelta < 80;
-      if (!stick.current && !wasPinnedBeforeResize) return;
-      stick.current = true;
-      if (resizeFrame.current !== null) cancelAnimationFrame(resizeFrame.current);
-      resizeFrame.current = requestAnimationFrame(() => {
-        if (stick.current) el.scrollTop = el.scrollHeight;
-        resizeFrame.current = null;
-      });
+      repinIfWasPinned(el, stick, resizeFrame, el.clientHeight - previous);
     });
     observer.observe(el);
     return () => {
@@ -92,17 +100,15 @@ export function Transcript({
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    const previousHeight = lastFooterHeight.current ?? footerHeight;
-    const heightDelta = footerHeight - previousHeight;
+    const previous = lastFooterHeight.current ?? footerHeight;
     lastFooterHeight.current = footerHeight;
-    const bottomDistance = el.scrollHeight - el.scrollTop - el.clientHeight;
-    const wasPinnedBeforeFooterResize = bottomDistance - heightDelta < 80;
-    if (!stick.current && !wasPinnedBeforeFooterResize) return;
-    stick.current = true;
-    const id = requestAnimationFrame(() => {
-      if (stick.current) el.scrollTop = el.scrollHeight;
-    });
-    return () => cancelAnimationFrame(id);
+    repinIfWasPinned(el, stick, resizeFrame, previous - footerHeight);
+    return () => {
+      if (resizeFrame.current !== null) {
+        cancelAnimationFrame(resizeFrame.current);
+        resizeFrame.current = null;
+      }
+    };
   }, [footerHeight]);
 
   // Sub-agent calls carry a parentId; collect them under their parent `task`
