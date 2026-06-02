@@ -1306,27 +1306,40 @@ func (a *App) ReadFile(rel string) FilePreview {
 		out.Truncated = true
 	}
 
-	// Check for BOM first: UTF-16 files contain 0x00 for every ASCII
-	// character, so a naive NUL check would misidentify them as binary.
-	enc, _ := fileenc.Detect(data)
-	if enc != fileenc.UTF16LE && enc != fileenc.UTF16BE && enc != fileenc.UTF8BOM {
-		if bytes.Contains(data, []byte{0}) {
+	// Check for BOM first (just the first 2-3 bytes — always complete
+	// even at a truncation boundary). BOM-prefixed files skip the NUL
+	// check since UTF-16 normally contains 0x00 for ASCII characters.
+	bomKind := fileenc.DetectQuick(data)
+	if bomKind != fileenc.UTF8 {
+		enc, _ := fileenc.Detect(data)
+		if enc == fileenc.LossyUTF8 {
 			out.Binary = true
 			return out
 		}
+		decoded := fileenc.Decode(data, enc)
+		out.Body = string(decoded)
+		return out
 	}
+
+	// No BOM — NUL in raw bytes is a binary signal.
+	if bytes.Contains(data, []byte{0}) {
+		out.Binary = true
+		return out
+	}
+
+	// Trim any partial multi-byte rune at the truncation boundary BEFORE
+	// encoding detection. Without this, a large UTF-8 file truncated
+	// mid-character would fail utf8.Valid and be misdetected as GB18030
+	// or LossyUTF8, producing mojibake or a false binary classification.
+	if out.Truncated {
+		data = trimUTF8PartialSuffix(data)
+	}
+	enc, _ := fileenc.Detect(data)
 	if enc == fileenc.LossyUTF8 {
 		out.Binary = true
 		return out
 	}
-	decoded := fileenc.Decode(data, enc)
-
-	// Trim any partial rune at the truncation boundary (safe now that
-	// decoded is valid UTF-8).
-	if out.Truncated {
-		decoded = trimUTF8PartialSuffix(decoded)
-	}
-	out.Body = string(decoded)
+	out.Body = string(fileenc.Decode(data, enc))
 	return out
 }
 

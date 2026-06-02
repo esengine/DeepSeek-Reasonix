@@ -95,6 +95,24 @@ func Decode(data []byte, enc Kind) []byte {
 	return data
 }
 
+// Decoder returns a streaming transform.Transformer for the given encoding,
+// suitable for wrapping an io.Reader via dec.Reader(r). Returns nil for UTF-8
+// and LossyUTF8 (no transformation needed — the caller should read directly).
+func Decoder(enc Kind) transform.Transformer {
+	switch enc {
+	case UTF8BOM:
+		// UTF-8 BOM just needs the 3-byte prefix stripped; the content is
+		// already valid UTF-8. Callers handle BOM stripping via Decode.
+		return nil
+	case GB18030:
+		return simplifiedchinese.GB18030.NewDecoder()
+	}
+	// UTF16LE/BE are not self-synchronising and cannot be streamed
+	// line-by-line without full-file buffering. Callers must handle
+	// them separately. UTF8 and LossyUTF8 need no transformation.
+	return nil
+}
+
 // Encode converts a UTF-8 string back to the given file encoding.
 // UTF8 and LossyUTF8 produce plain UTF-8 bytes.
 func Encode(text string, enc Kind) []byte {
