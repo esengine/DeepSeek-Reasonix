@@ -23,6 +23,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"reasonix/internal/proc"
 )
 
 // Event is a point in the agent loop a hook can fire at.
@@ -374,6 +376,7 @@ func DefaultSpawner(ctx context.Context, in SpawnInput) SpawnResult {
 
 	name, args := shellInvocation(in.Command)
 	cmd := exec.CommandContext(cctx, name, args...)
+	proc.HideWindow(cmd)
 	cmd.Dir = in.Cwd
 	cmd.Stdin = strings.NewReader(in.Stdin)
 	var outBuf, errBuf cappedBuffer

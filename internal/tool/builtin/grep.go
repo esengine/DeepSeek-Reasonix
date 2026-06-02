@@ -16,6 +16,7 @@ import (
 	"golang.org/x/text/transform"
 
 	fileenc "reasonix/internal/fileutil/encoding"
+	"reasonix/internal/proc"
 	"reasonix/internal/tool"
 )
 
@@ -199,6 +200,7 @@ func (g grepTool) runRipgrep(ctx context.Context, pattern, path string) (string,
 	cmd := exec.CommandContext(ctx, g.rg,
 		"--no-heading", "--line-number", "--with-filename", "--color", "never",
 		"--regexp", pattern, "--", path)
+	proc.HideWindow(cmd)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return "", err

@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"reasonix/internal/proc"
 )
 
 // psUTF8Prologue forces PowerShell to emit UTF-8 instead of the host's OEM code
@@ -77,7 +79,9 @@ func probeBash(path string) bool {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	return exec.CommandContext(ctx, path, "-c", "true").Run() == nil
+	cmd := exec.CommandContext(ctx, path, "-c", "true")
+	proc.HideWindow(cmd)
+	return cmd.Run() == nil
 }
 
 func fileExists(p string) bool {

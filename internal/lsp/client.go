@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"sync"
 	"time"
+
+	"reasonix/internal/proc"
 )
 
 // docState tracks what we last sent the server for a document, so ensureSynced
@@ -42,6 +44,7 @@ type Diagnostic struct {
 
 func startClient(ctx context.Context, bin string, args []string, env map[string]string, langID, root string) (*client, error) {
 	cmd := exec.CommandContext(ctx, bin, args...)
+	proc.HideWindow(cmd)
 	cmd.Dir = root
 	cmd.Env = append(os.Environ(), envSlice(env)...)
 	cmd.Stderr = io.Discard

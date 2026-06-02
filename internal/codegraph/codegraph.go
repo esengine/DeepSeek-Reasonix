@@ -21,6 +21,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"reasonix/internal/proc"
 )
 
 // BundleDirName is the directory, beside the reasonix executable, that the release
@@ -111,6 +113,7 @@ func EnsureInit(ctx context.Context, bin, root string) error {
 		return nil // already initialised — serve re-syncs and the watcher keeps it fresh
 	}
 	cmd := exec.CommandContext(ctx, bin, "init", root)
+	proc.HideWindow(cmd)
 	cmd.Dir = root
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("codegraph init: %w: %s", err, strings.TrimSpace(string(out)))
