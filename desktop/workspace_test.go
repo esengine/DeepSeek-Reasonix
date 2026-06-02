@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -112,7 +111,7 @@ func TestReadFileTrimsPartialUTF8RuneAtPreviewBoundary(t *testing.T) {
 	}
 }
 
-func TestReadFileKeepsInvalidUTF8Binary(t *testing.T) {
+func TestReadFilePreviewBinaryClassification(t *testing.T) {
 	orig, _ := os.Getwd()
 	defer os.Chdir(orig)
 
@@ -121,17 +120,26 @@ func TestReadFileKeepsInvalidUTF8Binary(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	data := append(bytes.Repeat([]byte("a"), filePreviewLimit-1), 0xff, 'x', 'y')
-	if err := os.WriteFile("invalid.txt", data, 0o644); err != nil {
+	// NUL is the binary signal, matching the CLI read_file tool once GB18030
+	// decoding meant invalid UTF-8 alone no longer implies binary.
+	if err := os.WriteFile("binary.bin", append([]byte("data"), 0x00, 0x01, 0x02), 0o644); err != nil {
 		t.Fatal(err)
 	}
-
-	preview := (&App{}).ReadFile("invalid.txt")
-	if preview.Err != "" {
-		t.Fatalf("ReadFile err = %q", preview.Err)
+	if p := (&App{}).ReadFile("binary.bin"); !p.Binary {
+		t.Errorf("NUL-containing file should be binary, got Body=%q", p.Body)
 	}
-	if !preview.Binary {
-		t.Fatal("ReadFile should keep invalid UTF-8 preview classified as binary")
+
+	// Invalid UTF-8 without a NUL is decoded leniently and shown as text, with
+	// U+FFFD where bytes don't map — not hidden behind a binary classification.
+	if err := os.WriteFile("invalid.txt", append([]byte("hello"), 0xff, 'x', 'y'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p := (&App{}).ReadFile("invalid.txt")
+	if p.Binary {
+		t.Error("invalid-but-NUL-free file should render as lossy text, not binary")
+	}
+	if !strings.ContainsRune(p.Body, '�') {
+		t.Errorf("lossy decode should mark undecodable bytes with U+FFFD, got %q", p.Body)
 	}
 }
 
