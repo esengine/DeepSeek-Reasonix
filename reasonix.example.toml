@@ -34,8 +34,6 @@ default     = "deepseek-v4-flash"   # optional; defaults to the first of `models
 api_key_env = "DEEPSEEK_API_KEY"
 context_window = 1000000
 price       = { cache_hit = 0.02, input = 1, output = 2, currency = "¥" }   # per 1M tokens
-# DeepSeek thinking mode is enabled by default; effort: high | max | off.
-effort      = "high"
 
 # A single-model provider still works (use `model = "..."`) — pick this form when a
 # model needs its own base_url / context_window / price (e.g. the two MiMo SKUs
@@ -117,3 +115,11 @@ enabled = []   # empty = all built-in tools
 # [[plugins]]
 # name    = "example"
 # command = "reasonix-plugin-example"
+# tier    = "lazy"  # eager | lazy (default) | background
+# # tier guidance:
+# #   eager      — handshake at boot; the agent waits. Use when the plugin's
+# #                tools must be in the very first turn's system prompt.
+# #   lazy       — placeholder tools (from cached schema, when present) until
+# #                the model uses them, then handshake on-demand. Default.
+# #   background — placeholder + spawn at boot in a goroutine so an idle
+# #                session warms up without blocking the user.

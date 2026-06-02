@@ -145,7 +145,34 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// Always construct a host, even with no plugins configured, so the controller's
 	// host pointer is stable for the session and `/mcp add` can hot-add into it.
 	pluginHost := plugin.NewHost()
-	specs := PluginSpecs(cfg.AutoStartPlugins())
+
+	// Partition configured plugins by tier so eager/lazy/background can each
+	// take the path that fits them. User entries default to lazy — they don't
+	// slow the next launch unless the user explicitly opts in to eager.
+	eagerEntries, lazyEntries, bgEntries := partitionByTier(cfg.AutoStartPlugins())
+
+	// Auto-demote: any eager plugin that has been chronically slow (Phase 5
+	// telemetry says p99 > 2*budget over the last few starts) drops to lazy
+	// for this session. The user keeps eager intent, just doesn't pay for it
+	// on a server that's been misbehaving. A notice surfaces the demotion.
+	var demoteMessages []string
+	budget := plugin.DefaultStartupBudget()
+	kept := eagerEntries[:0]
+	for _, e := range eagerEntries {
+		rec := plugin.Recommend(e.Name, budget, 0)
+		if rec.Demote {
+			demoteMessages = append(demoteMessages, rec.Reason)
+			lazyEntries = append(lazyEntries, e)
+			continue
+		}
+		kept = append(kept, e)
+	}
+	eagerEntries = kept
+
+	eagerSpecs := PluginSpecs(eagerEntries)
+	lazySpecs := PluginSpecs(lazyEntries)
+	bgSpecs := PluginSpecs(bgEntries)
+
 	// CodeGraph is a built-in MCP server fetched on first use. When it resolves,
 	// inject it as one more stdio plugin pinned to the project root (it is
 	// cwd-aware); EnsureInit only creates .codegraph/ (fast, size-independent),
@@ -154,6 +181,9 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// (one-time, ~45MB) if auto_install is on — startup still never blocks, the
 	// tools come online next session — otherwise point the user at the explicit
 	// install command. A failed init or fetch is a notice, not fatal.
+	//
+	// Codegraph stays eager regardless of user tier — symbol-graph tools land
+	// in the system prompt, so the agent must see them on first turn.
 	if cfg.Codegraph.Enabled {
 		bin, ok := codegraph.Resolve(cfg.Codegraph.Path)
 		switch {
@@ -162,7 +192,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 				sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn,
 					Text: "codegraph: init failed (" + err.Error() + ") — symbol-graph tools disabled this session"})
 			}
-			specs = append(specs, plugin.Spec{Name: "codegraph", Command: bin, Args: []string{"serve", "--mcp"}, Dir: cwd})
+			eagerSpecs = append(eagerSpecs, plugin.Spec{Name: "codegraph", Command: bin, Args: []string{"serve", "--mcp"}, Dir: cwd})
 		case cfg.Codegraph.AutoInstall:
 			notify := func(msg string) { sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: msg}) }
 			notify("codegraph: fetching code-intelligence runtime in the background (one-time) — symbol-graph tools available next session")
@@ -183,14 +213,23 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 				Text: "codegraph: not installed — run `reasonix codegraph install` to enable symbol-graph tools"})
 		}
 	}
-	if len(specs) > 0 {
-		// Apply caller-supplied stderr override to all plugin specs.
-		if opts.Stderr != nil {
-			for i := range specs {
-				specs[i].Stderr = opts.Stderr
-			}
+
+	// Apply caller-supplied stderr override to every spec across tiers.
+	if opts.Stderr != nil {
+		for i := range eagerSpecs {
+			eagerSpecs[i].Stderr = opts.Stderr
 		}
-		host, ptools := plugin.StartAvailable(ctx, specs)
+		for i := range lazySpecs {
+			lazySpecs[i].Stderr = opts.Stderr
+		}
+		for i := range bgSpecs {
+			bgSpecs[i].Stderr = opts.Stderr
+		}
+	}
+
+	// Eager: block until handshake. Failures show up in /mcp.
+	if len(eagerSpecs) > 0 {
+		host, ptools := plugin.StartAvailable(ctx, eagerSpecs)
 		pluginHost = host
 		for _, t := range ptools {
 			reg.Add(t)
@@ -203,6 +242,26 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: text})
 		}
 	}
+
+	// Lazy / background: register placeholder tools now; the real spawn waits
+	// for either the first model call (lazy) or a goroutine kicked off here
+	// (background). Both share the same pluginHost so /mcp status, hot-add,
+	// and Close see one cohesive set of servers regardless of tier.
+	registerDeferred := func(specs []plugin.Spec, kick bool) {
+		for _, s := range specs {
+			cs, _ := plugin.LoadCachedSchema(s.Name, plugin.SpecFingerprint(s))
+			for _, t := range plugin.LazyToolset(s, cs, pluginHost, reg, ctx, kick) {
+				reg.Add(t)
+			}
+		}
+	}
+	registerDeferred(lazySpecs, false)
+	registerDeferred(bgSpecs, true)
+
+	for _, msg := range demoteMessages {
+		sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: msg})
+	}
+
 	cleanup := pluginHost.Close
 
 	// LSP tools resolve their servers on PATH and spawn lazily on first query, so
@@ -506,6 +565,24 @@ func addBuiltins(reg *tool.Registry, enabled, writeRoots []string, bashSpec sand
 			reg.Add(t)
 		}
 	}
+}
+
+// partitionByTier splits configured plugin entries into the three startup
+// buckets — eager (block boot until ready), lazy (placeholder until first
+// model use), background (placeholder + start spawn now). Entries with an
+// unrecognised or empty tier land in lazy (the default).
+func partitionByTier(entries []config.PluginEntry) (eager, lazy, bg []config.PluginEntry) {
+	for _, e := range entries {
+		switch e.ResolvedTier() {
+		case "eager":
+			eager = append(eager, e)
+		case "background":
+			bg = append(bg, e)
+		default:
+			lazy = append(lazy, e)
+		}
+	}
+	return eager, lazy, bg
 }
 
 // PluginSpecs maps configured plugin entries to plugin.Spec, expanding ${VAR}
