@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Pencil, Trash2, Check, X } from "lucide-react";
 import { t, useT } from "../lib/i18n";
+import { sessionActivityTime } from "../lib/session";
 import type { SessionMeta } from "../lib/types";
 import { ResizableDrawer } from "./ResizableDrawer";
 
@@ -130,10 +131,6 @@ export function HistoryPanel({
         </div>
     </ResizableDrawer>
   );
-}
-
-function sessionActivityTime(session: SessionMeta): number {
-  return session.lastActivityAt ?? session.modTime;
 }
 
 // dayLabel buckets a timestamp into "Today", "Yesterday", or a locale date. It's

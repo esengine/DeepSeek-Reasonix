@@ -28,6 +28,7 @@ import { CapabilitiesPanel } from "./components/CapabilitiesPanel";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { WorkspacePanel } from "./components/WorkspacePanel";
 import { parseTodos } from "./lib/tools";
+import { sessionActivityTime } from "./lib/session";
 import type { MemoryView, Mode, SessionMeta } from "./lib/types";
 import { loadLayoutSize, saveLayoutSize } from "./lib/layoutPreferences";
 
@@ -119,10 +120,6 @@ function sessionTitle(session: SessionMeta, fallback: string): string {
 
 function sessionTime(ms: number): string {
   return new Date(ms).toLocaleDateString([], { month: "short", day: "numeric" });
-}
-
-function sessionActivityTime(session: SessionMeta): number {
-  return session.lastActivityAt ?? session.modTime;
 }
 
 export default function App() {
