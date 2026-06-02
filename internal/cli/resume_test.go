@@ -1,10 +1,12 @@
 package cli
 
 import (
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -54,6 +56,16 @@ func TestResumePickerNavigateAndSelect(t *testing.T) {
 	saveTestSession(t, aPath, "first session prompt")
 	bPath := filepath.Join(dir, "b.jsonl")
 	saveTestSession(t, bPath, "SECOND-SESSION-PROMPT")
+	// Pin distinct mtimes so b is unambiguously the most recent. Created back to
+	// back, the two files can land in the same filesystem mtime tick (seen on the
+	// CI Windows runner), which then tie-breaks to a.jsonl by path and flakes.
+	now := time.Now()
+	if err := os.Chtimes(aPath, now.Add(-2*time.Second), now.Add(-2*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(bPath, now, now); err != nil {
+		t.Fatal(err)
+	}
 
 	m := newTestChatTUI()
 	m.width = 80

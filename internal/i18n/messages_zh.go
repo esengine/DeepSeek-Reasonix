@@ -50,7 +50,7 @@ var Chinese = Messages{
 	AskTypingHint:          "输入后按 Enter 确认",
 	AskChatInstead:         "先不选择，直接回复",
 	ChatStatusQuestion:     "↑/↓ 选 · 数字快选 · 空格多选 · Enter 确认 · ←/→ 切换问题 · Esc 取消",
-	StatusResumePicker: "↑/↓ 移动 · Enter 恢复 · Esc 取消",
+	StatusResumePicker:     "↑/↓ 移动 · Enter 恢复 · Esc 取消",
 	AskSubmitTitle:         "提交答案",
 	AskUnanswered:          "(未答)",
 	AskSubmitHint:          "Enter 提交 · ← 返回修改",

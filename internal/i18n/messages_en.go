@@ -49,7 +49,7 @@ var English = Messages{
 	AskTypingHint:          "type below, Enter to confirm",
 	AskChatInstead:         "None — just chat",
 	ChatStatusQuestion:     "↑/↓ move · number to pick · space multi · Enter confirm · ←/→ switch · Esc cancel",
-	StatusResumePicker: "↑/↓ move · Enter resume · Esc cancel",
+	StatusResumePicker:     "↑/↓ move · Enter resume · Esc cancel",
 	AskSubmitTitle:         "Submit answers",
 	AskUnanswered:          "(unanswered)",
 	AskSubmitHint:          "Enter submits · ← returns to edit",
