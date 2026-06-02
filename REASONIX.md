@@ -42,7 +42,7 @@ agent. It is the Reasonix analog of Claude Code's CLAUDE.md.
 特性/影响：
 - <业务逻辑说明或影响范围>
 
-Co-Authored-By: Claude <noreply@anthropic.com>
+Co-Authored-By: Reasonix <noreply@reasonix.com>
 ```
 
 ### 规则
@@ -51,7 +51,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 - **scope** 使用英文模块名（如 `agent`、`desktop`、`tool`、`control`）或工单号
 - **subject** 不超过 50 字，清晰描述改动
 - **强制多行提交**：必须包含详细描述、修改内容清单、影响范围
-- **强制 Co-Authored-By**：末尾必须追加 `Co-Authored-By: Claude <noreply@anthropic.com>`
+- **强制 Co-Authored-By**：末尾必须追加 `Co-Authored-By: Reasonix <noreply@reasonix.com>`
 - 提交信息必须结合实际改动生成，禁止空泛模板
 
 ### 示例
@@ -70,7 +70,7 @@ feat(desktop): add MCP drawer skill metadata badges
 - 用户可查看 MCP 工具的详细元数据
 - 技能展示增加版本和作者信息
 
-Co-Authored-By: Claude <noreply@anthropic.com>
+Co-Authored-By: Reasonix <noreply@reasonix.com>
 ```
 
 ## Notes
