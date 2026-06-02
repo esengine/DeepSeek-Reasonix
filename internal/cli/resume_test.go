@@ -189,6 +189,28 @@ func TestResumeArgCompletionListsSessions(t *testing.T) {
 	}
 }
 
+// TestResumeAcceptChainsIntoSessionMenu proves accepting "/resume" (a
+// non-descend command that still takes arguments) immediately opens the session
+// menu, rather than waiting for the next keystroke.
+func TestResumeAcceptChainsIntoSessionMenu(t *testing.T) {
+	dir := t.TempDir()
+	saveTestSession(t, filepath.Join(dir, "a.jsonl"), "first")
+
+	exec := agent.New(nil, nil, agent.NewSession("sys"), agent.Options{}, event.Discard)
+	m := newTestChatTUI()
+	m.ctrl = control.New(control.Options{Executor: exec, SessionDir: dir, Label: "test"})
+
+	m.input.SetValue("/resu")
+	m.updateCompletion()
+	m.acceptCompletion()
+	if got := m.input.Value(); got != "/resume " {
+		t.Fatalf("accepting /resume should fill %q, got %q", "/resume ", got)
+	}
+	if !m.completion.active || m.completion.kind != compSlashArg {
+		t.Fatalf("accepting /resume should chain into the session menu: %+v", m.completion)
+	}
+}
+
 // TestRunResumeSwitchesSession proves "/resume <n>" repoints the running
 // controller to the chosen saved session and loads its history.
 func TestRunResumeSwitchesSession(t *testing.T) {

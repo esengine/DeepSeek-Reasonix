@@ -363,9 +363,9 @@ func (m *chatTUI) moveCompletion(delta int) {
 	m.completion.sel = ((m.completion.sel+delta)%n + n) % n
 }
 
-// acceptCompletion applies the selected item to the input. A directory descends
-// (the input is filled and the menu re-opens one level deeper); anything else
-// completes and closes the menu.
+// acceptCompletion applies the selected item to the input, then recomputes the
+// menu from the new value: it re-opens one level deeper (a descended directory
+// or a freshly completed command's arguments) or closes when nothing applies.
 func (m *chatTUI) acceptCompletion() {
 	if m.completion.sel >= len(m.completion.items) {
 		m.completion = completion{}
@@ -379,8 +379,8 @@ func (m *chatTUI) acceptCompletion() {
 	}
 	m.input.SetValue(val[:rf] + it.insert)
 	m.input.CursorEnd()
-	if it.descend {
-		m.updateCompletion() // re-list the directory we just descended into
+	if it.descend || strings.HasSuffix(it.insert, " ") {
+		m.updateCompletion()
 		return
 	}
 	m.updateCompletion() // re-filter for arg completion (e.g. /resume → numbered sessions)
