@@ -48,6 +48,10 @@ func TestExtensionRouting(t *testing.T) {
 func TestConnBidirectional(t *testing.T) {
 	caR, caW := io.Pipe()
 	acR, acW := io.Pipe()
+	// Close the writers at the end so both readLoop goroutines see EOF and exit
+	// (in production the subprocess pipe EOFs on kill; here nothing else closes it).
+	defer caW.Close()
+	defer acW.Close()
 
 	notif := make(chan string, 4)
 	var client *conn

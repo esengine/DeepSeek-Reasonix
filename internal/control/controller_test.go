@@ -159,11 +159,10 @@ func TestApprovalDeny(t *testing.T) {
 // later prompts for the same tool+subject: only the first reaches the frontend.
 func TestApprovalSessionGrant(t *testing.T) {
 	c, ids, prompts := approvalIDs()
-	go func() {
-		for id := range ids {
-			c.Approve(id, true, true)
-		}
-	}()
+	// Only the first call reaches the frontend (the session grant short-circuits
+	// the rest), so a single approval is all this needs — ranging would block on
+	// a second ID that never arrives.
+	go func() { c.Approve(<-ids, true, true) }()
 
 	for i := 0; i < 3; i++ {
 		allow, _, err := gateApprover{c}.Approve(context.Background(), "bash", "go build", nil)
