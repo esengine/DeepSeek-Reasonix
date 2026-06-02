@@ -46,3 +46,57 @@ jobs:
 
       - name: test
         run: go test ./...
+
+  desktop:
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: desktop/go.mod
+          cache: true
+          cache-dependency-path: desktop/go.sum
+
+      # The Go main package embeds frontend/dist; a placeholder lets the Go
+      # build/test resolve the embed without a full frontend build.
+      - name: Stub embedded frontend
+        run: |
+          mkdir -p frontend/dist
+          echo '<!doctype html><title>ci</title>' > frontend/dist/index.html
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt-clean:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go.mod tidy
+        run: |
+          go mod tidy
+          if ! git diff --quiet -- go.mod go.sum; then
+            echo "desktop/go.mod or go.sum is stale - run 'cd desktop && go mod tidy' and commit."
+            git diff -- go.mod go.sum
+            exit 1
+          fi
+
+      # WebKitGTK 4.0 toolchain (pinned to ubuntu-22.04; no webkit2_41 tag).
+      - name: Install Linux build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc libgtk-3-dev libwebkit2gtk-4.0-dev
+
+      - name: vet
+        run: go vet ./...
+
+      - name: build
+        run: go build ./...
+
+      - name: test
+        run: go test ./...
