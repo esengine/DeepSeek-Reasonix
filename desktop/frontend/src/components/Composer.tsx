@@ -573,7 +573,7 @@ export function Composer({
               <span>{a.path.split("/").pop()}</span>
               <button
                 type="button"
-                title="Remove image"
+                title={t("composer.removeImage")}
                 onClick={() => setAttachments((prev) => prev.filter((x) => x.path !== a.path))}
               >
                 <X size={14} />
