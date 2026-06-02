@@ -44,7 +44,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	if deepseek {
 		effort = strings.ToLower(strings.TrimSpace(effort))
 		switch effort {
-		case "":
+		case "", "off": // "off" is a retired level (disabled thinking); fall back to the default depth
 			effort = "high"
 		case "high", "max":
 		default:

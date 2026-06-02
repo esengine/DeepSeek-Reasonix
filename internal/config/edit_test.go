@@ -104,6 +104,21 @@ func TestNormalizeEffortDeepSeek(t *testing.T) {
 	}
 }
 
+func TestNormalizeLegacyEffortMigratesOff(t *testing.T) {
+	c := &Config{Providers: []ProviderEntry{
+		{Name: "deepseek", Effort: "off"},
+		{Name: "deepseek-upper", Effort: "OFF"},
+		{Name: "keep", Effort: "high"},
+	}}
+	normalizeLegacyEffort(c)
+	if c.Providers[0].Effort != "" || c.Providers[1].Effort != "" {
+		t.Fatalf("legacy off should migrate to empty, got %q/%q", c.Providers[0].Effort, c.Providers[1].Effort)
+	}
+	if c.Providers[2].Effort != "high" {
+		t.Fatalf("non-legacy effort changed: %q", c.Providers[2].Effort)
+	}
+}
+
 func TestNormalizeEffortAnthropic(t *testing.T) {
 	e := &ProviderEntry{Name: "claude", Kind: "anthropic", Model: "claude-opus-4-8"}
 	cap := EffortCapabilityForEntry(e)

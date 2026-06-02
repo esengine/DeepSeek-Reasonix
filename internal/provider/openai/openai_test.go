@@ -337,8 +337,12 @@ func TestNewDeepSeekThinkingDefaultsAndValidation(t *testing.T) {
 	if _, err := New(provider.Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4", Extra: map[string]any{"effort": "medium"}}); err == nil {
 		t.Fatal("New should reject invalid DeepSeek effort")
 	}
-	if _, err := New(provider.Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4", Extra: map[string]any{"effort": "off"}}); err == nil {
-		t.Fatal("New should reject disabled DeepSeek thinking")
+	p, err = New(provider.Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4", Extra: map[string]any{"effort": "off"}})
+	if err != nil {
+		t.Fatalf("New should migrate retired effort=off, not reject it: %v", err)
+	}
+	if got := p.(*client).effort; got != "high" {
+		t.Fatalf("retired effort=off should fall back to high, got %q", got)
 	}
 }
 

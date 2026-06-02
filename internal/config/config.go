@@ -464,7 +464,20 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 	cfg.mergeMCPJSON(entries)
+	normalizeLegacyEffort(cfg)
 	return cfg, nil
+}
+
+// normalizeLegacyEffort migrates the retired DeepSeek effort="off" (the old
+// /thinking off that disabled thinking) to the provider default, so a config
+// written by an older version keeps loading instead of erroring on a value the
+// provider no longer accepts.
+func normalizeLegacyEffort(c *Config) {
+	for i := range c.Providers {
+		if strings.EqualFold(strings.TrimSpace(c.Providers[i].Effort), "off") {
+			c.Providers[i].Effort = ""
+		}
+	}
 }
 
 // mergeTOMLPlugins merges [[plugins]] across TOML sources by name (later source wins).
