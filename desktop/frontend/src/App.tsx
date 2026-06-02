@@ -553,7 +553,7 @@ export default function App() {
           .join(" ")}
         style={layoutStyle}
       >
-        <aside className={`sidebar${sidebarCollapsed ? " sidebar--collapsed" : ""}`} aria-label="Reasonix navigation">
+        <aside className={`sidebar${sidebarCollapsed ? " sidebar--collapsed" : ""}`} aria-label={t("sidebar.navigation")}>
           <div className="sidebar__brand">
             <img src={logo} alt="" className="sidebar__logo" />
             <span>Reasonix</span>

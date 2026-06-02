@@ -59,8 +59,11 @@ type chatTUI struct {
 	input   textarea.Model
 	spinner spinner.Model
 
-	pastedBlocks []pastedBlock
-	nextPasteID  int
+	submittedInputs      []string
+	submittedInputCursor int
+	submittedInputDraft  string
+	pastedBlocks         []pastedBlock
+	nextPasteID          int
 
 	state    tuiState
 	runStart time.Time
@@ -374,27 +377,77 @@ func newChatTUI(ctrl *control.Controller, missing string, eventCh chan event.Eve
 
 	commitBuf := []string{}
 	return chatTUI{
-		ctrl:             ctrl,
-		label:            ctrl.Label(),
-		missing:          missing,
-		input:            ti,
-		spinner:          sp,
-		nextPasteID:      1,
-		reasoningLineIdx: -1,
-		reasoningTextIdx: -1,
-		answerIdx:        -1,
-		toolStreamIdx:    -1,
-		reasoning:        &strings.Builder{},
-		pending:          &strings.Builder{},
-		pendingCommit:    &commitBuf,
-		renderer:         newMarkdownRenderer(termW),
-		eventCh:          eventCh,
-		history:          ctrl.History(),
-		host:             ctrl.Host(),
-		commands:         ctrl.Commands(),
-		skills:           ctrl.Skills(),
-		viewport:         viewport.New(viewport.WithWidth(termW)),
+		ctrl:                 ctrl,
+		label:                ctrl.Label(),
+		missing:              missing,
+		input:                ti,
+		spinner:              sp,
+		submittedInputCursor: -1,
+		nextPasteID:          1,
+		reasoningLineIdx:     -1,
+		reasoningTextIdx:     -1,
+		answerIdx:            -1,
+		toolStreamIdx:        -1,
+		reasoning:            &strings.Builder{},
+		pending:              &strings.Builder{},
+		pendingCommit:        &commitBuf,
+		renderer:             newMarkdownRenderer(termW),
+		eventCh:              eventCh,
+		history:              ctrl.History(),
+		host:                 ctrl.Host(),
+		commands:             ctrl.Commands(),
+		skills:               ctrl.Skills(),
+		viewport:             viewport.New(viewport.WithWidth(termW)),
 	}
+}
+
+func (m *chatTUI) rememberSubmittedInput(input string) {
+	if strings.TrimSpace(input) == "" {
+		return
+	}
+	if len(m.submittedInputs) == 0 || m.submittedInputs[len(m.submittedInputs)-1] != input {
+		m.submittedInputs = append(m.submittedInputs, input)
+	}
+	m.submittedInputCursor = -1
+	m.submittedInputDraft = ""
+}
+
+func (m *chatTUI) recallSubmittedInput(delta int) bool {
+	if len(m.submittedInputs) == 0 {
+		return false
+	}
+	cursor := m.submittedInputCursor
+	if cursor < 0 {
+		if delta > 0 {
+			return false
+		}
+		if m.input.Line() != 0 {
+			return false // first-line Up enters history; lower lines navigate the draft
+		}
+		m.submittedInputDraft = m.input.Value()
+		cursor = len(m.submittedInputs) - 1
+	} else {
+		cursor += delta
+	}
+
+	if cursor < 0 {
+		cursor = 0
+	}
+	if cursor >= len(m.submittedInputs) {
+		m.submittedInputCursor = -1
+		m.input.SetValue(m.submittedInputDraft)
+		m.growInputToFit()
+		return true
+	}
+	m.submittedInputCursor = cursor
+	m.input.SetValue(m.submittedInputs[cursor])
+	m.growInputToFit()
+	return true
+}
+
+func (m *chatTUI) resetSubmittedInputRecall() {
+	m.submittedInputCursor = -1
+	m.submittedInputDraft = ""
 }
 
 // prompts returns the MCP prompts discovered at startup (nil when no plugins).
@@ -638,6 +691,18 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		switch msg.String() {
+		case "up":
+			if m.state != tuiRunning && m.recallSubmittedInput(-1) {
+				return m, nil
+			}
+		case "down":
+			if m.state != tuiRunning && m.recallSubmittedInput(1) {
+				return m, nil
+			}
+		default:
+			m.resetSubmittedInputRecall()
+		}
+		switch msg.String() {
 		case "esc":
 			// "Back out" of the most specific in-progress state: un-send a just-sent
 			// turn (server not yet replied), cancel a streaming turn, turn plan mode
@@ -723,6 +788,7 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if line == "exit" || line == "quit" || line == ":q" {
 				return m, tea.Quit
 			}
+			m.rememberSubmittedInput(line)
 
 			// "#<note>" quick-adds a memory line locally, no model turn —
 			// mirroring Claude Code's "#" memory shortcut.
@@ -732,11 +798,11 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.pastedBlocks = nil
 				note := strings.TrimSpace(strings.TrimPrefix(line, "#"))
 				if note == "" {
-					m.notice("nothing to remember")
+					m.notice(i18n.M.QuickRememberEmpty)
 				} else if path, err := m.ctrl.QuickAdd(memory.ScopeProject, note); err != nil {
 					m.notice("memory: " + err.Error())
 				} else {
-					m.notice("remembered → " + path)
+					m.notice(fmt.Sprintf(i18n.M.QuickRememberDoneFmt, path))
 				}
 				return m, finalize(m, cmds)
 			}
@@ -837,7 +903,7 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.oldCtrl != nil {
 				m.oldControllers = append(m.oldControllers, msg.oldCtrl)
 			}
-			m.notice(fmt.Sprintf("switched to %s (conversation carried over; prompt cache resets)", m.label))
+			m.notice(fmt.Sprintf(i18n.M.ModelSwitchedFmt, m.label))
 			cmds = append(cmds, fetchBalance(m.ctrl))
 			// Do NOT re-issue waitForAgentEvent here — the goroutine from the
 			// last agentEventMsg handler is still blocked on the same channel.

@@ -34,6 +34,7 @@ export const en = {
   "sidebar.noRecent": "No recent chats",
   "sidebar.workspace": "Workspace",
   "sidebar.changeWorkspace": "Change",
+  "sidebar.navigation": "Reasonix navigation",
   "sidebar.collapse": "Collapse sidebar",
   "sidebar.expand": "Expand sidebar",
   "sidebar.expandBlocked": "Close the right file panel before expanding the sidebar",
@@ -148,6 +149,7 @@ export const en = {
   "composer.pastedHidePreview": "Hide pasted text preview",
   "composer.pastedExpand": "Expand",
   "composer.pastedRemove": "Remove pasted text",
+  "composer.removeImage": "Remove image",
 
   // status bar
   "status.connecting": "connecting…",
@@ -325,6 +327,11 @@ export const en = {
   // assistant message
   "msg.thinking": "thinking",
   "msg.copy": "Copy",
+  "compaction.working": "Compacting conversation…",
+  "compaction.title": "Context compacted",
+  "compaction.messages": "{n} messages",
+  "compaction.showSummary": "show summary",
+  "compaction.hideSummary": "hide summary",
   "rewind.label": "Rewind / fork / summarize…",
   "rewind.both": "Code + conversation",
   "rewind.conversation": "Conversation only",

@@ -10,6 +10,7 @@ import (
 
 	"reasonix/internal/checkpoint"
 	"reasonix/internal/control"
+	"reasonix/internal/i18n"
 )
 
 // rewindPicker is the in-chat overlay for Esc-Esc / "/rewind". Stage 0 lists the
@@ -24,16 +25,15 @@ type rewindPicker struct {
 }
 
 var rewindActions = []struct {
-	label string
 	kind  string // "scope" | "fork" | "summ-from" | "summ-upto"
 	scope control.RewindScope
 }{
-	{"Code + conversation", "scope", control.RewindBoth},
-	{"Conversation only", "scope", control.RewindConversation},
-	{"Code only", "scope", control.RewindCode},
-	{"Fork (new branch, keep code)", "fork", 0},
-	{"Summarize from here", "summ-from", 0},
-	{"Summarize up to here", "summ-upto", 0},
+	{"scope", control.RewindBoth},
+	{"scope", control.RewindConversation},
+	{"scope", control.RewindCode},
+	{"fork", 0},
+	{"summ-from", 0},
+	{"summ-upto", 0},
 }
 
 // openRewind populates the picker from the session's checkpoints, selecting the
@@ -41,7 +41,7 @@ var rewindActions = []struct {
 func (m *chatTUI) openRewind() {
 	metas := m.ctrl.Checkpoints()
 	if len(metas) == 0 {
-		m.notice("nothing to rewind yet")
+		m.notice(i18n.M.RewindNone)
 		return
 	}
 	m.rewind = &rewindPicker{metas: metas, sel: len(metas) - 1}
@@ -155,20 +155,39 @@ func (m chatTUI) renderRewind() string {
 	w := max(m.width, 10)
 	var b strings.Builder
 	if r.stage == 0 {
-		b.WriteString(accent("⟲ Rewind") + dim(" — pick a turn") + "\n")
+		b.WriteString(accent(i18n.M.RewindPickTitle) + "\n")
 		for i, meta := range r.metas {
 			b.WriteString(rowLine(i == r.sel, meta.Turn+1, "", turnLabel(meta, w), false) + "\n")
 		}
-		b.WriteString(dim("↑/↓ move · Enter choose · Esc close"))
+		b.WriteString(dim(i18n.M.RewindPickHint))
 		return choicePanelStyle.Width(w).Render(b.String())
 	}
 	meta := r.metas[r.sel]
-	b.WriteString(accent("⟲ Restore to turn ") + fmt.Sprintf("%d ", meta.Turn+1) + dim(oneLine(meta.Prompt, 48)) + "\n")
-	for i, s := range rewindActions {
-		b.WriteString(rowLine(i == r.scope, i+1, "", s.label, false) + "\n")
+	b.WriteString(accent(fmt.Sprintf(i18n.M.RewindRestoreTitleFmt, meta.Turn+1)) + dim(oneLine(meta.Prompt, 48)) + "\n")
+	for i := range rewindActions {
+		b.WriteString(rowLine(i == r.scope, i+1, "", rewindActionLabel(i), false) + "\n")
 	}
-	b.WriteString(dim("↑/↓ · Enter apply · Esc back"))
+	b.WriteString(dim(i18n.M.RewindApplyHint))
 	return choicePanelStyle.Width(w).Render(b.String())
+}
+
+func rewindActionLabel(i int) string {
+	switch i {
+	case 0:
+		return i18n.M.RewindCodeConversation
+	case 1:
+		return i18n.M.RewindConversationOnly
+	case 2:
+		return i18n.M.RewindCodeOnly
+	case 3:
+		return i18n.M.RewindFork
+	case 4:
+		return i18n.M.RewindSummarizeFrom
+	case 5:
+		return i18n.M.RewindSummarizeUpto
+	default:
+		return ""
+	}
 }
 
 func turnLabel(meta checkpoint.Meta, w int) string {
@@ -187,7 +206,7 @@ func turnLabel(meta checkpoint.Meta, w int) string {
 func oneLine(s string, n int) string {
 	s = strings.TrimSpace(strings.ReplaceAll(s, "\n", " "))
 	if s == "" {
-		return "(empty)"
+		return i18n.M.RewindEmpty
 	}
 	return ansi.Truncate(s, n, "…")
 }

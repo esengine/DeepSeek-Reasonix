@@ -35,6 +35,7 @@ export const zh: Record<DictKey, string> = {
   "sidebar.noRecent": "还没有最近会话",
   "sidebar.workspace": "工作区",
   "sidebar.changeWorkspace": "更改",
+  "sidebar.navigation": "Reasonix 导航",
   "sidebar.collapse": "收起侧边栏",
   "sidebar.expand": "展开侧边栏",
   "sidebar.expandBlocked": "关闭右侧文件面板后可展开侧边栏",
@@ -149,6 +150,7 @@ export const zh: Record<DictKey, string> = {
   "composer.pastedHidePreview": "收起粘贴文本预览",
   "composer.pastedExpand": "展开",
   "composer.pastedRemove": "删除粘贴文本",
+  "composer.removeImage": "移除图片",
 
   // 状态栏
   "status.connecting": "连接中…",
@@ -326,13 +328,18 @@ export const zh: Record<DictKey, string> = {
   // 助手消息
   "msg.thinking": "思考过程",
   "msg.copy": "复制",
+  "compaction.working": "正在压缩对话…",
+  "compaction.title": "上下文已压缩",
+  "compaction.messages": "{n} 条消息",
+  "compaction.showSummary": "展开摘要",
+  "compaction.hideSummary": "收起摘要",
   "rewind.label": "回滚 / 分叉 / 摘要…",
   "rewind.both": "代码 + 对话",
   "rewind.conversation": "仅对话",
   "rewind.code": "仅代码",
-  "rewind.fork": "分叉(新分支)",
-  "rewind.summFrom": "从这里起摘要",
-  "rewind.summUpto": "摘要到这里",
+  "rewind.fork": "从这里分叉",
+  "rewind.summFrom": "总结后续内容",
+  "rewind.summUpto": "总结到这里",
   "msg.copied": "已复制",
 
   // 工具卡片摘要

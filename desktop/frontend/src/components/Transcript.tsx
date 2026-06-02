@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Item } from "../lib/useController";
+import { useT } from "../lib/i18n";
 import { AssistantMessage, UserMessage } from "./Message";
 import { ToolCard } from "./ToolCard";
 import { Welcome } from "./Welcome";
@@ -199,11 +200,12 @@ type CompactionItem = Extract<Item, { kind: "compaction" }>;
 // message count and trigger with the summary collapsed behind a toggle (the
 // summary is the new context base, so it's available but doesn't flood the view).
 function CompactionCard({ item }: { item: CompactionItem }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   if (item.pending) {
     return (
       <div className="compaction compaction--pending">
-        <span className="compaction__spinner">⋯</span> Compacting conversation…
+        <span className="compaction__spinner">⋯</span> {t("compaction.working")}
       </div>
     );
   }
@@ -211,11 +213,11 @@ function CompactionCard({ item }: { item: CompactionItem }) {
     <div className="compaction">
       <button className="compaction__head" onClick={() => setOpen((v) => !v)}>
         <span className="compaction__icon">◆</span>
-        <span className="compaction__title">Context compacted</span>
+        <span className="compaction__title">{t("compaction.title")}</span>
         <span className="compaction__meta">
-          {item.messages} messages · {item.trigger}
+          {t("compaction.messages", { n: item.messages })} · {item.trigger}
         </span>
-        <span className="compaction__toggle">{open ? "hide summary" : "show summary"}</span>
+        <span className="compaction__toggle">{open ? t("compaction.hideSummary") : t("compaction.showSummary")}</span>
       </button>
       {open && <pre className="compaction__summary">{item.summary}</pre>}
     </div>

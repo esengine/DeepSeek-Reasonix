@@ -260,6 +260,40 @@ func TestThinkingCommandRejectsNonDeepSeekProvider(t *testing.T) {
 	}
 }
 
+func TestSubmittedInputRecallWithArrowKeys(t *testing.T) {
+	m := newTestChatTUI()
+	m.rememberSubmittedInput("first")
+	m.rememberSubmittedInput("second")
+	m.input.SetValue("draft")
+
+	up := tea.KeyPressMsg{Code: tea.KeyUp}
+	down := tea.KeyPressMsg{Code: tea.KeyDown}
+
+	model, _ := m.Update(up)
+	m = model.(chatTUI)
+	if got := m.input.Value(); got != "second" {
+		t.Fatalf("first up should recall latest input, got %q", got)
+	}
+
+	model, _ = m.Update(up)
+	m = model.(chatTUI)
+	if got := m.input.Value(); got != "first" {
+		t.Fatalf("second up should recall older input, got %q", got)
+	}
+
+	model, _ = m.Update(down)
+	m = model.(chatTUI)
+	if got := m.input.Value(); got != "second" {
+		t.Fatalf("down should move toward newer input, got %q", got)
+	}
+
+	model, _ = m.Update(down)
+	m = model.(chatTUI)
+	if got := m.input.Value(); got != "draft" {
+		t.Fatalf("down past newest should restore draft, got %q", got)
+	}
+}
+
 // TestViewAltScreenFillsHeight proves the switch to alt-screen: View requests
 // the alt buffer + mouse, and the frame is exactly the terminal height (the
 // transcript viewport pads to fill above the pinned bottom region).
