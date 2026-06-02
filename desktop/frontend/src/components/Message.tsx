@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { Markdown } from "./Markdown";
 import { CopyButton } from "./CopyButton";
@@ -49,7 +49,10 @@ export function UserMessage({
   );
 }
 
-export function AssistantMessage({ item }: { item: AssistantItem }) {
+// memo: an unchanged message keeps a stable `item` ref across a streaming turn's
+// per-token re-renders, so only the live bubble re-parses markdown, not the whole
+// backlog.
+export const AssistantMessage = memo(function AssistantMessage({ item }: { item: AssistantItem }) {
   const t = useT();
   const [open, setOpen] = useState(false);
   return (
@@ -86,4 +89,4 @@ export function AssistantMessage({ item }: { item: AssistantItem }) {
       )}
     </div>
   );
-}
+});

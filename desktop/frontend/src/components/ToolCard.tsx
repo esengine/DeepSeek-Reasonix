@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import {
   Ban,
   Check,
@@ -54,7 +54,7 @@ function StatusGlyph({ status }: { status: ToolItem["status"] }) {
 // ToolCard renders one tool call. `subcalls` are sub-agent calls nested under a
 // `task` card (their ParentID points at this call); they render inline, live, so
 // the sub-agent's work is visible as it happens.
-export function ToolCard({ item, subcalls }: { item: ToolItem; subcalls?: ToolItem[] }) {
+export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolItem; subcalls?: ToolItem[] }) {
   const t = useT();
   const diffs = diffsFor(item.name, item.args);
   const subject = subjectOf(item.name, item.args);
@@ -134,4 +134,4 @@ export function ToolCard({ item, subcalls }: { item: ToolItem; subcalls?: ToolIt
       {item.error && <div className="tool__err">{item.error}</div>}
     </div>
   );
-}
+});
