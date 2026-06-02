@@ -1,6 +1,7 @@
 package builtin
 
 import (
+	"bufio"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,28 +9,31 @@ import (
 	ignore "github.com/sabhiram/go-gitignore"
 )
 
-// ignoreLayer is one .gitignore's rules plus the directory they govern; a path is
-// tested relative to dir. Layers run repo-root-first, and the deepest layer with a
-// verdict wins, so a nested "!keep" can re-include what a parent ignored.
-type ignoreLayer struct {
-	dir string
-	gi  *ignore.GitIgnore
+// ignoreFrame is the cumulative ignore state at a directory: every applicable
+// .gitignore pattern from the repo root down to dir, re-anchored relative to the
+// repo root and compiled into one matcher. Combining them into a single matcher
+// is what lets a nested "!keep" re-include a file an ancestor ignored —
+// go-gitignore applies last-match-wins across the whole ordered list.
+type ignoreFrame struct {
+	dir      string
+	patterns []string
+	gi       *ignore.GitIgnore
 }
 
 // walkIgnorer prunes a recursive grep walk to mirror ripgrep: it skips hidden
-// entries, the fixed vendorDirs, and anything matched by the repository's nested
-// .gitignore rules (root + every ancestor + per-directory, plus .git/info/exclude
-// and the global core.excludesFile). The walk root is never pruned, and pointing
-// grep straight at a hidden or ignored path searches it in full — ripgrep honors
-// an explicitly named path even when it would otherwise be ignored.
+// entries, the fixed vendorDirs, and anything matched by the repository's ignore
+// rules — every applicable .gitignore (root + ancestors + per-directory), plus
+// .git/info/exclude and the global core.excludesFile. The walk root is never
+// pruned, and pointing grep straight at a hidden or ignored path searches it in
+// full, matching ripgrep's handling of explicitly named paths.
 //
-// It is stateful across one WalkDir: enter pushes a directory's .gitignore before
-// its children are visited, and skip pops layers once the walk leaves them.
+// Stateful across one WalkDir: enter pushes a directory's cumulative frame before
+// its children are visited; skip pops frames once the walk leaves them.
 type walkIgnorer struct {
 	root     string
-	disabled bool          // explicit hidden/ignored root → search everything under it
-	base     []ignoreLayer // repo-root .. walk-root, always active
-	stack    []ignoreLayer // per-directory layers below the walk root
+	repoRoot string
+	disabled bool
+	frames   []ignoreFrame // shallow→deep; the deepest is the active matcher
 }
 
 func newWalkIgnorer(root string) *walkIgnorer {
@@ -38,23 +42,19 @@ func newWalkIgnorer(root string) *walkIgnorer {
 	if rr == "" {
 		return ig
 	}
+	ig.repoRoot = rr
 
-	// Repo-root layer: global excludes + .git/info/exclude + root .gitignore.
 	var rootLines []string
 	if gx := globalExcludesFile(); gx != "" {
-		rootLines = append(rootLines, readIgnoreLines(gx)...)
+		rootLines = append(rootLines, reanchorLines(readIgnoreLines(gx), "")...)
 	}
-	rootLines = append(rootLines, readIgnoreLines(filepath.Join(rr, ".git", "info", "exclude"))...)
-	rootLines = append(rootLines, readIgnoreLines(filepath.Join(rr, ".gitignore"))...)
-	if len(rootLines) > 0 {
-		ig.base = append(ig.base, ignoreLayer{dir: rr, gi: ignore.CompileIgnoreLines(rootLines...)})
-	}
-	// .gitignore in every directory from just below the repo root down to the walk
-	// root, so a search rooted in a subdirectory still honors its ancestors.
+	rootLines = append(rootLines, reanchorLines(readIgnoreLines(filepath.Join(rr, ".git", "info", "exclude")), "")...)
+	rootLines = append(rootLines, reanchorLines(readIgnoreLines(filepath.Join(rr, ".gitignore")), "")...)
+	ig.push(rr, nil, rootLines)
+
 	for _, dir := range ancestorsBetween(rr, ig.root) {
-		if lines := readIgnoreLines(filepath.Join(dir, ".gitignore")); len(lines) > 0 {
-			ig.base = append(ig.base, ignoreLayer{dir: dir, gi: ignore.CompileIgnoreLines(lines...)})
-		}
+		lines := reanchorLines(readIgnoreLines(filepath.Join(dir, ".gitignore")), relSlash(rr, dir))
+		ig.push(dir, ig.topPatterns(), lines)
 	}
 
 	if isHiddenName(filepath.Base(ig.root)) || ig.ignored(ig.root, true) {
@@ -63,28 +63,27 @@ func newWalkIgnorer(root string) *walkIgnorer {
 	return ig
 }
 
-// enter loads a kept directory's own .gitignore as a layer governing its
-// children. Called after skip clears the directory, before the walk descends.
+// enter loads a kept directory's own .gitignore as a cumulative frame governing
+// its children. Called after skip clears the directory, before the walk descends.
 func (ig *walkIgnorer) enter(path string) {
 	if ig.disabled {
 		return
 	}
 	abs := absClean(path)
 	if abs == ig.root {
-		return // the root's layers are already in base
+		return // the root's frames are already in place
 	}
-	if lines := readIgnoreLines(filepath.Join(abs, ".gitignore")); len(lines) > 0 {
-		ig.stack = append(ig.stack, ignoreLayer{dir: abs, gi: ignore.CompileIgnoreLines(lines...)})
-	}
+	lines := reanchorLines(readIgnoreLines(filepath.Join(abs, ".gitignore")), relSlash(ig.repoRoot, abs))
+	ig.push(abs, ig.topPatterns(), lines)
 }
 
-// skip reports whether a walked entry should be pruned, popping any nested layers
-// the walk has moved past. The root is never pruned; hidden entries and vendorDirs
-// always are; everything else is pruned when the .gitignore layers ignore it.
+// skip reports whether a walked entry should be pruned, popping frames the walk
+// has moved past. The root is never pruned; hidden entries and vendorDirs always
+// are; everything else is pruned when the active matcher ignores it.
 func (ig *walkIgnorer) skip(path, name string, isDir bool) bool {
 	abs := absClean(path)
-	for len(ig.stack) > 0 && !underDir(ig.stack[len(ig.stack)-1].dir, abs) {
-		ig.stack = ig.stack[:len(ig.stack)-1]
+	for len(ig.frames) > 1 && !underDir(ig.frames[len(ig.frames)-1].dir, abs) {
+		ig.frames = ig.frames[:len(ig.frames)-1]
 	}
 	if abs == ig.root || ig.disabled {
 		return false
@@ -98,32 +97,83 @@ func (ig *walkIgnorer) skip(path, name string, isDir bool) bool {
 	return ig.ignored(abs, isDir)
 }
 
-// ignored evaluates the .gitignore layers root-first; the deepest layer holding a
-// matching pattern decides. Each layer is matched independently, so a nested
-// negation that re-includes a file an ancestor ignored (root "*.log" +
-// subdir "!keep.log") is not honored — a rare case that would need all patterns
-// re-anchored into one ordered matcher.
 func (ig *walkIgnorer) ignored(abs string, isDir bool) bool {
-	ignored := false
-	eval := func(layers []ignoreLayer) {
-		for _, m := range layers {
-			rel, err := filepath.Rel(m.dir, abs)
-			if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
-				continue
-			}
-			slash := filepath.ToSlash(rel)
-			if _, pat := m.gi.MatchesPathHow(slash); pat != nil {
-				ignored = !pat.Negate
-			} else if isDir {
-				if _, pat := m.gi.MatchesPathHow(slash + "/"); pat != nil {
-					ignored = !pat.Negate
-				}
-			}
-		}
+	if len(ig.frames) == 0 {
+		return false
 	}
-	eval(ig.base)
-	eval(ig.stack)
-	return ignored
+	f := ig.frames[len(ig.frames)-1]
+	if f.gi == nil {
+		return false
+	}
+	rel := relSlash(ig.repoRoot, abs)
+	if rel == "" || rel == "." || strings.HasPrefix(rel, "..") {
+		return false
+	}
+	if isDir && f.gi.MatchesPath(rel+"/") {
+		return true
+	}
+	return f.gi.MatchesPath(rel)
+}
+
+func (ig *walkIgnorer) topPatterns() []string {
+	if len(ig.frames) == 0 {
+		return nil
+	}
+	return ig.frames[len(ig.frames)-1].patterns
+}
+
+// push records a frame combining parent patterns with this dir's new ones. A
+// frame is added only when it contributes rules (keeping the stack sparse), but
+// the repo-root frame is always recorded so it anchors the bottom of the stack.
+func (ig *walkIgnorer) push(dir string, parent, add []string) {
+	if len(add) == 0 && dir != ig.repoRoot {
+		return
+	}
+	pat := append(append([]string{}, parent...), add...)
+	var gi *ignore.GitIgnore
+	if len(pat) > 0 {
+		gi = ignore.CompileIgnoreLines(pat...)
+	}
+	ig.frames = append(ig.frames, ignoreFrame{dir: dir, patterns: pat, gi: gi})
+}
+
+// reanchorLines drops comments/blanks and re-anchors each pattern from a
+// .gitignore in relDir (relative to the repo root, "" for the root) so every
+// pattern is expressed relative to the repo root and can share one matcher.
+func reanchorLines(lines []string, relDir string) []string {
+	var out []string
+	for _, raw := range lines {
+		line := strings.TrimRight(raw, " \t\r")
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		out = append(out, reanchorPattern(line, relDir))
+	}
+	return out
+}
+
+// reanchorPattern rewrites one .gitignore pattern from relDir to be relative to
+// the repo root: an anchored pattern (leading or embedded "/") becomes
+// "/relDir/pat"; an unanchored one (matches at any depth) becomes
+// "/relDir/**/pat". Root patterns (relDir "") keep git's native semantics.
+func reanchorPattern(line, relDir string) string {
+	neg := ""
+	if strings.HasPrefix(line, "!") {
+		neg = "!"
+		line = line[1:]
+	}
+	if strings.HasPrefix(line, `\`) { // escaped leading '#' or '!'
+		line = line[1:]
+	}
+	if relDir == "" || relDir == "." {
+		return neg + line
+	}
+	anchored := strings.HasPrefix(line, "/") || strings.Contains(strings.TrimSuffix(line, "/"), "/")
+	line = strings.TrimPrefix(line, "/")
+	if anchored {
+		return neg + "/" + relDir + "/" + line
+	}
+	return neg + "/" + relDir + "/**/" + line
 }
 
 func isHiddenName(name string) bool {
@@ -142,31 +192,20 @@ func absClean(p string) string {
 	return filepath.Clean(p)
 }
 
+func relSlash(base, target string) string {
+	rel, err := filepath.Rel(base, target)
+	if err != nil {
+		return ""
+	}
+	return filepath.ToSlash(rel)
+}
+
 func readIgnoreLines(path string) []string {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return nil
 	}
 	return strings.Split(string(b), "\n")
-}
-
-// globalExcludesFile returns git's default global ignore path when it exists
-// ($XDG_CONFIG_HOME/git/ignore, else ~/.config/git/ignore). A core.excludesFile
-// pointed elsewhere in git config is not consulted.
-func globalExcludesFile() string {
-	base := os.Getenv("XDG_CONFIG_HOME")
-	if base == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return ""
-		}
-		base = filepath.Join(home, ".config")
-	}
-	p := filepath.Join(base, "git", "ignore")
-	if _, err := os.Stat(p); err == nil {
-		return p
-	}
-	return ""
 }
 
 // ancestorsBetween returns the directories in (repoRoot, root], shallow-first.
@@ -202,4 +241,97 @@ func findRepoRoot(start string) string {
 		}
 		abs = parent
 	}
+}
+
+// globalExcludesFile returns git's effective global ignore file: core.excludesFile
+// from the user/global git config when set and present, else git's default
+// ($XDG_CONFIG_HOME/git/ignore, then ~/.config/git/ignore). "" when none exists.
+func globalExcludesFile() string {
+	if p := gitConfigExcludesFile(); p != "" && statFile(p) {
+		return p
+	}
+	base := os.Getenv("XDG_CONFIG_HOME")
+	if base == "" {
+		if home, err := os.UserHomeDir(); err == nil {
+			base = filepath.Join(home, ".config")
+		}
+	}
+	if base != "" {
+		if p := filepath.Join(base, "git", "ignore"); statFile(p) {
+			return p
+		}
+	}
+	return ""
+}
+
+// gitConfigExcludesFile reads core.excludesFile from the global git config files
+// directly (no git binary needed). Include directives are not followed.
+func gitConfigExcludesFile() string {
+	for _, cfg := range gitConfigPaths() {
+		if p := scanGitConfigExcludes(cfg); p != "" {
+			return expandHome(p)
+		}
+	}
+	return ""
+}
+
+func gitConfigPaths() []string {
+	if p := os.Getenv("GIT_CONFIG_GLOBAL"); p != "" {
+		return []string{p}
+	}
+	home, _ := os.UserHomeDir()
+	base := os.Getenv("XDG_CONFIG_HOME")
+	if base == "" && home != "" {
+		base = filepath.Join(home, ".config")
+	}
+	var paths []string
+	if base != "" {
+		paths = append(paths, filepath.Join(base, "git", "config"))
+	}
+	if home != "" {
+		paths = append(paths, filepath.Join(home, ".gitconfig"))
+	}
+	return paths
+}
+
+func scanGitConfigExcludes(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	inCore := false
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
+			continue
+		}
+		if strings.HasPrefix(line, "[") {
+			sec := strings.ToLower(strings.Trim(line, "[]"))
+			inCore = strings.TrimSpace(strings.SplitN(sec, " ", 2)[0]) == "core"
+			continue
+		}
+		if !inCore {
+			continue
+		}
+		if k, v, ok := strings.Cut(line, "="); ok && strings.EqualFold(strings.TrimSpace(k), "excludesfile") {
+			return strings.Trim(strings.TrimSpace(v), `"`)
+		}
+	}
+	return ""
+}
+
+func expandHome(p string) string {
+	if p == "~" || strings.HasPrefix(p, "~/") || strings.HasPrefix(p, `~\`) {
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, strings.TrimLeft(p[1:], `/\`))
+		}
+	}
+	return p
+}
+
+func statFile(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
 }

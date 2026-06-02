@@ -47,7 +47,19 @@ func TestGrepNestedGitignore(t *testing.T) {
 }
 
 func TestGrepNestedNegationReincludes(t *testing.T) {
-	t.Skip("known gap: a nested !negation re-including an ancestor-ignored file is not yet honored (see walkIgnorer.ignored)")
+	dir := mkRepo(t)
+	writeFileT(t, filepath.Join(dir, ".gitignore"), "*.log\n")
+	writeFileT(t, filepath.Join(dir, "pkg", ".gitignore"), "!keep.log\n")
+	writeFileT(t, filepath.Join(dir, "pkg", "keep.log"), "NEEDLE\n") // re-included by nested negation
+	writeFileT(t, filepath.Join(dir, "pkg", "drop.log"), "NEEDLE\n") // still ignored by root
+
+	out := runTool(t, grepTool{}, map[string]any{"pattern": "NEEDLE", "path": dir})
+	if !strings.Contains(out, "keep.log") {
+		t.Fatalf("a nested !negation must re-include: %q", out)
+	}
+	if strings.Contains(out, "drop.log") {
+		t.Fatalf("a non-negated .log must stay ignored: %q", out)
+	}
 }
 
 func TestGrepSkipsHidden(t *testing.T) {
