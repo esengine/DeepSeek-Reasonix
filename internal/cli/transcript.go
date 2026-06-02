@@ -22,10 +22,20 @@ func wrapTranscript(s string, width int) string {
 	return lipgloss.NewStyle().Width(width).Render(s)
 }
 
-// copyToClipboard writes text to the system clipboard off the event loop.
+// clipboardWriteAll is the clipboard writer used by copyToClipboard. Tests
+// may replace it to simulate a platform-tool failure (tmux / SSH scenario).
+var clipboardWriteAll = clipboard.WriteAll
+
+// copyToClipboard writes text to the system clipboard. It first tries the
+// platform clipboard tool (xclip, xsel, wl-copy, pbcopy, …) via atotto; when
+// that fails — typically inside tmux or over SSH where the display server is
+// unreachable — it falls back to an OSC 52 escape sequence that tmux and most
+// modern terminals forward to the host clipboard.
 func copyToClipboard(text string) tea.Cmd {
 	return func() tea.Msg {
-		_ = clipboard.WriteAll(text)
+		if err := clipboardWriteAll(text); err != nil {
+			return tea.Printf("%s", ansi.SetSystemClipboard(text))
+		}
 		return nil
 	}
 }

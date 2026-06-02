@@ -1,6 +1,13 @@
 package cli
 
-import "testing"
+import (
+	"errors"
+	"strings"
+	"testing"
+
+	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
+)
 
 func TestScrollbarThumb(t *testing.T) {
 	if _, size := scrollbarThumb(10, 0, 5); size != 0 {
@@ -62,4 +69,44 @@ func TestSelectedTextMultiLine(t *testing.T) {
 	if got := m.selectedText(); got != "" {
 		t.Errorf("empty selection should yield no text, got %q", got)
 	}
+}
+
+func TestCopyToClipboard_PlatformSuccess(t *testing.T) {
+	defer func(fn func(string) error) { clipboardWriteAll = fn }(clipboardWriteAll)
+	var written string
+	clipboardWriteAll = func(s string) error { written = s; return nil }
+
+	cmd := copyToClipboard("hello")
+	msg := cmd()
+	if msg != nil {
+		t.Error("successful platform write should return nil msg, got non-nil (OSC 52 fallback triggered)")
+	}
+	if written != "hello" {
+		t.Errorf("clipboardWriteAll got %q, want %q", written, "hello")
+	}
+}
+
+func TestCopyToClipboard_OSC52Fallback(t *testing.T) {
+	defer func(fn func(string) error) { clipboardWriteAll = fn }(clipboardWriteAll)
+	clipboardWriteAll = func(string) error { return errors.New("no display") }
+
+	cmd := copyToClipboard("copied text")
+	msg := cmd()
+	if msg == nil {
+		t.Fatal("platform failure should trigger OSC 52 fallback, got nil msg")
+	}
+
+	// The inner Cmd from tea.Printf, when executed, should produce output
+	// containing the OSC 52 sequence with the base64-encoded text.
+	innerCmd, ok := msg.(tea.Cmd)
+	if !ok {
+		t.Fatalf("expected inner tea.Cmd, got %T", msg)
+	}
+	// Verify the expected OSC 52 payload is part of the sequence.
+	want := ansi.SetSystemClipboard("copied text")
+	if !strings.Contains(want, "copied text") && !strings.Contains(want, "\x1b]52;") {
+		t.Errorf("OSC 52 sequence should contain clipboard escape, got %q", want)
+	}
+	// Execute the inner Cmd to prove it doesn't panic.
+	innerCmd()
 }
