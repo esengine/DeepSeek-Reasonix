@@ -1,6 +1,7 @@
 package builtin
 
 import (
+	"os"
 	"path/filepath"
 
 	"reasonix/internal/sandbox"
@@ -80,7 +81,7 @@ func resolveIn(workDir, p string) string {
 	if p == "" || p == "." {
 		return workDir
 	}
-	if filepath.IsAbs(p) {
+	if filepath.IsAbs(p) || (len(p) > 0 && os.IsPathSeparator(p[0])) {
 		return p
 	}
 	return filepath.Join(workDir, p)

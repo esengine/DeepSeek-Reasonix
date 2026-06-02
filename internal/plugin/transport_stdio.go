@@ -65,6 +65,7 @@ func newStdioTransport(ctx context.Context, s Spec) (*stdioTransport, error) {
 	if s.Stderr != nil {
 		cmd.Stderr = io.MultiWriter(stderr, s.Stderr)
 	}
+	setPlatformAttrs(cmd) // hide child console window on Windows
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {

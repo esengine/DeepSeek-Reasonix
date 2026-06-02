@@ -67,6 +67,8 @@ type App struct {
 	saveMu    sync.Mutex
 	saving    bool
 	saveAgain bool
+
+	tray *trayMgr // system-tray icon; nil when silent-start is off
 }
 
 // NewApp constructs the bound object. The controller is built later, in startup,
@@ -107,6 +109,17 @@ func (a *App) buildController() {
 	// folder (the remembered one, else home) before anything reads/writes config,
 	// .env, memory, or skills relative to cwd.
 	ensureWorkspace()
+
+	// Start the system-tray icon when silent-start is enabled. This must happen
+	// after the Wails context is available (for runtime.WindowShow) but before
+	// the controller is built (so the tray is live before any frontend code runs).
+	ds := getDesktopSettings()
+	if ds.SilentStart {
+		t := newTrayMgr(ctx)
+		if err := t.start(); err == nil {
+			a.tray = t
+		}
+	}
 
 	// Resolve the active model to its canonical "provider/model" ref up front so
 	// the switcher can mark it current.
@@ -156,8 +169,13 @@ func (a *App) buildController() {
 	runtime.EventsEmit(ctx, "agent:ready")
 }
 
-// shutdown snapshots the conversation and stops plugin subprocesses on close.
+// shutdown snapshots the conversation, stops plugin subprocesses, and cleans
+// up the system-tray icon on close.
 func (a *App) shutdown(context.Context) {
+	if a.tray != nil {
+		a.tray.stop()
+		a.tray = nil
+	}
 	a.mu.RLock()
 	ctrl := a.ctrl
 	a.mu.RUnlock()
@@ -2378,6 +2396,45 @@ func (a *App) ConnectKey(apiKey string) error {
 		a.mu.Unlock()
 	}
 	return nil
+}
+
+// --- desktop settings: auto-start, silent-start ---
+
+// SetAutoStart enables or disables launching on user login. Persisted across
+// sessions in the desktop-level settings file (not project-scoped config).
+func (a *App) SetAutoStart(enabled bool) error {
+	s := getDesktopSettings()
+	s.AutoStart = enabled
+	return setDesktopSettings(s)
+}
+
+// AutoStart reports whether auto-start on login is enabled.
+func (a *App) AutoStart() bool {
+	return getDesktopSettings().AutoStart
+}
+
+// SetSilentStart enables or disables starting the window hidden with a
+// system-tray icon. When disabling, the tray icon is removed immediately;
+// when enabling, the change applies after the next launch.
+func (a *App) SetSilentStart(enabled bool) error {
+	s := getDesktopSettings()
+	s.SilentStart = enabled
+	if err := setDesktopSettings(s); err != nil {
+		return err
+	}
+	// When turning silent-start off at runtime, destroy the tray icon so it
+	// doesn't linger. There's no good way to add it at runtime (the message
+	// loop needs a locked OS thread), so turning it on still needs a restart.
+	if !enabled && a.tray != nil {
+		a.tray.stop()
+		a.tray = nil
+	}
+	return nil
+}
+
+// SilentStart reports whether silent (hidden-window) start is enabled.
+func (a *App) SilentStart() bool {
+	return getDesktopSettings().SilentStart
 }
 
 // eventSink is the controller's event.Sink in desktop mode: it forwards every

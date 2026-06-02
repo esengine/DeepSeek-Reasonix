@@ -456,6 +456,14 @@ export const zh: Record<DictKey, string> = {
   "tool.emptyFile": "空文件",
   "tool.noOutput": "无输出",
 
+  // startup & behaviour
+  "startup.title": "启动与行为",
+  "startup.autoStart": "开机自启",
+  "startup.autoStartHint": "登录时自动启动 Reasonix。",
+  "startup.silentStart": "静默启动",
+  "startup.silentStartHint": "启动时隐藏窗口，带托盘图标。点击托盘图标打开窗口。",
+  "startup.silentRestartNote": "开启后需重启生效。",
+
   // 软件更新
   "updater.title": "软件更新",
   "updater.currentVersion": "当前版本：{v}",

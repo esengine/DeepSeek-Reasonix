@@ -455,6 +455,14 @@ export const en = {
   "tool.emptyFile": "empty file",
   "tool.noOutput": "no output",
 
+  // startup & behaviour
+  "startup.title": "Startup & behaviour",
+  "startup.autoStart": "Launch on login",
+  "startup.autoStartHint": "Auto-start Reasonix when you log in.",
+  "startup.silentStart": "Silent start",
+  "startup.silentStartHint": "Start the window hidden with a tray icon. Click the tray icon to open it.",
+  "startup.silentRestartNote": "Turning on takes effect after restart.",
+
   // software update
   "updater.title": "Software update",
   "updater.currentVersion": "Current version: {v}",

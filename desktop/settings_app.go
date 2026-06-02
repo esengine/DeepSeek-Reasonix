@@ -84,6 +84,9 @@ type SettingsView struct {
 	// Bypass is the live YOLO state (runtime-only, not from config), so the panel's
 	// toggle reflects whether approvals are currently being skipped this session.
 	Bypass bool `json:"bypass"`
+	// Desktop-level settings (persisted outside project-scoped config).
+	AutoStart   bool `json:"autoStart"`
+	SilentStart bool `json:"silentStart"`
 }
 
 func nonNil(s []string) []string {
@@ -103,10 +106,13 @@ func (a *App) Settings() SettingsView {
 	if bash == "" {
 		bash = "enforce"
 	}
+	ds := getDesktopSettings()
 	v := SettingsView{
 		DefaultModel: cfg.DefaultModel,
 		PlannerModel: cfg.Agent.PlannerModel,
 		Providers:    []ProviderView{},
+		AutoStart:    ds.AutoStart,
+		SilentStart:  ds.SilentStart,
 		Permissions: PermissionsView{
 			Mode:  orDefault(cfg.Permissions.Mode, "ask"),
 			Allow: nonNil(cfg.Permissions.Allow),

@@ -17,9 +17,9 @@ import type { NetworkView, ProviderView, SettingsView } from "../lib/types";
 import { ResizableDrawer } from "./ResizableDrawer";
 import { Tooltip } from "./Tooltip";
 
-type SettingsTab = "models" | "providers" | "network" | "permissions" | "sandbox" | "agent" | "appearance" | "updates";
+type SettingsTab = "models" | "providers" | "network" | "permissions" | "sandbox" | "agent" | "appearance" | "startup" | "updates";
 
-const SETTINGS_TABS: SettingsTab[] = ["models", "providers", "network", "permissions", "sandbox", "agent", "appearance", "updates"];
+const SETTINGS_TABS: SettingsTab[] = ["models", "providers", "network", "permissions", "sandbox", "agent", "appearance", "startup", "updates"];
 
 // SettingsPanel is the desktop settings surface, aligning with Claude Code's
 // settings: model & providers (incl. API keys), permissions, sandbox, agent
@@ -109,6 +109,7 @@ export function SettingsPanel({ onClose, onChanged }: { onClose: () => void; onC
                     }}
                   />
                 )}
+                {tab === "startup" && <StartupSection s={s} busy={busy} apply={apply} />}
                 {tab === "updates" && <UpdatesSection configPath={s.configPath} />}
               </main>
             </div>
@@ -142,10 +143,13 @@ function settingsTabLabel(id: SettingsTab, t: ReturnType<typeof useT>): string {
       return t("settings.tab.appearance");
     case "updates":
       return t("settings.tab.updates");
+    case "startup":
+      return t("startup.title");
   }
 }
 
-function settingsTabMeta(id: SettingsTab, s: SettingsView, t: ReturnType<typeof useT>): string {
+function settingsTabMeta(id: SettingsTab, s: SettingsView, t: ReturnType<typeof useT>): 
+string {
   switch (id) {
     case "models":
       return toRef(s.defaultModel, s) || t("common.none");
@@ -163,6 +167,8 @@ function settingsTabMeta(id: SettingsTab, s: SettingsView, t: ReturnType<typeof 
       return t("settings.appearanceMeta");
     case "updates":
       return t("settings.updatesMeta");
+    case "startup":
+      return s.autoStart ? t("startup.autoStart") : t("common.none");
   }
 }
 
@@ -823,6 +829,39 @@ function themeName(theme: Theme, t: ReturnType<typeof useT>): string {
     case "dark":
       return t("settings.themeDark");
   }
+}
+
+function StartupSection({ s, busy, apply }: SectionProps) {
+  const t = useT();
+  return (
+    <section className="mem-section">
+      <div className="mem-section__title">{t("startup.title")}</div>
+
+      <label className="set-check">
+        <input
+          type="checkbox"
+          checked={s.autoStart}
+          disabled={busy}
+          onChange={(e) => void apply(() => app.SetAutoStart(e.target.checked))}
+        />
+        {t("startup.autoStart")}
+        <div className="mem-hint">{t("startup.autoStartHint")}</div>
+      </label>
+
+      <label className="set-check">
+        <input
+          type="checkbox"
+          checked={s.silentStart}
+          disabled={busy}
+          onChange={(e) => void apply(() => app.SetSilentStart(e.target.checked))}
+        />
+        {t("startup.silentStart")}
+        <div className="mem-hint">{t("startup.silentStartHint")}</div>
+      </label>
+
+      <div className="mem-hint">{t("startup.silentRestartNote")}</div>
+    </section>
+  );
 }
 
 const MB = 1024 * 1024;
