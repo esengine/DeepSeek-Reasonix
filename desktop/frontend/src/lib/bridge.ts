@@ -87,6 +87,7 @@ export interface AppBindings {
   OpenWorkspacePath(rel: string): Promise<void>;
   RevealWorkspacePath(rel: string): Promise<void>;
   SavePastedImage(dataUrl: string): Promise<string>;
+  SavePastedFile(name: string, dataUrl: string): Promise<string>;
   AttachmentDataURL(path: string): Promise<string>;
   Models(): Promise<ModelInfo[]>;
   SetModel(name: string): Promise<void>;
@@ -524,6 +525,9 @@ function makeMockApp(): AppBindings {
     },
     async SavePastedImage(_dataUrl: string) {
       return ".reasonix/attachments/mock.png";
+    },
+    async SavePastedFile(name: string, _dataUrl: string) {
+      return `.reasonix/attachments/mock-${name}`;
     },
     async AttachmentDataURL(_path: string) {
       return "data:image/png;base64,iVBORw0KGgo=";

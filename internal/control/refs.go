@@ -97,6 +97,21 @@ func (c *Controller) HasRefs(line string) bool {
 	return len(c.detectRefs(line)) > 0
 }
 
+// FileRefLine reports whether a submitted line is nothing but a path to an
+// existing file — a dragged or pasted file lands as its bare path, which on
+// POSIX starts with '/' and would otherwise be misread as a slash command. The
+// returned string is that path turned into an @reference so it attaches.
+func FileRefLine(line string) (string, bool) {
+	p := strings.Trim(strings.TrimSpace(line), `"'`)
+	if p == "" {
+		return "", false
+	}
+	if info, err := os.Stat(p); err != nil || info.IsDir() {
+		return "", false
+	}
+	return "@" + p, true
+}
+
 // ResolveRefs resolves the @references in a line into a single tagged context
 // block (file/dir contents, MCP resource bodies), plus per-reference error
 // strings for any that failed. An empty block means no references resolved.

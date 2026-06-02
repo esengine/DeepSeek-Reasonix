@@ -457,6 +457,10 @@ func (c *Controller) Submit(input string) {
 			return c.runTurnWithRaw(ctx, sent, sent)
 		})
 	case strings.HasPrefix(trimmed, "/"):
+		if ref, ok := FileRefLine(trimmed); ok {
+			c.runRefTurn(ref)
+			return
+		}
 		// Read-only management verbs (/model /memory /skill /hooks /mcp) emit a
 		// listing Notice, so Submit-based frontends (desktop, HTTP) get them with
 		// no extra wiring. (The chat TUI handles these itself with richer output.)
@@ -505,18 +509,24 @@ func (c *Controller) Submit(input string) {
 		}
 		c.notice("unknown command: " + trimmed)
 	default:
-		c.runGuarded(func(ctx context.Context) error {
-			block, errs := c.ResolveRefs(ctx, input)
-			for _, e := range errs {
-				c.notice(e)
-			}
-			sent := input
-			if block != "" {
-				sent = "Referenced context:\n\n" + block + "\n\n" + input
-			}
-			return c.runTurnWithRaw(ctx, sent, input)
-		})
+		c.runRefTurn(input)
 	}
+}
+
+// runRefTurn resolves a line's @references into a context block and starts a
+// turn with it prepended (or the raw line when nothing resolved).
+func (c *Controller) runRefTurn(input string) {
+	c.runGuarded(func(ctx context.Context) error {
+		block, errs := c.ResolveRefs(ctx, input)
+		for _, e := range errs {
+			c.notice(e)
+		}
+		sent := input
+		if block != "" {
+			sent = "Referenced context:\n\n" + block + "\n\n" + input
+		}
+		return c.runTurnWithRaw(ctx, sent, input)
+	})
 }
 
 // notice emits an informational Notice event.

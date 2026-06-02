@@ -139,11 +139,6 @@ type chatTUI struct {
 	bubbleStartIdx int
 	bubblePending  bool
 	turnDiscarded  bool
-	// attachments are image refs queued for the next user turn. They render as a
-	// tray above the input and are appended to the provider-facing prompt as
-	// @-references only when the turn is sent.
-	attachments        []chatAttachment
-	pendingAttachments []chatAttachment
 
 	// pendingApproval holds the tool-call approval currently shown in the banner
 	// (nil when none). While set, the controller's run goroutine is blocked
@@ -314,12 +309,11 @@ type promptResolvedMsg struct {
 // refsResolvedMsg carries the result of resolving the @references in a
 // submitted line (async file reads / MCP resources/read).
 type refsResolvedMsg struct {
-	sent        string
-	display     string
-	restore     string
-	attachments []chatAttachment
-	block       string
-	errs        []string
+	sent    string
+	display string
+	restore string
+	block   string
+	errs    []string
 }
 
 type clipboardImageMsg struct {
@@ -331,10 +325,6 @@ type clipboardPasteMsg struct {
 	path string
 	text string
 	err  error
-}
-
-type chatAttachment struct {
-	Path string
 }
 
 // newChatTUI assembles the initial model. The controller has already been wired
@@ -538,6 +528,12 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.state != tuiRunning && m.attachPastedImages(msg.Content) {
 			return m, finalize(m, cmds)
 		}
+		if ref, ok := pastedFileRef(msg.Content); ok {
+			m.input.InsertString(ref + " ")
+			m.growInputToFit()
+			m.updateCompletion()
+			return m, finalize(m, cmds)
+		}
 		if !m.chooserTyping() && m.pendingApproval == nil && m.rewind == nil && m.shouldFoldPaste(msg.Content) {
 			m.insertFoldedPaste(msg.Content)
 			m.growInputToFit()
@@ -632,8 +628,6 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case m.planMode:
 				m.planMode = false
 				m.ctrl.SetPlanMode(false)
-			case len(m.attachments) > 0 && strings.TrimSpace(m.input.Value()) == "":
-				m.attachments = nil
 			default:
 				// Idle with nothing to back out: a double-Esc on an empty composer
 				// opens the rewind picker (Claude Code's gesture); a first Esc just
@@ -699,7 +693,7 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			line := strings.TrimSpace(m.input.Value())
 
-			if line == "" && len(m.attachments) == 0 {
+			if line == "" {
 				return m, nil
 			}
 			if line == "exit" || line == "quit" || line == ":q" {
@@ -723,33 +717,34 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, finalize(m, cmds)
 			}
 
-			// Slash commands run locally without going through the model unless
-			// attachments are queued; then the line is a normal multimodal prompt.
-			if strings.HasPrefix(line, "/") && len(m.attachments) == 0 {
-				m.input.Reset()
-				m.input.SetHeight(1)
-				m.pastedBlocks = nil
-				cmds = append(cmds, m.runSlashCommand(line))
-				return m, finalize(m, cmds)
+			// Slash commands run locally without going through the model. A
+			// '/'-leading line that's actually a dragged file path is an attachment,
+			// not a command, so it's rewritten to an @reference instead.
+			if strings.HasPrefix(line, "/") {
+				if ref, ok := control.FileRefLine(line); ok {
+					line = ref
+				} else {
+					m.input.Reset()
+					m.input.SetHeight(1)
+					m.pastedBlocks = nil
+					cmds = append(cmds, m.runSlashCommand(line))
+					return m, finalize(m, cmds)
+				}
 			}
 
-			attachments := cloneAttachments(m.attachments)
-			sentText := m.expandPastedBlocks(line)
-			sentLine := withAttachmentRefs(sentText, attachments)
-			displayLine := withAttachmentLabels(sentText, attachments)
+			sentLine := m.expandPastedBlocks(line)
 			m.input.Reset()
 			m.input.SetHeight(1)
-			m.attachments = nil
 
-			// @references (local files / MCP resources) are resolved off the event
-			// loop by the controller; the turn starts when they resolve
-			// (refsResolvedMsg).
+			// @references (local files / MCP resources, including inline image
+			// attachments) are resolved off the event loop by the controller; the turn
+			// starts when they resolve (refsResolvedMsg).
 			if m.ctrl.HasRefs(sentLine) {
-				cmds = append(cmds, m.resolveRefs(sentLine, displayLine, line, attachments))
+				cmds = append(cmds, m.resolveRefs(sentLine, sentLine, line))
 				return m, finalize(m, cmds)
 			}
 
-			cmds = append(cmds, m.startTurnWithRaw(sentLine, displayLine, line, line, attachments))
+			cmds = append(cmds, m.startTurnWithRaw(sentLine, sentLine, line, line))
 			return m, finalize(m, cmds)
 		}
 
@@ -814,7 +809,7 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case strings.TrimSpace(msg.sent) == "":
 			m.notice(i18n.M.SlashPromptEmpty)
 		default:
-			cmds = append(cmds, m.startTurn(msg.sent, msg.display, msg.display, nil))
+			cmds = append(cmds, m.startTurn(msg.sent, msg.display, msg.display))
 		}
 
 	case refsResolvedMsg:
@@ -825,32 +820,35 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.block != "" {
 			sent = "Referenced context:\n\n" + msg.block + "\n\n" + msg.sent
 		}
-		cmds = append(cmds, m.startTurnWithRaw(sent, msg.display, msg.restore, msg.restore, msg.attachments))
+		cmds = append(cmds, m.startTurnWithRaw(sent, msg.display, msg.restore, msg.restore))
 
 	case clipboardImageMsg:
 		if msg.err != nil {
 			m.notice("paste image: " + msg.err.Error())
 			break
 		}
-		m.attachments = append(m.attachments, chatAttachment{Path: msg.path})
+		m.insertImageRef(msg.path)
 
 	case clipboardPasteMsg:
 		switch {
 		case msg.err != nil:
 			m.notice("paste: " + msg.err.Error())
 		case msg.path != "":
-			m.attachments = append(m.attachments, chatAttachment{Path: msg.path})
+			m.insertImageRef(msg.path)
 		case msg.text != "":
-			if !m.attachPastedImages(msg.text) {
-				if m.shouldFoldPaste(msg.text) {
-					m.insertFoldedPaste(msg.text)
-				} else {
-					m.input.InsertString(msg.text)
-				}
-				m.growInputToFit()
-				m.updateCompletion()
+			if m.attachPastedImages(msg.text) {
 				return m, finalize(m, cmds)
 			}
+			if ref, ok := pastedFileRef(msg.text); ok {
+				m.input.InsertString(ref + " ")
+			} else if m.shouldFoldPaste(msg.text) {
+				m.insertFoldedPaste(msg.text)
+			} else {
+				m.input.InsertString(msg.text)
+			}
+			m.growInputToFit()
+			m.updateCompletion()
+			return m, finalize(m, cmds)
 		}
 
 	case elapsedTickMsg:
@@ -1181,10 +1179,6 @@ func (m chatTUI) View() tea.View {
 		parts = append(parts, card)
 		rowsAboveBox += strings.Count(card, "\n") + 1
 	}
-	if tray := m.renderAttachmentTray(); tray != "" {
-		parts = append(parts, tray)
-		rowsAboveBox += strings.Count(tray, "\n") + 1
-	}
 	if menu := m.renderCompletion(); menu != "" {
 		parts = append(parts, menu)
 		rowsAboveBox += strings.Count(menu, "\n") + 1
@@ -1431,15 +1425,6 @@ func (m chatTUI) renderTodoPanel() string {
 	return todoPanelStyle.Width(max(m.width, 10)).Render(strings.TrimRight(b.String(), "\n"))
 }
 
-func (m chatTUI) renderAttachmentTray() string {
-	if len(m.attachments) == 0 {
-		return ""
-	}
-	labels := attachmentLabels(m.attachments)
-	body := strings.Join(labels, "  ")
-	return todoPanelStyle.Width(max(m.width, 10)).Render(body)
-}
-
 // truncateSubject trims a tool subject so the approval banner fits one line.
 func truncateSubject(s string, width int) string {
 	max := width - 28
@@ -1474,6 +1459,7 @@ const foldedPasteMinLines = 5
 type pastedBlock struct {
 	label string
 	text  string
+	image bool // an image attachment: expands to its bare @ref, not a wrapped block
 }
 
 func pastedLineCount(s string) int {
@@ -1510,12 +1496,29 @@ func (m *chatTUI) insertFoldedPaste(s string) {
 	m.input.InsertString(label + " ")
 }
 
+// insertImageRef puts a deletable [image #N] token in the input box (mapped to
+// the saved attachment's @ref, expanded on submit) so a dragged/pasted image is
+// edited and removed like any other text, not stranded in a separate tray.
+func (m *chatTUI) insertImageRef(path string) {
+	label := fmt.Sprintf("[image #%d]", m.nextPasteID)
+	m.nextPasteID++
+	m.pastedBlocks = append(m.pastedBlocks, pastedBlock{label: label, text: "@" + path, image: true})
+	m.input.InsertString(label + " ")
+	m.growInputToFit()
+	m.updateCompletion()
+}
+
 func (m *chatTUI) expandPastedBlocks(displayed string) string {
 	sent := displayed
 	for _, block := range m.pastedBlocks {
-		if strings.Contains(sent, block.label) {
-			sent = strings.ReplaceAll(sent, block.label, renderFoldedPasteBlock(block))
+		if !strings.Contains(sent, block.label) {
+			continue
 		}
+		repl := renderFoldedPasteBlock(block)
+		if block.image {
+			repl = block.text
+		}
+		sent = strings.ReplaceAll(sent, block.label, repl)
 	}
 	return sent
 }
@@ -1585,50 +1588,6 @@ func pasteClipboard() tea.Cmd {
 	}
 }
 
-func cloneAttachments(in []chatAttachment) []chatAttachment {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make([]chatAttachment, len(in))
-	copy(out, in)
-	return out
-}
-
-func attachmentLabels(in []chatAttachment) []string {
-	labels := make([]string, len(in))
-	for i := range in {
-		labels[i] = accent(fmt.Sprintf("[image%d]", i+1))
-	}
-	return labels
-}
-
-func withAttachmentLabels(line string, attachments []chatAttachment) string {
-	line = strings.TrimSpace(line)
-	if len(attachments) == 0 {
-		return line
-	}
-	labels := strings.Join(attachmentLabels(attachments), " ")
-	if line == "" {
-		return labels
-	}
-	return line + "\n" + labels
-}
-
-func withAttachmentRefs(line string, attachments []chatAttachment) string {
-	line = strings.TrimSpace(line)
-	if len(attachments) == 0 {
-		return line
-	}
-	refs := make([]string, len(attachments))
-	for i, a := range attachments {
-		refs[i] = "@" + a.Path
-	}
-	if line == "" {
-		return strings.Join(refs, " ")
-	}
-	return line + " " + strings.Join(refs, " ")
-}
-
 func (m *chatTUI) attachPastedImages(text string) bool {
 	sources, ok := pastedImageSources(text)
 	if !ok {
@@ -1640,7 +1599,7 @@ func (m *chatTUI) attachPastedImages(text string) bool {
 			m.notice("paste image: " + err.Error())
 			continue
 		}
-		m.attachments = append(m.attachments, chatAttachment{Path: path})
+		m.insertImageRef(path)
 	}
 	return true
 }
@@ -1762,6 +1721,22 @@ func pastedImagePath(src string) (string, bool) {
 	return filepath.Clean(src), true
 }
 
+// pastedFileRef turns a dragged/pasted non-image file path into an @reference so
+// it attaches instead of landing as literal text (and, for a POSIX path, being
+// misread as a slash command). Images are handled earlier; only path-shaped
+// content (a separator) that points at a real file qualifies, so an ordinary
+// pasted word is left alone.
+func pastedFileRef(content string) (string, bool) {
+	path, ok := pastedImagePath(content)
+	if !ok || !strings.ContainsAny(path, `/\`) {
+		return "", false
+	}
+	if info, err := os.Stat(path); err != nil || info.IsDir() {
+		return "", false
+	}
+	return "@" + path, true
+}
+
 // cycleMode advances the input mode normal → plan → YOLO → normal (Tab),
 // mirroring the desktop composer's Shift+Tab. plan is read-only; YOLO
 // auto-approves every tool call for the session (deny rules still apply). The
@@ -1796,14 +1771,14 @@ func (m *chatTUI) toggleVerboseReasoning(notify bool) {
 // and kicks off the controller turn. `sent` goes to the model uncomposed (the
 // controller frames it with any plan marker); `displayed` is what the transcript
 // shows, and `restore` is what Esc puts back while the bubble is still deferred.
-func (m *chatTUI) startTurn(sent, displayed, restore string, attachments []chatAttachment) tea.Cmd {
-	return m.startTurnWithRaw(sent, displayed, restore, sent, attachments)
+func (m *chatTUI) startTurn(sent, displayed, restore string) tea.Cmd {
+	return m.startTurnWithRaw(sent, displayed, restore, sent)
 }
 
 // startTurnWithRaw is startTurn plus an explicit `raw` (the un-resolved user
 // prompt) used only for the controller's auto-plan scoring, so resolved
 // @-reference payloads can't inflate the complexity signal.
-func (m *chatTUI) startTurnWithRaw(sent, displayed, restore, raw string, attachments []chatAttachment) tea.Cmd {
+func (m *chatTUI) startTurnWithRaw(sent, displayed, restore, raw string) tea.Cmd {
 	// Flush any half-streamed leftover before the new turn (defensive).
 	m.commitReasoning()
 	m.commitPending()
@@ -1814,7 +1789,6 @@ func (m *chatTUI) startTurnWithRaw(sent, displayed, restore, raw string, attachm
 	// restores the text to the input box, leaving nothing stranded.
 	m.pendingRestore = restore
 	m.pendingPastes = m.pasteLabelsIn(restore)
-	m.pendingAttachments = cloneAttachments(attachments)
 	m.bubbleStartIdx = len(m.transcript)
 	m.commitLine("") // blank line separating turns
 	m.commitLine(renderUserBubble(displayed, m.width, m.planMode))
@@ -1840,7 +1814,6 @@ func (m *chatTUI) confirmBubbleSent() {
 	}
 	m.bubblePending = false
 	m.pendingRestore = ""
-	m.pendingAttachments = nil
 }
 
 // unsendPending "un-sends" the in-flight turn while the server hasn't replied yet
@@ -1851,8 +1824,6 @@ func (m *chatTUI) confirmBubbleSent() {
 func (m *chatTUI) unsendPending() {
 	m.input.SetValue(m.pendingRestore)
 	m.growInputToFit()
-	m.attachments = cloneAttachments(m.pendingAttachments)
-	m.pendingAttachments = nil
 	m.transcript = m.transcript[:m.bubbleStartIdx]
 	m.transcriptDirty = true
 	m.bubblePending = false
@@ -2100,10 +2071,10 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 	default:
 		// A custom command wins over a skill of the same name; both resolve to a turn.
 		if sent, ok := m.ctrl.CustomCommand(input); ok {
-			return m.startTurn(sent, input, input, nil)
+			return m.startTurn(sent, input, input)
 		}
 		if sent, ok := m.ctrl.RunSkill(input); ok {
-			return m.startTurn(sent, input, input, nil)
+			return m.startTurn(sent, input, input)
 		}
 		m.notice(fmt.Sprintf("%s: %s", i18n.M.SlashUnknown, cmd))
 	}
@@ -2219,10 +2190,10 @@ func (m *chatTUI) notice(note string) {
 
 // resolveRefs resolves a line's @references off the event loop via the
 // controller, delivering a refsResolvedMsg with the tagged context block.
-func (m *chatTUI) resolveRefs(sent, display, restore string, attachments []chatAttachment) tea.Cmd {
+func (m *chatTUI) resolveRefs(sent, display, restore string) tea.Cmd {
 	return func() tea.Msg {
 		block, errs := m.ctrl.ResolveRefs(context.Background(), sent)
-		return refsResolvedMsg{sent: sent, display: display, restore: restore, attachments: attachments, block: block, errs: errs}
+		return refsResolvedMsg{sent: sent, display: display, restore: restore, block: block, errs: errs}
 	}
 }
 

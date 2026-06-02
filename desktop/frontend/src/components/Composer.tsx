@@ -11,7 +11,7 @@ import { FileMenu } from "./FileMenu";
 
 interface Attachment {
   path: string;
-  previewUrl: string;
+  previewUrl?: string;
 }
 
 const LONG_PASTE_MIN_CHARS = 2000;
@@ -254,18 +254,21 @@ export function Composer({
     setAttachments([]);
   };
 
+  const readFileAsDataURL = (file: File) =>
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
+
   const attachImageFiles = async (files: File[]) => {
     const images = files.filter((f) => f.type.startsWith("image/"));
     if (images.length === 0) return;
     for (const file of images) {
       setPendingPaste((n) => n + 1);
       try {
-        const dataUrl = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(String(reader.result));
-          reader.onerror = () => reject(reader.error);
-          reader.readAsDataURL(file);
-        });
+        const dataUrl = await readFileAsDataURL(file);
         const path = await app.SavePastedImage(dataUrl);
         const previewUrl = await app.AttachmentDataURL(path);
         setAttachments((prev) => [...prev, { path, previewUrl }]);
@@ -277,11 +280,35 @@ export function Composer({
     }
   };
 
+  // Non-image drops (PDFs, docs): the browser hands us bytes, not a path, so the
+  // kernel stores them and we reference the saved path — attached, not ignored.
+  const attachOtherFiles = async (files: File[]) => {
+    const others = files.filter((f) => !f.type.startsWith("image/"));
+    if (others.length === 0) return;
+    for (const file of others) {
+      setPendingPaste((n) => n + 1);
+      try {
+        const dataUrl = await readFileAsDataURL(file);
+        const path = await app.SavePastedFile(file.name, dataUrl);
+        setAttachments((prev) => [...prev, { path }]);
+      } catch {
+        // non-fatal: a failed attach must not block normal text input
+      } finally {
+        setPendingPaste((n) => Math.max(0, n - 1));
+      }
+    }
+  };
+
+  const attachFiles = (files: File[]) => {
+    void attachImageFiles(files);
+    void attachOtherFiles(files);
+  };
+
   const onPaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
-    const files = Array.from(e.clipboardData.files).filter((f) => f.type.startsWith("image/"));
+    const files = Array.from(e.clipboardData.files);
     if (files.length > 0) {
       e.preventDefault();
-      void attachImageFiles(files);
+      attachFiles(files);
       return;
     }
 
@@ -312,10 +339,10 @@ export function Composer({
 
   const onDrop = (e: DragEvent<HTMLDivElement>) => {
     const files = Array.from(e.dataTransfer.files);
-    if (!files.some((f) => f.type.startsWith("image/"))) return;
+    if (files.length === 0) return;
     e.preventDefault();
     setDragOver(false);
-    void attachImageFiles(files);
+    attachFiles(files);
   };
 
   const onDragOver = (e: DragEvent<HTMLDivElement>) => {
@@ -569,11 +596,11 @@ export function Composer({
         <div className="composer__attachments">
           {attachments.map((a) => (
             <div className="composer__attachment" key={a.path}>
-              <img src={a.previewUrl} alt="" />
+              {a.previewUrl ? <img src={a.previewUrl} alt="" /> : <FileText size={16} />}
               <span>{a.path.split("/").pop()}</span>
               <button
                 type="button"
-                title="Remove image"
+                title="Remove attachment"
                 onClick={() => setAttachments((prev) => prev.filter((x) => x.path !== a.path))}
               >
                 <X size={14} />

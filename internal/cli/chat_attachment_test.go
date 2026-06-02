@@ -1,19 +1,25 @@
 package cli
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 )
 
-func TestWithAttachmentRefs(t *testing.T) {
-	attachments := []chatAttachment{
-		{Path: ".reasonix/attachments/clipboard-20260601-010203.000001.png"},
-		{Path: ".reasonix/attachments/clipboard-20260601-010204.000002.jpg"},
-	}
-	got := withAttachmentRefs("describe", attachments)
-	want := "describe @.reasonix/attachments/clipboard-20260601-010203.000001.png @.reasonix/attachments/clipboard-20260601-010204.000002.jpg"
+func TestExpandPastedBlocksImage(t *testing.T) {
+	m := &chatTUI{pastedBlocks: []pastedBlock{
+		{label: "[image #1]", text: "@.reasonix/attachments/clipboard-20260601-010203.000001.png", image: true},
+		{label: "[Pasted text #2 · 3 lines]", text: "a\nb\nc"},
+	}}
+	got := m.expandPastedBlocks("look at [image #1] and [Pasted text #2 · 3 lines]")
+	want := "look at @.reasonix/attachments/clipboard-20260601-010203.000001.png and " +
+		renderFoldedPasteBlock(m.pastedBlocks[1])
 	if got != want {
-		t.Fatalf("withAttachmentRefs = %q, want %q", got, want)
+		t.Fatalf("expandPastedBlocks = %q, want %q", got, want)
+	}
+	if displayLineForImageRefs(got) != "look at [image1] and "+renderFoldedPasteBlock(m.pastedBlocks[1]) {
+		t.Fatalf("image ref should collapse to a label in the bubble: %q", displayLineForImageRefs(got))
 	}
 }
 
@@ -22,6 +28,30 @@ func TestDisplayLineForImageRefs(t *testing.T) {
 	want := "describe [image1] [image2]"
 	if got != want {
 		t.Fatalf("displayLineForImageRefs = %q, want %q", got, want)
+	}
+}
+
+func TestPastedFileRef(t *testing.T) {
+	dir := t.TempDir()
+	pdf := filepath.Join(dir, "report.pdf")
+	if err := os.WriteFile(pdf, []byte("%PDF-1.4 fake"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if got, ok := pastedFileRef(pdf); !ok || got != "@"+filepath.Clean(pdf) {
+		t.Fatalf("pastedFileRef(existing pdf) = %q, %v", got, ok)
+	}
+	if got, ok := pastedFileRef(`"` + pdf + `"`); !ok || got != "@"+filepath.Clean(pdf) {
+		t.Fatalf("pastedFileRef(quoted pdf) = %q, %v", got, ok)
+	}
+	if _, ok := pastedFileRef("just-a-word"); ok {
+		t.Fatal("a bare word with no separator must not be a file ref")
+	}
+	if _, ok := pastedFileRef(filepath.Join(dir, "missing.pdf")); ok {
+		t.Fatal("a non-existent path must not be a file ref")
+	}
+	if _, ok := pastedFileRef(dir); ok {
+		t.Fatal("a directory must not be a file ref")
 	}
 }
 

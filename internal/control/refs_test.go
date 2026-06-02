@@ -8,6 +8,30 @@ import (
 	"testing"
 )
 
+func TestFileRefLine(t *testing.T) {
+	dir := t.TempDir()
+	pdf := filepath.Join(dir, "report.pdf")
+	if err := os.WriteFile(pdf, []byte("%PDF-1.4 fake"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if got, ok := FileRefLine("  " + pdf + "  "); !ok || got != "@"+pdf {
+		t.Fatalf("FileRefLine(existing) = %q, %v", got, ok)
+	}
+	if got, ok := FileRefLine(`"` + pdf + `"`); !ok || got != "@"+pdf {
+		t.Fatalf("FileRefLine(quoted) = %q, %v", got, ok)
+	}
+	if _, ok := FileRefLine("/compact"); ok {
+		t.Fatal("a slash command must not resolve as a file ref")
+	}
+	if _, ok := FileRefLine(dir); ok {
+		t.Fatal("a directory must not resolve as a file ref")
+	}
+	if _, ok := FileRefLine(""); ok {
+		t.Fatal("empty must not resolve as a file ref")
+	}
+}
+
 func TestParseRefTokens(t *testing.T) {
 	cases := []struct {
 		line string

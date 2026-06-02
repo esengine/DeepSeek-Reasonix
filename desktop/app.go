@@ -1348,6 +1348,13 @@ func (a *App) SavePastedImage(dataURL string) (string, error) {
 	return control.SaveImageDataURL(dataURL)
 }
 
+// SavePastedFile stores a dropped non-image file (the browser exposes its bytes
+// as a data URL but not a real path) under .reasonix/attachments and returns the
+// relative @-reference path.
+func (a *App) SavePastedFile(name, dataURL string) (string, error) {
+	return control.SaveAttachmentDataURL(name, dataURL)
+}
+
 // AttachmentDataURL returns a safe data URL for a stored image attachment.
 func (a *App) AttachmentDataURL(path string) (string, error) {
 	return control.ImageDataURL(path)
