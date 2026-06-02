@@ -51,6 +51,30 @@ func (c *Controller) Compose(text string) string {
 	return text
 }
 
+// MemoryQuickAddNote parses the legacy "# <note>" memory shortcut. The space
+// after "#" is intentional: "#7", "#issue", and "#标题" are ordinary user
+// prompts, not memory writes.
+func MemoryQuickAddNote(input string) (note string, ok bool) {
+	trimmed := strings.TrimSpace(input)
+	if strings.HasPrefix(trimmed, "# ") || strings.HasPrefix(trimmed, "#\t") {
+		return strings.TrimSpace(trimmed[1:]), true
+	}
+	return "", false
+}
+
+// RememberCommandNote parses the explicit "/remember <note>" memory command.
+func RememberCommandNote(input string) (note string, ok bool) {
+	trimmed := strings.TrimSpace(input)
+	switch {
+	case trimmed == "/remember":
+		return "", true
+	case strings.HasPrefix(trimmed, "/remember ") || strings.HasPrefix(trimmed, "/remember\t"):
+		return strings.TrimSpace(trimmed[len("/remember"):]), true
+	default:
+		return "", false
+	}
+}
+
 // CustomCommand resolves a "/name args…" line against the loaded custom slash
 // commands, returning the rendered prompt to send (found=false when no command
 // matches). It does not apply the plan-mode marker — call Compose for that.

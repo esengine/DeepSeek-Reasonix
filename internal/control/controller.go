@@ -416,6 +416,14 @@ func lastAssistantText(msgs []provider.Message) string {
 // turn with its @-references resolved first.
 func (c *Controller) Submit(input string) {
 	trimmed := strings.TrimSpace(input)
+	if note, ok := MemoryQuickAddNote(trimmed); ok {
+		c.rememberProjectNote(note)
+		return
+	}
+	if note, ok := RememberCommandNote(trimmed); ok {
+		c.rememberProjectNote(note)
+		return
+	}
 	switch {
 	case trimmed == "/compact" || strings.HasPrefix(trimmed, "/compact "):
 		focus := strings.TrimSpace(strings.TrimPrefix(trimmed, "/compact"))
@@ -437,20 +445,6 @@ func (c *Controller) Submit(input string) {
 				c.notice("new session")
 			}
 		}()
-	case strings.HasPrefix(trimmed, "#"):
-		// "#<note>" quick-adds a memory line — same shortcut as the chat TUI, so
-		// the desktop and HTTP frontends (which route raw input through Submit)
-		// get it for free. It never starts a model turn.
-		note := strings.TrimSpace(trimmed[1:])
-		if note == "" {
-			c.notice("nothing to remember")
-			return
-		}
-		if path, err := c.QuickAdd(memory.ScopeProject, note); err != nil {
-			c.notice("memory: " + err.Error())
-		} else {
-			c.notice("remembered → " + path)
-		}
 	case strings.HasPrefix(trimmed, "/mcp__"):
 		c.runGuarded(func(ctx context.Context) error {
 			sent, found, err := c.MCPPrompt(ctx, trimmed)
@@ -517,6 +511,18 @@ func (c *Controller) Submit(input string) {
 		c.notice("unknown command: " + trimmed)
 	default:
 		c.runRefTurn(input)
+	}
+}
+
+func (c *Controller) rememberProjectNote(note string) {
+	if note == "" {
+		c.notice("nothing to remember")
+		return
+	}
+	if path, err := c.QuickAdd(memory.ScopeProject, note); err != nil {
+		c.notice("memory: " + err.Error())
+	} else {
+		c.notice("remembered → " + path)
 	}
 }
 
