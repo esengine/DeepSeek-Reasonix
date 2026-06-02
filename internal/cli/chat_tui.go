@@ -711,6 +711,9 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			case "esc":
 				m.completion = completion{}
+				if m.state == tuiRunning {
+					break // a turn is running — also cancel it via the main Esc handler
+				}
 				return m, nil
 			}
 		}

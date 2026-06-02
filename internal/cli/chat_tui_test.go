@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +15,40 @@ import (
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
 )
+
+type blockingTurnRunner struct{ started chan struct{} }
+
+func (r *blockingTurnRunner) Run(ctx context.Context, _ string) error {
+	close(r.started)
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+// TestEscCancelsRunningTurnWithCompletionOpen reproduces the report that Esc
+// (unlike Ctrl+C) did not stop a running turn: an active completion menu
+// captured Esc to close itself and returned before reaching the running-turn
+// cancel branch, while Ctrl+C — not in the completion switch — fell through.
+func TestEscCancelsRunningTurnWithCompletionOpen(t *testing.T) {
+	r := &blockingTurnRunner{started: make(chan struct{})}
+	ctrl := control.New(control.Options{Runner: r, Sink: event.Discard, SessionDir: t.TempDir(), Label: "test"})
+	ctrl.Send("hi")
+	<-r.started // the turn is in flight and cancellable
+
+	m := newTestChatTUI()
+	m.ctrl = ctrl
+	m.state = tuiRunning
+	m.completion.active = true // e.g. a "/" typed into the composer while waiting
+
+	_, _ = m.update(tea.KeyPressMsg{Code: tea.KeyEscape})
+
+	deadline := time.Now().Add(2 * time.Second)
+	for ctrl.Running() {
+		if time.Now().After(deadline) {
+			t.Fatal("Esc did not cancel the running turn (completion menu swallowed it)")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
 
 // TestTranscriptMirrorsCommits proves the alt-screen migration's foundation:
 // every line commitLine sends to native scrollback is also captured in the
