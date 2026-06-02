@@ -10,11 +10,11 @@ import (
 // an equivalent config — i.e. the wizard never writes a file it can't read.
 func TestRenderTOMLRoundTrips(t *testing.T) {
 	orig := Default()
-	orig.DefaultModel = "mimo-pro"
+	orig.DefaultModel = "deepseek"
 	orig.Language = "zh"
-	orig.Agent.AutoPlanClassifier = "deepseek-flash"
-	orig.Agent.SubagentModel = "mimo-pro"
-	orig.Agent.SubagentModels = map[string]string{"review": "deepseek-pro"}
+	orig.Agent.AutoPlanClassifier = "deepseek"
+	orig.Agent.SubagentModel = "deepseek"
+	orig.Agent.SubagentModels = map[string]string{"review": "deepseek"}
 	orig.Permissions = PermissionsConfig{
 		Mode:  "deny",
 		Deny:  []string{"bash(rm -rf*)"},
@@ -36,9 +36,9 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 		{Name: "example", Command: "reasonix-plugin-example"},
 		{Name: "stripe", Type: "http", URL: "https://mcp.stripe.com", Headers: map[string]string{"Authorization": "Bearer x"}, AutoStart: boolPtr(false)},
 	}
-	mm, _ := orig.Provider("mimo-pro")
+	mm, _ := orig.Provider("mimo-tp")
 	mm.BaseURL = "http://localhost:8000/v1"
-	ds, _ := orig.Provider("deepseek-flash")
+	ds, _ := orig.Provider("deepseek")
 	ds.Effort = "max"
 
 	rendered := RenderTOML(orig)
@@ -48,8 +48,8 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 		t.Fatalf("rendered TOML does not parse: %v\n---\n%s", err, rendered)
 	}
 
-	if got.DefaultModel != "mimo-pro" {
-		t.Errorf("default_model = %q, want mimo-pro", got.DefaultModel)
+	if got.DefaultModel != "deepseek" {
+		t.Errorf("default_model = %q, want deepseek", got.DefaultModel)
 	}
 	if got.Language != "zh" {
 		t.Errorf("language = %q, want zh", got.Language)
@@ -63,23 +63,23 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	if got.Agent.AutoPlan != "ask" {
 		t.Errorf("auto_plan = %q, want ask", got.Agent.AutoPlan)
 	}
-	if got.Agent.AutoPlanClassifier != "deepseek-flash" {
-		t.Errorf("auto_plan_classifier = %q, want deepseek-flash", got.Agent.AutoPlanClassifier)
+	if got.Agent.AutoPlanClassifier != "deepseek" {
+		t.Errorf("auto_plan_classifier = %q, want deepseek", got.Agent.AutoPlanClassifier)
 	}
 	if got.Agent.SystemPrompt != orig.Agent.SystemPrompt {
 		t.Errorf("system_prompt mismatch:\n got %q\nwant %q", got.Agent.SystemPrompt, orig.Agent.SystemPrompt)
 	}
-	if got.Agent.SubagentModel != "mimo-pro" {
-		t.Errorf("subagent_model = %q, want mimo-pro", got.Agent.SubagentModel)
+	if got.Agent.SubagentModel != "deepseek" {
+		t.Errorf("subagent_model = %q, want deepseek", got.Agent.SubagentModel)
 	}
-	if got.Agent.SubagentModels["review"] != "deepseek-pro" {
-		t.Errorf("subagent_models.review = %q, want deepseek-pro", got.Agent.SubagentModels["review"])
+	if got.Agent.SubagentModels["review"] != "deepseek" {
+		t.Errorf("subagent_models.review = %q, want deepseek", got.Agent.SubagentModels["review"])
 	}
-	if g, _ := got.Provider("mimo-pro"); g == nil || g.BaseURL != "http://localhost:8000/v1" {
-		t.Errorf("mimo-pro base_url not preserved: %+v", g)
+	if g, _ := got.Provider("mimo-tp"); g == nil || g.BaseURL != "http://localhost:8000/v1" {
+		t.Errorf("mimo-tp base_url not preserved: %+v", g)
 	}
-	if g, _ := got.Provider("deepseek-flash"); g == nil || g.Effort != "max" {
-		t.Errorf("deepseek-flash effort not preserved: %+v", g)
+	if g, _ := got.Provider("deepseek"); g == nil || g.Effort != "max" {
+		t.Errorf("deepseek effort not preserved: %+v", g)
 	}
 	if len(got.Providers) != len(orig.Providers) {
 		t.Errorf("providers count = %d, want %d", len(got.Providers), len(orig.Providers))

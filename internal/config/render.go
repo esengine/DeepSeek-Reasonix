@@ -121,6 +121,9 @@ func RenderTOML(c *Config) string {
 		} else if p.Model != "" {
 			fmt.Fprintf(&b, "model       = %q\n", p.Model)
 		}
+		if p.ModelsURL != "" {
+			fmt.Fprintf(&b, "models_url  = %q   # auto-fetch models from this URL on startup\n", p.ModelsURL)
+		}
 		fmt.Fprintf(&b, "api_key_env = %q\n", p.APIKeyEnv)
 		if p.BalanceURL != "" {
 			fmt.Fprintf(&b, "balance_url = %q   # optional; wallet-balance endpoint shown in the status bar\n", p.BalanceURL)

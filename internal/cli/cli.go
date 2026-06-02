@@ -6,9 +6,12 @@ package cli
 import (
 	"bufio"
 	"context"
+	"crypto/sha1"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -18,6 +21,8 @@ import (
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
+	"reasonix/internal/provider/openai"
+	"time"
 	"reasonix/internal/i18n"
 	"reasonix/internal/provider"
 	"reasonix/internal/serve"
@@ -561,16 +566,31 @@ func selectLanguage() (string, error) {
 }
 
 // selectEnabledProviders prompts a single multi-select of provider families
-// (DeepSeek / MiMo / …) and returns every SKU of every chosen family. Picking
-// a family enables all of its SKUs; users who want to exclude a specific SKU
-// edit reasonix.toml afterward — keeping first-run a single decision instead of two.
+// (DeepSeek / MiMo / custom / …) and returns one ProviderEntry per chosen
+// family, carrying the models the user picked. Built-in families try the
+// OpenAI-compatible GET /models endpoint first (so the user sees the real
+// list, not a stale hard-coded one) and fall back to the preset's static
+// model list when the call fails — offline first-run, missing key, or a
+// vendor that doesn't expose /models. All paths funnel through the same
+// fetchOrFallback / buildFamilyEntry helpers, so adding a new family only
+// requires a familyOf case.
 func selectEnabledProviders(providers []config.ProviderEntry) ([]config.ProviderEntry, error) {
+	providers, stale := filterStaleCustomEntries(providers)
+	for _, s := range stale {
+		fmt.Fprintf(os.Stderr, "  %s\n", dim(fmt.Sprintf(i18n.M.SkipStaleCustomEntryFmt, s.Name, s.BaseURL)))
+	}
+
 	famOrder, famMembers, famInfo := groupByFamily(providers)
 
 	famItems := make([]menuItem, len(famOrder))
 	for i, k := range famOrder {
 		famItems[i] = menuItem{name: famInfo[k].name, desc: famInfo[k].desc}
 	}
+	customIdx := len(famItems)
+	famItems = append(famItems, menuItem{name: i18n.M.CustomProviderLabel, desc: i18n.M.CustomProviderDesc})
+	anthropicIdx := len(famItems)
+	famItems = append(famItems, menuItem{name: i18n.M.AnthropicProviderLabel, desc: i18n.M.AnthropicProviderDesc})
+
 	famIdxs, err := selectMany(i18n.M.SelectProvidersLabel, famItems)
 	if err != nil {
 		return nil, err
@@ -578,11 +598,159 @@ func selectEnabledProviders(providers []config.ProviderEntry) ([]config.Provider
 
 	var enabled []config.ProviderEntry
 	for _, fi := range famIdxs {
-		for _, mi := range famMembers[famOrder[fi]] {
-			enabled = append(enabled, providers[mi])
+		switch fi {
+		case customIdx:
+			cps, err := promptCustomProvider()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "custom provider error: %v\n", err)
+				continue
+			}
+			enabled = append(enabled, cps...)
+			continue
+		case anthropicIdx:
+			aps, err := promptAnthropicProvider()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "anthropic provider error: %v\n", err)
+				continue
+			}
+			enabled = append(enabled, aps...)
+			continue
 		}
+
+		familyKey := famOrder[fi]
+		probe := providers[famMembers[familyKey][0]]
+		famName := famInfo[familyKey].name
+
+		models := fetchOrFallback(&probe, famName)
+		if len(models) == 0 {
+			fmt.Fprintf(os.Stderr, "  %s\n", dim(fmt.Sprintf(i18n.M.NoModelsAvailableFmt, famName)))
+			continue
+		}
+
+		items := make([]menuItem, len(models))
+		for i, m := range models {
+			items[i] = menuItem{name: m}
+		}
+		idxs, err := selectMany(fmt.Sprintf(i18n.M.SelectModelsLabel, famName), items)
+		if err != nil || len(idxs) == 0 {
+			continue
+		}
+
+		selected := make([]string, 0, len(idxs))
+		for _, idx := range idxs {
+			selected = append(selected, models[idx])
+		}
+		enabled = append(enabled, buildFamilyEntry(probe, selected))
 	}
 	return enabled, nil
+}
+
+// fetchOrFallback tries the OpenAI-compatible GET /models endpoint
+// (honoring the entry's ModelsURL when set) and returns the live model IDs.
+// On any failure — no base URL, no key set yet (the key is collected in a
+// later wizard step), network/auth error, or a vendor without /models — it
+// silently returns the preset's static model list so the wizard can always
+// present something. The fetch has a 10s timeout and is best-effort.
+func fetchOrFallback(probe *config.ProviderEntry, famName string) []string {
+	static := probe.ModelList()
+	if probe.BaseURL == "" {
+		return static
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	models, err := probe.FetchModels(ctx)
+	if err != nil || len(models) == 0 {
+		if len(static) > 0 {
+			fmt.Fprintf(os.Stderr, "  %s\n", dim(fmt.Sprintf(i18n.M.FetchModelsUsingPresetsFmt, famName)))
+		}
+		return static
+	}
+	fmt.Printf("  %s\n", green(fmt.Sprintf(i18n.M.FetchModelsSuccessFmt, len(models), famName)))
+	return models
+}
+
+// buildFamilyEntry returns a single ProviderEntry exposing the user's
+// selected models under one entry. It preserves the preset's API key env,
+// base URL, kind, context window, pricing, and effort — the things that
+// vary per vendor but not per model. The Default pointer is reset to the
+// first selected model if it would otherwise reference a model the user
+// didn't pick (or was empty).
+func buildFamilyEntry(probe config.ProviderEntry, selected []string) config.ProviderEntry {
+	entry := probe
+	entry.Models = selected
+	entry.Model = selected[0]
+	if entry.Default == "" || !containsString(selected, entry.Default) {
+		entry.Default = selected[0]
+	}
+	return entry
+}
+
+func containsString(xs []string, v string) bool {
+	for _, x := range xs {
+		if x == v {
+			return true
+		}
+	}
+	return false
+}
+
+// filterStaleCustomEntries drops the wizard's own magic-name entries
+// (Name="custom" with Kind="openai" or Name="anthropic" with Kind="anthropic")
+// that older versions of the wizard wrote into reasonix.toml. They collide
+// with the wizard's "custom" / "anthropic" menu items on re-run, showing up
+// as duplicate broken entries. The new wizard writes host-derived slugs
+// (e.g. "custom-token-sensenova-cn") so a hit on the magic name is
+// unambiguously stale. The returned slice is the dropped set so the caller
+// can warn the user to clean up reasonix.toml by hand.
+func filterStaleCustomEntries(providers []config.ProviderEntry) (kept, dropped []config.ProviderEntry) {
+	for _, p := range providers {
+		if p.Name == "custom" && p.Kind == "openai" {
+			dropped = append(dropped, p)
+			continue
+		}
+		if p.Name == "anthropic" && p.Kind == "anthropic" {
+			dropped = append(dropped, p)
+			continue
+		}
+		kept = append(kept, p)
+	}
+	return
+}
+
+// providerSlug derives a stable, human-readable entry name for a custom
+// OpenAI / Anthropic-compatible provider from its base URL, e.g.
+// "custom-token-sensenova-cn" or "anthropic-api-anthropic-com". We can't
+// reuse the wizard's menu-item labels ("custom" / "anthropic") because
+// those would collide with the menu item itself and end up rendered as
+// duplicate provider entries on subsequent re-runs of `reasonix setup`.
+// The host-based slug also gives users a meaningful name to grep for in
+// reasonix.toml. Falls back to a short sha1 of the raw URL when the URL
+// doesn't parse, so even malformed input still produces a unique name.
+func providerSlug(kind, baseURL string) string {
+	var host string
+	if u, err := url.Parse(baseURL); err == nil {
+		host = u.Host
+	}
+	if host == "" {
+		sum := sha1.Sum([]byte(baseURL))
+		return kind + "-" + hex.EncodeToString(sum[:4])
+	}
+	host = strings.ToLower(strings.TrimPrefix(host, "www."))
+	var b strings.Builder
+	prevDash := false
+	for _, r := range host {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+			prevDash = false
+		default:
+			if !prevDash && b.Len() > 0 {
+				b.WriteRune('-')
+				prevDash = true
+			}
+		}
+	}
+	return kind + "-" + strings.TrimRight(b.String(), "-")
 }
 
 // providerFamily is a wizard-only grouping of provider SKUs by vendor; it does
@@ -604,6 +772,218 @@ func familyOf(name string) providerFamily {
 	default:
 		return providerFamily{key: name, name: name}
 	}
+}
+
+// promptCustomProvider handles the custom provider entry flow.
+func promptCustomProvider() ([]config.ProviderEntry, error) {
+	methodIdx, err := selectOne(i18n.M.CustomAddMethodLabel, []menuItem{
+		{name: i18n.M.CustomMethodManual},
+		{name: i18n.M.CustomMethodURL},
+	})
+	if err != nil {
+		return nil, err
+	}
+	if methodIdx == 0 {
+		return promptCustomProviderManual()
+	}
+	return promptCustomProviderFromURL()
+}
+
+// promptCustomProviderManual handles manual model entry.
+func promptCustomProviderManual() ([]config.ProviderEntry, error) {
+	return promptCustomProviderManualWith(bufio.NewScanner(os.Stdin), "", "", "")
+}
+
+// promptCustomProviderManualWith is the shared backend for manual entry.
+// Pre-filled values (baseURL, keyEnv, apiKey) are reused as-is when non-empty
+// so the URL-fetch flow can fall through to manual entry without re-asking
+// the user for information they've already typed. An empty apiKey is allowed
+// — the key step happens later in the wizard and .env is updated then.
+func promptCustomProviderManualWith(in *bufio.Scanner, baseURL, keyEnv, apiKey string) ([]config.ProviderEntry, error) {
+	fmt.Println()
+	if baseURL == "" {
+		baseURL = ask(in, os.Stdout, i18n.M.CustomPromptBaseURL, "")
+		if baseURL == "" {
+			return nil, fmt.Errorf("base URL is required")
+		}
+	}
+	if keyEnv == "" {
+		keyEnv = ask(in, os.Stdout, i18n.M.CustomPromptKeyEnv, "CUSTOM_API_KEY")
+	}
+	if apiKey == "" {
+		apiKey = ask(in, os.Stdout, i18n.M.CustomPromptAPIKey, "")
+	}
+	if apiKey != "" {
+		os.Setenv(keyEnv, apiKey)
+	}
+	modelName := ask(in, os.Stdout, i18n.M.CustomPromptModel, "")
+	if modelName == "" {
+		return nil, fmt.Errorf("model name is required")
+	}
+	entry := config.ProviderEntry{
+		Name: providerSlug("custom", baseURL), Kind: "openai", BaseURL: baseURL,
+		Model: modelName, APIKeyEnv: keyEnv, ContextWindow: 128000,
+	}
+	fmt.Printf("  %s\n", green(fmt.Sprintf(i18n.M.CustomAddedFmt, entry.Name+"/"+modelName)))
+	return []config.ProviderEntry{entry}, nil
+}
+
+// promptCustomProviderFromURL tries the OpenAI-compatible GET /models
+// endpoint and shows a checkbox of the returned models. If the call fails
+// (network error, auth failure, or a vendor without /models) it falls
+// through to manual entry, reusing the URL and key the user already typed.
+func promptCustomProviderFromURL() ([]config.ProviderEntry, error) {
+	in := bufio.NewScanner(os.Stdin)
+	fmt.Println()
+
+	baseURL := ask(in, os.Stdout, i18n.M.CustomPromptBaseURL, "")
+	if baseURL == "" {
+		return nil, fmt.Errorf("base URL is required")
+	}
+	keyEnv := ask(in, os.Stdout, i18n.M.CustomPromptKeyEnv, "CUSTOM_API_KEY")
+	apiKey := ask(in, os.Stdout, i18n.M.CustomPromptAPIKey, "")
+	if apiKey != "" {
+		os.Setenv(keyEnv, apiKey)
+	}
+
+	fmt.Printf("  %s\n", dim(fmt.Sprintf(i18n.M.FetchingModelsFmt, "custom")))
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	models, err := openai.FetchModels(ctx, baseURL+"/models", apiKey)
+	if err != nil || len(models) == 0 {
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "  %s\n", dim(fmt.Sprintf(i18n.M.FetchModelsFailedFmt, "custom", err)))
+		} else {
+			fmt.Fprintf(os.Stderr, "  %s\n", dim(i18n.M.CustomFetchEmpty))
+		}
+		return promptCustomProviderManualWith(in, baseURL, keyEnv, apiKey)
+	}
+	fmt.Printf("  %s\n", green(fmt.Sprintf(i18n.M.FetchModelsSuccessFmt, len(models), "custom")))
+
+	items := make([]menuItem, len(models))
+	for i, m := range models {
+		items[i] = menuItem{name: m}
+	}
+	idxs, err := selectMany(fmt.Sprintf(i18n.M.SelectModelsLabel, "custom"), items)
+	if err != nil || len(idxs) == 0 {
+		return nil, fmt.Errorf("no models selected")
+	}
+	var selected []string
+	for _, i := range idxs {
+		selected = append(selected, models[i])
+	}
+	entry := config.ProviderEntry{
+		Name: providerSlug("custom", baseURL), Kind: "openai", BaseURL: baseURL,
+		Models: selected, Model: selected[0], APIKeyEnv: keyEnv, ContextWindow: 128000,
+	}
+	fmt.Printf("  %s\n", green(fmt.Sprintf(i18n.M.CustomAddedFmt, entry.Name+"/"+selected[0])))
+	return []config.ProviderEntry{entry}, nil
+}
+
+// promptAnthropicProvider handles the Anthropic compatible provider entry flow.
+func promptAnthropicProvider() ([]config.ProviderEntry, error) {
+	methodIdx, err := selectOne(i18n.M.AnthropicAddMethodLabel, []menuItem{
+		{name: i18n.M.AnthropicMethodManual},
+		{name: i18n.M.AnthropicMethodURL},
+	})
+	if err != nil {
+		return nil, err
+	}
+	if methodIdx == 0 {
+		return promptAnthropicProviderManual()
+	}
+	return promptAnthropicProviderFromURL()
+}
+
+// promptAnthropicProviderManual handles manual model entry.
+func promptAnthropicProviderManual() ([]config.ProviderEntry, error) {
+	return promptAnthropicProviderManualWith(bufio.NewScanner(os.Stdin), "", "", "")
+}
+
+// promptAnthropicProviderManualWith is the shared backend for manual entry
+// of an Anthropic-compatible custom provider. Pre-filled values (baseURL,
+// keyEnv, apiKey) are reused as-is when non-empty so the URL-fetch flow
+// can fall through to manual entry without re-asking the user.
+func promptAnthropicProviderManualWith(in *bufio.Scanner, baseURL, keyEnv, apiKey string) ([]config.ProviderEntry, error) {
+	fmt.Println()
+	if baseURL == "" {
+		baseURL = ask(in, os.Stdout, i18n.M.AnthropicPromptBaseURL, "")
+		if baseURL == "" {
+			return nil, fmt.Errorf("base URL is required")
+		}
+	}
+	if keyEnv == "" {
+		keyEnv = ask(in, os.Stdout, i18n.M.AnthropicPromptKeyEnv, "ANTHROPIC_API_KEY")
+	}
+	if apiKey == "" {
+		apiKey = ask(in, os.Stdout, i18n.M.AnthropicPromptAPIKey, "")
+	}
+	if apiKey != "" {
+		os.Setenv(keyEnv, apiKey)
+	}
+	modelName := ask(in, os.Stdout, i18n.M.AnthropicPromptModel, "")
+	if modelName == "" {
+		return nil, fmt.Errorf("model name is required")
+	}
+	entry := config.ProviderEntry{
+		Name: providerSlug("anthropic", baseURL), Kind: "anthropic", BaseURL: baseURL,
+		Model: modelName, APIKeyEnv: keyEnv, ContextWindow: 128000,
+	}
+	fmt.Printf("  %s\n", green(fmt.Sprintf(i18n.M.AnthropicAddedFmt, entry.Name+"/"+modelName)))
+	return []config.ProviderEntry{entry}, nil
+}
+
+// promptAnthropicProviderFromURL tries the OpenAI-compatible GET /models
+// endpoint (some Anthropic-compatible proxies do expose one). Most don't
+// — Anthropic's own API has no public model list — so on any failure the
+// flow falls through to manual entry with the URL/key already filled in,
+// rather than aborting the wizard.
+func promptAnthropicProviderFromURL() ([]config.ProviderEntry, error) {
+	in := bufio.NewScanner(os.Stdin)
+	fmt.Println()
+
+	baseURL := ask(in, os.Stdout, i18n.M.AnthropicPromptBaseURL, "")
+	if baseURL == "" {
+		return nil, fmt.Errorf("base URL is required")
+	}
+	keyEnv := ask(in, os.Stdout, i18n.M.AnthropicPromptKeyEnv, "ANTHROPIC_API_KEY")
+	apiKey := ask(in, os.Stdout, i18n.M.AnthropicPromptAPIKey, "")
+	if apiKey != "" {
+		os.Setenv(keyEnv, apiKey)
+	}
+
+	fmt.Printf("  %s\n", dim(fmt.Sprintf(i18n.M.AnthropicFetchingModelsFmt, "anthropic")))
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	models, err := openai.FetchModels(ctx, baseURL+"/models", apiKey)
+	if err != nil || len(models) == 0 {
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "  %s\n", dim(fmt.Sprintf(i18n.M.AnthropicFetchModelsFailedFmt, "anthropic", err)))
+		} else {
+			fmt.Fprintf(os.Stderr, "  %s\n", dim(i18n.M.AnthropicFetchEmpty))
+		}
+		return promptAnthropicProviderManualWith(in, baseURL, keyEnv, apiKey)
+	}
+	fmt.Printf("  %s\n", green(fmt.Sprintf(i18n.M.AnthropicFetchModelsSuccessFmt, len(models), "anthropic")))
+
+	items := make([]menuItem, len(models))
+	for i, m := range models {
+		items[i] = menuItem{name: m}
+	}
+	idxs, err := selectMany(fmt.Sprintf(i18n.M.AnthropicSelectModelsLabel, "anthropic"), items)
+	if err != nil || len(idxs) == 0 {
+		return nil, fmt.Errorf("no models selected")
+	}
+	var selected []string
+	for _, i := range idxs {
+		selected = append(selected, models[i])
+	}
+	entry := config.ProviderEntry{
+		Name: providerSlug("anthropic", baseURL), Kind: "anthropic", BaseURL: baseURL,
+		Models: selected, Model: selected[0], APIKeyEnv: keyEnv, ContextWindow: 128000,
+	}
+	fmt.Printf("  %s\n", green(fmt.Sprintf(i18n.M.AnthropicAddedFmt, entry.Name+"/"+selected[0])))
+	return []config.ProviderEntry{entry}, nil
 }
 
 func groupByFamily(providers []config.ProviderEntry) ([]string, map[string][]int, map[string]providerFamily) {
@@ -659,9 +1039,18 @@ func providersWithMissingKeys(cfg *config.Config) []config.ProviderEntry {
 	return out
 }
 
-// configureKeys asks for the API key of each distinct api_key_env among the
-// selected providers — shared keys (e.g. both DeepSeek models) are asked once.
-// Reads answers from r, writes prompts to w; returns KEY=value lines entered.
+// configureKeys reconciles each enabled provider's API key with the
+// environment. For every distinct api_key_env: if the variable is already
+// set — either by loadDotEnv from .env, or by an earlier wizard step that
+// called os.Setenv (the URL-fetch flow asks for the key once so it can call
+// /models) — the existing value is reused and a single-line confirmation is
+// printed so the user can see why no prompt appeared. Otherwise the user is
+// asked once per env var (deduped across providers that share one, e.g.
+// both DeepSeek models). Returns KEY=value lines to append to .env: any
+// env var that was already set in the process goes through too, so a
+// re-run of `reasonix setup` re-pins the current value into .env (a
+// loadDotEnv is first-wins, so without re-pinning, an old .env line would
+// shadow the fresh value).
 func configureKeys(selected []config.ProviderEntry, r io.Reader, w io.Writer) []string {
 	in := bufio.NewScanner(r)
 	fmt.Fprintln(w, "\n"+i18n.M.EnterAPIKeysHeader)
@@ -673,6 +1062,17 @@ func configureKeys(selected []config.ProviderEntry, r io.Reader, w io.Writer) []
 			continue
 		}
 		seen[p.APIKeyEnv] = true
+
+		// Reuse any value the wizard or .env already set. The URL-fetch
+		// flow (promptCustomProviderFromURL) calls os.Setenv(keyEnv, apiKey)
+		// before the /models probe; that value is the user's "real" key
+		// and we'd be wrong to discard it by asking again.
+		if cur := os.Getenv(p.APIKeyEnv); cur != "" {
+			fmt.Fprintf(w, "  %s %s\n", green("✓"), fmt.Sprintf(i18n.M.APIKeyAlreadySetFmt, p.APIKeyEnv))
+			envLines = append(envLines, p.APIKeyEnv+"="+cur)
+			continue
+		}
+
 		if key := ask(in, w, "  "+p.APIKeyEnv, ""); key != "" {
 			envLines = append(envLines, p.APIKeyEnv+"="+key)
 		}
