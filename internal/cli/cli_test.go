@@ -344,3 +344,28 @@ func TestFilterStaleCustomEntries(t *testing.T) {
 		}
 	})
 }
+
+func TestWithBuiltinFamiliesAddsMissingMiMo(t *testing.T) {
+	// The user's case: a reasonix.toml that defines only deepseek providers.
+	cfg := []config.ProviderEntry{
+		{Name: "deepseek-flash", Kind: "openai", BaseURL: "https://api.deepseek.com"},
+		{Name: "deepseek-pro", Kind: "openai", BaseURL: "https://api.deepseek.com"},
+	}
+	order, _, info := groupByFamily(withBuiltinFamilies(cfg))
+	seen := map[string]bool{}
+	for _, k := range order {
+		seen[info[k].name] = true
+	}
+	if !seen["DeepSeek"] || !seen["MiMo (Xiaomi)"] {
+		t.Fatalf("wizard families = %v, want both DeepSeek and MiMo", order)
+	}
+	// A user's customized deepseek must not be duplicated.
+	if n := len(groupByFamilyKeys(withBuiltinFamilies(cfg), "deepseek")); n != 2 {
+		t.Fatalf("deepseek members = %d, want the user's 2 (no injected duplicate)", n)
+	}
+}
+
+func groupByFamilyKeys(ps []config.ProviderEntry, key string) []int {
+	_, members, _ := groupByFamily(ps)
+	return members[key]
+}

@@ -622,6 +622,7 @@ func selectEnabledProviders(providers []config.ProviderEntry) ([]config.Provider
 	for _, s := range stale {
 		fmt.Fprintf(os.Stderr, "  %s\n", dim(fmt.Sprintf(i18n.M.SkipStaleCustomEntryFmt, s.Name, s.BaseURL)))
 	}
+	providers = withBuiltinFamilies(providers)
 
 	famOrder, famMembers, famInfo := groupByFamily(providers)
 
@@ -1042,6 +1043,25 @@ func groupByFamily(providers []config.ProviderEntry) ([]string, map[string][]int
 		members[f.key] = append(members[f.key], i)
 	}
 	return order, members, info
+}
+
+// withBuiltinFamilies guarantees the wizard always offers the built-in provider
+// families (DeepSeek, MiMo) even when the loaded config replaced them — a
+// reasonix.toml that defines only [[providers]] for deepseek otherwise hides
+// MiMo from setup, since [[providers]] replaces the presets wholesale. Families
+// already present are left untouched (the user's customizations win); only the
+// missing built-in families get their default entries appended.
+func withBuiltinFamilies(providers []config.ProviderEntry) []config.ProviderEntry {
+	have := map[string]bool{}
+	for _, p := range providers {
+		have[familyOf(p.Name).key] = true
+	}
+	for _, bp := range config.Default().Providers {
+		if k := familyOf(bp.Name).key; !have[k] {
+			providers = append(providers, bp)
+		}
+	}
+	return providers
 }
 
 // promptMissingKeys re-runs the wizard's key-entry step for any enabled
