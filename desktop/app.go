@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -56,11 +57,21 @@ type App struct {
 	ready       bool   // true once boot.Build completes (success or failure)
 	disabledMCP map[string]ServerView
 	mcpOrder    []string
+
+	// Per-turn autosave runs off the event goroutine so disk I/O never delays
+	// event delivery; overlapping requests coalesce into one trailing write.
+	saveMu    sync.Mutex
+	saving    bool
+	saveAgain bool
 }
 
 // NewApp constructs the bound object. The controller is built later, in startup,
 // once the Wails context exists.
-func NewApp() *App { return &App{sink: &eventSink{}, disabledMCP: map[string]ServerView{}} }
+func NewApp() *App {
+	a := &App{sink: &eventSink{}, disabledMCP: map[string]ServerView{}}
+	a.sink.app = a
+	return a
+}
 
 // startup runs once the webview process is up, before the frontend can issue any
 // bound call. It captures the Wails context (needed for EventsEmit), points the
@@ -1814,11 +1825,54 @@ func parseScope(s string) memory.Scope {
 // — Emit must not be exposed to JS. Emit runs on the agent goroutine;
 // runtime.EventsEmit is goroutine-safe, and the ctx guard covers the brief window
 // before startup assigns it.
-type eventSink struct{ ctx context.Context }
+type eventSink struct {
+	ctx context.Context
+	app *App
+}
 
 func (s *eventSink) Emit(e event.Event) {
-	if s.ctx == nil {
+	if s.ctx != nil {
+		runtime.EventsEmit(s.ctx, eventChannel, toWire(e))
+	}
+	// Persist after each turn so a force-kill of a long session loses at most the
+	// in-flight prompt, not every turn back to the last workspace switch.
+	if e.Kind == event.TurnDone && s.app != nil {
+		s.app.scheduleSnapshot()
+	}
+}
+
+// scheduleSnapshot kicks a single-flight background save of the active session;
+// a request arriving while one runs sets a trailing pass so the final state lands.
+func (a *App) scheduleSnapshot() {
+	a.saveMu.Lock()
+	if a.saving {
+		a.saveAgain = true
+		a.saveMu.Unlock()
 		return
 	}
-	runtime.EventsEmit(s.ctx, eventChannel, toWire(e))
+	a.saving = true
+	a.saveMu.Unlock()
+	go a.snapshotLoop()
+}
+
+func (a *App) snapshotLoop() {
+	for {
+		a.mu.RLock()
+		ctrl := a.ctrl
+		a.mu.RUnlock()
+		if ctrl != nil {
+			if err := ctrl.Snapshot(); err != nil {
+				slog.Warn("desktop: per-turn snapshot", "err", err)
+			}
+		}
+		a.saveMu.Lock()
+		if a.saveAgain {
+			a.saveAgain = false
+			a.saveMu.Unlock()
+			continue
+		}
+		a.saving = false
+		a.saveMu.Unlock()
+		return
+	}
 }
