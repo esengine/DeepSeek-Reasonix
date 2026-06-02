@@ -91,7 +91,7 @@ func (ig *walkIgnorer) skip(path, name string, isDir bool) bool {
 	if isHiddenName(name) {
 		return true
 	}
-	if isDir && vendorDirs[name] {
+	if isDir && (vendorDirs[name] || isProtectedDir(abs)) {
 		return true
 	}
 	return ig.ignored(abs, isDir)

@@ -101,5 +101,8 @@ var vendorDirs = map[string]bool{
 // rooted at root. The root itself is never pruned, so explicitly targeting a
 // vendor dir still works.
 func skipWalkDir(root, path, name string) bool {
-	return path != root && vendorDirs[name]
+	if path == root {
+		return false
+	}
+	return vendorDirs[name] || isProtectedDir(absClean(path))
 }
