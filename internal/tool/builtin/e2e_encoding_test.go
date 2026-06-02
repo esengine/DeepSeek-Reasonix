@@ -1,12 +1,10 @@
-//go:build e2e
-
 package builtin
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -17,96 +15,67 @@ import (
 	"reasonix/internal/tool"
 )
 
-// TestE2EGBKRoundTrip exercises the full read → edit → write → verify cycle
-// on a real GBK file written by an external tool (Python's codec), not by
-// Go's encoding package. This catches encoding-table mismatches that unit
-// tests with Go-generated GBK might miss.
-//
-// Run: go test -tags e2e ./internal/tool/builtin/ -run TestE2EGBKRoundTrip -v
-func TestE2EGBKRoundTrip(t *testing.T) {
-	path := os.Getenv("GBK_TEST_FILE")
-	if path == "" {
-		path = "/tmp/test_gbk.txt"
+func gbkBytes(t *testing.T, s string) []byte {
+	t.Helper()
+	b, _, err := transform.Bytes(simplifiedchinese.GB18030.NewEncoder(), []byte(s))
+	if err != nil {
+		t.Fatalf("encode GBK: %v", err)
 	}
-	if _, err := os.Stat(path); err != nil {
-		t.Skipf("GBK test file not found at %s — create with: python3 -c \"open('$path','wb').write('你好世界\\n第二行\\n'.encode('gbk'))\"", path)
+	return b
+}
+
+func TestE2EGBKRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "test_gbk.txt")
+	if err := os.WriteFile(path, gbkBytes(t, "你好世界\n这是第二行\n包含函数的测试\n"), 0o644); err != nil {
+		t.Fatal(err)
 	}
 
-	readTL, ok := tool.LookupBuiltin("read_file")
-	if !ok {
-		t.Fatal("read_file not registered")
-	}
-	editTL, ok := tool.LookupBuiltin("edit_file")
-	if !ok {
-		t.Fatal("edit_file not registered")
-	}
-	grepTL, ok := tool.LookupBuiltin("grep")
-	if !ok {
-		t.Fatal("grep not registered")
-	}
+	readTL, _ := tool.LookupBuiltin("read_file")
+	editTL, _ := tool.LookupBuiltin("edit_file")
+	grepTL, _ := tool.LookupBuiltin("grep")
 
 	args := func(m map[string]any) json.RawMessage {
 		b, _ := json.Marshal(m)
 		return json.RawMessage(b)
 	}
 
-	// Step 1: Read the GBK file — model should see decoded UTF-8.
-	t.Log("Step 1: read_file on GBK file")
 	out, err := readTL.Execute(context.Background(), args(map[string]any{"path": path}))
 	if err != nil {
 		t.Fatalf("read_file: %v", err)
 	}
-	t.Logf("read_file output:\n%s", out)
-	if !strings.Contains(out, "你好世界") || !strings.Contains(out, "第二行") {
-		t.Error("read_file did not decode GBK to readable Chinese text")
+	if !strings.Contains(out, "你好世界") || !strings.Contains(out, "这是第二行") {
+		t.Errorf("read_file did not decode GBK to readable Chinese:\n%s", out)
 	}
 
-	// Step 2: File must still be GBK on disk (read_file is read-only).
-	t.Log("Step 2: verify file still GBK after read")
-	raw, _ := os.ReadFile(path)
-	if utf8.Valid(raw) {
-		t.Error("read_file converted GBK file to UTF-8 on disk")
+	if raw, _ := os.ReadFile(path); utf8.Valid(raw) {
+		t.Error("read_file rewrote GBK file as UTF-8 on disk")
 	}
 
-	// Step 3: Edit the GBK file — replace "第二行" with "新的行".
-	t.Log("Step 3: edit_file on GBK file")
-	editOut, err := editTL.Execute(context.Background(), args(map[string]any{
+	if _, err := editTL.Execute(context.Background(), args(map[string]any{
 		"path":       path,
-		"old_string": "第二行",
-		"new_string": "新的行",
-	}))
-	if err != nil {
+		"old_string": "这是第二行",
+		"new_string": "这是新的行",
+	})); err != nil {
 		t.Fatalf("edit_file: %v", err)
 	}
-	t.Logf("edit_file: %s", editOut)
 
-	// Step 4: File must still be GBK, with the edit applied.
-	t.Log("Step 4: verify encoding and content after edit")
 	raw2, _ := os.ReadFile(path)
 	if utf8.Valid(raw2) {
-		t.Error("edit_file converted GBK file to UTF-8 on disk")
+		t.Error("edit_file rewrote GBK file as UTF-8 on disk")
 	}
 	decoded, _, _ := transform.Bytes(simplifiedchinese.GB18030.NewDecoder(), raw2)
-	s := string(decoded)
-	if !strings.Contains(s, "新的行") {
-		t.Errorf("edit not applied: %q", s)
-	}
-	if strings.Contains(s, "第二行") {
-		t.Errorf("old text still present: %q", s)
+	if s := string(decoded); !strings.Contains(s, "这是新的行") || strings.Contains(s, "这是第二行") {
+		t.Errorf("edit not applied to GBK file on disk: %q", s)
 	}
 
-	// Step 5: Read the edited file — model should see the updated UTF-8.
-	t.Log("Step 5: read edited GBK file")
 	out2, err := readTL.Execute(context.Background(), args(map[string]any{"path": path}))
 	if err != nil {
 		t.Fatalf("read_file after edit: %v", err)
 	}
-	if !strings.Contains(out2, "新的行") {
+	if !strings.Contains(out2, "这是新的行") {
 		t.Errorf("read_file after edit missing new text:\n%s", out2)
 	}
 
-	// Step 6: grep on the GBK file.
-	t.Log("Step 6: grep on GBK file")
 	grepOut, err := grepTL.Execute(context.Background(), args(map[string]any{
 		"pattern": "函数",
 		"path":    path,
@@ -115,13 +84,6 @@ func TestE2EGBKRoundTrip(t *testing.T) {
 		t.Fatalf("grep: %v", err)
 	}
 	if !strings.Contains(grepOut, "函数") {
-		t.Errorf("grep did not find match in decoded GBK: %s", grepOut)
+		t.Errorf("grep did not match decoded GBK content:\n%s", grepOut)
 	}
-
-	// Restore original file for re-runs.
-	original, _ := simplifiedchinese.GB18030.NewEncoder().String("你好世界\n这是第二行\n包含函数的测试\n")
-	os.WriteFile(path, []byte(original), 0o644)
 }
-
-// Suppress unused import.
-var _ = bytes.Compare
