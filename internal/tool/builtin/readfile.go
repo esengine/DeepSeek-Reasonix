@@ -153,33 +153,33 @@ func (r readFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 func (r readFile) scan(src io.Reader, offset, limit int) (string, error) {
 	scanner := bufio.NewScanner(src)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	upTo := offset + limit + 1
 
 	var collected []string
 	lineNo := 0
+	hasMore := false
 	for scanner.Scan() {
 		lineNo++
-		if lineNo > offset && len(collected) < limit {
+		if lineNo <= offset {
+			continue
+		}
+		if len(collected) < limit {
 			collected = append(collected, scanner.Text())
+			continue
 		}
-		if lineNo >= upTo {
-			break
-		}
-	}
-	remaining := 0
-	for scanner.Scan() {
-		remaining++
+		// A line past the requested window exists — stop here rather than reading
+		// the rest of the file just to count the remainder.
+		hasMore = true
+		break
 	}
 	if err := scanner.Err(); err != nil {
 		return "", fmt.Errorf("scan: %w", err)
 	}
-	totalSeen := lineNo + remaining
 
-	if totalSeen == 0 {
+	if lineNo == 0 {
 		return "(empty file)", nil
 	}
 	if len(collected) == 0 {
-		return fmt.Sprintf("(offset %d is past EOF — file has %d lines)", offset, totalSeen), nil
+		return fmt.Sprintf("(offset %d is past EOF — file has %d lines)", offset, lineNo), nil
 	}
 
 	maxShown := offset + len(collected)
@@ -189,10 +189,8 @@ func (r readFile) scan(src io.Reader, offset, limit int) (string, error) {
 	for i, line := range collected {
 		fmt.Fprintf(&b, "%*d→%s\n", w, offset+i+1, line)
 	}
-	more := totalSeen - (offset + len(collected))
-	if more > 0 {
-		fmt.Fprintf(&b, "\n[%d more line(s); pass offset=%d to continue]\n",
-			more, offset+len(collected))
+	if hasMore {
+		fmt.Fprintf(&b, "\n[more lines below; pass offset=%d to continue]\n", offset+len(collected))
 	}
 	return b.String(), nil
 }
