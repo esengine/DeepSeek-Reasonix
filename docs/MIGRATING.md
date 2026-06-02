@@ -65,6 +65,17 @@ and DeepSeek prefix-cache–oriented design.
 - Some granular v1 tools are intentionally consolidated (e.g. file-management ops
   go through `bash`); a few v1 tools are not yet ported (tracked on Discussions).
 
+## File encoding
+
+Reasonix 1.0 supports reading and editing files in UTF-8, UTF-8 BOM, UTF-16
+LE/BE, and GB18030 (a superset of GBK). This matches v1's behavior.
+
+- `read_file` decodes any supported encoding to UTF-8 for the model.
+- `edit_file` and `multi_edit` preserve the file's original encoding — if you
+  edit a GB18030 file, it stays GB18030 on disk.
+- `write_file` always writes UTF-8 (the model's output encoding).
+- `grep` decodes before matching, so regex patterns work on non-UTF-8 files.
+
 ## Reporting issues
 
 Issues and PRs are labelled by line: **`v1`** (legacy TypeScript) and **`v2`**

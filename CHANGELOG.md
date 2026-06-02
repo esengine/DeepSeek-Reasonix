@@ -31,6 +31,14 @@ TypeScript line; a new codebase that becomes the default (`main-v2`).
   prefix.
 - **ACP** (`reasonix acp`) and an HTTP/SSE server frontend; desktop app (Wails).
 
+### Fixed
+
+- **File encoding support restored** — GBK/GB18030 (and other non-UTF-8) files
+  can now be read, edited, and grepped correctly. The v2 rewrite had dropped
+  v1's encoding detection; files in CJK Windows charsets were silently misread
+  or rejected as binary. The read/edit/write round-trip now preserves the
+  original file encoding. (#2637)
+
 ### Notes
 
 - Versions: the legacy TypeScript line stays in `0.x`; the Go line starts at
