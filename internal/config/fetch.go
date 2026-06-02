@@ -4,7 +4,6 @@ package config
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"reasonix/internal/provider/openai"
 )
@@ -24,11 +23,4 @@ func (e *ProviderEntry) FetchModels(ctx context.Context) ([]string, error) {
 		url = e.BaseURL + "/models"
 	}
 	return openai.FetchModels(ctx, url, key)
-}
-
-// fetchModelsFromURL fetches models from a URL and returns the model IDs.
-func fetchModelsFromURL(url, apiKey string) ([]string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	return openai.FetchModels(ctx, url, apiKey)
 }

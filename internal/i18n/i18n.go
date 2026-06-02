@@ -229,39 +229,40 @@ type Messages struct {
 	APIKeyAlreadySetFmt        string // "reusing existing value for %s"
 
 	// custom provider
-	CustomProviderLabel     string // "Custom Model"
-	CustomProviderDesc      string // "Add third-party OpenAI compatible model"
-	CustomAddMethodLabel    string // "Select add method"
-	CustomMethodManual      string // "Enter model name manually"
-	CustomMethodURL         string // "Fetch models from URL"
-	CustomPromptModel       string // "Enter model name"
-	CustomPromptBaseURL     string // "Enter Base URL"
-	CustomPromptKeyEnv      string // "Enter API Key env var name"
-	CustomPromptAPIKey      string // "Enter API Key"
-	CustomAddedFmt          string // "Added custom model: %s"
+	CustomProviderLabel  string // "Custom Model"
+	CustomProviderDesc   string // "Add third-party OpenAI compatible model"
+	CustomAddMethodLabel string // "Select add method"
+	CustomMethodManual   string // "Enter model name manually"
+	CustomMethodURL      string // "Fetch models from URL"
+	CustomPromptModel    string // "Enter model name"
+	CustomPromptBaseURL  string // "Enter Base URL"
+	CustomPromptKeyEnv   string // "Enter API Key env var name"
+	CustomPromptAPIKey   string // "Enter API Key"
+	CustomAddedFmt       string // "Added custom model: %s"
 
 	// Anthropic compatible provider
-	AnthropicProviderLabel     string // "Anthropic Compatible"
-	AnthropicProviderDesc      string // "Add Anthropic API compatible model"
-	AnthropicAddMethodLabel    string // "Select add method"
-	AnthropicMethodManual      string // "Enter model name manually"
-	AnthropicMethodURL         string // "Fetch models from URL"
-	AnthropicPromptModel       string // "Enter model name"
-	AnthropicPromptBaseURL     string // "Enter Base URL"
-	AnthropicPromptKeyEnv      string // "Enter API Key env var name"
-	AnthropicPromptAPIKey      string // "Enter API Key"
-	AnthropicAddedFmt          string // "Added Anthropic compatible model: %s"
-	AnthropicFetchingModelsFmt string // "Fetching models for %s..."
+	AnthropicProviderLabel         string // "Anthropic Compatible"
+	AnthropicProviderDesc          string // "Add Anthropic API compatible model"
+	AnthropicAddMethodLabel        string // "Select add method"
+	AnthropicMethodManual          string // "Enter model name manually"
+	AnthropicMethodURL             string // "Fetch models from URL"
+	AnthropicPromptModel           string // "Enter model name"
+	AnthropicPromptBaseURL         string // "Enter Base URL"
+	AnthropicPromptKeyEnv          string // "Enter API Key env var name"
+	AnthropicPromptAPIKey          string // "Enter API Key"
+	AnthropicAddedFmt              string // "Added Anthropic compatible model: %s"
+	AnthropicFetchingModelsFmt     string // "Fetching models for %s..."
 	AnthropicFetchModelsSuccessFmt string // "Found %d models for %s"
-	AnthropicFetchModelsFailedFmt string // "Failed to fetch models for %s: %v"
-	AnthropicSelectModelsLabel string // "Select models to enable for %s"
+	AnthropicFetchModelsFailedFmt  string // "Failed to fetch models for %s: %v"
+	AnthropicSelectModelsLabel     string // "Select models to enable for %s"
 
 	// top-level / runAgent
-	UnknownCommandFmt string // "unknown command %q"
-	UsageRunHint      string // "usage: reasonix run [--model NAME] <task>"
-	ErrorPrefix       string // "error:" — prefix for fatal-error output
-	WriteConfigErr    string // "write config:" — prefix for write failure
-	WriteEnvErr       string // "write .env:" — prefix for env-write failure
+	UnknownCommandFmt         string // "unknown command %q"
+	UsageRunHint              string // "usage: reasonix run [--model NAME] <task>"
+	ErrorPrefix               string // "error:" — prefix for fatal-error output
+	ReconfigureOnUnknownModel string // shown when the configured model no longer resolves and setup is re-run
+	WriteConfigErr            string // "write config:" — prefix for write failure
+	WriteEnvErr               string // "write .env:" — prefix for env-write failure
 
 	// selection menus
 	SelectOneHint  string // "(↑/↓ · Enter · q to cancel)"

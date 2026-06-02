@@ -129,11 +129,11 @@ func TestGroupByFamily(t *testing.T) {
 	if got := order; !reflect.DeepEqual(got, []string{"deepseek", "mimo"}) {
 		t.Fatalf("family order = %v, want [deepseek mimo]", got)
 	}
-	if got := members["deepseek"]; !reflect.DeepEqual(got, []int{0}) {
-		t.Errorf("deepseek members = %v, want [0]", got)
+	if got := members["deepseek"]; !reflect.DeepEqual(got, []int{0, 1}) {
+		t.Errorf("deepseek members = %v, want [0 1]", got)
 	}
-	if got := members["mimo"]; !reflect.DeepEqual(got, []int{1, 2}) {
-		t.Errorf("mimo members = %v, want [1 2]", got)
+	if got := members["mimo"]; !reflect.DeepEqual(got, []int{2, 3}) {
+		t.Errorf("mimo members = %v, want [2 3]", got)
 	}
 	if info["deepseek"].name != "DeepSeek" || info["mimo"].name != "MiMo (Xiaomi)" {
 		t.Errorf("display names = %q / %q", info["deepseek"].name, info["mimo"].name)

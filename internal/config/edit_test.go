@@ -9,10 +9,10 @@ import (
 
 func TestSetDefaultModel(t *testing.T) {
 	c := Default()
-	if err := c.SetDefaultModel("mimo-tp"); err != nil {
+	if err := c.SetDefaultModel("mimo-pro"); err != nil {
 		t.Fatalf("set valid default: %v", err)
 	}
-	if c.DefaultModel != "mimo-tp" {
+	if c.DefaultModel != "mimo-pro" {
 		t.Errorf("default = %q, want mimo-pro", c.DefaultModel)
 	}
 	if err := c.SetDefaultModel("nope"); err == nil {
@@ -22,10 +22,10 @@ func TestSetDefaultModel(t *testing.T) {
 
 func TestSetPlannerModel(t *testing.T) {
 	c := Default()
-	if err := c.SetPlannerModel("deepseek"); err != nil {
+	if err := c.SetPlannerModel("deepseek-pro"); err != nil {
 		t.Fatalf("set planner: %v", err)
 	}
-	if c.Agent.PlannerModel != "deepseek" {
+	if c.Agent.PlannerModel != "deepseek-pro" {
 		t.Errorf("planner = %q", c.Agent.PlannerModel)
 	}
 	if err := c.SetPlannerModel(""); err != nil || c.Agent.PlannerModel != "" {
@@ -75,10 +75,10 @@ func TestUpsertProvider(t *testing.T) {
 
 func TestSetProviderEffort(t *testing.T) {
 	c := Default()
-	if err := c.SetProviderEffort("deepseek", "MAX"); err != nil {
+	if err := c.SetProviderEffort("deepseek-flash", "MAX"); err != nil {
 		t.Fatalf("SetProviderEffort: %v", err)
 	}
-	p, _ := c.Provider("deepseek")
+	p, _ := c.Provider("deepseek-flash")
 	if p.Effort != "max" {
 		t.Fatalf("effort = %q, want max", p.Effort)
 	}
@@ -139,13 +139,16 @@ func TestNormalizeEffortAnthropic(t *testing.T) {
 
 func TestResolveModelPreservesProviderEffort(t *testing.T) {
 	c := Default()
-	// Update the existing deepseek provider's effort to "max"
-	for i := range c.Providers {
-		if c.Providers[i].Name == "deepseek" {
-			c.Providers[i].Effort = "max"
-			break
-		}
-	}
+	c.Providers = append(c.Providers, ProviderEntry{
+		Name:      "deepseek",
+		Kind:      "openai",
+		BaseURL:   "https://api.deepseek.com",
+		Model:     "deepseek-v4-flash",
+		Models:    []string{"deepseek-v4-flash", "deepseek-v4-pro"},
+		Default:   "deepseek-v4-flash",
+		APIKeyEnv: "DEEPSEEK_API_KEY",
+		Effort:    "max",
+	})
 	e, ok := c.ResolveModel("deepseek/deepseek-v4-pro")
 	if !ok {
 		t.Fatal("ResolveModel did not find deepseek/deepseek-v4-pro")
@@ -157,20 +160,20 @@ func TestResolveModelPreservesProviderEffort(t *testing.T) {
 
 func TestRemoveProvider(t *testing.T) {
 	c := Default()
-	c.Agent.PlannerModel = "deepseek"
+	c.Agent.PlannerModel = "deepseek-pro"
 
 	// Cannot remove the default model.
 	if err := c.RemoveProvider(c.DefaultModel); err == nil {
 		t.Error("expected error removing the default model")
 	}
 	// Removing the planner provider clears planner_model.
-	if err := c.RemoveProvider("deepseek"); err != nil {
+	if err := c.RemoveProvider("deepseek-pro"); err != nil {
 		t.Fatalf("remove planner provider: %v", err)
 	}
 	if c.Agent.PlannerModel != "" {
 		t.Errorf("planner should be cleared, got %q", c.Agent.PlannerModel)
 	}
-	if _, ok := c.Provider("deepseek"); ok {
+	if _, ok := c.Provider("deepseek-pro"); ok {
 		t.Error("provider not actually removed")
 	}
 	// Unknown name errors.
@@ -302,10 +305,10 @@ func TestAutoStartPlugins(t *testing.T) {
 // re-decodes the file to confirm the changes survived a write/read cycle.
 func TestSaveToRoundTrips(t *testing.T) {
 	c := Default()
-	if err := c.SetDefaultModel("mimo-tp"); err != nil {
+	if err := c.SetDefaultModel("mimo-pro"); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.SetPlannerModel("deepseek"); err != nil {
+	if err := c.SetPlannerModel("deepseek-pro"); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.UpsertProvider(ProviderEntry{Name: "local", Kind: "openai", BaseURL: "http://localhost:1234/v1", Model: "llama"}); err != nil {
@@ -341,10 +344,10 @@ func TestSaveToRoundTrips(t *testing.T) {
 	if _, err := toml.DecodeFile(path, &got); err != nil {
 		t.Fatalf("saved file does not parse: %v", err)
 	}
-	if got.DefaultModel != "mimo-tp" {
+	if got.DefaultModel != "mimo-pro" {
 		t.Errorf("default_model = %q", got.DefaultModel)
 	}
-	if got.Agent.PlannerModel != "deepseek" {
+	if got.Agent.PlannerModel != "deepseek-pro" {
 		t.Errorf("planner_model = %q", got.Agent.PlannerModel)
 	}
 	if _, ok := got.Provider("local"); !ok {

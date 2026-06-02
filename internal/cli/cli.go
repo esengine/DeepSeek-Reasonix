@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/sha1"
 	"encoding/hex"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -21,11 +22,11 @@ import (
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
-	"reasonix/internal/provider/openai"
-	"time"
 	"reasonix/internal/i18n"
 	"reasonix/internal/provider"
+	"reasonix/internal/provider/openai"
 	"reasonix/internal/serve"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"golang.org/x/term"
@@ -267,6 +268,15 @@ func chatREPL(args []string) int {
 
 	sink := &eventSink{ch: eventCh}
 	ctrl, err := setup(ctx, *model, *maxSteps, false, sink)
+	if err != nil && errors.Is(err, boot.ErrUnknownModel) && isInteractive() {
+		// The configured model no longer resolves (e.g. a renamed/removed
+		// provider). Re-run the wizard instead of dead-ending, then retry.
+		fmt.Fprintln(os.Stderr, i18n.M.ReconfigureOnUnknownModel)
+		if rc := interactiveSetup("reasonix.toml"); rc != 0 {
+			return rc
+		}
+		ctrl, err = setup(ctx, *model, *maxSteps, false, sink)
+	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 1

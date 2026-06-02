@@ -10,6 +10,7 @@ package boot
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -36,6 +37,11 @@ import (
 	"reasonix/internal/tool"
 	"reasonix/internal/tool/builtin"
 )
+
+// ErrUnknownModel is returned by Build when the configured model can't be
+// resolved to a provider — e.g. a default_model left over from a renamed or
+// removed provider. Callers can detect it (errors.Is) to re-run setup.
+var ErrUnknownModel = errors.New("unknown model")
 
 // Options carries the per-run knobs a frontend chooses; everything else is read
 // from configuration. Model "" falls back to the configured default_model;
@@ -74,7 +80,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	}
 	entry, ok := cfg.ResolveModel(modelName)
 	if !ok {
-		return nil, fmt.Errorf("unknown model %q (configured: %s); note: defining [[providers]] replaces the built-in presets, so add a [[providers]] entry for it or use a configured name", modelName, providerNames(cfg))
+		return nil, fmt.Errorf("%w %q (configured: %s); note: defining [[providers]] replaces the built-in presets, so add a [[providers]] entry for it or use a configured name, or run `reasonix setup` to reconfigure", ErrUnknownModel, modelName, providerNames(cfg))
 	}
 	if opts.RequireKey {
 		if err := cfg.Validate(modelName); err != nil {

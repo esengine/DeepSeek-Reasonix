@@ -267,10 +267,10 @@ func TestEffortCommandWritesCurrentDeepSeekProvider(t *testing.T) {
 	isolateUserConfig(t)
 
 	m := newTestChatTUI()
-	m.ctrl = control.New(control.Options{Label: "deepseek"})
-	m.modelRef = "deepseek/deepseek-v4-flash"
+	m.ctrl = control.New(control.Options{Label: "deepseek-flash"})
+	m.modelRef = "deepseek-flash/deepseek-v4-flash"
 	m.buildController = func(_ string, _ []provider.Message) (*control.Controller, error) {
-		return control.New(control.Options{Label: "deepseek"}), nil
+		return control.New(control.Options{Label: "deepseek-flash"}), nil
 	}
 
 	cmd := m.runEffortCommand("/effort max")
