@@ -132,11 +132,8 @@ export interface AppBindings {
   CheckUpdate(): Promise<UpdateInfo | null>;
   ApplyUpdate(): Promise<void>;
   OpenDownloadPage(): Promise<void>;
-  // Onboarding: first-run overlay for the default provider's API key.
-  // NeedsOnboarding is true when DEEPSEEK_API_KEY (or whatever the default
-  // provider's key env is) is unset in the process. ConnectKey validates the
-  // key against the balance endpoint, persists it to ./.env, and rebuilds the
-  // controller — the frontend then transitions off the overlay on agent:ready.
+  // First-run overlay: NeedsOnboarding is true when the default provider key is
+  // unset; ConnectKey validates, persists to ./.env, and rebuilds the controller.
   NeedsOnboarding(): Promise<boolean>;
   ConnectKey(apiKey: string): Promise<void>;
 }
@@ -740,11 +737,10 @@ function makeMockApp(): AppBindings {
         window.open("https://github.com/esengine/reasonix/releases/latest", "_blank", "noopener");
       }
     },
-    // Onboarding mock: pretend the key is missing until the user "connects" so
-    // the overlay flow is exercisable in the browser dev seam. The real Wails
-    // shell overrides this and the overlay never appears once a key is set.
+    // Dev seam: drives the overlay flow in the browser until ConnectKey sets the
+    // key. Matches ConnectKey on apiKeyEnv so the two stay in sync.
     async NeedsOnboarding() {
-      return !settings.providers.find((p) => p.name === "deepseek-flash")?.keySet;
+      return !settings.providers.find((p) => p.apiKeyEnv === "DEEPSEEK_API_KEY")?.keySet;
     },
     async ConnectKey(apiKey: string) {
       if (!apiKey.trim()) throw new Error("key is required");

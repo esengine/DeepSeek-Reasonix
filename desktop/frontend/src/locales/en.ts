@@ -389,9 +389,7 @@ export const en = {
   "updater.retry": "Retry",
   "updater.dismiss": "Later",
 
-  // onboarding — first-run overlay shown when the default provider's API key
-  // is unset. The user pastes a key; we validate it against the vendor's
-  // balance endpoint (no tokens spent) and persist it to ./.env.
+  // onboarding — first-run API-key overlay
   "onboarding.title": "Connect Reasonix",
   "onboarding.tagline": "Paste a DeepSeek API key to start. Stored locally in .env, never sent anywhere else.",
   "onboarding.inputLabel": "API key",

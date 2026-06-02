@@ -162,10 +162,8 @@ export default function App() {
   } = useController();
   const t = useT();
   const [mode, setMode] = useState<Mode>("normal");
-  // Onboarding gate. null = not yet checked (show the regular loading screen),
-  // true = show the overlay, false = past onboarding, render the main UI.
-  // Probed exactly once on mount; the user clearing their key mid-session
-  // won't re-trigger the overlay (that's what the Settings panel is for).
+  // null until the mount probe resolves; true shows the overlay. Probed once —
+  // clearing the key mid-session is the Settings panel's job, not the gate's.
   const [needsOnboarding, setNeedsOnboarding] = useState<boolean | null>(null);
   const [memView, setMemView] = useState<MemoryView | null>(null);
   const [histView, setHistView] = useState<SessionMeta[] | null>(null);
@@ -318,10 +316,6 @@ export default function App() {
     void refreshSessions();
   }, [refreshSessions]);
 
-  // Probe the Go side for missing API key exactly once. We don't re-probe on
-  // meta changes because the only path that "adds a key" is the Settings
-  // panel, which calls SetProviderKey and a rebuild — the kernel then emits
-  // agent:ready and the regular UI is already mounted.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -329,11 +323,8 @@ export default function App() {
         const needs = await app.NeedsOnboarding();
         if (!cancelled) setNeedsOnboarding(needs);
       } catch {
-        // Bridge unavailable (browser dev mock missing the method, or
-        // pre-startup) — fall through to the regular UI; if the kernel
-        // can't load it, the existing topbar.startupError banner surfaces
-        // the reason. Treat as "no onboarding" so the user can still poke
-        // at the Settings panel.
+        // Bridge unavailable (browser dev seam) — skip the gate; a real key
+        // failure still surfaces via the topbar startupError banner.
         if (!cancelled) setNeedsOnboarding(false);
       }
     })();
@@ -994,10 +985,6 @@ export default function App() {
 
       {capsOpen && <CapabilitiesPanel onClose={() => setCapsOpen(false)} />}
 
-      {/* First-run gate: covers the whole app until the default provider's API
-          key is in place. onComplete fires after ConnectKey succeeds; the
-          kernel is already rebuilding in the background and will emit
-          agent:ready once the new controller is up. */}
       {needsOnboarding && <OnboardingOverlay onComplete={() => setNeedsOnboarding(false)} />}
     </div>
   );

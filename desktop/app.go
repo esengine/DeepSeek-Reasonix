@@ -1830,45 +1830,19 @@ func parseScope(s string) memory.Scope {
 	}
 }
 
-// onboardingKeyEnv is the API key the first-run overlay asks for. It matches the
-// default provider (deepseek) in config.Default(); once it's set the kernel can
-// boot. Other providers are configured later via the Settings panel.
+// onboardingKeyEnv is the default provider (deepseek) key from config.Default().
 const onboardingKeyEnv = "DEEPSEEK_API_KEY"
 
-// onboardingBalanceURL is the vendor balance endpoint that doubles as a
-// connectivity + auth probe — billing.FetchWithClient hits it with the user's
-// key and surfaces 401/403 for invalid keys. We use it instead of a separate
-// /models GET so the call costs zero tokens and reuses the existing billing
-// HTTP client (12s timeout, ctx-cancellable).
+// onboardingBalanceURL doubles as a zero-token connectivity + auth probe:
+// billing.FetchWithClient surfaces 401/403 for a bad key.
 const onboardingBalanceURL = "https://api.deepseek.com/user/balance"
 
-// NeedsOnboarding reports whether the first-run overlay should be shown. It
-// returns true when the default provider's API key env var is unset in the
-// process — which covers both a fresh install and a user who cleared their key
-// before launching. Cheap (no I/O, no config reload), so the frontend can call
-// it once on mount.
 func (a *App) NeedsOnboarding() bool {
 	return strings.TrimSpace(os.Getenv(onboardingKeyEnv)) == ""
 }
 
-// ConnectKey validates apiKey against the default provider's balance endpoint
-// and, on success, persists it to ./.env (via upsertDotEnv, which also sets the
-// process env so the next rebuild picks it up). The validation reuses
-// billing.FetchWithClient — a 12s timeout, a network call that costs no tokens
-// — so a typo'd key surfaces as 401 quickly. After writing the key we trigger
-// a controller rebuild; the kernel emits agent:ready once boot.Build completes
-// and the frontend then transitions off the overlay.
-//
-// Errors:
-//   - empty key → "key is required"
-//   - HTTP 401/403 → wrapped status so the UI can show "invalid key"
-//   - network/dial failure → wrapped; the UI shows "network unreachable"
-//   - any other HTTP status → wrapped
-//
-// Note: this method is bound to the UI before boot.Build has necessarily
-// finished. The rebuild below re-issues boot.Build with the freshly-set env
-// var; if the kernel already booted (key was empty so it built no controller),
-// this is the first real build, otherwise it's a rebuild.
+// ConnectKey validates apiKey against the balance endpoint, persists it to
+// ./.env, and rebuilds the controller so the new key takes effect.
 func (a *App) ConnectKey(apiKey string) error {
 	apiKey = strings.TrimSpace(apiKey)
 	if apiKey == "" {
@@ -1876,19 +1850,14 @@ func (a *App) ConnectKey(apiKey string) error {
 	}
 	ctx, cancel := context.WithTimeout(a.ctx, 8*time.Second)
 	defer cancel()
-	// FetchWithClient returns (nil, nil) when the url is empty — we never hit
-	// that path (onboardingBalanceURL is constant), but be defensive.
 	if _, err := billing.FetchWithClient(ctx, nil, onboardingBalanceURL, apiKey); err != nil {
 		return fmt.Errorf("validate: %w", err)
 	}
 	if err := upsertDotEnv(onboardingKeyEnv, apiKey); err != nil {
 		return fmt.Errorf("save: %w", err)
 	}
-	// rebuild the controller so the new key takes effect; startupErr is cleared
-	// by rebuild on success, so the topbar banner disappears on agent:ready.
 	if err := a.rebuild(); err != nil {
-		// Keep going — the key is persisted; the next user action that
-		// triggers a rebuild (e.g. /model switch) will load it.
+		// Key is persisted; surface the failure but let the next rebuild load it.
 		a.mu.Lock()
 		a.startupErr = err.Error()
 		a.mu.Unlock()

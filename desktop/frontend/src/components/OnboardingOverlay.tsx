@@ -3,20 +3,8 @@ import logo from "../assets/logo.svg";
 import { useT } from "../lib/i18n";
 import { app, openExternal } from "../lib/bridge";
 
-// OnboardingOverlay is the full-window first-run gate. Shown by App when
-// NeedsOnboarding() returns true (the default provider's API key is unset).
-// It validates the pasted key against the provider's balance endpoint, writes
-// it to ./.env via Go, and triggers a controller rebuild — the overlay stays
-// up until App's useController hook picks up agent:ready and the parent
-// drops needsOnboarding back to false. Three states the UI walks through:
-//
-//   idle        → paste a key, click "Connect & start"
-//   validating  → button shows a spinner, the input is locked
-//   error       → red banner with the kernel's reason; user can retry
-//
-// We deliberately don't auto-focus the input on mount: the user may be reading
-// the privacy / "where to get a key" copy first, and yanking focus before
-// they've decided feels pushy.
+// Full-window first-run gate: validate a pasted key via Go, then onComplete
+// unmounts us so the rebuilt controller's main UI takes over.
 export function OnboardingOverlay({ onComplete }: { onComplete: () => void }) {
   const t = useT();
   const [value, setValue] = useState("");
@@ -36,17 +24,8 @@ export function OnboardingOverlay({ onComplete }: { onComplete: () => void }) {
     setError(null);
     try {
       await app.ConnectKey(key);
-      // The Go side rebuilds the controller and emits agent:ready; the
-      // parent's useController hook will pick that up and refresh Meta/
-      // History. We just need to unmount ourselves so the main UI takes over.
-      // If the rebuild throws the key is still persisted and the next
-      // controller rebuild will pick it up, so leaving the overlay showing
-      // on error is the safer behavior.
       onComplete();
     } catch (e) {
-      // The kernel returns human-readable errors for the common cases
-      // (401 → "invalid key", dial failure → "network unreachable"). Map the
-      // 401/403 status text to a friendlier i18n key when we recognize it.
       const msg = e instanceof Error ? e.message : String(e);
       if (/status\s*401|status\s*403|invalid/i.test(msg)) {
         setError(t("onboarding.error.invalid"));

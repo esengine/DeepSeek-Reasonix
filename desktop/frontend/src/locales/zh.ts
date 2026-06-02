@@ -390,8 +390,7 @@ export const zh: Record<DictKey, string> = {
   "updater.retry": "重试",
   "updater.dismiss": "稍后",
 
-  // 首次启动引导：默认 provider 的 API key 未设置时显示。用户粘贴 key 后，
-  // 我们用 vendor 的余额接口做零 token 校验，然后写入 ./.env。
+  // onboarding — first-run API-key overlay
   "onboarding.title": "连接 Reasonix",
   "onboarding.tagline": "粘贴一个 DeepSeek API key 即可开始。密钥仅存于本机的 .env，不会发往任何地方。",
   "onboarding.inputLabel": "API 密钥",
