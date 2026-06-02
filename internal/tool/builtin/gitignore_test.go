@@ -17,6 +17,64 @@ func writeFileT(t *testing.T, path, body string) {
 	}
 }
 
+func mkRepo(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func TestGrepNestedGitignore(t *testing.T) {
+	dir := mkRepo(t)
+	writeFileT(t, filepath.Join(dir, ".gitignore"), "*.log\n")
+	writeFileT(t, filepath.Join(dir, "pkg", ".gitignore"), "secret.txt\n")
+	writeFileT(t, filepath.Join(dir, "pkg", "keep.go"), "NEEDLE\n")
+	writeFileT(t, filepath.Join(dir, "pkg", "secret.txt"), "NEEDLE\n") // ignored by nested
+	writeFileT(t, filepath.Join(dir, "pkg", "app.log"), "NEEDLE\n")    // ignored by root
+
+	out := runTool(t, grepTool{}, map[string]any{"pattern": "NEEDLE", "path": dir})
+	if !strings.Contains(out, "keep.go") {
+		t.Fatalf("kept file must be found: %q", out)
+	}
+	if strings.Contains(out, "secret.txt") {
+		t.Fatalf("a nested .gitignore must apply: %q", out)
+	}
+	if strings.Contains(out, "app.log") {
+		t.Fatalf("an ancestor .gitignore must apply in subdirs: %q", out)
+	}
+}
+
+func TestGrepNestedNegationReincludes(t *testing.T) {
+	t.Skip("known gap: a nested !negation re-including an ancestor-ignored file is not yet honored (see walkIgnorer.ignored)")
+}
+
+func TestGrepSkipsHidden(t *testing.T) {
+	dir := mkRepo(t)
+	writeFileT(t, filepath.Join(dir, "visible.txt"), "NEEDLE\n")
+	writeFileT(t, filepath.Join(dir, ".env"), "NEEDLE\n")
+	writeFileT(t, filepath.Join(dir, ".github", "ci.yml"), "NEEDLE\n")
+
+	out := runTool(t, grepTool{}, map[string]any{"pattern": "NEEDLE", "path": dir})
+	if !strings.Contains(out, "visible.txt") {
+		t.Fatalf("a visible file must be found: %q", out)
+	}
+	if strings.Contains(out, ".env") || strings.Contains(out, "ci.yml") {
+		t.Fatalf("hidden files/dirs must be skipped by default: %q", out)
+	}
+}
+
+func TestGrepExplicitHiddenRootSearched(t *testing.T) {
+	dir := mkRepo(t)
+	writeFileT(t, filepath.Join(dir, ".github", "ci.yml"), "NEEDLE\n")
+	// Pointing grep straight at a hidden dir searches it in full.
+	out := runTool(t, grepTool{}, map[string]any{"pattern": "NEEDLE", "path": filepath.Join(dir, ".github")})
+	if !strings.Contains(out, "ci.yml") {
+		t.Fatalf("an explicitly targeted hidden dir should be searched: %q", out)
+	}
+}
+
 // repo scaffolds a fake git repo: a .git marker, a .gitignore, and files both
 // kept and ignored — enough for the native grep walk to exercise .gitignore.
 func gitignoreRepo(t *testing.T) string {

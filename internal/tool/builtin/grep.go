@@ -37,7 +37,7 @@ func (g grepTool) Description() string {
 	if g.rg != "" {
 		return "Search for a regular expression in a file, or recursively under a directory — ripgrep-backed, so it honors .gitignore. Returns matching lines as path:line:text, capped at 200 matches."
 	}
-	return "Search for a regular expression in a file, or recursively under a directory (skips files matched by .gitignore). Returns matching lines as path:line:text, capped at 200 matches."
+	return "Search for a regular expression in a file, or recursively under a directory (skips hidden files and files matched by .gitignore). Returns matching lines as path:line:text, capped at 200 matches."
 }
 
 func (grepTool) Schema() json.RawMessage {
@@ -164,6 +164,7 @@ func (g grepTool) Execute(ctx context.Context, args json.RawMessage) (string, er
 				if ig.skip(path, d.Name(), true) {
 					return filepath.SkipDir
 				}
+				ig.enter(path)
 				return nil
 			}
 			if ig.skip(path, d.Name(), false) {
