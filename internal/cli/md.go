@@ -10,7 +10,9 @@ import (
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/extension"
 	extast "github.com/yuin/goldmark/extension/ast"
+	"github.com/yuin/goldmark/parser"
 	"github.com/yuin/goldmark/text"
+	"github.com/yuin/goldmark/util"
 )
 
 // mdRenderer turns the model's markdown answer into ANSI-styled terminal text
@@ -31,7 +33,12 @@ func newMarkdownRenderer(width int) *mdRenderer {
 	// Enable the GFM table extension so | header | rows | get parsed into
 	// a Table node rather than falling through as a literal text block.
 	return &mdRenderer{
-		md:    goldmark.New(goldmark.WithExtensions(extension.Table)),
+		md: goldmark.New(
+			goldmark.WithExtensions(extension.Table),
+			goldmark.WithParserOptions(
+				parser.WithInlineParsers(util.Prioritized(&mathParser{}, 150)),
+			),
+		),
 		width: width,
 	}
 }
@@ -50,7 +57,7 @@ func (r *mdRenderer) Render(input string) string {
 	if strings.TrimSpace(input) == "" {
 		return ""
 	}
-	input = fixCJKEmphasis(input)
+	input = fixCJKEmphasis(normalizeMath(input))
 	src := []byte(input)
 	doc := r.md.Parser().Parse(text.NewReader(src))
 	var buf strings.Builder
@@ -338,6 +345,8 @@ func (r *mdRenderer) appendInline(b *strings.Builder, n ast.Node, src []byte) {
 			b.WriteString(string(v.URL(src)))
 		case *ast.RawHTML:
 			// drop — rare in chat output and would print as literal escapes
+		case *mathNode:
+			b.WriteString(italic(v.value))
 		case *ast.String:
 			b.Write(v.Value)
 		default:
