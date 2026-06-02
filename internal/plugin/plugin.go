@@ -316,10 +316,21 @@ func (h *Host) StartPhaseB(ctx context.Context, sink event.Sink) {
 }
 
 func (h *Host) fetchPrompts(ctx context.Context, c *Client, sink event.Sink) {
-	ps, err := c.listPrompts(ctx)
+	aux, auxCtx, cancel, err := c.auxiliaryClient(ctx)
+	if err != nil {
+		slog.Warn("plugin: start auxiliary prompt client failed", "server", c.name, "err", err)
+		return
+	}
+	defer cancel()
+	defer aux.close()
+
+	ps, err := aux.listPrompts(auxCtx)
 	if err != nil {
 		slog.Warn("plugin: listPrompts failed", "server", c.name, "err", err)
 		return
+	}
+	for i := range ps {
+		ps[i].client = c
 	}
 	h.mu.Lock()
 	c.prompts = ps
@@ -334,7 +345,15 @@ func (h *Host) fetchPrompts(ctx context.Context, c *Client, sink event.Sink) {
 }
 
 func (h *Host) fetchResources(ctx context.Context, c *Client, sink event.Sink) {
-	rs, err := c.listResources(ctx)
+	aux, auxCtx, cancel, err := c.auxiliaryClient(ctx)
+	if err != nil {
+		slog.Warn("plugin: start auxiliary resource client failed", "server", c.name, "err", err)
+		return
+	}
+	defer cancel()
+	defer aux.close()
+
+	rs, err := aux.listResources(auxCtx)
 	if err != nil {
 		slog.Warn("plugin: listResources failed", "server", c.name, "err", err)
 		return
@@ -357,6 +376,7 @@ func (h *Host) fetchResources(ctx context.Context, c *Client, sink event.Sink) {
 type Client struct {
 	name string
 	t    transport
+	spec Spec
 
 	// Capabilities advertised by the server at initialize. prompts/list and
 	// resources/list are only called when advertised, so we never provoke a
@@ -372,6 +392,16 @@ type Client struct {
 	prompts   []Prompt
 	resources []Resource
 	tools     []ToolInfo
+}
+
+func (c *Client) auxiliaryClient(ctx context.Context) (*Client, context.Context, context.CancelFunc, error) {
+	auxCtx, cancel := context.WithTimeout(ctx, defaultStartTimeout)
+	aux, err := start(auxCtx, auxCtx, c.spec)
+	if err != nil {
+		cancel()
+		return nil, nil, nil, err
+	}
+	return aux, auxCtx, cancel, nil
 }
 
 // ToolInfo is the human-facing metadata returned by MCP tools/list for one tool.
@@ -578,7 +608,7 @@ func start(lifeCtx, callCtx context.Context, s Spec) (*Client, error) {
 	if tt == "" {
 		tt = "stdio"
 	}
-	c := &Client{name: s.Name, t: t, transport: tt}
+	c := &Client{name: s.Name, t: t, spec: s, transport: tt}
 	if err := c.initialize(callCtx); err != nil {
 		c.close()
 		return nil, err

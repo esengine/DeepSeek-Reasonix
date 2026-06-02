@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"reasonix/internal/event"
+	"reasonix/internal/tool"
 )
 
 // TestStdioEndToEnd drives a real subprocess (this test binary re-invoked in
@@ -408,6 +409,49 @@ func TestStartPhaseAReturnsBeforePhaseB(t *testing.T) {
 
 	if got := host.Prompts(); len(got) != 1 || got[0].Raw != "hello" {
 		t.Fatalf("after phase B, prompts = %+v, want one named hello", got)
+	}
+}
+
+func TestStartPhaseBDoesNotBlockToolCalls(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	spec := Spec{
+		Name:    "mock",
+		Command: os.Args[0],
+		Args:    []string{"-test.run=TestHelperProcess", "--"},
+		Env: map[string]string{
+			"GO_WANT_HELPER_PROCESS":         "1",
+			"GO_WANT_HELPER_PROMPTS":         "1",
+			"GO_WANT_HELPER_PROMPT_DELAY_MS": "1000",
+		},
+	}
+
+	host, tools := StartAvailable(ctx, []Spec{spec})
+	defer host.Close()
+
+	var echo tool.Tool
+	for _, t := range tools {
+		if t.Name() == "mcp__mock__echo" {
+			echo = t
+			break
+		}
+	}
+	if echo == nil {
+		t.Fatal("missing echo tool")
+	}
+
+	host.StartPhaseB(ctx, event.Discard)
+	time.Sleep(50 * time.Millisecond)
+
+	callCtx, callCancel := context.WithTimeout(ctx, 150*time.Millisecond)
+	defer callCancel()
+	out, err := echo.Execute(callCtx, json.RawMessage(`{"msg":"hi"}`))
+	if err != nil {
+		t.Fatalf("tool call should not be blocked by background prompts/list: %v", err)
+	}
+	if out != "echo: hi" {
+		t.Fatalf("Execute result = %q, want %q", out, "echo: hi")
 	}
 }
 
