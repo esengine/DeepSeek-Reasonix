@@ -1661,7 +1661,10 @@ func (c *Controller) requestApproval(ctx context.Context, tool, subject string) 
 	key := tool + "\x00" + subject
 
 	c.mu.Lock()
-	if c.granted[key] {
+	// YOLO/bypass and the just-approved-plan window auto-allow every approval
+	// without prompting; the plan gate routes through here too, so this is what
+	// stops a bypass session from blocking on plan approval. Deny rules bit upstream.
+	if c.bypass || c.autoApprove || c.granted[key] {
 		c.mu.Unlock()
 		return true, false, nil
 	}
