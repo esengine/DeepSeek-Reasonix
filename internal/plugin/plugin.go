@@ -71,6 +71,10 @@ type Host struct {
 	prompts   []Prompt
 	resources []Resource
 	failures  []Failure
+
+	// Detached stats/schema-cache writers from Start; off the boot path but
+	// drained by Close so cleanup can't race a still-open cache file.
+	bgWrites sync.WaitGroup
 }
 
 // Prompts returns every MCP prompt discovered across connected servers.
@@ -209,6 +213,9 @@ func Start(ctx context.Context, specs []Spec, p StartPolicy) (*Host, []tool.Tool
 	sem := make(chan struct{}, concurrency)
 	ch := make(chan result, len(specs))
 
+	// Created before the fan-out so the detached cache writers can join bgWrites.
+	h := &Host{}
+
 	for i, s := range specs {
 		go func(idx int, spec Spec) {
 			sem <- struct{}{}
@@ -231,7 +238,8 @@ func Start(ctx context.Context, specs []Spec, p StartPolicy) (*Host, []tool.Tool
 			if err != nil {
 				phaseADur := time.Since(phaseAStart)
 				cancelStartup()
-				go func() { _ = RecordStartup(spec.Name, phaseADur) }()
+				h.bgWrites.Add(1)
+				go func() { defer h.bgWrites.Done(); _ = RecordStartup(spec.Name, phaseADur) }()
 				ch <- result{idx: idx, spec: spec, err: fmt.Errorf("start plugin %q: %w", spec.Name, err)}
 				return
 			}
@@ -240,7 +248,8 @@ func Start(ctx context.Context, specs []Spec, p StartPolicy) (*Host, []tool.Tool
 			if err != nil {
 				phaseADur := time.Since(phaseAStart)
 				cancelStartup()
-				go func() { _ = RecordStartup(spec.Name, phaseADur) }()
+				h.bgWrites.Add(1)
+				go func() { defer h.bgWrites.Done(); _ = RecordStartup(spec.Name, phaseADur) }()
 				c.close()
 				ch <- result{idx: idx, spec: spec, err: fmt.Errorf("list tools from %q: %w", spec.Name, err)}
 				return
@@ -252,7 +261,9 @@ func Start(ctx context.Context, specs []Spec, p StartPolicy) (*Host, []tool.Tool
 			// recoverable (we just re-handshake or skip auto-demote).
 			phaseADur := time.Since(phaseAStart)
 			cancelStartup()
+			h.bgWrites.Add(1)
 			go func() {
+				defer h.bgWrites.Done()
 				_ = RecordStartup(spec.Name, phaseADur)
 				_ = SaveCachedSchema(spec.Name, CachedSchema{
 					SpecHash: SpecFingerprint(spec),
@@ -279,7 +290,6 @@ func Start(ctx context.Context, specs []Spec, p StartPolicy) (*Host, []tool.Tool
 		results[r.idx] = r
 	}
 
-	h := &Host{}
 	var tools []tool.Tool
 	var firstErr error
 	for _, r := range results {
@@ -312,6 +322,7 @@ func (h *Host) Close() {
 	for _, c := range clients {
 		c.close()
 	}
+	h.bgWrites.Wait() // drain detached stats/schema writers before returning
 }
 
 // StartPhaseB asynchronously fetches the auxiliary surfaces (prompts and
