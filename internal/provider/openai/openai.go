@@ -46,9 +46,9 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		switch effort {
 		case "":
 			effort = "high"
-		case "high", "max", "off":
+		case "high", "max":
 		default:
-			return nil, fmt.Errorf("openai: provider %q uses DeepSeek thinking; effort must be high, max, or off", name)
+			return nil, fmt.Errorf("openai: provider %q uses DeepSeek thinking; effort must be high or max", name)
 		}
 	}
 	httpClient, err := newHTTPClient(cfg)
@@ -244,10 +244,6 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 	}
 	if c.deepseek {
 		out.Thinking = &thinkingMode{Type: "enabled"}
-		if c.effort == "off" {
-			out.Thinking.Type = "disabled"
-			out.ReasoningEffort = ""
-		}
 	}
 	return out
 }

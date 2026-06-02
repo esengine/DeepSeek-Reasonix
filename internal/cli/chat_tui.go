@@ -201,6 +201,7 @@ type chatTUI struct {
 	// modelRef is the active "provider/model" ref, marked current in the picker.
 	buildController func(ref string, carry []provider.Message) (*control.Controller, error)
 	modelRef        string
+	effortLevel     string // "" when the current provider/model has no configurable effort
 
 	// outputStyle is the active output-style name (config agent.output_style),
 	// shown as the current entry in the /output-style listing. "" = default.
@@ -904,6 +905,7 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.skills = msg.skills
 			m.host = msg.host
 			m.modelRef = msg.ref
+			m.refreshEffortStatus()
 			// Stash the old controller for cleanup at exit. It cannot be
 			// closed here or in the build goroutine — Close() runs
 			// SessionEnd hooks and kills plugin subprocesses, both of
@@ -1353,7 +1355,8 @@ var (
 			BorderForeground(lipgloss.Color("240")).
 			PaddingLeft(1)
 
-	statusStyle = lipgloss.NewStyle().Faint(true)
+	statusBlockStyle = lipgloss.NewStyle()
+	workingStyle     = lipgloss.NewStyle().Faint(true)
 )
 
 func (m chatTUI) View() tea.View {
@@ -1366,11 +1369,21 @@ func (m chatTUI) View() tea.View {
 	var modeTag string
 	switch {
 	case m.ctrl.Bypass():
-		modeTag = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true).Render("[YOLO]")
+		modeTag = lipgloss.NewStyle().
+			Background(lipgloss.Color("#e5484d")).
+			Foreground(lipgloss.Color("#ffffff")).
+			Bold(true).
+			Padding(0, 1).
+			Render("YOLO")
 	case m.planMode:
-		modeTag = yellow("[plan]")
+		modeTag = lipgloss.NewStyle().
+			Background(lipgloss.Color("#2563eb")).
+			Foreground(lipgloss.Color("#ffffff")).
+			Bold(true).
+			Padding(0, 1).
+			Render("Plan")
 	default:
-		modeTag = dim("[auto]")
+		modeTag = dim("Auto")
 	}
 
 	ctxTag := m.contextTag()
@@ -1384,6 +1397,8 @@ func (m chatTUI) View() tea.View {
 		status = "  " + modeTag + " · " + i18n.M.ChatStatusPlanApproval
 	case m.pendingApproval != nil:
 		status = "  " + modeTag + " · " + i18n.M.ChatStatusToolApproval
+	case m.ctrl.Bypass():
+		status = "  " + modeTag + " · " + i18n.M.ChatStatusYoloIdle
 	default:
 		status = "  " + modeTag + " · " + i18n.M.ChatStatusIdle
 	}
@@ -1397,12 +1412,18 @@ func (m chatTUI) View() tea.View {
 			working += " · ↓" + shortTokens(m.turnTokens)
 		}
 	}
-	// Second status row: the live data (context gauge, cache rates, jobs,
-	// balance). It lives on its own fixed row so it's always shown in full rather
-	// than being truncated off the end of the keybinding hints on line 1. Two
-	// rows is a fixed height, so unlike a wrap-when-long status it doesn't
-	// reintroduce resize ghosting.
+	// Second status row: the live data (model, effort, context gauge, cache rates,
+	// jobs, balance). It lives on its own fixed row so it's always shown in full
+	// rather than being truncated off the end of the status line. Two rows is a
+	// fixed height, so unlike a wrap-when-long status it doesn't reintroduce
+	// resize ghosting.
 	var data []string
+	if mt := m.modelTag(); mt != "" {
+		data = append(data, mt)
+	}
+	if et := m.effortTag(); et != "" {
+		data = append(data, et)
+	}
 	if ctxTag != "" {
 		data = append(data, ctxTag)
 	}
@@ -1451,11 +1472,11 @@ func (m chatTUI) View() tea.View {
 	// Each row is clamped to width independently so neither wraps; padding to full
 	// width keeps a short row from leaving stale cells from the prior frame.
 	if working != "" {
-		parts = append(parts, statusStyle.Width(boxW).MaxWidth(boxW).Render(clampStatusLine(working, boxW)))
+		parts = append(parts, workingStyle.Width(boxW).MaxWidth(boxW).Render(clampStatusLine(working, boxW)))
 		rowsAboveBox++
 	}
 	statusBlock := clampStatusLine(status, boxW) + "\n" + clampStatusLine(dataLine, boxW)
-	parts = append(parts, box, statusStyle.Width(boxW).MaxWidth(boxW).Render(statusBlock))
+	parts = append(parts, box, statusBlockStyle.Width(boxW).MaxWidth(boxW).Render(statusBlock))
 
 	// Full-screen frame: the transcript viewport on top (it pads to exactly its
 	// height), the pinned bottom region beneath. Alt-screen owns the grid, so
@@ -1578,6 +1599,24 @@ func (m chatTUI) jobsTag() string {
 		return ""
 	}
 	return dim(fmt.Sprintf("⚙ %d", n))
+}
+
+func (m chatTUI) modelTag() string {
+	if strings.TrimSpace(m.label) == "" {
+		return ""
+	}
+	return dim(m.label)
+}
+
+func (m chatTUI) effortTag() string {
+	if m.effortLevel == "" {
+		return ""
+	}
+	body := "effort " + m.effortLevel
+	if m.effortLevel != "auto" {
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#2563eb")).Bold(true).Render(body)
+	}
+	return dim(body)
 }
 
 // shortTokens prints token counts compactly: 142_000 → "142K", 1_000_000 → "1M".
@@ -2315,8 +2354,8 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 		m.notice(i18n.M.SlashTodoCleared)
 	case "/verbose":
 		m.toggleVerboseReasoning(true)
-	case "/thinking":
-		return m.runThinkingCommand(input)
+	case "/effort":
+		return m.runEffortCommand(input)
 	case "/rewind":
 		m.echoLocalCommand(input)
 		m.openRewind()

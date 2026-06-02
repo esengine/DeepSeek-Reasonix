@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { Cpu, Wallet } from "lucide-react";
+import { EffortSwitcher } from "./EffortSwitcher";
 import { ModelSwitcher } from "./ModelSwitcher";
 import { SPINNER_WORDS, useI18n } from "../lib/i18n";
-import type { BalanceInfo, ContextInfo, JobView, Meta, Mode, WireUsage } from "../lib/types";
+import type { BalanceInfo, ContextInfo, EffortInfo, JobView, Meta, Mode, WireUsage } from "../lib/types";
 
 // JobsChip is the status-bar background-jobs indicator: a count that opens an
 // upward popover listing the running jobs (id · label · status), mirroring the
@@ -84,23 +85,27 @@ export function StatusBar({
   context,
   usage,
   balance,
+  effort,
   jobs,
   running,
   mode,
   turnStartAt,
   turnTokens,
   onSwitchModel,
+  onSetEffort,
 }: {
   meta?: Meta;
   context: ContextInfo;
   usage?: WireUsage;
   balance?: BalanceInfo;
+  effort?: EffortInfo;
   jobs?: JobView[];
   running: boolean;
   mode: Mode;
   turnStartAt: number;
   turnTokens: number;
   onSwitchModel: (name: string) => void;
+  onSetEffort: (level: string) => void;
 }) {
   const { t, locale } = useI18n();
   const now = useTick(running);
@@ -123,6 +128,12 @@ export function StatusBar({
     <div className="statusbar">
       <span className={`statusbar__dot ${running ? "statusbar__dot--busy" : ""}`} />
       <ModelSwitcher label={meta?.label ?? t("status.connecting")} onPick={onSwitchModel} />
+      {effort?.supported && (
+        <>
+          <span className="statusbar__sep">·</span>
+          <EffortSwitcher effort={effort} disabled={running} onPick={onSetEffort} />
+        </>
+      )}
       {activity ? (
         <>
           <span className="statusbar__sep">·</span>

@@ -28,8 +28,8 @@ func TestSlashArgItems(t *testing.T) {
 		Skills:          []skill.Skill{{Name: "explore", Scope: skill.ScopeBuiltin}, {Name: "review", Scope: skill.ScopeBuiltin}},
 		ServerNames:     []string{"fs", "git"},
 		DisconnectedMCP: []string{"optional"},
-		ModelRefs:       []string{"deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-pro"},
-		CurrentModel:    "deepseek/deepseek-v4-flash",
+		ModelRefs:       []string{"deepseek-flash/deepseek-v4-flash", "deepseek-pro/deepseek-v4-pro"},
+		CurrentModel:    "deepseek-flash/deepseek-v4-flash",
 	}
 
 	// /skill subcommands
@@ -64,7 +64,7 @@ func TestSlashArgItems(t *testing.T) {
 	}
 	// /model → refs, current marked
 	items, _ = SlashArgItems("/model ", data)
-	if !has(items, "deepseek/deepseek-v4-pro") {
+	if !has(items, "deepseek-pro/deepseek-v4-pro") {
 		t.Errorf("/model should list refs; got %v", labelsOf(items))
 	}
 	for _, it := range items {
@@ -77,10 +77,10 @@ func TestSlashArgItems(t *testing.T) {
 	if !has(items, "list") || !has(items, "trust") {
 		t.Errorf("/hooks should offer list/trust; got %v", labelsOf(items))
 	}
-	// /thinking
-	items, _ = SlashArgItems("/thinking ", data)
-	if !has(items, "high") || !has(items, "max") || !has(items, "off") {
-		t.Errorf("/thinking should offer high/max/off; got %v", labelsOf(items))
+	// /effort
+	items, _ = SlashArgItems("/effort ", data)
+	if !has(items, "auto") || !has(items, "high") || !has(items, "max") || has(items, "off") {
+		t.Errorf("/effort should offer auto/high/max only; got %v", labelsOf(items))
 	}
 	// a non-structured command yields nothing
 	if items, _ := SlashArgItems("/help ", data); len(items) != 0 {

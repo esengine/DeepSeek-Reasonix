@@ -1953,6 +1953,22 @@ body {
   font-size: 11.5px;
 }
 
+/* effort switcher: same status-bar affordance as the model switcher */
+.effortsw__trigger {
+  --wails-draggable: no-drag;
+}
+.effortsw__trigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.effortsw__trigger--explicit {
+  color: var(--accent);
+}
+.effortsw__menu {
+  min-width: 112px;
+  max-width: 160px;
+}
+
 /* ── approval modal ──────────────────────────────────────────────────────── */
 .modal-backdrop {
   position: fixed;

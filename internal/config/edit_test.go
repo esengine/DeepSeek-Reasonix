@@ -87,6 +87,41 @@ func TestSetProviderEffort(t *testing.T) {
 	}
 }
 
+func TestNormalizeEffortDeepSeek(t *testing.T) {
+	e := &ProviderEntry{Name: "deepseek", Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4"}
+	cap := EffortCapabilityForEntry(e)
+	if !cap.Supported || len(cap.Levels) != 3 || cap.Levels[0] != "auto" || cap.Levels[1] != "high" || cap.Levels[2] != "max" {
+		t.Fatalf("DeepSeek levels = %+v, want auto/high/max", cap)
+	}
+	for in, want := range map[string]string{"auto": "", "high": "high", "max": "max", "low": "high", "medium": "high", "xhigh": "max"} {
+		got, err := NormalizeEffort(e, in)
+		if err != nil || got != want {
+			t.Fatalf("NormalizeEffort(%q) = %q/%v, want %q/nil", in, got, err, want)
+		}
+	}
+	if _, err := NormalizeEffort(e, "off"); err == nil {
+		t.Fatal("DeepSeek /effort must reject off")
+	}
+}
+
+func TestNormalizeEffortAnthropic(t *testing.T) {
+	e := &ProviderEntry{Name: "claude", Kind: "anthropic", Model: "claude-opus-4-8"}
+	cap := EffortCapabilityForEntry(e)
+	if !cap.Supported || len(cap.Levels) != 6 {
+		t.Fatalf("Anthropic levels = %+v, want auto plus five levels", cap)
+	}
+	for _, level := range []string{"low", "medium", "high", "xhigh", "max"} {
+		got, err := NormalizeEffort(e, level)
+		if err != nil || got != level {
+			t.Fatalf("NormalizeEffort(%q) = %q/%v, want %q/nil", level, got, err, level)
+		}
+	}
+	got, err := NormalizeEffort(e, "auto")
+	if err != nil || got != "" {
+		t.Fatalf("NormalizeEffort(auto) = %q/%v, want empty/nil", got, err)
+	}
+}
+
 func TestResolveModelPreservesProviderEffort(t *testing.T) {
 	c := Default()
 	c.Providers = append(c.Providers, ProviderEntry{

@@ -66,6 +66,7 @@ type Messages struct {
 	ChatThoughtForFmt      string // collapsed reasoning summary, "%d" = elapsed s
 	ChatStatusThinkingFmt  string // "%s thinking… (%ds · <cancel hint>)" — %s = spinner, %d = elapsed s
 	ChatStatusIdle         string // shortcuts hint when idle
+	ChatStatusYoloIdle     string // shortcuts hint when idle in YOLO/bypass mode
 	ChatStatusPlanApproval string // shortcuts hint while a plan is pending
 	PlanApprovalPrompt     string // one-line "plan above is ready" banner shown above the input
 	ChatStatusToolApproval string // shortcuts hint while a tool call awaits approval
@@ -129,7 +130,7 @@ type Messages struct {
 	CmdOutputStyle  string // /output-style
 	CmdSkill        string // /skill
 	CmdVerbose      string // /verbose
-	CmdThinking     string // /thinking
+	CmdEffort       string // /effort
 	CmdHelp         string // /help
 	CmdTodo         string // /todo
 	CmdQuit         string // /quit (also accepts /exit as hidden alias)
@@ -144,9 +145,12 @@ type Messages struct {
 	ArgHooksList    string // /hooks list
 	ArgHooksTrust   string // /hooks trust
 	ArgModelCurrent string // /model <ref> active tag
-	ArgThinkingHigh string // /thinking high
-	ArgThinkingMax  string // /thinking max
-	ArgThinkingOff  string // /thinking off
+	ArgEffortAuto   string // /effort auto
+	ArgEffortLow    string // /effort low
+	ArgEffortMedium string // /effort medium
+	ArgEffortHigh   string // /effort high
+	ArgEffortXHigh  string // /effort xhigh
+	ArgEffortMax    string // /effort max
 
 	// management listing notices (the Submit path: desktop / HTTP frontends)
 	ListModelsHeaderFmt string // "models (active: %s)"

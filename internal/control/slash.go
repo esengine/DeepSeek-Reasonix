@@ -37,7 +37,7 @@ type ArgData struct {
 // (everything after the command word). It returns the suggestions filtered by
 // the token being typed and the byte offset where that token begins, so a caller
 // replaces just that token. Only structured commands participate (/mcp /model
-// /skill /hooks /thinking); others yield nil. Single source of truth for CLI +
+// /skill /hooks /effort); others yield nil. Single source of truth for CLI +
 // desktop.
 func SlashArgItems(line string, d ArgData) ([]SlashItem, int) {
 	cmdEnd := strings.IndexAny(line, " \t")
@@ -57,23 +57,52 @@ func SlashArgItems(line string, d ArgData) ([]SlashItem, int) {
 		raw = skillArgItems(prior, d)
 	case "/hooks":
 		raw = hooksArgItems(prior)
-	case "/thinking":
-		raw = thinkingArgItems(prior)
+	case "/effort":
+		raw = effortArgItems(prior, d)
 	default:
 		return nil, from
 	}
 	return filterSlash(raw, line, from, cur), from
 }
 
-func thinkingArgItems(prior []string) []SlashItem {
+func effortArgItems(prior []string, d ArgData) []SlashItem {
 	if len(prior) <= 1 {
-		return []SlashItem{
-			{Label: "high", Insert: "high", Hint: i18n.M.ArgThinkingHigh},
-			{Label: "max", Insert: "max", Hint: i18n.M.ArgThinkingMax},
-			{Label: "off", Insert: "off", Hint: i18n.M.ArgThinkingOff},
+		entry := currentEffortEntry(d)
+		cap := config.EffortCapabilityForEntry(entry)
+		var out []SlashItem
+		for _, level := range cap.Levels {
+			hint := ""
+			switch level {
+			case "auto":
+				hint = i18n.M.ArgEffortAuto
+			case "low":
+				hint = i18n.M.ArgEffortLow
+			case "medium":
+				hint = i18n.M.ArgEffortMedium
+			case "high":
+				hint = i18n.M.ArgEffortHigh
+			case "xhigh":
+				hint = i18n.M.ArgEffortXHigh
+			case "max":
+				hint = i18n.M.ArgEffortMax
+			}
+			out = append(out, SlashItem{Label: level, Insert: level, Hint: hint})
 		}
+		return out
 	}
 	return nil
+}
+
+func currentEffortEntry(d ArgData) *config.ProviderEntry {
+	if strings.TrimSpace(d.CurrentModel) == "" {
+		return nil
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return nil
+	}
+	entry, _ := cfg.ResolveModel(d.CurrentModel)
+	return entry
 }
 
 func mcpArgItems(prior []string, cur string, d ArgData) []SlashItem {

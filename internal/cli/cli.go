@@ -349,6 +349,7 @@ func chatREPL(args []string) int {
 			m.modelRef = entry.Name + "/" + entry.Model
 		}
 	}
+	m.refreshEffortStatus()
 
 	// No alt-screen: finalized transcript lines are committed to the terminal's
 	// normal buffer (via tea.Println) so native scrollback, the wheel, and copy

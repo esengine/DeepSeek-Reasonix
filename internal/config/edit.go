@@ -82,6 +82,17 @@ func (c *Config) SetProviderEffort(name, effort string) error {
 	return fmt.Errorf("set provider effort: no provider %q", name)
 }
 
+// SetProviderThinking updates a provider's provider-specific thinking mode knob.
+func (c *Config) SetProviderThinking(name, thinking string) error {
+	for i := range c.Providers {
+		if c.Providers[i].Name == name {
+			c.Providers[i].Thinking = strings.ToLower(strings.TrimSpace(thinking))
+			return nil
+		}
+	}
+	return fmt.Errorf("set provider thinking: no provider %q", name)
+}
+
 // SetNetwork updates ordinary outbound network proxy settings. Invalid custom
 // proxy settings are rejected here so the desktop panel cannot save a config that
 // would break provider startup.

@@ -293,7 +293,6 @@ func TestBuildRequestDeepSeekThinking(t *testing.T) {
 	}{
 		{name: "high", effort: "high", wantThinking: "enabled", wantReasoning: "high"},
 		{name: "max", effort: "max", wantThinking: "enabled", wantReasoning: "max"},
-		{name: "off", effort: "off", wantThinking: "disabled", wantReasoning: ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			req := (&client{model: "deepseek-v4", deepseek: true, effort: tc.effort}).buildRequest(provider.Request{})
@@ -337,6 +336,9 @@ func TestNewDeepSeekThinkingDefaultsAndValidation(t *testing.T) {
 
 	if _, err := New(provider.Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4", Extra: map[string]any{"effort": "medium"}}); err == nil {
 		t.Fatal("New should reject invalid DeepSeek effort")
+	}
+	if _, err := New(provider.Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4", Extra: map[string]any{"effort": "off"}}); err == nil {
+		t.Fatal("New should reject disabled DeepSeek thinking")
 	}
 }
 

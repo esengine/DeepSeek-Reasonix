@@ -241,7 +241,7 @@ each writer/bash call. `deny` rules harden both modes.
 
 The chat TUI accepts `/command` input. Three kinds share one dispatch:
 
-- **Built-in actions** (`/compact`, `/new`, `/mcp`, `/help`) manipulate session
+- **Built-in actions** (`/compact`, `/new`, `/effort`, `/mcp`, `/help`) manipulate session
   state locally and never reach the model.
 - **Custom commands** are Markdown files under `.reasonix/commands/` (project) and
   `~/.config/reasonix/commands/` (user); the project dir overrides the user dir on a

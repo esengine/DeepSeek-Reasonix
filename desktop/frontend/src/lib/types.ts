@@ -218,6 +218,13 @@ export interface ModelInfo {
   current: boolean;
 }
 
+export interface EffortInfo {
+  supported: boolean;
+  current: string; // "auto" | "low" | "medium" | "high" | "xhigh" | "max"
+  default: string;
+  levels: string[];
+}
+
 // Slash sub-command / argument completion (desktop/app.go SlashArgs). Mirrors the
 // CLI's arg hints so the composer can suggest e.g. /skill → list/show/new/paths.
 export interface SlashArgItem {

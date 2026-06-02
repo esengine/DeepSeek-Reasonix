@@ -140,7 +140,8 @@ export default function App() {
     pickWorkspace,
     switchWorkspace,
     rewind,
-    setModel,
+	setModel,
+	setEffort,
     fetchMemory,
     remember,
     forget,
@@ -760,15 +761,17 @@ export default function App() {
             <StatusBar
               meta={state.meta}
               context={state.context}
-              usage={state.usage}
-              balance={state.balance}
-              jobs={state.jobs}
+	      usage={state.usage}
+	      balance={state.balance}
+	      effort={state.effort}
+	      jobs={state.jobs}
               running={state.running}
               mode={mode}
               turnStartAt={state.turnStartAt}
-              turnTokens={state.turnTokens}
-              onSwitchModel={switchModel}
-            />
+	      turnTokens={state.turnTokens}
+	      onSwitchModel={switchModel}
+	      onSetEffort={setEffort}
+	    />
           </footer>
         </section>
 

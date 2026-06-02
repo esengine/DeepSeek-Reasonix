@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"net/url"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -10,35 +9,32 @@ import (
 	"reasonix/internal/config"
 )
 
-func (m *chatTUI) runThinkingCommand(input string) tea.Cmd {
+func (m *chatTUI) runEffortCommand(input string) tea.Cmd {
 	entry, ref, err := m.currentConfigProvider()
 	if err != nil {
-		m.notice("thinking: " + err.Error())
+		m.notice("effort: " + err.Error())
 		return nil
 	}
-	if !isDeepSeekProviderEntry(entry) {
-		m.notice("thinking effort is only supported for DeepSeek providers")
+	cap := config.EffortCapabilityForEntry(entry)
+	if !cap.Supported {
+		m.notice(fmt.Sprintf("effort is not configurable for %s", entry.Name))
 		return nil
 	}
 
 	args := tokenizeArgs(input)
 	if len(args) < 2 {
-		effort := entry.Effort
-		if effort == "" {
-			effort = "high"
-		}
-		m.notice(fmt.Sprintf("thinking effort for %s: %s", entry.Name, effort))
+		current := config.EffortDisplay(entry)
+		options := strings.Join(cap.Levels, "|")
+		m.notice(fmt.Sprintf("effort for %s: %s (default: %s; options: %s)", entry.Name, current, cap.Default, options))
 		return nil
 	}
 	if len(args) > 2 {
-		m.notice("usage: /thinking high|max|off")
+		m.notice("usage: /effort " + strings.Join(cap.Levels, "|"))
 		return nil
 	}
-	effort := strings.ToLower(strings.TrimSpace(args[1]))
-	switch effort {
-	case "high", "max", "off":
-	default:
-		m.notice("usage: /thinking high|max|off")
+	effort, err := config.NormalizeEffort(entry, args[1])
+	if err != nil {
+		m.notice(err.Error())
 		return nil
 	}
 	if m.buildController == nil {
@@ -46,35 +42,45 @@ func (m *chatTUI) runThinkingCommand(input string) tea.Cmd {
 		return nil
 	}
 	if m.ctrl.Running() {
-		m.notice("finish or cancel the current turn before changing thinking effort")
+		m.notice("finish or cancel the current turn before changing effort")
 		return nil
 	}
 
 	path := config.UserConfigPath()
 	if path == "" {
-		m.notice("thinking: cannot resolve user config directory")
+		m.notice("effort: cannot resolve user config directory")
 		return nil
 	}
 	edit := config.LoadForEdit(path)
 	if _, ok := edit.Provider(entry.Name); !ok {
 		if err := edit.UpsertProvider(*entry); err != nil {
-			m.notice("thinking: " + err.Error())
+			m.notice("effort: " + err.Error())
+			return nil
+		}
+	}
+	if entry.Kind == "anthropic" && effort != "" && entry.Thinking == "" {
+		if err := edit.SetProviderThinking(entry.Name, "adaptive"); err != nil {
+			m.notice("effort: " + err.Error())
 			return nil
 		}
 	}
 	if err := edit.SetProviderEffort(entry.Name, effort); err != nil {
-		m.notice("thinking: " + err.Error())
+		m.notice("effort: " + err.Error())
 		return nil
 	}
 	if err := edit.SaveTo(path); err != nil {
-		m.notice("thinking: " + err.Error())
+		m.notice("effort: " + err.Error())
 		return nil
 	}
 
-	m.notice(fmt.Sprintf("setting thinking effort for %s to %s…", entry.Name, effort))
+	display := effort
+	if display == "" {
+		display = "auto"
+	}
+	m.notice(fmt.Sprintf("setting effort for %s to %s…", entry.Name, display))
 	carried := m.ctrl.History()
 	if err := m.ctrl.Snapshot(); err != nil {
-		m.notice("thinking: snapshot: " + err.Error())
+		m.notice("effort: snapshot: " + err.Error())
 	}
 	oldCtrl := m.ctrl
 	build := m.buildController
@@ -94,7 +100,7 @@ func (m *chatTUI) runThinkingCommand(input string) tea.Cmd {
 			host:     c.Host(),
 		}
 	}
-	m.notice(fmt.Sprintf("thinking effort for %s set to %s", entry.Name, effort))
+	m.notice(fmt.Sprintf("effort for %s set to %s", entry.Name, display))
 	return m.pendingModelSwitch
 }
 
@@ -117,14 +123,14 @@ func (m *chatTUI) currentConfigProvider() (*config.ProviderEntry, string, error)
 	return entry, ref, nil
 }
 
-func isDeepSeekProviderEntry(e *config.ProviderEntry) bool {
-	if e == nil || e.Kind != "openai" {
-		return false
-	}
-	u, err := url.Parse(e.BaseURL)
+func (m *chatTUI) refreshEffortStatus() {
+	m.effortLevel = ""
+	entry, _, err := m.currentConfigProvider()
 	if err != nil {
-		return false
+		return
 	}
-	host := strings.ToLower(u.Hostname())
-	return host == "api.deepseek.com" || strings.HasSuffix(host, ".deepseek.com")
+	if !config.EffortCapabilityForEntry(entry).Supported {
+		return
+	}
+	m.effortLevel = config.EffortDisplay(entry)
 }

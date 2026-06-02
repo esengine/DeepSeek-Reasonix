@@ -159,6 +159,11 @@ func (a *App) shutdown(context.Context) {
 // Submit runs raw user input as a turn; slash commands and @-references are
 // resolved by the controller. Output arrives asynchronously on eventChannel.
 func (a *App) Submit(input string) {
+	trimmed := strings.TrimSpace(input)
+	if trimmed == "/effort" || strings.HasPrefix(trimmed, "/effort ") {
+		a.runEffortCommand(trimmed)
+		return
+	}
 	a.mu.RLock()
 	ctrl := a.ctrl
 	a.mu.RUnlock()
@@ -719,6 +724,7 @@ func (a *App) Commands() []CommandInfo {
 		{Name: "new", Description: i18n.M.CmdNew, Kind: "builtin"},
 		{Name: "compact", Description: i18n.M.CmdCompact, Kind: "builtin"},
 		{Name: "model", Description: i18n.M.CmdModel, Kind: "builtin"},
+		{Name: "effort", Description: i18n.M.CmdEffort, Kind: "builtin"},
 		{Name: "memory", Description: i18n.M.CmdMemory, Kind: "builtin"},
 		{Name: "mcp", Description: i18n.M.CmdMcp, Kind: "builtin"},
 		{Name: "hooks", Description: i18n.M.CmdHooks, Kind: "builtin"},
@@ -1256,6 +1262,13 @@ type ModelInfo struct {
 	Current  bool   `json:"current"`
 }
 
+type EffortInfo struct {
+	Supported bool     `json:"supported"`
+	Current   string   `json:"current"`
+	Default   string   `json:"default"`
+	Levels    []string `json:"levels"`
+}
+
 // Models flattens the configured providers into their (provider, model) pairs —
 // the switcher's options — marking the active one. A vendor with a `models` list
 // yields one entry per model, all sharing the same endpoint/key. Unconfigured
@@ -1329,6 +1342,48 @@ func (a *App) SetModel(name string) error {
 		newCtrl.SetSessionPath(path)
 	}
 	return nil
+}
+
+func (a *App) Effort() EffortInfo {
+	entry, err := a.currentProviderEntry()
+	if err != nil {
+		return EffortInfo{Current: "auto", Levels: []string{}}
+	}
+	cap := config.EffortCapabilityForEntry(entry)
+	if !cap.Supported {
+		return EffortInfo{Supported: false, Current: "auto", Default: cap.Default, Levels: []string{}}
+	}
+	return EffortInfo{Supported: true, Current: config.EffortDisplay(entry), Default: cap.Default, Levels: cap.Levels}
+}
+
+func (a *App) SetEffort(level string) error {
+	a.mu.RLock()
+	ctrl := a.ctrl
+	a.mu.RUnlock()
+	if ctrl != nil && ctrl.Running() {
+		return fmt.Errorf("finish or cancel the current turn before changing effort")
+	}
+	entry, err := a.currentProviderEntry()
+	if err != nil {
+		return err
+	}
+	effort, err := config.NormalizeEffort(entry, level)
+	if err != nil {
+		return err
+	}
+	return a.applyConfigChange(func(cfg *config.Config) error {
+		if _, ok := cfg.Provider(entry.Name); !ok {
+			if err := cfg.UpsertProvider(*entry); err != nil {
+				return err
+			}
+		}
+		if entry.Kind == "anthropic" && effort != "" && entry.Thinking == "" {
+			if err := cfg.SetProviderThinking(entry.Name, "adaptive"); err != nil {
+				return err
+			}
+		}
+		return cfg.SetProviderEffort(entry.Name, effort)
+	})
 }
 
 // DirEntry is one entry in the "@" file-reference menu.
@@ -1538,6 +1593,66 @@ func (a *App) RevealWorkspacePath(rel string) error {
 		}
 		return exec.Command("xdg-open", dir).Start()
 	}
+}
+
+func (a *App) notice(text string) {
+	if a.sink != nil {
+		a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: text})
+	}
+}
+
+func (a *App) runEffortCommand(input string) {
+	entry, err := a.currentProviderEntry()
+	if err != nil {
+		a.notice("effort: " + err.Error())
+		return
+	}
+	cap := config.EffortCapabilityForEntry(entry)
+	if !cap.Supported {
+		a.notice(fmt.Sprintf("effort is not configurable for %s", entry.Name))
+		return
+	}
+	args := strings.Fields(input)
+	if len(args) < 2 {
+		a.notice(fmt.Sprintf("effort for %s: %s (default: %s; options: %s)", entry.Name, config.EffortDisplay(entry), cap.Default, strings.Join(cap.Levels, "|")))
+		return
+	}
+	if len(args) > 2 {
+		a.notice("usage: /effort " + strings.Join(cap.Levels, "|"))
+		return
+	}
+	effort, err := config.NormalizeEffort(entry, args[1])
+	if err != nil {
+		a.notice(err.Error())
+		return
+	}
+	if err := a.SetEffort(args[1]); err != nil {
+		a.notice("effort: " + err.Error())
+		return
+	}
+	display := effort
+	if display == "" {
+		display = "auto"
+	}
+	a.notice(fmt.Sprintf("effort for %s set to %s", entry.Name, display))
+}
+
+func (a *App) currentProviderEntry() (*config.ProviderEntry, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	a.mu.RLock()
+	ref := a.model
+	a.mu.RUnlock()
+	if strings.TrimSpace(ref) == "" {
+		ref = cfg.DefaultModel
+	}
+	entry, ok := cfg.ResolveModel(ref)
+	if !ok {
+		return nil, fmt.Errorf("unknown model %q", ref)
+	}
+	return entry, nil
 }
 
 // SavePastedImage stores a browser clipboard image data URL under

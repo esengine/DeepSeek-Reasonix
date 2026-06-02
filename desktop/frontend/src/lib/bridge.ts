@@ -12,15 +12,16 @@ import type {
   CommandInfo,
   ContextInfo,
   DirEntry,
+  EffortInfo,
   FilePreview,
   HistoryMessage,
   JobView,
   MCPServerInput,
-	  MemoryView,
-	  Meta,
-	  ModelInfo,
-	  NetworkView,
-	  ProviderView,
+  MemoryView,
+  Meta,
+  ModelInfo,
+  NetworkView,
+  ProviderView,
   QuestionAnswer,
   ServerView,
   SessionMeta,
@@ -97,6 +98,8 @@ export interface AppBindings {
   AttachmentDataURL(path: string): Promise<string>;
   Models(): Promise<ModelInfo[]>;
   SetModel(name: string): Promise<void>;
+  Effort(): Promise<EffortInfo>;
+  SetEffort(level: string): Promise<void>;
   // Memory panel: read the loaded REASONIX.md hierarchy + saved auto-memories,
   // quick-add a note to a scope's REASONIX.md (≡ "#<note>"), and overwrite a doc
   // from the in-place editor.
@@ -114,10 +117,10 @@ export interface AppBindings {
   SetProviderKey(apiKeyEnv: string, value: string): Promise<void>;
   SetPermissionMode(mode: string): Promise<void>;
   AddPermissionRule(list: string, rule: string): Promise<void>;
-	  RemovePermissionRule(list: string, rule: string): Promise<void>;
-	  SetSandbox(bash: string, network: boolean, workspaceRoot: string, allowWrite: string[]): Promise<void>;
-	  SetNetwork(n: NetworkView): Promise<void>;
-	  SetAgentParams(temperature: number, maxSteps: number, systemPrompt: string): Promise<void>;
+  RemovePermissionRule(list: string, rule: string): Promise<void>;
+  SetSandbox(bash: string, network: boolean, workspaceRoot: string, allowWrite: string[]): Promise<void>;
+  SetNetwork(n: NetworkView): Promise<void>;
+  SetAgentParams(temperature: number, maxSteps: number, systemPrompt: string): Promise<void>;
   // SetBypass toggles YOLO mode (auto-approve every tool call this session; deny
   // rules still apply). Runtime-only — not written to config.
   SetBypass(on: boolean): Promise<void>;
@@ -243,6 +246,7 @@ function makeMockApp(): AppBindings {
   let cancelled = false;
   let cwd = "~/projects/reasonix"; // mutable so PickWorkspace is visible in dev
   let workspaces = ["~/projects/reasonix", "~/projects/blade", "~/projects/deepseek-forge", "~/projects/cc-switch-light", "~/projects/SuperRig"];
+  let mockEffort = "auto";
   const day = 86_400_000;
   const t0 = Date.now();
   // Mutable so MCP add/remove/retry are observable in browser dev.
@@ -295,15 +299,15 @@ function makeMockApp(): AppBindings {
       { name: "deepseek-flash", kind: "openai", baseUrl: "https://api.deepseek.com", models: ["deepseek-v4-flash"], default: "deepseek-v4-flash", apiKeyEnv: "DEEPSEEK_API_KEY", keySet: true, balanceUrl: "https://api.deepseek.com/user/balance", contextWindow: 1_000_000 },
       { name: "mimo-pro", kind: "openai", baseUrl: "https://api.xiaomimimo.com/v1", models: ["mimo-v2.5-pro"], default: "mimo-v2.5-pro", apiKeyEnv: "MIMO_API_KEY", keySet: false, balanceUrl: "", contextWindow: 1_000_000 },
     ],
-	    permissions: { mode: "ask", allow: ["ls", "read_file"], ask: [], deny: ["bash(rm *)"] },
-	    sandbox: { bash: "enforce", network: true, workspaceRoot: "", allowWrite: [] },
-	    network: {
-	      proxyMode: "auto",
-	      proxyUrl: "",
-	      noProxy: "",
-	      proxy: { type: "socks5", server: "127.0.0.1", port: 7890, username: "", password: "" },
-	    },
-	    agent: { temperature: 0.2, maxSteps: 0, systemPrompt: "You are Reasonix, a coding agent." },
+    permissions: { mode: "ask", allow: ["ls", "read_file"], ask: [], deny: ["bash(rm *)"] },
+    sandbox: { bash: "enforce", network: true, workspaceRoot: "", allowWrite: [] },
+    network: {
+      proxyMode: "auto",
+      proxyUrl: "",
+      noProxy: "",
+      proxy: { type: "socks5", server: "127.0.0.1", port: 7890, username: "", password: "" },
+    },
+    agent: { temperature: 0.2, maxSteps: 0, systemPrompt: "You are Reasonix, a coding agent." },
     configPath: "~/projects/reasonix/reasonix.toml",
     providerKinds: ["openai"],
     bypass: false,
@@ -439,6 +443,7 @@ function makeMockApp(): AppBindings {
         { name: "new", description: "Start a new session", kind: "builtin" as const },
         { name: "compact", description: "Summarize older history to free up context", kind: "builtin" as const },
         { name: "model", description: "Switch model", kind: "builtin" as const },
+        { name: "effort", description: "Set reasoning effort", kind: "builtin" as const },
         { name: "skill", description: "List skills", kind: "builtin" as const },
         { name: "explore", description: "Investigate the codebase in an isolated subagent", kind: "skill" as const },
         { name: "review", description: "Review the staged diff", hint: "[focus]", kind: "custom" as const },
@@ -522,6 +527,11 @@ function makeMockApp(): AppBindings {
           { label: "deepseek/deepseek-v4-flash", insert: "deepseek/deepseek-v4-flash", hint: "current" },
           { label: "deepseek/deepseek-v4-pro", insert: "deepseek/deepseek-v4-pro", hint: "" },
         ],
+        "/effort": [
+          { label: "auto", insert: "auto", hint: "use the model default" },
+          { label: "high", insert: "high", hint: "deeper reasoning" },
+          { label: "max", insert: "max", hint: "maximum reasoning" },
+        ],
       };
       const items = (subs[cmd] ?? [])
         .filter((it) => it.label.toLowerCase().startsWith(cur.toLowerCase()))
@@ -584,6 +594,12 @@ function makeMockApp(): AppBindings {
       ];
     },
     async SetModel() {},
+    async Effort() {
+      return { supported: true, current: mockEffort, default: "high", levels: ["auto", "high", "max"] };
+    },
+    async SetEffort(level: string) {
+      mockEffort = level || "auto";
+    },
     async Memory() {
       return {
         available: true,
