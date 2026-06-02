@@ -277,6 +277,18 @@ func TestApplyIndex(t *testing.T) {
 	}
 }
 
+func TestApplyIndexMandatesInlineButRestrainsSubagent(t *testing.T) {
+	out := ApplyIndex("BASE", []Skill{{Name: "alpha", Description: "the alpha", RunAs: RunInline}})
+
+	if !strings.Contains(out, "inline) skill is even plausibly relevant") ||
+		!strings.Contains(out, "invoke it before continuing") {
+		t.Errorf("inline skills should be mandatory on plausible relevance:\n%s", out)
+	}
+	if !strings.Contains(out, "not on weak relevance") {
+		t.Errorf("subagent skills should stay judgment-based, not mandatory:\n%s", out)
+	}
+}
+
 func TestApplyIndexTruncates(t *testing.T) {
 	var skills []Skill
 	for i := 0; i < 200; i++ {
