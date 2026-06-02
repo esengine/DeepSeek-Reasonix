@@ -57,6 +57,14 @@ What is still in progress or unstarted, and the single most concrete next action
 
 Rules: be terse — bullet points and fragments, not prose. Preserve identifiers, paths, and numbers exactly. Do NOT invent anything not present in the messages; if something is unknown, leave it out rather than guessing.`
 
+const dailyMemorySystemPrompt = `You are updating daily long-term memory for a coding-agent user.
+Merge the existing daily summary with the new transcript incrementally.
+
+Keep only durable information that helps future sessions: user preferences, project decisions, corrections, constraints, active goals, important external references, and unresolved follow-ups.
+Drop ephemeral chatter, obvious tool mechanics, repeated details already covered by the existing summary, and anything already recorded in files or git history unless the transcript adds a non-obvious decision about it.
+Write concise Markdown bullets or short sections. Do NOT invent facts. If the new transcript adds nothing durable, return the existing summary unchanged.
+Output the complete replacement daily summary only.`
+
 // maybeCompact compacts the session when the last turn's prompt has grown to the
 // configured fraction of the context window. It is a no-op when compaction is
 // disabled (no window) or usage is unavailable.
@@ -357,6 +365,68 @@ func (a *Agent) summarize(ctx context.Context, region []provider.Message, instru
 		return "", fmt.Errorf("summarizer returned empty output")
 	}
 	return s, nil
+}
+
+// SummarizeDailyMemory distills a new slice of conversation into one complete
+// replacement for a day's long-term memory summary. It uses the executor's own
+// provider without tools, like compaction, but it does not rewrite the live
+// session: callers persist the returned text through memory.Store.
+func (a *Agent) SummarizeDailyMemory(ctx context.Context, day, existing string, region []provider.Message) (string, error) {
+	region = memorySummaryMessages(region)
+	if len(region) == 0 {
+		return strings.TrimSpace(existing), nil
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "Date: %s\n\n", strings.TrimSpace(day))
+	b.WriteString("Existing daily summary:\n")
+	if strings.TrimSpace(existing) == "" {
+		b.WriteString("(none)\n")
+	} else {
+		b.WriteString(strings.TrimSpace(existing))
+		b.WriteString("\n")
+	}
+	b.WriteString("\nNew conversation transcript:\n")
+	b.WriteString(renderTranscript(region))
+
+	ch, err := a.prov.Stream(ctx, provider.Request{
+		Messages: []provider.Message{
+			{Role: provider.RoleSystem, Content: dailyMemorySystemPrompt},
+			{Role: provider.RoleUser, Content: b.String()},
+		},
+		Temperature: a.temperature,
+	})
+	if err != nil {
+		return "", err
+	}
+
+	var out strings.Builder
+	for chunk := range ch {
+		switch chunk.Type {
+		case provider.ChunkText:
+			out.WriteString(chunk.Text)
+		case provider.ChunkError:
+			return "", chunk.Err
+		}
+	}
+	s := strings.TrimSpace(out.String())
+	if s == "" {
+		return "", fmt.Errorf("daily memory summarizer returned empty output")
+	}
+	return s, nil
+}
+
+func memorySummaryMessages(msgs []provider.Message) []provider.Message {
+	out := make([]provider.Message, 0, len(msgs))
+	for _, m := range msgs {
+		if m.Role == provider.RoleSystem {
+			continue
+		}
+		if strings.TrimSpace(m.Content) == "" && len(m.ToolCalls) == 0 {
+			continue
+		}
+		out = append(out, m)
+	}
+	return out
 }
 
 // renderTranscript flattens messages into a readable transcript for summarization.

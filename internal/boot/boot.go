@@ -358,28 +358,38 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		}
 		classifier = control.NewProviderAutoPlanClassifier(classifierProv)
 	}
+	autoMemoryIdle := control.DefaultAutoMemoryIdle
+	if strings.EqualFold(strings.TrimSpace(cfg.Agent.AutoMemory), "on") {
+		d, err := control.ParseAutoMemoryIdle(cfg.Agent.AutoMemoryIdle)
+		if err != nil {
+			return nil, fmt.Errorf("agent.auto_memory_idle: %w", err)
+		}
+		autoMemoryIdle = d
+	}
 
 	ctrlOpts := control.Options{
-		Runner:        runner,
-		Executor:      executor,
-		Sink:          sink,
-		Policy:        policy,
-		Label:         label,
-		SystemPrompt:  sysPrompt,
-		SessionDir:    config.SessionDir(),
-		Host:          pluginHost,
-		Commands:      cmds,
-		Skills:        skills,
-		Hooks:         hookRunner,
-		Memory:        mem,
-		Cleanup:       cleanup,
-		BalanceURL:    entry.BalanceURL,
-		BalanceKey:    entry.APIKey(),
-		Jobs:          jm,
-		Registry:      reg,
-		PluginCtx:     ctx,
-		WorkspaceRoot: cwd,
-		AutoPlan:      cfg.Agent.AutoPlan,
+		Runner:         runner,
+		Executor:       executor,
+		Sink:           sink,
+		Policy:         policy,
+		Label:          label,
+		SystemPrompt:   sysPrompt,
+		SessionDir:     config.SessionDir(),
+		Host:           pluginHost,
+		Commands:       cmds,
+		Skills:         skills,
+		Hooks:          hookRunner,
+		Memory:         mem,
+		Cleanup:        cleanup,
+		BalanceURL:     entry.BalanceURL,
+		BalanceKey:     entry.APIKey(),
+		Jobs:           jm,
+		Registry:       reg,
+		PluginCtx:      ctx,
+		WorkspaceRoot:  cwd,
+		AutoPlan:       cfg.Agent.AutoPlan,
+		AutoMemory:     cfg.Agent.AutoMemory,
+		AutoMemoryIdle: autoMemoryIdle,
 	}
 	if classifier != nil {
 		ctrlOpts.Classifier = classifier

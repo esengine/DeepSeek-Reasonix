@@ -228,6 +228,44 @@ func TestCompactInjectsFocusAndPreCompactHook(t *testing.T) {
 	}
 }
 
+func TestSummarizeDailyMemoryMergesPreviousSummary(t *testing.T) {
+	prov := &fakeProvider{reply: "- Kept the important decision"}
+	sess := &Session{Messages: []provider.Message{
+		{Role: provider.RoleSystem, Content: "sys"},
+		{Role: provider.RoleUser, Content: "switch to the Go rewrite"},
+		{Role: provider.RoleAssistant, Content: "noted"},
+	}}
+	a := New(prov, tool.NewRegistry(), sess, Options{}, event.Discard)
+
+	got, err := a.SummarizeDailyMemory(context.Background(), "2026-06-02", "Previous summary", sess.Messages[1:])
+	if err != nil {
+		t.Fatalf("SummarizeDailyMemory: %v", err)
+	}
+	if got != "- Kept the important decision" {
+		t.Fatalf("summary = %q", got)
+	}
+	if len(prov.got) != 2 {
+		t.Fatalf("summarizer messages = %d, want 2: %+v", len(prov.got), prov.got)
+	}
+	sys := prov.got[0].Content
+	if !strings.Contains(sys, "daily long-term memory") || !strings.Contains(sys, "incrementally") {
+		t.Fatalf("system prompt should describe incremental daily memory, got %q", sys)
+	}
+	user := prov.got[1].Content
+	if !strings.Contains(user, "Date: 2026-06-02") {
+		t.Errorf("request missing date: %q", user)
+	}
+	if !strings.Contains(user, "Previous summary") {
+		t.Errorf("request missing previous summary: %q", user)
+	}
+	if !strings.Contains(user, "[user]\nswitch to the Go rewrite") {
+		t.Errorf("request missing transcript: %q", user)
+	}
+	if strings.Contains(user, "[system]") {
+		t.Errorf("daily memory should not include system prompt transcript: %q", user)
+	}
+}
+
 func TestMaybeCompactThreshold(t *testing.T) {
 	// 40-char contents → ~10 tokens each at the fallback ratio; with a 20-token
 	// window the tail budget (10) keeps only the last couple, leaving a region to

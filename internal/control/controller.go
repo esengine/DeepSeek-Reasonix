@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/billing"
@@ -131,6 +132,13 @@ type Controller struct {
 	// a fresh memory takes effect this session without busting the prompt cache;
 	// it joins the prefix naturally on the next session.
 	pendingMemory []string
+
+	autoMemory         bool
+	autoMemoryIdle     time.Duration
+	autoMemoryNow      func() time.Time
+	autoMemoryTimer    *time.Timer
+	autoMemoryCursor   int
+	autoMemoryFlushing bool
 }
 
 type approvalReply struct {
@@ -171,6 +179,11 @@ type Options struct {
 	WorkspaceRoot string
 	AutoPlan      string
 	Classifier    autoPlanClassifier
+	// AutoMemory enables idle daily summaries into the long-term memory store.
+	// AutoMemoryIdle defaults to DefaultAutoMemoryIdle when enabled and unset.
+	AutoMemory     string
+	AutoMemoryIdle time.Duration
+	AutoMemoryNow  func() time.Time // test seam; nil uses time.Now
 }
 
 // New builds a Controller. A nil Sink is replaced with event.Discard.
@@ -187,32 +200,48 @@ func New(opts Options) *Controller {
 	if pluginCtx == nil {
 		pluginCtx = context.Background()
 	}
+	autoMemoryIdle := opts.AutoMemoryIdle
+	if autoMemoryIdle <= 0 {
+		autoMemoryIdle = DefaultAutoMemoryIdle
+	}
+	autoMemoryNow := opts.AutoMemoryNow
+	if autoMemoryNow == nil {
+		autoMemoryNow = time.Now
+	}
+	autoMemoryCursor := 0
+	if opts.Executor != nil {
+		autoMemoryCursor = len(opts.Executor.Session().Snapshot())
+	}
 	c := &Controller{
-		runner:       opts.Runner,
-		executor:     opts.Executor,
-		sink:         sink,
-		policy:       opts.Policy,
-		label:        opts.Label,
-		systemPrompt: opts.SystemPrompt,
-		sessionDir:   opts.SessionDir,
-		sessionPath:  opts.SessionPath,
-		host:         opts.Host,
-		commands:     opts.Commands,
-		skills:       opts.Skills,
-		hooks:        opts.Hooks,
-		mem:          opts.Memory,
-		cleanup:      opts.Cleanup,
-		autoPlan:     normalizeAutoPlan(opts.AutoPlan),
-		classifier:   classifier,
-		balanceURL:   opts.BalanceURL,
-		balanceKey:   opts.BalanceKey,
-		jobs:         opts.Jobs,
-		reg:          opts.Registry,
-		pluginCtx:    pluginCtx,
-		cpRoot:       opts.WorkspaceRoot,
-		approvals:    map[string]chan approvalReply{},
-		asks:         map[string]chan []event.AskAnswer{},
-		granted:      map[string]bool{},
+		runner:           opts.Runner,
+		executor:         opts.Executor,
+		sink:             sink,
+		policy:           opts.Policy,
+		label:            opts.Label,
+		systemPrompt:     opts.SystemPrompt,
+		sessionDir:       opts.SessionDir,
+		sessionPath:      opts.SessionPath,
+		host:             opts.Host,
+		commands:         opts.Commands,
+		skills:           opts.Skills,
+		hooks:            opts.Hooks,
+		mem:              opts.Memory,
+		cleanup:          opts.Cleanup,
+		autoPlan:         normalizeAutoPlan(opts.AutoPlan),
+		classifier:       classifier,
+		autoMemory:       normalizeAutoMemory(opts.AutoMemory),
+		autoMemoryIdle:   autoMemoryIdle,
+		autoMemoryNow:    autoMemoryNow,
+		autoMemoryCursor: autoMemoryCursor,
+		balanceURL:       opts.BalanceURL,
+		balanceKey:       opts.BalanceKey,
+		jobs:             opts.Jobs,
+		reg:              opts.Registry,
+		pluginCtx:        pluginCtx,
+		cpRoot:           opts.WorkspaceRoot,
+		approvals:        map[string]chan approvalReply{},
+		asks:             map[string]chan []event.AskAnswer{},
+		granted:          map[string]bool{},
 	}
 	// Checkpoints: bind a store to the session and route writer pre-edits into it.
 	c.rebindCheckpoints(opts.SessionPath)
@@ -278,6 +307,7 @@ func (c *Controller) runGuarded(body func(ctx context.Context) error) {
 		c.mu.Unlock()
 		return
 	}
+	c.cancelAutoMemoryTimerLocked()
 	ctx, cancel := context.WithCancel(context.Background())
 	c.cancel = cancel
 	c.running = true
@@ -289,6 +319,9 @@ func (c *Controller) runGuarded(body func(ctx context.Context) error) {
 		c.running = false
 		c.cancel = nil
 		c.mu.Unlock()
+		if err == nil {
+			c.scheduleAutoMemory()
+		}
 		c.sink.Emit(event.Event{Kind: event.TurnDone, Err: err})
 	}()
 }
@@ -684,6 +717,9 @@ func (c *Controller) NewSession() error {
 	if err := c.Snapshot(); err != nil {
 		return err
 	}
+	if err := c.FlushAutoMemory(context.Background()); err != nil {
+		c.notice("auto memory skipped: " + err.Error())
+	}
 	c.hooks.SessionEnd(context.Background())
 	if c.sessionDir != "" {
 		c.mu.Lock()
@@ -691,6 +727,9 @@ func (c *Controller) NewSession() error {
 		c.mu.Unlock()
 	}
 	c.executor.SetSession(agent.NewSession(c.systemPrompt))
+	c.mu.Lock()
+	c.autoMemoryCursor = len(c.executor.Session().Snapshot())
+	c.mu.Unlock()
 	c.rebindCheckpoints(c.SessionPath())
 	c.mu.Lock()
 	c.startedOnce = true // NewSession fires SessionStart itself; don't re-fire on the next turn
@@ -1024,6 +1063,11 @@ func (c *Controller) Resume(s *agent.Session, path string) {
 	}
 	c.mu.Lock()
 	c.sessionPath = path
+	if s != nil {
+		c.autoMemoryCursor = len(s.Snapshot())
+	} else {
+		c.autoMemoryCursor = 0
+	}
 	c.mu.Unlock()
 	c.rebindCheckpoints(path)
 }
@@ -1316,6 +1360,7 @@ func (c *Controller) Label() string { return c.label }
 func (c *Controller) Close() {
 	c.mu.Lock()
 	started := c.startedOnce
+	c.cancelAutoMemoryTimerLocked()
 	c.mu.Unlock()
 	if started {
 		c.hooks.SessionEnd(context.Background())

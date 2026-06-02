@@ -46,6 +46,16 @@ func RenderTOML(c *Config) string {
 	} else {
 		b.WriteString("# auto_plan_classifier = \"deepseek-flash\"   # optional; only used for borderline tasks\n")
 	}
+	autoMemory := c.Agent.AutoMemory
+	if autoMemory == "" {
+		autoMemory = "off"
+	}
+	fmt.Fprintf(&b, "auto_memory = %q   # off|on; summarize idle chats into daily long-term memory\n", autoMemory)
+	autoMemoryIdle := c.Agent.AutoMemoryIdle
+	if autoMemoryIdle == "" {
+		autoMemoryIdle = "10m"
+	}
+	fmt.Fprintf(&b, "auto_memory_idle = %q   # wait after the last turn before refreshing the daily memory\n", autoMemoryIdle)
 	if c.Agent.PlannerModel != "" {
 		fmt.Fprintf(&b, "planner_model = %q   # low-frequency planner (two-model collaboration)\n", c.Agent.PlannerModel)
 	} else {

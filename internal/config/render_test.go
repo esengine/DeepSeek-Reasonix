@@ -12,6 +12,8 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	orig := Default()
 	orig.DefaultModel = "mimo-pro"
 	orig.Language = "zh"
+	orig.Agent.AutoMemory = "on"
+	orig.Agent.AutoMemoryIdle = "2m"
 	orig.Agent.AutoPlanClassifier = "deepseek-flash"
 	orig.Agent.SubagentModel = "mimo-pro"
 	orig.Agent.SubagentModels = map[string]string{"review": "deepseek-pro"}
@@ -53,6 +55,12 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	}
 	if got.Agent.AutoPlanClassifier != "deepseek-flash" {
 		t.Errorf("auto_plan_classifier = %q, want deepseek-flash", got.Agent.AutoPlanClassifier)
+	}
+	if got.Agent.AutoMemory != "on" {
+		t.Errorf("auto_memory = %q, want on", got.Agent.AutoMemory)
+	}
+	if got.Agent.AutoMemoryIdle != "2m" {
+		t.Errorf("auto_memory_idle = %q, want 2m", got.Agent.AutoMemoryIdle)
 	}
 	if got.Agent.SystemPrompt != orig.Agent.SystemPrompt {
 		t.Errorf("system_prompt mismatch:\n got %q\nwant %q", got.Agent.SystemPrompt, orig.Agent.SystemPrompt)

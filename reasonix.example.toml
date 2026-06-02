@@ -16,6 +16,8 @@ max_steps   = 25
 temperature = 0.0
 auto_plan   = "ask"   # off|ask|on; ask/on auto-enter plan mode for complex tasks
 # auto_plan_classifier = "deepseek-flash"   # optional; only used for borderline tasks
+auto_memory = "off"   # off|on; summarize idle chats into daily long-term memory
+auto_memory_idle = "10m"   # wait after the last turn before refreshing the daily memory
 # planner_model = "mimo-pro"   # optional: enable two-model collaboration
 # subagent_model = "deepseek-pro"   # optional default for runAs=subagent skills
 # subagent_models = { review = "deepseek-pro", security_review = "deepseek-pro" }   # per-skill overrides

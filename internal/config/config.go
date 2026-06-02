@@ -173,6 +173,12 @@ type AgentConfig struct {
 	// AutoPlanClassifier optionally names a provider/model used to classify
 	// borderline auto-plan decisions. Empty keeps the zero-cost heuristic path.
 	AutoPlanClassifier string `toml:"auto_plan_classifier"`
+	// AutoMemory controls whether idle chat sessions are summarized into the
+	// per-project long-term memory store. "off" disables it, "on" enables it.
+	AutoMemory string `toml:"auto_memory"`
+	// AutoMemoryIdle is a Go duration (for example "10m") waited after the last
+	// completed turn before the daily memory summary is refreshed.
+	AutoMemoryIdle string `toml:"auto_memory_idle"`
 }
 
 // ProviderEntry declares a model provider instance. ContextWindow is the model's
@@ -328,8 +334,10 @@ func Default() *Config {
 			// the user cancels, or the provider errors. Context stays bounded by
 			// compaction, not by a round count. Set a positive agent.max_steps only
 			// if you want a hard guard against runaway.
-			MaxSteps: 0,
-			AutoPlan: "ask",
+			MaxSteps:       0,
+			AutoPlan:       "ask",
+			AutoMemory:     "off",
+			AutoMemoryIdle: "10m",
 		},
 		// Mode "ask" with no rules keeps `reasonix run` autonomous (no TTY → ask
 		// resolves to allow) while `reasonix chat` prompts before writers. Users add
