@@ -150,4 +150,3 @@ func (r readFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 	}
 	return b.String(), nil
 }
-
