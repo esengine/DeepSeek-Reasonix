@@ -268,7 +268,7 @@ func TestServeCancel(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("prompt never started")
 	}
-	client.notify("session/cancel", SessionCancelParams{SessionID: nr.SessionID})
+	client.notify("session/cancel", SessionCancelParams(nr))
 
 	select {
 	case resp := <-promptCh:

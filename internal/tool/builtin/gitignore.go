@@ -162,9 +162,7 @@ func reanchorPattern(line, relDir string) string {
 		neg = "!"
 		line = line[1:]
 	}
-	if strings.HasPrefix(line, `\`) { // escaped leading '#' or '!'
-		line = line[1:]
-	}
+	line = strings.TrimPrefix(line, `\`) // escaped leading '#' or '!'
 	if relDir == "" || relDir == "." {
 		return neg + line
 	}

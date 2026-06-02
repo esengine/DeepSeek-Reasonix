@@ -76,10 +76,7 @@ func isReadOnlyBashSubject(subject string) bool {
 
 	// Check single-word read-only commands.
 	if readOnlyBashCommands[base] {
-		if hasUnsafeReadOnlyArgs(base, fields[1:]) {
-			return false
-		}
-		return true
+		return !hasUnsafeReadOnlyArgs(base, fields[1:])
 	}
 
 	// Check prefix commands (git log, go vet, etc.).

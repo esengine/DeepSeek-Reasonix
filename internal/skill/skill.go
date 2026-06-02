@@ -346,7 +346,7 @@ func (s *Store) Create(name string, scope Scope) (string, error) {
 // skill of the same name. Returns the written path.
 func (s *Store) CreateWithContent(name string, scope Scope, content string) (string, error) {
 	if !IsValidName(name) {
-		return "", fmt.Errorf("invalid skill name %q — use letters, digits, _, -, .", name)
+		return "", fmt.Errorf("invalid skill name %q — use letters, digits, '_', '-', '.'", name)
 	}
 	var root string
 	switch scope {
