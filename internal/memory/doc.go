@@ -142,7 +142,6 @@ type docSeen struct {
 	infos []os.FileInfo
 }
 
-// add records info and reports whether it was new.
 func (s *docSeen) add(info os.FileInfo) bool {
 	for _, prev := range s.infos {
 		if os.SameFile(prev, info) {
