@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -32,11 +33,12 @@ type Server struct {
 	ctrl      *control.Controller
 	bc        *Broadcaster
 	titleProv provider.Provider // lightweight flash provider for session titles
+	titles    *titleCache
 }
 
 // New builds a Server. bc must be the controller's event sink.
 func New(ctrl *control.Controller, bc *Broadcaster) *Server {
-	s := &Server{ctrl: ctrl, bc: bc}
+	s := &Server{ctrl: ctrl, bc: bc, titles: newTitleCache(ctrl.SessionDir())}
 	s.initTitleProvider()
 	return s
 }
@@ -584,28 +586,18 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, []any{})
 		return
 	}
-	current := s.ctrl.SessionPath()
+	current := filepath.Clean(s.ctrl.SessionPath())
 	var out []sessionEntry
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonl") {
 			continue
 		}
-		path := dir + "/" + e.Name()
+		path := filepath.Join(dir, e.Name())
 		name := strings.TrimSuffix(e.Name(), ".jsonl")
-		entry := sessionEntry{Name: name, Path: path, Current: path == current}
-		// Read first user message for title generation and turn count.
+		entry := sessionEntry{Name: name, Path: path, Current: filepath.Clean(path) == current}
 		if first, turns := previewSessionFile(path); turns > 0 {
 			entry.Turns = turns
-			if title := s.generateTitle(r.Context(), first); title != "" {
-				entry.Title = title
-			} else if first != "" {
-				// Fallback: truncate the first message as a preview.
-				if r := []rune(first); len(r) > 50 {
-					entry.Title = string(r[:47]) + "..."
-				} else {
-					entry.Title = first
-				}
-			}
+			entry.Title = s.sessionTitle(r.Context(), e.Name(), first, fileModNano(e))
 		}
 		out = append(out, entry)
 	}
@@ -617,6 +609,35 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 		out = []sessionEntry{}
 	}
 	writeJSON(w, out)
+}
+
+// sessionTitle returns a title for a session: the cached flash-generated title
+// when it matches the file's mtime, otherwise a freshly generated one (cached
+// for next time), falling back to a truncated preview when generation is off.
+func (s *Server) sessionTitle(ctx context.Context, name, first string, mod int64) string {
+	if cached, ok := s.titles.get(name, mod); ok {
+		return cached
+	}
+	if title := s.generateTitle(ctx, first); title != "" {
+		s.titles.put(name, title, mod)
+		return title
+	}
+	return previewTitle(first)
+}
+
+func previewTitle(first string) string {
+	if r := []rune(first); len(r) > 50 {
+		return string(r[:47]) + "..."
+	}
+	return first
+}
+
+func fileModNano(e os.DirEntry) int64 {
+	info, err := e.Info()
+	if err != nil {
+		return 0
+	}
+	return info.ModTime().UnixNano()
 }
 
 // previewSessionFile reads the first user message and turn count from a JSONL session file.
