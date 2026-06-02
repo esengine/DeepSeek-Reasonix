@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"golang.org/x/text/encoding/simplifiedchinese"
 )
 
 // --- workspaceStatePath ---
@@ -130,6 +132,32 @@ func TestReadFileKeepsInvalidUTF8Binary(t *testing.T) {
 	}
 	if !preview.Binary {
 		t.Fatal("ReadFile should keep invalid UTF-8 preview classified as binary")
+	}
+}
+
+func TestReadFileGB18030(t *testing.T) {
+	orig, _ := os.Getwd()
+	defer os.Chdir(orig)
+
+	dir := t.TempDir()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	gb, _ := simplifiedchinese.GB18030.NewEncoder().String("你好世界")
+	if err := os.WriteFile("gbk.txt", []byte(gb), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	preview := (&App{}).ReadFile("gbk.txt")
+	if preview.Err != "" {
+		t.Fatalf("ReadFile err = %q", preview.Err)
+	}
+	if preview.Binary {
+		t.Fatal("ReadFile should decode GB18030, not mark as binary")
+	}
+	if !strings.Contains(preview.Body, "你好世界") {
+		t.Errorf("expected decoded Chinese text, got %q", preview.Body)
 	}
 }
 

@@ -21,6 +21,7 @@ import (
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
+	fileenc "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/i18n"
 	"reasonix/internal/memory"
 	"reasonix/internal/plugin"
@@ -1303,13 +1304,30 @@ func (a *App) ReadFile(rel string) FilePreview {
 	if len(data) > filePreviewLimit {
 		data = data[:filePreviewLimit]
 		out.Truncated = true
-		data = trimUTF8PartialSuffix(data)
 	}
-	if bytes.Contains(data, []byte{0}) || !utf8.Valid(data) {
+
+	// Binary check on raw bytes — NUL is always a binary signal.
+	if bytes.Contains(data, []byte{0}) {
 		out.Binary = true
 		return out
 	}
-	out.Body = string(data)
+
+	// Detect encoding and decode to UTF-8. Only mark as binary if the
+	// content cannot be decoded by any supported encoding (UTF-8, UTF-8
+	// BOM, UTF-16, GB18030).
+	enc, _ := fileenc.Detect(data)
+	if enc == fileenc.LossyUTF8 {
+		out.Binary = true
+		return out
+	}
+	decoded := fileenc.Decode(data, enc)
+
+	// Trim any partial rune at the truncation boundary (safe now that
+	// decoded is valid UTF-8).
+	if out.Truncated {
+		decoded = trimUTF8PartialSuffix(decoded)
+	}
+	out.Body = string(decoded)
 	return out
 }
 
