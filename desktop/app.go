@@ -1306,16 +1306,15 @@ func (a *App) ReadFile(rel string) FilePreview {
 		out.Truncated = true
 	}
 
-	// Binary check on raw bytes — NUL is always a binary signal.
-	if bytes.Contains(data, []byte{0}) {
-		out.Binary = true
-		return out
-	}
-
-	// Detect encoding and decode to UTF-8. Only mark as binary if the
-	// content cannot be decoded by any supported encoding (UTF-8, UTF-8
-	// BOM, UTF-16, GB18030).
+	// Check for BOM first: UTF-16 files contain 0x00 for every ASCII
+	// character, so a naive NUL check would misidentify them as binary.
 	enc, _ := fileenc.Detect(data)
+	if enc != fileenc.UTF16LE && enc != fileenc.UTF16BE && enc != fileenc.UTF8BOM {
+		if bytes.Contains(data, []byte{0}) {
+			out.Binary = true
+			return out
+		}
+	}
 	if enc == fileenc.LossyUTF8 {
 		out.Binary = true
 		return out

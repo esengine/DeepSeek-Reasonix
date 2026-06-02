@@ -61,16 +61,34 @@ func (g grepTool) Execute(ctx context.Context, args json.RawMessage) (string, er
 
 	// searchFile returns io.EOF as a sentinel once the cap is reached.
 	searchFile := func(file string) error {
-		raw, err := os.ReadFile(file)
+		f, err := os.Open(file)
 		if err != nil {
 			return nil // skip unreadable files
 		}
-		// Binary detection: NUL byte in raw content (before decoding).
-		if bytes.IndexByte(raw, 0) >= 0 {
+		defer f.Close()
+
+		// Peek the first 8 KiB to reject binaries cheaply without reading
+		// the entire file into memory. Check BOM first (UTF-16 files have
+		// 0x00 for ASCII), then NUL.
+		peek := make([]byte, 8*1024)
+		n, _ := io.ReadFull(f, peek)
+		peek = peek[:n]
+
+		bomKind := fileenc.DetectQuick(peek)
+		if bomKind != fileenc.UTF16LE && bomKind != fileenc.UTF16BE && bomKind != fileenc.UTF8BOM {
+			if bytes.IndexByte(peek, 0) >= 0 {
+				return nil // binary, skip
+			}
+		}
+
+		// Read the rest for full encoding detection.
+		rest, err := io.ReadAll(f)
+		if err != nil {
 			return nil
 		}
-		enc, _ := fileenc.Detect(raw)
-		data := fileenc.Decode(raw, enc)
+		all := append(peek, rest...)
+		enc, _ := fileenc.Detect(all)
+		data := fileenc.Decode(all, enc)
 
 		sc := bufio.NewScanner(bytes.NewReader(data))
 		sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)

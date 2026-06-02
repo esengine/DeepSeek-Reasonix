@@ -57,6 +57,23 @@ func Detect(data []byte) (Kind, []byte) {
 	return LossyUTF8, data
 }
 
+// DetectQuick checks only for BOM prefixes in the first few bytes. This is
+// the fast path for peek-based binary rejection: BOM-prefixed files (UTF-16,
+// UTF-8 BOM) skip the NUL-byte check since 0x00 is normal in UTF-16. Returns
+// UTF8 for non-BOM content (the caller should fall through to full Detect
+// after verifying no NUL bytes).
+func DetectQuick(peek []byte) Kind {
+	switch {
+	case len(peek) >= 3 && peek[0] == 0xEF && peek[1] == 0xBB && peek[2] == 0xBF:
+		return UTF8BOM
+	case len(peek) >= 2 && peek[0] == 0xFF && peek[1] == 0xFE:
+		return UTF16LE
+	case len(peek) >= 2 && peek[0] == 0xFE && peek[1] == 0xFF:
+		return UTF16BE
+	}
+	return UTF8
+}
+
 // Decode converts data from the given encoding to UTF-8 bytes.
 func Decode(data []byte, enc Kind) []byte {
 	switch enc {

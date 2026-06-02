@@ -16,6 +16,8 @@ import (
 	"reasonix/internal/tool"
 )
 
+const readFileBinaryPeek = 8 * 1024 // bytes scanned for NUL before full read
+
 func init() { tool.RegisterBuiltin(readFile{}) }
 
 // readFile reads a text file. workDir, when non-empty, is the directory a
@@ -80,50 +82,70 @@ func (r readFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 	}
 	defer f.Close()
 
-	// Detect and decode the file's encoding to UTF-8. The cascade mirrors
-	// v1's file-encoding.ts: BOM → strict UTF-8 → GB18030 → lossy UTF-8.
-	// This keeps CJK Windows files (GBK/GB18030) readable and avoids
-	// rejecting them as "binary" — the old NUL-byte heuristic only worked
-	// for true binaries, not for valid text in a non-UTF-8 charset.
-	all, err := io.ReadAll(f)
+	// Peek the first 8 KiB to reject binary files cheaply — the original
+	// implementation did this too, and it prevents a multi-GB archive or
+	// executable from being slurped into memory just to be discarded.
+	peek := make([]byte, readFileBinaryPeek)
+	n, _ := io.ReadFull(f, peek)
+	peek = peek[:n]
+
+	// Check for a BOM first: UTF-16 files contain 0x00 for every ASCII
+	// character, so a naive NUL check would misidentify them as binary.
+	bomKind := fileenc.DetectQuick(peek)
+	if bomKind == fileenc.UTF16LE || bomKind == fileenc.UTF16BE || bomKind == fileenc.UTF8BOM {
+		rest, err := io.ReadAll(f)
+		if err != nil {
+			return "", fmt.Errorf("read %s: %w", p.Path, err)
+		}
+		all := append(peek, rest...)
+		src := io.Reader(bytes.NewReader(fileenc.Decode(all, bomKind)))
+		return r.scan(src, p.Offset, p.Limit)
+	}
+
+	// No BOM — a NUL anywhere in the peek means binary.
+	if bytes.IndexByte(peek, 0) >= 0 {
+		return "", fmt.Errorf("binary file %s (NUL byte detected); use `bash hexdump` or another tool", p.Path)
+	}
+
+	// Non-BOM text: read the rest for full encoding detection (UTF-8 vs
+	// GB18030 vs lossy fallback). The peek already passed the NUL check
+	// so the remainder is unlikely to contain one, but check anyway.
+	rest, err := io.ReadAll(f)
 	if err != nil {
 		return "", fmt.Errorf("read %s: %w", p.Path, err)
 	}
+	all := append(peek, rest...)
 	enc, _ := fileenc.Detect(all)
-	// NUL bytes are valid in UTF-16 (the 0x00 half of each ASCII code unit)
-	// but never valid in single-byte text. Skip the NUL check for BOM-prefixed
-	// files since they are already known to be UTF-16.
-	if enc != fileenc.UTF16LE && enc != fileenc.UTF16BE && bytes.IndexByte(all, 0) >= 0 {
+	if enc == fileenc.LossyUTF8 && bytes.IndexByte(all, 0) >= 0 {
 		return "", fmt.Errorf("binary file %s (NUL byte detected); use `bash hexdump` or another tool", p.Path)
 	}
 	src := io.Reader(bytes.NewReader(fileenc.Decode(all, enc)))
+	return r.scan(src, p.Offset, p.Limit)
+}
 
-	// Scan up to offset+limit+1 lines (the extra is just to know whether
-	// trimming a trailer is warranted). 1 MB per-line cap matches what other
-	// scanners in this package allow — well above any reasonable source line.
+// scan reads lines from src and returns the formatted output with line numbers.
+func (r readFile) scan(src io.Reader, offset, limit int) (string, error) {
 	scanner := bufio.NewScanner(src)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	upTo := p.Offset + p.Limit + 1
+	upTo := offset + limit + 1
 
 	var collected []string
 	lineNo := 0
 	for scanner.Scan() {
 		lineNo++
-		if lineNo > p.Offset && len(collected) < p.Limit {
+		if lineNo > offset && len(collected) < limit {
 			collected = append(collected, scanner.Text())
 		}
 		if lineNo >= upTo {
-			// Keep counting to know how many more lines remain.
 			break
 		}
 	}
-	// Drain any remainder to learn the true total without buffering the rest.
 	remaining := 0
 	for scanner.Scan() {
 		remaining++
 	}
 	if err := scanner.Err(); err != nil {
-		return "", fmt.Errorf("read %s: %w", p.Path, err)
+		return "", fmt.Errorf("scan: %w", err)
 	}
 	totalSeen := lineNo + remaining
 
@@ -131,22 +153,20 @@ func (r readFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 		return "(empty file)", nil
 	}
 	if len(collected) == 0 {
-		return fmt.Sprintf("(offset %d is past EOF — file has %d lines)", p.Offset, totalSeen), nil
+		return fmt.Sprintf("(offset %d is past EOF — file has %d lines)", offset, totalSeen), nil
 	}
 
-	// Right-align line numbers to the largest one we'll print, so the arrow
-	// "→" column lines up. Add 1 for the 1-based display.
-	maxShown := p.Offset + len(collected)
+	maxShown := offset + len(collected)
 	w := len(fmt.Sprint(maxShown))
 
 	var b strings.Builder
 	for i, line := range collected {
-		fmt.Fprintf(&b, "%*d→%s\n", w, p.Offset+i+1, line)
+		fmt.Fprintf(&b, "%*d→%s\n", w, offset+i+1, line)
 	}
-	more := totalSeen - (p.Offset + len(collected))
+	more := totalSeen - (offset + len(collected))
 	if more > 0 {
 		fmt.Fprintf(&b, "\n[%d more line(s); pass offset=%d to continue]\n",
-			more, p.Offset+len(collected))
+			more, offset+len(collected))
 	}
 	return b.String(), nil
 }
