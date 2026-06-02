@@ -98,6 +98,38 @@ func TestKill(t *testing.T) {
 	}
 }
 
+// Killed status is observable as soon as Kill returns, before the run goroutine
+// unwinds — otherwise a slow cancelled process tree (Windows taskkill + WaitDelay
+// drain) leaves Wait reporting Running until the goroutine finally returns, which
+// is the TestBackgroundKill flake. The job here stays blocked past ctx.Done.
+func TestKillStatusObservableBeforeGoroutineReturns(t *testing.T) {
+	m := NewManager(event.Discard)
+	defer m.Close()
+
+	release := make(chan struct{})
+	j := m.Start("bash", "", func(ctx context.Context, _ io.Writer) (string, error) {
+		<-ctx.Done()
+		<-release // simulate a teardown that hasn't returned yet
+		return "", ctx.Err()
+	})
+	if !m.Kill(j.ID) {
+		t.Fatal("Kill on a running job returned false")
+	}
+
+	// Short timeout: the goroutine is still blocked, so Wait can only know the
+	// status if Kill set it synchronously.
+	res := m.Wait(context.Background(), []string{j.ID}, 1)
+	if len(res) != 1 || res[0].Status != Killed {
+		t.Fatalf("want Killed before the goroutine returns, got %+v", res)
+	}
+	if n := len(m.Running()); n != 0 {
+		t.Fatalf("a killed job should not still be Running(), got %d", n)
+	}
+
+	close(release)
+	m.Wait(context.Background(), []string{j.ID}, 5)
+}
+
 // Close cancels every still-running job.
 func TestCloseCancels(t *testing.T) {
 	m := NewManager(event.Discard)

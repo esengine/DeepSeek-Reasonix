@@ -206,6 +206,15 @@ func (m *Manager) Kill(id string) bool {
 	}
 	j.mu.Lock()
 	running := j.status == Running
+	if running {
+		// Flip to Killed synchronously so Output/Wait reflect the kill the instant
+		// it's requested, not whenever the run goroutine's cmd.Run returns (which
+		// trails by WaitDelay while a cancelled process tree tears down). The
+		// goroutine still sets Killed + records completion on return; this only
+		// fires when the job is actually Running, so a job that just finished
+		// keeps its real terminal status.
+		j.status = Killed
+	}
 	j.mu.Unlock()
 	if !running {
 		return false
