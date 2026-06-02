@@ -74,7 +74,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	}
 	entry, ok := cfg.ResolveModel(modelName)
 	if !ok {
-		return nil, fmt.Errorf("unknown model %q (configured: %s)", modelName, providerNames(cfg))
+		return nil, fmt.Errorf("unknown model %q (configured: %s); note: defining [[providers]] replaces the built-in presets, so add a [[providers]] entry for it or use a configured name", modelName, providerNames(cfg))
 	}
 	if opts.RequireKey {
 		if err := cfg.Validate(modelName); err != nil {
@@ -87,6 +87,13 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// shares this synchronized sink. The job manager is session-scoped — its jobs
 	// outlive a turn and are cancelled by Controller.Close.
 	sink := event.Sync(opts.Sink)
+
+	// A resolvable model whose API key env is unset would otherwise build fine
+	// (RequireKey is false so the UI stays reachable) and then fail silently on the
+	// first request, showing as an empty/dead model. Surface the cause up front.
+	if !opts.RequireKey && entry.APIKeyEnv != "" && entry.APIKey() == "" {
+		sink.Emit(event.Event{Kind: event.Notice, Text: fmt.Sprintf("model %q is selected but its API key %s is not set — requests will fail until you set it", modelName, entry.APIKeyEnv)})
+	}
 	jm := jobs.NewManager(sink)
 
 	proxySpec := cfg.NetworkProxySpec()
