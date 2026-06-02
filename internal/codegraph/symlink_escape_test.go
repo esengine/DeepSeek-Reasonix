@@ -4,6 +4,8 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -36,6 +38,11 @@ func TestExtractRejectsEscapingSymlink(t *testing.T) {
 // TestExtractAllowsInternalSymlink keeps legitimate in-bundle symlinks working.
 func TestExtractAllowsInternalSymlink(t *testing.T) {
 	dir := t.TempDir()
+	probe := filepath.Join(dir, "probe-link")
+	if err := os.Symlink("probe-target", probe); err != nil {
+		t.Skipf("symlink creation is not available in this environment: %v", err)
+	}
+	_ = os.Remove(probe)
 	for _, dest := range []string{"bin/codegraph", "./node", "sub/dir/../tool"} {
 		if err := extractTarGz(tarGzWithSymlink("link", dest), dir); err != nil {
 			t.Errorf("internal symlink -> %q should be allowed, got %v", dest, err)

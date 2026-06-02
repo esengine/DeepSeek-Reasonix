@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"runtime"
 	"strings"
 	"testing"
 
@@ -15,16 +16,25 @@ import (
 // TestRunStatuslineCmd checks the custom status-line runner: it returns the
 // first stdout line and forwards the JSON payload on stdin.
 func TestRunStatuslineCmd(t *testing.T) {
+	firstLineCmd := "printf 'row-one\\nrow-two\\n'"
+	stdinCmd := "cat"
+	failCmd := "exit 3"
+	if runtime.GOOS == "windows" {
+		firstLineCmd = "echo row-one & echo row-two"
+		stdinCmd = "more"
+		failCmd = "exit /b 3"
+	}
+
 	// Multi-line output collapses to the first row.
-	if got := runStatuslineCmd("printf 'row-one\\nrow-two\\n'", "{}"); got != "row-one" {
+	if got := runStatuslineCmd(firstLineCmd, "{}"); got != "row-one" {
 		t.Errorf("multi-line output should collapse to the first row, got %q", got)
 	}
 	// The JSON payload is delivered on stdin.
-	if got := runStatuslineCmd("cat", `{"model":"deepseek"}`); got != `{"model":"deepseek"}` {
+	if got := runStatuslineCmd(stdinCmd, `{"model":"deepseek"}`); got != `{"model":"deepseek"}` {
 		t.Errorf("stdin payload not forwarded, got %q", got)
 	}
 	// A failing command yields an empty line, not an error.
-	if got := runStatuslineCmd("exit 3", "{}"); got != "" {
+	if got := runStatuslineCmd(failCmd, "{}"); got != "" {
 		t.Errorf("failed command should yield empty, got %q", got)
 	}
 }

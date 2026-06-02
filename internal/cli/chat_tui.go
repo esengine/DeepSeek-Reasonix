@@ -300,7 +300,7 @@ func runStatuslineCmd(cmd, stdinPayload string) string {
 	})
 	out := strings.TrimSpace(res.Stdout)
 	if i := strings.IndexByte(out, '\n'); i >= 0 {
-		out = out[:i]
+		out = strings.TrimSpace(out[:i])
 	}
 	return out
 }
