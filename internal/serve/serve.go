@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"reasonix/internal/agent"
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
@@ -256,6 +257,10 @@ func (s *Server) compact(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	// Persist the compacted session to disk — ctrl.Compact() only mutates in-memory.
+	if err := s.ctrl.Snapshot(); err != nil {
+		slog.Warn("serve: snapshot after compact", "err", err)
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -445,7 +450,7 @@ func (s *Server) answer(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// resume loads a previous session by index.
+// resume loads a previous session from a JSONL file.
 func (s *Server) resume(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Path string `json:"path"`
@@ -454,9 +459,17 @@ func (s *Server) resume(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing path", http.StatusBadRequest)
 		return
 	}
-	// Use Submit to handle /resume which the controller dispatches
-	s.ctrl.Submit("/resume " + body.Path)
-	w.WriteHeader(http.StatusAccepted)
+	// Snapshot the current session before switching away.
+	if err := s.ctrl.Snapshot(); err != nil {
+		slog.Warn("serve: snapshot before resume", "err", err)
+	}
+	loaded, err := agent.LoadSession(body.Path)
+	if err != nil {
+		http.Error(w, "load session: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	s.ctrl.Resume(loaded, body.Path)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // forget deletes a saved memory by name.

@@ -402,6 +402,18 @@ function setRunning(on) {
   },1000);} else {clearInterval(tickTimer);turnInfo.textContent='';}
 }
 
+function setConnState(state) {
+  // state: 'connected' | 'reconnecting' | 'disconnected'
+  const colors={connected:'var(--success)',reconnecting:'var(--warning)',disconnected:'var(--danger)'};
+  const labels={connected:'Connected',reconnecting:'Reconnecting...',disconnected:'Disconnected'};
+  if(!running){
+    statusDot.style.background=colors[state]||'';
+    statusDot.className='status__dot'+(state==='reconnecting'?' status__dot--busy':'');
+    statusText.textContent=labels[state]||state;
+  }
+  statusDotSidebar.style.background=colors[state]||'';
+}
+
 // ── messages ──
 function addUserMsg(text) { hideWelcome(); const d=el('div','msg msg--user'); d.appendChild(el('span','msg__caret','›')); d.appendChild(el('div','msg__text',text)); log.appendChild(d); scrollDown(); currentMsg=null;currentText=null;currentReasoning=null; }
 function ensureMsg() { if(!currentMsg){hideWelcome();currentMsg=el('div','msg msg--assistant');log.appendChild(currentMsg);} return currentMsg; }
@@ -579,7 +591,8 @@ function acceptSlash(){if(!slashOpen)return;const c=slashFiltered[slashIndex];if
 
 // ── SSE ──
 const es=new EventSource('/events');
-es.onmessage=ev=>{
+es.onopen=()=>{setConnState('connected');};
+es.onmessage=ev=>{setConnState('connected');
   const e=JSON.parse(ev.data);
   switch(e.kind){
     case 'turn_started': setRunning(true); finalizeMsg(); toolCards={}; break;
@@ -608,7 +621,10 @@ es.onmessage=ev=>{
     case 'turn_done': finalizeMsg(); setRunning(false); if(e.err){log.appendChild(el('div','msg--error','✗ '+e.err));scrollDown();} fetchStatus(); break;
   }
 };
-es.onerror=()=>{statusText.textContent='Disconnected';statusDot.className='status__dot';};
+es.onerror=()=>{
+  if(es.readyState===EventSource.CONNECTING){setConnState('reconnecting');}
+  else{setConnState('disconnected');}
+};
 
 // ── status polling ──
 function fetchStatus(){
