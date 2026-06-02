@@ -41,6 +41,7 @@ var English = Messages{
 	ChatThinking:           "thinking…",
 	ChatThoughtForFmt:      "thought for %ds",
 	ChatStatusThinkingFmt:  "%s thinking… (%ds · Esc cancels)",
+	ChatToolWorkingFmt:     "%s working · %ds",
 	ChatStatusIdle:         "ready",
 	ChatStatusYoloIdle:     "approvals skipped",
 	ChatStatusPlanApproval: "Enter/y approves & executes · n/Esc keeps planning · PgUp/PgDn scrolls",

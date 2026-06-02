@@ -67,6 +67,7 @@ type Messages struct {
 	ChatThinking           string // live reasoning marker label, e.g. "thinking…"
 	ChatThoughtForFmt      string // collapsed reasoning summary, "%d" = elapsed s
 	ChatStatusThinkingFmt  string // "%s thinking… (%ds · <cancel hint>)" — %s = spinner, %d = elapsed s
+	ChatToolWorkingFmt     string // "%s working · %ds" under a running tool — %s = spinner, %d = elapsed s
 	ChatStatusIdle         string // shortcuts hint when idle
 	ChatStatusYoloIdle     string // shortcuts hint when idle in YOLO/bypass mode
 	ChatStatusPlanApproval string // shortcuts hint while a plan is pending

@@ -128,11 +128,16 @@ type chatTUI struct {
 	// complete lines (toolTail) plus the in-progress one (toolPartial) — so a
 	// high-output command can't balloon memory or cost O(n²) re-splitting;
 	// toolLineCount feeds the collapse summary.
-	toolStreamIdx   int
-	toolStreamID    string
-	toolTail        []string
-	toolPartial     string
-	toolLineCount   int
+	toolStreamIdx int
+	toolStreamID  string
+	toolTail      []string
+	toolPartial   string
+	toolLineCount int
+	// toolStreamStart / toolStreamFrame drive the "⎿ working · Ns" line shown
+	// under a dispatched tool that hasn't produced output yet, so a slow tool
+	// (e.g. codegraph_context) reads as making progress rather than frozen.
+	toolStreamStart time.Time
+	toolStreamFrame int
 	transcriptDirty bool
 	eventCh         chan event.Event
 	started         bool // banner + resumed history committed once
@@ -991,6 +996,7 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case elapsedTickMsg:
 		if m.state == tuiRunning {
 			m.elapsed = int(time.Since(m.runStart).Seconds())
+			m.tickToolRunning()
 			cmds = append(cmds, elapsedTick())
 		}
 
@@ -1201,13 +1207,59 @@ func (m *chatTUI) collapseToolOutput(id string) {
 	if m.toolPartial != "" {
 		n++
 	}
-	m.transcript[m.toolStreamIdx] = connectorBlock([]string{dim(fmt.Sprintf("%d lines", n))})
+	if n == 0 {
+		// The tool produced no streamed output (e.g. an MCP call like
+		// codegraph_context) — drop the "working" placeholder so only the card
+		// remains, rather than leaving a "0 lines" summary.
+		if m.toolStreamIdx == len(m.transcript)-1 {
+			m.transcript = m.transcript[:m.toolStreamIdx]
+		} else {
+			m.transcript[m.toolStreamIdx] = ""
+		}
+	} else {
+		m.transcript[m.toolStreamIdx] = connectorBlock([]string{dim(fmt.Sprintf("%d lines", n))})
+	}
 	m.transcriptDirty = true
 	m.toolStreamIdx = -1
 	m.toolStreamID = ""
 	m.toolTail = m.toolTail[:0]
 	m.toolPartial = ""
 	m.toolLineCount = 0
+}
+
+// toolWorkingFrames is the braille spinner cycled once per second on the
+// "⎿ working · Ns" line of a tool that hasn't streamed output yet.
+var toolWorkingFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
+// beginToolRunning opens an empty live block under a just-dispatched tool card,
+// keyed by the call id. tickToolRunning fills it with a "working · Ns" line each
+// second; if the tool later streams output, streamToolOutput reuses the same
+// block; collapseToolOutput closes it on the result.
+func (m *chatTUI) beginToolRunning(id string) {
+	if id == "" {
+		return
+	}
+	m.toolStreamID = id
+	m.toolTail = m.toolTail[:0]
+	m.toolPartial = ""
+	m.toolLineCount = 0
+	m.toolStreamStart = time.Now()
+	m.toolStreamFrame = 0
+	m.toolStreamIdx = len(m.transcript)
+	m.commitLine(connectorBlock([]string{dim(fmt.Sprintf(i18n.M.ChatToolWorkingFmt, toolWorkingFrames[0], 0))}))
+}
+
+// tickToolRunning re-renders the working line of a tool that's dispatched but
+// hasn't produced output yet. A no-op once output streams in or no tool runs.
+func (m *chatTUI) tickToolRunning() {
+	if m.toolStreamIdx < 0 || m.toolLineCount != 0 || m.toolPartial != "" {
+		return
+	}
+	m.toolStreamFrame++
+	frame := toolWorkingFrames[m.toolStreamFrame%len(toolWorkingFrames)]
+	secs := int(time.Since(m.toolStreamStart).Seconds())
+	m.transcript[m.toolStreamIdx] = connectorBlock([]string{dim(fmt.Sprintf(i18n.M.ChatToolWorkingFmt, frame, secs))})
+	m.transcriptDirty = true
 }
 
 // commitReasoning closes the live thinking block: the "▎ thinking…" marker is
@@ -2231,6 +2283,7 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 				break
 			}
 			m.commitLine(toolCard(e.Tool.Name, e.Tool.Args, m.width))
+			m.beginToolRunning(e.Tool.ID)
 		}
 
 	case event.ToolProgress:

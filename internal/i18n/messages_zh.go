@@ -42,6 +42,7 @@ var Chinese = Messages{
 	ChatThinking:           "思考中…",
 	ChatThoughtForFmt:      "思考了 %d 秒",
 	ChatStatusThinkingFmt:  "%s 思考中… (%d 秒 · Esc 取消)",
+	ChatToolWorkingFmt:     "%s 运行中 · %d 秒",
 	ChatStatusIdle:         "就绪",
 	ChatStatusYoloIdle:     "已跳过批准",
 	ChatStatusPlanApproval: "Enter/y 批准并执行 · n/Esc 继续规划 · PgUp/PgDn 滚动",
