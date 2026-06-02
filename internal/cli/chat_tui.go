@@ -174,11 +174,11 @@ type chatTUI struct {
 	// rewind holds the Esc-Esc / "/rewind" picker (nil when closed); while set,
 	// keys drive it and it renders as an overlay. lastEsc times the double-Esc
 	// gesture that opens it on an empty composer.
-	rewind  *rewindPicker
+	rewind *rewindPicker
 	// resumePick is the interactive "/resume" session picker overlay. Non-nil
 	// while the user browses saved sessions with ↑/↓ and confirms with Enter.
 	resumePick *resumePicker
-	lastEsc time.Time
+	lastEsc    time.Time
 
 	// lastCtrlCAt records when Ctrl+C was pressed while idle on an empty
 	// composer, enabling a "press again to quit" confirmation pattern (1.5s
