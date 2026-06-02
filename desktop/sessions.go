@@ -87,6 +87,10 @@ func deleteSessionFile(dir, sessionPath string) error {
 	if err != nil {
 		return err
 	}
+	return removeSessionArtifacts(dir, sessionPath, key)
+}
+
+func removeSessionArtifacts(dir, sessionPath, key string) error {
 	if err := os.Remove(sessionPath); err != nil && !os.IsNotExist(err) {
 		return err
 	}

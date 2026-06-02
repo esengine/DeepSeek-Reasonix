@@ -407,7 +407,7 @@ func (a *App) ListSessions() []SessionMeta {
 // file on the next turn; start a new session first to retire it.
 func (a *App) DeleteSession(path string) error {
 	dir := config.SessionDir()
-	sessionPath, _, err := validateSessionPath(dir, path)
+	sessionPath, key, err := validateSessionPath(dir, path)
 	if err != nil {
 		return err
 	}
@@ -420,7 +420,7 @@ func (a *App) DeleteSession(path string) error {
 			return errActiveSession
 		}
 	}
-	return deleteSessionFile(dir, sessionPath)
+	return removeSessionArtifacts(dir, sessionPath, key)
 }
 
 // RenameSession sets a custom display name for a session (empty clears it back to
