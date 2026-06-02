@@ -195,6 +195,7 @@ export const en = {
 
   // memory drawer
   "memory.title": "Memory",
+  "memory.summary": "{facts} saved · {docs} files",
   "memory.unavailable": "Memory unavailable.",
   "memory.quickAdd": "Quick add",
   "memory.whereToSave": "Where to save",
@@ -203,10 +204,20 @@ export const en = {
   "memory.instructionFiles": "Instruction files",
   "memory.noDocs": "No REASONIX.md found. Quick-add one above.",
   "memory.savedMemories": "Saved memories",
+  "memory.fallibleNote": "Background memory. Verify file, function, and flag references before relying on them.",
+  "memory.searchPlaceholder": "Search title, slug, description, or body…",
+  "memory.typeFilter": "Memory type filter",
+  "memory.allTypes": "All",
+  "memory.noMatches": "No memories match the current filters.",
+  "memory.clearFilters": "Clear filters",
   "memory.noFacts": "Nothing saved yet. The agent writes these with the remember tool.",
+  "memory.links": "Memory links",
+  "memory.noBody": "No body saved for this memory.",
+  "memory.missingLinks": "{n} missing linked memory",
+  "memory.appliesNow": "Changes apply in this session.",
   "memory.storedUnder": "stored under {dir}",
   "memory.forget": "Forget",
-  "memory.confirmForget": "Forget “{name}”? This deletes the saved memory.",
+  "memory.confirmForget": "Confirm forget",
   "memory.deadLink": "No memory named “{name}”",
 
   // settings drawer

@@ -2743,6 +2743,16 @@ body {
   flex-direction: column;
   gap: 22px;
 }
+.mem-section {
+  min-width: 0;
+}
+.mem-section__row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
 .mem-section__title {
   font-size: 11px;
   text-transform: uppercase;
@@ -2750,6 +2760,88 @@ body {
   color: var(--fg-dim);
   margin-bottom: 10px;
   font-weight: 650;
+}
+.mem-section__row .mem-section__title {
+  margin-bottom: 3px;
+}
+.mem-note {
+  max-width: 36em;
+  color: var(--fg-faint);
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+.mem-count {
+  min-width: 24px;
+  height: 22px;
+  padding: 0 7px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: var(--bg-soft);
+  color: var(--fg-dim);
+  font-size: 11px;
+  font-family: var(--mono);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.mem-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.mem-search {
+  height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--fg-faint);
+}
+.mem-search:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+.mem-search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 12.5px;
+}
+.mem-filter {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  padding-bottom: 1px;
+}
+.mem-filter__item {
+  flex: 0 0 auto;
+  height: 25px;
+  padding: 0 9px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.mem-filter__item:hover {
+  color: var(--fg);
+  border-color: var(--border);
+  background: var(--bg-soft);
+}
+.mem-filter__item--on {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: transparent;
 }
 .mem-add {
   display: flex;
@@ -2789,7 +2881,20 @@ body {
 .mem-empty {
   font-size: 12px;
   color: var(--fg-faint);
-  padding: 4px 0;
+  padding: 8px 0;
+}
+.mem-empty__action {
+  margin-left: 8px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.mem-empty__action:hover {
+  text-decoration: underline;
 }
 .mem-doc {
   border: 1px solid var(--border);
@@ -2847,42 +2952,157 @@ body {
   gap: 8px;
   margin-top: 8px;
 }
-.mem-fact {
+.mem-facts {
   display: flex;
+  flex-direction: column;
   gap: 8px;
-  align-items: flex-start;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--border-soft);
 }
-.mem-fact__text {
+.mem-fact {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-elev) 78%, var(--bg) 22%);
+  overflow: hidden;
+  transition: border-color 0.12s, background 0.12s;
+}
+.mem-fact:hover {
+  border-color: var(--border);
+}
+.mem-fact__summary {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 10px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+.mem-fact__summary > svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: var(--fg-faint);
+}
+.mem-fact__main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   min-width: 0;
   flex: 1;
 }
-.mem-fact__name {
+.mem-fact__title {
+  min-width: 0;
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 650;
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mem-fact__meta {
+  min-width: 0;
+  color: var(--fg-faint);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .mem-fact__desc {
+  min-width: 0;
   font-size: 12px;
   color: var(--fg-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mem-fact__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 0 10px 9px 32px;
+}
+.mem-link-chip {
+  display: inline-flex;
+  max-width: 100%;
+  min-height: 22px;
+  align-items: center;
+  padding: 2px 7px;
+  border: 1px solid var(--accent-soft);
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font: inherit;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  line-height: 1.2;
+  cursor: pointer;
+}
+.mem-link-chip:hover {
+  border-color: color-mix(in srgb, var(--accent) 42%, transparent);
+}
+.mem-link-chip--dead {
+  border-color: color-mix(in srgb, var(--danger, #d66) 30%, transparent);
+  background: color-mix(in srgb, var(--danger, #d66) 10%, transparent);
+  color: var(--danger, #d66);
+  cursor: help;
+  text-decoration: line-through;
+}
+.mem-fact__detail {
+  border-top: 1px solid var(--border-soft);
+  padding: 10px;
+  background: color-mix(in srgb, var(--bg) 54%, transparent);
 }
 .mem-fact__body {
-  margin-top: 4px;
   font-size: 12px;
   color: var(--fg-dim);
+  line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
 }
 .mem-fact__forget {
-  flex-shrink: 0;
-  opacity: 0.5;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--fg-dim);
 }
 .mem-fact__forget:hover {
-  opacity: 1;
+  color: var(--danger, #d66);
+  border-color: color-mix(in srgb, var(--danger, #d66) 36%, transparent);
+}
+.mem-fact__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+}
+.mem-confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.mem-danger {
+  color: var(--danger, #d66);
+  border-color: color-mix(in srgb, var(--danger, #d66) 34%, transparent);
+  background: color-mix(in srgb, var(--danger, #d66) 10%, transparent);
+}
+.mem-danger:hover {
+  color: var(--danger, #d66);
+  border-color: color-mix(in srgb, var(--danger, #d66) 52%, transparent);
+}
+.mem-deadline {
+  margin-top: 8px;
+  color: var(--danger, #d66);
+  font-size: 11.5px;
 }
 .mem-fact--hl {
   background: var(--accent-soft, rgba(120, 170, 255, 0.12));
-  border-radius: 6px;
+  border-color: color-mix(in srgb, var(--accent) 42%, transparent);
 }
 .mem-link {
   background: none;
@@ -2897,6 +3117,11 @@ body {
   color: var(--danger, #d66);
   cursor: help;
   text-decoration: line-through;
+}
+.mem-hint--inline {
+  margin-top: 0;
+  font-family: inherit;
+  line-height: 1.35;
 }
 .btn--small {
   padding: 4px 10px;

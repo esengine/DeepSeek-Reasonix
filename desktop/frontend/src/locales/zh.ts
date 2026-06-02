@@ -196,6 +196,7 @@ export const zh: Record<DictKey, string> = {
 
   // 记忆抽屉
   "memory.title": "记忆",
+  "memory.summary": "{facts} 条已保存 · {docs} 个文件",
   "memory.unavailable": "记忆功能不可用。",
   "memory.quickAdd": "快速添加",
   "memory.whereToSave": "保存到哪里",
@@ -204,10 +205,20 @@ export const zh: Record<DictKey, string> = {
   "memory.instructionFiles": "指令文件",
   "memory.noDocs": "未找到 REASONIX.md。可在上方快速添加一条。",
   "memory.savedMemories": "已保存的记忆",
+  "memory.fallibleNote": "这些是背景记忆。引用文件、函数或配置项前仍需验证。",
+  "memory.searchPlaceholder": "搜索标题、slug、描述或正文…",
+  "memory.typeFilter": "记忆类型筛选",
+  "memory.allTypes": "全部",
+  "memory.noMatches": "没有符合当前筛选的记忆。",
+  "memory.clearFilters": "清空筛选",
   "memory.noFacts": "还没有保存任何内容。智能体会通过 remember 工具写入这些。",
+  "memory.links": "记忆互链",
+  "memory.noBody": "这条记忆没有正文。",
+  "memory.missingLinks": "{n} 条互链目标不存在",
+  "memory.appliesNow": "变更会在当前会话生效。",
   "memory.storedUnder": "存放于 {dir}",
   "memory.forget": "删除",
-  "memory.confirmForget": "删除「{name}」？这会移除这条已存记忆。",
+  "memory.confirmForget": "确认删除",
   "memory.deadLink": "没有名为「{name}」的记忆",
 
   // 设置抽屉
