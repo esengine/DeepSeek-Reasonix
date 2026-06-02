@@ -2,6 +2,7 @@
 /bin/
 /dist/
 /stage/
+/npm/.stage/
 /reasonix
 /reasonix.exe
 

@@ -1,0 +1,54 @@
+version: 2
+project_name: reasonix
+
+before:
+  hooks:
+    - go mod download
+
+builds:
+  - id: reasonix
+    main: ./cmd/reasonix
+    binary: reasonix
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{ .Tag }}
+    goos: [darwin, linux, windows]
+    goarch: [amd64, arm64]
+
+archives:
+  - id: reasonix
+    ids: [reasonix]
+    name_template: "reasonix-{{ .Os }}-{{ .Arch }}"
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+
+checksum:
+  name_template: SHA256SUMS
+  algorithm: sha256
+
+brews:
+  - name: reasonix
+    ids: [reasonix]
+    repository:
+      owner: esengine
+      name: homebrew-reasonix
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    homepage: "https://github.com/esengine/DeepSeek-Reasonix"
+    description: "Cache-first DeepSeek coding agent for the terminal."
+    license: MIT
+    commit_author:
+      name: reasonix
+      email: reasonix@deepseek.com
+    install: |
+      bin.install "reasonix"
+    test: |
+      assert_match "reasonix", shell_output("#{bin}/reasonix --version")
+
+release:
+  prerelease: auto

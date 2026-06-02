@@ -8,28 +8,51 @@ permissions:
   contents: write # create the release and upload archives
 
 jobs:
-  release:
+  cache-guard:
+    name: cache hit guard
     runs-on: ubuntu-latest
-    env:
-      GH_TOKEN: ${{ github.token }}
-      VERSION: ${{ github.ref_name }}
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
+      - run: ./scripts/cache-guard.sh
 
-      - name: Cache hit guard
-        run: ./scripts/cache-guard.sh
+  goreleaser:
+    name: archives + checksums + homebrew tap
+    needs: cache-guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: '~> v2'
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
 
-      - name: Build, bundle CodeGraph, and package
-        run: ./scripts/release.sh
-
-      - name: Publish GitHub release
-        run: |
-          gh release create "$VERSION" \
-            dist/SHA256SUMS dist/*.tar.gz dist/*.zip \
-            --title "$VERSION" \
-            --generate-notes
+  npm:
+    name: publish npm packages
+    needs: cache-guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+      - run: node npm/build.mjs "${GITHUB_REF_NAME}" --publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -17,7 +17,7 @@
 > [!IMPORTANT]
 > **Reasonix 1.0 is a ground-up rewrite in Go** — this branch (`main-v2`) is the new default and where development happens now.
 > The earlier `0.x` TypeScript releases are **legacy**, living on the [`v1`](https://github.com/esengine/DeepSeek-Reasonix/tree/v1) branch (maintenance only).
-> See the **[migration guide](./docs/MIGRATING.md)**. `npm i -g reasonix` stays the install command — `1.0.0`+ delivers the Go binary, `0.x` is the legacy TS build. (Heads-up: 1.0.0 isn't on npm yet — build from source meanwhile.)
+> See the **[migration guide](./docs/MIGRATING.md)**. `npm i -g reasonix` stays the install command — `1.0.0`+ delivers the Go binary, `0.x` is the legacy TS build.
 
 <p align="center">
   <a href="https://www.npmjs.com/package/reasonix"><img src="https://img.shields.io/npm/v/reasonix.svg?style=flat-square&color=cb3837&labelColor=161b22&logo=npm&logoColor=white" alt="npm version"/></a>
@@ -61,7 +61,17 @@
 - **Zero-friction distribution.** `CGO_ENABLED=0` single binary; cross-compile
   to six targets with one command. The only dependency is a TOML parser.
 
-## Install / Build
+## Install
+
+```sh
+npm i -g reasonix                  # any OS; pulls the prebuilt native binary
+brew install esengine/reasonix/reasonix   # macOS / Linux
+```
+
+Prebuilt archives (`darwin|linux|windows × amd64|arm64`) and `SHA256SUMS` are on
+every [GitHub release](https://github.com/esengine/DeepSeek-Reasonix/releases).
+
+### Build from source
 
 ```sh
 make build      # -> bin/reasonix
