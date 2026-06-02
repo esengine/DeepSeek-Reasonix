@@ -277,6 +277,21 @@ func TestApplyIndex(t *testing.T) {
 	}
 }
 
+func TestApplyIndexMakesRelevantSkillUseMandatory(t *testing.T) {
+	out := ApplyIndex("BASE", []Skill{{Name: "alpha", Description: "the alpha", RunAs: RunInline}})
+
+	for _, want := range []string{
+		"# Skills - mandatory playbooks",
+		"Before non-trivial work, scan this index",
+		"If any skill is even plausibly relevant to the user's task, invoke it before continuing",
+		"skip skill use only when no listed skill is plausibly relevant or the task is trivial",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("skill index should contain mandatory policy %q: %s", want, out)
+		}
+	}
+}
+
 func TestApplyIndexTruncates(t *testing.T) {
 	var skills []Skill
 	for i := 0; i < 200; i++ {

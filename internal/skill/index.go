@@ -11,10 +11,10 @@ const IndexMaxChars = 4000
 
 const missingDescPlaceholder = `(no description — frontmatter is missing a "description:" line; tell the user to add one)`
 
-// indexHeader introduces the skills block in the system prompt: how to invoke a
-// skill, and the inline-vs-subagent distinction.
-const indexHeader = "# Skills — playbooks you can invoke\n\n" +
-	"One-liner index. Each entry is a built-in or a user-authored playbook. Call `run_skill({ name: \"<skill-name>\", arguments: \"<task>\" })` — `name` is JUST the identifier (e.g. `\"explore\"`), NOT the `[🧬 subagent]` tag that follows it. Entries tagged `[🧬 subagent]` spawn an isolated subagent — its tool calls and reasoning never enter your context, only its final answer does; use them for context-heavy work (deep exploration, multi-step research) where you only need the conclusion. Untagged skills are inlined: the body becomes a tool result you read and act on directly. The user can also invoke a skill via `/<name>`."
+// indexHeader introduces the skills block in the system prompt: the mandatory
+// invocation policy, how to invoke a skill, and the inline-vs-subagent split.
+const indexHeader = "# Skills - mandatory playbooks\n\n" +
+	"One-liner index. Before non-trivial work, scan this index. If any skill is even plausibly relevant to the user's task, invoke it before continuing; skip skill use only when no listed skill is plausibly relevant or the task is trivial. Each entry is a built-in or a user-authored playbook. Call `run_skill({ name: \"<skill-name>\", arguments: \"<task>\" })` — `name` is JUST the identifier (e.g. `\"explore\"`), NOT the `[🧬 subagent]` tag that follows it. Prefer the dedicated top-level tool when one exists for a built-in subagent skill. Entries tagged `[🧬 subagent]` spawn an isolated subagent — its tool calls and reasoning never enter your context, only its final answer does; use them for context-heavy work (deep exploration, multi-step research) where you only need the conclusion. Untagged skills are inlined: the body becomes a tool result you read and act on directly. The user can also invoke a skill via `/<name>`."
 
 // ApplyIndex appends the skills index to basePrompt, or returns it unchanged
 // when there are no skills. Only names + descriptions (+ a subagent tag) are
