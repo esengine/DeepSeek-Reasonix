@@ -384,6 +384,23 @@ export const en = {
   "updater.failed": "Update failed: {msg}",
   "updater.retry": "Retry",
   "updater.dismiss": "Later",
+
+  // onboarding — first-run overlay shown when the default provider's API key
+  // is unset. The user pastes a key; we validate it against the vendor's
+  // balance endpoint (no tokens spent) and persist it to ./.env.
+  "onboarding.title": "Connect Reasonix",
+  "onboarding.tagline": "Paste a DeepSeek API key to start. Stored locally in .env, never sent anywhere else.",
+  "onboarding.inputLabel": "API key",
+  "onboarding.inputPlaceholder": "sk-…",
+  "onboarding.submit": "Connect & start",
+  "onboarding.validating": "Validating…",
+  "onboarding.getKey": "How do I get a key?",
+  "onboarding.privacy": "Stored only in this app's .env",
+  "onboarding.error.empty": "Please paste a key first.",
+  "onboarding.error.invalid": "That key didn't work — double-check it's active and has billing set up.",
+  "onboarding.error.network": "Couldn't reach DeepSeek — check your network and try again.",
+  "onboarding.error.unknown": "Something went wrong: {msg}",
+  "onboarding.skip": "Skip for now",
 };
 
 export type DictKey = keyof typeof en;

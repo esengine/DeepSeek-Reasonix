@@ -15,6 +15,7 @@ import {
 import logo from "./assets/logo.svg";
 import { useT } from "./lib/i18n";
 import { useController } from "./lib/useController";
+import { app } from "./lib/bridge";
 import { Transcript } from "./components/Transcript";
 import { Composer } from "./components/Composer";
 import { TodoPanel } from "./components/TodoPanel";
@@ -27,6 +28,7 @@ import { SettingsPanel } from "./components/SettingsPanel";
 import { CapabilitiesPanel } from "./components/CapabilitiesPanel";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { WorkspacePanel } from "./components/WorkspacePanel";
+import { OnboardingOverlay } from "./components/OnboardingOverlay";
 import { parseTodos } from "./lib/tools";
 import { sessionActivityTime } from "./lib/session";
 import type { MemoryView, Mode, SessionMeta } from "./lib/types";
@@ -150,6 +152,11 @@ export default function App() {
   } = useController();
   const t = useT();
   const [mode, setMode] = useState<Mode>("normal");
+  // Onboarding gate. null = not yet checked (show the regular loading screen),
+  // true = show the overlay, false = past onboarding, render the main UI.
+  // Probed exactly once on mount; the user clearing their key mid-session
+  // won't re-trigger the overlay (that's what the Settings panel is for).
+  const [needsOnboarding, setNeedsOnboarding] = useState<boolean | null>(null);
   const [memView, setMemView] = useState<MemoryView | null>(null);
   const [histView, setHistView] = useState<SessionMeta[] | null>(null);
   const [sidebarSessions, setSidebarSessions] = useState<SessionMeta[]>([]);
@@ -273,6 +280,30 @@ export default function App() {
   useEffect(() => {
     void refreshSessions();
   }, [refreshSessions]);
+
+  // Probe the Go side for missing API key exactly once. We don't re-probe on
+  // meta changes because the only path that "adds a key" is the Settings
+  // panel, which calls SetProviderKey and a rebuild — the kernel then emits
+  // agent:ready and the regular UI is already mounted.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const needs = await app.NeedsOnboarding();
+        if (!cancelled) setNeedsOnboarding(needs);
+      } catch {
+        // Bridge unavailable (browser dev mock missing the method, or
+        // pre-startup) — fall through to the regular UI; if the kernel
+        // can't load it, the existing topbar.startupError banner surfaces
+        // the reason. Treat as "no onboarding" so the user can still poke
+        // at the Settings panel.
+        if (!cancelled) setNeedsOnboarding(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     const onResize = () => setViewportWidth(window.innerWidth);
@@ -833,6 +864,12 @@ export default function App() {
       {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} onChanged={() => void refreshMeta()} />}
 
       {capsOpen && <CapabilitiesPanel onClose={() => setCapsOpen(false)} />}
+
+      {/* First-run gate: covers the whole app until the default provider's API
+          key is in place. onComplete fires after ConnectKey succeeds; the
+          kernel is already rebuilding in the background and will emit
+          agent:ready once the new controller is up. */}
+      {needsOnboarding && <OnboardingOverlay onComplete={() => setNeedsOnboarding(false)} />}
     </div>
   );
 }

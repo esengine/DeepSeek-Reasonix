@@ -385,4 +385,20 @@ export const zh: Record<DictKey, string> = {
   "updater.failed": "更新失败：{msg}",
   "updater.retry": "重试",
   "updater.dismiss": "稍后",
+
+  // 首次启动引导：默认 provider 的 API key 未设置时显示。用户粘贴 key 后，
+  // 我们用 vendor 的余额接口做零 token 校验，然后写入 ./.env。
+  "onboarding.title": "连接 Reasonix",
+  "onboarding.tagline": "粘贴一个 DeepSeek API key 即可开始。密钥仅存于本机的 .env，不会发往任何地方。",
+  "onboarding.inputLabel": "API 密钥",
+  "onboarding.inputPlaceholder": "sk-…",
+  "onboarding.submit": "连接并开始",
+  "onboarding.validating": "校验中…",
+  "onboarding.getKey": "如何获取 API key？",
+  "onboarding.privacy": "仅保存在本应用的 .env",
+  "onboarding.error.empty": "请先粘贴密钥。",
+  "onboarding.error.invalid": "这个 key 无法使用 —— 检查一下是否已激活、是否开通了计费。",
+  "onboarding.error.network": "无法连接 DeepSeek —— 检查网络后再试。",
+  "onboarding.error.unknown": "出错啦：{msg}",
+  "onboarding.skip": "稍后设置",
 };

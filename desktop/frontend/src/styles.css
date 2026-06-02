@@ -4916,3 +4916,174 @@ body {
   color: inherit;
   cursor: pointer;
 }
+
+/* onboarding — first-run gate covering the whole window. Sits above every
+   other layer; the card is centered, terminal-styled, with a faint scanline
+   accent so it reads as "stop and paste a key" rather than a generic modal. */
+.onboarding {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(
+      ellipse at top,
+      rgba(217, 119, 87, 0.06) 0%,
+      transparent 60%
+    ),
+    rgba(7, 8, 10, 0.92);
+  backdrop-filter: none;
+  --wails-draggable: drag;
+}
+.onboarding__card {
+  --wails-draggable: no-drag;
+  width: min(440px, calc(100vw - 48px));
+  padding: 32px 32px 28px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(217, 119, 87, 0.04);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.onboarding__logo {
+  width: 36px;
+  height: 36px;
+  align-self: flex-start;
+  margin-bottom: 4px;
+}
+.onboarding__title {
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  color: var(--fg);
+}
+.onboarding__tag {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--fg-dim);
+  margin-bottom: 6px;
+}
+.onboarding__label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--fg-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+.onboarding__input {
+  font-family: var(--mono);
+  font-size: 13px;
+  padding: 10px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--fg);
+  outline: none;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+.onboarding__input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(217, 119, 87, 0.18);
+}
+.onboarding__input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.onboarding__error {
+  font-size: 12px;
+  line-height: 1.5;
+  color: #ff8b7a;
+  background: rgba(255, 70, 70, 0.08);
+  border: 1px solid rgba(255, 70, 70, 0.25);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+.onboarding__submit {
+  margin-top: 4px;
+  padding: 10px 14px;
+  background: var(--accent);
+  color: #1a0e08;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: background 120ms ease, transform 80ms ease;
+}
+.onboarding__submit:hover:not(:disabled) {
+  background: #e08868;
+}
+.onboarding__submit:active:not(:disabled) {
+  transform: translateY(1px);
+}
+.onboarding__submit:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+.onboarding__spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(26, 14, 8, 0.3);
+  border-top-color: #1a0e08;
+  border-radius: 50%;
+  animation: onboarding-spin 0.7s linear infinite;
+}
+@keyframes onboarding-spin {
+  to { transform: rotate(360deg); }
+}
+.onboarding__links {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--fg-dim);
+  margin-top: 4px;
+}
+.onboarding__link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.onboarding__link:hover {
+  color: #e08868;
+}
+.onboarding__sep {
+  opacity: 0.5;
+}
+.onboarding__privacy {
+  opacity: 0.8;
+}
+.onboarding__skip {
+  background: none;
+  border: none;
+  padding: 4px 0;
+  margin-top: 2px;
+  color: var(--fg-dim);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  text-align: center;
+  transition: color 120ms ease;
+}
+.onboarding__skip:hover:not(:disabled) {
+  color: var(--fg);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.onboarding__skip:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
