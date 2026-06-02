@@ -261,10 +261,17 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 	defer close(out)
 
 	// Close the response body when the context is canceled so scanner.Scan()
-	// unblocks instead of hanging indefinitely on a stalled connection.
+	// unblocks instead of hanging on a stalled connection. done lets the goroutine
+	// exit when readStream returns normally — otherwise it outlives the call, and
+	// blocks forever on a non-cancellable context whose Done() is nil.
+	done := make(chan struct{})
+	defer close(done)
 	go func() {
-		<-ctx.Done()
-		resp.Body.Close()
+		select {
+		case <-ctx.Done():
+			resp.Body.Close()
+		case <-done:
+		}
 	}()
 
 	acc := map[int]*provider.ToolCall{}
