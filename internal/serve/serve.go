@@ -70,6 +70,46 @@ func (s *Server) initTitleProvider() {
 	s.titleProv = prov
 }
 
+// switchEffort changes the reasoning effort level and rebuilds the controller.
+// This replicates the TUI's /effort handler: validate → persist → rebuild.
+func (s *Server) switchEffort(ctx context.Context, level string) error {
+	if s.ctrl.Running() {
+		return fmt.Errorf("cannot change effort while a turn is running")
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	// Resolve the current active provider entry.
+	ref := s.ctrl.Label()
+	entry, ok := cfg.ResolveModel(ref)
+	if !ok {
+		return fmt.Errorf("cannot resolve current provider %q", ref)
+	}
+	cap := config.EffortCapabilityForEntry(entry)
+	if !cap.Supported {
+		return fmt.Errorf("effort is not configurable for %s", entry.Name)
+	}
+	effort, err := config.NormalizeEffort(entry, level)
+	if err != nil {
+		return err
+	}
+	// Persist to disk config so the change survives restarts.
+	editPath := config.UserConfigPath()
+	if editPath == "" {
+		return fmt.Errorf("no config file found")
+	}
+	edit := config.LoadForEdit(editPath)
+	if err := edit.SetProviderEffort(entry.Name, effort); err != nil {
+		return err
+	}
+	if err := edit.SaveTo(editPath); err != nil {
+		return fmt.Errorf("save config: %w", err)
+	}
+	// Rebuild controller with the updated effort (same as model switch).
+	return s.switchModel(ctx, entry.Name+"/"+entry.Model)
+}
+
 // switchModel rebuilds the controller with a new model, carrying over the
 // conversation history. This replicates the TUI/desktop model-switch path.
 func (s *Server) switchModel(ctx context.Context, ref string) error {
@@ -256,12 +296,25 @@ func (s *Server) submit(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing input", http.StatusBadRequest)
 		return
 	}
+	trimmed := strings.TrimSpace(body.Input)
 	// Intercept /model <ref> for runtime model switching (the controller's
 	// Submit path only lists models — switching is frontend-specific).
-	if trimmed := strings.TrimSpace(body.Input); strings.HasPrefix(trimmed, "/model ") {
+	if strings.HasPrefix(trimmed, "/model ") {
 		ref := strings.TrimSpace(strings.TrimPrefix(trimmed, "/model"))
 		if ref != "" {
 			if err := s.switchModel(r.Context(), ref); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+	}
+	// Intercept /effort <level> for reasoning effort switching.
+	if strings.HasPrefix(trimmed, "/effort ") {
+		level := strings.TrimSpace(strings.TrimPrefix(trimmed, "/effort"))
+		if level != "" {
+			if err := s.switchEffort(r.Context(), level); err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
