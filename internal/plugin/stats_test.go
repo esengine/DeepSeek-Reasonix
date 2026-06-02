@@ -9,15 +9,17 @@ import (
 	"time"
 )
 
-// withTempCache redirects config.CacheDir() at t.TempDir for the duration of
-// a test by overriding HOME and XDG_CONFIG_HOME — the same knobs cache_test
-// uses, since os.UserConfigDir reads them. Returns the directory that will
-// hold the cache subtree so callers can assert paths inside it.
+// withTempCache redirects config.CacheDir() at t.TempDir for the duration of a
+// test by overriding the knobs os.UserConfigDir reads: HOME/XDG_CONFIG_HOME on
+// unix, APPDATA on Windows (without it the tests write the real user cache).
+// Returns the directory that will hold the cache subtree so callers can assert
+// paths inside it.
 func withTempCache(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
 	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("APPDATA", dir)
 	return dir
 }
 
