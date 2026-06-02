@@ -745,7 +745,7 @@ export default function App() {
                 <span className="loading-screen__text">{t("common.loading")}</span>
               </div>
             ) : (
-              <Transcript items={state.items} footerHeight={footerHeight} onPrompt={send} onRewind={rewind} />
+              <Transcript items={state.items} live={state.live} footerHeight={footerHeight} onPrompt={send} onRewind={rewind} />
             )}
           </main>
 
