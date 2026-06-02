@@ -68,6 +68,7 @@ type Messages struct {
 	ChatThoughtForFmt      string // collapsed reasoning summary, "%d" = elapsed s
 	ChatStatusThinkingFmt  string // "%s thinking… (%ds · <cancel hint>)" — %s = spinner, %d = elapsed s
 	ChatToolWorkingFmt     string // "%s working · %ds" under a running tool — %s = spinner, %d = elapsed s
+	ChatStatusRetryingFmt  string // "%s retrying (%d/%d)…" — %s = spinner, %d/%d = attempt/max
 	ChatStatusIdle         string // shortcuts hint when idle
 	ChatStatusYoloIdle     string // shortcuts hint when idle in YOLO/bypass mode
 	ChatStatusCycleHint    string // mode-cycle shortcut hint shown when no modal prompt owns the status row
@@ -272,12 +273,43 @@ type Messages struct {
 	WriteConfigErr            string // "write config:" — prefix for write failure
 	WriteEnvErr               string // "write .env:" — prefix for env-write failure
 
+	// provider HTTP error explanations — actionable, reason + fix per status code
+	ProviderErrBadRequest          string // 400
+	ProviderErrAuth                string // 401
+	ProviderErrInsufficientBalance string // 402
+	ProviderErrUnprocessable       string // 422
+	ProviderErrRateLimited         string // 429
+	ProviderErrServer              string // 500
+	ProviderErrServerBusy          string // 503
+
 	// selection menus
 	SelectOneHint  string // "(↑/↓ · Enter · q to cancel)"
 	SelectManyHint string // "(↑/↓ · Space · Enter · q)"
 
 	// usage / help
 	UsageBody string // full multi-line help text
+}
+
+// ProviderStatusMessage returns an actionable explanation for a known provider
+// HTTP status, or "" when the status has no specific guidance.
+func (m Messages) ProviderStatusMessage(status int) string {
+	switch status {
+	case 400:
+		return m.ProviderErrBadRequest
+	case 401, 403:
+		return m.ProviderErrAuth
+	case 402:
+		return m.ProviderErrInsufficientBalance
+	case 422:
+		return m.ProviderErrUnprocessable
+	case 429:
+		return m.ProviderErrRateLimited
+	case 500:
+		return m.ProviderErrServer
+	case 503:
+		return m.ProviderErrServerBusy
+	}
+	return ""
 }
 
 // M is the active catalogue. DetectLanguage replaces it; English is the

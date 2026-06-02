@@ -16,7 +16,8 @@ export type EventKind =
   | "ask_request"
   | "turn_done"
   | "compaction_started"
-  | "compaction_done";
+  | "compaction_done"
+  | "retrying";
 
 export interface WireCompaction {
   trigger?: string; // "auto" | "manual"
@@ -92,6 +93,8 @@ export interface WireEvent {
   ask?: WireAsk;
   compaction?: WireCompaction;
   err?: string;
+  retryAttempt?: number;
+  retryMax?: number;
 }
 
 // Bound-method payloads (desktop/app.go).

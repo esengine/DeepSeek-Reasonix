@@ -67,6 +67,10 @@ type chatTUI struct {
 	state    tuiState
 	runStart time.Time
 	elapsed  int
+	// retryAttempt/retryMax drive the transient "retrying (n/m)" indicator while
+	// the provider re-attempts the connection; cleared by the next stream event.
+	retryAttempt int
+	retryMax     int
 	// turnTokens accumulates this turn's output tokens (summed from per-step Usage
 	// events) for the live "↓N" readout in the running status line.
 	turnTokens int
@@ -1471,9 +1475,13 @@ func (m chatTUI) View() tea.View {
 	// Code: live progress over the composer, shortcuts + stats under it.
 	var working string
 	if m.state == tuiRunning {
-		working = fmt.Sprintf("  "+i18n.M.ChatStatusThinkingFmt, m.spinner.View(), m.elapsed)
-		if m.turnTokens > 0 {
-			working += " · ↓" + shortTokens(m.turnTokens)
+		if m.retryAttempt > 0 {
+			working = fmt.Sprintf("  "+i18n.M.ChatStatusRetryingFmt, m.spinner.View(), m.retryAttempt, m.retryMax)
+		} else {
+			working = fmt.Sprintf("  "+i18n.M.ChatStatusThinkingFmt, m.spinner.View(), m.elapsed)
+			if m.turnTokens > 0 {
+				working += " · ↓" + shortTokens(m.turnTokens)
+			}
 		}
 	}
 	// Second status row: the live data (model, effort, context gauge, cache rates,
@@ -2212,6 +2220,15 @@ func (m *chatTUI) unsendPending() {
 // preserving order. Switching on the event Kind replaces the old prefix-sniffing
 // of a flattened byte stream: the structure is now explicit.
 func (m *chatTUI) ingestEvent(e event.Event) {
+	if e.Kind == event.Retrying {
+		m.retryAttempt = e.RetryAttempt
+		m.retryMax = e.RetryMax
+		return
+	}
+	// Any other event means the connection got past the retry window (or the turn
+	// ended), so the transient "retrying" indicator clears.
+	m.retryAttempt = 0
+	m.retryMax = 0
 	if m.turnDiscarded {
 		// The turn was un-sent (Esc before any packet); swallow whatever was already
 		// buffered for it until it settles, so nothing lands in scrollback.

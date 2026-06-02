@@ -424,6 +424,9 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 // accumulated text and reasoning are also returned so the caller can round-trip
 // reasoning on the next turn.
 func (a *Agent) stream(ctx context.Context, turn int) (string, string, string, []provider.ToolCall, *provider.Usage, error) {
+	ctx = provider.WithRetryNotify(ctx, func(info provider.RetryInfo) {
+		a.sink.Emit(event.Event{Kind: event.Retrying, RetryAttempt: info.Attempt, RetryMax: info.Max})
+	})
 	ch, err := a.prov.Stream(ctx, provider.Request{
 		Messages:    a.session.Messages,
 		Tools:       a.tools.Schemas(),

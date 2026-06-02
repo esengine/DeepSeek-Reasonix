@@ -12,16 +12,18 @@ import "reasonix/internal/event"
 // may diverge later; if they don't, this is the obvious thing to lift into a
 // shared event.ToWire.)
 type wireEvent struct {
-	Kind       string          `json:"kind"`
-	Text       string          `json:"text,omitempty"`
-	Reasoning  string          `json:"reasoning,omitempty"`
-	Level      string          `json:"level,omitempty"`
-	Tool       *wireTool       `json:"tool,omitempty"`
-	Usage      *wireUsage      `json:"usage,omitempty"`
-	Approval   *wireApproval   `json:"approval,omitempty"`
-	Ask        *wireAsk        `json:"ask,omitempty"`
-	Compaction *wireCompaction `json:"compaction,omitempty"`
-	Err        string          `json:"err,omitempty"`
+	Kind         string          `json:"kind"`
+	Text         string          `json:"text,omitempty"`
+	Reasoning    string          `json:"reasoning,omitempty"`
+	Level        string          `json:"level,omitempty"`
+	Tool         *wireTool       `json:"tool,omitempty"`
+	Usage        *wireUsage      `json:"usage,omitempty"`
+	Approval     *wireApproval   `json:"approval,omitempty"`
+	Ask          *wireAsk        `json:"ask,omitempty"`
+	Compaction   *wireCompaction `json:"compaction,omitempty"`
+	Err          string          `json:"err,omitempty"`
+	RetryAttempt int             `json:"retryAttempt,omitempty"`
+	RetryMax     int             `json:"retryMax,omitempty"`
 }
 
 // wireCompaction is the JSON form of an event.Compaction. On a compaction_started
@@ -101,6 +103,7 @@ var kindNames = map[event.Kind]string{
 	event.CompactionStarted: "compaction_started",
 	event.CompactionDone:    "compaction_done",
 	event.ToolProgress:      "tool_progress",
+	event.Retrying:          "retrying",
 }
 
 // toWireAsk converts an event.Ask into its JSON wire form.
@@ -158,6 +161,9 @@ func toWire(e event.Event) wireEvent {
 		if e.Err != nil {
 			w.Err = e.Err.Error()
 		}
+	case event.Retrying:
+		w.RetryAttempt = e.RetryAttempt
+		w.RetryMax = e.RetryMax
 	}
 	return w
 }

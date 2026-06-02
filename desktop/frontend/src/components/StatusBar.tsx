@@ -94,6 +94,7 @@ export function StatusBar({
   mode,
   turnStartAt,
   turnTokens,
+  retry,
   onSwitchModel,
   onSetEffort,
 }: {
@@ -107,6 +108,7 @@ export function StatusBar({
   mode: Mode;
   turnStartAt: number;
   turnTokens: number;
+  retry?: { attempt: number; max: number };
   onSwitchModel: (name: string) => void;
   onSetEffort: (level: string) => void;
 }) {
@@ -119,7 +121,9 @@ export function StatusBar({
   // While a turn runs, the status line shows live activity (word · elapsed ·
   // tokens) in place of the static context gauge.
   let activity: string | null = null;
-  if (running && turnStartAt) {
+  if (retry) {
+    activity = t("status.retrying", { attempt: retry.attempt, max: retry.max });
+  } else if (running && turnStartAt) {
     const elapsedMs = Math.max(0, now - turnStartAt);
     const words = SPINNER_WORDS[locale];
     const word = words[Math.floor(elapsedMs / 3000) % words.length];

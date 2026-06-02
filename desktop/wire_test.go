@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"reasonix/internal/event"
@@ -40,6 +41,21 @@ func TestToWireNoticeWarn(t *testing.T) {
 	w := toWire(e)
 	if w.Level != "warn" {
 		t.Errorf("notice warn level = %q", w.Level)
+	}
+}
+
+func TestToWireRetrying(t *testing.T) {
+	e := event.Event{Kind: event.Retrying, RetryAttempt: 3, RetryMax: 10}
+	w := toWire(e)
+	if w.Kind != "retrying" || w.RetryAttempt != 3 || w.RetryMax != 10 {
+		t.Errorf("retrying wire = %+v", w)
+	}
+	b, err := json.Marshal(w)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if s := string(b); !strings.Contains(s, `"retryAttempt":3`) || !strings.Contains(s, `"retryMax":10`) {
+		t.Errorf("retrying JSON = %s", s)
 	}
 }
 

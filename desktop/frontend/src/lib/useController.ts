@@ -98,6 +98,9 @@ interface State {
   // frontend-observed harness state; no model cooperation needed.
   turnStartAt: number;
   turnTokens: number;
+  // retry drives the transient "retrying (n/m)" indicator while the provider
+  // re-attempts the connection; cleared by the next stream event or turn end.
+  retry?: { attempt: number; max: number };
   // seq is a monotonic id source so React keys stay stable across re-renders.
   seq: number;
 }
@@ -166,6 +169,13 @@ function applyEvent(s: State, e: WireEvent): State {
   // request) and turn_done is handled in its own case, so neither commits.
   if (s.pendingUser !== undefined && e.kind !== "turn_started" && e.kind !== "turn_done") {
     s = flushPendingUser(s);
+  }
+  if (e.kind === "retrying") {
+    return { ...s, retry: { attempt: e.retryAttempt ?? 0, max: e.retryMax ?? 0 } };
+  }
+  // Any other event got past the retry window (or ended the turn): clear it.
+  if (s.retry) {
+    s = { ...s, retry: undefined };
   }
   switch (e.kind) {
     case "turn_started":

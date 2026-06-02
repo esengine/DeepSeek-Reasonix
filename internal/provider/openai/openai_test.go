@@ -13,36 +13,80 @@ import (
 	"reasonix/internal/provider"
 )
 
-// TestIsRetryableStatus covers the boundary: 408/429/5xx retry, other 4xx don't.
-func TestIsRetryableStatus(t *testing.T) {
-	retry := []int{408, 429, 500, 502, 503, 504, 599}
-	noRetry := []int{200, 400, 401, 403, 404, 422}
-	for _, s := range retry {
-		if !isRetryableStatus(s) {
-			t.Errorf("status %d should be retryable", s)
+// TestStreamRetriesThenSucceeds drives the real retry path end-to-end: the
+// server returns 503 twice, then a valid SSE stream. The provider must back off,
+// fire the retry-notify callback for each attempt, and ultimately stream the answer.
+func TestStreamRetriesThenSucceeds(t *testing.T) {
+	var reqs int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reqs++
+		if reqs <= 2 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"error":"overloaded"}`))
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"hi there\"}}]}\n\ndata: [DONE]\n\n")
+	}))
+	defer srv.Close()
+
+	p, err := New(provider.Config{Name: "deepseek", BaseURL: srv.URL, Model: "deepseek-v4", APIKey: "k"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	var attempts []int
+	ctx := provider.WithRetryNotify(context.Background(), func(i provider.RetryInfo) {
+		attempts = append(attempts, i.Attempt)
+		if i.Max != provider.MaxRetries {
+			t.Errorf("RetryInfo.Max = %d, want %d", i.Max, provider.MaxRetries)
+		}
+	})
+
+	ch, err := p.Stream(ctx, provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}}})
+	if err != nil {
+		t.Fatalf("Stream after retries: %v", err)
+	}
+	var got strings.Builder
+	for chunk := range ch {
+		if chunk.Type == provider.ChunkError {
+			t.Fatalf("unexpected stream error: %v", chunk.Err)
+		}
+		if chunk.Type == provider.ChunkText {
+			got.WriteString(chunk.Text)
 		}
 	}
-	for _, s := range noRetry {
-		if isRetryableStatus(s) {
-			t.Errorf("status %d should not be retryable", s)
-		}
+	if got.String() != "hi there" {
+		t.Errorf("streamed text = %q, want %q", got.String(), "hi there")
+	}
+	if reqs != 3 {
+		t.Errorf("server saw %d requests, want 3 (2 failures + 1 success)", reqs)
+	}
+	if len(attempts) != 2 || attempts[0] != 1 || attempts[1] != 2 {
+		t.Errorf("retry-notify attempts = %v, want [1 2]", attempts)
 	}
 }
 
-// TestIsTransientErr keeps user-intent errors (ctx cancel / deadline) out of
-// the retry path while letting network-level failures through.
-func TestIsTransientErr(t *testing.T) {
-	if isTransientErr(nil) {
-		t.Error("nil error should not be transient")
+// TestStreamInsufficientBalance verifies a 402 fails fast (no retry) as a typed
+// *provider.APIError carrying the status, so the display layer can explain it.
+func TestStreamInsufficientBalance(t *testing.T) {
+	var reqs int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reqs++
+		w.WriteHeader(http.StatusPaymentRequired)
+		_, _ = w.Write([]byte(`{"error":"Insufficient Balance"}`))
+	}))
+	defer srv.Close()
+
+	p, _ := New(provider.Config{Name: "deepseek", BaseURL: srv.URL, Model: "deepseek-v4", APIKey: "k"})
+	_, err := p.Stream(context.Background(), provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}}})
+	var apiErr *provider.APIError
+	if !errors.As(err, &apiErr) || apiErr.Status != 402 {
+		t.Fatalf("want *provider.APIError{Status:402}, got %T: %v", err, err)
 	}
-	if isTransientErr(context.Canceled) {
-		t.Error("ctx canceled should not be transient")
-	}
-	if isTransientErr(context.DeadlineExceeded) {
-		t.Error("ctx deadline should not be transient")
-	}
-	if !isTransientErr(errors.New("connection reset")) {
-		t.Error("generic network-ish error should be transient")
+	if reqs != 1 {
+		t.Errorf("402 should not retry, server saw %d requests", reqs)
 	}
 }
 

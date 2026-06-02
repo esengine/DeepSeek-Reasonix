@@ -294,7 +294,7 @@ func (c *Controller) runGuarded(body func(ctx context.Context) error) {
 		c.running = false
 		c.cancel = nil
 		c.mu.Unlock()
-		c.sink.Emit(event.Event{Kind: event.TurnDone, Err: err})
+		c.sink.Emit(event.Event{Kind: event.TurnDone, Err: explainError(err)})
 	}()
 }
 

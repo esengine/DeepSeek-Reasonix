@@ -179,6 +179,7 @@ export const en = {
   "status.effortAutoTitle": "Reasoning effort: auto (model default: {def})",
   "status.switchFolder": "{cwd}\nClick to switch project folder",
   "status.tokens": "tokens",
+  "status.retrying": "retrying ({attempt}/{max})…",
   "status.cache": "cache {pct}%",
   "status.cacheAvg": "avg {pct}%",
   "status.balanceTitle": "Wallet balance",

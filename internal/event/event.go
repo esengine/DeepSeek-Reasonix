@@ -73,6 +73,12 @@ const (
 	// status without polling. Text carries "<server>: <surface> ready (<count>
 	// items)". Appended last to keep the Kind values before it wire-stable.
 	MCPSurfaceReady
+	// Retrying fires before each backoff sleep while the provider re-attempts the
+	// connection+header phase after a transient failure (RetryAttempt of RetryMax).
+	// A frontend shows a transient "retrying (n/m)" indicator that the next stream
+	// event — or TurnDone — clears. Appended last to keep the Kind values before
+	// it wire-stable.
+	Retrying
 )
 
 // Level classifies a Notice so sinks can style or filter it.
@@ -177,13 +183,15 @@ type Event struct {
 	// session (Usage events only), so a frontend can show the aggregate hit-rate
 	// — which doesn't crater on a short turn or after compaction — alongside
 	// Usage's single-turn numbers.
-	SessionHit  int        // Usage: cumulative cache-hit prompt tokens this session
-	SessionMiss int        // Usage: cumulative cache-miss prompt tokens this session
-	Level       Level      // Notice
-	Approval    Approval   // ApprovalRequest
-	Ask         Ask        // AskRequest
-	Err         error      // TurnDone: non-nil on failure
-	Compaction  Compaction // Compaction
+	SessionHit   int        // Usage: cumulative cache-hit prompt tokens this session
+	SessionMiss  int        // Usage: cumulative cache-miss prompt tokens this session
+	Level        Level      // Notice
+	Approval     Approval   // ApprovalRequest
+	Ask          Ask        // AskRequest
+	Err          error      // TurnDone: non-nil on failure
+	Compaction   Compaction // Compaction
+	RetryAttempt int        // Retrying: 1-based attempt about to be made
+	RetryMax     int        // Retrying: total attempts before giving up
 }
 
 // Sink consumes a turn's events. The agent calls Emit serially from its run

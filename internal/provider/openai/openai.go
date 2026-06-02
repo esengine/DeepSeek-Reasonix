@@ -8,10 +8,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
-	"math/rand"
 	"net/http"
 	"net/url"
 	"sort"
@@ -105,7 +102,17 @@ func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provi
 		return nil, fmt.Errorf("%s: marshal request: %w", c.name, err)
 	}
 
-	resp, err := c.sendWithRetry(ctx, body)
+	newReq := func(ctx context.Context) (*http.Request, error) {
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(body))
+		if err != nil {
+			return nil, err
+		}
+		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+		httpReq.Header.Set("Accept", "text/event-stream")
+		return httpReq, nil
+	}
+	resp, err := provider.SendWithRetry(ctx, c.http, c.name, c.keyEnv, newReq)
 	if err != nil {
 		return nil, err
 	}
@@ -113,87 +120,6 @@ func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provi
 	out := make(chan provider.Chunk)
 	go c.readStream(ctx, resp, out)
 	return out, nil
-}
-
-// sendWithRetry POSTs the request body and returns the streaming response,
-// retrying on transient network errors and retryable HTTP statuses (408, 429,
-// 5xx) with exponential backoff + jitter. Retries only cover the connection +
-// header phase; once we hand the response to readStream, mid-stream failures
-// surface as ChunkError without retry, since the model has already started
-// emitting tokens we'd otherwise duplicate.
-func (c *client) sendWithRetry(ctx context.Context, body []byte) (*http.Response, error) {
-	const maxAttempts = 3
-	var lastErr error
-	for attempt := 0; attempt < maxAttempts; attempt++ {
-		if attempt > 0 {
-			delay := time.Duration(1<<(attempt-1))*500*time.Millisecond + time.Duration(rand.Intn(250))*time.Millisecond
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(delay):
-			}
-		}
-
-		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(body))
-		if err != nil {
-			return nil, fmt.Errorf("%s: build request: %w", c.name, err)
-		}
-		httpReq.Header.Set("Content-Type", "application/json")
-		httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
-		httpReq.Header.Set("Accept", "text/event-stream")
-
-		resp, err := c.http.Do(httpReq)
-		if err != nil {
-			if !isTransientErr(err) {
-				return nil, fmt.Errorf("%s: request failed: %w", c.name, err)
-			}
-			lastErr = fmt.Errorf("%s: request failed: %w", c.name, err)
-			continue
-		}
-		if resp.StatusCode == http.StatusOK {
-			return resp, nil
-		}
-		msg, readErr := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		if readErr != nil {
-			msg = []byte(fmt.Sprintf("(could not read error body: %v)", readErr))
-		}
-		// Drain any remaining body so the HTTP connection can be reused by the
-		// transport pool, then close.
-		_, _ = io.Copy(io.Discard, resp.Body)
-		resp.Body.Close()
-		// A rejected key is a configuration problem, not a transient one — give
-		// an actionable error instead of dumping the raw status body.
-		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-			return nil, &provider.AuthError{Provider: c.name, KeyEnv: c.keyEnv, Status: resp.StatusCode}
-		}
-		statusErr := fmt.Errorf("%s: status %d: %s", c.name, resp.StatusCode, strings.TrimSpace(string(msg)))
-		if !isRetryableStatus(resp.StatusCode) {
-			return nil, statusErr
-		}
-		lastErr = statusErr
-	}
-	return nil, lastErr
-}
-
-// isRetryableStatus returns true for HTTP status codes a transient backoff can
-// reasonably recover from: 408 (request timeout), 429 (rate limit), and 5xx.
-// 4xx other than 408/429 (auth, validation, not-found) are caller bugs and
-// won't fix themselves on retry.
-func isRetryableStatus(s int) bool {
-	return s == http.StatusRequestTimeout || s == http.StatusTooManyRequests || (s >= 500 && s <= 599)
-}
-
-// isTransientErr classifies HTTP client errors. ctx cancellation and deadline
-// expiry are caller intent — never retry those. Everything else (DNS failures,
-// connection resets, abrupt EOF, etc.) gets one more shot.
-func isTransientErr(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return false
-	}
-	return true
 }
 
 func (c *client) buildRequest(req provider.Request) chatRequest {

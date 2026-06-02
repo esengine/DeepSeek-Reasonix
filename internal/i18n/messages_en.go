@@ -42,6 +42,7 @@ var English = Messages{
 	ChatThoughtForFmt:      "thought for %ds",
 	ChatStatusThinkingFmt:  "%s thinking… (%ds · Esc cancels)",
 	ChatToolWorkingFmt:     "%s working · %ds",
+	ChatStatusRetryingFmt:  "%s retrying (%d/%d)… (Esc cancels)",
 	ChatStatusIdle:         "ready",
 	ChatStatusYoloIdle:     "approvals skipped",
 	ChatStatusCycleHint:    "shift+tab to cycle",
@@ -234,6 +235,14 @@ var English = Messages{
 	ReconfigureOnUnknownModel: "Configured model is no longer available — re-running setup.",
 	WriteConfigErr:            "write config:",
 	WriteEnvErr:               "write .env:",
+
+	ProviderErrBadRequest:          "Malformed request (HTTP 400): the request body was rejected. This is likely a bug — please report it if it persists.",
+	ProviderErrAuth:                "Authentication failed (HTTP 401): your API key is missing, wrong, or expired. Check the key in .env or run `reasonix setup`.",
+	ProviderErrInsufficientBalance: "Insufficient balance (HTTP 402): your account is out of credit. Top up your account, then retry.",
+	ProviderErrUnprocessable:       "Invalid parameters (HTTP 422): a request parameter was rejected. This is likely a bug — please report it if it persists.",
+	ProviderErrRateLimited:         "Rate limit reached (HTTP 429): too many requests (TPM/RPM). Retried with backoff — slow down or try again shortly.",
+	ProviderErrServer:              "Server error (HTTP 500): the provider hit an internal fault. Retried with backoff; if it keeps failing, try again later.",
+	ProviderErrServerBusy:          "Server busy (HTTP 503): the provider is overloaded. Retried with backoff; please try again shortly.",
 
 	SelectOneHint:  "(↑/↓ · Enter · q to cancel)",
 	SelectManyHint: "(↑/↓ · Space · Enter · q)",

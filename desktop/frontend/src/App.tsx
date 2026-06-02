@@ -963,6 +963,7 @@ export default function App() {
               mode={mode}
               turnStartAt={state.turnStartAt}
 	      turnTokens={state.turnTokens}
+	      retry={state.retry}
 	      onSwitchModel={switchModel}
 	      onSetEffort={setEffort}
 	    />
