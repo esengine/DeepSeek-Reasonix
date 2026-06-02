@@ -1,12 +1,15 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
+import { ErrorBoundary } from "./components/ErrorBoundary";
+import { installGlobalCrashHandlers } from "./lib/crash";
 import { LocaleProvider } from "./lib/i18n";
 import { initTheme } from "./lib/theme";
 import "./styles.css";
 
 // Apply the saved appearance (auto/light/dark) before the first paint.
 initTheme();
+installGlobalCrashHandlers();
 
 // Inside the Wails shell, suppress the webview's default right-click menu — its
 // Reload / Back / Inspect entries are easy to hit by accident and can reset or
@@ -24,8 +27,10 @@ if (!root) throw new Error("missing #root");
 
 createRoot(root).render(
   <StrictMode>
-    <LocaleProvider>
-      <App />
-    </LocaleProvider>
+    <ErrorBoundary>
+      <LocaleProvider>
+        <App />
+      </LocaleProvider>
+    </ErrorBoundary>
   </StrictMode>,
 );

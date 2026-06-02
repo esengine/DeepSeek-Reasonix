@@ -4424,3 +4424,38 @@ body {
     justify-content: center;
   }
 }
+
+#crash-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 24px;
+  background: #1a1a2e;
+  color: #e6e6f0;
+  overflow: auto;
+}
+.crash-overlay__title {
+  color: #ff6b6b;
+  font-size: 15px;
+  font-weight: 700;
+}
+.crash-overlay__body {
+  margin: 0;
+  font-family: var(--mono, monospace);
+  font-size: 12.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.crash-overlay__copy {
+  align-self: flex-start;
+  padding: 6px 12px;
+  border: 1px solid #444;
+  border-radius: 6px;
+  background: #2a2a40;
+  color: inherit;
+  cursor: pointer;
+}
