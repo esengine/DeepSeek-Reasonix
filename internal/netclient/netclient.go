@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"golang.org/x/net/http/httpproxy"
+
+	"reasonix/internal/sysproxy"
 )
 
 const (
@@ -140,8 +142,10 @@ func proxyFunc(spec ProxySpec) (func(*http.Request) (*url.URL, error), error) {
 		}
 		pf := cfg.ProxyFunc()
 		return func(req *http.Request) (*url.URL, error) { return pf(req.URL) }, nil
-	default:
+	case ModeEnv:
 		return environmentProxyFunc(), nil
+	default:
+		return autoProxyFunc(), nil
 	}
 }
 
@@ -149,6 +153,19 @@ func environmentProxyFunc() func(*http.Request) (*url.URL, error) {
 	cfg := httpproxy.FromEnvironment()
 	pf := cfg.ProxyFunc()
 	return func(req *http.Request) (*url.URL, error) { return pf(req.URL) }
+}
+
+// autoProxyFunc honors environment proxy vars first, then falls back to the OS
+// system proxy (Windows IE/PAC/WPAD) so corporate Windows machines work without
+// any manual HTTP_PROXY setup. Non-Windows resolves to env-only.
+func autoProxyFunc() func(*http.Request) (*url.URL, error) {
+	pf := httpproxy.FromEnvironment().ProxyFunc()
+	return func(req *http.Request) (*url.URL, error) {
+		if u, err := pf(req.URL); err != nil || u != nil {
+			return u, err
+		}
+		return sysproxy.ForURL(req.URL)
+	}
 }
 
 func customProxyURL(spec ProxySpec) (*url.URL, error) {

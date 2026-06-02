@@ -14,6 +14,7 @@ require (
 	github.com/sabhiram/go-gitignore v0.0.0-20210923224102-525f6e181f06
 	github.com/yuin/goldmark v1.8.2
 	golang.org/x/net v0.35.0
+	golang.org/x/sys v0.44.0
 	golang.org/x/term v0.43.0
 	golang.org/x/text v0.24.0
 )
@@ -32,5 +33,4 @@ require (
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	golang.org/x/sync v0.20.0 // indirect
-	golang.org/x/sys v0.44.0 // indirect
 )
