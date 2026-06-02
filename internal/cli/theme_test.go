@@ -201,6 +201,35 @@ func TestApplyTextareaThemeClearsCursorLineBackground(t *testing.T) {
 	}
 }
 
+// TestRuntimeAutoThemeDoesNotProbeStdin guards the fix for a runtime `/theme auto`
+// that live-probed the terminal (raw-mode stdin read) while the TUI owned stdin,
+// racing bubbletea's input reader. The switch must resolve via the COLORFGBG
+// fallback instead, never invoking the probe.
+func TestRuntimeAutoThemeDoesNotProbeStdin(t *testing.T) {
+	t.Setenv("COLORTERM", "")
+	t.Setenv("TERM_PROGRAM", "")
+	t.Setenv("REASONIX_THEME", "")
+	t.Setenv("REASONIX_THEME_STYLE", "")
+	t.Setenv("COLORFGBG", "15;0")
+	defer restoreThemeForTest(colorEnabled, activeCLITheme)
+	colorEnabled = true
+
+	prev := queryTerminalBackgroundForTheme
+	defer func() { queryTerminalBackgroundForTheme = prev }()
+	probed := false
+	queryTerminalBackgroundForTheme = func() (terminalRGB, bool) {
+		probed = true
+		return terminalRGB{}, false
+	}
+
+	if got := setCLIThemeMode("auto").name; got != "dark" {
+		t.Fatalf("auto with COLORFGBG=15;0 resolved %q, want dark", got)
+	}
+	if probed {
+		t.Fatal("runtime /theme auto probed the terminal while the TUI owns stdin")
+	}
+}
+
 func restoreThemeForTest(prevColor bool, prevTheme cliPalette) {
 	colorEnabled = prevColor
 	activeCLITheme = prevTheme

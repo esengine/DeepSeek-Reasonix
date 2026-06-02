@@ -194,8 +194,23 @@ func defaultCLIThemeStyle(mode string) cliThemeStyle {
 	return cliThemeStyles[0]
 }
 
+// withoutTerminalProbe resolves a theme with the OSC background probe disabled —
+// for callers running while something else (the live TUI) owns stdin, where a
+// raw-mode read would fight the TUI's input reader. "auto" then falls back to the
+// COLORFGBG heuristic.
+func withoutTerminalProbe(fn func()) {
+	prev := queryTerminalBackgroundForTheme
+	queryTerminalBackgroundForTheme = func() (terminalRGB, bool) { return terminalRGB{}, false }
+	defer func() { queryTerminalBackgroundForTheme = prev }()
+	fn()
+}
+
 func setCLIThemeMode(mode string) cliPalette {
-	activeCLITheme = resolveCLIThemeWithStyle(mode, activeCLITheme.style)
+	// A runtime /theme switch runs inside the TUI, which owns stdin, so resolving
+	// "auto" must not live-probe the terminal here.
+	withoutTerminalProbe(func() {
+		activeCLITheme = resolveCLIThemeWithStyle(mode, activeCLITheme.style)
+	})
 	refreshCLIStyles()
 	return activeCLITheme
 }

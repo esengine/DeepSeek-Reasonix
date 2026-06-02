@@ -108,10 +108,7 @@ func configureCLIThemeFromConfigForTTYOutput() {
 }
 
 func configureCLIThemeFromConfigNoProbe() {
-	prev := queryTerminalBackgroundForTheme
-	queryTerminalBackgroundForTheme = func() (terminalRGB, bool) { return terminalRGB{}, false }
-	defer func() { queryTerminalBackgroundForTheme = prev }()
-	configureCLIThemeFromConfig()
+	withoutTerminalProbe(configureCLIThemeFromConfig)
 }
 
 // setup builds a ready-to-drive Controller from config via boot.Build. It is a
