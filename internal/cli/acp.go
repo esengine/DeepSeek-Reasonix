@@ -123,6 +123,12 @@ func (f *acpFactory) NewSession(ctx context.Context, p acp.SessionParams) (*cont
 		for _, t := range ptools {
 			reg.Add(t)
 		}
+		// Mirror boot.Build: phase B (prompts + resources) is deferred to a
+		// background goroutine on the session ctx so the ACP path also sees
+		// non-empty Host.Prompts()/Resources() once the auxiliary surfaces
+		// stream in. Without this, MCPPrompt and @-ref consumers would stay
+		// empty for the session.
+		go h.StartPhaseB(ctx, p.Sink)
 		if text, ok := boot.MCPStartupNotice(h.Failures()); ok {
 			p.Sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: text})
 		}
