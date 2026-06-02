@@ -41,7 +41,8 @@ func (m *chatTUI) runResumeCommand(input string) {
 
 	args := tokenizeArgs(input) // args[0] == "/resume"
 	if len(args) < 2 {
-		m.showSessions(sessions)
+		m.showSessions(sessions) // write list to scrollback (above input)
+		m.openResumePicker()     // open interactive picker below
 		return
 	}
 	if m.ctrl.Running() {

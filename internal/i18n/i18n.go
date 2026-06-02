@@ -60,6 +60,8 @@ type Messages struct {
 	ResumeBadIndexFmt   string // shown when /resume gets an out-of-range index (one %d)
 	ResumeAlreadyActive string // shown when /resume targets the current session
 	ResumedTitle        string // banner title after a /resume switch
+	ResumePickTitle     string // header in the interactive resume picker
+	ResumePickHint      string // keyboard hint in the interactive resume picker
 
 	// chat TUI status line / approval banner.
 	ChatThinking           string // live reasoning marker label, e.g. "thinking…"
@@ -81,6 +83,7 @@ type Messages struct {
 	AskTypingHint      string // shown on that row while entering free text
 	AskChatInstead     string // the "don't pick, just chat" option label
 	ChatStatusQuestion string // shortcuts hint while a question card is open
+	StatusResumePicker string // status tag while the resume picker is open (e.g. "select session")
 	AskSubmitTitle     string // submit-tab title in the ask tool question card
 	AskUnanswered      string // placeholder for an unanswered ask question
 	AskSubmitHint      string // submit-tab keyboard hint

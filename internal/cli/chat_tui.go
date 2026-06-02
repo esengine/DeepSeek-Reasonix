@@ -174,8 +174,11 @@ type chatTUI struct {
 	// rewind holds the Esc-Esc / "/rewind" picker (nil when closed); while set,
 	// keys drive it and it renders as an overlay. lastEsc times the double-Esc
 	// gesture that opens it on an empty composer.
-	rewind  *rewindPicker
-	lastEsc time.Time
+	rewind *rewindPicker
+	// resumePick is the interactive "/resume" session picker overlay. Non-nil
+	// while the user browses saved sessions with ↑/↓ and confirms with Enter.
+	resumePick *resumePicker
+	lastEsc    time.Time
 
 	// lastCtrlCAt records when Ctrl+C was pressed while idle on an empty
 	// composer, enabling a "press again to quit" confirmation pattern (1.5s
@@ -668,6 +671,10 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.rewind != nil {
 			return m.handleRewindKey(msg)
 		}
+		// The resume picker is modal while open: keys navigate it.
+		if m.resumePick != nil {
+			return m.handleResumePickerKey(msg)
+		}
 		// A pending tool approval is modal: keystrokes answer it (y/a/n, Enter,
 		// Esc) rather than reaching the input.
 		if m.pendingApproval != nil {
@@ -685,6 +692,16 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.moveCompletion(1)
 				return m, nil
 			case "tab", "enter":
+				// When Enter is pressed and the completion has exactly one item
+				// already fully present in the input, close the menu and let Enter
+				// fall through to submit the command (/resume 3 → resume session 3).
+				if msg.String() == "enter" && len(m.completion.items) == 1 {
+					tok := m.input.Value()[m.completion.replaceFrom:]
+					if tok == m.completion.items[0].insert {
+						m.completion = completion{}
+						break // fall through to regular Enter
+					}
+				}
 				m.acceptCompletion()
 				return m, nil
 			case "esc":
@@ -1391,6 +1408,8 @@ func (m chatTUI) View() tea.View {
 	switch {
 	case m.rewind != nil:
 		status = "  " + modeTag + " · ⟲ rewind"
+	case m.resumePick != nil:
+		status = "  " + modeTag + " · " + i18n.M.StatusResumePicker
 	case m.chooser != nil:
 		status = "  " + modeTag + " · " + i18n.M.ChatStatusQuestion
 	case m.pendingApproval != nil && m.pendingApproval.Tool == planApprovalTool:
@@ -1460,6 +1479,10 @@ func (m chatTUI) View() tea.View {
 		rowsAboveBox += strings.Count(card, "\n") + 1
 	}
 	if card := m.renderRewind(); card != "" {
+		parts = append(parts, card)
+		rowsAboveBox += strings.Count(card, "\n") + 1
+	}
+	if card := m.renderResumePicker(); card != "" {
 		parts = append(parts, card)
 		rowsAboveBox += strings.Count(card, "\n") + 1
 	}
