@@ -2,6 +2,7 @@ package builtin
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 
+	fileenc "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/tool"
 )
 
@@ -59,21 +61,23 @@ func (g grepTool) Execute(ctx context.Context, args json.RawMessage) (string, er
 
 	// searchFile returns io.EOF as a sentinel once the cap is reached.
 	searchFile := func(file string) error {
-		f, err := os.Open(file)
+		raw, err := os.ReadFile(file)
 		if err != nil {
 			return nil // skip unreadable files
 		}
-		defer f.Close()
+		// Binary detection: NUL byte in raw content (before decoding).
+		if bytes.IndexByte(raw, 0) >= 0 {
+			return nil
+		}
+		enc, _ := fileenc.Detect(raw)
+		data := fileenc.Decode(raw, enc)
 
-		sc := bufio.NewScanner(f)
+		sc := bufio.NewScanner(bytes.NewReader(data))
 		sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 		ln := 0
 		for sc.Scan() {
 			ln++
 			line := sc.Text()
-			if strings.IndexByte(line, 0) >= 0 {
-				return nil // looks binary, skip the file
-			}
 			if re.MatchString(line) {
 				out = append(out, fmt.Sprintf("%s:%d:%s", file, ln, line))
 				if len(out) >= grepMaxMatches {

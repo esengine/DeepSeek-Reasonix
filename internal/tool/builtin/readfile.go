@@ -6,14 +6,13 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"strings"
-	"unicode/utf16"
 
+	fileenc "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/tool"
 )
 
@@ -25,8 +24,7 @@ func init() { tool.RegisterBuiltin(readFile{}) }
 type readFile struct{ workDir string }
 
 const (
-	readFileDefaultLimit = 2000     // lines returned when limit is unset
-	readFileBinaryPeek   = 8 * 1024 // bytes scanned for a NUL to flag binary
+	readFileDefaultLimit = 2000 // lines returned when limit is unset
 )
 
 func (readFile) Name() string { return "read_file" }
@@ -82,31 +80,23 @@ func (r readFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 	}
 	defer f.Close()
 
-	peek := make([]byte, readFileBinaryPeek)
-	n, _ := io.ReadFull(f, peek)
-	peek = peek[:n]
-
-	// A leading BOM marks encoded text whose bytes the NUL check below would
-	// otherwise misread: UTF-16 encodes ASCII as paired bytes with a 0x00 half,
-	// so a NUL is normal, not a binary signal. Decode such files to UTF-8 and
-	// scan that; only the BOM-less common case stays on the streaming path.
-	var src io.Reader = f
-	if enc := bomEncoding(peek); enc != encUTF8Plain {
-		rest, err := io.ReadAll(f)
-		if err != nil {
-			return "", fmt.Errorf("read %s: %w", p.Path, err)
-		}
-		src = bytes.NewReader(decodeBOM(append(peek, rest...), enc))
-	} else {
-		// Refuse binary files up front. A NUL byte anywhere in the leading 8 KB
-		// is the cheapest reliable signal for executables, archives, or images.
-		if bytes.IndexByte(peek, 0) >= 0 {
-			return "", fmt.Errorf("binary file %s (NUL byte detected); use `bash hexdump` or another tool", p.Path)
-		}
-		if _, err := f.Seek(0, io.SeekStart); err != nil {
-			return "", fmt.Errorf("seek %s: %w", p.Path, err)
-		}
+	// Detect and decode the file's encoding to UTF-8. The cascade mirrors
+	// v1's file-encoding.ts: BOM → strict UTF-8 → GB18030 → lossy UTF-8.
+	// This keeps CJK Windows files (GBK/GB18030) readable and avoids
+	// rejecting them as "binary" — the old NUL-byte heuristic only worked
+	// for true binaries, not for valid text in a non-UTF-8 charset.
+	all, err := io.ReadAll(f)
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", p.Path, err)
 	}
+	enc, _ := fileenc.Detect(all)
+	// NUL bytes are valid in UTF-16 (the 0x00 half of each ASCII code unit)
+	// but never valid in single-byte text. Skip the NUL check for BOM-prefixed
+	// files since they are already known to be UTF-16.
+	if enc != fileenc.UTF16LE && enc != fileenc.UTF16BE && bytes.IndexByte(all, 0) >= 0 {
+		return "", fmt.Errorf("binary file %s (NUL byte detected); use `bash hexdump` or another tool", p.Path)
+	}
+	src := io.Reader(bytes.NewReader(fileenc.Decode(all, enc)))
 
 	// Scan up to offset+limit+1 lines (the extra is just to know whether
 	// trimming a trailer is warranted). 1 MB per-line cap matches what other
@@ -161,44 +151,3 @@ func (r readFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 	return b.String(), nil
 }
 
-type bomKind int
-
-const (
-	encUTF8Plain bomKind = iota // no BOM (or none we special-case)
-	encUTF8BOM
-	encUTF16LE
-	encUTF16BE
-)
-
-func bomEncoding(b []byte) bomKind {
-	switch {
-	case len(b) >= 3 && b[0] == 0xEF && b[1] == 0xBB && b[2] == 0xBF:
-		return encUTF8BOM
-	case len(b) >= 2 && b[0] == 0xFF && b[1] == 0xFE:
-		return encUTF16LE
-	case len(b) >= 2 && b[0] == 0xFE && b[1] == 0xFF:
-		return encUTF16BE
-	}
-	return encUTF8Plain
-}
-
-// decodeBOM strips a UTF-8 BOM or decodes UTF-16 to UTF-8, given the kind
-// bomEncoding already identified from the same leading bytes.
-func decodeBOM(b []byte, enc bomKind) []byte {
-	switch enc {
-	case encUTF8BOM:
-		return b[3:]
-	case encUTF16LE, encUTF16BE:
-		order := binary.ByteOrder(binary.LittleEndian)
-		if enc == encUTF16BE {
-			order = binary.BigEndian
-		}
-		b = b[2:]
-		u := make([]uint16, 0, len(b)/2)
-		for i := 0; i+1 < len(b); i += 2 {
-			u = append(u, order.Uint16(b[i:i+2]))
-		}
-		return []byte(string(utf16.Decode(u)))
-	}
-	return b
-}

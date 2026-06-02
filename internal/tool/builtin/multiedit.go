@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 
 	"reasonix/internal/tool"
@@ -81,11 +80,10 @@ func (m multiEdit) Execute(ctx context.Context, args json.RawMessage) (string, e
 		return "", err
 	}
 
-	b, err := os.ReadFile(p.Path)
+	content, enc, err := readFileEncoded(p.Path)
 	if err != nil {
 		return "", fmt.Errorf("read %s: %w", p.Path, err)
 	}
-	content := string(b)
 
 	// Apply edits in order against the running in-memory buffer. Any failure
 	// returns before the write, leaving the file untouched — that's the
@@ -116,7 +114,7 @@ func (m multiEdit) Execute(ctx context.Context, args json.RawMessage) (string, e
 		}
 	}
 
-	if err := os.WriteFile(p.Path, []byte(content), 0o644); err != nil {
+	if err := writeFileEncoded(p.Path, content, enc); err != nil {
 		return "", fmt.Errorf("write %s: %w", p.Path, err)
 	}
 	return fmt.Sprintf("multi_edit %s: %d edits applied (%d total replacements)", p.Path, len(p.Edits), applied), nil

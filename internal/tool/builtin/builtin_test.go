@@ -14,6 +14,8 @@ import (
 	"testing"
 	"unicode/utf16"
 
+	"golang.org/x/text/encoding/simplifiedchinese"
+
 	"reasonix/internal/tool"
 )
 
@@ -402,5 +404,72 @@ func TestGlobNoMatches(t *testing.T) {
 	out := runTool(t, globTool{}, map[string]any{"pattern": filepath.Join(dir, "*.xyz")})
 	if !strings.Contains(out, "(no matches)") {
 		t.Errorf("expected (no matches), got:\n%s", out)
+	}
+}
+
+// --- GB18030 encoding integration tests (issue #2637) ---
+
+func TestReadFileGB18030(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "gbk.txt")
+	gb, err := simplifiedchinese.GB18030.NewEncoder().String("你好世界\n第二行")
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	os.WriteFile(f, []byte(gb), 0o644)
+
+	out := runTool(t, readFile{}, map[string]any{"path": f})
+	if !strings.Contains(out, "你好世界") || !strings.Contains(out, "第二行") {
+		t.Errorf("expected decoded Chinese text, got:\n%s", out)
+	}
+}
+
+func TestEditFileGB18030RoundTrip(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "gbk.txt")
+	original, _ := simplifiedchinese.GB18030.NewEncoder().String("你好世界\n第二行\n")
+	os.WriteFile(f, []byte(original), 0o644)
+
+	runTool(t, editFile{}, map[string]any{
+		"path":       f,
+		"old_string": "第二行",
+		"new_string": "新的行",
+	})
+
+	got, _ := os.ReadFile(f)
+	// The file should still be GB18030-encoded (not silently converted to UTF-8).
+	dec, _ := simplifiedchinese.GB18030.NewDecoder().Bytes(got)
+	if string(dec) != "你好世界\n新的行\n" {
+		t.Errorf("after edit = %q (decoded)", dec)
+	}
+}
+
+func TestMultiEditGB18030RoundTrip(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "gbk.txt")
+	original, _ := simplifiedchinese.GB18030.NewEncoder().String("package old\n\nfunc old() {\n\told()\n}\n")
+	os.WriteFile(f, []byte(original), 0o644)
+
+	runTool(t, multiEdit{}, map[string]any{
+		"path": f,
+		"edits": []map[string]any{
+			{"old_string": "package old", "new_string": "package new"},
+			{"old_string": "old", "new_string": "reasonix", "replace_all": true},
+		},
+	})
+
+	got, _ := os.ReadFile(f)
+	dec, _ := simplifiedchinese.GB18030.NewDecoder().Bytes(got)
+	want := "package new\n\nfunc reasonix() {\n\treasonix()\n}\n"
+	if string(dec) != want {
+		t.Errorf("after multi_edit = %q (decoded), want %q", dec, want)
+	}
+}
+
+func TestGrepGB18030(t *testing.T) {
+	dir := t.TempDir()
+	gb, _ := simplifiedchinese.GB18030.NewEncoder().String("你好世界\n包含函数的行\n")
+	os.WriteFile(filepath.Join(dir, "gbk.txt"), []byte(gb), 0o644)
+
+	out := runTool(t, grepTool{}, map[string]any{"pattern": "函数", "path": dir})
+	if !strings.Contains(out, "函数") {
+		t.Errorf("expected match in decoded GB18030 text, got:\n%s", out)
 	}
 }

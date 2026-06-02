@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"reasonix/internal/diff"
+	fileenc "reasonix/internal/fileutil/encoding"
 )
 
 // preview.go gives the file-writing built-ins the optional tool.Previewer
@@ -36,8 +37,9 @@ func (w writeFile) Preview(args json.RawMessage) (diff.Change, error) {
 	p.Path = resolveIn(w.workDir, p.Path)
 
 	old, kind := "", diff.Create
-	if b, err := os.ReadFile(p.Path); err == nil {
-		old, kind = string(b), diff.Modify
+	if data, err := os.ReadFile(p.Path); err == nil {
+		enc, _ := fileenc.Detect(data)
+		old, kind = string(fileenc.Decode(data, enc)), diff.Modify
 	} else if !os.IsNotExist(err) {
 		return diff.Change{}, fmt.Errorf("read %s: %w", p.Path, err)
 	}
@@ -64,11 +66,10 @@ func (e editFile) Preview(args json.RawMessage) (diff.Change, error) {
 	}
 	p.Path = resolveIn(e.workDir, p.Path)
 
-	b, err := os.ReadFile(p.Path)
+	content, _, err := readFileEncoded(p.Path)
 	if err != nil {
 		return diff.Change{}, fmt.Errorf("read %s: %w", p.Path, err)
 	}
-	content := string(b)
 
 	switch strings.Count(content, p.OldString) {
 	case 0:
@@ -103,12 +104,11 @@ func (m multiEdit) Preview(args json.RawMessage) (diff.Change, error) {
 	}
 	p.Path = resolveIn(m.workDir, p.Path)
 
-	b, err := os.ReadFile(p.Path)
+	content, _, err := readFileEncoded(p.Path)
 	if err != nil {
 		return diff.Change{}, fmt.Errorf("read %s: %w", p.Path, err)
 	}
-	original := string(b)
-	content := original
+	original := content
 
 	for i, step := range p.Edits {
 		if step.OldString == "" {

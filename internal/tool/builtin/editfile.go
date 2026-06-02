@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 
 	"reasonix/internal/tool"
@@ -52,11 +51,10 @@ func (e editFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 		return "", err
 	}
 
-	b, err := os.ReadFile(p.Path)
+	content, enc, err := readFileEncoded(p.Path)
 	if err != nil {
 		return "", fmt.Errorf("read %s: %w", p.Path, err)
 	}
-	content := string(b)
 
 	switch strings.Count(content, p.OldString) {
 	case 0:
@@ -68,7 +66,7 @@ func (e editFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 	}
 
 	updated := strings.Replace(content, p.OldString, p.NewString, 1)
-	if err := os.WriteFile(p.Path, []byte(updated), 0o644); err != nil {
+	if err := writeFileEncoded(p.Path, updated, enc); err != nil {
 		return "", fmt.Errorf("write %s: %w", p.Path, err)
 	}
 	return fmt.Sprintf("edited %s", p.Path), nil
