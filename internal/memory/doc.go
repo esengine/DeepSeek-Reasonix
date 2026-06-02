@@ -15,6 +15,7 @@
 package memory
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -34,10 +35,10 @@ const (
 
 // docNames are the recognized memory filenames at each level, in load order.
 // REASONIX.md is ours; AGENTS.md and CLAUDE.md are the cross-tool conventions.
-// When several exist in one directory, all load (each labeled with its source
-// path), so a repo already carrying an AGENTS.md / CLAUDE.md is picked up without
-// renaming. New docs are created as AGENTS.md (the universal convention) — see
-// defaultDocName / Set.DocPath.
+// When several distinct files exist in one directory, all load (each labeled with
+// its source path), so a repo already carrying an AGENTS.md / CLAUDE.md is picked
+// up without renaming. New docs are created as AGENTS.md (the universal
+// convention) — see defaultDocName / Set.DocPath.
 var docNames = []string{"REASONIX.md", "AGENTS.md", "CLAUDE.md"}
 
 // localNames are the personal, git-ignored overrides, highest precedence.
@@ -68,10 +69,11 @@ type Source struct {
 // last. Discovery is best-effort: missing or unreadable files are skipped.
 func discoverDocs(cwd, userDir string) []Source {
 	var out []Source
+	seen := docSeen{}
 
 	// 1. User-global memory (lowest precedence).
 	if userDir != "" {
-		out = append(out, loadFrom(userDir, docNames, ScopeUser)...)
+		out = append(out, loadFrom(userDir, docNames, ScopeUser, &seen)...)
 	}
 
 	// 2. Ancestor chain, outermost → project root. The project root (cwd) is
@@ -81,33 +83,74 @@ func discoverDocs(cwd, userDir string) []Source {
 		if sameDir(dir, cwd) {
 			scope = ScopeProject
 		}
-		out = append(out, loadFrom(dir, docNames, scope)...)
+		out = append(out, loadFrom(dir, docNames, scope, &seen)...)
 	}
 
 	// 3. Project-local overrides (highest precedence).
-	out = append(out, loadFrom(cwd, localNames, ScopeLocal)...)
+	out = append(out, loadFrom(cwd, localNames, ScopeLocal, &seen)...)
 
 	return out
 }
 
 // loadFrom loads each present name in dir, in order, expanding @imports relative
 // to dir. A name with no file, or one that fails to read, is silently skipped.
-func loadFrom(dir string, names []string, scope Scope) []Source {
+func loadFrom(dir string, names []string, scope Scope, seen *docSeen) []Source {
 	var out []Source
 	for _, name := range names {
 		path := filepath.Join(dir, name)
-		b, err := os.ReadFile(path)
-		if err != nil {
+		body, info, ok := readDoc(path)
+		if !ok {
 			continue
 		}
-		body := strings.TrimSpace(string(b))
-		if body == "" {
+		if seen != nil && !seen.add(info) {
 			continue
 		}
 		body = resolveImports(body, dir, map[string]bool{absOf(path): true}, 0)
 		out = append(out, Source{Path: path, Scope: scope, Body: body})
 	}
 	return out
+}
+
+// readDoc opens path once and returns both its trimmed body and file identity.
+// The shared file handle keeps the content and identity tied to the same target,
+// which matters when a discovered memory path is a symlink.
+func readDoc(path string) (string, os.FileInfo, bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", nil, false
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return "", nil, false
+	}
+	b, err := io.ReadAll(f)
+	if err != nil {
+		return "", nil, false
+	}
+	body := strings.TrimSpace(string(b))
+	if body == "" {
+		return "", nil, false
+	}
+	return body, info, true
+}
+
+// docSeen tracks physical files already loaded during discovery. Paths are not
+// enough here: AGENTS.md may be a symlink to CLAUDE.md, and both should fold into
+// the system prompt only once while preserving the first discovered source path.
+type docSeen struct {
+	infos []os.FileInfo
+}
+
+// add records info and reports whether it was new.
+func (s *docSeen) add(info os.FileInfo) bool {
+	for _, prev := range s.infos {
+		if os.SameFile(prev, info) {
+			return false
+		}
+	}
+	s.infos = append(s.infos, info)
+	return true
 }
 
 // ancestorsToRoot returns the directory chain from the project root down to cwd,
