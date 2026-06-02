@@ -22,6 +22,7 @@ type Workspace struct {
 	Dir        string
 	WriteRoots []string
 	Bash       sandbox.Spec
+	Search     SearchSpec
 }
 
 // Tools returns the built-in tools bound to the workspace, ready to Add to a
@@ -46,7 +47,7 @@ func (w Workspace) Tools(enabled ...string) []tool.Tool {
 		bash{workDir: w.Dir, sb: w.Bash},
 		listDir{workDir: w.Dir},
 		globTool{workDir: w.Dir},
-		grepTool{workDir: w.Dir},
+		grepTool{workDir: w.Dir, rg: w.Search.RgPath},
 		webFetch{},
 	}
 	if len(enabled) == 0 {

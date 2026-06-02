@@ -234,7 +234,17 @@ func (e *ProviderEntry) HasModel(m string) bool {
 
 // ToolsConfig selects which built-in tools are enabled. Empty means all of them.
 type ToolsConfig struct {
-	Enabled []string `toml:"enabled"`
+	Enabled []string     `toml:"enabled"`
+	Search  SearchConfig `toml:"search"`
+}
+
+// SearchConfig tunes the grep tool's engine. Engine is "auto" (default — use
+// ripgrep when it's on PATH, else the native Go scanner), "native" (always Go),
+// or "rg" (require ripgrep; warn at startup and fall back to native if absent).
+// RgPath optionally points at a specific ripgrep binary instead of a PATH lookup.
+type SearchConfig struct {
+	Engine string `toml:"engine"`
+	RgPath string `toml:"rg_path"`
 }
 
 // PermissionsConfig declares the per-call permission policy (see

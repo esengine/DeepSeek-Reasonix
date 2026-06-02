@@ -129,7 +129,8 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	if sandbox.ResolveShell().Kind == sandbox.ShellPowerShell {
 		fmt.Fprintln(stderr, "warning: bash not found on PATH; the shell tool will run commands under Windows PowerShell. Install Git for Windows or WSL to use bash.")
 	}
-	addBuiltins(reg, cfg.Tools.Enabled, cfg.WriteRoots(), bashSpec, stderr)
+	searchSpec := builtin.ResolveSearch(cfg.Tools.Search.Engine, cfg.Tools.Search.RgPath, stderr)
+	addBuiltins(reg, cfg.Tools.Enabled, cfg.WriteRoots(), bashSpec, searchSpec, stderr)
 	// Always construct a host, even with no plugins configured, so the controller's
 	// host pointer is stable for the session and `/mcp add` can hot-add into it.
 	pluginHost := plugin.NewHost()
@@ -454,7 +455,7 @@ func NewProvider(e *config.ProviderEntry) (provider.Provider, error) {
 // them. writeRoots confines the file-writing built-ins to the workspace: after
 // the (unconfined) defaults are added, each enabled writer is replaced by an
 // instance bound to writeRoots (preserving registry order).
-func addBuiltins(reg *tool.Registry, enabled, writeRoots []string, bashSpec sandbox.Spec, stderr io.Writer) {
+func addBuiltins(reg *tool.Registry, enabled, writeRoots []string, bashSpec sandbox.Spec, searchSpec builtin.SearchSpec, stderr io.Writer) {
 	if len(enabled) == 0 {
 		for _, t := range tool.Builtins() {
 			reg.Add(t)
@@ -471,7 +472,7 @@ func addBuiltins(reg *tool.Registry, enabled, writeRoots []string, bashSpec sand
 	// Replace the unconfined defaults with confined instances (registry order is
 	// preserved on replace): file-writers bound to the workspace, bash to the OS
 	// sandbox. Only replace tools actually enabled/present.
-	confined := append(builtin.ConfineWriters(writeRoots), builtin.ConfineBash(bashSpec))
+	confined := append(builtin.ConfineWriters(writeRoots), builtin.ConfineBash(bashSpec), builtin.ConfineSearch(searchSpec))
 	for _, t := range confined {
 		if _, ok := reg.Get(t.Name()); ok {
 			reg.Add(t)
