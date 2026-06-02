@@ -48,7 +48,30 @@ jobs:
         run: go build ./...
 
       - name: test
+        env:
+          # Run the prompt-cache prefix-stability guard (TestCacheHit*) in CI: a
+          # regression there silently tanks the cache hit rate the project is
+          # built around.
+          REASONIX_RELEASE_CACHE_GUARD: "1"
         run: go test ./...
+
+  race:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # The matrix never runs -race (it needs cgo); the project's concurrency
+      # (plugin fan-out, background phase B, jobs Kill/Wait) would otherwise
+      # ship without race coverage.
+      - name: test -race
+        env:
+          REASONIX_RELEASE_CACHE_GUARD: "1"
+        run: go test -race ./...
 
   desktop:
     runs-on: ubuntu-22.04
