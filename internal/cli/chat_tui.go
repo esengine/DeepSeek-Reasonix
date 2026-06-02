@@ -174,8 +174,9 @@ type chatTUI struct {
 	rewind  *rewindPicker
 	lastEsc time.Time
 
-	// lastCtrlCAt records when Ctrl+C was pressed while idle, enabling a
-	// "press again to quit" confirmation pattern (1.5s window).
+	// lastCtrlCAt records when Ctrl+C was pressed while idle on an empty
+	// composer, enabling a "press again to quit" confirmation pattern (1.5s
+	// window). Reset when Ctrl+C clears non-empty input instead.
 	lastCtrlCAt time.Time
 
 	// host is the running MCP servers (nil when no plugins). The TUI reads
@@ -670,7 +671,7 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			return m, nil
-		case "ctrl+c":
+		case "ctrl+c", "super+c", "meta+c":
 			if m.state == tuiRunning {
 				if m.bubblePending {
 					m.unsendPending() // server not yet replied — restore text, leave no trace
@@ -679,7 +680,14 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
-			// Idle: require double-press within 1.5s to prevent accidental exits.
+			// Idle: if the composer has text, a single press clears it (like Esc).
+			// On an empty composer, require double-press within 1.5s to quit.
+			if strings.TrimSpace(m.input.Value()) != "" {
+				m.input.Reset()
+				m.pastedBlocks = nil
+				m.lastCtrlCAt = time.Time{}
+				return m, nil
+			}
 			if !m.lastCtrlCAt.IsZero() && time.Since(m.lastCtrlCAt) < 1500*time.Millisecond {
 				return m, tea.Quit
 			}
