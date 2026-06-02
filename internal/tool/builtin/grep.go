@@ -96,6 +96,9 @@ func (g grepTool) Execute(ctx context.Context, args json.RawMessage) (string, er
 		for sc.Scan() {
 			ln++
 			line := sc.Text()
+			if strings.IndexByte(line, 0) >= 0 {
+				return nil // looks binary, skip the file
+			}
 			if re.MatchString(line) {
 				out = append(out, fmt.Sprintf("%s:%d:%s", file, ln, line))
 				if len(out) >= grepMaxMatches {
