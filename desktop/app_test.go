@@ -58,6 +58,35 @@ func TestSetEffortPersistsAndAutoClears(t *testing.T) {
 	}
 }
 
+func TestSetEffortRebuildsController(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	app := NewApp()
+	app.ctx = context.Background()
+	app.model = "deepseek-flash/deepseek-v4-flash"
+	old := control.New(control.Options{Label: "old-controller"})
+	app.ctrl = old
+	defer func() {
+		if app.ctrl != nil {
+			app.ctrl.Close()
+		}
+	}()
+
+	if err := app.SetEffort("max"); err != nil {
+		t.Fatalf("SetEffort(max): %v", err)
+	}
+	if app.ctrl == nil {
+		t.Fatal("SetEffort should leave a rebuilt controller")
+	}
+	if app.ctrl == old {
+		t.Fatal("SetEffort should rebuild the active controller so the provider sees the new effort")
+	}
+	if got := app.Effort().Current; got != "max" {
+		t.Fatalf("Effort current = %q, want max", got)
+	}
+}
+
 func TestSetEffortRejectsRunningTurn(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
