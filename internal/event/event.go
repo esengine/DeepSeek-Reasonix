@@ -68,6 +68,11 @@ const (
 	// ToolResult for long tools like bash so a frontend can show live progress.
 	// Appended last to keep the Kind values before it wire-stable.
 	ToolProgress
+	// MCPSurfaceReady fires once per server when its background-loaded surface
+	// (prompts or resources) finishes after startup. Lets UIs refresh /mcp
+	// status without polling. Text carries "<server>: <surface> ready (<count>
+	// items)". Appended last to keep the Kind values before it wire-stable.
+	MCPSurfaceReady
 )
 
 // Level classifies a Notice so sinks can style or filter it.

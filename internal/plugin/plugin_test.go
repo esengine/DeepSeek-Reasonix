@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"reasonix/internal/event"
 )
 
 // TestStdioEndToEnd drives a real subprocess (this test binary re-invoked in
@@ -347,6 +349,68 @@ func TestStartPolicyPerPluginTimeout(t *testing.T) {
 	}
 }
 
+// TestStartPhaseAReturnsBeforePhaseB pins the two-phase handshake contract.
+// The helper advertises prompts and stalls prompts/list by 200ms; StartAvailable
+// must return as soon as tools are ready (well before that 200ms), and the
+// prompts must only materialise on Host after StartPhaseB has been called and
+// drained — proving prompts ride the background phase, not the boot critical path.
+func TestStartPhaseAReturnsBeforePhaseB(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	spec := Spec{
+		Name:    "mock",
+		Command: os.Args[0],
+		Args:    []string{"-test.run=TestHelperProcess", "--"},
+		Env: map[string]string{
+			"GO_WANT_HELPER_PROCESS":         "1",
+			"GO_WANT_HELPER_PROMPTS":         "1",
+			"GO_WANT_HELPER_PROMPT_DELAY_MS": "200",
+		},
+	}
+
+	t0 := time.Now()
+	host, tools := StartAvailable(ctx, []Spec{spec})
+	startDur := time.Since(t0)
+	defer host.Close()
+
+	if len(tools) == 0 {
+		t.Fatalf("want tools from helper, got 0")
+	}
+	if startDur >= 150*time.Millisecond {
+		t.Fatalf("StartAvailable took %v — phase B (200ms prompts) leaked onto the critical path", startDur)
+	}
+	if got := host.Prompts(); len(got) != 0 {
+		t.Fatalf("phase A must not surface prompts yet, got %d", len(got))
+	}
+
+	// Drive phase B and wait for the surface-ready event. Use a buffered channel
+	// sink so the test never blocks the emitter — the event payload itself is
+	// our completion signal.
+	ready := make(chan event.Event, 4)
+	host.StartPhaseB(ctx, event.FuncSink(func(e event.Event) {
+		if e.Kind == event.MCPSurfaceReady {
+			select {
+			case ready <- e:
+			default:
+			}
+		}
+	}))
+
+	select {
+	case e := <-ready:
+		if !strings.Contains(e.Text, "prompts ready") {
+			t.Fatalf("phase B event text = %q, want it to mention prompts", e.Text)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("phase B never fired MCPSurfaceReady for prompts")
+	}
+
+	if got := host.Prompts(); len(got) != 1 || got[0].Raw != "hello" {
+		t.Fatalf("after phase B, prompts = %+v, want one named hello", got)
+	}
+}
+
 // TestHelperProcess is not a real test; it acts as a minimal MCP stdio server
 // when invoked by TestStdioEndToEnd. It exits before the test framework can
 // print to stdout, keeping the JSON-RPC channel clean.
@@ -354,6 +418,9 @@ func TestStartPolicyPerPluginTimeout(t *testing.T) {
 // GO_WANT_HELPER_INIT_MS optionally injects a sleep before responding to the
 // initialize call, used by the timeout / concurrency tests to simulate slow
 // handshakes without depending on external processes.
+// GO_WANT_HELPER_PROMPTS advertises the prompts capability and registers a
+// "hello" prompt; GO_WANT_HELPER_PROMPT_DELAY_MS stalls prompts/list so the
+// phase-A vs phase-B split can be exercised.
 func TestHelperProcess(t *testing.T) {
 	if os.Getenv("GO_WANT_HELPER_STDERR_EXIT") == "1" {
 		os.Stderr.WriteString("helper stderr boom\n")
@@ -400,10 +467,26 @@ func TestHelperProcess(t *testing.T) {
 			if initDelay > 0 {
 				time.Sleep(initDelay)
 			}
+			caps := map[string]any{}
+			if os.Getenv("GO_WANT_HELPER_PROMPTS") == "1" {
+				caps["prompts"] = map[string]any{}
+			}
 			result = map[string]any{
 				"protocolVersion": protocolVersion,
 				"serverInfo":      map[string]any{"name": "mock", "version": "0"},
+				"capabilities":    caps,
 			}
+		case "prompts/list":
+			if ms := os.Getenv("GO_WANT_HELPER_PROMPT_DELAY_MS"); ms != "" {
+				if v, err := time.ParseDuration(ms + "ms"); err == nil && v > 0 {
+					time.Sleep(v)
+				}
+			}
+			result = map[string]any{"prompts": []map[string]any{{
+				"name":        "hello",
+				"description": "say hi",
+				"arguments":   []map[string]any{},
+			}}}
 		case "tools/list":
 			result = map[string]any{"tools": []map[string]any{{
 				"name":        "zed",

@@ -195,6 +195,10 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		for _, t := range ptools {
 			reg.Add(t)
 		}
+		// PhaseB (prompts + resources) runs on the boot ctx — which is the
+		// controller's session-scoped PluginCtx — so the auxiliary surfaces
+		// keep streaming in after Start returns without holding up the agent.
+		go host.StartPhaseB(ctx, sink)
 		if text, ok := MCPStartupNotice(host.Failures()); ok {
 			sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: text})
 		}
