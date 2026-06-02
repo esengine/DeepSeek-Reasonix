@@ -18,7 +18,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -28,7 +28,10 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      # Skipped on Windows: the runner checks out CRLF, so gofmt -l flags every
+      # file. gofmt output is OS-independent, so the Unix legs already cover it.
       - name: gofmt
+        if: runner.os != 'Windows'
         run: |
           # Root module only — desktop/ is a separate module with its own tooling.
           unformatted=$(gofmt -l . | grep -v '^desktop/' || true)
