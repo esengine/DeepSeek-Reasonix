@@ -550,31 +550,32 @@ export function WorkspacePanel({
       const isOpen = openDirs.has(path);
       const active = selectedPath === path;
       const row = (
-        <button
-          key={path}
-          className={`workspace-tree__row${active ? " workspace-tree__row--active" : ""}`}
-          draggable
-          onDragStart={(event) => startTreeDrag(event, path, entry.isDir)}
-          onClick={() => (entry.isDir ? toggleDir(path) : selectFile(path))}
-          onContextMenu={(event) => openTreeMenu(event, path, entry.isDir)}
-          style={{ paddingLeft: 8 + depth * 14 }}
-        >
-          {entry.isDir ? (
-            isOpen ? (
-              <ChevronDown size={13} className="workspace-tree__chev" />
+        <Tooltip key={path} label={path} fill>
+          <button
+            className={`workspace-tree__row${active ? " workspace-tree__row--active" : ""}`}
+            draggable
+            onDragStart={(event) => startTreeDrag(event, path, entry.isDir)}
+            onClick={() => (entry.isDir ? toggleDir(path) : selectFile(path))}
+            onContextMenu={(event) => openTreeMenu(event, path, entry.isDir)}
+            style={{ paddingLeft: 8 + depth * 14 }}
+          >
+            {entry.isDir ? (
+              isOpen ? (
+                <ChevronDown size={13} className="workspace-tree__chev" />
+              ) : (
+                <ChevronRight size={13} className="workspace-tree__chev" />
+              )
             ) : (
-              <ChevronRight size={13} className="workspace-tree__chev" />
-            )
-          ) : (
-            <span className="workspace-tree__chev" />
-          )}
-          {entry.isDir ? (
-            <Folder size={14} className="workspace-tree__icon workspace-tree__icon--dir" />
-          ) : (
-            <FileText size={14} className="workspace-tree__icon" />
-          )}
-          <span className="workspace-tree__name">{entry.name}</span>
-        </button>
+              <span className="workspace-tree__chev" />
+            )}
+            {entry.isDir ? (
+              <Folder size={14} className="workspace-tree__icon workspace-tree__icon--dir" />
+            ) : (
+              <FileText size={14} className="workspace-tree__icon" />
+            )}
+            <span className="workspace-tree__name">{entry.name}</span>
+          </button>
+        </Tooltip>
       );
       if (!entry.isDir || !isOpen) return [row];
       return [row, ...renderRows(path, depth + 1)];
