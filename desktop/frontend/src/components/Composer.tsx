@@ -174,32 +174,41 @@ export function Composer({
 
   // --- slash argument completion ("/cmd <args>") --- mirrors the CLI: once past
   // the command word, the backend suggests sub-commands (/skill → list/show/…,
-  // /mcp → add/remove, /model → refs). Fetched from app.SlashArgs.
+  // /mcp → add/remove, /model → refs). Fetched from app.SlashArgs. Debounced
+  // by 120ms so rapid typing doesn't flood the backend with IPC calls — the
+  // menu only updates after the user pauses.
   const [argRes, setArgRes] = useState<SlashArgsResult | null>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
   useEffect(() => {
     if (!text.startsWith("/") || !/\s/.test(text)) {
       setArgRes(null);
       return;
     }
-    let live = true;
-    app
-      .SlashArgs(text)
-      .then((r) => {
-        if (!live) return;
-        // Drop suggestions that wouldn't change the input — the token is already
-        // fully typed (e.g. "/skill list" offering "list"). Otherwise the menu
-        // lingers on a complete command and Enter keeps "accepting" a no-op
-        // instead of sending. (Defense-in-depth: the backend filters these too.)
-        // r.items can arrive as null (an empty Go slice serializes to JSON null),
-        // so guard before filtering — otherwise the throw is swallowed and the
-        // stale menu from the previous keystroke lingers (the /skill list bug).
-        const useful = (r.items ?? []).filter((it) => text.slice(0, r.from) + it.insert !== text);
-        setArgRes(useful.length > 0 ? { items: useful, from: r.from } : null);
-        setActive(0);
-      })
-      .catch(() => {});
+    clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      let live = true;
+      app
+        .SlashArgs(text)
+        .then((r) => {
+          if (!live) return;
+          // Drop suggestions that wouldn't change the input — the token is already
+          // fully typed (e.g. "/skill list" offering "list"). Otherwise the menu
+          // lingers on a complete command and Enter keeps "accepting" a no-op
+          // instead of sending. (Defense-in-depth: the backend filters these too.)
+          // r.items can arrive as null (an empty Go slice serializes to JSON null),
+          // so guard before filtering — otherwise the throw is swallowed and the
+          // stale menu from the previous keystroke lingers (the /skill list bug).
+          const useful = (r.items ?? []).filter((it) => text.slice(0, r.from) + it.insert !== text);
+          setArgRes(useful.length > 0 ? { items: useful, from: r.from } : null);
+          setActive(0);
+        })
+        .catch(() => {});
+      return () => {
+        live = false;
+      };
+    }, 120);
     return () => {
-      live = false;
+      clearTimeout(debounceRef.current);
     };
   }, [text]);
 
