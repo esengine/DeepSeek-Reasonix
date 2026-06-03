@@ -44,8 +44,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { runner: macos-14, platform: darwin/arm64, name: darwin-arm64 }
-          - { runner: macos-13, platform: darwin/amd64, name: darwin-amd64 }
+          # One universal macOS build (Intel + Apple Silicon) on a single arm64
+          # runner — avoids the scarce/slow macos-13 Intel runner.
+          - { runner: macos-14, platform: darwin/universal, name: darwin-universal }
           - { runner: windows-latest, platform: windows/amd64, name: windows-amd64 }
           - { runner: ubuntu-22.04, platform: linux/amd64, name: linux-amd64 }
     runs-on: ${{ matrix.runner }}

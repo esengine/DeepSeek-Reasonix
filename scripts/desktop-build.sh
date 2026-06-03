@@ -53,7 +53,15 @@ darwin)
 	app="$staging/${APPNAME}.app"
 	cp -R "build/bin/reasonix-desktop.app" "$app"
 	codesign --force --deep -s - "$app"
-	ditto -c -k --keepParent "$app" "$ROOT/dist/${APPNAME}-darwin-${arch}.zip"
+	if [ "$arch" = universal ]; then
+		# One universal .app covers Intel + Apple Silicon; publish it under both
+		# manifest keys so the updater's darwin-arm64/darwin-amd64 lookup finds it
+		# (avoids a scarce macos-13 Intel runner).
+		ditto -c -k --keepParent "$app" "$ROOT/dist/${APPNAME}-darwin-arm64.zip"
+		ditto -c -k --keepParent "$app" "$ROOT/dist/${APPNAME}-darwin-amd64.zip"
+	else
+		ditto -c -k --keepParent "$app" "$ROOT/dist/${APPNAME}-darwin-${arch}.zip"
+	fi
 	rm -rf "$staging"
 	;;
 windows)
