@@ -513,6 +513,13 @@ func (h *Host) RecordFailure(s Spec, err error) {
 	h.failures = append(h.failures, f)
 }
 
+// ClearFailure drops a recorded startup/connection failure for status UIs.
+func (h *Host) ClearFailure(name string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.clearFailure(name)
+}
+
 // clearFailure drops the failure record for name. The caller holds h.mu (Lock) —
 // it runs inside addConnected / Remove, which already mutate under the lock.
 func (h *Host) clearFailure(name string) {

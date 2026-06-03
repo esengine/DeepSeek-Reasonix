@@ -28,6 +28,7 @@ func TestSlashArgItems(t *testing.T) {
 		Skills:          []skill.Skill{{Name: "explore", Scope: skill.ScopeBuiltin}, {Name: "review", Scope: skill.ScopeBuiltin}},
 		DisabledSkills:  []skill.Skill{{Name: "security-review", Scope: skill.ScopeBuiltin}},
 		ServerNames:     []string{"fs", "git"},
+		ConfiguredMCP:   []string{"fs", "linear"},
 		DisconnectedMCP: []string{"optional"},
 		ModelRefs:       []string{"deepseek-flash/deepseek-v4-flash", "deepseek-pro/deepseek-v4-pro"},
 		CurrentModel:    "deepseek-flash/deepseek-v4-flash",
@@ -70,6 +71,15 @@ func TestSlashArgItems(t *testing.T) {
 	items, _ = SlashArgItems("/mcp connect ", data)
 	if !has(items, "optional") {
 		t.Errorf("/mcp connect should list disconnected configured servers; got %v", labelsOf(items))
+	}
+	// /mcp show/tools -> connected + configured server names
+	items, _ = SlashArgItems("/mcp show ", data)
+	if !has(items, "fs") || !has(items, "linear") || !has(items, "optional") {
+		t.Errorf("/mcp show should list known servers; got %v", labelsOf(items))
+	}
+	items, _ = SlashArgItems("/mcp tools ", data)
+	if !has(items, "git") || !has(items, "linear") {
+		t.Errorf("/mcp tools should list known servers; got %v", labelsOf(items))
 	}
 	// /model → refs, current marked
 	items, _ = SlashArgItems("/model ", data)

@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -164,5 +165,136 @@ func TestMergeMCPJSONPrecedence(t *testing.T) {
 	}
 	if cfg.Plugins[1].Name != "extra" || cfg.Plugins[1].Command != "extra-bin" {
 		t.Errorf("non-colliding entry not appended: %+v", cfg.Plugins[1])
+	}
+}
+
+func TestClearPluginAuthenticationInSourceUsesMCPJSON(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("HOME", root)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "xdg"))
+	t.Setenv("AppData", filepath.Join(root, "AppData"))
+	t.Chdir(t.TempDir())
+
+	userPath := UserConfigPath()
+	if err := os.MkdirAll(filepath.Dir(userPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(userPath, []byte("[[plugins]]\nname = \"global\"\ncommand = \"global-bin\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mcp := `{
+  "mcpServers": {
+    "dida": {
+      "type": "http",
+      "url": "https://mcp.dida365.com/mcp?access_token=abc&workspace=main",
+      "headers": { "Authorization": "Bearer ${DIDA_TOKEN}", "X-Org": "team" },
+      "env": { "DIDA_TOKEN": "${DIDA_TOKEN}", "DEBUG": "1" }
+    }
+  }
+}`
+	if err := os.WriteFile(mcpJSONFile, []byte(mcp), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	updated, changed, source, err := ClearPluginAuthenticationInSource("dida")
+	if err != nil {
+		t.Fatalf("ClearPluginAuthenticationInSource: %v", err)
+	}
+	if !changed {
+		t.Fatal("ClearPluginAuthenticationInSource should report changed")
+	}
+	if source != mcpJSONFile {
+		t.Fatalf("source = %q, want %q", source, mcpJSONFile)
+	}
+	if updated.URL != "https://mcp.dida365.com/mcp?workspace=main" {
+		t.Fatalf("updated URL = %q", updated.URL)
+	}
+
+	userRaw, err := os.ReadFile(userPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(userRaw), "dida") {
+		t.Fatalf("user config should not receive .mcp.json server:\n%s", userRaw)
+	}
+	entries, err := loadMCPJSON(mcpJSONFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("entries = %+v, want one dida entry", entries)
+	}
+	got := entries[0]
+	if got.URL != "https://mcp.dida365.com/mcp?workspace=main" {
+		t.Fatalf(".mcp.json URL = %q", got.URL)
+	}
+	if _, ok := got.Headers["Authorization"]; ok {
+		t.Fatalf("auth header should be removed: %+v", got.Headers)
+	}
+	if got.Headers["X-Org"] != "team" {
+		t.Fatalf("ordinary header should be preserved: %+v", got.Headers)
+	}
+	if _, ok := got.Env["DIDA_TOKEN"]; ok {
+		t.Fatalf("auth env should be removed: %+v", got.Env)
+	}
+	if got.Env["DEBUG"] != "1" {
+		t.Fatalf("ordinary env should be preserved: %+v", got.Env)
+	}
+}
+
+func TestClearPluginAuthenticationInSourcePrefersTOML(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("HOME", root)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "xdg"))
+	t.Setenv("AppData", filepath.Join(root, "AppData"))
+	t.Chdir(t.TempDir())
+
+	if err := os.WriteFile("reasonix.toml", []byte(`[[plugins]]
+name = "dida"
+type = "http"
+url = "https://reasonix.example/mcp?access_token=toml"
+[plugins.headers]
+Authorization = "Bearer ${TOML_TOKEN}"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mcp := `{ "mcpServers": {
+  "dida": {
+    "type": "http",
+    "url": "https://mcp-json.example/mcp?access_token=json",
+    "headers": { "Authorization": "Bearer ${JSON_TOKEN}" }
+  }
+} }`
+	if err := os.WriteFile(mcpJSONFile, []byte(mcp), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	updated, changed, source, err := ClearPluginAuthenticationInSource("dida")
+	if err != nil {
+		t.Fatalf("ClearPluginAuthenticationInSource: %v", err)
+	}
+	if !changed {
+		t.Fatal("ClearPluginAuthenticationInSource should report changed")
+	}
+	if source != "reasonix.toml" {
+		t.Fatalf("source = %q, want reasonix.toml", source)
+	}
+	if updated.URL != "https://reasonix.example/mcp" {
+		t.Fatalf("updated URL = %q", updated.URL)
+	}
+
+	projectRaw, err := os.ReadFile("reasonix.toml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(projectRaw), "access_token=toml") || strings.Contains(string(projectRaw), "Authorization") {
+		t.Fatalf("reasonix.toml auth material should be removed:\n%s", projectRaw)
+	}
+	mcpRaw, err := os.ReadFile(mcpJSONFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(mcpRaw), "access_token=json") {
+		t.Fatalf(".mcp.json collision entry should be left untouched:\n%s", mcpRaw)
 	}
 }

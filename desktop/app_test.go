@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -166,6 +167,175 @@ args = ["-y", "@playwright/mcp"]
 	t.Fatalf("playwright MCP missing from Capabilities: %+v", view.Servers)
 }
 
+func TestCapabilitiesMarksDeferredRemoteMCPAuthPossible(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	dir := t.TempDir()
+	t.Chdir(dir)
+	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
+[codegraph]
+enabled = false
+
+[[plugins]]
+name = "dida"
+type = "http"
+url = "https://mcp.dida365.com"
+tier = "lazy"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp()
+	app.ctrl = control.New(control.Options{Host: plugin.NewHost()})
+	defer app.ctrl.Close()
+
+	view := app.Capabilities()
+	for _, s := range view.Servers {
+		if s.Name == "dida" {
+			if s.Status != "deferred" || s.AuthStatus != "possible" || s.AuthURL != "https://mcp.dida365.com" {
+				t.Fatalf("dida auth diagnosis = %+v", s)
+			}
+			return
+		}
+	}
+	t.Fatalf("dida MCP missing from Capabilities: %+v", view.Servers)
+}
+
+func TestCapabilitiesDoesNotMarkRemoteMCPWithAuthHeaderPossible(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	dir := t.TempDir()
+	t.Chdir(dir)
+	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
+[codegraph]
+enabled = false
+
+[[plugins]]
+name = "stripe"
+type = "http"
+url = "https://mcp.stripe.com"
+headers = { Authorization = "Bearer ${STRIPE_TOKEN}" }
+tier = "lazy"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp()
+	app.ctrl = control.New(control.Options{Host: plugin.NewHost()})
+	defer app.ctrl.Close()
+
+	view := app.Capabilities()
+	for _, s := range view.Servers {
+		if s.Name == "stripe" {
+			if s.AuthStatus != "none" {
+				t.Fatalf("stripe auth status = %q, want none; server = %+v", s.AuthStatus, s)
+			}
+			return
+		}
+	}
+	t.Fatalf("stripe MCP missing from Capabilities: %+v", view.Servers)
+}
+
+func TestCapabilitiesMarksAuthFailureRequired(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	dir := t.TempDir()
+	t.Chdir(dir)
+	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
+[codegraph]
+enabled = false
+
+[[plugins]]
+name = "figma"
+type = "http"
+url = "https://mcp.figma.com/mcp"
+tier = "lazy"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	host := plugin.NewHost()
+	host.RecordFailure(plugin.Spec{Name: "figma", Type: "http", URL: "https://mcp.figma.com/mcp"}, errors.New("connect: 401 unauthorized"))
+	app := NewApp()
+	app.ctrl = control.New(control.Options{Host: host})
+	defer app.ctrl.Close()
+
+	view := app.Capabilities()
+	for _, s := range view.Servers {
+		if s.Name == "figma" {
+			if s.Status != "failed" || s.AuthStatus != "required" || s.AuthURL != "https://mcp.figma.com/mcp" {
+				t.Fatalf("figma auth diagnosis = %+v", s)
+			}
+			return
+		}
+	}
+	t.Fatalf("figma MCP missing from Capabilities: %+v", view.Servers)
+}
+
+func TestClearMCPServerAuthenticationClearsConfigAndFailure(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	dir := t.TempDir()
+	t.Chdir(dir)
+	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
+[codegraph]
+enabled = false
+
+[[plugins]]
+name = "figma"
+type = "http"
+url = "https://mcp.figma.com/mcp?access_token=abc&workspace=main"
+headers = { Authorization = "Bearer ${FIGMA_TOKEN}", "X-Org" = "team" }
+env = { FIGMA_TOKEN = "${FIGMA_TOKEN}", DEBUG = "1" }
+tier = "lazy"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	host := plugin.NewHost()
+	host.RecordFailure(plugin.Spec{Name: "figma", Type: "http", URL: "https://mcp.figma.com/mcp"}, errors.New("connect: 401 unauthorized"))
+	app := NewApp()
+	app.ctrl = control.New(control.Options{Host: host})
+	defer app.ctrl.Close()
+
+	if err := app.ClearMCPServerAuthentication("figma"); err != nil {
+		t.Fatalf("ClearMCPServerAuthentication: %v", err)
+	}
+	if failures := host.Failures(); len(failures) != 0 {
+		t.Fatalf("failure should be cleared: %+v", failures)
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := cfg.Plugins[0]
+	if p.URL != "https://mcp.figma.com/mcp?workspace=main" {
+		t.Fatalf("url = %q", p.URL)
+	}
+	if _, ok := p.Headers["Authorization"]; ok {
+		t.Fatalf("auth header should be removed: %v", p.Headers)
+	}
+	if p.Headers["X-Org"] != "team" {
+		t.Fatalf("ordinary header should be preserved: %v", p.Headers)
+	}
+	if _, ok := p.Env["FIGMA_TOKEN"]; ok {
+		t.Fatalf("auth env should be removed: %v", p.Env)
+	}
+	if p.Env["DEBUG"] != "1" {
+		t.Fatalf("ordinary env should be preserved: %v", p.Env)
+	}
+	view := app.Capabilities()
+	for _, s := range view.Servers {
+		if s.Name == "figma" {
+			if s.Status != "deferred" || s.AuthStatus != "possible" {
+				t.Fatalf("figma should return to deferred possible auth: %+v", s)
+			}
+			return
+		}
+	}
+	t.Fatalf("figma MCP missing from Capabilities: %+v", view.Servers)
+}
+
 func TestUpdateMCPServerKeepsLazyMCPDeferred(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
@@ -243,9 +413,15 @@ tier = "lazy"
 	app.ctrl = control.New(control.Options{Host: plugin.NewHost()})
 	defer app.ctrl.Close()
 
-	err := app.SetMCPServerTier("broken", "background")
-	if err == nil || !strings.Contains(err.Error(), "connect failed") {
-		t.Fatalf("SetMCPServerTier error = %v, want connect failure", err)
+	if err := app.SetMCPServerTier("broken", "background"); err != nil {
+		t.Fatalf("SetMCPServerTier should persist tier even when immediate connect fails: %v", err)
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Plugins[0].Tier; got != "background" {
+		t.Fatalf("saved tier = %q, want background", got)
 	}
 	if !mcpFailed(app.ctrl, "broken") {
 		t.Fatalf("Host.Failures() = %+v, want broken failure recorded", app.ctrl.Host().Failures())
@@ -255,6 +431,9 @@ tier = "lazy"
 		if s.Name == "broken" {
 			if s.Status != "failed" {
 				t.Fatalf("server status = %q, want failed; server = %+v", s.Status, s)
+			}
+			if s.Tier != "background" {
+				t.Fatalf("server tier = %q, want background so radio selection does not jump back", s.Tier)
 			}
 			return
 		}

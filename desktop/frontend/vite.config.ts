@@ -1,10 +1,21 @@
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
+
+// On macOS ≤ 12 (Safari 15 WebKit) a crossorigin module/stylesheet fetched over the
+// wails:// scheme is CORS-blocked (no Access-Control-Allow-Origin from the handler),
+// so the bundle never loads and the window paints blank; newer WebKit tolerates it.
+function stripCrossorigin(): Plugin {
+  return {
+    name: "strip-crossorigin",
+    enforce: "post",
+    transformIndexHtml: (html) => html.replace(/\s+crossorigin(?==["']|[\s/>])/g, ""),
+  };
+}
 
 // base: "./" so built asset URLs are relative. Wails serves the embedded dist from
 // the app root over the wails:// scheme, where absolute "/assets/..." URLs 404.
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), stripCrossorigin()],
   base: "./",
   build: {
     outDir: "dist",

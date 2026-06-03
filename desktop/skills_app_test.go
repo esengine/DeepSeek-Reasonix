@@ -52,6 +52,9 @@ func TestSkillRootsViewCountsProjectSkills(t *testing.T) {
 			if r.Status != "ok" || r.Skills != 1 || r.Scope != "project" {
 				t.Fatalf("project root view = %+v", r)
 			}
+			if len(r.SkillItems) != 1 || r.SkillItems[0].Name != "proj" || r.SkillItems[0].Description != "project" {
+				t.Fatalf("project root skill items = %+v", r.SkillItems)
+			}
 			return
 		}
 	}
@@ -93,6 +96,9 @@ func TestSkillRootsViewMarksEnvConfiguredCustomRoot(t *testing.T) {
 		if realTestPath(r.Dir) == want {
 			if !r.Configured || r.Skills != 1 || r.Scope != "custom" {
 				t.Fatalf("custom root view = %+v, want configured custom root with one skill", r)
+			}
+			if len(r.SkillItems) != 1 || r.SkillItems[0].Name != "custom" || r.SkillItems[0].Scope != "custom" {
+				t.Fatalf("custom root skill items = %+v", r.SkillItems)
 			}
 			return
 		}

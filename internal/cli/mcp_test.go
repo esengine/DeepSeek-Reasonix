@@ -1,10 +1,14 @@
 package cli
 
 import (
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+
+	"reasonix/internal/config"
 	"reasonix/internal/plugin"
 )
 
@@ -148,5 +152,273 @@ func TestRenderMCPStatusShowsFailures(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("rendered MCP status missing %q:\n%s", want, got)
 		}
+	}
+}
+
+func TestRenderMCPManagerListGroupsRuntimeAndConfiguredServers(t *testing.T) {
+	p := &mcpManager{snapshot: mcpSnapshot{
+		configPath: "reasonix.toml",
+		servers: []mcpServerView{
+			{Name: "codegraph", Transport: "stdio", Status: "connected", BuiltIn: true, Tools: 4},
+			{Name: "github", Transport: "stdio", Status: "deferred", Configured: true, Tier: "lazy", Tools: 12},
+			{Name: "figma", Transport: "http", Status: "failed", Configured: true, Tier: "lazy", URL: "https://mcp.figma.com", Error: "connect: 401 unauthorized"},
+		},
+	}}
+	got := p.renderList(120)
+	for _, want := range []string{
+		"Manage MCP servers",
+		"3 servers",
+		"Built-in MCPs",
+		"User MCPs (reasonix.toml)",
+		"codegraph",
+		"connected",
+		"github",
+		"connect on use",
+		"figma",
+		"needs authentication",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("rendered MCP manager list missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestRenderMCPManagerListCompactsLongNames(t *testing.T) {
+	p := &mcpManager{snapshot: mcpSnapshot{servers: []mcpServerView{
+		{Name: "@modelcontextprotocol/server-sequential-thinking", Transport: "stdio", Status: "deferred", Configured: true, Tier: "lazy"},
+	}}}
+	got := p.renderList(80)
+	for _, line := range strings.Split(got, "\n") {
+		if visibleWidth(line) > 80 {
+			t.Fatalf("line exceeds width 80 (%d): %q\n%s", visibleWidth(line), line, got)
+		}
+	}
+	if strings.Contains(got, "\n 0") || strings.Contains(got, "\n use") {
+		t.Fatalf("list row should not wrap status onto the next line:\n%s", got)
+	}
+}
+
+func TestRenderMCPManagerAuthFailureActions(t *testing.T) {
+	p := &mcpManager{
+		stage: mcpStageDetail,
+		name:  "figma",
+		snapshot: mcpSnapshot{
+			configPath: "reasonix.toml",
+			servers: []mcpServerView{{
+				Name: "figma", Transport: "http", Status: "failed", Configured: true,
+				Tier: "lazy", URL: "https://mcp.figma.com", Error: "connect: 401 unauthorized",
+			}},
+		},
+	}
+	got := p.renderDetail(120)
+	for _, want := range []string{
+		"Figma MCP Server",
+		"needs authentication",
+		"not authenticated",
+		"Authenticate",
+		"Clear authentication",
+		"View logs",
+		"Edit config",
+		"Remove server",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("rendered auth failure details missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "Retry") {
+		t.Fatalf("auth failures should prefer Authenticate over Retry:\n%s", got)
+	}
+}
+
+func TestRenderMCPManagerClearAuthConfirmation(t *testing.T) {
+	p := &mcpManager{
+		stage:   mcpStageConfirmClearAuth,
+		name:    "figma",
+		confirm: 1,
+		snapshot: mcpSnapshot{
+			servers: []mcpServerView{{
+				Name: "figma", Transport: "http", Status: "failed", Configured: true,
+				Tier: "lazy", URL: "https://mcp.figma.com", Error: "connect: 401 unauthorized",
+			}},
+		},
+	}
+	got := p.renderConfirmClearAuth(120)
+	for _, want := range []string{
+		"Clear authentication for MCP server \"figma\"?",
+		"Confirm clear authentication",
+		"Cancel",
+		"y confirm",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("rendered clear-auth confirmation missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestRenderMCPManagerRemoteDeferredAuthHint(t *testing.T) {
+	p := &mcpManager{
+		stage: mcpStageDetail,
+		name:  "dida",
+		snapshot: mcpSnapshot{
+			configPath: "reasonix.toml",
+			servers: []mcpServerView{{
+				Name: "dida", Transport: "http", Status: "deferred", Configured: true,
+				Tier: "lazy", URL: "https://mcp.dida365.com",
+			}},
+		},
+	}
+	got := p.renderDetail(100)
+	for _, want := range []string{
+		"connect on use",
+		"Auth:",
+		"may need authorization",
+		"Connect now",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("rendered deferred remote details missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "Authenticate") {
+		t.Fatalf("possible auth should not replace connect action before a failure:\n%s", got)
+	}
+}
+
+func TestRenderMCPManagerDetailCompactsConfigPath(t *testing.T) {
+	p := &mcpManager{
+		stage: mcpStageDetail,
+		name:  "github",
+		snapshot: mcpSnapshot{
+			configPath: "/Users/example/Library/Application Support/reasonix/config.toml",
+			servers: []mcpServerView{{
+				Name: "github", Transport: "stdio", Status: "deferred", Configured: true,
+				Tier: "lazy", Command: "npx", Args: []string{"-y", "@modelcontextprotocol/server-github"},
+			}},
+		},
+	}
+	got := p.renderDetail(80)
+	for _, line := range strings.Split(got, "\n") {
+		if visibleWidth(line) > 80 {
+			t.Fatalf("detail line exceeds width 80 (%d): %q\n%s", visibleWidth(line), line, got)
+		}
+	}
+	if strings.Contains(got, "Application Support/reasonix/config.toml") {
+		t.Fatalf("long config path should be compacted:\n%s", got)
+	}
+}
+
+func TestMCPEditConfigLaunchUsesVisualBeforeEditor(t *testing.T) {
+	t.Setenv("VISUAL", "vim")
+	t.Setenv("EDITOR", "nano")
+
+	path := "/tmp/reasonix config.toml"
+	launch, err := mcpEditConfigLaunchCommand(path, func(string) (string, error) {
+		t.Fatal("lookPath should not be called when VISUAL is set")
+		return "", errors.New("unexpected lookup")
+	})
+	if err != nil {
+		t.Fatalf("edit command: %v", err)
+	}
+	if launch.systemDefault {
+		t.Fatalf("VISUAL should not use system default: %+v", launch)
+	}
+	if launch.editor != "vim" {
+		t.Fatalf("editor = %q, want vim", launch.editor)
+	}
+	if len(launch.cmd.Args) != 3 || launch.cmd.Args[0] != "sh" || launch.cmd.Args[1] != "-lc" {
+		t.Fatalf("VISUAL should run through shell, args=%v", launch.cmd.Args)
+	}
+	if want := "vim " + shellQuote(path); launch.cmd.Args[2] != want {
+		t.Fatalf("shell command = %q, want %q", launch.cmd.Args[2], want)
+	}
+}
+
+func TestMCPEditConfigLaunchFallsBackToTerminalEditor(t *testing.T) {
+	t.Setenv("VISUAL", "")
+	t.Setenv("EDITOR", "")
+
+	launch, err := mcpEditConfigLaunchCommand("/tmp/reasonix.toml", func(name string) (string, error) {
+		if name == "vim" {
+			return "/usr/bin/vim", nil
+		}
+		return "", errors.New("not found")
+	})
+	if err != nil {
+		t.Fatalf("edit command: %v", err)
+	}
+	if launch.systemDefault {
+		t.Fatalf("terminal editor fallback should not use system default: %+v", launch)
+	}
+	if launch.editor != "vim" {
+		t.Fatalf("editor = %q, want vim", launch.editor)
+	}
+	if len(launch.cmd.Args) != 2 || launch.cmd.Args[0] != "/usr/bin/vim" || launch.cmd.Args[1] != "/tmp/reasonix.toml" {
+		t.Fatalf("terminal editor args=%v", launch.cmd.Args)
+	}
+}
+
+func TestMCPEditConfigLaunchUsesSystemDefaultLast(t *testing.T) {
+	t.Setenv("VISUAL", "")
+	t.Setenv("EDITOR", "")
+
+	path := "/tmp/reasonix.toml"
+	launch, err := mcpEditConfigLaunchCommand(path, func(string) (string, error) {
+		return "", errors.New("not found")
+	})
+	if err != nil {
+		t.Fatalf("edit command: %v", err)
+	}
+	if !launch.systemDefault {
+		t.Fatalf("missing terminal editors should use system default: %+v", launch)
+	}
+	want, err := mcpOpenCommand(path)
+	if err != nil {
+		t.Fatalf("open command: %v", err)
+	}
+	if len(launch.cmd.Args) == 0 || len(want.Args) == 0 || launch.cmd.Args[0] != want.Args[0] {
+		t.Fatalf("system default command = %v, want command starting with %v", launch.cmd.Args, want.Args)
+	}
+}
+
+func TestApplyMCPModePersistsTier(t *testing.T) {
+	isolateUserConfig(t)
+	cfg := config.Default()
+	cfg.Plugins = []config.PluginEntry{{Name: "github", Command: "npx", Args: []string{"server"}, Tier: "lazy"}}
+	if err := cfg.SaveTo("reasonix.toml"); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	m := newTestChatTUI()
+	m.mcp = &mcpManager{
+		stage: mcpStageMode,
+		name:  "github",
+		snapshot: mcpSnapshot{configPath: "reasonix.toml", servers: []mcpServerView{{
+			Name: "github", Transport: "stdio", Status: "deferred", Configured: true, Tier: "lazy",
+		}}},
+	}
+	_, _ = m.applyMCPMode("background")
+
+	loaded, err := config.Load()
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if len(loaded.Plugins) != 1 || loaded.Plugins[0].Tier != "background" {
+		t.Fatalf("tier not persisted, plugins=%+v", loaded.Plugins)
+	}
+}
+
+func TestMCPManagerEscFromDetailReturnsToList(t *testing.T) {
+	m := newTestChatTUI()
+	m.mcp = &mcpManager{
+		stage: mcpStageDetail,
+		name:  "codegraph",
+		snapshot: mcpSnapshot{servers: []mcpServerView{{
+			Name: "codegraph", Transport: "stdio", Status: "connected", BuiltIn: true,
+		}}},
+	}
+
+	got, _ := m.handleMCPManagerKey(tea.KeyPressMsg{Code: tea.KeyEscape})
+	next := got.(chatTUI)
+	if next.mcp == nil || next.mcp.stage != mcpStageList {
+		t.Fatalf("Esc from detail should return to list, got %#v", next.mcp)
 	}
 }

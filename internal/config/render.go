@@ -261,6 +261,9 @@ func RenderTOML(c *Config) string {
 			if pl.AutoStart != nil {
 				fmt.Fprintf(&b, "auto_start = %v\n", *pl.AutoStart)
 			}
+			if strings.TrimSpace(pl.Tier) != "" {
+				fmt.Fprintf(&b, "tier    = %q\n", pl.Tier)
+			}
 		}
 	}
 

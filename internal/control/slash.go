@@ -154,6 +154,8 @@ func mcpArgItems(prior []string, cur string, d ArgData) []SlashItem {
 		return []SlashItem{
 			{Label: "add", Insert: "add ", Hint: i18n.M.ArgMcpAdd, Descend: true},
 			{Label: "connect", Insert: "connect ", Hint: "connect a configured MCP server", Descend: true},
+			{Label: "show", Insert: "show ", Hint: "show MCP server details", Descend: true},
+			{Label: "tools", Insert: "tools ", Hint: "show MCP server tools", Descend: true},
 			{Label: "remove", Insert: "remove ", Hint: i18n.M.ArgMcpRemove, Descend: true},
 			{Label: "list", Insert: "list", Hint: i18n.M.ArgMcpList},
 		}
@@ -166,6 +168,15 @@ func mcpArgItems(prior []string, cur string, d ArgData) []SlashItem {
 		var items []SlashItem
 		for _, name := range d.ServerNames {
 			items = append(items, SlashItem{Label: name, Insert: name, Hint: i18n.M.ArgMcpConnected})
+		}
+		return items
+	case "show", "tools":
+		if len(prior) != 2 {
+			return nil
+		}
+		var items []SlashItem
+		for _, name := range allMCPArgNames(d) {
+			items = append(items, SlashItem{Label: name, Insert: name})
 		}
 		return items
 	case "connect":
@@ -188,6 +199,21 @@ func mcpArgItems(prior []string, cur string, d ArgData) []SlashItem {
 		}
 	}
 	return nil
+}
+
+func allMCPArgNames(d ArgData) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, list := range [][]string{d.ServerNames, d.ConfiguredMCP, d.DisconnectedMCP} {
+		for _, name := range list {
+			if strings.TrimSpace(name) == "" || seen[name] {
+				continue
+			}
+			seen[name] = true
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 func modelArgItems(prior []string, d ArgData) []SlashItem {

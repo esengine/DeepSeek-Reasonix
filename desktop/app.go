@@ -26,6 +26,7 @@ import (
 	"reasonix/internal/event"
 	fileenc "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/i18n"
+	"reasonix/internal/mcpdiag"
 	"reasonix/internal/memory"
 	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
@@ -840,9 +841,11 @@ func (a *App) SlashArgs(input string) SlashArgsResult {
 		return SlashArgsResult{}
 	}
 	data := control.ArgData{
-		Skills:         ctrl.Skills(),
-		DisabledSkills: ctrl.DisabledSkills(),
-		CurrentModel:   model,
+		Skills:          ctrl.Skills(),
+		DisabledSkills:  ctrl.DisabledSkills(),
+		ConfiguredMCP:   ctrl.ConfiguredMCPNames(),
+		DisconnectedMCP: ctrl.DisconnectedMCPNames(),
+		CurrentModel:    model,
 	}
 	for _, m := range a.Models() {
 		data.ModelRefs = append(data.ModelRefs, m.Ref)
@@ -873,22 +876,25 @@ type CapabilitiesView struct {
 // "failed" (with the connection error), "initializing" (background startup in
 // progress), or "disabled".
 type ServerView struct {
-	Name       string     `json:"name"`
-	Transport  string     `json:"transport"`
-	Status     string     `json:"status"`
-	BuiltIn    bool       `json:"builtIn,omitempty"`
-	Configured bool       `json:"configured,omitempty"`
-	AutoStart  bool       `json:"autoStart"`
-	Tier       string     `json:"tier,omitempty"`
-	Command    string     `json:"command,omitempty"`
-	Args       []string   `json:"args,omitempty"`
-	URL        string     `json:"url,omitempty"`
-	EnvKeys    []string   `json:"envKeys,omitempty"`
-	Tools      int        `json:"tools"`
-	Prompts    int        `json:"prompts"`
-	Resources  int        `json:"resources"`
-	Error      string     `json:"error,omitempty"`
-	ToolList   []ToolView `json:"toolList,omitempty"`
+	Name           string     `json:"name"`
+	Transport      string     `json:"transport"`
+	Status         string     `json:"status"`
+	BuiltIn        bool       `json:"builtIn,omitempty"`
+	Configured     bool       `json:"configured,omitempty"`
+	AutoStart      bool       `json:"autoStart"`
+	Tier           string     `json:"tier,omitempty"`
+	Command        string     `json:"command,omitempty"`
+	Args           []string   `json:"args,omitempty"`
+	URL            string     `json:"url,omitempty"`
+	EnvKeys        []string   `json:"envKeys,omitempty"`
+	Tools          int        `json:"tools"`
+	Prompts        int        `json:"prompts"`
+	Resources      int        `json:"resources"`
+	Error          string     `json:"error,omitempty"`
+	ToolList       []ToolView `json:"toolList,omitempty"`
+	AuthStatus     string     `json:"authStatus,omitempty"`
+	AuthURL        string     `json:"authUrl,omitempty"`
+	AuthConfigured bool       `json:"authConfigured,omitempty"`
 }
 
 type ToolView struct {
@@ -905,15 +911,23 @@ type SkillView struct {
 	Enabled     bool   `json:"enabled"`
 }
 
+type SkillRootSkillView struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Scope       string `json:"scope"`
+	RunAs       string `json:"runAs"`
+}
+
 // SkillRootView is one skill discovery root for the drawer's Sources section.
 type SkillRootView struct {
-	Dir        string `json:"dir"`
-	Scope      string `json:"scope"`
-	Priority   int    `json:"priority"`
-	Status     string `json:"status"`
-	Configured bool   `json:"configured"`
-	Skills     int    `json:"skills"`
-	Warning    string `json:"warning,omitempty"`
+	Dir        string               `json:"dir"`
+	Scope      string               `json:"scope"`
+	Priority   int                  `json:"priority"`
+	Status     string               `json:"status"`
+	Configured bool                 `json:"configured"`
+	Skills     int                  `json:"skills"`
+	SkillItems []SkillRootSkillView `json:"skillItems,omitempty"`
+	Warning    string               `json:"warning,omitempty"`
 }
 
 // Capabilities projects the session's MCP servers (connected + failed) and skills
@@ -1047,6 +1061,7 @@ func withPluginConfig(v ServerView, p config.PluginEntry) ServerView {
 	v.Command = p.Command
 	v.Args = append([]string(nil), p.Args...)
 	v.URL = p.URL
+	v.AuthConfigured = mcpdiag.HasAuthConfig(p.Headers, p.Env, p.URL)
 	if len(p.Env) > 0 {
 		v.EnvKeys = make([]string, 0, len(p.Env))
 		for k := range p.Env {
@@ -1054,6 +1069,9 @@ func withPluginConfig(v ServerView, p config.PluginEntry) ServerView {
 		}
 		sort.Strings(v.EnvKeys)
 	}
+	auth := mcpdiag.DiagnoseAuth(v.Transport, v.Status, v.Error, v.URL, v.AuthConfigured)
+	v.AuthStatus = auth.Status
+	v.AuthURL = auth.URL
 	return v
 }
 
@@ -1067,8 +1085,21 @@ func skillRootsView() []SkillRootView {
 	}
 	st := skill.New(skill.Options{ProjectRoot: cwd, CustomPaths: custom, DisableBuiltins: true, Stderr: io.Discard})
 	counts := map[string]int{}
+	skillItems := map[string][]SkillRootSkillView{}
 	for _, sk := range st.List() {
-		counts[config.CanonicalSkillPath(filepath.Dir(skillRootPath(sk.Path)))]++
+		root := config.CanonicalSkillPath(filepath.Dir(skillRootPath(sk.Path)))
+		counts[root]++
+		skillItems[root] = append(skillItems[root], SkillRootSkillView{
+			Name:        sk.Name,
+			Description: sk.Description,
+			Scope:       string(sk.Scope),
+			RunAs:       string(sk.RunAs),
+		})
+	}
+	for root := range skillItems {
+		sort.Slice(skillItems[root], func(i, j int) bool {
+			return skillItems[root][i].Name < skillItems[root][j].Name
+		})
 	}
 	userConfigured := map[string]bool{}
 	if userCfg != nil {
@@ -1086,6 +1117,7 @@ func skillRootsView() []SkillRootView {
 			Status:     string(r.Status),
 			Configured: r.Scope == skill.ScopeCustom && userConfigured[dir],
 			Skills:     counts[dir],
+			SkillItems: skillItems[dir],
 		}
 		out = append(out, view)
 	}
@@ -1328,6 +1360,26 @@ func (a *App) RetryMCPServer(name string) error {
 	return err
 }
 
+// ClearMCPServerAuthentication removes local auth-like config for one MCP and
+// clears the current session's cached connection failure. It does not remove the
+// server itself or try to sign the user out of the third-party browser session.
+func (a *App) ClearMCPServerAuthentication(name string) error {
+	if name == "codegraph" {
+		return fmt.Errorf("codegraph is built in; it has no stored MCP authentication")
+	}
+	if a.ctrl == nil {
+		return fmt.Errorf("no active session")
+	}
+	if _, _, _, err := config.ClearPluginAuthenticationInSource(name); err != nil {
+		return err
+	}
+	a.ctrl.DisconnectMCPServer(name)
+	if h := a.ctrl.Host(); h != nil {
+		h.ClearFailure(name)
+	}
+	return nil
+}
+
 // SetMCPServerEnabled is the connector toggle: on reconnects a configured server
 // for this session, off disconnects it (config untouched either way — like Claude
 // Code's per-conversation enable/disable, it resets on the next session start).
@@ -1390,7 +1442,7 @@ func (a *App) SetMCPServerTier(name, tier string) error {
 	if tier != "lazy" && a.ctrl != nil && !mcpConnected(a.ctrl, name) {
 		if _, err := a.ctrl.ConnectConfiguredMCPServer(name); err != nil {
 			recordMCPFailure(a.ctrl, updated, err)
-			return fmt.Errorf("saved launch mode, but connect failed: %w", err)
+			return nil
 		}
 		a.mu.Lock()
 		delete(a.disabledMCP, name)

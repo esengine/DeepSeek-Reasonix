@@ -88,6 +88,7 @@ export interface AppBindings {
   UpdateMCPServer(name: string, input: MCPServerInput): Promise<void>;
   RemoveMCPServer(name: string): Promise<void>;
   RetryMCPServer(name: string): Promise<void>;
+  ClearMCPServerAuthentication(name: string): Promise<void>;
   PickSkillFolder(): Promise<string>;
   AddSkillPath(path: string): Promise<void>;
   RemoveSkillPath(path: string): Promise<void>;
@@ -313,6 +314,8 @@ function makeMockApp(): AppBindings {
       autoStart: true,
       tier: "lazy",
       url: "https://mcp.linear.app/mcp",
+      authStatus: "possible",
+      authUrl: "https://mcp.linear.app/mcp",
       tools: 8,
       prompts: 0,
       resources: 0,
@@ -327,7 +330,7 @@ function makeMockApp(): AppBindings {
         { name: "search", description: "Search Linear workspace objects." },
       ],
     },
-    { name: "figma", transport: "http", status: "failed", configured: true, autoStart: true, tier: "lazy", url: "https://mcp.figma.com/mcp", tools: 0, prompts: 0, resources: 0, error: "connect: 401 unauthorized" },
+    { name: "figma", transport: "http", status: "failed", configured: true, autoStart: true, tier: "lazy", url: "https://mcp.figma.com/mcp", authStatus: "required", authUrl: "https://mcp.figma.com/mcp", tools: 0, prompts: 0, resources: 0, error: "connect: 401 unauthorized" },
   ];
   const capSkills: SkillView[] = [
     { name: "explore", description: "Investigate the codebase in an isolated subagent", scope: "builtin", runAs: "subagent", enabled: true },
@@ -336,8 +339,27 @@ function makeMockApp(): AppBindings {
   ];
   let capSkillRoots: SkillRootView[] = [
     { dir: "~/projects/reasonix/.reasonix/skills", scope: "project", priority: 1, status: "missing", configured: false, skills: 0 },
-    { dir: "~/my-skills", scope: "custom", priority: 5, status: "ok", configured: true, skills: 1 },
-    { dir: "~/.reasonix/skills", scope: "global", priority: 6, status: "ok", configured: false, skills: 2 },
+    {
+      dir: "~/my-skills",
+      scope: "custom",
+      priority: 5,
+      status: "ok",
+      configured: true,
+      skills: 1,
+      skillItems: [{ name: "review", description: "Review the staged diff", scope: "custom", runAs: "inline" }],
+    },
+    {
+      dir: "~/.reasonix/skills",
+      scope: "global",
+      priority: 6,
+      status: "ok",
+      configured: false,
+      skills: 2,
+      skillItems: [
+        { name: "explore", description: "Investigate the codebase in an isolated subagent", scope: "global", runAs: "subagent" },
+        { name: "init", description: "Scaffold a REASONIX.md for this repo", scope: "global", runAs: "inline" },
+      ],
+    },
   ];
   const mockSwitchWorkspace = async (path: string) => {
     cwd = path || "~";
@@ -650,6 +672,8 @@ function makeMockApp(): AppBindings {
           envKeys: input.env ? Object.keys(input.env).sort() : s.envKeys,
           tools: nextTools,
           error: undefined,
+          authStatus: nextStatus !== "connected" && input.transport !== "stdio" ? "possible" : undefined,
+          authUrl: nextStatus !== "connected" && input.transport !== "stdio" ? input.url : undefined,
         };
       });
     },
@@ -658,7 +682,22 @@ function makeMockApp(): AppBindings {
     },
     async RetryMCPServer(name: string) {
       capServers = capServers.map((s) =>
-        s.name === name ? { ...s, status: "connected", tools: s.tools || 4, error: undefined } : s,
+        s.name === name ? { ...s, status: "connected", tools: s.tools || 4, error: undefined, authStatus: undefined, authUrl: undefined } : s,
+      );
+    },
+    async ClearMCPServerAuthentication(name: string) {
+      capServers = capServers.map((s) =>
+        s.name === name
+          ? {
+              ...s,
+              status: s.tier === "background" || s.tier === "eager" ? "initializing" : "deferred",
+              tools: 0,
+              error: undefined,
+              authStatus: s.transport !== "stdio" ? "possible" : undefined,
+              authUrl: s.transport !== "stdio" ? s.url : undefined,
+              authConfigured: undefined,
+            }
+          : s,
       );
     },
     async PickSkillFolder() {
@@ -667,7 +706,15 @@ function makeMockApp(): AppBindings {
     async AddSkillPath(path: string) {
       const dir = path.trim() || "~/my-skills";
       if (!capSkillRoots.some((r) => r.scope === "custom" && r.dir === dir)) {
-        capSkillRoots.push({ dir, scope: "custom", priority: capSkillRoots.length + 1, status: "ok", configured: true, skills: 1 });
+        capSkillRoots.push({
+          dir,
+          scope: "custom",
+          priority: capSkillRoots.length + 1,
+          status: "ok",
+          configured: true,
+          skills: 1,
+          skillItems: [{ name: "local-dev", description: "Local custom development workflow", scope: "custom", runAs: "inline" }],
+        });
       }
       if (!capSkills.some((s) => s.name === "local-dev")) {
         capSkills.push({ name: "local-dev", description: "Local custom development workflow", scope: "custom", runAs: "inline", enabled: true });
@@ -688,7 +735,14 @@ function makeMockApp(): AppBindings {
     async SetMCPServerEnabled(name: string, enabled: boolean) {
       capServers = capServers.map((s) =>
         s.name === name
-          ? { ...s, status: enabled ? "connected" : "disabled", tools: enabled ? s.tools || 4 : 0, error: undefined }
+          ? {
+              ...s,
+              status: enabled ? "connected" : "disabled",
+              tools: enabled ? s.tools || 4 : 0,
+              error: undefined,
+              authStatus: !enabled && s.transport !== "stdio" ? "possible" : undefined,
+              authUrl: !enabled && s.transport !== "stdio" ? s.url : undefined,
+            }
           : s,
       );
     },
@@ -697,7 +751,7 @@ function makeMockApp(): AppBindings {
         if (s.name !== name) return s;
         if (tier === "lazy") return { ...s, tier };
         const tools = s.tools || (s.transport === "stdio" ? 3 : 5);
-        return { ...s, tier, status: "connected", tools, error: undefined };
+        return { ...s, tier, status: "connected", tools, error: undefined, authStatus: undefined, authUrl: undefined };
       });
     },
     async SlashArgs(input: string) {

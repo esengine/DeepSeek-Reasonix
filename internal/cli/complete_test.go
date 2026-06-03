@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+
 	"reasonix/internal/agent"
 	"reasonix/internal/command"
 	"reasonix/internal/control"
@@ -233,6 +235,22 @@ func TestSlashArgCompletionChainsFromName(t *testing.T) {
 	}
 	if !hasLabel(m.completion.items, "add") {
 		t.Errorf("chained menu should list subcommands: %v", labels(m.completion.items))
+	}
+}
+
+func TestEnterOnBareMCPArgMenuSubmitsManager(t *testing.T) {
+	isolateUserConfig(t)
+	m := newTestChatTUI()
+	m.input.SetValue("/mcp ")
+	m.updateCompletion()
+	if !m.completion.active || m.completion.kind != compSlashArg {
+		t.Fatalf("/mcp <space> should open arg completion before Enter: %+v", m.completion)
+	}
+
+	got, _ := m.update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	next := got.(chatTUI)
+	if next.mcp == nil || next.mcp.stage != mcpStageList {
+		t.Fatalf("Enter on bare /mcp arg menu should open manager, got %#v", next.mcp)
 	}
 }
 

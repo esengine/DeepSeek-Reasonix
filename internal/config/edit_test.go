@@ -400,6 +400,46 @@ func TestPluginResolvedTierDefaultsToLazy(t *testing.T) {
 	}
 }
 
+func TestClearPluginAuthentication(t *testing.T) {
+	c := Default()
+	c.Plugins = []PluginEntry{{
+		Name: "dida",
+		Type: "http",
+		URL:  "https://mcp.dida365.com/mcp?access_token=abc&workspace=main",
+		Headers: map[string]string{
+			"Authorization": "Bearer ${DIDA_TOKEN}",
+			"X-Org":         "team",
+		},
+		Env: map[string]string{
+			"DIDA_TOKEN": "${DIDA_TOKEN}",
+			"DEBUG":      "1",
+		},
+		Tier: "lazy",
+	}}
+	updated, changed, err := c.ClearPluginAuthentication("dida")
+	if err != nil {
+		t.Fatalf("ClearPluginAuthentication: %v", err)
+	}
+	if !changed {
+		t.Fatal("ClearPluginAuthentication should report changed")
+	}
+	if updated.URL != "https://mcp.dida365.com/mcp?workspace=main" {
+		t.Fatalf("url = %q", updated.URL)
+	}
+	if _, ok := updated.Headers["Authorization"]; ok {
+		t.Fatalf("auth header should be removed: %v", updated.Headers)
+	}
+	if updated.Headers["X-Org"] != "team" {
+		t.Fatalf("ordinary header should be preserved: %v", updated.Headers)
+	}
+	if _, ok := updated.Env["DIDA_TOKEN"]; ok {
+		t.Fatalf("auth env should be removed: %v", updated.Env)
+	}
+	if updated.Env["DEBUG"] != "1" {
+		t.Fatalf("ordinary env should be preserved: %v", updated.Env)
+	}
+}
+
 // TestSaveToRoundTrips stages several mutations, persists atomically, and
 // re-decodes the file to confirm the changes survived a write/read cycle.
 func TestSaveToRoundTrips(t *testing.T) {

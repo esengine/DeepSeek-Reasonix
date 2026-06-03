@@ -216,6 +216,9 @@ export interface ServerView {
   resources: number;
   error?: string;
   toolList?: MCPToolView[];
+  authStatus?: "none" | "possible" | "required" | string;
+  authUrl?: string;
+  authConfigured?: boolean;
 }
 export interface MCPToolView {
   name: string;
@@ -228,6 +231,12 @@ export interface SkillView {
   runAs: string;
   enabled: boolean;
 }
+export interface SkillRootSkillView {
+  name: string;
+  description: string;
+  scope: string;
+  runAs: string;
+}
 export interface SkillRootView {
   dir: string;
   scope: string;
@@ -235,6 +244,7 @@ export interface SkillRootView {
   status: string;
   configured: boolean;
   skills: number;
+  skillItems?: SkillRootSkillView[];
   warning?: string;
 }
 export interface CapabilitiesView {
