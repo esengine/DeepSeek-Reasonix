@@ -53,7 +53,7 @@ func Run(args []string, version string) int {
 	switch cmd {
 	case "run":
 		return runAgent(rest)
-	case "chat":
+	case "chat", "code": // "code" is the v0.x name for the interactive session
 		return chatREPL(rest)
 	case "serve":
 		return runServe(rest)
