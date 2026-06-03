@@ -74,7 +74,7 @@ every [GitHub release](https://github.com/esengine/DeepSeek-Reasonix/releases).
 ### Build from source
 
 ```sh
-make build      # -> bin/reasonix
+make build      # -> bin/reasonix(.exe)
 make cross      # -> dist/ (darwin|linux|windows × amd64|arm64)
 ```
 
