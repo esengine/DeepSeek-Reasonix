@@ -8,10 +8,8 @@ import (
 	"reasonix/internal/fileutil"
 )
 
-// dotEnvPath points to the user's home-directory .env where secrets are
-// persisted. Using an absolute path rooted at $HOME guarantees the file is
-// always written to and read from the same location, regardless of the current
-// working directory (which changes when the user switches workspaces).
+// dotEnvPath is ~/.env (absolute, so a workspace switch — which changes cwd —
+// can't scatter or lose the key).
 var dotEnvPath = func() string {
 	if home, err := os.UserHomeDir(); err == nil {
 		return filepath.Join(home, ".env")
