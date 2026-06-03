@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -71,6 +72,9 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	if stderr == nil {
 		stderr = os.Stderr
 	}
+	// One-time import of a v0.x (~/.reasonix/config.json) install — runs before
+	// Load so the freshly written config + ~/.env are picked up this same boot.
+	migrated, migErr := config.MigrateLegacyIfNeeded()
 	cfg, err := config.Load()
 	if err != nil {
 		return nil, err
@@ -94,6 +98,17 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// shares this synchronized sink. The job manager is session-scoped — its jobs
 	// outlive a turn and are cancelled by Controller.Close.
 	sink := event.Sync(opts.Sink)
+
+	if migErr != nil {
+		sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "config migration from ~/.reasonix failed: " + migErr.Error()})
+	} else if migrated != nil {
+		sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: migrated.Notice()})
+		if home, herr := os.UserHomeDir(); herr == nil {
+			if n, serr := agent.MigrateLegacySessions(filepath.Join(home, ".reasonix", "sessions"), config.SessionDir()); serr == nil && n > 0 {
+				sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: fmt.Sprintf("imported %d past session(s) from ~/.reasonix/sessions — resume them with --resume or the history panel", n)})
+			}
+		}
+	}
 
 	// A resolvable model whose API key env is unset would otherwise build fine
 	// (RequireKey is false so the UI stays reachable) and then fail silently on the
