@@ -1553,6 +1553,7 @@ body {
   font-weight: 650;
 }
 .drawer__body {
+  flex: 1;
   overflow-y: auto;
   padding: 14px 16px;
   display: flex;
@@ -1809,6 +1810,121 @@ body {
   color: var(--fg);
   font: inherit;
   font-size: 13px;
+}
+/* Selection mode: checkbox and highlight */
+.hist-item__check {
+  --wails-draggable: no-drag;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  color: var(--fg-faint);
+  cursor: pointer;
+  transition: color 0.12s;
+}
+.hist-item__check:hover:not(:disabled) {
+  color: var(--fg);
+}
+.hist-item__check:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+.hist-item__check-lock {
+  font-size: 12px;
+  color: var(--fg-faint);
+}
+.hist-item--selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.hist-item--selected .hist-item__check {
+  color: var(--accent);
+}
+
+/* Drawer header actions container (select button + close) */
+.drawer__head-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.chip--active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent-soft);
+}
+
+/* Drawer footer: batch action bar */
+.drawer__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-soft);
+  flex-shrink: 0;
+}
+.drawer__footer-btn {
+  --wails-draggable: no-drag;
+  background: transparent;
+  border: none;
+  color: var(--fg-faint);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+.drawer__footer-btn:hover {
+  color: var(--fg);
+  background: var(--bg);
+}
+.drawer__footer-confirm {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.drawer__footer-prompt {
+  font-size: 12px;
+  color: var(--fg-faint);
+}
+
+/* Generic button variants */
+.btn {
+  --wails-draggable: no-drag;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 1px solid var(--border);
+  background: var(--bg-soft);
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+.btn:hover {
+  background: var(--bg);
+  border-color: var(--fg-faint);
+}
+.btn--sm {
+  padding: 4px 8px;
+  font-size: 12px;
+}
+.btn--danger {
+  border-color: #e5534b;
+  color: #e5534b;
+  background: transparent;
+}
+.btn--danger:hover {
+  background: rgba(229, 83, 75, 0.1);
+  border-color: #e5534b;
 }
 
 /* ── settings drawer ───────────────────────────────────────────────────────── */

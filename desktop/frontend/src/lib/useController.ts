@@ -533,10 +533,14 @@ export function useController() {
     app.ContextUsage().then((context) => dispatch({ type: "context", context })).catch(() => {});
   }, []);
 
-  // Manage saved sessions: delete one, or give it a custom name (""=clear). Both
-  // only touch on-disk state; the caller re-fetches the list to reflect the change.
+  // Manage saved sessions: delete one, batch delete, or give one a custom name
+  // (""=clear). All only touch on-disk state; the caller re-fetches the list.
   const deleteSession = useCallback((path: string) => {
     return app.DeleteSession(path).catch(() => {});
+  }, []);
+
+  const deleteSessions = useCallback((paths: string[]) => {
+    return app.DeleteSessions(paths).catch(() => 0);
   }, []);
 
   const renameSession = useCallback((path: string, title: string) => {
@@ -640,6 +644,7 @@ export function useController() {
     listSessions,
     resumeSession,
     deleteSession,
+    deleteSessions,
     renameSession,
     refreshMeta,
     pickWorkspace,

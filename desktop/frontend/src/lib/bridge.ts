@@ -50,6 +50,7 @@ export interface AppBindings {
   ListSessions(): Promise<SessionMeta[]>;
   ResumeSession(path: string): Promise<HistoryMessage[]>;
   DeleteSession(path: string): Promise<void>;
+  DeleteSessions(paths: string[]): Promise<number>;
   RenameSession(path: string, title: string): Promise<void>;
   // Workspace: open a folder chooser and switch to that project (fresh session);
   // returns the chosen path, or "" if cancelled.
@@ -216,7 +217,7 @@ function makeMockApp(): AppBindings {
   const day = 86_400_000;
   const t0 = Date.now();
   // Mutable so delete/rename are observable in browser dev.
-  const sessions: SessionMeta[] = [
+  let sessions: SessionMeta[] = [
     { path: "/mock/sessions/a.jsonl", preview: "fix the login bug in auth.go", turns: 12, modTime: t0 - 3_600_000, current: true },
     { path: "/mock/sessions/b.jsonl", preview: "refactor the payment module", turns: 5, modTime: t0 - 6 * 3_600_000, current: false },
     { path: "/mock/sessions/c.jsonl", preview: "write the README and badges", turns: 8, modTime: t0 - day - 3_600_000, current: false },
@@ -320,6 +321,12 @@ function makeMockApp(): AppBindings {
     async DeleteSession(path: string) {
       const i = sessions.findIndex((s) => s.path === path);
       if (i >= 0) sessions.splice(i, 1);
+    },
+    async DeleteSessions(paths: string[]) {
+      const set = new Set(paths);
+      const before = sessions.length;
+      sessions = sessions.filter((s) => !set.has(s.path));
+      return before - sessions.length;
     },
     async RenameSession(path: string, title: string) {
       const s = sessions.find((x) => x.path === path);
