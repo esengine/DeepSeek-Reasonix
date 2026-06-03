@@ -42,6 +42,10 @@ func (g globTool) Execute(ctx context.Context, args json.RawMessage) (string, er
 	if p.Pattern == "" {
 		return "", fmt.Errorf("pattern is required")
 	}
+	// Save the original pattern before resolveIn prepends workDir, so the
+	// simple-filename recursive-fallback check below works on the raw input
+	// — not the already-joined absolute path that always contains separators.
+	rawPattern := p.Pattern
 	p.Pattern = resolveIn(g.workDir, p.Pattern)
 	p.Pattern = filepath.FromSlash(p.Pattern) // models emit "/" (see Description); WalkDir/Match compare OS-native paths
 
@@ -54,13 +58,14 @@ func (g globTool) Execute(ctx context.Context, args json.RawMessage) (string, er
 	// found and the pattern is a simple filename (no path separator), retry
 	// with a recursive walk (equivalent to "**/<pattern>") so the tool finds
 	// files anywhere in the tree — the common case where the model only knows
-	// a filename but not its exact location.
+	// a filename but not its exact location. Uses the raw pattern (before
+	// resolveIn) so a workspace root doesn't mask a simple "*.go".
 	matches, err := filepath.Glob(p.Pattern)
 	if err != nil {
 		return "", fmt.Errorf("glob %q: %w", p.Pattern, err)
 	}
-	if len(matches) == 0 && !strings.ContainsAny(p.Pattern, "/\\") {
-		return globRecursive(ctx, filepath.Join("**", p.Pattern))
+	if len(matches) == 0 && !strings.ContainsAny(rawPattern, "/\\") {
+		return globRecursive(ctx, filepath.Join("**", rawPattern))
 	}
 	if len(matches) == 0 {
 		return "(no matches)", nil
@@ -74,7 +79,8 @@ func (g globTool) Execute(ctx context.Context, args json.RawMessage) (string, er
 
 // globRecursive handles patterns containing ** by walking the filesystem.
 // It splits the pattern at ** to get a root prefix and a suffix to match
-// against each file path found during the walk.
+// against each file path found during the walk. Accepts a context so the
+// walk can be interrupted on cancellation.
 func globRecursive(ctx context.Context, pattern string) (string, error) {
 	// Split on ** to find the root directory and the remaining pattern.
 	parts := strings.SplitN(pattern, "**", 2)
