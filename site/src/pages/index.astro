@@ -2,6 +2,7 @@
 import Base from '../layouts/Base.astro';
 const R2 = 'https://pub-147fb53b9c1e4bbf891a257968619ea7.r2.dev/latest';
 const repo = 'https://github.com/esengine/DeepSeek-Reasonix';
+const DT053 = `${repo}/releases/download/desktop-v0.53.0`;
 ---
 <Base
   title="Reasonix — DeepSeek-native coding agent for your terminal"
@@ -25,14 +26,14 @@ const repo = 'https://github.com/esengine/DeepSeek-Reasonix';
 
   <a id="top"></a>
   <header class="hero wrap">
-    <div class="kicker"><span class="dot"></span><span data-en>v1.0.0 — a ground-up rewrite in Go · MIT</span><span data-zh>v1.0.0 — Go 全新重写 · MIT</span></div>
+    <div class="kicker"><span class="dot"></span><span data-en>Stable v0.53 on npm · v1.0.0 Go rewrite — preview · MIT</span><span data-zh>npm 稳定版 v0.53 · v1.0.0 Go 重写(预览)· MIT</span></div>
     <h1>
       <span data-en>A <em>DeepSeek</em>-native agent for your terminal.</span>
       <span data-zh><em>DeepSeek</em> 原生的终端编码 Agent。</span>
     </h1>
     <p class="lede">
-      <span data-en>The loop is append-only, aligned to DeepSeek's byte-stable prefix cache — so long sessions hold <b>90%+ cache hit</b> and input-token cost collapses to <b>~1/5</b>. One Go binary. Terminal-first.</span>
-      <span data-zh>运行循环 append-only,对齐 DeepSeek 字节稳定的 prefix-cache —— 长会话缓存命中 <b>90%+</b>,输入 token 成本降到 <b>约 1/5</b>。单个 Go 二进制,终端优先。</span>
+      <span data-en>The loop is append-only, aligned to DeepSeek's byte-stable prefix cache — so long sessions hold <b>90%+ cache hit</b> and input-token cost collapses to <b>~1/5</b>. Terminal-first.</span>
+      <span data-zh>运行循环 append-only,对齐 DeepSeek 字节稳定的 prefix-cache —— 长会话缓存命中 <b>90%+</b>,输入 token 成本降到 <b>约 1/5</b>。终端优先。</span>
     </p>
     <div class="hi">
       <div class="hi-tabs">
@@ -41,15 +42,49 @@ const repo = 'https://github.com/esengine/DeepSeek-Reasonix';
         <button class="htab" data-h="dl"><span data-en>Download</span><span data-zh>下载</span></button>
       </div>
       <div class="hi-body">
-        <div class="hpanel on" data-h="npm"><span class="hcmd"><span class="p">$ </span>npm i -g reasonix</span><button class="cp" data-copy="npm i -g reasonix"><span data-en>Copy</span><span data-zh>复制</span></button></div>
-        <div class="hpanel" data-h="brew"><span class="hcmd"><span class="p">$ </span>brew install esengine/reasonix/reasonix</span><button class="cp" data-copy="brew install esengine/reasonix/reasonix"><span data-en>Copy</span><span data-zh>复制</span></button></div>
+        <div class="hpanel on" data-h="npm">
+          <div class="cmdgroup">
+            <div class="cmdtag ok">latest · v0.53</div>
+            <div class="cmdrow"><span class="hcmd"><span class="p">$ </span>npm i -g reasonix</span><button class="cp" data-copy="npm i -g reasonix"><span data-en>Copy</span><span data-zh>复制</span></button></div>
+            <div class="cmdrow"><span class="hcmd"><span class="p">$ </span>reasonix code</span><button class="cp" data-copy="reasonix code"><span data-en>Copy</span><span data-zh>复制</span></button></div>
+          </div>
+          <div class="cmdgroup">
+            <div class="cmdtag pre">next · v1.0.0</div>
+            <div class="cmdrow"><span class="hcmd"><span class="p">$ </span>npm i -g reasonix@next</span><button class="cp" data-copy="npm i -g reasonix@next"><span data-en>Copy</span><span data-zh>复制</span></button></div>
+            <div class="cmdrow"><span class="hcmd"><span class="p">$ </span>reasonix</span><button class="cp" data-copy="reasonix"><span data-en>Copy</span><span data-zh>复制</span></button></div>
+          </div>
+        </div>
+        <div class="hpanel" data-h="brew">
+          <div class="cmdgroup">
+            <div class="cmdtag pre"><span data-en>v1.0.0 only</span><span data-zh>仅 v1.0.0</span></div>
+            <div class="cmdrow"><span class="hcmd"><span class="p">$ </span>brew install esengine/reasonix/reasonix</span><button class="cp" data-copy="brew install esengine/reasonix/reasonix"><span data-en>Copy</span><span data-zh>复制</span></button></div>
+            <div class="cmdrow"><span class="hcmd"><span class="p">$ </span>reasonix</span><button class="cp" data-copy="reasonix"><span data-en>Copy</span><span data-zh>复制</span></button></div>
+          </div>
+        </div>
         <div class="hpanel" data-h="dl">
-          <a class="hdl" href={`${R2}/Reasonix-darwin-arm64.zip`} download>macOS</a>
-          <a class="hdl" href={`${R2}/Reasonix-windows-amd64-installer.exe`} download>Windows</a>
-          <a class="hdl" href={`${R2}/Reasonix-linux-amd64.tar.gz`} download>Linux</a>
+          <div class="dlgroup">
+            <div class="dllabel"><span class="dot ok"></span><span data-en>Stable · v0.53</span><span data-zh>稳定版 · v0.53</span></div>
+            <div class="dlrow">
+              <a class="hdl" href={`${DT053}/Reasonix_0.53.0_universal.dmg`}>macOS</a>
+              <a class="hdl" href={`${DT053}/Reasonix_0.53.0_x64-setup.exe`}>Windows</a>
+              <a class="hdl" href={`${DT053}/Reasonix_0.53.0_amd64.AppImage`}>Linux</a>
+            </div>
+          </div>
+          <div class="dlgroup">
+            <div class="dllabel"><span class="dot pre"></span><span data-en>v1.0.0 · Go rewrite — preview</span><span data-zh>v1.0.0 · Go 重写(预览)</span></div>
+            <div class="dlrow">
+              <a class="hdl" href={`${R2}/Reasonix-darwin-arm64.zip`} download>macOS</a>
+              <a class="hdl" href={`${R2}/Reasonix-windows-amd64-installer.exe`} download>Windows</a>
+              <a class="hdl" href={`${R2}/Reasonix-linux-amd64.tar.gz`} download>Linux</a>
+            </div>
+          </div>
         </div>
       </div>
     </div>
+    <p class="hnote">
+      <span data-en><b>v0.53</b> — the stable line, runs on Node. <b>v1.0.0</b> — the Go rewrite, one binary, no Node, in preview. <a href={`${repo}/releases/tag/v1.0.0`}>v1.0.0 release notes →</a></span>
+      <span data-zh><b>v0.53</b> —— 稳定线,基于 Node。<b>v1.0.0</b> —— Go 重写、单二进制、无需 Node,预览中。<a href={`${repo}/releases/tag/v1.0.0`}>v1.0.0 更新说明 →</a></span>
+    </p>
     <a class="ghlink" href={repo}><span data-en>★ Star on GitHub</span><span data-zh>★ 在 GitHub 点星</span></a>
 
     <div class="term" id="term">
