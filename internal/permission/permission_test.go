@@ -21,7 +21,7 @@ func TestParseRule(t *testing.T) {
 		{"bash( go test ./... )", "bash", " go test ./... ", false, true}, // subject preserved verbatim
 		{"bash(echo (hi))", "bash", "echo (hi)", false, true},             // first '(' wins, trailing ')'
 		{"bash=rm *.log", "bash", "rm *.log", true, true},                 // literal: '*' is not a wildcard
-		{"bash=make FOO=bar", "bash", "make FOO=bar", true, true},          // split on first '=' only
+		{"bash=make FOO=bar", "bash", "make FOO=bar", true, true},         // split on first '=' only
 		{"bash=echo (hi)", "bash", "echo (hi)", true, true},               // '=' before '(' → literal, parens kept
 		{"bash(make FOO=*)", "bash", "make FOO=*", false, true},           // '(' before '=' → still a glob
 		{"", "", "", false, false},
