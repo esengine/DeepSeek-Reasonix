@@ -12,6 +12,7 @@ import type {
   CommandInfo,
   ContextInfo,
   DirEntry,
+  DroppedItem,
   EffortInfo,
   FilePreview,
   HistoryMessage,
@@ -98,6 +99,9 @@ export interface AppBindings {
   RevealWorkspacePath(rel: string): Promise<void>;
   SavePastedImage(dataUrl: string): Promise<string>;
   SavePastedFile(name: string, dataUrl: string): Promise<string>;
+  // AttachDropped resolves an OS-dropped absolute path (from the native file-drop
+  // bridge) into a composer context entry — a workspace ref or a stored attachment.
+  AttachDropped(path: string): Promise<DroppedItem>;
   AttachmentDataURL(path: string): Promise<string>;
   Models(): Promise<ModelInfo[]>;
   SetModel(name: string): Promise<void>;
@@ -143,6 +147,10 @@ export interface AppBindings {
 interface WailsRuntime {
   EventsOn(name: string, cb: (...data: unknown[]) => void): () => void;
   BrowserOpenURL(url: string): void;
+  // Native OS file drop (desktop only); useDropTarget gates delivery to elements
+  // carrying the --wails-drop-target CSS property. Absent in the browser dev mock.
+  OnFileDrop?(cb: (x: number, y: number, paths: string[]) => void, useDropTarget: boolean): void;
+  OnFileDropOff?(): void;
 }
 
 declare global {
@@ -188,6 +196,18 @@ export function onUpdaterProgress(cb: (p: UpdateProgress) => void): () => void {
   return () => {
     updaterListeners.delete(cb);
   };
+}
+
+// onFilesDropped subscribes to native OS file drops landing on the composer (the
+// --wails-drop-target element); the callback gets the dropped files' absolute
+// paths. No-op in the browser dev mock, where the runtime is absent.
+export function onFilesDropped(cb: (paths: string[]) => void): () => void {
+  const rt = typeof window !== "undefined" ? window.runtime : undefined;
+  if (!rt?.OnFileDrop) return () => {};
+  rt.OnFileDrop((_x, _y, paths) => {
+    if (Array.isArray(paths) && paths.length > 0) cb(paths);
+  }, true);
+  return () => rt.OnFileDropOff?.();
 }
 
 // onReady subscribes to the agent:ready event fired when boot.Build completes.
@@ -703,6 +723,10 @@ function makeMockApp(): AppBindings {
     },
     async SavePastedFile(name: string, _dataUrl: string) {
       return `.reasonix/attachments/mock-${name}`;
+    },
+    async AttachDropped(path: string) {
+      const name = path.split(/[/\\]/).filter(Boolean).pop() ?? path;
+      return { kind: "attachment" as const, path: `.reasonix/attachments/mock-${name}` };
     },
     async AttachmentDataURL(_path: string) {
       return "data:image/png;base64,iVBORw0KGgo=";

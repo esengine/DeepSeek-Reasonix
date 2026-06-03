@@ -160,6 +160,13 @@ export interface DirEntry {
   isDir: boolean;
 }
 
+export interface DroppedItem {
+  kind: "workspace" | "attachment";
+  path: string;
+  isDir?: boolean;
+  previewUrl?: string;
+}
+
 export interface FilePreview {
   path: string;
   body: string;

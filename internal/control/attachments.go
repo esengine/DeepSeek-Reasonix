@@ -156,6 +156,64 @@ func SaveImageFile(path string) (string, error) {
 	return SaveImageBytes("", raw)
 }
 
+func SaveAttachmentFile(path string) (string, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return "", err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return "", fmt.Errorf("attachment path must not be a symlink")
+	}
+	if info.IsDir() || info.Size() <= 0 || info.Size() > maxFileAttachmentBytes {
+		return "", fmt.Errorf("attachment must be between 1 byte and 25 MB")
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	opened, err := f.Stat()
+	if err != nil {
+		return "", err
+	}
+	if !os.SameFile(info, opened) {
+		return "", fmt.Errorf("attachment changed while opening")
+	}
+	raw, err := io.ReadAll(io.LimitReader(f, maxFileAttachmentBytes+1))
+	if err != nil {
+		return "", err
+	}
+	if len(raw) == 0 || len(raw) > maxFileAttachmentBytes {
+		return "", fmt.Errorf("attachment must be between 1 byte and 25 MB")
+	}
+	if after, err := f.Stat(); err != nil {
+		return "", err
+	} else if !os.SameFile(opened, after) || after.Size() != opened.Size() {
+		return "", fmt.Errorf("attachment changed while reading")
+	}
+	ext := strings.ToLower(filepath.Ext(path))
+	if !safeAttachmentExt.MatchString(ext) {
+		ext = ".bin"
+	}
+	if err := ensureAttachmentRoot(); err != nil {
+		return "", err
+	}
+	rel, dst, err := createAttachmentFile(ext)
+	if err != nil {
+		return "", err
+	}
+	if _, err := dst.Write(raw); err != nil {
+		_ = dst.Close()
+		_ = os.Remove(rel)
+		return "", err
+	}
+	if err := dst.Close(); err != nil {
+		_ = os.Remove(rel)
+		return "", err
+	}
+	return filepath.ToSlash(rel), nil
+}
+
 func SaveClipboardImage() (string, error) {
 	switch runtime.GOOS {
 	case "darwin":

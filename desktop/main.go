@@ -54,6 +54,11 @@ func main() {
 		OnShutdown:       app.shutdown,
 		Bind:             []any{app},
 
+		// Native OS file drops: the webview withholds dropped files' paths from the
+		// HTML drop event, so the frontend (composer) reads them via runtime.OnFileDrop
+		// against the --wails-drop-target element instead.
+		DragAndDrop: &options.DragAndDrop{EnableFileDrop: true},
+
 		// --- per-platform adaptation (see desktop/README.md for the rationale) ---
 		Mac: &mac.Options{
 			// Inset traffic-lights over a frameless-feeling header; the frontend
