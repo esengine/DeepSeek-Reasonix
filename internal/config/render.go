@@ -150,6 +150,12 @@ func RenderTOML(c *Config) string {
 		if p.Effort != "" {
 			fmt.Fprintf(&b, "effort      = %q\n", p.Effort)
 		}
+		if len(p.SupportedEfforts) > 0 {
+			fmt.Fprintf(&b, "supported_efforts = %s\n", renderStringArray(p.SupportedEfforts))
+		}
+		if p.DefaultEffort != "" {
+			fmt.Fprintf(&b, "default_effort    = %q\n", p.DefaultEffort)
+		}
 		if p.NoProxy {
 			b.WriteString("no_proxy    = true   # reach this base_url directly, never via the proxy\n")
 		}

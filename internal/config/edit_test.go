@@ -556,3 +556,83 @@ func TestSetNetworkRejectsIncompleteCustomProxy(t *testing.T) {
 		t.Fatal("custom proxy without server/port should be rejected")
 	}
 }
+
+func TestEffortCapabilityCustomSupportedEfforts(t *testing.T) {
+	e := &ProviderEntry{
+		Name:             "mimo",
+		Kind:             "openai",
+		BaseURL:          "https://api.xiaomimimo.com/v1",
+		Model:            "mimo-v2.5-pro",
+		SupportedEfforts: []string{"auto", "low", "medium", "high"},
+		DefaultEffort:    "auto",
+	}
+	cap := EffortCapabilityForEntry(e)
+	if !cap.Supported || len(cap.Levels) != 4 {
+		t.Fatalf("MiMo levels = %+v, want 4 levels", cap)
+	}
+	if cap.Default != "auto" {
+		t.Fatalf("MiMo default = %q, want auto", cap.Default)
+	}
+}
+
+func TestNormalizeEffortCustomSupportedEfforts(t *testing.T) {
+	e := &ProviderEntry{
+		Name:             "mimo",
+		Kind:             "openai",
+		BaseURL:          "https://api.xiaomimimo.com/v1",
+		Model:            "mimo-v2.5-pro",
+		SupportedEfforts: []string{"auto", "low", "medium", "high"},
+		DefaultEffort:    "auto",
+	}
+	// Valid levels pass through.
+	for _, level := range []string{"low", "medium", "high"} {
+		got, err := NormalizeEffort(e, level)
+		if err != nil || got != level {
+			t.Fatalf("NormalizeEffort(%q) = %q/%v, want %q/nil", level, got, err, level)
+		}
+	}
+	// "auto" maps to empty string.
+	got, err := NormalizeEffort(e, "auto")
+	if err != nil || got != "" {
+		t.Fatalf("NormalizeEffort(auto) = %q/%v, want empty/nil", got, err)
+	}
+	// Unsupported level "max" degrades to DefaultEffort ("auto" = empty).
+	got, err = NormalizeEffort(e, "max")
+	if err != nil || got != "" {
+		t.Fatalf("NormalizeEffort(max) = %q/%v, want empty/nil (fallback to auto)", got, err)
+	}
+}
+
+func TestNormalizeEffortCustomDefaultEffort(t *testing.T) {
+	e := &ProviderEntry{
+		Name:             "custom",
+		Kind:             "openai",
+		BaseURL:          "https://api.example.com/v1",
+		Model:            "custom-v1",
+		SupportedEfforts: []string{"low", "medium", "high"},
+		DefaultEffort:    "high",
+	}
+	// Unsupported level "max" degrades to DefaultEffort "high".
+	got, err := NormalizeEffort(e, "max")
+	if err != nil || got != "high" {
+		t.Fatalf("NormalizeEffort(max) = %q/%v, want high/nil", got, err)
+	}
+	// Unsupported level "turbo" also degrades to DefaultEffort "high".
+	got, err = NormalizeEffort(e, "turbo")
+	if err != nil || got != "high" {
+		t.Fatalf("NormalizeEffort(turbo) = %q/%v, want high/nil", got, err)
+	}
+}
+
+func TestEffortCapabilityEmptySupportedEffortsNotConfigurable(t *testing.T) {
+	e := &ProviderEntry{
+		Name:    "generic",
+		Kind:    "openai",
+		BaseURL: "https://api.example.com/v1",
+		Model:   "generic-v1",
+	}
+	cap := EffortCapabilityForEntry(e)
+	if cap.Supported {
+		t.Fatalf("empty SupportedEfforts should not be configurable, got %+v", cap)
+	}
+}

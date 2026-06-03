@@ -509,6 +509,8 @@ function ProviderEditor({
   // Empty when unset so the placeholder (and its "0 = default" hint) reads instead
   // of a bare "0"; saved back as 0.
   const [ctx, setCtx] = useState(initial?.contextWindow ? String(initial.contextWindow) : "");
+  const [effortStr, setEffortStr] = useState((initial?.supportedEfforts ?? []).join(", "));
+  const [defaultEffort, setDefaultEffort] = useState(initial?.defaultEffort ?? "auto");
 
   // Offer the kinds the kernel actually registered; if the stored kind is a
   // legacy/unknown one, keep it as an option so editing doesn't silently change it.
@@ -529,6 +531,8 @@ function ProviderEditor({
       keySet: initial?.keySet ?? false,
       balanceUrl: balanceUrl.trim(),
       contextWindow: Number(ctx) || 0,
+      supportedEfforts: effortStr.split(",").map((s) => s.trim()).filter(Boolean),
+      defaultEffort: defaultEffort.trim() || "auto",
     });
   };
 
@@ -552,6 +556,16 @@ function ProviderEditor({
       <label className="set-label">{t("settings.providerContextWindow")}</label>
       <input className="mem-input" placeholder={t("settings.contextWindowPlaceholder")} value={ctx} onChange={(e) => setCtx(e.target.value)} inputMode="numeric" />
       <div className="mem-hint">{t("settings.contextWindowHint")}</div>
+      <label className="set-label">{t("settings.supportedEfforts")}</label>
+      <input className="mem-input" placeholder={t("settings.supportedEffortsPlaceholder")} value={effortStr} onChange={(e) => setEffortStr(e.target.value)} />
+      <div className="mem-hint">{t("settings.supportedEffortsHint")}</div>
+      <label className="set-label">{t("settings.defaultEffort")}</label>
+      <select className="mem-select" value={defaultEffort} onChange={(e) => setDefaultEffort(e.target.value)}>
+        <option value="auto">auto</option>
+        {(effortStr.split(",").map((s) => s.trim()).filter(Boolean) || ["low", "medium", "high"]).map((l) => (
+          <option key={l} value={l}>{l}</option>
+        ))}
+      </select>
       <div className="prov-card__actions">
         <button className="btn btn--small" onClick={onCancel} disabled={busy}>
           {t("common.cancel")}

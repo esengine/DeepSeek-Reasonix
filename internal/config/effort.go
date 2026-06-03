@@ -15,9 +15,17 @@ type EffortCapability struct {
 }
 
 // EffortCapabilityForEntry returns the user-facing /effort levels for a resolved
-// provider entry. Provider implementations still decide how a stored effort is
-// serialized into requests.
+// provider entry. When the provider declares SupportedEfforts in its config,
+// those take precedence; otherwise built-in heuristics apply (DeepSeek / Anthropic).
 func EffortCapabilityForEntry(e *ProviderEntry) EffortCapability {
+	if e != nil && len(e.SupportedEfforts) > 0 {
+		def := e.DefaultEffort
+		if def == "" {
+			def = "auto"
+		}
+		return EffortCapability{Supported: true, Levels: e.SupportedEfforts, Default: def}
+	}
+	// Built-in provider heuristics (backward compatibility for old TOML configs).
 	switch {
 	case isDeepSeekEntry(e):
 		return EffortCapability{Supported: true, Levels: []string{"auto", "high", "max"}, Default: "high"}
@@ -38,6 +46,39 @@ func NormalizeEffort(e *ProviderEntry, raw string) (string, error) {
 	if level == "auto" {
 		return "", nil
 	}
+
+	// Config-driven: when the provider declares SupportedEfforts, validate against them.
+	if e != nil && len(e.SupportedEfforts) > 0 {
+		for _, valid := range e.SupportedEfforts {
+			if level == valid {
+				return level, nil
+			}
+		}
+		// Level not supported — degrade to DefaultEffort.
+		fallback := e.DefaultEffort
+		if fallback == "" {
+			fallback = "auto"
+		}
+		// Ultimate safety: if fallback is also not in the list, use the first level.
+		if fallback != "auto" {
+			found := false
+			for _, valid := range e.SupportedEfforts {
+				if fallback == valid {
+					found = true
+					break
+				}
+			}
+			if !found {
+				fallback = e.SupportedEfforts[0]
+			}
+		}
+		if fallback == "auto" {
+			return "", nil
+		}
+		return fallback, nil
+	}
+
+	// Built-in provider heuristics (backward compatibility).
 	switch {
 	case isDeepSeekEntry(e):
 		switch level {

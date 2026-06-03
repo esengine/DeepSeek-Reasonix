@@ -328,6 +328,8 @@ export interface ProviderView {
   keySet: boolean; // the env var currently resolves to a value
   balanceUrl: string; // optional wallet-balance endpoint; "" disables the readout
   contextWindow: number;
+  supportedEfforts: string[];
+  defaultEffort: string;
 }
 
 // BalanceInfo is the wallet-balance readout (desktop/app.go Balance). available
