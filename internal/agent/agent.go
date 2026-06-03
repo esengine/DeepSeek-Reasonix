@@ -427,15 +427,23 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 		})
 
 		if len(calls) == 0 {
-			if reason := a.finalReadinessFailure(); reason != "" {
+			readiness := a.finalReadinessCheck()
+			if readiness.reason != "" {
 				finalReadinessBlocks++
+				result := evidence.ReadinessBlocked
 				if finalReadinessBlocks >= maxFinalReadinessBlocks {
-					return fmt.Errorf("final-answer readiness failed %d times: %s", finalReadinessBlocks, reason)
+					result = evidence.ReadinessErrored
+					event.RecordReadinessAudit(a.sink, readiness.audit(result, false))
+					return fmt.Errorf("final-answer readiness failed %d times: %s", finalReadinessBlocks, readiness.reason)
 				}
-				a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "final-answer readiness blocked: " + reason})
-				a.session.Add(provider.Message{Role: provider.RoleUser, Content: finalReadinessRetryMessage(reason)})
+				event.RecordReadinessAudit(a.sink, readiness.audit(result, false))
+				a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "final-answer readiness blocked: " + readiness.reason})
+				a.session.Add(provider.Message{Role: provider.RoleUser, Content: finalReadinessRetryMessage(readiness.reason)})
 				a.maybeCompact(ctx, usage)
 				continue
+			}
+			if readiness.applies {
+				event.RecordReadinessAudit(a.sink, readiness.audit(evidence.ReadinessAllowed, finalReadinessBlocks > 0))
 			}
 			return nil // model gave a final answer
 		}
@@ -461,41 +469,73 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 }
 
 func (a *Agent) finalReadinessFailure() string {
+	return a.finalReadinessCheck().reason
+}
+
+type finalReadinessCheck struct {
+	applies              bool
+	reason               string
+	missingProjectChecks int
+	missingCompleteStep  bool
+	incompleteTodos      int
+}
+
+func (c finalReadinessCheck) audit(result evidence.ReadinessAuditResult, recovered bool) evidence.ReadinessAudit {
+	return evidence.ReadinessAudit{
+		Result:                 result,
+		Recovered:              recovered,
+		MissingProjectChecks:   c.missingProjectChecks,
+		MissingCompleteStep:    c.missingCompleteStep,
+		IncompleteTodos:        c.incompleteTodos,
+		CommandMismatchMissing: c.missingProjectChecks,
+	}
+}
+
+func (a *Agent) finalReadinessCheck() finalReadinessCheck {
 	if a.evidence == nil {
-		return ""
+		return finalReadinessCheck{}
 	}
 	var missing []string
+	out := finalReadinessCheck{}
 	if !a.planMode.Load() {
 		if incomplete, hasTodos := a.evidence.IncompleteLatestTodos(); hasTodos && len(incomplete) > 0 {
+			out.applies = true
+			out.incompleteTodos = len(incomplete)
 			missing = append(missing, finalReadinessIncompleteTodos(incomplete))
 		}
 	}
 	writer, hasWriter := a.evidence.LatestSuccessfulWriterIndex()
 	if !hasWriter {
-		return strings.Join(missing, "; ")
+		if len(missing) > 0 {
+			out.reason = strings.Join(missing, "; ")
+		}
+		return out
 	}
 	hasProjectChecks := len(a.projectChecks) > 0
 	hasTodoReceipt := a.evidence.HasSuccessfulTodoWrite()
 	if !hasProjectChecks && !hasTodoReceipt && len(missing) == 0 {
-		return ""
+		return finalReadinessCheck{}
 	}
-
+	out.applies = true
 	for _, check := range a.projectChecks {
 		command := strings.TrimSpace(check.Command)
 		if command == "" {
 			continue
 		}
 		if !a.evidence.HasSuccessfulCommandAfter(command, writer) {
+			out.missingProjectChecks++
 			missing = append(missing, fmt.Sprintf("run %q from %s after the latest write", command, finalReadinessCheckSource(check)))
 		}
 	}
 	if hasTodoReceipt && !a.evidence.HasSuccessfulCompleteStepAfter(writer) {
+		out.missingCompleteStep = true
 		missing = append(missing, "call complete_step after the latest write")
 	}
 	if len(missing) == 0 {
-		return ""
+		return out
 	}
-	return strings.Join(missing, "; ")
+	out.reason = strings.Join(missing, "; ")
+	return out
 }
 
 func finalReadinessIncompleteTodos(items []evidence.TodoStepMatch) string {
