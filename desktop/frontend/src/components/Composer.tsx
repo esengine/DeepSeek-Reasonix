@@ -241,7 +241,7 @@ export function Composer({
     // re-fetch only when the menu opens or the directory level changes
   }, [atRaw === null, atDir]);
   const atMatches = useMemo(
-    () => (atRaw === null ? [] : entries.filter((e) => e.name.toLowerCase().includes(atFrag)).slice(0, 10)),
+    () => (atRaw === null ? [] : entries.filter((e) => e.name.toLowerCase().includes(atFrag))),
     [atRaw, atFrag, entries],
   );
 
