@@ -992,19 +992,6 @@ func (a *App) Capabilities() CapabilitiesView {
 			seen["codegraph"] = true
 		}
 	}
-	for name, s := range disabled {
-		if seen[name] {
-			continue
-		}
-		if name != "codegraph" || !codegraphConfigured {
-			continue
-		}
-		s.Status = "disabled"
-		s.BuiltIn = true
-		s.Error = ""
-		out.Servers = append(out.Servers, s)
-		retainedDisabled[name] = s
-	}
 	out.Servers = orderServerViews(out.Servers, order)
 
 	a.mu.Lock()
