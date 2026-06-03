@@ -438,7 +438,11 @@ keep exactly one in_progress, and flip each to completed as you finish it — up
 the list as you go, not just at the end.
 In plan mode the harness blocks writer tools: do read-only research, then write a
 concise plan as your reply and stop. The user is asked to approve before anything
-is changed; once approved, work through the steps, updating the task list as you go.`
+is changed; once approved, work through the steps, updating the task list as you go.
+CodeGraph code-intelligence tools (codegraph_explore, codegraph_search,
+codegraph_node, codegraph_callers, codegraph_callees, codegraph_impact,
+codegraph_files) understand your codebase at the AST level — prefer them over
+grep/read_file for code understanding.`
 
 // LanguagePolicy is the auto fallback appended to the system prompt when no
 // concrete UI language is resolved. It is static English text, so it stays part
