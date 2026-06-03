@@ -134,6 +134,7 @@ func resolveBareNames(refs []ref) []ref {
 		if r, ok := need[d.Name()]; ok {
 			rel, _ := filepath.Rel(cwd, p)
 			r.path = filepath.ToSlash(rel)
+			delete(need, d.Name())
 			found++
 		}
 		return nil

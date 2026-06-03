@@ -144,3 +144,61 @@ func TestReadFileRef(t *testing.T) {
 		t.Error("missing path should error")
 	}
 }
+
+func TestResolveBareNamesDuplicates(t *testing.T) {
+	temp := t.TempDir()
+
+	if err := os.MkdirAll(filepath.Join(temp, "a"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(temp, "b"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(temp, "c"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(temp, "a", "helper.go"), []byte("package a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(temp, "b", "helper.go"), []byte("package b"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(temp, "c", "main.go"), []byte("package c"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	oldCwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(temp); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(oldCwd); err != nil {
+			t.Error(err)
+		}
+	})
+
+	refs := []ref{
+		{kind: refFile, raw: "helper.go"},
+		{kind: refFile, raw: "main.go"},
+	}
+
+	resolved := resolveBareNames(refs)
+
+	if len(resolved) != 2 {
+		t.Fatalf("expected 2 resolved refs, got %d", len(resolved))
+	}
+
+	helperRef := resolved[0]
+	mainRef := resolved[1]
+
+	if helperRef.path != "a/helper.go" && helperRef.path != "b/helper.go" {
+		t.Errorf("expected helper.go path to be a/helper.go or b/helper.go, got %q", helperRef.path)
+	}
+	if mainRef.path != "c/main.go" {
+		t.Errorf("expected main.go path to be c/main.go, got %q", mainRef.path)
+	}
+}
