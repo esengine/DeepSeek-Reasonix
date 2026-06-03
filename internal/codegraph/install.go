@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 )
 
 const (
@@ -22,6 +23,9 @@ const (
 	// with CODEGRAPH_VERSION in the Makefile and .github/workflows.
 	Version = "v0.9.7"
 	cgRepo  = "colbymchenry/codegraph"
+
+	renameAttempts = 5
+	renameBackoff  = 200 * time.Millisecond
 )
 
 // CacheDir is where the CodeGraph bundle is unpacked on first use:
@@ -141,12 +145,14 @@ func InstallWithClient(ctx context.Context, client *http.Client, log func(string
 	if err != nil {
 		return "", err
 	}
-	if err := os.Rename(root, dir); err != nil {
-		// A concurrent session may have won the race; accept its install.
+	if p, ok := cached(); ok {
+		return p, nil // a concurrent session already populated dir
+	}
+	if err := promote(root, dir); err != nil {
 		if p, ok := cached(); ok {
-			return p, nil
+			return p, nil // a concurrent winner landed during our retries
 		}
-		return "", err
+		return "", fmt.Errorf("codegraph: install to %s failed: %w — the cache directory may be read-only or locked by antivirus; set REASONIX_CACHE_DIR to a writable location to relocate it", dir, err)
 	}
 	p, ok := cached()
 	if !ok {
@@ -154,6 +160,23 @@ func InstallWithClient(ctx context.Context, client *http.Client, log func(string
 	}
 	logf(log, "codegraph: installed to %s", dir)
 	return p, nil
+}
+
+// promote moves the freshly extracted bundle (root) into its versioned home
+// (dir). On Windows os.Rename onto an existing directory fails with "Access is
+// denied", so a stale/partial dest from an earlier interrupted install (cached()
+// already reported it incomplete) is cleared first; a just-extracted .exe can
+// also stay briefly locked by an AV scanner, so the move is retried.
+func promote(root, dir string) error {
+	_ = os.RemoveAll(dir)
+	var err error
+	for i := 0; i < renameAttempts; i++ {
+		if err = os.Rename(root, dir); err == nil {
+			return nil
+		}
+		time.Sleep(renameBackoff)
+	}
+	return err
 }
 
 func httpGet(ctx context.Context, client *http.Client, url string) ([]byte, error) {
