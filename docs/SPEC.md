@@ -368,6 +368,10 @@ api_key_env = "MIMO_API_KEY"
 [tools]
 enabled = []   # omit/empty = all built-ins
 
+[skills]
+# paths = ["~/my-skills", "../shared/skills"]   # extra custom skill roots
+# disabled_skills = ["review"]                  # hidden from prompt, slash invocation, and skill tools
+
 [permissions]
 mode  = "ask"                              # writer fallback when no rule matches: ask|allow|deny
 deny  = ["bash(rm -rf*)", "bash(git push*)"]   # hard-blocked in every mode

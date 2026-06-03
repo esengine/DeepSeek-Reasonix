@@ -299,6 +299,31 @@ func TestSkillPathMutators(t *testing.T) {
 	}
 }
 
+func TestSkillEnabledMutator(t *testing.T) {
+	c := Default()
+	if err := c.SetSkillEnabled("review", false); err != nil {
+		t.Fatalf("disable skill: %v", err)
+	}
+	if err := c.SetSkillEnabled("review", false); err != nil {
+		t.Fatalf("disable duplicate skill: %v", err)
+	}
+	if len(c.Skills.DisabledSkills) != 1 || c.Skills.DisabledSkills[0] != "review" {
+		t.Fatalf("disabled skills = %v, want [review]", c.Skills.DisabledSkills)
+	}
+	if !c.IsSkillDisabled("review") {
+		t.Fatal("review should be disabled")
+	}
+	if err := c.SetSkillEnabled("review", true); err != nil {
+		t.Fatalf("enable skill: %v", err)
+	}
+	if len(c.Skills.DisabledSkills) != 0 {
+		t.Fatalf("disabled skills after enable = %v, want empty", c.Skills.DisabledSkills)
+	}
+	if err := c.SetSkillEnabled("bad name", false); err == nil {
+		t.Fatal("invalid skill name should error")
+	}
+}
+
 func TestPluginMutators(t *testing.T) {
 	c := Default()
 

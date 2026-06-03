@@ -4249,16 +4249,41 @@ body {
   color: var(--fg);
   font: inherit;
   text-align: left;
-  cursor: pointer;
   transition: border-color 0.12s, background 0.12s, transform 0.12s;
 }
 .cap-skill-card:hover,
-.cap-skill-card:focus-visible {
+.cap-skill-card:focus-within {
   border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
   background: var(--bg-soft);
   outline: none;
 }
-.cap-skill-card:active {
+.cap-skill-card--disabled {
+  background: color-mix(in srgb, var(--bg-soft) 48%, transparent);
+  color: var(--fg-dim);
+}
+.cap-skill-card__top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+.cap-skill-card__toggle {
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.cap-skill-card__toggle:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 52%, transparent);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+.cap-skill-card__toggle:active {
   transform: translateY(1px);
 }
 .cap-skill-card__head {
@@ -4324,6 +4349,10 @@ body {
 }
 .cap-skill-badge--run {
   color: var(--fg-faint);
+}
+.cap-skill-badge--off {
+  color: var(--fg-faint);
+  background: color-mix(in srgb, var(--bg-elev) 80%, transparent);
 }
 .cap-skill-card__desc {
   margin: 6px 0 0 33px;

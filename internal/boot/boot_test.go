@@ -132,6 +132,59 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 	}
 }
 
+func TestBuildOmitsDisabledSkillsFromPromptAndRuntimeList(t *testing.T) {
+	dir := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Chdir(dir)
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "test-model"
+
+[codegraph]
+enabled = false
+
+[agent]
+system_prompt = "BASE"
+
+[skills]
+disabled_skills = ["projskill", "review"]
+
+[[providers]]
+name = "test-model"
+kind = "openai"
+base_url = "https://example.invalid"
+model = "x"
+api_key_env = "REASONIX_TEST_KEY_UNSET"
+`)
+	writeFile(t, dir, ".reasonix/skills/projskill.md", "---\ndescription: a project skill\n---\nplaybook")
+
+	ctrl, err := Build(context.Background(), Options{})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer ctrl.Close()
+
+	for _, s := range ctrl.Skills() {
+		if s.Name == "projskill" || s.Name == "review" {
+			t.Fatalf("disabled skill %q should not be executable: %v", s.Name, ctrl.Skills())
+		}
+	}
+	var allHasProj bool
+	for _, s := range ctrl.AllSkills() {
+		if s.Name == "projskill" {
+			allHasProj = true
+		}
+	}
+	if !allHasProj {
+		t.Fatalf("AllSkills should include disabled skills for management: %v", ctrl.AllSkills())
+	}
+	sys := systemMessage(ctrl.History())
+	if strings.Contains(sys, "projskill") || strings.Contains(sys, "- review ") {
+		t.Fatalf("disabled skill names should be omitted from system prompt:\n%s", sys)
+	}
+}
+
 func TestBuildRecordsMCPStartupFailure(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)

@@ -9,7 +9,7 @@ import (
 
 const skillShowMaxLines = 80
 
-func renderSkillList(width int, skills []skill.Skill) string {
+func renderSkillList(width int, skills []skill.Skill, disabled map[string]bool) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n", viewHeader("skills (%d)", len(skills)))
 	for _, s := range skills {
@@ -19,21 +19,27 @@ func renderSkillList(width int, skills []skill.Skill) string {
 		if s.RunAs == skill.RunSubagent {
 			tag = "  " + viewStatus("subagent")
 		}
+		if disabled[s.Name] {
+			tag += "  " + viewMeta("disabled")
+		}
 		used := 2 + viewPadWidth(name, 18) + 1 + visibleWidth(scope) + 2 + visibleWidth(tag)
 		desc := viewCompactText(s.Description, viewBudget(width, used))
 		fmt.Fprintf(&b, "  %-18s %s  %s%s\n", name, viewMeta(scope), desc, tag)
 	}
-	b.WriteString(viewHint(viewCompactText("invoke: /<name> [args] · author: install_skill (model) or /skill new <name>", viewBudget(width, 2))))
+	b.WriteString(viewHint(viewCompactText("invoke: /<name> [args] · manage: /skill enable <name>, /skill disable <name> · author: /skill new <name>", viewBudget(width, 2))))
 	return strings.TrimRight(b.String(), "\n")
 }
 
-func renderSkillShow(width int, s skill.Skill) string {
+func renderSkillShow(width int, s skill.Skill, disabled bool) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s %s\n", viewHeader("skill:"), viewCompactText(s.Name, viewBudget(width, 7)))
 	if s.RunAs == skill.RunSubagent {
 		fmt.Fprintf(&b, "  %s  %s\n", viewMeta(string(s.Scope)), viewStatus("subagent"))
 	} else {
 		fmt.Fprintf(&b, "  %s\n", viewMeta(string(s.Scope)))
+	}
+	if disabled {
+		fmt.Fprintf(&b, "  %s\n", viewMeta("disabled"))
 	}
 	if strings.TrimSpace(s.Description) != "" {
 		fmt.Fprintf(&b, "  %s\n", viewCompactText(s.Description, viewBudget(width, 2)))

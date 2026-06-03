@@ -54,6 +54,7 @@ type Controller struct {
 	host         *plugin.Host
 	commands     []command.Command
 	skills       []skill.Skill
+	allSkills    []skill.Skill
 	hooks        *hook.Runner // session hook runner; nil-safe (no hooks configured)
 	mem          *memory.Set
 	cleanup      func()
@@ -155,6 +156,7 @@ type Options struct {
 	Host         *plugin.Host
 	Commands     []command.Command
 	Skills       []skill.Skill
+	AllSkills    []skill.Skill
 	Hooks        *hook.Runner
 	Memory       *memory.Set
 	Cleanup      func()
@@ -202,6 +204,7 @@ func New(opts Options) *Controller {
 		host:          opts.Host,
 		commands:      opts.Commands,
 		skills:        opts.Skills,
+		allSkills:     opts.AllSkills,
 		hooks:         opts.Hooks,
 		mem:           opts.Memory,
 		cleanup:       opts.Cleanup,
@@ -1192,6 +1195,60 @@ func (c *Controller) Commands() []command.Command { return c.commands }
 
 // Skills returns the discoverable skills (for the slash menu and `/skill`).
 func (c *Controller) Skills() []skill.Skill { return c.skills }
+
+// AllSkills returns every discoverable skill, including disabled ones, for
+// management surfaces that need to re-enable a hidden skill.
+func (c *Controller) AllSkills() []skill.Skill {
+	if len(c.allSkills) > 0 {
+		return c.allSkills
+	}
+	return c.skills
+}
+
+// DisabledSkills returns all discoverable skills that are disabled in config.
+func (c *Controller) DisabledSkills() []skill.Skill {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil
+	}
+	var out []skill.Skill
+	for _, sk := range c.AllSkills() {
+		if cfg.IsSkillDisabled(sk.Name) {
+			out = append(out, sk)
+		}
+	}
+	return out
+}
+
+// SkillEnabled reports whether a discoverable skill is enabled.
+func (c *Controller) SkillEnabled(name string) bool {
+	cfg, err := config.Load()
+	if err != nil {
+		return true
+	}
+	return !cfg.IsSkillDisabled(name)
+}
+
+// SetSkillEnabled persists a skill enable/disable preference. The caller should
+// rebuild the controller for the prompt/tool registry to reflect it immediately.
+func (c *Controller) SetSkillEnabled(name string, enabled bool) error {
+	found := false
+	for _, sk := range c.AllSkills() {
+		if config.SkillNameKey(sk.Name) == config.SkillNameKey(name) {
+			name = sk.Name
+			found = true
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("unknown skill: %s", name)
+	}
+	cfg := config.LoadForEdit(config.UserConfigPath())
+	if err := cfg.SetSkillEnabled(name, enabled); err != nil {
+		return err
+	}
+	return cfg.SaveTo(config.UserConfigPath())
+}
 
 // HookRunner returns the session's hook runner (nil-safe; may hold zero hooks),
 // so a frontend can list the active hooks via `/hooks`.

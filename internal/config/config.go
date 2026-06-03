@@ -10,6 +10,8 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
+	"runtime"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -17,6 +19,23 @@ import (
 	"reasonix/internal/netclient"
 	"reasonix/internal/provider"
 )
+
+var validSkillName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$`)
+
+// IsValidSkillName reports whether name is a usable skill identifier.
+func IsValidSkillName(name string) bool { return validSkillName.MatchString(name) }
+
+// SkillNameKey normalizes a skill identifier for config comparisons.
+func SkillNameKey(name string) string {
+	name = strings.TrimSpace(name)
+	if !IsValidSkillName(name) {
+		return ""
+	}
+	if runtime.GOOS == "windows" {
+		return strings.ToLower(name)
+	}
+	return name
+}
 
 // Config is Reasonix's runtime configuration.
 type Config struct {
@@ -183,9 +202,11 @@ func (c *Config) NetworkProxyMode() string {
 // roots — each a directory of SKILL.md / <name>.md playbooks — scanned between
 // the project roots (.reasonix/.agents/.claude under the workspace) and the
 // global roots (the same three under the home dir). ~ and relative paths and
-// ${VAR} expansion are supported.
+// ${VAR} expansion are supported. DisabledSkills hides named skills from the
+// agent prompt, slash invocation, and skill tools while keeping them manageable.
 type SkillsConfig struct {
-	Paths []string `toml:"paths"`
+	Paths          []string `toml:"paths"`
+	DisabledSkills []string `toml:"disabled_skills"`
 }
 
 // SkillCustomPaths returns the configured custom skill roots with ${VAR}
@@ -198,6 +219,40 @@ func (c *Config) SkillCustomPaths() []string {
 		}
 	}
 	return out
+}
+
+// DisabledSkillNames returns valid disabled skill identifiers, preserving the
+// first spelling and dropping duplicates/empty entries.
+func (c *Config) DisabledSkillNames() []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, name := range c.Skills.DisabledSkills {
+		name = strings.TrimSpace(name)
+		if !IsValidSkillName(name) {
+			continue
+		}
+		key := SkillNameKey(name)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, name)
+	}
+	return out
+}
+
+// IsSkillDisabled reports whether name is configured as disabled.
+func (c *Config) IsSkillDisabled(name string) bool {
+	key := SkillNameKey(name)
+	if key == "" {
+		return false
+	}
+	for _, disabled := range c.DisabledSkillNames() {
+		if SkillNameKey(disabled) == key {
+			return true
+		}
+	}
+	return false
 }
 
 // SandboxConfig bounds the blast radius of tool calls (Phase 0: file-writer

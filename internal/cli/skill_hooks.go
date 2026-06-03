@@ -2,8 +2,11 @@ package cli
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
+
+	tea "charm.land/bubbletea/v2"
 
 	"reasonix/internal/config"
 	"reasonix/internal/hook"
@@ -30,6 +33,12 @@ func (m *chatTUI) runSkillSubcommand(input string) {
 			return
 		}
 		m.skillShow(args[2])
+	case "enable", "disable":
+		if len(args) < 3 {
+			m.notice("usage: /skill " + sub + " <name>")
+			return
+		}
+		m.skillSetEnabled(args[2], sub == "enable")
 	case "new", "init":
 		if len(args) < 3 {
 			m.notice("usage: /skill new <name> [--global]")
@@ -45,27 +54,100 @@ func (m *chatTUI) runSkillSubcommand(input string) {
 		if _, ok := m.ctrl.RunSkill("/" + args[1]); ok {
 			hint = " (to run it, type /" + args[1] + ")"
 		}
-		m.notice("unknown /skill subcommand " + args[1] + hint + " — try: /skill, /skill show <name>, /skill new <name>, /skill paths")
+		m.notice("unknown /skill subcommand " + args[1] + hint + " — try: /skill, /skill show <name>, /skill enable <name>, /skill disable <name>, /skill new <name>, /skill paths")
 	}
 }
 
 func (m *chatTUI) skillList() {
 	skills := m.skills
+	if m.ctrl != nil {
+		skills = m.ctrl.AllSkills()
+	}
 	if len(skills) == 0 {
 		m.notice("no skills found. Add SKILL.md / <name>.md under .reasonix/skills (project) or ~/.reasonix/skills (global); .agents/.agent/.claude skills dirs also work. Invoke with /<name> or run_skill.")
 		return
 	}
-	m.commitLine(renderSkillList(m.width, skills))
+	m.commitLine(renderSkillList(m.width, skills, m.disabledSkillNames()))
 }
 
 func (m *chatTUI) skillShow(name string) {
-	for _, s := range m.skills {
+	skills := m.skills
+	if m.ctrl != nil {
+		skills = m.ctrl.AllSkills()
+	}
+	for _, s := range skills {
 		if s.Name == name {
-			m.commitLine(renderSkillShow(m.width, s))
+			disabled := false
+			if m.ctrl != nil {
+				disabled = !m.ctrl.SkillEnabled(s.Name)
+			}
+			m.commitLine(renderSkillShow(m.width, s, disabled))
 			return
 		}
 	}
 	m.notice("unknown skill: " + name)
+}
+
+func (m *chatTUI) disabledSkillNames() map[string]bool {
+	out := map[string]bool{}
+	if m.ctrl == nil {
+		return out
+	}
+	for _, s := range m.ctrl.DisabledSkills() {
+		out[s.Name] = true
+	}
+	return out
+}
+
+func (m *chatTUI) skillSetEnabled(name string, enabled bool) {
+	if m.buildController == nil {
+		m.notice("skill toggle unavailable in this session")
+		return
+	}
+	if m.ctrl.Running() {
+		m.notice("cannot change skills while a turn is running")
+		return
+	}
+	if err := m.ctrl.SetSkillEnabled(name, enabled); err != nil {
+		m.notice("skill " + enableVerb(enabled) + ": " + err.Error())
+		return
+	}
+	carried := m.ctrl.History()
+	prevPath := m.ctrl.SessionPath()
+	if err := m.ctrl.Snapshot(); err != nil {
+		slog.Warn("skill toggle: snapshot failed", "err", err)
+	}
+	if enabled {
+		m.notice("enabled skill " + name + " — refreshing session")
+	} else {
+		m.notice("disabled skill " + name + " — refreshing session")
+	}
+	oldCtrl := m.ctrl
+	build := m.buildController
+	ref := m.modelRef
+	m.modelSwitchPending = true
+	m.pendingModelSwitch = func() tea.Msg {
+		c, err := build(ref, carried, prevPath)
+		if err != nil {
+			return modelSwitchMsg{ref: ref, err: err}
+		}
+		return modelSwitchMsg{
+			ref:      ref,
+			ctrl:     c,
+			oldCtrl:  oldCtrl,
+			label:    c.Label(),
+			commands: c.Commands(),
+			skills:   c.Skills(),
+			host:     c.Host(),
+		}
+	}
+}
+
+func enableVerb(enabled bool) string {
+	if enabled {
+		return "enable"
+	}
+	return "disable"
 }
 
 func (m *chatTUI) skillNew(name string, global bool) {

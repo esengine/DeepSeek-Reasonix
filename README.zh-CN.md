@@ -113,6 +113,10 @@ api_key_env = "DEEPSEEK_API_KEY"
 [tools]
 enabled = []   # 省略/为空 = 全部内置工具
 
+[skills]
+# paths = ["~/my-skills", "../shared/skills"]   # 额外的自定义技能目录
+# disabled_skills = ["review"]                  # 隐藏技能，直到 /skill enable <name>
+
 [permissions]
 mode  = "ask"                                # 无规则命中时 writer 的兜底：ask|allow|deny
 deny  = ["bash(rm -rf*)", "bash(git push*)"] # 任何模式下都硬阻断

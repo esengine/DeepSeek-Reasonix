@@ -92,6 +92,7 @@ export interface AppBindings {
   AddSkillPath(path: string): Promise<void>;
   RemoveSkillPath(path: string): Promise<void>;
   RefreshSkills(): Promise<void>;
+  SetSkillEnabled(name: string, enabled: boolean): Promise<void>;
   // SetMCPServerEnabled is the per-session connector toggle (on reconnects, off
   // disconnects; config untouched).
   SetMCPServerEnabled(name: string, enabled: boolean): Promise<void>;
@@ -329,9 +330,9 @@ function makeMockApp(): AppBindings {
     { name: "figma", transport: "http", status: "failed", configured: true, autoStart: true, tier: "lazy", url: "https://mcp.figma.com/mcp", tools: 0, prompts: 0, resources: 0, error: "connect: 401 unauthorized" },
   ];
   const capSkills: SkillView[] = [
-    { name: "explore", description: "Investigate the codebase in an isolated subagent", scope: "builtin", runAs: "subagent" },
-    { name: "review", description: "Review the staged diff", scope: "project", runAs: "inline" },
-    { name: "init", description: "Scaffold a REASONIX.md for this repo", scope: "builtin", runAs: "inline" },
+    { name: "explore", description: "Investigate the codebase in an isolated subagent", scope: "builtin", runAs: "subagent", enabled: true },
+    { name: "review", description: "Review the staged diff", scope: "project", runAs: "inline", enabled: false },
+    { name: "init", description: "Scaffold a REASONIX.md for this repo", scope: "builtin", runAs: "inline", enabled: true },
   ];
   let capSkillRoots: SkillRootView[] = [
     { dir: "~/projects/reasonix/.reasonix/skills", scope: "project", priority: 1, status: "missing", configured: false, skills: 0 },
@@ -669,7 +670,7 @@ function makeMockApp(): AppBindings {
         capSkillRoots.push({ dir, scope: "custom", priority: capSkillRoots.length + 1, status: "ok", configured: true, skills: 1 });
       }
       if (!capSkills.some((s) => s.name === "local-dev")) {
-        capSkills.push({ name: "local-dev", description: "Local custom development workflow", scope: "custom", runAs: "inline" });
+        capSkills.push({ name: "local-dev", description: "Local custom development workflow", scope: "custom", runAs: "inline", enabled: true });
       }
     },
     async RemoveSkillPath(path: string) {
@@ -680,6 +681,10 @@ function makeMockApp(): AppBindings {
       }
     },
     async RefreshSkills() {},
+    async SetSkillEnabled(name: string, enabled: boolean) {
+      const skill = capSkills.find((s) => s.name === name);
+      if (skill) skill.enabled = enabled;
+    },
     async SetMCPServerEnabled(name: string, enabled: boolean) {
       capServers = capServers.map((s) =>
         s.name === name
@@ -704,6 +709,8 @@ function makeMockApp(): AppBindings {
         "/skill": [
           { label: "list", insert: "list", hint: "list skills" },
           { label: "show", insert: "show ", hint: "show a skill's body", descend: true },
+          { label: "enable", insert: "enable ", hint: "enable a disabled skill", descend: true },
+          { label: "disable", insert: "disable ", hint: "disable an enabled skill", descend: true },
           { label: "new", insert: "new ", hint: "scaffold a new skill" },
           { label: "paths", insert: "paths", hint: "show discovery paths" },
         ],

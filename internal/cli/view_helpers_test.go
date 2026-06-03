@@ -18,8 +18,8 @@ func TestRenderSkillListUsesSharedVisualLanguage(t *testing.T) {
 	got := renderSkillList(width, []skill.Skill{
 		{Name: "explore", Description: strings.Repeat("long ", 30), Scope: skill.ScopeProject},
 		{Name: "deep", Description: "run in isolation", Scope: skill.ScopeGlobal, RunAs: skill.RunSubagent},
-	})
-	for _, want := range []string{"skills (2)", "/explore", "(project)", "…", "/deep", "subagent", "invoke:"} {
+	}, map[string]bool{"explore": true})
+	for _, want := range []string{"skills (2)", "/explore", "(project)", "…", "/deep", "subagent", "disabled", "invoke:"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("skill list missing %q:\n%s", want, got)
 		}
@@ -36,8 +36,8 @@ func TestRenderSkillShowCapsLongBody(t *testing.T) {
 		Scope:       skill.ScopeBuiltin,
 		Path:        "/very/long/path/to/SKILL.md",
 		Body:        body,
-	})
-	for _, want := range []string{"skill:", "review", "builtin", "review code", "SKILL.md", "+3 more lines"} {
+	}, true)
+	for _, want := range []string{"skill:", "review", "builtin", "disabled", "review code", "SKILL.md", "+3 more lines"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("skill show missing %q:\n%s", want, got)
 		}

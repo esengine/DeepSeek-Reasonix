@@ -262,6 +262,36 @@ func (c *Config) RemoveSkillPath(path string) (bool, error) {
 	return false, nil
 }
 
+// SetSkillEnabled persists a per-skill enable/disable preference. Skills are
+// enabled by default; disabling records the name, enabling removes it.
+func (c *Config) SetSkillEnabled(name string, enabled bool) error {
+	name = strings.TrimSpace(name)
+	key := SkillNameKey(name)
+	if key == "" {
+		return fmt.Errorf("skill name %q: use letters, digits, '_', '-', '.', 1-64 chars, starting alphanumeric", name)
+	}
+	next := c.DisabledSkillNames()
+	idx := -1
+	for i, existing := range next {
+		if SkillNameKey(existing) == key {
+			idx = i
+			break
+		}
+	}
+	if enabled {
+		if idx >= 0 {
+			next = append(next[:idx], next[idx+1:]...)
+		}
+		c.Skills.DisabledSkills = next
+		return nil
+	}
+	if idx < 0 {
+		next = append(next, name)
+	}
+	c.Skills.DisabledSkills = next
+	return nil
+}
+
 // CanonicalSkillPath expands env vars, ~ and relative segments to an absolute
 // cleaned path for comparing skill roots. On Windows it folds case so paths that
 // differ only in casing dedupe. Use only for comparison, never as stored config.

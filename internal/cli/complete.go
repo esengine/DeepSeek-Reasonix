@@ -154,6 +154,7 @@ func (m *chatTUI) slashArgItems(val string) ([]compItem, int, bool) {
 		CurrentModel: m.modelRef,
 	}
 	if m.ctrl != nil {
+		data.DisabledSkills = m.ctrl.DisabledSkills()
 		data.ConfiguredMCP = m.ctrl.ConfiguredMCPNames()
 		data.DisconnectedMCP = m.ctrl.DisconnectedMCPNames()
 	}

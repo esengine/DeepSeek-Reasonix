@@ -158,8 +158,14 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// only; bodies load on demand via run_skill or "/<name>". Bodies never enter
 	// the prefix, so the index costs a fixed, small amount per turn.
 	cwd, _ := os.Getwd()
-	skillStore := skill.New(skill.Options{ProjectRoot: cwd, CustomPaths: cfg.SkillCustomPaths(), Stderr: opts.Stderr})
+	skillStore := skill.New(skill.Options{
+		ProjectRoot:   cwd,
+		CustomPaths:   cfg.SkillCustomPaths(),
+		DisabledNames: cfg.DisabledSkillNames(),
+		Stderr:        opts.Stderr,
+	})
 	skills := skillStore.List()
+	allSkills := skill.New(skill.Options{ProjectRoot: cwd, CustomPaths: cfg.SkillCustomPaths(), Stderr: io.Discard}).List()
 	sysPrompt = skill.ApplyIndex(sysPrompt, skills)
 
 	reg := tool.NewRegistry()
@@ -491,6 +497,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		Host:          pluginHost,
 		Commands:      cmds,
 		Skills:        skills,
+		AllSkills:     allSkills,
 		Hooks:         hookRunner,
 		Memory:        mem,
 		Cleanup:       cleanup,

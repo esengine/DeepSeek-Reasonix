@@ -248,8 +248,10 @@ export function CapabilitiesPanel({
                       <SkillRow
                         key={sk.name}
                         skill={sk}
+                        busy={busy}
                         expanded={expandedSkills.has(sk.name)}
                         onToggle={() => toggleSkill(sk.name)}
+                        onToggleEnabled={(enabled) => void mutate(() => app.SetSkillEnabled(sk.name, enabled))}
                       />
                     ))}
                   </div>
@@ -1025,36 +1027,53 @@ function serverActionLabel(s: ServerView, t: ReturnType<typeof useT>): string {
 
 function SkillRow({
   skill,
+  busy,
   expanded,
   onToggle,
+  onToggleEnabled,
 }: {
   skill: SkillView;
+  busy: boolean;
   expanded: boolean;
   onToggle: () => void;
+  onToggleEnabled: (enabled: boolean) => void;
 }) {
   const t = useT();
   const summary = summarizeSkillDescription(skill.description);
   const canExpand = summary !== skill.description;
   return (
-    <button
-      className={`cap-skill-card${expanded ? " cap-skill-card--expanded" : ""}${canExpand ? " cap-skill-card--expandable" : ""}`}
-      type="button"
-      onClick={onToggle}
-      aria-expanded={expanded}
+    <div
+      className={`cap-skill-card${expanded ? " cap-skill-card--expanded" : ""}${canExpand ? " cap-skill-card--expandable" : ""}${!skill.enabled ? " cap-skill-card--disabled" : ""}`}
     >
-      <div className="cap-skill-card__head">
-        <span className="cap-skill-card__icon">/</span>
-        <span className="cap-skill-card__main">
-          <span className="cap-skill-card__command">{skill.name}</span>
-          <span className="cap-skill-card__badges">
-            <span className={`cap-skill-badge cap-skill-badge--${skill.scope}`}>{skillScopeLabel(skill.scope, t)}</span>
-            {skill.runAs === "subagent" && <span className="cap-skill-badge cap-skill-badge--run">{t("caps.subagent")}</span>}
+      <div className="cap-skill-card__top">
+        <button className="cap-skill-card__toggle" type="button" onClick={onToggle} aria-expanded={expanded}>
+          <span className="cap-skill-card__head">
+            <span className="cap-skill-card__icon">/</span>
+            <span className="cap-skill-card__main">
+              <span className="cap-skill-card__command">{skill.name}</span>
+              <span className="cap-skill-card__badges">
+                <span className={`cap-skill-badge cap-skill-badge--${skill.scope}`}>{skillScopeLabel(skill.scope, t)}</span>
+                {skill.runAs === "subagent" && <span className="cap-skill-badge cap-skill-badge--run">{t("caps.subagent")}</span>}
+                {!skill.enabled && <span className="cap-skill-badge cap-skill-badge--off">{t("caps.skillDisabled")}</span>}
+              </span>
+            </span>
           </span>
-        </span>
+        </button>
+        <Tooltip label={skill.enabled ? t("caps.disableSkill") : t("caps.enableSkill")}>
+          <label className="cap-switch">
+            <input
+              type="checkbox"
+              checked={skill.enabled}
+              disabled={busy}
+              onChange={(e) => onToggleEnabled(e.target.checked)}
+            />
+            <span className="cap-switch__track" />
+          </label>
+        </Tooltip>
       </div>
       <div className="cap-skill-card__desc">{expanded ? skill.description : summary}</div>
       {canExpand && <div className="cap-skill-card__more">{expanded ? t("common.collapse") : t("common.expand")}</div>}
-    </button>
+    </div>
   );
 }
 

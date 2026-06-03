@@ -26,6 +26,7 @@ func has(items []SlashItem, label string) bool {
 func TestSlashArgItems(t *testing.T) {
 	data := ArgData{
 		Skills:          []skill.Skill{{Name: "explore", Scope: skill.ScopeBuiltin}, {Name: "review", Scope: skill.ScopeBuiltin}},
+		DisabledSkills:  []skill.Skill{{Name: "security-review", Scope: skill.ScopeBuiltin}},
 		ServerNames:     []string{"fs", "git"},
 		DisconnectedMCP: []string{"optional"},
 		ModelRefs:       []string{"deepseek-flash/deepseek-v4-flash", "deepseek-pro/deepseek-v4-pro"},
@@ -37,7 +38,7 @@ func TestSlashArgItems(t *testing.T) {
 	if from != len("/skill ") {
 		t.Errorf("from = %d, want %d", from, len("/skill "))
 	}
-	for _, w := range []string{"list", "show", "new", "paths"} {
+	for _, w := range []string{"list", "show", "enable", "disable", "new", "paths"} {
 		if !has(items, w) {
 			t.Errorf("/skill missing subcommand %q; got %v", w, labelsOf(items))
 		}
@@ -46,6 +47,14 @@ func TestSlashArgItems(t *testing.T) {
 	items, _ = SlashArgItems("/skill show ", data)
 	if !has(items, "explore") || !has(items, "review") {
 		t.Errorf("/skill show should list skill names; got %v", labelsOf(items))
+	}
+	items, _ = SlashArgItems("/skill disable ", data)
+	if !has(items, "explore") || has(items, "security-review") {
+		t.Errorf("/skill disable should list enabled skills only; got %v", labelsOf(items))
+	}
+	items, _ = SlashArgItems("/skill enable ", data)
+	if !has(items, "security-review") || has(items, "review") {
+		t.Errorf("/skill enable should list disabled skills only; got %v", labelsOf(items))
 	}
 	// /mcp subcommands + filtering
 	items, _ = SlashArgItems("/mcp re", data)

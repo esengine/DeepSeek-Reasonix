@@ -34,6 +34,7 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 		},
 	}
 	orig.Skills.Paths = []string{"~/my-skills", "../shared/skills"}
+	orig.Skills.DisabledSkills = []string{"review", "explore"}
 	orig.Plugins = []PluginEntry{
 		{Name: "example", Command: "reasonix-plugin-example"},
 		{Name: "stripe", Type: "http", URL: "https://mcp.stripe.com", Headers: map[string]string{"Authorization": "Bearer x"}, AutoStart: boolPtr(false)},
@@ -106,6 +107,9 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	}
 	if len(got.Skills.Paths) != 2 || got.Skills.Paths[0] != "~/my-skills" {
 		t.Errorf("skills.paths = %v", got.Skills.Paths)
+	}
+	if len(got.Skills.DisabledSkills) != 2 || got.Skills.DisabledSkills[0] != "review" || got.Skills.DisabledSkills[1] != "explore" {
+		t.Errorf("skills.disabled_skills = %v", got.Skills.DisabledSkills)
 	}
 	if len(got.Plugins) != 2 {
 		t.Fatalf("plugins count = %d, want 2", len(got.Plugins))

@@ -172,9 +172,14 @@ func RenderTOML(c *Config) string {
 
 	b.WriteString("[skills]\n")
 	if len(c.Skills.Paths) > 0 {
-		fmt.Fprintf(&b, "paths = %s   # extra custom skill roots\n\n", renderStringArray(c.Skills.Paths))
+		fmt.Fprintf(&b, "paths = %s   # extra custom skill roots\n", renderStringArray(c.Skills.Paths))
 	} else {
-		b.WriteString("# paths = [\"~/my-skills\", \"../shared/skills\"]   # extra custom skill roots\n\n")
+		b.WriteString("# paths = [\"~/my-skills\", \"../shared/skills\"]   # extra custom skill roots\n")
+	}
+	if disabled := c.DisabledSkillNames(); len(disabled) > 0 {
+		fmt.Fprintf(&b, "disabled_skills = %s   # hidden from the prompt, slash invocation, and skill tools\n\n", renderStringArray(disabled))
+	} else {
+		b.WriteString("# disabled_skills = [\"review\"]   # hide noisy or unwanted skills\n\n")
 	}
 
 	b.WriteString("[permissions]\n")

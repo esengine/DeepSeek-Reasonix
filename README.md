@@ -117,6 +117,10 @@ api_key_env = "DEEPSEEK_API_KEY"
 [tools]
 enabled = []   # omit/empty = all built-ins
 
+[skills]
+# paths = ["~/my-skills", "../shared/skills"]   # extra custom skill roots
+# disabled_skills = ["review"]                  # hide skills until /skill enable <name>
+
 [permissions]
 mode  = "ask"                                # writer fallback when no rule matches: ask|allow|deny
 deny  = ["bash(rm -rf*)", "bash(git push*)"] # hard-blocked in every mode

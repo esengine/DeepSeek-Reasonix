@@ -840,8 +840,9 @@ func (a *App) SlashArgs(input string) SlashArgsResult {
 		return SlashArgsResult{}
 	}
 	data := control.ArgData{
-		Skills:       ctrl.Skills(),
-		CurrentModel: model,
+		Skills:         ctrl.Skills(),
+		DisabledSkills: ctrl.DisabledSkills(),
+		CurrentModel:   model,
 	}
 	for _, m := range a.Models() {
 		data.ModelRefs = append(data.ModelRefs, m.Ref)
@@ -901,6 +902,7 @@ type SkillView struct {
 	Description string `json:"description"`
 	Scope       string `json:"scope"`
 	RunAs       string `json:"runAs"`
+	Enabled     bool   `json:"enabled"`
 }
 
 // SkillRootView is one skill discovery root for the drawer's Sources section.
@@ -1022,10 +1024,11 @@ func (a *App) Capabilities() CapabilitiesView {
 	a.mcpOrder = mergeServerOrder(a.mcpOrder, out.Servers)
 	a.mu.Unlock()
 
-	for _, s := range ctrl.Skills() {
+	for _, s := range ctrl.AllSkills() {
 		out.Skills = append(out.Skills, SkillView{
 			Name: s.Name, Description: s.Description,
 			Scope: string(s.Scope), RunAs: string(s.RunAs),
+			Enabled: ctrl.SkillEnabled(s.Name),
 		})
 	}
 	out.SkillRoots = skillRootsView()
@@ -1152,6 +1155,14 @@ func (a *App) RemoveSkillPath(path string) error {
 // discovery, the system prompt index, and slash completions.
 func (a *App) RefreshSkills() error {
 	return a.rebuild()
+}
+
+// SetSkillEnabled persists a skill toggle and rebuilds the controller so the
+// prompt index, slash menu, and skill tools reflect it immediately.
+func (a *App) SetSkillEnabled(name string, enabled bool) error {
+	return a.applyConfigChange(func(c *config.Config) error {
+		return c.SetSkillEnabled(name, enabled)
+	})
 }
 
 func normalizeSkillPath(path string) string {
