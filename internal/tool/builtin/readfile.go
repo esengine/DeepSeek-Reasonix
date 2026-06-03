@@ -117,6 +117,18 @@ func (r readFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 		return r.scan(io.MultiReader(bytes.NewReader(body), f), p.Offset, p.Limit)
 	}
 
+	// BOM-less UTF-16 (Windows source files) has a NUL for every ASCII char but
+	// no BOM, so it reaches here; recognise it by its NUL pattern and decode it
+	// rather than rejecting it as binary.
+	if k, ok := fileenc.DetectUTF16NoBOM(peek); ok {
+		rest, rerr := io.ReadAll(f)
+		if rerr != nil {
+			return "", fmt.Errorf("read %s: %w", p.Path, rerr)
+		}
+		all := append(peek, rest...)
+		return r.scan(bytes.NewReader(fileenc.Decode(all, k)), p.Offset, p.Limit)
+	}
+
 	if bytes.IndexByte(peek, 0) >= 0 {
 		return "", fmt.Errorf("binary file %s (NUL byte detected); use `bash hexdump` or another tool", p.Path)
 	}

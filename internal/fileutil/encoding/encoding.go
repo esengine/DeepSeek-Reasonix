@@ -30,6 +30,12 @@ const (
 	// LossyUTF8 is not valid UTF-8 and not valid GB18030 — decoded lossily
 	// as UTF-8 with replacement characters so the model sees something.
 	LossyUTF8
+	// UTF16LENoBOM is UTF-16 Little-Endian without a BOM — common for source
+	// files saved by Windows tools. Detected heuristically from the NUL-byte
+	// pattern; written back without a BOM to preserve the original bytes.
+	UTF16LENoBOM
+	// UTF16BENoBOM is UTF-16 Big-Endian without a BOM.
+	UTF16BENoBOM
 )
 
 var utf8BOM = []byte{0xEF, 0xBB, 0xBF}
@@ -44,6 +50,12 @@ func Detect(data []byte) (Kind, []byte) {
 		return UTF16LE, data
 	case len(data) >= 2 && data[0] == 0xFE && data[1] == 0xFF:
 		return UTF16BE, data
+	}
+	// BOM-less UTF-16 must be tried before utf8.Valid: its low bytes plus 0x00
+	// high bytes are all valid UTF-8 code units, so a naive check would tag a
+	// UTF-16 source file as UTF-8 and surface the embedded NULs as garbage.
+	if k, ok := DetectUTF16NoBOM(data); ok {
+		return k, data
 	}
 	if utf8.Valid(data) {
 		return UTF8, data
@@ -74,6 +86,38 @@ func DetectQuick(peek []byte) Kind {
 	return UTF8
 }
 
+// DetectUTF16NoBOM heuristically recognises BOM-less UTF-16 from the NUL-byte
+// distribution: ASCII-range text encodes one byte of payload and one 0x00 per
+// code unit, so the NULs cluster on odd offsets (LE) or even offsets (BE). It
+// requires a strong skew — one parity heavily NUL, the other almost none — so
+// genuine binary (NULs on both parities) and plain UTF-8 (no NULs) fall through.
+func DetectUTF16NoBOM(b []byte) (Kind, bool) {
+	n := len(b)
+	if n < 16 {
+		return UTF8, false
+	}
+	n &^= 1 // examine an even-length window so parity counts are comparable
+	var evenNUL, oddNUL int
+	for i := 0; i < n; i++ {
+		if b[i] != 0 {
+			continue
+		}
+		if i%2 == 0 {
+			evenNUL++
+		} else {
+			oddNUL++
+		}
+	}
+	half := n / 2
+	switch {
+	case oddNUL*10 >= half*3 && evenNUL*20 <= half:
+		return UTF16LENoBOM, true
+	case evenNUL*10 >= half*3 && oddNUL*20 <= half:
+		return UTF16BENoBOM, true
+	}
+	return UTF8, false
+}
+
 // Decode converts data from the given encoding to UTF-8 bytes.
 func Decode(data []byte, enc Kind) []byte {
 	switch enc {
@@ -83,6 +127,10 @@ func Decode(data []byte, enc Kind) []byte {
 		return decodeUTF16(data[2:], binary.LittleEndian)
 	case UTF16BE:
 		return decodeUTF16(data[2:], binary.BigEndian)
+	case UTF16LENoBOM:
+		return decodeUTF16(data, binary.LittleEndian)
+	case UTF16BENoBOM:
+		return decodeUTF16(data, binary.BigEndian)
 	case GB18030:
 		out, _, err := transform.Bytes(simplifiedchinese.GB18030.NewDecoder(), data)
 		if err != nil {
@@ -120,9 +168,13 @@ func Encode(text string, enc Kind) []byte {
 	case UTF8BOM:
 		return append(utf8BOM, []byte(text)...)
 	case UTF16LE:
-		return encodeUTF16(text, binary.LittleEndian)
+		return encodeUTF16(text, binary.LittleEndian, true)
 	case UTF16BE:
-		return encodeUTF16(text, binary.BigEndian)
+		return encodeUTF16(text, binary.BigEndian, true)
+	case UTF16LENoBOM:
+		return encodeUTF16(text, binary.LittleEndian, false)
+	case UTF16BENoBOM:
+		return encodeUTF16(text, binary.BigEndian, false)
 	case GB18030:
 		out, _, err := transform.Bytes(simplifiedchinese.GB18030.NewEncoder(), []byte(text))
 		if err != nil {
@@ -142,20 +194,21 @@ func decodeUTF16(b []byte, order binary.ByteOrder) []byte {
 	return []byte(string(utf16Decode(u)))
 }
 
-// encodeUTF16 converts a UTF-8 string to UTF-16 bytes with BOM.
-func encodeUTF16(text string, order binary.ByteOrder) []byte {
+// encodeUTF16 converts a UTF-8 string to UTF-16 bytes, with a BOM when withBOM.
+func encodeUTF16(text string, order binary.ByteOrder, withBOM bool) []byte {
 	runes := []rune(text)
 	encoded := utf16Encode(runes)
 
-	var bom [2]byte
-	if order == binary.LittleEndian {
-		bom[0], bom[1] = 0xFF, 0xFE
-	} else {
-		bom[0], bom[1] = 0xFE, 0xFF
-	}
-
 	var buf bytes.Buffer
-	buf.Write(bom[:])
+	if withBOM {
+		var bom [2]byte
+		if order == binary.LittleEndian {
+			bom[0], bom[1] = 0xFF, 0xFE
+		} else {
+			bom[0], bom[1] = 0xFE, 0xFF
+		}
+		buf.Write(bom[:])
+	}
 	for _, u := range encoded {
 		var b [2]byte
 		order.PutUint16(b[:], u)
