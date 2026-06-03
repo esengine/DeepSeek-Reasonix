@@ -12,6 +12,46 @@ import (
 	"reasonix/internal/config"
 )
 
+func TestChdirTo(t *testing.T) {
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if rc := chdirTo(""); rc != 0 {
+		t.Fatalf(`chdirTo("") = %d, want 0`, rc)
+	}
+	if cwd, _ := os.Getwd(); cwd != orig {
+		t.Fatalf(`chdirTo("") moved cwd to %q`, cwd)
+	}
+
+	tmp := t.TempDir()
+	// Restore CWD before TempDir's RemoveAll runs (LIFO ordering): Windows can't
+	// delete a directory that is still the process working directory.
+	t.Cleanup(func() { _ = os.Chdir(orig) })
+	if rc := chdirTo(tmp); rc != 0 {
+		t.Fatalf("chdirTo(tmp) = %d, want 0", rc)
+	}
+	got, _ := filepath.EvalSymlinks(mustGetwd(t))
+	want, _ := filepath.EvalSymlinks(tmp)
+	if got != want {
+		t.Fatalf("cwd = %q, want %q", got, want)
+	}
+
+	if rc := chdirTo(filepath.Join(tmp, "does-not-exist")); rc != 2 {
+		t.Fatalf("chdirTo(missing) = %d, want 2", rc)
+	}
+}
+
+func mustGetwd(t *testing.T) string {
+	t.Helper()
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cwd
+}
+
 func TestMetadataCommandsDoNotProbeTerminalTheme(t *testing.T) {
 	defer func(prev func() (terminalRGB, bool)) {
 		queryTerminalBackgroundForTheme = prev

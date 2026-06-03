@@ -141,14 +141,32 @@ func setupQuiet(ctx context.Context, modelName string, maxStepsOverride int, req
 	})
 }
 
+// chdirTo honours --dir: it switches the working directory before anything reads
+// it, so config discovery, the sandbox root, and file tools all resolve from the
+// chosen project root. Returns 2 (already reported) on failure, 0 otherwise.
+func chdirTo(dir string) int {
+	if dir == "" {
+		return 0
+	}
+	if err := os.Chdir(dir); err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		return 2
+	}
+	return 0
+}
+
 func runAgent(args []string) int {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	model := fs.String("model", "", "provider name (default: config default_model)")
 	maxSteps := fs.Int("max-steps", 0, "max tool-call rounds (0 = use config/default)")
 	showThinking := fs.Bool("show-thinking", false, "show thinking text instead of the collapsed thinking marker")
 	metricsPath := fs.String("metrics", "", "write a JSON token/cache/cost summary of the run to this path")
+	dir := fs.String("dir", "", "change to this directory first (project root); config, sandbox and file tools resolve from here")
 	if err := fs.Parse(args); err != nil {
 		return 2
+	}
+	if rc := chdirTo(*dir); rc != 0 {
+		return rc
 	}
 	configureCLIThemeFromConfigForTTYOutput()
 
@@ -261,8 +279,12 @@ func chatREPL(args []string) int {
 	resume := fs.Bool("resume", false, "list saved sessions and pick one to resume")
 	yolo := fs.Bool("dangerously-skip-permissions", false, "YOLO: auto-approve every tool call this session (deny rules still apply)")
 	fs.BoolVar(yolo, "yolo", false, "alias for --dangerously-skip-permissions")
+	dir := fs.String("dir", "", "change to this directory first (project root); config, sandbox and file tools resolve from here")
 	if err := fs.Parse(args); err != nil {
 		return 2
+	}
+	if rc := chdirTo(*dir); rc != 0 {
+		return rc
 	}
 	if cfg, err := config.Load(); err == nil {
 		configureCLIThemeWithStyle(cfg.UITheme(), cfg.UIThemeStyle())
