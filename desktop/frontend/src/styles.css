@@ -709,7 +709,20 @@ body {
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 24%, transparent);
 }
 .layout--sidebar-collapsed .sidebar-resizer {
-  display: none;
+  /* Keep the resizer visible in collapsed mode so the user can drag the sidebar
+     back open. Offset from the narrow (68px) sidebar edge. */
+  display: block;
+  left: calc(var(--sidebar-width) - 3px);
+  cursor: col-resize;
+}
+.layout--sidebar-collapsed .sidebar-resizer::after {
+  /* A subtle hint that this edge is draggable */
+  background: var(--border);
+  opacity: 0.35;
+}
+.layout--sidebar-collapsed .sidebar-resizer:hover::after {
+  background: var(--accent);
+  opacity: 1;
 }
 .workspace-panel-resizer {
   --wails-draggable: no-drag;

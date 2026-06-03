@@ -393,6 +393,7 @@ export default function App() {
     });
   }, []);
 
+
   const handleWorkspacePreviewModeChange = useCallback((active: boolean) => {
     setWorkspacePreviewModeActive(active);
     if (active) {
@@ -659,6 +660,20 @@ export default function App() {
     : sidebarCollapsed
       ? t("sidebar.expand")
       : t("sidebar.collapse");
+
+  // Cmd+B / Ctrl+B toggles the sidebar
+  useEffect(() => {
+    const onKey = (e: Event) => {
+      const key = (e as any).key;
+      const mod = (e as any).metaKey || (e as any).ctrlKey;
+      if (mod && key === "b") {
+        e.preventDefault();
+        toggleSidebar();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [toggleSidebar]);
 
   return (
     <div className="app">
