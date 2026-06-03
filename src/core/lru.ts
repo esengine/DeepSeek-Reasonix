@@ -28,6 +28,10 @@ export class LruCache<K, V> {
   clear(): void {
     this.map.clear();
   }
+
+  delete(key: K): void {
+    this.map.delete(key);
+  }
 }
 
 /** LruCache with a per-entry TTL — a stale hit is treated as a miss and evicted. */
@@ -43,7 +47,10 @@ export class TtlLruCache<K, V> {
   get(key: K): V | undefined {
     const e = this.inner.get(key);
     if (!e) return undefined;
-    if (e.expiresAt <= Date.now()) return undefined;
+    if (e.expiresAt <= Date.now()) {
+      this.inner.delete(key);
+      return undefined;
+    }
     return e.v;
   }
 

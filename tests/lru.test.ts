@@ -94,4 +94,26 @@ describe("TtlLruCache", () => {
     expect(c.get("b")).toBe(2);
     expect(c.get("c")).toBe(3);
   });
+
+  it("evicts a stale entry on lookup and prevents it from surviving eviction", () => {
+    const c = new TtlLruCache<string, number>(2, 1000);
+    c.set("a", 1);
+    c.set("b", 2);
+    vi.advanceTimersByTime(1500);
+
+    // Stale lookup on "a". Should return undefined and evict "a".
+    expect(c.get("a")).toBeUndefined();
+
+    // Verify "a" was actually evicted from the underlying cache store
+    expect((c as any).inner.get("a")).toBeUndefined();
+    expect((c as any).inner.size).toBe(1);
+
+    // Set new keys to verify correct eviction behavior
+    c.set("c", 3); // size becomes 2: {"b", "c"}
+    c.set("d", 4); // oldest ("b") gets evicted: {"c", "d"}
+
+    expect((c as any).inner.get("c")).not.toBeUndefined();
+    expect((c as any).inner.get("d")).not.toBeUndefined();
+    expect((c as any).inner.get("b")).toBeUndefined();
+  });
 });
