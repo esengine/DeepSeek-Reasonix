@@ -1,3 +1,4 @@
+import { useDeferredValue } from "react";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -58,10 +59,16 @@ function normalizeMath(s: string): string {
 }
 
 export function Markdown({ text }: { text: string }) {
+  // useDeferredValue lets React prioritise the plain-text streaming frame over
+  // the expensive markdown parse+render. If a new text delta arrives while the
+  // markdown tree is still diffing, React can abort the in-progress render and
+  // start fresh with the latest text — keeping the UI responsive during the
+  // final markdown pass on long responses.
+  const deferred = useDeferredValue(text);
   return (
     <div className="md">
       <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]} components={components}>
-        {normalizeMath(text)}
+        {normalizeMath(deferred)}
       </ReactMarkdown>
     </div>
   );
