@@ -213,6 +213,24 @@ func TestToolWorkingLineThenClears(t *testing.T) {
 	}
 }
 
+func TestTodoPanelKeepsLastSuccessfulTodoWrite(t *testing.T) {
+	m := newTestChatTUI()
+	initial := `{"todos":[{"content":"Sync main-v2","status":"in_progress"},{"content":"Push origin","status":"pending"}]}`
+	failed := `{"todos":[{"content":"Sync main-v2","status":"completed"},{"content":"Push origin","status":"in_progress"}]}`
+
+	m.ingestEvent(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{ID: "todo-1", Name: "todo_write", Args: initial}})
+	m.ingestEvent(event.Event{Kind: event.ToolResult, Tool: event.Tool{ID: "todo-1", Name: "todo_write", Args: initial, Output: "Todos updated"}})
+	if m.todoArgs != initial {
+		t.Fatalf("todoArgs after successful result = %q, want initial args", m.todoArgs)
+	}
+
+	m.ingestEvent(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{ID: "todo-2", Name: "todo_write", Args: failed}})
+	m.ingestEvent(event.Event{Kind: event.ToolResult, Tool: event.Tool{ID: "todo-2", Name: "todo_write", Args: failed, Err: "missing complete_step"}})
+	if m.todoArgs != initial {
+		t.Fatalf("failed todo_write must not replace the panel: got %q, want %q", m.todoArgs, initial)
+	}
+}
+
 // TestToolProgressTailCap proves the live block only keeps the last
 // toolStreamTailLines lines so a chatty build doesn't flood scrollback.
 func TestToolProgressTailCap(t *testing.T) {

@@ -157,6 +157,36 @@ func (l *Ledger) HasSuccessfulTodoWrite() bool {
 	return false
 }
 
+func (l *Ledger) IncompleteLatestTodos() ([]TodoStepMatch, bool) {
+	if l == nil {
+		return nil, false
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for i := len(l.receipts) - 1; i >= 0; i-- {
+		r := l.receipts[i]
+		if !r.Success || r.ToolName != "todo_write" {
+			continue
+		}
+		incomplete := make([]TodoStepMatch, 0)
+		for j, t := range r.Todos {
+			status := todoStatus(t.Status)
+			if status == "completed" {
+				continue
+			}
+			incomplete = append(incomplete, TodoStepMatch{
+				Found:      true,
+				Index:      j + 1,
+				Content:    t.Content,
+				Status:     status,
+				ActiveForm: t.ActiveForm,
+			})
+		}
+		return incomplete, true
+	}
+	return nil, false
+}
+
 func (l *Ledger) HasSuccessfulWrite(paths []string) bool {
 	return l.hasSuccessfulPaths(paths, func(r Receipt) bool { return r.Write })
 }

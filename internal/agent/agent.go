@@ -435,17 +435,20 @@ func (a *Agent) finalReadinessFailure() string {
 	if a.evidence == nil {
 		return ""
 	}
+	var missing []string
+	if incomplete, hasTodos := a.evidence.IncompleteLatestTodos(); hasTodos && len(incomplete) > 0 {
+		missing = append(missing, finalReadinessIncompleteTodos(incomplete))
+	}
 	writer, hasWriter := a.evidence.LatestSuccessfulWriterIndex()
 	if !hasWriter {
-		return ""
+		return strings.Join(missing, "; ")
 	}
 	hasProjectChecks := len(a.projectChecks) > 0
 	hasTodoReceipt := a.evidence.HasSuccessfulTodoWrite()
-	if !hasProjectChecks && !hasTodoReceipt {
+	if !hasProjectChecks && !hasTodoReceipt && len(missing) == 0 {
 		return ""
 	}
 
-	var missing []string
 	for _, check := range a.projectChecks {
 		command := strings.TrimSpace(check.Command)
 		if command == "" {
@@ -462,6 +465,18 @@ func (a *Agent) finalReadinessFailure() string {
 		return ""
 	}
 	return strings.Join(missing, "; ")
+}
+
+func finalReadinessIncompleteTodos(items []evidence.TodoStepMatch) string {
+	parts := make([]string, 0, len(items))
+	for _, item := range items {
+		label := strings.TrimSpace(item.Content)
+		if label == "" {
+			label = fmt.Sprintf("todo %d", item.Index)
+		}
+		parts = append(parts, fmt.Sprintf("%s: %s", label, item.Status))
+	}
+	return "latest successful todo_write still has incomplete items: " + strings.Join(parts, ", ")
 }
 
 func finalReadinessCheckSource(check instruction.VerifyCheck) string {

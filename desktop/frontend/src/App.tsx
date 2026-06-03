@@ -237,14 +237,15 @@ export default function App() {
   }, [state.meta, mode, syncModeToController]);
 
   // The live task list pinned above the composer comes from the most recent
-  // top-level todo_write call; it stays visible while work remains, clears itself
-  // once every item is completed, and can be dismissed by the user (the ✕). A
-  // dismissal is keyed to that list's id, so a fresh todo_write (a new task)
-  // brings the panel back.
+  // successful top-level todo_write result; failed or still-running attempts do
+  // not advance the canonical panel state. It stays visible while work remains,
+  // clears itself once every item is completed, and can be dismissed by the user
+  // (the ✕). A dismissal is keyed to that list's id, so a fresh accepted
+  // todo_write brings the panel back.
   const todoItem = useMemo(() => {
     for (let i = state.items.length - 1; i >= 0; i--) {
       const it = state.items[i];
-      if (it.kind === "tool" && it.name === "todo_write" && !it.parentId) return it;
+      if (it.kind === "tool" && it.name === "todo_write" && !it.parentId && it.status === "done" && !it.error) return it;
     }
     return null;
   }, [state.items]);
