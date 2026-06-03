@@ -34,6 +34,9 @@ checksum:
 homebrew_casks:
   - name: reasonix
     ids: [reasonix]
+    # Prereleases (v*-rc*) must not update the stable tap; brew has no separate
+    # prerelease channel, so a pushed rc cask becomes the default `brew install`.
+    skip_upload: "auto"
     repository:
       owner: esengine
       name: homebrew-reasonix
