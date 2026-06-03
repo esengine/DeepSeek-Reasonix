@@ -104,10 +104,15 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "config migration from ~/.reasonix failed: " + migErr.Error()})
 	} else if migrated != nil {
 		sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: migrated.Notice()})
-		if home, herr := os.UserHomeDir(); herr == nil {
-			if n, serr := agent.MigrateLegacySessions(filepath.Join(home, ".reasonix", "sessions"), config.SessionDir()); serr == nil && n > 0 {
-				sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: fmt.Sprintf("imported %d past session(s) from ~/.reasonix/sessions — resume them with --resume or the history panel", n)})
-			}
+	}
+	// Back-fill v0.x sessions, independent of the config migration. This used to be
+	// nested under the (one-time) config migration above, so a v0.x user who had
+	// already opened v1 never got their old sessions imported (#2869). It is guarded
+	// by its own marker, so running every boot imports any not-yet-imported session
+	// once and is a cheap no-op afterwards.
+	if home, herr := os.UserHomeDir(); herr == nil {
+		if n, serr := agent.MigrateLegacySessions(filepath.Join(home, ".reasonix", "sessions"), config.SessionDir()); serr == nil && n > 0 {
+			sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: fmt.Sprintf("imported %d past session(s) from ~/.reasonix/sessions — resume them with --resume or the history panel", n)})
 		}
 	}
 

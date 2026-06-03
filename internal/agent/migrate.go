@@ -33,12 +33,21 @@ type legacyToolCall struct {
 	} `json:"function"`
 }
 
+// legacyImportMarker, once present in the v1+ session dir, records that the
+// one-time v0.x import has already run — so a session the user deletes after it
+// was imported doesn't reappear on the next launch.
+const legacyImportMarker = ".legacy-imported"
+
 // MigrateLegacySessions imports v0.x event-log sessions (<name>.events.jsonl under
-// srcDir) into the v1+ message-log format (<name>.jsonl under destDir). It is a
-// no-op when destDir already holds sessions (so it never imports twice) or srcDir
-// has none, and never modifies the legacy files. Returns the count imported.
+// srcDir) into the v1+ message-log format (<name>.jsonl under destDir), back-filling
+// any whose .jsonl isn't already present. It runs once — guarded by a marker file in
+// destDir — so it still imports when destDir already holds v1+ sessions (the old
+// all-or-nothing skip hid a v0.x user's history the moment they opened v1, #2869)
+// without re-importing on every launch. Never modifies the legacy files. Returns the
+// count imported.
 func MigrateLegacySessions(srcDir, destDir string) (int, error) {
-	if hasSessions(destDir) {
+	marker := filepath.Join(destDir, legacyImportMarker)
+	if _, err := os.Stat(marker); err == nil {
 		return 0, nil
 	}
 	entries, err := os.ReadDir(srcDir)
@@ -51,11 +60,14 @@ func MigrateLegacySessions(srcDir, destDir string) (int, error) {
 		if e.IsDir() || !strings.HasSuffix(name, ".events.jsonl") {
 			continue
 		}
+		dest := filepath.Join(destDir, strings.TrimSuffix(name, ".events.jsonl")+".jsonl")
+		if _, err := os.Stat(dest); err == nil {
+			continue // already imported, or a v1+ session of the same name
+		}
 		msgs, err := reconstructSession(filepath.Join(srcDir, name))
 		if err != nil || len(msgs) == 0 {
 			continue
 		}
-		dest := filepath.Join(destDir, strings.TrimSuffix(name, ".events.jsonl")+".jsonl")
 		s := &Session{Messages: msgs}
 		if err := s.Save(dest); err != nil {
 			return imported, err
@@ -65,20 +77,10 @@ func MigrateLegacySessions(srcDir, destDir string) (int, error) {
 		}
 		imported++
 	}
+	if err := os.MkdirAll(destDir, 0o755); err == nil {
+		os.WriteFile(marker, nil, 0o644)
+	}
 	return imported, nil
-}
-
-func hasSessions(dir string) bool {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return false
-	}
-	for _, e := range entries {
-		if !e.IsDir() && filepath.Ext(e.Name()) == ".jsonl" {
-			return true
-		}
-	}
-	return false
 }
 
 // reconstructSession folds the chronological event stream into the provider
