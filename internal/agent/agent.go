@@ -209,6 +209,12 @@ type Agent struct {
 	// (a different failure shape, or any success). See applyStormBreaker.
 	stormSig   string
 	stormCount int
+
+	// outCache caches read-only tool results (read_file, grep, ls, glob) so
+	// repeated calls with identical arguments return instantly. This is common
+	// when the model re-reads a file it already examined or re-runs a grep
+	// after a compaction. The cache is LRU-bounded and concurrent-safe.
+	outCache *toolCache
 }
 
 // SetPlanMode flips the read-only gate. While true, executeOne refuses any
@@ -355,6 +361,7 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		compactRatio:  opts.CompactRatio,
 		recentKeep:    opts.RecentKeep,
 		archiveDir:    opts.ArchiveDir,
+		outCache:      newToolCache(),
 	}
 }
 
@@ -840,6 +847,15 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 			}
 		}
 	}
+	// Check the read-only tool cache before executing. Read-only tools with
+	// identical arguments (e.g. re-reading the same file) return the cached
+	// result instantly, saving execution time and context tokens.
+	if t.ReadOnly() {
+		if cached, ok := a.outCache.Get(call.Name, call.Arguments); ok {
+			return toolOutcome{output: cached}
+		}
+	}
+
 	cctx := withCallContext(ctx, call.ID, a.sink, a.asker)
 	if a.evidence != nil {
 		cctx = evidence.WithLedger(cctx, a.evidence)
@@ -891,6 +907,12 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 		a.hooks.SubagentStop(ctx, result)
 	}
 	body, truncMsg := truncateToolOutput(result)
+	// Cache successful read-only tool results for potential reuse. Truncated
+	// results are not cached — they're lossy, and a second call with the same
+	// args might produce different output if the source changed.
+	if t.ReadOnly() && truncMsg == "" {
+		a.outCache.Put(call.Name, call.Arguments, body)
+	}
 	return toolOutcome{output: body, truncated: truncMsg != "", truncMsg: truncMsg}
 }
 
