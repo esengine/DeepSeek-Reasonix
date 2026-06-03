@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -863,5 +864,31 @@ func TestAgentEventCoalescesBurst(t *testing.T) {
 	}
 	if len(m.eventCh) != 0 {
 		t.Errorf("channel should be fully drained, %d left", len(m.eventCh))
+	}
+}
+
+func TestShortTokens(t *testing.T) {
+	cases := []struct {
+		n    int
+		want string
+	}{
+		{0, "0"},
+		{999, "999"},
+		{1000, "1.0K"},
+		{1500, "1.5K"},
+		{1999, "2.0K"},
+		{9999, "10.0K"},
+		{142000, "142.0K"},
+		{999999, "1.0M"},
+		{1000000, "1.0M"},
+		{1500000, "1.5M"},
+	}
+	for _, tc := range cases {
+		t.Run(fmt.Sprintf("n=%d", tc.n), func(t *testing.T) {
+			got := shortTokens(tc.n)
+			if got != tc.want {
+				t.Errorf("shortTokens(%d) = %q, want %q", tc.n, got, tc.want)
+			}
+		})
 	}
 }

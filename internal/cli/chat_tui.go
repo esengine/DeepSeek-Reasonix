@@ -1792,13 +1792,13 @@ func (m chatTUI) effortTag() string {
 	return dim(body)
 }
 
-// shortTokens prints token counts compactly: 142_000 → "142K", 1_000_000 → "1M".
+// shortTokens prints token counts compactly: 1_500 → "1.5K", 142_000 → "142.0K", 1_000_000 → "1.0M".
 func shortTokens(n int) string {
 	switch {
-	case n >= 1_000_000:
+	case n >= 999_950:
 		return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
 	case n >= 1_000:
-		return fmt.Sprintf("%dK", n/1_000)
+		return fmt.Sprintf("%.1fK", float64(n)/1_000)
 	default:
 		return fmt.Sprintf("%d", n)
 	}
