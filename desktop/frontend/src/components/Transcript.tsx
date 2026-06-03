@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Item } from "../lib/useController";
+import { useScrollBatch } from "../lib/useScrollBatch";
 import { AssistantMessage, UserMessage } from "./Message";
 import { ToolCard } from "./ToolCard";
 import { Welcome } from "./Welcome";
@@ -45,27 +46,30 @@ export function Transcript({
   // together with plain-text streaming this keeps the view from jittering. The
   // dependency tracks rendered content, not just array identity, so streaming
   // still follows the bottom if a reducer reuses the items array.
+  //
+  // useScrollBatch coalesces multiple rapid deltas per frame into a single
+  // scrollTop assignment, reducing layout thrash during fast streaming.
   const contentVersion = scrollVersion(items);
+  const scheduleScroll = useScrollBatch(scrollRef, stick.current);
   useEffect(() => {
     if (!stick.current) return;
-    const el = scrollRef.current;
-    if (!el) return;
-    const id = requestAnimationFrame(() => {
-      el.scrollTop = el.scrollHeight;
-    });
-    return () => cancelAnimationFrame(id);
-  }, [contentVersion]);
+    scheduleScroll();
+  }, [contentVersion, scheduleScroll]);
 
   // Sub-agent calls carry a parentId; collect them under their parent `task`
   // call so the parent card can render them nested, and skip them at top level.
-  const subcallsByParent = new Map<string, ToolItem[]>();
-  for (const it of items) {
-    if (it.kind === "tool" && it.parentId) {
-      const arr = subcallsByParent.get(it.parentId) ?? [];
-      arr.push(it);
-      subcallsByParent.set(it.parentId, arr);
+  // Memoized so the map identity is stable when items haven't changed.
+  const subcallsByParent = useMemo(() => {
+    const map = new Map<string, ToolItem[]>();
+    for (const it of items) {
+      if (it.kind === "tool" && it.parentId) {
+        const arr = map.get(it.parentId) ?? [];
+        arr.push(it);
+        map.set(it.parentId, arr);
+      }
     }
-  }
+    return map;
+  }, [items]);
 
   // The rewind menu's open state is lifted here so at most one is open at a time;
   // a mousedown outside any .rewind closes it.
