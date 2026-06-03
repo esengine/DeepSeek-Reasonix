@@ -26,9 +26,11 @@ BINNAME="reasonix-desktop"    # wails.json outputfilename -> linux binary name
 cd "$ROOT/desktop"
 
 # Stamp the version resource (Windows file properties, macOS CFBundleVersion) from
-# the tag. Wails reads info.productVersion from wails.json; goversioninfo needs it
-# numeric, so a leading "v" must go or the whole version block is silently dropped.
-numver="${VERSION#v}"
+# the tag. Wails feeds info.productVersion into goversioninfo and NSIS's
+# VIFileVersion, both of which demand a strictly numeric X.X.X, so strip the
+# leading "v" AND any prerelease suffix (a `-rc1` tag would otherwise abort the
+# installer build). The full tag still rides in ldflags for the in-app version.
+numver="${VERSION#v}"; numver="${numver%%-*}"
 node -e 'const fs=require("fs"),f="wails.json",j=JSON.parse(fs.readFileSync(f,"utf8"));j.info.productVersion=process.argv[1];fs.writeFileSync(f,JSON.stringify(j,null,2)+"\n")' "$numver"
 
 # NSIS installer is Windows-only (Wails requires a single windows target for -nsis).
