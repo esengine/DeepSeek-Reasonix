@@ -324,9 +324,10 @@ func chatREPL(args []string) int {
 
 	sink := &eventSink{ch: eventCh}
 	ctrl, err := setup(ctx, *model, *maxSteps, false, sink)
-	if err != nil && errors.Is(err, boot.ErrUnknownModel) && isInteractive() {
-		// The configured model no longer resolves (e.g. a renamed/removed
-		// provider). Re-run the wizard instead of dead-ending, then retry.
+	if err != nil && errors.Is(err, boot.ErrUnknownModel) && isInteractive() && config.SourcePath() == "" {
+		// True first run whose default model can't resolve: guide setup, then retry.
+		// With a config present, fall through to the descriptive error — re-running
+		// the wizard would overwrite the user's config (#2856).
 		fmt.Fprintln(os.Stderr, i18n.M.ReconfigureOnUnknownModel)
 		if rc := interactiveSetup(defaultConfigTarget(), defaultEnvTarget()); rc != 0 {
 			return rc
