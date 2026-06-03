@@ -109,6 +109,36 @@ func TestSetEffortRejectsRunningTurn(t *testing.T) {
 	waitNotRunning(t, app.ctrl)
 }
 
+func TestSearchFileRefsFindsNestedBasename(t *testing.T) {
+	orig, _ := os.Getwd()
+	defer os.Chdir(orig)
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "frontend", "wailsjs", "runtime"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "frontend", "wailsjs", "runtime", "runtime.js"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "node_modules", "pkg"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "node_modules", "pkg", "runtime.js"), []byte("noise"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	got := (&App{}).SearchFileRefs("runtime.js")
+	if !hasDirEntry(got, "frontend/wailsjs/runtime/runtime.js") {
+		t.Fatalf("SearchFileRefs(runtime.js) should find nested workspace file, got %+v", got)
+	}
+	if hasDirEntry(got, "node_modules/pkg/runtime.js") {
+		t.Fatalf("SearchFileRefs should skip node_modules noise, got %+v", got)
+	}
+}
+
 func TestDeleteSessionRejectsActiveRelativePath(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
@@ -580,6 +610,15 @@ func hasLevel(levels []string, want string) bool {
 func hasCommand(cmds []CommandInfo, name string) bool {
 	for _, cmd := range cmds {
 		if cmd.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func hasDirEntry(entries []DirEntry, name string) bool {
+	for _, entry := range entries {
+		if entry.Name == name {
 			return true
 		}
 	}

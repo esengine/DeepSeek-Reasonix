@@ -24,6 +24,7 @@ import (
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
+	"reasonix/internal/fileref"
 	fileenc "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/i18n"
 	"reasonix/internal/mcpdiag"
@@ -1758,6 +1759,7 @@ type WorkspaceChangesView struct {
 var atSkip = map[string]bool{".git": true, "node_modules": true, ".DS_Store": true}
 
 const filePreviewLimit = 256 * 1024
+const fileRefSearchLimit = 20
 
 func trimUTF8PartialSuffix(data []byte) []byte {
 	if utf8.Valid(data) {
@@ -1838,6 +1840,20 @@ func (a *App) ListDir(rel string) []DirEntry {
 	sort.Slice(dirs, func(i, j int) bool { return strings.ToLower(dirs[i].Name) < strings.ToLower(dirs[j].Name) })
 	sort.Slice(files, func(i, j int) bool { return strings.ToLower(files[i].Name) < strings.ToLower(files[j].Name) })
 	return append(dirs, files...)
+}
+
+// SearchFileRefs finds workspace files by basename for bare "@token" completion.
+func (a *App) SearchFileRefs(query string) []DirEntry {
+	base, err := os.Getwd()
+	if err != nil {
+		return nil
+	}
+	paths := fileref.Search(base, query, fileRefSearchLimit)
+	out := make([]DirEntry, 0, len(paths))
+	for _, path := range paths {
+		out = append(out, DirEntry{Name: path, IsDir: false})
+	}
+	return out
 }
 
 // ReadFile returns a small text preview for a file under the current workspace.

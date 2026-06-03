@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -158,6 +159,52 @@ func TestFileItemsOneLevel(t *testing.T) {
 		if it.label == "sub/" && !it.descend {
 			t.Error("directory entry should be a descend")
 		}
+	}
+}
+
+func TestFileItemsSearchesBasenameAtTopLevel(t *testing.T) {
+	orig, _ := os.Getwd()
+	defer os.Chdir(orig)
+
+	dir := t.TempDir()
+	writeAt(t, dir, "frontend/wailsjs/runtime/runtime.js", "x")
+	writeAt(t, dir, "node_modules/pkg/runtime.js", "noise")
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	m := newTestChatTUI()
+	items := m.fileItems("runtime.js")
+
+	if !hasLabel(items, "frontend/wailsjs/runtime/runtime.js") {
+		t.Fatalf("top-level @runtime.js should offer nested file path, got %v", labels(items))
+	}
+	if hasLabel(items, "node_modules/pkg/runtime.js") {
+		t.Fatalf("file search should skip node_modules noise, got %v", labels(items))
+	}
+}
+
+func TestFileItemsSearchRespectsMenuCap(t *testing.T) {
+	orig, _ := os.Getwd()
+	defer os.Chdir(orig)
+
+	dir := t.TempDir()
+	for i := 0; i < maxCompItems; i++ {
+		writeAt(t, dir, filepath.Join("aa-dir-"+fmt.Sprintf("%03d", i), "file.txt"), "x")
+	}
+	writeAt(t, dir, "nested/aa-deep.js", "y")
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	m := newTestChatTUI()
+	items := m.fileItems("aa")
+
+	if len(items) != maxCompItems {
+		t.Fatalf("fileItems should stay capped at %d entries, got %d", maxCompItems, len(items))
+	}
+	if hasLabel(items, "nested/aa-deep.js") {
+		t.Fatalf("search result should not exceed capped menu: %v", labels(items))
 	}
 }
 

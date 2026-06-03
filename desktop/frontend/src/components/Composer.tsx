@@ -223,7 +223,9 @@ export function Composer({
   }, [atRaw]);
 
   const [entries, setEntries] = useState<DirEntry[]>([]);
+  const [searchEntries, setSearchEntries] = useState<DirEntry[]>([]);
   const dirCache = useRef<Record<string, DirEntry[]>>({});
+  const searchCache = useRef<Record<string, DirEntry[]>>({});
   useEffect(() => {
     if (atRaw === null) return;
     const cached = dirCache.current[atDir];
@@ -245,9 +247,42 @@ export function Composer({
     };
     // re-fetch only when the menu opens or the directory level changes
   }, [atRaw === null, atDir]);
+  useEffect(() => {
+    if (atRaw === null || atDir !== "" || atFrag === "") {
+      setSearchEntries([]);
+      return;
+    }
+    const cached = searchCache.current[atFrag];
+    if (cached) {
+      setSearchEntries(cached);
+      return;
+    }
+    setSearchEntries([]);
+    let live = true;
+    app
+      .SearchFileRefs(atFrag)
+      .then((es) => {
+        const list = es ?? [];
+        searchCache.current[atFrag] = list;
+        if (live) setSearchEntries(list);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [atRaw === null, atDir, atFrag]);
   const atMatches = useMemo(
-    () => (atRaw === null ? [] : entries.filter((e) => e.name.toLowerCase().includes(atFrag)).slice(0, 10)),
-    [atRaw, atFrag, entries],
+    () => {
+      if (atRaw === null) return [];
+      const local = entries.filter((e) => e.name.toLowerCase().includes(atFrag));
+      const seen = new Set(local.map((e) => e.name));
+      const searched = searchEntries.filter((e) => {
+        const basename = e.name.split("/").pop()?.toLowerCase() ?? "";
+        return basename.includes(atFrag) && !seen.has(e.name);
+      });
+      return [...local, ...searched].slice(0, 10);
+    },
+    [atRaw, atFrag, entries, searchEntries],
   );
 
   // --- which menu (if any) is open --- (slash command names win; then slash

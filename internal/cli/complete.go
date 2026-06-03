@@ -9,6 +9,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"reasonix/internal/control"
+	"reasonix/internal/fileref"
 	"reasonix/internal/i18n"
 	"reasonix/internal/skill"
 )
@@ -51,6 +52,8 @@ const (
 	// pathologically large directory can't blow up the menu — we read only one
 	// level (os.ReadDir), never the whole tree.
 	maxCompItems = 200
+	// maxFileSearchItems caps basename search results for bare @tokens.
+	maxFileSearchItems = 20
 )
 
 // slashItems is the full set of slash commands offered for completion: the
@@ -298,6 +301,23 @@ func (m *chatTUI) fileItems(token string) []compItem {
 	// At the top level (still naming the first segment) MCP resources share the
 	// '@' namespace, so offer the matching ones too.
 	if !strings.Contains(token, "/") {
+		seen := map[string]bool{}
+		for _, it := range items {
+			seen[strings.TrimPrefix(it.insert, "@")] = true
+		}
+		remaining := maxCompItems - len(items)
+		if remaining > maxFileSearchItems {
+			remaining = maxFileSearchItems
+		}
+		for _, path := range fileref.Search(".", frag, remaining) {
+			if seen[path] {
+				continue
+			}
+			items = append(items, compItem{label: path, insert: "@" + path, hint: "file"})
+			if len(items) >= maxCompItems {
+				break
+			}
+		}
 		items = append(items, m.resourceItems("", token)...)
 	}
 	return items
