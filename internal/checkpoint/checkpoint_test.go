@@ -137,3 +137,28 @@ func TestPersistenceRoundTrip(t *testing.T) {
 		t.Fatalf("NextTurn = %d, want 2", s2.NextTurn())
 	}
 }
+
+func TestLazyDirectoryCreation(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(t.TempDir(), "lazy-sess.ckpt")
+
+	// 1. Construct a Store with a non-empty dir string
+	s := New(dir, root)
+
+	// 2. Assert the directory does NOT exist yet
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("directory should not exist yet: %v", err)
+	}
+
+	// 3. Write/persist one checkpoint (via Begin)
+	s.Begin(0, "lazy", 0)
+
+	// 4. Assert the directory and the turn file now exist
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("directory should now exist: %v", err)
+	}
+	turnPath := filepath.Join(dir, "turn-0.json")
+	if _, err := os.Stat(turnPath); err != nil {
+		t.Fatalf("turn file should now exist: %v", err)
+	}
+}
