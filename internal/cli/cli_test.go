@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"reasonix/internal/config"
+	"reasonix/internal/provider"
 )
 
 func TestChdirTo(t *testing.T) {
@@ -264,6 +265,41 @@ func TestFamilyStaticModelsDedupes(t *testing.T) {
 	got := familyStaticModels(providers, []int{0, 1})
 	if !reflect.DeepEqual(got, []string{"x", "y", "z"}) {
 		t.Errorf("got %v, want x/y/z deduped", got)
+	}
+}
+
+// TestBuildFamilyEntriesSplitsPricing proves flash and pro land in separate
+// entries carrying their own price, rather than collapsing into one entry that
+// would bill pro at flash's rate.
+func TestBuildFamilyEntriesSplitsPricing(t *testing.T) {
+	flash := config.ProviderEntry{Name: "deepseek-flash", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash", Price: &provider.Pricing{Input: 1, Output: 2}}
+	pro := config.ProviderEntry{Name: "deepseek-pro", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro", Price: &provider.Pricing{Input: 3, Output: 6}}
+	got := buildFamilyEntries(flash, []config.ProviderEntry{flash, pro}, []string{"deepseek-v4-flash", "deepseek-v4-pro"})
+	if len(got) != 2 {
+		t.Fatalf("got %d entries, want 2", len(got))
+	}
+	byName := map[string]config.ProviderEntry{}
+	for _, e := range got {
+		byName[e.Name] = e
+	}
+	if e := byName["deepseek-flash"]; e.Model != "deepseek-v4-flash" || e.Price == nil || e.Price.Output != 2 {
+		t.Errorf("flash entry wrong: %+v (price %+v)", e, e.Price)
+	}
+	if e := byName["deepseek-pro"]; e.Model != "deepseek-v4-pro" || e.Price == nil || e.Price.Output != 6 {
+		t.Errorf("pro entry wrong: %+v (price %+v)", e, e.Price)
+	}
+}
+
+// TestBuildFamilyEntriesUnknownModelUsesProbe puts a live-only SKU (no matching
+// preset) under the probe entry rather than dropping it.
+func TestBuildFamilyEntriesUnknownModelUsesProbe(t *testing.T) {
+	flash := config.ProviderEntry{Name: "deepseek-flash", Model: "deepseek-v4-flash", Price: &provider.Pricing{Input: 1}}
+	got := buildFamilyEntries(flash, []config.ProviderEntry{flash}, []string{"deepseek-v4-flash", "deepseek-v9-experimental"})
+	if len(got) != 1 || got[0].Name != "deepseek-flash" {
+		t.Fatalf("got %+v, want one deepseek-flash entry", got)
+	}
+	if !reflect.DeepEqual(got[0].Models, []string{"deepseek-v4-flash", "deepseek-v9-experimental"}) {
+		t.Errorf("Models = %v, want both under the probe entry", got[0].Models)
 	}
 }
 

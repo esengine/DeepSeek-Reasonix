@@ -767,7 +767,11 @@ func selectEnabledProviders(providers []config.ProviderEntry) ([]config.Provider
 		for _, idx := range idxs {
 			selected = append(selected, models[idx])
 		}
-		enabled = append(enabled, buildFamilyEntry(probe, selected))
+		members := make([]config.ProviderEntry, 0, len(famMembers[familyKey]))
+		for _, idx := range famMembers[familyKey] {
+			members = append(members, providers[idx])
+		}
+		enabled = append(enabled, buildFamilyEntries(probe, members, selected)...)
 	}
 	return enabled, nil
 }
@@ -835,6 +839,41 @@ func fetchOrFallback(probe *config.ProviderEntry, famName string) []string {
 // vary per vendor but not per model. The Default pointer is reset to the
 // first selected model if it would otherwise reference a model the user
 // didn't pick (or was empty).
+// buildFamilyEntries splits the user's selection back across the family's preset
+// members so each model keeps its own entry — and therefore its own pricing,
+// context window, and balance URL. A family like DeepSeek ships flash and pro as
+// separate presets with different prices; collapsing them into one entry would
+// bill pro at flash's rate. Models the live /models list returned that match no
+// preset (a new SKU) fall under the probe entry. Member order is preserved;
+// within a member, selection order is preserved.
+func buildFamilyEntries(probe config.ProviderEntry, members []config.ProviderEntry, selected []string) []config.ProviderEntry {
+	tmpl := map[string]config.ProviderEntry{probe.Name: probe}
+	ownerName := map[string]string{}
+	for _, m := range members {
+		tmpl[m.Name] = m
+		for _, id := range m.ModelList() {
+			ownerName[id] = m.Name
+		}
+	}
+	var order []string
+	groups := map[string][]string{}
+	for _, sm := range selected {
+		name, ok := ownerName[sm]
+		if !ok {
+			name = probe.Name
+		}
+		if _, seen := groups[name]; !seen {
+			order = append(order, name)
+		}
+		groups[name] = append(groups[name], sm)
+	}
+	out := make([]config.ProviderEntry, 0, len(order))
+	for _, name := range order {
+		out = append(out, buildFamilyEntry(tmpl[name], groups[name]))
+	}
+	return out
+}
+
 func buildFamilyEntry(probe config.ProviderEntry, selected []string) config.ProviderEntry {
 	entry := probe
 	entry.Models = selected
