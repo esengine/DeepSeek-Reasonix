@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -143,10 +144,40 @@ func proxyFunc(spec ProxySpec) (func(*http.Request) (*url.URL, error), error) {
 		pf := cfg.ProxyFunc()
 		return func(req *http.Request) (*url.URL, error) { return pf(req.URL) }, nil
 	case ModeEnv:
-		return environmentProxyFunc(), nil
+		return withCNProviderDirect(environmentProxyFunc()), nil
 	default:
-		return autoProxyFunc(), nil
+		return withCNProviderDirect(autoProxyFunc()), nil
 	}
+}
+
+// withCNProviderDirect routes the built-in China-only provider endpoints straight
+// to origin in the automatic proxy modes. Clash/v2ray-style proxies route these
+// CN hosts through a foreign exit the origin resets mid-TLS (SSL_ERROR_SYSCALL,
+// #2803); the env/system proxy still applies to every other host. Opt out with
+// REASONIX_PROXY_CN_DIRECT=0 when egress is only reachable via the proxy.
+func withCNProviderDirect(pf func(*http.Request) (*url.URL, error)) func(*http.Request) (*url.URL, error) {
+	if !cnProviderDirectEnabled() {
+		return pf
+	}
+	return func(req *http.Request) (*url.URL, error) {
+		if builtinCNProviderHost(req.URL.Hostname()) {
+			return nil, nil
+		}
+		return pf(req)
+	}
+}
+
+func cnProviderDirectEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("REASONIX_PROXY_CN_DIRECT"))) {
+	case "0", "false", "no", "off":
+		return false
+	}
+	return true
+}
+
+func builtinCNProviderHost(host string) bool {
+	host = strings.ToLower(host)
+	return host == "xiaomimimo.com" || strings.HasSuffix(host, ".xiaomimimo.com")
 }
 
 func environmentProxyFunc() func(*http.Request) (*url.URL, error) {
