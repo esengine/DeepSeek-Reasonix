@@ -36,7 +36,9 @@ export async function searchFiles(
   }
   const matches: string[] = [];
   let totalBytes = 0;
+  let truncated = false;
   const walk = async (dir: string): Promise<void> => {
+    if (truncated) return;
     throwIfAborted(args.signal);
     let entries: import("node:fs").Dirent[];
     try {
@@ -45,6 +47,7 @@ export async function searchFiles(
       return;
     }
     for (const e of entries) {
+      if (truncated) return;
       throwIfAborted(args.signal);
       const full = pathMod.join(dir, e.name);
       const lower = e.name.toLowerCase();
@@ -52,7 +55,10 @@ export async function searchFiles(
       if (hit) {
         const rel = displayRel(ctx.rootDir, full);
         if (totalBytes + rel.length + 1 > ctx.maxListBytes) {
-          matches.push("[… search truncated — refine pattern …]");
+          if (!truncated) {
+            matches.push("[… search truncated — refine pattern …]");
+            truncated = true;
+          }
           return;
         }
         matches.push(rel);

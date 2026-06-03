@@ -419,6 +419,23 @@ describe("filesystem tools (built-in, sandbox-enforced)", () => {
         spy.mockRestore();
       }
     });
+
+    it("reports search truncated notice exactly once and stops walk", async () => {
+      const localTools = new ToolRegistry();
+      registerFilesystemTools(localTools, { rootDir: root, maxListBytes: 15 });
+
+      await fs.mkdir(join(root, "dirA"), { recursive: true });
+      await fs.mkdir(join(root, "dirB"), { recursive: true });
+      await fs.writeFile(join(root, "dirA", "match1.ts"), "x");
+      await fs.writeFile(join(root, "dirA", "match2.ts"), "x");
+      await fs.writeFile(join(root, "dirB", "match3.ts"), "x");
+
+      const out = await localTools.dispatch("search_files", JSON.stringify({ pattern: "match" }));
+      expect(out).toContain("[… search truncated — refine pattern …]");
+
+      const occurrences = out.split("[… search truncated — refine pattern …]").length - 1;
+      expect(occurrences).toBe(1);
+    });
   });
 
   describe("search_content", () => {
