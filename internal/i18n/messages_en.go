@@ -195,6 +195,7 @@ var English = Messages{
 	FetchModelsSuccessFmt:      "Found %d models for %s",
 	FetchModelsFailedFmt:       "Failed to fetch models for %s: %v",
 	FetchModelsUsingPresetsFmt: "Live fetch unavailable for %s, using preset model list",
+	FamilyKeyPromptFmt:         "Enter your %s API key to list available models (Enter to skip):",
 	SelectModelsLabel:          "Select models to enable for %s",
 	NoModelsAvailableFmt:       "%s: no models available, skipping",
 	CustomFetchEmpty:           "/models returned an empty list — falling back to manual entry",

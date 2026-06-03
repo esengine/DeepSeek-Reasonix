@@ -738,6 +738,16 @@ func selectEnabledProviders(providers []config.ProviderEntry) ([]config.Provider
 		probe := providers[famMembers[familyKey][0]]
 		famName := famInfo[familyKey].name
 
+		// Seed the probe's static list with every member of the family (e.g. the
+		// flash and pro SKUs), not just the first — so a failed /models probe
+		// falls back to the whole family instead of collapsing to one model.
+		probe.Models = familyStaticModels(providers, famMembers[familyKey])
+
+		// Collect the key before probing /models: a keyless probe 401s and the
+		// fallback would hide the live SKUs. Mirrors the custom/anthropic flows;
+		// configureKeys later sees the env var set and won't ask twice.
+		ensureProbeKey(&probe, famName)
+
 		models := fetchOrFallback(&probe, famName)
 		if len(models) == 0 {
 			fmt.Fprintf(os.Stderr, "  %s\n", dim(fmt.Sprintf(i18n.M.NoModelsAvailableFmt, famName)))
@@ -760,6 +770,39 @@ func selectEnabledProviders(providers []config.ProviderEntry) ([]config.Provider
 		enabled = append(enabled, buildFamilyEntry(probe, selected))
 	}
 	return enabled, nil
+}
+
+// familyStaticModels unions the preset model lists of every entry in the family,
+// preserving order and dropping duplicates. It is the fallback offered when the
+// live /models probe fails, so a family with separate flash/pro preset entries
+// still surfaces both rather than only the first member's model.
+func familyStaticModels(providers []config.ProviderEntry, idxs []int) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, i := range idxs {
+		for _, m := range providers[i].ModelList() {
+			if m != "" && !seen[m] {
+				seen[m] = true
+				out = append(out, m)
+			}
+		}
+	}
+	return out
+}
+
+// ensureProbeKey prompts once for the family's API key when it isn't already in
+// the environment, so the /models probe can run and return the live SKU list.
+// The value is set in the env for the probe; configureKeys persists it to .env
+// later and skips re-asking. A blank entry is fine — the static fallback covers it.
+func ensureProbeKey(probe *config.ProviderEntry, famName string) {
+	if probe.APIKeyEnv == "" || os.Getenv(probe.APIKeyEnv) != "" {
+		return
+	}
+	fmt.Printf("  %s\n", dim(fmt.Sprintf(i18n.M.FamilyKeyPromptFmt, famName)))
+	in := bufio.NewScanner(os.Stdin)
+	if key := strings.TrimSpace(ask(in, os.Stdout, "  "+probe.APIKeyEnv, "")); key != "" {
+		os.Setenv(probe.APIKeyEnv, key)
+	}
 }
 
 // fetchOrFallback tries the OpenAI-compatible GET /models endpoint

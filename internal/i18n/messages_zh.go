@@ -196,6 +196,7 @@ var Chinese = Messages{
 	FetchModelsSuccessFmt:      "发现 %d 个 %s 模型",
 	FetchModelsFailedFmt:       "获取 %s 模型失败: %v",
 	FetchModelsUsingPresetsFmt: "无法在线获取 %s 的模型，使用预设列表",
+	FamilyKeyPromptFmt:         "输入 %s 的 API key 以获取可用模型（回车跳过）：",
 	SelectModelsLabel:          "选择要启用的 %s 模型",
 	NoModelsAvailableFmt:       "%s: 没有可用模型，跳过",
 	CustomFetchEmpty:           "/models 返回为空，回退到手动输入",

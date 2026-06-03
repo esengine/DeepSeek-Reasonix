@@ -240,6 +240,33 @@ func TestFetchOrFallback(t *testing.T) {
 	})
 }
 
+// TestFamilyStaticModels proves the offline fallback unions every member of a
+// family (the flash + pro SKUs), not just the first — the regression that left
+// users with only flash when the live /models probe failed.
+func TestFamilyStaticModels(t *testing.T) {
+	providers := []config.ProviderEntry{
+		{Name: "deepseek-flash", Model: "deepseek-v4-flash"},
+		{Name: "deepseek-pro", Model: "deepseek-v4-pro"},
+		{Name: "mimo-flash", Model: "mimo-v2.5"},
+	}
+	got := familyStaticModels(providers, []int{0, 1})
+	want := []string{"deepseek-v4-flash", "deepseek-v4-pro"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+func TestFamilyStaticModelsDedupes(t *testing.T) {
+	providers := []config.ProviderEntry{
+		{Name: "a", Models: []string{"x", "y"}},
+		{Name: "b", Models: []string{"y", "z"}},
+	}
+	got := familyStaticModels(providers, []int{0, 1})
+	if !reflect.DeepEqual(got, []string{"x", "y", "z"}) {
+		t.Errorf("got %v, want x/y/z deduped", got)
+	}
+}
+
 // TestBuildFamilyEntry covers the three observable behaviors:
 //   - The selected models land in the entry's Models field, with Model
 //     pointed at the first one so legacy single-model lookups still work.
