@@ -1255,11 +1255,20 @@ func readStdin() string {
 func welcome(version string) int {
 	src := config.SourcePath()
 
+	// Try loading config early — it merges user-global + cwd-local sources.
+	// A valid load means the user has configured before (possibly in another
+	// directory), so we should NOT re-trigger the setup wizard.
+	cfg, cfgErr := config.Load()
+	if cfgErr != nil {
+		cfg = config.Default()
+	}
+
 	// First run on an interactive terminal: actively guide setup rather than
 	// printing a static screen and exiting. interactiveSetup owns the language
 	// prompt and welcome banner so every prompt the user sees is already
-	// localized to their choice.
-	if src == "" && isInteractive() {
+	// localized to their choice. Only trigger when no config loads from ANY
+	// source (neither cwd-local nor user-global).
+	if src == "" && cfgErr != nil && isInteractive() {
 		if rc := interactiveSetup("reasonix.toml"); rc != 0 {
 			return rc
 		}
@@ -1276,17 +1285,12 @@ func welcome(version string) int {
 		return 0
 	}
 
-	cfg, cfgErr := config.Load()
-	if cfgErr != nil {
-		cfg = config.Default()
-	}
-
-	// reasonix.toml exists and parses on a terminal: go into chat. If any enabled
-	// provider's key isn't set yet, re-run the wizard's key-entry step inline
-	// — first run already chose language and providers, so we don't re-ask
-	// those. Skipping the prompts is still fine; the chat banner falls back to
-	// a one-line warning.
-	if src != "" && cfgErr == nil && isInteractive() {
+	// Config loads successfully (from any source) on a terminal: go into chat.
+	// If any enabled provider's key isn't set yet, re-run the wizard's key-entry
+	// step inline — first run already chose language and providers, so we don't
+	// re-ask those. Skipping the prompts is still fine; the chat banner falls
+	// back to a one-line warning.
+	if cfgErr == nil && isInteractive() {
 		if rc := promptMissingKeys(cfg); rc != 0 {
 			return rc
 		}
