@@ -935,19 +935,19 @@ export default function App() {
             {state.approval && (
               <ApprovalModal
                 approval={state.approval}
-                onAnswer={(allow, session) => {
+                onAnswer={(allow, session, persist) => {
                   // Approving an exit_plan_mode plan leaves plan mode (the controller
                   // flips the executor; mirror it here for the indicator).
                   if (state.approval!.tool === "exit_plan_mode" && allow) setMode("normal");
-                  approve(state.approval!.id, allow, session);
+                  approve(state.approval!.id, allow, session, persist);
                 }}
                 onRevisePlan={(text) => {
                   setPendingPlanRevision(text);
-                  approve(state.approval!.id, false, false);
+                  approve(state.approval!.id, false, false, false);
                 }}
                 onExitPlan={() => {
                   applyMode("normal");
-                  approve(state.approval!.id, false, false);
+                  approve(state.approval!.id, false, false, false);
                 }}
               />
             )}

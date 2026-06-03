@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -502,6 +503,23 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		PluginCtx:     ctx,
 		WorkspaceRoot: cwd,
 		AutoPlan:      cfg.Agent.AutoPlan,
+		OnRemember: func(rule string) {
+			path := config.SourcePath()
+			if path == "" {
+				path = "reasonix.toml" // match Config.Save() fallback
+			}
+			edit := config.LoadForEdit(path)
+			if edit == nil {
+				return
+			}
+			if err := edit.AddPermissionRule("allow", rule); err != nil {
+				slog.Warn("persist permission rule", "rule", rule, "err", err)
+				return
+			}
+			if err := edit.Save(); err != nil {
+				slog.Warn("save config after permission rule", "err", err)
+			}
+		},
 	}
 	if classifier != nil {
 		ctrlOpts.Classifier = classifier

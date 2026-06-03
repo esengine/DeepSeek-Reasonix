@@ -575,9 +575,9 @@ export function useController() {
     return undefined;
   }, []);
 
-  const approve = useCallback((id: string, allow: boolean, session: boolean) => {
+  const approve = useCallback((id: string, allow: boolean, session: boolean, persist: boolean) => {
     dispatch({ type: "clearApproval" });
-    app.Approve(id, allow, session).catch(() => {});
+    app.Approve(id, allow, session, persist).catch(() => {});
   }, []);
 
   // answerQuestion resolves an ask_request with the user's per-question picks.
