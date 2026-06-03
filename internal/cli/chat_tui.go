@@ -247,6 +247,9 @@ type chatTUI struct {
 
 	// completion is the live autocomplete menu (slash commands; @-refs later).
 	completion completion
+	// fileSearchCache memoizes fileref.Search by query so the bounded walk runs
+	// once per @token fragment, not on every keystroke that re-renders the menu.
+	fileSearchCache map[string][]string
 }
 
 type tuiState int

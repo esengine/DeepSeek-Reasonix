@@ -310,7 +310,11 @@ func (m *chatTUI) fileItems(token string) []compItem {
 		if remaining > maxFileSearchItems {
 			remaining = maxFileSearchItems
 		}
-		for _, path := range fileref.Search(".", frag, remaining) {
+		results := m.searchFileRefs(frag)
+		if len(results) > remaining {
+			results = results[:remaining]
+		}
+		for _, path := range results {
 			if seen[path] {
 				continue
 			}
@@ -322,6 +326,20 @@ func (m *chatTUI) fileItems(token string) []compItem {
 		items = append(items, m.resourceItems("", token)...)
 	}
 	return items
+}
+
+// searchFileRefs memoizes the bounded basename walk so re-rendering the menu
+// for an unchanged @token fragment doesn't re-walk the workspace each keystroke.
+func (m *chatTUI) searchFileRefs(frag string) []string {
+	if m.fileSearchCache == nil {
+		m.fileSearchCache = map[string][]string{}
+	}
+	if r, ok := m.fileSearchCache[frag]; ok {
+		return r
+	}
+	r := fileref.Search(".", frag, maxFileSearchItems)
+	m.fileSearchCache[frag] = r
+	return r
 }
 
 // splitPathToken splits a path token into (dir, frag): dir keeps its trailing

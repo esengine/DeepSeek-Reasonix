@@ -12,7 +12,6 @@ var skipDirs = map[string]bool{
 	"node_modules": true,
 	"dist":         true,
 	"build":        true,
-	".DS_Store":    true,
 }
 
 const (
