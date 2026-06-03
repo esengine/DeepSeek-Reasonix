@@ -97,6 +97,50 @@ func (c *Controller) HasRefs(line string) bool {
 	return len(c.detectRefs(line)) > 0
 }
 
+// resolveBareNames batch-resolves simple filenames (no path separator) that
+// don't exist in cwd. It walks the working tree once and matches every
+// unresolved name against the set, stopping when all are found. This runs in
+// the async ResolveRefs path, never on the TUI event loop.
+func resolveBareNames(refs []ref) []ref {
+	need := map[string]*ref{}
+	var names []string
+	for i := range refs {
+		r := &refs[i]
+		if r.kind != refFile || strings.ContainsAny(r.raw, "/\\") {
+			continue
+		}
+		if _, err := os.Stat(r.raw); err == nil {
+			continue
+		}
+		need[r.raw] = r
+		names = append(names, r.raw)
+	}
+	if len(names) == 0 {
+		return refs
+	}
+	found := 0
+	cwd, _ := os.Getwd()
+	filepath.WalkDir(cwd, func(p string, d os.DirEntry, wErr error) error {
+		if wErr != nil || found == len(names) {
+			return filepath.SkipAll
+		}
+		if d.IsDir() {
+			switch d.Name() {
+			case ".git", "node_modules", ".DS_Store", "__pycache__", ".idea", ".vscode":
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if r, ok := need[d.Name()]; ok {
+			rel, _ := filepath.Rel(cwd, p)
+			r.path = filepath.ToSlash(rel)
+			found++
+		}
+		return nil
+	})
+	return refs
+}
+
 // FileRefLine reports whether a submitted line is nothing but a path to an
 // existing file — a dragged or pasted file lands as its bare path, which on
 // POSIX starts with '/' and would otherwise be misread as a slash command. The
@@ -117,8 +161,10 @@ func FileRefLine(line string) (string, bool) {
 // strings for any that failed. An empty block means no references resolved.
 // Safe to call off a frontend's event loop; honours ctx for the resource reads.
 func (c *Controller) ResolveRefs(ctx context.Context, line string) (block string, errs []string) {
+	refs := c.detectRefs(line)
+	refs = resolveBareNames(refs)
 	var b strings.Builder
-	for _, r := range c.detectRefs(line) {
+	for _, r := range refs {
 		switch r.kind {
 		case refResource:
 			text, err := c.host.ReadResource(ctx, r.server, r.uri)
@@ -152,12 +198,14 @@ func appendRefBlock(b *strings.Builder, tag, attr, body string) {
 	fmt.Fprintf(b, "<%s %s>\n%s\n</%s>", tag, attr, body, tag)
 }
 
+// maxDirEntries caps how many directory entries are injected so @some-huge-dir
+// can't blow the context window.
+const maxDirEntries = 100
+
 // readFileRef reads an @-referenced path for injection. A directory yields a
-// recursive listing (walked depth-first so the model sees the full tree); a
-// binary file (NUL in the first 8 KiB) is noted rather than dumped; a large file
-// is truncated to maxFileRefBytes with a marker. isDir lets the caller pick the
-// wrapping tag. Common noise directories (.git, node_modules, .DS_Store) are
-// skipped during the walk.
+// recursive listing capped at maxDirEntries; a binary file (NUL in the first
+// 8 KiB) is noted rather than dumped; a large file is truncated to
+// maxFileRefBytes with a marker. isDir lets the caller pick the wrapping tag.
 func readFileRef(path string) (content string, isDir bool, err error) {
 	info, err := os.Stat(path)
 	if err != nil {
@@ -165,25 +213,20 @@ func readFileRef(path string) (content string, isDir bool, err error) {
 	}
 	if info.IsDir() {
 		var b strings.Builder
+		n := 0
 		err := filepath.WalkDir(path, func(p string, d os.DirEntry, wErr error) error {
-			if wErr != nil {
-				return wErr
+			if wErr != nil || n >= maxDirEntries {
+				return filepath.SkipAll
 			}
-			// Skip the root itself — we only list its children.
 			if p == path {
 				return nil
 			}
-			name := d.Name()
-			// Skip common noise directories.
 			if d.IsDir() {
-				switch name {
+				switch d.Name() {
 				case ".git", "node_modules", ".DS_Store", "__pycache__", ".idea", ".vscode":
 					return filepath.SkipDir
 				}
 			}
-			// Render the path relative to the referenced directory so the
-			// listing is concise and unambiguous. Use forward slashes for
-			// cross-platform consistency.
 			rel, rErr := filepath.Rel(path, p)
 			if rErr != nil {
 				rel = p
@@ -194,8 +237,12 @@ func readFileRef(path string) (content string, isDir bool, err error) {
 			}
 			b.WriteString(rel)
 			b.WriteByte('\n')
+			n++
 			return nil
 		})
+		if n >= maxDirEntries {
+			b.WriteString("\n…[truncated; directory has more entries]…")
+		}
 		if err != nil {
 			return "", true, err
 		}
