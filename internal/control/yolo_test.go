@@ -132,3 +132,53 @@ func TestSetBypassAllowsPendingApproval(t *testing.T) {
 		t.Fatal("bypass should remain on after draining pending approvals")
 	}
 }
+
+// TestSetModeYoloDrainsPendingApproval is the SetMode-path twin of the SetBypass
+// case: applying YOLO atomically must also unblock an approval already waiting.
+func TestSetModeYoloDrainsPendingApproval(t *testing.T) {
+	c, ids, _ := approvalIDs()
+
+	done := make(chan bool, 1)
+	go func() {
+		allow, _, _ := c.requestApproval(context.Background(), "multi_edit", "/tmp/file")
+		done <- allow
+	}()
+
+	select {
+	case <-ids:
+	case <-time.After(2 * time.Second):
+		t.Fatal("approval request was not emitted")
+	}
+
+	c.SetMode(false, true)
+
+	select {
+	case allow := <-done:
+		if !allow {
+			t.Fatal("pending approval should be auto-allowed when SetMode turns YOLO on")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("pending approval stayed blocked after SetMode(false, true)")
+	}
+}
+
+// TestSetModeAppliesBothGates checks SetMode sets plan and bypass together so the
+// composer never has to sequence two calls and risk a half-applied window.
+func TestSetModeAppliesBothGates(t *testing.T) {
+	c, _, _ := approvalIDs()
+
+	c.SetMode(true, false)
+	if !c.PlanMode() || c.Bypass() {
+		t.Fatalf("plan mode: plan=%v bypass=%v, want true/false", c.PlanMode(), c.Bypass())
+	}
+
+	c.SetMode(false, true)
+	if c.PlanMode() || !c.Bypass() {
+		t.Fatalf("yolo mode: plan=%v bypass=%v, want false/true", c.PlanMode(), c.Bypass())
+	}
+
+	c.SetMode(false, false)
+	if c.PlanMode() || c.Bypass() {
+		t.Fatalf("normal mode: plan=%v bypass=%v, want false/false", c.PlanMode(), c.Bypass())
+	}
+}

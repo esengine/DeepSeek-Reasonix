@@ -1409,17 +1409,46 @@ func (c *Controller) SetBypass(on bool) {
 	c.mu.Lock()
 	c.bypass = on
 	if on {
-		pending = make([]chan approvalReply, 0, len(c.approvals))
-		for id, reply := range c.approvals {
-			delete(c.approvals, id)
-			pending = append(pending, reply)
-		}
+		pending = c.drainApprovalsLocked()
 	}
 	c.mu.Unlock()
 
 	for _, reply := range pending {
 		reply <- approvalReply{allow: true}
 	}
+}
+
+// SetMode applies plan (read-only) and bypass (auto-approve) together so a turn
+// submitted right after a composer mode switch can't observe a half-applied
+// gate. Turning bypass on drains any approval already waiting.
+func (c *Controller) SetMode(plan, bypass bool) {
+	var pending []chan approvalReply
+
+	c.mu.Lock()
+	c.planMode = plan
+	c.bypass = bypass
+	if bypass {
+		pending = c.drainApprovalsLocked()
+	}
+	c.mu.Unlock()
+
+	if c.executor != nil {
+		c.executor.SetPlanMode(plan)
+	}
+	for _, reply := range pending {
+		reply <- approvalReply{allow: true}
+	}
+}
+
+// drainApprovalsLocked removes every pending approval gate and returns their
+// reply channels; caller holds c.mu and sends {allow:true} after unlocking.
+func (c *Controller) drainApprovalsLocked() []chan approvalReply {
+	pending := make([]chan approvalReply, 0, len(c.approvals))
+	for id, reply := range c.approvals {
+		delete(c.approvals, id)
+		pending = append(pending, reply)
+	}
+	return pending
 }
 
 // Bypass reports whether YOLO/bypass mode is on, for the status-bar indicator.

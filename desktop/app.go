@@ -226,6 +226,26 @@ func (a *App) SetPlanMode(on bool) {
 	}
 }
 
+// SetMode applies a composer gating mode ("plan" | "yolo" | anything else =
+// normal) in one call, so a turn submitted right after the switch can't race a
+// half-applied SetPlanMode/SetBypass pair.
+func (a *App) SetMode(mode string) {
+	a.mu.RLock()
+	ctrl := a.ctrl
+	a.mu.RUnlock()
+	if ctrl == nil {
+		return
+	}
+	switch mode {
+	case "plan":
+		ctrl.SetMode(true, false)
+	case "yolo":
+		ctrl.SetMode(false, true)
+	default:
+		ctrl.SetMode(false, false)
+	}
+}
+
 // QuestionAnswer is the frontend's reply to one question in an ask_request.
 type QuestionAnswer struct {
 	QuestionID string   `json:"questionId"`

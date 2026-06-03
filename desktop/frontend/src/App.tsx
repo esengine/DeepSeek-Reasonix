@@ -142,8 +142,7 @@ export default function App() {
     cancel,
     approve,
     answerQuestion,
-    setPlan,
-    setBypass,
+    setControllerMode,
     newSession,
     listSessions,
     resumeSession,
@@ -200,23 +199,7 @@ export default function App() {
     [effectiveSidebarWidth, viewportWidth, workspaceFileTreePanelWidth, workspacePanelWidth, workspacePreviewModeActive],
   );
 
-  const syncModeToController = useCallback(
-    async (m: Mode) => {
-      if (m === "plan") {
-        await setBypass(false);
-        await setPlan(true);
-        return;
-      }
-      if (m === "yolo") {
-        await setPlan(false);
-        await setBypass(true);
-        return;
-      }
-      await setPlan(false);
-      await setBypass(false);
-    },
-    [setPlan, setBypass],
-  );
+  const syncModeToController = useCallback((m: Mode) => setControllerMode(m), [setControllerMode]);
 
   // applyMode is the single source of truth for the input mode: it updates the
   // local pill and pushes the matching gate state to the controller (plan = read
@@ -963,8 +946,7 @@ export default function App() {
                   approve(state.approval!.id, false, false);
                 }}
                 onExitPlan={() => {
-                  setMode("normal");
-                  setPlan(false);
+                  applyMode("normal");
                   approve(state.approval!.id, false, false);
                 }}
               />
