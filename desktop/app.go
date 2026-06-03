@@ -447,6 +447,31 @@ func (a *App) DeleteSession(path string) error {
 	return removeSessionArtifacts(dir, sessionPath, key)
 }
 
+// DeleteSessions removes multiple saved sessions in one call. The active session
+// is silently skipped (same guard as DeleteSession). Returns the number of
+// sessions actually deleted so the frontend can show feedback.
+func (a *App) DeleteSessions(paths []string) (int, error) {
+	a.mu.RLock()
+	ctrl := a.ctrl
+	a.mu.RUnlock()
+	dir := config.SessionDir()
+	active := ""
+	if ctrl != nil {
+		active = ctrl.SessionPath()
+	}
+	deleted := 0
+	for _, p := range paths {
+		if p == active {
+			continue
+		}
+		if err := deleteSessionFile(dir, p); err != nil {
+			return deleted, err
+		}
+		deleted++
+	}
+	return deleted, nil
+}
+
 // RenameSession sets a custom display name for a session (empty clears it back to
 // the preview). It only affects the history panel; the file on disk is unchanged.
 func (a *App) RenameSession(path, title string) error {

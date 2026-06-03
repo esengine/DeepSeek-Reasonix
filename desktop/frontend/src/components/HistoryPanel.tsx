@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Pencil, Search, Trash2, Check, X } from "lucide-react";
+import { Check, CheckSquare, Pencil, Search, Square, Trash2, X } from "lucide-react";
 import { t, useT } from "../lib/i18n";
 import { sessionActivityTime } from "../lib/session";
 import type { HistoryMessage, SessionMeta } from "../lib/types";
@@ -10,13 +10,15 @@ import { Transcript } from "./Transcript";
 
 // HistoryPanel lists saved sessions newest-first. Idle clicks resume a session;
 // running clicks load a read-only preview so the active stream keeps writing to
-// the current controller/session.
+// the current controller/session. Selection mode lets the user batch-delete
+// multiple sessions at once; the active session is never selectable.
 export function HistoryPanel({
   sessions,
   running,
   onResume,
   onPreview,
   onDelete,
+  onDeleteBatch,
   onRename,
   onClose,
 }: {
@@ -25,6 +27,7 @@ export function HistoryPanel({
   onResume: (path: string) => void;
   onPreview: (path: string) => Promise<HistoryMessage[]>;
   onDelete: (path: string) => void;
+  onDeleteBatch: (paths: string[]) => void;
   onRename: (path: string, title: string) => void;
   onClose: () => void;
 }) {
@@ -41,6 +44,11 @@ export function HistoryPanel({
     loading: boolean;
   } | null>(null);
   const previewSeq = useRef(0);
+
+  // Selection mode state.
+  const [selecting, setSelecting] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [batchConfirming, setBatchConfirming] = useState(false);
 
   const startRename = (s: SessionMeta) => {
     if (running) return;
@@ -81,6 +89,45 @@ export function HistoryPanel({
     );
   }, [query, sessions]);
 
+  // Toggle a single session's selection. The active session is never selectable.
+  const toggleSelect = useCallback((path: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  }, []);
+
+  // Select/deselect all non-current sessions.
+  const selectablePaths = filteredSessions.filter((s) => !s.current).map((s) => s.path);
+  const allSelected = selectablePaths.length > 0 && selectablePaths.every((p) => selected.has(p));
+  const toggleAll = useCallback(() => {
+    if (allSelected) setSelected(new Set());
+    else setSelected(new Set(selectablePaths));
+  }, [allSelected, selectablePaths]);
+
+  // Enter selection mode clears any pending single-delete confirmation.
+  const enterSelect = () => {
+    setSelecting(true);
+    setSelected(new Set());
+    setBatchConfirming(false);
+    setConfirming(null);
+    setEditing(null);
+  };
+  const exitSelect = () => {
+    setSelecting(false);
+    setSelected(new Set());
+    setBatchConfirming(false);
+  };
+
+  const doBatchDelete = () => {
+    const paths = Array.from(selected);
+    if (paths.length === 0) return;
+    onDeleteBatch(paths);
+    exitSelect();
+  };
+
   // Sessions arrive newest-first; bucket consecutive ones under a day heading
   // (Today / Yesterday / a date) while preserving that order.
   const groups: { label: string; items: SessionMeta[] }[] = [];
@@ -115,11 +162,24 @@ export function HistoryPanel({
           <div className="drawer__title">{tr("history.title")}</div>
           {running && <div className="drawer__summary">{tr("history.readOnlyHint")}</div>}
         </div>
-        <Tooltip label={tr("common.close")}>
-          <button className="chip" onClick={onClose}>
-            ✕
-          </button>
-        </Tooltip>
+        <div className="drawer__head-actions">
+          {selecting ? (
+            <button className="chip chip--active" onClick={exitSelect} title={tr("history.selectDone")}>
+              {tr("history.selectDone")}
+            </button>
+          ) : (
+            sessions.length > 0 && (
+              <button className="chip" onClick={enterSelect} title={tr("history.select")}>
+                {tr("history.select")}
+              </button>
+            )
+          )}
+          <Tooltip label={tr("common.close")}>
+            <button className="chip" onClick={onClose}>
+              ✕
+            </button>
+          </Tooltip>
+        </div>
       </header>
 
       <div className={`drawer__body history-drawer${showPreview ? " history-drawer--preview" : ""}`}>
@@ -139,12 +199,29 @@ export function HistoryPanel({
               <section className="mem-section" key={g.label}>
                 <div className="mem-section__title">{g.label}</div>
                 {g.items.map((s) => {
-                  const selected = preview?.path === s.path;
+                  const previewing = preview?.path === s.path;
                   return (
                     <div
-                      className={`hist-item${s.current ? " hist-item--current" : ""}${selected ? " hist-item--selected" : ""}`}
+                      className={`hist-item${s.current ? " hist-item--current" : ""}${previewing ? " hist-item--selected" : ""}${selecting && selected.has(s.path) ? " hist-item--checked" : ""}`}
                       key={s.path}
                     >
+                      {selecting && (
+                        <button
+                          className="hist-item__check"
+                          onClick={() => toggleSelect(s.path)}
+                          disabled={s.current}
+                          title={s.current ? tr("history.current") : undefined}
+                        >
+                          {s.current ? (
+                            <span className="hist-item__check-lock">—</span>
+                          ) : selected.has(s.path) ? (
+                            <CheckSquare size={16} />
+                          ) : (
+                            <Square size={16} />
+                          )}
+                        </button>
+                      )}
+
                       {editing === s.path ? (
                         <input
                           className="hist-item__rename"
@@ -162,7 +239,8 @@ export function HistoryPanel({
                         <button
                           className="hist-item__main"
                           onClick={() => {
-                            if (running) void loadPreview(s);
+                            if (selecting && !s.current) toggleSelect(s.path);
+                            else if (running) void loadPreview(s);
                             else onResume(s.path);
                           }}
                         >
@@ -172,7 +250,7 @@ export function HistoryPanel({
                             <span>{tr(s.turns === 1 ? "history.turnOne" : "history.turnOther", { n: s.turns })}</span>
                             <span>·</span>
                             <span>{timeLabel(sessionActivityTime(s))}</span>
-                            {running && (
+                            {running && !selecting && (
                               <>
                                 <span>·</span>
                                 <span>{tr("history.preview")}</span>
@@ -182,7 +260,7 @@ export function HistoryPanel({
                         </button>
                       )}
 
-                      {editing !== s.path && (
+                      {!selecting && editing !== s.path && (
                         <div className="hist-item__actions">
                           {confirming === s.path ? (
                             <>
@@ -239,7 +317,7 @@ export function HistoryPanel({
           )}
         </div>
 
-        {showPreview && (
+        {showPreview && !selecting && (
           <section className="history-preview">
             <div className="history-preview__head">
               <div className="history-preview__title">{preview.title}</div>
@@ -255,6 +333,31 @@ export function HistoryPanel({
               )}
             </div>
           </section>
+        )}
+
+        {selecting && (
+          <footer className="drawer__footer">
+            <button className="drawer__footer-btn" onClick={toggleAll}>
+              {allSelected ? tr("history.deselectAll") : tr("history.selectAll")}
+            </button>
+            {selected.size > 0 &&
+              (batchConfirming ? (
+                <div className="drawer__footer-confirm">
+                  <span className="drawer__footer-prompt">{tr("history.confirmDeleteSelected", { n: selected.size })}</span>
+                  <button className="btn btn--danger btn--sm" onClick={doBatchDelete}>
+                    <Check size={14} />
+                  </button>
+                  <button className="btn btn--sm" onClick={() => setBatchConfirming(false)}>
+                    <X size={14} />
+                  </button>
+                </div>
+              ) : (
+                <button className="btn btn--danger btn--sm" onClick={() => setBatchConfirming(true)}>
+                  <Trash2 size={14} />
+                  {tr("history.deleteSelected", { n: selected.size })}
+                </button>
+              ))}
+          </footer>
         )}
       </div>
     </ResizableDrawer>

@@ -291,6 +291,12 @@ export const en = {
   "history.noResults": "No matching sessions.",
   "history.today": "Today",
   "history.yesterday": "Yesterday",
+  "history.select": "Select",
+  "history.selectDone": "Done",
+  "history.selectAll": "Select all",
+  "history.deselectAll": "Deselect all",
+  "history.deleteSelected": "Delete selected ({n})",
+  "history.confirmDeleteSelected": "Delete {n} sessions?",
 
   // memory drawer
   "memory.title": "Memory",
