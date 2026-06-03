@@ -8,7 +8,7 @@ export interface PruneSessionsOptions {
 
 export function pruneSessionsCommand(opts: PruneSessionsOptions): void {
   const days = opts.days ?? 90;
-  if (!Number.isFinite(days) || days < 1) {
+  if (!Number.isInteger(days) || days < 1) {
     console.error(t("sessions.daysInvalid", { days }));
     process.exit(1);
   }

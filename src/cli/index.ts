@@ -509,7 +509,7 @@ program
 program
   .command("prune-sessions")
   .description(t("cli.pruneSessions"))
-  .option("--days <n>", t("ui.pruneDaysHint"), (v) => Number.parseInt(v, 10))
+  .option("--days <n>", t("ui.pruneDaysHint"), (v) => Number(v))
   .option("--dry-run", t("ui.pruneDryRunHint"))
   .action(async (opts) => {
     const { pruneSessionsCommand } = await import("./commands/prune-sessions.js");
