@@ -679,16 +679,15 @@ export default function App() {
           <div className="sidebar__brand">
             <img src={logo} alt="" className="sidebar__logo" />
             <span>Reasonix</span>
-            <Tooltip label={sidebarToggleTitle}>
-              <button
-                className={`sidebar__toggle${sidebarExpandBlocked ? " sidebar__toggle--blocked" : ""}`}
-                onClick={sidebarExpandBlocked ? undefined : toggleSidebar}
-                aria-label={sidebarToggleTitle}
-                aria-disabled={sidebarExpandBlocked}
-              >
-                {sidebarCollapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
-              </button>
-            </Tooltip>
+            <button
+              className={`sidebar__toggle${sidebarExpandBlocked ? " sidebar__toggle--blocked" : ""}`}
+              title={sidebarToggleTitle}
+              onClick={sidebarExpandBlocked ? undefined : toggleSidebar}
+              aria-label={sidebarToggleTitle}
+              aria-disabled={sidebarExpandBlocked}
+            >
+              {sidebarCollapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
+            </button>
           </div>
 
           <Tooltip label={t("topbar.newSession")} fill>
