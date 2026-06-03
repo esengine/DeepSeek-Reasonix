@@ -89,6 +89,9 @@ func Run(args []string, version string) int {
 	case "doctor":
 		configureCLIThemeFromConfigNoProbe()
 		return doctorCommand(rest, version)
+	case "lark":
+		configureCLIThemeFromConfigNoProbe()
+		return runLark(rest)
 	case "version", "--version", "-v":
 		fmt.Println("reasonix", version)
 		return 0

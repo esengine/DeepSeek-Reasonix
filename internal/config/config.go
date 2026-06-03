@@ -55,6 +55,8 @@ type Config struct {
 	Codegraph     CodegraphConfig   `toml:"codegraph"`
 	Statusline    StatuslineConfig  `toml:"statusline"`
 	LSP           LSPConfig         `toml:"lsp"`
+	Lark          LarkConfig        `toml:"lark"`
+}
 }
 
 // UIConfig controls CLI presentation-only settings. Desktop appearance is kept in
@@ -583,6 +585,116 @@ func resolvedMCPTier(tier string) string {
 		return "background"
 	default:
 		return "lazy"
+	}
+}
+
+// LarkConfig configures the Lark bot frontend. When absent the bot is
+// disabled. Credentials follow the same pattern as providers: app_id_env /
+// app_secret_env name an environment variable holding the value; the raw
+// app_id / app_secret fields are a direct fallback. Both support ${ENV_VAR}
+// expansion. All other fields are optional with sensible defaults.
+type LarkConfig struct {
+	AppID        string `toml:"app_id"`
+	AppSecret    string `toml:"app_secret"`
+	AppIDEnv     string `toml:"app_id_env"`
+	AppSecretEnv string `toml:"app_secret_env"`
+
+	// Session management
+	SessionTTL  string `toml:"session_ttl"`
+	MaxSessions int    `toml:"max_sessions"`
+
+	// Permission mode per context: "read-only", "interactive", "bypass"
+	GroupPermission string `toml:"group_permission"`
+	DMPermission    string `toml:"dm_permission"`
+
+	// SDK Channel policy
+	RequireMention      bool     `toml:"require_mention"`
+	RespondToMentionAll bool     `toml:"respond_to_mention_all"`
+	AllowGroups         []string `toml:"allow_groups"`
+	AllowDMs            []string `toml:"allow_dms"`
+
+	// Response formatting
+	ShowToolProgress  bool   `toml:"show_tool_progress"`
+	ShowReasoning     bool   `toml:"show_reasoning"`
+	MaxResponseLength int    `toml:"max_response_length"`
+	ApprovalTimeout   string `toml:"approval_timeout"`
+}
+
+// ResolvedAppID returns the app ID via env var (app_id_env) or raw value with
+// ${VAR} expansion on the fallback.
+func (c LarkConfig) ResolvedAppID() string {
+	if c.AppIDEnv != "" {
+		if v := os.Getenv(c.AppIDEnv); v != "" {
+			return v
+		}
+	}
+	return ExpandVars(c.AppID)
+}
+
+// ResolvedAppSecret returns the app secret with the same env-first strategy.
+func (c LarkConfig) ResolvedAppSecret() string {
+	if c.AppSecretEnv != "" {
+		if v := os.Getenv(c.AppSecretEnv); v != "" {
+			return v
+		}
+	}
+	return ExpandVars(c.AppSecret)
+}
+
+// Enabled reports whether the Lark bot is configured.
+func (c LarkConfig) Enabled() bool { return c.ResolvedAppID() != "" && c.ResolvedAppSecret() != "" }
+
+// ResolvedSessionTTL returns the session TTL duration, defaulting to 1h.
+func (c LarkConfig) ResolvedSessionTTL() string {
+	if c.SessionTTL == "" {
+		return "1h"
+	}
+	return c.SessionTTL
+}
+
+// ResolvedMaxSessions returns the max concurrent sessions, 0 = unlimited.
+func (c LarkConfig) ResolvedMaxSessions() int {
+	if c.MaxSessions < 0 {
+		return 0
+	}
+	return c.MaxSessions
+}
+
+// ResolvedGroupPermission returns the normalized group permission mode.
+func (c LarkConfig) ResolvedGroupPermission() string {
+	return resolveLarkPermission(c.GroupPermission, "read-only")
+}
+
+// ResolvedDMPermission returns the normalized DM permission mode.
+func (c LarkConfig) ResolvedDMPermission() string {
+	return resolveLarkPermission(c.DMPermission, "interactive")
+}
+
+// ResolvedMaxResponseLength returns the response truncation length, defaulting to 8000.
+func (c LarkConfig) ResolvedMaxResponseLength() int {
+	if c.MaxResponseLength <= 0 {
+		return 8000
+	}
+	return c.MaxResponseLength
+}
+
+// ResolvedApprovalTimeout returns the approval timeout duration, defaulting to 5m.
+func (c LarkConfig) ResolvedApprovalTimeout() string {
+	if c.ApprovalTimeout == "" {
+		return "5m"
+	}
+	return c.ApprovalTimeout
+}
+
+func resolveLarkPermission(raw, defaultVal string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "read-only", "interactive", "bypass":
+		return strings.ToLower(strings.TrimSpace(raw))
+	default:
+		if raw == "" {
+			return defaultVal
+		}
+		return defaultVal
 	}
 }
 

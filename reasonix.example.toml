@@ -148,3 +148,34 @@ enabled = []   # empty = all built-in tools
 # #                the model uses them, then handshake on-demand. Default.
 # #   background — placeholder + spawn at boot in a goroutine so an idle
 # #                session warms up without blocking the user.
+
+# [lark]
+# # Lark (飞书) bot frontend: operate Reasonix through chat.
+# # Credentials follow the provider pattern: app_id_env names the env var;
+# # app_id is a direct fallback (supports ${VAR} expansion). Never put secrets here.
+# app_id_env = "LARK_APP_ID"
+# app_secret_env = "LARK_APP_SECRET"
+#
+# # Or set directly (with env expansion):
+# # app_id     = "cli_xxx"
+# # app_secret = "${LARK_APP_SECRET}"
+#
+# # Session management
+# # session_ttl  = "1h"    # idle sessions expire after this duration
+# # max_sessions = 50      # concurrent chat sessions, 0 = unlimited
+#
+# # Permission mode per context
+# # group_permission = "read-only"    # read-only | interactive | bypass
+# # dm_permission    = "interactive"  # read-only | interactive | bypass
+#
+# # SDK Channel policy
+# # require_mention       = true
+# # respond_to_mention_all = false
+# # allow_groups          = []    # empty = all allowed
+# # allow_dms             = []    # empty = all allowed
+#
+# # Response formatting
+# # show_tool_progress  = false   # true = inline tool markers; false = summary at end
+# # show_reasoning      = false
+# # max_response_length = 8000
+# # approval_timeout    = "5m"

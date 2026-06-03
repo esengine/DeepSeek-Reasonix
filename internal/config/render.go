@@ -351,6 +351,67 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		}
 	}
 
+	if c.Lark.Enabled() {
+		b.WriteString("\n[lark]\n")
+		if c.Lark.AppIDEnv != "" {
+			fmt.Fprintf(&b, "app_id_env     = %q\n", c.Lark.AppIDEnv)
+		} else if c.Lark.AppID != "" {
+			fmt.Fprintf(&b, "app_id         = %q\n", c.Lark.AppID)
+		}
+		if c.Lark.AppSecretEnv != "" {
+			fmt.Fprintf(&b, "app_secret_env = %q\n", c.Lark.AppSecretEnv)
+		} else if c.Lark.AppSecret != "" {
+			fmt.Fprintf(&b, "app_secret     = %q\n", c.Lark.AppSecret)
+		}
+		if c.Lark.SessionTTL != "" {
+			fmt.Fprintf(&b, "session_ttl    = %q\n", c.Lark.SessionTTL)
+		}
+		if c.Lark.MaxSessions > 0 {
+			fmt.Fprintf(&b, "max_sessions   = %d\n", c.Lark.MaxSessions)
+		}
+		if c.Lark.GroupPermission != "" {
+			fmt.Fprintf(&b, "group_permission = %q\n", c.Lark.ResolvedGroupPermission())
+		}
+		if c.Lark.DMPermission != "" {
+			fmt.Fprintf(&b, "dm_permission    = %q\n", c.Lark.ResolvedDMPermission())
+		}
+		if c.Lark.RequireMention {
+			b.WriteString("require_mention = true\n")
+		}
+		if c.Lark.RespondToMentionAll {
+			b.WriteString("respond_to_mention_all = true\n")
+		}
+		if len(c.Lark.AllowGroups) > 0 {
+			fmt.Fprintf(&b, "allow_groups   = %s\n", renderStringArray(c.Lark.AllowGroups))
+		}
+		if len(c.Lark.AllowDMs) > 0 {
+			fmt.Fprintf(&b, "allow_dms      = %s\n", renderStringArray(c.Lark.AllowDMs))
+		}
+		if c.Lark.ShowToolProgress {
+			b.WriteString("show_tool_progress = true\n")
+		}
+		if c.Lark.ShowReasoning {
+			b.WriteString("show_reasoning = true\n")
+		}
+		if c.Lark.MaxResponseLength > 0 && c.Lark.MaxResponseLength != 8000 {
+			fmt.Fprintf(&b, "max_response_length = %d\n", c.Lark.MaxResponseLength)
+		}
+		if c.Lark.ApprovalTimeout != "" && c.Lark.ApprovalTimeout != "5m" {
+			fmt.Fprintf(&b, "approval_timeout = %q\n", c.Lark.ApprovalTimeout)
+		}
+	} else {
+		b.WriteString("\n# [lark]\n")
+		b.WriteString("# # Lark bot frontend: operate Reasonix through chat.\n")
+		b.WriteString("# # Credentials follow the provider pattern: app_id_env names the env var.\n")
+		b.WriteString("# app_id_env     = \"LARK_APP_ID\"\n")
+		b.WriteString("# app_secret_env = \"LARK_APP_SECRET\"\n")
+		b.WriteString("# # session_ttl  = \"1h\"\n")
+		b.WriteString("# # max_sessions = 50\n")
+		b.WriteString("# # group_permission = \"read-only\"   # read-only | interactive | bypass\n")
+		b.WriteString("# # dm_permission    = \"interactive\"\n")
+		b.WriteString("# # show_tool_progress = false   # true = inline tool markers; false = summary at end\n")
+	}
+
 	return b.String()
 }
 
