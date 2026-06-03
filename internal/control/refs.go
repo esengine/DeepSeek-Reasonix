@@ -120,7 +120,7 @@ func resolveBareNames(refs []ref) []ref {
 	}
 	found := 0
 	cwd, _ := os.Getwd()
-	filepath.WalkDir(cwd, func(p string, d os.DirEntry, wErr error) error {
+	_ = filepath.WalkDir(cwd, func(p string, d os.DirEntry, wErr error) error {
 		if wErr != nil || found == len(names) {
 			return filepath.SkipAll
 		}

@@ -197,10 +197,10 @@ func slug(name string) string {
 // the boundary between (key, value) and the next field can't collide via
 // concatenation (e.g. "command" + "foo" vs "comm" + "andfoo").
 func writeField(h io.Writer, key, val string) {
-	h.Write([]byte(key))
-	h.Write([]byte{0})
-	h.Write([]byte(val))
-	h.Write([]byte{1})
+	_, _ = h.Write([]byte(key))
+	_, _ = h.Write([]byte{0})
+	_, _ = h.Write([]byte(val))
+	_, _ = h.Write([]byte{1})
 }
 
 // writeKV hashes a map deterministically by sorting keys, so Go's randomised

@@ -3,11 +3,37 @@ version: "2"
 linters:
   enable:
     - errcheck
-    - staticcheck
-    - unused
     - govet
     - ineffassign
+    - staticcheck
+    - unused
+  settings:
+    errcheck:
+      check-type-assertions: false
+      exclude-functions:
+        - (*os.File).Close
+        - (io.Closer).Close
+        - (*net/http.Response).Body.Close
+        - golang.org/x/term.Restore
+    staticcheck:
+      checks:
+        - all
+        - -ST1005 # error strings ending with punctuation — too strict for initial adoption
+        - -ST1018 # Unicode format characters — intentional in TUI code
+        - -QF1001 # De Morgan's law — readability preference
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      # Setup/teardown in tests routinely ignores cleanup errors.
+      - path: _test\.go
+        linters:
+          - errcheck
 
 issues:
-  # Only report issues introduced by the PR, not pre-existing code.
-  new-from-rev: main-v2
+  max-issues-per-linter: 0
+  max-same-issues: 0

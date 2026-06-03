@@ -387,14 +387,6 @@ type mcpEditConfigLaunch struct {
 	systemDefault bool
 }
 
-func mcpEditConfigCommand(path string) (*exec.Cmd, error) {
-	launch, err := mcpEditConfigLaunchCommand(path, exec.LookPath)
-	if err != nil {
-		return nil, err
-	}
-	return launch.cmd, nil
-}
-
 func mcpEditConfigLaunchCommand(path string, lookPath func(string) (string, error)) (mcpEditConfigLaunch, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {

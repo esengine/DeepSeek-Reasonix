@@ -73,12 +73,12 @@ func MigrateLegacySessions(srcDir, destDir string) (int, error) {
 			return imported, err
 		}
 		if info, err := e.Info(); err == nil {
-			os.Chtimes(dest, info.ModTime(), info.ModTime()) // preserve resume ordering
+			_ = os.Chtimes(dest, info.ModTime(), info.ModTime()) // preserve resume ordering
 		}
 		imported++
 	}
 	if err := os.MkdirAll(destDir, 0o755); err == nil {
-		os.WriteFile(marker, nil, 0o644)
+		_ = os.WriteFile(marker, nil, 0o644)
 	}
 	return imported, nil
 }

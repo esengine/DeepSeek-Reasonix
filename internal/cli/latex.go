@@ -18,23 +18,23 @@ func convertMath(rs []rune) string {
 	var b strings.Builder
 	b.Grow(len(rs))
 	for i := 0; i < len(rs); {
-		switch r := rs[i]; {
-		case r == '\\':
+		switch r := rs[i]; r {
+		case '\\':
 			i = convertCommand(&b, rs, i)
-		case r == '^':
+		case '^':
 			arg, ni := readAtom(rs, i+1, false)
 			b.WriteString(superscript(convertMath([]rune(arg))))
 			i = ni
-		case r == '_':
+		case '_':
 			arg, ni := readAtom(rs, i+1, false)
 			b.WriteString(subscript(convertMath([]rune(arg))))
 			i = ni
-		case r == '{' || r == '}':
+		case '{', '}':
 			i++
-		case r == '&' || r == '~':
+		case '&', '~':
 			b.WriteByte(' ')
 			i++
-		case r == '$':
+		case '$':
 			i++
 		default:
 			b.WriteRune(r)

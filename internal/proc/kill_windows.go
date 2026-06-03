@@ -54,7 +54,7 @@ func TrackTree(cmd *exec.Cmd) uintptr {
 		_ = windows.CloseHandle(job)
 		return 0
 	}
-	defer windows.CloseHandle(h)
+	defer func() { _ = windows.CloseHandle(h) }()
 	if err := windows.AssignProcessToJobObject(job, h); err != nil {
 		_ = windows.CloseHandle(job)
 		return 0

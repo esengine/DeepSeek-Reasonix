@@ -401,6 +401,8 @@ func changedLineSet(repo, base string, srcFiles []string) map[string]map[int]boo
 	file := ""
 	newLine := 0
 	for _, ln := range strings.Split(diff, "\n") {
+		// '-' (deletion) lines are intentionally unhandled: they don't advance the
+		// new-side line counter, so they fall through with no case.
 		switch {
 		case strings.HasPrefix(ln, "+++ b/"):
 			file = strings.TrimPrefix(ln, "+++ b/")
@@ -412,15 +414,13 @@ func changedLineSet(repo, base string, srcFiles []string) map[string]map[int]boo
 				if sp := strings.IndexAny(num, ", "); sp >= 0 {
 					num = num[:sp]
 				}
-				fmt.Sscanf(num, "%d", &newLine)
+				_, _ = fmt.Sscanf(num, "%d", &newLine)
 			}
 		case strings.HasPrefix(ln, "+") && !strings.HasPrefix(ln, "+++"):
 			if file != "" {
 				out[file][newLine] = true
 			}
 			newLine++
-		case strings.HasPrefix(ln, "-"):
-			// deletion: does not advance the new-side counter
 		}
 	}
 	return out

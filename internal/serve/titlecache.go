@@ -33,7 +33,7 @@ func (c *titleCache) load() {
 	}
 	c.loaded = true
 	if data, err := os.ReadFile(filepath.Join(c.dir, ".session-titles.json")); err == nil {
-		json.Unmarshal(data, &c.entries)
+		_ = json.Unmarshal(data, &c.entries)
 	}
 }
 
@@ -53,6 +53,6 @@ func (c *titleCache) put(name, title string, mod int64) {
 	c.load()
 	c.entries[name] = titleEntry{Title: title, Mod: mod}
 	if data, err := json.Marshal(c.entries); err == nil {
-		os.WriteFile(filepath.Join(c.dir, ".session-titles.json"), data, 0o644)
+		_ = os.WriteFile(filepath.Join(c.dir, ".session-titles.json"), data, 0o644)
 	}
 }

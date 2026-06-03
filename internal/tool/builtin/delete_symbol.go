@@ -188,11 +188,11 @@ func (d deleteSymbol) findSymbol(path, name, kind, parent string) (symbolMatch, 
 
 	if len(filtered) > 1 {
 		var b strings.Builder
-		b.WriteString(fmt.Sprintf("Multiple matches for %q — disambiguate with kind/parent:\n", name))
+		fmt.Fprintf(&b, "Multiple matches for %q — disambiguate with kind/parent:\n", name)
 		for _, m := range filtered {
-			b.WriteString(fmt.Sprintf("  line %d: %s %s", m.line, m.kind, m.name))
+			fmt.Fprintf(&b, "  line %d: %s %s", m.line, m.kind, m.name)
 			if m.parent != "" {
-				b.WriteString(fmt.Sprintf(" (on %s)", m.parent))
+				fmt.Fprintf(&b, " (on %s)", m.parent)
 			}
 			b.WriteString("\n")
 		}

@@ -92,7 +92,7 @@ func pacProxy(target *url.URL, autoConfigURL *uint16, scheme string) *url.URL {
 	if session == 0 {
 		return nil
 	}
-	defer procCloseHandle.Call(session)
+	defer func() { _, _, _ = procCloseHandle.Call(session) }()
 
 	opts := autoproxyOptions{fAutoLogonIfChallenged: 1}
 	if autoConfigURL != nil {

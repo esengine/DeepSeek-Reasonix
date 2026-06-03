@@ -39,7 +39,7 @@ func queryTerminalBackground() (terminalRGB, bool) {
 	if err := unix.SetNonblock(inFd, true); err != nil {
 		return terminalRGB{}, false
 	}
-	defer unix.FcntlInt(uintptr(inFd), unix.F_SETFL, flags)
+	defer func() { _, _ = unix.FcntlInt(uintptr(inFd), unix.F_SETFL, flags) }()
 
 	if _, err := os.Stdout.Write([]byte("\x1b]11;?\x07")); err != nil {
 		return terminalRGB{}, false
