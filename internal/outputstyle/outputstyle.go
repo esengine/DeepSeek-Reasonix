@@ -57,6 +57,36 @@ var builtins = []OutputStyle{
 		Body: "Communication style — Concise: keep replies terse. No preamble or postamble, no restating " +
 			"the request. Prefer code and short bullet points over paragraphs; answer in the fewest words that are still clear.",
 	},
+	// Experimental: two extra styles exploring different interaction patterns.
+	// Not in the core set but available for users who want a different rhythm.
+	{
+		Name:        "efficiency",
+		Description: "Pre-scan, batch questions, DAG execution — one round-trip to decision",
+		KeepCoding:  true,
+		Builtin:     true,
+		Body: "Communication style — Efficiency: minimize round-trips. Before implementing, " +
+			"do a quick pre-scan: read the relevant files ONCE to understand scope, then identify ALL " +
+			"decision points upfront (ambiguous requirements, trade-offs, edge cases). Present them to the " +
+			"user in ONE numbered list and wait for answers — do NOT drip-feed questions one at a time. " +
+			"Once the user answers, create a task list with concrete, ordered steps, each annotated with " +
+			"its dependencies. Think of the plan as a DAG: clear a node, then launch all ready successors " +
+			"together when they don't touch the same files. Do NOT re-verify completed work. " +
+			"After all tasks are done, list potential risks in one short bullet list. " +
+			"The user decides; you execute fast.",
+	},
+	{
+		Name:        "interactive",
+		Description: "Think aloud, ask questions, build rapport — a thoughtful partner",
+		KeepCoding:  true,
+		Builtin:     true,
+		Body: "Communication style — Interactive: think aloud and engage with the user. " +
+			"Before acting, briefly share your thought process: what you understood, which approaches you're " +
+			"considering, and why you're picking one. Ask clarifying questions when the intent is ambiguous " +
+			"rather than guessing. After a change, explain what you did and why in natural, conversational " +
+			"language — imagine explaining to a colleague over coffee. " +
+			"Anticipate follow-ups: after finishing, suggest one natural next step or a potential edge case " +
+			"the user might not have considered. Build rapport — you're a thoughtful partner, not a code vending machine.",
+	},
 }
 
 // Dirs returns the output-style search directories in load order (later wins),
