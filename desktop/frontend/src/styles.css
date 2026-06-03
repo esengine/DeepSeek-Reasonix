@@ -299,7 +299,12 @@ body {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  padding: 50px 10px 12px;
+  /* 56px top padding clears macOS inset traffic light buttons (TitleBarHiddenInset),
+     which on Retina (144 DPI) extend to ~y=52. The previous 50px left only 2px
+     before the brand content at the effective padding boundary, causing the three
+     coloured circles (red/yellow/green) to appear to overlap with the sidebar
+     logo and toggle button. Adjust by 2-4 px on other DPI as needed. */
+  padding: 56px 10px 12px;
   background: var(--sidebar-bg);
   border-right: 1px solid var(--border-soft);
   --wails-draggable: drag;
@@ -325,6 +330,10 @@ body {
   height: 24px;
   border-radius: 7px;
 }
+.sidebar__brand .tooltip-trigger:not(.tooltip-trigger--fill):not(.tooltip-trigger--block) {
+  margin-left: auto;
+}
+
 .sidebar__toggle {
   --wails-draggable: no-drag;
   margin-left: auto;
@@ -631,6 +640,10 @@ body {
 .sidebar--collapsed .sidebar__brand > span {
   display: none;
 }
+.sidebar--collapsed .sidebar__brand .tooltip-trigger:not(.tooltip-trigger--fill):not(.tooltip-trigger--block) {
+  margin-left: 0;
+}
+
 .sidebar--collapsed .sidebar__toggle {
   margin-left: 0;
 }
@@ -740,7 +753,7 @@ body {
   display: flex;
   align-items: center;
   gap: 12px;
-  height: 50px;
+  height: 56px;
   padding: 0 18px;
   background: var(--chat-bg);
   border-bottom: 1px solid var(--border-soft);
