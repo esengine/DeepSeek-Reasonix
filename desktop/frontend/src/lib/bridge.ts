@@ -383,7 +383,7 @@ function makeMockApp(): AppBindings {
                 prompt: "对于 reasonix 二进制缺失的问题，你想怎么做？",
                 options: [
                   { label: "先查文档", description: "查看 README / 构建文档来确定正确的构建命令" },
-                  { label: "看 Cargo.toml", description: "直接查看 src-tauri 目录下的 Cargo.toml 来推断入口" },
+                  { label: "看构建配置", description: "查看 desktop/wails.json 与 main.go 来推断入口" },
                   { label: "我先帮你尝试构建", description: "先处理 git 冲突，然后尝试本地构建并汇报结果" },
                 ],
               },
