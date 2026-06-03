@@ -65,7 +65,7 @@ func (g globTool) Execute(ctx context.Context, args json.RawMessage) (string, er
 		return "", fmt.Errorf("glob %q: %w", p.Pattern, err)
 	}
 	if len(matches) == 0 && !strings.ContainsAny(rawPattern, "/\\") {
-		return globRecursive(ctx, filepath.Join("**", rawPattern))
+		return globRecursive(ctx, filepath.Join(g.workDir, "**", rawPattern))
 	}
 	if len(matches) == 0 {
 		return "(no matches)", nil

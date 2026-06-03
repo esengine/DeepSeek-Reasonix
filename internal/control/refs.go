@@ -215,7 +215,10 @@ func readFileRef(path string) (content string, isDir bool, err error) {
 		var b strings.Builder
 		n := 0
 		err := filepath.WalkDir(path, func(p string, d os.DirEntry, wErr error) error {
-			if wErr != nil || n >= maxDirEntries {
+			if wErr != nil {
+				return wErr
+			}
+			if n >= maxDirEntries {
 				return filepath.SkipAll
 			}
 			if p == path {

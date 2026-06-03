@@ -23,7 +23,7 @@ func TestGlobBareNameFallsBackToRecursiveWithWorkDir(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "node_modules", "pkg", "target.go"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	t.Chdir(root)
+	t.Chdir(t.TempDir())
 
 	out := runTool(t, globTool{workDir: root}, map[string]any{"pattern": "target.go"})
 	if !strings.Contains(filepath.ToSlash(out), "sub/deep/target.go") {
