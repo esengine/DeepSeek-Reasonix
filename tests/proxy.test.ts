@@ -119,6 +119,13 @@ describe("parseNoProxy + matchesNoProxy", () => {
     expect(matchesNoProxy("api.deepseek.com", p)).toBe(true);
   });
 
+  it("handles IPv6 port stripping and bare IPv6 literals in NO_PROXY", () => {
+    expect(matchesNoProxy("::1", parseNoProxy("::1"))).toBe(true);
+    expect(matchesNoProxy("::1", parseNoProxy("[::1]:8080"))).toBe(true);
+    expect(matchesNoProxy("host", parseNoProxy("host:8080"))).toBe(true);
+    expect(matchesNoProxy("2001:db8::1", parseNoProxy("2001:db8::1"))).toBe(true);
+  });
+
   it("comma-separated entries are merged", () => {
     const p = parseNoProxy("a.com, .b.com, *.c.com, 127.0.0.1");
     expect(matchesNoProxy("a.com", p)).toBe(true);

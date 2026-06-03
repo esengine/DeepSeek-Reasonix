@@ -81,9 +81,22 @@ export function parseNoProxy(raw: string | null | undefined): NoProxyPattern[] {
 }
 
 function buildPattern(raw: string): NoProxyPattern {
-  // Strip optional :port — we route by host only.
-  const colon = raw.lastIndexOf(":");
-  const hostPart = colon !== -1 && /^\d+$/.test(raw.slice(colon + 1)) ? raw.slice(0, colon) : raw;
+  let hostPart = raw;
+  if (raw.startsWith("[")) {
+    const end = raw.indexOf("]");
+    if (end !== -1) {
+      hostPart = raw.slice(1, end);
+    }
+  } else {
+    const colons = raw.split(":").length - 1;
+    if (colons === 1) {
+      const colon = raw.indexOf(":");
+      const port = raw.slice(colon + 1);
+      if (/^\d+$/.test(port)) {
+        hostPart = raw.slice(0, colon);
+      }
+    }
+  }
   const normalized = hostPart.toLowerCase();
   if (normalized === "*") {
     return { raw, matches: () => true };
