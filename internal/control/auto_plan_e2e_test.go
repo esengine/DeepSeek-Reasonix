@@ -77,7 +77,7 @@ func TestAutoPlanGateEndToEnd(t *testing.T) {
 		}),
 	})
 
-	go func() { c.Approve(<-approvalID, true, false) }()
+	go func() { c.Approve(<-approvalID, true, false, false) }()
 
 	input := "实现 issue #2395：新增配置项、自动判断复杂任务、补测试和文档"
 	if err := c.runTurnWithRaw(context.Background(), input, input); err != nil {
@@ -128,7 +128,7 @@ func TestAutoPlanGateRejectionStaysInPlan(t *testing.T) {
 		}),
 	})
 
-	go func() { c.Approve(<-approvalID, false, false) }()
+	go func() { c.Approve(<-approvalID, false, false, false) }()
 
 	input := "实现 issue #2395：新增配置项、自动判断复杂任务、补测试和文档"
 	if err := c.runTurnWithRaw(context.Background(), input, input); err != nil {

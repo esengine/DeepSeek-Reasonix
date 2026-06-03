@@ -207,12 +207,12 @@ func (a *App) Cancel() {
 
 // Approve answers a pending approval_request by ID: allow runs the call, session
 // also remembers the grant for the rest of the session.
-func (a *App) Approve(id string, allow, session bool) {
+func (a *App) Approve(id string, allow, session, persist bool) {
 	a.mu.RLock()
 	ctrl := a.ctrl
 	a.mu.RUnlock()
 	if ctrl != nil {
-		ctrl.Approve(id, allow, session)
+		ctrl.Approve(id, allow, session, persist)
 	}
 }
 

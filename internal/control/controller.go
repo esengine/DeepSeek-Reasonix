@@ -59,7 +59,8 @@ type Controller struct {
 	cleanup      func()
 	autoPlan     string
 	classifier   autoPlanClassifier
-	startedOnce  bool // guards the one-shot SessionStart hook on first turn
+	startedOnce  bool              // guards the one-shot SessionStart hook on first turn
+	onRemember   func(rule string) // set via Options; invoked when user picks "always allow"
 
 	// balanceURL/balanceKey target the active provider's optional wallet-balance
 	// endpoint (empty when the provider declares none). Captured at build so a
@@ -138,6 +139,7 @@ type Controller struct {
 type approvalReply struct {
 	allow   bool
 	session bool
+	persist bool // true = write "always allow" rule to config
 }
 
 // Options carries the already-built pieces setup assembles. Lifecycle metadata
@@ -174,6 +176,10 @@ type Options struct {
 	WorkspaceRoot string
 	AutoPlan      string
 	Classifier    autoPlanClassifier
+	// OnRemember, when set, is invoked with a new allow rule the user chose to
+	// persist to disk (e.g. "bash(go build*)"). The callback is wired into the
+	// permission Gate on EnableInteractiveApproval.
+	OnRemember func(rule string)
 }
 
 // New builds a Controller. A nil Sink is replaced with event.Discard.
@@ -207,6 +213,7 @@ func New(opts Options) *Controller {
 		cleanup:       opts.Cleanup,
 		autoPlan:      normalizeAutoPlan(opts.AutoPlan),
 		classifier:    classifier,
+		onRemember:    opts.OnRemember,
 		balanceURL:    opts.BalanceURL,
 		balanceKey:    opts.BalanceKey,
 		balanceClient: opts.BalanceClient,
@@ -585,13 +592,13 @@ func (c *Controller) Running() bool {
 // Approve answers a pending ApprovalRequest by ID: allow runs the call, session
 // also remembers a grant for the rest of the session so the same tool+subject
 // isn't re-prompted. Unknown/expired IDs are ignored.
-func (c *Controller) Approve(id string, allow, session bool) {
+func (c *Controller) Approve(id string, allow, session, persist bool) {
 	c.mu.Lock()
 	reply := c.approvals[id]
 	delete(c.approvals, id)
 	c.mu.Unlock()
 	if reply != nil {
-		reply <- approvalReply{allow: allow, session: session} // buffered, never blocks
+		reply <- approvalReply{allow: allow, session: session, persist: persist} // buffered, never blocks
 	}
 }
 
@@ -602,7 +609,9 @@ func (c *Controller) Approve(id string, allow, session bool) {
 // a nil asker from setup.
 func (c *Controller) EnableInteractiveApproval() {
 	if c.executor != nil {
-		c.executor.SetGate(permission.NewGate(c.policy, gateApprover{c}))
+		gate := permission.NewGate(c.policy, gateApprover{c})
+		gate.OnRemember = c.onRemember // wire "always allow" persistence callback
+		c.executor.SetGate(gate)
 		c.executor.SetAsker(c)
 	}
 }
@@ -1752,8 +1761,10 @@ func (c *Controller) requestApproval(ctx context.Context, tool, subject string) 
 			c.granted[key] = true
 			c.mu.Unlock()
 		}
-		// remember=false: session grants live here, not in the on-disk policy.
-		return r.allow, false, nil
+		// When persist is true, remember=true signals Gate.OnRemember to write
+		// the rule to the on-disk config. Plan approvals are excluded.
+		remember := r.persist && tool != planApprovalTool
+		return r.allow, remember, nil
 	case <-ctx.Done():
 		c.mu.Lock()
 		delete(c.approvals, id)

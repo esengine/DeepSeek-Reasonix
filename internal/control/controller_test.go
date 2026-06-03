@@ -198,7 +198,7 @@ func approvalIDs() (*Controller, chan string, *int) {
 // the (fake) frontend answers allow, and the gate returns allow with no grant.
 func TestApprovalAllowOnce(t *testing.T) {
 	c, ids, _ := approvalIDs()
-	go func() { c.Approve(<-ids, true, false) }()
+	go func() { c.Approve(<-ids, true, false, false) }()
 
 	allow, remember, err := gateApprover{c}.Approve(context.Background(), "bash", "go test", nil)
 	if err != nil || !allow || remember {
@@ -209,7 +209,7 @@ func TestApprovalAllowOnce(t *testing.T) {
 // TestApprovalDeny confirms a declined call returns allow=false.
 func TestApprovalDeny(t *testing.T) {
 	c, ids, _ := approvalIDs()
-	go func() { c.Approve(<-ids, false, false) }()
+	go func() { c.Approve(<-ids, false, false, false) }()
 
 	allow, _, err := gateApprover{c}.Approve(context.Background(), "bash", "rm -rf /", nil)
 	if err != nil || allow {
@@ -224,7 +224,7 @@ func TestApprovalSessionGrant(t *testing.T) {
 	// Only the first call reaches the frontend (the session grant short-circuits
 	// the rest), so a single approval is all this needs — ranging would block on
 	// a second ID that never arrives.
-	go func() { c.Approve(<-ids, true, true) }()
+	go func() { c.Approve(<-ids, true, true, false) }()
 
 	for i := 0; i < 3; i++ {
 		allow, _, err := gateApprover{c}.Approve(context.Background(), "bash", "go build", nil)

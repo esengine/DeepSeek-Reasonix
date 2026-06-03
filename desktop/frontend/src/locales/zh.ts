@@ -234,6 +234,7 @@ export const zh: Record<DictKey, string> = {
   "approval.deny": "拒绝",
   "approval.allowOnce": "允许一次",
   "approval.allowSession": "本会话内允许",
+  "approval.allowPersistent": "总是允许（保存）",
 
   // 提问卡片
   "ask.title": "需要你决定",
