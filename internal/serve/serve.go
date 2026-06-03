@@ -84,45 +84,6 @@ func (s *Server) initTitleProvider() {
 // conversation history. This replicates the TUI/desktop model-switch path. The
 // write lock is held across the whole rebuild so concurrent requests never read
 // a half-swapped controller and two switches can't run at once.
-// switchEffort changes the reasoning effort level and rebuilds the controller.
-// Config is persisted to disk first, then switchModel handles the rebuild.
-func (s *Server) switchEffort(ctx context.Context, level string) error {
-	cur := s.ctl()
-	if cur.Running() {
-		return fmt.Errorf("cannot change effort while a turn is running")
-	}
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("load config: %w", err)
-	}
-	ref := cur.Label()
-	entry, ok := cfg.ResolveModel(ref)
-	if !ok {
-		return fmt.Errorf("cannot resolve current provider %q", ref)
-	}
-	cap := config.EffortCapabilityForEntry(entry)
-	if !cap.Supported {
-		return fmt.Errorf("effort is not configurable for %s", entry.Name)
-	}
-	effort, err := config.NormalizeEffort(entry, level)
-	if err != nil {
-		return err
-	}
-	editPath := config.UserConfigPath()
-	if editPath == "" {
-		return fmt.Errorf("no config file found")
-	}
-	edit := config.LoadForEdit(editPath)
-	if err := edit.SetProviderEffort(entry.Name, effort); err != nil {
-		return err
-	}
-	if err := edit.SaveTo(editPath); err != nil {
-		return fmt.Errorf("save config: %w", err)
-	}
-	// Rebuild controller with updated effort — switchModel handles the lock.
-	return s.switchModel(ctx, entry.Name+"/"+entry.Model)
-}
-
 func (s *Server) switchModel(ctx context.Context, ref string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -156,6 +117,60 @@ func (s *Server) switchModel(ctx context.Context, ref string) error {
 	s.ctrl = newCtrl
 	cur.Close()
 	return nil
+}
+
+// switchEffort persists a new reasoning-effort level for the active provider and
+// rebuilds via switchModel (which takes the write lock).
+func (s *Server) switchEffort(ctx context.Context, level string) error {
+	cur := s.ctl()
+	if cur.Running() {
+		return fmt.Errorf("cannot change effort while a turn is running")
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	ref := cur.Label()
+	entry, ok := cfg.ResolveModel(ref)
+	if !ok {
+		return fmt.Errorf("cannot resolve current provider %q", ref)
+	}
+	if !config.EffortCapabilityForEntry(entry).Supported {
+		return fmt.Errorf("effort is not configurable for %s", entry.Name)
+	}
+	effort, err := config.NormalizeEffort(entry, level)
+	if err != nil {
+		return err
+	}
+	editPath := config.UserConfigPath()
+	if editPath == "" {
+		return fmt.Errorf("no config file found")
+	}
+	edit := config.LoadForEdit(editPath)
+	if err := applyEffortEdit(edit, entry, effort); err != nil {
+		return err
+	}
+	if err := edit.SaveTo(editPath); err != nil {
+		return fmt.Errorf("save config: %w", err)
+	}
+	return s.switchModel(ctx, entry.Name+"/"+entry.Model)
+}
+
+// applyEffortEdit writes effort onto entry within edit, mirroring CLI/desktop
+// SetEffort: upsert the provider when the user config has no block for it yet, and
+// enable adaptive thinking for Anthropic so the effort knob actually engages.
+func applyEffortEdit(edit *config.Config, entry *config.ProviderEntry, effort string) error {
+	if _, ok := edit.Provider(entry.Name); !ok {
+		if err := edit.UpsertProvider(*entry); err != nil {
+			return err
+		}
+	}
+	if entry.Kind == "anthropic" && effort != "" && entry.Thinking == "" {
+		if err := edit.SetProviderThinking(entry.Name, "adaptive"); err != nil {
+			return err
+		}
+	}
+	return edit.SetProviderEffort(entry.Name, effort)
 }
 
 // Handler returns the HTTP routes: GET / (a minimal browser client), GET /events
