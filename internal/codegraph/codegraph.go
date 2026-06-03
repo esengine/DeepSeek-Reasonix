@@ -21,9 +21,12 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"reasonix/internal/proc"
 )
+
+const initTimeout = 30 * time.Second
 
 // BundleDirName is the directory, beside the reasonix executable, that the release
 // archive unpacks the CodeGraph bundle into. Its launcher lives at
@@ -112,7 +115,11 @@ func EnsureInit(ctx context.Context, bin, root string) error {
 	if Initialized(root) {
 		return nil // already initialised — serve re-syncs and the watcher keeps it fresh
 	}
+	ctx, cancel := context.WithTimeout(ctx, initTimeout)
+	defer cancel()
 	cmd := exec.CommandContext(ctx, bin, "init", root)
+	cmd.Cancel = func() error { proc.KillTree(cmd); return nil }
+	cmd.WaitDelay = 3 * time.Second
 	proc.HideWindow(cmd)
 	cmd.Dir = root
 	if out, err := cmd.CombinedOutput(); err != nil {
