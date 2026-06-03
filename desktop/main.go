@@ -62,9 +62,18 @@ func main() {
 			Appearance: mac.NSAppearanceNameDarkAqua,
 		},
 		Windows: &windows.Options{
-			// Follow the OS light/dark setting; the frontend also honors
-			// prefers-color-scheme so the two stay in sync.
-			Theme: windows.SystemDefault,
+			// Paint the OS title bar with the app's dark shell colour instead of the
+			// default light caption that clashed against the dark UI on light-mode
+			// Windows (#2793). Both modes use the shell colour so it always blends.
+			Theme: windows.Dark,
+			CustomTheme: &windows.ThemeSettings{
+				DarkModeTitleBar:   windows.RGB(26, 26, 46),
+				DarkModeTitleText:  windows.RGB(228, 228, 238),
+				DarkModeBorder:     windows.RGB(26, 26, 46),
+				LightModeTitleBar:  windows.RGB(26, 26, 46),
+				LightModeTitleText: windows.RGB(228, 228, 238),
+				LightModeBorder:    windows.RGB(26, 26, 46),
+			},
 		},
 		Linux: &linux.Options{
 			ProgramName: "Reasonix",
