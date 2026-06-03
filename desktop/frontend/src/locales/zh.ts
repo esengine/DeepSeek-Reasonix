@@ -184,6 +184,7 @@ export const zh: Record<DictKey, string> = {
   "status.cache": "缓存 {pct}%",
   "status.cacheAvg": "平均 {pct}%",
   "status.balanceTitle": "钱包余额",
+  "status.spendTitle": "本会话花费",
   "status.jobs": "{n} 个运行中",
   "status.jobsTitle": "后台作业",
   "status.yolo": "YOLO",

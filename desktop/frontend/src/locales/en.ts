@@ -183,6 +183,7 @@ export const en = {
   "status.cache": "cache {pct}%",
   "status.cacheAvg": "avg {pct}%",
   "status.balanceTitle": "Wallet balance",
+  "status.spendTitle": "Spent this session",
   "status.jobs": "{n} running",
   "status.jobsTitle": "Background jobs",
   "status.yolo": "YOLO",

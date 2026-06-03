@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Cpu, Wallet } from "lucide-react";
+import { Coins, Cpu, Wallet } from "lucide-react";
 import { EffortSwitcher } from "./EffortSwitcher";
 import { ModelSwitcher } from "./ModelSwitcher";
 import { Tooltip } from "./Tooltip";
@@ -94,6 +94,7 @@ export function StatusBar({
   mode,
   turnStartAt,
   turnTokens,
+  cost,
   retry,
   onSwitchModel,
   onSetEffort,
@@ -108,6 +109,7 @@ export function StatusBar({
   mode: Mode;
   turnStartAt: number;
   turnTokens: number;
+  cost?: number;
   retry?: { attempt: number; max: number };
   onSwitchModel: (name: string) => void;
   onSetEffort: (level: string) => void;
@@ -172,13 +174,26 @@ export function StatusBar({
           <JobsChip jobs={jobs} />
         </>
       )}
+      {typeof cost === "number" && cost > 0 && (
+        <>
+          <span className="statusbar__sep">·</span>
+          <Tooltip label={t("status.spendTitle")}>
+            <span className="statusbar__balance statusbar__cost">
+              <Coins size={11} />
+              {`¥${cost < 1 ? cost.toFixed(4) : cost.toFixed(2)}`}
+            </span>
+          </Tooltip>
+        </>
+      )}
       {balance?.available && balance.display && (
         <>
           <span className="statusbar__sep">·</span>
-          <span className="statusbar__balance">
-            <Wallet size={11} />
-            {balance.display}
-          </span>
+          <Tooltip label={t("status.balanceTitle")}>
+            <span className="statusbar__balance">
+              <Wallet size={11} />
+              {balance.display}
+            </span>
+          </Tooltip>
         </>
       )}
       <span className="statusbar__spacer" />

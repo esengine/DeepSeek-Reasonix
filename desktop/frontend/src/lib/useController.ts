@@ -98,6 +98,10 @@ interface State {
   // frontend-observed harness state; no model cooperation needed.
   turnStartAt: number;
   turnTokens: number;
+  // sessionCostUsd is the running spend for this session — each turn's estimated
+  // cost (provider currency, despite the wire field name) summed so the status bar
+  // can show what the conversation has cost. Reset with the session.
+  sessionCostUsd: number;
   // retry drives the transient "retrying (n/m)" indicator while the provider
   // re-attempts the connection; cleared by the next stream event or turn end.
   retry?: { attempt: number; max: number };
@@ -113,6 +117,7 @@ const initialState: State = {
   jobs: [],
   turnStartAt: 0,
   turnTokens: 0,
+  sessionCostUsd: 0,
   seq: 0,
 };
 
@@ -283,7 +288,8 @@ function applyEvent(s: State, e: WireEvent): State {
       // Usage arrives once per model step; sum the output across steps for the
       // turn's running token tally.
       const turnTokens = s.turnTokens + (e.usage?.completionTokens ?? 0);
-      return { ...s, usage: e.usage, context: { ...s.context, used }, turnTokens };
+      const sessionCostUsd = s.sessionCostUsd + (e.usage?.costUsd ?? 0);
+      return { ...s, usage: e.usage, context: { ...s.context, used }, turnTokens, sessionCostUsd };
     }
 
     case "notice":
