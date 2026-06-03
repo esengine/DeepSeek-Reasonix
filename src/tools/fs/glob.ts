@@ -51,7 +51,8 @@ export async function globFiles(
       }
       if (!e.isFile() && !e.isSymbolicLink()) continue;
       const rel = displayRel(ctx.rootDir, full);
-      if (!isMatch(rel)) continue;
+      const matchRel = displayRel(startAbs, full);
+      if (!isMatch(matchRel)) continue;
       let mtimeMs = 0;
       if (sortBy === "mtime") {
         try {

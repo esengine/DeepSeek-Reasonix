@@ -1309,6 +1309,12 @@ describe("filesystem tools (built-in, sandbox-enforced)", () => {
       expect(lines.length).toBe(3);
       expect(lines[lines.length - 1]).toMatch(/3 more matches/);
     });
+
+    it("matches relative to a custom path base directory", async () => {
+      const out = await tools.dispatch("glob", JSON.stringify({ path: "src", pattern: "*.ts" }));
+      expect(out).toContain("src/index.ts");
+      expect(out).not.toContain("(no matches)");
+    });
   });
 
   describe("search_content — context lines (-A/-B/-C semantics)", () => {
