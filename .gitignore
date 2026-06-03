@@ -6,6 +6,11 @@
 /reasonix
 /reasonix.exe
 
+# Website (Astro) build output
+/site/dist/
+/site/.astro/
+/site/_preview.png
+
 # Go test/build scratch
 *.test
 *.out

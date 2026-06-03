@@ -1,0 +1,155 @@
+---
+import Base from '../layouts/Base.astro';
+const R2 = 'https://pub-147fb53b9c1e4bbf891a257968619ea7.r2.dev/latest';
+const repo = 'https://github.com/esengine/DeepSeek-Reasonix';
+---
+<Base
+  title="Reasonix — DeepSeek-native coding agent for your terminal"
+  description="Open-source AI coding agent for your terminal, engineered around DeepSeek's byte-stable prefix cache. Long sessions hold 90%+ cache hit and input-token cost collapses to ~1/5. A single Go binary. npm · Homebrew · desktop. MIT.">
+
+  <nav id="nav">
+    <div class="wrap nav">
+      <a class="brand" href="#top"><span class="mk">R</span>Reasonix</a>
+      <div class="nav-links">
+        <a href="#top" data-en>Install</a><a href="#top" data-zh>安装</a>
+        <a href="#features" data-en>Features</a><a href="#features" data-zh>特性</a>
+        <a href="#why" data-en>Why DeepSeek</a><a href="#why" data-zh>为何 DeepSeek</a>
+        <a href={repo}>GitHub</a>
+      </div>
+      <div class="nav-right">
+        <button class="lang" id="lang">中文</button>
+        <a class="btn btn-dark" href="#top"><span data-en>Get started</span><span data-zh>开始</span></a>
+      </div>
+    </div>
+  </nav>
+
+  <a id="top"></a>
+  <header class="hero wrap">
+    <div class="kicker"><span class="dot"></span><span data-en>v1.0.0 — a ground-up rewrite in Go · MIT</span><span data-zh>v1.0.0 — Go 全新重写 · MIT</span></div>
+    <h1>
+      <span data-en>A <em>DeepSeek</em>-native agent for your terminal.</span>
+      <span data-zh><em>DeepSeek</em> 原生的终端编码 Agent。</span>
+    </h1>
+    <p class="lede">
+      <span data-en>The loop is append-only, aligned to DeepSeek's byte-stable prefix cache — so long sessions hold <b>90%+ cache hit</b> and input-token cost collapses to <b>~1/5</b>. One Go binary. Terminal-first.</span>
+      <span data-zh>运行循环 append-only,对齐 DeepSeek 字节稳定的 prefix-cache —— 长会话缓存命中 <b>90%+</b>,输入 token 成本降到 <b>约 1/5</b>。单个 Go 二进制,终端优先。</span>
+    </p>
+    <div class="hi">
+      <div class="hi-tabs">
+        <button class="htab on" data-h="npm">npm</button>
+        <button class="htab" data-h="brew">Homebrew</button>
+        <button class="htab" data-h="dl"><span data-en>Download</span><span data-zh>下载</span></button>
+      </div>
+      <div class="hi-body">
+        <div class="hpanel on" data-h="npm"><span class="hcmd"><span class="p">$ </span>npm i -g reasonix</span><button class="cp" data-copy="npm i -g reasonix"><span data-en>Copy</span><span data-zh>复制</span></button></div>
+        <div class="hpanel" data-h="brew"><span class="hcmd"><span class="p">$ </span>brew install esengine/reasonix/reasonix</span><button class="cp" data-copy="brew install esengine/reasonix/reasonix"><span data-en>Copy</span><span data-zh>复制</span></button></div>
+        <div class="hpanel" data-h="dl">
+          <a class="hdl" href={`${R2}/Reasonix-darwin-arm64.zip`} download>macOS</a>
+          <a class="hdl" href={`${R2}/Reasonix-windows-amd64-installer.exe`} download>Windows</a>
+          <a class="hdl" href={`${R2}/Reasonix-linux-amd64.tar.gz`} download>Linux</a>
+        </div>
+      </div>
+    </div>
+    <a class="ghlink" href={repo}><span data-en>★ Star on GitHub</span><span data-zh>★ 在 GitHub 点星</span></a>
+
+    <div class="term" id="term">
+      <div class="tbar"><i></i><i></i><i></i><span>~/app — reasonix chat</span></div>
+      <div class="tbody" id="tbody"><span class="ln"><span class="u">$</span> reasonix chat</span><span class="ln"><span class="i">reasonix v1.0.0 · model deepseek-v4-flash · ~/app</span></span><span class="ln"><span class="d">cache 94.2% hit · session 18m · cost $0.043</span></span><span class="ln"><span class="u">›</span> add retry with backoff to the http client</span><span class="ln"><span class="e">edit</span>  internal/net/client.go        <span class="c">+24 −3</span></span><span class="ln"><span class="e">edit</span>  internal/net/client_test.go   <span class="c">+41 −0</span></span><span class="ln"><span class="k">✓</span> go test ./internal/net/   ok  0.21s</span><span class="ln"><span class="d">2 files · cache 94.2% → 95.1%</span><span class="caret"></span></span></div>
+    </div>
+  </header>
+
+
+  <section id="features" class="wrap reveal">
+    <div class="head">
+      <div class="lab" data-en>Features</div><div class="lab" data-zh>特性</div>
+      <h2><span data-en>Built for long, cheap sessions.</span><span data-zh>为长会话、低成本而生。</span></h2>
+    </div>
+    <div class="grid">
+      <div class="feat"><div class="n">01</div><h3 data-en>Cache-first loop</h3><h3 data-zh>缓存优先循环</h3><p data-en>Append-only history aligned to DeepSeek's prefix cache. 90%+ hit on long sessions; input tokens bill at ~1/5.</p><p data-zh>append-only 历史对齐 DeepSeek prefix-cache。长会话 90%+ 命中,输入 token 约 1/5 计费。</p></div>
+      <div class="feat"><div class="n">02</div><h3 data-en>Single Go binary</h3><h3 data-zh>单个 Go 二进制</h3><p data-en>CGO-free, cross-compiled for darwin/linux/windows × amd64/arm64. No Node runtime.</p><p data-zh>无 CGO,交叉编译覆盖 darwin/linux/windows × amd64/arm64。运行不需要 Node。</p></div>
+      <div class="feat"><div class="n">03</div><h3>MCP first-class</h3><p data-en>stdio, SSE, streamable HTTP. External servers merge their tools into one registry under a prefix.</p><p data-zh>stdio、SSE、streamable HTTP。外部服务器的工具以前缀合并进同一 registry。</p></div>
+      <div class="feat"><div class="n">04</div><h3 data-en>Plan mode + sandbox</h3><h3 data-zh>计划模式 + 沙箱</h3><p data-en>Writers are jailed to the workspace; <code>/plan</code> gates the session read-only until you approve.</p><p data-zh>写工具被关进工作区;<code>/plan</code> 进只读门,批准前不写盘。</p></div>
+      <div class="feat"><div class="n">05</div><h3 data-en>Subagents &amp; skills</h3><h3 data-zh>子智能体与技能</h3><p data-en>explore / research / review / security-review agents, plus Markdown skill scripts with isolated tools.</p><p data-zh>explore / research / review / security-review 子智能体,加 Markdown 技能脚本与隔离工具。</p></div>
+      <div class="feat"><div class="n">06</div><h3 data-en>Terminal-native</h3><h3 data-zh>终端原生</h3><p data-en>Not another IDE plugin. <code>git diff</code> handles diffs, <code>ls</code> handles trees — the terminal is the workspace.</p><p data-zh>不是又一个 IDE 插件。diff 交给 <code>git diff</code> —— 终端就是工作面板。</p></div>
+    </div>
+  </section>
+
+  <section id="why" class="wrap reveal">
+    <div class="why">
+      <div>
+        <div class="lab" data-en>Why DeepSeek</div><div class="lab" data-zh>为何 DeepSeek</div>
+        <h2><span data-en>The cheapness is the point.</span><span data-zh>便宜,就是核心。</span></h2>
+        <p class="sub"><span data-en>Most agents pay full price for the same growing prompt every turn. Reasonix keeps the prefix byte-identical so DeepSeek's cache does the heavy lifting.</span><span data-zh>多数 agent 每回合都为同一段不断增长的 prompt 付全价。Reasonix 让前缀逐字节稳定,让 DeepSeek 的缓存替你扛下来。</span></p>
+      </div>
+      <div class="nums">
+        <div class="num"><div class="v">90%+</div><div class="l"><span data-en>cache hit on long sessions</span><span data-zh>长会话缓存命中</span></div></div>
+        <div class="num"><div class="v">~1/5</div><div class="l"><span data-en>input-token cost</span><span data-zh>输入 token 成本</span></div></div>
+        <div class="num"><div class="v">0</div><div class="l"><span data-en>Node runtime to run it</span><span data-zh>运行所需 Node</span></div></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="wrap reveal">
+    <div class="band">
+      <h2><span data-en>Start in one line.</span><span data-zh>一行开始。</span></h2>
+      <p class="sub"><span data-en>Point it at api.deepseek.com and leave it running.</span><span data-zh>对接 api.deepseek.com,留它一直跑着。</span></p>
+      <div class="run"><span><span class="p">$ </span>npm i -g reasonix</span><button class="cp" data-copy="npm i -g reasonix"><span data-en>Copy</span><span data-zh>复制</span></button></div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="wrap foot">
+      <div>© 2026 Reasonix · <span data-en>MIT licensed</span><span data-zh>MIT 许可</span></div>
+      <div class="foot-links">
+        <a href={repo}>GitHub</a>
+        <a href="https://www.npmjs.com/package/reasonix">npm</a>
+        <a href="https://platform.deepseek.com" target="_blank" rel="noreferrer">DeepSeek</a>
+        <a href={`${repo}/releases/latest`}><span data-en>Releases</span><span data-zh>下载</span></a>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    const root = document.documentElement;
+    const langBtn = document.getElementById('lang')!;
+    function setLang(l: string){ root.lang = l; langBtn.textContent = l === 'zh' ? 'EN' : '中文'; try{ localStorage.setItem('rx-lang', l) }catch{} }
+    let saved = ''; try{ saved = localStorage.getItem('rx-lang') || '' }catch{}
+    setLang(saved || ((navigator.language||'').toLowerCase().startsWith('zh') ? 'zh' : 'en'));
+    langBtn.addEventListener('click', () => setLang(root.lang === 'zh' ? 'en' : 'zh'));
+
+    const nav = document.getElementById('nav')!;
+    addEventListener('scroll', () => nav.classList.toggle('stuck', scrollY > 8), { passive: true });
+
+    document.querySelectorAll<HTMLButtonElement>('.htab').forEach((t) => t.addEventListener('click', () => {
+      document.querySelectorAll('.htab').forEach((x) => x.classList.remove('on'));
+      document.querySelectorAll('.hpanel').forEach((x) => x.classList.remove('on'));
+      t.classList.add('on');
+      document.querySelector(`.hpanel[data-h="${t.dataset.h}"]`)!.classList.add('on');
+    }));
+
+    document.querySelectorAll<HTMLButtonElement>('.tab').forEach((t) => t.addEventListener('click', () => {
+      document.querySelectorAll('.tab').forEach((x) => x.classList.remove('on'));
+      document.querySelectorAll('.panel').forEach((x) => x.classList.remove('on'));
+      t.classList.add('on');
+      document.querySelector(`[data-panel="${t.dataset.tab}"]`)!.classList.add('on');
+    }));
+
+    document.querySelectorAll<HTMLButtonElement>('.cp').forEach((b) => b.addEventListener('click', () => {
+      navigator.clipboard.writeText(b.dataset.copy || '').then(() => {
+        const prev = b.innerHTML; b.classList.add('ok');
+        b.innerHTML = '<span data-en>Copied</span><span data-zh>已复制</span>';
+        setTimeout(() => { b.innerHTML = prev; b.classList.remove('ok'); }, 1400);
+      });
+    }));
+
+    // reveal on scroll
+    const io = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting){ e.target.classList.add('in'); io.unobserve(e.target); } }), { threshold: .12 });
+    document.querySelectorAll('.reveal').forEach((el) => io.observe(el));
+
+    // terminal lines reveal sequentially
+    const lines = Array.from(document.querySelectorAll<HTMLElement>('#tbody .ln'));
+    const delays = [240, 360, 240, 520, 360, 280, 420, 320];
+    let acc = 280;
+    lines.forEach((ln, i) => { setTimeout(() => ln.classList.add('on'), acc); acc += delays[i] || 300; });
+  </script>
+</Base>
