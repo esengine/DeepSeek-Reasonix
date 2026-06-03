@@ -58,6 +58,16 @@ func lastToolResult(s *Session, name string) string {
 	return result
 }
 
+func toolResults(s *Session, name string) []string {
+	var results []string
+	for _, m := range s.Messages {
+		if m.Role == provider.RoleTool && m.Name == name {
+			results = append(results, m.Content)
+		}
+	}
+	return results
+}
+
 func sessionHasUserMessageContaining(s *Session, needle string) bool {
 	for _, m := range s.Messages {
 		if m.Role == provider.RoleUser && strings.Contains(m.Content, needle) {
@@ -264,6 +274,7 @@ func TestFinalReadinessRequiresCompleteStepAfterWriterWhenTodoSeen(t *testing.T)
 				"result":"changed.go updated",
 				"evidence":[{"kind":"diff","summary":"updated code","paths":["changed.go"]}]
 			}`),
+			toolCallChunk("c4", "todo_write", `{"todos":[{"content":"Edit code","status":"completed"}]}`),
 			{Type: provider.ChunkDone},
 		},
 		{{Type: provider.ChunkText, Text: "signed off done"}, {Type: provider.ChunkDone}},
@@ -372,6 +383,12 @@ func TestEvidenceFlowRejectsStepMissingFromTodoWrite(t *testing.T) {
 				"result":"step is complete",
 				"evidence":[{"kind":"manual","summary":"checked manually"}]
 			}`),
+			toolCallChunk("c3", "complete_step", `{
+				"step":"Add parser",
+				"result":"parser added",
+				"evidence":[{"kind":"manual","summary":"checked manually"}]
+			}`),
+			toolCallChunk("c4", "todo_write", `{"todos":[{"content":"Add parser","status":"completed"}]}`),
 			{Type: provider.ChunkDone},
 		},
 		{{Type: provider.ChunkText, Text: "done"}, {Type: provider.ChunkDone}},
@@ -430,13 +447,24 @@ func TestEvidenceFlowRejectsTodoCompletionWithoutCompleteStep(t *testing.T) {
 	if !ok {
 		t.Fatal("todo_write builtin not registered")
 	}
+	completeStep, ok := tool.LookupBuiltin("complete_step")
+	if !ok {
+		t.Fatal("complete_step builtin not registered")
+	}
 	reg := tool.NewRegistry()
 	reg.Add(todoWrite)
+	reg.Add(completeStep)
 
 	prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{
 		{
 			toolCallChunk("c1", "todo_write", `{"todos":[{"content":"Add parser","status":"in_progress"}]}`),
 			toolCallChunk("c2", "todo_write", `{"todos":[{"content":"Add parser","status":"completed"}]}`),
+			toolCallChunk("c3", "complete_step", `{
+				"step":"Add parser",
+				"result":"parser added",
+				"evidence":[{"kind":"manual","summary":"checked manually"}]
+			}`),
+			toolCallChunk("c4", "todo_write", `{"todos":[{"content":"Add parser","status":"completed"}]}`),
 			{Type: provider.ChunkDone},
 		},
 		{{Type: provider.ChunkText, Text: "done"}, {Type: provider.ChunkDone}},
@@ -447,9 +475,13 @@ func TestEvidenceFlowRejectsTodoCompletionWithoutCompleteStep(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	got := lastToolResult(a.session, "todo_write")
+	results := toolResults(a.session, "todo_write")
+	if len(results) < 2 {
+		t.Fatalf("todo_write results = %v, want the rejected completion result", results)
+	}
+	got := results[1]
 	if !strings.Contains(got, "complete_step") {
-		t.Fatalf("final todo_write result = %q, want completion rejected until complete_step", got)
+		t.Fatalf("todo_write result = %q, want completion rejected until complete_step", got)
 	}
 }
 
@@ -475,6 +507,12 @@ func TestEvidenceFlowFailedCompleteStepDoesNotAuthorizeTodoCompletion(t *testing
 				"evidence":[{"kind":"manual","summary":"checked manually"}]
 			}`),
 			toolCallChunk("c3", "todo_write", `{"todos":[{"content":"Add parser","status":"completed"}]}`),
+			toolCallChunk("c4", "complete_step", `{
+				"step":"Add parser",
+				"result":"parser added",
+				"evidence":[{"kind":"manual","summary":"checked manually"}]
+			}`),
+			toolCallChunk("c5", "todo_write", `{"todos":[{"content":"Add parser","status":"completed"}]}`),
 			{Type: provider.ChunkDone},
 		},
 		{{Type: provider.ChunkText, Text: "done"}, {Type: provider.ChunkDone}},
@@ -485,9 +523,13 @@ func TestEvidenceFlowFailedCompleteStepDoesNotAuthorizeTodoCompletion(t *testing
 		t.Fatalf("Run: %v", err)
 	}
 
-	got := lastToolResult(a.session, "todo_write")
+	results := toolResults(a.session, "todo_write")
+	if len(results) < 2 {
+		t.Fatalf("todo_write results = %v, want the rejected completion result", results)
+	}
+	got := results[1]
 	if !strings.Contains(got, "complete_step") {
-		t.Fatalf("final todo_write result = %q, want failed complete_step not to authorize completion", got)
+		t.Fatalf("todo_write result = %q, want failed complete_step not to authorize completion", got)
 	}
 }
 
@@ -513,6 +555,7 @@ func TestEvidenceFlowRejectsReplacedTodoAfterNumericCompleteStep(t *testing.T) {
 				"evidence":[{"kind":"manual","summary":"checked manually"}]
 			}`),
 			toolCallChunk("c3", "todo_write", `{"todos":[{"content":"Ship parser","status":"completed"}]}`),
+			toolCallChunk("c4", "todo_write", `{"todos":[{"content":"Add parser","status":"completed"}]}`),
 			{Type: provider.ChunkDone},
 		},
 		{{Type: provider.ChunkText, Text: "done"}, {Type: provider.ChunkDone}},
@@ -523,9 +566,13 @@ func TestEvidenceFlowRejectsReplacedTodoAfterNumericCompleteStep(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	got := lastToolResult(a.session, "todo_write")
+	results := toolResults(a.session, "todo_write")
+	if len(results) < 2 {
+		t.Fatalf("todo_write results = %v, want the rejected replacement result", results)
+	}
+	got := results[1]
 	if !strings.Contains(got, "Ship parser") || !strings.Contains(got, "complete_step") {
-		t.Fatalf("final todo_write result = %q, want replaced todo rejected", got)
+		t.Fatalf("todo_write result = %q, want replaced todo rejected", got)
 	}
 }
 
@@ -555,6 +602,19 @@ func TestEvidenceFlowAcceptsReorderedTodoAfterNumericCompleteStep(t *testing.T) 
 			}`),
 			toolCallChunk("c3", "todo_write", `{"todos":[
 				{"content":"Write tests","status":"pending"},
+				{"content":"Add parser","status":"completed"}
+			]}`),
+			toolCallChunk("c4", "todo_write", `{"todos":[
+				{"content":"Write tests","status":"in_progress"},
+				{"content":"Add parser","status":"completed"}
+			]}`),
+			toolCallChunk("c5", "complete_step", `{
+				"step":"Write tests",
+				"result":"tests written",
+				"evidence":[{"kind":"manual","summary":"checked manually"}]
+			}`),
+			toolCallChunk("c6", "todo_write", `{"todos":[
+				{"content":"Write tests","status":"completed"},
 				{"content":"Add parser","status":"completed"}
 			]}`),
 			{Type: provider.ChunkDone},

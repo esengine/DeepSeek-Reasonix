@@ -33,7 +33,7 @@ each GitHub release. Or build from source:
 
 ```sh
 git clone https://github.com/esengine/DeepSeek-Reasonix   # default: main-v2 (Go)
-cd DeepSeek-Reasonix && make build                        # -> bin/reasonix
+cd DeepSeek-Reasonix && make build                        # -> bin/reasonix(.exe)
 ```
 
 Until `1.0.0` is published to npm, `npm i -g reasonix` still installs the `0.x`
@@ -58,8 +58,9 @@ and DeepSeek prefix-cache–oriented design.
 
 - **Code intelligence**: embedding semantic search is replaced by **CodeGraph**
   (`codegraph_*` tools) — a tree-sitter symbol/call graph, no embedding service or
-  API cost. Fetched into a local cache on first use (or `reasonix codegraph
-  install`); set `[codegraph].enabled = false` to opt out.
+  API cost. New (first-run) configs start with it off; existing configs keep it
+  on across upgrades. Toggle `[codegraph]` in the MCP manager or config, and set
+  `[codegraph].tier` to choose lazy, background, or eager startup.
 - **Plan mode** + `complete_step` (evidence-backed step sign-off).
 - **No web dashboard** — the v2 line is terminal + desktop (Wails), by design.
 - Some granular v1 tools are intentionally consolidated (e.g. file-management ops

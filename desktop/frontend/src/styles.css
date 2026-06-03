@@ -4042,6 +4042,10 @@ body {
   font-weight: 700;
 }
 .cap-sources__summary {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 6px;
   margin-top: 0;
   color: var(--fg-dim);
   font-size: 11.5px;
@@ -4059,8 +4063,19 @@ body {
 }
 .cap-sources__manage {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.cap-sources__manage-actions {
+  display: flex;
+  flex-wrap: wrap;
   gap: 6px;
+  min-width: 0;
+}
+.cap-sources__manage .btn {
+  min-height: 24px;
+  padding-inline: 9px;
 }
 .cap-source-list {
   display: flex;
@@ -4086,8 +4101,15 @@ body {
 .cap-source__text {
   min-width: 0;
 }
+.cap-source__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
 .cap-source__label {
   overflow: hidden;
+  min-width: 0;
   color: var(--fg);
   font-size: 12px;
   font-weight: 700;
@@ -4095,15 +4117,47 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.cap-source__path {
-  overflow: hidden;
-  margin-top: 2px;
+.cap-source__badges {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  justify-self: end;
+  gap: 4px;
+  max-width: 142px;
+  flex-wrap: wrap;
+}
+.cap-source-badge {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-soft) 74%, transparent);
   color: var(--fg-dim);
-  font-family: var(--mono);
-  font-size: 10.8px;
+  font-size: 10px;
+  font-weight: 550;
+  letter-spacing: 0;
   line-height: 1.35;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+}
+.cap-source-badge--scope {
+  border-color: var(--border-soft);
+  background: color-mix(in srgb, var(--bg-soft) 64%, transparent);
+  color: var(--fg-dim);
+}
+.cap-source-badge--configured {
+  border-color: color-mix(in srgb, var(--ok) 34%, var(--border));
+  background: color-mix(in srgb, var(--ok) 8%, var(--bg-soft));
+  color: var(--ok);
+}
+.cap-source-badge--missing {
+  border-color: color-mix(in srgb, var(--err) 28%, var(--border));
+  background: color-mix(in srgb, var(--err) 7%, var(--bg-soft));
+  color: var(--err);
+}
+.cap-source-badge--builtin {
+  border-color: color-mix(in srgb, var(--accent) 22%, var(--border));
+  background: color-mix(in srgb, var(--accent) 6%, var(--bg-soft));
+  color: color-mix(in srgb, var(--accent) 70%, var(--fg-dim));
 }
 .cap-source__meta {
   display: flex;
@@ -4112,6 +4166,70 @@ body {
   margin-top: 4px;
   color: var(--fg-dim);
   font-size: 11px;
+}
+.cap-source-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 8px;
+}
+.cap-source-skills {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-soft);
+}
+.cap-source-skill {
+  min-width: 0;
+}
+.cap-source-skill__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.cap-source-skill__name {
+  overflow: hidden;
+  min-width: 0;
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cap-source-skill__badges {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 4px;
+}
+.cap-source-skill__desc {
+  overflow: hidden;
+  margin-top: 2px;
+  color: var(--fg-dim);
+  font-size: 10.8px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cap-source-skills__more {
+  --wails-draggable: no-drag;
+  align-self: flex-start;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  padding: 1px 0;
+}
+.cap-source-skills__more:hover,
+.cap-source-skills__more:focus-visible {
+  color: var(--fg);
+  outline: none;
 }
 .cap-source__warning {
   margin-top: 5px;
@@ -4129,10 +4247,6 @@ body {
   font-size: 11.5px;
   cursor: pointer;
   padding: 2px 0;
-}
-.cap-diagnostics--compact {
-  margin-top: -2px;
-  font-size: 11px;
 }
 .cap-diagnostics:hover,
 .cap-diagnostics:focus-visible {
@@ -4201,6 +4315,9 @@ body {
   gap: 6px;
   margin-top: 8px;
 }
+.cap-failure__mode {
+  margin-top: 9px;
+}
 .cap-failure__logbox {
   margin: 8px 0 0;
   border: 1px solid var(--border-soft);
@@ -4238,6 +4355,36 @@ body {
   flex-direction: column;
   gap: 8px;
 }
+.cap-skills-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-soft);
+}
+.cap-skills-head__copy {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 7px;
+}
+.cap-skills-head__title {
+  color: var(--fg);
+  font-size: 11.5px;
+  font-weight: 700;
+}
+.cap-skills-head__summary {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 6px;
+  color: var(--fg-dim);
+  font-size: 11.5px;
+  line-height: 1.3;
+}
 .cap-skill-card {
   --wails-draggable: no-drag;
   width: 100%;
@@ -4249,16 +4396,41 @@ body {
   color: var(--fg);
   font: inherit;
   text-align: left;
-  cursor: pointer;
   transition: border-color 0.12s, background 0.12s, transform 0.12s;
 }
 .cap-skill-card:hover,
-.cap-skill-card:focus-visible {
+.cap-skill-card:focus-within {
   border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
   background: var(--bg-soft);
   outline: none;
 }
-.cap-skill-card:active {
+.cap-skill-card--disabled {
+  background: color-mix(in srgb, var(--bg-soft) 48%, transparent);
+  color: var(--fg-dim);
+}
+.cap-skill-card__top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+.cap-skill-card__toggle {
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.cap-skill-card__toggle:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 52%, transparent);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+.cap-skill-card__toggle:active {
   transform: translateY(1px);
 }
 .cap-skill-card__head {
@@ -4324,6 +4496,10 @@ body {
 }
 .cap-skill-badge--run {
   color: var(--fg-faint);
+}
+.cap-skill-badge--off {
+  color: var(--fg-faint);
+  background: color-mix(in srgb, var(--bg-elev) 80%, transparent);
 }
 .cap-skill-card__desc {
   margin: 6px 0 0 33px;
@@ -4409,9 +4585,16 @@ body {
   color: var(--fg-faint);
 }
 .cap-row__builtin {
-  font-size: 11px;
-  font-weight: 650;
-  color: var(--fg-faint);
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 6%, var(--bg-soft));
+  color: color-mix(in srgb, var(--accent) 70%, var(--fg-dim));
+  font-size: 10px;
+  font-weight: 550;
+  letter-spacing: 0;
+  line-height: 1.35;
 }
 .cap-row--skill {
   align-items: center;

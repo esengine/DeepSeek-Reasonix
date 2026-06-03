@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"reasonix/internal/proc"
 )
 
 type gitStatusEntry struct {
@@ -101,12 +103,15 @@ func (a *App) WorkspaceChanges() WorkspaceChangesView {
 
 func workspaceGitStatus(base string) ([]gitStatusEntry, error) {
 	cmd := exec.Command("git", "-C", base, "status", "--porcelain=v1", "-z", "--untracked-files=all")
+	proc.HideWindow(cmd)
 	raw, err := cmd.Output()
 	if err != nil {
 		return nil, err
 	}
 	entries := parseGitStatusPorcelainZ(raw)
-	topRaw, err := exec.Command("git", "-C", base, "rev-parse", "--show-toplevel").Output()
+	topCmd := exec.Command("git", "-C", base, "rev-parse", "--show-toplevel")
+	proc.HideWindow(topCmd)
+	topRaw, err := topCmd.Output()
 	if err != nil {
 		return nil, err
 	}

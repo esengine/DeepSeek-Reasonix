@@ -119,6 +119,60 @@ func (s *Server) switchModel(ctx context.Context, ref string) error {
 	return nil
 }
 
+// switchEffort persists a new reasoning-effort level for the active provider and
+// rebuilds via switchModel (which takes the write lock).
+func (s *Server) switchEffort(ctx context.Context, level string) error {
+	cur := s.ctl()
+	if cur.Running() {
+		return fmt.Errorf("cannot change effort while a turn is running")
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	ref := cur.Label()
+	entry, ok := cfg.ResolveModel(ref)
+	if !ok {
+		return fmt.Errorf("cannot resolve current provider %q", ref)
+	}
+	if !config.EffortCapabilityForEntry(entry).Supported {
+		return fmt.Errorf("effort is not configurable for %s", entry.Name)
+	}
+	effort, err := config.NormalizeEffort(entry, level)
+	if err != nil {
+		return err
+	}
+	editPath := config.UserConfigPath()
+	if editPath == "" {
+		return fmt.Errorf("no config file found")
+	}
+	edit := config.LoadForEdit(editPath)
+	if err := applyEffortEdit(edit, entry, effort); err != nil {
+		return err
+	}
+	if err := edit.SaveTo(editPath); err != nil {
+		return fmt.Errorf("save config: %w", err)
+	}
+	return s.switchModel(ctx, entry.Name+"/"+entry.Model)
+}
+
+// applyEffortEdit writes effort onto entry within edit, mirroring CLI/desktop
+// SetEffort: upsert the provider when the user config has no block for it yet, and
+// enable adaptive thinking for Anthropic so the effort knob actually engages.
+func applyEffortEdit(edit *config.Config, entry *config.ProviderEntry, effort string) error {
+	if _, ok := edit.Provider(entry.Name); !ok {
+		if err := edit.UpsertProvider(*entry); err != nil {
+			return err
+		}
+	}
+	if entry.Kind == "anthropic" && effort != "" && entry.Thinking == "" {
+		if err := edit.SetProviderThinking(entry.Name, "adaptive"); err != nil {
+			return err
+		}
+	}
+	return edit.SetProviderEffort(entry.Name, effort)
+}
+
 // Handler returns the HTTP routes: GET / (a minimal browser client), GET /events
 // (SSE), GET /history, GET /context, and POST command endpoints.
 // CORS is NOT applied by default — same-origin policy protects the unauthenticated
@@ -267,12 +321,25 @@ func (s *Server) submit(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing input", http.StatusBadRequest)
 		return
 	}
+	trimmed := strings.TrimSpace(body.Input)
 	// Intercept /model <ref> for runtime model switching (the controller's
 	// Submit path only lists models — switching is frontend-specific).
-	if trimmed := strings.TrimSpace(body.Input); strings.HasPrefix(trimmed, "/model ") {
+	if strings.HasPrefix(trimmed, "/model ") {
 		ref := strings.TrimSpace(strings.TrimPrefix(trimmed, "/model"))
 		if ref != "" {
 			if err := s.switchModel(r.Context(), ref); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+	}
+	// Intercept /effort <level> for reasoning effort switching.
+	if strings.HasPrefix(trimmed, "/effort ") {
+		level := strings.TrimSpace(strings.TrimPrefix(trimmed, "/effort"))
+		if level != "" {
+			if err := s.switchEffort(r.Context(), level); err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
@@ -294,12 +361,13 @@ func (s *Server) approve(w http.ResponseWriter, r *http.Request) {
 		ID      string `json:"id"`
 		Allow   bool   `json:"allow"`
 		Session bool   `json:"session"`
+		Persist bool   `json:"persist"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.ID == "" {
 		http.Error(w, "missing id", http.StatusBadRequest)
 		return
 	}
-	s.ctl().Approve(body.ID, body.Allow, body.Session)
+	s.ctl().Approve(body.ID, body.Allow, body.Session, body.Persist)
 	w.WriteHeader(http.StatusNoContent)
 }
 

@@ -249,7 +249,8 @@ func importTarget(line string) (string, bool) {
 func resolvePath(p, baseDir string) string {
 	if strings.HasPrefix(p, "~") {
 		if home, err := os.UserHomeDir(); err == nil {
-			return filepath.Join(home, strings.TrimPrefix(p[1:], "/"))
+			rest := strings.TrimLeft(p[1:], "/\\")
+			return filepath.Join(home, rest)
 		}
 	}
 	if filepath.IsAbs(p) {

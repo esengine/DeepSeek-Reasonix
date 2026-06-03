@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 
 	"reasonix/internal/agent"
@@ -323,11 +324,12 @@ func chatREPL(args []string) int {
 
 	sink := &eventSink{ch: eventCh}
 	ctrl, err := setup(ctx, *model, *maxSteps, false, sink)
-	if err != nil && errors.Is(err, boot.ErrUnknownModel) && isInteractive() {
-		// The configured model no longer resolves (e.g. a renamed/removed
-		// provider). Re-run the wizard instead of dead-ending, then retry.
+	if err != nil && errors.Is(err, boot.ErrUnknownModel) && isInteractive() && config.SourcePath() == "" {
+		// True first run whose default model can't resolve: guide setup, then retry.
+		// With a config present, fall through to the descriptive error — re-running
+		// the wizard would overwrite the user's config (#2856).
 		fmt.Fprintln(os.Stderr, i18n.M.ReconfigureOnUnknownModel)
-		if rc := interactiveSetup("reasonix.toml"); rc != 0 {
+		if rc := interactiveSetup(defaultConfigTarget(), defaultEnvTarget()); rc != 0 {
 			return rc
 		}
 		ctrl, err = setup(ctx, *model, *maxSteps, false, sink)
@@ -449,14 +451,64 @@ func chatREPL(args []string) int {
 	return 0
 }
 
-// setupConfig runs the configuration wizard (the `reasonix setup` command),
-// writing reasonix.toml (+ .env). Project memory is a separate concern — the
-// in-session `/init` skill generates AGENTS.md (see initHint).
-func setupConfig(args []string) int {
-	path := "reasonix.toml"
-	if len(args) > 0 {
-		path = args[0]
+// setupTargets is where the wizard writes: the TOML config and the secrets file.
+// Keys always go to the reasonix-owned global credentials file so they never land
+// in a project's own .env; only the config location is project-local under --local.
+type setupTargets struct {
+	config string
+	env    string
+}
+
+// defaultConfigTarget is the user-global config file, falling back to a
+// project-local reasonix.toml only when the user config dir can't be resolved.
+func defaultConfigTarget() string {
+	if p := config.UserConfigPath(); p != "" {
+		return p
 	}
+	return "reasonix.toml"
+}
+
+// defaultEnvTarget is the reasonix-owned global credentials file, falling back to
+// a project-local .env only when the user config dir can't be resolved.
+func defaultEnvTarget() string {
+	if p := config.UserCredentialsPath(); p != "" {
+		return p
+	}
+	return ".env"
+}
+
+// resolveSetupTargets picks where `reasonix setup` writes. Keys always go to the
+// global env. The config goes to the user-global dir by default, to ./reasonix.toml
+// under --local, or to an explicit path argument when given.
+func resolveSetupTargets(args []string) setupTargets {
+	t := setupTargets{config: defaultConfigTarget(), env: defaultEnvTarget()}
+	for _, a := range args {
+		switch a {
+		case "--local", "-l":
+			t.config = "reasonix.toml"
+		default:
+			t.config = a
+		}
+	}
+	return t
+}
+
+// displayPath shortens a home-relative path to ~/… for readable wizard output.
+func displayPath(p string) string {
+	if home, err := os.UserHomeDir(); err == nil && home != "" && strings.HasPrefix(p, home) {
+		return "~" + p[len(home):]
+	}
+	return p
+}
+
+// setupConfig runs the configuration wizard (the `reasonix setup` command),
+// writing config.toml to the user-global dir (or ./reasonix.toml under --local)
+// and API keys to the reasonix-owned global .env — never a project's own .env.
+// Project memory is a separate concern — the in-session `/init` skill generates
+// AGENTS.md (see initHint).
+func setupConfig(args []string) int {
+	t := resolveSetupTargets(args)
+	path := t.config
 	if _, err := os.Stat(path); err == nil {
 		// Non-interactive must not clobber an existing config silently.
 		if !isInteractive() {
@@ -473,21 +525,25 @@ func setupConfig(args []string) int {
 
 	// Interactive wizard on a TTY; fall back to the annotated default when piped.
 	if isInteractive() {
-		rc := interactiveSetup(path)
+		rc := interactiveSetup(t.config, t.env)
 		if rc == 0 {
 			fmt.Printf(i18n.M.TryHintFmt+"\n", bold("reasonix chat"))
 		}
 		return rc
 	}
-	return writeDefaultConfig(path)
+	return writeDefaultConfig(t.config)
 }
 
 func writeDefaultConfig(path string) int {
-	if err := config.Default().WriteFile(path); err != nil {
+	c := config.Default()
+	// A freshly scaffolded config starts without the codegraph daemon; existing
+	// configs (which never wrote [codegraph]) keep it on via the built-in default.
+	c.Codegraph.Enabled = false
+	if err := c.SaveTo(path); err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.WriteConfigErr, err)
 		return 1
 	}
-	fmt.Printf(i18n.M.WroteFileFmt+"\n", path)
+	fmt.Printf(i18n.M.WroteFileFmt+"\n", displayPath(path))
 	fmt.Println(i18n.M.NextHint)
 	return 0
 }
@@ -501,18 +557,26 @@ func initHint() int {
 	return 0
 }
 
-// interactiveSetup runs the setup wizard, then writes reasonix.toml (plus .env for any
-// keys entered). The wizard is intentionally minimal: pick language, pick
+// interactiveSetup runs the setup wizard, then writes the config to configPath
+// and any entered API keys to envPath (the reasonix-owned global .env, never a
+// project's own). The wizard is intentionally minimal: pick language, pick
 // provider, enter API keys. Language is asked first so every subsequent prompt
 // is already in the user's language even when env auto-detection got it wrong.
 // Two-model collaboration is left as a manual config edit (planner_model) so
 // first-run never confronts newcomers with advanced choices.
-func interactiveSetup(path string) int {
+func interactiveSetup(configPath, envPath string) int {
 	// Seed from the existing config when reconfiguring, so a re-run to fix a key
 	// preserves the user's providers / agent settings instead of resetting to
 	// defaults. First run (no file) falls back to the built-in defaults.
-	cfg := config.LoadForEdit(path)
+	_, statErr := os.Stat(configPath)
+	isNewConfig := statErr != nil
+	cfg := config.LoadForEdit(configPath)
 	prevDefault := cfg.DefaultModel
+	if isNewConfig {
+		// Brand-new user: start without the codegraph daemon. A reconfigure of an
+		// existing config keeps whatever the user already had.
+		cfg.Codegraph.Enabled = false
+	}
 
 	lang, err := selectLanguage()
 	if err != nil {
@@ -551,18 +615,18 @@ func interactiveSetup(path string) int {
 		}
 	}
 
-	if err := cfg.WriteFile(path); err != nil {
+	if err := cfg.SaveTo(configPath); err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.WriteConfigErr, err)
 		return 1
 	}
-	fmt.Printf("\n%s %s\n", green("✓"), fmt.Sprintf(i18n.M.WroteFileFmt, path))
+	fmt.Printf("\n%s %s\n", green("✓"), fmt.Sprintf(i18n.M.WroteFileFmt, displayPath(configPath)))
 
 	if len(envLines) > 0 {
-		if err := appendEnv(".env", envLines); err != nil {
+		if err := appendEnv(envPath, envLines); err != nil {
 			fmt.Fprintln(os.Stderr, i18n.M.WriteEnvErr, err)
 			return 1
 		}
-		fmt.Printf("%s %s\n", green("✓"), fmt.Sprintf(i18n.M.WroteFileFmt, ".env"))
+		fmt.Printf("%s %s\n", green("✓"), fmt.Sprintf(i18n.M.WroteFileFmt, displayPath(envPath)))
 	}
 
 	fmt.Printf("\n%s %s\n", accent("◆"), i18n.M.SetupComplete)
@@ -686,6 +750,16 @@ func selectEnabledProviders(providers []config.ProviderEntry) ([]config.Provider
 		probe := providers[famMembers[familyKey][0]]
 		famName := famInfo[familyKey].name
 
+		// Seed the probe's static list with every member of the family (e.g. the
+		// flash and pro SKUs), not just the first — so a failed /models probe
+		// falls back to the whole family instead of collapsing to one model.
+		probe.Models = familyStaticModels(providers, famMembers[familyKey])
+
+		// Collect the key before probing /models: a keyless probe 401s and the
+		// fallback would hide the live SKUs. Mirrors the custom/anthropic flows;
+		// configureKeys later sees the env var set and won't ask twice.
+		ensureProbeKey(&probe, famName)
+
 		models := fetchOrFallback(&probe, famName)
 		if len(models) == 0 {
 			fmt.Fprintf(os.Stderr, "  %s\n", dim(fmt.Sprintf(i18n.M.NoModelsAvailableFmt, famName)))
@@ -705,9 +779,46 @@ func selectEnabledProviders(providers []config.ProviderEntry) ([]config.Provider
 		for _, idx := range idxs {
 			selected = append(selected, models[idx])
 		}
-		enabled = append(enabled, buildFamilyEntry(probe, selected))
+		members := make([]config.ProviderEntry, 0, len(famMembers[familyKey]))
+		for _, idx := range famMembers[familyKey] {
+			members = append(members, providers[idx])
+		}
+		enabled = append(enabled, buildFamilyEntries(probe, members, selected)...)
 	}
 	return enabled, nil
+}
+
+// familyStaticModels unions the preset model lists of every entry in the family,
+// preserving order and dropping duplicates. It is the fallback offered when the
+// live /models probe fails, so a family with separate flash/pro preset entries
+// still surfaces both rather than only the first member's model.
+func familyStaticModels(providers []config.ProviderEntry, idxs []int) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, i := range idxs {
+		for _, m := range providers[i].ModelList() {
+			if m != "" && !seen[m] {
+				seen[m] = true
+				out = append(out, m)
+			}
+		}
+	}
+	return out
+}
+
+// ensureProbeKey prompts once for the family's API key when it isn't already in
+// the environment, so the /models probe can run and return the live SKU list.
+// The value is set in the env for the probe; configureKeys persists it to .env
+// later and skips re-asking. A blank entry is fine — the static fallback covers it.
+func ensureProbeKey(probe *config.ProviderEntry, famName string) {
+	if probe.APIKeyEnv == "" || os.Getenv(probe.APIKeyEnv) != "" {
+		return
+	}
+	fmt.Printf("  %s\n", dim(fmt.Sprintf(i18n.M.FamilyKeyPromptFmt, famName)))
+	in := bufio.NewScanner(os.Stdin)
+	if key := strings.TrimSpace(ask(in, os.Stdout, "  "+probe.APIKeyEnv, "")); key != "" {
+		os.Setenv(probe.APIKeyEnv, key)
+	}
 }
 
 // fetchOrFallback tries the OpenAI-compatible GET /models endpoint
@@ -740,6 +851,41 @@ func fetchOrFallback(probe *config.ProviderEntry, famName string) []string {
 // vary per vendor but not per model. The Default pointer is reset to the
 // first selected model if it would otherwise reference a model the user
 // didn't pick (or was empty).
+// buildFamilyEntries splits the user's selection back across the family's preset
+// members so each model keeps its own entry — and therefore its own pricing,
+// context window, and balance URL. A family like DeepSeek ships flash and pro as
+// separate presets with different prices; collapsing them into one entry would
+// bill pro at flash's rate. Models the live /models list returned that match no
+// preset (a new SKU) fall under the probe entry. Member order is preserved;
+// within a member, selection order is preserved.
+func buildFamilyEntries(probe config.ProviderEntry, members []config.ProviderEntry, selected []string) []config.ProviderEntry {
+	tmpl := map[string]config.ProviderEntry{probe.Name: probe}
+	ownerName := map[string]string{}
+	for _, m := range members {
+		tmpl[m.Name] = m
+		for _, id := range m.ModelList() {
+			ownerName[id] = m.Name
+		}
+	}
+	var order []string
+	groups := map[string][]string{}
+	for _, sm := range selected {
+		name, ok := ownerName[sm]
+		if !ok {
+			name = probe.Name
+		}
+		if _, seen := groups[name]; !seen {
+			order = append(order, name)
+		}
+		groups[name] = append(groups[name], sm)
+	}
+	out := make([]config.ProviderEntry, 0, len(order))
+	for _, name := range order {
+		out = append(out, buildFamilyEntry(tmpl[name], groups[name]))
+	}
+	return out
+}
+
 func buildFamilyEntry(probe config.ProviderEntry, selected []string) config.ProviderEntry {
 	entry := probe
 	entry.Models = selected
@@ -1086,11 +1232,11 @@ func withBuiltinFamilies(providers []config.ProviderEntry) []config.ProviderEntr
 }
 
 // promptMissingKeys re-runs the wizard's key-entry step for any enabled
-// provider whose api_key_env is unset. Newly entered values are appended to
-// .env so the chat session that follows picks them up via config.Load. The
-// user can hit Enter to skip — the chat banner falls back to a one-line
-// warning so they still see what's missing. Returns a non-zero exit code only
-// when writing .env fails.
+// provider whose api_key_env is unset. Newly entered values are appended to the
+// reasonix-owned global .env so the chat session that follows picks them up via
+// config.Load. The user can hit Enter to skip — the chat banner falls back to a
+// one-line warning so they still see what's missing. Returns a non-zero exit
+// code only when writing the env file fails.
 func promptMissingKeys(cfg *config.Config) int {
 	missing := providersWithMissingKeys(cfg)
 	if len(missing) == 0 {
@@ -1102,11 +1248,12 @@ func promptMissingKeys(cfg *config.Config) int {
 	if len(envLines) == 0 {
 		return 0
 	}
-	if err := appendEnv(".env", envLines); err != nil {
+	envPath := defaultEnvTarget()
+	if err := appendEnv(envPath, envLines); err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.WriteEnvErr, err)
 		return 1
 	}
-	fmt.Printf("%s %s\n", green("✓"), fmt.Sprintf(i18n.M.WroteFileFmt, ".env"))
+	fmt.Printf("%s %s\n", green("✓"), fmt.Sprintf(i18n.M.WroteFileFmt, displayPath(envPath)))
 	return 0
 }
 
@@ -1237,6 +1384,11 @@ func appendEnv(path string, lines []string) error {
 			os.Setenv(strings.TrimSpace(k), v)
 		}
 	}
+	if dir := filepath.Dir(path); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+	}
 	return os.WriteFile(path, []byte(b.String()), 0o600)
 }
 
@@ -1255,9 +1407,9 @@ func readStdin() string {
 func welcome(version string) int {
 	src := config.SourcePath()
 
-	// Try loading config early — it merges user-global + cwd-local sources.
-	// A valid load means the user has configured before (possibly in another
-	// directory), so we should NOT re-trigger the setup wizard.
+	// Load early: config.Load merges the cwd-local and user-global sources, so a
+	// successful load means the user has configured before — even when run from a
+	// directory without a local reasonix.toml (SourcePath is then "").
 	cfg, cfgErr := config.Load()
 	if cfgErr != nil {
 		cfg = config.Default()
@@ -1266,10 +1418,10 @@ func welcome(version string) int {
 	// First run on an interactive terminal: actively guide setup rather than
 	// printing a static screen and exiting. interactiveSetup owns the language
 	// prompt and welcome banner so every prompt the user sees is already
-	// localized to their choice. Only trigger when no config loads from ANY
-	// source (neither cwd-local nor user-global).
+	// localized to their choice. Only when no config loads from ANY source — not
+	// merely when the cwd lacks a local file.
 	if src == "" && cfgErr != nil && isInteractive() {
-		if rc := interactiveSetup("reasonix.toml"); rc != 0 {
+		if rc := interactiveSetup(defaultConfigTarget(), defaultEnvTarget()); rc != 0 {
 			return rc
 		}
 		// Config just written; reload so .env (and any pinned language) is
@@ -1285,11 +1437,11 @@ func welcome(version string) int {
 		return 0
 	}
 
-	// Config loads successfully (from any source) on a terminal: go into chat.
-	// If any enabled provider's key isn't set yet, re-run the wizard's key-entry
-	// step inline — first run already chose language and providers, so we don't
-	// re-ask those. Skipping the prompts is still fine; the chat banner falls
-	// back to a one-line warning.
+	// Config loads from any source (cwd-local or user-global) on a terminal: go
+	// into chat. If any enabled provider's key isn't set yet, re-run the wizard's
+	// key-entry step inline — first run already chose language and providers, so
+	// we don't re-ask those. Skipping the prompts is still fine; the chat banner
+	// falls back to a one-line warning.
 	if cfgErr == nil && isInteractive() {
 		if rc := promptMissingKeys(cfg); rc != 0 {
 			return rc

@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -103,10 +104,15 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "config migration from ~/.reasonix failed: " + migErr.Error()})
 	} else if migrated != nil {
 		sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: migrated.Notice()})
-		if home, herr := os.UserHomeDir(); herr == nil {
-			if n, serr := agent.MigrateLegacySessions(filepath.Join(home, ".reasonix", "sessions"), config.SessionDir()); serr == nil && n > 0 {
-				sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: fmt.Sprintf("imported %d past session(s) from ~/.reasonix/sessions — resume them with --resume or the history panel", n)})
-			}
+	}
+	// Back-fill v0.x sessions, independent of the config migration. This used to be
+	// nested under the (one-time) config migration above, so a v0.x user who had
+	// already opened v1 never got their old sessions imported (#2869). It is guarded
+	// by its own marker, so running every boot imports any not-yet-imported session
+	// once and is a cheap no-op afterwards.
+	if home, herr := os.UserHomeDir(); herr == nil {
+		if n, serr := agent.MigrateLegacySessions(filepath.Join(home, ".reasonix", "sessions"), config.SessionDir()); serr == nil && n > 0 {
+			sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: fmt.Sprintf("imported %d past session(s) from ~/.reasonix/sessions — resume them with --resume or the history panel", n)})
 		}
 	}
 
@@ -158,8 +164,14 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// only; bodies load on demand via run_skill or "/<name>". Bodies never enter
 	// the prefix, so the index costs a fixed, small amount per turn.
 	cwd, _ := os.Getwd()
-	skillStore := skill.New(skill.Options{ProjectRoot: cwd, CustomPaths: cfg.SkillCustomPaths(), Stderr: opts.Stderr})
+	skillStore := skill.New(skill.Options{
+		ProjectRoot:   cwd,
+		CustomPaths:   cfg.SkillCustomPaths(),
+		DisabledNames: cfg.DisabledSkillNames(),
+		Stderr:        opts.Stderr,
+	})
 	skills := skillStore.List()
+	allSkills := skill.New(skill.Options{ProjectRoot: cwd, CustomPaths: cfg.SkillCustomPaths(), Stderr: io.Discard}).List()
 	sysPrompt = skill.ApplyIndex(sysPrompt, skills)
 
 	reg := tool.NewRegistry()
@@ -212,10 +224,11 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// tools come online next session — otherwise point the user at the explicit
 	// install command. A failed init or fetch is a notice, not fatal.
 	//
-	// Warm CodeGraph projects stay eager because the agent benefits from seeing
-	// symbol-graph tools on the first turn. Cold projects start in the background:
-	// the first .codegraph/ creation and daemon warmup should not be reported as
-	// a startup failure just because they exceeded the generic MCP budget.
+	// CodeGraph follows the same user-selectable tier model as ordinary MCP
+	// servers when a tier is set. EnsureInit only creates .codegraph/ (fast,
+	// size-independent). With no explicit tier — an upgraded config that predates
+	// the setting — it keeps the historical startup: warm projects eager so
+	// symbol tools are ready on the first turn, cold projects in the background.
 	if cfg.Codegraph.Enabled {
 		bin, ok := codegraph.Resolve(cfg.Codegraph.Path)
 		switch {
@@ -227,12 +240,29 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 					Text: "codegraph: init failed (" + err.Error() + ") — symbol-graph tools disabled this session"})
 				break
 			}
-			if warm {
+			bgNotice := func() {
+				if !warm {
+					sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
+						Text: "codegraph: preparing code-intelligence tools in the background — tools will appear when ready"})
+				}
+			}
+			if strings.TrimSpace(cfg.Codegraph.Tier) == "" {
+				if warm {
+					eagerSpecs = append(eagerSpecs, spec)
+				} else {
+					bgSpecs = append(bgSpecs, spec)
+					bgNotice()
+				}
+				break
+			}
+			switch cfg.Codegraph.ResolvedTier() {
+			case "eager":
 				eagerSpecs = append(eagerSpecs, spec)
-			} else {
+			case "background":
 				bgSpecs = append(bgSpecs, spec)
-				sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
-					Text: "codegraph: preparing code-intelligence tools in the background — tools will appear when ready"})
+				bgNotice()
+			default:
+				lazySpecs = append(lazySpecs, spec)
 			}
 		case cfg.Codegraph.AutoInstall:
 			notify := func(msg string) { sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: msg}) }
@@ -491,6 +521,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		Host:          pluginHost,
 		Commands:      cmds,
 		Skills:        skills,
+		AllSkills:     allSkills,
 		Hooks:         hookRunner,
 		Memory:        mem,
 		Cleanup:       cleanup,
@@ -502,6 +533,20 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		PluginCtx:     ctx,
 		WorkspaceRoot: cwd,
 		AutoPlan:      cfg.Agent.AutoPlan,
+		OnRemember: func(rule string) {
+			path := config.SourcePath()
+			if path == "" {
+				path = "reasonix.toml" // match Config.Save() fallback
+			}
+			edit := config.LoadForEdit(path)
+			if err := edit.AddPermissionRule("allow", rule); err != nil {
+				slog.Warn("persist permission rule", "rule", rule, "err", err)
+				return
+			}
+			if err := edit.Save(); err != nil {
+				slog.Warn("save config after permission rule", "err", err)
+			}
+		},
 	}
 	if classifier != nil {
 		ctrlOpts.Classifier = classifier

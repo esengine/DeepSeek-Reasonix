@@ -54,12 +54,14 @@ type Controller struct {
 	host         *plugin.Host
 	commands     []command.Command
 	skills       []skill.Skill
+	allSkills    []skill.Skill
 	hooks        *hook.Runner // session hook runner; nil-safe (no hooks configured)
 	mem          *memory.Set
 	cleanup      func()
 	autoPlan     string
 	classifier   autoPlanClassifier
-	startedOnce  bool // guards the one-shot SessionStart hook on first turn
+	startedOnce  bool              // guards the one-shot SessionStart hook on first turn
+	onRemember   func(rule string) // set via Options; invoked when user picks "always allow"
 
 	// balanceURL/balanceKey target the active provider's optional wallet-balance
 	// endpoint (empty when the provider declares none). Captured at build so a
@@ -138,6 +140,7 @@ type Controller struct {
 type approvalReply struct {
 	allow   bool
 	session bool
+	persist bool // true = write "always allow" rule to config
 }
 
 // Options carries the already-built pieces setup assembles. Lifecycle metadata
@@ -155,6 +158,7 @@ type Options struct {
 	Host         *plugin.Host
 	Commands     []command.Command
 	Skills       []skill.Skill
+	AllSkills    []skill.Skill
 	Hooks        *hook.Runner
 	Memory       *memory.Set
 	Cleanup      func()
@@ -174,6 +178,10 @@ type Options struct {
 	WorkspaceRoot string
 	AutoPlan      string
 	Classifier    autoPlanClassifier
+	// OnRemember, when set, is invoked with a new allow rule the user chose to
+	// persist to disk (e.g. "bash(go build*)"). The callback is wired into the
+	// permission Gate on EnableInteractiveApproval.
+	OnRemember func(rule string)
 }
 
 // New builds a Controller. A nil Sink is replaced with event.Discard.
@@ -202,11 +210,13 @@ func New(opts Options) *Controller {
 		host:          opts.Host,
 		commands:      opts.Commands,
 		skills:        opts.Skills,
+		allSkills:     opts.AllSkills,
 		hooks:         opts.Hooks,
 		mem:           opts.Memory,
 		cleanup:       opts.Cleanup,
 		autoPlan:      normalizeAutoPlan(opts.AutoPlan),
 		classifier:    classifier,
+		onRemember:    opts.OnRemember,
 		balanceURL:    opts.BalanceURL,
 		balanceKey:    opts.BalanceKey,
 		balanceClient: opts.BalanceClient,
@@ -585,13 +595,13 @@ func (c *Controller) Running() bool {
 // Approve answers a pending ApprovalRequest by ID: allow runs the call, session
 // also remembers a grant for the rest of the session so the same tool+subject
 // isn't re-prompted. Unknown/expired IDs are ignored.
-func (c *Controller) Approve(id string, allow, session bool) {
+func (c *Controller) Approve(id string, allow, session, persist bool) {
 	c.mu.Lock()
 	reply := c.approvals[id]
 	delete(c.approvals, id)
 	c.mu.Unlock()
 	if reply != nil {
-		reply <- approvalReply{allow: allow, session: session} // buffered, never blocks
+		reply <- approvalReply{allow: allow, session: session, persist: persist} // buffered, never blocks
 	}
 }
 
@@ -602,7 +612,9 @@ func (c *Controller) Approve(id string, allow, session bool) {
 // a nil asker from setup.
 func (c *Controller) EnableInteractiveApproval() {
 	if c.executor != nil {
-		c.executor.SetGate(permission.NewGate(c.policy, gateApprover{c}))
+		gate := permission.NewGate(c.policy, gateApprover{c})
+		gate.OnRemember = c.onRemember // wire "always allow" persistence callback
+		c.executor.SetGate(gate)
 		c.executor.SetAsker(c)
 	}
 }
@@ -1193,6 +1205,60 @@ func (c *Controller) Commands() []command.Command { return c.commands }
 // Skills returns the discoverable skills (for the slash menu and `/skill`).
 func (c *Controller) Skills() []skill.Skill { return c.skills }
 
+// AllSkills returns every discoverable skill, including disabled ones, for
+// management surfaces that need to re-enable a hidden skill.
+func (c *Controller) AllSkills() []skill.Skill {
+	if len(c.allSkills) > 0 {
+		return c.allSkills
+	}
+	return c.skills
+}
+
+// DisabledSkills returns all discoverable skills that are disabled in config.
+func (c *Controller) DisabledSkills() []skill.Skill {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil
+	}
+	var out []skill.Skill
+	for _, sk := range c.AllSkills() {
+		if cfg.IsSkillDisabled(sk.Name) {
+			out = append(out, sk)
+		}
+	}
+	return out
+}
+
+// SkillEnabled reports whether a discoverable skill is enabled.
+func (c *Controller) SkillEnabled(name string) bool {
+	cfg, err := config.Load()
+	if err != nil {
+		return true
+	}
+	return !cfg.IsSkillDisabled(name)
+}
+
+// SetSkillEnabled persists a skill enable/disable preference. The caller should
+// rebuild the controller for the prompt/tool registry to reflect it immediately.
+func (c *Controller) SetSkillEnabled(name string, enabled bool) error {
+	found := false
+	for _, sk := range c.AllSkills() {
+		if config.SkillNameKey(sk.Name) == config.SkillNameKey(name) {
+			name = sk.Name
+			found = true
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("unknown skill: %s", name)
+	}
+	cfg := config.LoadForEdit(config.UserConfigPath())
+	if err := cfg.SetSkillEnabled(name, enabled); err != nil {
+		return err
+	}
+	return cfg.SaveTo(config.UserConfigPath())
+}
+
 // HookRunner returns the session's hook runner (nil-safe; may hold zero hooks),
 // so a frontend can list the active hooks via `/hooks`.
 func (c *Controller) HookRunner() *hook.Runner { return c.hooks }
@@ -1409,17 +1475,46 @@ func (c *Controller) SetBypass(on bool) {
 	c.mu.Lock()
 	c.bypass = on
 	if on {
-		pending = make([]chan approvalReply, 0, len(c.approvals))
-		for id, reply := range c.approvals {
-			delete(c.approvals, id)
-			pending = append(pending, reply)
-		}
+		pending = c.drainApprovalsLocked()
 	}
 	c.mu.Unlock()
 
 	for _, reply := range pending {
 		reply <- approvalReply{allow: true}
 	}
+}
+
+// SetMode applies plan (read-only) and bypass (auto-approve) together so a turn
+// submitted right after a composer mode switch can't observe a half-applied
+// gate. Turning bypass on drains any approval already waiting.
+func (c *Controller) SetMode(plan, bypass bool) {
+	var pending []chan approvalReply
+
+	c.mu.Lock()
+	c.planMode = plan
+	c.bypass = bypass
+	if bypass {
+		pending = c.drainApprovalsLocked()
+	}
+	c.mu.Unlock()
+
+	if c.executor != nil {
+		c.executor.SetPlanMode(plan)
+	}
+	for _, reply := range pending {
+		reply <- approvalReply{allow: true}
+	}
+}
+
+// drainApprovalsLocked removes every pending approval gate and returns their
+// reply channels; caller holds c.mu and sends {allow:true} after unlocking.
+func (c *Controller) drainApprovalsLocked() []chan approvalReply {
+	pending := make([]chan approvalReply, 0, len(c.approvals))
+	for id, reply := range c.approvals {
+		delete(c.approvals, id)
+		pending = append(pending, reply)
+	}
+	return pending
 }
 
 // Bypass reports whether YOLO/bypass mode is on, for the status-bar indicator.
@@ -1723,8 +1818,10 @@ func (c *Controller) requestApproval(ctx context.Context, tool, subject string) 
 			c.granted[key] = true
 			c.mu.Unlock()
 		}
-		// remember=false: session grants live here, not in the on-disk policy.
-		return r.allow, false, nil
+		// When persist is true, remember=true signals Gate.OnRemember to write
+		// the rule to the on-disk config. Plan approvals are excluded.
+		remember := r.persist && tool != planApprovalTool
+		return r.allow, remember, nil
 	case <-ctx.Done():
 		c.mu.Lock()
 		delete(c.approvals, id)

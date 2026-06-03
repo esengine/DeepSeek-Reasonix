@@ -249,10 +249,11 @@ type SessionCancelParams struct {
 type PermissionOptionKind string
 
 const (
-	OptAllowOnce    PermissionOptionKind = "allow_once"
-	OptAllowAlways  PermissionOptionKind = "allow_always"
-	OptRejectOnce   PermissionOptionKind = "reject_once"
-	OptRejectAlways PermissionOptionKind = "reject_always"
+	OptAllowOnce       PermissionOptionKind = "allow_once"
+	OptAllowAlways     PermissionOptionKind = "allow_always"
+	OptAllowPersistent PermissionOptionKind = "allow_persistent"
+	OptRejectOnce      PermissionOptionKind = "reject_once"
+	OptRejectAlways    PermissionOptionKind = "reject_always"
 )
 
 // PermissionOption is one choice offered to the user for a permission request.

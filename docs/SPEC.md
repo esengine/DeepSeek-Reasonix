@@ -268,6 +268,22 @@ Review the staged diff. Focus on $ARGUMENTS, list bugs with file:line.
   skipped, not fatal. Custom and MCP-prompt commands both resolve to text and
   reuse the same "start a turn" path as a typed message.
 
+#### CLI modal/composer ownership
+
+The Bubble Tea chat TUI has one bottom composer. A slash-command overlay must
+declare whether it owns keyboard input:
+
+- **Modal overlays** own navigation/confirm/cancel keys and must hide the
+  composer while open. Examples: `/mcp`, `/resume`, `/rewind`, approval prompts,
+  and non-typing `ask` choice cards.
+- **Input-owned overlays** are attached to the textarea and must keep the
+  composer visible. Examples: slash/@ autocomplete and `ask` free-text mode.
+
+New CLI overlays must update `chat_tui.hideComposer()` and add/extend layout
+tests so `bottomRows()` accounts for either `panel + status` or
+`panel + composer + status`. This prevents inactive chat input boxes from being
+rendered under modal panels.
+
 ### 3.9 Chat references (`@`)
 
 A chat message may embed `@` references; before the turn is sent, each is
@@ -367,6 +383,10 @@ api_key_env = "MIMO_API_KEY"
 
 [tools]
 enabled = []   # omit/empty = all built-ins
+
+[skills]
+# paths = ["~/my-skills", "../shared/skills"]   # extra custom skill roots
+# disabled_skills = ["review"]                  # hidden from prompt, slash invocation, and skill tools
 
 [permissions]
 mode  = "ask"                              # writer fallback when no rule matches: ask|allow|deny

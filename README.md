@@ -74,7 +74,7 @@ every [GitHub release](https://github.com/esengine/DeepSeek-Reasonix/releases).
 ### Build from source
 
 ```sh
-make build      # -> bin/reasonix
+make build      # -> bin/reasonix(.exe)
 make cross      # -> dist/ (darwin|linux|windows × amd64|arm64)
 ```
 
@@ -116,6 +116,10 @@ api_key_env = "DEEPSEEK_API_KEY"
 
 [tools]
 enabled = []   # omit/empty = all built-ins
+
+[skills]
+# paths = ["~/my-skills", "../shared/skills"]   # extra custom skill roots
+# disabled_skills = ["review"]                  # hide skills until /skill enable <name>
 
 [permissions]
 mode  = "ask"                                # writer fallback when no rule matches: ask|allow|deny
@@ -188,6 +192,11 @@ sources are merged; on a name collision `reasonix.toml` wins.
   }
 }
 ```
+
+**Upgrading from `0.x`?** Your old `~/.reasonix/config.json` is still read for its
+`mcpServers` (honouring `mcpDisabled`) as a lowest-priority source, so MCP servers
+keep working — move them into `reasonix.toml`'s `[[plugins]]` or a `.mcp.json` when
+convenient.
 
 ### Slash commands
 

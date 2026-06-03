@@ -10,6 +10,8 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
+	"runtime"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -17,6 +19,23 @@ import (
 	"reasonix/internal/netclient"
 	"reasonix/internal/provider"
 )
+
+var validSkillName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$`)
+
+// IsValidSkillName reports whether name is a usable skill identifier.
+func IsValidSkillName(name string) bool { return validSkillName.MatchString(name) }
+
+// SkillNameKey normalizes a skill identifier for config comparisons.
+func SkillNameKey(name string) string {
+	name = strings.TrimSpace(name)
+	if !IsValidSkillName(name) {
+		return ""
+	}
+	if runtime.GOOS == "windows" {
+		return strings.ToLower(name)
+	}
+	return name
+}
 
 // Config is Reasonix's runtime configuration.
 type Config struct {
@@ -99,16 +118,29 @@ type StatuslineConfig struct {
 
 // CodegraphConfig governs the built-in CodeGraph MCP server — symbol/call-graph
 // code intelligence (tree-sitter + SQLite) that gives the agent codegraph_*
-// search / context / explore / trace / node tools. Enabled defaults to true; set
-// enabled = false to drop those tools and fall back to grep/glob. AutoInstall
-// (default true) lets reasonix fetch the CodeGraph runtime into its cache on first
-// use; set false to require an explicit `reasonix codegraph install` (e.g. for
-// air-gapped or headless runs). Path overrides binary resolution; empty resolves
-// the cache, then a `codegraph` on PATH, then a bundle beside the executable.
+// search / context / explore / trace / node tools. Enabled defaults to true so
+// upgrades keep it for existing configs; first-run scaffolds write enabled =
+// false so only brand-new users start without it. AutoInstall (default true)
+// lets reasonix fetch the CodeGraph runtime into its cache when CodeGraph is
+// enabled but missing; set false to require an explicit `reasonix codegraph
+// install` (e.g. for air-gapped or headless runs). Path overrides binary
+// resolution; empty resolves the cache, then a `codegraph` on PATH, then a
+// bundle beside the executable. Tier matches ordinary MCP servers (lazy,
+// background, eager); when unset it preserves the historical warm→eager /
+// cold→background startup.
 type CodegraphConfig struct {
 	Enabled     bool   `toml:"enabled"`
 	AutoInstall bool   `toml:"auto_install"`
 	Path        string `toml:"path"`
+	Tier        string `toml:"tier"`
+}
+
+func (c CodegraphConfig) ShouldAutoStart() bool {
+	return c.Enabled
+}
+
+func (c CodegraphConfig) ResolvedTier() string {
+	return resolvedMCPTier(c.Tier)
 }
 
 // NetworkConfig controls ordinary outbound HTTP traffic such as model providers,
@@ -183,9 +215,11 @@ func (c *Config) NetworkProxyMode() string {
 // roots — each a directory of SKILL.md / <name>.md playbooks — scanned between
 // the project roots (.reasonix/.agents/.claude under the workspace) and the
 // global roots (the same three under the home dir). ~ and relative paths and
-// ${VAR} expansion are supported.
+// ${VAR} expansion are supported. DisabledSkills hides named skills from the
+// agent prompt, slash invocation, and skill tools while keeping them manageable.
 type SkillsConfig struct {
-	Paths []string `toml:"paths"`
+	Paths          []string `toml:"paths"`
+	DisabledSkills []string `toml:"disabled_skills"`
 }
 
 // SkillCustomPaths returns the configured custom skill roots with ${VAR}
@@ -198,6 +232,40 @@ func (c *Config) SkillCustomPaths() []string {
 		}
 	}
 	return out
+}
+
+// DisabledSkillNames returns valid disabled skill identifiers, preserving the
+// first spelling and dropping duplicates/empty entries.
+func (c *Config) DisabledSkillNames() []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, name := range c.Skills.DisabledSkills {
+		name = strings.TrimSpace(name)
+		if !IsValidSkillName(name) {
+			continue
+		}
+		key := SkillNameKey(name)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, name)
+	}
+	return out
+}
+
+// IsSkillDisabled reports whether name is configured as disabled.
+func (c *Config) IsSkillDisabled(name string) bool {
+	key := SkillNameKey(name)
+	if key == "" {
+		return false
+	}
+	for _, disabled := range c.DisabledSkillNames() {
+		if SkillNameKey(disabled) == key {
+			return true
+		}
+	}
+	return false
 }
 
 // SandboxConfig bounds the blast radius of tool calls (Phase 0: file-writer
@@ -404,7 +472,11 @@ func (e PluginEntry) ShouldAutoStart() bool {
 // the project default applied. Unknown values fall back to "lazy" so a typo
 // never forces a slow boot.
 func (e PluginEntry) ResolvedTier() string {
-	switch strings.ToLower(strings.TrimSpace(e.Tier)) {
+	return resolvedMCPTier(e.Tier)
+}
+
+func resolvedMCPTier(tier string) string {
+	switch strings.ToLower(strings.TrimSpace(tier)) {
 	case "eager":
 		return "eager"
 	case "background":
@@ -471,10 +543,10 @@ func Default() *Config {
 		// so an absent [sandbox] in a user's file keeps egress (zero value would
 		// wrongly deny it).
 		Sandbox: SandboxConfig{Bash: "enforce", Network: true},
-		// CodeGraph code-intelligence on by default: when it resolves it is injected
-		// as a built-in MCP server, and AutoInstall fetches it into the cache on
-		// first use. Set enabled = false to opt out, or auto_install = false to
-		// require an explicit `reasonix codegraph install`.
+		// CodeGraph code-intelligence defaults on so existing configs (which never
+		// wrote a [codegraph] section) keep it after an upgrade. First-run scaffolds
+		// write enabled = false instead, so only brand-new users start without it.
+		// AutoInstall fetches the runtime into the cache when enabled and missing.
 		Codegraph: CodegraphConfig{Enabled: true, AutoInstall: true},
 		// LSP tools on by default, but dormant until a language server is on PATH;
 		// a missing server yields an install hint rather than an error.
@@ -490,8 +562,9 @@ func Default() *Config {
 }
 
 // Load builds the configuration: defaults, then user config, then project
-// config, then any MCP servers from Claude Code's .mcp.json. A .env in the
-// working directory is loaded first so api_key_env can resolve.
+// config, then MCP servers from Claude Code's .mcp.json, then (lowest priority)
+// the v0.x ~/.reasonix/config.json's mcpServers. A .env in the working directory
+// is loaded first so api_key_env can resolve.
 func Load() (*Config, error) {
 	loadDotEnv()
 	cfg := Default()
@@ -501,7 +574,11 @@ func Load() (*Config, error) {
 		tomlSources = append(tomlSources, uc)
 	}
 	tomlSources = append(tomlSources, "reasonix.toml")
+	sawConfigFile := false
 	for _, path := range tomlSources {
+		if _, err := os.Stat(path); err == nil {
+			sawConfigFile = true
+		}
 		if err := mergeFile(cfg, path); err != nil {
 			return nil, err
 		}
@@ -523,8 +600,56 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 	cfg.mergeMCPJSON(entries)
+
+	// Lowest priority: the v0.x ~/.reasonix/config.json's mcpServers, so upgrading
+	// from the TypeScript line keeps MCP servers without rewriting them. Anything
+	// the v2 config or .mcp.json already declared wins on a name collision.
+	cfg.mergeMCPJSON(loadLegacyMCP(legacyConfigPath()))
 	normalizeLegacyEffort(cfg)
+	backfillDeepSeekPro(cfg)
+	// First run (no config file anywhere): keep CodeGraph off until the user opts
+	// in. An existing config — even one without a [codegraph] section — keeps the
+	// built-in default (on), so an upgrade never silently drops code intelligence.
+	if !sawConfigFile {
+		cfg.Codegraph.Enabled = false
+	}
 	return cfg, nil
+}
+
+// backfillDeepSeekPro restores deepseek-pro for configs the pre-fix setup wizard
+// wrote with only deepseek-v4-flash: a keyless /models probe used to drop the Pro
+// SKU, leaving users unable to switch to it. In-memory only — the user's file is
+// untouched. Narrowly scoped to the official DeepSeek endpoint (which is known to
+// serve pro) so a custom flash-only deployment isn't given an entry that 404s.
+func backfillDeepSeekPro(c *Config) {
+	const flashModel, proModel = "deepseek-v4-flash", "deepseek-v4-pro"
+	var flash *ProviderEntry
+	for i := range c.Providers {
+		p := &c.Providers[i]
+		if p.Name == "deepseek-pro" {
+			return
+		}
+		for _, m := range p.ModelList() {
+			switch m {
+			case proModel:
+				return // pro already reachable
+			case flashModel:
+				if strings.Contains(p.BaseURL, "api.deepseek.com") {
+					flash = p
+				}
+			}
+		}
+	}
+	if flash == nil {
+		return
+	}
+	for _, bp := range Default().Providers {
+		if bp.Name == "deepseek-pro" {
+			bp.APIKeyEnv = flash.APIKeyEnv
+			c.Providers = append(c.Providers, bp)
+			return
+		}
+	}
 }
 
 // normalizeLegacyEffort migrates the retired DeepSeek effort="off" (the old
@@ -599,6 +724,21 @@ func userConfigPath() string {
 // UserConfigPath is the user-global config file (~/.config/reasonix/config.toml),
 // or "" when the user config dir can't be resolved.
 func UserConfigPath() string { return userConfigPath() }
+
+// UserCredentialsPath is the reasonix-owned global secrets file, beside
+// config.toml in the user config dir (e.g. ~/.config/reasonix/credentials). It
+// holds KEY=value lines loaded into the environment by loadDotEnv. The setup
+// wizard writes API keys here, deliberately NOT named .env: keys never land in a
+// project's own .env (which can't be selectively gitignored), never get
+// committed, and resolve from any working directory. "" when the user config dir
+// can't be resolved.
+func UserCredentialsPath() string {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(dir, "reasonix", "credentials")
+}
 
 // ArchiveDir is where compacted conversation history is archived for
 // traceability (one timestamped .jsonl per compaction). Empty if the user config

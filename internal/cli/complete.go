@@ -9,6 +9,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"reasonix/internal/control"
+	"reasonix/internal/fileref"
 	"reasonix/internal/i18n"
 	"reasonix/internal/skill"
 )
@@ -51,6 +52,8 @@ const (
 	// pathologically large directory can't blow up the menu — we read only one
 	// level (os.ReadDir), never the whole tree.
 	maxCompItems = 200
+	// maxFileSearchItems caps basename search results for bare @tokens.
+	maxFileSearchItems = 20
 )
 
 // slashItems is the full set of slash commands offered for completion: the
@@ -154,6 +157,7 @@ func (m *chatTUI) slashArgItems(val string) ([]compItem, int, bool) {
 		CurrentModel: m.modelRef,
 	}
 	if m.ctrl != nil {
+		data.DisabledSkills = m.ctrl.DisabledSkills()
 		data.ConfiguredMCP = m.ctrl.ConfiguredMCPNames()
 		data.DisconnectedMCP = m.ctrl.DisconnectedMCPNames()
 	}
@@ -298,9 +302,44 @@ func (m *chatTUI) fileItems(token string) []compItem {
 	// At the top level (still naming the first segment) MCP resources share the
 	// '@' namespace, so offer the matching ones too.
 	if !strings.Contains(token, "/") {
+		seen := map[string]bool{}
+		for _, it := range items {
+			seen[strings.TrimPrefix(it.insert, "@")] = true
+		}
+		remaining := maxCompItems - len(items)
+		if remaining > maxFileSearchItems {
+			remaining = maxFileSearchItems
+		}
+		results := m.searchFileRefs(frag)
+		if len(results) > remaining {
+			results = results[:remaining]
+		}
+		for _, path := range results {
+			if seen[path] {
+				continue
+			}
+			items = append(items, compItem{label: path, insert: "@" + path, hint: "file"})
+			if len(items) >= maxCompItems {
+				break
+			}
+		}
 		items = append(items, m.resourceItems("", token)...)
 	}
 	return items
+}
+
+// searchFileRefs memoizes the bounded basename walk so re-rendering the menu
+// for an unchanged @token fragment doesn't re-walk the workspace each keystroke.
+func (m *chatTUI) searchFileRefs(frag string) []string {
+	if m.fileSearchCache == nil {
+		m.fileSearchCache = map[string][]string{}
+	}
+	if r, ok := m.fileSearchCache[frag]; ok {
+		return r
+	}
+	r := fileref.Search(".", frag, maxFileSearchItems)
+	m.fileSearchCache[frag] = r
+	return r
 }
 
 // splitPathToken splits a path token into (dir, frag): dir keeps its trailing

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -299,6 +300,31 @@ func TestSkillPathMutators(t *testing.T) {
 	}
 }
 
+func TestSkillEnabledMutator(t *testing.T) {
+	c := Default()
+	if err := c.SetSkillEnabled("review", false); err != nil {
+		t.Fatalf("disable skill: %v", err)
+	}
+	if err := c.SetSkillEnabled("review", false); err != nil {
+		t.Fatalf("disable duplicate skill: %v", err)
+	}
+	if len(c.Skills.DisabledSkills) != 1 || c.Skills.DisabledSkills[0] != "review" {
+		t.Fatalf("disabled skills = %v, want [review]", c.Skills.DisabledSkills)
+	}
+	if !c.IsSkillDisabled("review") {
+		t.Fatal("review should be disabled")
+	}
+	if err := c.SetSkillEnabled("review", true); err != nil {
+		t.Fatalf("enable skill: %v", err)
+	}
+	if len(c.Skills.DisabledSkills) != 0 {
+		t.Fatalf("disabled skills after enable = %v, want empty", c.Skills.DisabledSkills)
+	}
+	if err := c.SetSkillEnabled("bad name", false); err == nil {
+		t.Fatal("invalid skill name should error")
+	}
+}
+
 func TestPluginMutators(t *testing.T) {
 	c := Default()
 
@@ -354,6 +380,46 @@ func TestAutoStartPlugins(t *testing.T) {
 	}
 }
 
+func TestCodegraphDefaultEnabledForUpgrades(t *testing.T) {
+	c := Default()
+	if !c.Codegraph.Enabled {
+		t.Fatal("default codegraph enabled = false; existing configs without a [codegraph] section would lose it on upgrade")
+	}
+	if !c.Codegraph.AutoInstall {
+		t.Fatal("default codegraph auto_install = false, want true")
+	}
+	if c.Codegraph.Tier != "" {
+		t.Fatalf("default codegraph tier = %q, want unset (boot then preserves warm→eager/cold→background)", c.Codegraph.Tier)
+	}
+}
+
+func TestLoadForEditPreservesCodegraphWithoutSection(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "reasonix.toml")
+	if err := os.WriteFile(path, []byte("default_model = \"x\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if c := LoadForEdit(path); !c.Codegraph.Enabled {
+		t.Fatal("a config omitting [codegraph] disabled codegraph; an upgrade must keep it on")
+	}
+}
+
+func TestLoadFirstRunDisablesCodegraph(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("AppData", t.TempDir())
+	t.Chdir(t.TempDir())
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Codegraph.Enabled {
+		t.Fatal("first run (no config file anywhere) left codegraph enabled; new users should start without it")
+	}
+}
+
 func TestPluginResolvedTierDefaultsToLazy(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -372,6 +438,46 @@ func TestPluginResolvedTierDefaultsToLazy(t *testing.T) {
 				t.Fatalf("ResolvedTier(%q) = %q, want %q", tc.tier, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestClearPluginAuthentication(t *testing.T) {
+	c := Default()
+	c.Plugins = []PluginEntry{{
+		Name: "dida",
+		Type: "http",
+		URL:  "https://mcp.dida365.com/mcp?access_token=abc&workspace=main",
+		Headers: map[string]string{
+			"Authorization": "Bearer ${DIDA_TOKEN}",
+			"X-Org":         "team",
+		},
+		Env: map[string]string{
+			"DIDA_TOKEN": "${DIDA_TOKEN}",
+			"DEBUG":      "1",
+		},
+		Tier: "lazy",
+	}}
+	updated, changed, err := c.ClearPluginAuthentication("dida")
+	if err != nil {
+		t.Fatalf("ClearPluginAuthentication: %v", err)
+	}
+	if !changed {
+		t.Fatal("ClearPluginAuthentication should report changed")
+	}
+	if updated.URL != "https://mcp.dida365.com/mcp?workspace=main" {
+		t.Fatalf("url = %q", updated.URL)
+	}
+	if _, ok := updated.Headers["Authorization"]; ok {
+		t.Fatalf("auth header should be removed: %v", updated.Headers)
+	}
+	if updated.Headers["X-Org"] != "team" {
+		t.Fatalf("ordinary header should be preserved: %v", updated.Headers)
+	}
+	if _, ok := updated.Env["DIDA_TOKEN"]; ok {
+		t.Fatalf("auth env should be removed: %v", updated.Env)
+	}
+	if updated.Env["DEBUG"] != "1" {
+		t.Fatalf("ordinary env should be preserved: %v", updated.Env)
 	}
 }
 

@@ -189,6 +189,29 @@ func TestBuiltinsPresentAndOverridable(t *testing.T) {
 	}
 }
 
+func TestDisabledSkillsAreFilteredFromListAndRead(t *testing.T) {
+	home := t.TempDir()
+	writeSkill(t, home, ".reasonix/skills/active.md", "---\ndescription: active\n---\nbody")
+	writeSkill(t, home, ".reasonix/skills/hidden.md", "---\ndescription: hidden\n---\nbody")
+
+	st := New(Options{HomeDir: home, DisabledNames: []string{"hidden", "review"}})
+	if _, ok := find(st.List(), "active"); !ok {
+		t.Fatal("active skill should be listed")
+	}
+	if _, ok := find(st.List(), "hidden"); ok {
+		t.Fatal("disabled file skill should not be listed")
+	}
+	if _, ok := st.Read("hidden"); ok {
+		t.Fatal("disabled file skill should not be readable")
+	}
+	if _, ok := find(st.List(), "review"); ok {
+		t.Fatal("disabled builtin skill should not be listed")
+	}
+	if _, ok := st.Read("review"); ok {
+		t.Fatal("disabled builtin skill should not be readable")
+	}
+}
+
 func sameStrings(a, b []string) bool {
 	if len(a) != len(b) {
 		return false

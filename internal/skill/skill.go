@@ -15,7 +15,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 
@@ -65,12 +64,8 @@ type Skill struct {
 	Model        string // optional model override for runAs=subagent (frontmatter `model:`)
 }
 
-// validName is the skill-identifier shape: alnum start, then alnum / `_` / `-` /
-// `.`, 1-64 chars total. Mirrors the TS reference so names round-trip to files.
-var validName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$`)
-
 // IsValidName reports whether name is a usable skill identifier.
-func IsValidName(name string) bool { return validName.MatchString(name) }
+func IsValidName(name string) bool { return config.IsValidSkillName(name) }
 
 // Options configure a Store. ProjectRoot "" reads only the global + custom
 // scopes. HomeDir "" resolves to the OS home dir (tests point it at a tmpdir).
@@ -78,6 +73,7 @@ type Options struct {
 	HomeDir         string
 	ProjectRoot     string
 	CustomPaths     []string
+	DisabledNames   []string
 	DisableBuiltins bool // suppress shipped built-ins (test-only knob)
 	// Stderr is the writer for diagnostic warnings. When nil, defaults to
 	// os.Stderr. Set to io.Discard to suppress output (e.g. during model
@@ -90,6 +86,7 @@ type Store struct {
 	homeDir         string
 	projectRoot     string
 	customPaths     []string
+	disabled        map[string]bool
 	disableBuiltins bool
 	stderr          io.Writer
 }
@@ -124,6 +121,7 @@ func New(opts Options) *Store {
 		homeDir:         home,
 		projectRoot:     root,
 		customPaths:     custom,
+		disabled:        disabledNameSet(opts.DisabledNames),
 		disableBuiltins: opts.DisableBuiltins,
 		stderr:          stderr,
 	}
@@ -181,6 +179,20 @@ func (s *Store) roots() []Root {
 // Roots exposes the discovery directories with their status for `/skill paths`.
 func (s *Store) Roots() []Root { return s.roots() }
 
+func disabledNameSet(names []string) map[string]bool {
+	out := map[string]bool{}
+	for _, name := range names {
+		if key := config.SkillNameKey(name); key != "" {
+			out[key] = true
+		}
+	}
+	return out
+}
+
+func (s *Store) disabledName(name string) bool {
+	return s.disabled[config.SkillNameKey(name)]
+}
+
 // pathStatus classifies a root directory without failing on the common case of
 // "not created yet".
 func pathStatus(dir string) PathStatus {
@@ -220,6 +232,9 @@ func (s *Store) List() []Skill {
 			if !ok {
 				continue
 			}
+			if s.disabledName(sk.Name) {
+				continue
+			}
 			if _, dup := byName[sk.Name]; !dup {
 				byName[sk.Name] = sk
 			}
@@ -227,6 +242,9 @@ func (s *Store) List() []Skill {
 	}
 	if !s.disableBuiltins {
 		for _, sk := range builtinSkills() {
+			if s.disabledName(sk.Name) {
+				continue
+			}
 			if _, dup := byName[sk.Name]; !dup {
 				byName[sk.Name] = sk
 			}
@@ -244,6 +262,9 @@ func (s *Store) List() []Skill {
 // built-ins. ok is false when no such skill exists or the file is unreadable.
 func (s *Store) Read(name string) (Skill, bool) {
 	if !IsValidName(name) {
+		return Skill{}, false
+	}
+	if s.disabledName(name) {
 		return Skill{}, false
 	}
 	for _, r := range s.roots() {

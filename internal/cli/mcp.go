@@ -181,17 +181,19 @@ func mcpList() int {
 	}
 	listed := 0
 	// CodeGraph is a built-in server injected by boot, not a [[plugins]] entry, so
-	// report its resolved status here too — otherwise `mcp list` looks empty even
-	// when codegraph will load. This doubles as a headless preflight: it shows
-	// whether the binary resolves before you enter a session.
-	if cfg.Codegraph.Enabled {
-		if bin, ok := codegraph.Resolve(cfg.Codegraph.Path); ok {
-			fmt.Printf("%-16s (stdio, built-in)  %s serve --mcp\n", "codegraph", bin)
-		} else {
-			fmt.Printf("%-16s (built-in, not installed)  run `reasonix codegraph install` (or it auto-installs on first use)\n", "codegraph")
+	// report its resolved status here too. It is listed even when disabled, matching
+	// the MCP manager where the user can enable it and choose a startup tier.
+	codegraphMeta := fmt.Sprintf(" [auto_start=%v tier=%s]", cfg.Codegraph.Enabled, cfg.Codegraph.ResolvedTier())
+	if bin, ok := codegraph.Resolve(cfg.Codegraph.Path); ok {
+		fmt.Printf("%-16s (stdio, built-in)%s  %s serve --mcp\n", "codegraph", codegraphMeta, bin)
+	} else {
+		fmt.Printf("%-16s (built-in, not installed)%s  run `reasonix codegraph install`", "codegraph", codegraphMeta)
+		if cfg.Codegraph.Enabled && cfg.Codegraph.AutoInstall {
+			fmt.Print(" (or let auto_install fetch it on next startup)")
 		}
-		listed++
+		fmt.Println()
 	}
+	listed++
 	for _, p := range cfg.Plugins {
 		typ := p.Type
 		if typ == "" {

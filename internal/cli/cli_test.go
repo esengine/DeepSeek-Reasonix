@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"reasonix/internal/config"
+	"reasonix/internal/provider"
 )
 
 func TestChdirTo(t *testing.T) {
@@ -240,6 +241,68 @@ func TestFetchOrFallback(t *testing.T) {
 	})
 }
 
+// TestFamilyStaticModels proves the offline fallback unions every member of a
+// family (the flash + pro SKUs), not just the first — the regression that left
+// users with only flash when the live /models probe failed.
+func TestFamilyStaticModels(t *testing.T) {
+	providers := []config.ProviderEntry{
+		{Name: "deepseek-flash", Model: "deepseek-v4-flash"},
+		{Name: "deepseek-pro", Model: "deepseek-v4-pro"},
+		{Name: "mimo-flash", Model: "mimo-v2.5"},
+	}
+	got := familyStaticModels(providers, []int{0, 1})
+	want := []string{"deepseek-v4-flash", "deepseek-v4-pro"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+func TestFamilyStaticModelsDedupes(t *testing.T) {
+	providers := []config.ProviderEntry{
+		{Name: "a", Models: []string{"x", "y"}},
+		{Name: "b", Models: []string{"y", "z"}},
+	}
+	got := familyStaticModels(providers, []int{0, 1})
+	if !reflect.DeepEqual(got, []string{"x", "y", "z"}) {
+		t.Errorf("got %v, want x/y/z deduped", got)
+	}
+}
+
+// TestBuildFamilyEntriesSplitsPricing proves flash and pro land in separate
+// entries carrying their own price, rather than collapsing into one entry that
+// would bill pro at flash's rate.
+func TestBuildFamilyEntriesSplitsPricing(t *testing.T) {
+	flash := config.ProviderEntry{Name: "deepseek-flash", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash", Price: &provider.Pricing{Input: 1, Output: 2}}
+	pro := config.ProviderEntry{Name: "deepseek-pro", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro", Price: &provider.Pricing{Input: 3, Output: 6}}
+	got := buildFamilyEntries(flash, []config.ProviderEntry{flash, pro}, []string{"deepseek-v4-flash", "deepseek-v4-pro"})
+	if len(got) != 2 {
+		t.Fatalf("got %d entries, want 2", len(got))
+	}
+	byName := map[string]config.ProviderEntry{}
+	for _, e := range got {
+		byName[e.Name] = e
+	}
+	if e := byName["deepseek-flash"]; e.Model != "deepseek-v4-flash" || e.Price == nil || e.Price.Output != 2 {
+		t.Errorf("flash entry wrong: %+v (price %+v)", e, e.Price)
+	}
+	if e := byName["deepseek-pro"]; e.Model != "deepseek-v4-pro" || e.Price == nil || e.Price.Output != 6 {
+		t.Errorf("pro entry wrong: %+v (price %+v)", e, e.Price)
+	}
+}
+
+// TestBuildFamilyEntriesUnknownModelUsesProbe puts a live-only SKU (no matching
+// preset) under the probe entry rather than dropping it.
+func TestBuildFamilyEntriesUnknownModelUsesProbe(t *testing.T) {
+	flash := config.ProviderEntry{Name: "deepseek-flash", Model: "deepseek-v4-flash", Price: &provider.Pricing{Input: 1}}
+	got := buildFamilyEntries(flash, []config.ProviderEntry{flash}, []string{"deepseek-v4-flash", "deepseek-v9-experimental"})
+	if len(got) != 1 || got[0].Name != "deepseek-flash" {
+		t.Fatalf("got %+v, want one deepseek-flash entry", got)
+	}
+	if !reflect.DeepEqual(got[0].Models, []string{"deepseek-v4-flash", "deepseek-v9-experimental"}) {
+		t.Errorf("Models = %v, want both under the probe entry", got[0].Models)
+	}
+}
+
 // TestBuildFamilyEntry covers the three observable behaviors:
 //   - The selected models land in the entry's Models field, with Model
 //     pointed at the first one so legacy single-model lookups still work.
@@ -408,4 +471,14 @@ func TestWithBuiltinFamiliesAddsMissingMiMo(t *testing.T) {
 func groupByFamilyKeys(ps []config.ProviderEntry, key string) []int {
 	_, members, _ := groupByFamily(ps)
 	return members[key]
+}
+
+func TestWriteDefaultConfigDisablesCodegraph(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "reasonix.toml")
+	if rc := writeDefaultConfig(path); rc != 0 {
+		t.Fatalf("writeDefaultConfig rc = %d", rc)
+	}
+	if c := config.LoadForEdit(path); c.Codegraph.Enabled {
+		t.Fatal("a freshly scaffolded config left codegraph enabled; new users should start without it")
+	}
 }

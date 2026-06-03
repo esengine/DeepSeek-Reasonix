@@ -18,6 +18,8 @@ import (
 	"reasonix/internal/proc"
 )
 
+const closeWaitBudget = 5 * time.Second
+
 // stdioTransport speaks newline-delimited JSON-RPC 2.0 over a subprocess's
 // stdin/stdout — the MCP stdio convention (one JSON message per line, no
 // embedded newlines). A dedicated reader goroutine owns stdout and demuxes each
@@ -28,6 +30,7 @@ import (
 type stdioTransport struct {
 	name   string
 	cmd    *exec.Cmd
+	job    uintptr // Windows Job Object handle (0 elsewhere); reaps detached grandchildren on close
 	stdin  io.WriteCloser
 	stdout *bufio.Reader
 	stderr *tailBuffer
@@ -77,6 +80,7 @@ func newStdioTransport(ctx context.Context, s Spec) (*stdioTransport, error) {
 	t := &stdioTransport{
 		name:    s.Name,
 		cmd:     cmd,
+		job:     proc.TrackTree(cmd),
 		stdin:   stdin,
 		stdout:  bufio.NewReader(stdout),
 		stderr:  stderr,
@@ -420,13 +424,23 @@ func (t *stdioTransport) wait() {
 	})
 }
 
+// close kills the whole process tree (a launcher's surviving grandchild keeps
+// the inherited stdio pipes open, so a plain Process.Kill leaves cmd.Wait
+// blocking forever) and reaps it under a budget so one wedged server can never
+// stall a boot or a turn teardown.
 func (t *stdioTransport) close() {
 	if t.stdin != nil {
 		_ = t.stdin.Close()
 	}
-	if t.cmd != nil && t.cmd.Process != nil {
-		_ = t.cmd.Process.Kill()
-		t.wait()
+	if t.cmd == nil || t.cmd.Process == nil {
+		return
+	}
+	proc.KillTracked(t.cmd, t.job)
+	done := make(chan struct{})
+	go func() { t.wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(closeWaitBudget):
 	}
 }
 

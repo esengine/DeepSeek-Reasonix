@@ -26,6 +26,7 @@ type SlashItem struct {
 // controller). This keeps the CLI and desktop sub-command hints identical.
 type ArgData struct {
 	Skills          []skill.Skill
+	DisabledSkills  []skill.Skill
 	ServerNames     []string
 	ConfiguredMCP   []string
 	DisconnectedMCP []string
@@ -153,6 +154,8 @@ func mcpArgItems(prior []string, cur string, d ArgData) []SlashItem {
 		return []SlashItem{
 			{Label: "add", Insert: "add ", Hint: i18n.M.ArgMcpAdd, Descend: true},
 			{Label: "connect", Insert: "connect ", Hint: "connect a configured MCP server", Descend: true},
+			{Label: "show", Insert: "show ", Hint: "show MCP server details", Descend: true},
+			{Label: "tools", Insert: "tools ", Hint: "show MCP server tools", Descend: true},
 			{Label: "remove", Insert: "remove ", Hint: i18n.M.ArgMcpRemove, Descend: true},
 			{Label: "list", Insert: "list", Hint: i18n.M.ArgMcpList},
 		}
@@ -165,6 +168,15 @@ func mcpArgItems(prior []string, cur string, d ArgData) []SlashItem {
 		var items []SlashItem
 		for _, name := range d.ServerNames {
 			items = append(items, SlashItem{Label: name, Insert: name, Hint: i18n.M.ArgMcpConnected})
+		}
+		return items
+	case "show", "tools":
+		if len(prior) != 2 {
+			return nil
+		}
+		var items []SlashItem
+		for _, name := range allMCPArgNames(d) {
+			items = append(items, SlashItem{Label: name, Insert: name})
 		}
 		return items
 	case "connect":
@@ -189,6 +201,21 @@ func mcpArgItems(prior []string, cur string, d ArgData) []SlashItem {
 	return nil
 }
 
+func allMCPArgNames(d ArgData) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, list := range [][]string{d.ServerNames, d.ConfiguredMCP, d.DisconnectedMCP} {
+		for _, name := range list {
+			if strings.TrimSpace(name) == "" || seen[name] {
+				continue
+			}
+			seen[name] = true
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
 func modelArgItems(prior []string, d ArgData) []SlashItem {
 	if len(prior) != 1 { // the single ref arg is already placed
 		return nil
@@ -209,6 +236,8 @@ func skillArgItems(prior []string, d ArgData) []SlashItem {
 		return []SlashItem{
 			{Label: "list", Insert: "list", Hint: i18n.M.ArgSkillList},
 			{Label: "show", Insert: "show ", Hint: i18n.M.ArgSkillShow, Descend: true},
+			{Label: "enable", Insert: "enable ", Hint: "enable a disabled skill", Descend: true},
+			{Label: "disable", Insert: "disable ", Hint: "disable an enabled skill", Descend: true},
 			{Label: "new", Insert: "new ", Hint: i18n.M.ArgSkillNew},
 			{Label: "paths", Insert: "paths", Hint: i18n.M.ArgSkillPaths},
 		}
@@ -216,6 +245,20 @@ func skillArgItems(prior []string, d ArgData) []SlashItem {
 	if (prior[1] == "show" || prior[1] == "cat") && len(prior) == 2 {
 		var items []SlashItem
 		for _, s := range d.Skills {
+			items = append(items, SlashItem{Label: s.Name, Insert: s.Name, Hint: string(s.Scope)})
+		}
+		return items
+	}
+	if prior[1] == "disable" && len(prior) == 2 {
+		var items []SlashItem
+		for _, s := range d.Skills {
+			items = append(items, SlashItem{Label: s.Name, Insert: s.Name, Hint: string(s.Scope)})
+		}
+		return items
+	}
+	if prior[1] == "enable" && len(prior) == 2 {
+		var items []SlashItem
+		for _, s := range d.DisabledSkills {
 			items = append(items, SlashItem{Label: s.Name, Insert: s.Name, Hint: string(s.Scope)})
 		}
 		return items
@@ -270,6 +313,21 @@ func (c *Controller) managementNotice(trimmed string) bool {
 	case "/memory":
 		c.notice(c.memoryListText())
 	case "/skill", "/skills":
+		sub := ""
+		if len(fields) >= 2 {
+			sub = strings.ToLower(fields[1])
+		}
+		if len(fields) >= 3 && (sub == "enable" || sub == "disable") {
+			enabled := sub == "enable"
+			if err := c.SetSkillEnabled(fields[2], enabled); err != nil {
+				c.notice("skill " + sub + ": " + err.Error())
+			} else if enabled {
+				c.notice("enabled skill " + fields[2] + " — restart or refresh the session for the prompt and tools to update")
+			} else {
+				c.notice("disabled skill " + fields[2] + " — restart or refresh the session for the prompt and tools to update")
+			}
+			return true
+		}
 		c.notice(c.skillListText())
 	case "/hooks":
 		c.notice(c.hookListText())

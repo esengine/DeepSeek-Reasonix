@@ -60,6 +60,7 @@ func codegraphStatus() int {
 	}
 	fmt.Printf("%-13s %v\n", "enabled:", cfg.Codegraph.Enabled)
 	fmt.Printf("%-13s %v\n", "auto_install:", cfg.Codegraph.AutoInstall)
+	fmt.Printf("%-13s %s\n", "tier:", cfg.Codegraph.ResolvedTier())
 	fmt.Printf("%-13s %s\n", "version:", codegraph.Version)
 	fmt.Printf("%-13s %s\n", "cache:", codegraph.CacheDir())
 	if p, ok := codegraph.Resolve(cfg.Codegraph.Path); ok {

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"reasonix/internal/fileutil"
+	"reasonix/internal/mcpdiag"
 	"reasonix/internal/netclient"
 	"reasonix/internal/permission"
 )
@@ -262,6 +263,36 @@ func (c *Config) RemoveSkillPath(path string) (bool, error) {
 	return false, nil
 }
 
+// SetSkillEnabled persists a per-skill enable/disable preference. Skills are
+// enabled by default; disabling records the name, enabling removes it.
+func (c *Config) SetSkillEnabled(name string, enabled bool) error {
+	name = strings.TrimSpace(name)
+	key := SkillNameKey(name)
+	if key == "" {
+		return fmt.Errorf("skill name %q: use letters, digits, '_', '-', '.', 1-64 chars, starting alphanumeric", name)
+	}
+	next := c.DisabledSkillNames()
+	idx := -1
+	for i, existing := range next {
+		if SkillNameKey(existing) == key {
+			idx = i
+			break
+		}
+	}
+	if enabled {
+		if idx >= 0 {
+			next = append(next[:idx], next[idx+1:]...)
+		}
+		c.Skills.DisabledSkills = next
+		return nil
+	}
+	if idx < 0 {
+		next = append(next, name)
+	}
+	c.Skills.DisabledSkills = next
+	return nil
+}
+
 // CanonicalSkillPath expands env vars, ~ and relative segments to an absolute
 // cleaned path for comparing skill roots. On Windows it folds case so paths that
 // differ only in casing dedupe. Use only for comparison, never as stored config.
@@ -312,6 +343,65 @@ func (c *Config) RemovePlugin(name string) bool {
 		}
 	}
 	return false
+}
+
+// ClearPluginAuthentication removes locally stored auth-like material for one
+// MCP server while keeping the server entry itself. It intentionally leaves
+// non-auth config (command, URL host/path, ordinary env/header keys, tier) alone.
+func (c *Config) ClearPluginAuthentication(name string) (PluginEntry, bool, error) {
+	for i := range c.Plugins {
+		if c.Plugins[i].Name != name {
+			continue
+		}
+		headers, env, url, changed := mcpdiag.ClearAuthConfig(c.Plugins[i].Headers, c.Plugins[i].Env, c.Plugins[i].URL)
+		c.Plugins[i].Headers = headers
+		c.Plugins[i].Env = env
+		c.Plugins[i].URL = url
+		return c.Plugins[i], changed, nil
+	}
+	return PluginEntry{}, false, fmt.Errorf("clear plugin authentication: no plugin %q", name)
+}
+
+// ClearPluginAuthenticationInSource clears auth material in the file that actually
+// owns the MCP server. Load() merges user/project TOML and project .mcp.json into
+// one Config, so callers must not mutate that merged view and Save() it back: a
+// .mcp.json-only server would otherwise be serialized into reasonix.toml or the
+// user config. Source priority mirrors Load(): project TOML, user TOML, then the
+// project .mcp.json entry if TOML did not define that server.
+func ClearPluginAuthenticationInSource(name string) (PluginEntry, bool, string, error) {
+	if path := pluginTOMLSourcePath(name); path != "" {
+		cfg := LoadForEdit(path)
+		updated, changed, err := cfg.ClearPluginAuthentication(name)
+		if err != nil {
+			return PluginEntry{}, false, path, err
+		}
+		if changed {
+			if err := cfg.SaveTo(path); err != nil {
+				return PluginEntry{}, false, path, err
+			}
+		}
+		return updated, changed, path, nil
+	}
+	updated, changed, err := clearMCPJSONAuthentication(mcpJSONFile, name)
+	if err != nil {
+		return PluginEntry{}, false, "", err
+	}
+	return updated, changed, mcpJSONFile, nil
+}
+
+func pluginTOMLSourcePath(name string) string {
+	for _, path := range []string{"reasonix.toml", userConfigPath()} {
+		if strings.TrimSpace(path) == "" {
+			continue
+		}
+		cfg := LoadForEdit(path)
+		for _, p := range cfg.Plugins {
+			if p.Name == name {
+				return path
+			}
+		}
+	}
+	return ""
 }
 
 // validatePlugin checks a plugin entry by transport. An empty Type means stdio.

@@ -43,7 +43,7 @@ const maxResultChars = 8000
 type updateSink struct {
 	conn      notifier
 	sessionID string
-	approve   func(id string, allow, session bool)
+	approve   func(id string, allow, session, persist bool)
 }
 
 func newUpdateSink(conn notifier, sessionID string) *updateSink {
@@ -52,7 +52,7 @@ func newUpdateSink(conn notifier, sessionID string) *updateSink {
 
 // bindApprove installs the controller's Approve callback, called by the service
 // once the controller exists (the sink is built first, to hand to the Factory).
-func (s *updateSink) bindApprove(fn func(id string, allow, session bool)) {
+func (s *updateSink) bindApprove(fn func(id string, allow, session, persist bool)) {
 	s.approve = fn
 }
 
@@ -195,11 +195,12 @@ func (s *updateSink) requestPermission(a event.Approval) {
 		Options: []PermissionOption{
 			{OptionID: string(OptAllowOnce), Name: "Allow", Kind: OptAllowOnce},
 			{OptionID: string(OptAllowAlways), Name: "Allow for this session", Kind: OptAllowAlways},
+			{OptionID: string(OptAllowPersistent), Name: "Always allow (save to config)", Kind: OptAllowPersistent},
 			{OptionID: string(OptRejectOnce), Name: "Reject", Kind: OptRejectOnce},
 		},
 	}
 
-	allow, session := false, false
+	allow, session, persist := false, false, false
 	// context.Background: Conn.Request also unblocks on connection close, so the
 	// round-trip can't outlive the wire even without a turn-scoped context here.
 	if raw, err := s.conn.Request(context.Background(), "session/request_permission", params); err == nil {
@@ -210,10 +211,12 @@ func (s *updateSink) requestPermission(a event.Approval) {
 				allow = true
 			case OptAllowAlways:
 				allow, session = true, true
+			case OptAllowPersistent:
+				allow, session, persist = true, true, true
 			}
 		}
 	}
-	s.approve(a.ID, allow, session)
+	s.approve(a.ID, allow, session, persist)
 }
 
 // textBlock builds a text content block.

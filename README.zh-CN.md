@@ -71,7 +71,7 @@ brew install esengine/reasonix/reasonix   # macOS
 ### 从源码构建
 
 ```sh
-make build      # -> bin/reasonix
+make build      # -> bin/reasonix(.exe)
 make cross      # -> dist/（darwin|linux|windows × amd64|arm64）
 ```
 
@@ -112,6 +112,10 @@ api_key_env = "DEEPSEEK_API_KEY"
 
 [tools]
 enabled = []   # 省略/为空 = 全部内置工具
+
+[skills]
+# paths = ["~/my-skills", "../shared/skills"]   # 额外的自定义技能目录
+# disabled_skills = ["review"]                  # 隐藏技能，直到 /skill enable <name>
 
 [permissions]
 mode  = "ask"                                # 无规则命中时 writer 的兜底：ask|allow|deny
@@ -177,6 +181,10 @@ headers = { Authorization = "Bearer ${STRIPE_KEY}" }
   }
 }
 ```
+
+**从 `0.x` 升级？** 旧的 `~/.reasonix/config.json` 仍会被读取(读其 `mcpServers`、并遵从
+`mcpDisabled`),作为最低优先级来源——所以 MCP 服务器照常可用;方便时再把它们挪进
+`reasonix.toml` 的 `[[plugins]]` 或 `.mcp.json`。
 
 ### 斜杠命令
 

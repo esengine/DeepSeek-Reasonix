@@ -31,6 +31,38 @@ func TestAssetNameForCurrentPlatform(t *testing.T) {
 	}
 }
 
+func TestPromoteReplacesStalePartialDest(t *testing.T) {
+	parent := t.TempDir()
+	root := filepath.Join(parent, ".dl-x", "codegraph-x64")
+	if err := os.MkdirAll(filepath.Join(root, "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "bin", "codegraph"), []byte("new"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	dir := filepath.Join(parent, "v0.9.7")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "stale.txt"), []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := promote(root, dir); err != nil {
+		t.Fatalf("promote over a stale dest: %v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(dir, "bin", "codegraph")); err != nil || string(got) != "new" {
+		t.Fatalf("dest missing promoted bundle: %q %v", got, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "stale.txt")); !os.IsNotExist(err) {
+		t.Fatal("stale dest content survived promote")
+	}
+	if _, err := os.Stat(root); !os.IsNotExist(err) {
+		t.Fatal("root should have been moved into dir")
+	}
+}
+
 func TestSha256For(t *testing.T) {
 	sums := "abc123  codegraph-linux-x64.tar.gz\ndef456  codegraph-darwin-arm64.tar.gz\n"
 	got, err := sha256For(sums, "codegraph-darwin-arm64.tar.gz")

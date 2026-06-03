@@ -188,6 +188,12 @@ type chatTUI struct {
 	resumePick *resumePicker
 	lastEsc    time.Time
 
+	// mcp is the interactive "/mcp" manager overlay. mcpDisabled tracks servers
+	// turned off only for this chat session, matching the desktop connector
+	// toggle's non-persistent semantics.
+	mcp         *mcpManager
+	mcpDisabled map[string]bool
+
 	// lastCtrlCAt records when Ctrl+C was pressed while idle on an empty
 	// composer, enabling a "press again to quit" confirmation pattern (1.5s
 	// window). Reset when Ctrl+C clears non-empty input instead.
@@ -226,6 +232,7 @@ type chatTUI struct {
 	// place of the built-in data row.
 	statuslineCmd string
 	statuslineOut string
+	gitStatus     gitStatus
 
 	// modelSwitchPending is true while an async /model build is in flight.
 	modelSwitchPending bool
@@ -240,6 +247,9 @@ type chatTUI struct {
 
 	// completion is the live autocomplete menu (slash commands; @-refs later).
 	completion completion
+	// fileSearchCache memoizes fileref.Search by query so the bounded walk runs
+	// once per @token fragment, not on every keystroke that re-renders the menu.
+	fileSearchCache map[string][]string
 }
 
 type tuiState int
@@ -273,6 +283,10 @@ type balanceMsg struct{ text string }
 // when none/failed).
 type statuslineMsg struct{ out string }
 
+// gitStatusMsg carries the latest lightweight git readout for the built-in
+// status line. Empty means "not a git worktree" or "git unavailable".
+type gitStatusMsg struct{ status gitStatus }
+
 // runStatusline runs the user's custom status-line command off the event loop,
 // feeding it a small JSON context on stdin and returning its first stdout line.
 // A no-op (nil) when no command is configured. Tight timeout so a slow script
@@ -283,10 +297,12 @@ func (m chatTUI) runStatusline() tea.Cmd {
 		return nil
 	}
 	used, window := m.ctrl.ContextSnapshot()
+	cwd, _ := os.Getwd()
 	payload, _ := json.Marshal(map[string]any{
 		"model":         m.label,
 		"contextUsed":   used,
 		"contextWindow": window,
+		"cwd":           cwd,
 	})
 	return func() tea.Msg { return statuslineMsg{out: runStatuslineCmd(cmd, string(payload))} }
 }
@@ -305,6 +321,13 @@ func runStatuslineCmd(cmd, stdinPayload string) string {
 		out = strings.TrimSpace(out[:i])
 	}
 	return out
+}
+
+func (m chatTUI) refreshGitStatus() tea.Cmd {
+	if m.statuslineCmd != "" {
+		return nil
+	}
+	return fetchGitStatus()
 }
 
 // modelSwitchMsg carries the result of an async /model switch. A nil err means
@@ -480,6 +503,7 @@ func (m chatTUI) Init() tea.Cmd {
 		waitForAgentEvent(m.eventCh),
 		fetchBalance(m.ctrl),
 		m.runStatusline(), // nil (no-op) unless a custom status line is configured
+		m.refreshGitStatus(),
 	)
 }
 
@@ -628,7 +652,7 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.updateCompletion()
 			return m, finalize(m, cmds)
 		}
-		if !m.chooserTyping() && m.pendingApproval == nil && m.rewind == nil && m.shouldFoldPaste(msg.Content) {
+		if !m.chooserTyping() && m.pendingApproval == nil && m.rewind == nil && m.resumePick == nil && m.mcp == nil && m.shouldFoldPaste(msg.Content) {
 			m.insertFoldedPaste(msg.Content)
 			m.growInputToFit()
 			m.updateCompletion()
@@ -686,6 +710,10 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.resumePick != nil {
 			return m.handleResumePickerKey(msg)
 		}
+		// The MCP manager is modal while open: keys navigate it.
+		if m.mcp != nil {
+			return m.handleMCPManagerKey(msg)
+		}
 		// A pending tool approval is modal: keystrokes answer it (y/a/n, Enter,
 		// Esc) rather than reaching the input.
 		if m.pendingApproval != nil {
@@ -703,6 +731,10 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.moveCompletion(1)
 				return m, nil
 			case "tab", "enter":
+				if msg.String() == "enter" && strings.TrimSpace(m.input.Value()) == "/mcp" {
+					m.completion = completion{}
+					break
+				}
 				// When Enter is pressed and the completion has exactly one item
 				// already fully present in the input, close the menu and let Enter
 				// fall through to submit the command (/resume 3 → resume session 3).
@@ -881,6 +913,7 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		e := event.Event(msg)
 		m.ingestEvent(e)
 		turnDone := e.Kind == event.TurnDone
+		gitMaybeChanged := e.Kind == event.ToolResult && !e.Tool.ReadOnly
 		// Coalesce a burst: the goroutine that produced this event has already
 		// exited (a Cmd reads the channel once), so it's safe to drain the events
 		// already buffered and ingest them now. One re-wrap then covers the whole
@@ -895,6 +928,9 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if e2.Kind == event.TurnDone {
 					turnDone = true
 				}
+				if e2.Kind == event.ToolResult && !e2.Tool.ReadOnly {
+					gitMaybeChanged = true
+				}
 			default:
 				break drain
 			}
@@ -908,12 +944,20 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, c)
 			}
 		}
+		if turnDone || gitMaybeChanged {
+			if c := m.refreshGitStatus(); c != nil {
+				cmds = append(cmds, c)
+			}
+		}
 
 	case balanceMsg:
 		m.balance = msg.text
 
 	case statuslineMsg:
 		m.statuslineOut = msg.out
+
+	case gitStatusMsg:
+		m.gitStatus = msg.status
 
 	case compactDoneMsg:
 		if msg.err != nil {
@@ -960,6 +1004,13 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.notice(i18n.M.SlashPromptEmpty)
 		default:
 			cmds = append(cmds, m.startTurn(msg.sent, msg.display, msg.display))
+		}
+
+	case mcpExternalDoneMsg:
+		if msg.err != nil {
+			m.notice(msg.label + ": " + msg.err.Error())
+		} else if msg.target != "" {
+			m.notice(msg.label + ": " + msg.target)
 		}
 
 	case refsResolvedMsg:
@@ -1069,8 +1120,8 @@ func (m *chatTUI) commitSpacer() {
 }
 
 // bottomRows is the terminal-row height of the pinned bottom region: any open
-// panels (todo / approval / chooser / rewind / completion), the input box (its
-// line count plus top+bottom border), and the two fixed status rows.
+// panels (todo / approval / chooser / rewind / MCP / completion), the composer
+// when visible, and the two fixed status rows.
 func (m chatTUI) bottomRows() int {
 	rows := 0
 	for _, s := range []string{
@@ -1078,6 +1129,8 @@ func (m chatTUI) bottomRows() int {
 		m.renderApprovalBanner(),
 		m.renderChooser(),
 		m.renderRewind(),
+		m.renderResumePicker(),
+		m.renderMCPManager(),
 		m.renderCompletion(),
 	} {
 		if s != "" {
@@ -1087,7 +1140,29 @@ func (m chatTUI) bottomRows() int {
 	if m.state == tuiRunning {
 		rows++ // the working spinner line above the box
 	}
-	return rows + m.input.Height() + 2 + 2
+	if !m.hideComposer() {
+		rows += m.input.Height() + 2
+	}
+	return rows + 2
+}
+
+// hideComposer is the single ownership gate for the bottom composer.
+//
+// Rule for new CLI panels:
+//   - If a panel is modal and keystrokes navigate/confirm/cancel the panel, hide
+//     the composer so users do not see an inactive chat input.
+//   - If a panel is input-owned (autocomplete, or chooser free-text mode), keep
+//     the composer visible because the textarea is the active control.
+//
+// Whenever a new slash-command overlay or approval-style prompt is added, update
+// this function and the modal layout tests together. Otherwise the panel may
+// reserve rows for a composer that cannot receive input, leaving a confusing
+// blank/bordered area at the bottom of the TUI.
+func (m chatTUI) hideComposer() bool {
+	if m.mcp != nil || m.resumePick != nil || m.rewind != nil || m.pendingApproval != nil {
+		return true
+	}
+	return m.chooser != nil && !m.chooser.typing
 }
 
 // transcriptHeight is the row budget left for the transcript viewport once the
@@ -1379,34 +1454,37 @@ const planApprovalTool = "exit_plan_mode"
 
 // handleApprovalKey resolves a pending approval from a keystroke and re-arms the
 // listener. 1/y/Enter allows once, 2/a allows for the rest of the session,
-// 3/n/Esc denies. Ctrl-C cancels the whole turn via the run context. For a plan
-// approval (planApprovalTool), allowing also drops the local [plan] tag — the
+// 3/p writes an "always allow" rule to the config file, 4/n/Esc denies.
+// Ctrl-C cancels the whole turn via the run context. For a plan approval
+// (planApprovalTool), allowing also drops the local [plan] tag — the
 // controller turns plan mode off on its side.
 func (m chatTUI) handleApprovalKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	answer := func(allow, session bool) (tea.Model, tea.Cmd) {
+	answer := func(allow, session, persist bool) (tea.Model, tea.Cmd) {
 		if allow && m.pendingApproval.Tool == planApprovalTool {
 			m.planMode = false
 		}
-		m.ctrl.Approve(m.pendingApproval.ID, allow, session)
+		m.ctrl.Approve(m.pendingApproval.ID, allow, session, persist)
 		m.pendingApproval = nil
 		return m, nil // the next ApprovalRequest / event arrives on eventCh
 	}
 	switch msg.String() {
 	case "ctrl+c":
 		m.ctrl.Cancel() // cancels the run; the approver unblocks via ctx.Done()
-		return answer(false, false)
+		return answer(false, false, false)
 	case "enter":
-		return answer(true, false)
+		return answer(true, false, false)
 	case "esc":
-		return answer(false, false)
+		return answer(false, false, false)
 	}
 	switch strings.ToLower(msg.String()) {
 	case "y", "1":
-		return answer(true, false)
+		return answer(true, false, false)
 	case "a", "2":
-		return answer(true, true)
-	case "n", "3":
-		return answer(false, false)
+		return answer(true, true, false) // session grant
+	case "p", "3":
+		return answer(true, true, true) // persist to config
+	case "n", "4":
+		return answer(false, false, false)
 	}
 	return m, nil // ignore anything else while awaiting a decision
 }
@@ -1426,27 +1504,31 @@ func (m chatTUI) View() tea.View {
 	if boxW < 10 {
 		boxW = 10
 	}
-	box := inputBoxStyle.Width(boxW).Render(m.input.View())
+	hideComposer := m.hideComposer()
+	var box string
+	if !hideComposer {
+		box = inputBoxStyle.Width(boxW).Render(m.input.View())
+	}
 
 	var modeTag string
 	switch {
 	case m.ctrl.Bypass():
 		modeTag = lipgloss.NewStyle().
-			Background(lipgloss.Color("#e5484d")).
+			Background(lipgloss.Color(statusYoloColor.hex)).
 			Foreground(lipgloss.Color("#ffffff")).
 			Bold(true).
 			Padding(0, 1).
 			Render("YOLO")
 	case m.planMode:
 		modeTag = lipgloss.NewStyle().
-			Background(lipgloss.Color("#2563eb")).
+			Background(lipgloss.Color(statusPlanColor.hex)).
 			Foreground(lipgloss.Color("#ffffff")).
 			Bold(true).
 			Padding(0, 1).
 			Render("Plan")
 	default:
 		modeTag = lipgloss.NewStyle().
-			Background(lipgloss.Color("#f59e0b")).
+			Background(lipgloss.Color(statusAutoColor.hex)).
 			Foreground(lipgloss.Color("#111827")).
 			Bold(true).
 			Padding(0, 1).
@@ -1460,6 +1542,8 @@ func (m chatTUI) View() tea.View {
 		status = "  " + modeTag + " · ⟲ rewind"
 	case m.resumePick != nil:
 		status = "  " + modeTag + " · " + i18n.M.StatusResumePicker
+	case m.mcp != nil:
+		status = "  " + modeTag + " · MCP"
 	case m.chooser != nil:
 		status = "  " + modeTag + " · " + i18n.M.ChatStatusQuestion
 	case m.pendingApproval != nil && m.pendingApproval.Tool == planApprovalTool:
@@ -1485,14 +1569,17 @@ func (m chatTUI) View() tea.View {
 			}
 		}
 	}
-	// Second status row: the live data (model, effort, context gauge, cache rates,
-	// jobs, balance). It lives on its own fixed row so it's always shown in full
-	// rather than being truncated off the end of the status line. Two rows is a
-	// fixed height, so unlike a wrap-when-long status it doesn't reintroduce
+	// Second status row: the live data (model, git, effort, context gauge, cache
+	// rates, jobs, balance). It lives on its own fixed row so it's always shown in
+	// full rather than being truncated off the end of the status line. Two rows is
+	// a fixed height, so unlike a wrap-when-long status it doesn't reintroduce
 	// resize ghosting.
 	var data []string
 	if mt := m.modelTag(); mt != "" {
 		data = append(data, mt)
+	}
+	if gt := m.gitTag(); gt != "" {
+		data = append(data, gt)
 	}
 	if et := m.effortTag(); et != "" {
 		data = append(data, et)
@@ -1516,10 +1603,10 @@ func (m chatTUI) View() tea.View {
 	}
 
 	// Bottom region pinned under the transcript viewport: optional panels, the
-	// input box, then the two status rows. Its height feeds transcriptHeight so
-	// the viewport above fills exactly the rest of the screen.
+	// composer when visible, then the two status rows. Its height feeds
+	// transcriptHeight so the viewport above fills exactly the rest of the screen.
 	var parts []string
-	rowsAboveBox := 0 // terminal rows occupied by todo/banner/menu before the input box
+	rowsAboveBox := 0 // terminal rows occupied by panels/working line before the composer
 	if todo := m.renderTodoPanel(); todo != "" {
 		parts = append(parts, todo)
 		rowsAboveBox += strings.Count(todo, "\n") + 1
@@ -1540,12 +1627,16 @@ func (m chatTUI) View() tea.View {
 		parts = append(parts, card)
 		rowsAboveBox += strings.Count(card, "\n") + 1
 	}
+	if card := m.renderMCPManager(); card != "" {
+		parts = append(parts, card)
+		rowsAboveBox += strings.Count(card, "\n") + 1
+	}
 	if menu := m.renderCompletion(); menu != "" {
 		parts = append(parts, menu)
 		rowsAboveBox += strings.Count(menu, "\n") + 1
 	}
-	// Layout: the working spinner (when running) above the box; the input box; then
-	// the two status rows (line 1 = mode + shortcuts/state, line 2 = live data).
+	// Layout: the working spinner (when running), then the composer when visible,
+	// then the two status rows (line 1 = mode + shortcuts/state, line 2 = live data).
 	// Each row is clamped to width independently so neither wraps; padding to full
 	// width keeps a short row from leaving stale cells from the prior frame.
 	if working != "" {
@@ -1553,7 +1644,10 @@ func (m chatTUI) View() tea.View {
 		rowsAboveBox++
 	}
 	statusBlock := clampStatusLine(status, boxW) + "\n" + clampStatusLine(dataLine, boxW)
-	parts = append(parts, box, statusBlockStyle.Width(boxW).MaxWidth(boxW).Render(statusBlock))
+	if !hideComposer {
+		parts = append(parts, box)
+	}
+	parts = append(parts, statusBlockStyle.Width(boxW).MaxWidth(boxW).Render(statusBlock))
 
 	// Full-screen frame: the transcript viewport on top (it pads to exactly its
 	// height), the pinned bottom region beneath. Alt-screen owns the grid, so
@@ -1561,14 +1655,16 @@ func (m chatTUI) View() tea.View {
 	v := tea.NewView(m.renderTranscript() + "\n" + strings.Join(parts, "\n"))
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeCellMotion // wheel scrolls the transcript
-	// Anchor the real terminal cursor at the textarea's insertion point so IME
-	// candidate windows appear in the input box. input.Cursor() is relative to
-	// the textarea; offset by the viewport height + rows above + the box's top
-	// border row (+1 column for PaddingLeft).
-	if cur := m.input.Cursor(); cur != nil {
-		cur.X += 1
-		cur.Y += m.viewport.Height() + rowsAboveBox + 1
-		v.Cursor = cur
+	// Anchor the real terminal cursor at the textarea's insertion point only when
+	// the composer is visible. input.Cursor() is relative to the textarea; offset
+	// by the viewport height + rows above + the box's top border row (+1 column
+	// for PaddingLeft).
+	if !hideComposer {
+		if cur := m.input.Cursor(); cur != nil {
+			cur.X += 1
+			cur.Y += m.viewport.Height() + rowsAboveBox + 1
+			v.Cursor = cur
+		}
 	}
 	return v
 }
@@ -2280,9 +2376,8 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 		m.finalizeStreamed()
 		switch e.Tool.Name {
 		case "todo_write":
-			// Drive the pinned task list above the input (renderTodoPanel) rather
-			// than printing a tool line; it updates in place as the list evolves.
-			m.todoArgs = e.Tool.Args
+			// The result decides whether this list becomes canonical; dispatch only
+			// means the model asked for an update.
 		case planApprovalTool:
 			// No longer a tool, but guard anyway: the plan is the assistant's reply.
 		default:
@@ -2305,6 +2400,9 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 		// call surfaces a red "⏺ Verb ⊘ <reason>" card. A live-output block (bash)
 		// collapses to a one-line "⎿ N lines" summary first.
 		m.collapseToolOutput(e.Tool.ID)
+		if e.Tool.Name == "todo_write" && e.Tool.Err == "" {
+			m.todoArgs = e.Tool.Args
+		}
 		if e.Tool.Err != "" {
 			m.finalizeStreamed()
 			m.commitLine("  " + red("●") + " " + bold(toolDisplayName(e.Tool.Name)) + " " + red("⊘ "+e.Tool.Err))
@@ -2359,6 +2457,12 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 		// ctrl.AnswerQuestion resolves it. Keys drive the card while it's set.
 		m.finalizeStreamed()
 		m.chooser = newChooser(e.Ask)
+
+	case event.MCPSurfaceReady:
+		if m.ctrl != nil {
+			m.host = m.ctrl.Host()
+		}
+		m.refreshMCPManager()
 
 	case event.TurnDone:
 		// The turn settled — freeze anything still streaming, surface a real error,
@@ -2467,6 +2571,9 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 	case "/skill", "/skills":
 		m.echoLocalCommand(input)
 		m.runSkillSubcommand(input)
+		if m.pendingModelSwitch != nil {
+			return m.pendingModelSwitch
+		}
 	case "/hooks":
 		m.echoLocalCommand(input)
 		m.runHooksSubcommand(input)
@@ -2545,14 +2652,29 @@ func (m *chatTUI) commandNames() string {
 func (m *chatTUI) runMCPSubcommand(input string) {
 	args := tokenizeArgs(input) // args[0] == "/mcp"
 	if len(args) < 2 {
-		m.showMCPStatus()
+		m.openMCPManager("")
 		return
 	}
 	switch args[1] {
 	case "list", "ls":
 		// The completion menu offers "list"; treat it as the status view (same as
-		// a bare /mcp) rather than an unknown subcommand.
+		// the legacy /mcp output) rather than an unknown subcommand.
 		m.showMCPStatus()
+	case "show":
+		if len(args) < 3 {
+			m.notice("usage: /mcp show <name>")
+			return
+		}
+		m.openMCPManager(args[2])
+	case "tools":
+		if len(args) < 3 {
+			m.notice("usage: /mcp tools <name>")
+			return
+		}
+		m.openMCPManager(args[2])
+		if m.mcp != nil {
+			m.mcp.stage = mcpStageTools
+		}
 	case "add":
 		entry, err := parseMCPAdd(args[2:])
 		if err != nil {
@@ -2594,7 +2716,7 @@ func (m *chatTUI) runMCPSubcommand(input string) {
 			m.notice("removed " + name + " from config")
 		}
 	default:
-		m.notice("unknown /mcp subcommand " + args[1] + " — try: /mcp, /mcp add, /mcp connect, /mcp remove")
+		m.notice("unknown /mcp subcommand " + args[1] + " — try: /mcp, /mcp list, /mcp show, /mcp add, /mcp connect, /mcp remove")
 	}
 }
 

@@ -10,7 +10,7 @@ export function ApprovalModal({
   onExitPlan,
 }: {
   approval: WireApproval;
-  onAnswer: (allow: boolean, session: boolean) => void;
+  onAnswer: (allow: boolean, session: boolean, persist: boolean) => void;
   onRevisePlan?: (text: string) => void;
   onExitPlan?: () => void;
 }) {
@@ -25,14 +25,15 @@ export function ApprovalModal({
 
   const choosePlanAction = (key: string) => {
     if (key === "1") setRevisionOpen((open) => !open);
-    else if (key === "2") onAnswer(true, false);
-    else if (key === "3" || key === "Escape") (onExitPlan ?? (() => onAnswer(false, false)))();
+    else if (key === "2") onAnswer(true, false, false);
+    else if (key === "3" || key === "Escape") (onExitPlan ?? (() => onAnswer(false, false, false)))();
   };
 
   const chooseToolAction = (key: string) => {
-    if (key === "1") onAnswer(true, false);
-    else if (key === "2") onAnswer(true, true);
-    else if (key === "3" || key === "Escape") onAnswer(false, false);
+    if (key === "1") onAnswer(true, false, false);
+    else if (key === "2") onAnswer(true, true, false);
+    else if (key === "3") onAnswer(true, true, true);
+    else if (key === "4" || key === "Escape") onAnswer(false, false, false);
   };
 
   useEffect(() => {
@@ -47,7 +48,7 @@ export function ApprovalModal({
       const target = event.target as HTMLElement | null;
       const tag = target?.tagName.toLowerCase();
       if (tag === "input" || tag === "textarea" || target?.isContentEditable) return;
-      if (event.key !== "1" && event.key !== "2" && event.key !== "3" && event.key !== "Escape") return;
+      if (event.key !== "1" && event.key !== "2" && event.key !== "3" && event.key !== "4" && event.key !== "Escape") return;
       event.preventDefault();
       if (isPlanApproval) choosePlanAction(event.key);
       else chooseToolAction(event.key);
@@ -80,11 +81,11 @@ export function ApprovalModal({
         actions={
           <>
             <PromptAction keyLabel="1" label={t("approval.revisePlan")} onClick={() => setRevisionOpen((open) => !open)} />
-            <PromptAction keyLabel="2" label={t("approval.startExecution")} onClick={() => onAnswer(true, false)} selected />
+            <PromptAction keyLabel="2" label={t("approval.startExecution")} onClick={() => onAnswer(true, false, false)} selected />
             <PromptAction
               keyLabel="3"
               label={t("approval.exitPlan")}
-              onClick={() => (onExitPlan ?? (() => onAnswer(false, false)))()}
+              onClick={() => (onExitPlan ?? (() => onAnswer(false, false, false)))()}
             />
           </>
         }
@@ -138,9 +139,10 @@ export function ApprovalModal({
               onClick={() => setDetailsOpen((open) => !open)}
             />
           )}
-          <PromptAction keyLabel="1" label={t("approval.allowOnce")} onClick={() => onAnswer(true, false)} selected />
-          <PromptAction keyLabel="2" label={t("approval.allowSession")} onClick={() => onAnswer(true, true)} />
-          <PromptAction keyLabel="3" label={t("approval.deny")} onClick={() => onAnswer(false, false)} />
+          <PromptAction keyLabel="1" label={t("approval.allowOnce")} onClick={() => onAnswer(true, false, false)} selected />
+          <PromptAction keyLabel="2" label={t("approval.allowSession")} onClick={() => onAnswer(true, true, false)} />
+          <PromptAction keyLabel="3" label={t("approval.allowPersistent")} onClick={() => onAnswer(true, true, true)} />
+          <PromptAction keyLabel="4" label={t("approval.deny")} onClick={() => onAnswer(false, false, false)} />
         </>
       }
     >

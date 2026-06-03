@@ -15,8 +15,8 @@ import (
 // resolved config and applies edits through internal/config/edit.go (the
 // purpose-built mutation API), then rebuilds the controller so the change takes
 // effect live — the same snapshot→reload→resume pattern as SetModel. Secrets are
-// the exception: they go to ./.env (upsertDotEnv), since config stores only the
-// env-var name, not the key.
+// the exception: they go to the global credentials file (upsertDotEnv), since
+// config stores only the env-var name, not the key.
 
 // --- read ---
 
@@ -303,8 +303,9 @@ func (a *App) DeleteProvider(name string) error {
 	return a.applyConfigChange(func(c *config.Config) error { return c.RemoveProvider(name) })
 }
 
-// SetProviderKey writes a secret to ./.env under the given env-var name (the one a
-// provider's api_key_env points at) and rebuilds so it resolves immediately.
+// SetProviderKey writes a secret to the global credentials file under the given
+// env-var name (the one a provider's api_key_env points at) and rebuilds so it
+// resolves immediately.
 func (a *App) SetProviderKey(apiKeyEnv, value string) error {
 	if strings.TrimSpace(apiKeyEnv) == "" {
 		return fmt.Errorf("this provider has no api_key_env set")

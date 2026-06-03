@@ -55,7 +55,7 @@ func TestMigrateLegacySessionsReconstructsConversation(t *testing.T) {
 	}
 }
 
-func TestMigrateLegacySessionsSkipsWhenDestHasSessions(t *testing.T) {
+func TestMigrateLegacySessionsBackfillsAlongsideExisting(t *testing.T) {
 	src := t.TempDir()
 	dest := t.TempDir()
 	os.WriteFile(filepath.Join(src, "chat-1.events.jsonl"), []byte(legacyEventLog), 0o644)
@@ -65,11 +65,56 @@ func TestMigrateLegacySessionsSkipsWhenDestHasSessions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	if n != 0 {
-		t.Errorf("must not import over an existing v1+ session dir, imported %d", n)
+	if n != 1 {
+		t.Errorf("should back-fill the legacy session even when dest has others, imported %d", n)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "chat-1.jsonl")); err != nil {
+		t.Errorf("legacy session should have been imported: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "existing.jsonl")); err != nil {
+		t.Errorf("pre-existing v1+ session must be left intact: %v", err)
+	}
+}
+
+func TestMigrateLegacySessionsRunsOnce(t *testing.T) {
+	src := t.TempDir()
+	dest := t.TempDir()
+	os.WriteFile(filepath.Join(src, "chat-1.events.jsonl"), []byte(legacyEventLog), 0o644)
+
+	if n, err := MigrateLegacySessions(src, dest); err != nil || n != 1 {
+		t.Fatalf("first run: n=%d err=%v, want 1", n, err)
+	}
+	// User deletes the imported session, then a second launch happens.
+	if err := os.Remove(filepath.Join(dest, "chat-1.jsonl")); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := MigrateLegacySessions(src, dest); err != nil || n != 0 {
+		t.Fatalf("second run must be a no-op (marker present): n=%d err=%v", n, err)
 	}
 	if _, err := os.Stat(filepath.Join(dest, "chat-1.jsonl")); !os.IsNotExist(err) {
-		t.Errorf("legacy session should not have been written when dest already has sessions")
+		t.Errorf("a deleted import must not reappear after the one-time migration")
+	}
+}
+
+func TestMigrateLegacySessionsSkipsAlreadyImported(t *testing.T) {
+	src := t.TempDir()
+	dest := t.TempDir()
+	os.WriteFile(filepath.Join(src, "chat-1.events.jsonl"), []byte(legacyEventLog), 0o644)
+	os.WriteFile(filepath.Join(dest, "chat-1.jsonl"), []byte(`{"role":"user","content":"edited"}`+"\n"), 0o644)
+
+	n, err := MigrateLegacySessions(src, dest)
+	if err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("a same-named existing session must not be overwritten, imported %d", n)
+	}
+	loaded, err := LoadSession(filepath.Join(dest, "chat-1.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Messages) != 1 || loaded.Messages[0].Content != "edited" {
+		t.Errorf("existing same-named session was clobbered: %+v", loaded.Messages)
 	}
 }
 

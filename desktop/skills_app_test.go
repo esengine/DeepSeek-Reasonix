@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"reasonix/internal/config"
+	"reasonix/internal/control"
+	"reasonix/internal/skill"
 )
 
 func TestNormalizeSkillPathDirectoryLayout(t *testing.T) {
@@ -50,6 +52,9 @@ func TestSkillRootsViewCountsProjectSkills(t *testing.T) {
 			if r.Status != "ok" || r.Skills != 1 || r.Scope != "project" {
 				t.Fatalf("project root view = %+v", r)
 			}
+			if len(r.SkillItems) != 1 || r.SkillItems[0].Name != "proj" || r.SkillItems[0].Description != "project" {
+				t.Fatalf("project root skill items = %+v", r.SkillItems)
+			}
 			return
 		}
 	}
@@ -92,10 +97,48 @@ func TestSkillRootsViewMarksEnvConfiguredCustomRoot(t *testing.T) {
 			if !r.Configured || r.Skills != 1 || r.Scope != "custom" {
 				t.Fatalf("custom root view = %+v, want configured custom root with one skill", r)
 			}
+			if len(r.SkillItems) != 1 || r.SkillItems[0].Name != "custom" || r.SkillItems[0].Scope != "custom" {
+				t.Fatalf("custom root skill items = %+v", r.SkillItems)
+			}
 			return
 		}
 	}
 	t.Fatalf("custom skill root %q not found in %+v", root, roots)
+}
+
+func TestCapabilitiesIncludesDisabledSkills(t *testing.T) {
+	a := &App{ctrl: control.New(control.Options{
+		Skills: []skill.Skill{
+			{Name: "explore", Description: "enabled", Scope: skill.ScopeBuiltin, RunAs: skill.RunSubagent},
+		},
+		AllSkills: []skill.Skill{
+			{Name: "explore", Description: "enabled", Scope: skill.ScopeBuiltin, RunAs: skill.RunSubagent},
+			{Name: "review", Description: "disabled", Scope: skill.ScopeBuiltin, RunAs: skill.RunSubagent},
+		},
+	})}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	cfgPath := config.UserConfigPath()
+	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cfgPath, []byte("[skills]\ndisabled_skills = [\"review\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	view := a.Capabilities()
+	states := map[string]bool{}
+	for _, sk := range view.Skills {
+		states[sk.Name] = sk.Enabled
+	}
+	if states["explore"] != true {
+		t.Fatalf("explore should be enabled in capabilities: %+v", view.Skills)
+	}
+	enabled, ok := states["review"]
+	if !ok || enabled {
+		t.Fatalf("review should be disabled but present in capabilities: %+v", view.Skills)
+	}
 }
 
 func realTestPath(path string) string {

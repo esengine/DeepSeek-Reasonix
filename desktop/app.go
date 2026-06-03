@@ -24,8 +24,10 @@ import (
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
+	"reasonix/internal/fileref"
 	fileenc "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/i18n"
+	"reasonix/internal/mcpdiag"
 	"reasonix/internal/memory"
 	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
@@ -207,12 +209,12 @@ func (a *App) Cancel() {
 
 // Approve answers a pending approval_request by ID: allow runs the call, session
 // also remembers the grant for the rest of the session.
-func (a *App) Approve(id string, allow, session bool) {
+func (a *App) Approve(id string, allow, session, persist bool) {
 	a.mu.RLock()
 	ctrl := a.ctrl
 	a.mu.RUnlock()
 	if ctrl != nil {
-		ctrl.Approve(id, allow, session)
+		ctrl.Approve(id, allow, session, persist)
 	}
 }
 
@@ -223,6 +225,26 @@ func (a *App) SetPlanMode(on bool) {
 	a.mu.RUnlock()
 	if ctrl != nil {
 		ctrl.SetPlanMode(on)
+	}
+}
+
+// SetMode applies a composer gating mode ("plan" | "yolo" | anything else =
+// normal) in one call, so a turn submitted right after the switch can't race a
+// half-applied SetPlanMode/SetBypass pair.
+func (a *App) SetMode(mode string) {
+	a.mu.RLock()
+	ctrl := a.ctrl
+	a.mu.RUnlock()
+	if ctrl == nil {
+		return
+	}
+	switch mode {
+	case "plan":
+		ctrl.SetMode(true, false)
+	case "yolo":
+		ctrl.SetMode(false, true)
+	default:
+		ctrl.SetMode(false, false)
 	}
 }
 
@@ -820,8 +842,11 @@ func (a *App) SlashArgs(input string) SlashArgsResult {
 		return SlashArgsResult{}
 	}
 	data := control.ArgData{
-		Skills:       ctrl.Skills(),
-		CurrentModel: model,
+		Skills:          ctrl.Skills(),
+		DisabledSkills:  ctrl.DisabledSkills(),
+		ConfiguredMCP:   ctrl.ConfiguredMCPNames(),
+		DisconnectedMCP: ctrl.DisconnectedMCPNames(),
+		CurrentModel:    model,
 	}
 	for _, m := range a.Models() {
 		data.ModelRefs = append(data.ModelRefs, m.Ref)
@@ -852,22 +877,25 @@ type CapabilitiesView struct {
 // "failed" (with the connection error), "initializing" (background startup in
 // progress), or "disabled".
 type ServerView struct {
-	Name       string     `json:"name"`
-	Transport  string     `json:"transport"`
-	Status     string     `json:"status"`
-	BuiltIn    bool       `json:"builtIn,omitempty"`
-	Configured bool       `json:"configured,omitempty"`
-	AutoStart  bool       `json:"autoStart"`
-	Tier       string     `json:"tier,omitempty"`
-	Command    string     `json:"command,omitempty"`
-	Args       []string   `json:"args,omitempty"`
-	URL        string     `json:"url,omitempty"`
-	EnvKeys    []string   `json:"envKeys,omitempty"`
-	Tools      int        `json:"tools"`
-	Prompts    int        `json:"prompts"`
-	Resources  int        `json:"resources"`
-	Error      string     `json:"error,omitempty"`
-	ToolList   []ToolView `json:"toolList,omitempty"`
+	Name           string     `json:"name"`
+	Transport      string     `json:"transport"`
+	Status         string     `json:"status"`
+	BuiltIn        bool       `json:"builtIn,omitempty"`
+	Configured     bool       `json:"configured,omitempty"`
+	AutoStart      bool       `json:"autoStart"`
+	Tier           string     `json:"tier,omitempty"`
+	Command        string     `json:"command,omitempty"`
+	Args           []string   `json:"args,omitempty"`
+	URL            string     `json:"url,omitempty"`
+	EnvKeys        []string   `json:"envKeys,omitempty"`
+	Tools          int        `json:"tools"`
+	Prompts        int        `json:"prompts"`
+	Resources      int        `json:"resources"`
+	Error          string     `json:"error,omitempty"`
+	ToolList       []ToolView `json:"toolList,omitempty"`
+	AuthStatus     string     `json:"authStatus,omitempty"`
+	AuthURL        string     `json:"authUrl,omitempty"`
+	AuthConfigured bool       `json:"authConfigured,omitempty"`
 }
 
 type ToolView struct {
@@ -881,17 +909,26 @@ type SkillView struct {
 	Description string `json:"description"`
 	Scope       string `json:"scope"`
 	RunAs       string `json:"runAs"`
+	Enabled     bool   `json:"enabled"`
+}
+
+type SkillRootSkillView struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Scope       string `json:"scope"`
+	RunAs       string `json:"runAs"`
 }
 
 // SkillRootView is one skill discovery root for the drawer's Sources section.
 type SkillRootView struct {
-	Dir        string `json:"dir"`
-	Scope      string `json:"scope"`
-	Priority   int    `json:"priority"`
-	Status     string `json:"status"`
-	Configured bool   `json:"configured"`
-	Skills     int    `json:"skills"`
-	Warning    string `json:"warning,omitempty"`
+	Dir        string               `json:"dir"`
+	Scope      string               `json:"scope"`
+	Priority   int                  `json:"priority"`
+	Status     string               `json:"status"`
+	Configured bool                 `json:"configured"`
+	Skills     int                  `json:"skills"`
+	SkillItems []SkillRootSkillView `json:"skillItems,omitempty"`
+	Warning    string               `json:"warning,omitempty"`
 }
 
 // Capabilities projects the session's MCP servers (connected + failed) and skills
@@ -912,11 +949,11 @@ func (a *App) Capabilities() CapabilitiesView {
 	seen := map[string]bool{}
 	connected := map[string]bool{}
 	retainedDisabled := map[string]ServerView{}
-	codegraphConfigured := false
+	var loadedCfg *config.Config
 	configured := map[string]config.PluginEntry{}
 	var configuredEntries []config.PluginEntry
 	if cfg, err := config.Load(); err == nil {
-		codegraphConfigured = cfg.Codegraph.Enabled
+		loadedCfg = cfg
 		configuredEntries = append(configuredEntries, cfg.Plugins...)
 		for _, p := range configuredEntries {
 			configured[p.Name] = p
@@ -934,6 +971,8 @@ func (a *App) Capabilities() CapabilitiesView {
 			}
 			if p, ok := configured[s.Name]; ok {
 				view = withPluginConfig(view, p)
+			} else if s.Name == "codegraph" && loadedCfg != nil {
+				view = withCodegraphConfig(view, loadedCfg.Codegraph)
 			}
 			out.Servers = append(out.Servers, view)
 		}
@@ -944,13 +983,15 @@ func (a *App) Capabilities() CapabilitiesView {
 			}
 			if p, ok := configured[f.Name]; ok {
 				view = withPluginConfig(view, p)
+			} else if f.Name == "codegraph" && loadedCfg != nil {
+				view = withCodegraphConfig(view, loadedCfg.Codegraph)
 			}
 			out.Servers = append(out.Servers, view)
 		}
 	}
 	// Configured servers that are neither connected nor failed are either lazy
 	// (deferred), background/eager (initializing), or toggled off this session.
-	if len(configuredEntries) > 0 || codegraphConfigured {
+	if len(configuredEntries) > 0 || loadedCfg != nil {
 		for _, p := range configuredEntries {
 			if seen[p.Name] {
 				continue
@@ -977,33 +1018,30 @@ func (a *App) Capabilities() CapabilitiesView {
 			out.Servers = append(out.Servers, withPluginConfig(ServerView{Name: p.Name, Status: status}, p))
 			seen[p.Name] = true
 		}
-		if codegraphConfigured && !seen["codegraph"] {
+		if loadedCfg != nil && !seen["codegraph"] {
+			status := "disabled"
+			if loadedCfg.Codegraph.Enabled {
+				switch loadedCfg.Codegraph.ResolvedTier() {
+				case "background", "eager":
+					status = "initializing"
+				default:
+					status = "deferred"
+				}
+			}
 			if s, ok := disabled["codegraph"]; ok {
 				s.Status = "disabled"
 				s.Transport = "stdio"
 				s.BuiltIn = true
+				s = withCodegraphConfig(s, loadedCfg.Codegraph)
 				s.Error = ""
 				out.Servers = append(out.Servers, s)
 				retainedDisabled["codegraph"] = s
 				delete(disabled, "codegraph")
 			} else {
-				out.Servers = append(out.Servers, ServerView{Name: "codegraph", Transport: "stdio", Status: "initializing", BuiltIn: true})
+				out.Servers = append(out.Servers, withCodegraphConfig(ServerView{Name: "codegraph", Status: status}, loadedCfg.Codegraph))
 			}
 			seen["codegraph"] = true
 		}
-	}
-	for name, s := range disabled {
-		if seen[name] {
-			continue
-		}
-		if name != "codegraph" || !codegraphConfigured {
-			continue
-		}
-		s.Status = "disabled"
-		s.BuiltIn = true
-		s.Error = ""
-		out.Servers = append(out.Servers, s)
-		retainedDisabled[name] = s
 	}
 	out.Servers = orderServerViews(out.Servers, order)
 
@@ -1015,10 +1053,11 @@ func (a *App) Capabilities() CapabilitiesView {
 	a.mcpOrder = mergeServerOrder(a.mcpOrder, out.Servers)
 	a.mu.Unlock()
 
-	for _, s := range ctrl.Skills() {
+	for _, s := range ctrl.AllSkills() {
 		out.Skills = append(out.Skills, SkillView{
 			Name: s.Name, Description: s.Description,
 			Scope: string(s.Scope), RunAs: string(s.RunAs),
+			Enabled: ctrl.SkillEnabled(s.Name),
 		})
 	}
 	out.SkillRoots = skillRootsView()
@@ -1037,6 +1076,7 @@ func withPluginConfig(v ServerView, p config.PluginEntry) ServerView {
 	v.Command = p.Command
 	v.Args = append([]string(nil), p.Args...)
 	v.URL = p.URL
+	v.AuthConfigured = mcpdiag.HasAuthConfig(p.Headers, p.Env, p.URL)
 	if len(p.Env) > 0 {
 		v.EnvKeys = make([]string, 0, len(p.Env))
 		for k := range p.Env {
@@ -1044,6 +1084,20 @@ func withPluginConfig(v ServerView, p config.PluginEntry) ServerView {
 		}
 		sort.Strings(v.EnvKeys)
 	}
+	auth := mcpdiag.DiagnoseAuth(v.Transport, v.Status, v.Error, v.URL, v.AuthConfigured)
+	v.AuthStatus = auth.Status
+	v.AuthURL = auth.URL
+	return v
+}
+
+func withCodegraphConfig(v ServerView, c config.CodegraphConfig) ServerView {
+	v.Name = "codegraph"
+	v.Transport = "stdio"
+	v.BuiltIn = true
+	v.Configured = true
+	v.AutoStart = c.ShouldAutoStart()
+	v.Tier = c.ResolvedTier()
+	v.AuthStatus = mcpdiag.AuthNone
 	return v
 }
 
@@ -1057,8 +1111,21 @@ func skillRootsView() []SkillRootView {
 	}
 	st := skill.New(skill.Options{ProjectRoot: cwd, CustomPaths: custom, DisableBuiltins: true, Stderr: io.Discard})
 	counts := map[string]int{}
+	skillItems := map[string][]SkillRootSkillView{}
 	for _, sk := range st.List() {
-		counts[config.CanonicalSkillPath(filepath.Dir(skillRootPath(sk.Path)))]++
+		root := config.CanonicalSkillPath(filepath.Dir(skillRootPath(sk.Path)))
+		counts[root]++
+		skillItems[root] = append(skillItems[root], SkillRootSkillView{
+			Name:        sk.Name,
+			Description: sk.Description,
+			Scope:       string(sk.Scope),
+			RunAs:       string(sk.RunAs),
+		})
+	}
+	for root := range skillItems {
+		sort.Slice(skillItems[root], func(i, j int) bool {
+			return skillItems[root][i].Name < skillItems[root][j].Name
+		})
 	}
 	userConfigured := map[string]bool{}
 	if userCfg != nil {
@@ -1076,6 +1143,7 @@ func skillRootsView() []SkillRootView {
 			Status:     string(r.Status),
 			Configured: r.Scope == skill.ScopeCustom && userConfigured[dir],
 			Skills:     counts[dir],
+			SkillItems: skillItems[dir],
 		}
 		out = append(out, view)
 	}
@@ -1145,6 +1213,14 @@ func (a *App) RemoveSkillPath(path string) error {
 // discovery, the system prompt index, and slash completions.
 func (a *App) RefreshSkills() error {
 	return a.rebuild()
+}
+
+// SetSkillEnabled persists a skill toggle and rebuilds the controller so the
+// prompt index, slash menu, and skill tools reflect it immediately.
+func (a *App) SetSkillEnabled(name string, enabled bool) error {
+	return a.applyConfigChange(func(c *config.Config) error {
+		return c.SetSkillEnabled(name, enabled)
+	})
 }
 
 func normalizeSkillPath(path string) string {
@@ -1279,7 +1355,7 @@ func (a *App) UpdateMCPServer(name string, in MCPServerInput) error {
 	if !sessionDisabled && (wasConnected || wasFailed || updated.ResolvedTier() != "lazy") {
 		if _, err := a.ctrl.ConnectConfiguredMCPServer(name); err != nil {
 			recordMCPFailure(a.ctrl, updated, err)
-			return fmt.Errorf("saved config, but reconnect failed: %w", err)
+			return nil
 		}
 	}
 	return nil
@@ -1287,6 +1363,9 @@ func (a *App) UpdateMCPServer(name string, in MCPServerInput) error {
 
 // RemoveMCPServer disconnects a live server and drops it from config (the row's ✕).
 func (a *App) RemoveMCPServer(name string) error {
+	if name == "codegraph" {
+		return fmt.Errorf("codegraph is built in; it cannot be removed")
+	}
 	if a.ctrl == nil {
 		return fmt.Errorf("no active session")
 	}
@@ -1310,12 +1389,35 @@ func (a *App) RetryMCPServer(name string) error {
 	return err
 }
 
+// ClearMCPServerAuthentication removes local auth-like config for one MCP and
+// clears the current session's cached connection failure. It does not remove the
+// server itself or try to sign the user out of the third-party browser session.
+func (a *App) ClearMCPServerAuthentication(name string) error {
+	if name == "codegraph" {
+		return fmt.Errorf("codegraph is built in; it has no stored MCP authentication")
+	}
+	if a.ctrl == nil {
+		return fmt.Errorf("no active session")
+	}
+	if _, _, _, err := config.ClearPluginAuthenticationInSource(name); err != nil {
+		return err
+	}
+	a.ctrl.DisconnectMCPServer(name)
+	if h := a.ctrl.Host(); h != nil {
+		h.ClearFailure(name)
+	}
+	return nil
+}
+
 // SetMCPServerEnabled is the connector toggle: on reconnects a configured server
 // for this session, off disconnects it (config untouched either way — like Claude
 // Code's per-conversation enable/disable, it resets on the next session start).
 func (a *App) SetMCPServerEnabled(name string, enabled bool) error {
 	if a.ctrl == nil {
 		return fmt.Errorf("no active session")
+	}
+	if name == "codegraph" {
+		return a.setCodegraphEnabled(enabled)
 	}
 	if enabled {
 		_, err := a.ctrl.ConnectConfiguredMCPServer(name)
@@ -1346,7 +1448,7 @@ func (a *App) SetMCPServerEnabled(name string, enabled bool) error {
 // "connect now" remain separate controls.
 func (a *App) SetMCPServerTier(name, tier string) error {
 	if name == "codegraph" {
-		return fmt.Errorf("codegraph is built in; configure it with [codegraph]")
+		return a.setCodegraphTier(tier)
 	}
 	tier = normalizeMCPTier(tier)
 	cfg, err := config.Load()
@@ -1358,6 +1460,10 @@ func (a *App) SetMCPServerTier(name, tier string) error {
 	for i := range cfg.Plugins {
 		if cfg.Plugins[i].Name == name {
 			cfg.Plugins[i].Tier = tier
+			if !cfg.Plugins[i].ShouldAutoStart() {
+				on := true
+				cfg.Plugins[i].AutoStart = &on
+			}
 			updated = cfg.Plugins[i]
 			found = true
 			break
@@ -1372,11 +1478,71 @@ func (a *App) SetMCPServerTier(name, tier string) error {
 	if tier != "lazy" && a.ctrl != nil && !mcpConnected(a.ctrl, name) {
 		if _, err := a.ctrl.ConnectConfiguredMCPServer(name); err != nil {
 			recordMCPFailure(a.ctrl, updated, err)
-			return fmt.Errorf("saved launch mode, but connect failed: %w", err)
+			return nil
 		}
 		a.mu.Lock()
 		delete(a.disabledMCP, name)
 		a.mu.Unlock()
+	}
+	return nil
+}
+
+func (a *App) setCodegraphEnabled(enabled bool) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	cfg.Codegraph.Enabled = enabled
+	if err := cfg.Save(); err != nil {
+		return err
+	}
+	if enabled {
+		a.mu.Lock()
+		delete(a.disabledMCP, "codegraph")
+		a.mu.Unlock()
+		if _, err := a.ctrl.ConnectConfiguredMCPServer("codegraph"); err != nil {
+			recordCodegraphFailure(a.ctrl, cfg.Codegraph, err)
+			return nil
+		}
+		return nil
+	}
+	if h := a.ctrl.Host(); h != nil {
+		h.ClearFailure("codegraph")
+	}
+	a.ctrl.DisconnectMCPServer("codegraph")
+	s := withCodegraphConfig(ServerView{Name: "codegraph", Status: "disabled"}, cfg.Codegraph)
+	a.mu.Lock()
+	if a.disabledMCP == nil {
+		a.disabledMCP = map[string]ServerView{}
+	}
+	a.disabledMCP["codegraph"] = s
+	a.mcpOrder = mergeServerOrder(a.mcpOrder, []ServerView{s})
+	a.mu.Unlock()
+	return nil
+}
+
+func (a *App) setCodegraphTier(tier string) error {
+	tier = normalizeMCPTier(tier)
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	cfg.Codegraph.Enabled = true
+	cfg.Codegraph.Tier = tier
+	if err := cfg.Save(); err != nil {
+		return err
+	}
+	if a.ctrl == nil {
+		return nil
+	}
+	a.mu.Lock()
+	delete(a.disabledMCP, "codegraph")
+	a.mu.Unlock()
+	if tier != "lazy" && !mcpConnected(a.ctrl, "codegraph") {
+		if _, err := a.ctrl.ConnectConfiguredMCPServer("codegraph"); err != nil {
+			recordCodegraphFailure(a.ctrl, cfg.Codegraph, err)
+			return nil
+		}
 	}
 	return nil
 }
@@ -1440,6 +1606,22 @@ func recordMCPFailure(ctrl *control.Controller, e config.PluginEntry, err error)
 		Env:     exp.Env,
 		URL:     exp.URL,
 		Headers: exp.Headers,
+	}, err)
+}
+
+func recordCodegraphFailure(ctrl *control.Controller, c config.CodegraphConfig, err error) {
+	if ctrl == nil || ctrl.Host() == nil || err == nil {
+		return
+	}
+	cmd := strings.TrimSpace(c.Path)
+	if cmd == "" {
+		cmd = "codegraph"
+	}
+	ctrl.Host().RecordFailure(plugin.Spec{
+		Name:    "codegraph",
+		Type:    "stdio",
+		Command: cmd,
+		Args:    []string{"serve", "--mcp"},
 	}, err)
 }
 
@@ -1699,6 +1881,7 @@ type WorkspaceChangesView struct {
 var atSkip = map[string]bool{".git": true, "node_modules": true, ".DS_Store": true}
 
 const filePreviewLimit = 256 * 1024
+const fileRefSearchLimit = 20
 
 func trimUTF8PartialSuffix(data []byte) []byte {
 	if utf8.Valid(data) {
@@ -1779,6 +1962,20 @@ func (a *App) ListDir(rel string) []DirEntry {
 	sort.Slice(dirs, func(i, j int) bool { return strings.ToLower(dirs[i].Name) < strings.ToLower(dirs[j].Name) })
 	sort.Slice(files, func(i, j int) bool { return strings.ToLower(files[i].Name) < strings.ToLower(files[j].Name) })
 	return append(dirs, files...)
+}
+
+// SearchFileRefs finds workspace files by basename for bare "@token" completion.
+func (a *App) SearchFileRefs(query string) []DirEntry {
+	base, err := os.Getwd()
+	if err != nil {
+		return nil
+	}
+	paths := fileref.Search(base, query, fileRefSearchLimit)
+	out := make([]DirEntry, 0, len(paths))
+	for _, path := range paths {
+		out = append(out, DirEntry{Name: path, IsDir: false})
+	}
+	return out
 }
 
 // ReadFile returns a small text preview for a file under the current workspace.
@@ -2159,8 +2356,8 @@ func (a *App) NeedsOnboarding() bool {
 	return strings.TrimSpace(os.Getenv(onboardingKeyEnv)) == ""
 }
 
-// ConnectKey validates apiKey against the balance endpoint, persists it to
-// ./.env, and rebuilds the controller so the new key takes effect.
+// ConnectKey validates apiKey against the balance endpoint, persists it to the
+// global credentials file, and rebuilds the controller so the new key takes effect.
 func (a *App) ConnectKey(apiKey string) error {
 	apiKey = strings.TrimSpace(apiKey)
 	if apiKey == "" {

@@ -9,7 +9,10 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
+	"reasonix/internal/agent"
+	"reasonix/internal/checkpoint"
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
@@ -90,6 +93,161 @@ func TestTranscriptViewportSizing(t *testing.T) {
 	}
 	if m.viewport.TotalLineCount() == 0 {
 		t.Errorf("viewport should hold the committed banner after the first resize")
+	}
+}
+
+func TestMCPManagerHidesComposerBox(t *testing.T) {
+	ctrl := control.New(control.Options{})
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
+	m.mcp = &mcpManager{stage: mcpStageList, snapshot: mcpSnapshot{servers: []mcpServerView{
+		{Name: "github", Transport: "stdio", Status: "deferred", Configured: true, Tier: "lazy"},
+	}}}
+
+	m0, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = m0.(chatTUI)
+
+	cardRows := strings.Count(m.renderMCPManager(), "\n") + 1
+	if got, want := m.bottomRows(), cardRows+2; got != want {
+		t.Fatalf("bottomRows with MCP manager = %d, want %d (MCP panel + status rows, no composer box)", got, want)
+	}
+	content := ansi.Strip(m.View().Content)
+	if !strings.Contains(content, "Manage MCP servers") {
+		t.Fatalf("MCP manager missing from view:\n%s", content)
+	}
+	if !strings.Contains(content, "· MCP") {
+		t.Fatalf("MCP status line missing from view:\n%s", content)
+	}
+}
+
+func TestModalPanelsHideComposerBox(t *testing.T) {
+	ask := event.Ask{
+		ID: "ask-1",
+		Questions: []event.AskQuestion{{
+			ID:     "q1",
+			Prompt: "Pick one",
+			Options: []event.AskOption{{
+				Label: "Option A",
+			}},
+		}},
+	}
+	tests := []struct {
+		name   string
+		setup  func(*chatTUI)
+		render func(chatTUI) string
+	}{
+		{
+			name: "resume picker",
+			setup: func(m *chatTUI) {
+				m.resumePick = &resumePicker{sessions: []agent.SessionInfo{{
+					Path:    "one.jsonl",
+					Preview: "previous task",
+					Turns:   3,
+				}}, sel: 0, active: -1}
+			},
+			render: func(m chatTUI) string { return m.renderResumePicker() },
+		},
+		{
+			name: "rewind picker",
+			setup: func(m *chatTUI) {
+				m.rewind = &rewindPicker{metas: []checkpoint.Meta{{
+					Turn:   0,
+					Prompt: "fix the parser",
+				}}, sel: 0}
+			},
+			render: func(m chatTUI) string { return m.renderRewind() },
+		},
+		{
+			name: "approval prompt",
+			setup: func(m *chatTUI) {
+				m.pendingApproval = &event.Approval{ID: "approval-1", Tool: "bash", Subject: "echo hi"}
+			},
+			render: func(m chatTUI) string { return m.renderApprovalBanner() },
+		},
+		{
+			name: "ask chooser",
+			setup: func(m *chatTUI) {
+				m.chooser = newChooser(ask)
+			},
+			render: func(m chatTUI) string { return m.renderChooser() },
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctrl := control.New(control.Options{})
+			m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
+			tt.setup(&m)
+
+			m0, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+			m = m0.(chatTUI)
+
+			card := tt.render(m)
+			if card == "" {
+				t.Fatalf("%s panel did not render", tt.name)
+			}
+			cardRows := strings.Count(card, "\n") + 1
+			if got, want := m.bottomRows(), cardRows+2; got != want {
+				t.Fatalf("bottomRows with %s = %d, want %d (panel + status rows, no composer box)", tt.name, got, want)
+			}
+		})
+	}
+}
+
+func TestInputOwnedOverlaysKeepComposerBox(t *testing.T) {
+	ask := event.Ask{
+		ID: "ask-1",
+		Questions: []event.AskQuestion{{
+			ID:     "q1",
+			Prompt: "Pick one",
+			Options: []event.AskOption{{
+				Label: "Option A",
+			}},
+		}},
+	}
+	tests := []struct {
+		name   string
+		setup  func(*chatTUI)
+		render func(chatTUI) string
+	}{
+		{
+			name: "ask free text",
+			setup: func(m *chatTUI) {
+				m.chooser = newChooser(ask)
+				m.chooser.typing = true
+			},
+			render: func(m chatTUI) string { return m.renderChooser() },
+		},
+		{
+			name: "completion menu",
+			setup: func(m *chatTUI) {
+				m.input.SetValue("/")
+				m.completion = completion{active: true, kind: compSlash, items: []compItem{{label: "/mcp"}}, sel: 0}
+			},
+			render: func(m chatTUI) string { return m.renderCompletion() },
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctrl := control.New(control.Options{})
+			m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
+			tt.setup(&m)
+
+			m0, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+			m = m0.(chatTUI)
+
+			if m.hideComposer() {
+				t.Fatalf("%s should keep the composer visible", tt.name)
+			}
+			panel := tt.render(m)
+			if panel == "" {
+				t.Fatalf("%s panel did not render", tt.name)
+			}
+			panelRows := strings.Count(panel, "\n") + 1
+			if got, want := m.bottomRows(), panelRows+m.input.Height()+2+2; got != want {
+				t.Fatalf("bottomRows with %s = %d, want %d (panel + composer box + status rows)", tt.name, got, want)
+			}
+		})
 	}
 }
 

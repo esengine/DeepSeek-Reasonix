@@ -1,9 +1,12 @@
 package cli
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
+
+	tea "charm.land/bubbletea/v2"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/command"
@@ -159,6 +162,52 @@ func TestFileItemsOneLevel(t *testing.T) {
 	}
 }
 
+func TestFileItemsSearchesBasenameAtTopLevel(t *testing.T) {
+	orig, _ := os.Getwd()
+	defer os.Chdir(orig)
+
+	dir := t.TempDir()
+	writeAt(t, dir, "frontend/wailsjs/runtime/runtime.js", "x")
+	writeAt(t, dir, "node_modules/pkg/runtime.js", "noise")
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	m := newTestChatTUI()
+	items := m.fileItems("runtime.js")
+
+	if !hasLabel(items, "frontend/wailsjs/runtime/runtime.js") {
+		t.Fatalf("top-level @runtime.js should offer nested file path, got %v", labels(items))
+	}
+	if hasLabel(items, "node_modules/pkg/runtime.js") {
+		t.Fatalf("file search should skip node_modules noise, got %v", labels(items))
+	}
+}
+
+func TestFileItemsSearchRespectsMenuCap(t *testing.T) {
+	orig, _ := os.Getwd()
+	defer os.Chdir(orig)
+
+	dir := t.TempDir()
+	for i := 0; i < maxCompItems; i++ {
+		writeAt(t, dir, filepath.Join("aa-dir-"+fmt.Sprintf("%03d", i), "file.txt"), "x")
+	}
+	writeAt(t, dir, "nested/aa-deep.js", "y")
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	m := newTestChatTUI()
+	items := m.fileItems("aa")
+
+	if len(items) != maxCompItems {
+		t.Fatalf("fileItems should stay capped at %d entries, got %d", maxCompItems, len(items))
+	}
+	if hasLabel(items, "nested/aa-deep.js") {
+		t.Fatalf("search result should not exceed capped menu: %v", labels(items))
+	}
+}
+
 func TestFileItemsHiddenWhenDotTyped(t *testing.T) {
 	dir := t.TempDir()
 	writeAt(t, dir, ".hidden", "z")
@@ -233,6 +282,22 @@ func TestSlashArgCompletionChainsFromName(t *testing.T) {
 	}
 	if !hasLabel(m.completion.items, "add") {
 		t.Errorf("chained menu should list subcommands: %v", labels(m.completion.items))
+	}
+}
+
+func TestEnterOnBareMCPArgMenuSubmitsManager(t *testing.T) {
+	isolateUserConfig(t)
+	m := newTestChatTUI()
+	m.input.SetValue("/mcp ")
+	m.updateCompletion()
+	if !m.completion.active || m.completion.kind != compSlashArg {
+		t.Fatalf("/mcp <space> should open arg completion before Enter: %+v", m.completion)
+	}
+
+	got, _ := m.update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	next := got.(chatTUI)
+	if next.mcp == nil || next.mcp.stage != mcpStageList {
+		t.Fatalf("Enter on bare /mcp arg menu should open manager, got %#v", next.mcp)
 	}
 }
 

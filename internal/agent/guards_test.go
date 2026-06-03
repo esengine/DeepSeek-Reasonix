@@ -230,7 +230,10 @@ func TestExecuteBatchParallelReadOnly(t *testing.T) {
 // own position in the provider-ordered batch: read-only runs before and after it
 // may still parallelise within their contiguous segments.
 func TestExecuteBatchSegmentsAroundWrites(t *testing.T) {
-	const delay = 40 * time.Millisecond
+	// A larger per-call delay keeps fixed scheduler jitter on loaded CI a small
+	// fraction of the segment time, so the tight relative bound below stays
+	// reliable instead of being widened toward the serial floor.
+	const delay = 100 * time.Millisecond
 	reg := tool.NewRegistry()
 	reg.Add(fakeTool{name: "ro1", readOnly: true, delay: delay})
 	reg.Add(fakeTool{name: "ro2", readOnly: true, delay: delay})

@@ -142,8 +142,7 @@ export default function App() {
     cancel,
     approve,
     answerQuestion,
-    setPlan,
-    setBypass,
+    setControllerMode,
     newSession,
     listSessions,
     resumeSession,
@@ -200,23 +199,7 @@ export default function App() {
     [effectiveSidebarWidth, viewportWidth, workspaceFileTreePanelWidth, workspacePanelWidth, workspacePreviewModeActive],
   );
 
-  const syncModeToController = useCallback(
-    async (m: Mode) => {
-      if (m === "plan") {
-        await setBypass(false);
-        await setPlan(true);
-        return;
-      }
-      if (m === "yolo") {
-        await setPlan(false);
-        await setBypass(true);
-        return;
-      }
-      await setPlan(false);
-      await setBypass(false);
-    },
-    [setPlan, setBypass],
-  );
+  const syncModeToController = useCallback((m: Mode) => setControllerMode(m), [setControllerMode]);
 
   // applyMode is the single source of truth for the input mode: it updates the
   // local pill and pushes the matching gate state to the controller (plan = read
@@ -254,14 +237,15 @@ export default function App() {
   }, [state.meta, mode, syncModeToController]);
 
   // The live task list pinned above the composer comes from the most recent
-  // top-level todo_write call; it stays visible while work remains, clears itself
-  // once every item is completed, and can be dismissed by the user (the ✕). A
-  // dismissal is keyed to that list's id, so a fresh todo_write (a new task)
-  // brings the panel back.
+  // successful top-level todo_write result; failed or still-running attempts do
+  // not advance the canonical panel state. It stays visible while work remains,
+  // clears itself once every item is completed, and can be dismissed by the user
+  // (the ✕). A dismissal is keyed to that list's id, so a fresh accepted
+  // todo_write brings the panel back.
   const todoItem = useMemo(() => {
     for (let i = state.items.length - 1; i >= 0; i--) {
       const it = state.items[i];
-      if (it.kind === "tool" && it.name === "todo_write" && !it.parentId) return it;
+      if (it.kind === "tool" && it.name === "todo_write" && !it.parentId && it.status === "done" && !it.error) return it;
     }
     return null;
   }, [state.items]);
@@ -952,20 +936,19 @@ export default function App() {
             {state.approval && (
               <ApprovalModal
                 approval={state.approval}
-                onAnswer={(allow, session) => {
+                onAnswer={(allow, session, persist) => {
                   // Approving an exit_plan_mode plan leaves plan mode (the controller
                   // flips the executor; mirror it here for the indicator).
                   if (state.approval!.tool === "exit_plan_mode" && allow) setMode("normal");
-                  approve(state.approval!.id, allow, session);
+                  approve(state.approval!.id, allow, session, persist);
                 }}
                 onRevisePlan={(text) => {
                   setPendingPlanRevision(text);
-                  approve(state.approval!.id, false, false);
+                  approve(state.approval!.id, false, false, false);
                 }}
                 onExitPlan={() => {
-                  setMode("normal");
-                  setPlan(false);
-                  approve(state.approval!.id, false, false);
+                  applyMode("normal");
+                  approve(state.approval!.id, false, false, false);
                 }}
               />
             )}
