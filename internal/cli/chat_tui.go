@@ -2000,11 +2000,7 @@ func truncateSubject(s string, width int) string {
 	if max < 16 {
 		max = 16
 	}
-	r := []rune(s)
-	if len(r) > max {
-		return string(r[:max]) + "…"
-	}
-	return s
+	return ansi.Truncate(s, max, "…")
 }
 
 // clampStatusLine truncates a status line to `width` visible columns, ANSI-aware,

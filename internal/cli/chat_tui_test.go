@@ -921,3 +921,29 @@ func TestShortTokens(t *testing.T) {
 		})
 	}
 }
+
+func TestTruncateSubject(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		width int
+	}{
+		{"short ASCII", "rm file", 60},
+		{"long ASCII", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 60},
+		{"CJK at 60", "日本語の文章は通常、表示幅が広いため、端末の横幅を超えてしまうことがあります。", 60},
+		{"CJK at 30", "日本語の文章は通常、表示幅が広いため、端末の横幅を超えてしまうことがあります。", 30},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := truncateSubject(tc.input, tc.width)
+			wantMax := tc.width - 28
+			if wantMax < 16 {
+				wantMax = 16
+			}
+			w := ansi.StringWidth(got)
+			if w > wantMax {
+				t.Errorf("truncateSubject(%q, %d) = %q (width %d), want visible width <= %d", tc.input, tc.width, got, w, wantMax)
+			}
+		})
+	}
+}
