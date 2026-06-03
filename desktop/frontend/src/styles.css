@@ -4154,6 +4154,11 @@ body {
   background: color-mix(in srgb, var(--err) 7%, var(--bg-soft));
   color: var(--err);
 }
+.cap-source-badge--builtin {
+  border-color: color-mix(in srgb, var(--accent) 22%, var(--border));
+  background: color-mix(in srgb, var(--accent) 6%, var(--bg-soft));
+  color: color-mix(in srgb, var(--accent) 70%, var(--fg-dim));
+}
 .cap-source__meta {
   display: flex;
   flex-wrap: wrap;
