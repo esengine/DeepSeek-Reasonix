@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 
 	"reasonix/internal/agent"
@@ -327,7 +328,7 @@ func chatREPL(args []string) int {
 		// The configured model no longer resolves (e.g. a renamed/removed
 		// provider). Re-run the wizard instead of dead-ending, then retry.
 		fmt.Fprintln(os.Stderr, i18n.M.ReconfigureOnUnknownModel)
-		if rc := interactiveSetup("reasonix.toml"); rc != 0 {
+		if rc := interactiveSetup(defaultConfigTarget(), defaultEnvTarget()); rc != 0 {
 			return rc
 		}
 		ctrl, err = setup(ctx, *model, *maxSteps, false, sink)
@@ -449,14 +450,64 @@ func chatREPL(args []string) int {
 	return 0
 }
 
-// setupConfig runs the configuration wizard (the `reasonix setup` command),
-// writing reasonix.toml (+ .env). Project memory is a separate concern — the
-// in-session `/init` skill generates AGENTS.md (see initHint).
-func setupConfig(args []string) int {
-	path := "reasonix.toml"
-	if len(args) > 0 {
-		path = args[0]
+// setupTargets is where the wizard writes: the TOML config and the secrets file.
+// Keys always go to the reasonix-owned global credentials file so they never land
+// in a project's own .env; only the config location is project-local under --local.
+type setupTargets struct {
+	config string
+	env    string
+}
+
+// defaultConfigTarget is the user-global config file, falling back to a
+// project-local reasonix.toml only when the user config dir can't be resolved.
+func defaultConfigTarget() string {
+	if p := config.UserConfigPath(); p != "" {
+		return p
 	}
+	return "reasonix.toml"
+}
+
+// defaultEnvTarget is the reasonix-owned global credentials file, falling back to
+// a project-local .env only when the user config dir can't be resolved.
+func defaultEnvTarget() string {
+	if p := config.UserCredentialsPath(); p != "" {
+		return p
+	}
+	return ".env"
+}
+
+// resolveSetupTargets picks where `reasonix setup` writes. Keys always go to the
+// global env. The config goes to the user-global dir by default, to ./reasonix.toml
+// under --local, or to an explicit path argument when given.
+func resolveSetupTargets(args []string) setupTargets {
+	t := setupTargets{config: defaultConfigTarget(), env: defaultEnvTarget()}
+	for _, a := range args {
+		switch a {
+		case "--local", "-l":
+			t.config = "reasonix.toml"
+		default:
+			t.config = a
+		}
+	}
+	return t
+}
+
+// displayPath shortens a home-relative path to ~/… for readable wizard output.
+func displayPath(p string) string {
+	if home, err := os.UserHomeDir(); err == nil && home != "" && strings.HasPrefix(p, home) {
+		return "~" + p[len(home):]
+	}
+	return p
+}
+
+// setupConfig runs the configuration wizard (the `reasonix setup` command),
+// writing config.toml to the user-global dir (or ./reasonix.toml under --local)
+// and API keys to the reasonix-owned global .env — never a project's own .env.
+// Project memory is a separate concern — the in-session `/init` skill generates
+// AGENTS.md (see initHint).
+func setupConfig(args []string) int {
+	t := resolveSetupTargets(args)
+	path := t.config
 	if _, err := os.Stat(path); err == nil {
 		// Non-interactive must not clobber an existing config silently.
 		if !isInteractive() {
@@ -473,21 +524,21 @@ func setupConfig(args []string) int {
 
 	// Interactive wizard on a TTY; fall back to the annotated default when piped.
 	if isInteractive() {
-		rc := interactiveSetup(path)
+		rc := interactiveSetup(t.config, t.env)
 		if rc == 0 {
 			fmt.Printf(i18n.M.TryHintFmt+"\n", bold("reasonix chat"))
 		}
 		return rc
 	}
-	return writeDefaultConfig(path)
+	return writeDefaultConfig(t.config)
 }
 
 func writeDefaultConfig(path string) int {
-	if err := config.Default().WriteFile(path); err != nil {
+	if err := config.Default().SaveTo(path); err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.WriteConfigErr, err)
 		return 1
 	}
-	fmt.Printf(i18n.M.WroteFileFmt+"\n", path)
+	fmt.Printf(i18n.M.WroteFileFmt+"\n", displayPath(path))
 	fmt.Println(i18n.M.NextHint)
 	return 0
 }
@@ -501,17 +552,18 @@ func initHint() int {
 	return 0
 }
 
-// interactiveSetup runs the setup wizard, then writes reasonix.toml (plus .env for any
-// keys entered). The wizard is intentionally minimal: pick language, pick
+// interactiveSetup runs the setup wizard, then writes the config to configPath
+// and any entered API keys to envPath (the reasonix-owned global .env, never a
+// project's own). The wizard is intentionally minimal: pick language, pick
 // provider, enter API keys. Language is asked first so every subsequent prompt
 // is already in the user's language even when env auto-detection got it wrong.
 // Two-model collaboration is left as a manual config edit (planner_model) so
 // first-run never confronts newcomers with advanced choices.
-func interactiveSetup(path string) int {
+func interactiveSetup(configPath, envPath string) int {
 	// Seed from the existing config when reconfiguring, so a re-run to fix a key
 	// preserves the user's providers / agent settings instead of resetting to
 	// defaults. First run (no file) falls back to the built-in defaults.
-	cfg := config.LoadForEdit(path)
+	cfg := config.LoadForEdit(configPath)
 	prevDefault := cfg.DefaultModel
 
 	lang, err := selectLanguage()
@@ -551,18 +603,18 @@ func interactiveSetup(path string) int {
 		}
 	}
 
-	if err := cfg.WriteFile(path); err != nil {
+	if err := cfg.SaveTo(configPath); err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.WriteConfigErr, err)
 		return 1
 	}
-	fmt.Printf("\n%s %s\n", green("✓"), fmt.Sprintf(i18n.M.WroteFileFmt, path))
+	fmt.Printf("\n%s %s\n", green("✓"), fmt.Sprintf(i18n.M.WroteFileFmt, displayPath(configPath)))
 
 	if len(envLines) > 0 {
-		if err := appendEnv(".env", envLines); err != nil {
+		if err := appendEnv(envPath, envLines); err != nil {
 			fmt.Fprintln(os.Stderr, i18n.M.WriteEnvErr, err)
 			return 1
 		}
-		fmt.Printf("%s %s\n", green("✓"), fmt.Sprintf(i18n.M.WroteFileFmt, ".env"))
+		fmt.Printf("%s %s\n", green("✓"), fmt.Sprintf(i18n.M.WroteFileFmt, displayPath(envPath)))
 	}
 
 	fmt.Printf("\n%s %s\n", accent("◆"), i18n.M.SetupComplete)
@@ -1086,11 +1138,11 @@ func withBuiltinFamilies(providers []config.ProviderEntry) []config.ProviderEntr
 }
 
 // promptMissingKeys re-runs the wizard's key-entry step for any enabled
-// provider whose api_key_env is unset. Newly entered values are appended to
-// .env so the chat session that follows picks them up via config.Load. The
-// user can hit Enter to skip — the chat banner falls back to a one-line
-// warning so they still see what's missing. Returns a non-zero exit code only
-// when writing .env fails.
+// provider whose api_key_env is unset. Newly entered values are appended to the
+// reasonix-owned global .env so the chat session that follows picks them up via
+// config.Load. The user can hit Enter to skip — the chat banner falls back to a
+// one-line warning so they still see what's missing. Returns a non-zero exit
+// code only when writing the env file fails.
 func promptMissingKeys(cfg *config.Config) int {
 	missing := providersWithMissingKeys(cfg)
 	if len(missing) == 0 {
@@ -1102,11 +1154,12 @@ func promptMissingKeys(cfg *config.Config) int {
 	if len(envLines) == 0 {
 		return 0
 	}
-	if err := appendEnv(".env", envLines); err != nil {
+	envPath := defaultEnvTarget()
+	if err := appendEnv(envPath, envLines); err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.WriteEnvErr, err)
 		return 1
 	}
-	fmt.Printf("%s %s\n", green("✓"), fmt.Sprintf(i18n.M.WroteFileFmt, ".env"))
+	fmt.Printf("%s %s\n", green("✓"), fmt.Sprintf(i18n.M.WroteFileFmt, displayPath(envPath)))
 	return 0
 }
 
@@ -1237,6 +1290,11 @@ func appendEnv(path string, lines []string) error {
 			os.Setenv(strings.TrimSpace(k), v)
 		}
 	}
+	if dir := filepath.Dir(path); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+	}
 	return os.WriteFile(path, []byte(b.String()), 0o600)
 }
 
@@ -1260,7 +1318,7 @@ func welcome(version string) int {
 	// prompt and welcome banner so every prompt the user sees is already
 	// localized to their choice.
 	if src == "" && isInteractive() {
-		if rc := interactiveSetup("reasonix.toml"); rc != 0 {
+		if rc := interactiveSetup(defaultConfigTarget(), defaultEnvTarget()); rc != 0 {
 			return rc
 		}
 		// Config just written; reload so .env (and any pinned language) is

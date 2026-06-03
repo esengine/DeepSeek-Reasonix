@@ -1424,34 +1424,37 @@ const planApprovalTool = "exit_plan_mode"
 
 // handleApprovalKey resolves a pending approval from a keystroke and re-arms the
 // listener. 1/y/Enter allows once, 2/a allows for the rest of the session,
-// 3/n/Esc denies. Ctrl-C cancels the whole turn via the run context. For a plan
-// approval (planApprovalTool), allowing also drops the local [plan] tag — the
+// 3/p writes an "always allow" rule to the config file, 4/n/Esc denies.
+// Ctrl-C cancels the whole turn via the run context. For a plan approval
+// (planApprovalTool), allowing also drops the local [plan] tag — the
 // controller turns plan mode off on its side.
 func (m chatTUI) handleApprovalKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	answer := func(allow, session bool) (tea.Model, tea.Cmd) {
+	answer := func(allow, session, persist bool) (tea.Model, tea.Cmd) {
 		if allow && m.pendingApproval.Tool == planApprovalTool {
 			m.planMode = false
 		}
-		m.ctrl.Approve(m.pendingApproval.ID, allow, session)
+		m.ctrl.Approve(m.pendingApproval.ID, allow, session, persist)
 		m.pendingApproval = nil
 		return m, nil // the next ApprovalRequest / event arrives on eventCh
 	}
 	switch msg.String() {
 	case "ctrl+c":
 		m.ctrl.Cancel() // cancels the run; the approver unblocks via ctx.Done()
-		return answer(false, false)
+		return answer(false, false, false)
 	case "enter":
-		return answer(true, false)
+		return answer(true, false, false)
 	case "esc":
-		return answer(false, false)
+		return answer(false, false, false)
 	}
 	switch strings.ToLower(msg.String()) {
 	case "y", "1":
-		return answer(true, false)
+		return answer(true, false, false)
 	case "a", "2":
-		return answer(true, true)
-	case "n", "3":
-		return answer(false, false)
+		return answer(true, true, false) // session grant
+	case "p", "3":
+		return answer(true, true, true) // persist to config
+	case "n", "4":
+		return answer(false, false, false)
 	}
 	return m, nil // ignore anything else while awaiting a decision
 }

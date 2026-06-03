@@ -33,7 +33,7 @@ each GitHub release. Or build from source:
 
 ```sh
 git clone https://github.com/esengine/DeepSeek-Reasonix   # default: main-v2 (Go)
-cd DeepSeek-Reasonix && make build                        # -> bin/reasonix
+cd DeepSeek-Reasonix && make build                        # -> bin/reasonix(.exe)
 ```
 
 Until `1.0.0` is published to npm, `npm i -g reasonix` still installs the `0.x`

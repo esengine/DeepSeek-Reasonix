@@ -71,7 +71,7 @@ brew install esengine/reasonix/reasonix   # macOS
 ### 从源码构建
 
 ```sh
-make build      # -> bin/reasonix
+make build      # -> bin/reasonix(.exe)
 make cross      # -> dist/（darwin|linux|windows × amd64|arm64）
 ```
 

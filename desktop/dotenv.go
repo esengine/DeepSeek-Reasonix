@@ -5,28 +5,41 @@ import (
 	"path/filepath"
 	"strings"
 
+	"reasonix/internal/config"
 	"reasonix/internal/fileutil"
 )
 
-// dotEnvPath is ~/.env (absolute, so a workspace switch — which changes cwd —
-// can't scatter or lose the key).
-var dotEnvPath = func() string {
+// credentialsPath is the reasonix-owned global secrets file the settings panel
+// writes API keys to — the same file `reasonix setup` writes and config.loadDotEnv
+// reads, so a key set in the desktop app resolves for the CLI from any directory.
+// Never a project .env: keys stay out of the user's project tree. Falls back to
+// ~/.env only when the user config dir can't be resolved.
+func credentialsPath() string {
+	if p := config.UserCredentialsPath(); p != "" {
+		return p
+	}
 	if home, err := os.UserHomeDir(); err == nil {
 		return filepath.Join(home, ".env")
 	}
-	return ".env" // fallback: relative to cwd if home is unavailable
-}()
+	return ".env"
+}
 
-// upsertDotEnv sets KEY=value in the home-directory .env (replacing an existing
-// KEY line, else appending), and applies it to the running process so a rebuild
-// picks it up without a restart. Comments and unrelated lines are preserved.
+// upsertDotEnv sets KEY=value in the global credentials file (replacing an
+// existing KEY line, else appending), and applies it to the running process so a
+// rebuild picks it up without a restart.
 func upsertDotEnv(key, value string) error {
+	return upsertEnvFile(credentialsPath(), key, value)
+}
+
+// upsertEnvFile merges KEY=value into a KEY=value file at path, preserving
+// comments and unrelated lines, writing atomically via a sibling temp + rename.
+func upsertEnvFile(path, key, value string) error {
 	key = strings.TrimSpace(key)
 	if key == "" {
 		return nil
 	}
 	var lines []string
-	if b, err := os.ReadFile(dotEnvPath); err == nil {
+	if b, err := os.ReadFile(path); err == nil {
 		lines = strings.Split(strings.TrimRight(string(b), "\n"), "\n")
 	}
 	replaced := false
@@ -46,7 +59,13 @@ func upsertDotEnv(key, value string) error {
 	}
 	out := strings.Join(lines, "\n") + "\n"
 
-	tmp, err := os.CreateTemp(filepath.Dir(dotEnvPath), ".env.*.tmp")
+	dir := filepath.Dir(path)
+	if dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+	}
+	tmp, err := os.CreateTemp(dir, "credentials.*.tmp")
 	if err != nil {
 		return err
 	}
@@ -60,7 +79,7 @@ func upsertDotEnv(key, value string) error {
 		os.Remove(tmpPath)
 		return err
 	}
-	if err := fileutil.ReplaceFile(tmpPath, dotEnvPath); err != nil {
+	if err := fileutil.ReplaceFile(tmpPath, path); err != nil {
 		os.Remove(tmpPath)
 		return err
 	}

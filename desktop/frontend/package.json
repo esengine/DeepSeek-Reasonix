@@ -26,5 +26,10 @@
     "@vitejs/plugin-react": "^4.3.4",
     "typescript": "^5.6.3",
     "vite": "^6.0.7"
+  },
+  "pnpm": {
+    "overrides": {
+      "mdast-util-gfm-autolink-literal": "2.0.0"
+    }
   }
 }

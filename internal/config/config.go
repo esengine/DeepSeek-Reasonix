@@ -655,6 +655,21 @@ func userConfigPath() string {
 // or "" when the user config dir can't be resolved.
 func UserConfigPath() string { return userConfigPath() }
 
+// UserCredentialsPath is the reasonix-owned global secrets file, beside
+// config.toml in the user config dir (e.g. ~/.config/reasonix/credentials). It
+// holds KEY=value lines loaded into the environment by loadDotEnv. The setup
+// wizard writes API keys here, deliberately NOT named .env: keys never land in a
+// project's own .env (which can't be selectively gitignored), never get
+// committed, and resolve from any working directory. "" when the user config dir
+// can't be resolved.
+func UserCredentialsPath() string {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(dir, "reasonix", "credentials")
+}
+
 // ArchiveDir is where compacted conversation history is archived for
 // traceability (one timestamped .jsonl per compaction). Empty if the user config
 // directory cannot be resolved, in which case archiving is skipped.

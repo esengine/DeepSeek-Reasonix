@@ -144,8 +144,12 @@ func TestSubjectPriority(t *testing.T) {
 
 func TestRememberRuleWithSubject(t *testing.T) {
 	got := rememberRule("bash", "go test ./...")
-	if got != "bash(go test ./...)" {
+	if got != "bash=go test ./..." {
 		t.Errorf("rememberRule = %q", got)
+	}
+	// The literal form round-trips: ParseRule must read it back as an exact-match rule.
+	if r, ok := ParseRule(got); !ok || !r.Literal || r.Tool != "bash" || r.Subject != "go test ./..." {
+		t.Errorf("ParseRule(%q) = {%q,%q,lit=%v,ok=%v}", got, r.Tool, r.Subject, r.Literal, ok)
 	}
 }
 

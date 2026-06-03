@@ -4315,6 +4315,9 @@ body {
   gap: 6px;
   margin-top: 8px;
 }
+.cap-failure__mode {
+  margin-top: 9px;
+}
 .cap-failure__logbox {
   margin: 8px 0 0;
   border: 1px solid var(--border-soft);

@@ -193,6 +193,7 @@ export function CapabilitiesPanel({
                         if (ok) setConfirmingClearAuth(null);
                       })
                     }
+                    onSetTier={(name, tier) => void mutate(() => app.SetMCPServerTier(name, tier))}
                     confirming={confirming}
                     onConfirm={(name) => {
                       setConfirming(name);
@@ -693,6 +694,7 @@ function FailedServersNotice({
   onConfirmClearAuth,
   onCancelClearAuth,
   onClearAuth,
+  onSetTier,
   onConfirm,
   onCancelConfirm,
   onRemove,
@@ -707,6 +709,7 @@ function FailedServersNotice({
   onConfirmClearAuth: (name: string) => void;
   onCancelClearAuth: () => void;
   onClearAuth: (name: string) => void;
+  onSetTier: (name: string, tier: string) => void;
   onConfirm: (name: string) => void;
   onCancelConfirm: () => void;
   onRemove: (name: string) => void;
@@ -725,6 +728,7 @@ function FailedServersNotice({
           const open = expanded.has(s.name);
           const error = s.error || t("caps.failed");
           const actionLabel = serverActionLabel(s, t);
+          const canConfigure = s.configured && !s.builtIn;
           const handlePrimaryAction = () => {
             if (shouldOpenAuth(s)) {
               openExternal((s.authUrl || "").trim());
@@ -783,6 +787,11 @@ function FailedServersNotice({
                   </>
                 )}
               </div>
+              {canConfigure && (
+                <div className="cap-failure__mode">
+                  <AutoConnectControls tier={s.tier || "lazy"} busy={busy} onTierChange={(tier) => onSetTier(s.name, tier)} />
+                </div>
+              )}
               {open && (
                 <div className="cap-failure__logbox">
                   <div className="cap-failure__logbar">

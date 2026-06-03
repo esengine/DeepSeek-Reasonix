@@ -12,15 +12,20 @@ func TestParseRule(t *testing.T) {
 		in       string
 		wantTool string
 		wantSubj string
+		wantLit  bool
 		wantOK   bool
 	}{
-		{"bash", "bash", "", true},
-		{"bash(rm -rf*)", "bash", "rm -rf*", true},
-		{"  read_file  ", "read_file", "", true},
-		{"bash( go test ./... )", "bash", " go test ./... ", true}, // subject preserved verbatim
-		{"bash(echo (hi))", "bash", "echo (hi)", true},             // first '(' wins, trailing ')'
-		{"", "", "", false},
-		{"(noTool)", "", "", false},
+		{"bash", "bash", "", false, true},
+		{"bash(rm -rf*)", "bash", "rm -rf*", false, true},
+		{"  read_file  ", "read_file", "", false, true},
+		{"bash( go test ./... )", "bash", " go test ./... ", false, true}, // subject preserved verbatim
+		{"bash(echo (hi))", "bash", "echo (hi)", false, true},             // first '(' wins, trailing ')'
+		{"bash=rm *.log", "bash", "rm *.log", true, true},                 // literal: '*' is not a wildcard
+		{"bash=make FOO=bar", "bash", "make FOO=bar", true, true},          // split on first '=' only
+		{"bash=echo (hi)", "bash", "echo (hi)", true, true},               // '=' before '(' → literal, parens kept
+		{"bash(make FOO=*)", "bash", "make FOO=*", false, true},           // '(' before '=' → still a glob
+		{"", "", "", false, false},
+		{"(noTool)", "", "", false, false},
 	}
 	for _, c := range cases {
 		r, ok := ParseRule(c.in)
@@ -28,8 +33,8 @@ func TestParseRule(t *testing.T) {
 			t.Errorf("ParseRule(%q) ok = %v, want %v", c.in, ok, c.wantOK)
 			continue
 		}
-		if ok && (r.Tool != c.wantTool || r.Subject != c.wantSubj) {
-			t.Errorf("ParseRule(%q) = {%q,%q}, want {%q,%q}", c.in, r.Tool, r.Subject, c.wantTool, c.wantSubj)
+		if ok && (r.Tool != c.wantTool || r.Subject != c.wantSubj || r.Literal != c.wantLit) {
+			t.Errorf("ParseRule(%q) = {%q,%q,lit=%v}, want {%q,%q,lit=%v}", c.in, r.Tool, r.Subject, r.Literal, c.wantTool, c.wantSubj, c.wantLit)
 		}
 	}
 }
@@ -162,8 +167,8 @@ func TestGateInteractive(t *testing.T) {
 	if ap.calls != 1 {
 		t.Errorf("approver calls = %d, want 1", ap.calls)
 	}
-	if remembered != "bash(go build)" {
-		t.Errorf("remembered rule = %q, want %q", remembered, "bash(go build)")
+	if remembered != "bash=go build" {
+		t.Errorf("remembered rule = %q, want %q", remembered, "bash=go build")
 	}
 
 	// Decline path.
@@ -187,5 +192,19 @@ func TestGateInteractive(t *testing.T) {
 	allow, _, _ = g4.Check(context.Background(), "bash", json.RawMessage(`{"command":"ok go"}`), false)
 	if !allow || ap4.calls != 0 {
 		t.Errorf("allow-listed call reached approver: allow=%v calls=%d", allow, ap4.calls)
+	}
+}
+
+// TestLiteralRuleMatchesExactly guards the remembered-approval rule shape: a
+// literal "bash=rm *.log" must allow only that exact command, never the wildcard
+// expansion a glob "bash(rm *.log)" would have matched.
+func TestLiteralRuleMatchesExactly(t *testing.T) {
+	p := New("ask", []string{"bash=rm *.log"}, nil, nil)
+
+	if got := p.Decide("bash", false, json.RawMessage(`{"command":"rm *.log"}`)); got != Allow {
+		t.Errorf("exact command = %v, want Allow", got)
+	}
+	if got := p.Decide("bash", false, json.RawMessage(`{"command":"rm secrets.log"}`)); got == Allow {
+		t.Errorf("literal rule wildcard-matched %q — '*' must stay literal", "rm secrets.log")
 	}
 }

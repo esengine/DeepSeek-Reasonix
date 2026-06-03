@@ -263,6 +263,7 @@ export const zh: Record<DictKey, string> = {
   "approval.deny": "拒绝",
   "approval.allowOnce": "允许一次",
   "approval.allowSession": "本会话内允许",
+  "approval.allowPersistent": "总是允许（保存）",
 
   // 提问卡片
   "ask.title": "需要你决定",
@@ -375,7 +376,7 @@ export const zh: Record<DictKey, string> = {
 	  "settings.proxyUrlHint": "可选。填写后 proxy_url 会覆盖上面的服务器和端口。",
 	  "settings.noProxy": "不走代理",
 	  "settings.saveNetwork": "保存网络设置",
-	  "settings.setKey": "设置 {env}（→ .env）",
+	  "settings.setKey": "设置 {env}",
   "settings.saveKey": "保存密钥",
   "settings.permissions": "权限",
   "settings.writerMode": "写操作模式",
@@ -476,13 +477,13 @@ export const zh: Record<DictKey, string> = {
 
   // onboarding — first-run API-key overlay
   "onboarding.title": "连接 Reasonix",
-  "onboarding.tagline": "粘贴一个 DeepSeek API key 即可开始。密钥仅存于本机的 .env，不会发往任何地方。",
+  "onboarding.tagline": "粘贴一个 DeepSeek API key 即可开始。密钥仅存于本机，不会发往任何地方。",
   "onboarding.inputLabel": "API 密钥",
   "onboarding.inputPlaceholder": "sk-…",
   "onboarding.submit": "连接并开始",
   "onboarding.validating": "校验中…",
   "onboarding.getKey": "如何获取 API key？",
-  "onboarding.privacy": "仅保存在本应用的 .env",
+  "onboarding.privacy": "仅保存在本机",
   "onboarding.error.empty": "请先粘贴密钥。",
   "onboarding.error.invalid": "这个 key 无法使用 —— 检查一下是否已激活、是否开通了计费。",
   "onboarding.error.network": "无法连接 DeepSeek —— 检查网络后再试。",

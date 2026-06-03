@@ -176,11 +176,12 @@ func TestUpdateSinkDropsAndWarns(t *testing.T) {
 	}
 }
 
-// approveCall records one approve(id, allow, session) callback.
+// approveCall records one approve(id, allow, session, persist) callback.
 type approveCall struct {
 	id      string
 	allow   bool
 	session bool
+	persist bool
 }
 
 func TestUpdateSinkApprovalAllowAlways(t *testing.T) {
@@ -209,13 +210,13 @@ func TestUpdateSinkApprovalAllowAlways(t *testing.T) {
 	}}
 	sink := newUpdateSink(fn, "sess-1")
 	got := make(chan approveCall, 1)
-	sink.bindApprove(func(id string, allow, session bool) { got <- approveCall{id, allow, session} })
+	sink.bindApprove(func(id string, allow, session, persist bool) { got <- approveCall{id, allow, session, persist} })
 
 	sink.Emit(event.Event{Kind: event.ApprovalRequest, Approval: event.Approval{ID: "9", Tool: "bash", Subject: "rm -rf /"}})
 
 	select {
 	case c := <-got:
-		if c != (approveCall{id: "9", allow: true, session: true}) {
+		if c != (approveCall{id: "9", allow: true, session: true, persist: false}) {
 			t.Errorf("approve = %+v, want {9 true true}", c)
 		}
 	case <-time.After(2 * time.Second):
@@ -241,7 +242,7 @@ func TestUpdateSinkApprovalDenied(t *testing.T) {
 			fn := &fakeNotifier{onReq: func(string, any) (json.RawMessage, error) { return tc.resp() }}
 			sink := newUpdateSink(fn, "sess-1")
 			got := make(chan approveCall, 1)
-			sink.bindApprove(func(id string, allow, session bool) { got <- approveCall{id, allow, session} })
+			sink.bindApprove(func(id string, allow, session, persist bool) { got <- approveCall{id, allow, session, persist} })
 
 			sink.Emit(event.Event{Kind: event.ApprovalRequest, Approval: event.Approval{ID: "3", Tool: "edit_file"}})
 

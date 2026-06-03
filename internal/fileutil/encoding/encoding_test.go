@@ -219,6 +219,77 @@ func TestRoundTripUTF8BOM(t *testing.T) {
 	}
 }
 
+// --- BOM-less UTF-16 ---
+
+func utf16NoBOM(t *testing.T, s string, order binary.ByteOrder) []byte {
+	t.Helper()
+	var b bytes.Buffer
+	for _, r := range utf16.Encode([]rune(s)) {
+		_ = binary.Write(&b, order, r)
+	}
+	return b.Bytes()
+}
+
+func TestDetectUTF16LENoBOM(t *testing.T) {
+	in := utf16NoBOM(t, "// Created by 69431 on 2024/12/31\n#include \"x.h\"\n", binary.LittleEndian)
+	enc, _ := Detect(in)
+	if enc != UTF16LENoBOM {
+		t.Errorf("got %v, want UTF16LENoBOM", enc)
+	}
+}
+
+func TestDetectUTF16BENoBOM(t *testing.T) {
+	in := utf16NoBOM(t, "package main\nfunc main() {}\n", binary.BigEndian)
+	enc, _ := Detect(in)
+	if enc != UTF16BENoBOM {
+		t.Errorf("got %v, want UTF16BENoBOM", enc)
+	}
+}
+
+func TestDetectPlainUTF8NotUTF16(t *testing.T) {
+	enc, _ := Detect([]byte("the quick brown fox jumps over the lazy dog\n"))
+	if enc != UTF8 {
+		t.Errorf("ASCII text misdetected as %v", enc)
+	}
+}
+
+func TestDetectBinaryNotUTF16NoBOM(t *testing.T) {
+	// NULs on both parities — genuine binary must not look like BOM-less UTF-16.
+	bin := []byte{0x00, 0x00, 0x01, 0x00, 0x00, 0x02, 0xFF, 0x00, 0x00, 0x03, 0x00, 0x00, 0x04, 0x00, 0x00, 0x05, 0x00, 0x00}
+	if k, ok := DetectUTF16NoBOM(bin); ok {
+		t.Errorf("binary misdetected as %v", k)
+	}
+}
+
+func TestDecodeUTF16LENoBOM(t *testing.T) {
+	in := utf16NoBOM(t, "hello\nworld", binary.LittleEndian)
+	if out := string(Decode(in, UTF16LENoBOM)); out != "hello\nworld" {
+		t.Errorf("got %q", out)
+	}
+}
+
+func TestRoundTripUTF16LENoBOM(t *testing.T) {
+	original := "// c++ source\nint main() { return 0; }\n"
+	encoded := utf16NoBOM(t, original, binary.LittleEndian)
+
+	enc, _ := Detect(encoded)
+	if enc != UTF16LENoBOM {
+		t.Fatalf("detect: got %v", enc)
+	}
+	decoded := string(Decode(encoded, enc))
+	if decoded != original {
+		t.Fatalf("decode mismatch: %q", decoded)
+	}
+	edited := strings.Replace(decoded, "return 0", "return 1", 1)
+	reencoded := Encode(edited, enc)
+	if bytes.HasPrefix(reencoded, []byte{0xFF, 0xFE}) || bytes.HasPrefix(reencoded, []byte{0xFE, 0xFF}) {
+		t.Error("no-BOM re-encode leaked a BOM")
+	}
+	if redecoded := string(Decode(reencoded, enc)); redecoded != edited {
+		t.Errorf("round-trip failed: got %q, want %q", redecoded, edited)
+	}
+}
+
 // --- UTF-16 supplementary plane (surrogate pairs) ---
 
 func TestSurrogatePairRoundTrip(t *testing.T) {

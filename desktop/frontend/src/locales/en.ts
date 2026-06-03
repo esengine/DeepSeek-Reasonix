@@ -262,6 +262,7 @@ export const en = {
   "approval.deny": "Deny",
   "approval.allowOnce": "Allow once",
   "approval.allowSession": "Allow for session",
+  "approval.allowPersistent": "Always allow (save)",
 
   // ask card
   "ask.title": "Need your decision",
@@ -374,7 +375,7 @@ export const en = {
 	  "settings.proxyUrlHint": "Optional. When set, proxy_url overrides the structured server and port fields.",
 	  "settings.noProxy": "No proxy",
 	  "settings.saveNetwork": "Save network settings",
-	  "settings.setKey": "set {env} (→ .env)",
+	  "settings.setKey": "set {env}",
   "settings.saveKey": "Save key",
   "settings.permissions": "Permissions",
   "settings.writerMode": "Writer mode",
@@ -475,13 +476,13 @@ export const en = {
 
   // onboarding — first-run API-key overlay
   "onboarding.title": "Connect Reasonix",
-  "onboarding.tagline": "Paste a DeepSeek API key to start. Stored locally in .env, never sent anywhere else.",
+  "onboarding.tagline": "Paste a DeepSeek API key to start. Stored locally on this machine, never sent anywhere else.",
   "onboarding.inputLabel": "API key",
   "onboarding.inputPlaceholder": "sk-…",
   "onboarding.submit": "Connect & start",
   "onboarding.validating": "Validating…",
   "onboarding.getKey": "How do I get a key?",
-  "onboarding.privacy": "Stored only in this app's .env",
+  "onboarding.privacy": "Stored only on this machine",
   "onboarding.error.empty": "Please paste a key first.",
   "onboarding.error.invalid": "That key didn't work — double-check it's active and has billing set up.",
   "onboarding.error.network": "Couldn't reach DeepSeek — check your network and try again.",

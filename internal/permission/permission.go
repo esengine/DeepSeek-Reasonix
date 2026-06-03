@@ -49,21 +49,38 @@ func ParseDecision(s string) Decision {
 	}
 }
 
-// Rule matches tool calls. Tool is the tool name; Subject, when non-empty, is a
-// glob (see matchGlob) the call's subject must match. An empty Subject matches
-// every call to Tool.
+// Rule matches tool calls. Tool is the tool name; Subject, when non-empty,
+// constrains the call's subject. A glob Subject (see matchGlob) matches by
+// wildcard; a Literal Subject matches by exact string equality. An empty Subject
+// matches every call to Tool.
 type Rule struct {
 	Tool    string
 	Subject string
+	// Literal matches Subject by exact equality rather than as a glob, so a
+	// remembered concrete command keeps any '*'/'?' as ordinary characters
+	// instead of turning them into wildcards.
+	Literal bool
 }
 
-// ParseRule parses "ToolName" or "ToolName(glob)". Surrounding whitespace is
-// trimmed. ok is false for a malformed entry (empty tool name) so the caller
-// can warn rather than silently install a rule that matches nothing.
+// ParseRule parses "ToolName", "ToolName(glob)", or "ToolName=literal".
+// Surrounding whitespace is trimmed. The "=literal" form (taken when the '='
+// precedes any '(') matches the rest of the string verbatim — no globbing —
+// which is how remembered approvals are stored so a command's punctuation can't
+// widen the rule. ok is false for a malformed entry (empty tool name) so the
+// caller can warn rather than silently install a rule that matches nothing.
 func ParseRule(s string) (Rule, bool) {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return Rule{}, false
+	}
+	if eq := strings.IndexByte(s, '='); eq > 0 {
+		if paren := strings.IndexByte(s, '('); paren < 0 || eq < paren {
+			tool := strings.TrimSpace(s[:eq])
+			if tool == "" {
+				return Rule{}, false
+			}
+			return Rule{Tool: tool, Subject: s[eq+1:], Literal: true}, true
+		}
 	}
 	if i := strings.IndexByte(s, '('); i >= 0 && strings.HasSuffix(s, ")") {
 		tool := strings.TrimSpace(s[:i])
@@ -137,7 +154,16 @@ func matchAny(rules []Rule, toolName, subject string) bool {
 		if r.Subject == "" {
 			return true
 		}
-		if subject != "" && matchGlob(r.Subject, subject) {
+		if subject == "" {
+			continue
+		}
+		if r.Literal {
+			if r.Subject == subject {
+				return true
+			}
+			continue
+		}
+		if matchGlob(r.Subject, subject) {
 			return true
 		}
 	}
@@ -219,7 +245,7 @@ type Gate struct {
 	Approver Approver
 
 	// OnRemember, when set, is invoked with a new allow rule the user chose to
-	// remember (e.g. "bash(go build*)"), so the front-end can persist it.
+	// remember (e.g. "bash=go build"), so the front-end can persist it.
 	OnRemember func(rule string)
 }
 
@@ -267,5 +293,5 @@ func rememberRule(toolName, subject string) string {
 	if subject == "" {
 		return toolName
 	}
-	return toolName + "(" + subject + ")"
+	return toolName + "=" + subject
 }

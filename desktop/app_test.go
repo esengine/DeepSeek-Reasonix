@@ -392,6 +392,63 @@ env = { TOKEN = "${PLAYWRIGHT_TOKEN}" }
 	t.Fatalf("playwright MCP missing from Capabilities: %+v", view.Servers)
 }
 
+func TestUpdateMCPServerRecordsReconnectFailure(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	dir := t.TempDir()
+	t.Chdir(dir)
+	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
+[codegraph]
+enabled = false
+
+[[plugins]]
+name = "broken"
+command = "npx"
+tier = "lazy"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp()
+	app.ctrl = control.New(control.Options{Host: plugin.NewHost()})
+	defer app.ctrl.Close()
+
+	if err := app.UpdateMCPServer("broken", MCPServerInput{
+		Name:      "broken",
+		Transport: "stdio",
+		Command:   "reasonix-missing-mcp-binary",
+		Tier:      "background",
+	}); err != nil {
+		t.Fatalf("UpdateMCPServer should persist config even when reconnect fails: %v", err)
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Plugins[0].Command; got != "reasonix-missing-mcp-binary" {
+		t.Fatalf("updated command = %q, want missing binary", got)
+	}
+	if got := cfg.Plugins[0].Tier; got != "background" {
+		t.Fatalf("updated tier = %q, want background", got)
+	}
+	if !mcpFailed(app.ctrl, "broken") {
+		t.Fatalf("Host.Failures() = %+v, want broken failure recorded", app.ctrl.Host().Failures())
+	}
+	view := app.Capabilities()
+	for _, s := range view.Servers {
+		if s.Name == "broken" {
+			if s.Status != "failed" {
+				t.Fatalf("server status = %q, want failed; server = %+v", s.Status, s)
+			}
+			if s.Command != "reasonix-missing-mcp-binary" || s.Tier != "background" {
+				t.Fatalf("server config not refreshed after failed reconnect: %+v", s)
+			}
+			return
+		}
+	}
+	t.Fatalf("broken MCP missing from Capabilities: %+v", view.Servers)
+}
+
 func TestSetMCPServerTierRecordsConnectFailure(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
@@ -434,6 +491,50 @@ tier = "lazy"
 			}
 			if s.Tier != "background" {
 				t.Fatalf("server tier = %q, want background so radio selection does not jump back", s.Tier)
+			}
+			return
+		}
+	}
+	t.Fatalf("broken MCP missing from Capabilities: %+v", view.Servers)
+}
+
+func TestCapabilitiesKeepsFailedMCPConfiguredTierAfterRestart(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	dir := t.TempDir()
+	t.Chdir(dir)
+	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
+[codegraph]
+enabled = false
+
+[[plugins]]
+name = "broken"
+command = "reasonix-missing-mcp-binary"
+tier = "eager"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp()
+	app.ctrl = control.New(control.Options{Host: plugin.NewHost()})
+	defer app.ctrl.Close()
+	recordMCPFailure(app.ctrl, config.PluginEntry{
+		Name:    "broken",
+		Command: "reasonix-missing-mcp-binary",
+		Tier:    "eager",
+	}, errors.New("connect: missing binary"))
+
+	view := app.Capabilities()
+	for _, s := range view.Servers {
+		if s.Name == "broken" {
+			if s.Status != "failed" {
+				t.Fatalf("server status = %q, want failed; server = %+v", s.Status, s)
+			}
+			if s.Tier != "eager" {
+				t.Fatalf("server tier = %q, want eager so failed UI preserves the configured selection", s.Tier)
+			}
+			if !s.Configured {
+				t.Fatalf("server configured = false, want true; server = %+v", s)
 			}
 			return
 		}

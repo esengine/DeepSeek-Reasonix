@@ -208,12 +208,12 @@ func (a *App) Cancel() {
 
 // Approve answers a pending approval_request by ID: allow runs the call, session
 // also remembers the grant for the rest of the session.
-func (a *App) Approve(id string, allow, session bool) {
+func (a *App) Approve(id string, allow, session, persist bool) {
 	a.mu.RLock()
 	ctrl := a.ctrl
 	a.mu.RUnlock()
 	if ctrl != nil {
-		ctrl.Approve(id, allow, session)
+		ctrl.Approve(id, allow, session, persist)
 	}
 }
 
@@ -1329,7 +1329,7 @@ func (a *App) UpdateMCPServer(name string, in MCPServerInput) error {
 	if !sessionDisabled && (wasConnected || wasFailed || updated.ResolvedTier() != "lazy") {
 		if _, err := a.ctrl.ConnectConfiguredMCPServer(name); err != nil {
 			recordMCPFailure(a.ctrl, updated, err)
-			return fmt.Errorf("saved config, but reconnect failed: %w", err)
+			return nil
 		}
 	}
 	return nil
@@ -2229,8 +2229,8 @@ func (a *App) NeedsOnboarding() bool {
 	return strings.TrimSpace(os.Getenv(onboardingKeyEnv)) == ""
 }
 
-// ConnectKey validates apiKey against the balance endpoint, persists it to
-// ./.env, and rebuilds the controller so the new key takes effect.
+// ConnectKey validates apiKey against the balance endpoint, persists it to the
+// global credentials file, and rebuilds the controller so the new key takes effect.
 func (a *App) ConnectKey(apiKey string) error {
 	apiKey = strings.TrimSpace(apiKey)
 	if apiKey == "" {

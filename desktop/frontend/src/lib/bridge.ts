@@ -43,7 +43,7 @@ export interface AppBindings {
   Submit(input: string): Promise<void>;
   SubmitDisplay(display: string, input: string): Promise<void>;
   Cancel(): Promise<void>;
-  Approve(id: string, allow: boolean, session: boolean): Promise<void>;
+  Approve(id: string, allow: boolean, session: boolean, persist: boolean): Promise<void>;
   AnswerQuestion(id: string, answers: QuestionAnswer[]): Promise<void>;
   SetPlanMode(on: boolean): Promise<void>;
   // SetMode applies plan/yolo/normal gating atomically (one IPC, no half-applied
@@ -516,12 +516,13 @@ function makeMockApp(): AppBindings {
       cancelled = true;
       emit({ kind: "turn_done" });
     },
-    async Approve(_id, allow, session) {
+    async Approve(_id, allow, session, persist) {
       if (!pendingApprovalPreview) return;
       pendingApprovalPreview = false;
+      const suffix = persist ? "persisted" : session ? "allowed for session" : "allowed once";
       emit({
         kind: "message",
-        text: `approval preview answered: ${allow ? (session ? "allowed for session" : "allowed once") : "denied"}`,
+        text: `approval preview answered: ${allow ? suffix : "denied"}`,
       });
       emit({ kind: "turn_done" });
     },
