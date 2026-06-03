@@ -579,7 +579,44 @@ func Load() (*Config, error) {
 	}
 	cfg.mergeMCPJSON(entries)
 	normalizeLegacyEffort(cfg)
+	backfillDeepSeekPro(cfg)
 	return cfg, nil
+}
+
+// backfillDeepSeekPro restores deepseek-pro for configs the pre-fix setup wizard
+// wrote with only deepseek-v4-flash: a keyless /models probe used to drop the Pro
+// SKU, leaving users unable to switch to it. In-memory only — the user's file is
+// untouched. Narrowly scoped to the official DeepSeek endpoint (which is known to
+// serve pro) so a custom flash-only deployment isn't given an entry that 404s.
+func backfillDeepSeekPro(c *Config) {
+	const flashModel, proModel = "deepseek-v4-flash", "deepseek-v4-pro"
+	var flash *ProviderEntry
+	for i := range c.Providers {
+		p := &c.Providers[i]
+		if p.Name == "deepseek-pro" {
+			return
+		}
+		for _, m := range p.ModelList() {
+			switch m {
+			case proModel:
+				return // pro already reachable
+			case flashModel:
+				if strings.Contains(p.BaseURL, "api.deepseek.com") {
+					flash = p
+				}
+			}
+		}
+	}
+	if flash == nil {
+		return
+	}
+	for _, bp := range Default().Providers {
+		if bp.Name == "deepseek-pro" {
+			bp.APIKeyEnv = flash.APIKeyEnv
+			c.Providers = append(c.Providers, bp)
+			return
+		}
+	}
 }
 
 // normalizeLegacyEffort migrates the retired DeepSeek effort="off" (the old
