@@ -221,6 +221,7 @@ func resolveImports(body, baseDir string, seen map[string]bool, depth int) strin
 		}
 		seen[abs] = true
 		lines[i] = resolveImports(strings.TrimSpace(string(b)), filepath.Dir(path), seen, depth+1)
+		delete(seen, abs)
 	}
 	return strings.Join(lines, "\n")
 }
