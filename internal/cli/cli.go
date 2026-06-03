@@ -368,15 +368,14 @@ func chatREPL(args []string) int {
 	// model (carrying the conversation). It must NOT touch the running model —
 	// runModelSubcommand performs the swap on the live copy. The same stable sink
 	// feeds the new controller, so events keep flowing to this TUI.
-	m.buildController = func(ref string, carry []provider.Message) (*control.Controller, error) {
+	m.buildController = func(ref string, carry []provider.Message, resumePath string) (*control.Controller, error) {
 		c, err := setupQuiet(ctx, ref, *maxSteps, false, sink)
 		if err != nil {
 			return nil, err
 		}
-		path := ""
-		if dir := c.SessionDir(); dir != "" {
-			path = agent.NewSessionPath(dir, c.Label())
-		}
+		// Keep the carried conversation in its existing file so the switch doesn't
+		// orphan a duplicate (#2807).
+		path := agent.ContinueSessionPath(resumePath, c.SessionDir(), c.Label())
 		if len(carry) > 0 {
 			c.Resume(&agent.Session{Messages: carry}, path)
 		} else if path != "" {

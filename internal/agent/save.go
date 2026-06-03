@@ -178,6 +178,21 @@ func previewSession(path string) (string, int) {
 	return first, turns
 }
 
+// ContinueSessionPath returns where a conversation carried into a rebuilt
+// controller (model switch, config change) should keep auto-saving: its existing
+// file when it has one, so the continued session stays a single file instead of
+// the old one being orphaned as an identical duplicate (#2807). A session with no
+// file yet gets a fresh path; "" when persistence is disabled.
+func ContinueSessionPath(prevPath, dir, model string) string {
+	if prevPath != "" {
+		return prevPath
+	}
+	if dir == "" {
+		return ""
+	}
+	return NewSessionPath(dir, model)
+}
+
 // NewSessionPath returns the path to use for a fresh session, namespaced by
 // the model so the filename hints at what the conversation was with. dir is
 // typically config.SessionDir().

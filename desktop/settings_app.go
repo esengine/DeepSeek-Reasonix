@@ -184,7 +184,9 @@ func (a *App) rebuild() error {
 		return nil
 	}
 	var carried []provider.Message
+	prevPath := ""
 	if a.ctrl != nil {
+		prevPath = a.ctrl.SessionPath()
 		_ = a.ctrl.Snapshot()
 		carried = a.ctrl.History()
 		a.ctrl.Close()
@@ -209,10 +211,7 @@ func (a *App) rebuild() error {
 	a.label = ctrl.Label()
 	a.startupErr = ""
 	ctrl.EnableInteractiveApproval()
-	path := ""
-	if dir := ctrl.SessionDir(); dir != "" {
-		path = agent.NewSessionPath(dir, ctrl.Label())
-	}
+	path := agent.ContinueSessionPath(prevPath, ctrl.SessionDir(), ctrl.Label())
 	if len(carried) > 0 {
 		carried = withFreshSystemPrompt(carried, systemPromptFrom(ctrl.History()))
 		ctrl.Resume(&agent.Session{Messages: carried}, path)

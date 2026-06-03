@@ -34,6 +34,7 @@ func (m *chatTUI) runModelSubcommand(input string) {
 		return
 	}
 	carried := m.ctrl.History()
+	prevPath := m.ctrl.SessionPath()
 	if err := m.ctrl.Snapshot(); err != nil {
 		slog.Warn("model switch: snapshot failed", "err", err)
 	}
@@ -51,7 +52,7 @@ func (m *chatTUI) runModelSubcommand(input string) {
 	// must happen here, before we hand the new controller back.
 	m.modelSwitchPending = true
 	m.pendingModelSwitch = func() tea.Msg {
-		c, err := build(ref, carried)
+		c, err := build(ref, carried, prevPath)
 		if err != nil {
 			return modelSwitchMsg{ref: ref, err: err}
 		}

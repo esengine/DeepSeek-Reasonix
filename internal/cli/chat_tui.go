@@ -207,10 +207,12 @@ type chatTUI struct {
 	skills []skill.Skill
 
 	// buildController builds a fresh controller on a model ref, carrying prior
-	// history across (set by chatREPL; it must NOT touch this model — the swap
-	// happens in runModelSubcommand on the running copy). nil disables /model.
-	// modelRef is the active "provider/model" ref, marked current in the picker.
-	buildController func(ref string, carry []provider.Message) (*control.Controller, error)
+	// history across and pinning auto-save to resumePath so the continued
+	// conversation stays in one file (set by chatREPL; it must NOT touch this
+	// model — the swap happens in runModelSubcommand on the running copy). nil
+	// disables /model. modelRef is the active "provider/model" ref, marked
+	// current in the picker.
+	buildController func(ref string, carry []provider.Message, resumePath string) (*control.Controller, error)
 	modelRef        string
 	effortLevel     string // "" when the current provider/model has no configurable effort
 

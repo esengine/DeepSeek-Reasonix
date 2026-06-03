@@ -1350,7 +1350,9 @@ func (a *App) SetModel(name string) error {
 	}
 
 	var carried []provider.Message
+	prevPath := ""
 	if ctrl != nil {
+		prevPath = ctrl.SessionPath()
 		_ = ctrl.Snapshot()
 		carried = ctrl.History()
 		ctrl.Close()
@@ -1367,12 +1369,10 @@ func (a *App) SetModel(name string) error {
 	a.mu.Unlock()
 	newCtrl.EnableInteractiveApproval()
 
-	path := ""
-	if dir := newCtrl.SessionDir(); dir != "" {
-		path = agent.NewSessionPath(dir, newCtrl.Label())
-	}
 	// Carry the prior conversation (full provider.Message log, incl. the system
-	// prompt) into the new session so history is preserved across the switch.
+	// prompt) into the new session so history is preserved across the switch, and
+	// keep it in its existing file so the switch doesn't orphan a duplicate (#2807).
+	path := agent.ContinueSessionPath(prevPath, newCtrl.SessionDir(), newCtrl.Label())
 	if len(carried) > 0 {
 		newCtrl.Resume(&agent.Session{Messages: carried}, path)
 	} else if path != "" {

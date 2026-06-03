@@ -79,6 +79,7 @@ func (m *chatTUI) runEffortCommand(input string) tea.Cmd {
 	}
 	m.notice(fmt.Sprintf("setting effort for %s to %s…", entry.Name, display))
 	carried := m.ctrl.History()
+	prevPath := m.ctrl.SessionPath()
 	if err := m.ctrl.Snapshot(); err != nil {
 		m.notice("effort: snapshot: " + err.Error())
 	}
@@ -86,7 +87,7 @@ func (m *chatTUI) runEffortCommand(input string) tea.Cmd {
 	build := m.buildController
 	m.modelSwitchPending = true
 	m.pendingModelSwitch = func() tea.Msg {
-		c, err := build(ref, carried)
+		c, err := build(ref, carried, prevPath)
 		if err != nil {
 			return modelSwitchMsg{ref: ref, err: err}
 		}

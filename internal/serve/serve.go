@@ -91,6 +91,7 @@ func (s *Server) switchModel(ctx context.Context, ref string) error {
 	if cur.Running() {
 		return fmt.Errorf("cannot switch model while a turn is running")
 	}
+	prevPath := cur.SessionPath()
 	if err := cur.Snapshot(); err != nil {
 		slog.Warn("serve: snapshot before model switch", "err", err)
 	}
@@ -104,10 +105,9 @@ func (s *Server) switchModel(ctx context.Context, ref string) error {
 	if err != nil {
 		return fmt.Errorf("switch model: %w", err)
 	}
-	newPath := ""
-	if dir := newCtrl.SessionDir(); dir != "" {
-		newPath = agent.NewSessionPath(dir, newCtrl.Label())
-	}
+	// Keep the carried conversation in its existing file so the switch doesn't
+	// orphan a duplicate (#2807).
+	newPath := agent.ContinueSessionPath(prevPath, newCtrl.SessionDir(), newCtrl.Label())
 	if len(carried) > 0 {
 		newCtrl.Resume(&agent.Session{Messages: carried}, newPath)
 	} else if newPath != "" {
