@@ -1,6 +1,7 @@
 package control
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -17,10 +18,14 @@ func explainError(err error) error {
 	}
 	var apiErr *provider.APIError
 	if errors.As(err, &apiErr) {
-		if msg := i18n.M.ProviderStatusMessage(apiErr.Status); msg != "" {
-			return errors.New(msg)
+		msg := i18n.M.ProviderStatusMessage(apiErr.Status)
+		if msg == "" {
+			return err
 		}
-		return err
+		if reason := requestErrorReason(apiErr); reason != "" {
+			return fmt.Errorf("%s\n%s", msg, reason)
+		}
+		return errors.New(msg)
 	}
 	var authErr *provider.AuthError
 	if errors.As(err, &authErr) {
@@ -34,4 +39,39 @@ func explainError(err error) error {
 		return errors.New(msg)
 	}
 	return err
+}
+
+// requestErrorReason returns the provider's verbatim reason for request-shaped
+// 4xx (400/422) — the localized line names the category, the body names the
+// actual cause (context-length exceeded, unpaired tool_calls). Empty otherwise.
+func requestErrorReason(e *provider.APIError) string {
+	if e.Status != 400 && e.Status != 422 {
+		return ""
+	}
+	return providerBodyReason(e.Body)
+}
+
+// providerBodyReason pulls the human reason from an OpenAI/Anthropic-shaped error
+// body ({"error":{"message":…}}), falling back to the trimmed raw body.
+func providerBodyReason(body string) string {
+	if body == "" {
+		return ""
+	}
+	var parsed struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if json.Unmarshal([]byte(body), &parsed) == nil && parsed.Error.Message != "" {
+		return clampRunes(parsed.Error.Message, 800)
+	}
+	return clampRunes(body, 800)
+}
+
+func clampRunes(s string, max int) string {
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max]) + "…"
 }
