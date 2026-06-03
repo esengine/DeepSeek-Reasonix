@@ -193,6 +193,11 @@ sources are merged; on a name collision `reasonix.toml` wins.
 }
 ```
 
+**Upgrading from `0.x`?** Your old `~/.reasonix/config.json` is still read for its
+`mcpServers` (honouring `mcpDisabled`) as a lowest-priority source, so MCP servers
+keep working — move them into `reasonix.toml`'s `[[plugins]]` or a `.mcp.json` when
+convenient.
+
 ### Slash commands
 
 In `reasonix chat`, built-in commands (`/compact`, `/new`, `/rewind`, `/tree`,

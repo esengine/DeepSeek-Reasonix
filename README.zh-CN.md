@@ -182,6 +182,10 @@ headers = { Authorization = "Bearer ${STRIPE_KEY}" }
 }
 ```
 
+**从 `0.x` 升级？** 旧的 `~/.reasonix/config.json` 仍会被读取(读其 `mcpServers`、并遵从
+`mcpDisabled`),作为最低优先级来源——所以 MCP 服务器照常可用;方便时再把它们挪进
+`reasonix.toml` 的 `[[plugins]]` 或 `.mcp.json`。
+
 ### 斜杠命令
 
 `reasonix chat` 里,内置命令(`/compact`、`/new`、`/rewind`、`/tree`、`/branch`、`/switch`、`/todo`、`/model`、`/effort`、`/mcp`、`/help`)在本地执行。

@@ -47,17 +47,62 @@ func loadMCPJSON(path string) ([]PluginEntry, error) {
 	if err := json.Unmarshal(b, &doc); err != nil {
 		return nil, fmt.Errorf("mcp config %s: %w", path, err)
 	}
-	names := make([]string, 0, len(doc.MCPServers))
-	for name := range doc.MCPServers {
-		names = append(names, name)
+	return specsToEntries(doc.MCPServers, nil), nil
+}
+
+// specsToEntries converts an mcpServers map to PluginEntry values, sorted by name
+// for a stable connection order. Names in skip are dropped (used for v0.x's
+// mcpDisabled list).
+func specsToEntries(specs map[string]mcpServerSpec, skip map[string]bool) []PluginEntry {
+	names := make([]string, 0, len(specs))
+	for name := range specs {
+		if !skip[name] {
+			names = append(names, name)
+		}
 	}
 	sort.Strings(names)
 	entries := make([]PluginEntry, 0, len(names))
 	for _, name := range names {
-		s := doc.MCPServers[name]
-		entries = append(entries, pluginEntryFromMCPSpec(name, s))
+		entries = append(entries, pluginEntryFromMCPSpec(name, specs[name]))
 	}
-	return entries, nil
+	return entries
+}
+
+// legacyConfigPath is the v0.x (TypeScript line) config file, ~/.reasonix/config.json.
+func legacyConfigPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".reasonix", "config.json")
+}
+
+// loadLegacyMCP reads the v0.x ~/.reasonix/config.json and returns its enabled
+// mcpServers as PluginEntry values (servers listed in its mcpDisabled are
+// skipped), so upgrading from v0.x keeps MCP servers working without rewriting
+// them as [[plugins]]. Absent or malformed → nil: a stale legacy file must never
+// block startup, and it is the lowest-priority source anyway (the v2 config and
+// .mcp.json win on a name collision — see Load).
+func loadLegacyMCP(path string) []PluginEntry {
+	if path == "" {
+		return nil
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var doc struct {
+		MCPServers  map[string]mcpServerSpec `json:"mcpServers"`
+		MCPDisabled []string                 `json:"mcpDisabled"`
+	}
+	if err := json.Unmarshal(b, &doc); err != nil {
+		return nil
+	}
+	disabled := make(map[string]bool, len(doc.MCPDisabled))
+	for _, n := range doc.MCPDisabled {
+		disabled[n] = true
+	}
+	return specsToEntries(doc.MCPServers, disabled)
 }
 
 func pluginEntryFromMCPSpec(name string, s mcpServerSpec) PluginEntry {

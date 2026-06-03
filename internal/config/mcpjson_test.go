@@ -298,3 +298,50 @@ Authorization = "Bearer ${TOML_TOKEN}"
 		t.Fatalf(".mcp.json collision entry should be left untouched:\n%s", mcpRaw)
 	}
 }
+
+func TestLoadLegacyMCP(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	doc := `{
+  "mcpServers": {
+    "github":  { "command": "npx", "args": ["-y", "server-github"], "env": { "TOKEN": "x" } },
+    "old":     { "command": "foo" },
+    "remote":  { "type": "sse", "url": "https://x/sse", "headers": { "Authorization": "Bearer y" } }
+  },
+  "mcpDisabled": ["old"],
+  "projects": { "/some/root": { "shellAllowed": [] } }
+}`
+	if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := loadLegacyMCP(path)
+	// "old" is in mcpDisabled and dropped; github + remote remain, name-sorted.
+	if len(got) != 2 {
+		t.Fatalf("got %d entries, want 2: %+v", len(got), got)
+	}
+	if got[0].Name != "github" || got[1].Name != "remote" {
+		t.Fatalf("names = %q, %q; want github, remote", got[0].Name, got[1].Name)
+	}
+	if got[0].Command != "npx" || got[0].Env["TOKEN"] != "x" {
+		t.Errorf("github mapped wrong: %+v", got[0])
+	}
+	if got[1].Type != "sse" || got[1].URL != "https://x/sse" || got[1].Headers["Authorization"] != "Bearer y" {
+		t.Errorf("remote mapped wrong: %+v", got[1])
+	}
+
+	// Absent, malformed, and empty paths must not error — just yield nil, so a
+	// stale legacy file can never block startup.
+	if got := loadLegacyMCP(filepath.Join(dir, "nope.json")); got != nil {
+		t.Errorf("absent file: got %+v, want nil", got)
+	}
+	if err := os.WriteFile(path, []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := loadLegacyMCP(path); got != nil {
+		t.Errorf("malformed file: got %+v, want nil", got)
+	}
+	if got := loadLegacyMCP(""); got != nil {
+		t.Errorf("empty path: got %+v, want nil", got)
+	}
+}
