@@ -56,3 +56,4 @@ homebrew_casks:
 
 release:
   prerelease: auto
+  name_template: "Reasonix CLI {{ .Tag }}"

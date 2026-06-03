@@ -131,8 +131,11 @@ jobs:
         id: ver
         run: |
           TAG="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
+          VERSION="${TAG#desktop-}"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "version=${TAG#desktop-}" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          # A version with a suffix (v1.0.0-rc1) is a prerelease.
+          case "$VERSION" in *-*) echo "prerelease=true" >> "$GITHUB_OUTPUT";; *) echo "prerelease=false" >> "$GITHUB_OUTPUT";; esac
 
       # Generate latest.json with GitHub release download URLs; the mirror step
       # rewrites them to R2 afterwards. GITHUB_REPOSITORY is provided by the runner.
@@ -144,9 +147,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ steps.ver.outputs.tag }}" dist/* \
-            --title "Reasonix Desktop ${{ steps.ver.outputs.tag }}" \
-            --generate-notes
+          args=(--title "Reasonix Desktop ${{ steps.ver.outputs.version }}" --generate-notes)
+          [ "${{ steps.ver.outputs.prerelease }}" = "true" ] && args+=(--prerelease)
+          gh release create "${{ steps.ver.outputs.tag }}" dist/* "${args[@]}"
 
   mirror:
     name: mirror to R2
@@ -162,6 +165,7 @@ jobs:
         run: |
           TAG="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          case "${TAG#desktop-}" in *-*) echo "prerelease=true" >> "$GITHUB_OUTPUT";; *) echo "prerelease=false" >> "$GITHUB_OUTPUT";; esac
 
       - name: Download release assets
         if: env.HAS_R2 == 'true'
@@ -205,4 +209,10 @@ jobs:
         run: |
           ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
           aws s3 cp assets/ "s3://${R2_BUCKET}/${TAG}/" --recursive --endpoint-url "$ENDPOINT"
-          aws s3 cp assets/ "s3://${R2_BUCKET}/latest/" --recursive --endpoint-url "$ENDPOINT"
+          # Prereleases publish to their own tag prefix but must not move the
+          # updater's latest/ pointer; stable releases do.
+          if [ "${{ steps.ver.outputs.prerelease }}" = "true" ]; then
+            echo "prerelease — leaving R2 latest/ untouched"
+          else
+            aws s3 cp assets/ "s3://${R2_BUCKET}/latest/" --recursive --endpoint-url "$ENDPOINT"
+          fi
