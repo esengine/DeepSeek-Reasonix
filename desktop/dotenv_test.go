@@ -10,12 +10,11 @@ import (
 // TestUpsertDotEnv proves a new key is appended, an existing key is replaced in
 // place, comments/other lines survive, and the process env is updated.
 func TestUpsertDotEnv(t *testing.T) {
+	// Point dotEnvPath at a temp directory so tests are hermetic.
 	dir := t.TempDir()
-	cwd, _ := os.Getwd()
-	if err := os.Chdir(dir); err != nil {
-		t.Fatal(err)
-	}
-	defer os.Chdir(cwd)
+	origPath := dotEnvPath
+	dotEnvPath = filepath.Join(dir, ".env")
+	defer func() { dotEnvPath = origPath }()
 
 	if err := os.WriteFile(dotEnvPath, []byte("# comment\nFOO=old\nBAR=keep\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -28,7 +27,7 @@ func TestUpsertDotEnv(t *testing.T) {
 		t.Fatalf("append: %v", err)
 	}
 
-	b, _ := os.ReadFile(filepath.Join(dir, dotEnvPath))
+	b, _ := os.ReadFile(dotEnvPath)
 	got := string(b)
 	for _, want := range []string{"# comment", "FOO=new", "BAR=keep", "BAZ=added"} {
 		if !strings.Contains(got, want) {
