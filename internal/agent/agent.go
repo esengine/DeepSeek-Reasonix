@@ -858,7 +858,15 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 		a.hooks.PostToolUse(ctx, call.Name, json.RawMessage(call.Arguments), result)
 	}
 	if err != nil {
-		body, truncMsg := truncateToolOutput(fmt.Sprintf("error: %v\n%s", err, result))
+		detail := result
+		// Malformed-args failures are a transient model JSON glitch (e.g. options
+		// written as ["a":"b"] → "invalid character ':' after array element"). The
+		// args can't be safely re-parsed, but echoing the tool's schema makes the
+		// retry land valid instead of repeating the same broken shape.
+		if !json.Valid([]byte(call.Arguments)) {
+			detail = strings.TrimRight(detail, "\n") + "\nThe arguments were not valid JSON. Re-emit them exactly per this schema:\n" + string(t.Schema())
+		}
+		body, truncMsg := truncateToolOutput(fmt.Sprintf("error: %v\n%s", err, detail))
 		return toolOutcome{output: body, errMsg: firstLine(err.Error()), truncated: truncMsg != "", truncMsg: truncMsg}
 	}
 	// A foreground `task` sub-agent just finished — its result is the final answer.
