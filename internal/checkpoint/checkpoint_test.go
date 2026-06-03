@@ -276,3 +276,24 @@ func BenchmarkRestoreGB18030Encoding(b *testing.B) {
 		}
 	}
 }
+
+func TestLazyDirectoryCreation(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(t.TempDir(), "lazy-sess.ckpt")
+
+	s := New(dir, root)
+
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("directory should not exist yet: %v", err)
+	}
+
+	s.Begin(0, "lazy", 0)
+
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("directory should now exist: %v", err)
+	}
+	turnPath := filepath.Join(dir, "turn-0.json")
+	if _, err := os.Stat(turnPath); err != nil {
+		t.Fatalf("turn file should now exist: %v", err)
+	}
+}

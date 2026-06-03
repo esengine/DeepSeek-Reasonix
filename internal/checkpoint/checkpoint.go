@@ -72,9 +72,6 @@ type Store struct {
 func New(dir, root string) *Store {
 	s := &Store{dir: dir, root: root, seen: map[string]bool{}}
 	if dir != "" {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			slog.Warn("checkpoint: create dir failed, persistence disabled", "dir", dir, "err", err)
-		}
 		s.load()
 	}
 	return s
@@ -176,6 +173,10 @@ func (s *Store) persist(c *Checkpoint) {
 	}
 	b, err := json.Marshal(c)
 	if err != nil {
+		return
+	}
+	if err := os.MkdirAll(s.dir, 0o755); err != nil {
+		slog.Warn("checkpoint: create dir failed", "dir", s.dir, "err", err)
 		return
 	}
 	if err := os.WriteFile(filepath.Join(s.dir, fmt.Sprintf("turn-%d.json", c.Turn)), b, 0o644); err != nil {
