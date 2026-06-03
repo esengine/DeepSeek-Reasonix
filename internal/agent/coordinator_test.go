@@ -52,7 +52,7 @@ func TestCoordinatorHandsPlanToExecutor(t *testing.T) {
 
 	executor := New(exec, tool.NewRegistry(), NewSession("exec-sys"), Options{}, event.Discard)
 	plannerSess := NewSession("planner-sys")
-	coord := NewCoordinator(planner, plannerSess, nil, executor, 0, event.Discard)
+	coord := NewCoordinator(planner, plannerSess, nil, executor, 0, event.Discard, nil)
 
 	if err := coord.Run(context.Background(), "fix the bug"); err != nil {
 		t.Fatalf("Run: %v", err)
@@ -68,5 +68,34 @@ func TestCoordinatorHandsPlanToExecutor(t *testing.T) {
 	// prefix grows prepend-only and stays cache-stable.
 	if n := len(plannerSess.Messages); n != 3 {
 		t.Errorf("planner session has %d messages, want 3", n)
+	}
+}
+
+// TestCoordinatorSkipsPlannerForTrivialTurn checks the gate: when shouldPlan
+// rejects the turn, the planner is never called and the executor gets the raw
+// input (no plan handoff).
+func TestCoordinatorSkipsPlannerForTrivialTurn(t *testing.T) {
+	planner := &mockProvider{name: "planner"}
+	exec := &mockProvider{name: "executor", chunks: []provider.Chunk{
+		{Type: provider.ChunkText, Text: "It does X."},
+		{Type: provider.ChunkDone},
+	}}
+
+	executor := New(exec, tool.NewRegistry(), NewSession("exec-sys"), Options{}, event.Discard)
+	plannerSess := NewSession("planner-sys")
+	coord := NewCoordinator(planner, plannerSess, nil, executor, 0, event.Discard, func(string) bool { return false })
+
+	if err := coord.Run(context.Background(), "what does this function do?"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if planner.lastReq.Messages != nil {
+		t.Error("planner should not be called for a skipped turn")
+	}
+	if got := lastUser(exec.lastReq); got != "what does this function do?" {
+		t.Errorf("executor saw %q, want the raw input with no plan handoff", got)
+	}
+	if n := len(plannerSess.Messages); n != 1 { // just the system message
+		t.Errorf("planner session has %d messages, want 1 (untouched)", n)
 	}
 }

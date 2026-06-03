@@ -33,13 +33,17 @@ type Coordinator struct {
 	executor       *Agent
 	temperature    float64
 	sink           event.Sink
+	// shouldPlan gates the planner pass per turn; nil plans every turn. Lets a
+	// trivial, non-work turn (a question, a greeting) skip straight to the
+	// executor instead of paying a planner round on it.
+	shouldPlan func(string) bool
 }
 
 // NewCoordinator wires a planner provider (with its own session) to an executor.
 // sink receives the planner's phase/text/usage events; the executor emits its
 // own events to its own sink (the CLI wires the same sink into both). A nil
 // sink is replaced with event.Discard.
-func NewCoordinator(planner provider.Provider, plannerSession *Session, plannerPricing *provider.Pricing, executor *Agent, temperature float64, sink event.Sink) *Coordinator {
+func NewCoordinator(planner provider.Provider, plannerSession *Session, plannerPricing *provider.Pricing, executor *Agent, temperature float64, sink event.Sink, shouldPlan func(string) bool) *Coordinator {
 	if nilutil.IsNil(sink) {
 		sink = event.Discard
 	}
@@ -50,12 +54,17 @@ func NewCoordinator(planner provider.Provider, plannerSession *Session, plannerP
 		executor:       executor,
 		temperature:    temperature,
 		sink:           sink,
+		shouldPlan:     shouldPlan,
 	}
 }
 
 // Run plans with the planner model, then hands the plan to the executor.
 func (c *Coordinator) Run(ctx context.Context, input string) error {
 	c.sink.Emit(event.Event{Kind: event.TurnStarted})
+	if c.shouldPlan != nil && !c.shouldPlan(input) {
+		c.sink.Emit(event.Event{Kind: event.Phase, Text: c.executor.prov.Name() + " · executing"})
+		return c.executor.Run(ctx, input)
+	}
 	c.sink.Emit(event.Event{Kind: event.Phase, Text: c.planner.Name() + " · planning"})
 	plan, err := c.plan(ctx, input)
 	if err != nil {

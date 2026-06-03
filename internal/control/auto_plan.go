@@ -71,6 +71,18 @@ func (c *Controller) shouldAutoPlan(ctx context.Context, input string) bool {
 	return score >= 2
 }
 
+// TaskWarrantsPlanner reports whether a task turn is worth a planner pass in
+// two-model mode. Empty input, slash commands, and low-risk informational asks
+// (explain / show / what / why / 解释 / 查一下 …) skip straight to the executor;
+// anything that reads like a work request — even a terse one — still gets planned.
+func TaskWarrantsPlanner(input string) bool {
+	text := strings.TrimSpace(input)
+	if text == "" || strings.HasPrefix(text, "/") || strings.HasPrefix(text, PlanModeMarker) {
+		return false
+	}
+	return !isLowRiskQuestion(strings.ToLower(text))
+}
+
 func autoPlanScore(input string) int {
 	text := strings.TrimSpace(input)
 	if text == "" || strings.HasPrefix(text, "/") || strings.HasPrefix(text, PlanModeMarker) {
