@@ -103,6 +103,7 @@ export function Composer({
   onPickFolder,
   insertRequest,
   disabled,
+  ready,
 }: {
   running: boolean;
   mode: Mode;
@@ -115,6 +116,10 @@ export function Composer({
   onPickFolder: (path?: string) => Promise<string>;
   insertRequest?: ComposerInsertRequest | null;
   disabled?: boolean;
+  // ready/cwd re-trigger the command fetch: Commands() returns only built-ins
+  // until boot.Build finishes (the controller, hence skills/custom/MCP, is nil
+  // before then), and the available set changes when the workspace switches.
+  ready?: boolean;
 }) {
   const t = useT();
   const [text, setText] = useState("");
@@ -156,7 +161,7 @@ export function Composer({
   const [commands, setCommands] = useState<CommandInfo[]>([]);
   useEffect(() => {
     app.Commands().then(setCommands).catch(() => {});
-  }, []);
+  }, [ready, cwd]);
 
   const slashQuery = useMemo(() => {
     if (!text.startsWith("/") || /\s/.test(text)) return null;
@@ -241,7 +246,7 @@ export function Composer({
     // re-fetch only when the menu opens or the directory level changes
   }, [atRaw === null, atDir]);
   const atMatches = useMemo(
-    () => (atRaw === null ? [] : entries.filter((e) => e.name.toLowerCase().includes(atFrag))),
+    () => (atRaw === null ? [] : entries.filter((e) => e.name.toLowerCase().includes(atFrag)).slice(0, 10)),
     [atRaw, atFrag, entries],
   );
 
@@ -775,9 +780,11 @@ export function Composer({
                       <Eye size={14} />
                     </button>
                   </Tooltip>
-                  <button type="button" onClick={() => expandPastedBlock(block)}>
-                    {t("composer.pastedExpand")}
-                  </button>
+                  <Tooltip label={t("composer.pastedExpand")}>
+                    <button type="button" onClick={() => expandPastedBlock(block)}>
+                      {t("composer.pastedExpand")}
+                    </button>
+                  </Tooltip>
                   <Tooltip label={t("composer.pastedRemove")}>
                     <button type="button" onClick={() => removePastedBlock(block)}>
                       <Trash2 size={14} />
@@ -865,14 +872,16 @@ export function Composer({
               </Tooltip>
             </div>
           )}
-          <button
-            className={`composer__mode composer__mode--${mode}`}
-            onClick={onCycleMode}
-          >
-            <span className="composer__mode-dot" />
-            {mode === "yolo" ? t("composer.modeYolo") : mode === "plan" ? t("composer.modePlan") : t("composer.modeNormal")}
-            <span className="composer__mode-hint">{t("composer.modeHint")}</span>
-          </button>
+          <Tooltip label={t("composer.modeTitle")}>
+            <button
+              className={`composer__mode composer__mode--${mode}`}
+              onClick={onCycleMode}
+            >
+              <span className="composer__mode-dot" />
+              {mode === "yolo" ? t("composer.modeYolo") : mode === "plan" ? t("composer.modePlan") : t("composer.modeNormal")}
+              <span className="composer__mode-hint">{t("composer.modeHint")}</span>
+            </button>
+          </Tooltip>
         </div>
       </div>
     </div>

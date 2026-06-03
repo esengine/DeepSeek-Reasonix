@@ -960,6 +960,7 @@ export default function App() {
               onPickFolder={switchFolder}
               insertRequest={composerInsertRequest}
               disabled={state.meta?.ready === false || state.approval != null || state.ask != null}
+              ready={state.meta?.ready === true}
             />
             <StatusBar
               meta={state.meta}
