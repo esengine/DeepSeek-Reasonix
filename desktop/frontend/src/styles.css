@@ -330,10 +330,6 @@ body {
   height: 24px;
   border-radius: 7px;
 }
-.sidebar__brand .tooltip-trigger:not(.tooltip-trigger--fill):not(.tooltip-trigger--block) {
-  margin-left: auto;
-}
-
 .sidebar__toggle {
   --wails-draggable: no-drag;
   margin-left: auto;
@@ -640,12 +636,20 @@ body {
 .sidebar--collapsed .sidebar__brand > span {
   display: none;
 }
-.sidebar--collapsed .sidebar__brand .tooltip-trigger:not(.tooltip-trigger--fill):not(.tooltip-trigger--block) {
-  margin-left: 0;
-}
-
 .sidebar--collapsed .sidebar__toggle {
   margin-left: 0;
+  /* Make the toggle button visible in collapsed mode &mdash; without a
+     background the 28&times;28 icon is nearly invisible against the dark
+     sidebar background at var(--fg-faint) opacity. */
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--fg-dim);
+}
+.sidebar--collapsed .sidebar__toggle:hover {
+  color: var(--fg);
+  background: var(--sidebar-hover);
+  border-color: var(--fg-faint);
 }
 .sidebar--collapsed .sidebar__new,
 .sidebar--collapsed .sidebar__navitem {
