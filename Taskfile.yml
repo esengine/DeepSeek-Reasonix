@@ -1,0 +1,96 @@
+version: '3'
+
+vars:
+  VERSION:
+    sh: git describe --tags --always 2>/dev/null || echo dev
+  LDFLAGS: '-s -w -X main.version={{.VERSION}}'
+  EXE_EXT:
+    sh: go env GOEXE
+  # CodeGraph release pinned for the bundled MCP server / e2e test. Bump
+  # together with any change to the integration in internal/codegraph.
+  CODEGRAPH_VERSION: v0.9.7
+
+tasks:
+  default:
+    desc: Build reasonix and the plugin example (default task)
+    cmds:
+      - task: build
+
+  build:
+    desc: Build reasonix and the plugin example
+    cmds:
+      - CGO_ENABLED=0 go build -ldflags '{{.LDFLAGS}}' -o bin/reasonix{{.EXE_EXT}} ./cmd/reasonix
+      - CGO_ENABLED=0 go build -ldflags '{{.LDFLAGS}}' -o bin/reasonix-plugin-example{{.EXE_EXT}} ./cmd/reasonix-plugin-example
+
+  install:
+    desc: Install reasonix via go install
+    cmds:
+      - CGO_ENABLED=0 go install -ldflags '{{.LDFLAGS}}' ./cmd/reasonix
+
+  vet:
+    desc: Run go vet ./...
+    cmds:
+      - go vet ./...
+
+  fmt:
+    desc: Format Go source code with gofmt
+    cmds:
+      - gofmt -w .
+
+  test:
+    desc: Run all tests (go test ./...)
+    cmds:
+      - go test ./...
+
+  hooks:
+    desc: Install git hooks (core.hooksPath -> .githooks)
+    cmds:
+      - 'git config core.hooksPath .githooks'
+      - 'echo "installed: core.hooksPath -> .githooks (pre-push runs go vet)"'
+    silent: true
+
+  cross:
+    desc: Cross-compile for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64, windows/arm64
+    cmds:
+      - |
+        mkdir -p dist
+        for p in darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64 windows/arm64; do
+          os=${p%/*}
+          arch=${p#*/}
+          ext=
+          [ "$os" = "windows" ] && ext=.exe
+          echo "build $os/$arch"
+          CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -ldflags '{{.LDFLAGS}}' -o dist/reasonix-$os-$arch$ext ./cmd/reasonix
+        done
+    silent: true
+
+  clean:
+    desc: Remove build output (bin/ dist/)
+    cmds:
+      - rm -rf bin dist
+
+  # Fetch the matching CodeGraph bundle into bin/codegraph/ (the distribution
+  # layout: launcher at bin/codegraph/bin/codegraph beside bin/reasonix) and
+  # run the gated MCP end-to-end test against it. Requires `gh`. Windows:
+  # install via the upstream install.ps1 and run the test with
+  # REASONIX_CODEGRAPH_BIN set.
+  e2e-codegraph:
+    desc: Fetch pinned CodeGraph release and run gated MCP e2e test
+    cmds:
+      - |
+        os=$(uname -s | tr 'A-Z' 'a-z')
+        arch=$(uname -m)
+        case $arch in
+          arm64|aarch64) arch=arm64 ;;
+          x86_64|amd64) arch=x64 ;;
+          *) echo "unsupported arch $arch"; exit 1 ;;
+        esac
+        asset=codegraph-$os-$arch.tar.gz
+        dest=bin/codegraph
+        echo "fetching $asset ({{.CODEGRAPH_VERSION}}) -> $dest"
+        rm -rf "$dest" && mkdir -p "$dest"
+        gh release download {{.CODEGRAPH_VERSION}} -R colbymchenry/codegraph -p "$asset" -O /tmp/$asset
+        tar -xzf /tmp/$asset -C "$dest" --strip-components=1
+        REASONIX_CODEGRAPH_E2E=1 REASONIX_CODEGRAPH_BIN=$PWD/$dest/bin/codegraph \
+          go test ./internal/codegraph/ -run E2E -v -count=1
+    silent: true
