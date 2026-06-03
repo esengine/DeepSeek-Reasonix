@@ -44,15 +44,15 @@ type Shell struct {
 // is usually absent from PATH, it probes the Git-for-Windows install locations
 // and only then falls back to PowerShell so the tool still functions.
 func ResolveShell() Shell {
-	return resolveShell(runtime.GOOS, exec.LookPath, fileExists, windowsBashCandidates(), probeBash)
+	return resolveShell(runtime.GOOS, exec.LookPath, fileExists, windowsBashCandidates(), probeBash, isWindowsWSLBash)
 }
 
 // resolveShell is ResolveShell with its environment lookups injected — including
 // the Git-for-Windows bash candidates, which derive from %ProgramFiles% and so
 // are empty off Windows — so the decision table is deterministically testable on
 // any host.
-func resolveShell(goos string, lookPath func(string) (string, error), exists func(string) bool, winBashCandidates []string, probe func(string) bool) Shell {
-	if p, err := lookPath("bash"); err == nil && probe(p) {
+func resolveShell(goos string, lookPath func(string) (string, error), exists func(string) bool, winBashCandidates []string, probe func(string) bool, isWSL func(string) bool) Shell {
+	if p, err := lookPath("bash"); err == nil && !isWSL(p) && probe(p) {
 		return Shell{Kind: ShellBash, Path: p}
 	}
 	if goos == "windows" {
@@ -68,6 +68,27 @@ func resolveShell(goos string, lookPath func(string) (string, error), exists fun
 		}
 	}
 	return Shell{Kind: ShellBash, Path: "bash"}
+}
+
+// isWindowsWSLBash reports whether a resolved bash path is the WSL launcher
+// Windows ships under %SystemRoot% (e.g. C:\Windows\System32\bash.exe). With WSL
+// installed it runs commands inside the Linux VM — where the Windows workspace is
+// a /mnt/<drive> path — so it must never be chosen for a native Windows workspace;
+// the only bash.exe Microsoft places under the Windows dir is that launcher.
+func isWindowsWSLBash(path string) bool {
+	if runtime.GOOS != "windows" || path == "" {
+		return false
+	}
+	win := os.Getenv("SystemRoot")
+	if win == "" {
+		win = os.Getenv("windir")
+	}
+	if win == "" {
+		return false
+	}
+	p := strings.ToLower(filepath.Clean(path))
+	root := strings.ToLower(filepath.Clean(win)) + string(filepath.Separator)
+	return strings.HasPrefix(p, root)
 }
 
 // Windows ships a bash.exe launcher stub in %SystemRoot% that opens the WSL

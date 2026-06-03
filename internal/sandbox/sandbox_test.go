@@ -98,6 +98,9 @@ func TestResolveShellDecisionTable(t *testing.T) {
 	gitBash := []string{`C:\fake\Git\bin\bash.exe`}
 	always := func(string) bool { return true }
 	never := func(string) bool { return false }
+	// onPath("bash") returns C:\fake\bash.exe; treat exactly that as the WSL
+	// launcher so the exclusion is exercised without matching the Git candidate.
+	wslIsPathBash := func(p string) bool { return p == `C:\fake\bash.exe` }
 	cases := []struct {
 		name       string
 		goos       string
@@ -105,22 +108,48 @@ func TestResolveShellDecisionTable(t *testing.T) {
 		candidates []string
 		exists     func(string) bool
 		probe      func(string) bool
+		isWSL      func(string) bool
 		wantKind   ShellKind
+		wantPath   string
 	}{
-		{"bash on PATH wins", "windows", onPath("bash", "powershell"), gitBash, never, always, ShellBash},
-		{"bash on PATH but probe fails", "windows", onPath("bash", "powershell"), gitBash, never, never, ShellPowerShell},
-		{"no bash, git-bash on disk", "windows", onPath("powershell"), gitBash, always, always, ShellBash},
-		{"git-bash on disk but probe fails", "windows", onPath("powershell"), gitBash, always, never, ShellPowerShell},
-		{"no bash anywhere, pwsh", "windows", onPath("pwsh", "powershell"), gitBash, never, never, ShellPowerShell},
-		{"no bash, only powershell", "windows", onPath("powershell"), gitBash, never, never, ShellPowerShell},
-		{"windows, nothing found", "windows", onPath(), nil, never, never, ShellBash},
-		{"linux, no bash → no PS fallback", "linux", onPath("powershell"), gitBash, always, always, ShellBash},
+		{"bash on PATH wins", "windows", onPath("bash", "powershell"), gitBash, never, always, never, ShellBash, `C:\fake\bash.exe`},
+		{"bash on PATH but probe fails", "windows", onPath("bash", "powershell"), gitBash, never, never, never, ShellPowerShell, ""},
+		{"no bash, git-bash on disk", "windows", onPath("powershell"), gitBash, always, always, never, ShellBash, ""},
+		{"git-bash on disk but probe fails", "windows", onPath("powershell"), gitBash, always, never, never, ShellPowerShell, ""},
+		{"no bash anywhere, pwsh", "windows", onPath("pwsh", "powershell"), gitBash, never, never, never, ShellPowerShell, ""},
+		{"no bash, only powershell", "windows", onPath("powershell"), gitBash, never, never, never, ShellPowerShell, ""},
+		{"windows, nothing found", "windows", onPath(), nil, never, never, never, ShellBash, ""},
+		{"linux, no bash → no PS fallback", "linux", onPath("powershell"), gitBash, always, always, never, ShellBash, ""},
+		{"wsl bash on PATH skipped for git-bash", "windows", onPath("bash", "powershell"), gitBash, always, always, wslIsPathBash, ShellBash, `C:\fake\Git\bin\bash.exe`},
+		{"wsl bash on PATH, no git → powershell not wsl", "windows", onPath("bash", "powershell"), gitBash, never, always, wslIsPathBash, ShellPowerShell, ""},
 	}
 	for _, c := range cases {
-		got := resolveShell(c.goos, c.lookPath, c.exists, c.candidates, c.probe)
+		got := resolveShell(c.goos, c.lookPath, c.exists, c.candidates, c.probe, c.isWSL)
 		if got.Kind != c.wantKind {
 			t.Errorf("%s: kind = %s, want %s (path=%s)", c.name, got.Kind, c.wantKind, got.Path)
 		}
+		if c.wantPath != "" && got.Path != c.wantPath {
+			t.Errorf("%s: path = %q, want %q", c.name, got.Path, c.wantPath)
+		}
+	}
+}
+
+func TestIsWindowsWSLBash(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows-only path detection")
+	}
+	t.Setenv("SystemRoot", `C:\Windows`)
+	if !isWindowsWSLBash(`C:\Windows\System32\bash.exe`) {
+		t.Error("System32 bash launcher should be detected as WSL")
+	}
+	if !isWindowsWSLBash(`c:\windows\system32\BASH.EXE`) {
+		t.Error("detection should be case-insensitive")
+	}
+	if isWindowsWSLBash(`C:\Program Files\Git\bin\bash.exe`) {
+		t.Error("Git-for-Windows bash must not be flagged as WSL")
+	}
+	if isWindowsWSLBash("") {
+		t.Error("empty path is not WSL")
 	}
 }
 
