@@ -7,6 +7,8 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/BurntSushi/toml"
+
 	"reasonix/internal/fileutil"
 	"reasonix/internal/mcpdiag"
 	"reasonix/internal/netclient"
@@ -501,10 +503,12 @@ func validatePlugin(e PluginEntry) error {
 	return nil
 }
 
-// SaveTo writes the configuration to path as annotated TOML, atomically: it
-// writes a sibling temp file then renames, so a crash mid-write can't leave a
-// half-written reasonix.toml that fails to parse on next load. Parent directories
-// are created as needed.
+// SaveTo writes the configuration to path as TOML, atomically: it writes a
+// sibling temp file then renames, so a crash mid-write can't leave a
+// half-written reasonix.toml that fails to parse on next load. When the file
+// already exists, the in-memory config is marshalled via toml.Marshal to
+// preserve all sections (including those not handled by RenderTOML). First-run
+// scaffolding uses RenderTOML for the commented house style.
 func (c *Config) SaveTo(path string) error {
 	return c.SaveToScope(path, renderScopeForPath(path))
 }
@@ -542,6 +546,18 @@ func writeConfigFile(path, body string) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("save: create dir: %w", err)
 	}
+
+	var body string
+	if _, err := os.Stat(path); err == nil {
+		b, err := toml.Marshal(c)
+		if err != nil {
+			return fmt.Errorf("save: marshal: %w", err)
+		}
+		body = string(append([]byte("# Reasonix configuration.\n"), b...))
+	} else {
+		body = RenderTOML(c)
+	}
+
 	tmp, err := os.CreateTemp(dir, ".reasonix.*.toml.tmp")
 	if err != nil {
 		return fmt.Errorf("save: create temp: %w", err)
