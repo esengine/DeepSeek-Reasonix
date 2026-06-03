@@ -8,7 +8,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -27,16 +26,18 @@ const (
 
 // ProxySpec is the resolved proxy configuration used by network clients. URL is
 // an advanced override; otherwise Type/Server/Port/Credentials are composed into a
-// proxy URL. NoProxy is honored for custom proxies.
+// proxy URL. NoProxy is honored for custom proxies. DirectHosts always bypass the
+// proxy in every mode (the caller derives them, e.g. from no_proxy providers).
 type ProxySpec struct {
-	Mode     string
-	URL      string
-	NoProxy  string
-	Type     string
-	Server   string
-	Port     int
-	Username string
-	Password string
+	Mode        string
+	URL         string
+	NoProxy     string
+	Type        string
+	Server      string
+	Port        int
+	Username    string
+	Password    string
+	DirectHosts []string
 }
 
 // TransportOptions lets callers keep their existing network timeouts while
@@ -128,6 +129,14 @@ func defaultTransport() *http.Transport {
 }
 
 func proxyFunc(spec ProxySpec) (func(*http.Request) (*url.URL, error), error) {
+	base, err := baseProxyFunc(spec)
+	if err != nil {
+		return nil, err
+	}
+	return withDirectHosts(base, spec.DirectHosts), nil
+}
+
+func baseProxyFunc(spec ProxySpec) (func(*http.Request) (*url.URL, error), error) {
 	switch NormalizeMode(spec.Mode) {
 	case ModeOff:
 		return nil, nil
@@ -144,40 +153,35 @@ func proxyFunc(spec ProxySpec) (func(*http.Request) (*url.URL, error), error) {
 		pf := cfg.ProxyFunc()
 		return func(req *http.Request) (*url.URL, error) { return pf(req.URL) }, nil
 	case ModeEnv:
-		return withCNProviderDirect(environmentProxyFunc()), nil
+		return environmentProxyFunc(), nil
 	default:
-		return withCNProviderDirect(autoProxyFunc()), nil
+		return autoProxyFunc(), nil
 	}
 }
 
-// withCNProviderDirect routes the built-in China-only provider endpoints straight
-// to origin in the automatic proxy modes. Clash/v2ray-style proxies route these
-// CN hosts through a foreign exit the origin resets mid-TLS (SSL_ERROR_SYSCALL,
-// #2803); the env/system proxy still applies to every other host. Opt out with
-// REASONIX_PROXY_CN_DIRECT=0 when egress is only reachable via the proxy.
-func withCNProviderDirect(pf func(*http.Request) (*url.URL, error)) func(*http.Request) (*url.URL, error) {
-	if !cnProviderDirectEnabled() {
+// withDirectHosts makes the listed hosts (and their subdomains) bypass the proxy
+// in every mode. The caller decides which hosts are direct — netclient stays
+// provider-agnostic. A China-only endpoint reached through a foreign-exit proxy
+// resets the TLS handshake (SSL_ERROR_SYSCALL, #2803), so its provider marks it.
+func withDirectHosts(pf func(*http.Request) (*url.URL, error), hosts []string) func(*http.Request) (*url.URL, error) {
+	if pf == nil || len(hosts) == 0 {
 		return pf
 	}
+	norm := make([]string, 0, len(hosts))
+	for _, h := range hosts {
+		if h = strings.ToLower(strings.TrimSpace(h)); h != "" {
+			norm = append(norm, h)
+		}
+	}
 	return func(req *http.Request) (*url.URL, error) {
-		if builtinCNProviderHost(req.URL.Hostname()) {
-			return nil, nil
+		host := strings.ToLower(req.URL.Hostname())
+		for _, h := range norm {
+			if host == h || strings.HasSuffix(host, "."+h) {
+				return nil, nil
+			}
 		}
 		return pf(req)
 	}
-}
-
-func cnProviderDirectEnabled() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("REASONIX_PROXY_CN_DIRECT"))) {
-	case "0", "false", "no", "off":
-		return false
-	}
-	return true
-}
-
-func builtinCNProviderHost(host string) bool {
-	host = strings.ToLower(host)
-	return host == "xiaomimimo.com" || strings.HasSuffix(host, ".xiaomimimo.com")
 }
 
 func environmentProxyFunc() func(*http.Request) (*url.URL, error) {

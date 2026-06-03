@@ -7,6 +7,7 @@ package config
 import (
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -140,15 +141,37 @@ type NetworkProxyConfig struct {
 // NetworkProxySpec returns the expanded proxy settings used by netclient.
 func (c *Config) NetworkProxySpec() netclient.ProxySpec {
 	return netclient.ProxySpec{
-		Mode:     c.Network.ProxyMode,
-		URL:      ExpandVars(c.Network.ProxyURL),
-		NoProxy:  ExpandVars(c.Network.NoProxy),
-		Type:     c.Network.Proxy.Type,
-		Server:   ExpandVars(c.Network.Proxy.Server),
-		Port:     c.Network.Proxy.Port,
-		Username: ExpandVars(c.Network.Proxy.Username),
-		Password: ExpandVars(c.Network.Proxy.Password),
+		Mode:        c.Network.ProxyMode,
+		URL:         ExpandVars(c.Network.ProxyURL),
+		NoProxy:     ExpandVars(c.Network.NoProxy),
+		Type:        c.Network.Proxy.Type,
+		Server:      ExpandVars(c.Network.Proxy.Server),
+		Port:        c.Network.Proxy.Port,
+		Username:    ExpandVars(c.Network.Proxy.Username),
+		Password:    ExpandVars(c.Network.Proxy.Password),
+		DirectHosts: c.directProxyHosts(),
 	}
+}
+
+// directProxyHosts collects the base_url hosts of providers marked no_proxy, so
+// netclient bypasses the proxy for them without knowing any provider by name.
+func (c *Config) directProxyHosts() []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, p := range c.Providers {
+		if !p.NoProxy {
+			continue
+		}
+		u, err := url.Parse(strings.TrimSpace(p.BaseURL))
+		if err != nil {
+			continue
+		}
+		if h := u.Hostname(); h != "" && !seen[h] {
+			seen[h] = true
+			out = append(out, h)
+		}
+	}
+	return out
 }
 
 // NetworkProxyMode normalizes network.proxy_mode to a known value.
@@ -277,6 +300,9 @@ type ProviderEntry struct {
 	// Empty = provider default.
 	Thinking string `toml:"thinking"`
 	Effort   string `toml:"effort"`
+	// NoProxy reaches this provider's base_url directly, never through the proxy.
+	// For China-only endpoints a foreign-exit proxy resets the TLS handshake (#2803).
+	NoProxy bool `toml:"no_proxy"`
 }
 
 // ModelList returns the models this provider exposes: the explicit `models` list,
@@ -457,8 +483,8 @@ func Default() *Config {
 		Providers: []ProviderEntry{
 			{Name: "deepseek-flash", Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash", APIKeyEnv: "DEEPSEEK_API_KEY", BalanceURL: "https://api.deepseek.com/user/balance", ContextWindow: 1_000_000, Price: &provider.Pricing{CacheHit: 0.02, Input: 1, Output: 2, Currency: "¥"}},
 			{Name: "deepseek-pro", Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro", APIKeyEnv: "DEEPSEEK_API_KEY", BalanceURL: "https://api.deepseek.com/user/balance", ContextWindow: 1_000_000, Price: &provider.Pricing{CacheHit: 0.025, Input: 3, Output: 6, Currency: "¥"}},
-			{Name: "mimo-pro", Kind: "openai", BaseURL: "https://token-plan-cn.xiaomimimo.com/v1", Model: "mimo-v2.5-pro", APIKeyEnv: "MIMO_API_KEY", ContextWindow: 1_000_000, Price: &provider.Pricing{CacheHit: 0.025, Input: 3, Output: 6, Currency: "¥"}},
-			{Name: "mimo-flash", Kind: "openai", BaseURL: "https://token-plan-cn.xiaomimimo.com/v1", Model: "mimo-v2.5", APIKeyEnv: "MIMO_API_KEY", ContextWindow: 1_000_000, Price: &provider.Pricing{CacheHit: 0.02, Input: 1, Output: 2, Currency: "¥"}},
+			{Name: "mimo-pro", Kind: "openai", BaseURL: "https://token-plan-cn.xiaomimimo.com/v1", Model: "mimo-v2.5-pro", APIKeyEnv: "MIMO_API_KEY", ContextWindow: 1_000_000, Price: &provider.Pricing{CacheHit: 0.025, Input: 3, Output: 6, Currency: "¥"}, NoProxy: true},
+			{Name: "mimo-flash", Kind: "openai", BaseURL: "https://token-plan-cn.xiaomimimo.com/v1", Model: "mimo-v2.5", APIKeyEnv: "MIMO_API_KEY", ContextWindow: 1_000_000, Price: &provider.Pricing{CacheHit: 0.02, Input: 1, Output: 2, Currency: "¥"}, NoProxy: true},
 		},
 	}
 }

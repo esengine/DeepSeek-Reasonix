@@ -59,21 +59,20 @@ func TestCustomProxyHonorsNoProxy(t *testing.T) {
 	}
 }
 
-func TestAutoModeRoutesCNProviderDirect(t *testing.T) {
+func TestDirectHostsBypassProxy(t *testing.T) {
 	t.Setenv("HTTPS_PROXY", "http://proxy.example.com:8080")
 	t.Setenv("NO_PROXY", "")
-	t.Setenv("REASONIX_PROXY_CN_DIRECT", "")
-	pf, err := proxyFunc(ProxySpec{Mode: "auto"})
+	pf, err := proxyFunc(ProxySpec{Mode: "auto", DirectHosts: []string{"token-plan-cn.xiaomimimo.com"}})
 	if err != nil {
 		t.Fatalf("proxyFunc: %v", err)
 	}
 
 	got, err := pf(&http.Request{URL: mustURL("https://token-plan-cn.xiaomimimo.com/v1/chat")})
 	if err != nil {
-		t.Fatalf("mimo lookup: %v", err)
+		t.Fatalf("direct-host lookup: %v", err)
 	}
 	if got != nil {
-		t.Fatalf("MiMo (CN-only) should bypass the proxy in auto mode, got %s", got)
+		t.Fatalf("a direct host should bypass the proxy, got %s", got)
 	}
 
 	other, err := pf(&http.Request{URL: mustURL("https://example.com/x")})
@@ -81,24 +80,23 @@ func TestAutoModeRoutesCNProviderDirect(t *testing.T) {
 		t.Fatalf("other lookup: %v", err)
 	}
 	if other == nil || other.Host != "proxy.example.com:8080" {
-		t.Fatalf("non-CN host should still use the env proxy, got %v", other)
+		t.Fatalf("non-direct host should still use the env proxy, got %v", other)
 	}
 }
 
-func TestCNProviderDirectOptOut(t *testing.T) {
+func TestNoDirectHostsKeepsEveryoneProxied(t *testing.T) {
 	t.Setenv("HTTPS_PROXY", "http://proxy.example.com:8080")
 	t.Setenv("NO_PROXY", "")
-	t.Setenv("REASONIX_PROXY_CN_DIRECT", "0")
-	pf, err := proxyFunc(ProxySpec{Mode: "env"})
+	pf, err := proxyFunc(ProxySpec{Mode: "env"}) // no DirectHosts → nothing special-cased
 	if err != nil {
 		t.Fatalf("proxyFunc: %v", err)
 	}
 	got, err := pf(&http.Request{URL: mustURL("https://token-plan-cn.xiaomimimo.com/v1/chat")})
 	if err != nil {
-		t.Fatalf("mimo lookup: %v", err)
+		t.Fatalf("lookup: %v", err)
 	}
 	if got == nil || got.Host != "proxy.example.com:8080" {
-		t.Fatalf("opt-out should send MiMo through the proxy, got %v", got)
+		t.Fatalf("without DirectHosts the host must go through the proxy, got %v", got)
 	}
 }
 

@@ -150,6 +150,9 @@ func RenderTOML(c *Config) string {
 		if p.Effort != "" {
 			fmt.Fprintf(&b, "effort      = %q\n", p.Effort)
 		}
+		if p.NoProxy {
+			b.WriteString("no_proxy    = true   # reach this base_url directly, never via the proxy\n")
+		}
 		b.WriteString("\n")
 	}
 
