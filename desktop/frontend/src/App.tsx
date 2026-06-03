@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import {
   SquarePen,
@@ -256,6 +256,12 @@ export default function App() {
     todoItem.id !== dismissedTodo &&
     todos.length > 0 &&
     todos.some((t) => t.status !== "completed");
+
+  // useDeferredValue lets React prioritise Composer input (high-priority) over
+  // Transcript re-renders (low-priority) during streaming. When a keystroke
+  // and a transcript update collide, the keystroke is processed immediately
+  // and the transcript re-render is deferred to idle time.
+  const deferredItems = useDeferredValue(state.items);
 
   useEffect(() => {
     if (!pendingPlanRevision || state.running) return;
@@ -927,7 +933,7 @@ export default function App() {
                 <span className="loading-screen__text">{t("common.loading")}</span>
               </div>
             ) : (
-              <Transcript items={state.items} live={state.live} footerHeight={footerHeight} onPrompt={send} onRewind={rewind} />
+              <Transcript items={deferredItems} live={state.live} footerHeight={footerHeight} onPrompt={send} onRewind={rewind} />
             )}
           </main>
 
