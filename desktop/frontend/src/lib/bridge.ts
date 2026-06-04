@@ -109,6 +109,9 @@ export interface AppBindings {
   SetModel(name: string): Promise<void>;
   Effort(): Promise<EffortInfo>;
   SetEffort(level: string): Promise<void>;
+  // SwitchProvider adapts the session effort to the new provider's capability
+  // and returns a warning string if the effort was degraded.
+  SwitchProvider(providerName: string): Promise<string>;
   // Memory panel: read the loaded REASONIX.md hierarchy + saved auto-memories,
   // quick-add a note to a scope's REASONIX.md (≡ "#<note>"), and overwrite a doc
   // from the in-place editor.
@@ -352,8 +355,8 @@ function makeMockApp(): AppBindings {
     defaultModel: "deepseek-flash",
     plannerModel: "",
     providers: [
-      { name: "deepseek-flash", kind: "openai", baseUrl: "https://api.deepseek.com", models: ["deepseek-v4-flash"], default: "deepseek-v4-flash", apiKeyEnv: "DEEPSEEK_API_KEY", keySet: true, balanceUrl: "https://api.deepseek.com/user/balance", contextWindow: 1_000_000 },
-      { name: "mimo-pro", kind: "openai", baseUrl: "https://api.xiaomimimo.com/v1", models: ["mimo-v2.5-pro"], default: "mimo-v2.5-pro", apiKeyEnv: "MIMO_API_KEY", keySet: false, balanceUrl: "", contextWindow: 1_000_000 },
+      { name: "deepseek-flash", kind: "openai", baseUrl: "https://api.deepseek.com", models: ["deepseek-v4-flash"], default: "deepseek-v4-flash", apiKeyEnv: "DEEPSEEK_API_KEY", keySet: true, balanceUrl: "https://api.deepseek.com/user/balance", contextWindow: 1_000_000, supportedEfforts: [], defaultEffort: "" },
+      { name: "mimo-pro", kind: "openai", baseUrl: "https://api.xiaomimimo.com/v1", models: ["mimo-v2.5-pro"], default: "mimo-v2.5-pro", apiKeyEnv: "MIMO_API_KEY", keySet: false, balanceUrl: "", contextWindow: 1_000_000, supportedEfforts: ["auto", "low", "medium", "high"], defaultEffort: "auto" },
     ],
     permissions: { mode: "ask", allow: ["ls", "read_file"], ask: [], deny: ["bash(rm *)"] },
     sandbox: { bash: "enforce", network: true, workspaceRoot: "", allowWrite: [] },
@@ -367,6 +370,8 @@ function makeMockApp(): AppBindings {
     configPath: "~/projects/reasonix/reasonix.toml",
     providerKinds: ["openai"],
     bypass: false,
+    sessionEffort: "",
+    sessionProvider: "deepseek-flash",
   };
   return {
     async Submit(input) {
@@ -804,6 +809,9 @@ function makeMockApp(): AppBindings {
     },
     async SetEffort(level: string) {
       mockEffort = level || "auto";
+    },
+    async SwitchProvider(_providerName: string) {
+      return ""; // no warning in mock
     },
     async Memory() {
       return {

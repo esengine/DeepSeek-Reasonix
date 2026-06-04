@@ -333,6 +333,11 @@ function ModelsSection({ s, busy, apply, onManageProviders }: SectionProps & { o
   const plannerRef = toRef(s.plannerModel, s);
   const [defaultProvider, defaultModel] = defaultRef.split("/");
 
+  // Find the active session provider's SupportedEfforts for the effort dropdown.
+  const sessionProviderEntry = s.providers.find((p) => p.name === s.sessionProvider);
+  const sessionEffortLevels = sessionProviderEntry?.supportedEfforts ?? [];
+  const hasSessionEffort = sessionEffortLevels.length > 0;
+
   return (
     <section className="mem-section">
       <div className="mem-section__head">
@@ -374,6 +379,54 @@ function ModelsSection({ s, busy, apply, onManageProviders }: SectionProps & { o
           ))}
         </select>
       </div>
+
+      {/* Session section: active provider + effort */}
+      <div className="set-row">
+        <label className="set-label">{t("settings.sessionProvider")}</label>
+        <select
+          className="mem-select set-grow"
+          value={s.sessionProvider}
+          disabled={busy}
+          onChange={(e) => {
+            const providerName = e.target.value;
+            void apply(async () => {
+              await app.SwitchProvider(providerName);
+            });
+          }}
+        >
+          {s.providers.map((p) => (
+            <option key={p.name} value={p.name}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+        <div className="mem-hint">{t("settings.sessionProviderHint")}</div>
+      </div>
+
+      {hasSessionEffort && (
+        <div className="set-row">
+          <label className="set-label">{t("settings.sessionEffort")}</label>
+          <select
+            className="mem-select set-grow"
+            value={s.sessionEffort || "auto"}
+            disabled={busy}
+            onChange={(e) => {
+              const level = e.target.value;
+              void apply(async () => {
+                // SetEffort will validate and degrade if needed.
+                await app.SetEffort(level);
+              });
+            }}
+          >
+            {sessionEffortLevels.map((l) => (
+              <option key={l} value={l}>
+                {l}
+              </option>
+            ))}
+          </select>
+          <div className="mem-hint">{t("settings.sessionEffortHint")}</div>
+        </div>
+      )}
 
       <div className="settings-model-card">
         <div>
