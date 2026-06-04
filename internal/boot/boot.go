@@ -16,6 +16,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"reasonix/internal/agent"
@@ -186,7 +187,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 
 	reg := tool.NewRegistry()
 	bashSpec := sandbox.Spec{Mode: cfg.BashMode(), WriteRoots: cfg.WriteRootsForRoot(root), Network: cfg.Sandbox.Network}
-	if bashSpec.Mode == "enforce" && !sandbox.Available() {
+	if bashSpec.Mode == "enforce" && !sandbox.Available() && runtime.GOOS != "windows" {
 		fmt.Fprintln(stderr, "warning: bash sandbox requested but unavailable on this platform; running bash unconfined")
 	}
 	if sandbox.ResolveShell().Kind == sandbox.ShellPowerShell {

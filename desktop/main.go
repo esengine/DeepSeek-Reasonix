@@ -8,6 +8,8 @@ package main
 
 import (
 	"embed"
+	"io"
+	"log"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -37,6 +39,11 @@ var assets embed.FS
 var version = "dev"
 
 func main() {
+	// The go-webview2 library uses log.Printf for startup diagnostics (e.g.
+	// "[WebView2] Environment created successfully"). Discard the default
+	// logger's output so these one-time messages don't pollute the terminal.
+	log.SetOutput(io.Discard)
+
 	app := NewApp()
 
 	err := wails.Run(&options.App{
