@@ -258,7 +258,7 @@ func render(results []result) string {
 				currencySym(r.Currency), r.Cost)
 		}
 	}
-	fmt.Fprintf(&b, "\n<sub>Real provider run on the PR head. Cache-hit %% is cached prompt tokens / total prompt tokens.</sub>\n")
+	fmt.Fprintf(&b, "\n<sub>Real provider run. Cache-hit %% is cached prompt tokens / total prompt tokens.</sub>\n")
 
 	notes := false
 	for _, r := range results {

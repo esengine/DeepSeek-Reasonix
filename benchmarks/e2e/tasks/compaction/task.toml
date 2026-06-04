@@ -1,0 +1,3 @@
+prompt = "The folder story/ holds six chapters named chapter-1.md through chapter-6.md. Read each chapter in full, from the first to the last. In the prose of chapter 1 a small river village is named (it sits where two rivers meet); in the prose of chapter 6 a noble House is named (its ancestral seal is broken). The names are woven into ordinary sentences, not labelled, so you must read the narrative to find them. Then write a file named answer.txt whose entire contents are the village name, a single hyphen, and the House name — for example Riverton-Stark — and nothing else."
+max_steps = 40
+timeout_sec = 900
