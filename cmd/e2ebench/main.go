@@ -182,6 +182,17 @@ func runTask(bin, model string, t task) result {
 	cmd.Dir = work
 	cmd.Stdout = os.Stderr // stream the run to the job log, keep stdout clean for the report
 	cmd.Stderr = os.Stderr
+	// When the bench's per-task ctx times out, Go's exec sends the cancel
+	// signal (SIGKILL on Unix by default) and then waits for the child to
+	// exit. Without WaitDelay, that wait is unbounded: a stuck child
+	// (deep syscall, MCP stdio server wedged on a write to a closed pipe,
+	// AV scanner holding the binary open on Windows) blocks the bench
+	// indefinitely. After WaitDelay, exec closes the child's I/O pipes,
+	// which unblocks any stdio-bound wait in the child even when the
+	// signal is ignored. 10s is the same shape bash.go uses for its
+	// 120s foreground timeout — long enough for a graceful exit, short
+	// enough that the bench never wedges.
+	cmd.WaitDelay = 10 * time.Second
 	runErr := cmd.Run()
 
 	if m, err := readMetrics(metricsPath); err == nil {

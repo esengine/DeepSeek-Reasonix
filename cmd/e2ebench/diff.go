@@ -82,6 +82,12 @@ func runOnce(o diffOpts, srcFiles, pkgs []string, prompt string) diffReport {
 	cmd.Dir = o.repo
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
+	// Same WaitDelay contract as runTask in main.go: when the diff-mode
+	// ctx times out, exec.WaitDelay bounds how long we wait for the child
+	// to honour the cancel signal before the I/O pipes are force-closed
+	// and Wait() returns. Without it, a wedged child would block the
+	// bench forever. See main.go for the rationale.
+	cmd.WaitDelay = 10 * time.Second
 	runErr := cmd.Run()
 
 	// The agent's new files are untracked, so `git diff HEAD` would miss them;
