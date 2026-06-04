@@ -810,6 +810,13 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.unsendPending()
 			case m.state == tuiRunning:
 				m.ctrl.Cancel()
+				// Defensive: if the controller is no longer running (cancel
+				// completed synchronously, e.g. for shell commands), transition
+				// to idle immediately instead of waiting for TurnDone.
+				if !m.ctrl.Running() {
+					m.state = tuiIdle
+					m.confirmBubbleSent()
+				}
 			case m.ctrl.Bypass():
 				m.ctrl.SetBypass(false) // back out of YOLO
 			case m.planMode:
