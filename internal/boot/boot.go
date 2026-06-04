@@ -76,6 +76,9 @@ type Options struct {
 	// (for example ACP session/new). They are connected eagerly for this
 	// controller but are not persisted to reasonix.toml.
 	ExtraPlugins []plugin.Spec
+	// SessionDir overrides where persisted chat transcripts are written. When
+	// empty, the shared CLI/global session directory is used.
+	SessionDir string
 }
 
 // Build loads config, resolves the model(s), and returns a Controller wrapping a
@@ -691,6 +694,11 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		classifier = control.NewProviderAutoPlanClassifier(classifierProv)
 	}
 
+	sessionDir := opts.SessionDir
+	if sessionDir == "" {
+		sessionDir = config.SessionDir()
+	}
+
 	ctrlOpts := control.Options{
 		Runner:        runner,
 		Executor:      executor,
@@ -698,7 +706,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		Policy:        policy,
 		Label:         label,
 		SystemPrompt:  sysPrompt,
-		SessionDir:    config.SessionDir(),
+		SessionDir:    sessionDir,
 		Host:          pluginHost,
 		Commands:      cmds,
 		Skills:        skills,

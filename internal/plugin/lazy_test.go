@@ -334,6 +334,38 @@ func TestLazyBackgroundKick(t *testing.T) {
 	}
 }
 
+func TestLazyBackgroundCloseCancelsInFlightKick(t *testing.T) {
+	redirectCache(t)
+	spec := helperSpec()
+	spec.Name = "slow"
+	spec.Env["GO_WANT_HELPER_INIT_MS"] = "5000"
+	writeMockCache(t, spec)
+	cs, _ := LoadCachedSchema(spec.Name, SpecFingerprint(spec))
+
+	host := NewHost()
+	reg := tool.NewRegistry()
+
+	tools := LazyToolset(spec, cs, host, reg, context.Background(), true)
+	for _, lt := range tools {
+		reg.Add(lt)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		host.Close()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Host.Close did not cancel the in-flight background lazy spawn")
+	}
+
+	if names := host.ServerNames(); len(names) != 0 {
+		t.Fatalf("closed host retained connected servers: %v", names)
+	}
+}
+
 // TestLazyConcurrentExecuteOnlyOneSpawn pins the de-duplication contract: 10
 // goroutines racing through Execute on the same lazyTool may only trigger ONE
 // spawn (and therefore one connected mock server on the host). The state
