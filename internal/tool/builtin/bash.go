@@ -178,13 +178,46 @@ func hasUnquotedSeq(s, seq string) bool {
 }
 
 // commandPreview is a short single-line label for a background bash job, surfaced
-// in the status bar and completion notices.
+// in the status bar and completion notices. It collapses all runs of internal
+// whitespace (newlines, tabs, carriage returns, vertical tabs, form feeds) to a
+// single ASCII space so a multi-line script reads as a one-liner in the UI
+// without leaving stray \t or \r characters that would make the row jitter as
+// monospace glyph widths disagree between terminals. The leading/trailing
+// TrimSpace drops the result back to a clean word boundary.
 func commandPreview(cmd string) string {
-	cmd = strings.TrimSpace(strings.ReplaceAll(cmd, "\n", " "))
+	cmd = collapseInternalWhitespace(cmd)
 	const max = 48
 	r := []rune(cmd)
 	if len(r) > max {
 		return string(r[:max]) + "…"
 	}
 	return cmd
+}
+
+// collapseInternalWhitespace replaces every run of ASCII whitespace (Unicode
+// category Zs is too broad: it would mangle the U+00A0 non-breaking space
+// inside, e.g., a heredoc) with a single ASCII space, then trims. Kept
+// package-private so future call sites (e.g. the front-end status bar) can
+// reuse the same rule without re-implementing the unicode-table lookup.
+func collapseInternalWhitespace(s string) string {
+	if s == "" {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	prevSpace := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch c {
+		case ' ', '\t', '\n', '\r', '\v', '\f':
+			if !prevSpace {
+				b.WriteByte(' ')
+				prevSpace = true
+			}
+		default:
+			b.WriteByte(c)
+			prevSpace = false
+		}
+	}
+	return strings.TrimSpace(b.String())
 }
