@@ -1969,7 +1969,7 @@ func (a *App) ListDir(rel string) []DirEntry {
 func (a *App) SearchFileRefs(query string) []DirEntry {
 	base, err := os.Getwd()
 	if err != nil {
-		return nil
+		return []DirEntry{}
 	}
 	paths := fileref.Search(base, query, fileRefSearchLimit)
 	out := make([]DirEntry, 0, len(paths))
