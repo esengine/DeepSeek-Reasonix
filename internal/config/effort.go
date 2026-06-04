@@ -18,6 +18,16 @@ type EffortCapability struct {
 // provider entry. Provider implementations still decide how a stored effort is
 // serialized into requests.
 func EffortCapabilityForEntry(e *ProviderEntry) EffortCapability {
+	if e != nil && len(e.SupportedEfforts) > 0 {
+		levels := make([]string, 0, len(e.SupportedEfforts)+1)
+		levels = append(levels, "auto")
+		levels = append(levels, e.SupportedEfforts...)
+		def := e.DefaultEffort
+		if def == "" || !containsString(e.SupportedEfforts, def) {
+			def = e.SupportedEfforts[0]
+		}
+		return EffortCapability{Supported: true, Levels: levels, Default: def}
+	}
 	switch {
 	case isDeepSeekEntry(e):
 		return EffortCapability{Supported: true, Levels: []string{"auto", "high", "max"}, Default: "high"}
@@ -37,6 +47,12 @@ func NormalizeEffort(e *ProviderEntry, raw string) (string, error) {
 	}
 	if level == "auto" {
 		return "", nil
+	}
+	if e != nil && len(e.SupportedEfforts) > 0 {
+		if containsString(e.SupportedEfforts, level) {
+			return level, nil
+		}
+		return "", fmt.Errorf("usage: /effort auto|%s", strings.Join(e.SupportedEfforts, "|"))
 	}
 	switch {
 	case isDeepSeekEntry(e):
@@ -88,4 +104,13 @@ func isDeepSeekEntry(e *ProviderEntry) bool {
 	}
 	host := strings.ToLower(u.Hostname())
 	return host == "api.deepseek.com" || strings.HasSuffix(host, ".deepseek.com")
+}
+
+func containsString(haystack []string, needle string) bool {
+	for _, s := range haystack {
+		if s == needle {
+			return true
+		}
+	}
+	return false
 }
