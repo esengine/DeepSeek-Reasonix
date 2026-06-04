@@ -5541,6 +5541,7 @@ body {
   color: var(--fg);
   background: var(--hover);
 }
+
 .composer__pasted {
   display: flex;
   flex-direction: column;
@@ -5881,4 +5882,14 @@ body {
 .onboarding__skip:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+
+
+/* Memory filter input: a full-width mem-input variant that sits below
+   the section title. The existing mem-input already has a 28px height
+   and the right border tokens; this just sets margin so it doesn't
+   crowd the doc list. */
+.mem-filter {
+  margin: 4px 0 8px;
+  width: 100%;
+
 }

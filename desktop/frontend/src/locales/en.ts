@@ -304,9 +304,13 @@ export const en = {
   "memory.missingLinks": "{n} missing linked memory",
   "memory.appliesNow": "Changes apply in this session.",
   "memory.storedUnder": "stored under {dir}",
+
   "memory.forget": "Forget",
   "memory.confirmForget": "Confirm forget",
   "memory.deadLink": "No memory named “{name}”",
+
+  "memory.filterPlaceholder": "Filter docs and facts…",
+  "memory.noFilterMatch": "Nothing matches the current filter.",
 
   // settings drawer
   "settings.title": "Settings",

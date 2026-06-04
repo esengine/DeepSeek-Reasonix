@@ -305,9 +305,14 @@ export const zh: Record<DictKey, string> = {
   "memory.missingLinks": "{n} 条互链目标不存在",
   "memory.appliesNow": "变更会在当前会话生效。",
   "memory.storedUnder": "存放于 {dir}",
+
   "memory.forget": "删除",
   "memory.confirmForget": "确认删除",
   "memory.deadLink": "没有名为「{name}」的记忆",
+
+  "memory.filterPlaceholder": "筛选指令文件与记忆…",
+  "memory.noFilterMatch": "没有匹配当前筛选的内容。",
+
 
   // 设置抽屉
   "settings.title": "设置",
