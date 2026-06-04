@@ -4,11 +4,13 @@ import App from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { installGlobalCrashHandlers } from "./lib/crash";
 import { LocaleProvider } from "./lib/i18n";
+import { initTextSize } from "./lib/textSize";
 import { initTheme } from "./lib/theme";
 import "./styles.css";
 
 // Apply the saved appearance (auto/light/dark) before the first paint.
 initTheme();
+initTextSize();
 
 // Pre-warm font fallback stacks so the first frame doesn't flicker between the
 // browser default font and the app's configured typeface. Inserting a hidden span

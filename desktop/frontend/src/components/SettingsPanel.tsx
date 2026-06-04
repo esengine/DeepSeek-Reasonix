@@ -16,6 +16,7 @@ import {
   type Theme,
   type ThemeStyle,
 } from "../lib/theme";
+import { TEXT_SIZES, applyTextSize, getTextSize, type TextSize } from "../lib/textSize";
 import type { NetworkView, ProviderView, SettingsView } from "../lib/types";
 import { InlineConfirmButton } from "./InlineConfirmButton";
 import { ResizableDrawer } from "./ResizableDrawer";
@@ -36,6 +37,7 @@ export function SettingsPanel({ onClose, onChanged }: { onClose: () => void; onC
   const [err, setErr] = useState<string | null>(null);
   const [theme, setThemeState] = useState<Theme>(getTheme());
   const [themeStyle, setThemeStyleState] = useState<ThemeStyle>(() => getThemeStyle(getTheme()));
+  const [textSize, setTextSizeState] = useState<TextSize>(getTextSize());
   const [tab, setTab] = useState<SettingsTab>("general");
 
   const reload = async () => setS(normalizeSettingsView(await app.Settings().catch(() => null)));
@@ -106,6 +108,7 @@ export function SettingsPanel({ onClose, onChanged }: { onClose: () => void; onC
                   <AppearanceSection
                     theme={theme}
                     themeStyle={themeStyle}
+                    textSize={textSize}
                     onTheme={(t) => {
                       const nextStyle = themeForStyle(themeStyle) === getResolvedTheme(t) ? themeStyle : defaultStyleForTheme(t);
                       applyTheme(t, nextStyle, { persist: false });
@@ -119,6 +122,10 @@ export function SettingsPanel({ onClose, onChanged }: { onClose: () => void; onC
                       setThemeState(nextTheme);
                       setThemeStyleState(style);
                       void apply(() => app.SetDesktopAppearance(nextTheme, style));
+                    }}
+                    onTextSize={(size) => {
+                      applyTextSize(size);
+                      setTextSizeState(size);
                     }}
                   />
                 )}
@@ -984,13 +991,17 @@ function SandboxSection({ s, busy, apply }: SectionProps) {
 function AppearanceSection({
   theme,
   themeStyle,
+  textSize,
   onTheme,
   onThemeStyle,
+  onTextSize,
 }: {
   theme: Theme;
   themeStyle: ThemeStyle;
+  textSize: TextSize;
   onTheme: (t: Theme) => void;
   onThemeStyle: (style: ThemeStyle) => void;
+  onTextSize: (size: TextSize) => void;
 }) {
   const t = useT();
   const themeOptions: Theme[] = ["auto", "light", "dark"];
@@ -1026,6 +1037,20 @@ function AppearanceSection({
           ))}
         </div>
       </div>
+      <div className="set-row">
+        <label className="set-label">{t("settings.textSize")}</label>
+        <div className="set-seg">
+          {TEXT_SIZES.map((size) => (
+            <button
+              key={size}
+              className={`set-seg__btn${textSize === size ? " set-seg__btn--on" : ""}`}
+              onClick={() => onTextSize(size)}
+            >
+              {textSizeName(size, t)}
+            </button>
+          ))}
+        </div>
+      </div>
     </section>
   );
 }
@@ -1038,6 +1063,19 @@ function themeName(theme: Theme, t: ReturnType<typeof useT>): string {
       return t("settings.themeLight");
     case "dark":
       return t("settings.themeDark");
+  }
+}
+
+function textSizeName(size: TextSize, t: ReturnType<typeof useT>): string {
+  switch (size) {
+    case "small":
+      return t("settings.textSizeSmall");
+    case "default":
+      return t("settings.textSizeDefault");
+    case "large":
+      return t("settings.textSizeLarge");
+    case "xlarge":
+      return t("settings.textSizeXLarge");
   }
 }
 

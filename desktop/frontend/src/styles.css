@@ -34,6 +34,19 @@
   --fg: #f4f5f7;
   --fg-dim: #c0c4cc;
   --fg-faint: #858b96;
+  --font-scale: 1;
+  --text-2xs: calc(10px * var(--font-scale));
+  --text-xs: calc(11px * var(--font-scale));
+  --text-sm: calc(12px * var(--font-scale));
+  --text-md: calc(13px * var(--font-scale));
+  --text-base: calc(14px * var(--font-scale));
+  --text-lg: calc(15px * var(--font-scale));
+  --text-xl: calc(18px * var(--font-scale));
+  --font-caption: var(--text-xs);
+  --font-code: var(--text-sm);
+  --font-content: var(--text-base);
+  --font-control: var(--text-md);
+  --font-control-small: var(--text-sm);
   --scrollbar-size: 10px;
   --scrollbar-track: transparent;
   --scrollbar-thumb: color-mix(in srgb, var(--fg-faint) 42%, transparent);
@@ -284,6 +297,18 @@
   --accent-strong: #276a8f;
 }
 
+:root[data-text-size="small"] {
+  --font-scale: 0.94;
+}
+
+:root[data-text-size="large"] {
+  --font-scale: 1.08;
+}
+
+:root[data-text-size="xlarge"] {
+  --font-scale: 1.16;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -300,10 +325,17 @@ body {
   background: var(--bg);
   color: var(--fg);
   font-family: var(--sans);
-  font-size: 14px;
+  font-size: var(--text-base);
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
   overflow: hidden;
+}
+
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
 }
 
 /* Only real hyperlinks get the pointer cursor; everything else (buttons, tabs,
@@ -633,7 +665,7 @@ a[href] {
   background: var(--button-bg);
   color: var(--button-muted-fg);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--font-control-small);
   font-weight: 500;
   line-height: 1.25;
   border-radius: var(--button-radius);
@@ -666,7 +698,7 @@ a[href] {
 .banner {
   flex: 0 0 auto;
   padding: 8px 16px;
-  font-size: 12.5px;
+  font-size: var(--font-control-small);
 }
 .banner--error {
   background: var(--del-bg);
@@ -686,7 +718,7 @@ a[href] {
 }
 .banner__hint {
   color: var(--fg-dim);
-  font-size: 11.5px;
+  font-size: var(--font-caption);
 }
 .banner__spacer {
   flex: 1 1 auto;
@@ -1160,7 +1192,7 @@ a[href] {
   padding: 8px 12px;
   border-left: 2px solid var(--border);
   color: var(--fg-dim);
-  font-size: 13px;
+  font-size: var(--font-content);
   white-space: pre-wrap;
 }
 
@@ -1255,7 +1287,7 @@ a[href] {
 .md table {
   border-collapse: collapse;
   margin: 0 0 12px;
-  font-size: 13px;
+  font-size: var(--font-content);
   display: block;
   overflow-x: auto;
 }
@@ -1278,7 +1310,7 @@ a[href] {
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   font-family: var(--mono);
-  font-size: 12.5px;
+  font-size: var(--font-code);
   line-height: 1.55;
   overflow: auto;
   white-space: pre;
@@ -1446,14 +1478,14 @@ a[href] {
 }
 .tool__name {
   font-family: var(--mono);
-  font-size: 12.5px;
+  font-size: var(--font-code);
   font-weight: 600;
   color: var(--accent);
   flex-shrink: 0;
 }
 .tool__subject {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--font-code);
   color: var(--fg-dim);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1471,7 +1503,7 @@ a[href] {
   padding: 0 11px 10px 30px;
 }
 .tool__note {
-  font-size: 11px;
+  font-size: var(--font-caption);
   color: var(--fg-faint);
   margin-top: 3px;
 }
@@ -1797,6 +1829,7 @@ a[href] {
   background: none;
   color: var(--fg);
   font: inherit;
+  font-size: var(--font-content);
   line-height: 1.55;
   max-height: 200px;
   outline: none;
@@ -2512,7 +2545,7 @@ a[href] {
   background: var(--button-bg);
   color: var(--button-fg);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--font-control);
   font-weight: 500;
   line-height: 1.25;
   border-radius: var(--button-radius);
@@ -3944,7 +3977,7 @@ a[href] {
   border-radius: 7px;
   color: var(--fg);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--font-control);
   padding: 6px 8px;
 }
 .mem-select:focus,
@@ -3962,7 +3995,7 @@ a[href] {
 }
 .mem-hint {
   margin-top: 6px;
-  font-size: 11px;
+  font-size: var(--font-caption);
   color: var(--fg-faint);
   font-family: var(--mono);
   word-break: break-all;
@@ -4224,11 +4257,11 @@ a[href] {
 .btn--small {
   height: var(--button-small-height);
   padding: 0 10px;
-  font-size: 12px;
+  font-size: var(--font-control-small);
 }
 .badge {
   flex-shrink: 0;
-  font-size: 10px;
+  font-size: var(--text-2xs);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   padding: 2px 7px;
@@ -5385,12 +5418,12 @@ a[href] {
   white-space: nowrap;
 }
 .settings-nav__item span {
-  font-size: 13px;
+  font-size: var(--font-control);
   font-weight: 650;
 }
 .settings-nav__item small {
   color: var(--fg-dim);
-  font-size: 10.5px;
+  font-size: var(--text-2xs);
   font-family: var(--mono);
 }
 .settings-content {
@@ -5443,7 +5476,7 @@ a[href] {
 }
 .settings-model-card span {
   color: var(--fg-dim);
-  font-size: 11px;
+  font-size: var(--font-caption);
   margin-bottom: 5px;
 }
 .settings-model-card strong {
@@ -5452,7 +5485,7 @@ a[href] {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 14px;
+  font-size: var(--text-base);
   font-weight: 700;
   color: var(--fg);
 }
@@ -5460,7 +5493,7 @@ a[href] {
   margin-top: 4px;
   color: var(--fg-dim);
   font-family: var(--mono);
-  font-size: 10.5px;
+  font-size: var(--text-2xs);
 }
 .settings-summary {
   border: 1px solid var(--border);
@@ -5493,7 +5526,7 @@ a[href] {
   margin-bottom: 0;
 }
 .set-label {
-  font-size: 12px;
+  font-size: var(--font-control-small);
   color: var(--fg);
   font-weight: 550;
   min-width: 92px;
@@ -5512,7 +5545,7 @@ a[href] {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
+  font-size: var(--font-control-small);
   color: var(--fg-dim);
   margin-bottom: 10px;
 }
@@ -5645,7 +5678,7 @@ a[href] {
   background: transparent;
   color: var(--fg-dim);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--font-control-small);
   padding: 5px 13px;
   text-transform: capitalize;
 }
