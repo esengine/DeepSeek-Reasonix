@@ -181,6 +181,7 @@ export default function App() {
   const [workspacePanelMaximized, setWorkspacePanelMaximized] = useState(false);
   const [workspacePreviewModeActive, setWorkspacePreviewModeActive] = useState(false);
   const [workspaceChangesRefreshKey, setWorkspaceChangesRefreshKey] = useState(0);
+  const [workspaceTreeRefreshKey, setWorkspaceTreeRefreshKey] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [capsOpen, setCapsOpen] = useState(false);
   const [composerInsertRequest, setComposerInsertRequest] = useState<ComposerInsertRequest | null>(null);
@@ -267,6 +268,7 @@ export default function App() {
   useEffect(() => {
     if (wasRunningForWorkspaceChangesRef.current && !state.running) {
       setWorkspaceChangesRefreshKey((key) => key + 1);
+      setWorkspaceTreeRefreshKey((key) => key + 1);
     }
     wasRunningForWorkspaceChangesRef.current = state.running;
   }, [state.running]);
@@ -398,6 +400,7 @@ export default function App() {
     await newSession();
     await refreshSessions();
     setWorkspaceChangesRefreshKey((key) => key + 1);
+    setWorkspaceTreeRefreshKey((key) => key + 1);
   }, [newSession, refreshSessions]);
 
   const toggleSidebar = useCallback(() => {
@@ -584,6 +587,7 @@ export default function App() {
       await resumeSession(path);
       await refreshSessions();
       setWorkspaceChangesRefreshKey((key) => key + 1);
+      setWorkspaceTreeRefreshKey((key) => key + 1);
     },
     [state.running, resumeSession, refreshSessions],
   );
@@ -641,6 +645,7 @@ export default function App() {
     if (picked) {
       await refreshSessions();
       setWorkspaceChangesRefreshKey((key) => key + 1);
+      setWorkspaceTreeRefreshKey((key) => key + 1);
     }
     return picked;
   }, [pickWorkspace, switchWorkspace, refreshSessions]);
@@ -1037,6 +1042,7 @@ export default function App() {
           onPreviewModeChange={handleWorkspacePreviewModeChange}
           onAddToChat={addToChat}
           changesRefreshKey={workspaceChangesRefreshKey}
+          treeRefreshKey={workspaceTreeRefreshKey}
         />
       </div>
 

@@ -168,6 +168,7 @@ export function WorkspacePanel({
   onPreviewModeChange,
   onAddToChat,
   changesRefreshKey,
+  treeRefreshKey,
 }: {
   open: boolean;
   cwd?: string;
@@ -178,6 +179,7 @@ export function WorkspacePanel({
   onPreviewModeChange?: (active: boolean) => void;
   onAddToChat?: (text: string) => void;
   changesRefreshKey?: number;
+  treeRefreshKey?: number;
 }) {
   const t = useT();
   const panelRef = useRef<HTMLElement>(null);
@@ -319,6 +321,22 @@ export function WorkspacePanel({
     if (!open || !selectedPath) return;
     return refreshSelected();
   }, [open, refreshSelected, selectedPath]);
+
+  // Refresh the file tree when the agent modifies files (turn completion,
+  // new session, resume, workspace switch). Re-fetches all currently open
+  // directories and refreshes the preview of the selected file.
+  useEffect(() => {
+    if (!open || treeRefreshKey === undefined || treeRefreshKey === 0) return;
+    setEntriesByDir((prev) => {
+      for (const dir of Object.keys(prev)) {
+        void loadDir(dir);
+      }
+      return prev;
+    });
+    if (selectedPath) {
+      void refreshSelected();
+    }
+  }, [treeRefreshKey, open, loadDir, selectedPath, refreshSelected]);
 
   const toggleDir = useCallback(
     (dir: string) => {
