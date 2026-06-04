@@ -4,12 +4,12 @@ import "testing"
 
 func TestTrayMenuLabelsFollowLocale(t *testing.T) {
 	zh := trayMenuLabels("zh")
-	if zh.openTitle != "打开 Reasonix" || zh.quitTitle != "退出 Reasonix" {
+	if zh.openTitle != "打开" || zh.quitTitle != "退出" {
 		t.Fatalf("zh labels = %#v", zh)
 	}
 
 	en := trayMenuLabels("en")
-	if en.openTitle != "Open Reasonix" || en.quitTitle != "Quit Reasonix" {
+	if en.openTitle != "Open" || en.quitTitle != "Quit" {
 		t.Fatalf("en labels = %#v", en)
 	}
 
