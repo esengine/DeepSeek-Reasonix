@@ -898,6 +898,27 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, finalize(m, cmds)
 			}
 
+			// "!<cmd>" runs a shell command directly, bypassing the model.
+			if strings.HasPrefix(line, "!") {
+				cmd := strings.TrimPrefix(line, "!")
+				m.input.Reset()
+				m.input.SetHeight(1)
+				m.pastedBlocks = nil
+				m.state = tuiRunning
+				m.runStart = time.Now()
+				m.elapsed = 0
+				m.turnTokens = 0
+				m.pendingRestore = line
+				m.bubbleStartIdx = len(m.transcript)
+				m.commitLine("")
+				m.commitLine(renderUserBubble(line, m.width, m.planMode))
+				m.bubblePending = true
+				m.turnDiscarded = false
+				m.confirmBubbleSent() // shell events arrive instantly
+				m.ctrl.RunShell(cmd)
+				return m, tea.Batch(m.spinner.Tick, elapsedTick())
+			}
+
 			// Slash commands run locally without going through the model. A
 			// '/'-leading line that's actually a dragged file path is an attachment,
 			// not a command, so it's rewritten to an @reference instead.
