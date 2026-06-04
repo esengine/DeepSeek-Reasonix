@@ -1,17 +1,3 @@
-# Code owners — governs required review on core paths.
-#
-# Takes effect once a main-v2 ruleset enables "Require review from Code Owners".
-# Paths not listed here have no required owner, so the maintainers can merge them
-# freely; the core-architecture paths below require the repo owner's review.
-
-# --- Maintainers: paste the two GitHub usernames to auto-request them on every PR ---
-# *                     @USERNAME1 @USERNAME2
-
-# --- Core architecture — owner review required ---
-/internal/agent/        @esengine
-/internal/provider/     @esengine
-/internal/netclient/    @esengine
-/internal/serve/        @esengine
-/internal/config/       @esengine
-/cmd/e2ebench/          @esengine
-/.github/               @esengine
+# Every pull request requires review from the maintainer.
+# The repo owner is optional (can review anything, but is not required).
+* @SivanCola
