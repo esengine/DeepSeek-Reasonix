@@ -76,7 +76,19 @@ func main() {
 		os.Exit(1)
 	}
 	if len(tasks) == 0 {
-		fmt.Fprintln(os.Stderr, "no tasks found under", filepath.Join(*suite, "tasks"))
+		// Distinguish \"suite dir is missing\" from \"suite dir is empty\"
+		// — the former is a config error (the user pointed -suite at a
+		// path that doesn't exist; -suite's default of benchmarks/e2e
+		// is missing because the bench is running from a stale
+		// checkout). The latter is \"you haven't written any tasks
+		// yet\" — both are exit-1, but the message tells the user
+		// which to fix.
+		dir := filepath.Join(*suite, "tasks")
+		if _, statErr := os.Stat(dir); statErr != nil {
+			fmt.Fprintf(os.Stderr, "no tasks found under %s: %v\n", dir, statErr)
+		} else {
+			fmt.Fprintf(os.Stderr, "no tasks found under %s (the directory exists but contains no task.toml files)\n", dir)
+		}
 		os.Exit(1)
 	}
 
