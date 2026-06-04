@@ -84,6 +84,11 @@ type SettingsView struct {
 	// Bypass is the live YOLO state (runtime-only, not from config), so the panel's
 	// toggle reflects whether approvals are currently being skipped this session.
 	Bypass bool `json:"bypass"`
+	// SessionEffort is the currently active effort level for the session.
+	// "" means auto (omit from API requests, protecting prefix cache).
+	SessionEffort string `json:"sessionEffort"`
+	// SessionProvider is the currently active provider name for the session.
+	SessionProvider string `json:"sessionProvider"`
 }
 
 func nonNil(s []string) []string {
@@ -133,6 +138,8 @@ func (a *App) Settings() SettingsView {
 		ConfigPath:    config.SourcePath(),
 		ProviderKinds: provider.Kinds(),
 		Bypass:        a.ctrl != nil && a.ctrl.Bypass(),
+		SessionEffort:   cfg.Session.Effort,
+		SessionProvider: cfg.Session.Provider,
 	}
 	for i := range cfg.Providers {
 		p := &cfg.Providers[i]
@@ -281,11 +288,25 @@ func (a *App) SetPlannerModel(ref string) error {
 
 // SaveProvider adds or updates a provider. A single model fills `model`; several
 // fill `models` (with `default`). The shared key/endpoint live on the entry.
+// Fields not present in the ProviderView (e.g. supported_efforts when the UI
+// doesn't expose them yet) are preserved from the existing entry.
 func (a *App) SaveProvider(p ProviderView) error {
 	return a.applyConfigChange(func(c *config.Config) error {
 		e := config.ProviderEntry{
 			Name: p.Name, Kind: p.Kind, BaseURL: p.BaseURL,
 			APIKeyEnv: p.APIKeyEnv, BalanceURL: strings.TrimSpace(p.BalanceURL), ContextWindow: p.ContextWindow,
+		}
+		// Merge effort fields: if the frontend sends them, use them; otherwise
+		// preserve the existing values so TOML-only fields aren't wiped.
+		if existing, ok := c.Provider(p.Name); ok {
+			e.SupportedEfforts = existing.SupportedEfforts
+			e.DefaultEffort = existing.DefaultEffort
+		}
+		if len(p.SupportedEfforts) > 0 {
+			e.SupportedEfforts = p.SupportedEfforts
+		}
+		if p.DefaultEffort != "" {
+			e.DefaultEffort = p.DefaultEffort
 		}
 		if len(p.Models) > 0 {
 			e.Model = p.Models[0] // also satisfies validateProvider's model requirement
@@ -296,6 +317,35 @@ func (a *App) SaveProvider(p ProviderView) error {
 		}
 		return c.UpsertProvider(e)
 	})
+}
+
+// SwitchProvider adapts the session effort to the new provider's capability
+// and returns a warning string if the effort was degraded. The provider switch
+// itself is handled by SetDefaultModel or the /model command; this method only
+// deals with the effort adaptation.
+func (a *App) SwitchProvider(providerName string) string {
+	cfg, err := config.Load()
+	if err != nil {
+		return ""
+	}
+	entry, ok := cfg.Provider(providerName)
+	if !ok {
+		return ""
+	}
+	caps := config.EffortCapabilityForEntry(entry)
+	warning := cfg.Session.AdaptToProvider(caps)
+	if warning != "" {
+		// Save the adapted session effort.
+		path := config.UserConfigPath()
+		if path != "" {
+			edit := config.LoadForEdit(path)
+			edit.Session.Effort = cfg.Session.Effort
+			if err := edit.SaveTo(path); err != nil {
+				return warning // still return warning even if save fails
+			}
+		}
+	}
+	return warning
 }
 
 // DeleteProvider removes a provider (refused for the current default_model).
