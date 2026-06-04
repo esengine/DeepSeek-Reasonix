@@ -473,3 +473,83 @@ func TestStreamSynthesizesMissingToolCallIDs(t *testing.T) {
 		t.Errorf("synthesized ids must be distinct, got %v", ids)
 	}
 }
+
+// TestBuildRequestNoDoubleEscapeUnicode guards against tool-call arguments
+// being double-escaped when round-tripped through the request builder.
+// Before the fix, chatToolCall.Function.Arguments was a Go string, so
+// json.Marshal re-encoded Chinese characters as \uXXXX escape sequences
+// inside a JSON string — the model then saw literal \u6e38 sequences and
+// reproduced them in subsequent tool calls, causing regexp.Compile to fail
+// with "invalid escape sequence: \u".
+func TestBuildRequestNoDoubleEscapeUnicode(t *testing.T) {
+	c := &client{model: "deepseek-v4"}
+	req := c.buildRequest(provider.Request{
+		Messages: []provider.Message{
+			{Role: provider.RoleUser, Content: "grep it"},
+			{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{
+				{ID: "call_zh", Name: "grep", Arguments: `{"pattern":"@游戏攻略"}`},
+			}},
+			{Role: provider.RoleTool, Content: "ok", ToolCallID: "call_zh", Name: "grep"},
+		},
+	})
+
+	b, err := json.Marshal(req.Messages)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	// The serialized arguments must contain the actual Chinese characters
+	// (UTF-8 bytes), NOT double-escaped \uXXXX sequences inside a JSON string.
+	s := string(b)
+	if strings.Contains(s, `\u6e38`) || strings.Contains(s, `\u653b`) {
+		t.Errorf("tool call arguments were double-escaped (\\uXXXX found in wire JSON):\n%s", s)
+	}
+
+	// Decode the assistant message's tool_calls arguments and verify the
+	// raw JSON is preserved verbatim.
+	var raw []struct {
+		ToolCalls []struct {
+			Function struct {
+				Arguments json.RawMessage `json:"arguments"`
+			} `json:"function"`
+		} `json:"tool_calls"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(raw) < 2 || len(raw[1].ToolCalls) == 0 {
+		t.Fatalf("expected assistant tool_calls in serialized output: %s", s)
+	}
+	gotArgs := string(raw[1].ToolCalls[0].Function.Arguments)
+	wantArgs := `{"pattern":"@游戏攻略"}`
+	if gotArgs != wantArgs {
+		t.Errorf("arguments round-trip:\n  got:  %s\n  want: %s", gotArgs, wantArgs)
+	}
+}
+
+// TestBuildRequestInvalidToolArgsFallback ensures that when a model generates
+// malformed JSON in tool-call arguments, the request serialisation falls back
+// to a string-encoded form rather than failing outright (which would crash the
+// entire request).
+func TestBuildRequestInvalidToolArgsFallback(t *testing.T) {
+	c := &client{model: "deepseek-v4"}
+	req := c.buildRequest(provider.Request{
+		Messages: []provider.Message{
+			{Role: provider.RoleUser, Content: "do it"},
+			{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{
+				{ID: "call_bad", Name: "write_file", Arguments: `"""invalid json"""`},
+			}},
+			{Role: provider.RoleTool, Content: "ok", ToolCallID: "call_bad", Name: "write_file"},
+		},
+	})
+
+	// The critical assertion: Marshal must succeed even with invalid args.
+	b, err := json.Marshal(req.Messages)
+	if err != nil {
+		t.Fatalf("marshal failed with invalid tool args: %v", err)
+	}
+	// The output must be valid JSON.
+	if !json.Valid(b) {
+		t.Errorf("marshal produced invalid JSON: %s", b)
+	}
+}

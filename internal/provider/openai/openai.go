@@ -414,6 +414,37 @@ type chatToolCall struct {
 	} `json:"function"`
 }
 
+// MarshalJSON overrides the default serialization so that Function.Arguments
+// is written as raw JSON when valid, avoiding the double-escaping that
+// json.Marshal(string) would apply to non-ASCII characters (Chinese, Japanese,
+// emoji). When the model produced malformed JSON arguments, it falls back to a
+// properly escaped string so the outer request never becomes unparseable.
+func (c chatToolCall) MarshalJSON() ([]byte, error) {
+	type Alias chatToolCall // prevents infinite recursion
+	if len(c.Function.Arguments) == 0 || json.Valid([]byte(c.Function.Arguments)) {
+		return json.Marshal(struct {
+			Alias
+			Function struct {
+				Name      string          `json:"name,omitempty"`
+				Arguments json.RawMessage `json:"arguments,omitempty"`
+			} `json:"function"`
+		}{
+			Alias: Alias(c),
+			Function: struct {
+				Name      string          `json:"name,omitempty"`
+				Arguments json.RawMessage `json:"arguments,omitempty"`
+			}{
+				Name:      c.Function.Name,
+				Arguments: json.RawMessage(c.Function.Arguments),
+			},
+		})
+	}
+	// Invalid JSON — fall back to the default string serialization so the
+	// outer request stays parseable; the model will see the escaped form and
+	// can self-correct.
+	return json.Marshal(Alias(c))
+}
+
 type streamResponse struct {
 	Choices []struct {
 		Delta struct {
