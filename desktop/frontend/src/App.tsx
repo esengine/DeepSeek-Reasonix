@@ -35,6 +35,7 @@ import { WorkspacePanel } from "./components/WorkspacePanel";
 import { Tooltip } from "./components/Tooltip";
 import { OnboardingOverlay } from "./components/OnboardingOverlay";
 import { parseTodos } from "./lib/tools";
+import { shouldShowTodoPanel } from "./lib/todoVisibility";
 import { sessionActivityTime } from "./lib/session";
 import type { ComposerInsertRequest, MemoryView, Mode, SessionMeta } from "./lib/types";
 import { loadLayoutSize, saveLayoutSize } from "./lib/layoutPreferences";
@@ -238,10 +239,10 @@ export default function App() {
 
   // The live task list pinned above the composer comes from the most recent
   // successful top-level todo_write result; failed or still-running attempts do
-  // not advance the canonical panel state. It stays visible while work remains,
-  // clears itself once every item is completed, and can be dismissed by the user
-  // (the ✕). A dismissal is keyed to that list's id, so a fresh accepted
-  // todo_write brings the panel back.
+  // not advance the canonical panel state. It stays visible through the final
+  // all-completed update, and can be dismissed by the user (the ✕). A dismissal
+  // is keyed to that list's id, so a fresh accepted todo_write brings the panel
+  // back.
   const todoItem = useMemo(() => {
     for (let i = state.items.length - 1; i >= 0; i--) {
       const it = state.items[i];
@@ -251,11 +252,7 @@ export default function App() {
   }, [state.items]);
   const todos = useMemo(() => (todoItem ? parseTodos(todoItem.args) : []), [todoItem]);
   const [dismissedTodo, setDismissedTodo] = useState<string | null>(null);
-  const showTodos =
-    !!todoItem &&
-    todoItem.id !== dismissedTodo &&
-    todos.length > 0 &&
-    todos.some((t) => t.status !== "completed");
+  const showTodos = shouldShowTodoPanel(todoItem?.id, dismissedTodo, todos);
 
   useEffect(() => {
     if (!pendingPlanRevision || state.running) return;
