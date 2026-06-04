@@ -292,6 +292,45 @@ body {
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
   overflow: hidden;
+  /* Theme transition: crossfade the four surfaces and the accent triplet so a
+     light/dark/auto switch (or an accent picker drag) doesn't snap. The list
+     is intentionally narrow — only the colors actually used as "theme" — so a
+     streaming text delta or a tool card with a transient background color
+     (status badges) doesn't repaint during the fade. Disabled for users with
+     prefers-reduced-motion (and the system color-scheme change is
+     instantaneous on Linux WebKitGTK, where the transition property is
+     occasionally honored but the OS still reschedules a white flash). */
+  transition:
+    background-color 180ms ease,
+    color 180ms ease,
+    border-color 180ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body {
+    transition: none;
+  }
+}
+
+/* Theme-transition active state. We add a class to <html> for the duration of
+   a theme flip so the transition fires; without it the initial computed-style
+   change would skip the animation. The class is removed on the next rAF, which
+   gives the browser a paint frame to capture the from-values. */
+html.theme-transitioning,
+html.theme-transitioning * {
+  transition:
+    background-color 180ms ease,
+    color 180ms ease,
+    border-color 180ms ease,
+    --accent 180ms ease,
+    --accent-fg 180ms ease,
+    --accent-soft 180ms ease !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  html.theme-transitioning,
+  html.theme-transitioning * {
+    transition: none !important;
+  }
 }
 
 .app {
@@ -5253,6 +5292,37 @@ body {
   .set-hint {
     margin-left: 0;
   }
+}
+
+/* Accent color picker: a small swatch + hex readout, sized to match .set-row's
+   left label column. The native <input type="color"> renders a square
+   swatch in WebKitGTK and a circle in Chromium — we can't normalize the
+   inner shape, so we constrain the input to a 28px square and let the OS
+   draw whatever it likes inside. The swatch + label get the click target;
+   clicking the surrounding row doesn't open the picker. */
+.set-accent {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.set-accent::-webkit-color-swatch-wrapper {
+  padding: 2px;
+}
+.set-accent::-webkit-color-swatch {
+  border: none;
+  border-radius: 4px;
+}
+.set-accent__hex {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--fg-dim);
+  text-transform: lowercase;
+  margin-left: 2px;
 }
 
 /* ── tool card extras: outcome line, nested sub-agent, multi-edit labels ───── */
