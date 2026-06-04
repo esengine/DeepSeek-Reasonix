@@ -17,6 +17,7 @@ type RunMetrics struct {
 	Steps            int     `json:"steps"` // model calls (one per stream, incl. tool rounds)
 	Cost             float64 `json:"cost"`
 	Currency         string  `json:"currency"`
+	Compactions      int     `json:"compactions"`
 }
 
 // metricsSink forwards every event to the real sink and accumulates the per-call
@@ -41,6 +42,9 @@ func (s *metricsSink) Emit(e event.Event) {
 				float64(u.CompletionTokens)*p.Output) / 1e6
 			s.m.Currency = p.Currency
 		}
+	}
+	if e.Kind == event.CompactionStarted {
+		s.m.Compactions++
 	}
 	s.inner.Emit(e)
 }
