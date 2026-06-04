@@ -386,6 +386,18 @@ func parseCoverProfile(repo, path string) map[string][]coverBlock {
 // repoRelFromModulePath turns "reasonix/internal/agent/foo.go" into
 // "internal/agent/foo.go" by dropping the first path element (the module root).
 func repoRelFromModulePath(p string) string {
+	// The coverage profile uses module-qualified paths ("<module>/<rel>")
+	// because that's what `go list` emits. Strip the module prefix using
+	// the e2e bench's own module name (the only module the bench ever
+	// grades), not a generic "first path segment" heuristic — the old
+	// shape worked for `module reasonix` (single segment) but would
+	// silently mis-strip `github.com/` from a multi-segment module,
+	// leaving coverage keyed on a wrong suffix and missing every match
+	// in `changedLineCoverage`.
+	prefix := "reasonix/"
+	if strings.HasPrefix(p, prefix) {
+		return p[len(prefix):]
+	}
 	if i := strings.IndexByte(p, '/'); i >= 0 {
 		return p[i+1:]
 	}
