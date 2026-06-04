@@ -17,7 +17,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/codegraph"
@@ -140,7 +139,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	if err := netclient.Validate(proxySpec); err != nil {
 		return nil, err
 	}
-	balanceClient, err := netclient.NewHTTPClient(proxySpec, 12*time.Second, netclient.TransportOptions{})
+	balanceClient, err := netclient.NewHTTPClient(proxySpec, netclient.TransportOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -284,7 +283,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		case cfg.Codegraph.AutoInstall:
 			notify := func(msg string) { sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: msg}) }
 			notify("codegraph: fetching code-intelligence runtime in the background (one-time) — symbol-graph tools available next session")
-			codegraphClient, err := netclient.NewHTTPClient(proxySpec, 0, netclient.TransportOptions{})
+			codegraphClient, err := netclient.NewHTTPClient(proxySpec, netclient.TransportOptions{})
 			if err != nil {
 				notify("codegraph: install skipped (" + err.Error() + ")")
 			} else {

@@ -72,12 +72,12 @@ func Validate(spec ProxySpec) error {
 }
 
 // NewHTTPClient returns an HTTP client with Reasonix proxy settings applied.
-func NewHTTPClient(spec ProxySpec, timeout time.Duration, opts TransportOptions) (*http.Client, error) {
+func NewHTTPClient(spec ProxySpec, opts TransportOptions) (*http.Client, error) {
 	tr, err := NewTransport(spec, opts)
 	if err != nil {
 		return nil, err
 	}
-	return &http.Client{Timeout: timeout, Transport: tr}, nil
+	return &http.Client{Transport: tr}, nil
 }
 
 // NewTransport clones net/http's default transport and overlays the requested

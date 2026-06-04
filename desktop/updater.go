@@ -65,7 +65,7 @@ func httpClient() (*http.Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return netclient.NewHTTPClient(cfg.NetworkProxySpec(), httpTimeout, netclient.TransportOptions{})
+	return netclient.NewHTTPClient(cfg.NetworkProxySpec(), netclient.TransportOptions{})
 }
 
 // canSelfUpdate reports whether in-place update is possible. macOS is excluded:

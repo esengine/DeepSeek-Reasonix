@@ -38,7 +38,7 @@ func codegraphInstall() int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	client, err := netclient.NewHTTPClient(cfg.NetworkProxySpec(), 0, netclient.TransportOptions{})
+	client, err := netclient.NewHTTPClient(cfg.NetworkProxySpec(), netclient.TransportOptions{})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1

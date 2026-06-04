@@ -34,7 +34,9 @@ func (a *App) CheckUpdate() (*UpdateInfo, error) {
 			Err:           err.Error(),
 		}, nil
 	}
-	m, err := fetchManifest(a.reqCtx(), c)
+	ctx, cancel := context.WithTimeout(a.reqCtx(), httpTimeout)
+	defer cancel()
+	m, err := fetchManifest(ctx, c)
 	if err != nil {
 		return &UpdateInfo{
 			Current:       version,
@@ -52,7 +54,9 @@ func (a *App) CheckUpdate() (*UpdateInfo, error) {
 func (a *App) OpenDownloadPage() {
 	page := defaultDownloadPage
 	if c, err := httpClient(); err == nil {
-		if m, err := fetchManifest(a.reqCtx(), c); err == nil && m.DownloadPage != "" {
+		ctx, cancel := context.WithTimeout(a.reqCtx(), httpTimeout)
+		defer cancel()
+		if m, err := fetchManifest(ctx, c); err == nil && m.DownloadPage != "" {
 			page = m.DownloadPage
 		}
 	}
@@ -73,7 +77,9 @@ func (a *App) ApplyUpdate() error {
 	if err != nil {
 		return a.failUpdate(err)
 	}
-	m, err := fetchManifest(a.reqCtx(), c)
+	ctx, cancel := context.WithTimeout(a.reqCtx(), httpTimeout)
+	defer cancel()
+	m, err := fetchManifest(ctx, c)
 	if err != nil {
 		return a.failUpdate(err)
 	}
