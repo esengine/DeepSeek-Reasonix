@@ -34,6 +34,55 @@ type Config struct {
 	Codegraph    CodegraphConfig   `toml:"codegraph"`
 	Statusline   StatuslineConfig  `toml:"statusline"`
 	LSP          LSPConfig         `toml:"lsp"`
+	Session      Session           `toml:"session"`
+
+	// MigrationHint is set during Load when the config file uses the legacy
+	// provider-level effort field. The CLI prints it once on startup.
+	MigrationHint string `toml:"-"`
+}
+
+// Session holds runtime user state that is not part of the provider capability
+// declaration. Effort is the currently selected effort level for the active
+// session; "" means auto (omit from API requests, protecting prefix cache).
+type Session struct {
+	Provider string `toml:"provider"`
+	Effort   string `toml:"effort"`
+}
+
+// AdaptToProvider re-validates Session.Effort against the given provider
+// capability. If the current effort is not supported, it degrades to the
+// provider's default and returns a warning string.
+func (s *Session) AdaptToProvider(caps EffortCapability) string {
+	if s.Effort == "" || s.Effort == "auto" {
+		// Auto is always valid — just clear it so omitempty works.
+		s.Effort = ""
+		return ""
+	}
+	res := ResolveEffort(caps, s.Effort)
+	if res.Blocked {
+		old := s.Effort
+		s.Effort = ""
+		return fmt.Sprintf("effort %q not supported by this provider, cleared", old)
+	}
+	if res.Degraded {
+		s.Effort = res.Effort
+		return res.Warning
+	}
+	return ""
+}
+
+// ValidateEffortConfig checks the config for effort-related inconsistencies.
+// Non-DeepSeek providers without SupportedEfforts get a soft warning (not a
+// hard error) so existing user configs keep working.
+func (c *Config) ValidateEffortConfig() error {
+	for i, p := range c.Providers {
+		if p.DefaultEffort != "" && p.DefaultEffort != "auto" && len(p.SupportedEfforts) > 0 {
+			if !containsLevel(p.SupportedEfforts, p.DefaultEffort) {
+				return fmt.Errorf("providers[%d] %q: default_effort %q not in supported_efforts %v", i, p.Name, p.DefaultEffort, p.SupportedEfforts)
+			}
+		}
+	}
+	return nil
 }
 
 // UIConfig controls presentation-only settings. Theme affects CLI rendering; the
@@ -292,14 +341,23 @@ type ProviderEntry struct {
 	BalanceURL    string            `toml:"balance_url"` // optional; a provider-specific wallet-balance endpoint (DeepSeek: https://api.deepseek.com/user/balance). Empty = no balance readout.
 	ContextWindow int               `toml:"context_window"`
 	Price         *provider.Pricing `toml:"price"`
-	// Thinking / Effort are provider-kind-specific knobs forwarded to the provider
-	// via Config.Extra. The anthropic provider reads Thinking="adaptive" to enable
-	// extended thinking and Effort ("low".."max") to tune depth. The
-	// openai-compatible provider forwards Effort as reasoning_effort for
-	// thinking-capable models; DeepSeek accepts high|max.
-	// Empty = provider default.
+	// Thinking is a provider-kind-specific knob forwarded to the provider via
+	// Config.Extra. The anthropic provider reads Thinking="adaptive" to enable
+	// extended thinking. Empty = provider default.
 	Thinking string `toml:"thinking"`
-	Effort   string `toml:"effort"`
+	// Effort is the LEGACY provider-level effort field. It is read during Load
+	// for backward compatibility and migrated to Session.Effort. It is never
+	// written to TOML (render.go strips it).
+	Effort string `toml:"effort"`
+	// SupportedEfforts declares the /effort levels available for this provider.
+	// When set, EffortCapabilityForEntry and ResolveEffort use these instead
+	// of the built-in DeepSeek/Anthropic heuristics -- any third-party model can
+	// declare its own supported levels here. Empty = not configurable (UI hidden).
+	SupportedEfforts []string `toml:"supported_efforts"`
+	// DefaultEffort is the fallback level when the user's choice is not in
+	// SupportedEfforts, or when "auto" is selected (stored as "" internally so
+	// omitempty omits it from the API request -- protecting prefix cache).
+	DefaultEffort string `toml:"default_effort"`
 	// NoProxy reaches this provider's base_url directly, never through the proxy.
 	// For China-only endpoints a foreign-exit proxy resets the TLS handshake (#2803).
 	NoProxy bool `toml:"no_proxy"`
@@ -483,8 +541,9 @@ func Default() *Config {
 		Providers: []ProviderEntry{
 			{Name: "deepseek-flash", Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash", APIKeyEnv: "DEEPSEEK_API_KEY", BalanceURL: "https://api.deepseek.com/user/balance", ContextWindow: 1_000_000, Price: &provider.Pricing{CacheHit: 0.02, Input: 1, Output: 2, Currency: "¥"}},
 			{Name: "deepseek-pro", Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro", APIKeyEnv: "DEEPSEEK_API_KEY", BalanceURL: "https://api.deepseek.com/user/balance", ContextWindow: 1_000_000, Price: &provider.Pricing{CacheHit: 0.025, Input: 3, Output: 6, Currency: "¥"}},
-			{Name: "mimo-pro", Kind: "openai", BaseURL: "https://token-plan-cn.xiaomimimo.com/v1", Model: "mimo-v2.5-pro", APIKeyEnv: "MIMO_API_KEY", ContextWindow: 1_000_000, Price: &provider.Pricing{CacheHit: 0.025, Input: 3, Output: 6, Currency: "¥"}, NoProxy: true},
-			{Name: "mimo-flash", Kind: "openai", BaseURL: "https://token-plan-cn.xiaomimimo.com/v1", Model: "mimo-v2.5", APIKeyEnv: "MIMO_API_KEY", ContextWindow: 1_000_000, Price: &provider.Pricing{CacheHit: 0.02, Input: 1, Output: 2, Currency: "¥"}, NoProxy: true},
+			{Name: "mimo-pro", Kind: "openai", BaseURL: "https://token-plan-cn.xiaomimimo.com/v1", Model: "mimo-v2.5-pro", APIKeyEnv: "MIMO_API_KEY", ContextWindow: 1_000_000, Price: &provider.Pricing{CacheHit: 0.025, Input: 3, Output: 6, Currency: "¥"}, SupportedEfforts: []string{"auto", "low", "medium", "high"}, DefaultEffort: "auto", NoProxy: true},
+			{Name: "mimo-flash", Kind: "openai", BaseURL: "https://token-plan-cn.xiaomimimo.com/v1", Model: "mimo-v2.5", APIKeyEnv: "MIMO_API_KEY", ContextWindow: 1_000_000, Price: &provider.Pricing{CacheHit: 0.02, Input: 1, Output: 2, Currency: "¥"}, SupportedEfforts: []string{"auto", "low", "medium", "high"}, DefaultEffort: "auto", NoProxy: true},
+			{Name: "anthropic", Kind: "anthropic", BaseURL: "https://api.anthropic.com", Model: "claude-sonnet-4-20250514", APIKeyEnv: "ANTHROPIC_API_KEY", ContextWindow: 200_000, SupportedEfforts: []string{"auto", "low", "medium", "high", "xhigh", "max"}, DefaultEffort: "auto"},
 		},
 	}
 }
@@ -528,14 +587,28 @@ func Load() (*Config, error) {
 }
 
 // normalizeLegacyEffort migrates the retired DeepSeek effort="off" (the old
-// /thinking off that disabled thinking) to the provider default, so a config
-// written by an older version keeps loading instead of erroring on a value the
-// provider no longer accepts.
+// /thinking off that disabled thinking) and the legacy provider-level effort
+// field to the new Session.Effort field.
 func normalizeLegacyEffort(c *Config) {
-	for i := range c.Providers {
-		if strings.EqualFold(strings.TrimSpace(c.Providers[i].Effort), "off") {
-			c.Providers[i].Effort = ""
+	// Migrate the legacy provider-level Effort field to Session.Effort.
+	// Priority: first provider with a non-empty Effort wins (matches old behavior
+	// where effort was per-provider and the "current" provider was the default).
+	if c.Session.Effort == "" {
+		for i := range c.Providers {
+			effort := strings.TrimSpace(c.Providers[i].Effort)
+			if strings.EqualFold(effort, "off") {
+				effort = "" // retired "off" → auto
+			}
+			if effort != "" {
+				c.Session.Effort = effort
+				c.MigrationHint = fmt.Sprintf("migrated legacy provider effort %q to session effort", effort)
+				break
+			}
 		}
+	}
+	// Clear legacy fields so they don't persist.
+	for i := range c.Providers {
+		c.Providers[i].Effort = ""
 	}
 }
 

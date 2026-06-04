@@ -127,7 +127,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		return nil, err
 	}
 
-	execProv, err := NewProviderWithProxy(entry, proxySpec)
+	execProv, err := NewProviderWithProxy(entry, cfg.Session.Effort, proxySpec)
 	if err != nil {
 		return nil, err
 	}
@@ -378,7 +378,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		prov, price, ctxWin := execProv, entry.Price, entry.ContextWindow
 		if modelRef := subagentModelRef(cfg, sk); modelRef != "" {
 			if me, ok := cfg.ResolveModel(modelRef); ok {
-				if p, err := NewProviderWithProxy(me, proxySpec); err == nil {
+				if p, err := NewProviderWithProxy(me, cfg.Session.Effort, proxySpec); err == nil {
 					prov, price, ctxWin = p, me.Price, me.ContextWindow
 				}
 			}
@@ -458,7 +458,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			return nil, fmt.Errorf("planner_model %q is not a configured provider", pm)
 		}
 		if pe.Model != entry.Model {
-			plannerProv, err := NewProviderWithProxy(pe, proxySpec)
+			plannerProv, err := NewProviderWithProxy(pe, cfg.Session.Effort, proxySpec)
 			if err != nil {
 				return nil, fmt.Errorf("planner %q: %w", pm, err)
 			}
@@ -473,7 +473,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		if !ok {
 			return nil, fmt.Errorf("auto_plan_classifier %q is not a configured provider", cm)
 		}
-		classifierProv, err := NewProviderWithProxy(ce, proxySpec)
+		classifierProv, err := NewProviderWithProxy(ce, cfg.Session.Effort, proxySpec)
 		if err != nil {
 			return nil, fmt.Errorf("auto_plan_classifier %q: %w", cm, err)
 		}
@@ -556,13 +556,14 @@ func subagentModelKeys(name string) []string {
 // NewProvider builds a provider.Provider from a configured entry. Exported so
 // custom assemblers (e.g. the ACP per-session factory) can reuse it without
 // going through the full Build.
-func NewProvider(e *config.ProviderEntry) (provider.Provider, error) {
-	return NewProviderWithProxy(e, netclient.ProxySpec{Mode: netclient.ModeAuto})
+func NewProvider(e *config.ProviderEntry, effort string) (provider.Provider, error) {
+	return NewProviderWithProxy(e, effort, netclient.ProxySpec{Mode: netclient.ModeAuto})
 }
 
 // NewProviderWithProxy builds a provider.Provider with the configured ordinary
-// network proxy settings.
-func NewProviderWithProxy(e *config.ProviderEntry, proxy netclient.ProxySpec) (provider.Provider, error) {
+// network proxy settings. effort is the session-level effort level (from
+// Session.Effort); "" means auto/omit.
+func NewProviderWithProxy(e *config.ProviderEntry, effort string, proxy netclient.ProxySpec) (provider.Provider, error) {
 	return provider.New(e.Kind, provider.Config{
 		Name:    e.Name,
 		BaseURL: e.BaseURL,
@@ -574,7 +575,7 @@ func NewProviderWithProxy(e *config.ProviderEntry, proxy netclient.ProxySpec) (p
 		Extra: map[string]any{
 			"api_key_env": e.APIKeyEnv,
 			"thinking":    e.Thinking,
-			"effort":      e.Effort,
+			"effort":      effort,
 			"proxy_spec":  proxy,
 		},
 	})

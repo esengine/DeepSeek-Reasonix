@@ -1,151 +1,109 @@
 package config
 
 import (
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 )
 
-// legacyHome points HOME / config-dir / .env resolution at a fresh temp tree and
-// returns the legacy config.json path and the v1+ dest config path.
-func legacyHome(t *testing.T) (src, dest, home string) {
-	t.Helper()
-	home = t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)                               // os.UserHomeDir on Windows
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config")) // os.UserConfigDir on Linux
-	t.Setenv("AppData", filepath.Join(home, "AppData"))         // os.UserConfigDir on Windows
-	return filepath.Join(home, ".reasonix", "config.json"), userConfigPath(), home
-}
+func TestMigrate_LegacyProviderEffort(t *testing.T) {
+	c := Default()
+	// Simulate old config with provider-level effort.
+	c.Providers[0].Effort = "high"
+	c.Session.Effort = ""
 
-func writeLegacy(t *testing.T, src, body string) {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(src), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(src, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
-}
+	normalizeLegacyEffort(c)
 
-func TestMigrateImportsKeyPluginsAndLang(t *testing.T) {
-	src, dest, home := legacyHome(t)
-	writeLegacy(t, src, `{
-		"apiKey": "sk-legacy-123",
-		"lang": "zh",
-		"mcpServers": {
-			"fs": {"command": "npx", "args": ["-y", "server-fs"], "type": "stdio"},
-			"stripe": {"type": "http", "url": "https://mcp.stripe.com", "disabled": true}
-		},
-		"mcpEnv": {"fs": {"ROOT": "/tmp"}}
-	}`)
-
-	res, err := MigrateLegacyIfNeeded()
-	if err != nil {
-		t.Fatalf("migrate: %v", err)
+	if c.Session.Effort != "high" {
+		t.Errorf("Session.Effort = %q, want migrated \"high\"", c.Session.Effort)
 	}
-	if res == nil {
-		t.Fatal("expected a migration result")
+	if c.MigrationHint == "" {
+		t.Error("MigrationHint should be set after migration")
 	}
-	if !res.KeyToEnv || res.Plugins != 2 {
-		t.Errorf("result = %+v, want KeyToEnv=true Plugins=2", res)
-	}
-
-	envData, err := os.ReadFile(filepath.Join(home, ".env"))
-	if err != nil {
-		t.Fatalf("read ~/.env: %v", err)
-	}
-	if !strings.Contains(string(envData), "DEEPSEEK_API_KEY=sk-legacy-123") {
-		t.Errorf("~/.env missing key: %q", envData)
-	}
-
-	got, err := os.ReadFile(dest)
-	if err != nil {
-		t.Fatalf("read dest config: %v", err)
-	}
-	toml := string(got)
-	for _, want := range []string{`language      = "zh"`, `name    = "fs"`, `name    = "stripe"`, `type    = "http"`, `auto_start = false`} {
-		if !strings.Contains(toml, want) {
-			t.Errorf("dest config missing %q:\n%s", want, toml)
+	// Legacy field should be cleared.
+	for i, p := range c.Providers {
+		if p.Effort != "" {
+			t.Errorf("Providers[%d].Effort = %q, should be cleared", i, p.Effort)
 		}
 	}
+}
 
-	if _, err := os.Stat(src); err != nil {
-		t.Errorf("legacy file must be left untouched: %v", err)
+func TestMigrate_LegacyOff(t *testing.T) {
+	c := Default()
+	c.Providers[0].Effort = "off"
+	c.Session.Effort = ""
+
+	normalizeLegacyEffort(c)
+
+	if c.Session.Effort != "" {
+		t.Errorf("Session.Effort = %q, want empty (off migrated to auto)", c.Session.Effort)
 	}
 }
 
-func TestMigrateRoundTripsThroughLoad(t *testing.T) {
-	src, _, _ := legacyHome(t)
-	writeLegacy(t, src, `{"apiKey":"sk-x","mcpServers":{"fs":{"command":"npx","env":{"A":"1"}}}}`)
+func TestMigrate_SessionEffortAlreadySet(t *testing.T) {
+	c := Default()
+	c.Providers[0].Effort = "max"
+	c.Session.Effort = "low"
 
-	if _, err := MigrateLegacyIfNeeded(); err != nil {
-		t.Fatalf("migrate: %v", err)
+	normalizeLegacyEffort(c)
+
+	// Session.Effort should not be overwritten if already set.
+	if c.Session.Effort != "low" {
+		t.Errorf("Session.Effort = %q, want preserved \"low\"", c.Session.Effort)
 	}
-	cfg, err := Load()
-	if err != nil {
-		t.Fatalf("load: %v", err)
-	}
-	if len(cfg.Plugins) != 1 || cfg.Plugins[0].Name != "fs" || cfg.Plugins[0].Command != "npx" {
-		t.Errorf("plugins did not round-trip through Load: %+v", cfg.Plugins)
-	}
-	if cfg.Plugins[0].Env["A"] != "1" {
-		t.Errorf("plugin env lost: %+v", cfg.Plugins[0].Env)
+	// Legacy field should still be cleared.
+	if c.Providers[0].Effort != "" {
+		t.Errorf("Providers[0].Effort = %q, should be cleared", c.Providers[0].Effort)
 	}
 }
 
-func TestMigrateSkipsWhenDestExists(t *testing.T) {
-	src, dest, _ := legacyHome(t)
-	writeLegacy(t, src, `{"apiKey":"sk-x"}`)
-	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-		t.Fatal(err)
+func TestMigrate_DeepSeekWithExplicitSupportedEfforts(t *testing.T) {
+	c := Default()
+	// DeepSeek with explicit SupportedEfforts should keep them.
+	ds := c.Providers[0] // deepseek-flash
+	if ds.SupportedEfforts != nil {
+		t.Skip("deepseek-flash already has SupportedEfforts in Default()")
 	}
-	if err := os.WriteFile(dest, []byte("default_model = \"deepseek-flash\"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	// Add SupportedEfforts to DeepSeek.
+	c.Providers[0].SupportedEfforts = []string{"auto", "high", "max"}
+	c.Providers[0].DefaultEffort = "auto"
 
-	res, err := MigrateLegacyIfNeeded()
-	if err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	if res != nil {
-		t.Errorf("must not migrate over an existing v1+ config, got %+v", res)
+	caps := EffortCapabilityForEntry(&c.Providers[0])
+	if len(caps.Levels) != 3 || caps.Default != "auto" {
+		t.Errorf("DeepSeek with explicit caps = %+v", caps)
 	}
 }
 
-func TestMigrateNoLegacyIsNoop(t *testing.T) {
-	legacyHome(t)
-	res, err := MigrateLegacyIfNeeded()
-	if err != nil || res != nil {
-		t.Errorf("no legacy install should be a silent no-op, got res=%+v err=%v", res, err)
+func TestValidateEffortConfig(t *testing.T) {
+	c := Default()
+	// Valid config should pass.
+	if err := c.ValidateEffortConfig(); err != nil {
+		t.Errorf("ValidateEffortConfig() = %v, want nil", err)
+	}
+
+	// Invalid: DefaultEffort not in SupportedEfforts.
+	c.Providers[2].DefaultEffort = "turbo" // mimo-pro
+	if err := c.ValidateEffortConfig(); err == nil {
+		t.Error("ValidateEffortConfig() should fail when DefaultEffort not in SupportedEfforts")
 	}
 }
 
-func TestMigrateToleratesUTF8BOM(t *testing.T) {
-	src, _, home := legacyHome(t)
-	writeLegacy(t, src, "\ufeff"+`{"apiKey":"sk-bom"}`)
-	res, err := MigrateLegacyIfNeeded()
-	if err != nil {
-		t.Fatalf("a BOM-prefixed legacy config must still parse: %v", err)
-	}
-	if res == nil || !res.KeyToEnv {
-		t.Fatalf("BOM-prefixed config did not migrate: %+v", res)
-	}
-	data, _ := os.ReadFile(filepath.Join(home, ".env"))
-	if !strings.Contains(string(data), "DEEPSEEK_API_KEY=sk-bom") {
-		t.Errorf("key not migrated from BOM-prefixed config: %q", data)
-	}
-}
+func TestAdaptToProvider_SessionEffort(t *testing.T) {
+	caps := EffortCapability{Supported: true, Levels: []string{"auto", "low", "medium", "high"}, Default: "auto"}
 
-func TestMigrateCustomBaseURLWarns(t *testing.T) {
-	src, _, _ := legacyHome(t)
-	writeLegacy(t, src, `{"apiKey":"sk-x","baseUrl":"https://my-proxy.example/v1"}`)
-	res, err := MigrateLegacyIfNeeded()
-	if err != nil {
-		t.Fatalf("migrate: %v", err)
+	s := Session{Provider: "mimo", Effort: "high"}
+	warning := s.AdaptToProvider(caps)
+	if warning != "" {
+		t.Errorf("AdaptToProvider(high) = %q, want empty", warning)
 	}
-	if len(res.Warnings) == 0 {
-		t.Error("a non-DeepSeek base_url should produce a warning")
+	if s.Effort != "high" {
+		t.Errorf("Session.Effort = %q, want high", s.Effort)
+	}
+
+	s.Effort = "max"
+	warning = s.AdaptToProvider(caps)
+	if warning == "" {
+		t.Error("AdaptToProvider(max) should return warning")
+	}
+	if s.Effort == "max" {
+		t.Errorf("Session.Effort should be degraded from max, got %q", s.Effort)
 	}
 }

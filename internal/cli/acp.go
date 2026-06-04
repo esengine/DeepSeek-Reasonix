@@ -87,7 +87,7 @@ func (f *acpFactory) NewSession(ctx context.Context, p acp.SessionParams) (*cont
 		return nil, fmt.Errorf("unknown model %q", f.model)
 	}
 	proxySpec := cfg.NetworkProxySpec()
-	execProv, err := boot.NewProviderWithProxy(entry, proxySpec)
+	execProv, err := boot.NewProviderWithProxy(entry, cfg.Session.Effort, proxySpec)
 	if err != nil {
 		return nil, err
 	}
@@ -160,7 +160,7 @@ func (f *acpFactory) NewSession(ctx context.Context, p acp.SessionParams) (*cont
 			return nil, fmt.Errorf("planner_model %q is not a configured provider", pm)
 		}
 		if pe.Model != entry.Model {
-			plannerProv, err := boot.NewProviderWithProxy(pe, proxySpec)
+			plannerProv, err := boot.NewProviderWithProxy(pe, cfg.Session.Effort, proxySpec)
 			if err != nil {
 				cleanup()
 				return nil, fmt.Errorf("planner %q: %w", pm, err)
