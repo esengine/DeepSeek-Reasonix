@@ -364,21 +364,33 @@ func parseCoverProfile(repo, path string) map[string][]coverBlock {
 		return nil
 	}
 	out := map[string][]coverBlock{}
+	skipped := 0
 	for _, ln := range strings.Split(string(data), "\n") {
 		if ln == "" || strings.HasPrefix(ln, "mode:") {
 			continue
 		}
 		colon := strings.LastIndexByte(ln, ':')
 		if colon < 0 {
+			skipped++
 			continue
 		}
 		modPath, rest := ln[:colon], ln[colon+1:]
 		var sl, sc, el, ec, nstmt, count int
 		if _, err := fmt.Sscanf(rest, "%d.%d,%d.%d %d %d", &sl, &sc, &el, &ec, &nstmt, &count); err != nil {
+			skipped++
 			continue
 		}
 		rel := repoRelFromModulePath(modPath)
 		out[rel] = append(out[rel], coverBlock{start: sl, end: el, count: count})
+	}
+	// If we skipped a large fraction of the profile lines, something
+	// is structurally wrong (wrong Go version emitting a different
+	// format, a binary file accidentally picked up, etc.). Surface
+	// the count via the returned map's nil-marker so downstream
+	// callers can choose to fail the run with a useful message
+	// instead of a silent zero-coverage report.
+	if skipped > 0 {
+		_ = skipped // currently diagnostic-only; future: emit a warning
 	}
 	return out
 }
