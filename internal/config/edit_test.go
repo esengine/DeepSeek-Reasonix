@@ -115,9 +115,8 @@ func TestSetProviderEffort(t *testing.T) {
 	if err := c.SetProviderEffort("deepseek-flash", "MAX"); err != nil {
 		t.Fatalf("SetProviderEffort: %v", err)
 	}
-	p, _ := c.Provider("deepseek-flash")
-	if p.Effort != "max" {
-		t.Fatalf("effort = %q, want max", p.Effort)
+	if c.Session.Effort != "max" {
+		t.Fatalf("Session.Effort = %q, want max", c.Session.Effort)
 	}
 	if err := c.SetProviderEffort("missing", "high"); err == nil {
 		t.Fatal("SetProviderEffort should reject unknown provider")
@@ -161,14 +160,32 @@ func TestNormalizeLegacyEffortMigratesOff(t *testing.T) {
 	c := &Config{Providers: []ProviderEntry{
 		{Name: "deepseek", Effort: "off"},
 		{Name: "deepseek-upper", Effort: "OFF"},
+	}}
+	normalizeLegacyEffort(c)
+	// "off" migrates to empty (auto), so Session.Effort stays empty.
+	if c.Session.Effort != "" {
+		t.Fatalf("Session.Effort = %q, want empty (off migrated to auto)", c.Session.Effort)
+	}
+	// All legacy fields should be cleared.
+	for i, p := range c.Providers {
+		if p.Effort != "" {
+			t.Fatalf("Providers[%d].Effort = %q, should be cleared", i, p.Effort)
+		}
+	}
+}
+
+func TestNormalizeLegacyEffortMigratesHigh(t *testing.T) {
+	c := &Config{Providers: []ProviderEntry{
+		{Name: "deepseek", Effort: "off"},
 		{Name: "keep", Effort: "high"},
 	}}
 	normalizeLegacyEffort(c)
-	if c.Providers[0].Effort != "" || c.Providers[1].Effort != "" {
-		t.Fatalf("legacy off should migrate to empty, got %q/%q", c.Providers[0].Effort, c.Providers[1].Effort)
+	// "high" from the second provider should be migrated.
+	if c.Session.Effort != "high" {
+		t.Fatalf("Session.Effort = %q, want high", c.Session.Effort)
 	}
-	if c.Providers[2].Effort != "high" {
-		t.Fatalf("non-legacy effort changed: %q", c.Providers[2].Effort)
+	if c.MigrationHint == "" {
+		t.Fatal("MigrationHint should be set")
 	}
 }
 

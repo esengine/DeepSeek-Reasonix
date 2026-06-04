@@ -117,6 +117,19 @@ func RenderTOML(c *Config) string {
 	}
 	b.WriteString("\n")
 
+	b.WriteString("[session]\n")
+	if c.Session.Provider != "" {
+		fmt.Fprintf(&b, "provider = %q   # active provider name\n", c.Session.Provider)
+	} else {
+		b.WriteString("# provider = \"deepseek-flash\"   # active provider name\n")
+	}
+	if c.Session.Effort != "" {
+		fmt.Fprintf(&b, "effort   = %q   # active effort level; \"auto\" = omit from API requests (cache-safe)\n", c.Session.Effort)
+	} else {
+		b.WriteString("# effort   = \"auto\"   # active effort level; \"auto\" = omit from API requests (cache-safe)\n")
+	}
+	b.WriteString("\n")
+
 	for _, p := range c.Providers {
 		b.WriteString("[[providers]]\n")
 		fmt.Fprintf(&b, "name        = %q\n", p.Name)
@@ -147,8 +160,11 @@ func RenderTOML(c *Config) string {
 		if p.Thinking != "" {
 			fmt.Fprintf(&b, "thinking    = %q\n", p.Thinking)
 		}
-		if p.Effort != "" {
-			fmt.Fprintf(&b, "effort      = %q\n", p.Effort)
+		if len(p.SupportedEfforts) > 0 {
+			fmt.Fprintf(&b, "supported_efforts = %s\n", renderStringArray(p.SupportedEfforts))
+		}
+		if p.DefaultEffort != "" {
+			fmt.Fprintf(&b, "default_effort    = %q\n", p.DefaultEffort)
 		}
 		if p.NoProxy {
 			b.WriteString("no_proxy    = true   # reach this base_url directly, never via the proxy\n")

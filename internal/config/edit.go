@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -71,15 +72,24 @@ func (c *Config) UpsertProvider(e ProviderEntry) error {
 	return nil
 }
 
-// SetProviderEffort updates a provider's provider-specific thinking effort knob.
+// SetProviderEffort updates the session effort level. The effort is validated
+// against the named provider's capability; unsupported levels degrade to the
+// provider's default.
 func (c *Config) SetProviderEffort(name, effort string) error {
-	for i := range c.Providers {
-		if c.Providers[i].Name == name {
-			c.Providers[i].Effort = strings.ToLower(strings.TrimSpace(effort))
-			return nil
-		}
+	p, ok := c.Provider(name)
+	if !ok {
+		return fmt.Errorf("set provider effort: no provider %q", name)
 	}
-	return fmt.Errorf("set provider effort: no provider %q", name)
+	caps := EffortCapabilityForEntry(p)
+	res := ResolveEffort(caps, effort)
+	if res.Blocked {
+		return fmt.Errorf("effort is not configurable for %s", name)
+	}
+	if res.Warning != "" {
+		slog.Warn("config: effort degraded", "provider", name, "warning", res.Warning)
+	}
+	c.Session.Effort = res.Effort
+	return nil
 }
 
 // SetLanguage pins the CLI UI language; empty/auto clears the override so runtime detection falls back to REASONIX_LANG / locale.

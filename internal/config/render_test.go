@@ -40,8 +40,8 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	}
 	mm, _ := orig.Provider("mimo-pro")
 	mm.BaseURL = "http://localhost:8000/v1"
-	ds, _ := orig.Provider("deepseek-flash")
-	ds.Effort = "max"
+	orig.Session.Provider = "deepseek-flash"
+	orig.Session.Effort = "max"
 
 	rendered := RenderTOML(orig)
 
@@ -86,8 +86,11 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	if g, _ := got.Provider("mimo-pro"); g == nil || g.BaseURL != "http://localhost:8000/v1" {
 		t.Errorf("mimo-pro base_url not preserved: %+v", g)
 	}
-	if g, _ := got.Provider("deepseek-flash"); g == nil || g.Effort != "max" {
-		t.Errorf("deepseek-flash effort not preserved: %+v", g)
+	if got.Session.Provider != "deepseek-flash" {
+		t.Errorf("session provider = %q, want deepseek-flash", got.Session.Provider)
+	}
+	if got.Session.Effort != "max" {
+		t.Errorf("session effort = %q, want max", got.Session.Effort)
 	}
 	if len(got.Providers) != len(orig.Providers) {
 		t.Errorf("providers count = %d, want %d", len(got.Providers), len(orig.Providers))
