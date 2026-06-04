@@ -5541,6 +5541,7 @@ body {
   color: var(--fg);
   background: var(--hover);
 }
+
 .composer__pasted {
   display: flex;
   flex-direction: column;
@@ -5881,4 +5882,47 @@ body {
 .onboarding__skip:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+
+
+/* UsageIndicator: a small three-cell pill that mounts in the status
+   bar. The up/down arrows are in unicode (cheaper than lucide icons
+   for an always-on status bar element). The cache-hit cell is
+   dimmer than the prompt/completion cells so the eye lands on the
+   billable numbers first. */
+.usage {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  margin-left: 6px;
+  padding: 2px 4px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--fg-dim);
+  background: var(--bg-soft);
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+}
+.usage__cell {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
+  padding: 0 5px;
+  border-right: 1px solid var(--border-soft);
+}
+.usage__cell:last-child {
+  border-right: 0;
+}
+.usage__lbl {
+  opacity: 0.6;
+  font-size: 9.5px;
+}
+.usage__val {
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+.usage__cell--saved {
+  color: var(--add-fg);
+}
+.usage__cell--saved .usage__val {
+  color: var(--add-fg);
 }

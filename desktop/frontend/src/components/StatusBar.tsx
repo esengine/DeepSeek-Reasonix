@@ -3,6 +3,7 @@ import { Coins, Cpu, Wallet } from "lucide-react";
 import { EffortSwitcher } from "./EffortSwitcher";
 import { ModelSwitcher } from "./ModelSwitcher";
 import { Tooltip } from "./Tooltip";
+import { UsageIndicator } from "./UsageIndicator";
 import { SPINNER_WORDS, useI18n } from "../lib/i18n";
 import type { BalanceInfo, ContextInfo, EffortInfo, JobView, Meta, Mode, WireUsage } from "../lib/types";
 
@@ -166,6 +167,12 @@ export function StatusBar({
         <>
           <span className="statusbar__sep">·</span>
           <span className="statusbar__cache">{t("status.cacheAvg", { pct: avgPct })}</span>
+        </>
+      )}
+      {usage && (
+        <>
+          <span className="statusbar__sep">·</span>
+          <UsageIndicator usage={usage} />
         </>
       )}
       {jobs && jobs.length > 0 && (
