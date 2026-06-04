@@ -23,7 +23,12 @@ func (m *chatTUI) runEffortCommand(input string) tea.Cmd {
 
 	args := tokenizeArgs(input)
 	if len(args) < 2 {
-		current := config.EffortDisplay(entry)
+		cfg, _ := config.Load()
+		effort := ""
+		if cfg != nil {
+			effort = cfg.Session.Effort
+		}
+		current := config.EffortDisplay(effort)
 		options := strings.Join(cap.Levels, "|")
 		m.notice(fmt.Sprintf("effort for %s: %s (default: %s; options: %s)", entry.Name, current, cap.Default, options))
 		return nil
@@ -133,5 +138,10 @@ func (m *chatTUI) refreshEffortStatus() {
 	if !config.EffortCapabilityForEntry(entry).Supported {
 		return
 	}
-	m.effortLevel = config.EffortDisplay(entry)
+	cfg, _ := config.Load()
+	effort := ""
+	if cfg != nil {
+		effort = cfg.Session.Effort
+	}
+	m.effortLevel = config.EffortDisplay(effort)
 }
