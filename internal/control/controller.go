@@ -599,6 +599,7 @@ func (c *Controller) RunShell(command string) {
 		cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 		setShellKillTree(cmd)
 		cmd.WaitDelay = shellWaitDelay
+		cmd.Dir = c.cpRoot
 		var buf bytes.Buffer
 		w := io.MultiWriter(&buf, &shellWriter{emit: func(chunk string) {
 			c.sink.Emit(event.Event{
