@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 type diffOpts struct {
@@ -561,10 +562,19 @@ func gitOut(repo string, args ...string) string {
 func truncate(s string) string { return truncateFor(s, 12000) }
 
 func truncateFor(s string, max int) string {
-	if len(s) <= max {
+	if max <= 0 || len(s) <= max {
 		return s
 	}
-	return s[:max] + "\n…(truncated)…"
+	// Avoid splitting a multi-byte UTF-8 rune — `s[:max]` would otherwise
+	// drop the last 1–3 bytes of a rune and corrupt the surrounding
+	// characters when the markdown report is rendered with the same
+	// font. `utf8.RuneStart` returns true only on the first byte of a
+	// rune, so walk back until the cut lands on one.
+	cut := max
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "\n…(truncated)…"
 }
 
 func tail(s string, n int) string {
