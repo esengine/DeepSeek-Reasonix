@@ -101,7 +101,7 @@ export interface AppBindings {
   SlashArgs(input: string): Promise<SlashArgsResult>;
   ListDir(rel: string): Promise<DirEntry[]>;
   SearchFileRefs(query: string): Promise<DirEntry[]>;
-  ReadFile(rel: string, enc?: string): Promise<FilePreview>;
+  ReadFile(rel: string): Promise<FilePreview>;
   WorkspaceChanges(): Promise<WorkspaceChangesView>;
   OpenWorkspacePath(rel: string): Promise<void>;
   RevealWorkspacePath(rel: string): Promise<void>;
@@ -136,7 +136,6 @@ export interface AppBindings {
   SetSandbox(bash: string, network: boolean, workspaceRoot: string, allowWrite: string[]): Promise<void>;
   SetNetwork(n: NetworkView): Promise<void>;
   SetAgentParams(temperature: number, maxSteps: number, systemPrompt: string): Promise<void>;
-  SetFileEncoding(encoding: string): Promise<void>;
   // SetBypass toggles YOLO mode (auto-approve every tool call this session; deny
   // rules still apply). Runtime-only — not written to config.
   SetBypass(on: boolean): Promise<void>;
@@ -391,9 +390,9 @@ function makeMockApp(): AppBindings {
     },
     agent: { temperature: 0.2, maxSteps: 0, systemPrompt: "You are Reasonix, a coding agent." },
     configPath: "~/projects/reasonix/reasonix.toml",
-    fileEncoding: "",
     providerKinds: ["openai"],
     bypass: false,
+    fileEncoding: "UTF-8",
   };
   return {
     async Platform() {
@@ -791,7 +790,7 @@ function makeMockApp(): AppBindings {
         .filter((path) => path.split("/").pop()?.toLowerCase().includes(q))
         .map((name) => ({ name, isDir: false }));
     },
-    async ReadFile(rel: string, _enc?: string) {
+    async ReadFile(rel: string) {
       const samples: Record<string, string> = {
         "README.md": "# Reasonix\n\nBrowser-dev workspace preview.\n\n- Chat in the center\n- Browse files on the right\n- Keep sessions on the left\n",
         "go.mod": "module reasonix\n\ngo 1.23\n",
@@ -804,7 +803,6 @@ function makeMockApp(): AppBindings {
         size: samples[rel]?.length ?? 42,
         truncated: false,
         binary: false,
-        encoding: _enc || "UTF-8",
       };
     },
     async WorkspaceChanges() {
@@ -939,9 +937,6 @@ function makeMockApp(): AppBindings {
 	    },
     async SetAgentParams(temperature: number, maxSteps: number, systemPrompt: string) {
       settings.agent = { temperature, maxSteps, systemPrompt };
-    },
-    async SetFileEncoding(encoding: string) {
-      settings.fileEncoding = encoding;
     },
     async SetBypass(on: boolean) {
       settings.bypass = on;

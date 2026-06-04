@@ -416,19 +416,70 @@ function reducer(s: State, a: Action): State {
     case "jobs":
       return { ...s, jobs: a.jobs };
     case "history": {
-      // Only user/assistant turns with visible text or assistant reasoning — never
-      // the system prompt or tool-result messages.
-      const visible = a.messages.filter(
-        (m) =>
-          (m.role === "user" && m.content.trim() !== "") ||
-          (m.role === "assistant" && (m.content.trim() !== "" || (m.reasoning ?? "").trim() !== "")),
-      );
-      const items: Item[] = visible.map((m, i) =>
-        m.role === "user"
-          ? { kind: "user", id: `h${i}`, text: m.content }
-          : { kind: "assistant", id: `h${i}`, text: m.content, reasoning: m.reasoning ?? "", streaming: false },
-      );
-      return { ...s, items, seq: s.seq + visible.length };
+      // Reconstruct the full transcript from saved messages, including tool
+      // cards that were previously dropped. System messages are skipped; tool
+      // result messages are folded into their matching dispatch cards.
+      const msgs = a.messages;
+
+      // Build a lookup: toolCallId → tool result content for filling in tool
+      // card output. Multiple tool messages may share one call id (sub-agent
+      // inner results), but the first match is the canonical one.
+      const resultMap = new Map<string, { content: string; name: string }>();
+      for (const m of msgs) {
+        if (m.role === "tool" && m.toolCallId) {
+          if (!resultMap.has(m.toolCallId)) {
+            resultMap.set(m.toolCallId, { content: m.content, name: m.toolName ?? "" });
+          }
+        }
+      }
+
+      const items: Item[] = [];
+      let seq = s.seq;
+      for (let i = 0; i < msgs.length; i++) {
+        const m = msgs[i];
+        if (m.role === "system") continue;
+        if (m.role === "tool") continue; // folded into tool cards below
+        if (m.role === "user") {
+          if (m.content.trim() === "") continue;
+          items.push({ kind: "user", id: `h${seq}`, text: m.content });
+          seq++;
+          continue;
+        }
+        if (m.role === "assistant") {
+          const hasText = m.content.trim() !== "" || (m.reasoning ?? "").trim() !== "";
+          const toolCalls = m.toolCalls ?? [];
+          // Only emit an assistant bubble if it has visible text or reasoning.
+          if (hasText) {
+            items.push({
+              kind: "assistant",
+              id: `h${seq}`,
+              text: m.content,
+              reasoning: m.reasoning ?? "",
+              streaming: false,
+            });
+            seq++;
+          }
+          // Reconstruct tool cards from the assistant's tool calls.
+          for (const tc of toolCalls) {
+            const result = resultMap.get(tc.id);
+            const output = result?.content ?? "";
+            const hasError = output.startsWith("[error") || output.startsWith("Error:");
+            items.push({
+              kind: "tool",
+              id: tc.id || `ht${seq}`,
+              name: tc.name,
+              args: tc.arguments ?? "",
+              readOnly: false,
+              status: hasError ? "error" : "done",
+              output,
+              error: hasError ? output : undefined,
+            });
+            seq++;
+          }
+          continue;
+        }
+      }
+      return { ...s, items, seq };
     }
     case "local_notice":
       return {
@@ -731,13 +782,13 @@ export function useController() {
     // "fork" branches into a new session; "summ-*" compress the log; the rest
     // restore in place. All keep code intact (except the code/both restores).
     if (scope === "fork") {
-      await app.Fork(turn).catch((e) => { console.error("fork failed:", e); dispatch({ type: "local_notice", level: "warn" as const, text: `Fork failed: ${e?.message ?? e}` }); });
+      await app.Fork(turn).catch(() => {});
     } else if (scope === "summ-from") {
-      await app.SummarizeFrom(turn).catch((e) => { console.error("summarize failed:", e); dispatch({ type: "local_notice", level: "warn" as const, text: `Summarize failed: ${e?.message ?? e}` }); });
+      await app.SummarizeFrom(turn).catch(() => {});
     } else if (scope === "summ-upto") {
-      await app.SummarizeUpTo(turn).catch((e) => { console.error("summarize failed:", e); dispatch({ type: "local_notice", level: "warn" as const, text: `Summarize failed: ${e?.message ?? e}` }); });
+      await app.SummarizeUpTo(turn).catch(() => {});
     } else {
-      await app.Rewind(turn, scope).catch((e) => { console.error("rewind failed:", e); dispatch({ type: "local_notice", level: "warn" as const, text: `Rewind failed: ${e?.message ?? e}` }); });
+      await app.Rewind(turn, scope).catch(() => {});
     }
     const messages = await app.History().catch(() => [] as HistoryMessage[]);
     dispatch({ type: "reset" });

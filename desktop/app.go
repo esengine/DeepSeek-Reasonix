@@ -615,6 +615,22 @@ type HistoryMessage struct {
 	Role      string `json:"role"`
 	Content   string `json:"content"`
 	Reasoning string `json:"reasoning,omitempty"`
+	// ToolCalls carries the tool calls an assistant message requested. Each
+	// entry mirrors a provider.ToolCall so the frontend can reconstruct tool
+	// cards in historical sessions.
+	ToolCalls []HistoryToolCall `json:"toolCalls,omitempty"`
+	// ToolCallID is set on tool-result messages (role:"tool") so the frontend
+	// can match results back to their dispatch cards.
+	ToolCallID string `json:"toolCallId,omitempty"`
+	// ToolName is set on tool-result messages for display.
+	ToolName string `json:"toolName,omitempty"`
+}
+
+// HistoryToolCall is one tool call from a historical assistant message.
+type HistoryToolCall struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
 }
 
 // History returns the session's message log.
@@ -640,7 +656,22 @@ func historyMessages(msgs []provider.Message, resolveUserContent func(string) st
 		if m.Role == provider.RoleAssistant {
 			reasoning = m.ReasoningContent
 		}
-		out = append(out, HistoryMessage{Role: string(m.Role), Content: content, Reasoning: reasoning})
+		hm := HistoryMessage{Role: string(m.Role), Content: content, Reasoning: reasoning}
+		// Preserve tool calls from assistant messages so the frontend can
+		// reconstruct tool cards.
+		if m.Role == provider.RoleAssistant && len(m.ToolCalls) > 0 {
+			hm.ToolCalls = make([]HistoryToolCall, len(m.ToolCalls))
+			for i, tc := range m.ToolCalls {
+				hm.ToolCalls[i] = HistoryToolCall{ID: tc.ID, Name: tc.Name, Arguments: tc.Arguments}
+			}
+		}
+		// Preserve tool result linkage so the frontend can fill in tool card
+		// output/errors.
+		if m.Role == provider.RoleTool {
+			hm.ToolCallID = m.ToolCallID
+			hm.ToolName = m.Name
+		}
+		out = append(out, hm)
 	}
 	return out
 }
@@ -1856,7 +1887,6 @@ type FilePreview struct {
 	Size      int64  `json:"size"`
 	Truncated bool   `json:"truncated"`
 	Binary    bool   `json:"binary"`
-	Encoding  string `json:"encoding,omitempty"`
 	Err       string `json:"err,omitempty"`
 }
 
@@ -1979,8 +2009,7 @@ func (a *App) SearchFileRefs(query string) []DirEntry {
 }
 
 // ReadFile returns a small text preview for a file under the current workspace.
-// enc overrides auto-detection when non-empty (e.g. "UTF-8", "GB18030").
-func (a *App) ReadFile(rel string, enc string) FilePreview {
+func (a *App) ReadFile(rel string) FilePreview {
 	out := FilePreview{Path: rel}
 	path, ok, err := workspacePath(rel)
 	if err != nil || !ok {
@@ -2020,27 +2049,18 @@ func (a *App) ReadFile(rel string, enc string) FilePreview {
 		out.Truncated = true
 	}
 
-	// When the caller specifies an encoding, skip auto-detection entirely.
-	if forcedKind, ok := fileenc.ParseName(enc); ok {
-		decoded := fileenc.Decode(data, forcedKind)
-		out.Body = string(decoded)
-		out.Encoding = fileenc.Name(forcedKind)
-		return out
-	}
-
 	// Check for BOM first (just the first 2-3 bytes — always complete
 	// even at a truncation boundary). BOM-prefixed files skip the NUL
 	// check since UTF-16 normally contains 0x00 for ASCII characters.
 	bomKind := fileenc.DetectQuick(data)
 	if bomKind != fileenc.UTF8 {
-		detected, _ := fileenc.Detect(data)
-		if detected == fileenc.LossyUTF8 {
+		enc, _ := fileenc.Detect(data)
+		if enc == fileenc.LossyUTF8 {
 			out.Binary = true
 			return out
 		}
-		decoded := fileenc.Decode(data, detected)
+		decoded := fileenc.Decode(data, enc)
 		out.Body = string(decoded)
-		out.Encoding = fileenc.Name(detected)
 		return out
 	}
 
@@ -2057,13 +2077,12 @@ func (a *App) ReadFile(rel string, enc string) FilePreview {
 	if out.Truncated {
 		data = trimUTF8PartialSuffix(data)
 	}
-	detected, _ := fileenc.Detect(data)
-	if detected == fileenc.LossyUTF8 {
+	enc, _ := fileenc.Detect(data)
+	if enc == fileenc.LossyUTF8 {
 		out.Binary = true
 		return out
 	}
-	out.Body = string(fileenc.Decode(data, detected))
-	out.Encoding = fileenc.Name(detected)
+	out.Body = string(fileenc.Decode(data, enc))
 	return out
 }
 

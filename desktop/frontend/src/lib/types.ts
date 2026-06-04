@@ -45,24 +45,11 @@ export interface WireUsage {
   cacheHitTokens: number;
   cacheMissTokens: number;
   reasoningTokens?: number;
-  cacheDiagnostics?: WireCacheDiagnostics;
   // Session-cumulative cache tokens — the status bar shows the aggregate
   // hit-rate (Σhit/Σ(hit+miss)), steadier than the single-turn cacheHitTokens.
   sessionCacheHitTokens: number;
   sessionCacheMissTokens: number;
   costUsd?: number;
-}
-
-export interface WireCacheDiagnostics {
-  prefixHash: string;
-  prefixChanged: boolean;
-  prefixChangeReasons?: string[];
-  systemHash: string;
-  toolsHash: string;
-  logRewriteVersion: number;
-  toolSchemaTokens: number;
-  cacheMissTokens: number;
-  cacheHitTokens: number;
 }
 
 export interface WireApproval {
@@ -115,6 +102,15 @@ export interface HistoryMessage {
   role: string;
   content: string;
   reasoning?: string;
+  toolCalls?: HistoryToolCall[];
+  toolCallId?: string;
+  toolName?: string;
+}
+
+export interface HistoryToolCall {
+  id: string;
+  name: string;
+  arguments: string;
 }
 
 // CheckpointMeta is one rewind point (a user turn) for the rewind UI.
@@ -186,7 +182,6 @@ export interface FilePreview {
   size: number;
   truncated: boolean;
   binary: boolean;
-  encoding?: string;
   err?: string;
 }
 
@@ -399,7 +394,6 @@ export interface AgentView {
 export interface SettingsView {
   defaultModel: string;
   plannerModel: string;
-  fileEncoding: string;
   providers: ProviderView[];
   permissions: PermissionsView;
   sandbox: SandboxView;
@@ -407,7 +401,8 @@ export interface SettingsView {
   agent: AgentView;
   configPath: string;
   providerKinds: string[]; // provider implementations the kernel registered (for the kind picker)
-  bypass: boolean; // live YOLO state (runtime-only) — whether approvals are currently being skipped this session
+  bypass: boolean; // live YOLO state (runtime-only) — whether approvals are skipped this session
+  fileEncoding: string; // project-level file encoding (e.g. "UTF-8", "GB18030")
 }
 
 // Auto-updater payloads (desktop/updater.go). UpdateInfo drives the update banner;

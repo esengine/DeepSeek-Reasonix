@@ -285,15 +285,53 @@ function sessionMetaLine(s: SessionMeta, tr: ReturnType<typeof useT>): string {
 }
 
 function previewMessagesToItems(messages: HistoryMessage[]): Item[] {
-  return messages
-    .filter(
-      (m) =>
-        (m.role === "user" && m.content.trim() !== "") ||
-        (m.role === "assistant" && (m.content.trim() !== "" || (m.reasoning ?? "").trim() !== "")),
-    )
-    .map((m, i) =>
-      m.role === "user"
-        ? { kind: "user", id: `hp${i}`, text: m.content }
-        : { kind: "assistant", id: `hp${i}`, text: m.content, reasoning: m.reasoning ?? "", streaming: false },
-    );
+  // Build a lookup: toolCallId → tool result content for filling in tool cards.
+  const resultMap = new Map<string, string>();
+  for (const m of messages) {
+    if (m.role === "tool" && m.toolCallId && !resultMap.has(m.toolCallId)) {
+      resultMap.set(m.toolCallId, m.content);
+    }
+  }
+
+  const items: Item[] = [];
+  let seq = 0;
+  for (const m of messages) {
+    if (m.role === "system" || m.role === "tool") continue;
+    if (m.role === "user") {
+      if (m.content.trim() === "") continue;
+      items.push({ kind: "user", id: `hp${seq}`, text: m.content });
+      seq++;
+      continue;
+    }
+    if (m.role === "assistant") {
+      const hasText = m.content.trim() !== "" || (m.reasoning ?? "").trim() !== "";
+      const toolCalls = m.toolCalls ?? [];
+      if (hasText) {
+        items.push({
+          kind: "assistant",
+          id: `hp${seq}`,
+          text: m.content,
+          reasoning: m.reasoning ?? "",
+          streaming: false,
+        });
+        seq++;
+      }
+      for (const tc of toolCalls) {
+        const output = resultMap.get(tc.id) ?? "";
+        const hasError = output.startsWith("[error") || output.startsWith("Error:");
+        items.push({
+          kind: "tool",
+          id: tc.id || `hpt${seq}`,
+          name: tc.name,
+          args: tc.arguments ?? "",
+          readOnly: false,
+          status: hasError ? "error" : "done",
+          output,
+          error: hasError ? output : undefined,
+        });
+        seq++;
+      }
+    }
+  }
+  return items;
 }
