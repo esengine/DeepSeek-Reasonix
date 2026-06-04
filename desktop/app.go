@@ -7,7 +7,6 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	goruntime "runtime"
 	"sort"
@@ -2070,18 +2069,7 @@ func (a *App) RevealWorkspacePath(rel string) error {
 	if err != nil || !ok {
 		return os.ErrInvalid
 	}
-	switch goruntime.GOOS {
-	case "darwin":
-		return exec.Command("open", "-R", path).Start()
-	case "windows":
-		return exec.Command("explorer", "/select,", path).Start()
-	default:
-		dir := path
-		if info, err := os.Stat(path); err == nil && !info.IsDir() {
-			dir = filepath.Dir(path)
-		}
-		return exec.Command("xdg-open", dir).Start()
-	}
+	return revealWorkspacePath(goruntime.GOOS, path)
 }
 
 func (a *App) notice(text string) {

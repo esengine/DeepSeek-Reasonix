@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -181,6 +182,59 @@ func TestWindowsOpenWorkspacePathAvoidsCmdShell(t *testing.T) {
 	}
 	if strings.Contains(body, "cmd") || strings.Contains(body, "/c") {
 		t.Fatal("Windows workspace opener must not route paths through cmd.exe")
+	}
+}
+
+func TestRevealWorkspaceCommandByPlatform(t *testing.T) {
+	tests := []struct {
+		name     string
+		goos     string
+		path     string
+		isDir    bool
+		wantName string
+		wantArgs []string
+	}{
+		{
+			name:     "macOS reveals files with Finder selection",
+			goos:     "darwin",
+			path:     "/repo/src/main.go",
+			wantName: "open",
+			wantArgs: []string{"open", "-R", "/repo/src/main.go"},
+		},
+		{
+			name:     "Windows reveals files with Explorer selection",
+			goos:     "windows",
+			path:     `C:\repo\src\main.go`,
+			wantName: "explorer",
+			wantArgs: []string{"explorer", `/select,C:\repo\src\main.go`},
+		},
+		{
+			name:     "Linux reveals files by opening parent folder",
+			goos:     "linux",
+			path:     "/repo/src/main.go",
+			wantName: "xdg-open",
+			wantArgs: []string{"xdg-open", "/repo/src"},
+		},
+		{
+			name:     "Linux opens folders directly",
+			goos:     "linux",
+			path:     "/repo/src",
+			isDir:    true,
+			wantName: "xdg-open",
+			wantArgs: []string{"xdg-open", "/repo/src"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := revealWorkspaceCommand(tt.goos, tt.path, tt.isDir)
+			if filepath.Base(cmd.Path) != tt.wantName {
+				t.Fatalf("command path = %q, want basename %q", cmd.Path, tt.wantName)
+			}
+			if !reflect.DeepEqual(cmd.Args, tt.wantArgs) {
+				t.Fatalf("command args = %#v, want %#v", cmd.Args, tt.wantArgs)
+			}
+		})
 	}
 }
 

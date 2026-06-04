@@ -12,6 +12,7 @@ import {
   Columns2,
   FileText,
   Folder,
+  FolderSearch,
   GitBranch,
   Maximize2,
   MessageSquarePlus,
@@ -37,7 +38,8 @@ const WORKSPACE_TREE_MIN_WIDTH = 220;
 const WORKSPACE_TREE_DEFAULT_WIDTH = WORKSPACE_TREE_MIN_WIDTH;
 const WORKSPACE_TREE_MAX_WIDTH = 420;
 const WORKSPACE_PREVIEW_MIN_WIDTH = 420;
-const WORKSPACE_CONTEXT_MENU_FILE_HEIGHT = 92;
+const WORKSPACE_CONTEXT_MENU_FILE_HEIGHT = 136;
+const WORKSPACE_CONTEXT_MENU_FOLDER_HEIGHT = 92;
 const WORKSPACE_CONTEXT_MENU_REF_HEIGHT = 48;
 
 function clampWorkspaceTreeWidth(width: number, panelWidth?: number): number {
@@ -135,6 +137,12 @@ function formatBytes(n: number): string {
   return `${n} B`;
 }
 
+function revealMenuKey(platform: string): "workspace.revealInFinder" | "workspace.revealInExplorer" | "workspace.revealInFileManager" {
+  if (platform === "darwin") return "workspace.revealInFinder";
+  if (platform === "windows") return "workspace.revealInExplorer";
+  return "workspace.revealInFileManager";
+}
+
 function isDeletedChange(row: WorkspaceChangeView): boolean {
   return !!row.gitStatus && row.gitStatus.includes("D");
 }
@@ -155,6 +163,7 @@ export function WorkspacePanel({
   onToggleMaximized,
   onPreviewModeChange,
   onAddToChat,
+  onNotice,
   changesRefreshKey,
 }: {
   open: boolean;
@@ -165,6 +174,7 @@ export function WorkspacePanel({
   onToggleMaximized: () => void;
   onPreviewModeChange?: (active: boolean) => void;
   onAddToChat?: (text: string) => void;
+  onNotice?: (text: string, level?: "info" | "warn") => void;
   changesRefreshKey?: number;
 }) {
   const t = useT();
@@ -187,10 +197,26 @@ export function WorkspacePanel({
   const [treeVisible, setTreeVisible] = useState(true);
   const [treeWidth, setTreeWidth] = useState(loadWorkspaceTreeWidth);
   const [treeResizing, setTreeResizing] = useState(false);
+  const [platform, setPlatform] = useState("");
 
   const loadDir = useCallback(async (dir: string) => {
     const entries = await app.ListDir(dir).catch(() => []);
     setEntriesByDir((prev) => ({ ...prev, [dir]: entries ?? [] }));
+  }, []);
+
+  useEffect(() => {
+    let live = true;
+    app
+      .Platform()
+      .then((next) => {
+        if (live) setPlatform(next);
+      })
+      .catch(() => {
+        if (live) setPlatform("");
+      });
+    return () => {
+      live = false;
+    };
   }, []);
 
   const loadChanges = useCallback(async () => {
@@ -474,6 +500,7 @@ export function WorkspacePanel({
   const openTreeMenu = (event: ReactMouseEvent<HTMLElement>, path: string, isDir: boolean) => {
     event.preventDefault();
     event.stopPropagation();
+    window.getSelection()?.removeAllRanges();
     setSelectionMenu(null);
     setTreeMenu({ x: event.clientX, y: event.clientY, path, isDir });
   };
@@ -505,6 +532,18 @@ export function WorkspacePanel({
       onAddToChat?.(formatSelectionReference(target.path, file.body) + suffix);
     } catch {
       onAddToChat?.(formatWorkspaceReference(target.path, false));
+    }
+  };
+
+  const revealTreePath = async () => {
+    if (!treeMenu) return;
+    const target = treeMenu.path;
+    setTreeMenu(null);
+    try {
+      await app.RevealWorkspacePath(target);
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      onNotice?.(t("workspace.revealFailed", { path: target, err: detail }), "warn");
     }
   };
 
@@ -819,7 +858,7 @@ export function WorkspacePanel({
         <FloatingMenu
           x={treeMenu.x}
           y={treeMenu.y}
-          estimatedHeight={treeMenu.isDir ? WORKSPACE_CONTEXT_MENU_REF_HEIGHT : WORKSPACE_CONTEXT_MENU_FILE_HEIGHT}
+          estimatedHeight={treeMenu.isDir ? WORKSPACE_CONTEXT_MENU_FOLDER_HEIGHT : WORKSPACE_CONTEXT_MENU_FILE_HEIGHT}
           className="workspace-tree-menu"
         >
           <FloatingMenuItems
@@ -828,6 +867,11 @@ export function WorkspacePanel({
                 icon: <MessageSquarePlus size={14} />,
                 label: treeMenu.isDir ? t("workspace.addFolderReferenceToChat") : t("workspace.addFileReferenceToChat"),
                 onSelect: addTreeReferenceToChat,
+              },
+              {
+                icon: <FolderSearch size={14} />,
+                label: t(revealMenuKey(platform)),
+                onSelect: () => void revealTreePath(),
               },
               ...(treeMenu.isDir
                 ? []

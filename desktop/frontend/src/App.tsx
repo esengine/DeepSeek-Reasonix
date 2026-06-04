@@ -1036,6 +1036,7 @@ export default function App() {
           onToggleMaximized={() => setWorkspacePanelMaximized((value) => !value)}
           onPreviewModeChange={handleWorkspacePreviewModeChange}
           onAddToChat={addToChat}
+          onNotice={notice}
           changesRefreshKey={workspaceChangesRefreshKey}
         />
       </div>
