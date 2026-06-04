@@ -31,7 +31,7 @@ export type ToolStatus = "running" | "done" | "error" | "stopped";
 export type LiveStream = { id: string; text: string; reasoning: string };
 
 export type Item =
-  | { kind: "user"; id: string; text: string }
+  | { kind: "user"; id: string; text: string; pending?: boolean; failed?: boolean }
   | { kind: "assistant"; id: string; text: string; reasoning: string; streaming: boolean }
   | { kind: "phase"; id: string; text: string }
   | { kind: "notice"; id: string; level: "info" | "warn"; text: string }
@@ -84,13 +84,10 @@ interface State {
   // live is the streaming segment's accumulating text/reasoning, kept out of
   // items so a token only updates this O(1) field, not the whole backlog.
   live?: LiveStream;
-  // pendingUser holds a just-sent message whose bubble is deferred until the
-  // server's first real packet, so an Esc/Stop before any reply "un-sends" it —
-  // restoring the text to the composer with nothing left in the transcript. It's
-  // committed by the first packet (or, defensively, at turn end). discardTurn is
-  // set on un-send so the cancelled turn's already-buffered events are swallowed
-  // until its turn_done settles.
-  pendingUser?: string;
+  // pendingUser tracks the optimistic user bubble inserted immediately on send.
+  // The first real server packet confirms it; Esc/Stop before that packet removes
+  // it and restores the text to the composer.
+  pendingUser?: { id: string; text: string };
   discardTurn?: boolean;
   // turnStartAt is the wall-clock ms the current turn began (0 when idle), and
   // turnTokens accumulates the output tokens reported this turn — together they
@@ -125,6 +122,7 @@ type Action =
   | { type: "event"; e: WireEvent }
   | { type: "user"; text: string }
   | { type: "unsend" }
+  | { type: "send_failed"; error: string }
   | { type: "meta"; meta: Meta }
   | { type: "context"; context: ContextInfo }
   | { type: "balance"; balance: BalanceInfo }
@@ -148,16 +146,15 @@ function ensureAssistant(s: State): { items: Item[]; id: string; seq: number } {
   return { items: [...s.items, item], id, seq: s.seq + 1 };
 }
 
-// flushPendingUser commits the deferred user bubble into the transcript (a no-op
-// when none is pending). Called by the first real packet of a turn, and at turn
-// end as a fallback so an error-before-reply or empty turn still shows what the
-// user sent.
-function flushPendingUser(s: State): State {
+// confirmPendingUser settles the optimistic user bubble once the backend has
+// observed the turn. The bubble already exists, so this must never append.
+function confirmPendingUser(s: State): State {
   if (s.pendingUser === undefined) return s;
   return {
     ...s,
-    seq: s.seq + 1,
-    items: [...s.items, { kind: "user", id: `u${s.seq}`, text: s.pendingUser }],
+    items: s.items.map((it) =>
+      it.kind === "user" && it.id === s.pendingUser?.id ? { ...it, pending: false } : it,
+    ),
     pendingUser: undefined,
   };
 }
@@ -169,11 +166,11 @@ function applyEvent(s: State, e: WireEvent): State {
     if (e.kind === "turn_done") return { ...s, discardTurn: false, running: false, turnActive: false, currentAssistant: undefined, live: undefined };
     return s;
   }
-  // The first real packet means the server replied — commit the deferred user
-  // bubble before rendering it. turn_started is local (emitted before the
-  // request) and turn_done is handled in its own case, so neither commits.
+  // The first real packet means the server replied — confirm the optimistic user
+  // bubble before rendering follow-up events. turn_started is local and turn_done
+  // has its own finalization path.
   if (s.pendingUser !== undefined && e.kind !== "turn_started" && e.kind !== "turn_done") {
-    s = flushPendingUser(s);
+    s = confirmPendingUser(s);
   }
   if (e.kind === "retrying") {
     return { ...s, retry: { attempt: e.retryAttempt ?? 0, max: e.retryMax ?? 0 } };
@@ -360,10 +357,10 @@ function applyEvent(s: State, e: WireEvent): State {
       return { ...s, ask: e.ask };
 
     case "turn_done": {
-      // A turn that ended while its bubble was still deferred (an error before any
-      // reply, or an empty turn) was really sent — commit it so it isn't lost. A
+      // A turn that ended before any real content was still observed by the
+      // backend, so keep the optimistic user bubble and mark it confirmed. A
       // user-cancel before any reply takes the un-send path instead (discardTurn).
-      if (s.pendingUser !== undefined) s = flushPendingUser(s);
+      if (s.pendingUser !== undefined) s = confirmPendingUser(s);
       // The turn is over, so nothing more will arrive: fold any residual live
       // segment (a turn that errored before its closing `message`) back into its
       // item, freeze a streaming assistant, and settle any tool still "running"
@@ -389,22 +386,48 @@ function applyEvent(s: State, e: WireEvent): State {
 
 function reducer(s: State, a: Action): State {
   switch (a.type) {
-    case "user":
-      // Defer the bubble (see pendingUser): it lands in the transcript only once
-      // the server replies, so an Esc before then can un-send it cleanly.
+    case "user": {
+      const id = `u${s.seq}`;
       return {
         ...s,
         running: true,
         turnStartAt: Date.now(),
         turnTokens: 0,
-        pendingUser: a.text,
+        seq: s.seq + 1,
+        pendingUser: { id, text: a.text },
         discardTurn: false,
+        items: [...s.items, { kind: "user", id, text: a.text, pending: true }],
       };
+    }
     case "unsend":
-      // Esc/Stop before any reply: drop the deferred bubble and mark the turn
-      // discarded so its trailing events are swallowed. The composer restores the
-      // text from cancel()'s return value.
-      return { ...s, pendingUser: undefined, discardTurn: true, running: false, live: undefined };
+      // Esc/Stop before any reply: drop the optimistic bubble and mark the turn
+      // discarded so its trailing events are swallowed.
+      return {
+        ...s,
+        pendingUser: undefined,
+        discardTurn: true,
+        running: false,
+        live: undefined,
+        items: s.pendingUser ? s.items.filter((it) => it.id !== s.pendingUser?.id) : s.items,
+      };
+    case "send_failed": {
+      if (!s.pendingUser) return s;
+      const notice: Item = { kind: "notice", id: `n${s.seq}`, level: "warn", text: `Send failed: ${a.error}` };
+      const items = s.items.map((it) =>
+        it.kind === "user" && it.id === s.pendingUser?.id
+          ? { ...it, pending: false, failed: true }
+          : it,
+      );
+      return {
+        ...s,
+        pendingUser: undefined,
+        running: false,
+        turnActive: false,
+        live: undefined,
+        seq: s.seq + 1,
+        items: [...items, notice],
+      };
+    }
     case "meta":
       return { ...s, meta: a.meta };
     case "context":
@@ -452,6 +475,9 @@ function reducer(s: State, a: Action): State {
       return s;
   }
 }
+
+export const testInitialState = initialState;
+export const testReducer = reducer;
 
 export function useController() {
   const [state, dispatch] = useReducer(reducer, initialState);
@@ -553,7 +579,9 @@ export function useController() {
     const display = displayText.trim();
     const submit = submitText.trim();
     const call = display !== submit ? app.SubmitDisplay(display, submit) : app.Submit(submit);
-    call.catch(() => {});
+    call.catch((error) => {
+      dispatch({ type: "send_failed", error: error instanceof Error ? error.message : String(error) });
+    });
   }, []);
 
   const notice = useCallback((text: string, level: "info" | "warn" = "info") => {
@@ -566,7 +594,7 @@ export function useController() {
   const cancel = useCallback((): string | undefined => {
     const cur = stateRef.current;
     if (cur.running && cur.pendingUser !== undefined) {
-      const text = cur.pendingUser;
+      const text = cur.pendingUser.text;
       dispatch({ type: "unsend" });
       app.Cancel().catch(() => {});
       return text;

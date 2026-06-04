@@ -151,7 +151,7 @@ export function Transcript({
   const userTurn = new Map<string, number>();
   let nt = 0;
   for (const it of items) {
-    if (it.kind === "user") userTurn.set(it.id, nt++);
+    if (it.kind === "user" && !it.failed) userTurn.set(it.id, nt++);
   }
 
   return (
@@ -166,6 +166,8 @@ export function Transcript({
               <UserMessage
                 key={it.id}
                 text={it.text}
+                pending={it.pending}
+                failed={it.failed}
                 turn={tn}
                 open={tn != null && openTurn === tn}
                 onToggle={() => setOpenTurn((cur) => (cur === tn ? null : (tn ?? null)))}

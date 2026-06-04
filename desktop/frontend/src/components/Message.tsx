@@ -10,23 +10,28 @@ type AssistantItem = Extract<Item, { kind: "assistant" }>;
 
 export function UserMessage({
   text,
+  pending,
+  failed,
   turn,
   open,
   onToggle,
   onRewind,
 }: {
   text: string;
+  pending?: boolean;
+  failed?: boolean;
   turn?: number;
   open?: boolean; // whether this message's rewind menu is the open one (lifted to Transcript)
   onToggle?: () => void;
   onRewind?: (turn: number, scope: string) => void;
 }) {
   const t = useT();
-  const canRewind = onRewind != null && turn != null;
+  const canRewind = !pending && !failed && onRewind != null && turn != null;
   const rewind = (scope: string) => onRewind?.(turn as number, scope);
   const displayText = text.replace(/@\.reasonix\/attachments\/[^\s]+/g, "[image]");
+  const statusClass = failed ? " msg--user-failed" : pending ? " msg--user-pending" : "";
   return (
-    <div className="msg msg--user">
+    <div className={`msg msg--user${statusClass}`}>
       <span className="msg__caret">›</span>
       <div className="msg__text">{displayText}</div>
       {canRewind && (

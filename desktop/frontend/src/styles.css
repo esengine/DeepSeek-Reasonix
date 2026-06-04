@@ -1042,6 +1042,12 @@ body {
   align-items: baseline;
   color: var(--fg);
 }
+.msg--user-pending {
+  opacity: 0.72;
+}
+.msg--user-failed {
+  color: var(--danger);
+}
 /* Rewind affordance on a user message: an always-visible (dim) ⟲ at the right of
    the row that toggles a dropdown popover of actions. The menu is absolutely
    positioned and vertical so all options (rewind scopes / fork / summarize) are
