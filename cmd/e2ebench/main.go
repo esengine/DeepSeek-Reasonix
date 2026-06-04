@@ -329,6 +329,15 @@ func copyDir(src, dst string) error {
 		if err != nil {
 			return err
 		}
+		// Skip symlinks. The seed workdir is a checked-in source tree,
+		// not a user-supplied input, so symlinks would be intentional
+		// (a `node_modules` shim, a vendored link to a sibling repo).
+		// Following them is dangerous (we'd copy a file the agent
+		// shouldn't see, like a fixture secret outside the seed) and
+		// recreating them is the more conservative behaviour.
+		if info.Mode()&os.ModeSymlink != 0 {
+			return nil
+		}
 		rel, _ := filepath.Rel(src, p)
 		target := filepath.Join(dst, rel)
 		if info.IsDir() {
