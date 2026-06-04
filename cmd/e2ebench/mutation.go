@@ -69,25 +69,8 @@ func runMutation(repo, base string, srcFiles []string, refs []testRef) mutationR
 			}
 			cmd := exec.Command("go", "test", "-run", runRe, pkg)
 			cmd.Dir = repo
-			// Bound the wait for the mutated-binary test run. Without
-			// WaitDelay, a mutant that compiles but wedges a test
-			// (e.g. infinite loop, blocking syscall) would block the
-			// bench forever, AND the explicit WriteFile restore below
-			// would not fire. 2 minutes matches what `go test -timeout`
-			// uses by default — long enough for a slow legitimate
-			// test, short enough that a hung binary never pins the
-			// bench. After WaitDelay, exec closes the child's I/O,
-			// unblocking the stdio-bound wait even when SIGKILL is
-			// ignored.
-			cmd.WaitDelay = 2 * time.Minute
-			// Restore the source no matter what — even when the test
-			// binary wedges, panics, or the process is killed by the
-			// test-timeout cap. The previous shape only restored on
-			// the happy path; a panic between WriteFile and the
-			// `caught := ...` line would leave the file in mutated
-			// state and break the next mutant (and the next attempt's
-			// diff-mode run via resetTree, which `git clean -fd`
-			// would then re-load from the mutated working tree).
+			cmd.WaitDelay = 2 * time.Minute // bound the wait for a mutant that wedges a test
+			// Restore source even on panic; a file left mutated would corrupt the next mutant.
 			restored := false
 			defer func() {
 				if !restored {
@@ -108,11 +91,7 @@ func runMutation(repo, base string, srcFiles []string, refs []testRef) mutationR
 }
 
 // changedFuncs returns the funcs in f whose line range overlaps a changed line.
-// main/init are skipped (no meaningful return to mutate). Function literals
-// (closures assigned to a variable) and methods declared in a type literal
-// are skipped too — they have a FuncDecl with Type.Params but no name, and
-// the mutation shape `*new(T)` doesn't compile cleanly when the result
-// type is a generic instantiation the parser can't see through.
+// main/init and nil-named decls are skipped (no meaningful return to mutate).
 func changedFuncs(fset *token.FileSet, f *ast.File, lines map[int]bool) []*ast.FuncDecl {
 	var out []*ast.FuncDecl
 	for _, decl := range f.Decls {

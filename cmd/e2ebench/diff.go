@@ -83,12 +83,7 @@ func runOnce(o diffOpts, srcFiles, pkgs []string, prompt string) diffReport {
 	cmd.Dir = o.repo
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
-	// Same WaitDelay contract as runTask in main.go: when the diff-mode
-	// ctx times out, exec.WaitDelay bounds how long we wait for the child
-	// to honour the cancel signal before the I/O pipes are force-closed
-	// and Wait() returns. Without it, a wedged child would block the
-	// bench forever. See main.go for the rationale.
-	cmd.WaitDelay = 10 * time.Second
+	cmd.WaitDelay = 10 * time.Second // bound the wait for a wedged child after ctx timeout
 	runErr := cmd.Run()
 
 	// The agent's new files are untracked, so `git diff HEAD` would miss them;
@@ -105,16 +100,6 @@ func runOnce(o diffOpts, srcFiles, pkgs []string, prompt string) diffReport {
 	var mut mutationResult
 	covered, coverTotal := 0, 0
 	if len(refs) > 0 && testsPass {
-		// The grading loop (test run → coverage → differential → mutation
-		// → build) needs an overall budget so a hung child in any of
-		// the inner commands can't pin the bench indefinitely. The
-		// agent run already has its own ctx timeout; we cap the
-		// grading to the same wall-clock ceiling so a slow grader
-		// (e.g. a coverage profile on a big package) doesn't quietly
-		// eat the entire CI window.
-		gradeCtx, gradeCancel := context.WithTimeout(context.Background(), time.Duration(o.timeoutSec)*time.Second)
-		defer gradeCancel()
-		_ = gradeCtx // reserved for a future WithContext hook; the per-call WaitDelay is the actual safety net
 		covered, coverTotal = changedLineCoverage(o.repo, o.base, pkgs, srcFiles)
 		pins = differentialPerTest(o.repo, o.base, srcFiles, refs)
 		mut = runMutation(o.repo, o.base, srcFiles, refs)
@@ -167,12 +152,7 @@ func resetTree(repo string) {
 func goBuildAll(repo string) (bool, string) {
 	cmd := exec.Command("go", "build", "./...")
 	cmd.Dir = repo
-	// Same WaitDelay contract as runTests/runTask: if `go build` hangs
-	// (a corrupted module cache, a circular replace directive, a
-	// compiler driver that can't reach the toolchain), the bench would
-	// otherwise wedge. 2 minutes is plenty for a clean build; the wait
-	// itself is just the safety net.
-	cmd.WaitDelay = 2 * time.Minute
+	cmd.WaitDelay = 2 * time.Minute // bound the wait if `go build` hangs
 	out, err := cmd.CombinedOutput()
 	return err == nil, string(out)
 }
@@ -328,16 +308,7 @@ func differentialPerTest(repo, base string, srcFiles []string, refs []testRef) [
 			_ = os.Remove(filepath.Join(repo, filepath.FromSlash(f)))
 		}
 	}
-	// Restore the source no matter what. The previous shape only restored
-	// on the happy path; a panic between the revert and the per-test
-	// loop would leave the working tree on `base` and break the
-	// downstream `runMutation` (which writes the current source, then
-	// mutates it), the build-step, and the next diff-mode attempt's
-	// `resetTree` (which `git clean -fd` re-loads from the working tree
-	// — so a tree that's still on `base` would be re-detected as the
-	// PR-head, masking the PR's behavior). The deferred restore uses
-	// a `restored` flag to avoid the duplicate `git checkout` (which
-	// would log a benign "needs update" warning on each redundant call).
+	// Restore source even on panic; a tree left on `base` would mask the PR for later steps.
 	restored := false
 	defer func() {
 		if restored {
@@ -352,11 +323,7 @@ func differentialPerTest(repo, base string, srcFiles []string, refs []testRef) [
 	for _, r := range refs {
 		cmd := exec.Command("go", "test", "-run", "^"+r.name+"$", r.pkg)
 		cmd.Dir = repo
-		// Same WaitDelay contract as runTests: a single hung test
-		// (infinite loop, blocking syscall) would otherwise pin the
-		// bench. 2 minutes is enough for a slow legitimate test and
-		// short enough that a wedged test never wedges the bench.
-		cmd.WaitDelay = 2 * time.Minute
+		cmd.WaitDelay = 2 * time.Minute // bound the wait for a hung test
 		raw, err := cmd.CombinedOutput()
 		out = append(out, pinResult{
 			testRef:     r,
@@ -413,33 +380,21 @@ func parseCoverProfile(repo, path string) map[string][]coverBlock {
 		return nil
 	}
 	out := map[string][]coverBlock{}
-	skipped := 0
 	for _, ln := range strings.Split(string(data), "\n") {
 		if ln == "" || strings.HasPrefix(ln, "mode:") {
 			continue
 		}
 		colon := strings.LastIndexByte(ln, ':')
 		if colon < 0 {
-			skipped++
 			continue
 		}
 		modPath, rest := ln[:colon], ln[colon+1:]
 		var sl, sc, el, ec, nstmt, count int
 		if _, err := fmt.Sscanf(rest, "%d.%d,%d.%d %d %d", &sl, &sc, &el, &ec, &nstmt, &count); err != nil {
-			skipped++
 			continue
 		}
 		rel := repoRelFromModulePath(modPath)
 		out[rel] = append(out[rel], coverBlock{start: sl, end: el, count: count})
-	}
-	// If we skipped a large fraction of the profile lines, something
-	// is structurally wrong (wrong Go version emitting a different
-	// format, a binary file accidentally picked up, etc.). Surface
-	// the count via the returned map's nil-marker so downstream
-	// callers can choose to fail the run with a useful message
-	// instead of a silent zero-coverage report.
-	if skipped > 0 {
-		_ = skipped // currently diagnostic-only; future: emit a warning
 	}
 	return out
 }
@@ -447,14 +402,7 @@ func parseCoverProfile(repo, path string) map[string][]coverBlock {
 // repoRelFromModulePath turns "reasonix/internal/agent/foo.go" into
 // "internal/agent/foo.go" by dropping the first path element (the module root).
 func repoRelFromModulePath(p string) string {
-	// The coverage profile uses module-qualified paths ("<module>/<rel>")
-	// because that's what `go list` emits. Strip the module prefix using
-	// the e2e bench's own module name (the only module the bench ever
-	// grades), not a generic "first path segment" heuristic — the old
-	// shape worked for `module reasonix` (single segment) but would
-	// silently mis-strip `github.com/` from a multi-segment module,
-	// leaving coverage keyed on a wrong suffix and missing every match
-	// in `changedLineCoverage`.
+	// Strip the full module prefix; a generic first-segment cut mis-strips a multi-segment module path.
 	prefix := "reasonix/"
 	if strings.HasPrefix(p, prefix) {
 		return p[len(prefix):]
@@ -537,14 +485,7 @@ func parseNewTests(diff string) []testRef {
 			continue
 		}
 		sig := strings.TrimPrefix(body, "func ")
-		// Function vs method: a top-level function's signature starts
-		// with its name (`TestFoo(t *testing.T) …`), so the first '('
-		// comes after the name. A method's signature starts with the
-		// receiver (`(s *Suite) TestFoo(t *testing.T) …`), so the
-		// first '(' is at position 0 — and the previous shape's
-		// `paren <= 0` guard silently dropped every method-form test
-		// on the floor. Parse the receiver out, then take the name
-		// from whatever follows the closing ')'.
+		// Method form `(r T) Name(...)` starts with '('; parse the receiver out before the name.
 		var name string
 		if sig[0] == '(' {
 			close := strings.IndexByte(sig, ')')
@@ -607,25 +548,12 @@ func runTests(repo, testCmd string, pkgs []string) (bool, string) {
 	args := append(fields[1:], pkgs...)
 	cmd := exec.Command(fields[0], args...)
 	cmd.Dir = repo
-	// runTests is the gate that decides whether a diff-mode run passes; if
-	// `go test` hangs (e.g. a test that opens a network port and blocks on
-	// Accept, or a `-race` race-detector crash that wedges the test binary),
-	// the whole bench hangs. 5 minutes is the cap go's own `go test -timeout`
-	// defaults to; long enough for the slowest legitimate test on a big
-	// monorepo, short enough that a hung run can't pin the bench.
-	cmd.WaitDelay = 5 * time.Minute
+	cmd.WaitDelay = 5 * time.Minute // bound the wait if `go test` hangs
 	out, err := cmd.CombinedOutput()
 	return err == nil, string(out)
 }
 
-// splitShellFields is a small POSIX-ish shell splitter: splits on
-// whitespace, supports single- and double-quoted spans (the kind of
-// arguments a user might pass via `--test-cmd \"go test -run
-// TestFoo\"`), and strips the quotes. It's intentionally tiny — the
-// diff-mode `--test-cmd` flag is set by the workflow, not the user,
-// so we don't need shell-expansion or backticks. Quoted segments
-// preserve their internal whitespace; everything else splits on
-// runs of \t, \n, or space.
+// splitShellFields splits on whitespace, honoring single/double-quoted spans and stripping the quotes.
 func splitShellFields(s string) []string {
 	var out []string
 	var cur strings.Builder
@@ -712,11 +640,7 @@ func truncateFor(s string, max int) string {
 	if max <= 0 || len(s) <= max {
 		return s
 	}
-	// Avoid splitting a multi-byte UTF-8 rune — `s[:max]` would otherwise
-	// drop the last 1–3 bytes of a rune and corrupt the surrounding
-	// characters when the markdown report is rendered with the same
-	// font. `utf8.RuneStart` returns true only on the first byte of a
-	// rune, so walk back until the cut lands on one.
+	// Back the cut up to a rune boundary so we don't split a multi-byte UTF-8 rune.
 	cut := max
 	for cut > 0 && !utf8.RuneStart(s[cut]) {
 		cut--

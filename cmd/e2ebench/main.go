@@ -88,13 +88,6 @@ func main() {
 		os.Exit(1)
 	}
 	if len(tasks) == 0 {
-		// Distinguish \"suite dir is missing\" from \"suite dir is empty\"
-		// — the former is a config error (the user pointed -suite at a
-		// path that doesn't exist; -suite's default of benchmarks/e2e
-		// is missing because the bench is running from a stale
-		// checkout). The latter is \"you haven't written any tasks
-		// yet\" — both are exit-1, but the message tells the user
-		// which to fix.
 		dir := filepath.Join(*suite, "tasks")
 		if _, statErr := os.Stat(dir); statErr != nil {
 			fmt.Fprintf(os.Stderr, "no tasks found under %s: %v\n", dir, statErr)
@@ -213,17 +206,7 @@ func runTask(bin, model string, t task) result {
 	cmd.Dir = work
 	cmd.Stdout = os.Stderr // stream the run to the job log, keep stdout clean for the report
 	cmd.Stderr = os.Stderr
-	// When the bench's per-task ctx times out, Go's exec sends the cancel
-	// signal (SIGKILL on Unix by default) and then waits for the child to
-	// exit. Without WaitDelay, that wait is unbounded: a stuck child
-	// (deep syscall, MCP stdio server wedged on a write to a closed pipe,
-	// AV scanner holding the binary open on Windows) blocks the bench
-	// indefinitely. After WaitDelay, exec closes the child's I/O pipes,
-	// which unblocks any stdio-bound wait in the child even when the
-	// signal is ignored. 10s is the same shape bash.go uses for its
-	// 120s foreground timeout — long enough for a graceful exit, short
-	// enough that the bench never wedges.
-	cmd.WaitDelay = 10 * time.Second
+	cmd.WaitDelay = 10 * time.Second // bound the wait for a stuck child after ctx timeout
 	runErr := cmd.Run()
 
 	if m, err := readMetrics(metricsPath); err == nil {
@@ -372,12 +355,7 @@ func copyDir(src, dst string) error {
 		if err != nil {
 			return err
 		}
-		// Skip symlinks. The seed workdir is a checked-in source tree,
-		// not a user-supplied input, so symlinks would be intentional
-		// (a `node_modules` shim, a vendored link to a sibling repo).
-		// Following them is dangerous (we'd copy a file the agent
-		// shouldn't see, like a fixture secret outside the seed) and
-		// recreating them is the more conservative behaviour.
+		// Skip symlinks so a seed link can't leak a file from outside the seed tree.
 		if info.Mode()&os.ModeSymlink != 0 {
 			return nil
 		}
@@ -411,11 +389,6 @@ func copyFile(src, dst string) error {
 	if _, err := io.Copy(out, in); err != nil {
 		return err
 	}
-	// os.Create / O_CREATE default to 0666 (umask'd). A read-only seed
-	// (e.g. a fixture 0400 marker file) would otherwise become writable
-	// in the workdir, which then looks like a permissions change to
-	// `git status` even though we never wrote to it. Mirror the source
-	// mode explicitly so a seed's executable bit / read-only bit
-	// survive the copy.
+	// Mirror the source mode so a seed's read-only / exec bit survives the copy.
 	return os.Chmod(dst, info.Mode().Perm())
 }
