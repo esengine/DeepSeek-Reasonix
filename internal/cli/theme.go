@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"image/color"
+	"log/slog"
 	"os"
 	"strconv"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/lipgloss/v2"
 
+	"reasonix/internal/config"
 	"reasonix/internal/i18n"
 )
 
@@ -461,6 +463,28 @@ func (m *chatTUI) runThemeSubcommand(input string) {
 	}
 	m.refreshRuntimeTheme()
 	m.notice(fmt.Sprintf(i18n.M.ThemeChangedFmt, theme.name, theme.style))
+
+	// Persist to user config so the choice survives restart.
+	m.persistTheme(name)
+}
+
+func (m *chatTUI) persistTheme(inputName string) {
+	path := config.UserConfigPath()
+	if path == "" {
+		return
+	}
+	edit := config.LoadForEdit(path)
+	switch inputName {
+	case "auto", "light", "dark":
+		edit.UI.Theme = inputName
+		edit.UI.ThemeStyle = activeCLITheme.style
+	default:
+		edit.UI.Theme = activeCLITheme.name
+		edit.UI.ThemeStyle = inputName
+	}
+	if err := edit.SaveTo(path); err != nil {
+		slog.Warn("theme: failed to persist", "path", path, "err", err)
+	}
 }
 
 func (m *chatTUI) refreshRuntimeTheme() {
