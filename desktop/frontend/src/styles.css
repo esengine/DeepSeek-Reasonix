@@ -2696,7 +2696,7 @@ body {
   border-bottom: 1px solid var(--border-soft);
 }
 .workspace-tabs {
-  flex: 1 1 auto;
+  flex: 1 1 0%;
   min-width: 0;
   display: flex;
   align-items: center;
@@ -2704,6 +2704,9 @@ body {
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;
+}
+.workspace-tabs > * {
+  flex-shrink: 0;
 }
 .workspace-tabs::-webkit-scrollbar {
   display: none;

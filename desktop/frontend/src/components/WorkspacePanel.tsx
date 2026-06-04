@@ -624,12 +624,12 @@ export function WorkspacePanel({
                 </button>
               </Tooltip>
             ))}
-            <Tooltip label={t("workspace.newTab")}>
-              <button className="workspace-tab workspace-tab--new" onClick={openPickerTab}>
-                <Plus size={14} />
-              </button>
-            </Tooltip>
           </div>
+          <Tooltip label={t("workspace.newTab")}>
+            <button className="workspace-tab workspace-tab--new" onClick={openPickerTab}>
+              <Plus size={14} />
+            </button>
+          </Tooltip>
 
           <div className="workspace-preview__window-actions">
             <Tooltip label={maximized ? t("workspace.restore") : t("workspace.maximize")}>
