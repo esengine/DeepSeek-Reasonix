@@ -46,7 +46,7 @@ func (l listDir) Execute(ctx context.Context, args json.RawMessage) (string, err
 
 	// Recursive mode: walk the whole tree depth-first.
 	if p.Recursive {
-		return l.listRecursive(p.Path)
+		return l.listRecursive(ctx, p.Path)
 	}
 
 	entries, err := os.ReadDir(p.Path)
@@ -72,13 +72,23 @@ func (l listDir) Execute(ctx context.Context, args json.RawMessage) (string, err
 	return b.String(), nil
 }
 
+// lsRecursiveCap is the maximum number of entries listRecursive will emit
+// before truncating, so a huge monorepo can't blow up memory.
+const lsRecursiveCap = 5000
+
 // listRecursive walks a directory tree depth-first, skipping noise dirs.
-// Depth is capped to guard against symlink loops.
-func (l listDir) listRecursive(root string) (string, error) {
+// Depth is capped to guard against symlink loops; result count is capped to
+// guard against huge trees; context cancellation aborts the walk promptly.
+func (l listDir) listRecursive(ctx context.Context, root string) (string, error) {
 	var b strings.Builder
+	count := 0
+	truncated := false
 	err := filepath.WalkDir(root, func(p string, d os.DirEntry, wErr error) error {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		if wErr != nil {
-			return wErr
+			return nil // skip unreadable entries instead of aborting
 		}
 		if p == root {
 			return nil
@@ -88,6 +98,13 @@ func (l listDir) listRecursive(root string) (string, error) {
 			case ".git", "node_modules", ".DS_Store", "__pycache__", ".idea", ".vscode":
 				return filepath.SkipDir
 			}
+		}
+		if count >= lsRecursiveCap {
+			truncated = true
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
 		}
 		rel, rErr := filepath.Rel(root, p)
 		if rErr != nil {
@@ -107,13 +124,17 @@ func (l listDir) listRecursive(root string) (string, error) {
 			rel += fmt.Sprintf("\t%d", info.Size())
 		}
 		b.WriteString(rel + "\n")
+		count++
 		return nil
 	})
-	if err != nil {
+	if err != nil && ctx.Err() == nil {
 		return "", fmt.Errorf("ls -R %s: %w", root, err)
 	}
 	if b.Len() == 0 {
 		return "(empty directory tree)", nil
+	}
+	if truncated {
+		b.WriteString(fmt.Sprintf("\n... (truncated at %d entries)\n", lsRecursiveCap))
 	}
 	return b.String(), nil
 }

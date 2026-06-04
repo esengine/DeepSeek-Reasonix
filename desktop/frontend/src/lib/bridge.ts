@@ -101,7 +101,7 @@ export interface AppBindings {
   SlashArgs(input: string): Promise<SlashArgsResult>;
   ListDir(rel: string): Promise<DirEntry[]>;
   SearchFileRefs(query: string): Promise<DirEntry[]>;
-  ReadFile(rel: string): Promise<FilePreview>;
+  ReadFile(rel: string, enc?: string): Promise<FilePreview>;
   WorkspaceChanges(): Promise<WorkspaceChangesView>;
   OpenWorkspacePath(rel: string): Promise<void>;
   RevealWorkspacePath(rel: string): Promise<void>;
@@ -139,6 +139,8 @@ export interface AppBindings {
   // SetBypass toggles YOLO mode (auto-approve every tool call this session; deny
   // rules still apply). Runtime-only — not written to config.
   SetBypass(on: boolean): Promise<void>;
+  // SetFileEncoding sets the project-level file encoding for read/write tools.
+  SetFileEncoding(encoding: string): Promise<void>;
   // Auto-updater (desktop/updater_app.go): the injected build version, a manifest
   // check, applying an update (win/linux self-update; macOS opens the download
   // page), and opening that page directly. Progress streams on "updater:progress".
@@ -790,7 +792,7 @@ function makeMockApp(): AppBindings {
         .filter((path) => path.split("/").pop()?.toLowerCase().includes(q))
         .map((name) => ({ name, isDir: false }));
     },
-    async ReadFile(rel: string) {
+    async ReadFile(rel: string, _enc?: string) {
       const samples: Record<string, string> = {
         "README.md": "# Reasonix\n\nBrowser-dev workspace preview.\n\n- Chat in the center\n- Browse files on the right\n- Keep sessions on the left\n",
         "go.mod": "module reasonix\n\ngo 1.23\n",
@@ -940,6 +942,9 @@ function makeMockApp(): AppBindings {
     },
     async SetBypass(on: boolean) {
       settings.bypass = on;
+    },
+    async SetFileEncoding(encoding: string) {
+      settings.fileEncoding = encoding;
     },
     async Version() {
       return "v1.0.0 (browser dev)";

@@ -147,12 +147,16 @@ export function Transcript({
   }, [openTurn]);
 
   // Each user message's turn = its ordinal among user messages, so a rewind
-  // targets the matching checkpoint.
-  const userTurn = new Map<string, number>();
-  let nt = 0;
-  for (const it of items) {
-    if (it.kind === "user") userTurn.set(it.id, nt++);
-  }
+  // targets the matching checkpoint. Memoized so it isn't rebuilt on every
+  // streaming re-render.
+  const userTurn = useMemo(() => {
+    const m = new Map<string, number>();
+    let nt = 0;
+    for (const it of items) {
+      if (it.kind === "user") m.set(it.id, nt++);
+    }
+    return m;
+  }, [items]);
 
   return (
     <div className="transcript" ref={scrollRef} onScroll={onScroll}>

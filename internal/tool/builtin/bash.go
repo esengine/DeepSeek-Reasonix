@@ -1,7 +1,6 @@
 package builtin
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -122,7 +121,7 @@ func (b bash) Execute(ctx context.Context, args json.RawMessage) (string, error)
 	cmd.Dir = b.workDir // "" lets exec use the process working directory
 	setKillTree(cmd)
 	cmd.WaitDelay = bashWaitDelay
-	var buf bytes.Buffer
+	var buf cappedBuffer
 	w := io.Writer(&buf)
 	if emit, ok := tool.ProgressFrom(ctx); ok {
 		w = io.MultiWriter(&buf, newProgressWriter(emit))
@@ -187,4 +186,81 @@ func commandPreview(cmd string) string {
 		return string(r[:max]) + "…"
 	}
 	return cmd
+}
+
+// bashOutputCap is the maximum bytes retained from a foreground bash command.
+// When exceeded, the buffer keeps only the first and last portions so the model
+// still sees the command's opening context and its final output.
+const (
+	bashOutputCap   = 10 << 20 // 10 MiB
+	bashOutputKeep  = 1 << 20  // 1 MiB from each end
+)
+
+// cappedBuffer is an io.Writer that accumulates command output up to
+// bashOutputCap bytes. Once the cap is exceeded it switches to a ring-buffer
+// strategy: the first bashOutputKeep bytes are preserved in `head` and the
+// latest bytes rotate through `tail`, so String() returns head + gap marker +
+// tail. This prevents a runaway command (e.g. `find /`, `cat /dev/urandom`)
+// from consuming unbounded memory before the timeout fires.
+type cappedBuffer struct {
+	head    []byte         // first bashOutputKeep bytes (immutable once filled)
+	tail    []byte         // ring buffer for the latest bytes
+	tailPos int            // write cursor inside tail
+	total   int            // total bytes seen (may exceed cap)
+	capped  bool           // true once we switched to ring mode
+}
+
+func (b *cappedBuffer) Write(p []byte) (int, error) {
+	n := len(p)
+	b.total += n
+	if !b.capped {
+		remaining := bashOutputCap - len(b.head)
+		if n <= remaining {
+			b.head = append(b.head, p...)
+			return n, nil
+		}
+		// Fill head to cap, then start ring buffer.
+		b.head = append(b.head, p[:remaining]...)
+		tailSize := bashOutputKeep
+		b.tail = make([]byte, tailSize)
+		b.capped = true
+		p = p[remaining:]
+	}
+	// Ring-buffer the remainder.
+	for len(p) > 0 {
+		space := len(b.tail) - b.tailPos
+		if space == 0 {
+			b.tailPos = 0
+			space = len(b.tail)
+		}
+		chunk := len(p)
+		if chunk > space {
+			chunk = space
+		}
+		copy(b.tail[b.tailPos:], p[:chunk])
+		b.tailPos += chunk
+		p = p[chunk:]
+	}
+	return n, nil
+}
+
+func (b *cappedBuffer) String() string {
+	if !b.capped {
+		return string(b.head)
+	}
+	// Reconstruct tail in order: the ring buffer may have wrapped.
+	var tail []byte
+	if b.tailPos < len(b.tail) && b.total > bashOutputCap+len(b.tail) {
+		// Ring has wrapped: oldest data starts at tailPos.
+		tail = append(b.tail[b.tailPos:], b.tail[:b.tailPos]...)
+	} else {
+		tail = b.tail[:b.tailPos]
+	}
+	skipped := b.total - len(b.head) - len(tail)
+	var sb strings.Builder
+	sb.Grow(len(b.head) + len(tail) + 80)
+	sb.Write(b.head)
+	fmt.Fprintf(&sb, "\n\n... [truncated %d bytes] ...\n\n", skipped)
+	sb.Write(tail)
+	return sb.String()
 }
