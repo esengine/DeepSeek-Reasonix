@@ -307,6 +307,7 @@ Usage:
   reasonix serve [--model NAME] [--addr HOST:PORT]      serve the session over HTTP+SSE (browser client at /)
   reasonix setup [path]                                 interactive config wizard; writes reasonix.toml (+ .env)
   reasonix mcp <add|remove|list>                        manage MCP servers in reasonix.toml
+  reasonix update [--dry-run]                           self-update from GitHub Releases (--dry-run: check only)
   reasonix doctor [--json]                              print redacted local diagnostics
   reasonix version
   reasonix help
@@ -323,4 +324,16 @@ Configuration:
   Secrets come from the environment via api_key_env (e.g. DEEPSEEK_API_KEY).
   Run 'reasonix setup' to scaffold a config; see docs/SPEC.md.
 `,
+
+	UpdateCheckFailed:    "update check failed:",
+	UpdateAlreadyLatest:  "Already running the latest version.",
+	UpdateAvailable:      "Update available:",
+	UpdatePrereleaseHint: "Note: this is a pre-release version.",
+	UpdateDownloading:    "Downloading update…",
+	UpdateProgress:       "downloading",
+	UpdateVerifying:      "Verifying checksum…",
+	UpdateApplying:       "Applying update…",
+	UpdateDone:           "Update complete.",
+	UpdateSuccess:        "Update successful! Please restart reasonix for the new version to take effect.",
+	UpdateFailed:         "update failed:",
 }

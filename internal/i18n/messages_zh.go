@@ -308,6 +308,7 @@ var Chinese = Messages{
   reasonix serve [--model NAME] [--addr HOST:PORT]      通过 HTTP+SSE 提供会话（浏览器客户端在 /）
   reasonix setup [path]                                 交互式配置向导；生成 reasonix.toml（及 .env）
   reasonix mcp <add|remove|list>                        管理 reasonix.toml 里的 MCP 服务器
+  reasonix update [--dry-run]                           从 GitHub Releases 自更新（--dry-run：仅检查）
   reasonix doctor [--json]                              输出脱敏的本地诊断信息
   reasonix version
   reasonix help
@@ -324,4 +325,16 @@ var Chinese = Messages{
   密钥通过 api_key_env 从环境变量注入（如 DEEPSEEK_API_KEY）。
   运行 'reasonix setup' 生成配置；详见 docs/SPEC.md。
 `,
+
+	UpdateCheckFailed:    "检查更新失败：",
+	UpdateAlreadyLatest:  "已是最新版本。",
+	UpdateAvailable:      "有新版本可用：",
+	UpdatePrereleaseHint: "注意：这是一个预发布版本。",
+	UpdateDownloading:    "正在下载更新…",
+	UpdateProgress:       "下载中",
+	UpdateVerifying:      "正在校验…",
+	UpdateApplying:       "正在应用更新…",
+	UpdateDone:           "更新完成。",
+	UpdateSuccess:        "更新成功！请重启 reasonix 以使用新版本。",
+	UpdateFailed:         "更新失败：",
 }

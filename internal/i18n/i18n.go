@@ -342,6 +342,19 @@ type Messages struct {
 
 	// usage / help
 	UsageBody string // full multi-line help text
+
+	// `reasonix update` — CLI self-update from GitHub Releases
+	UpdateCheckFailed    string // "update check failed:" — prefix before the error detail
+	UpdateAlreadyLatest  string // "already on the latest version"
+	UpdateAvailable      string // "update available:" — prefix before "current → latest"
+	UpdatePrereleaseHint string // "this is a pre-release; use with caution"
+	UpdateDownloading    string // "downloading update…"
+	UpdateProgress       string // "downloading" — prefix for the progress counter
+	UpdateVerifying      string // "verifying checksum…"
+	UpdateApplying       string // "applying update…"
+	UpdateDone           string // "update complete"
+	UpdateSuccess        string // final success message
+	UpdateFailed         string // "update failed:" — prefix before the error detail
 }
 
 // ProviderStatusMessage returns an actionable explanation for a known provider
