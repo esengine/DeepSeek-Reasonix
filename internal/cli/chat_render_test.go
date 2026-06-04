@@ -19,6 +19,7 @@ func newTestChatTUI() chatTUI {
 	return chatTUI{
 		input:                ti,
 		width:                80,
+		statusLineCount:      2,
 		submittedInputCursor: -1,
 		queueEditCursor:      -1,
 		nextPasteID:          1,

@@ -271,6 +271,12 @@ type chatTUI struct {
 	statuslineOut string
 	gitStatus     gitStatus
 
+	// statusLineCount is the number of terminal rows the status block occupies
+	// (wrapped working line + wrapped status line + wrapped data line). Updated
+	// each frame via computeStatusLineCount so bottomRows can reserve the correct
+	// height; starts at 2 (unwrapped) until first render.
+	statusLineCount int
+
 	// modelSwitchPending is true while an async /model build is in flight.
 	modelSwitchPending bool
 	// pendingModelSwitch holds the tea.Cmd that triggers the async build.
@@ -470,6 +476,7 @@ func newChatTUI(ctrl *control.Controller, missing string, eventCh chan event.Eve
 		commands:             ctrl.Commands(),
 		skills:               ctrl.Skills(),
 		viewport:             viewport.New(viewport.WithWidth(termW)),
+		statusLineCount:      2,
 	}
 }
 
@@ -651,7 +658,15 @@ func (m chatTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if contentW < 1 {
 		contentW = 1
 	}
+	// Recompute the wrapped status-line count so bottomRows reserves the right
+	// height for the viewport. The data-line tags (model, git, effort, context,
+	// cache, jobs, balance) are the ones most likely to wrap on a narrow terminal.
+	cm.statusLineCount = cm.computeStatusLineCount(contentW)
 	cm.viewport.SetWidth(contentW)
+	// Recompute the wrapped status-line count so bottomRows reserves the right
+	// height for the viewport. Use cm.width (same as boxW in View()) so the
+	// wrapping width matches what View() actually renders.
+	cm.statusLineCount = cm.computeStatusLineCount(cm.width)
 	cm.viewport.SetHeight(cm.transcriptHeight())
 	// Re-feed only when the content grew or the width changed (re-wrapping is
 	// the expensive part); a bare scroll or spinner tick keeps the offset.
@@ -1431,9 +1446,10 @@ func (m chatTUI) bottomRows() int {
 			rows += strings.Count(s, "\n") + 1
 		}
 	}
-	if m.state == tuiRunning {
-		rows++ // the working spinner line above the box
-	}
+	// Remove the hardcoded working-line increment — it is counted inside
+	// statusLineCount via computeStatusLineCount, which also accounts for
+	// wrapping. The fallback to 2 (unwrapped) covers the initial frame and
+	// tests that don't call Update first.
 	if m.nativeScrollback {
 		if main := m.renderMainManager(); main != "" {
 			rows += strings.Count(main, "\n") + 1
@@ -1445,7 +1461,10 @@ func (m chatTUI) bottomRows() int {
 	if !m.hideComposer() {
 		rows += m.input.Height() + 2
 	}
-	return rows + 2
+	if m.statusLineCount > 0 {
+		return rows + m.statusLineCount
+	}
+	return rows + 2 // fallback for tests that don't set statusLineCount
 }
 
 // hideComposer is the single ownership gate for the bottom composer.
@@ -2111,7 +2130,7 @@ func (m chatTUI) View() tea.View {
 	if et := m.effortTag(); et != "" {
 		status += " · " + et
 	}
-	if gt := m.gitTag(boxW - visibleWidth(status) - visibleWidth(" · ")); gt != "" {
+	if gt := m.gitTag(); gt != "" {
 		status += " · " + gt
 	}
 	// The spinning "thinking…" indicator is its own line ABOVE the input box (shown
@@ -2135,8 +2154,11 @@ func (m chatTUI) View() tea.View {
 			}
 		}
 	}
-	// Cache rates get their own fixed second row so they're never truncated off
-	// the status line; a fixed height also avoids wrap-induced resize ghosting.
+	// Second status row: the live data (model, git, effort, context gauge, cache
+	// rates, jobs, balance). It lives on its own row so it's always visible; if it
+	// exceeds the terminal width it wraps to additional rows instead of being
+	// truncated. Wrapping is safe in the alt-screen view — there's no scrollback
+	// to strand — and computeStatusLineCount reserves the correct height.
 	var data []string
 	if mt := m.modelTag(); mt != "" {
 		data = append(data, mt)
@@ -2200,17 +2222,17 @@ func (m chatTUI) View() tea.View {
 	}
 	// Layout: the working spinner (when running), then the composer when visible,
 	// then the two status rows (line 1 = mode + run config + worktree identity, line 2 = live run data).
-	// Each row is clamped to width independently so neither wraps; padding to full
-	// width keeps a short row from leaving stale cells from the prior frame.
+	// Each row is wrapped to width so long content flows onto additional rows
+	// instead of being truncated. Padding to full width prevents stale cells.
 	if working != "" {
-		parts = append(parts, workingStyle.Width(boxW).MaxWidth(boxW).Render(clampStatusLine(working, boxW)))
+		parts = append(parts, workingStyle.Width(boxW).MaxWidth(boxW).Render(wrapStatusLine(working, boxW)))
 		rowsAboveBox++
 	}
 	if footer := m.renderMainManagerFooter(); footer != "" {
 		parts = append(parts, footer)
 		rowsAboveBox += strings.Count(footer, "\n") + 1
 	}
-	statusBlock := clampStatusLine(status, boxW) + "\n" + clampStatusLine(dataLine, boxW)
+	statusBlock := wrapStatusLine(status, boxW) + "\n" + wrapStatusLine(dataLine, boxW)
 	if !hideComposer {
 		if qi := m.renderQueueIndicator(); qi != "" {
 			parts = append(parts, qi)
@@ -2538,16 +2560,119 @@ func truncateSubject(s string, width int) string {
 	return ansi.Truncate(s, max, "…")
 }
 
-// clampStatusLine truncates a status line to `width` visible columns, ANSI-aware,
-// appending an ellipsis and a reset. The bottom region must stay a fixed height —
-// the non-alt-screen renderer commits scrollback by clearing the prior frame's
-// lines, so a status that wraps to a second row strands input-box borders in
-// history. Truncating (not wrapping) keeps it one row regardless of how many tags
-// (ctx · cache · avg · jobs · balance) it carries on a narrow terminal.
-func clampStatusLine(s string, width int) string {
-	// ansi.Truncate is ANSI-aware, counts wide chars, and appends the tail when
-	// it actually clips — one row regardless of how many tags the status carries.
-	return ansi.Truncate(s, width, "…")
+// wrapStatusLine wraps a status line to `width` visible columns, ANSI-aware,
+// so text that exceeds one row flows onto additional lines instead of being
+// truncated with an ellipsis. Wrapping is permissive — spaces are preferred
+// break points — and works within the alt-screen view so there is no scrollback
+// artifact.
+func wrapStatusLine(s string, width int) string {
+	if width <= 0 || s == "" {
+		return s
+	}
+	return ansi.Hardwrap(s, width, true)
+}
+
+// computeStatusLineCount returns the number of terminal rows the status block
+// (working line + first status line + data line) will occupy after wrapping to
+// `width`. It mirrors the construction in View() so the reserved height matches
+// the rendered height exactly — the load-bearing invariant for bottomRows().
+// Use the same width (m.width) that View() passes to wrapStatusLine.
+func (m chatTUI) computeStatusLineCount(width int) int {
+	if m.ctrl == nil {
+		return 2 // safe default for tests without a real controller
+	}
+	shellMode := strings.HasPrefix(strings.TrimSpace(m.input.Value()), "!")
+
+	// Replicate the first status line (mode tag + state) from View().
+	// ModeTag is rendered with Padding(0,1) in View() — add the same padding
+	// here so the visible width matches exactly.
+	modeTag := " " + m.modeTagText() + " "
+	if shellMode {
+		modeTag = " Shell "
+	}
+	status := "  " + modeTag
+	switch {
+	case m.rewind != nil:
+		status += " · ⟲ rewind"
+	case m.mcpImport != nil:
+		status += " · MCP import"
+	case m.resumePick != nil:
+		status += " · " + i18n.M.StatusResumePicker
+	case m.mcp != nil:
+		status += " · MCP"
+	case m.skillPick != nil:
+		status += " · " + i18n.M.SkillPickerStatusLabel
+	case m.chooser != nil:
+		status += " · " + i18n.M.ChatStatusQuestion
+	case m.pendingApproval != nil && m.pendingApproval.Tool == planApprovalTool:
+		status += " · " + i18n.M.ChatStatusPlanApproval
+	case m.pendingApproval != nil:
+		status += " · " + i18n.M.ChatStatusToolApproval
+	case shellMode:
+		status += " · " + i18n.M.ShellModeHint
+	case m.ctrl.AutoApproveTools():
+		status += " · " + i18n.M.ChatStatusYoloIdle + " (" + m.cycleHint() + ")"
+	default:
+		status += " · " + i18n.M.ChatStatusIdle + " (" + m.cycleHint() + ")"
+	}
+	if et := m.effortTag(); et != "" {
+		status += " · " + et
+	}
+	if gt := m.gitTag(); gt != "" {
+		status += " · " + gt
+	}
+
+	// Replicate the data line from View().
+	var data []string
+	if mt := m.modelTag(); mt != "" {
+		data = append(data, mt)
+	}
+	if cache := m.cacheTag(); cache != "" {
+		data = append(data, cache)
+	}
+	if ct := m.contextTag(); ct != "" {
+		data = append(data, ct)
+	}
+	if jt := m.jobsTag(); jt != "" {
+		data = append(data, jt)
+	}
+	if m.balance != "" {
+		data = append(data, m.balance)
+	}
+	dataLine := "  " + strings.Join(data, " · ")
+	if m.statuslineCmd != "" && m.statuslineOut != "" {
+		dataLine = "  " + m.statuslineOut
+	}
+
+	// Replicate the working (spinner) line from View(), shown only while a turn runs.
+	var working string
+	if m.state == tuiRunning {
+		if m.retryAttempt > 0 {
+			working = fmt.Sprintf("  "+i18n.M.ChatStatusRetryingFmt, m.spinner.View(), m.retryAttempt, m.retryMax)
+		} else {
+			working = fmt.Sprintf("  "+i18n.M.ChatStatusThinkingFmt, m.spinner.View(), m.elapsed)
+			if m.turnTokens > 0 {
+				working += " · ↓" + shortTokens(m.turnTokens)
+			}
+			if n := len(m.pendingInterject); n > 0 {
+				if n == 1 {
+					working += " · ✎ feedback queued"
+				} else {
+					working += fmt.Sprintf(" · ✎ %d queued", n)
+				}
+			}
+		}
+	}
+
+	// Count wrapped rows for every piece that View() renders as wrapped.
+	var lines int
+	if m.state == tuiRunning {
+		// working (spinner) line — wraps independently of the status block below.
+		lines += strings.Count(wrapStatusLine(working, width), "\n") + 1
+	}
+	lines += strings.Count(wrapStatusLine(status, width), "\n") + 1
+	lines += strings.Count(wrapStatusLine(dataLine, width), "\n") + 1
+	return lines
 }
 
 // growInputToFit resizes the textarea to the number of lines its value spans,
