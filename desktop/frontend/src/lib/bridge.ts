@@ -177,6 +177,8 @@ export interface AppBindings {
   SetDesktopAppearance(theme: string, style: string): Promise<void>;
   MigrateDesktopPreferences(language: string, theme: string, style: string): Promise<void>;
   SetAgentParams(temperature: number, maxSteps: number, systemPrompt: string): Promise<void>;
+  // SetBypass toggles YOLO mode (auto-approve every tool call this session; deny
+  // rules still apply). Runtime-only — not written to config.
   SetBypass(on: boolean): Promise<void>;
   Version(): Promise<string>;
   CheckUpdate(): Promise<UpdateInfo | null>;

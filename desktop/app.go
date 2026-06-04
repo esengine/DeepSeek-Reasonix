@@ -63,6 +63,8 @@ type App struct {
 	readyHook   func()
 
 	forceQuit atomic.Bool
+	trayReady bool
+	tray      *desktopTray
 }
 
 // NewApp constructs the bound object. Tabs are restored in startup from the
@@ -90,6 +92,7 @@ func (a *App) Platform() string {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	installSystemQuitHook()
+	a.startTray()
 
 	go a.restoreOrBuildTabs()
 }
@@ -104,8 +107,10 @@ func (a *App) beforeClose(ctx context.Context) bool {
 	}
 	if cfg.DesktopCloseBehavior() == "background" {
 		a.saveWindowStateSync()
+		a.snapshotAllTabs()
 		// Hide the application, not just the window, so macOS can restore it
-		// from the Dock using the normal app activation path.
+		// from the Dock/menu using the normal app activation path. On tray-capable
+		// platforms, the tray menu provides an additional Open/Quit entry point.
 		runtime.Hide(ctx)
 		return true
 	}
@@ -206,8 +211,23 @@ func (a *App) createTabEntryWithID(scope, workspaceRoot, topicID, id string) *Wo
 	}
 }
 
+func (a *App) snapshotAllTabs() {
+	a.mu.RLock()
+	tabs := make([]*WorkspaceTab, 0, len(a.tabs))
+	for _, t := range a.tabs {
+		tabs = append(tabs, t)
+	}
+	a.mu.RUnlock()
+	for _, t := range tabs {
+		if t.Ctrl != nil {
+			_ = t.Ctrl.Snapshot()
+		}
+	}
+}
+
 // shutdown snapshots all tabs, saves the final window geometry, and closes tabs.
 func (a *App) shutdown(context.Context) {
+	a.stopTray()
 	// Save window geometry synchronously from Go so it's persisted even if the
 	// frontend's beforeunload promise hasn't resolved yet.
 	a.saveWindowStateSync()
