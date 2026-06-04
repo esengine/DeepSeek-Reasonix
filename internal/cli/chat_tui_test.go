@@ -10,6 +10,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/x/ansi"
 
 	"reasonix/internal/agent"
@@ -874,6 +875,57 @@ func TestCtrlCClearsThenDoublePressQuits(t *testing.T) {
 		t.Error("double Ctrl+C on empty input should quit")
 	}
 	_ = out3
+}
+
+// TestCtrlCCopySelection verifies that Ctrl+C while idle on an empty composer
+// with an active text selection copies the selected text to clipboard instead
+// of arming the double-press quit gesture.
+func TestCtrlCCopySelection(t *testing.T) {
+	var copied string
+	clipboardWriteAll = func(text string) error { copied = text; return nil }
+	defer func() { clipboardWriteAll = clipboard.WriteAll }()
+
+	m := newTestChatTUI()
+	ctrlC := tea.KeyPressMsg{Code: 'c', Mod: 4}
+
+	// Set up an active selection: anchor < head so there's something to copy.
+	// selection uses content-line coordinates; transcript needs at least one line.
+	m.transcript = []string{"hello world"}
+	m.wrappedLines = []string{"hello world"}
+	m.sel = selection{active: true, anchor: selPos{line: 0, col: 0}, head: selPos{line: 0, col: 5}}
+
+	out, cmd := m.Update(ctrlC)
+	m2, ok := out.(chatTUI)
+	if !ok {
+		t.Fatalf("Update returned %T, want chatTUI", out)
+	}
+
+	// Selection should be cleared after copy.
+	if m2.sel.active {
+		t.Error("selection should be cleared after Ctrl+C copy")
+	}
+
+	// Should NOT arm the quit gesture.
+	if !m2.lastCtrlCAt.IsZero() {
+		t.Error("Ctrl+C on active selection should not arm the quit gesture")
+	}
+
+	// Should return a command (clipboard copy + finalize).
+	if cmd == nil {
+		t.Fatal("Ctrl+C on selection should return a cmd (clipboard + finalize)")
+	}
+
+	// Execute the command — it should trigger the clipboard stub.
+	cmd()
+	if copied != "hello" {
+		t.Errorf("clipboard should contain selected text %q, got %q", "hello", copied)
+	}
+
+	// Second Ctrl+C should now arm quit (selection is gone).
+	_, cmd2 := m2.Update(ctrlC)
+	if cmd2 == nil {
+		t.Error("Ctrl+C after copy should arm quit (return a finalize cmd)")
+	}
 }
 
 // TestAgentEventCoalescesBurst proves one update drains the buffered event burst
