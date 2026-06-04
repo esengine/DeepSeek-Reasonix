@@ -7,6 +7,7 @@ package encoding
 import (
 	"bytes"
 	"encoding/binary"
+	"strings"
 	"unicode/utf8"
 
 	"golang.org/x/text/encoding/simplifiedchinese"
@@ -248,4 +249,53 @@ func utf16Encode(runes []rune) []uint16 {
 		}
 	}
 	return out
+}
+
+// Name returns a human-readable label for the encoding kind.
+func Name(k Kind) string {
+	switch k {
+	case UTF8:
+		return "UTF-8"
+	case UTF8BOM:
+		return "UTF-8 BOM"
+	case UTF16LE:
+		return "UTF-16 LE"
+	case UTF16BE:
+		return "UTF-16 BE"
+	case UTF16LENoBOM:
+		return "UTF-16 LE (no BOM)"
+	case UTF16BENoBOM:
+		return "UTF-16 BE (no BOM)"
+	case GB18030:
+		return "GB18030"
+	case LossyUTF8:
+		return "Lossy UTF-8"
+	}
+	return "UTF-8"
+}
+
+// ParseName converts a user-supplied encoding label to a Kind.
+// Returns the kind and true when recognised, or UTF8 and false when
+// the label is empty or unknown (caller should fall back to auto-detection).
+// Accepts common aliases: "gbk" / "gb2312" → GB18030, "utf8" → UTF8, etc.
+func ParseName(s string) (Kind, bool) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "":
+		return UTF8, false
+	case "utf-8", "utf8":
+		return UTF8, true
+	case "utf-8 bom", "utf8 bom", "utf8bom":
+		return UTF8BOM, true
+	case "utf-16 le", "utf16le", "utf-16le":
+		return UTF16LE, true
+	case "utf-16 be", "utf16be", "utf-16be":
+		return UTF16BE, true
+	case "utf-16 le (no bom)", "utf16le-nobom", "utf-16le-nobom":
+		return UTF16LENoBOM, true
+	case "utf-16 be (no bom)", "utf16be-nobom", "utf-16be-nobom":
+		return UTF16BENoBOM, true
+	case "gb18030", "gbk", "gb2312":
+		return GB18030, true
+	}
+	return UTF8, false
 }

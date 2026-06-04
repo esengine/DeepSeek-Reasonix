@@ -1978,54 +1978,6 @@ func (a *App) SearchFileRefs(query string) []DirEntry {
 	return out
 }
 
-// encodingName returns a human-readable label for a detected encoding kind.
-func encodingName(k fileenc.Kind) string {
-	switch k {
-	case fileenc.UTF8:
-		return "UTF-8"
-	case fileenc.UTF8BOM:
-		return "UTF-8 BOM"
-	case fileenc.UTF16LE:
-		return "UTF-16 LE"
-	case fileenc.UTF16BE:
-		return "UTF-16 BE"
-	case fileenc.UTF16LENoBOM:
-		return "UTF-16 LE (no BOM)"
-	case fileenc.UTF16BENoBOM:
-		return "UTF-16 BE (no BOM)"
-	case fileenc.GB18030:
-		return "GB18030"
-	case fileenc.LossyUTF8:
-		return "Lossy UTF-8"
-	}
-	return "UTF-8"
-}
-
-// parseEncoding converts a user-supplied encoding label to a fileenc.Kind.
-// Returns the kind and true when the label is recognised, or UTF8 and false
-// when it is empty or unknown (caller should fall back to auto-detection).
-func parseEncoding(enc string) (fileenc.Kind, bool) {
-	switch strings.ToLower(strings.TrimSpace(enc)) {
-	case "":
-		return fileenc.UTF8, false
-	case "utf-8", "utf8":
-		return fileenc.UTF8, true
-	case "utf-8 bom", "utf8 bom", "utf8bom":
-		return fileenc.UTF8BOM, true
-	case "utf-16 le", "utf16le", "utf-16le":
-		return fileenc.UTF16LE, true
-	case "utf-16 be", "utf16be", "utf-16be":
-		return fileenc.UTF16BE, true
-	case "utf-16 le (no bom)", "utf16le-nobom", "utf-16le-nobom":
-		return fileenc.UTF16LENoBOM, true
-	case "utf-16 be (no bom)", "utf16be-nobom", "utf-16be-nobom":
-		return fileenc.UTF16BENoBOM, true
-	case "gb18030", "gbk", "gb2312":
-		return fileenc.GB18030, true
-	}
-	return fileenc.UTF8, false
-}
-
 // ReadFile returns a small text preview for a file under the current workspace.
 // enc overrides auto-detection when non-empty (e.g. "UTF-8", "GB18030").
 func (a *App) ReadFile(rel string, enc string) FilePreview {
@@ -2069,10 +2021,10 @@ func (a *App) ReadFile(rel string, enc string) FilePreview {
 	}
 
 	// When the caller specifies an encoding, skip auto-detection entirely.
-	if forcedKind, ok := parseEncoding(enc); ok {
+	if forcedKind, ok := fileenc.ParseName(enc); ok {
 		decoded := fileenc.Decode(data, forcedKind)
 		out.Body = string(decoded)
-		out.Encoding = encodingName(forcedKind)
+		out.Encoding = fileenc.Name(forcedKind)
 		return out
 	}
 
@@ -2088,7 +2040,7 @@ func (a *App) ReadFile(rel string, enc string) FilePreview {
 		}
 		decoded := fileenc.Decode(data, detected)
 		out.Body = string(decoded)
-		out.Encoding = encodingName(detected)
+		out.Encoding = fileenc.Name(detected)
 		return out
 	}
 
@@ -2111,7 +2063,7 @@ func (a *App) ReadFile(rel string, enc string) FilePreview {
 		return out
 	}
 	out.Body = string(fileenc.Decode(data, detected))
-	out.Encoding = encodingName(detected)
+	out.Encoding = fileenc.Name(detected)
 	return out
 }
 

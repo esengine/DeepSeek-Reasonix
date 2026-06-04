@@ -782,6 +782,9 @@ func (c *Controller) Rewind(turn int, scope RewindScope) error {
 		if err != nil {
 			return c.rewindFail(fmt.Errorf("rewind code: %w", err))
 		}
+		// Prune checkpoints from the rewound turn onward so stale snapshots
+		// don't shadow new ones when turn numbers are reused after rewind.
+		c.cp.Prune(turn)
 		c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
 			Text: fmt.Sprintf("rewound code to turn %d — %d file(s) restored, %d removed", turn, len(written), len(deleted))})
 	}
@@ -794,12 +797,17 @@ func (c *Controller) Rewind(turn int, scope RewindScope) error {
 			s.Messages = s.Messages[:boundary]
 			c.mu.Lock()
 			c.cpTurn = turn // renumber future turns from here; later turns are gone
+			// Prune boundaries for turns that no longer exist.
 			for k := range c.cpBound {
 				if k >= turn {
 					delete(c.cpBound, k)
 				}
 			}
 			c.mu.Unlock()
+			// If code wasn't already pruned (RewindConversation only), prune now.
+			if scope == RewindConversation {
+				c.cp.Prune(turn)
+			}
 			if err := c.Snapshot(); err != nil {
 				slog.Warn("controller: snapshot after rewind", "err", err)
 			}

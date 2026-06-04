@@ -184,6 +184,31 @@ func (s *Store) persist(c *Checkpoint) {
 	}
 }
 
+// Prune removes all checkpoints with Turn >= fromTurn from the in-memory store
+// and deletes their persisted JSON files. This must be called after a code or
+// conversation rewind so that stale checkpoints from later turns don't shadow
+// new ones when turn numbers are reused.
+func (s *Store) Prune(fromTurn int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	kept := s.done[:0]
+	for _, c := range s.done {
+		if c.Turn >= fromTurn {
+			// Delete persisted JSON for this turn.
+			if s.dir != "" {
+				os.Remove(filepath.Join(s.dir, fmt.Sprintf("turn-%d.json", c.Turn)))
+			}
+			continue
+		}
+		kept = append(kept, c)
+	}
+	s.done = kept
+	// Also discard cur if it belongs to a pruned turn.
+	if s.cur != nil && s.cur.Turn >= fromTurn {
+		s.cur = nil
+	}
+}
+
 // NextTurn returns the turn number a new checkpoint should take: one past the
 // highest existing turn (0 when empty), so a resumed session keeps numbering
 // without colliding with checkpoints loaded from disk.

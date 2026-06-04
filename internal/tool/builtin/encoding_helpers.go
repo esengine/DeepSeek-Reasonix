@@ -11,9 +11,19 @@ import (
 // Returns the decoded content and the detected encoding kind so callers
 // can re-encode on write to preserve the original charset.
 func readFileEncoded(path string) (content string, enc fileenc.Kind, err error) {
+	return readFileEncodedWith(path, "")
+}
+
+// readFileEncodedWith reads a file and decodes it to UTF-8. When encName is
+// non-empty the encoding is forced (skip auto-detection); otherwise behaves
+// like readFileEncoded.
+func readFileEncodedWith(path string, encName string) (content string, enc fileenc.Kind, err error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return "", 0, err
+	}
+	if forced, ok := fileenc.ParseName(encName); ok {
+		return string(fileenc.Decode(b, forced)), forced, nil
 	}
 	enc, _ = fileenc.Detect(b)
 	return string(fileenc.Decode(b, enc)), enc, nil
@@ -22,6 +32,15 @@ func readFileEncoded(path string) (content string, enc fileenc.Kind, err error) 
 // writeFileEncoded encodes content back to the given encoding and writes it.
 func writeFileEncoded(path string, content string, enc fileenc.Kind) error {
 	return os.WriteFile(path, fileenc.Encode(content, enc), 0o644)
+}
+
+// writeFileEncodedWith writes content to path. When encName is non-empty the
+// encoding is forced; otherwise enc (typically from readFileEncoded) is used.
+func writeFileEncodedWith(path string, content string, enc fileenc.Kind, encName string) error {
+	if forced, ok := fileenc.ParseName(encName); ok {
+		return os.WriteFile(path, fileenc.Encode(content, forced), 0o644)
+	}
+	return writeFileEncoded(path, content, enc)
 }
 
 // matchLineEndings adapts an edit's old/new text to a CRLF file when the literal

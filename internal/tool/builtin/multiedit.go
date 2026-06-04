@@ -53,7 +53,8 @@ func (multiEdit) Schema() json.RawMessage {
       },
       "required":["old_string","new_string"]
     }
-  }
+  },
+  "encoding":{"type":"string","description":"File encoding override (e.g. \"UTF-8\", \"GB18030\"). When omitted, auto-detection is used."}
 },
 "required":["path","edits"]
 }`)
@@ -63,8 +64,9 @@ func (multiEdit) ReadOnly() bool { return false }
 
 func (m multiEdit) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var p struct {
-		Path  string     `json:"path"`
-		Edits []editStep `json:"edits"`
+		Path     string     `json:"path"`
+		Edits    []editStep `json:"edits"`
+		Encoding string     `json:"encoding,omitempty"`
 	}
 	if err := json.Unmarshal(args, &p); err != nil {
 		return "", fmt.Errorf("invalid args: %w", err)
@@ -80,7 +82,7 @@ func (m multiEdit) Execute(ctx context.Context, args json.RawMessage) (string, e
 		return "", err
 	}
 
-	content, enc, err := readFileEncoded(p.Path)
+	content, enc, err := readFileEncodedWith(p.Path, p.Encoding)
 	if err != nil {
 		return "", fmt.Errorf("read %s: %w", p.Path, err)
 	}
@@ -115,7 +117,7 @@ func (m multiEdit) Execute(ctx context.Context, args json.RawMessage) (string, e
 		}
 	}
 
-	if err := writeFileEncoded(p.Path, content, enc); err != nil {
+	if err := writeFileEncodedWith(p.Path, content, enc, p.Encoding); err != nil {
 		return "", fmt.Errorf("write %s: %w", p.Path, err)
 	}
 	return fmt.Sprintf("multi_edit %s: %d edits applied (%d total replacements)", p.Path, len(p.Edits), applied), nil

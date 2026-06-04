@@ -54,6 +54,7 @@ func (e editFile) Preview(args json.RawMessage) (diff.Change, error) {
 		Path      string `json:"path"`
 		OldString string `json:"old_string"`
 		NewString string `json:"new_string"`
+		Encoding  string `json:"encoding,omitempty"`
 	}
 	if err := json.Unmarshal(args, &p); err != nil {
 		return diff.Change{}, fmt.Errorf("invalid args: %w", err)
@@ -66,7 +67,7 @@ func (e editFile) Preview(args json.RawMessage) (diff.Change, error) {
 	}
 	p.Path = resolveIn(e.workDir, p.Path)
 
-	content, _, err := readFileEncoded(p.Path)
+	content, _, err := readFileEncodedWith(p.Path, p.Encoding)
 	if err != nil {
 		return diff.Change{}, fmt.Errorf("read %s: %w", p.Path, err)
 	}
@@ -90,8 +91,9 @@ func (e editFile) Preview(args json.RawMessage) (diff.Change, error) {
 // of an invalid batch fails the same way the call would.
 func (m multiEdit) Preview(args json.RawMessage) (diff.Change, error) {
 	var p struct {
-		Path  string     `json:"path"`
-		Edits []editStep `json:"edits"`
+		Path     string     `json:"path"`
+		Edits    []editStep `json:"edits"`
+		Encoding string     `json:"encoding,omitempty"`
 	}
 	if err := json.Unmarshal(args, &p); err != nil {
 		return diff.Change{}, fmt.Errorf("invalid args: %w", err)
@@ -104,7 +106,7 @@ func (m multiEdit) Preview(args json.RawMessage) (diff.Change, error) {
 	}
 	p.Path = resolveIn(m.workDir, p.Path)
 
-	content, _, err := readFileEncoded(p.Path)
+	content, _, err := readFileEncodedWith(p.Path, p.Encoding)
 	if err != nil {
 		return diff.Change{}, fmt.Errorf("read %s: %w", p.Path, err)
 	}

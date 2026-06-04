@@ -731,13 +731,13 @@ export function useController() {
     // "fork" branches into a new session; "summ-*" compress the log; the rest
     // restore in place. All keep code intact (except the code/both restores).
     if (scope === "fork") {
-      await app.Fork(turn).catch(() => {});
+      await app.Fork(turn).catch((e) => { console.error("fork failed:", e); dispatch({ type: "local_notice", level: "warn" as const, text: `Fork failed: ${e?.message ?? e}` }); });
     } else if (scope === "summ-from") {
-      await app.SummarizeFrom(turn).catch(() => {});
+      await app.SummarizeFrom(turn).catch((e) => { console.error("summarize failed:", e); dispatch({ type: "local_notice", level: "warn" as const, text: `Summarize failed: ${e?.message ?? e}` }); });
     } else if (scope === "summ-upto") {
-      await app.SummarizeUpTo(turn).catch(() => {});
+      await app.SummarizeUpTo(turn).catch((e) => { console.error("summarize failed:", e); dispatch({ type: "local_notice", level: "warn" as const, text: `Summarize failed: ${e?.message ?? e}` }); });
     } else {
-      await app.Rewind(turn, scope).catch(() => {});
+      await app.Rewind(turn, scope).catch((e) => { console.error("rewind failed:", e); dispatch({ type: "local_notice", level: "warn" as const, text: `Rewind failed: ${e?.message ?? e}` }); });
     }
     const messages = await app.History().catch(() => [] as HistoryMessage[]);
     dispatch({ type: "reset" });

@@ -26,7 +26,7 @@ func (editFile) Description() string {
 }
 
 func (editFile) Schema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"File path"},"old_string":{"type":"string","description":"Exact text to replace (must be unique in the file)"},"new_string":{"type":"string","description":"Replacement text (may be empty to delete)"}},"required":["path","old_string","new_string"]}`)
+	return json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"File path"},"old_string":{"type":"string","description":"Exact text to replace (must be unique in the file)"},"new_string":{"type":"string","description":"Replacement text (may be empty to delete)"},"encoding":{"type":"string","description":"File encoding override (e.g. \"UTF-8\", \"GB18030\"). When omitted, auto-detection is used."}},"required":["path","old_string","new_string"]}`)
 }
 
 func (editFile) ReadOnly() bool { return false }
@@ -36,6 +36,7 @@ func (e editFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 		Path      string `json:"path"`
 		OldString string `json:"old_string"`
 		NewString string `json:"new_string"`
+		Encoding  string `json:"encoding,omitempty"`
 	}
 	if err := json.Unmarshal(args, &p); err != nil {
 		return "", fmt.Errorf("invalid args: %w", err)
@@ -51,7 +52,7 @@ func (e editFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 		return "", err
 	}
 
-	content, enc, err := readFileEncoded(p.Path)
+	content, enc, err := readFileEncodedWith(p.Path, p.Encoding)
 	if err != nil {
 		return "", fmt.Errorf("read %s: %w", p.Path, err)
 	}
@@ -67,7 +68,7 @@ func (e editFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 	}
 
 	updated := strings.Replace(content, old, newStr, 1)
-	if err := writeFileEncoded(p.Path, updated, enc); err != nil {
+	if err := writeFileEncodedWith(p.Path, updated, enc, p.Encoding); err != nil {
 		return "", fmt.Errorf("write %s: %w", p.Path, err)
 	}
 	return fmt.Sprintf("edited %s", p.Path), nil

@@ -46,7 +46,8 @@ func (readFile) Schema() json.RawMessage {
 "properties":{
   "path":{"type":"string","description":"File path"},
   "offset":{"type":"integer","description":"0-based line offset to start reading from (default 0)","minimum":0},
-  "limit":{"type":"integer","description":"Maximum lines to return (default 2000)","minimum":1}
+  "limit":{"type":"integer","description":"Maximum lines to return (default 2000)","minimum":1},
+  "encoding":{"type":"string","description":"File encoding override (e.g. \"UTF-8\", \"GB18030\", \"UTF-16 LE\"). When omitted, auto-detection is used."}
 },
 "required":["path"]
 }`)
@@ -56,9 +57,10 @@ func (readFile) ReadOnly() bool { return true }
 
 func (r readFile) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var p struct {
-		Path   string `json:"path"`
-		Offset int    `json:"offset,omitempty"`
-		Limit  int    `json:"limit,omitempty"`
+		Path     string `json:"path"`
+		Offset   int    `json:"offset,omitempty"`
+		Limit    int    `json:"limit,omitempty"`
+		Encoding string `json:"encoding,omitempty"`
 	}
 	if err := json.Unmarshal(args, &p); err != nil {
 		return "", fmt.Errorf("invalid args: %w", err)
@@ -86,6 +88,16 @@ func (r readFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 		return "", fmt.Errorf("read %s: %w", p.Path, err)
 	}
 	defer f.Close()
+
+	// When the caller specifies an encoding, skip all auto-detection branches and
+	// decode with the forced encoding directly.
+	if forced, ok := fileenc.ParseName(p.Encoding); ok {
+		all, rerr := io.ReadAll(f)
+		if rerr != nil {
+			return "", fmt.Errorf("read %s: %w", p.Path, rerr)
+		}
+		return r.scan(bytes.NewReader(fileenc.Decode(all, forced)), p.Offset, p.Limit)
+	}
 
 	// Peek the first 8 KiB to reject binary files cheaply (a NUL byte) before
 	// reading further — keeps a multi-GB archive from being slurped just to be
