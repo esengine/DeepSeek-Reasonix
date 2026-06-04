@@ -1630,7 +1630,12 @@ func (a *App) Effort() EffortInfo {
 	if !cap.Supported {
 		return EffortInfo{Supported: false, Current: "auto", Default: cap.Default, Levels: []string{}}
 	}
-	return EffortInfo{Supported: true, Current: config.EffortDisplay(entry), Default: cap.Default, Levels: cap.Levels}
+	cfg, _ := config.Load()
+	effort := ""
+	if cfg != nil {
+		effort = cfg.Session.Effort
+	}
+	return EffortInfo{Supported: true, Current: config.EffortDisplay(effort), Default: cap.Default, Levels: cap.Levels}
 }
 
 func (a *App) SetEffort(level string) error {
@@ -1907,7 +1912,12 @@ func (a *App) runEffortCommand(input string) {
 	}
 	args := strings.Fields(input)
 	if len(args) < 2 {
-		a.notice(fmt.Sprintf("effort for %s: %s (default: %s; options: %s)", entry.Name, config.EffortDisplay(entry), cap.Default, strings.Join(cap.Levels, "|")))
+		cfg, _ := config.Load()
+		effort := ""
+		if cfg != nil {
+			effort = cfg.Session.Effort
+		}
+		a.notice(fmt.Sprintf("effort for %s: %s (default: %s; options: %s)", entry.Name, config.EffortDisplay(effort), cap.Default, strings.Join(cap.Levels, "|")))
 		return
 	}
 	if len(args) > 2 {

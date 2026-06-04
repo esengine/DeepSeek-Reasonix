@@ -29,8 +29,8 @@ func TestEffortDefaultsBeforeStartup(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 
 	got := NewApp().Effort()
-	if !got.Supported || got.Current != "auto" || got.Default != "high" || !hasLevel(got.Levels, "auto") {
-		t.Fatalf("pre-startup Effort() = %+v, want auto with DeepSeek default high", got)
+	if !got.Supported || got.Current != "auto" || got.Default != "auto" || !hasLevel(got.Levels, "auto") {
+		t.Fatalf("pre-startup Effort() = %+v, want auto with DeepSeek default auto", got)
 	}
 }
 
