@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/billing"
@@ -135,7 +136,30 @@ type Controller struct {
 	// a fresh memory takes effect this session without busting the prompt cache;
 	// it joins the prefix naturally on the next session.
 	pendingMemory []string
+
+	// historyCache amortises the cost of History() across bursty accessor
+	// callers (lastAssistantText in the hook Stop path, replaySectionsFor in
+	// the TUI on every render, the serve /history endpoint, etc.). The cache
+	// is a single-slot copy: each successful Snapshot fills it, and a
+	// subsequent History() within historyCacheTTL returns the same slice.
+	//
+	// The cache is invalidated on every Controller-level mutation that
+	// changes the underlying session (Replace, SetSession, Resume). For
+	// streaming-time Append calls (the agent's hot path of "add an
+	// assistant delta" or "add a tool result") the TTL is the safety net:
+	// the next Snapshot lands within 25ms either way, and a 25ms-stale
+	// view is fine for a 60Hz UI thread that just wants the live count.
+	// The cost amortises to O(1) per History() call when several callers
+	// fire in the same render frame.
+	historyCacheMu    sync.Mutex
+	historyCache      []provider.Message
+	historyCacheAt    time.Time
+	historyCacheTTL   time.Duration
+	historyCacheHits  uint64 // diagnostics: served from cache
+	historyCacheMiss  uint64 // diagnostics: re-snapshotted
 }
+
+const defaultHistoryCacheTTL = 25 * time.Millisecond
 
 type approvalReply struct {
 	allow   bool
@@ -227,6 +251,7 @@ func New(opts Options) *Controller {
 		approvals:     map[string]chan approvalReply{},
 		asks:          map[string]chan []event.AskAnswer{},
 		granted:       map[string]bool{},
+		historyCacheTTL: defaultHistoryCacheTTL,
 	}
 	// Checkpoints: bind a store to the session and route writer pre-edits into it.
 	c.rebindCheckpoints(opts.SessionPath)
@@ -1055,6 +1080,12 @@ func (c *Controller) Resume(s *agent.Session, path string) {
 	c.sessionPath = path
 	c.mu.Unlock()
 	c.rebindCheckpoints(path)
+	// Session rebound: the next History() must re-Snapshot, not serve the
+	// old (now-stale) cached slice. The TTL would catch this within 25ms
+	// anyway, but invalidating explicitly makes the staleness window zero
+	// for the resume path — the user's first render of a loaded session
+	// should see the actual transcript, not the previous session's tail.
+	c.invalidateHistoryCache()
 }
 
 // Snapshot writes the executor's conversation to the active session file. No-op
@@ -1137,11 +1168,53 @@ func (c *Controller) SessionPath() string {
 
 // History returns the executor's current message log (for repopulating a
 // resumed frontend's view).
+//
+// The result is cached for historyCacheTTL (25ms by default) so a burst of
+// accessor callers in the same render frame — lastAssistantText in the hook
+// Stop path, replaySectionsFor in the TUI on every render, the serve
+// /history endpoint, etc. — share a single Snapshot copy. The TTL is short
+// enough that a 60Hz UI thread sees a fresh slice at most one frame late,
+// and the underlying copy still happens under the session's RWMutex so a
+// concurrent Append never tears.
 func (c *Controller) History() []provider.Message {
 	if c.executor == nil {
 		return nil
 	}
-	return c.executor.Session().Snapshot() // copy — a turn may be appending concurrently
+	// Fast path: the cache is single-slot; under contention (one goroutine
+	// mid-Snapshot) readers wait, then take the just-filled cache. Holding
+	// the mutex through the read is cheap (no syscalls, no I/O), and keeps
+	// the read coherent with the slow path's write.
+	c.historyCacheMu.Lock()
+	defer c.historyCacheMu.Unlock()
+	if c.historyCache != nil && time.Since(c.historyCacheAt) < c.historyCacheTTL {
+		c.historyCacheHits++
+		return c.historyCache
+	}
+	snap := c.executor.Session().Snapshot() // copy — a turn may be appending concurrently
+	c.historyCache = snap
+	c.historyCacheAt = time.Now()
+	c.historyCacheMiss++
+	return snap
+}
+
+// invalidateHistoryCache is called by every Controller-level path that
+// replaces or rebinds the underlying session (Resume, Replace, SetSession).
+// Streaming-time Appends are NOT invalidated explicitly — the TTL covers
+// them, and bumping a counter per Append would defeat the purpose of
+// caching.
+func (c *Controller) invalidateHistoryCache() {
+	c.historyCacheMu.Lock()
+	c.historyCache = nil
+	c.historyCacheMu.Unlock()
+}
+
+// HistoryCacheStats reports cache hit/miss counts for diagnostics and tests.
+// The Controller is the only thing that owns the cache, so a one-liner here
+// keeps the public surface narrow.
+func (c *Controller) HistoryCacheStats() (hits, misses uint64) {
+	c.historyCacheMu.Lock()
+	defer c.historyCacheMu.Unlock()
+	return c.historyCacheHits, c.historyCacheMiss
 }
 
 // ContextSnapshot returns (promptTokens, contextWindow) from the most recent
