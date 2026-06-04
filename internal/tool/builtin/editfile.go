@@ -65,6 +65,17 @@ func (e editFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 	old, newStr := matchLineEndings(content, p.OldString, p.NewString)
 	switch strings.Count(content, old) {
 	case 0:
+		// Exact match failed — try whitespace-tolerant fuzzy matching.
+		if actual, ok := fuzzyFind(content, old); ok {
+			// Adapt newStr's line endings to match the actual content region.
+			_, newStr = matchLineEndings(content, old, newStr)
+			// Replace the actual (whitespace-preserved) text in content.
+			updated := strings.Replace(content, actual, newStr, 1)
+			if err := writeFileEncodedWith(p.Path, updated, enc, encParam); err != nil {
+				return "", fmt.Errorf("write %s: %w", p.Path, err)
+			}
+			return fmt.Sprintf("edited %s (fuzzy match)", p.Path), nil
+		}
 		return "", diagnoseNotFound(p.Path, p.OldString, content)
 	case 1:
 		// ok

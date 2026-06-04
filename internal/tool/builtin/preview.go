@@ -79,6 +79,12 @@ func (e editFile) Preview(args json.RawMessage) (diff.Change, error) {
 	old, newStr := matchLineEndings(content, p.OldString, p.NewString)
 	switch strings.Count(content, old) {
 	case 0:
+		// Fuzzy fallback.
+		if actual, ok := fuzzyFind(content, old); ok {
+			_, newStr = matchLineEndings(content, old, newStr)
+			updated := strings.Replace(content, actual, newStr, 1)
+			return diff.Build(p.Path, content, updated, diff.Modify), nil
+		}
 		return diff.Change{}, diagnoseNotFound(p.Path, p.OldString, content)
 	case 1:
 		// ok
@@ -128,6 +134,11 @@ func (m multiEdit) Preview(args json.RawMessage) (diff.Change, error) {
 		old, newStr := matchLineEndings(content, step.OldString, step.NewString)
 		if step.ReplaceAll {
 			if strings.Count(content, old) == 0 {
+				if actual, ok := fuzzyFind(content, old); ok {
+					_, newStr = matchLineEndings(content, old, newStr)
+					content = strings.ReplaceAll(content, actual, newStr)
+					continue
+				}
 				return diff.Change{}, diagnoseNotFound(p.Path, step.OldString, content)
 			}
 			content = strings.ReplaceAll(content, old, newStr)
@@ -135,6 +146,11 @@ func (m multiEdit) Preview(args json.RawMessage) (diff.Change, error) {
 		}
 		switch strings.Count(content, old) {
 		case 0:
+			if actual, ok := fuzzyFind(content, old); ok {
+				_, newStr = matchLineEndings(content, old, newStr)
+				content = strings.Replace(content, actual, newStr, 1)
+				continue
+			}
 			return diff.Change{}, diagnoseNotFound(p.Path, step.OldString, content)
 		case 1:
 			content = strings.Replace(content, old, newStr, 1)

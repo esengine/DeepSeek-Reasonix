@@ -179,3 +179,80 @@ func quoteLine(s string) string {
 	}
 	return "`" + s + "`"
 }
+
+// fuzzyFind attempts a whitespace-tolerant match of old in content when exact
+// matching fails. It tries two progressive relaxations:
+//
+//  1. Trim trailing whitespace from every line (models often add or drop
+//     spaces at line ends, or the file has trailing spaces the model didn't
+//     reproduce).
+//  2. Also trim leading whitespace (the model mis-indented the block or the
+//     code was extracted from a different indentation context).
+//
+// When a fuzzy match is found it returns the **actual** text from content
+// (with original whitespace preserved) so that strings.Replace substitutes
+// the real region without disturbing the file's formatting.
+//
+// Returns ("", false) if no match is found at any relaxation level.
+func fuzzyFind(content, old string) (actualOld string, found bool) {
+	if old == "" || content == "" {
+		return "", false
+	}
+
+	// Split on \n (works for both LF and CRLF — \r stays attached).
+	oldLines := strings.Split(old, "\n")
+	contentLines := strings.Split(content, "\n")
+	nOld := len(oldLines)
+	if nOld == 0 || nOld > len(contentLines) {
+		return "", false
+	}
+
+	// --- Level 1: trim trailing whitespace per line ---
+	trimTrail := func(lines []string) []string {
+		out := make([]string, len(lines))
+		for i, l := range lines {
+			out[i] = strings.TrimRight(l, " \t\r")
+		}
+		return out
+	}
+
+	normOld := trimTrail(oldLines)
+	for i := 0; i <= len(contentLines)-nOld; i++ {
+		window := contentLines[i : i+nOld]
+		if linesEqual(trimTrail(window), normOld) {
+			return strings.Join(window, "\n"), true
+		}
+	}
+
+	// --- Level 2: also trim leading whitespace (dedent) ---
+	trimLead := func(lines []string) []string {
+		out := make([]string, len(lines))
+		for i, l := range lines {
+			out[i] = strings.TrimLeft(l, " \t")
+		}
+		return out
+	}
+
+	normOld2 := trimLead(normOld)
+	for i := 0; i <= len(contentLines)-nOld; i++ {
+		window := contentLines[i : i+nOld]
+		if linesEqual(trimLead(trimTrail(window)), normOld2) {
+			return strings.Join(window, "\n"), true
+		}
+	}
+
+	return "", false
+}
+
+// linesEqual compares two line slices element-wise.
+func linesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}

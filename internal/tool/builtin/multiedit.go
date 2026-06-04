@@ -105,6 +105,14 @@ func (m multiEdit) Execute(ctx context.Context, args json.RawMessage) (string, e
 		if step.ReplaceAll {
 			count := strings.Count(content, old)
 			if count == 0 {
+				// Fuzzy match for replace_all: find the actual text and replace all.
+				if actual, ok := fuzzyFind(content, old); ok {
+					_, newStr = matchLineEndings(content, old, newStr)
+					fuzzyCount := strings.Count(content, actual)
+					content = strings.ReplaceAll(content, actual, newStr)
+					applied += fuzzyCount
+					continue
+				}
 				return "", diagnoseNotFound(p.Path, step.OldString, content)
 			}
 			content = strings.ReplaceAll(content, old, newStr)
@@ -113,6 +121,13 @@ func (m multiEdit) Execute(ctx context.Context, args json.RawMessage) (string, e
 		}
 		switch strings.Count(content, old) {
 		case 0:
+			// Fuzzy fallback.
+			if actual, ok := fuzzyFind(content, old); ok {
+				_, newStr = matchLineEndings(content, old, newStr)
+				content = strings.Replace(content, actual, newStr, 1)
+				applied++
+				continue
+			}
 			return "", diagnoseNotFound(p.Path, step.OldString, content)
 		case 1:
 			content = strings.Replace(content, old, newStr, 1)
