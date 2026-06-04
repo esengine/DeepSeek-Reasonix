@@ -556,6 +556,11 @@ export function useController() {
     call.catch(() => {});
   }, []);
 
+  const runShell = useCallback((command: string) => {
+    dispatch({ type: "user", text: `!${command}` });
+    app.RunShell(command).catch(() => {});
+  }, []);
+
   const notice = useCallback((text: string, level: "info" | "warn" = "info") => {
     dispatch({ type: "local_notice", level, text });
   }, []);
@@ -751,6 +756,7 @@ export function useController() {
   return {
     state,
     send,
+    runShell,
     notice,
     cancel,
     approve,

@@ -138,6 +138,7 @@ export default function App() {
   const {
     state,
     send,
+    runShell,
     notice,
     cancel,
     approve,
@@ -288,6 +289,11 @@ export default function App() {
   const handleSend = useCallback(
     async (displayText: string, submitText = displayText) => {
       const trimmed = displayText.trim();
+      // "!<cmd>" runs a shell command directly, bypassing the model.
+      if (trimmed.startsWith("!")) {
+        runShell(trimmed.slice(1));
+        return;
+      }
       const model = /^\/model\s+(\S+)$/.exec(trimmed);
       if (model) {
         void switchModel(model[1]);
@@ -324,7 +330,7 @@ export default function App() {
       await syncModeToController(mode);
       send(trimmed, submitText.trim());
     },
-    [switchModel, openMemory, syncModeToController, mode, send, notice, t],
+    [switchModel, openMemory, syncModeToController, mode, send, runShell, notice, t],
   );
 
   const addToChat = useCallback((text: string) => {

@@ -193,6 +193,17 @@ func (a *App) Submit(input string) {
 	}
 }
 
+// RunShell executes a shell command directly (bypassing the model) and streams
+// output as events on eventChannel.
+func (a *App) RunShell(command string) {
+	a.mu.RLock()
+	ctrl := a.ctrl
+	a.mu.RUnlock()
+	if ctrl != nil {
+		ctrl.RunShell(command)
+	}
+}
+
 // SubmitDisplay runs input as a turn while recording a shorter UI-only display
 // string for the saved desktop transcript. The model still receives input.
 func (a *App) SubmitDisplay(display, input string) {
