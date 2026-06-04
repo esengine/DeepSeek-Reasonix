@@ -459,6 +459,15 @@ type ProviderEntry struct {
 	// Empty = provider default.
 	Thinking string `toml:"thinking"`
 	Effort   string `toml:"effort"`
+	// SupportedEfforts lists the /effort levels this provider/model exposes.
+	// When non-empty, it overrides the built-in defaults derived from
+	// Kind/BaseURL and makes /effort configurable. "auto" is the implicit
+	// prefix — always accepted. DefaultEffort resolves it; omit DefaultEffort
+	// (or set one outside this list) to fall back to SupportedEfforts[0].
+	SupportedEfforts []string `toml:"supported_efforts"`
+	// DefaultEffort is the /effort level used when the user picks "auto" or
+	// has not set Effort. Ignored when SupportedEfforts is empty.
+	DefaultEffort string `toml:"default_effort"`
 	// NoProxy reaches this provider's base_url directly, never through the proxy.
 	// For China-only endpoints a foreign-exit proxy resets the TLS handshake (#2803).
 	NoProxy bool `toml:"no_proxy"`
