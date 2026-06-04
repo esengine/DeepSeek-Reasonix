@@ -401,6 +401,8 @@ export const zh: Record<DictKey, string> = {
   "settings.language": "语言",
   "settings.langAuto": "自动（跟随系统）",
   "settings.config": "配置文件：{path}",
+  "settings.searchPlaceholder": "筛选设置…",
+  "settings.noSectionMatch": "没有匹配 “{q}” 的设置。",
 
   // 待办栏
   "todo.title": "待办",

@@ -400,6 +400,8 @@ export const en = {
   "settings.language": "Language",
   "settings.langAuto": "Auto (system)",
   "settings.config": "config: {path}",
+  "settings.searchPlaceholder": "Filter settings…",
+  "settings.noSectionMatch": "No setting matches “{q}”.",
 
   // todo bar
   "todo.title": "To-dos",
