@@ -1,5 +1,5 @@
-import { lazy, Suspense } from "react";
-import { CopyButton } from "./CopyButton";
+import { lazy, Suspense, useState } from "react";
+import { CodeBlockToolbar } from "./CodeBlockToolbar";
 
 export interface EditorProps {
   value: string;
@@ -22,9 +22,23 @@ export interface EditorProps {
 const Impl = lazy(() => import("./editors/HljsCode"));
 
 export function CodeViewer(props: EditorProps) {
+  // The toolbar lives above the editor and stays in sync with the language
+  // override (the user's manual pick in the picker). We hold the override
+  // here rather than inside the toolbar so a future feature — e.g. "use
+  // this highlight for the next N code blocks" — can read it from the
+  // parent. The override is "additive" to props.language: when the user
+  // picks "rust", we pass that down; if they then change the input (which
+  // would mean a different code block), the toolbar's internal override
+  // resets to the new props.language.
+  const [override, setOverride] = useState<string | null>(null);
+  const effective = override ?? props.language;
   return (
     <div className="code-block">
-      <CopyButton text={props.value} className="code-block__copy" />
+      <CodeBlockToolbar
+        value={props.value}
+        language={effective}
+        onLanguageChange={(lang) => setOverride(lang)}
+      />
       <Suspense
         fallback={
           <pre className="code code--loading">
@@ -32,7 +46,7 @@ export function CodeViewer(props: EditorProps) {
           </pre>
         }
       >
-        <Impl {...props} />
+        <Impl {...props} language={effective} />
       </Suspense>
     </div>
   );

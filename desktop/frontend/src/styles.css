@@ -579,6 +579,120 @@ body {
 .code-block:hover .code-block__copy {
   opacity: 1;
 }
+
+/* code-block toolbar: hover-revealed row of actions. The wrapper is a
+   positioned cluster at the top-right; the existing copy button keeps its
+   own positioning slot and the toolbar overlays the same area. We delay the
+   fade-out by 80ms so a quick mouse-pass over the picker list doesn't blink
+   the buttons away mid-hover. */
+.code-block__toolbar {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 3;
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  opacity: 0;
+  transition: opacity 0.12s ease 0.08s;
+  pointer-events: none;
+}
+.code-block:hover .code-block__toolbar,
+.code-block:focus-within .code-block__toolbar {
+  opacity: 1;
+  pointer-events: auto;
+}
+.code-block__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 7px;
+  font-size: 11px;
+  font-family: var(--sans);
+  color: var(--fg-dim);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s, border-color 0.1s;
+}
+.code-block__btn:hover {
+  color: var(--fg);
+  background: var(--bg-elev-2);
+  border-color: var(--border-soft);
+}
+.code-block__btn-label {
+  font-weight: 600;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+.code-block__lang {
+  text-transform: none;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--fg-dim);
+  padding: 3px 6px 3px 8px;
+}
+.code-block__lang:hover {
+  color: var(--accent);
+}
+.code-block__lang-label {
+  max-width: 80px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.code-block__lang-chev {
+  transition: transform 0.12s;
+  opacity: 0.6;
+}
+.code-block__lang-chev--open {
+  transform: rotate(180deg);
+}
+.code-block__picker {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 4;
+  min-width: 180px;
+  max-height: 280px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+}
+.code-block__picker-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 8px;
+  font-size: 12px;
+  font-family: var(--sans);
+  color: var(--fg);
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+  text-align: left;
+}
+.code-block__picker-item:hover {
+  background: var(--bg-elev-2);
+}
+.code-block__picker-item--on {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.code-block__picker-id {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--fg-faint);
+}
 .msg__actions {
   margin-top: 6px;
   opacity: 0;
