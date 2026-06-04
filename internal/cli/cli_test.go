@@ -143,11 +143,12 @@ func TestConfigureKeysReusesExistingEnv(t *testing.T) {
 func TestConfigureKeysAllSetSkipsInput(t *testing.T) {
 	t.Setenv("DEEPSEEK_API_KEY", "ds")
 	t.Setenv("MIMO_API_KEY", "mi")
+	t.Setenv("ANTHROPIC_API_KEY", "ant")
 
 	selected := config.Default().Providers
 	env := configureKeys(selected, strings.NewReader("should-not-be-consumed\n"), io.Discard)
-	if len(env) != 2 {
-		t.Errorf("env = %v, want 2 (both reused)", env)
+	if len(env) != 3 {
+		t.Errorf("env = %v, want 3 (all reused)", env)
 	}
 }
 
@@ -189,13 +190,13 @@ func TestAppendEnvUpsertHandlesExportPrefix(t *testing.T) {
 }
 
 // TestGroupByFamily verifies the wizard groups the default preset into
-// "deepseek" (flash + pro) and "mimo" (pro + flash), preserving the order
-// each family first appears in.
+// "deepseek" (flash + pro), "mimo" (pro + flash), and "anthropic",
+// preserving the order each family first appears in.
 func TestGroupByFamily(t *testing.T) {
 	order, members, info := groupByFamily(config.Default().Providers)
 
-	if got := order; !reflect.DeepEqual(got, []string{"deepseek", "mimo"}) {
-		t.Fatalf("family order = %v, want [deepseek mimo]", got)
+	if got := order; !reflect.DeepEqual(got, []string{"deepseek", "mimo", "anthropic"}) {
+		t.Fatalf("family order = %v, want [deepseek mimo anthropic]", got)
 	}
 	if got := members["deepseek"]; !reflect.DeepEqual(got, []int{0, 1}) {
 		t.Errorf("deepseek members = %v, want [0 1]", got)
@@ -203,8 +204,11 @@ func TestGroupByFamily(t *testing.T) {
 	if got := members["mimo"]; !reflect.DeepEqual(got, []int{2, 3}) {
 		t.Errorf("mimo members = %v, want [2 3]", got)
 	}
-	if info["deepseek"].name != "DeepSeek" || info["mimo"].name != "MiMo (Xiaomi)" {
-		t.Errorf("display names = %q / %q", info["deepseek"].name, info["mimo"].name)
+	if got := members["anthropic"]; !reflect.DeepEqual(got, []int{4}) {
+		t.Errorf("anthropic members = %v, want [4]", got)
+	}
+	if info["deepseek"].name != "DeepSeek" || info["mimo"].name != "MiMo (Xiaomi)" || info["anthropic"].name != "Anthropic" {
+		t.Errorf("display names = %q / %q / %q", info["deepseek"].name, info["mimo"].name, info["anthropic"].name)
 	}
 }
 
