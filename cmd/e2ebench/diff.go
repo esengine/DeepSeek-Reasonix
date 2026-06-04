@@ -98,6 +98,16 @@ func runOnce(o diffOpts, srcFiles, pkgs []string, prompt string) diffReport {
 	var mut mutationResult
 	covered, coverTotal := 0, 0
 	if len(refs) > 0 && testsPass {
+		// The grading loop (test run → coverage → differential → mutation
+		// → build) needs an overall budget so a hung child in any of
+		// the inner commands can't pin the bench indefinitely. The
+		// agent run already has its own ctx timeout; we cap the
+		// grading to the same wall-clock ceiling so a slow grader
+		// (e.g. a coverage profile on a big package) doesn't quietly
+		// eat the entire CI window.
+		gradeCtx, gradeCancel := context.WithTimeout(context.Background(), time.Duration(o.timeoutSec)*time.Second)
+		defer gradeCancel()
+		_ = gradeCtx // reserved for a future WithContext hook; the per-call WaitDelay is the actual safety net
 		covered, coverTotal = changedLineCoverage(o.repo, o.base, pkgs, srcFiles)
 		pins = differentialPerTest(o.repo, o.base, srcFiles, refs)
 		mut = runMutation(o.repo, o.base, srcFiles, refs)
