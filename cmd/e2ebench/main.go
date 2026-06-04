@@ -347,11 +347,23 @@ func copyFile(src, dst string) error {
 		return err
 	}
 	defer in.Close()
-	out, err := os.Create(dst)
+	info, err := in.Stat()
+	if err != nil {
+		return err
+	}
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, info.Mode().Perm())
 	if err != nil {
 		return err
 	}
 	defer out.Close()
-	_, err = io.Copy(out, in)
-	return err
+	if _, err := io.Copy(out, in); err != nil {
+		return err
+	}
+	// os.Create / O_CREATE default to 0666 (umask'd). A read-only seed
+	// (e.g. a fixture 0400 marker file) would otherwise become writable
+	// in the workdir, which then looks like a permissions change to
+	// `git status` even though we never wrote to it. Mirror the source
+	// mode explicitly so a seed's executable bit / read-only bit
+	// survive the copy.
+	return os.Chmod(dst, info.Mode().Perm())
 }
