@@ -643,6 +643,189 @@ func TestSubmittedInputRecallWithArrowKeys(t *testing.T) {
 	}
 }
 
+func TestQueueNavigationWithArrowKeys(t *testing.T) {
+	m := newTestChatTUI()
+	m.state = tuiRunning
+	m.pendingInterject = []string{"queued one", "queued two", "queued three"}
+	m.input.SetValue("my draft")
+
+	up := tea.KeyPressMsg{Code: tea.KeyUp}
+	down := tea.KeyPressMsg{Code: tea.KeyDown}
+
+	// First ↑ should save draft and jump to last queued item.
+	model, _ := m.Update(up)
+	m = model.(chatTUI)
+	if got := m.input.Value(); got != "queued three" {
+		t.Fatalf("first up: want %q, got %q", "queued three", got)
+	}
+	if m.queueEditCursor != 2 {
+		t.Fatalf("first up: cursor should be 2, got %d", m.queueEditCursor)
+	}
+
+	// Second ↑ should move to "queued two".
+	model, _ = m.Update(up)
+	m = model.(chatTUI)
+	if got := m.input.Value(); got != "queued two" {
+		t.Fatalf("second up: want %q, got %q", "queued two", got)
+	}
+
+	// ↓ should move back to "queued three".
+	model, _ = m.Update(down)
+	m = model.(chatTUI)
+	if got := m.input.Value(); got != "queued three" {
+		t.Fatalf("down: want %q, got %q", "queued three", got)
+	}
+
+	// ↓ past the end should restore the draft.
+	model, _ = m.Update(down)
+	m = model.(chatTUI)
+	if got := m.input.Value(); got != "my draft" {
+		t.Fatalf("down past end: want %q, got %q", "my draft", got)
+	}
+	if m.queueEditCursor != -1 {
+		t.Fatalf("down past end: cursor should be -1, got %d", m.queueEditCursor)
+	}
+}
+
+func TestQueueNavigationClampAtStart(t *testing.T) {
+	m := newTestChatTUI()
+	m.state = tuiRunning
+	m.pendingInterject = []string{"only item"}
+	m.input.SetValue("draft")
+
+	up := tea.KeyPressMsg{Code: tea.KeyUp}
+	// First ↑ jumps to the only item.
+	model, _ := m.Update(up)
+	m = model.(chatTUI)
+	if got := m.input.Value(); got != "only item" {
+		t.Fatalf("first up: want %q, got %q", "only item", got)
+	}
+	// Second ↑ should clamp at index 0 (not go negative).
+	model, _ = m.Update(up)
+	m = model.(chatTUI)
+	if m.queueEditCursor != 0 {
+		t.Fatalf("second up: cursor should clamp at 0, got %d", m.queueEditCursor)
+	}
+	if got := m.input.Value(); got != "only item" {
+		t.Fatalf("second up: value should stay %q, got %q", "only item", got)
+	}
+}
+
+func TestQueueNavigationNoOpWhenEmpty(t *testing.T) {
+	m := newTestChatTUI()
+	m.state = tuiRunning
+	m.input.SetValue("hello")
+
+	up := tea.KeyPressMsg{Code: tea.KeyUp}
+	model, _ := m.Update(up)
+	m = model.(chatTUI)
+	if got := m.input.Value(); got != "hello" {
+		t.Fatalf("empty queue: input should be unchanged, got %q", got)
+	}
+}
+
+func TestQueueEditSavesOnEnter(t *testing.T) {
+	m := newTestChatTUI()
+	m.state = tuiRunning
+	m.pendingInterject = []string{"original one", "original two"}
+
+	up := tea.KeyPressMsg{Code: tea.KeyUp}
+	model, _ := m.Update(up)
+	m = model.(chatTUI)
+	if m.queueEditCursor != 1 {
+		t.Fatalf("cursor should be 1 after up, got %d", m.queueEditCursor)
+	}
+
+	// Edit the queued message.
+	m.input.SetValue("edited two")
+	enter := tea.KeyPressMsg{Code: tea.KeyEnter}
+	model, _ = m.Update(enter)
+	m = model.(chatTUI)
+
+	if m.pendingInterject[1] != "edited two" {
+		t.Fatalf("queue[1] should be %q, got %q", "edited two", m.pendingInterject[1])
+	}
+	if m.pendingInterject[0] != "original one" {
+		t.Fatalf("queue[0] should be unchanged, got %q", m.pendingInterject[0])
+	}
+	if m.queueEditCursor != -1 {
+		t.Fatalf("cursor should reset after enter, got %d", m.queueEditCursor)
+	}
+}
+
+func TestQueueNewMessageOnEnterDuringRunning(t *testing.T) {
+	m := newTestChatTUI()
+	m.state = tuiRunning
+	m.pendingInterject = []string{"existing"}
+
+	m.input.SetValue("new message")
+	enter := tea.KeyPressMsg{Code: tea.KeyEnter}
+	model, _ := m.Update(enter)
+	m = model.(chatTUI)
+
+	if len(m.pendingInterject) != 2 {
+		t.Fatalf("queue should have 2 items, got %d", len(m.pendingInterject))
+	}
+	if m.pendingInterject[1] != "new message" {
+		t.Fatalf("queue[1] should be %q, got %q", "new message", m.pendingInterject[1])
+	}
+}
+
+func TestQueueNavigationResetOnNonUpDownKey(t *testing.T) {
+	m := newTestChatTUI()
+	m.state = tuiRunning
+	m.pendingInterject = []string{"queued"}
+
+	up := tea.KeyPressMsg{Code: tea.KeyUp}
+	model, _ := m.Update(up)
+	m = model.(chatTUI)
+	if m.queueEditCursor != 0 {
+		t.Fatalf("cursor should be 0 after up, got %d", m.queueEditCursor)
+	}
+
+	// A regular key should reset the queue navigation cursor.
+	letter := tea.KeyPressMsg{Code: 'a'}
+	model, _ = m.Update(letter)
+	m = model.(chatTUI)
+	if m.queueEditCursor != -1 {
+		t.Fatalf("cursor should reset on non-up/down key, got %d", m.queueEditCursor)
+	}
+}
+
+func TestQueueIndicatorRendering(t *testing.T) {
+	m := newTestChatTUI()
+	m.state = tuiRunning
+	m.pendingInterject = []string{"first msg", "second msg"}
+
+	qi := m.renderQueueIndicator()
+	if qi == "" {
+		t.Fatal("queue indicator should not be empty when queue has items and running")
+	}
+	if !strings.Contains(qi, "[1]") || !strings.Contains(qi, "[2]") {
+		t.Fatalf("queue indicator should contain [1] and [2], got %q", qi)
+	}
+	if !strings.Contains(qi, "first msg") || !strings.Contains(qi, "second msg") {
+		t.Fatalf("queue indicator should show message previews, got %q", qi)
+	}
+
+	// Highlight marker should appear for the browsed item.
+	m.queueEditCursor = 1
+	qi = m.renderQueueIndicator()
+	if !strings.Contains(qi, "▸") {
+		t.Fatalf("queue indicator should show ▸ for browsed item, got %q", qi)
+	}
+}
+
+func TestQueueIndicatorHiddenWhenIdle(t *testing.T) {
+	m := newTestChatTUI()
+	m.state = tuiIdle
+	m.pendingInterject = []string{"queued"}
+
+	if qi := m.renderQueueIndicator(); qi != "" {
+		t.Fatalf("queue indicator should be empty when idle, got %q", qi)
+	}
+}
+
 // TestViewAltScreenFillsHeight proves the switch to alt-screen: View requests
 // the alt buffer + mouse, and the frame is exactly the terminal height (the
 // transcript viewport pads to fill above the pinned bottom region).

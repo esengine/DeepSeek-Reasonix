@@ -94,6 +94,13 @@ type chatTUI struct {
 	// pendingInterject queues input typed while a turn runs; each TurnDone
 	// dequeues the front and submits it as the next turn.
 	pendingInterject []string
+	// queueEditCursor tracks which queued message the user is currently
+	// browsing/editing via ↑/↓ during tuiRunning. -1 means "not browsing".
+	queueEditCursor int
+	// queueEditDraft saves the in-progress input text when the user first
+	// presses ↑ to browse the queue, so it can be restored when the cursor
+	// moves past the end.
+	queueEditDraft string
 
 	// history is a resumed session's messages, committed to scrollback once on
 	// the first WindowSizeMsg so a reopened chat shows its prior transcript.
@@ -429,6 +436,7 @@ func newChatTUI(ctrl *control.Controller, missing string, eventCh chan event.Eve
 		input:                ti,
 		spinner:              sp,
 		submittedInputCursor: -1,
+		queueEditCursor:      -1,
 		nextPasteID:          1,
 		reasoningLineIdx:     -1,
 		reasoningTextIdx:     -1,
@@ -494,6 +502,87 @@ func (m *chatTUI) recallSubmittedInput(delta int) bool {
 func (m *chatTUI) resetSubmittedInputRecall() {
 	m.submittedInputCursor = -1
 	m.submittedInputDraft = ""
+}
+
+// navigateQueue moves through the pending interject queue during tuiRunning.
+// delta < 0 means ↑ (older), delta > 0 means ↓ (newer). Returns true if the
+// input was updated.
+func (m *chatTUI) navigateQueue(delta int) bool {
+	if len(m.pendingInterject) == 0 {
+		return false
+	}
+	cursor := m.queueEditCursor
+	if cursor < 0 {
+		if delta > 0 {
+			return false // already at "new draft" — nothing newer
+		}
+		// First ↑: save the current draft and jump to the last queued item.
+		m.queueEditDraft = m.input.Value()
+		cursor = len(m.pendingInterject) - 1
+	} else {
+		cursor += delta
+	}
+
+	if cursor < 0 {
+		cursor = 0
+	}
+	if cursor >= len(m.pendingInterject) {
+		// Past the end: restore the draft the user was composing.
+		m.queueEditCursor = -1
+		m.input.SetValue(m.queueEditDraft)
+		m.growInputToFit()
+		return true
+	}
+	m.queueEditCursor = cursor
+	m.input.SetValue(m.pendingInterject[cursor])
+	m.growInputToFit()
+	return true
+}
+
+// commitQueueEdit writes the current input back to the queue slot being edited,
+// then resets the queue navigation cursor. Called before the input is consumed
+// (Enter or TurnDone dequeue).
+func (m *chatTUI) commitQueueEdit() {
+	if m.queueEditCursor >= 0 && m.queueEditCursor < len(m.pendingInterject) {
+		m.pendingInterject[m.queueEditCursor] = m.input.Value()
+	}
+	m.queueEditCursor = -1
+	m.queueEditDraft = ""
+}
+
+// resetQueueNavigation resets the queue browsing cursor so the user returns to
+// normal input mode. Any in-progress edit is discarded (the queued item keeps
+// its previous value).
+func (m *chatTUI) resetQueueNavigation() {
+	m.queueEditCursor = -1
+	m.queueEditDraft = ""
+}
+
+// renderQueueIndicator renders the pending-message queue as dim text to show
+// above the input box when messages are queued during a running turn.
+func (m chatTUI) renderQueueIndicator() string {
+	if m.state != tuiRunning || len(m.pendingInterject) == 0 {
+		return ""
+	}
+	queueStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240")) // dim grey
+	highlightStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("250"))
+	var lines []string
+	for i, msg := range m.pendingInterject {
+		preview := msg
+		// Truncate long messages for the compact preview.
+		runes := []rune(preview)
+		if len(runes) > 50 {
+			preview = string(runes[:47]) + "…"
+		}
+		cursor := " "
+		style := queueStyle
+		if m.queueEditCursor == i {
+			cursor = "▸"
+			style = highlightStyle
+		}
+		lines = append(lines, style.Render(fmt.Sprintf("  %s [%d] %s", cursor, i+1, preview)))
+	}
+	return strings.Join(lines, "\n")
 }
 
 // prompts returns the MCP prompts discovered at startup (nil when no plugins).
@@ -770,15 +859,27 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		switch msg.String() {
 		case "up":
-			if m.state != tuiRunning && m.recallSubmittedInput(-1) {
+			if m.state == tuiRunning {
+				if m.navigateQueue(-1) {
+					return m, nil
+				}
+			} else if m.recallSubmittedInput(-1) {
 				return m, nil
 			}
 		case "down":
-			if m.state != tuiRunning && m.recallSubmittedInput(1) {
+			if m.state == tuiRunning {
+				if m.navigateQueue(1) {
+					return m, nil
+				}
+			} else if m.recallSubmittedInput(1) {
 				return m, nil
 			}
+		case "enter":
+			// Don't reset queue navigation — the Enter handler below needs
+			// queueEditCursor to decide whether to save an edit or enqueue.
 		default:
 			m.resetSubmittedInputRecall()
+			m.resetQueueNavigation()
 		}
 		switch msg.String() {
 		case "esc":
@@ -871,11 +972,21 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if line == "" {
 					return m, nil
 				}
-				m.pendingInterject = append(m.pendingInterject, line)
+				if m.queueEditCursor >= 0 && m.queueEditCursor < len(m.pendingInterject) {
+					// Save the edited text back to the queue slot.
+					m.pendingInterject[m.queueEditCursor] = line
+					m.notice(fmt.Sprintf("queue [%d] updated", m.queueEditCursor+1))
+					m.queueEditCursor = -1
+					m.queueEditDraft = ""
+				} else {
+					m.pendingInterject = append(m.pendingInterject, line)
+					m.notice("feedback queued — will send when the current turn finishes")
+					m.queueEditCursor = -1
+					m.queueEditDraft = ""
+				}
 				m.input.Reset()
 				m.input.SetHeight(1)
 				m.pastedBlocks = nil
-				m.notice("feedback queued — will send when the current turn finishes")
 				return m, finalize(m, cmds)
 			}
 			if m.modelSwitchPending {
@@ -975,6 +1086,9 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(m.pendingInterject) > 0 {
 				interject := m.pendingInterject[0]
 				m.pendingInterject = m.pendingInterject[1:]
+				// Reset queue navigation — the indices shifted.
+				m.queueEditCursor = -1
+				m.queueEditDraft = ""
 				cmds = append(cmds, m.startTurn(interject, interject, interject))
 			}
 		}
@@ -1766,6 +1880,10 @@ func (m chatTUI) View() tea.View {
 	}
 	statusBlock := clampStatusLine(status, boxW) + "\n" + clampStatusLine(dataLine, boxW)
 	if !hideComposer {
+		if qi := m.renderQueueIndicator(); qi != "" {
+			parts = append(parts, qi)
+			rowsAboveBox += strings.Count(qi, "\n") + 1
+		}
 		parts = append(parts, box)
 	}
 	parts = append(parts, statusBlockStyle.Width(boxW).MaxWidth(boxW).Render(statusBlock))
@@ -2597,6 +2715,8 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 		// just clear the un-sendable flag.
 		m.confirmBubbleSent()
 		m.state = tuiIdle
+		m.queueEditCursor = -1
+		m.queueEditDraft = ""
 		m.clearSubmittedPastes()
 		if e.Err != nil && e.Err.Error() != "" && !strings.Contains(e.Err.Error(), "context canceled") {
 			m.commitLine(wrapForViewport(i18n.M.ErrorPrefix+" "+e.Err.Error(), m.width, activeCLITheme.warn))
