@@ -196,7 +196,10 @@ func (a *App) Submit(input string) {
 // RunShell executes a shell command directly (bypassing the model) and streams
 // output as events on eventChannel.
 func (a *App) RunShell(command string) {
-	if ctrl := a.activeCtrl(); ctrl != nil {
+	a.mu.RLock()
+	ctrl := a.ctrl
+	a.mu.RUnlock()
+	if ctrl != nil {
 		ctrl.RunShell(command)
 	}
 }
