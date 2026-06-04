@@ -1,15 +1,11 @@
 package main
 
 import (
-	_ "embed"
 	"sync"
 
 	"fyne.io/systray"
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
-
-//go:embed build/appicon.png
-var trayIcon []byte
 
 type desktopTray struct {
 	end      func()
@@ -31,8 +27,8 @@ func (a *App) startTray() {
 	a.tray = t
 	a.mu.Unlock()
 
-	start, end := systray.RunWithExternalLoop(func() {
-		systray.SetIcon(trayIcon)
+	t.end = startDesktopTray(func() {
+		systray.SetIcon(trayIconBytes)
 		systray.SetTitle("Reasonix")
 		systray.SetTooltip("Reasonix")
 		systray.SetOnTapped(func() { a.showFromTray() })
@@ -60,8 +56,6 @@ func (a *App) startTray() {
 		a.trayReady = false
 		a.mu.Unlock()
 	})
-	t.end = end
-	start()
 }
 
 func (a *App) stopTray() {
