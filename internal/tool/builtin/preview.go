@@ -67,21 +67,26 @@ func (e editFile) Preview(args json.RawMessage) (diff.Change, error) {
 	}
 	p.Path = resolveIn(e.workDir, p.Path)
 
-	content, _, err := readFileEncodedWith(p.Path, p.Encoding)
+	encParam := p.Encoding
+	if encParam == "" {
+		encParam = e.fileEncoding
+	}
+	content, _, err := readFileEncodedWith(p.Path, encParam)
 	if err != nil {
 		return diff.Change{}, fmt.Errorf("read %s: %w", p.Path, err)
 	}
 
-	switch strings.Count(content, p.OldString) {
+	old, newStr := matchLineEndings(content, p.OldString, p.NewString)
+	switch strings.Count(content, old) {
 	case 0:
-		return diff.Change{}, fmt.Errorf("old_string not found in %s", p.Path)
+		return diff.Change{}, diagnoseNotFound(p.Path, p.OldString, content)
 	case 1:
 		// ok
 	default:
-		return diff.Change{}, fmt.Errorf("old_string is not unique in %s; add more surrounding context", p.Path)
+		return diff.Change{}, diagnoseNotUnique(p.Path, old, content)
 	}
 
-	updated := strings.Replace(content, p.OldString, p.NewString, 1)
+	updated := strings.Replace(content, old, newStr, 1)
 	return diff.Build(p.Path, content, updated, diff.Modify), nil
 }
 
@@ -106,7 +111,11 @@ func (m multiEdit) Preview(args json.RawMessage) (diff.Change, error) {
 	}
 	p.Path = resolveIn(m.workDir, p.Path)
 
-	content, _, err := readFileEncodedWith(p.Path, p.Encoding)
+	encParam := p.Encoding
+	if encParam == "" {
+		encParam = m.fileEncoding
+	}
+	content, _, err := readFileEncodedWith(p.Path, encParam)
 	if err != nil {
 		return diff.Change{}, fmt.Errorf("read %s: %w", p.Path, err)
 	}
@@ -116,20 +125,21 @@ func (m multiEdit) Preview(args json.RawMessage) (diff.Change, error) {
 		if step.OldString == "" {
 			return diff.Change{}, fmt.Errorf("edit %d: old_string is required", i+1)
 		}
+		old, newStr := matchLineEndings(content, step.OldString, step.NewString)
 		if step.ReplaceAll {
-			if strings.Count(content, step.OldString) == 0 {
-				return diff.Change{}, fmt.Errorf("edit %d: old_string not found", i+1)
+			if strings.Count(content, old) == 0 {
+				return diff.Change{}, diagnoseNotFound(p.Path, step.OldString, content)
 			}
-			content = strings.ReplaceAll(content, step.OldString, step.NewString)
+			content = strings.ReplaceAll(content, old, newStr)
 			continue
 		}
-		switch strings.Count(content, step.OldString) {
+		switch strings.Count(content, old) {
 		case 0:
-			return diff.Change{}, fmt.Errorf("edit %d: old_string not found", i+1)
+			return diff.Change{}, diagnoseNotFound(p.Path, step.OldString, content)
 		case 1:
-			content = strings.Replace(content, step.OldString, step.NewString, 1)
+			content = strings.Replace(content, old, newStr, 1)
 		default:
-			return diff.Change{}, fmt.Errorf("edit %d: old_string is not unique; add more surrounding context or set replace_all", i+1)
+			return diff.Change{}, diagnoseNotUnique(p.Path, old, content)
 		}
 	}
 	return diff.Build(p.Path, original, content, diff.Modify), nil

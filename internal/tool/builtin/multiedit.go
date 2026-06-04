@@ -105,7 +105,7 @@ func (m multiEdit) Execute(ctx context.Context, args json.RawMessage) (string, e
 		if step.ReplaceAll {
 			count := strings.Count(content, old)
 			if count == 0 {
-				return "", fmt.Errorf("edit %d: old_string not found", i+1)
+				return "", diagnoseNotFound(p.Path, step.OldString, content)
 			}
 			content = strings.ReplaceAll(content, old, newStr)
 			applied += count
@@ -113,12 +113,12 @@ func (m multiEdit) Execute(ctx context.Context, args json.RawMessage) (string, e
 		}
 		switch strings.Count(content, old) {
 		case 0:
-			return "", fmt.Errorf("edit %d: old_string not found", i+1)
+			return "", diagnoseNotFound(p.Path, step.OldString, content)
 		case 1:
 			content = strings.Replace(content, old, newStr, 1)
 			applied++
 		default:
-			return "", fmt.Errorf("edit %d: old_string is not unique; add more surrounding context or set replace_all", i+1)
+			return "", diagnoseNotUnique(p.Path, old, content)
 		}
 	}
 

@@ -1,6 +1,7 @@
 package builtin
 
 import (
+	"fmt"
 	"os"
 	"strings"
 
@@ -59,4 +60,122 @@ func matchLineEndings(content, old, new string) (string, string) {
 		return toCRLF(old), toCRLF(new)
 	}
 	return old, new
+}
+
+// diagnoseNotFound builds a helpful error message when old_string is not found in
+// content. It locates the nearest line-level match (longest common prefix) and
+// reports its line number plus the first differing characters, so the model can
+// fix its old_string in one shot instead of blind retries.
+func diagnoseNotFound(path, old, content string) error {
+	if old == "" {
+		return fmt.Errorf("old_string not found in %s", path)
+	}
+	oldLines := strings.Split(old, "\n")
+	contentLines := strings.Split(content, "\n")
+
+	bestLine := -1
+	bestScore := 0
+	for i, cl := range contentLines {
+		score := commonPrefixLen(strings.TrimSpace(cl), strings.TrimSpace(oldLines[0]))
+		if score > bestScore {
+			bestScore = score
+			bestLine = i
+		}
+	}
+
+	if bestLine < 0 || bestScore < 3 {
+		return fmt.Errorf("old_string not found in %s (no close match found)", path)
+	}
+
+	// Show the nearest match's line number and the actual content there.
+	start := bestLine
+	end := start + len(oldLines)
+	if end > len(contentLines) {
+		end = len(contentLines)
+	}
+	actual := strings.Join(contentLines[start:end], "\n")
+
+	// Trim both for comparison readability.
+	actualTrim := strings.TrimSpace(actual)
+	oldTrim := strings.TrimSpace(old)
+	if len(actualTrim) > 200 {
+		actualTrim = actualTrim[:200] + "…"
+	}
+	if len(oldTrim) > 200 {
+		oldTrim = oldTrim[:200] + "…"
+	}
+
+	return fmt.Errorf("old_string not found in %s. Nearest match at line %d:\n  expected: %s\n  actual:   %s",
+		path, bestLine+1, quoteLine(oldTrim), quoteLine(actualTrim))
+}
+
+// diagnoseNotUnique builds a helpful error message when old_string appears more
+// than once, reporting the count and the line numbers of each occurrence so the
+// model can add distinguishing context.
+func diagnoseNotUnique(path, old, content string) error {
+	count := strings.Count(content, old)
+	lines := matchLineNumbers(old, content)
+	if len(lines) > 8 {
+		lines = append(lines[:8], -1) // sentinel for "and more"
+	}
+	lineStr := formatLineList(lines)
+	return fmt.Errorf("old_string is not unique in %s (%d matches at %s); add more surrounding context to disambiguate",
+		path, count, lineStr)
+}
+
+// matchLineNumbers returns the 1-based line numbers where old appears in content.
+func matchLineNumbers(old, content string) []int {
+	if old == "" {
+		return nil
+	}
+	var lines []int
+	lineNo := 1
+	search := old
+	firstLine := strings.SplitN(search, "\n", 2)[0]
+	for i, ch := range content {
+		if ch == '\n' {
+			lineNo++
+		}
+		// Quick check: does old start here?
+		if i+len(search) <= len(content) && content[i:i+len(search)] == search {
+			lines = append(lines, lineNo)
+		}
+		_ = firstLine // suppress unused
+	}
+	return lines
+}
+
+// formatLineList formats a slice of line numbers for display, with -1 meaning "…".
+func formatLineList(lines []int) string {
+	parts := make([]string, 0, len(lines))
+	for _, l := range lines {
+		if l < 0 {
+			parts = append(parts, "…")
+		} else {
+			parts = append(parts, fmt.Sprintf("line %d", l))
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
+// commonPrefixLen returns the number of leading runes two strings share.
+func commonPrefixLen(a, b string) int {
+	n := len(a)
+	if len(b) < n {
+		n = len(b)
+	}
+	for i := 0; i < n; i++ {
+		if a[i] != b[i] {
+			return i
+		}
+	}
+	return n
+}
+
+// quoteLine wraps a line sample for display in an error message.
+func quoteLine(s string) string {
+	if strings.Contains(s, "\n") {
+		return "«" + strings.ReplaceAll(s, "\n", "↵") + "»"
+	}
+	return "`" + s + "`"
 }

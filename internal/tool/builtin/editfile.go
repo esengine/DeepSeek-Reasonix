@@ -65,11 +65,11 @@ func (e editFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 	old, newStr := matchLineEndings(content, p.OldString, p.NewString)
 	switch strings.Count(content, old) {
 	case 0:
-		return "", fmt.Errorf("old_string not found in %s", p.Path)
+		return "", diagnoseNotFound(p.Path, p.OldString, content)
 	case 1:
 		// ok
 	default:
-		return "", fmt.Errorf("old_string is not unique in %s; add more surrounding context", p.Path)
+		return "", diagnoseNotUnique(p.Path, old, content)
 	}
 
 	updated := strings.Replace(content, old, newStr, 1)
