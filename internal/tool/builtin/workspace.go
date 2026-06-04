@@ -19,10 +19,11 @@ import (
 // root, so writes stay inside the project by default. Bash is the OS-sandbox
 // spec for the bash tool (as ConfineBash).
 type Workspace struct {
-	Dir        string
-	WriteRoots []string
-	Bash       sandbox.Spec
-	Search     SearchSpec
+	Dir          string
+	WriteRoots   []string
+	Bash         sandbox.Spec
+	Search       SearchSpec
+	FileEncoding string // project-level file encoding (e.g. "GB18030"); empty = auto-detect
 }
 
 // Tools returns the built-in tools bound to the workspace, ready to Add to a
@@ -38,10 +39,10 @@ func (w Workspace) Tools(enabled ...string) []tool.Tool {
 	roots := realRoots(writeRoots)
 
 	all := []tool.Tool{
-		readFile{workDir: w.Dir},
-		writeFile{workDir: w.Dir, roots: roots},
-		editFile{workDir: w.Dir, roots: roots},
-		multiEdit{workDir: w.Dir, roots: roots},
+		readFile{workDir: w.Dir, fileEncoding: w.FileEncoding},
+		writeFile{workDir: w.Dir, roots: roots, fileEncoding: w.FileEncoding},
+		editFile{workDir: w.Dir, roots: roots, fileEncoding: w.FileEncoding},
+		multiEdit{workDir: w.Dir, roots: roots, fileEncoding: w.FileEncoding},
 		deleteRange{workDir: w.Dir, roots: roots},
 		deleteSymbol{workDir: w.Dir, roots: roots},
 		bash{workDir: w.Dir, sb: w.Bash},

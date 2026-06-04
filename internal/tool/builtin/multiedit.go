@@ -15,8 +15,9 @@ func init() { tool.RegisterBuiltin(multiEdit{}) }
 // the workspace when non-empty (see writeFile); workDir, when non-empty, is the
 // directory a relative path resolves against (see resolveIn).
 type multiEdit struct {
-	roots   []string
-	workDir string
+	roots        []string
+	workDir      string
+	fileEncoding string // project-level encoding override; empty = auto-detect
 }
 
 // editStep is one edit in a multi_edit operation. Mirrors edit_file's args
@@ -82,7 +83,11 @@ func (m multiEdit) Execute(ctx context.Context, args json.RawMessage) (string, e
 		return "", err
 	}
 
-	content, enc, err := readFileEncodedWith(p.Path, p.Encoding)
+	encParam := p.Encoding
+	if encParam == "" {
+		encParam = m.fileEncoding
+	}
+	content, enc, err := readFileEncodedWith(p.Path, encParam)
 	if err != nil {
 		return "", fmt.Errorf("read %s: %w", p.Path, err)
 	}
@@ -117,7 +122,7 @@ func (m multiEdit) Execute(ctx context.Context, args json.RawMessage) (string, e
 		}
 	}
 
-	if err := writeFileEncodedWith(p.Path, content, enc, p.Encoding); err != nil {
+	if err := writeFileEncodedWith(p.Path, content, enc, encParam); err != nil {
 		return "", fmt.Errorf("write %s: %w", p.Path, err)
 	}
 	return fmt.Sprintf("multi_edit %s: %d edits applied (%d total replacements)", p.Path, len(p.Edits), applied), nil

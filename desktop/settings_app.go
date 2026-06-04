@@ -72,6 +72,7 @@ type AgentView struct {
 type SettingsView struct {
 	DefaultModel string          `json:"defaultModel"`
 	PlannerModel string          `json:"plannerModel"`
+	FileEncoding string          `json:"fileEncoding"` // project file encoding (e.g. "UTF-8", "GB18030")
 	Providers    []ProviderView  `json:"providers"`
 	Permissions  PermissionsView `json:"permissions"`
 	Sandbox      SandboxView     `json:"sandbox"`
@@ -117,6 +118,7 @@ func (a *App) Settings() SettingsView {
 	v := SettingsView{
 		DefaultModel: cfg.DefaultModel,
 		PlannerModel: cfg.Agent.PlannerModel,
+		FileEncoding: cfg.FileEncoding,
 		Providers:    []ProviderView{},
 		Permissions: PermissionsView{
 			Mode:  orDefault(cfg.Permissions.Mode, "ask"),
@@ -383,6 +385,15 @@ func (a *App) SetAgentParams(temperature float64, maxSteps int, systemPrompt str
 		c.Agent.Temperature = temperature
 		c.Agent.MaxSteps = maxSteps
 		c.Agent.SystemPrompt = systemPrompt
+		return nil
+	})
+}
+
+// SetFileEncoding sets the project-level file encoding (e.g. "UTF-8", "GB18030").
+// Empty string means auto-detect.
+func (a *App) SetFileEncoding(encoding string) error {
+	return a.applyConfigChange(func(c *config.Config) error {
+		c.FileEncoding = strings.TrimSpace(encoding)
 		return nil
 	})
 }

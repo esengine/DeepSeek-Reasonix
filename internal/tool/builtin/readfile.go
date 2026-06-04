@@ -28,7 +28,10 @@ func init() { tool.RegisterBuiltin(readFile{}) }
 // readFile reads a text file. workDir, when non-empty, is the directory a
 // relative path is resolved against (see resolveIn); the zero value registered
 // at init resolves against the process working directory.
-type readFile struct{ workDir string }
+type readFile struct {
+	workDir      string
+	fileEncoding string // project-level encoding override; empty = auto-detect
+}
 
 const (
 	readFileDefaultLimit = 2000 // lines returned when limit is unset
@@ -90,8 +93,13 @@ func (r readFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 	defer f.Close()
 
 	// When the caller specifies an encoding, skip all auto-detection branches and
-	// decode with the forced encoding directly.
-	if forced, ok := fileenc.ParseName(p.Encoding); ok {
+	// decode with the forced encoding directly. Fall back to the project-level
+	// encoding when the per-call param is empty.
+	encOverride := p.Encoding
+	if encOverride == "" {
+		encOverride = r.fileEncoding
+	}
+	if forced, ok := fileenc.ParseName(encOverride); ok {
 		all, rerr := io.ReadAll(f)
 		if rerr != nil {
 			return "", fmt.Errorf("read %s: %w", p.Path, rerr)

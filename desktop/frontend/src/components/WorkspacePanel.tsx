@@ -199,7 +199,18 @@ export function WorkspacePanel({
   const [treeVisible, setTreeVisible] = useState(true);
   const [treeWidth, setTreeWidth] = useState(loadWorkspaceTreeWidth);
   const [treeResizing, setTreeResizing] = useState(false);
-  const [encodingOverride, setEncodingOverride] = useState<string>("");
+  const [projectEncoding, setProjectEncoding] = useState<string>("");
+
+  // Load project encoding from settings on panel open / workspace change.
+  useEffect(() => {
+    if (!open) return;
+    app.Settings().then((s) => setProjectEncoding(s.fileEncoding || "")).catch(() => {});
+  }, [cwd, open]);
+
+  const changeProjectEncoding = useCallback(async (enc: string) => {
+    setProjectEncoding(enc);
+    await app.SetFileEncoding(enc).catch(() => {});
+  }, []);
 
   const loadDir = useCallback(async (dir: string) => {
     const entries = await app.ListDir(dir).catch(() => []);
@@ -226,7 +237,6 @@ export function WorkspacePanel({
     (path: string) => {
       setSelectedPath(path);
       setFilter("");
-      setEncodingOverride("");
       setOpenTabs((tabs) => (tabs.includes(path) ? tabs : [...tabs, path]));
       const dirs = parentDirs(path);
       setOpenDirs((prev) => new Set([...Array.from(prev), ...dirs]));
@@ -248,7 +258,6 @@ export function WorkspacePanel({
     setSelectionMenu(null);
     setTreeMenu(null);
     setFilter("");
-    setEncodingOverride("");
     setTreeVisible(true);
     void loadDir("");
   }, [cwd, loadDir, open]);
@@ -282,7 +291,7 @@ export function WorkspacePanel({
     let live = true;
     setLoadingPreview(true);
     app
-      .ReadFile(selectedPath, encodingOverride || "")
+      .ReadFile(selectedPath, projectEncoding || "")
       .then((next) => {
         if (live) setPreview(next);
       })
@@ -304,7 +313,7 @@ export function WorkspacePanel({
     return () => {
       live = false;
     };
-  }, [selectedPath, encodingOverride]);
+  }, [selectedPath, projectEncoding]);
 
   useEffect(() => {
     if (!open || !selectedPath) return;
@@ -331,7 +340,6 @@ export function WorkspacePanel({
     setSelectedPath(null);
     setPreview(null);
     setFilter("");
-    setEncodingOverride("");
     setSelectionMenu(null);
     setTreeMenu(null);
     setTreeVisible(true);
@@ -706,18 +714,18 @@ export function WorkspacePanel({
             );
           })}
           {preview && preview.size > 0 && <span className="workspace-preview__size">{formatBytes(preview.size)}</span>}
-          {preview && !preview.binary && !preview.err && (
+          {!preview?.binary && !preview?.err && (
             <Tooltip label={t("workspace.encodingOverride")}>
               <select
                 className="workspace-encoding-select"
-                value={encodingOverride}
-                onChange={(e) => setEncodingOverride(e.target.value)}
-                title={preview.encoding ? t("workspace.encodingTitle").replace("{enc}", preview.encoding) : t("workspace.encoding")}
+                value={projectEncoding}
+                onChange={(e) => void changeProjectEncoding(e.target.value)}
+                title={projectEncoding ? t("workspace.encodingTitle").replace("{enc}", projectEncoding) : t("workspace.encoding")}
               >
                 {ENCODING_OPTIONS.map((opt) => (
                   <option key={opt.value} value={opt.value}>
                     {opt.value === "" ? t("workspace.encodingAuto") : opt.label}
-                    {opt.value !== "" && preview.encoding && opt.value === preview.encoding ? " ✓" : ""}
+                    {opt.value !== "" && preview?.encoding && opt.value === preview.encoding ? " ✓" : ""}
                   </option>
                 ))}
               </select>

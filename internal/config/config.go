@@ -40,7 +40,8 @@ func SkillNameKey(name string) string {
 // Config is Reasonix's runtime configuration.
 type Config struct {
 	DefaultModel string            `toml:"default_model"`
-	Language     string            `toml:"language"` // ui/model language tag (e.g. "zh"); empty = auto-detect from $LANG / $REASONIX_LANG
+	Language     string            `toml:"language"`      // ui/model language tag (e.g. "zh"); empty = auto-detect from $LANG / $REASONIX_LANG
+	FileEncoding string            `toml:"file_encoding"` // project file encoding (e.g. "UTF-8", "GB18030"); empty = auto-detect
 	UI           UIConfig          `toml:"ui"`
 	Agent        AgentConfig       `toml:"agent"`
 	Providers    []ProviderEntry   `toml:"providers"`

@@ -399,6 +399,7 @@ export interface AgentView {
 export interface SettingsView {
   defaultModel: string;
   plannerModel: string;
+  fileEncoding: string;
   providers: ProviderView[];
   permissions: PermissionsView;
   sandbox: SandboxView;
@@ -406,7 +407,7 @@ export interface SettingsView {
   agent: AgentView;
   configPath: string;
   providerKinds: string[]; // provider implementations the kernel registered (for the kind picker)
-  bypass: boolean; // live YOLO state (runtime-only) — whether approvals are skipped this session
+  bypass: boolean; // live YOLO state (runtime-only) — whether approvals are currently being skipped this session
 }
 
 // Auto-updater payloads (desktop/updater.go). UpdateInfo drives the update banner;

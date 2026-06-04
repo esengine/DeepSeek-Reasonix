@@ -22,12 +22,16 @@ func ConfineBash(spec sandbox.Spec) tool.Tool {
 // the unconfined instances registered at init time, so writes stay inside the
 // workspace by default. roots may be relative; they are resolved to absolute,
 // symlink-free paths once here. An empty roots slice yields unconfined writers.
-func ConfineWriters(roots []string) []tool.Tool {
+func ConfineWriters(roots []string, fileEncoding ...string) []tool.Tool {
 	rs := realRoots(roots)
+	enc := ""
+	if len(fileEncoding) > 0 {
+		enc = fileEncoding[0]
+	}
 	return []tool.Tool{
-		writeFile{roots: rs},
-		editFile{roots: rs},
-		multiEdit{roots: rs},
+		writeFile{roots: rs, fileEncoding: enc},
+		editFile{roots: rs, fileEncoding: enc},
+		multiEdit{roots: rs, fileEncoding: enc},
 		notebookEdit{roots: rs},
 		deleteRange{roots: rs},
 		deleteSymbol{roots: rs},

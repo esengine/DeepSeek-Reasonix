@@ -18,8 +18,9 @@ func init() { tool.RegisterBuiltin(writeFile{}) }
 // is overridden per run by ConfineWriters. workDir, when non-empty, is the
 // directory a relative path resolves against (see resolveIn).
 type writeFile struct {
-	roots   []string
-	workDir string
+	roots        []string
+	workDir      string
+	fileEncoding string // project-level encoding override; empty = auto-detect from existing file
 }
 
 func (writeFile) Name() string { return "write_file" }
@@ -56,9 +57,14 @@ func (w writeFile) Execute(ctx context.Context, args json.RawMessage) (string, e
 		}
 	}
 
-	// Determine target encoding: explicit override > existing file encoding > UTF-8.
+	// Determine target encoding: explicit override > project encoding > existing
+	// file encoding > UTF-8 (new files).
+	encParam := p.Encoding
+	if encParam == "" {
+		encParam = w.fileEncoding
+	}
 	var targetEnc fileenc.Kind
-	if forced, ok := fileenc.ParseName(p.Encoding); ok {
+	if forced, ok := fileenc.ParseName(encParam); ok {
 		targetEnc = forced
 	} else if existing, err := os.ReadFile(p.Path); err == nil {
 		targetEnc, _ = fileenc.Detect(existing)

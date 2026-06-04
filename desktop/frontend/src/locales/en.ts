@@ -76,8 +76,8 @@ export const en = {
   "workspace.deleted": "Deleted",
   "workspace.encoding": "Encoding",
   "workspace.encodingAuto": "Auto",
-  "workspace.encodingTitle": "File encoding: {enc}",
-  "workspace.encodingOverride": "Reopen with encoding",
+  "workspace.encodingTitle": "Project encoding: {enc}",
+  "workspace.encodingOverride": "Change project file encoding",
 
   // mcp & skills drawer
   "caps.title": "MCP & Skills",

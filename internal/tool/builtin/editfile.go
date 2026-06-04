@@ -15,8 +15,9 @@ func init() { tool.RegisterBuiltin(editFile{}) }
 // workspace when non-empty (see writeFile); workDir, when non-empty, is the
 // directory a relative path resolves against (see resolveIn).
 type editFile struct {
-	roots   []string
-	workDir string
+	roots        []string
+	workDir      string
+	fileEncoding string // project-level encoding override; empty = auto-detect
 }
 
 func (editFile) Name() string { return "edit_file" }
@@ -52,7 +53,11 @@ func (e editFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 		return "", err
 	}
 
-	content, enc, err := readFileEncodedWith(p.Path, p.Encoding)
+	encParam := p.Encoding
+	if encParam == "" {
+		encParam = e.fileEncoding
+	}
+	content, enc, err := readFileEncodedWith(p.Path, encParam)
 	if err != nil {
 		return "", fmt.Errorf("read %s: %w", p.Path, err)
 	}
@@ -68,7 +73,7 @@ func (e editFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 	}
 
 	updated := strings.Replace(content, old, newStr, 1)
-	if err := writeFileEncodedWith(p.Path, updated, enc, p.Encoding); err != nil {
+	if err := writeFileEncodedWith(p.Path, updated, enc, encParam); err != nil {
 		return "", fmt.Errorf("write %s: %w", p.Path, err)
 	}
 	return fmt.Sprintf("edited %s", p.Path), nil
