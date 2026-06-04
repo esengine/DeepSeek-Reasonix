@@ -13,14 +13,8 @@ import (
 	"reasonix/internal/skill"
 )
 
-// runSkillSubcommand handles "/skills" (and the legacy "/skill" alias): list
-// the discoverable skills, open the manager, show one's body, scaffold a new
-// one, or inspect the discovery paths.
-// "/skills <name> [args]" with no recognised subcommand falls through to invoking
-// the skill (handled by runSlashCommand's default branch), so this only owns the
-// management verbs.
 func (m *chatTUI) runSkillSubcommand(input string) {
-	args := tokenizeArgs(input) // args[0] == "/skills" or legacy "/skill"
+	args := tokenizeArgs(input)
 	sub := ""
 	if len(args) > 1 {
 		sub = strings.ToLower(args[1])
@@ -54,7 +48,6 @@ func (m *chatTUI) runSkillSubcommand(input string) {
 	case "paths":
 		m.skillPaths()
 	default:
-		// /skills is management-only; a skill is invoked directly as /<name>.
 		hint := ""
 		if _, ok := m.ctrl.RunSkill("/" + args[1]); ok {
 			hint = " (to run it, type /" + args[1] + ")"
@@ -230,8 +223,6 @@ func (m *chatTUI) skillPaths() {
 	m.commitLine(renderSkillPaths(m.width, st.Roots()))
 }
 
-// skillStore builds a Store reflecting this session's project root + configured
-// custom paths, for the management verbs that need to write or enumerate roots.
 func (m *chatTUI) skillStore() *skill.Store {
 	cwd, _ := os.Getwd()
 	var custom []string
@@ -241,10 +232,8 @@ func (m *chatTUI) skillStore() *skill.Store {
 	return skill.New(skill.Options{ProjectRoot: cwd, CustomPaths: custom})
 }
 
-// runHooksSubcommand handles "/hooks": list the active hooks and the project's
-// trust state, or trust the current project so its hooks load next session.
 func (m *chatTUI) runHooksSubcommand(input string) {
-	args := tokenizeArgs(input) // args[0] == "/hooks"
+	args := tokenizeArgs(input)
 	sub := ""
 	if len(args) > 1 {
 		sub = strings.ToLower(args[1])
@@ -270,7 +259,6 @@ func (m *chatTUI) hooksList(cwd string) {
 	m.commitLine(renderHooks(m.width, active, trusted, hook.ProjectDefinesHooks(cwd)))
 }
 
-// containsArg reports whether flag appears in args.
 func containsArg(args []string, flag string) bool {
 	for _, a := range args {
 		if a == flag {

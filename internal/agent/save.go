@@ -88,15 +88,10 @@ type SessionInfo struct {
 	ModTime        time.Time // compatibility alias for LastActivityAt
 	Preview        string
 	Turns          int
-	// Scope is the session's workspace scope ("project" | "global").
-	// Empty for legacy sessions (treated as "global").
-	Scope string
-	// WorkspaceRoot is the project root for project-scoped sessions.
-	WorkspaceRoot string
-	// TopicID is the topic this session belongs to (project-scoped only).
-	TopicID string
-	// TopicTitle is the topic's display name.
-	TopicTitle string
+	Scope          string
+	WorkspaceRoot  string
+	TopicID        string
+	TopicTitle     string
 }
 
 // ListSessions returns every *.jsonl session under dir, most-recently-active

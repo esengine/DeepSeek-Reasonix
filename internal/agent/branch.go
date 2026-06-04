@@ -23,22 +23,12 @@ type BranchMeta struct {
 	ForkMessageIndex int       `json:"fork_message_index,omitempty"`
 	CreatedAt        time.Time `json:"created_at"`
 	UpdatedAt        time.Time `json:"updated_at"`
-	// Scope distinguishes project-level from global sessions.
-	// "project" means this session belongs to a project workspace;
-	// "global" (the default for legacy sessions) means it's a global conversation.
-	Scope string `json:"scope,omitempty"`
-	// WorkspaceRoot is the project's root directory for project-scoped sessions.
-	WorkspaceRoot string `json:"workspace_root,omitempty"`
-	// TopicID links this session to a topic within a project.
-	TopicID string `json:"topic_id,omitempty"`
-	// TopicTitle is the user-visible topic name. May differ from a
-	// separately-stored title (which can be renamed independently).
-	TopicTitle string `json:"topic_title,omitempty"`
+	Scope            string    `json:"scope,omitempty"`
+	WorkspaceRoot    string    `json:"workspace_root,omitempty"`
+	TopicID          string    `json:"topic_id,omitempty"`
+	TopicTitle       string    `json:"topic_title,omitempty"`
 }
 
-// DefaultScope returns the effective scope, treating empty/"global" as "global"
-// and "project" as "project". Legacy sessions without a scope field default to
-// "global" so they appear in the Global / 未归档 group rather than being orphaned.
 func (m BranchMeta) DefaultScope() string {
 	switch m.Scope {
 	case "project":
