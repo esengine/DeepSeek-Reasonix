@@ -1387,7 +1387,13 @@ func (c *Controller) connectCodegraphMCPServer(cfg *config.Config) (int, error) 
 	if err := codegraph.EnsureInit(c.pluginCtx, bin, cwd); err != nil {
 		return 0, fmt.Errorf("codegraph init: %w", err)
 	}
-	return c.connectMCPSpec(plugin.Spec{Name: "codegraph", Command: bin, Args: []string{"serve", "--mcp"}, Dir: cwd})
+	return c.connectMCPSpec(plugin.Spec{
+		Name:              "codegraph",
+		Command:           bin,
+		Args:              []string{"serve", "--mcp"},
+		Dir:               cwd,
+		ReadOnlyToolNames: codegraph.ReadOnlyToolNames(),
+	})
 }
 
 // RemoveMCPServer disconnects a live MCP server — its tools vanish from the next

@@ -244,7 +244,13 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		bin, ok := codegraph.Resolve(cfg.Codegraph.Path)
 		switch {
 		case ok:
-			spec := plugin.Spec{Name: "codegraph", Command: bin, Args: []string{"serve", "--mcp"}, Dir: root}
+			spec := plugin.Spec{
+				Name:              "codegraph",
+				Command:           bin,
+				Args:              []string{"serve", "--mcp"},
+				Dir:               root,
+				ReadOnlyToolNames: codegraph.ReadOnlyToolNames(),
+			}
 			warm := codegraph.Initialized(root)
 			if err := codegraph.EnsureInit(ctx, bin, root); err != nil {
 				sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn,
