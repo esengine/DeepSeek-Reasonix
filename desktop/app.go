@@ -1772,18 +1772,21 @@ func (a *App) SetModel(name string) error {
 		prevPath = ctrl.SessionPath()
 		_ = ctrl.Snapshot()
 		carried = ctrl.History()
-		ctrl.Close()
 	}
 
-	newCtrl, err := boot.Build(a.ctx, boot.Options{Model: name, RequireKey: false, Sink: a.sink})
+	newCtrl, err := boot.Build(a.ctx, boot.Options{Model: name, RequireKey: false, Sink: a.sink, Stderr: io.Discard})
 	if err != nil {
 		return err
 	}
 	a.mu.Lock()
+	old := a.ctrl
 	a.ctrl = newCtrl
 	a.model = name
 	a.label = newCtrl.Label()
 	a.mu.Unlock()
+	if old != nil {
+		old.Close()
+	}
 	newCtrl.EnableInteractiveApproval()
 
 	// Carry the prior conversation (full provider.Message log, incl. the system
