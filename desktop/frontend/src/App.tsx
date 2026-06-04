@@ -15,6 +15,7 @@ import {
   Check,
   Trash2,
   X,
+  Download,
 } from "lucide-react";
 import logo from "./assets/logo.svg";
 import { useT } from "./lib/i18n";
@@ -34,6 +35,7 @@ import { UpdateBanner } from "./components/UpdateBanner";
 import { WorkspacePanel } from "./components/WorkspacePanel";
 import { Tooltip } from "./components/Tooltip";
 import { OnboardingOverlay } from "./components/OnboardingOverlay";
+import { copyToClipboard, exportFilename, exportToMarkdown } from "./lib/exportSession";
 import { parseTodos } from "./lib/tools";
 import { sessionActivityTime } from "./lib/session";
 import type { ComposerInsertRequest, MemoryView, Mode, SessionMeta } from "./lib/types";
@@ -669,6 +671,37 @@ export default function App() {
     [saveDoc, fetchMemory],
   );
 
+  // Export the current transcript as Markdown. The download path uses a Blob +
+  // anchor click, which works in Wails' WebView the same as a regular browser
+  // (the WebView surfaces an OS save dialog for the download). We name the
+  // file with a local-time timestamp so successive exports don't collide on
+  // the user's disk. Copy-to-clipboard is the same path minus the download.
+  const onExportMarkdown = useCallback(() => {
+    const md = exportToMarkdown(state.items, { model: state.meta?.label, cwd: state.meta?.cwd });
+    const name = exportFilename();
+    if (typeof document === "undefined") return;
+    const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    a.style.display = "none";
+    document.body.appendChild(a);
+    a.click();
+    requestAnimationFrame(() => {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    });
+  }, [state.items, state.meta]);
+
+  // copyAsMarkdown mirrors onExportMarkdown but writes to the clipboard.
+  // Useful when the user wants to paste into a chat (Slack, GitHub issue,
+  // blog draft) rather than save a file. Same source-of-truth rendering.
+  const onCopyMarkdown = useCallback(async () => {
+    const md = exportToMarkdown(state.items, { model: state.meta?.label, cwd: state.meta?.cwd });
+    await copyToClipboard(md);
+  }, [state.items, state.meta]);
+
   const sidebarExpandBlocked = sidebarCollapsed && workspacePreviewModeActive;
   const sidebarToggleTitle = sidebarExpandBlocked
     ? t("sidebar.expandBlocked")
@@ -926,6 +959,15 @@ export default function App() {
                   }}
                 >
                   <SquarePen size={13} />
+                </button>
+              </Tooltip>
+              <Tooltip label="Copy transcript as Markdown (double-click to download .md)">
+                <button
+                  className="chip chip--icon"
+                  onClick={onCopyMarkdown}
+                  onDoubleClick={onExportMarkdown}
+                >
+                  <Download size={13} />
                 </button>
               </Tooltip>
             </div>
