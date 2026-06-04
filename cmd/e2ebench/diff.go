@@ -464,11 +464,33 @@ func parseNewTests(diff string) []testRef {
 			continue
 		}
 		sig := strings.TrimPrefix(body, "func ")
-		paren := strings.IndexByte(sig, '(')
-		if paren <= 0 {
-			continue
+		// Function vs method: a top-level function's signature starts
+		// with its name (`TestFoo(t *testing.T) …`), so the first '('
+		// comes after the name. A method's signature starts with the
+		// receiver (`(s *Suite) TestFoo(t *testing.T) …`), so the
+		// first '(' is at position 0 — and the previous shape's
+		// `paren <= 0` guard silently dropped every method-form test
+		// on the floor. Parse the receiver out, then take the name
+		// from whatever follows the closing ')'.
+		var name string
+		if sig[0] == '(' {
+			close := strings.IndexByte(sig, ')')
+			if close < 0 {
+				continue
+			}
+			rest := strings.TrimSpace(sig[close+1:])
+			methodParen := strings.IndexByte(rest, '(')
+			if methodParen <= 0 {
+				continue
+			}
+			name = rest[:methodParen]
+		} else {
+			funcParen := strings.IndexByte(sig, '(')
+			if funcParen <= 0 {
+				continue
+			}
+			name = sig[:funcParen]
 		}
-		name := sig[:paren]
 		if strings.HasPrefix(name, "Test") || strings.HasPrefix(name, "Fuzz") || strings.HasPrefix(name, "Benchmark") {
 			refs = append(refs, testRef{name: name, pkg: pkg})
 		}
