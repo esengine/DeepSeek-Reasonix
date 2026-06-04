@@ -475,7 +475,11 @@ func (a *App) SetCloseBehavior(mode string) error {
 // SetDesktopLanguage updates only the desktop UI language. It deliberately does
 // not touch config.language, which the CLI/model-facing runtime uses.
 func (a *App) SetDesktopLanguage(lang string) error {
-	return a.applyConfigOnly(func(c *config.Config) error { return c.SetDesktopLanguage(lang) })
+	if err := a.applyConfigOnly(func(c *config.Config) error { return c.SetDesktopLanguage(lang) }); err != nil {
+		return err
+	}
+	a.updateTrayLocale(lang)
+	return nil
 }
 
 // SetDesktopAppearance updates only desktop theme preferences. It does not
