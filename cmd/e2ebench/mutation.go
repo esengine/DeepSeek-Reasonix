@@ -81,12 +81,20 @@ func runMutation(repo, base string, srcFiles []string, refs []testRef) mutationR
 }
 
 // changedFuncs returns the funcs in f whose line range overlaps a changed line.
-// main/init are skipped (no meaningful return to mutate).
+// main/init are skipped (no meaningful return to mutate). Function literals
+// (closures assigned to a variable) and methods declared in a type literal
+// are skipped too — they have a FuncDecl with Type.Params but no name, and
+// the mutation shape `*new(T)` doesn't compile cleanly when the result
+// type is a generic instantiation the parser can't see through.
 func changedFuncs(fset *token.FileSet, f *ast.File, lines map[int]bool) []*ast.FuncDecl {
 	var out []*ast.FuncDecl
 	for _, decl := range f.Decls {
 		fd, ok := decl.(*ast.FuncDecl)
-		if !ok || fd.Body == nil || fd.Name.Name == "main" || fd.Name.Name == "init" {
+		if !ok || fd.Body == nil || fd.Name == nil {
+			continue
+		}
+		name := fd.Name.Name
+		if name == "main" || name == "init" {
 			continue
 		}
 		start := fset.Position(fd.Pos()).Line
