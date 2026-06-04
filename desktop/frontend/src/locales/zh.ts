@@ -406,6 +406,22 @@ export const zh: Record<DictKey, string> = {
   "todo.title": "待办",
   "todo.dismiss": "关闭待办列表",
 
+  // 快捷键速查表（按 ? 打开）
+  "shortcuts.title": "键盘快捷键",
+  "shortcuts.close": "关闭快捷键速查表",
+  "shortcuts.open": "显示键盘快捷键",
+  "shortcuts.section.composer": "输入框",
+  "shortcuts.section.transcript": "会话",
+  "shortcuts.section.global": "全局",
+  "shortcuts.desc.composer.send": "发送消息",
+  "shortcuts.desc.composer.newline": "换行（Shift+Enter）",
+  "shortcuts.desc.composer.cycleMode": "切换模式（normal → plan → YOLO）",
+  "shortcuts.desc.composer.historyPrev": "上一条已发送的消息",
+  "shortcuts.desc.composer.historyNext": "下一条已发送的消息",
+  "shortcuts.desc.composer.cancel": "停止当前回合",
+  "shortcuts.desc.transcript.jumpBottom": "跳到底部",
+  "shortcuts.desc.global.cheatsheet": "显示本速查表",
+
   // 斜杠菜单标签
   "slash.project": "项目",
   "slash.mcp": "mcp",

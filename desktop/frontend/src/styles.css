@@ -294,6 +294,109 @@ body {
   overflow: hidden;
 }
 
+/* Accessibility: keyboard focus rings on every interactive element. The ring
+   is rendered as a 2px outline in the accent color with a 2px transparent
+   gap (the standard "double ring" pattern), so it's visible on both light
+   and dark themes. :focus-visible is the right pseudo-class — :focus would
+   paint the ring on every click, which the OS / WebKitGTK already draws a
+   focus rectangle for, doubling up the visual noise. Buttons that are
+   :disabled skip the ring entirely (it's not actionable). */
+:focus {
+  outline: none;
+}
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 5px;
+}
+:disabled:focus-visible {
+  outline: none;
+}
+
+/* Skip-to-composer link: a visually-hidden link that becomes visible when
+   it receives keyboard focus (Tab from the topbar lands on it first).
+   Pressing Enter moves focus to the textarea so a screen-reader or
+   keyboard-only user can start typing without tabbing through every
+   topbar chip. */
+.skip-link {
+  position: absolute;
+  top: -100px;
+  left: 12px;
+  z-index: 1000;
+  padding: 8px 14px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: top 0.12s;
+}
+.skip-link:focus {
+  top: 12px;
+}
+
+/* Cheatsheet: declarative key/desc rows. Each row is a flex line; the keys
+   get a fixed min-width on the left so the descriptions align across rows
+   (eye doesn't have to re-find the column on every line). The kbd cluster
+   matches the existing welcome kbd style. */
+.cheatsheet {
+  padding: 4px 4px 16px;
+}
+.cheatsheet__section + .cheatsheet__section {
+  margin-top: 18px;
+}
+.cheatsheet__section-title {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--fg-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 0 8px 6px;
+}
+.cheatsheet__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.cheatsheet__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 8px;
+  border-radius: 5px;
+}
+.cheatsheet__row:hover {
+  background: var(--bg-soft);
+}
+.cheatsheet__keys {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 130px;
+  flex-shrink: 0;
+}
+.cheatsheet__kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--fg);
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  line-height: 1;
+}
+.cheatsheet__desc {
+  color: var(--fg-dim);
+  font-size: 12.5px;
+}
+
 .app {
   height: 100%;
   min-height: 0;

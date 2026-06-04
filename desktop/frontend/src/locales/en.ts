@@ -405,6 +405,22 @@ export const en = {
   "todo.title": "To-dos",
   "todo.dismiss": "Dismiss the task list",
 
+  // shortcuts cheatsheet (press ?)
+  "shortcuts.title": "Keyboard shortcuts",
+  "shortcuts.close": "Close shortcuts",
+  "shortcuts.open": "Show keyboard shortcuts",
+  "shortcuts.section.composer": "Composer",
+  "shortcuts.section.transcript": "Transcript",
+  "shortcuts.section.global": "Global",
+  "shortcuts.desc.composer.send": "Send prompt",
+  "shortcuts.desc.composer.newline": "Newline (Shift+Enter)",
+  "shortcuts.desc.composer.cycleMode": "Cycle mode (normal → plan → YOLO)",
+  "shortcuts.desc.composer.historyPrev": "Previous prompt",
+  "shortcuts.desc.composer.historyNext": "Next prompt",
+  "shortcuts.desc.composer.cancel": "Stop the current turn",
+  "shortcuts.desc.transcript.jumpBottom": "Jump to bottom",
+  "shortcuts.desc.global.cheatsheet": "Show this cheatsheet",
+
   // slash menu tags
   "slash.project": "project",
   "slash.mcp": "mcp",
