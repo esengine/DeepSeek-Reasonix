@@ -1370,6 +1370,11 @@ const toolStreamTailLines = 8
 // the command finishes. Ctrl+B toggles the full output.
 const shellPreviewLines = 10
 
+// shellExpandMaxLines caps how many lines Ctrl+B shows in expanded mode, so a
+// very large output (e.g. thousands of lines) doesn't hang the TUI or push the
+// input box off-screen.
+const shellExpandMaxLines = 200
+
 // streamToolOutput appends a chunk of a running tool's output and re-renders its
 // live block (the last toolStreamTailLines lines) under the tool card, opening
 // the block on the first chunk. Mirrors streamReasoning.
@@ -1475,8 +1480,8 @@ func (m *chatTUI) collapseToolOutput(id string) {
 }
 
 // toggleShellOutput expands or collapses the output of the most recent shell
-// command. When expanded, the full output replaces the preview; when collapsed,
-// only the first shellPreviewLines are shown. Called on Ctrl+B.
+// command. When expanded, up to shellExpandMaxLines lines are shown; when
+// collapsed, only the first shellPreviewLines are shown. Called on Ctrl+B.
 func (m *chatTUI) toggleShellOutput() {
 	// Find the most recent shell output that has a transcript entry.
 	var lastID string
@@ -1494,25 +1499,37 @@ func (m *chatTUI) toggleShellOutput() {
 	if !ok {
 		return
 	}
+	lines := strings.Split(strings.TrimRight(full, "\n"), "\n")
+	total := len(lines)
+	innerW := m.width - len([]rune(connector))
+	if innerW < 10 {
+		innerW = 80
+	}
+
 	if m.shellExpanded[lastID] {
-		// Collapse: show preview.
+		// Collapse back to preview.
 		m.shellExpanded[lastID] = false
-		lines := strings.Split(strings.TrimRight(full, "\n"), "\n")
-		if len(lines) > shellPreviewLines {
+		if total > shellPreviewLines {
 			preview := make([]string, shellPreviewLines+1)
 			for i := 0; i < shellPreviewLines; i++ {
-				preview[i] = dim(clampPlain(lines[i], m.width-len([]rune(connector))))
+				preview[i] = dim(clampPlain(lines[i], innerW))
 			}
-			preview[shellPreviewLines] = dim(fmt.Sprintf("… %d more lines (Ctrl+B)", len(lines)-shellPreviewLines))
+			preview[shellPreviewLines] = dim(fmt.Sprintf("… %d more lines (Ctrl+B)", total-shellPreviewLines))
 			m.transcript[lastIdx] = connectorBlock(preview)
 		}
 	} else {
-		// Expand: show full output.
+		// Expand: show up to shellExpandMaxLines lines.
 		m.shellExpanded[lastID] = true
-		lines := strings.Split(strings.TrimRight(full, "\n"), "\n")
-		rendered := make([]string, len(lines))
-		for i, ln := range lines {
-			rendered[i] = dim(clampPlain(ln, m.width-len([]rune(connector))))
+		show := total
+		if show > shellExpandMaxLines {
+			show = shellExpandMaxLines
+		}
+		rendered := make([]string, show)
+		for i := 0; i < show; i++ {
+			rendered[i] = dim(clampPlain(lines[i], innerW))
+		}
+		if total > shellExpandMaxLines {
+			rendered = append(rendered, dim(fmt.Sprintf("… %d more lines", total-shellExpandMaxLines)))
 		}
 		m.transcript[lastIdx] = connectorBlock(rendered)
 	}
