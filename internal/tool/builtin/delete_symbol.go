@@ -61,7 +61,7 @@ func (d deleteSymbol) Execute(ctx context.Context, args json.RawMessage) (string
 		Kind   string `json:"kind"`
 		Parent string `json:"parent"`
 	}
-	if err := json.Unmarshal(args, &p); err != nil {
+	if err := unmarshalArgs(args, &p); err != nil {
 		return "", fmt.Errorf("invalid args: %w", err)
 	}
 	if p.Path == "" {
@@ -107,7 +107,7 @@ func (d deleteSymbol) Preview(args json.RawMessage) (diff.Change, error) {
 		Kind   string `json:"kind"`
 		Parent string `json:"parent"`
 	}
-	if err := json.Unmarshal(args, &p); err != nil {
+	if err := unmarshalArgs(args, &p); err != nil {
 		return diff.Change{}, fmt.Errorf("invalid args: %w", err)
 	}
 	if p.Path == "" {

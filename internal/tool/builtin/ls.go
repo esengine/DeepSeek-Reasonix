@@ -35,7 +35,7 @@ func (l listDir) Execute(ctx context.Context, args json.RawMessage) (string, err
 		Recursive bool   `json:"recursive"`
 	}{Path: "."}
 	if len(args) > 0 {
-		if err := json.Unmarshal(args, &p); err != nil {
+		if err := unmarshalArgs(args, &p); err != nil {
 			return "", fmt.Errorf("invalid args: %w", err)
 		}
 	}

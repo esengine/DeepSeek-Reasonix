@@ -136,7 +136,7 @@ func (n notebookEdit) Preview(raw json.RawMessage) (diff.Change, error) {
 
 func parseNotebookArgs(raw json.RawMessage) (notebookArgs, error) {
 	var a notebookArgs
-	if err := json.Unmarshal(raw, &a); err != nil {
+	if err := unmarshalArgs(raw, &a); err != nil {
 		return a, fmt.Errorf("invalid args: %w", err)
 	}
 	// Be forgiving about the source field: models reach for the write_file/edit_file

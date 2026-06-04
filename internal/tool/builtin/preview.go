@@ -28,7 +28,7 @@ func (w writeFile) Preview(args json.RawMessage) (diff.Change, error) {
 		Path    string `json:"path"`
 		Content string `json:"content"`
 	}
-	if err := json.Unmarshal(args, &p); err != nil {
+	if err := unmarshalArgs(args, &p); err != nil {
 		return diff.Change{}, fmt.Errorf("invalid args: %w", err)
 	}
 	if p.Path == "" {
@@ -56,7 +56,7 @@ func (e editFile) Preview(args json.RawMessage) (diff.Change, error) {
 		NewString string `json:"new_string"`
 		Encoding  string `json:"encoding,omitempty"`
 	}
-	if err := json.Unmarshal(args, &p); err != nil {
+	if err := unmarshalArgs(args, &p); err != nil {
 		return diff.Change{}, fmt.Errorf("invalid args: %w", err)
 	}
 	if p.Path == "" {
@@ -100,7 +100,7 @@ func (m multiEdit) Preview(args json.RawMessage) (diff.Change, error) {
 		Edits    []editStep `json:"edits"`
 		Encoding string     `json:"encoding,omitempty"`
 	}
-	if err := json.Unmarshal(args, &p); err != nil {
+	if err := unmarshalArgs(args, &p); err != nil {
 		return diff.Change{}, fmt.Errorf("invalid args: %w", err)
 	}
 	if p.Path == "" {

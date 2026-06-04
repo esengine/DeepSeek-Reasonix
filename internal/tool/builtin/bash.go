@@ -78,7 +78,7 @@ func (b bash) Execute(ctx context.Context, args json.RawMessage) (string, error)
 		Command         string `json:"command"`
 		RunInBackground bool   `json:"run_in_background"`
 	}
-	if err := json.Unmarshal(args, &p); err != nil {
+	if err := unmarshalArgs(args, &p); err != nil {
 		return "", fmt.Errorf("invalid args: %w", err)
 	}
 	if p.Command == "" {

@@ -39,7 +39,7 @@ func (e editFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 		NewString string `json:"new_string"`
 		Encoding  string `json:"encoding,omitempty"`
 	}
-	if err := json.Unmarshal(args, &p); err != nil {
+	if err := unmarshalArgs(args, &p); err != nil {
 		return "", fmt.Errorf("invalid args: %w", err)
 	}
 	if p.Path == "" {

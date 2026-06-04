@@ -45,7 +45,7 @@ func (bashOutput) Execute(ctx context.Context, args json.RawMessage) (string, er
 		JobID  string `json:"job_id"`
 		Filter string `json:"filter"`
 	}
-	if err := json.Unmarshal(args, &p); err != nil {
+	if err := unmarshalArgs(args, &p); err != nil {
 		return "", fmt.Errorf("invalid args: %w", err)
 	}
 	if p.JobID == "" {
@@ -108,7 +108,7 @@ func (killShell) Execute(ctx context.Context, args json.RawMessage) (string, err
 	var p struct {
 		JobID string `json:"job_id"`
 	}
-	if err := json.Unmarshal(args, &p); err != nil {
+	if err := unmarshalArgs(args, &p); err != nil {
 		return "", fmt.Errorf("invalid args: %w", err)
 	}
 	if p.JobID == "" {
@@ -146,7 +146,7 @@ func (waitJob) Execute(ctx context.Context, args json.RawMessage) (string, error
 		TimeoutSeconds int      `json:"timeout_seconds"`
 	}
 	if len(args) > 0 {
-		if err := json.Unmarshal(args, &p); err != nil {
+		if err := unmarshalArgs(args, &p); err != nil {
 			return "", fmt.Errorf("invalid args: %w", err)
 		}
 	}

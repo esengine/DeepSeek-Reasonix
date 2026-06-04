@@ -101,7 +101,7 @@ func (webFetch) Execute(ctx context.Context, args json.RawMessage) (string, erro
 	var p struct {
 		URL string `json:"url"`
 	}
-	if err := json.Unmarshal(args, &p); err != nil {
+	if err := unmarshalArgs(args, &p); err != nil {
 		return "", fmt.Errorf("invalid args: %w", err)
 	}
 	if p.URL == "" {

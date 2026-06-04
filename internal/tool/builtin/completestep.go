@@ -83,7 +83,7 @@ func (completeStep) Execute(ctx context.Context, args json.RawMessage) (string, 
 		Evidence []stepEvidence `json:"evidence"`
 		Notes    string         `json:"notes"`
 	}
-	if err := json.Unmarshal(args, &p); err != nil {
+	if err := unmarshalArgs(args, &p); err != nil {
 		return "", fmt.Errorf("invalid args: %w", err)
 	}
 	if strings.TrimSpace(p.Step) == "" {

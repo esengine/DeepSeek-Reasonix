@@ -65,7 +65,7 @@ func (r readFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 		Limit    int    `json:"limit,omitempty"`
 		Encoding string `json:"encoding,omitempty"`
 	}
-	if err := json.Unmarshal(args, &p); err != nil {
+	if err := unmarshalArgs(args, &p); err != nil {
 		return "", fmt.Errorf("invalid args: %w", err)
 	}
 	if p.Path == "" {
