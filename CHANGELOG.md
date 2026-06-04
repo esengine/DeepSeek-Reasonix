@@ -4,6 +4,31 @@ All notable changes to the Go line (Reasonix 1.0+) are recorded here. The legacy
 `0.x` TypeScript history lives on the [`v1`](https://github.com/esengine/DeepSeek-Reasonix/tree/v1)
 branch.
 
+## [Unreleased]
+
+### Changed
+
+- **Effort configuration-driven refactoring** — effort (reasoning depth) is now
+  config-driven via `supported_efforts` / `default_effort` in provider TOML,
+  with a session-level `[session]` section for the active provider and effort.
+  - `Session` struct: `Provider` + `Effort` fields replace the per-provider
+    `effort` field (old field auto-migrated on first load).
+  - `ResolveEffort(caps, chosen)`: pure function for validation + degradation
+    with human-readable warnings.
+  - `Session.AdaptToProvider(caps)`: auto-degrades effort when switching
+    providers that don't support the current level.
+  - DeepSeek default effort changed from `"high"` to `"auto"` (cache-safe).
+  - Anthropic added to built-in presets with `supported_efforts`.
+  - CLI `/model` and `/effort` now show degradation warnings.
+  - Desktop Settings panel: new Session Provider + Effort dropdowns with
+    dynamic options based on provider capability.
+  - `SaveProvider` uses merge mode (preserves TOML-only fields like
+    `supported_efforts` when the UI doesn't expose them).
+
+### Fixed
+
+- Fixed "Prefix Cache 不被击中" wording in docs (should be "不被破坏").
+
 ## [1.0.0] — 2026-06-03
 
 First stable release — a **ground-up rewrite in Go**. Not an upgrade of the `0.x`

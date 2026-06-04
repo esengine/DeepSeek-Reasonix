@@ -196,7 +196,36 @@ This is the **only** point where the prompt prefix changes — a deliberate, rar
 stays cache-friendly, so cache hit rate (the key observability signal) stays
 high. `context_window = 0` disables compaction for an instance.
 
-### 3.7 Permissions (`internal/permission`) — per-call gating
+### 3.7 Reasoning effort (`internal/config/effort.go`)
+
+Reasoning effort controls the model's thinking depth. It is a provider-specific
+knob forwarded as `reasoning_effort` in the API request; omitting it (the `auto`
+level) lets the provider use its default, which protects prefix cache stability.
+
+**Architecture.** Effort has three layers:
+
+- **Provider capability** (`SupportedEfforts` / `DefaultEffort` in TOML): declares
+  which levels a provider supports. DeepSeek and Anthropic have built-in
+  heuristics; all other providers must declare explicitly.
+- **Session state** (`Session.Effort` in TOML): the user's currently selected
+  level. Adapts automatically when switching providers via `AdaptToProvider`.
+- **Resolution** (`ResolveEffort(caps, chosen)`): a pure function that validates
+  the chosen level against the capability and degrades to the default if
+  unsupported, returning a `ResolveResult` with the wire-format value and an
+  optional warning.
+
+**Cache-safe `auto`.** The `auto` level maps to an empty string, which
+`json:"reasoning_effort,omitempty"` omits from the request. This keeps the
+prompt prefix identical across turns regardless of effort switching, preserving
+DeepSeek's automatic prefix cache. Explicit levels (`low`, `medium`, `high`,
+`max`) are sent as-is; the provider decides how to interpret them.
+
+**Provider switching.** When the user switches providers (via `/model` or the
+desktop UI), `Session.AdaptToProvider(newCaps)` re-validates the current effort
+against the new provider's capability. If the level is not supported, it degrades
+to the provider's default and returns a warning string that the UI surfaces.
+
+### 3.8 Permissions (`internal/permission`) — per-call gating
 
 A coding agent runs shell commands and edits files autonomously. The permission
 layer decides, **per tool call**, whether to allow it, deny it, or ask the user

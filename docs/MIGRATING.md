@@ -76,6 +76,51 @@ LE/BE, and GB18030 (a superset of GBK). This matches v1's behavior.
 - `write_file` always writes UTF-8 (the model's output encoding).
 - `grep` decodes before matching, so regex patterns work on non-UTF-8 files.
 
+## Effort configuration (v1.1.0+)
+
+The effort (reasoning depth) system was refactored in v1.1.0. The provider-level
+`effort` field has been replaced by a session-level `[session]` section.
+
+### What changed
+
+| Before (v1.0.0) | After (v1.1.0+) |
+|---|---|
+| `effort = "high"` in `[[providers]]` | `effort = "high"` in `[session]` |
+| Effort per-provider | Effort per-session (adapts on provider switch) |
+| `NormalizeEffort()` | `ResolveEffort()` (pure function, returns warning) |
+
+### Migration
+
+**Automatic.** When you first load an old config with `effort = "high"` in a
+provider block, Reasonix migrates it to `[session] effort = "high"` and prints a
+one-time deprecation warning. The next save writes the new format.
+
+**Manual.** If you prefer to update your config by hand:
+
+```toml
+# Old format
+[[providers]]
+name = "deepseek"
+effort = "high"
+
+# New format
+[session]
+provider = "deepseek"
+effort   = "high"
+
+[[providers]]
+name = "deepseek"
+# effort field removed
+```
+
+### New features
+
+- **`supported_efforts`**: declare which effort levels a provider supports.
+  Required for non-DeepSeek/Anthropic providers.
+- **`default_effort`**: fallback level when the user's choice is not supported.
+- **`Session.AdaptToProvider`**: automatically degrades effort when switching
+  to a provider that doesn't support the current level.
+
 ## Reporting issues
 
 Issues and PRs are labelled by line: **`v1`** (legacy TypeScript) and **`v2`**
