@@ -505,7 +505,7 @@ func failingTestNames(out string) []string {
 }
 
 func runTests(repo, testCmd string, pkgs []string) (bool, string) {
-	fields := strings.Fields(testCmd)
+	fields := splitShellFields(testCmd)
 	if len(fields) == 0 {
 		fields = []string{"go", "test"}
 	}
@@ -514,6 +514,52 @@ func runTests(repo, testCmd string, pkgs []string) (bool, string) {
 	cmd.Dir = repo
 	out, err := cmd.CombinedOutput()
 	return err == nil, string(out)
+}
+
+// splitShellFields is a small POSIX-ish shell splitter: splits on
+// whitespace, supports single- and double-quoted spans (the kind of
+// arguments a user might pass via `--test-cmd \"go test -run
+// TestFoo\"`), and strips the quotes. It's intentionally tiny — the
+// diff-mode `--test-cmd` flag is set by the workflow, not the user,
+// so we don't need shell-expansion or backticks. Quoted segments
+// preserve their internal whitespace; everything else splits on
+// runs of \t, \n, or space.
+func splitShellFields(s string) []string {
+	var out []string
+	var cur strings.Builder
+	inSingle, inDouble := false, false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case inSingle:
+			if c == '\'' {
+				inSingle = false
+			} else {
+				cur.WriteByte(c)
+			}
+		case inDouble:
+			if c == '"' {
+				inDouble = false
+			} else {
+				cur.WriteByte(c)
+			}
+		case c == '\'':
+			inSingle = true
+		case c == '"':
+			inDouble = true
+		case c == ' ' || c == '\t' || c == '\n':
+			if cur.Len() > 0 {
+				out = append(out, cur.String())
+				cur.Reset()
+			}
+		default:
+			cur.WriteByte(c)
+		}
+	}
+	if cur.Len() > 0 {
+		out = append(out, cur.String())
+	}
+	return out
 }
 
 // changedGoFiles lists .go files changed by base...HEAD, excluding *_test.go
