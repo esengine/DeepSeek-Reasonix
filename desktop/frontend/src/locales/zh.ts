@@ -281,6 +281,12 @@ export const zh: Record<DictKey, string> = {
   "history.noResults": "没有匹配的会话。",
   "history.today": "今天",
   "history.yesterday": "昨天",
+  "history.select": "选择",
+  "history.selectDone": "完成",
+  "history.selectAll": "全选",
+  "history.deselectAll": "取消全选",
+  "history.deleteSelected": "删除选中 ({n})",
+  "history.confirmDeleteSelected": "删除 {n} 个会话？",
 
   // 记忆抽屉
   "memory.title": "记忆",

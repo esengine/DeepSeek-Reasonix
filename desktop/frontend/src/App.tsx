@@ -148,6 +148,7 @@ export default function App() {
     resumeSession,
     previewSession,
     deleteSession,
+    deleteSessions,
     renameSession,
     refreshMeta,
     pickWorkspace,
@@ -596,6 +597,13 @@ export default function App() {
       setHistView((cur) => (cur === null ? null : sessions));
     },
     [state.running, deleteSession, refreshSessions],
+  );
+  const onDeleteSessions = useCallback(
+    async (paths: string[]) => {
+      await deleteSessions(paths);
+      setHistView(await listSessions());
+    },
+    [deleteSessions, listSessions],
   );
   const onRenameSession = useCallback(
     async (path: string, title: string) => {
@@ -1057,6 +1065,7 @@ export default function App() {
           onResume={onResumeSession}
           onPreview={previewSession}
           onDelete={onDeleteSession}
+          onDeleteBatch={onDeleteSessions}
           onRename={onRenameSession}
           onClose={closeHistory}
         />
