@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -416,6 +417,7 @@ func (a *App) buildTabController(tab *WorkspaceTab) {
 		RequireKey:    false,
 		Sink:          tab.sink,
 		WorkspaceRoot: root,
+		Stderr:        io.Discard,
 	})
 	if err != nil {
 		a.mu.Lock()

@@ -1768,7 +1768,6 @@ func (a *App) SetModel(name string) error {
 		prevPath = tab.Ctrl.SessionPath()
 		_ = tab.Ctrl.Snapshot()
 		carried = tab.Ctrl.History()
-		tab.Ctrl.Close()
 	}
 
 	newCtrl, err := boot.Build(a.ctx, boot.Options{
@@ -1776,15 +1775,20 @@ func (a *App) SetModel(name string) error {
 		RequireKey:    false,
 		Sink:          tab.sink,
 		WorkspaceRoot: tab.WorkspaceRoot,
+		Stderr:        io.Discard,
 	})
 	if err != nil {
 		return err
 	}
+	old := tab.Ctrl
 	a.mu.Lock()
 	tab.Ctrl = newCtrl
 	tab.model = name
 	tab.Label = newCtrl.Label()
 	a.mu.Unlock()
+	if old != nil {
+		old.Close()
+	}
 	newCtrl.EnableInteractiveApproval()
 
 	path := agent.ContinueSessionPath(prevPath, newCtrl.SessionDir(), newCtrl.Label())

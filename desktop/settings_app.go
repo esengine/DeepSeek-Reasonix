@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -204,7 +205,6 @@ func (a *App) rebuild() error {
 		prevPath = tab.Ctrl.SessionPath()
 		_ = tab.Ctrl.Snapshot()
 		carried = tab.Ctrl.History()
-		tab.Ctrl.Close()
 	}
 	model := tab.model
 	if cfg, err := config.Load(); err == nil {
@@ -219,6 +219,7 @@ func (a *App) rebuild() error {
 		Model: model, RequireKey: false,
 		Sink:          tab.sink,
 		WorkspaceRoot: tab.WorkspaceRoot,
+		Stderr:        io.Discard,
 	})
 	if err != nil {
 		a.mu.Lock()
@@ -226,12 +227,16 @@ func (a *App) rebuild() error {
 		a.mu.Unlock()
 		return err
 	}
+	old := tab.Ctrl
 	a.mu.Lock()
 	tab.Ctrl = ctrl
 	tab.model = model
 	tab.Label = ctrl.Label()
 	tab.StartupErr = ""
 	a.mu.Unlock()
+	if old != nil {
+		old.Close()
+	}
 	ctrl.EnableInteractiveApproval()
 	path := agent.ContinueSessionPath(prevPath, ctrl.SessionDir(), ctrl.Label())
 	if len(carried) > 0 {

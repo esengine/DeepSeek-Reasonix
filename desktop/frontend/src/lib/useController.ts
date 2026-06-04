@@ -458,7 +458,15 @@ export function useController() {
   const compact = useCallback(() => { app.Compact().catch(() => {}); }, []);
 
   const setModel = useCallback(async (name: string) => {
-    await app.SetModel(name).catch(() => {});
+    try {
+      await app.SetModel(name);
+    } catch (e) {
+      if (activeTabId) {
+        const text = `Model switch failed: ${e instanceof Error ? e.message : String(e)}`;
+        dispatchTo(activeTabId, { type: "local_notice", level: "warn", text });
+      }
+      return;
+    }
     if (!activeTabId) return;
     try {
       dispatchTo(activeTabId, { type: "meta", meta: await app.Meta() });
