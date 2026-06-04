@@ -9,6 +9,13 @@ default_model = "deepseek"   # a provider name (→ its default model) or "provi
 theme = "auto"   # auto|dark|light; controls CLI colors only; REASONIX_THEME can override per run
 # theme_style = "graphite"   # graphite|ember|aurora|midnight|sandstone|porcelain|linen|glacier
 
+# Session state: active provider and effort level.
+# effort = "auto" omits reasoning_effort from API requests (cache-safe).
+# When switching providers, effort adapts automatically to the new provider's capability.
+[session]
+provider = "deepseek"
+# effort   = "auto"   # auto|low|medium|high|xhigh|max; auto = provider default
+
 [agent]
 system_prompt = """
 You are Reasonix, a coding agent focused on executing code tasks.
@@ -38,13 +45,12 @@ default     = "deepseek-v4-flash"   # optional; defaults to the first of `models
 api_key_env = "DEEPSEEK_API_KEY"
 context_window = 1000000
 price       = { cache_hit = 0.02, input = 1, output = 2, currency = "¥" }   # per 1M tokens
-# DeepSeek thinking is always on; effort: high | max. Omit for auto (provider default).
-effort      = "high"
+# DeepSeek has a built-in effort heuristic (auto|high|max). No need to declare
+# supported_efforts unless you want to override the default.
 
 # A single-model provider still works (use `model = "..."`) — pick this form when a
 # model needs its own base_url / context_window / price (e.g. the two MiMo SKUs
 # below have different context windows).
-price       = { cache_hit = 0.025, input = 3, output = 6, currency = "¥" }   # per 1M tokens
 
 [[providers]]
 name           = "mimo-pro"
@@ -53,14 +59,21 @@ base_url       = "https://api.xiaomimimo.com/v1"
 model          = "mimo-v2.5-pro"   # thinking-mode on by default; reasoning_content rendered dim above the answer
 api_key_env    = "MIMO_API_KEY"
 context_window = 1000000
+price          = { cache_hit = 0.025, input = 3, output = 6, currency = "¥" }   # per 1M tokens
+# MiMo effort levels. supported_efforts declares what /effort can pick;
+# default_effort is the fallback when an unsupported level is chosen.
+supported_efforts = ["auto", "low", "medium", "high"]
+default_effort    = "auto"
 
 [[providers]]
 name           = "mimo-flash"
 kind           = "openai"
 base_url       = "https://api.xiaomimimo.com/v1"
-model          = "mimo-v2-flash"   # thinking-mode off by default; cheaper / faster
+model          = "mimo-v2.5"   # thinking-mode off by default; cheaper / faster
 api_key_env    = "MIMO_API_KEY"
 context_window = 65536
+supported_efforts = ["auto", "low", "medium", "high"]
+default_effort    = "auto"
 
 # Anthropic (Claude) — the "anthropic" kind speaks the Messages API directly (no
 # OpenAI shim). base_url is optional (defaults to https://api.anthropic.com). Note:
@@ -74,9 +87,10 @@ api_key_env    = "ANTHROPIC_API_KEY"
 context_window = 1000000
 price          = { cache_hit = 0.5, input = 5, output = 25, currency = "$" }   # per 1M tokens
 # Extended thinking (anthropic kind only; round-trips the signed reasoning block
-# across tool calls). Omit to disable. effort: low | medium | high | xhigh | max.
+# across tool calls). Omit to disable.
 thinking       = "adaptive"
-effort         = "high"
+# Anthropic has a built-in effort heuristic (auto|low|medium|high|xhigh|max).
+# No need to declare supported_efforts unless you want to override the default.
 
 [tools]
 enabled = []   # empty = all built-in tools
