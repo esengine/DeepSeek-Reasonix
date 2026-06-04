@@ -925,6 +925,13 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// "!<cmd>" runs a shell command directly, bypassing the model.
 			if strings.HasPrefix(line, "!") {
 				cmd := strings.TrimPrefix(line, "!")
+				if strings.TrimSpace(cmd) == "" {
+					m.input.Reset()
+					m.input.SetHeight(1)
+					m.pastedBlocks = nil
+					m.notice(i18n.M.ShellExecEmpty)
+					return m, finalize(m, cmds)
+				}
 				m.input.Reset()
 				m.input.SetHeight(1)
 				m.pastedBlocks = nil

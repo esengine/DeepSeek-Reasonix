@@ -310,7 +310,12 @@ export default function App() {
       const trimmed = displayText.trim();
       // "!<cmd>" runs a shell command directly, bypassing the model.
       if (trimmed.startsWith("!")) {
-        runShell(trimmed.slice(1));
+        const cmd = trimmed.slice(1).trim();
+        if (!cmd) {
+          notice("usage: !<command>  (e.g. !ls -la)");
+          return;
+        }
+        runShell(cmd);
         return;
       }
       const model = /^\/model\s+(\S+)$/.exec(trimmed);
