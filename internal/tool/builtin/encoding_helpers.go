@@ -177,12 +177,52 @@ func commonPrefixLen(a, b string) int {
 	return n
 }
 
-// quoteLine wraps a line sample for display in an error message.
+// quoteLine wraps a line sample for display in an error message, making
+// invisible whitespace visible: tabs render as "→" so the model can tell
+// tab-indented code from space-indented code at a glance.
 func quoteLine(s string) string {
+	s = strings.ReplaceAll(s, "\t", "→")
 	if strings.Contains(s, "\n") {
 		return "«" + strings.ReplaceAll(s, "\n", "↵") + "»"
 	}
 	return "`" + s + "`"
+}
+
+// editSnippet returns a short context window (±contextLines around the edit)
+// so the model can verify the edit landed in the right place. Tabs and other
+// invisible whitespace are rendered visibly.
+func editSnippet(content, old, newStr string, contextLines int) string {
+	if old == "" && newStr == "" {
+		return ""
+	}
+	lines := strings.Split(content, "\n")
+	// Find the line where the replacement starts.
+	idx := strings.Index(content, newStr)
+	if idx < 0 {
+		return "" // replacement not in content (shouldn't happen)
+	}
+	editLine := strings.Count(content[:idx], "\n")
+
+	start := editLine - contextLines
+	if start < 0 {
+		start = 0
+	}
+	end := editLine + strings.Count(newStr, "\n") + 1 + contextLines
+	if end > len(lines) {
+		end = len(lines)
+	}
+
+	var sb strings.Builder
+	width := len(fmt.Sprintf("%d", end))
+	for i := start; i < end; i++ {
+		marker := " "
+		if i >= editLine && i <= editLine+strings.Count(newStr, "\n") {
+			marker = "›"
+		}
+		line := strings.ReplaceAll(lines[i], "\t", "→")
+		fmt.Fprintf(&sb, "%s %*d│%s\n", marker, width, i+1, line)
+	}
+	return sb.String()
 }
 
 // fuzzyFind attempts a whitespace-tolerant match of old in content when exact
@@ -225,6 +265,25 @@ func fuzzyFind(content, old string) (actualOld string, found bool) {
 	for i := 0; i <= len(contentLines)-nOld; i++ {
 		window := contentLines[i : i+nOld]
 		if linesEqual(trimTrail(window), normOld) {
+			return strings.Join(window, "\n"), true
+		}
+	}
+
+	// --- Level 1.5: normalize tabs to spaces (tab↔space mismatch) ---
+	// Catches the common case where the model emits spaces but the file uses
+	// tabs (or vice versa), without stripping all indentation like Level 2.
+	expandTabs := func(lines []string) []string {
+		out := make([]string, len(lines))
+		for i, l := range lines {
+			out[i] = strings.ReplaceAll(l, "\t", "    ")
+		}
+		return out
+	}
+
+	normOldTab := expandTabs(normOld)
+	for i := 0; i <= len(contentLines)-nOld; i++ {
+		window := contentLines[i : i+nOld]
+		if linesEqual(expandTabs(trimTrail(window)), normOldTab) {
 			return strings.Join(window, "\n"), true
 		}
 	}

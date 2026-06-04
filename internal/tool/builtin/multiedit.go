@@ -97,6 +97,7 @@ func (m multiEdit) Execute(ctx context.Context, args json.RawMessage) (string, e
 	// safety guarantee that makes multi_edit preferable to chained
 	// edit_file calls.
 	applied := 0
+	var lastNew string // track last replacement for snippet
 	for i, step := range p.Edits {
 		if step.OldString == "" {
 			return "", fmt.Errorf("edit %d: old_string is required", i+1)
@@ -111,12 +112,14 @@ func (m multiEdit) Execute(ctx context.Context, args json.RawMessage) (string, e
 					fuzzyCount := strings.Count(content, actual)
 					content = strings.ReplaceAll(content, actual, newStr)
 					applied += fuzzyCount
+					lastNew = newStr
 					continue
 				}
 				return "", diagnoseNotFound(p.Path, step.OldString, content)
 			}
 			content = strings.ReplaceAll(content, old, newStr)
 			applied += count
+			lastNew = newStr
 			continue
 		}
 		switch strings.Count(content, old) {
@@ -126,12 +129,14 @@ func (m multiEdit) Execute(ctx context.Context, args json.RawMessage) (string, e
 				_, newStr = matchLineEndings(content, old, newStr)
 				content = strings.Replace(content, actual, newStr, 1)
 				applied++
+				lastNew = newStr
 				continue
 			}
 			return "", diagnoseNotFound(p.Path, step.OldString, content)
 		case 1:
 			content = strings.Replace(content, old, newStr, 1)
 			applied++
+			lastNew = newStr
 		default:
 			return "", diagnoseNotUnique(p.Path, old, content)
 		}
@@ -140,5 +145,6 @@ func (m multiEdit) Execute(ctx context.Context, args json.RawMessage) (string, e
 	if err := writeFileEncodedWith(p.Path, content, enc, encParam); err != nil {
 		return "", fmt.Errorf("write %s: %w", p.Path, err)
 	}
-	return fmt.Sprintf("multi_edit %s: %d edits applied (%d total replacements)", p.Path, len(p.Edits), applied), nil
+	snippet := editSnippet(content, "", lastNew, 3)
+	return fmt.Sprintf("multi_edit %s: %d edits applied (%d total replacements)\n\n%s", p.Path, len(p.Edits), applied, snippet), nil
 }

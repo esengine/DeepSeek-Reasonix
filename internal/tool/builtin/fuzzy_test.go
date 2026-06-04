@@ -110,3 +110,17 @@ func TestFuzzyFind_PreservesOriginalFormatting(t *testing.T) {
 		t.Errorf("actual = %q, expected original file text with whitespace", actual)
 	}
 }
+
+func TestFuzzyFind_TabVsSpaces(t *testing.T) {
+	// File uses tabs, model emits 4 spaces per tab.
+	content := "\tfunc main() {\n\t\treturn nil\n\t}\n"
+	old := "    func main() {\n        return nil\n    }"
+	actual, ok := fuzzyFind(content, old)
+	if !ok {
+		t.Fatal("expected tab-vs-space match at Level 1.5")
+	}
+	// Actual text from file preserves tabs.
+	if actual != "\tfunc main() {\n\t\treturn nil\n\t}" {
+		t.Errorf("actual = %q, expected tab-preserved text", actual)
+	}
+}

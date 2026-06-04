@@ -74,7 +74,8 @@ func (e editFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 			if err := writeFileEncodedWith(p.Path, updated, enc, encParam); err != nil {
 				return "", fmt.Errorf("write %s: %w", p.Path, err)
 			}
-			return fmt.Sprintf("edited %s (fuzzy match)", p.Path), nil
+			snippet := editSnippet(updated, actual, newStr, 3)
+			return fmt.Sprintf("edited %s (fuzzy match)\n\n%s", p.Path, snippet), nil
 		}
 		return "", diagnoseNotFound(p.Path, p.OldString, content)
 	case 1:
@@ -87,5 +88,6 @@ func (e editFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 	if err := writeFileEncodedWith(p.Path, updated, enc, encParam); err != nil {
 		return "", fmt.Errorf("write %s: %w", p.Path, err)
 	}
-	return fmt.Sprintf("edited %s", p.Path), nil
+	snippet := editSnippet(updated, old, newStr, 3)
+	return fmt.Sprintf("edited %s\n\n%s", p.Path, snippet), nil
 }
