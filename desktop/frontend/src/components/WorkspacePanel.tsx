@@ -714,23 +714,6 @@ export function WorkspacePanel({
             );
           })}
           {preview && preview.size > 0 && <span className="workspace-preview__size">{formatBytes(preview.size)}</span>}
-          {!preview?.binary && !preview?.err && (
-            <Tooltip label={t("workspace.encodingOverride")}>
-              <select
-                className="workspace-encoding-select"
-                value={projectEncoding}
-                onChange={(e) => void changeProjectEncoding(e.target.value)}
-                title={projectEncoding ? t("workspace.encodingTitle").replace("{enc}", projectEncoding) : t("workspace.encoding")}
-              >
-                {ENCODING_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.value === "" ? t("workspace.encodingAuto") : opt.label}
-                    {opt.value !== "" && preview?.encoding && opt.value === preview.encoding ? " ✓" : ""}
-                  </option>
-                ))}
-              </select>
-            </Tooltip>
-          )}
         </div>
 
         <div className="workspace-preview__body" ref={previewBodyRef} onContextMenu={openSelectionMenu}>
@@ -816,6 +799,20 @@ export function WorkspacePanel({
             <button className="workspace-iconbtn" onClick={() => void loadChanges()}>
               <RefreshCw size={14} />
             </button>
+          </Tooltip>
+          <Tooltip label={t("workspace.encodingOverride")}>
+            <select
+              className="workspace-encoding-select"
+              value={projectEncoding}
+              onChange={(e) => void changeProjectEncoding(e.target.value)}
+              title={projectEncoding ? t("workspace.encodingTitle").replace("{enc}", projectEncoding) : t("workspace.encoding")}
+            >
+              {ENCODING_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.value === "" ? t("workspace.encodingAuto") : opt.label}
+                </option>
+              ))}
+            </select>
           </Tooltip>
         </div>
 
