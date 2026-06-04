@@ -396,7 +396,7 @@ func (c *Controller) runTurnWithRaw(ctx context.Context, input, raw string) erro
 		return nil // keep planning; plan mode stays on
 	}
 	c.SetPlanMode(false)
-	c.seedPlanTodos(proposal)
+	seededTodos := c.seedPlanTodos(proposal)
 	// The plan is the go-ahead: don't re-prompt for each write of the approved
 	// work. Auto-approve writers for the duration of this execution turn only.
 	c.mu.Lock()
@@ -407,7 +407,11 @@ func (c *Controller) runTurnWithRaw(ctx context.Context, input, raw string) erro
 		c.autoApprove = false
 		c.mu.Unlock()
 	}()
-	return c.runner.Run(ctx, planApprovedMessage)
+	if err := c.runner.Run(ctx, planApprovedMessage); err != nil {
+		return err
+	}
+	c.completePlanTodos(seededTodos)
+	return nil
 }
 
 // lastAssistantText returns the content of the most recent assistant message with
@@ -1843,14 +1847,29 @@ type seedTodo struct {
 // user approves — a structural guarantee, not a prompt the model might ignore.
 // The model still flips item status as it works (only it knows its own
 // progress); this just makes the list exist. No-op when the plan has no list.
-func (c *Controller) seedPlanTodos(plan string) {
+func (c *Controller) seedPlanTodos(plan string) string {
 	args := PlanTodosJSON(plan)
 	if args == "" {
-		return
+		return ""
 	}
 	t := event.Tool{ID: "plan-seed", Name: "todo_write", Args: args, ReadOnly: true}
 	c.sink.Emit(event.Event{Kind: event.ToolDispatch, Tool: t})
 	t.Output = "task list seeded from the approved plan"
+	c.sink.Emit(event.Event{Kind: event.ToolResult, Tool: t})
+	return args
+}
+
+func (c *Controller) completePlanTodos(args string) {
+	if args == "" {
+		return
+	}
+	done := completedPlanTodosJSON(args)
+	if done == "" {
+		return
+	}
+	t := event.Tool{ID: "plan-seed", Name: "todo_write", Args: done, ReadOnly: true}
+	c.sink.Emit(event.Event{Kind: event.ToolDispatch, Tool: t})
+	t.Output = "approved plan finished"
 	c.sink.Emit(event.Event{Kind: event.ToolResult, Tool: t})
 }
 
@@ -1865,6 +1884,23 @@ func PlanTodosJSON(plan string) string {
 		return ""
 	}
 	b, err := json.Marshal(map[string]any{"todos": items})
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
+func completedPlanTodosJSON(args string) string {
+	var p struct {
+		Todos []seedTodo `json:"todos"`
+	}
+	if err := json.Unmarshal([]byte(args), &p); err != nil || len(p.Todos) == 0 {
+		return ""
+	}
+	for i := range p.Todos {
+		p.Todos[i].Status = "completed"
+	}
+	b, err := json.Marshal(map[string]any{"todos": p.Todos})
 	if err != nil {
 		return ""
 	}
