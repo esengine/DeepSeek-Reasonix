@@ -41,9 +41,9 @@ const (
 
 // Release is a minimal view of the GitHub Releases API response.
 type Release struct {
-	TagName    string    `json:"tag_name"`
-	Prerelease bool      `json:"prerelease"`
-	Assets     []Asset   `json:"assets"`
+	TagName    string  `json:"tag_name"`
+	Prerelease bool    `json:"prerelease"`
+	Assets     []Asset `json:"assets"`
 }
 
 // Asset is one downloadable file attached to a release.
@@ -55,12 +55,12 @@ type Asset struct {
 
 // Info is the Check result shown to the user.
 type Info struct {
-	Current   string
-	Latest    string
-	Available bool
+	Current    string
+	Latest     string
+	Available  bool
 	Prerelease bool
-	AssetName string
-	Err       string
+	AssetName  string
+	Err        string
 }
 
 // Check fetches the latest release from GitHub and compares it to current.
