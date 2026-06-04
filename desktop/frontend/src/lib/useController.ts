@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useReducer, useRef } from "react";
 import { app, onEvent, onReady } from "./bridge";
+import { createRafBatch } from "./rafBatch";
 import type {
   BalanceInfo,
   ContextInfo,
@@ -476,8 +477,28 @@ export function useController() {
   }, []);
 
   useEffect(() => {
+    // Stream batching: text/reasoning deltas pile up faster than the display can
+    // repaint (200 tok/s ≈ one delta per 5 ms; rAF is 16 ms). We coalesce those
+    // into a single reducer pass per frame. Non-text events (tool_dispatch,
+    // usage, notice, turn_started/done, message) break the batch first so their
+    // ordering against earlier text is preserved — a tool call that follows
+    // "Reading foo.ts…" should appear after that text, not interleaved.
+    //
+    // The flusher walks the deltas in order, applying each through the same
+    // reducer path as the live wire event; that's cheaper than a special-case
+    // bulk reducer and keeps the state shape identical to the un-batched case.
+    const textBatch = createRafBatch<WireEvent>((batch) => {
+      for (const e of batch) dispatch({ type: "event", e });
+    });
     const off = onEvent((e) => {
-      dispatch({ type: "event", e });
+      if (e.kind === "text" || e.kind === "reasoning") {
+        textBatch.push(e);
+      } else {
+        // Ordering: flush any queued deltas BEFORE the structural event, so the
+        // dispatch order in the reducer matches the order the kernel emitted.
+        textBatch.drain();
+        dispatch({ type: "event", e });
+      }
       // The gauge's denominator (window) and post-turn prompt size come from the
       // kernel, not the stream — refresh once a turn settles. The wallet balance
       // moves with spend, so refresh it on the same boundary.
@@ -504,6 +525,13 @@ export function useController() {
           .catch(() => {});
       }
     });
+    // On unmount, drain any in-flight text so a turn-end that races the
+    // teardown doesn't strand the last few tokens in the buffer (the user
+    // would see the bubble frozen at the penultimate delta).
+    return () => {
+      textBatch.drain();
+      off();
+    };
 
     // When boot.Build completes asynchronously, the Go side emits agent:ready.
     // Re-fetch session data so the UI reflects the now-available controller.
