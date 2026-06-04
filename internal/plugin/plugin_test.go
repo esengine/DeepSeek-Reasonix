@@ -55,6 +55,46 @@ func TestStdioEndToEnd(t *testing.T) {
 	}
 }
 
+func TestSpecReadOnlyToolNamesMarksUnhintedToolsReadOnly(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	spec := Spec{
+		Name:    "mock",
+		Command: os.Args[0],
+		Args:    []string{"-test.run=TestHelperProcess", "--"},
+		Env:     map[string]string{"GO_WANT_HELPER_PROCESS": "1"},
+		ReadOnlyToolNames: map[string]bool{
+			"echo": true,
+		},
+	}
+
+	host, tools, err := StartAll(ctx, []Spec{spec})
+	if err != nil {
+		t.Fatalf("StartAll: %v", err)
+	}
+	defer host.Close()
+
+	byName := map[string]tool.Tool{}
+	for _, tl := range tools {
+		byName[tl.Name()] = tl
+	}
+	echo := byName["mcp__mock__echo"]
+	if echo == nil {
+		t.Fatalf("mcp__mock__echo missing from %v", byName)
+	}
+	if !echo.ReadOnly() {
+		t.Fatal("read-only override did not mark unhinted echo tool read-only")
+	}
+	zed := byName["mcp__mock__zed"]
+	if zed == nil {
+		t.Fatalf("mcp__mock__zed missing from %v", byName)
+	}
+	if zed.ReadOnly() {
+		t.Fatal("read-only override should not mark non-listed tools read-only")
+	}
+}
+
 func TestStartAvailableKeepsGoodServers(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

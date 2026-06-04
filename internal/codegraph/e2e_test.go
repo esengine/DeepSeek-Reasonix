@@ -59,10 +59,11 @@ func TestE2ECodegraphMCP(t *testing.T) {
 	// 2) Connect through the real MCP client, pinned to the project root via Dir —
 	//    the same wiring boot uses for the built-in server.
 	host, tools, err := plugin.StartAll(ctx, []plugin.Spec{{
-		Name:    "codegraph",
-		Command: bin,
-		Args:    []string{"serve", "--mcp"},
-		Dir:     root,
+		Name:              "codegraph",
+		Command:           bin,
+		Args:              []string{"serve", "--mcp"},
+		Dir:               root,
+		ReadOnlyToolNames: ReadOnlyToolNames(),
 	}})
 	if err != nil {
 		t.Fatalf("StartAll: %v", err)
@@ -83,6 +84,9 @@ func TestE2ECodegraphMCP(t *testing.T) {
 	}
 	if search == nil {
 		t.Fatalf("no codegraph_search tool among %v", names)
+	}
+	if !search.ReadOnly() {
+		t.Fatalf("codegraph_search should be read-only under the built-in CodeGraph override; tools=%v", names)
 	}
 
 	// serve indexes in the background, so poll the search for a few seconds until
