@@ -353,6 +353,10 @@ type AgentConfig struct {
 	// AutoPlanClassifier optionally names a provider/model used to classify
 	// borderline auto-plan decisions. Empty keeps the zero-cost heuristic path.
 	AutoPlanClassifier string `toml:"auto_plan_classifier"`
+	// Compaction window fractions: soft = notice only, compact = trigger, force = hard ceiling.
+	SoftCompactRatio  float64 `toml:"soft_compact_ratio"`
+	CompactRatio      float64 `toml:"compact_ratio"`
+	CompactForceRatio float64 `toml:"compact_force_ratio"`
 }
 
 // ProviderEntry declares a model provider instance. ContextWindow is the model's
@@ -541,8 +545,11 @@ func Default() *Config {
 			// the user cancels, or the provider errors. Context stays bounded by
 			// compaction, not by a round count. Set a positive agent.max_steps only
 			// if you want a hard guard against runaway.
-			MaxSteps: 0,
-			AutoPlan: "ask",
+			MaxSteps:          0,
+			AutoPlan:          "ask",
+			SoftCompactRatio:  0.5,
+			CompactRatio:      0.8,
+			CompactForceRatio: 0.9,
 		},
 		// Mode "ask" with no rules keeps `reasonix run` autonomous (no TTY → ask
 		// resolves to allow) while `reasonix chat` prompts before writers. Users add

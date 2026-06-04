@@ -49,15 +49,18 @@ func SubagentMetaTools() []string {
 // parallel research across independent areas (the parallel-dispatch path picks
 // these up only when readOnly, which task is not).
 type TaskTool struct {
-	prov          provider.Provider
-	pricing       *provider.Pricing
-	parentReg     *tool.Registry
-	maxSteps      int
-	contextWindow int
-	temperature   float64
-	archiveDir    string
-	sysPrompt     string
-	gate          Gate
+	prov              provider.Provider
+	pricing           *provider.Pricing
+	parentReg         *tool.Registry
+	maxSteps          int
+	contextWindow     int
+	softCompactRatio  float64
+	compactRatio      float64
+	compactForceRatio float64
+	temperature       float64
+	archiveDir        string
+	sysPrompt         string
+	gate              Gate
 }
 
 // NewTaskTool wires a task tool to the parent agent's environment so its
@@ -67,20 +70,23 @@ type TaskTool struct {
 // deny rules still bite while autonomous sub-agents are never blocked on an
 // interactive prompt (there is no UI to answer one).
 func NewTaskTool(prov provider.Provider, pricing *provider.Pricing, parentReg *tool.Registry,
-	maxSteps, contextWindow int, temperature float64, archiveDir, sysPrompt string, gate Gate) *TaskTool {
+	maxSteps, contextWindow int, softCompactRatio, compactRatio, compactForceRatio, temperature float64, archiveDir, sysPrompt string, gate Gate) *TaskTool {
 	if sysPrompt == "" {
 		sysPrompt = DefaultTaskSystemPrompt
 	}
 	return &TaskTool{
-		prov:          prov,
-		pricing:       pricing,
-		parentReg:     parentReg,
-		maxSteps:      maxSteps,
-		contextWindow: contextWindow,
-		temperature:   temperature,
-		archiveDir:    archiveDir,
-		sysPrompt:     sysPrompt,
-		gate:          gate,
+		prov:              prov,
+		pricing:           pricing,
+		parentReg:         parentReg,
+		maxSteps:          maxSteps,
+		contextWindow:     contextWindow,
+		softCompactRatio:  softCompactRatio,
+		compactRatio:      compactRatio,
+		compactForceRatio: compactForceRatio,
+		temperature:       temperature,
+		archiveDir:        archiveDir,
+		sysPrompt:         sysPrompt,
+		gate:              gate,
 	}
 }
 
@@ -203,12 +209,15 @@ func FilterRegistry(parent *tool.Registry, names []string, exclude ...string) *t
 // background paths.
 func (t *TaskTool) runSub(ctx context.Context, prompt string, subReg *tool.Registry, sink event.Sink, maxSteps int) (string, error) {
 	return RunSubAgent(ctx, t.prov, subReg, t.sysPrompt, prompt, Options{
-		MaxSteps:      maxSteps,
-		Temperature:   t.temperature,
-		Pricing:       t.pricing,
-		Gate:          t.gate,
-		ContextWindow: t.contextWindow,
-		ArchiveDir:    t.archiveDir,
+		MaxSteps:          maxSteps,
+		Temperature:       t.temperature,
+		Pricing:           t.pricing,
+		Gate:              t.gate,
+		ContextWindow:     t.contextWindow,
+		SoftCompactRatio:  t.softCompactRatio,
+		CompactRatio:      t.compactRatio,
+		CompactForceRatio: t.compactForceRatio,
+		ArchiveDir:        t.archiveDir,
 	}, sink)
 }
 

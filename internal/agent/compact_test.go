@@ -101,9 +101,10 @@ func TestTailStartSmallSession(t *testing.T) {
 
 func TestCompactReplacesHistory(t *testing.T) {
 	prov := &fakeProvider{reply: "- goal: do X\n- changed file Y"}
+	bigStep := strings.Repeat("important implementation detail ", 80)
 	sess := &Session{Messages: []provider.Message{
 		{Role: provider.RoleSystem, Content: "sys"},
-		{Role: provider.RoleUser, Content: "task"},
+		{Role: provider.RoleUser, Content: "task " + bigStep},
 		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "1", Name: "read_file", Arguments: "{}"}}},
 		{Role: provider.RoleTool, ToolCallID: "1", Name: "read_file", Content: "file contents"},
 		{Role: provider.RoleAssistant, Content: "did a step"},
@@ -113,7 +114,7 @@ func TestCompactReplacesHistory(t *testing.T) {
 	dir := t.TempDir()
 	a := New(prov, tool.NewRegistry(), sess, Options{RecentKeep: 2, ArchiveDir: dir}, event.Discard)
 
-	if err := a.compact(context.Background(), "manual", ""); err != nil {
+	if err := a.compact(context.Background(), "manual", "", true); err != nil {
 		t.Fatalf("compact: %v", err)
 	}
 	if got := sess.RewriteVersion(); got != 1 {
@@ -170,7 +171,7 @@ func TestCompactEmitsEvents(t *testing.T) {
 	sink := event.FuncSink(func(e event.Event) { got = append(got, e) })
 	a := New(prov, tool.NewRegistry(), sess, Options{RecentKeep: 2}, sink)
 
-	if err := a.compact(context.Background(), "auto", ""); err != nil {
+	if err := a.compact(context.Background(), "auto", "", true); err != nil {
 		t.Fatalf("compact: %v", err)
 	}
 
@@ -216,7 +217,7 @@ func TestCompactInjectsFocusAndPreCompactHook(t *testing.T) {
 	}}
 	a := New(prov, tool.NewRegistry(), sess, Options{RecentKeep: 2, Hooks: &stubHooks{preCompactOut: "KEEP-THE-MIGRATION-PLAN"}}, event.Discard)
 
-	if err := a.compact(context.Background(), "manual", "focus on the auth refactor"); err != nil {
+	if err := a.compact(context.Background(), "manual", "focus on the auth refactor", true); err != nil {
 		t.Fatalf("compact: %v", err)
 	}
 	if len(prov.got) == 0 || prov.got[0].Role != provider.RoleSystem {
@@ -245,7 +246,7 @@ func TestCompactRewriteVersionFeedsCacheDiagnostics(t *testing.T) {
 	a := New(prov, tool.NewRegistry(), sess, Options{RecentKeep: 2}, event.Discard)
 	before := CaptureShape("sys", nil, sess.RewriteVersion())
 
-	if err := a.compact(context.Background(), "auto", ""); err != nil {
+	if err := a.compact(context.Background(), "auto", "", true); err != nil {
 		t.Fatalf("compact: %v", err)
 	}
 
@@ -259,37 +260,107 @@ func TestCompactRewriteVersionFeedsCacheDiagnostics(t *testing.T) {
 	}
 }
 
+func TestCompactFoldsSingleLargeMessage(t *testing.T) {
+	prov := &fakeProvider{reply: "- captured the large file contents"}
+	sess := &Session{Messages: []provider.Message{
+		{Role: provider.RoleSystem, Content: "sys"},
+		{Role: provider.RoleTool, ToolCallID: "1", Name: "read_file", Content: strings.Repeat("large output line\n", 500)},
+		{Role: provider.RoleUser, Content: "next"},
+		{Role: provider.RoleAssistant, Content: "ok"},
+	}}
+	a := New(prov, tool.NewRegistry(), sess, Options{RecentKeep: 2, ArchiveDir: t.TempDir()}, event.Discard)
+
+	if err := a.compact(context.Background(), "auto", "", false); err != nil {
+		t.Fatalf("compact: %v", err)
+	}
+	if got := len(sess.Messages); got != 4 {
+		t.Fatalf("len = %d, want 4: %+v", got, sess.Messages)
+	}
+	if !strings.Contains(sess.Messages[1].Content, "large file contents") {
+		t.Fatalf("single large message was not summarized: %+v", sess.Messages)
+	}
+	if len(prov.got) == 0 || !strings.Contains(prov.got[1].Content, "large output line") {
+		t.Fatalf("summarizer did not receive the large message: %+v", prov.got)
+	}
+}
+
+func TestCompactSkipsSingleSmallMessage(t *testing.T) {
+	prov := &fakeProvider{reply: "- should not be called"}
+	sess := &Session{Messages: []provider.Message{
+		{Role: provider.RoleSystem, Content: "sys"},
+		{Role: provider.RoleUser, Content: "tiny"},
+		{Role: provider.RoleUser, Content: "next"},
+		{Role: provider.RoleAssistant, Content: "ok"},
+	}}
+	a := New(prov, tool.NewRegistry(), sess, Options{RecentKeep: 2, ArchiveDir: t.TempDir()}, event.Discard)
+
+	if err := a.compact(context.Background(), "auto", "", false); err != nil {
+		t.Fatalf("compact: %v", err)
+	}
+	if got := len(sess.Messages); got != 4 {
+		t.Fatalf("small single message should not compact, len = %d", got)
+	}
+	if len(prov.got) != 0 {
+		t.Fatalf("summarizer was called for tiny region: %+v", prov.got)
+	}
+}
+
 func TestMaybeCompactThreshold(t *testing.T) {
-	// 40-char contents → ~10 tokens each at the fallback ratio; with a 20-token
-	// window the tail budget (10) keeps only the last couple, leaving a region to
-	// compact once the trigger is crossed.
-	body := strings.Repeat("x", 40)
+	// A large early user message gives the fold real value; with a 100-token window
+	// the soft (50%), trigger (80%), and force (90%) thresholds are easy to hit.
 	newSess := func() *Session {
 		return &Session{Messages: []provider.Message{
-			{Role: provider.RoleSystem, Content: body},
-			{Role: provider.RoleUser, Content: body},
-			{Role: provider.RoleAssistant, Content: body},
-			{Role: provider.RoleUser, Content: body},
-			{Role: provider.RoleAssistant, Content: body},
-			{Role: provider.RoleUser, Content: body},
-			{Role: provider.RoleAssistant, Content: body},
+			{Role: provider.RoleSystem, Content: "sys"},
+			{Role: provider.RoleUser, Content: strings.Repeat("a ", 500)},
+			{Role: provider.RoleAssistant, Content: "b"},
+			{Role: provider.RoleUser, Content: "c"},
+			{Role: provider.RoleAssistant, Content: "d"},
+			{Role: provider.RoleUser, Content: "e"},
+			{Role: provider.RoleAssistant, Content: "f"},
 		}}
 	}
 
-	// Below 80% of the window: untouched.
+	// Below 50% of the window: untouched.
 	sess := newSess()
-	a := New(&fakeProvider{reply: "s"}, tool.NewRegistry(), sess, Options{ContextWindow: 20, RecentKeep: 2, ArchiveDir: t.TempDir()}, event.Discard)
-	a.maybeCompact(context.Background(), &provider.Usage{PromptTokens: 8})
+	a := New(&fakeProvider{reply: "s"}, tool.NewRegistry(), sess, Options{ContextWindow: 100, RecentKeep: 2, ArchiveDir: t.TempDir()}, event.Discard)
+	a.maybeCompact(context.Background(), &provider.Usage{PromptTokens: 49})
 	if len(sess.Messages) != 7 {
 		t.Errorf("below threshold should not compact, len = %d", len(sess.Messages))
 	}
 
-	// At/above 80%: compacts.
+	// At/above 50% only emits a soft notice; it does not rewrite the cache prefix.
 	sess = newSess()
-	a = New(&fakeProvider{reply: "s"}, tool.NewRegistry(), sess, Options{ContextWindow: 20, RecentKeep: 2, ArchiveDir: t.TempDir()}, event.Discard)
-	a.maybeCompact(context.Background(), &provider.Usage{PromptTokens: 18})
-	if len(sess.Messages) >= 7 {
-		t.Errorf("above threshold should compact, len = %d", len(sess.Messages))
+	prov := &fakeProvider{reply: "s"}
+	var notices []event.Event
+	a = New(prov, tool.NewRegistry(), sess, Options{ContextWindow: 100, RecentKeep: 2, ArchiveDir: t.TempDir()}, event.FuncSink(func(e event.Event) {
+		if e.Kind == event.Notice {
+			notices = append(notices, e)
+		}
+	}))
+	a.maybeCompact(context.Background(), &provider.Usage{PromptTokens: 50})
+	if len(sess.Messages) != 7 {
+		t.Errorf("soft threshold should not compact, len = %d", len(sess.Messages))
+	}
+	if len(prov.got) != 0 {
+		t.Fatalf("soft threshold called summarizer: %+v", prov.got)
+	}
+	if len(notices) != 1 || !strings.Contains(notices[0].Text, "context reached 50%") {
+		t.Fatalf("soft threshold notice = %+v", notices)
+	}
+	a.maybeCompact(context.Background(), &provider.Usage{PromptTokens: 60})
+	if len(notices) != 1 {
+		t.Fatalf("soft threshold notice should only emit once, got %d", len(notices))
+	}
+
+	// At/above 80%: compacts when the fold is economically worthwhile. The
+	// token-budgeted tail keeps the small recent messages, so the large early
+	// message is the only foldable region — folding it installs a summary at
+	// index 1 (the count is unchanged because one message becomes one summary).
+	sess = newSess()
+	a = New(&fakeProvider{reply: "s"}, tool.NewRegistry(), sess, Options{ContextWindow: 100, RecentKeep: 2, ArchiveDir: t.TempDir()}, event.Discard)
+	a.maybeCompact(context.Background(), &provider.Usage{PromptTokens: 80})
+	if !strings.Contains(sess.Messages[1].Content, "Summary of earlier") {
+		t.Errorf("compact threshold should fold the large early message, got: %+v", sess.Messages[1])
 	}
 
 	// No context window: compaction disabled.
@@ -298,5 +369,69 @@ func TestMaybeCompactThreshold(t *testing.T) {
 	a.maybeCompact(context.Background(), &provider.Usage{PromptTokens: 1 << 30})
 	if len(sess.Messages) != 7 {
 		t.Errorf("no window should disable compaction, len = %d", len(sess.Messages))
+	}
+}
+
+func TestMaybeCompactForceCeilingBypassesEconomics(t *testing.T) {
+	sess := &Session{Messages: []provider.Message{
+		{Role: provider.RoleSystem, Content: "sys"},
+		{Role: provider.RoleUser, Content: "small old request"},
+		{Role: provider.RoleAssistant, Content: "small old answer"},
+		{Role: provider.RoleUser, Content: "next"},
+		{Role: provider.RoleAssistant, Content: "ok"},
+	}}
+	prov := &fakeProvider{reply: "forced summary"}
+	a := New(prov, tool.NewRegistry(), sess, Options{ContextWindow: 100, RecentKeep: 2, ArchiveDir: t.TempDir()}, event.Discard)
+
+	a.maybeCompact(context.Background(), &provider.Usage{PromptTokens: 90})
+	// The token-budgeted tail keeps "small old answer", next, ok, so only the
+	// single early message folds — force bypasses the economics skip and installs
+	// a summary at index 1, leaving the count at 5.
+	if got := len(sess.Messages); got != 5 {
+		t.Fatalf("len = %d, want 5 after forced single-message fold: %+v", got, sess.Messages)
+	}
+	if !strings.Contains(sess.Messages[1].Content, "forced summary") {
+		t.Fatalf("forced compact did not install summary: %+v", sess.Messages)
+	}
+	if len(prov.got) == 0 {
+		t.Fatalf("summarizer was not called at force ceiling")
+	}
+}
+
+func TestMaybeCompactSkipsLowValueRegionBeforeForceCeiling(t *testing.T) {
+	sess := &Session{Messages: []provider.Message{
+		{Role: provider.RoleSystem, Content: "sys"},
+		{Role: provider.RoleUser, Content: "small old request"},
+		{Role: provider.RoleAssistant, Content: "small old answer"},
+		{Role: provider.RoleUser, Content: "next"},
+		{Role: provider.RoleAssistant, Content: "ok"},
+	}}
+	prov := &fakeProvider{reply: "should not summarize"}
+	a := New(prov, tool.NewRegistry(), sess, Options{ContextWindow: 100, RecentKeep: 2, ArchiveDir: t.TempDir()}, event.Discard)
+
+	a.maybeCompact(context.Background(), &provider.Usage{PromptTokens: 80})
+	if got := len(sess.Messages); got != 5 {
+		t.Fatalf("low-value region should not compact before force ceiling, len = %d", got)
+	}
+	if len(prov.got) != 0 {
+		t.Fatalf("summarizer was called for low-value non-forced region: %+v", prov.got)
+	}
+}
+
+func TestMaybeCompactFoldsSingleLargeMessageAtThreshold(t *testing.T) {
+	sess := &Session{Messages: []provider.Message{
+		{Role: provider.RoleSystem, Content: "sys"},
+		{Role: provider.RoleUser, Content: strings.Repeat("large prompt chunk ", 500)},
+		{Role: provider.RoleUser, Content: "next"},
+		{Role: provider.RoleAssistant, Content: "ok"},
+	}}
+	a := New(&fakeProvider{reply: "single large summary"}, tool.NewRegistry(), sess, Options{ContextWindow: 100, RecentKeep: 2, ArchiveDir: t.TempDir()}, event.Discard)
+
+	a.maybeCompact(context.Background(), &provider.Usage{PromptTokens: 80})
+	if got := len(sess.Messages); got != 4 {
+		t.Fatalf("len = %d, want 4: %+v", got, sess.Messages)
+	}
+	if !strings.Contains(sess.Messages[1].Content, "single large summary") {
+		t.Fatalf("single large message was not compacted at threshold: %+v", sess.Messages)
 	}
 }

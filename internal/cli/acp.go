@@ -138,15 +138,19 @@ func (f *acpFactory) NewSession(ctx context.Context, p acp.SessionParams) (*cont
 	policy := permission.New(cfg.Permissions.Mode, cfg.Permissions.Allow, cfg.Permissions.Ask, cfg.Permissions.Deny)
 	headlessGate := permission.NewGate(policy, nil)
 	reg.Add(agent.NewTaskTool(execProv, entry.Price, reg, maxSteps,
-		entry.ContextWindow, cfg.Agent.Temperature, config.ArchiveDir(), "", headlessGate))
+		entry.ContextWindow, cfg.Agent.SoftCompactRatio, cfg.Agent.CompactRatio, cfg.Agent.CompactForceRatio,
+		cfg.Agent.Temperature, config.ArchiveDir(), "", headlessGate))
 
 	executor := agent.New(execProv, reg, agent.NewSession(sysPrompt), agent.Options{
-		MaxSteps:      maxSteps,
-		Temperature:   cfg.Agent.Temperature,
-		Pricing:       entry.Price,
-		Gate:          headlessGate,
-		ContextWindow: entry.ContextWindow,
-		ArchiveDir:    config.ArchiveDir(),
+		MaxSteps:          maxSteps,
+		Temperature:       cfg.Agent.Temperature,
+		Pricing:           entry.Price,
+		Gate:              headlessGate,
+		ContextWindow:     entry.ContextWindow,
+		SoftCompactRatio:  cfg.Agent.SoftCompactRatio,
+		CompactRatio:      cfg.Agent.CompactRatio,
+		CompactForceRatio: cfg.Agent.CompactForceRatio,
+		ArchiveDir:        config.ArchiveDir(),
 	}, p.Sink)
 
 	cmds, _ := command.Load(config.CommandDirs()...)

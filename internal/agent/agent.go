@@ -195,9 +195,13 @@ type Agent struct {
 	// tail verbatim (recentKeep is the message floor) and archiving the originals
 	// under archiveDir. compactStuck latches when compaction can't get the prompt
 	// under the window (consecutiveCompacts crosses the limit), so auto-compaction
-	// pauses instead of looping.
+	// pauses instead of looping. softCompactNoticed gates the one-shot soft-ratio
+	// notice so it fires once per approach, not every turn.
 	contextWindow       int
+	softCompactRatio    float64
 	compactRatio        float64
+	compactForceRatio   float64
+	softCompactNoticed  bool
 	recentKeep          int
 	archiveDir          string
 	compactStuck        bool
@@ -290,7 +294,7 @@ func (a *Agent) CompactRatio() float64 { return a.compactRatio }
 // TUI's `/compact` command so the user can reset the prefix before it
 // naturally fills up.
 func (a *Agent) CompactNow(ctx context.Context, instructions string) error {
-	return a.compact(ctx, "manual", instructions)
+	return a.compact(ctx, "manual", instructions, true)
 }
 
 // Options configures an Agent.
@@ -302,6 +306,15 @@ type Options struct {
 	// Gate is the per-call permission gate. nil disables gating.
 	Gate Gate
 
+	// Context management. ContextWindow <= 0 disables compaction. Ratios and
+	// RecentKeep fall back to defaults when unset.
+	ContextWindow     int
+	SoftCompactRatio  float64
+	CompactRatio      float64
+	CompactForceRatio float64
+	RecentKeep        int
+	ArchiveDir        string
+
 	// Hooks fires PreToolUse / PostToolUse shell hooks around tool calls. nil
 	// disables hook firing.
 	Hooks ToolHooks
@@ -311,14 +324,6 @@ type Options struct {
 
 	// ProjectChecks are host-observable structured checks extracted during boot.
 	ProjectChecks []instruction.VerifyCheck
-
-	// Context management. ContextWindow <= 0 disables compaction. CompactRatio
-	// is the trigger fraction; RecentKeep is the minimum recent messages kept
-	// verbatim (the tail is otherwise token-bounded). Both fall back to defaults.
-	ContextWindow int
-	CompactRatio  float64
-	RecentKeep    int
-	ArchiveDir    string
 }
 
 // New constructs an Agent. MaxSteps <= 0 means no cap — the run loop continues
@@ -326,8 +331,14 @@ type Options struct {
 // provider errors (compaction keeps the context bounded). A nil sink is replaced
 // with event.Discard so the agent can always emit unconditionally.
 func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Options, sink event.Sink) *Agent {
+	if opts.SoftCompactRatio <= 0 {
+		opts.SoftCompactRatio = defaultSoftCompactRatio
+	}
 	if opts.CompactRatio <= 0 {
 		opts.CompactRatio = defaultCompactRatio
+	}
+	if opts.CompactForceRatio <= 0 {
+		opts.CompactForceRatio = defaultCompactForceRatio
 	}
 	if opts.RecentKeep <= 0 {
 		opts.RecentKeep = minRecentKeep
@@ -344,22 +355,24 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		hooks = nil
 	}
 	return &Agent{
-		prov:          prov,
-		tools:         tools,
-		session:       session,
-		maxSteps:      opts.MaxSteps,
-		temperature:   opts.Temperature,
-		pricing:       opts.Pricing,
-		sink:          sink,
-		gate:          gate,
-		hooks:         hooks,
-		jobs:          opts.Jobs,
-		evidence:      evidence.NewLedger(),
-		projectChecks: append([]instruction.VerifyCheck(nil), opts.ProjectChecks...),
-		contextWindow: opts.ContextWindow,
-		compactRatio:  opts.CompactRatio,
-		recentKeep:    opts.RecentKeep,
-		archiveDir:    opts.ArchiveDir,
+		prov:              prov,
+		tools:             tools,
+		session:           session,
+		maxSteps:          opts.MaxSteps,
+		temperature:       opts.Temperature,
+		pricing:           opts.Pricing,
+		sink:              sink,
+		gate:              gate,
+		hooks:             hooks,
+		jobs:              opts.Jobs,
+		evidence:          evidence.NewLedger(),
+		projectChecks:     append([]instruction.VerifyCheck(nil), opts.ProjectChecks...),
+		contextWindow:     opts.ContextWindow,
+		softCompactRatio:  opts.SoftCompactRatio,
+		compactRatio:      opts.CompactRatio,
+		compactForceRatio: opts.CompactForceRatio,
+		recentKeep:        opts.RecentKeep,
+		archiveDir:        opts.ArchiveDir,
 	}
 }
 

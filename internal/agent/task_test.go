@@ -18,7 +18,7 @@ func TestTaskToolReturnsSubAgentFinalAnswer(t *testing.T) {
 		{Type: provider.ChunkDone},
 	}}
 	parentReg := tool.NewRegistry()
-	task := NewTaskTool(sub, nil, parentReg, 20, 0, 0.0, "", "test-sys-prompt", nil)
+	task := NewTaskTool(sub, nil, parentReg, 20, 0, 0, 0, 0, 0.0, "", "test-sys-prompt", nil)
 
 	out, err := task.Execute(context.Background(), []byte(`{"prompt":"find callers of Foo"}`))
 	if err != nil {
@@ -51,7 +51,7 @@ func TestTaskToolFiltersTools(t *testing.T) {
 	parentReg.Add(fakeTool{name: "read_file", readOnly: true})
 	parentReg.Add(fakeTool{name: "write_file", readOnly: false})
 	parentReg.Add(fakeTool{name: "bash", readOnly: false})
-	task := NewTaskTool(sub, nil, parentReg, 20, 0, 0.0, "", "sys", nil)
+	task := NewTaskTool(sub, nil, parentReg, 20, 0, 0, 0, 0, 0.0, "", "sys", nil)
 	parentReg.Add(task) // simulate the wiring in cli.setup
 	parentReg.Add(fakeTool{name: "run_skill", readOnly: false})
 	parentReg.Add(fakeTool{name: "research", readOnly: false})
@@ -80,7 +80,7 @@ func TestTaskToolDefaultsToParentToolsWithoutMetaTools(t *testing.T) {
 	parentReg := tool.NewRegistry()
 	parentReg.Add(fakeTool{name: "read_file", readOnly: true})
 	parentReg.Add(fakeTool{name: "grep", readOnly: true})
-	task := NewTaskTool(sub, nil, parentReg, 20, 0, 0.0, "", "sys", nil)
+	task := NewTaskTool(sub, nil, parentReg, 20, 0, 0, 0, 0, 0.0, "", "sys", nil)
 	parentReg.Add(task)
 	parentReg.Add(fakeTool{name: "run_skill", readOnly: false})
 	parentReg.Add(fakeTool{name: "explore", readOnly: false})
