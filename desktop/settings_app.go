@@ -482,6 +482,16 @@ func (a *App) SetDesktopLanguage(lang string) error {
 	return nil
 }
 
+// SetTrayLocale mirrors the resolved desktop UI language into the native tray
+// menu. It is runtime-only; the persisted preference remains [desktop].language.
+func (a *App) SetTrayLocale(locale string) error {
+	if locale != "zh" {
+		locale = "en"
+	}
+	a.updateTrayLocale(locale)
+	return nil
+}
+
 // SetDesktopAppearance updates only desktop theme preferences. It does not
 // rebuild the active controller and must stay out of provider-visible requests.
 func (a *App) SetDesktopAppearance(theme, style string) error {

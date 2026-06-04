@@ -264,7 +264,7 @@ export default function App() {
     reorderTabs,
     syncActiveTab,
   } = useController();
-  const { setPref: setLocalePref } = useI18n();
+  const { locale, setPref: setLocalePref } = useI18n();
   const t = useT();
   const [modesByTab, setModesByTab] = useState<Record<string, Mode>>({});
   const [tabMetas, setTabMetas] = useState<TabMeta[]>([]);
@@ -417,6 +417,10 @@ export default function App() {
   }, [activeTab?.topicId, renamingTopicId]);
 
   const syncModeToController = useCallback((m: Mode) => setControllerMode(m), [setControllerMode]);
+
+  useEffect(() => {
+    void app.SetTrayLocale(locale).catch(() => {});
+  }, [locale]);
 
   // applyMode is the single source of truth for the input mode: it updates the
   // local pill and pushes the matching gate state to the controller (plan = read
