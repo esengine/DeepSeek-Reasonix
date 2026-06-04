@@ -186,6 +186,7 @@ export interface FilePreview {
   size: number;
   truncated: boolean;
   binary: boolean;
+  encoding?: string;
   err?: string;
 }
 

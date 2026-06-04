@@ -74,6 +74,10 @@ export const en = {
   "workspace.sourceSession": "Session",
   "workspace.sourceGit": "Git",
   "workspace.deleted": "Deleted",
+  "workspace.encoding": "Encoding",
+  "workspace.encodingAuto": "Auto",
+  "workspace.encodingTitle": "File encoding: {enc}",
+  "workspace.encodingOverride": "Reopen with encoding",
 
   // mcp & skills drawer
   "caps.title": "MCP & Skills",

@@ -2852,6 +2852,29 @@ body {
   flex-shrink: 0;
   font-family: var(--mono);
 }
+.workspace-encoding-select {
+  flex-shrink: 0;
+  margin-left: 6px;
+  padding: 1px 4px;
+  border: 1px solid var(--border-soft);
+  border-radius: 5px;
+  background: var(--bg-soft);
+  color: var(--fg-dim);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.4;
+  cursor: pointer;
+  outline: none;
+  max-width: 160px;
+}
+.workspace-encoding-select:hover {
+  border-color: var(--border);
+  color: var(--fg);
+}
+.workspace-encoding-select:focus {
+  border-color: var(--accent, var(--border));
+  box-shadow: 0 0 0 1px var(--accent, var(--border));
+}
 .workspace-preview__body {
   position: relative;
   flex: 1 1 auto;

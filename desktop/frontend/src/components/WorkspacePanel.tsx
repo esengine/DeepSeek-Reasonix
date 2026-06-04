@@ -40,6 +40,18 @@ const WORKSPACE_PREVIEW_MIN_WIDTH = 420;
 const WORKSPACE_CONTEXT_MENU_FILE_HEIGHT = 92;
 const WORKSPACE_CONTEXT_MENU_REF_HEIGHT = 48;
 
+// Encoding options for the file encoding override selector.
+const ENCODING_OPTIONS = [
+  { value: "", label: "Auto" },
+  { value: "UTF-8", label: "UTF-8" },
+  { value: "UTF-8 BOM", label: "UTF-8 BOM" },
+  { value: "GB18030", label: "GB18030" },
+  { value: "UTF-16 LE", label: "UTF-16 LE" },
+  { value: "UTF-16 BE", label: "UTF-16 BE" },
+  { value: "UTF-16 LE (no BOM)", label: "UTF-16 LE (no BOM)" },
+  { value: "UTF-16 BE (no BOM)", label: "UTF-16 BE (no BOM)" },
+] as const;
+
 function clampWorkspaceTreeWidth(width: number, panelWidth?: number): number {
   const maxForPanel =
     typeof panelWidth === "number" && Number.isFinite(panelWidth)
@@ -187,6 +199,7 @@ export function WorkspacePanel({
   const [treeVisible, setTreeVisible] = useState(true);
   const [treeWidth, setTreeWidth] = useState(loadWorkspaceTreeWidth);
   const [treeResizing, setTreeResizing] = useState(false);
+  const [encodingOverride, setEncodingOverride] = useState<string>("");
 
   const loadDir = useCallback(async (dir: string) => {
     const entries = await app.ListDir(dir).catch(() => []);
@@ -213,6 +226,7 @@ export function WorkspacePanel({
     (path: string) => {
       setSelectedPath(path);
       setFilter("");
+      setEncodingOverride("");
       setOpenTabs((tabs) => (tabs.includes(path) ? tabs : [...tabs, path]));
       const dirs = parentDirs(path);
       setOpenDirs((prev) => new Set([...Array.from(prev), ...dirs]));
@@ -234,6 +248,7 @@ export function WorkspacePanel({
     setSelectionMenu(null);
     setTreeMenu(null);
     setFilter("");
+    setEncodingOverride("");
     setTreeVisible(true);
     void loadDir("");
   }, [cwd, loadDir, open]);
@@ -267,7 +282,7 @@ export function WorkspacePanel({
     let live = true;
     setLoadingPreview(true);
     app
-      .ReadFile(selectedPath)
+      .ReadFile(selectedPath, encodingOverride || "")
       .then((next) => {
         if (live) setPreview(next);
       })
@@ -289,7 +304,7 @@ export function WorkspacePanel({
     return () => {
       live = false;
     };
-  }, [selectedPath]);
+  }, [selectedPath, encodingOverride]);
 
   useEffect(() => {
     if (!open || !selectedPath) return;
@@ -316,6 +331,7 @@ export function WorkspacePanel({
     setSelectedPath(null);
     setPreview(null);
     setFilter("");
+    setEncodingOverride("");
     setSelectionMenu(null);
     setTreeMenu(null);
     setTreeVisible(true);
@@ -496,7 +512,7 @@ export function WorkspacePanel({
     const target = treeMenu;
     setTreeMenu(null);
     try {
-      const file = await app.ReadFile(target.path);
+      const file = await app.ReadFile(target.path, "");
       if (file.err || file.binary) {
         onAddToChat?.(formatWorkspaceReference(target.path, false));
         return;
@@ -690,6 +706,23 @@ export function WorkspacePanel({
             );
           })}
           {preview && preview.size > 0 && <span className="workspace-preview__size">{formatBytes(preview.size)}</span>}
+          {preview && !preview.binary && !preview.err && (
+            <Tooltip label={t("workspace.encodingOverride")}>
+              <select
+                className="workspace-encoding-select"
+                value={encodingOverride}
+                onChange={(e) => setEncodingOverride(e.target.value)}
+                title={preview.encoding ? t("workspace.encodingTitle").replace("{enc}", preview.encoding) : t("workspace.encoding")}
+              >
+                {ENCODING_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.value === "" ? t("workspace.encodingAuto") : opt.label}
+                    {opt.value !== "" && preview.encoding && opt.value === preview.encoding ? " ✓" : ""}
+                  </option>
+                ))}
+              </select>
+            </Tooltip>
+          )}
         </div>
 
         <div className="workspace-preview__body" ref={previewBodyRef} onContextMenu={openSelectionMenu}>

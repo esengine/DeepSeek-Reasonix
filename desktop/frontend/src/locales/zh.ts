@@ -75,6 +75,10 @@ export const zh: Record<DictKey, string> = {
   "workspace.sourceSession": "会话",
   "workspace.sourceGit": "Git",
   "workspace.deleted": "已删除",
+  "workspace.encoding": "编码",
+  "workspace.encodingAuto": "自动",
+  "workspace.encodingTitle": "文件编码：{enc}",
+  "workspace.encodingOverride": "以指定编码重新打开",
 
   // MCP 与技能抽屉
   "caps.title": "MCP 与技能",
