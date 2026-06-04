@@ -599,13 +599,23 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.MouseClickMsg:
 		// Right-click copies the active selection (Windows Terminal convention);
-		// left-press in the transcript region begins a text selection.
+		// left-press in the transcript region begins a text selection — unless
+		// the click lands on a shell-output hint line, which toggles expand.
 		if msg.Button == tea.MouseRight && m.sel.active && !m.sel.empty() {
 			text := m.selectedText()
 			m.sel = selection{}
 			return m, tea.Batch(copyToClipboard(text), finalize(m, cmds))
 		}
 		if msg.Button == tea.MouseLeft && msg.Y < m.viewport.Height() {
+			// Check if the clicked line is a shell-output hint.
+			lineIdx := m.viewport.YOffset() + msg.Y
+			if lineIdx >= 0 && lineIdx < len(m.wrappedLines) {
+				clicked := m.wrappedLines[lineIdx]
+				if strings.Contains(clicked, "more lines") && strings.Contains(clicked, "Ctrl+B") {
+					m.toggleShellOutput()
+					return m, finalize(m, cmds)
+				}
+			}
 			at := m.transcriptCaret(msg.X, msg.Y)
 			m.sel = selection{active: true, anchor: at, head: at}
 			m.autoScroll = 0
@@ -1458,7 +1468,7 @@ func (m *chatTUI) collapseToolOutput(id string) {
 			for i := 0; i < shellPreviewLines; i++ {
 				preview[i] = dim(clampPlain(lines[i], m.width-len([]rune(connector))))
 			}
-			preview[shellPreviewLines] = dim(fmt.Sprintf("… %d more lines (Ctrl+B)", total-shellPreviewLines))
+			preview[shellPreviewLines] = dim(fmt.Sprintf("… %d more lines (click/Ctrl+B)", total-shellPreviewLines))
 			m.transcript[m.toolStreamIdx] = connectorBlock(preview)
 		} else {
 			rendered := make([]string, total)
@@ -1514,7 +1524,7 @@ func (m *chatTUI) toggleShellOutput() {
 			for i := 0; i < shellPreviewLines; i++ {
 				preview[i] = dim(clampPlain(lines[i], innerW))
 			}
-			preview[shellPreviewLines] = dim(fmt.Sprintf("… %d more lines (Ctrl+B)", total-shellPreviewLines))
+			preview[shellPreviewLines] = dim(fmt.Sprintf("… %d more lines (click/Ctrl+B)", total-shellPreviewLines))
 			m.transcript[lastIdx] = connectorBlock(preview)
 		}
 	} else {
