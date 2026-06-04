@@ -1,4 +1,4 @@
-import { memo, useState } from "react";
+import { memo, useDeferredValue, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { Markdown } from "./Markdown";
 import { CopyButton } from "./CopyButton";
@@ -58,6 +58,17 @@ export function UserMessage({
 export const AssistantMessage = memo(function AssistantMessage({ item }: { item: AssistantItem }) {
   const t = useT();
   const [open, setOpen] = useState(false);
+  // Real-time markdown rendering: hand the live text straight to react-markdown
+  // so formatting (headings, lists, code, links) appears token-by-token instead
+  // of jumping in all at once on the closing `message` event. useDeferredValue
+  // marks the re-parse as a low-priority update — the cursor and scroll stay
+  // smooth because React commits the streaming flag (which controls the cursor)
+  // before the heavy parse catches up. The brief render lag is the right trade
+  // for a progressive, real-time read vs. layout jitter from re-parsing on
+  // every keystroke at high priority. When the stream ends, the deferred value
+  // converges on the full text and the final markdown is identical to the
+  // pre-fix completion-time render.
+  const displayed = useDeferredValue(item.text);
   return (
     <div className="msg msg--assistant">
       {item.reasoning && (
@@ -73,17 +84,8 @@ export const AssistantMessage = memo(function AssistantMessage({ item }: { item:
         </div>
       )}
       <div className="msg__body">
-        {item.streaming ? (
-          // While streaming, render raw text (stable, monospace-free) instead of
-          // re-parsing markdown on every token — partial markdown reflows the
-          // layout and makes the view jitter. Markdown renders once, on completion.
-          <div className="msg__stream">
-            {item.text}
-            <span className="cursor" />
-          </div>
-        ) : (
-          <Markdown text={item.text} />
-        )}
+        <Markdown text={displayed} />
+        {item.streaming && <span className="cursor" aria-hidden="true" />}
       </div>
       {!item.streaming && item.text && (
         <div className="msg__actions">

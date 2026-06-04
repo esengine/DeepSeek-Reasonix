@@ -71,10 +71,17 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
         : summarize(item.name, item.args, item.output, item.error);
 
   // edit diffs are the point of the card, so they're shown inline; everything
-  // else folds its args/output away by default. Nested children always show.
+  // else folds its args/output away by default. Nested sub-agent calls (an
+  // `/explore`'s read_file / grep chain) follow the parent's expand state — a
+  // single chevron now collapses the whole subagent tree to one line, which
+  // fixes the "explore's display can't be collapsed" pain: before, the chevron
+  // only hid args/output, so a 50-step explore always flooded the transcript
+  // with its full step list. Open by default while the sub-agent is still
+  // running so the user can watch it progress; closed by default once it
+  // settles, so a finished explore can be re-folded to a single summary line.
   const hasBody = diffs.length === 0 && (!!item.args || !!item.output);
-  const [open, setOpen] = useState(false);
-  const expandable = hasBody;
+  const [open, setOpen] = useState(item.status === "running" && hasNested);
+  const expandable = hasBody || hasNested;
 
   // Read-only "research" calls (read/grep/ls/glob/web_fetch) are quieted to a
   // slim, borderless, dim row so a long run of them doesn't bury the few calls
@@ -111,7 +118,7 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
         </div>
       ))}
 
-      {hasNested && (
+      {hasNested && open && (
         <div className="tool__nested">
           {nested.map((c) => (
             <ToolCard key={c.id} item={c} />
