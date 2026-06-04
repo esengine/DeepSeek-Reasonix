@@ -102,8 +102,15 @@ func main() {
 		fmt.Print(report)
 	}
 	if *outJSON != "" {
-		b, _ := json.MarshalIndent(results, "", "  ")
-		_ = os.WriteFile(*outJSON, b, 0o644)
+		b, err := json.MarshalIndent(results, "", "  ")
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "marshal json:", err)
+			os.Exit(1)
+		}
+		if err := os.WriteFile(*outJSON, b, 0o644); err != nil {
+			fmt.Fprintln(os.Stderr, "write json:", err)
+			os.Exit(1)
+		}
 	}
 }
 
