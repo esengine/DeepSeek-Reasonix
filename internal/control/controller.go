@@ -550,6 +550,10 @@ func (c *Controller) rememberProjectNote(note string) {
 // the bash tool's timeout so behaviour is consistent across invocation paths.
 const shellTimeout = 120 * time.Second
 
+// shellWaitDelay bounds how long cmd.Run() waits after context cancellation for
+// the child's pipes to drain, matching the bash tool's WaitDelay.
+const shellWaitDelay = 5 * time.Second
+
 // shellWriter forwards each chunk of shell output to a callback, so RunShell
 // can stream live progress to the frontend as the command produces output.
 type shellWriter struct{ emit func(string) }
@@ -572,13 +576,13 @@ func (c *Controller) RunShell(command string) {
 	}
 	c.runGuarded(func(ctx context.Context) error {
 		sh := sandbox.ResolveShell()
-		argv, _ := sandbox.Command(sandbox.Spec{}, sh, command)
+		argv, _ := sandbox.Command(sandbox.Spec{}, sh, command) // false = unsandboxed (user invoked)
 
-		preview := command
+		preview := []rune(command)
 		if len(preview) > 32 {
 			preview = preview[:32]
 		}
-		id := "shell-" + preview
+		id := "shell-" + string(preview)
 
 		c.sink.Emit(event.Event{
 			Kind: event.ToolDispatch,
@@ -593,6 +597,8 @@ func (c *Controller) RunShell(command string) {
 		defer cancel()
 
 		cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+		setShellKillTree(cmd)
+		cmd.WaitDelay = shellWaitDelay
 		var buf bytes.Buffer
 		w := io.MultiWriter(&buf, &shellWriter{emit: func(chunk string) {
 			c.sink.Emit(event.Event{
