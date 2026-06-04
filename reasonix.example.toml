@@ -65,6 +65,21 @@ model          = "mimo-v2-flash"   # thinking-mode off by default; cheaper / fas
 api_key_env    = "MIMO_API_KEY"
 context_window = 65536
 
+# Custom /effort levels for a provider. When supported_efforts is set, the
+# /effort command exposes these levels; default_effort is what "/effort auto"
+# (or unset) resolves to. Leave both commented to keep the built-in defaults
+# (DeepSeek: high|max; Anthropic: low|medium|high|xhigh|max). Other kinds
+# (e.g. mimo-pro) don't expose /effort unless you opt in here.
+#
+# [[providers]]
+# name           = "mimo-custom"
+# kind           = "openai"
+# base_url       = "https://token-plan-cn.xiaomimimo.com/v1"
+# model          = "mimo-v2.5-pro"
+# api_key_env    = "MIMO_API_KEY"
+# supported_efforts = ["low", "medium", "high"]
+# default_effort    = "high"
+
 # Anthropic (Claude) — the "anthropic" kind speaks the Messages API directly (no
 # OpenAI shim). base_url is optional (defaults to https://api.anthropic.com). Note:
 # this provider does not enable extended thinking and does not send temperature —

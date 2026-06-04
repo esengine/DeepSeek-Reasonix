@@ -204,6 +204,12 @@ function toRef(model: string, s: SettingsView): string {
 }
 
 const PROXY_MODES = ["auto", "custom", "off"] as const;
+
+// EFFORT_PRESETS is the canonical union of /effort levels the kernel
+// recognises. The settings UI exposes these as toggleable checkboxes; users
+// can additionally add arbitrary custom names via the "Add" input. The order
+// here is what the user sees in the dropdown.
+const EFFORT_PRESETS: readonly string[] = ["low", "medium", "high", "xhigh", "max"];
 const PROXY_TYPES = ["http", "https", "socks5", "socks5h"] as const;
 const LANGUAGE_PREFS: LangPref[] = ["", "zh", "en"];
 const AUTO_PLAN_MODES = ["off", "on"] as const;
@@ -650,10 +656,42 @@ function ProviderEditor({
   // Empty when unset so the placeholder (and its "0 = default" hint) reads instead
   // of a bare "0"; saved back as 0.
   const [ctx, setCtx] = useState(initial?.contextWindow ? String(initial.contextWindow) : "");
+  const [supportedEfforts, setSupportedEfforts] = useState<string[]>(initial?.supportedEfforts ?? []);
+  const [customEffortDraft, setCustomEffortDraft] = useState("");
+  const [defaultEffort, setDefaultEffort] = useState(initial?.defaultEffort ?? "");
 
   // Offer the kinds the kernel actually registered; if the stored kind is a
   // legacy/unknown one, keep it as an option so editing doesn't silently change it.
   const kindOptions = kind && !kinds.includes(kind) ? [kind, ...kinds] : kinds;
+
+  // Split supportedEfforts into the 5 canonical presets (for checkbox UI) and
+  // any user-added custom names (rendered as removable chips). The preset order
+  // is fixed; custom names keep insertion order.
+  const presetEfforts = supportedEfforts.filter((e) => EFFORT_PRESETS.includes(e));
+  const customEfforts = supportedEfforts.filter((e) => !EFFORT_PRESETS.includes(e));
+
+  const togglePreset = (level: string) => {
+    const has = presetEfforts.includes(level);
+    const nextPresets = has ? presetEfforts.filter((e) => e !== level) : [...presetEfforts, level];
+    setSupportedEfforts([...nextPresets, ...customEfforts]);
+    // If the removed preset was the default, fall back to "auto" (empty string).
+    if (has && defaultEffort === level) setDefaultEffort("");
+  };
+
+  const addCustomEffort = () => {
+    const v = customEffortDraft.trim();
+    if (!v || supportedEfforts.includes(v)) {
+      setCustomEffortDraft("");
+      return;
+    }
+    setSupportedEfforts([...presetEfforts, ...customEfforts, v]);
+    setCustomEffortDraft("");
+  };
+
+  const removeCustomEffort = (level: string) => {
+    setSupportedEfforts(supportedEfforts.filter((e) => e !== level));
+    if (defaultEffort === level) setDefaultEffort("");
+  };
 
   const save = () => {
     const ms = models
@@ -670,6 +708,10 @@ function ProviderEditor({
       keySet: initial?.keySet ?? false,
       balanceUrl: balanceUrl.trim(),
       contextWindow: Number(ctx) || 0,
+      supportedEfforts,
+      // Clear the stored default if no levels are selected; the backend's
+      // NormalizeEffort would otherwise silently ignore an unsupported value.
+      defaultEffort: supportedEfforts.length > 0 ? defaultEffort : "",
     });
   };
 
@@ -693,6 +735,81 @@ function ProviderEditor({
       <label className="set-label">{t("settings.providerContextWindow")}</label>
       <input className="mem-input" placeholder={t("settings.contextWindowPlaceholder")} value={ctx} onChange={(e) => setCtx(e.target.value)} inputMode="numeric" />
       <div className="mem-hint">{t("settings.contextWindowHint")}</div>
+      <label className="set-label">{t("settings.supportedEfforts")}</label>
+      {EFFORT_PRESETS.map((level) => (
+        <label key={level} className="set-check">
+          <input
+            type="checkbox"
+            checked={presetEfforts.includes(level)}
+            onChange={() => togglePreset(level)}
+          />
+          {level}
+        </label>
+      ))}
+      <div className="set-row">
+        <input
+          className="mem-input set-grow"
+          placeholder={t("settings.supportedEffortsCustomPlaceholder")}
+          value={customEffortDraft}
+          onChange={(e) => setCustomEffortDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              addCustomEffort();
+            }
+          }}
+        />
+        <button
+          type="button"
+          className="btn btn--small"
+          disabled={
+            !customEffortDraft.trim() || supportedEfforts.includes(customEffortDraft.trim())
+          }
+          onClick={addCustomEffort}
+        >
+          {t("common.add")}
+        </button>
+      </div>
+      {customEfforts.length > 0 && (
+        <div className="set-rules__chips">
+          {customEfforts.map((level) => (
+            <span className="set-rule" key={level}>
+              {level}
+              <Tooltip label={t("common.delete")}>
+                <button
+                  type="button"
+                  className="set-rule__x"
+                  disabled={busy}
+                  onClick={() => removeCustomEffort(level)}
+                >
+                  ×
+                </button>
+              </Tooltip>
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="mem-hint">{t("settings.supportedEffortsHint")}</div>
+      <label className="set-label">{t("settings.defaultEffort")}</label>
+      {supportedEfforts.length > 0 ? (
+        <select
+          className="mem-select"
+          value={defaultEffort}
+          onChange={(e) => setDefaultEffort(e.target.value)}
+        >
+          <option value="">{t("settings.defaultEffortAuto")}</option>
+          {supportedEfforts.map((level) => (
+            <option key={level} value={level}>
+              {level}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <select className="mem-select" value="" disabled>
+          <option value="">{t("settings.defaultEffortAuto")}</option>
+        </select>
+      )}
+      <div className="mem-hint">{t("settings.defaultEffortHint")}</div>
       <div className="prov-card__actions">
         <button className="btn btn--small" onClick={onCancel} disabled={busy}>
           {t("common.cancel")}

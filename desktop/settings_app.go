@@ -22,15 +22,17 @@ import (
 // --- read ---
 
 type ProviderView struct {
-	Name          string   `json:"name"`
-	Kind          string   `json:"kind"`
-	BaseURL       string   `json:"baseUrl"`
-	Models        []string `json:"models"`
-	Default       string   `json:"default"`
-	APIKeyEnv     string   `json:"apiKeyEnv"`
-	KeySet        bool     `json:"keySet"` // the env var currently resolves to a non-empty value
-	BalanceURL    string   `json:"balanceUrl"`
-	ContextWindow int      `json:"contextWindow"`
+	Name             string   `json:"name"`
+	Kind             string   `json:"kind"`
+	BaseURL          string   `json:"baseUrl"`
+	Models           []string `json:"models"`
+	Default          string   `json:"default"`
+	APIKeyEnv        string   `json:"apiKeyEnv"`
+	KeySet           bool     `json:"keySet"` // the env var currently resolves to a non-empty value
+	BalanceURL       string   `json:"balanceUrl"`
+	ContextWindow    int      `json:"contextWindow"`
+	SupportedEfforts []string `json:"supportedEfforts"`
+	DefaultEffort    string   `json:"defaultEffort"`
 }
 
 type PermissionsView struct {
@@ -165,10 +167,12 @@ func (a *App) Settings() SettingsView {
 		v.Providers = append(v.Providers, ProviderView{
 			Name: p.Name, Kind: p.Kind, BaseURL: p.BaseURL,
 			Models: nonNil(p.ModelList()), Default: p.DefaultModel(),
-			APIKeyEnv:     p.APIKeyEnv,
-			KeySet:        p.APIKeyEnv != "" && os.Getenv(p.APIKeyEnv) != "",
-			BalanceURL:    p.BalanceURL,
-			ContextWindow: p.ContextWindow,
+			APIKeyEnv:        p.APIKeyEnv,
+			KeySet:           p.APIKeyEnv != "" && os.Getenv(p.APIKeyEnv) != "",
+			BalanceURL:       p.BalanceURL,
+			ContextWindow:    p.ContextWindow,
+			SupportedEfforts: nonNil(p.SupportedEfforts),
+			DefaultEffort:    p.DefaultEffort,
 		})
 	}
 	return v
@@ -406,6 +410,8 @@ func (a *App) SaveProvider(p ProviderView) error {
 		e := config.ProviderEntry{
 			Name: p.Name, Kind: p.Kind, BaseURL: p.BaseURL,
 			APIKeyEnv: p.APIKeyEnv, BalanceURL: strings.TrimSpace(p.BalanceURL), ContextWindow: p.ContextWindow,
+			SupportedEfforts: p.SupportedEfforts,
+			DefaultEffort:    p.DefaultEffort,
 		}
 		if len(p.Models) > 0 {
 			e.Model = p.Models[0] // also satisfies validateProvider's model requirement
