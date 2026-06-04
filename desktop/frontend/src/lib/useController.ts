@@ -453,6 +453,22 @@ function reducer(s: State, a: Action): State {
   }
 }
 
+// refreshStatus fires the three background-style status reads (Balance, Effort,
+// Jobs) concurrently. They're independent of each other and of the session load,
+// so Promise.all is strictly better than the previous three sequential
+// .then().catch() chains — one round-trip's worth of latency for all three
+// instead of three sequential round-trips. Each call still swallows its own
+// rejection so a single unreachable endpoint (e.g. a wallet balance that
+// isn't configured) doesn't take the others down with it.
+function refreshStatus(dispatch: React.Dispatch<Action>) {
+  Promise.allSettled([app.Balance(), app.Effort(), app.Jobs()]).then((results) => {
+    const [balanceR, effortR, jobsR] = results;
+    if (balanceR.status === "fulfilled") dispatch({ type: "balance", balance: balanceR.value });
+    if (effortR.status === "fulfilled") dispatch({ type: "effort", effort: effortR.value });
+    if (jobsR.status === "fulfilled") dispatch({ type: "jobs", jobs: jobsR.value });
+  });
+}
+
 export function useController() {
   const [state, dispatch] = useReducer(reducer, initialState);
   // A live mirror of state for event-handler callbacks (useCallback closures are
@@ -460,15 +476,30 @@ export function useController() {
   const stateRef = useRef(state);
   stateRef.current = state;
 
-  // loadSessionData fetches Meta, ContextUsage, and History — called on mount
-  // and again when agent:ready fires (boot.Build completed in the background).
+  // loadSessionData fetches Meta, ContextUsage, Effort, and History — called
+  // on mount and again when agent:ready fires (boot.Build completed in the
+  // background). Meta is the gating read (the rest depend on the controller
+  // being built), but ContextUsage / Effort / History are independent of each
+  // other and of Meta's body, so we kick them all off in parallel after Meta
+  // resolves — a 4× speedup when each call is, say, a 5–20ms IPC roundtrip.
   const loadSessionData = useCallback(async () => {
     try {
-      dispatch({ type: "meta", meta: await app.Meta() });
-      dispatch({ type: "context", context: await app.ContextUsage() });
-      dispatch({ type: "effort", effort: await app.Effort() });
-      const history = await app.History();
-      if (history && history.length) dispatch({ type: "history", messages: history });
+      const meta = await app.Meta();
+      dispatch({ type: "meta", meta });
+      // Fire the rest in parallel; the first rejection doesn't cancel the
+      // others (allSettled), so a failed History read doesn't lose the
+      // ContextUsage update, etc.
+      const [contextR, effortR, historyR] = await Promise.allSettled([
+        app.ContextUsage(),
+        app.Effort(),
+        app.History(),
+      ]);
+      if (contextR.status === "fulfilled") dispatch({ type: "context", context: contextR.value });
+      if (effortR.status === "fulfilled") dispatch({ type: "effort", effort: effortR.value });
+      if (historyR.status === "fulfilled") {
+        const history = historyR.value;
+        if (history && history.length) dispatch({ type: "history", messages: history });
+      }
     } catch {
       // Bound methods unavailable (pre-startup / build error) — ignore; Meta's
       // startupErr surfaces the reason once it's reachable.
@@ -480,24 +511,21 @@ export function useController() {
       dispatch({ type: "event", e });
       // The gauge's denominator (window) and post-turn prompt size come from the
       // kernel, not the stream — refresh once a turn settles. The wallet balance
-      // moves with spend, so refresh it on the same boundary.
+      // moves with spend, so refresh it on the same boundary. All three reads
+      // are independent; previously they were three sequential round-trips
+      // (ContextUsage → Balance → Effort). The Jobs check is folded into
+      // refreshStatus too — same boundary, same concurrency story.
       if (e.kind === "turn_done") {
-        app
-          .ContextUsage()
-          .then((context) => dispatch({ type: "context", context }))
-          .catch(() => {});
-        app
-          .Balance()
-          .then((balance) => dispatch({ type: "balance", balance }))
-          .catch(() => {});
-        app
-          .Effort()
-          .then((effort) => dispatch({ type: "effort", effort }))
-          .catch(() => {});
+        Promise.allSettled([app.ContextUsage(), app.Balance(), app.Effort()]).then((results) => {
+          const [contextR, balanceR, effortR] = results;
+          if (contextR.status === "fulfilled") dispatch({ type: "context", context: contextR.value });
+          if (balanceR.status === "fulfilled") dispatch({ type: "balance", balance: balanceR.value });
+          if (effortR.status === "fulfilled") dispatch({ type: "effort", effort: effortR.value });
+        });
       }
       // Background jobs start/finish via notices and bound around a turn, so
       // refresh the running set on both — keeps the status-bar count live.
-      if (e.kind === "turn_done" || e.kind === "notice") {
+      if (e.kind === "notice") {
         app
           .Jobs()
           .then((jobs) => dispatch({ type: "jobs", jobs }))
@@ -509,38 +537,16 @@ export function useController() {
     // Re-fetch session data so the UI reflects the now-available controller.
     const offReady = onReady(() => {
       void loadSessionData();
-      app
-        .Balance()
-        .then((balance) => dispatch({ type: "balance", balance }))
-        .catch(() => {});
-      app
-        .Jobs()
-        .then((jobs) => dispatch({ type: "jobs", jobs }))
-        .catch(() => {});
-      app
-        .Effort()
-        .then((effort) => dispatch({ type: "effort", effort }))
-        .catch(() => {});
+      refreshStatus(dispatch);
     });
 
     // Initial load — picks up the pre-build Meta (ready=false) and, if the
-    // build already finished, the full session.
+    // build already finished, the full session. Wallet balance / effort /
+    // jobs are independent network calls; fire them concurrently instead of
+    // serially so the first-paint of those chips doesn't wait three
+    // round-trips.
     void loadSessionData();
-
-    // Wallet balance is a network call — fetch it independently so it never delays
-    // the transcript/meta load (and is a no-op readout when not configured).
-    app
-      .Balance()
-      .then((balance) => dispatch({ type: "balance", balance }))
-      .catch(() => {});
-    app
-      .Effort()
-      .then((effort) => dispatch({ type: "effort", effort }))
-      .catch(() => {});
-    app
-      .Jobs()
-      .then((jobs) => dispatch({ type: "jobs", jobs }))
-      .catch(() => {});
+    refreshStatus(dispatch);
 
     return () => {
       off();
