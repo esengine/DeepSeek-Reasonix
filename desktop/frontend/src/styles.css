@@ -628,7 +628,7 @@ body {
   gap: 8px;
   padding: 0 0 12px;
 }
-.sidebar--collapsed .sidebar__brand > span {
+.sidebar--collapsed .sidebar__brand-name {
   display: none;
 }
 .sidebar--collapsed .sidebar__toggle {

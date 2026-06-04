@@ -678,7 +678,7 @@ export default function App() {
         <aside className={`sidebar${sidebarCollapsed ? " sidebar--collapsed" : ""}`} aria-label={t("sidebar.navigation")}>
           <div className="sidebar__brand">
             <img src={logo} alt="" className="sidebar__logo" />
-            <span>Reasonix</span>
+            <span className="sidebar__brand-name">Reasonix</span>
             <Tooltip label={sidebarToggleTitle}>
               <button
                 className={`sidebar__toggle${sidebarExpandBlocked ? " sidebar__toggle--blocked" : ""}`}
