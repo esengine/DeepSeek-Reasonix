@@ -1,4 +1,4 @@
-import { memo, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import {
   Ban,
   Check,
@@ -19,6 +19,7 @@ import { CodeViewer } from "./CodeViewer";
 import { DiffView } from "./DiffView";
 import { useT } from "../lib/i18n";
 import { diffsFor, subjectOf, summarize } from "../lib/tools";
+import { useShellExpand } from "../lib/shellExpand";
 import type { Item } from "../lib/useController";
 
 type ToolItem = Extract<Item, { kind: "tool" }>;
@@ -36,6 +37,9 @@ const ICONS: Record<string, LucideIcon> = {
   task: ListTree,
 };
 
+/** Lines shown by default in a shell output block before the "show all" button. */
+const SHELL_PREVIEW_LINES = 10;
+
 function pretty(json: string): string {
   try {
     return JSON.stringify(JSON.parse(json), null, 2);
@@ -49,6 +53,14 @@ function StatusGlyph({ status }: { status: ToolItem["status"] }) {
   if (status === "error") return <X className="ico ico--err" size={13} />;
   if (status === "stopped") return <Ban className="ico ico--stopped" size={13} />;
   return <Check className="ico ico--ok" size={13} />;
+}
+
+/** Returns the first n lines of text and the total line count. */
+function splitPreview(text: string, n: number): { preview: string; total: number; hasMore: boolean } {
+  const lines = text.split("\n");
+  const total = lines.length;
+  if (total <= n) return { preview: text, total, hasMore: false };
+  return { preview: lines.slice(0, n).join("\n"), total, hasMore: true };
 }
 
 // ToolCard renders one tool call. `subcalls` are sub-agent calls nested under a
@@ -72,9 +84,19 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
 
   // edit diffs are the point of the card, so they're shown inline; everything
   // else folds its args/output away by default. Nested children always show.
+  // Shell commands default to open so the output is immediately visible.
   const hasBody = diffs.length === 0 && (!!item.args || !!item.output);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(item.isShell && hasBody);
+  const [showAll, setShowAll] = useState(false);
   const expandable = hasBody;
+
+  // Register this shell card's toggle with the global ShellExpand context so
+  // Ctrl/Cmd+B can expand/collapse the most recent shell output.
+  const shellExpand = useShellExpand();
+  useEffect(() => {
+    if (!item.isShell || !shellExpand) return;
+    return shellExpand.register(item.id, () => setOpen((v) => !v));
+  }, [item.isShell, item.id, shellExpand]);
 
   // Read-only "research" calls (read/grep/ls/glob/web_fetch) are quieted to a
   // slim, borderless, dim row so a long run of them doesn't bury the few calls
@@ -82,6 +104,10 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
   // full card. Uses the readOnly flag, not a tool-name list.
   const quiet =
     item.readOnly && !hasNested && item.status !== "error" && item.status !== "stopped";
+
+  // Shell output: split into preview + "show all" toggle.
+  const shellOutput = item.isShell && item.output ? item.output : null;
+  const shellPreview = shellOutput ? splitPreview(shellOutput, SHELL_PREVIEW_LINES) : null;
 
   return (
     <div className={`tool tool--${item.status} ${quiet ? "tool--quiet" : ""}`}>
@@ -119,7 +145,21 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
         </div>
       )}
 
-      {hasBody && open && (
+      {/* Shell output: always visible (auto-open), with preview/show-all toggle */}
+      {shellPreview && open && (
+        <div className="tool__body">
+          <CodeViewer value={showAll ? shellOutput! : shellPreview.preview} maxHeight={showAll ? 480 : 260} />
+          {shellPreview.hasMore && !showAll && (
+            <button className="tool__showall" onClick={() => setShowAll(true)}>
+              {t("tool.showAllLines", { n: shellPreview.total })}
+            </button>
+          )}
+          {item.truncated && <div className="tool__note">{t("tool.truncated")}</div>}
+        </div>
+      )}
+
+      {/* Non-shell body: args + output, gated by open */}
+      {!shellPreview && hasBody && open && (
         <div className="tool__body">
           {item.args && <CodeViewer value={pretty(item.args)} language="json" maxHeight={180} />}
           {item.output && (

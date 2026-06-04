@@ -126,9 +126,10 @@ type Messages struct {
 	CompHintFile       string // key hint footer under the @ file/resource menu
 
 	// shell execution (! prefix).
-	ShellExecEmpty     string // bare "!" with no command
-	ShellExecFailedFmt string // "shell command failed: %v"
+	ShellExecEmpty      string // bare "!" with no command
+	ShellExecFailedFmt  string // "shell command failed: %v"
 	ShellExecTimeoutFmt string // "shell command timed out (> %s)"
+	ShellModeHint       string // status line hint when input starts with !
 
 	// slash command + sub-command descriptions shown in the menu (CLI and desktop
 	// share these via i18n.M, so both frontends localize identically).

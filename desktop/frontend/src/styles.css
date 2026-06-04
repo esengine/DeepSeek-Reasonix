@@ -43,6 +43,7 @@
   --err: #e0696a;
   --danger: #e5484d;
   --danger-fg: #fff;
+  --shell-accent: #22c55e;
 
   /* component recipes */
   --list-row-height: 38px;
@@ -1458,6 +1459,21 @@ body {
   color: var(--fg-faint);
   margin-top: 3px;
 }
+.tool__showall {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  line-height: 1.6;
+}
+.tool__showall:hover {
+  background: color-mix(in srgb, var(--accent-soft) 60%, transparent);
+}
 .tool__err {
   margin: 0 11px 10px 30px;
   padding: 7px 10px;
@@ -1741,6 +1757,16 @@ body {
 .composer--disabled:focus-within {
   border-color: var(--border);
   box-shadow: none;
+}
+.composer--shell {
+  border-bottom-color: var(--shell-accent);
+}
+.composer--shell:focus-within {
+  border-bottom-color: var(--shell-accent);
+  box-shadow: 0 1px 0 0 var(--shell-accent);
+}
+.composer--shell .composer__caret {
+  color: var(--shell-accent);
 }
 .composer__caret {
   color: var(--accent);

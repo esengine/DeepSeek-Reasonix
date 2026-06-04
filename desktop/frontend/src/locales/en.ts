@@ -431,6 +431,7 @@ export const en = {
   "tool.stepOne": "{n} step",
   "tool.stepOther": "{n} steps",
   "tool.truncated": "output truncated",
+  "tool.showAllLines": "show all {n} lines",
   "tool.lineOne": "{n} line",
   "tool.lineOther": "{n} lines",
   "tool.matchOne": "{n} match",

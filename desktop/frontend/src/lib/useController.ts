@@ -54,6 +54,7 @@ export type Item =
       output?: string;
       error?: string;
       truncated?: boolean;
+      isShell?: boolean; // true for !-prefix shell commands (controls default expand)
       parentId?: string; // a sub-agent call nests under the `task` call with this id
     };
 
@@ -229,16 +230,7 @@ function applyEvent(s: State, e: WireEvent): State {
         }
         return { ...s, items: next };
       }
-      const item: Item = {
-        kind: "tool",
-        id,
-        name: t.name,
-        args: t.args ?? "",
-        readOnly: t.readOnly,
-        status: "running",
-        parentId: t.parentId,
-      };
-      return { ...s, seq: s.seq + 1, items: [...s.items, item] };
+      return { ...s, seq: s.seq + 1, items: [...s.items, { kind: "tool", id, name: t.name, args: t.args ?? "", readOnly: t.readOnly, status: "running", isShell: id.startsWith("shell-"), parentId: t.parentId }] };
     }
 
     case "tool_result": {

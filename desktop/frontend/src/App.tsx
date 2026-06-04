@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
+import { ShellExpandProvider, useShellExpand } from "./lib/shellExpand";
 import {
   SquarePen,
   Brain,
@@ -132,6 +133,24 @@ function sessionTitle(session: SessionMeta, fallback: string): string {
 
 function sessionTime(ms: number): string {
   return new Date(ms).toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
+
+/** Global hotkey handler for shell-expand toggle (Ctrl/Cmd+B). */
+function ShellHotkeys() {
+  const shellExpand = useShellExpand();
+  useEffect(() => {
+    if (!shellExpand) return;
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "b") {
+        e.preventDefault();
+        shellExpand.toggleLast();
+      }
+    };
+    document.addEventListener("keydown", onKey as (e: globalThis.KeyboardEvent) => void);
+    return () => document.removeEventListener("keydown", onKey as (e: globalThis.KeyboardEvent) => void);
+  }, [shellExpand]);
+  return null;
 }
 
 export default function App() {
@@ -683,6 +702,8 @@ export default function App() {
       : t("sidebar.collapse");
 
   return (
+    <ShellExpandProvider>
+    <ShellHotkeys />
     <div className="app">
       <div
         className={[
@@ -1074,5 +1095,6 @@ export default function App() {
 
       {needsOnboarding && <OnboardingOverlay onComplete={() => setNeedsOnboarding(false)} />}
     </div>
+    </ShellExpandProvider>
   );
 }

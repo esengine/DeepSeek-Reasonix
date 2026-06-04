@@ -140,6 +140,14 @@ type chatTUI struct {
 	toolTail      []string
 	toolPartial   string
 	toolLineCount int
+	// shellOutputs stores the full accumulated output of each shell command
+	// (tool IDs with "shell-" prefix), so the first 10 lines can be shown after
+	// collapse and Ctrl+B can toggle the complete output.
+	shellOutputs  map[string]string
+	shellExpanded map[string]bool
+	// shellTranscriptIdx maps a shell tool ID to the transcript index of its
+	// collapsed output block, so Ctrl+B can rewrite it in place.
+	shellTranscriptIdx map[string]int
 	// toolStreamStart / toolStreamFrame drive the "⎿ working · Ns" line shown
 	// under a dispatched tool that hasn't produced output yet, so a slow tool
 	// (e.g. codegraph_context) reads as making progress rather than frozen.
@@ -438,6 +446,9 @@ func newChatTUI(ctrl *control.Controller, missing string, eventCh chan event.Eve
 		pending:              &strings.Builder{},
 		pendingCommit:        &commitBuf,
 		renderer:             newMarkdownRenderer(termW),
+		shellOutputs:         make(map[string]string),
+		shellExpanded:        make(map[string]bool),
+		shellTranscriptIdx:   make(map[string]int),
 		eventCh:              eventCh,
 		history:              ctrl.History(),
 		host:                 ctrl.Host(),
@@ -850,6 +861,9 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, finalize(m, cmds)
 		case "ctrl+o":
 			m.toggleVerboseReasoning(m.state != tuiRunning)
+			return m, finalize(m, cmds)
+		case "ctrl+b":
+			m.toggleShellOutput()
 			return m, finalize(m, cmds)
 		case "shift+tab":
 			// Cycle auto → plan → YOLO; allowed mid-turn so the user can flip the
@@ -1352,6 +1366,10 @@ func reasoningBlock(raw string, width, maxLines int) string {
 // the live block scrolls within this window so a chatty build doesn't flood.
 const toolStreamTailLines = 8
 
+// shellPreviewLines is how many lines of shell output to show by default after
+// the command finishes. Ctrl+B toggles the full output.
+const shellPreviewLines = 10
+
 // streamToolOutput appends a chunk of a running tool's output and re-renders its
 // live block (the last toolStreamTailLines lines) under the tool card, opening
 // the block on the first chunk. Mirrors streamReasoning.
@@ -1367,6 +1385,10 @@ func (m *chatTUI) streamToolOutput(id, chunk string) {
 		m.toolLineCount = 0
 		m.toolStreamIdx = len(m.transcript)
 		m.commitLine("")
+	}
+	// Accumulate full output for shell commands so Ctrl+B can expand it.
+	if strings.HasPrefix(id, "shell-") {
+		m.shellOutputs[id] += chunk
 	}
 	// Fold completed lines into the bounded tail; keep the trailing partial.
 	data := m.toolPartial + chunk
@@ -1405,7 +1427,9 @@ func (m *chatTUI) pushToolLine(line string) {
 
 // collapseToolOutput replaces a finished tool's live block with a dim
 // "⎿ N lines" summary, so the scrollback keeps a marker of the run without the
-// full output (which the model already received). No-op when id isn't streaming.
+// full output (which the model already received). For shell commands ("shell-"
+// prefix), it shows the first shellPreviewLines with a Ctrl+B hint instead.
+// No-op when id isn't streaming.
 func (m *chatTUI) collapseToolOutput(id string) {
 	if m.toolStreamIdx < 0 || id == "" || m.toolStreamID != id {
 		return
@@ -1415,14 +1439,30 @@ func (m *chatTUI) collapseToolOutput(id string) {
 		n++
 	}
 	if n == 0 {
-		// The tool produced no streamed output (e.g. an MCP call like
-		// codegraph_context) — drop the "working" placeholder so only the card
-		// remains, rather than leaving a "0 lines" summary.
 		if m.toolStreamIdx == len(m.transcript)-1 {
 			m.transcript = m.transcript[:m.toolStreamIdx]
 		} else {
 			m.transcript[m.toolStreamIdx] = ""
 		}
+	} else if full, ok := m.shellOutputs[id]; ok {
+		// Shell command: show first N lines + hint.
+		lines := strings.Split(strings.TrimRight(full, "\n"), "\n")
+		total := len(lines)
+		if total > shellPreviewLines {
+			preview := make([]string, shellPreviewLines+1)
+			for i := 0; i < shellPreviewLines; i++ {
+				preview[i] = dim(clampPlain(lines[i], m.width-len([]rune(connector))))
+			}
+			preview[shellPreviewLines] = dim(fmt.Sprintf("… %d more lines (Ctrl+B)", total-shellPreviewLines))
+			m.transcript[m.toolStreamIdx] = connectorBlock(preview)
+		} else {
+			rendered := make([]string, total)
+			for i, ln := range lines {
+				rendered[i] = dim(clampPlain(ln, m.width-len([]rune(connector))))
+			}
+			m.transcript[m.toolStreamIdx] = connectorBlock(rendered)
+		}
+		m.shellTranscriptIdx[id] = m.toolStreamIdx
 	} else {
 		m.transcript[m.toolStreamIdx] = connectorBlock([]string{dim(fmt.Sprintf("%d lines", n))})
 	}
@@ -1432,6 +1472,51 @@ func (m *chatTUI) collapseToolOutput(id string) {
 	m.toolTail = m.toolTail[:0]
 	m.toolPartial = ""
 	m.toolLineCount = 0
+}
+
+// toggleShellOutput expands or collapses the output of the most recent shell
+// command. When expanded, the full output replaces the preview; when collapsed,
+// only the first shellPreviewLines are shown. Called on Ctrl+B.
+func (m *chatTUI) toggleShellOutput() {
+	// Find the most recent shell output that has a transcript entry.
+	var lastID string
+	var lastIdx int
+	for id, idx := range m.shellTranscriptIdx {
+		if idx > lastIdx {
+			lastID = id
+			lastIdx = idx
+		}
+	}
+	if lastID == "" {
+		return
+	}
+	full, ok := m.shellOutputs[lastID]
+	if !ok {
+		return
+	}
+	if m.shellExpanded[lastID] {
+		// Collapse: show preview.
+		m.shellExpanded[lastID] = false
+		lines := strings.Split(strings.TrimRight(full, "\n"), "\n")
+		if len(lines) > shellPreviewLines {
+			preview := make([]string, shellPreviewLines+1)
+			for i := 0; i < shellPreviewLines; i++ {
+				preview[i] = dim(clampPlain(lines[i], m.width-len([]rune(connector))))
+			}
+			preview[shellPreviewLines] = dim(fmt.Sprintf("… %d more lines (Ctrl+B)", len(lines)-shellPreviewLines))
+			m.transcript[lastIdx] = connectorBlock(preview)
+		}
+	} else {
+		// Expand: show full output.
+		m.shellExpanded[lastID] = true
+		lines := strings.Split(strings.TrimRight(full, "\n"), "\n")
+		rendered := make([]string, len(lines))
+		for i, ln := range lines {
+			rendered[i] = dim(clampPlain(ln, m.width-len([]rune(connector))))
+		}
+		m.transcript[lastIdx] = connectorBlock(rendered)
+	}
+	m.transcriptDirty = true
 }
 
 // toolWorkingFrames is the braille spinner cycled once per second on the
@@ -1629,13 +1714,25 @@ func (m chatTUI) View() tea.View {
 		boxW = 10
 	}
 	hideComposer := m.hideComposer()
+	shellMode := strings.HasPrefix(strings.TrimSpace(m.input.Value()), "!")
 	var box string
 	if !hideComposer {
-		box = inputBoxStyle.Width(boxW).Render(m.input.View())
+		style := inputBoxStyle.Width(boxW)
+		if shellMode {
+			style = style.BorderForeground(lipgloss.Color(statusShellColor.hex))
+		}
+		box = style.Render(m.input.View())
 	}
 
 	var modeTag string
 	switch {
+	case shellMode:
+		modeTag = lipgloss.NewStyle().
+			Background(lipgloss.Color(statusShellColor.hex)).
+			Foreground(lipgloss.Color("#ffffff")).
+			Bold(true).
+			Padding(0, 1).
+			Render("Shell")
 	case m.ctrl.Bypass():
 		modeTag = lipgloss.NewStyle().
 			Background(lipgloss.Color(statusYoloColor.hex)).
@@ -1676,6 +1773,8 @@ func (m chatTUI) View() tea.View {
 		status = "  " + modeTag + " · " + i18n.M.ChatStatusPlanApproval
 	case m.pendingApproval != nil:
 		status = "  " + modeTag + " · " + i18n.M.ChatStatusToolApproval
+	case shellMode:
+		status = "  " + modeTag + " · " + i18n.M.ShellModeHint
 	case m.ctrl.Bypass():
 		status = "  " + modeTag + " · " + i18n.M.ChatStatusYoloIdle + " " + dim("("+i18n.M.ChatStatusCycleHint+")")
 	default:

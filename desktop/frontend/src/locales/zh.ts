@@ -432,6 +432,7 @@ export const zh: Record<DictKey, string> = {
   "tool.stepOne": "{n} 步",
   "tool.stepOther": "{n} 步",
   "tool.truncated": "输出已截断",
+  "tool.showAllLines": "显示全部 {n} 行",
   "tool.lineOne": "{n} 行",
   "tool.lineOther": "{n} 行",
   "tool.matchOne": "{n} 处匹配",
