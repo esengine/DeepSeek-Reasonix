@@ -144,16 +144,16 @@ type Messages struct {
 	CmdOutputStyle  string // /output-style
 	CmdTheme        string // /theme
 	CmdLanguage     string // /language
-	CmdSkill        string // /skill
+	CmdSkill        string // /skills
 	CmdVerbose      string // /verbose
 	CmdEffort       string // /effort
 	CmdHelp         string // /help
 	CmdTodo         string // /todo
 	CmdQuit         string // /quit (also accepts /exit as hidden alias)
-	ArgSkillList    string // /skill list
-	ArgSkillShow    string // /skill show
-	ArgSkillNew     string // /skill new
-	ArgSkillPaths   string // /skill paths
+	ArgSkillList    string // /skills list
+	ArgSkillShow    string // /skills show
+	ArgSkillNew     string // /skills new
+	ArgSkillPaths   string // /skills paths
 	ArgMcpAdd       string // /mcp add
 	ArgMcpRemove    string // /mcp remove
 	ArgMcpList      string // /mcp list
@@ -212,6 +212,52 @@ type Messages struct {
 	RewindRestoreTitleFmt  string
 	RewindApplyHint        string
 	RewindEmpty            string
+
+	// skill picker overlay (/skills interactive panel in CLI TUI)
+	SkillPickerTitle             string
+	SkillPickerAvailableFmt      string
+	SkillPickerMatchingFmt       string // "%d matching · %d total" when searching
+	SkillPickerHint              string
+	SkillPickerDetailHint        string
+	SkillPickerSearchEmpty       string
+	SkillPickerSearchPrompt      string
+	SkillPickerSearchPlaceholder string
+	SkillPickerSourceTitle       string
+	SkillPickerSourceActiveFmt   string
+	SkillPickerSourceHint        string
+	SkillPickerDiagHidden        string
+	SkillPickerDiagShown         string
+	SkillPickerBuiltinSource     string
+	SkillPickerRescanned         string
+	SkillPickerNoDescription     string
+	SkillPickerScopeProject      string
+	SkillPickerScopeCustom       string
+	SkillPickerScopeGlobal       string
+	SkillPickerScopeBuiltin      string
+	SkillPickerSubagent          string
+	SkillPickerAvailableLabel    string
+	SkillPickerDisabledLabel     string
+	SkillPickerNoChanges         string
+	SkillPickerSourceSkillsHint  string
+	SkillPickerSourceSkillsEmpty string
+	SkillPickerActionToggle      string
+	SkillPickerActionDelete      string
+	SkillPickerDeleteTitleFmt    string // "Delete skill %s?"
+	SkillPickerDeleteConfirm     string
+	SkillPickerDeleteCancel      string
+	SkillPickerDeleteHint        string
+	SkillPickerDeletedFmt        string // "deleted skill %s"
+	SkillPickerMoreAboveFmt      string // "↑ %d more above"
+	SkillPickerMoreBelowFmt      string // "↓ %d more below"
+	SkillPickerTokenFmt          string // "~%d tok"
+	SkillPickerDetailMetaFmt     string // "Scope: %s  Run as: %s"
+	SkillPickerSkillsUnit        string // "skills" (used as "%d skills")
+	SkillPickerLinesUnit         string // "lines" (used as "+N more lines")
+	SkillPickerStatusLabel       string // shown in the TUI status bar while picker is open
+	SkillPickerStatusOK          string // "ok" path status label
+	SkillPickerStatusMissing     string // "missing" path status label
+	SkillPickerStatusNotDir      string // "not-directory" path status label
+	SkillPickerStatusUnreadable  string // "unreadable" path status label
 
 	// init wizard
 	SelectProvidersLabel  string // multi-select label

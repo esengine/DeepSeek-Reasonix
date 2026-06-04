@@ -46,6 +46,10 @@ type Spec struct {
 	// captured in a bounded buffer for failure diagnostics; nil keeps it out of
 	// the terminal so child logs cannot corrupt interactive UIs.
 	Stderr io.Writer
+	// ReadOnlyToolNames marks trusted raw MCP tool names as read-only even when
+	// the server omits annotations.readOnlyHint. It is for first-party adapters
+	// with known semantics; user-configured plugins should rely on MCP metadata.
+	ReadOnlyToolNames map[string]bool
 }
 
 // transport carries JSON-RPC messages to and from one MCP server. call sends a
@@ -720,6 +724,10 @@ type mcpTool struct {
 	} `json:"annotations"`
 }
 
+func (s Spec) toolReadOnly(rawName string, hinted bool) bool {
+	return hinted || s.ReadOnlyToolNames[rawName]
+}
+
 func (c *Client) listTools(ctx context.Context) ([]tool.Tool, error) {
 	res, err := c.call(ctx, "tools/list", map[string]any{})
 	if err != nil {
@@ -735,6 +743,7 @@ func (c *Client) listTools(ctx context.Context) ([]tool.Tool, error) {
 	toolInfos := make([]ToolInfo, 0, len(out.Tools))
 	tools := make([]tool.Tool, 0, len(out.Tools))
 	for _, t := range out.Tools {
+		hinted := t.Annotations != nil && t.Annotations.ReadOnlyHint
 		toolInfos = append(toolInfos, ToolInfo{Name: t.Name, Description: t.Description})
 		tools = append(tools, &remoteTool{
 			client:   c,
@@ -742,7 +751,7 @@ func (c *Client) listTools(ctx context.Context) ([]tool.Tool, error) {
 			rawName:  t.Name,
 			desc:     t.Description,
 			schema:   canonicalizeSchema(t.InputSchema),
-			readOnly: t.Annotations != nil && t.Annotations.ReadOnlyHint,
+			readOnly: c.spec.toolReadOnly(t.Name, hinted),
 		})
 	}
 	sort.SliceStable(toolInfos, func(i, j int) bool { return toolInfos[i].Name < toolInfos[j].Name })
@@ -822,16 +831,15 @@ type remoteTool struct {
 	rawName  string // original name for tools/call
 	desc     string
 	schema   json.RawMessage
-	readOnly bool // from the tool's MCP readOnlyHint annotation
+	readOnly bool // from MCP readOnlyHint or trusted first-party Spec override
 }
 
 func (t *remoteTool) Name() string        { return t.name }
 func (t *remoteTool) Description() string { return t.desc }
 
-// ReadOnly reflects the tool's MCP readOnlyHint annotation. It defaults to
-// false (opaque — we can't inspect a remote tool's side effects), so plugins
-// opt into parallel-batch dispatch and the permission layer's reader-default
-// by explicitly declaring readOnlyHint: true in tools/list.
+// ReadOnly reflects MCP readOnlyHint, plus trusted first-party Spec overrides.
+// It defaults to false: opaque third-party tools must declare readOnlyHint
+// before joining reader-default permission handling or plan-mode execution.
 func (t *remoteTool) ReadOnly() bool { return t.readOnly }
 
 func (t *remoteTool) Schema() json.RawMessage {

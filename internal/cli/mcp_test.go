@@ -248,11 +248,13 @@ func TestRenderMCPManagerClearAuthConfirmation(t *testing.T) {
 		"Clear authentication for MCP server \"figma\"?",
 		"Confirm clear authentication",
 		"Cancel",
-		"y confirm",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("rendered clear-auth confirmation missing %q:\n%s", want, got)
 		}
+	}
+	if hint := p.footerHint(); !strings.Contains(hint, "y confirm") {
+		t.Fatalf("clear-auth footer hint missing confirm shortcut: %q", hint)
 	}
 }
 

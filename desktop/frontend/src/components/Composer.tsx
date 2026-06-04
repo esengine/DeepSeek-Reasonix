@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ClipboardEvent, DragEvent, KeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import { ArrowUp, Check, ChevronDown, Eye, FileText, Folder, FolderGit2, FolderPlus, Search, Square, Trash2, X } from "lucide-react";
+import { asArray } from "../lib/array";
 import { app, onFilesDropped } from "../lib/bridge";
 import { useT } from "../lib/i18n";
 import { clearLayoutSize, loadOptionalLayoutSize, saveLayoutSize } from "../lib/layoutPreferences";
@@ -160,7 +161,7 @@ export function Composer({
   // --- slash commands (whole-input "/token") ---
   const [commands, setCommands] = useState<CommandInfo[]>([]);
   useEffect(() => {
-    app.Commands().then(setCommands).catch(() => {});
+    app.Commands().then((next) => setCommands(asArray(next))).catch(() => {});
   }, [ready, cwd]);
 
   const slashQuery = useMemo(() => {
@@ -193,8 +194,10 @@ export function Composer({
         // r.items can arrive as null (an empty Go slice serializes to JSON null),
         // so guard before filtering — otherwise the throw is swallowed and the
         // stale menu from the previous keystroke lingers (the /skill list bug).
-        const useful = (r.items ?? []).filter((it) => text.slice(0, r.from) + it.insert !== text);
-        setArgRes(useful.length > 0 ? { items: useful, from: r.from } : null);
+        const items = asArray(r?.items);
+        const from = r?.from ?? 0;
+        const useful = items.filter((it) => text.slice(0, from) + it.insert !== text);
+        setArgRes(useful.length > 0 ? { items: useful, from } : null);
         setActive(0);
       })
       .catch(() => {});
@@ -237,7 +240,7 @@ export function Composer({
     app
       .ListDir(atDir)
       .then((es) => {
-        const list = es ?? [];
+        const list = asArray(es);
         dirCache.current[atDir] = list;
         if (live) setEntries(list);
       })
@@ -575,7 +578,7 @@ export function Composer({
   }, [cwd]);
 
   const loadWorkspaces = () => {
-    app.ListWorkspaces().then(setWorkspaces).catch(() => setWorkspaces([]));
+    app.ListWorkspaces().then((next) => setWorkspaces(asArray(next))).catch(() => setWorkspaces([]));
   };
 
   useEffect(() => {

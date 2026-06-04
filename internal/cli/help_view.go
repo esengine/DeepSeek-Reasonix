@@ -64,7 +64,7 @@ func builtinHelpItems() []compItem {
 		{label: "/todo", hint: i18n.M.CmdTodo},
 		{label: "/model", hint: i18n.M.CmdModel},
 		{label: "/mcp", hint: i18n.M.CmdMcp},
-		{label: "/skill", hint: i18n.M.CmdSkill},
+		{label: "/skills", hint: i18n.M.CmdSkill},
 		{label: "/hooks", hint: i18n.M.CmdHooks},
 		{label: "/memory", hint: i18n.M.CmdMemory},
 		{label: "/output-style", hint: i18n.M.CmdOutputStyle},

@@ -61,3 +61,13 @@ func TestFinalReadinessFailureBranches(t *testing.T) {
 		})
 	}
 }
+
+func TestFinalReadinessAllowsIncompleteTodosInPlanMode(t *testing.T) {
+	todo := evidence.Receipt{ToolName: "todo_write", Success: true, Todos: []evidence.TodoItem{{Content: "draft implementation plan", Status: "pending"}}}
+	a := &Agent{evidence: readinessLedger(todo)}
+	a.SetPlanMode(true)
+
+	if got := a.finalReadinessFailure(); got != "" {
+		t.Fatalf("finalReadinessFailure() = %q, want empty in plan mode", got)
+	}
+}

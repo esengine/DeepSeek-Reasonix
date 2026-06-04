@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useState } from "react";
+import { asArray } from "../lib/array";
 import { app, openExternal } from "../lib/bridge";
 import { useT } from "../lib/i18n";
 import type { CapabilitiesView, MCPServerInput, ServerView, SkillRootSkillView, SkillRootView, SkillView } from "../lib/types";
@@ -32,7 +33,7 @@ export function CapabilitiesPanel({
   const [expandedServerTools, setExpandedServerTools] = useState<Set<string>>(() => new Set());
 
   const reload = useCallback(async () => {
-    setView(await app.Capabilities().catch(() => ({ servers: [], skills: [], skillRoots: [] })));
+    setView(normalizeCapabilitiesView(await app.Capabilities().catch(() => ({ servers: [], skills: [], skillRoots: [] }))));
   }, []);
   useEffect(() => {
     void reload();
@@ -303,6 +304,22 @@ export function CapabilitiesPanel({
         )}
     </ResizableDrawer>
   );
+}
+
+function normalizeCapabilitiesView(view: CapabilitiesView | null | undefined): CapabilitiesView {
+  return {
+    servers: asArray(view?.servers).map((server) => ({
+      ...server,
+      args: asArray(server.args),
+      envKeys: asArray(server.envKeys),
+      toolList: asArray(server.toolList),
+    })),
+    skills: asArray(view?.skills),
+    skillRoots: asArray(view?.skillRoots).map((root) => ({
+      ...root,
+      skillItems: asArray(root.skillItems),
+    })),
+  };
 }
 
 function skillListSummary(skills: SkillView[], filtered: SkillView[], searching: boolean, t: ReturnType<typeof useT>): string {

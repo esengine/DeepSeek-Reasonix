@@ -16,7 +16,17 @@ import (
 // fallback (the desktop app writes there). Existing environment variables always
 // win over all three.
 func loadDotEnv() {
-	loadDotEnvFile(".env")
+	loadDotEnvForRoot(".")
+}
+
+// loadDotEnvForRoot loads a root's .env file (if present) before the home .env
+// fallback. When root is "." it behaves like loadDotEnv().
+func loadDotEnvForRoot(root string) {
+	dotEnvPath := ".env"
+	if root != "" && root != "." {
+		dotEnvPath = filepath.Join(root, ".env")
+	}
+	loadDotEnvFile(dotEnvPath)
 	if p := UserCredentialsPath(); p != "" {
 		loadDotEnvFile(p)
 	}

@@ -209,8 +209,11 @@ type chatTUI struct {
 	commands []command.Command
 
 	// skills are the discoverable skills (built-in + user/project); each is offered
-	// in the slash menu as "/<name>" and managed via /skill.
+	// in the slash menu as "/<name>" and managed via /skills.
 	skills []skill.Skill
+
+	// skillPick is the interactive skill picker overlay for /skills. nil when closed.
+	skillPick *skillPicker
 
 	// buildController builds a fresh controller on a model ref, carrying prior
 	// history across and pinning auto-save to resumePath so the continued
@@ -652,7 +655,7 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.updateCompletion()
 			return m, finalize(m, cmds)
 		}
-		if !m.chooserTyping() && m.pendingApproval == nil && m.rewind == nil && m.resumePick == nil && m.mcp == nil && m.shouldFoldPaste(msg.Content) {
+		if !m.chooserTyping() && m.pendingApproval == nil && m.rewind == nil && m.resumePick == nil && m.mcp == nil && m.skillPick == nil && m.shouldFoldPaste(msg.Content) {
 			m.insertFoldedPaste(msg.Content)
 			m.growInputToFit()
 			m.updateCompletion()
@@ -714,6 +717,10 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.mcp != nil {
 			return m.handleMCPManagerKey(msg)
 		}
+		// The skill picker is modal while open: keys navigate it.
+		if m.skillPick != nil {
+			return m.handleSkillPickerKey(msg)
+		}
 		// A pending tool approval is modal: keystrokes answer it (y/a/n, Enter,
 		// Esc) rather than reaching the input.
 		if m.pendingApproval != nil {
@@ -731,9 +738,9 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.moveCompletion(1)
 				return m, nil
 			case "tab", "enter":
-				if msg.String() == "enter" && strings.TrimSpace(m.input.Value()) == "/mcp" {
+				if msg.String() == "enter" && (m.completionExactLabel() || m.completionBareOverlayCommand()) {
 					m.completion = completion{}
-					break
+					break // fall through to regular Enter and submit the command
 				}
 				// When Enter is pressed and the completion has exactly one item
 				// already fully present in the input, close the menu and let Enter
@@ -989,6 +996,9 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.notice(fmt.Sprintf(i18n.M.ModelSwitchedFmt, m.label))
 			cmds = append(cmds, fetchBalance(m.ctrl))
+			if c := m.runStatusline(); c != nil {
+				cmds = append(cmds, c)
+			}
 			// Do NOT re-issue waitForAgentEvent here — the goroutine from the
 			// last agentEventMsg handler is still blocked on the same channel.
 			// Starting a second one creates a race: two goroutines compete on
@@ -1120,8 +1130,9 @@ func (m *chatTUI) commitSpacer() {
 }
 
 // bottomRows is the terminal-row height of the pinned bottom region: any open
-// panels (todo / approval / chooser / rewind / MCP / completion), the composer
-// when visible, and the two fixed status rows.
+// bottom panels (todo / approval / chooser / rewind / completion), the composer
+// when visible, and the two fixed status rows. Full-screen managers such as MCP
+// and skills render inside the main transcript area instead of the bottom rail.
 func (m chatTUI) bottomRows() int {
 	rows := 0
 	for _, s := range []string{
@@ -1130,7 +1141,6 @@ func (m chatTUI) bottomRows() int {
 		m.renderChooser(),
 		m.renderRewind(),
 		m.renderResumePicker(),
-		m.renderMCPManager(),
 		m.renderCompletion(),
 	} {
 		if s != "" {
@@ -1139,6 +1149,9 @@ func (m chatTUI) bottomRows() int {
 	}
 	if m.state == tuiRunning {
 		rows++ // the working spinner line above the box
+	}
+	if footer := m.renderMainManagerFooter(); footer != "" {
+		rows += strings.Count(footer, "\n") + 1
 	}
 	if !m.hideComposer() {
 		rows += m.input.Height() + 2
@@ -1159,7 +1172,7 @@ func (m chatTUI) bottomRows() int {
 // reserve rows for a composer that cannot receive input, leaving a confusing
 // blank/bordered area at the bottom of the TUI.
 func (m chatTUI) hideComposer() bool {
-	if m.mcp != nil || m.resumePick != nil || m.rewind != nil || m.pendingApproval != nil {
+	if m.mcp != nil || m.skillPick != nil || m.resumePick != nil || m.rewind != nil || m.pendingApproval != nil {
 		return true
 	}
 	return m.chooser != nil && !m.chooser.typing
@@ -1172,6 +1185,78 @@ func (m chatTUI) transcriptHeight() int {
 		return h
 	}
 	return 1
+}
+
+func (m chatTUI) renderMainManager() string {
+	if card := m.renderMCPManager(); card != "" {
+		return card
+	}
+	return m.renderSkillPicker()
+}
+
+func managerContentPanelStyle(width int) lipgloss.Style {
+	return choicePanelStyle.
+		Border(lipgloss.NormalBorder(), true, false, false, false).
+		Width(width)
+}
+
+func managerFooterPanelStyle(width int) lipgloss.Style {
+	return choicePanelStyle.
+		Border(lipgloss.NormalBorder(), false, false, true, false).
+		Width(width)
+}
+
+func (m chatTUI) renderMainManagerFooter() string {
+	hint := ""
+	switch {
+	case m.mcp != nil:
+		hint = m.mcp.footerHint()
+	case m.skillPick != nil:
+		hint = m.skillPickerFooterHint()
+	}
+	if strings.TrimSpace(hint) == "" {
+		return ""
+	}
+	w := max(viewWidth(m.width), 40)
+	return managerFooterPanelStyle(w).Render(dim(hint))
+}
+
+func (m chatTUI) renderTranscriptWithMainManager(card string) string {
+	h := m.viewport.Height()
+	if h <= 0 {
+		return ""
+	}
+	cw := m.viewport.Width()
+	if cw <= 0 {
+		cw = max(m.width-1, 1)
+	}
+
+	cardLines := strings.Split(strings.TrimRight(card, "\n"), "\n")
+	if len(cardLines) > h {
+		cardLines = cardLines[:h]
+	}
+	maxTranscriptRows := h - len(cardLines)
+	if maxTranscriptRows > 0 && len(cardLines) > 0 && len(m.wrappedLines) > 0 {
+		maxTranscriptRows--
+	}
+
+	var rows []string
+	if maxTranscriptRows > 0 {
+		lines := m.wrappedLines
+		start := max(0, len(lines)-maxTranscriptRows)
+		rows = append(rows, lines[start:]...)
+	}
+	if len(rows) > 0 && len(cardLines) > 0 {
+		rows = append(rows, "")
+	}
+	rows = append(rows, cardLines...)
+	for len(rows) < h {
+		rows = append(rows, "")
+	}
+	for i, row := range rows {
+		rows[i] = padRight(ansi.Cut(row, 0, cw), cw)
+	}
+	return strings.Join(rows, "\n")
 }
 
 // reasoningViewMax bounds the live thinking buffer the streamed block renders
@@ -1544,6 +1629,8 @@ func (m chatTUI) View() tea.View {
 		status = "  " + modeTag + " · " + i18n.M.StatusResumePicker
 	case m.mcp != nil:
 		status = "  " + modeTag + " · MCP"
+	case m.skillPick != nil:
+		status = "  " + modeTag + " · " + i18n.M.SkillPickerStatusLabel
 	case m.chooser != nil:
 		status = "  " + modeTag + " · " + i18n.M.ChatStatusQuestion
 	case m.pendingApproval != nil && m.pendingApproval.Tool == planApprovalTool:
@@ -1627,10 +1714,6 @@ func (m chatTUI) View() tea.View {
 		parts = append(parts, card)
 		rowsAboveBox += strings.Count(card, "\n") + 1
 	}
-	if card := m.renderMCPManager(); card != "" {
-		parts = append(parts, card)
-		rowsAboveBox += strings.Count(card, "\n") + 1
-	}
 	if menu := m.renderCompletion(); menu != "" {
 		parts = append(parts, menu)
 		rowsAboveBox += strings.Count(menu, "\n") + 1
@@ -1643,6 +1726,10 @@ func (m chatTUI) View() tea.View {
 		parts = append(parts, workingStyle.Width(boxW).MaxWidth(boxW).Render(clampStatusLine(working, boxW)))
 		rowsAboveBox++
 	}
+	if footer := m.renderMainManagerFooter(); footer != "" {
+		parts = append(parts, footer)
+		rowsAboveBox += strings.Count(footer, "\n") + 1
+	}
 	statusBlock := clampStatusLine(status, boxW) + "\n" + clampStatusLine(dataLine, boxW)
 	if !hideComposer {
 		parts = append(parts, box)
@@ -1652,7 +1739,11 @@ func (m chatTUI) View() tea.View {
 	// Full-screen frame: the transcript viewport on top (it pads to exactly its
 	// height), the pinned bottom region beneath. Alt-screen owns the grid, so
 	// resize repaints cleanly — no scrollback reflow, no ghost borders.
-	v := tea.NewView(m.renderTranscript() + "\n" + strings.Join(parts, "\n"))
+	mainArea := m.renderTranscript()
+	if card := m.renderMainManager(); card != "" {
+		mainArea = m.renderTranscriptWithMainManager(card)
+	}
+	v := tea.NewView(mainArea + "\n" + strings.Join(parts, "\n"))
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeCellMotion // wheel scrolls the transcript
 	// Anchor the real terminal cursor at the textarea's insertion point only when
@@ -1792,13 +1883,13 @@ func (m chatTUI) effortTag() string {
 	return dim(body)
 }
 
-// shortTokens prints token counts compactly: 142_000 → "142K", 1_000_000 → "1M".
+// shortTokens prints token counts compactly: 1_500 → "1.5K", 142_000 → "142.0K", 1_000_000 → "1.0M".
 func shortTokens(n int) string {
 	switch {
-	case n >= 1_000_000:
+	case n >= 999_950:
 		return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
 	case n >= 1_000:
-		return fmt.Sprintf("%dK", n/1_000)
+		return fmt.Sprintf("%.1fK", float64(n)/1_000)
 	default:
 		return fmt.Sprintf("%d", n)
 	}
@@ -1909,11 +2000,7 @@ func truncateSubject(s string, width int) string {
 	if max < 16 {
 		max = 16
 	}
-	r := []rune(s)
-	if len(r) > max {
-		return string(r[:max]) + "…"
-	}
-	return s
+	return ansi.Truncate(s, max, "…")
 }
 
 // clampStatusLine truncates a status line to `width` visible columns, ANSI-aware,

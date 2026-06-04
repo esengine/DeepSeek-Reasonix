@@ -62,6 +62,12 @@ type Options struct {
 	// during model switch inside a bubbletea session to prevent any output
 	// from corrupting the TUI's terminal raw mode.
 	Stderr io.Writer
+	// WorkspaceRoot is the project root directory for config, skills, memory,
+	// commands, hooks, and tool confinement. When empty, the current working
+	// directory is used (CLI default). Desktop tabs pass their project root here
+	// so each tab loads its own config/skills/hooks without changing the process
+	// cwd — enabling concurrent multi-project sessions.
+	WorkspaceRoot string
 }
 
 // Build loads config, resolves the model(s), and returns a Controller wrapping a
@@ -73,10 +79,16 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	if stderr == nil {
 		stderr = os.Stderr
 	}
+	root := opts.WorkspaceRoot
+	if root == "" {
+		if wd, err := os.Getwd(); err == nil {
+			root = wd
+		}
+	}
 	// One-time import of a v0.x (~/.reasonix/config.json) install — runs before
 	// Load so the freshly written config + ~/.env are picked up this same boot.
 	migrated, migErr := config.MigrateLegacyIfNeeded()
-	cfg, err := config.Load()
+	cfg, err := config.LoadForRoot(root)
 	if err != nil {
 		return nil, err
 	}
@@ -155,7 +167,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// durable, cache-stable prefix every turn reuses, so memory costs nothing per
 	// turn. Mid-session changes never touch this prefix — they ride the
 	// controller's transient turn-injection and fold in on the next session.
-	mem := memory.Load(memory.Options{CWD: ".", UserDir: config.MemoryUserDir()})
+	mem := memory.Load(memory.Options{CWD: root, UserDir: config.MemoryUserDir()})
 	projectChecks := instruction.ExtractHostChecks(mem.Docs)
 	sysPrompt = memory.Compose(sysPrompt, mem)
 
@@ -163,19 +175,18 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// one-liner index into the same cache-stable prefix — names + descriptions
 	// only; bodies load on demand via run_skill or "/<name>". Bodies never enter
 	// the prefix, so the index costs a fixed, small amount per turn.
-	cwd, _ := os.Getwd()
 	skillStore := skill.New(skill.Options{
-		ProjectRoot:   cwd,
+		ProjectRoot:   root,
 		CustomPaths:   cfg.SkillCustomPaths(),
 		DisabledNames: cfg.DisabledSkillNames(),
 		Stderr:        opts.Stderr,
 	})
 	skills := skillStore.List()
-	allSkills := skill.New(skill.Options{ProjectRoot: cwd, CustomPaths: cfg.SkillCustomPaths(), Stderr: io.Discard}).List()
+	allSkills := skill.New(skill.Options{ProjectRoot: root, CustomPaths: cfg.SkillCustomPaths(), Stderr: io.Discard}).List()
 	sysPrompt = skill.ApplyIndex(sysPrompt, skills)
 
 	reg := tool.NewRegistry()
-	bashSpec := sandbox.Spec{Mode: cfg.BashMode(), WriteRoots: cfg.WriteRoots(), Network: cfg.Sandbox.Network}
+	bashSpec := sandbox.Spec{Mode: cfg.BashMode(), WriteRoots: cfg.WriteRootsForRoot(root), Network: cfg.Sandbox.Network}
 	if bashSpec.Mode == "enforce" && !sandbox.Available() {
 		fmt.Fprintln(stderr, "warning: bash sandbox requested but unavailable on this platform; running bash unconfined")
 	}
@@ -183,7 +194,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		fmt.Fprintln(stderr, "warning: bash not found on PATH; the shell tool will run commands under Windows PowerShell. Install Git for Windows or WSL to use bash.")
 	}
 	searchSpec := builtin.ResolveSearch(cfg.Tools.Search.Engine, cfg.Tools.Search.RgPath, stderr)
-	addBuiltins(reg, cfg.Tools.Enabled, cfg.WriteRoots(), bashSpec, searchSpec, stderr)
+	addBuiltins(reg, cfg.Tools.Enabled, cfg.WriteRootsForRoot(root), bashSpec, searchSpec, stderr, root)
 	// Always construct a host, even with no plugins configured, so the controller's
 	// host pointer is stable for the session and `/mcp add` can hot-add into it.
 	pluginHost := plugin.NewHost()
@@ -233,9 +244,15 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		bin, ok := codegraph.Resolve(cfg.Codegraph.Path)
 		switch {
 		case ok:
-			spec := plugin.Spec{Name: "codegraph", Command: bin, Args: []string{"serve", "--mcp"}, Dir: cwd}
-			warm := codegraph.Initialized(cwd)
-			if err := codegraph.EnsureInit(ctx, bin, cwd); err != nil {
+			spec := plugin.Spec{
+				Name:              "codegraph",
+				Command:           bin,
+				Args:              []string{"serve", "--mcp"},
+				Dir:               root,
+				ReadOnlyToolNames: codegraph.ReadOnlyToolNames(),
+			}
+			warm := codegraph.Initialized(root)
+			if err := codegraph.EnsureInit(ctx, bin, root); err != nil {
 				sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn,
 					Text: "codegraph: init failed (" + err.Error() + ") — symbol-graph tools disabled this session"})
 				break
@@ -340,7 +357,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// returns an install hint). The manager is session-scoped; chain its shutdown
 	// into the controller's cleanup so servers stop with the session, not the turn.
 	if cfg.LSP.Enabled {
-		lspMgr := lsp.NewManager(cwd, LSPSpecs(cfg.LSP))
+		lspMgr := lsp.NewManager(root, LSPSpecs(cfg.LSP))
 		for _, t := range lsp.Tools(lspMgr) {
 			reg.Add(t)
 		}
@@ -367,13 +384,13 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// silently execute them). Non-blocking hook output is surfaced to the user as
 	// a Notice through the shared sink. The runner fires PreToolUse/PostToolUse in
 	// the agent loop and UserPromptSubmit/Stop at the controller's turn boundary.
-	hooksTrusted := hook.IsTrusted(cwd, "")
+	hooksTrusted := hook.IsTrusted(root, "")
 	hookRunner := hook.NewRunner(
-		hook.Load(hook.LoadOptions{ProjectRoot: cwd, Trusted: hooksTrusted}),
-		cwd, nil,
+		hook.Load(hook.LoadOptions{ProjectRoot: root, Trusted: hooksTrusted}),
+		root, nil,
 		func(msg string) { sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: msg}) },
 	)
-	if hook.ProjectDefinesHooks(cwd) && !hooksTrusted {
+	if hook.ProjectDefinesHooks(root) && !hooksTrusted {
 		sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
 			Text: "this project defines hooks but they are not trusted — run /hooks trust to enable them"})
 	}
@@ -450,7 +467,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 
 	// Custom slash commands (.reasonix/commands + user dir). Best-effort: a malformed
 	// file is skipped, and a load error never blocks the session.
-	cmds, _ := command.Load(config.CommandDirs()...)
+	cmds, _ := command.Load(config.CommandDirsForRoot(root)...)
 
 	// Expose the loaded slash commands (skills + custom commands) to the model via
 	// the slash_command tool, so it can invoke a project playbook by name the way a
@@ -531,27 +548,40 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		Jobs:          jm,
 		Registry:      reg,
 		PluginCtx:     ctx,
-		WorkspaceRoot: cwd,
+		WorkspaceRoot: root,
 		AutoPlan:      cfg.Agent.AutoPlan,
 		OnRemember: func(rule string) {
-			path := config.SourcePath()
-			if path == "" {
-				path = "reasonix.toml" // match Config.Save() fallback
-			}
-			edit := config.LoadForEdit(path)
-			if err := edit.AddPermissionRule("allow", rule); err != nil {
-				slog.Warn("persist permission rule", "rule", rule, "err", err)
-				return
-			}
-			if err := edit.Save(); err != nil {
-				slog.Warn("save config after permission rule", "err", err)
-			}
+			rememberPermissionRule(opts.WorkspaceRoot, rule)
 		},
 	}
 	if classifier != nil {
 		ctrlOpts.Classifier = classifier
 	}
 	return control.New(ctrlOpts), nil
+}
+
+func rememberPermissionRule(workspaceRoot, rule string) {
+	path := rememberPermissionConfigPath(workspaceRoot)
+	edit := config.LoadForEdit(path)
+	if err := edit.AddPermissionRule("allow", rule); err != nil {
+		slog.Warn("persist permission rule", "rule", rule, "err", err)
+		return
+	}
+	if err := edit.SaveTo(path); err != nil {
+		slog.Warn("save config after permission rule", "err", err)
+	}
+}
+
+func rememberPermissionConfigPath(workspaceRoot string) string {
+	workspaceRoot = strings.TrimSpace(workspaceRoot)
+	if workspaceRoot != "" {
+		return filepath.Join(workspaceRoot, "reasonix.toml")
+	}
+	path := config.SourcePath()
+	if path == "" {
+		path = "reasonix.toml" // match Config.Save() fallback
+	}
+	return path
 }
 
 func subagentModelRef(cfg *config.Config, sk skill.Skill) string {
@@ -629,7 +659,20 @@ func NewProviderWithProxy(e *config.ProviderEntry, proxy netclient.ProxySpec) (p
 // them. writeRoots confines the file-writing built-ins to the workspace: after
 // the (unconfined) defaults are added, each enabled writer is replaced by an
 // instance bound to writeRoots (preserving registry order).
-func addBuiltins(reg *tool.Registry, enabled, writeRoots []string, bashSpec sandbox.Spec, searchSpec builtin.SearchSpec, stderr io.Writer) {
+// When workDir is non-empty, tools resolve relative paths against it instead of
+// the process cwd, enabling concurrent multi-project sessions.
+func addBuiltins(reg *tool.Registry, enabled, writeRoots []string, bashSpec sandbox.Spec, searchSpec builtin.SearchSpec, stderr io.Writer, workDir string) {
+	// If a workspace directory is set, use workspace-bound tools that resolve
+	// paths relative to that directory. Otherwise fall back to the process-cwd
+	// compile-time builtins.
+	if workDir != "" {
+		ws := builtin.Workspace{Dir: workDir, WriteRoots: writeRoots, Bash: bashSpec, Search: searchSpec}
+		for _, t := range ws.Tools(enabled...) {
+			reg.Add(t)
+		}
+		return
+	}
+
 	if len(enabled) == 0 {
 		for _, t := range tool.Builtins() {
 			reg.Add(t)

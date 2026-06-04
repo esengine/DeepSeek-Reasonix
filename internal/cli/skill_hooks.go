@@ -13,35 +13,34 @@ import (
 	"reasonix/internal/skill"
 )
 
-// runSkillSubcommand handles "/skill" (and "/skills"): list the discoverable
-// skills, show one's body, scaffold a new one, or inspect the discovery paths.
-// "/skill <name> [args]" with no recognised subcommand falls through to invoking
-// the skill (handled by runSlashCommand's default branch), so this only owns the
-// management verbs.
 func (m *chatTUI) runSkillSubcommand(input string) {
-	args := tokenizeArgs(input) // args[0] == "/skill"
+	args := tokenizeArgs(input)
 	sub := ""
 	if len(args) > 1 {
 		sub = strings.ToLower(args[1])
 	}
 	switch sub {
-	case "", "list", "ls":
+	case "":
+		m.openSkillPicker()
+	case "list", "ls":
 		m.skillList()
+	case "manage", "picker":
+		m.openSkillPicker()
 	case "show", "cat":
 		if len(args) < 3 {
-			m.notice("usage: /skill show <name>")
+			m.notice("usage: /skills show <name>")
 			return
 		}
 		m.skillShow(args[2])
 	case "enable", "disable":
 		if len(args) < 3 {
-			m.notice("usage: /skill " + sub + " <name>")
+			m.notice("usage: /skills " + sub + " <name>")
 			return
 		}
 		m.skillSetEnabled(args[2], sub == "enable")
 	case "new", "init":
 		if len(args) < 3 {
-			m.notice("usage: /skill new <name> [--global]")
+			m.notice("usage: /skills new <name> [--global]")
 			return
 		}
 		global := containsArg(args[3:], "--global")
@@ -49,12 +48,11 @@ func (m *chatTUI) runSkillSubcommand(input string) {
 	case "paths":
 		m.skillPaths()
 	default:
-		// /skill is management-only; a skill is invoked directly as /<name>.
 		hint := ""
 		if _, ok := m.ctrl.RunSkill("/" + args[1]); ok {
 			hint = " (to run it, type /" + args[1] + ")"
 		}
-		m.notice("unknown /skill subcommand " + args[1] + hint + " — try: /skill, /skill show <name>, /skill enable <name>, /skill disable <name>, /skill new <name>, /skill paths")
+		m.notice("unknown /skills subcommand " + args[1] + hint + " — try: /skills, /skills manage, /skills show <name>, /skills enable <name>, /skills disable <name>, /skills new <name>, /skills paths")
 	}
 }
 
@@ -67,7 +65,7 @@ func (m *chatTUI) skillList() {
 		m.notice("no skills found. Add SKILL.md / <name>.md under .reasonix/skills (project) or ~/.reasonix/skills (global); .agents/.agent/.claude skills dirs also work. Invoke with /<name> or run_skill.")
 		return
 	}
-	m.commitLine(renderSkillList(m.width, skills, m.disabledSkillNames()))
+	m.commitLine(renderSkillList(m.width, sortedSkills(skills), m.disabledSkillNames()))
 }
 
 func (m *chatTUI) skillShow(name string) {
@@ -100,7 +98,18 @@ func (m *chatTUI) disabledSkillNames() map[string]bool {
 }
 
 func (m *chatTUI) skillSetEnabled(name string, enabled bool) {
+	m.skillSaveEnabledChanges(map[string]bool{name: enabled})
+}
+
+func (m *chatTUI) skillSaveEnabledChanges(changes map[string]bool) {
+	if len(changes) == 0 {
+		return
+	}
 	if m.buildController == nil {
+		m.notice("skill toggle unavailable in this session")
+		return
+	}
+	if m.ctrl == nil {
 		m.notice("skill toggle unavailable in this session")
 		return
 	}
@@ -108,19 +117,63 @@ func (m *chatTUI) skillSetEnabled(name string, enabled bool) {
 		m.notice("cannot change skills while a turn is running")
 		return
 	}
-	if err := m.ctrl.SetSkillEnabled(name, enabled); err != nil {
-		m.notice("skill " + enableVerb(enabled) + ": " + err.Error())
+	known := map[string]string{}
+	for _, sk := range m.ctrl.AllSkills() {
+		known[config.SkillNameKey(sk.Name)] = sk.Name
+	}
+	cfg := config.LoadForEdit(config.UserConfigPath())
+	for name, enabled := range changes {
+		canonical, ok := known[config.SkillNameKey(name)]
+		if !ok {
+			m.notice("skill " + enableVerb(enabled) + ": unknown skill: " + name)
+			return
+		}
+		if err := cfg.SetSkillEnabled(canonical, enabled); err != nil {
+			m.notice("skill " + enableVerb(enabled) + ": " + err.Error())
+			return
+		}
+	}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		m.notice("skill toggle: " + err.Error())
 		return
+	}
+	notice := ""
+	if len(changes) == 1 {
+		name := ""
+		enabled := false
+		for n, e := range changes {
+			name, enabled = n, e
+		}
+		if enabled {
+			notice = "enabled skill " + name + " — refreshing session"
+		} else {
+			notice = "disabled skill " + name + " — refreshing session"
+		}
+	} else {
+		notice = fmt.Sprintf("updated %d skills — refreshing session", len(changes))
+	}
+	m.scheduleSkillSessionRefresh("skill toggle", notice)
+}
+
+func (m *chatTUI) scheduleSkillSessionRefresh(reason, notice string) bool {
+	if m.buildController == nil {
+		m.notice("skill refresh unavailable in this session")
+		return false
+	}
+	if m.ctrl == nil {
+		return false
+	}
+	if m.ctrl.Running() {
+		m.notice("cannot refresh skills while a turn is running")
+		return false
 	}
 	carried := m.ctrl.History()
 	prevPath := m.ctrl.SessionPath()
 	if err := m.ctrl.Snapshot(); err != nil {
-		slog.Warn("skill toggle: snapshot failed", "err", err)
+		slog.Warn(reason+": snapshot failed", "err", err)
 	}
-	if enabled {
-		m.notice("enabled skill " + name + " — refreshing session")
-	} else {
-		m.notice("disabled skill " + name + " — refreshing session")
+	if notice != "" {
+		m.notice(notice)
 	}
 	oldCtrl := m.ctrl
 	build := m.buildController
@@ -141,6 +194,7 @@ func (m *chatTUI) skillSetEnabled(name string, enabled bool) {
 			host:     c.Host(),
 		}
 	}
+	return true
 }
 
 func enableVerb(enabled bool) string {
@@ -169,8 +223,6 @@ func (m *chatTUI) skillPaths() {
 	m.commitLine(renderSkillPaths(m.width, st.Roots()))
 }
 
-// skillStore builds a Store reflecting this session's project root + configured
-// custom paths, for the management verbs that need to write or enumerate roots.
 func (m *chatTUI) skillStore() *skill.Store {
 	cwd, _ := os.Getwd()
 	var custom []string
@@ -180,10 +232,8 @@ func (m *chatTUI) skillStore() *skill.Store {
 	return skill.New(skill.Options{ProjectRoot: cwd, CustomPaths: custom})
 }
 
-// runHooksSubcommand handles "/hooks": list the active hooks and the project's
-// trust state, or trust the current project so its hooks load next session.
 func (m *chatTUI) runHooksSubcommand(input string) {
-	args := tokenizeArgs(input) // args[0] == "/hooks"
+	args := tokenizeArgs(input)
 	sub := ""
 	if len(args) > 1 {
 		sub = strings.ToLower(args[1])
@@ -209,7 +259,6 @@ func (m *chatTUI) hooksList(cwd string) {
 	m.commitLine(renderHooks(m.width, active, trusted, hook.ProjectDefinesHooks(cwd)))
 }
 
-// containsArg reports whether flag appears in args.
 func containsArg(args []string, flag string) bool {
 	for _, a := range args {
 		if a == flag {

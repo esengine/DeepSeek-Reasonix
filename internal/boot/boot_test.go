@@ -342,6 +342,74 @@ func writeFile(t *testing.T, dir, name, body string) {
 	}
 }
 
+func TestRememberPermissionRuleUsesWorkspaceRoot(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
+
+	cwd := t.TempDir()
+	workspace := t.TempDir()
+	t.Chdir(cwd)
+	writeFile(t, cwd, "reasonix.toml", `
+[permissions]
+allow = ["bash(cwd*)"]
+`)
+	writeFile(t, workspace, "reasonix.toml", `
+[permissions]
+allow = ["bash(workspace*)"]
+`)
+
+	const rule = "bash=go test ./..."
+	rememberPermissionRule(workspace, rule)
+
+	cwdCfg := config.LoadForEdit(filepath.Join(cwd, "reasonix.toml"))
+	if hasPermissionRule(cwdCfg.Permissions.Allow, rule) {
+		t.Fatalf("remembered rule was written to cwd config: %v", cwdCfg.Permissions.Allow)
+	}
+	workspaceCfg := config.LoadForEdit(filepath.Join(workspace, "reasonix.toml"))
+	if !hasPermissionRule(workspaceCfg.Permissions.Allow, rule) {
+		t.Fatalf("remembered rule missing from workspace config: %v", workspaceCfg.Permissions.Allow)
+	}
+}
+
+func TestRememberPermissionRuleEmptyRootUsesSourcePath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
+
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+	userConfig := config.UserConfigPath()
+	writeFile(t, filepath.Dir(userConfig), filepath.Base(userConfig), `
+[permissions]
+allow = ["bash(user*)"]
+`)
+
+	const rule = "bash=go env"
+	rememberPermissionRule("", rule)
+
+	userCfg := config.LoadForEdit(userConfig)
+	if !hasPermissionRule(userCfg.Permissions.Allow, rule) {
+		t.Fatalf("empty root should remember into SourcePath config: %v", userCfg.Permissions.Allow)
+	}
+	if _, err := os.Stat(filepath.Join(cwd, "reasonix.toml")); !os.IsNotExist(err) {
+		t.Fatalf("empty root should not create cwd config when SourcePath exists, err=%v", err)
+	}
+}
+
+func hasPermissionRule(rules []string, want string) bool {
+	for _, rule := range rules {
+		if rule == want {
+			return true
+		}
+	}
+	return false
+}
+
 // TestBuildMigratesLegacyConfigEndToEnd drives the real boot path: a v0.x
 // ~/.reasonix/config.json with no v1+ config present must be imported during
 // Build — config written, key pinned into the env, and the user told via a notice.

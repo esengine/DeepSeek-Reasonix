@@ -20,19 +20,37 @@ func (p *mcpManager) render(width int) string {
 	w := max(viewWidth(width), 40)
 	switch p.stage {
 	case mcpStageDetail:
-		return choicePanelStyle.Width(w).Render(p.renderDetail(w))
+		return managerContentPanelStyle(w).Render(p.renderDetail(w))
 	case mcpStageTools:
-		return choicePanelStyle.Width(w).Render(p.renderTools(w))
+		return managerContentPanelStyle(w).Render(p.renderTools(w))
 	case mcpStageLogs:
-		return choicePanelStyle.Width(w).Render(p.renderLogs(w))
+		return managerContentPanelStyle(w).Render(p.renderLogs(w))
 	case mcpStageMode:
-		return choicePanelStyle.Width(w).Render(p.renderMode(w))
+		return managerContentPanelStyle(w).Render(p.renderMode(w))
 	case mcpStageConfirmRemove:
-		return choicePanelStyle.Width(w).Render(p.renderConfirmRemove(w))
+		return managerContentPanelStyle(w).Render(p.renderConfirmRemove(w))
 	case mcpStageConfirmClearAuth:
-		return choicePanelStyle.Width(w).Render(p.renderConfirmClearAuth(w))
+		return managerContentPanelStyle(w).Render(p.renderConfirmClearAuth(w))
 	default:
-		return choicePanelStyle.Width(w).Render(p.renderList(w))
+		return managerContentPanelStyle(w).Render(p.renderList(w))
+	}
+}
+
+func (p *mcpManager) footerHint() string {
+	switch p.stage {
+	case mcpStageDetail:
+		return "↑/↓ navigate · Enter to select · Esc to back"
+	case mcpStageTools, mcpStageLogs:
+		return "Esc to back"
+	case mcpStageMode:
+		return "Enter to apply · Esc to back"
+	case mcpStageConfirmRemove, mcpStageConfirmClearAuth:
+		return "Enter to select · y confirm · n cancel · Esc to back"
+	default:
+		if len(p.snapshot.servers) == 0 {
+			return "↑/↓ navigate · Enter to confirm · Esc to cancel"
+		}
+		return "↑/↓ navigate · Enter for details · Esc to close"
 	}
 }
 
@@ -45,7 +63,6 @@ func (p *mcpManager) renderList(width int) string {
 	}
 	if len(p.snapshot.servers) == 0 {
 		b.WriteString(viewMeta("No MCP servers configured. Use /mcp add <name> ... to add one.") + "\n\n")
-		b.WriteString(dim("↑/↓ navigate · Enter to confirm · Esc to cancel"))
 		return b.String()
 	}
 	start, end := visibleRange(len(p.snapshot.servers), p.sel, mcpListMaxRows)
@@ -75,7 +92,6 @@ func (p *mcpManager) renderList(width int) string {
 	if end < len(p.snapshot.servers) {
 		fmt.Fprintf(&b, "%s\n", viewMeta(fmt.Sprintf("↓ %d more below", len(p.snapshot.servers)-end)))
 	}
-	b.WriteString("\n" + dim("↑/↓ navigate · Enter for details · Esc to close"))
 	return strings.TrimRight(b.String(), "\n")
 }
 
@@ -153,7 +169,6 @@ func (p *mcpManager) renderDetail(width int) string {
 			b.WriteString(rowLine(i == p.action, i+1, "", a.label, false) + "\n")
 		}
 	}
-	b.WriteString(dim("↑/↓ navigate · Enter to select · Esc to back"))
 	return strings.TrimRight(b.String(), "\n")
 }
 
@@ -179,7 +194,6 @@ func (p *mcpManager) renderTools(width int) string {
 			fmt.Fprintf(&b, "%s\n", viewMore(extra, "tools"))
 		}
 	}
-	b.WriteString("\n" + dim("Esc to back"))
 	return strings.TrimRight(b.String(), "\n")
 }
 
@@ -195,7 +209,6 @@ func (p *mcpManager) renderLogs(width int) string {
 	} else {
 		b.WriteString(viewProtectLines(v.Error, viewBudget(width, 2)) + "\n")
 	}
-	b.WriteString("\n" + dim("Esc to back"))
 	return strings.TrimRight(b.String(), "\n")
 }
 
@@ -212,7 +225,6 @@ func (p *mcpManager) renderMode(width int) string {
 		b.WriteString(line + "\n")
 		b.WriteString(dim("       "+viewCompactText(choice.desc, viewBudget(width, 7))) + "\n")
 	}
-	b.WriteString(dim("Enter to apply · Esc to back"))
 	return strings.TrimRight(b.String(), "\n")
 }
 
@@ -226,7 +238,6 @@ func (p *mcpManager) renderConfirmRemove(width int) string {
 	b.WriteString(viewMeta("This removes it from Reasonix config. It cannot be undone from this panel.") + "\n\n")
 	b.WriteString(rowLine(p.confirm == 0, 1, "", "Confirm remove", false) + "\n")
 	b.WriteString(rowLine(p.confirm == 1, 2, "", "Cancel", false) + "\n")
-	b.WriteString(dim("Enter to select · y confirm · n cancel · Esc to back"))
 	return strings.TrimRight(b.String(), "\n")
 }
 
@@ -241,7 +252,6 @@ func (p *mcpManager) renderConfirmClearAuth(width int) string {
 	b.WriteString(viewMeta(viewCompactText(hint, viewBudget(width, 0))) + "\n\n")
 	b.WriteString(rowLine(p.confirm == 0, 1, "", "Confirm clear authentication", false) + "\n")
 	b.WriteString(rowLine(p.confirm == 1, 2, "", "Cancel", false) + "\n")
-	b.WriteString(dim("Enter to select · y confirm · n cancel · Esc to back"))
 	return strings.TrimRight(b.String(), "\n")
 }
 

@@ -88,6 +88,10 @@ type SessionInfo struct {
 	ModTime        time.Time // compatibility alias for LastActivityAt
 	Preview        string
 	Turns          int
+	Scope          string
+	WorkspaceRoot  string
+	TopicID        string
+	TopicTitle     string
 }
 
 // ListSessions returns every *.jsonl session under dir, most-recently-active
@@ -121,6 +125,10 @@ func ListSessions(dir string) ([]SessionInfo, error) {
 		}
 		createdAt := info.ModTime()
 		lastActivityAt := info.ModTime()
+		scope := "global"
+		workspaceRoot := ""
+		topicID := ""
+		topicTitle := ""
 		if meta, ok, err := LoadBranchMeta(full); err == nil && ok {
 			if !meta.CreatedAt.IsZero() {
 				createdAt = meta.CreatedAt
@@ -128,6 +136,10 @@ func ListSessions(dir string) ([]SessionInfo, error) {
 			if !meta.UpdatedAt.IsZero() {
 				lastActivityAt = meta.UpdatedAt
 			}
+			scope = meta.DefaultScope()
+			workspaceRoot = meta.WorkspaceRoot
+			topicID = meta.TopicID
+			topicTitle = meta.TopicTitle
 		}
 		out = append(out, SessionInfo{
 			Path:           full,
@@ -136,6 +148,10 @@ func ListSessions(dir string) ([]SessionInfo, error) {
 			ModTime:        lastActivityAt,
 			Preview:        preview,
 			Turns:          turns,
+			Scope:          scope,
+			WorkspaceRoot:  workspaceRoot,
+			TopicID:        topicID,
+			TopicTitle:     topicTitle,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { asArray } from "../lib/array";
 import { app } from "../lib/bridge";
 import { useI18n, useT } from "../lib/i18n";
 import { useUpdater } from "../lib/useUpdater";
@@ -34,7 +35,7 @@ export function SettingsPanel({ onClose, onChanged }: { onClose: () => void; onC
   const [themeStyle, setThemeStyleState] = useState<ThemeStyle>(() => getThemeStyle(getTheme()));
   const [tab, setTab] = useState<SettingsTab>("models");
 
-  const reload = async () => setS(await app.Settings().catch(() => null));
+  const reload = async () => setS(normalizeSettingsView(await app.Settings().catch(() => null)));
   useEffect(() => {
     void reload();
   }, []);
@@ -209,6 +210,39 @@ function normalizeProxyMode(mode: string): ProxyMode {
 
 function normalizeNetworkView(network: NetworkView): NetworkView {
   return { ...network, proxyMode: normalizeProxyMode(network.proxyMode) };
+}
+
+function normalizeSettingsView(view: SettingsView | null | undefined): SettingsView | null {
+  if (!view) return null;
+  const permissions = view.permissions ?? { mode: "ask", allow: [], ask: [], deny: [] };
+  const sandbox = view.sandbox ?? { bash: "enforce", network: false, workspaceRoot: "", allowWrite: [] };
+  const network = view.network ?? {
+    proxyMode: "auto",
+    proxyUrl: "",
+    noProxy: "",
+    proxy: { type: "socks5", server: "", port: 0, username: "", password: "" },
+  };
+  const agent = view.agent ?? { temperature: 0, maxSteps: 0, systemPrompt: "" };
+  return {
+    ...view,
+    providers: asArray(view.providers).map((p) => ({ ...p, models: asArray(p.models) })),
+    providerKinds: asArray(view.providerKinds),
+    permissions: {
+      ...permissions,
+      allow: asArray(permissions.allow),
+      ask: asArray(permissions.ask),
+      deny: asArray(permissions.deny),
+    },
+    sandbox: {
+      ...sandbox,
+      allowWrite: asArray(sandbox.allowWrite),
+    },
+    network: {
+      ...network,
+      proxy: network.proxy ?? { type: "socks5", server: "", port: 0, username: "", password: "" },
+    },
+    agent,
+  };
 }
 
 function NetworkSection({ s, busy, apply }: SectionProps) {

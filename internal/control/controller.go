@@ -472,7 +472,7 @@ func (c *Controller) Submit(input string) {
 			c.runRefTurn(ref)
 			return
 		}
-		// Read-only management verbs (/model /memory /skill /hooks /mcp) emit a
+		// Read-only management verbs (/model /memory /skills /hooks /mcp) emit a
 		// listing Notice, so Submit-based frontends (desktop, HTTP) get them with
 		// no extra wiring. (The chat TUI handles these itself with richer output.)
 		fields := strings.Fields(trimmed)
@@ -590,6 +590,13 @@ func (c *Controller) Running() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.running
+}
+
+// Turn returns the current turn number (0 before the first submit).
+func (c *Controller) Turn() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.turn
 }
 
 // Approve answers a pending ApprovalRequest by ID: allow runs the call, session
@@ -1202,7 +1209,7 @@ func (c *Controller) Host() *plugin.Host { return c.host }
 // Commands returns the loaded custom slash commands.
 func (c *Controller) Commands() []command.Command { return c.commands }
 
-// Skills returns the discoverable skills (for the slash menu and `/skill`).
+// Skills returns the discoverable skills (for the slash menu and `/skills`).
 func (c *Controller) Skills() []skill.Skill { return c.skills }
 
 // AllSkills returns every discoverable skill, including disabled ones, for
@@ -1380,7 +1387,13 @@ func (c *Controller) connectCodegraphMCPServer(cfg *config.Config) (int, error) 
 	if err := codegraph.EnsureInit(c.pluginCtx, bin, cwd); err != nil {
 		return 0, fmt.Errorf("codegraph init: %w", err)
 	}
-	return c.connectMCPSpec(plugin.Spec{Name: "codegraph", Command: bin, Args: []string{"serve", "--mcp"}, Dir: cwd})
+	return c.connectMCPSpec(plugin.Spec{
+		Name:              "codegraph",
+		Command:           bin,
+		Args:              []string{"serve", "--mcp"},
+		Dir:               cwd,
+		ReadOnlyToolNames: codegraph.ReadOnlyToolNames(),
+	})
 }
 
 // RemoveMCPServer disconnects a live MCP server — its tools vanish from the next

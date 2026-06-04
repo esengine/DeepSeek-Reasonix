@@ -463,3 +463,23 @@ func (c *Config) Save() error {
 	}
 	return c.SaveTo(path)
 }
+
+// SaveForRoot saves the config to root's reasonix.toml, falling back to the
+// user's global config when root has no existing reasonix.toml.
+func (c *Config) SaveForRoot(root string) error {
+	root = resolveRoot(root)
+	projectTOML := "reasonix.toml"
+	if root != "." {
+		projectTOML = filepath.Join(root, "reasonix.toml")
+	}
+	if _, err := os.Stat(projectTOML); err == nil {
+		return c.SaveTo(projectTOML)
+	}
+	if uc := userConfigPath(); uc != "" {
+		if err := os.MkdirAll(filepath.Dir(uc), 0o755); err != nil {
+			return err
+		}
+		return c.SaveTo(uc)
+	}
+	return c.SaveTo(projectTOML)
+}

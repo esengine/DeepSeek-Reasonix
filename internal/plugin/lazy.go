@@ -246,7 +246,7 @@ func LazyToolset(spec Spec, cs *CachedSchema, host *Host, reg *tool.Registry, se
 				name:     toolName(spec.Name, ct.Name),
 				desc:     ct.Description,
 				schema:   ct.Schema,
-				readOnly: ct.ReadOnly,
+				readOnly: spec.toolReadOnly(ct.Name, ct.ReadOnly),
 				hasCache: true,
 			})
 		}

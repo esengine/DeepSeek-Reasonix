@@ -23,6 +23,7 @@ import {
   Search,
   X,
 } from "lucide-react";
+import { asArray } from "../lib/array";
 import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
 import { loadLayoutSize, saveLayoutSize } from "../lib/layoutPreferences";
@@ -190,7 +191,7 @@ export function WorkspacePanel({
 
   const loadDir = useCallback(async (dir: string) => {
     const entries = await app.ListDir(dir).catch(() => []);
-    setEntriesByDir((prev) => ({ ...prev, [dir]: entries ?? [] }));
+    setEntriesByDir((prev) => ({ ...prev, [dir]: asArray<DirEntry>(entries) }));
   }, []);
 
   const loadChanges = useCallback(async () => {
@@ -356,7 +357,7 @@ export function WorkspacePanel({
   }, [entriesByDir, filter]);
 
   const changedRows = useMemo(() => {
-    const rows = changes?.files ?? [];
+    const rows = asArray(changes?.files);
     const q = filter.trim().toLowerCase();
     if (!q) return rows;
     return rows.filter((row) => `${row.path} ${row.oldPath ?? ""} ${row.gitStatus ?? ""}`.toLowerCase().includes(q));
@@ -516,7 +517,7 @@ export function WorkspacePanel({
       const deleted = isDeletedChange(row);
       return (
         <button
-          key={`${row.path}-${row.sources.join("-")}`}
+          key={`${row.path}-${asArray(row.sources).join("-")}`}
           className={`workspace-change${selectedPath === row.path ? " workspace-change--active" : ""}${deleted ? " workspace-change--disabled" : ""}`}
           draggable
           onDragStart={(event) => startTreeDrag(event, row.path, false)}

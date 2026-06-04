@@ -293,12 +293,22 @@ type SandboxConfig struct {
 // (relative or absolute); the confiner resolves them to absolute, symlink-free
 // paths. The result is always non-empty, so confinement is on by default.
 func (c *Config) WriteRoots() []string {
+	return c.WriteRootsForRoot(".")
+}
+
+// WriteRootsForRoot is like WriteRoots but falls back to fallbackRoot when the
+// config doesn't explicitly set a workspace_root. Desktop tabs pass their
+// project root here so tool confinement is correct without changing cwd.
+func (c *Config) WriteRootsForRoot(fallbackRoot string) []string {
 	root := ExpandVars(c.Sandbox.WorkspaceRoot)
 	if root == "" {
-		if wd, err := os.Getwd(); err == nil {
-			root = wd
-		} else {
-			root = "."
+		root = fallbackRoot
+		if root == "" || root == "." {
+			if wd, err := os.Getwd(); err == nil {
+				root = wd
+			} else {
+				root = "."
+			}
 		}
 	}
 	roots := []string{root}
@@ -566,14 +576,29 @@ func Default() *Config {
 // the v0.x ~/.reasonix/config.json's mcpServers. A .env in the working directory
 // is loaded first so api_key_env can resolve.
 func Load() (*Config, error) {
-	loadDotEnv()
+	return LoadForRoot(".")
+}
+
+// LoadForRoot builds the configuration with project files resolved from root
+// instead of the current working directory. When root is "" or ".", it behaves
+// like Load(). This is the workspace-aware entry point: desktop tabs use it so
+// each project's reasonix.toml + .env + .mcp.json are resolved independently
+// without changing the process cwd.
+func LoadForRoot(root string) (*Config, error) {
+	root = resolveRoot(root)
+	loadDotEnvForRoot(root)
 	cfg := Default()
+
+	projectTOML := "reasonix.toml"
+	if root != "." {
+		projectTOML = filepath.Join(root, "reasonix.toml")
+	}
 
 	var tomlSources []string
 	if uc := userConfigPath(); uc != "" {
 		tomlSources = append(tomlSources, uc)
 	}
-	tomlSources = append(tomlSources, "reasonix.toml")
+	tomlSources = append(tomlSources, projectTOML)
 	sawConfigFile := false
 	for _, path := range tomlSources {
 		if _, err := os.Stat(path); err == nil {
@@ -595,7 +620,11 @@ func Load() (*Config, error) {
 	// Claude Code's .mcp.json (project root) is read last and merged into
 	// [[plugins]], so a server configured for Claude works here unchanged.
 	// reasonix.toml wins on a name collision (see mergeMCPJSON).
-	entries, err := loadMCPJSON(mcpJSONFile)
+	mcpFile := mcpJSONFile
+	if root != "." {
+		mcpFile = filepath.Join(root, mcpJSONFile)
+	}
+	entries, err := loadMCPJSON(mcpFile)
 	if err != nil {
 		return nil, err
 	}
@@ -650,6 +679,13 @@ func backfillDeepSeekPro(c *Config) {
 			return
 		}
 	}
+}
+
+func resolveRoot(root string) string {
+	if root == "" || root == "." {
+		return "."
+	}
+	return filepath.Clean(root)
 }
 
 // normalizeLegacyEffort migrates the retired DeepSeek effort="off" (the old
@@ -814,6 +850,14 @@ func conventionSubdirsAsc(base, sub string) []string {
 // .agents / .agent dirs lets commands authored for other agent tools (same .md +
 // frontmatter format) work here unchanged.
 func CommandDirs() []string {
+	return CommandDirsForRoot(".")
+}
+
+// CommandDirsForRoot is like CommandDirs but resolves the project convention
+// dirs under root instead of the current working directory. Global (home/XDG)
+// dirs are unchanged — they are always user-scoped.
+func CommandDirsForRoot(root string) []string {
+	root = resolveRoot(root)
 	var dirs []string
 	if home, err := os.UserHomeDir(); err == nil {
 		dirs = append(dirs, conventionSubdirsAsc(home, "commands")...)
@@ -821,14 +865,25 @@ func CommandDirs() []string {
 	if dir, err := os.UserConfigDir(); err == nil {
 		dirs = append(dirs, filepath.Join(dir, "reasonix", "commands")) // legacy XDG user dir
 	}
-	dirs = append(dirs, conventionSubdirsAsc(".", "commands")...)
+	dirs = append(dirs, conventionSubdirsAsc(root, "commands")...)
 	return dirs
 }
 
 // SourcePath returns the highest-priority config file that exists, or "" if none.
 func SourcePath() string {
-	if _, err := os.Stat("reasonix.toml"); err == nil {
-		return "reasonix.toml"
+	return SourcePathForRoot(".")
+}
+
+// SourcePathForRoot returns the highest-priority config file that exists under
+// root, or "" if none. Equivalent to SourcePath() when root is ".".
+func SourcePathForRoot(root string) string {
+	root = resolveRoot(root)
+	projectTOML := "reasonix.toml"
+	if root != "." {
+		projectTOML = filepath.Join(root, "reasonix.toml")
+	}
+	if _, err := os.Stat(projectTOML); err == nil {
+		return projectTOML
 	}
 	if uc := userConfigPath(); uc != "" {
 		if _, err := os.Stat(uc); err == nil {

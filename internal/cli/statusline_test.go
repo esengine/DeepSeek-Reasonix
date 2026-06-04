@@ -48,6 +48,44 @@ func TestRunStatuslineDisabled(t *testing.T) {
 	}
 }
 
+func TestModelSwitchRefreshesCustomStatusline(t *testing.T) {
+	oldCtrl := control.New(control.Options{Label: "old-model"})
+	newCtrl := control.New(control.Options{Label: "new-model"})
+	m := newChatTUI(oldCtrl, "", make(chan event.Event, 1), 80)
+	m.statuslineCmd = "cat"
+	m.statuslineOut = `{"model":"old-model"}`
+
+	_, cmd := m.Update(modelSwitchMsg{
+		ref:   "provider/new-model",
+		ctrl:  newCtrl,
+		label: "new-model",
+	})
+	if cmd == nil {
+		t.Fatal("model switch should schedule commands")
+	}
+	if !statuslineCommandHasModel(cmd, "new-model") {
+		t.Fatal("model switch did not refresh custom statusline with the new model")
+	}
+}
+
+func statuslineCommandHasModel(cmd tea.Cmd, model string) bool {
+	msg := cmd()
+	switch msg := msg.(type) {
+	case statuslineMsg:
+		return strings.Contains(msg.out, `"model":"`+model+`"`)
+	case tea.BatchMsg:
+		for _, child := range msg {
+			if child == nil {
+				continue
+			}
+			if statuslineCommandHasModel(child, model) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func TestIdleStatuslineIsCompact(t *testing.T) {
 	i18n.DetectLanguage("en")
 

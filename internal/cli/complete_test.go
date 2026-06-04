@@ -218,20 +218,32 @@ func TestFileItemsHiddenWhenDotTyped(t *testing.T) {
 	}
 }
 
-// TestSlashArgCompletionMCPSubcommands proves the menu now follows past the
-// command word: "/mcp " opens an argument menu of subcommands rather than going
-// dark the moment a space is typed.
+// TestSlashArgCompletionMCPSubcommands proves explicit help syntax opens the
+// subcommand menu; a bare trailing space stays submit-ready.
 func TestSlashArgCompletionMCPSubcommands(t *testing.T) {
 	m := newTestChatTUI()
-	m.input.SetValue("/mcp ")
+	m.input.SetValue("/mcp?")
 	m.updateCompletion()
 	if !m.completion.active || m.completion.kind != compSlashArg {
-		t.Fatalf("/mcp <space> should open the argument menu: %+v", m.completion)
+		t.Fatalf("/mcp? should open the argument menu: %+v", m.completion)
 	}
-	for _, want := range []string{"add", "connect", "remove", "list"} {
+	for _, want := range []string{"add", "connect", "remove", "show", "tools"} {
 		if !hasLabel(m.completion.items, want) {
 			t.Errorf("subcommand %q missing: %v", want, labels(m.completion.items))
 		}
+	}
+	if hasLabel(m.completion.items, "list") {
+		t.Errorf("redundant list subcommand should be hidden from /mcp? menu: %v", labels(m.completion.items))
+	}
+	m.acceptCompletion()
+	if got := m.input.Value(); got != "/mcp add " {
+		t.Fatalf("accepting /mcp? subcommand should replace ? with command, got %q", got)
+	}
+
+	m.input.SetValue("/mcp ")
+	m.updateCompletion()
+	if m.completion.active {
+		t.Fatalf("/mcp <space> should not open the argument menu: %+v", m.completion)
 	}
 }
 
@@ -267,31 +279,48 @@ func TestSlashArgCompletionMCPAddFlags(t *testing.T) {
 	}
 }
 
-// TestSlashArgCompletionChainsFromName proves accepting "/mcp" chains straight
-// into the subcommand menu (the command is marked to descend on accept).
-func TestSlashArgCompletionChainsFromName(t *testing.T) {
+// TestSlashCompletionMCPDoesNotAutoDescend proves accepting "/mcp" keeps the
+// bare command submit-ready; only an explicitly typed trailing space opens the
+// subcommand menu.
+func TestSlashCompletionMCPDoesNotAutoDescend(t *testing.T) {
 	m := newTestChatTUI()
 	m.input.SetValue("/mcp")
 	m.updateCompletion()
 	m.acceptCompletion()
-	if got := m.input.Value(); got != "/mcp " {
-		t.Fatalf("accepting /mcp should fill %q, got %q", "/mcp ", got)
+	if got := m.input.Value(); got != "/mcp" {
+		t.Fatalf("accepting /mcp should keep %q, got %q", "/mcp", got)
 	}
-	if !m.completion.active || m.completion.kind != compSlashArg {
-		t.Fatalf("accepting /mcp should chain into the subcommand menu: %+v", m.completion)
-	}
-	if !hasLabel(m.completion.items, "add") {
-		t.Errorf("chained menu should list subcommands: %v", labels(m.completion.items))
+	if m.completion.active {
+		t.Fatalf("accepting /mcp should not chain into the subcommand menu: %+v", m.completion)
 	}
 }
 
-func TestEnterOnBareMCPArgMenuSubmitsManager(t *testing.T) {
+func TestEnterOnExactMCPSubmitsManager(t *testing.T) {
+	isolateUserConfig(t)
+	m := newTestChatTUI()
+	m.input.SetValue("/mcp")
+	m.updateCompletion()
+	if !m.completion.active {
+		t.Fatal("typing /mcp should show slash completion before Enter")
+	}
+	if m.completion.kind == compSlashArg {
+		t.Fatalf("typing exact /mcp should not open subcommand completion: %+v", m.completion)
+	}
+
+	got, _ := m.update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	next := got.(chatTUI)
+	if next.mcp == nil || next.mcp.stage != mcpStageList {
+		t.Fatalf("Enter on exact /mcp should open manager, got %#v", next.mcp)
+	}
+}
+
+func TestEnterOnMCPWithTrailingSpaceSubmitsManager(t *testing.T) {
 	isolateUserConfig(t)
 	m := newTestChatTUI()
 	m.input.SetValue("/mcp ")
 	m.updateCompletion()
-	if !m.completion.active || m.completion.kind != compSlashArg {
-		t.Fatalf("/mcp <space> should open arg completion before Enter: %+v", m.completion)
+	if m.completion.active {
+		t.Fatalf("/mcp <space> should stay submit-ready before Enter: %+v", m.completion)
 	}
 
 	got, _ := m.update(tea.KeyPressMsg{Code: tea.KeyEnter})

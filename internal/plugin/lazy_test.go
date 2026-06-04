@@ -143,6 +143,45 @@ func TestLazyCacheHitSyncSpawn(t *testing.T) {
 	}
 }
 
+func TestLazyToolsetAppliesSpecReadOnlyOverrideToCachedTools(t *testing.T) {
+	redirectCache(t)
+	spec := helperSpec()
+	cachedSpec := spec
+	writeMockCache(t, cachedSpec)
+	spec.ReadOnlyToolNames = map[string]bool{"echo": true}
+
+	cs, ok := LoadCachedSchema(spec.Name, SpecFingerprint(spec))
+	if !ok {
+		t.Fatal("LoadCachedSchema: miss right after save (sanity)")
+	}
+
+	host := NewHost()
+	defer host.Close()
+	reg := tool.NewRegistry()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	tools := LazyToolset(spec, cs, host, reg, ctx, false)
+	byName := map[string]tool.Tool{}
+	for _, tl := range tools {
+		byName[tl.Name()] = tl
+	}
+	echo := byName["mcp__mock__echo"]
+	if echo == nil {
+		t.Fatalf("mcp__mock__echo missing from %v", byName)
+	}
+	if !echo.ReadOnly() {
+		t.Fatal("lazy cached echo should use the spec read-only override")
+	}
+	zed := byName["mcp__mock__zed"]
+	if zed == nil {
+		t.Fatalf("mcp__mock__zed missing from %v", byName)
+	}
+	if zed.ReadOnly() {
+		t.Fatal("lazy cached zed should keep cached non-read-only status")
+	}
+}
+
 // TestLazyCacheMissAsyncSpawn drives the cache-miss branch: with no cache, a
 // single "connect" placeholder shows up; first Execute returns a retry hint and
 // kicks the spawn async; once that spawn finishes, the registry swaps to the

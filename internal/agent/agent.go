@@ -436,8 +436,10 @@ func (a *Agent) finalReadinessFailure() string {
 		return ""
 	}
 	var missing []string
-	if incomplete, hasTodos := a.evidence.IncompleteLatestTodos(); hasTodos && len(incomplete) > 0 {
-		missing = append(missing, finalReadinessIncompleteTodos(incomplete))
+	if !a.planMode.Load() {
+		if incomplete, hasTodos := a.evidence.IncompleteLatestTodos(); hasTodos && len(incomplete) > 0 {
+			missing = append(missing, finalReadinessIncompleteTodos(incomplete))
+		}
 	}
 	writer, hasWriter := a.evidence.LatestSuccessfulWriterIndex()
 	if !hasWriter {

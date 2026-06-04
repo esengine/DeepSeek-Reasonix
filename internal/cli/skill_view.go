@@ -26,7 +26,7 @@ func renderSkillList(width int, skills []skill.Skill, disabled map[string]bool) 
 		desc := viewCompactText(s.Description, viewBudget(width, used))
 		fmt.Fprintf(&b, "  %-18s %s  %s%s\n", name, viewMeta(scope), desc, tag)
 	}
-	b.WriteString(viewHint(viewCompactText("invoke: /<name> [args] · manage: /skill enable <name>, /skill disable <name> · author: /skill new <name>", viewBudget(width, 2))))
+	b.WriteString(viewHint(viewCompactText("invoke: /<name> [args] · manage: /skills manage · author: /skills new <name>", viewBudget(width, 2))))
 	return strings.TrimRight(b.String(), "\n")
 }
 

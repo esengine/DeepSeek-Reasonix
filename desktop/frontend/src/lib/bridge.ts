@@ -11,6 +11,7 @@ import type {
   CheckpointMeta,
   CommandInfo,
   ContextInfo,
+  ContextPanelInfo,
   DirEntry,
   DroppedItem,
   EffortInfo,
@@ -22,6 +23,7 @@ import type {
   Meta,
   ModelInfo,
   NetworkView,
+  ProjectNode,
   ProviderView,
   QuestionAnswer,
   ServerView,
@@ -30,6 +32,8 @@ import type {
   SkillRootView,
   SkillView,
   SlashArgsResult,
+  TabMeta,
+  TopicMeta,
   UpdateInfo,
   UpdateProgress,
   WireEvent,
@@ -40,6 +44,7 @@ import type {
 // AppBindings mirrors desktop/app.go's exported method set. Keep in sync by hand
 // (or regenerate with `wails generate module` and import wailsjs instead).
 export interface AppBindings {
+  Platform(): Promise<string>;
   Submit(input: string): Promise<void>;
   SubmitDisplay(display: string, input: string): Promise<void>;
   Cancel(): Promise<void>;
@@ -156,6 +161,19 @@ export interface AppBindings {
   // unset; ConnectKey validates, persists to ./.env, and rebuilds the controller.
   NeedsOnboarding(): Promise<boolean>;
   ConnectKey(apiKey: string): Promise<void>;
+  // Tab management (desktop/tabs.go).
+  ListTabs(): Promise<TabMeta[]>;
+  OpenProjectTab(workspaceRoot: string, topicID: string): Promise<TabMeta>;
+  OpenGlobalTab(topicID: string): Promise<TabMeta>;
+  SetActiveTab(tabID: string): Promise<void>;
+  CloseTab(tabID: string): Promise<void>;
+  // Project tree (desktop/tabs.go).
+  ListProjectTree(): Promise<ProjectNode[]>;
+  CreateTopic(scope: string, workspaceRoot: string, title: string): Promise<TopicMeta>;
+  RenameTopic(topicID: string, title: string): Promise<void>;
+  DeleteTopic(topicID: string): Promise<void>;
+  // Context panel (desktop/tabs.go).
+  ContextPanel(tabID: string): Promise<ContextPanelInfo>;
 }
 
 interface WailsRuntime {
@@ -404,6 +422,9 @@ function makeMockApp(): AppBindings {
     silentStart: false,
   };
   return {
+    async Platform() {
+      return "browser";
+    },
     async Submit(input) {
       cancelled = false;
       emit({ kind: "turn_started" });
@@ -1031,6 +1052,124 @@ function makeMockApp(): AppBindings {
         if (p.apiKeyEnv === "DEEPSEEK_API_KEY") p.keySet = true;
       });
       await delay(300);
+    },
+    // Tab management mocks.
+    async ListTabs() {
+      return [
+        {
+          id: "tab_mock_1",
+          scope: "global",
+          workspaceRoot: "",
+          workspaceName: "Global",
+          topicId: "",
+          topicTitle: "Global",
+          label: "deepseek-v4-flash",
+          ready: true,
+          running: false,
+          active: true,
+          cwd: "~/projects/reasonix",
+        },
+        {
+          id: "tab_mock_2",
+          scope: "project",
+          workspaceRoot: "~/projects/blade",
+          workspaceName: "blade",
+          topicId: "topic_mock_1",
+          topicTitle: "Fix login bug",
+          label: "deepseek-v4-pro",
+          ready: true,
+          running: false,
+          active: false,
+          cwd: "~/projects/blade",
+        },
+      ];
+    },
+    async OpenProjectTab(workspaceRoot: string, _topicID: string) {
+      return {
+        id: "tab_" + Date.now(),
+        scope: "project",
+        workspaceRoot,
+        workspaceName: workspaceRoot.split("/").filter(Boolean).pop() ?? workspaceRoot,
+        topicId: _topicID,
+        topicTitle: "New topic",
+        label: "deepseek-v4-flash",
+        ready: true,
+        running: false,
+        active: true,
+        cwd: workspaceRoot,
+      };
+    },
+    async OpenGlobalTab(_topicID: string) {
+      return {
+        id: "tab_" + Date.now(),
+        scope: "global",
+        workspaceRoot: "",
+        workspaceName: "Global",
+        topicId: _topicID,
+        topicTitle: "Global",
+        label: "deepseek-v4-flash",
+        ready: true,
+        running: false,
+        active: true,
+        cwd: "",
+      };
+    },
+    async SetActiveTab(_tabID: string) {},
+    async CloseTab(_tabID: string) {},
+    async ListProjectTree() {
+      return [
+        {
+          key: "global_folder",
+          kind: "global_folder" as const,
+          label: "Global",
+          children: [
+            { key: "global_topic_1", kind: "global_topic" as const, label: "● General", topicId: "topic_global_1" },
+          ],
+        },
+        {
+          key: "project_~/projects/reasonix",
+          kind: "project" as const,
+          label: "reasonix",
+          root: "~/projects/reasonix",
+          children: [
+            { key: "topic_t1", kind: "topic" as const, label: "● Fix auth flow", root: "~/projects/reasonix", topicId: "topic_t1" },
+            { key: "topic_t2", kind: "topic" as const, label: "Refactor config", root: "~/projects/reasonix", topicId: "topic_t2" },
+          ],
+        },
+        {
+          key: "project_~/projects/blade",
+          kind: "project" as const,
+          label: "blade",
+          root: "~/projects/blade",
+          children: [
+            { key: "topic_t3", kind: "topic" as const, label: "● Fix login bug", root: "~/projects/blade", topicId: "topic_t3" },
+          ],
+        },
+      ];
+    },
+    async CreateTopic(_scope: string, _workspaceRoot: string, title: string) {
+      return { id: "topic_" + Date.now(), title, createdAt: Date.now() };
+    },
+    async RenameTopic(_topicID: string, _title: string) {},
+    async DeleteTopic(_topicID: string) {},
+    async ContextPanel(_tabID: string) {
+      return {
+        usedTokens: 1280,
+        windowTokens: 1000000,
+        promptTokens: 1200,
+        completionTokens: 80,
+        reasoningTokens: 0,
+        cacheHitTokens: 1024,
+        cacheMissTokens: 256,
+        sessionCostUsd: 0.05,
+        readFiles: [
+          { path: "src/app.ts", turn: 1, time: Date.now() - 60000 },
+          { path: "src/lib/bridge.ts", turn: 1, time: Date.now() - 55000, offset: 100, limit: 50 },
+        ],
+        changedFiles: [
+          { path: "src/lib/bridge.ts", sources: ["session"], turns: [1], latestPrompt: "add tab management", latestTime: Date.now() - 60000 },
+        ],
+      };
     },
   };
 }

@@ -34,20 +34,31 @@ func TestSlashArgItems(t *testing.T) {
 		CurrentModel:    "deepseek-flash/deepseek-v4-flash",
 	}
 
-	// /skill subcommands
-	items, from := SlashArgItems("/skill ", data)
-	if from != len("/skill ") {
-		t.Errorf("from = %d, want %d", from, len("/skill "))
+	// /skills subcommands
+	items, from := SlashArgItems("/skills ", data)
+	if from != len("/skills ") {
+		t.Errorf("from = %d, want %d", from, len("/skills "))
 	}
-	for _, w := range []string{"list", "show", "enable", "disable", "new", "paths"} {
+	for _, w := range []string{"show", "enable", "disable", "new", "paths"} {
 		if !has(items, w) {
-			t.Errorf("/skill missing subcommand %q; got %v", w, labelsOf(items))
+			t.Errorf("/skills missing subcommand %q; got %v", w, labelsOf(items))
 		}
 	}
-	// /skill show → skill names
+	if has(items, "manage") {
+		t.Errorf("/skills should hide redundant manage subcommand; got %v", labelsOf(items))
+	}
+	if has(items, "list") {
+		t.Errorf("/skills should hide redundant list subcommand; got %v", labelsOf(items))
+	}
+	// /skills show → skill names
+	items, _ = SlashArgItems("/skills show ", data)
+	if !has(items, "explore") || !has(items, "review") {
+		t.Errorf("/skills show should list skill names; got %v", labelsOf(items))
+	}
+	// Legacy /skill still works as an alias.
 	items, _ = SlashArgItems("/skill show ", data)
 	if !has(items, "explore") || !has(items, "review") {
-		t.Errorf("/skill show should list skill names; got %v", labelsOf(items))
+		t.Errorf("/skill show alias should list skill names; got %v", labelsOf(items))
 	}
 	items, _ = SlashArgItems("/skill disable ", data)
 	if !has(items, "explore") || has(items, "security-review") {
@@ -58,6 +69,10 @@ func TestSlashArgItems(t *testing.T) {
 		t.Errorf("/skill enable should list disabled skills only; got %v", labelsOf(items))
 	}
 	// /mcp subcommands + filtering
+	items, _ = SlashArgItems("/mcp ", data)
+	if has(items, "list") {
+		t.Errorf("/mcp should hide redundant list subcommand; got %v", labelsOf(items))
+	}
 	items, _ = SlashArgItems("/mcp re", data)
 	if len(items) != 1 || items[0].Label != "remove" {
 		t.Errorf("/mcp re should filter to remove; got %v", labelsOf(items))
@@ -111,12 +126,13 @@ func TestSlashArgItems(t *testing.T) {
 		t.Errorf("/help should have no arg items; got %v", labelsOf(items))
 	}
 	// a fully-typed terminal subcommand offers nothing (no lingering no-op) so the
-	// caller can submit instead of "accepting" a no-op — the /skill list bug.
-	if items, _ := SlashArgItems("/skill list", data); len(items) != 0 {
-		t.Errorf("/skill list (token complete) should offer no suggestion; got %v", labelsOf(items))
+	// caller can submit instead of "accepting" a no-op — the /skills list bug.
+	if items, _ := SlashArgItems("/skills list", data); len(items) != 0 {
+		t.Errorf("/skills list (token complete) should offer no suggestion; got %v", labelsOf(items))
 	}
-	// but a partial token still completes.
-	if items, _ := SlashArgItems("/skill li", data); !has(items, "list") {
-		t.Errorf("/skill li should still complete to list; got %v", labelsOf(items))
+	// and hidden menu commands stay hidden while direct typed execution remains
+	// handled by runSkillSubcommand.
+	if items, _ := SlashArgItems("/skills li", data); len(items) != 0 {
+		t.Errorf("/skills li should not offer hidden list suggestion; got %v", labelsOf(items))
 	}
 }

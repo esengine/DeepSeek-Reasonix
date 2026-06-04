@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -106,16 +107,45 @@ func TestMCPManagerHidesComposerBox(t *testing.T) {
 	m0, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = m0.(chatTUI)
 
-	cardRows := strings.Count(m.renderMCPManager(), "\n") + 1
-	if got, want := m.bottomRows(), cardRows+2; got != want {
-		t.Fatalf("bottomRows with MCP manager = %d, want %d (MCP panel + status rows, no composer box)", got, want)
+	footerRows := strings.Count(m.renderMainManagerFooter(), "\n") + 1
+	if got, want := m.bottomRows(), footerRows+2; got != want {
+		t.Fatalf("bottomRows with MCP manager = %d, want %d (footer + status rows; manager content renders in main area)", got, want)
+	}
+	if !m.hideComposer() {
+		t.Fatal("MCP manager should hide the composer")
 	}
 	content := ansi.Strip(m.View().Content)
 	if !strings.Contains(content, "Manage MCP servers") {
 		t.Fatalf("MCP manager missing from view:\n%s", content)
 	}
+	if !strings.Contains(content, "Enter for details") {
+		t.Fatalf("MCP footer hint missing from view:\n%s", content)
+	}
 	if !strings.Contains(content, "· MCP") {
 		t.Fatalf("MCP status line missing from view:\n%s", content)
+	}
+}
+
+func TestMainManagerFollowsTranscriptWithoutTopPadding(t *testing.T) {
+	ctrl := control.New(control.Options{})
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
+	m0, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
+	m = m0.(chatTUI)
+	m.wrappedLines = []string{"reasonix chat", "› /mcp"}
+
+	out := ansi.Strip(m.renderTranscriptWithMainManager("Manage MCP servers\n1 servers"))
+	lines := strings.Split(out, "\n")
+	if len(lines) < 4 {
+		t.Fatalf("rendered manager area too short:\n%s", out)
+	}
+	if !strings.Contains(lines[0], "reasonix chat") || !strings.Contains(lines[1], "/mcp") {
+		t.Fatalf("transcript lines should stay above manager:\n%s", out)
+	}
+	if strings.TrimSpace(lines[2]) != "" {
+		t.Fatalf("expected one separator line before manager, got %q in:\n%s", lines[2], out)
+	}
+	if !strings.Contains(lines[3], "Manage MCP servers") {
+		t.Fatalf("manager should follow transcript immediately, got line 3 %q in:\n%s", lines[3], out)
 	}
 }
 
@@ -863,5 +893,57 @@ func TestAgentEventCoalescesBurst(t *testing.T) {
 	}
 	if len(m.eventCh) != 0 {
 		t.Errorf("channel should be fully drained, %d left", len(m.eventCh))
+	}
+}
+
+func TestShortTokens(t *testing.T) {
+	cases := []struct {
+		n    int
+		want string
+	}{
+		{0, "0"},
+		{999, "999"},
+		{1000, "1.0K"},
+		{1500, "1.5K"},
+		{1999, "2.0K"},
+		{9999, "10.0K"},
+		{142000, "142.0K"},
+		{999999, "1.0M"},
+		{1000000, "1.0M"},
+		{1500000, "1.5M"},
+	}
+	for _, tc := range cases {
+		t.Run(fmt.Sprintf("n=%d", tc.n), func(t *testing.T) {
+			got := shortTokens(tc.n)
+			if got != tc.want {
+				t.Errorf("shortTokens(%d) = %q, want %q", tc.n, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestTruncateSubject(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		width int
+	}{
+		{"short ASCII", "rm file", 60},
+		{"long ASCII", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 60},
+		{"CJK at 60", "日本語の文章は通常、表示幅が広いため、端末の横幅を超えてしまうことがあります。", 60},
+		{"CJK at 30", "日本語の文章は通常、表示幅が広いため、端末の横幅を超えてしまうことがあります。", 30},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := truncateSubject(tc.input, tc.width)
+			wantMax := tc.width - 28
+			if wantMax < 16 {
+				wantMax = 16
+			}
+			w := ansi.StringWidth(got)
+			if w > wantMax {
+				t.Errorf("truncateSubject(%q, %d) = %q (width %d), want visible width <= %d", tc.input, tc.width, got, w, wantMax)
+			}
+		})
 	}
 }

@@ -23,6 +23,19 @@ type BranchMeta struct {
 	ForkMessageIndex int       `json:"fork_message_index,omitempty"`
 	CreatedAt        time.Time `json:"created_at"`
 	UpdatedAt        time.Time `json:"updated_at"`
+	Scope            string    `json:"scope,omitempty"`
+	WorkspaceRoot    string    `json:"workspace_root,omitempty"`
+	TopicID          string    `json:"topic_id,omitempty"`
+	TopicTitle       string    `json:"topic_title,omitempty"`
+}
+
+func (m BranchMeta) DefaultScope() string {
+	switch m.Scope {
+	case "project":
+		return "project"
+	default:
+		return "global"
+	}
 }
 
 // BranchInfo combines sidecar metadata with the session file details needed for
