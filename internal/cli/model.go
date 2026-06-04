@@ -33,6 +33,28 @@ func (m *chatTUI) runModelSubcommand(input string) {
 		m.notice(fmt.Sprintf(i18n.M.ModelAlreadyOnFmt, ref))
 		return
 	}
+
+	// Adapt effort to the new provider's capability before building.
+	cfg, cfgErr := config.Load()
+	if cfgErr == nil {
+		if newEntry, ok := cfg.ResolveModel(ref); ok {
+			newCaps := config.EffortCapabilityForEntry(newEntry)
+			warning := cfg.Session.AdaptToProvider(newCaps)
+			if warning != "" {
+				m.notice(fmt.Sprintf("effort: %s", warning))
+			}
+			// Save the adapted session effort.
+			path := config.UserConfigPath()
+			if path != "" {
+				edit := config.LoadForEdit(path)
+				edit.Session.Effort = cfg.Session.Effort
+				if err := edit.SaveTo(path); err != nil {
+					slog.Warn("model switch: save adapted effort failed", "err", err)
+				}
+			}
+		}
+	}
+
 	carried := m.ctrl.History()
 	prevPath := m.ctrl.SessionPath()
 	if err := m.ctrl.Snapshot(); err != nil {

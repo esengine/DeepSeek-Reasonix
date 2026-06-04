@@ -284,8 +284,8 @@ func TestEffortCommandWritesCurrentDeepSeekProvider(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read saved config: %v", err)
 	}
-	if !strings.Contains(string(body), `effort      = "max"`) {
-		t.Fatalf("saved config missing effort=max:\n%s", body)
+	if !strings.Contains(string(body), `effort   = "max"`) {
+		t.Fatalf("saved config missing session effort=max:\n%s", body)
 	}
 }
 
@@ -293,10 +293,11 @@ func TestEffortCommandRejectsUnsupportedProvider(t *testing.T) {
 	isolateUserConfig(t)
 
 	m := newTestChatTUI()
-	m.ctrl = control.New(control.Options{Label: "mimo-pro"})
-	m.modelRef = "mimo-pro/mimo-v2.5-pro"
+	// Use a generic OpenAI provider without SupportedEfforts - should not support effort.
+	m.ctrl = control.New(control.Options{Label: "generic-openai"})
+	m.modelRef = "generic-openai/gpt-4"
 	m.buildController = func(_ string, _ []provider.Message, _ string) (*control.Controller, error) {
-		return control.New(control.Options{Label: "mimo-pro"}), nil
+		return control.New(control.Options{Label: "generic-openai"}), nil
 	}
 
 	if cmd := m.runEffortCommand("/effort max"); cmd != nil {
@@ -330,6 +331,35 @@ func TestEffortCommandAutoClearsProviderEffort(t *testing.T) {
 	section := providerSection(string(body), "deepseek-flash")
 	if strings.Contains(section, `effort      = "`) {
 		t.Fatalf("auto should clear saved deepseek-flash effort:\n%s", section)
+	}
+}
+
+func TestEffortCommandDegradesUnsupportedLevel(t *testing.T) {
+	isolateUserConfig(t)
+
+	m := newTestChatTUI()
+	// MiMo has SupportedEfforts = ["auto", "low", "medium", "high"].
+	// Setting "max" should degrade to "auto" (the default for MiMo).
+	m.ctrl = control.New(control.Options{Label: "mimo-pro"})
+	m.modelRef = "mimo-pro/mimo-v2.5-pro"
+	m.buildController = func(_ string, _ []provider.Message, _ string) (*control.Controller, error) {
+		return control.New(control.Options{Label: "mimo-pro"}), nil
+	}
+
+	cmd := m.runEffortCommand("/effort max")
+	if cmd == nil {
+		t.Fatal("/effort max on MiMo should return a rebuild command (with degradation)")
+	}
+
+	// Verify the saved config has the degraded effort (auto = empty, not written).
+	configPath := config.UserConfigPath()
+	body, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read saved config: %v", err)
+	}
+	// "auto" maps to "" which means the effort field should not be written.
+	if strings.Contains(string(body), `effort   = "max"`) {
+		t.Fatalf("saved config should NOT have effort=max (should be degraded):\n%s", body)
 	}
 }
 

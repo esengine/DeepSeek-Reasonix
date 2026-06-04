@@ -834,6 +834,8 @@ func familyOf(name string) providerFamily {
 		return providerFamily{key: "deepseek", name: "DeepSeek", desc: "fast & cheap, plus a stronger Pro SKU"}
 	case strings.HasPrefix(name, "mimo"):
 		return providerFamily{key: "mimo", name: "MiMo (Xiaomi)", desc: "long-horizon agentic"}
+	case strings.HasPrefix(name, "anthropic"):
+		return providerFamily{key: "anthropic", name: "Anthropic", desc: "Claude models with extended thinking"}
 	default:
 		return providerFamily{key: name, name: name}
 	}

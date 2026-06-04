@@ -23,7 +23,12 @@ func (m *chatTUI) runEffortCommand(input string) tea.Cmd {
 
 	args := tokenizeArgs(input)
 	if len(args) < 2 {
-		current := config.EffortDisplay(entry)
+		cfg, _ := config.Load()
+		effort := ""
+		if cfg != nil {
+			effort = cfg.Session.Effort
+		}
+		current := config.EffortDisplay(effort)
 		options := strings.Join(cap.Levels, "|")
 		m.notice(fmt.Sprintf("effort for %s: %s (default: %s; options: %s)", entry.Name, current, cap.Default, options))
 		return nil
@@ -32,11 +37,18 @@ func (m *chatTUI) runEffortCommand(input string) tea.Cmd {
 		m.notice("usage: /effort " + strings.Join(cap.Levels, "|"))
 		return nil
 	}
-	effort, err := config.NormalizeEffort(entry, args[1])
-	if err != nil {
-		m.notice(err.Error())
+
+	// Use ResolveEffort for validation and degradation with warning.
+	res := config.ResolveEffort(cap, args[1])
+	if res.Blocked {
+		m.notice(fmt.Sprintf("effort is not configurable for %s", entry.Name))
 		return nil
 	}
+	if res.Warning != "" {
+		m.notice(fmt.Sprintf("effort: %s", res.Warning))
+	}
+	effort := res.Effort
+
 	if m.buildController == nil {
 		m.notice("model switching is unavailable in this session")
 		return nil
@@ -52,31 +64,19 @@ func (m *chatTUI) runEffortCommand(input string) tea.Cmd {
 		return nil
 	}
 	edit := config.LoadForEdit(path)
-	if _, ok := edit.Provider(entry.Name); !ok {
-		if err := edit.UpsertProvider(*entry); err != nil {
-			m.notice("effort: " + err.Error())
-			return nil
-		}
-	}
+	edit.Session.Effort = effort
 	if entry.Kind == "anthropic" && effort != "" && entry.Thinking == "" {
 		if err := edit.SetProviderThinking(entry.Name, "adaptive"); err != nil {
 			m.notice("effort: " + err.Error())
 			return nil
 		}
 	}
-	if err := edit.SetProviderEffort(entry.Name, effort); err != nil {
-		m.notice("effort: " + err.Error())
-		return nil
-	}
 	if err := edit.SaveTo(path); err != nil {
 		m.notice("effort: " + err.Error())
 		return nil
 	}
 
-	display := effort
-	if display == "" {
-		display = "auto"
-	}
+	display := config.EffortDisplay(effort)
 	m.notice(fmt.Sprintf("setting effort for %s to %s…", entry.Name, display))
 	carried := m.ctrl.History()
 	prevPath := m.ctrl.SessionPath()
@@ -133,5 +133,10 @@ func (m *chatTUI) refreshEffortStatus() {
 	if !config.EffortCapabilityForEntry(entry).Supported {
 		return
 	}
-	m.effortLevel = config.EffortDisplay(entry)
+	cfg, _ := config.Load()
+	effort := ""
+	if cfg != nil {
+		effort = cfg.Session.Effort
+	}
+	m.effortLevel = config.EffortDisplay(effort)
 }
