@@ -104,6 +104,7 @@ effort         = "high"
 
 [tools]
 enabled = []   # empty = all built-in tools
+bash_timeout_seconds = 0   # 0 = no foreground timeout; cancellation still stops the process
 
 # CodeGraph code intelligence (symbol/call-graph search via tree-sitter + SQLite),
 # a built-in MCP server giving the agent codegraph_* search / context / explore /

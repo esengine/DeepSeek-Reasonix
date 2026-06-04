@@ -385,6 +385,7 @@ api_key_env = "MIMO_API_KEY"
 
 [tools]
 enabled = []   # omit/empty = all built-ins
+bash_timeout_seconds = 0   # 0 = no foreground timeout; cancellation still stops the process
 
 [skills]
 # paths = ["~/my-skills", "../shared/skills"]   # extra custom skill roots
