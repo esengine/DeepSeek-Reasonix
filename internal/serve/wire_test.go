@@ -21,9 +21,17 @@ func TestToWire(t *testing.T) {
 			Kind:    event.Usage,
 			Usage:   &provider.Usage{PromptTokens: 1000, CompletionTokens: 200, TotalTokens: 1200, CacheHitTokens: 900, CacheMissTokens: 100},
 			Pricing: &provider.Pricing{CacheHit: 0.02, Input: 1, Output: 2},
+			CacheDiagnostics: &event.CacheDiagnostics{
+				PrefixChanged:       true,
+				PrefixChangeReasons: []string{"log_rewrite"},
+				LogRewriteVersion:   1,
+			},
 		})
 		if w.Usage == nil || w.Usage.TotalTokens != 1200 || w.Usage.CostUSD <= 0 {
 			t.Errorf("usage = %+v", w.Usage)
+		}
+		if w.Usage.CacheDiagnostics == nil || w.Usage.CacheDiagnostics.PrefixChangeReasons[0] != "log_rewrite" {
+			t.Errorf("cache diagnostics = %+v", w.Usage.CacheDiagnostics)
 		}
 	})
 

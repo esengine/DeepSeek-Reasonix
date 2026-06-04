@@ -140,6 +140,11 @@ type Agent struct {
 	sessCacheHit  atomic.Int64
 	sessCacheMiss atomic.Int64
 
+	// lastPrefixShape records the previous provider request's cacheable prefix
+	// so usage events can explain prefix churn on the next request.
+	lastPrefixShape     PrefixShape
+	haveLastPrefixShape bool
+
 	// planMode, when true, refuses any tool call whose ReadOnly() is false.
 	// The system prompt and tool list never change with the toggle so the
 	// prompt-cache prefix stays valid; the gating happens at execute time
@@ -373,13 +378,24 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 
 	finalReadinessBlocks := 0
 	for step := 0; a.maxSteps <= 0 || step < a.maxSteps; step++ {
+		schemas := a.tools.Schemas()
+		prefixShape := a.capturePrefixShape(schemas)
+		prevPrefixShape := a.lastPrefixShape
+		if !a.haveLastPrefixShape {
+			prevPrefixShape = prefixShape
+		}
+
 		text, reasoning, signature, calls, usage, err := a.stream(ctx, step+1)
 		if err != nil {
 			return err
 		}
+		cacheDiagnostics := CompareShape(prevPrefixShape, prefixShape, usage)
+		a.lastPrefixShape = prefixShape
+		a.haveLastPrefixShape = true
 		if usage != nil && usage.TotalTokens > 0 {
 			a.sink.Emit(event.Event{Kind: event.Usage, Usage: usage, Pricing: a.pricing,
-				SessionHit: int(a.sessCacheHit.Load()), SessionMiss: int(a.sessCacheMiss.Load())})
+				CacheDiagnostics: &cacheDiagnostics,
+				SessionHit:       int(a.sessCacheHit.Load()), SessionMiss: int(a.sessCacheMiss.Load())})
 		}
 		if msg, ok := finishReasonMessage(usage); ok {
 			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: msg})
@@ -585,6 +601,24 @@ func (a *Agent) stream(ctx context.Context, turn int) (string, string, string, [
 		a.sink.Emit(event.Event{Kind: event.Message, Text: text.String(), Reasoning: display})
 	}
 	return text.String(), stored, signature, calls, usage, nil
+}
+
+func (a *Agent) capturePrefixShape(schemas []provider.ToolSchema) PrefixShape {
+	return CaptureShape(a.systemPrompt(), schemas, a.session.RewriteVersion())
+}
+
+func (a *Agent) systemPrompt() string {
+	var b strings.Builder
+	for _, m := range a.session.Messages {
+		if m.Role != provider.RoleSystem {
+			continue
+		}
+		if b.Len() > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(m.Content)
+	}
+	return b.String()
 }
 
 // executeBatch dispatches one model turn's tool calls. A ToolDispatch event is

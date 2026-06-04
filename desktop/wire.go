@@ -67,17 +67,30 @@ type wireTool struct {
 }
 
 type wireUsage struct {
-	PromptTokens     int `json:"promptTokens"`
-	CompletionTokens int `json:"completionTokens"`
-	TotalTokens      int `json:"totalTokens"`
-	CacheHitTokens   int `json:"cacheHitTokens"`
-	CacheMissTokens  int `json:"cacheMissTokens"`
-	ReasoningTokens  int `json:"reasoningTokens,omitempty"`
+	PromptTokens     int                   `json:"promptTokens"`
+	CompletionTokens int                   `json:"completionTokens"`
+	TotalTokens      int                   `json:"totalTokens"`
+	CacheHitTokens   int                   `json:"cacheHitTokens"`
+	CacheMissTokens  int                   `json:"cacheMissTokens"`
+	ReasoningTokens  int                   `json:"reasoningTokens,omitempty"`
+	CacheDiagnostics *wireCacheDiagnostics `json:"cacheDiagnostics,omitempty"`
 	// Session-cumulative cache tokens — the status line shows the aggregate
 	// hit-rate Σhit/Σ(hit+miss), steadier than the single-turn CacheHitTokens.
 	SessionCacheHitTokens  int     `json:"sessionCacheHitTokens"`
 	SessionCacheMissTokens int     `json:"sessionCacheMissTokens"`
 	CostUSD                float64 `json:"costUsd,omitempty"`
+}
+
+type wireCacheDiagnostics struct {
+	PrefixHash          string   `json:"prefixHash"`
+	PrefixChanged       bool     `json:"prefixChanged"`
+	PrefixChangeReasons []string `json:"prefixChangeReasons,omitempty"`
+	SystemHash          string   `json:"systemHash"`
+	ToolsHash           string   `json:"toolsHash"`
+	LogRewriteVersion   int      `json:"logRewriteVersion"`
+	ToolSchemaTokens    int      `json:"toolSchemaTokens"`
+	CacheMissTokens     int      `json:"cacheMissTokens"`
+	CacheHitTokens      int      `json:"cacheHitTokens"`
 }
 
 type wireApproval struct {
@@ -144,6 +157,9 @@ func toWire(e event.Event) wireEvent {
 				CacheMissTokens: u.CacheMissTokens, ReasoningTokens: u.ReasoningTokens,
 				SessionCacheHitTokens: e.SessionHit, SessionCacheMissTokens: e.SessionMiss,
 			}
+			if e.CacheDiagnostics != nil {
+				w.Usage.CacheDiagnostics = toWireCacheDiagnostics(e.CacheDiagnostics)
+			}
 			if e.Pricing != nil {
 				w.Usage.CostUSD = e.Pricing.Cost(u)
 			}
@@ -166,4 +182,18 @@ func toWire(e event.Event) wireEvent {
 		w.RetryMax = e.RetryMax
 	}
 	return w
+}
+
+func toWireCacheDiagnostics(d *event.CacheDiagnostics) *wireCacheDiagnostics {
+	return &wireCacheDiagnostics{
+		PrefixHash:          d.PrefixHash,
+		PrefixChanged:       d.PrefixChanged,
+		PrefixChangeReasons: append([]string(nil), d.PrefixChangeReasons...),
+		SystemHash:          d.SystemHash,
+		ToolsHash:           d.ToolsHash,
+		LogRewriteVersion:   d.LogRewriteVersion,
+		ToolSchemaTokens:    d.ToolSchemaTokens,
+		CacheMissTokens:     d.CacheMissTokens,
+		CacheHitTokens:      d.CacheHitTokens,
+	}
 }

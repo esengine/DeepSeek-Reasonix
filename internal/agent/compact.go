@@ -146,6 +146,7 @@ func (a *Agent) compact(ctx context.Context, trigger, instructions string) error
 	})
 	compacted = append(compacted, msgs[start:]...)
 	a.session.Replace(compacted)
+	a.session.IncrementRewrite()
 
 	a.sink.Emit(event.Event{Kind: event.CompactionDone, Compaction: event.Compaction{
 		Trigger: trigger, Messages: len(region), Summary: summary, Archive: archived,
