@@ -255,7 +255,7 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		}
 		b.WriteString("]\n")
 	}
-	fmt.Fprintf(&b, "bash_timeout_seconds = %d   # 0 = no foreground timeout; cancellation still stops the process\n\n", c.BashTimeoutSeconds())
+	fmt.Fprintf(&b, "bash_timeout_seconds = %d   # foreground safety cap; set 0 for no tool-local cap\n\n", c.BashTimeoutSeconds())
 
 	b.WriteString("[codegraph]\n")
 	fmt.Fprintf(&b, "enabled      = %v   # built-in MCP server; off by default for first-run sessions\n", c.Codegraph.Enabled)

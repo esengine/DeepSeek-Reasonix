@@ -176,7 +176,7 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 func TestAddBuiltinsWithWorkspaceRootKeepsSessionTools(t *testing.T) {
 	reg := tool.NewRegistry()
 	var stderr bytes.Buffer
-	addBuiltins(reg, nil, []string{t.TempDir()}, sandbox.Spec{}, builtin.SearchSpec{}, &stderr, t.TempDir())
+	addBuiltins(reg, nil, []string{t.TempDir()}, sandbox.Spec{}, 120*time.Second, builtin.SearchSpec{}, &stderr, t.TempDir())
 	for _, name := range []string{
 		"todo_write",
 		"complete_step",
@@ -504,8 +504,30 @@ func TestBuildMigratesLegacySessionsFromConfigSessionDir(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "xdg-config"))
 	t.Setenv("AppData", filepath.Join(home, "AppData"))
 
-	proj := t.TempDir()
+	proj, err := os.MkdirTemp("", "reasonix-legacy-session-project-*")
+	if err != nil {
+		t.Fatalf("temp project dir: %v", err)
+	}
+	t.Cleanup(func() {
+		var err error
+		for i := 0; i < 20; i++ {
+			if err = os.RemoveAll(proj); err == nil {
+				return
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		if runtime.GOOS == "windows" {
+			t.Logf("leaving temp project dir %s after Windows cleanup failed: %v", proj, err)
+			return
+		}
+		t.Fatalf("remove temp project dir %s: %v", proj, err)
+	})
+	oldwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get cwd: %v", err)
+	}
 	t.Chdir(proj)
+	defer func() { _ = os.Chdir(oldwd) }()
 	writeFile(t, proj, "reasonix.toml", "[codegraph]\nenabled = false\n")
 
 	legacyDir := config.SessionDir()

@@ -112,7 +112,7 @@ api_key_env = "DEEPSEEK_API_KEY"
 
 [tools]
 enabled = []   # 省略/为空 = 全部内置工具
-bash_timeout_seconds = 0   # 0 = 前台命令不设超时；取消操作仍会停止进程
+bash_timeout_seconds = 120   # 前台安全上限；设为 0 表示不设工具层超时
 
 [skills]
 # paths = ["~/my-skills", "../shared/skills"]   # 额外的自定义技能目录

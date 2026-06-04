@@ -27,13 +27,13 @@ func TestBashForegroundTimeoutConfig(t *testing.T) {
 	}
 }
 
-func TestBashZeroTimeoutDoesNotCapForeground(t *testing.T) {
+func TestBashExplicitZeroTimeoutDoesNotCapForeground(t *testing.T) {
 	sh := sandbox.ResolveShell()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	start := time.Now()
-	out, err := (bash{shell: sh}).Execute(ctx, argsJSON(t, map[string]any{"command": oneSecondCommand(sh)}))
+	out, err := (bash{shell: sh, timeout: 0}).Execute(ctx, argsJSON(t, map[string]any{"command": oneSecondCommand(sh)}))
 	elapsed := time.Since(start)
 	if err != nil {
 		t.Fatalf("zero-timeout foreground command failed: %v (out=%q)", err, out)
@@ -73,8 +73,8 @@ func oneSecondCommand(sh sandbox.Shell) string {
 	return "sleep 1; printf done"
 }
 
-func BenchmarkBashForegroundTimeoutDisabled(b *testing.B) {
-	bt := bash{}
+func BenchmarkBashForegroundTimeoutExplicitZero(b *testing.B) {
+	bt := bash{timeout: 0}
 	ctx := context.Background()
 	for b.Loop() {
 		runCtx := ctx
@@ -88,8 +88,8 @@ func BenchmarkBashForegroundTimeoutDisabled(b *testing.B) {
 	}
 }
 
-func BenchmarkBashForegroundTimeoutConfigured(b *testing.B) {
-	bt := bash{timeout: 10 * time.Minute}
+func BenchmarkBashForegroundTimeoutConfiguredCap(b *testing.B) {
+	bt := bash{timeout: 120 * time.Second}
 	ctx := context.Background()
 	for b.Loop() {
 		runCtx := ctx

@@ -541,18 +541,21 @@ func (e *ProviderEntry) HasModel(m string) bool {
 // ToolsConfig selects which built-in tools are enabled. Empty means all of them.
 type ToolsConfig struct {
 	Enabled            []string     `toml:"enabled"`
-	BashTimeoutSeconds int          `toml:"bash_timeout_seconds"`
+	BashTimeoutSeconds *int         `toml:"bash_timeout_seconds"`
 	Search             SearchConfig `toml:"search"`
 }
 
-// BashTimeoutSeconds returns the foreground bash timeout in seconds. Zero means
-// no tool-local cap; negative config values are treated as zero so a typo cannot
-// produce a nonsensical negative duration.
+const defaultBashTimeoutSeconds = 120
+
+// BashTimeoutSeconds returns the foreground bash timeout in seconds. An omitted
+// config keeps the historical 120s safety cap, explicit 0 disables the
+// tool-local cap, and positive values set a custom cap. Negative values fall
+// back to the default so a typo cannot silently remove the safety net.
 func (c *Config) BashTimeoutSeconds() int {
-	if c.Tools.BashTimeoutSeconds < 0 {
-		return 0
+	if c.Tools.BashTimeoutSeconds == nil || *c.Tools.BashTimeoutSeconds < 0 {
+		return defaultBashTimeoutSeconds
 	}
-	return c.Tools.BashTimeoutSeconds
+	return *c.Tools.BashTimeoutSeconds
 }
 
 // SearchConfig tunes the grep tool's engine. Engine is "auto" (default — use
