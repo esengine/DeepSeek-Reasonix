@@ -70,8 +70,8 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	if got.Agent.Temperature != orig.Agent.Temperature {
 		t.Errorf("temperature = %v, want %v", got.Agent.Temperature, orig.Agent.Temperature)
 	}
-	if got.Agent.AutoPlan != "ask" {
-		t.Errorf("auto_plan = %q, want ask", got.Agent.AutoPlan)
+	if got.Agent.AutoPlan != "off" {
+		t.Errorf("auto_plan = %q, want off", got.Agent.AutoPlan)
 	}
 	if got.Agent.AutoPlanClassifier != "deepseek-flash" {
 		t.Errorf("auto_plan_classifier = %q, want deepseek-flash", got.Agent.AutoPlanClassifier)
