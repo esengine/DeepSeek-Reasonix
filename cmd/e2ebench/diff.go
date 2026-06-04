@@ -150,6 +150,12 @@ func resetTree(repo string) {
 func goBuildAll(repo string) (bool, string) {
 	cmd := exec.Command("go", "build", "./...")
 	cmd.Dir = repo
+	// Same WaitDelay contract as runTests/runTask: if `go build` hangs
+	// (a corrupted module cache, a circular replace directive, a
+	// compiler driver that can't reach the toolchain), the bench would
+	// otherwise wedge. 2 minutes is plenty for a clean build; the wait
+	// itself is just the safety net.
+	cmd.WaitDelay = 2 * time.Minute
 	out, err := cmd.CombinedOutput()
 	return err == nil, string(out)
 }
@@ -512,6 +518,13 @@ func runTests(repo, testCmd string, pkgs []string) (bool, string) {
 	args := append(fields[1:], pkgs...)
 	cmd := exec.Command(fields[0], args...)
 	cmd.Dir = repo
+	// runTests is the gate that decides whether a diff-mode run passes; if
+	// `go test` hangs (e.g. a test that opens a network port and blocks on
+	// Accept, or a `-race` race-detector crash that wedges the test binary),
+	// the whole bench hangs. 5 minutes is the cap go's own `go test -timeout`
+	// defaults to; long enough for the slowest legitimate test on a big
+	// monorepo, short enough that a hung run can't pin the bench.
+	cmd.WaitDelay = 5 * time.Minute
 	out, err := cmd.CombinedOutput()
 	return err == nil, string(out)
 }
