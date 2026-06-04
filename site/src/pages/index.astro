@@ -4,6 +4,14 @@ const R2BASE = 'https://pub-147fb53b9c1e4bbf891a257968619ea7.r2.dev';
 const R2 = `${R2BASE}/latest`;
 const repo = 'https://github.com/esengine/DeepSeek-Reasonix';
 const DT053 = `${R2BASE}/desktop-v0.53.0`;
+
+// v1.x (Go preview) version, resolved from the published manifest at build time
+// and refreshed at runtime — a new release updates the site with no manual edit.
+let goVer = '1.1.0';
+try {
+  const r = await fetch(`${R2}/latest.json`);
+  if (r.ok) { const d = await r.json(); goVer = String(d.version || '').replace(/^v/, '') || goVer; }
+} catch {}
 ---
 <Base
   title="Reasonix — DeepSeek-native coding agent for your terminal"
@@ -27,7 +35,7 @@ const DT053 = `${R2BASE}/desktop-v0.53.0`;
 
   <a id="top"></a>
   <header class="hero wrap">
-    <div class="kicker"><span class="dot"></span><span data-en>Stable v0.53 on npm · v1.0.0 Go rewrite — preview · MIT</span><span data-zh>npm 稳定版 v0.53 · v1.0.0 Go 重写(预览)· MIT</span></div>
+    <div class="kicker"><span class="dot"></span><span data-en>Stable v0.53 on npm · v<span class="rxv">{goVer}</span> Go rewrite — preview · MIT</span><span data-zh>npm 稳定版 v0.53 · v<span class="rxv">{goVer}</span> Go 重写(预览)· MIT</span></div>
     <h1>
       <span data-en>A <em>DeepSeek</em>-native agent for your terminal.</span>
       <span data-zh><em>DeepSeek</em> 原生的终端编码 Agent。</span>
@@ -50,14 +58,14 @@ const DT053 = `${R2BASE}/desktop-v0.53.0`;
             <div class="cmdrow"><span class="hcmd"><span class="p">$ </span>reasonix code</span><button class="cp" data-copy="reasonix code"><span data-en>Copy</span><span data-zh>复制</span></button></div>
           </div>
           <div class="cmdgroup">
-            <div class="cmdtag pre">next · v1.0.0</div>
+            <div class="cmdtag pre">next · v<span class="rxv">{goVer}</span></div>
             <div class="cmdrow"><span class="hcmd"><span class="p">$ </span>npm i -g reasonix@next</span><button class="cp" data-copy="npm i -g reasonix@next"><span data-en>Copy</span><span data-zh>复制</span></button></div>
             <div class="cmdrow"><span class="hcmd"><span class="p">$ </span>reasonix</span><button class="cp" data-copy="reasonix"><span data-en>Copy</span><span data-zh>复制</span></button></div>
           </div>
         </div>
         <div class="hpanel" data-h="brew">
           <div class="cmdgroup">
-            <div class="cmdtag pre"><span data-en>v1.0.0 only</span><span data-zh>仅 v1.0.0</span></div>
+            <div class="cmdtag pre"><span data-en>v<span class="rxv">{goVer}</span> only</span><span data-zh>仅 v<span class="rxv">{goVer}</span></span></div>
             <div class="cmdrow"><span class="hcmd"><span class="p">$ </span>brew install esengine/reasonix/reasonix</span><button class="cp" data-copy="brew install esengine/reasonix/reasonix"><span data-en>Copy</span><span data-zh>复制</span></button></div>
             <div class="cmdrow"><span class="hcmd"><span class="p">$ </span>reasonix</span><button class="cp" data-copy="reasonix"><span data-en>Copy</span><span data-zh>复制</span></button></div>
           </div>
@@ -72,7 +80,7 @@ const DT053 = `${R2BASE}/desktop-v0.53.0`;
             </div>
           </div>
           <div class="dlgroup">
-            <div class="dllabel"><span class="dot pre"></span><span data-en>v1.0.0 · Go rewrite — preview</span><span data-zh>v1.0.0 · Go 重写(预览)</span></div>
+            <div class="dllabel"><span class="dot pre"></span><span data-en>v<span class="rxv">{goVer}</span> · Go rewrite — preview</span><span data-zh>v<span class="rxv">{goVer}</span> · Go 重写(预览)</span></div>
             <div class="dlrow">
               <a class="hdl" href={`${R2}/Reasonix-darwin-arm64.zip`} download>macOS</a>
               <a class="hdl" href={`${R2}/Reasonix-windows-amd64-installer.exe`} download>Windows</a>
@@ -83,14 +91,14 @@ const DT053 = `${R2BASE}/desktop-v0.53.0`;
       </div>
     </div>
     <p class="hnote">
-      <span data-en><b>v0.53</b> — the stable line, runs on Node. <b>v1.0.0</b> — the Go rewrite, one binary, no Node, in preview. <a href={`${repo}/releases/tag/v1.0.0`}>v1.0.0 release notes →</a></span>
-      <span data-zh><b>v0.53</b> —— 稳定线,基于 Node。<b>v1.0.0</b> —— Go 重写、单二进制、无需 Node,预览中。<a href={`${repo}/releases/tag/v1.0.0`}>v1.0.0 更新说明 →</a></span>
+      <span data-en><b>v0.53</b> — the stable line, runs on Node. <b>v<span class="rxv">{goVer}</span></b> — the Go rewrite, one binary, no Node, in preview. <a class="rxnotes" href={`${repo}/releases/tag/v${goVer}`}>v<span class="rxv">{goVer}</span> release notes →</a></span>
+      <span data-zh><b>v0.53</b> —— 稳定线,基于 Node。<b>v<span class="rxv">{goVer}</span></b> —— Go 重写、单二进制、无需 Node,预览中。<a class="rxnotes" href={`${repo}/releases/tag/v${goVer}`}>v<span class="rxv">{goVer}</span> 更新说明 →</a></span>
     </p>
     <a class="ghlink" href={repo}><span data-en>★ Star on GitHub</span><span data-zh>★ 在 GitHub 点星</span></a>
 
     <div class="term" id="term">
       <div class="tbar"><i></i><i></i><i></i><span>~/app — reasonix chat</span></div>
-      <div class="tbody" id="tbody"><span class="ln"><span class="u">$</span> reasonix chat</span><span class="ln"><span class="i">reasonix v1.0.0 · model deepseek-v4-flash · ~/app</span></span><span class="ln"><span class="d">cache 94.2% hit · session 18m · cost $0.043</span></span><span class="ln"><span class="u">›</span> add retry with backoff to the http client</span><span class="ln"><span class="e">edit</span>  internal/net/client.go        <span class="c">+24 −3</span></span><span class="ln"><span class="e">edit</span>  internal/net/client_test.go   <span class="c">+41 −0</span></span><span class="ln"><span class="k">✓</span> go test ./internal/net/   ok  0.21s</span><span class="ln"><span class="d">2 files · cache 94.2% → 95.1%</span><span class="caret"></span></span></div>
+      <div class="tbody" id="tbody"><span class="ln"><span class="u">$</span> reasonix chat</span><span class="ln"><span class="i">reasonix v<span class="rxv">{goVer}</span> · model deepseek-v4-flash · ~/app</span></span><span class="ln"><span class="d">cache 94.2% hit · session 18m · cost $0.043</span></span><span class="ln"><span class="u">›</span> add retry with backoff to the http client</span><span class="ln"><span class="e">edit</span>  internal/net/client.go        <span class="c">+24 −3</span></span><span class="ln"><span class="e">edit</span>  internal/net/client_test.go   <span class="c">+41 −0</span></span><span class="ln"><span class="k">✓</span> go test ./internal/net/   ok  0.21s</span><span class="ln"><span class="d">2 files · cache 94.2% → 95.1%</span><span class="caret"></span></span></div>
     </div>
   </header>
 
@@ -187,5 +195,19 @@ const DT053 = `${R2BASE}/desktop-v0.53.0`;
     const delays = [240, 360, 240, 520, 360, 280, 420, 320];
     let acc = 280;
     lines.forEach((ln, i) => { setTimeout(() => ln.classList.add('on'), acc); acc += delays[i] || 300; });
+
+    // Refresh the v1.x (Go preview) version from the published manifest, so the
+    // page stays current between site rebuilds.
+    fetch('https://pub-147fb53b9c1e4bbf891a257968619ea7.r2.dev/latest/latest.json', { cache: 'no-cache' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        const v = String((d && d.version) || '').replace(/^v/, '');
+        if (!v) return;
+        document.querySelectorAll('.rxv').forEach((e) => { e.textContent = v; });
+        document.querySelectorAll<HTMLAnchorElement>('a.rxnotes').forEach((a) => {
+          a.href = a.href.replace(/releases\/tag\/v[^/]*$/, 'releases/tag/v' + v);
+        });
+      })
+      .catch(() => {});
   </script>
 </Base>
