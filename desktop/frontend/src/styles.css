@@ -5541,6 +5541,7 @@ body {
   color: var(--fg);
   background: var(--hover);
 }
+
 .composer__pasted {
   display: flex;
   flex-direction: column;
@@ -5881,4 +5882,116 @@ body {
 .onboarding__skip:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+
+
+/* InlineDiff: a compact before/after diff card. The header strip carries
+   the filename, the +/- counts, and a Copy button. The body is a monospace
+   pre with +/- row coloring. The CSS tokens are the same --add-bg /
+   --del-bg the existing DiffView uses, so light/dark theme changes apply
+   uniformly. */
+.inline-diff {
+  margin: 4px 0;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  background: var(--bg-soft);
+  overflow: hidden;
+}
+.inline-diff__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 9px;
+  border-bottom: 1px solid var(--border-soft);
+  font-size: 11px;
+}
+.inline-diff__file {
+  font-family: var(--mono);
+  color: var(--fg-dim);
+  max-width: 60%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.inline-diff__stats {
+  display: inline-flex;
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+}
+.inline-diff__add {
+  color: var(--add-fg);
+}
+.inline-diff__del {
+  color: var(--del-fg);
+}
+.inline-diff__spacer {
+  flex: 1;
+}
+.inline-diff__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  font-family: var(--sans);
+  font-size: 10.5px;
+  color: var(--fg-dim);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.inline-diff__btn:hover {
+  color: var(--fg);
+  background: var(--bg-elev);
+}
+.inline-diff__body {
+  margin: 0;
+  padding: 4px 0;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.55;
+  max-height: 320px;
+  overflow: auto;
+}
+.inline-diff__row {
+  display: flex;
+  gap: 6px;
+  padding: 0 8px;
+}
+.inline-diff__row--add {
+  background: var(--add-bg);
+}
+.inline-diff__row--del {
+  background: var(--del-bg);
+}
+.inline-diff__sign {
+  width: 10px;
+  flex-shrink: 0;
+  text-align: center;
+  opacity: 0.6;
+  user-select: none;
+}
+.inline-diff__text {
+  flex: 1;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.inline-diff__more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  width: 100%;
+  padding: 5px 0;
+  font-size: 11px;
+  color: var(--fg-dim);
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--border-soft);
+  cursor: pointer;
+}
+.inline-diff__more:hover {
+  color: var(--accent);
+  background: var(--bg-elev);
+
 }
