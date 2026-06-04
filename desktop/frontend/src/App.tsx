@@ -341,6 +341,22 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      const platform = await app.Platform().catch(() => "");
+      if (cancelled || typeof document === "undefined") return;
+      if (platform) {
+        document.documentElement.dataset.platform = platform;
+      } else {
+        delete document.documentElement.dataset.platform;
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
       try {
         const needs = await app.NeedsOnboarding();
         if (!cancelled) setNeedsOnboarding(needs);
@@ -654,6 +670,7 @@ export default function App() {
           .join(" ")}
         style={layoutStyle}
       >
+        <div className="mac-window-chrome" aria-hidden="true" />
         <aside className={`sidebar${sidebarCollapsed ? " sidebar--collapsed" : ""}`} aria-label={t("sidebar.navigation")}>
           <div className="sidebar__brand">
             <img src={logo} alt="" className="sidebar__logo" />

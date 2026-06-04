@@ -44,6 +44,7 @@ import type {
 // AppBindings mirrors desktop/app.go's exported method set. Keep in sync by hand
 // (or regenerate with `wails generate module` and import wailsjs instead).
 export interface AppBindings {
+  Platform(): Promise<string>;
   Submit(input: string): Promise<void>;
   SubmitDisplay(display: string, input: string): Promise<void>;
   Cancel(): Promise<void>;
@@ -413,6 +414,9 @@ function makeMockApp(): AppBindings {
     bypass: false,
   };
   return {
+    async Platform() {
+      return "browser";
+    },
     async Submit(input) {
       cancelled = false;
       emit({ kind: "turn_started" });

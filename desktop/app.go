@@ -62,6 +62,12 @@ func NewApp() *App {
 	return &App{tabs: map[string]*WorkspaceTab{}}
 }
 
+// Platform exposes the native OS to the frontend so chrome/layout affordances can
+// stay platform-scoped instead of relying on browser user-agent guesses.
+func (a *App) Platform() string {
+	return goruntime.GOOS
+}
+
 // startup runs once the webview process is up, before the frontend can issue any
 // bound call. It captures the Wails context (needed for EventsEmit), then kicks
 // off the initialization in a background goroutine so the webview loads immediately.
