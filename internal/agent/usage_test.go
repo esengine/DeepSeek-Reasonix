@@ -10,9 +10,13 @@ import (
 
 // renderUsage drives a Usage event through a fresh TextSink (no renderer) and
 // returns what it wrote — the usage line, exercised through the event path.
-func renderUsage(u *provider.Usage, p *provider.Pricing) string {
+func renderUsage(u *provider.Usage, p *provider.Pricing, d ...*event.CacheDiagnostics) string {
 	var b strings.Builder
-	NewTextSink(&b, nil, 80).Emit(event.Event{Kind: event.Usage, Usage: u, Pricing: p})
+	var diag *event.CacheDiagnostics
+	if len(d) > 0 {
+		diag = d[0]
+	}
+	NewTextSink(&b, nil, 80).Emit(event.Event{Kind: event.Usage, Usage: u, Pricing: p, CacheDiagnostics: diag})
 	return b.String()
 }
 
@@ -53,5 +57,16 @@ func TestUsageLineDerivesMissFromHit(t *testing.T) {
 	}
 	if out := renderUsage(u, nil); !strings.Contains(out, "1133 cached / 2407 new") {
 		t.Errorf("usage line = %q (want 1133 cached / 2407 new)", out)
+	}
+}
+
+func TestUsageLineReportsPrefixChurn(t *testing.T) {
+	u := &provider.Usage{PromptTokens: 100, CompletionTokens: 10, TotalTokens: 110}
+	d := &event.CacheDiagnostics{
+		PrefixChanged:       true,
+		PrefixChangeReasons: []string{"tools", "log_rewrite"},
+	}
+	if out := renderUsage(u, nil, d); !strings.Contains(out, "cache prefix changed: tools+log_rewrite") {
+		t.Errorf("usage line = %q (want cache prefix change reason)", out)
 	}
 }

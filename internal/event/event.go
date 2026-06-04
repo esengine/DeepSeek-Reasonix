@@ -170,15 +170,31 @@ type AskAnswer struct {
 	Selected   []string
 }
 
+// CacheDiagnostics describes whether and why the cacheable prefix changed since
+// the last turn. It rides on the Usage event so every frontend can show
+// cache-churn attribution.
+type CacheDiagnostics struct {
+	PrefixHash          string
+	PrefixChanged       bool
+	PrefixChangeReasons []string // "system", "tools", "log_rewrite"
+	SystemHash          string
+	ToolsHash           string
+	LogRewriteVersion   int
+	ToolSchemaTokens    int
+	CacheMissTokens     int
+	CacheHitTokens      int
+}
+
 // Event is one increment in a turn's event stream. Read the field(s) documented
 // for Kind; the others are zero.
 type Event struct {
-	Kind      Kind
-	Text      string            // Reasoning / Text / Message / Notice / Phase
-	Reasoning string            // Message: the full reasoning chain
-	Tool      Tool              // ToolDispatch / ToolResult
-	Usage     *provider.Usage   // Usage
-	Pricing   *provider.Pricing // Usage: for cost display (nil = omit cost)
+	Kind             Kind
+	Text             string            // Reasoning / Text / Message / Notice / Phase
+	Reasoning        string            // Message: the full reasoning chain
+	Tool             Tool              // ToolDispatch / ToolResult
+	Usage            *provider.Usage   // Usage
+	Pricing          *provider.Pricing // Usage: for cost display (nil = omit cost)
+	CacheDiagnostics *CacheDiagnostics // Usage: cache-churn attribution (nil = N/A)
 	// SessionHit/SessionMiss carry cumulative cache tokens across the whole
 	// session (Usage events only), so a frontend can show the aggregate hit-rate
 	// — which doesn't crater on a short turn or after compaction — alongside

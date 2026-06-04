@@ -20,6 +20,9 @@ max_steps   = 25
 temperature = 0.0
 auto_plan   = "ask"   # off|ask|on; ask/on auto-enter plan mode for complex tasks
 # auto_plan_classifier = "deepseek-flash"   # optional; only used for borderline tasks
+soft_compact_ratio  = 0.5   # notice only; keeps the cache-first prefix intact
+compact_ratio       = 0.8   # try compacting when prompt reaches this fraction
+compact_force_ratio = 0.9   # force compacting at this high-water mark
 # planner_model = "mimo-pro"   # optional: enable two-model collaboration
 # subagent_model = "deepseek-pro"   # optional default for runAs=subagent skills
 # subagent_models = { review = "deepseek-pro", security_review = "deepseek-pro" }   # per-skill overrides

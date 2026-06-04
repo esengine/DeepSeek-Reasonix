@@ -34,6 +34,7 @@ type runMetrics struct {
 	Steps            int     `json:"steps"`
 	Cost             float64 `json:"cost"`
 	Currency         string  `json:"currency"`
+	Compactions      int     `json:"compactions"`
 }
 
 type result struct {
@@ -215,7 +216,7 @@ func grade(work, taskDir string) bool {
 func render(results []result) string {
 	var b strings.Builder
 	passed, ran := 0, 0
-	var pTok, cTok, hit, miss int
+	var pTok, cTok, hit, miss, compacts int
 	var cost float64
 	currency := ""
 	for _, r := range results {
@@ -230,6 +231,7 @@ func render(results []result) string {
 		cTok += r.CompletionTokens
 		hit += r.CacheHitTokens
 		miss += r.CacheMissTokens
+		compacts += r.Compactions
 		cost += r.Cost
 		if r.Currency != "" {
 			currency = r.Currency
@@ -237,28 +239,28 @@ func render(results []result) string {
 	}
 
 	fmt.Fprintf(&b, "## 🤖 Reasonix e2e benchmark\n\n")
-	fmt.Fprintf(&b, "**Accuracy:** %d/%d (%s) · **Cache hit:** %s · **Tokens:** %s (prompt %s / completion %s) · **Cost:** %s%.4f\n\n",
+	fmt.Fprintf(&b, "**Accuracy:** %d/%d (%s) · **Cache hit:** %s · **Tokens:** %s (prompt %s / completion %s) · **Compactions:** %d · **Cost:** %s%.4f\n\n",
 		passed, ran, pct(passed, ran), pct(hit, hit+miss),
-		comma(pTok+cTok), comma(pTok), comma(cTok), currencySym(currency), cost)
+		comma(pTok+cTok), comma(pTok), comma(cTok), compacts, currencySym(currency), cost)
 
-	fmt.Fprintf(&b, "| Task | Result | Steps | Prompt | Completion | Cache hit | Cost |\n")
-	fmt.Fprintf(&b, "|------|--------|------:|-------:|-----------:|----------:|-----:|\n")
+	fmt.Fprintf(&b, "| Task | Result | Steps | Prompt | Completion | Cache hit | Compact | Cost |\n")
+	fmt.Fprintf(&b, "|------|--------|------:|-------:|-----------:|----------:|--------:|-----:|\n")
 	for _, r := range results {
 		switch {
 		case r.Skipped:
-			fmt.Fprintf(&b, "| `%s` | ⏭️ skipped | — | — | — | — | — |\n", r.ID)
+			fmt.Fprintf(&b, "| `%s` | ⏭️ skipped | — | — | — | — | — | — |\n", r.ID)
 		default:
 			res := "❌ fail"
 			if r.Passed {
 				res = "✅ pass"
 			}
-			fmt.Fprintf(&b, "| `%s` | %s | %d | %s | %s | %s | %s%.4f |\n",
+			fmt.Fprintf(&b, "| `%s` | %s | %d | %s | %s | %s | %d | %s%.4f |\n",
 				r.ID, res, r.Steps, comma(r.PromptTokens), comma(r.CompletionTokens),
 				pct(r.CacheHitTokens, r.CacheHitTokens+r.CacheMissTokens),
-				currencySym(r.Currency), r.Cost)
+				r.Compactions, currencySym(r.Currency), r.Cost)
 		}
 	}
-	fmt.Fprintf(&b, "\n<sub>Real provider run on the PR head. Cache-hit %% is cached prompt tokens / total prompt tokens.</sub>\n")
+	fmt.Fprintf(&b, "\n<sub>Real provider run. Cache-hit %% is cached prompt tokens / total prompt tokens.</sub>\n")
 
 	notes := false
 	for _, r := range results {

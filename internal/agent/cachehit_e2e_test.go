@@ -180,7 +180,7 @@ func TestCacheHitPrefixStable(t *testing.T) {
 		}
 		t.Logf("turn %d: prompt=%d hit=%d miss=%d → 'cache %d%%' (hit/prompt=%d%%) | %s",
 			i, u.PromptTokens, u.CacheHitTokens, u.CacheMissTokens, hitRate(u), want,
-			strings.TrimSpace(FormatUsageLine(u, nil)))
+			strings.TrimSpace(FormatUsageLine(u, nil, nil)))
 		if u.CacheHitTokens+u.CacheMissTokens != u.PromptTokens {
 			t.Errorf("display denominator mismatch: hit+miss=%d != prompt=%d (status%% would read wrong)",
 				u.CacheHitTokens+u.CacheMissTokens, u.PromptTokens)

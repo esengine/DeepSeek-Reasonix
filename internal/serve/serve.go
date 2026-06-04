@@ -7,6 +7,7 @@ package serve
 
 import (
 	"context"
+	"crypto/sha256"
 	_ "embed"
 	"encoding/json"
 	"fmt"
@@ -404,8 +405,10 @@ func (s *Server) newSession(w http.ResponseWriter, _ *http.Request) {
 }
 
 // history returns the session's message log as {role, content} pairs so a
-// reconnecting client can repopulate its transcript.
-func (s *Server) history(w http.ResponseWriter, _ *http.Request) {
+// reconnecting client can repopulate its transcript. Supports ETag caching:
+// if the client sends If-None-Match with the current ETag, the server returns
+// 304 Not Modified with no body, saving bandwidth on reconnects.
+func (s *Server) history(w http.ResponseWriter, r *http.Request) {
 	type msg struct {
 		Role    string `json:"role"`
 		Content string `json:"content"`
@@ -414,13 +417,14 @@ func (s *Server) history(w http.ResponseWriter, _ *http.Request) {
 	for _, m := range s.ctl().History() {
 		out = append(out, msg{Role: string(m.Role), Content: m.Content})
 	}
-	writeJSON(w, out)
+	writeJSONCached(w, r, out)
 }
 
-// context returns the prompt-vs-window gauge numbers.
-func (s *Server) context(w http.ResponseWriter, _ *http.Request) {
+// context returns the prompt-vs-window gauge numbers. Supports ETag caching
+// so reconnecting clients avoid re-fetching unchanged context data.
+func (s *Server) context(w http.ResponseWriter, r *http.Request) {
 	used, window := s.ctl().ContextSnapshot()
-	writeJSON(w, map[string]int{"used": used, "window": window})
+	writeJSONCached(w, r, map[string]int{"used": used, "window": window})
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
@@ -428,6 +432,27 @@ func writeJSON(w http.ResponseWriter, v any) {
 	if err := json.NewEncoder(w).Encode(v); err != nil {
 		slog.Warn("serve: writeJSON encode failed", "err", err)
 	}
+}
+
+// writeJSONCached encodes v as JSON, computes a weak ETag from the body, and
+// returns 304 Not Modified if the client's If-None-Match matches. This avoids
+// re-sending unchanged history/context payloads on every reconnect.
+func writeJSONCached(w http.ResponseWriter, r *http.Request, v any) {
+	body, err := json.Marshal(v)
+	if err != nil {
+		slog.Warn("serve: writeJSONCached marshal failed", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	etag := fmt.Sprintf(`"%x"`, sha256.Sum256(body))
+	if match := r.Header.Get("If-None-Match"); match == etag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("ETag", etag)
+	w.Header().Set("Cache-Control", "private, max-age=0, must-revalidate")
+	_, _ = w.Write(body)
 }
 
 // corsMiddleware adds CORS headers for a specific allowed origin. Only use for

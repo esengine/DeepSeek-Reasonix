@@ -102,7 +102,7 @@ func (s *TextSink) Emit(e event.Event) {
 			fmt.Fprintln(s.out)
 			s.textWritten = false
 		}
-		s.usageLine(e.Usage, e.Pricing)
+		s.usageLine(e.Usage, e.Pricing, e.CacheDiagnostics)
 
 	case event.Notice:
 		glyph := "·"
@@ -167,8 +167,8 @@ func (s *TextSink) closeTextStream(text, reasoning string) {
 }
 
 // usageLine writes the one-line token/cache summary; no-op when usage is unset.
-func (s *TextSink) usageLine(u *provider.Usage, p *provider.Pricing) {
-	if line := FormatUsageLine(u, p); line != "" {
+func (s *TextSink) usageLine(u *provider.Usage, p *provider.Pricing, d *event.CacheDiagnostics) {
+	if line := FormatUsageLine(u, p, d); line != "" {
 		fmt.Fprintln(s.out, line)
 		s.wroteAnything = true
 	}
@@ -182,7 +182,7 @@ func (s *TextSink) usageLine(u *provider.Usage, p *provider.Pricing) {
 // denominator just grew. Reasoning tokens (a subset of completion) show the
 // chain-of-thought cost. Shared by TextSink and the chat TUI so both frontends
 // render the line identically.
-func FormatUsageLine(u *provider.Usage, p *provider.Pricing) string {
+func FormatUsageLine(u *provider.Usage, p *provider.Pricing, d *event.CacheDiagnostics) string {
 	if u == nil || u.TotalTokens == 0 {
 		return ""
 	}
@@ -205,8 +205,16 @@ func FormatUsageLine(u *provider.Usage, p *provider.Pricing) string {
 	if p != nil {
 		cost = fmt.Sprintf(" · %s%.4f", p.Symbol(), p.Cost(u))
 	}
-	return fmt.Sprintf("  · %d tok · in %d%s · out %d%s%s",
-		u.TotalTokens, u.PromptTokens, cacheCol, u.CompletionTokens, reasoning, cost)
+	churn := ""
+	if d != nil && d.PrefixChanged {
+		reasons := strings.Join(d.PrefixChangeReasons, "+")
+		if reasons == "" {
+			reasons = "unknown"
+		}
+		churn = fmt.Sprintf(" · cache prefix changed: %s", reasons)
+	}
+	return fmt.Sprintf("  · %d tok · in %d%s · out %d%s%s%s",
+		u.TotalTokens, u.PromptTokens, cacheCol, u.CompletionTokens, reasoning, cost, churn)
 }
 
 // dimText wraps s in the ANSI dim SGR sequence so reasoning streams visually

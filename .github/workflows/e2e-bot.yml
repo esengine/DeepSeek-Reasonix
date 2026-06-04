@@ -50,12 +50,12 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Build harness + agent from the default branch
-        # The PR head may predate the bot (no cmd/e2ebench, no `run --metrics`), so
-        # build both here and stash them + the suite outside the tree before the
-        # working tree is switched to the PR head.
+      - name: Build harness + fallback agent from the default branch
+        # Harness (e2ebench) and suite always come from main-v2 so a PR can't weaken
+        # its own grader or tests. The agent is rebuilt from the PR head below; this
+        # main-v2 build is only the fallback for heads that predate `run --metrics`.
         run: |
-          go build -o "$RUNNER_TEMP/reasonix" ./cmd/reasonix
+          go build -o "$RUNNER_TEMP/reasonix-base" ./cmd/reasonix
           go build -o "$RUNNER_TEMP/e2ebench" ./cmd/e2ebench
           cp -r benchmarks/e2e "$RUNNER_TEMP/suite"
 
@@ -63,6 +63,23 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh pr checkout ${{ github.event.issue.number }}
+
+      - name: Build the agent from the PR head
+        # The whole point of the bot is to drive the PR's code, not main-v2's. Fall
+        # back to the main-v2 build only when the PR head can't yield a
+        # run --metrics-capable binary (build break or predates the flag).
+        id: agent
+        run: |
+          bin="$RUNNER_TEMP/reasonix-base"
+          src="main-v2 fallback (PR head lacks run --metrics)"
+          if go build -o "$RUNNER_TEMP/reasonix-pr" ./cmd/reasonix \
+            && "$RUNNER_TEMP/reasonix-pr" run -h 2>&1 | grep -q -- '-metrics'; then
+            bin="$RUNNER_TEMP/reasonix-pr"
+            src="PR head ($(git rev-parse --short HEAD))"
+          fi
+          echo "bin=$bin" >> "$GITHUB_OUTPUT"
+          echo "src=$src" >> "$GITHUB_OUTPUT"
+          echo "agent under test: $src"
 
       - name: Write provider config
         # User config covers suite tasks (they run in temp dirs); the repo-root copy
@@ -78,7 +95,7 @@ jobs:
           base_url = "${{ vars.REASONIX_E2E_BASE_URL || 'https://api.deepseek.com' }}"
           model = "${{ vars.REASONIX_E2E_MODEL || 'deepseek-v4-flash' }}"
           api_key_env = "DEEPSEEK_API_KEY"
-          context_window = 65536
+          context_window = 20000   # small so the suite actually exercises compaction + cache churn
 
           [providers.price]
           cache_hit = ${{ vars.REASONIX_E2E_PRICE_CACHE_HIT || '0.02' }}
@@ -112,9 +129,9 @@ jobs:
             BASE_REF=$(gh pr view ${{ github.event.issue.number }} --json baseRefName -q .baseRefName)
             git fetch -q origin "$BASE_REF"
             BASE=$(git merge-base "origin/$BASE_REF" HEAD)
-            "$RUNNER_TEMP/e2ebench" -mode diff -bin "$RUNNER_TEMP/reasonix" -repo . -base "$BASE" -model e2e -attempts "$ATTEMPTS" -out report.md
+            "$RUNNER_TEMP/e2ebench" -mode diff -bin "${{ steps.agent.outputs.bin }}" -repo . -base "$BASE" -model e2e -attempts "$ATTEMPTS" -out report.md
           else
-            "$RUNNER_TEMP/e2ebench" -bin "$RUNNER_TEMP/reasonix" -suite "$RUNNER_TEMP/suite" -model e2e -out report.md -json report.json -budget 400000
+            "$RUNNER_TEMP/e2ebench" -bin "${{ steps.agent.outputs.bin }}" -suite "$RUNNER_TEMP/suite" -model e2e -out report.md -json report.json -budget 400000
           fi
 
       - name: Post report
@@ -122,7 +139,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TRIGGER_USER: ${{ github.event.comment.user.login }}
         run: |
-          printf '\n> agent built from main-v2 · PR head %s · triggered by @%s\n' "$(git rev-parse --short HEAD)" "$TRIGGER_USER" >> report.md
+          printf '\n> agent: %s · triggered by @%s\n' "${{ steps.agent.outputs.src }}" "$TRIGGER_USER" >> report.md
           gh pr comment ${{ github.event.issue.number }} --body-file report.md
 
       - name: Report failure
