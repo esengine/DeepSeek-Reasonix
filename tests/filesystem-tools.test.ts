@@ -1315,6 +1315,27 @@ describe("filesystem tools (built-in, sandbox-enforced)", () => {
       expect(out).toContain("src/index.ts");
       expect(out).not.toContain("(no matches)");
     });
+
+    it("matches relative to an absolute path argument", async () => {
+      const absDir = join(root, "absdir");
+      await fs.mkdir(absDir, { recursive: true });
+      await fs.writeFile(join(absDir, "testfile.ts"), "export const a = 1;");
+      const out = await tools.dispatch("glob", JSON.stringify({ path: absDir, pattern: "*.ts" }));
+      expect(out).toContain("absdir/testfile.ts");
+      expect(out).not.toContain("(no matches)");
+    });
+
+    it("matches relative to dot path '.' and does not recurse unless requested", async () => {
+      await fs.writeFile(join(root, "top.ts"), "x");
+      await fs.mkdir(join(root, "sub"), { recursive: true });
+      await fs.writeFile(join(root, "sub", "a.ts"), "y");
+
+      const out = await tools.dispatch("glob", JSON.stringify({ path: ".", pattern: "*.ts" }));
+      const lines = out.split("\n").filter((l) => l.trim());
+      expect(lines).toContain("top.ts");
+      expect(lines).not.toContain("sub/a.ts");
+      expect(lines).not.toContain("src/index.ts");
+    });
   });
 
   describe("search_content — context lines (-A/-B/-C semantics)", () => {
