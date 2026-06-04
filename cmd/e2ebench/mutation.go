@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 const maxMutants = 15
@@ -68,8 +69,34 @@ func runMutation(repo, base string, srcFiles []string, refs []testRef) mutationR
 			}
 			cmd := exec.Command("go", "test", "-run", runRe, pkg)
 			cmd.Dir = repo
+			// Bound the wait for the mutated-binary test run. Without
+			// WaitDelay, a mutant that compiles but wedges a test
+			// (e.g. infinite loop, blocking syscall) would block the
+			// bench forever, AND the explicit WriteFile restore below
+			// would not fire. 2 minutes matches what `go test -timeout`
+			// uses by default — long enough for a slow legitimate
+			// test, short enough that a hung binary never pins the
+			// bench. After WaitDelay, exec closes the child's I/O,
+			// unblocking the stdio-bound wait even when SIGKILL is
+			// ignored.
+			cmd.WaitDelay = 2 * time.Minute
+			// Restore the source no matter what — even when the test
+			// binary wedges, panics, or the process is killed by the
+			// test-timeout cap. The previous shape only restored on
+			// the happy path; a panic between WriteFile and the
+			// `caught := ...` line would leave the file in mutated
+			// state and break the next mutant (and the next attempt's
+			// diff-mode run via resetTree, which `git clean -fd`
+			// would then re-load from the mutated working tree).
+			restored := false
+			defer func() {
+				if !restored {
+					_ = os.WriteFile(abs, srcB, 0o644)
+				}
+			}()
 			caught := cmd.Run() != nil
-			_ = os.WriteFile(abs, srcB, 0o644) // restore before the next mutant
+			_ = os.WriteFile(abs, srcB, 0o644)
+			restored = true
 			if caught {
 				res.caught++
 			} else {
