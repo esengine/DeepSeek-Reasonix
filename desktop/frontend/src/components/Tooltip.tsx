@@ -136,10 +136,11 @@ export function Tooltip({
     "aria-describedby": open ? id : undefined,
     onMouseEnter: () => show(),
     onMouseLeave: hide,
+    onPointerDownCapture: hide,
     onFocus: () => show(0),
     onBlur: hide,
     onKeyDown: (event: ReactKeyboardEvent<HTMLElement>) => {
-      if (event.key === "Escape") hide();
+      if (event.key === "Escape" || event.key === "Enter" || event.key === " ") hide();
     },
   };
 
