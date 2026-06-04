@@ -91,10 +91,9 @@ type chatTUI struct {
 	// untouched.
 	planMode bool
 
-	// pendingInterject holds user input queued while a turn is running. When the
-	// turn completes (TurnDone), this text is automatically submitted as the next
-	// turn — letting the user interject mid-execution without waiting.
-	pendingInterject string
+	// pendingInterject queues input typed while a turn runs; each TurnDone
+	// dequeues the front and submits it as the next turn.
+	pendingInterject []string
 
 	// history is a resumed session's messages, committed to scrollback once on
 	// the first WindowSizeMsg so a reopened chat shows its prior transcript.
@@ -863,7 +862,7 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if line == "" {
 					return m, nil
 				}
-				m.pendingInterject = line
+				m.pendingInterject = append(m.pendingInterject, line)
 				m.input.Reset()
 				m.input.SetHeight(1)
 				m.pastedBlocks = nil
@@ -964,9 +963,9 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if c := m.runStatusline(); c != nil {
 				cmds = append(cmds, c)
 			}
-			if m.pendingInterject != "" {
-				interject := m.pendingInterject
-				m.pendingInterject = ""
+			if len(m.pendingInterject) > 0 {
+				interject := m.pendingInterject[0]
+				m.pendingInterject = m.pendingInterject[1:]
 				cmds = append(cmds, m.startTurn(interject, interject, interject))
 			}
 		}
@@ -1673,8 +1672,12 @@ func (m chatTUI) View() tea.View {
 			if m.turnTokens > 0 {
 				working += " · ↓" + shortTokens(m.turnTokens)
 			}
-			if m.pendingInterject != "" {
-				working += dim(" · ✎ feedback queued")
+			if n := len(m.pendingInterject); n > 0 {
+				if n == 1 {
+					working += dim(" · ✎ feedback queued")
+				} else {
+					working += dim(fmt.Sprintf(" · ✎ %d queued", n))
+				}
 			}
 		}
 	}
@@ -2948,4 +2951,3 @@ type eventSink struct {
 }
 
 func (s *eventSink) Emit(e event.Event) { s.ch <- e }
-
