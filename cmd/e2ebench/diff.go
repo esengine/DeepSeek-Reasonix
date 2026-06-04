@@ -305,10 +305,35 @@ func differentialPerTest(repo, base string, srcFiles []string, refs []testRef) [
 			_ = os.Remove(filepath.Join(repo, filepath.FromSlash(f)))
 		}
 	}
+	// Restore the source no matter what. The previous shape only restored
+	// on the happy path; a panic between the revert and the per-test
+	// loop would leave the working tree on `base` and break the
+	// downstream `runMutation` (which writes the current source, then
+	// mutates it), the build-step, and the next diff-mode attempt's
+	// `resetTree` (which `git clean -fd` re-loads from the working tree
+	// — so a tree that's still on `base` would be re-detected as the
+	// PR-head, masking the PR's behavior). The deferred restore uses
+	// a `restored` flag to avoid the duplicate `git checkout` (which
+	// would log a benign "needs update" warning on each redundant call).
+	restored := false
+	defer func() {
+		if restored {
+			return
+		}
+		for _, f := range srcFiles {
+			_ = exec.Command("git", "-C", repo, "checkout", "HEAD", "--", f).Run()
+		}
+	}()
+
 	out := make([]pinResult, 0, len(refs))
 	for _, r := range refs {
 		cmd := exec.Command("go", "test", "-run", "^"+r.name+"$", r.pkg)
 		cmd.Dir = repo
+		// Same WaitDelay contract as runTests: a single hung test
+		// (infinite loop, blocking syscall) would otherwise pin the
+		// bench. 2 minutes is enough for a slow legitimate test and
+		// short enough that a wedged test never wedges the bench.
+		cmd.WaitDelay = 2 * time.Minute
 		raw, err := cmd.CombinedOutput()
 		out = append(out, pinResult{
 			testRef:     r,
@@ -319,6 +344,7 @@ func differentialPerTest(repo, base string, srcFiles []string, refs []testRef) [
 	for _, f := range srcFiles {
 		_ = exec.Command("git", "-C", repo, "checkout", "HEAD", "--", f).Run()
 	}
+	restored = true
 	return out
 }
 
