@@ -11,15 +11,19 @@
 package control
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/billing"
@@ -30,12 +34,14 @@ import (
 	"reasonix/internal/diff"
 	"reasonix/internal/event"
 	"reasonix/internal/hook"
+	"reasonix/internal/i18n"
 	"reasonix/internal/jobs"
 	"reasonix/internal/memory"
 	"reasonix/internal/nilutil"
 	"reasonix/internal/permission"
 	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
+	"reasonix/internal/sandbox"
 	"reasonix/internal/skill"
 	"reasonix/internal/tool"
 )
@@ -434,6 +440,10 @@ func (c *Controller) Submit(input string) {
 		c.rememberProjectNote(note)
 		return
 	}
+	if strings.HasPrefix(trimmed, "!") {
+		c.RunShell(trimmed[1:])
+		return
+	}
 	switch {
 	case trimmed == "/compact" || strings.HasPrefix(trimmed, "/compact "):
 		focus := strings.TrimSpace(strings.TrimPrefix(trimmed, "/compact"))
@@ -534,6 +544,87 @@ func (c *Controller) rememberProjectNote(note string) {
 	} else {
 		c.notice("remembered → " + path)
 	}
+}
+
+// shellTimeout is the maximum time a user-invoked "!command" may run. Matches
+// the bash tool's timeout so behaviour is consistent across invocation paths.
+const shellTimeout = 120 * time.Second
+
+// shellWriter forwards each chunk of shell output to a callback, so RunShell
+// can stream live progress to the frontend as the command produces output.
+type shellWriter struct{ emit func(string) }
+
+func (w *shellWriter) Write(p []byte) (int, error) {
+	w.emit(string(p))
+	return len(p), nil
+}
+
+// RunShell executes a shell command directly (bypassing the model) and streams
+// the output as ToolDispatch/ToolProgress/ToolResult events. It uses the same
+// bash-tool infrastructure (shell resolution, timeout) and shares the runGuarded
+// lock with model turns — only one can run at a time. User-invoked "!" commands
+// run without the OS sandbox (the user typed the command explicitly).
+func (c *Controller) RunShell(command string) {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		c.notice(i18n.M.ShellExecEmpty)
+		return
+	}
+	c.runGuarded(func(ctx context.Context) error {
+		sh := sandbox.ResolveShell()
+		argv, _ := sandbox.Command(sandbox.Spec{}, sh, command)
+
+		preview := command
+		if len(preview) > 32 {
+			preview = preview[:32]
+		}
+		id := "shell-" + preview
+
+		c.sink.Emit(event.Event{
+			Kind: event.ToolDispatch,
+			Tool: event.Tool{
+				ID:   id,
+				Name: "bash",
+				Args: fmt.Sprintf(`{"command":%q}`, command),
+			},
+		})
+
+		ctx, cancel := context.WithTimeout(ctx, shellTimeout)
+		defer cancel()
+
+		cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+		var buf bytes.Buffer
+		w := io.MultiWriter(&buf, &shellWriter{emit: func(chunk string) {
+			c.sink.Emit(event.Event{
+				Kind: event.ToolProgress,
+				Tool: event.Tool{ID: id, Output: chunk},
+			})
+		}})
+		cmd.Stdout = w
+		cmd.Stderr = w
+		err := cmd.Run()
+		out := buf.String()
+
+		if ctx.Err() == context.DeadlineExceeded {
+			c.sink.Emit(event.Event{
+				Kind: event.ToolResult,
+				Tool: event.Tool{ID: id, Name: "bash", Output: out, Err: fmt.Sprintf(i18n.M.ShellExecTimeoutFmt, shellTimeout)},
+			})
+			return nil
+		}
+		if err != nil {
+			c.sink.Emit(event.Event{
+				Kind: event.ToolResult,
+				Tool: event.Tool{ID: id, Name: "bash", Output: out, Err: fmt.Sprintf(i18n.M.ShellExecFailedFmt, err)},
+			})
+			return nil
+		}
+		c.sink.Emit(event.Event{
+			Kind: event.ToolResult,
+			Tool: event.Tool{ID: id, Name: "bash", Output: out},
+		})
+		return nil
+	})
 }
 
 // runRefTurn resolves a line's @references into a context block and starts a

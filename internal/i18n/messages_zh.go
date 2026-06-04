@@ -140,6 +140,10 @@ var Chinese = Messages{
 	CompHintSlash:                "↑/↓ 移动 · Tab/Enter 选中 · Esc 关闭",
 	CompHintFile:                 "↑/↓ 移动 · Tab/Enter 进入文件夹或选中文件 · Esc 关闭",
 
+	ShellExecEmpty:      "用法：!<命令>  （例如 !ls -la）",
+	ShellExecFailedFmt:  "Shell 命令执行失败：%v",
+	ShellExecTimeoutFmt: "Shell 命令超时（>%s）",
+
 	CmdNew:          "开启新会话",
 	CmdCompact:      "压缩上下文",
 	CmdRewind:       "回滚到更早的一轮",

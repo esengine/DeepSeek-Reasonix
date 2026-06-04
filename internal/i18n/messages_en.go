@@ -139,6 +139,10 @@ var English = Messages{
 	CompHintSlash:                "↑/↓ move · Tab/Enter select · Esc close",
 	CompHintFile:                 "↑/↓ move · Tab/Enter open folder or pick file · Esc close",
 
+	ShellExecEmpty:      "usage: !<command>  (e.g. !ls -la)",
+	ShellExecFailedFmt:  "shell command failed: %v",
+	ShellExecTimeoutFmt: "shell command timed out (> %s)",
+
 	CmdNew:          "fork a fresh session",
 	CmdCompact:      "compact context",
 	CmdRewind:       "rewind to an earlier turn",
