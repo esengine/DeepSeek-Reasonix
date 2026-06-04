@@ -665,8 +665,18 @@ body {
   width: 100%;
   padding: 0 0 8px;
 }
-.sidebar--collapsed .sidebar__brand > span {
+/* Hide only the brand text when the rail collapses. The previous selector
+   (`.sidebar--collapsed .sidebar__brand > span`) also matched the Tooltip
+   wrapper around the toggle button, which made the sidebar impossible to
+   reopen once collapsed. The dedicated class keeps the rule targeted; the
+   defensive `.tooltip-trigger` override below is a belt-and-suspenders guard
+   so a future regression in the brand-name selector cannot lock the rail
+   closed again. See PR #2987 for the original incident. */
+.sidebar--collapsed .sidebar__brand-name {
   display: none;
+}
+.sidebar--collapsed .sidebar__brand .tooltip-trigger {
+  display: inline-flex;
 }
 .sidebar--collapsed .sidebar__toggle {
   margin-left: 0;
