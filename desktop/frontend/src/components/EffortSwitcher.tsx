@@ -14,7 +14,7 @@ export function EffortSwitcher({
 }) {
   const t = useT();
   const [open, setOpen] = useState(false);
-  if (!effort?.supported || effort.levels.length === 0) return null;
+  if (!effort?.supported || (effort.levels ?? []).length === 0) return null;
 
   const current = effort.current || "auto";
   const pick = (level: string) => {
