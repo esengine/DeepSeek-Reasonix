@@ -69,12 +69,13 @@ jobs:
         with:
           version: 10
 
-      # Linux: WebKitGTK 4.0 toolchain (pinned to ubuntu-22.04; no webkit2_41 tag).
+      # Linux: WebKitGTK 4.1 toolchain (-tags webkit2_41 in desktop-build.sh).
+      # 4.1 ships from ubuntu-22.04 on and is the only one present on 24.04+/Fedora 40+.
       - name: Install Linux build deps
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc libgtk-3-dev libwebkit2gtk-4.0-dev
+          sudo apt-get install -y gcc libgtk-3-dev libwebkit2gtk-4.1-dev
 
       # Windows: NSIS provides makensis for `wails build -nsis`.
       - name: Install NSIS

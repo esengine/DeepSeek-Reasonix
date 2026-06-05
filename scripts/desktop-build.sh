@@ -36,6 +36,9 @@ node -e 'const fs=require("fs"),f="wails.json",j=JSON.parse(fs.readFileSync(f,"u
 # NSIS installer is Windows-only (Wails requires a single windows target for -nsis).
 build_args=(-clean -platform "$PLATFORM" -ldflags "-X main.version=$VERSION")
 [ "$os" = windows ] && build_args+=(-nsis)
+# Link cgo against WebKitGTK 4.1: 4.0 (libwebkit2gtk-4.0.so.37) is gone on
+# Ubuntu 24.04+/Fedora 40+, while 4.1 ships from Ubuntu 22.04 onward.
+[ "$os" = linux ] && build_args+=(-tags webkit2_41)
 
 echo "==> wails build ${build_args[*]}"
 wails build "${build_args[@]}"
