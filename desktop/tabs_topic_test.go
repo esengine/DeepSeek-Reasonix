@@ -1114,3 +1114,44 @@ func TestLegacyMigrationConcurrentRunsHaveNoLostUpdates(t *testing.T) {
 		}
 	}
 }
+
+func TestEnsureTopicIndexedConcurrentRunsHaveNoLostProjectUpdates(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectRoot := t.TempDir()
+	const n = 12
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			topicID := fmt.Sprintf("topic_recovered_%02d", i)
+			if err := ensureTopicIndexed("project", projectRoot, topicID, fmt.Sprintf("Recovered %02d", i), topicTitleSourceManual); err != nil {
+				t.Errorf("ensure topic indexed: %v", err)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	nodes := NewApp().ListProjectTree()
+	if len(nodes) != 1 {
+		t.Fatalf("project tree len = %d, want 1: %#v", len(nodes), nodes)
+	}
+	got := map[string]bool{}
+	for _, child := range nodes[0].Children {
+		got[child.TopicID] = true
+	}
+	for i := 0; i < n; i++ {
+		topicID := fmt.Sprintf("topic_recovered_%02d", i)
+		if !got[topicID] {
+			t.Fatalf("concurrent topic index recovery lost %q; children=%#v", topicID, nodes[0].Children)
+		}
+		if title := loadTopicTitle(projectRoot, topicID); title == "" {
+			t.Fatalf("title index missing %q", topicID)
+		}
+	}
+}

@@ -587,7 +587,7 @@ func (a *App) buildTabController(tab *WorkspaceTab) {
 		if path != "" {
 			a.persistTabSessionPath(tab, path)
 			if strings.TrimSpace(tab.TopicID) != "" {
-				if err := ensureTopicIndexed(tab.Scope, tab.WorkspaceRoot, tab.TopicID, tab.TopicTitle, loadTopicTitleSource(tab.WorkspaceRoot, tab.TopicID)); err == nil {
+				if err := ensureTopicIndexed(tab.Scope, tab.WorkspaceRoot, tab.TopicID, tab.TopicTitle, loadTopicTitleSource(topicTitleRoot(tab.Scope, tab.WorkspaceRoot), tab.TopicID)); err == nil {
 					a.emitProjectTreeChanged()
 				}
 			}
@@ -1287,10 +1287,7 @@ func loadTopicTitleSource(workspaceRoot, topicID string) string {
 }
 
 func topicTitleForTab(scope, workspaceRoot, topicID string) string {
-	titleRoot := workspaceRoot
-	if scope == "global" {
-		titleRoot = ""
-	}
+	titleRoot := topicTitleRoot(scope, workspaceRoot)
 	if title := strings.TrimSpace(loadTopicTitle(titleRoot, topicID)); title != "" {
 		return title
 	}
@@ -1298,6 +1295,13 @@ func topicTitleForTab(scope, workspaceRoot, topicID string) string {
 		return "Global"
 	}
 	return defaultTopicTitle
+}
+
+func topicTitleRoot(scope, workspaceRoot string) string {
+	if scope == "global" {
+		return ""
+	}
+	return workspaceRoot
 }
 
 func forkTopicTitle(title string) string {
@@ -1345,11 +1349,18 @@ func setTopicTitleSource(workspaceRoot, topicID, source string) error {
 	return saveTopicTitleSources(workspaceRoot, sources)
 }
 
+// topicIndexMu serializes recovery writes to desktop-projects.json and topic
+// title indexes. Startup builds restored tabs concurrently, and each tab may
+// repair its missing index.
+var topicIndexMu sync.Mutex
+
 func ensureTopicIndexed(scope, workspaceRoot, topicID, title, source string) error {
 	topicID = strings.TrimSpace(topicID)
 	if topicID == "" {
 		return fmt.Errorf("topicID is required")
 	}
+	topicIndexMu.Lock()
+	defer topicIndexMu.Unlock()
 	if strings.TrimSpace(scope) == "global" {
 		workspaceRoot = ""
 	} else {
