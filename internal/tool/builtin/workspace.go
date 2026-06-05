@@ -39,10 +39,10 @@ func (w Workspace) Tools(enabled ...string) []tool.Tool {
 	roots := realRoots(writeRoots)
 
 	overrides := map[string]tool.Tool{
-		"read_file":     readFile{workDir: w.Dir},
-		"write_file":    writeFile{workDir: w.Dir, roots: roots},
-		"edit_file":     editFile{workDir: w.Dir, roots: roots},
-		"multi_edit":    multiEdit{workDir: w.Dir, roots: roots},
+		"read_file":     readFile{workDir: w.Dir, fileEncoding: w.FileEncoding},
+		"write_file":    writeFile{workDir: w.Dir, roots: roots, fileEncoding: w.FileEncoding},
+		"edit_file":     editFile{workDir: w.Dir, roots: roots, fileEncoding: w.FileEncoding},
+		"multi_edit":    multiEdit{workDir: w.Dir, roots: roots, fileEncoding: w.FileEncoding},
 		"notebook_edit": notebookEdit{workDir: w.Dir, roots: roots},
 		"delete_range":  deleteRange{workDir: w.Dir, roots: roots},
 		"delete_symbol": deleteSymbol{workDir: w.Dir, roots: roots},
