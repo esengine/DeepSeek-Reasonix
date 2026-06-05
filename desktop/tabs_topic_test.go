@@ -788,6 +788,23 @@ func TestRenameTopicRecreatesDeletedProjectTitleIndexFromSessionMeta(t *testing.
 	}
 }
 
+func TestEnsureTopicIndexedPreservesGlobalAutoTitleSource(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	topicID := "topic_global_auto"
+	if err := setTopicTitleWithSource("", topicID, defaultTopicTitle, topicTitleSourceAuto); err != nil {
+		t.Fatalf("set global topic title: %v", err)
+	}
+	source := loadTopicTitleSource(topicTitleRoot("global", globalTabWorkspaceRoot()), topicID)
+	if err := ensureTopicIndexed("global", globalTabWorkspaceRoot(), topicID, defaultTopicTitle, source); err != nil {
+		t.Fatalf("ensure global topic indexed: %v", err)
+	}
+
+	if got := loadTopicTitleSource("", topicID); got != topicTitleSourceAuto {
+		t.Fatalf("global title source = %q, want %q", got, topicTitleSourceAuto)
+	}
+}
+
 func TestAutoTitleTopicFromFirstUserMessage(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
