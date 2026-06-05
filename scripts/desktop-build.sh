@@ -5,7 +5,8 @@
 #
 # Output lands in <repo>/dist/ with stable, platform-keyed names that
 # desktop/cmd/sign's `manifest` subcommand maps back to update.PlatformKey:
-#   macOS:   Reasonix-darwin-<arch>.zip                  (ditto archive of the .app)
+#   macOS:   Reasonix-darwin-<arch>.zip                  (ditto archive; updater channel)
+#            Reasonix-darwin-universal.dmg               (drag-to-install; human download)
 #   Windows: Reasonix-windows-<arch>-installer.exe       (NSIS per-user installer)
 #   Linux:   Reasonix-linux-<arch>.tar.gz                (bare binary)
 #
@@ -65,7 +66,23 @@ darwin)
 	else
 		ditto -c -k --keepParent "$app" "$ROOT/dist/${APPNAME}-darwin-${arch}.zip"
 	fi
-	rm -rf "$staging"
+	# A drag-to-Applications .dmg for first-time human download. Named -universal so
+	# cmd/sign's substring match (darwin-arm64/darwin-amd64) skips it: the .zip stays
+	# the updater channel, the .dmg is release-page only. create-dmg can exit nonzero
+	# while still writing the image, so gate on the file existing, not the exit code.
+	dmgsrc=$(mktemp -d)
+	cp -R "$app" "$dmgsrc/${APPNAME}.app"
+	dmg="$ROOT/dist/${APPNAME}-darwin-universal.dmg"
+	create-dmg \
+		--volname "$APPNAME" \
+		--window-size 540 380 \
+		--icon-size 110 \
+		--icon "${APPNAME}.app" 150 190 \
+		--app-drop-link 390 190 \
+		--no-internet-enable \
+		"$dmg" "$dmgsrc" || true
+	[ -f "$dmg" ] || { echo "create-dmg did not produce $dmg" >&2; exit 1; }
+	rm -rf "$staging" "$dmgsrc"
 	;;
 windows)
 	# `wails build -nsis` writes the installer under build/bin; its exact name
