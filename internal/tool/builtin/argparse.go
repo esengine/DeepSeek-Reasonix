@@ -19,11 +19,14 @@ func unmarshalArgs(args json.RawMessage, v any) error {
 	// Attempt progressive repairs, retrying unmarshal after each.
 	s := string(args)
 	for _, repair := range []func(string) string{
+		stripMarkdownFence,
 		stripOuterQuotes,
 		fixTripleQuotes,
 		stripTrailingCommas,
 		fixSingleQuotes,
+		fixPythonLiterals,
 		fixUnescapedControls,
+		stripComments,
 	} {
 		s = repair(s)
 		if err := json.Unmarshal([]byte(s), v); err == nil {
@@ -192,4 +195,125 @@ func toHex4(r rune) string {
 		hex[(r>>4)&0xf],
 		hex[r&0xf],
 	})
+}
+
+// stripMarkdownFence removes ```json ... ``` or ``` ... ``` wrappers that some
+// models wrap around tool-call arguments.
+// Example: "```json\n{\"todos\":[]}\n```" → "{\"todos\":[]}"
+func stripMarkdownFence(s string) string {
+	s = strings.TrimSpace(s)
+	if !strings.HasPrefix(s, "```") {
+		return s
+	}
+	// Find the end of the opening fence line (```json or ```)
+	firstNL := strings.IndexByte(s, '\n')
+	if firstNL < 0 {
+		return s
+	}
+	inner := s[firstNL+1:]
+	// Strip the closing fence
+	if idx := strings.LastIndex(inner, "```"); idx >= 0 {
+		inner = inner[:idx]
+	}
+	return strings.TrimSpace(inner)
+}
+
+// fixPythonLiterals replaces Python-style True/False/None with JSON
+// true/false/null. Some models trained on Python-heavy corpora emit these.
+// Example: {"done": True, "data": None} → {"done": true, "data": null}
+func fixPythonLiterals(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	inString := false
+	escape := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if escape {
+			b.WriteByte(c)
+			escape = false
+			continue
+		}
+		if c == '\\' && inString {
+			b.WriteByte(c)
+			escape = true
+			continue
+		}
+		if c == '"' {
+			inString = !inString
+			b.WriteByte(c)
+			continue
+		}
+		if !inString {
+			rest := s[i:]
+			if strings.HasPrefix(rest, "True") {
+				b.WriteString("true")
+				i += 3
+				continue
+			}
+			if strings.HasPrefix(rest, "False") {
+				b.WriteString("false")
+				i += 4
+				continue
+			}
+			if strings.HasPrefix(rest, "None") {
+				b.WriteString("null")
+				i += 3
+				continue
+			}
+		}
+		b.WriteByte(c)
+	}
+	return b.String()
+}
+
+// stripComments removes // line comments and /* block comments */ from JSON.
+// Some models add comments to their output. Only strips comments outside strings.
+func stripComments(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	inString := false
+	escape := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if escape {
+			b.WriteByte(c)
+			escape = false
+			continue
+		}
+		if c == '\\' && inString {
+			b.WriteByte(c)
+			escape = true
+			continue
+		}
+		if c == '"' {
+			inString = !inString
+			b.WriteByte(c)
+			continue
+		}
+		if !inString && c == '/' && i+1 < len(s) {
+			if s[i+1] == '/' {
+				// Line comment — skip to end of line
+				for i < len(s) && s[i] != '\n' {
+					i++
+				}
+				if i < len(s) {
+					b.WriteByte('\n')
+				}
+				continue
+			}
+			if s[i+1] == '*' {
+				// Block comment — skip to */
+				i += 2
+				for i+1 < len(s) && !(s[i] == '*' && s[i+1] == '/') {
+					i++
+				}
+				if i+1 < len(s) {
+					i++ // skip past the /
+				}
+				continue
+			}
+		}
+		b.WriteByte(c)
+	}
+	return b.String()
 }

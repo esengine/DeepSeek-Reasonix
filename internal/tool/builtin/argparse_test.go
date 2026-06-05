@@ -154,3 +154,104 @@ func TestFixSingleQuotes(t *testing.T) {
 		t.Errorf("got %q, want %q", got, want)
 	}
 }
+
+func TestUnmarshalArgs_MarkdownFence(t *testing.T) {
+	var p struct {
+		Path string `json:"path"`
+	}
+	raw := json.RawMessage("```json\n{\"path\":\"test.txt\"}\n```")
+	err := unmarshalArgs(raw, &p)
+	if err != nil {
+		t.Fatalf("markdown-fenced JSON should be repaired: %v", err)
+	}
+	if p.Path != "test.txt" {
+		t.Errorf("path = %q, want %q", p.Path, "test.txt")
+	}
+}
+
+func TestUnmarshalArgs_PythonLiterals(t *testing.T) {
+	var p struct {
+		Done   bool        `json:"done"`
+		Active bool        `json:"active"`
+		Data   interface{} `json:"data"`
+	}
+	raw := json.RawMessage(`{"done": True, "active": False, "data": None}`)
+	err := unmarshalArgs(raw, &p)
+	if err != nil {
+		t.Fatalf("Python literals should be repaired: %v", err)
+	}
+	if !p.Done {
+		t.Error("done should be true")
+	}
+	if p.Active {
+		t.Error("active should be false")
+	}
+	if p.Data != nil {
+		t.Errorf("data should be nil, got %v", p.Data)
+	}
+}
+
+func TestUnmarshalArgs_Comments(t *testing.T) {
+	var p struct {
+		Path string `json:"path"`
+	}
+	raw := json.RawMessage(`{
+		// file path
+		"path": "test.txt" /* the target */
+	}`)
+	err := unmarshalArgs(raw, &p)
+	if err != nil {
+		t.Fatalf("JSON with comments should be repaired: %v", err)
+	}
+	if p.Path != "test.txt" {
+		t.Errorf("path = %q, want %q", p.Path, "test.txt")
+	}
+}
+
+func TestStripMarkdownFence(t *testing.T) {
+	tests := []struct {
+		in, want string
+	}{
+		{"```json\n{\"a\":1}\n```", `{"a":1}`},
+		{"```\n{\"a\":1}\n```", `{"a":1}`},
+		{`{"a":1}`, `{"a":1}`}, // no fence — unchanged
+		{"```json\n{\"a\":1}", `{"a":1}`}, // missing closing fence
+	}
+	for _, tt := range tests {
+		got := stripMarkdownFence(tt.in)
+		if got != tt.want {
+			t.Errorf("stripMarkdownFence(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestFixPythonLiterals(t *testing.T) {
+	got := fixPythonLiterals(`{"a": True, "b": False, "c": None}`)
+	want := `{"a": true, "b": false, "c": null}`
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+	// Should NOT replace inside strings
+	got2 := fixPythonLiterals(`{"msg": "True story"}`)
+	want2 := `{"msg": "True story"}`
+	if got2 != want2 {
+		t.Errorf("got %q, want %q", got2, want2)
+	}
+}
+
+func TestStripComments(t *testing.T) {
+	tests := []struct {
+		in, want string
+	}{
+		{`{"a": 1}`, `{"a": 1}`},                             // no comments
+		{"{\"a\": 1} // comment", "{\"a\": 1} "},             // line comment
+		{`{"a": /* inline */ 1}`, `{"a":  1}`},               // block comment
+		{`{"msg": "hello // world"}`, `{"msg": "hello // world"}`}, // inside string preserved
+	}
+	for _, tt := range tests {
+		got := stripComments(tt.in)
+		if got != tt.want {
+			t.Errorf("stripComments(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
