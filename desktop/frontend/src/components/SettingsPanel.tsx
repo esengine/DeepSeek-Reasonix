@@ -24,6 +24,23 @@ import { Tooltip } from "./Tooltip";
 type SettingsTab = "general" | "models" | "providers" | "network" | "permissions" | "sandbox" | "agent" | "appearance" | "updates";
 
 const SETTINGS_TABS: SettingsTab[] = ["general", "models", "providers", "network", "permissions", "sandbox", "agent", "appearance", "updates"];
+const TEMPERATURE_PRESETS = [
+  { key: "strict", value: 0, label: "settings.temperaturePreset.strict" },
+  { key: "daily", value: 0.2, label: "settings.temperaturePreset.daily" },
+  { key: "explore", value: 0.5, label: "settings.temperaturePreset.explore" },
+  { key: "creative", value: 0.8, label: "settings.temperaturePreset.creative" },
+] as const;
+type TemperaturePresetKey = (typeof TEMPERATURE_PRESETS)[number]["key"];
+
+function closestTemperaturePreset(value: number): (typeof TEMPERATURE_PRESETS)[number] {
+  return TEMPERATURE_PRESETS.reduce((best, preset) =>
+    Math.abs(preset.value - value) < Math.abs(best.value - value) ? preset : best,
+  TEMPERATURE_PRESETS[1]);
+}
+
+function temperatureForPreset(key: TemperaturePresetKey): number {
+  return TEMPERATURE_PRESETS.find((preset) => preset.key === key)?.value ?? TEMPERATURE_PRESETS[1].value;
+}
 
 // SettingsPanel is the desktop settings surface, aligning with Claude Code's
 // settings: model & providers (incl. API keys), permissions, sandbox, agent
@@ -868,17 +885,30 @@ function SandboxSection({ s, busy, apply }: SectionProps) {
 
 function AgentSection({ s, busy, apply }: SectionProps) {
   const t = useT();
-  const [temp, setTemp] = useState(String(s.agent.temperature));
+  const [tempPreset, setTempPreset] = useState<TemperaturePresetKey>(() => closestTemperaturePreset(s.agent.temperature).key);
   const [steps, setSteps] = useState(String(s.agent.maxSteps));
   const [prompt, setPrompt] = useState(s.agent.systemPrompt);
-  const dirty = temp !== String(s.agent.temperature) || steps !== String(s.agent.maxSteps) || prompt !== s.agent.systemPrompt;
+  const selectedTemp = temperatureForPreset(tempPreset);
+  const dirty = selectedTemp !== s.agent.temperature || steps !== String(s.agent.maxSteps) || prompt !== s.agent.systemPrompt;
+
+  useEffect(() => {
+    setTempPreset(closestTemperaturePreset(s.agent.temperature).key);
+    setSteps(String(s.agent.maxSteps));
+    setPrompt(s.agent.systemPrompt);
+  }, [s.agent.temperature, s.agent.maxSteps, s.agent.systemPrompt]);
 
   return (
     <section className="mem-section">
       <div className="mem-section__title">{t("settings.agent")}</div>
       <div className="set-row">
         <label className="set-label">{t("settings.temperature")}</label>
-        <input className="mem-input set-narrow" value={temp} onChange={(e) => setTemp(e.target.value)} disabled={busy} inputMode="decimal" />
+        <select className="mem-select set-grow" value={tempPreset} disabled={busy} onChange={(e) => setTempPreset(e.target.value as TemperaturePresetKey)}>
+          {TEMPERATURE_PRESETS.map((preset) => (
+            <option key={preset.key} value={preset.key}>
+              {t(preset.label)}
+            </option>
+          ))}
+        </select>
         <label className="set-label">{t("settings.maxSteps")}</label>
         <input className="mem-input set-narrow" value={steps} onChange={(e) => setSteps(e.target.value)} disabled={busy} inputMode="numeric" />
         <span className="mem-hint">{t("settings.unlimited")}</span>
@@ -889,7 +919,7 @@ function AgentSection({ s, busy, apply }: SectionProps) {
         <button
           className="btn btn--primary btn--small"
           disabled={busy || !dirty}
-          onClick={() => void apply(() => app.SetAgentParams(Number(temp) || 0, Number(steps) || 0, prompt))}
+          onClick={() => void apply(() => app.SetAgentParams(selectedTemp, Number(steps) || 0, prompt))}
         >
           {t("settings.saveAgent")}
         </button>
