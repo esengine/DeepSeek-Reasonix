@@ -539,17 +539,6 @@ func (m *chatTUI) navigateQueue(delta int) bool {
 	return true
 }
 
-// commitQueueEdit writes the current input back to the queue slot being edited,
-// then resets the queue navigation cursor. Called before the input is consumed
-// (Enter or TurnDone dequeue).
-func (m *chatTUI) commitQueueEdit() {
-	if m.queueEditCursor >= 0 && m.queueEditCursor < len(m.pendingInterject) {
-		m.pendingInterject[m.queueEditCursor] = m.input.Value()
-	}
-	m.queueEditCursor = -1
-	m.queueEditDraft = ""
-}
-
 // resetQueueNavigation resets the queue browsing cursor so the user returns to
 // normal input mode. Any in-progress edit is discarded (the queued item keeps
 // its previous value).
