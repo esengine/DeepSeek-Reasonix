@@ -1,0 +1,230 @@
+package config
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+)
+
+// legacyConfig is the subset of the v0.x (~/.reasonix/config.json) schema this
+// import carries forward. Fields absent here are dropped on purpose: desktop tab
+// state is frontend-owned, and skills already live in the shared ~/.reasonix/skills
+// root that v1+ also scans, so they need no migration.
+type legacyConfig struct {
+	APIKey      string                       `json:"apiKey"`
+	BaseURL     string                       `json:"baseUrl"`
+	Lang        string                       `json:"lang"`
+	MCPServers  map[string]legacyMCPServer   `json:"mcpServers"`
+	MCPEnv      map[string]map[string]string `json:"mcpEnv"`
+	MCPDisabled []string                     `json:"mcpDisabled"`
+}
+
+type legacyMCPServer struct {
+	Command   string            `json:"command"`
+	Args      []string          `json:"args"`
+	Env       map[string]string `json:"env"`
+	Transport string            `json:"transport"`
+	Type      string            `json:"type"`
+	URL       string            `json:"url"`
+	Headers   map[string]string `json:"headers"`
+	Disabled  bool              `json:"disabled"`
+}
+
+// MigrationResult summarizes a one-time legacy import for the boot-time notice.
+type MigrationResult struct {
+	From     string
+	To       string
+	KeyToEnv bool
+	Plugins  int
+	Warnings []string
+}
+
+func (r *MigrationResult) Notice() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "migrated your previous configuration: %s → %s", r.From, r.To)
+	if r.Plugins > 0 {
+		fmt.Fprintf(&b, " (%d MCP server(s))", r.Plugins)
+	}
+	if r.KeyToEnv {
+		b.WriteString("; API key written to ~/.env")
+	}
+	b.WriteString(". The old files were left untouched.")
+	for _, w := range r.Warnings {
+		b.WriteString("\n  note: " + w)
+	}
+	return b.String()
+}
+
+// MigrateLegacyIfNeeded performs a one-time, non-destructive import of a v0.x
+// install (~/.reasonix/config.json) into the v1+ user config when the latter does
+// not exist yet. It never modifies or deletes the legacy files. Returns nil when
+// there is nothing to migrate (no legacy install, or a v1+ config already present).
+func MigrateLegacyIfNeeded() (*MigrationResult, error) {
+	dest := userConfigPath()
+	if dest == "" {
+		return nil, nil
+	}
+	if _, err := os.Stat(dest); err == nil {
+		return nil, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, nil
+	}
+	src := filepath.Join(home, ".reasonix", "config.json")
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return nil, nil
+	}
+	var legacy legacyConfig
+	data = bytes.TrimPrefix(data, []byte{0xEF, 0xBB, 0xBF}) // tolerate a UTF-8 BOM (some editors add one)
+	if err := json.Unmarshal(data, &legacy); err != nil {
+		return nil, fmt.Errorf("parse legacy config %s: %w", src, err)
+	}
+
+	cfg := Default()
+	res := &MigrationResult{From: src, To: dest}
+	if legacy.Lang != "" {
+		cfg.Language = legacy.Lang
+	}
+	cfg.Plugins = legacyPlugins(legacy)
+	res.Plugins = len(cfg.Plugins)
+
+	var envLines []string
+	if key := strings.TrimSpace(legacy.APIKey); key != "" {
+		envLines = append(envLines, "DEEPSEEK_API_KEY="+key)
+		res.KeyToEnv = true
+		if base := strings.TrimSpace(legacy.BaseURL); base != "" && !strings.Contains(base, "deepseek.com") {
+			res.Warnings = append(res.Warnings, "your previous base_url was "+base+
+				" — add a [[providers]] entry pointing at it; the key was saved as DEEPSEEK_API_KEY")
+		}
+	}
+
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		return nil, fmt.Errorf("create config dir: %w", err)
+	}
+	if err := cfg.WriteFile(dest); err != nil {
+		return nil, fmt.Errorf("write %s: %w", dest, err)
+	}
+	if len(envLines) > 0 {
+		if err := writeHomeEnv(home, envLines); err != nil {
+			return res, fmt.Errorf("write ~/.env: %w", err)
+		}
+	}
+	return res, nil
+}
+
+func legacyPlugins(legacy legacyConfig) []PluginEntry {
+	if len(legacy.MCPServers) == 0 {
+		return nil
+	}
+	disabled := make(map[string]bool, len(legacy.MCPDisabled))
+	for _, n := range legacy.MCPDisabled {
+		disabled[n] = true
+	}
+	names := make([]string, 0, len(legacy.MCPServers))
+	for n := range legacy.MCPServers {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	out := make([]PluginEntry, 0, len(names))
+	for _, name := range names {
+		s := legacy.MCPServers[name]
+		pe := PluginEntry{
+			Name:    name,
+			Type:    normalizeTransport(firstNonEmpty(s.Type, s.Transport)),
+			Command: s.Command,
+			Args:    s.Args,
+			Env:     mergeEnv(s.Env, legacy.MCPEnv[name]),
+			URL:     s.URL,
+			Headers: s.Headers,
+		}
+		if s.Disabled || disabled[name] {
+			off := false
+			pe.AutoStart = &off
+		}
+		out = append(out, pe)
+	}
+	return out
+}
+
+// normalizeTransport maps the v0.x transport names to v1+ plugin types. stdio is
+// the default, so it returns "" (RenderTOML then omits the field).
+func normalizeTransport(t string) string {
+	switch strings.ToLower(strings.TrimSpace(t)) {
+	case "http", "streamable-http":
+		return "http"
+	case "sse":
+		return "sse"
+	default:
+		return ""
+	}
+}
+
+func firstNonEmpty(a, b string) string {
+	if strings.TrimSpace(a) != "" {
+		return a
+	}
+	return b
+}
+
+// mergeEnv overlays the per-server env map onto the spec's own env (overlay wins,
+// matching v0.x mcpEnv precedence). Returns nil when both are empty.
+func mergeEnv(base, overlay map[string]string) map[string]string {
+	if len(base) == 0 && len(overlay) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(base)+len(overlay))
+	for k, v := range base {
+		out[k] = v
+	}
+	for k, v := range overlay {
+		out[k] = v
+	}
+	return out
+}
+
+// writeHomeEnv merges lines into ~/.env, replacing any existing assignment of the
+// same key, and pins them into the current process env so the just-built session
+// resolves the key without a restart.
+func writeHomeEnv(home string, lines []string) error {
+	path := filepath.Join(home, ".env")
+	target := make(map[string]bool, len(lines))
+	for _, l := range lines {
+		if k, _, ok := strings.Cut(l, "="); ok {
+			target[strings.TrimSpace(k)] = true
+		}
+	}
+	var kept []string
+	if data, err := os.ReadFile(path); err == nil {
+		for _, raw := range strings.Split(string(data), "\n") {
+			check := strings.TrimPrefix(strings.TrimSpace(raw), "export ")
+			if k, _, ok := strings.Cut(check, "="); ok && target[strings.TrimSpace(k)] {
+				continue
+			}
+			kept = append(kept, raw)
+		}
+		if n := len(kept); n > 0 && kept[n-1] == "" {
+			kept = kept[:n-1]
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	var b strings.Builder
+	for _, l := range kept {
+		b.WriteString(l)
+		b.WriteByte('\n')
+	}
+	for _, l := range lines {
+		b.WriteString(l)
+		b.WriteByte('\n')
+		if k, v, ok := strings.Cut(l, "="); ok {
+			os.Setenv(strings.TrimSpace(k), v)
+		}
+	}
+	return os.WriteFile(path, []byte(b.String()), 0o600)
+}

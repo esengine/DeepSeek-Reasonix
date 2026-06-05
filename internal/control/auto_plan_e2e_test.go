@@ -102,6 +102,50 @@ func TestAutoPlanGateEndToEnd(t *testing.T) {
 	}
 }
 
+func TestApprovedPlanSeedClearsAfterExecutionWithoutModelTodoWrite(t *testing.T) {
+	prov := &scriptedTurns{turns: [][]provider.Chunk{
+		textTurn("Plan:\n1. Add the config field\n2. Wire it into boot"),
+		textTurn("Done."),
+	}}
+	ag := agent.New(prov, tool.NewRegistry(), agent.NewSession(""), agent.Options{}, event.Discard)
+
+	approvalID := make(chan string, 1)
+	var planSeedResults []string
+	c := New(Options{
+		AutoPlan: "on",
+		Runner:   ag,
+		Executor: ag,
+		Sink: event.FuncSink(func(e event.Event) {
+			switch e.Kind {
+			case event.ApprovalRequest:
+				approvalID <- e.Approval.ID
+			case event.ToolResult:
+				if e.Tool.ID == "plan-seed" && e.Tool.Name == "todo_write" && e.Tool.Err == "" {
+					planSeedResults = append(planSeedResults, e.Tool.Args)
+				}
+			}
+		}),
+	})
+
+	go func() { c.Approve(<-approvalID, true, false, false) }()
+
+	input := "Implement issue #2395: add config, wire boot, add tests and docs"
+	if err := c.runTurnWithRaw(context.Background(), input, input); err != nil {
+		t.Fatalf("runTurnWithRaw: %v", err)
+	}
+
+	if len(planSeedResults) != 2 {
+		t.Fatalf("plan-seed todo results = %d, want seed then completion: %#v", len(planSeedResults), planSeedResults)
+	}
+	last := planSeedResults[len(planSeedResults)-1]
+	if strings.Contains(last, `"in_progress"`) || strings.Contains(last, `"pending"`) {
+		t.Fatalf("final plan-seed todos should be completed so the panel hides: %s", last)
+	}
+	if !strings.Contains(last, `"completed"`) {
+		t.Fatalf("final plan-seed todos should contain completed items: %s", last)
+	}
+}
+
 // TestAutoPlanGateRejectionStaysInPlan proves a rejected plan keeps plan mode on
 // and never runs the execution turn: only the plan turn reached the model.
 func TestAutoPlanGateRejectionStaysInPlan(t *testing.T) {

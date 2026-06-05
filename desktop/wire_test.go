@@ -106,8 +106,11 @@ func TestToWireUsageWithPricing(t *testing.T) {
 		Pricing: &provider.Pricing{CacheHit: 1.0, Input: 2.0, Output: 10.0},
 	}
 	w := toWire(e)
-	if w.Usage == nil || w.Usage.CostUSD != 1.0 {
-		t.Errorf("cost = %f, want 1.0", w.Usage.CostUSD)
+	if w.Usage == nil || w.Usage.Cost != 1.0 || w.Usage.CostUSD != 1.0 {
+		t.Errorf("cost = %+v, want cost and compat costUsd of 1.0", w.Usage)
+	}
+	if w.Usage.Currency != "¥" {
+		t.Errorf("currency = %q, want ¥", w.Usage.Currency)
 	}
 }
 

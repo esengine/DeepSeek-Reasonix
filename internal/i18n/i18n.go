@@ -72,6 +72,8 @@ type Messages struct {
 	ChatStatusIdle         string // shortcuts hint when idle
 	ChatStatusYoloIdle     string // shortcuts hint when idle in YOLO/bypass mode
 	ChatStatusCycleHint    string // mode-cycle shortcut hint shown when no modal prompt owns the status row
+	ChatStatusCacheNowFmt  string // cache status tag, "%s" = latest-turn hit rate with percent sign
+	ChatStatusCacheAvgFmt  string // cache status tag, "%s" = session-average hit rate with percent sign
 	ChatStatusPlanApproval string // shortcuts hint while a plan is pending
 	PlanApprovalPrompt     string // one-line "plan above is ready" banner shown above the input
 	ChatStatusToolApproval string // shortcuts hint while a tool call awaits approval
@@ -125,6 +127,12 @@ type Messages struct {
 	CompHintSlash      string // key hint footer under the slash-command menu
 	CompHintFile       string // key hint footer under the @ file/resource menu
 
+	// shell execution (! prefix).
+	ShellExecEmpty      string // bare "!" with no command
+	ShellExecFailedFmt  string // "shell command failed: %v"
+	ShellExecTimeoutFmt string // "shell command timed out (> %s)"
+	ShellModeHint       string // status line hint when input starts with !
+
 	// slash command + sub-command descriptions shown in the menu (CLI and desktop
 	// share these via i18n.M, so both frontends localize identically).
 	CmdNew          string // /new
@@ -147,6 +155,7 @@ type Messages struct {
 	CmdSkill        string // /skills
 	CmdVerbose      string // /verbose
 	CmdEffort       string // /effort
+	CmdAutoPlan     string // /auto-plan
 	CmdHelp         string // /help
 	CmdTodo         string // /todo
 	CmdQuit         string // /quit (also accepts /exit as hidden alias)

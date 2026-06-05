@@ -94,6 +94,65 @@ func TestMigrateLegacySessionsRunsOnce(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dest, "chat-1.jsonl")); !os.IsNotExist(err) {
 		t.Errorf("a deleted import must not reappear after the one-time migration")
 	}
+	if _, err := os.Stat(filepath.Join(dest, legacyEventsHomeImportMarker)); err != nil {
+		t.Errorf("source-specific import marker missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dest, legacyImportMarker)); err != nil {
+		t.Errorf("legacy compatibility import marker missing: %v", err)
+	}
+}
+
+func TestMigrateLegacySessionsHonorsLegacyMarkerForHomeSource(t *testing.T) {
+	src := t.TempDir()
+	dest := t.TempDir()
+	os.WriteFile(filepath.Join(src, "chat-1.events.jsonl"), []byte(legacyEventLog), 0o644)
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dest, legacyImportMarker), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	n, err := MigrateLegacySessions(src, dest)
+	if err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("legacy marker should protect the home source from re-importing, got %d", n)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "chat-1.jsonl")); !os.IsNotExist(err) {
+		t.Errorf("legacy marker should keep deleted/imported sessions from reappearing")
+	}
+	if _, err := os.Stat(filepath.Join(dest, legacyEventsHomeImportMarker)); err != nil {
+		t.Errorf("legacy marker should be upgraded to source marker: %v", err)
+	}
+}
+
+func TestMigrateLegacySessionsSourceMarkersAreIndependent(t *testing.T) {
+	src := t.TempDir()
+	dest := t.TempDir()
+	os.WriteFile(filepath.Join(src, "appdata-chat.events.jsonl"), []byte(legacyEventLog), 0o644)
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dest, legacyImportMarker), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	const appDataMarker = ".legacy-imported.v0-events-appdata"
+	n, err := migrateLegacySessions(src, dest, appDataMarker, false)
+	if err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("independent source marker should allow a new source import, got %d", n)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "appdata-chat.jsonl")); err != nil {
+		t.Errorf("new source session should have been imported: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dest, appDataMarker)); err != nil {
+		t.Errorf("new source marker missing: %v", err)
+	}
 }
 
 func TestMigrateLegacySessionsSkipsAlreadyImported(t *testing.T) {

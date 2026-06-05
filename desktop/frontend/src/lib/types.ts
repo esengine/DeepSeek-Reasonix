@@ -49,6 +49,9 @@ export interface WireUsage {
   // hit-rate (Σhit/Σ(hit+miss)), steadier than the single-turn cacheHitTokens.
   sessionCacheHitTokens: number;
   sessionCacheMissTokens: number;
+  cost?: number;
+  currency?: string;
+  // Deprecated compatibility alias. Prefer cost + currency.
   costUsd?: number;
 }
 
@@ -95,6 +98,90 @@ export interface WireEvent {
   err?: string;
   retryAttempt?: number;
   retryMax?: number;
+  // Tab routing: set by the Go-side tabEventSink so multi-tab frontends
+  // route each event to the correct per-tab reducer.
+  tabId?: string;
+  sessionHitTokens?: number;
+  sessionMissTokens?: number;
+  sessionCost?: number;
+  sessionCurrency?: string;
+  // Deprecated compatibility alias. Prefer sessionCost + sessionCurrency.
+  sessionCostUsd?: number;
+}
+
+// Tab management types (desktop/tabs.go).
+export interface TabMeta {
+  id: string;
+  tabType?: "session" | "file";
+  scope: string;
+  workspaceRoot: string;
+  workspaceName: string;
+  topicId: string;
+  topicTitle: string;
+  filePath?: string;
+  projectColor?: string;
+  label: string;
+  ready: boolean;
+  running: boolean;
+  mode: Mode;
+  startupErr?: string;
+  active: boolean;
+  cwd: string;
+}
+
+export interface ProjectNode {
+  key: string;
+  kind: "project" | "topic" | "global_folder" | "global_topic";
+  label: string;
+  root?: string;
+  topicId?: string;
+  projectColor?: string;
+  turns?: number;
+  lastActivityAt?: number;
+  open?: boolean;
+  running?: boolean;
+  children?: ProjectNode[];
+}
+
+export interface TopicMeta {
+  id: string;
+  title: string;
+  createdAt: number;
+}
+
+export interface ContextPanelInfo {
+  usedTokens: number;
+  windowTokens: number;
+  promptTokens: number;
+  completionTokens: number;
+  reasoningTokens: number;
+  cacheHitTokens: number;
+  cacheMissTokens: number;
+  sessionCost?: number;
+  sessionCurrency?: string;
+  // Deprecated compatibility alias. Prefer sessionCost + sessionCurrency.
+  sessionCostUsd?: number;
+  readFiles: ReadFileRecord[];
+  changedFiles: ChangedFileInfo[];
+}
+
+export interface ReadFileRecord {
+  path: string;
+  turn: number;
+  time: number;
+  offset?: number;
+  limit?: number;
+  truncated?: boolean;
+}
+
+export interface ChangedFileInfo {
+  path: string;
+  oldPath?: string;
+  sources: string[];
+  gitStatus?: string;
+  turns: number[];
+  latestPrompt?: string;
+  latestTime?: number;
 }
 
 // Bound-method payloads (desktop/app.go).
@@ -119,6 +206,8 @@ export interface CheckpointMeta {
   prompt: string;
   files: string[];
   time: number; // unix ms
+  canCode?: boolean;
+  canConversation?: boolean;
 }
 
 // SessionMeta is one saved session for the history panel.
@@ -127,10 +216,16 @@ export interface SessionMeta {
   preview: string;
   title?: string; // user-chosen name; falls back to preview when empty
   turns: number;
-  createdAt?: number; // unix milliseconds
-  lastActivityAt?: number; // unix milliseconds
+  createdAt: number; // unix milliseconds
+  lastActivityAt: number; // unix milliseconds
   modTime: number; // compatibility alias for lastActivityAt
+  deletedAt?: number; // unix milliseconds, present for trashed sessions
   current: boolean;
+  open: boolean;
+  scope?: string;       // "project" | "global"; empty for legacy → treated as "global"
+  workspaceRoot?: string;
+  topicId?: string;
+  topicTitle?: string;
 }
 
 export interface WorkspaceView {
@@ -142,6 +237,7 @@ export interface WorkspaceView {
 export interface ContextInfo {
   used: number;
   window: number;
+  compactRatio?: number;
 }
 
 export interface Meta {
@@ -153,8 +249,8 @@ export interface Meta {
   bypass?: boolean; // YOLO mode on (auto-approve every tool call)
 }
 
-// Mode is the input mode cycled by Shift+Tab: normal → plan (read-only) → yolo
-// (auto-approve every tool call; deny rules still apply).
+// Mode is the input mode cycled by Shift+Tab: normal (shown as auto) → plan
+// (read-only) → yolo (auto-approve every tool call; deny rules still apply).
 export type Mode = "normal" | "plan" | "yolo";
 
 export interface CommandInfo {
@@ -220,14 +316,14 @@ export interface ServerView {
   args?: string[];
   url?: string;
   envKeys?: string[];
-  authStatus?: string;
-  authUrl?: string;
-  authConfigured?: boolean;
   tools: number;
   prompts: number;
   resources: number;
   error?: string;
   toolList?: MCPToolView[];
+  authStatus?: "none" | "possible" | "required" | string;
+  authUrl?: string;
+  authConfigured?: boolean;
 }
 export interface MCPToolView {
   name: string;
@@ -238,6 +334,7 @@ export interface SkillView {
   description: string;
   scope: string;
   runAs: string;
+  enabled: boolean;
 }
 export interface SkillRootSkillView {
   name: string;
@@ -336,6 +433,8 @@ export interface ProviderView {
   keySet: boolean; // the env var currently resolves to a value
   balanceUrl: string; // optional wallet-balance endpoint; "" disables the readout
   contextWindow: number;
+  supportedEfforts: string[]; // custom /effort levels; empty = use built-in Kind/BaseURL default
+  defaultEffort: string; // /effort level when user picks "auto" or unset; "" = supportedEfforts[0]
 }
 
 // BalanceInfo is the wallet-balance readout (desktop/app.go Balance). available
@@ -394,11 +493,16 @@ export interface AgentView {
 export interface SettingsView {
   defaultModel: string;
   plannerModel: string;
+  autoPlan: string;
   providers: ProviderView[];
   permissions: PermissionsView;
   sandbox: SandboxView;
   network: NetworkView;
   agent: AgentView;
+  desktopLanguage: string; // "" | "en" | "zh"; empty = auto
+  desktopTheme: string; // "auto" | "dark" | "light"
+  desktopThemeStyle: string;
+  closeBehavior: string; // "background" | "quit"
   configPath: string;
   providerKinds: string[]; // provider implementations the kernel registered (for the kind picker)
   bypass: boolean; // live YOLO state (runtime-only) — whether approvals are skipped this session

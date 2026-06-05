@@ -1,10 +1,14 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/config"
+	"reasonix/internal/control"
+	"reasonix/internal/event"
 	"reasonix/internal/provider"
 )
 
@@ -59,5 +63,59 @@ func TestPreviewSessionMessagesLoadsWithoutResuming(t *testing.T) {
 	}
 	if got[1].Reasoning != "saved reasoning" {
 		t.Fatalf("preview reasoning = %q, want saved reasoning", got[1].Reasoning)
+	}
+}
+
+func TestResumeSessionForTabTargetsSpecifiedTab(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir session dir: %v", err)
+	}
+
+	activePath := filepath.Join(dir, "active.jsonl")
+	inactivePath := filepath.Join(dir, "inactive.jsonl")
+	targetPath := filepath.Join(dir, "target.jsonl")
+	writeHistoryTestSession(t, activePath, "active prompt")
+	writeHistoryTestSession(t, inactivePath, "inactive prompt")
+	writeHistoryTestSession(t, targetPath, "target prompt")
+
+	activeExec := agent.New(nil, nil, agent.NewSession(""), agent.Options{}, event.Discard)
+	inactiveExec := agent.New(nil, nil, agent.NewSession(""), agent.Options{}, event.Discard)
+	activeCtrl := control.New(control.Options{Executor: activeExec, SessionDir: dir, SessionPath: activePath, Label: "active"})
+	inactiveCtrl := control.New(control.Options{Executor: inactiveExec, SessionDir: dir, SessionPath: inactivePath, Label: "inactive"})
+	defer activeCtrl.Close()
+	defer inactiveCtrl.Close()
+
+	app := &App{
+		tabs: map[string]*WorkspaceTab{
+			"active":   {ID: "active", Scope: "global", Ctrl: activeCtrl, Ready: true},
+			"inactive": {ID: "inactive", Scope: "global", Ctrl: inactiveCtrl, Ready: true},
+		},
+		tabOrder:    []string{"active", "inactive"},
+		activeTabID: "active",
+	}
+
+	got, err := app.ResumeSessionForTab("inactive", targetPath)
+	if err != nil {
+		t.Fatalf("ResumeSessionForTab: %v", err)
+	}
+	if activeCtrl.SessionPath() != activePath {
+		t.Fatalf("active tab session path = %q, want %q", activeCtrl.SessionPath(), activePath)
+	}
+	if inactiveCtrl.SessionPath() != targetPath {
+		t.Fatalf("inactive tab session path = %q, want %q", inactiveCtrl.SessionPath(), targetPath)
+	}
+	if len(got) != 1 || got[0].Content != "target prompt" {
+		t.Fatalf("resumed history = %+v, want target prompt", got)
+	}
+}
+
+func writeHistoryTestSession(t *testing.T, path, prompt string) {
+	t.Helper()
+	session := agent.NewSession("")
+	session.Add(provider.Message{Role: provider.RoleUser, Content: prompt})
+	if err := session.Save(path); err != nil {
+		t.Fatalf("Save %s: %v", path, err)
 	}
 }

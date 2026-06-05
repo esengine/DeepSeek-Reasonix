@@ -11,6 +11,7 @@ export function PromptShelf({
   crumbs,
   quickActions,
   barRef,
+  actionsWrap = false,
 }: {
   titleId: string;
   title: ReactNode;
@@ -21,9 +22,10 @@ export function PromptShelf({
   crumbs?: ReactNode;
   quickActions?: ReactNode;
   barRef?: RefObject<HTMLDivElement>;
+  actionsWrap?: boolean;
 }) {
   return (
-    <div className="prompt-shelf" aria-live="polite">
+    <div className={`prompt-shelf${actionsWrap ? " prompt-shelf--actions-wrap" : ""}`} aria-live="polite">
       <div
         ref={barRef}
         className="prompt-shelf__bar"
@@ -36,8 +38,8 @@ export function PromptShelf({
           <PauseCircle size={16} aria-hidden="true" />
           <div className="prompt-shelf__copy">
             <div id={titleId} className="prompt-shelf__title">
-              {title}
-              {badges}
+              <span className="prompt-shelf__heading">{title}</span>
+              {badges && <span className="prompt-shelf__badges">{badges}</span>}
             </div>
             <div className="prompt-shelf__meta">{meta}</div>
           </div>

@@ -18,7 +18,7 @@ guessing; keep changes minimal and correct; briefly summarize what you did."""
 # system_prompt_file = "prompts/system.md"   # overrides system_prompt when set
 max_steps   = 25
 temperature = 0.0
-auto_plan   = "ask"   # off|ask|on; ask/on auto-enter plan mode for complex tasks
+auto_plan   = "off"   # off|on; off keeps plan mode manual
 # auto_plan_classifier = "deepseek-flash"   # optional; only used for borderline tasks
 soft_compact_ratio  = 0.5   # notice only; keeps the cache-first prefix intact
 compact_ratio       = 0.8   # try compacting when prompt reaches this fraction
@@ -64,6 +64,21 @@ base_url       = "https://api.xiaomimimo.com/v1"
 model          = "mimo-v2-flash"   # thinking-mode off by default; cheaper / faster
 api_key_env    = "MIMO_API_KEY"
 context_window = 65536
+
+# Custom /effort levels for a provider. When supported_efforts is set, the
+# /effort command exposes these levels; default_effort is what "/effort auto"
+# (or unset) resolves to. Leave both commented to keep the built-in defaults
+# (DeepSeek: high|max; Anthropic: low|medium|high|xhigh|max). Other kinds
+# (e.g. mimo-pro) don't expose /effort unless you opt in here.
+#
+# [[providers]]
+# name           = "mimo-custom"
+# kind           = "openai"
+# base_url       = "https://token-plan-cn.xiaomimimo.com/v1"
+# model          = "mimo-v2.5-pro"
+# api_key_env    = "MIMO_API_KEY"
+# supported_efforts = ["low", "medium", "high"]
+# default_effort    = "high"
 
 # Anthropic (Claude) — the "anthropic" kind speaks the Messages API directly (no
 # OpenAI shim). base_url is optional (defaults to https://api.anthropic.com). Note:

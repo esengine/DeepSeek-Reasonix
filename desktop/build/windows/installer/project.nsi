@@ -4,7 +4,7 @@ Unicode true
 ## Reasonix per-user NSIS installer.
 ##
 ## This file is COMMITTED and customized (Wails leaves an existing project.nsi
-## untouched and only regenerates wails_tools.nsh). The two customizations vs.
+## untouched and only regenerates wails_tools.nsh). The customizations vs.
 ## Wails' default template:
 ##
 ##   1. REQUEST_EXECUTION_LEVEL "user" + InstallDir under $LOCALAPPDATA - install
@@ -13,6 +13,12 @@ Unicode true
 ##   2. Uninstall registry under HKCU (not HKLM). Wails' wails.writeUninstaller /
 ##      wails.deleteUninstaller macros hard-code HKLM, which a non-admin install
 ##      cannot write - so we inline HKCU versions below instead.
+##   3. InstallDir is remembered across updates via InstallDirRegKey +
+##      InstallLocation (HKCU\...\Uninstall\InstallLocation). Without this, every
+##      release forces the user back to %LOCALAPPDATA%\Programs\Reasonix even if
+##      they had moved the install to a different drive (e.g. D:\Tools\Reasonix);
+##      the silent auto-updater would re-run with /S into the wrong dir, leaving
+##      the old install orphaned.
 ##
 ## Everything else mirrors Wails' generated default. Defines below override the
 ## ProjectInfo values that wails_tools.nsh would otherwise populate.
@@ -66,7 +72,9 @@ ManifestDPIAware true
 
 Name "${INFO_PRODUCTNAME}"
 OutFile "..\..\bin\${INFO_PROJECTNAME}-${ARCH}-installer.exe" # Name of the installer's file.
-InstallDir "$LOCALAPPDATA\Programs\${INFO_PRODUCTNAME}" # Per-user install location (no admin rights required).
+!define REASONIX_DEFAULT_INSTALLDIR "$LOCALAPPDATA\Programs\${INFO_PRODUCTNAME}"
+InstallDirRegKey HKCU "${UNINST_KEY}" "InstallLocation" # Reuse the previous install path on update; .onInit falls back to the default on first install.
+InstallDir "${REASONIX_DEFAULT_INSTALLDIR}" # Per-user install location (no admin rights required).
 ShowInstDetails show # This will always show the installation details.
 
 ####
@@ -82,6 +90,13 @@ ShowInstDetails show # This will always show the installation details.
     WriteRegStr HKCU "${UNINST_KEY}" "DisplayIcon" "$INSTDIR\${PRODUCT_EXECUTABLE}"
     WriteRegStr HKCU "${UNINST_KEY}" "UninstallString" "$\"$INSTDIR\uninstall.exe$\""
     WriteRegStr HKCU "${UNINST_KEY}" "QuietUninstallString" "$\"$INSTDIR\uninstall.exe$\" /S"
+    # Persist the resolved install path so a subsequent update picks it up
+    # via InstallDirRegKey above. Without this, every release would force the
+    # user back to %LOCALAPPDATA%\Programs\Reasonix even if they had moved
+    # the install to a different drive (e.g. D:\Tools\Reasonix). The auto-
+    # updater re-runs this installer with /S and trusts the persisted path,
+    # so it has to be present before the silent re-install.
+    WriteRegStr HKCU "${UNINST_KEY}" "InstallLocation" "$INSTDIR"
 
     ${GetSize} "$INSTDIR" "/S=0K" $0 $1 $2
     IntFmt $0 "0x%08X" $0
@@ -95,6 +110,13 @@ ShowInstDetails show # This will always show the installation details.
 
 Function .onInit
    !insertmacro wails.checkArchitecture
+
+   ; InstallDirRegKey leaves $INSTDIR empty when the InstallLocation value
+   ; is missing (first install, or the user wiped the uninstaller registry).
+   ; Fall back to the per-user default so the directory page lands on a
+   ; usable path instead of crashing the install with "InstallDir empty".
+   StrCmp $INSTDIR "" 0 +2
+   StrCpy $INSTDIR "${REASONIX_DEFAULT_INSTALLDIR}"
 FunctionEnd
 
 Section

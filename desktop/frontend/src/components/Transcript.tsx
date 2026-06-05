@@ -1,20 +1,34 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, type MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { Item, LiveStream } from "../lib/useController";
+import type { CheckpointMeta } from "../lib/types";
 import { useT } from "../lib/i18n";
 import { AssistantMessage, UserMessage } from "./Message";
 import { ToolCard } from "./ToolCard";
 import { Welcome } from "./Welcome";
 
 type ToolItem = Extract<Item, { kind: "tool" }>;
+type QuestionAnchor = { id: string; text: string; turn: number };
+
+const QUESTION_NAV_MIN_COUNT = 2;
+
+function questionAnchorId(id: string): string {
+  return `question-anchor-${id}`;
+}
+
+function compactQuestionText(text: string): string {
+  const cleaned = text.replace(/@\.reasonix\/attachments\/[^\s]+/g, "[image]").replace(/\s+/g, " ").trim();
+  if (cleaned.length <= 80) return cleaned;
+  return cleaned.slice(0, 80);
+}
 
 function scrollVersion(items: Item[]): string {
   return items
     .map((it) => {
       switch (it.kind) {
         case "assistant":
-          return `${it.id}:a:${it.text.length}:${it.reasoning.length}:${it.streaming ? 1 : 0}`;
+          return `${it.id}:a:${it.text?.length ?? 0}:${it.reasoning?.length ?? 0}:${it.streaming ? 1 : 0}`;
         case "tool":
-          return `${it.id}:t:${it.name}:${it.status}:${it.args.length}:${it.output?.length ?? 0}:${it.error?.length ?? 0}:${it.truncated ? 1 : 0}`;
+          return `${it.id}:t:${it.name}:${it.status}:${it.args?.length ?? 0}:${it.output?.length ?? 0}:${it.error?.length ?? 0}:${it.truncated ? 1 : 0}`;
         default:
           return `${it.id}:${it.kind}`;
       }
@@ -45,12 +59,20 @@ export function Transcript({
   footerHeight = 0,
   onPrompt,
   onRewind,
+  checkpoints = [],
+  actionPending = false,
+  rewindDisabled = false,
+  questionNavigator = true,
 }: {
   items: Item[];
   live?: LiveStream;
   footerHeight?: number;
   onPrompt: (text: string) => void;
   onRewind?: (turn: number, scope: string) => void;
+  checkpoints?: CheckpointMeta[];
+  actionPending?: boolean;
+  rewindDisabled?: boolean;
+  questionNavigator?: boolean;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   // stick tracks whether the view is pinned to the bottom; once the user scrolls
@@ -59,6 +81,18 @@ export function Transcript({
   const resizeFrame = useRef<number | null>(null);
   const lastClientHeight = useRef<number | null>(null);
   const lastFooterHeight = useRef<number | null>(null);
+
+  const questions = useMemo<QuestionAnchor[]>(() => {
+    const anchors: QuestionAnchor[] = [];
+    let turn = 0;
+    for (const it of items) {
+      if (it.kind !== "user") continue;
+      anchors.push({ id: it.id, text: compactQuestionText(it.text), turn });
+      turn += 1;
+    }
+    return anchors;
+  }, [items]);
+  const showQuestionNav = questionNavigator && questions.length >= QUESTION_NAV_MIN_COUNT;
 
   const onScroll = () => {
     const el = scrollRef.current;
@@ -82,7 +116,7 @@ export function Transcript({
       el.scrollTop = el.scrollHeight;
     });
     return () => cancelAnimationFrame(id);
-  }, [contentVersion, live?.text.length, live?.reasoning.length]);
+  }, [contentVersion, live?.text?.length ?? 0, live?.reasoning?.length ?? 0]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -157,10 +191,36 @@ export function Transcript({
     }
     return m;
   }, [items]);
+  const checkpointsByTurn = useMemo(() => new Map(checkpoints.map((checkpoint) => [checkpoint.turn, checkpoint])), [checkpoints]);
+
+  const jumpToQuestion = (question: QuestionAnchor) => {
+    const el = scrollRef.current;
+    const node = document.getElementById(questionAnchorId(question.id));
+    if (!el || !node) return;
+    stick.current = false;
+    if (resizeFrame.current !== null) {
+      cancelAnimationFrame(resizeFrame.current);
+      resizeFrame.current = null;
+    }
+    const scrollerRect = el.getBoundingClientRect();
+    const nodeRect = node.getBoundingClientRect();
+    const top = el.scrollTop + nodeRect.top - scrollerRect.top - 12;
+    el.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+  };
+
+  const empty = items.length === 0;
 
   return (
-    <div className="transcript" ref={scrollRef} onScroll={onScroll}>
-      {items.length === 0 && <Welcome onPrompt={onPrompt} />}
+    <div
+      className={`transcript${empty ? " transcript--empty" : ""}`}
+      ref={scrollRef}
+      onScroll={onScroll}
+    >
+      {empty && <Welcome onPrompt={onPrompt} />}
+
+      {!empty && showQuestionNav && (
+        <QuestionJumpBar questions={questions} onJump={jumpToQuestion} />
+      )}
 
       {items.map((it) => {
         switch (it.kind) {
@@ -171,9 +231,13 @@ export function Transcript({
                 key={it.id}
                 text={it.text}
                 turn={tn}
-                open={tn != null && openTurn === tn}
-                onToggle={() => setOpenTurn((cur) => (cur === tn ? null : (tn ?? null)))}
-                onRewind={(turn, scope) => {
+                anchorId={questionAnchorId(it.id)}
+	                open={tn != null && openTurn === tn}
+	                onToggle={() => setOpenTurn((cur) => (cur === tn ? null : (tn ?? null)))}
+	                checkpoint={tn != null ? checkpointsByTurn.get(tn) : undefined}
+	                actionPending={actionPending}
+	                rewindDisabled={rewindDisabled}
+	                onRewind={(turn, scope) => {
                   onRewind?.(turn, scope);
                   setOpenTurn(null);
                 }}
@@ -208,6 +272,137 @@ export function Transcript({
         }
       })}
     </div>
+  );
+}
+
+function QuestionJumpBar({ questions, onJump }: { questions: QuestionAnchor[]; onJump: (question: QuestionAnchor) => void }) {
+  const t = useT();
+  const [hovered, setHovered] = useState<number | null>(null);
+  const [active, setActive] = useState<number | null>(null);
+  const barRef = useRef<HTMLDivElement>(null);
+  const previewTop = useRef(0);
+  const [showPreview, setShowPreview] = useState(false);
+
+  useEffect(() => {
+    if (questions.length === 0) return;
+    setActive((cur) => {
+      if (cur !== null && questions.some((question) => question.turn === cur)) return cur;
+      return questions[questions.length - 1]?.turn ?? null;
+    });
+  }, [questions]);
+
+  useEffect(() => {
+    if (active === null) return;
+    const el = barRef.current?.querySelector(`[data-turn="${active}"]`);
+    el?.scrollIntoView({ block: "nearest" });
+  }, [active]);
+
+  const hoverIdx = hovered !== null ? questions.findIndex((question) => question.turn === hovered) : -1;
+  const hoveredQuestion = hovered !== null ? questions.find((question) => question.turn === hovered) : undefined;
+
+  const closestQuestionFromY = (clientY: number): { question: QuestionAnchor; previewY: number } | null => {
+    const el = barRef.current;
+    if (!el) return null;
+    const markers = el.querySelectorAll<HTMLElement>(".jump-item");
+    const barRect = el.getBoundingClientRect();
+    let closest = -1;
+    let closestDist = Infinity;
+    let closestY = 0;
+    markers.forEach((item, index) => {
+      const rect = item.getBoundingClientRect();
+      const midY = rect.top + rect.height / 2;
+      const dist = Math.abs(clientY - midY);
+      if (dist < closestDist) {
+        closestDist = dist;
+        closest = index;
+        closestY = midY - barRect.top;
+      }
+    });
+    const question = questions[closest];
+    if (!question) return null;
+    return { question, previewY: closestY };
+  };
+
+  const onMove = (e: ReactMouseEvent<HTMLDivElement>) => {
+    const closest = closestQuestionFromY(e.clientY);
+    if (!closest) return;
+    previewTop.current = closest.previewY;
+    setHovered(closest.question.turn);
+    setShowPreview(true);
+  };
+
+  const scrollTo = (question: QuestionAnchor) => {
+    setActive(question.turn);
+    onJump(question);
+  };
+
+  const onRailMouseDown = (e: ReactMouseEvent<HTMLDivElement>) => {
+    const closest = closestQuestionFromY(e.clientY);
+    if (!closest) return;
+    e.preventDefault();
+    previewTop.current = closest.previewY;
+    setHovered(closest.question.turn);
+    setShowPreview(true);
+    scrollTo(closest.question);
+  };
+
+  const onItemMouseDown = (e: ReactMouseEvent<HTMLButtonElement>, question: QuestionAnchor) => {
+    e.preventDefault();
+    scrollTo(question);
+  };
+
+  const dotProps = (
+    idx: number,
+    turn: number,
+  ): { style: CSSProperties; "data-d"?: string } => {
+    const isActive = active === turn;
+    if (hoverIdx < 0) {
+      return { style: { width: isActive ? 18 : 12, background: isActive ? "var(--accent)" : undefined } };
+    }
+    const d = Math.abs(idx - hoverIdx);
+    const width = d === 0 ? 32 : d === 1 ? 20 : d === 2 ? 14 : isActive ? 18 : 12;
+    const background = d <= 2 ? undefined : isActive ? "var(--accent)" : undefined;
+    return {
+      style: { width, transitionDelay: `${d * 20}ms`, background },
+      "data-d": d <= 2 ? String(d) : undefined,
+    };
+  };
+
+  return (
+    <nav
+      className="jump-bar"
+      ref={barRef}
+      aria-label={t("questionNav.label")}
+      onMouseMove={onMove}
+      onMouseLeave={() => {
+        setHovered(null);
+        setShowPreview(false);
+      }}
+    >
+      <div className="jump-scroll" onMouseDown={onRailMouseDown} onClick={onRailMouseDown}>
+        {questions.map((question, index) => (
+          <button
+            className="jump-item"
+            key={question.id}
+            type="button"
+            data-turn={question.turn}
+            aria-label={t("questionNav.jump", { n: question.turn + 1 })}
+            onMouseDown={(e) => onItemMouseDown(e, question)}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (e.detail === 0) scrollTo(question);
+            }}
+          >
+            <span className="jump-dot" {...dotProps(index, question.turn)} />
+          </button>
+        ))}
+      </div>
+      {showPreview && hoveredQuestion && (
+        <div className="jump-preview" style={{ top: previewTop.current }} role="tooltip">
+          <span className="jump-text">{hoveredQuestion.text}</span>
+        </div>
+      )}
+    </nav>
   );
 }
 

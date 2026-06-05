@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, ClipboardEvent, DragEvent, KeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
-import { ArrowUp, Check, ChevronDown, Eye, FileText, Folder, FolderGit2, FolderPlus, Search, Square, Trash2, X } from "lucide-react";
+import type { CSSProperties, ClipboardEvent, DragEvent, KeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
+import { AlertTriangle, ArrowUp, Check, ChevronDown, Eye, FileText, Folder, FolderGit2, FolderPlus, List, Search, Square, Trash2, X, Zap } from "lucide-react";
+import { asArray } from "../lib/array";
 import { app, onFilesDropped } from "../lib/bridge";
-import { useT } from "../lib/i18n";
+import { SPINNER_WORDS, useI18n } from "../lib/i18n";
 import { clearLayoutSize, loadOptionalLayoutSize, saveLayoutSize } from "../lib/layoutPreferences";
-import type { CommandInfo, ComposerInsertRequest, DirEntry, Mode, SlashArgItem, SlashArgsResult, WorkspaceView } from "../lib/types";
+import type { CommandInfo, ComposerInsertRequest, DirEntry, EffortInfo, Mode, SlashArgItem, SlashArgsResult, WorkspaceView } from "../lib/types";
 import {
   formatWorkspaceReference,
   parseWorkspaceReference,
@@ -14,7 +15,10 @@ import {
 import { SlashMenu } from "./SlashMenu";
 import { ArgMenu } from "./ArgMenu";
 import { FileMenu } from "./FileMenu";
+import { EffortSwitcher } from "./EffortSwitcher";
+import { ModelSwitcher } from "./ModelSwitcher";
 import { Tooltip } from "./Tooltip";
+import { AnchoredPopover } from "./AnchoredPopover";
 
 interface Attachment {
   path: string;
@@ -76,6 +80,27 @@ function loadComposerHeight(): number | null {
   return loadOptionalLayoutSize("composerHeight", clampComposerHeight);
 }
 
+function fmtTokens(n: number): string {
+  if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, "") + "k";
+  return String(n);
+}
+
+function fmtElapsed(ms: number): string {
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}s`;
+  return `${Math.floor(s / 60)}m ${s % 60}s`;
+}
+
+function useTick(on: boolean): number {
+  const [, setN] = useState(0);
+  useEffect(() => {
+    if (!on) return;
+    const id = window.setInterval(() => setN((n) => n + 1), 1000);
+    return () => window.clearInterval(id);
+  }, [on]);
+  return Date.now();
+}
+
 function isImeKeyEvent(
   e: KeyboardEvent<HTMLTextAreaElement>,
   composing: boolean,
@@ -97,31 +122,56 @@ export function Composer({
   running,
   mode,
   cwd,
+  modelLabel,
+  tabId,
+  effort,
   onSend,
   onCancel,
   onCycleMode,
+  onSetMode,
+  onSwitchModel,
+  onSetEffort,
   onPickFolder,
+  onRemoveWorkspace,
   insertRequest,
   disabled,
+  decisionPending = false,
   ready,
+  turnStartAt,
+  turnTokens,
+  retry,
+  workspaceRefreshSignal,
 }: {
   running: boolean;
   mode: Mode;
   cwd?: string;
+  modelLabel: string;
+  tabId?: string;
+  effort?: EffortInfo;
   onSend: (displayText: string, submitText?: string) => void;
   // Returns the un-sent text when cancelling before the server replied (so it can
   // be restored to the input); undefined for a normal cancel.
   onCancel: () => string | undefined;
   onCycleMode: () => void;
+  onSetMode: (mode: Mode) => void;
+  onSwitchModel: (name: string) => void;
+  onSetEffort: (level: string) => void;
   onPickFolder: (path?: string) => Promise<string>;
+  onRemoveWorkspace: (path: string) => Promise<void>;
   insertRequest?: ComposerInsertRequest | null;
   disabled?: boolean;
+  decisionPending?: boolean;
   // ready/cwd re-trigger the command fetch: Commands() returns only built-ins
   // until boot.Build finishes (the controller, hence skills/custom/MCP, is nil
   // before then), and the available set changes when the workspace switches.
   ready?: boolean;
+  turnStartAt?: number;
+  turnTokens?: number;
+  retry?: { attempt: number; max: number };
+  workspaceRefreshSignal?: number;
 }) {
-  const t = useT();
+  const { t, locale } = useI18n();
+  const now = useTick(running);
   const [text, setText] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [workspaceRefs, setWorkspaceRefs] = useState<WorkspaceReference[]>([]);
@@ -141,7 +191,6 @@ export function Composer({
   const taRef = useRef<HTMLTextAreaElement>(null);
   const composerCardRef = useRef<HTMLDivElement>(null);
   const workspaceAnchorRef = useRef<HTMLDivElement>(null);
-  const workspaceMenuRef = useRef<HTMLDivElement>(null);
   const wasRunning = useRef(running);
   const composingRef = useRef(false);
   const lastCompositionEndAt = useRef(0);
@@ -160,7 +209,7 @@ export function Composer({
   // --- slash commands (whole-input "/token") ---
   const [commands, setCommands] = useState<CommandInfo[]>([]);
   useEffect(() => {
-    app.Commands().then(setCommands).catch(() => {});
+    app.Commands().then((next) => setCommands(asArray(next))).catch(() => {});
   }, [ready, cwd]);
 
   const slashQuery = useMemo(() => {
@@ -174,32 +223,41 @@ export function Composer({
 
   // --- slash argument completion ("/cmd <args>") --- mirrors the CLI: once past
   // the command word, the backend suggests sub-commands (/skill → list/show/…,
-  // /mcp → add/remove, /model → refs). Fetched from app.SlashArgs.
+  // /mcp → add/remove, /model → refs). Fetched from app.SlashArgs. Debounced
+  // by 120ms so rapid typing doesn't flood the backend with IPC calls — the
+  // menu only updates after the user pauses.
   const [argRes, setArgRes] = useState<SlashArgsResult | null>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
   useEffect(() => {
     if (!text.startsWith("/") || !/\s/.test(text)) {
       setArgRes(null);
       return;
     }
     let live = true;
-    app
-      .SlashArgs(text)
-      .then((r) => {
-        if (!live) return;
-        // Drop suggestions that wouldn't change the input — the token is already
-        // fully typed (e.g. "/skill list" offering "list"). Otherwise the menu
-        // lingers on a complete command and Enter keeps "accepting" a no-op
-        // instead of sending. (Defense-in-depth: the backend filters these too.)
-        // r.items can arrive as null (an empty Go slice serializes to JSON null),
-        // so guard before filtering — otherwise the throw is swallowed and the
-        // stale menu from the previous keystroke lingers (the /skill list bug).
-        const useful = (r.items ?? []).filter((it) => text.slice(0, r.from) + it.insert !== text);
-        setArgRes(useful.length > 0 ? { items: useful, from: r.from } : null);
-        setActive(0);
-      })
-      .catch(() => {});
+    clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      app
+        .SlashArgs(text)
+        .then((r) => {
+          if (!live) return;
+          // Drop suggestions that wouldn't change the input — the token is already
+          // fully typed (e.g. "/skill list" offering "list"). Otherwise the menu
+          // lingers on a complete command and Enter keeps "accepting" a no-op
+          // instead of sending. (Defense-in-depth: the backend filters these too.)
+          // r.items can arrive as null (an empty Go slice serializes to JSON null),
+          // so guard before filtering — otherwise the throw is swallowed and the
+          // stale menu from the previous keystroke lingers (the /skill list bug).
+          const items = asArray(r?.items);
+          const from = r?.from ?? 0;
+          const useful = items.filter((it) => text.slice(0, from) + it.insert !== text);
+          setArgRes(useful.length > 0 ? { items: useful, from } : null);
+          setActive(0);
+        })
+        .catch(() => {});
+    }, 120);
     return () => {
       live = false;
+      clearTimeout(debounceRef.current);
     };
   }, [text]);
 
@@ -237,7 +295,7 @@ export function Composer({
     app
       .ListDir(atDir)
       .then((es) => {
-        const list = es ?? [];
+        const list = asArray(es);
         dirCache.current[atDir] = list;
         if (live) setEntries(list);
       })
@@ -575,23 +633,12 @@ export function Composer({
   }, [cwd]);
 
   const loadWorkspaces = () => {
-    app.ListWorkspaces().then(setWorkspaces).catch(() => setWorkspaces([]));
+    app.ListWorkspaces().then((next) => setWorkspaces(asArray(next))).catch(() => setWorkspaces([]));
   };
 
   useEffect(() => {
     if (workspaceMenuOpen) loadWorkspaces();
-  }, [workspaceMenuOpen, cwd]);
-
-  useEffect(() => {
-    if (!workspaceMenuOpen) return;
-    const close = (e: MouseEvent) => {
-      const target = e.target as Node;
-      if (workspaceAnchorRef.current?.contains(target) || workspaceMenuRef.current?.contains(target)) return;
-      setWorkspaceMenuOpen(false);
-    };
-    document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
-  }, [workspaceMenuOpen]);
+  }, [workspaceMenuOpen, cwd, workspaceRefreshSignal]);
 
   const filteredWorkspaces = useMemo(() => {
     const q = workspaceQuery.trim().toLowerCase();
@@ -605,6 +652,11 @@ export function Composer({
       setWorkspaceMenuOpen(false);
       setWorkspaceQuery("");
     }
+  };
+
+  const removeWorkspace = async (path: string) => {
+    await onRemoveWorkspace(path);
+    setWorkspaces((prev) => prev.filter((w) => w.path !== path));
   };
 
   useEffect(() => {
@@ -717,18 +769,48 @@ export function Composer({
     }
     // Esc interrupts the in-flight turn (matches the Stop button's hint), and
     // restores the text if the server hadn't replied yet.
-    if (e.key === "Escape" && running) {
+    if (e.key === "Escape" && running && !decisionPending) {
       e.preventDefault();
       handleCancel();
     }
   };
 
   const composerCardStyle = composerHeight === null ? undefined : ({ "--composer-height": `${composerHeight}px` } as CSSProperties);
+  const modeOptions: Array<{ id: Mode; label: string; icon: ReactNode }> = [
+    { id: "normal", label: "auto", icon: <Zap size={13} /> },
+    { id: "plan", label: "plan", icon: <List size={13} /> },
+    { id: "yolo", label: "yolo", icon: <AlertTriangle size={13} /> },
+  ];
+  const runActivity = retry
+    ? t("status.retrying", { attempt: retry.attempt, max: retry.max })
+    : running && turnStartAt
+      ? (() => {
+          const elapsedMs = Math.max(0, now - turnStartAt);
+          const words = SPINNER_WORDS[locale];
+          const word = words[Math.floor(elapsedMs / 3000) % words.length];
+          const tok = turnTokens && turnTokens > 0 ? ` · ↓ ${fmtTokens(turnTokens)} ${t("status.tokens")}` : "";
+          return `${word}… ${fmtElapsed(elapsedMs)}${tok}`;
+        })()
+      : null;
+  const hasWorkspace = Boolean(cwd);
+  const hasEffort = Boolean(effort?.supported);
+  const composerMetaClass = [
+    "composer-meta",
+    hasWorkspace ? "composer-meta--has-workspace" : "composer-meta--no-workspace",
+    hasEffort ? "composer-meta--has-effort" : "composer-meta--no-effort",
+  ].join(" ");
 
   return (
-    <div className="composer-wrap" style={{ "--wails-drop-target": "drop" } as CSSProperties}>
-      {workspaceMenuOpen && cwd && (
-        <div className="workspace-switcher" ref={workspaceMenuRef}>
+    <div
+      className={`composer-wrap${decisionPending ? " composer-wrap--decision-pending" : ""}`}
+      style={{ "--wails-drop-target": "drop" } as CSSProperties}
+    >
+      <AnchoredPopover
+        open={workspaceMenuOpen && !!cwd}
+        anchorRef={workspaceAnchorRef}
+        onClose={() => setWorkspaceMenuOpen(false)}
+        className="workspace-switcher workspace-switcher--portal"
+      >
           <label className="workspace-switcher__search">
             <Search size={14} />
             <input
@@ -743,9 +825,10 @@ export function Composer({
           </label>
           <div className="workspace-switcher__list">
             {filteredWorkspaces.map((w) => (
-              <Tooltip key={w.path} label={w.path} fill>
+              <div className="workspace-switcher__row" key={w.path}>
                 <button
-                  className="workspace-switcher__item"
+                  className={`workspace-switcher__item${w.current ? " workspace-switcher__item--current" : ""}`}
+                  title={w.path}
                   onClick={() => {
                     if (w.current) {
                       setWorkspaceMenuOpen(false);
@@ -758,7 +841,20 @@ export function Composer({
                   <span>{w.name}</span>
                   {w.current && <Check size={15} />}
                 </button>
-              </Tooltip>
+                <button
+                  className="workspace-switcher__remove"
+                  type="button"
+                  aria-label={t("composer.removeProject")}
+                  title={t("composer.removeProject")}
+                  disabled={running}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void removeWorkspace(w.path);
+                  }}
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
             ))}
             {filteredWorkspaces.length === 0 && <div className="workspace-switcher__empty">{t("composer.noProjectMatches")}</div>}
           </div>
@@ -768,8 +864,7 @@ export function Composer({
               <span>{t("composer.addProject")}</span>
             </button>
           </div>
-        </div>
-      )}
+      </AnchoredPopover>
       {menuMode === "slash" && (
         <SlashMenu items={slashMatches} activeIndex={active} onPick={pickCommand} onHover={setActive} />
       )}
@@ -777,6 +872,35 @@ export function Composer({
         <ArgMenu items={argRes.items} activeIndex={active} onPick={pickArg} onHover={setActive} />
       )}
       {menuMode === "at" && <FileMenu items={atMatches} activeIndex={active} onPick={pickEntry} onHover={setActive} />}
+      <div className="composer-toolbar">
+        <div className="composer-modebar" role="toolbar" aria-label={t("composer.modeTitle")}>
+          {modeOptions.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              className={`composer-modebar__item composer-modebar__item--${option.id}${mode === option.id ? " composer-modebar__item--active" : ""}`}
+              onClick={() => onSetMode(option.id)}
+              aria-pressed={mode === option.id}
+              disabled={disabled || running}
+            >
+              {option.icon}
+              <span>{option.label}</span>
+            </button>
+          ))}
+        </div>
+        {runActivity && (
+          <div className="composer-runstatus" role="status" aria-live="polite">
+            <span className="composer-runstatus__dot" />
+            <span className="composer-runstatus__text">{runActivity}</span>
+            <Tooltip label={t("composer.stop")}>
+              <button className="composer-runstatus__stop" type="button" onClick={handleCancel} disabled={decisionPending}>
+                <Square size={10} fill="currentColor" />
+                <span>{t("composer.stopShort")}</span>
+              </button>
+            </Tooltip>
+          </div>
+        )}
+      </div>
       {(attachments.length > 0 || workspaceRefs.length > 0) && (
         <div className="composer-context" aria-label={t("composer.contextItems")}>
           {attachments.map((a) => (
@@ -865,12 +989,12 @@ export function Composer({
           onDoubleClick={resetComposerHeight}
         />
         <div
-          className={`composer${dragOver ? " composer--dragover" : ""}${disabled ? " composer--disabled" : ""}`}
+          className={`composer${dragOver ? " composer--dragover" : ""}${disabled ? " composer--disabled" : ""}${text.trimStart().startsWith("!") ? " composer--shell" : ""}`}
           onDrop={onDrop}
           onDragOver={onDragOver}
           onDragLeave={onDragLeave}
         >
-          <span className="composer__caret">›</span>
+          <span className="composer__caret">{text.trimStart().startsWith("!") ? "$" : "›"}</span>
           <textarea
             ref={taRef}
             className="composer__input"
@@ -893,13 +1017,7 @@ export function Composer({
             rows={1}
             disabled={disabled}
           />
-          {running ? (
-            <Tooltip label={t("composer.stop")}>
-              <button className="composer__btn composer__btn--stop" onClick={handleCancel}>
-                <Square size={14} fill="currentColor" />
-              </button>
-            </Tooltip>
-          ) : (
+          {!running && (
             <Tooltip label={t("composer.send")}>
               <button
                 className="composer__btn composer__btn--send"
@@ -911,34 +1029,32 @@ export function Composer({
             </Tooltip>
           )}
         </div>
-        <div className="composer-meta">
+        <div className={composerMetaClass}>
           {cwd && (
-            <div className="composer-workspace-wrap" ref={workspaceAnchorRef}>
-              <Tooltip label={running ? t("common.busyHint") : t("status.switchFolder", { cwd })}>
-                <button
-                  className={`composer__workspace${workspaceMenuOpen ? " composer__workspace--open" : ""}`}
-                  onClick={() => {
-                    if (!running) setWorkspaceMenuOpen((open) => !open);
-                  }}
-                  disabled={running}
-                >
-                  <FolderGit2 size={13} />
-                  <span>{workspaceName}</span>
-                  <ChevronDown size={12} />
-                </button>
-              </Tooltip>
+            <div className="composer-meta__control composer-meta__control--workspace composer-workspace-wrap" ref={workspaceAnchorRef}>
+              <button
+                className={`composer__workspace${workspaceMenuOpen ? " composer__workspace--open" : ""}`}
+                onClick={() => {
+                  if (!running) setWorkspaceMenuOpen((open) => !open);
+                }}
+                disabled={running}
+              >
+                <FolderGit2 size={13} />
+                <span>{workspaceName}</span>
+                <ChevronDown size={12} />
+              </button>
             </div>
           )}
-          <Tooltip label={t("composer.modeTitle")}>
-            <button
-              className={`composer__mode composer__mode--${mode}`}
-              onClick={onCycleMode}
-            >
-              <span className="composer__mode-dot" />
-              {mode === "yolo" ? t("composer.modeYolo") : mode === "plan" ? t("composer.modePlan") : t("composer.modeNormal")}
-              <span className="composer__mode-hint">{t("composer.modeHint")}</span>
-            </button>
-          </Tooltip>
+          <div className="composer-meta__params">
+            <div className="composer-meta__control composer-meta__control--model">
+              <ModelSwitcher label={modelLabel} tabId={tabId} onPick={onSwitchModel} />
+            </div>
+            {effort?.supported && (
+              <div className="composer-meta__control composer-meta__control--effort">
+                <EffortSwitcher effort={effort} disabled={running} onPick={onSetEffort} />
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>

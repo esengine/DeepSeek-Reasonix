@@ -19,6 +19,7 @@ func newTestChatTUI() chatTUI {
 		input:                ti,
 		width:                80,
 		submittedInputCursor: -1,
+		queueEditCursor:      -1,
 		nextPasteID:          1,
 		reasoningLineIdx:     -1,
 		reasoningTextIdx:     -1,
@@ -28,6 +29,18 @@ func newTestChatTUI() chatTUI {
 		pending:              &strings.Builder{},
 		pendingCommit:        &commit,
 		renderer:             newMarkdownRenderer(80),
+	}
+}
+
+func TestCacheRateLabelKeepsTwoDecimals(t *testing.T) {
+	if got := cacheRateLabel("turn hit %s", 998, 1000); got != "turn hit 99.80%" {
+		t.Fatalf("cacheRateLabel = %q, want turn hit 99.80%%", got)
+	}
+	if got := cacheRateLabel("avg %s", 1, 3); got != "avg 33.33%" {
+		t.Fatalf("cacheRateLabel = %q, want avg 33.33%%", got)
+	}
+	if got := cacheRateLabel("avg %s", 1, 0); got != "" {
+		t.Fatalf("cacheRateLabel with zero denominator = %q, want empty", got)
 	}
 }
 

@@ -46,6 +46,47 @@ func TestGitStatusRenderRepoUsesSuppliedRepoStyle(t *testing.T) {
 	}
 }
 
+func TestGitStatusRenderWithinCompactsRepoBeforeBranch(t *testing.T) {
+	status := gitStatus{Repo: "VeryLongDeepSeekReasonixWorkspace", Branch: "codex/cli-tui-status-row"}
+
+	full := ansi.Strip(status.RenderWithin(80, statusAutoColor))
+	if full != "VeryLongDeepSeekReasonixWorkspace@codex/cli-tui-status-row" {
+		t.Fatalf("wide RenderWithin = %q", full)
+	}
+
+	got := ansi.Strip(status.RenderWithin(46, statusAutoColor))
+	if ansi.StringWidth(got) > 46 {
+		t.Fatalf("compacted status width = %d, want <= 46: %q", ansi.StringWidth(got), got)
+	}
+	if !strings.Contains(got, "@codex/cli-tui-status-row") {
+		t.Fatalf("branch should stay intact while repo can be compacted: %q", got)
+	}
+	if !strings.Contains(got, "…") {
+		t.Fatalf("long repo should be compacted with ellipsis: %q", got)
+	}
+}
+
+func TestGitStatusRenderWithinKeepsDirtySuffix(t *testing.T) {
+	status := gitStatus{
+		Repo:      "VeryLongDeepSeekReasonixWorkspace",
+		Branch:    "codex/cli-tui-status-row",
+		Added:     12,
+		Removed:   3,
+		Untracked: 4,
+	}
+
+	got := ansi.Strip(status.RenderWithin(35, statusAutoColor))
+	if ansi.StringWidth(got) > 35 {
+		t.Fatalf("compacted dirty status width = %d, want <= 35: %q", ansi.StringWidth(got), got)
+	}
+	if !strings.Contains(got, "(+12 -3 ?4)") {
+		t.Fatalf("dirty suffix should be preserved: %q", got)
+	}
+	if !strings.Contains(got, "@") || !strings.Contains(got, "…") {
+		t.Fatalf("identity should remain segmented and compacted: %q", got)
+	}
+}
+
 func TestLoadGitStatus(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not found")

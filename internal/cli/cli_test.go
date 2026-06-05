@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -53,6 +54,17 @@ func mustGetwd(t *testing.T) string {
 	return cwd
 }
 
+func isolateCLIConfigHome(t *testing.T) string {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
+	t.Chdir(t.TempDir())
+	return home
+}
+
 func TestMetadataCommandsDoNotProbeTerminalTheme(t *testing.T) {
 	defer func(prev func() (terminalRGB, bool)) {
 		queryTerminalBackgroundForTheme = prev
@@ -78,6 +90,135 @@ func TestMetadataCommandsDoNotProbeTerminalTheme(t *testing.T) {
 	})
 	if !strings.Contains(out, "Usage:") {
 		t.Fatalf("help output missing usage:\n%s", out)
+	}
+}
+
+func TestRunMigratesLegacyConfigBeforeConfigOnlyCommands(t *testing.T) {
+	isolateCLIConfigHome(t)
+	legacyPath := filepath.Join(filepath.Dir(config.UserConfigPath()), "reasonix.toml")
+	if err := os.MkdirAll(filepath.Dir(legacyPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacyPath, []byte(`
+default_model = "deepseek-flash"
+
+[[plugins]]
+name = "legacy-cli"
+command = "legacy-bin"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out := captureStdout(t, func() {
+		if rc := Run([]string{"mcp", "list"}, "test-version"); rc != 0 {
+			t.Fatalf("mcp list rc = %d, want 0", rc)
+		}
+	})
+	if !strings.Contains(out, "legacy-cli") {
+		t.Fatalf("mcp list should include migrated legacy config:\n%s", out)
+	}
+
+	body, err := os.ReadFile(config.UserConfigPath())
+	if err != nil {
+		t.Fatalf("read migrated user config: %v", err)
+	}
+	for _, want := range []string{`config_version = 2`, `[desktop]`, `name    = "legacy-cli"`} {
+		if !strings.Contains(string(body), want) {
+			t.Fatalf("migrated config missing %q:\n%s", want, body)
+		}
+	}
+}
+
+func TestRunMetadataCommandsDoNotMigrateLegacyConfig(t *testing.T) {
+	isolateCLIConfigHome(t)
+	legacyPath := filepath.Join(filepath.Dir(config.UserConfigPath()), "reasonix.toml")
+	if err := os.MkdirAll(filepath.Dir(legacyPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacyPath, []byte(`default_model = "deepseek-flash"`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out := captureStdout(t, func() {
+		if rc := Run([]string{"version"}, "test-version"); rc != 0 {
+			t.Fatalf("version rc = %d, want 0", rc)
+		}
+	})
+	if !strings.Contains(out, "reasonix test-version") {
+		t.Fatalf("version output = %q", out)
+	}
+	if _, err := os.Stat(config.UserConfigPath()); !os.IsNotExist(err) {
+		t.Fatalf("version should not migrate legacy config, stat err=%v", err)
+	}
+}
+
+func TestConfigAutoPlanCommandWritesUserConfig(t *testing.T) {
+	isolateCLIConfigHome(t)
+
+	out := captureStdout(t, func() {
+		if rc := Run([]string{"config", "auto-plan", "on"}, "test-version"); rc != 0 {
+			t.Fatalf("config auto-plan rc = %d, want 0", rc)
+		}
+	})
+	if !strings.Contains(out, `auto_plan = "on"`) {
+		t.Fatalf("config auto-plan output = %q", out)
+	}
+	cfg := config.LoadForEdit(config.UserConfigPath())
+	if cfg.Agent.AutoPlan != "on" {
+		t.Fatalf("saved auto_plan = %q, want on", cfg.Agent.AutoPlan)
+	}
+}
+
+func TestConfigAutoPlanLocalCreatesMinimalProjectOverride(t *testing.T) {
+	isolateCLIConfigHome(t)
+
+	userCfg := config.Default()
+	userCfg.DefaultModel = "mimo-pro"
+	if err := userCfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("write user config: %v", err)
+	}
+
+	out := captureStdout(t, func() {
+		if rc := Run([]string{"config", "auto-plan", "--local", "on"}, "test-version"); rc != 0 {
+			t.Fatalf("config auto-plan --local rc = %d, want 0", rc)
+		}
+	})
+	if !strings.Contains(out, `auto_plan = "on"`) {
+		t.Fatalf("config auto-plan --local output = %q", out)
+	}
+
+	body, err := os.ReadFile("reasonix.toml")
+	if err != nil {
+		t.Fatalf("read project config: %v", err)
+	}
+	if strings.Contains(string(body), "default_model") {
+		t.Fatalf("project auto-plan override should not pin default_model:\n%s", body)
+	}
+	if !strings.Contains(string(body), "[agent]") || !strings.Contains(string(body), `auto_plan = "on"`) {
+		t.Fatalf("project config missing auto_plan override:\n%s", body)
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("load merged config: %v", err)
+	}
+	if cfg.DefaultModel != "mimo-pro" {
+		t.Fatalf("default_model = %q, want global mimo-pro", cfg.DefaultModel)
+	}
+	if cfg.Agent.AutoPlan != "on" {
+		t.Fatalf("auto_plan = %q, want local on", cfg.Agent.AutoPlan)
+	}
+}
+
+func TestWelcomePromptMissingKeysRequiresConfigSource(t *testing.T) {
+	if welcomeShouldPromptMissingKeys("", nil) {
+		t.Fatal("built-in defaults without a config source should not prompt for missing provider keys")
+	}
+	if welcomeShouldPromptMissingKeys("reasonix.toml", errors.New("bad config")) {
+		t.Fatal("invalid config should not enter the missing-key prompt path")
+	}
+	if !welcomeShouldPromptMissingKeys("reasonix.toml", nil) {
+		t.Fatal("valid config source should enter the missing-key prompt path")
 	}
 }
 

@@ -44,7 +44,6 @@ func saveWorkspace(dir string) {
 		return
 	}
 	_ = os.WriteFile(p, []byte(dir), 0o644)
-	rememberWorkspace(dir)
 }
 
 // loadWorkspace returns the remembered working folder, or "" if none.
@@ -98,6 +97,35 @@ func rememberWorkspace(dir string) {
 		}
 		if len(paths) >= 12 {
 			break
+		}
+	}
+	p := workspaceListPath()
+	if p == "" {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		return
+	}
+	if b, err := json.MarshalIndent(paths, "", "  "); err == nil {
+		_ = os.WriteFile(p, b, 0o644)
+	}
+}
+
+func forgetWorkspace(dir string) {
+	dir = strings.TrimSpace(dir)
+	if dir == "" {
+		return
+	}
+	if abs, err := filepath.Abs(dir); err == nil {
+		dir = abs
+	}
+	paths := make([]string, 0, len(loadWorkspaces()))
+	for _, path := range loadWorkspaces() {
+		if abs, err := filepath.Abs(path); err == nil {
+			path = abs
+		}
+		if path != dir {
+			paths = append(paths, path)
 		}
 	}
 	p := workspaceListPath()

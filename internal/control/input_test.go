@@ -183,7 +183,7 @@ func TestRunTurnAutoPlanComplexTask(t *testing.T) {
 	var notices []string
 	runner := &fakeTurnRunner{}
 	c := New(Options{
-		AutoPlan: "ask",
+		AutoPlan: "on",
 		Runner:   runner,
 		Sink: event.FuncSink(func(e event.Event) {
 			if e.Kind == event.Notice {
@@ -209,7 +209,7 @@ func TestRunTurnAutoPlanComplexTask(t *testing.T) {
 
 func TestRunTurnAutoPlanSkipsSimpleQuestion(t *testing.T) {
 	runner := &fakeTurnRunner{}
-	c := New(Options{AutoPlan: "ask", Runner: runner})
+	c := New(Options{AutoPlan: "on", Runner: runner})
 
 	if err := c.runTurn(context.Background(), "解释一下这个函数做什么？"); err != nil {
 		t.Fatal(err)
@@ -238,10 +238,24 @@ func TestRunTurnAutoPlanOff(t *testing.T) {
 	}
 }
 
+func TestSetAutoPlanAffectsNextTurn(t *testing.T) {
+	runner := &fakeTurnRunner{}
+	c := New(Options{AutoPlan: "off", Runner: runner})
+	c.SetAutoPlan("on")
+
+	input := "实现 GitHub issue #2395：\n- 新增配置项\n- 自动判断复杂任务\n- 补测试和文档"
+	if err := c.runTurn(context.Background(), input); err != nil {
+		t.Fatal(err)
+	}
+	if len(runner.inputs) != 1 || !strings.HasPrefix(runner.inputs[0], PlanModeMarker) {
+		t.Fatalf("SetAutoPlan should affect next turn, inputs=%q", runner.inputs)
+	}
+}
+
 func TestRunTurnAutoPlanClassifierBorderlineTrue(t *testing.T) {
 	classifier := &fakeAutoPlanClassifier{needsPlan: true, reason: "borderline multi-step"}
 	runner := &fakeTurnRunner{}
-	c := New(Options{AutoPlan: "ask", Classifier: classifier, Runner: runner})
+	c := New(Options{AutoPlan: "on", Classifier: classifier, Runner: runner})
 
 	if err := c.runTurn(context.Background(), "实现一个小的配置入口"); err != nil {
 		t.Fatal(err)
@@ -257,7 +271,7 @@ func TestRunTurnAutoPlanClassifierBorderlineTrue(t *testing.T) {
 func TestRunTurnAutoPlanClassifierBorderlineFalse(t *testing.T) {
 	classifier := &fakeAutoPlanClassifier{needsPlan: false, reason: "single obvious edit"}
 	runner := &fakeTurnRunner{}
-	c := New(Options{AutoPlan: "ask", Classifier: classifier, Runner: runner})
+	c := New(Options{AutoPlan: "on", Classifier: classifier, Runner: runner})
 
 	if err := c.runTurn(context.Background(), "实现一个小的配置入口"); err != nil {
 		t.Fatal(err)
@@ -276,7 +290,7 @@ func TestRunTurnAutoPlanClassifierBorderlineFalse(t *testing.T) {
 func TestRunTurnAutoPlanClassifierFallback(t *testing.T) {
 	classifier := &fakeAutoPlanClassifier{err: errors.New("bad json")}
 	runner := &fakeTurnRunner{}
-	c := New(Options{AutoPlan: "ask", Classifier: classifier, Runner: runner})
+	c := New(Options{AutoPlan: "on", Classifier: classifier, Runner: runner})
 
 	if err := c.runTurn(context.Background(), "实现 README 文档更新"); err != nil {
 		t.Fatal(err)
@@ -292,7 +306,7 @@ func TestRunTurnAutoPlanClassifierFallback(t *testing.T) {
 func TestRunTurnAutoPlanTypedNilClassifierFallsBack(t *testing.T) {
 	var classifier *ProviderAutoPlanClassifier
 	runner := &fakeTurnRunner{}
-	c := New(Options{AutoPlan: "ask", Classifier: classifier, Runner: runner})
+	c := New(Options{AutoPlan: "on", Classifier: classifier, Runner: runner})
 
 	if err := c.runTurn(context.Background(), "实现 README 文档更新"); err != nil {
 		t.Fatal(err)
@@ -304,7 +318,7 @@ func TestRunTurnAutoPlanTypedNilClassifierFallsBack(t *testing.T) {
 
 func TestRunTurnAutoPlanScoresRawPromptNotResolvedRefs(t *testing.T) {
 	runner := &fakeTurnRunner{}
-	c := New(Options{AutoPlan: "ask", Runner: runner})
+	c := New(Options{AutoPlan: "on", Runner: runner})
 
 	resolved := "Referenced context:\n\n" +
 		strings.Repeat("实现 重构 配置 测试 文档 多个文件\n", 20) +

@@ -92,6 +92,10 @@ func SaveBranchMeta(sessionPath string, m BranchMeta) error {
 	return saveBranchMeta(sessionPath, m, true)
 }
 
+func SaveBranchMetaPreserveUpdated(sessionPath string, m BranchMeta) error {
+	return saveBranchMeta(sessionPath, m, false)
+}
+
 func saveBranchMeta(sessionPath string, m BranchMeta, touchUpdated bool) error {
 	metaPath := BranchMetaPath(sessionPath)
 	if metaPath == "" {

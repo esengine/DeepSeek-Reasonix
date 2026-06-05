@@ -10,7 +10,6 @@ import (
 
 const (
 	autoPlanOff = "off"
-	autoPlanAsk = "ask"
 	autoPlanOn  = "on"
 )
 
@@ -22,14 +21,12 @@ type autoPlanClassifier interface {
 
 func normalizeAutoPlan(mode string) string {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
-	case "", autoPlanAsk:
-		return autoPlanAsk
-	case autoPlanOn:
+	case autoPlanOn, "ask": // "ask" is a legacy synonym for on.
 		return autoPlanOn
-	case autoPlanOff:
+	case "", autoPlanOff:
 		return autoPlanOff
 	default:
-		return autoPlanAsk
+		return autoPlanOff
 	}
 }
 

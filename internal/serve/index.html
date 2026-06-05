@@ -386,6 +386,8 @@ function post(path, body) {
 function scrollDown() { requestAnimationFrame(()=>{log.scrollTop=log.scrollHeight;});}
 function hideWelcome() { if(welcome) welcome.style.display='none';}
 function fmtTok(n) { return n>=1000?(n/1000).toFixed(1).replace(/\.0$/,'')+'k':String(n);}
+function currencySymbol(c){const v=String(c||'¥').trim();if(/^(cny|rmb|yuan)$/i.test(v))return '¥';if(/^(usd|dollar)$/i.test(v))return '$';return v||'¥';}
+function fmtMoney(n,c){if(typeof n!=='number'||!isFinite(n))return '—';const s=currencySymbol(c);return s+(n<1?n.toFixed(4):n.toFixed(2));}
 function fmtElapsed(ms) { const s=Math.floor(ms/1000); return s<60?s+'s':Math.floor(s/60)+'m '+s%60+'s';}
 function escHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 function el(tag,cls,text) { const e=document.createElement(tag); if(cls)e.className=cls; if(text)e.textContent=text; return e;}
@@ -610,7 +612,8 @@ es.onmessage=ev=>{setConnState('connected');
           const sp=el('span','item');sp.innerHTML=it.l+' <span class="v '+it.c+'">'+it.v+'</span>';strip.appendChild(sp);
         });
         if(e.usage.cacheHitTokens){const sp=el('span','item');sp.innerHTML='Cache <span class="v acc">'+Math.round(e.usage.cacheHitTokens/Math.max(1,e.usage.cacheHitTokens+e.usage.cacheMissTokens)*100)+'%</span>';strip.appendChild(sp);}
-        if(e.usage.costUsd){const sp=el('span','item');sp.innerHTML='Cost <span class="v">$'+e.usage.costUsd.toFixed(4)+'</span>';strip.appendChild(sp);}
+        const usageCost=e.usage.cost??e.usage.costUsd;
+        if(typeof usageCost==='number'&&usageCost>0){const sp=el('span','item');sp.innerHTML='Cost <span class="v">'+fmtMoney(usageCost,e.usage.currency)+'</span>';strip.appendChild(sp);}
         log.appendChild(strip);scrollDown();
       } break;
     case 'notice': log.appendChild(el('div','notice'+(e.level==='warn'?' notice--warn':''),(e.level==='warn'?'! ':'')+(e.text||'')));scrollDown();break;
@@ -638,8 +641,8 @@ function fetchStatus(){
     // sidebar metrics
     const cacheTotal=(s.cacheHit||0)+(s.cacheMiss||0);
     $('#sm-cache').textContent=cacheTotal>0?Math.round((s.cacheHit||0)/cacheTotal*100)+'%':'—';
-    if(s.lastUsage?.costUsd!=null)$('#sm-cost').textContent='$'+s.lastUsage.costUsd.toFixed(4);
-    else if(s.lastUsage?.totalCost!=null)$('#sm-cost').textContent='$'+s.lastUsage.totalCost.toFixed(4);
+    const lastCost=s.lastUsage?.cost??s.lastUsage?.costUsd??s.lastUsage?.totalCost;
+    if(typeof lastCost==='number')$('#sm-cost').textContent=fmtMoney(lastCost,s.lastUsage?.currency);
     if(s.balance?.display)$('#sm-balance').textContent=s.balance.display;
     if(s.balance?.display)balanceInfo.textContent='💰 '+s.balance.display;
   }).catch(()=>{});

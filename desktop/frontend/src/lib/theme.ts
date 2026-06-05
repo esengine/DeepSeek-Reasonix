@@ -1,6 +1,16 @@
 // theme.ts manages the appearance override. The stylesheet follows the OS via
 // prefers-color-scheme unless data-theme forces "dark" or "light". A separate
 // data-theme-style attribute changes only accent tokens.
+//
+// When running inside the Wails shell, applyTheme also syncs the native window
+// theme (title bar, traffic lights, etc.) so the OS chrome matches the webview.
+
+import {
+  WindowSetDarkTheme,
+  WindowSetLightTheme,
+  WindowSetSystemDefaultTheme,
+  WindowSetBackgroundColour,
+} from "../../wailsjs/runtime/runtime";
 
 export type Theme = "auto" | "light" | "dark";
 export type ResolvedTheme = Exclude<Theme, "auto">;
@@ -31,17 +41,22 @@ export const THEME_STYLE_THEME: Record<ThemeStyle, ResolvedTheme> = {
 
 const DEFAULT_THEME_STYLE: Record<ResolvedTheme, ThemeStyle> = {
   dark: "graphite",
-  light: "sandstone",
+  light: "glacier",
 };
+// New users default to the product's dark graphite look. Existing users, and any
+// user who manually changes the theme, keep their stored desktop config.
+const DEFAULT_THEME: Theme = "dark";
 
 const THEME_KEY = "reasonix-theme";
 const STYLE_KEY = "reasonix-theme-style";
+let currentTheme: Theme = DEFAULT_THEME;
+let currentThemeStyle: ThemeStyle = DEFAULT_THEME_STYLE.dark;
 
-function normalizeTheme(value: unknown): Theme | null {
+export function normalizeThemePreference(value: unknown): Theme {
   if (typeof value === "object" && value !== null) {
-    return normalizeTheme((value as { mode?: unknown }).mode);
+    return normalizeThemePreference((value as { mode?: unknown }).mode);
   }
-  if (typeof value !== "string") return null;
+  if (typeof value !== "string") return DEFAULT_THEME;
   switch (value) {
     case "auto":
       return "auto";
@@ -54,7 +69,7 @@ function normalizeTheme(value: unknown): Theme | null {
     case "contrast":
       return "dark";
     default:
-      return null;
+      return DEFAULT_THEME;
   }
 }
 
@@ -63,14 +78,7 @@ export function isThemeStyle(value: unknown): value is ThemeStyle {
 }
 
 export function getTheme(): Theme {
-  const v = typeof localStorage !== "undefined" ? localStorage.getItem(THEME_KEY) : null;
-  if (!v) return "auto";
-  try {
-    const parsed = JSON.parse(v) as unknown;
-    return normalizeTheme(parsed) ?? normalizeTheme(v) ?? "auto";
-  } catch {
-    return normalizeTheme(v) ?? "auto";
-  }
+  return currentTheme;
 }
 
 export function getResolvedTheme(theme: Theme = getTheme()): ResolvedTheme {
@@ -88,12 +96,15 @@ export function themeForStyle(style: ThemeStyle): ResolvedTheme {
 }
 
 export function getThemeStyle(theme: Theme = getTheme()): ThemeStyle {
-  const stored = typeof localStorage !== "undefined" ? localStorage.getItem(STYLE_KEY) : null;
-  if (isThemeStyle(stored) && themeForStyle(stored) === getResolvedTheme(theme)) return stored;
+  if (theme === currentTheme && themeForStyle(currentThemeStyle) === getResolvedTheme(theme)) return currentThemeStyle;
   return defaultStyleForTheme(theme);
 }
 
-export function applyTheme(theme: Theme, style: ThemeStyle = getThemeStyle(theme)): void {
+export function normalizeThemeStyleForTheme(style: string | undefined, theme: Theme): ThemeStyle {
+  return isThemeStyle(style) && themeForStyle(style) === getResolvedTheme(theme) ? style : defaultStyleForTheme(theme);
+}
+
+export function applyTheme(theme: Theme, style: ThemeStyle = getThemeStyle(theme), options: { persist?: boolean } = {}): void {
   if (typeof document === "undefined") return;
   const root = document.documentElement;
   root.removeAttribute("data-theme-mode");
@@ -103,16 +114,71 @@ export function applyTheme(theme: Theme, style: ThemeStyle = getThemeStyle(theme
 
   const resolved = getResolvedTheme(theme);
   const nextStyle = themeForStyle(style) === resolved ? style : DEFAULT_THEME_STYLE[resolved];
+  currentTheme = theme;
+  currentThemeStyle = nextStyle;
   root.setAttribute("data-theme-style", nextStyle);
+
+  // Sync the native window theme (title bar, traffic lights) to match.
+  if (typeof window !== "undefined" && window.runtime) {
+    if (theme === "auto") {
+      WindowSetSystemDefaultTheme();
+    } else if (theme === "light") {
+      WindowSetLightTheme();
+    } else if (theme === "dark") {
+      WindowSetDarkTheme();
+    }
+  }
+
+  void options;
+}
+
+export function readLegacyThemePreference(): { theme: Theme; style: ThemeStyle; hasValue: boolean } {
+  if (typeof localStorage === "undefined") return { theme: DEFAULT_THEME, style: DEFAULT_THEME_STYLE.dark, hasValue: false };
+  let rawTheme: string | null = null;
+  let rawStyle: string | null = null;
   try {
-    localStorage.setItem(THEME_KEY, theme);
-    localStorage.setItem(STYLE_KEY, nextStyle);
+    rawTheme = localStorage.getItem(THEME_KEY);
+    rawStyle = localStorage.getItem(STYLE_KEY);
   } catch {
-    /* private mode / no storage — the in-DOM attributes still apply */
+    return { theme: DEFAULT_THEME, style: DEFAULT_THEME_STYLE.dark, hasValue: false };
+  }
+  const hasValue = rawTheme !== null || rawStyle !== null;
+  let theme = DEFAULT_THEME;
+  if (rawTheme) {
+    try {
+      theme = normalizeThemePreference(JSON.parse(rawTheme) as unknown);
+    } catch {
+      theme = normalizeThemePreference(rawTheme);
+    }
+  }
+  const style = normalizeThemeStyleForTheme(rawStyle ?? undefined, theme);
+  return { theme, style, hasValue };
+}
+
+export function clearLegacyThemePreference(): void {
+  try {
+    localStorage.removeItem(THEME_KEY);
+    localStorage.removeItem(STYLE_KEY);
+  } catch {
+    /* ignore storage failures */
   }
 }
 
+// initTheme runs before React mounts. It applies the saved theme to the DOM and
+// sets the native window background colour to match the resolved theme, avoiding
+// a white (or wrong-colour) flash while the webview paints its first frame.
 export function initTheme(): void {
   const theme = getTheme();
-  applyTheme(theme, getThemeStyle(theme));
+  applyTheme(theme, getThemeStyle(theme), { persist: false });
+
+  if (typeof window !== "undefined" && window.runtime) {
+    const resolved = getResolvedTheme(theme);
+    if (resolved === "light") {
+      // Light shell: matches :root[data-theme="light"] --bg (#f7f8fb).
+      WindowSetBackgroundColour(247, 248, 251, 255);
+    } else {
+      // Dark shell: matches :root --bg (#090a0c).
+      WindowSetBackgroundColour(9, 10, 12, 255);
+    }
+  }
 }

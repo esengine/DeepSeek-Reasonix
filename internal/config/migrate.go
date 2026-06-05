@@ -50,7 +50,7 @@ func (r *MigrationResult) Notice() string {
 		fmt.Fprintf(&b, " (%d MCP server(s))", r.Plugins)
 	}
 	if r.KeyToEnv {
-		b.WriteString("; API key written to ~/.env")
+		b.WriteString("; API key saved to reasonix's credentials store")
 	}
 	b.WriteString(". The old files were left untouched.")
 	for _, w := range r.Warnings {
@@ -59,10 +59,11 @@ func (r *MigrationResult) Notice() string {
 	return b.String()
 }
 
-// MigrateLegacyIfNeeded performs a one-time, non-destructive import of a v0.x
-// install (~/.reasonix/config.json) into the v1+ user config when the latter does
-// not exist yet. It never modifies or deletes the legacy files. Returns nil when
-// there is nothing to migrate (no legacy install, or a v1+ config already present).
+// MigrateLegacyIfNeeded performs a one-time, non-destructive import of older
+// installs into the current user config when the latter does not exist yet. It
+// checks v1-era TOML first, then v0.5/v0.x ~/.reasonix/config.json, and never
+// modifies or deletes the legacy files. Returns nil when there is nothing to
+// migrate, or when the current user config already exists.
 func MigrateLegacyIfNeeded() (*MigrationResult, error) {
 	dest := userConfigPath()
 	if dest == "" {
@@ -74,6 +75,9 @@ func MigrateLegacyIfNeeded() (*MigrationResult, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, nil
+	}
+	if res, err := migrateLegacyTOMLIfNeeded(dest, home); res != nil || err != nil {
+		return res, err
 	}
 	src := filepath.Join(home, ".reasonix", "config.json")
 	data, err := os.ReadFile(src)
@@ -90,7 +94,9 @@ func MigrateLegacyIfNeeded() (*MigrationResult, error) {
 	res := &MigrationResult{From: src, To: dest}
 	if legacy.Lang != "" {
 		cfg.Language = legacy.Lang
+		_ = cfg.SetDesktopLanguage(legacy.Lang)
 	}
+	migrateLegacyBaseURL(cfg, legacy.BaseURL)
 	cfg.Plugins = legacyPlugins(legacy)
 	res.Plugins = len(cfg.Plugins)
 
@@ -100,7 +106,7 @@ func MigrateLegacyIfNeeded() (*MigrationResult, error) {
 		res.KeyToEnv = true
 		if base := strings.TrimSpace(legacy.BaseURL); base != "" && !strings.Contains(base, "deepseek.com") {
 			res.Warnings = append(res.Warnings, "your previous base_url was "+base+
-				" — add a [[providers]] entry pointing at it; the key was saved as DEEPSEEK_API_KEY")
+				" — it was applied to the built-in DeepSeek providers; verify models if this endpoint is not DeepSeek-compatible")
 		}
 	}
 
@@ -111,11 +117,58 @@ func MigrateLegacyIfNeeded() (*MigrationResult, error) {
 		return nil, fmt.Errorf("write %s: %w", dest, err)
 	}
 	if len(envLines) > 0 {
-		if err := writeHomeEnv(home, envLines); err != nil {
-			return res, fmt.Errorf("write ~/.env: %w", err)
+		if err := writeCredentialsEnv(home, envLines); err != nil {
+			return res, fmt.Errorf("write credentials: %w", err)
 		}
 	}
 	return res, nil
+}
+
+func migrateLegacyTOMLIfNeeded(dest, home string) (*MigrationResult, error) {
+	for _, src := range legacyTOMLPaths(dest, home) {
+		if src == "" || filepath.Clean(src) == filepath.Clean(dest) {
+			continue
+		}
+		if _, err := os.Stat(src); err != nil {
+			continue
+		}
+		cfg := Default()
+		if err := mergeFile(cfg, src); err != nil {
+			return nil, fmt.Errorf("parse legacy config %s: %w", src, err)
+		}
+		cfg.ConfigVersion = Default().ConfigVersion
+		if strings.TrimSpace(cfg.Desktop.CloseBehavior) == "" && strings.TrimSpace(cfg.UI.CloseBehavior) != "" {
+			cfg.Desktop.CloseBehavior = cfg.DesktopCloseBehavior()
+		}
+		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+			return nil, fmt.Errorf("create config dir: %w", err)
+		}
+		if err := cfg.WriteFile(dest); err != nil {
+			return nil, fmt.Errorf("write %s: %w", dest, err)
+		}
+		return &MigrationResult{From: src, To: dest, Plugins: len(cfg.Plugins)}, nil
+	}
+	return nil, nil
+}
+
+func legacyTOMLPaths(dest, home string) []string {
+	paths := []string{filepath.Join(filepath.Dir(dest), "reasonix.toml")}
+	if home != "" {
+		paths = append(paths, filepath.Join(home, ".reasonix", "reasonix.toml"))
+	}
+	return paths
+}
+
+func migrateLegacyBaseURL(cfg *Config, baseURL string) {
+	baseURL = strings.TrimSpace(baseURL)
+	if cfg == nil || baseURL == "" {
+		return
+	}
+	for i := range cfg.Providers {
+		if cfg.Providers[i].APIKeyEnv == "DEEPSEEK_API_KEY" {
+			cfg.Providers[i].BaseURL = baseURL
+		}
+	}
 }
 
 func legacyPlugins(legacy legacyConfig) []PluginEntry {
@@ -188,11 +241,20 @@ func mergeEnv(base, overlay map[string]string) map[string]string {
 	return out
 }
 
-// writeHomeEnv merges lines into ~/.env, replacing any existing assignment of the
-// same key, and pins them into the current process env so the just-built session
-// resolves the key without a restart.
-func writeHomeEnv(home string, lines []string) error {
-	path := filepath.Join(home, ".env")
+// writeCredentialsEnv merges lines into the reasonix-owned global credentials
+// file (UserCredentialsPath, e.g. %AppData%\reasonix\credentials), replacing any
+// existing assignment of the same key, and pins them into the current process env
+// so the just-built session resolves the key without a restart. Falls back to
+// ~/.env only when the user config dir can't be resolved — never a project .env,
+// so a migration keeps secrets out of the user's project tree.
+func writeCredentialsEnv(home string, lines []string) error {
+	path := UserCredentialsPath()
+	if path == "" {
+		path = filepath.Join(home, ".env")
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
 	target := make(map[string]bool, len(lines))
 	for _, l := range lines {
 		if k, _, ok := strings.Cut(l, "="); ok {

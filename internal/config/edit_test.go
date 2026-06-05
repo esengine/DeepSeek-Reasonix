@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/BurntSushi/toml"
@@ -58,6 +59,90 @@ func TestUIThemeStyleNormalizes(t *testing.T) {
 	}
 }
 
+func TestUICloseBehaviorNormalizes(t *testing.T) {
+	c := Default()
+	for _, tt := range []struct {
+		in   string
+		want string
+	}{
+		{"", "background"},
+		{"QUIT", "quit"},
+		{"exit", "quit"},
+		{" background ", "background"},
+		{"hide", "background"},
+		{"unknown", "background"},
+	} {
+		c.UI.CloseBehavior = tt.in
+		if got := c.UICloseBehavior(); got != tt.want {
+			t.Errorf("UICloseBehavior(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestDesktopPreferencesAreSeparateFromCLI(t *testing.T) {
+	c := Default()
+	c.Language = "zh"
+	c.UI.Theme = "light"
+	c.UI.ThemeStyle = "glacier"
+
+	if err := c.SetDesktopLanguage("en"); err != nil {
+		t.Fatalf("SetDesktopLanguage: %v", err)
+	}
+	if err := c.SetDesktopAppearance("dark", "graphite"); err != nil {
+		t.Fatalf("SetDesktopAppearance: %v", err)
+	}
+
+	if c.Language != "zh" {
+		t.Fatalf("CLI language changed to %q", c.Language)
+	}
+	if got := c.UITheme(); got != "light" {
+		t.Fatalf("CLI theme = %q, want light", got)
+	}
+	if got := c.UIThemeStyle(); got != "glacier" {
+		t.Fatalf("CLI theme style = %q, want glacier", got)
+	}
+	if got := c.DesktopLanguage(); got != "en" {
+		t.Fatalf("desktop language = %q, want en", got)
+	}
+	if got := c.DesktopTheme(); got != "dark" {
+		t.Fatalf("desktop theme = %q, want dark", got)
+	}
+	if got := c.DesktopThemeStyle(); got != "graphite" {
+		t.Fatalf("desktop theme style = %q, want graphite", got)
+	}
+}
+
+func TestDesktopCloseBehaviorFallsBackToLegacyUI(t *testing.T) {
+	c := Default()
+	c.UI.CloseBehavior = "quit"
+	if got := c.DesktopCloseBehavior(); got != "quit" {
+		t.Fatalf("legacy close behavior = %q, want quit", got)
+	}
+	c.Desktop.CloseBehavior = "background"
+	if got := c.DesktopCloseBehavior(); got != "background" {
+		t.Fatalf("desktop close behavior = %q, want background", got)
+	}
+}
+
+func TestSetUICloseBehavior(t *testing.T) {
+	c := Default()
+	if err := c.SetUICloseBehavior("background"); err != nil {
+		t.Fatalf("SetUICloseBehavior background: %v", err)
+	}
+	if got := c.UICloseBehavior(); got != "background" {
+		t.Fatalf("close behavior = %q, want background", got)
+	}
+	if err := c.SetUICloseBehavior("quit"); err != nil {
+		t.Fatalf("SetUICloseBehavior quit: %v", err)
+	}
+	if got := c.UICloseBehavior(); got != "quit" {
+		t.Fatalf("close behavior = %q, want quit", got)
+	}
+	if err := c.SetUICloseBehavior("later"); err == nil {
+		t.Fatal("expected error for invalid close behavior")
+	}
+}
+
 func TestSetPlannerModel(t *testing.T) {
 	c := Default()
 	if err := c.SetPlannerModel("deepseek-pro"); err != nil {
@@ -71,6 +156,27 @@ func TestSetPlannerModel(t *testing.T) {
 	}
 	if err := c.SetPlannerModel("ghost"); err == nil {
 		t.Error("expected error for unknown planner")
+	}
+}
+
+func TestSetAutoPlan(t *testing.T) {
+	c := Default()
+	for _, mode := range []string{"on", "off"} {
+		if err := c.SetAutoPlan(mode); err != nil {
+			t.Fatalf("SetAutoPlan(%q): %v", mode, err)
+		}
+		if c.Agent.AutoPlan != mode {
+			t.Fatalf("auto_plan = %q, want %q", c.Agent.AutoPlan, mode)
+		}
+	}
+	if err := c.SetAutoPlan("ask"); err != nil {
+		t.Fatalf("legacy ask should be accepted: %v", err)
+	}
+	if c.Agent.AutoPlan != "on" {
+		t.Fatalf("legacy ask should save as on, got %q", c.Agent.AutoPlan)
+	}
+	if err := c.SetAutoPlan("auto"); err == nil {
+		t.Fatal("expected error for invalid auto_plan mode")
 	}
 }
 
@@ -550,9 +656,197 @@ func TestSaveToRoundTrips(t *testing.T) {
 	}
 }
 
+func TestSaveToScopesUserAndProjectFiles(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	c := Default()
+	c.Desktop.Theme = "dark"
+	c.Desktop.ThemeStyle = "graphite"
+	c.Desktop.CloseBehavior = "background"
+
+	userPath := UserConfigPath()
+	if err := c.SaveTo(userPath); err != nil {
+		t.Fatalf("SaveTo user config: %v", err)
+	}
+	userBody, err := os.ReadFile(userPath)
+	if err != nil {
+		t.Fatalf("read user config: %v", err)
+	}
+	if !strings.Contains(string(userBody), "[desktop]") {
+		t.Fatalf("user config should include desktop preferences:\n%s", userBody)
+	}
+
+	projectPath := filepath.Join(t.TempDir(), "reasonix.toml")
+	if err := c.SaveTo(projectPath); err != nil {
+		t.Fatalf("SaveTo project config: %v", err)
+	}
+	projectBody, err := os.ReadFile(projectPath)
+	if err != nil {
+		t.Fatalf("read project config: %v", err)
+	}
+	if strings.Contains(string(projectBody), "[desktop]") || strings.Contains(string(projectBody), "close_behavior") {
+		t.Fatalf("project config should not include desktop preferences:\n%s", projectBody)
+	}
+}
+
 func TestSetNetworkRejectsIncompleteCustomProxy(t *testing.T) {
 	c := Default()
 	if err := c.SetNetwork(NetworkConfig{ProxyMode: "custom"}); err == nil {
 		t.Fatal("custom proxy without server/port should be rejected")
+	}
+}
+
+func TestEffortCapabilityCustomSupportedEfforts(t *testing.T) {
+	e := &ProviderEntry{
+		Name:             "custom",
+		Kind:             "openai",
+		BaseURL:          "https://example.com",
+		SupportedEfforts: []string{"low", "medium", "high"},
+		DefaultEffort:    "high",
+	}
+	cap := EffortCapabilityForEntry(e)
+	if !cap.Supported {
+		t.Fatalf("expected supported, got %+v", cap)
+	}
+	wantLevels := []string{"auto", "low", "medium", "high"}
+	if len(cap.Levels) != len(wantLevels) {
+		t.Fatalf("levels = %v, want %v", cap.Levels, wantLevels)
+	}
+	for i, l := range wantLevels {
+		if cap.Levels[i] != l {
+			t.Errorf("levels[%d] = %q, want %q", i, cap.Levels[i], l)
+		}
+	}
+	if cap.Default != "high" {
+		t.Errorf("default = %q, want high", cap.Default)
+	}
+}
+
+func TestNormalizeEffortCustomSupportedEfforts(t *testing.T) {
+	e := &ProviderEntry{
+		Name:             "custom",
+		Kind:             "openai",
+		BaseURL:          "https://example.com",
+		SupportedEfforts: []string{"low", "medium", "high"},
+	}
+	for in, want := range map[string]string{"auto": "", "low": "low", "MEDIUM": "medium", "high": "high"} {
+		got, err := NormalizeEffort(e, in)
+		if err != nil || got != want {
+			t.Fatalf("NormalizeEffort(%q) = %q/%v, want %q/nil", in, got, err, want)
+		}
+	}
+	for _, bad := range []string{"max", "xhigh", "", "  "} {
+		if _, err := NormalizeEffort(e, bad); err == nil {
+			t.Errorf("NormalizeEffort(%q) should be rejected", bad)
+		}
+	}
+}
+
+func TestNormalizeEffortCustomDefaultEffort(t *testing.T) {
+	e := &ProviderEntry{
+		Name:             "custom",
+		Kind:             "openai",
+		BaseURL:          "https://example.com",
+		SupportedEfforts: []string{"low", "medium", "high"},
+		DefaultEffort:    "xhigh", // not in the list — must fall back to the first level
+	}
+	cap := EffortCapabilityForEntry(e)
+	if cap.Default != "low" {
+		t.Fatalf("default = %q, want low (first of supported_efforts)", cap.Default)
+	}
+	// Omitting DefaultEffort also falls back to the first level.
+	e2 := *e
+	e2.DefaultEffort = ""
+	if cap := EffortCapabilityForEntry(&e2); cap.Default != "low" {
+		t.Errorf("empty default = %q, want low", cap.Default)
+	}
+	// /effort auto still maps to "" regardless of DefaultEffort.
+	if got, err := NormalizeEffort(e, "auto"); err != nil || got != "" {
+		t.Fatalf("NormalizeEffort(auto) = %q/%v, want empty/nil", got, err)
+	}
+	e.Effort = "high"
+	if got := EffectiveEffort(e); got != "high" {
+		t.Fatalf("explicit effort should win over default_effort, got %q", got)
+	}
+}
+
+func TestNormalizeEffortCustomLevelsCaseInsensitive(t *testing.T) {
+	e := &ProviderEntry{
+		Name:             "custom",
+		Kind:             "openai",
+		BaseURL:          "https://example.com",
+		SupportedEfforts: []string{"Low", "MEDIUM", "medium", "auto", " "},
+		DefaultEffort:    "MEDIUM",
+	}
+	cap := EffortCapabilityForEntry(e)
+	wantLevels := []string{"auto", "low", "medium"}
+	if len(cap.Levels) != len(wantLevels) {
+		t.Fatalf("levels = %v, want %v", cap.Levels, wantLevels)
+	}
+	for i, want := range wantLevels {
+		if cap.Levels[i] != want {
+			t.Fatalf("levels[%d] = %q, want %q", i, cap.Levels[i], want)
+		}
+	}
+	if cap.Default != "medium" {
+		t.Fatalf("default = %q, want medium", cap.Default)
+	}
+	got, err := NormalizeEffort(e, "MEDIUM")
+	if err != nil || got != "medium" {
+		t.Fatalf("NormalizeEffort(MEDIUM) = %q/%v, want medium/nil", got, err)
+	}
+	if got := EffectiveEffort(e); got != "medium" {
+		t.Fatalf("EffectiveEffort = %q, want medium", got)
+	}
+}
+
+func TestUpsertProviderNormalizesCustomEffortFields(t *testing.T) {
+	c := &Config{}
+	if err := c.UpsertProvider(ProviderEntry{
+		Name:             "custom",
+		Kind:             "openai",
+		BaseURL:          "https://example.com",
+		Model:            "m",
+		Effort:           " HIGH ",
+		SupportedEfforts: []string{"Low", "MEDIUM", "medium", "auto"},
+		DefaultEffort:    " LOW ",
+	}); err != nil {
+		t.Fatalf("UpsertProvider: %v", err)
+	}
+	got, _ := c.Provider("custom")
+	if got.Effort != "high" || got.DefaultEffort != "low" {
+		t.Fatalf("effort/default = %q/%q, want high/low", got.Effort, got.DefaultEffort)
+	}
+	wantSupported := []string{"low", "medium"}
+	if len(got.SupportedEfforts) != len(wantSupported) {
+		t.Fatalf("supported_efforts = %v, want %v", got.SupportedEfforts, wantSupported)
+	}
+	for i, want := range wantSupported {
+		if got.SupportedEfforts[i] != want {
+			t.Fatalf("supported_efforts[%d] = %q, want %q", i, got.SupportedEfforts[i], want)
+		}
+	}
+}
+
+func TestEffortCapabilityEmptySupportedEffortsNotConfigurable(t *testing.T) {
+	// mimo-pro without SupportedEfforts: no built-in heuristic, /effort must reject.
+	e := &ProviderEntry{
+		Name:    "mimo-pro",
+		Kind:    "openai",
+		BaseURL: "https://token-plan-cn.xiaomimimo.com/v1",
+		Model:   "mimo-v2.5-pro",
+	}
+	if cap := EffortCapabilityForEntry(e); cap.Supported {
+		t.Fatalf("mimo-pro without SupportedEfforts should not be configurable, got %+v", cap)
+	}
+	if _, err := NormalizeEffort(e, "high"); err == nil {
+		t.Fatal("NormalizeEffort should reject level for unsupported provider")
+	}
+	// `supported_efforts = []` (empty slice) is treated like nil — the v2 design
+	// has no way to opt out of the built-in heuristic; users either configure
+	// levels or leave the field unset.
+	e2 := *e
+	e2.SupportedEfforts = []string{}
+	if cap := EffortCapabilityForEntry(&e2); cap.Supported {
+		t.Fatalf("empty supported_efforts should also fall through to the heuristic, got %+v", cap)
 	}
 }

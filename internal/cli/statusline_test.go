@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"runtime"
 	"strings"
 	"testing"
@@ -8,9 +9,12 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"reasonix/internal/agent"
+	"reasonix/internal/agent/testutil"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/i18n"
+	"reasonix/internal/tool"
 )
 
 // TestRunStatuslineCmd checks the custom status-line runner: it returns the
@@ -157,9 +161,48 @@ func TestStatuslineShowsEffort(t *testing.T) {
 	i18n.DetectLanguage("en")
 
 	content := renderStatuslineViewWithEffort(t, "auto")
-	plain := bottomStatusPlain(content)
-	if !strings.Contains(plain, "deepseek-v4-flash · effort auto") {
-		t.Fatalf("status data line should show effort:\n%s", plain)
+	lines := bottomStatusPlainLines(content)
+	if len(lines) != 2 {
+		t.Fatalf("status block lines = %d, want 2:\n%s", len(lines), strings.Join(lines, "\n"))
+	}
+	if !strings.Contains(lines[0], "effort auto") {
+		t.Fatalf("mode row should show effort:\n%s", strings.Join(lines, "\n"))
+	}
+	if strings.Contains(lines[1], "effort auto") {
+		t.Fatalf("data row should not show effort:\n%s", strings.Join(lines, "\n"))
+	}
+}
+
+func TestStatuslineKeepsCacheRatesInPrimaryDataRow(t *testing.T) {
+	i18n.DetectLanguage("en")
+
+	content := renderStatuslineViewWithCache(t)
+	lines := bottomStatusPlainLines(content)
+	if len(lines) != 2 {
+		t.Fatalf("status block lines = %d, want 2:\n%s", len(lines), strings.Join(lines, "\n"))
+	}
+	want := "deepseek-v4-flash · turn hit 90.00% · avg 90.00%"
+	if !strings.Contains(lines[1], want) {
+		t.Fatalf("data row should keep cache rates next to model:\n%s", strings.Join(lines, "\n"))
+	}
+}
+
+func TestStatuslinePutsGitIdentityOnModeRow(t *testing.T) {
+	i18n.DetectLanguage("en")
+
+	content := renderStatuslineViewWithGitAndEffort(t)
+	lines := bottomStatusPlainLines(content)
+	if len(lines) != 2 {
+		t.Fatalf("status block lines = %d, want 2:\n%s", len(lines), strings.Join(lines, "\n"))
+	}
+	if !strings.Contains(lines[0], "effort auto · Reasonix@codex/demo (+3 -1 ?2)") {
+		t.Fatalf("mode row should include effort before git identity:\n%s", strings.Join(lines, "\n"))
+	}
+	if strings.Contains(lines[1], "Reasonix@codex/demo") {
+		t.Fatalf("data row should not include git identity:\n%s", strings.Join(lines, "\n"))
+	}
+	if !strings.Contains(lines[1], "deepseek-v4-flash") || strings.Contains(lines[1], "effort auto") {
+		t.Fatalf("data row should keep model without effort:\n%s", strings.Join(lines, "\n"))
 	}
 }
 
@@ -209,6 +252,40 @@ func renderStatuslineViewWithEffort(t *testing.T, effort string) string {
 	return next.(chatTUI).View().Content
 }
 
+func renderStatuslineViewWithGitAndEffort(t *testing.T) string {
+	t.Helper()
+
+	ctrl := control.New(control.Options{})
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 120)
+	m.label = "deepseek-v4-flash"
+	m.effortLevel = "auto"
+	m.gitStatus = gitStatus{
+		Repo:      "Reasonix",
+		Branch:    "codex/demo",
+		Added:     3,
+		Removed:   1,
+		Untracked: 2,
+	}
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 24})
+	return next.(chatTUI).View().Content
+}
+
+func renderStatuslineViewWithCache(t *testing.T) string {
+	t.Helper()
+
+	prov := testutil.NewMock("deepseek-v4-flash", testutil.UsageTurn(900, 100, 50))
+	exec := agent.New(prov, tool.NewRegistry(), agent.NewSession(""), agent.Options{MaxSteps: 1, ContextWindow: 200_000}, event.Discard)
+	if err := exec.Run(context.Background(), "hello"); err != nil {
+		t.Fatalf("seed agent usage: %v", err)
+	}
+	ctrl := control.New(control.Options{Executor: exec})
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 160)
+	m.label = "deepseek-v4-flash"
+	m.effortLevel = "auto"
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 24})
+	return next.(chatTUI).View().Content
+}
+
 func renderPlanStatuslineView(t *testing.T) string {
 	t.Helper()
 
@@ -220,9 +297,13 @@ func renderPlanStatuslineView(t *testing.T) string {
 }
 
 func bottomStatusPlain(content string) string {
+	return strings.Join(bottomStatusPlainLines(content), "\n")
+}
+
+func bottomStatusPlainLines(content string) []string {
 	lines := strings.Split(ansi.Strip(content), "\n")
 	if len(lines) < 2 {
-		return strings.Join(lines, "\n")
+		return lines
 	}
-	return strings.Join(lines[len(lines)-2:], "\n")
+	return lines[len(lines)-2:]
 }

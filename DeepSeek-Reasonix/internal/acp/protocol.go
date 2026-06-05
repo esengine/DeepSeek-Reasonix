@@ -1,0 +1,291 @@
+// Package acp implements the Agent Client Protocol (https://agentclientprotocol.com)
+// transport: a stdio JSON-RPC 2.0 agent that editors and other host clients speak
+// to drive Reasonix. Many tools integrated with the v1 (main-branch) agent over
+// ACP, so v2 keeps the wire contract identical — the wire types in this file are a
+// faithful port of main's src/acp/protocol.ts (ACP protocol version 1).
+//
+// The package is an adapter layer over the v2 kernel and depends only on stable
+// contracts: it maps the agent's typed event.Event stream onto session/update
+// notifications (see dispatch.go), bridges permission.Approver onto
+// session/request_permission round-trips (see permission.go), and exposes the
+// whole thing over NDJSON JSON-RPC (see server.go). How a per-session agent is
+// actually assembled — provider, tools rooted at the session cwd, per-session MCP
+// — is left to a Factory the composition root supplies (see service.go), so this
+// package stays independent of the cli wiring.
+package acp
+
+import (
+	"encoding/json"
+	"strings"
+)
+
+// ProtocolVersion is the ACP version this agent implements. Matches main.
+const ProtocolVersion = 1
+
+// JSON-RPC 2.0 error codes (subset used on the wire). Mirrors protocol.ts.
+const (
+	ErrParse          = -32700
+	ErrInvalidRequest = -32600
+	ErrMethodNotFound = -32601
+	ErrInvalidParams  = -32602
+	ErrInternal       = -32603
+)
+
+// --- initialize ---
+
+// InitializeParams is the client's handshake. We accept and ignore its
+// capabilities/info — the agent advertises a fixed capability set in reply.
+type InitializeParams struct {
+	ProtocolVersion int             `json:"protocolVersion"`
+	ClientInfo      *Implementation `json:"clientInfo,omitempty"`
+}
+
+// Implementation names a participant (client or agent) on the wire.
+type Implementation struct {
+	Name    string `json:"name"`
+	Title   string `json:"title,omitempty"`
+	Version string `json:"version,omitempty"`
+}
+
+// InitializeResult advertises what this agent supports. The capability flags
+// match main exactly: sessions are created via session/new (no loadSession),
+// prompts may carry inline resource text (embeddedContext) but not image/audio,
+// and MCP is stdio-only (no http/sse).
+type InitializeResult struct {
+	ProtocolVersion   int               `json:"protocolVersion"`
+	AgentCapabilities AgentCapabilities `json:"agentCapabilities"`
+	AgentInfo         Implementation    `json:"agentInfo"`
+	AuthMethods       []any             `json:"authMethods"`
+}
+
+// AgentCapabilities is the agentCapabilities object in InitializeResult.
+type AgentCapabilities struct {
+	LoadSession        bool               `json:"loadSession"`
+	PromptCapabilities PromptCapabilities `json:"promptCapabilities"`
+	MCPCapabilities    MCPCapabilities    `json:"mcpCapabilities"`
+}
+
+// PromptCapabilities reports which content-block kinds prompts may carry.
+type PromptCapabilities struct {
+	Image           bool `json:"image"`
+	Audio           bool `json:"audio"`
+	EmbeddedContext bool `json:"embeddedContext"`
+}
+
+// MCPCapabilities reports which MCP transports session/new accepts.
+type MCPCapabilities struct {
+	HTTP bool `json:"http"`
+	SSE  bool `json:"sse"`
+}
+
+// --- session/new ---
+
+// SessionNewParams opens a session rooted at cwd, optionally with stdio MCP
+// servers the agent should connect for the session's lifetime.
+type SessionNewParams struct {
+	Cwd        string          `json:"cwd,omitempty"`
+	MCPServers []MCPServerSpec `json:"mcpServers,omitempty"`
+}
+
+// MCPServerSpec describes one stdio MCP server the client asks the agent to run.
+type MCPServerSpec struct {
+	Name    string            `json:"name"`
+	Command string            `json:"command,omitempty"`
+	Args    []string          `json:"args,omitempty"`
+	Env     map[string]string `json:"env,omitempty"`
+}
+
+// SessionNewResult returns the opaque id used to address the session thereafter.
+type SessionNewResult struct {
+	SessionID string `json:"sessionId"`
+}
+
+// --- session/load ---
+
+// SessionLoadParams resumes a session saved under sessionId (the id a prior
+// session/new returned), optionally re-rooting it at cwd with fresh MCP servers.
+// The agent replays the stored conversation as session/update notifications
+// before the request returns.
+type SessionLoadParams struct {
+	SessionID  string          `json:"sessionId"`
+	Cwd        string          `json:"cwd,omitempty"`
+	MCPServers []MCPServerSpec `json:"mcpServers,omitempty"`
+}
+
+// SessionLoadResult is the empty ack; the conversation has already arrived as a
+// burst of session/update notifications by the time it is sent.
+type SessionLoadResult struct{}
+
+// --- content blocks (inbound prompt) ---
+
+// ContentBlock is one piece of a prompt. The agent reads text blocks and the
+// inline text of resource blocks (embeddedContext); image/audio are accepted on
+// the wire but ignored, matching the advertised capabilities.
+type ContentBlock struct {
+	Type     string            `json:"type"`
+	Text     string            `json:"text,omitempty"`
+	Resource *ResourceContents `json:"resource,omitempty"`
+	MimeType string            `json:"mimeType,omitempty"`
+	Data     string            `json:"data,omitempty"`
+}
+
+// ResourceContents is the embedded resource of a "resource" content block.
+type ResourceContents struct {
+	URI      string `json:"uri"`
+	MimeType string `json:"mimeType,omitempty"`
+	Text     string `json:"text,omitempty"`
+}
+
+// FlattenPrompt extracts the user-visible prompt text out of ACP content blocks.
+// Text blocks contribute their text; resource blocks contribute their inline
+// text when present (embeddedContext). Other block kinds are dropped. Ported from
+// protocol.ts flattenPrompt.
+func FlattenPrompt(blocks []ContentBlock) string {
+	parts := make([]string, 0, len(blocks))
+	for _, b := range blocks {
+		switch b.Type {
+		case "text":
+			if b.Text != "" {
+				parts = append(parts, b.Text)
+			}
+		case "resource":
+			if b.Resource != nil && b.Resource.Text != "" {
+				parts = append(parts, b.Resource.Text)
+			}
+		}
+	}
+	return strings.TrimSpace(strings.Join(parts, "\n\n"))
+}
+
+// --- session/prompt ---
+
+// SessionPromptParams sends a turn's prompt to a session.
+type SessionPromptParams struct {
+	SessionID string         `json:"sessionId"`
+	Prompt    []ContentBlock `json:"prompt"`
+}
+
+// StopReason tells the client why a turn ended. Values match main's wire.
+type StopReason string
+
+const (
+	StopEndTurn   StopReason = "end_turn"
+	StopCancelled StopReason = "cancelled"
+	StopError     StopReason = "error"
+)
+
+// SessionPromptResult ends a session/prompt. TranscriptPath is reserved for a
+// future on-disk transcript pointer; omitted (null) for now.
+type SessionPromptResult struct {
+	StopReason     StopReason `json:"stopReason"`
+	TranscriptPath *string    `json:"transcriptPath,omitempty"`
+}
+
+// --- session/update (agent → client notifications) ---
+//
+// SessionUpdate is a tagged union discriminated by sessionUpdate. The variants
+// reuse the JSON key "content" with two incompatible shapes (a single block for
+// message chunks, an array for tool results), so we model each variant as its own
+// struct rather than one struct with conflicting tags, and carry it through
+// SessionUpdateParams.Update as an interface value.
+
+// SessionUpdateParams wraps one update for a session.
+type SessionUpdateParams struct {
+	SessionID string `json:"sessionId"`
+	Update    any    `json:"update"`
+}
+
+// messageChunk is agent_message_chunk / agent_thought_chunk.
+type messageChunk struct {
+	SessionUpdate string       `json:"sessionUpdate"`
+	Content       ContentBlock `json:"content"`
+	Metadata      *updateMeta  `json:"metadata,omitempty"`
+}
+
+// updateMeta carries optional error detail on an agent_message_chunk.
+type updateMeta struct {
+	Error *updateError `json:"error,omitempty"`
+}
+
+type updateError struct {
+	Name    string `json:"name"`
+	Message string `json:"message"`
+}
+
+// toolCall is a "tool_call" update (announces a call, with title/kind/rawInput).
+type toolCall struct {
+	SessionUpdate string          `json:"sessionUpdate"`
+	ToolCallID    string          `json:"toolCallId"`
+	Title         string          `json:"title,omitempty"`
+	Kind          string          `json:"kind,omitempty"`
+	Status        string          `json:"status,omitempty"`
+	RawInput      json.RawMessage `json:"rawInput,omitempty"`
+}
+
+// toolCallUpdateMsg is a "tool_call_update" update (status + result content).
+type toolCallUpdateMsg struct {
+	SessionUpdate string        `json:"sessionUpdate"`
+	ToolCallID    string        `json:"toolCallId"`
+	Status        string        `json:"status,omitempty"`
+	Content       []toolContent `json:"content,omitempty"`
+}
+
+// toolContent wraps a tool result's text, per the ACP tool_call_update shape.
+type toolContent struct {
+	Type    string       `json:"type"`
+	Content ContentBlock `json:"content"`
+}
+
+// --- session/cancel (client → agent notification) ---
+
+// SessionCancelParams cancels an in-progress turn.
+type SessionCancelParams struct {
+	SessionID string `json:"sessionId"`
+}
+
+// --- session/request_permission (agent → client request) ---
+
+// PermissionOptionKind classifies an option for host UI styling. Matches main.
+type PermissionOptionKind string
+
+const (
+	OptAllowOnce       PermissionOptionKind = "allow_once"
+	OptAllowAlways     PermissionOptionKind = "allow_always"
+	OptAllowPersistent PermissionOptionKind = "allow_persistent"
+	OptRejectOnce      PermissionOptionKind = "reject_once"
+	OptRejectAlways    PermissionOptionKind = "reject_always"
+)
+
+// PermissionOption is one choice offered to the user for a permission request.
+type PermissionOption struct {
+	OptionID string               `json:"optionId"`
+	Name     string               `json:"name"`
+	Kind     PermissionOptionKind `json:"kind"`
+}
+
+// PermissionRequestParams asks the client to approve a pending tool call.
+type PermissionRequestParams struct {
+	SessionID string             `json:"sessionId"`
+	ToolCall  PermissionToolCall `json:"toolCall"`
+	Options   []PermissionOption `json:"options"`
+}
+
+// PermissionToolCall describes the call awaiting approval.
+type PermissionToolCall struct {
+	ToolCallID string          `json:"toolCallId"`
+	Title      string          `json:"title,omitempty"`
+	Kind       string          `json:"kind,omitempty"`
+	Status     string          `json:"status,omitempty"`
+	RawInput   json.RawMessage `json:"rawInput,omitempty"`
+}
+
+// PermissionRequestResult is the client's reply to a permission request.
+type PermissionRequestResult struct {
+	Outcome PermissionOutcome `json:"outcome"`
+}
+
+// PermissionOutcome is "selected" (with optionId) or "cancelled".
+type PermissionOutcome struct {
+	Outcome  string `json:"outcome"`
+	OptionID string `json:"optionId,omitempty"`
+}

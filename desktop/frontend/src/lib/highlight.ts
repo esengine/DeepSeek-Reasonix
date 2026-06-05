@@ -43,15 +43,77 @@ export function resolveLang(lang?: string): string {
   return hljs.getLanguage(resolved) ? resolved : "";
 }
 
+// LRU cache for highlighted output. The same code block can re-render many
+// times (Re-renders due to streaming updates that don't change this block,
+// React's StrictMode double-invoke in dev, hover-reveals of the toolbar's
+// child elements). highlight.highlight() is a real lexer walk that shows
+// up in the profile for large blocks; a 200-entry LRU keyed on the
+// resolved language plus a fast hash of the code keeps the steady-state
+// cost at a Map.get(). The Map is a plain LRU, not a WeakMap, so a large
+// (non-streaming) transcript will eventually evict; the size of 200 is
+// chosen to cover the visible viewport plus a small overshoot — most
+// transcripts re-render the same ~30 visible blocks.
+const HL_CACHE_MAX = 200;
+
+// djb2 hash for the cache key. We only use the hash inside the key
+// (Map<number, string>), not as a security primitive; collisions are fine
+// because we ALSO store the original code alongside the entry and verify
+// before serving the cached value. The hash is what makes the key
+// constant-time to compare for Map.get(); comparing the full source
+// string would be O(n) on every render and dwarf the savings.
+function hashCode(s: string): number {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+  return h;
+}
+
+interface CacheEntry {
+  code: string;
+  html: string;
+}
+const hlCache = new Map<number, CacheEntry>();
+
+function cacheGet(code: string, lang: string): string | null {
+  const key = hashCode(lang + "\0" + code);
+  const e = hlCache.get(key);
+  if (!e) return null;
+  // Defend against the (rare) hash collision: the stored code must match
+  // the queried code exactly. We move the entry to the end of the Map to
+  // mark it most-recently-used.
+  if (e.code !== code) return null;
+  hlCache.delete(key);
+  hlCache.set(key, e);
+  return e.html;
+}
+
+function cachePut(code: string, lang: string, html: string): void {
+  const key = hashCode(lang + "\0" + code);
+  if (hlCache.has(key)) hlCache.delete(key); // refresh
+  hlCache.set(key, { code, html });
+  while (hlCache.size > HL_CACHE_MAX) {
+    // Map iteration is insertion-order; the first key is the oldest.
+    const oldest = hlCache.keys().next().value;
+    if (oldest === undefined) break;
+    hlCache.delete(oldest);
+  }
+}
+
 // highlightToHtml returns highlighted HTML (token <span>s) for the given code, or
 // escaped plain text when the language is unknown. ignoreIllegals so partial /
-// streaming snippets never throw.
+// streaming snippets never throw. The LRU cache shaves the bulk of the work
+// when a transcript re-renders the same blocks (most common: a streaming
+// update changes the *next* block, not this one).
 export function highlightToHtml(code: string, lang?: string): string {
   const resolved = resolveLang(lang);
   if (!resolved) return escapeHtml(code);
+  const cached = cacheGet(code, resolved);
+  if (cached !== null) return cached;
+  let html: string;
   try {
-    return hljs.highlight(code, { language: resolved, ignoreIllegals: true }).value;
+    html = hljs.highlight(code, { language: resolved, ignoreIllegals: true }).value;
   } catch {
     return escapeHtml(code);
   }
+  cachePut(code, resolved, html);
+  return html;
 }

@@ -1,0 +1,151 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+DeepSeek-Reasonix 自动更新 & 编译脚本 (Windows)
+
+功能：
+  1. 拉取 main-v2 分支最新源码（保留本地修改）
+  2. 编译 desktop production build
+
+用法：
+  python update_build.py
+"""
+
+import os
+import sys
+import subprocess
+import shutil
+import time
+from pathlib import Path
+
+# ============================================================
+# 配置
+# ============================================================
+PROJECT_ROOT = Path(r"C:\Users\Administrator\DeepSeek-Reasonix")
+DESKTOP_DIR = PROJECT_ROOT / "desktop"
+BUILD_OUTPUT = DESKTOP_DIR / "build" / "bin" / "reasonix-desktop.exe"
+BRANCH = "main-v2"
+REMOTE = "origin"
+
+# ============================================================
+# 工具函数
+# ============================================================
+
+def run(cmd, cwd=None, check=True):
+    """执行命令并打印输出"""
+    if isinstance(cmd, str):
+        cmd_str = cmd
+    else:
+        cmd_str = " ".join(cmd)
+    print(f"\n>>> {cmd_str}")
+    return subprocess.run(
+        cmd, cwd=cwd, shell=isinstance(cmd, str),
+        capture_output=False, check=check
+    )
+
+
+# ============================================================
+# 步骤 1: 拉取最新源码（保留本地修改）
+# ============================================================
+
+def step_fetch():
+    print("\n" + "=" * 60)
+    print("步骤 1: 拉取最新源码（保留本地修改）")
+    print("=" * 60)
+
+    # 先 stash 本地修改
+    print("\n  保存本地修改...")
+    subprocess.run("git stash push -m \"auto-stash before update\"",
+                   cwd=PROJECT_ROOT, shell=True, capture_output=True)
+
+    # 拉取并 merge（不用 reset --hard，保留本地修改）
+    run(f"git fetch {REMOTE} {BRANCH}", cwd=PROJECT_ROOT)
+    run(f"git merge {REMOTE}/{BRANCH} --no-edit", cwd=PROJECT_ROOT)
+
+    # 恢复 stash
+    print("\n  恢复本地修改...")
+    result = subprocess.run("git stash pop",
+                           cwd=PROJECT_ROOT, shell=True, capture_output=True, text=True)
+    if result.returncode != 0:
+        print(f"  WARN stash pop 可能有冲突: {result.stderr.strip()}")
+
+    # 显示当前提交
+    result = subprocess.run(
+        "git log --oneline -3", cwd=PROJECT_ROOT,
+        capture_output=True, text=True, shell=True
+    )
+    print(result.stdout)
+
+
+# ============================================================
+# 步骤 2: 编译
+# ============================================================
+
+def step_build():
+    print("\n" + "=" * 60)
+    print("步骤 2: 编译 desktop production build")
+    print("=" * 60)
+
+    # 先杀掉可能正在运行的旧进程
+    if BUILD_OUTPUT.exists():
+        print("  检查是否有运行中的实例...")
+        subprocess.run(
+            'taskkill /F /IM reasonix-desktop.exe /T 2>nul',
+            shell=True, capture_output=True
+        )
+        # 等进程完全退出
+        time.sleep(1)
+        # 删除旧产物避免 wails -clean 权限错误
+        try:
+            BUILD_OUTPUT.unlink()
+            print("  已删除旧产物")
+        except PermissionError:
+            print("  WARN 无法删除旧产物，尝试重命名...")
+            try:
+                BUILD_OUTPUT.rename(BUILD_OUTPUT.with_suffix(".exe.old"))
+            except Exception:
+                pass
+
+    run("wails build", cwd=DESKTOP_DIR)
+
+    if BUILD_OUTPUT.exists():
+        size_mb = BUILD_OUTPUT.stat().st_size / (1024 * 1024)
+        print(f"\n  OK 编译成功！")
+        print(f"     产物: {BUILD_OUTPUT}")
+        print(f"     大小: {size_mb:.1f} MB")
+    else:
+        print(f"\n  FAIL 编译失败，未找到产物: {BUILD_OUTPUT}")
+        sys.exit(1)
+
+
+# ============================================================
+# 主流程
+# ============================================================
+
+def main():
+    print("=" * 60)
+    print(" DeepSeek-Reasonix 自动更新 & 编译")
+    print("=" * 60)
+    print(f" 项目路径: {PROJECT_ROOT}")
+    print(f" 分支:     {BRANCH}")
+
+    # 检查前置条件
+    if not (PROJECT_ROOT / ".git").exists():
+        print("ERROR: 不是 git 仓库")
+        sys.exit(1)
+
+    for tool in ["git", "wails", "go", "pnpm"]:
+        if shutil.which(tool) is None:
+            print(f"ERROR: 未找到 {tool}，请先安装")
+            sys.exit(1)
+
+    step_fetch()
+    step_build()
+
+    print("\n" + "=" * 60)
+    print(" 全部完成！")
+    print("=" * 60)
+
+
+if __name__ == "__main__":
+    main()

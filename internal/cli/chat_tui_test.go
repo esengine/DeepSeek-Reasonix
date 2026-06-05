@@ -30,6 +30,30 @@ func (r *blockingTurnRunner) Run(ctx context.Context, _ string) error {
 	return ctx.Err()
 }
 
+type recordingTurnRunner struct {
+	inputs []string
+}
+
+func (r *recordingTurnRunner) Run(_ context.Context, input string) error {
+	r.inputs = append(r.inputs, input)
+	return nil
+}
+
+func waitForCLIEvent(t *testing.T, ch <-chan event.Event, kind event.Kind) {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case e := <-ch:
+			if e.Kind == kind {
+				return
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for event %v", kind)
+		}
+	}
+}
+
 // TestEscCancelsRunningTurnWithCompletionOpen reproduces the report that Esc
 // (unlike Ctrl+C) did not stop a running turn: an active completion menu
 // captured Esc to close itself and returned before reaching the running-turn
@@ -370,6 +394,24 @@ func TestUserBubbleEchoedImmediately(t *testing.T) {
 	}
 }
 
+func TestUserBubbleIsLightweightTranscriptLine(t *testing.T) {
+	prevColor := colorEnabled
+	colorEnabled = true
+	defer func() { colorEnabled = prevColor }()
+
+	got := renderUserBubble("hello world", 80, false)
+	plain := ansi.Strip(got)
+	if !strings.Contains(plain, "› hello world") {
+		t.Fatalf("user bubble missing prompt text: %q", plain)
+	}
+	if got == plain {
+		t.Fatalf("user bubble should use themed foreground color when color is enabled: %q", got)
+	}
+	if w := ansi.StringWidth(plain); w > 20 {
+		t.Fatalf("user bubble should not render as a full-width input-like block, width=%d text=%q", w, plain)
+	}
+}
+
 // TestUnsendDiscardsBufferedEvents proves that after an un-send (Esc before any
 // packet) the turn's already-buffered events are swallowed — nothing reaches
 // scrollback — and its TurnDone settles the model back to idle.
@@ -523,6 +565,65 @@ func TestEffortCommandAutoClearsProviderEffort(t *testing.T) {
 	}
 }
 
+func TestAutoPlanCommandPersistsAndUpdatesController(t *testing.T) {
+	isolateUserConfig(t)
+
+	runner := &recordingTurnRunner{}
+	events := make(chan event.Event, 4)
+	ctrl := control.New(control.Options{
+		AutoPlan: "off",
+		Runner:   runner,
+		Sink: event.FuncSink(func(e event.Event) {
+			events <- e
+		}),
+	})
+	m := newTestChatTUI()
+	m.ctrl = ctrl
+
+	m.runAutoPlanCommand("/auto-plan on")
+
+	body, err := os.ReadFile(config.UserConfigPath())
+	if err != nil {
+		t.Fatalf("read saved config: %v", err)
+	}
+	if !strings.Contains(string(body), `auto_plan   = "on"`) {
+		t.Fatalf("saved config missing auto_plan=on:\n%s", body)
+	}
+	input := "实现 GitHub issue #2395：\n- 新增配置项\n- 自动判断复杂任务\n- 补测试和文档"
+	ctrl.Send(input)
+	waitForCLIEvent(t, events, event.TurnDone)
+	if len(runner.inputs) != 1 || !strings.HasPrefix(runner.inputs[0], control.PlanModeMarker) {
+		t.Fatalf("/auto-plan on should affect current controller, inputs=%q", runner.inputs)
+	}
+}
+
+func TestAutoPlanCommandWritesUserConfigNotProjectConfig(t *testing.T) {
+	isolateUserConfig(t)
+	projectPath := filepath.Join(mustGetwd(t), "reasonix.toml")
+	if err := os.WriteFile(projectPath, []byte("[agent]\nauto_plan = \"off\"\n"), 0o644); err != nil {
+		t.Fatalf("write project config: %v", err)
+	}
+
+	m := newTestChatTUI()
+	m.ctrl = control.New(control.Options{AutoPlan: "off"})
+	m.runAutoPlanCommand("/auto-plan on")
+
+	userBody, err := os.ReadFile(config.UserConfigPath())
+	if err != nil {
+		t.Fatalf("read user config: %v", err)
+	}
+	if !strings.Contains(string(userBody), `auto_plan   = "on"`) {
+		t.Fatalf("user config missing auto_plan=on:\n%s", userBody)
+	}
+	projectBody, err := os.ReadFile(projectPath)
+	if err != nil {
+		t.Fatalf("read project config: %v", err)
+	}
+	if string(projectBody) != "[agent]\nauto_plan = \"off\"\n" {
+		t.Fatalf("/auto-plan should not rewrite project config:\n%s", projectBody)
+	}
+}
+
 func TestLanguageCommandSwitchesImmediatelyAndPersists(t *testing.T) {
 	isolateUserConfig(t)
 	i18n.DetectLanguage("en")
@@ -640,6 +741,189 @@ func TestSubmittedInputRecallWithArrowKeys(t *testing.T) {
 	m = model.(chatTUI)
 	if got := m.input.Value(); got != "draft" {
 		t.Fatalf("down past newest should restore draft, got %q", got)
+	}
+}
+
+func TestQueueNavigationWithArrowKeys(t *testing.T) {
+	m := newTestChatTUI()
+	m.state = tuiRunning
+	m.pendingInterject = []string{"queued one", "queued two", "queued three"}
+	m.input.SetValue("my draft")
+
+	up := tea.KeyPressMsg{Code: tea.KeyUp}
+	down := tea.KeyPressMsg{Code: tea.KeyDown}
+
+	// First ↑ should save draft and jump to last queued item.
+	model, _ := m.Update(up)
+	m = model.(chatTUI)
+	if got := m.input.Value(); got != "queued three" {
+		t.Fatalf("first up: want %q, got %q", "queued three", got)
+	}
+	if m.queueEditCursor != 2 {
+		t.Fatalf("first up: cursor should be 2, got %d", m.queueEditCursor)
+	}
+
+	// Second ↑ should move to "queued two".
+	model, _ = m.Update(up)
+	m = model.(chatTUI)
+	if got := m.input.Value(); got != "queued two" {
+		t.Fatalf("second up: want %q, got %q", "queued two", got)
+	}
+
+	// ↓ should move back to "queued three".
+	model, _ = m.Update(down)
+	m = model.(chatTUI)
+	if got := m.input.Value(); got != "queued three" {
+		t.Fatalf("down: want %q, got %q", "queued three", got)
+	}
+
+	// ↓ past the end should restore the draft.
+	model, _ = m.Update(down)
+	m = model.(chatTUI)
+	if got := m.input.Value(); got != "my draft" {
+		t.Fatalf("down past end: want %q, got %q", "my draft", got)
+	}
+	if m.queueEditCursor != -1 {
+		t.Fatalf("down past end: cursor should be -1, got %d", m.queueEditCursor)
+	}
+}
+
+func TestQueueNavigationClampAtStart(t *testing.T) {
+	m := newTestChatTUI()
+	m.state = tuiRunning
+	m.pendingInterject = []string{"only item"}
+	m.input.SetValue("draft")
+
+	up := tea.KeyPressMsg{Code: tea.KeyUp}
+	// First ↑ jumps to the only item.
+	model, _ := m.Update(up)
+	m = model.(chatTUI)
+	if got := m.input.Value(); got != "only item" {
+		t.Fatalf("first up: want %q, got %q", "only item", got)
+	}
+	// Second ↑ should clamp at index 0 (not go negative).
+	model, _ = m.Update(up)
+	m = model.(chatTUI)
+	if m.queueEditCursor != 0 {
+		t.Fatalf("second up: cursor should clamp at 0, got %d", m.queueEditCursor)
+	}
+	if got := m.input.Value(); got != "only item" {
+		t.Fatalf("second up: value should stay %q, got %q", "only item", got)
+	}
+}
+
+func TestQueueNavigationNoOpWhenEmpty(t *testing.T) {
+	m := newTestChatTUI()
+	m.state = tuiRunning
+	m.input.SetValue("hello")
+
+	up := tea.KeyPressMsg{Code: tea.KeyUp}
+	model, _ := m.Update(up)
+	m = model.(chatTUI)
+	if got := m.input.Value(); got != "hello" {
+		t.Fatalf("empty queue: input should be unchanged, got %q", got)
+	}
+}
+
+func TestQueueEditSavesOnEnter(t *testing.T) {
+	m := newTestChatTUI()
+	m.state = tuiRunning
+	m.pendingInterject = []string{"original one", "original two"}
+
+	up := tea.KeyPressMsg{Code: tea.KeyUp}
+	model, _ := m.Update(up)
+	m = model.(chatTUI)
+	if m.queueEditCursor != 1 {
+		t.Fatalf("cursor should be 1 after up, got %d", m.queueEditCursor)
+	}
+
+	// Edit the queued message.
+	m.input.SetValue("edited two")
+	enter := tea.KeyPressMsg{Code: tea.KeyEnter}
+	model, _ = m.Update(enter)
+	m = model.(chatTUI)
+
+	if m.pendingInterject[1] != "edited two" {
+		t.Fatalf("queue[1] should be %q, got %q", "edited two", m.pendingInterject[1])
+	}
+	if m.pendingInterject[0] != "original one" {
+		t.Fatalf("queue[0] should be unchanged, got %q", m.pendingInterject[0])
+	}
+	if m.queueEditCursor != -1 {
+		t.Fatalf("cursor should reset after enter, got %d", m.queueEditCursor)
+	}
+}
+
+func TestQueueNewMessageOnEnterDuringRunning(t *testing.T) {
+	m := newTestChatTUI()
+	m.state = tuiRunning
+	m.pendingInterject = []string{"existing"}
+
+	m.input.SetValue("new message")
+	enter := tea.KeyPressMsg{Code: tea.KeyEnter}
+	model, _ := m.Update(enter)
+	m = model.(chatTUI)
+
+	if len(m.pendingInterject) != 2 {
+		t.Fatalf("queue should have 2 items, got %d", len(m.pendingInterject))
+	}
+	if m.pendingInterject[1] != "new message" {
+		t.Fatalf("queue[1] should be %q, got %q", "new message", m.pendingInterject[1])
+	}
+}
+
+func TestQueueNavigationResetOnNonUpDownKey(t *testing.T) {
+	m := newTestChatTUI()
+	m.state = tuiRunning
+	m.pendingInterject = []string{"queued"}
+
+	up := tea.KeyPressMsg{Code: tea.KeyUp}
+	model, _ := m.Update(up)
+	m = model.(chatTUI)
+	if m.queueEditCursor != 0 {
+		t.Fatalf("cursor should be 0 after up, got %d", m.queueEditCursor)
+	}
+
+	// A regular key should reset the queue navigation cursor.
+	letter := tea.KeyPressMsg{Code: 'a'}
+	model, _ = m.Update(letter)
+	m = model.(chatTUI)
+	if m.queueEditCursor != -1 {
+		t.Fatalf("cursor should reset on non-up/down key, got %d", m.queueEditCursor)
+	}
+}
+
+func TestQueueIndicatorRendering(t *testing.T) {
+	m := newTestChatTUI()
+	m.state = tuiRunning
+	m.pendingInterject = []string{"first msg", "second msg"}
+
+	qi := m.renderQueueIndicator()
+	if qi == "" {
+		t.Fatal("queue indicator should not be empty when queue has items and running")
+	}
+	if !strings.Contains(qi, "[1]") || !strings.Contains(qi, "[2]") {
+		t.Fatalf("queue indicator should contain [1] and [2], got %q", qi)
+	}
+	if !strings.Contains(qi, "first msg") || !strings.Contains(qi, "second msg") {
+		t.Fatalf("queue indicator should show message previews, got %q", qi)
+	}
+
+	// Highlight marker should appear for the browsed item.
+	m.queueEditCursor = 1
+	qi = m.renderQueueIndicator()
+	if !strings.Contains(qi, "▸") {
+		t.Fatalf("queue indicator should show ▸ for browsed item, got %q", qi)
+	}
+}
+
+func TestQueueIndicatorHiddenWhenIdle(t *testing.T) {
+	m := newTestChatTUI()
+	m.state = tuiIdle
+	m.pendingInterject = []string{"queued"}
+
+	if qi := m.renderQueueIndicator(); qi != "" {
+		t.Fatalf("queue indicator should be empty when idle, got %q", qi)
 	}
 }
 

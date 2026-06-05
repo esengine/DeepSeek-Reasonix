@@ -47,6 +47,8 @@ var Chinese = Messages{
 	ChatStatusIdle:         "就绪",
 	ChatStatusYoloIdle:     "已跳过批准",
 	ChatStatusCycleHint:    "shift+tab 循环切换",
+	ChatStatusCacheNowFmt:  "本次命中 %s",
+	ChatStatusCacheAvgFmt:  "平均 %s",
 	ChatStatusPlanApproval: "Enter/y 批准并执行 · n/Esc 继续规划 · PgUp/PgDn 滚动",
 	PlanApprovalPrompt:     "计划已生成（见上方）— Enter/y 批准执行,n/Esc 继续规划",
 	ChatStatusToolApproval: "1 本次允许 · 2 本会话允许 · 3 总是允许（保存） · 4 拒绝 · y/a/p/n 兼容 · Ctrl-C 取消本轮",
@@ -140,6 +142,11 @@ var Chinese = Messages{
 	CompHintSlash:                "↑/↓ 移动 · Tab/Enter 选中 · Esc 关闭",
 	CompHintFile:                 "↑/↓ 移动 · Tab/Enter 进入文件夹或选中文件 · Esc 关闭",
 
+	ShellExecEmpty:      "用法：!<命令>  （例如 !ls -la）",
+	ShellExecFailedFmt:  "Shell 命令执行失败：%v",
+	ShellExecTimeoutFmt: "Shell 命令超时（>%s）",
+	ShellModeHint:       "Enter 执行 Shell · Esc 取消 · 点击输出展开",
+
 	CmdNew:          "开启新会话",
 	CmdCompact:      "压缩上下文",
 	CmdRewind:       "回滚到更早的一轮",
@@ -160,6 +167,7 @@ var Chinese = Messages{
 	CmdSkill:        "管理 skills",
 	CmdVerbose:      "切换 thinking 原文显示",
 	CmdEffort:       "设置推理强度",
+	CmdAutoPlan:     "配置自动计划模式",
 	CmdHelp:         "查看命令列表",
 	CmdTodo:         "清除任务清单",
 	CmdQuit:         "退出会话",
@@ -302,6 +310,7 @@ var Chinese = Messages{
   reasonix run  [--model NAME] [--max-steps N] <task>   执行单次任务后退出
   reasonix serve [--model NAME] [--addr HOST:PORT]      通过 HTTP+SSE 提供会话（浏览器客户端在 /）
   reasonix setup [path]                                 交互式配置向导；生成 reasonix.toml（及 .env）
+  reasonix config auto-plan [off|on]                    配置自动计划模式
   reasonix mcp <add|remove|list>                        管理 reasonix.toml 里的 MCP 服务器
   reasonix doctor [--json]                              输出脱敏的本地诊断信息
   reasonix version

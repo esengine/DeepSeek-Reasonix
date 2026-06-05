@@ -1,0 +1,467 @@
+package plugin
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"sync"
+	"time"
+
+	"reasonix/internal/proc"
+)
+
+const closeWaitBudget = 5 * time.Second
+
+// stdioTransport speaks newline-delimited JSON-RPC 2.0 over a subprocess's
+// stdin/stdout — the MCP stdio convention (one JSON message per line, no
+// embedded newlines). A dedicated reader goroutine owns stdout and demuxes each
+// response to the waiting call by id, so a call can abandon a blocking read the
+// moment its context is cancelled (the subprocess is bound to the session, not
+// the turn, so a hung server would otherwise hang a cancelled turn forever).
+// callMu serialises a request/response round-trip over the shared pipe.
+type stdioTransport struct {
+	name   string
+	cmd    *exec.Cmd
+	job    uintptr // Windows Job Object handle (0 elsewhere); reaps detached grandchildren on close
+	stdin  io.WriteCloser
+	stdout *bufio.Reader
+	stderr *tailBuffer
+
+	callMu sync.Mutex // one in-flight request/response at a time over the shared pipe
+
+	mu      sync.Mutex
+	nextID  int
+	pending map[int]chan rpcResponse
+	readErr error // set once the reader goroutine exits; further calls fail fast
+
+	waitOnce sync.Once
+}
+
+func newStdioTransport(ctx context.Context, s Spec) (*stdioTransport, error) {
+	if strings.TrimSpace(s.Command) == "" {
+		return nil, fmt.Errorf("stdio plugin %q: command is required", s.Name)
+	}
+	env := mergeEnv(os.Environ(), s.Env)
+	exe, env, err := resolveStdioExecutable(ctx, s, env)
+	if err != nil {
+		return nil, err
+	}
+	cmd := exec.CommandContext(ctx, exe, s.Args...)
+	proc.HideWindow(cmd)
+	cmd.Env = env
+	if s.Dir != "" {
+		cmd.Dir = s.Dir // pin cwd-aware servers (e.g. CodeGraph) to the project root
+	}
+	stderr := &tailBuffer{limit: 16 * 1024}
+	cmd.Stderr = stderr
+	if s.Stderr != nil {
+		cmd.Stderr = io.MultiWriter(stderr, s.Stderr)
+	}
+
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, err
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	t := &stdioTransport{
+		name:    s.Name,
+		cmd:     cmd,
+		job:     proc.TrackTree(cmd),
+		stdin:   stdin,
+		stdout:  bufio.NewReader(stdout),
+		stderr:  stderr,
+		pending: map[int]chan rpcResponse{},
+	}
+	go t.readLoop()
+	return t, nil
+}
+
+var stdioShellPATH = defaultStdioShellPATH
+
+func resolveStdioExecutable(ctx context.Context, s Spec, env []string) (string, []string, error) {
+	if hasPathSeparator(s.Command) {
+		return s.Command, env, nil
+	}
+	if exe, ok := lookPathInEnv(s.Command, env); ok {
+		return exe, env, nil
+	}
+
+	currentPath, _ := envValue(env, "PATH")
+	if shellPath := strings.TrimSpace(stdioShellPATH(ctx)); shellPath != "" {
+		fallbackPath := mergePathLists(shellPath, currentPath)
+		if fallbackPath != currentPath {
+			fallbackEnv := setEnvValue(env, "PATH", fallbackPath)
+			if exe, ok := lookPathInEnv(s.Command, fallbackEnv); ok {
+				return exe, fallbackEnv, nil
+			}
+			env = fallbackEnv
+			currentPath = fallbackPath
+		}
+	}
+
+	return "", env, fmt.Errorf("stdio plugin %q: command %q not found on PATH; GUI launches and non-interactive sessions may not inherit your shell PATH. Use an absolute command path or set PATH in the MCP server env. PATH=%q",
+		s.Name, s.Command, currentPath)
+}
+
+func hasPathSeparator(s string) bool {
+	return strings.ContainsAny(s, `/\`)
+}
+
+func lookPathInEnv(command string, env []string) (string, bool) {
+	path, _ := envValue(env, "PATH")
+	pathext, _ := envValue(env, "PATHEXT")
+	for _, dir := range filepath.SplitList(path) {
+		if dir == "" || !filepath.IsAbs(dir) {
+			continue
+		}
+		for _, name := range executableNames(command, pathext) {
+			candidate := filepath.Join(dir, name)
+			if isExecutableFile(candidate) {
+				return candidate, true
+			}
+		}
+	}
+	return "", false
+}
+
+func executableNames(command, pathext string) []string {
+	if runtime.GOOS != "windows" || filepath.Ext(command) != "" {
+		return []string{command}
+	}
+	if strings.TrimSpace(pathext) == "" {
+		pathext = ".COM;.EXE;.BAT;.CMD"
+	}
+	names := []string{command}
+	seen := map[string]bool{strings.ToLower(command): true}
+	for _, ext := range strings.Split(pathext, ";") {
+		ext = strings.TrimSpace(ext)
+		if ext == "" {
+			continue
+		}
+		if !strings.HasPrefix(ext, ".") {
+			ext = "." + ext
+		}
+		name := command + ext
+		key := strings.ToLower(name)
+		if !seen[key] {
+			seen[key] = true
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+func isExecutableFile(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() {
+		return false
+	}
+	if runtime.GOOS == "windows" {
+		return true
+	}
+	return info.Mode().Perm()&0o111 != 0
+}
+
+func defaultStdioShellPATH(ctx context.Context) string {
+	if runtime.GOOS == "windows" {
+		return ""
+	}
+	shell := stdioShell()
+	if shell == "" {
+		return ""
+	}
+	const marker = "__REASONIX_PATH__="
+	script := "printf '\\n" + marker + "%s\\n' \"$PATH\""
+	for _, args := range [][]string{
+		{"-l", "-i", "-c", script},
+		{"-l", "-c", script},
+		{"-c", script},
+	} {
+		out := runShellPATHCommand(ctx, shell, args)
+		if path := parseShellPATH(out, marker); path != "" {
+			return path
+		}
+	}
+	return ""
+}
+
+func stdioShell() string {
+	if shell := strings.TrimSpace(os.Getenv("SHELL")); shell != "" {
+		if hasPathSeparator(shell) {
+			if isExecutableFile(shell) {
+				return shell
+			}
+		} else if exe, ok := lookPathInEnv(shell, os.Environ()); ok {
+			return exe
+		}
+	}
+	for _, shell := range []string{"/bin/zsh", "/bin/bash", "/bin/sh"} {
+		if isExecutableFile(shell) {
+			return shell
+		}
+	}
+	return ""
+}
+
+func runShellPATHCommand(parent context.Context, shell string, args []string) []byte {
+	ctx, cancel := context.WithTimeout(parent, 2*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, shell, args...)
+	proc.HideWindow(cmd)
+	cmd.Stdin = strings.NewReader("")
+	out, _ := cmd.CombinedOutput()
+	return out
+}
+
+func parseShellPATH(out []byte, marker string) string {
+	lines := strings.Split(strings.ReplaceAll(string(out), "\r\n", "\n"), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if strings.HasPrefix(lines[i], marker) {
+			return strings.TrimSpace(strings.TrimPrefix(lines[i], marker))
+		}
+	}
+	return ""
+}
+
+func mergeEnv(base []string, overrides map[string]string) []string {
+	out := append([]string(nil), base...)
+	for k, v := range overrides {
+		out = setEnvValue(out, k, v)
+	}
+	return out
+}
+
+func setEnvValue(env []string, key, value string) []string {
+	out := make([]string, 0, len(env)+1)
+	replaced := false
+	for _, kv := range env {
+		k, _, ok := strings.Cut(kv, "=")
+		if ok && envKeyEqual(k, key) {
+			if !replaced {
+				out = append(out, key+"="+value)
+				replaced = true
+			}
+			continue
+		}
+		out = append(out, kv)
+	}
+	if !replaced {
+		out = append(out, key+"="+value)
+	}
+	return out
+}
+
+func envValue(env []string, key string) (string, bool) {
+	for i := len(env) - 1; i >= 0; i-- {
+		k, v, ok := strings.Cut(env[i], "=")
+		if ok && envKeyEqual(k, key) {
+			return v, true
+		}
+	}
+	return "", false
+}
+
+func envKeyEqual(a, b string) bool {
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(a, b)
+	}
+	return a == b
+}
+
+func mergePathLists(primary, secondary string) string {
+	var out []string
+	seen := map[string]bool{}
+	for _, path := range []string{primary, secondary} {
+		for _, dir := range filepath.SplitList(path) {
+			if dir == "" || seen[dir] {
+				continue
+			}
+			seen[dir] = true
+			out = append(out, dir)
+		}
+	}
+	return strings.Join(out, string(os.PathListSeparator))
+}
+
+// readLoop owns stdout for the transport's lifetime: it reads one JSON-RPC
+// message per line, drops server-initiated notifications/requests (they carry a
+// method), and hands each response to the call waiting on its id. On any read
+// error it fails every pending call and exits.
+func (t *stdioTransport) readLoop() {
+	for {
+		line, err := t.stdout.ReadBytes('\n')
+		if err != nil {
+			t.failAll(err)
+			return
+		}
+		line = bytes.TrimSpace(line)
+		if len(line) == 0 {
+			continue
+		}
+		var probe struct {
+			Method string `json:"method"`
+		}
+		_ = json.Unmarshal(line, &probe)
+		if probe.Method != "" {
+			continue // server notification/request, not a response to one of our calls
+		}
+		var resp rpcResponse
+		if err := json.Unmarshal(line, &resp); err != nil {
+			continue // unparseable line with no id — can't route it, skip
+		}
+		t.mu.Lock()
+		ch := t.pending[resp.ID]
+		delete(t.pending, resp.ID)
+		t.mu.Unlock()
+		if ch != nil {
+			ch <- resp // buffered(1): never blocks, even if the caller already left
+		}
+	}
+}
+
+// failAll records the terminal read error and unblocks every pending call by
+// closing its channel; a caller distinguishes this from a real response by the
+// closed-channel receive.
+func (t *stdioTransport) failAll(err error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.readErr == nil {
+		t.readErr = err
+	}
+	for id, ch := range t.pending {
+		close(ch)
+		delete(t.pending, id)
+	}
+}
+
+func (t *stdioTransport) call(ctx context.Context, method string, params any) (json.RawMessage, error) {
+	t.callMu.Lock()
+	defer t.callMu.Unlock()
+
+	t.mu.Lock()
+	if t.readErr != nil {
+		t.mu.Unlock()
+		return nil, t.withStderr(fmt.Errorf("plugin %q: read: %w", t.name, t.readErr))
+	}
+	t.nextID++
+	id := t.nextID
+	ch := make(chan rpcResponse, 1)
+	t.pending[id] = ch
+	t.mu.Unlock()
+
+	defer func() {
+		t.mu.Lock()
+		delete(t.pending, id)
+		t.mu.Unlock()
+	}()
+
+	if err := t.write(rpcRequest{JSONRPC: "2.0", ID: id, Method: method, Params: params}); err != nil {
+		return nil, fmt.Errorf("plugin %q: write %s: %w", t.name, method, err)
+	}
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case resp, ok := <-ch:
+		if !ok {
+			return nil, t.withStderr(fmt.Errorf("plugin %q: read: %w", t.name, t.readErr))
+		}
+		if resp.Error != nil {
+			return nil, fmt.Errorf("plugin %q: %w", t.name, resp.Error)
+		}
+		return resp.Result, nil
+	}
+}
+
+func (t *stdioTransport) notify(_ context.Context, method string, params any) error {
+	return t.write(rpcRequest{JSONRPC: "2.0", Method: method, Params: params})
+}
+
+func (t *stdioTransport) write(v any) error {
+	b, err := json.Marshal(v) // marshaled JSON never contains a literal newline
+	if err != nil {
+		return err
+	}
+	if _, err = t.stdin.Write(append(b, '\n')); err != nil {
+		return t.withStderr(err)
+	}
+	return nil
+}
+
+func (t *stdioTransport) withStderr(err error) error {
+	if t.stderr == nil {
+		return err
+	}
+	t.wait() // reap the exited child so its stderr copy goroutine has flushed the tail
+	msg := t.stderr.String()
+	if msg == "" {
+		return err
+	}
+	return fmt.Errorf("%w: stderr: %s", err, msg)
+}
+
+// wait reaps the child exactly once; cmd.Wait blocks until the stderr-copy
+// goroutine completes, so the tail buffer is settled before anyone reads it.
+func (t *stdioTransport) wait() {
+	t.waitOnce.Do(func() {
+		if t.cmd != nil && t.cmd.Process != nil {
+			_ = t.cmd.Wait()
+		}
+	})
+}
+
+// close kills the whole process tree (a launcher's surviving grandchild keeps
+// the inherited stdio pipes open, so a plain Process.Kill leaves cmd.Wait
+// blocking forever) and reaps it under a budget so one wedged server can never
+// stall a boot or a turn teardown.
+func (t *stdioTransport) close() {
+	if t.stdin != nil {
+		_ = t.stdin.Close()
+	}
+	if t.cmd == nil || t.cmd.Process == nil {
+		return
+	}
+	proc.KillTracked(t.cmd, t.job)
+	done := make(chan struct{})
+	go func() { t.wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(closeWaitBudget):
+	}
+}
+
+type tailBuffer struct {
+	mu    sync.Mutex
+	limit int
+	buf   []byte
+}
+
+func (b *tailBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.buf = append(b.buf, p...)
+	if b.limit > 0 && len(b.buf) > b.limit {
+		b.buf = append([]byte(nil), b.buf[len(b.buf)-b.limit:]...)
+	}
+	return len(p), nil
+}
+
+func (b *tailBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return strings.TrimSpace(string(b.buf))
+}

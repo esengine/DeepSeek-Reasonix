@@ -57,6 +57,9 @@ type Options struct {
 	MaxSteps   int
 	RequireKey bool
 	Sink       event.Sink
+	// EffortOverride is a session-local reasoning effort override. Nil means use
+	// the resolved provider config; a non-nil empty string means provider default.
+	EffortOverride *string
 	// Stderr is the writer for diagnostic warnings and plugin subprocess
 	// stderr output. When nil, defaults to os.Stderr. Set to io.Discard
 	// during model switch inside a bubbletea session to prevent any output
@@ -85,8 +88,9 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			root = wd
 		}
 	}
-	// One-time import of a v0.x (~/.reasonix/config.json) install — runs before
-	// Load so the freshly written config + ~/.env are picked up this same boot.
+	// One-time import of v1/v0.5 legacy config — runs before Load so the freshly
+	// written config + ~/.env are picked up this same boot. CLI Run also calls this
+	// before config-only commands; this call stays as the shared frontend fallback.
 	migrated, migErr := config.MigrateLegacyIfNeeded()
 	cfg, err := config.LoadForRoot(root)
 	if err != nil {
@@ -99,6 +103,12 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	entry, ok := cfg.ResolveModel(modelName)
 	if !ok {
 		return nil, fmt.Errorf("%w %q (configured: %s); note: defining [[providers]] replaces the built-in presets, so add a [[providers]] entry for it or use a configured name, or run `reasonix setup` to reconfigure", ErrUnknownModel, modelName, providerNames(cfg))
+	}
+	if opts.EffortOverride != nil {
+		entry.Effort = *opts.EffortOverride
+		if entry.Kind == "anthropic" && strings.TrimSpace(entry.Effort) != "" && strings.TrimSpace(entry.Thinking) == "" {
+			entry.Thinking = "adaptive"
+		}
 	}
 	if opts.RequireKey {
 		if err := cfg.Validate(modelName); err != nil {
@@ -648,12 +658,12 @@ func NewProviderWithProxy(e *config.ProviderEntry, proxy netclient.ProxySpec) (p
 		Model:   e.Model,
 		APIKey:  e.APIKey(),
 		// Pass the key's env var so auth failures can name where to fix it, plus
-		// provider-kind-specific knobs (the anthropic provider reads thinking/effort;
-		// the openai one ignores them).
+		// provider-kind-specific knobs. EffectiveEffort applies a configured
+		// default_effort when the user has not explicitly selected /effort.
 		Extra: map[string]any{
 			"api_key_env": e.APIKeyEnv,
 			"thinking":    e.Thinking,
-			"effort":      e.Effort,
+			"effort":      config.EffectiveEffort(e),
 			"proxy_spec":  proxy,
 		},
 	})

@@ -1,0 +1,163 @@
+package provider
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"math/rand"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+)
+
+// MaxRetries is the number of times SendWithRetry re-attempts the connection +
+// header phase after the initial try (so up to MaxRetries+1 total attempts).
+const MaxRetries = 10
+
+const maxBackoff = 15 * time.Second
+
+// RetryInfo describes a backoff about to happen: Attempt is the 1-based retry
+// number (of Max) and Delay is how long SendWithRetry will wait before it.
+type RetryInfo struct {
+	Attempt int
+	Max     int
+	Delay   time.Duration
+	Err     error
+}
+
+type RetryNotify func(RetryInfo)
+
+type retryNotifyKey struct{}
+
+// WithRetryNotify attaches a callback that SendWithRetry invokes before each
+// backoff sleep, so the agent can surface a transient "retrying (n/m)" status.
+func WithRetryNotify(ctx context.Context, fn RetryNotify) context.Context {
+	if fn == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, retryNotifyKey{}, fn)
+}
+
+func retryNotifyFromContext(ctx context.Context) RetryNotify {
+	fn, _ := ctx.Value(retryNotifyKey{}).(RetryNotify)
+	return fn
+}
+
+// APIError reports a non-OK HTTP status that isn't an auth failure. Status
+// carries the code so the display layer can map it to an actionable, localized
+// message; Body is a trimmed snippet of the response.
+type APIError struct {
+	Provider string
+	Status   int
+	Body     string
+}
+
+func (e *APIError) Error() string {
+	if e.Body == "" {
+		return fmt.Sprintf("%s: status %d", e.Provider, e.Status)
+	}
+	return fmt.Sprintf("%s: status %d: %s", e.Provider, e.Status, e.Body)
+}
+
+// RetryableStatus reports whether a backoff can plausibly recover from status s:
+// 408 (request timeout), 429 (rate limit) and 5xx (incl. Anthropic's 529). Other
+// 4xx (400/401/402/422, …) are caller/config problems retrying can't fix.
+func RetryableStatus(s int) bool {
+	return s == http.StatusRequestTimeout || s == http.StatusTooManyRequests || (s >= 500 && s <= 599)
+}
+
+func transientErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	return true
+}
+
+func backoffDelay(attempt int, retryAfter time.Duration) time.Duration {
+	if retryAfter > 0 {
+		if retryAfter > maxBackoff {
+			return maxBackoff
+		}
+		return retryAfter
+	}
+	d := time.Duration(1<<(attempt-1)) * 500 * time.Millisecond
+	if d > maxBackoff {
+		d = maxBackoff
+	}
+	return d + time.Duration(rand.Intn(250))*time.Millisecond
+}
+
+func parseRetryAfter(resp *http.Response) time.Duration {
+	v := strings.TrimSpace(resp.Header.Get("Retry-After"))
+	if v == "" {
+		return 0
+	}
+	if secs, err := strconv.Atoi(v); err == nil && secs >= 0 {
+		return time.Duration(secs) * time.Second
+	}
+	return 0
+}
+
+// SendWithRetry POSTs a streaming request built by newReq and returns the OK
+// response. It retries the connection+header phase up to MaxRetries times on
+// transient network errors and retryable statuses with capped exponential
+// backoff + jitter, honoring Retry-After. 401/403 become *AuthError; other
+// non-OK statuses become *APIError. A RetryNotify in ctx fires before each
+// sleep. Retries cover only the header phase — once the body streams, mid-stream
+// failures are not retried (the model has already emitted tokens).
+func SendWithRetry(ctx context.Context, httpClient *http.Client, provName, keyEnv string, newReq func(context.Context) (*http.Request, error)) (*http.Response, error) {
+	notify := retryNotifyFromContext(ctx)
+	var lastErr error
+	var retryAfter time.Duration
+
+	for attempt := 0; attempt <= MaxRetries; attempt++ {
+		if attempt > 0 {
+			delay := backoffDelay(attempt, retryAfter)
+			if notify != nil {
+				notify(RetryInfo{Attempt: attempt, Max: MaxRetries, Delay: delay, Err: lastErr})
+			}
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(delay):
+			}
+		}
+		retryAfter = 0
+
+		req, err := newReq(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("%s: build request: %w", provName, err)
+		}
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			if !transientErr(err) {
+				return nil, fmt.Errorf("%s: request failed: %w", provName, err)
+			}
+			lastErr = fmt.Errorf("%s: request failed: %w", provName, err)
+			continue
+		}
+		if resp.StatusCode == http.StatusOK {
+			return resp, nil
+		}
+
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		retryAfter = parseRetryAfter(resp)
+		_, _ = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+
+		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+			return nil, &AuthError{Provider: provName, KeyEnv: keyEnv, Status: resp.StatusCode}
+		}
+		apiErr := &APIError{Provider: provName, Status: resp.StatusCode, Body: strings.TrimSpace(string(msg))}
+		if !RetryableStatus(resp.StatusCode) {
+			return nil, apiErr
+		}
+		lastErr = apiErr
+	}
+	return nil, lastErr
+}

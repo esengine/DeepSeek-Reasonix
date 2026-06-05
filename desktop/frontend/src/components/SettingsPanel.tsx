@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
+import { asArray } from "../lib/array";
 import { app } from "../lib/bridge";
-import { useI18n, useT } from "../lib/i18n";
+import { normalizeLangPref, useI18n, useT, type LangPref } from "../lib/i18n";
 import { useUpdater } from "../lib/useUpdater";
 import {
   THEME_STYLES,
@@ -9,21 +10,25 @@ import {
   getResolvedTheme,
   getTheme,
   getThemeStyle,
+  normalizeThemePreference,
+  normalizeThemeStyleForTheme,
   themeForStyle,
   type Theme,
   type ThemeStyle,
 } from "../lib/theme";
+import { TEXT_SIZES, applyTextSize, getTextSize, type TextSize } from "../lib/textSize";
 import type { NetworkView, ProviderView, SettingsView } from "../lib/types";
+import { InlineConfirmButton } from "./InlineConfirmButton";
 import { ResizableDrawer } from "./ResizableDrawer";
 import { Tooltip } from "./Tooltip";
 
-type SettingsTab = "models" | "providers" | "network" | "permissions" | "sandbox" | "agent" | "appearance" | "updates";
+type SettingsTab = "general" | "models" | "providers" | "network" | "permissions" | "sandbox" | "appearance" | "updates";
 
-const SETTINGS_TABS: SettingsTab[] = ["models", "providers", "network", "permissions", "sandbox", "agent", "appearance", "updates"];
+const SETTINGS_TABS: SettingsTab[] = ["general", "models", "providers", "network", "permissions", "sandbox", "appearance", "updates"];
 
 // SettingsPanel is the desktop settings surface, aligning with Claude Code's
-// settings: model & providers (incl. API keys), permissions, sandbox, agent
-// params, and appearance. Every change writes reasonix.toml (or .env for keys)
+// settings: model & providers (incl. API keys), permissions, sandbox, and
+// appearance. Every change writes reasonix.toml (or .env for keys)
 // through the kernel's config edit API and rebuilds the controller live.
 export function SettingsPanel({ onClose, onChanged }: { onClose: () => void; onChanged: () => void }) {
   const t = useT();
@@ -32,12 +37,20 @@ export function SettingsPanel({ onClose, onChanged }: { onClose: () => void; onC
   const [err, setErr] = useState<string | null>(null);
   const [theme, setThemeState] = useState<Theme>(getTheme());
   const [themeStyle, setThemeStyleState] = useState<ThemeStyle>(() => getThemeStyle(getTheme()));
-  const [tab, setTab] = useState<SettingsTab>("models");
+  const [textSize, setTextSizeState] = useState<TextSize>(getTextSize());
+  const [tab, setTab] = useState<SettingsTab>("general");
 
-  const reload = async () => setS(await app.Settings().catch(() => null));
+  const reload = async () => setS(normalizeSettingsView(await app.Settings().catch(() => null)));
   useEffect(() => {
     void reload();
   }, []);
+  useEffect(() => {
+    if (!s) return;
+    const nextTheme = normalizeThemePreference(s.desktopTheme);
+    const nextStyle = normalizeThemeStyleForTheme(s.desktopThemeStyle, nextTheme);
+    setThemeState(nextTheme);
+    setThemeStyleState(nextStyle);
+  }, [s?.desktopTheme, s?.desktopThemeStyle]);
 
   // apply runs a mutation, re-reads settings, and refreshes the topbar/model. A
   // rejected binding (validation / rebuild failure) surfaces as an inline banner.
@@ -85,27 +98,34 @@ export function SettingsPanel({ onClose, onChanged }: { onClose: () => void; onC
               </nav>
               <main className="settings-content">
                 {err && <div className="banner banner--error">{err}</div>}
+                {tab === "general" && <GeneralSection s={s} busy={busy} apply={apply} />}
                 {tab === "models" && <ModelsSection s={s} busy={busy} apply={apply} onManageProviders={() => setTab("providers")} />}
                 {tab === "providers" && <ProvidersSection s={s} busy={busy} apply={apply} />}
                 {tab === "network" && <NetworkSection s={s} busy={busy} apply={apply} />}
                 {tab === "permissions" && <PermissionsSection s={s} busy={busy} apply={apply} />}
                 {tab === "sandbox" && <SandboxSection s={s} busy={busy} apply={apply} />}
-                {tab === "agent" && <AgentSection s={s} busy={busy} apply={apply} />}
                 {tab === "appearance" && (
                   <AppearanceSection
                     theme={theme}
                     themeStyle={themeStyle}
+                    textSize={textSize}
                     onTheme={(t) => {
                       const nextStyle = themeForStyle(themeStyle) === getResolvedTheme(t) ? themeStyle : defaultStyleForTheme(t);
-                      applyTheme(t, nextStyle);
+                      applyTheme(t, nextStyle, { persist: false });
                       setThemeState(t);
                       setThemeStyleState(nextStyle);
+                      void apply(() => app.SetDesktopAppearance(t, nextStyle));
                     }}
                     onThemeStyle={(style) => {
                       const nextTheme = themeForStyle(style);
-                      applyTheme(nextTheme, style);
+                      applyTheme(nextTheme, style, { persist: false });
                       setThemeState(nextTheme);
                       setThemeStyleState(style);
+                      void apply(() => app.SetDesktopAppearance(nextTheme, style));
+                    }}
+                    onTextSize={(size) => {
+                      applyTextSize(size);
+                      setTextSizeState(size);
                     }}
                   />
                 )}
@@ -128,6 +148,8 @@ function settingsTabLabel(id: SettingsTab, t: ReturnType<typeof useT>): string {
   switch (id) {
     case "models":
       return t("settings.tab.models");
+    case "general":
+      return t("settings.tab.general");
     case "providers":
       return t("settings.tab.providers");
     case "network":
@@ -136,8 +158,6 @@ function settingsTabLabel(id: SettingsTab, t: ReturnType<typeof useT>): string {
       return t("settings.tab.permissions");
     case "sandbox":
       return t("settings.tab.sandbox");
-    case "agent":
-      return t("settings.tab.agent");
     case "appearance":
       return t("settings.tab.appearance");
     case "updates":
@@ -149,6 +169,8 @@ function settingsTabMeta(id: SettingsTab, s: SettingsView, t: ReturnType<typeof 
   switch (id) {
     case "models":
       return toRef(s.defaultModel, s) || t("common.none");
+    case "general":
+      return `${closeBehaviorLabel(normalizeCloseBehavior(s.closeBehavior), t)} · ${t(`settings.autoPlan.${normalizeAutoPlan(s.autoPlan)}`)}`;
     case "providers":
       return t("settings.providerCount", { n: s.providers.length });
     case "network":
@@ -157,8 +179,6 @@ function settingsTabMeta(id: SettingsTab, s: SettingsView, t: ReturnType<typeof 
       return s.permissions.mode;
     case "sandbox":
       return s.sandbox.bash;
-    case "agent":
-      return t("settings.agentMeta", { temp: s.agent.temperature, steps: s.agent.maxSteps || "∞" });
     case "appearance":
       return t("settings.appearanceMeta");
     case "updates":
@@ -186,9 +206,18 @@ function toRef(model: string, s: SettingsView): string {
 }
 
 const PROXY_MODES = ["auto", "custom", "off"] as const;
+
+// EFFORT_PRESETS is the canonical union of /effort levels the kernel
+// recognises. The settings UI exposes these as toggleable checkboxes; users
+// can additionally add arbitrary custom names via the "Add" input. The order
+// here is what the user sees in the dropdown.
+const EFFORT_PRESETS: readonly string[] = ["low", "medium", "high", "xhigh", "max"];
 const PROXY_TYPES = ["http", "https", "socks5", "socks5h"] as const;
+const LANGUAGE_PREFS: LangPref[] = ["", "zh", "en"];
+const AUTO_PLAN_MODES = ["off", "on"] as const;
 
 type ProxyMode = (typeof PROXY_MODES)[number];
+type AutoPlanMode = (typeof AUTO_PLAN_MODES)[number];
 
 function normalizeProxyMode(mode: string): ProxyMode {
   switch (mode) {
@@ -203,6 +232,119 @@ function normalizeProxyMode(mode: string): ProxyMode {
 
 function normalizeNetworkView(network: NetworkView): NetworkView {
   return { ...network, proxyMode: normalizeProxyMode(network.proxyMode) };
+}
+
+function normalizeAutoPlan(mode: string | undefined): AutoPlanMode {
+  return mode === "ask" || mode === "on" ? "on" : "off";
+}
+
+function normalizeSettingsView(view: SettingsView | null | undefined): SettingsView | null {
+  if (!view) return null;
+  const permissions = view.permissions ?? { mode: "ask", allow: [], ask: [], deny: [] };
+  const sandbox = view.sandbox ?? { bash: "enforce", network: false, workspaceRoot: "", allowWrite: [] };
+  const network = view.network ?? {
+    proxyMode: "auto",
+    proxyUrl: "",
+    noProxy: "",
+    proxy: { type: "socks5", server: "", port: 0, username: "", password: "" },
+  };
+  const agent = view.agent ?? { temperature: 0, maxSteps: 0, systemPrompt: "" };
+  return {
+    ...view,
+    providers: asArray(view.providers).map((p) => ({ ...p, models: asArray(p.models) })),
+    providerKinds: asArray(view.providerKinds),
+    permissions: {
+      ...permissions,
+      allow: asArray(permissions.allow),
+      ask: asArray(permissions.ask),
+      deny: asArray(permissions.deny),
+    },
+    sandbox: {
+      ...sandbox,
+      allowWrite: asArray(sandbox.allowWrite),
+    },
+    network: {
+      ...network,
+      proxy: network.proxy ?? { type: "socks5", server: "", port: 0, username: "", password: "" },
+    },
+    agent,
+    autoPlan: normalizeAutoPlan(view.autoPlan),
+    desktopLanguage: normalizeLangPref(view.desktopLanguage),
+    desktopTheme: normalizeThemePreference(view.desktopTheme),
+    desktopThemeStyle: normalizeThemeStyleForTheme(view.desktopThemeStyle, normalizeThemePreference(view.desktopTheme)),
+    closeBehavior: normalizeCloseBehavior(view.closeBehavior),
+  };
+}
+
+type CloseBehavior = "background" | "quit";
+
+function normalizeCloseBehavior(mode: string | undefined): CloseBehavior {
+  return mode === "quit" ? "quit" : "background";
+}
+
+function closeBehaviorLabel(mode: CloseBehavior, t: ReturnType<typeof useT>): string {
+  return mode === "quit" ? t("settings.closeBehavior.quit") : t("settings.closeBehavior.background");
+}
+
+function GeneralSection({ s, busy, apply }: SectionProps) {
+  const { t, setPref } = useI18n();
+  const closeBehavior = normalizeCloseBehavior(s.closeBehavior);
+  const autoPlan = normalizeAutoPlan(s.autoPlan);
+  const languagePref = normalizeLangPref(s.desktopLanguage);
+  const setLanguage = (next: LangPref) => {
+    setPref(next);
+    void apply(() => app.SetDesktopLanguage(next));
+  };
+  return (
+    <section className="mem-section">
+      <div className="mem-section__title">{t("settings.tab.general")}</div>
+      <div className="set-row">
+        <label className="set-label">{t("settings.language")}</label>
+        <div className="set-seg">
+          {LANGUAGE_PREFS.map((pref) => (
+            <button
+              key={pref || "auto"}
+              className={`set-seg__btn${languagePref === pref ? " set-seg__btn--on" : ""}`}
+              disabled={busy}
+              onClick={() => setLanguage(pref)}
+            >
+              {pref === "" ? t("settings.langAuto") : pref === "zh" ? "中文" : "English"}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="set-row">
+        <label className="set-label">{t("settings.closeBehavior")}</label>
+        <div className="set-seg">
+          {(["background", "quit"] as const).map((mode) => (
+            <button
+              key={mode}
+              className={`set-seg__btn${closeBehavior === mode ? " set-seg__btn--on" : ""}`}
+              disabled={busy}
+              onClick={() => void apply(() => app.SetCloseBehavior(mode))}
+            >
+              {closeBehaviorLabel(mode, t)}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="set-row">
+        <label className="set-label">{t("settings.autoPlan")}</label>
+        <div className="set-seg">
+          {AUTO_PLAN_MODES.map((mode) => (
+            <button
+              key={mode}
+              className={`set-seg__btn${autoPlan === mode ? " set-seg__btn--on" : ""}`}
+              disabled={busy}
+              onClick={() => void apply(() => app.SetAutoPlan(mode))}
+            >
+              {t(`settings.autoPlan.${mode}`)}
+            </button>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
 }
 
 function NetworkSection({ s, busy, apply }: SectionProps) {
@@ -332,6 +474,9 @@ function ModelsSection({ s, busy, apply, onManageProviders }: SectionProps & { o
   const defaultRef = toRef(s.defaultModel, s);
   const plannerRef = toRef(s.plannerModel, s);
   const [defaultProvider, defaultModel] = defaultRef.split("/");
+  const plannerModeDetail = plannerRef
+    ? t("settings.plannerDualDetail", { planner: plannerRef, executor: defaultRef || t("common.none") })
+    : t("settings.plannerSingleDetail", { model: defaultRef || t("common.none") });
 
   return (
     <section className="mem-section">
@@ -383,8 +528,8 @@ function ModelsSection({ s, busy, apply, onManageProviders }: SectionProps & { o
         </div>
         <div>
           <span>{t("settings.plannerStatus")}</span>
-          <strong>{plannerRef ? t("settings.plannerEnabled") : t("settings.plannerDisabled")}</strong>
-          <small>{plannerRef || t("settings.plannerNone")}</small>
+          <strong>{plannerRef ? t("settings.plannerDual") : t("settings.plannerSingle")}</strong>
+          <small>{plannerModeDetail}</small>
         </div>
       </div>
 
@@ -453,15 +598,22 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
                 <button className="btn btn--small" disabled={busy} onClick={() => setEditing(p.name)}>
                   {t("common.edit")}
                 </button>
-                <Tooltip label={defaultProvider === p.name ? t("settings.cantDeleteDefault") : t("settings.deleteProvider")}>
-                  <button
-                    className="btn btn--small"
-                    disabled={busy || defaultProvider === p.name}
-                    onClick={() => void apply(() => app.DeleteProvider(p.name))}
-                  >
-                    {t("common.delete")}
-                  </button>
-                </Tooltip>
+                {defaultProvider === p.name ? (
+                  <Tooltip label={t("settings.cantDeleteDefault")}>
+                    <button className="btn btn--small" disabled>
+                      {t("common.delete")}
+                    </button>
+                  </Tooltip>
+                ) : (
+                  <InlineConfirmButton
+                    label={t("common.delete")}
+                    confirmLabel={t("settings.confirmDeleteProvider")}
+                    cancelLabel={t("common.cancel")}
+                    disabled={busy}
+                    danger
+                    onConfirm={() => apply(() => app.DeleteProvider(p.name))}
+                  />
+                )}
               </div>
               <div className="prov-card__meta">
                 <span>{p.kind}</span>
@@ -509,10 +661,42 @@ function ProviderEditor({
   // Empty when unset so the placeholder (and its "0 = default" hint) reads instead
   // of a bare "0"; saved back as 0.
   const [ctx, setCtx] = useState(initial?.contextWindow ? String(initial.contextWindow) : "");
+  const [supportedEfforts, setSupportedEfforts] = useState<string[]>(initial?.supportedEfforts ?? []);
+  const [customEffortDraft, setCustomEffortDraft] = useState("");
+  const [defaultEffort, setDefaultEffort] = useState(initial?.defaultEffort ?? "");
 
   // Offer the kinds the kernel actually registered; if the stored kind is a
   // legacy/unknown one, keep it as an option so editing doesn't silently change it.
   const kindOptions = kind && !kinds.includes(kind) ? [kind, ...kinds] : kinds;
+
+  // Split supportedEfforts into the 5 canonical presets (for checkbox UI) and
+  // any user-added custom names (rendered as removable chips). The preset order
+  // is fixed; custom names keep insertion order.
+  const presetEfforts = supportedEfforts.filter((e) => EFFORT_PRESETS.includes(e));
+  const customEfforts = supportedEfforts.filter((e) => !EFFORT_PRESETS.includes(e));
+
+  const togglePreset = (level: string) => {
+    const has = presetEfforts.includes(level);
+    const nextPresets = has ? presetEfforts.filter((e) => e !== level) : [...presetEfforts, level];
+    setSupportedEfforts([...nextPresets, ...customEfforts]);
+    // If the removed preset was the default, fall back to "auto" (empty string).
+    if (has && defaultEffort === level) setDefaultEffort("");
+  };
+
+  const addCustomEffort = () => {
+    const v = customEffortDraft.trim().toLowerCase();
+    if (!v || supportedEfforts.includes(v)) {
+      setCustomEffortDraft("");
+      return;
+    }
+    setSupportedEfforts([...presetEfforts, ...customEfforts, v]);
+    setCustomEffortDraft("");
+  };
+
+  const removeCustomEffort = (level: string) => {
+    setSupportedEfforts(supportedEfforts.filter((e) => e !== level));
+    if (defaultEffort === level) setDefaultEffort("");
+  };
 
   const save = () => {
     const ms = models
@@ -529,6 +713,10 @@ function ProviderEditor({
       keySet: initial?.keySet ?? false,
       balanceUrl: balanceUrl.trim(),
       contextWindow: Number(ctx) || 0,
+      supportedEfforts,
+      // Clear the stored default if no levels are selected; the backend's
+      // NormalizeEffort would otherwise silently ignore an unsupported value.
+      defaultEffort: supportedEfforts.length > 0 ? defaultEffort : "",
     });
   };
 
@@ -552,6 +740,81 @@ function ProviderEditor({
       <label className="set-label">{t("settings.providerContextWindow")}</label>
       <input className="mem-input" placeholder={t("settings.contextWindowPlaceholder")} value={ctx} onChange={(e) => setCtx(e.target.value)} inputMode="numeric" />
       <div className="mem-hint">{t("settings.contextWindowHint")}</div>
+      <label className="set-label">{t("settings.supportedEfforts")}</label>
+      {EFFORT_PRESETS.map((level) => (
+        <label key={level} className="set-check">
+          <input
+            type="checkbox"
+            checked={presetEfforts.includes(level)}
+            onChange={() => togglePreset(level)}
+          />
+          {level}
+        </label>
+      ))}
+      <div className="set-row">
+        <input
+          className="mem-input set-grow"
+          placeholder={t("settings.supportedEffortsCustomPlaceholder")}
+          value={customEffortDraft}
+          onChange={(e) => setCustomEffortDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              addCustomEffort();
+            }
+          }}
+        />
+        <button
+          type="button"
+          className="btn btn--small"
+          disabled={
+            !customEffortDraft.trim() || supportedEfforts.includes(customEffortDraft.trim().toLowerCase())
+          }
+          onClick={addCustomEffort}
+        >
+          {t("common.add")}
+        </button>
+      </div>
+      {customEfforts.length > 0 && (
+        <div className="set-rules__chips">
+          {customEfforts.map((level) => (
+            <span className="set-rule" key={level}>
+              {level}
+              <Tooltip label={t("common.delete")}>
+                <button
+                  type="button"
+                  className="set-rule__x"
+                  disabled={busy}
+                  onClick={() => removeCustomEffort(level)}
+                >
+                  ×
+                </button>
+              </Tooltip>
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="mem-hint">{t("settings.supportedEffortsHint")}</div>
+      <label className="set-label">{t("settings.defaultEffort")}</label>
+      {supportedEfforts.length > 0 ? (
+        <select
+          className="mem-select"
+          value={defaultEffort}
+          onChange={(e) => setDefaultEffort(e.target.value)}
+        >
+          <option value="">{t("settings.defaultEffortAuto")}</option>
+          {supportedEfforts.map((level) => (
+            <option key={level} value={level}>
+              {level}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <select className="mem-select" value="" disabled>
+          <option value="">{t("settings.defaultEffortAuto")}</option>
+        </select>
+      )}
+      <div className="mem-hint">{t("settings.defaultEffortHint")}</div>
       <div className="prov-card__actions">
         <button className="btn btn--small" onClick={onCancel} disabled={busy}>
           {t("common.cancel")}
@@ -725,50 +988,22 @@ function SandboxSection({ s, busy, apply }: SectionProps) {
   );
 }
 
-function AgentSection({ s, busy, apply }: SectionProps) {
-  const t = useT();
-  const [temp, setTemp] = useState(String(s.agent.temperature));
-  const [steps, setSteps] = useState(String(s.agent.maxSteps));
-  const [prompt, setPrompt] = useState(s.agent.systemPrompt);
-  const dirty = temp !== String(s.agent.temperature) || steps !== String(s.agent.maxSteps) || prompt !== s.agent.systemPrompt;
-
-  return (
-    <section className="mem-section">
-      <div className="mem-section__title">{t("settings.agent")}</div>
-      <div className="set-row">
-        <label className="set-label">{t("settings.temperature")}</label>
-        <input className="mem-input set-narrow" value={temp} onChange={(e) => setTemp(e.target.value)} disabled={busy} inputMode="decimal" />
-        <label className="set-label">{t("settings.maxSteps")}</label>
-        <input className="mem-input set-narrow" value={steps} onChange={(e) => setSteps(e.target.value)} disabled={busy} inputMode="numeric" />
-        <span className="mem-hint">{t("settings.unlimited")}</span>
-      </div>
-      <div className="set-rules__label">{t("settings.systemPrompt")}</div>
-      <textarea className="mem-textarea" value={prompt} onChange={(e) => setPrompt(e.target.value)} disabled={busy} spellCheck={false} />
-      <div className="prov-card__actions">
-        <button
-          className="btn btn--primary btn--small"
-          disabled={busy || !dirty}
-          onClick={() => void apply(() => app.SetAgentParams(Number(temp) || 0, Number(steps) || 0, prompt))}
-        >
-          {t("settings.saveAgent")}
-        </button>
-      </div>
-    </section>
-  );
-}
-
 function AppearanceSection({
   theme,
   themeStyle,
+  textSize,
   onTheme,
   onThemeStyle,
+  onTextSize,
 }: {
   theme: Theme;
   themeStyle: ThemeStyle;
+  textSize: TextSize;
   onTheme: (t: Theme) => void;
   onThemeStyle: (style: ThemeStyle) => void;
+  onTextSize: (size: TextSize) => void;
 }) {
-  const { t, pref, setPref } = useI18n();
+  const t = useT();
   const themeOptions: Theme[] = ["auto", "light", "dark"];
   return (
     <section className="mem-section">
@@ -803,12 +1038,18 @@ function AppearanceSection({
         </div>
       </div>
       <div className="set-row">
-        <label className="set-label">{t("settings.language")}</label>
-        <select className="mem-select set-grow" value={pref} onChange={(e) => setPref(e.target.value as "" | "en" | "zh")}>
-          <option value="">{t("settings.langAuto")}</option>
-          <option value="zh">中文</option>
-          <option value="en">English</option>
-        </select>
+        <label className="set-label">{t("settings.textSize")}</label>
+        <div className="set-seg">
+          {TEXT_SIZES.map((size) => (
+            <button
+              key={size}
+              className={`set-seg__btn${textSize === size ? " set-seg__btn--on" : ""}`}
+              onClick={() => onTextSize(size)}
+            >
+              {textSizeName(size, t)}
+            </button>
+          ))}
+        </div>
       </div>
     </section>
   );
@@ -822,6 +1063,19 @@ function themeName(theme: Theme, t: ReturnType<typeof useT>): string {
       return t("settings.themeLight");
     case "dark":
       return t("settings.themeDark");
+  }
+}
+
+function textSizeName(size: TextSize, t: ReturnType<typeof useT>): string {
+  switch (size) {
+    case "small":
+      return t("settings.textSizeSmall");
+    case "default":
+      return t("settings.textSizeDefault");
+    case "large":
+      return t("settings.textSizeLarge");
+    case "xlarge":
+      return t("settings.textSizeXLarge");
   }
 }
 

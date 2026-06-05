@@ -28,14 +28,12 @@ func TestWorkspaceStatePath(t *testing.T) {
 // --- saveWorkspace / loadWorkspace round-trip ---
 
 func TestSaveLoadWorkspaceRoundTrip(t *testing.T) {
-	// workspaceStatePath() lives under config.MemoryUserDir(), which resolves via
-	// os.UserConfigDir() — rooted at HOME. Point HOME at a temp dir so the path
-	// resolves to a real, writable location and the save→load round-trip actually
-	// exercises persistence instead of silently no-opping when no config dir
-	// happens to exist in the environment.
-	t.Setenv("HOME", t.TempDir())
+	// workspaceStatePath() resolves via os.UserConfigDir() (HOME on unix,
+	// %AppData% on Windows); isolate both so the round-trip exercises real
+	// persistence instead of no-opping or leaking into the dev config dir.
+	isolateDesktopUserDirs(t)
 	if workspaceStatePath() == "" {
-		t.Fatal("workspaceStatePath() is empty after pointing HOME at a temp dir")
+		t.Fatal("workspaceStatePath() is empty after isolating the user config dir")
 	}
 
 	dir := t.TempDir()
@@ -45,8 +43,8 @@ func TestSaveLoadWorkspaceRoundTrip(t *testing.T) {
 	}
 }
 
-func TestSaveWorkspaceRemembersRecentWorkspaces(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+func TestSaveWorkspaceOnlyRemembersLastWorkspace(t *testing.T) {
+	isolateDesktopUserDirs(t)
 	first := t.TempDir()
 	second := t.TempDir()
 
@@ -54,12 +52,11 @@ func TestSaveWorkspaceRemembersRecentWorkspaces(t *testing.T) {
 	saveWorkspace(second)
 	saveWorkspace(first)
 
-	got := loadWorkspaces()
-	if len(got) < 2 {
-		t.Fatalf("loadWorkspaces len = %d, want at least 2", len(got))
+	if got := loadWorkspace(); got != first {
+		t.Fatalf("loadWorkspace = %q, want %q", got, first)
 	}
-	if got[0] != first || got[1] != second {
-		t.Fatalf("loadWorkspaces = %v, want first two %q, %q", got, first, second)
+	if got := loadWorkspaces(); len(got) != 0 {
+		t.Fatalf("saveWorkspace should not maintain legacy workspace list, got %v", got)
 	}
 }
 

@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="500" viewBox="0 0 920 500" role="img" aria-labelledby="title desc">
+  <title id="title">Reasonix CLI theme switching preview</title>
+  <desc id="desc">A terminal preview showing the /theme command listing styles and switching to aurora.</desc>
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="18" stdDeviation="20" flood-color="#000" flood-opacity="0.28"/>
+    </filter>
+    <style>
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .sans { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    </style>
+  </defs>
+  <rect width="920" height="500" fill="#f5f2ec"/>
+  <rect x="80" y="54" width="760" height="392" rx="18" fill="#0e0e10" filter="url(#shadow)"/>
+  <rect x="80" y="54" width="760" height="42" rx="18" fill="#18181b"/>
+  <circle cx="110" cy="75" r="6" fill="#ff5f56"/>
+  <circle cx="130" cy="75" r="6" fill="#ffbd2e"/>
+  <circle cx="150" cy="75" r="6" fill="#27c93f"/>
+  <text x="460" y="80" fill="#8a8a93" text-anchor="middle" class="sans" font-size="13">reasonix chat</text>
+
+  <text x="112" y="132" fill="#d97757" class="mono" font-size="16">◆ reasonix chat</text>
+  <text x="300" y="132" fill="#777780" class="mono" font-size="16">· deepseek/deepseek-reasoner</text>
+
+  <text x="112" y="178" fill="#34c3a6" class="mono" font-size="15">/theme</text>
+  <text x="112" y="210" fill="#a3a3ab" class="mono" font-size="15">  · themes:</text>
+  <text x="132" y="238" fill="#d97757" class="mono" font-size="15">› graphite</text>
+  <text x="246" y="238" fill="#707078" class="mono" font-size="15">dark  warm clay accent</text>
+  <text x="132" y="266" fill="#ededef" class="mono" font-size="15">  ember</text>
+  <text x="246" y="266" fill="#707078" class="mono" font-size="15">dark  hot orange accent</text>
+  <text x="132" y="294" fill="#ededef" class="mono" font-size="15">  aurora</text>
+  <text x="246" y="294" fill="#707078" class="mono" font-size="15">dark  cool teal accent</text>
+  <text x="132" y="322" fill="#ededef" class="mono" font-size="15">  midnight</text>
+  <text x="246" y="322" fill="#707078" class="mono" font-size="15">dark  quiet violet accent</text>
+  <text x="112" y="360" fill="#34c3a6" class="mono" font-size="15">/theme aurora</text>
+  <text x="112" y="392" fill="#a3a3ab" class="mono" font-size="15">  · theme switched to aurora</text>
+
+  <rect x="110" y="414" width="700" height="1.5" fill="#34c3a6"/>
+  <text x="126" y="440" fill="#ededef" class="mono" font-size="15">Ask Reasonix...</text>
+  <rect x="110" y="454" width="700" height="1.5" fill="#34c3a6"/>
+
+  <rect x="590" y="172" width="180" height="32" rx="8" fill="#d97757" fill-opacity="0.18" stroke="#d97757"/>
+  <text x="680" y="193" fill="#d97757" text-anchor="middle" class="mono" font-size="13">graphite</text>
+  <rect x="590" y="216" width="180" height="32" rx="8" fill="#f06d38" fill-opacity="0.18" stroke="#f06d38"/>
+  <text x="680" y="237" fill="#f06d38" text-anchor="middle" class="mono" font-size="13">ember</text>
+  <rect x="590" y="260" width="180" height="32" rx="8" fill="#34c3a6" fill-opacity="0.18" stroke="#34c3a6"/>
+  <text x="680" y="281" fill="#34c3a6" text-anchor="middle" class="mono" font-size="13">aurora</text>
+  <rect x="590" y="304" width="180" height="32" rx="8" fill="#b18cff" fill-opacity="0.18" stroke="#b18cff"/>
+  <text x="680" y="325" fill="#b18cff" text-anchor="middle" class="mono" font-size="13">midnight</text>
+</svg>

@@ -105,9 +105,7 @@ func (f *acpFactory) NewSession(ctx context.Context, p acp.SessionParams) (*cont
 	if p.Cwd != "" {
 		writeRoots = []string{p.Cwd}
 	}
-	bashSpec := sandbox.Spec{Mode: cfg.BashMode(), WriteRoots: writeRoots, Network: cfg.Sandbox.Network}
-	ws := builtin.Workspace{Dir: p.Cwd, WriteRoots: writeRoots, Bash: bashSpec, Search: builtin.ResolveSearch(cfg.Tools.Search.Engine, cfg.Tools.Search.RgPath, nil)}
-	for _, t := range ws.Tools(cfg.Tools.Enabled...) {
+	for _, t := range acpBuiltinTools(cfg, p.Cwd, writeRoots) {
 		reg.Add(t)
 	}
 
@@ -187,4 +185,15 @@ func (f *acpFactory) NewSession(ctx context.Context, p acp.SessionParams) (*cont
 		Commands:     cmds,
 		Cleanup:      cleanup,
 	}), nil
+}
+
+func acpBuiltinTools(cfg *config.Config, cwd string, writeRoots []string) []tool.Tool {
+	bashSpec := sandbox.Spec{Mode: cfg.BashMode(), WriteRoots: writeRoots, Network: cfg.Sandbox.Network}
+	ws := builtin.Workspace{
+		Dir:        cwd,
+		WriteRoots: writeRoots,
+		Bash:       bashSpec,
+		Search:     builtin.ResolveSearch(cfg.Tools.Search.Engine, cfg.Tools.Search.RgPath, nil),
+	}
+	return ws.Tools(cfg.Tools.Enabled...)
 }

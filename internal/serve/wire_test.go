@@ -27,7 +27,7 @@ func TestToWire(t *testing.T) {
 				LogRewriteVersion:   1,
 			},
 		})
-		if w.Usage == nil || w.Usage.TotalTokens != 1200 || w.Usage.CostUSD <= 0 {
+		if w.Usage == nil || w.Usage.TotalTokens != 1200 || w.Usage.Cost <= 0 || w.Usage.CostUSD <= 0 || w.Usage.Currency != "¥" {
 			t.Errorf("usage = %+v", w.Usage)
 		}
 		if w.Usage.CacheDiagnostics == nil || w.Usage.CacheDiagnostics.PrefixChangeReasons[0] != "log_rewrite" {

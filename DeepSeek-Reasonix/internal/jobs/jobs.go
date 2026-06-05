@@ -1,0 +1,351 @@
+// Package jobs is the session-scoped background-job registry behind the agent's
+// background tools (bash run_in_background, task run_in_background) and the
+// bash_output / kill_shell / wait tools. A Manager owns a context whose lifetime
+// is the session, NOT a single turn — so a job started in one turn keeps running
+// across turns and is cancelled only when the controller closes (or kill_shell is
+// called). Tools reach the Manager through the call context (WithManager /
+// FromContext), the same injection pattern the `ask` tool uses for the asker.
+//
+// The Manager emits a user-visible Notice when a job starts and finishes, and
+// accumulates a one-line completion summary that the controller drains into the
+// next turn (DrainCompletedNote) so the model itself learns of completions.
+package jobs
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"io"
+	"strings"
+	"sync"
+	"time"
+
+	"reasonix/internal/event"
+	"reasonix/internal/nilutil"
+)
+
+// Status is a job's lifecycle state.
+type Status string
+
+const (
+	Running Status = "running"
+	Done    Status = "done"
+	Failed  Status = "failed"
+	Killed  Status = "killed"
+)
+
+// View is a read-only snapshot of a job for the status bar.
+type View struct {
+	ID        string `json:"id"`
+	Kind      string `json:"kind"`
+	Label     string `json:"label"`
+	Status    string `json:"status"`
+	StartedAt int64  `json:"startedAt"` // unix milliseconds
+}
+
+// Result is one job's terminal (or current) state returned by Wait.
+type Result struct {
+	ID     string
+	Kind   string
+	Label  string
+	Status Status
+	Output string // the terminal result text, or the streamed buffer when no result was set
+}
+
+// Job is one background job. The mutex guards the streaming buffer and the
+// terminal fields; the run goroutine writes them, readers (Output/Wait/snapshots)
+// take the same lock.
+type Job struct {
+	ID    string
+	Kind  string // "bash" | "task"
+	Label string
+
+	mu         sync.Mutex
+	buf        bytes.Buffer
+	readOffset int
+	status     Status
+	result     string
+	resultRead bool // result already surfaced by Output (task jobs stream nothing to buf)
+	startedAt  int64
+	cancel     context.CancelFunc
+	done       chan struct{}
+}
+
+// Manager is the session's background-job table. It is safe for concurrent use.
+type Manager struct {
+	sink   event.Sink
+	root   context.Context
+	cancel context.CancelFunc
+
+	mu        sync.Mutex
+	seq       int
+	jobs      map[string]*Job
+	order     []string
+	completed []string // finished-job summaries awaiting drain into the next turn
+}
+
+// NewManager returns a Manager whose jobs run under a fresh session-scoped
+// context (cancelled by Close). sink receives job-lifecycle notices; pass the
+// session's synchronized sink (event.Sync) since jobs emit from goroutines.
+func NewManager(sink event.Sink) *Manager {
+	if nilutil.IsNil(sink) {
+		sink = event.Discard
+	}
+	root, cancel := context.WithCancel(context.Background())
+	return &Manager{sink: sink, root: root, cancel: cancel, jobs: map[string]*Job{}}
+}
+
+// jobWriter appends a job's streamed output under its lock so a concurrent
+// Output read never races the producing goroutine.
+type jobWriter struct{ j *Job }
+
+func (w jobWriter) Write(p []byte) (int, error) {
+	w.j.mu.Lock()
+	defer w.j.mu.Unlock()
+	return w.j.buf.Write(p)
+}
+
+// Start launches run on a goroutine under the manager's session context and
+// returns the job immediately. run streams output to the writer and returns the
+// terminal result text (a task's final answer; a bash job streams everything to
+// the buffer and returns ""). The job is marked killed when its context was
+// cancelled, failed on any other error, else done.
+func (m *Manager) Start(kind, label string, run func(ctx context.Context, out io.Writer) (string, error)) *Job {
+	m.mu.Lock()
+	m.seq++
+	id := fmt.Sprintf("%s-%d", kind, m.seq)
+	ctx, cancel := context.WithCancel(m.root)
+	j := &Job{ID: id, Kind: kind, Label: label, status: Running, startedAt: nowMs(), cancel: cancel, done: make(chan struct{})}
+	m.jobs[id] = j
+	m.order = append(m.order, id)
+	m.mu.Unlock()
+
+	m.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: startedText(kind, id, label)})
+
+	go func() {
+		result, err := run(ctx, jobWriter{j})
+		j.mu.Lock()
+		j.result = result
+		switch {
+		case ctx.Err() != nil:
+			j.status = Killed
+		case err != nil:
+			j.status = Failed
+			if result == "" {
+				j.result = err.Error()
+			}
+		default:
+			j.status = Done
+		}
+		st := j.status
+		j.mu.Unlock()
+		// Record completion (queue the drain note + emit the closing Notice) BEFORE
+		// signalling done, so a Wait that unblocks on j.done sees the note already
+		// queued — otherwise DrainCompletedNote can race ahead of the bookkeeping.
+		m.recordCompletion(id, kind, label, st, err)
+		close(j.done)
+	}()
+	return j
+}
+
+// recordCompletion queues the finished-job summary for DrainCompletedNote and
+// emits a closing Notice (warn for a failure, info otherwise).
+func (m *Manager) recordCompletion(id, kind, label string, st Status, err error) {
+	tag := id
+	if label != "" {
+		tag = fmt.Sprintf("%s (%s)", id, label)
+	}
+	m.mu.Lock()
+	m.completed = append(m.completed, fmt.Sprintf("%s — %s", tag, st))
+	m.mu.Unlock()
+
+	level, text := event.LevelInfo, fmt.Sprintf("background %s finished: %s", kind, id)
+	switch st {
+	case Failed:
+		level, text = event.LevelWarn, fmt.Sprintf("background %s failed: %s — %v", kind, id, err)
+	case Killed:
+		text = fmt.Sprintf("background %s killed: %s", kind, id)
+	}
+	m.sink.Emit(event.Event{Kind: event.Notice, Level: level, Text: text})
+}
+
+func (m *Manager) get(id string) *Job {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.jobs[id]
+}
+
+// Output returns the job's output produced since the last Output call plus its
+// current status. ok is false when the id is unknown.
+func (m *Manager) Output(id string) (text string, status Status, ok bool) {
+	j := m.get(id)
+	if j == nil {
+		return "", "", false
+	}
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	full := j.buf.String()
+	text = full[j.readOffset:]
+	j.readOffset = len(full)
+	// A task job streams nothing to the buffer — its answer lands in result. Once
+	// it is terminal with no buffered output, surface that result once so a task's
+	// answer is visible here too (bash_output's description promises task support).
+	if text == "" && j.status != Running && j.result != "" && !j.resultRead {
+		text = j.result
+		j.resultRead = true
+	}
+	return text, j.status, true
+}
+
+// Kill cancels a running job. Returns false when the id is unknown or the job has
+// already finished.
+func (m *Manager) Kill(id string) bool {
+	j := m.get(id)
+	if j == nil {
+		return false
+	}
+	j.mu.Lock()
+	running := j.status == Running
+	if running {
+		// Flip to Killed synchronously so Output/Wait reflect the kill the instant
+		// it's requested, not whenever the run goroutine's cmd.Run returns (which
+		// trails by WaitDelay while a cancelled process tree tears down). The
+		// goroutine still sets Killed + records completion on return; this only
+		// fires when the job is actually Running, so a job that just finished
+		// keeps its real terminal status.
+		j.status = Killed
+	}
+	j.mu.Unlock()
+	if !running {
+		return false
+	}
+	j.cancel()
+	return true
+}
+
+// Wait blocks until the named jobs (or every currently-running job when ids is
+// empty) reach a terminal state, or ctx is cancelled, or timeoutSec elapses
+// (0 = no timeout). It returns each target's snapshot regardless of why it
+// returned, so a timeout still reports partial progress.
+func (m *Manager) Wait(ctx context.Context, ids []string, timeoutSec int) []Result {
+	targets := m.resolve(ids)
+	if len(targets) == 0 {
+		return nil
+	}
+	var timeout <-chan time.Time
+	if timeoutSec > 0 {
+		t := time.NewTimer(time.Duration(timeoutSec) * time.Second)
+		defer t.Stop()
+		timeout = t.C
+	}
+	for _, j := range targets {
+		select {
+		case <-j.done:
+		case <-ctx.Done():
+			return m.results(targets)
+		case <-timeout:
+			return m.results(targets)
+		}
+	}
+	return m.results(targets)
+}
+
+// resolve maps requested ids to jobs; an empty list selects all running jobs.
+func (m *Manager) resolve(ids []string) []*Job {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []*Job
+	if len(ids) == 0 {
+		for _, id := range m.order {
+			j := m.jobs[id]
+			j.mu.Lock()
+			running := j.status == Running
+			j.mu.Unlock()
+			if running {
+				out = append(out, j)
+			}
+		}
+		return out
+	}
+	for _, id := range ids {
+		if j := m.jobs[id]; j != nil {
+			out = append(out, j)
+		}
+	}
+	return out
+}
+
+func (m *Manager) results(targets []*Job) []Result {
+	out := make([]Result, 0, len(targets))
+	for _, j := range targets {
+		j.mu.Lock()
+		text := j.result
+		if text == "" {
+			text = j.buf.String()
+		}
+		out = append(out, Result{ID: j.ID, Kind: j.Kind, Label: j.Label, Status: j.status, Output: text})
+		j.mu.Unlock()
+	}
+	return out
+}
+
+// Running returns a snapshot of the still-running jobs (for the status bar).
+func (m *Manager) Running() []View {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []View
+	for _, id := range m.order {
+		j := m.jobs[id]
+		j.mu.Lock()
+		if j.status == Running {
+			out = append(out, View{ID: j.ID, Kind: j.Kind, Label: j.Label, Status: string(j.status), StartedAt: j.startedAt})
+		}
+		j.mu.Unlock()
+	}
+	return out
+}
+
+// DrainCompletedNote returns (and clears) a one-line summary of jobs that
+// finished since the last drain, for the controller to fold into the next turn
+// so the model learns of completions. "" when nothing finished.
+func (m *Manager) DrainCompletedNote() string {
+	m.mu.Lock()
+	c := m.completed
+	m.completed = nil
+	m.mu.Unlock()
+	if len(c) == 0 {
+		return ""
+	}
+	return "Background jobs finished since your last message: " + strings.Join(c, "; ") +
+		". Read their output with bash_output or wait if you still need it."
+}
+
+// Close cancels the session context, terminating every running job. Safe to call
+// once at controller shutdown.
+func (m *Manager) Close() { m.cancel() }
+
+func nowMs() int64 { return time.Now().UnixMilli() }
+
+func startedText(kind, id, label string) string {
+	if label != "" {
+		return fmt.Sprintf("background %s started: %s (%s)", kind, id, label)
+	}
+	return fmt.Sprintf("background %s started: %s", kind, id)
+}
+
+// --- call-context injection (mirrors agent.CallContext) ---
+
+type ctxKey struct{}
+
+// WithManager stamps ctx with the job manager so tools can reach it via
+// FromContext. The agent sets this on every tool call's context.
+func WithManager(ctx context.Context, m *Manager) context.Context {
+	return context.WithValue(ctx, ctxKey{}, m)
+}
+
+// FromContext returns the job manager set by the agent, if any. ok is false for a
+// plain context (headless tests, calls outside the run loop).
+func FromContext(ctx context.Context) (*Manager, bool) {
+	m, ok := ctx.Value(ctxKey{}).(*Manager)
+	return m, ok && m != nil
+}

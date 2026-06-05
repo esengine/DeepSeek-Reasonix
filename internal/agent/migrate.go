@@ -37,6 +37,7 @@ type legacyToolCall struct {
 // one-time v0.x import has already run — so a session the user deletes after it
 // was imported doesn't reappear on the next launch.
 const legacyImportMarker = ".legacy-imported"
+const legacyEventsHomeImportMarker = ".legacy-imported.v0-events-home"
 
 // MigrateLegacySessions imports v0.x event-log sessions (<name>.events.jsonl under
 // srcDir) into the v1+ message-log format (<name>.jsonl under destDir), back-filling
@@ -46,8 +47,18 @@ const legacyImportMarker = ".legacy-imported"
 // without re-importing on every launch. Never modifies the legacy files. Returns the
 // count imported.
 func MigrateLegacySessions(srcDir, destDir string) (int, error) {
-	marker := filepath.Join(destDir, legacyImportMarker)
-	if _, err := os.Stat(marker); err == nil {
+	return migrateLegacySessions(srcDir, destDir, legacyEventsHomeImportMarker, true)
+}
+
+func migrateLegacySessions(srcDir, destDir, marker string, honorLegacyMarker bool) (int, error) {
+	if strings.TrimSpace(marker) == "" {
+		marker = legacyImportMarker
+	}
+	if importMarkerExists(destDir, marker) {
+		return 0, nil
+	}
+	if honorLegacyMarker && importMarkerExists(destDir, legacyImportMarker) {
+		writeImportMarkers(destDir, marker)
 		return 0, nil
 	}
 	entries, err := os.ReadDir(srcDir)
@@ -77,10 +88,34 @@ func MigrateLegacySessions(srcDir, destDir string) (int, error) {
 		}
 		imported++
 	}
-	if err := os.MkdirAll(destDir, 0o755); err == nil {
-		_ = os.WriteFile(marker, nil, 0o644)
-	}
+	writeImportMarkers(destDir, marker, legacyImportMarker)
 	return imported, nil
+}
+
+func importMarkerExists(destDir, marker string) bool {
+	if strings.TrimSpace(destDir) == "" || strings.TrimSpace(marker) == "" {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(destDir, marker))
+	return err == nil
+}
+
+func writeImportMarkers(destDir string, markers ...string) {
+	if strings.TrimSpace(destDir) == "" {
+		return
+	}
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		return
+	}
+	seen := map[string]bool{}
+	for _, marker := range markers {
+		marker = strings.TrimSpace(marker)
+		if marker == "" || seen[marker] {
+			continue
+		}
+		seen[marker] = true
+		_ = os.WriteFile(filepath.Join(destDir, marker), nil, 0o644)
+	}
 }
 
 // reconstructSession folds the chronological event stream into the provider
