@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import {
   SquarePen,
@@ -26,11 +26,14 @@ import { TodoPanel } from "./components/TodoPanel";
 import { ApprovalModal } from "./components/ApprovalModal";
 import { AskCard } from "./components/AskCard";
 import { StatusBar } from "./components/StatusBar";
-import { MemoryPanel } from "./components/MemoryPanel";
-import { HistoryPanel } from "./components/HistoryPanel";
-import { SettingsPanel } from "./components/SettingsPanel";
+// The four drawable panels (Memory / History / Settings / Update) are opened
+// conditionally and are mutually exclusive in practice. Code-split them so
+// their JS only lands when the user first opens the corresponding chip.
+const MemoryPanel = lazy(() => import("./components/MemoryPanel").then((m) => ({ default: m.MemoryPanel })));
+const HistoryPanel = lazy(() => import("./components/HistoryPanel").then((m) => ({ default: m.HistoryPanel })));
+const SettingsPanel = lazy(() => import("./components/SettingsPanel").then((m) => ({ default: m.SettingsPanel })));
+const UpdateBanner = lazy(() => import("./components/UpdateBanner").then((m) => ({ default: m.UpdateBanner })));
 import { CapabilitiesPanel } from "./components/CapabilitiesPanel";
-import { UpdateBanner } from "./components/UpdateBanner";
 import { WorkspacePanel } from "./components/WorkspacePanel";
 import { Tooltip } from "./components/Tooltip";
 import { OnboardingOverlay } from "./components/OnboardingOverlay";
@@ -935,7 +938,9 @@ export default function App() {
             <div className="banner banner--error">{t("topbar.startupError", { msg: state.meta.startupErr })}</div>
           )}
 
-          <UpdateBanner />
+          <Suspense fallback={null}>
+            <UpdateBanner />
+          </Suspense>
 
           <main className="main">
             {state.meta?.ready === false && !state.meta?.startupErr ? (
@@ -1041,28 +1046,36 @@ export default function App() {
       </div>
 
       {memView !== null && (
-        <MemoryPanel
-          view={memView}
-          onClose={closeMemory}
-          onRemember={onRemember}
-          onForget={onForget}
-          onSaveDoc={onSaveDoc}
-        />
+        <Suspense fallback={null}>
+          <MemoryPanel
+            view={memView}
+            onClose={closeMemory}
+            onRemember={onRemember}
+            onForget={onForget}
+            onSaveDoc={onSaveDoc}
+          />
+        </Suspense>
       )}
 
       {histView !== null && (
-        <HistoryPanel
-          sessions={histView}
-          running={state.running}
-          onResume={onResumeSession}
-          onPreview={previewSession}
-          onDelete={onDeleteSession}
-          onRename={onRenameSession}
-          onClose={closeHistory}
-        />
+        <Suspense fallback={null}>
+          <HistoryPanel
+            sessions={histView}
+            running={state.running}
+            onResume={onResumeSession}
+            onPreview={previewSession}
+            onDelete={onDeleteSession}
+            onRename={onRenameSession}
+            onClose={closeHistory}
+          />
+        </Suspense>
       )}
 
-      {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} onChanged={() => void refreshMeta()} />}
+      {settingsOpen && (
+        <Suspense fallback={null}>
+          <SettingsPanel onClose={() => setSettingsOpen(false)} onChanged={() => void refreshMeta()} />
+        </Suspense>
+      )}
 
       {capsOpen && <CapabilitiesPanel onClose={() => setCapsOpen(false)} />}
 
