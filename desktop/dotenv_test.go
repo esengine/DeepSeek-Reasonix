@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"reasonix/internal/config"
 )
 
 // TestUpsertEnvFile proves a new key is appended, an existing key is replaced in
@@ -34,5 +36,66 @@ func TestUpsertEnvFile(t *testing.T) {
 	}
 	if os.Getenv("FOO") != "new" || os.Getenv("BAZ") != "added" {
 		t.Errorf("process env not updated: FOO=%q BAZ=%q", os.Getenv("FOO"), os.Getenv("BAZ"))
+	}
+}
+
+// TestPromoteProviderKeysLiftsProjectKeyAndStripsHomeEnv proves a provider key
+// that resolves only from a project .env / ~/.env is copied into the global
+// credentials store, removed from ~/.env, and that unrelated env vars are ignored.
+func TestPromoteProviderKeysLiftsProjectKeyAndStripsHomeEnv(t *testing.T) {
+	home := isolateDesktopUserDirs(t)
+	homeEnv := filepath.Join(home, ".env")
+	if err := os.WriteFile(homeEnv, []byte("DEEPSEEK_API_KEY=sk-test\nNPM_TOKEN=secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("DEEPSEEK_API_KEY", "sk-test")
+	t.Setenv("NPM_TOKEN", "secret")
+
+	promoteProviderKeysToCredentials(config.Default())
+
+	cred, err := os.ReadFile(config.UserCredentialsPath())
+	if err != nil {
+		t.Fatalf("credentials not written: %v", err)
+	}
+	if !strings.Contains(string(cred), "DEEPSEEK_API_KEY=sk-test") {
+		t.Errorf("provider key not promoted to credentials:\n%s", cred)
+	}
+	if strings.Contains(string(cred), "NPM_TOKEN") {
+		t.Errorf("non-provider env var must not be promoted:\n%s", cred)
+	}
+
+	rest, _ := os.ReadFile(homeEnv)
+	if strings.Contains(string(rest), "DEEPSEEK_API_KEY") {
+		t.Errorf("promoted key must be stripped from ~/.env:\n%s", rest)
+	}
+	if !strings.Contains(string(rest), "NPM_TOKEN=secret") {
+		t.Errorf("unrelated ~/.env line must survive:\n%s", rest)
+	}
+}
+
+// TestPromoteProviderKeysLeavesExistingCredentialsKey proves promotion never
+// overwrites a key already in the credentials store and leaves ~/.env untouched.
+func TestPromoteProviderKeysLeavesExistingCredentialsKey(t *testing.T) {
+	home := isolateDesktopUserDirs(t)
+	if err := os.MkdirAll(filepath.Dir(config.UserCredentialsPath()), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(config.UserCredentialsPath(), []byte("DEEPSEEK_API_KEY=sk-global\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	homeEnv := filepath.Join(home, ".env")
+	if err := os.WriteFile(homeEnv, []byte("DEEPSEEK_API_KEY=sk-stale\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("DEEPSEEK_API_KEY", "sk-global")
+
+	promoteProviderKeysToCredentials(config.Default())
+
+	cred, _ := os.ReadFile(config.UserCredentialsPath())
+	if !strings.Contains(string(cred), "DEEPSEEK_API_KEY=sk-global") {
+		t.Errorf("existing credentials key was changed:\n%s", cred)
+	}
+	if data, err := os.Stat(homeEnv); err != nil || data.Size() == 0 {
+		t.Errorf("~/.env should be untouched when key already global, err=%v", err)
 	}
 }

@@ -482,6 +482,10 @@ func (a *App) buildTabController(tab *WorkspaceTab) {
 		return
 	}
 
+	// A key resolved from this project's .env is project-scoped; lift it into the
+	// global credentials store so it follows the user to every other workspace.
+	promoteProviderKeysToCredentials(cfg)
+
 	model := strings.TrimSpace(tab.model)
 	if model == "" {
 		model = cfg.DefaultModel
