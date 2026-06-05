@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -218,6 +219,12 @@ type Agent struct {
 	// (a different failure shape, or any success). See applyStormBreaker.
 	stormSig   string
 	stormCount int
+
+	// repeatSuccessCounts tracks write-like tool calls that have already
+	// succeeded in this user turn. This catches the complementary loop shape to
+	// stormSig: a model keeps doing the same successful write, so there is no
+	// error for the failure-only storm breaker to see.
+	repeatSuccessCounts map[string]int
 }
 
 // SetPlanMode flips the read-only gate. While true, executeOne refuses any
@@ -386,6 +393,7 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 	if a.evidence != nil {
 		a.evidence.Reset()
 	}
+	a.repeatSuccessCounts = nil
 	a.sink.Emit(event.Event{Kind: event.TurnStarted})
 	a.session.Add(provider.Message{Role: provider.RoleUser, Content: input})
 
@@ -753,6 +761,12 @@ func runParallel(start, end int, run func(int)) {
 // re-emits (re-worded but still over-long), truncating the same way again.
 const stormBreakThreshold = 3
 
+// repeatSuccessBreakThreshold is how many identical write-like successes the
+// agent allows before refusing another copy in the same user turn. Two gives the
+// model room for a natural self-correction; the third repeat is usually a
+// no-op/write loop and should be redirected to a different tool or final answer.
+const repeatSuccessBreakThreshold = 2
+
 // applyStormBreaker detects a run of identically-failing turns and, past the
 // threshold, rewrites the model-facing result (results[0]) into a directive to
 // change approach. It keys on each call's (tool, error) — not its args — because a
@@ -838,6 +852,13 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 		return toolOutcome{
 			output: fmt.Sprintf("error: unknown tool %q", call.Name),
 			errMsg: fmt.Sprintf("unknown tool %q", call.Name),
+		}
+	}
+	if out, blocked := a.repeatedSuccessBlock(call, t); blocked {
+		return toolOutcome{
+			output:  out,
+			blocked: true,
+			errMsg:  "blocked by loop guard",
 		}
 	}
 	if a.planMode.Load() && !t.ReadOnly() {
@@ -933,6 +954,7 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 		body, truncMsg := truncateToolOutput(fmt.Sprintf("error: %v\n%s", err, detail))
 		return toolOutcome{output: body, errMsg: firstLine(err.Error()), truncated: truncMsg != "", truncMsg: truncMsg}
 	}
+	a.recordRepeatSuccess(call, t)
 	// A foreground `task` sub-agent just finished — its result is the final answer.
 	// (A backgrounded one returns a "Started…" string and stops later in a job, so
 	// it doesn't fire here.) SubagentStop lets a hook react to delegated work.
@@ -941,6 +963,134 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 	}
 	body, truncMsg := truncateToolOutput(result)
 	return toolOutcome{output: body, truncated: truncMsg != "", truncMsg: truncMsg}
+}
+
+func (a *Agent) repeatedSuccessBlock(call provider.ToolCall, t tool.Tool) (string, bool) {
+	sig, ok := repeatSuccessSignature(call, t)
+	if !ok || a.repeatSuccessCounts == nil {
+		return "", false
+	}
+	count := a.repeatSuccessCounts[sig]
+	if count < repeatSuccessBreakThreshold {
+		return "", false
+	}
+	return fmt.Sprintf(
+		"blocked: [loop guard] %q has already succeeded %d times with the same write-like arguments in this user turn. Re-running it is unlikely to help and may burn tokens or repeat file writes. Change approach: use edit_file or multi_edit for file changes, verify with a read/test command, or explain the blocker in your final answer.",
+		call.Name, count), true
+}
+
+func (a *Agent) recordRepeatSuccess(call provider.ToolCall, t tool.Tool) {
+	sig, ok := repeatSuccessSignature(call, t)
+	if !ok {
+		return
+	}
+	if a.repeatSuccessCounts == nil {
+		a.repeatSuccessCounts = make(map[string]int)
+	}
+	a.repeatSuccessCounts[sig]++
+}
+
+func repeatSuccessSignature(call provider.ToolCall, t tool.Tool) (string, bool) {
+	if t.ReadOnly() {
+		return "", false
+	}
+	switch call.Name {
+	case "write_file", "edit_file", "multi_edit", "notebook_edit":
+		return call.Name + "\x00" + canonicalToolArgs(call.Arguments), true
+	case "bash":
+		var p struct {
+			Command         string `json:"command"`
+			RunInBackground bool   `json:"run_in_background"`
+		}
+		if err := json.Unmarshal([]byte(call.Arguments), &p); err != nil {
+			return "", false
+		}
+		if p.RunInBackground || !isShellFileWriteCommand(p.Command) {
+			return "", false
+		}
+		return "bash\x00" + normalizeShellCommand(p.Command), true
+	default:
+		return "", false
+	}
+}
+
+func canonicalToolArgs(raw string) string {
+	var v any
+	if err := json.Unmarshal([]byte(raw), &v); err != nil {
+		return strings.TrimSpace(raw)
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return strings.TrimSpace(raw)
+	}
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, b); err != nil {
+		return string(b)
+	}
+	return compact.String()
+}
+
+func normalizeShellCommand(command string) string {
+	return strings.Join(strings.Fields(command), " ")
+}
+
+func isShellFileWriteCommand(command string) bool {
+	lower := strings.ToLower(command)
+	switch {
+	case shellPythonOpenWrites(lower):
+		return true
+	case strings.Contains(lower, "set-content") || strings.Contains(lower, "add-content") || strings.Contains(lower, "out-file"):
+		return true
+	case strings.Contains(lower, "sed -i") || strings.Contains(lower, "perl -pi"):
+		return true
+	case hasShellWriteRedirect(command):
+		return true
+	default:
+		return false
+	}
+}
+
+func shellPythonOpenWrites(lower string) bool {
+	if !strings.Contains(lower, "open(") {
+		return false
+	}
+	if strings.Contains(lower, ".write(") {
+		return true
+	}
+	for _, marker := range []string{", 'w", `, "w`, ", 'a", `, "a`, ", 'x", `, "x`, "mode='w", `mode="w`, "mode='a", `mode="a`, "mode='x", `mode="x`} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasShellWriteRedirect(command string) bool {
+	var quote rune
+	var prev rune
+	for _, r := range command {
+		if quote != 0 {
+			if r == quote {
+				quote = 0
+			}
+			prev = r
+			continue
+		}
+		if r == '\'' || r == '"' {
+			quote = r
+			prev = r
+			continue
+		}
+		if r == '>' {
+			if prev == '2' {
+				prev = r
+				continue
+			}
+			return true
+		}
+		prev = r
+	}
+	return false
 }
 
 // isBackgroundTaskCall reports whether a `task` call set run_in_background, so a

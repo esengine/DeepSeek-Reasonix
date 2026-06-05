@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -27,6 +28,22 @@ func TestWriteFileOverwrites(t *testing.T) {
 	got, _ := os.ReadFile(f)
 	if string(got) != "new" {
 		t.Errorf("after overwrite = %q", got)
+	}
+}
+
+func TestWriteFileSameContentNoOp(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "x.txt")
+	os.WriteFile(f, []byte("same"), 0o644)
+	out, err := writeFile{}.Execute(context.Background(), argsJSON(t, map[string]any{"path": f, "content": "same"}))
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(out, "already contains the exact content") {
+		t.Fatalf("same-content write should return a no-op signal, got %q", out)
+	}
+	got, _ := os.ReadFile(f)
+	if string(got) != "same" {
+		t.Errorf("content changed = %q", got)
 	}
 }
 

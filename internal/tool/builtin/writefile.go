@@ -48,6 +48,9 @@ func (w writeFile) Execute(ctx context.Context, args json.RawMessage) (string, e
 	if err := confine(w.roots, p.Path); err != nil {
 		return "", err
 	}
+	if existing, err := os.ReadFile(p.Path); err == nil && string(existing) == p.Content {
+		return fmt.Sprintf("%s already contains the exact content; no changes made", p.Path), nil
+	}
 	if dir := filepath.Dir(p.Path); dir != "" && dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return "", fmt.Errorf("mkdir %s: %w", dir, err)
