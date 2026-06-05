@@ -721,7 +721,9 @@ func (a *App) tabSnapshotLoop(tab *WorkspaceTab) {
 		a.mu.RUnlock()
 		if ctrl != nil {
 			if err := ctrl.Snapshot(); err == nil {
-				a.maybeAutoTitleTopic(tab)
+				if !a.maybeAutoTitleTopic(tab) {
+					a.emitProjectTreeChanged()
+				}
 			}
 		}
 		tab.saveMu.Lock()
@@ -736,28 +738,29 @@ func (a *App) tabSnapshotLoop(tab *WorkspaceTab) {
 	}
 }
 
-func (a *App) maybeAutoTitleTopic(tab *WorkspaceTab) {
+func (a *App) maybeAutoTitleTopic(tab *WorkspaceTab) bool {
 	if tab == nil || strings.TrimSpace(tab.TopicID) == "" || tab.Ctrl == nil {
-		return
+		return false
 	}
 	titleRoot := tab.WorkspaceRoot
 	if tab.Scope == "global" {
 		titleRoot = ""
 	}
 	if source := loadTopicTitleSource(titleRoot, tab.TopicID); source != topicTitleSourceAuto {
-		return
+		return false
 	}
 	sessionPath := tab.Ctrl.SessionPath()
 	if sessionPath == "" {
-		return
+		return false
 	}
 	nextTitle, updated := autoTitleTopicFromSession(titleRoot, tab.TopicID, sessionPath)
 	if !updated {
-		return
+		return false
 	}
 	a.updateOpenTopicTitle(tab.TopicID, nextTitle)
 	a.updateTopicSessionTitles(tab.TopicID, nextTitle)
 	a.emitProjectTreeChanged()
+	return true
 }
 
 func autoTitleTopicFromSession(workspaceRoot, topicID, sessionPath string) (string, bool) {
@@ -1627,13 +1630,18 @@ func (a *App) CreateTopic(scope, workspaceRoot, title string) (TopicMeta, error)
 			}
 		}
 	}
+	a.emitProjectTreeChanged()
 	return TopicMeta{ID: topicID, Title: trimmedTitle, CreatedAt: time.Now().UnixMilli()}, nil
 }
 
 // RenameProject updates the sidebar-only display title for a project folder.
 // Empty title clears the override and falls back to the folder name.
 func (a *App) RenameProject(workspaceRoot, title string) error {
-	return renameProject(workspaceRoot, title)
+	if err := renameProject(workspaceRoot, title); err != nil {
+		return err
+	}
+	a.emitProjectTreeChanged()
+	return nil
 }
 
 // SetProjectColor updates the project-level accent color used by project topics
@@ -1671,7 +1679,11 @@ func (a *App) ReorderProjects(workspaceRoots []string) error {
 		next = append(next, project)
 	}
 	f.Projects = next
-	return saveProjectsFile(f)
+	if err := saveProjectsFile(f); err != nil {
+		return err
+	}
+	a.emitProjectTreeChanged()
+	return nil
 }
 
 // RenameTopic updates a topic's display title.
@@ -1786,6 +1798,7 @@ func (a *App) DeleteTopic(topicID string) error {
 		}
 	}
 	_ = saveProjectsFile(f)
+	a.emitProjectTreeChanged()
 	return nil
 }
 

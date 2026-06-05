@@ -561,6 +561,7 @@ func (a *App) Fork(turn int) (TabMeta, error) {
 	meta := a.tabMeta(tab, true)
 	a.mu.Unlock()
 
+	a.emitProjectTreeChanged()
 	go a.buildTabController(tab)
 	return meta, nil
 }
@@ -689,7 +690,11 @@ func (a *App) DeleteSession(path string) error {
 	if _, ok := a.openSessionPaths(dir)[sessionPath]; ok {
 		return errActiveSession
 	}
-	return trashSessionArtifacts(dir, sessionPath, key)
+	if err := trashSessionArtifacts(dir, sessionPath, key); err != nil {
+		return err
+	}
+	a.emitProjectTreeChanged()
+	return nil
 }
 
 func (a *App) openSessionPaths(dir string) map[string]struct{} {
@@ -736,7 +741,11 @@ func (a *App) RestoreSession(path string) error {
 	if err := restoreTrashedSessionFile(dir, path); err != nil {
 		return err
 	}
-	return restoreSessionTopicIndex(dir, filepath.Join(dir, key))
+	if err := restoreSessionTopicIndex(dir, filepath.Join(dir, key)); err != nil {
+		return err
+	}
+	a.emitProjectTreeChanged()
+	return nil
 }
 
 // PurgeTrashedSession permanently removes a trashed session and its title/display
@@ -835,7 +844,11 @@ func (a *App) RemoveWorkspace(dir string) error {
 	}
 	dir = normalizeProjectRoot(dir)
 	forgetWorkspace(dir)
-	return removeProject(dir)
+	if err := removeProject(dir); err != nil {
+		return err
+	}
+	a.emitProjectTreeChanged()
+	return nil
 }
 
 func migrateLegacyWorkspacesIntoProjects() {
