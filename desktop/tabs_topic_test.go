@@ -722,6 +722,72 @@ func TestRenameTopicUpdatesOpenTabMeta(t *testing.T) {
 	}
 }
 
+func TestRenameTopicRecreatesDeletedProjectTitleIndexFromOpenTab(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectRoot := t.TempDir()
+	app := NewApp()
+	topic, err := app.CreateTopic("project", projectRoot, "旧标题")
+	if err != nil {
+		t.Fatalf("create topic: %v", err)
+	}
+	if _, err := app.OpenProjectTab(projectRoot, topic.ID); err != nil {
+		t.Fatalf("open project tab: %v", err)
+	}
+	if err := os.Remove(topicTitlesPath(projectRoot)); err != nil {
+		t.Fatalf("remove topic titles: %v", err)
+	}
+	if err := os.Remove(topicTitleSourcesPath(projectRoot)); err != nil {
+		t.Fatalf("remove topic title sources: %v", err)
+	}
+
+	if err := app.RenameTopic(topic.ID, "恢复标题"); err != nil {
+		t.Fatalf("rename topic after deleting title index: %v", err)
+	}
+	if got := loadTopicTitle(projectRoot, topic.ID); got != "恢复标题" {
+		t.Fatalf("restored topic title = %q, want 恢复标题", got)
+	}
+	nodes := app.ListProjectTree()
+	if len(nodes) != 1 || len(nodes[0].Children) != 1 || nodes[0].Children[0].TopicID != topic.ID {
+		t.Fatalf("project tree should still contain topic, got %#v", nodes)
+	}
+}
+
+func TestRenameTopicRecreatesDeletedProjectTitleIndexFromSessionMeta(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectRoot := t.TempDir()
+	topicID := "topic_missing_index"
+	if err := addProject(projectRoot, ""); err != nil {
+		t.Fatalf("add project: %v", err)
+	}
+	if err := setTopicTitle(projectRoot, topicID, "旧标题"); err != nil {
+		t.Fatalf("set topic title: %v", err)
+	}
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	writeTopicSession(t, dir, "missing-index.jsonl", topicID, "旧标题", projectRoot)
+	if err := os.Remove(topicTitlesPath(projectRoot)); err != nil {
+		t.Fatalf("remove topic titles: %v", err)
+	}
+	if err := os.Remove(topicTitleSourcesPath(projectRoot)); err != nil {
+		t.Fatalf("remove topic title sources: %v", err)
+	}
+
+	if err := NewApp().RenameTopic(topicID, "恢复标题"); err != nil {
+		t.Fatalf("rename topic from session meta after deleting title index: %v", err)
+	}
+	if got := loadTopicTitle(projectRoot, topicID); got != "恢复标题" {
+		t.Fatalf("restored topic title = %q, want 恢复标题", got)
+	}
+	nodes := NewApp().ListProjectTree()
+	if len(nodes) != 1 || len(nodes[0].Children) != 1 || nodes[0].Children[0].TopicID != topicID {
+		t.Fatalf("project tree should contain restored topic, got %#v", nodes)
+	}
+}
+
 func TestAutoTitleTopicFromFirstUserMessage(t *testing.T) {
 	isolateDesktopUserDirs(t)
 

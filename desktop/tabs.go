@@ -586,6 +586,11 @@ func (a *App) buildTabController(tab *WorkspaceTab) {
 		// Write/update scope/session meta.
 		if path != "" {
 			a.persistTabSessionPath(tab, path)
+			if strings.TrimSpace(tab.TopicID) != "" {
+				if err := ensureTopicIndexed(tab.Scope, tab.WorkspaceRoot, tab.TopicID, tab.TopicTitle, loadTopicTitleSource(tab.WorkspaceRoot, tab.TopicID)); err == nil {
+					a.emitProjectTreeChanged()
+				}
+			}
 			// Restore existing telemetry if resuming a session.
 			telemetryPath := path + ".telemetry.json"
 			if records := loadTelemetry(telemetryPath); len(records) > 0 {
@@ -1340,6 +1345,42 @@ func setTopicTitleSource(workspaceRoot, topicID, source string) error {
 	return saveTopicTitleSources(workspaceRoot, sources)
 }
 
+func ensureTopicIndexed(scope, workspaceRoot, topicID, title, source string) error {
+	topicID = strings.TrimSpace(topicID)
+	if topicID == "" {
+		return fmt.Errorf("topicID is required")
+	}
+	if strings.TrimSpace(scope) == "global" {
+		workspaceRoot = ""
+	} else {
+		workspaceRoot = normalizeProjectRoot(workspaceRoot)
+	}
+	title = strings.TrimSpace(title)
+	if title == "" {
+		title = defaultTopicTitle
+	}
+	source = strings.TrimSpace(source)
+	if source == "" {
+		source = topicTitleSourceManual
+	}
+	if err := setTopicTitleWithSource(workspaceRoot, topicID, title, source); err != nil {
+		return err
+	}
+	f := loadProjectsFile()
+	if workspaceRoot == "" {
+		f.GlobalTopics = prependUniqueString(f.GlobalTopics, topicID)
+		return saveProjectsFile(f)
+	}
+	for i, p := range f.Projects {
+		if p.Root == workspaceRoot {
+			f.Projects[i].Topics = prependUniqueString(p.Topics, topicID)
+			return saveProjectsFile(f)
+		}
+	}
+	f.Projects = append(f.Projects, desktopProject{Root: workspaceRoot, Topics: []string{topicID}})
+	return saveProjectsFile(f)
+}
+
 // --- telemetry --------------------------------------------------------------
 
 func (a *App) tabTelemetryPath(tabID string) string {
@@ -1734,7 +1775,56 @@ func (a *App) RenameTopic(topicID, title string) error {
 		a.emitProjectTreeChanged()
 		return nil
 	}
+	if scope, workspaceRoot, ok := a.findTopicLocation(topicID); ok {
+		if err := ensureTopicIndexed(scope, workspaceRoot, topicID, trimmed, topicTitleSourceManual); err != nil {
+			return err
+		}
+		a.updateOpenTopicTitle(topicID, trimmed)
+		a.updateTopicSessionTitles(topicID, trimmed)
+		a.emitProjectTreeChanged()
+		return nil
+	}
 	return fmt.Errorf("topic %q not found", topicID)
+}
+
+func (a *App) findTopicLocation(topicID string) (string, string, bool) {
+	topicID = strings.TrimSpace(topicID)
+	if topicID == "" {
+		return "", "", false
+	}
+	a.mu.RLock()
+	for _, tab := range a.tabs {
+		if tab == nil || tab.TopicID != topicID {
+			continue
+		}
+		scope := tab.Scope
+		workspaceRoot := tab.WorkspaceRoot
+		a.mu.RUnlock()
+		if scope == "global" {
+			return "global", "", true
+		}
+		return "project", normalizeProjectRoot(workspaceRoot), true
+	}
+	a.mu.RUnlock()
+
+	infos, err := agent.ListSessions(config.SessionDir())
+	if err != nil {
+		return "", "", false
+	}
+	for _, info := range infos {
+		if strings.TrimSpace(info.TopicID) != topicID {
+			continue
+		}
+		scope := strings.TrimSpace(info.Scope)
+		if scope == "" {
+			scope = "global"
+		}
+		if scope == "global" {
+			return "global", "", true
+		}
+		return "project", normalizeProjectRoot(info.WorkspaceRoot), true
+	}
+	return "", "", false
 }
 
 func (a *App) updateOpenTopicTitle(topicID, title string) {
