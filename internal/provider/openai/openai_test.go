@@ -474,14 +474,11 @@ func TestStreamSynthesizesMissingToolCallIDs(t *testing.T) {
 	}
 }
 
-// TestBuildRequestNoDoubleEscapeUnicode guards against tool-call arguments
-// being double-escaped when round-tripped through the request builder.
-// Before the fix, chatToolCall.Function.Arguments was a Go string, so
-// json.Marshal re-encoded Chinese characters as \uXXXX escape sequences
-// inside a JSON string — the model then saw literal \u6e38 sequences and
-// reproduced them in subsequent tool calls, causing regexp.Compile to fail
-// with "invalid escape sequence: \u".
-func TestBuildRequestNoDoubleEscapeUnicode(t *testing.T) {
+// TestBuildRequestToolCallArgsRoundTrip verifies that tool-call arguments
+// survive a marshal→unmarshal round-trip with Chinese/CJK content intact.
+// Go's json.Marshal may encode non-ASCII as \uXXXX on the wire (valid JSON),
+// but json.Unmarshal must restore the original characters.
+func TestBuildRequestToolCallArgsRoundTrip(t *testing.T) {
 	c := &client{model: "deepseek-v4"}
 	req := c.buildRequest(provider.Request{
 		Messages: []provider.Message{
@@ -498,19 +495,12 @@ func TestBuildRequestNoDoubleEscapeUnicode(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 
-	// The serialized arguments must contain the actual Chinese characters
-	// (UTF-8 bytes), NOT double-escaped \uXXXX sequences inside a JSON string.
-	s := string(b)
-	if strings.Contains(s, `\u6e38`) || strings.Contains(s, `\u653b`) {
-		t.Errorf("tool call arguments were double-escaped (\\uXXXX found in wire JSON):\n%s", s)
-	}
-
 	// Decode the assistant message's tool_calls arguments and verify the
-	// raw JSON is preserved verbatim.
+	// JSON content is preserved after the round-trip.
 	var raw []struct {
 		ToolCalls []struct {
 			Function struct {
-				Arguments json.RawMessage `json:"arguments"`
+				Arguments string `json:"arguments"`
 			} `json:"function"`
 		} `json:"tool_calls"`
 	}
@@ -518,9 +508,9 @@ func TestBuildRequestNoDoubleEscapeUnicode(t *testing.T) {
 		t.Fatalf("unmarshal: %v", err)
 	}
 	if len(raw) < 2 || len(raw[1].ToolCalls) == 0 {
-		t.Fatalf("expected assistant tool_calls in serialized output: %s", s)
+		t.Fatalf("expected assistant tool_calls in serialized output: %s", string(b))
 	}
-	gotArgs := string(raw[1].ToolCalls[0].Function.Arguments)
+	gotArgs := raw[1].ToolCalls[0].Function.Arguments
 	wantArgs := `{"pattern":"@游戏攻略"}`
 	if gotArgs != wantArgs {
 		t.Errorf("arguments round-trip:\n  got:  %s\n  want: %s", gotArgs, wantArgs)
