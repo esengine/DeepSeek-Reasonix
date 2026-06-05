@@ -28,6 +28,7 @@ import (
 const maxToolOutputBytes = 32 * 1024
 
 const maxFinalReadinessBlocks = 3
+const maxEmptyFinalBlocks = 3
 
 // Renderer redraws the assistant's final-answer text as styled output. It is
 // applied only after a turn's text stream completes, so the user sees raw
@@ -398,6 +399,7 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 	a.session.Add(provider.Message{Role: provider.RoleUser, Content: input})
 
 	finalReadinessBlocks := 0
+	emptyFinalBlocks := 0
 	for step := 0; a.maxSteps <= 0 || step < a.maxSteps; step++ {
 		schemas := a.tools.Schemas()
 		prefixShape := a.capturePrefixShape(schemas)
@@ -445,8 +447,19 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 				a.maybeCompact(ctx, usage)
 				continue
 			}
+			if !hasVisibleFinalAnswer(text) {
+				emptyFinalBlocks++
+				if emptyFinalBlocks >= maxEmptyFinalBlocks {
+					return fmt.Errorf("model finished without a visible final answer %d times", emptyFinalBlocks)
+				}
+				a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "empty final answer blocked: model returned no visible answer text; retrying"})
+				a.session.Add(provider.Message{Role: provider.RoleUser, Content: emptyFinalRetryMessage()})
+				a.maybeCompact(ctx, usage)
+				continue
+			}
 			return nil // model gave a final answer
 		}
+		emptyFinalBlocks = 0
 
 		results := a.executeBatch(ctx, calls)
 		for i, call := range calls {
@@ -531,6 +544,14 @@ func finalReadinessCheckSource(check instruction.VerifyCheck) string {
 
 func finalReadinessRetryMessage(reason string) string {
 	return "Host final-answer readiness check failed. Before giving a final answer, address the missing host-observable receipts: " + reason + ". Run the required tool calls, then answer when readiness is satisfied."
+}
+
+func hasVisibleFinalAnswer(text string) bool {
+	return strings.TrimSpace(text) != ""
+}
+
+func emptyFinalRetryMessage() string {
+	return "The previous assistant response finished without any visible answer text. Continue the same task now and provide a concise visible answer to the user. Do not send reasoning only."
 }
 
 // stream runs one completion, emitting reasoning and text deltas as typed
