@@ -1718,6 +1718,27 @@ func (c *Controller) Bypass() bool {
 	return c.bypass
 }
 
+// Steer queues guidance mid-turn without interrupting the in-flight request.
+func (c *Controller) Steer(text string) {
+	c.mu.Lock()
+	exec := c.executor
+	c.mu.Unlock()
+	if exec != nil {
+		exec.Steer(text)
+	}
+}
+
+// SteerConsumed returns true when the steer queue is empty after the last consume.
+func (c *Controller) SteerConsumed() bool {
+	c.mu.Lock()
+	exec := c.executor
+	c.mu.Unlock()
+	if exec != nil {
+		return exec.SteerConsumed()
+	}
+	return true
+}
+
 // --- memory ---
 //
 // c.mem is treated as an immutable snapshot guarded by c.mu: reads take the lock

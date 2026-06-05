@@ -941,9 +941,14 @@ func (a *App) SwitchWorkspace(dir string) (string, error) {
 // HistoryMessage is one prior turn, for the frontend to repopulate its transcript
 // after a reload.
 type HistoryMessage struct {
-	Role      string `json:"role"`
-	Content   string `json:"content"`
-	Reasoning string `json:"reasoning,omitempty"`
+	Role          string `json:"role"`
+	Content       string `json:"content"`
+	Reasoning     string `json:"reasoning,omitempty"`
+	ToolName      string `json:"toolName,omitempty"`
+	ToolArgs      string `json:"toolArgs,omitempty"`
+	ToolOutput    string `json:"toolOutput,omitempty"`
+	ToolId        string `json:"toolId,omitempty"`
+	ToolTruncated bool   `json:"toolTruncated,omitempty"`
 }
 
 // History returns the session's message log.
@@ -961,6 +966,18 @@ func (a *App) HistoryForTab(tabID string) []HistoryMessage {
 }
 
 func historyMessages(msgs []provider.Message, resolveUserContent func(string) string) []HistoryMessage {
+	// First pass: build a lookup from tool-call ID to its metadata.
+	toolCallByID := make(map[string]provider.ToolCall, 4)
+	for _, m := range msgs {
+		if m.Role == provider.RoleAssistant {
+			for _, tc := range m.ToolCalls {
+				if tc.ID != "" {
+					toolCallByID[tc.ID] = tc
+				}
+			}
+		}
+	}
+
 	out := make([]HistoryMessage, 0, len(msgs))
 	for _, m := range msgs {
 		content := m.Content
@@ -971,7 +988,20 @@ func historyMessages(msgs []provider.Message, resolveUserContent func(string) st
 		if m.Role == provider.RoleAssistant {
 			reasoning = m.ReasoningContent
 		}
-		out = append(out, HistoryMessage{Role: string(m.Role), Content: content, Reasoning: reasoning})
+		hm := HistoryMessage{Role: string(m.Role), Content: content, Reasoning: reasoning}
+		if m.Role == provider.RoleTool {
+			hm.ToolName = m.Name
+			hm.ToolOutput = m.Content
+			hm.Content = ""
+			if tc, ok := toolCallByID[m.ToolCallID]; ok {
+				hm.ToolArgs = tc.Arguments
+				if hm.ToolName == "" {
+					hm.ToolName = tc.Name
+				}
+				hm.ToolId = tc.ID
+			}
+		}
+		out = append(out, hm)
 	}
 	return out
 }

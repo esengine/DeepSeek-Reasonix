@@ -71,6 +71,8 @@ type chatTUI struct {
 	// the provider re-attempts the connection; cleared by the next stream event.
 	retryAttempt int
 	retryMax     int
+	// steerStaged counts queued mid-turn steers not yet consumed.
+	steerStaged int
 	// turnTokens accumulates this turn's output tokens (summed from per-step Usage
 	// events) for the live "↓N" readout in the running status line.
 	turnTokens int
@@ -513,6 +515,12 @@ func (m *chatTUI) recallSubmittedInput(delta int) bool {
 func (m *chatTUI) resetSubmittedInputRecall() {
 	m.submittedInputCursor = -1
 	m.submittedInputDraft = ""
+}
+
+// isSteerCommand rejects slash commands and bang-prefixed inputs during steer.
+func isSteerCommand(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	return strings.HasPrefix(trimmed, "/") || strings.HasPrefix(trimmed, "# ") || strings.HasPrefix(trimmed, "#\t") || strings.HasPrefix(trimmed, "!")
 }
 
 // navigateQueue moves through the pending interject queue during tuiRunning.
@@ -989,21 +997,11 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "enter":
 			if m.state == tuiRunning {
 				line := strings.TrimSpace(m.input.Value())
-				if line == "" {
+				if line == "" || isSteerCommand(line) {
 					return m, nil
 				}
-				if m.queueEditCursor >= 0 && m.queueEditCursor < len(m.pendingInterject) {
-					// Save the edited text back to the queue slot.
-					m.pendingInterject[m.queueEditCursor] = line
-					m.notice(fmt.Sprintf("queue [%d] updated", m.queueEditCursor+1))
-					m.queueEditCursor = -1
-					m.queueEditDraft = ""
-				} else {
-					m.pendingInterject = append(m.pendingInterject, line)
-					m.notice("feedback queued — will send when the current turn finishes")
-					m.queueEditCursor = -1
-					m.queueEditDraft = ""
-				}
+				m.ctrl.Steer(line)
+				m.steerStaged++
 				m.input.Reset()
 				m.input.SetHeight(1)
 				m.pastedBlocks = nil
@@ -1055,6 +1053,7 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.runStart = time.Now()
 				m.elapsed = 0
 				m.turnTokens = 0
+				m.steerStaged = 0
 				m.pendingRestore = line
 				m.bubbleStartIdx = len(m.transcript)
 				m.commitLine("")
@@ -1951,12 +1950,8 @@ func (m chatTUI) View() tea.View {
 			if m.turnTokens > 0 {
 				working += " · ↓" + shortTokens(m.turnTokens)
 			}
-			if n := len(m.pendingInterject); n > 0 {
-				if n == 1 {
-					working += dim(" · ✎ feedback queued")
-				} else {
-					working += dim(fmt.Sprintf(" · ✎ %d queued", n))
-				}
+			if m.steerStaged > 0 {
+				working += fmt.Sprintf(" · ▸ %d staged", m.steerStaged)
 			}
 		}
 	}
@@ -2695,6 +2690,7 @@ func (m *chatTUI) startTurnWithRaw(sent, displayed, restore, raw string) tea.Cmd
 	m.runStart = time.Now()
 	m.elapsed = 0
 	m.turnTokens = 0
+	m.steerStaged = 0
 	// The controller owns the run goroutine, its context, and cancellation; it
 	// streams events to eventCh and emits TurnDone when the turn settles.
 	m.ctrl.SendWithRaw(sent, raw)
@@ -2882,6 +2878,13 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 		}
 		m.refreshMCPManager()
 
+	case event.Steer:
+		if m.steerStaged > 0 {
+			m.steerStaged--
+		}
+		m.finalizeStreamed()
+		m.commitLine("  ▸ steer: " + e.Text)
+
 	case event.TurnDone:
 		// The turn settled — freeze anything still streaming, surface a real error,
 		// and gate a plan-mode proposal on the user's approval. Autosave already
@@ -2894,6 +2897,7 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 		// just clear the un-sendable flag.
 		m.confirmBubbleSent()
 		m.state = tuiIdle
+		m.steerStaged = 0
 		m.queueEditCursor = -1
 		m.queueEditDraft = ""
 		m.clearSubmittedPastes()
