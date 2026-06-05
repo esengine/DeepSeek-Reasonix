@@ -50,7 +50,7 @@ func (r *MigrationResult) Notice() string {
 		fmt.Fprintf(&b, " (%d MCP server(s))", r.Plugins)
 	}
 	if r.KeyToEnv {
-		b.WriteString("; API key written to ~/.env")
+		b.WriteString("; API key saved to reasonix's credentials store")
 	}
 	b.WriteString(". The old files were left untouched.")
 	for _, w := range r.Warnings {
@@ -117,8 +117,8 @@ func MigrateLegacyIfNeeded() (*MigrationResult, error) {
 		return nil, fmt.Errorf("write %s: %w", dest, err)
 	}
 	if len(envLines) > 0 {
-		if err := writeHomeEnv(home, envLines); err != nil {
-			return res, fmt.Errorf("write ~/.env: %w", err)
+		if err := writeCredentialsEnv(home, envLines); err != nil {
+			return res, fmt.Errorf("write credentials: %w", err)
 		}
 	}
 	return res, nil
@@ -241,11 +241,20 @@ func mergeEnv(base, overlay map[string]string) map[string]string {
 	return out
 }
 
-// writeHomeEnv merges lines into ~/.env, replacing any existing assignment of the
-// same key, and pins them into the current process env so the just-built session
-// resolves the key without a restart.
-func writeHomeEnv(home string, lines []string) error {
-	path := filepath.Join(home, ".env")
+// writeCredentialsEnv merges lines into the reasonix-owned global credentials
+// file (UserCredentialsPath, e.g. %AppData%\reasonix\credentials), replacing any
+// existing assignment of the same key, and pins them into the current process env
+// so the just-built session resolves the key without a restart. Falls back to
+// ~/.env only when the user config dir can't be resolved — never a project .env,
+// so a migration keeps secrets out of the user's project tree.
+func writeCredentialsEnv(home string, lines []string) error {
+	path := UserCredentialsPath()
+	if path == "" {
+		path = filepath.Join(home, ".env")
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
 	target := make(map[string]bool, len(lines))
 	for _, l := range lines {
 		if k, _, ok := strings.Cut(l, "="); ok {

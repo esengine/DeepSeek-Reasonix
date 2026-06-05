@@ -52,12 +52,15 @@ func TestMigrateImportsKeyPluginsAndLang(t *testing.T) {
 		t.Errorf("result = %+v, want KeyToEnv=true Plugins=2", res)
 	}
 
-	envData, err := os.ReadFile(filepath.Join(home, ".env"))
+	envData, err := os.ReadFile(UserCredentialsPath())
 	if err != nil {
-		t.Fatalf("read ~/.env: %v", err)
+		t.Fatalf("read credentials: %v", err)
 	}
 	if !strings.Contains(string(envData), "DEEPSEEK_API_KEY=sk-legacy-123") {
-		t.Errorf("~/.env missing key: %q", envData)
+		t.Errorf("credentials missing key: %q", envData)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".env")); !os.IsNotExist(err) {
+		t.Errorf("migration must not write the user's ~/.env, stat err=%v", err)
 	}
 
 	got, err := os.ReadFile(dest)
@@ -115,7 +118,7 @@ func TestMigrateSkipsWhenDestExists(t *testing.T) {
 }
 
 func TestMigrateImportsLegacyV1TOMLBeforeJSON(t *testing.T) {
-	srcJSON, dest, home := legacyHome(t)
+	srcJSON, dest, _ := legacyHome(t)
 	legacyTOML := filepath.Join(filepath.Dir(dest), "reasonix.toml")
 	if err := os.MkdirAll(filepath.Dir(legacyTOML), 0o755); err != nil {
 		t.Fatal(err)
@@ -155,8 +158,8 @@ command = "legacy-bin"
 			t.Fatalf("migrated TOML missing %q:\n%s", want, text)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(home, ".env")); !os.IsNotExist(err) {
-		t.Fatalf("v1 TOML migration should not import lower-priority JSON key, env stat err=%v", err)
+	if _, err := os.Stat(UserCredentialsPath()); !os.IsNotExist(err) {
+		t.Fatalf("v1 TOML migration should not import lower-priority JSON key, credentials stat err=%v", err)
 	}
 }
 
@@ -207,7 +210,7 @@ func TestMigrateNoLegacyIsNoop(t *testing.T) {
 }
 
 func TestMigrateToleratesUTF8BOM(t *testing.T) {
-	src, _, home := legacyHome(t)
+	src, _, _ := legacyHome(t)
 	writeLegacy(t, src, "\ufeff"+`{"apiKey":"sk-bom"}`)
 	res, err := MigrateLegacyIfNeeded()
 	if err != nil {
@@ -216,7 +219,7 @@ func TestMigrateToleratesUTF8BOM(t *testing.T) {
 	if res == nil || !res.KeyToEnv {
 		t.Fatalf("BOM-prefixed config did not migrate: %+v", res)
 	}
-	data, _ := os.ReadFile(filepath.Join(home, ".env"))
+	data, _ := os.ReadFile(UserCredentialsPath())
 	if !strings.Contains(string(data), "DEEPSEEK_API_KEY=sk-bom") {
 		t.Errorf("key not migrated from BOM-prefixed config: %q", data)
 	}

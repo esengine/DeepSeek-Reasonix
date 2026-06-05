@@ -468,8 +468,11 @@ func TestBuildMigratesLegacyConfigEndToEnd(t *testing.T) {
 		t.Errorf("DEEPSEEK_API_KEY not pinned into env after migration: %q", got)
 	}
 
-	if data, err := os.ReadFile(filepath.Join(home, ".env")); err != nil || !strings.Contains(string(data), "DEEPSEEK_API_KEY=sk-e2e") {
-		t.Errorf("~/.env missing migrated key: %q (err %v)", data, err)
+	if data, err := os.ReadFile(config.UserCredentialsPath()); err != nil || !strings.Contains(string(data), "DEEPSEEK_API_KEY=sk-e2e") {
+		t.Errorf("credentials store missing migrated key: %q (err %v)", data, err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".env")); !os.IsNotExist(err) {
+		t.Errorf("migration must not write the user's ~/.env, stat err=%v", err)
 	}
 
 	sessionImported := false
