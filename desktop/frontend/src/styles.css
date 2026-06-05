@@ -916,10 +916,10 @@ a[href] {
   overflow: hidden;
 }
 .welcome__logo {
-  width: 54px;
-  height: 54px;
-  margin-bottom: 16px;
-  border-radius: 13px;
+  width: clamp(220px, 38vw, 280px);
+  height: auto;
+  margin-bottom: 24px;
+  border-radius: 0;
 }
 .welcome__title {
   font-size: 22px;
@@ -981,9 +981,9 @@ a[href] {
 
 @container (max-height: 560px) {
   .welcome__logo {
-    width: 44px;
-    height: 44px;
-    margin-bottom: 10px;
+    width: 220px;
+    height: auto;
+    margin-bottom: 16px;
   }
   .welcome__title {
     font-size: 20px;
@@ -6664,9 +6664,32 @@ a[href] {
 
 .app-chrome__logo {
   flex: 0 0 auto;
-  width: 18px;
-  height: 18px;
-  border-radius: 5px;
+  width: 116px;
+  height: auto;
+  max-height: 27px;
+  border-radius: 0;
+}
+
+.welcome__logo,
+.app-chrome__logo {
+  filter: brightness(0) invert(1);
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) .welcome__logo,
+  :root:not([data-theme]) .app-chrome__logo {
+    filter: none;
+  }
+}
+
+:root[data-theme="light"] .welcome__logo,
+:root[data-theme="light"] .app-chrome__logo {
+  filter: none;
+}
+
+:root[data-theme="dark"] .welcome__logo,
+:root[data-theme="dark"] .app-chrome__logo {
+  filter: brightness(0) invert(1);
 }
 
 .app-chrome__identity strong {

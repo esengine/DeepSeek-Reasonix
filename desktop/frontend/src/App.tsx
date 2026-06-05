@@ -18,7 +18,7 @@ import {
   PanelRightOpen,
   Trash2,
 } from "lucide-react";
-import logo from "./assets/logo.svg";
+import logoWordmark from "./assets/logo-wordmark.svg";
 import { asArray } from "./lib/array";
 import { clearLegacyLangPref, normalizeLangPref, readLegacyLangPref, t, useI18n, useT } from "./lib/i18n";
 import { useController } from "./lib/useController";
@@ -1165,8 +1165,7 @@ export default function App() {
             {sidebarCollapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
           </button>
           <div className="app-chrome__identity" aria-label="Reasonix">
-            <img src={logo} alt="" className="app-chrome__logo" />
-            <strong>Reasonix</strong>
+            <img src={logoWordmark} alt="" className="app-chrome__logo" />
             <span className="app-chrome__separator">/</span>
             <span className="app-chrome__scope">{appChromeScopeLabel(activeTab, state.meta)}</span>
           </div>
