@@ -511,7 +511,9 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	var classifier *control.ProviderAutoPlanClassifier
 
 	// Two-model collaboration: a distinct planner_model wraps the executor in a
-	// Coordinator with its own session, kept separate for cache stability.
+	// Coordinator with its own session, kept separate for cache stability. The
+	// planner gets the same standing memory context and a filtered read-only
+	// research tool set, so it can inspect rules/code without side effects.
 	if pm := cfg.Agent.PlannerModel; pm != "" {
 		pe, ok := cfg.ResolveModel(pm)
 		if !ok {
@@ -522,8 +524,17 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			if err != nil {
 				return nil, fmt.Errorf("planner %q: %w", pm, err)
 			}
-			plannerSess := agent.NewSession(agent.DefaultPlannerPrompt)
-			runner = agent.NewCoordinator(plannerProv, plannerSess, pe.Price, executor, cfg.Agent.Temperature, sink, control.TaskWarrantsPlanner)
+			plannerSess := agent.NewSession(agent.PlannerPromptWithContext(mem.Block()))
+			plannerTools := agent.PlannerToolRegistry(reg)
+			runner = agent.NewCoordinator(plannerProv, plannerSess, pe.Price, plannerTools, agent.Options{
+				MaxSteps:          agent.PlannerMaxSteps(maxSteps),
+				Gate:              headlessGate,
+				ContextWindow:     pe.ContextWindow,
+				SoftCompactRatio:  cfg.Agent.SoftCompactRatio,
+				CompactRatio:      cfg.Agent.CompactRatio,
+				CompactForceRatio: cfg.Agent.CompactForceRatio,
+				ArchiveDir:        config.ArchiveDir(),
+			}, executor, cfg.Agent.Temperature, sink, control.TaskWarrantsPlanner)
 			label = entry.Model + " + planner " + pe.Model
 		}
 	}

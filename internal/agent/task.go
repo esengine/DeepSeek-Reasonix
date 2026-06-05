@@ -204,6 +204,48 @@ func FilterRegistry(parent *tool.Registry, names []string, exclude ...string) *t
 	return sub
 }
 
+var plannerNonResearchTools = []string{
+	"ask",
+	"bash_output",
+	"complete_step",
+	"slash_command",
+	"todo_write",
+	"wait",
+}
+
+// PlannerToolRegistry returns the tool set exposed to the two-model planner:
+// read-only research tools only. It deliberately excludes workflow/meta tools
+// that are technically read-only but can prompt the user, update visible task
+// state, wait on jobs, or expand commands instead of inspecting context.
+func PlannerToolRegistry(parent *tool.Registry) *tool.Registry {
+	exclude := append(SubagentMetaTools(), plannerNonResearchTools...)
+	return FilterReadOnlyRegistry(parent, exclude...)
+}
+
+// FilterReadOnlyRegistry builds a sub-registry containing only tools whose
+// ReadOnly contract is true, minus explicit exclusions.
+func FilterReadOnlyRegistry(parent *tool.Registry, exclude ...string) *tool.Registry {
+	ex := make(map[string]bool, len(exclude))
+	for _, e := range exclude {
+		ex[e] = true
+	}
+	sub := tool.NewRegistry()
+	if parent == nil {
+		return sub
+	}
+	for _, name := range parent.Names() {
+		if ex[name] {
+			continue
+		}
+		tl, ok := parent.Get(name)
+		if !ok || !tl.ReadOnly() {
+			continue
+		}
+		sub.Add(tl)
+	}
+	return sub
+}
+
 // runSub builds a sub-agent over subReg, runs prompt to completion emitting to
 // sink, and returns its final assistant answer. Shared by the foreground and
 // background paths.

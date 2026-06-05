@@ -243,6 +243,10 @@ separate cache-stable sessions) is a one-line edit afterwards — set
 planner_model = "deepseek-pro"   # used as the low-frequency planner
 ```
 
+The planner sees loaded `REASONIX.md` / `AGENTS.md` memory and a small read-only
+research tool set, so it can inspect relevant files before handing a plan to the
+executor. Writer and workflow tools remain executor-only.
+
 Subagent skills inherit the executor model by default. Set `subagent_model` to
 run them on another configured model, or use `subagent_models` to override only
 specific skills such as `review` or `security_review`.

@@ -15,6 +15,8 @@ import (
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/i18n"
+	"reasonix/internal/instruction"
+	"reasonix/internal/memory"
 	"reasonix/internal/permission"
 	"reasonix/internal/plugin"
 	"reasonix/internal/sandbox"
@@ -95,6 +97,9 @@ func (f *acpFactory) NewSession(ctx context.Context, p acp.SessionParams) (*cont
 	if err != nil {
 		return nil, err
 	}
+	mem := memory.Load(memory.Options{CWD: p.Cwd, UserDir: config.MemoryUserDir()})
+	projectChecks := instruction.ExtractHostChecks(mem.Docs)
+	sysPrompt = memory.Compose(sysPrompt, mem)
 
 	// Built-ins rooted at the session cwd. Writes confine to that cwd by default
 	// (Workspace makes Dir the sole write root when WriteRoots is empty), which is
@@ -144,6 +149,7 @@ func (f *acpFactory) NewSession(ctx context.Context, p acp.SessionParams) (*cont
 		Temperature:       cfg.Agent.Temperature,
 		Pricing:           entry.Price,
 		Gate:              headlessGate,
+		ProjectChecks:     projectChecks,
 		ContextWindow:     entry.ContextWindow,
 		SoftCompactRatio:  cfg.Agent.SoftCompactRatio,
 		CompactRatio:      cfg.Agent.CompactRatio,
@@ -167,8 +173,17 @@ func (f *acpFactory) NewSession(ctx context.Context, p acp.SessionParams) (*cont
 				cleanup()
 				return nil, fmt.Errorf("planner %q: %w", pm, err)
 			}
-			plannerSess := agent.NewSession(agent.DefaultPlannerPrompt)
-			runner = agent.NewCoordinator(plannerProv, plannerSess, pe.Price, executor, cfg.Agent.Temperature, p.Sink, control.TaskWarrantsPlanner)
+			plannerSess := agent.NewSession(agent.PlannerPromptWithContext(mem.Block()))
+			plannerTools := agent.PlannerToolRegistry(reg)
+			runner = agent.NewCoordinator(plannerProv, plannerSess, pe.Price, plannerTools, agent.Options{
+				MaxSteps:          agent.PlannerMaxSteps(maxSteps),
+				Gate:              headlessGate,
+				ContextWindow:     pe.ContextWindow,
+				SoftCompactRatio:  cfg.Agent.SoftCompactRatio,
+				CompactRatio:      cfg.Agent.CompactRatio,
+				CompactForceRatio: cfg.Agent.CompactForceRatio,
+				ArchiveDir:        config.ArchiveDir(),
+			}, executor, cfg.Agent.Temperature, p.Sink, control.TaskWarrantsPlanner)
 			label = entry.Model + " + planner " + pe.Model
 		}
 	}
