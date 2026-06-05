@@ -104,9 +104,6 @@ export function SettingsPanel({ onClose, onChanged }: { onClose: () => void; onC
                 {tab === "sandbox" && <SandboxSection s={s} busy={busy} apply={apply} />}
                 {tab === "appearance" && (
                   <AppearanceSection
-                    s={s}
-                    busy={busy}
-                    apply={apply}
                     theme={theme}
                     themeStyle={themeStyle}
                     onTheme={(t) => {
@@ -985,17 +982,11 @@ function SandboxSection({ s, busy, apply }: SectionProps) {
 }
 
 function AppearanceSection({
-  s,
-  busy,
-  apply,
   theme,
   themeStyle,
   onTheme,
   onThemeStyle,
 }: {
-  s: SettingsView;
-  busy: boolean;
-  apply: (fn: () => Promise<void>) => Promise<void>;
   theme: Theme;
   themeStyle: ThemeStyle;
   onTheme: (t: Theme) => void;
