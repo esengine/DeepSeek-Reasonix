@@ -240,6 +240,8 @@ export const en = {
   "composer.noProjectMatches": "No matching projects",
   "composer.addProject": "Add new project",
   "composer.removeProject": "Remove project",
+  "composer.confirmRemoveProject": "Click again to confirm",
+  "composer.cannotRemoveCurrent": "The current workspace cannot be removed",
   "composer.removeCurrentProjectDisabled": "Current project cannot be removed",
   "composer.send": "Send (Enter)",
   "composer.stop": "Stop (Esc)",

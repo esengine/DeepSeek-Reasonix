@@ -241,6 +241,8 @@ export const zh: Record<DictKey, string> = {
   "composer.noProjectMatches": "没有匹配的项目",
   "composer.addProject": "添加新项目",
   "composer.removeProject": "移除项目",
+  "composer.confirmRemoveProject": "再次点击以确认",
+  "composer.cannotRemoveCurrent": "当前工作区不能移除",
   "composer.removeCurrentProjectDisabled": "不能移除当前项目",
   "composer.send": "发送（Enter）",
   "composer.stop": "停止（Esc）",

@@ -186,6 +186,13 @@ export function Composer({
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
   const [workspaceQuery, setWorkspaceQuery] = useState("");
   const [workspaces, setWorkspaces] = useState<WorkspaceView[]>([]);
+  // Two-click delete: the first click on the trash icon moves the row into a
+  // "Confirm?" state and shows a real label ("Delete?") on the icon; the
+  // second click (within ~3s) actually fires the removal. A click anywhere
+  // else, Escape, or a workspace switch resets the row. We keep the existing
+  // server-side RemoveWorkspace as the actual delete so the projects file
+  // stays the single source of truth — this is purely a confirmation gate.
+  const [confirmRemovePath, setConfirmRemovePath] = useState<string | null>(null);
   const [composerHeight, setComposerHeight] = useState<number | null>(loadComposerHeight);
   const [composerResizing, setComposerResizing] = useState(false);
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -657,7 +664,22 @@ export function Composer({
   const removeWorkspace = async (path: string) => {
     await onRemoveWorkspace(path);
     setWorkspaces((prev) => prev.filter((w) => w.path !== path));
+    setConfirmRemovePath(null);
   };
+
+  // First click on the trash icon arms the confirmation; second click fires.
+  // We reset the armed state after a short idle window so the user doesn't
+  // accidentally delete a workspace they walked past 30s ago.
+  useEffect(() => {
+    if (!confirmRemovePath) return;
+    const id = window.setTimeout(() => setConfirmRemovePath(null), 3000);
+    return () => window.clearTimeout(id);
+  }, [confirmRemovePath]);
+
+  // Escape / menu close / workspace switch all clear the armed delete.
+  useEffect(() => {
+    if (!workspaceMenuOpen) setConfirmRemovePath(null);
+  }, [workspaceMenuOpen]);
 
   useEffect(() => {
     const onResize = () => setComposerHeight((height) => (height === null ? null : clampComposerHeight(height)));
@@ -842,17 +864,28 @@ export function Composer({
                   {w.current && <Check size={15} />}
                 </button>
                 <button
-                  className="workspace-switcher__remove"
+                  className={`workspace-switcher__remove${confirmRemovePath === w.path ? " workspace-switcher__remove--armed" : ""}${w.current ? " workspace-switcher__remove--current" : ""}`}
                   type="button"
-                  aria-label={t("composer.removeProject")}
-                  title={t("composer.removeProject")}
-                  disabled={running}
+                  aria-label={confirmRemovePath === w.path ? t("composer.confirmRemoveProject") : t("composer.removeProject")}
+                  title={
+                    w.current
+                      ? t("composer.cannotRemoveCurrent")
+                      : confirmRemovePath === w.path
+                        ? t("composer.confirmRemoveProject")
+                        : t("composer.removeProject")
+                  }
+                  disabled={running || w.current}
                   onClick={(event) => {
                     event.stopPropagation();
-                    void removeWorkspace(w.path);
+                    if (w.current) return;
+                    if (confirmRemovePath === w.path) {
+                      void removeWorkspace(w.path);
+                    } else {
+                      setConfirmRemovePath(w.path);
+                    }
                   }}
                 >
-                  <Trash2 size={14} />
+                  {confirmRemovePath === w.path ? <Check size={14} /> : <Trash2 size={14} />}
                 </button>
               </div>
             ))}

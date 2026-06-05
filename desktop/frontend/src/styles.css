@@ -2126,24 +2126,38 @@ a[href] {
   height: 28px;
   padding: 0;
   color: var(--fg-faint);
-  opacity: 0;
-  transition: color 0.12s, opacity 0.12s, background 0.12s;
+  /* Always visible (was opacity: 0 + hover-only) — the trash button was
+     effectively undiscoverable for many users, so a freshly created workspace
+     looked "permanent". A low-opacity resting state keeps the row calm
+     while making the affordance legible. */
+  opacity: 0.45;
+  transition: color 0.12s, opacity 0.12s, background 0.12s, transform 0.12s;
 }
 .workspace-switcher__row:hover .workspace-switcher__remove,
 .workspace-switcher__remove:focus-visible {
   opacity: 1;
 }
-.workspace-switcher__remove:hover:not(:disabled),
-.workspace-switcher__remove:focus-visible:not(:disabled) {
+.workspace-switcher__remove--armed {
+  opacity: 1;
+  background: color-mix(in srgb, var(--err) 18%, transparent);
+  color: var(--err);
+  transform: scale(1.05);
+}
+.workspace-switcher__remove--current {
+  cursor: not-allowed;
+  opacity: 0.25;
+}
+.workspace-switcher__row:hover .workspace-switcher__remove--current,
+.workspace-switcher__remove--current:focus-visible {
+  opacity: 0.4;
+}
+.workspace-switcher__remove:hover:not(:disabled):not(.workspace-switcher__remove--armed),
+.workspace-switcher__remove:focus-visible:not(:disabled):not(.workspace-switcher__remove--armed) {
   background: color-mix(in srgb, var(--err) 12%, transparent);
   color: var(--err);
 }
 .workspace-switcher__remove:disabled {
   cursor: not-allowed;
-  opacity: 0;
-}
-.workspace-switcher__row:hover .workspace-switcher__remove:disabled {
-  opacity: 0.28;
 }
 .workspace-switcher__item:hover,
 .workspace-switcher__actions button:hover {
