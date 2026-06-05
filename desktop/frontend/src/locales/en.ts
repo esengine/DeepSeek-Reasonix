@@ -492,6 +492,7 @@ export const en = {
   "settings.temperaturePreset.daily": "Daily assistant (0.2)",
   "settings.temperaturePreset.explore": "Solution exploration (0.5)",
   "settings.temperaturePreset.creative": "Creative drafting (0.8)",
+  "settings.temperaturePreset.custom": "Custom ({temp})",
   "settings.maxSteps": "Max tool rounds",
   "settings.unlimited": "0 = unlimited",
   "settings.systemPrompt": "System prompt",

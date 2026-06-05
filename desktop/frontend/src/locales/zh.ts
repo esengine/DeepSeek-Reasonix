@@ -493,6 +493,7 @@ export const zh: Record<DictKey, string> = {
   "settings.temperaturePreset.daily": "日常助手（0.2）",
   "settings.temperaturePreset.explore": "方案探索（0.5）",
   "settings.temperaturePreset.creative": "创意发散（0.8）",
+  "settings.temperaturePreset.custom": "自定义（{temp}）",
   "settings.maxSteps": "最大工具轮数",
   "settings.unlimited": "0 = 不限",
   "settings.systemPrompt": "系统提示词",

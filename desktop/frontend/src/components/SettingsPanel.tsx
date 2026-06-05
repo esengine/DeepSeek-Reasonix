@@ -31,14 +31,14 @@ const TEMPERATURE_PRESETS = [
   { key: "creative", value: 0.8, label: "settings.temperaturePreset.creative" },
 ] as const;
 type TemperaturePresetKey = (typeof TEMPERATURE_PRESETS)[number]["key"];
+type TemperatureSelection = TemperaturePresetKey | "custom";
 
-function closestTemperaturePreset(value: number): (typeof TEMPERATURE_PRESETS)[number] {
-  return TEMPERATURE_PRESETS.reduce((best, preset) =>
-    Math.abs(preset.value - value) < Math.abs(best.value - value) ? preset : best,
-  TEMPERATURE_PRESETS[1]);
+function temperatureSelection(value: number): TemperatureSelection {
+  return TEMPERATURE_PRESETS.find((preset) => preset.value === value)?.key ?? "custom";
 }
 
-function temperatureForPreset(key: TemperaturePresetKey): number {
+function temperatureForSelection(key: TemperatureSelection, customValue: number): number {
+  if (key === "custom") return customValue;
   return TEMPERATURE_PRESETS.find((preset) => preset.key === key)?.value ?? TEMPERATURE_PRESETS[1].value;
 }
 
@@ -885,14 +885,14 @@ function SandboxSection({ s, busy, apply }: SectionProps) {
 
 function AgentSection({ s, busy, apply }: SectionProps) {
   const t = useT();
-  const [tempPreset, setTempPreset] = useState<TemperaturePresetKey>(() => closestTemperaturePreset(s.agent.temperature).key);
+  const [tempPreset, setTempPreset] = useState<TemperatureSelection>(() => temperatureSelection(s.agent.temperature));
   const [steps, setSteps] = useState(String(s.agent.maxSteps));
   const [prompt, setPrompt] = useState(s.agent.systemPrompt);
-  const selectedTemp = temperatureForPreset(tempPreset);
+  const selectedTemp = temperatureForSelection(tempPreset, s.agent.temperature);
   const dirty = selectedTemp !== s.agent.temperature || steps !== String(s.agent.maxSteps) || prompt !== s.agent.systemPrompt;
 
   useEffect(() => {
-    setTempPreset(closestTemperaturePreset(s.agent.temperature).key);
+    setTempPreset(temperatureSelection(s.agent.temperature));
     setSteps(String(s.agent.maxSteps));
     setPrompt(s.agent.systemPrompt);
   }, [s.agent.temperature, s.agent.maxSteps, s.agent.systemPrompt]);
@@ -902,7 +902,8 @@ function AgentSection({ s, busy, apply }: SectionProps) {
       <div className="mem-section__title">{t("settings.agent")}</div>
       <div className="set-row">
         <label className="set-label">{t("settings.temperature")}</label>
-        <select className="mem-select set-grow" value={tempPreset} disabled={busy} onChange={(e) => setTempPreset(e.target.value as TemperaturePresetKey)}>
+        <select className="mem-select set-grow" value={tempPreset} disabled={busy} onChange={(e) => setTempPreset(e.target.value as TemperatureSelection)}>
+          {tempPreset === "custom" && <option value="custom">{t("settings.temperaturePreset.custom", { temp: s.agent.temperature })}</option>}
           {TEMPERATURE_PRESETS.map((preset) => (
             <option key={preset.key} value={preset.key}>
               {t(preset.label)}
