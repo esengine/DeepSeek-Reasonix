@@ -1,16 +1,22 @@
 package main
 
 import (
+	goruntime "runtime"
+
 	"github.com/wailsapp/wails/v2/pkg/menu"
 	"github.com/wailsapp/wails/v2/pkg/menu/keys"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-// createAppMenu builds the native application menu bar. It emits app:open-settings
-// on CmdOrCtrl+, so the frontend can open the settings drawer without a global
-// keyboard listener. Edit and Window menus use Wails standard roles for platform-
-// correct Undo/Redo/Cut/Copy/Paste/SelectAll and Minimize/Zoom/Fullscreen.
+// createAppMenu builds the native application menu bar. macOS only: it's the
+// platform convention there, and the Edit menu's standard roles are what make
+// Cmd+C/V work in the webview. On Windows/Linux a menu bar renders as a stray
+// in-window "File" strip (the Edit/Window mac roles don't show), so return nil.
 func (a *App) createAppMenu() *menu.Menu {
+	if goruntime.GOOS != "darwin" {
+		return nil
+	}
+
 	m := menu.NewMenu()
 
 	m.Append(menu.AppMenu())
