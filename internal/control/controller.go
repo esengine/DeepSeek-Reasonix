@@ -501,6 +501,17 @@ func (c *Controller) Submit(input string) {
 				c.notice(err.Error())
 			}
 			return
+		case "/rewind":
+			args := strings.TrimSpace(strings.TrimPrefix(trimmed, fields[0]))
+			turn, scope, err := parseRewind(args, c.Checkpoints())
+			if err != nil {
+				c.notice("usage: /rewind [turn] [code|conversation|both]")
+				return
+			}
+			if err := c.Rewind(turn, scope); err != nil {
+				c.notice(err.Error())
+			}
+			return
 		}
 		if c.managementNotice(trimmed) {
 			return
@@ -1787,6 +1798,39 @@ func listItem(line string) (content string, level int, ok bool) {
 // requestApproval emits an ApprovalRequest and blocks until Approve(ID, …)
 // answers or ctx is cancelled. A prior session grant for the same tool+subject
 // short-circuits. promptMu serialises outstanding prompts.
+// parseRewind parses the arguments after "/rewind". The user may provide:
+//   /rewind              → latest checkpoint, both
+//   /rewind <turn>       → that turn, both
+//   /rewind <turn> <scope> → that turn, code|conversation|both
+// If no turn is given, the latest checkpoint is used. If no scope is given, Both is assumed.
+func parseRewind(args string, cps []checkpoint.Meta) (int, RewindScope, error) {
+	fields := strings.Fields(args)
+	if len(fields) == 0 {
+		if len(cps) == 0 {
+			return 0, RewindBoth, fmt.Errorf("no checkpoints available")
+		}
+		return cps[len(cps)-1].Turn, RewindBoth, nil
+	}
+	turn, err := strconv.Atoi(fields[0])
+	if err != nil {
+		return 0, RewindBoth, fmt.Errorf("invalid turn: %w", err)
+	}
+	scope := RewindBoth
+	if len(fields) >= 2 {
+		switch strings.ToLower(fields[1]) {
+		case "code":
+			scope = RewindCode
+		case "conversation":
+			scope = RewindConversation
+		case "both":
+			scope = RewindBoth
+		default:
+			return 0, RewindBoth, fmt.Errorf("unknown scope %q", fields[1])
+		}
+	}
+	return turn, scope, nil
+}
+
 func (c *Controller) requestApproval(ctx context.Context, tool, subject string) (bool, bool, error) {
 	key := tool + "\x00" + subject
 

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/checkpoint"
 	"reasonix/internal/event"
 	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
@@ -247,5 +248,48 @@ func TestApprovalCtxCancel(t *testing.T) {
 	allow, _, err := gateApprover{c}.Approve(ctx, "bash", "x", nil)
 	if err == nil || allow {
 		t.Fatalf("Approve on cancelled ctx = (%v,%v), want (false, error)", allow, err)
+	}
+}
+
+func TestParseRewind(t *testing.T) {
+	cps := []checkpoint.Meta{
+		{Turn: 0, Prompt: "first"},
+		{Turn: 1, Prompt: "second"},
+		{Turn: 2, Prompt: "third"},
+	}
+	cases := []struct {
+		args    string
+		wantT   int
+		wantS   RewindScope
+		wantErr bool
+	}{
+		{"", 2, RewindBoth, false},               // no args -> latest turn, both
+		{"1", 1, RewindBoth, false},              // turn only
+		{"0 code", 0, RewindCode, false},         // turn + code
+		{"1 conversation", 1, RewindConversation, false}, // turn + conversation
+		{"2 both", 2, RewindBoth, false},         // turn + both
+		{"abc", 0, RewindBoth, true},             // invalid turn
+		{"0 unknown", 0, RewindBoth, true},       // unknown scope
+	}
+	for _, tc := range cases {
+		t.Run(tc.args, func(t *testing.T) {
+			gotT, gotS, err := parseRewind(tc.args, cps)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("parseRewind(%q) err=%v, wantErr=%v", tc.args, err, tc.wantErr)
+			}
+			if err != nil {
+				return
+			}
+			if gotT != tc.wantT || gotS != tc.wantS {
+				t.Fatalf("parseRewind(%q) = (%d,%d), want (%d,%d)", tc.args, gotT, gotS, tc.wantT, tc.wantS)
+			}
+		})
+	}
+}
+
+func TestParseRewindEmptyCheckpoints(t *testing.T) {
+	_, _, err := parseRewind("", nil)
+	if err == nil {
+		t.Fatal("expected error when no checkpoints")
 	}
 }
