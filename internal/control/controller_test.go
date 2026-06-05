@@ -263,13 +263,13 @@ func TestParseRewind(t *testing.T) {
 		wantS   RewindScope
 		wantErr bool
 	}{
-		{"", 2, RewindBoth, false},               // no args -> latest turn, both
-		{"1", 1, RewindBoth, false},              // turn only
-		{"0 code", 0, RewindCode, false},         // turn + code
+		{"", 2, RewindBoth, false},                       // no args -> latest turn, both
+		{"1", 1, RewindBoth, false},                      // turn only
+		{"0 code", 0, RewindCode, false},                 // turn + code
 		{"1 conversation", 1, RewindConversation, false}, // turn + conversation
-		{"2 both", 2, RewindBoth, false},         // turn + both
-		{"abc", 0, RewindBoth, true},             // invalid turn
-		{"0 unknown", 0, RewindBoth, true},       // unknown scope
+		{"2 both", 2, RewindBoth, false},                 // turn + both
+		{"abc", 0, RewindBoth, true},                     // invalid turn
+		{"0 unknown", 0, RewindBoth, true},               // unknown scope
 	}
 	for _, tc := range cases {
 		t.Run(tc.args, func(t *testing.T) {
