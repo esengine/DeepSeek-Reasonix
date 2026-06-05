@@ -924,22 +924,25 @@ export function WorkspacePanel({
                 </button>
               </Tooltip>
             )}
-            <Tooltip label={t("workspace.encodingOverride")}>
-              <select
-                className="workspace-encoding-select"
-                value={projectEncoding}
-                onChange={(e) => void changeProjectEncoding(e.target.value)}
-                title={projectEncoding ? t("workspace.encodingTitle").replace("{enc}", projectEncoding) : t("workspace.encoding")}
-              >
-                {ENCODING_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.value === "" ? t("workspace.encodingAuto") : opt.label}
-                  </option>
-                ))}
-              </select>
-            </Tooltip>
           </div>
         )}
+
+        <div className="workspace-encoding-row">
+          <Tooltip label={t("workspace.encodingOverride")}>
+            <select
+              className="workspace-encoding-select"
+              value={projectEncoding}
+              onChange={(e) => void changeProjectEncoding(e.target.value)}
+              title={projectEncoding ? t("workspace.encodingTitle").replace("{enc}", projectEncoding) : t("workspace.encoding")}
+            >
+              {ENCODING_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.value === "" ? t("workspace.encodingAuto") : opt.label}
+                </option>
+              ))}
+            </select>
+          </Tooltip>
+        </div>
 
         <div className="workspace-search">
           <Search size={14} />
