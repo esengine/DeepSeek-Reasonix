@@ -387,6 +387,23 @@ a[href] {
   display: none;
 }
 
+.layout--workspace-floating {
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+}
+.layout--workspace-floating .workspace-panel-resizer {
+  display: none;
+}
+.layout--workspace-floating .workbench-dock {
+  position: absolute;
+  top: 38px;
+  right: 0;
+  bottom: 0;
+  width: var(--workspace-width);
+  z-index: 100;
+  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.3);
+  border-left: 1px solid var(--border);
+}
+
 .sidebar {
   grid-row: 2;
   grid-column: 1;
