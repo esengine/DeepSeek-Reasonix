@@ -472,6 +472,9 @@ function ModelsSection({ s, busy, apply, onManageProviders }: SectionProps & { o
   const defaultRef = toRef(s.defaultModel, s);
   const plannerRef = toRef(s.plannerModel, s);
   const [defaultProvider, defaultModel] = defaultRef.split("/");
+  const plannerModeDetail = plannerRef
+    ? t("settings.plannerDualDetail", { planner: plannerRef, executor: defaultRef || t("common.none") })
+    : t("settings.plannerSingleDetail", { model: defaultRef || t("common.none") });
 
   return (
     <section className="mem-section">
@@ -523,8 +526,8 @@ function ModelsSection({ s, busy, apply, onManageProviders }: SectionProps & { o
         </div>
         <div>
           <span>{t("settings.plannerStatus")}</span>
-          <strong>{plannerRef ? t("settings.plannerEnabled") : t("settings.plannerDisabled")}</strong>
-          <small>{plannerRef || t("settings.plannerNone")}</small>
+          <strong>{plannerRef ? t("settings.plannerDual") : t("settings.plannerSingle")}</strong>
+          <small>{plannerModeDetail}</small>
         </div>
       </div>
 
