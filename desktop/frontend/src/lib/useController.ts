@@ -267,15 +267,29 @@ function reducer(s: State, a: Action): State {
     case "message_action_start": return { ...s, messageAction: a.action };
     case "message_action_done": return { ...s, messageAction: undefined };
     case "history": {
+      // User, assistant, and tool-result messages. Tool messages need
+      // toolName set by the backend before rendering as ToolCard.
       const visible = a.messages.filter(
-        (m) => (m.role === "user" && m.content.trim() !== "") ||
-               (m.role === "assistant" && (m.content.trim() !== "" || (m.reasoning ?? "").trim() !== "")),
+        (m) =>
+          (m.role === "user" && m.content.trim() !== "") ||
+          (m.role === "assistant" && (m.content.trim() !== "" || (m.reasoning ?? "").trim() !== "")) ||
+          (m.role === "tool" && (m.toolName ?? "").trim() !== ""),
       );
-      const items: Item[] = visible.map((m, i) =>
-        m.role === "user"
-          ? { kind: "user", id: `h${i}`, text: m.content }
-          : { kind: "assistant", id: `h${i}`, text: m.content, reasoning: m.reasoning ?? "", streaming: false },
-      );
+      const items: Item[] = visible.map((m, i) => {
+        if (m.role === "user") return { kind: "user", id: `h${i}`, text: m.content };
+        if (m.role === "tool")
+          return {
+            kind: "tool",
+            id: m.toolId || `h${i}`,
+            name: m.toolName || "",
+            args: m.toolArgs || "",
+            readOnly: false,
+            status: "done" as const,
+            output: m.toolOutput,
+            truncated: m.toolTruncated,
+          };
+        return { kind: "assistant", id: `h${i}`, text: m.content, reasoning: m.reasoning ?? "", streaming: false };
+      });
       return { ...s, items, seq: s.seq + visible.length };
     }
     case "local_notice": return { ...s, running: false, turnActive: false, seq: s.seq + 1, items: [...s.items, { kind: "notice", id: `n${s.seq}`, level: a.level, text: a.text }] };
@@ -431,6 +445,12 @@ export function useController() {
     if (!activeTabId) return;
     dispatchTo(activeTabId, { type: "user", text: `!${command}` });
     app.RunShell(command).catch(() => {});
+  }, [activeTabId, dispatchTo]);
+
+  const steer = useCallback((text: string) => {
+    if (!activeTabId) return;
+    dispatchTo(activeTabId, { type: "user", text });
+    app.Steer(text).catch(() => {});
   }, [activeTabId, dispatchTo]);
 
   const notice = useCallback((text: string, level: "info" | "warn" = "info") => {
@@ -631,7 +651,7 @@ export function useController() {
   return {
     state: activeState,
     activeTabId,
-    send, runShell, notice, cancel, approve, answerQuestion, setControllerMode,
+    send, runShell, steer, notice, cancel, approve, answerQuestion, setControllerMode,
     newSession, listSessions, listTrashedSessions, resumeSession, previewSession, deleteSession, restoreSession, purgeTrashedSession, renameSession,
     refreshMeta, pickWorkspace, switchWorkspace, compact, rewind, setModel, setEffort,
     fetchMemory, remember, forget, saveDoc,

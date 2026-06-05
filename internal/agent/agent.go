@@ -178,6 +178,13 @@ type Agent struct {
 	// reach it. nil leaves those tools to degrade gracefully.
 	jobs *jobs.Manager
 
+	// steerQueue holds mid-turn user messages queued while the agent is
+	// running. Each is consumed once per loop iteration, persisted to the
+	// session, and remains visible for the rest of the turn.
+	steerMu       sync.Mutex
+	steerQueue    []string
+	steerConsumed bool
+
 	// evidence is a per-user-turn ledger of host-observed tool receipts. It lets
 	// complete_step validate that cited evidence happened before the claim.
 	evidence *evidence.Ledger
@@ -292,6 +299,53 @@ func (a *Agent) SessionCache() (hit, miss int) {
 // means compaction is disabled for this agent.
 func (a *Agent) ContextWindow() int { return a.contextWindow }
 
+// mid-turn steer marker.
+const midTurnSteerPrefix = "[Mid-turn steer queued by the user. Do not treat this as a new task; use it only as additional guidance for the current task after completing the current step.]"
+
+func midTurnSteerMessage(text string) string {
+	return midTurnSteerPrefix + "\n" + text
+}
+
+// Steer queues a message for mid-turn injection.
+func (a *Agent) Steer(text string) {
+	a.steerMu.Lock()
+	defer a.steerMu.Unlock()
+	a.steerQueue = append(a.steerQueue, text)
+	a.steerConsumed = false
+}
+
+// SteerConsumed returns true when the steer queue became empty.
+func (a *Agent) SteerConsumed() bool {
+	a.steerMu.Lock()
+	defer a.steerMu.Unlock()
+	return a.steerConsumed
+}
+
+func (a *Agent) consumeSteer() (string, bool) {
+	a.steerMu.Lock()
+	defer a.steerMu.Unlock()
+	if len(a.steerQueue) == 0 {
+		return "", false
+	}
+	t := a.steerQueue[0]
+	a.steerQueue = a.steerQueue[1:]
+	a.steerConsumed = len(a.steerQueue) == 0
+	return t, true
+}
+
+func (a *Agent) clearSteerQueue() {
+	a.steerMu.Lock()
+	defer a.steerMu.Unlock()
+	a.steerQueue = nil
+	a.steerConsumed = false
+}
+
+func (a *Agent) steerQueueLen() int {
+	a.steerMu.Lock()
+	defer a.steerMu.Unlock()
+	return len(a.steerQueue)
+}
+
 // CompactRatio returns the fraction of the window at which auto-compaction
 // fires (e.g. 0.8). The status line uses it to show headroom to the next compact.
 func (a *Agent) CompactRatio() float64 { return a.compactRatio }
@@ -390,6 +444,10 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 // a round count. A positive maxSteps imposes an optional hard guard, surfaced as
 // a resumable notice when hit.
 func (a *Agent) Run(ctx context.Context, input string) error {
+	defer a.clearSteerQueue()
+	a.steerMu.Lock()
+	a.steerConsumed = false
+	a.steerMu.Unlock()
 	if a.evidence != nil {
 		a.evidence.Reset()
 	}
@@ -399,6 +457,11 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 
 	finalReadinessBlocks := 0
 	for step := 0; a.maxSteps <= 0 || step < a.maxSteps; step++ {
+		// Consume a queued steer and persist it to the session.
+		if text, ok := a.consumeSteer(); ok {
+			a.session.Add(provider.Message{Role: provider.RoleUser, Content: midTurnSteerMessage(text)})
+			a.sink.Emit(event.Event{Kind: event.Steer, Text: text})
+		}
 		schemas := a.tools.Schemas()
 		prefixShape := a.capturePrefixShape(schemas)
 		prevPrefixShape := a.lastPrefixShape
@@ -443,6 +506,9 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 				a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "final-answer readiness blocked: " + reason})
 				a.session.Add(provider.Message{Role: provider.RoleUser, Content: finalReadinessRetryMessage(reason)})
 				a.maybeCompact(ctx, usage)
+				continue
+			}
+			if a.steerQueueLen() > 0 {
 				continue
 			}
 			return nil // model gave a final answer

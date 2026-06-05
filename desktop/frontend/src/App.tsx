@@ -233,6 +233,7 @@ export default function App() {
     activeTabId,
     send,
     runShell,
+    steer,
     notice,
     cancel,
     approve,
@@ -334,6 +335,7 @@ export default function App() {
   const [footerHeight, setFooterHeight] = useState(0);
   const layoutRef = useRef<HTMLDivElement>(null);
   const footerRef = useRef<HTMLElement>(null);
+  const runningRef = useRef(state.running);
   const [layoutWidth, setLayoutWidth] = useState(0);
   const preferredWorkspacePanelWidth =
     rightDockMode === "context"
@@ -523,6 +525,12 @@ export default function App() {
     send(text);
   }, [pendingPlanRevision, send, state.running]);
 
+  // Keep runningRef in sync so handleSend sees the latest running value
+  // even inside a stale closure.
+  useEffect(() => {
+    runningRef.current = state.running;
+  }, [state.running]);
+
   // Memory drawer: opening fetches a fresh snapshot; writes re-fetch so the
   // panel reflects what landed on disk.
   const openMemory = useCallback(async () => {
@@ -585,10 +593,11 @@ export default function App() {
         notice(t("settings.themeUnknown", { name: arg }), "warn");
         return;
       }
+      if (runningRef.current) { steer(submitText.trim()); return; }
       await syncModeToController(mode);
       send(trimmed, submitText.trim());
     },
-    [switchModel, openMemory, syncModeToController, mode, send, runShell, notice, t],
+    [switchModel, openMemory, syncModeToController, mode, send, steer, runShell, notice, t],
   );
 
   const refreshTabMetas = useCallback(async (): Promise<TabMeta[]> => {

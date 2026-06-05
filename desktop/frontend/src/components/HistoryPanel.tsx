@@ -439,11 +439,22 @@ function previewMessagesToItems(messages: HistoryMessage[]): Item[] {
     .filter(
       (m) =>
         (m.role === "user" && m.content.trim() !== "") ||
-        (m.role === "assistant" && (m.content.trim() !== "" || (m.reasoning ?? "").trim() !== "")),
+        (m.role === "assistant" && (m.content.trim() !== "" || (m.reasoning ?? "").trim() !== "")) ||
+        (m.role === "tool" && (m.toolName ?? "").trim() !== ""),
     )
-    .map((m, i) =>
-      m.role === "user"
-        ? { kind: "user", id: `hp${i}`, text: m.content }
-        : { kind: "assistant", id: `hp${i}`, text: m.content, reasoning: m.reasoning ?? "", streaming: false },
-    );
+    .map((m, i) => {
+      if (m.role === "user") return { kind: "user", id: `hp${i}`, text: m.content };
+      if (m.role === "tool")
+        return {
+          kind: "tool",
+          id: m.toolId || `hp${i}`,
+          name: m.toolName || "",
+          args: m.toolArgs || "",
+          readOnly: false,
+          status: "done" as const,
+          output: m.toolOutput,
+          truncated: m.toolTruncated,
+        };
+      return { kind: "assistant", id: `hp${i}`, text: m.content, reasoning: m.reasoning ?? "", streaming: false };
+    });
 }

@@ -17,7 +17,8 @@ export type EventKind =
   | "turn_done"
   | "compaction_started"
   | "compaction_done"
-  | "retrying";
+  | "retrying"
+  | "steer";
 
 export interface WireCompaction {
   trigger?: string; // "auto" | "manual"
@@ -189,6 +190,11 @@ export interface HistoryMessage {
   role: string;
   content: string;
   reasoning?: string;
+  toolName?: string;
+  toolArgs?: string;
+  toolOutput?: string;
+  toolId?: string;
+  toolTruncated?: boolean;
 }
 
 // CheckpointMeta is one rewind point (a user turn) for the rewind UI.
