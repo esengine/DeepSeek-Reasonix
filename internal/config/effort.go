@@ -18,13 +18,14 @@ type EffortCapability struct {
 // provider entry. Provider implementations still decide how a stored effort is
 // serialized into requests.
 func EffortCapabilityForEntry(e *ProviderEntry) EffortCapability {
-	if e != nil && len(e.SupportedEfforts) > 0 {
-		levels := make([]string, 0, len(e.SupportedEfforts)+1)
+	supported := normalizedSupportedEfforts(e)
+	if len(supported) > 0 {
+		levels := make([]string, 0, len(supported)+1)
 		levels = append(levels, "auto")
-		levels = append(levels, e.SupportedEfforts...)
-		def := e.DefaultEffort
-		if def == "" || !containsString(e.SupportedEfforts, def) {
-			def = e.SupportedEfforts[0]
+		levels = append(levels, supported...)
+		def := normalizeEffortLevel(e.DefaultEffort)
+		if def == "" || !containsString(supported, def) {
+			def = supported[0]
 		}
 		return EffortCapability{Supported: true, Levels: levels, Default: def}
 	}
@@ -41,18 +42,19 @@ func EffortCapabilityForEntry(e *ProviderEntry) EffortCapability {
 // NormalizeEffort maps a user-supplied /effort level into the value stored in
 // config. Empty means auto/provider default.
 func NormalizeEffort(e *ProviderEntry, raw string) (string, error) {
-	level := strings.ToLower(strings.TrimSpace(raw))
+	level := normalizeEffortLevel(raw)
 	if level == "" {
 		return "", fmt.Errorf("usage: /effort auto|<level>")
 	}
 	if level == "auto" {
 		return "", nil
 	}
-	if e != nil && len(e.SupportedEfforts) > 0 {
-		if containsString(e.SupportedEfforts, level) {
+	supported := normalizedSupportedEfforts(e)
+	if len(supported) > 0 {
+		if containsString(supported, level) {
 			return level, nil
 		}
-		return "", fmt.Errorf("usage: /effort auto|%s", strings.Join(e.SupportedEfforts, "|"))
+		return "", fmt.Errorf("usage: /effort auto|%s", strings.Join(supported, "|"))
 	}
 	switch {
 	case isDeepSeekEntry(e):
@@ -91,7 +93,50 @@ func EffortDisplay(e *ProviderEntry) string {
 	if e == nil || strings.TrimSpace(e.Effort) == "" {
 		return "auto"
 	}
-	return strings.ToLower(strings.TrimSpace(e.Effort))
+	return normalizeEffortLevel(e.Effort)
+}
+
+// EffectiveEffort resolves the provider-visible effort value. Explicit
+// ProviderEntry.Effort wins; otherwise a configured SupportedEfforts list makes
+// DefaultEffort (or the first supported level) the runtime default. Empty means
+// provider default / omit the provider-specific effort field.
+func EffectiveEffort(e *ProviderEntry) string {
+	if e == nil {
+		return ""
+	}
+	if effort := normalizeEffortLevel(e.Effort); effort != "" {
+		return effort
+	}
+	supported := normalizedSupportedEfforts(e)
+	if len(supported) == 0 {
+		return ""
+	}
+	def := normalizeEffortLevel(e.DefaultEffort)
+	if def == "" || !containsString(supported, def) {
+		return supported[0]
+	}
+	return def
+}
+
+func normalizeEffortConfig(c *Config) {
+	if c == nil {
+		return
+	}
+	for i := range c.Providers {
+		normalizeProviderEffortFields(&c.Providers[i])
+	}
+}
+
+func normalizeProviderEffortFields(e *ProviderEntry) {
+	if e == nil {
+		return
+	}
+	e.Effort = normalizeEffortLevel(e.Effort)
+	if e.Effort == "off" {
+		e.Effort = ""
+	}
+	e.DefaultEffort = normalizeEffortLevel(e.DefaultEffort)
+	e.SupportedEfforts = normalizedSupportedEfforts(e)
 }
 
 func isDeepSeekEntry(e *ProviderEntry) bool {
@@ -113,4 +158,25 @@ func containsString(haystack []string, needle string) bool {
 		}
 	}
 	return false
+}
+
+func normalizeEffortLevel(s string) string {
+	return strings.ToLower(strings.TrimSpace(s))
+}
+
+func normalizedSupportedEfforts(e *ProviderEntry) []string {
+	if e == nil || len(e.SupportedEfforts) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(e.SupportedEfforts))
+	seen := map[string]bool{}
+	for _, raw := range e.SupportedEfforts {
+		level := normalizeEffortLevel(raw)
+		if level == "" || level == "auto" || seen[level] {
+			continue
+		}
+		seen[level] = true
+		out = append(out, level)
+	}
+	return out
 }

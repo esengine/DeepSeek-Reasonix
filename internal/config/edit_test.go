@@ -763,6 +763,68 @@ func TestNormalizeEffortCustomDefaultEffort(t *testing.T) {
 	if got, err := NormalizeEffort(e, "auto"); err != nil || got != "" {
 		t.Fatalf("NormalizeEffort(auto) = %q/%v, want empty/nil", got, err)
 	}
+	e.Effort = "high"
+	if got := EffectiveEffort(e); got != "high" {
+		t.Fatalf("explicit effort should win over default_effort, got %q", got)
+	}
+}
+
+func TestNormalizeEffortCustomLevelsCaseInsensitive(t *testing.T) {
+	e := &ProviderEntry{
+		Name:             "custom",
+		Kind:             "openai",
+		BaseURL:          "https://example.com",
+		SupportedEfforts: []string{"Low", "MEDIUM", "medium", "auto", " "},
+		DefaultEffort:    "MEDIUM",
+	}
+	cap := EffortCapabilityForEntry(e)
+	wantLevels := []string{"auto", "low", "medium"}
+	if len(cap.Levels) != len(wantLevels) {
+		t.Fatalf("levels = %v, want %v", cap.Levels, wantLevels)
+	}
+	for i, want := range wantLevels {
+		if cap.Levels[i] != want {
+			t.Fatalf("levels[%d] = %q, want %q", i, cap.Levels[i], want)
+		}
+	}
+	if cap.Default != "medium" {
+		t.Fatalf("default = %q, want medium", cap.Default)
+	}
+	got, err := NormalizeEffort(e, "MEDIUM")
+	if err != nil || got != "medium" {
+		t.Fatalf("NormalizeEffort(MEDIUM) = %q/%v, want medium/nil", got, err)
+	}
+	if got := EffectiveEffort(e); got != "medium" {
+		t.Fatalf("EffectiveEffort = %q, want medium", got)
+	}
+}
+
+func TestUpsertProviderNormalizesCustomEffortFields(t *testing.T) {
+	c := &Config{}
+	if err := c.UpsertProvider(ProviderEntry{
+		Name:             "custom",
+		Kind:             "openai",
+		BaseURL:          "https://example.com",
+		Model:            "m",
+		Effort:           " HIGH ",
+		SupportedEfforts: []string{"Low", "MEDIUM", "medium", "auto"},
+		DefaultEffort:    " LOW ",
+	}); err != nil {
+		t.Fatalf("UpsertProvider: %v", err)
+	}
+	got, _ := c.Provider("custom")
+	if got.Effort != "high" || got.DefaultEffort != "low" {
+		t.Fatalf("effort/default = %q/%q, want high/low", got.Effort, got.DefaultEffort)
+	}
+	wantSupported := []string{"low", "medium"}
+	if len(got.SupportedEfforts) != len(wantSupported) {
+		t.Fatalf("supported_efforts = %v, want %v", got.SupportedEfforts, wantSupported)
+	}
+	for i, want := range wantSupported {
+		if got.SupportedEfforts[i] != want {
+			t.Fatalf("supported_efforts[%d] = %q, want %q", i, got.SupportedEfforts[i], want)
+		}
+	}
 }
 
 func TestEffortCapabilityEmptySupportedEffortsNotConfigurable(t *testing.T) {

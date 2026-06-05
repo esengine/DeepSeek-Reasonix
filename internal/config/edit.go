@@ -74,6 +74,7 @@ func (c *Config) SetAutoPlan(mode string) error {
 // validated; whether the kind is actually registered and the key resolves is
 // checked later by provider.New / Validate, which give actionable errors.
 func (c *Config) UpsertProvider(e ProviderEntry) error {
+	normalizeProviderEffortFields(&e)
 	if err := validateProvider(e); err != nil {
 		return err
 	}

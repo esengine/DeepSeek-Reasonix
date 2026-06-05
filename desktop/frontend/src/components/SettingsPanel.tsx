@@ -679,7 +679,7 @@ function ProviderEditor({
   };
 
   const addCustomEffort = () => {
-    const v = customEffortDraft.trim();
+    const v = customEffortDraft.trim().toLowerCase();
     if (!v || supportedEfforts.includes(v)) {
       setCustomEffortDraft("");
       return;
@@ -763,7 +763,7 @@ function ProviderEditor({
           type="button"
           className="btn btn--small"
           disabled={
-            !customEffortDraft.trim() || supportedEfforts.includes(customEffortDraft.trim())
+            !customEffortDraft.trim() || supportedEfforts.includes(customEffortDraft.trim().toLowerCase())
           }
           onClick={addCustomEffort}
         >

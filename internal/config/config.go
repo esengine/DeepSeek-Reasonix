@@ -729,6 +729,7 @@ func LoadForRoot(root string) (*Config, error) {
 	// the v2 config or .mcp.json already declared wins on a name collision.
 	cfg.mergeMCPJSON(loadLegacyMCP(legacyConfigPath()))
 	normalizeLegacyEffort(cfg)
+	normalizeEffortConfig(cfg)
 	backfillDeepSeekPro(cfg)
 	// First run (no config file anywhere): keep CodeGraph off until the user opts
 	// in. An existing config — even one without a [codegraph] section — keeps the
@@ -829,6 +830,8 @@ func LoadForEdit(path string) *Config {
 	if err := mergeFile(cfg, path); err != nil {
 		slog.Warn("config: load for edit failed, using defaults", "path", path, "err", err)
 	}
+	normalizeLegacyEffort(cfg)
+	normalizeEffortConfig(cfg)
 	return cfg
 }
 

@@ -657,12 +657,12 @@ func NewProviderWithProxy(e *config.ProviderEntry, proxy netclient.ProxySpec) (p
 		Model:   e.Model,
 		APIKey:  e.APIKey(),
 		// Pass the key's env var so auth failures can name where to fix it, plus
-		// provider-kind-specific knobs (the anthropic provider reads thinking/effort;
-		// the openai one ignores them).
+		// provider-kind-specific knobs. EffectiveEffort applies a configured
+		// default_effort when the user has not explicitly selected /effort.
 		Extra: map[string]any{
 			"api_key_env": e.APIKeyEnv,
 			"thinking":    e.Thinking,
-			"effort":      e.Effort,
+			"effort":      config.EffectiveEffort(e),
 			"proxy_spec":  proxy,
 		},
 	})
