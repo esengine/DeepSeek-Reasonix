@@ -477,16 +477,6 @@ export function useController() {
   }, []);
 
   useEffect(() => {
-    // Stream batching: text/reasoning deltas pile up faster than the display can
-    // repaint (200 tok/s ≈ one delta per 5 ms; rAF is 16 ms). We coalesce those
-    // into a single reducer pass per frame. Non-text events (tool_dispatch,
-    // usage, notice, turn_started/done, message) break the batch first so their
-    // ordering against earlier text is preserved — a tool call that follows
-    // "Reading foo.ts…" should appear after that text, not interleaved.
-    //
-    // The flusher walks the deltas in order, applying each through the same
-    // reducer path as the live wire event; that's cheaper than a special-case
-    // bulk reducer and keeps the state shape identical to the un-batched case.
     const textBatch = createRafBatch<WireEvent>((batch) => {
       for (const e of batch) dispatch({ type: "event", e });
     });
@@ -494,8 +484,6 @@ export function useController() {
       if (e.kind === "text" || e.kind === "reasoning") {
         textBatch.push(e);
       } else {
-        // Ordering: flush any queued deltas BEFORE the structural event, so the
-        // dispatch order in the reducer matches the order the kernel emitted.
         textBatch.drain();
         dispatch({ type: "event", e });
       }
