@@ -87,12 +87,18 @@ type SessionNewParams struct {
 	MCPServers []MCPServerSpec `json:"mcpServers,omitempty"`
 }
 
+// EnvVariable represents a single environment variable with a name and value.
+type EnvVariable struct {
+	Name string `json:"name"`
+	Value string `json:"value"`
+}
+
 // MCPServerSpec describes one stdio MCP server the client asks the agent to run.
 type MCPServerSpec struct {
-	Name    string            `json:"name"`
-	Command string            `json:"command,omitempty"`
-	Args    []string          `json:"args,omitempty"`
-	Env     map[string]string `json:"env,omitempty"`
+	Name    string   `json:"name"`
+	Command string   `json:"command,omitempty"`
+	Args    []string `json:"args,omitempty"`
+	Env     []EnvVariable `json:"env,omitempty"`
 }
 
 // SessionNewResult returns the opaque id used to address the session thereafter.

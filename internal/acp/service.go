@@ -318,12 +318,16 @@ func mcpSpecs(in []MCPServerSpec) []plugin.Spec {
 	}
 	out := make([]plugin.Spec, 0, len(in))
 	for _, m := range in {
+		env := make(map[string]string)
+		for _, variable := range m.Env {
+			env[variable.Name] = variable.Value
+		}
 		out = append(out, plugin.Spec{
 			Name:    m.Name,
 			Type:    "stdio",
 			Command: m.Command,
 			Args:    m.Args,
-			Env:     m.Env,
+			Env:     env,
 		})
 	}
 	return out

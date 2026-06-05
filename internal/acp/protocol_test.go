@@ -138,7 +138,7 @@ func TestMcpSpecsNil(t *testing.T) {
 
 func TestMcpSpecsConversion(t *testing.T) {
 	in := []MCPServerSpec{
-		{Name: "codegraph", Command: "codegraph", Args: []string{"--stdio"}, Env: map[string]string{"HOME": "/tmp"}},
+		{Name: "codegraph", Command: "codegraph", Args: []string{"--stdio"}, Env: []EnvVariable{{Name:"HOME", Value: "/tmp"}}},
 	}
 	got := mcpSpecs(in)
 	if len(got) != 1 {
