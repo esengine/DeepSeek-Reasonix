@@ -89,12 +89,13 @@ func (a *App) Platform() string {
 // off the initialization in a background goroutine so the webview loads immediately.
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	installSystemQuitHook()
 
 	go a.restoreOrBuildTabs()
 }
 
 func (a *App) beforeClose(ctx context.Context) bool {
-	if a.forceQuit.Swap(false) {
+	if a.forceQuit.Swap(false) || consumeSystemQuitRequested() {
 		return false
 	}
 	cfg, _, err := a.loadDesktopUserConfigForEdit()

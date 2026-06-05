@@ -73,6 +73,28 @@ func TestEffortDefaultsBeforeStartup(t *testing.T) {
 	}
 }
 
+func TestBeforeCloseAllowsSystemQuitWhenBackgroundCloseEnabled(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	consumeSystemQuitRequested()
+	t.Cleanup(func() { consumeSystemQuitRequested() })
+
+	userCfg := config.LoadForEdit(config.UserConfigPath())
+	if err := userCfg.SetDesktopCloseBehavior("background"); err != nil {
+		t.Fatal(err)
+	}
+	if err := userCfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatal(err)
+	}
+
+	markSystemQuitRequested()
+	if prevent := NewApp().beforeClose(context.Background()); prevent {
+		t.Fatal("system quit should bypass background close-to-tray behavior")
+	}
+	if consumeSystemQuitRequested() {
+		t.Fatal("system quit marker should be consumed by beforeClose")
+	}
+}
+
 func TestEmitReadyInvokesReadyHook(t *testing.T) {
 	app := NewApp()
 	var calls int32
