@@ -284,8 +284,8 @@ export default function App() {
   const [workspacePreviewActive, setWorkspacePreviewActive] = useState(false);
   const [workspacePanelResizing, setWorkspacePanelResizing] = useState(false);
   const [workspacePanelMaximized, setWorkspacePanelMaximized] = useState(false);
-  const [workspacePreviewModeActive, setWorkspacePreviewModeActive] = useState(false);
-  const [workspaceChangesRefreshKey, setWorkspaceChangesRefreshKey] = useState(0);
+  const [_workspacePreviewModeActive, _setWorkspacePreviewModeActive] = useState(false);
+  const [_workspaceChangesRefreshKey, setWorkspaceChangesRefreshKey] = useState(0);
   const [workspaceTreeRefreshKey, setWorkspaceTreeRefreshKey] = useState(0);
   const [rightDockMode, setRightDockMode] = useState<RightDockMode>("files");
   const [dockRefreshKey, setDockRefreshKey] = useState(0);
@@ -297,6 +297,7 @@ export default function App() {
   const [topicTitleDraft, setTopicTitleDraft] = useState("");
   const topicRenameSkipCommitRef = useRef(false);
   const topicRenameCommitHandledRef = useRef(false);
+  const [composerRestoreText, setComposerRestoreText] = useState<{ id: number; text: string } | null>(null);
 
   // Persist window geometry across launches.
   useWindowStatePersistence();
@@ -465,7 +466,13 @@ export default function App() {
   // not advance the canonical panel state. It stays visible through the final
   // all-completed update, and can be dismissed by the user (the ✕). A dismissal
   // is keyed to that list's id, so a fresh accepted todo_write brings the panel
-  // back.
+  // back. When the model doesn't call todo_write after each step (common with
+  // third-party models), the panel auto-advances: it counts successful writer
+  // tool completions after the last todo_write and uses that to flip items from
+  // in_progress → completed and the next pending → in_progress. This gives the
+  // user real-time progress visibility even when the model skips todo updates.
+  // If the model later calls todo_write with its own list, that takes priority
+  // (the scan finds a newer item and the auto-advance counter resets relative to it).
   const todoEntry = useMemo(() => {
     for (let i = state.items.length - 1; i >= 0; i--) {
       const it = state.items[i];
@@ -476,7 +483,61 @@ export default function App() {
     return null;
   }, [state.items]);
   const todoItem = todoEntry?.item ?? null;
-  const todos = useMemo(() => (todoItem ? parseTodos(todoItem.args) : []), [todoItem]);
+  const baseTodos = useMemo(() => (todoItem ? parseTodos(todoItem.args) : []), [todoItem]);
+
+  // Count successful writer tool completions after the last todo_write.
+  const stepsAfterTodo = useMemo(() => {
+    if (!todoItem) return 0;
+    let count = 0;
+    let foundTodo = false;
+    for (const it of state.items) {
+      if (it === todoItem) {
+        foundTodo = true;
+        continue;
+      }
+      if (!foundTodo) continue;
+      if (it.kind === "tool" && it.status === "done" && !it.error && !it.readOnly && it.name !== "todo_write" && it.name !== "complete_step") {
+        count++;
+      }
+    }
+    return count;
+  }, [state.items, todoItem]);
+
+  // Auto-advance: shift items from pending/in_progress to completed based on
+  // the number of writer steps completed after the last todo_write.
+  const todos = useMemo(() => {
+    if (baseTodos.length === 0 || stepsAfterTodo === 0) return baseTodos;
+    const advanced = baseTodos.map((t) => ({ ...t }));
+    let remaining = stepsAfterTodo;
+    // First ensure there's an in_progress item
+    if (!advanced.some((t) => t.status === "in_progress")) {
+      for (const t of advanced) {
+        if (t.status === "pending") {
+          t.status = "in_progress";
+          break;
+        }
+      }
+    }
+    for (let i = 0; i < advanced.length && remaining > 0; i++) {
+      if (advanced[i].status === "in_progress") {
+        advanced[i].status = "completed";
+        advanced[i].activeForm = undefined;
+        remaining--;
+        // Mark next pending as in_progress
+        for (let j = i + 1; j < advanced.length; j++) {
+          if (advanced[j].status === "pending") {
+            advanced[j].status = "in_progress";
+            break;
+          }
+        }
+        // Restart scan from beginning to catch the new in_progress
+        i = -1;
+      }
+    }
+    return advanced;
+  }, [baseTodos, stepsAfterTodo]);
+
+
   const [dismissedTodo, setDismissedTodo] = useState<string | null>(null);
   const showTodos = shouldShowTodoPanel(todoItem?.id, dismissedTodo, todos);
   const [todoNow, setTodoNow] = useState(() => Date.now());
@@ -545,6 +606,16 @@ export default function App() {
   }, [fetchMemory]);
 
   const closeMemory = useCallback(() => setMemView(null), []);
+
+  // handleRewind wraps the controller's rewind to also restore the composer
+  // text from the checkpoint's stored prompt, so the user can edit and resubmit.
+  const handleRewind = useCallback(async (turn: number, scope: string) => {
+    const prompt = await app.RewindPrompt(turn).catch(() => "");
+    await rewind(turn, scope);
+    if (prompt) {
+      setComposerRestoreText((prev) => ({ id: (prev?.id ?? 0) + 1, text: prompt }));
+    }
+  }, [rewind]);
 
   // handleSend intercepts the slash commands that need a desktop-native action
   // before they reach the backend: "/model <ref>" rebuilds on that model, and
@@ -928,20 +999,6 @@ export default function App() {
     await refreshTabMetas();
     setTabRevealSignal((signal) => signal + 1);
   }, [activeTab?.scope, activeTab?.workspaceRoot, openGlobalTab, openProjectTab, refreshTabMetas, state.meta?.cwd]);
-
-  const handleMessageAction = useCallback(async (turn: number, scope: string) => {
-    await rewind(turn, scope);
-    if (scope === "fork") {
-      await refreshTabMetas();
-      setProjectRevision((value) => value + 1);
-      setTabRevealSignal((signal) => signal + 1);
-      return;
-    }
-    if (scope === "code" || scope === "both") {
-      setDockRefreshKey((value) => value + 1);
-      setProjectRevision((value) => value + 1);
-    }
-  }, [refreshTabMetas, rewind]);
 
   const handleOpenTopic = useCallback(async (scope: string, workspaceRoot: string, topicId: string) => {
     if (scope === "global") {
@@ -1386,7 +1443,7 @@ export default function App() {
 	                live={state.live}
 	                footerHeight={footerHeight}
 	                onPrompt={send}
-	                onRewind={handleMessageAction}
+	                onRewind={handleRewind}
 	                checkpoints={state.checkpoints}
 	                actionPending={state.messageAction != null}
 	                rewindDisabled={state.running || state.messageAction != null || state.approval != null || state.ask != null}
@@ -1438,6 +1495,7 @@ export default function App() {
               onPickFolder={switchFolder}
               onRemoveWorkspace={removeWorkspace}
               insertRequest={composerInsertRequest}
+              restoreText={composerRestoreText}
 	              disabled={state.meta?.ready === false || state.messageAction != null || state.approval != null || state.ask != null}
 	              decisionPending={state.messageAction != null || state.approval != null || state.ask != null}
               ready={state.meta?.ready === true}

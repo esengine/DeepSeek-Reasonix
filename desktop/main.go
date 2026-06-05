@@ -47,7 +47,7 @@ func main() {
 	app := NewApp()
 
 	// Restore saved window size, or fall back to the default.
-	width, height := 1240, 720
+	width, height := 1400, 800
 	if saved, ok := loadWindowState(); ok {
 		if saved.Width > 0 {
 			width = saved.Width

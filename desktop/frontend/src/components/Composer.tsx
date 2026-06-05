@@ -134,6 +134,7 @@ export function Composer({
   onPickFolder,
   onRemoveWorkspace,
   insertRequest,
+  restoreText,
   disabled,
   decisionPending = false,
   ready,
@@ -159,6 +160,7 @@ export function Composer({
   onPickFolder: (path?: string) => Promise<string>;
   onRemoveWorkspace: (path: string) => Promise<void>;
   insertRequest?: ComposerInsertRequest | null;
+  restoreText?: { id: number; text: string } | null;
   disabled?: boolean;
   decisionPending?: boolean;
   // ready/cwd re-trigger the command fetch: Commands() returns only built-ins
@@ -426,6 +428,21 @@ export function Composer({
     }
     insertTextAtCaret(insertRequest.text);
   }, [insertRequest]);
+
+  // Restore composer text after a rewind (replaces the entire content).
+  const consumedRestoreIdRef = useRef(0);
+  useEffect(() => {
+    if (!restoreText || restoreText.id === consumedRestoreIdRef.current) return;
+    consumedRestoreIdRef.current = restoreText.id;
+    setText(restoreText.text);
+    requestAnimationFrame(() => {
+      const ta = taRef.current;
+      if (ta) {
+        ta.selectionStart = ta.selectionEnd = ta.value.length;
+        ta.focus();
+      }
+    });
+  }, [restoreText]);
 
   const expandPastedBlocks = (displayText: string): string => {
     let expanded = displayText;

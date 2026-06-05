@@ -42,6 +42,7 @@ type Config struct {
 	ConfigVersion int               `toml:"config_version"`
 	DefaultModel  string            `toml:"default_model"`
 	Language      string            `toml:"language"` // ui/model language tag (e.g. "zh"); empty = auto-detect from $LANG / $REASONIX_LANG
+	FileEncoding  string            `toml:"file_encoding"` // project file encoding (e.g. "UTF-8", "GB18030"); empty = auto-detect
 	UI            UIConfig          `toml:"ui"`
 	Desktop       DesktopConfig     `toml:"desktop"`
 	Agent         AgentConfig       `toml:"agent"`

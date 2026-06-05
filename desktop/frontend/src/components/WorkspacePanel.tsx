@@ -171,7 +171,7 @@ export function WorkspacePanel({
   onToggleMaximized,
   onPreviewModeChange,
   onAddToChat,
-  changesRefreshKey,
+  changesRefreshKey: _changesRefreshKey,
   treeRefreshKey,
   onRequestPanelWidth,
   refreshKey,
@@ -602,7 +602,7 @@ export function WorkspacePanel({
     const target = treeMenu;
     setTreeMenu(null);
     try {
-      const file = await app.ReadFile(target.path, "");
+      const file = await app.ReadFile(target.path, projectEncoding || "");
       if (file.err || file.binary) {
         onAddToChat?.(formatWorkspaceReference(target.path, false));
         return;
@@ -924,22 +924,21 @@ export function WorkspacePanel({
                 </button>
               </Tooltip>
             )}
+            <Tooltip label={t("workspace.encodingOverride")}>
+              <select
+                className="workspace-encoding-select"
+                value={projectEncoding}
+                onChange={(e) => void changeProjectEncoding(e.target.value)}
+                title={projectEncoding ? t("workspace.encodingTitle").replace("{enc}", projectEncoding) : t("workspace.encoding")}
+              >
+                {ENCODING_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.value === "" ? t("workspace.encodingAuto") : opt.label}
+                  </option>
+                ))}
+              </select>
+            </Tooltip>
           </div>
-          </div>
-          <Tooltip label={t("workspace.encodingOverride")}>
-            <select
-              className="workspace-encoding-select"
-              value={projectEncoding}
-              onChange={(e) => void changeProjectEncoding(e.target.value)}
-              title={projectEncoding ? t("workspace.encodingTitle").replace("{enc}", projectEncoding) : t("workspace.encoding")}
-            >
-              {ENCODING_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.value === "" ? t("workspace.encodingAuto") : opt.label}
-                </option>
-              ))}
-            </select>
-          </Tooltip>
         )}
 
         <div className="workspace-search">

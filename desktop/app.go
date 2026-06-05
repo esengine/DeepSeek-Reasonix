@@ -518,6 +518,18 @@ func (a *App) Rewind(turn int, scope string) error {
 	return ctrl.Rewind(turn, s)
 }
 
+// RewindPrompt returns the user prompt text for a given turn, so the frontend
+// can restore the composer input after a rewind.
+func (a *App) RewindPrompt(turn int) string {
+	a.mu.RLock()
+	ctrl := a.activeCtrlLocked()
+	a.mu.RUnlock()
+	if ctrl == nil {
+		return ""
+	}
+	return ctrl.RewindPrompt(turn)
+}
+
 // Fork branches the conversation at the start of turn into a new session tab
 // (preserving the current tab), keeping code intact, and switches to the new tab.
 func (a *App) Fork(turn int) (TabMeta, error) {
@@ -2623,7 +2635,10 @@ func (a *App) SearchFileRefs(query string) []DirEntry {
 }
 
 // ReadFile returns a small text preview for a file under the current workspace.
-func (a *App) ReadFile(rel string) FilePreview {
+// When encOverride is non-empty (e.g. "UTF-8", "GB18030"), that encoding is
+// forced instead of auto-detection, so the workspace panel can preview files
+// in the project's configured encoding.
+func (a *App) ReadFile(rel string, encOverride string) FilePreview {
 	out := FilePreview{Path: rel}
 	path, ok, err := a.workspacePath(rel)
 	if err != nil || !ok {
@@ -2661,6 +2676,16 @@ func (a *App) ReadFile(rel string) FilePreview {
 	if len(data) > filePreviewLimit {
 		data = data[:filePreviewLimit]
 		out.Truncated = true
+	}
+
+	// When an encoding override is provided, force it and skip auto-detection.
+	if encOverride != "" {
+		if forced, ok := fileenc.ParseName(encOverride); ok {
+			decoded := fileenc.Decode(data, forced)
+			out.Body = string(decoded)
+			return out
+		}
+		// Invalid override name — fall through to auto-detection.
 	}
 
 	// Check for BOM first (just the first 2-3 bytes — always complete

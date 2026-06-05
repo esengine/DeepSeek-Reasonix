@@ -127,6 +127,23 @@ func (s *Store) Bounds() map[int]int {
 	return m
 }
 
+// PromptForTurn returns the user prompt stored for the given turn number,
+// or "" if no checkpoint exists for that turn. Used by the frontend to
+// restore the composer text after a rewind.
+func (s *Store) PromptForTurn(turn int) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, c := range s.done {
+		if c.Turn == turn {
+			return c.Prompt
+		}
+	}
+	if s.cur != nil && s.cur.Turn == turn {
+		return s.cur.Prompt
+	}
+	return ""
+}
+
 // Snapshot records the pre-edit state of the file a writer is about to change.
 // Only the first touch of a path in the current turn is kept (that is its
 // turn-start content). A no-op before the first Begin.

@@ -907,8 +907,16 @@ func (c *Controller) rewindFail(err error) error {
 // turn (or a later one) changed to its pre-turn content; Conversation truncates the
 // message log back to that turn; Both does both. Refused while a turn is running.
 // Conversation rewind relies on the live boundary recorded at turn start, so it is
-// unavailable for turns inherited from a resumed session (code rewind still works).
-// Frontends re-render their transcript from History after the call.
+// RewindPrompt returns the user prompt text for the given turn number, so the
+// frontend can restore the composer input after a rewind.
+func (c *Controller) RewindPrompt(turn int) string {
+	if c.cp == nil {
+		return ""
+	}
+	return c.cp.PromptForTurn(turn)
+}
+
+// Rewind rolls back conversation and/or code to a specific turn boundary.
 func (c *Controller) Rewind(turn int, scope RewindScope) error {
 	if c.cp == nil || c.executor == nil {
 		return c.rewindFail(fmt.Errorf("checkpoints unavailable"))
