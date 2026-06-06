@@ -24,6 +24,8 @@ import type { Item } from "../lib/useController";
 
 type ToolItem = Extract<Item, { kind: "tool" }>;
 
+const SUBAGENT_TOOLS = new Set(["task", "run_skill", "explore", "research", "review", "security_review"]);
+
 const ICONS: Record<string, LucideIcon> = {
   edit_file: FilePen,
   multi_edit: FilePen,
@@ -73,6 +75,10 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
   const Icon = ICONS[item.name] ?? Wrench;
   const nested = subcalls ?? [];
   const hasNested = nested.length > 0;
+  const profileText =
+    SUBAGENT_TOOLS.has(item.name) && item.profile
+      ? [item.profile.model, item.profile.effort ? `effort ${item.profile.effort}` : ""].filter(Boolean).join(" · ")
+      : "";
 
   // A task's summary is its step count; everything else derives from the result.
   const summary =
@@ -123,6 +129,7 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
         <Icon className="tool__icon" size={14} />
         <span className="tool__name">{item.name}</span>
         {subject && <span className="tool__subject">{subject}</span>}
+        {profileText && <span className="tool__profile">{profileText}</span>}
         <span className="tool__meta">
           <StatusGlyph status={item.status} />
         </span>

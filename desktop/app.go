@@ -3,8 +3,13 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"io"
+	"mime"
+	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -65,12 +70,177 @@ type App struct {
 	forceQuit atomic.Bool
 	trayReady bool
 	tray      *desktopTray
+
+	mediaTokens *mediaTokenStore
+}
+
+// mediaTokenEntry holds metadata for a workspace media file served via temporary URL.
+type mediaTokenEntry struct {
+	absPath   string
+	filename  string
+	mime      string
+	kind      string
+	size      int64
+	modTime   time.Time
+	createdAt time.Time
+	expiresAt time.Time
+}
+
+// mediaTokenStore manages temporary tokens that grant access to workspace files
+// through the AssetServer middleware. Tokens expire after a fixed TTL and are
+// capped at a maximum count; creating a new token evicts the oldest entry when
+// the store is full.
+type mediaTokenStore struct {
+	mu    sync.Mutex
+	byTok map[string]*mediaTokenEntry
+	order []string // oldest first
+	maxN  int
+	ttl   time.Duration
+}
+
+const mediaTokenMax = 256
+
+func newMediaTokenStore() *mediaTokenStore {
+	return &mediaTokenStore{
+		byTok: map[string]*mediaTokenEntry{},
+		maxN:  mediaTokenMax,
+		ttl:   10 * time.Minute,
+	}
+}
+
+func (s *mediaTokenStore) cleanupLocked() {
+	now := time.Now()
+	for len(s.order) > 0 {
+		tok := s.order[0]
+		e := s.byTok[tok]
+		if e == nil {
+			s.order = s.order[1:]
+			continue
+		}
+		if !now.Before(e.expiresAt) {
+			delete(s.byTok, tok)
+			s.order = s.order[1:]
+			continue
+		}
+		break
+	}
+	for len(s.order) > s.maxN {
+		oldest := s.order[0]
+		delete(s.byTok, oldest)
+		s.order = s.order[1:]
+	}
+}
+
+func (s *mediaTokenStore) create(absPath, filename, mime, kind string, size int64, modTime time.Time) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.cleanupLocked()
+
+	tok := make([]byte, 16)
+	if _, err := rand.Read(tok); err != nil {
+		panic("crypto/rand.Read failed: " + err.Error())
+	}
+	token := hex.EncodeToString(tok)
+
+	now := time.Now()
+	s.byTok[token] = &mediaTokenEntry{
+		absPath:   absPath,
+		filename:  filename,
+		mime:      mime,
+		kind:      kind,
+		size:      size,
+		modTime:   modTime,
+		createdAt: now,
+		expiresAt: now.Add(s.ttl),
+	}
+	s.order = append(s.order, token)
+
+	// Trim oldest if the new token pushed us over the limit.
+	for len(s.order) > s.maxN {
+		oldest := s.order[0]
+		delete(s.byTok, oldest)
+		s.order = s.order[1:]
+	}
+
+	return token
+}
+
+func (s *mediaTokenStore) get(token string) *mediaTokenEntry {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e := s.byTok[token]
+	if e == nil {
+		return nil
+	}
+	if time.Now().After(e.expiresAt) {
+		delete(s.byTok, token)
+		return nil
+	}
+	return e
+}
+
+func (a *App) ensureMediaTokenStore() *mediaTokenStore {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.mediaTokens == nil {
+		a.mediaTokens = newMediaTokenStore()
+	}
+	return a.mediaTokens
+}
+
+// workspaceMediaMiddleware returns an HTTP middleware that intercepts
+// /__reasonix_workspace_media/{token}/{filename} requests and serves the
+// corresponding workspace file. All other paths pass through to the Wails
+// default asset handler unchanged.
+func (a *App) workspaceMediaMiddleware() func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			prefix := "/__reasonix_workspace_media/"
+			if !strings.HasPrefix(r.URL.Path, prefix) {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			if r.Method != http.MethodGet && r.Method != http.MethodHead {
+				w.WriteHeader(http.StatusMethodNotAllowed)
+				return
+			}
+
+			rest := strings.TrimPrefix(r.URL.Path, prefix)
+			parts := strings.SplitN(rest, "/", 2)
+			if len(parts) == 0 || parts[0] == "" {
+				http.NotFound(w, r)
+				return
+			}
+			token := parts[0]
+
+			entry := a.ensureMediaTokenStore().get(token)
+			if entry == nil {
+				http.NotFound(w, r)
+				return
+			}
+
+			f, err := os.Open(entry.absPath)
+			if err != nil {
+				http.NotFound(w, r)
+				return
+			}
+			defer f.Close()
+
+			w.Header().Set("Content-Type", entry.mime)
+			w.Header().Set("Content-Disposition", mime.FormatMediaType("inline", map[string]string{"filename": entry.filename}))
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+			w.Header().Set("Cache-Control", "private, max-age=600")
+			http.ServeContent(w, r, entry.filename, entry.modTime, f)
+		})
+	}
 }
 
 // NewApp constructs the bound object. Tabs are restored in startup from the
 // last session's desktop-tabs.json.
 func NewApp() *App {
-	return &App{tabs: map[string]*WorkspaceTab{}}
+	return &App{tabs: map[string]*WorkspaceTab{}, mediaTokens: newMediaTokenStore()}
 }
 
 func (a *App) bootContext() context.Context {
@@ -108,10 +278,7 @@ func (a *App) beforeClose(ctx context.Context) bool {
 	if cfg.DesktopCloseBehavior() == "background" {
 		a.saveWindowStateSync()
 		a.snapshotAllTabs()
-		// Hide the application, not just the window, so macOS can restore it
-		// from the Dock/menu using the normal app activation path. On tray-capable
-		// platforms, the tray menu provides an additional Open/Quit entry point.
-		runtime.Hide(ctx)
+		hideForBackground(ctx)
 		return true
 	}
 	return false
@@ -119,8 +286,7 @@ func (a *App) beforeClose(ctx context.Context) bool {
 
 func (a *App) showMainWindow() {
 	if a.ctx != nil {
-		runtime.Show(a.ctx)
-		runtime.WindowShow(a.ctx)
+		showFromBackground(a.ctx)
 	}
 }
 
@@ -134,6 +300,26 @@ func (a *App) quitApp() {
 	}
 	a.forceQuit.Store(true)
 	runtime.Quit(a.ctx)
+}
+
+func hideForBackground(ctx context.Context) {
+	if backgroundCloseUsesApplicationHide(goruntime.GOOS) {
+		runtime.Hide(ctx)
+		return
+	}
+	runtime.WindowHide(ctx)
+}
+
+func showFromBackground(ctx context.Context) {
+	if backgroundCloseUsesApplicationHide(goruntime.GOOS) {
+		runtime.Show(ctx)
+	}
+	runtime.WindowShow(ctx)
+	runtime.WindowUnminimise(ctx)
+}
+
+func backgroundCloseUsesApplicationHide(goos string) bool {
+	return goos == "darwin"
 }
 
 // restoreOrBuildTabs restores the tabs from the last session, or creates a
@@ -941,9 +1127,18 @@ func (a *App) SwitchWorkspace(dir string) (string, error) {
 // HistoryMessage is one prior turn, for the frontend to repopulate its transcript
 // after a reload.
 type HistoryMessage struct {
-	Role      string `json:"role"`
-	Content   string `json:"content"`
-	Reasoning string `json:"reasoning,omitempty"`
+	Role       string            `json:"role"`
+	Content    string            `json:"content"`
+	Reasoning  string            `json:"reasoning,omitempty"`
+	ToolCalls  []HistoryToolCall `json:"toolCalls,omitempty"`
+	ToolCallID string            `json:"toolCallId,omitempty"`
+	ToolName   string            `json:"toolName,omitempty"`
+}
+
+type HistoryToolCall struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
 }
 
 // History returns the session's message log.
@@ -971,7 +1166,18 @@ func historyMessages(msgs []provider.Message, resolveUserContent func(string) st
 		if m.Role == provider.RoleAssistant {
 			reasoning = m.ReasoningContent
 		}
-		out = append(out, HistoryMessage{Role: string(m.Role), Content: content, Reasoning: reasoning})
+		hm := HistoryMessage{Role: string(m.Role), Content: content, Reasoning: reasoning}
+		if m.Role == provider.RoleAssistant && len(m.ToolCalls) > 0 {
+			hm.ToolCalls = make([]HistoryToolCall, len(m.ToolCalls))
+			for i, tc := range m.ToolCalls {
+				hm.ToolCalls[i] = HistoryToolCall{ID: tc.ID, Name: tc.Name, Arguments: tc.Arguments}
+			}
+		}
+		if m.Role == provider.RoleTool {
+			hm.ToolCallID = m.ToolCallID
+			hm.ToolName = m.Name
+		}
+		out = append(out, hm)
 	}
 	return out
 }
@@ -1467,14 +1673,17 @@ func skillRootsView() []SkillRootView {
 	cfg, _ := config.Load()
 	userCfg := config.LoadForEdit(config.UserConfigPath())
 	var custom []string
+	maxDepth := 3
 	if cfg != nil {
 		custom = cfg.SkillCustomPaths()
+		maxDepth = cfg.SkillMaxDepth()
 	}
-	st := skill.New(skill.Options{ProjectRoot: cwd, CustomPaths: custom, DisableBuiltins: true, Stderr: io.Discard})
+	st := skill.New(skill.Options{ProjectRoot: cwd, CustomPaths: custom, MaxDepth: maxDepth, DisableBuiltins: true, Stderr: io.Discard})
 	counts := map[string]int{}
 	skillItems := map[string][]SkillRootSkillView{}
+	roots := st.Roots()
 	for _, sk := range st.List() {
-		root := config.CanonicalSkillPath(filepath.Dir(skillRootPath(sk.Path)))
+		root := skillDisplayRoot(sk, roots)
 		counts[root]++
 		skillItems[root] = append(skillItems[root], SkillRootSkillView{
 			Name:        sk.Name,
@@ -1495,7 +1704,7 @@ func skillRootsView() []SkillRootView {
 		}
 	}
 	out := []SkillRootView{}
-	for _, r := range st.Roots() {
+	for _, r := range roots {
 		dir := config.CanonicalSkillPath(r.Dir)
 		view := SkillRootView{
 			Dir:        r.Dir,
@@ -1626,6 +1835,21 @@ func skillRootPath(path string) string {
 	return path
 }
 
+func skillDisplayRoot(sk skill.Skill, roots []skill.Root) string {
+	cleanPath := filepath.Clean(sk.Path)
+	for _, r := range roots {
+		if r.Scope != sk.Scope {
+			continue
+		}
+		cleanRoot := filepath.Clean(r.Dir)
+		prefix := cleanRoot + string(filepath.Separator)
+		if cleanPath == cleanRoot || strings.HasPrefix(cleanPath, prefix) {
+			return config.CanonicalSkillPath(r.Dir)
+		}
+	}
+	return config.CanonicalSkillPath(filepath.Dir(skillRootPath(sk.Path)))
+}
+
 // MCPServerInput is the drawer's "add server" form. Transport is "stdio" (Command
 // + Args + Env) or "http"/"sse" (URL). Mirrors config.PluginEntry's writable shape.
 type MCPServerInput struct {
@@ -1635,7 +1859,6 @@ type MCPServerInput struct {
 	Args      []string          `json:"args"`
 	URL       string            `json:"url"`
 	Env       map[string]string `json:"env"`
-	Tier      string            `json:"tier"`
 }
 
 // AddMCPServer connects a server live and persists it to config (Customize → MCP →
@@ -1652,7 +1875,6 @@ func (a *App) AddMCPServer(in MCPServerInput) (int, error) {
 		Args:    in.Args,
 		URL:     in.URL,
 		Env:     in.Env,
-		Tier:    normalizeMCPTier(in.Tier),
 	}
 	if err := a.saveDesktopMCPServer(entry); err != nil {
 		return 0, err
@@ -1684,7 +1906,7 @@ func (a *App) UpdateMCPServer(name string, in MCPServerInput) error {
 	updated.Command = strings.TrimSpace(in.Command)
 	updated.Args = append([]string(nil), in.Args...)
 	updated.URL = strings.TrimSpace(in.URL)
-	updated.Tier = normalizeMCPTier(in.Tier)
+	updated.Tier = ""
 	if in.Env != nil {
 		updated.Env = in.Env
 	}
@@ -1743,15 +1965,26 @@ func (a *App) RemoveMCPServer(name string) error {
 	return fmt.Errorf("no MCP server named %q", name)
 }
 
-// RetryMCPServer reconnects a configured server that failed or was disconnected,
-// without touching config (the failed row's retry button).
-func (a *App) RetryMCPServer(name string) error {
+// ReconnectMCPServer disconnects the server if it is already connected (to force
+// a fresh handshake and tool re-registration), then reconnects.  Failures are
+// recorded on the Host so the UI can render them.
+func (a *App) ReconnectMCPServer(name string) error {
 	tab := a.activeTab()
 	if tab == nil || tab.Ctrl == nil {
 		return fmt.Errorf("no active session")
 	}
+	if mcpConnected(tab.Ctrl, name) {
+		tab.Ctrl.DisconnectMCPServer(name)
+	}
 	_, err := a.connectConfiguredMCPServerForTab(tab, name)
-	return err
+	if err != nil {
+		recordMCPFailure(tab.Ctrl, config.PluginEntry{Name: name}, err)
+		return err
+	}
+	a.mu.Lock()
+	delete(tab.disabledMCP, name)
+	a.mu.Unlock()
+	return nil
 }
 
 // ClearMCPServerAuthentication removes local auth-like config for one MCP and
@@ -1829,9 +2062,9 @@ func (a *App) connectConfiguredMCPServerForTab(tab *WorkspaceTab, name string) (
 	return 0, fmt.Errorf("no configured MCP server named %q", name)
 }
 
-// SetMCPServerTier persists how a configured MCP server should start on future
-// sessions. It does not tear down a connected server; the per-session toggle and
-// "connect now" remain separate controls.
+// SetMCPServerTier is kept for old desktop bindings. New config writes drop the
+// retired tier field, so this only affects the active session before the next
+// config reload.
 func (a *App) SetMCPServerTier(name, tier string) error {
 	if name == "codegraph" {
 		return a.setCodegraphTier(tier)
@@ -2039,6 +2272,8 @@ func normalizeMCPTier(tier string) string {
 	case "eager":
 		return "eager"
 	case "background":
+		return "background"
+	case "":
 		return "background"
 	default:
 		return "lazy"
@@ -2447,6 +2682,9 @@ type FilePreview struct {
 	Size      int64  `json:"size"`
 	Truncated bool   `json:"truncated"`
 	Binary    bool   `json:"binary"`
+	Kind      string `json:"kind,omitempty"`
+	Mime      string `json:"mime,omitempty"`
+	URL       string `json:"url,omitempty"`
 	Err       string `json:"err,omitempty"`
 }
 
@@ -2472,6 +2710,17 @@ var atSkip = map[string]bool{".git": true, "node_modules": true, ".DS_Store": tr
 const filePreviewLimit = 256 * 1024
 const fileRefSearchLimit = 20
 
+var previewMediaMIMEs = map[string]string{
+	".bmp":  "image/bmp",
+	".gif":  "image/gif",
+	".jpeg": "image/jpeg",
+	".jpg":  "image/jpeg",
+	".pdf":  "application/pdf",
+	".png":  "image/png",
+	".svg":  "image/svg+xml",
+	".webp": "image/webp",
+}
+
 func trimUTF8PartialSuffix(data []byte) []byte {
 	if utf8.Valid(data) {
 		return data
@@ -2486,6 +2735,20 @@ func trimUTF8PartialSuffix(data []byte) []byte {
 		return data[:i]
 	}
 	return data
+}
+
+func previewMediaKind(path string) (kind string, mime string) {
+	mime = previewMediaMIMEs[strings.ToLower(filepath.Ext(path))]
+	if mime == "" {
+		return "", ""
+	}
+	if strings.HasPrefix(mime, "image/") {
+		return "image", mime
+	}
+	if mime == "application/pdf" {
+		return "pdf", mime
+	}
+	return "", ""
 }
 
 func (a *App) activeWorkspaceBase() (string, error) {
@@ -2613,6 +2876,13 @@ func (a *App) ReadFile(rel string) FilePreview {
 		return out
 	}
 	out.Size = info.Size()
+	if kind, mime := previewMediaKind(path); kind != "" {
+		token := a.ensureMediaTokenStore().create(path, info.Name(), mime, kind, info.Size(), info.ModTime())
+		out.Kind = kind
+		out.Mime = mime
+		out.URL = "/__reasonix_workspace_media/" + token + "/" + url.PathEscape(info.Name())
+		return out
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		out.Err = err.Error()

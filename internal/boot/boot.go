@@ -126,16 +126,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	} else if migrated != nil {
 		sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: migrated.Notice()})
 	}
-	// Back-fill v0.x sessions, independent of the config migration. This used to be
-	// nested under the (one-time) config migration above, so a v0.x user who had
-	// already opened v1 never got their old sessions imported (#2869). It is guarded
-	// by its own marker, so running every boot imports any not-yet-imported session
-	// once and is a cheap no-op afterwards.
-	if home, herr := os.UserHomeDir(); herr == nil {
-		if n, serr := agent.MigrateLegacySessions(filepath.Join(home, ".reasonix", "sessions"), config.SessionDir()); serr == nil && n > 0 {
-			sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: fmt.Sprintf("imported %d past session(s) from ~/.reasonix/sessions — resume them with --resume or the history panel", n)})
-		}
-	}
+	migrateLegacySessionSources(sink)
 
 	// A resolvable model whose API key env is unset would otherwise build fine
 	// (RequireKey is false so the UI stays reachable) and then fail silently on the
@@ -188,10 +179,11 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		ProjectRoot:   root,
 		CustomPaths:   cfg.SkillCustomPaths(),
 		DisabledNames: cfg.DisabledSkillNames(),
+		MaxDepth:      cfg.SkillMaxDepth(),
 		Stderr:        opts.Stderr,
 	})
 	skills := skillStore.List()
-	allSkills := skill.New(skill.Options{ProjectRoot: root, CustomPaths: cfg.SkillCustomPaths(), Stderr: io.Discard}).List()
+	allSkills := skill.New(skill.Options{ProjectRoot: root, CustomPaths: cfg.SkillCustomPaths(), MaxDepth: cfg.SkillMaxDepth(), Stderr: io.Discard}).List()
 	sysPrompt = skill.ApplyIndex(sysPrompt, skills)
 
 	reg := tool.NewRegistry()
@@ -209,8 +201,8 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	pluginHost := plugin.NewHost()
 
 	// Partition configured plugins by tier so eager/lazy/background can each
-	// take the path that fits them. User entries default to lazy — they don't
-	// slow the next launch unless the user explicitly opts in to eager.
+	// take the path that fits them. User entries default to background: the
+	// session starts immediately while enabled MCP servers warm up.
 	eagerEntries, lazyEntries, bgEntries := partitionByTier(cfg.AutoStartPlugins())
 
 	// Auto-demote: any eager plugin that has been chronically slow (recent
@@ -409,9 +401,37 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// sub-agents inherit the full tool set (minus `task` itself, to keep
 	// nesting out of the picture). It registers into the same reg the
 	// executor uses, so the model surfaces it like any other tool.
+	resolveSubagentProvider := func(modelRef, effort string) (provider.Provider, *provider.Pricing, int, error) {
+		me := *entry
+		if strings.TrimSpace(modelRef) != "" {
+			resolved, ok := cfg.ResolveModel(modelRef)
+			if !ok {
+				return nil, nil, 0, fmt.Errorf("unknown model %q", modelRef)
+			}
+			me = *resolved
+		}
+		if strings.TrimSpace(effort) != "" {
+			normalized, err := config.NormalizeEffort(&me, effort)
+			if err != nil {
+				return nil, nil, 0, err
+			}
+			me.Effort = normalized
+			if me.Kind == "anthropic" && strings.TrimSpace(me.Effort) != "" && strings.TrimSpace(me.Thinking) == "" {
+				me.Thinking = "adaptive"
+			}
+		}
+		p, err := NewProviderWithProxy(&me, proxySpec)
+		if err != nil {
+			return nil, nil, 0, err
+		}
+		return p, me.Price, me.ContextWindow, nil
+	}
+	taskModel := firstNonEmpty(cfg.Agent.SubagentModels["task"], cfg.Agent.SubagentModel)
+	taskEffort := firstNonEmpty(cfg.Agent.SubagentEfforts["task"], cfg.Agent.SubagentEffort)
 	reg.Add(agent.NewTaskTool(execProv, entry.Price, reg, maxSteps,
 		entry.ContextWindow, cfg.Agent.SoftCompactRatio, cfg.Agent.CompactRatio, cfg.Agent.CompactForceRatio,
-		cfg.Agent.Temperature, config.ArchiveDir(), "", headlessGate))
+		cfg.Agent.Temperature, config.ArchiveDir(), "", headlessGate,
+		taskModel, taskEffort, resolveSubagentProvider))
 
 	// The `remember` tool lets the model persist durable facts to the project's
 	// auto-memory store; `forget` prunes ones that turn out wrong. The saved index
@@ -433,12 +453,14 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// Its tool activity nests under the invoking call, like `task`.
 	skillRunner := func(sctx context.Context, sk skill.Skill, task string) (string, error) {
 		prov, price, ctxWin := execProv, entry.Price, entry.ContextWindow
-		if modelRef := subagentModelRef(cfg, sk); modelRef != "" {
-			if me, ok := cfg.ResolveModel(modelRef); ok {
-				if p, err := NewProviderWithProxy(me, proxySpec); err == nil {
-					prov, price, ctxWin = p, me.Price, me.ContextWindow
-				}
+		modelRef := subagentModelRef(cfg, sk)
+		effortRef := subagentEffortRef(cfg, sk)
+		if modelRef != "" || effortRef != "" {
+			p, pr, cw, err := resolveSubagentProvider(modelRef, effortRef)
+			if err != nil {
+				return "", fmt.Errorf("subagent skill %q profile: %w", sk.Name, err)
 			}
+			prov, price, ctxWin = p, pr, cw
 		}
 		subReg := agent.FilterRegistry(reg, sk.AllowedTools, agent.SubagentMetaTools()...)
 		steps := maxSteps
@@ -456,9 +478,16 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			ArchiveDir:    config.ArchiveDir(),
 		}, agent.NestedSink(sctx, event.Discard))
 	}
-	reg.Add(skill.NewRunSkillTool(skillStore, skillRunner))
+	skillProfile := func(sk skill.Skill) *event.Profile {
+		model, effort := subagentModelRef(cfg, sk), subagentEffortRef(cfg, sk)
+		if model == "" && effort == "" {
+			return nil
+		}
+		return &event.Profile{Model: model, Effort: effort}
+	}
+	reg.Add(skill.NewRunSkillTool(skillStore, skillRunner, skillProfile))
 	reg.Add(skill.NewInstallSkillTool(skillStore, nil))
-	for _, t := range skill.BuiltinSubagentTools(skillStore, skillRunner) {
+	for _, t := range skill.BuiltinSubagentTools(skillStore, skillRunner, skillProfile) {
 		reg.Add(t)
 	}
 
@@ -584,6 +613,49 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	return control.New(ctrlOpts), nil
 }
 
+func migrateLegacySessionSources(sink event.Sink) {
+	dest := config.SessionDir()
+	if strings.TrimSpace(dest) == "" {
+		return
+	}
+	type legacySource struct {
+		dir     string
+		label   string
+		migrate func(srcDir, destDir string) (int, error)
+	}
+	var sources []legacySource
+	if home, herr := os.UserHomeDir(); herr == nil {
+		sources = append(sources, legacySource{
+			dir:     filepath.Join(home, ".reasonix", "sessions"),
+			label:   "~/.reasonix/sessions",
+			migrate: agent.MigrateLegacySessions,
+		})
+	}
+	// Back-fill v0.x sessions from the current user config session directory as
+	// well. This covers users whose platform config root was redirected before the
+	// Go rewrite; their event logs can already live where v2 stores sessions.
+	sources = append(sources, legacySource{
+		dir:     dest,
+		label:   dest,
+		migrate: agent.MigrateLegacySessionsFromConfigDir,
+	})
+
+	seen := map[string]bool{}
+	for _, src := range sources {
+		if strings.TrimSpace(src.dir) == "" {
+			continue
+		}
+		key := filepath.Clean(src.dir)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		if n, serr := src.migrate(src.dir, dest); serr == nil && n > 0 {
+			sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: fmt.Sprintf("imported %d past session(s) from %s — resume them with --resume or the history panel", n, src.label)})
+		}
+	}
+}
+
 func rememberPermissionRule(workspaceRoot, rule string) {
 	path := rememberPermissionConfigPath(workspaceRoot)
 	edit := config.LoadForEdit(path)
@@ -608,6 +680,15 @@ func rememberPermissionConfigPath(workspaceRoot string) string {
 	return path
 }
 
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
+}
+
 func subagentModelRef(cfg *config.Config, sk skill.Skill) string {
 	if cfg != nil {
 		for _, key := range subagentModelKeys(sk.Name) {
@@ -623,6 +704,23 @@ func subagentModelRef(cfg *config.Config, sk skill.Skill) string {
 		return ""
 	}
 	return strings.TrimSpace(cfg.Agent.SubagentModel)
+}
+
+func subagentEffortRef(cfg *config.Config, sk skill.Skill) string {
+	if cfg != nil {
+		for _, key := range subagentModelKeys(sk.Name) {
+			if e := strings.TrimSpace(cfg.Agent.SubagentEfforts[key]); e != "" {
+				return e
+			}
+		}
+	}
+	if e := strings.TrimSpace(sk.Effort); e != "" {
+		return e
+	}
+	if cfg == nil {
+		return ""
+	}
+	return strings.TrimSpace(cfg.Agent.SubagentEffort)
 }
 
 func subagentModelKeys(name string) []string {
@@ -724,7 +822,8 @@ func addBuiltins(reg *tool.Registry, enabled, writeRoots []string, bashSpec sand
 // partitionByTier splits configured plugin entries into the three startup
 // buckets — eager (block boot until ready), lazy (placeholder until first
 // model use), background (placeholder + start spawn now). Entries with an
-// unrecognised or empty tier land in lazy (the default).
+// empty tier land in background; unrecognised non-empty tiers land in lazy so a
+// typo never triggers unexpected background work.
 func partitionByTier(entries []config.PluginEntry) (eager, lazy, bg []config.PluginEntry) {
 	for _, e := range entries {
 		switch e.ResolvedTier() {

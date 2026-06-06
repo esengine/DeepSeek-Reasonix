@@ -16,6 +16,16 @@ func TestToWire(t *testing.T) {
 		}
 	})
 
+	t.Run("tool dispatch profile", func(t *testing.T) {
+		w := toWire(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{
+			Name: "task", Args: `{"prompt":"x"}`,
+			Profile: &event.Profile{Model: "deepseek-pro", Effort: "max"},
+		}})
+		if w.Tool == nil || w.Tool.Profile == nil || w.Tool.Profile.Model != "deepseek-pro" || w.Tool.Profile.Effort != "max" {
+			t.Errorf("profile = %+v", w.Tool)
+		}
+	})
+
 	t.Run("usage with cost", func(t *testing.T) {
 		w := toWire(event.Event{
 			Kind:    event.Usage,

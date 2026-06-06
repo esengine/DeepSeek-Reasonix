@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 
 	"reasonix/internal/acp"
 	"reasonix/internal/agent"
@@ -17,8 +18,10 @@ import (
 	"reasonix/internal/i18n"
 	"reasonix/internal/instruction"
 	"reasonix/internal/memory"
+	"reasonix/internal/netclient"
 	"reasonix/internal/permission"
 	"reasonix/internal/plugin"
+	"reasonix/internal/provider"
 	"reasonix/internal/sandbox"
 	"reasonix/internal/tool"
 	"reasonix/internal/tool/builtin"
@@ -140,9 +143,12 @@ func (f *acpFactory) NewSession(ctx context.Context, p acp.SessionParams) (*cont
 	maxSteps := cfg.Agent.MaxSteps
 	policy := permission.New(cfg.Permissions.Mode, cfg.Permissions.Allow, cfg.Permissions.Ask, cfg.Permissions.Deny)
 	headlessGate := permission.NewGate(policy, nil)
+	taskModel, taskEffort := acpTaskProfileDefaults(cfg)
+	resolveSubagentProvider := newACPSubagentProviderResolver(cfg, entry, proxySpec)
 	reg.Add(agent.NewTaskTool(execProv, entry.Price, reg, maxSteps,
 		entry.ContextWindow, cfg.Agent.SoftCompactRatio, cfg.Agent.CompactRatio, cfg.Agent.CompactForceRatio,
-		cfg.Agent.Temperature, config.ArchiveDir(), "", headlessGate))
+		cfg.Agent.Temperature, config.ArchiveDir(), "", headlessGate,
+		taskModel, taskEffort, resolveSubagentProvider))
 
 	executor := agent.New(execProv, reg, agent.NewSession(sysPrompt), agent.Options{
 		MaxSteps:          maxSteps,
@@ -211,4 +217,55 @@ func acpBuiltinTools(cfg *config.Config, cwd string, writeRoots []string) []tool
 		Search:     builtin.ResolveSearch(cfg.Tools.Search.Engine, cfg.Tools.Search.RgPath, nil),
 	}
 	return ws.Tools(cfg.Tools.Enabled...)
+}
+
+func acpTaskProfileDefaults(cfg *config.Config) (string, string) {
+	if cfg == nil {
+		return "", ""
+	}
+	model := strings.TrimSpace(cfg.Agent.SubagentModels["task"])
+	if model == "" {
+		model = strings.TrimSpace(cfg.Agent.SubagentModel)
+	}
+	effort := strings.TrimSpace(cfg.Agent.SubagentEfforts["task"])
+	if effort == "" {
+		effort = strings.TrimSpace(cfg.Agent.SubagentEffort)
+	}
+	return model, effort
+}
+
+func newACPSubagentProviderResolver(cfg *config.Config, parent *config.ProviderEntry, proxySpec netclient.ProxySpec) func(string, string) (provider.Provider, *provider.Pricing, int, error) {
+	return func(modelRef, effort string) (provider.Provider, *provider.Pricing, int, error) {
+		modelRef = strings.TrimSpace(modelRef)
+		effort = strings.TrimSpace(effort)
+
+		var entry *config.ProviderEntry
+		if modelRef != "" {
+			var ok bool
+			entry, ok = cfg.ResolveModel(modelRef)
+			if !ok {
+				return nil, nil, 0, fmt.Errorf("subagent_model %q is not a configured provider", modelRef)
+			}
+		} else {
+			cp := *parent
+			entry = &cp
+		}
+
+		if effort != "" {
+			normalized, err := config.NormalizeEffort(entry, effort)
+			if err != nil {
+				return nil, nil, 0, err
+			}
+			entry.Effort = normalized
+			if entry.Kind == "anthropic" && strings.TrimSpace(entry.Effort) != "" && strings.TrimSpace(entry.Thinking) == "" {
+				entry.Thinking = "adaptive"
+			}
+		}
+
+		prov, err := boot.NewProviderWithProxy(entry, proxySpec)
+		if err != nil {
+			return nil, nil, 0, err
+		}
+		return prov, entry.Price, entry.ContextWindow, nil
+	}
 }

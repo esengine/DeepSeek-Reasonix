@@ -387,6 +387,23 @@ a[href] {
   display: none;
 }
 
+.layout--workspace-floating {
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+}
+.layout--workspace-floating .workspace-panel-resizer {
+  display: none;
+}
+.layout--workspace-floating .workbench-dock {
+  position: absolute;
+  top: 38px;
+  right: 0;
+  bottom: 0;
+  width: var(--workspace-width);
+  z-index: 100;
+  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.3);
+  border-left: 1px solid var(--border);
+}
+
 .sidebar {
   grid-row: 2;
   grid-column: 1;
@@ -1492,6 +1509,15 @@ a[href] {
   white-space: nowrap;
   min-width: 0;
 }
+.tool__profile {
+  font-family: var(--mono);
+  font-size: var(--font-caption);
+  color: var(--fg-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
 .tool__meta {
   margin-left: auto;
   display: flex;
@@ -2159,24 +2185,38 @@ a[href] {
   height: 28px;
   padding: 0;
   color: var(--fg-faint);
-  opacity: 0;
-  transition: color 0.12s, opacity 0.12s, background 0.12s;
+  /* Always visible (was opacity: 0 + hover-only) — the trash button was
+     effectively undiscoverable for many users, so a freshly created workspace
+     looked "permanent". A low-opacity resting state keeps the row calm
+     while making the affordance legible. */
+  opacity: 0.45;
+  transition: color 0.12s, opacity 0.12s, background 0.12s, transform 0.12s;
 }
 .workspace-switcher__row:hover .workspace-switcher__remove,
 .workspace-switcher__remove:focus-visible {
   opacity: 1;
 }
-.workspace-switcher__remove:hover:not(:disabled),
-.workspace-switcher__remove:focus-visible:not(:disabled) {
+.workspace-switcher__remove--armed {
+  opacity: 1;
+  background: color-mix(in srgb, var(--err) 18%, transparent);
+  color: var(--err);
+  transform: scale(1.05);
+}
+.workspace-switcher__remove--current {
+  cursor: not-allowed;
+  opacity: 0.25;
+}
+.workspace-switcher__row:hover .workspace-switcher__remove--current,
+.workspace-switcher__remove--current:focus-visible {
+  opacity: 0.4;
+}
+.workspace-switcher__remove:hover:not(:disabled):not(.workspace-switcher__remove--armed),
+.workspace-switcher__remove:focus-visible:not(:disabled):not(.workspace-switcher__remove--armed) {
   background: color-mix(in srgb, var(--err) 12%, transparent);
   color: var(--err);
 }
 .workspace-switcher__remove:disabled {
   cursor: not-allowed;
-  opacity: 0;
-}
-.workspace-switcher__row:hover .workspace-switcher__remove:disabled {
-  opacity: 0.28;
 }
 .workspace-switcher__item:hover,
 .workspace-switcher__actions button:hover {
@@ -3367,6 +3407,29 @@ a[href] {
 }
 .workspace-preview__body .code {
   min-width: 0;
+}
+.workspace-media {
+  box-sizing: border-box;
+  width: 100%;
+}
+.workspace-media--image {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  min-height: 100%;
+}
+.workspace-media--image img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  object-fit: contain;
+}
+.workspace-media--pdf {
+  display: block;
+  height: 100%;
+  min-height: 520px;
+  border: 0;
+  background: var(--bg);
 }
 .workspace-note {
   margin-bottom: 10px;
@@ -7511,84 +7574,9 @@ a[href] {
   font-size: 13px;
 }
 
-.project-tree__empty-state {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 14px 8px;
-  color: var(--fg-dim);
-}
-
-.project-tree__empty-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 34px;
-  height: 34px;
-  border: 1px solid var(--border-soft);
-  border-radius: 8px;
-  background: var(--bg);
-  color: var(--accent);
-}
-
-.project-tree__empty-copy {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-
-.project-tree__empty-copy strong {
-  color: var(--fg);
-  font-size: 14px;
-  line-height: 1.2;
-}
-
-.project-tree__empty-copy span,
-.project-tree__empty-current {
-  color: var(--fg-faint);
+.project-tree__empty--subtle {
+  padding: 8px 12px;
   font-size: 12px;
-  line-height: 1.45;
-}
-
-.project-tree__empty-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-}
-
-.project-tree__empty-actions button {
-  --wails-draggable: no-drag;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  height: 32px;
-  border-radius: 7px;
-  font: inherit;
-  font-size: 12.5px;
-}
-
-.project-tree__empty-primary {
-  border: 1px solid color-mix(in srgb, var(--accent) 52%, var(--border));
-  background: color-mix(in srgb, var(--accent) 18%, var(--bg-elev));
-  color: var(--accent-strong);
-  font-weight: 620;
-}
-
-.project-tree__empty-primary:hover {
-  background: color-mix(in srgb, var(--accent) 24%, var(--bg-elev));
-  color: var(--fg);
-}
-
-.project-tree__empty-secondary {
-  border: 1px solid var(--border-soft);
-  background: var(--bg);
-  color: var(--fg-dim);
-}
-
-.project-tree__empty-secondary:hover {
-  background: var(--bg-hover);
-  color: var(--fg);
 }
 
 .context-inspector,

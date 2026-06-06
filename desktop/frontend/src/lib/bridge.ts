@@ -127,7 +127,7 @@ export interface AppBindings {
   AddMCPServer(input: MCPServerInput): Promise<number>;
   UpdateMCPServer(name: string, input: MCPServerInput): Promise<void>;
   RemoveMCPServer(name: string): Promise<void>;
-  RetryMCPServer(name: string): Promise<void>;
+  ReconnectMCPServer(name: string): Promise<void>;
   ClearMCPServerAuthentication(name: string): Promise<void>;
   PickSkillFolder(): Promise<string>;
   AddSkillPath(path: string): Promise<void>;
@@ -163,6 +163,8 @@ export interface AppBindings {
   Settings(): Promise<SettingsView>;
   SetDefaultModel(ref: string): Promise<void>;
   SetPlannerModel(ref: string): Promise<void>;
+  SetSubagentModel(ref: string): Promise<void>;
+  SetSubagentEffort(level: string): Promise<void>;
   SetAutoPlan(mode: string): Promise<void>;
   SaveProvider(p: ProviderView): Promise<void>;
   DeleteProvider(name: string): Promise<void>;
@@ -376,7 +378,7 @@ function makeMockApp(): AppBindings {
       builtIn: true,
       configured: true,
       autoStart: false,
-      tier: "lazy",
+      tier: "background",
       tools: 0,
       prompts: 0,
       resources: 0,
@@ -387,14 +389,14 @@ function makeMockApp(): AppBindings {
         { name: "node", description: "Inspect a specific graph node." },
       ],
     },
-    { name: "github", transport: "stdio", status: "connected", configured: true, autoStart: true, tier: "lazy", command: "npx", args: ["-y", "@modelcontextprotocol/server-github"], tools: 12, prompts: 2, resources: 0 },
+    { name: "github", transport: "stdio", status: "connected", configured: true, autoStart: true, tier: "background", command: "npx", args: ["-y", "@modelcontextprotocol/server-github"], tools: 12, prompts: 2, resources: 0 },
     {
       name: "linear",
       transport: "http",
-      status: "deferred",
+      status: "initializing",
       configured: true,
       autoStart: true,
-      tier: "lazy",
+      tier: "background",
       url: "https://mcp.linear.app/mcp",
       authStatus: "possible",
       authUrl: "https://mcp.linear.app/mcp",
@@ -412,7 +414,7 @@ function makeMockApp(): AppBindings {
         { name: "search", description: "Search Linear workspace objects." },
       ],
     },
-    { name: "figma", transport: "http", status: "failed", configured: true, autoStart: true, tier: "lazy", url: "https://mcp.figma.com/mcp", authStatus: "required", authUrl: "https://mcp.figma.com/mcp", tools: 0, prompts: 0, resources: 0, error: "connect: 401 unauthorized" },
+    { name: "figma", transport: "http", status: "failed", configured: true, autoStart: true, tier: "background", url: "https://mcp.figma.com/mcp", authStatus: "required", authUrl: "https://mcp.figma.com/mcp", tools: 0, prompts: 0, resources: 0, error: "connect: 401 unauthorized" },
   ];
   const capSkills: SkillView[] = [
     { name: "explore", description: "Investigate the codebase in an isolated subagent", scope: "builtin", runAs: "subagent", enabled: true },
@@ -517,6 +519,8 @@ function makeMockApp(): AppBindings {
   const settings: SettingsView = {
     defaultModel: "deepseek-flash",
     plannerModel: "",
+    subagentModel: "",
+    subagentEffort: "",
     autoPlan: "off",
     providers: [
       { name: "deepseek-flash", kind: "openai", baseUrl: "https://api.deepseek.com", models: ["deepseek-v4-flash"], default: "deepseek-v4-flash", apiKeyEnv: "DEEPSEEK_API_KEY", keySet: true, balanceUrl: "https://api.deepseek.com/user/balance", contextWindow: 1_000_000, supportedEfforts: [], defaultEffort: "" },
@@ -1046,7 +1050,7 @@ function makeMockApp(): AppBindings {
         status: "connected",
         configured: true,
         autoStart: true,
-        tier: input.tier || "lazy",
+        tier: "background",
         command: input.command,
         args: input.args,
         url: input.url,
@@ -1063,14 +1067,13 @@ function makeMockApp(): AppBindings {
     async UpdateMCPServer(name: string, input: MCPServerInput) {
       capServers = capServers.map((s) => {
         if (s.name !== name) return s;
-        const connected = s.status === "connected" || s.status === "failed" || input.tier !== "lazy";
+        const connected = s.status === "connected" || s.status === "failed" || s.tier !== "lazy";
         const nextStatus = s.status === "disabled" ? "disabled" : connected ? "connected" : "deferred";
         const nextTools = nextStatus === "connected" ? s.tools || (input.transport === "stdio" ? 3 : 5) : 0;
         return {
           ...s,
           transport: input.transport,
           status: nextStatus,
-          tier: input.tier || "lazy",
           command: input.transport === "stdio" ? input.command : "",
           args: input.transport === "stdio" ? input.args : [],
           url: input.transport === "stdio" ? "" : input.url,
@@ -1085,9 +1088,15 @@ function makeMockApp(): AppBindings {
     async RemoveMCPServer(name: string) {
       capServers = capServers.filter((s) => s.name !== name);
     },
-    async RetryMCPServer(name: string) {
+    async ReconnectMCPServer(name: string) {
       capServers = capServers.map((s) =>
-        s.name === name ? { ...s, status: "connected", tools: s.tools || 4, error: undefined, authStatus: undefined, authUrl: undefined } : s,
+        s.name === name
+          ? { ...s, status: "initializing", error: undefined, authStatus: undefined, authUrl: undefined }
+          : s,
+      );
+      await new Promise((r) => setTimeout(r, 400));
+      capServers = capServers.map((s) =>
+        s.name === name ? { ...s, status: "connected", tools: s.tools || 4 } : s,
       );
     },
     async ClearMCPServerAuthentication(name: string) {
@@ -1347,6 +1356,12 @@ function makeMockApp(): AppBindings {
     },
     async SetPlannerModel(ref: string) {
       settings.plannerModel = ref;
+    },
+    async SetSubagentModel(ref: string) {
+      settings.subagentModel = ref;
+    },
+    async SetSubagentEffort(level: string) {
+      settings.subagentEffort = level;
     },
     async SetAutoPlan(mode: string) {
       settings.autoPlan = mode;

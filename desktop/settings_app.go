@@ -74,6 +74,8 @@ type AgentView struct {
 type SettingsView struct {
 	DefaultModel      string          `json:"defaultModel"`
 	PlannerModel      string          `json:"plannerModel"`
+	SubagentModel     string          `json:"subagentModel"`
+	SubagentEffort    string          `json:"subagentEffort"`
 	AutoPlan          string          `json:"autoPlan"`
 	Providers         []ProviderView  `json:"providers"`
 	Permissions       PermissionsView `json:"permissions"`
@@ -127,10 +129,12 @@ func (a *App) Settings() SettingsView {
 		bash = "enforce"
 	}
 	v := SettingsView{
-		DefaultModel: cfg.DefaultModel,
-		PlannerModel: cfg.Agent.PlannerModel,
-		AutoPlan:     desktopAutoPlanMode(cfg.Agent.AutoPlan),
-		Providers:    []ProviderView{},
+		DefaultModel:   cfg.DefaultModel,
+		PlannerModel:   cfg.Agent.PlannerModel,
+		SubagentModel:  cfg.Agent.SubagentModel,
+		SubagentEffort: cfg.Agent.SubagentEffort,
+		AutoPlan:       desktopAutoPlanMode(cfg.Agent.AutoPlan),
+		Providers:      []ProviderView{},
 		Permissions: PermissionsView{
 			Mode:  orDefault(cfg.Permissions.Mode, "ask"),
 			Allow: nonNil(cfg.Permissions.Allow),
@@ -385,6 +389,45 @@ func (a *App) SetPlannerModel(ref string) error {
 			}
 		}
 		c.Agent.PlannerModel = ref
+		return nil
+	})
+}
+
+// SetSubagentModel sets (or clears) the default model used by subagent entry points.
+func (a *App) SetSubagentModel(ref string) error {
+	return a.applyConfigChange(func(c *config.Config) error {
+		ref = strings.TrimSpace(ref)
+		if ref != "" {
+			if _, ok := c.ResolveModel(ref); !ok {
+				return fmt.Errorf("unknown subagent model %q", ref)
+			}
+		}
+		c.Agent.SubagentModel = ref
+		return nil
+	})
+}
+
+// SetSubagentEffort sets (or clears) the default effort used by subagent entry points.
+func (a *App) SetSubagentEffort(level string) error {
+	return a.applyConfigChange(func(c *config.Config) error {
+		level = strings.TrimSpace(level)
+		if level == "" || level == "auto" {
+			c.Agent.SubagentEffort = ""
+			return nil
+		}
+		model := strings.TrimSpace(c.Agent.SubagentModel)
+		if model == "" {
+			model = c.DefaultModel
+		}
+		entry, ok := c.ResolveModel(model)
+		if !ok {
+			return fmt.Errorf("unknown subagent model %q", model)
+		}
+		effort, err := config.NormalizeEffort(entry, level)
+		if err != nil {
+			return err
+		}
+		c.Agent.SubagentEffort = effort
 		return nil
 	})
 }

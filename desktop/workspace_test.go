@@ -1,11 +1,15 @@
 package main
 
 import (
+	"mime"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"golang.org/x/text/encoding/simplifiedchinese"
 )
@@ -138,6 +142,365 @@ func TestReadFilePreviewBinaryClassification(t *testing.T) {
 	}
 	if !strings.ContainsRune(p.Body, '�') {
 		t.Errorf("lossy decode should mark undecodable bytes with U+FFFD, got %q", p.Body)
+	}
+}
+
+func TestReadFileMediaPreview(t *testing.T) {
+	orig, _ := os.Getwd()
+	defer os.Chdir(orig)
+
+	dir := t.TempDir()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	png := []byte("\x89PNG\r\n\x1a\npreview")
+	if err := os.WriteFile("shot.PNG", png, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var app App
+	image := app.ReadFile("shot.PNG")
+	if image.Err != "" {
+		t.Fatalf("ReadFile png err = %q", image.Err)
+	}
+	if image.Binary || image.Kind != "image" || image.Mime != "image/png" {
+		t.Fatalf("ReadFile png = %+v, want image preview", image)
+	}
+	if image.Body != "" {
+		t.Fatalf("media preview should have empty body, got %q", image.Body)
+	}
+	if !strings.HasPrefix(image.URL, "/__reasonix_workspace_media/") || !strings.HasSuffix(image.URL, "/shot.PNG") {
+		t.Fatalf("unexpected media URL: %q", image.URL)
+	}
+
+	if err := os.WriteFile("report.pdf", []byte("%PDF-1.4\npreview"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pdf := app.ReadFile("report.pdf")
+	if pdf.Err != "" {
+		t.Fatalf("ReadFile pdf err = %q", pdf.Err)
+	}
+	if pdf.Binary || pdf.Kind != "pdf" || pdf.Mime != "application/pdf" {
+		t.Fatalf("ReadFile pdf = %+v, want pdf preview", pdf)
+	}
+	if pdf.Body != "" {
+		t.Fatalf("media preview should have empty body, got %q", pdf.Body)
+	}
+	if !strings.HasPrefix(pdf.URL, "/__reasonix_workspace_media/") || !strings.HasSuffix(pdf.URL, "/report.pdf") {
+		t.Fatalf("unexpected media URL: %q", pdf.URL)
+	}
+}
+
+func TestMediaTokenHandlerServesFile(t *testing.T) {
+	orig, _ := os.Getwd()
+	defer os.Chdir(orig)
+
+	dir := t.TempDir()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	png := []byte("\x89PNG\r\n\x1a\npreview-data")
+	if err := os.WriteFile("shot.PNG", png, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp()
+	preview := app.ReadFile("shot.PNG")
+	if preview.URL == "" {
+		t.Fatal("expected URL in media preview")
+	}
+
+	mw := app.workspaceMediaMiddleware()
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("fallback handler should not be called for media URLs")
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, preview.URL, nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "image/png" {
+		t.Fatalf("expected Content-Type image/png, got %q", ct)
+	}
+	if cd := rec.Header().Get("Content-Disposition"); !strings.Contains(cd, "inline") {
+		t.Fatalf("expected inline Content-Disposition, got %q", cd)
+	}
+	if rec.Body.String() != string(png) {
+		t.Fatalf("body mismatch, got %q", rec.Body.String())
+	}
+}
+
+func TestMediaTokenHandlerEscapedFilename(t *testing.T) {
+	orig, _ := os.Getwd()
+	defer os.Chdir(orig)
+
+	dir := t.TempDir()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	name := `weird "file" name.png`
+	if err := os.WriteFile(name, []byte("png"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp()
+	preview := app.ReadFile(name)
+	if strings.Contains(preview.URL, " ") || strings.Contains(preview.URL, `"`) {
+		t.Fatalf("media URL should path-escape filename, got %q", preview.URL)
+	}
+
+	handler := app.workspaceMediaMiddleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("fallback handler should not be called")
+	}))
+	req := httptest.NewRequest(http.MethodGet, preview.URL, nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	disposition, params, err := mime.ParseMediaType(rec.Header().Get("Content-Disposition"))
+	if err != nil {
+		t.Fatalf("Content-Disposition should parse: %v", err)
+	}
+	if disposition != "inline" || params["filename"] != name {
+		t.Fatalf("Content-Disposition = %q %#v, want inline filename %q", disposition, params, name)
+	}
+}
+
+func TestMediaTokenHandlerHead(t *testing.T) {
+	orig, _ := os.Getwd()
+	defer os.Chdir(orig)
+
+	dir := t.TempDir()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile("doc.pdf", []byte("%PDF-test"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp()
+	preview := app.ReadFile("doc.pdf")
+
+	mw := app.workspaceMediaMiddleware()
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("fallback handler should not be called")
+	}))
+
+	req := httptest.NewRequest(http.MethodHead, preview.URL, nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/pdf" {
+		t.Fatalf("expected Content-Type application/pdf, got %q", ct)
+	}
+}
+
+func TestMediaTokenHandlerRangeRequest(t *testing.T) {
+	orig, _ := os.Getwd()
+	defer os.Chdir(orig)
+
+	dir := t.TempDir()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	data := []byte("0123456789ABCDEF")
+	if err := os.WriteFile("data.png", data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp()
+	preview := app.ReadFile("data.png")
+
+	mw := app.workspaceMediaMiddleware()
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("fallback should not be called")
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, preview.URL, nil)
+	req.Header.Set("Range", "bytes=0-4")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusPartialContent {
+		t.Fatalf("expected 206, got %d", rec.Code)
+	}
+	if rec.Body.String() != "01234" {
+		t.Fatalf("expected '01234', got %q", rec.Body.String())
+	}
+}
+
+func TestMediaTokenHandlerBadToken(t *testing.T) {
+	orig, _ := os.Getwd()
+	defer os.Chdir(orig)
+
+	dir := t.TempDir()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp()
+	mw := app.workspaceMediaMiddleware()
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/__reasonix_workspace_media/deadbeef/fake.png", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for bad token, got %d", rec.Code)
+	}
+}
+
+func TestMediaTokenHandlerNonGetHead(t *testing.T) {
+	orig, _ := os.Getwd()
+	defer os.Chdir(orig)
+
+	dir := t.TempDir()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile("test.png", []byte("png"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp()
+	preview := app.ReadFile("test.png")
+
+	mw := app.workspaceMediaMiddleware()
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("fallback should not be called")
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, preview.URL, nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405 for POST, got %d", rec.Code)
+	}
+}
+
+func TestMediaTokenHandlerPassesUnrelatedPaths(t *testing.T) {
+	app := NewApp()
+	mw := app.workspaceMediaMiddleware()
+
+	fallbackCalled := false
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fallbackCalled = true
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/index.html", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if !fallbackCalled {
+		t.Fatal("expected fallback handler for non-media path")
+	}
+}
+
+func TestMediaTokenMaxEviction(t *testing.T) {
+	orig, _ := os.Getwd()
+	defer os.Chdir(orig)
+
+	dir := t.TempDir()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile("test.png", []byte("data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp()
+	store := app.mediaTokens
+
+	// Fill beyond max to trigger eviction of oldest.
+	var oldestToken string
+	for i := 0; i < mediaTokenMax+1; i++ {
+		tok := store.create(dir+"/test.png", "test.png", "image/png", "image", 4, time.Time{})
+		if i == 0 {
+			oldestToken = tok
+		}
+	}
+
+	if store.get(oldestToken) != nil {
+		t.Fatal("oldest token should have been evicted")
+	}
+	if len(store.order) != mediaTokenMax {
+		t.Fatalf("expected %d tokens, got %d", mediaTokenMax, len(store.order))
+	}
+}
+
+func TestMediaTokenExpiry(t *testing.T) {
+	orig, _ := os.Getwd()
+	defer os.Chdir(orig)
+
+	dir := t.TempDir()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile("test.png", []byte("data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp()
+	store := app.mediaTokens
+	tok := store.create(dir+"/test.png", "test.png", "image/png", "image", 4, time.Time{})
+
+	// Force expiry by rolling back the clock on the entry.
+	store.mu.Lock()
+	store.byTok[tok].expiresAt = time.Now().Add(-1 * time.Second)
+	store.mu.Unlock()
+
+	if e := store.get(tok); e != nil {
+		t.Fatal("expired token should return nil")
+	}
+	next := store.create(dir+"/test.png", "test.png", "image/png", "image", 4, time.Time{})
+	if next == "" || store.get(next) == nil {
+		t.Fatal("store should create and read a fresh token after expired get cleanup")
+	}
+}
+
+func TestReadFileTextUnchanged(t *testing.T) {
+	orig, _ := os.Getwd()
+	defer os.Chdir(orig)
+
+	dir := t.TempDir()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile("hello.txt", []byte("hello world"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp()
+	preview := app.ReadFile("hello.txt")
+	if preview.Err != "" {
+		t.Fatalf("ReadFile text err = %q", preview.Err)
+	}
+	if preview.Body != "hello world" {
+		t.Fatalf("expected text body, got %q", preview.Body)
+	}
+	if preview.Kind != "" || preview.Mime != "" || preview.URL != "" {
+		t.Fatalf("text preview should not have media fields")
 	}
 }
 

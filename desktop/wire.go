@@ -55,15 +55,21 @@ type wireAsk struct {
 }
 
 type wireTool struct {
-	ID        string `json:"id,omitempty"`
-	Name      string `json:"name"`
-	Args      string `json:"args,omitempty"`
-	Output    string `json:"output,omitempty"`
-	Err       string `json:"err,omitempty"`
-	ReadOnly  bool   `json:"readOnly"`
-	Truncated bool   `json:"truncated,omitempty"`
-	Partial   bool   `json:"partial,omitempty"`
-	ParentID  string `json:"parentId,omitempty"`
+	ID        string       `json:"id,omitempty"`
+	Name      string       `json:"name"`
+	Args      string       `json:"args,omitempty"`
+	Output    string       `json:"output,omitempty"`
+	Err       string       `json:"err,omitempty"`
+	ReadOnly  bool         `json:"readOnly"`
+	Truncated bool         `json:"truncated,omitempty"`
+	Partial   bool         `json:"partial,omitempty"`
+	ParentID  string       `json:"parentId,omitempty"`
+	Profile   *wireProfile `json:"profile,omitempty"`
+}
+
+type wireProfile struct {
+	Model  string `json:"model,omitempty"`
+	Effort string `json:"effort,omitempty"`
 }
 
 type wireUsage struct {
@@ -147,12 +153,16 @@ func toWire(e event.Event) wireEvent {
 			w.Level = "info"
 		}
 	case event.ToolDispatch, event.ToolResult, event.ToolProgress:
-		w.Tool = &wireTool{
+		wt := &wireTool{
 			ID: e.Tool.ID, Name: e.Tool.Name, Args: e.Tool.Args,
 			Output: e.Tool.Output, Err: e.Tool.Err,
 			ReadOnly: e.Tool.ReadOnly, Truncated: e.Tool.Truncated,
 			Partial: e.Tool.Partial, ParentID: e.Tool.ParentID,
 		}
+		if e.Tool.Profile != nil {
+			wt.Profile = &wireProfile{Model: e.Tool.Profile.Model, Effort: e.Tool.Profile.Effort}
+		}
+		w.Tool = wt
 	case event.Usage:
 		if u := e.Usage; u != nil {
 			w.Usage = &wireUsage{

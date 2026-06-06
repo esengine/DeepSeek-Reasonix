@@ -4,7 +4,7 @@ import { Archive, Pencil, Search, Trash2, RotateCcw } from "lucide-react";
 import { t, useT } from "../lib/i18n";
 import { sessionActivityTime } from "../lib/session";
 import type { HistoryMessage, SessionMeta } from "../lib/types";
-import type { Item } from "../lib/useController";
+import { historyMessagesToItems, type Item } from "../lib/useController";
 import { ResizableDrawer } from "./ResizableDrawer";
 import { Tooltip } from "./Tooltip";
 import { Transcript } from "./Transcript";
@@ -435,15 +435,5 @@ function sessionMetaLine(s: SessionMeta, tr: ReturnType<typeof useT>, isTrash = 
 }
 
 function previewMessagesToItems(messages: HistoryMessage[]): Item[] {
-  return messages
-    .filter(
-      (m) =>
-        (m.role === "user" && m.content.trim() !== "") ||
-        (m.role === "assistant" && (m.content.trim() !== "" || (m.reasoning ?? "").trim() !== "")),
-    )
-    .map((m, i) =>
-      m.role === "user"
-        ? { kind: "user", id: `hp${i}`, text: m.content }
-        : { kind: "assistant", id: `hp${i}`, text: m.content, reasoning: m.reasoning ?? "", streaming: false },
-    );
+  return historyMessagesToItems(messages, "hp").items;
 }

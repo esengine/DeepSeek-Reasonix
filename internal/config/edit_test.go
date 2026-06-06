@@ -526,13 +526,13 @@ func TestLoadFirstRunDisablesCodegraph(t *testing.T) {
 	}
 }
 
-func TestPluginResolvedTierDefaultsToLazy(t *testing.T) {
+func TestPluginResolvedTierDefaultsToBackground(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		tier string
 		want string
 	}{
-		{name: "empty", tier: "", want: "lazy"},
+		{name: "empty", tier: "", want: "background"},
 		{name: "explicit lazy", tier: "lazy", want: "lazy"},
 		{name: "background", tier: "background", want: "background"},
 		{name: "eager", tier: "eager", want: "eager"},

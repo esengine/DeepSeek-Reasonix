@@ -425,20 +425,49 @@ func (s *Server) newSession(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// history returns the session's message log as {role, content} pairs so a
-// reconnecting client can repopulate its transcript. Supports ETag caching:
+type historyToolCall struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+}
+
+type historyMessage struct {
+	Role       string            `json:"role"`
+	Content    string            `json:"content"`
+	Reasoning  string            `json:"reasoning,omitempty"`
+	ToolCalls  []historyToolCall `json:"toolCalls,omitempty"`
+	ToolCallID string            `json:"toolCallId,omitempty"`
+	ToolName   string            `json:"toolName,omitempty"`
+}
+
+func historyMessages(msgs []provider.Message) []historyMessage {
+	out := make([]historyMessage, 0, len(msgs))
+	for _, m := range msgs {
+		hm := historyMessage{Role: string(m.Role), Content: m.Content}
+		if m.Role == provider.RoleAssistant {
+			hm.Reasoning = m.ReasoningContent
+			if len(m.ToolCalls) > 0 {
+				hm.ToolCalls = make([]historyToolCall, len(m.ToolCalls))
+				for i, tc := range m.ToolCalls {
+					hm.ToolCalls[i] = historyToolCall{ID: tc.ID, Name: tc.Name, Arguments: tc.Arguments}
+				}
+			}
+		}
+		if m.Role == provider.RoleTool {
+			hm.ToolCallID = m.ToolCallID
+			hm.ToolName = m.Name
+		}
+		out = append(out, hm)
+	}
+	return out
+}
+
+// history returns the session's message log so a reconnecting client can
+// repopulate its transcript, including historical tool cards. Supports ETag caching:
 // if the client sends If-None-Match with the current ETag, the server returns
 // 304 Not Modified with no body, saving bandwidth on reconnects.
 func (s *Server) history(w http.ResponseWriter, r *http.Request) {
-	type msg struct {
-		Role    string `json:"role"`
-		Content string `json:"content"`
-	}
-	var out []msg
-	for _, m := range s.ctl().History() {
-		out = append(out, msg{Role: string(m.Role), Content: m.Content})
-	}
-	writeJSONCached(w, r, out)
+	writeJSONCached(w, r, historyMessages(s.ctl().History()))
 }
 
 // context returns the prompt-vs-window gauge numbers. Supports ETag caching

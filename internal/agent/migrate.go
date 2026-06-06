@@ -38,6 +38,7 @@ type legacyToolCall struct {
 // was imported doesn't reappear on the next launch.
 const legacyImportMarker = ".legacy-imported"
 const legacyEventsHomeImportMarker = ".legacy-imported.v0-events-home"
+const legacyEventsConfigImportMarker = ".legacy-imported.v0-events-config"
 
 // MigrateLegacySessions imports v0.x event-log sessions (<name>.events.jsonl under
 // srcDir) into the v1+ message-log format (<name>.jsonl under destDir), back-filling
@@ -48,6 +49,14 @@ const legacyEventsHomeImportMarker = ".legacy-imported.v0-events-home"
 // count imported.
 func MigrateLegacySessions(srcDir, destDir string) (int, error) {
 	return migrateLegacySessions(srcDir, destDir, legacyEventsHomeImportMarker, true)
+}
+
+// MigrateLegacySessionsFromConfigDir imports v0.x event-log sessions found in
+// the current user config session directory. It uses an independent marker so a
+// previous ~/.reasonix import marker cannot hide sessions from a redirected
+// config root on Windows/macOS.
+func MigrateLegacySessionsFromConfigDir(srcDir, destDir string) (int, error) {
+	return migrateLegacySessions(srcDir, destDir, legacyEventsConfigImportMarker, false)
 }
 
 func migrateLegacySessions(srcDir, destDir, marker string, honorLegacyMarker bool) (int, error) {
@@ -88,7 +97,11 @@ func migrateLegacySessions(srcDir, destDir, marker string, honorLegacyMarker boo
 		}
 		imported++
 	}
-	writeImportMarkers(destDir, marker, legacyImportMarker)
+	markers := []string{marker}
+	if honorLegacyMarker {
+		markers = append(markers, legacyImportMarker)
+	}
+	writeImportMarkers(destDir, markers...)
 	return imported, nil
 }
 

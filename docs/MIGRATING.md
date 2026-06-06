@@ -59,11 +59,12 @@ cd DeepSeek-Reasonix && make build                        # -> bin/reasonix(.exe
 
 On first launch v2 runs a one-time, **non-destructive** import: it reads a v0.x
 `~/.reasonix/config.json` (API key, base URL, language, MCP servers) and imports
-past sessions from `~/.reasonix/sessions`, leaves the old files untouched, and
-prints a boot notice when it does. Imported sessions resume with `--resume` or
-the history panel. The config import only runs when no v2 config exists yet — if
-v2 wrote its config before your `0.x` data was in place nothing is overwritten,
-so copy any missing values across by hand.
+past sessions from `~/.reasonix/sessions` and legacy event logs already located
+in the current user config session directory, leaves the old files untouched, and
+prints a boot notice when it does. Imported sessions resume with `--resume` or the
+history panel. The config import only runs when no v2 config exists yet — if v2
+wrote its config before your `0.x` data was in place nothing is overwritten, so
+copy any missing values across by hand.
 
 ## What's the same
 

@@ -67,6 +67,17 @@ func TestToWireToolDispatch(t *testing.T) {
 	}
 }
 
+func TestToWireToolDispatchProfile(t *testing.T) {
+	e := event.Event{Kind: event.ToolDispatch, Tool: event.Tool{
+		ID: "1", Name: "task", Args: `{"prompt":"x"}`,
+		Profile: &event.Profile{Model: "deepseek-pro", Effort: "max"},
+	}}
+	w := toWire(e)
+	if w.Tool == nil || w.Tool.Profile == nil || w.Tool.Profile.Model != "deepseek-pro" || w.Tool.Profile.Effort != "max" {
+		t.Errorf("tool profile = %+v", w.Tool)
+	}
+}
+
 func TestToWireToolResult(t *testing.T) {
 	e := event.Event{Kind: event.ToolResult, Tool: event.Tool{ID: "1", Output: "ok", Truncated: true}}
 	w := toWire(e)

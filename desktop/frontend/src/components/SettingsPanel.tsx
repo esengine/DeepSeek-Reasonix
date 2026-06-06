@@ -251,6 +251,8 @@ function normalizeSettingsView(view: SettingsView | null | undefined): SettingsV
   const agent = view.agent ?? { temperature: 0, maxSteps: 0, systemPrompt: "" };
   return {
     ...view,
+    subagentModel: view.subagentModel ?? "",
+    subagentEffort: view.subagentEffort ?? "",
     providers: asArray(view.providers).map((p) => ({ ...p, models: asArray(p.models) })),
     providerKinds: asArray(view.providerKinds),
     permissions: {
@@ -473,6 +475,7 @@ function ModelsSection({ s, busy, apply, onManageProviders }: SectionProps & { o
   const refs = allRefs(s);
   const defaultRef = toRef(s.defaultModel, s);
   const plannerRef = toRef(s.plannerModel, s);
+  const subagentRef = toRef(s.subagentModel, s);
   const [defaultProvider, defaultModel] = defaultRef.split("/");
   const plannerModeDetail = plannerRef
     ? t("settings.plannerDualDetail", { planner: plannerRef, executor: defaultRef || t("common.none") })
@@ -520,6 +523,41 @@ function ModelsSection({ s, busy, apply, onManageProviders }: SectionProps & { o
         </select>
       </div>
 
+      <div className="set-row">
+        <label className="set-label">{t("settings.subagentModel")}</label>
+        <select
+          className="mem-select set-grow"
+          value={subagentRef}
+          disabled={busy}
+          onChange={(e) => void apply(() => app.SetSubagentModel(e.target.value))}
+        >
+          <option value="">{t("settings.subagentModelDefault")}</option>
+          {refs.map((r) => (
+            <option key={r} value={r}>
+              {r}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="set-row">
+        <label className="set-label">{t("settings.subagentEffort")}</label>
+        <select
+          className="mem-select set-grow"
+          value={s.subagentEffort || ""}
+          disabled={busy}
+          onChange={(e) => void apply(() => app.SetSubagentEffort(e.target.value))}
+        >
+          <option value="">{t("settings.subagentEffortDefault")}</option>
+          {EFFORT_PRESETS.map((level) => (
+            <option key={level} value={level}>
+              {level}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="mem-hint">{t("settings.subagentHint")}</div>
+
       <div className="settings-model-card">
         <div>
           <span>{t("settings.activeProvider")}</span>
@@ -530,6 +568,11 @@ function ModelsSection({ s, busy, apply, onManageProviders }: SectionProps & { o
           <span>{t("settings.plannerStatus")}</span>
           <strong>{plannerRef ? t("settings.plannerDual") : t("settings.plannerSingle")}</strong>
           <small>{plannerModeDetail}</small>
+        </div>
+        <div>
+          <span>{t("settings.subagentDefaults")}</span>
+          <strong>{subagentRef || t("common.auto")}</strong>
+          <small>{s.subagentEffort ? `effort ${s.subagentEffort}` : t("common.auto")}</small>
         </div>
       </div>
 

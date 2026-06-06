@@ -55,6 +55,7 @@ func TestGenManifest(t *testing.T) {
 		"Reasonix-darwin-arm64.zip",
 		"Reasonix-darwin-amd64.zip",
 		"Reasonix-windows-amd64-installer.exe",
+		"Reasonix-windows-amd64.zip", // portable download, not the updater channel
 		"Reasonix-linux-amd64.tar.gz",
 		"Reasonix-linux-amd64.tar.gz.minisig", // must be skipped
 		"README.txt",                          // unmatched, must be skipped

@@ -63,7 +63,7 @@ const SIDEBAR_DEFAULT_WIDTH = 264;
 const SIDEBAR_DEFAULT_RATIO = 0.175;
 const SIDEBAR_MIN_WIDTH = 228;
 const SIDEBAR_MAX_WIDTH = 420;
-const CHAT_MIN_WIDTH = 760;
+const CHAT_MIN_WIDTH = 400;
 const WORKSPACE_RESIZER_WIDTH = 8;
 
 function isThemeMode(value: string): value is Theme {
@@ -78,7 +78,6 @@ const RIGHT_DOCK_TREE_MIN_WIDTH = 260;
 const RIGHT_DOCK_TREE_MAX_WIDTH = 560;
 const RIGHT_DOCK_PREVIEW_DEFAULT_WIDTH = 640;
 const RIGHT_DOCK_MAX_WIDTH = 860;
-const RIGHT_DOCK_MIN_RENDER_WIDTH = 220;
 
 type RightDockMode = "context" | "files" | "changed";
 const SHOW_CONTEXT_DOCK = false;
@@ -118,10 +117,10 @@ function defaultRightDockTreeWidth(): number {
   return clampRightDockTreeWidth(width * RIGHT_DOCK_TREE_DEFAULT_RATIO);
 }
 
-function resolveRightDockWidth(mainWidth: number, desiredDockWidth: number): number {
+function resolveRightDockWidth(mainWidth: number, desiredDockWidth: number, minWidth: number): number {
   const budget = Math.max(0, Math.round(mainWidth) - CHAT_MIN_WIDTH - WORKSPACE_RESIZER_WIDTH);
-  if (budget < RIGHT_DOCK_MIN_RENDER_WIDTH) return 0;
-  const desired = Math.min(RIGHT_DOCK_MAX_WIDTH, Math.max(RIGHT_DOCK_MIN_RENDER_WIDTH, Math.round(desiredDockWidth)));
+  if (budget < minWidth) return 0;
+  const desired = Math.min(RIGHT_DOCK_MAX_WIDTH, Math.max(minWidth, Math.round(desiredDockWidth)));
   return Math.min(budget, desired);
 }
 
@@ -343,11 +342,17 @@ export default function App() {
       : rightDockTreeWidth;
   const sidebarRenderWidth = sidebarCollapsed ? 0 : sidebarWidth;
   const measuredMainWidth = layoutWidth > 0 ? Math.max(0, layoutWidth - sidebarRenderWidth) : CHAT_MIN_WIDTH + WORKSPACE_RESIZER_WIDTH + preferredWorkspacePanelWidth;
+  const workspacePanelMinWidth = workspacePreviewActive ? RIGHT_DOCK_MIN_WIDTH : RIGHT_DOCK_TREE_MIN_WIDTH;
+
+  const budget = Math.max(0, measuredMainWidth - CHAT_MIN_WIDTH - WORKSPACE_RESIZER_WIDTH);
+  const workspacePanelFloating = workspacePanelOpen && !workspacePanelMaximized && budget < workspacePanelMinWidth;
+
   const resolvedWorkspacePanelWidth = workspacePanelOpen && !workspacePanelMaximized
-    ? resolveRightDockWidth(measuredMainWidth, preferredWorkspacePanelWidth)
+    ? (workspacePanelFloating ? Math.min(measuredMainWidth, Math.max(workspacePanelMinWidth, preferredWorkspacePanelWidth)) : resolveRightDockWidth(measuredMainWidth, preferredWorkspacePanelWidth, workspacePanelMinWidth))
     : preferredWorkspacePanelWidth;
+
   const workspacePanelRenderable = workspacePanelOpen && (workspacePanelMaximized || resolvedWorkspacePanelWidth > 0);
-  const workspacePanelGridOpen = workspacePanelRenderable && !workspacePanelMaximized;
+  const workspacePanelGridOpen = workspacePanelRenderable && !workspacePanelMaximized && !workspacePanelFloating;
   const workspacePanelRenderWidth = workspacePanelMaximized ? preferredWorkspacePanelWidth : resolvedWorkspacePanelWidth;
   const activeTab = useMemo(
     () => tabMetas.find((tab) => tab.id === activeTabId) ?? tabMetas.find((tab) => tab.active),
@@ -795,15 +800,24 @@ export default function App() {
   const openWorkspacePanel = useCallback(
     (mode: RightDockMode = rightDockMode) => {
       setRightDockMode(mode);
+      let nextMaximized = workspacePanelMaximized;
       if (mode === "context") {
+        nextMaximized = false;
+        setWorkspacePanelMaximized(false);
+      } else {
+        // When user explicitly opens the panel, we do NOT force maximize.
+        // If there's not enough room, the panel will open in floating mode
+        // over the chat area, preserving the chat area's minimum width
+        // and keeping the panel's close button accessible.
+        nextMaximized = false;
         setWorkspacePanelMaximized(false);
       }
-      if (workspacePanelOpen) {
+      if (workspacePanelOpen && workspacePanelMaximized === nextMaximized) {
         return;
       }
       setWorkspacePanelOpen(true);
     },
-    [rightDockMode, workspacePanelOpen],
+    [rightDockMode, workspacePanelMaximized, workspacePanelOpen],
   );
 
   const closeWorkspacePanel = useCallback(() => {
@@ -1127,7 +1141,6 @@ export default function App() {
     : workspacePreviewActive
     ? RIGHT_DOCK_PREVIEW_DEFAULT_WIDTH
     : defaultRightDockTreeWidth();
-  const workspacePanelMinWidth = workspacePreviewActive ? RIGHT_DOCK_MIN_WIDTH : RIGHT_DOCK_TREE_MIN_WIDTH;
   const workspacePanelMaxWidth = workspacePreviewActive ? RIGHT_DOCK_MAX_WIDTH : RIGHT_DOCK_TREE_MAX_WIDTH;
 
   return (
@@ -1141,7 +1154,7 @@ export default function App() {
           sidebarCollapsed ? "layout--sidebar-collapsed" : "",
           sidebarResizing ? "layout--resizing layout--sidebar-resizing" : "",
           workspacePanelGridOpen ? "layout--workspace-open" : "",
-          workspacePanelOpen && !workspacePanelGridOpen && !workspacePanelMaximized ? "layout--workspace-constrained" : "",
+          workspacePanelFloating ? "layout--workspace-floating" : "",
           workspacePanelOpen && workspacePanelMaximized ? "layout--workspace-maximized" : "",
           workspacePanelResizing ? "layout--resizing layout--workspace-resizing" : "",
         ]
@@ -1191,7 +1204,6 @@ export default function App() {
               activeScope={activeTab?.scope}
               activeWorkspaceRoot={activeTab?.workspaceRoot}
               activeTopicId={activeTab?.topicId}
-              currentWorkspaceName={workspaceDisplayName(state.meta?.cwd)}
               onOpenTopic={handleOpenTopic}
               onOpenProjectHistory={openProjectHistory}
               onTopicsChanged={refreshProjectsAndTabs}
@@ -1200,9 +1212,6 @@ export default function App() {
               onAddProject={async () => {
                 await switchFolder();
               }}
-              onUseCurrentProject={state.meta?.cwd ? async () => {
-                await switchFolder(state.meta?.cwd);
-              } : undefined}
             />
           </section>
 
@@ -1277,20 +1286,20 @@ export default function App() {
             />
             {!workspacePanelMaximized && (
               <Tooltip
-                label={workspacePanelOpen ? t("rightDock.collapse") : t("rightDock.expand")}
+                label={workspacePanelRenderable ? t("rightDock.collapse") : t("rightDock.expand")}
                 className={[
                   "workspace-dock-toggle",
-                  workspacePanelOpen ? "workspace-dock-toggle--open" : "workspace-dock-toggle--closed",
+                  workspacePanelRenderable ? "workspace-dock-toggle--open" : "workspace-dock-toggle--closed",
                 ].join(" ")}
               >
                 <button
                   className="workspace-dock-toggle__button"
                   type="button"
-                  onClick={workspacePanelOpen ? closeWorkspacePanel : () => openWorkspacePanel("files")}
-                  aria-label={workspacePanelOpen ? t("rightDock.collapse") : t("rightDock.expand")}
-                  aria-pressed={workspacePanelOpen}
+                  onClick={workspacePanelRenderable ? closeWorkspacePanel : () => openWorkspacePanel("files")}
+                  aria-label={workspacePanelRenderable ? t("rightDock.collapse") : t("rightDock.expand")}
+                  aria-pressed={workspacePanelRenderable}
                 >
-                  {workspacePanelOpen ? <PanelRightClose size={15} /> : <PanelRightOpen size={15} />}
+                  {workspacePanelRenderable ? <PanelRightClose size={15} /> : <PanelRightOpen size={15} />}
                 </button>
               </Tooltip>
             )}

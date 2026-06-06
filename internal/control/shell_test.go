@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"reasonix/internal/event"
+	"reasonix/internal/sandbox"
 )
 
 // collectSink returns a Sink that collects events and a channel that receives
@@ -137,5 +138,23 @@ func TestRunShell_FailingCommand(t *testing.T) {
 	}
 	if result.Tool.Err == "" {
 		t.Error("failing command should produce an error string")
+	}
+}
+
+func TestRunShell_CancelStopsCommand(t *testing.T) {
+	sink, done, _ := collectSink()
+	ctrl := &Controller{sink: sink}
+
+	command := "sleep 30"
+	if sandbox.ResolveShell().Kind == sandbox.ShellPowerShell {
+		command = "Start-Sleep -Seconds 30"
+	}
+	ctrl.RunShell(command)
+	time.Sleep(100 * time.Millisecond)
+	ctrl.Cancel()
+
+	e := waitForDone(t, done)
+	if e.Kind != event.TurnDone {
+		t.Fatalf("done event kind = %v, want TurnDone", e.Kind)
 	}
 }
