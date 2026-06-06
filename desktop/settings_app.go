@@ -551,6 +551,15 @@ func (a *App) SetAgentParams(temperature float64, maxSteps int, systemPrompt str
 	})
 }
 
+// SetFileEncoding sets the project-level file encoding (e.g. "UTF-8", "GB18030").
+// Empty string means auto-detect.
+func (a *App) SetFileEncoding(encoding string) error {
+	return a.applyConfigChange(func(c *config.Config) error {
+		c.FileEncoding = strings.TrimSpace(encoding)
+		return nil
+	})
+}
+
 // trimList drops blank entries from a string slice (and returns a non-nil slice).
 func trimList(in []string) []string {
 	out := []string{}

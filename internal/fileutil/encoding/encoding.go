@@ -7,6 +7,7 @@ package encoding
 import (
 	"bytes"
 	"encoding/binary"
+	"strings"
 	"unicode/utf8"
 
 	"golang.org/x/text/encoding/simplifiedchinese"
@@ -39,6 +40,24 @@ const (
 )
 
 var utf8BOM = []byte{0xEF, 0xBB, 0xBF}
+
+// ParseName converts a human-readable encoding name (e.g. "UTF-8", "GB18030",
+// "UTF-16 LE") to its Kind constant. Returns (kind, true) on success, or
+// (0, false) for unrecognised names.
+func ParseName(name string) (Kind, bool) {
+	switch strings.ToUpper(strings.TrimSpace(name)) {
+	case "UTF-8", "UTF8":
+		return UTF8, true
+	case "GB18030", "GBK", "GB2312":
+		return GB18030, true
+	case "UTF-16 LE", "UTF16LE", "UTF-16LE":
+		return UTF16LE, true
+	case "UTF-16 BE", "UTF16BE", "UTF-16BE":
+		return UTF16BE, true
+	default:
+		return 0, false
+	}
+}
 
 // Detect returns the encoding kind for the given raw file bytes. The same
 // bytes should then be passed to Decode for conversion to UTF-8.
