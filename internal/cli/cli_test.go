@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"bytes"
 	"errors"
 	"io"
@@ -12,6 +13,7 @@ import (
 
 	"reasonix/internal/config"
 	"reasonix/internal/event"
+	"reasonix/internal/i18n"
 	"reasonix/internal/notify"
 	"reasonix/internal/provider"
 )
@@ -269,6 +271,20 @@ func TestWithNotificationsWrapsCLISinkWithConfiguredSender(t *testing.T) {
 	}
 	if sender.messages[0].Body != "Turn finished" {
 		t.Fatalf("notification body = %q, want Turn finished", sender.messages[0].Body)
+	}
+}
+
+func TestSetupOverwritePromptShowsYNDefault(t *testing.T) {
+	t.Cleanup(func() { i18n.DetectLanguage("en") })
+	for _, lang := range []string{"en", "zh"} {
+		i18n.DetectLanguage(lang)
+		var out bytes.Buffer
+		if confirmReconfigureExistingConfig("config.toml", bufio.NewScanner(strings.NewReader("\n")), &out) {
+			t.Fatalf("%s empty overwrite answer should keep existing config", lang)
+		}
+		if !strings.Contains(out.String(), "[y/N]:") {
+			t.Fatalf("%s overwrite prompt should show explicit [y/N] default, got %q", lang, out.String())
+		}
 	}
 }
 

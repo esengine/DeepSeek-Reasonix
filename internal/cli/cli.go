@@ -559,8 +559,7 @@ func setupConfig(args []string) int {
 			return 1
 		}
 		in := bufio.NewScanner(os.Stdin)
-		ans := ask(in, os.Stdout, fmt.Sprintf(i18n.M.ConfirmReconfigureFmt, path), "N")
-		if ans != "y" && ans != "Y" {
+		if !confirmReconfigureExistingConfig(path, in, os.Stdout) {
 			fmt.Println(i18n.M.KeepingExisting)
 			return 0
 		}
@@ -575,6 +574,11 @@ func setupConfig(args []string) int {
 		return rc
 	}
 	return writeDefaultConfig(t.config)
+}
+
+func confirmReconfigureExistingConfig(path string, in *bufio.Scanner, w io.Writer) bool {
+	ans := ask(in, w, fmt.Sprintf(i18n.M.ConfirmReconfigureFmt, path), "y/N")
+	return ans == "y" || ans == "Y"
 }
 
 func writeDefaultConfig(path string) int {
