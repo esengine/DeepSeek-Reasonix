@@ -24,11 +24,11 @@ import { normalizeWindowsEnvVars } from "../src/tools/shell/exec.js";
 
 /** A PauseGate that records call args and denies — denial keeps the spawn from actually running. */
 class SpyGate extends PauseGate {
-  lastCall: { kind: string; payload?: unknown } | null = null;
-  override ask(opts: { kind: string; payload?: unknown }): Promise<any> {
+  lastCall: Parameters<PauseGate["ask"]>[0] | null = null;
+  override ask = ((opts: Parameters<PauseGate["ask"]>[0]) => {
     this.lastCall = opts;
     return Promise.resolve({ type: "deny" } as ConfirmationChoice);
-  }
+  }) as PauseGate["ask"];
 }
 
 class AutoGate extends PauseGate {
@@ -37,9 +37,9 @@ class AutoGate extends PauseGate {
     super();
     this._choice = choice;
   }
-  override ask(_opts: { kind: string; payload?: unknown }): Promise<ConfirmationChoice> {
+  override ask = ((_opts: Parameters<PauseGate["ask"]>[0]) => {
     return Promise.resolve(this._choice);
-  }
+  }) as PauseGate["ask"];
 }
 
 describe("tokenizeCommand", () => {
@@ -355,10 +355,13 @@ describe("isAllowed", () => {
     });
 
     it("accepts user-configured extra prefixes", () => {
-      expect(isAllowed("cat /opt/secrets/config.yml", [], projectRoot)).toBe(true);
+      // /opt/secrets is outside workspace — workspace-escape check (#2081) demotes it even without sensitive-prefix config
+      expect(isAllowed("cat /opt/secrets/config.yml", [], projectRoot)).toBe(false);
       expect(
         isAllowed("cat /opt/secrets/config.yml", [], projectRoot, { prefixes: ["/opt/secrets"] }),
       ).toBe(false);
+      // A path inside the workspace that isn't in sensitive prefixes should pass
+      expect(isAllowed("cat secrets/config.yml", [], projectRoot)).toBe(true);
     });
 
     it("accepts user-configured extra patterns", () => {
@@ -369,6 +372,82 @@ describe("isAllowed", () => {
     it("works through isCommandAllowed for chain commands", () => {
       expect(isCommandAllowed("cat ~/.ssh/id_rsa | grep KEY", [], projectRoot)).toBe(false);
       expect(isCommandAllowed("cat src/index.ts && grep TODO src/", [], projectRoot)).toBe(true);
+    });
+
+    it("demotes allowlisted commands with sandbox-escaping redirects", () => {
+      expect(isCommandAllowed("git status > out.txt")).toBe(false);
+      expect(isCommandAllowed("git status > /tmp/evil", [], projectRoot)).toBe(false);
+      expect(isCommandAllowed("ls > ../../../etc/passwd", [], projectRoot)).toBe(false);
+    });
+
+    it("allows safe redirects in allowlisted chain commands", () => {
+      expect(isCommandAllowed("git status > ./output.txt", [], projectRoot)).toBe(true);
+      expect(
+        isCommandAllowed(`git status > ${join(projectRoot, "out.txt")}`, [], projectRoot),
+      ).toBe(true);
+      expect(isCommandAllowed("git status > /dev/null", [], projectRoot)).toBe(true);
+      expect(isCommandAllowed("git status 2>&1", [], projectRoot)).toBe(true);
+    });
+
+    it("demotes sensitive redirect targets", () => {
+      expect(isCommandAllowed("cat < .env", [], projectRoot)).toBe(false);
+      expect(isCommandAllowed("cat < ~/.ssh/id_rsa", [], projectRoot)).toBe(false);
+      expect(isCommandAllowed("cat < README.md", [], projectRoot)).toBe(true);
+    });
+  });
+
+  // Issue #2081 — allowlisted commands with path arguments that resolve
+  // outside the workspace are demoted to the confirm gate.
+  describe("workspace-escape path demotion", () => {
+    const projectRoot = "/home/user/project";
+
+    it("demotes find with absolute path outside workspace", () => {
+      expect(isAllowed("find / -name '*.ts'", [], projectRoot)).toBe(false);
+      expect(isAllowed("find /etc -name '*.conf'", [], projectRoot)).toBe(false);
+      expect(isAllowed("find /tmp -name '*.log'", [], projectRoot)).toBe(false);
+    });
+
+    it("allows find with workspace-relative paths", () => {
+      expect(isAllowed("find . -name '*.ts'", [], projectRoot)).toBe(true);
+      expect(isAllowed("find src -type f", [], projectRoot)).toBe(true);
+      expect(isAllowed("find ./dist -name '*.js'", [], projectRoot)).toBe(true);
+    });
+
+    it("demotes tree with path outside workspace", () => {
+      expect(isAllowed("tree /etc", [], projectRoot)).toBe(false);
+      expect(isAllowed("tree /", [], projectRoot)).toBe(false);
+    });
+
+    it("allows tree with workspace-relative path", () => {
+      expect(isAllowed("tree src", [], projectRoot)).toBe(true);
+      expect(isAllowed("tree -L 2", [], projectRoot)).toBe(true);
+    });
+
+    it("demotes grep/cat/ls with absolute path outside workspace", () => {
+      expect(isAllowed("grep foo /etc/passwd", [], projectRoot)).toBe(false);
+      expect(isAllowed("cat /etc/hosts", [], projectRoot)).toBe(false);
+      expect(isAllowed("ls /root", [], projectRoot)).toBe(false);
+    });
+
+    it("allows grep/cat/ls with workspace-relative path", () => {
+      expect(isAllowed("grep TODO src/", [], projectRoot)).toBe(true);
+      expect(isAllowed("cat README.md", [], projectRoot)).toBe(true);
+      expect(isAllowed("ls src/", [], projectRoot)).toBe(true);
+    });
+
+    it("does NOT demote when projectRoot is not provided (backward compat)", () => {
+      expect(isAllowed("find / -name '*.ts'")).toBe(true);
+      expect(isAllowed("tree /etc")).toBe(true);
+    });
+
+    it("skips flags, URLs, and env vars", () => {
+      expect(isAllowed("ls --color", [], projectRoot)).toBe(true);
+      expect(isAllowed("grep --include=*.ts foo src/", [], projectRoot)).toBe(true);
+    });
+
+    it("works through isCommandAllowed for chain commands", () => {
+      expect(isCommandAllowed("find / -name '*.ts' | head", [], projectRoot)).toBe(false);
+      expect(isCommandAllowed("find . -name '*.ts' | head", [], projectRoot)).toBe(true);
     });
   });
 });
@@ -526,6 +605,33 @@ describe("registerShellTools — dispatch integration", () => {
     expect(out).not.toMatch(/user denied/);
   });
 
+  it("sharpens repeated shell gate denials for the high-risk call corpus", async () => {
+    const cases: Array<{ name: "run_command" | "run_background"; args: Record<string, unknown> }> =
+      [
+        { name: "run_command", args: { command: "npm install left-pad" } },
+        { name: "run_background", args: { command: "npm run dev", waitSec: 1 } },
+      ];
+
+    for (const item of cases) {
+      const registry = new ToolRegistry();
+      registerShellTools(registry, { rootDir: tmp });
+      const gate = new AutoGate({ type: "deny", denyContext: "too risky" });
+      const rawArgs = JSON.stringify(item.args);
+
+      const first = await registry.dispatch(item.name, rawArgs, { confirmationGate: gate });
+      const second = JSON.parse(
+        await registry.dispatch(item.name, rawArgs, { confirmationGate: gate }),
+      );
+
+      expect(first).toMatch(new RegExp(`user denied: ${String(item.args.command)}`));
+      expect(first).toMatch(/too risky/);
+      expect(second.rejectedReason).toBe("shell-gate");
+      expect(second.consecutiveInterceptorRejection).toBe(true);
+      expect(second.error).toMatch(/do not retry identical args/);
+      expect(second.error).toMatch(/allowlisted/);
+    }
+  });
+
   it("passes the correct kind to the gate — regression check for argument swap", async () => {
     const registry = new ToolRegistry();
     registerShellTools(registry, { rootDir: tmp });
@@ -615,6 +721,67 @@ describe("registerShellTools — dispatch integration", () => {
     });
     expect(afterYolo).toMatch(/user denied/);
     expect(afterYolo).toMatch(/node -e/);
+  });
+
+  it("run_background dispatch starts a job, list_jobs sees it, job_output reads it, stop_job ends it", async () => {
+    const registry = new ToolRegistry();
+    const jobs = new (await import("../src/tools/jobs.js")).JobRegistry();
+    registerShellTools(registry, { rootDir: tmp, jobs, extraAllowed: ["node"] });
+
+    try {
+      const startOut = await registry.dispatch(
+        "run_background",
+        JSON.stringify({
+          command: `node -e "setInterval(()=>console.log('tick'), 50)"`,
+          waitSec: 0.1,
+        }),
+      );
+      const jobIdMatch = startOut.match(/job (\d+) started/);
+      expect(jobIdMatch).not.toBeNull();
+      const jobId = Number(jobIdMatch![1]);
+
+      const listOut = await registry.dispatch("list_jobs", "{}");
+      expect(listOut).toMatch(new RegExp(`\\b${jobId}\\b`));
+      expect(listOut).toContain("node -e");
+
+      await registry.dispatch(
+        "wait_for_job",
+        JSON.stringify({ jobId, timeoutMs: 500, waitFor: "output-or-exit" }),
+      );
+      const outputOut = await registry.dispatch("job_output", JSON.stringify({ jobId }));
+      expect(outputOut).toContain("tick");
+
+      const stopOut = await registry.dispatch("stop_job", JSON.stringify({ jobId }));
+      expect(stopOut).toContain(`job ${jobId}`);
+    } finally {
+      await jobs.shutdown(2000);
+    }
+  }, 15000);
+
+  it("job_output / stop_job report not-found for unknown jobId", async () => {
+    const registry = new ToolRegistry();
+    registerShellTools(registry, { rootDir: tmp });
+    const outNoRead = await registry.dispatch("job_output", JSON.stringify({ jobId: 9999 }));
+    expect(outNoRead).toMatch(/job 9999: not found/);
+    const outNoStop = await registry.dispatch("stop_job", JSON.stringify({ jobId: 9999 }));
+    expect(outNoStop).toMatch(/job 9999: not found/);
+  });
+
+  it("list_jobs reports an empty session when nothing has been started", async () => {
+    const registry = new ToolRegistry();
+    registerShellTools(registry, { rootDir: tmp });
+    const out = await registry.dispatch("list_jobs", "{}");
+    expect(out).toContain("no background jobs");
+  });
+
+  it("run_background dispatch rejects a cwd that escapes the workspace root", async () => {
+    const registry = new ToolRegistry();
+    registerShellTools(registry, { rootDir: tmp, extraAllowed: ["node"] });
+    const out = await registry.dispatch(
+      "run_background",
+      JSON.stringify({ command: "node --version", cwd: "../../etc" }),
+    );
+    expect(out).toMatch(/resolves outside the workspace root/);
   });
 });
 

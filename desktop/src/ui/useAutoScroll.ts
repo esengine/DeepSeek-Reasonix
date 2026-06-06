@@ -15,6 +15,8 @@ export function useAutoScroll(
   containerRef: React.RefObject<HTMLDivElement | null>,
   contentRef: React.RefObject<HTMLDivElement | null>,
   busy: boolean,
+  /** Optional boot-time restore: the offset the transcript should open at. */
+  getRestoreScrollTop?: () => number | null,
 ) {
   const [showJumpButton, setShowJumpButton] = useState(false);
   const isPinnedRef = useRef(true);
@@ -49,9 +51,8 @@ export function useAutoScroll(
     [containerRef],
   );
 
-  // User-intent detection: only these gestures un-pin. Scroll events are
-  // intentionally NOT listened to — they can't tell user gestures from our
-  // own scrollTo.
+  // Un-pin only on real user gestures; scroll events can't tell our own
+  // scrollTo from the user, so they're only honored during an active drag.
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -67,26 +68,50 @@ export function useAutoScroll(
       });
     };
 
+    // Scrollbar drag fires no wheel/touch; without scroll-watching here,
+    // the ResizeObserver re-pins mid-drag and the thumb rubber-bands.
+    let dragging = false;
+    const onScrollDuringDrag = () => {
+      isPinnedRef.current = isAtBottom();
+      refreshJumpButton();
+    };
+    const onPointerDown = () => {
+      onUserGesture();
+      if (dragging) return;
+      dragging = true;
+      el.addEventListener("scroll", onScrollDuringDrag, { passive: true });
+    };
+    const endDrag = () => {
+      if (!dragging) return;
+      dragging = false;
+      el.removeEventListener("scroll", onScrollDuringDrag);
+      onUserGesture();
+    };
+
     el.addEventListener("wheel", onUserGesture, { passive: true });
     el.addEventListener("touchmove", onUserGesture, { passive: true });
     el.addEventListener("keydown", onUserGesture);
-    // pointerdown on the scrollbar gutter starts a drag-scroll. The
-    // drag itself fires no wheel/touch, but pointerdown's followup
-    // scroll arrives within a frame; one rAF measure catches it.
-    el.addEventListener("pointerdown", onUserGesture);
+    el.addEventListener("pointerdown", onPointerDown);
+    // Release may land outside the container if the pointer drifts.
+    window.addEventListener("pointerup", endDrag);
+    window.addEventListener("pointercancel", endDrag);
 
     return () => {
       if (pendingFrame) cancelAnimationFrame(pendingFrame);
       el.removeEventListener("wheel", onUserGesture);
       el.removeEventListener("touchmove", onUserGesture);
       el.removeEventListener("keydown", onUserGesture);
-      el.removeEventListener("pointerdown", onUserGesture);
+      el.removeEventListener("pointerdown", onPointerDown);
+      el.removeEventListener("scroll", onScrollDuringDrag);
+      window.removeEventListener("pointerup", endDrag);
+      window.removeEventListener("pointercancel", endDrag);
     };
   }, [containerRef, isAtBottom, refreshJumpButton]);
 
-  // When busy→idle (turn completes), re-pin and scroll to final answer.
+  // Both busy edges re-pin: turn start = user just sent and expects to
+  // see the reply; turn end = settle on the final answer (issue #1182).
   useEffect(() => {
-    if (wasBusyRef.current && !busy) {
+    if (wasBusyRef.current !== busy) {
       scrollToBottom(true);
     }
     wasBusyRef.current = busy;
@@ -122,17 +147,27 @@ export function useAutoScroll(
     };
   }, [containerRef, contentRef, refreshJumpButton]);
 
-  // Initial scroll to bottom when hook mounts (e.g., session loaded).
+  // Initial scroll when the hook mounts (e.g. session loaded). Restores the
+  // saved offset if there is one (#1244), otherwise pins to the bottom.
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
     const id = setTimeout(() => {
-      isPinnedRef.current = true;
-      setShowJumpButton(false);
-      el.scrollTo({ top: el.scrollHeight, behavior: "instant" });
-    }, 50);
+      const restore = getRestoreScrollTop?.() ?? null;
+      if (restore != null && restore > PIN_THRESHOLD) {
+        // Mid-transcript restore: stay un-pinned so content growth and the
+        // ResizeObserver don't yank the view back to the bottom.
+        isPinnedRef.current = false;
+        el.scrollTop = restore;
+        refreshJumpButton();
+      } else {
+        isPinnedRef.current = true;
+        setShowJumpButton(false);
+        el.scrollTo({ top: el.scrollHeight, behavior: "instant" });
+      }
+    }, 60);
     return () => clearTimeout(id);
-  }, [containerRef]);
+  }, [containerRef, getRestoreScrollTop, refreshJumpButton]);
 
   return { showJumpButton, scrollToBottom };
 }

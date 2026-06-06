@@ -1,13 +1,13 @@
-import { Box, Text } from "ink";
+import { Box, type Color, Text } from "ink";
 import React, { useContext } from "react";
 import { FG } from "../theme/tokens.js";
 import { ActiveCardContext } from "./Card.js";
 
-export type MetaItem = string | { text: string; color: string };
+export type MetaItem = string | { text: string; color: Color };
 
 export interface CardHeaderProps {
-  glyph: string;
-  tone: string;
+  glyph: string | React.ReactElement;
+  tone: Color;
   title: string;
   /** Body-tone text after the title, separated by a space (no `·`). */
   subtitle?: string;
@@ -29,7 +29,7 @@ export function CardHeader({
   const visibleMeta = active ? meta : meta?.filter((item) => typeof item !== "string");
   return (
     <Box flexDirection="row" gap={1}>
-      <Text color={tone}>{glyph}</Text>
+      {typeof glyph === "string" ? <Text color={tone}>{glyph}</Text> : glyph}
       <Text bold color={tone}>
         {title}
       </Text>

@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
   const renderMock = vi.fn();
+  const enableMouseModeMock = vi.fn();
+  const disableMouseModeMock = vi.fn();
   const loadApiKeyMock = vi.fn(() => "sk-test");
   const readConfigMock = vi.fn(() => ({ mcpDisabled: [] as string[] }));
   const searchEnabledMock = vi.fn(() => false);
@@ -55,6 +57,8 @@ const mocks = vi.hoisted(() => {
   return {
     bridgeMcpToolsMock,
     closeMock,
+    disableMouseModeMock,
+    enableMouseModeMock,
     FakeMcpClient,
     FakeTransport,
     initializeMock,
@@ -86,6 +90,11 @@ vi.mock("../src/config.js", async (importOriginal) => {
 
 vi.mock("../src/env.js", () => ({
   loadDotenv: mocks.loadDotenvMock,
+}));
+
+vi.mock("../src/cli/ui/mouse-mode.js", () => ({
+  disableMouseMode: mocks.disableMouseModeMock,
+  enableMouseMode: mocks.enableMouseModeMock,
 }));
 
 vi.mock("../src/memory/session.js", () => ({
@@ -129,9 +138,12 @@ async function captureStartupState(opts?: {
   bridgeError?: Error;
   mcp?: string[];
   lang?: "EN" | "zh-CN";
+  noMouse?: boolean;
 }) {
   vi.resetModules();
   mocks.renderMock.mockReset();
+  mocks.enableMouseModeMock.mockClear();
+  mocks.disableMouseModeMock.mockClear();
   mocks.loadDotenvMock.mockClear();
   mocks.loadApiKeyMock.mockClear();
   mocks.initializeMock.mockReset();
@@ -198,6 +210,7 @@ async function captureStartupState(opts?: {
     system: "s",
     mcp: opts?.mcp ?? ["fs=npx -y @scope/fs /tmp"],
     seedTools: new ToolRegistry(),
+    noMouse: opts?.noMouse,
   });
 
   expect(capturedProps).not.toBeNull();
@@ -210,9 +223,12 @@ async function captureStartupState(opts?: {
 
 // Dynamic chat.js / tools.js import inside captureStartupState pushes
 // past the 5s default under full-suite worker contention; pass in
-// isolation. 15s leaves headroom for cold module-cache + slow CI hosts
-// without making the suite noticeably slower in the happy path.
-describe("chatCommand MCP startup summary states", { timeout: 15_000 }, () => {
+// isolation. The previous 15s ceiling timed out the first test on
+// Windows CI under coverage (v8) instrumentation — the FIRST cold
+// module load eats most of the budget on slow hosts. 30s leaves
+// headroom without slowing the happy path (passing tests still
+// finish in ~400ms after the first cold run warms the worker).
+describe("chatCommand MCP startup summary states", { timeout: 30_000 }, () => {
   beforeEach(() => {
     vi.spyOn(process.stderr, "write").mockImplementation(() => true);
   });
@@ -239,6 +255,14 @@ describe("chatCommand MCP startup summary states", { timeout: 15_000 }, () => {
     expect(mocks.bridgeMcpToolsMock).not.toHaveBeenCalled();
   });
 
+  it("enables mouse tracking by default and honors noMouse opt-out", async () => {
+    await captureStartupState();
+    expect(mocks.enableMouseModeMock).toHaveBeenCalledTimes(1);
+
+    await captureStartupState({ noMouse: true });
+    expect(mocks.enableMouseModeMock).not.toHaveBeenCalled();
+  });
+
   it("never blocks chatCommand on bridge failure — App.tsx surfaces the lifecycle error post-mount", async () => {
     const props = await captureStartupState({
       initializeError: new Error("spawn failed"),
@@ -249,8 +273,6 @@ describe("chatCommand MCP startup summary states", { timeout: 15_000 }, () => {
     expect(mocks.initializeMock).not.toHaveBeenCalled();
   });
 
-  const COPY_HINT = "/copy  →  vim-style copy mode (j/k navigate, v select, y yank to clipboard)";
-
   it("adds empty-MCP hint exactly when setup is completed and configured MCP list is empty", async () => {
     const props = await captureStartupState({
       readConfig: { setupCompleted: true, mcp: [] },
@@ -258,18 +280,18 @@ describe("chatCommand MCP startup summary states", { timeout: 15_000 }, () => {
     });
 
     expect(props.startupInfoHints).toEqual([
-      "\u2139 no MCP servers configured \u2014 try: `reasonix setup` to re-pick, or `reasonix mcp install filesystem`",
-      COPY_HINT,
+      "\u2139 no MCP servers configured \u2014 try: `reasonix setup` to re-pick, or `reasonix mcp install filesystem` \u00b7 shell commands gate per-call (allow once / allow always / deny), no global allow-all",
     ]);
+    expect(props.startupInfoHints.join("\n")).not.toContain("/copy");
   });
 
-  it("does not add empty-MCP hint when configured MCP list is non-empty", async () => {
+  it("does not add startup hints when configured MCP list is non-empty", async () => {
     const props = await captureStartupState({
       readConfig: { setupCompleted: true, mcp: ["fs=npx -y @scope/fs /tmp"] },
       mcp: ["fs=npx -y @scope/fs /tmp"],
     });
 
-    expect(props.startupInfoHints).toEqual([COPY_HINT]);
+    expect(props.startupInfoHints).toEqual([]);
   });
 
   it("renders empty-MCP hint in zh-CN locale", async () => {
@@ -279,8 +301,8 @@ describe("chatCommand MCP startup summary states", { timeout: 15_000 }, () => {
       lang: "zh-CN",
     });
     expect(props.startupInfoHints).toEqual([
-      "\u2139 未配置 MCP 服务器 —— 可尝试：`reasonix setup` 重新选择，或 `reasonix mcp install filesystem`",
-      COPY_HINT,
+      "\u2139 未配置 MCP 服务器 —— 可尝试：`reasonix setup` 重新选择，或 `reasonix mcp install filesystem` · shell 命令按次审批（allow once / allow always / deny），无全局放行",
     ]);
+    expect(props.startupInfoHints.join("\n")).not.toContain("/copy");
   });
 });

@@ -1,3 +1,4 @@
+import { listThemeNames } from "../theme/tokens.js";
 import type { SlashArgContext, SlashCommandSpec, SlashGroup } from "./types.js";
 
 export const SLASH_GROUP_ORDER = [
@@ -25,6 +26,8 @@ export const SLASH_GROUP_LABEL: Record<SlashGroup, string> = {
 const SLASH_GROUP_RANK = new Map<SlashGroup, number>(
   SLASH_GROUP_ORDER.map((group, index) => [group, index]),
 );
+const THEME_ARG_COMPLETER = ["auto", ...listThemeNames()] as const;
+const THEME_ARGS_HINT = `[${THEME_ARG_COMPLETER.join("|")}]`;
 
 export function orderSlashCommandsByGroup<T extends Pick<SlashCommandSpec, "group">>(
   commands: readonly T[],
@@ -69,13 +72,6 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
   },
 
   {
-    cmd: "preset",
-    group: "setup",
-    argsHint: "<auto|flash|pro>",
-    summary: "model bundle — auto escalates flash → pro, flash/pro lock. Bare opens picker.",
-    argCompleter: ["auto", "flash", "pro"],
-  },
-  {
     cmd: "model",
     group: "setup",
     argsHint: "<id>",
@@ -83,28 +79,34 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
     argCompleter: "models",
   },
   {
+    cmd: "effort",
+    group: "setup",
+    argsHint: "<low|medium|high|max>",
+    summary:
+      "reasoning_effort cap — high is the safe default (vLLM/Azure compatible); max is a DeepSeek extension.",
+    argCompleter: ["low", "medium", "high", "max"],
+  },
+  {
+    cmd: "max-tokens",
+    group: "setup",
+    argsHint: "<N|off>",
+    summary:
+      "cap output tokens per turn — useful to limit runaway reasoning. Bare shows current value. 'off' clears the cap.",
+  },
+  {
     cmd: "language",
     group: "setup",
-    argsHint: "<EN|zh-CN>",
+    argsHint: "<EN|zh-CN|de|ru>",
     summary: "switch the runtime language",
-    argCompleter: ["EN", "zh-CN"],
+    argCompleter: ["EN", "zh-CN", "de", "ru"],
     aliases: ["lang"],
   },
   {
     cmd: "theme",
     group: "setup",
-    argsHint: "[auto|default|dark|light|tokyo-night|github-dark|github-light|high-contrast]",
+    argsHint: THEME_ARGS_HINT,
     summary: "show or persist the terminal theme preference. Bare opens picker.",
-    argCompleter: [
-      "auto",
-      "default",
-      "dark",
-      "light",
-      "tokyo-night",
-      "github-dark",
-      "github-light",
-      "high-contrast",
-    ],
+    argCompleter: THEME_ARG_COMPLETER,
   },
 
   { cmd: "status", group: "info", summary: "current model, flags, context, session" },
@@ -127,6 +129,12 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
       "cross-session cost dashboard (today / week / month / all-time · cache hit · vs Claude)",
   },
   {
+    cmd: "cache-miss-report",
+    group: "info",
+    summary: "explain recent prompt-cache misses from local prefix evidence",
+    aliases: ["cache-report", "cache"],
+  },
+  {
     cmd: "doctor",
     group: "info",
     summary: "health check (api / config / api-reach / index / hooks / project)",
@@ -137,17 +145,24 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
     summary: "keyboard + mouse + copy/paste reference",
   },
   {
-    cmd: "copy",
-    group: "chat",
-    summary: "vim/tmux-style copy mode — j/k navigate, v select, y yank to clipboard",
-  },
-  {
     cmd: "feedback",
     group: "info",
     summary: "open a GitHub issue with diagnostic info copied to clipboard",
   },
+  {
+    cmd: "about",
+    group: "info",
+    summary: "project info — version, website, repo, license",
+  },
 
   { cmd: "sessions", group: "session", summary: "list saved sessions (current marked with ▸)" },
+  {
+    cmd: "session-persist",
+    group: "session",
+    argsHint: "<on|off>",
+    summary:
+      "toggle whether reasonix resumes the last session on launch. 'off' = always start fresh (#2238).",
+  },
   {
     cmd: "title",
     group: "session",
@@ -190,6 +205,22 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
     argsHint: "<connect|status|disconnect>",
     summary: "connect, inspect, or disconnect the QQ channel",
     argCompleter: ["connect", "status", "disconnect"],
+  },
+  {
+    cmd: "telegram",
+    group: "extend",
+    argsHint: "<connect|status|disconnect>",
+    summary: "connect, inspect, or disconnect the Telegram channel",
+    argCompleter: ["connect", "status", "disconnect"],
+    aliases: ["tg"],
+  },
+  {
+    cmd: "weixin",
+    group: "extend",
+    argsHint: "<connect|status|disconnect> [manual token accountId [baseUrl]]",
+    summary: "connect, inspect, or disconnect the Weixin channel",
+    argCompleter: ["connect", "status", "disconnect"],
+    aliases: ["wx"],
   },
 
   {
@@ -252,19 +283,28 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
   {
     cmd: "mode",
     group: "code",
-    argsHint: "[review|auto|yolo]",
+    argsHint: "[review|auto|yolo|plan]",
     summary:
-      "edit-gate: review (queue) · auto (apply+undo) · yolo (apply+auto-shell). Shift+Tab cycles.",
+      "edit-gate: review (queue) · auto (apply+undo) · yolo (apply+auto-shell) · plan (read-only). Shift+Tab cycles.",
     contextual: "code",
-    argCompleter: ["review", "auto", "yolo"],
+    argCompleter: ["review", "auto", "yolo", "plan"],
+  },
+  {
+    cmd: "diff",
+    group: "code",
+    argsHint: "[summary|full|none]",
+    summary:
+      "diff display mode: summary (path +stats, default) · full (unified diff) · none (checkmark only)",
+    contextual: "code",
+    argCompleter: ["summary", "full", "none"],
   },
   {
     cmd: "plan",
     group: "code",
-    argsHint: "[on|off]",
-    summary: "toggle read-only plan mode (writes bounced until submit_plan + approval)",
+    argsHint: "[on|off|strict]",
+    summary: "toggle read-only plan mode / strict lifecycle rails",
     contextual: "code",
-    argCompleter: ["on", "off"],
+    argCompleter: ["on", "off", "strict"],
   },
   {
     cmd: "checkpoint",
@@ -315,13 +355,6 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
   },
 
   {
-    cmd: "pro",
-    group: "advanced",
-    argsHint: "[off]",
-    summary: "arm v4-pro for the NEXT turn only (one-shot · auto-disarms after turn)",
-    argCompleter: ["off"],
-  },
-  {
     cmd: "budget",
     group: "advanced",
     argsHint: "[usd|off]",
@@ -332,10 +365,22 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
   {
     cmd: "search-engine",
     group: "advanced",
-    argsHint: "<mojeek|searxng> [<endpoint>]",
-    summary: "switch web search backend — mojeek (default, no deps) or searxng (self-hosted)",
-    argCompleter: ["mojeek", "searxng"],
-    aliases: ["se"],
+    argsHint: "<bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama> [<key>]",
+    summary:
+      "switch web search backend — bing (default, works from CN without proxy), bing-intl (international index via www.bing.com), searxng (self-hosted), metaso (free 100/d), baidu (Baidu AI Search, free 1500/mo per Baidu docs), tavily (free 1000/mo), perplexity (AI-native), exa (AI-native), brave (independent index, free 2000/mo), or ollama (Ollama cloud web search). Provider with no key prompts inline config.",
+    argCompleter: [
+      "bing",
+      "bing-intl",
+      "searxng",
+      "metaso",
+      "baidu",
+      "tavily",
+      "perplexity",
+      "exa",
+      "brave",
+      "ollama",
+    ],
+    aliases: ["se", "search_engine"],
   },
   {
     cmd: "hooks",
@@ -452,8 +497,10 @@ export function detectSlashArgContext(input: string, codeMode = false): SlashArg
 
 export function parseSlash(text: string): { cmd: string; args: string[] } | null {
   if (!text.startsWith("/")) return null;
+  // "//" is a line comment, not a slash command
+  if (text.startsWith("//")) return null;
   const parts = text.slice(1).trim().split(/\s+/);
-  const cmd = parts[0]?.toLowerCase() ?? "";
+  const cmd = resolveSlashAlias(parts[0]?.toLowerCase() ?? "");
   if (!cmd) return null;
   return { cmd, args: parts.slice(1) };
 }

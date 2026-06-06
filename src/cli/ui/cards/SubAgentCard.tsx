@@ -1,17 +1,23 @@
-import { Box, Text } from "ink";
+import { Box, type Color, Text } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React, { useContext } from "react";
 import { t } from "../../../i18n/index.js";
 import { ActiveCardContext, Card as CardWrap } from "../primitives/Card.js";
 import { CardHeader } from "../primitives/CardHeader.js";
-import { Spinner } from "../primitives/Spinner.js";
+import {
+  PULSE_CIRCLE,
+  PULSE_DIAMOND,
+  PULSE_HEX,
+  PULSE_SQUARE,
+  Pulse,
+} from "../primitives/Pulse.js";
 import type { Card, SubAgentCard as SubAgentCardData } from "../state/cards.js";
 import { useThemeTokens } from "../theme/context.js";
 import { CARD } from "../theme/tokens.js";
 
 export function SubAgentCard({ card }: { card: SubAgentCardData }): React.ReactElement {
   const { fg, tone, toneActive } = useThemeTokens();
-  const statusColor: Record<SubAgentCardData["status"], string> = {
+  const statusColor: Record<SubAgentCardData["status"], Color> = {
     running: toneActive.violet,
     done: tone.ok,
     failed: tone.err,
@@ -29,7 +35,9 @@ export function SubAgentCard({ card }: { card: SubAgentCardData }): React.ReactE
   return (
     <CardWrap tone={headColor}>
       <CardHeader
-        glyph={headGlyph}
+        glyph={
+          isRunning ? <Pulse active frames={PULSE_HEX} settled="⌬" color={headColor} /> : headGlyph
+        }
         tone={headColor}
         title={t("cardTitles.subagent")}
         subtitle={card.task}
@@ -64,7 +72,7 @@ function isChildDone(card: Card): boolean {
 interface ChildVisual {
   statusGlyph: React.ReactElement;
   kindGlyph: string;
-  kindColor: string;
+  kindColor: Color;
   text: string;
 }
 
@@ -76,36 +84,39 @@ function ChildRow({ card }: { card: Card }): React.ReactElement {
     <>
       {v.statusGlyph}
       <Text color={v.kindColor}>{v.kindGlyph}</Text>
-      <Text dimColor={isDone} color={fg.body}>
+      <Text dim={isDone} color={fg.body}>
         {v.text}
       </Text>
     </>
   );
 }
 
-function runningGlyph(color: string): React.ReactElement {
-  return <Spinner kind="circle" color={color} />;
+function runningGlyph(color: Color, kind: "reasoning" | "tool" | "streaming"): React.ReactElement {
+  const frames =
+    kind === "tool" ? PULSE_SQUARE : kind === "streaming" ? PULSE_CIRCLE : PULSE_DIAMOND;
+  const settled = kind === "tool" ? "▣" : kind === "streaming" ? "●" : "◆";
+  return <Pulse active frames={frames} settled={settled} color={color} />;
 }
 
-function doneGlyph(color: string): React.ReactElement {
+function doneGlyph(color: Color): React.ReactElement {
   return <Text color={color}>✓</Text>;
 }
 
-function failedGlyph(color: string): React.ReactElement {
+function failedGlyph(color: Color): React.ReactElement {
   return <Text color={color}>✗</Text>;
 }
 
 function childVisual(
   card: Card,
-  doneColor: string,
-  failedColor: string,
-  fallbackColor: string,
+  doneColor: Color,
+  failedColor: Color,
+  fallbackColor: Color,
 ): ChildVisual {
   switch (card.kind) {
     case "reasoning": {
       const done = !card.streaming;
       return {
-        statusGlyph: done ? doneGlyph(doneColor) : runningGlyph(CARD.reasoning.color),
+        statusGlyph: done ? doneGlyph(doneColor) : runningGlyph(CARD.reasoning.color, "reasoning"),
         kindGlyph: "●",
         kindColor: CARD.reasoning.color,
         text: t("cardLabels.reasoningLabel", { count: card.paragraphs }),
@@ -114,7 +125,7 @@ function childVisual(
     case "tool": {
       const elapsed = card.elapsedMs > 0 ? ` · ${(card.elapsedMs / 1000).toFixed(2)}s` : "";
       return {
-        statusGlyph: card.done ? doneGlyph(doneColor) : runningGlyph(CARD.tool.color),
+        statusGlyph: card.done ? doneGlyph(doneColor) : runningGlyph(CARD.tool.color, "tool"),
         kindGlyph: "●",
         kindColor: CARD.tool.color,
         text: `${card.name}${elapsed}`,
@@ -122,7 +133,9 @@ function childVisual(
     }
     case "streaming":
       return {
-        statusGlyph: card.done ? doneGlyph(doneColor) : runningGlyph(CARD.streaming.color),
+        statusGlyph: card.done
+          ? doneGlyph(doneColor)
+          : runningGlyph(CARD.streaming.color, "streaming"),
         kindGlyph: "●",
         kindColor: CARD.streaming.color,
         text: card.done ? t("cardLabels.response") : t("cardLabels.writing"),

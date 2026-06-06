@@ -1,45 +1,56 @@
+import { COMPACTION_SUMMARY_MARKER } from "@reasonix/core-utils";
 import type { DeepSeekClient } from "./client.js";
 import { Usage } from "./client.js";
 import { healLoadedMessages } from "./loop.js";
-import { thinkingModeForModel } from "./loop.js";
 import { stripHallucinatedToolMarkup } from "./loop.js";
 import { buildAssistantMessage } from "./loop/messages.js";
 import { DEFAULT_MAX_RESULT_CHARS } from "./mcp/registry.js";
 import type { AppendOnlyLog } from "./memory/runtime.js";
 import { rewriteSession } from "./memory/session.js";
 import {
-  DEEPSEEK_CONTEXT_TOKENS,
-  DEFAULT_CONTEXT_TOKENS,
   type SessionStats,
+  inputCostUsd,
+  pricingFor,
+  resolveContextTokens,
 } from "./telemetry/stats.js";
-import {
-  countTokensBounded,
-  estimateConversationTokens,
-  estimateRequestTokens,
-} from "./tokenizer.js";
-import type { ChatMessage } from "./types.js";
+import { countTokensBounded, estimateRequestTokens } from "./tokenizer.js";
+import type { ChatMessage, ToolSpec } from "./types.js";
+
+function extractPinnedConstraints(systemPrompt: string): string {
+  // matchAll because the system prompt can carry multiple blocks under the same
+  // prefix — e.g. global User memory + per-project User memory, or several
+  // Project memory files. Single .match() would only grab the first.
+  const pattern =
+    /# (?:HIGH PRIORITY constraints|User memory|Project memory)[\s\S]*?(?=\n# |\n---|$)/g;
+  return Array.from(systemPrompt.matchAll(pattern), (m) => m[0]).join("\n\n");
+}
 
 /** Auto-fold when a turn's response shows promptTokens above this fraction of ctxMax. */
-export const HISTORY_FOLD_THRESHOLD = 0.5;
+export const HISTORY_FOLD_THRESHOLD = 0.75;
 /** Tail budget after a normal fold, as a fraction of ctxMax. */
 export const HISTORY_FOLD_TAIL_FRACTION = 0.2;
 /** Above this fraction the normal fold's tail budget didn't buy enough headroom — fold harder. */
-export const HISTORY_FOLD_AGGRESSIVE_THRESHOLD = 0.7;
+export const HISTORY_FOLD_AGGRESSIVE_THRESHOLD = 0.78;
 /** Tail budget after an aggressive fold — half the normal one, sacrifices recent context for headroom. */
 export const HISTORY_FOLD_AGGRESSIVE_TAIL_FRACTION = 0.1;
 /** Skip the fold if the head wouldn't shrink the log by at least this fraction. */
 export const HISTORY_FOLD_MIN_SAVINGS_FRACTION = 0.3;
 /** Above this fraction we exit the turn with a summary instead of folding (defense in depth). */
 export const FORCE_SUMMARY_THRESHOLD = 0.8;
-/** Local preflight estimate above this fraction trips the emergency in-place compact path. */
-export const PREFLIGHT_EMERGENCY_THRESHOLD = 0.95;
-/** Emergency preflight target after local truncation, as a fraction of ctxMax. */
-export const PREFLIGHT_MECHANICAL_TARGET_FRACTION = 0.7;
+/** Turn-start local estimate above this fraction triggers a pre-iter fold. Covers cases the
+ * post-response fold can't (terminal prior turn, fresh session restore, huge user paste). */
+export const TURN_START_FOLD_THRESHOLD = 0.9;
 /** Hard deadline for semantic fold summaries so a hung request cannot stall the turn loop. */
 export const HISTORY_FOLD_SUMMARY_TIMEOUT_MS = 15_000;
-/** Prepended to fold summary content so the model knows it's a synthesized recap. */
-export const HISTORY_FOLD_MARKER =
-  "[CONVERSATION HISTORY SUMMARY — earlier turns folded for context efficiency]\n\n";
+/** Normal-band folds should pay for themselves over a short horizon; aggressive folds still prioritize headroom. */
+export const HISTORY_FOLD_ECONOMIC_HORIZON_TURNS = 3;
+export const HISTORY_FOLD_MIN_ECONOMIC_SAVINGS_FRACTION = 0.15;
+export const HISTORY_FOLD_MIN_ECONOMIC_SAVINGS_USD = 0.002;
+/** Summary + next-turn cold segment reserve used by fold economics. */
+export const HISTORY_FOLD_SUMMARY_RESERVE_TOKENS = 4096;
+/** Prepended to fold summary content so the model knows it's a synthesized recap.
+ *  Re-export of the shared constant so existing imports keep resolving. */
+export const HISTORY_FOLD_MARKER = COMPACTION_SUMMARY_MARKER;
 /** Header that precedes preserved skill bodies in a fold's synthesized assistant message. */
 export const SKILL_PIN_MEMO_HEADER = "[Active skill memos — preserved verbatim across the fold:]";
 /** Matches the wrapper emitted by `run_skill` so the fold can lift bodies out before summarizing. */
@@ -52,6 +63,12 @@ export interface ContextManagerDeps {
   sessionName: string | null;
   getAbortSignal: () => AbortSignal;
   getCurrentTurn: () => number;
+  getSystemPrompt: () => string;
+  /** Reuses the live prefix → fold summary call shares the cached bytes the main agent already paid for. */
+  getToolSpecs?: () => readonly ToolSpec[];
+  getFewShots?: () => readonly ChatMessage[];
+  /** Fired when the message log was rewritten by fold; lets the loop drop session-scoped caches whose validity rested on the elided history (e.g. read-before-edit tracker). */
+  onLogRewrite?: () => void;
 }
 
 export type PostUsageDecisionKind = "none" | "fold" | "exit-with-summary";
@@ -65,12 +82,7 @@ export interface PostUsageDecision {
   tailBudget?: number;
   /** True when this fold is in the 70-85% band — used in user-facing messaging. */
   aggressive?: boolean;
-}
-
-export interface PreflightDecision {
-  needsAction: boolean;
-  estimateTokens: number;
-  ctxMax: number;
+  economics?: FoldEconomics;
 }
 
 export interface FoldResult {
@@ -80,28 +92,111 @@ export interface FoldResult {
   summaryChars: number;
 }
 
-// Stub pins in head so the summarizer doesn't paraphrase them; dedupe by name, last invocation wins.
-function extractPinnedSkills(head: ChatMessage[]): {
-  stubbedHead: ChatMessage[];
-  pinnedBodies: string[];
-} {
+export interface FoldEconomics {
+  horizonTurns: number;
+  carryInputUsd: number;
+  foldInputUsd: number;
+  savingsUsd: number;
+  savingsFraction: number;
+  worthwhile: boolean;
+}
+
+export function estimateFoldEconomics(
+  usage: Usage,
+  model: string,
+  tailBudgetTokens: number,
+): FoldEconomics {
+  const pricing = pricingFor(model);
+  if (!pricing) {
+    return {
+      horizonTurns: HISTORY_FOLD_ECONOMIC_HORIZON_TURNS,
+      carryInputUsd: 0,
+      foldInputUsd: 0,
+      savingsUsd: 0,
+      savingsFraction: 0,
+      worthwhile: true,
+    };
+  }
+
+  const horizonTurns = HISTORY_FOLD_ECONOMIC_HORIZON_TURNS;
+  const carryInputUsd = inputCostUsd(model, usage) * horizonTurns;
+  const summaryCallUsd = inputCostUsd(model, usage);
+  const postFoldPromptTokens = Math.min(
+    usage.promptTokens,
+    tailBudgetTokens + HISTORY_FOLD_SUMMARY_RESERVE_TOKENS,
+  );
+  const postFoldColdUsd = (postFoldPromptTokens * pricing.inputCacheMiss) / 1_000_000;
+  const postFoldWarmUsd =
+    ((horizonTurns - 1) * postFoldPromptTokens * pricing.inputCacheHit) / 1_000_000;
+  const foldInputUsd = summaryCallUsd + postFoldColdUsd + postFoldWarmUsd;
+  const savingsUsd = carryInputUsd - foldInputUsd;
+  const savingsFraction = carryInputUsd > 0 ? savingsUsd / carryInputUsd : 0;
+  return {
+    horizonTurns,
+    carryInputUsd,
+    foldInputUsd,
+    savingsUsd,
+    savingsFraction,
+    worthwhile:
+      savingsUsd >= HISTORY_FOLD_MIN_ECONOMIC_SAVINGS_USD &&
+      savingsFraction >= HISTORY_FOLD_MIN_ECONOMIC_SAVINGS_FRACTION,
+  };
+}
+
+function buildFoldSummaryInstruction(pinnedSkillNames: string[]): string {
+  const base =
+    "Summarize the conversation above as one self-contained prose recap. Preserve the user's " +
+    "ORIGINAL OBJECTIVE (never paraphrase away negative constraints like 'do NOT do X'), all " +
+    "'do not' / 'never' / 'avoid' instructions, decisions reached, files inspected or modified, " +
+    "tool results still relevant, and any open todos. Skip turn-by-turn play-by-play. " +
+    "Output plain prose only — no tool calls, no markdown headings, no SEARCH/REPLACE blocks.";
+  if (pinnedSkillNames.length === 0) return base;
+  const list = pinnedSkillNames.map((n) => `"${n}"`).join(", ");
+  return `${base} The following skill memos are pinned verbatim and appended after your summary — do NOT quote or paraphrase their bodies: ${list}.`;
+}
+
+// Dedupe by name, last invocation wins. Read-only — leaves head bytes unchanged so the
+// summarizer call's prefix still matches what the main agent already cached.
+function collectPinnedSkills(head: ChatMessage[]): { names: string[]; bodies: string[] } {
   const pinned = new Map<string, string>();
-  const stubbedHead = head.map((msg) => {
-    if (typeof msg.content !== "string") return msg;
-    let hit = false;
-    const next = msg.content.replace(SKILL_PIN_REGEX, (full, name: string) => {
+  for (const msg of head) {
+    if (typeof msg.content !== "string") continue;
+    SKILL_PIN_REGEX.lastIndex = 0;
+    for (const match of msg.content.matchAll(SKILL_PIN_REGEX)) {
+      const name = match[1] as string;
+      const full = match[0];
       pinned.delete(name);
       pinned.set(name, full);
-      hit = true;
-      return `[skill ${JSON.stringify(name)} memo — preserved separately, do not summarize.]`;
-    });
-    return hit ? { ...msg, content: next } : msg;
-  });
-  return { stubbedHead, pinnedBodies: [...pinned.values()] };
+    }
+  }
+  return { names: [...pinned.keys()], bodies: [...pinned.values()] };
 }
 
 export class ContextManager {
+  private _logTokensCache = -1;
+  private _logTokensVersion = -1;
+
   constructor(private deps: ContextManagerDeps) {}
+
+  /** Real-time token count of the current log — used by Desktop to refresh the
+   *  context meter after /compact when no API usage event is available. */
+  getLogTokens(): number {
+    if (this._logTokensCache >= 0 && this._logTokensVersion === this.deps.log.version) {
+      return this._logTokensCache;
+    }
+    const entries = this.deps.log.toFullHistory();
+    let total = 0;
+    for (const e of entries) {
+      const content = typeof e.content === "string" ? e.content : "";
+      total += countTokensBounded(content);
+      if (e.role === "assistant" && Array.isArray(e.tool_calls) && e.tool_calls.length > 0) {
+        total += countTokensBounded(JSON.stringify(e.tool_calls));
+      }
+    }
+    this._logTokensCache = total;
+    this._logTokensVersion = this.deps.log.version;
+    return total;
+  }
 
   /** Decision after a turn's response — fold, exit with summary, or carry on. */
   decideAfterUsage(
@@ -109,7 +204,7 @@ export class ContextManager {
     model: string,
     alreadyFoldedThisTurn: boolean,
   ): PostUsageDecision {
-    const ctxMax = DEEPSEEK_CONTEXT_TOKENS[model] ?? DEFAULT_CONTEXT_TOKENS;
+    const ctxMax = resolveContextTokens(model);
     if (!usage) return { kind: "none", promptTokens: 0, ctxMax, ratio: 0 };
     const ratio = usage.promptTokens / ctxMax;
     const base = { promptTokens: usage.promptTokens, ctxMax, ratio };
@@ -126,36 +221,41 @@ export class ContextManager {
       };
     }
     if (ratio > HISTORY_FOLD_THRESHOLD) {
+      const tailBudget = Math.floor(ctxMax * HISTORY_FOLD_TAIL_FRACTION);
+      const economics = estimateFoldEconomics(usage, model, tailBudget);
+      if (!economics.worthwhile) {
+        return { kind: "none", ...base, economics };
+      }
       return {
         kind: "fold",
         ...base,
-        tailBudget: Math.floor(ctxMax * HISTORY_FOLD_TAIL_FRACTION),
+        tailBudget,
         aggressive: false,
+        economics,
       };
     }
     return { kind: "none", ...base };
   }
 
-  /** Local-side preflight before sending a request — catches oversized payloads early. */
-  decidePreflight(
+  /** Turn-start estimate vs ctxMax — caller folds if the ratio crosses
+   *  TURN_START_FOLD_THRESHOLD. Replaces the old preflight/mechanical pair. */
+  estimateTurnStart(
     messages: ChatMessage[],
     toolSpecs: ReadonlyArray<unknown> | undefined | null,
     model: string,
-  ): PreflightDecision {
-    const ctxMax = DEEPSEEK_CONTEXT_TOKENS[model] ?? DEFAULT_CONTEXT_TOKENS;
+  ): { estimateTokens: number; ctxMax: number; ratio: number } {
+    const ctxMax = resolveContextTokens(model);
     const estimate = estimateRequestTokens(messages, toolSpecs ?? null, true);
-    return {
-      needsAction: estimate / ctxMax > PREFLIGHT_EMERGENCY_THRESHOLD,
-      estimateTokens: estimate,
-      ctxMax,
-    };
+    return { estimateTokens: estimate, ctxMax, ratio: estimate / ctxMax };
   }
 
-  /** Replace older turns with one summary message; keep tail within keepRecentTokens budget. */
-  async fold(model: string, opts?: { keepRecentTokens?: number }): Promise<FoldResult> {
-    const ctxMax = DEEPSEEK_CONTEXT_TOKENS[model] ?? DEFAULT_CONTEXT_TOKENS;
+  async fold(
+    model: string,
+    opts?: { keepRecentTokens?: number; requireTailBoundary?: boolean },
+  ): Promise<FoldResult> {
+    const ctxMax = resolveContextTokens(model);
     const tailBudget = opts?.keepRecentTokens ?? Math.floor(ctxMax * HISTORY_FOLD_TAIL_FRACTION);
-    const all = this.deps.log.toMessages();
+    const all = this.deps.log.toFullHistory();
     const noop: FoldResult = {
       folded: false,
       beforeMessages: all.length,
@@ -164,8 +264,16 @@ export class ContextManager {
     };
     if (all.length === 0) return noop;
 
-    // Per-message content-only comparison for fold ordering (not exact API match).
-    const tokenCounts = all.map((m) => countTokensBounded(m.content ?? ""));
+    // Per-message token cost includes tool_calls JSON; otherwise heavy tool-call
+    // arguments slip through the tail-budget check and the boundary slides past
+    // the active tool turn. No chat-template wrapper here — that would double-count.
+    const tokenCounts = all.map((m) => {
+      let n = countTokensBounded(typeof m.content === "string" ? m.content : "");
+      if (m.role === "assistant" && Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
+        n += countTokensBounded(JSON.stringify(m.tool_calls));
+      }
+      return n;
+    });
     const totalTokens = tokenCounts.reduce((a, b) => a + b, 0);
 
     let cumTokens = 0;
@@ -176,25 +284,33 @@ export class ContextManager {
       if (all[i]!.role === "user") boundary = i;
     }
     if (boundary <= 0) return noop;
+    // Preflight-only: refuse when no user landed in tail — the active tool turn
+    // would be wiped. Default fold path (post-response) tolerates empty tail so
+    // cache-aligned summary tests still exercise the "summarize all" shape.
+    if (opts?.requireTailBoundary && boundary >= all.length) return noop;
 
     const head = all.slice(0, boundary);
     const tail = all.slice(boundary);
     const headTokens = totalTokens - cumTokens;
     if (headTokens < totalTokens * HISTORY_FOLD_MIN_SAVINGS_FRACTION) return noop;
 
-    const { stubbedHead, pinnedBodies } = extractPinnedSkills(head);
-    const summary = await this.summarizeForFold(stubbedHead);
+    const { names: pinnedNames, bodies: pinnedBodies } = collectPinnedSkills(head);
+    const summary = await this.summarizeForFold(head, pinnedNames);
     if (!summary.content) return noop;
 
     const memoTail =
       pinnedBodies.length > 0 ? `\n\n${SKILL_PIN_MEMO_HEADER}\n\n${pinnedBodies.join("\n\n")}` : "";
+    const constraints = extractPinnedConstraints(this.deps.getSystemPrompt());
+    const constraintTail = constraints
+      ? `\n\n[PINNED CONSTRAINTS — preserved verbatim]\n\n${constraints}`
+      : "";
     // Route via buildAssistantMessage so the synthetic summary carries
     // reasoning_content under thinking-mode sessions — without it the
     // next API call 400s with "must be passed back" (#1042). Stamp uses
     // the SESSION model so an empty placeholder is added even when the
     // summarizer call somehow returned no reasoning.
     const summaryMsg = buildAssistantMessage(
-      HISTORY_FOLD_MARKER + summary.content + memoTail,
+      HISTORY_FOLD_MARKER + summary.content + memoTail + constraintTail,
       [],
       model,
       summary.reasoningContent,
@@ -202,68 +318,12 @@ export class ContextManager {
     const replacement = [summaryMsg, ...tail];
     this.deps.log.compactInPlace(replacement);
     this.persistRewrite(replacement);
+    this.deps.onLogRewrite?.();
     return {
       folded: true,
       beforeMessages: all.length,
       afterMessages: replacement.length,
       summaryChars: summary.content.length,
-    };
-  }
-
-  /** Pure local emergency compaction for preflight: drop oldest log entries and keep a valid tail. */
-  mechanicalTruncate(
-    model: string,
-    opts?: { targetTokens?: number; allowEmpty?: boolean },
-  ): FoldResult {
-    const ctxMax = DEEPSEEK_CONTEXT_TOKENS[model] ?? DEFAULT_CONTEXT_TOKENS;
-    const targetTokens =
-      opts?.targetTokens ?? Math.floor(ctxMax * PREFLIGHT_MECHANICAL_TARGET_FRACTION);
-    const all = this.deps.log.toMessages();
-    const noop: FoldResult = {
-      folded: false,
-      beforeMessages: all.length,
-      afterMessages: all.length,
-      summaryChars: 0,
-    };
-    if (all.length === 0) return noop;
-
-    const tokenCounts = all.map((m) => estimateConversationTokens([m], true));
-    let latestUserBoundary = -1;
-    for (let i = all.length - 1; i >= 0; i--) {
-      if (all[i]!.role === "user") {
-        latestUserBoundary = i;
-        break;
-      }
-    }
-    let cumTokens = 0;
-    let boundary = all.length;
-    let foundSafeBoundary = false;
-    for (let i = all.length - 1; i >= 0; i--) {
-      const next = cumTokens + tokenCounts[i]!;
-      if (next > targetTokens) break;
-      cumTokens = next;
-      if (all[i]!.role === "user") {
-        boundary = i;
-        foundSafeBoundary = true;
-      }
-    }
-    if (boundary <= 0) return noop;
-
-    const replacement = foundSafeBoundary
-      ? all.slice(boundary)
-      : opts?.allowEmpty
-        ? []
-        : latestUserBoundary >= 0
-          ? all.slice(latestUserBoundary)
-          : all;
-    if (replacement.length === all.length) return noop;
-    this.deps.log.compactInPlace(replacement);
-    this.persistRewrite(replacement);
-    return {
-      folded: true,
-      beforeMessages: all.length,
-      afterMessages: replacement.length,
-      summaryChars: 0,
     };
   }
 
@@ -286,19 +346,19 @@ export class ContextManager {
 
   private async summarizeForFold(
     messagesToSummarize: ChatMessage[],
+    pinnedSkillNames: string[],
   ): Promise<{ content: string; reasoningContent: string }> {
     const summaryModel = "deepseek-v4-flash";
-    const systemPrompt =
-      "You compress conversation history for a coding agent. Output one prose recap that preserves: the user's overall goal, decisions and conclusions reached, files inspected or modified, important tool results still relevant to ongoing work, and any open todos. Skip turn-by-turn play-by-play. No tool calls, no markdown headings, no SEARCH/REPLACE blocks — plain prose only.";
     const healed = healLoadedMessages(messagesToSummarize, DEFAULT_MAX_RESULT_CHARS).messages;
+    const agentSystem = this.deps.getSystemPrompt();
+    const fewShots = this.deps.getFewShots?.() ?? [];
+    const tools = this.deps.getToolSpecs?.() ?? [];
+    const instruction = buildFoldSummaryInstruction(pinnedSkillNames);
     const messages: ChatMessage[] = [
-      { role: "system", content: systemPrompt },
+      { role: "system", content: agentSystem },
+      ...fewShots.map((m) => ({ ...m })),
       ...healed,
-      {
-        role: "user",
-        content:
-          "Summarize the conversation above as plain prose. This summary replaces the original turns to free context — make it self-contained.",
-      },
+      { role: "user", content: instruction },
     ];
     const turnSignal = this.deps.getAbortSignal();
     const foldCtrl = new AbortController();
@@ -327,9 +387,9 @@ export class ContextManager {
         this.deps.client.chat({
           model: summaryModel,
           messages,
+          tools: tools.length ? (tools as ToolSpec[]) : undefined,
           signal: foldCtrl.signal,
-          thinking: thinkingModeForModel(summaryModel),
-          reasoningEffort: "high",
+          thinking: "disabled",
         }),
         abortPromise,
         timeoutPromise,

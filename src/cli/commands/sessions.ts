@@ -23,7 +23,7 @@ function listAll(): void {
     console.log(t("sessions.emptyHint"));
     return;
   }
-  console.log("Saved sessions (~/.reasonix/sessions/):");
+  console.log(t("sessions.listHeader"));
   console.log("");
   console.log(`  ${"name".padEnd(22)} ${"msgs".padStart(6)}  ${"size".padStart(8)}  modified`);
   console.log(`  ${"─".repeat(60)}`);
@@ -37,16 +37,16 @@ function listAll(): void {
     if (details.length > 0) console.log(`      ${details.join(" · ")}`);
   }
   console.log("");
-  console.log("Inspect:  reasonix sessions <name>");
-  console.log("Resume:   reasonix chat --session <name>");
+  console.log(t("sessions.inspectHint"));
+  console.log(t("sessions.resumeHint"));
 }
 
 function inspectSession(name: string, verbose: boolean): void {
   const path = sessionPath(name);
   const messages = loadSessionMessages(name);
   if (messages.length === 0) {
-    console.error(`no session named "${name}" (or it's empty).`);
-    console.error(`looked at: ${path}`);
+    console.error(t("sessions.noSession", { name }));
+    console.error(t("sessions.lookedAt", { path }));
     process.exit(1);
   }
 

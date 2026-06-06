@@ -7,7 +7,6 @@ import type { PlanStep } from "../../tools/plan.js";
 import { PlanStepList, type StepStatus } from "./PlanStepList.js";
 import { SingleSelect } from "./Select.js";
 import { ApprovalCard } from "./cards/ApprovalCard.js";
-import { useReserveRows } from "./layout/viewport-budget.js";
 
 export type CheckpointChoice = "continue" | "revise" | "stop";
 
@@ -32,9 +31,6 @@ function PlanCheckpointConfirmInner({
   completedStepIds,
   onChoose,
 }: PlanCheckpointConfirmProps) {
-  const stepRows = steps?.length ?? 0;
-  useReserveRows("modal", { min: 10, max: Math.max(14, stepRows + 12) });
-
   const label = title ? `${stepId} · ${title}` : stepId;
   const counter = total > 0 ? `${completed}/${total}` : "";
   const isLast = total > 0 && completed >= total;
@@ -48,12 +44,12 @@ function PlanCheckpointConfirmInner({
         </Box>
       ) : null}
       <SingleSelect
-        initialValue={isLast ? "stop" : "continue"}
+        initialValue="continue"
         items={[
           {
             value: "continue",
-            label: t("planFlow.checkpoint.continue"),
-            hint: t("planFlow.checkpoint.continueHint"),
+            label: t(isLast ? "planFlow.checkpoint.finish" : "planFlow.checkpoint.continue"),
+            hint: t(isLast ? "planFlow.checkpoint.finishHint" : "planFlow.checkpoint.continueHint"),
           },
           {
             value: "revise",

@@ -1,15 +1,12 @@
 /** resolveDefaults — flags vs config precedence; silent failures here are user-visible "config does nothing" bugs. */
 
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { resolveContinueFlag, resolveDefaults } from "../src/cli/resolve.js";
 import { writeConfig } from "../src/config.js";
 
-// resolve.ts reads the real ~/.reasonix/config.json via readConfig().
-// Redirect HOME to a temp dir for each test so we never touch the
-// user's real config and we start each case with a clean slate.
 describe("resolveDefaults", () => {
   let home: string;
   const origHome = process.env.HOME;
@@ -18,7 +15,7 @@ describe("resolveDefaults", () => {
   beforeEach(() => {
     home = mkdtempSync(join(tmpdir(), "reasonix-resolve-"));
     process.env.HOME = home;
-    process.env.USERPROFILE = home; // node:os homedir() uses this on Windows
+    process.env.USERPROFILE = home;
   });
 
   afterEach(() => {
@@ -37,32 +34,46 @@ describe("resolveDefaults", () => {
     }
   });
 
-  it("empty flags + empty config → auto preset (flash + max)", () => {
+  it("empty flags + empty config → flash + high", () => {
     const r = resolveDefaults({});
     expect(r.model).toBe("deepseek-v4-flash");
-    expect(r.reasoningEffort).toBe("max");
+    expect(r.reasoningEffort).toBe("high");
     expect(r.mcp).toEqual([]);
     expect(r.session).toBe("default");
   });
 
-  it("config.preset 'fast' drops effort to high (still flash)", () => {
-    writeConfig({ preset: "fast" }, join(home, ".reasonix", "config.json"));
+  it("config.model overrides the default", () => {
+    writeConfig({ model: "deepseek-v4-pro" }, join(home, ".reasonix", "config.json"));
     const r = resolveDefaults({});
-    expect(r.model).toBe("deepseek-v4-flash");
-    expect(r.reasoningEffort).toBe("high");
-  });
-
-  it("--preset max overrides config.preset=fast → pro + max", () => {
-    writeConfig({ preset: "fast" }, join(home, ".reasonix", "config.json"));
-    const r = resolveDefaults({ preset: "max" });
     expect(r.model).toBe("deepseek-v4-pro");
-    expect(r.reasoningEffort).toBe("max");
   });
 
-  it("--model wins even when --preset is set", () => {
-    const r = resolveDefaults({ preset: "max", model: "deepseek-v4-flash" });
-    expect(r.model).toBe("deepseek-v4-flash");
-    expect(r.reasoningEffort).toBe("max");
+  it("config.reasoningEffort persists across launches", () => {
+    writeConfig({ reasoningEffort: "max" }, join(home, ".reasonix", "config.json"));
+    expect(resolveDefaults({}).reasoningEffort).toBe("max");
+  });
+
+  it("--model wins over config.model", () => {
+    writeConfig({ model: "deepseek-v4-flash" }, join(home, ".reasonix", "config.json"));
+    const r = resolveDefaults({ model: "deepseek-v4-pro" });
+    expect(r.model).toBe("deepseek-v4-pro");
+  });
+
+  it("--effort wins over config.reasoningEffort", () => {
+    writeConfig({ reasoningEffort: "max" }, join(home, ".reasonix", "config.json"));
+    const r = resolveDefaults({ effort: "low" });
+    expect(r.reasoningEffort).toBe("low");
+  });
+
+  it("--effort accepts any of the four enum values", () => {
+    for (const e of ["low", "medium", "high", "max"] as const) {
+      expect(resolveDefaults({ effort: e }).reasoningEffort).toBe(e);
+    }
+  });
+
+  it("--effort with garbage value falls through to config / default", () => {
+    writeConfig({ reasoningEffort: "medium" }, join(home, ".reasonix", "config.json"));
+    expect(resolveDefaults({ effort: "absurd" }).reasoningEffort).toBe("medium");
   });
 
   it("--mcp overrides config.mcp wholesale (no merging)", () => {
@@ -85,10 +96,13 @@ describe("resolveDefaults", () => {
   });
 
   it("--no-config ignores the config entirely", () => {
-    writeConfig({ preset: "max", mcp: ["x=cmd"] }, join(home, ".reasonix", "config.json"));
+    writeConfig(
+      { model: "deepseek-v4-pro", reasoningEffort: "max", mcp: ["x=cmd"] },
+      join(home, ".reasonix", "config.json"),
+    );
     const r = resolveDefaults({ noConfig: true });
-    expect(r.model).toBe("deepseek-v4-flash"); // smart defaults (new default)
-    expect(r.reasoningEffort).toBe("max");
+    expect(r.model).toBe("deepseek-v4-flash");
+    expect(r.reasoningEffort).toBe("high");
     expect(r.mcp).toEqual([]);
   });
 
@@ -102,6 +116,65 @@ describe("resolveDefaults", () => {
     writeConfig({ session: null }, join(home, ".reasonix", "config.json"));
     const r = resolveDefaults({});
     expect(r.session).toBeUndefined();
+  });
+
+  describe("Claude .mcp.json compatibility", () => {
+    let cwd: string;
+    const origCwd = process.cwd();
+
+    beforeEach(() => {
+      cwd = mkdtempSync(join(tmpdir(), "reasonix-cwd-"));
+      process.chdir(cwd);
+    });
+
+    afterEach(() => {
+      process.chdir(origCwd);
+      rmSync(cwd, { recursive: true, force: true });
+    });
+
+    it("merges project-level .mcp.json into resolved mcp specs", () => {
+      writeFileSync(
+        join(cwd, ".mcp.json"),
+        JSON.stringify({
+          mcpServers: {
+            gh: { type: "http", url: "https://api.githubcopilot.com/mcp/" },
+          },
+        }),
+        "utf8",
+      );
+      const r = resolveDefaults({});
+      expect(r.mcp.some((s) => s.includes("gh="))).toBe(true);
+    });
+
+    it("project .mcp.json overrides user mcpServers on name collision", () => {
+      writeConfig(
+        {
+          mcpServers: { gh: { command: "user-level-cmd" } },
+        },
+        join(home, ".reasonix", "config.json"),
+      );
+      writeFileSync(
+        join(cwd, ".mcp.json"),
+        JSON.stringify({
+          mcpServers: { gh: { type: "stdio", command: "project-level-cmd" } },
+        }),
+        "utf8",
+      );
+      const r = resolveDefaults({});
+      const ghEntry = r.mcp.find((s) => s.startsWith("gh="))!;
+      expect(ghEntry).toContain("project-level-cmd");
+      expect(ghEntry).not.toContain("user-level-cmd");
+    });
+
+    it("--no-config skips .mcp.json entirely", () => {
+      writeFileSync(
+        join(cwd, ".mcp.json"),
+        JSON.stringify({ mcpServers: { gh: { type: "stdio", command: "node" } } }),
+        "utf8",
+      );
+      const r = resolveDefaults({ noConfig: true });
+      expect(r.mcp).toEqual([]);
+    });
   });
 });
 

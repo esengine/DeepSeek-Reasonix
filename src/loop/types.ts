@@ -1,4 +1,5 @@
 import type { RepairReport } from "../repair/index.js";
+import type { CacheDiagnosticEntry } from "../telemetry/cache-diagnostics.js";
 import type { TurnStats } from "../telemetry/stats.js";
 
 export type EventRole =
@@ -14,15 +15,21 @@ export type EventRole =
   | "warning"
   /** Transient indicator for silent phases; UI clears on next primary event. */
   | "status"
-  /** Mid-turn steer injected as a user utterance without aborting the current turn. */
+  /** Mid-turn steer injected as queued user guidance without aborting the current turn. */
   | "steer"
   /** A user message was queued mid-turn and flushed into model context. */
   | "user.queued";
+
+/** "low" = chatty / self-correcting / counter — Desktop+Dashboard filter these out by default.
+ *  Undefined / "high" = real event the user should see (compaction, abort, budget, rate-limit, etc.).
+ *  TUI ignores this and renders every warning. */
+export type EventSeverity = "low" | "high";
 
 export interface LoopEvent {
   turn: number;
   role: EventRole;
   content: string;
+  severity?: EventSeverity;
   reasoningDelta?: string;
   toolName?: string;
   /** Raw args JSON — needed by `reasonix diff` to explain why a tool was called. */
@@ -36,8 +43,17 @@ export interface LoopEvent {
   /** Stable id for tool_start / tool pairs — also the inflight-set key. UI uses this as the card id so it can derive `running` from `loop.inflight.has(callId)` instead of trusting end-event delivery. */
   callId?: string;
   stats?: TurnStats;
+  cacheDiagnostic?: CacheDiagnosticEntry;
   repair?: RepairReport;
   error?: string;
+  errorDetail?: {
+    name: string;
+    message: string;
+    code?: string;
+    phase?: string;
+    retryable: boolean;
+    recoverable: boolean;
+  };
   /** Display-only — code-mode applier MUST skip SEARCH/REPLACE in forced-summary text. */
   forcedSummary?: boolean;
 }

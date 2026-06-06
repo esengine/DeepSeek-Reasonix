@@ -17,7 +17,7 @@ export interface WelcomeBannerProps {
   languageVersion?: number;
 }
 
-const HINTS = ["/help", "/init", "/memory", "/cost"] as const;
+const HINTS = ["/help", "/skill", "/init", "/memory", "/cost"] as const;
 
 export function WelcomeBanner({
   inCodeMode,

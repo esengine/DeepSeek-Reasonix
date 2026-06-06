@@ -9,6 +9,7 @@ export default defineConfig([
     sourcemap: true,
     target: "node22",
     outDir: "dist",
+    noExternal: ["@reasonix/core-utils", "ink"],
   },
   {
     entry: ["src/cli/index.ts"],
@@ -27,16 +28,6 @@ export default defineConfig([
       opts.external = [...(opts.external ?? []), "react-devtools-core"];
     },
   },
-  {
-    entry: { app: "dashboard/app.js" },
-    format: ["esm"],
-    dts: false,
-    clean: true,
-    sourcemap: true,
-    target: "es2022",
-    platform: "browser",
-    outDir: "dashboard/dist",
-    noExternal: [/.*/],
-    splitting: false,
-  },
+  // Dashboard is now built by Vite (npm run build:dashboard).
+  // The old tsup entry that bundled dashboard/app.js has been removed.
 ]);

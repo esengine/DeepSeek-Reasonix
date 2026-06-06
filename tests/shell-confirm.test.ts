@@ -1,5 +1,5 @@
+import { derivePrefix } from "@reasonix/core-utils";
 import { describe, expect, it } from "vitest";
-import { derivePrefix } from "../src/cli/ui/ShellConfirm.js";
 
 describe("derivePrefix", () => {
   it("returns the sole token for single-word commands", () => {

@@ -38,6 +38,18 @@ describe("Usage.cacheHitRatio", () => {
     expect(u.promptCacheHitTokens).toBe(800);
     expect(u.promptCacheMissTokens).toBe(200);
   });
+
+  it("maps Ollama native usage fields into prompt and completion tokens", () => {
+    const u = Usage.fromApi({
+      prompt_eval_count: 1234,
+      eval_count: 56,
+    });
+    expect(u.promptTokens).toBe(1234);
+    expect(u.completionTokens).toBe(56);
+    expect(u.totalTokens).toBe(1290);
+    expect(u.promptCacheHitTokens).toBe(0);
+    expect(u.promptCacheMissTokens).toBe(1234);
+  });
 });
 
 describe("costUsd", () => {
@@ -322,5 +334,80 @@ describe("SessionStats — issue #364 resume cache + context carryover", () => {
     s.seedCarryover({ cacheHitTokens: 0, cacheMissTokens: -5, lastPromptTokens: 0 });
     expect(s.aggregateCacheHitRatio).toBe(0);
     expect(s.summary().lastPromptTokens).toBe(0);
+  });
+
+  it("cumulativeCompletionTokens sums carryover + live turns so resume doesn't reset the counter", () => {
+    // Regression: #1667 persisted totalCompletionTokens but didn't seed it
+    // back into stats on resume, so the first patchSessionMeta after a
+    // restart overwrote the saved value with just the new turn's tally.
+    const s = new SessionStats();
+    s.seedCarryover({ totalCompletionTokens: 50_000 });
+    expect(s.cumulativeCompletionTokens).toBe(50_000);
+    s.record(1, "deepseek-chat", new Usage(2000, 500, 0, 0, 2000));
+    expect(s.cumulativeCompletionTokens).toBe(50_500);
+  });
+
+  it("seedCarryover ignores zero / negative totalCompletionTokens", () => {
+    const s = new SessionStats();
+    s.seedCarryover({ totalCompletionTokens: 0 });
+    expect(s.cumulativeCompletionTokens).toBe(0);
+    s.seedCarryover({ totalCompletionTokens: -1 });
+    expect(s.cumulativeCompletionTokens).toBe(0);
+  });
+});
+
+describe("SessionStats.recordExternal (#2008)", () => {
+  it("adds subagent cost to session totalCost without creating a turn entry", () => {
+    const s = new SessionStats();
+    s.record(1, "deepseek-v4-pro", new Usage(10_000, 1000, 0, 8000, 2000));
+    const costBefore = s.totalCost;
+    const turnsBefore = s.summary().turns;
+
+    // Simulate a subagent on flash
+    s.recordExternal("deepseek-v4-flash", new Usage(5000, 500, 0, 4000, 1000));
+
+    expect(s.totalCost).toBeGreaterThan(costBefore);
+    // Turn count must NOT increase — subagent is not a parent turn.
+    expect(s.summary().turns).toBe(turnsBefore);
+  });
+
+  it("adds subagent cache tokens to cumulativeToken getters", () => {
+    const s = new SessionStats();
+    s.record(1, "deepseek-v4-pro", new Usage(10_000, 1000, 0, 8000, 2000));
+    const hitBefore = s.cumulativeCacheHitTokens;
+    const missBefore = s.cumulativeCacheMissTokens;
+    const compBefore = s.cumulativeCompletionTokens;
+
+    s.recordExternal("deepseek-v4-flash", new Usage(5000, 500, 0, 4000, 1000));
+
+    expect(s.cumulativeCacheHitTokens).toBe(hitBefore + 4000);
+    expect(s.cumulativeCacheMissTokens).toBe(missBefore + 1000);
+    expect(s.cumulativeCompletionTokens).toBe(compBefore + 500);
+  });
+
+  it("aggregateCacheHitRatio includes subagent tokens", () => {
+    const s = new SessionStats();
+    // Parent: 8000 hit, 2000 miss → 0.8
+    s.record(1, "deepseek-v4-pro", new Usage(10_000, 1000, 0, 8000, 2000));
+    const ratioBefore = s.aggregateCacheHitRatio;
+    expect(ratioBefore).toBeCloseTo(0.8, 4);
+
+    // Subagent: 1000 hit, 4000 miss → 0.2 (lower hit ratio)
+    s.recordExternal("deepseek-v4-flash", new Usage(5000, 500, 0, 1000, 4000));
+
+    // Combined: 9000 hit, 6000 miss → 0.6
+    expect(s.aggregateCacheHitRatio).toBeCloseTo(9000 / 15000, 4);
+    expect(s.aggregateCacheHitRatio).toBeLessThan(ratioBefore);
+  });
+
+  it("summary().totalCostUsd reflects subagent usage", () => {
+    const s = new SessionStats();
+    s.record(1, "deepseek-v4-pro", new Usage(10_000, 1000, 0, 8000, 2000));
+    const summaryBefore = s.summary().totalCostUsd;
+
+    s.recordExternal("deepseek-v4-flash", new Usage(5000, 500, 0, 4000, 1000));
+    const summaryAfter = s.summary().totalCostUsd;
+
+    expect(summaryAfter).toBeGreaterThan(summaryBefore);
   });
 });

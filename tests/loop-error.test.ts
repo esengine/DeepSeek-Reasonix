@@ -2,7 +2,12 @@
 
 import { afterEach, describe, expect, it } from "vitest";
 import { setLanguageRuntime } from "../src/i18n/index.js";
-import { formatLoopError, healLoadedMessages, stripHallucinatedToolMarkup } from "../src/loop.js";
+import {
+  formatLoopError,
+  healLoadedMessages,
+  healLoadedMessagesByTokens,
+  stripHallucinatedToolMarkup,
+} from "../src/loop.js";
 import type { ChatMessage } from "../src/types.js";
 
 describe("formatLoopError", () => {
@@ -45,6 +50,18 @@ describe("formatLoopError", () => {
     const out = formatLoopError(raw);
     expect(out).toMatch(/Invalid parameter/);
     expect(out).toContain("temperature");
+  });
+
+  it("429 → concurrency-limit hint with cap numbers + remediation (#1522)", () => {
+    const raw = new Error(
+      'DeepSeek 429: {"error":{"message":"Too Many Requests, please reduce concurrency"}}',
+    );
+    const out = formatLoopError(raw);
+    expect(out).toMatch(/concurrency limit/);
+    expect(out).toMatch(/500/);
+    expect(out).toMatch(/2500/);
+    expect(out).toContain("reduce concurrency");
+    expect(out).toContain("platform.deepseek.com");
   });
 
   it("400 (non-overflow) → extracts the inner error message, drops the JSON wrapping", () => {
@@ -117,6 +134,57 @@ describe("formatLoopError", () => {
     const out = formatLoopError(new Error("DeepSeek 500: "));
     expect(out).toMatch(/service unavailable \(500\)/);
   });
+
+  it("5xx from a non-DeepSeek host → generic upstream wording, no DS hint, no probe", () => {
+    const out = formatLoopError(new Error("DeepSeek 500: "), undefined, {
+      upstreamHost: "http://localhost:11434/v1",
+    });
+    expect(out).toMatch(/Upstream service unavailable \(500\)/);
+    expect(out).toContain("localhost:11434");
+    expect(out).not.toContain("status.deepseek.com");
+    expect(out).not.toMatch(/DeepSeek-side problem/);
+    expect(out).not.toMatch(/main API answered/);
+    expect(out).not.toMatch(/unreachable from your network/);
+  });
+
+  it("5xx from api.deepseek.com → still gets the DS-specific wording (allow-list)", () => {
+    const out = formatLoopError(new Error("DeepSeek 503: "), undefined, {
+      upstreamHost: "https://api.deepseek.com",
+    });
+    expect(out).toMatch(/DeepSeek-side problem/);
+    expect(out).toContain("status.deepseek.com");
+  });
+});
+
+describe("healLoadedMessagesByTokens", () => {
+  it("shrinks oversized paired tool-call args when loading an old session", () => {
+    const bigArgs = JSON.stringify({
+      path: "src/large.ts",
+      content: Array.from({ length: 1200 }, (_, i) => `line ${i}: replacement`).join("\n"),
+    });
+    const messages: ChatMessage[] = [
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          { id: "c1", type: "function", function: { name: "write_blob", arguments: bigArgs } },
+        ],
+      },
+      { role: "tool", tool_call_id: "c1", content: "ok" },
+    ];
+
+    const healed = healLoadedMessagesByTokens(messages, 500);
+
+    expect(healed.healedCount).toBe(1);
+    expect(healed.tokensSaved).toBeGreaterThan(0);
+    const assistant = healed.messages[0];
+    if (assistant?.role !== "assistant" || !assistant.tool_calls) {
+      throw new Error("assistant tool call missing");
+    }
+    const savedArgs = assistant.tool_calls[0]!.function.arguments;
+    expect(savedArgs.length).toBeLessThan(bigArgs.length / 5);
+    expect(JSON.parse(savedArgs).content).toMatch(/shrunk/);
+  });
 });
 
 describe("formatLoopError — zh-CN runtime switch", () => {
@@ -131,6 +199,18 @@ describe("formatLoopError — zh-CN runtime switch", () => {
     expect(out).toContain("503");
     expect(out).toContain("DeepSeek 服务端问题");
     expect(out).toContain("status.deepseek.com");
+  });
+
+  it("non-DS host 5xx translates when language is zh-CN, omits DS-specific hints", () => {
+    setLanguageRuntime("zh-CN");
+    const out = formatLoopError(new Error("DeepSeek 502: "), undefined, {
+      upstreamHost: "http://192.168.1.5:8080/v1",
+    });
+    expect(out).toContain("上游服务不可用");
+    expect(out).toContain("502");
+    expect(out).toContain("192.168.1.5:8080");
+    expect(out).not.toContain("status.deepseek.com");
+    expect(out).not.toContain("DeepSeek 服务端问题");
   });
 
   it("401 auth error translates when language is zh-CN, preserves the inner DS message", () => {

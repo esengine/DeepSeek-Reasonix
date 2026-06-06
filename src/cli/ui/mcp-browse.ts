@@ -1,5 +1,6 @@
 /** `/resource` + `/prompt` handlers — async (round-trip to MCP server), so App.tsx calls directly instead of `handleSlash`. */
 
+import { t } from "../../i18n/index.js";
 import type {
   GetPromptResult,
   McpPromptMessage,
@@ -27,9 +28,9 @@ export function formatResourceList(servers: readonly McpServerSummary[]): string
     lines.push("");
   }
   if (total === 0) {
-    return "No resources on any connected MCP server (or no servers connected). `/mcp` shows the current set.";
+    return t("mcpBrowse.noResources");
   }
-  lines.push("Read one: `/resource <uri>` — or use Tab in the picker.");
+  lines.push(t("mcpBrowse.readOne"));
   return lines.join("\n");
 }
 
@@ -54,11 +55,9 @@ export function formatPromptList(servers: readonly McpServerSummary[]): string {
     lines.push("");
   }
   if (total === 0) {
-    return "No prompts on any connected MCP server (or no servers connected). `/mcp` shows the current set.";
+    return t("mcpBrowse.noPrompts");
   }
-  lines.push(
-    "Fetch one: `/prompt <name>` — args are not supported yet; prompts with required args will surface an error from the server.",
-  );
+  lines.push(t("mcpBrowse.fetchOne"));
   return lines.join("\n");
 }
 
@@ -155,8 +154,8 @@ export async function handleMcpBrowseSlash(
     const server = findServerForResource(servers, arg);
     if (!server) {
       log.pushWarning(
-        `no server exposes resource "${arg}"`,
-        "`/resource` with no arg lists what's available.",
+        t("mcpBrowse.noServerForResource", { name: arg }),
+        t("mcpBrowse.resourceHint"),
       );
       return;
     }
@@ -164,7 +163,7 @@ export async function handleMcpBrowseSlash(
       const result = await server.readResource(arg);
       log.pushInfo(formatResourceContents(arg, result));
     } catch (err) {
-      log.pushWarning("readResource failed", (err as Error).message);
+      log.pushWarning(t("mcpBrowse.readFailed"), (err as Error).message);
     }
     return;
   }
@@ -172,16 +171,13 @@ export async function handleMcpBrowseSlash(
   // prompt
   const server = findServerForPrompt(servers, arg);
   if (!server) {
-    log.pushWarning(
-      `no server exposes prompt "${arg}"`,
-      "`/prompt` with no arg lists what's available.",
-    );
+    log.pushWarning(t("mcpBrowse.noServerForPrompt", { name: arg }), t("mcpBrowse.promptHint"));
     return;
   }
   try {
     const result = await server.getPrompt(arg);
     log.pushInfo(formatPromptMessages(arg, result));
   } catch (err) {
-    log.pushWarning("getPrompt failed", (err as Error).message);
+    log.pushWarning(t("mcpBrowse.fetchFailed"), (err as Error).message);
   }
 }

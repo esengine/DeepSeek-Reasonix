@@ -79,6 +79,19 @@ export async function handleModal(
       ctx.resolveShellConfirm(choice);
       return { status: 200, body: { resolved: true } };
     }
+    if (kind === "path") {
+      if (!ctx.resolvePathConfirm) {
+        return { status: 503, body: { error: "path modal resolution not wired" } };
+      }
+      if (choice !== "run_once" && choice !== "always_allow" && choice !== "deny") {
+        return {
+          status: 400,
+          body: { error: "path choice must be run_once / always_allow / deny" },
+        };
+      }
+      ctx.resolvePathConfirm(choice);
+      return { status: 200, body: { resolved: true } };
+    }
     if (kind === "choice") {
       if (!ctx.resolveChoiceConfirm) {
         return { status: 503, body: { error: "choice modal resolution not wired" } };

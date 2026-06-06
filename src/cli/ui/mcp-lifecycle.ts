@@ -24,8 +24,8 @@ const STATE: Record<McpLifecycleEvent["state"], { glyph: string; label: () => st
   failed: { glyph: "✖", label: () => t("mcpLifecycle.failed") },
   disabled: { glyph: "○", label: () => t("mcpLifecycle.disabled") },
   reconnect: { glyph: "↻", label: () => t("mcpLifecycle.reconnect") },
-  "tools-ready": { glyph: "⚡", label: () => "tools ready" },
-  warn: { glyph: "⚠", label: () => "warn" },
+  "tools-ready": { glyph: "⚡", label: () => t("mcpLifecycle.toolsReady") },
+  warn: { glyph: "⚠", label: () => t("mcpLifecycle.warnLabel") },
 };
 
 const NAME_COL = 22;

@@ -92,3 +92,31 @@ export async function handleFileRead(
     closeSync(fd);
   }
 }
+
+export async function handleFileReadPreview(
+  method: string,
+  _rest: string[],
+  _body: string,
+  ctx: DashboardContext,
+  query: URLSearchParams = new URLSearchParams(),
+): Promise<ApiResult> {
+  if (method !== "GET") return { status: 405, body: { error: "GET only" } };
+  const filePath = query.get("path") ?? "";
+  if (!filePath) return { status: 400, body: { error: "path query parameter required" } };
+
+  const read = await handleFileRead("GET", [filePath], "", ctx);
+  if (read.status !== 200) return read;
+
+  const body = read.body as { content?: unknown; path?: unknown };
+  const text = typeof body.content === "string" ? body.content : "";
+  const lines = text.split(/\r?\n/);
+  if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+  return {
+    status: 200,
+    body: {
+      path: typeof body.path === "string" ? body.path : filePath,
+      head: lines.slice(0, 12).join("\n"),
+      totalLines: lines.length,
+    },
+  };
+}

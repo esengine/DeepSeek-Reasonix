@@ -1,4 +1,4 @@
-import { Box, Text, useStdout } from "ink";
+import { Box, type Color, Text, useStdout } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React, { useEffect } from "react";
 import { useAgentState, useDispatch } from "../state/provider.js";
@@ -20,7 +20,7 @@ const TONE_GLYPH = {
   err: "✗",
 } as const;
 
-function bodyColor(toast: Toast, now: number): string {
+function bodyColor(toast: Toast, now: number): Color {
   const elapsed = now - toast.bornAt;
   const remaining = toast.ttlMs - elapsed;
   return remaining < toast.ttlMs / 3 ? FG.meta : FG.body;

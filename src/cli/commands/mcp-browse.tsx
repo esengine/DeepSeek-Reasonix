@@ -2,7 +2,7 @@
 
 import { Box, Text, render, useApp, useInput } from "ink";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { readConfig, writeConfig } from "../../config.js";
+import { normalizeMcpConfig, readConfig, writeConfig } from "../../config.js";
 import { loadDotenv } from "../../env.js";
 import { loadOverlay } from "../../mcp/marketplace-overlay/loader.js";
 import {
@@ -12,6 +12,7 @@ import {
   specStringFor,
 } from "../../mcp/registry-fetch.js";
 import type { RegistryEntry } from "../../mcp/registry-types.js";
+import { FG } from "../ui/theme/tokens.js";
 
 const VISIBLE_ROWS = 12;
 
@@ -115,7 +116,10 @@ function McpBrowseApp() {
         const spec = specStringFor(entry.name, entry.install);
         const cfg = readConfig();
         const existing = cfg.mcp ?? [];
-        if (existing.includes(spec)) {
+        const installedName = entry.name;
+        const normalized = normalizeMcpConfig(cfg);
+        const nameCollision = normalized.some((s) => s.name === installedName);
+        if (existing.includes(spec) || nameCollision) {
           setStatus(`already installed: ${spec}`);
           return;
         }
@@ -169,19 +173,21 @@ function McpBrowseApp() {
   return (
     <Box flexDirection="column" paddingX={1}>
       <Box>
-        <Text bold color="cyan">
+        <Text bold color="ansi:cyan">
           ◈ MCP marketplace
         </Text>
-        <Text dimColor>{`  ·  ${state.status}`}</Text>
+        <Text color={FG.faint}>{`  ·  ${state.status}`}</Text>
       </Box>
       <Box marginTop={1}>
         <Text>search: </Text>
-        <Text color="white">{state.query || "(type to filter)"}</Text>
-        <Text dimColor>{`  ${filtered.length} match${filtered.length === 1 ? "" : "es"}`}</Text>
+        <Text color="ansi:white">{state.query || "(type to filter)"}</Text>
+        <Text
+          color={FG.faint}
+        >{`  ${filtered.length} match${filtered.length === 1 ? "" : "es"}`}</Text>
       </Box>
       <Box marginTop={1} flexDirection="column">
         {window.length === 0 ? (
-          <Text dimColor>{state.loading ? "loading…" : "no entries"}</Text>
+          <Text color={FG.faint}>{state.loading ? "loading…" : "no entries"}</Text>
         ) : (
           window.map((e, i) => {
             const idx = (start || 0) + i;
@@ -191,9 +197,9 @@ function McpBrowseApp() {
             const pop = e.popularity !== undefined ? ` · ${e.popularity.toLocaleString()}` : "";
             return (
               <Box key={e.name}>
-                <Text color={active ? "cyan" : undefined}>{active ? "▸ " : "  "}</Text>
+                <Text color={active ? "ansi:cyan" : undefined}>{active ? "▸ " : "  "}</Text>
                 <Text bold={active}>{e.name.padEnd(40).slice(0, 40)}</Text>
-                <Text dimColor>{` ${tag}${pop}`}</Text>
+                <Text color={FG.faint}>{` ${tag}${pop}`}</Text>
               </Box>
             );
           })
@@ -201,29 +207,31 @@ function McpBrowseApp() {
       </Box>
       {selected ? (
         <Box marginTop={1} flexDirection="column">
-          <Text bold color="white">
+          <Text bold color="ansi:white">
             {overlay?.[selected.name]?.title ?? selected.title}
             {overlay?.[selected.name] ? (
-              <Text dimColor>{`  \u00b7  ${selected.title}`}</Text>
+              <Text color={FG.faint}>{`  \u00b7  ${selected.title}`}</Text>
             ) : null}
           </Text>
-          <Text dimColor>
+          <Text color={FG.faint}>
             {overlay?.[selected.name]?.description ?? selected.description?.slice(0, 160) ?? null}
           </Text>
           {selected.install ? (
-            <Text dimColor>
+            <Text color={FG.faint}>
               {`spec: ${selected.install.runtime} ${selected.install.packageId ?? selected.install.url ?? "—"} · ${selected.install.transport}`}
             </Text>
           ) : (
-            <Text dimColor>(smithery listing — install info not exposed)</Text>
+            <Text color={FG.faint}>(smithery listing — install info not exposed)</Text>
           )}
           {selected.install?.requiredEnv?.length ? (
-            <Text color="yellow">{`needs: ${selected.install.requiredEnv.join(", ")}`}</Text>
+            <Text color="ansi:yellow">{`needs: ${selected.install.requiredEnv.join(", ")}`}</Text>
           ) : null}
         </Box>
       ) : null}
       <Box marginTop={1}>
-        <Text dimColor>type to filter · ↑↓ pick · enter install · tab load more · esc quit</Text>
+        <Text color={FG.faint}>
+          type to filter · ↑↓ pick · enter install · tab load more · esc quit
+        </Text>
       </Box>
     </Box>
   );

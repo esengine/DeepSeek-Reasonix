@@ -1,6 +1,7 @@
 import { basename } from "node:path";
 import { listPlanArchives, loadPlanState, relativeTime } from "@/code/plan-store.js";
 import { t } from "@/i18n/index.js";
+import type { StepCompletion, StepEvidence } from "@/tools/plan.js";
 import type { SlashHandler } from "../dispatch.js";
 
 const plans: SlashHandler = (args, loop, ctx) => {
@@ -28,6 +29,11 @@ const plans: SlashHandler = (args, loop, ctx) => {
         when,
       }),
     );
+    const lifecycle = ctx.getEngineeringLifecycleSnapshot?.();
+    if (lifecycle?.mode !== "off" && lifecycle?.mutatedSinceLastStep) {
+      lines.push(t("handlers.plans.evidencePending"));
+    }
+    lines.push(...formatActiveEvidenceLines(active.stepCompletions, active.completedStepIds));
   } else {
     lines.push(t("handlers.plans.activeNone"));
   }
@@ -55,6 +61,8 @@ const plans: SlashHandler = (args, loop, ctx) => {
         label,
       }),
     );
+    const evidence = formatArchivedEvidenceSummary(a.stepCompletions, a.completedStepIds);
+    if (evidence) lines.push(t("handlers.plans.archivedEvidenceLine", { summary: evidence }));
   }
   return { info: lines.join("\n") };
 };
@@ -121,6 +129,54 @@ function handleDone(rest: string[], ctx: Parameters<SlashHandler>[2]): { info: s
     case "no-plan":
       return { info: t("handlers.plans.doneNoPlan") };
   }
+}
+
+function formatActiveEvidenceLines(
+  completions: Record<string, StepCompletion> | undefined,
+  completedStepIds: readonly string[],
+): string[] {
+  if (!completions) return [];
+  const lines: string[] = [];
+  for (const stepId of completedStepIds) {
+    const summary = formatCompletionEvidenceSummary(completions[stepId]);
+    if (!summary) continue;
+    lines.push(t("handlers.plans.evidenceLine", { stepId, summary }));
+  }
+  return lines;
+}
+
+function formatArchivedEvidenceSummary(
+  completions: Record<string, StepCompletion> | undefined,
+  completedStepIds: readonly string[],
+): string | null {
+  if (!completions) return null;
+  const parts: string[] = [];
+  for (const stepId of completedStepIds) {
+    const summary = formatCompletionEvidenceSummary(completions[stepId]);
+    if (!summary) continue;
+    parts.push(`${stepId} ${summary}`);
+  }
+  return parts.length > 0 ? parts.join("; ") : null;
+}
+
+function formatCompletionEvidenceSummary(completion: StepCompletion | undefined): string | null {
+  const evidence = completion?.evidence;
+  if (!evidence || evidence.length === 0) {
+    const compact = completion?.evidenceSummary?.trim();
+    return compact || null;
+  }
+  const parts = evidence.map(formatEvidenceItem).filter((part) => part.length > 0);
+  return parts.length > 0 ? parts.join("; ") : null;
+}
+
+function formatEvidenceItem(evidence: StepEvidence): string {
+  const extras: string[] = [];
+  if (evidence.command) extras.push(evidence.command);
+  if (evidence.paths && evidence.paths.length > 0) {
+    extras.push(evidence.paths.slice(0, 3).join(", "));
+  }
+  const suffix = extras.length > 0 ? ` (${extras.join("; ")})` : "";
+  return `${evidence.kind} - ${evidence.summary}${suffix}`;
 }
 
 export const handlers: Record<string, SlashHandler> = {

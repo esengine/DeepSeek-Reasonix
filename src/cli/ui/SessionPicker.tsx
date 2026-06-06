@@ -247,7 +247,7 @@ export function SessionPicker({
           <Text bold color={TONE.brand}>
             {renaming.buf}
           </Text>
-          <Text backgroundColor={TONE.brand} color="black">
+          <Text backgroundColor={TONE.brand} color="ansi:black">
             {" "}
           </Text>
         </Box>
@@ -258,7 +258,7 @@ export function SessionPicker({
           <Text bold color={TONE.brand}>
             {query}
           </Text>
-          <Text backgroundColor={TONE.brand} color="black">
+          <Text backgroundColor={TONE.brand} color="ansi:black">
             {" "}
           </Text>
         </Box>

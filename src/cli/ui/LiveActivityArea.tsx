@@ -9,6 +9,7 @@ import React from "react";
 import { OngoingToolRow, SubagentLiveStack, ThinkingRow, UndoBanner } from "./layout/LiveRows.js";
 import { ToastRail } from "./layout/ToastRail.js";
 import { PlanLiveRow } from "./layout/plan-live-row.js";
+import { useRenderTrace } from "./render-trace.js";
 
 import type { SubagentActivity } from "./useSubagent.js";
 
@@ -22,6 +23,7 @@ type UndoBannerState = Parameters<typeof UndoBanner>[0]["banner"];
 
 export interface LiveActivityAreaProps {
   noTakeoverOverlay: boolean;
+  suppressPlanLiveRow?: boolean;
   ongoingTool: { name: string; args?: string } | null;
   toolProgress: { progress: number; total?: number; message?: string } | null;
   subagentActivities: ReadonlyArray<SubagentActivity>;
@@ -38,6 +40,7 @@ export interface LiveActivityAreaProps {
 export const LiveActivityArea: React.FC<LiveActivityAreaProps> = React.memo(
   ({
     noTakeoverOverlay,
+    suppressPlanLiveRow,
     ongoingTool,
     toolProgress,
     subagentActivities,
@@ -48,10 +51,15 @@ export const LiveActivityArea: React.FC<LiveActivityAreaProps> = React.memo(
     undoBanner,
     hideUndo,
   }) => {
+    useRenderTrace("LiveActivityArea");
     return (
       <Box flexDirection="column" flexShrink={0} flexWrap="nowrap">
         {noTakeoverOverlay && ongoingTool ? (
-          <OngoingToolRow tool={ongoingTool} progress={toolProgress} />
+          <OngoingToolRow
+            tool={ongoingTool}
+            progress={toolProgress}
+            subagentActivities={subagentActivities}
+          />
         ) : null}
         {noTakeoverOverlay && subagentActivities.length > 0 ? (
           <SubagentLiveStack activities={subagentActivities} max={3} />
@@ -61,7 +69,7 @@ export const LiveActivityArea: React.FC<LiveActivityAreaProps> = React.memo(
         {noTakeoverOverlay && busy && !isStreaming && !ongoingTool && !statusLine ? (
           <ThinkingRow text={activityLabel} />
         ) : null}
-        {noTakeoverOverlay ? <PlanLiveRow /> : null}
+        {noTakeoverOverlay && !suppressPlanLiveRow ? <PlanLiveRow /> : null}
         <ToastRail />
       </Box>
     );

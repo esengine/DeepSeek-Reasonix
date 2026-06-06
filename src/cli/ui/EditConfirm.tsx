@@ -1,4 +1,4 @@
-import { Box, Text } from "ink";
+import { Box, Text, useStdout } from "ink";
 import React, { useMemo, useState } from "react";
 import { formatEditBlockSplit } from "../../code/diff-preview.js";
 import type { EditBlock } from "../../code/edit-blocks.js";
@@ -7,7 +7,7 @@ import { DenyContextInput } from "./DenyContextInput.js";
 import { SplitDiff } from "./SplitDiff.js";
 import { ApprovalCard } from "./cards/ApprovalCard.js";
 import { useKeystroke } from "./keystroke-context.js";
-import { useReserveRows, useTotalRows } from "./layout/viewport-budget.js";
+import { FG } from "./theme/tokens.js";
 
 export type EditReviewChoice = "apply" | "reject" | "apply-rest-of-turn" | "flip-to-auto";
 
@@ -20,11 +20,9 @@ const MODAL_OVERHEAD_ROWS = 18;
 const MIN_DIFF_ROWS = 8;
 
 export function EditConfirm({ block, onChoose }: EditConfirmProps) {
-  const rows = useTotalRows();
-  const allocated = useReserveRows("modal", {
-    min: MODAL_OVERHEAD_ROWS + MIN_DIFF_ROWS,
-    max: Math.max(MODAL_OVERHEAD_ROWS + MIN_DIFF_ROWS, rows - 4),
-  });
+  const { stdout } = useStdout();
+  const rows = stdout?.rows ?? 40;
+  const allocated = Math.max(MODAL_OVERHEAD_ROWS + MIN_DIFF_ROWS, rows - 4);
   const budget = Math.max(MIN_DIFF_ROWS, allocated - MODAL_OVERHEAD_ROWS);
 
   const allRows = useMemo(
@@ -136,7 +134,7 @@ export function EditConfirm({ block, onChoose }: EditConfirmProps) {
       footerHint={t("editConfirm.footer")}
     >
       {hiddenAbove > 0 ? (
-        <Text dimColor>
+        <Text color={FG.faint}>
           {t(hiddenAbove === 1 ? "editConfirm.linesAbove" : "editConfirm.linesAbovePlural", {
             count: hiddenAbove,
           })}
@@ -151,10 +149,10 @@ export function EditConfirm({ block, onChoose }: EditConfirmProps) {
         <Text color="#bef0c8" backgroundColor="#0c2718">
           {t("editConfirm.newLabel")}
         </Text>
-        <Text dimColor>{t("editConfirm.sideBySide")}</Text>
+        <Text color={FG.faint}>{t("editConfirm.sideBySide")}</Text>
       </Box>
       {hiddenBelow > 0 ? (
-        <Text dimColor>
+        <Text color={FG.faint}>
           {t(hiddenBelow === 1 ? "editConfirm.linesBelow" : "editConfirm.linesBelowPlural", {
             count: hiddenBelow,
           })}

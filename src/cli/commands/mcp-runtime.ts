@@ -35,6 +35,7 @@ export interface RuntimeContext {
   getTools: () => ToolRegistry | undefined;
   getMcpPrefix: () => string | undefined;
   getRequestedCount: () => number;
+  getWorkspaceDir?: () => string | undefined;
   progressSink: { current: ((info: ProgressInfo) => void) | null };
 }
 
@@ -100,16 +101,29 @@ export const stderrLifecycleSink: McpLifecycleSink = (n) => {
   );
 };
 
+export interface McpFailure {
+  spec: string;
+  name: string;
+  reason: string;
+  at: number;
+}
+
 export interface McpRuntime {
   size(): number;
   specs(): string[];
   summaries(): McpServerSummary[];
+  /** Last bridge failure per spec — drives the "未桥接" reason shown in the dashboard. */
+  failures(): McpFailure[];
   addSpec(
     raw: string,
     loop?: CacheFirstLoop,
+    signal?: AbortSignal,
   ): Promise<{ ok: true; summary: McpServerSummary } | { ok: false; reason: string }>;
   removeSpec(raw: string, loop?: CacheFirstLoop): Promise<boolean>;
-  reloadFromConfig(loop?: CacheFirstLoop): Promise<{
+  reloadFromConfig(
+    loop?: CacheFirstLoop,
+    opts?: McpReloadOptions,
+  ): Promise<{
     added: string[];
     removed: string[];
     failed: Array<{ spec: string; reason: string }>;
@@ -120,18 +134,25 @@ export interface McpRuntime {
   setLifecycleSink(sink: McpLifecycleSink): void;
 }
 
+interface McpReloadOptions {
+  force?: Iterable<string>;
+}
+
 export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
   const records = new Map<string, SpecRecord>();
   const insertionOrder: string[] = [];
+  const failureMap = new Map<string, McpFailure>();
   let sink: McpLifecycleSink = stderrLifecycleSink;
 
   async function addSpec(
     raw: string,
     loop?: CacheFirstLoop,
+    signal?: AbortSignal,
   ): Promise<{ ok: true; summary: McpServerSummary } | { ok: false; reason: string }> {
     if (records.has(raw)) {
       return { ok: true, summary: records.get(raw)!.summary };
     }
+    failureMap.delete(raw);
     const tools = ctx.getTools();
     if (!tools) return { ok: false, reason: "no tool registry available" };
     const cfg = readConfig();
@@ -159,6 +180,7 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
       if (spec.disabled) {
         sink({ kind: "disabled", name: label });
         rejectReady(new Error(`MCP server "${label}" is disabled`));
+        failureMap.set(raw, { spec: raw, name: label, reason: "disabled by user", at: Date.now() });
         return { ok: false, reason: "disabled by user" };
       }
       sink({ kind: "handshake", name: label });
@@ -168,10 +190,11 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
         : ctx.getRequestedCount() === 1 && ctx.getMcpPrefix()
           ? (ctx.getMcpPrefix() as string)
           : "";
-      if (spec.transport === "stdio") preflightStdioSpec(spec);
-      const transport = buildTransportFromSpec(spec);
-      mcp = new McpClient({ transport });
-      await mcp.initialize();
+      const workspaceDir = ctx.getWorkspaceDir?.();
+      if (spec.transport === "stdio") preflightStdioSpec(spec, { cwd: workspaceDir });
+      const transport = buildTransportFromSpec(spec, { cwd: workspaceDir });
+      mcp = new McpClient({ transport, workspaceDir, requestTimeoutMs: spec.requestTimeoutMs });
+      await mcp.initialize({ signal });
       const host: McpClientHost = { client: mcp };
       const bridge = await bridgeMcpTools(mcp, {
         registry: tools,
@@ -291,6 +314,7 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
         await mcp?.close().catch(() => undefined);
         rejectReady(new Error(`MCP server "${label}" failed to start: ${reason}`));
         sink({ kind: "failed", name: label, reason });
+        failureMap.set(raw, { spec: raw, name: label, reason, at: Date.now() });
         return { ok: false, reason };
       }
       sink({ kind: "warn", name: label, reason });
@@ -299,6 +323,7 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
   }
 
   async function removeSpec(raw: string, loop?: CacheFirstLoop): Promise<boolean> {
+    failureMap.delete(raw);
     const record = records.get(raw);
     if (!record) return false;
     await record.client.close().catch(() => undefined);
@@ -313,7 +338,10 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
     return true;
   }
 
-  async function reloadFromConfig(loop?: CacheFirstLoop): Promise<{
+  async function reloadFromConfig(
+    loop?: CacheFirstLoop,
+    opts: McpReloadOptions = {},
+  ): Promise<{
     added: string[];
     removed: string[];
     failed: Array<{ spec: string; reason: string }>;
@@ -323,14 +351,17 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
     const desired = normalized.map(specToRaw);
     const desiredSet = new Set(desired);
     const currentSet = new Set(records.keys());
+    const forceSet = new Set(opts.force ?? []);
     const added: string[] = [];
     const removed: string[] = [];
     const failed: Array<{ spec: string; reason: string }> = [];
 
     for (const spec of [...currentSet]) {
-      if (!desiredSet.has(spec)) {
+      const noLongerDesired = !desiredSet.has(spec);
+      if (noLongerDesired || forceSet.has(spec)) {
         await removeSpec(spec, loop);
-        removed.push(spec);
+        currentSet.delete(spec);
+        if (noLongerDesired) removed.push(spec);
       }
     }
     for (const spec of desired) {
@@ -354,6 +385,10 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
     for (const r of records.values()) await r.client.close().catch(() => undefined);
     records.clear();
     insertionOrder.length = 0;
+    failureMap.clear();
+  }
+  function failures(): McpFailure[] {
+    return [...failureMap.values()];
   }
   function setLifecycleSink(s: McpLifecycleSink): void {
     sink = s;
@@ -362,6 +397,7 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
     size: () => records.size,
     specs,
     summaries,
+    failures,
     addSpec,
     removeSpec,
     reloadFromConfig,

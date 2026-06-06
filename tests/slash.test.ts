@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -11,7 +11,7 @@ import {
   suggestSlashCommands,
 } from "../src/cli/ui/slash.js";
 import { DeepSeekClient, Usage } from "../src/client.js";
-import { loadTheme } from "../src/config.js";
+import { loadTheme, readConfig } from "../src/config.js";
 import {
   getLanguage,
   notifyLanguageChange,
@@ -20,6 +20,10 @@ import {
 } from "../src/i18n/index.js";
 import { CacheFirstLoop } from "../src/loop.js";
 import { ImmutablePrefix } from "../src/memory/runtime.js";
+import {
+  buildCacheDiagnostic,
+  prefixDiagnosticHashes,
+} from "../src/telemetry/cache-diagnostics.js";
 import { VERSION } from "../src/version.js";
 
 function makeLoop() {
@@ -38,6 +42,12 @@ describe("parseSlash", () => {
     expect(parseSlash("hello")).toBeNull();
     expect(parseSlash("")).toBeNull();
     expect(parseSlash("/")).toBeNull();
+  });
+  it("returns null on comment-like input starting with //", () => {
+    expect(parseSlash("// some comment")).toBeNull();
+    expect(parseSlash("//")).toBeNull();
+    expect(parseSlash("//help")).toBeNull();
+    expect(parseSlash("// /still/a/comment")).toBeNull();
   });
   it("lowercases the command and splits args", () => {
     expect(parseSlash("/Harvest on")).toEqual({ cmd: "harvest", args: ["on"] });
@@ -104,7 +114,7 @@ describe("handleSlash", () => {
   it("/help returns a multi-line message", () => {
     const r = handleSlash("help", [], makeLoop());
     expect(r.info).toMatch(/\/status/);
-    expect(r.info).toMatch(/\/preset/);
+    expect(r.info).toMatch(/\/effort/);
     expect(r.info).toMatch(/\/compact/);
   });
 
@@ -115,6 +125,15 @@ describe("handleSlash", () => {
     ].map((match) => match[1]);
     expect(groupHeaders).toEqual(SLASH_GROUP_ORDER.map((group) => group.toUpperCase()));
     expect(info.indexOf("  SETUP")).toBeLessThan(info.indexOf("  CHAT"));
+  });
+
+  it("/about prints version, website, repo, and MIT license", () => {
+    const r = handleSlash("about", [], makeLoop());
+    expect(r.info).toContain(VERSION);
+    expect(r.info).toContain("https://esengine.github.io/DeepSeek-Reasonix/");
+    expect(r.info).toContain("https://github.com/esengine/DeepSeek-Reasonix");
+    expect(r.info).toContain("MIT");
+    expect(SLASH_COMMANDS.find((s) => s.cmd === "about")?.group).toBe("info");
   });
 
   it("/title starts AI session title regeneration", async () => {
@@ -139,22 +158,128 @@ describe("handleSlash", () => {
     const loop = makeLoop();
     const r = handleSlash("status", [], loop);
     expect(r.info).toMatch(/model\s+deepseek-/);
-    expect(r.info).toMatch(/effort=max/);
+    expect(r.info).toMatch(/effort=high/);
   });
 
   it("/model switches the model", () => {
     const loop = makeLoop();
-    handleSlash("model", ["deepseek-reasoner"], loop);
-    expect(loop.model).toBe("deepseek-reasoner");
+    const tempDir = mkdtempSync(join(tmpdir(), "reasonix-slash-model-basic-"));
+    const tempConfig = join(tempDir, "config.json");
+    try {
+      handleSlash("model", ["deepseek-reasoner"], loop, { configPath: tempConfig });
+      expect(loop.model).toBe("deepseek-reasoner");
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 
   it("/model soft-warns when id is not in the fetched catalog but still switches", () => {
-    const loop = makeLoop();
-    const r = handleSlash("model", ["deepseek-made-up"], loop, {
-      models: ["deepseek-chat", "deepseek-reasoner"],
-    });
-    expect(loop.model).toBe("deepseek-made-up");
-    expect(r.info).toMatch(/not in the fetched catalog/);
+    const tempDir = mkdtempSync(join(tmpdir(), "reasonix-slash-model-warn-"));
+    const tempConfig = join(tempDir, "config.json");
+    try {
+      const loop = makeLoop();
+      const r = handleSlash("model", ["deepseek-made-up"], loop, {
+        models: ["deepseek-chat", "deepseek-reasoner"],
+        configPath: tempConfig,
+      });
+      expect(loop.model).toBe("deepseek-made-up");
+      expect(r.info).toMatch(/not in the fetched catalog/);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("/model persists to the provided configPath instead of the user's global config", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "reasonix-slash-model-"));
+    const tempConfig = join(tempDir, "config.json");
+    try {
+      const loop = makeLoop();
+      const r = handleSlash("model", ["deepseek-made-up"], loop, {
+        models: ["deepseek-chat", "deepseek-reasoner"],
+        configPath: tempConfig,
+      });
+      expect(loop.model).toBe("deepseek-made-up");
+      expect(r.info).toMatch(/not in the fetched catalog/);
+      const saved = JSON.parse(readFileSync(tempConfig, "utf8"));
+      expect(saved.model).toBe("deepseek-made-up");
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("/search-engine accepts baidu and saves an inline API key", () => {
+    const tempHome = mkdtempSync(join(tmpdir(), "reasonix-slash-search-engine-"));
+    const originalHome = process.env.HOME;
+    const originalUserProfile = process.env.USERPROFILE;
+    try {
+      process.env.HOME = tempHome;
+      process.env.USERPROFILE = tempHome;
+      const result = handleSlash("search-engine", ["baidu", "test-baidu-key"], makeLoop());
+      expect(result.info).toContain("baidu");
+      const configPath = join(tempHome, ".reasonix", "config.json");
+      expect(readConfig(configPath)).toMatchObject({
+        webSearchEngine: "baidu",
+        baiduApiKey: "test-baidu-key",
+      });
+    } finally {
+      if (originalHome === undefined) {
+        // biome-ignore lint/performance/noDelete: env var must be absent, not "undefined"
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = originalHome;
+      }
+      if (originalUserProfile === undefined) {
+        // biome-ignore lint/performance/noDelete: env var must be absent, not "undefined"
+        delete process.env.USERPROFILE;
+      } else {
+        process.env.USERPROFILE = originalUserProfile;
+      }
+      if (existsSync(tempHome)) rmSync(tempHome, { recursive: true, force: true });
+    }
+  });
+
+  it("/search-engine baidu without a key points at both supported env vars", () => {
+    const tempHome = mkdtempSync(join(tmpdir(), "reasonix-slash-search-engine-"));
+    const originalHome = process.env.HOME;
+    const originalUserProfile = process.env.USERPROFILE;
+    const originalBaidu = process.env.BAIDU_API_KEY;
+    const originalQianfan = process.env.QIANFAN_API_KEY;
+    try {
+      process.env.HOME = tempHome;
+      process.env.USERPROFILE = tempHome;
+      // biome-ignore lint/performance/noDelete: env var must be absent, not "undefined"
+      delete process.env.BAIDU_API_KEY;
+      // biome-ignore lint/performance/noDelete: env var must be absent, not "undefined"
+      delete process.env.QIANFAN_API_KEY;
+      const result = handleSlash("search-engine", ["baidu"], makeLoop());
+      expect(result.info).toContain("BAIDU_API_KEY or QIANFAN_API_KEY");
+    } finally {
+      if (originalHome === undefined) {
+        // biome-ignore lint/performance/noDelete: env var must be absent, not "undefined"
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = originalHome;
+      }
+      if (originalUserProfile === undefined) {
+        // biome-ignore lint/performance/noDelete: env var must be absent, not "undefined"
+        delete process.env.USERPROFILE;
+      } else {
+        process.env.USERPROFILE = originalUserProfile;
+      }
+      if (originalBaidu === undefined) {
+        // biome-ignore lint/performance/noDelete: env var must be absent, not "undefined"
+        delete process.env.BAIDU_API_KEY;
+      } else {
+        process.env.BAIDU_API_KEY = originalBaidu;
+      }
+      if (originalQianfan === undefined) {
+        // biome-ignore lint/performance/noDelete: env var must be absent, not "undefined"
+        delete process.env.QIANFAN_API_KEY;
+      } else {
+        process.env.QIANFAN_API_KEY = originalQianfan;
+      }
+      if (existsSync(tempHome)) rmSync(tempHome, { recursive: true, force: true });
+    }
   });
 
   it("/model with no arg opens the unified picker (#371)", () => {
@@ -165,9 +290,10 @@ describe("handleSlash", () => {
     expect(r.openModelPicker).toBe(true);
   });
 
-  it("/preset with no arg opens the unified picker", () => {
-    const r = handleSlash("preset", [], makeLoop());
-    expect(r.openModelPicker).toBe(true);
+  it("/effort with no arg returns the current value", () => {
+    const r = handleSlash("effort", [], makeLoop());
+    expect(r.info).toMatch(/effort/);
+    expect(r.info).toMatch(/low.*medium.*high.*max/);
   });
 
   it("unknown commands return an unknown flag with hint", () => {
@@ -218,42 +344,44 @@ describe("handleSlash", () => {
     expect(posted).toMatch(/nothing to fold|folded/);
   });
 
-  it("/preset auto = v4-flash with auto-escalate", () => {
-    const loop = makeLoop();
-    handleSlash("model", ["deepseek-v4-pro"], loop);
-    handleSlash("preset", ["auto"], loop);
-    expect(loop.model).toBe("deepseek-v4-flash");
-    expect(loop.reasoningEffort).toBe("max");
-    expect(loop.autoEscalate).toBe(true);
+  it("/effort accepts each enum value", () => {
+    for (const e of ["low", "medium", "high", "max"] as const) {
+      const loop = makeLoop();
+      handleSlash("effort", [e], loop);
+      expect(loop.reasoningEffort).toBe(e);
+    }
   });
 
-  it("/preset flash = v4-flash, no auto-escalate", () => {
-    const loop = makeLoop();
-    handleSlash("preset", ["flash"], loop);
-    expect(loop.model).toBe("deepseek-v4-flash");
-    expect(loop.reasoningEffort).toBe("max");
-    expect(loop.autoEscalate).toBe(false);
-  });
-
-  it("/preset pro = v4-pro pinned", () => {
-    const loop = makeLoop();
-    handleSlash("preset", ["pro"], loop);
-    expect(loop.model).toBe("deepseek-v4-pro");
-    expect(loop.reasoningEffort).toBe("max");
-    expect(loop.autoEscalate).toBe(false);
-  });
-
-  it("/preset with bad name returns usage", () => {
-    const r = handleSlash("preset", ["nonsense"], makeLoop());
+  it("/effort with bad name returns usage", () => {
+    const r = handleSlash("effort", ["nonsense"], makeLoop());
     expect(r.info).toMatch(/usage/);
   });
 
-  it("/help mentions presets", () => {
-    const r = handleSlash("help", [], makeLoop());
-    expect(r.info).toMatch(/Presets/);
-    expect(r.info).toMatch(/auto/);
-    expect(r.info).toMatch(/flash/);
-    expect(r.info).toMatch(/pro/);
+  it("/effort rejects `max` on non-DeepSeek endpoints (#1794)", () => {
+    const client = new DeepSeekClient({
+      apiKey: "sk-test",
+      baseUrl: "http://localhost:8080/v1",
+      fetch: vi.fn() as unknown as typeof fetch,
+    });
+    const loop = new CacheFirstLoop({ client, prefix: new ImmutablePrefix({ system: "s" }) });
+    const r = handleSlash("effort", ["max"], loop);
+    expect(r.info).toMatch(/usage/);
+    expect(r.info).not.toMatch(/\bmax\b/);
+    expect(loop.reasoningEffort).not.toBe("max");
+  });
+
+  it("/effort status on non-DeepSeek endpoint omits `max` from the list (#1794)", () => {
+    const client = new DeepSeekClient({
+      apiKey: "sk-test",
+      baseUrl: "http://localhost:8080/v1",
+      fetch: vi.fn() as unknown as typeof fetch,
+    });
+    const loop = new CacheFirstLoop({ client, prefix: new ImmutablePrefix({ system: "s" }) });
+    const r = handleSlash("effort", [], loop);
+    expect(r.info).toMatch(/low/);
+    expect(r.info).toMatch(/medium/);
+    expect(r.info).toMatch(/high/);
+    expect(r.info).not.toMatch(/\bmax\b/);
   });
 
   it("/help mentions sessions", () => {
@@ -264,6 +392,14 @@ describe("handleSlash", () => {
   it("/help mentions /mcp", () => {
     const r = handleSlash("help", [], makeLoop());
     expect(r.info).toMatch(/\/mcp/);
+  });
+
+  it("/help explains the per-call shell-exec approval flow (issue #866)", () => {
+    const r = handleSlash("help", [], makeLoop());
+    expect(r.info).toMatch(/per-call approval/i);
+    expect(r.info).toMatch(/allow once/i);
+    expect(r.info).toMatch(/allow always/i);
+    expect(r.info).toMatch(/deny/i);
   });
 
   it("/undo outside code mode says it's not available", () => {
@@ -296,6 +432,22 @@ describe("handleSlash", () => {
       codeUndo: () => "▸ restored 2 file(s)",
     });
     expect(r.info).toMatch(/restored 2 file/);
+  });
+
+  it("/undo records reverted edits in model context", () => {
+    const loop = makeLoop();
+    const r = handleSlash("undo", [], loop, {
+      codeUndo: () => ({
+        info: "▸ undo: reverted demo.txt from batch #1",
+        contextEvent: { batchId: 1, source: "auto", paths: ["demo.txt"] },
+      }),
+    });
+
+    expect(r.info).toContain("reverted demo.txt");
+    expect(loop.log.entries.at(-1)).toMatchObject({
+      role: "system",
+      content: expect.stringContaining("The user ran /undo and reverted edit batch #1"),
+    });
   });
 
   it("/help mentions /undo and /commit", () => {
@@ -371,7 +523,7 @@ describe("handleSlash", () => {
   describe("detectSlashArgContext", () => {
     it("returns null before the user commits to a slash name", () => {
       expect(detectSlashArgContext("/pr")).toBeNull();
-      expect(detectSlashArgContext("/preset")).toBeNull();
+      expect(detectSlashArgContext("/effort")).toBeNull();
     });
 
     it("returns null when the command doesn't exist", () => {
@@ -382,14 +534,13 @@ describe("handleSlash", () => {
       expect(detectSlashArgContext("just some text")).toBeNull();
     });
 
-    it("activates enum picker for /preset", () => {
-      const ctx = detectSlashArgContext("/preset fl");
+    it("activates enum picker for /effort", () => {
+      const ctx = detectSlashArgContext("/effort hi");
       expect(ctx).not.toBeNull();
       expect(ctx!.kind).toBe("picker");
-      expect(ctx!.spec.argCompleter).toEqual(["auto", "flash", "pro"]);
-      expect(ctx!.partial).toBe("fl");
-      // Offset is the char index where the partial starts in the buffer.
-      expect(ctx!.partialOffset).toBe("/preset ".length);
+      expect(ctx!.spec.argCompleter).toEqual(["low", "medium", "high", "max"]);
+      expect(ctx!.partial).toBe("hi");
+      expect(ctx!.partialOffset).toBe("/effort ".length);
     });
 
     it("activates model picker for /model", () => {
@@ -403,7 +554,7 @@ describe("handleSlash", () => {
       const ctx = detectSlashArgContext("/plan o", true);
       expect(ctx).not.toBeNull();
       expect(ctx!.kind).toBe("picker");
-      expect(ctx!.spec.argCompleter).toEqual(["on", "off"]);
+      expect(ctx!.spec.argCompleter).toEqual(["on", "off", "strict"]);
     });
 
     it("hides /plan outside code mode (command is contextual)", () => {
@@ -411,14 +562,13 @@ describe("handleSlash", () => {
     });
 
     it("surfaces a hint-only row once the user types a space inside the partial", () => {
-      // "/preset auto foo" — typed past the one enum slot.
-      const ctx = detectSlashArgContext("/preset auto foo");
+      const ctx = detectSlashArgContext("/effort high foo");
       expect(ctx).not.toBeNull();
       expect(ctx!.kind).toBe("hint");
     });
 
     it("returns picker with empty partial when the user just hit space", () => {
-      const ctx = detectSlashArgContext("/preset ");
+      const ctx = detectSlashArgContext("/effort ");
       expect(ctx).not.toBeNull();
       expect(ctx!.kind).toBe("picker");
       expect(ctx!.partial).toBe("");
@@ -433,15 +583,10 @@ describe("handleSlash", () => {
     });
 
     it("still surfaces picker kind when partial exactly matches an enum value", () => {
-      // Detector itself is kind-only — it doesn't know whether the
-      // partial is a complete match. The App's slashArgMatches memo
-      // is responsible for hiding the picker on exact match so Enter
-      // submits; this test documents that the detector's contract is
-      // "we're in picker mode" regardless of match state.
-      const ctx = detectSlashArgContext("/preset smart");
+      const ctx = detectSlashArgContext("/effort medium");
       expect(ctx).not.toBeNull();
       expect(ctx!.kind).toBe("picker");
-      expect(ctx!.partial).toBe("smart");
+      expect(ctx!.partial).toBe("medium");
     });
   });
 
@@ -529,7 +674,7 @@ describe("handleSlash", () => {
     for (const required of [
       "help",
       "status",
-      "preset",
+      "effort",
       "model",
       "language",
       "theme",
@@ -555,10 +700,18 @@ describe("handleSlash", () => {
     // Case-insensitive.
     expect(suggestSlashCommands("HE").map((s) => s.cmd)).toEqual(["help"]);
     // Empty prefix returns the full non-advanced release list, including code commands.
-    expect(suggestSlashCommands("", true)).toHaveLength(42);
+    expect(suggestSlashCommands("", true)).toHaveLength(48);
     expect(suggestSlashCommands("", true).map((s) => s.cmd)).toContain("logs");
     expect(suggestSlashCommands("", true).map((s) => s.cmd)).toContain("language");
+    expect(suggestSlashCommands("", true).map((s) => s.cmd)).toContain("weixin");
     expect(suggestSlashCommands("lan").map((s) => s.cmd)).toContain("language");
+  });
+
+  it("resolves Telegram-safe slash aliases", () => {
+    expect(parseSlash("/search_engine bing")).toEqual({
+      cmd: "search-engine",
+      args: ["bing"],
+    });
   });
 
   describe("/btw — issue #725", () => {
@@ -621,6 +774,33 @@ describe("handleSlash", () => {
     it("is surfaced by suggestSlashCommands", () => {
       const names = suggestSlashCommands("sta").map((s) => s.cmd);
       expect(names).toContain("stats");
+    });
+  });
+
+  describe("/cache-miss-report", () => {
+    it("renders a live cache report when no session meta exists", () => {
+      const loop = makeLoop();
+      const turnStats = loop.stats.record(1, loop.model, new Usage(100, 20, 120, 80, 20));
+      const diagnostic = buildCacheDiagnostic({
+        turn: 1,
+        model: loop.model,
+        usage: turnStats.usage,
+        estimatedCostUsd: turnStats.cost,
+        prefix: prefixDiagnosticHashes({ system: "s", toolSpecs: [], fewShots: [] }),
+        previous: null,
+      });
+      loop.stats.addCacheDiagnostic(diagnostic);
+
+      const r = handleSlash("cache-miss-report", [], loop);
+
+      expect(r.info).toContain("cache miss report");
+      expect(r.info).toContain("DeepSeek does not return a cache-miss reason");
+      expect(r.info).toContain("input 100");
+    });
+
+    it("is surfaced by suggestSlashCommands", () => {
+      const names = suggestSlashCommands("cache").map((s) => s.cmd);
+      expect(names).toContain("cache-miss-report");
     });
   });
 
@@ -922,6 +1102,31 @@ describe("handleSlash", () => {
     expect(r.info).toMatch(/no turn yet/);
   });
 
+  it("/cost posts the session-aggregate cacheHit so the card matches the status bar (#1479)", () => {
+    const loop = makeLoop();
+    // Two turns with very different per-turn cache hits — last turn is 10%
+    // but the session average is ~75% once both turns are summed. Without
+    // the fix the slash card would have shown 10% while the bottom status
+    // bar showed ~75%, which is exactly the bug.
+    loop.stats.record(1, loop.model, new Usage(10_000, 100, 10_100, 9_000, 1_000));
+    loop.stats.record(2, loop.model, new Usage(10_000, 100, 10_100, 1_000, 9_000));
+    const lastTurn = loop.stats.turns[loop.stats.turns.length - 1]!;
+    const summary = loop.stats.summary();
+    // Sanity: per-turn and session-aggregate must actually differ, otherwise
+    // the test passes for the wrong reason.
+    expect(lastTurn.cacheHitRatio).not.toBe(summary.cacheHitRatio);
+
+    let posted: { cacheHit: number; sessionCost: number } | null = null;
+    handleSlash("cost", [], loop, {
+      postUsage: (args) => {
+        posted = { cacheHit: args.cacheHit, sessionCost: args.sessionCost };
+      },
+    });
+    expect(posted).not.toBeNull();
+    expect(posted!.cacheHit).toBeCloseTo(summary.cacheHitRatio, 6);
+    expect(posted!.cacheHit).not.toBe(lastTurn.cacheHitRatio);
+  });
+
   it("/status with pendingEditCount=0 hides the edits line", () => {
     const r = handleSlash("status", [], makeLoop(), { pendingEditCount: 0 });
     expect(r.info).not.toMatch(/pending/);
@@ -1087,6 +1292,114 @@ describe("handleSlash", () => {
       expect(r.info).toMatch(/Refactor auth into signed tokens/);
       expect(r.info).toMatch(/1\/2/);
     });
+
+    it("/plans surfaces active step evidence and pending evidence state", () => {
+      const loop = loopWithSession("plans-active-evidence");
+      const fs = require("node:fs") as typeof import("node:fs");
+      const dir = join(tempHome, ".reasonix", "sessions");
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(
+        join(dir, "plans-active-evidence.plan.json"),
+        JSON.stringify({
+          version: 2,
+          steps: [
+            { id: "step-1", title: "Update router", action: "Update router references." },
+            { id: "step-2", title: "Run migration", action: "Run the migration." },
+          ],
+          completedStepIds: ["step-1"],
+          stepCompletions: {
+            "step-1": {
+              kind: "step_completed",
+              stepId: "step-1",
+              result: "Updated router references.",
+              evidence: [
+                {
+                  kind: "verification",
+                  summary: "focused router tests passed",
+                  command: "npm test -- tests/router.test.ts",
+                },
+                {
+                  kind: "diff",
+                  summary: "updated router imports",
+                  paths: ["src/router.ts", "src/routes.ts"],
+                },
+              ],
+            },
+          },
+          updatedAt: new Date().toISOString(),
+          summary: "Router migration",
+        }),
+      );
+
+      const r = handleSlash("plans", [], loop, {
+        getEngineeringLifecycleSnapshot: () => ({
+          mode: "strict",
+          state: "executing",
+          planSteps: [],
+          completedStepIds: ["step-1"],
+          mutatedSinceLastStep: true,
+        }),
+      });
+
+      expect(r.info).toContain("Router migration");
+      expect(r.info).toContain("evidence pending");
+      expect(r.info).toContain("step-1");
+      expect(r.info).toContain("verification - focused router tests passed");
+      expect(r.info).toContain("npm test -- tests/router.test.ts");
+      expect(r.info).toContain("diff - updated router imports");
+      expect(r.info).toContain("src/router.ts, src/routes.ts");
+    });
+
+    it("/plans surfaces archived plan evidence summaries", () => {
+      const loop = loopWithSession("plans-archived-evidence");
+      writeArchive("plans-archived-evidence", "2026-04-20-evidence", {
+        version: 2,
+        steps: [
+          { id: "step-1", title: "Migrate config", action: "Update dependency config." },
+          { id: "step-2", title: "Confirm rollout", action: "Confirm rollout notes." },
+        ],
+        completedStepIds: ["step-1", "step-2"],
+        stepCompletions: {
+          "step-1": {
+            kind: "step_completed",
+            stepId: "step-1",
+            result: "Updated dependency config.",
+            evidence: [
+              {
+                kind: "diff",
+                summary: "updated package and lockfile",
+                paths: ["package.json", "pnpm-lock.yaml"],
+              },
+              {
+                kind: "verification",
+                summary: "install completed",
+                command: "npm install",
+              },
+            ],
+          },
+          "step-2": {
+            kind: "step_completed",
+            stepId: "step-2",
+            result: "Confirmed rollout notes.",
+            evidence: [{ kind: "manual", summary: "owner approved rollout note" }],
+          },
+        },
+        updatedAt: "2026-04-20T00:00:00.000Z",
+        summary: "Config migration",
+      });
+
+      const r = handleSlash("plans", [], loop);
+
+      expect(r.info).toContain("Config migration");
+      expect(r.info).toContain("evidence:");
+      expect(r.info).toContain("step-1");
+      expect(r.info).toContain("diff - updated package and lockfile");
+      expect(r.info).toContain("package.json, pnpm-lock.yaml");
+      expect(r.info).toContain("verification - install completed");
+      expect(r.info).toContain("npm install");
+      expect(r.info).toContain("step-2");
+      expect(r.info).toContain("manual - owner approved rollout note");
+    });
   });
 
   describe("/memory", () => {
@@ -1178,7 +1491,7 @@ describe("handleSlash", () => {
       expect(r2.info).toMatch(/plan mode OFF/);
     });
 
-    it("/plan on / off / true / false / 0 / 1 parse correctly", () => {
+    it("/plan on / off / true / false / 0 / 1 / strict parse correctly", () => {
       const check = (arg: string, expected: boolean) => {
         const calls: boolean[] = [];
         handleSlash("plan", [arg], makeLoop(), {
@@ -1193,6 +1506,25 @@ describe("handleSlash", () => {
       check("off", false);
       check("false", false);
       check("0", false);
+      check("strict", true);
+    });
+
+    it("/plan strict is explicit, not a toggle", () => {
+      const calls: boolean[] = [];
+      handleSlash("plan", ["strict"], makeLoop(), {
+        planMode: true,
+        setPlanMode: (on) => calls.push(on),
+      });
+      expect(calls).toEqual([true]);
+    });
+
+    it("/plan off marks the change as a user slash action", () => {
+      const calls: Array<{ on: boolean; source?: string }> = [];
+      handleSlash("plan", ["off"], makeLoop(), {
+        planMode: true,
+        setPlanMode: (on, source) => calls.push({ on, source }),
+      });
+      expect(calls).toEqual([{ on: false, source: "slash" }]);
     });
 
     it("/plan explains the stronger-constraint relationship with autonomous submit_plan", () => {
@@ -1215,6 +1547,54 @@ describe("handleSlash", () => {
     it("/status hides the plan line when plan mode is off", () => {
       const r = handleSlash("status", [], makeLoop(), { planMode: false });
       expect(r.info).not.toMatch(/plan\s+ON/);
+    });
+
+    it("/status surfaces strict lifecycle state when enabled", () => {
+      const r = handleSlash("status", [], makeLoop(), {
+        getEngineeringLifecycleSnapshot: () => ({
+          mode: "strict",
+          state: "armed",
+          planSteps: [],
+          completedStepIds: [],
+          mutatedSinceLastStep: false,
+        }),
+      });
+
+      expect(r.info).toMatch(/lifecycle\s+strict\/armed/);
+    });
+
+    it("/status surfaces lifecycle progress and evidence pending", () => {
+      const r = handleSlash("status", [], makeLoop(), {
+        getEngineeringLifecycleSnapshot: () => ({
+          mode: "strict",
+          state: "executing",
+          planSteps: [
+            { id: "step-1", title: "Refactor", action: "Move code." },
+            { id: "step-2", title: "Verify", action: "Run tests." },
+            { id: "step-3", title: "Document", action: "Write notes." },
+          ],
+          completedStepIds: ["step-1"],
+          mutatedSinceLastStep: true,
+        }),
+      });
+
+      expect(r.info).toMatch(/lifecycle\s+strict\/executing/);
+      expect(r.info).toMatch(/1\/3/);
+      expect(r.info).toMatch(/evidence pending/);
+    });
+
+    it("/status hides lifecycle when it is off", () => {
+      const r = handleSlash("status", [], makeLoop(), {
+        getEngineeringLifecycleSnapshot: () => ({
+          mode: "off",
+          state: "idle",
+          planSteps: [],
+          completedStepIds: [],
+          mutatedSinceLastStep: false,
+        }),
+      });
+
+      expect(r.info).not.toMatch(/lifecycle/);
     });
   });
 
@@ -1252,15 +1632,15 @@ describe("handleSlash", () => {
     });
 
     it("persists a registered theme", () => {
-      const r = handleSlash("theme", ["tokyo-night"], makeLoop());
-      expect(r.info).toMatch(/theme saved: tokyo-night/);
+      const r = handleSlash("theme", ["midnight"], makeLoop());
+      expect(r.info).toMatch(/theme saved: midnight/);
       expect(r.openThemePicker).toBeUndefined();
-      expect(loadTheme()).toBe("tokyo-night");
+      expect(loadTheme()).toBe("midnight");
     });
 
     it("persists auto so env can resolve the active theme", () => {
       const r = handleSlash("theme", ["auto"], makeLoop());
-      expect(r.info).toMatch(/active on next launch: github-dark/);
+      expect(r.info).toMatch(/active on next launch: graphite/);
       expect(loadTheme()).toBe("auto");
     });
 
@@ -1294,6 +1674,12 @@ describe("handleSlash", () => {
       expect(r.info).toBe("Language switched to English.");
     });
 
+    it("switches to German", () => {
+      const r = handleSlash("language", ["de"], makeLoop());
+      expect(getLanguage()).toBe("de");
+      expect(r.info).toBe("Sprache auf Deutsch umgestellt.");
+    });
+
     it("returns error for unsupported language", () => {
       const r = handleSlash("language", ["fr"], makeLoop());
       expect(r.info).toMatch(/Unsupported/);
@@ -1305,6 +1691,21 @@ describe("handleSlash", () => {
       const r = handleSlash("lang", ["zh-CN"], makeLoop());
       expect(getLanguage()).toBe("zh-CN");
       expect(r.info).toBe("语言已切换为简体中文。");
+    });
+
+    it("/skill list localizes built-in skill descriptions in Chinese", () => {
+      setLanguageRuntime("zh-CN");
+      const r = handleSlash("skill", ["list"], makeLoop(), { codeRoot: process.cwd() });
+      expect(r.info).toMatch(/用户技能/);
+      expect(r.info).toMatch(/\(builtin\)\s+qq/);
+      expect(r.info).not.toContain("Guide QQ channel setup and troubleshooting");
+    });
+
+    it("/skill qq resolves the builtin qq skill and reports localized run info in Chinese", () => {
+      setLanguageRuntime("zh-CN");
+      const r = handleSlash("skill", ["qq"], makeLoop(), { codeRoot: process.cwd() });
+      expect(r.info).toBe("▸ 正在运行技能：qq");
+      expect(r.resubmit).toContain("# Skill: qq");
     });
 
     it("fires onLanguageChange listeners", () => {

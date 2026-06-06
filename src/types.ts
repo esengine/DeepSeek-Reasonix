@@ -46,12 +46,16 @@ export interface RawUsage {
   total_tokens?: number;
   prompt_cache_hit_tokens?: number;
   prompt_cache_miss_tokens?: number;
+  /** Ollama native API: input tokens processed. */
+  prompt_eval_count?: number;
+  /** Ollama native API: output tokens generated. */
+  eval_count?: number;
 }
 
 export interface ChatRequestOptions {
   model: string;
   messages: ChatMessage[];
-  tools?: ToolSpec[];
+  tools?: readonly ToolSpec[];
   temperature?: number;
   maxTokens?: number;
   stream?: boolean;
@@ -59,5 +63,5 @@ export interface ChatRequestOptions {
   /** DeepSeek response_format — use { type: "json_object" } to force valid JSON. */
   responseFormat?: { type: "json_object" | "text" };
   thinking?: "enabled" | "disabled";
-  reasoningEffort?: "high" | "max";
+  reasoningEffort?: import("./config.js").ReasoningEffort;
 }

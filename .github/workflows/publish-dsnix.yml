@@ -1,0 +1,63 @@
+name: Publish dsnix
+
+# Tag namespace: `dsnix-v<semver>` triggers npm publish for the
+# dsnix shim package only. Plain `v<semver>` tags publish the main
+# `reasonix` CLI (see publish-npm.yml); the two are decoupled so the
+# alias can be released independently when the shim itself changes.
+on:
+  push:
+    tags: ["dsnix-v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to publish (e.g. dsnix-v0.48.0). Required when running manually."
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    name: publish dsnix to npm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          registry-url: https://registry.npmjs.org/
+
+      - name: Verify tag matches packages/dsnix/package.json version
+        shell: bash
+        run: |
+          tag="${{ github.event.inputs.tag || github.ref_name }}"
+          tag_version="${tag#dsnix-v}"
+          pkg_version=$(node -p "require('./packages/dsnix/package.json').version")
+          if [ "$tag_version" != "$pkg_version" ]; then
+            echo "::error::tag $tag (version $tag_version) does not match packages/dsnix/package.json version $pkg_version"
+            exit 1
+          fi
+          echo "tag $tag matches packages/dsnix/package.json $pkg_version"
+
+      - name: Verify reasonix@<version> is already published on npm
+        shell: bash
+        run: |
+          dep_version=$(node -p "require('./packages/dsnix/package.json').dependencies.reasonix")
+          if ! npm view "reasonix@${dep_version}" version >/dev/null 2>&1; then
+            echo "::error::dsnix depends on reasonix@${dep_version} but that version is not published yet"
+            exit 1
+          fi
+          echo "reasonix@${dep_version} is published — safe to publish dsnix"
+
+      - name: Publish dsnix to npm
+        run: npm publish --access public
+        working-directory: packages/dsnix
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

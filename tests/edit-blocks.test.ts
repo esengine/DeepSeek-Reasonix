@@ -1,8 +1,17 @@
 /** SEARCH/REPLACE parsing + application — fresh temp dir per test. */
 
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import iconv from "iconv-lite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   applyEditBlock,
@@ -117,6 +126,42 @@ describe("applyEditBlock", () => {
     expect(readFileSync(join(root, "a.txt"), "utf8")).toBe("goodbye world\n");
   });
 
+  it("treats leading slash paths as project-root relative", () => {
+    writeFileSync(join(root, "a.txt"), "hello world\n", "utf8");
+    const result = applyEditBlock(
+      { path: "/a.txt", search: "hello", replace: "goodbye", offset: 0 },
+      root,
+    );
+    expect(result.status).toBe("applied");
+    expect(readFileSync(join(root, "a.txt"), "utf8")).toBe("goodbye world\n");
+  });
+
+  it("allows real absolute paths when they stay inside rootDir", () => {
+    const absPath = join(root, "a.txt");
+    writeFileSync(absPath, "hello world\n", "utf8");
+    const result = applyEditBlock(
+      { path: absPath, search: "hello", replace: "goodbye", offset: 0 },
+      root,
+    );
+    expect(result.status).toBe("applied");
+    expect(readFileSync(absPath, "utf8")).toBe("goodbye world\n");
+  });
+
+  it("refuses real absolute paths outside rootDir", () => {
+    const outside = resolve(root, "..", "outside.txt");
+    writeFileSync(outside, "hello world\n", "utf8");
+    try {
+      const result = applyEditBlock(
+        { path: outside, search: "hello", replace: "goodbye", offset: 0 },
+        root,
+      );
+      expect(result.status).toBe("path-escape");
+      expect(readFileSync(outside, "utf8")).toBe("hello world\n");
+    } finally {
+      rmSync(outside, { force: true });
+    }
+  });
+
   it("creates a new file when SEARCH is empty and file doesn't exist", () => {
     const result = applyEditBlock(
       { path: "new/nested/file.ts", search: "", replace: "export const x = 1;\n", offset: 0 },
@@ -155,15 +200,15 @@ describe("applyEditBlock", () => {
     expect(existsSync(join(root, "..", "escape.txt"))).toBe(false);
   });
 
-  it("replaces only the first occurrence when SEARCH appears twice", () => {
+  it("refuses ambiguous SEARCH text that appears twice", () => {
     writeFileSync(join(root, "a.txt"), "foo bar foo\n", "utf8");
     const result = applyEditBlock(
       { path: "a.txt", search: "foo", replace: "FOO", offset: 0 },
       root,
     );
-    expect(result.status).toBe("applied");
-    // First "foo" replaced, second left alone.
-    expect(readFileSync(join(root, "a.txt"), "utf8")).toBe("FOO bar foo\n");
+    expect(result.status).toBe("not-found");
+    expect(result.message).toMatch(/multiple times/);
+    expect(readFileSync(join(root, "a.txt"), "utf8")).toBe("foo bar foo\n");
   });
 
   it("matches LF search against CRLF file content", () => {
@@ -184,6 +229,35 @@ describe("applyEditBlock", () => {
     );
     expect(result.status).toBe("applied");
     expect(readFileSync(join(root, "lf.txt"), "utf8")).toBe("LINE1\nLINE2\n");
+  });
+
+  it("preserves symlink targets instead of replacing the link with a regular file", () => {
+    const outside = resolve(root, "..", "outside-symlink-target.txt");
+    const link = join(root, "linked.txt");
+    writeFileSync(outside, "hello world\n", "utf8");
+    let symlinksWorked = true;
+    try {
+      symlinkSync(outside, link);
+    } catch {
+      symlinksWorked = false;
+    }
+    if (!symlinksWorked) {
+      rmSync(outside, { force: true });
+      return;
+    }
+    try {
+      const result = applyEditBlock(
+        { path: "linked.txt", search: "hello", replace: "goodbye", offset: 0 },
+        root,
+      );
+
+      expect(result.status).toBe("applied");
+      expect(lstatSync(link).isSymbolicLink()).toBe(true);
+      expect(readFileSync(outside, "utf8")).toBe("goodbye world\n");
+    } finally {
+      rmSync(link, { force: true });
+      rmSync(outside, { force: true });
+    }
   });
 });
 
@@ -223,11 +297,27 @@ describe("snapshotBeforeEdits + restoreSnapshots", () => {
     writeFileSync(join(root, "a.txt"), "one two three\n", "utf8");
     const blocks = [
       { path: "a.txt", search: "one", replace: "ONE", offset: 0 },
-      { path: "a.txt", search: "two", replace: "TWO", offset: 10 },
+      { path: "/a.txt", search: "two", replace: "TWO", offset: 10 },
     ];
     const snaps = snapshotBeforeEdits(blocks, root);
     expect(snaps).toHaveLength(1); // not 2 — same file
     expect(snaps[0]!.prevContent).toBe("one two three\n");
+  });
+
+  it("does not snapshot paths outside rootDir before apply rejects them", () => {
+    const outside = resolve(root, "..", "outside-secret.txt");
+    writeFileSync(outside, "SECRET_OUTSIDE_WORKSPACE", "utf8");
+    try {
+      const block = { path: outside, search: "SECRET", replace: "PUBLIC", offset: 0 };
+      const snaps = snapshotBeforeEdits([block], root);
+      const [result] = applyEditBlocks([block], root);
+
+      expect(snaps).toEqual([]);
+      expect(result!.status).toBe("path-escape");
+      expect(readFileSync(outside, "utf8")).toBe("SECRET_OUTSIDE_WORKSPACE");
+    } finally {
+      rmSync(outside, { force: true });
+    }
   });
 
   it("restores multiple files in a single batch independently", () => {
@@ -307,5 +397,66 @@ describe("applyEditBlocks (batch)", () => {
     expect(results[1]!.status).toBe("not-found");
     expect(readFileSync(join(root, "a.txt"), "utf8")).toBe("ALPHA\n");
     expect(readFileSync(join(root, "b.txt"), "utf8")).toBe("bravo\n"); // untouched
+  });
+});
+
+describe("edit pipeline preserves file encoding (#1445)", () => {
+  let root: string;
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "edit-encoding-"));
+  });
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("edits a GB18030 file and writes back in GB18030", () => {
+    const original = "标题\n旧内容\n尾部\n";
+    const file = join(root, "cn.txt");
+    writeFileSync(file, iconv.encode(original, "gb18030"));
+
+    const result = applyEditBlock(
+      { path: "cn.txt", search: "旧内容", replace: "新内容", offset: 0 },
+      root,
+    );
+    expect(result.status).toBe("applied");
+
+    const onDisk = readFileSync(file);
+    expect(iconv.decode(onDisk, "gb18030")).toBe("标题\n新内容\n尾部\n");
+    expect(() => new TextDecoder("utf-8", { fatal: true }).decode(onDisk)).toThrow();
+  });
+
+  it("edits a UTF-8 BOM file and preserves the BOM bytes", () => {
+    const bom = Buffer.from([0xef, 0xbb, 0xbf]);
+    const file = join(root, "bom.txt");
+    writeFileSync(file, Buffer.concat([bom, Buffer.from("hello world\n", "utf8")]));
+
+    const result = applyEditBlock(
+      { path: "bom.txt", search: "world", replace: "你好", offset: 0 },
+      root,
+    );
+    expect(result.status).toBe("applied");
+
+    const onDisk = readFileSync(file);
+    expect(onDisk[0]).toBe(0xef);
+    expect(onDisk[1]).toBe(0xbb);
+    expect(onDisk[2]).toBe(0xbf);
+    expect(onDisk.subarray(3).toString("utf8")).toBe("hello 你好\n");
+  });
+
+  it("snapshot + restore round-trips through GB18030 without re-encoding", () => {
+    const original = "保留编码\n";
+    const file = join(root, "cn.txt");
+    writeFileSync(file, iconv.encode(original, "gb18030"));
+
+    const snaps = snapshotBeforeEdits(
+      [{ path: "cn.txt", search: "x", replace: "y", offset: 0 }],
+      root,
+    );
+    expect(snaps[0]?.prevEncoding).toBe("gb18030");
+
+    writeFileSync(file, iconv.encode("被修改\n", "gb18030"));
+    const restored = restoreSnapshots(snaps, root);
+    expect(restored[0]?.status).toBe("applied");
+    expect(iconv.decode(readFileSync(file), "gb18030")).toBe(original);
   });
 });

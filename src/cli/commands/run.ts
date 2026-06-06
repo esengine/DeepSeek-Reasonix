@@ -2,10 +2,13 @@ import type { WriteStream } from "node:fs";
 import { stdin, stdout } from "node:process";
 import { createInterface } from "node:readline/promises";
 import {
+  bridgeEndpointEnv,
   defaultConfigPath,
   isPlausibleKey,
   loadApiKey,
-  loadBaseUrl,
+  loadEndpoint,
+  loadMaxIterPerTurn,
+  loadToolRateLimit,
   normalizeMcpConfig,
   readConfig,
   saveApiKey,
@@ -28,8 +31,6 @@ export interface RunOptions {
   model: string;
   system: string;
   budgetUsd?: number;
-  /** Per-turn repair-signal count required to escalate flash→pro. Undefined → loop default (3). */
-  failureThreshold?: number;
   /** JSONL transcript path — lets `reasonix replay` / `diff` audit this run. */
   transcript?: string;
   /** Zero or more MCP server specs. Each: `"name=cmd args..."` or `"cmd args..."`. */
@@ -70,8 +71,8 @@ async function ensureApiKey(): Promise<string> {
 
 export async function runCommand(opts: RunOptions): Promise<void> {
   loadDotenv();
-  const apiKey = await ensureApiKey();
-  process.env.DEEPSEEK_API_KEY = apiKey;
+  await ensureApiKey();
+  bridgeEndpointEnv();
 
   // Optional MCP setup — mirrors chat's flow. Must happen before loop
   // construction so the tools make it into the prefix.
@@ -83,8 +84,9 @@ export async function runCommand(opts: RunOptions): Promise<void> {
   const clients: McpClient[] = [];
   let tools: ToolRegistry | undefined;
   let successCount = 0;
+  const workspaceDir = process.cwd();
   if (normalizedSpecs.length > 0) {
-    tools = new ToolRegistry();
+    tools = new ToolRegistry({ rateLimit: loadToolRateLimit() });
     for (const spec of normalizedSpecs) {
       let label = "anon";
       let mcp: McpClient | undefined;
@@ -101,9 +103,9 @@ export async function runCommand(opts: RunOptions): Promise<void> {
           : normalizedSpecs.length === 1 && opts.mcpPrefix
             ? opts.mcpPrefix
             : "";
-        if (spec.transport === "stdio") preflightStdioSpec(spec);
-        const transport = buildTransportFromSpec(spec);
-        mcp = new McpClient({ transport });
+        if (spec.transport === "stdio") preflightStdioSpec(spec, { cwd: workspaceDir });
+        const transport = buildTransportFromSpec(spec, { cwd: workspaceDir });
+        mcp = new McpClient({ transport, workspaceDir, requestTimeoutMs: spec.requestTimeoutMs });
         await mcp.initialize();
         const bridge = await bridgeMcpTools(mcp, {
           registry: tools,
@@ -138,7 +140,8 @@ export async function runCommand(opts: RunOptions): Promise<void> {
     if (successCount === 0) tools = undefined;
   }
 
-  const client = new DeepSeekClient({ baseUrl: loadBaseUrl() });
+  const ep = loadEndpoint();
+  const client = new DeepSeekClient({ apiKey: ep.apiKey, baseUrl: ep.baseUrl });
   const prefix = new ImmutablePrefix({
     system: opts.system,
     toolSpecs: tools?.specs(),
@@ -149,7 +152,7 @@ export async function runCommand(opts: RunOptions): Promise<void> {
     tools,
     model: opts.model,
     budgetUsd: opts.budgetUsd,
-    failureThreshold: opts.failureThreshold,
+    maxIterPerTurn: loadMaxIterPerTurn(),
   });
   const prefixHash = prefix.fingerprint;
 

@@ -1,5 +1,6 @@
 /** MCP client + bridge — in-process fake transport answering initialize / tools/list / tools/call. */
 
+import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 import { McpClient } from "../src/mcp/client.js";
 import { bridgeMcpTools, flattenMcpResult } from "../src/mcp/registry.js";
@@ -34,6 +35,8 @@ interface FakeServerOptions {
   getPrompt?: (name: string, args?: Record<string, string>) => GetPromptResult;
   /** Initialize capabilities override — defaults advertise tools only. */
   capabilities?: Record<string, unknown>;
+  /** Client responses to server-initiated requests. */
+  responses?: JsonRpcMessage[];
 }
 
 /** In-process MCP transport — responds in `send()` by pushing onto the queue. */
@@ -47,7 +50,10 @@ class FakeMcpTransport implements McpTransport {
 
   async send(msg: JsonRpcMessage): Promise<void> {
     if (this.closed) throw new Error("fake transport closed");
-    if (!("method" in msg)) return; // response frames from client? never happens
+    if (!("method" in msg)) {
+      this.opts.responses?.push(msg);
+      return;
+    }
     if (!("id" in msg)) {
       // notification — e.g. notifications/initialized — acknowledge silently
       this.opts.received!.push(msg as JsonRpcRequest);
@@ -77,6 +83,10 @@ class FakeMcpTransport implements McpTransport {
   async close(): Promise<void> {
     this.closed = true;
     while (this.waiters.length > 0) this.waiters.shift()!(null);
+  }
+
+  pushServerMessage(msg: JsonRpcMessage): void {
+    this.push(msg);
   }
 
   private handle(req: JsonRpcRequest): JsonRpcMessage {
@@ -184,6 +194,41 @@ describe("McpClient: initialize handshake", () => {
     expect(received[0]!.method).toBe("initialize");
     expect(received[1]!.method).toBe("notifications/initialized");
 
+    await client.close();
+  });
+
+  it("advertises the roots capability when a workspace is configured", async () => {
+    const received: JsonRpcRequest[] = [];
+    const workspaceDir = "/tmp/reasonix-workspace";
+    const transport = new FakeMcpTransport({ tools: [], received });
+    const client = new McpClient({ transport, workspaceDir });
+    await client.initialize();
+    const init = received.find((r) => r.method === "initialize")!;
+    const params = init.params as {
+      capabilities: Record<string, unknown>;
+    } & Record<string, unknown>;
+    expect(params.capabilities).toHaveProperty("roots");
+    expect(params).not.toHaveProperty("rootUri");
+    expect(params).not.toHaveProperty("workspaceFolders");
+    await client.close();
+  });
+
+  it("answers roots/list with the configured workspace root", async () => {
+    const responses: JsonRpcMessage[] = [];
+    const workspaceDir = "/tmp/reasonix-workspace";
+    const workspaceUri = pathToFileURL(workspaceDir).href;
+    const transport = new FakeMcpTransport({ tools: [], responses });
+    const client = new McpClient({ transport, workspaceDir });
+    await client.initialize();
+    transport.pushServerMessage({ jsonrpc: "2.0", id: "roots-1", method: "roots/list" });
+    for (let i = 0; responses.length === 0 && i < 20; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    expect(responses[0]).toMatchObject({
+      jsonrpc: "2.0",
+      id: "roots-1",
+      result: { roots: [{ uri: workspaceUri, name: "reasonix-workspace" }] },
+    });
     await client.close();
   });
 
@@ -361,6 +406,80 @@ describe("flattenMcpResult", () => {
     const small = "hello world";
     const out = flattenMcpResult({ content: [{ type: "text", text: small }] }, { maxChars: 1000 });
     expect(out).toBe("hello world");
+  });
+});
+
+describe("flattenMcpResult: schema validation", () => {
+  it("rejects a non-object result", () => {
+    expect(() => flattenMcpResult(null as unknown as CallToolResult)).toThrow("non-object");
+    expect(() => flattenMcpResult("str" as unknown as CallToolResult)).toThrow("non-object");
+    expect(() => flattenMcpResult(42 as unknown as CallToolResult)).toThrow("non-object");
+  });
+
+  it("rejects a result missing content", () => {
+    expect(() => flattenMcpResult({} as unknown as CallToolResult)).toThrow("non-array content");
+  });
+
+  it("rejects non-array content", () => {
+    expect(() => flattenMcpResult({ content: "nope" } as unknown as CallToolResult)).toThrow(
+      "non-array content",
+    );
+    expect(() => flattenMcpResult({ content: null } as unknown as CallToolResult)).toThrow(
+      "non-array content",
+    );
+  });
+
+  it("rejects a content block that isn't an object", () => {
+    expect(() => flattenMcpResult({ content: ["string"] } as unknown as CallToolResult)).toThrow(
+      "is not an object",
+    );
+    expect(() => flattenMcpResult({ content: [null] } as unknown as CallToolResult)).toThrow(
+      "is not an object",
+    );
+  });
+
+  it("rejects an unknown content block type", () => {
+    expect(() =>
+      flattenMcpResult({
+        content: [{ type: "resource", uri: "file:///etc/passwd" }],
+      } as unknown as CallToolResult),
+    ).toThrow("unknown type");
+  });
+
+  it("rejects a text block with non-string text", () => {
+    expect(() =>
+      flattenMcpResult({
+        content: [{ type: "text", text: 42 }],
+      } as unknown as CallToolResult),
+    ).toThrow("non-string text");
+  });
+
+  it("rejects an image block with non-string data", () => {
+    expect(() =>
+      flattenMcpResult({
+        content: [{ type: "image", data: null, mimeType: "image/png" }],
+      } as unknown as CallToolResult),
+    ).toThrow("non-string data");
+  });
+
+  it("rejects an image block with non-string mimeType", () => {
+    expect(() =>
+      flattenMcpResult({
+        content: [{ type: "image", data: "abc", mimeType: 7 }],
+      } as unknown as CallToolResult),
+    ).toThrow("non-string mimeType");
+  });
+
+  it("passes a valid result through unchanged", () => {
+    const out = flattenMcpResult({
+      content: [
+        { type: "text", text: "hello" },
+        { type: "image", data: "abc", mimeType: "image/png" },
+      ],
+      isError: false,
+    });
+    expect(out).toContain("hello");
+    expect(out).toContain("[image image/png");
   });
 });
 

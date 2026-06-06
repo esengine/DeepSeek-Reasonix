@@ -1,7 +1,7 @@
 /** Parse + spawn `cmd1 | cmd2 && cmd3 > out` ourselves — never invoke a shell, sidestep PS5.1's `&&` parse error and codepage drift. */
 
 import { type ChildProcess, type SpawnOptions, spawn } from "node:child_process";
-import { closeSync, openSync } from "node:fs";
+import { constants, closeSync, lstatSync, openSync, realpathSync } from "node:fs";
 import { devNull } from "node:os";
 import * as pathMod from "node:path";
 import { isDqEscape, killProcessTree, prepareSpawn, smartDecodeOutput } from "./shell.js";
@@ -241,7 +241,7 @@ export function parseCommandChain(cmd: string): CommandChain | null {
     const cmdName = seg.argv[0] ?? "";
     if (cmdName.toLowerCase() === "cd") {
       throw new UnsupportedSyntaxError(
-        "cd in parsed command chains does not change cwd for later segments. Use a command-native cwd flag instead, such as `npm --prefix <dir> run <script>`, `git -C <dir> ...`, or `cargo -C <dir> ...`.",
+        "cd in parsed command chains does not change cwd for later segments. By default, run generated scripts from the directory where the script was written; do not assume an input/data directory is the cwd just because the task reads files there. Pass input/data paths as arguments unless the command truly depends on that cwd. For package tools, use command-native cwd flags such as `npm --prefix <dir> run <script>`, `git -C <dir> ...`, or `cargo -C <dir> ...`.",
       );
     }
   }
@@ -354,14 +354,63 @@ interface SegmentStdio {
 }
 
 /** Models reach for `2>nul` (Windows) and `2>/dev/null` (POSIX) interchangeably; without this the parser materializes a real `<cwd>/nul` file. */
-function isNullDeviceAlias(target: string): boolean {
+export function isNullDeviceAlias(target: string): boolean {
   const lower = target.toLowerCase();
   if (lower === "/dev/null") return true;
   if (process.platform === "win32" && lower === "nul") return true;
   return false;
 }
 
+function pathIsUnder(child: string, parent: string): boolean {
+  const rel = pathMod.relative(parent, child);
+  return rel === "" || (!rel.startsWith("..") && !pathMod.isAbsolute(rel));
+}
+
+function openFlags(mode: "r" | "w" | "a"): number {
+  const noFollow = "O_NOFOLLOW" in constants ? constants.O_NOFOLLOW : 0;
+  if (mode === "r") return constants.O_RDONLY | noFollow;
+  if (mode === "w") return constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | noFollow;
+  return constants.O_WRONLY | constants.O_CREAT | constants.O_APPEND | noFollow;
+}
+
+function ensureUnderSandbox(path: string, sandboxRoot: string, target: string): void {
+  if (!pathIsUnder(path, sandboxRoot)) {
+    throw new Error(
+      `redirect target "${target}" resolves outside the workspace sandbox (${sandboxRoot})`,
+    );
+  }
+}
+
+function resolveRedirectTarget(target: string, cwd: string): string {
+  const lexicalRoot = pathMod.resolve(cwd);
+  const sandboxRoot = realpathSync(lexicalRoot);
+  const resolved = pathMod.resolve(lexicalRoot, target);
+  ensureUnderSandbox(resolved, lexicalRoot, target);
+
+  try {
+    const stat = lstatSync(resolved);
+    if (stat.isSymbolicLink()) {
+      throw new Error(`redirect target "${target}" is a symbolic link`);
+    }
+    ensureUnderSandbox(realpathSync(resolved), sandboxRoot, target);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT") throw err;
+    ensureUnderSandbox(realpathSync(pathMod.dirname(resolved)), sandboxRoot, target);
+  }
+
+  return resolved;
+}
+
+function validateRedirectTargets(redirects: readonly Redirect[], cwd: string): void {
+  for (const r of redirects) {
+    if (r.kind === "2>&1" || !r.target || isNullDeviceAlias(r.target)) continue;
+    resolveRedirectTarget(r.target, cwd);
+  }
+}
+
 function openRedirects(redirects: readonly Redirect[], cwd: string): SegmentStdio {
+  validateRedirectTargets(redirects, cwd);
   let stdinFd: number | null = null;
   let stdoutFd: number | null = null;
   let stderrFd: number | null = null;
@@ -369,8 +418,8 @@ function openRedirects(redirects: readonly Redirect[], cwd: string): SegmentStdi
   let bothFd: number | null = null;
   const toClose: number[] = [];
   const open = (target: string, flags: "r" | "w" | "a"): number => {
-    const resolved = isNullDeviceAlias(target) ? devNull : pathMod.resolve(cwd, target);
-    const fd = openSync(resolved, flags);
+    const resolved = isNullDeviceAlias(target) ? devNull : resolveRedirectTarget(target, cwd);
+    const fd = openSync(resolved, openFlags(flags), 0o666);
     toClose.push(fd);
     return fd;
   };

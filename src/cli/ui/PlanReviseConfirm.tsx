@@ -1,9 +1,10 @@
-import { Box, Text } from "ink";
+import { Box, type Color, Text } from "ink";
 import React from "react";
 import { t } from "../../i18n/index.js";
 import type { PlanStep } from "../../tools/plan.js";
 import { SingleSelect } from "./Select.js";
 import { ApprovalCard } from "./cards/ApprovalCard.js";
+import { FG } from "./theme/tokens.js";
 
 export type ReviseChoice = "accept" | "reject";
 
@@ -33,7 +34,7 @@ function computeDiff(oldSteps: PlanStep[], newSteps: PlanStep[]): DiffRow[] {
   return rows;
 }
 
-function riskDots(risk: PlanStep["risk"]): { dots: string; color: string } {
+function riskDots(risk: PlanStep["risk"]): { dots: string; color: Color } {
   switch (risk) {
     case "high":
       return { dots: "●●●", color: "#f87171" };
@@ -73,7 +74,7 @@ function PlanReviseConfirmInner({
       </Box>
       {summary ? (
         <Box marginBottom={1}>
-          <Text dimColor>{t("planReviseConfirm.updatedSummary", { summary })}</Text>
+          <Text color={FG.faint}>{t("planReviseConfirm.updatedSummary", { summary })}</Text>
         </Box>
       ) : null}
       <Box marginBottom={1} flexDirection="column">
@@ -89,10 +90,10 @@ function PlanReviseConfirmInner({
               <Text color={prefixColor} bold>
                 {`${prefix} `}
               </Text>
-              <Text color={risk.color} bold dimColor={dim}>
+              <Text color={dim ? FG.faint : risk.color} bold>
                 {risk.dots}
               </Text>
-              <Text dimColor={dim} strikethrough={strike}>
+              <Text color={dim ? FG.faint : undefined} strikethrough={strike}>
                 {` ${row.step.id} \u00b7 ${row.step.title}`}
               </Text>
             </Box>

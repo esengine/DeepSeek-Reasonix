@@ -200,7 +200,7 @@ export function smartDecodeOutput(buf: Buffer): string {
 
 export interface ResolveExecutableOptions {
   platform?: NodeJS.Platform;
-  env?: { PATH?: string; PATHEXT?: string };
+  env?: Record<string, string | undefined>;
   isFile?: (path: string) => boolean;
   pathDelimiter?: string;
 }

@@ -110,6 +110,18 @@ describe("parseCommandChain", () => {
     );
   });
 
+  it("tells Python script tests to run near the script without making workspace-root cwd mandatory", () => {
+    expect(() => parseCommandChain("cd data && python3 parse_fire_protocol.py")).toThrow(
+      /default.*directory where the script was written/i,
+    );
+    expect(() => parseCommandChain("cd data && python3 parse_fire_protocol.py")).toThrow(
+      /do not assume.*input\/data.*cwd/i,
+    );
+    expect(() => parseCommandChain("cd data && python3 parse_fire_protocol.py")).toThrow(
+      /pass input\/data paths as arguments/i,
+    );
+  });
+
   it("still accepts a normal chain without `cd`", () => {
     const c = parseCommandChain("echo hello && echo world");
     expect(c).not.toBeNull();

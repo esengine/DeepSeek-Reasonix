@@ -2,13 +2,14 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1.0, user-scalable=no" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
     <title>Reasonix</title>
     <meta name="reasonix-token" content="__REASONIX_TOKEN__" />
     <meta name="reasonix-mode" content="__REASONIX_MODE__" />
+    <!-- Production: served by CLI server; Vite dev: transformed by vite.config.ts -->
     <link rel="stylesheet" href="/assets/app.css?token=__REASONIX_TOKEN__" />
-    <link rel="stylesheet" href="/assets/vendor-uplot.css?token=__REASONIX_TOKEN__" />
-    <link rel="stylesheet" href="/assets/vendor-hljs.css?token=__REASONIX_TOKEN__" />
   </head>
   <body>
     <div id="root">

@@ -18,10 +18,11 @@
  * but narrow enough to fit beside other status info.
  */
 
-import { Box, Text } from "ink";
+import { Box, type Color, Text } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
 import { COLOR, GLYPH } from "./theme.js";
+import { FG } from "./theme/tokens.js";
 
 export interface CharBarProps {
   /** 0–100 (clamped). Negative or NaN → 0; >100 → 100. */
@@ -29,9 +30,9 @@ export interface CharBarProps {
   /** Cell count. Default 24. Min 4 enforced so the bar is at least readable. */
   width?: number;
   /** Filled-cell COLOR. Defaults to brand cyan. */
-  color?: string;
+  color?: Color;
   /** Empty-cell COLOR. Defaults to dim slate. */
-  emptyColor?: string;
+  emptyColor?: Color;
   /**
    * Whether to render the percentage label after the bar. Off when the
    * caller wants to put its own meta after (e.g. "12 of 30 done").
@@ -62,10 +63,8 @@ export function CharBar({
   return (
     <Box>
       <Text color={color}>{GLYPH.block.repeat(filled)}</Text>
-      <Text color={emptyColor ?? COLOR.info} dimColor>
-        {GLYPH.shade1.repeat(total - filled)}
-      </Text>
-      {showLabel ? <Text dimColor>{`  ${label ?? `${Math.round(clamped)}%`}`}</Text> : null}
+      <Text color={FG.faint}>{GLYPH.shade1.repeat(total - filled)}</Text>
+      {showLabel ? <Text color={FG.faint}>{`  ${label ?? `${Math.round(clamped)}%`}`}</Text> : null}
     </Box>
   );
 }
@@ -73,7 +72,7 @@ export function CharBar({
 export interface StackedSegment {
   /** Percent of the total width this segment occupies. 0–100. */
   pct: number;
-  color: string;
+  color: Color;
   /** Optional label (used by legend renderer; not rendered in the bar). */
   label?: string;
 }
@@ -82,7 +81,7 @@ export interface StackedCharBarProps {
   segments: readonly StackedSegment[];
   width?: number;
   /** Color of the trailing "free / unused" cells. */
-  emptyColor?: string;
+  emptyColor?: Color;
 }
 
 /**
@@ -110,9 +109,7 @@ export function StackedCharBar({
           {GLYPH.block.repeat(cells[i] ?? 0)}
         </Text>
       ))}
-      <Text color={emptyColor ?? COLOR.info} dimColor>
-        {GLYPH.shade1.repeat(empty)}
-      </Text>
+      <Text color={FG.faint}>{GLYPH.shade1.repeat(empty)}</Text>
     </Box>
   );
 }

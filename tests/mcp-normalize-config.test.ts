@@ -432,3 +432,174 @@ describe("normalizeMcpConfig: extraLegacy parameter", () => {
     expect(result[0]!.name).toBe("fs");
   });
 });
+
+describe("normalizeMcpConfig: Claude .mcp.json compatibility", () => {
+  it("accepts `type` as alias for `transport`", () => {
+    const cfg: ReasonixConfig = {
+      mcpServers: {
+        local: { type: "stdio", command: "node", args: ["server.js"] },
+        events: { type: "sse", url: "https://example.com/sse" },
+      },
+    };
+    const result = normalizeMcpConfig(cfg);
+    const local = findByName(result, "local")!;
+    expect(local.transport).toBe("stdio");
+    const events = findByName(result, "events")!;
+    expect(events.transport).toBe("sse");
+  });
+
+  it('treats `type: "http"` as `streamable-http`', () => {
+    const cfg: ReasonixConfig = {
+      mcpServers: {
+        gh: { type: "http", url: "https://api.githubcopilot.com/mcp/" },
+      },
+    };
+    const result = normalizeMcpConfig(cfg);
+    const gh = findByName(result, "gh")!;
+    expect(gh.transport).toBe("streamable-http");
+  });
+
+  it("`transport` still wins when both transport and type are set", () => {
+    const cfg: ReasonixConfig = {
+      mcpServers: {
+        odd: { transport: "stdio", type: "http", command: "node" },
+      },
+    };
+    const result = normalizeMcpConfig(cfg);
+    expect(result[0]!.transport).toBe("stdio");
+  });
+});
+
+describe("normalizeMcpConfig: requestTimeoutMs (#2023)", () => {
+  it("passes requestTimeoutMs through for stdio mcpServers", () => {
+    const cfg: ReasonixConfig = {
+      mcpServers: {
+        slow: {
+          command: "npx",
+          args: ["-y", "@scope/slow-server"],
+          requestTimeoutMs: 120_000,
+        },
+      },
+    };
+    const result = normalizeMcpConfig(cfg);
+    const spec = findByName(result, "slow")!;
+    expect(spec.requestTimeoutMs).toBe(120_000);
+  });
+
+  it("passes requestTimeoutMs through for SSE mcpServers", () => {
+    const cfg: ReasonixConfig = {
+      mcpServers: {
+        remote: {
+          transport: "sse",
+          url: "https://example.com/sse",
+          requestTimeoutMs: 90_000,
+        },
+      },
+    };
+    const result = normalizeMcpConfig(cfg);
+    const spec = findByName(result, "remote")!;
+    expect(spec.requestTimeoutMs).toBe(90_000);
+  });
+
+  it("passes requestTimeoutMs through for streamable-http mcpServers", () => {
+    const cfg: ReasonixConfig = {
+      mcpServers: {
+        edge: {
+          transport: "streamable-http",
+          url: "https://edge.example.com/mcp",
+          requestTimeoutMs: 180_000,
+        },
+      },
+    };
+    const result = normalizeMcpConfig(cfg);
+    const spec = findByName(result, "edge")!;
+    expect(spec.requestTimeoutMs).toBe(180_000);
+  });
+
+  it("leaves requestTimeoutMs undefined when not set", () => {
+    const cfg: ReasonixConfig = {
+      mcpServers: {
+        normal: {
+          command: "npx",
+          args: ["-y", "@scope/normal-server"],
+        },
+      },
+    };
+    const result = normalizeMcpConfig(cfg);
+    const spec = findByName(result, "normal")!;
+    expect(spec.requestTimeoutMs).toBeUndefined();
+  });
+
+  it("expands ${VAR} and ${env:VAR} in mcpServers headers (#2148)", () => {
+    const orig = process.env.TEST_MCP_TOKEN;
+    process.env.TEST_MCP_TOKEN = "secret-token-123";
+    try {
+      const cfg: ReasonixConfig = {
+        mcpServers: {
+          remote: {
+            url: "https://api.example.com/mcp",
+            transport: "sse",
+            headers: {
+              Authorization: "Bearer ${TEST_MCP_TOKEN}",
+              "X-Custom": "${env:TEST_MCP_TOKEN}",
+              Static: "no-expand",
+              Missing: "${NONEXISTENT_VAR_FOR_TEST}",
+            },
+          },
+        },
+      };
+      const result = normalizeMcpConfig(cfg);
+      const spec = findByName(result, "remote")!;
+      expect(spec.transport).toBe("sse");
+      if (spec.transport !== "sse") throw new Error("unreachable");
+      expect(spec.headers?.Authorization).toBe("Bearer secret-token-123");
+      expect(spec.headers?.["X-Custom"]).toBe("secret-token-123");
+      expect(spec.headers?.Static).toBe("no-expand");
+      expect(spec.headers?.Missing).toBe("${NONEXISTENT_VAR_FOR_TEST}");
+    } finally {
+      if (orig === undefined) {
+        // biome-ignore lint/performance/noDelete: restore env
+        delete process.env.TEST_MCP_TOKEN;
+      } else {
+        process.env.TEST_MCP_TOKEN = orig;
+      }
+    }
+  });
+
+  it("supports ${VAR:-default} and ${env:VAR:-default} fallback syntax (#2148)", () => {
+    // biome-ignore lint/performance/noDelete: ensure var is unset for test
+    delete process.env.MCP_HEADER_TEST_UNSET_VAR;
+    const orig = process.env.MCP_HEADER_TEST_SET_VAR;
+    process.env.MCP_HEADER_TEST_SET_VAR = "actual-value";
+    try {
+      const cfg: ReasonixConfig = {
+        mcpServers: {
+          remote: {
+            url: "https://api.example.com/mcp",
+            transport: "sse",
+            headers: {
+              A: "${MCP_HEADER_TEST_SET_VAR:-fallback}",
+              B: "${MCP_HEADER_TEST_UNSET_VAR:-dev-token}",
+              C: "${env:MCP_HEADER_TEST_SET_VAR:-fallback}",
+              D: "${env:MCP_HEADER_TEST_UNSET_VAR:-dev-token}",
+            },
+          },
+        },
+      };
+      const result = normalizeMcpConfig(cfg);
+      const spec = findByName(result, "remote")!;
+      if (spec.transport !== "sse") throw new Error("unreachable");
+      expect(spec.headers?.A).toBe("actual-value");
+      expect(spec.headers?.B).toBe("dev-token");
+      expect(spec.headers?.C).toBe("actual-value");
+      expect(spec.headers?.D).toBe("dev-token");
+    } finally {
+      if (orig === undefined) {
+        // biome-ignore lint/performance/noDelete: restore env
+        delete process.env.MCP_HEADER_TEST_SET_VAR;
+      } else {
+        process.env.MCP_HEADER_TEST_SET_VAR = orig;
+      }
+    }
+  });
+});

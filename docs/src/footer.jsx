@@ -2,6 +2,13 @@
 
 function Footer() {
   const { lang } = useLang();
+  const { version: rxVersion, status: rxStatus } = useVersion();
+  const rxLabel =
+    rxStatus === "ok" && rxVersion
+      ? `v${rxVersion} · stable`
+      : rxStatus === "failed"
+        ? t({ zh: "版本获取失败", en: "version unavailable" }, lang)
+        : t({ zh: "正在获取版本…", en: "fetching version…" }, lang);
   return (
     <footer className="footer">
       <div className="footer-inner">
@@ -58,7 +65,7 @@ function Footer() {
           zh: 'Independent open-source project · 与 DeepSeek 官方无关',
           en: 'Independent open-source project · not affiliated with DeepSeek',
         }, lang)}</span>
-        <span style={{marginLeft:18}}>v{window.REASONIX_VERSION} · stable</span>
+        <span style={{marginLeft:18}}>{rxLabel}</span>
       </div>
     </footer>
   );

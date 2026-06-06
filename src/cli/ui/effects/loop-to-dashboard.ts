@@ -16,22 +16,33 @@ export function loopEventToDashboard(
       };
     case "tool_start":
       if (!ev.toolName) return null;
-      return { kind: "tool_start", id, toolName: ev.toolName, args: ev.toolArgs };
+      // Use the loop's stable per-call id so the matching `tool` event
+      // below carries the same id — the dashboard reducer keys segments
+      // by it. Falling back to the role+timestamp id leaves tool cards
+      // stuck in "running" because the result never matches the intent.
+      return {
+        kind: "tool_start",
+        id: ev.callId ?? id,
+        toolName: ev.toolName,
+        args: ev.toolArgs,
+      };
     case "tool":
       if (!ev.toolName) return null;
       return {
         kind: "tool",
-        id,
+        id: ev.callId ?? id,
         toolName: ev.toolName,
         content: ev.content,
         args: ev.toolArgs,
       };
     case "warning":
-      return { kind: "warning", id, text: ev.content };
+      return { kind: "warning", id, text: ev.content, severity: ev.severity };
     case "error":
       return { kind: "error", id, text: ev.content };
     case "status":
       return { kind: "status", text: ev.content };
+    case "steer":
+      return { kind: "user", id, text: ev.content };
     default:
       return null;
   }

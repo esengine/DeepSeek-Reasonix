@@ -1,17 +1,32 @@
+import { useEffect, useRef, useState } from "react";
 import { I } from "../icons";
 import { t } from "../i18n";
 import type { Balance, Settings, UsageStats } from "../App";
 import type { JobInfo } from "../protocol";
-import { THEME, type Theme } from "../theme";
+import { THEME, THEME_STYLES, type Theme, type ThemeStyle, themeForStyle } from "../theme";
+import { localizeShortcutText } from "./shortcut";
 
-function formatMoney(amount: number, currency: "CNY" | "USD"): string {
+const USD_TO_CNY = 7.2;
+
+function formatMoney(amountUsd: number, currency: "CNY" | "USD"): string {
   const symbol = currency === "CNY" ? "¥" : "$";
+  const amount = currency === "CNY" ? amountUsd * USD_TO_CNY : amountUsd;
   return `${symbol} ${amount.toFixed(4)}`;
 }
 
 function tokenLabel(n: number): string {
   if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
   return `${n}`;
+}
+
+/** Format a 0–100 percentage to 2 decimal places.
+ *  100.00 is shown only when the value is exactly 100; values that would round
+ *  to 100.00 are capped at 99.99. */
+function formatPct(value: number): string {
+  if (value === 100) return "100.00";
+  const rounded = Math.round(value * 100) / 100;
+  if (rounded >= 100) return "99.99";
+  return rounded.toFixed(2);
 }
 
 export function StatusBar({
@@ -22,10 +37,11 @@ export function StatusBar({
   ready,
   currency,
   theme,
+  themeStyle,
   jobs,
   jobsOpen,
   onToggleJobs,
-  onToggleTheme,
+  onSetThemeStyle,
   onToggleCurrency,
   onOpenSettings,
   onOpenWorkdir,
@@ -37,22 +53,47 @@ export function StatusBar({
   ready: boolean;
   currency: "CNY" | "USD";
   theme: Theme;
+  themeStyle: ThemeStyle;
   jobs: JobInfo[];
   jobsOpen: boolean;
   onToggleJobs: () => void;
-  onToggleTheme: () => void;
+  onSetThemeStyle: (style: ThemeStyle) => void;
   onToggleCurrency: () => void;
   onOpenSettings: () => void;
   onOpenWorkdir?: (anchor: { bottom: number; left: number }) => void;
 }) {
-  const totalTokens = usage.cacheHitTokens + usage.cacheMissTokens;
-  const cacheHitPct = totalTokens > 0 ? Math.round((usage.cacheHitTokens / totalTokens) * 100) : 0;
+  const sessionPromptTokens =
+    usage.totalPromptTokens || usage.cacheHitTokens + usage.cacheMissTokens;
+  const liveContextTokens = usage.reservedTokens + usage.liveLogTokens;
+  const totalTokens = Math.max(sessionPromptTokens, liveContextTokens);
+  const cacheDenom = usage.cacheHitTokens + usage.cacheMissTokens;
+  const cacheHitRaw = cacheDenom > 0 ? (usage.cacheHitTokens / cacheDenom) * 100 : 0;
+  const cacheHitPctDisplay = formatPct(cacheHitRaw);
+  const cacheHitDetail =
+    cacheDenom > 0
+      ? `${usage.cacheHitTokens.toLocaleString()} / ${cacheDenom.toLocaleString()} tokens (${cacheHitPctDisplay}%)`
+      : "";
   const runningJobs = jobs.filter((j) => j.running).length;
   const spent = formatMoney(usage.totalCostUsd, currency);
   const balanceLabel = balance
     ? `${balance.currency === "USD" ? "$" : "¥"} ${balance.total.toFixed(2)}`
     : "—";
   const connState = !ready ? "off" : busy ? "running" : "online";
+  const [themeOpen, setThemeOpen] = useState(false);
+  const themePopRef = useRef<HTMLDivElement | null>(null);
+  const themeButtonRef = useRef<HTMLSpanElement | null>(null);
+
+  useEffect(() => {
+    if (!themeOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (themePopRef.current?.contains(target) || themeButtonRef.current?.contains(target)) return;
+      setThemeOpen(false);
+    };
+    window.addEventListener("pointerdown", onPointerDown);
+    return () => window.removeEventListener("pointerdown", onPointerDown);
+  }, [themeOpen]);
+
   return (
     <footer className="statusbar">
       <span className="seg" title={`API · ${settings?.baseUrl ?? "api.deepseek.com"}`}>
@@ -63,19 +104,19 @@ export function StatusBar({
         <span>{settings?.baseUrl?.replace(/^https?:\/\//, "") ?? "api.deepseek.com"}</span>
         <span className="v">{!ready ? t("statusbar.offline") : busy ? t("statusbar.busy") : t("statusbar.online")}</span>
       </span>
-      <span className="seg" title="cache hit">
+      <span className="seg" title={cacheHitDetail || t("statusbar.cacheHit")}>
         <I.zap size={11} style={{ color: "var(--accent)" }} />
-        <span>cache</span>
-        <span className="v acc">{cacheHitPct}%</span>
+        <span>{t("statusbar.cache")}</span>
+        <span className="v acc">{cacheHitPctDisplay}%</span>
       </span>
       <span className="seg">
         <I.cpu size={11} />
-        <span>tokens</span>
+        <span>{t("statusbar.tokens")}</span>
         <span className="v">{tokenLabel(totalTokens)}</span>
       </span>
       <span className="seg">
         <I.coin size={11} />
-        <span>本次</span>
+        <span>{t("statusbar.thisTurn")}</span>
         <span className="v ok">{spent}</span>
       </span>
 
@@ -84,7 +125,7 @@ export function StatusBar({
       <span
         className={`seg jobs ${jobsOpen ? "active" : ""}`}
         onClick={onToggleJobs}
-        title={t("statusbar.jobsTip")}
+        title={localizeShortcutText(t("statusbar.jobsTip"))}
       >
         <I.cpu size={11} />
         <span>{t("statusbar.jobs")}</span>
@@ -94,7 +135,7 @@ export function StatusBar({
       {settings?.workspaceDir ? (
         <span
           className="seg"
-          title={`切换工作区 · ${settings.workspaceDir}`}
+          title={t("statusbar.switchWorkspace", { workspace: settings.workspaceDir })}
           style={onOpenWorkdir ? { cursor: "pointer" } : undefined}
           onClick={(e) => {
             if (!onOpenWorkdir) return;
@@ -108,21 +149,79 @@ export function StatusBar({
       ) : null}
       <span
         className="seg"
-        title={`model · preset ${settings?.preset ?? "auto"}`}
+        title={`model · effort ${settings?.reasoningEffort ?? "high"}`}
         onClick={onOpenSettings}
       >
         <I.brain size={11} style={{ color: "var(--violet)" }} />
         <span className="v vio">{settings?.model ?? "—"}</span>
+        <span className="v">{settings?.reasoningEffort ?? "high"}</span>
       </span>
-      <span className="seg" title="切换货币 (CNY / USD)" onClick={onToggleCurrency}>
+      <span
+        className="seg"
+        title={t("statusbar.switchCurrency")}
+        onClick={onToggleCurrency}
+      >
         <I.coin size={11} />
-        <span>余额</span>
-        <span className="v ok">{balanceLabel}</span>
+        <span>{t("statusbar.balance")}</span>
+        <span className="v ok">
+          {balance && balance.infos.length > 0
+            ? balance.infos
+                .map((info) => `${info.currency === "USD" ? "$" : "¥"} ${info.total.toFixed(2)}`)
+                .join(" / ")
+            : balanceLabel}
+        </span>
       </span>
-      <span className="seg" title="切换主题" onClick={onToggleTheme}>
+      <span
+        ref={themeButtonRef}
+        className={`seg theme-trigger ${themeOpen ? "active" : ""}`}
+        title={t("statusbar.switchTheme")}
+        onClick={() => setThemeOpen((open) => !open)}
+      >
         {theme === THEME.DARK ? <I.moon size={11} /> : <I.sun size={11} />}
-        <span className="v">{theme === THEME.DARK ? "深色" : "浅色"}</span>
+        <span className="v">
+          {t(`statusbar.themeStyle${themeStyle[0]!.toUpperCase()}${themeStyle.slice(1)}` as any)}
+        </span>
       </span>
+      {themeOpen ? (
+        <div ref={themePopRef} className="theme-pop" role="menu" aria-label={t("settings.themeStyle")}>
+          <div className="theme-pop-head">
+            <div className="tt">{t("settings.themeStyle")}</div>
+            <div className="ss">{t("statusbar.switchTheme")}</div>
+          </div>
+          <div className="theme-pop-list">
+            {THEME_STYLES.map((style) => (
+              <button
+                key={style}
+                type="button"
+                className="theme-pop-item"
+                data-on={themeStyle === style}
+                data-style={style}
+                onClick={() => {
+                  onSetThemeStyle(style);
+                  setThemeOpen(false);
+                }}
+              >
+                <span className="style-swatches" aria-hidden="true">
+                  <span />
+                  <span />
+                  <span />
+                </span>
+                <span className="txt">
+                  <span className="nm">
+                    {t(`statusbar.themeStyle${style[0]!.toUpperCase()}${style.slice(1)}` as any)}
+                  </span>
+                  <span className="md">
+                    {themeForStyle(style) === THEME.DARK
+                      ? t("statusbar.themeDark")
+                      : t("statusbar.themeLight")}
+                  </span>
+                </span>
+                {themeStyle === style ? <I.check size={13} /> : null}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
     </footer>
   );
 }

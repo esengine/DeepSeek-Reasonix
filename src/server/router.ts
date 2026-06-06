@@ -1,11 +1,12 @@
 import { handleAbort } from "./api/abort.js";
+import { handleBrowse } from "./api/browse.js";
 import { handleCheckpointCreate } from "./api/checkpoint-create.js";
 import { handleCheckpointDelete } from "./api/checkpoint-delete.js";
 import { handleCheckpointDiffs } from "./api/checkpoint-diffs.js";
 import { handleCheckpointRestore } from "./api/checkpoint-restore.js";
 import { handleCheckpoints } from "./api/checkpoints.js";
 import { handleEditMode } from "./api/edit-mode.js";
-import { handleFileRead } from "./api/file-read.js";
+import { handleFileRead, handleFileReadPreview } from "./api/file-read.js";
 import { handleFiles } from "./api/files.js";
 import { handleGitDiffs } from "./api/git-diffs.js";
 import { handleHealth } from "./api/health.js";
@@ -79,7 +80,7 @@ export async function handleApi(
       case "hooks":
         return await handleHooks(method, rest, body, ctx);
       case "memory":
-        return await handleMemory(method, rest, body, ctx);
+        return await handleMemory(method, rest, body, ctx, query);
       case "skills":
         return await handleSkills(method, rest, body, ctx);
       case "mcp":
@@ -91,7 +92,9 @@ export async function handleApi(
       case "slash":
         return await handleSlash(method, rest, body, ctx);
       case "files":
-        return await handleFiles(method, rest, body, ctx);
+        return await handleFiles(method, rest, body, ctx, query);
+      case "browse":
+        return await handleBrowse(method, rest, body, ctx, query);
       case "project-tree":
         return await handleProjectTree(method, rest, body, ctx);
       case "git-diffs":
@@ -110,6 +113,8 @@ export async function handleApi(
         return await handleReviewDiffs(method, rest, body, ctx);
       case "file":
         return await handleFileRead(method, rest, body, ctx);
+      case "file-read":
+        return await handleFileReadPreview(method, rest, body, ctx, query);
       case "loop":
         return await handleLoop(method, rest, body, ctx);
       case "models":

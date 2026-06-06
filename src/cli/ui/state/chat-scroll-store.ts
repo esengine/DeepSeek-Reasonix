@@ -1,15 +1,15 @@
-/** Chat-scroll state in its own store so wheel/arrow ticks don't dirty App.tsx. */
+/** Chat-history scroll state in its own store so wheel ticks do not dirty App.tsx. */
 
 export interface ChatScrollState {
   /** Rows of content above the visible viewport. */
   scrollRows: number;
-  /** True while following the bottom — auto-advances on new content. */
+  /** True while following the bottom; new content keeps the viewport pinned. */
   pinned: boolean;
-  /** Total scrollable rows; CardStream reports this once Yoga has measured. */
+  /** Total scrollable rows reported by CardStream after measurement. */
   maxScroll: number;
-  /** Bumped on every applied scroll delta — consumers can flash an indicator. */
+  /** Bumped on every applied scroll delta so the indicator can flash. */
   scrollVersion: number;
-  /** Per-card row height, populated as cards mount and re-measured on streaming changes. */
+  /** Per-card row height, populated as cards mount and re-measure. */
   cardHeights: ReadonlyMap<string, number>;
 }
 
@@ -22,16 +22,17 @@ export interface ChatScrollStore {
   scrollDown(): void;
   scrollPageUp(): void;
   scrollPageDown(): void;
+  scrollWheelUp(): void;
+  scrollWheelDown(): void;
   jumpToBottom(): void;
   setMaxScroll(rows: number): void;
-  /** Reports a card's measured height. No-op if value matches the cache. */
   setCardHeight(id: string, rows: number): void;
-  /** Drops heights for cards no longer in the visible list. Called by CardStream when cards change. */
   pruneCardHeights(liveIds: ReadonlySet<string>): void;
 }
 
 export const SCROLL_ARROW_ROWS = 3;
 export const SCROLL_PAGE_ROWS = 5;
+export const SCROLL_WHEEL_ROWS = 1;
 const COALESCE_MS = 16;
 
 const EMPTY_HEIGHTS: ReadonlyMap<string, number> = new Map();
@@ -44,19 +45,20 @@ const initial: ChatScrollState = {
   cardHeights: EMPTY_HEIGHTS,
 };
 
-export function createChatScrollStore(): ChatScrollStore {
+export interface CreateChatScrollStoreOptions {
+  /** Per-SGR-wheel-report step. Defaults to 1; clamped to [1, 10]. */
+  wheelRows?: number;
+}
+
+export function createChatScrollStore(opts: CreateChatScrollStoreOptions = {}): ChatScrollStore {
+  const wheelRows =
+    typeof opts.wheelRows === "number" && Number.isInteger(opts.wheelRows) && opts.wheelRows >= 1
+      ? Math.min(opts.wheelRows, 10)
+      : SCROLL_WHEEL_ROWS;
   let state = initial;
   const listeners = new Set<ScrollListener>();
   let pendingDelta = 0;
   let flushTimer: NodeJS.Timeout | null = null;
-  // Trailing-edge coalesce target for pinned-mode shrinks (issue #653).
-  // While a burst of card-collapse re-measurements arrives, we hold the latest
-  // target here and apply it once on a microtask flush, so subscribers see one
-  // settled transition instead of N oscillating snaps.
-  // Grows still apply immediately — streaming content should auto-scroll without
-  // latency. Growth oscillation is prevented upstream by the monotonic height
-  // lock in CardStream.MeasuredCard: card heights only increase during streaming,
-  // so maxScroll growth is naturally monotonic.
   let pendingMaxShrink: number | null = null;
   let shrinkTimer: NodeJS.Timeout | null = null;
 
@@ -87,7 +89,6 @@ export function createChatScrollStore(): ChatScrollStore {
     });
   }
 
-  /** Leading-edge: first tick flushes immediately, rest coalesce into one trailing flush. */
   function schedule(delta: number): void {
     if (flushTimer === null) {
       pendingDelta = delta;
@@ -127,32 +128,26 @@ export function createChatScrollStore(): ChatScrollStore {
     scrollDown: () => schedule(SCROLL_ARROW_ROWS),
     scrollPageUp: () => schedule(-SCROLL_PAGE_ROWS),
     scrollPageDown: () => schedule(SCROLL_PAGE_ROWS),
+    scrollWheelUp: () => schedule(-wheelRows),
+    scrollWheelDown: () => schedule(wheelRows),
     jumpToBottom() {
       pendingDelta = 0;
       if (flushTimer !== null) {
         clearTimeout(flushTimer);
         flushTimer = null;
       }
-      // Drop any deferred shrink so an explicit jump isn't undone by a stale target.
       pendingMaxShrink = null;
       if (shrinkTimer !== null) {
         clearTimeout(shrinkTimer);
         shrinkTimer = null;
       }
-      set({ pinned: true });
+      set({ pinned: true, scrollRows: state.maxScroll });
     },
     setMaxScroll(rows: number) {
-      const m = rows < 0 ? 0 : rows;
-      // Coalesce shrinks while pinned (issue #653): a burst of card-teardown
-      // re-measurements during an Esc-abort would otherwise snap scrollRows N
-      // times, producing a visible flicker. Grows still apply immediately so
-      // normal streaming output keeps the viewport pinned without latency.
-      // Growth oscillation is prevented upstream by the monotonic height lock
-      // in CardStream.MeasuredCard — card heights only increase during streaming,
-      // so maxScroll growth is naturally monotonic without coalescing.
+      const maxScroll = rows < 0 ? 0 : rows;
       const currentMax = pendingMaxShrink ?? state.maxScroll;
-      if (state.pinned && m < currentMax) {
-        pendingMaxShrink = m;
+      if (state.pinned && maxScroll < currentMax) {
+        pendingMaxShrink = maxScroll;
         if (shrinkTimer === null) {
           shrinkTimer = setTimeout(() => {
             shrinkTimer = null;
@@ -161,12 +156,9 @@ export function createChatScrollStore(): ChatScrollStore {
         }
         return;
       }
-      // Non-shrink path: flush any deferred shrink first so its trailing state
-      // doesn't clobber the value we're about to set.
       if (pendingMaxShrink !== null) flushShrink();
-      // Pinned-mode invariant: scrollRows tracks maxScroll exactly.
-      const nextScrollRows = state.pinned ? m : Math.min(state.scrollRows, m);
-      set({ maxScroll: m, scrollRows: nextScrollRows });
+      const nextScrollRows = state.pinned ? maxScroll : Math.min(state.scrollRows, maxScroll);
+      set({ maxScroll, scrollRows: nextScrollRows });
     },
     setCardHeight(id: string, rows: number) {
       if (state.cardHeights.get(id) === rows) return;
@@ -175,16 +167,16 @@ export function createChatScrollStore(): ChatScrollStore {
       set({ cardHeights: next });
     },
     pruneCardHeights(liveIds: ReadonlySet<string>) {
-      let drop = 0;
-      for (const id of state.cardHeights.keys()) {
-        if (!liveIds.has(id)) drop++;
-      }
-      if (drop === 0) return;
+      let changed = false;
       const next = new Map<string, number>();
-      for (const [id, h] of state.cardHeights) {
-        if (liveIds.has(id)) next.set(id, h);
+      for (const [id, rows] of state.cardHeights) {
+        if (liveIds.has(id)) {
+          next.set(id, rows);
+        } else {
+          changed = true;
+        }
       }
-      set({ cardHeights: next });
+      if (changed) set({ cardHeights: next });
     },
   };
 }

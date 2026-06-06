@@ -11,6 +11,8 @@ const baseActivity: SubagentActivity = {
   elapsedMs: 0,
   phase: "exploring",
   lastInner: null,
+  outputChars: 0,
+  reasoningChars: 0,
 };
 
 function inner(

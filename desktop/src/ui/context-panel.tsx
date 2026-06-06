@@ -1,10 +1,15 @@
-import { useMemo, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { openPath } from "@tauri-apps/plugin-opener";
+import { useEffect, useMemo, useState } from "react";
 import type { SessionFile, Settings, UsageStats } from "../App";
+import { Markdown } from "../Markdown";
 import { t, useLang } from "../i18n";
 import { I } from "../icons";
-import type { McpSpecInfo, MemoryEntryInfo } from "../protocol";
+import type { McpSpecInfo, MemoryDetail, MemoryEntryInfo } from "../protocol";
+import { PanelErrorBoundary } from "./error-boundary";
+import { McpServerCard } from "./mcp-server-card";
 
-type Tab = "files" | "tools" | "memory" | "rules";
+export type ContextPanelTab = "files" | "tools" | "memory" | "rules";
 
 const CONTEXT_MAX_TOKENS = 1_000_000;
 
@@ -15,6 +20,13 @@ export function ContextPanel({
   mcpBridged,
   sessionFiles,
   memory,
+  memoryDetail,
+  activeTab,
+  activeTabNonce,
+  onReadMemory,
+  onOpenMcpSettings,
+  onEditMcpSpec,
+  onRetryMcpSpec,
 }: {
   settings: Settings | null;
   usage: UsageStats;
@@ -22,15 +34,26 @@ export function ContextPanel({
   mcpBridged: boolean;
   sessionFiles: SessionFile[];
   memory: MemoryEntryInfo[];
+  memoryDetail: MemoryDetail | null;
+  activeTab?: ContextPanelTab;
+  activeTabNonce?: number;
+  onReadMemory: (path: string) => void;
+  onOpenMcpSettings?: () => void;
+  onEditMcpSpec?: (spec: McpSpecInfo) => void;
+  onRetryMcpSpec?: (raw: string) => void;
 }) {
   useLang();
-  const [tab, setTab] = useState<Tab>("files");
+  const [tab, setTab] = useState<ContextPanelTab>("files");
+  useEffect(() => {
+    if (activeTab) setTab(activeTab);
+  }, [activeTab, activeTabNonce]);
   const reserved = usage.reservedTokens;
-  // After a warm cache turn the API counts the reserved prefix inside cacheHit;
-  // subtract to keep the bar segments visually disjoint. Cold cache shows the
-  // reserved portion in cacheMiss instead, so do the same for `used`.
-  const cached = Math.max(0, usage.cacheHitTokens - reserved);
-  const used = Math.max(0, usage.cacheMissTokens - Math.max(0, reserved - usage.cacheHitTokens));
+  const lastHit = usage.lastCallCacheHit ?? 0;
+  const lastMiss = usage.lastCallCacheMiss ?? 0;
+  const observedLog = Math.max(0, lastHit + lastMiss - reserved);
+  const logTokens = Math.max(usage.liveLogTokens, observedLog);
+  const cached = Math.min(logTokens, Math.max(0, lastHit - reserved));
+  const used = Math.max(0, logTokens - cached);
   const reservedPct = Math.min(100, (reserved / CONTEXT_MAX_TOKENS) * 100);
   const usedPct = Math.min(100, (used / CONTEXT_MAX_TOKENS) * 100);
   const cachedPct = Math.min(100, (cached / CONTEXT_MAX_TOKENS) * 100);
@@ -39,23 +62,23 @@ export function ContextPanel({
     <aside className="ctx">
       <div className="ctx-tabs">
         <div className="ctx-tab" data-active={tab === "files"} onClick={() => setTab("files")}>
-          文件
+          {t("contextPanel.filesTab")}
         </div>
         <div className="ctx-tab" data-active={tab === "tools"} onClick={() => setTab("tools")}>
-          工具
+          {t("contextPanel.toolsTab")}
         </div>
         <div className="ctx-tab" data-active={tab === "memory"} onClick={() => setTab("memory")}>
-          记忆
+          {t("contextPanel.memoryTab")}
         </div>
         <div className="ctx-tab" data-active={tab === "rules"} onClick={() => setTab("rules")}>
-          规则
+          {t("contextPanel.rulesTab")}
         </div>
       </div>
 
       <div className="ctx-body">
-        <div className="ctx-block">
+        <div className="ctx-block ctx-body-tokens">
           <div className="h">
-            <span>上下文 · tokens</span>
+            <span>{t("contextPanel.contextTokens")}</span>
             <span className="right">
               {(reserved + used + cached).toLocaleString()} /{" "}
               {CONTEXT_MAX_TOKENS.toLocaleString()}
@@ -73,22 +96,36 @@ export function ContextPanel({
             </span>
             <span className="l">
               <span className="sw c" />
-              缓存 <span className="v">{cached.toLocaleString()}</span>
+              {t("contextPanel.cacheKey")} <span className="v">{cached.toLocaleString()}</span>
             </span>
             <span className="l">
               <span className="sw u" />
               {t("contextPanel.usedKey")} <span className="v">{used.toLocaleString()}</span>
             </span>
             <span className="l">
-              余 <span className="v">{free.toLocaleString()}</span>
+              {t("contextPanel.freeKey")} <span className="v">{free.toLocaleString()}</span>
             </span>
           </div>
         </div>
 
-        {tab === "files" && <CtxFiles files={sessionFiles} />}
-        {tab === "tools" && <CtxTools specs={mcpSpecs} bridged={mcpBridged} />}
-        {tab === "memory" && <CtxMemory entries={memory} />}
-        {tab === "rules" && <CtxRules settings={settings} />}
+        <div className="ctx-body-tab">
+          <PanelErrorBoundary key={tab} label={tab}>
+            {tab === "files" && <CtxFiles files={sessionFiles} settings={settings} />}
+            {tab === "tools" && (
+              <CtxTools
+                specs={mcpSpecs}
+                bridged={mcpBridged}
+                onOpenSettings={onOpenMcpSettings}
+                onEdit={onEditMcpSpec}
+                onRetry={onRetryMcpSpec}
+              />
+            )}
+            {tab === "memory" && (
+              <CtxMemory entries={memory} detail={memoryDetail} onRead={onReadMemory} />
+            )}
+            {tab === "rules" && <CtxRules settings={settings} />}
+          </PanelErrorBoundary>
+        </div>
       </div>
     </aside>
   );
@@ -96,7 +133,25 @@ export function ContextPanel({
 
 type TreeNode =
   | { kind: "dir"; depth: number; name: string; key: string }
-  | { kind: "file"; depth: number; name: string; key: string; status: "c" | "m" };
+  | { kind: "file"; depth: number; name: string; path: string; key: string; status: "c" | "m" };
+
+async function openContextFile(path: string, settings: Settings | null): Promise<void> {
+  const workspaceDir = settings?.workspaceDir;
+  const isWindows = workspaceDir?.includes("\\") ?? false;
+  const sep = isWindows ? "\\" : "/";
+  const abs =
+    workspaceDir && !/^[a-zA-Z]:[\\/]/.test(path) && !path.startsWith("/")
+      ? `${workspaceDir.replace(/[\\/]$/, "")}${sep}${path.replace(/^[\\/]+/, "").replace(/\//g, sep)}`
+      : isWindows
+        ? path.replace(/\//g, "\\")
+        : path;
+  const editor = settings?.editor?.trim();
+  if (editor) {
+    await invoke("open_in_editor", { command: editor, path: abs, line: null });
+    return;
+  }
+  await openPath(abs);
+}
 
 function buildSessionTree(files: SessionFile[]): TreeNode[] {
   const sorted = [...files].sort((a, b) =>
@@ -105,7 +160,8 @@ function buildSessionTree(files: SessionFile[]): TreeNode[] {
   const out: TreeNode[] = [];
   const seenDirs = new Set<string>();
   for (const f of sorted) {
-    const parts = f.path.replace(/\\/g, "/").split("/").filter(Boolean);
+    const displayPath = f.path.replace(/\\/g, "/");
+    const parts = displayPath.split("/").filter(Boolean);
     if (parts.length === 0) continue;
     let prefix = "";
     for (let i = 0; i < parts.length - 1; i++) {
@@ -121,6 +177,7 @@ function buildSessionTree(files: SessionFile[]): TreeNode[] {
       kind: "file",
       depth: parts.length - 1,
       name: leaf,
+      path: displayPath,
       key: `f:${f.path}`,
       status: f.status,
     });
@@ -128,13 +185,15 @@ function buildSessionTree(files: SessionFile[]): TreeNode[] {
   return out;
 }
 
-function CtxFiles({ files }: { files: SessionFile[] }) {
+function CtxFiles({ files, settings }: { files: SessionFile[]; settings: Settings | null }) {
   const tree = useMemo(() => buildSessionTree(files), [files]);
   return (
     <div className="ctx-block">
       <div className="h">
-        <span>上下文中的文件</span>
-        <span className="right">{files.length === 0 ? "—" : `${files.length} files`}</span>
+        <span>{t("contextPanel.filesTitle")}</span>
+        <span className="right">
+          {files.length === 0 ? "—" : t("contextPanel.filesCount", { count: files.length })}
+        </span>
       </div>
       <div className="tree">
         {files.length === 0 ? (
@@ -142,7 +201,13 @@ function CtxFiles({ files }: { files: SessionFile[] }) {
         ) : (
           tree.map((n) =>
             n.kind === "dir" ? (
-              <div className="node" key={n.key} data-d={n.depth} data-kind="dir">
+              <div
+                className="node"
+                key={n.key}
+                data-d={n.depth}
+                data-kind="dir"
+                style={{ paddingLeft: 4 + n.depth * 14 }}
+              >
                 <span className="ico">
                   <I.folder size={12} />
                 </span>
@@ -154,17 +219,39 @@ function CtxFiles({ files }: { files: SessionFile[] }) {
                 key={n.key}
                 data-d={n.depth}
                 data-kind="file"
-                title={n.name}
+                title={n.path}
+                style={{ paddingLeft: 4 + n.depth * 14 }}
               >
                 <span className="ico">
                   <I.file size={12} />
                 </span>
-                <span className="nm">{n.name}</span>
+                <span className="node-text">
+                  <span className="nm">{n.name}</span>
+                  <span className="full-path">{n.path}</span>
+                </span>
                 <span
                   className="dot"
                   data-s={n.status}
-                  title={n.status === "m" ? "modified" : "in context"}
+                  title={n.status === "m" ? t("contextPanel.fileModified") : t("contextPanel.fileInContext")}
                 />
+                <button
+                  type="button"
+                  className="tree-action"
+                  aria-label={t("contextPanel.openFile", { path: n.path })}
+                  title={t("contextPanel.openFile", { path: n.path })}
+                  onClick={() => void openContextFile(n.path, settings)}
+                >
+                  <I.file size={12} />
+                </button>
+                <button
+                  type="button"
+                  className="tree-action"
+                  aria-label={t("contextPanel.copyPath", { path: n.path })}
+                  title={t("contextPanel.copyPath", { path: n.path })}
+                  onClick={() => void navigator.clipboard?.writeText(n.path)}
+                >
+                  <I.copy size={12} />
+                </button>
               </div>
             ),
           )
@@ -174,83 +261,151 @@ function CtxFiles({ files }: { files: SessionFile[] }) {
   );
 }
 
-function CtxTools({ specs, bridged }: { specs: McpSpecInfo[]; bridged: boolean }) {
+type McpFilter = "all" | "ready" | "failed";
+
+function CtxTools({
+  specs,
+  bridged,
+  onOpenSettings,
+  onEdit,
+  onRetry,
+}: {
+  specs: McpSpecInfo[];
+  bridged: boolean;
+  onOpenSettings?: () => void;
+  onEdit?: (spec: McpSpecInfo) => void;
+  onRetry?: (raw: string) => void;
+}) {
+  const [filter, setFilter] = useState<McpFilter>("all");
   const readyCount = specs.filter((s) => s.status === "connected").length;
+  const failed = specs.filter((s) => s.status === "failed");
+  const failedCount = failed.length;
+  const toolCount = specs.reduce((sum, s) => sum + (s.toolCount ?? s.tools?.length ?? 0), 0);
+  const filtered =
+    filter === "ready"
+      ? specs.filter((s) => s.status === "connected")
+      : filter === "failed"
+        ? failed
+        : [...failed, ...specs.filter((s) => s.status !== "failed")];
+  const retryAll = () => {
+    if (!onRetry) return;
+    for (const spec of failed) onRetry(spec.raw);
+  };
   return (
     <div className="ctx-block">
       <div className="h">
-        <span>MCP 服务器</span>
+        <span>{t("contextPanel.mcpTitle")}</span>
         <span className="right">
           {specs.length === 0
             ? "—"
             : bridged
-              ? `${specs.length} ready`
-              : `${readyCount}/${specs.length} ready`}
+              ? t("contextPanel.mcpReadyAll", { count: specs.length })
+              : t("contextPanel.mcpReadySome", { ready: readyCount, count: specs.length })}
         </span>
       </div>
       {specs.length === 0 ? (
-        <div className="ctx-empty">未配置 MCP 服务器</div>
+        <div className="ctx-empty">{t("contextPanel.mcpEmpty")}</div>
       ) : (
-        specs.map((s) => {
-          const dot =
-            s.status === "connected"
-              ? "ok"
-              : s.status === "failed" || s.parseError
-                ? "off"
-                : "pending";
-          const suffix = s.statusReason
-            ? ` · ${s.statusReason}`
-            : s.status === "connected"
-              ? typeof s.toolCount === "number"
-                ? ` · ${s.toolCount} tools`
-                : " · ready"
-              : s.status === "handshake"
-                ? " · connecting"
-                : s.status === "disabled"
-                  ? " · disabled"
-                  : s.status === "failed"
-                    ? " · failed"
-                    : " · configured";
-          return (
-            <div className="mcp-row" key={s.raw}>
-              <span className="ico">
-                <I.wrench size={12} />
-              </span>
-              <div className="body">
-                <div className="n">{s.name ?? s.summary}</div>
-                <div className="m">
-                  {s.transport}
-                  {suffix}
-                </div>
-              </div>
-              <span className="status" data-s={dot} />
-            </div>
-          );
-        })
+        <>
+          <div className="mcp-health-strip">
+            <span>{t("contextPanel.mcpHealthTotal", { count: specs.length })}</span>
+            <span data-kind="ok">{t("contextPanel.mcpHealthReady", { count: readyCount })}</span>
+            <span data-kind={failedCount > 0 ? "failed" : "muted"}>
+              {t("contextPanel.mcpHealthFailed", { count: failedCount })}
+            </span>
+            <span>{t("contextPanel.mcpHealthTools", { count: toolCount })}</span>
+          </div>
+          <div className="mcp-filter-row">
+            {(["all", "ready", "failed"] as const).map((kind) => (
+              <button
+                key={kind}
+                type="button"
+                className="mcp-filter"
+                data-active={filter === kind}
+                onClick={() => setFilter(kind)}
+              >
+                {kind === "all"
+                  ? t("contextPanel.mcpFilterAll")
+                  : kind === "ready"
+                    ? t("contextPanel.mcpFilterReady")
+                    : t("contextPanel.mcpFilterFailed")}
+              </button>
+            ))}
+            <span className="spacer" />
+            {failedCount > 0 && onRetry ? (
+              <button type="button" className="mcp-mini-action" onClick={retryAll}>
+                <I.refresh size={12} />
+                {t("contextPanel.mcpRetryAll")}
+              </button>
+            ) : null}
+            {onOpenSettings ? (
+              <button type="button" className="mcp-mini-action" onClick={onOpenSettings}>
+                <I.cog size={12} />
+                {t("contextPanel.mcpSettings")}
+              </button>
+            ) : null}
+          </div>
+          {filtered.length === 0 ? (
+            <div className="ctx-empty">{t("contextPanel.mcpFilterEmpty")}</div>
+          ) : (
+            filtered.map((s) => (
+              <McpServerCard
+                key={s.raw}
+                spec={s}
+                mode="context"
+                onRetry={onRetry}
+                onEdit={onEdit ?? (onOpenSettings ? () => onOpenSettings() : undefined)}
+              />
+            ))
+          )}
+        </>
       )}
     </div>
   );
 }
 
-function CtxMemory({ entries }: { entries: MemoryEntryInfo[] }) {
+function CtxMemory({
+  entries,
+  detail,
+  onRead,
+}: {
+  entries: MemoryEntryInfo[];
+  detail: MemoryDetail | null;
+  onRead: (path: string) => void;
+}) {
   return (
-    <div className="ctx-block">
+    <div className="ctx-block" style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
       <div className="h">
-        <span>长期记忆</span>
-        <span className="right">{entries.length === 0 ? "—" : `${entries.length} 项`}</span>
+        <span>{t("contextPanel.memoryTitle")}</span>
+        <span className="right">
+          {entries.length === 0 ? "—" : t("contextPanel.itemCount", { count: entries.length })}
+        </span>
       </div>
       {entries.length === 0 ? (
         <div className="ctx-empty">{t("contextPanel.noMemoriesMsg")}</div>
       ) : (
-        <div className="mem">
-          {entries.map((m) => (
-            <div className="mem-row" key={`${m.scope}/${m.name}`}>
-              <span className="scope" data-s={m.scope}>
-                {m.scope === "project" ? "项目" : "全局"}
-              </span>
-              <span className="txt">{m.description || m.name}</span>
+        <div className="mem" style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
+          <div style={{ flexShrink: 0 }}>
+            {entries.map((m) => (
+              <button
+                type="button"
+                className="mem-row"
+                data-active={detail?.path === m.path}
+                key={m.path}
+                onClick={() => onRead(m.path)}
+              >
+                <span className="scope" data-s={m.scope}>
+                  {m.scope === "project" ? t("contextPanel.scopeProject") : t("contextPanel.scopeGlobal")}
+                </span>
+                <span className="txt">{m.description || m.name}</span>
+              </button>
+            ))}
+          </div>
+          {detail ? (
+            <div className="mem-detail">
+              <Markdown source={detail.body} />
             </div>
-          ))}
+          ) : null}
         </div>
       )}
     </div>
@@ -261,27 +416,29 @@ function CtxRules({ settings }: { settings: Settings | null }) {
   const editMode = settings?.editMode ?? "review";
   const items: { p: string; allow: boolean; desc: string }[] =
     editMode === "yolo"
-      ? [{ p: "*", allow: true, desc: "YOLO 模式 · 所有工具调用自动批准" }]
+      ? [{ p: "*", allow: true, desc: t("contextPanel.ruleYolo") }]
       : editMode === "auto"
         ? [
-            { p: "read_file, list_directory, search_files, *", allow: true, desc: "只读工具自动批准" },
-            { p: "run_command (allowlist)", allow: true, desc: "命中 shell 白名单的命令自动批准" },
-            { p: "edit_file, write_file, run_command (其他)", allow: false, desc: "写入与未知 shell 命令需确认" },
+            { p: "read_file, list_directory, search_files, *", allow: true, desc: t("contextPanel.ruleReadOnly") },
+            { p: "run_command (allowlist)", allow: true, desc: t("contextPanel.ruleShellAllowlist") },
+            { p: "edit_file, write_file, run_command (other)", allow: false, desc: t("contextPanel.ruleWritesAsk") },
           ]
         : [
-            { p: "*", allow: false, desc: "Review 模式 · 每个工具调用都需确认" },
+            { p: "*", allow: false, desc: t("contextPanel.ruleReview") },
           ];
   return (
     <div className="ctx-block">
       <div className="h">
-        <span>自动批准</span>
+        <span>{t("contextPanel.autoApproveTitle")}</span>
         <span className="right">{editMode}</span>
       </div>
       {items.map((r) => (
         <div className="rule" key={r.p}>
           <div className="top">
             <span className={`pat ${r.allow ? "" : "deny"}`}>{r.p}</span>
-            <span className={`sw ${r.allow ? "" : "deny"}`}>{r.allow ? "ALLOW" : "ASK"}</span>
+            <span className={`sw ${r.allow ? "" : "deny"}`}>
+              {r.allow ? t("contextPanel.allow") : t("contextPanel.ask")}
+            </span>
           </div>
           <div className="desc">{r.desc}</div>
         </div>

@@ -1,15 +1,20 @@
-import { describe, expect, it, vi } from "vitest";
-import { loadMetasoApiKey } from "../src/config.js";
+import { lookup } from "node:dns/promises";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { loadBaiduApiKey, loadMetasoApiKey, writeConfig } from "../src/config.js";
 import { ToolRegistry } from "../src/tools.js";
 import {
   formatSearchResults,
   htmlToText,
-  parseMojeekResults,
+  parseBingResults,
   parseSearxngHtmlResults,
   registerWebTools,
   webFetch,
   webSearch,
 } from "../src/tools/web.js";
+
+vi.mock("node:dns/promises", () => ({
+  lookup: vi.fn(async () => [{ address: "93.184.216.34", family: 4 }]),
+}));
 
 describe("htmlToText", () => {
   it("strips script/style/nav/footer and preserves paragraph breaks", () => {
@@ -43,37 +48,30 @@ describe("htmlToText", () => {
   });
 });
 
-describe("parseMojeekResults", () => {
-  // Fixture mirrors the shape Mojeek actually returns as of April 2026.
+describe("parseBingResults", () => {
+  // Fixture mirrors the shape cn.bing.com returns as of 2026-05 (captured live).
+  // Each result is a `<li class="b_algo">` with `<h2><a href>` + `<div class="b_caption"><p>`.
   const sampleHtml = `
-    <ul class="results">
-      <li>
-        <a title="https://example.com/a" href="https://example.com/a" class="ob">
-          <p class="i"><span class="url">https://example.com</span></p>
-        </a>
-        <h2>
-          <a class="title" title="https://example.com/a" href="https://example.com/a">
-            Flutter 3.19 release notes
+    <ol id="b_results">
+      <li class="b_algo" data-id iid=SERP.5339>
+        <h2 class="">
+          <a target="_blank" href="https://example.com/a" h="ID=SERP,5145.2">
+            <strong>Flutter</strong> 3.19 release notes
           </a>
         </h2>
-        <p class="s">
-          Flutter 3.19 introduces <strong>new Navigator</strong>&nbsp;APIs &amp; more.
-        </p>
+        <div class="b_caption">
+          <p class="b_lineclamp2">Flutter 3.19 introduces <strong>new Navigator</strong>&nbsp;APIs &amp; more.</p>
+        </div>
       </li>
-      <li>
-        <a href="https://medium.com/flutter/x" class="ob">
-          <p class="i"><span class="url">medium.com</span></p>
-        </a>
-        <h2>
-          <a class="title" href="https://medium.com/flutter/x">What's new in 3.19</a>
-        </h2>
-        <p class="s">An overview post.</p>
+      <li class="b_algo" data-id iid=SERP.5340>
+        <h2><a target="_blank" href="https://medium.com/flutter/x">What's new in 3.19</a></h2>
+        <div class="b_caption"><p>An overview post.</p></div>
       </li>
-    </ul>
+    </ol>
   `;
 
-  it("extracts title/url/snippet from the expected markup", () => {
-    const items = parseMojeekResults(sampleHtml);
+  it("extracts title/url/snippet from b_algo blocks", () => {
+    const items = parseBingResults(sampleHtml);
     expect(items).toHaveLength(2);
     expect(items[0]).toEqual({
       title: "Flutter 3.19 release notes",
@@ -88,28 +86,58 @@ describe("parseMojeekResults", () => {
   });
 
   it("returns empty on markup that doesn't match the expected shape", () => {
-    expect(parseMojeekResults("<html><body>nothing here</body></html>")).toEqual([]);
+    expect(parseBingResults("<html><body>nothing here</body></html>")).toEqual([]);
   });
 
-  it("tolerates attribute-order swaps (href before class)", () => {
+  it("handles a b_algo block with no b_caption sibling (empty snippet)", () => {
     const html = `
-      <a href="https://example.com/z" class="title">Title Z</a>
-      <p class="s">Snippet Z.</p>
+      <li class="b_algo">
+        <h2><a href="https://example.com/s">Solo</a></h2>
+      </li>
     `;
-    const items = parseMojeekResults(html);
+    const items = parseBingResults(html);
     expect(items).toHaveLength(1);
     expect(items[0]).toEqual({
-      title: "Title Z",
-      url: "https://example.com/z",
-      snippet: "Snippet Z.",
+      title: "Solo",
+      url: "https://example.com/s",
+      snippet: "",
     });
   });
 
-  it("handles a title with no snippet sibling (empty snippet)", () => {
-    const html = `<a class="title" href="https://example.com/s">Solo</a>`;
-    const items = parseMojeekResults(html);
+  it("skips a b_algo block missing the h2 anchor", () => {
+    const html = `
+      <li class="b_algo">
+        <div class="b_caption"><p>orphan snippet</p></div>
+      </li>
+    `;
+    expect(parseBingResults(html)).toEqual([]);
+  });
+
+  // www.bing.com (bing-intl) wraps organic links in /ck/a click-tracking redirects,
+  // emitted as root-relative hrefs with a base64url-encoded target in the `u=a1…` param.
+  it("decodes relative /ck/a click-tracking hrefs to the real target", () => {
+    const target = "https://github.com/flutter/flutter";
+    const u = `a1${Buffer.from(target).toString("base64url")}`;
+    const html = `
+      <li class="b_algo">
+        <h2><a href="/ck/a?!&&p=abc123&u=${u}&ntb=1">Flutter repo</a></h2>
+        <div class="b_caption"><p>The Flutter SDK.</p></div>
+      </li>
+    `;
+    const items = parseBingResults(html);
     expect(items).toHaveLength(1);
-    expect(items[0]?.snippet).toBe("");
+    expect(items[0].url).toBe(target);
+  });
+
+  it("decodes absolute bing.com/ck/a hrefs too", () => {
+    const target = "https://en.wikipedia.org/wiki/Dart";
+    const u = `a1${Buffer.from(target).toString("base64url")}`;
+    const html = `
+      <li class="b_algo">
+        <h2><a href="https://www.bing.com/ck/a?u=${u}">Dart</a></h2>
+      </li>
+    `;
+    expect(parseBingResults(html)[0].url).toBe(target);
   });
 });
 
@@ -163,12 +191,12 @@ describe("parseSearxngHtmlResults", () => {
 
 describe("webSearch", () => {
   const twoResultsHtml = `
-    <a class="title" href="https://example.com/a">A</a>
-    <p class="s">snippet A</p>
-    <a class="title" href="https://example.com/b">B</a>
-    <p class="s">snippet B</p>`;
+    <li class="b_algo"><h2><a href="https://example.com/a">A</a></h2>
+      <div class="b_caption"><p>snippet A</p></div></li>
+    <li class="b_algo"><h2><a href="https://example.com/b">B</a></h2>
+      <div class="b_caption"><p>snippet B</p></div></li>`;
 
-  it("GETs Mojeek with a browser UA and query string", async () => {
+  it("GETs cn.bing.com with a browser UA and query string", async () => {
     const captured: { url: string; method: string; ua: string } = { url: "", method: "", ua: "" };
     const originalFetch = globalThis.fetch;
     globalThis.fetch = vi.fn(async (url: string | URL, init?: RequestInit) => {
@@ -183,7 +211,7 @@ describe("webSearch", () => {
     }) as unknown as typeof fetch;
     try {
       const out = await webSearch("flutter 3.19", { topK: 2 });
-      expect(captured.url).toContain("mojeek.com/search");
+      expect(captured.url).toContain("cn.bing.com/search");
       expect(captured.url).toContain("q=flutter%203.19");
       expect(captured.method).toBe("GET");
       expect(captured.ua).toMatch(/Mozilla\/5.0/);
@@ -301,6 +329,7 @@ describe("webSearch", () => {
 });
 
 describe("searchMetaso", () => {
+  const originalMetasoKey = process.env.METASO_API_KEY;
   const sampleResponse = {
     credits: 3,
     total: 72,
@@ -321,6 +350,32 @@ describe("searchMetaso", () => {
       },
     ],
   };
+
+  beforeEach(() => {
+    process.env.METASO_API_KEY = "test-metaso-key";
+  });
+
+  afterEach(() => {
+    if (originalMetasoKey === undefined) {
+      // biome-ignore lint/performance/noDelete: env var must be restored to absent
+      delete process.env.METASO_API_KEY;
+    } else {
+      process.env.METASO_API_KEY = originalMetasoKey;
+    }
+  });
+
+  it("requires an API key before contacting Metaso", async () => {
+    // biome-ignore lint/performance/noDelete: env var must be absent, not "undefined"
+    delete process.env.METASO_API_KEY;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn() as unknown as typeof fetch;
+    try {
+      await expect(webSearch("q", { engine: "metaso" })).rejects.toThrow(/Metaso.*API key/i);
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 
   it("POSTs to metaso API with JSON body and auth header", async () => {
     const captured: { url: string; method: string; headers: Record<string, string>; body: string } =
@@ -413,6 +468,40 @@ describe("searchMetaso", () => {
     }
   });
 
+  it("throws Metaso server error on non-JSON 500 response", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response("<html><body>upstream failure</body></html>", {
+          status: 500,
+          headers: { "Content-Type": "text/html" },
+        }),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(webSearch("q", { engine: "metaso" })).rejects.toThrow(
+        /Metaso server error \(500\)/,
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("throws Metaso parse error on 200 invalid JSON", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response("not json", {
+          status: 200,
+          headers: { "Content-Type": "text/plain" },
+        }),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(webSearch("q", { engine: "metaso" })).rejects.toThrow(/unparseable/i);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it("returns empty array on 0 results", async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = vi.fn(
@@ -450,6 +539,805 @@ describe("searchMetaso", () => {
   });
 });
 
+describe("searchBaidu", () => {
+  const originalBaiduKey = process.env.BAIDU_API_KEY;
+
+  beforeEach(() => {
+    process.env.BAIDU_API_KEY = "test-baidu-key";
+  });
+
+  afterEach(() => {
+    if (originalBaiduKey === undefined) {
+      // biome-ignore lint/performance/noDelete: env var must be restored to absent
+      delete process.env.BAIDU_API_KEY;
+    } else {
+      process.env.BAIDU_API_KEY = originalBaiduKey;
+    }
+  });
+
+  it("requires an API key before contacting Baidu AI Search", async () => {
+    // biome-ignore lint/performance/noDelete: env var must be absent, not "undefined"
+    delete process.env.BAIDU_API_KEY;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn() as unknown as typeof fetch;
+    try {
+      await expect(webSearch("q", { engine: "baidu" })).rejects.toThrow(/Baidu.*API key/i);
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("POSTs to Baidu AI Search with JSON body and auth header", async () => {
+    const captured: { url: string; method: string; headers: Record<string, string>; body: string } =
+      { url: "", method: "", headers: {}, body: "" };
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (url: string | URL, init?: RequestInit) => {
+      captured.url = String(url);
+      captured.method = init?.method ?? "GET";
+      captured.headers = (init?.headers ?? {}) as Record<string, string>;
+      captured.body = String(init?.body ?? "");
+      return new Response(
+        JSON.stringify({
+          references: [
+            { title: "Result One", url: "https://example.com/1", content: "Snippet one." },
+            { title: "Result Two", url: "https://example.com/2", content: "Snippet two." },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+    }) as unknown as typeof fetch;
+    try {
+      const out = await webSearch("test query", { engine: "baidu", topK: 5 });
+      expect(captured.url).toBe("https://qianfan.baidubce.com/v2/ai_search/web_search");
+      expect(captured.method).toBe("POST");
+      expect(captured.headers.Authorization).toBe(`Bearer ${loadBaiduApiKey()}`);
+      expect(captured.headers["Content-Type"]).toBe("application/json");
+      const body = JSON.parse(captured.body);
+      expect(body.messages).toEqual([{ role: "user", content: "test query" }]);
+      expect(out).toEqual([
+        { title: "Result One", url: "https://example.com/1", snippet: "Snippet one." },
+        { title: "Result Two", url: "https://example.com/2", snippet: "Snippet two." },
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("returns [] when Baidu returns no references", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ references: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(webSearch("empty", { engine: "baidu" })).resolves.toEqual([]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("skips Baidu references without a URL or title", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            references: [
+              { title: "No URL", content: "skip" },
+              { url: "https://example.com/no-title", content: "skip" },
+              { title: "Good", url: "https://example.com/good", content: "keep" },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(webSearch("mixed", { engine: "baidu" })).resolves.toEqual([
+        { title: "Good", url: "https://example.com/good", snippet: "keep" },
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("clamps Baidu topK to [1, 10]", async () => {
+    const references = Array.from({ length: 12 }, (_, i) => ({
+      title: `Result ${i + 1}`,
+      url: `https://example.com/${i + 1}`,
+      content: `Snippet ${i + 1}`,
+    }));
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ references }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(webSearch("x", { engine: "baidu", topK: 99 })).resolves.toHaveLength(10);
+      await expect(webSearch("x", { engine: "baidu", topK: 0 })).resolves.toHaveLength(1);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("throws Baidu auth error on 401 and 403", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () => new Response(JSON.stringify({ error: "invalid key" }), { status: 401 }),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(webSearch("q", { engine: "baidu" })).rejects.toThrow(/Baidu.*API key/i);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("throws Baidu rate-limit error on 429", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () => new Response(JSON.stringify({ error: "rate limited" }), { status: 429 }),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(webSearch("q", { engine: "baidu" })).rejects.toThrow(/rate-limit|quota/i);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("throws Baidu server error on non-JSON 500 response", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response("<html><body>upstream failure</body></html>", {
+          status: 500,
+          headers: { "Content-Type": "text/html" },
+        }),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(webSearch("q", { engine: "baidu" })).rejects.toThrow(
+        /Baidu AI Search server error \(500\)/,
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("throws Baidu parse error on invalid JSON", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () => new Response("not json", { status: 200 }),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(webSearch("q", { engine: "baidu" })).rejects.toThrow(/unparseable/i);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+describe("searchTavily", () => {
+  const sampleResponse = {
+    query: "test query",
+    results: [
+      {
+        title: "First Hit",
+        url: "https://example.com/1",
+        content: "First snippet.",
+        score: 0.93,
+      },
+      {
+        title: "Second Hit",
+        url: "https://example.com/2",
+        content: "Second snippet.",
+        score: 0.81,
+      },
+    ],
+    response_time: 0.42,
+  };
+
+  it("requires an API key — throws a setup-pointing error when none is set", async () => {
+    const origKey = process.env.TAVILY_API_KEY;
+    // biome-ignore lint/performance/noDelete: env var must be absent, not "undefined"
+    delete process.env.TAVILY_API_KEY;
+    try {
+      await expect(webSearch("q", { engine: "tavily" })).rejects.toThrow(/Tavily.*API key/i);
+      // Plain-string match — checking the error message includes the signup URL,
+      // not testing URL safety; using a regex here trips CodeQL's missing-anchor rule.
+      await expect(webSearch("q", { engine: "tavily" })).rejects.toThrow("tavily.com");
+    } finally {
+      if (origKey !== undefined) process.env.TAVILY_API_KEY = origKey;
+    }
+  });
+
+  it("POSTs to Tavily with the api_key in the body", async () => {
+    const origKey = process.env.TAVILY_API_KEY;
+    process.env.TAVILY_API_KEY = "tvly-test-key";
+    const captured: { url: string; method: string; body: string } = {
+      url: "",
+      method: "",
+      body: "",
+    };
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (url: string | URL, init?: RequestInit) => {
+      captured.url = String(url);
+      captured.method = init?.method ?? "GET";
+      captured.body = String(init?.body ?? "");
+      return new Response(JSON.stringify(sampleResponse), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+    try {
+      const out = await webSearch("test query", { engine: "tavily", topK: 5 });
+      expect(captured.url).toBe("https://api.tavily.com/search");
+      expect(captured.method).toBe("POST");
+      const body = JSON.parse(captured.body);
+      expect(body.api_key).toBe("tvly-test-key");
+      expect(body.query).toBe("test query");
+      expect(body.max_results).toBe(5);
+      expect(out).toHaveLength(2);
+      expect(out[0]).toEqual({
+        title: "First Hit",
+        url: "https://example.com/1",
+        snippet: "First snippet.",
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (origKey === undefined) {
+        // biome-ignore lint/performance/noDelete: same reason — must drop, not set to "undefined"
+        delete process.env.TAVILY_API_KEY;
+      } else {
+        process.env.TAVILY_API_KEY = origKey;
+      }
+    }
+  });
+
+  it("maps 401/403 to a key-rejected error", async () => {
+    const origKey = process.env.TAVILY_API_KEY;
+    process.env.TAVILY_API_KEY = "tvly-bad";
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () => new Response("forbidden", { status: 403 }),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(webSearch("q", { engine: "tavily" })).rejects.toThrow(/Tavily.*rejected/i);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (origKey === undefined) {
+        // biome-ignore lint/performance/noDelete: same reason
+        delete process.env.TAVILY_API_KEY;
+      } else {
+        process.env.TAVILY_API_KEY = origKey;
+      }
+    }
+  });
+
+  it("maps 429 to a quota/rate-limit error", async () => {
+    const origKey = process.env.TAVILY_API_KEY;
+    process.env.TAVILY_API_KEY = "tvly-test-key";
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () => new Response("too many", { status: 429 }),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(webSearch("q", { engine: "tavily" })).rejects.toThrow(/quota|rate-limit/i);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (origKey === undefined) {
+        // biome-ignore lint/performance/noDelete: same reason
+        delete process.env.TAVILY_API_KEY;
+      } else {
+        process.env.TAVILY_API_KEY = origKey;
+      }
+    }
+  });
+
+  it("returns empty array when results is empty", async () => {
+    const origKey = process.env.TAVILY_API_KEY;
+    process.env.TAVILY_API_KEY = "tvly-test-key";
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ query: "x", results: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    ) as unknown as typeof fetch;
+    try {
+      const out = await webSearch("x", { engine: "tavily" });
+      expect(out).toEqual([]);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (origKey === undefined) {
+        // biome-ignore lint/performance/noDelete: same reason
+        delete process.env.TAVILY_API_KEY;
+      } else {
+        process.env.TAVILY_API_KEY = origKey;
+      }
+    }
+  });
+});
+
+describe("searchPerplexity", () => {
+  const sampleResponse = {
+    choices: [{ message: { content: "Synthesized answer about the query." } }],
+    citations: [
+      { url: "https://source.example.com/a", title: "Source A" },
+      "https://source.example.com/b",
+    ],
+  };
+
+  it("requires an API key — throws a setup-pointing error when none is set", async () => {
+    const origKey = process.env.PERPLEXITY_API_KEY;
+    // biome-ignore lint/performance/noDelete: env var must be absent, not "undefined"
+    delete process.env.PERPLEXITY_API_KEY;
+    try {
+      await expect(webSearch("q", { engine: "perplexity" })).rejects.toThrow(
+        /Perplexity.*API key/i,
+      );
+      await expect(webSearch("q", { engine: "perplexity" })).rejects.toThrow("perplexity.ai");
+    } finally {
+      if (origKey !== undefined) process.env.PERPLEXITY_API_KEY = origKey;
+    }
+  });
+
+  it("POSTs to Perplexity with bearer auth and sonar model", async () => {
+    const origKey = process.env.PERPLEXITY_API_KEY;
+    process.env.PERPLEXITY_API_KEY = "pplx-test-key";
+    const captured: { url: string; method: string; auth: string; body: string } = {
+      url: "",
+      method: "",
+      auth: "",
+      body: "",
+    };
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (url: string | URL, init?: RequestInit) => {
+      captured.url = String(url);
+      captured.method = init?.method ?? "GET";
+      captured.auth = String((init?.headers as Record<string, string>)?.Authorization ?? "");
+      captured.body = String(init?.body ?? "");
+      return new Response(JSON.stringify(sampleResponse), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+    try {
+      const out = await webSearch("test query", { engine: "perplexity", topK: 5 });
+      expect(captured.url).toBe("https://api.perplexity.ai/chat/completions");
+      expect(captured.method).toBe("POST");
+      expect(captured.auth).toBe("Bearer pplx-test-key");
+      const body = JSON.parse(captured.body);
+      expect(body.model).toBe("sonar");
+      expect(body.messages[0].content).toBe("test query");
+      // First result is the AI answer (url:"" sentinel + answer field)
+      expect(out[0]).toEqual({
+        title: "Synthesized answer about the query.",
+        url: "",
+        snippet: "",
+        answer: "Synthesized answer about the query.",
+      });
+      // Citations follow — both object and string forms
+      expect(out[1]?.url).toBe("https://source.example.com/a");
+      expect(out[1]?.title).toBe("Source A");
+      expect(out[2]?.url).toBe("https://source.example.com/b");
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (origKey === undefined) {
+        // biome-ignore lint/performance/noDelete: same reason
+        delete process.env.PERPLEXITY_API_KEY;
+      } else {
+        process.env.PERPLEXITY_API_KEY = origKey;
+      }
+    }
+  });
+
+  it("maps 401/403 to a key-rejected error", async () => {
+    const origKey = process.env.PERPLEXITY_API_KEY;
+    process.env.PERPLEXITY_API_KEY = "pplx-bad";
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () => new Response("forbidden", { status: 403 }),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(webSearch("q", { engine: "perplexity" })).rejects.toThrow(
+        /Perplexity.*rejected/i,
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (origKey === undefined) {
+        // biome-ignore lint/performance/noDelete: same reason
+        delete process.env.PERPLEXITY_API_KEY;
+      } else {
+        process.env.PERPLEXITY_API_KEY = origKey;
+      }
+    }
+  });
+
+  it("maps 429 to a rate-limit error", async () => {
+    const origKey = process.env.PERPLEXITY_API_KEY;
+    process.env.PERPLEXITY_API_KEY = "pplx-test-key";
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () => new Response("too many", { status: 429 }),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(webSearch("q", { engine: "perplexity" })).rejects.toThrow(/rate-limit/i);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (origKey === undefined) {
+        // biome-ignore lint/performance/noDelete: same reason
+        delete process.env.PERPLEXITY_API_KEY;
+      } else {
+        process.env.PERPLEXITY_API_KEY = origKey;
+      }
+    }
+  });
+
+  it("maps unparseable JSON to a parse error", async () => {
+    const origKey = process.env.PERPLEXITY_API_KEY;
+    process.env.PERPLEXITY_API_KEY = "pplx-test-key";
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () => new Response("<html>not json</html>", { status: 200 }),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(webSearch("q", { engine: "perplexity" })).rejects.toThrow(/unparseable/i);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (origKey === undefined) {
+        // biome-ignore lint/performance/noDelete: same reason
+        delete process.env.PERPLEXITY_API_KEY;
+      } else {
+        process.env.PERPLEXITY_API_KEY = origKey;
+      }
+    }
+  });
+});
+
+describe("searchExa", () => {
+  const sampleResponse = {
+    answer: "Exa synthesized answer.",
+    citations: [
+      {
+        title: "Citation A",
+        url: "https://exa.example.com/a",
+        text: "Snippet A.",
+      },
+      {
+        title: "Citation B",
+        url: "https://exa.example.com/b",
+        text: "Snippet B.",
+      },
+    ],
+  };
+
+  it("requires an API key — throws a setup-pointing error when none is set", async () => {
+    const origKey = process.env.EXA_API_KEY;
+    // biome-ignore lint/performance/noDelete: env var must be absent, not "undefined"
+    delete process.env.EXA_API_KEY;
+    try {
+      await expect(webSearch("q", { engine: "exa" })).rejects.toThrow(/Exa.*API key/i);
+      await expect(webSearch("q", { engine: "exa" })).rejects.toThrow("exa.ai");
+    } finally {
+      if (origKey !== undefined) process.env.EXA_API_KEY = origKey;
+    }
+  });
+
+  it("POSTs to Exa /answer with x-api-key header", async () => {
+    const origKey = process.env.EXA_API_KEY;
+    process.env.EXA_API_KEY = "exa-test-key";
+    const captured: { url: string; method: string; auth: string; body: string } = {
+      url: "",
+      method: "",
+      auth: "",
+      body: "",
+    };
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (url: string | URL, init?: RequestInit) => {
+      captured.url = String(url);
+      captured.method = init?.method ?? "GET";
+      captured.auth = String((init?.headers as Record<string, string>)?.["x-api-key"] ?? "");
+      captured.body = String(init?.body ?? "");
+      return new Response(JSON.stringify(sampleResponse), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+    try {
+      const out = await webSearch("test query", { engine: "exa", topK: 5 });
+      expect(captured.url).toBe("https://api.exa.ai/answer");
+      expect(captured.method).toBe("POST");
+      expect(captured.auth).toBe("exa-test-key");
+      const body = JSON.parse(captured.body);
+      expect(body.query).toBe("test query");
+      expect(out[0]).toEqual({
+        title: "Exa synthesized answer.",
+        url: "",
+        snippet: "",
+        answer: "Exa synthesized answer.",
+      });
+      expect(out[1]).toEqual({
+        title: "Citation A",
+        url: "https://exa.example.com/a",
+        snippet: "Snippet A.",
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (origKey === undefined) {
+        // biome-ignore lint/performance/noDelete: same reason
+        delete process.env.EXA_API_KEY;
+      } else {
+        process.env.EXA_API_KEY = origKey;
+      }
+    }
+  });
+
+  it("maps 401/403 to a key-rejected error", async () => {
+    const origKey = process.env.EXA_API_KEY;
+    process.env.EXA_API_KEY = "exa-bad";
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () => new Response("forbidden", { status: 403 }),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(webSearch("q", { engine: "exa" })).rejects.toThrow(/Exa.*rejected/i);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (origKey === undefined) {
+        // biome-ignore lint/performance/noDelete: same reason
+        delete process.env.EXA_API_KEY;
+      } else {
+        process.env.EXA_API_KEY = origKey;
+      }
+    }
+  });
+
+  it("maps 429 to a rate-limit/quota error", async () => {
+    const origKey = process.env.EXA_API_KEY;
+    process.env.EXA_API_KEY = "exa-test-key";
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () => new Response("too many", { status: 429 }),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(webSearch("q", { engine: "exa" })).rejects.toThrow(/rate-limit|quota/i);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (origKey === undefined) {
+        // biome-ignore lint/performance/noDelete: same reason
+        delete process.env.EXA_API_KEY;
+      } else {
+        process.env.EXA_API_KEY = origKey;
+      }
+    }
+  });
+
+  it("maps unparseable JSON to a parse error", async () => {
+    const origKey = process.env.EXA_API_KEY;
+    process.env.EXA_API_KEY = "exa-test-key";
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () => new Response("<html>not json</html>", { status: 200 }),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(webSearch("q", { engine: "exa" })).rejects.toThrow(/unparseable/i);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (origKey === undefined) {
+        // biome-ignore lint/performance/noDelete: same reason
+        delete process.env.EXA_API_KEY;
+      } else {
+        process.env.EXA_API_KEY = origKey;
+      }
+    }
+  });
+});
+
+describe("searchBrave", () => {
+  const sampleResponse = {
+    web: {
+      results: [
+        {
+          title: "Brave Result One",
+          url: "https://brave.example.com/1",
+          description: "First snippet.",
+        },
+        {
+          title: "Brave Result Two",
+          url: "https://brave.example.com/2",
+          description: "Second snippet.",
+        },
+      ],
+    },
+  };
+
+  it("requires an API key — throws a setup-pointing error when none is set", async () => {
+    const origKey = process.env.BRAVE_SEARCH_API_KEY;
+    const origKeyShort = process.env.BRAVE_API_KEY;
+    // biome-ignore lint/performance/noDelete: env var must be absent, not "undefined"
+    delete process.env.BRAVE_SEARCH_API_KEY;
+    // biome-ignore lint/performance/noDelete: also clear the short alias
+    delete process.env.BRAVE_API_KEY;
+    try {
+      await expect(webSearch("q", { engine: "brave" })).rejects.toThrow(/Brave.*API key/i);
+      await expect(webSearch("q", { engine: "brave" })).rejects.toThrow("brave.com/search/api");
+    } finally {
+      if (origKey !== undefined) process.env.BRAVE_SEARCH_API_KEY = origKey;
+      if (origKeyShort !== undefined) process.env.BRAVE_API_KEY = origKeyShort;
+    }
+  });
+
+  it("GETs Brave Search API with X-Subscription-Token header and query params", async () => {
+    const origKey = process.env.BRAVE_SEARCH_API_KEY;
+    process.env.BRAVE_SEARCH_API_KEY = "brave-test-key";
+    const captured: { url: string; method: string; token: string } = {
+      url: "",
+      method: "",
+      token: "",
+    };
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (url: string | URL, init?: RequestInit) => {
+      captured.url = String(url);
+      captured.method = init?.method ?? "GET";
+      captured.token = String(
+        (init?.headers as Record<string, string>)?.["X-Subscription-Token"] ?? "",
+      );
+      return new Response(JSON.stringify(sampleResponse), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+    try {
+      const out = await webSearch("test query", { engine: "brave", topK: 5 });
+      expect(captured.url).toContain("api.search.brave.com/res/v1/web/search");
+      expect(captured.url).toContain("q=test%20query");
+      expect(captured.url).toContain("count=5");
+      expect(captured.method).toBe("GET");
+      expect(captured.token).toBe("brave-test-key");
+      expect(out).toHaveLength(2);
+      expect(out[0]).toEqual({
+        title: "Brave Result One",
+        url: "https://brave.example.com/1",
+        snippet: "First snippet.",
+      });
+      expect(out[1]).toEqual({
+        title: "Brave Result Two",
+        url: "https://brave.example.com/2",
+        snippet: "Second snippet.",
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (origKey === undefined) {
+        // biome-ignore lint/performance/noDelete: same reason
+        delete process.env.BRAVE_SEARCH_API_KEY;
+      } else {
+        process.env.BRAVE_SEARCH_API_KEY = origKey;
+      }
+    }
+  });
+
+  it("maps 401/403 to a key-rejected error", async () => {
+    const origKey = process.env.BRAVE_SEARCH_API_KEY;
+    process.env.BRAVE_SEARCH_API_KEY = "brave-bad";
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () => new Response("forbidden", { status: 403 }),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(webSearch("q", { engine: "brave" })).rejects.toThrow(/Brave.*rejected/i);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (origKey === undefined) {
+        // biome-ignore lint/performance/noDelete: same reason
+        delete process.env.BRAVE_SEARCH_API_KEY;
+      } else {
+        process.env.BRAVE_SEARCH_API_KEY = origKey;
+      }
+    }
+  });
+
+  it("maps 429 to a rate-limit/quota error", async () => {
+    const origKey = process.env.BRAVE_SEARCH_API_KEY;
+    process.env.BRAVE_SEARCH_API_KEY = "brave-test-key";
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () => new Response("too many", { status: 429 }),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(webSearch("q", { engine: "brave" })).rejects.toThrow(/rate-limit|quota/i);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (origKey === undefined) {
+        // biome-ignore lint/performance/noDelete: same reason
+        delete process.env.BRAVE_SEARCH_API_KEY;
+      } else {
+        process.env.BRAVE_SEARCH_API_KEY = origKey;
+      }
+    }
+  });
+
+  it("maps unparseable JSON to a parse error", async () => {
+    const origKey = process.env.BRAVE_SEARCH_API_KEY;
+    process.env.BRAVE_SEARCH_API_KEY = "brave-test-key";
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () => new Response("<html>not json</html>", { status: 200 }),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(webSearch("q", { engine: "brave" })).rejects.toThrow(/unparseable/i);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (origKey === undefined) {
+        // biome-ignore lint/performance/noDelete: same reason
+        delete process.env.BRAVE_SEARCH_API_KEY;
+      } else {
+        process.env.BRAVE_SEARCH_API_KEY = origKey;
+      }
+    }
+  });
+
+  it("returns empty array when web.results is missing or empty", async () => {
+    const origKey = process.env.BRAVE_SEARCH_API_KEY;
+    process.env.BRAVE_SEARCH_API_KEY = "brave-test-key";
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ web: { results: [] } }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    ) as unknown as typeof fetch;
+    try {
+      const out = await webSearch("x", { engine: "brave" });
+      expect(out).toEqual([]);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (origKey === undefined) {
+        // biome-ignore lint/performance/noDelete: same reason
+        delete process.env.BRAVE_SEARCH_API_KEY;
+      } else {
+        process.env.BRAVE_SEARCH_API_KEY = origKey;
+      }
+    }
+  });
+
+  it("clamps topK to [1, 20]", async () => {
+    const origKey = process.env.BRAVE_SEARCH_API_KEY;
+    process.env.BRAVE_SEARCH_API_KEY = "brave-test-key";
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(JSON.stringify(sampleResponse), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    ) as unknown as typeof fetch;
+    try {
+      const outMax = await webSearch("x", { engine: "brave", topK: 99 });
+      expect(outMax.length).toBeLessThanOrEqual(2);
+      const outMin = await webSearch("x", { engine: "brave", topK: 0 });
+      expect(outMin.length).toBe(1);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (origKey === undefined) {
+        // biome-ignore lint/performance/noDelete: same reason
+        delete process.env.BRAVE_SEARCH_API_KEY;
+      } else {
+        process.env.BRAVE_SEARCH_API_KEY = origKey;
+      }
+    }
+  });
+});
+
 describe("formatSearchResults", () => {
   it("renders a query header + numbered list", () => {
     const out = formatSearchResults("hello", [
@@ -461,24 +1349,164 @@ describe("formatSearchResults", () => {
     expect(out).toMatch(/1\. One\n\s+https:\/\/one\n\s+first/);
     expect(out).toMatch(/2\. Two/);
   });
+
+  it("renders answer + sources dual-section when an AI answer is present", () => {
+    const out = formatSearchResults("hello", [
+      { title: "An AI answer.", url: "", snippet: "", answer: "An AI answer." },
+      { title: "Citation A", url: "https://a", snippet: "snippet a" },
+      { title: "Citation B", url: "https://b", snippet: "" },
+    ]);
+    expect(out).toMatch(/answer:\n\s+An AI answer\./);
+    expect(out).toMatch(/sources \(2\)/);
+    expect(out).toMatch(/1\. Citation A\n\s+https:\/\/a\n\s+snippet a/);
+    expect(out).toMatch(/2\. Citation B/);
+    expect(out).not.toMatch(/^results \(/m);
+  });
 });
 
 describe("registerWebTools", () => {
+  const isolatedConfigPath = "/tmp/reasonix-web-tools-test-config-does-not-exist.json";
+
   it("registers web_search and web_fetch", () => {
     const registry = new ToolRegistry();
-    registerWebTools(registry);
+    registerWebTools(registry, { configPath: isolatedConfigPath });
     expect(registry.size).toBe(2);
   });
 
   it("web_fetch refuses non-http(s) urls", async () => {
     const registry = new ToolRegistry();
-    registerWebTools(registry);
+    registerWebTools(registry, { configPath: isolatedConfigPath });
     const out = await registry.dispatch("web_fetch", JSON.stringify({ url: "file:///etc/passwd" }));
     expect(out).toMatch(/must start with http/);
+  });
+
+  it("web_search dispatch returns formatted results", async () => {
+    const html = `
+      <li class="b_algo"><h2><a href="https://example.com/a">A</a></h2>
+        <div class="b_caption"><p>snippet A</p></div></li>
+      <li class="b_algo"><h2><a href="https://example.com/b">B</a></h2>
+        <div class="b_caption"><p>snippet B</p></div></li>`;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () => new Response(html, { status: 200, headers: { "Content-Type": "text/html" } }),
+    ) as unknown as typeof fetch;
+    try {
+      const registry = new ToolRegistry();
+      registerWebTools(registry, { configPath: isolatedConfigPath });
+      const out = await registry.dispatch(
+        "web_search",
+        JSON.stringify({ query: "flutter 3.19", topK: 2 }),
+      );
+      expect(out).toContain("query: flutter 3.19");
+      expect(out).toContain("https://example.com/a");
+      expect(out).toContain("snippet A");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("web_fetch dispatch returns title + body text", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(
+          "<html><head><title>Demo</title></head><body><p>Hello world.</p></body></html>",
+          { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" } },
+        ),
+    ) as unknown as typeof fetch;
+    try {
+      const registry = new ToolRegistry();
+      registerWebTools(registry, { configPath: isolatedConfigPath });
+      const out = await registry.dispatch(
+        "web_fetch",
+        JSON.stringify({ url: "https://example.com/" }),
+      );
+      expect(out).toContain("Demo");
+      expect(out).toContain("https://example.com/");
+      expect(out).toContain("Hello world.");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("web_search can dispatch through Ollama cloud", async () => {
+    const configPath = "/tmp/reasonix-web-tools-ollama-search-test.json";
+    writeConfig({ webSearchEngine: "ollama", ollamaApiKey: "ollama-test-key" }, configPath);
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (_url, init) => {
+      expect(_url).toBe("https://ollama.com/api/web_search");
+      expect((init as RequestInit).headers).toMatchObject({
+        Authorization: "Bearer ollama-test-key",
+      });
+      expect(JSON.parse((init as RequestInit).body as string)).toMatchObject({
+        query: "reasonix",
+        max_results: 2,
+      });
+      return new Response(
+        JSON.stringify({
+          results: [{ title: "Reasonix", url: "https://example.com/r", content: "Result body" }],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }) as unknown as typeof fetch;
+    try {
+      const registry = new ToolRegistry();
+      registerWebTools(registry, { configPath });
+      const out = await registry.dispatch(
+        "web_search",
+        JSON.stringify({ query: "reasonix", topK: 2 }),
+      );
+      expect(out).toContain("https://example.com/r");
+      expect(out).toContain("Result body");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("web_fetch can dispatch through Ollama cloud when selected", async () => {
+    const configPath = "/tmp/reasonix-web-tools-ollama-fetch-test.json";
+    writeConfig({ webSearchEngine: "ollama", ollamaApiKey: "ollama-test-key" }, configPath);
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (_url, init) => {
+      expect(_url).toBe("https://ollama.com/api/web_fetch");
+      expect((init as RequestInit).headers).toMatchObject({
+        Authorization: "Bearer ollama-test-key",
+      });
+      expect(JSON.parse((init as RequestInit).body as string)).toMatchObject({
+        url: "https://example.com/page",
+      });
+      return new Response(
+        JSON.stringify({
+          title: "Fetched",
+          content: "Fetched content",
+          links: ["https://example.com/next"],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }) as unknown as typeof fetch;
+    try {
+      const registry = new ToolRegistry();
+      registerWebTools(registry, { configPath });
+      const out = await registry.dispatch(
+        "web_fetch",
+        JSON.stringify({ url: "https://example.com/page" }),
+      );
+      expect(out).toContain("Fetched");
+      expect(out).toContain("Fetched content");
+      expect(out).toContain("https://example.com/next");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });
 
 describe("webFetch", () => {
+  const mockedLookup = vi.mocked(lookup);
+
+  beforeEach(() => {
+    mockedLookup.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
+  });
+
   it("extracts title + body text from an html response", async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = vi.fn(
@@ -521,6 +1549,57 @@ describe("webFetch", () => {
     ) as unknown as typeof fetch;
     try {
       await expect(webFetch("https://example.com/missing")).rejects.toThrow(/web_fetch 404/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("refuses literal internal addresses before fetching", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn() as unknown as typeof fetch;
+    try {
+      await expect(webFetch("http://127.0.0.1:9200/")).rejects.toThrow(
+        /refuses internal or reserved host: 127\.0\.0\.1/,
+      );
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("refuses DNS names that resolve to internal addresses (even after DoH fallback)", async () => {
+    mockedLookup.mockResolvedValueOnce([{ address: "10.0.0.5", family: 4 }]);
+    const originalFetch = globalThis.fetch;
+    // Stub fetch so the DoH fallback also fails — correct rejection must happen
+    // without relying on a real Cloudflare round-trip.
+    globalThis.fetch = vi.fn(async () => {
+      throw new Error("network offline");
+    }) as unknown as typeof fetch;
+    try {
+      await expect(webFetch("https://metadata.example/")).rejects.toThrow(
+        /refuses internal or reserved host: metadata\.example/,
+      );
+      // The DoH fallback attempted a fetch; verify it went to the right endpoint.
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        expect.stringMatching(/^https:\/\/1\.1\.1\.1\/dns-query\?name=metadata\.example&type=A$/),
+        expect.objectContaining({ headers: { Accept: "application/dns-json" } }),
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("refuses redirects to internal hosts", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response("", { status: 302, headers: { Location: "http://169.254.169.254/" } }),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(webFetch("https://example.com/redirect")).rejects.toThrow(
+        /refuses internal or reserved host: 169\.254\.169\.254/,
+      );
+      expect(globalThis.fetch).toHaveBeenCalledTimes(1);
     } finally {
       globalThis.fetch = originalFetch;
     }

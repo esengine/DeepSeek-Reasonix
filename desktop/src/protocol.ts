@@ -9,6 +9,7 @@ export type PathAccessRequiredEvent = {
   toolName: string;
   sandboxRoot: string;
   allowPrefix: string;
+  prompt?: import("@reasonix/core-utils").ApprovalPrompt;
 };
 
 export type ConfirmRequiredEvent = {
@@ -16,6 +17,7 @@ export type ConfirmRequiredEvent = {
   id: number;
   kind: "run_command" | "run_background";
   command: string;
+  prompt?: import("@reasonix/core-utils").ApprovalPrompt;
 };
 
 export type ConfirmationChoice =
@@ -86,10 +88,7 @@ export type RevisionRequiredEvent = {
   summary?: string;
 };
 
-export type RevisionVerdict =
-  | { type: "accepted" }
-  | { type: "rejected" }
-  | { type: "cancelled" };
+export type RevisionVerdict = { type: "accepted" } | { type: "rejected" } | { type: "cancelled" };
 
 export type StepCompletedEvent = {
   type: "$step_completed";
@@ -103,7 +102,36 @@ export type PlanClearedEvent = { type: "$plan_cleared" };
 
 export type SessionsEvent = {
   type: "$sessions";
-  items: { name: string; messageCount: number; mtime: string; summary?: string }[];
+  items: {
+    name: string;
+    messageCount: number;
+    mtime: string;
+    summary?: string;
+    workspaceStatus?: "matched" | "legacy_missing_meta";
+  }[];
+};
+
+export type ExternalSessionSource = "claude" | "codex";
+
+export type ExternalSessionApp = {
+  source: ExternalSessionSource;
+  label: string;
+  root: string;
+  available: boolean;
+  sessionCount: number;
+  latestMtime?: string;
+};
+
+export type SessionImportSourcesEvent = {
+  type: "$session_import_sources";
+  apps: ExternalSessionApp[];
+};
+
+export type SessionImportResultEvent = {
+  type: "$session_import_result";
+  imported: number;
+  skipped: number;
+  failed: number;
 };
 
 export type MentionResultsEvent = {
@@ -121,9 +149,25 @@ export type MentionPreviewEvent = {
   totalLines: number;
 };
 
+export type PromptHistoryCursor = {
+  sessionName: string;
+  messageIndex: number;
+};
+
+export type PromptHistoryResultEvent = {
+  type: "$prompt_history_result";
+  nonce: number;
+  entry: {
+    value: string;
+    cursor: PromptHistoryCursor;
+  } | null;
+};
+
 export type TabOpenedEvent = {
   type: "$tab_opened";
   workspaceDir: string;
+  /** True when the frontend should focus this tab (user-opened, or the restored focused tab). */
+  active?: boolean;
 };
 
 export type TabClosedEvent = {
@@ -137,16 +181,38 @@ export type McpSpecInfo = {
   name: string | null;
   transport: "stdio" | "sse" | "streamable-http";
   summary: string;
+  config?: ImportedMcpServer;
   parseError?: string;
   status: McpSpecStatus;
+  statusHint?: "auth" | "missing-token" | "command" | "network" | "unknown";
   statusReason?: string;
   toolCount?: number;
+  tools?: McpToolInfo[];
+};
+
+export type McpToolInfo = {
+  name: string;
+  registeredName: string;
+  description?: string;
 };
 
 export type McpSpecsEvent = {
   type: "$mcp_specs";
   specs: McpSpecInfo[];
   bridged: boolean;
+};
+
+export type ImportedMcpServer = {
+  name: string;
+  transport: "stdio" | "sse" | "streamable-http";
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  cwd?: string;
+  url?: string;
+  headers?: Record<string, string>;
+  disabled?: boolean;
+  requestTimeoutMs?: number;
 };
 
 export type SkillScope = "project" | "global" | "builtin";
@@ -168,18 +234,37 @@ export type SkillsEvent = {
 export type CtxBreakdownEvent = {
   type: "$ctx_breakdown";
   reservedTokens: number;
+  /** Current log token count (real-time) — sent after /compact to refresh the meter. */
+  logTokens?: number;
 };
 
 export type MemoryEntryInfo = {
+  kind: "project_file" | "global_file" | "structured";
   name: string;
   scope: "project" | "global";
+  path: string;
   description: string;
+  type?: string;
 };
 
 export type MemoryEvent = {
   type: "$memory";
   entries: MemoryEntryInfo[];
 };
+
+export type MemoryDetail = MemoryEntryInfo & {
+  body: string;
+  createdAt?: string;
+};
+
+export type MemoryDetailEvent = {
+  type: "$memory_detail";
+  detail: MemoryDetail;
+};
+
+export type RetryResultEvent = { type: "$retry_result"; text: string };
+
+export type BtwResultEvent = { type: "$btw_result"; question: string; answer: string };
 
 export type JobInfo = {
   id: number;
@@ -228,7 +313,14 @@ export type SessionLoadedEvent = {
     totalCostUsd: number;
     cacheHitTokens: number;
     cacheMissTokens: number;
+    totalCompletionTokens: number;
   };
+};
+
+export type SessionEmptyEvent = {
+  type: "$session_empty";
+  name: string;
+  sizeBytes: number;
 };
 
 export type NeedsSetupEvent = {
@@ -236,13 +328,25 @@ export type NeedsSetupEvent = {
   reason: "no_api_key";
 };
 
-export type EditMode = "review" | "auto" | "yolo";
+export type EditMode = "review" | "auto" | "yolo" | "plan";
 
-export type PresetName = "auto" | "flash" | "pro";
+export type ReasoningEffort = "low" | "medium" | "high" | "max";
+
+export type WebSearchEngineName =
+  | "bing"
+  | "bing-intl"
+  | "searxng"
+  | "metaso"
+  | "baidu"
+  | "tavily"
+  | "perplexity"
+  | "exa"
+  | "brave"
+  | "ollama";
 
 export type SettingsEvent = {
   type: "$settings";
-  reasoningEffort: "high" | "max";
+  reasoningEffort: ReasoningEffort;
   editMode: EditMode;
   budgetUsd: number | null;
   baseUrl?: string;
@@ -250,9 +354,42 @@ export type SettingsEvent = {
   workspaceDir: string;
   recentWorkspaces: string[];
   model: string;
-  preset: PresetName;
   editor?: string;
+  desktopCloseBehavior?: "closeToTray" | "closeToQuit";
+  webSearchEngine?: WebSearchEngineName;
+  webSearchEndpoint?: string;
+  webSearchApiKeys?: {
+    metaso?: string;
+    baidu?: string;
+    tavily?: string;
+    perplexity?: string;
+    exa?: string;
+    ollama?: string;
+    brave?: string;
+  };
+  subagentModels?: Record<string, "flash" | "pro">;
+  showSystemEvents?: boolean;
   version: string;
+};
+
+export type QQSettingsEvent = {
+  type: "$qq_settings";
+  appId?: string;
+  appSecret?: string;
+  sandbox: boolean;
+  enabled: boolean;
+  configured: boolean;
+  runtimeState: "disconnected" | "connecting" | "connected" | "failed";
+  lastError?: string;
+  appIdPreview?: string;
+  access: string;
+};
+
+export type BalanceInfoItem = {
+  currency: string;
+  total: number;
+  granted?: number;
+  toppedUp?: number;
 };
 
 export type BalanceEvent = {
@@ -260,16 +397,38 @@ export type BalanceEvent = {
   currency: string;
   total: number;
   isAvailable: boolean;
+  balanceInfos: BalanceInfoItem[];
 };
 
 export type SettingsPatch = {
-  reasoningEffort?: "high" | "max";
+  reasoningEffort?: ReasoningEffort;
   editMode?: EditMode;
   budgetUsd?: number | null;
   baseUrl?: string;
   workspaceDir?: string;
-  preset?: PresetName;
+  recentWorkspaces?: string[];
+  model?: string;
   editor?: string;
+  desktopCloseBehavior?: "closeToTray" | "closeToQuit";
+  webSearchEngine?: WebSearchEngineName;
+  webSearchEndpoint?: string | null;
+  metasoApiKey?: string | null;
+  baiduApiKey?: string | null;
+  tavilyApiKey?: string | null;
+  perplexityApiKey?: string | null;
+  exaApiKey?: string | null;
+  ollamaApiKey?: string | null;
+  braveApiKey?: string | null;
+  subagentModels?: Record<string, "flash" | "pro">;
+  /** Per-model context-window override (tokens). Keys are model ids; values are the prompt-side token cap. */
+  contextTokens?: Record<string, number>;
+  showSystemEvents?: boolean;
+};
+
+export type QQConfigPatch = {
+  appId?: string;
+  appSecret?: string;
+  sandbox: boolean;
 };
 
 export type UserMessageEvent = {
@@ -286,7 +445,7 @@ export type ModelTurnStartedEvent = {
   ts: string;
   turn: number;
   model: string;
-  reasoningEffort: "high" | "max";
+  reasoningEffort: ReasoningEffort;
   prefixHash: string;
 };
 
@@ -355,6 +514,15 @@ export type StatusEvent = {
   text: string;
 };
 
+export type WarningEvent = {
+  type: "warning";
+  id: number;
+  ts: string;
+  turn: number;
+  text: string;
+  severity: "low" | "high";
+};
+
 export type KernelErrorEvent = {
   type: "error";
   id: number;
@@ -373,9 +541,13 @@ export type IncomingEvent = { tabId?: string } & (
   | ChoiceRequiredEvent
   | PlanRequiredEvent
   | SessionsEvent
+  | SessionImportSourcesEvent
+  | SessionImportResultEvent
   | SessionLoadedEvent
+  | SessionEmptyEvent
   | NeedsSetupEvent
   | SettingsEvent
+  | QQSettingsEvent
   | BalanceEvent
   | CheckpointRequiredEvent
   | RevisionRequiredEvent
@@ -383,12 +555,14 @@ export type IncomingEvent = { tabId?: string } & (
   | PlanClearedEvent
   | MentionResultsEvent
   | MentionPreviewEvent
+  | PromptHistoryResultEvent
   | TabOpenedEvent
   | TabClosedEvent
   | McpSpecsEvent
   | SkillsEvent
   | CtxBreakdownEvent
   | MemoryEvent
+  | MemoryDetailEvent
   | JobsEvent
   | UserMessageEvent
   | ModelTurnStartedEvent
@@ -398,7 +572,10 @@ export type IncomingEvent = { tabId?: string } & (
   | ToolIntentEvent
   | ToolResultEvent
   | StatusEvent
+  | WarningEvent
   | KernelErrorEvent
+  | RetryResultEvent
+  | BtwResultEvent
 );
 
 export type OutgoingCommand = { tabId?: string } & (
@@ -412,21 +589,45 @@ export type OutgoingCommand = { tabId?: string } & (
   | { cmd: "session_list" }
   | { cmd: "session_delete"; name: string }
   | { cmd: "session_load"; name: string }
+  | { cmd: "session_rename"; name: string; title: string }
+  | { cmd: "session_import"; source: ExternalSessionSource; path: string; name?: string }
+  | { cmd: "session_import_scan" }
+  | { cmd: "session_import_bulk"; sources: ExternalSessionSource[] }
+  | { cmd: "memory_read"; path: string }
   | { cmd: "new_chat" }
   | { cmd: "setup_save_key"; key: string }
   | { cmd: "settings_get" }
   | ({ cmd: "settings_save" } & SettingsPatch)
+  | { cmd: "qq_status_get" }
+  | { cmd: "qq_connect" }
+  | { cmd: "qq_disconnect" }
+  | ({ cmd: "qq_config_save" } & QQConfigPatch)
   | { cmd: "mention_query"; query: string; nonce: number }
   | { cmd: "mention_preview"; path: string; nonce: number }
   | { cmd: "mention_picked"; path: string }
+  | {
+      cmd: "prompt_history_step";
+      nonce: number;
+      direction: "older" | "newer";
+      cursor?: PromptHistoryCursor | null;
+      startSessionName?: string;
+      stopSessionName?: string;
+    }
   | { cmd: "tab_open"; workspaceDir?: string }
   | { cmd: "tab_close" }
+  | { cmd: "tab_activate"; tabId: string }
   | { cmd: "mcp_specs_get" }
   | { cmd: "mcp_specs_add"; spec: string }
   | { cmd: "mcp_specs_remove"; spec: string }
+  | { cmd: "mcp_import_servers"; servers: ImportedMcpServer[] }
+  | { cmd: "mcp_specs_update"; raw: string; server: ImportedMcpServer }
+  | { cmd: "mcp_specs_retry"; raw: string }
   | { cmd: "skills_get" }
   | { cmd: "skill_run"; name: string; args?: string }
   | { cmd: "jobs_list" }
   | { cmd: "jobs_stop"; jobId: number }
   | { cmd: "jobs_stop_all" }
+  | { cmd: "compact_history" }
+  | { cmd: "retry" }
+  | { cmd: "btw"; text: string }
 );

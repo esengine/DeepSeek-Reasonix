@@ -15,6 +15,7 @@ import type { TranscriptMeta } from "../../transcript/log.js";
 import { type TurnPage, computeCumulativeStats } from "../../transcript/replay.js";
 import { RecordView } from "./RecordView.js";
 import { StatsPanel } from "./StatsPanel.js";
+import { FG } from "./theme/tokens.js";
 
 export interface ReplayAppProps {
   meta: TranscriptMeta | null;
@@ -61,6 +62,12 @@ export function ReplayApp({ meta, pages }: ReplayAppProps) {
     // Replay is read-only — no live last-turn prompt tokens to show.
     lastPromptTokens: 0,
     lastTurnCostUsd: 0,
+    totalCacheHitTokens: 0,
+    totalCacheMissTokens: 0,
+    lastCacheMissTokens: 0,
+    lastToolSchemaTokens: 0,
+    lastPrefixChanged: false,
+    lastPrefixChangeReasons: [],
   };
 
   const prefixHash =
@@ -82,11 +89,11 @@ export function ReplayApp({ meta, pages }: ReplayAppProps) {
 
       <Box flexDirection="column" marginTop={1} paddingX={1}>
         <Box justifyContent="space-between">
-          <Text color="cyan" bold>
+          <Text color="ansi:cyan" bold>
             {progressLabel}
           </Text>
           {meta ? (
-            <Text dimColor>
+            <Text color={FG.faint}>
               {meta.source}
               {meta.task ? ` · ${meta.task}` : ""}
               {meta.mode ? ` · ${meta.mode}` : ""}
@@ -99,14 +106,14 @@ export function ReplayApp({ meta, pages }: ReplayAppProps) {
             {({ key, rec }) => <RecordView key={key} rec={rec} />}
           </Static>
         ) : (
-          <Text dimColor italic>
+          <Text color={FG.faint} italic>
             {t("replayApp.noRecords")}
           </Text>
         )}
       </Box>
 
-      <Box marginTop={1} paddingX={1} borderStyle="single" borderColor="gray">
-        <Text dimColor>
+      <Box marginTop={1} paddingX={1} borderStyle="single" borderColor="ansi:blackBright">
+        <Text color={FG.faint}>
           <Text bold>j</Text>/<Text bold>↓</Text>/<Text bold>space</Text> next · <Text bold>k</Text>
           /<Text bold>↑</Text> prev · <Text bold>g</Text> first · <Text bold>G</Text> last ·{" "}
           <Text bold>q</Text> quit

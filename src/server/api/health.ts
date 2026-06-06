@@ -1,7 +1,7 @@
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { listSessions } from "../../memory/session.js";
+import { listSessionsAsync } from "../../memory/session.js";
 import { VERSION } from "../../version.js";
 import type { DashboardContext } from "../context.js";
 import type { ApiResult } from "../router.js";
@@ -14,26 +14,24 @@ interface DirStat {
 }
 
 /** Sum file sizes one level deep. Recursion deferred until we have a use-case for nested data dirs. */
-function dirSize(path: string): DirStat {
-  if (!existsSync(path)) return { path, exists: false, fileCount: 0, totalBytes: 0 };
+async function dirSize(path: string): Promise<DirStat> {
   let fileCount = 0;
   let totalBytes = 0;
   try {
-    const entries = readdirSync(path);
+    const entries = await readdir(path);
     for (const name of entries) {
       const full = join(path, name);
       try {
-        const s = statSync(full);
+        const s = await stat(full);
         if (s.isFile()) {
           fileCount++;
           totalBytes += s.size;
         } else if (s.isDirectory()) {
-          // Recurse one level for nested folders (memory/<hash>, sessions/, etc).
           try {
-            const inner = readdirSync(full);
+            const inner = await readdir(full);
             for (const child of inner) {
               try {
-                const cs = statSync(join(full, child));
+                const cs = await stat(join(full, child));
                 if (cs.isFile()) {
                   fileCount++;
                   totalBytes += cs.size;
@@ -51,7 +49,7 @@ function dirSize(path: string): DirStat {
       }
     }
   } catch {
-    return { path, exists: true, fileCount: 0, totalBytes: 0 };
+    return { path, exists: false, fileCount: 0, totalBytes: 0 };
   }
   return { path, exists: true, fileCount, totalBytes };
 }
@@ -68,20 +66,20 @@ export async function handleHealth(
   const home = homedir();
   const reasonixHome = join(home, ".reasonix");
 
-  const sessionsStat = dirSize(join(reasonixHome, "sessions"));
-  const memoryStat = dirSize(join(reasonixHome, "memory"));
-  const semanticStat = dirSize(join(reasonixHome, "semantic"));
+  const [sessionsStat, memoryStat, semanticStat] = await Promise.all([
+    dirSize(join(reasonixHome, "sessions")),
+    dirSize(join(reasonixHome, "memory")),
+    dirSize(join(reasonixHome, "semantic")),
+  ]);
 
   let usageBytes = 0;
-  if (existsSync(ctx.usageLogPath)) {
-    try {
-      usageBytes = statSync(ctx.usageLogPath).size;
-    } catch {
-      /* ignore */
-    }
+  try {
+    usageBytes = (await stat(ctx.usageLogPath)).size;
+  } catch {
+    /* ignore */
   }
 
-  const sessions = listSessions();
+  const sessions = await listSessionsAsync();
 
   return {
     status: 200,

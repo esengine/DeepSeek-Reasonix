@@ -211,6 +211,12 @@ export interface TipCard extends CardBase {
   readonly oneTime: boolean;
 }
 
+export interface CompactionCard extends CardBase {
+  readonly kind: "compaction";
+  /** Synthesized recap body with the marker prefix stripped. */
+  readonly summary: string;
+}
+
 export type Card =
   | UserCard
   | ReasoningCard
@@ -228,7 +234,8 @@ export type Card =
   | LiveCard
   | CtxCard
   | DoctorCard
-  | TipCard;
+  | TipCard
+  | CompactionCard;
 
 export interface DoctorCheckEntry {
   readonly label: string;

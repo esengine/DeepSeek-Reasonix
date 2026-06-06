@@ -1,12 +1,12 @@
 /** Markdown → Ink. Parsing via marked; visual mapping mirrors dashboard/app.css `.md` rules. Code blocks pass through cli-highlight for ANSI syntax coloring. */
 
 import { highlight, supportsLanguage } from "cli-highlight";
-import { Box, Text, Transform, useStdout } from "ink";
+import { Box, type Color, Link, Text, useStdout } from "ink";
 import { type Token, type Tokens, marked } from "marked";
 import React from "react";
 import stringWidth from "string-width";
-import { wrapToCells } from "../../frame/width.js";
 import { decodeHtmlEntities } from "./html-entities.js";
+import { padToCells, wrapToCells } from "./text-width.js";
 import { FG, SURFACE, TONE } from "./theme/tokens.js";
 
 /** Left margin consumed by card outer marginLeft + body paddingLeft + safety. */
@@ -137,8 +137,12 @@ function ListItem({
 
 function CodeBlock({ token }: { token: Tokens.Code }): React.ReactElement {
   const lang = token.lang?.split(/\s+/)[0] ?? "";
-  const colored = highlightCode(decodeHtmlEntities(token.text), lang);
-  const lines = colored.split("\n");
+  // highlight.js tokenization runs every render unless memoized — multi-block
+  // assistant replies were re-highlighting on every parent re-render (slow tick, theme, resize).
+  const lines = React.useMemo(
+    () => highlightCode(decodeHtmlEntities(token.text), lang).split("\n"),
+    [token.text, lang],
+  );
   return (
     <Box flexDirection="column">
       {lang ? (
@@ -187,13 +191,6 @@ function Blockquote({ token }: { token: Tokens.Blockquote }): React.ReactElement
       ))}
     </Box>
   );
-}
-
-/** Right-pad to `cells` visual columns — wide chars (CJK, emoji) count as 2. */
-function padToCells(text: string, cells: number): string {
-  const w = stringWidth(text);
-  if (w >= cells) return text;
-  return text + " ".repeat(cells - w);
 }
 
 function HorizontalRule(): React.ReactElement {
@@ -375,13 +372,13 @@ function looksLikeFileRef(path: string, hasLine: boolean): boolean {
   return ext.length >= 2;
 }
 
-function osc8(children: React.ReactNode, target: string, color: string): React.ReactElement {
+function osc8(children: React.ReactNode, target: string, color: Color): React.ReactElement {
   return (
-    <Transform transform={(text) => `\x1b]8;;${target}\x1b\\${text}\x1b]8;;\x1b\\`}>
+    <Link url={target}>
       <Text color={color} underline>
         {children}
       </Text>
-    </Transform>
+    </Link>
   );
 }
 

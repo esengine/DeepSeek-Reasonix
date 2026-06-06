@@ -1,19 +1,30 @@
 import { promises as fs } from "node:fs";
 import * as pathMod from "node:path";
+import { type FileEncoding, decodeFileBuffer, encodeFile } from "../../code/file-encoding.js";
 
 function displayRel(rootDir: string, full: string): string {
   return pathMod.relative(rootDir, full).replaceAll("\\", "/");
 }
 
+/** Marker substring in the gate-reject message so tools.ts's repeat-rejection tracker spots a 2nd identical unread-edit and switches to the sharper "stop retrying" hint. */
+export const READ_BEFORE_EDIT_MARKER = "read_file first";
+
 export async function applyEdit(
   rootDir: string,
   abs: string,
   args: { search: string; replace: string },
+  hasRead?: (abs: string) => boolean,
 ): Promise<string> {
   if (args.search.length === 0) {
     throw new Error("edit_file: search cannot be empty");
   }
-  const before = await fs.readFile(abs, "utf8");
+  if (hasRead && !hasRead(abs)) {
+    throw new Error(
+      `edit_file: ${displayRel(rootDir, abs)} was not read this session — ${READ_BEFORE_EDIT_MARKER} so your SEARCH matches the bytes on disk.`,
+    );
+  }
+  const beforeBuf = await fs.readFile(abs);
+  const { text: before, encoding } = decodeFileBuffer(beforeBuf);
   const le = before.includes("\r\n") ? "\r\n" : "\n";
   const adaptedSearch = args.search.replace(/\r?\n/g, le);
   const adaptedReplace = args.replace.replace(/\r?\n/g, le);
@@ -29,12 +40,237 @@ export async function applyEdit(
   }
   const after =
     before.slice(0, firstIdx) + adaptedReplace + before.slice(firstIdx + adaptedSearch.length);
-  await fs.writeFile(abs, after, "utf8");
+  await fs.writeFile(abs, encodeFile(after, encoding));
   const rel = displayRel(rootDir, abs);
   const header = `edited ${rel} (${adaptedSearch.length}→${adaptedReplace.length} chars)`;
   const startLine = before.slice(0, firstIdx).split(/\r?\n/).length;
   const diff = renderEditDiff(adaptedSearch, adaptedReplace, startLine);
   return `${header}\n${diff}`;
+}
+
+export interface DeleteRangeArgs {
+  start_anchor: string;
+  end_anchor: string;
+  inclusive?: boolean;
+}
+
+export interface DeletePatch {
+  search: string;
+  replace: "";
+  startIndex: number;
+  endIndex: number;
+  startLine: number;
+  deletedChars: number;
+  noopReason?: string;
+}
+
+export function computeDeleteRangePatchFromText(text: string, args: DeleteRangeArgs): DeletePatch {
+  const startAnchor = args.start_anchor;
+  const endAnchor = args.end_anchor;
+  if (typeof startAnchor !== "string" || startAnchor.length === 0) {
+    return noDeletePatch("start_anchor is empty");
+  }
+  if (typeof endAnchor !== "string" || endAnchor.length === 0) {
+    return noDeletePatch("end_anchor is empty");
+  }
+  const startHits = allOccurrences(text, startAnchor);
+  if (startHits.length !== 1) {
+    return noDeletePatch(
+      startHits.length === 0
+        ? "start_anchor not found"
+        : `start_anchor appears ${startHits.length} times`,
+    );
+  }
+  const endHits = allOccurrences(text, endAnchor);
+  if (endHits.length !== 1) {
+    return noDeletePatch(
+      endHits.length === 0 ? "end_anchor not found" : `end_anchor appears ${endHits.length} times`,
+    );
+  }
+  const inclusive = args.inclusive !== false;
+  const startIdx = startHits[0]!;
+  const endIdx = endHits[0]!;
+  const deleteStart = inclusive ? startIdx : startIdx + startAnchor.length;
+  const deleteEnd = inclusive ? endIdx + endAnchor.length : endIdx;
+  if (deleteStart > deleteEnd) {
+    return noDeletePatch("start_anchor resolves after end_anchor");
+  }
+  if (deleteStart === deleteEnd) {
+    return noDeletePatch("anchor range is empty");
+  }
+  const search = text.slice(deleteStart, deleteEnd);
+  return {
+    search,
+    replace: "",
+    startIndex: deleteStart,
+    endIndex: deleteEnd,
+    startLine: text.slice(0, deleteStart).split(/\r?\n/).length,
+    deletedChars: search.length,
+  };
+}
+
+export function computeDeleteLineRangePatchFromText(
+  text: string,
+  startLine: number,
+  endLine: number,
+): DeletePatch {
+  if (!Number.isInteger(startLine) || !Number.isInteger(endLine)) {
+    return noDeletePatch("line range must be integer lines");
+  }
+  if (startLine < 1 || endLine < startLine) {
+    return noDeletePatch("line range is invalid");
+  }
+  const starts = lineStartOffsets(text);
+  if (startLine > starts.length) {
+    return noDeletePatch(`start line ${startLine} is outside the file`);
+  }
+  const startIdx = starts[startLine - 1]!;
+  const endIdx = starts[endLine] ?? text.length;
+  if (startIdx >= endIdx) return noDeletePatch("line range is empty");
+  const search = text.slice(startIdx, endIdx);
+  return {
+    search,
+    replace: "",
+    startIndex: startIdx,
+    endIndex: endIdx,
+    startLine,
+    deletedChars: search.length,
+  };
+}
+
+export async function applyDeleteRange(
+  rootDir: string,
+  abs: string,
+  args: DeleteRangeArgs,
+  hasRead?: (abs: string) => boolean,
+): Promise<string> {
+  if (hasRead && !hasRead(abs)) {
+    throw new Error(
+      `delete_range: ${displayRel(rootDir, abs)} was not read this session — ${READ_BEFORE_EDIT_MARKER} so anchors match the bytes on disk.`,
+    );
+  }
+  const beforeBuf = await fs.readFile(abs);
+  const { text: before, encoding } = decodeFileBuffer(beforeBuf);
+  const le = before.includes("\r\n") ? "\r\n" : "\n";
+  const patch = computeDeleteRangePatchFromText(before, {
+    ...args,
+    start_anchor: args.start_anchor.replace(/\r?\n/g, le),
+    end_anchor: args.end_anchor.replace(/\r?\n/g, le),
+  });
+  const rel = displayRel(rootDir, abs);
+  if (patch.noopReason) return `delete_range: no-op for ${rel} — ${patch.noopReason}`;
+  const after = `${before.slice(0, patch.startIndex)}${patch.replace}${before.slice(patch.endIndex)}`;
+  await fs.writeFile(abs, encodeFile(after, encoding));
+  return `delete_range: deleted ${patch.deletedChars} chars from ${rel}\n${renderEditDiff(patch.search, patch.replace, patch.startLine)}`;
+}
+
+export async function applyDeleteLineRange(
+  rootDir: string,
+  abs: string,
+  startLine: number,
+  endLine: number,
+  toolName: string,
+  hasRead?: (abs: string) => boolean,
+): Promise<string> {
+  if (hasRead && !hasRead(abs)) {
+    throw new Error(
+      `${toolName}: ${displayRel(rootDir, abs)} was not read this session — ${READ_BEFORE_EDIT_MARKER} so deletion matches the bytes on disk.`,
+    );
+  }
+  const beforeBuf = await fs.readFile(abs);
+  const { text: before, encoding } = decodeFileBuffer(beforeBuf);
+  const patch = computeDeleteLineRangePatchFromText(before, startLine, endLine);
+  const rel = displayRel(rootDir, abs);
+  if (patch.noopReason) return `${toolName}: no-op for ${rel} — ${patch.noopReason}`;
+  const after = `${before.slice(0, patch.startIndex)}${patch.replace}${before.slice(patch.endIndex)}`;
+  await fs.writeFile(abs, encodeFile(after, encoding));
+  return `${toolName}: deleted lines ${startLine}-${endLine} from ${rel}\n${renderEditDiff(patch.search, patch.replace, patch.startLine)}`;
+}
+
+export function expandSymbolDeletionStartLine(
+  lines: readonly string[],
+  symbolLine: number,
+): number {
+  let startLine = symbolLine;
+
+  startLine = expandDecoratorStartLine(lines, startLine);
+  startLine = expandDocCommentStartLine(lines, startLine);
+  return expandDecoratorStartLine(lines, startLine);
+}
+
+function noDeletePatch(reason: string): DeletePatch {
+  return {
+    search: "",
+    replace: "",
+    startIndex: 0,
+    endIndex: 0,
+    startLine: 1,
+    deletedChars: 0,
+    noopReason: reason,
+  };
+}
+
+function allOccurrences(haystack: string, needle: string): number[] {
+  const out: number[] = [];
+  let idx = haystack.indexOf(needle);
+  while (idx >= 0) {
+    out.push(idx);
+    idx = haystack.indexOf(needle, idx + Math.max(1, needle.length));
+  }
+  return out;
+}
+
+function lineStartOffsets(text: string): number[] {
+  const starts = [0];
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === "\n" && i + 1 < text.length) starts.push(i + 1);
+  }
+  return starts;
+}
+
+function expandDecoratorStartLine(lines: readonly string[], startLine: number): number {
+  let nextStart = startLine;
+  while (nextStart > 1) {
+    const previous = (lines[nextStart - 2] ?? "").trim();
+    if (previous.startsWith("@")) {
+      nextStart--;
+      continue;
+    }
+    if (looksLikeDecoratorContinuation(previous)) {
+      const decoratorStart = findDecoratorStartAbove(lines, nextStart - 1);
+      if (decoratorStart !== null) {
+        nextStart = decoratorStart;
+        continue;
+      }
+    }
+    break;
+  }
+  return nextStart;
+}
+
+function looksLikeDecoratorContinuation(trimmed: string): boolean {
+  return /^[)\]}]/.test(trimmed);
+}
+
+function findDecoratorStartAbove(lines: readonly string[], lastLine: number): number | null {
+  for (let line = lastLine; line >= 1; line--) {
+    const trimmed = (lines[line - 1] ?? "").trim();
+    if (trimmed.length === 0) return null;
+    if (trimmed.startsWith("@")) return line;
+  }
+  return null;
+}
+
+function expandDocCommentStartLine(lines: readonly string[], startLine: number): number {
+  if (startLine <= 1) return startLine;
+  const previous = (lines[startLine - 2] ?? "").trim();
+  if (!previous.endsWith("*/")) return startLine;
+  for (let line = startLine - 1; line >= 1; line--) {
+    const trimmed = (lines[line - 1] ?? "").trim();
+    if (trimmed.startsWith("/**")) return line;
+    if (!trimmed.startsWith("*") && trimmed.length > 0) return startLine;
+  }
+  return startLine;
 }
 
 export interface MultiEditEntry {
@@ -46,16 +282,19 @@ export interface MultiEditEntry {
 export async function applyMultiEdit(
   rootDir: string,
   edits: ReadonlyArray<MultiEditEntry>,
+  hasRead?: (abs: string) => boolean,
 ): Promise<string> {
   if (edits.length === 0) {
     throw new Error("multi_edit: edits must contain at least one entry");
   }
   type FileState = {
+    before: string;
     buf: string;
     le: string;
     hunks: string[];
     deltaChars: number;
     touched: number;
+    encoding: FileEncoding;
   };
   const filesByPath = new Map<string, FileState>();
 
@@ -80,16 +319,23 @@ export async function applyMultiEdit(
     }
     let state = filesByPath.get(e.abs);
     if (!state) {
+      if (hasRead && !hasRead(e.abs)) {
+        throw new Error(
+          `multi_edit: edit #${i + 1} target ${rel} was not read this session — ${READ_BEFORE_EDIT_MARKER} (no edits applied)`,
+        );
+      }
       let before: string;
+      let encoding: FileEncoding;
       try {
-        before = await fs.readFile(e.abs, "utf8");
+        const buf = await fs.readFile(e.abs);
+        ({ text: before, encoding } = decodeFileBuffer(buf));
       } catch (err) {
         throw new Error(
           `multi_edit: edit #${i + 1} cannot read ${rel}: ${(err as Error).message} (no edits applied)`,
         );
       }
       const le = before.includes("\r\n") ? "\r\n" : "\n";
-      state = { buf: before, le, hunks: [], deltaChars: 0, touched: 0 };
+      state = { before, buf: before, le, hunks: [], deltaChars: 0, touched: 0, encoding };
       filesByPath.set(e.abs, state);
     }
     const adaptedSearch = e.search.replace(/\r?\n/g, state.le);
@@ -97,7 +343,7 @@ export async function applyMultiEdit(
     const firstIdx = state.buf.indexOf(adaptedSearch);
     if (firstIdx < 0) {
       throw new Error(
-        `multi_edit: edit #${i + 1} search text not found in ${rel} — no edits applied (multi_edit is atomic)`,
+        `multi_edit: edit #${i + 1} search text not found in ${rel} — no edits applied`,
       );
     }
     const nextIdx = state.buf.indexOf(adaptedSearch, firstIdx + 1);
@@ -116,8 +362,31 @@ export async function applyMultiEdit(
     state.touched++;
   }
 
-  for (const [abs, state] of filesByPath) {
-    await fs.writeFile(abs, state.buf, "utf8");
+  // Push to `attempted` BEFORE writeFile so a write that truncates or
+  // partially-writes before failing is also rolled back.
+  const attempted: Array<{ abs: string; before: string; encoding: FileEncoding }> = [];
+  try {
+    for (const [abs, state] of filesByPath) {
+      attempted.push({ abs, before: state.before, encoding: state.encoding });
+      await fs.writeFile(abs, encodeFile(state.buf, state.encoding));
+    }
+  } catch (writeErr) {
+    const rollbackFailures: string[] = [];
+    for (const item of [...attempted].reverse()) {
+      try {
+        await fs.writeFile(item.abs, encodeFile(item.before, item.encoding));
+      } catch (restoreErr) {
+        rollbackFailures.push(`${displayRel(rootDir, item.abs)}: ${(restoreErr as Error).message}`);
+      }
+    }
+    if (rollbackFailures.length > 0) {
+      throw new Error(
+        `multi_edit: write failed after partial application: ${(writeErr as Error).message}; rollback failed for ${rollbackFailures.join("; ")}`,
+      );
+    }
+    throw new Error(
+      `multi_edit: write failed: ${(writeErr as Error).message}; rolled back all files that may have been modified`,
+    );
   }
 
   const fileCount = filesByPath.size;
@@ -142,6 +411,49 @@ function renderEditDiff(search: string, replace: string, startLine: number): str
   const hunk = `@@ -${startLine},${a.length} +${startLine},${b.length} @@`;
   const body = diff.map((d) => `${d.op === " " ? " " : d.op} ${d.line}`).join("\n");
   return `${hunk}\n${body}`;
+}
+
+/** Thresholds beyond which write_file skips full diff to avoid slow LCS on huge files. */
+const WRITE_DIFF_MAX_LINES = 5000;
+const WRITE_DIFF_MAX_BYTES = 100 * 1024;
+
+/** Generate write_file result with unified diff, matching edit_file format. New file → `created path (N chars)`, overwrite → `edited path (old→new chars)` + diff, large file → summary only. */
+export function generateWriteDiff(
+  oldContent: string | null,
+  newContent: string,
+  rel: string,
+): string {
+  const newLen = newContent.length;
+
+  // New file — no old content to diff against.
+  if (oldContent === null) {
+    return `created ${rel} (${newLen} chars)`;
+  }
+
+  const oldLen = oldContent.length;
+
+  // No changes.
+  if (oldContent === newContent) {
+    return `edited ${rel} (${oldLen}→${newLen} chars)`;
+  }
+
+  // Large file — skip diff computation to avoid O(n*m) LCS blowup.
+  if (
+    oldContent.length > WRITE_DIFF_MAX_BYTES ||
+    newContent.length > WRITE_DIFF_MAX_BYTES ||
+    oldContent.split(/\r?\n/).length > WRITE_DIFF_MAX_LINES ||
+    newContent.split(/\r?\n/).length > WRITE_DIFF_MAX_LINES
+  ) {
+    return `edited ${rel} (${oldLen}→${newLen} chars) [diff too large]`;
+  }
+
+  const header = `edited ${rel} (${oldLen}→${newLen} chars)`;
+  const oldLines = oldContent.split(/\r?\n/);
+  const newLines = newContent.split(/\r?\n/);
+  const diff = lineDiff(oldLines, newLines);
+  const hunk = `@@ -1,${oldLines.length} +1,${newLines.length} @@`;
+  const body = diff.map((d) => `${d.op === " " ? " " : d.op} ${d.line}`).join("\n");
+  return `${header}\n${hunk}\n${body}`;
 }
 
 export function lineDiff(

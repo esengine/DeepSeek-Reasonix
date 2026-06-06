@@ -2,7 +2,7 @@
 
 import { Box, Text } from "ink";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { readConfig, writeConfig } from "../../config.js";
+import { normalizeMcpConfig, readConfig, writeConfig } from "../../config.js";
 import { t } from "../../i18n/index.js";
 import { loadOverlay } from "../../mcp/marketplace-overlay/loader.js";
 import {
@@ -16,6 +16,7 @@ import type { RegistryEntry } from "../../mcp/registry-types.js";
 import { type PickerBroadcastPorts, usePickerBroadcast } from "./dashboard/use-picker-broadcast.js";
 import { useKeystroke } from "./keystroke-context.js";
 import { COLOR } from "./theme.js";
+import { FG } from "./theme/tokens.js";
 
 const VISIBLE_ROWS = 10;
 
@@ -96,7 +97,11 @@ function isInstalled(installedSpecs: string[], entry: RegistryEntry): string | n
   if (!entry.install) return null;
   try {
     const spec = specStringFor(entry.name, entry.install);
-    return installedSpecs.includes(spec) ? spec : null;
+    if (installedSpecs.includes(spec)) return spec;
+    // Also check for name collision with mcpServers entries
+    const normalized = normalizeMcpConfig(readConfig());
+    if (normalized.some((s) => s.name === entry.name)) return spec;
+    return null;
   } catch {
     return null;
   }
@@ -360,18 +365,18 @@ export function McpMarketplace({ onClose, postInfo, reloadMcp, pickerPorts }: Mc
         <Text bold color={COLOR.brand}>
           ◈ MCP marketplace
         </Text>
-        <Text dimColor>{`  ·  ${state.status}`}</Text>
+        <Text color={FG.faint}>{`  ·  ${state.status}`}</Text>
       </Box>
       <Box marginTop={1}>
         <Text>{t("mcpMarketplace.filter")}</Text>
         <Text>{state.query || t("mcpMarketplace.filterPlaceholder")}</Text>
         <Text
-          dimColor
+          color={FG.faint}
         >{`  ${t(filtered.length === 1 ? "mcpMarketplace.matchSingular" : "mcpMarketplace.matchPlural", { n: filtered.length })}`}</Text>
       </Box>
       <Box marginTop={1} flexDirection="column">
         {window.length === 0 ? (
-          <Text dimColor>
+          <Text color={FG.faint}>
             {state.loading ? t("mcpMarketplace.loading") : t("mcpMarketplace.noEntries")}
           </Text>
         ) : (
@@ -387,7 +392,7 @@ export function McpMarketplace({ onClose, postInfo, reloadMcp, pickerPorts }: Mc
               <Box key={e.name}>
                 <Text color={active ? COLOR.brand : undefined}>{active ? "▸ " : "  "}</Text>
                 <Text bold={active}>{e.name.padEnd(38).slice(0, 38)}</Text>
-                <Text dimColor>{` ${tag}${pop}${installedBadge}`}</Text>
+                <Text color={FG.faint}>{` ${tag}${pop}${installedBadge}`}</Text>
               </Box>
             );
           })
@@ -398,14 +403,14 @@ export function McpMarketplace({ onClose, postInfo, reloadMcp, pickerPorts }: Mc
           <Text bold>
             {overlay?.[selected.name]?.title ?? selected.title}
             {overlay?.[selected.name] ? (
-              <Text dimColor>{`  \u00b7  ${selected.title}`}</Text>
+              <Text color={FG.faint}>{`  \u00b7  ${selected.title}`}</Text>
             ) : null}
           </Text>
-          <Text dimColor>
+          <Text color={FG.faint}>
             {overlay?.[selected.name]?.description ?? selected.description?.slice(0, 200) ?? null}
           </Text>
           {selected.install ? (
-            <Text dimColor>
+            <Text color={FG.faint}>
               {t("mcpMarketplace.specLine", {
                 runtime: selected.install.runtime,
                 id: selected.install.packageId ?? selected.install.url ?? "\u2014",
@@ -413,17 +418,17 @@ export function McpMarketplace({ onClose, postInfo, reloadMcp, pickerPorts }: Mc
               })}
             </Text>
           ) : (
-            <Text dimColor>{t("mcpMarketplace.smitheryDetail")}</Text>
+            <Text color={FG.faint}>{t("mcpMarketplace.smitheryDetail")}</Text>
           )}
           {selected.install?.requiredEnv?.length ? (
-            <Text color="yellow">
+            <Text color="ansi:yellow">
               {t("mcpMarketplace.needsEnv", { env: selected.install.requiredEnv.join(", ") })}
             </Text>
           ) : null}
         </Box>
       ) : null}
       <Box marginTop={1}>
-        <Text dimColor>{t("mcpMarketplace.footerHint")}</Text>
+        <Text color={FG.faint}>{t("mcpMarketplace.footerHint")}</Text>
       </Box>
     </Box>
   );

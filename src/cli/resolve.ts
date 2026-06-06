@@ -1,14 +1,23 @@
-/** Precedence: per-setting flag > --preset > config.preset > "auto" defaults. */
-
-import { type PresetName, type ReasonixConfig, normalizeMcpConfig, readConfig } from "../config.js";
+import {
+  DEFAULT_MODEL,
+  type ReasoningEffort,
+  type ReasonixConfig,
+  isReasoningEffort,
+  loadModel,
+  loadReasoningEffort,
+  normalizeMcpConfig,
+  readConfig,
+} from "../config.js";
+import { loadDotMcpJson } from "../mcp/dot-mcp-json.js";
 import { specToRaw } from "../mcp/spec.js";
-import { resolvePreset } from "./ui/presets.js";
 
 export interface ResolvedDefaults {
   model: string;
-  reasoningEffort: "high" | "max";
+  reasoningEffort: ReasoningEffort;
   mcp: string[];
   session: string | undefined;
+  /** True when autoResumeSession:false is in effect — tells callers to skip the session picker. */
+  forceNew?: boolean;
 }
 
 export interface RawCliFlags {
@@ -16,64 +25,57 @@ export interface RawCliFlags {
   mcp?: string[];
   /** Commander's `--no-session` surfaces as `false`; `--session X` as a string. */
   session?: string | false;
-  /** `--preset <name>`. */
-  preset?: string;
+  /** `--effort low|medium|high|max`. */
+  effort?: string;
   /** When true, ignore config entirely (power-user escape hatch). */
   noConfig?: boolean;
 }
 
 export function resolveDefaults(flags: RawCliFlags): ResolvedDefaults {
   const cfg: ReasonixConfig = flags.noConfig ? {} : readConfig();
-  const preset = pickPreset(flags.preset, cfg.preset);
-  const presetSettings = resolvePreset(preset);
+  const model =
+    flags.model?.trim() || (flags.noConfig ? cfg.model?.trim() : loadModel()) || DEFAULT_MODEL;
 
-  const model = flags.model ?? presetSettings.model;
-  const reasoningEffort = presetSettings.reasoningEffort;
+  const flagEffort = flags.effort?.toLowerCase();
+  const reasoningEffort: ReasoningEffort = isReasoningEffort(flagEffort)
+    ? flagEffort
+    : flags.noConfig
+      ? "high"
+      : loadReasoningEffort();
 
-  // `--mcp` accumulator is [] when absent. Treat empty from flags as
-  // "user didn't pass" → fall through to config. Users who explicitly
-  // want zero MCP servers can pass `--no-config` or edit the file.
+  const merged = flags.noConfig ? cfg : mergeDotMcpJson(cfg, process.cwd());
+
   const normalizedMcp = normalizeMcpConfig(
-    cfg,
+    merged,
     flags.mcp && flags.mcp.length > 0 ? flags.mcp : undefined,
   );
   const mcp = normalizedMcp.map(specToRaw);
 
-  const session = resolveSession(flags.session, cfg.session);
+  const session = resolveSession(flags.session, cfg.session, cfg.autoResumeSession);
+  const forceNew =
+    cfg.autoResumeSession === false && flags.session === undefined ? true : undefined;
 
-  return { model, reasoningEffort, mcp, session };
+  return { model, reasoningEffort, mcp, session, forceNew };
 }
 
-function pickPreset(
-  flagPreset: string | undefined,
-  configPreset: PresetName | undefined,
-): PresetName {
-  if (flagPreset && isPresetName(flagPreset)) return flagPreset;
-  if (configPreset) return configPreset;
-  return "auto";
-}
-
-function isPresetName(s: string): s is PresetName {
-  return (
-    s === "auto" ||
-    s === "flash" ||
-    s === "pro" ||
-    // Legacy names — kept callable so old `--preset smart` invocations
-    // and stale config.json entries don't error out.
-    s === "fast" ||
-    s === "smart" ||
-    s === "max"
-  );
+function mergeDotMcpJson(cfg: ReasonixConfig, projectRoot: string): ReasonixConfig {
+  const project = loadDotMcpJson(projectRoot);
+  if (!project) return cfg;
+  return { ...cfg, mcpServers: { ...(cfg.mcpServers ?? {}), ...project } };
 }
 
 function resolveSession(
   flag: string | false | undefined,
   configSession: string | null | undefined,
+  autoResume?: boolean,
 ): string | undefined {
-  if (flag === false) return undefined; // --no-session
+  if (flag === false) return undefined;
   if (typeof flag === "string" && flag.length > 0) return flag;
-  if (configSession === null) return undefined; // config opted out
+  if (configSession === null) return undefined;
   if (typeof configSession === "string" && configSession.length > 0) return configSession;
+  // When autoResumeSession is explicitly false, don't default to "default" session
+  // so each launch starts fresh instead of resuming the previous conversation (#2238).
+  if (autoResume === false) return undefined;
   return "default";
 }
 

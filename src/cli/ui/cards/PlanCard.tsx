@@ -1,9 +1,10 @@
-import { Box, Text } from "ink";
+import { Box, type Color, Text } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
 import { t } from "../../../i18n/index.js";
 import { Card } from "../primitives/Card.js";
 import { CardHeader } from "../primitives/CardHeader.js";
+import { PULSE_DIAMOND, Pulse } from "../primitives/Pulse.js";
 import type { PlanCard as PlanCardData, PlanStep } from "../state/cards.js";
 import { useThemeTokens } from "../theme/context.js";
 
@@ -20,7 +21,7 @@ const VISIBLE_WINDOW = 5;
 
 export function PlanCard({ card }: { card: PlanCardData }): React.ReactElement {
   const { fg, tone, toneActive } = useThemeTokens();
-  const statusColor: Record<PlanStep["status"], string> = {
+  const statusColor: Record<PlanStep["status"], Color> = {
     queued: fg.faint,
     running: toneActive.brand,
     done: tone.ok,
@@ -43,7 +44,14 @@ export function PlanCard({ card }: { card: PlanCardData }): React.ReactElement {
 
   return (
     <Card tone={cardTone}>
-      <CardHeader glyph="●" tone={cardTone} title={card.title} meta={[progress]} />
+      <CardHeader
+        glyph={
+          hasRunning ? <Pulse active frames={PULSE_DIAMOND} settled="◆" color={cardTone} /> : "●"
+        }
+        tone={cardTone}
+        title={card.title}
+        meta={[progress]}
+      />
       {window.hiddenBefore > 0 ? (
         <Box flexDirection="row" gap={1}>
           <Text color={tone.ok}>✓</Text>
@@ -55,7 +63,11 @@ export function PlanCard({ card }: { card: PlanCardData }): React.ReactElement {
         const titleColor = isActive ? fg.strong : fg.sub;
         return (
           <Box key={step.id} flexDirection="row" gap={1}>
-            <Text color={statusColor[step.status]}>{STATUS_GLYPH[step.status]}</Text>
+            {isActive ? (
+              <Pulse active frames={PULSE_DIAMOND} settled="◆" color={statusColor[step.status]} />
+            ) : (
+              <Text color={statusColor[step.status]}>{STATUS_GLYPH[step.status]}</Text>
+            )}
             <Text bold={isActive} color={titleColor}>
               {`${step.indexLabel}. ${step.title}`}
             </Text>

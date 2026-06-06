@@ -3,36 +3,82 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { loadQQConfig } from "../config.js";
 import { loadDotenv } from "../env.js";
+import { t } from "../i18n/index.js";
+import { decideQQAccess, describeQQAccess, redactQQOpenId } from "./access.js";
 import { type C2CMessage, QQBot } from "./bot.js";
+import { formatQQAccessSummary } from "./strings.js";
 
 const QQ_LOCK_FILE = join(homedir(), ".reasonix", "qq-channel.pid");
+const QQ_MAX_CHUNK_BYTES = 1500;
+const NATURAL_SPLIT_MIN_FRACTION = 0.6;
+const QQ_MARKDOWN_WRAPPER_RE = /^```(?:markdown|md)\s*\r?\n([\s\S]*?)\r?\n```$/i;
 
-function chunkMessage(text: string, maxLen = 1500): string[] {
+function fitUtf8Slice(text: string, maxBytes: number): string {
+  let end = 0;
+  let bytes = 0;
+  for (const char of text) {
+    const nextBytes = Buffer.byteLength(char, "utf8");
+    if (bytes > 0 && bytes + nextBytes > maxBytes) break;
+    end += char.length;
+    bytes += nextBytes;
+  }
+  return end > 0 ? text.slice(0, end) : text.slice(0, 1);
+}
+
+function pickNaturalSplit(candidate: string): number {
+  const minSplit = Math.floor(candidate.length * NATURAL_SPLIT_MIN_FRACTION);
+  const splitters = ["\n\n", "\n", " "];
+  for (const splitter of splitters) {
+    const at = candidate.lastIndexOf(splitter);
+    if (at >= minSplit) return at + splitter.length;
+  }
+  return candidate.length;
+}
+
+export function splitQQMessage(text: string, maxBytes = QQ_MAX_CHUNK_BYTES): string[] {
   const chunks: string[] = [];
   let remaining = text;
-  while (remaining.length > maxLen) {
-    let splitAt = remaining.lastIndexOf("\n", maxLen);
-    if (splitAt < 0) splitAt = remaining.lastIndexOf(" ", maxLen);
-    if (splitAt < 0) splitAt = maxLen;
-    chunks.push(remaining.slice(0, splitAt));
-    remaining = remaining.slice(splitAt).trim();
+  while (remaining.length > 0) {
+    if (Buffer.byteLength(remaining, "utf8") <= maxBytes) {
+      chunks.push(remaining);
+      break;
+    }
+
+    const candidate = fitUtf8Slice(remaining, maxBytes);
+    const splitAt = pickNaturalSplit(candidate);
+    chunks.push(candidate.slice(0, splitAt));
+    remaining = remaining.slice(splitAt).trimStart();
   }
-  if (remaining.length > 0) chunks.push(remaining);
   return chunks;
+}
+
+export function normalizeQQMarkdownReply(text: string): string {
+  const trimmed = text.trim();
+  const match = trimmed.match(QQ_MARKDOWN_WRAPPER_RE);
+  if (!match) {
+    return text;
+  }
+  return match[1] ?? text;
 }
 
 export class QQChannel {
   private bot: QQBot | null = null;
   private qqUserId: string | null = null;
   private qqMessageId: string | null = null;
+  private ownerOpenId: string | undefined;
+  private allowlist: string[] | undefined;
+  private runtimeBoundOpenId: string | null = null;
   private processedMsgIds = new Set<string>();
   private processedMsgIdQueue: string[] = [];
   private lockAcquired = false;
+  private nextOutboundMsgSeq = 1;
+  private markdownDisabled = false;
 
   constructor(
     private callbacks: {
       onSubmitMessage: (text: string) => void;
       onError?: (msg: string) => void;
+      onInfo?: (msg: string) => void;
     },
   ) {}
 
@@ -53,9 +99,7 @@ export class QQChannel {
       if (Number.isInteger(existing) && existing > 0 && existing !== process.pid) {
         try {
           process.kill(existing, 0);
-          throw new Error(
-            `QQ channel is already running in process ${existing}. Stop that process before starting another QQ channel.`,
-          );
+          throw new Error(t("handlers.qq.lockAlreadyRunning", { pid: existing }));
         } catch (err) {
           const e = err as NodeJS.ErrnoException;
           if (e.code !== "ESRCH") throw err;
@@ -80,6 +124,71 @@ export class QQChannel {
     this.lockAcquired = false;
   }
 
+  private applyAccessConfig(config: ReturnType<typeof loadQQConfig>): void {
+    this.ownerOpenId = config.ownerOpenId;
+    this.allowlist = config.allowlist;
+    if (this.ownerOpenId || (this.allowlist?.length ?? 0) > 0) {
+      this.runtimeBoundOpenId = null;
+    }
+  }
+
+  private handlePrivateMessage(msg: C2CMessage): void {
+    const text = msg.content?.trim();
+    if (!text) return;
+    if (!this.rememberMessage(msg.id)) return;
+
+    const openid = msg.author.user_openid;
+    const verdict = decideQQAccess(
+      {
+        ownerOpenId: this.ownerOpenId,
+        allowlist: this.allowlist,
+        runtimeBoundOpenId: this.runtimeBoundOpenId,
+      },
+      openid,
+    );
+    if (!verdict.accept) {
+      this.callbacks.onError?.(
+        t("handlers.qq.unauthorizedMessage", {
+          openid: redactQQOpenId(openid),
+          access: formatQQAccessSummary({
+            ownerOpenId: this.ownerOpenId,
+            allowlist: this.allowlist,
+            runtimeBoundOpenId: this.runtimeBoundOpenId,
+          }),
+        }),
+      );
+      return;
+    }
+    if (verdict.bindRuntime) {
+      this.runtimeBoundOpenId = openid;
+      this.callbacks.onInfo?.(
+        t("handlers.qq.runtimeBound", {
+          openid: redactQQOpenId(openid),
+        }),
+      );
+    }
+
+    this.qqUserId = openid;
+    this.qqMessageId = msg.id;
+    this.callbacks.onSubmitMessage(`[QQ] ${text}`);
+  }
+
+  refreshAccessConfig(): void {
+    this.applyAccessConfig(loadQQConfig());
+  }
+
+  describeAccess(): string {
+    return describeQQAccess({
+      ownerOpenId: this.ownerOpenId,
+      allowlist: this.allowlist,
+      runtimeBoundOpenId: this.runtimeBoundOpenId,
+    });
+  }
+
+  getRuntimeBoundOpenId(): string | null {
+    return this.runtimeBoundOpenId;
+  }
+
   async start(): Promise<void> {
     loadDotenv();
     this.acquireLock();
@@ -87,12 +196,13 @@ export class QQChannel {
     const config = loadQQConfig();
     if (!config.appId) {
       this.releaseLock();
-      throw new Error("QQ App ID is required. Run `/qq connect` to configure.");
+      throw new Error(t("handlers.qq.missingAppId"));
     }
     if (!config.appSecret) {
       this.releaseLock();
-      throw new Error("QQ App Secret is required. Run `/qq connect` to configure.");
+      throw new Error(t("handlers.qq.missingAppSecret"));
     }
+    this.applyAccessConfig(config);
 
     const bot = new QQBot({
       appid: config.appId,
@@ -109,12 +219,7 @@ export class QQChannel {
     });
 
     bot.on("message.private", (msg: C2CMessage) => {
-      const text = msg.content?.trim();
-      if (!text) return;
-      if (!this.rememberMessage(msg.id)) return;
-      this.qqUserId = msg.author.user_openid;
-      this.qqMessageId = msg.id;
-      this.callbacks.onSubmitMessage(`[QQ] ${text}`);
+      this.handlePrivateMessage(msg);
     });
 
     this.bot = bot;
@@ -129,10 +234,10 @@ export class QQChannel {
       ]);
 
       if (readyOrError === "error") {
-        throw new Error("QQ bot authentication failed - check your appId and appSecret");
+        throw new Error(t("handlers.qq.authFailed"));
       }
       if (readyOrError === "timeout") {
-        throw new Error("QQ bot did not receive READY within 15s - check your appId and appSecret");
+        throw new Error(t("handlers.qq.readyTimeout"));
       }
     } catch (err) {
       this.releaseLock();
@@ -142,13 +247,41 @@ export class QQChannel {
 
   async sendResponse(text: string): Promise<void> {
     if (!this.bot || !this.qqUserId) return;
-    const chunks = chunkMessage(text);
-    for (const chunk of chunks) {
+    const chunks = splitQQMessage(normalizeQQMarkdownReply(text));
+    for (let index = 0; index < chunks.length; index++) {
+      const chunk = chunks[index];
+      if (!chunk) continue;
       try {
-        await this.bot.sendPrivateMessage(this.qqUserId, chunk, this.qqMessageId ?? undefined);
+        const msgSeq = this.nextOutboundMsgSeq++;
+        if (!this.markdownDisabled) {
+          try {
+            await this.bot.sendPrivateMessage(
+              this.qqUserId,
+              chunk,
+              this.qqMessageId ?? undefined,
+              msgSeq,
+              true,
+            );
+            continue;
+          } catch (err) {
+            this.markdownDisabled = true;
+            this.callbacks.onError?.(
+              `QQ markdown delivery disabled after first failure: ${(err as Error).message}`,
+            );
+          }
+        }
+
+        await this.bot.sendPrivateMessage(
+          this.qqUserId,
+          chunk,
+          this.qqMessageId ?? undefined,
+          this.nextOutboundMsgSeq++,
+          false,
+        );
       } catch (err) {
-        const msg = `QQ sendResponse error: ${(err as Error).message}`;
+        const msg = `QQ sendResponse chunk ${index + 1}/${chunks.length} failed: ${(err as Error).message}`;
         this.callbacks.onError?.(msg);
+        break;
       }
     }
   }

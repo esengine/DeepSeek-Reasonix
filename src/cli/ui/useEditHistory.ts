@@ -6,12 +6,14 @@ import {
   type EditSnapshot,
   restoreSnapshots,
 } from "../../code/edit-blocks.js";
+import { t } from "../../i18n/index.js";
 import {
   type EditHistoryEntry,
   entryStatus,
   formatUndoRows,
   isEntryFullyUndone,
 } from "./edit-history.js";
+import type { CodeUndoResult } from "./undo-context.js";
 
 export interface UndoBannerState {
   results: ApplyResult[];
@@ -34,7 +36,7 @@ export interface UseEditHistoryResult {
   armUndoBanner: (results: ApplyResult[]) => void;
   /** Pause / resume the active undo countdown. No-ops if the banner is already settled. */
   toggleUndoPause: () => void;
-  codeUndo: (args?: readonly string[]) => string;
+  codeUndo: (args?: readonly string[]) => CodeUndoResult;
   codeHistory: () => string;
   codeShowEdit: (args?: readonly string[]) => string;
   /** Sealed at handleSubmit start so prior turns stay intact for independent /history walks. */
@@ -111,13 +113,15 @@ export function useEditHistory(codeMode: { rootDir: string } | undefined): UseEd
 
   const codeUndo = useCallback<UseEditHistoryResult["codeUndo"]>(
     (args = []) => {
-      if (!codeMode) return "not in code mode";
+      if (!codeMode) return { info: "not in code mode" };
       const root = codeMode.rootDir;
 
-      const revert = (entry: EditHistoryEntry, paths: readonly string[]): string => {
+      const revert = (entry: EditHistoryEntry, paths: readonly string[]): CodeUndoResult => {
         const subset = entry.snapshots.filter((s) => paths.includes(s.path));
         if (subset.length === 0) {
-          return `batch #${entry.id}: nothing to undo (already restored or path not in batch)`;
+          return {
+            info: `batch #${entry.id}: nothing to undo (already restored or path not in batch)`,
+          };
         }
         const results = restoreSnapshots(subset, root);
         for (const s of subset) entry.undoneFiles.add(s.path);
@@ -132,7 +136,16 @@ export function useEditHistory(codeMode: { rootDir: string } | undefined): UseEd
         const when = new Date(entry.at).toISOString().replace("T", " ").slice(11, 19);
         const scope = subset.length === 1 ? subset[0]!.path : `${subset.length} file(s)`;
         const header = `▸ undo: reverted ${scope} from batch #${entry.id} (${when})`;
-        return [header, ...formatUndoRows(results)].join("\n");
+        const revertedPaths = results
+          .filter((r) => r.status === "applied" || r.status === "created")
+          .map((r) => r.path);
+        return {
+          info: [header, ...formatUndoRows(results)].join("\n"),
+          contextEvent:
+            revertedPaths.length > 0
+              ? { batchId: entry.id, source: entry.source, paths: revertedPaths }
+              : undefined,
+        };
       };
 
       const idArg = args[0];
@@ -145,31 +158,35 @@ export function useEditHistory(codeMode: { rootDir: string } | undefined): UseEd
           const remaining = e.snapshots.map((s) => s.path).filter((p) => !e.undoneFiles.has(p));
           return revert(e, remaining);
         }
-        return "nothing to undo — every batch in the session history is already undone";
+        return { info: "nothing to undo — every batch in the session history is already undone" };
       }
 
       const id = Number.parseInt(idArg, 10);
       if (!Number.isFinite(id)) {
-        return "usage: /undo [id] [path]   (omit id for newest; id from /history; path from /show <id>)";
+        return {
+          info: "usage: /undo [id] [path]   (omit id for newest; id from /history; path from /show <id>)",
+        };
       }
       const entry = editHistory.current.find((e) => e.id === id);
-      if (!entry) return `no edit #${id} — run /history to see valid ids`;
+      if (!entry) return { info: `no edit #${id} — run /history to see valid ids` };
 
       if (!pathArg) {
         const remaining = entry.snapshots
           .map((s) => s.path)
           .filter((p) => !entry.undoneFiles.has(p));
-        if (remaining.length === 0) return `batch #${id} is already fully undone`;
+        if (remaining.length === 0) return { info: `batch #${id} is already fully undone` };
         return revert(entry, remaining);
       }
 
       const snap = entry.snapshots.find((s) => s.path === pathArg);
       if (!snap) {
         const files = [...new Set(entry.blocks.map((b) => b.path))];
-        return `batch #${id} doesn't include "${pathArg}" — files in this batch: ${files.join(", ")}`;
+        return {
+          info: `batch #${id} doesn't include "${pathArg}" — files in this batch: ${files.join(", ")}`,
+        };
       }
       if (entry.undoneFiles.has(pathArg)) {
-        return `${pathArg} in batch #${id} is already undone`;
+        return { info: `${pathArg} in batch #${id} is already undone` };
       }
       return revert(entry, [pathArg]);
     },
@@ -177,10 +194,10 @@ export function useEditHistory(codeMode: { rootDir: string } | undefined): UseEd
   );
 
   const codeHistory = useCallback<UseEditHistoryResult["codeHistory"]>(() => {
-    if (!codeMode) return "not in code mode";
+    if (!codeMode) return t("app.editHistoryNoCodeMode");
     const entries = editHistory.current;
-    if (entries.length === 0) return "no edits recorded this session yet";
-    const lines = ["Edit history (oldest first):"];
+    if (entries.length === 0) return t("app.editHistoryNoEdits");
+    const lines = [t("app.editHistoryTitle")];
     for (const e of entries) {
       const when = new Date(e.at).toISOString().replace("T", " ").slice(11, 19);
       const files = new Set(e.blocks.map((b) => b.path));
@@ -188,26 +205,26 @@ export function useEditHistory(codeMode: { rootDir: string } | undefined): UseEd
       const fileSummary = fileList.length > 60 ? `${fileList.slice(0, 60)}…` : fileList;
       const status = entryStatus(e);
       const statusText =
-        status === "applied" ? "applied" : status === "PARTIAL" ? "PARTIAL" : "UNDONE ";
+        status === "applied"
+          ? t("app.editHistoryStatusApplied")
+          : status === "PARTIAL"
+            ? t("app.editHistoryStatusPartial")
+            : t("app.editHistoryStatusUndone");
       lines.push(
         `  #${String(e.id).padStart(3)}  ${when}  ${statusText}  ${e.source.padEnd(12)} ${files.size} file · ${e.blocks.length} block   ${fileSummary}`,
       );
     }
     lines.push("");
-    lines.push(
-      "/show <id>            → per-file summary    ·    /show <id> <path>  → full diff of one file",
-    );
-    lines.push(
-      "/undo                 → newest non-undone   ·    /undo <id> [path]  → target a specific batch or file",
-    );
+    lines.push(t("app.editHistoryHelpShow"));
+    lines.push(t("app.editHistoryHelpUndo"));
     return lines.join("\n");
   }, [codeMode]);
 
   const codeShowEdit = useCallback<UseEditHistoryResult["codeShowEdit"]>(
     (args = []) => {
-      if (!codeMode) return "not in code mode";
+      if (!codeMode) return t("app.editHistoryNoCodeMode");
       const entries = editHistory.current;
-      if (entries.length === 0) return "no edits recorded this session — /history is empty";
+      if (entries.length === 0) return t("app.editHistoryNoEdits2");
 
       const idArg = args[0];
       const pathArg = args[1];
@@ -219,26 +236,30 @@ export function useEditHistory(codeMode: { rootDir: string } | undefined): UseEd
       } else {
         const id = Number.parseInt(idArg, 10);
         if (!Number.isFinite(id)) {
-          return "usage: /show [id] [path]   (omit id for newest; path from the per-file summary)";
+          return t("app.editHistoryNoShowId");
         }
         entry = entries.find((e) => e.id === id);
-        if (!entry) return `no edit #${id} — run /history to see valid ids`;
+        if (!entry) return t("app.editHistoryIdNotFound", { id });
       }
-      if (!entry) return "unexpected: history lookup failed";
+      if (!entry) return t("app.editHistoryLookupFailed");
 
       if (pathArg) {
         const fileBlocks = entry.blocks.filter((b) => b.path === pathArg);
         if (fileBlocks.length === 0) {
           const files = [...new Set(entry.blocks.map((b) => b.path))];
-          return `batch #${entry.id} doesn't include "${pathArg}" — files in this batch: ${files.join(", ")}`;
+          return t("app.editHistoryBatchNoFile", {
+            id: entry.id,
+            path: pathArg,
+            files: files.join(", "),
+          });
         }
         const when = new Date(entry.at).toISOString().replace("T", " ").slice(11, 19);
         const state = entry.undoneFiles.has(pathArg) ? "UNDONE" : "applied";
         const header = `▸ edit #${entry.id} · ${when} · ${pathArg} · ${state} · ${fileBlocks.length} block(s)`;
         const diff = formatAllBlockDiffs(fileBlocks, { maxLines: 60, contextLines: 2 });
         const footer = entry.undoneFiles.has(pathArg)
-          ? "(already reverted — /history shows the batch-level status)"
-          : `/undo ${entry.id} ${pathArg}  → revert just this file`;
+          ? t("app.editHistoryAlreadyReverted")
+          : t("app.editHistoryRevertFile", { id: entry.id, path: pathArg });
         return [header, ...diff, "", footer].join("\n");
       }
 

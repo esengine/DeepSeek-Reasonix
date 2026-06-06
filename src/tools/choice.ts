@@ -69,7 +69,7 @@ export function registerChoiceTool(
   registry.register({
     name: "ask_choice",
     description:
-      "Present 2–6 alternatives to the user. The principle: if the user is supposed to pick, the tool picks — you don't enumerate the choices as prose. Prose menus have no picker in this TUI, so the user gets a wall of text to scroll through and a letter to type, strictly worse than the magenta picker this tool renders. Call it whenever (a) the user has asked for options, (b) you've analyzed multiple approaches and the final call is theirs, or (c) it's a preference fork you can't resolve without them. Skip it when one option is clearly best (just do it, or submit_plan) or a free-form text answer fits (ask in prose). Keep option ids short and stable (A/B/C). Each option: title + optional summary. allowCustom=true when their real answer might not fit. Max 6 options — narrow first if more. A one-sentence lead-in before the call is fine; don't repeat the options in it.",
+      "Render an arrow-key picker with 2–6 alternatives. Use when the user is supposed to pick — never enumerate choices as prose. Skip when one option is clearly best (just do it) or a free-form text answer fits. Max 6 options; set `allowCustom:true` when their real answer might not fit.",
     readOnly: true,
     parameters: {
       type: "object",
@@ -77,21 +77,19 @@ export function registerChoiceTool(
         question: {
           type: "string",
           description:
-            "The question to put in front of the user. One sentence. Don't repeat the options in the question text — the picker renders them separately.",
+            "One-sentence question. Don't repeat the options here — the picker renders them.",
         },
         options: {
           type: "array",
-          description:
-            "2–4 alternatives. Each needs a stable id and a short title; summary is optional.",
+          description: "2–6 alternatives. Each: stable id + short title; summary optional.",
           items: {
             type: "object",
             properties: {
-              id: { type: "string", description: "Short stable id (A, B, C, or option-1)." },
-              title: { type: "string", description: "One-line title shown as the option label." },
+              id: { type: "string", description: "Stable id (A, B, C or option-1)." },
+              title: { type: "string", description: "One-line label." },
               summary: {
                 type: "string",
-                description:
-                  "Optional. A second dimmed line with more detail. Keep under ~80 chars.",
+                description: "Optional dimmed second line, ≤80 chars.",
               },
             },
             required: ["id", "title"],
@@ -99,8 +97,7 @@ export function registerChoiceTool(
         },
         allowCustom: {
           type: "boolean",
-          description:
-            "If true, the picker shows a 'Let me type my own answer' escape hatch. Default false. Turn on when the user's real answer might not fit any of your pre-defined options.",
+          description: "Shows a 'type my own answer' escape hatch. Default false.",
         },
       },
       required: ["question", "options"],

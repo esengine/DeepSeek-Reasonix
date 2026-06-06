@@ -6,8 +6,15 @@ import { basename, join } from "node:path";
 /** Default WRITE target — created when no candidate exists yet. */
 export const PROJECT_MEMORY_FILE = "REASONIX.md";
 
-/** READ candidates, in priority order. AGENTS.md is the open spec at agents.md (Linux Foundation). */
-export const PROJECT_MEMORY_FILES = ["REASONIX.md", "AGENTS.md", "AGENT.md"] as const;
+/** READ candidates, in priority order. AGENTS.md is the open spec at agents.md (Linux Foundation).
+ *  CLAUDE.md candidates support migration from Claude Code (project-root or .claude/ subdirectory). */
+export const PROJECT_MEMORY_FILES = [
+  "REASONIX.md",
+  ".claude/CLAUDE.md",
+  "CLAUDE.md",
+  "AGENTS.md",
+  "AGENT.md",
+] as const;
 
 export const PROJECT_MEMORY_MAX_CHARS = 8000;
 

@@ -2,6 +2,7 @@ import { memo, useState, type ReactNode } from "react";
 import { I } from "../icons";
 import { Markdown } from "../Markdown";
 import { t, useLang } from "../i18n";
+import { Shortcut } from "./shortcut";
 
 type Tone = "default" | "success" | "warning" | "danger" | "accent" | "violet";
 
@@ -69,12 +70,27 @@ export type PlanItem = {
   note?: string;
 };
 
-function derivePlanBadge(items: PlanItem[]): { cls: "run" | "ok" | "warn" | "err"; label: string } {
-  if (items.some((x) => x.status === "failed")) return { cls: "err", label: t("planBadge.failed") };
-  if (items.some((x) => x.status === "blocked")) return { cls: "warn", label: t("planBadge.blocked") };
-  if (items.some((x) => x.status === "active")) return { cls: "run", label: t("planBadge.running") };
-  if (items.length > 0 && items.every((x) => x.status === "done")) return { cls: "ok", label: t("planBadge.done") };
-  return { cls: "run", label: t("planBadge.pending") };
+function derivePlanBadge(items: PlanItem[]): { state: "running" | "done" | "failed" | "waiting" | "blocked"; label: string } {
+  if (items.some((x) => x.status === "failed")) return { state: "failed", label: t("planBadge.failed") };
+  if (items.some((x) => x.status === "blocked")) return { state: "blocked", label: t("planBadge.blocked") };
+  if (items.some((x) => x.status === "active")) return { state: "running", label: t("planBadge.running") };
+  if (items.length > 0 && items.every((x) => x.status === "done")) return { state: "done", label: t("planBadge.done") };
+  return { state: "waiting", label: t("planBadge.pending") };
+}
+
+function StatusIcon({ state, label }: { state: "running" | "done" | "failed" | "waiting" | "blocked"; label: string }) {
+  switch (state) {
+    case "running":
+      return <span className="spin-meta" role="img" aria-label={label} title={label} />;
+    case "done":
+      return <I.check size={10} style={{ color: "var(--success)" }} aria-label={label} />;
+    case "failed":
+      return <I.x size={10} style={{ color: "var(--danger)" }} aria-label={label} />;
+    case "waiting":
+      return <span className="status-dot warn" role="img" aria-label={label} title={label} />;
+    case "blocked":
+      return <I.slash size={10} style={{ color: "var(--warning)" }} aria-label={label} />;
+  }
 }
 
 export function PlanCardView({ items, title }: { items: PlanItem[]; title?: string }) {
@@ -93,7 +109,8 @@ export function PlanCardView({ items, title }: { items: PlanItem[]; title?: stri
           <span>
             {done}/{items.length}
           </span>
-          <span className={`pill-tag ${badge.cls}`}>{badge.label}</span>
+          <StatusIcon state={badge.state} label={badge.label} />
+          <span className="meta-label">{badge.label}</span>
         </>
       }
     >
@@ -150,11 +167,9 @@ export function ReasoningCard({
             </span>
           ) : null}
           {streaming ? (
-            <span className="pill-tag warn">
-              <span className="shimmer">streaming…</span>
-            </span>
+            <StatusIcon state="running" label={t("cards.streaming")} />
           ) : (
-            <span className="pill-tag ok">{t("cards.reasoningComplete")}</span>
+            <StatusIcon state="done" label={t("cards.reasoningComplete")} />
           )}
         </>
       }
@@ -178,12 +193,12 @@ export function ReasoningCard({
           <div className="meta">
             {model ? (
               <span>
-                <span className="k">model</span> {model}
+                <span className="k">{t("settings.model")}</span> {model}
               </span>
             ) : null}
             {tokens !== undefined ? (
               <span>
-                <span className="k">tokens</span> {tokens.toLocaleString()}
+                <span className="k">{t("statusbar.tokens")}</span> {tokens.toLocaleString()}
               </span>
             ) : null}
           </div>
@@ -203,6 +218,7 @@ export function ShellCard({
   onApprove,
   onReject,
   onAlwaysAllow,
+  defaultOpen,
 }: {
   command: string;
   output?: string;
@@ -211,10 +227,10 @@ export function ShellCard({
   onApprove?: () => void;
   onReject?: () => void;
   onAlwaysAllow?: () => void;
+  defaultOpen?: boolean;
 }) {
   useLang();
   const tone: Tone = state === "failed" ? "danger" : state === "done" ? "success" : "warning";
-  const durationLabel = durationMs ? ` · ${(durationMs / 1000).toFixed(2)}s` : "";
   return (
     <Card
       tone={tone}
@@ -222,16 +238,22 @@ export function ShellCard({
       kind="shell"
       name="shell"
       compact
+      defaultOpen={defaultOpen ?? false}
       meta={
-        state === "await" ? (
-          <span className="pill-tag warn">{t("cards.shellAwaiting")}</span>
-        ) : state === "running" ? (
-          <span className="pill-tag run">{t("cards.shellRunning")}</span>
-        ) : state === "failed" ? (
-          <span className="pill-tag err">failed{durationLabel}</span>
-        ) : (
-          <span className="pill-tag ok">done{durationLabel}</span>
-        )
+        <>
+          {state === "await" ? (
+            <StatusIcon state="waiting" label={t("cards.shellAwaiting")} />
+          ) : state === "running" ? (
+            <StatusIcon state="running" label={t("cards.shellRunning")} />
+          ) : state === "failed" ? (
+            <StatusIcon state="failed" label={t("cards.failed")} />
+          ) : (
+            <StatusIcon state="done" label={t("cards.done")} />
+          )}
+          {(state === "done" || state === "failed") && durationMs ? (
+            <span className="meta-dur">{(durationMs / 1000).toFixed(2)}s</span>
+          ) : null}
+        </>
       }
     >
       <div className="shell">
@@ -271,15 +293,37 @@ export function ShellCard({
               ) : null}
               {onReject ? (
                 <button type="button" className="btn" onClick={onReject}>
-                  {t("cards.shellReject")} <kbd>⌘.</kbd>
+                  {t("cards.shellReject")} <Shortcut keys={["mod", "."]} />
                 </button>
               ) : null}
               <button type="button" className="btn primary" onClick={onApprove}>
-                {t("cards.shellRun")} <kbd>⌘⏎</kbd>
+                {t("cards.shellRun")} <Shortcut keys={["mod", "enter"]} />
               </button>
             </div>
           </div>
         ) : null}
+      </div>
+    </Card>
+  );
+}
+
+// ---- Compaction ----
+
+export function CompactionCard({ summary }: { summary: string }) {
+  useLang();
+  const charCount = summary.length;
+  return (
+    <Card
+      tone="default"
+      icon={<I.archive size={12} />}
+      kind="compaction"
+      name={t("cards.compactionName")}
+      meta={<span>{t("cards.compactionMeta", { chars: charCount.toLocaleString() })}</span>}
+      defaultOpen={false}
+      compact
+    >
+      <div className="compaction-body">
+        <Markdown source={summary} />
       </div>
     </Card>
   );
@@ -293,32 +337,39 @@ export function ToolCard({
   result,
   ok,
   durationMs,
+  defaultOpen,
 }: {
   name: string;
   args?: string;
   result?: string;
   ok?: boolean;
   durationMs?: number;
+  defaultOpen?: boolean;
 }) {
+  useLang();
   const running = result === undefined;
   const tone: Tone = running ? "default" : ok === false ? "danger" : "success";
-  const dur = durationMs ? `${durationMs} ms` : "—";
   return (
     <Card
       tone={tone}
       icon={<I.wrench size={12} />}
       kind="tool"
       name={name}
-      defaultOpen={false}
+      defaultOpen={defaultOpen ?? false}
       compact
       meta={
-        running ? (
-          <span className="pill-tag run">running</span>
-        ) : ok === false ? (
-          <span className="pill-tag err">error · {dur}</span>
-        ) : (
-          <span className="pill-tag ok">done · {dur}</span>
-        )
+        <>
+          {running ? (
+            <StatusIcon state="running" label={t("cards.running")} />
+          ) : ok === false ? (
+            <StatusIcon state="failed" label={t("cards.error")} />
+          ) : (
+            <StatusIcon state="done" label={t("cards.done")} />
+          )}
+          {!running && durationMs !== undefined ? (
+            <span className="meta-dur">{durationMs} ms</span>
+          ) : null}
+        </>
       }
     >
       <div className="tool-call">
@@ -332,7 +383,7 @@ export function ToolCard({
         ) : null}
         {result !== undefined ? (
           <div className="row">
-            <span className="k">{ok === false ? "error" : "result"}</span>
+            <span className="k">{ok === false ? t("cards.error") : t("cards.result")}</span>
             <span className="v">
               <span className={ok === false ? "num" : "str"}>
                 {result.length > 1200 ? `${result.slice(0, 1200)}…` : result}
@@ -352,6 +403,70 @@ export type DiffLine =
   | { t: "ctx"; l?: number; r?: number; s: string }
   | { t: "add"; r: number; s: string }
   | { t: "rm"; l: number; s: string };
+
+export function parseEditResult(text: string): { filename: string; lines: DiffLine[] }[] {
+  const files: { filename: string; lines: DiffLine[] }[] = [];
+  const lines = text.split("\n");
+
+  let currentFilename = "";
+  let currentLines: DiffLine[] = [];
+  let hunkStartLeft = 0;
+  let hunkStartRight = 0;
+  let leftLine = 0;
+  let rightLine = 0;
+
+  const flush = () => {
+    if (currentLines.length > 0) {
+      files.push({ filename: currentFilename, lines: currentLines });
+    }
+    currentLines = [];
+    hunkStartLeft = 0;
+    hunkStartRight = 0;
+    leftLine = 0;
+    rightLine = 0;
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+
+    if (line.startsWith("edited ") || line.startsWith("multi_edit:")) {
+      const m = line.match(/^edited\s+(.+?)\s+\(/);
+      if (m) currentFilename = m[1]!;
+      continue;
+    }
+
+    if (line.startsWith("# ")) {
+      flush();
+      currentFilename = line.slice(2);
+      continue;
+    }
+
+    const hunkMatch = line.match(/^@@\s+-(\d+),(\d+)\s+\+(\d+),(\d+)\s+@@/);
+    if (hunkMatch) {
+      hunkStartLeft = Number(hunkMatch[1]!);
+      hunkStartRight = Number(hunkMatch[3]!);
+      leftLine = hunkStartLeft;
+      rightLine = hunkStartRight;
+      currentLines.push({ t: "hunk", s: line });
+      continue;
+    }
+
+    if (line.startsWith("+") && !line.startsWith("+++")) {
+      currentLines.push({ t: "add", r: rightLine, s: line.slice(1) });
+      rightLine++;
+    } else if (line.startsWith("-") && !line.startsWith("---")) {
+      currentLines.push({ t: "rm", l: leftLine, s: line.slice(1) });
+      leftLine++;
+    } else if (line.startsWith(" ")) {
+      currentLines.push({ t: "ctx", l: leftLine, r: rightLine, s: line.slice(1) });
+      leftLine++;
+      rightLine++;
+    }
+  }
+
+  flush();
+  return files;
+}
 
 export function DiffCard({
   filename,
@@ -379,7 +494,11 @@ export function DiffCard({
         <>
           <span style={{ color: "var(--success)" }}>+{adds}</span>
           <span style={{ color: "var(--danger)" }}>−{rms}</span>
-          {applied ? <span className="pill-tag ok">applied</span> : <span className="pill-tag warn">{t("cards.diffAwaiting")}</span>}
+          {applied ? (
+            <StatusIcon state="done" label={t("cards.applied")} />
+          ) : (
+            <StatusIcon state="waiting" label={t("cards.diffAwaiting")} />
+          )}
         </>
       }
     >
@@ -420,7 +539,7 @@ export function DiffCard({
               ) : null}
               {onApply ? (
                 <button type="button" className="btn primary" onClick={onApply}>
-                  {t("cards.diffApply")} <kbd>⌘⏎</kbd>
+                  {t("cards.diffApply")} <Shortcut keys={["mod", "enter"]} />
                 </button>
               ) : null}
             </div>
@@ -466,7 +585,7 @@ export function WebSearchCard({ query, results }: { query: string; results: Sear
       meta={
         <>
           <span>"{query}"</span>
-          <span className="pill-tag ok">{results.length} hits</span>
+          <span className="pill-tag ok">{results.length} {t("cards.hits")}</span>
         </>
       }
     >
@@ -518,11 +637,11 @@ export function SubagentCard({
             {done} / {children.length} {t("cards.subagentDoneProgress")}
           </span>
           {status === "done" ? (
-            <span className="pill-tag ok">{t("cards.subagentDone")}</span>
+            <StatusIcon state="done" label={t("cards.subagentDone")} />
           ) : status === "failed" ? (
-            <span className="pill-tag err">{t("cards.subagentFailed")}</span>
+            <StatusIcon state="failed" label={t("cards.subagentFailed")} />
           ) : (
-            <span className="pill-tag run">{t("cards.subagentRunning")}</span>
+            <StatusIcon state="running" label={t("cards.subagentRunning")} />
           )}
         </>
       }
@@ -586,6 +705,7 @@ export function AttachCard({
   meta: string;
   preview?: string;
 }) {
+  useLang();
   return (
     <Card
       tone="default"
@@ -617,7 +737,8 @@ export function MetricStrip({
   costLabel,
   elapsed,
 }: {
-  cacheHit?: number;
+  /** Pre-formatted cache percentage string (e.g. "72.12%"). */
+  cacheHit?: string;
   promptTokens?: number;
   outputTokens?: number;
   costLabel?: string;
@@ -628,32 +749,32 @@ export function MetricStrip({
       {cacheHit !== undefined ? (
         <span className="item">
           <I.zap size={11} style={{ color: "var(--accent)" }} />
-          <span>cache_hit</span>
-          <span className="v acc">{cacheHit}%</span>
+          <span>{t("cards.cacheHit")}</span>
+          <span className="v acc">{cacheHit}</span>
         </span>
       ) : null}
       {promptTokens !== undefined ? (
         <span className="item">
-          <span>prompt</span>
+          <span>{t("cards.prompt")}</span>
           <span className="v">{promptTokens.toLocaleString()} t</span>
         </span>
       ) : null}
       {outputTokens !== undefined ? (
         <span className="item">
-          <span>output</span>
+          <span>{t("cards.output")}</span>
           <span className="v">{outputTokens.toLocaleString()} t</span>
         </span>
       ) : null}
       {costLabel ? (
         <span className="item">
           <I.coin size={11} />
-          <span>cost</span>
+          <span>{t("cards.cost")}</span>
           <span className="v ok">{costLabel}</span>
         </span>
       ) : null}
       {elapsed ? (
         <span className="item">
-          <span>elapsed</span>
+          <span>{t("cards.elapsed")}</span>
           <span className="v">{elapsed}</span>
         </span>
       ) : null}

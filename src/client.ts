@@ -1,5 +1,5 @@
 import { type EventSourceMessage, createParser } from "eventsource-parser";
-import { loadRateLimit } from "./config.js";
+import { loadRateLimit, resolveBaseUrlEnv } from "./config.js";
 import { type RetryOptions, fetchWithRetry } from "./retry.js";
 import type { ChatMessage, ChatRequestOptions, RawUsage, ToolCall, ToolSpec } from "./types.js";
 
@@ -17,16 +17,31 @@ export class Usage {
     return denom > 0 ? this.promptCacheHitTokens / denom : 0;
   }
 
+  static hasApiUsage(raw: unknown): raw is RawUsage {
+    if (!raw || typeof raw !== "object") return false;
+    const u = raw as RawUsage;
+    return (
+      typeof u.prompt_tokens === "number" ||
+      typeof u.completion_tokens === "number" ||
+      typeof u.total_tokens === "number" ||
+      typeof u.prompt_cache_hit_tokens === "number" ||
+      typeof u.prompt_cache_miss_tokens === "number" ||
+      typeof u.prompt_eval_count === "number" ||
+      typeof u.eval_count === "number"
+    );
+  }
+
   static fromApi(raw: RawUsage | undefined | null): Usage {
     const u = raw ?? {};
-    const promptTokens = u.prompt_tokens ?? 0;
+    const promptTokens = u.prompt_tokens ?? u.prompt_eval_count ?? 0;
+    const completionTokens = u.completion_tokens ?? u.eval_count ?? 0;
     const cacheHitTokens = u.prompt_cache_hit_tokens ?? 0;
     const cacheMissTokens =
       u.prompt_cache_miss_tokens ?? Math.max(0, promptTokens - cacheHitTokens);
     return new Usage(
       promptTokens,
-      u.completion_tokens ?? 0,
-      u.total_tokens ?? 0,
+      completionTokens,
+      u.total_tokens ?? promptTokens + completionTokens,
       cacheHitTokens,
       cacheMissTokens,
     );
@@ -93,6 +108,49 @@ export interface DeepSeekClientOptions {
   retry?: RetryOptions;
 }
 
+// DeepSeek's strict JSON parser rejects lone UTF-16 surrogate escapes
+// (`\ud800`, `\udc00`) even though JavaScript can carry them in strings.
+function replaceLoneSurrogates(value: string): string {
+  let out = "";
+  let last = 0;
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = value.charCodeAt(i + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        i++;
+      } else {
+        out += value.slice(last, i);
+        out += "\uFFFD";
+        last = i + 1;
+      }
+      continue;
+    }
+    if (code >= 0xdc00 && code <= 0xdfff) {
+      out += value.slice(last, i);
+      out += "\uFFFD";
+      last = i + 1;
+    }
+  }
+  if (last === 0) return value;
+  return out + value.slice(last);
+}
+
+function sanitizeJsonTransportValue(value: unknown): unknown {
+  if (typeof value === "string") return replaceLoneSurrogates(value);
+  if (value === null || typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.map((item) => sanitizeJsonTransportValue(item));
+  const out: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value)) {
+    out[key] = sanitizeJsonTransportValue(item);
+  }
+  return out;
+}
+
+function stringifyJsonTransport(value: unknown): string {
+  return JSON.stringify(sanitizeJsonTransportValue(value));
+}
+
 export class DeepSeekClient {
   readonly apiKey: string;
   readonly baseUrl: string;
@@ -110,7 +168,7 @@ export class DeepSeekClient {
       );
     }
     this.apiKey = apiKey;
-    let url = opts.baseUrl ?? process.env.DEEPSEEK_BASE_URL ?? "https://api.deepseek.com";
+    let url = opts.baseUrl ?? resolveBaseUrlEnv() ?? "https://api.deepseek.com";
     // Manual trim — `/\/+$/` is O(n²) on slash-heavy non-matches per CodeQL js/polynomial-redos.
     while (url.endsWith("/")) url = url.slice(0, -1);
     this.baseUrl = url;
@@ -156,6 +214,7 @@ export class DeepSeekClient {
       messages: opts.messages,
       stream,
     };
+    if (stream) payload.stream_options = { include_usage: true };
     if (opts.tools?.length) payload.tools = opts.tools;
     if (opts.temperature !== undefined) payload.temperature = opts.temperature;
     if (opts.maxTokens !== undefined) payload.max_tokens = opts.maxTokens;
@@ -166,13 +225,25 @@ export class DeepSeekClient {
     // ignored — we don't strip them here because the server's explicit
     // "setting won't report an error" contract means leaving them in is
     // safe and keeps the request payload diffable against OpenAI tooling.
-    if (opts.thinking) {
+    if (opts.thinking && !this._isAzureEndpoint()) {
       payload.extra_body = { thinking: { type: opts.thinking } };
     }
     if (opts.reasoningEffort) {
       payload.reasoning_effort = opts.reasoningEffort;
     }
     return payload;
+  }
+
+  /** Azure OpenAI-compatible endpoints do not accept DeepSeek's proprietary
+   *  `extra_body.thinking` field (they reject the request with 400).  We still
+   *  send `reasoning_effort`, which Azure *does* support. */
+  private _isAzureEndpoint(): boolean {
+    try {
+      const host = new URL(this.baseUrl).hostname;
+      return host === "azure.com" || host.endsWith(".azure.com");
+    } catch {
+      return false;
+    }
   }
 
   /** Returns null on failure so callers can degrade — session must keep working without balance UI. */
@@ -211,8 +282,13 @@ export class DeepSeekClient {
 
   async chat(opts: ChatRequestOptions): Promise<ChatResponse> {
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), this.timeoutMs);
-    const signal = opts.signal ?? ctrl.signal;
+    const timer = setTimeout(
+      () => ctrl.abort(new Error(`DeepSeek request timed out after ${this.timeoutMs}ms`)),
+      this.timeoutMs,
+    );
+    // Combine — `opts.signal ?? ctrl.signal` orphans the timer when the
+    // caller passes a signal, so timeoutMs never reaches fetch.
+    const signal = opts.signal ? AbortSignal.any([opts.signal, ctrl.signal]) : ctrl.signal;
 
     try {
       await this.waitForChatRateLimit(signal);
@@ -225,7 +301,7 @@ export class DeepSeekClient {
             Authorization: `Bearer ${this.apiKey}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify(this.buildPayload(opts, false)),
+          body: stringifyJsonTransport(this.buildPayload(opts, false)),
           signal,
         },
         { ...this.retry, signal },
@@ -239,7 +315,7 @@ export class DeepSeekClient {
         content: choice.content ?? "",
         reasoningContent: choice.reasoning_content ?? null,
         toolCalls: choice.tool_calls ?? [],
-        usage: Usage.fromApi(data.usage),
+        usage: Usage.fromApi(data.usage ?? data),
         raw: data,
       };
     } finally {
@@ -249,8 +325,14 @@ export class DeepSeekClient {
 
   async *stream(opts: ChatRequestOptions): AsyncGenerator<StreamChunk> {
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), this.timeoutMs);
-    const signal = opts.signal ?? ctrl.signal;
+    const timer = setTimeout(
+      () => ctrl.abort(new Error(`DeepSeek stream timed out after ${this.timeoutMs}ms`)),
+      this.timeoutMs,
+    );
+    // Combine — `opts.signal ?? ctrl.signal` orphans the timer when the
+    // caller passes a signal, leaving a stalled SSE body to hang forever
+    // on reader.read() (issue #1535).
+    const signal = opts.signal ? AbortSignal.any([opts.signal, ctrl.signal]) : ctrl.signal;
 
     let resp: Response;
     try {
@@ -268,7 +350,7 @@ export class DeepSeekClient {
             "Content-Type": "application/json",
             Accept: "text/event-stream",
           },
-          body: JSON.stringify(this.buildPayload(opts, true)),
+          body: stringifyJsonTransport(this.buildPayload(opts, true)),
           signal,
         },
         { ...this.retry, signal },
@@ -310,8 +392,9 @@ export class DeepSeekClient {
               argumentsDelta: tc.function?.arguments,
             };
           }
-          if (json.usage) {
-            chunk.usage = Usage.fromApi(json.usage);
+          const rawUsage = json.usage ?? (Usage.hasApiUsage(json) ? json : undefined);
+          if (rawUsage) {
+            chunk.usage = Usage.fromApi(rawUsage);
           }
           queue.push(chunk);
         } catch {
@@ -329,7 +412,18 @@ export class DeepSeekClient {
           continue;
         }
         if (done) break;
-        const { value, done: streamDone } = await reader.read();
+        let value: Uint8Array | undefined;
+        let streamDone: boolean;
+        try {
+          ({ value, done: streamDone } = await reader.read());
+        } catch (readErr) {
+          const cause = readErr instanceof Error ? readErr : new Error(String(readErr));
+          const code = "code" in cause && typeof cause.code === "string" ? cause.code : undefined;
+          throw Object.assign(new Error(`SSE body read failed: ${cause.message}`), {
+            phase: "stream_body_read" as const,
+            code,
+          });
+        }
         if (streamDone) break;
         parser.feed(decoder.decode(value, { stream: true }));
       }

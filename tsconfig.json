@@ -19,13 +19,13 @@
     "declarationMap": true,
     "sourceMap": true,
     "outDir": "dist",
-    "rootDir": "src",
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
+      "ink": ["packages/ink/src/index.ts"]
     },
     "types": ["node"]
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "packages/ink/src/**/*"],
   "exclude": ["node_modules", "dist", "tests", "examples", "benchmarks"]
 }

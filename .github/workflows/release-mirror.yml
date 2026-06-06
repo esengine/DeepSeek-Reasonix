@@ -41,6 +41,35 @@ jobs:
             -R "${{ github.repository }}" \
             -D assets
 
+      # Rewrite bundle URLs inside latest.json (Tauri updater manifest)
+      # so the desktop pulls bundles from R2, not GitHub. Without this the
+      # updater fetches the small JSON from R2 but still downloads the
+      # heavy installer from github.com — defeating the mirror.
+      # No-op when latest.json is absent (CLI-only releases).
+      - name: Rewrite latest.json URLs → R2
+        if: env.HAS_R2 == 'true'
+        env:
+          R2_PUBLIC_BASE: https://pub-147fb53b9c1e4bbf891a257968619ea7.r2.dev
+          TAG: ${{ steps.tag.outputs.name }}
+        run: |
+          file=assets/latest.json
+          if [ ! -f "$file" ]; then
+            echo "no latest.json in release — skipping rewrite"
+            exit 0
+          fi
+          # GitHub URLs look like:
+          #   https://github.com/<owner>/<repo>/releases/download/<TAG>/<file>
+          # Rewrite to:
+          #   <R2_PUBLIC_BASE>/<TAG>/<file>
+          jq --arg base "$R2_PUBLIC_BASE" --arg tag "$TAG" '
+            .platforms |= with_entries(
+              .value.url |= sub("https://github.com/[^/]+/[^/]+/releases/download/[^/]+/"; "\($base)/\($tag)/")
+            )
+          ' "$file" > "$file.new"
+          mv "$file.new" "$file"
+          echo "rewrote latest.json:"
+          cat "$file"
+
       - name: Configure AWS CLI for R2
         if: env.HAS_R2 == 'true'
         run: |

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { EngineeringLifecycleRuntime } from "../src/code/lifecycle.js";
 import { ToolRegistry } from "../src/tools.js";
 
 describe("ToolRegistry", () => {
@@ -230,6 +231,22 @@ describe("ToolRegistry", () => {
       expect(fnCalled).toBe(false);
     });
 
+    it("passes intercepted tool results through the result augmenter", async () => {
+      const reg = new ToolRegistry();
+      const seen: Array<{ name: string; result: string }> = [];
+      reg.register({ name: "edit_file", fn: () => "should not run" });
+      reg.addToolInterceptor("review-gate", () => "▸ edit blocks: 1/1 applied");
+      reg.setResultAugmenter((name, _args, result) => {
+        seen.push({ name, result });
+        return `${result}\naugmented`;
+      });
+
+      const out = await reg.dispatch("edit_file", '{"path":"src/app.ts"}');
+
+      expect(out).toBe("▸ edit blocks: 1/1 applied\naugmented");
+      expect(seen).toEqual([{ name: "edit_file", result: "▸ edit blocks: 1/1 applied" }]);
+    });
+
     it("falls through to tool.fn when interceptor returns null", async () => {
       const reg = new ToolRegistry();
       reg.register({ name: "read_file", fn: () => "content" });
@@ -281,6 +298,133 @@ describe("ToolRegistry", () => {
       expect(await reg.dispatch("edit_file", "{}")).toBe("fn-output");
     });
 
+    it("runs ordered interceptors before the legacy interceptor", async () => {
+      const reg = new ToolRegistry();
+      const seen: string[] = [];
+      reg.register({ name: "edit_file", fn: () => "ok" });
+      reg.addToolInterceptor("first", () => {
+        seen.push("first");
+        return null;
+      });
+      reg.addToolInterceptor("second", () => {
+        seen.push("second");
+        return "blocked";
+      });
+      reg.setToolInterceptor(() => {
+        seen.push("legacy");
+        return null;
+      });
+
+      const out = await reg.dispatch("edit_file", "{}");
+
+      expect(out).toBe("blocked");
+      expect(seen).toEqual(["first", "second"]);
+    });
+
+    it("can remove an ordered interceptor by id", async () => {
+      const reg = new ToolRegistry();
+      reg.register({ name: "edit_file", fn: () => "ok" });
+      const remove = reg.addToolInterceptor("blocker", () => "blocked");
+      remove();
+
+      const out = await reg.dispatch("edit_file", "{}");
+
+      expect(out).toBe("ok");
+    });
+
+    it("sharpens repeated identical interceptor rejections", async () => {
+      const reg = new ToolRegistry();
+      reg.register({ name: "multi_edit", fn: () => "ok" });
+      reg.addToolInterceptor("lifecycle", () =>
+        JSON.stringify({
+          error: "multi_edit blocked",
+          rejectedReason: "engineering-lifecycle",
+        }),
+      );
+
+      const first = JSON.parse(await reg.dispatch("multi_edit", '{"edits":[]}'));
+      const second = JSON.parse(await reg.dispatch("multi_edit", '{"edits":[]}'));
+
+      expect(first.consecutiveInterceptorRejection).toBeUndefined();
+      expect(second.consecutiveInterceptorRejection).toBe(true);
+      expect(second.error).toMatch(/do not retry identical args/);
+    });
+
+    it("sharpens repeated lifecycle gate rejections when JSON key order changes", async () => {
+      const lifecycle = new EngineeringLifecycleRuntime({ mode: "strict" });
+      const reg = new ToolRegistry();
+      reg.register({ name: "run_command", fn: () => "should not run" });
+      reg.addToolInterceptor("engineering-lifecycle", lifecycle.guardToolCall);
+
+      const first = JSON.parse(
+        await reg.dispatch("run_command", '{"command":"rm -rf dist","cwd":"/repo"}'),
+      );
+      const second = JSON.parse(
+        await reg.dispatch("run_command", '{"cwd":"/repo","command":"rm -rf dist"}'),
+      );
+
+      expect(first.rejectedReason).toBe("engineering-lifecycle");
+      expect(first.consecutiveInterceptorRejection).toBeUndefined();
+      expect(second.rejectedReason).toBe("engineering-lifecycle");
+      expect(second.consecutiveInterceptorRejection).toBe(true);
+      expect(second.error).toMatch(/do not retry identical args/);
+    });
+
+    it("sharpens repeated lifecycle gate rejections for high-risk call corpus", async () => {
+      const cases: Array<{ name: string; args: Record<string, unknown> }> = [
+        {
+          name: "multi_edit",
+          args: {
+            edits: [
+              { path: "src/a.ts", search: "a", replace: "b" },
+              { path: "src/b.ts", search: "a", replace: "b" },
+            ],
+          },
+        },
+        { name: "delete_file", args: { path: "src/old.ts" } },
+        { name: "run_command", args: { command: "npm install left-pad", cwd: "/repo" } },
+      ];
+
+      for (const item of cases) {
+        const lifecycle = new EngineeringLifecycleRuntime({ mode: "strict" });
+        const reg = new ToolRegistry();
+        reg.register({ name: item.name, fn: () => "should not run" });
+        reg.addToolInterceptor("engineering-lifecycle", lifecycle.guardToolCall);
+
+        const rawArgs = JSON.stringify(item.args);
+        const first = JSON.parse(await reg.dispatch(item.name, rawArgs));
+        const second = JSON.parse(await reg.dispatch(item.name, rawArgs));
+
+        expect(first.rejectedReason).toBe("engineering-lifecycle");
+        expect(first.consecutiveInterceptorRejection).toBeUndefined();
+        expect(second.rejectedReason).toBe("engineering-lifecycle");
+        expect(second.consecutiveInterceptorRejection).toBe(true);
+      }
+    });
+
+    it("sharpens repeated edit gate rejections from review-mode text", async () => {
+      const reg = new ToolRegistry();
+      reg.register({ name: "edit_file", fn: () => "should not run" });
+      reg.setToolInterceptor((name, args) => {
+        if (name !== "edit_file") return null;
+        return `User rejected this edit to ${String(args.path)}. Don't retry the same SEARCH/REPLACE; either try a different approach or ask the user what they want instead.`;
+      });
+
+      const rawArgs = JSON.stringify({
+        path: "src/app.ts",
+        search: "oldValue",
+        replace: "newValue",
+      });
+      const first = await reg.dispatch("edit_file", rawArgs);
+      const second = JSON.parse(await reg.dispatch("edit_file", rawArgs));
+
+      expect(first).toMatch(/User rejected this edit to src\/app\.ts/);
+      expect(second.rejectedReason).toBe("edit-gate");
+      expect(second.consecutiveInterceptorRejection).toBe(true);
+      expect(second.error).toMatch(/do not retry identical args/);
+      expect(second.error).toMatch(/different edit/);
+    });
+
     it("surfaces interceptor throws as structured errors", async () => {
       const reg = new ToolRegistry();
       reg.register({ name: "edit_file", fn: () => "ok" });
@@ -289,6 +433,117 @@ describe("ToolRegistry", () => {
       });
       const out = await reg.dispatch("edit_file", "{}");
       expect(JSON.parse(out).error).toMatch(/interceptor failed — boom/);
+    });
+  });
+
+  describe("rate limit", () => {
+    it("does not consume quota for unknown tools", async () => {
+      const reg = new ToolRegistry({
+        rateLimit: { aggregate: { maxCalls: 1, windowSeconds: 60 }, tools: {} },
+      });
+      let calls = 0;
+      reg.register({ name: "ok", fn: () => String(++calls) });
+
+      await reg.dispatch("missing", "{}");
+      expect(await reg.dispatch("ok", "{}")).toBe("1");
+      expect(JSON.parse(await reg.dispatch("ok", "{}")).error).toBe("rate_limited");
+      expect(calls).toBe(1);
+    });
+
+    it("does not consume quota for malformed or missing required args", async () => {
+      const reg = new ToolRegistry({
+        rateLimit: { aggregate: { maxCalls: 1, windowSeconds: 60 }, tools: {} },
+      });
+      let calls = 0;
+      reg.register({
+        name: "read_file",
+        parameters: {
+          type: "object",
+          properties: { path: { type: "string" } },
+          required: ["path"],
+        },
+        fn: () => String(++calls),
+      });
+
+      await reg.dispatch("read_file", "{bad json");
+      await reg.dispatch("read_file", "{}");
+      expect(await reg.dispatch("read_file", '{"path":"a"}')).toBe("1");
+      expect(JSON.parse(await reg.dispatch("read_file", '{"path":"b"}')).error).toBe(
+        "rate_limited",
+      );
+      expect(calls).toBe(1);
+    });
+
+    it("does not consume quota for plan-mode refusals", async () => {
+      const reg = new ToolRegistry({
+        rateLimit: { aggregate: { maxCalls: 1, windowSeconds: 60 }, tools: {} },
+      });
+      let calls = 0;
+      reg.register({ name: "edit_file", fn: () => String(++calls) });
+
+      reg.setPlanMode(true);
+      await reg.dispatch("edit_file", "{}");
+      reg.setPlanMode(false);
+
+      expect(await reg.dispatch("edit_file", "{}")).toBe("1");
+      expect(JSON.parse(await reg.dispatch("edit_file", "{}")).error).toBe("rate_limited");
+      expect(calls).toBe(1);
+    });
+
+    it("does not consume quota for interceptor short-circuits", async () => {
+      const reg = new ToolRegistry({
+        rateLimit: { aggregate: { maxCalls: 1, windowSeconds: 60 }, tools: {} },
+      });
+      let calls = 0;
+      reg.register({ name: "edit_file", fn: () => String(++calls) });
+      reg.setToolInterceptor(() => "queued");
+
+      expect(await reg.dispatch("edit_file", "{}")).toBe("queued");
+      reg.setToolInterceptor(null);
+      expect(await reg.dispatch("edit_file", "{}")).toBe("1");
+      expect(JSON.parse(await reg.dispatch("edit_file", "{}")).error).toBe("rate_limited");
+      expect(calls).toBe(1);
+    });
+
+    it("consumes quota before the tool fn awaits", async () => {
+      const reg = new ToolRegistry({
+        rateLimit: { aggregate: { maxCalls: 1, windowSeconds: 60 }, tools: {} },
+      });
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      reg.register({
+        name: "slow",
+        fn: async () => {
+          await gate;
+          return "done";
+        },
+      });
+
+      const first = reg.dispatch("slow", "{}");
+      const second = reg.dispatch("slow", "{}");
+      release();
+
+      expect(JSON.parse(await second).error).toBe("rate_limited");
+      expect(await first).toBe("done");
+    });
+
+    it("does not call fn or audit when rate-limited", async () => {
+      const reg = new ToolRegistry({
+        rateLimit: { aggregate: { maxCalls: 1, windowSeconds: 60 }, tools: {} },
+      });
+      let calls = 0;
+      const audit: string[] = [];
+      reg.register({ name: "echo", fn: () => String(++calls) });
+      reg.setAuditListener((event) => audit.push(event.name));
+
+      expect(await reg.dispatch("echo", "{}")).toBe("1");
+      const blocked = JSON.parse(await reg.dispatch("echo", "{}"));
+
+      expect(blocked).toMatchObject({ error: "rate_limited", tool: "echo" });
+      expect(calls).toBe(1);
+      expect(audit).toEqual(["echo"]);
     });
   });
 

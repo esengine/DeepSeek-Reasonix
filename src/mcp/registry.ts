@@ -1,9 +1,9 @@
-import { countTokens } from "../tokenizer.js";
+import { countTokens, countTokensBounded } from "../tokenizer.js";
 import { ToolRegistry } from "../tools.js";
 import type { JSONSchema } from "../types.js";
 import type { McpClient } from "./client.js";
 import { LatencyTracker, type SlowEvent } from "./latency.js";
-import type { CallToolResult, McpContentBlock } from "./types.js";
+import type { CallToolResult, McpContentBlock, McpTool } from "./types.js";
 
 export interface BridgeOptions {
   /** Prefix for tool names — disambiguates collisions when bridging multiple servers. */
@@ -73,16 +73,14 @@ export interface BridgeEnv {
 }
 
 /** Register one MCP tool's bridged closure into the registry. Returns the registered name (or "" if skipped). */
-export function registerSingleMcpTool(
-  mcpTool: import("./types.js").McpTool,
-  env: BridgeEnv,
-): string {
-  if (!mcpTool.name) return "";
-  const registeredName = `${env.prefix}${mcpTool.name}`;
+export function registerSingleMcpTool(mcpTool: McpTool, env: BridgeEnv): string {
+  const stableTool = canonicalizeMcpToolForCache(mcpTool);
+  if (!stableTool.name) return "";
+  const registeredName = `${env.prefix}${stableTool.name}`;
   env.registry.register({
     name: registeredName,
-    description: mcpTool.description ?? "",
-    parameters: mcpTool.inputSchema as JSONSchema,
+    description: stableTool.description ?? "",
+    parameters: stableTool.inputSchema as JSONSchema,
     fn: async (args: Record<string, unknown>, ctx) => {
       if (env.ready) {
         await waitForReady(
@@ -96,7 +94,7 @@ export function registerSingleMcpTool(
       // Resolve client at call time via the host indirection so `/mcp reconnect`
       // can swap a fresh client in without re-bridging tools.
       const live = env.host.client;
-      const toolResult = await live.callTool(mcpTool.name, args, {
+      const toolResult = await live.callTool(stableTool.name, args, {
         onProgress: env.onProgress
           ? (info) => env.onProgress!({ toolName: registeredName, ...info })
           : undefined,
@@ -194,7 +192,10 @@ export async function bridgeMcpTools(
     serverName,
   };
   const listed = await client.listTools();
-  for (const mcpTool of listed.tools) {
+  const stableTools = listed.tools
+    .map((tool) => canonicalizeMcpToolForCache(tool))
+    .sort((a, b) => `${prefix}${a.name}`.localeCompare(`${prefix}${b.name}`));
+  for (const mcpTool of stableTools) {
     if (!mcpTool.name) {
       result.skipped.push({ name: "?", reason: "empty tool name" });
       continue;
@@ -205,40 +206,137 @@ export async function bridgeMcpTools(
   return { ...result, env };
 }
 
+export function canonicalizeMcpToolForCache(tool: McpTool): McpTool {
+  return {
+    ...tool,
+    inputSchema: canonicalizeSchemaForCache(tool.inputSchema) as McpTool["inputSchema"],
+  };
+}
+
+const SET_LIKE_SCHEMA_ARRAY_KEYS = new Set(["required", "dependentRequired"]);
+
+export function canonicalizeSchemaForCache(value: unknown, parentKey?: string): unknown {
+  if (Array.isArray(value)) {
+    const mapped = value.map((item) => canonicalizeSchemaForCache(item));
+    if (parentKey && SET_LIKE_SCHEMA_ARRAY_KEYS.has(parentKey) && mapped.every(isScalar)) {
+      return [...mapped].sort((a, b) => String(a).localeCompare(String(b)));
+    }
+    return mapped;
+  }
+  if (!value || typeof value !== "object") return value;
+  if (parentKey === "dependentRequired") {
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(value as Record<string, unknown>).sort()) {
+      const arr = (value as Record<string, unknown>)[key];
+      out[key] =
+        Array.isArray(arr) && arr.every(isScalar)
+          ? [...(arr as unknown[])].sort((a, b) => String(a).localeCompare(String(b)))
+          : canonicalizeSchemaForCache(arr, key);
+    }
+    return out;
+  }
+  const out: Record<string, unknown> = {};
+  for (const key of Object.keys(value as Record<string, unknown>).sort()) {
+    out[key] = canonicalizeSchemaForCache((value as Record<string, unknown>)[key], key);
+  }
+  return out;
+}
+
+function isScalar(value: unknown): boolean {
+  return value === null || ["string", "number", "boolean"].includes(typeof value);
+}
+
 export interface FlattenOptions {
   /** Cap the flattened string at this many characters. Default: no cap. */
   maxChars?: number;
 }
 
 export function flattenMcpResult(result: CallToolResult, opts: FlattenOptions = {}): string {
+  validateResultShape(result);
   const parts = result.content.map(blockToString);
   const joined = parts.join("\n").trim();
   const prefixed = result.isError ? `ERROR: ${joined || "(no error message from server)"}` : joined;
   return opts.maxChars ? truncateForModel(prefixed, opts.maxChars) : prefixed;
 }
 
+/** Runtime schema check — MCP server responses cross a network boundary and the TypeScript types are compile-time only. */
+function validateResultShape(result: CallToolResult): void {
+  if (typeof result !== "object" || !result)
+    throw new Error(`MCP server returned non-object result: ${typeof result}`);
+  const { content, isError: _isError } = result as { content: unknown; isError?: unknown };
+  if (!Array.isArray(content))
+    throw new Error(`MCP server returned result with non-array content: ${typeof content}`);
+  for (let i = 0; i < content.length; i++) {
+    const block = content[i] as Record<string, unknown> | null | undefined;
+    if (typeof block !== "object" || !block)
+      throw new Error(`MCP server returned result.content[${i}] is not an object`);
+    if (block.type !== "text" && block.type !== "image")
+      throw new Error(
+        `MCP server returned result.content[${i}] with unknown type ${JSON.stringify(block.type)}`,
+      );
+    if (block.type === "text" && typeof block.text !== "string")
+      throw new Error(
+        `MCP server returned result.content[${i}] with non-string text (${typeof block.text})`,
+      );
+    if (block.type === "image") {
+      if (typeof block.data !== "string")
+        throw new Error(
+          `MCP server returned result.content[${i}] with non-string data (${typeof block.data})`,
+        );
+      if (typeof block.mimeType !== "string")
+        throw new Error(
+          `MCP server returned result.content[${i}] with non-string mimeType (${typeof block.mimeType})`,
+        );
+    }
+  }
+}
+
 /** Head + 1KB tail so error messages at end of stack traces aren't lost. */
-export function truncateForModel(s: string, maxChars: number): string {
+export function truncateForModel(s: string, maxChars: number, extraNote?: string): string {
   if (s.length <= maxChars) return s;
   const tailBudget = Math.min(1024, Math.floor(maxChars * 0.1));
   const headBudget = Math.max(0, maxChars - tailBudget);
-  const head = s.slice(0, headBudget);
-  const tail = s.slice(-tailBudget);
+  const head = sliceAlignedToCodepoint(s, headBudget);
+  const tail = sliceSuffixAlignedToCodepoint(s, tailBudget);
   const dropped = s.length - head.length - tail.length;
-  return `${head}\n\n[…truncated ${dropped} chars — raise BridgeOptions.maxResultChars, or call the tool with a narrower scope (filter, head, pagination)…]\n\n${tail}`;
+  const note = extraNote ? ` — ${extraNote}` : "";
+  return `${head}\n\n[…truncated ${dropped} chars — raise BridgeOptions.maxResultChars, or call the tool with a narrower scope (filter, head, pagination)${note}…]\n\n${tail}`;
+}
+
+/** Slicing inside a UTF-16 surrogate pair (emoji, supplementary CJK) leaves a lone surrogate
+ *  that crashes downstream JSON parsers (issue #1970). Trim one code unit back if needed. */
+function sliceAlignedToCodepoint(s: string, end: number): string {
+  if (end <= 0) return "";
+  if (end >= s.length) return s;
+  const last = s.charCodeAt(end - 1);
+  if (last >= 0xd800 && last <= 0xdbff) return s.slice(0, end - 1);
+  return s.slice(0, end);
+}
+
+function sliceSuffixAlignedToCodepoint(s: string, len: number): string {
+  if (len <= 0) return "";
+  if (len >= s.length) return s;
+  const start = s.length - len;
+  const first = s.charCodeAt(start);
+  if (first >= 0xdc00 && first <= 0xdfff) return s.slice(start + 1);
+  return s.slice(start);
 }
 
 /** Never tokenizes full input — pathological repetitive text (`AAAA…`) costs 30s+ on the pure-TS BPE port. */
-export function truncateForModelByTokens(s: string, maxTokens: number): string {
+export function truncateForModelByTokens(s: string, maxTokens: number, extraNote?: string): string {
   if (maxTokens <= 0) return "";
-  // Every token is ≥1 char — if length ≤ budget, tokens ≤ budget.
   if (s.length <= maxTokens) return s;
-  // Small enough to tokenize-check without pathological cost: confirm
-  // whether we're actually over budget. (Threshold is the char-bound
-  // worst case for English/code — ~4 chars/token.)
+  // Sample-based estimate: only ever tokenizes 2KB of head+tail regardless
+  // of input size. If a healthy safety margin still puts us under budget,
+  // skip the precise check — a few-percent under-truncation is far cheaper
+  // than tokenizing every fat tool result.
   if (s.length <= maxTokens * 4) {
-    const tokens = countTokens(s);
-    if (tokens <= maxTokens) return s;
+    const est = countTokensBounded(s);
+    if (Math.ceil(est * 1.15) <= maxTokens) return s;
+    if (est <= maxTokens) {
+      const tokens = countTokens(s);
+      if (tokens <= maxTokens) return s;
+    }
   }
 
   const markerOverhead = 48; // rough token cost of the truncation marker
@@ -259,7 +357,8 @@ export function truncateForModelByTokens(s: string, maxTokens: number): string {
   const ratio = sampleChars > 0 ? sampleTokens / sampleChars : 0.3;
   const estTotalTokens = Math.ceil(s.length * ratio);
   const droppedTokens = Math.max(0, estTotalTokens - sampleTokens);
-  return `${head}\n\n[…truncated ~${droppedTokens} tokens (${droppedChars} chars) — raise BridgeOptions.maxResultTokens, or call the tool with a narrower scope (filter, head, pagination)…]\n\n${tail}`;
+  const note = extraNote ? ` — ${extraNote}` : "";
+  return `${head}\n\n[…truncated ~${droppedTokens} tokens (${droppedChars} chars) — raise BridgeOptions.maxResultTokens, or call the tool with a narrower scope (filter, head, pagination)${note}…]\n\n${tail}`;
 }
 
 function sizePrefixToTokens(s: string, budget: number): string {
@@ -270,15 +369,15 @@ function sizePrefixToTokens(s: string, budget: number): string {
   let size = Math.min(s.length, budget * 4);
   for (let iter = 0; iter < 6; iter++) {
     if (size <= 0) return "";
-    const slice = s.slice(0, size);
+    const slice = sliceAlignedToCodepoint(s, size);
     const count = countTokens(slice);
     if (count <= budget) return slice;
     // Shrink by the overshoot fraction plus a small safety margin.
     const next = Math.floor(size * (budget / count) * 0.95);
-    if (next >= size) return s.slice(0, Math.max(0, size - 1));
+    if (next >= size) return sliceAlignedToCodepoint(s, Math.max(0, size - 1));
     size = next;
   }
-  return s.slice(0, Math.max(0, size));
+  return sliceAlignedToCodepoint(s, Math.max(0, size));
 }
 
 /** Slice `s` from the end to the largest suffix that fits `budget` tokens. */
@@ -287,14 +386,14 @@ function sizeSuffixToTokens(s: string, budget: number): string {
   let size = Math.min(s.length, budget * 4);
   for (let iter = 0; iter < 6; iter++) {
     if (size <= 0) return "";
-    const slice = s.slice(-size);
+    const slice = sliceSuffixAlignedToCodepoint(s, size);
     const count = countTokens(slice);
     if (count <= budget) return slice;
     const next = Math.floor(size * (budget / count) * 0.95);
-    if (next >= size) return s.slice(-Math.max(0, size - 1));
+    if (next >= size) return sliceSuffixAlignedToCodepoint(s, Math.max(0, size - 1));
     size = next;
   }
-  return s.slice(-Math.max(0, size));
+  return sliceSuffixAlignedToCodepoint(s, Math.max(0, size));
 }
 
 function blockToString(block: McpContentBlock): string {

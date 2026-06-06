@@ -18,13 +18,31 @@ export function createStore(session: SessionInfo, initialCards?: ReadonlyArray<C
   const stateListeners = new Set<StateListener>();
   const eventListeners = new Set<EventListener>();
 
+  // Macrotask-batched notification: during rapid streaming, dozens of chunks arrive
+  // within a single event-loop drain.  Each `dispatch()` used to synchronously
+  // notify every listener, causing React's `useSyncExternalStore` to re-render
+  // on *every* token.  When renders couldn't keep up, React hit "Maximum update
+  // depth exceeded".  Deferring via setTimeout(0) coalesces all dispatches that
+  // happen inside the same tick into a single notification burst.
+  let notifyScheduled = false;
+  const scheduleNotify = () => {
+    if (notifyScheduled) return;
+    notifyScheduled = true;
+    // setTimeout(0) defers to the next macrotask, coalescing all synchronous
+    // dispatches (e.g. rapid streaming chunks) into a single notification.
+    setTimeout(() => {
+      notifyScheduled = false;
+      for (const listener of stateListeners) listener();
+    }, 0);
+  };
+
   return {
     getState() {
       return state;
     },
     dispatch(event) {
       state = reduce(state, event);
-      for (const listener of stateListeners) listener();
+      scheduleNotify();
       for (const listener of eventListeners) listener(event);
     },
     subscribe(listener) {

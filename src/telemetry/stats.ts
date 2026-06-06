@@ -1,5 +1,6 @@
 import type { Usage } from "../client.js";
-import { loadPricingOverride } from "../config.js";
+import { loadContextTokens, loadPricingOverride } from "../config.js";
+import type { CacheDiagnosticEntry } from "./cache-diagnostics.js";
 
 /** USD per 1M tokens; display currency conversion happens at the UI boundary. */
 export const DEEPSEEK_PRICING: Record<
@@ -43,6 +44,17 @@ export const DEEPSEEK_CONTEXT_TOKENS: Record<string, number> = {
 
 /** Fallback when the caller's model id isn't in the table — safe lower bound. */
 export const DEFAULT_CONTEXT_TOKENS = 131_072;
+
+/** Resolve context-window size: user config → built-in table → 131 K default. */
+export function resolveContextTokens(model: string, configPath?: string): number {
+  const userOverride = loadContextTokens(configPath)[model];
+  if (userOverride && userOverride > 0) return userOverride;
+  return DEEPSEEK_CONTEXT_TOKENS[model] ?? DEFAULT_CONTEXT_TOKENS;
+}
+
+/** Maximum turns retained in memory before old entries are rolled into carryover.
+ *  Each TurnStats holds usage + cost + model — at N=200 this caps memory at ~50KB. */
+export const MAX_TURNS = 200;
 
 export function costUsd(model: string, usage: Usage, path?: string): number {
   const p = pricingFor(model, path);
@@ -94,6 +106,22 @@ export interface TurnStats {
   usage: Usage;
   cost: number;
   cacheHitRatio: number;
+  cacheDiagnostics?: CacheDiagnostics;
+}
+
+export type CacheChurnReason = "system" | "tools" | "few_shots" | "log_rewrite";
+
+export interface CacheDiagnostics {
+  prefixHash: string;
+  prefixChanged: boolean;
+  prefixChangeReasons: CacheChurnReason[];
+  systemHash: string;
+  toolsHash: string;
+  fewShotsHash: string;
+  logRewriteVersion: number;
+  toolSchemaTokens: number;
+  promptCacheMissTokens: number;
+  promptCacheHitTokens: number;
 }
 
 export interface SessionSummary {
@@ -110,6 +138,12 @@ export interface SessionSummary {
   /** Floor estimate for next call — actual cost = this + user delta + new tool outputs. */
   lastPromptTokens: number;
   lastTurnCostUsd: number;
+  totalCacheHitTokens: number;
+  totalCacheMissTokens: number;
+  lastCacheMissTokens: number;
+  lastToolSchemaTokens: number;
+  lastPrefixChanged: boolean;
+  lastPrefixChangeReasons: CacheChurnReason[];
 }
 
 export class SessionStats {
@@ -120,8 +154,13 @@ export class SessionStats {
   private _carryoverTurns = 0;
   private _carryoverCacheHit = 0;
   private _carryoverCacheMiss = 0;
+  private _carryoverCompletion = 0;
   /** Last turn's promptTokens before exit — surfaced via summary() until the next live turn lands. */
   private _carryoverLastPromptTokens = 0;
+  /** Per-turn cache diagnostics stored as each turn completes, so the live
+   *  /cache-miss-report can replay accurate prefix hashes per historical turn
+   *  rather than computing them all from the current prefix. */
+  private _cacheDiagnostics: CacheDiagnosticEntry[] = [];
 
   /** Seed totals from a resumed session's persisted meta — only call once at construction. */
   seedCarryover(opts: {
@@ -129,6 +168,7 @@ export class SessionStats {
     turnCount?: number;
     cacheHitTokens?: number;
     cacheMissTokens?: number;
+    totalCompletionTokens?: number;
     lastPromptTokens?: number;
   }): void {
     if (typeof opts.totalCostUsd === "number" && opts.totalCostUsd > 0) {
@@ -143,9 +183,33 @@ export class SessionStats {
     if (typeof opts.cacheMissTokens === "number" && opts.cacheMissTokens > 0) {
       this._carryoverCacheMiss = opts.cacheMissTokens;
     }
+    if (typeof opts.totalCompletionTokens === "number" && opts.totalCompletionTokens > 0) {
+      this._carryoverCompletion = opts.totalCompletionTokens;
+    }
     if (typeof opts.lastPromptTokens === "number" && opts.lastPromptTokens > 0) {
       this._carryoverLastPromptTokens = opts.lastPromptTokens;
     }
+  }
+
+  /** Cumulative cache hit tokens across carryover + current turns. */
+  get cumulativeCacheHitTokens(): number {
+    let hit = this._carryoverCacheHit;
+    for (const t of this.turns) hit += t.usage.promptCacheHitTokens;
+    return hit;
+  }
+
+  /** Cumulative cache miss tokens across carryover + current turns. */
+  get cumulativeCacheMissTokens(): number {
+    let miss = this._carryoverCacheMiss;
+    for (const t of this.turns) miss += t.usage.promptCacheMissTokens;
+    return miss;
+  }
+
+  /** Cumulative completion (output) tokens across carryover + current turns. */
+  get cumulativeCompletionTokens(): number {
+    let comp = this._carryoverCompletion;
+    for (const t of this.turns) comp += t.usage.completionTokens;
+    return comp;
   }
 
   reset(): void {
@@ -154,10 +218,17 @@ export class SessionStats {
     this._carryoverTurns = 0;
     this._carryoverCacheHit = 0;
     this._carryoverCacheMiss = 0;
+    this._carryoverCompletion = 0;
     this._carryoverLastPromptTokens = 0;
+    this._cacheDiagnostics = [];
   }
 
-  record(turn: number, model: string, usage: Usage): TurnStats {
+  record(
+    turn: number,
+    model: string,
+    usage: Usage,
+    cacheDiagnostics?: CacheDiagnostics,
+  ): TurnStats {
     const cost = costUsd(model, usage);
     const stats: TurnStats = {
       turn,
@@ -165,9 +236,45 @@ export class SessionStats {
       usage,
       cost,
       cacheHitRatio: usage.cacheHitRatio,
+      cacheDiagnostics,
     };
     this.turns.push(stats);
+    this.trimOldTurns();
     return stats;
+  }
+
+  /** Fold external usage (e.g. subagent child-loop) into session totals without creating a turn entry. (#2008) */
+  recordExternal(model: string, usage: Usage): void {
+    this._carryoverCost += costUsd(model, usage);
+    this._carryoverCacheHit += usage.promptCacheHitTokens;
+    this._carryoverCacheMiss += usage.promptCacheMissTokens;
+    this._carryoverCompletion += usage.completionTokens;
+  }
+
+  /** Store a cache diagnostic entry per turn so the live /cache-miss-report
+   *  replays the prefix hashes that were actually in effect at turn time. */
+  addCacheDiagnostic(entry: CacheDiagnosticEntry): void {
+    this._cacheDiagnostics.push(entry);
+  }
+
+  /** Per-turn cache diagnostics stored in-memory for the current process. */
+  get cacheDiagnostics(): readonly CacheDiagnosticEntry[] {
+    return this._cacheDiagnostics;
+  }
+
+  /** Drop oldest turns beyond MAX_TURNS, folding their costs into carryover so
+   *  session totals remain accurate even after trimming. */
+  private trimOldTurns(): void {
+    if (this.turns.length <= MAX_TURNS) return;
+    const excess = this.turns.length - MAX_TURNS;
+    const dropped = this.turns.splice(0, excess);
+    for (const t of dropped) {
+      this._carryoverCost += t.cost;
+      this._carryoverCacheHit += t.usage.promptCacheHitTokens;
+      this._carryoverCacheMiss += t.usage.promptCacheMissTokens;
+      this._carryoverCompletion += t.usage.completionTokens;
+    }
+    this._carryoverTurns += excess;
   }
 
   get totalCost(): number {
@@ -214,6 +321,12 @@ export class SessionStats {
       cacheHitRatio: round(this.aggregateCacheHitRatio, 4),
       lastPromptTokens: last?.usage.promptTokens ?? this._carryoverLastPromptTokens,
       lastTurnCostUsd: round(last?.cost ?? 0, 6),
+      totalCacheHitTokens: this.cumulativeCacheHitTokens,
+      totalCacheMissTokens: this.cumulativeCacheMissTokens,
+      lastCacheMissTokens: last?.usage.promptCacheMissTokens ?? 0,
+      lastToolSchemaTokens: last?.cacheDiagnostics?.toolSchemaTokens ?? 0,
+      lastPrefixChanged: last?.cacheDiagnostics?.prefixChanged ?? false,
+      lastPrefixChangeReasons: last?.cacheDiagnostics?.prefixChangeReasons ?? [],
     };
   }
 }

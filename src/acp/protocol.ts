@@ -79,12 +79,22 @@ export type StopReason = "end_turn" | "tool_use_complete" | "cancelled" | "error
 
 export interface SessionPromptResult {
   stopReason: StopReason;
+  transcriptPath?: string | null;
 }
 
 export type SessionUpdate =
   | {
       sessionUpdate: "agent_message_chunk";
       content: { type: "text"; text: string };
+      metadata?: {
+        error?: {
+          name: string;
+          message: string;
+          code?: string;
+          phase?: string;
+          retryable?: boolean;
+        };
+      };
     }
   | {
       sessionUpdate: "agent_thought_chunk";

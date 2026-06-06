@@ -9,6 +9,7 @@ type SemanticToolOptions = {
   model?: string;
   extraBody?: Record<string, unknown>;
   timeoutMs?: number;
+  batchSize?: number;
   root: string;
   defaultTopK?: number;
   defaultMinScore?: number;
@@ -57,6 +58,7 @@ export async function registerSemanticSearchTool(
         apiKey: opts.apiKey,
         model: opts.model,
         extraBody: opts.extraBody,
+        batchSize: opts.batchSize,
         signal: ctx?.signal,
       });
       if (hits === null) {

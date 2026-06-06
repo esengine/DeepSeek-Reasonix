@@ -122,6 +122,7 @@ describe("JobRegistry", () => {
   it("tailLines caps returned output to the last N lines", async () => {
     const cmd = `node -e "for (let i=0;i<50;i++) console.log('line'+i); setTimeout(()=>{}, 10000)"`;
     const res = await registry.start(cmd, { cwd, waitSec: 0.5 });
+    await waitFor(() => registry.read(res.jobId)?.output.includes("line49") ?? false, 3000);
     const tailed = registry.read(res.jobId, { tailLines: 5 });
     const lines = (tailed?.output ?? "").split("\n").filter(Boolean);
     expect(lines.length).toBeLessThanOrEqual(5);

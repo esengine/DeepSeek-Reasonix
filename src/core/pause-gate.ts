@@ -2,27 +2,15 @@
 // Tools call gate.ask(kind, payload) and await the result; the App subscribes
 // with gate.on() to show the right modal, then calls gate.resolve() on user pick.
 
-export type ConfirmationChoice =
-  | { type: "deny"; denyContext?: string }
-  | { type: "run_once" }
-  | { type: "always_allow"; prefix: string };
+import type {
+  CheckpointVerdict,
+  ChoiceVerdict,
+  ConfirmationChoice,
+  PlanVerdict,
+  RevisionVerdict,
+} from "@reasonix/core-utils";
 
-export type PlanVerdict =
-  | { type: "approve"; feedback?: string }
-  | { type: "refine"; feedback?: string }
-  | { type: "cancel"; feedback?: string };
-
-export type CheckpointVerdict =
-  | { type: "continue" }
-  | { type: "revise"; feedback?: string }
-  | { type: "stop" };
-
-export type RevisionVerdict = { type: "accepted" } | { type: "rejected" } | { type: "cancelled" };
-
-export type ChoiceVerdict =
-  | { type: "pick"; optionId: string }
-  | { type: "text"; text: string }
-  | { type: "cancel" };
+export type { ConfirmationChoice, PlanVerdict, CheckpointVerdict, RevisionVerdict, ChoiceVerdict };
 
 export type ToolConfirmationAuditEvent =
   | {
@@ -71,7 +59,13 @@ interface PausePayloadMap {
     allowPrefix: string;
   };
   plan_proposed: { plan: string; steps?: unknown[]; summary?: string };
-  plan_checkpoint: { stepId: string; title?: string; result: string; notes?: string };
+  plan_checkpoint: {
+    stepId: string;
+    title?: string;
+    result: string;
+    notes?: string;
+    completion?: unknown;
+  };
   plan_revision: { reason: string; remainingSteps: unknown[]; summary?: string };
   choice: { question: string; options: unknown[]; allowCustom: boolean };
 }

@@ -125,6 +125,12 @@ function summarizeTurns(turns: TurnStats[]): SessionSummary {
     cacheHitRatio: round(cacheHitRatio, 4),
     lastPromptTokens: lastTurn?.usage.promptTokens ?? 0,
     lastTurnCostUsd: round(lastTurn?.cost ?? 0, 6),
+    totalCacheHitTokens: hit,
+    totalCacheMissTokens: miss,
+    lastCacheMissTokens: lastTurn?.usage.promptCacheMissTokens ?? 0,
+    lastToolSchemaTokens: lastTurn?.cacheDiagnostics?.toolSchemaTokens ?? 0,
+    lastPrefixChanged: lastTurn?.cacheDiagnostics?.prefixChanged ?? false,
+    lastPrefixChangeReasons: lastTurn?.cacheDiagnostics?.prefixChangeReasons ?? [],
   };
 }
 

@@ -3,6 +3,650 @@
 All notable changes to Reasonix. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.52.0] — 2026-05-26
+
+**Ink renderer in-tree as `@esengine/ink`.** The vendored Ink fork now
+lives as a workspace package (#1847), unblocking TUI-specific
+renderer tweaks (focus, IME, Static append) without forking upstream.
+TUI polish lands on top: guard ASCII IME enter commits so JP/CN IME
+atomic commits don't double-submit (#1874), preserve undo state across
+session context switches (#1810), incremental repaint coverage
+(#1873).
+
+**Desktop — clipboard image paste.** Paste screenshots / copied images
+directly into the composer (#1889); paste path hardened against
+oversized + non-image clipboard payloads (#1897). Sessions exported by
+other local AI apps can be imported into Reasonix (#1894).
+
+**Desktop — JumpBar polish + drag perf.** JumpBar now highlights the
+active message bar and follows the latest one as the thread grows
+(#1813); dot styling pulled into a shared helper (#1892). Sidebar drag
+writes CSS vars directly to the DOM with `content-visibility` on
+messages (#1812) and unit-suffixes the vars to dodge a Chromium
+recompute storm (#1875).
+
+**Desktop — smaller fixes.**
+- Search-engine API key UI + slash command interception (#1867)
+- Mention `@` popup stays stable while filtering (#1850); split
+  kind/length effects in the popup (#1859)
+- Update banner floats above the thread instead of pushing layout
+  (#1865)
+- `memoryDetail` / `onReadMemory` wired through test fixtures so the
+  desktop memory browser is exercisable in unit tests
+
+**Config — base URL + proxy.** `DEEPSEEK_API_BASE_URL` accepted as an
+env alias to the existing base-url override (#1876, #1887), and
+`proxy.url` is now a first-class field in `config.json` (#1881). MCP
+`initialize` no longer leaks LSP-only fields that some servers reject
+(#1861).
+
+**Providers.** Ollama usage parsing tolerates the field-name variants
+recent Ollama versions emit (#1886).
+
+**i18n.**
+- Russian (`ru`) language pack added (#1879)
+- German corrections — capitalization, terminology, coverage (#1878)
+- `/qq` command hints + argsHint localized; English fallback for
+  zh-CN (#1857, #1862)
+
+**Dashboard / UI.**
+- Sync TUI and Web modal state so confirm gate doesn't desync between
+  surfaces (#1831, #1866)
+- Highlight active plan edit mode (#1863)
+- `useEditHistory` no longer re-exports undo-context through itself
+  (#1854)
+
+## [0.51.0] — 2026-05-25
+
+**First paint — session restore 4.5s → 430ms.** Progressive `<Static>`
+mount streams scrollback in chunks instead of mounting the full history
+synchronously (#1761). Combined with index-backed `mutateCard` + O(n)
+`plan.drop` + cursor elide (#1769) and the bump to `ink@7.0.4` (which
+ships the flicker fix we'd been carrying as a patch — patch-package
+machinery is gone, #1809), large session restores no longer block the
+event loop on startup.
+
+**Perf — tokenizer + markdown + search.** BPE tokenizer caches its
+table + bounds per-content counts with a fast-path truncate (#1741),
+so long sessions don't re-tokenize the world on every turn. CodeBlock
+syntax highlight is memoized (#1743). Literal-pattern search bypasses
+the regex worker entirely (#1748). Windows terminal repaint cadence is
+throttled (#1750) and a BEL → ST swap on Windows stdout stops `cmd.exe`
+from beeping on every render frame (#1795).
+
+**Cross-platform robustness.**
+- `EXDEV` fallback for atomic config writes on OneDrive / NTFS reparse
+  points (#1778) — config saves no longer fail on Windows + cloud-sync
+- Apple Terminal mouse-reset crash guarded (#1764); legacy X10 mouse
+  reports without ESC are dropped (#1723); `ESC`-less CSI recovery is
+  refused when followed by typed text (#1771)
+- CLI startup gates on unsupported Node versions with a clear error
+  instead of crashing in the middle of bootstrap (#1757)
+- Desktop bundled Node inherits parent TCC grants on macOS (#1749) so
+  file / microphone permission prompts attach to the app, not the helper
+- Crash-safe atomic rename for edit-block writes (#1721); completed
+  plans archive instead of persisting across sessions (#1700)
+- `.devenv` and `.direnv` are skipped by glob / search / directory_tree (#1706)
+
+**Memory — CLAUDE.md import for Claude Code migration.** Loading
+`CLAUDE.md` and `~/.claude/CLAUDE.md` alongside the existing
+`REASONIX.md` (#1694) lets Claude Code users carry their project /
+user memory directly into Reasonix without rewriting it.
+
+**i18n — German.** Full German (`de`) locale added (#1773) with a
+follow-up correction pass (#1797).
+
+**Desktop polish.**
+- JumpBar message navigation dock (#1725, #1729)
+- File-change summary card after each assistant turn (#1691)
+- Self-heal stale model id; expose plan as 4th editMode (#1699)
+- Restore aborted prompt drafts on relaunch (#1693)
+- Recalc thread width on resize (#1789); right panel scrollbar
+  draggable (#1765); contain long MCP spec strings (#1736)
+- Sync slash setting commands across surfaces (#1724)
+- Surface desktop startup failures instead of silent exit (#1759)
+
+**TUI polish.**
+- Plan-mode `[PLAN]` / `[计划]` badge in input bar (#1742)
+- Forward-delete for `Delete` key (#1735)
+- IME candidate window cursor alignment (#1754)
+- Coalesce prompt cursor sync to reduce flicker (#1768)
+- Demote stuck `running` plan step on turn end (#1784)
+- Hide `max` effort on non-DeepSeek endpoints (#1798)
+- Drop stale "press Cmd-C to copy" startup hint (#1692)
+
+**Dashboard / web mode.**
+- Bootstrap mcp / skills / memory panels in web mode (#1775)
+- Expose new memory browser to web (#1779)
+- Replay active modal on SSE connect so confirm gate isn't stuck (#1770)
+- Restore scroll and memory visibility (#1766)
+- Docs responsive spacing polish (#1785)
+
+**Smaller fixes.**
+- Preserve full tool results when truncated (#1615)
+- Trim long-session retained payloads to bound memory growth (#1799)
+- Drain steer queue on `/new` + `/cwd` so prior intent doesn't leak (#1774)
+- Suppress DeepSeek-specific 5xx hints when host isn't DeepSeek (#1716)
+- `normalizeSemanticEmbeddingUserConfig` preserves `timeoutMs` (#1788)
+- `REASONIX_ACP_SYSTEM_APPEND` env var for system-prompt injection (#1737)
+- Configurable cost-display currency with click-to-toggle (#1710)
+
+**Refactors / internals.**
+- Extract `LruCache` + `TtlLruCache` + `lazy()` helpers from ad-hoc
+  duplicates (#1746)
+- Split stream aggregator + chunked dispatch out of `step()` (#1739)
+- Per-component render trace gated by `REASONIX_TRACE_RENDERS` (#1747);
+  `readStats` API on render trace + real-numbers large-session probe (#1751)
+
+## [0.50.1] — 2026-05-24
+
+**Install fix — `postinstall` no longer crashes on `npx`.** The
+`postinstall` hook added in 0.50.0 (#1584) ran `npm ci` inside
+`dashboard/` and `desktop/` to set up the dev workspace, but those
+directories aren't shipped in the published tarball. Result: `npx
+reasonix@0.50.0 code` failed during install with a `dashboard/package.json
+not found` error and the CLI never started. `postinstall` now delegates
+to `scripts/postinstall.mjs`, which exits 0 when `dashboard/package.json`
+is missing (i.e. anywhere except a git checkout). 0.50.0 is deprecated
+on npm.
+
+## [0.50.0] — 2026-05-24
+
+**Desktop dashboard — unified on the CLI-hosted React surface.** The
+old Tauri+Preact dashboard inside the desktop bundle is gone (#1418).
+Desktop now embeds the same CLI-hosted dashboard the browser surface
+already uses, so there's one React app rendering chat across all
+three surfaces (CLI, browser, desktop) instead of two divergent
+implementations drifting apart. Cuts the duplicate rendering paths
+that caused tool cards, code blocks, and compacted history to look
+subtly different depending on where you opened the same session.
+
+**Presets — flash/pro are the only knobs now.** The preset abstraction
+is removed (#1657, #1630): config now exposes `model` + `effort`
+directly instead of indirecting through `preset: auto | flash | pro`.
+The `/pro` switch is dropped too — flash and pro remain as direct
+model selections. Per-skill flash/pro override lands with a Settings
+UI (#1632) so subagents can opt into a heavier model without
+reconfiguring the parent.
+
+**Cumulative usage stats — persisted + auto-restored.** Session token
+totals and accumulated cost now write to the session meta on each
+turn and reload on startup (#1667, #1680 follow-up). Cost telemetry
+survives a CLI restart or desktop relaunch instead of resetting to
+zero, and the context-size readout shows the current window, not the
+all-time cumulative cache count (#1643). `SessionStats` caps at 200
+turns with cost carryover so long-lived sessions don't unbound (#1628).
+
+**Plans — `editMode="plan"` enforced at the dispatch gate.** Plan
+mode now blocks write tools at the `ToolRegistry` dispatch layer
+(#1681), not as a per-tool soft check. Plan steps also advance
+correctly when intermediate actions are skipped (#1629), so the
+"current step" indicator no longer stalls on a step the model already
+completed.
+
+**Context — fold once at turn start.** The pre-flight fold pass is
+gone — context folding now happens once at the start of each turn
+instead of being threaded through mid-turn checks (#1642, #1646). The
+obsolete byte-ceiling check is dropped too. Compacted history renders
+as a single collapsible card on all three surfaces (#1649), so the
+fold is visible without dominating the scrollback.
+
+**Desktop polish.**
+- Draggable sidebar resize + responsive conversation panel width (#1688)
+- Responsive sidebar collapse on narrow windows (#1585)
+- Copy/edit overlay, message-history navigation, IME guard, card collapse (#1645)
+- `Esc` closes the open modal instead of aborting the model turn (#1685)
+- QQ turn routing isolated by tab so cross-tab messages don't bleed (#1672)
+- Discard explicitly aborted turns instead of replaying them on resume (#1687)
+- Render `edit_file` / `multi_edit` results as DiffCard, matching CLI (#1662)
+- Code-block syntax highlighting follows light/dark theme (#1655)
+- System events surface as a show/hide toggle (#1654, #1650)
+- File paths + completion feedback surface in tool results (#1644)
+- Block right-click context menu in release builds (#1641)
+- Preserve code operators when rendering inline code (#1640)
+- Compact composer default preserved across relaunches (#1594)
+- Stale events no longer corrupt UI after a session switch (#1582)
+- macOS bundled Node inherits parent TCC grants so file/microphone
+  permission prompts attach to the desktop app, not the helper (#1614)
+- New `dashboard.enabled` config to suppress auto-start when the
+  dashboard isn't wanted (#1612)
+- Localize edit approval/discard messages + event errors with zh-CN (#1617)
+
+**Dashboard polish.**
+- Persistent active-session URL — shareable + refresh-safe (#1586,
+  #1589, #1599)
+- Code-block syntax highlighting follows light/dark theme (#1664)
+- IME confirm-enter no longer submits mid-composition (#1689)
+- Code-fence language detection fix mirrored from desktop (#1677, #1661)
+- Heavy vendor libs split into separate chunks for faster cold load (#1587)
+- Tool cards no longer stuck spinning when the turn ends without an
+  explicit completion event (#1676)
+- Markdown tables get a horizontal scrollbar instead of overflowing
+  the chat column (#1562)
+- Search-engine switcher restored in dashboard + desktop settings (#1618)
+- Composer queue-count label was reading the wrong variable name (#1674)
+- Long file paths stop stretching the chat bubble width (#1590)
+- Don't synthesize `$turn_complete` from per-iter `assistant_final` —
+  let the real completion event fire (#1673)
+
+**TUI.**
+- New `Alt+S` hotkey stashes the current input buffer and recalls it
+  later, like a one-slot clipboard for the composer
+- Static history is isolated from input re-renders, so typing during
+  a model turn doesn't repaint the whole scrollback (#1635)
+- Legacy mouse reports (X10) are dropped so terminals that emit them
+  by default no longer flood the input stream (#1637, #1648)
+- `multi_edit` is gated in review mode to match the single-edit
+  approval flow (#1647)
+- Shell command failure output is surfaced to the user instead of
+  silently truncated (#1608)
+
+**Diff rendering — CJK column-border alignment.** `SplitDiff` no
+longer misaligns the column border when CJK characters appear in
+either side of the diff (#1686). The width math now accounts for
+double-width graphemes when laying out the gutter.
+
+**Subagents — per-skill model override.** Each named skill
+(`/explore`, `/research`, `/review`, `/security-review`) can now
+override flash/pro independently (#1632), with a Settings UI to
+manage the overrides. Defaults flow from the parent session.
+
+**MCP.**
+- Workspace roots are passed to MCP servers on connect (#1625), so
+  servers that scope by root see the right project
+- `codeCommand` honors the full `normalizeMcpConfig` pipeline including
+  inline `mcpServers` blocks (#1603, follow-up to #1568)
+
+**Config.**
+- `(baseUrl, apiKey)` is resolved as a tuple instead of two
+  independent fields (#1658), so a partial override on one no longer
+  silently falls through to the env value of the other
+- Stale model IDs self-heal on load; v3 IDs are dropped from the
+  picker fallback list (#1663)
+- Theme rename follow-up from #1666 closes out the prompt-input + user
+  card token migration (#1678, #1666, #1623)
+
+**Memory.** `JobRegistry` self-cleans entries for completed jobs
+(#1620), so long sessions don't accumulate dead job records that
+never release their references.
+
+**Other.**
+- `chore(loop)` drop redundant abort warning, keep only the synthetic
+  final event (#1659)
+- `chore(theme)` finish theme rename follow-up after #1666 (#1678)
+- `chore(ui)` drop redundant `overflow-wrap` from inherited
+  descendants (#1675)
+- `fix(presets)` drop stale "5/31 discount" framing in pro cost copy
+  (#1583)
+- `chore(install)` include desktop deps in root postinstall (#1584)
+- `test(lifecycle)` cover deterministic policy corpus + npm package
+  aliases (#1574, #1621)
+
+## [0.49.0] — 2026-05-22
+
+**TUI — Static-history renderer.** The history pane is now rendered
+exclusively through Ink's `<Static>` (#1529, stages 1–4). The previous
+virtual-viewport machinery — viewport-budget row allocator, byte-virtual
+frame layer, manual scroll math — is gone. Net: less code on the hot
+path, no more "frame drift" on very long sessions, and the rewrite stays
+Ink-native instead of fighting it. Behind `REASONIX_STATIC_HISTORY` at
+stage 1, default-on by stage 2, scaffolding removed by stage 4.
+
+**Chat — queued mid-turn steers.** Typing while the model is mid-turn
+no longer fights the live render or drops the keystroke. New input
+queues, surfaces a small "queued" hint, and feeds into the next user
+turn cleanly (#1501). Pairs with the static-history switch so the
+queued line stays visible across re-renders.
+
+**Web search — Bing default, dashboard engine switcher.** Default web
+backend switches from Mojeek to Bing (#1558); the dashboard gains a
+visible engine switcher so you can flip between configured backends
+without editing config. Mojeek is dropped from the bundled set entirely
+in this release.
+
+**Plans — lifecycle evidence summaries.** Plan acceptance now surfaces
+the evidence captured at each lifecycle step (#1500), so the "why this
+plan is ready to accept" question has a structured answer instead of
+implicit trust. Builds on the strict-lifecycle observability that
+landed in 0.48.1.
+
+**Desktop — approval + completion notifications.** Native OS
+notifications for approval prompts and turn-complete events (#1519),
+so a long-running turn can land in the background and still surface.
+Uses `tauri-plugin-notification`.
+
+**i18n — CLI command output.** `/mcp`, `/sessions`, `/prune`, `/theme`
+output is now translated (#1524), closing the remaining English-only
+gap in CLI command surfaces. Approval-prompt confirm titles and action
+labels also get zh-CN (#1560/#1561).
+
+**Security.**
+- `web_fetch` now blocks SSRF — private/loopback/link-local targets are
+  rejected at the boundary (#1544)
+- Edit snapshots can no longer read outside the workspace (#1454)
+- Shell redirects (`>`, `>>`, `<`) are constrained to the sandbox
+  boundary (#1457)
+- New Task integrity guardrail catches objective simplification — i.e.
+  the model trying to redefine a hard requirement away (#1516)
+
+**Tools.** `run_command` description now actively discourages
+shell-based file edits in favor of the structured `edit` tool (#1514).
+A per-turn dispatch-rate limit lands for tool calls (#1356), keeping
+runaway loops from burning a quota slice in one turn.
+
+**TUI polish.**
+- `Ctrl+Enter` now inserts a newline (#1513) — matching how every
+  modern composer treats the modifier
+- `mouseWheelRows` config knob tunes scroll velocity per terminal
+  (#1511) so trackpad vs. wheel mouse don't fight the default
+- `@mention` file search is restricted to the current directory prefix
+  (#1548) so the picker doesn't dump the whole repo
+- Paste-sentinel label no longer claims `^O` expands the paste — the
+  shortcut never existed (#1517)
+
+**Context.** Pinned-constraint blocks are now preserved across context
+folds (#1515) and the fold tail captures all of them, not just the last
+(#1552). Memory constraints survive the fold instead of silently
+dropping out under pressure.
+
+**Client.**
+- DeepSeek 429s are translated into an actionable "concurrency limit
+  hit" hint instead of a raw HTTP error (#1526)
+- `timeoutMs` is now wired to `fetch` when the caller passes an
+  `AbortSignal` (#1535) — previously the timeout was silently ignored
+- `--no-proxy` / `REASONIX_NO_PROXY` opt-out is honored for the
+  DeepSeek direct-route default (#1507)
+
+**Files.** Read/edit/restore now preserve the source file's encoding
+(GB18030, UTF-8 BOM, etc.) instead of normalizing to UTF-8 on write
+(#1518). Important for CJK Windows projects.
+
+**Web/Dashboard.**
+- Path-access approval modal is bridged to the dashboard (#1538) so
+  the browser surface can resolve the same prompts as CLI/Desktop
+- `@mention` file picker popover lands in the dashboard ChatPane
+  (#1546), gated on attached mode (#1549)
+
+**Config.** Atomic config writes restore the preset-write diagnostic
+trace (#1555), so when a preset write goes wrong you can actually see
+why.
+
+**Refactor.** `lifecycle` extracts a standalone risk policy module
+(#1557), shrinking the orchestrator and unblocking risk policy reuse
+from non-lifecycle callers.
+
+**Edit safety.** `read-before-edit` is now enforced at the dispatch
+gate, not as a per-tool check (#1563) — `edit` / `multi_edit` refuse
+to fire on a file the model hasn't read this session, closing the
+race where a SEARCH block could match stale bytes after an external
+write.
+
+**Cache.** Fold-summary requests now reuse the live agent's system
+prompt + tool list as their prefix, so the cached bytes the main
+agent just paid for carry over to the summary call (#1565). Measured
+on a 48.7K-token fold: 0% → 99.6% cache hit, ~89% input cost
+reduction per fold.
+
+**Other:**
+- `fix(desktop)` drop `workspace:*` protocol for core-utils — desktop
+  isn't a workspace member
+- `fix(desktop)` tsc errors blocking desktop bundle build
+
+## [0.48.1] — 2026-05-21
+
+**`dsnix` — short alias.** A new `dsnix` shim package lands alongside
+`reasonix` (#1440), so `npx dsnix` is now equivalent to `npx reasonix`
+for users who'd rather type five characters than eight. The shim is
+just a forwarding binary — same CLI, same release cadence — and ships
+on npm with the same version pinning (#1442). The root README documents
+the alias.
+
+**Lifecycle — observability + corpus tests.** Strict lifecycle now
+surfaces step-level evidence and rail decisions through a structured
+observability channel (#1426), so what the loop is doing at each step
+is legible instead of inferred. Two corpus tests lock the behavior in:
+multi-file refactor flow (#1427) and config-migration replay (#1473).
+
+**Approval prompt unification.** Phase 3 of the pause-request work
+(#1322) lands a single `PauseRequest` → UI data model shared by ACP,
+CLI, and Desktop (#1443) — the three surfaces now render the same
+prompt from the same payload instead of each translating in their own
+way. Net: pause prompts stay in sync across surfaces when fields are
+added.
+
+**i18n.** Builtin skill descriptions are now translated (#1468), and
+MCP error toasts + status labels carry zh-CN (#1481). The remaining
+hardcoded English surface in skill picker and MCP error toasts is gone.
+
+**Composer redesign + Ctrl+P shortcut modal.** The input area is
+rebuilt with a denser layout, a clearer affordance for multi-line
+input, and a Ctrl+P shortcut-help modal that lists every key binding
+in one place (#1483). The desktop composer also autosizes for
+multi-line input properly (#1439).
+
+**Java tool — cheaper.** The Java source/decompile tool description
+and output are pruned (#1485), shaving cached prefix tokens. Pairs with
+the #1390 buffer raise from 0.48.0.
+
+**Security.** `metaso` web-search no longer ships with a baked API
+key — it now requires the user-configured key like every other backend
+(#1488). Project-level hooks are trusted without an extra prompt
+provided they live inside the working directory.
+
+**YOLO mode polish.** `run_command` and `run_background` approval
+gates now auto-resolve in YOLO mode (#1489) so power users don't get a
+modal for every shell call after explicitly opting in.
+
+**Perf — folding thresholds.** Normal fold threshold raised 50% → 75%,
+aggressive 70% → 78% (#1461) — the loop now spends less time folding
+context that didn't need to be folded.
+
+**Preflight.** The cap that previously only counted tokens now also
+gates on raw JSON body bytes (#1451), catching oversized payloads that
+weren't reflected in the token count.
+
+**Desktop.** Error cards are dismissable and recoverable variants
+toned down (#1487); orphaned pause-gate modals are cleared on
+`$turn_complete` so a stale gate can't block the next turn (#1484);
+session titles are renameable from the sidebar (#1478); `/btw` now
+echoes input, surfaces busy state, and routes through the side-question
+prompt instead of silently dropping the keystroke (#1472).
+
+**TUI.** SGR mouse mode stays on for Windows Terminal (#1486) —
+alternate-scroll silently breaks the wheel there. The default for
+non-WT terminals switches to alternate-scroll (`?1007h`) (#1477) to
+avoid the click-eats-selection problem on conhost-class hosts.
+
+**Other:**
+- `fix(cost)` show session-aggregate cache hit so `/cost` matches the
+  status-bar number (#1482)
+- `fix(plan)` Accept executes immediately when the plan has no open
+  questions instead of waiting on a non-existent answer (#1480)
+- `fix` resolve root-relative edit-block paths (#1452)
+- `fix(tests)` bump chat-mcp-startup timeout to 30s for Windows test
+  matrix (#1471)
+
+## [0.48.0] — 2026-05-20
+
+**Proxy-aware networking.** `NO_PROXY` is now honored end-to-end and
+the DeepSeek host is baked into the default bypass whitelist so a
+machine-wide `HTTPS_PROXY` no longer routes API traffic through an
+unwanted proxy (#1373). A `--no-proxy` CLI flag, `REASONIX_NO_PROXY`
+env, and `cfg.proxy` field give per-invocation control (#1374), and
+`/doctor` surfaces the resolved `NO_PROXY` value plus the routing
+decision Reasonix made for each host (#1375). If proxy behavior ever
+looks wrong, `/doctor` will tell you why in one screen.
+
+**Code intelligence boost.** Two new tree-sitter–powered tools land:
+`get_symbols` and `find_in_code` cover TS/JS/Python/Go/Rust/Java
+(#1387), giving Reasonix structural code navigation instead of plain
+grep. Java gets a dedicated `java_source` tool that reads `.java`
+sources and decompiles `.class` / inner jar entries via `javap`
+(#1344), with output stripped of noise and the read buffer raised so
+large classes fit in one round (#1390). Web search adds Perplexity
+and Exa backends alongside the existing Mojeek / Tavily set (#1350).
+
+**Lifecycle round two.** Checkpoints now gate mutating tools during
+restore so an in-flight edit can't race a rollback (#1389), state is
+preserved across plan revisions (#1388), and step evidence is
+summarized at the plan card so progress is legible without expanding
+each step (#1391). `/plan` is excluded from the strict-rails cache
+constraint that would otherwise force a re-prefix on every revision
+(#1407, #1386), and a strict end-to-end harness covers the whole
+lifecycle path (#1424).
+
+**Subagent UX.** Long-running `explore` / `research` / `review` are
+now top-level slash commands with live byte-progress in the status
+row instead of a frozen spinner (#1422). The agent loop is hardened:
+`_turnAbort` resets in `finally` so a consumer break can't lock the
+session (#1421), ambiguous search-replace edit blocks are rejected
+instead of silently miss-applying (#1414), repeated gate rejections
+no longer ping-pong (#1392), and FS tools walk `.reasonix/` so user
+skills are reachable from any subdir (#1371).
+
+**Desktop.** QQ sessions are now usable from the desktop app — the
+QQ Adapter routes events through the same RPC bridge as CLI tabs
+(#1334). Custom font support + file-link rendering improvements ship
+(#1376). Reliability fixes: `rpc_spawn` is idempotent and a
+`desktop_resync` rehydrate path recovers cleanly after a renderer
+reload (#1428); F5 / Ctrl+R are swallowed in packaged builds so a
+stray refresh can't wipe the chat (#1430); React error #31 with
+non-string MCP config items is fixed (#1394); the context-token
+meter syncs after `/compact` (#1399); the cost meter and session
+cost card apply USD→CNY conversion (#1369); `augmentProcessPath()`
+lost in the #1334 rebase is restored (#1361); desktop stdout partial
+writes are handled (#1405); `/btw` on empty payload now surfaces a
+usage hint instead of dropping the keystroke (#1383).
+
+**TUI / UI.** `/about` is a new slash command showing version,
+website, GitHub, and license (#1434). Remaining hardcoded strings in
+edit history and MCP browse are now i18n'd (#1433). Reasoning,
+streaming, and diff content beyond the recent window are elided so
+long sessions don't tank scroll perf (#1432). Wheel scroll is less
+sensitive and per-card stdout resize listeners collapse to one (#1423);
+terminal mouse tracking now has a CLI opt-out for users on
+mouse-hostile terminals (#1345).
+
+**Settings / config.** `config.json` with a UTF-8 BOM is tolerated
+instead of crashing the loader (#1431); preset-trace diagnostic
+retired (#1431). The dashboard can now clear `baseUrl` to fall back
+to the bundled default (#1425). `string[]` config fields are
+sanitized at the `readConfig` boundary so a malformed entry can't
+propagate into the running session (#1396).
+
+**Other:**
+- `fix(test)` switch vitest to forks pool to stop heap OOM on
+  many-core hosts (#1408)
+- `chore(shell)` trim `run_command` param description (saves 119
+  tokens of cached prefix) (#1403)
+- `chore(scripts)` measure per-tool token cost end-to-end (#1402)
+- `test(tools)` close dispatch-level E2E gaps for shell jobs, web,
+  and scaffold (#1400)
+- `test(shell-tools)` raise `run_background` dispatch test timeout
+  to 15s (#1406)
+- `test(web)` cover Perplexity + Exa backends (#1366)
+- `docs(qq)` add desktop quick start and trim README surface (#1401)
+
+## [0.47.2] — 2026-05-19
+
+**Hotfix — `npx reasonix@latest` install.** `0.47.1` shipped with
+`@reasonix/core-utils` listed under runtime `dependencies` as
+`workspace:*`. Because the workspace package is `private: true`,
+`npm publish` did not rewrite the protocol, so consumers hit
+`EUNSUPPORTEDPROTOCOL: Unsupported URL Type "workspace:"` during
+install. The bundled `dist/` already inlines core-utils at build
+time, so the dependency belongs under `devDependencies`. Moved.
+`0.47.1` is deprecated on npm; please install `0.47.2`.
+
+## [0.47.1] — 2026-05-19
+
+**Desktop shakeout.** Follow-ups to the 0.47.0 desktop launch:
+inherit login-shell `PATH` so `nvm`/`asdf`/`fnm`-installed Node is
+visible to `run_command` (#1331); stop claiming "Connected" on the QQ
+settings page since the desktop is config-editor-only, not a live
+bridge (#1326); re-enable devtools + right-click context menu in
+release builds; route the in-app update check through the updater
+plugin so CSP doesn't block it (#1298); prevent the browser-level
+Select-All when the composer isn't focused (#1314); add unified
+`button:disabled` style; ship selectable theme styles (#1291); a few
+follow-up bug fixes from the release.
+
+**Prompt budget — round one.** `codeSystemPrompt` compressed -51%
+(~3.1k tokens/request, #1323) and tool spec descriptions -28% (~2.7k
+tokens/request, #1321), with a byte-budget regression test locked in
+(#1320). The cache-prefix shrinks accordingly — cheaper first turn,
+same behavior.
+
+**TUI / shell-exec.** Per-call shell-exec approval flow now surfaces
+on the first run instead of failing silently (#1278); spinner +
+stream tick rate dropped on legacy Windows conhost; light-theme
+picker rows highlight on selection (#1330); `//` line-comment input
+no longer parses as a slash command (#1288).
+
+**Other:**
+- `feat(core-utils)` new `@reasonix/core-utils` workspace package —
+  Phase 1 internal split, no public-API change (#1328)
+- `feat(lifecycle)` opt-in engineering lifecycle (#1306)
+- `feat(tools)` ordered interceptor chain (#1301)
+- `feat(plan)` persist step evidence metadata (#1302)
+- `feat(read_file)` lower outline threshold 512 KiB → 64 KiB (#1324)
+- `fix(multi_edit)` roll back files that may have been modified on
+  write failure (#1325)
+- `fix(permissions)` strip literal `*` from always-allow prefix in
+  Desktop/ACP (#1312)
+- `fix(client)` skip `extra_body` for Azure endpoints (#1316)
+- `fix(search)` honor `tavily` engine + read engine at call time
+- `fix(cli)` resolve heap reexec entrypoint (#1303)
+- `fix(docs)` point download mirrors at `desktop-v*` tag namespace
+
+## [0.47.0] — 2026-05-18
+
+**Desktop matures.** The Tauri app picks up the polish it was missing —
+About modal with one-click update check, KaTeX math rendering in chat,
+window/tab/session/scroll restore across relaunch, /compact /retry /btw
+/feedback slash commands, per-message copy + file-export actions, QQ
+settings entry, platform-aware keyboard shortcut hints. The auto-updater
+now reads `latest.json` from the R2 mirror so an npm-only `v*` release
+can no longer brick the in-app update banner; the banner also surfaces
+download progress while the bundle pulls. Universal Node is bundled on
+macOS so Intel Macs stop blank-screening at launch.
+
+**TUI — composer round two.** Composer keys and visuals re-align with
+Claude Code: rounded border, status row at the bottom, input-box
+background fill, left stripe on user card. `ctrl+r` toggles verbose
+(reasoning + raw tool I/O); `esc-esc` opens a rewind picker over the
+last 5s; `u` undo is now gated to the same 5s window so stale taps
+can't revert. SGR mouse wheel is on by default again, IME cursor stays
+glued to `▌`, WelcomeBanner centers vertically on empty chats.
+
+**Search hardening.** Regex now runs in a worker thread so a ReDoS
+pattern can be terminated cleanly; worker deadline 5s → 60s and walk
+deadline 15s → 120s for legitimately large repos. Tavily added as a
+`web_search` backend — escape hatch when Mojeek 403s. `search_content`
+gets a walk-level deadline and ESC preempts queued tool calls.
+
+**Claude-ecosystem compat.** Reasonix now reads `.mcp.json` and
+`.claude/skills/` from the repo so existing Claude Code setups work
+without a second copy; common skill fields (`type`/`context`/`agent`)
+are aliased.
+
+**Other:**
+- `feat(embedding)` batch OpenAI-compat embedding requests to respect
+  provider batch limits
+- `feat(memory)` inject ancestor `AGENTS.md` into `list_directory`,
+  not only `read_file`
+- `perf(session)` skip cross-workspace jsonls + byte-scan line count
+  — sidebar list ~10× faster
+- `feat(config)` support pricing overrides and per-model rpm limits
+- `feat(dashboard)` new / switch / delete sessions in-place, no CLI
+  bounce
+- `fix(mcp)` runtime schema validation for MCP server responses; ESC
+  aborts hung handshakes during startup; surface the real bridge-
+  failure reason in the dashboard
+- `fix(cli)` preserve flash-preset auto-escalate semantics
+- `ci` split desktop + npm releases into separate tag namespaces:
+  `v*` → npm, `desktop-v*` → Tauri bundles
+
 ## [0.46.0] — 2026-05-17
 
 **Breaking — Rust renderer removed.** Reasonix is back to a pure Ink/Node

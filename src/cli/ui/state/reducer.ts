@@ -1,7 +1,10 @@
+import { extractToolExitCode } from "../tool-summary.js";
+import { elideFromCursor } from "./card-elision.js";
 import type {
   Card,
   CardId,
   LiveCard,
+  PlanStep,
   ReasoningCard,
   StreamingCard,
   ToolCard,
@@ -61,17 +64,19 @@ export function reduce(state: AgentState, event: AgentEvent): AgentState {
       return mutateCard(state, event.id, "tool", (c) => ({ ...c, output: c.output + event.text }));
 
     case "tool.end": {
-      const finalOutput = event.output ?? "";
-      const rejected = isPlanModeRejection(finalOutput);
-      return mutateCard(state, event.id, "tool", (c) => ({
-        ...c,
-        done: true,
-        output: event.output ?? c.output,
-        exitCode: event.exitCode,
-        elapsedMs: event.elapsedMs,
-        ...(event.aborted ? { aborted: true } : {}),
-        ...(rejected ? { rejected: true } : {}),
-      }));
+      return mutateCard(state, event.id, "tool", (c) => {
+        const finalOutput = event.output ?? c.output;
+        const rejected = isPlanModeRejection(finalOutput);
+        return {
+          ...c,
+          done: true,
+          output: finalOutput,
+          exitCode: event.exitCode ?? extractToolExitCode(c.name, finalOutput),
+          elapsedMs: event.elapsedMs,
+          ...(event.aborted ? { aborted: true } : {}),
+          ...(rejected ? { rejected: true } : {}),
+        };
+      });
     }
 
     case "tool.retry":
@@ -128,10 +133,10 @@ export function reduce(state: AgentState, event: AgentEvent): AgentState {
         ? state
         : { ...state, session: { ...state.session, model: event.model } };
 
-    case "session.preset.change":
-      return state.status.preset === event.preset
+    case "session.effort.change":
+      return state.status.reasoningEffort === event.reasoningEffort
         ? state
-        : { ...state, status: { ...state.status, preset: event.preset } };
+        : { ...state, status: { ...state.status, reasoningEffort: event.reasoningEffort } };
 
     case "mcp.loading": {
       const current = state.status.mcpLoading;
@@ -188,8 +193,8 @@ export function reduce(state: AgentState, event: AgentEvent): AgentState {
     case "toast.hide":
       return { ...state, toasts: state.toasts.filter((t) => t.id !== event.id) };
 
-    case "live.show":
-      return appendCard(state, {
+    case "live.show": {
+      const card: LiveCard = {
         kind: "live",
         id: event.id,
         ts: event.ts,
@@ -197,7 +202,10 @@ export function reduce(state: AgentState, event: AgentEvent): AgentState {
         tone: event.tone,
         text: event.text,
         meta: event.meta,
-      });
+      };
+      const replaced = mutateCard(state, event.id, "live", () => card);
+      return replaced === state ? appendCard(state, card) : replaced;
+    }
 
     case "tip.show":
       return appendCard(state, {
@@ -214,6 +222,8 @@ export function reduce(state: AgentState, event: AgentEvent): AgentState {
       return {
         ...state,
         cards: [],
+        cardIndex: new Map(),
+        elideCursor: 0,
         focusedCardId: null,
         toasts: [],
         status: {
@@ -225,6 +235,16 @@ export function reduce(state: AgentState, event: AgentEvent): AgentState {
           promptCap: undefined,
         },
       };
+
+    case "session.fork": {
+      const idx = state.cardIndex.get(event.cardId);
+      if (idx === undefined) return state;
+      const cards = state.cards.slice(0, idx);
+      const cardIndex = new Map<CardId, number>();
+      for (let i = 0; i < cards.length; i++) cardIndex.set(cards[i]!.id, i);
+      const elideCursor = Math.min(state.elideCursor, cards.length);
+      return { ...state, cards, cardIndex, elideCursor, focusedCardId: null };
+    }
 
     case "session.workspace.change":
       return state.session.id === event.id && state.session.workspace === event.workspace
@@ -240,25 +260,26 @@ export function reduce(state: AgentState, event: AgentEvent): AgentState {
         id: event.id,
         ts: Date.now(),
         title: event.title,
-        steps: event.steps,
+        steps: event.variant === "active" ? advanceActivePlanSteps(event.steps) : event.steps,
         variant: event.variant,
       });
 
     case "plan.drop": {
       // Latest still-active plan flips to "replay" — preserves it in scrollback
       // but signals "no longer the live plan" to selectors and UI.
-      let dropped = false;
-      const cards = state.cards.map((c, i) => {
-        if (dropped) return c;
-        if (c.kind !== "plan" || c.variant !== "active") return c;
-        // Walk from end — only the LAST active plan should drop.
-        if (state.cards.slice(i + 1).some((cc) => cc.kind === "plan" && cc.variant === "active")) {
-          return c;
+      let lastActiveIdx = -1;
+      for (let i = state.cards.length - 1; i >= 0; i--) {
+        const c = state.cards[i]!;
+        if (c.kind === "plan" && c.variant === "active") {
+          lastActiveIdx = i;
+          break;
         }
-        dropped = true;
-        return { ...c, variant: "replay" as const };
-      });
-      return dropped ? { ...state, cards } : state;
+      }
+      if (lastActiveIdx < 0) return state;
+      const cards = state.cards.slice();
+      const target = cards[lastActiveIdx] as Extract<Card, { kind: "plan" }>;
+      cards[lastActiveIdx] = { ...target, variant: "replay" as const };
+      return { ...state, cards };
     }
 
     case "plan.step.complete": {
@@ -270,6 +291,26 @@ export function reduce(state: AgentState, event: AgentEvent): AgentState {
           if (s.id !== event.stepId || s.status === "done") return s;
           stepChanged = true;
           return { ...s, status: "done" as const };
+        });
+        if (!stepChanged) return c;
+        changed = true;
+        return { ...c, steps: c.variant === "active" ? advanceActivePlanSteps(next) : next };
+      });
+      return changed ? { ...state, cards } : state;
+    }
+
+    case "plan.idle": {
+      // Turn ended — nothing is actually executing, so a "running" step on the
+      // live plan is a lie. Demote it back to "queued"; the next mark_step_complete
+      // will re-advance the running marker via advanceActivePlanSteps. Issue #1784.
+      let changed = false;
+      const cards = state.cards.map((c) => {
+        if (c.kind !== "plan" || c.variant !== "active") return c;
+        let stepChanged = false;
+        const next = c.steps.map((s) => {
+          if (s.status !== "running") return s;
+          stepChanged = true;
+          return { ...s, status: "queued" as const };
         });
         if (!stepChanged) return c;
         changed = true;
@@ -319,37 +360,12 @@ export function reduce(state: AgentState, event: AgentEvent): AgentState {
   }
 }
 
-/** Tool outputs older than this many cards get stubbed so a 7-hour session doesn't drag GBs of one-off file reads / search results / screenshots through the heap (issue #1031). */
-const RECENT_CARDS_WINDOW = 200;
-/** Don't bother eliding tiny outputs — the stub is itself ~150 chars and the savings aren't worth the lost context. */
-const MIN_ELIDE_OUTPUT_LENGTH = 4096;
-/** Marker for already-elided outputs so we don't re-stub on every subsequent append. */
-const ELIDED_TOOL_OUTPUT_PREFIX = "[elided — older than the last ";
-
-function elideOldToolOutputs(cards: ReadonlyArray<Card>): ReadonlyArray<Card> {
-  // Caller is about to append a new card. Anticipate that — so once
-  // cards.length hits the window, the very next append starts eliding.
-  if (cards.length < RECENT_CARDS_WINDOW) return cards;
-  const cutoff = cards.length + 1 - RECENT_CARDS_WINDOW;
-  let next: Card[] | null = null;
-  for (let i = 0; i < cutoff; i++) {
-    const c = cards[i]!;
-    if (c.kind !== "tool") continue;
-    const out = (c as ToolCard).output;
-    if (typeof out !== "string") continue;
-    if (out.length <= MIN_ELIDE_OUTPUT_LENGTH) continue;
-    if (out.startsWith(ELIDED_TOOL_OUTPUT_PREFIX)) continue;
-    if (next === null) next = cards.slice();
-    next[i] = {
-      ...(c as ToolCard),
-      output: `${ELIDED_TOOL_OUTPUT_PREFIX}${RECENT_CARDS_WINDOW} cards; ${out.length.toLocaleString()} chars dropped to save memory. Full output is on disk in the session log.]`,
-    };
-  }
-  return next ?? cards;
-}
-
 function appendCard(state: AgentState, card: Card): AgentState {
-  return { ...state, cards: [...elideOldToolOutputs(state.cards), card] };
+  const { cards: elided, cursor } = elideFromCursor(state.cards, state.elideCursor);
+  const cards = [...elided, card];
+  // Mutate the existing index — append-only mutation; structural rebuilds (fork/reset) replace it.
+  (state.cardIndex as Map<CardId, number>).set(card.id, cards.length - 1);
+  return { ...state, cards, cardIndex: state.cardIndex, elideCursor: cursor };
 }
 
 function mutateCard<K extends Card["kind"]>(
@@ -358,10 +374,12 @@ function mutateCard<K extends Card["kind"]>(
   kind: K,
   patch: (card: Extract<Card, { kind: K }>) => Extract<Card, { kind: K }>,
 ): AgentState {
-  const idx = state.cards.findIndex((c) => c.id === id && c.kind === kind);
-  if (idx < 0) return state;
+  const idx = state.cardIndex.get(id);
+  if (idx === undefined) return state;
+  const existing = state.cards[idx];
+  if (!existing || existing.kind !== kind) return state;
   const next = state.cards.slice();
-  next[idx] = patch(state.cards[idx] as Extract<Card, { kind: K }>);
+  next[idx] = patch(existing as Extract<Card, { kind: K }>);
   return { ...state, cards: next };
 }
 
@@ -401,6 +419,19 @@ function nextId(prefix: string): string {
 
 function makeUserCard(text: string): UserCard {
   return { kind: "user", id: nextId("user"), ts: Date.now(), text };
+}
+
+function isSettledPlanStatus(status: PlanStep["status"]): boolean {
+  return status === "done" || status === "failed" || status === "blocked" || status === "skipped";
+}
+
+function advanceActivePlanSteps(steps: ReadonlyArray<PlanStep>): PlanStep[] {
+  const runningIndex = steps.findIndex((s) => !isSettledPlanStatus(s.status));
+  return steps.map((s, i) => {
+    if (isSettledPlanStatus(s.status)) return s;
+    const status: PlanStep["status"] = i === runningIndex ? "running" : "queued";
+    return s.status === status ? s : { ...s, status };
+  });
 }
 
 function makeReasoningCard(id: string, model?: string): ReasoningCard {

@@ -1,13 +1,13 @@
-import { savePreset } from "@/config.js";
+import {
+  type ReasoningEffort,
+  isReasoningEffort,
+  saveMaxOutputTokens,
+  saveModel,
+  saveReasoningEffort,
+} from "@/config.js";
 import { t } from "@/i18n/index.js";
-import { PRESETS } from "../../presets.js";
+import { effortChoicesForBaseUrl } from "../../effort-choices.js";
 import type { SlashHandler } from "../dispatch.js";
-
-function inferPresetFromModel(id: string): "auto" | "flash" | "pro" | null {
-  if (id === "deepseek-v4-pro") return "pro";
-  if (id === "deepseek-v4-flash") return "flash";
-  return null;
-}
 
 const model: SlashHandler = (args, loop, ctx) => {
   const id = args[0];
@@ -15,18 +15,12 @@ const model: SlashHandler = (args, loop, ctx) => {
   if (!id) {
     return { openModelPicker: true };
   }
-  // Manual model pick = explicit pin: disable auto-escalate so flash doesn't
-  // get bumped, and persist the inferred preset so a relaunch keeps the choice.
-  loop.configure({ model: id, autoEscalate: false });
+  loop.configure({ model: id });
   ctx.dispatch?.({ type: "session.model.change", model: id });
-  const inferred = inferPresetFromModel(id);
-  ctx.dispatch?.({ type: "session.preset.change", preset: inferred });
-  if (inferred) {
-    try {
-      savePreset(inferred);
-    } catch {
-      /* disk full / perms — runtime change still took effect */
-    }
+  try {
+    saveModel(id, ctx.configPath);
+  } catch {
+    /* disk full / perms — runtime change still took effect */
   }
   if (known && known.length > 0 && !known.includes(id)) {
     return {
@@ -36,63 +30,28 @@ const model: SlashHandler = (args, loop, ctx) => {
   return { info: t("handlers.model.modelSet", { id }) };
 };
 
-const preset: SlashHandler = (args, loop, ctx) => {
-  const name = (args[0] ?? "").toLowerCase();
-  const apply = (
-    presetName: "auto" | "flash" | "pro",
-    p: (typeof PRESETS)[keyof typeof PRESETS],
-  ) => {
-    loop.configure({
-      model: p.model,
-      autoEscalate: p.autoEscalate,
-      reasoningEffort: p.reasoningEffort,
-    });
-    ctx.dispatch?.({ type: "session.model.change", model: p.model });
-    ctx.dispatch?.({ type: "session.preset.change", preset: presetName });
-    try {
-      savePreset(presetName);
-    } catch {
-      /* disk full / perms — runtime change still took effect */
-    }
-  };
-  if (name === "auto") {
-    apply("auto", PRESETS.auto);
-    return { info: t("handlers.model.presetAuto") };
+const effort: SlashHandler = (args, loop, ctx) => {
+  const choices = effortChoicesForBaseUrl(loop.client.baseUrl);
+  const list = choices.join(" | ");
+  const usageKey =
+    choices.length === 4 ? "handlers.model.effortUsage" : "handlers.model.effortUsageNoMax";
+  const raw = (args[0] ?? "").toLowerCase();
+  if (raw === "") {
+    return {
+      info: t("handlers.model.effortStatus", { current: loop.reasoningEffort, list }),
+    };
   }
-  if (name === "flash") {
-    apply("flash", PRESETS.flash);
-    return { info: t("handlers.model.presetFlash") };
+  if (!isReasoningEffort(raw) || !choices.includes(raw as ReasoningEffort)) {
+    return { info: t(usageKey, { list }) };
   }
-  if (name === "pro") {
-    apply("pro", PRESETS.pro);
-    return { info: t("handlers.model.presetPro") };
+  const next: ReasoningEffort = raw;
+  loop.configure({ reasoningEffort: next });
+  try {
+    saveReasoningEffort(next, ctx.configPath);
+  } catch {
+    /* disk full / perms — runtime change still took effect */
   }
-  if (name === "") {
-    return { openModelPicker: true };
-  }
-  return { info: t("handlers.model.presetUsage") };
-};
-
-const ESCALATION_MODEL_ID = "deepseek-v4-pro";
-
-const pro: SlashHandler = (args, loop, ctx) => {
-  const arg = (args[0] ?? "").toLowerCase();
-  if (arg === "off" || arg === "cancel" || arg === "disarm") {
-    if (!loop.proArmed) {
-      return { info: t("handlers.model.proNothingArmed") };
-    }
-    if (ctx.disarmPro) ctx.disarmPro();
-    else loop.disarmPro();
-    return { info: t("handlers.model.proDisarmed") };
-  }
-  if (arg && arg !== "on" && arg !== "arm") {
-    return { info: t("handlers.model.proUsage") };
-  }
-  if (ctx.armPro) ctx.armPro();
-  else loop.armProForNextTurn();
-  return {
-    info: t("handlers.model.proArmed", { model: ESCALATION_MODEL_ID }),
-  };
+  return { info: t("handlers.model.effortSet", { effort: next }) };
 };
 
 const budget: SlashHandler = (args, loop) => {
@@ -138,9 +97,41 @@ const budget: SlashHandler = (args, loop) => {
   };
 };
 
+const maxTokens: SlashHandler = (args, loop, ctx) => {
+  const arg = (args[0] ?? "").trim().toLowerCase();
+  if (arg === "") {
+    return {
+      info:
+        loop.maxOutputTokens === undefined
+          ? t("handlers.model.maxTokensNoCap")
+          : t("handlers.model.maxTokensStatus", { n: loop.maxOutputTokens }),
+    };
+  }
+  if (arg === "off" || arg === "none" || arg === "0") {
+    loop.configure({ maxOutputTokens: null });
+    try {
+      saveMaxOutputTokens(null, ctx.configPath);
+    } catch {
+      /* ignore persist errors */
+    }
+    return { info: t("handlers.model.maxTokensOff") };
+  }
+  const n = Number(arg);
+  if (!Number.isInteger(n) || n <= 0) {
+    return { info: t("handlers.model.maxTokensUsage") };
+  }
+  loop.configure({ maxOutputTokens: n });
+  try {
+    saveMaxOutputTokens(n, ctx.configPath);
+  } catch {
+    /* ignore persist errors */
+  }
+  return { info: t("handlers.model.maxTokensSet", { n }) };
+};
+
 export const handlers: Record<string, SlashHandler> = {
   model,
-  preset,
-  pro,
+  effort,
   budget,
+  "max-tokens": maxTokens,
 };

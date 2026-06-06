@@ -1,6 +1,24 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_MAX_RESULT_TOKENS, truncateForModelByTokens } from "../src/mcp/registry.js";
+import {
+  DEFAULT_MAX_RESULT_TOKENS,
+  truncateForModel,
+  truncateForModelByTokens,
+} from "../src/mcp/registry.js";
 import { countTokens } from "../src/tokenizer.js";
+
+function hasLoneSurrogate(s: string): boolean {
+  for (let i = 0; i < s.length; i++) {
+    const code = s.charCodeAt(i);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = s.charCodeAt(i + 1);
+      if (next < 0xdc00 || next > 0xdfff) return true;
+      i++;
+      continue;
+    }
+    if (code >= 0xdc00 && code <= 0xdfff) return true;
+  }
+  return false;
+}
 
 describe("truncateForModelByTokens", () => {
   it("returns the string unchanged when it fits the budget", () => {
@@ -75,5 +93,30 @@ describe("truncateForModelByTokens", () => {
     const droppedChars = Number(match![2]);
     expect(droppedTokens).toBeGreaterThan(0);
     expect(droppedChars).toBeGreaterThan(0);
+  });
+
+  it("never leaves a lone UTF-16 surrogate at a slice boundary (issue #1970)", () => {
+    // Emoji are UTF-16 surrogate pairs. Pack a content so the natural
+    // token-budget slice lands inside one — without alignment, the head
+    // would end with a lone high surrogate and DeepSeek's serde_json
+    // would reject the request with "unexpected end of hex escape".
+    const emoji = "🚀";
+    const filler = "x".repeat(50);
+    const segment = `${emoji}${filler}`;
+    const s = segment.repeat(2000);
+    const out = truncateForModelByTokens(s, 400);
+    expect(hasLoneSurrogate(out)).toBe(false);
+    expect(JSON.stringify(out)).not.toMatch(/\\u[dD][89abAB][0-9a-fA-F]{2}/);
+  });
+});
+
+describe("truncateForModel (char-based)", () => {
+  it("never leaves a lone UTF-16 surrogate at a slice boundary (issue #1970)", () => {
+    const emoji = "🎯";
+    const filler = "y".repeat(50);
+    const s = `${emoji}${filler}`.repeat(2000);
+    const out = truncateForModel(s, 1000);
+    expect(hasLoneSurrogate(out)).toBe(false);
+    expect(JSON.stringify(out)).not.toMatch(/\\u[dD][89abAB][0-9a-fA-F]{2}/);
   });
 });

@@ -1,4 +1,12 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -210,6 +218,100 @@ describe("runChain — redirect execution", () => {
     await runChain(c, { cwd: tmp, ...baseOpts });
     expect(readFileSync(join(tmp, "out.txt"), "utf8")).toBe("hello");
   });
+
+  it("rejects absolute redirect targets outside the sandbox", async () => {
+    const outside = `${tmp}-outside.txt`;
+    rmSync(outside, { force: true });
+    try {
+      const c = parseCommandChain(`node -e "process.stdout.write('blocked')" > "${outside}"`)!;
+      await expect(runChain(c, { cwd: tmp, ...baseOpts })).rejects.toThrow(
+        /outside the workspace sandbox/,
+      );
+      expect(existsSync(outside)).toBe(false);
+    } finally {
+      rmSync(outside, { force: true });
+    }
+  });
+
+  it("rejects relative redirect targets that escape the sandbox", async () => {
+    const outside = join(tmp, "..", "reasonix-redir-outside.txt");
+    rmSync(outside, { force: true });
+    try {
+      const c = parseCommandChain(
+        "node -e \"process.stdout.write('blocked')\" > ../reasonix-redir-outside.txt",
+      )!;
+      await expect(runChain(c, { cwd: tmp, ...baseOpts })).rejects.toThrow(
+        /outside the workspace sandbox/,
+      );
+      expect(existsSync(outside)).toBe(false);
+    } finally {
+      rmSync(outside, { force: true });
+    }
+  });
+
+  it("allows absolute redirect targets inside the sandbox", async () => {
+    const inside = join(tmp, "inside-absolute.txt");
+    const c = parseCommandChain(`node -e "process.stdout.write('inside')" > "${inside}"`)!;
+    const r = await runChain(c, { cwd: tmp, ...baseOpts });
+    expect(r.exitCode).toBe(0);
+    expect(readFileSync(inside, "utf8")).toBe("inside");
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "rejects output redirects through a symlink to an outside file",
+    async () => {
+      const outside = `${tmp}-symlink-outside.txt`;
+      const link = join(tmp, "out-link.txt");
+      writeFileSync(outside, "original");
+      symlinkSync(outside, link);
+      try {
+        const c = parseCommandChain("node -e \"process.stdout.write('blocked')\" > out-link.txt")!;
+        await expect(runChain(c, { cwd: tmp, ...baseOpts })).rejects.toThrow(/symbolic link/);
+        expect(readFileSync(outside, "utf8")).toBe("original");
+      } finally {
+        rmSync(outside, { force: true });
+      }
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "rejects input redirects through a symlink to an outside file",
+    async () => {
+      const outside = `${tmp}-symlink-secret.txt`;
+      const link = join(tmp, "in-link.txt");
+      writeFileSync(outside, "SECRET");
+      symlinkSync(outside, link);
+      try {
+        const c = parseCommandChain(
+          "node -e \"let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>process.stdout.write(d))\" < in-link.txt",
+        )!;
+        await expect(runChain(c, { cwd: tmp, ...baseOpts })).rejects.toThrow(/symbolic link/);
+      } finally {
+        rmSync(outside, { force: true });
+      }
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "rejects writes under a symlinked directory that points outside the sandbox",
+    async () => {
+      const outsideDir = `${tmp}-outside-dir`;
+      const linkDir = join(tmp, "linked-dir");
+      mkdirSync(outsideDir);
+      symlinkSync(outsideDir, linkDir, "dir");
+      try {
+        const c = parseCommandChain(
+          "node -e \"process.stdout.write('blocked')\" > linked-dir/out.txt",
+        )!;
+        await expect(runChain(c, { cwd: tmp, ...baseOpts })).rejects.toThrow(
+          /outside the workspace sandbox/,
+        );
+        expect(existsSync(join(outsideDir, "out.txt"))).toBe(false);
+      } finally {
+        rmSync(outsideDir, { recursive: true, force: true });
+      }
+    },
+  );
 });
 
 describe("runCommand — redirect dispatch", () => {

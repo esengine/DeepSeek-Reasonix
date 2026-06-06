@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { stdin, stdout } from "node:process";
 import { createInterface } from "node:readline/promises";
 import { DeepSeekClient } from "../../client.js";
-import { loadApiKey, loadBaseUrl } from "../../config.js";
+import { loadEndpoint } from "../../config.js";
 import { loadDotenv } from "../../env.js";
 
 export interface CommitOptions {
@@ -241,8 +241,8 @@ export async function commitCommand(opts: CommitOptions = {}): Promise<void> {
   loadDotenv();
   dieIfNotGitRepo();
 
-  const apiKey = loadApiKey() ?? process.env.DEEPSEEK_API_KEY;
-  if (!apiKey) {
+  const ep = loadEndpoint();
+  if (!ep.apiKey) {
     process.stderr.write(
       "reasonix commit: DEEPSEEK_API_KEY not set. Run `reasonix setup` to save one, or export it.\n",
     );
@@ -267,7 +267,7 @@ export async function commitCommand(opts: CommitOptions = {}): Promise<void> {
     );
   }
 
-  const client = new DeepSeekClient({ apiKey, baseUrl: loadBaseUrl() });
+  const client = new DeepSeekClient({ apiKey: ep.apiKey, baseUrl: ep.baseUrl });
   const model = opts.model ?? DEFAULT_MODEL;
   const recentCommits = readRecentCommits();
 

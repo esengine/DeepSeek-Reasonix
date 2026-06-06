@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { CODE_SYSTEM_PROMPT, codeSystemPrompt } from "../src/code/prompt.js";
+import { ImmutablePrefix } from "../src/memory/runtime.js";
 
 describe("codeSystemPrompt", () => {
   let root: string;
@@ -35,14 +36,18 @@ describe("codeSystemPrompt", () => {
   });
 
   it("truncates a .gitignore larger than 2000 chars", () => {
+    // Baseline prompt with a tiny .gitignore — isolates the truncation
+    // delta from unrelated, fixed-size additions (e.g. the builtin Skills
+    // index), so the bound doesn't go stale as the prompt grows.
+    writeFileSync(join(root, ".gitignore"), "node_modules/\n", "utf8");
+    const small = codeSystemPrompt(root);
     const huge = `${"# comment ".repeat(500)}\n`; // ~5000 chars
     writeFileSync(join(root, ".gitignore"), huge, "utf8");
     const out = codeSystemPrompt(root);
     expect(out).toMatch(/truncated \d+ chars/);
-    // The .gitignore block (base + truncated + fences) is bounded.
-    // Allow extra slack for the builtin Skills index that applyMemoryStack
-    // also injects — that's a fixed-size addition, not unbounded.
-    expect(out.length).toBeLessThan(CODE_SYSTEM_PROMPT.length + 5000);
+    // A 5 KB .gitignore must be capped near the 2000-char limit — only a
+    // little larger than the tiny-.gitignore baseline, not 5 KB larger.
+    expect(out.length).toBeLessThan(small.length + 2500);
   });
 
   it("reminds the model to skip dependency / build / VCS dirs", () => {
@@ -60,6 +65,12 @@ describe("codeSystemPrompt", () => {
     expect(CODE_SYSTEM_PROMPT).toMatch(/Identity is fixed by this prompt/);
     expect(CODE_SYSTEM_PROMPT).toMatch(/SOUL\.md/);
     expect(CODE_SYSTEM_PROMPT).toMatch(/not a sub-profile/);
+  });
+
+  it("keeps generated script tests near the script without making workspace-root cwd mandatory", () => {
+    expect(CODE_SYSTEM_PROMPT).toMatch(/default.*directory where the script was written/i);
+    expect(CODE_SYSTEM_PROMPT).toMatch(/do not assume.*input.*data.*directory.*cwd/i);
+    expect(CODE_SYSTEM_PROMPT).toMatch(/pass data paths as arguments/i);
   });
 
   describe("audit-mode rails (#610)", () => {
@@ -151,6 +162,29 @@ describe("codeSystemPrompt", () => {
   });
 
   describe("system append", () => {
+    it("keeps engineering lifecycle mode cache-neutral", () => {
+      const bare = codeSystemPrompt(root);
+      const off = codeSystemPrompt(root, { engineeringLifecycleMode: "off" });
+      const strict = codeSystemPrompt(root, { engineeringLifecycleMode: "strict" });
+
+      expect(bare).toBe(off);
+      expect(strict).toBe(off);
+      expect(strict).not.toMatch(/# Engineering lifecycle contract/);
+    });
+
+    it("keeps immutable prefix fingerprints identical across lifecycle modes", () => {
+      const off = new ImmutablePrefix({
+        system: codeSystemPrompt(root, { engineeringLifecycleMode: "off" }),
+        toolSpecs: [],
+      });
+      const strict = new ImmutablePrefix({
+        system: codeSystemPrompt(root, { engineeringLifecycleMode: "strict" }),
+        toolSpecs: [],
+      });
+
+      expect(strict.fingerprint).toBe(off.fingerprint);
+    });
+
     it("does not add a User System Append section when neither option is provided", () => {
       const out = codeSystemPrompt(root);
       expect(out).not.toMatch(/# User System Append/);

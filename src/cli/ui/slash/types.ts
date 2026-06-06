@@ -1,7 +1,9 @@
+import type { EngineeringLifecycleSnapshot } from "../../../code/lifecycle.js";
 import type { EditMode } from "../../../config.js";
 import type { McpServerSummary } from "../../../mcp/summary.js";
 import type { JobRegistry } from "../../../tools/jobs.js";
 import type { PlanStep } from "../../../tools/plan.js";
+import type { CodeUndoOutput } from "../undo-context.js";
 
 export type { McpServerSummary } from "../../../mcp/summary.js";
 
@@ -20,8 +22,6 @@ export interface SlashResult {
   openThemePicker?: boolean;
   /** Open the unified MCP hub — `/mcp` defaults to "live", `/mcp browse` to "marketplace". */
   openMcpHub?: { tab: "live" | "marketplace" };
-  /** Open the vim/tmux-style copy mode — yank chat text to clipboard via OSC 52. */
-  openCopyMode?: boolean;
   /** Open the arg-completer picker for this command (e.g. `/language` → language picker). */
   openArgPickerFor?: string;
   /** Exit the app. */
@@ -59,15 +59,18 @@ export interface SlashResult {
   };
 }
 
+export type PlanModeToggleSource = "slash" | "explicit-intent";
+
 export interface SlashContext {
   configPath?: string;
   mcpSpecs?: string[];
-  codeUndo?: (args: readonly string[]) => string;
+  codeUndo?: (args: readonly string[]) => CodeUndoOutput;
   codeApply?: (indices?: readonly number[]) => string;
   codeDiscard?: (indices?: readonly number[]) => string;
   codeHistory?: () => string;
   codeShowEdit?: (args: readonly string[]) => string;
   codeRoot?: string;
+  getEngineeringLifecycleSnapshot?: () => EngineeringLifecycleSnapshot | null;
   pendingEditCount?: number;
   mcpServers?: McpServerSummary[];
   /** Absent → tests context; `/memory` MUST reply "root unknown" rather than silently reading wrong dir. */
@@ -109,7 +112,7 @@ export interface SlashContext {
     footer?: string;
   }) => void;
   dispatch?: (event: import("../state/events.js").AgentEvent) => void;
-  setPlanMode?: (on: boolean) => void;
+  setPlanMode?: (on: boolean, source?: PlanModeToggleSource) => void;
   /** Manual escape valve when the model forgot to call `mark_step_complete` — used by `/plans done <id>`. */
   markPlanStepDone?: (stepId: string) => "ok" | "not-in-plan" | "already-done" | "no-plan";
   /** Mark every still-queued step done — used by `/plans done all`. Returns the count newly marked. */
@@ -133,8 +136,6 @@ export interface SlashContext {
   refreshModels?: () => void;
   /** Ask the current model to summarize the active session into a short title and rename it. */
   generateSessionTitle?: () => Promise<string>;
-  armPro?: () => void;
-  disarmPro?: () => void;
   startLoop?: (intervalMs: number, prompt: string) => void;
   stopLoop?: () => void;
   getLoopStatus?: () => {
@@ -150,6 +151,16 @@ export interface SlashContext {
   /** Snapshot the dashboard's URL when running, null otherwise. */
   getDashboardUrl?: () => string | null;
   qq?: {
+    connect: (args: readonly string[]) => Promise<string>;
+    disconnect: () => Promise<string>;
+    status: () => string;
+  };
+  telegram?: {
+    connect: (args: readonly string[]) => Promise<string>;
+    disconnect: () => Promise<string>;
+    status: () => string;
+  };
+  weixin?: {
     connect: (args: readonly string[]) => Promise<string>;
     disconnect: () => Promise<string>;
     status: () => string;

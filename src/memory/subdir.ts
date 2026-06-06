@@ -4,14 +4,14 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { PROJECT_MEMORY_FILES, PROJECT_MEMORY_MAX_CHARS } from "./project.js";
 
-/** Ancestor PROJECT_MEMORY_FILES matches for `absPath`, walking from its dir up to (but not including) `rootDir`. Innermost-first. Returns absolute paths. */
-export function findSubdirMemoryAncestors(absPath: string, rootDir: string): string[] {
+/** PROJECT_MEMORY_FILES matches inside `absDir` AND its ancestors, walking up to (but not including) `rootDir`. Innermost-first. Returns absolute paths. */
+export function findDirMemory(absDir: string, rootDir: string): string[] {
   const root = resolve(rootDir);
-  const target = resolve(absPath);
+  const target = resolve(absDir);
   const rel = relative(root, target);
-  if (!rel || rel.startsWith("..")) return [];
+  if (rel.startsWith("..")) return [];
   const found: string[] = [];
-  let cur = dirname(target);
+  let cur = target;
   while (cur !== root) {
     const r = relative(root, cur);
     if (!r || r.startsWith("..")) break;
@@ -27,6 +27,11 @@ export function findSubdirMemoryAncestors(absPath: string, rootDir: string): str
     cur = parent;
   }
   return found;
+}
+
+/** Ancestor PROJECT_MEMORY_FILES matches for a file at `absPath`, walking from its dir up to (but not including) `rootDir`. Innermost-first. */
+export function findSubdirMemoryAncestors(absPath: string, rootDir: string): string[] {
+  return findDirMemory(dirname(resolve(absPath)), rootDir);
 }
 
 export function readSubdirMemoryContent(path: string): string | null {

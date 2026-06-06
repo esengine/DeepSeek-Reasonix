@@ -1,18 +1,16 @@
 import { Box, Text, useStdout } from "ink";
 import React, { useContext } from "react";
-import { clipToCells } from "../../../frame/width.js";
 import { t } from "../../../i18n/index.js";
 import { countTokensBounded } from "../../../tokenizer.js";
 import { LiveExpandContext } from "../layout/LiveExpandContext.js";
-import { useReserveRows } from "../layout/viewport-budget.js";
 import { Markdown } from "../markdown.js";
 import { Card } from "../primitives/Card.js";
 import { CardHeader } from "../primitives/CardHeader.js";
-import { PILL_MODEL, Pill, modelBadgeFor } from "../primitives/Pill.js";
-import { Spinner } from "../primitives/Spinner.js";
+import { Pill, modelBadgeFor, pillModel, pillPath } from "../primitives/Pill.js";
+import { PULSE_CIRCLE, Pulse } from "../primitives/Pulse.js";
 import type { StreamingCard as StreamingCardData } from "../state/cards.js";
+import { clipToCells } from "../text-width.js";
 import { FG, TONE, TONE_ACTIVE } from "../theme/tokens.js";
-import { useSlowTick } from "../ticker.js";
 import { useIncrementalWrap } from "./useIncrementalWrap.js";
 
 /** Streaming preview tail length — bounded live region so chunks don't thrash whole-card layout. */
@@ -93,34 +91,26 @@ function useLiveTokenRate(card: StreamingCardData, enabled: boolean): TokenRate 
   return rateFromTokens(estimate.tokens, card.ts, Date.now());
 }
 
-const PILL_RATE = { bg: "#11141a", fg: "#8b949e" } as const;
+const pillRate = pillPath;
 
 export function StreamingCard({ card }: { card: StreamingCardData }): React.ReactElement {
   const { stdout } = useStdout();
   const cols = stdout?.columns ?? 80;
   const expanded = useContext(LiveExpandContext);
-  const reserveCap = expanded ? EXPANDED_MAX_LINES + 2 : STREAMING_PREVIEW_LINES + 2;
-  useReserveRows("stream", {
-    min: STREAMING_PREVIEW_LINES + 1,
-    max: reserveCap,
-  });
-  // Re-render at 1Hz so the rate keeps updating even when chunks stall.
-  // Frozen once `card.done` is true — settled cards render via Static.
-  useSlowTick();
   const liveRate = useLiveTokenRate(card, !card.done && !card.aborted);
   const lineCells = Math.max(20, cols - 4);
   const visualLines = useIncrementalWrap(card.text, lineCells);
 
   const modelBadge = card.model ? modelBadgeFor(card.model) : null;
   const modelPill = modelBadge ? (
-    <Pill label={modelBadge.label} {...PILL_MODEL[modelBadge.kind]} bold={false} />
+    <Pill label={modelBadge.label} {...pillModel()[modelBadge.kind]} bold={false} />
   ) : null;
 
   if (card.done && !card.aborted) {
     const { tokens, tps } = tokenRate(card.text, card.ts, card.endedAt ?? Date.now());
     const ratePill =
       tokens >= MIN_TOKENS_FOR_RATE && tps !== null ? (
-        <Pill label={`${formatTokenCount(tokens)} tok · ${tps} t/s`} {...PILL_RATE} bold={false} />
+        <Pill label={`${formatTokenCount(tokens)} tok · ${tps} t/s`} {...pillRate()} bold={false} />
       ) : null;
     return (
       <Card tone={TONE.ok}>
@@ -145,15 +135,19 @@ export function StreamingCard({ card }: { card: StreamingCardData }): React.Reac
   const droppedAbove = Math.max(0, visualLines.length - visible.length);
   const aborted = !!card.aborted;
   const headColor = aborted ? TONE.err : TONE_ACTIVE.brand;
-  const glyph = aborted ? "⊘" : "●";
+  const glyph: string | React.ReactElement = aborted ? (
+    "⊘"
+  ) : (
+    <Pulse active frames={PULSE_CIRCLE} settled="●" color={headColor} />
+  );
   const headLabel = aborted ? t("cardLabels.aborted") : t("cardLabels.writing");
 
   const liveRatePill =
     !aborted && liveRate.tokens >= MIN_TOKENS_FOR_RATE && liveRate.tps !== null ? (
-      <Pill label={`${liveRate.tps} t/s`} {...PILL_RATE} bold={false} />
+      <Pill label={`${liveRate.tps} t/s`} {...pillRate()} bold={false} />
     ) : null;
   const expandPill = !aborted ? (
-    <Pill label={expanded ? "expanded ⌃o" : "preview ⌃o"} {...PILL_RATE} bold={false} />
+    <Pill label={expanded ? "expanded ⌃o" : "preview ⌃o"} {...pillRate()} bold={false} />
   ) : null;
 
   return (
@@ -166,7 +160,6 @@ export function StreamingCard({ card }: { card: StreamingCardData }): React.Reac
           <>
             {liveRatePill}
             {expandPill}
-            {aborted ? null : <Spinner kind="braille" color={TONE_ACTIVE.brand} />}
             {modelPill}
           </>
         }

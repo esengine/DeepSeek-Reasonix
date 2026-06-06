@@ -1,13 +1,19 @@
 /** CacheFirstLoop integration — fake-fetch DeepSeekClient, non-streaming path. */
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { DeepSeekClient, Usage } from "../src/client.js";
+import {
+  HISTORY_FOLD_AGGRESSIVE_THRESHOLD,
+  HISTORY_FOLD_THRESHOLD,
+} from "../src/context-manager.js";
 import { type ConfirmationChoice, PauseGate } from "../src/core/pause-gate.js";
 import { CacheFirstLoop } from "../src/loop.js";
 import { ImmutablePrefix } from "../src/memory/runtime.js";
-import type { RepairReport } from "../src/repair/index.js";
+import { DEEPSEEK_CONTEXT_TOKENS } from "../src/telemetry/stats.js";
 import { ToolRegistry } from "../src/tools.js";
-import type { ChatMessage } from "../src/types.js";
+import type { ChatMessage, ToolSpec } from "../src/types.js";
+
+const FOLD_TEST_MODEL = "test-fold-ctx";
 
 interface FakeResponseShape {
   content?: string;
@@ -56,7 +62,18 @@ function makeClient(responses: FakeResponseShape[]) {
   });
 }
 
+function toolSpec(name: string): ToolSpec {
+  return {
+    type: "function",
+    function: { name, description: "", parameters: { type: "object", properties: {} } },
+  };
+}
+
 describe("CacheFirstLoop (non-streaming)", () => {
+  afterEach(() => {
+    delete DEEPSEEK_CONTEXT_TOKENS[FOLD_TEST_MODEL];
+  });
+
   it("completes a single-turn plain chat", async () => {
     const client = makeClient([{ content: "hi there" }]);
     const loop = new CacheFirstLoop({
@@ -74,6 +91,59 @@ describe("CacheFirstLoop (non-streaming)", () => {
     expect(events[events.length - 1]).toBe("done");
     expect(loop.stats.turns.length).toBe(1);
     expect(loop.log.length).toBe(2); // user + assistant
+  });
+
+  it("restores the base model after a headless NEEDS_PRO one-shot retry", async () => {
+    const models: string[] = [];
+    const responses = ["<<<NEEDS_PRO: subtle invariant>>>", "pro answer", "flash answer"];
+    const client = new DeepSeekClient({
+      apiKey: "sk-test",
+      fetch: vi.fn(async (_url: any, init: any) => {
+        const body = init?.body ? JSON.parse(init.body) : {};
+        models.push(body.model);
+        const content = responses.shift() ?? "extra";
+        return new Response(
+          JSON.stringify({
+            choices: [
+              {
+                index: 0,
+                message: {
+                  role: "assistant",
+                  content,
+                  reasoning_content: null,
+                },
+                finish_reason: "stop",
+              },
+            ],
+            usage: {
+              prompt_tokens: 100,
+              completion_tokens: 20,
+              total_tokens: 120,
+              prompt_cache_hit_tokens: 0,
+              prompt_cache_miss_tokens: 100,
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }) as unknown as typeof fetch,
+    });
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: false,
+      model: "deepseek-v4-flash",
+    });
+
+    await expect(loop.run("hard")).resolves.toBe("pro answer");
+    expect(loop.model).toBe("deepseek-v4-flash");
+    await expect(loop.run("simple")).resolves.toBe("flash answer");
+
+    expect(models).toEqual(["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash"]);
+    expect(loop.stats.turns.map((turn) => turn.model)).toEqual([
+      "deepseek-v4-pro",
+      "deepseek-v4-flash",
+    ]);
+    expect(JSON.stringify(loop.log.entries)).not.toContain("NEEDS_PRO");
   });
 
   it("records cache hit telemetry from API usage", async () => {
@@ -155,6 +225,60 @@ describe("CacheFirstLoop (non-streaming)", () => {
     expect(loop.stats.turns.length).toBe(2); // two model round-trips
   });
 
+  it("records cache diagnostics from the tool snapshot actually sent", async () => {
+    const client = makeClient([
+      {
+        content: "",
+        tool_calls: [
+          {
+            id: "call_1",
+            type: "function",
+            function: { name: "probe", arguments: "{}" },
+          },
+        ],
+      },
+      { content: "done" },
+      { content: "next done" },
+    ]);
+
+    const tools = new ToolRegistry();
+    tools.register({
+      name: "probe",
+      description: "hot-adds another tool while the turn is running",
+      parameters: { type: "object", properties: {} },
+      fn: async () => {
+        prefix.addTool(toolSpec("mcp_dynamic_tool"));
+        return "ok";
+      },
+    });
+    const prefix = new ImmutablePrefix({ system: "s", toolSpecs: tools.specs() });
+    const loop = new CacheFirstLoop({
+      client,
+      prefix,
+      tools,
+      stream: false,
+    });
+
+    await loop.run("go");
+
+    expect(prefix.toolSpecs.map((spec) => spec.function.name)).toEqual([
+      "mcp_dynamic_tool",
+      "probe",
+    ]);
+    expect(loop.stats.cacheDiagnostics).toHaveLength(2);
+    expect(loop.stats.cacheDiagnostics[0]?.toolNames).toEqual(["probe"]);
+    expect(loop.stats.cacheDiagnostics[1]?.toolNames).toEqual(["probe"]);
+    expect(loop.stats.cacheDiagnostics[1]?.missReason).not.toBe("mcp-tool-hot-add");
+    expect(loop.stats.turns[1]?.cacheDiagnostics?.prefixChangeReasons).toEqual([]);
+
+    await loop.run("next");
+
+    expect(loop.stats.turns[2]?.cacheDiagnostics?.prefixChangeReasons).toContain("tools");
+    expect(loop.stats.summary().lastPrefixChangeReasons).toContain("tools");
+    expect(loop.stats.cacheDiagnostics[2]?.toolNames).toEqual(["mcp_dynamic_tool", "probe"]);
+    expect(loop.stats.cacheDiagnostics[2]?.missReason).toBe("mcp-tool-hot-add");
+  });
+
   it("yields tool_start before each tool dispatch so the TUI can show 'running…'", async () => {
     const client = makeClient([
       {
@@ -195,6 +319,67 @@ describe("CacheFirstLoop (non-streaming)", () => {
     // tool_start must precede the matching tool result.
     expect(roleOrder[0]).toEqual({ role: "tool_start", toolName: "add" });
     expect(roleOrder[1]).toEqual({ role: "tool", toolName: "add" });
+  });
+
+  it("surfaces a warning when a tool call is rate-limited", async () => {
+    const client = makeClient([
+      {
+        content: "",
+        tool_calls: [
+          {
+            id: "call_1",
+            type: "function",
+            function: { name: "echo", arguments: '{"msg":"one"}' },
+          },
+          {
+            id: "call_2",
+            type: "function",
+            function: { name: "echo", arguments: '{"msg":"two"}' },
+          },
+          {
+            id: "call_3",
+            type: "function",
+            function: { name: "echo", arguments: '{"msg":"three"}' },
+          },
+        ],
+      },
+      { content: "done" },
+    ]);
+    const tools = new ToolRegistry({
+      rateLimit: { aggregate: { maxCalls: 2, windowSeconds: 60 }, tools: {} },
+    });
+    const seen: string[] = [];
+    tools.register<{ msg: string }, string>({
+      name: "echo",
+      parallelSafe: true,
+      parameters: {
+        type: "object",
+        properties: { msg: { type: "string" } },
+        required: ["msg"],
+      },
+      fn: ({ msg }) => {
+        seen.push(msg);
+        return msg;
+      },
+    });
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s", toolSpecs: tools.specs() }),
+      tools,
+      stream: false,
+    });
+
+    const warnings: string[] = [];
+    const toolResults: string[] = [];
+    for await (const ev of loop.step("go")) {
+      if (ev.role === "warning") warnings.push(ev.content);
+      if (ev.role === "tool") toolResults.push(ev.content);
+    }
+
+    expect(seen).toEqual(["one", "two"]);
+    expect(toolResults).toHaveLength(3);
+    expect(JSON.parse(toolResults[2]!).error).toBe("rate_limited");
+    expect(warnings.filter((content) => content.includes("rate-limited"))).toHaveLength(1);
   });
 
   it("immutable prefix is preserved across turns (cache-stability invariant)", async () => {
@@ -268,10 +453,6 @@ describe("CacheFirstLoop (non-streaming)", () => {
       }
     }
 
-    // Warning fires with the abort notice.
-    const warnings = events.filter((e) => e.role === "warning");
-    expect(warnings.some((w) => /aborted at iter/.test(w.content ?? ""))).toBe(true);
-
     // Synthetic assistant_final is tagged forcedSummary and carries
     // the stopped-message text. It should NOT contain any model
     // output because no second API call was made.
@@ -291,9 +472,9 @@ describe("CacheFirstLoop (non-streaming)", () => {
     // Regression: a user pressing Esc once would put _turnAbort into
     // an aborted state; the iter-0 abort branch handled it but didn't
     // reset the controller. Every subsequent step() then carried the
-    // stale aborted state forward and bailed out with another
-    // "stopped without producing a summary" before any model call ran.
-    // The session was effectively dead until restart.
+    // stale aborted state forward and bailed out with the synthetic
+    // stopped-summary before any model call ran. The session was
+    // effectively dead until restart.
     const reg = new ToolRegistry();
     reg.register({
       name: "probe",
@@ -338,10 +519,61 @@ describe("CacheFirstLoop (non-streaming)", () => {
     const finals = turn2Events.filter((e) => e.role === "assistant_final");
     expect(finals).toHaveLength(1);
     expect(finals[0]!.content).toBe("second turn ran cleanly");
-    // No "aborted at iter 0" warning on turn 2.
-    expect(
-      turn2Events.some((e) => e.role === "warning" && /aborted at iter/.test(e.content ?? "")),
-    ).toBe(false);
+  });
+
+  it("does not bleed when consumer breaks for-await mid-abort-yield", async () => {
+    // Desktop runTurn checks its own outer aborter after each yielded
+    // event and `break`s out. That calls generator.return() on step(),
+    // which throws into the suspended yield and skips any straight-line
+    // code after it. If `_turnAbort = new AbortController()` sits after
+    // a yield (rather than in finally), the reset is lost and every
+    // subsequent step() locks at iter 0 via carryAbort.
+    const reg = new ToolRegistry();
+    reg.register({
+      name: "probe",
+      description: "no-op",
+      parameters: { type: "object", properties: {} },
+      fn: async () => "ok",
+    });
+    const chainingToolCall = {
+      content: "",
+      tool_calls: [{ id: "c", type: "function", function: { name: "probe", arguments: "{}" } }],
+    };
+    const finalAnswer = { content: "second turn ran cleanly", tool_calls: [] };
+    const client = new DeepSeekClient({
+      apiKey: "sk-test",
+      fetch: fakeFetch([chainingToolCall, finalAnswer]) as unknown as typeof fetch,
+    });
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s", toolSpecs: reg.specs() }),
+      tools: reg,
+      stream: false,
+      maxToolIters: 16,
+    });
+
+    let aborted = false;
+    for await (const ev of loop.step("first")) {
+      if (!aborted && ev.role === "tool") {
+        aborted = true;
+        loop.abort();
+        continue;
+      }
+      if (aborted && ev.role === "assistant_final" && ev.forcedSummary) {
+        // Mirror desktop runTurn: drop out of for-await mid-abort-drain,
+        // before `done` is yielded — exercises the finally-block reset.
+        break;
+      }
+    }
+
+    const turn2Events: { role: string; content?: string }[] = [];
+    for await (const ev of loop.step("second")) {
+      turn2Events.push({ role: ev.role, content: ev.content });
+    }
+
+    const finals = turn2Events.filter((e) => e.role === "assistant_final");
+    expect(finals).toHaveLength(1);
+    expect(finals[0]!.content).toBe("second turn ran cleanly");
   });
 
   it("first all-suppressed storm self-corrects in-turn instead of stopping", async () => {
@@ -493,6 +725,78 @@ describe("CacheFirstLoop (non-streaming)", () => {
     expect(summary!.content).toMatch(/context budget running low/);
   });
 
+  it("force-summary calls the active model, not a hard-coded one (third-party endpoint compat)", async () => {
+    const seenModels: string[] = [];
+    const responses: FakeResponseShape[] = [
+      {
+        content: "",
+        tool_calls: [{ id: "c", type: "function", function: { name: "probe", arguments: "{}" } }],
+        usage: {
+          prompt_tokens: 900_000,
+          completion_tokens: 10,
+          total_tokens: 900_010,
+          prompt_cache_hit_tokens: 0,
+          prompt_cache_miss_tokens: 900_000,
+        },
+      },
+      { content: "summary text" },
+    ];
+    let i = 0;
+    const captureFetch: typeof fetch = vi.fn(async (_url: any, init: any) => {
+      const body = init?.body ? JSON.parse(init.body) : {};
+      if (typeof body.model === "string") seenModels.push(body.model);
+      const resp = responses[i++] ?? responses[responses.length - 1]!;
+      return new Response(
+        JSON.stringify({
+          choices: [
+            {
+              index: 0,
+              message: {
+                role: "assistant",
+                content: resp.content ?? "",
+                tool_calls: resp.tool_calls ?? undefined,
+              },
+              finish_reason: resp.tool_calls ? "tool_calls" : "stop",
+            },
+          ],
+          usage: resp.usage ?? {
+            prompt_tokens: 100,
+            completion_tokens: 20,
+            total_tokens: 120,
+            prompt_cache_hit_tokens: 0,
+            prompt_cache_miss_tokens: 100,
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }) as unknown as typeof fetch;
+
+    const reg = new ToolRegistry();
+    reg.register({
+      name: "probe",
+      description: "no-op",
+      parameters: { type: "object", properties: {} },
+      fn: async () => "ok",
+    });
+    const thirdPartyModel = "mimo-v2.5-pro";
+    const client = new DeepSeekClient({ apiKey: "sk-test", fetch: captureFetch });
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s", toolSpecs: reg.specs() }),
+      tools: reg,
+      stream: false,
+      maxToolIters: 64,
+      model: thirdPartyModel,
+    });
+
+    for await (const _ of loop.step("analyze the repo")) {
+      // drain
+    }
+
+    expect(seenModels.length).toBeGreaterThanOrEqual(2);
+    expect(seenModels.every((m) => m === thirdPartyModel)).toBe(true);
+  });
+
   it("compactHistory replaces head with summary, keeps tail within token budget", async () => {
     const responses: FakeResponseShape[] = [
       { content: "User explored auth and billing modules; landed on session refactor plan." },
@@ -546,7 +850,16 @@ describe("CacheFirstLoop (non-streaming)", () => {
     expect(loop.log.length).toBe(4);
   });
 
-  it("auto-folds history when promptTokens crosses 50% of ctxMax", async () => {
+  it("auto-folds history when promptTokens crosses the normal fold threshold", async () => {
+    // ctxMax sized so the seed log (~90K content tokens) stays under preflight's
+    // 95% threshold AND the fold tailBudget (20%) stays smaller than the log
+    // so fold has a meaningful head to compact. The mocked usage trips post-
+    // response auto-fold without preflight stealing the work.
+    DEEPSEEK_CONTEXT_TOKENS[FOLD_TEST_MODEL] = 200_000;
+    const tripPrompt = Math.ceil(
+      200_000 *
+        (HISTORY_FOLD_THRESHOLD + (HISTORY_FOLD_AGGRESSIVE_THRESHOLD - HISTORY_FOLD_THRESHOLD) / 2),
+    );
     const reg = new ToolRegistry();
     reg.register({
       name: "probe",
@@ -555,16 +868,15 @@ describe("CacheFirstLoop (non-streaming)", () => {
       fn: async () => "ok",
     });
     const responses: FakeResponseShape[] = [
-      // Iter 0: tool call with usage above 50% of 1M ctx.
       {
         content: "",
         tool_calls: [{ id: "c1", type: "function", function: { name: "probe", arguments: "{}" } }],
         usage: {
-          prompt_tokens: 600_000,
+          prompt_tokens: tripPrompt,
           completion_tokens: 10,
-          total_tokens: 600_010,
-          prompt_cache_hit_tokens: 500_000,
-          prompt_cache_miss_tokens: 100_000,
+          total_tokens: tripPrompt + 10,
+          prompt_cache_hit_tokens: Math.floor(tripPrompt * 0.8),
+          prompt_cache_miss_tokens: Math.ceil(tripPrompt * 0.2),
         },
       },
       // Summary call response (compactHistory).
@@ -579,12 +891,12 @@ describe("CacheFirstLoop (non-streaming)", () => {
       tools: reg,
       stream: false,
       maxToolIters: 8,
+      model: FOLD_TEST_MODEL,
     });
-    // Seed 18 user/assistant turns sized so the LOG estimate stays
-    // below the 95% preflight threshold (otherwise preflight folds
-    // first and the auto-fold path never runs). The mocked usage of
-    // 600k below is what trips the auto-fold check, independent of the
-    // tokenizer's view of the seed.
+    // Seed 18 user/assistant turns sized so the LOG estimate stays below both
+    // preflight signals (95% of token ctx AND the byte ceiling) — otherwise
+    // preflight folds first and the auto-fold path never runs. The mocked usage
+    // of 600k below is what trips the auto-fold check.
     const fillLines = (label: string, n: number) =>
       Array.from(
         { length: n },
@@ -592,8 +904,8 @@ describe("CacheFirstLoop (non-streaming)", () => {
           `${label} line ${i}: lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.`,
       ).join("\n");
     for (let i = 0; i < 18; i++) {
-      loop.log.append({ role: "user", content: `Q${i}\n${fillLines(`q${i}`, 400)}` });
-      loop.log.append({ role: "assistant", content: `A${i}\n${fillLines(`a${i}`, 400)}` });
+      loop.log.append({ role: "user", content: `Q${i}\n${fillLines(`q${i}`, 100)}` });
+      loop.log.append({ role: "assistant", content: `A${i}\n${fillLines(`a${i}`, 100)}` });
     }
     const beforeMessages = loop.log.length;
 
@@ -610,7 +922,11 @@ describe("CacheFirstLoop (non-streaming)", () => {
     expect(loop.log.length).toBeLessThan(beforeMessages);
   }, 30_000);
 
-  it("uses the aggressive fold tier when promptTokens crosses 70% of ctxMax", async () => {
+  it("uses the aggressive fold tier when promptTokens crosses the aggressive threshold", async () => {
+    DEEPSEEK_CONTEXT_TOKENS[FOLD_TEST_MODEL] = 200_000;
+    const tripPrompt = Math.ceil(
+      200_000 * (HISTORY_FOLD_AGGRESSIVE_THRESHOLD + (0.8 - HISTORY_FOLD_AGGRESSIVE_THRESHOLD) / 2),
+    );
     const reg = new ToolRegistry();
     reg.register({
       name: "probe",
@@ -619,16 +935,15 @@ describe("CacheFirstLoop (non-streaming)", () => {
       fn: async () => "ok",
     });
     const responses: FakeResponseShape[] = [
-      // Iter 0: usage at 75% of 1M ctx — squarely in the aggressive band.
       {
         content: "",
         tool_calls: [{ id: "c1", type: "function", function: { name: "probe", arguments: "{}" } }],
         usage: {
-          prompt_tokens: 750_000,
+          prompt_tokens: tripPrompt,
           completion_tokens: 10,
-          total_tokens: 750_010,
-          prompt_cache_hit_tokens: 600_000,
-          prompt_cache_miss_tokens: 150_000,
+          total_tokens: tripPrompt + 10,
+          prompt_cache_hit_tokens: Math.floor(tripPrompt * 0.8),
+          prompt_cache_miss_tokens: Math.ceil(tripPrompt * 0.2),
         },
       },
       // Summary call (compactHistory).
@@ -643,6 +958,7 @@ describe("CacheFirstLoop (non-streaming)", () => {
       tools: reg,
       stream: false,
       maxToolIters: 8,
+      model: FOLD_TEST_MODEL,
     });
     const fillLines = (label: string, n: number) =>
       Array.from(
@@ -651,8 +967,8 @@ describe("CacheFirstLoop (non-streaming)", () => {
           `${label} line ${i}: lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.`,
       ).join("\n");
     for (let i = 0; i < 18; i++) {
-      loop.log.append({ role: "user", content: `Q${i}\n${fillLines(`q${i}`, 400)}` });
-      loop.log.append({ role: "assistant", content: `A${i}\n${fillLines(`a${i}`, 400)}` });
+      loop.log.append({ role: "user", content: `Q${i}\n${fillLines(`q${i}`, 100)}` });
+      loop.log.append({ role: "assistant", content: `A${i}\n${fillLines(`a${i}`, 100)}` });
     }
 
     const events: { role: string; content?: string }[] = [];
@@ -711,6 +1027,62 @@ describe("CacheFirstLoop (non-streaming)", () => {
     expect(content).toMatch(/truncated/);
   });
 
+  it("shrinks retained tool-call args without starving the tool dispatch", async () => {
+    const reg = new ToolRegistry();
+    const hugeContent = Array.from({ length: 9000 }, (_, i) => `line ${i}: payload ${i}`).join(
+      "\n",
+    );
+    let receivedChars = 0;
+    reg.register<{ path: string; content: string }, string>({
+      name: "write_blob",
+      description: "captures a large write payload",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string" },
+          content: { type: "string" },
+        },
+        required: ["path", "content"],
+      },
+      fn: async (args) => {
+        receivedChars = args.content.length;
+        return `received ${receivedChars}`;
+      },
+    });
+    const rawArgs = JSON.stringify({ path: "big.txt", content: hugeContent });
+    const responses: FakeResponseShape[] = [
+      {
+        content: "",
+        tool_calls: [
+          { id: "c1", type: "function", function: { name: "write_blob", arguments: rawArgs } },
+        ],
+      },
+      { content: "done." },
+    ];
+    const client = makeClient(responses);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s", toolSpecs: reg.specs() }),
+      tools: reg,
+      stream: false,
+    });
+
+    for await (const _ev of loop.step("go")) {
+      /* drain */
+    }
+
+    expect(receivedChars).toBe(hugeContent.length);
+    const assistantEntry = loop.log
+      .toMessages()
+      .find((m) => m.role === "assistant" && (m.tool_calls?.length ?? 0) > 0);
+    expect(assistantEntry).toBeDefined();
+    const savedArgs = assistantEntry!.tool_calls![0]!.function.arguments;
+    expect(savedArgs.length).toBeLessThan(rawArgs.length / 10);
+    const parsed = JSON.parse(savedArgs) as { path: string; content: string };
+    expect(parsed.path).toBe("big.txt");
+    expect(parsed.content).toMatch(/shrunk/);
+  });
+
   it("buildMessages strips a dangling assistant-with-tool_calls tail — defensive against 'insufficient tool messages' 400", async () => {
     // Craft a log where the last entry is an assistant message with
     // tool_calls but no matching tool responses. This is the shape
@@ -759,366 +1131,6 @@ describe("CacheFirstLoop (non-streaming)", () => {
       roles.push(ev.role);
     }
     expect(roles).toContain("error");
-  });
-});
-
-// ── Test helper: call the private noteToolFailureSignal method ──────────
-// PRIVATE-ACCESS JUSTIFICATION: noteToolFailureSignal is private, and the
-// counter state lives inside the private TurnFailureTracker (_turnFailures)
-// — there is no public getter for the current count / type breakdown, and
-// `escalatedThisTurn` only reflects the boolean outcome, not the tally
-// that produced it. The SEARCH-mismatch path is tested behaviorally through
-// step() below (driving real tool failures and asserting on escalatedThisTurn
-// + warning events). The repair-based path (scavenged/truncationsFixed/
-// stormsBroken) is also reachable through step() — step() calls
-// noteToolFailureSignal("", report) internally — but constructing specific
-// RepairReport inputs requires tool-call patterns that are deeply coupled
-// to repair-module internals (scavenge scanners, storm-threshold windows,
-// truncation JSON shapes). Testing the counting + threshold logic directly
-// with known inputs keeps these tests focused on the escalation gate rather
-// than the repair pipeline that feeds it. All private-field access is
-// consolidated behind this single helper so only one place needs updating
-// when the representation changes.
-function signalToolFailure(
-  loop: CacheFirstLoop,
-  options: {
-    /** Set the accumulated failure count before this call (default 0). */
-    count?: number;
-    /** Set the already-escalated flag before this call (default false). */
-    escalated?: boolean;
-    /** Disable autoEscalate for this loop (reconfigures the instance). */
-    disableAutoEscalate?: boolean;
-    /** A tool-result JSON string to scan for SEARCH-mismatch patterns. */
-    resultJson?: string;
-    /** A repair report whose counts contribute to the failure tally. */
-    repair?: RepairReport;
-  } = {},
-): { escalated: boolean; count: number; types: Record<string, number> } {
-  if (options.disableAutoEscalate) loop.configure({ autoEscalate: false });
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const priv = loop as any;
-  const tracker = priv._turnFailures as { count: number; types: Record<string, number> };
-  if (options.count !== undefined) tracker.count = options.count;
-  if (options.escalated !== undefined) priv._escalateThisTurn = options.escalated;
-
-  const escalated: boolean = priv.noteToolFailureSignal(options.resultJson ?? "", options.repair);
-  return {
-    escalated,
-    count: tracker.count as number,
-    types: { ...tracker.types } as Record<string, number>,
-  };
-}
-
-describe("CacheFirstLoop - auto-escalation on tool failures", () => {
-  const FAILURE_ESCALATION_THRESHOLD = 3;
-
-  // ── Behavioral tests: drive real tool failures through step() ──────
-
-  it("auto-escalates when 3 SEARCH-mismatch tool failures accumulate", async () => {
-    const tools = new ToolRegistry();
-    tools.register({
-      name: "fail_tool",
-      description: "returns SEARCH-mismatch error shape",
-      parameters: { type: "object", properties: { n: { type: "integer" } }, required: [] },
-      fn: ({ n }: { n?: number }) =>
-        JSON.stringify({
-          error: `Error: search text not found in file_${n ?? 0}.ts`,
-        }),
-    });
-    // 3 tool calls, each with different args so the storm breaker
-    // sees distinct signatures and doesn't suppress any.
-    const call = (id: string, n: number) => ({
-      content: "",
-      tool_calls: [
-        {
-          id,
-          type: "function" as const,
-          function: { name: "fail_tool", arguments: JSON.stringify({ n }) },
-        },
-      ],
-    });
-    const client = makeClient([
-      call("c1", 1),
-      call("c2", 2),
-      call("c3", 3),
-      { content: "done after failures" },
-    ]);
-    const loop = new CacheFirstLoop({
-      client,
-      prefix: new ImmutablePrefix({ system: "s", toolSpecs: tools.specs() }),
-      tools,
-      stream: false,
-    });
-
-    const warnings: string[] = [];
-    for await (const ev of loop.step("go")) {
-      if (ev.role === "warning") warnings.push(ev.content);
-    }
-
-    expect(loop.escalatedThisTurn).toBe(true);
-    expect(warnings.some((w) => /escalat/i.test(w))).toBe(true);
-  });
-
-  it("single SEARCH-mismatch below threshold does not auto-escalate", async () => {
-    const tools = new ToolRegistry();
-    tools.register({
-      name: "fail_tool",
-      description: "returns SEARCH-mismatch error shape",
-      parameters: { type: "object", properties: {}, required: [] },
-      fn: () => JSON.stringify({ error: "Error: search text not found in file.ts" }),
-    });
-    const client = makeClient([
-      {
-        content: "",
-        tool_calls: [
-          { id: "c1", type: "function", function: { name: "fail_tool", arguments: "{}" } },
-        ],
-      },
-      { content: "ok after one failure" },
-    ]);
-    const loop = new CacheFirstLoop({
-      client,
-      prefix: new ImmutablePrefix({ system: "s", toolSpecs: tools.specs() }),
-      tools,
-      stream: false,
-    });
-
-    const warnings: string[] = [];
-    for await (const ev of loop.step("go")) {
-      if (ev.role === "warning") warnings.push(ev.content);
-    }
-
-    expect(loop.escalatedThisTurn).toBe(false);
-    expect(warnings.some((w) => /escalat/i.test(w))).toBe(false);
-  });
-
-  it("autoEscalate=false prevents auto-escalation despite accumulated failures", async () => {
-    const tools = new ToolRegistry();
-    tools.register({
-      name: "fail_tool",
-      description: "returns SEARCH-mismatch error shape",
-      parameters: { type: "object", properties: { n: { type: "integer" } }, required: [] },
-      fn: ({ n }: { n?: number }) =>
-        JSON.stringify({
-          error: `Error: search text not found in file_${n ?? 0}.ts`,
-        }),
-    });
-    const call = (id: string, n: number) => ({
-      content: "",
-      tool_calls: [
-        {
-          id,
-          type: "function" as const,
-          function: { name: "fail_tool", arguments: JSON.stringify({ n }) },
-        },
-      ],
-    });
-    const client = makeClient([call("c1", 1), call("c2", 2), call("c3", 3), { content: "done" }]);
-    const loop = new CacheFirstLoop({
-      client,
-      prefix: new ImmutablePrefix({ system: "s", toolSpecs: tools.specs() }),
-      tools,
-      stream: false,
-      autoEscalate: false,
-    });
-
-    const warnings: string[] = [];
-    for await (const ev of loop.step("go")) {
-      if (ev.role === "warning") warnings.push(ev.content);
-    }
-
-    expect(loop.escalatedThisTurn).toBe(false);
-    expect(warnings.some((w) => /escalat/i.test(w))).toBe(false);
-  });
-
-  // ── Unit tests: edge cases that need private state access ─────────
-
-  it("repair flavor counts accumulate proportionally per call", () => {
-    const client = makeClient([{ content: "ok" }]);
-    const loop = new CacheFirstLoop({
-      client,
-      prefix: new ImmutablePrefix({ system: "s" }),
-      stream: false,
-    });
-    const result = signalToolFailure(loop, {
-      repair: { scavenged: 2, truncationsFixed: 3, stormsBroken: 1, notes: [] },
-    });
-    // 2 (scavenged) + 3 (truncationsFixed) + 1 (stormsBroken) = 6
-    expect(result.count).toBe(6);
-    expect(result.types.scavenged).toBe(2);
-    expect(result.types.truncated).toBe(3);
-    expect(result.types["repeat-loop"]).toBe(1);
-  });
-
-  it("SEARCH-mismatch error result bumps the search-mismatch flavor", () => {
-    const client = makeClient([{ content: "ok" }]);
-    const loop = new CacheFirstLoop({
-      client,
-      prefix: new ImmutablePrefix({ system: "s" }),
-      stream: false,
-    });
-    const result = signalToolFailure(loop, {
-      resultJson: JSON.stringify({
-        error: "Error: search text not found in path/to/file.ts",
-      }),
-    });
-    expect(result.count).toBe(1);
-    expect(result.types["search-mismatch"]).toBe(1);
-  });
-
-  it("non-SEARCH error results do not bump the counter", () => {
-    const client = makeClient([{ content: "ok" }]);
-    const loop = new CacheFirstLoop({
-      client,
-      prefix: new ImmutablePrefix({ system: "s" }),
-      stream: false,
-    });
-    const result = signalToolFailure(loop, {
-      count: 2,
-      resultJson: JSON.stringify({ error: "some other error" }),
-    });
-    // Neither bumped (the error string lacks "search text not found")
-    // nor escalated — the count stays at the preset value.
-    expect(result.count).toBe(2);
-    expect(result.escalated).toBe(false);
-  });
-
-  it("returns true and flips escalatedThisTurn when threshold is crossed", () => {
-    const client = makeClient([{ content: "ok" }]);
-    const loop = new CacheFirstLoop({
-      client,
-      prefix: new ImmutablePrefix({ system: "s" }),
-      stream: false,
-    });
-    // One below threshold → should tip.
-    const result = signalToolFailure(loop, {
-      count: 2,
-      repair: { scavenged: 0, truncationsFixed: 1, stormsBroken: 0, notes: [] },
-    });
-    expect(result.escalated).toBe(true);
-    expect(result.count).toBe(3);
-    // Public getter also reflects the escalation.
-    expect(loop.escalatedThisTurn).toBe(true);
-  });
-
-  it("does not double-escalate when already escalated this turn", () => {
-    const client = makeClient([{ content: "ok" }]);
-    const loop = new CacheFirstLoop({
-      client,
-      prefix: new ImmutablePrefix({ system: "s" }),
-      stream: false,
-    });
-    // Start one below threshold so the call WOULD cross and trigger
-    // escalation, but the already-escalated flag must block it.
-    const result = signalToolFailure(loop, {
-      count: 2,
-      escalated: true,
-      repair: { scavenged: 1, truncationsFixed: 0, stormsBroken: 0, notes: [] },
-    });
-    expect(result.escalated).toBe(false); // no double-escalation
-  });
-
-  it("does not escalate when autoEscalate is disabled", () => {
-    const client = makeClient([{ content: "ok" }]);
-    const loop = new CacheFirstLoop({
-      client,
-      prefix: new ImmutablePrefix({ system: "s" }),
-      stream: false,
-    });
-    // Start one below threshold so the call WOULD cross and trigger
-    // escalation, but autoEscalate=false must block it.
-    const result = signalToolFailure(loop, {
-      count: 2,
-      disableAutoEscalate: true,
-      repair: { scavenged: 1, truncationsFixed: 0, stormsBroken: 0, notes: [] },
-    });
-    expect(result.escalated).toBe(false);
-    expect(loop.escalatedThisTurn).toBe(false);
-  });
-
-  it("custom failureThreshold=5 does not escalate until 5th signal", () => {
-    const client = makeClient([{ content: "ok" }]);
-    const loop = new CacheFirstLoop({
-      client,
-      prefix: new ImmutablePrefix({ system: "s" }),
-      stream: false,
-      failureThreshold: 5,
-    });
-    // First four signals should not escalate.
-    for (let i = 0; i < 4; i++) {
-      const result = signalToolFailure(loop, {
-        repair: { scavenged: 1, truncationsFixed: 0, stormsBroken: 0, notes: [] },
-      });
-      expect(result.escalated).toBe(false);
-    }
-    expect(loop.escalatedThisTurn).toBe(false);
-    // Fifth signal crosses the configured threshold.
-    const fifth = signalToolFailure(loop, {
-      repair: { scavenged: 1, truncationsFixed: 0, stormsBroken: 0, notes: [] },
-    });
-    expect(fifth.escalated).toBe(true);
-    expect(fifth.count).toBe(5);
-    expect(loop.escalatedThisTurn).toBe(true);
-  });
-
-  it("default failureThreshold preserves the 3-signal escalation behavior", () => {
-    const client = makeClient([{ content: "ok" }]);
-    const loop = new CacheFirstLoop({
-      client,
-      prefix: new ImmutablePrefix({ system: "s" }),
-      stream: false,
-      // No failureThreshold passed — should use default of 3.
-    });
-    // Two signals: not crossed yet.
-    for (let i = 0; i < 2; i++) {
-      const result = signalToolFailure(loop, {
-        repair: { scavenged: 1, truncationsFixed: 0, stormsBroken: 0, notes: [] },
-      });
-      expect(result.escalated).toBe(false);
-    }
-    // Third crosses.
-    const third = signalToolFailure(loop, {
-      repair: { scavenged: 1, truncationsFixed: 0, stormsBroken: 0, notes: [] },
-    });
-    expect(third.escalated).toBe(true);
-    expect(third.count).toBe(3);
-  });
-
-  it("invalid failureThreshold values warn on stderr and fall back to default 3", () => {
-    const client = makeClient([{ content: "ok" }]);
-    const writes: string[] = [];
-    const original = process.stderr.write.bind(process.stderr);
-    // Capture stderr writes during construction so we can assert the warning.
-    (process.stderr as unknown as { write: (s: string) => boolean }).write = (s: string) => {
-      writes.push(String(s));
-      return true;
-    };
-    let loop: CacheFirstLoop;
-    try {
-      loop = new CacheFirstLoop({
-        client,
-        prefix: new ImmutablePrefix({ system: "s" }),
-        stream: false,
-        // Out-of-range value (>20) — must warn and fall back to default 3.
-        failureThreshold: 999,
-      });
-    } finally {
-      (process.stderr as unknown as { write: typeof original }).write = original;
-    }
-    expect(writes.some((w) => /failureThreshold=999/.test(w))).toBe(true);
-
-    // Behavior matches the default-3 threshold.
-    for (let i = 0; i < 2; i++) {
-      const result = signalToolFailure(loop, {
-        repair: { scavenged: 1, truncationsFixed: 0, stormsBroken: 0, notes: [] },
-      });
-      expect(result.escalated).toBe(false);
-    }
-    const third = signalToolFailure(loop, {
-      repair: { scavenged: 1, truncationsFixed: 0, stormsBroken: 0, notes: [] },
-    });
-    expect(third.escalated).toBe(true);
-    expect(third.count).toBe(3);
   });
 });
 
@@ -1239,21 +1251,9 @@ describe("CacheFirstLoop - configure() method", () => {
     loop.configure({ reasoningEffort: "high" });
     expect(loop.reasoningEffort).toBe("high");
   });
-
-  it("updates autoEscalate via configure", () => {
-    const client = makeClient([{ content: "ok" }]);
-    const loop = new CacheFirstLoop({
-      client,
-      prefix: new ImmutablePrefix({ system: "s" }),
-      stream: false,
-      autoEscalate: true,
-    });
-    loop.configure({ autoEscalate: false });
-    expect(loop.autoEscalate).toBe(false);
-  });
 });
 
-describe("CacheFirstLoop - setBudget / clearLog / retryLastUser / proArm", () => {
+describe("CacheFirstLoop - setBudget / clearLog / retryLastUser", () => {
   it("setBudget(null) clears budget", () => {
     const client = makeClient([{ content: "ok" }]);
     const loop = new CacheFirstLoop({
@@ -1315,6 +1315,36 @@ describe("CacheFirstLoop - setBudget / clearLog / retryLastUser / proArm", () =>
     expect(loop.stats.summary().totalCostUsd).toBe(0);
     expect(loop.stats.summary().turns).toBe(0);
     expect(loop.currentTurn).toBe(0);
+  });
+
+  it("clearLog drains the steer queue so the next turn doesn't replay prior intent", async () => {
+    const fetchSpy = vi.fn(
+      async (_url: any, init: any) =>
+        new Response(
+          JSON.stringify({
+            _echo_messages: JSON.parse(init.body).messages,
+            choices: [
+              { index: 0, message: { role: "assistant", content: "ok" }, finish_reason: "stop" },
+            ],
+            usage: { prompt_tokens: 10, completion_tokens: 1, total_tokens: 11 },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    ) as unknown as typeof fetch;
+    const client = new DeepSeekClient({ apiKey: "sk-test", fetch: fetchSpy });
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: false,
+    });
+    loop.steer("finish the refactor i started in the prior session");
+    loop.clearLog();
+    for await (const _ev of loop.step("hello")) {
+      /* drain */
+    }
+    const sent = JSON.parse((fetchSpy as any).mock.calls[0][1].body).messages as ChatMessage[];
+    const userBodies = sent.filter((m) => m.role === "user").map((m) => m.content);
+    expect(userBodies).toEqual(["hello"]);
   });
 
   it("clearLog returns 0 dropped when already empty", () => {
@@ -1463,214 +1493,56 @@ describe("CacheFirstLoop - setBudget / clearLog / retryLastUser / proArm", () =>
     expect(loop.log.entries[1]!.content).toBe("an answer");
   });
 
-  it("armProForNextTurn sets proArmed and step consumes it producing warning", async () => {
+  it("rewindToUserTurn(0) drops everything from the first user turn", () => {
     const client = makeClient([{ content: "ok" }]);
     const loop = new CacheFirstLoop({
       client,
       prefix: new ImmutablePrefix({ system: "s" }),
       stream: false,
     });
-    expect(loop.proArmed).toBe(false);
-    loop.armProForNextTurn();
-    expect(loop.proArmed).toBe(true);
+    loop.log.append({ role: "user", content: "turn one" });
+    loop.log.append({ role: "assistant", content: "reply one" });
+    loop.log.append({ role: "user", content: "turn two" });
+    loop.log.append({ role: "assistant", content: "reply two" });
 
-    // After step(), the arm is consumed.
-    const warnings: string[] = [];
-    for await (const ev of loop.step("hi")) {
-      if (ev.role === "warning") warnings.push(ev.content);
-    }
-    // Should have a warning about /pro armed.
-    expect(warnings.some((w) => /\/pro armed/.test(w))).toBe(true);
-    expect(loop.proArmed).toBe(false);
-    // escalatedThisTurn should be true because the arm was consumed.
-    expect(loop.escalatedThisTurn).toBe(true);
+    const result = loop.rewindToUserTurn(0);
+    expect(result).toBe("turn one");
+    expect(loop.log.length).toBe(0);
   });
 
-  it("disarmPro cancels arming before step", () => {
+  it("rewindToUserTurn(1) keeps turn 0 and drops turn 1+ onwards", () => {
     const client = makeClient([{ content: "ok" }]);
     const loop = new CacheFirstLoop({
       client,
       prefix: new ImmutablePrefix({ system: "s" }),
       stream: false,
     });
-    loop.armProForNextTurn();
-    expect(loop.proArmed).toBe(true);
-    loop.disarmPro();
-    expect(loop.proArmed).toBe(false);
+    loop.log.append({ role: "user", content: "turn one" });
+    loop.log.append({ role: "assistant", content: "reply one" });
+    loop.log.append({ role: "user", content: "turn two" });
+    loop.log.append({ role: "assistant", content: "reply two" });
+    loop.log.append({ role: "user", content: "turn three" });
+    loop.log.append({ role: "assistant", content: "reply three" });
+
+    const result = loop.rewindToUserTurn(1);
+    expect(result).toBe("turn two");
+    expect(loop.log.length).toBe(2);
+    expect(loop.log.entries[0]!.content).toBe("turn one");
+    expect(loop.log.entries[1]!.content).toBe("reply one");
   });
 
-  it("escalatedThisTurn is false when not armed and no auto-escalation triggered", async () => {
+  it("rewindToUserTurn(N) returns null when N exceeds available user turns", () => {
     const client = makeClient([{ content: "ok" }]);
     const loop = new CacheFirstLoop({
       client,
       prefix: new ImmutablePrefix({ system: "s" }),
       stream: false,
-      autoEscalate: false,
     });
-    expect(loop.escalatedThisTurn).toBe(false);
-    // Run a step - no escalation should occur.
-    for await (const _ev of loop.step("hi")) {
-      /* drain */
-    }
-    expect(loop.escalatedThisTurn).toBe(false);
-  });
-});
+    loop.log.append({ role: "user", content: "only one" });
+    loop.log.append({ role: "assistant", content: "reply" });
 
-describe("CacheFirstLoop - self-reported escalation via <<<NEEDS_PRO>>>", () => {
-  function modelCapturingFetch(responses: FakeResponseShape[]): {
-    fetch: typeof fetch;
-    seenModels: string[];
-  } {
-    const seenModels: string[] = [];
-    let i = 0;
-    const fetchFn = vi.fn(async (_url: any, init: any) => {
-      const body = init?.body ? JSON.parse(init.body) : {};
-      seenModels.push(body.model);
-      const resp = responses[i++] ?? responses[responses.length - 1]!;
-      return new Response(
-        JSON.stringify({
-          choices: [
-            {
-              index: 0,
-              message: {
-                role: "assistant",
-                content: resp.content ?? "",
-                reasoning_content: resp.reasoning_content ?? null,
-                tool_calls: resp.tool_calls ?? undefined,
-              },
-              finish_reason: resp.tool_calls ? "tool_calls" : "stop",
-            },
-          ],
-          usage: resp.usage ?? {
-            prompt_tokens: 100,
-            completion_tokens: 20,
-            total_tokens: 120,
-            prompt_cache_hit_tokens: 0,
-            prompt_cache_miss_tokens: 100,
-          },
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      );
-    }) as unknown as typeof fetch;
-    return { fetch: fetchFn, seenModels };
-  }
-
-  it("retries on v4-pro when flash outputs the NEEDS_PRO marker as lead-in", async () => {
-    const { fetch, seenModels } = modelCapturingFetch([
-      { content: "<<<NEEDS_PRO>>>" }, // first call on flash → escalation request
-      { content: "OK, here's the answer on pro." }, // retry on pro → real response
-    ]);
-    const loop = new CacheFirstLoop({
-      client: new DeepSeekClient({ apiKey: "sk-test", fetch }),
-      prefix: new ImmutablePrefix({ system: "be brief" }),
-      model: "deepseek-v4-flash",
-      stream: false,
-    });
-
-    const events: { role: string; content?: string }[] = [];
-    for await (const ev of loop.step("hard question")) {
-      events.push({ role: ev.role, content: ev.content });
-    }
-
-    // Two model calls total: first flash, second pro
-    expect(seenModels).toEqual(["deepseek-v4-flash", "deepseek-v4-pro"]);
-    // A warning surfaced about the retry
-    expect(events.some((e) => e.role === "warning" && /escalat/i.test(e.content ?? ""))).toBe(true);
-    // The final assistant message is the pro-generated content, not the marker
-    const finalEv = events.find((e) => e.role === "assistant_final");
-    expect(finalEv?.content).toBe("OK, here's the answer on pro.");
-  });
-
-  it("does not retry when the response merely mentions the marker mid-text", async () => {
-    const { fetch, seenModels } = modelCapturingFetch([
-      { content: "See the docs: <<<NEEDS_PRO>>> is a reserved marker." },
-    ]);
-    const loop = new CacheFirstLoop({
-      client: new DeepSeekClient({ apiKey: "sk-test", fetch }),
-      prefix: new ImmutablePrefix({ system: "be brief" }),
-      model: "deepseek-v4-flash",
-      stream: false,
-    });
-
-    for await (const _ev of loop.step("explain the marker")) {
-      /* drain */
-    }
-
-    expect(seenModels).toEqual(["deepseek-v4-flash"]);
-  });
-
-  it("does not escalate again when the model is already on pro", async () => {
-    // Even if pro happens to echo the marker, no infinite-retry loop.
-    const { fetch, seenModels } = modelCapturingFetch([
-      { content: "<<<NEEDS_PRO>>>" }, // on pro — should NOT trigger retry
-    ]);
-    const loop = new CacheFirstLoop({
-      client: new DeepSeekClient({ apiKey: "sk-test", fetch }),
-      prefix: new ImmutablePrefix({ system: "be brief" }),
-      model: "deepseek-v4-pro",
-      stream: false,
-    });
-
-    for await (const _ev of loop.step("hi")) {
-      /* drain */
-    }
-
-    // Exactly one call; no retry.
-    expect(seenModels).toEqual(["deepseek-v4-pro"]);
-  });
-
-  it("surfaces the model's reason in the warning when marker carries one", async () => {
-    const { fetch } = modelCapturingFetch([
-      { content: "<<<NEEDS_PRO: cross-file refactor with circular imports>>>" },
-      { content: "Done on pro." },
-    ]);
-    const loop = new CacheFirstLoop({
-      client: new DeepSeekClient({ apiKey: "sk-test", fetch }),
-      prefix: new ImmutablePrefix({ system: "be brief" }),
-      model: "deepseek-v4-flash",
-      stream: false,
-    });
-    const events: { role: string; content?: string }[] = [];
-    for await (const ev of loop.step("refactor this")) {
-      events.push({ role: ev.role, content: ev.content });
-    }
-    const warning = events.find((e) => e.role === "warning" && /escalat/i.test(e.content ?? ""));
-    expect(warning).toBeDefined();
-    expect(warning?.content).toContain("cross-file refactor with circular imports");
-  });
-
-  it("treats an empty reason payload the same as the bare marker", async () => {
-    const { fetch, seenModels } = modelCapturingFetch([
-      { content: "<<<NEEDS_PRO: >>>" }, // empty reason
-      { content: "Done on pro." },
-    ]);
-    const loop = new CacheFirstLoop({
-      client: new DeepSeekClient({ apiKey: "sk-test", fetch }),
-      prefix: new ImmutablePrefix({ system: "be brief" }),
-      model: "deepseek-v4-flash",
-      stream: false,
-    });
-    for await (const _ev of loop.step("x")) {
-      /* drain */
-    }
-    expect(seenModels).toEqual(["deepseek-v4-flash", "deepseek-v4-pro"]);
-  });
-
-  it("does not match a malformed marker (no closing >>>)", async () => {
-    const { fetch, seenModels } = modelCapturingFetch([
-      { content: "<<<NEEDS_PRO: this looks like a marker but never closes" },
-    ]);
-    const loop = new CacheFirstLoop({
-      client: new DeepSeekClient({ apiKey: "sk-test", fetch }),
-      prefix: new ImmutablePrefix({ system: "be brief" }),
-      model: "deepseek-v4-flash",
-      stream: false,
-    });
-    for await (const _ev of loop.step("x")) {
-      /* drain */
-    }
-    // No retry — the marker never closed, so the content streams as-is.
-    expect(seenModels).toEqual(["deepseek-v4-flash"]);
+    expect(loop.rewindToUserTurn(5)).toBeNull();
+    expect(loop.log.length).toBe(2);
   });
 });
 
@@ -1756,7 +1628,6 @@ describe("CacheFirstLoop (streaming) — tool_call_delta emission", () => {
       prefix: new ImmutablePrefix({ system: "s" }),
       stream: true,
       maxToolIters: 1,
-      autoEscalate: false,
     });
 
     const channels: Array<"reasoning" | "content"> = [];
@@ -2444,9 +2315,82 @@ describe("CacheFirstLoop — mid-turn steer injection", () => {
     // steerConsumed should be true after consumption.
     expect(loop.steerConsumed).toBe(true);
 
-    // The steer should appear as a user message in the log.
+    // The steer should appear as a user message in the log, wrapped so it
+    // remains guidance for the current task rather than a new top-level task.
     const userMessages = loop.log.entries.filter((m) => m.role === "user");
-    expect(userMessages.some((m) => m.content === "mid-turn steer message")).toBe(true);
+    expect(
+      userMessages.some(
+        (m) =>
+          typeof m.content === "string" &&
+          m.content.includes("Mid-turn steer queued by the user") &&
+          m.content.includes("mid-turn steer message"),
+      ),
+    ).toBe(true);
+  });
+
+  it("queues multiple mid-turn steers and consumes one per iteration", async () => {
+    const client = makeClient([
+      {
+        content: "",
+        tool_calls: [
+          {
+            id: "call_1",
+            type: "function",
+            function: { name: "add", arguments: '{"a":1,"b":1}' },
+          },
+        ],
+      },
+      {
+        content: "",
+        tool_calls: [
+          {
+            id: "call_2",
+            type: "function",
+            function: { name: "add", arguments: '{"a":2,"b":2}' },
+          },
+        ],
+      },
+      { content: "done" },
+    ]);
+
+    const tools = new ToolRegistry();
+    tools.register<{ a: number; b: number }, number>({
+      name: "add",
+      parameters: {
+        type: "object",
+        properties: { a: { type: "integer" }, b: { type: "integer" } },
+        required: ["a", "b"],
+      },
+      fn: ({ a, b }) => a + b,
+    });
+
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "use add", toolSpecs: tools.specs() }),
+      tools,
+      stream: false,
+    });
+
+    const gen = loop.step("turn");
+    let r = await gen.next();
+    while (!r.done && r.value.role !== "tool") r = await gen.next();
+
+    loop.steer("first steer");
+    loop.steer("second steer");
+
+    const seen: string[] = [];
+    while (!r.done) {
+      r = await gen.next();
+      if (!r.done && r.value.role === "steer") seen.push(r.value.content);
+    }
+
+    expect(seen).toEqual(["first steer", "second steer"]);
+    const persisted = loop.log.entries
+      .filter((m) => m.role === "user")
+      .map((m) => m.content)
+      .filter((c): c is string => typeof c === "string");
+    expect(persisted.some((c) => c.includes("first steer"))).toBe(true);
+    expect(persisted.some((c) => c.includes("second steer"))).toBe(true);
   });
 
   it("steerConsumed resets to false at the start of each new step()", async () => {
@@ -2563,5 +2507,151 @@ describe("CacheFirstLoop — mid-turn steer injection", () => {
     // Second steer should reset steerConsumed to false.
     loop.steer("second steer");
     expect(loop.steerConsumed).toBe(false);
+  });
+
+  it("surfaces structured errorDetail when the API call fails", async () => {
+    const err = Object.assign(new Error("SSE body read failed: terminated"), {
+      phase: "stream_body_read",
+      code: "UND_ERR_ABORTED",
+    });
+    const fetch = vi.fn(async () => {
+      throw err;
+    }) as unknown as typeof fetch;
+    const client = new DeepSeekClient({
+      apiKey: "sk-test",
+      fetch,
+    });
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "be brief" }),
+      stream: false,
+    });
+
+    const events: any[] = [];
+    for await (const ev of loop.step("hello")) {
+      events.push(ev);
+    }
+
+    const errorEv = events.find((e) => e.role === "error");
+    expect(errorEv).toBeDefined();
+    expect(errorEv!.error).toContain("terminated");
+    expect(errorEv!.errorDetail).toMatchObject({
+      name: "Error",
+      message: expect.stringContaining("terminated"),
+      phase: "stream_body_read",
+      code: "UND_ERR_ABORTED",
+      retryable: true,
+      recoverable: false,
+    });
+  });
+
+  it("stops at DEFAULT_MAX_ITER_PER_TURN and forces summary (#2037 BUG-028)", async () => {
+    // Build a client that always returns a tool call — the loop would
+    // run forever without the iteration cap. Use unique call IDs AND
+    // unique arguments so the storm breaker (threshold=3 for identical
+    // (name, args) tuples) doesn't fire first.
+    const infiniteResponses: FakeResponseShape[] = Array.from(
+      { length: CacheFirstLoop.DEFAULT_MAX_ITER_PER_TURN + 50 },
+      (_, i) => ({
+        content: "",
+        tool_calls: [
+          {
+            id: `call_${i}`,
+            type: "function" as const,
+            function: { name: "noop", arguments: JSON.stringify({ i }) },
+          },
+        ],
+      }),
+    );
+    // The last response (force-summary) must be a plain text reply.
+    infiniteResponses.push({ content: "Here is what I found." });
+
+    const fetchMock = fakeFetch(infiniteResponses);
+    const client = new DeepSeekClient({ apiKey: "sk-test", fetch: fetchMock });
+    const tools = new ToolRegistry();
+    tools.register({
+      name: "noop",
+      description: "does nothing",
+      parameters: { type: "object", properties: {} },
+      fn: async () => "ok",
+    });
+
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "be brief", toolSpecs: tools.specs() }),
+      tools,
+      stream: false,
+    });
+
+    const events: any[] = [];
+    for await (const ev of loop.step("do stuff forever")) {
+      events.push(ev);
+    }
+
+    // Must have emitted the iteration-limit warning.
+    const warnEv = events.find(
+      (e) => e.role === "warning" && /iteration cap/i.test(e.content ?? ""),
+    );
+    expect(warnEv).toBeDefined();
+
+    // Must have produced a final summary (forced).
+    const finalEv = events.find((e) => e.role === "assistant_final");
+    expect(finalEv).toBeDefined();
+
+    // The loop must NOT have run all 150 iterations — it should stop
+    // at DEFAULT_MAX_ITER_PER_TURN + 1 (the summary call).
+    // Tool dispatches = DEFAULT_MAX_ITER_PER_TURN (one per iter).
+    // The +1 is the summary API call recorded as a turn.
+    expect(fetchMock).toHaveBeenCalledTimes(CacheFirstLoop.DEFAULT_MAX_ITER_PER_TURN + 1);
+  });
+
+  it("respects custom maxIterPerTurn option", async () => {
+    const customCap = 3;
+    const infiniteResponses: FakeResponseShape[] = Array.from(
+      { length: customCap + 50 },
+      (_, i) => ({
+        content: "",
+        tool_calls: [
+          {
+            id: `call_${i}`,
+            type: "function" as const,
+            function: { name: "noop", arguments: JSON.stringify({ i }) },
+          },
+        ],
+      }),
+    );
+    infiniteResponses.push({ content: "Summary." });
+
+    const fetchMock = fakeFetch(infiniteResponses);
+    const client = new DeepSeekClient({ apiKey: "sk-test", fetch: fetchMock });
+    const tools = new ToolRegistry();
+    tools.register({
+      name: "noop",
+      description: "does nothing",
+      parameters: { type: "object", properties: {} },
+      fn: async () => "ok",
+    });
+
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "be brief", toolSpecs: tools.specs() }),
+      tools,
+      stream: false,
+      maxIterPerTurn: customCap,
+    });
+
+    const events: any[] = [];
+    for await (const ev of loop.step("do stuff forever")) {
+      events.push(ev);
+    }
+
+    const warnEv = events.find(
+      (e) => e.role === "warning" && /iteration cap/i.test(e.content ?? ""),
+    );
+    expect(warnEv).toBeDefined();
+    expect(warnEv!.content).toContain(String(customCap));
+
+    // Tool dispatches = customCap (one per iter) + 1 force-summary call.
+    expect(fetchMock).toHaveBeenCalledTimes(customCap + 1);
   });
 });

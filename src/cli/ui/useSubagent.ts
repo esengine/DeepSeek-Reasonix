@@ -1,8 +1,13 @@
+import type { Color } from "ink";
 import { useEffect, useRef, useState } from "react";
 import { t } from "../../i18n/index.js";
 import type { LoopEvent } from "../../loop.js";
 import { appendUsage } from "../../telemetry/usage.js";
-import type { SubagentEvent, SubagentSink } from "../../tools/subagent.js";
+import {
+  SHARED_SUBAGENT_SINK,
+  type SubagentEvent,
+  type SubagentSink,
+} from "../../tools/subagent.js";
 import type { Scrollback } from "./hooks/useScrollback.js";
 import { CARD, TONE, formatCost } from "./theme/tokens.js";
 
@@ -30,6 +35,23 @@ export function reduceSubagentInnerEvent(
       const phase = ev.phase ?? a.phase;
       if (phase === a.phase) return a;
       return { ...a, phase };
+    });
+  }
+  if (ev.kind === "stream-progress") {
+    return mapMatchingRun(prev, ev.runId, (a) => {
+      const outputChars = ev.outputChars ?? a.outputChars;
+      const reasoningChars = ev.reasoningChars ?? a.reasoningChars;
+      const toolReadChars = ev.toolReadChars ?? a.toolReadChars;
+      const elapsedMs = ev.elapsedMs ?? a.elapsedMs;
+      if (
+        outputChars === a.outputChars &&
+        reasoningChars === a.reasoningChars &&
+        toolReadChars === a.toolReadChars &&
+        elapsedMs === a.elapsedMs
+      ) {
+        return a;
+      }
+      return { ...a, outputChars, reasoningChars, toolReadChars, elapsedMs };
     });
   }
   return prev;
@@ -89,7 +111,7 @@ function summariseInner(ev: LoopEvent): SubagentInnerSummary | null {
 export interface SubagentInnerSummary {
   /** Card-kind-ish glyph (◆ reasoning, ▣ tool, ▶ streaming, ✖ error). */
   glyph: string;
-  color: string;
+  color: Color;
   label: string;
   meta?: string;
 }
@@ -106,6 +128,10 @@ export interface SubagentActivity {
   model?: string;
   phase?: "exploring" | "summarising";
   lastInner: SubagentInnerSummary | null;
+  /** Monotonic byte/char counters — proves data is flowing during long no-tool gaps. `outputChars` = model assistant content streamed, `reasoningChars` = model reasoning streamed, `toolReadChars` = sum of tool-result strings the child read back IN. */
+  outputChars: number;
+  reasoningChars: number;
+  toolReadChars: number;
 }
 
 export interface UseSubagentParams {
@@ -113,6 +139,9 @@ export interface UseSubagentParams {
   log: Scrollback;
   /** Read live wallet currency at end-event time so the cost suffix follows the wallet symbol. */
   getWalletCurrency?: () => string | undefined;
+  /** Called when a subagent completes successfully — lets the caller fold
+   *  subagent usage into the parent session's stats. (#2008) */
+  onSubagentEnd?: (model: string, usage: import("../../client.js").Usage) => void;
 }
 
 export interface UseSubagentResult {
@@ -125,15 +154,23 @@ export function useSubagent({
   session,
   log,
   getWalletCurrency,
+  onSubagentEnd,
 }: UseSubagentParams): UseSubagentResult {
   const [activities, setActivities] = useState<ReadonlyArray<SubagentActivity>>([]);
-  const sinkRef = useRef<SubagentSink>({ current: null });
+  // Share the process-wide singleton so `buildCodeToolset`'s pre-mount
+  // `subagentRunner` closure (which reads sink.current at dispatch time)
+  // sees the same `.current` we install below in useEffect.
+  const sinkRef = useRef<SubagentSink>(SHARED_SUBAGENT_SINK);
   // Subagent runs can outlive a balance refresh; the thunk lives in a ref so the
   // sink callback (installed once at mount) always reads the latest wallet currency.
   const getWalletCurrencyRef = useRef(getWalletCurrency);
   useEffect(() => {
     getWalletCurrencyRef.current = getWalletCurrency;
   }, [getWalletCurrency]);
+  const onSubagentEndRef = useRef(onSubagentEnd);
+  useEffect(() => {
+    onSubagentEndRef.current = onSubagentEnd;
+  }, [onSubagentEnd]);
 
   useEffect(() => {
     sinkRef.current.current = (ev: SubagentEvent) => {
@@ -150,6 +187,9 @@ export function useSubagent({
             model: ev.model,
             phase: "exploring",
             lastInner: null,
+            outputChars: 0,
+            reasoningChars: 0,
+            toolReadChars: 0,
           };
           return [...prev, next];
         });
@@ -179,6 +219,7 @@ export function useSubagent({
               durationMs: ev.elapsedMs ?? 0,
             },
           });
+          onSubagentEndRef.current?.(ev.model, ev.usage);
         }
         return;
       }

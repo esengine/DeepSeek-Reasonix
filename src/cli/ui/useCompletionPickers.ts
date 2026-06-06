@@ -10,8 +10,9 @@ import {
   rankPickerCandidates,
   walkFilesStream,
 } from "../../at-mentions.js";
-import { loadResolvedSkillPaths } from "../../config.js";
+import { type ReasoningEffort, loadResolvedSkillPaths } from "../../config.js";
 import { SkillStore } from "../../skills.js";
+import { effortArgsHintFor } from "./effort-choices.js";
 import {
   type McpServerSummary,
   type SlashArgContext,
@@ -20,6 +21,7 @@ import {
   detectSlashArgContext,
   suggestSlashCommands,
 } from "./slash.js";
+import { type ThemeChoice, themeChoiceLabel } from "./theme/labels.js";
 
 export interface UseCompletionPickersParams {
   input: string;
@@ -31,6 +33,8 @@ export interface UseCompletionPickersParams {
   mcpServers: McpServerSummary[] | undefined;
   /** Cross-session slash invocation counts — used to sort suggestions by frequency. */
   slashUsage?: Readonly<Record<string, number>>;
+  /** Filtered effort enum for the active endpoint — drops "max" on non-DeepSeek hosts (#1794). */
+  effortChoices: readonly ReasoningEffort[];
 }
 
 export interface AtPickerEntry {
@@ -97,13 +101,15 @@ export function useCompletionPickers({
   models,
   mcpServers,
   slashUsage,
+  effortChoices,
 }: UseCompletionPickersParams): UseCompletionPickersResult {
   // ── slash-name picker ──
   const [slashSelected, setSlashSelected] = useState(0);
   const slashMatches = useMemo(() => {
     if (!input.startsWith("/") || input.includes(" ")) return null;
-    return suggestSlashCommands(input.slice(1), !!codeMode, slashUsage);
-  }, [input, codeMode, slashUsage]);
+    const raw = suggestSlashCommands(input.slice(1), !!codeMode, slashUsage);
+    return raw.map((spec) => rewriteEffortSpec(spec, effortChoices));
+  }, [input, codeMode, slashUsage, effortChoices]);
   const slashGroupMode = input === "/";
   const slashAdvancedHidden = useMemo(
     () => (slashGroupMode ? countAdvancedCommands(!!codeMode) : 0),
@@ -166,10 +172,19 @@ export function useCompletionPickers({
         loading: browse.loading,
       };
     }
+    // When the user already typed a directory prefix (e.g. `@dir/fil`),
+    // filter search results to only files under that directory so a
+    // shorter same-name match from elsewhere (e.g. root `.gitignore`)
+    // doesn't steal the picker selection.
+    const dirPrefix = parsed.dir ? `${parsed.dir}/` : "";
+    let filtered = search.entries;
+    if (dirPrefix) {
+      filtered = search.entries.filter((e) => e.insertPath.startsWith(dirPrefix));
+    }
     return {
       kind: "search",
       filter: parsed.filter,
-      entries: search.entries,
+      entries: filtered,
       scanned: search.scanned,
       searching: search.searching,
     };
@@ -200,8 +215,12 @@ export function useCompletionPickers({
   const slashArgContext = useMemo<SlashArgContext | null>(() => {
     if (!input.startsWith("/")) return null;
     if (slashMatches !== null) return null;
-    return detectSlashArgContext(input, !!codeMode);
-  }, [input, slashMatches, codeMode]);
+    const ctx = detectSlashArgContext(input, !!codeMode);
+    if (!ctx) return null;
+    return ctx.kind === "picker"
+      ? { ...ctx, spec: rewriteEffortSpec(ctx.spec, effortChoices) }
+      : ctx;
+  }, [input, slashMatches, codeMode, effortChoices]);
 
   // Path completion: async directory listing for `argCompleter: "path"`.
   const slashArgPathCandidates = usePathCandidates(
@@ -220,7 +239,13 @@ export function useCompletionPickers({
     if (Array.isArray(completer)) {
       if (partial && completer.some((v) => v.toLowerCase() === needle)) return null;
       if (!partial) return completer.slice();
-      return completer.filter((v) => v.toLowerCase().startsWith(needle));
+      return completer.filter((v) => {
+        if (v.toLowerCase().startsWith(needle)) return true;
+        if (slashArgContext.spec.cmd !== "theme") return false;
+        return themeChoiceLabel(v as ThemeChoice)
+          .toLowerCase()
+          .includes(needle);
+      });
     }
     if (completer === "models") {
       const all = models ?? [];
@@ -256,10 +281,7 @@ export function useCompletionPickers({
         projectRoot: codeMode?.rootDir,
         customSkillPaths: loadResolvedSkillPaths(baseDir),
       });
-      const names = store
-        .list()
-        .filter((s) => s.scope !== "builtin")
-        .map((s) => s.name);
+      const names = store.list().map((s) => s.name);
       if (partial && names.some((n) => n.toLowerCase() === needle)) return null;
       if (!partial) return names.slice(0, 40);
       return names.filter((n) => n.toLowerCase().includes(needle)).slice(0, 40);
@@ -559,4 +581,20 @@ function rankSearchHits(
       isDir: false,
     };
   });
+}
+
+/** Drops `max` from the /effort spec's argsHint + argCompleter when the
+ *  active endpoint is non-DeepSeek so vLLM/Azure users don't see an option
+ *  that would 400 their next call (#1794). No-op for any other command. */
+function rewriteEffortSpec(
+  spec: SlashCommandSpec,
+  effortChoices: readonly ReasoningEffort[],
+): SlashCommandSpec {
+  if (spec.cmd !== "effort") return spec;
+  if (effortChoices.length === 4) return spec;
+  return {
+    ...spec,
+    argsHint: effortArgsHintFor(effortChoices),
+    argCompleter: [...effortChoices],
+  };
 }

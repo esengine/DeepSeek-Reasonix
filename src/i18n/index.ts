@@ -1,20 +1,36 @@
 import { loadLanguage, saveLanguage } from "../config.js";
 import { EN } from "./EN.js";
+import { JA } from "./JA.js";
+import { de } from "./de.js";
+import { ru } from "./ru.js";
 import type { LanguageCode, TranslationSchema } from "./types.js";
 import { zhCN } from "./zh-CN.js";
 
 const translations: Record<LanguageCode, TranslationSchema> = {
   EN,
   "zh-CN": zhCN,
+  de,
+  ru,
+  ja: JA,
 };
 
 /** Map a system locale (e.g. "zh-CN", "en-US") to a supported LanguageCode, or null. */
-export function detectSystemLanguage(
-  locale: string = Intl.DateTimeFormat().resolvedOptions().locale,
-): LanguageCode | null {
+export function detectSystemLanguage(locale: string = systemLocale()): LanguageCode | null {
   if (locale.startsWith("zh")) return "zh-CN";
   if (locale.startsWith("en")) return "EN";
+  if (locale.startsWith("de")) return "de";
+  if (locale.startsWith("ru")) return "ru";
+  if (locale.startsWith("ja")) return "ja";
   return null;
+}
+
+function systemLocale(): string {
+  return (
+    process.env.LC_ALL ||
+    process.env.LC_MESSAGES ||
+    process.env.LANG ||
+    Intl.DateTimeFormat().resolvedOptions().locale
+  );
 }
 
 let currentLang: LanguageCode = loadLanguage() ?? detectSystemLanguage() ?? "EN";
@@ -100,7 +116,7 @@ export function t(path: string, params?: Record<string, string | number>): strin
   if (params) {
     let result = val;
     for (const [k, v] of Object.entries(params)) {
-      result = result.replace(new RegExp(`\\{${k}\\}`, "g"), String(v));
+      result = result.replaceAll(`{${k}}`, String(v));
     }
     return result;
   }

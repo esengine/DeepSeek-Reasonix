@@ -7,6 +7,8 @@
   &nbsp;·&nbsp;
   <a href="./README.zh-CN.md">简体中文</a>
   &nbsp;·&nbsp;
+  <a href="./README.ja-JP.md">日本語</a>
+  &nbsp;·&nbsp;
   <a href="https://esengine.github.io/DeepSeek-Reasonix/">Website</a>
   &nbsp;·&nbsp;
   <a href="https://esengine.github.io/DeepSeek-Reasonix/configuration.html">Guide</a>
@@ -14,6 +16,8 @@
   <a href="./docs/ARCHITECTURE.md">Architecture</a>
   &nbsp;·&nbsp;
   <a href="./benchmarks/">Benchmarks</a>
+  &nbsp;·&nbsp;
+  <strong><a href="https://discord.gg/XF78rEME2D">Discord</a></strong>
 </p>
 
 <p align="center">
@@ -23,8 +27,10 @@
   <a href="https://www.npmjs.com/package/reasonix"><img src="https://img.shields.io/npm/dm/reasonix.svg?style=flat-square&color=3fb950&labelColor=161b22&label=downloads" alt="downloads"/></a>
   <a href="./package.json"><img src="https://img.shields.io/node/v/reasonix.svg?style=flat-square&color=5fa04e&labelColor=161b22&logo=nodedotjs&logoColor=white" alt="node"/></a>
   <a href="https://github.com/esengine/reasonix/stargazers"><img src="https://img.shields.io/github/stars/esengine/reasonix.svg?style=flat-square&color=dbab09&labelColor=161b22&logo=github&logoColor=white" alt="GitHub stars"/></a>
+  <a href="https://atomgit.com/esengine/DeepSeek-Reasonix"><img src="https://atomgit.com/esengine/DeepSeek-Reasonix/star/badge.svg" alt="AtomGit stars"/></a>
   <a href="https://github.com/esengine/reasonix/graphs/contributors"><img src="https://img.shields.io/github/contributors/esengine/reasonix.svg?style=flat-square&color=bc8cff&labelColor=161b22&logo=github&logoColor=white" alt="contributors"/></a>
   <a href="https://github.com/esengine/reasonix/discussions"><img src="https://img.shields.io/github/discussions/esengine/reasonix.svg?style=flat-square&color=58a6ff&labelColor=161b22&logo=github&logoColor=white" alt="Discussions"/></a>
+  <a href="https://discord.gg/XF78rEME2D"><img src="https://img.shields.io/badge/discord-join-5865F2.svg?style=flat-square&labelColor=161b22&logo=discord&logoColor=white" alt="Discord"/></a>
 </p>
 
 <p align="center">
@@ -52,6 +58,9 @@
 > [!NOTE]
 > **Real user, single day (2026-05-01):** 435M input tokens, **99.82% cache hit**, ~$12 instead of the ~$61 the same workload would cost with no cache on `v4-flash` — see the [case study](./benchmarks/real-world-cache/README.md). DeepSeek provides the cacheable bytes; the four mechanisms in [Pillar 1](./docs/ARCHITECTURE.md#pillar-1--cache-first-loop) are how Reasonix keeps them cacheable across long sessions.
 
+> [!IMPORTANT]
+> **Community · 加入社区** — bilingual Discord with channels for setup help (`#help` / `#求助`), workflow showcases, feature ideas, and contributor-only PR coordination. Verify your GitHub in-server to get the **Contributor** role automatically. → **<https://discord.gg/XF78rEME2D>**
+
 <br/>
 
 ## Install
@@ -76,6 +85,15 @@ Grab a [DeepSeek API key →](https://platform.deepseek.com/api_keys) · `reason
 
 If you use Reasonix daily, global install is the simplest path. If you just want to try it, use `npx`.
 
+**Prefer fewer keystrokes?** The shorter `dsnix` alias resolves to the same CLI:
+
+~~~bash
+npm install -g dsnix       # exposes `dsnix` on PATH, depends on reasonix
+npx dsnix@latest code      # one-shot via the shorter command
+~~~
+
+A global `npm install -g reasonix` also drops a `dsnix` shim on PATH, so the two are interchangeable.
+
 Bare `reasonix` (no subcommand) launches `code` in the current directory — typing `reasonix` and `reasonix code` are equivalent.
 
 | Command | When |
@@ -90,31 +108,15 @@ Other subcommands (`replay` · `diff` · `events` · `stats` · `index` · `mcp`
 
 ### QQ channel
 
-Reasonix can attach QQ as a remote communication channel for existing `chat` and `code` sessions. It is not a separate runtime mode.
+QQ can extend an existing `chat`, `code`, or desktop session as a remote channel. It is part of the current session flow, not a separate runtime mode.
 
-Start a session first:
+- CLI: start a session, then run `/qq connect`
+- Desktop: open `Settings -> General -> QQ Channel`
 
-~~~bash
-reasonix code
-# or
-reasonix chat
-~~~
+Once connected, QQ messages can enter the current session, assistant replies route back to QQ, and follow-up interactions can continue remotely.
 
-Then connect QQ from inside the session:
+For full setup, desktop quick start, and troubleshooting, see [QQ channel setup](./docs/qq-connect.md).
 
-~~~text
-/qq connect
-~~~
-
-Available commands:
-
-- `/qq connect`
-- `/qq status`
-- `/qq disconnect`
-
-Once enabled, later `chat` / `code` sessions auto-start the QQ channel. Slash commands, confirmation prompts, and follow-up assistant replies can continue through QQ without terminal-side input.
-
-See [QQ channel setup](./docs/qq-connect.md) for setup details and QQ Open Platform bot registration.
 ### Desktop client (prerelease)
 
 A native Tauri client for users who want a GUI over the same loop. Multi-tab, the right-panel shows files the agent has read or edited this session, the same cost / cache / token meters live at the bottom. Same DeepSeek API key, same `~/.reasonix` config — the desktop bundles its own Node runtime, no separate `npm install` step.
@@ -156,6 +158,13 @@ npx reasonix code --dir /path/to/project
 /skill new my-skill --global     # ~/.reasonix/skills for cross-project use
 ~~~
 
+**Claude-format skills also load.** `<project>/.claude/skills/<name>/SKILL.md` and `~/.claude/skills/` are read alongside Reasonix's native paths, so tooling that emits Claude-format skills works out of the box. Example — drop OpenSpec workflows in without an upstream adapter:
+
+~~~bash
+npx openspec init --tools claude    # writes .claude/skills/openspec-*/SKILL.md
+/skill openspec-propose <task>      # then invoke from Reasonix
+~~~
+
 </details>
 
 <br/>
@@ -173,7 +182,7 @@ One JSON file at `~/.reasonix/config.json` plus per-project overrides under `<pr
 | [Memory](https://esengine.github.io/DeepSeek-Reasonix/configuration.html#memory) | User-private knowledge pinned into the prefix. `user` / `feedback` / `project` / `reference` types. |
 | [Hooks](https://esengine.github.io/DeepSeek-Reasonix/configuration.html#hooks) | Shell commands on lifecycle events. `PreToolUse` (gating) · `PostToolUse` · `UserPromptSubmit` · `Stop`. |
 | [Permissions](https://esengine.github.io/DeepSeek-Reasonix/configuration.html#permissions) | Per-workspace shell allowlist. Exact-prefix match. |
-| [Web search](https://esengine.github.io/DeepSeek-Reasonix/configuration.html#search) | Mojeek by default; switch to self-hosted SearXNG or Metaso with `/search-engine`. |
+| [Web search](https://esengine.github.io/DeepSeek-Reasonix/configuration.html#search) | Bing by default; switch to Baidu AI Search, self-hosted SearXNG, Metaso, Tavily, Perplexity, Exa, Brave, or Ollama with `/search-engine`. |
 | [Semantic index](https://esengine.github.io/DeepSeek-Reasonix/configuration.html#index) | `reasonix index` — local Ollama or any OpenAI-compatible embedding endpoint. |
 
 <br/>
@@ -210,7 +219,7 @@ Click through to the full architecture writeup → [Pillar 1 — Cache-first loo
 | Configurable web search engine    | `/search-engine` | —             | —                   | —                  |
 | Persistent per-workspace sessions | yes              | partial           | n/a                 | —                  |
 | Plan mode · MCP · hooks · skills  | yes              | yes               | yes                 | partial            |
-| Web search (Mojeek + SearXNG + Metaso)   | yes              | yes               | yes                 | yes                |
+| Web search (Bing + Baidu + SearXNG + API engines) | yes              | yes               | yes                 | yes                |
 | Open community development        | yes              | —                 | —                   | yes                |
 
 For live cache-hit rates, costs, and methodology, see [`benchmarks/`](./benchmarks/) — the numbers move with model pricing, so they live with the harness, not in the README.
@@ -221,7 +230,7 @@ For live cache-hit rates, costs, and methodology, see [`benchmarks/`](./benchmar
 
 - [**Architecture**](./docs/ARCHITECTURE.md) — three pillars: cache-first loop, tool-call repair, cost control
 - [**CLI Reference**](./docs/CLI-REFERENCE.md) — every shell subcommand, every slash command, every keybinding
-- [**QQ channel setup**](./docs/qq-connect.md) — what it is, commands, setup flow, and QQ Open Platform credentials
+- [**QQ channel setup**](./docs/qq-connect.md) — CLI first-connect flow, desktop entry, and QQ Open Platform credentials
 - [**Benchmarks**](./benchmarks/) — τ-bench-lite harness, transcripts, cost methodology
 - [**Website**](https://esengine.github.io/DeepSeek-Reasonix/) — getting started, dashboard mockup, TUI mockup
 - [**Contributing**](./CONTRIBUTING.md) — comment policy, error-handling rules, library-over-hand-rolled
@@ -232,7 +241,7 @@ For live cache-hit rates, costs, and methodology, see [`benchmarks/`](./benchmar
 ## Community
 
 > [!NOTE]
-> Reasonix is open source and community-developed. The contributors wall below isn't decoration — every avatar is a real PR that shipped.
+> Reasonix is open source and community-developed. Every avatar in the Acknowledgments wall at the bottom of this file is a real PR that shipped.
 
 Scoped starter tickets — each with background, code pointers, acceptance criteria, and hints — live under the [`good first issue`](https://github.com/esengine/reasonix/labels/good%20first%20issue) label. Pick anything open.
 
@@ -251,12 +260,6 @@ Scoped starter tickets — each with background, code pointers, acceptance crite
 </p>
 
 **Before your first PR**: read [`CONTRIBUTING.md`](./CONTRIBUTING.md) — short, strict rules (comments, errors, libraries-over-hand-rolled). `tests/comment-policy.test.ts` enforces the comment ones; `npm run verify` is the pre-push gate. By participating you agree to the [Code of Conduct](./CODE_OF_CONDUCT.md). Security issues → [SECURITY.md](./SECURITY.md).
-
-<p align="center">
-  <a href="https://github.com/esengine/reasonix/graphs/contributors">
-    <img src="https://contrib.rocks/image?repo=esengine/DeepSeek-Reasonix&max=100&columns=12" alt="Contributors to esengine/DeepSeek-Reasonix" width="860"/>
-  </a>
-</p>
 
 <br/>
 
@@ -284,12 +287,52 @@ Scoped starter tickets — each with background, code pointers, acceptance crite
 
 <br/>
 
+## Support
+
+If Reasonix has been useful and you'd like to say thanks, you can. It stays a coffee, not a contract — donations don't buy feature priority or change how issues get triaged.
+
+- **International** — PayPal: [paypal.me/yuhuahui](https://paypal.me/yuhuahui)
+- **国内** — 微信支付（扫码）
+
+<p align="center">
+  <img src=".github/sponsor/wechat-pay.jpg" alt="WeChat Pay QR code" width="240"/>
+</p>
+
+<br/>
+
+## Acknowledgments
+
+A small list of folks whose work has shaped Reasonix the most — measured
+by both commit count and code volume. **Listed alphabetically, no ordering
+of importance.** The full contributor graph is on
+[GitHub](https://github.com/esengine/DeepSeek-Reasonix/graphs/contributors).
+
+- [**ctharvey**](https://github.com/ctharvey)
+- [**dimasd-angga**](https://github.com/dimasd-angga) (Dimas D. Angga)
+- [**Evan-Pycraft**](https://github.com/Evan-Pycraft)
+- [**ForeverYoungPp**](https://github.com/ForeverYoungPp)
+- [**GTC2080**](https://github.com/GTC2080) (TaoMu)
+- [**kabaka9527**](https://github.com/kabaka9527)
+- [**lisniuse**](https://github.com/lisniuse) (Richie)
+- [**wade19990814-hue**](https://github.com/wade19990814-hue)
+- [**wviana**](https://github.com/wviana) (Wesley Viana)
+
+Also a separate thank-you to [**Bernardxu123**](https://github.com/Bernardxu123)
+for designing the project logo (see [`docs/brand/`](./docs/brand/)), and to
+[AIGC Link](https://xhslink.com/m/80ngts127cA) for promoting the project on XiaoHongShu.
+
+<p align="center">
+  <a href="https://github.com/esengine/DeepSeek-Reasonix/graphs/contributors">
+    <img src="https://contrib.rocks/image?repo=esengine/DeepSeek-Reasonix&max=100&columns=12" alt="Contributors to esengine/DeepSeek-Reasonix" width="860"/>
+  </a>
+</p>
+
+<br/>
+
 ---
 
 <p align="center">
   <sub>MIT — see <a href="./LICENSE">LICENSE</a></sub>
   <br/>
-  <sub>Built by the community at <a href="https://github.com/esengine/reasonix/graphs/contributors">esengine/reasonix</a></sub>
-  <br/>
-  <sub>Special thanks to <a href="https://xhslink.com/m/80ngts127cA">AIGC Link</a> for the promotions on XiaoHongShu.</sub>
+  <sub>Built by the community at <a href="https://github.com/esengine/DeepSeek-Reasonix/graphs/contributors">esengine/DeepSeek-Reasonix</a></sub>
 </p>

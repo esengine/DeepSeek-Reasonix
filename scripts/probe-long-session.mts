@@ -7,13 +7,21 @@
  * Surfaces: cache trajectory, cost shape, anything degrading over time.
  *
  * Run: REASONIX_LOG_LEVEL=ERROR npx tsx scripts/probe-long-session.mts
+ * Reads DEEPSEEK_API_KEY from the environment, .env.testbak, or ~/.reasonix/config.json.
  */
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { DeepSeekClient } from "../src/client.js";
 import { CacheFirstLoop } from "../src/loop.js";
 import { ImmutablePrefix } from "../src/memory/runtime.js";
-import { DEEPSEEK_CONTEXT_TOKENS } from "../src/telemetry/stats.js";
+import {
+  DEEPSEEK_CONTEXT_TOKENS,
+  pricingFor,
+  type CacheChurnReason,
+  type TurnStats,
+} from "../src/telemetry/stats.js";
 import { ToolRegistry } from "../src/tools.js";
 
 // Force a small ctx window so the 50% fold threshold trips in a few
@@ -21,18 +29,42 @@ import { ToolRegistry } from "../src/tools.js";
 // id, real API call, just the local gauge is shrunk.
 DEEPSEEK_CONTEXT_TOKENS["deepseek-chat"] = 50_000;
 
-function loadDotenv(path: string) {
+function loadDotenv(path: string): void {
+  if (!existsSync(path)) return;
   const txt = readFileSync(path, "utf8");
   for (const line of txt.split(/\r?\n/)) {
     const m = line.match(/^([A-Z_][A-Z0-9_]*)=(.*)$/);
     if (m && !process.env[m[1]]) process.env[m[1]] = m[2];
   }
 }
-loadDotenv("./.env.testbak");
 
-const PRICE_HIT_PER_M = 0.07;
-const PRICE_MISS_PER_M = 0.27;
-const PRICE_COMPLETION_PER_M = 1.1;
+function loadReasonixApiKey(): void {
+  if (process.env.DEEPSEEK_API_KEY) return;
+  const path = join(homedir(), ".reasonix", "config.json");
+  if (!existsSync(path)) return;
+  const cfg = JSON.parse(readFileSync(path, "utf8")) as {
+    apiKey?: string;
+    deepseekApiKey?: string;
+    endpoint?: { apiKey?: string };
+  };
+  const key = cfg.apiKey ?? cfg.deepseekApiKey ?? cfg.endpoint?.apiKey ?? "";
+  if (key) process.env.DEEPSEEK_API_KEY = key;
+}
+
+loadDotenv("./.env.testbak");
+loadReasonixApiKey();
+
+function cacheRatio(usage: {
+  promptCacheHitTokens: number;
+  promptCacheMissTokens: number;
+}): number {
+  const total = usage.promptCacheHitTokens + usage.promptCacheMissTokens;
+  return total > 0 ? (usage.promptCacheHitTokens / total) * 100 : 0;
+}
+
+function formatReasons(reasons: readonly CacheChurnReason[]): string {
+  return reasons.length > 0 ? reasons.join(",") : "-";
+}
 
 const docLine = (i: number, sec: string) =>
   `[${sec}#${i}] section ${sec} entry ${i}: requirement traces to constraint ${(i % 7) + 1}, status ${i % 3 === 0 ? "open" : "closed"}, owner team-${(i % 5) + 1}, last touched 2026-04-${(i % 28) + 1}.`;
@@ -69,11 +101,11 @@ async function main() {
     maxToolIters: 4,
   });
 
-  let mutations = 0;
+  let rawRewrites = 0;
   let folds = 0;
   const origCompactInPlace = loop.log.compactInPlace.bind(loop.log);
   loop.log.compactInPlace = (...args) => {
-    mutations++;
+    rawRewrites++;
     return origCompactInPlace(...args);
   };
 
@@ -100,48 +132,57 @@ async function main() {
     "api-v2",
   ];
 
-  console.log("turn |  prompt  |   hit   |   miss  | hit% |  $/turn  |  $cum");
-  console.log("-----+----------+---------+---------+------+----------+--------");
+  console.log("turn |  prompt  |   hit   |   miss  | hit% |  $/turn  |  $cum  | churn");
+  console.log("-----+----------+---------+---------+------+----------+--------+----------");
 
   let cumCost = 0;
   let forceSummaryHit = false;
+  const measured: Array<{
+    turn: number;
+    ratio: number;
+    forcedSummary: boolean;
+    reasons: CacheChurnReason[];
+  }> = [];
+  const pricing = pricingFor(model);
 
   for (let i = 0; i < sections.length; i++) {
     const t0 = Date.now();
-    let usage: {
-      promptTokens: number;
-      completionTokens: number;
-      promptCacheHitTokens: number;
-      promptCacheMissTokens: number;
-    } | null = null;
+    let stats: TurnStats | null = null;
     let warning = "";
+    let turnForcedSummary = false;
     for await (const ev of loop.step(`Read the "${sections[i]}" section.`)) {
       if (ev.role === "assistant_final" && ev.stats?.usage) {
-        usage = ev.stats.usage as typeof usage;
+        stats = ev.stats;
       }
       if (ev.role === "warning" && ev.content) {
         warning = ev.content;
         if (/folded \d+ messages/.test(ev.content)) folds++;
       }
-      if (ev.forcedSummary) forceSummaryHit = true;
+      if (ev.forcedSummary) {
+        forceSummaryHit = true;
+        turnForcedSummary = true;
+      }
     }
     const ms = Date.now() - t0;
+    const usage = stats?.usage;
     if (!usage) {
       console.log(
         `${String(i).padStart(3)}  | (no usage)  -- ${warning ? `warning: ${warning}` : ""}`,
       );
       continue;
     }
-    const total = usage.promptCacheHitTokens + usage.promptCacheMissTokens;
-    const ratio = total > 0 ? (usage.promptCacheHitTokens / total) * 100 : 0;
-    const cost =
-      (usage.promptCacheHitTokens * PRICE_HIT_PER_M +
-        usage.promptCacheMissTokens * PRICE_MISS_PER_M +
-        usage.completionTokens * PRICE_COMPLETION_PER_M) /
-      1_000_000;
+    const ratio = cacheRatio(usage);
+    const cost = pricing
+      ? (usage.promptCacheHitTokens * pricing.inputCacheHit +
+          usage.promptCacheMissTokens * pricing.inputCacheMiss +
+          usage.completionTokens * pricing.output) /
+        1_000_000
+      : 0;
+    const reasons = stats.cacheDiagnostics?.prefixChangeReasons ?? [];
+    measured.push({ turn: i, ratio, forcedSummary: turnForcedSummary, reasons: [...reasons] });
     cumCost += cost;
     console.log(
-      `${String(i).padStart(3)}  | ${String(usage.promptTokens).padStart(7)} | ${String(usage.promptCacheHitTokens).padStart(7)} | ${String(usage.promptCacheMissTokens).padStart(7)} | ${ratio.toFixed(1).padStart(4)} | $${cost.toFixed(5)} | $${cumCost.toFixed(4)}  ${ms}ms${warning ? ` (${warning.slice(0, 60)}…)` : ""}`,
+      `${String(i).padStart(3)}  | ${String(usage.promptTokens).padStart(7)} | ${String(usage.promptCacheHitTokens).padStart(7)} | ${String(usage.promptCacheMissTokens).padStart(7)} | ${ratio.toFixed(1).padStart(4)} | $${cost.toFixed(5)} | $${cumCost.toFixed(4)} | ${formatReasons(reasons)}  ${ms}ms${warning ? ` (${warning.slice(0, 60)}…)` : ""}`,
     );
     if (forceSummaryHit) {
       console.log(
@@ -151,14 +192,33 @@ async function main() {
     }
   }
 
-  console.log(`\ntotal log.compactInPlace() calls: ${mutations} (expected: ${folds} folds)`);
+  console.log(`\ntotal raw log.compactInPlace() calls: ${rawRewrites} (${folds} fold warning events)`);
   console.log(`total cost across session: $${cumCost.toFixed(4)}`);
 
-  if (mutations !== folds) {
-    console.log(`FAIL: ${mutations} mutations but only ${folds} fold events — unexpected mutation`);
+  const sustained = measured.filter((entry) => entry.turn >= 4 && !entry.forcedSummary);
+  const sustainedAvg =
+    sustained.length > 0
+      ? sustained.reduce((sum, entry) => sum + entry.ratio, 0) / sustained.length
+      : 0;
+  const unstablePrefixTurns = measured
+    .slice(1)
+    .filter((entry) => entry.reasons.some((reason) => reason !== "log_rewrite"));
+  console.log(`sustained cache hit average (turn >=4, pre-summary): ${sustainedAvg.toFixed(1)}%`);
+
+  if (unstablePrefixTurns.length > 0) {
+    const detail = unstablePrefixTurns
+      .map((entry) => `turn-${entry.turn}:${formatReasons(entry.reasons)}`)
+      .join(", ");
+    console.log(`FAIL: non-log prefix churn detected (${detail})`);
     process.exit(1);
   }
-  console.log(`\nVERDICT: ${folds} fold(s) fired, no other mutations.`);
+  if (sustainedAvg < 85) {
+    console.log(`FAIL: sustained cache hit average ${sustainedAvg.toFixed(1)}% below 85% threshold`);
+    process.exit(1);
+  }
+  console.log(
+    `\nVERDICT: cache stayed warm through oversized tool results; raw rewrites are diagnostic, and force-summary cold miss is expected when triggered.`,
+  );
 }
 
 main().catch((e) => {

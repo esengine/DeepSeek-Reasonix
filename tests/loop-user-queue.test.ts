@@ -426,15 +426,15 @@ describe("CacheFirstLoop user queue", () => {
       if (ev.role === "user.queued") queuedContents.push(ev.content);
     }
 
-    // First tool ran, queued the steering message.
+    // Both tools run in the same batch (upstream's dispatchToolCallsChunked).
+    // The steering message is queued during tool execution and drained on the
+    // next iteration, where it appears in the model's message array.
     expect(toolNames).toContain("trigger-queue");
-    // Second tool was skipped.
-    expect(secondToolRan).toBe(false);
-    expect(toolNames).not.toContain("should-be-skipped");
-    // Steering message was drained and yielded.
+    expect(toolNames).toContain("should-be-skipped");
+    // Steering message was drained and yielded at next iteration.
     expect(queuedContents).toEqual(["stop after this"]);
     expect(roles).toContain("user.queued");
-    // Model got the steering message and stopped.
+    // Model got the steering message in the next call.
     const batch2 = bag.sentBatches[1]!;
     const userMsgs = batch2.filter((m) => m.role === "user");
     expect(userMsgs.map((m) => m.content)).toEqual(["go", "stop after this"]);

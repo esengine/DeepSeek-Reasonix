@@ -1,17 +1,13 @@
 /** Names sanitized via SAFE_NAME on every write — guards against path traversal. */
 
 import { createHash } from "node:crypto";
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  readdirSync,
-  statSync,
-  unlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdir, readFile, readdir, stat, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve as resolvePath } from "node:path";
+import {
+  collectMemoryEntriesForWorkspace,
+  readMemoryEntryDetail,
+} from "../../desktop/memory-browser.js";
 import {
   PROJECT_MEMORY_FILE,
   findProjectMemoryPath,
@@ -48,20 +44,23 @@ function parseBody(raw: string): WriteBody {
 
 const SAFE_NAME = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/;
 
-function listMemoryFiles(dir: string): Array<{ name: string; size: number; mtime: number }> {
-  if (!existsSync(dir)) return [];
+async function listMemoryFiles(
+  dir: string,
+): Promise<Array<{ name: string; size: number; mtime: number }>> {
   try {
-    return readdirSync(dir)
-      .filter((f) => f.endsWith(".md"))
-      .map((f) => {
-        const stat = statSync(join(dir, f));
+    const entries = await readdir(dir);
+    const mdFiles = entries.filter((f) => f.endsWith(".md"));
+    const stats = await Promise.all(
+      mdFiles.map(async (f) => {
+        const s = await stat(join(dir, f));
         return {
           name: f.replace(/\.md$/, ""),
-          size: stat.size,
-          mtime: stat.mtime.getTime(),
+          size: s.size,
+          mtime: s.mtime.getTime(),
         };
-      })
-      .sort((a, b) => b.mtime - a.mtime);
+      }),
+    );
+    return stats.sort((a, b) => b.mtime - a.mtime);
   } catch {
     return [];
   }
@@ -72,10 +71,33 @@ export async function handleMemory(
   rest: string[],
   body: string,
   ctx: DashboardContext,
+  query: URLSearchParams = new URLSearchParams(),
 ): Promise<ApiResult> {
   const cwd = ctx.getCurrentCwd?.();
   const globalDir = globalMemoryDir();
   const projectMemDir = cwd ? projectMemoryDir(cwd) : "";
+
+  // Browser shape — matches the $memory event payload emitted by desktop.ts
+  // so the web dashboard's memory panel (project file + global file +
+  // structured entries with `kind`/`path`/`type`) renders the same as Tauri.
+  if (method === "GET" && rest[0] === "entries") {
+    if (!cwd) return { status: 200, body: { entries: [] } };
+    try {
+      return { status: 200, body: { entries: collectMemoryEntriesForWorkspace(cwd) } };
+    } catch (err) {
+      return { status: 500, body: { error: (err as Error).message } };
+    }
+  }
+  if (method === "GET" && rest[0] === "read") {
+    if (!cwd) return { status: 503, body: { error: "no active project" } };
+    const path = query.get("path");
+    if (!path) return { status: 400, body: { error: "path query parameter required" } };
+    try {
+      return { status: 200, body: { detail: readMemoryEntryDetail({ path }, cwd) } };
+    } catch (err) {
+      return { status: 404, body: { error: (err as Error).message } };
+    }
+  }
 
   if (method === "GET" && rest.length === 0) {
     const existingProjectMemory = cwd ? findProjectMemoryPath(cwd) : null;
@@ -92,11 +114,11 @@ export async function handleMemory(
         },
         global: {
           path: globalDir,
-          files: listMemoryFiles(globalDir),
+          files: await listMemoryFiles(globalDir),
         },
         projectMem: {
           path: projectMemDir,
-          files: projectMemDir ? listMemoryFiles(projectMemDir) : [],
+          files: projectMemDir ? await listMemoryFiles(projectMemDir) : [],
         },
       },
     };
@@ -111,14 +133,18 @@ export async function handleMemory(
       if (!cwd) return { status: 503, body: { error: "no active project" } };
       const path = findProjectMemoryPath(cwd);
       if (!path) return { status: 404, body: { error: "project memory file not found" } };
-      return { status: 200, body: { path, body: readFileSync(path, "utf8") } };
+      return { status: 200, body: { path, body: await readFile(path, "utf8") } };
     }
     if ((scope === "global" || scope === "project-mem") && name && SAFE_NAME.test(name)) {
       const dir = scope === "global" ? globalDir : projectMemDir;
       if (!dir) return { status: 503, body: { error: "no project root for project-mem" } };
       const path = join(dir, `${name}.md`);
-      if (!existsSync(path)) return { status: 404, body: { error: "not found" } };
-      return { status: 200, body: { path, body: readFileSync(path, "utf8") } };
+      try {
+        const body = await readFile(path, "utf8");
+        return { status: 200, body: { path, body } };
+      } catch {
+        return { status: 404, body: { error: "not found" } };
+      }
     }
     return { status: 400, body: { error: "bad scope or name" } };
   }
@@ -131,17 +157,17 @@ export async function handleMemory(
     if (scope === "project") {
       if (!cwd) return { status: 503, body: { error: "no active project" } };
       const path = resolveProjectMemoryWritePath(cwd);
-      mkdirSync(dirname(path), { recursive: true });
-      writeFileSync(path, contents, "utf8");
+      await mkdir(dirname(path), { recursive: true });
+      await writeFile(path, contents, "utf8");
       ctx.audit?.({ ts: Date.now(), action: "save-memory", payload: { scope, path } });
       return { status: 200, body: { saved: true, path } };
     }
     if ((scope === "global" || scope === "project-mem") && name && SAFE_NAME.test(name)) {
       const dir = scope === "global" ? globalDir : projectMemDir;
       if (!dir) return { status: 503, body: { error: "no project root for project-mem" } };
-      mkdirSync(dir, { recursive: true });
+      await mkdir(dir, { recursive: true });
       const path = join(dir, `${name}.md`);
-      writeFileSync(path, contents, "utf8");
+      await writeFile(path, contents, "utf8");
       ctx.audit?.({ ts: Date.now(), action: "save-memory", payload: { scope, name, path } });
       return { status: 200, body: { saved: true, path } };
     }
@@ -153,18 +179,19 @@ export async function handleMemory(
       const dir = scope === "global" ? globalDir : projectMemDir;
       if (!dir) return { status: 503, body: { error: "no project root for project-mem" } };
       const path = join(dir, `${name}.md`);
-      if (existsSync(path)) {
-        unlinkSync(path);
+      try {
+        await unlink(path);
         ctx.audit?.({ ts: Date.now(), action: "delete-memory", payload: { scope, name, path } });
         return { status: 200, body: { deleted: true } };
+      } catch {
+        return { status: 404, body: { error: "not found" } };
       }
-      return { status: 404, body: { error: "not found" } };
     }
     if (scope === "project") {
       if (!cwd) return { status: 503, body: { error: "no active project" } };
       const path = findProjectMemoryPath(cwd);
       if (path) {
-        unlinkSync(path);
+        await unlink(path);
         ctx.audit?.({ ts: Date.now(), action: "delete-memory", payload: { scope, path } });
         return { status: 200, body: { deleted: true } };
       }

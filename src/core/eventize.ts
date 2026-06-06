@@ -25,7 +25,7 @@ import type {
 export interface EventizeContext {
   model: string;
   prefixHash: string;
-  reasoningEffort: "high" | "max";
+  reasoningEffort: import("../config.js").ReasoningEffort;
 }
 
 export class Eventizer {
@@ -79,11 +79,20 @@ export class Eventizer {
         out.push(this.toolResultEvent(ev.turn, callId, ok, ev.content, 0));
         break;
       }
-      case "warning":
-        out.push(this.classifyWarning(ev));
+      case "warning": {
+        const classified = this.classifyWarning(ev);
+        if (classified) out.push(classified);
         break;
+      }
       case "error":
-        out.push(this.errorEvent(ev.turn, ev.error ?? ev.content, false));
+        out.push(
+          this.errorEvent(ev.turn, ev.error ?? ev.content, ev.errorDetail?.recoverable ?? false, {
+            name: ev.errorDetail?.name,
+            code: ev.errorDetail?.code,
+            phase: ev.errorDetail?.phase,
+            retryable: ev.errorDetail?.retryable,
+          }),
+        );
         break;
       case "status":
         out.push(this.statusEvent(ev.turn, ev.content));
@@ -329,7 +338,12 @@ export class Eventizer {
     };
   }
 
-  private errorEvent(turn: number, message: string, recoverable: boolean): KernelErrorEvent {
+  private errorEvent(
+    turn: number,
+    message: string,
+    recoverable: boolean,
+    detail?: { name?: string; code?: string; phase?: string; retryable?: boolean },
+  ): KernelErrorEvent {
     return {
       id: ++this.nextId,
       ts: new Date().toISOString(),
@@ -337,11 +351,14 @@ export class Eventizer {
       type: "error",
       message,
       recoverable,
+      ...detail,
     };
   }
 
-  /** Pattern-match warning text since LoopEvent doesn't carry a typed kind. */
-  private classifyWarning(ev: LoopEvent): Event {
+  /** Pattern-match warning text since LoopEvent doesn't carry a typed kind. Returns null
+   *  for low-severity warnings (self-correcting / counter messages); the UI surface drops
+   *  them entirely instead of rendering noise. */
+  private classifyWarning(ev: LoopEvent): Event | null {
     const c = ev.content;
     if (/\bauto-escalating to\b|\barmed\b.*pro|NEEDS_PRO/.test(c)) {
       return {
@@ -365,7 +382,15 @@ export class Eventizer {
         capUsd: 0,
       };
     }
-    return this.errorEvent(ev.turn, c, true);
+    if (ev.severity === "low") return null;
+    return {
+      id: ++this.nextId,
+      ts: new Date().toISOString(),
+      turn: ev.turn,
+      type: "warning",
+      text: c,
+      severity: ev.severity ?? "high",
+    };
   }
 }
 

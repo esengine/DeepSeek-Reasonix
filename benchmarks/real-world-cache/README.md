@@ -20,22 +20,22 @@ Used with permission, anonymized.
 ## Cost — using the prices Reasonix bills against (`src/telemetry/stats.ts`)
 
 USD per 1M tokens — `inputCacheHit / inputCacheMiss / output`:
-- `deepseek-v4-flash` — `0.028 / 0.139 / 0.278`
-- `deepseek-v4-pro` — `0.139 / 1.667 / 3.333`
+- `deepseek-v4-flash` — `0.0028 / 0.14 / 0.28`
+- `deepseek-v4-pro` — `0.003625 / 0.435 / 0.87`
 
 Assuming **v4-flash** (the project default):
 
 | | This user (99.82% hit) | Same workload, **0% cache** |
 |---|---:|---:|
-| Cache-hit input | $12.18 | — |
-| Cache-miss input | $0.11 | $60.58 |
+| Cache-hit input | $1.22 | — |
+| Cache-miss input | $0.11 | $61.01 |
 | Output | $0.05 | $0.05 |
-| **Total / day** | **$12.34** | **$60.63** |
+| **Total / day** | **$1.38** | **$61.06** |
 
-→ Cache saved this user **$48.29**, or **~80%** off the un-cached baseline, on a single day.
+→ Cache saved this user **$59.68**, or **~97.7%** off the un-cached baseline, on a single day.
 
-On **v4-pro** (5× the prefix-cache discount) the same workload would cost
-**~$62.35** vs **~$727.08** without cache — a **~91% saving**.
+On **v4-pro** (6.25% of uncached input cost) the same workload would cost
+**~$2.07** vs **~$189.73** without cache — a **~98.9%** saving.
 
 ## "Isn't that just DeepSeek's prefix cache?"
 
@@ -59,8 +59,9 @@ hit rates:
 3. **`VolatileScratch`** — chain-of-thought / per-turn scratch lives outside
    the cached prefix so it never poisons the next hit.
 4. **Auto-compact** — when context approaches the cap, older turns fold into
-   a summary message *appended* to the prefix; the prefix itself isn't
-   rewritten, so the cache survives the fold.
+   a summary message. The summary request is shaped to reuse the main agent's
+   already-cached system/tool/history prefix; the following main-agent request
+   still pays a cold miss for the newly synthesized summary segment.
 
 DeepSeek gave us cacheable bytes. The four mechanisms above are how we keep
 the bytes cacheable.

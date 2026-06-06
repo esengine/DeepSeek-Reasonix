@@ -61,15 +61,42 @@ describe("acp --yolo", () => {
     expect(bridged).toBe(false);
   });
 
-  it("does NOT auto-resolve run_command requests even with --yolo (shell.ts handles that via allowAll)", async () => {
+  it("auto-resolves run_command (run_once) with --yolo — shell.ts's allowAll closure can't see --yolo when config still says review (#1448)", async () => {
     const gate = new PauseGate();
-    let bridgedReqId: number | null = null;
-    makeListener({ yolo: true }, "review")(gate, (id) => {
-      bridgedReqId = id;
-      gate.resolve(id, { type: "run_once" } as never);
+    let bridged = false;
+    makeListener({ yolo: true }, "review")(gate, () => {
+      bridged = true;
     });
 
-    await gate.ask({ kind: "run_command", payload: { command: "rm -rf /" } });
+    const promise = gate.ask({ kind: "run_command", payload: { command: "rm -rf /" } });
+    await expect(promise).resolves.toEqual({ type: "run_once" });
+    expect(bridged).toBe(false);
+  });
+
+  it("auto-resolves run_background (run_once) with --yolo for the same reason", async () => {
+    const gate = new PauseGate();
+    let bridged = false;
+    makeListener({ yolo: true }, "review")(gate, () => {
+      bridged = true;
+    });
+
+    const promise = gate.ask({
+      kind: "run_background",
+      payload: { command: "npm dev", cwd: "/work" },
+    });
+    await expect(promise).resolves.toEqual({ type: "run_once" });
+    expect(bridged).toBe(false);
+  });
+
+  it("bridges run_command to the client in auto mode (only yolo bypasses)", async () => {
+    const gate = new PauseGate();
+    let bridgedReqId: number | null = null;
+    makeListener({ yolo: false }, "auto")(gate, (id) => {
+      bridgedReqId = id;
+      gate.resolve(id, { type: "deny" } as never);
+    });
+
+    await gate.ask({ kind: "run_command", payload: { command: "ls" } });
     expect(bridgedReqId).not.toBeNull();
   });
 

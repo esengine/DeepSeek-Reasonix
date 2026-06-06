@@ -1,8 +1,8 @@
-import { Box, Text, useStdout } from "ink";
+import chalk from "chalk";
+import { Box, type Color, Text, useStdout } from "ink";
 import React, { useEffect, useRef, useState } from "react";
 import { t } from "../../i18n/index.js";
 import { useKeystroke } from "./keystroke-context.js";
-import { useReserveRows } from "./layout/viewport-budget.js";
 import { type MultilineKey, lineAndColumn, processMultilineKey } from "./multiline-keys.js";
 import {
   PASTE_SENTINEL_RANGE,
@@ -21,6 +21,26 @@ import { FG, SURFACE, TONE } from "./theme/tokens.js";
 
 /** Pastes shorter than this AND single-line render verbatim; longer ones become a `[paste #N · …]` sentinel chip (#397). */
 export const INLINE_PASTE_THRESHOLD = 200;
+
+// Tight enough that a normal typed Enter (≥80ms after the last keystroke
+// for human cadence) still submits; wide enough that CJK IME commit-then-
+// Enter (terminal flushes both together) falls inside the window.
+const IME_GUARD_MS = 50;
+
+function hasNonAscii(s: string): boolean {
+  for (let i = 0; i < s.length; i++) {
+    if (s.charCodeAt(i) > 0x7f) return true;
+  }
+  return false;
+}
+
+function isPotentialImeCommitInput(s: string): boolean {
+  if (s.length === 0) return false;
+  if (hasNonAscii(s)) return true;
+  // WeChat IME English mode can commit an ASCII word as one burst, then
+  // pass the confirming Enter through as the next key event.
+  return s.length > 1;
+}
 
 export function shouldInlinePaste(content: string): boolean {
   return !content.includes("\n") && content.length <= INLINE_PASTE_THRESHOLD;
@@ -72,12 +92,23 @@ export interface PromptInputProps {
   onSubmit: (v: string) => void;
   disabled?: boolean;
   placeholder?: string;
-  /** Ctrl+P / Ctrl+N hand off here when no in-buffer cursor move applies — parent walks history and swaps `value` via `onChange`. */
+  steerBusy?: boolean;
+  /** ↑/↓ / Ctrl+N hand off here when no in-buffer cursor move applies — parent walks history and swaps `value` via `onChange`. */
   onHistoryPrev?: () => void;
   onHistoryNext?: () => void;
   /** Ctrl+X — parent spawns $EDITOR with the current buffer and re-injects on exit. */
   onOpenExternalEditor?: () => void;
   onCursorChange?: (cursor: number) => void;
+  /** Rows the parent renders below this box — drives IME cursor sync so fcitx5/ibus/Win-IME candidate popups land next to the visual ▌. */
+  rowsAfter?: number;
+  /** Current mode for bottom status display. */
+  mode?: string;
+  /** Current model for bottom status display. */
+  model?: string;
+  /** True when viewing a historical input. */
+  isHistoryMode?: boolean;
+  /** True when plan mode is active — shows [PLAN] badge. */
+  planMode?: boolean;
 }
 
 export function PromptInput({
@@ -86,19 +117,17 @@ export function PromptInput({
   onSubmit,
   disabled,
   placeholder,
+  steerBusy,
   onHistoryPrev,
   onHistoryNext,
   onOpenExternalEditor,
   onCursorChange,
+  rowsAfter = 0,
+  mode,
+  model,
+  isHistoryMode,
+  planMode,
 }: PromptInputProps) {
-  // Cap at 24 — collapseLinesForDisplay hides content past ~20 logical lines.
-  // Quantize spec.max to 4-row buckets so per-keystroke line-count changes
-  // don't churn viewport-budget; without this every single character that
-  // adds/removes a newline re-dispatches the allocator and reflows layout.
-  const inputLineCount = value.length > 0 ? value.split("\n").length : 1;
-  const reserveMax = Math.min(Math.ceil(inputLineCount / 4) * 4 + 3, 24);
-  useReserveRows("input", { min: 1, max: reserveMax });
-
   const [cursor, setCursor] = useState(value.length);
 
   useEffect(() => {
@@ -108,6 +137,13 @@ export function PromptInput({
   // Paste registry — keyed by sentinel id, holds original content.
   const pastesRef = useRef<Map<number, PasteEntry>>(new Map());
   const nextPasteIdRef = useRef<number>(0);
+
+  // IMEs commit the candidate then often pass the trigger Enter through
+  // as a real keystroke; terminals can't expose composition state. If submit
+  // fires within IME_GUARD_MS of a likely IME commit we treat it as that
+  // commit-Enter. CJK commits are non-ASCII; WeChat English-mode commits are
+  // ASCII bursts rather than ordinary per-key input.
+  const lastImeCommitInputAtRef = useRef(0);
 
   // Refs (not props/state) — multiple keystrokes in one stdin chunk dispatch
   // before re-render, so the handler must read the latest value/cursor.
@@ -140,12 +176,18 @@ export function PromptInput({
     setCursor(c + insertion.length);
   };
 
+  const inputFrozen = disabled && !steerBusy;
+  const inputActive = !disabled || !!steerBusy;
+
   useKeystroke((ev) => {
-    if (disabled) return;
+    if (inputFrozen) return;
     if (ev.paste) {
       // Bracketed-paste content delivered by the stdin reader.
       if (ev.input.length > 0) registerPaste(ev.input);
       return;
+    }
+    if (isPotentialImeCommitInput(ev.input)) {
+      lastImeCommitInputAtRef.current = Date.now();
     }
     const key: MultilineKey = {
       input: ev.input,
@@ -180,6 +222,10 @@ export function PromptInput({
       setCursor(action.cursor);
     }
     if (action.submit) {
+      if (Date.now() - lastImeCommitInputAtRef.current < IME_GUARD_MS) {
+        lastImeCommitInputAtRef.current = 0;
+        return;
+      }
       const raw = action.submitValue ?? lastLocalValueRef.current;
       const expanded = expandPasteSentinels(raw, pastesRef.current);
       const reachable = new Set(listPasteIdsInBuffer(raw));
@@ -191,7 +237,7 @@ export function PromptInput({
     if (action.historyHandoff === "prev") onHistoryPrev?.();
     if (action.historyHandoff === "next") onHistoryNext?.();
     if (action.openExternalEditor) onOpenExternalEditor?.();
-  }, !disabled);
+  }, inputActive);
 
   // ── Render ──────────────────────────────────────────────────────
 
@@ -204,147 +250,182 @@ export function PromptInput({
 
   // Hint avoids literal `/` and `@` glyphs — they render in the same row as
   // a just-cleared buffer and read as residual typed input on dim-poor terminals.
-  const effectivePlaceholder = disabled
-    ? (placeholder ?? t("composer.waitingForResponse"))
-    : (placeholder ?? t("composer.placeholder"));
+  const effectivePlaceholder = steerBusy
+    ? t("composer.steerPlaceholder")
+    : disabled
+      ? (placeholder ?? t("composer.waitingForResponse"))
+      : (placeholder ?? t("composer.placeholder"));
 
   const lines = value.length > 0 ? value.split("\n") : [""];
-  const accentColor = disabled ? FG.faint : TONE.brand;
+  const accentColor = steerBusy ? TONE.brand : disabled ? FG.faint : TONE.brand;
   const cursorVisible = true;
   const { line: cursorLine, col: cursorCol } = lineAndColumn(value, cursor);
 
   const renderItems = collapseLinesForDisplay(lines, cursorLine);
   const showHugeBufferHints = lines.length > 20;
 
+  // Ink owns cursor positioning end-to-end; out-of-band CUP writes desync
+  // its frame buffer and leave residual glyphs on next diff.
+
+  const borderLabel = (() => {
+    const parts: string[] = [];
+    if (planMode) parts.push(chalk.hex(TONE.warn)(`[${t("statsPanel.modePlan")}]`));
+    if (isHistoryMode) parts.push(chalk.hex(TONE.accent)("↑ history"));
+    if (mode) parts.push(chalk.hex(TONE.brand)(mode));
+    if (model) parts.push(chalk.hex(FG.faint)(model));
+    return parts.length > 0 ? ` ${parts.join(chalk.hex(FG.faint)(" · "))} ` : undefined;
+  })();
+
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={accentColor} paddingX={1}>
-      {(() => {
-        const rows: React.ReactNode[] = [];
-        let firstRowEmitted = false;
-        for (let renderIdx = 0; renderIdx < renderItems.length; renderIdx++) {
-          const item = renderItems[renderIdx]!;
-          if (item.kind === "skip") {
-            rows.push(
-              <Box key={`skip-${renderIdx}`}>
-                <Text color={FG.faint}>{continuationIndent}</Text>
-                <Text color={FG.faint}>
-                  {`[… ${item.linesHidden} line${item.linesHidden === 1 ? "" : "s"} hidden — full content kept, submitted on Enter …]`}
-                </Text>
-              </Box>,
-            );
-            continue;
-          }
-          const i = item.originalIndex;
-          const line = item.line;
-          const isCursorLine = i === cursorLine;
-          const showPlaceholder = i === 0 && value.length === 0;
-          if (showPlaceholder) {
-            rows.push(
-              <PromptLine
-                key={`ln-${i}-text-0`}
-                line=""
-                isFirst={true}
-                isCursorLine={isCursorLine && !disabled}
-                cursorCol={isCursorLine ? cursorCol : null}
-                cursorVisible={cursorVisible}
-                showPlaceholder
-                placeholderText={effectivePlaceholder}
-                promptPrefix={promptPrefix}
-                continuationIndent={continuationIndent}
-                visibleCells={visibleCells}
-                accentColor={accentColor}
-                pastes={pastesRef.current}
-                disabled={disabled === true}
-              />,
-            );
-            firstRowEmitted = true;
-            continue;
-          }
-          const segs = splitLineByPastes(line);
-          for (let segIdx = 0; segIdx < segs.length; segIdx++) {
-            const seg = segs[segIdx]!;
-            const isFirst = !firstRowEmitted;
-            firstRowEmitted = true;
-            if (seg.kind === "paste") {
-              const cursorOnIt =
-                isCursorLine && cursorCol >= seg.startOffset && cursorCol <= seg.startOffset + 1;
+    <Box
+      flexDirection="column"
+      paddingX={1}
+      borderStyle="round"
+      borderLeft={false}
+      borderRight={false}
+      borderColor={inputActive ? TONE.brand : FG.faint}
+      backgroundColor={SURFACE.bgInput}
+      borderText={
+        borderLabel ? { content: borderLabel, position: "top", align: "end", offset: 2 } : undefined
+      }
+      width="100%"
+    >
+      <Box flexDirection="column" flexGrow={1}>
+        {(() => {
+          const rows: React.ReactNode[] = [];
+          let firstRowEmitted = false;
+          for (let renderIdx = 0; renderIdx < renderItems.length; renderIdx++) {
+            const item = renderItems[renderIdx]!;
+            if (item.kind === "skip") {
               rows.push(
-                <PasteChipRow
-                  key={`ln-${i}-paste-${segIdx}`}
-                  entry={pastesRef.current.get(seg.id)}
-                  pasteId={seg.id}
-                  isFirst={isFirst}
-                  active={cursorOnIt && !disabled}
-                  visibleCells={visibleCells}
-                  accentColor={accentColor}
-                />,
+                <Box key={`skip-${renderIdx}`}>
+                  <Text color={FG.faint}>{continuationIndent}</Text>
+                  <Text color={FG.faint}>
+                    {`[… ${item.linesHidden} line${item.linesHidden === 1 ? "" : "s"} hidden — full content kept, submitted on Enter …]`}
+                  </Text>
+                </Box>,
               );
               continue;
             }
-            const segHasCursor =
-              isCursorLine &&
-              cursorCol >= seg.startOffset &&
-              cursorCol <= seg.startOffset + seg.text.length;
-            rows.push(
-              <PromptLine
-                key={`ln-${i}-text-${segIdx}`}
-                line={seg.text}
-                isFirst={isFirst}
-                isCursorLine={segHasCursor && !disabled}
-                cursorCol={segHasCursor ? cursorCol - seg.startOffset : null}
-                cursorVisible={cursorVisible}
-                showPlaceholder={false}
-                placeholderText=""
-                promptPrefix={promptPrefix}
-                continuationIndent={continuationIndent}
-                visibleCells={visibleCells}
-                accentColor={accentColor}
-                pastes={pastesRef.current}
-                disabled={disabled === true}
-              />,
-            );
+            const i = item.originalIndex;
+            const line = item.line;
+            const isCursorLine = i === cursorLine;
+            const showPlaceholder = i === 0 && value.length === 0;
+            if (showPlaceholder) {
+              rows.push(
+                <PromptLine
+                  key={`ln-${i}-text-0`}
+                  line=""
+                  isFirst={true}
+                  isCursorLine={isCursorLine && inputActive}
+                  cursorCol={isCursorLine ? cursorCol : null}
+                  cursorVisible={cursorVisible}
+                  showPlaceholder
+                  placeholderText={effectivePlaceholder}
+                  promptPrefix={promptPrefix}
+                  continuationIndent={continuationIndent}
+                  visibleCells={visibleCells}
+                  accentColor={accentColor}
+                  pastes={pastesRef.current}
+                  disabled={disabled === true}
+                  steerBusy={steerBusy}
+                />,
+              );
+              firstRowEmitted = true;
+              continue;
+            }
+            const segs = splitLineByPastes(line);
+            for (let segIdx = 0; segIdx < segs.length; segIdx++) {
+              const seg = segs[segIdx]!;
+              const isFirst = !firstRowEmitted;
+              firstRowEmitted = true;
+              if (seg.kind === "paste") {
+                const cursorOnIt =
+                  isCursorLine && cursorCol >= seg.startOffset && cursorCol <= seg.startOffset + 1;
+                rows.push(
+                  <PasteChipRow
+                    key={`ln-${i}-paste-${segIdx}`}
+                    entry={pastesRef.current.get(seg.id)}
+                    pasteId={seg.id}
+                    isFirst={isFirst}
+                    active={cursorOnIt && inputActive}
+                    visibleCells={visibleCells}
+                    accentColor={accentColor}
+                  />,
+                );
+                continue;
+              }
+              const segHasCursor =
+                isCursorLine &&
+                cursorCol >= seg.startOffset &&
+                cursorCol <= seg.startOffset + seg.text.length;
+              rows.push(
+                <PromptLine
+                  key={`ln-${i}-text-${segIdx}`}
+                  line={seg.text}
+                  isFirst={isFirst}
+                  isCursorLine={segHasCursor && inputActive}
+                  cursorCol={segHasCursor ? cursorCol - seg.startOffset : null}
+                  cursorVisible={cursorVisible}
+                  showPlaceholder={false}
+                  placeholderText=""
+                  promptPrefix={promptPrefix}
+                  continuationIndent={continuationIndent}
+                  visibleCells={visibleCells}
+                  accentColor={accentColor}
+                  pastes={pastesRef.current}
+                  disabled={disabled === true}
+                  steerBusy={steerBusy}
+                />,
+              );
+            }
+            if (segs.length === 0) {
+              const isFirst = !firstRowEmitted;
+              firstRowEmitted = true;
+              rows.push(
+                <PromptLine
+                  key={`ln-${i}-empty`}
+                  line=""
+                  isFirst={isFirst}
+                  isCursorLine={isCursorLine && inputActive}
+                  cursorCol={isCursorLine ? 0 : null}
+                  cursorVisible={cursorVisible}
+                  showPlaceholder={false}
+                  placeholderText=""
+                  promptPrefix={promptPrefix}
+                  continuationIndent={continuationIndent}
+                  visibleCells={visibleCells}
+                  accentColor={accentColor}
+                  pastes={pastesRef.current}
+                  disabled={disabled === true}
+                  steerBusy={steerBusy}
+                />,
+              );
+            }
           }
-          if (segs.length === 0) {
-            const isFirst = !firstRowEmitted;
-            firstRowEmitted = true;
-            rows.push(
-              <PromptLine
-                key={`ln-${i}-empty`}
-                line=""
-                isFirst={isFirst}
-                isCursorLine={isCursorLine && !disabled}
-                cursorCol={isCursorLine ? 0 : null}
-                cursorVisible={cursorVisible}
-                showPlaceholder={false}
-                placeholderText=""
-                promptPrefix={promptPrefix}
-                continuationIndent={continuationIndent}
-                visibleCells={visibleCells}
-                accentColor={accentColor}
-                pastes={pastesRef.current}
-                disabled={disabled === true}
-              />,
-            );
-          }
-        }
-        return rows;
-      })()}
-      {showHugeBufferHints && !disabled ? (
-        <Box>
-          <Text color={FG.faint}>
-            {`  [${lines.length} lines · PgUp/PgDn jump · Ctrl+U clear · Ctrl+W del word]`}
-          </Text>
-        </Box>
-      ) : null}
-      {!disabled ? (
-        <Box marginTop={1}>
-          <HintRow />
-        </Box>
-      ) : (
-        <Box marginTop={1}>
-          <Text color={FG.faint}>{"  esc to stop"}</Text>
-        </Box>
-      )}
+          return rows;
+        })()}
+        {showHugeBufferHints && inputActive ? (
+          <Box>
+            <Text color={FG.faint}>
+              {`  [${lines.length} lines · PgUp/PgDn jump · Ctrl+U clear · Ctrl+W del word]`}
+            </Text>
+          </Box>
+        ) : null}
+        {inputFrozen ? (
+          <Box marginTop={1}>
+            <Text color={FG.faint}>{"  esc to stop"}</Text>
+          </Box>
+        ) : null}
+        {steerBusy ? (
+          <Box marginTop={1} flexDirection="row">
+            <Text color={TONE.accent}>{"  \u23ce "}</Text>
+            <Text color={FG.faint}>{t("composer.steerHint")}</Text>
+            <Text color={FG.faint}>{"  ·  "}</Text>
+            <Text color={FG.faint}>{"esc to stop"}</Text>
+          </Box>
+        ) : null}
+      </Box>
     </Box>
   );
 }
@@ -352,9 +433,9 @@ export function PromptInput({
 export function HintRow(): React.ReactElement {
   const items: Array<{ key: string; tKey: string }> = [
     { key: "\u23ce", tKey: "composer.hintSend" },
-    { key: "\u21e7\u23ce", tKey: "composer.hintNewline" },
+    { key: "\u21e7\u23ce / ^J", tKey: "composer.hintNewline" },
     { key: "^U", tKey: "composer.hintClear" },
-    { key: "^P/^N", tKey: "composer.hintHistory" },
+    { key: "\u2191\u2193", tKey: "composer.hintHistory" },
     { key: "esc", tKey: "composer.hintAbort" },
     { key: "^C", tKey: "composer.hintQuit" },
   ];
@@ -404,7 +485,7 @@ interface PasteChipRowProps {
   isFirst: boolean;
   active: boolean;
   visibleCells: number;
-  accentColor: string;
+  accentColor: Color;
 }
 
 function PasteChipRow({
@@ -429,7 +510,7 @@ function PasteChipRow({
         <Text bold color={accentColor}>
           {"▸ "}
         </Text>
-        <Text bold color="black" backgroundColor={accentColor}>
+        <Text bold color="ansi:black" backgroundColor={accentColor}>
           {`  ${labelText}  `}
         </Text>
       </Box>
@@ -455,7 +536,7 @@ function formatChipLabel(entry: PasteEntry | undefined, pasteId: number, budget:
   const lines = `${entry.lineCount} line${entry.lineCount === 1 ? "" : "s"}`;
   const bytes = formatBytesShort(entry.charCount);
   const kind = sniffChipKind(entry.content);
-  const full = `📋 pasted  ${lines} · ${bytes}  ·  ${kind}  ^O expand · ⌫ remove`;
+  const full = `📋 pasted  ${lines} · ${bytes}  ·  ${kind}  ⌫ remove`;
   if (full.length <= Math.max(40, budget)) return full;
   const compact = `📋 pasted  ${lines} · ${bytes}  ·  ${kind}`;
   if (compact.length <= Math.max(30, budget)) return compact;
@@ -492,9 +573,10 @@ interface PromptLineProps {
   promptPrefix: string;
   continuationIndent: string;
   visibleCells: number;
-  accentColor: string;
+  accentColor: Color;
   pastes: ReadonlyMap<number, PasteEntry>;
   disabled: boolean;
+  steerBusy?: boolean;
 }
 
 function PromptLine({
@@ -511,14 +593,16 @@ function PromptLine({
   accentColor,
   pastes,
   disabled,
+  steerBusy,
 }: PromptLineProps) {
+  const promptActive = !disabled || !!steerBusy;
   if (showPlaceholder) {
     return (
       <Box>
         <Text bold color={accentColor}>
           {promptPrefix}
         </Text>
-        {!disabled ? <Text color={accentColor}>{cursorVisible ? "▌" : " "}</Text> : null}
+        {promptActive ? <Text color={accentColor}>{cursorVisible ? "▌" : " "}</Text> : null}
         <Text color={FG.faint}>{placeholderText}</Text>
       </Box>
     );
@@ -558,7 +642,7 @@ function ViewportContent({
 }: {
   segments: Segment[];
   cursorCell: number | null;
-  accentColor: string;
+  accentColor: Color;
   cursorVisible: boolean;
 }) {
   // No cursor on this line — straight render.
@@ -678,7 +762,11 @@ function charCellsForText(ch: string): number {
 
 function renderSegment(seg: Segment, key: number, _inverse: boolean): React.ReactNode {
   if (seg.kind === "text") {
-    return <Text key={`s-${key}`}>{seg.text}</Text>;
+    return (
+      <Text key={`s-${key}`} color={FG.body}>
+        {seg.text}
+      </Text>
+    );
   }
   return (
     <Text key={`s-${key}`} backgroundColor={SURFACE.bgElev} color={FG.body}>

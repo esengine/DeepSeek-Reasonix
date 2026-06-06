@@ -1,53 +1,72 @@
-import { render } from "ink-testing-library";
 import React from "react";
-import { describe, expect, it } from "vitest";
-import { ShellConfirm, clampCommand } from "../src/cli/ui/ShellConfirm.js";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { ShellConfirm } from "../src/cli/ui/ShellConfirm.js";
+import { setLanguageRuntime } from "../src/i18n/index.js";
+import { render } from "./helpers/ink-test.js";
 
-describe("clampCommand", () => {
-  it("returns the original command when line count is within max", () => {
-    const cmd = "echo one\necho two\necho three";
-    expect(clampCommand(cmd, 5)).toEqual({ preview: cmd, hidden: 0 });
-  });
+function makeShellPrompt(command: string): import("@reasonix/core-utils").ApprovalPrompt {
+  return {
+    id: 1,
+    kind: "shell",
+    tone: "warn",
+    title: "Run command",
+    subtitle: command,
+    preview: command,
+    meta: {},
+    actions: [
+      { id: "run_once", label: "Run once", kind: "allow_once" },
+      { id: "always_allow", label: "Always allow", kind: "allow_always" },
+      {
+        id: "deny",
+        label: "Deny",
+        kind: "reject",
+        secondaryInput: { hint: "Reason", required: false },
+      },
+    ],
+    data: { prefix: command.split(" ")[0] ?? "" },
+  };
+}
 
-  it("keeps exactly `max` lines and reports the dropped count", () => {
-    const cmd = ["a", "b", "c", "d", "e"].join("\n");
-    expect(clampCommand(cmd, 3)).toEqual({ preview: "a\nb\nc", hidden: 2 });
-  });
+describe("ShellConfirm — renders with ApprovalPrompt", () => {
+  beforeEach(() => setLanguageRuntime("EN"));
+  afterEach(() => setLanguageRuntime("EN"));
 
-  it("treats a single-line command as not clamped", () => {
-    expect(clampCommand("ls -la", 3)).toEqual({ preview: "ls -la", hidden: 0 });
-  });
-
-  it("is a no-op when max equals the line count exactly", () => {
-    const cmd = "a\nb\nc";
-    expect(clampCommand(cmd, 3)).toEqual({ preview: cmd, hidden: 0 });
-  });
-});
-
-describe("ShellConfirm — long-command rendering (issue #680)", () => {
-  it("renders the action options and footer even with a 50-line command", () => {
-    const command = Array.from({ length: 50 }, (_, i) => `echo line-${i + 1}`).join("\n");
+  it("renders the action options and footer", () => {
     const { lastFrame, unmount } = render(
-      <ShellConfirm command={command} allowPrefix="echo" onChoose={() => {}} />,
+      <ShellConfirm prompt={makeShellPrompt("echo hello")} onChoose={() => {}} />,
     );
     const out = lastFrame() ?? "";
     unmount();
-    expect(out).toContain("allow once");
-    expect(out).toContain("allow always");
-    expect(out).toContain("deny");
-    expect(out).toContain("pick");
-    expect(out).toContain("confirm");
-    expect(out).toMatch(/more lines? hidden/);
-    expect(out).toContain("echo line-1");
-  });
-
-  it("does not show the hidden-lines hint for a short command", () => {
-    const { lastFrame, unmount } = render(
-      <ShellConfirm command="echo hello" allowPrefix="echo" onChoose={() => {}} />,
-    );
-    const out = lastFrame() ?? "";
-    unmount();
+    expect(out).toContain("Run once");
+    expect(out).toContain("Always allow");
+    expect(out).toContain("Deny");
     expect(out).toContain("echo hello");
-    expect(out).not.toMatch(/more lines? hidden/);
+  });
+
+  it("triggers deny phase when a secondary-input action is submitted", () => {
+    const { lastFrame, stdin, unmount } = render(
+      <ShellConfirm prompt={makeShellPrompt("rm -rf /")} onChoose={() => {}} />,
+    );
+    // Move to "deny" option and submit
+    stdin.write("[B[B"); // two down arrows
+    stdin.write("\r"); // enter
+    const out = lastFrame() ?? "";
+    unmount();
+    expect(out).toContain("Deny");
+  });
+
+  it("translates title + action labels under zh-CN (#1560)", () => {
+    setLanguageRuntime("zh-CN");
+    const { lastFrame, unmount } = render(
+      <ShellConfirm prompt={makeShellPrompt("python script.py")} onChoose={() => {}} />,
+    );
+    const out = lastFrame() ?? "";
+    unmount();
+    expect(out).toContain("运行命令");
+    expect(out).toContain("运行一次");
+    expect(out).toContain("始终允许");
+    expect(out).toContain("拒绝");
+    expect(out).not.toContain("Run once");
+    expect(out).not.toContain("Always allow");
   });
 });

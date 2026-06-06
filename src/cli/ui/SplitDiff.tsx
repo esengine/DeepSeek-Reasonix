@@ -22,7 +22,9 @@ import { Box, Text, useStdout } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for React.Fragment
 import React from "react";
 import type { SplitDiffRow } from "../../code/diff-preview.js";
+import { clipToCells, padToCells } from "./text-width.js";
 import { COLOR } from "./theme.js";
+import { FG } from "./theme/tokens.js";
 
 export interface SplitDiffProps {
   rows: readonly SplitDiffRow[];
@@ -45,9 +47,7 @@ export function SplitDiff({ rows, totalCols }: SplitDiffProps): React.ReactEleme
       {rows.map((row, i) => (
         <Box key={`r-${i}-${row.left.num ?? "p"}-${row.right.num ?? "p"}`}>
           <Cell side={row.left} width={halfCols} which="left" />
-          <Text color={COLOR.info} dimColor>
-            {" │ "}
-          </Text>
+          <Text color={FG.faint}>{" │ "}</Text>
           <Cell side={row.right} width={halfCols} which="right" />
         </Box>
       ))}
@@ -72,12 +72,11 @@ function Cell({
   const sign =
     side.kind === "del" ? "-" : side.kind === "add" ? "+" : side.kind === "pad" ? " " : " ";
   const raw = side.text;
-  const truncated = raw.length > inner ? `${raw.slice(0, inner - 1)}…` : raw;
-  // Pad to fixed width so the bg color stretches across the whole
-  // column even when the text is short — without this the red/green
-  // wash would only cover the actual chars and the rest of the row
-  // would be terminal default, which looks broken.
-  const padded = truncated.padEnd(inner);
+  // clipToCells / padToCells count visual cells, so CJK + emoji rows
+  // neither overflow (raw.length undercounts wide chars at the cut) nor
+  // get over-padded (padEnd pads by string length, not cells) — both
+  // would knock the column border out of alignment (#1671).
+  const padded = padToCells(clipToCells(raw, inner), inner);
 
   if (side.kind === "del") {
     return (
@@ -98,11 +97,11 @@ function Cell({
     // lines" capRows marker also rides this kind on the left side
     // when present, so we render its text dim italic.
     return (
-      <Text color={COLOR.info} dimColor italic={!!raw}>
+      <Text color={FG.faint} italic={!!raw}>
         {`${numStr} ${sign} ${padded}`}
       </Text>
     );
   }
   // ctx: same content both sides, dim
-  return <Text dimColor>{`${numStr} ${sign} ${padded}`}</Text>;
+  return <Text color={FG.faint}>{`${numStr} ${sign} ${padded}`}</Text>;
 }

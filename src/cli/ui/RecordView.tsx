@@ -4,6 +4,7 @@ import { Box, Text } from "ink";
 import React from "react";
 import { t } from "../../i18n/index.js";
 import type { TranscriptRecord } from "../../transcript/log.js";
+import { FG } from "./theme/tokens.js";
 
 export interface RecordViewProps {
   rec: TranscriptRecord;
@@ -28,7 +29,7 @@ export function RecordView({ rec, compact = false }: RecordViewProps) {
       : rec.content;
     return (
       <Box marginTop={1}>
-        <Text bold color="cyan">
+        <Text bold color="ansi:cyan">
           {t("recordView.userPrefix")}
         </Text>
         <Text>{content}</Text>
@@ -39,11 +40,11 @@ export function RecordView({ rec, compact = false }: RecordViewProps) {
     return (
       <Box flexDirection="column" marginTop={1}>
         <Box>
-          <Text bold color="green">
+          <Text bold color="ansi:green">
             {t("recordView.assistant")}
           </Text>
           {rec.cost !== undefined ? (
-            <Text dimColor>
+            <Text color={FG.faint}>
               {"  $"}
               {rec.cost.toFixed(6)}
             </Text>
@@ -53,7 +54,7 @@ export function RecordView({ rec, compact = false }: RecordViewProps) {
         {rec.content ? (
           <Text>{rec.content}</Text>
         ) : (
-          <Text dimColor italic>
+          <Text color={FG.faint} italic>
             {t("recordView.toolCallOnly")}
           </Text>
         )}
@@ -63,18 +64,18 @@ export function RecordView({ rec, compact = false }: RecordViewProps) {
   if (rec.role === "tool") {
     return (
       <Box flexDirection="column" marginTop={1}>
-        <Text color="yellow">
+        <Text color="ansi:yellow">
           {t("recordView.toolPrefix")}
           {rec.tool ?? "?"}
           {">"}
         </Text>
         {rec.args ? (
-          <Text dimColor>
+          <Text color={FG.faint}>
             {t("recordView.argsLabel")}
             {truncate(rec.args, toolArgsMax)}
           </Text>
         ) : null}
-        <Text dimColor>
+        <Text color={FG.faint}>
           {t("recordView.resultArrow")}
           {truncate(rec.content, toolContentMax)}
         </Text>
@@ -84,10 +85,10 @@ export function RecordView({ rec, compact = false }: RecordViewProps) {
   if (rec.role === "error") {
     return (
       <Box marginTop={1}>
-        <Text color="red" bold>
+        <Text color="ansi:red" bold>
           {t("recordView.error")}
         </Text>
-        <Text color="red">{rec.error ?? rec.content}</Text>
+        <Text color="ansi:red">{rec.error ?? rec.content}</Text>
       </Box>
     );
   }
@@ -97,7 +98,7 @@ export function RecordView({ rec, compact = false }: RecordViewProps) {
   }
   return (
     <Box>
-      <Text dimColor>
+      <Text color={FG.faint}>
         [{rec.role}] {rec.content}
       </Text>
     </Box>
@@ -110,10 +111,10 @@ function CacheBadge({ usage }: { usage: NonNullable<TranscriptRecord["usage"]> }
   const total = hit + miss;
   if (total === 0) return null;
   const pct = (hit / total) * 100;
-  const color = pct >= 70 ? "green" : pct >= 40 ? "yellow" : "red";
+  const color = pct >= 70 ? "ansi:green" : pct >= 40 ? "ansi:yellow" : "ansi:red";
   return (
     <Text>
-      <Text dimColor>{t("recordView.cache")}</Text>
+      <Text color={FG.faint}>{t("recordView.cache")}</Text>
       <Text color={color}>{pct.toFixed(1)}%</Text>
     </Text>
   );

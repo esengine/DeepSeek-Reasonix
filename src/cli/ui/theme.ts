@@ -1,8 +1,11 @@
+import type { Color } from "ink";
 import React from "react";
 import { useThemeTokens } from "./theme/context.js";
 import {
   CARD,
+  PILL,
   FG as TOKEN_FG,
+  MESSAGE_BG as TOKEN_MESSAGE_BG,
   SURFACE as TOKEN_SURFACE,
   TONE,
   TONE_ACTIVE,
@@ -14,7 +17,7 @@ export type UiGradient = ReturnType<typeof gradientFromTheme>;
 export type UiSurface = ReturnType<typeof surfaceFromTheme>;
 export type UiFg = ReturnType<typeof fgFromTheme>;
 
-export function gradientFromTheme(theme: ThemeTokens): ReadonlyArray<string> {
+export function gradientFromTheme(theme: ThemeTokens): ReadonlyArray<Color> {
   return [
     theme.tone.ok,
     theme.tone.brand,
@@ -90,7 +93,9 @@ function currentTheme(): ThemeTokens {
     tone: TONE,
     toneActive: TONE_ACTIVE,
     surface: TOKEN_SURFACE,
+    messageBg: TOKEN_MESSAGE_BG,
     card: CARD,
+    pill: PILL,
   };
 }
 
@@ -154,9 +159,9 @@ export const FG = proxyThemeValue(() => fgFromTheme(currentTheme()));
 export function gradientCells(
   width: number,
   glyph: string = GLYPH.block,
-  gradient: ReadonlyArray<string> = GRADIENT,
-): Array<{ ch: string; color: string }> {
-  const cells: Array<{ ch: string; color: string }> = [];
+  gradient: ReadonlyArray<Color> = GRADIENT,
+): Array<{ ch: string; color: Color }> {
+  const cells: Array<{ ch: string; color: Color }> = [];
   if (width <= 0) return cells;
   const last = gradient.length - 1;
   for (let i = 0; i < width; i++) {

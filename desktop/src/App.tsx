@@ -1,14 +1,29 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
+import {
+  isPermissionGranted as isNotificationPermissionGranted,
+  requestPermission as requestNotificationPermission,
+  sendNotification,
+} from "@tauri-apps/plugin-notification";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { type Update, check } from "@tauri-apps/plugin-updater";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { CommandPalette, Toast, buildCommands, useCommandPalette } from "./CommandPalette";
 import { WorkspaceProvider } from "./Markdown";
-import { getLang, setLang, t, useLang } from "./i18n";
+import {
+  nextAbortDraftCandidate,
+  restoreAbortedDraft,
+  type AbortDraftSource,
+} from "./abort-draft";
+import { getLang, getLangLabel, getSupportedLangs, setLang, t, useLang } from "./i18n";
 import { I } from "./icons";
+import {
+  buildSlashSettingsDescriptors,
+  parseSlashSettingsCommand,
+  type SlashSettingsCommand,
+} from "./slash-settings";
 import {
   FONT_FAMILY,
   FONT_FAMILY_STACK,
@@ -18,31 +33,58 @@ import {
   type FontScale,
   THEME,
   type Theme,
+  type ThemeStyle,
+  defaultStyleForTheme,
   isFontFamily,
   isFontScale,
+  isTheme,
+  isThemeStyle,
+  themeForStyle,
 } from "./theme";
 import type {
   CheckpointVerdict,
   ChoiceVerdict,
   ConfirmationChoice,
+  ExternalSessionApp,
+  ExternalSessionSource,
+  ImportedMcpServer,
   IncomingEvent,
   JobInfo,
   McpSpecInfo,
+  MemoryDetail,
   MemoryEntryInfo,
   OutgoingCommand,
   PlanVerdict,
+  PromptHistoryCursor,
   RevisionVerdict,
   SettingsPatch,
   SkillInfo,
 } from "./protocol";
+import { type QQDesktopSettingsState } from "./qq-settings";
 import { Composer, type SlashCmd } from "./ui/composer";
-import { ContextPanel } from "./ui/context-panel";
+import { ContextPanel, type ContextPanelTab } from "./ui/context-panel";
 import { JobsPop } from "./ui/jobs-pop";
 import { useElapsed } from "./ui/live";
+import { AboutModal } from "./ui/about";
 import { SettingsModal, type PageId as SettingsPageId } from "./ui/settings";
+import { JumpBar } from "./ui/jump-bar";
+import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
+
 import { Sidebar } from "./ui/sidebar";
+import { Shortcut, localizeShortcutText, shortcutText } from "./ui/shortcut";
 import { Splash, shouldShowSplash } from "./ui/splash";
 import { StatusBar } from "./ui/statusbar";
+import {
+  StartupFailure,
+  coerceStartupFailure,
+  type StartupFailureState,
+} from "./ui/startup-failure";
+import {
+  dispatchDesktopNotifications,
+  deriveDesktopNotifications,
+  shouldShowCompletionToast,
+  type ApprovalSnapshot,
+} from "./notifications";
 import {
   ActivePlanTaskCard,
   AssistantMsg,
@@ -57,8 +99,31 @@ import {
   UserMsg,
 } from "./ui/thread";
 import { WorkdirPop } from "./ui/workdir-pop";
-import { useAutoScroll } from "./ui/useAutoScroll";
+import { parseEditResult } from "./ui/cards";
+import { useAutoCollapse } from "./ui/useAutoCollapse";
+import { useResizable } from "./ui/useResizable";
+// Auto-scroll handled by Virtuoso followOutput + scrollToIndex (useAutoScroll replaced).
 import { useDisableTextAssist } from "./ui/useDisableTextAssist";
+import { getThreadMaxWidth } from "./ui/thread-layout";
+import { elideTranscriptMessages } from "./ui/transcript-elision";
+import { openUrl } from "@tauri-apps/plugin-opener";
+
+const RIGHT_SIDEBAR_COLLAPSE_WIDTH = 1120;
+const LEFT_SIDEBAR_COLLAPSE_WIDTH = 760;
+
+const RESPONSIVE_STAGE = {
+  WIDE: "wide",
+  COMPACT: "compact",
+  NARROW: "narrow",
+} as const;
+
+type ResponsiveStage = (typeof RESPONSIVE_STAGE)[keyof typeof RESPONSIVE_STAGE];
+
+function responsiveStage(width: number): ResponsiveStage {
+  if (width < LEFT_SIDEBAR_COLLAPSE_WIDTH) return RESPONSIVE_STAGE.NARROW;
+  if (width < RIGHT_SIDEBAR_COLLAPSE_WIDTH) return RESPONSIVE_STAGE.COMPACT;
+  return RESPONSIVE_STAGE.WIDE;
+}
 
 export type AssistantSegment =
   | { kind: "text"; text: string }
@@ -88,12 +153,14 @@ export type ChatMessage =
       pending: boolean;
     }
   | { kind: "status"; text: string }
-  | { kind: "error"; message: string };
+  | { kind: "warning"; id: string; text: string; severity: "low" | "high" }
+  | { kind: "error"; message: string; id: string; recoverable?: boolean };
 
 export type PendingConfirm = {
   id: number;
   kind: "run_command" | "run_background";
   command: string;
+  prompt: import("@reasonix/core-utils").ApprovalPrompt;
 };
 
 export type PendingPathAccess = {
@@ -103,6 +170,7 @@ export type PendingPathAccess = {
   toolName: string;
   sandboxRoot: string;
   allowPrefix: string;
+  prompt: import("@reasonix/core-utils").ApprovalPrompt;
 };
 
 export type PendingChoice = {
@@ -161,33 +229,93 @@ export type UsageStats = {
   lastCallCacheMiss: number | null;
   /** System prompt + tool specs — constant for the session, sent on tab open. */
   reservedTokens: number;
+  /** Current conversation log tokens, refreshed by the desktop sidecar. */
+  liveLogTokens: number;
 };
+
+type CcSwitchImportResult = {
+  source: "db" | "config";
+  path: string;
+  servers: ImportedMcpServer[];
+};
+
+type WindowControls = Pick<
+  ReturnType<typeof getCurrentWindow>,
+  "isFullscreen" | "isMaximized" | "setFullscreen" | "toggleMaximize"
+>;
+
+export function readWindowExpanded(win: WindowControls, isMac: boolean): Promise<boolean> {
+  return isMac ? win.isFullscreen() : win.isMaximized();
+}
+
+export function toggleWindowExpanded(
+  win: WindowControls,
+  isMac: boolean,
+  expanded: boolean,
+): Promise<void> {
+  if (isMac) return win.setFullscreen(!expanded);
+  return win.toggleMaximize();
+}
 
 export type SessionInfo = {
   name: string;
   messageCount: number;
   mtime: string;
   summary?: string;
+  workspaceStatus?: "matched" | "legacy_missing_meta";
 };
 
 export type Settings = {
-  reasoningEffort: "high" | "max";
-  editMode: "review" | "auto" | "yolo";
+  reasoningEffort: "low" | "medium" | "high" | "max";
+  editMode: "review" | "auto" | "yolo" | "plan";
   budgetUsd: number | null;
   baseUrl?: string;
   apiKeyPrefix?: string;
   workspaceDir: string;
   recentWorkspaces: string[];
   model: string;
-  preset: "auto" | "flash" | "pro";
   editor?: string;
+  desktopCloseBehavior?: "closeToTray" | "closeToQuit";
+  webSearchEngine?:
+    | "bing"
+    | "bing-intl"
+    | "searxng"
+    | "metaso"
+    | "baidu"
+    | "tavily"
+    | "perplexity"
+    | "exa"
+    | "brave"
+    | "ollama";
+  webSearchEndpoint?: string;
+  webSearchApiKeys?: {
+    metaso?: string;
+    baidu?: string;
+    tavily?: string;
+    perplexity?: string;
+    exa?: string;
+    ollama?: string;
+    brave?: string;
+  };
+  subagentModels?: Record<string, "flash" | "pro">;
+  /** Per-model context-window override (tokens). */
+  contextTokens?: Record<string, number>;
+  showSystemEvents?: boolean;
   version: string;
+};
+
+export type BalanceInfoItem = {
+  currency: string;
+  total: number;
+  granted?: number;
+  toppedUp?: number;
 };
 
 export type Balance = {
   currency: string;
   total: number;
   isAvailable: boolean;
+  infos: BalanceInfoItem[];
 };
 
 type MentionResults = { nonce: number; query: string; results: string[] };
@@ -196,6 +324,13 @@ type MentionPreviewState = {
   path: string;
   head: string;
   totalLines: number;
+};
+
+type PromptHistoryNavState = {
+  mode: "idle" | "browsing";
+  draft: string;
+  cursor: PromptHistoryCursor | null;
+  originSessionName: string | null;
 };
 
 type State = {
@@ -214,21 +349,31 @@ type State = {
   activePlan: ActivePlan | null;
   usage: UsageStats;
   sessions: SessionInfo[];
+  externalImportSources: ExternalSessionApp[];
   settings: Settings | null;
+  qq: QQDesktopSettingsState | null;
   balance: Balance | null;
   mentionResults: MentionResults | null;
   mentionPreview: MentionPreviewState | null;
+  promptHistoryResult: {
+    nonce: number;
+    entry: { value: string; cursor: PromptHistoryCursor } | null;
+  } | null;
   mcpSpecs: McpSpecInfo[];
   mcpBridged: boolean;
   skills: SkillInfo[];
   /** Files the agent has read or modified this session — paths as the tool args provided them. */
   sessionFiles: SessionFile[];
   memory: MemoryEntryInfo[];
+  memoryDetail: MemoryDetail | null;
   jobs: JobInfo[];
   /** Live "skill running" indicator — set when a `skill_run` RPC dispatches, cleared on `$turn_complete`. */
   activeSkill: SkillOrigin | null;
   /** Messages typed while busy=true — auto-sent FIFO once the current turn completes. Cleared on `clear`, `rpc_exit`, `session_loaded`. */
   queuedSends: string[];
+  /** Populated by $retry_result — component useEffect reads and sets composer draft. */
+  retryText?: string;
+  retryNonce: number;
 };
 
 export type SessionFile = {
@@ -257,33 +402,78 @@ type Action =
   | { t: "resolve_checkpoint"; id: number; verdict: CheckpointVerdict }
   | { t: "resolve_revision"; id: number; verdict: RevisionVerdict }
   | { t: "dismiss_plan" }
+  | { t: "dismiss_error"; id: string }
   | { t: "mention_results"; results: MentionResults }
   | { t: "mention_preview"; preview: MentionPreviewState }
   | { t: "enqueue_send"; text: string }
   | { t: "dequeue_send"; index: number }
-  | { t: "shift_queued_send" };
+  | { t: "shift_queued_send" }
+  | { t: "settings_patch"; patch: SettingsPatch }
+  | { t: "push_status"; text: string };
 
-function reduce(state: State, action: Action): State {
+function sanitizeSettingsPatch(patch: SettingsPatch): Partial<Settings> {
+  const {
+    metasoApiKey: _metaso,
+    baiduApiKey: _baidu,
+    tavilyApiKey: _tavily,
+    perplexityApiKey: _perplexity,
+    exaApiKey: _exa,
+    ollamaApiKey: _ollama,
+    webSearchEndpoint,
+    ...rest
+  } = patch;
+  const sanitized: Partial<Settings> = { ...rest };
+  if (webSearchEndpoint !== undefined) {
+    sanitized.webSearchEndpoint = webSearchEndpoint ?? undefined;
+  }
+  return sanitized;
+}
+
+function fallbackSkillDesc(skill: SkillInfo): string {
+  const scope =
+    skill.scope === "builtin"
+      ? t("app.skill.scope.builtin")
+      : skill.scope === "global"
+        ? t("app.skill.scope.global")
+        : t("app.skill.scope.project");
+  const runAs =
+    skill.runAs === "subagent"
+      ? t("app.skill.runAs.subagent")
+      : t("app.skill.runAs.inline");
+  return t("app.skill.generic", { scope, runAs });
+}
+
+function nextMessageTurn(messages: ChatMessage[]): number {
+  const lastTurn = messages.reduce((max, m) => {
+    if (m.kind === "user" || m.kind === "assistant") return Math.max(max, m.turn);
+    return max;
+  }, 0);
+  return lastTurn + 1;
+}
+
+let _errSeq = 0;
+function nextErrorId(): string {
+  _errSeq += 1;
+  return `err-${Date.now().toString(36)}-${_errSeq}`;
+}
+
+export function reduce(state: State, action: Action): State {
+  return withElidedTranscript(reduceRaw(state, action));
+}
+
+function reduceRaw(state: State, action: Action): State {
   switch (action.t) {
     case "send_user": {
-      const lastTurn = state.messages.reduce((max, m) => {
-        if (m.kind === "user" || m.kind === "assistant") return Math.max(max, m.turn);
-        return max;
-      }, 0);
       return {
         ...state,
         busy: true,
         messages: [
           ...state.messages,
-          { kind: "user", text: action.text, clientId: action.clientId, turn: lastTurn + 1 },
+          { kind: "user", text: action.text, clientId: action.clientId, turn: nextMessageTurn(state.messages) },
         ],
       };
     }
     case "start_skill": {
-      const lastTurn = state.messages.reduce((max, m) => {
-        if (m.kind === "user" || m.kind === "assistant") return Math.max(max, m.turn);
-        return max;
-      }, 0);
       const argsLine = action.args ? ` ${action.args}` : "";
       return {
         ...state,
@@ -295,7 +485,7 @@ function reduce(state: State, action: Action): State {
             kind: "user",
             text: `/${action.skill.name}${argsLine}`,
             clientId: action.clientId,
-            turn: lastTurn + 1,
+            turn: nextMessageTurn(state.messages),
             skill: action.skill,
           },
         ],
@@ -310,11 +500,19 @@ function reduce(state: State, action: Action): State {
         queuedSends: [],
         messages: [
           ...state.messages,
-          { kind: "error", message: `reasonix exited (code ${action.code ?? "?"})` },
+          {
+            kind: "error",
+            message: `reasonix exited (code ${action.code ?? "?"})`,
+            id: nextErrorId(),
+          },
         ],
       };
     case "incoming":
       return applyIncoming(state, action.event);
+    case "settings_patch":
+      return state.settings
+        ? { ...state, settings: { ...state.settings, ...sanitizeSettingsPatch(action.patch) } }
+        : state;
     case "batch_delta": {
       const collapsed: DeltaBatchItem[] = [];
       for (const item of action.items) {
@@ -360,6 +558,7 @@ function reduce(state: State, action: Action): State {
         sessionFiles: [],
         activeSkill: null,
         queuedSends: [],
+        retryNonce: 0,
       };
     case "resolve_confirm":
       return {
@@ -419,6 +618,13 @@ function reduce(state: State, action: Action): State {
     }
     case "dismiss_plan":
       return { ...state, activePlan: null };
+    case "dismiss_error":
+      return {
+        ...state,
+        messages: state.messages.filter(
+          (m) => !(m.kind === "error" && m.id === action.id),
+        ),
+      };
     case "mention_results":
       return { ...state, mentionResults: action.results };
     case "mention_preview":
@@ -432,11 +638,95 @@ function reduce(state: State, action: Action): State {
       };
     case "shift_queued_send":
       return { ...state, queuedSends: state.queuedSends.slice(1) };
+    case "push_status":
+      return { ...state, messages: [...state.messages, { kind: "status", text: action.text }] };
   }
+}
+
+function withElidedTranscript(state: State): State {
+  const messages = elideTranscriptMessages(state.messages);
+  return messages === state.messages ? state : { ...state, messages };
 }
 
 const READING_TOOLS = new Set(["read_file"]);
 const MODIFYING_TOOLS = new Set(["edit_file", "write_file"]);
+
+type FileStat = { filename: string; added: number; removed: number };
+type FileStats = { entries: FileStat[]; totalAdded: number; totalRemoved: number };
+
+function countFileStats(segments: AssistantSegment[]): FileStats | null {
+  const entries: FileStat[] = [];
+  for (const s of segments) {
+    if (s.kind !== "tool" || !s.result || s.ok === false) continue;
+    if (s.name === "edit_file" || s.name === "multi_edit") {
+      for (const f of parseEditResult(s.result)) {
+        let added = 0;
+        let removed = 0;
+        for (const ln of f.lines) {
+          if (ln.t === "add") added++;
+          else if (ln.t === "rm") removed++;
+        }
+        entries.push({ filename: f.filename, added, removed });
+      }
+    } else if (s.name === "write_file") {
+      let lines = 0;
+      try {
+        const parsed = JSON.parse(s.args);
+        if (typeof parsed.content === "string") {
+          lines = parsed.content.split("\n").length;
+        }
+      } catch {
+        /* args unparseable */
+      }
+      let filename = "";
+      try {
+        filename = JSON.parse(s.args)?.path ?? "";
+      } catch {
+        /* ignore */
+      }
+      entries.push({ filename, added: lines, removed: 0 });
+    }
+  }
+  if (entries.length === 0) return null;
+  const totalAdded = entries.reduce((s, e) => s + e.added, 0);
+  const totalRemoved = entries.reduce((s, e) => s + e.removed, 0);
+  return { entries, totalAdded, totalRemoved };
+}
+
+function DiffStats({ stats }: { stats: FileStats }) {
+  const [open, setOpen] = useState(false);
+  const total = stats.entries.length;
+  return (
+    <div className="diff-stats">
+      <button
+        type="button"
+        className="diff-stats-head"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className="ico">
+          <I.diff size={11} />
+        </span>
+        <span>
+          {total} {total === 1 ? "file" : "files"} changed · +{stats.totalAdded} / −{stats.totalRemoved} {stats.totalRemoved === 1 ? "line" : "lines"}
+        </span>
+        <span className="chev">{open ? <I.chev size={10} /> : <I.chevR size={10} />}</span>
+      </button>
+      {open ? (
+        <div className="diff-stats-body">
+          {stats.entries.map((e) => (
+            <div key={e.filename} className="diff-stats-row">
+              <span className="fn">{e.filename}</span>
+              <span className="counts">
+                <span className="add">+{e.added}</span>
+                {e.removed > 0 ? <span className="rm"> / −{e.removed}</span> : null}
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 function extractToolFiles(name: string, args: string): SessionFile[] {
   try {
@@ -497,6 +787,7 @@ function zeroUsage(): UsageStats {
     lastCallCacheHit: null,
     lastCallCacheMiss: null,
     reservedTokens: 0,
+    liveLogTokens: 0,
   };
 }
 
@@ -512,20 +803,56 @@ function appendTextSegment(
   return [...segments, { kind, text }];
 }
 
-function applyIncoming(state: State, ev: IncomingEvent): State {
+export function applyIncoming(state: State, ev: IncomingEvent): State {
+  return withElidedTranscript(applyIncomingRaw(state, ev));
+}
+
+function applyIncomingRaw(state: State, ev: IncomingEvent): State {
   switch (ev.type) {
+    case "user.message": {
+      return {
+        ...state,
+        busy: true,
+        messages: [
+          ...state.messages,
+          {
+            kind: "user",
+            text: ev.text,
+            clientId: `remote-${ev.id}`,
+            turn: ev.turn > 0 ? ev.turn : nextMessageTurn(state.messages),
+          },
+        ],
+      };
+    }
     case "$ready":
       return { ...state, ready: true, needsSetup: false };
     case "$needs_setup":
       return { ...state, needsSetup: true, ready: false };
     case "$turn_complete":
-      return { ...state, busy: false, activeSkill: null };
+      // Clear pause-gate-tied modals too. By the time the loop emits
+      // $turn_complete, anything still in these arrays is orphaned — the
+      // tool call that opened it has either resolved (so it's gone already)
+      // or the turn was aborted (so the model isn't coming back for it).
+      // Without this, an Esc/abort during plan approval leaves the plan
+      // card rendered AFTER state.messages forever; the queued user input
+      // that drains next then appears above the zombie card (#1456).
+      return {
+        ...state,
+        busy: false,
+        activeSkill: null,
+        pendingConfirms: [],
+        pendingPathAccess: [],
+        pendingChoices: [],
+        pendingPlans: [],
+        pendingCheckpoints: [],
+        pendingRevisions: [],
+      };
     case "$confirm_required":
       return {
         ...state,
         pendingConfirms: [
           ...state.pendingConfirms,
-          { id: ev.id, kind: ev.kind, command: ev.command },
+          { id: ev.id, kind: ev.kind, command: ev.command, prompt: ev.prompt! },
         ],
       };
     case "$path_access_required":
@@ -540,6 +867,7 @@ function applyIncoming(state: State, ev: IncomingEvent): State {
             toolName: ev.toolName,
             sandboxRoot: ev.sandboxRoot,
             allowPrefix: ev.allowPrefix,
+            prompt: ev.prompt!,
           },
         ],
       };
@@ -617,14 +945,49 @@ function applyIncoming(state: State, ev: IncomingEvent): State {
       };
     case "$sessions":
       return { ...state, sessions: ev.items };
+    case "$session_import_sources":
+      return { ...state, externalImportSources: ev.apps };
+    case "$session_import_result":
+      return {
+        ...state,
+        messages: [
+          ...state.messages,
+          {
+            kind: "status",
+            text: t("sidebarPanel.importResult", {
+              imported: ev.imported,
+              skipped: ev.skipped,
+              failed: ev.failed,
+            }),
+          },
+        ],
+      };
     case "$mcp_specs":
-      return { ...state, mcpSpecs: ev.specs, mcpBridged: ev.bridged };
+      return {
+        ...state,
+        mcpSpecs: Array.isArray(ev.specs) ? ev.specs : [],
+        mcpBridged: Boolean(ev.bridged),
+      };
     case "$skills":
       return { ...state, skills: ev.items };
-    case "$ctx_breakdown":
-      return { ...state, usage: { ...state.usage, reservedTokens: ev.reservedTokens } };
+    case "$ctx_breakdown": {
+      const next: UsageStats = { ...state.usage, reservedTokens: ev.reservedTokens };
+      if (typeof ev.logTokens === "number") {
+        next.liveLogTokens = ev.logTokens;
+      }
+      return { ...state, usage: next };
+    }
     case "$memory":
-      return { ...state, memory: ev.entries };
+      return {
+        ...state,
+        memory: ev.entries,
+        memoryDetail:
+          state.memoryDetail && ev.entries.some((entry) => entry.path === state.memoryDetail?.path)
+            ? state.memoryDetail
+            : null,
+      };
+    case "$memory_detail":
+      return { ...state, memoryDetail: ev.detail };
     case "$jobs":
       return { ...state, jobs: ev.items };
     case "$balance":
@@ -634,6 +997,22 @@ function applyIncoming(state: State, ev: IncomingEvent): State {
           currency: ev.currency,
           total: ev.total,
           isAvailable: ev.isAvailable,
+          infos: ev.balanceInfos ?? [],
+        },
+      };
+    case "$qq_settings":
+      return {
+        ...state,
+        qq: {
+          appId: ev.appId,
+          appSecret: ev.appSecret,
+          sandbox: ev.sandbox,
+          enabled: ev.enabled,
+          configured: ev.configured,
+          runtimeState: ev.runtimeState,
+          lastError: ev.lastError,
+          appIdPreview: ev.appIdPreview,
+          access: ev.access,
         },
       };
     case "$settings": {
@@ -652,6 +1031,7 @@ function applyIncoming(state: State, ev: IncomingEvent): State {
         activePlan: wsChanged ? null : state.activePlan,
         usage: wsChanged ? zeroUsage() : state.usage,
         sessionFiles: wsChanged ? [] : state.sessionFiles,
+        retryNonce: wsChanged ? 0 : state.retryNonce,
         settings: {
           reasoningEffort: ev.reasoningEffort,
           editMode: ev.editMode,
@@ -661,8 +1041,13 @@ function applyIncoming(state: State, ev: IncomingEvent): State {
           workspaceDir: ev.workspaceDir,
           recentWorkspaces: ev.recentWorkspaces,
           model: ev.model,
-          preset: ev.preset,
           editor: ev.editor,
+          desktopCloseBehavior: ev.desktopCloseBehavior,
+          webSearchEngine: ev.webSearchEngine,
+          webSearchEndpoint: ev.webSearchEndpoint,
+          webSearchApiKeys: ev.webSearchApiKeys,
+          subagentModels: ev.subagentModels,
+          showSystemEvents: ev.showSystemEvents,
           version: ev.version,
         },
       };
@@ -716,22 +1101,66 @@ function applyIncoming(state: State, ev: IncomingEvent): State {
           ...zeroUsage(),
           totalCostUsd: ev.carryover.totalCostUsd,
           totalPromptTokens: ev.carryover.cacheHitTokens + ev.carryover.cacheMissTokens,
+          totalCompletionTokens: ev.carryover.totalCompletionTokens ?? 0,
           cacheHitTokens: ev.carryover.cacheHitTokens,
           cacheMissTokens: ev.carryover.cacheMissTokens,
         },
         sessionFiles,
         activeSkill: null,
         queuedSends: [],
+        retryNonce: 0,
       };
     }
+    case "$session_empty": {
+      // The sidecar successfully ran loadSessionMessages but the jsonl is
+      // empty / all-malformed. Without this, the click looks like a no-op
+      // because the chat just re-renders empty. Issue #1179.
+      const sizeNote = ev.sizeBytes === 0 ? "0 bytes" : `${ev.sizeBytes} bytes, no valid entries`;
+      return {
+        ...state,
+        messages: [
+          ...state.messages,
+          {
+            kind: "error",
+            message:
+              `Session "${ev.name}" loaded with no messages (${sizeNote}). ` +
+              `The file ~/.reasonix/sessions/${ev.name}.jsonl exists but couldn't be parsed — ` +
+              `start a new chat or restore from .jsonl.bak if you have one.`,
+            id: nextErrorId(),
+          },
+        ],
+      };
+    }
+    case "$prompt_history_result":
+      return {
+        ...state,
+        promptHistoryResult: { nonce: ev.nonce, entry: ev.entry },
+      };
     case "$error":
-    case "error":
+    case "error": {
+      // Kernel-level errors carry a `recoverable` flag — true for
+      // storm-repair / repeat-loop warnings the loop already worked
+      // around, false for hard failures. The desktop renders both as
+      // dismissable cards but uses softer tone for the recoverable
+      // ones so a session full of self-repaired loops doesn't look
+      // like everything's on fire (#1456-followup).
+      const recoverable = ev.type === "error" ? ev.recoverable : false;
+      // Loop has returned (any error path ends the turn); flip the still-
+      // streaming assistant message to settled so the UI doesn't keep
+      // showing a "thinking" spinner above the error card (#1660).
+      const settled = state.messages.map((m) =>
+        m.kind === "assistant" && m.pending ? { ...m, pending: false } : m,
+      );
       return {
         ...state,
         busy: false,
         activeSkill: null,
-        messages: [...state.messages, { kind: "error", message: ev.message }],
+        messages: [
+          ...settled,
+          { kind: "error", message: ev.message, id: nextErrorId(), recoverable },
+        ],
       };
+    }
     case "model.turn.started":
       if (state.messages.some((m) => m.kind === "assistant" && m.turn === ev.turn)) {
         return { ...state, model: ev.model };
@@ -744,123 +1173,174 @@ function applyIncoming(state: State, ev: IncomingEvent): State {
           { kind: "assistant", turn: ev.turn, segments: [], pending: true },
         ],
       };
-    case "model.delta":
-      return {
-        ...state,
-        messages: state.messages.map((m) => {
-          if (m.kind !== "assistant" || m.turn !== ev.turn) return m;
-          if (ev.channel === "content") {
-            return { ...m, segments: appendTextSegment(m.segments, "text", ev.text) };
-          }
-          if (ev.channel === "reasoning") {
-            return { ...m, segments: appendTextSegment(m.segments, "reasoning", ev.text) };
-          }
-          return m;
-        }),
-      };
+    case "model.delta": {
+      // Walk backwards — streaming always targets the latest assistant message
+      for (let i = state.messages.length - 1; i >= 0; i--) {
+        const m = state.messages[i]!;
+        if (m.kind !== "assistant" || m.turn !== ev.turn) continue;
+        let updated = m;
+        if (ev.channel === "content") updated = { ...m, segments: appendTextSegment(m.segments, "text", ev.text) };
+        else if (ev.channel === "reasoning") updated = { ...m, segments: appendTextSegment(m.segments, "reasoning", ev.text) };
+        const next = [...state.messages];
+        next[i] = updated;
+        return { ...state, messages: next };
+      }
+      return state;
+    }
     case "model.final": {
       const u = ev.usage;
+      const promptTokens =
+        u?.prompt_tokens ??
+        (u?.prompt_cache_hit_tokens ?? 0) + (u?.prompt_cache_miss_tokens ?? 0);
       const callHit = u?.prompt_cache_hit_tokens ?? 0;
-      const callMiss = u?.prompt_cache_miss_tokens ?? 0;
-      const hasCall = callHit > 0 || callMiss > 0;
+      const callMiss = u?.prompt_cache_miss_tokens ?? Math.max(0, promptTokens - callHit);
+      const hasCall = promptTokens > 0 || callHit > 0 || callMiss > 0;
       const usage: UsageStats = {
         totalCostUsd: state.usage.totalCostUsd + (ev.costUsd ?? 0),
-        totalPromptTokens: state.usage.totalPromptTokens + (u?.prompt_tokens ?? 0),
+        totalPromptTokens: state.usage.totalPromptTokens + promptTokens,
         totalCompletionTokens: state.usage.totalCompletionTokens + (u?.completion_tokens ?? 0),
         cacheHitTokens: state.usage.cacheHitTokens + callHit,
         cacheMissTokens: state.usage.cacheMissTokens + callMiss,
         lastCallCacheHit: hasCall ? callHit : state.usage.lastCallCacheHit,
         lastCallCacheMiss: hasCall ? callMiss : state.usage.lastCallCacheMiss,
         reservedTokens: state.usage.reservedTokens,
+        liveLogTokens: state.usage.liveLogTokens,
       };
-      return {
-        ...state,
-        usage,
-        messages: state.messages.map((m) => {
-          if (m.kind !== "assistant" || m.turn !== ev.turn) return m;
-          return { ...m, pending: false };
-        }),
-      };
+      // Walk backwards to clear pending flag on the matching assistant
+      let settledPending = false;
+      for (let i = state.messages.length - 1; i >= 0; i--) {
+        const m = state.messages[i]!;
+        if (m.kind !== "assistant" || m.turn !== ev.turn) continue;
+        if (m.pending) {
+          const s = [...state.messages];
+          s[i] = { ...m, pending: false };
+          state = { ...state, messages: s };
+        }
+        settledPending = true;
+        break;
+      }
+      return settledPending ? { ...state, usage } : { ...state, usage };
     }
-    case "tool.preparing":
-      return {
-        ...state,
-        messages: state.messages.map((m) => {
-          if (m.kind !== "assistant" || m.turn !== ev.turn) return m;
-          if (m.segments.some((s) => s.kind === "tool" && s.callId === ev.callId)) return m;
-          return {
-            ...m,
-            segments: [
-              ...m.segments,
-              {
-                kind: "tool",
-                callId: ev.callId,
-                name: ev.name,
-                args: "",
-                startedAt: Date.now(),
-              },
-            ],
-          };
-        }),
-      };
+    case "tool.preparing": {
+      for (let i = state.messages.length - 1; i >= 0; i--) {
+        const m = state.messages[i]!;
+        if (m.kind !== "assistant" || m.turn !== ev.turn) continue;
+        if (m.segments.some((s) => s.kind === "tool" && s.callId === ev.callId)) return state;
+        const next = [...state.messages];
+        next[i] = { ...m, segments: [...m.segments, { kind: "tool" as const, callId: ev.callId, name: ev.name, args: "", startedAt: Date.now() }] };
+        return { ...state, messages: next };
+      }
+      return state;
+    }
     case "tool.intent": {
       const adds = extractToolFiles(ev.name, ev.args);
-      return {
-        ...state,
-        sessionFiles: mergeSessionFiles(state.sessionFiles, adds),
-        messages: state.messages.map((m) => {
-          if (m.kind !== "assistant" || m.turn !== ev.turn) return m;
-          const idx = m.segments.findIndex((s) => s.kind === "tool" && s.callId === ev.callId);
-          if (idx >= 0) {
-            const segs = [...m.segments];
-            const seg = segs[idx];
-            if (seg?.kind === "tool") {
-              segs[idx] = { ...seg, args: ev.args };
-            }
-            return { ...m, segments: segs };
-          }
-          return {
-            ...m,
-            segments: [
-              ...m.segments,
-              {
-                kind: "tool",
-                callId: ev.callId,
-                name: ev.name,
-                args: ev.args,
-                startedAt: Date.now(),
-              },
-            ],
-          };
-        }),
-      };
+      let nextState = { ...state, sessionFiles: mergeSessionFiles(state.sessionFiles, adds) };
+      for (let i = state.messages.length - 1; i >= 0; i--) {
+        const m = state.messages[i]!;
+        if (m.kind !== "assistant" || m.turn !== ev.turn) continue;
+        const idx = m.segments.findIndex((s) => s.kind === "tool" && s.callId === ev.callId);
+        if (idx >= 0) {
+          const segs = [...m.segments];
+          if (segs[idx]?.kind === "tool") segs[idx] = { ...(segs[idx] as AssistantSegment & { kind: "tool" }), args: ev.args };
+          const msgs = [...nextState.messages];
+          msgs[i] = { ...m, segments: segs };
+          nextState = { ...nextState, messages: msgs };
+        } else {
+          const msgs = [...nextState.messages];
+          msgs[i] = { ...m, segments: [...m.segments, { kind: "tool" as const, callId: ev.callId, name: ev.name, args: ev.args, startedAt: Date.now() }] };
+          nextState = { ...nextState, messages: msgs };
+        }
+        break;
+      }
+      return nextState;
     }
-    case "tool.result":
+    case "tool.result": {
+      for (let i = state.messages.length - 1; i >= 0; i--) {
+        const m = state.messages[i]!;
+        if (m.kind !== "assistant") continue;
+        let mutated = false;
+        const segs = m.segments.map((s) => {
+          if (s.kind === "tool" && s.callId === ev.callId) {
+            mutated = true;
+            return { ...s, result: ev.output, ok: ev.ok, durationMs: Date.now() - s.startedAt };
+          }
+          return s;
+        });
+        if (!mutated) continue;
+        const next = [...state.messages];
+        next[i] = { ...m, segments: segs };
+        return { ...state, messages: next };
+      }
+      return state;
+    }
+    case "$retry_result":
+      return { ...state, retryText: ev.text, retryNonce: state.retryNonce + 1 };
+    case "$btw_result":
       return {
         ...state,
-        messages: state.messages.map((m) => {
-          if (m.kind !== "assistant") return m;
-          let mutated = false;
-          const segs = m.segments.map((s) => {
-            if (s.kind === "tool" && s.callId === ev.callId) {
-              mutated = true;
-              return {
-                ...s,
-                result: ev.output,
-                ok: ev.ok,
-                durationMs: Date.now() - s.startedAt,
-              };
-            }
-            return s;
-          });
-          return mutated ? { ...m, segments: segs } : m;
-        }),
+        busy: false,
+        messages: [
+          ...state.messages,
+          { kind: "status", text: `≫ btw\n${ev.answer}` },
+        ],
       };
     case "status":
       return state;
+    case "warning":
+      // High-severity only — eventize already drops "low". Inline divider only.
+      if (ev.severity !== "high") return state;
+      return {
+        ...state,
+        messages: [
+          ...state.messages,
+          {
+            kind: "warning",
+            id: `w-${ev.id}`,
+            text: ev.text,
+            severity: ev.severity,
+          },
+        ],
+      };
     default:
       return state;
   }
+}
+
+function formatConversationMarkdown(messages: ChatMessage[], userLabel: string): string {
+  return messages
+    .map((m) => {
+      if (m.kind === "user") return `### ${userLabel}\n\n${m.text}`;
+      if (m.kind === "assistant") {
+        const body = m.segments
+          .map((s) => {
+            if (s.kind === "text") return s.text;
+            if (s.kind === "reasoning")
+              return `<details>\n<summary>${t("app.exportReasoningSummary")}</summary>\n\n${s.text}\n\n</details>`;
+            if (s.kind === "tool") {
+              const arg = s.args ? `\n\n\`\`\`json\n${s.args}\n\`\`\`` : "";
+              const res = s.result ? `\n\n\`\`\`\n${s.result}\n\`\`\`` : "";
+              return `> **${t("app.exportToolLabel")} · \`${s.name}\`**${arg}${res}`;
+            }
+            return "";
+          })
+          .filter(Boolean)
+          .join("\n\n");
+        return `### Reasonix\n\n${body}`;
+      }
+      if (m.kind === "error") return `### Error\n\n${m.message}`;
+      return "";
+    })
+    .filter(Boolean)
+    .join("\n\n---\n\n");
+}
+
+function sanitizeFilename(name: string): string {
+  return name.replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").replace(/^\.+/, "").slice(0, 200) || "session";
+}
+
+function defaultExportFilename(session: string): string {
+  const safe = sanitizeFilename(session);
+  return `${safe}.md`;
 }
 
 type TabAction = Action;
@@ -870,58 +1350,70 @@ interface TabRuntimeProps {
   tabId: string;
   active: boolean;
   currency: "CNY" | "USD";
-  pendingUpdate: Update | null;
-  updateStatus: "idle" | "installing" | "error";
-  installUpdate: () => void;
-  dismissUpdate: () => void;
   registerDispatch: (tabId: string, d: TabDispatcher | null) => void;
   onNewTab: () => void;
   onCloseTab: () => void;
   canCloseTab: boolean;
   theme: Theme;
+  themeStyle: ThemeStyle;
   onSetTheme: (theme: Theme) => void;
+  onSetThemeStyle: (style: ThemeStyle) => void;
   onToggleTheme: () => void;
   fontScale: FontScale;
   onSetFontScale: (scale: FontScale) => void;
   fontFamily: FontFamily;
   onSetFontFamily: (family: FontFamily) => void;
+  customFontFamily: string;
+  onSetCustomFontFamily: (family: string) => void;
   sideCollapsed: boolean;
   ctxCollapsed: boolean;
+  sideWidth: number;
+  ctxWidth: number;
+  threadMaxWidth: number;
+  onSideResizeDown: (e: React.MouseEvent) => void;
+  onCtxResizeDown: (e: React.MouseEvent) => void;
   onToggleSide: () => void;
   onToggleCtx: () => void;
   onToggleCurrency: () => void;
-  tabsList: { id: string; workspaceDir?: string }[];
+  tabsList: { id: string; workspaceDir?: string; busy?: boolean }[];
   activeTabId: string;
   setActiveTabId: (id: string) => void;
+  onBusyChange?: (tabId: string, busy: boolean) => void;
 }
 
 function TabRuntime({
   tabId,
   active,
   currency,
-  pendingUpdate,
-  updateStatus,
-  installUpdate,
-  dismissUpdate,
   registerDispatch,
   onNewTab,
   onCloseTab,
   canCloseTab,
   theme,
+  themeStyle,
   onSetTheme,
+  onSetThemeStyle,
   onToggleTheme,
   fontScale,
   onSetFontScale,
   fontFamily,
   onSetFontFamily,
+  customFontFamily,
+  onSetCustomFontFamily,
   sideCollapsed,
   ctxCollapsed,
+  sideWidth,
+  ctxWidth,
+  threadMaxWidth,
+  onSideResizeDown,
+  onCtxResizeDown,
   onToggleSide,
   onToggleCtx,
   onToggleCurrency,
   tabsList,
   activeTabId,
   setActiveTabId,
+  onBusyChange,
 }: TabRuntimeProps) {
   const [state, dispatch] = useReducer(reduce, {
     ready: false,
@@ -937,22 +1429,43 @@ function TabRuntime({
     activePlan: null,
     usage: zeroUsage(),
     sessions: [],
+    externalImportSources: [],
     settings: null,
+    qq: null,
     balance: null,
     mentionResults: null,
     mentionPreview: null,
+    promptHistoryResult: null,
     mcpSpecs: [],
     mcpBridged: false,
     skills: [],
     sessionFiles: [],
     memory: [],
+    memoryDetail: null,
     jobs: [],
     activeSkill: null,
     queuedSends: [],
+    retryNonce: 0,
   });
   useLang();
   useDisableTextAssist();
   const [draft, setDraft] = useState("");
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const [promptHistoryNav, setPromptHistoryNav] = useState<PromptHistoryNavState>({
+    mode: "idle",
+    draft: "",
+    cursor: null,
+    originSessionName: null,
+  });
+  const promptHistoryNavRef = useRef(promptHistoryNav);
+  promptHistoryNavRef.current = promptHistoryNav;
+  const promptHistoryRequestRef = useRef<{
+    nonce: number;
+    direction: "older" | "newer";
+    draft: string;
+  } | null>(null);
+  const promptHistoryNonceRef = useRef(0);
   const [toast, setToast] = useState<{ msg: string; yolo?: boolean } | null>(null);
   const [splashOn, setSplashOn] = useState<boolean>(() => shouldShowSplash());
   const [wdOpen, setWdOpen] = useState(false);
@@ -961,12 +1474,47 @@ function TabRuntime({
   >(undefined);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const threadRef = useRef<HTMLDivElement>(null);
-  const threadInnerRef = useRef<HTMLDivElement>(null);
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
+  const virtScrollerRef = useRef<HTMLDivElement | null>(null);
+  const atBottomRef = useRef(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsPage, setSettingsPage] = useState<SettingsPageId>("general");
+  const [mcpEditTarget, setMcpEditTarget] = useState<{ raw: string; nonce: number } | null>(
+    null,
+  );
   const [jobsOpen, setJobsOpen] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
+  const [contextPanelTab, setContextPanelTab] = useState<ContextPanelTab>("files");
+  const [contextPanelTabNonce, setContextPanelTabNonce] = useState(0);
+  const previousApprovalSnapshotRef = useRef<ApprovalSnapshot>({
+    confirms: [],
+    pathAccess: [],
+    choices: [],
+    plans: [],
+    checkpoints: [],
+    revisions: [],
+  });
+  const wasBusyRef = useRef(false);
+  const busyStartedAtRef = useRef<number | null>(null);
+  const abortDraftRef = useRef<string | null>(null);
+  const clearAbortDraft = useCallback(() => {
+    abortDraftRef.current = nextAbortDraftCandidate(abortDraftRef.current, { type: "clear" });
+  }, []);
+  const recordAbortDraft = useCallback((source: AbortDraftSource, text: string) => {
+    abortDraftRef.current = nextAbortDraftCandidate(abortDraftRef.current, {
+      type: "record",
+      source,
+      text,
+    });
+  }, []);
   const openSettingsAt = useCallback((page: SettingsPageId = "general") => {
     setSettingsPage(page);
+    setMcpEditTarget(null);
+    setSettingsOpen(true);
+  }, []);
+  const openMcpEditor = useCallback((spec: McpSpecInfo) => {
+    setSettingsPage("mcp");
+    setMcpEditTarget((prev) => ({ raw: spec.raw, nonce: (prev?.nonce ?? 0) + 1 }));
     setSettingsOpen(true);
   }, []);
   const palette = useCommandPalette(active);
@@ -976,6 +1524,10 @@ function TabRuntime({
     return () => registerDispatch(tabId, null);
   }, [tabId, registerDispatch]);
 
+  useEffect(() => {
+    onBusyChange?.(tabId, state.busy);
+  }, [tabId, state.busy, onBusyChange]);
+
   const sendRpc = useCallback(
     (cmd: OutgoingCommand) => {
       const payload = { tabId, ...cmd };
@@ -984,6 +1536,35 @@ function TabRuntime({
       );
     },
     [tabId],
+  );
+
+  const resetPromptHistoryNav = useCallback(() => {
+    promptHistoryRequestRef.current = null;
+    setPromptHistoryNav({
+      mode: "idle",
+      draft: "",
+      cursor: null,
+      originSessionName: null,
+    });
+  }, []);
+
+  const requestPromptHistoryNavigation = useCallback(
+    (direction: "older" | "newer", currentDraft: string) => {
+      const nav = promptHistoryNavRef.current;
+      if (direction === "newer" && nav.mode === "idle") return false;
+      const nonce = ++promptHistoryNonceRef.current;
+      promptHistoryRequestRef.current = { nonce, direction, draft: currentDraft };
+      sendRpc({
+        cmd: "prompt_history_step",
+        nonce,
+        direction,
+        cursor: nav.mode === "browsing" ? nav.cursor : null,
+        startSessionName: nav.mode === "idle" ? state.currentSession : undefined,
+        stopSessionName: nav.originSessionName ?? undefined,
+      });
+      return true;
+    },
+    [sendRpc, state.currentSession],
   );
 
   const queryMentions = useCallback(
@@ -1002,6 +1583,21 @@ function TabRuntime({
     (patch: SettingsPatch) => sendRpc({ cmd: "settings_save", ...patch }),
     [sendRpc],
   );
+  const applySettingsPatch = useCallback(
+    (patch: SettingsPatch) => {
+      dispatch({ t: "settings_patch", patch });
+      saveSettings(patch);
+    },
+    [saveSettings],
+  );
+  const loadQQSettings = useCallback(() => sendRpc({ cmd: "qq_status_get" }), [sendRpc]);
+  const connectQQ = useCallback(() => sendRpc({ cmd: "qq_connect" }), [sendRpc]);
+  const disconnectQQ = useCallback(() => sendRpc({ cmd: "qq_disconnect" }), [sendRpc]);
+  const saveQQConfig = useCallback(
+    (patch: { appId?: string; appSecret?: string; sandbox: boolean }) =>
+      sendRpc({ cmd: "qq_config_save", ...patch }),
+    [sendRpc],
+  );
   const saveApiKey = useCallback(
     (key: string) => sendRpc({ cmd: "setup_save_key", key }),
     [sendRpc],
@@ -1014,26 +1610,37 @@ function TabRuntime({
     (spec: string) => sendRpc({ cmd: "mcp_specs_remove", spec }),
     [sendRpc],
   );
+  const updateMcpSpec = useCallback(
+    (raw: string, server: ImportedMcpServer) => sendRpc({ cmd: "mcp_specs_update", raw, server }),
+    [sendRpc],
+  );
+  const retryMcpSpec = useCallback(
+    (raw: string) => sendRpc({ cmd: "mcp_specs_retry", raw }),
+    [sendRpc],
+  );
   const newChat = useCallback(() => {
+    clearAbortDraft();
+    resetPromptHistoryNav();
     sendRpc({ cmd: "new_chat" });
     dispatch({ t: "clear" });
-  }, [sendRpc]);
+  }, [clearAbortDraft, resetPromptHistoryNav, sendRpc]);
 
   const pickWorkspace = useCallback(async () => {
     try {
       const picked = await openDialog({
         directory: true,
         multiple: false,
-        title: "Pick workspace directory",
+        title: t("workdir.title"),
         defaultPath: state.settings?.workspaceDir,
       });
       if (typeof picked === "string" && picked.length > 0) {
+        clearAbortDraft();
         saveSettings({ workspaceDir: picked });
       }
     } catch (err) {
       console.error("pickWorkspace failed", err);
     }
-  }, [saveSettings, state.settings?.workspaceDir]);
+  }, [clearAbortDraft, saveSettings, state.settings?.workspaceDir]);
 
   const flashToast = useCallback(
     (msg: string, opts?: { yolo?: boolean; duration?: number }) => {
@@ -1041,6 +1648,108 @@ function TabRuntime({
       window.setTimeout(() => setToast(null), opts?.duration ?? 1600);
     },
     [],
+  );
+
+  const importCcSwitchMcp = useCallback(async () => {
+    try {
+      const result = await invoke<CcSwitchImportResult>("import_cc_switch_mcp");
+      const existingNames = new Set(
+        state.mcpSpecs
+          .map((spec) => spec.name)
+          .filter((name): name is string => typeof name === "string" && name.length > 0),
+      );
+      const pending = result.servers.filter((server) => !existingNames.has(server.name));
+      const skipped = result.servers.length - pending.length;
+      if (pending.length === 0) {
+        flashToast(t("toast.mcpImportNone"));
+        return;
+      }
+      await invoke("rpc_send", {
+        line: JSON.stringify({ tabId, cmd: "mcp_import_servers", servers: pending }),
+      });
+      flashToast(
+        skipped > 0
+          ? t("toast.mcpImportedWithSkipped", { imported: pending.length, skipped })
+          : t("toast.mcpImported", { imported: pending.length }),
+        { duration: 2600 },
+      );
+    } catch (err) {
+      flashToast(t("toast.mcpImportFailed", { error: String(err) }), { duration: 3200 });
+      throw err;
+    }
+  }, [flashToast, state.mcpSpecs, tabId]);
+
+  const openMcpStatus = useCallback(() => {
+    setContextPanelTab("tools");
+    setContextPanelTabNonce((nonce) => nonce + 1);
+    if (ctxCollapsed) onToggleCtx();
+    flashToast(t("toast.mcpStatusOpened"));
+  }, [ctxCollapsed, flashToast, onToggleCtx]);
+
+  const retryFailedMcpSpecs = useCallback(() => {
+    const failed = state.mcpSpecs.filter((spec) => spec.status === "failed");
+    if (failed.length === 0) {
+      flashToast(t("toast.mcpRetryNone"));
+      return;
+    }
+    for (const spec of failed) retryMcpSpec(spec.raw);
+    flashToast(t("toast.mcpRetryQueued", { count: failed.length }), { duration: 2200 });
+  }, [flashToast, retryMcpSpec, state.mcpSpecs]);
+
+  const runMcpSlashCommand = useCallback(
+    (arg?: string) => {
+      const subcommand = arg?.trim().toLowerCase() ?? "";
+      if (!subcommand || subcommand === "settings" || subcommand === "config") {
+        openSettingsAt("mcp");
+        return true;
+      }
+      if (subcommand === "status" || subcommand === "list" || subcommand === "ls") {
+        openMcpStatus();
+        return true;
+      }
+      if (subcommand === "retry" || subcommand === "reconnect") {
+        retryFailedMcpSpecs();
+        return true;
+      }
+      if (subcommand === "import" || subcommand === "cc-switch" || subcommand === "ccswitch") {
+        openSettingsAt("mcp");
+        void importCcSwitchMcp().catch(() => undefined);
+        return true;
+      }
+      return false;
+    },
+    [importCcSwitchMcp, openMcpStatus, openSettingsAt, retryFailedMcpSpecs],
+  );
+
+  const applyReasoningEffort = useCallback(
+    (reasoningEffort: Settings["reasoningEffort"]) => {
+      applySettingsPatch({ reasoningEffort });
+      flashToast(t("app.toast.effortSwitched", { effort: reasoningEffort }));
+    },
+    [applySettingsPatch, flashToast],
+  );
+
+  const applyEditMode = useCallback(
+    (mode: Settings["editMode"]) => {
+      applySettingsPatch({ editMode: mode });
+      if (mode === "yolo") {
+        flashToast(t("app.yolo.toast"), { yolo: true, duration: 3000 });
+      } else {
+        flashToast(t("app.toast.modeSwitched", { mode: mode.toUpperCase() }));
+      }
+    },
+    [applySettingsPatch, flashToast],
+  );
+
+  const applySlashSettingsCommand = useCallback(
+    (command: SlashSettingsCommand) => {
+      if (command.type === "reasoningEffort") {
+        applyReasoningEffort(command.reasoningEffort);
+      } else {
+        applyEditMode(command.editMode);
+      }
+    },
+    [applyEditMode, applyReasoningEffort],
   );
 
   // Drag-and-drop: dropping files/folders onto the window inserts them
@@ -1111,15 +1820,123 @@ function TabRuntime({
     (override?: string) => {
       const text = (override ?? draft).trim();
       if (!text || !state.ready || state.busy) return;
+      resetPromptHistoryNav();
+
+      const settingsCommand = parseSlashSettingsCommand(text);
+      if (settingsCommand) {
+        applySlashSettingsCommand(settingsCommand);
+        if (!override) setDraft("");
+        return;
+      }
+
+      // /btw <question> — route to side-question RPC instead of user_input.
+      // Empty payload used to silently swallow the keystroke (#1370); surface
+      // the usage hint as a status message so the user knows what's expected.
+      // The full /btw line is echoed via send_user so the typed text appears
+      // immediately and busy=true gives a thinking indicator while the side
+      // call runs (#1470).
+      const btwMatch = /^\/btw(?:\s+([\s\S]+))?$/.exec(text);
+      if (btwMatch) {
+        const question = btwMatch[1]?.trim() ?? "";
+        if (!question) {
+          dispatch({ t: "push_status", text: t("app.btwUsage") });
+          if (!override) setDraft("/btw ");
+          return;
+        }
+        const clientId = `btw-${Date.now()}`;
+        recordAbortDraft("btw", text);
+        dispatch({ t: "send_user", text, clientId });
+        sendRpc({ cmd: "btw", text: question });
+        if (!override) setDraft("");
+        return;
+      }
+
+      const skillMatch = text.match(/^\/([a-zA-Z0-9_-]+)(\s+.*)?$/);
+      if (skillMatch) {
+        const [, name, args] = skillMatch;
+        if (name === "search-engine" || name === "se") {
+          openSettingsAt("general");
+          if (!override) setDraft("");
+          return;
+        }
+        if (name === "mcp") {
+          if (runMcpSlashCommand(args?.trim())) {
+            if (!override) setDraft("");
+            return;
+          }
+        }
+        if (name === "skill" || name === "skills") {
+          openSettingsAt("skills");
+          if (!override) setDraft("");
+          return;
+        }
+        const skill = state.skills.find((s) => s.name === name);
+        if (skill) {
+          const clientId = `skill-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+          const trimmedArgs = args?.trim() ?? "";
+          recordAbortDraft("skill_run", text);
+          dispatch({ t: "start_skill", skill: { name: skill.name, runAs: skill.runAs }, args: trimmedArgs, clientId });
+          sendRpc({ cmd: "skill_run", name: skill.name, args: trimmedArgs || undefined });
+          if (!override) setDraft("");
+          return;
+        }
+      }
       const clientId = `c-${Date.now()}`;
+      recordAbortDraft("user_input", text);
       dispatch({ t: "send_user", text, clientId });
       sendRpc({ cmd: "user_input", text });
       if (!override) setDraft("");
     },
-    [draft, state.ready, state.busy, sendRpc],
+    [
+      draft,
+      state.ready,
+      state.busy,
+      state.skills,
+      sendRpc,
+      recordAbortDraft,
+      applySlashSettingsCommand,
+      openSettingsAt,
+      resetPromptHistoryNav,
+      runMcpSlashCommand,
+    ],
   );
 
-  const abort = useCallback(() => sendRpc({ cmd: "abort" }), [sendRpc]);
+  const abort = useCallback(() => {
+    const restored = restoreAbortedDraft(draft, abortDraftRef.current);
+    clearAbortDraft();
+    if (restored !== null) {
+      setDraft(restored);
+      composerRef.current?.focus();
+    }
+    sendRpc({ cmd: "abort" });
+  }, [clearAbortDraft, draft, sendRpc]);
+
+  useEffect(() => {
+    if (!state.busy) clearAbortDraft();
+  }, [clearAbortDraft, state.busy]);
+
+  const clearConversation = useCallback(() => {
+    clearAbortDraft();
+    resetPromptHistoryNav();
+    dispatch({ t: "clear" });
+  }, [clearAbortDraft, resetPromptHistoryNav]);
+
+  // When /retry returns the last user text, set it as the composer draft
+  useEffect(() => {
+    if (state.retryNonce > 0 && state.retryText) {
+      resetPromptHistoryNav();
+      setDraft(state.retryText);
+      composerRef.current?.focus();
+    }
+    // Only fire when retryNonce changes — retryText alone would re-fire on re-renders
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.retryNonce]);
+
+  const onEditUserMsg = useCallback((t: string) => {
+    resetPromptHistoryNav();
+    setDraft(t);
+    composerRef.current?.focus();
+  }, [resetPromptHistoryNav]);
 
   useEffect(() => {
     if (state.busy || !state.ready || state.queuedSends.length === 0) return;
@@ -1128,6 +1945,113 @@ function TabRuntime({
     dispatch({ t: "shift_queued_send" });
     send(next);
   }, [state.busy, state.ready, state.queuedSends, send]);
+
+  useEffect(() => {
+    const result = state.promptHistoryResult;
+    const request = promptHistoryRequestRef.current;
+    if (!result || !request || result.nonce !== request.nonce) return;
+    promptHistoryRequestRef.current = null;
+
+    const nav = promptHistoryNavRef.current;
+    if (!result.entry) {
+      if (request.direction === "newer" && nav.mode === "browsing") {
+        const restored = nav.draft;
+        setDraft(restored);
+        setPromptHistoryNav({
+          mode: "idle",
+          draft: "",
+          cursor: null,
+          originSessionName: null,
+        });
+        requestAnimationFrame(() => {
+          composerRef.current?.focus();
+          composerRef.current?.setSelectionRange(restored.length, restored.length);
+        });
+      }
+      return;
+    }
+
+    const value = result.entry.value;
+    setDraft(value);
+    setPromptHistoryNav((prev) => ({
+      mode: "browsing",
+      draft: prev.mode === "idle" ? request.draft : prev.draft,
+      cursor: result.entry?.cursor ?? null,
+      originSessionName: prev.mode === "idle" ? (state.currentSession ?? null) : prev.originSessionName,
+    }));
+    requestAnimationFrame(() => {
+      composerRef.current?.focus();
+      composerRef.current?.setSelectionRange(value.length, value.length);
+    });
+  }, [state.promptHistoryResult, state.currentSession]);
+
+  useEffect(() => {
+    resetPromptHistoryNav();
+  }, [resetPromptHistoryNav, state.currentSession]);
+
+  useEffect(() => {
+    const currentSnapshot: ApprovalSnapshot = {
+      confirms: state.pendingConfirms.map((c) => ({ id: c.id, command: c.command })),
+      pathAccess: state.pendingPathAccess.map((p) => ({ id: p.id, path: p.path, intent: p.intent })),
+      choices: state.pendingChoices.map((c) => ({ id: c.id, question: c.question })),
+      plans: state.pendingPlans.map((p) => ({ id: p.id, summary: p.summary, plan: p.plan })),
+      checkpoints: state.pendingCheckpoints.map((c) => ({ id: c.id, title: c.title, result: c.result })),
+      revisions: state.pendingRevisions.map((r) => ({ id: r.id, summary: r.summary, reason: r.reason })),
+    };
+    const previousSnapshot = previousApprovalSnapshotRef.current;
+    const wasBusy = wasBusyRef.current;
+    const busyDurationMs = wasBusy && !state.busy && busyStartedAtRef.current
+      ? Date.now() - busyStartedAtRef.current
+      : 0;
+
+    if (state.busy && busyStartedAtRef.current === null) {
+      busyStartedAtRef.current = Date.now();
+    } else if (!state.busy) {
+      busyStartedAtRef.current = null;
+    }
+
+    previousApprovalSnapshotRef.current = currentSnapshot;
+    wasBusyRef.current = state.busy;
+
+    void getCurrentWindow()
+      .isFocused()
+      .catch(() => true)
+      .then((focused) => {
+        if (
+          shouldShowCompletionToast({
+            wasBusy,
+            isBusy: state.busy,
+            busyDurationMs,
+            focused,
+          })
+        ) {
+          flashToast(t("app.toast.taskComplete"), { duration: 2400 });
+        }
+        const notifications = deriveDesktopNotifications({
+          previous: previousSnapshot,
+          current: currentSnapshot,
+          wasBusy,
+          isBusy: state.busy,
+          busyDurationMs,
+          focused,
+        });
+        void dispatchDesktopNotifications(notifications, {
+          isFocused: async () => focused,
+          isPermissionGranted: isNotificationPermissionGranted,
+          requestPermission: requestNotificationPermission,
+          sendNotification,
+        });
+      });
+  }, [
+    flashToast,
+    state.busy,
+    state.pendingChoices,
+    state.pendingCheckpoints,
+    state.pendingConfirms,
+    state.pendingPathAccess,
+    state.pendingPlans,
+    state.pendingRevisions,
+  ]);
 
   const resolveConfirm = useCallback(
     (id: number, response: ConfirmationChoice) => {
@@ -1184,11 +2108,68 @@ function TabRuntime({
     [sendRpc],
   );
 
-  const { showJumpButton, scrollToBottom } = useAutoScroll(
-    threadRef,
-    threadInnerRef,
-    state.busy,
-  );
+  const messageItems = state.messages;
+
+  const [showJumpButton, setShowJumpButton] = useState(false);
+
+  // Reserve scroll to bottom when busy becomes true (message just sent).
+  const busyPrevRef = useRef(state.busy);
+  useEffect(() => {
+    if (state.busy && !busyPrevRef.current) {
+      atBottomRef.current = true;
+      setShowJumpButton(false);
+    }
+    busyPrevRef.current = state.busy;
+  }, [state.busy]);
+
+  const scrollToBottom = useCallback(() => {
+    const len = messageItems.length;
+    if (len > 0) {
+      const scroller = virtScrollerRef.current;
+      if (scroller) {
+        scroller.scrollTop = scroller.scrollHeight;
+      } else {
+        virtuosoRef.current?.scrollToIndex({ index: len - 1, behavior: "auto" });
+      }
+    }
+  }, [messageItems.length]);
+
+  // Follow the bottom while the assistant is streaming and the user hasn't
+  // scrolled up. The dependency on messageItems.length covers new messages;
+  // atBottomRef guards against re-pinning when the user intentionally scrolled
+  // up to read earlier content (#2159).
+  useEffect(() => {
+    const s = virtScrollerRef.current;
+    if (!s || messageItems.length === 0) return;
+    if (!atBottomRef.current) return;
+    const id = requestAnimationFrame(() => {
+      if (atBottomRef.current) s.scrollTop = s.scrollHeight;
+    });
+    return () => cancelAnimationFrame(id);
+  }, [messageItems]);
+
+  // Persist the transcript scroll offset per session so a restart reopens
+  // the conversation where the user left it (#1244).
+  useEffect(() => {
+    const el = virtScrollerRef.current;
+    const session = state.currentSession;
+    if (!el || !session) return;
+    const key = `reasonix.scroll.${session}`;
+    let timer: ReturnType<typeof setTimeout>;
+    const onScroll = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 80;
+        if (atBottom) localStorage.removeItem(key);
+        else localStorage.setItem(key, String(Math.round(el.scrollTop)));
+      }, 250);
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      clearTimeout(timer);
+    };
+  }, [state.currentSession]);
 
   useEffect(() => {
     if (!active) return;
@@ -1205,10 +2186,20 @@ function TabRuntime({
   }, [active, state.busy, sendRpc]);
 
   useEffect(() => {
+    if (!active) return;
+    loadQQSettings();
+  }, [active, loadQQSettings]);
+
+  useEffect(() => {
     // Every TabRuntime stays mounted (display:none on inactive), so each registers its own keydown — without this gate Cmd+N would fire newChat() in every tab and wipe the inactive ones' sessions.
     if (!active) return;
     const onKey = (e: KeyboardEvent) => {
       const mod = e.ctrlKey || e.metaKey;
+      if (mod && (e.key === "a" || e.key === "A")) {
+        const tag = (e.target as HTMLElement)?.tagName;
+        if (tag !== "INPUT" && tag !== "TEXTAREA") e.preventDefault();
+        return;
+      }
       if (mod && (e.key === "l" || e.key === "L")) {
         e.preventDefault();
         composerRef.current?.focus();
@@ -1229,13 +2220,55 @@ function TabRuntime({
       } else if (e.key === "Escape" && state.busy) {
         const target = e.target as HTMLElement | null;
         if (target?.tagName === "INPUT" || target?.tagName === "TEXTAREA") return;
+        // A modal is open — let its own Esc handler close it (#1670).
+        if (settingsOpen || aboutOpen || jobsOpen || wdOpen) return;
         e.preventDefault();
         abort();
+      } else if (e.key === "Enter" && !mod && !e.shiftKey && !e.altKey) {
+        // Defer to any control that already handles Enter — native inputs/buttons,
+        // ARIA button/link widgets (sidebar rows, file pills), or anything that called
+        // preventDefault — so we only grant when focus is on inert layout (#2015).
+        if (e.defaultPrevented) return;
+        const target = e.target as HTMLElement | null;
+        if (
+          target?.isContentEditable ||
+          target?.closest('input, textarea, button, select, a, [role="button"], [role="link"]')
+        ) {
+          return;
+        }
+        if (settingsOpen || aboutOpen || jobsOpen || wdOpen) return;
+        // Enter grants the pending authorization prompt (run once), matching the
+        // TUI where Enter confirms the highlighted choice (#1962).
+        const confirm = state.pendingConfirms.at(-1);
+        if (confirm) {
+          e.preventDefault();
+          resolveConfirm(confirm.id, { type: "run_once" });
+          return;
+        }
+        const pathAccess = state.pendingPathAccess.at(-1);
+        if (pathAccess) {
+          e.preventDefault();
+          resolvePathAccess(pathAccess.id, { type: "run_once" });
+        }
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [active, state.busy, abort, newChat, settingsOpen, openSettingsAt]);
+  }, [
+    active,
+    state.busy,
+    state.pendingConfirms,
+    state.pendingPathAccess,
+    resolveConfirm,
+    resolvePathAccess,
+    abort,
+    newChat,
+    settingsOpen,
+    aboutOpen,
+    jobsOpen,
+    wdOpen,
+    openSettingsAt,
+  ]);
 
   const commands = buildCommands({
     newChat: () => {
@@ -1243,12 +2276,12 @@ function TabRuntime({
       flashToast(t("app.toast.newSession"));
     },
     clearChat: () => {
-      dispatch({ t: "clear" });
+      clearConversation();
       flashToast(t("app.toast.cleared"));
     },
     focusComposer: () => composerRef.current?.focus(),
     openSettings: () => openSettingsAt("general"),
-    about: () => flashToast(`Reasonix · ${state.settings?.version ?? "dev"}`),
+    about: () => setAboutOpen(true),
     abort,
     copyLast: () => {
       const last = [...state.messages].reverse().find((m) => m.kind === "assistant");
@@ -1263,32 +2296,11 @@ function TabRuntime({
         flashToast(t("app.toast.copied"));
       }
     },
+    conversationCopy: () => {
+      conversationCopy();
+    },
     exportMarkdown: () => {
-      const userLabel = t("app.exportUserLabel");
-      const md = state.messages
-        .map((m) => {
-          if (m.kind === "user") return `### ${userLabel}\n\n${m.text}`;
-          if (m.kind === "assistant") {
-            const body = m.segments
-              .map((s) => {
-                if (s.kind === "text") return s.text;
-                if (s.kind === "reasoning")
-                  return `<details>\n<summary>Reasoning</summary>\n\n${s.text}\n\n</details>`;
-                return "";
-              })
-              .filter(Boolean)
-              .join("\n\n");
-            return `### Reasonix\n\n${body}`;
-          }
-          if (m.kind === "error") return `### Error\n\n${m.message}`;
-          return "";
-        })
-        .filter(Boolean)
-        .join("\n\n---\n\n");
-      if (md) {
-        void navigator.clipboard.writeText(md);
-        flashToast(t("app.toast.copiedMd"));
-      }
+      exportConversation();
     },
     pickWorkspace,
     newTab: onNewTab,
@@ -1297,6 +2309,17 @@ function TabRuntime({
     canCloseTab,
     hasMessages: state.messages.length > 0,
   });
+
+  const slashSettingCommands: SlashCmd[] = buildSlashSettingsDescriptors().map(
+    ({ cmd, action }) => ({
+      cmd,
+      desc:
+        action.type === "editMode"
+          ? t("app.cmd.setMode", { mode: action.editMode })
+          : t("app.cmd.setEffort", { effort: action.reasoningEffort }),
+      run: () => applySlashSettingsCommand(action),
+    }),
+  );
 
   const slashCommands: SlashCmd[] = [
     {
@@ -1307,8 +2330,8 @@ function TabRuntime({
         composerRef.current?.focus();
       },
     },
-    { cmd: "/new", desc: t("app.cmd.newSession"), run: () => newChat(), kb: "⌘N" },
-    { cmd: "/clear", desc: t("app.cmd.clearChat"), run: () => dispatch({ t: "clear" }) },
+    { cmd: "/new", desc: t("app.cmd.newSession"), run: () => newChat(), kb: shortcutText(["mod", "N"]) },
+    { cmd: "/clear", desc: t("app.cmd.clearChat"), run: () => clearConversation() },
     { cmd: "/abort", desc: t("app.cmd.abort"), run: () => abort(), kb: "esc" },
     {
       cmd: "/copy",
@@ -1328,6 +2351,25 @@ function TabRuntime({
       },
     },
     { cmd: "/model", desc: t("app.cmd.switchModel"), run: () => openSettingsAt("models") },
+    { cmd: "/mcp", desc: t("app.cmd.mcp"), run: () => openSettingsAt("mcp") },
+    { cmd: "/mcp status", desc: t("app.cmd.mcpStatus"), run: openMcpStatus },
+    { cmd: "/mcp retry", desc: t("app.cmd.mcpRetry"), run: retryFailedMcpSpecs },
+    {
+      cmd: "/mcp import",
+      desc: t("app.cmd.mcpImport"),
+      run: () => {
+        openSettingsAt("mcp");
+        void importCcSwitchMcp().catch(() => undefined);
+      },
+    },
+    {
+      cmd: "/search-engine",
+      desc: t("app.cmd.searchEngine"),
+      run: () => openSettingsAt("general"),
+    },
+    { cmd: "/skill", desc: t("app.cmd.skill"), run: () => openSettingsAt("skills") },
+    { cmd: "/skills", desc: t("app.cmd.skill"), run: () => openSettingsAt("skills") },
+    ...slashSettingCommands,
     { cmd: "/theme", desc: t("app.cmd.toggleTheme"), run: onToggleTheme },
     {
       cmd: "/currency",
@@ -1338,9 +2380,10 @@ function TabRuntime({
       cmd: "/lang",
       desc: t("app.cmd.toggleLang"),
       run: () => {
-        const next = getLang() === "zh-CN" ? "en" : "zh-CN";
+        const langs = getSupportedLangs();
+        const next = langs[(langs.indexOf(getLang()) + 1) % langs.length] ?? "en";
         setLang(next);
-        const langName = next === "zh-CN" ? t("app.langZH") : t("app.langEN");
+        const langName = getLangLabel(next);
         flashToast(t("app.toast.langSwitched", { lang: langName }));
       },
     },
@@ -1349,10 +2392,41 @@ function TabRuntime({
       desc: t("app.cmd.exportMd"),
       run: () => exportConversation(),
     },
+    {
+      cmd: "/feedback",
+      desc: t("app.cmd.feedback"),
+      run: () => {
+        void openUrl("https://github.com/esengine/DeepSeek-Reasonix/issues/new/choose").catch(
+          () => undefined,
+        );
+      },
+    },
+    {
+      cmd: "/compact",
+      desc: t("app.cmd.compact"),
+      run: () => sendRpc({ cmd: "compact_history" }),
+    },
+    {
+      cmd: "/retry",
+      desc: t("app.cmd.retry"),
+      run: () => sendRpc({ cmd: "retry" }),
+    },
+    {
+      cmd: "/btw",
+      desc: t("app.cmd.btw"),
+      run: () => {
+        // Sets the draft to /btw so the user can type their question.
+        // The send() handler detects the /btw prefix and routes to the btw RPC.
+        setDraft("/btw ");
+        composerRef.current?.focus();
+      },
+    },
     ...state.skills.map((s) => ({
       cmd: `/${s.name}`,
-      desc: s.description || `skill · ${s.scope}`,
+      desc: s.description?.trim() || fallbackSkillDesc(s),
+      insertOnly: true,
       run: () => {
+        recordAbortDraft("skill_run", `/${s.name}`);
         dispatch({
           t: "start_skill",
           skill: { name: s.name, runAs: s.runAs },
@@ -1368,14 +2442,16 @@ function TabRuntime({
     ? state.settings.workspaceDir.split(/[\\/]/).pop() || "workspace"
     : "Reasonix";
   const session = (() => {
+    if (state.currentSession) {
+      const s = state.sessions.find((x) => x.name === state.currentSession);
+      if (s?.summary?.trim()) return s.summary.trim();
+    }
     const firstUser = state.messages.find((m) => m.kind === "user");
     if (firstUser && firstUser.kind === "user") {
       const cleaned = firstUser.text.replace(/\s+/g, " ").trim();
       if (cleaned) return cleaned.length > 60 ? `${cleaned.slice(0, 60)}…` : cleaned;
     }
     if (state.currentSession) {
-      const s = state.sessions.find((x) => x.name === state.currentSession);
-      if (s?.summary?.trim()) return s.summary.trim();
       const m = state.currentSession.match(/^desktop-(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})/);
       if (m)
         return t("app.session.format", {
@@ -1390,51 +2466,56 @@ function TabRuntime({
       : workspaceLabel;
   })();
 
-  const exportConversation = useCallback(() => {
+  const exportConversation = useCallback(async () => {
     const userLabel = t("app.exportUserLabel");
-    const md = state.messages
-      .map((m) => {
-        if (m.kind === "user") return `### ${userLabel}\n\n${m.text}`;
-        if (m.kind === "assistant") {
-          const body = m.segments
-            .map((s) => {
-              if (s.kind === "text") return s.text;
-              if (s.kind === "reasoning")
-                return `<details>\n<summary>Reasoning</summary>\n\n${s.text}\n\n</details>`;
-              if (s.kind === "tool") {
-                const arg = s.args ? `\n\n\`\`\`json\n${s.args}\n\`\`\`` : "";
-                const res = s.result ? `\n\n\`\`\`\n${s.result}\n\`\`\`` : "";
-                return `> **Tool · \`${s.name}\`**${arg}${res}`;
-              }
-              return "";
-            })
-            .filter(Boolean)
-            .join("\n\n");
-          return `### Reasonix\n\n${body}`;
-        }
-        if (m.kind === "error") return `### Error\n\n${m.message}`;
-        return "";
-      })
-      .filter(Boolean)
-      .join("\n\n---\n\n");
-    if (md) {
-      void navigator.clipboard.writeText(md);
-      flashToast(t("app.toast.copiedMd"));
-    } else {
+    const md = formatConversationMarkdown(state.messages, userLabel);
+    if (!md) {
       flashToast(t("app.toast.emptySession"));
+      return;
     }
+    try {
+      const filename = defaultExportFilename(session);
+      const path = await saveDialog({
+        defaultPath: filename,
+        filters: [{ name: "Markdown", extensions: ["md"] }],
+        title: t("app.toast.exportDialogTitle"),
+      });
+      if (!path) return;
+      await invoke("write_text_file", { path, content: md });
+      flashToast(t("app.toast.exportedMd"));
+    } catch (err) {
+      console.error("export failed", err);
+      flashToast(t("app.toast.exportFailed", { error: String(err) }));
+    }
+  }, [state.messages, session, flashToast]);
+
+  const conversationCopy = useCallback(() => {
+    const userLabel = t("app.exportUserLabel");
+    const md = formatConversationMarkdown(state.messages, userLabel);
+    if (!md) {
+      flashToast(t("app.toast.emptySession"));
+      return;
+    }
+    void navigator.clipboard.writeText(md);
+    flashToast(t("app.toast.copiedMd"));
   }, [state.messages, flashToast]);
 
   return (
     <WorkspaceProvider
-      value={{ dir: state.settings?.workspaceDir, editor: state.settings?.editor }}
+      value={{ dir: state.settings?.workspaceDir, editor: state.settings?.editor, sessionFiles: state.sessionFiles }}
     >
       <div
         className="app"
         data-theme={theme}
+        data-theme-style={themeStyle}
         data-side-collapsed={sideCollapsed}
         data-ctx-collapsed={ctxCollapsed}
-        style={{ display: active ? undefined : "none" }}
+        style={{
+          display: active ? undefined : "none",
+          ["--side-width" as string]: sideCollapsed ? "0px" : `${sideWidth}px`,
+          ["--ctx-width" as string]: ctxCollapsed ? "0px" : `${ctxWidth}px`,
+          ["--thread-max-width" as string]: `${threadMaxWidth}px`,
+        }}
       >
         <TitleBar
           session={session}
@@ -1445,8 +2526,9 @@ function TabRuntime({
           onToggleCtx={onToggleCtx}
           onOpenCommands={() => palette.setOpen(true)}
           onOpenSettings={() => openSettingsAt("general")}
+          onCopy={conversationCopy}
           onExport={exportConversation}
-          onClear={() => dispatch({ t: "clear" })}
+          onClear={clearConversation}
           hasMessages={state.messages.length > 0}
         />
 
@@ -1466,16 +2548,47 @@ function TabRuntime({
 
         <Sidebar
           sessions={state.sessions}
+          importSources={state.externalImportSources}
           activeName={state.currentSession}
+          workspaceDir={state.settings?.workspaceDir}
           onNewChat={newChat}
-          onLoadSession={(name) => sendRpc({ cmd: "session_load", name })}
+          onLoadSession={(name) => {
+            clearAbortDraft();
+            sendRpc({ cmd: "session_load", name });
+          }}
           onDeleteSession={(name) => sendRpc({ cmd: "session_delete", name })}
+          onRenameSession={(name, title) => sendRpc({ cmd: "session_rename", name, title })}
+          onRefreshImportSources={() => sendRpc({ cmd: "session_import_scan" })}
+          onImportDetectedSessions={(sources: ExternalSessionSource[]) =>
+            sendRpc({ cmd: "session_import_bulk", sources })
+          }
+          onImportSession={({ source, path, name }) =>
+            sendRpc({ cmd: "session_import", source, path, ...(name ? { name } : {}) })
+          }
+          onOpenWorkdir={(anchor) => {
+            setWdAnchor(anchor);
+            setWdOpen(true);
+          }}
           onOpenSettings={() => openSettingsAt("general")}
           onOpenRules={() => openSettingsAt("rules")}
           onOpenCommands={() => palette.setOpen(true)}
+          onOpenAbout={() => setAboutOpen(true)}
         />
 
+        {!sideCollapsed ? (
+          <div
+            className="resize-handle"
+            data-side="left"
+            data-dragging={undefined}
+            onMouseDown={onSideResizeDown}
+          />
+        ) : null}
+
         <main className="main" style={{ position: "relative" }}>
+          <JumpBar messages={state.messages} threadEl={threadRef.current} onScrollToTurn={(turn) => {
+            const idx = state.messages.findIndex((m) => (m.kind === "user" || m.kind === "assistant") && m.turn === turn);
+            if (idx >= 0) virtuosoRef.current?.scrollToIndex(idx);
+          }} />
           {state.needsSetup ? (
             <NeedsSetupView
               workspaceDir={state.settings?.workspaceDir}
@@ -1492,6 +2605,7 @@ function TabRuntime({
                 hasMessages={state.messages.length > 0}
                 onAbort={abort}
                 onNewChat={newChat}
+                onCopy={conversationCopy}
                 onExport={exportConversation}
                 onOpenWorkdir={(anchor) => {
                   setWdAnchor(anchor);
@@ -1499,169 +2613,117 @@ function TabRuntime({
                 }}
               />
               <div className="thread" ref={threadRef}>
-                <div className="thread-inner" ref={threadInnerRef}>
-                  {pendingUpdate ? (
-                    <UpdateBanner
-                      version={pendingUpdate.version}
-                      currentVersion={pendingUpdate.currentVersion}
-                      status={updateStatus}
-                      onInstall={installUpdate}
-                      onDismiss={dismissUpdate}
-                    />
-                  ) : null}
-
-                  {state.activePlan ? (
-                    <>
-                      <PlanBanner
-                        plan={state.activePlan}
-                        onDismiss={state.busy ? undefined : () => dispatch({ t: "dismiss_plan" })}
-                      />
-                      <ActivePlanTaskCard plan={state.activePlan} />
-                    </>
-                  ) : null}
-
-                  {state.messages.length === 0 ? (
+                {state.messages.length === 0 ? (
+                  <div className="thread-inner thread-inner--standalone">
                     <EmptyState
                       onPick={(text) => {
                         const trimmed = text.trim();
                         if (trimmed.startsWith("/")) {
                           const cmd = trimmed.split(/\s+/)[0] ?? "";
                           const match = slashCommands.find((s) => s.cmd === cmd);
-                          if (match) {
-                            match.run();
-                            return;
-                          }
+                          if (match) { match.run(); return; }
                         }
                         send(text);
                       }}
                       workspaceDir={state.settings?.workspaceDir}
                     />
-                  ) : null}
-
-                  {state.messages.map((m, i) => {
-                    if (m.kind === "user") {
-                      const dividerLabel = `turn ${m.turn}`;
-                      const prev = state.messages[i - 1];
-                      const needsDivider = !prev || prev.kind === "user";
-                      return (
-                        <div key={`u-${i}`}>
-                          {needsDivider ? <TurnDivider label={dividerLabel} /> : null}
-                          <UserMsg text={m.text} skill={m.skill} />
+                  </div>
+                ) : (
+                  <Virtuoso
+                    ref={virtuosoRef}
+                    style={{ height: "90%" }}
+                    className="virtuoso-scroll"
+                    totalCount={messageItems.length}
+                    followOutput={"auto"}
+                    initialTopMostItemIndex={messageItems.length > 0 ? messageItems.length - 1 : undefined}
+                    scrollerRef={(ref) => { virtScrollerRef.current = ref as HTMLDivElement | null; }}
+                    atBottomStateChange={(atBottom) => { atBottomRef.current = atBottom; setShowJumpButton(!atBottom); }}
+                    components={{
+                      Header: state.activePlan ? () => (
+                        <div className="thread-inner">
+                          <PlanBanner
+                            plan={state.activePlan!}
+                            onDismiss={state.busy ? undefined : () => dispatch({ t: "dismiss_plan" })}
+                          />
+                          <ActivePlanTaskCard plan={state.activePlan!} />
                         </div>
-                      );
-                    }
-                    if (m.kind === "assistant") {
-                      return (
-                        <AssistantMsg
-                          key={`a-${m.turn}`}
-                          segments={m.segments}
-                          pending={m.pending}
-                          model={state.model}
-                          onApproveConfirm={onApproveConfirm}
-                          onRejectConfirm={onRejectConfirm}
-                          onAlwaysAllowConfirm={onAlwaysAllowConfirm}
-                          pendingConfirms={state.pendingConfirms}
-                        />
-                      );
-                    }
-                    if (m.kind === "error") {
-                      return (
-                        <div
-                          key={`e-${i}`}
-                          className="warn-card"
-                          style={{
-                            borderColor: "var(--tone-err)",
-                            background: "var(--danger-soft)",
-                          }}
-                        >
-                          <span className="ico" style={{ color: "var(--tone-err)" }}>
-                            <I.warning size={16} />
-                          </span>
-                          <div>
-                            <div className="tt">{t("app.errorLabel")}</div>
-                            <div className="ds">{m.message}</div>
+                      ) : undefined,
+                      Footer: () => (
+                        <div className="thread-inner">
+                          {state.pendingPlans.map((p) => <PlanApprovalCard key={`pp-${p.id}`} p={p} onApprove={() => resolvePlan(p.id, { type: "approve" })} onRefine={() => resolvePlan(p.id, { type: "refine" })} onCancel={() => resolvePlan(p.id, { type: "cancel" })} />)}
+                          {state.pendingCheckpoints.map((c) => <CheckpointApprovalCard key={`cp-${c.id}`} c={c} onContinue={() => resolveCheckpoint(c.id, { type: "continue" })} onRevise={() => resolveCheckpoint(c.id, { type: "revise" })} onStop={() => resolveCheckpoint(c.id, { type: "stop" })} />)}
+                          {state.pendingRevisions.map((r) => <RevisionApprovalCard key={`rv-${r.id}`} r={r} onAccept={() => resolveRevision(r.id, { type: "accepted" })} onReject={() => resolveRevision(r.id, { type: "rejected" })} />)}
+                          {state.pendingConfirms.map((c) => <ConfirmApprovalCard key={`cc-${c.id}`} prompt={c.prompt} onAllow={() => resolveConfirm(c.id, { type: "run_once" })} onAlwaysAllow={(prefix) => resolveConfirm(c.id, { type: "always_allow", prefix })} onDeny={() => resolveConfirm(c.id, { type: "deny" })} />)}
+                          {state.pendingPathAccess.map((p) => <PathAccessApprovalCard key={`pa-${p.id}`} prompt={p.prompt} onAllow={() => resolvePathAccess(p.id, { type: "run_once" })} onAlwaysAllow={(prefix) => resolvePathAccess(p.id, { type: "always_allow", prefix })} onDeny={() => resolvePathAccess(p.id, { type: "deny" })} />)}
+                          {state.pendingChoices.map((c) => <ChoiceApprovalCard key={`ch-${c.id}`} c={c} onPick={(optionId) => resolveChoice(c.id, { type: "pick", optionId })} onCancel={() => resolveChoice(c.id, { type: "cancel" })} />)}
+                          {!state.ready ? <div style={{ padding: 12, color: "var(--muted)", fontFamily: "Geist Mono, monospace", fontSize: 11 }}>{t("app.connecting")}</div> : null}
+                        </div>
+                      ),
+                    }}
+                    itemContent={(index) => {
+                      const m = state.messages[index]!;
+                      if (m.kind === "user") {
+                        return (
+                          <div className="thread-inner" data-turn={m.turn}>
+                            <TurnDivider label={`turn ${m.turn}`} />
+                            <UserMsg text={m.text} skill={m.skill} onEdit={onEditUserMsg} />
                           </div>
-                        </div>
-                      );
-                    }
-                    return null;
-                  })}
-
-                  {/* Pending approvals */}
-                  {state.pendingPlans.map((p) => (
-                    <PlanApprovalCard
-                      key={`pp-${p.id}`}
-                      p={p}
-                      onApprove={() => resolvePlan(p.id, { type: "approve" })}
-                      onRefine={() => resolvePlan(p.id, { type: "refine" })}
-                      onCancel={() => resolvePlan(p.id, { type: "cancel" })}
-                    />
-                  ))}
-                  {state.pendingCheckpoints.map((c) => (
-                    <CheckpointApprovalCard
-                      key={`cp-${c.id}`}
-                      c={c}
-                      onContinue={() => resolveCheckpoint(c.id, { type: "continue" })}
-                      onRevise={() => resolveCheckpoint(c.id, { type: "revise" })}
-                      onStop={() => resolveCheckpoint(c.id, { type: "stop" })}
-                    />
-                  ))}
-                  {state.pendingRevisions.map((r) => (
-                    <RevisionApprovalCard
-                      key={`rv-${r.id}`}
-                      r={r}
-                      onAccept={() => resolveRevision(r.id, { type: "accepted" })}
-                      onReject={() => resolveRevision(r.id, { type: "rejected" })}
-                    />
-                  ))}
-                  {state.pendingConfirms.map((c) => (
-                    <ConfirmApprovalCard
-                      key={`cc-${c.id}`}
-                      c={c}
-                      onAllow={() => resolveConfirm(c.id, { type: "run_once" })}
-                      onAlwaysAllow={(prefix) =>
-                        resolveConfirm(c.id, { type: "always_allow", prefix })
+                        );
                       }
-                      onDeny={() => resolveConfirm(c.id, { type: "deny" })}
-                    />
-                  ))}
-                  {state.pendingPathAccess.map((p) => (
-                    <PathAccessApprovalCard
-                      key={`pa-${p.id}`}
-                      p={p}
-                      onAllow={() => resolvePathAccess(p.id, { type: "run_once" })}
-                      onAlwaysAllow={(prefix) =>
-                        resolvePathAccess(p.id, { type: "always_allow", prefix })
+                      if (m.kind === "assistant") {
+                        const stats = !m.pending ? countFileStats(m.segments) : null;
+                        return (
+                          <div className="thread-inner">
+                            <AssistantMsg
+                              segments={m.segments}
+                              pending={m.pending}
+                              model={state.model}
+                              onApproveConfirm={onApproveConfirm}
+                              onRejectConfirm={onRejectConfirm}
+                              onAlwaysAllowConfirm={onAlwaysAllowConfirm}
+                              pendingConfirms={state.pendingConfirms}
+                            />
+                            {stats ? <DiffStats stats={stats} /> : null}
+                          </div>
+                        );
                       }
-                      onDeny={() => resolvePathAccess(p.id, { type: "deny" })}
-                    />
-                  ))}
-                  {state.pendingChoices.map((c) => (
-                    <ChoiceApprovalCard
-                      key={`ch-${c.id}`}
-                      c={c}
-                      onPick={(optionId) => resolveChoice(c.id, { type: "pick", optionId })}
-                      onCancel={() => resolveChoice(c.id, { type: "cancel" })}
-                    />
-                  ))}
-
-                  {!state.ready ? (
-                    <div
-                      style={{
-                        padding: 12,
-                        color: "var(--muted)",
-                        fontFamily: "Geist Mono, monospace",
-                        fontSize: 11,
-                      }}
-                    >
-                      {t("app.connecting")}
-                    </div>
-                  ) : null}
-                </div>
+                      if (m.kind === "error") {
+                        const toneVar = m.recoverable ? "var(--tone-warn)" : "var(--tone-err)";
+                        const bgVar = m.recoverable ? "var(--warn-soft, var(--danger-soft))" : "var(--danger-soft)";
+                        const labelKey = m.recoverable ? "app.warningLabel" : "app.errorLabel";
+                        return (
+                          <div key={m.id} className="warn-card" style={{ borderColor: toneVar, background: bgVar, position: "relative" }}>
+                            <span className="ico" style={{ color: toneVar }}><I.warning size={16} /></span>
+                            <div style={{ flex: 1 }}>
+                              <div className="tt">{t(labelKey)}</div>
+                              <div className="ds">{m.message}</div>
+                            </div>
+                            <button type="button" className="warn-card-dismiss" title={t("app.dismissError")}
+                              onClick={() => dispatch({ t: "dismiss_error", id: m.id })}
+                              style={{ background: "transparent", border: "none", color: toneVar, cursor: "pointer", padding: "4px", alignSelf: "flex-start" }}>
+                              <I.x size={14} />
+                            </button>
+                          </div>
+                        );
+                      }
+                      if (m.kind === "warning") {
+                        if (state.settings?.showSystemEvents === false) return null;
+                        return (
+                          <div key={m.id} className="sys-event-row" title={m.text}>
+                            <span className="line" />
+                            <span className="label">{m.text}</span>
+                            <span className="line" />
+                          </div>
+                        );
+                      }
+                      return null;
+                    }}
+                  />
+                )}
                 {showJumpButton ? (
                   <button
                     className="thread-jump-bottom"
-                    onClick={() => scrollToBottom(true)}
+                    onClick={() => { atBottomRef.current = true; setShowJumpButton(false); scrollToBottom(); }}
                     title={t("app.jumpToBottom") ?? "Jump to bottom"}
                     aria-label={t("app.jumpToBottom") ?? "Jump to bottom"}
                   >
@@ -1673,6 +2735,11 @@ function TabRuntime({
               <Composer
                 draft={draft}
                 setDraft={setDraft}
+                onDraftUserEdit={resetPromptHistoryNav}
+                promptHistoryBrowsing={promptHistoryNav.mode === "browsing"}
+                onPromptHistoryNavigate={(direction) =>
+                  requestPromptHistoryNavigation(direction, draftRef.current)
+                }
                 onSend={() => send()}
                 onAbort={abort}
                 disabled={!state.ready}
@@ -1686,21 +2753,15 @@ function TabRuntime({
                 }
                 busyElapsedMs={elapsed}
                 textareaRef={composerRef}
-                preset={state.settings?.preset ?? "auto"}
                 modelLabel={state.settings?.model ?? "deepseek-v4-flash"}
-                onPresetChange={(preset) => {
-                  saveSettings({ preset });
-                  flashToast(t("app.toast.modelSwitched", { model: preset.toUpperCase() }));
+                reasoningEffort={state.settings?.reasoningEffort ?? "high"}
+                onModelChange={(model) => {
+                  applySettingsPatch({ model });
+                  flashToast(t("app.toast.modelSwitched", { model }));
                 }}
+                onEffortChange={applyReasoningEffort}
                 editMode={state.settings?.editMode ?? "review"}
-                onEditModeChange={(mode) => {
-                  saveSettings({ editMode: mode });
-                  if (mode === "yolo") {
-                    flashToast(t("app.yolo.toast"), { yolo: true, duration: 3000 });
-                  } else {
-                    flashToast(t("app.toast.modeSwitched", { mode: mode.toUpperCase() }));
-                  }
-                }}
+                onEditModeChange={applyEditMode}
                 workspaceDir={state.settings?.workspaceDir}
                 slashCommands={slashCommands}
                 onMentionQuery={queryMentions}
@@ -1709,6 +2770,7 @@ function TabRuntime({
                 mentionResults={state.mentionResults}
                 queuedSends={state.queuedSends}
                 onQueueWhileBusy={(text) => {
+                  resetPromptHistoryNav();
                   dispatch({ t: "enqueue_send", text });
                   setDraft("");
                 }}
@@ -1718,6 +2780,14 @@ function TabRuntime({
           )}
         </main>
 
+        {!ctxCollapsed ? (
+          <div
+            className="resize-handle"
+            data-side="right"
+            data-dragging={undefined}
+            onMouseDown={onCtxResizeDown}
+          />
+        ) : null}
         <ContextPanel
           settings={state.settings}
           usage={state.usage}
@@ -1725,6 +2795,13 @@ function TabRuntime({
           mcpBridged={state.mcpBridged}
           sessionFiles={state.sessionFiles}
           memory={state.memory}
+          memoryDetail={state.memoryDetail}
+          activeTab={contextPanelTab}
+          activeTabNonce={contextPanelTabNonce}
+          onReadMemory={(path) => sendRpc({ cmd: "memory_read", path })}
+          onOpenMcpSettings={() => openSettingsAt("mcp")}
+          onEditMcpSpec={openMcpEditor}
+          onRetryMcpSpec={retryMcpSpec}
         />
 
         <StatusBar
@@ -1735,10 +2812,11 @@ function TabRuntime({
           ready={state.ready}
           currency={currency}
           theme={theme}
+          themeStyle={themeStyle}
           jobs={state.jobs}
           jobsOpen={jobsOpen}
           onToggleJobs={() => setJobsOpen((v) => !v)}
-          onToggleTheme={onToggleTheme}
+          onSetThemeStyle={onSetThemeStyle}
           onToggleCurrency={onToggleCurrency}
           onOpenSettings={() => openSettingsAt("general")}
           onOpenWorkdir={(anchor) => {
@@ -1759,9 +2837,18 @@ function TabRuntime({
           recent={state.settings?.recentWorkspaces ?? []}
           current={state.settings?.workspaceDir}
           anchor={wdAnchor}
-          onPick={(path) => saveSettings({ workspaceDir: path })}
+          onPick={(path) => {
+            clearAbortDraft();
+            saveSettings({ workspaceDir: path });
+          }}
           onBrowse={pickWorkspace}
+          onRemoveRecent={(path) => {
+            const nextRecent = (state.settings?.recentWorkspaces ?? []).filter((p) => p !== path);
+            applySettingsPatch({ recentWorkspaces: nextRecent });
+          }}
         />
+
+        {aboutOpen ? <AboutModal onClose={() => setAboutOpen(false)} /> : null}
 
         {settingsOpen && state.settings ? (
           <SettingsModal
@@ -1770,21 +2857,41 @@ function TabRuntime({
             usage={state.usage}
             currency={currency}
             theme={theme}
+            themeStyle={themeStyle}
             onSetTheme={onSetTheme}
+            onSetThemeStyle={onSetThemeStyle}
             fontScale={fontScale}
             onSetFontScale={onSetFontScale}
             fontFamily={fontFamily}
             onSetFontFamily={onSetFontFamily}
+            customFontFamily={customFontFamily}
+            onSetCustomFontFamily={onSetCustomFontFamily}
             initialPage={settingsPage}
+            initialMcpEditRaw={mcpEditTarget?.raw}
+            initialMcpEditNonce={mcpEditTarget?.nonce ?? 0}
             mcpSpecs={state.mcpSpecs}
             mcpBridged={state.mcpBridged}
             skills={state.skills}
+            memory={state.memory}
+            memoryDetail={state.memoryDetail}
+            qq={state.qq}
             onClose={() => setSettingsOpen(false)}
             onSave={saveSettings}
             onSaveApiKey={saveApiKey}
+            onLoadQQ={loadQQSettings}
+            onConnectQQ={connectQQ}
+            onDisconnectQQ={disconnectQQ}
+            onSaveQQConfig={saveQQConfig}
+            onOpenQQApplyLink={() =>
+              openUrl("https://q.qq.com/qqbot/openclaw/login.html").catch(() => undefined)
+            }
             onPickWorkspace={pickWorkspace}
+            onImportCcSwitchMcp={importCcSwitchMcp}
             onAddMcpSpec={addMcpSpec}
             onRemoveMcpSpec={removeMcpSpec}
+            onUpdateMcpSpec={updateMcpSpec}
+            onRetryMcpSpec={retryMcpSpec}
+            onReadMemory={(path) => sendRpc({ cmd: "memory_read", path })}
           />
         ) : null}
 
@@ -1844,6 +2951,7 @@ function TitleBar({
   onToggleCtx,
   onOpenCommands,
   onOpenSettings,
+  onCopy,
   onExport,
   onClear,
   hasMessages,
@@ -1856,6 +2964,7 @@ function TitleBar({
   onToggleCtx: () => void;
   onOpenCommands: () => void;
   onOpenSettings: () => void;
+  onCopy: () => void;
   onExport: () => void;
   onClear: () => void;
   hasMessages: boolean;
@@ -1868,13 +2977,23 @@ function TitleBar({
 
   useEffect(() => {
     const win = getCurrentWindow();
-    win.isMaximized().then(setIsMaximized);
+    const syncWindowState = async () => {
+      setIsMaximized(await readWindowExpanded(win, isMac));
+    };
+    void syncWindowState();
     let unlisten: (() => void) | undefined;
     win.listen("tauri://resize", async () => {
-      setIsMaximized(await win.isMaximized());
+      await syncWindowState();
     }).then((fn) => { unlisten = fn; });
-    return () => unlisten?.();
-  }, []);
+    let fullscreenUnlisten: (() => void) | undefined;
+    win.listen("tauri://fullscreen", async () => {
+      await syncWindowState();
+    }).then((fn) => { fullscreenUnlisten = fn; });
+    return () => {
+      unlisten?.();
+      fullscreenUnlisten?.();
+    };
+  }, [isMac]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -1925,7 +3044,7 @@ function TitleBar({
               aria-label={isMaximized ? t("app.titlebar.restore") : t("app.titlebar.maximize")}
               onMouseDown={(e) => {
                 e.stopPropagation();
-                win.toggleMaximize();
+                void toggleWindowExpanded(win, true, isMaximized);
               }}
             >
               {isMaximized ? <WinRestore /> : <WinMaximize />}
@@ -1936,7 +3055,7 @@ function TitleBar({
           type="button"
           className="iconbtn"
           data-on={sideOn}
-          title={t("app.titlebar.sidebar")}
+          title={localizeShortcutText(t("app.titlebar.sidebar"))}
           onClick={onToggleSide}
         >
           <I.panel_l size={14} />
@@ -1988,7 +3107,17 @@ function TitleBar({
                 <div className="popup-item" onClick={() => { onOpenCommands(); setMenuOpen(false); }}>
                   <span className="ico"><I.search size={12} /></span>
                   <div className="nm"><span>{t("app.titlebar.commandPalette")}</span></div>
-                  <span className="kb">⌘K</span>
+                  <span className="kb">
+                    <Shortcut keys={["mod", "K"]} />
+                  </span>
+                </div>
+                <div
+                  className="popup-item"
+                  onClick={() => { if (hasMessages) onCopy(); setMenuOpen(false); }}
+                  style={{ opacity: hasMessages ? 1 : 0.5 }}
+                >
+                  <span className="ico"><I.copy size={12} /></span>
+                  <div className="nm"><span>{t("app.titlebar.copyMd")}</span></div>
                 </div>
                 <div
                   className="popup-item"
@@ -2005,7 +3134,9 @@ function TitleBar({
                 <div className="popup-item" onClick={() => { onOpenSettings(); setMenuOpen(false); }}>
                   <span className="ico"><I.cog size={12} /></span>
                   <div className="nm"><span>{t("app.titlebar.settings")}</span></div>
-                  <span className="kb">⌘,</span>
+                  <span className="kb">
+                    <Shortcut keys={["mod", ","]} />
+                  </span>
                 </div>
               </div>
             </div>
@@ -2027,7 +3158,7 @@ function TitleBar({
               type="button"
               className="win-ctrl"
               title={isMaximized ? t("app.titlebar.restore") : t("app.titlebar.maximize")}
-              onMouseDown={(e) => { e.stopPropagation(); win.toggleMaximize(); }}
+              onMouseDown={(e) => { e.stopPropagation(); void toggleWindowExpanded(win, false, isMaximized); }}
             >
               {isMaximized ? <WinRestore /> : <WinMaximize />}
             </button>
@@ -2054,7 +3185,7 @@ function TabBar({
   onNew,
   singleTab,
 }: {
-  tabs: { id: string; workspaceDir?: string }[];
+  tabs: { id: string; workspaceDir?: string; busy?: boolean }[];
   activeId: string;
   setActive: (id: string) => void;
   onClose: (id: string) => void;
@@ -2079,7 +3210,7 @@ function TabBar({
             onClick={() => setActive(t.id)}
             title={ws || label}
           >
-            <span className="dot" data-state="running" />
+            <span className="dot" data-state={t.busy ? "running" : "idle"} />
             <span className="label">{label}</span>
             {!singleTab ? (
               <span
@@ -2095,7 +3226,7 @@ function TabBar({
           </div>
         );
       })}
-      <div className="tab newtab" title={t("app.tab.newTabTitle")} onClick={onNew}>
+      <div className="tab newtab" title={localizeShortcutText(t("app.tab.newTabTitle"))} onClick={onNew}>
         <I.plus size={12} />
         <span style={{ fontSize: 11, marginLeft: 4 }}>{t("app.tab.newTab")}</span>
       </div>
@@ -2111,6 +3242,7 @@ function MainHead({
   hasMessages,
   onAbort,
   onNewChat,
+  onCopy,
   onExport,
   onOpenWorkdir,
 }: {
@@ -2121,6 +3253,7 @@ function MainHead({
   hasMessages: boolean;
   onAbort: () => void;
   onNewChat: () => void;
+  onCopy: () => void;
   onExport: () => void;
   onOpenWorkdir: (anchor: { top?: number; bottom?: number; left: number }) => void;
 }) {
@@ -2163,9 +3296,18 @@ function MainHead({
       <button
         type="button"
         className="h-btn"
-        onClick={onExport}
+        onClick={onCopy}
         disabled={!hasMessages}
         title={t("app.header.copyMd")}
+      >
+        <I.copy size={12} /> {t("app.header.copy")}
+      </button>
+      <button
+        type="button"
+        className="h-btn"
+        onClick={onExport}
+        disabled={!hasMessages}
+        title={t("app.header.exportMd")}
       >
         <I.download size={12} /> {t("app.header.export")}
       </button>
@@ -2329,50 +3471,77 @@ function NeedsSetupView({
   );
 }
 
-function UpdateBanner({
+function UpdateOverlay({
   version,
   currentVersion,
   status,
+  progress,
   onInstall,
   onDismiss,
 }: {
   version: string;
   currentVersion: string;
   status: "idle" | "installing" | "error";
+  progress: { downloaded: number; total: number | null } | null;
   onInstall: () => void;
   onDismiss: () => void;
 }) {
   useLang();
+  const ratio =
+    progress && progress.total && progress.total > 0
+      ? Math.min(1, progress.downloaded / progress.total)
+      : null;
   const statusText =
-    status === "installing"
-      ? t("app.update.installing")
-      : status === "error"
-        ? t("app.update.failed")
+    status === "error"
+      ? t("app.update.failed")
+      : status === "installing"
+        ? progress
+          ? ratio !== null
+            ? t("app.update.downloading", {
+                downloaded: formatBytes(progress.downloaded),
+                total: formatBytes(progress.total ?? 0),
+                pct: Math.round(ratio * 100),
+              })
+            : t("app.update.downloadingUnknown", {
+                downloaded: formatBytes(progress.downloaded),
+              })
+          : t("app.update.installing")
         : t("app.update.clickToInstall");
   return (
-    <div
-      className="plan-banner"
-      style={{ background: "var(--accent-soft)", borderColor: "var(--accent)" }}
-    >
-      <span className="ico">
-        <I.download size={14} />
-      </span>
-      <div className="body">
-        <div className="t">
-          {t("app.update.available", { current: currentVersion, latest: version })}
+    <div className="update-overlay" aria-live="polite">
+      <div className="plan-banner update-overlay-card">
+        <span className="ico">
+          <I.download size={14} />
+        </span>
+        <div className="body">
+          <div className="t">
+            {t("app.update.available", { current: currentVersion, latest: version })}
+          </div>
+          <div className="s">{statusText}</div>
+          {status === "installing" && ratio !== null ? (
+            <div className="meter-mini" aria-label="download progress">
+              <span style={{ width: `${Math.round(ratio * 100)}%` }} />
+            </div>
+          ) : null}
         </div>
-        <div className="s">{statusText}</div>
-      </div>
-      <div className="prog">
-        <button type="button" onClick={onInstall} disabled={status === "installing"}>
-          {t("app.update.install")}
-        </button>
-        <button type="button" onClick={onDismiss}>
-          {t("app.update.later")}
-        </button>
+        <div className="prog">
+          <button type="button" onClick={onInstall} disabled={status === "installing"}>
+            {t("app.update.install")}
+          </button>
+          <button type="button" onClick={onDismiss} disabled={status === "installing"}>
+            {t("app.update.later")}
+          </button>
+        </div>
       </div>
     </div>
   );
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
 type TabMeta = { id: string; workspaceDir?: string; busy?: boolean };
@@ -2380,10 +3549,14 @@ type TabMeta = { id: string; workspaceDir?: string; busy?: boolean };
 export function App() {
   const [tabs, setTabs] = useState<TabMeta[]>([]);
   const [activeTabId, setActiveTabId] = useState<string>("");
+  const [startupFailure, setStartupFailure] = useState<StartupFailureState | null>(null);
+  const [startupRetryNonce, setStartupRetryNonce] = useState(0);
+  const tabBusyRef = useRef<Map<string, boolean>>(new Map());
   const dispatchersRef = useRef<Map<string, TabDispatcher>>(new Map());
   const pendingEventsRef = useRef<Map<string, TabAction[]>>(new Map());
   const pendingDeltasRef = useRef<Map<string, DeltaBatchItem[]>>(new Map());
   const rafScheduledRef = useRef(false);
+  const startupStderrRef = useRef<string[]>([]);
   const tabsRef = useRef<TabMeta[]>([]);
   useEffect(() => {
     tabsRef.current = tabs;
@@ -2391,13 +3564,25 @@ export function App() {
 
   const [pendingUpdate, setPendingUpdate] = useState<Update | null>(null);
   const [updateStatus, setUpdateStatus] = useState<"idle" | "installing" | "error">("idle");
+  const [updateProgress, setUpdateProgress] = useState<{
+    downloaded: number;
+    total: number | null;
+  } | null>(null);
   const [currency, setCurrency] = useState<"CNY" | "USD">(() => {
     const v = localStorage.getItem("reasonix.currency");
     return v === "USD" ? "USD" : "CNY";
   });
   const [theme, setTheme] = useState<Theme>(() => {
     const v = localStorage.getItem("reasonix.theme");
-    return v === THEME.LIGHT ? THEME.LIGHT : THEME.DARK;
+    const style = localStorage.getItem("reasonix.themeStyle");
+    if (isThemeStyle(style)) return themeForStyle(style);
+    return isTheme(v) ? v : THEME.DARK;
+  });
+  const [themeStyle, setThemeStyle] = useState<ThemeStyle>(() => {
+    const style = localStorage.getItem("reasonix.themeStyle");
+    if (isThemeStyle(style)) return style;
+    const storedTheme = localStorage.getItem("reasonix.theme");
+    return defaultStyleForTheme(isTheme(storedTheme) ? storedTheme : THEME.DARK);
   });
   const [fontScale, setFontScale] = useState<FontScale>(() => {
     const v = localStorage.getItem("reasonix.fontScale");
@@ -2407,13 +3592,82 @@ export function App() {
     const v = localStorage.getItem("reasonix.fontFamily");
     return isFontFamily(v) ? v : FONT_FAMILY.SANS;
   });
-  const [sideCollapsed, setSideCollapsed] = useState(false);
-  const [ctxCollapsed, setCtxCollapsed] = useState(false);
+  const [customFontFamily, setCustomFontFamily] = useState<string>(() => {
+    return localStorage.getItem("reasonix.customFontFamily") ?? "";
+  });
+  const {
+    collapsed: sideCollapsed,
+    toggle: onToggleSide,
+    requireCollapsed: requireSideCollapsed,
+    releaseCollapsed: releaseSideCollapsed,
+  } = useAutoCollapse("reasonix.sideCollapsed");
+  const {
+    collapsed: ctxCollapsed,
+    toggle: onToggleCtx,
+    requireCollapsed: requireCtxCollapsed,
+    releaseCollapsed: releaseCtxCollapsed,
+  } = useAutoCollapse("reasonix.ctxCollapsed");
+
+  const { width: sideWidth, onMouseDown: onSideResizeDown } = useResizable("side", sideCollapsed);
+  const { width: ctxWidth, onMouseDown: onCtxResizeDown } = useResizable("ctx", ctxCollapsed);
+  const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
+  const visibleSide = sideCollapsed ? 0 : sideWidth;
+  const visibleCtx = ctxCollapsed ? 0 : ctxWidth;
+  const threadMaxWidth = getThreadMaxWidth({ viewportWidth, visibleSide, visibleCtx });
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
+    document.documentElement.dataset.themeStyle = themeStyle;
     localStorage.setItem("reasonix.theme", theme);
-  }, [theme]);
+    localStorage.setItem("reasonix.themeStyle", themeStyle);
+  }, [theme, themeStyle]);
+
+  // Sync --composer-max-width to .app (separate from inline style to avoid React override)
+  const composerRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (!composerRef.current) composerRef.current = document.querySelector(".app");
+    composerRef.current?.style.setProperty("--composer-max-width", `${threadMaxWidth}px`);
+  }, [threadMaxWidth]);
+
+  useEffect(() => {
+    let raf = 0;
+    let prevStage: ResponsiveStage | null = null;
+
+    const sync = () => {
+      raf = 0;
+      const width = window.innerWidth;
+      setViewportWidth(width);
+      const next = responsiveStage(width);
+      if (prevStage === next) return;
+      const prev = prevStage;
+      prevStage = next;
+
+      if (next === RESPONSIVE_STAGE.WIDE) {
+        releaseCtxCollapsed();
+        releaseSideCollapsed();
+      } else if (next === RESPONSIVE_STAGE.COMPACT) {
+        // Only force ctx collapse when entering compact from wider — coming
+        // from narrow, the user may have manually opened ctx and we keep that.
+        if (prev === null || prev === RESPONSIVE_STAGE.WIDE) requireCtxCollapsed();
+        releaseSideCollapsed();
+      } else {
+        requireCtxCollapsed();
+        requireSideCollapsed();
+      }
+    };
+
+    const onResize = () => {
+      if (raf) return;
+      raf = window.requestAnimationFrame(sync);
+    };
+
+    sync();
+    window.addEventListener("resize", onResize);
+    return () => {
+      if (raf) window.cancelAnimationFrame(raf);
+      window.removeEventListener("resize", onResize);
+    };
+  }, [requireCtxCollapsed, releaseCtxCollapsed, requireSideCollapsed, releaseSideCollapsed]);
 
   useEffect(() => {
     // Chromium webview supports `zoom`; scales every px-based size without touching CSS rules.
@@ -2422,10 +3676,15 @@ export function App() {
   }, [fontScale]);
 
   useEffect(() => {
-    // CSS rules use var(--font-sans); changing it here re-styles every sans surface in one shot. Mono stays put because code/transcripts hardcode "Geist Mono".
-    document.documentElement.style.setProperty("--font-sans", FONT_FAMILY_STACK[fontFamily]);
+    const custom = customFontFamily.trim();
+    const stack =
+      fontFamily === FONT_FAMILY.CUSTOM && custom
+        ? custom
+        : FONT_FAMILY_STACK[fontFamily] ?? FONT_FAMILY_STACK.sans;
+    document.documentElement.style.setProperty("--font-sans", stack);
     localStorage.setItem("reasonix.fontFamily", fontFamily);
-  }, [fontFamily]);
+    localStorage.setItem("reasonix.customFontFamily", customFontFamily);
+  }, [fontFamily, customFontFamily]);
 
   useEffect(() => {
     const onCur = (e: Event) => {
@@ -2460,6 +3719,10 @@ export function App() {
     }
   }, []);
 
+  const retryStartup = useCallback(() => {
+    setStartupRetryNonce((n) => n + 1);
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -2478,8 +3741,19 @@ export function App() {
   const installUpdate = useCallback(async () => {
     if (!pendingUpdate) return;
     setUpdateStatus("installing");
+    setUpdateProgress(null);
     try {
-      await pendingUpdate.downloadAndInstall();
+      await pendingUpdate.downloadAndInstall((evt) => {
+        if (evt.event === "Started") {
+          setUpdateProgress({ downloaded: 0, total: evt.data.contentLength ?? null });
+        } else if (evt.event === "Progress") {
+          setUpdateProgress((p) =>
+            p ? { ...p, downloaded: p.downloaded + evt.data.chunkLength } : p,
+          );
+        } else if (evt.event === "Finished") {
+          setUpdateProgress((p) => (p ? { ...p, downloaded: p.total ?? p.downloaded } : p));
+        }
+      });
       await relaunch();
     } catch (err) {
       console.error("update failed", err);
@@ -2513,6 +3787,8 @@ export function App() {
     };
 
     const setup = async () => {
+      startupStderrRef.current = [];
+      setStartupFailure(null);
       const subs = await Promise.all([
         listen<{ data: string }>("rpc:event", (e) => {
           try {
@@ -2525,7 +3801,10 @@ export function App() {
                   ? prev
                   : [...prev, { id: tabId, workspaceDir: ev.workspaceDir }],
               );
-              setActiveTabId(tabId);
+              // Focus the tab the backend marked active (user-opened, or the
+              // restored focused tab); otherwise keep focus, but make sure
+              // *some* tab is active during a multi-tab restore.
+              setActiveTabId((prev) => (ev.active || !prev ? tabId : prev));
               return;
             }
             if (ev.type === "$tab_closed" && tabId) {
@@ -2593,10 +3872,27 @@ export function App() {
           }
         }),
         listen<{ data: string }>("rpc:stderr", (e) => {
+          startupStderrRef.current = [...startupStderrRef.current, e.payload.data].slice(-12);
+          setStartupFailure((prev) =>
+            prev
+              ? coerceStartupFailure(
+                  prev.details[0] ?? t("app.startupFailedUnknown"),
+                  startupStderrRef.current,
+                )
+              : prev,
+          );
           console.warn("[reasonix stderr]", e.payload.data);
         }),
         listen<{ code: number | null }>("rpc:exit", (e) => {
           for (const tabId of dispatchersRef.current.keys()) flushTabDeltas(tabId);
+          if (dispatchersRef.current.size === 0) {
+            setStartupFailure(
+              coerceStartupFailure(
+                new Error(`reasonix exited (code ${e.payload.code ?? "?"})`),
+                startupStderrRef.current,
+              ),
+            );
+          }
           for (const dispatch of dispatchersRef.current.values()) {
             dispatch({ t: "rpc_exit", code: e.payload.code });
           }
@@ -2609,8 +3905,19 @@ export function App() {
       cleanups.push(...subs);
       try {
         await invoke("rpc_spawn");
+        // WebView reload (DevTools F5, host respawn) keeps the Node child
+        // alive but loses every $tab_opened / $settings / $needs_setup that
+        // already fired. Ask the desktop server to re-emit them.
+        if (!cancelled) {
+          await invoke("rpc_send", {
+            line: JSON.stringify({ cmd: "desktop_resync" }),
+          });
+        }
       } catch (err) {
-        if (!cancelled) console.error("rpc_spawn failed", err);
+        if (!cancelled) {
+          setStartupFailure(coerceStartupFailure(err, startupStderrRef.current));
+          console.error("rpc_spawn failed", err);
+        }
       }
     };
     void setup();
@@ -2618,7 +3925,15 @@ export function App() {
       cancelled = true;
       for (const c of cleanups) c();
     };
-  }, [deliverToTab]);
+  }, [deliverToTab, startupRetryNonce]);
+
+  // Tell the backend which tab is focused so a restart can reopen on it (#1244).
+  useEffect(() => {
+    if (!activeTabId) return;
+    invoke("rpc_send", {
+      line: JSON.stringify({ cmd: "tab_activate", tabId: activeTabId }),
+    }).catch(() => {});
+  }, [activeTabId]);
 
   const openTab = useCallback(() => {
     invoke("rpc_send", { line: JSON.stringify({ cmd: "tab_open" }) }).catch((err) =>
@@ -2655,22 +3970,30 @@ export function App() {
       } else if (mod && (e.key === "b" || e.key === "B")) {
         if (e.altKey) {
           e.preventDefault();
-          setCtxCollapsed((v) => !v);
+          onToggleCtx();
         } else {
           e.preventDefault();
-          setSideCollapsed((v) => !v);
+          onToggleSide();
         }
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [openTab, closeTab, activeTabId, tabs]);
+  }, [openTab, closeTab, activeTabId, tabs, onToggleCtx, onToggleSide]);
+
+  const onSetTheme = useCallback((nextTheme: Theme) => {
+    setTheme(nextTheme);
+    setThemeStyle(defaultStyleForTheme(nextTheme));
+  }, []);
+
+  const onSetThemeStyle = useCallback((nextStyle: ThemeStyle) => {
+    setThemeStyle(nextStyle);
+    setTheme(themeForStyle(nextStyle));
+  }, []);
 
   const onToggleTheme = useCallback(() => {
-    setTheme((currentTheme) =>
-      currentTheme === THEME.DARK ? THEME.LIGHT : THEME.DARK,
-    );
-  }, []);
+    onSetTheme(theme === THEME.DARK ? THEME.LIGHT : THEME.DARK);
+  }, [onSetTheme, theme]);
 
   const onToggleCurrency = useCallback(() => {
     setCurrency((c) => {
@@ -2681,6 +4004,15 @@ export function App() {
     });
   }, []);
 
+  const onTabBusyChange = useCallback((tabId: string, busy: boolean) => {
+    tabBusyRef.current.set(tabId, busy);
+    setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, busy } : t)));
+  }, []);
+
+  if (startupFailure && tabs.length === 0) {
+    return <StartupFailure details={startupFailure.details} onRetry={retryStartup} />;
+  }
+
   return (
     <>
       {tabs.map((t) => (
@@ -2689,31 +4021,47 @@ export function App() {
           tabId={t.id}
           active={t.id === activeTabId}
           currency={currency}
-          pendingUpdate={pendingUpdate}
-          updateStatus={updateStatus}
-          installUpdate={installUpdate}
-          dismissUpdate={() => setPendingUpdate(null)}
           registerDispatch={registerDispatch}
           onNewTab={openTab}
           onCloseTab={() => closeTab(t.id)}
           canCloseTab={tabs.length > 1}
           theme={theme}
-          onSetTheme={setTheme}
+          themeStyle={themeStyle}
+          onSetTheme={onSetTheme}
+          onSetThemeStyle={onSetThemeStyle}
           onToggleTheme={onToggleTheme}
           fontScale={fontScale}
           onSetFontScale={setFontScale}
           fontFamily={fontFamily}
           onSetFontFamily={setFontFamily}
+          customFontFamily={customFontFamily}
+          onSetCustomFontFamily={setCustomFontFamily}
           sideCollapsed={sideCollapsed}
           ctxCollapsed={ctxCollapsed}
-          onToggleSide={() => setSideCollapsed((v) => !v)}
-          onToggleCtx={() => setCtxCollapsed((v) => !v)}
+          sideWidth={sideWidth}
+          ctxWidth={ctxWidth}
+          threadMaxWidth={threadMaxWidth}
+          onSideResizeDown={onSideResizeDown}
+          onCtxResizeDown={onCtxResizeDown}
+          onToggleSide={onToggleSide}
+          onToggleCtx={onToggleCtx}
           onToggleCurrency={onToggleCurrency}
           tabsList={tabs}
           activeTabId={activeTabId}
           setActiveTabId={setActiveTabId}
+          onBusyChange={onTabBusyChange}
         />
       ))}
+      {pendingUpdate ? (
+        <UpdateOverlay
+          version={pendingUpdate.version}
+          currentVersion={pendingUpdate.currentVersion}
+          status={updateStatus}
+          progress={updateProgress}
+          onInstall={installUpdate}
+          onDismiss={() => setPendingUpdate(null)}
+        />
+      ) : null}
     </>
   );
 }

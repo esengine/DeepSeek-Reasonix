@@ -8,18 +8,20 @@ import React from "react";
 
 import type { EditMode } from "../../config.js";
 import type { JobRegistry } from "../../tools/jobs.js";
+import { useRenderTrace } from "./render-trace.js";
 
 import { AtMentionSuggestions } from "./AtMentionSuggestions.js";
 import { PromptInput, QueueIndicator } from "./PromptInput.js";
+import { ShortcutsHelpModal } from "./ShortcutsHelpModal.js";
 import type { SlashArgPickerProps } from "./SlashArgPicker.js";
 import { SlashArgPicker } from "./SlashArgPicker.js";
 import type { SlashSuggestionsProps } from "./SlashSuggestions.js";
 import { SlashSuggestions } from "./SlashSuggestions.js";
-import { ModeStatusBar } from "./layout/LiveRows.js";
+
 import { StatusRow } from "./layout/StatusRow.js";
 import { formatLoopStatus } from "./loop.js";
-import { useChatScrollState } from "./state/chat-scroll-provider.js";
-import { FG } from "./theme/tokens.js";
+import { SURFACE } from "./theme/tokens.js";
+import { useSlowTick } from "./ticker.js";
 
 import type { StatusBarConfig } from "./layout/StatusRow.js";
 
@@ -35,17 +37,25 @@ export interface ComposerAreaProps {
   jobs?: JobRegistry;
   activeLoop?: Parameters<typeof LoopStatusRow>[0]["loop"] | null;
   statusBar: StatusBarConfig;
+  /** Current mode for input box bottom display. */
+  mode?: string;
+  /** Current model for input box bottom display. */
+  model?: string;
+  /** Show the shortcuts help modal above the input box. */
+  showShortcuts?: boolean;
 
   // ── prompt ───────────────────────────────────────────────────────
   input: string;
   setInput: (next: string) => void;
   busy: boolean;
+  steerBusy?: boolean;
   queueMessages: { text: string; enqueuedAt: number }[];
   onSubmit: (raw: string) => Promise<void>;
   onHistoryPrev: () => void;
   onHistoryNext: () => void;
   onOpenExternalEditor: () => void;
   onCursorChange: (cursor: number) => void;
+  isHistoryMode?: boolean;
 
   // ── slash / @-mention / arg picker — derived from sub-component props
   slashMatches: SlashSuggestionsProps["matches"] | null;
@@ -65,21 +75,6 @@ export interface ComposerAreaProps {
   slashArgSelected: number;
 }
 
-// ── History scroll hint ────────────────────────────────────────────
-
-const HistoryHint: React.FC<{ children: React.ReactNode }> = React.memo(({ children }) => {
-  const pinned = useChatScrollState((s: { pinned: boolean }) => s.pinned);
-  if (!pinned) {
-    return (
-      <Text color={FG.faint}>
-        scrolled up — reading history — End / PgDn to return — ↓ to advance one line
-      </Text>
-    );
-  }
-  return <>{children}</>;
-});
-HistoryHint.displayName = "HistoryHint";
-
 // ── Component ─────────────────────────────────────────────────────
 
 export const ComposerArea: React.FC<ComposerAreaProps> = React.memo(
@@ -92,15 +87,20 @@ export const ComposerArea: React.FC<ComposerAreaProps> = React.memo(
     jobs,
     activeLoop,
     statusBar,
+    mode,
+    model,
+    showShortcuts,
     input,
     setInput,
     busy,
+    steerBusy,
     queueMessages,
     onSubmit,
     onHistoryPrev,
     onHistoryNext,
     onOpenExternalEditor,
     onCursorChange,
+    isHistoryMode,
     slashMatches,
     slashSelected,
     slashGroupMode,
@@ -111,8 +111,14 @@ export const ComposerArea: React.FC<ComposerAreaProps> = React.memo(
     slashArgMatches,
     slashArgSelected,
   }) => {
+    useRenderTrace("ComposerArea");
     const inputArea = (
-      <Box flexDirection="column" flexShrink={0} flexWrap="nowrap">
+      <Box
+        flexDirection="column"
+        flexShrink={0}
+        flexWrap="nowrap"
+        backgroundColor={SURFACE.bgInput}
+      >
         <Box flexDirection="column" flexShrink={0} flexWrap="nowrap">
           {slashMatches !== null ? (
             <SlashSuggestions
@@ -136,33 +142,30 @@ export const ComposerArea: React.FC<ComposerAreaProps> = React.memo(
             />
           ) : null}
         </Box>
+        {showShortcuts ? <ShortcutsHelpModal /> : null}
         <QueueIndicator messages={queueMessages} />
         <PromptInput
           value={input}
           onChange={setInput}
           onSubmit={onSubmit}
           disabled={busy}
+          steerBusy={steerBusy}
           onHistoryPrev={onHistoryPrev}
           onHistoryNext={onHistoryNext}
           onOpenExternalEditor={onOpenExternalEditor}
           onCursorChange={onCursorChange}
+          rowsAfter={2 + (activeLoop ? 1 : 0)}
+          mode={mode}
+          model={model}
+          isHistoryMode={isHistoryMode}
+          planMode={planMode}
         />
         {activeLoop ? <LoopStatusRow loop={activeLoop} /> : null}
-        {jobs ? (
-          <ModeStatusBar
-            editMode={editMode}
-            pendingCount={pendingCount}
-            flash={modeFlash}
-            planMode={planMode}
-            undoArmed={undoArmed}
-            jobs={jobs}
-          />
-        ) : null}
         <StatusRow statusBar={statusBar} />
       </Box>
     );
 
-    return <HistoryHint>{inputArea}</HistoryHint>;
+    return inputArea;
   },
 );
 ComposerArea.displayName = "ComposerArea";
@@ -174,15 +177,11 @@ function LoopStatusRow({
 }: {
   loop: { prompt: string; intervalMs: number; nextFireAt: number; iter: number };
 }) {
-  const [, setTick] = React.useState(0);
-  React.useEffect(() => {
-    const id = setInterval(() => setTick((t) => t + 1), 1000);
-    return () => clearInterval(id);
-  }, []);
+  useSlowTick();
   const nextFireMs = Math.max(0, loop.nextFireAt - Date.now());
   return (
     <Box>
-      <Text color="cyan">
+      <Text color="ansi:cyan">
         {`loop: ${formatLoopStatus(loop.prompt, nextFireMs, loop.iter)} — /loop stop or type to cancel`}
       </Text>
     </Box>

@@ -25,12 +25,15 @@ sessions/
 .turbo/
 # Local-only Claude Code settings — personal overrides, never committed.
 .claude/settings.local.json
+# Local agent notes — personal workflow reminders, never committed.
+agent.md
 # Per-user Reasonix state under .reasonix/ — committable team-level
 # files (settings.json, skills/) stay tracked, but the user-private
 # bits (semantic index, sessions, opt-out markers) never should.
 .reasonix/semantic/
 .reasonix/sessions/
 .reasonix/semantic-skip
+.reasonix/truncated-results/
 # Scratch entry regenerated each time scripts/bundle-codemirror.mjs runs.
 scripts/.cm-entry.mjs
 # Personal bun lockfile — project uses npm officially.
@@ -48,3 +51,5 @@ desktop/src-tauri/binaries/
 # Design mock-up reference (local, not part of repo)
 .design-ref/
 *.cpuprofile
+
+.probe-snapshots/

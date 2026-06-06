@@ -133,4 +133,14 @@ describe("McpClient.request() timeout/no-crash", () => {
       await client.close();
     }
   });
+
+  it("initialize() rejects when the supplied AbortSignal fires (issue #1236)", async () => {
+    const transport = new SilentServerTransport();
+    const client = new McpClient({ transport, requestTimeoutMs: 60_000 });
+    const ac = new AbortController();
+    const pending = client.initialize({ signal: ac.signal });
+    setTimeout(() => ac.abort(), 20);
+    await expect(pending).rejects.toThrow(/aborted/);
+    await client.close();
+  });
 });

@@ -3,6 +3,7 @@ import { Box, Text } from "ink";
 import React from "react";
 import { t } from "../../i18n/index.js";
 import { GLYPH, useColor } from "./theme.js";
+import { FG, SURFACE } from "./theme/tokens.js";
 import type { AtPickerEntry, AtPickerState } from "./useCompletionPickers.js";
 
 export interface AtMentionSuggestionsProps {
@@ -41,7 +42,7 @@ export function AtMentionSuggestions({
           isSelected={windowStart + i === selectedIndex}
         />
       ))}
-      {hiddenBelow > 0 ? <Text dimColor>{`   ↓ ${hiddenBelow} below`}</Text> : null}
+      {hiddenBelow > 0 ? <Text color={FG.faint}>{`   ↓ ${hiddenBelow} below`}</Text> : null}
       <FooterRow isBrowse={isBrowse} hasFolder={shown.some((e) => e.isDir)} />
     </Box>
   );
@@ -69,8 +70,8 @@ function HeaderRow({
     return (
       <Box>
         {lead}
-        <Text dimColor>{`${where}  ${counter}`}</Text>
-        {hiddenAbove > 0 ? <Text dimColor>{`   ↑ ${hiddenAbove} above`}</Text> : null}
+        <Text color={FG.faint}>{`${where}  ${counter}`}</Text>
+        {hiddenAbove > 0 ? <Text color={FG.faint}>{`   ↑ ${hiddenAbove} above`}</Text> : null}
       </Box>
     );
   }
@@ -80,8 +81,8 @@ function HeaderRow({
   return (
     <Box>
       {lead}
-      <Text dimColor>{status}</Text>
-      {hiddenAbove > 0 ? <Text dimColor>{`   ↑ ${hiddenAbove} above`}</Text> : null}
+      <Text color={FG.faint}>{status}</Text>
+      {hiddenAbove > 0 ? <Text color={FG.faint}>{`   ↑ ${hiddenAbove} above`}</Text> : null}
     </Box>
   );
 }
@@ -102,7 +103,7 @@ function EmptyRow({ state, color }: { state: AtPickerState; color: ReturnType<ty
   if (state.searching) {
     return (
       <Box>
-        <Text dimColor>{t("atMentions.scanning")}</Text>
+        <Text color={FG.faint}>{t("atMentions.scanning")}</Text>
       </Box>
     );
   }
@@ -123,14 +124,14 @@ function EntryRow({ entry, isSelected }: { entry: AtPickerEntry; isSelected: boo
   const labelColor = entry.isDir ? color.accent : color.primary;
   const labelText = entry.isDir ? `${entry.label}/` : entry.label;
   return (
-    <Box>
+    <Box backgroundColor={isSelected ? SURFACE.bgElev : undefined}>
       <Text color={isSelected ? color.primary : color.info} bold={isSelected}>
         {cursor}
       </Text>
       <Text color={labelColor} bold={isSelected}>
         {labelText.padEnd(20)}
       </Text>
-      {entry.dirSuffix ? <Text dimColor>{`  ${entry.dirSuffix}`}</Text> : null}
+      {entry.dirSuffix ? <Text color={FG.faint}>{`  ${entry.dirSuffix}`}</Text> : null}
     </Box>
   );
 }
@@ -139,7 +140,7 @@ function FooterRow({ isBrowse, hasFolder }: { isBrowse: boolean; hasFolder: bool
   const hintKey = isBrowse && hasFolder ? "atMentions.footerBrowse" : "atMentions.footerInsert";
   return (
     <Box marginTop={0}>
-      <Text dimColor>{`  ${t(hintKey)}`}</Text>
+      <Text color={FG.faint}>{`  ${t(hintKey)}`}</Text>
     </Box>
   );
 }

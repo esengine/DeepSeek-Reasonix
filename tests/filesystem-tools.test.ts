@@ -387,6 +387,13 @@ describe("filesystem tools (built-in, sandbox-enforced)", () => {
       expect(out).toContain("node_modules/lib/marker.ts");
     });
 
+    it("walks .reasonix/ by default so user skills stay reachable (#1357)", async () => {
+      await fs.mkdir(join(root, ".reasonix", "skills"), { recursive: true });
+      await fs.writeFile(join(root, ".reasonix", "skills", "my-skill.md"), "# my-skill\n");
+      const out = await tools.dispatch("search_files", JSON.stringify({ pattern: "my-skill" }));
+      expect(out).toContain(".reasonix/skills/my-skill.md");
+    });
+
     it("honors AbortSignal during recursive search", async () => {
       await fs.mkdir(join(root, "src", "nested"), { recursive: true });
       await fs.writeFile(join(root, "src", "nested", "marker.ts"), "x");
@@ -522,6 +529,54 @@ describe("filesystem tools (built-in, sandbox-enforced)", () => {
       );
       expect(out).toMatch(/src\/cli\/ui\/App\.tsx:1:/);
       expect(out).not.toMatch(/src[\\]cli/);
+    });
+
+    it("scans a 1.5 MiB single-line file fully without hanging (issue #1236)", async () => {
+      // Minified-bundle shape — long single line. We want the search to
+      // (a) cover the whole line, and (b) complete in reasonable time
+      // against a literal pattern. The pattern below is literal so V8's
+      // fast regex path handles 1.5 MiB in tens of ms. The walk-level
+      // deadline (WALK_DEADLINE_MS) is the backstop if a future change
+      // regresses to quadratic behaviour.
+      const longLine = "a".repeat(1_500_000);
+      await fs.writeFile(join(root, "huge.txt"), `${longLine}\n`);
+      const start = Date.now();
+      const out = await tools.dispatch(
+        "search_content",
+        JSON.stringify({ pattern: "definitely_not_in_aaaa" }),
+      );
+      expect(Date.now() - start).toBeLessThan(2000);
+      expect(out).toMatch(/no matches/);
+    });
+
+    it("skips a single file with catastrophic regex and keeps walking (issue #1236)", async () => {
+      // (a+)+! on a long run of 'a' is the textbook ReDoS pattern. With the
+      // worker-isolated runner, the bad file is terminated and reported as
+      // a regex-timeout in the footer; the remaining file still produces
+      // its match.
+      const { RegexRunner, __setRegexRunnerForTesting } = await import(
+        "../src/tools/fs/regex-runner.js"
+      );
+      __setRegexRunnerForTesting(new RegexRunner({ defaultTimeoutMs: 300 }));
+      try {
+        await fs.writeFile(join(root, "evil.txt"), `${"a".repeat(40)}\n`);
+        await fs.writeFile(join(root, "good.txt"), "match here\n");
+        const out = await tools.dispatch("search_content", JSON.stringify({ pattern: "(a+)+!" }));
+        expect(out).toMatch(/regex timed out on 1 file/);
+        expect(out).toContain("evil.txt");
+      } finally {
+        __setRegexRunnerForTesting(null);
+      }
+    });
+
+    it("returns an aborted error when the signal fires before dispatch (issue #1236)", async () => {
+      const ctrl = new AbortController();
+      ctrl.abort();
+      const out = await tools.dispatch("search_content", JSON.stringify({ pattern: "anything" }), {
+        signal: ctrl.signal,
+      });
+      expect(out).toMatch(/aborted before dispatch/);
+      expect(JSON.parse(out)).toMatchObject({ rejectedReason: "aborted" });
     });
 
     it("honors AbortSignal during recursive content search", async () => {
@@ -728,7 +783,7 @@ describe("filesystem tools (built-in, sandbox-enforced)", () => {
         "write_file",
         JSON.stringify({ path: "new.md", content: "hi" }),
       );
-      expect(out).toMatch(/wrote 2 chars/);
+      expect(out).toMatch(/created new\.md \(2 chars\)/);
       const disk = await fs.readFile(join(root, "new.md"), "utf8");
       expect(disk).toBe("hi");
     });
@@ -913,7 +968,7 @@ describe("filesystem tools (built-in, sandbox-enforced)", () => {
   });
 
   describe("allowWriting=false (read-only mode)", () => {
-    it("skips registering write_file / edit_file / multi_edit / create_directory / move_file / delete_file / delete_directory / copy_file", async () => {
+    it("skips registering write_file / edit_file / multi_edit / delete_range / delete_symbol / create_directory / move_file / delete_file / delete_directory / copy_file", async () => {
       const ro = new ToolRegistry();
       registerFilesystemTools(ro, { rootDir: root, allowWriting: false });
       expect(ro.has("read_file")).toBe(true);
@@ -922,6 +977,8 @@ describe("filesystem tools (built-in, sandbox-enforced)", () => {
       expect(ro.has("write_file")).toBe(false);
       expect(ro.has("edit_file")).toBe(false);
       expect(ro.has("multi_edit")).toBe(false);
+      expect(ro.has("delete_range")).toBe(false);
+      expect(ro.has("delete_symbol")).toBe(false);
       expect(ro.has("create_directory")).toBe(false);
       expect(ro.has("move_file")).toBe(false);
       expect(ro.has("delete_file")).toBe(false);
@@ -1135,6 +1192,52 @@ describe("filesystem tools (built-in, sandbox-enforced)", () => {
       expect(out).toMatch(/applied 2 edits/);
       const disk = await fs.readFile(join(root, "a.txt"), "utf8");
       expect(disk).toBe("ONE\r\ntwo\r\nTHREE\r\n");
+    });
+
+    it("rolls back attempted files when a disk write fails mid-batch", async () => {
+      await fs.writeFile(join(root, "a.txt"), "alpha\n");
+      await fs.writeFile(join(root, "b.txt"), "bravo\n");
+
+      const originalWriteFile = fs.writeFile.bind(fs);
+      // First attempt to write b.txt fails; rollback retry passes through.
+      let bTxtFailed = false;
+      const spy = vi
+        .spyOn(fs, "writeFile")
+        .mockImplementation(
+          async (
+            path: string | URL | import("node:fs/promises").FileHandle,
+            data: any,
+            ...rest: any[]
+          ) => {
+            const resolved = typeof path === "string" ? path : path.toString();
+            if (resolved.endsWith("b.txt") && !bTxtFailed) {
+              bTxtFailed = true;
+              // Simulate partial write before failure (truncation from writeFile open).
+              await originalWriteFile(path, "PARTIAL", ...rest);
+              throw new Error("SIMULATED DISK FULL");
+            }
+            return originalWriteFile(path, data, ...rest);
+          },
+        );
+
+      try {
+        const out = await tools.dispatch(
+          "multi_edit",
+          JSON.stringify({
+            edits: [
+              { path: "a.txt", search: "alpha", replace: "ALPHA" },
+              { path: "b.txt", search: "bravo", replace: "BRAVO" },
+            ],
+          }),
+        );
+        expect(out).toMatch(/write failed/);
+        expect(out).toMatch(/rolled back/);
+      } finally {
+        spy.mockRestore();
+      }
+      // Both files must be restored to original content
+      expect(await fs.readFile(join(root, "a.txt"), "utf8")).toBe("alpha\n");
+      expect(await fs.readFile(join(root, "b.txt"), "utf8")).toBe("bravo\n");
     });
 
     it("refuses when an edit references a non-existent file (atomic — no other files written)", async () => {

@@ -29,12 +29,29 @@ export interface StreamableHttpMcpSpec {
 export type McpSpec = StdioMcpSpec | SseMcpSpec | StreamableHttpMcpSpec;
 
 export type McpServerSpec =
-  | (StdioMcpSpec & { env?: Record<string, string>; disabled?: boolean })
-  | (SseMcpSpec & { headers?: Record<string, string>; disabled?: boolean })
-  | (StreamableHttpMcpSpec & { headers?: Record<string, string>; disabled?: boolean });
+  | (StdioMcpSpec & {
+      env?: Record<string, string>;
+      cwd?: string;
+      disabled?: boolean;
+      requestTimeoutMs?: number;
+    })
+  | (SseMcpSpec & {
+      headers?: Record<string, string>;
+      disabled?: boolean;
+      requestTimeoutMs?: number;
+    })
+  | (StreamableHttpMcpSpec & {
+      headers?: Record<string, string>;
+      disabled?: boolean;
+      requestTimeoutMs?: number;
+    });
 
 export function getMcpServerEnv(spec: McpServerSpec): Record<string, string> | undefined {
   return spec.transport === "stdio" ? spec.env : undefined;
+}
+
+export function getMcpServerCwd(spec: McpServerSpec): string | undefined {
+  return spec.transport === "stdio" ? spec.cwd : undefined;
 }
 
 export function getMcpServerHeaders(spec: McpServerSpec): Record<string, string> | undefined {
@@ -48,15 +65,31 @@ export function overlayMatchedSpec(
   switch (parsed.transport) {
     case "stdio":
       return matched
-        ? { ...parsed, disabled: matched.disabled, env: getMcpServerEnv(matched) }
+        ? {
+            ...parsed,
+            disabled: matched.disabled,
+            env: getMcpServerEnv(matched),
+            cwd: getMcpServerCwd(matched),
+            requestTimeoutMs: matched.requestTimeoutMs,
+          }
         : { ...parsed };
     case "sse":
       return matched
-        ? { ...parsed, disabled: matched.disabled, headers: getMcpServerHeaders(matched) }
+        ? {
+            ...parsed,
+            disabled: matched.disabled,
+            headers: getMcpServerHeaders(matched),
+            requestTimeoutMs: matched.requestTimeoutMs,
+          }
         : { ...parsed };
     case "streamable-http":
       return matched
-        ? { ...parsed, disabled: matched.disabled, headers: getMcpServerHeaders(matched) }
+        ? {
+            ...parsed,
+            disabled: matched.disabled,
+            headers: getMcpServerHeaders(matched),
+            requestTimeoutMs: matched.requestTimeoutMs,
+          }
         : { ...parsed };
   }
 }

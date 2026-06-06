@@ -1,0 +1,24 @@
+{
+  "name": "@reasonix/core-utils",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Shared utilities duplicated across CLI, Desktop, Dashboard, and ACP surfaces.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./compaction": "./src/compaction.ts",
+    "./derive-prefix": "./src/derive-prefix.ts",
+    "./tildeify": "./src/tildeify.ts",
+    "./tool-kind": "./src/tool-kind.ts",
+    "./permission-types": "./src/permission-types.ts",
+    "./approval-prompt": "./src/approval-prompt.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "typescript": "^5.6.3"
+  }
+}

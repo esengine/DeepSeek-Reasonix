@@ -6,12 +6,12 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Context, Result};
 use parking_lot::Mutex;
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, State};
 #[cfg(not(debug_assertions))]
 use tauri::Manager;
+use tauri::{AppHandle, Emitter, State};
 use which::which_all;
 
 #[derive(Default)]
@@ -69,7 +69,10 @@ fn resolve_cli(app: &AppHandle) -> Result<(String, Vec<String>)> {
         if is_real_node && cli_path.exists() {
             return Ok((
                 node_path.to_string_lossy().into_owned(),
-                vec![cli_path.to_string_lossy().into_owned(), "desktop".to_string()],
+                vec![
+                    cli_path.to_string_lossy().into_owned(),
+                    "desktop".to_string(),
+                ],
             ));
         }
     }
@@ -85,7 +88,6 @@ fn resolve_cli(app: &AppHandle) -> Result<(String, Vec<String>)> {
     let entry = candidates
         .into_iter()
         .find(|p| p.exists())
-        .map(PathBuf::from)
         .ok_or_else(|| anyhow!("dist/cli/index.js not found — run `npm run build` at repo root"))?;
 
     let node_path = find_real_node().context("node not found")?;
@@ -98,15 +100,16 @@ fn resolve_cli(app: &AppHandle) -> Result<(String, Vec<String>)> {
 }
 
 /// Walk every PATH match for `node` and return the first one that is
-/// (a) a real file > 100 KB and (b) NOT inside Windows' App Execution
-/// Alias directory — those Microsoft Store stubs are 0-byte and triggered
-/// the original "%1 is not a valid Win32 application" (error 193).
+/// (a) a real file > 50 KB on macOS/Linux, or > 100 KB on Windows, and
+/// (b) NOT inside Windows' App Execution Alias directory.
+/// Threshold must accommodate Homebrew Node ~68 KB on arm64 macOS.
 fn find_real_node() -> Result<PathBuf> {
     let names: &[&str] = if cfg!(windows) {
         &["node.exe", "node"]
     } else {
         &["node"]
     };
+    let min_size: u64 = if cfg!(windows) { 100_000 } else { 50_000 };
     let mut tried: Vec<String> = Vec::new();
     for name in names {
         if let Ok(iter) = which_all(*name) {
@@ -114,7 +117,7 @@ fn find_real_node() -> Result<PathBuf> {
                 let size = std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
                 let lower = p.to_string_lossy().to_lowercase();
                 let is_ms_store_shim = lower.contains("windowsapps");
-                let too_small = size < 100_000;
+                let too_small = size < min_size;
                 if !too_small && !is_ms_store_shim {
                     return Ok(p);
                 }
@@ -122,7 +125,11 @@ fn find_real_node() -> Result<PathBuf> {
                     "{} ({} bytes{})",
                     p.display(),
                     size,
-                    if is_ms_store_shim { ", MS Store shim" } else { "" },
+                    if is_ms_store_shim {
+                        ", MS Store shim"
+                    } else {
+                        ""
+                    },
                 ));
             }
         }
@@ -141,7 +148,10 @@ fn find_real_node() -> Result<PathBuf> {
 pub fn rpc_spawn(app: AppHandle, state: State<'_, RpcState>) -> Result<(), String> {
     let mut guard = state.inner.lock();
     if guard.is_some() {
-        return Err("rpc already spawned".into());
+        // Idempotent — a second call (effect re-run, WebView reload) keeps the
+        // existing Node child. The frontend follows up with `desktop_resync`
+        // so a reloaded React app catches up on bootstrap events it missed.
+        return Ok(());
     }
 
     let (program, args) = resolve_cli(&app).map_err(|e| e.to_string())?;
@@ -259,7 +269,9 @@ fn kill_process_tree(pid: u32) {
 #[tauri::command]
 pub fn rpc_kill(state: State<'_, RpcState>) -> Result<(), String> {
     let handle_opt = state.inner.lock().take();
-    let Some(handle) = handle_opt else { return Ok(()) };
+    let Some(handle) = handle_opt else {
+        return Ok(());
+    };
 
     drop(handle.stdin);
 

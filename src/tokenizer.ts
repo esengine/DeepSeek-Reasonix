@@ -5,6 +5,7 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
+import { LruCache } from "./core/lru.js";
 
 interface AddedToken {
   id: number;
@@ -151,6 +152,12 @@ function loadTokenizer(): LoadedTokenizer {
   return cached;
 }
 
+/** Force the BPE vocab to load now (gunzip + JSON.parse + Map build ≈ 100ms, 35MB heap).
+ *  Idempotent. Call once at idle after first paint so the first user turn doesn't pay it. */
+export function warmupTokenizer(): void {
+  loadTokenizer();
+}
+
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -178,15 +185,20 @@ function applySplit(chunks: string[], re: RegExp): string[] {
 /** UTF-8 bytes of `s`, each mapped to its byte-level visible char. */
 function byteLevelEncode(s: string, byteToChar: string[]): string {
   const bytes = new TextEncoder().encode(s);
-  let out = "";
-  for (let i = 0; i < bytes.length; i++) out += byteToChar[bytes[i]!];
-  return out;
+  const parts: string[] = new Array(bytes.length);
+  for (let i = 0; i < bytes.length; i++) parts[i] = byteToChar[bytes[i]!]!;
+  return parts.join("");
 }
+
+/** Repetitive tool output / identifier chunks re-encode thousands of times per session; LRU bounds at ~400KB. */
+const bpeCache = new LruCache<string, string[]>(8192);
 
 function bpeEncode(piece: string, mergeRank: Map<string, number>): string[] {
   if (piece.length <= 1) return piece ? [piece] : [];
-  let word: string[] = Array.from(piece);
-  while (true) {
+  const cached = bpeCache.get(piece);
+  if (cached !== undefined) return cached;
+  const word: string[] = Array.from(piece);
+  while (word.length > 1) {
     let bestIdx = -1;
     let bestRank = Number.POSITIVE_INFINITY;
     for (let i = 0; i < word.length - 1; i++) {
@@ -195,17 +207,13 @@ function bpeEncode(piece: string, mergeRank: Map<string, number>): string[] {
       if (rank !== undefined && rank < bestRank) {
         bestRank = rank;
         bestIdx = i;
-        if (rank === 0) break; // 0 is already the best possible
+        if (rank === 0) break;
       }
     }
     if (bestIdx < 0) break;
-    word = [
-      ...word.slice(0, bestIdx),
-      word[bestIdx]! + word[bestIdx + 1]!,
-      ...word.slice(bestIdx + 2),
-    ];
-    if (word.length === 1) break;
+    word.splice(bestIdx, 2, word[bestIdx]! + word[bestIdx + 1]!);
   }
+  bpeCache.set(piece, word);
   return word;
 }
 
@@ -251,7 +259,38 @@ export function encode(text: string): number[] {
 }
 
 export function countTokens(text: string): number {
-  return encode(text).length;
+  if (!text) return 0;
+  const t = loadTokenizer();
+  let count = 0;
+
+  const process = (segment: string) => {
+    if (!segment) return;
+    let chunks: string[] = [segment];
+    for (const re of t.splitRegexes) chunks = applySplit(chunks, re);
+    for (const chunk of chunks) {
+      if (!chunk) continue;
+      const byteLevel = byteLevelEncode(chunk, t.byteToChar);
+      const pieces = bpeEncode(byteLevel, t.mergeRank);
+      for (const p of pieces) {
+        if (t.vocab[p] !== undefined) count++;
+      }
+    }
+  };
+
+  if (t.addedPattern) {
+    t.addedPattern.lastIndex = 0;
+    let last = 0;
+    for (const m of text.matchAll(t.addedPattern)) {
+      const idx = m.index ?? 0;
+      if (idx > last) process(text.slice(last, idx));
+      if (t.addedMap.has(m[0])) count++;
+      last = idx + m[0].length;
+    }
+    if (last < text.length) process(text.slice(last));
+  } else {
+    process(text);
+  }
+  return count;
 }
 
 export const DEFAULT_BOUNDED_TOKENIZE_CHARS = 2 * 1024;
@@ -460,7 +499,7 @@ export function formatDeepSeekPrompt(
   }
   const merged = mergeToolMessages(msgs);
 
-  let prompt = BOS;
+  const parts: string[] = [BOS];
 
   for (let i = 0; i < merged.length; i++) {
     const msg = merged[i]!;
@@ -468,29 +507,75 @@ export function formatDeepSeekPrompt(
     const nextRole = i + 1 < merged.length ? (merged[i + 1]!.role ?? "user") : null;
 
     if (role === "system") {
-      prompt += msg.content ?? "";
+      parts.push(msg.content ?? "");
     } else if (role === "user") {
-      prompt += USER_SP + (msg.content ?? "");
+      parts.push(USER_SP, msg.content ?? "");
       if (nextRole === "assistant" || nextRole === null) {
-        prompt += ASSISTANT_SP + THINK_END;
+        parts.push(ASSISTANT_SP, THINK_END);
       }
     } else if (role === "assistant") {
       if (msg.reasoning_content) {
-        prompt += THINK_START + msg.reasoning_content + THINK_END;
+        parts.push(THINK_START, msg.reasoning_content, THINK_END);
       }
-      if (msg.content) prompt += msg.content;
+      if (msg.content) parts.push(msg.content);
       const tcs = msg.tool_calls;
       if (Array.isArray(tcs) && tcs.length > 0) {
-        prompt += renderToolCallsDsml(tcs);
+        parts.push(renderToolCallsDsml(tcs));
       }
-      prompt += EOS;
+      parts.push(EOS);
     }
   }
 
-  return prompt;
+  return parts.join("");
 }
 
-/** Token-count the FULL conversation as the API would see it: wraps messages in V4 chat template, then encodes once. */
+const PER_MESSAGE_TEMPLATE_TOKENS = 6;
+
+/** Keyed by content string — WeakMap-on-message can't be used because callers spread `{...e}` defensive copies, breaking identity every turn. */
+const contentTokenCache = new LruCache<string, number>(4096);
+
+/** Skip caching strings >10KB — 4096 entries of 50KB+ tool outputs would retain 200MB+ of string keys. */
+const MAX_CACHEABLE_CHARS = 10 * 1024;
+
+function cachedBoundedTokens(s: string): number {
+  if (s.length === 0) return 0;
+  const cached = contentTokenCache.get(s);
+  if (cached !== undefined) return cached;
+  const n = countTokensBounded(s);
+  if (s.length <= MAX_CACHEABLE_CHARS) contentTokenCache.set(s, n);
+  return n;
+}
+
+function tokensForMessage(
+  m: {
+    role?: string;
+    content?: string | null;
+    tool_calls?: unknown;
+    reasoning_content?: string | null;
+  },
+  dropThisReasoning: boolean,
+): number {
+  let n = 0;
+  if (typeof m.content === "string" && m.content.length > 0) {
+    n += cachedBoundedTokens(m.content);
+  }
+  if (m.role === "assistant") {
+    if (
+      !dropThisReasoning &&
+      typeof m.reasoning_content === "string" &&
+      m.reasoning_content.length > 0
+    ) {
+      n += cachedBoundedTokens(m.reasoning_content);
+    }
+    const tcs = m.tool_calls;
+    if (Array.isArray(tcs) && tcs.length > 0) {
+      n += cachedBoundedTokens(JSON.stringify(tcs));
+    }
+  }
+  return n;
+}
+
+/** Per-message bounded sum, not a full-prompt rebuild — used for fold-threshold checks where ±5% slop is fine. */
 export function estimateConversationTokens(
   messages: Array<{
     role?: string;
@@ -502,7 +587,25 @@ export function estimateConversationTokens(
   drop_thinking = false,
 ): number {
   if (messages.length === 0) return 0;
-  return countTokensBounded(formatDeepSeekPrompt(messages, drop_thinking));
+  let lastUserOrDev = -1;
+  if (drop_thinking) {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const r = messages[i]!.role;
+      if (r === "user" || r === "developer") {
+        lastUserOrDev = i;
+        break;
+      }
+    }
+  }
+  let total = 2;
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i]!;
+    if (drop_thinking && i < lastUserOrDev && m.role === "developer") continue;
+    total += PER_MESSAGE_TEMPLATE_TOKENS;
+    const dropReasoning = drop_thinking && i < lastUserOrDev && m.role === "assistant";
+    total += tokensForMessage(m, dropReasoning);
+  }
+  return total;
 }
 
 /** Total request tokens (messages + tool specs) as the API counts them. Tool specs rendered via V4 TOOLS_TEMPLATE and added to message token count. */

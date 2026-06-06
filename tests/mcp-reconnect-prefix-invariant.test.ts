@@ -77,7 +77,7 @@ describe("RFC #110 — cache-prefix invariant under MCP reconnect", () => {
     expect(after.fingerprint).not.toBe(before.fingerprint);
   });
 
-  it("REORDERING the same tools changes the fingerprint (array order is part of the prefix)", () => {
+  it("REORDERING the same tools keeps the fingerprint stable (prefix sorts tool specs)", () => {
     const a = new ImmutablePrefix({
       system: "s",
       toolSpecs: [tool("read"), tool("write"), tool("search")],
@@ -86,6 +86,6 @@ describe("RFC #110 — cache-prefix invariant under MCP reconnect", () => {
       system: "s",
       toolSpecs: [tool("write"), tool("read"), tool("search")],
     });
-    expect(b.fingerprint).not.toBe(a.fingerprint);
+    expect(b.fingerprint).toBe(a.fingerprint);
   });
 });

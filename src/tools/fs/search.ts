@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import * as pathMod from "node:path";
+import { getRegexRunner } from "./regex-runner.js";
 
 export interface SearchContext {
   rootDir: string;
@@ -71,6 +72,12 @@ export async function searchFiles(
 const MAX_HITS_PER_FILE = 30;
 /** Once printed bytes pass this fraction of the byte budget, remaining files switch to histogram. */
 const SUMMARY_MODE_TRIGGER_RATIO = 0.8;
+// Walk-level deadline must be larger than the per-file regex timeout
+// (DEFAULT_TIMEOUT_MS in regex-runner = 60 s) so one timed-out file doesn't
+// immediately trip this guard; 120 s leaves room for a second slow file
+// plus the rest of the walk before declaring the search a lost cause.
+const WALK_DEADLINE_MS = 120_000;
+const REGEX_METACHARS = /[\\.+*?()[\]{}|^$]/;
 
 export async function searchContent(
   ctx: SearchContext,
@@ -90,11 +97,19 @@ export async function searchContent(
   const includeDeps = args.include_deps === true;
   const ctxLines = Math.max(0, Math.min(20, Math.floor(args.context ?? 0)));
   const summaryOnly = args.summary_only === true;
-  let re: RegExp | null = null;
-  try {
-    re = new RegExp(args.pattern, caseSensitive ? "" : "i");
-  } catch {
-    re = null;
+  const reFlags = caseSensitive ? "" : "i";
+  // Patterns with no regex metacharacters take the main-thread `text.includes`
+  // path below — building a worker dispatch for plain literals dominates wall
+  // time on multi-file scans (#1748).
+  const hasMeta = REGEX_METACHARS.test(args.pattern);
+  let reSource: string | null = null;
+  if (hasMeta) {
+    try {
+      new RegExp(args.pattern, reFlags);
+      reSource = args.pattern;
+    } catch {
+      reSource = null;
+    }
   }
   const needle = caseSensitive ? args.pattern : args.pattern.toLowerCase();
   const matches: string[] = [];
@@ -104,6 +119,15 @@ export async function searchContent(
   let summaryMode = summaryOnly;
   let summaryNoticeEmitted = false;
   const fileHitCounts = new Map<string, number>();
+  const regexSkippedFiles: Array<{ rel: string; reason: string }> = [];
+  const t0 = Date.now();
+  const throwIfTimedOut = (): void => {
+    if (Date.now() - t0 > WALK_DEADLINE_MS) {
+      throw new Error(
+        `search_content exceeded ${WALK_DEADLINE_MS}ms — narrow the scope (path/glob) or simplify the pattern`,
+      );
+    }
+  };
 
   const pushLine = (out: string): boolean => {
     if (totalBytes + out.length + 1 > ctx.maxListBytes) {
@@ -141,6 +165,7 @@ export async function searchContent(
     for (const e of entries) {
       if (truncated) return;
       throwIfAborted(args.signal);
+      throwIfTimedOut();
       if (e.isDirectory()) {
         if (!includeDeps && ctx.skipDirNames.has(e.name)) continue;
         await walk(pathMod.join(dir, e.name));
@@ -175,14 +200,34 @@ export async function searchContent(
       if (firstNul !== -1 && firstNul < 8 * 1024) continue;
       const text = raw.toString("utf8");
       const rel = displayRel(ctx.rootDir, full);
-      const lines = text.split(/\r?\n/);
-      const hits: number[] = [];
-      for (let li = 0; li < lines.length; li++) {
-        throwIfAborted(args.signal);
-        const line = lines[li]!;
-        const lineForCheck = caseSensitive ? line : line.toLowerCase();
-        const hit = re ? re.test(line) : lineForCheck.includes(needle);
-        if (hit) hits.push(li);
+      let hits: number[];
+      let lines: string[];
+      if (reSource !== null) {
+        lines = text.split(/\r?\n/);
+        try {
+          hits = await getRegexRunner().testLines(text, reSource, reFlags, {
+            signal: args.signal,
+          });
+        } catch (err) {
+          const reason = (err as Error).message;
+          // Genuine abort bubbles up; regex-timeout means this single file's
+          // pattern is pathological — skip it and keep walking.
+          if (reason.includes("aborted")) throw err;
+          regexSkippedFiles.push({ rel, reason });
+          continue;
+        }
+      } else {
+        const haystack = caseSensitive ? text : text.toLowerCase();
+        if (haystack.indexOf(needle) === -1) {
+          scanned++;
+          continue;
+        }
+        lines = text.split(/\r?\n/);
+        hits = [];
+        for (let li = 0; li < lines.length; li++) {
+          const lineForCheck = caseSensitive ? lines[li]! : lines[li]!.toLowerCase();
+          if (lineForCheck.includes(needle)) hits.push(li);
+        }
       }
       scanned++;
       if (hits.length === 0) continue;
@@ -238,6 +283,11 @@ export async function searchContent(
     }
   };
   await walk(startAbs);
+  if (regexSkippedFiles.length > 0) {
+    pushLine(
+      `[regex timed out on ${regexSkippedFiles.length} file${regexSkippedFiles.length === 1 ? "" : "s"} — pattern may have catastrophic backtracking; first: ${regexSkippedFiles[0]!.rel}]`,
+    );
+  }
   if (matches.length === 0) {
     return scanned === 0
       ? "(no files scanned — path empty or all files filtered out)"

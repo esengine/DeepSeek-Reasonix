@@ -6,7 +6,6 @@ import { PlanStepList } from "./PlanStepList.js";
 import { SingleSelect } from "./Select.js";
 import { ApprovalCard } from "./cards/ApprovalCard.js";
 import { useKeystroke } from "./keystroke-context.js";
-import { useReserveRows, useTotalRows } from "./layout/viewport-budget.js";
 import { MarkdownView } from "./markdown-view.js";
 import { extractOpenQuestionsSection } from "./plan-open-questions.js";
 import type { KeyEvent } from "./stdin-reader.js";
@@ -31,7 +30,7 @@ const EXPANDED_DETAIL_CHROME_ROWS = 4;
 
 function PlanConfirmInner({ plan, steps, summary, onChoose }: PlanConfirmProps) {
   const { stdout } = useStdout();
-  const totalRows = useTotalRows();
+  const totalRows = stdout?.rows ?? 40;
   const [expanded, setExpanded] = useState(false);
   const [detailOffset, setDetailOffset] = useState(0);
   const stepRows = steps?.length ?? 0;
@@ -44,12 +43,9 @@ function PlanConfirmInner({ plan, steps, summary, onChoose }: PlanConfirmProps) 
   );
 
   const oqRows = openQuestions ? Math.min(openQuestions.split("\n").length, 8) : 0;
-  const modalRows = useReserveRows("modal", {
-    min: 10,
-    max: expanded
-      ? Math.max(10, totalRows - EXPANDED_DETAIL_CHROME_ROWS)
-      : Math.max(16, Math.min(32, (hasSteps ? stepRows + 2 : 2) + oqRows + 14)),
-  });
+  const modalRows = expanded
+    ? Math.max(10, totalRows - EXPANDED_DETAIL_CHROME_ROWS)
+    : Math.max(16, Math.min(32, (hasSteps ? stepRows + 2 : 2) + oqRows + 14));
   const detailViewRows = expanded
     ? Math.max(10, modalRows - EXPANDED_MODAL_OVERHEAD_ROWS)
     : Math.max(
@@ -94,17 +90,17 @@ function PlanConfirmInner({ plan, steps, summary, onChoose }: PlanConfirmProps) 
       return;
     }
     if (!isDetailScrollKey(ev)) return;
-    if (ev.pageUp || ev.mouseScrollUp) {
+    if (ev.pageUp) {
       setDetailOffset((n) => Math.max(0, n - detailViewRows));
-    } else if (ev.pageDown || ev.mouseScrollDown) {
+    } else if (ev.pageDown) {
       setDetailOffset((n) => Math.min(maxDetailOffset, n + detailViewRows));
     } else if (ev.home) {
       setDetailOffset(0);
     } else if (ev.end) {
       setDetailOffset(maxDetailOffset);
-    } else if (ev.upArrow) {
+    } else if (ev.upArrow || ev.mouseScrollUp) {
       setDetailOffset((n) => Math.max(0, n - 1));
-    } else if (ev.downArrow) {
+    } else if (ev.downArrow || ev.mouseScrollDown) {
       setDetailOffset((n) => Math.min(maxDetailOffset, n + 1));
     }
   });

@@ -259,10 +259,25 @@ describe("StdinReader — bracketed paste", () => {
     expect(events).toEqual([{ input: "ab" }, { input: "stuff", paste: true }]);
   });
 
-  it("printable runs do not eat a following ESC-less arrow tail", () => {
+  it("ESC-less arrow tail followed by another CSI prefix still recovers", () => {
     const { reader, events } = setup();
-    reader.feed("ab[Ccd");
-    expect(events).toEqual([{ input: "ab" }, { input: "", rightArrow: true }, { input: "cd" }]);
+    reader.feed("[C[A");
+    expect(events).toEqual([
+      { input: "", rightArrow: true },
+      { input: "", upArrow: true },
+    ]);
+  });
+
+  it("typed `[DEBUG]` is not misread as left-arrow + EBUG] (#1771)", () => {
+    const { reader, events } = setup();
+    reader.feed("[DEBUG]");
+    expect(events).toEqual([{ input: "[DEBUG]" }]);
+  });
+
+  it("typed `[ABC]`-shaped tokens stay intact (no upArrow split)", () => {
+    const { reader, events } = setup();
+    reader.feed("[Aabc");
+    expect(events).toEqual([{ input: "[Aabc" }]);
   });
 });
 
@@ -430,6 +445,47 @@ describe("StdinReader — SGR mouse reports (issue #867)", () => {
     const { reader, events } = setup();
     reader.feed("[<not-a-mouse-report");
     expect(events).toEqual([{ input: "[<not-a-mouse-report" }]);
+  });
+
+  it("drops legacy X10 mouse reports as a whole instead of leaking coordinate bytes", () => {
+    const { reader, events } = setup();
+    reader.feed("\x1b[M`*%");
+    expect(events).toEqual([]);
+  });
+
+  it("drops legacy X10 mouse reports even when split after the prefix", () => {
+    const { reader, events } = setup();
+    reader.feed("\x1b[M");
+    reader.feed("`*%");
+    expect(events).toEqual([]);
+  });
+
+  it("drops a legacy X10 mouse-report flood without surfacing prompt input (#1598)", () => {
+    const { reader, events } = setup();
+    for (let i = 0; i < 1000; i++) {
+      reader.feed("\x1b[M`*%");
+    }
+    expect(events).toEqual([]);
+  });
+
+  it("drops ESC-stripped legacy X10 mouse reports instead of leaking prompt input (#1598)", () => {
+    const { reader, events } = setup();
+    reader.feed("[M`*%");
+    expect(events).toEqual([]);
+  });
+
+  it("drops an ESC-stripped legacy X10 mouse-report flood without surfacing prompt input (#1598)", () => {
+    const { reader, events } = setup();
+    for (let i = 0; i < 1000; i++) {
+      reader.feed("[M`*%");
+    }
+    expect(events).toEqual([]);
+  });
+
+  it("keeps printable text around an ESC-stripped legacy X10 report intact", () => {
+    const { reader, events } = setup();
+    reader.feed("ab[M`*%cd");
+    expect(events).toEqual([{ input: "ab" }, { input: "cd" }]);
   });
 });
 

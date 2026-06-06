@@ -1,8 +1,16 @@
-/** web_search uses Mojeek (DDG returns anti-bot 202 to unauthenticated POSTs); web_fetch sniffs HTML to text. */
+/** web_search uses Bing (cn.bing.com — works from CN without proxy); web_fetch sniffs HTML to text. */
 
+import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
 import { parse as parseHtml } from "node-html-parser";
 import {
+  loadBaiduApiKey,
+  loadBraveApiKey,
+  loadExaApiKey,
   loadMetasoApiKey,
+  loadOllamaApiKey,
+  loadPerplexityApiKey,
+  loadTavilyApiKey,
   webSearchEndpoint as loadWebSearchEndpoint,
   webSearchEngine as loadWebSearchEngine,
 } from "../config.js";
@@ -13,6 +21,8 @@ export interface SearchResult {
   title: string;
   url: string;
   snippet: string;
+  /** AI-generated answer text — set by AI-native engines (Perplexity, Exa); undefined for traditional engines. */
+  answer?: string;
 }
 
 export interface PageContent {
@@ -28,14 +38,28 @@ export interface WebFetchOptions {
   maxChars?: number;
   /** Timeout in ms. Defaults to 15_000. */
   timeoutMs?: number;
+  /** Config path for provider-specific keys. Defaults to ~/.reasonix/config.json. */
+  configPath?: string;
   signal?: AbortSignal;
 }
 
 export interface WebSearchOptions {
   topK?: number;
   signal?: AbortSignal;
-  /** Backend engine: "mojeek" (scrapes Mojeek HTML), "searxng" (self-hosted SearXNG JSON API), or "metaso" (Metaso API). */
-  engine?: "mojeek" | "searxng" | "metaso";
+  /** Config path for provider-specific keys. Defaults to ~/.reasonix/config.json. */
+  configPath?: string;
+  /** Backend engine: "bing" (scrapes cn.bing.com HTML — default, works from CN without proxy), "bing-intl" (www.bing.com, indexes international sites), "searxng" (self-hosted SearXNG), "metaso" (Metaso API), "baidu" (Baidu AI Search API), "tavily" (LLM-friendly JSON API), "perplexity" (Perplexity AI), "exa" (Exa API), "brave" (Brave Search API), or "ollama" (Ollama cloud web search). */
+  engine?:
+    | "bing"
+    | "bing-intl"
+    | "searxng"
+    | "metaso"
+    | "baidu"
+    | "tavily"
+    | "perplexity"
+    | "exa"
+    | "brave"
+    | "ollama";
   /** Base URL for SearXNG. Default http://localhost:8080. */
   endpoint?: string;
 }
@@ -43,14 +67,28 @@ export interface WebSearchOptions {
 const DEFAULT_FETCH_MAX_CHARS = 32_000;
 const DEFAULT_FETCH_TIMEOUT_MS = 15_000;
 const DEFAULT_TOPK = 5;
+/** Timeout applied to every outbound search request (#2252 extended Bing; apply consistently). */
+const SEARCH_TIMEOUT_MS = 15_000;
 /** Bytes cap applied before `resp.text()` — char cap can't fire until the body is fully buffered. */
 const FETCH_MAX_BYTES = 10 * 1024 * 1024;
-// Real-browser UA. Servers like Mojeek are bot-friendly but still gate
-// obvious scraper UAs; a stock Chrome string avoids the fast-path block.
+// Real-browser UA. Most search backends gate obvious scraper UAs; a stock
+// Chrome string clears the fast-path block.
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
-const MOJEEK_ENDPOINT = "https://www.mojeek.com/search";
+// cn.bing.com over www.bing.com — CN endpoint returns raw URLs in the
+// HTML; the international endpoint wraps them in `bing.com/ck/a?u=a1<base64>`
+// click-tracking redirects we'd have to decode per result.
+const BING_ENDPOINT = "https://cn.bing.com/search";
+const BING_INTL_ENDPOINT = "https://www.bing.com/search";
 const METASO_ENDPOINT = "https://metaso.cn/api/v1";
+const BAIDU_AI_SEARCH_ENDPOINT = "https://qianfan.baidubce.com/v2/ai_search/web_search";
+const TAVILY_ENDPOINT = "https://api.tavily.com/search";
+const PERPLEXITY_ENDPOINT = "https://api.perplexity.ai/chat/completions";
+const EXA_ENDPOINT = "https://api.exa.ai/answer";
+const BRAVE_ENDPOINT = "https://api.search.brave.com/res/v1/web/search";
+const OLLAMA_WEB_SEARCH_ENDPOINT = "https://ollama.com/api/web_search";
+const OLLAMA_WEB_FETCH_ENDPOINT = "https://ollama.com/api/web_fetch";
+const FETCH_MAX_REDIRECTS = 5;
 
 /** Pick a status-specific webErrors key so the model gets an actionable hint, not a bare status. */
 function searchStatusError(status: number): string {
@@ -67,6 +105,149 @@ function fetchStatusError(status: number, url: string): string {
   return t("webErrors.fetchStatus", { status, url });
 }
 
+function parseIpv4(address: string): number | null {
+  const parts = address.split(".");
+  if (parts.length !== 4) return null;
+  let out = 0;
+  for (const part of parts) {
+    if (!/^\d+$/.test(part)) return null;
+    const n = Number(part);
+    if (!Number.isInteger(n) || n < 0 || n > 255) return null;
+    out = (out << 8) + n;
+  }
+  return out >>> 0;
+}
+
+function ipv4InRange(value: number, base: string, bits: number): boolean {
+  const parsed = parseIpv4(base);
+  if (parsed === null) return false;
+  const mask = bits === 0 ? 0 : (0xffffffff << (32 - bits)) >>> 0;
+  return (value & mask) === (parsed & mask);
+}
+
+function isPrivateIpv4(address: string): boolean {
+  const value = parseIpv4(address);
+  if (value === null) return false;
+  return (
+    ipv4InRange(value, "0.0.0.0", 8) ||
+    ipv4InRange(value, "10.0.0.0", 8) ||
+    ipv4InRange(value, "100.64.0.0", 10) ||
+    ipv4InRange(value, "127.0.0.0", 8) ||
+    ipv4InRange(value, "169.254.0.0", 16) ||
+    ipv4InRange(value, "172.16.0.0", 12) ||
+    ipv4InRange(value, "192.0.0.0", 24) ||
+    ipv4InRange(value, "192.0.2.0", 24) ||
+    ipv4InRange(value, "192.168.0.0", 16) ||
+    ipv4InRange(value, "198.18.0.0", 15) ||
+    ipv4InRange(value, "198.51.100.0", 24) ||
+    ipv4InRange(value, "203.0.113.0", 24) ||
+    ipv4InRange(value, "224.0.0.0", 4) ||
+    ipv4InRange(value, "240.0.0.0", 4)
+  );
+}
+
+function normalizeIpv6(address: string): string {
+  return address.toLowerCase().replace(/(^|:)0+([0-9a-f])/g, "$1$2");
+}
+
+function isPrivateIpv6(address: string): boolean {
+  const normalized = normalizeIpv6(address);
+  const mapped = /^::ffff:(?:0+:)?(\d+\.\d+\.\d+\.\d+)$/i.exec(normalized);
+  if (mapped) return isPrivateIpv4(mapped[1]!);
+  return (
+    normalized === "::" ||
+    normalized === "::1" ||
+    normalized.startsWith("fc") ||
+    normalized.startsWith("fd") ||
+    normalized.startsWith("fe8") ||
+    normalized.startsWith("fe9") ||
+    normalized.startsWith("fea") ||
+    normalized.startsWith("feb") ||
+    normalized.startsWith("ff")
+  );
+}
+
+function isInternalAddress(address: string): boolean {
+  const family = isIP(address);
+  if (family === 4) return isPrivateIpv4(address);
+  if (family === 6) return isPrivateIpv6(address);
+  return false;
+}
+
+/** DoH fallback for when system DNS returns Fake-IP (TUN proxies). */
+interface DohAnswer {
+  type: number;
+  data: string;
+}
+
+interface DohResponse {
+  Status: number;
+  Answer?: DohAnswer[];
+}
+
+async function dohResolve(host: string): Promise<string[]> {
+  const url = new URL("https://1.1.1.1/dns-query");
+  url.searchParams.set("name", host);
+  url.searchParams.set("type", "A");
+
+  const resp = await fetch(url.toString(), {
+    headers: { Accept: "application/dns-json" },
+    signal: AbortSignal.timeout(5000),
+  });
+  if (!resp.ok) throw new Error(`DoH resolve failed: HTTP ${resp.status} for ${host}`);
+
+  const data = (await resp.json()) as DohResponse;
+  if (data.Status !== 0)
+    throw new Error(`DoH resolve failed: DNS status ${data.Status} for ${host}`);
+
+  const addresses = (data.Answer ?? []).filter((a) => a.type === 1).map((a) => a.data);
+
+  if (addresses.length === 0) throw new Error(`DoH resolve returned no A records for ${host}`);
+  return addresses;
+}
+
+async function assertPublicHttpUrl(rawUrl: string): Promise<URL> {
+  const url = new URL(rawUrl);
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error(`web_fetch refuses non-HTTP URL: ${url.protocol}`);
+  }
+
+  const host = url.hostname;
+  const literal = isIP(host);
+  if (literal) {
+    if (isInternalAddress(host)) {
+      throw new Error(`web_fetch refuses internal or reserved host: ${host}`);
+    }
+    return url;
+  }
+
+  // Primary: system DNS
+  const sysAddrs = (await lookup(host, { all: true, verbatim: true })).map((e) => e.address);
+
+  if (sysAddrs.length === 0) {
+    throw new Error(`web_fetch refuses internal or reserved host: ${host}`);
+  }
+
+  if (sysAddrs.some(isInternalAddress)) {
+    // System DNS returned fake/internal addresses (e.g. TUN Fake-IP) —
+    // fall back to DoH to get the real public IPs
+    const dohAddrs = await dohResolve(host).catch(() => null);
+    if (!dohAddrs || dohAddrs.some(isInternalAddress)) {
+      throw new Error(`web_fetch refuses internal or reserved host: ${host}`);
+    }
+    // DoH resolved to public IPs → host is legitimate
+  }
+
+  return url;
+}
+
+function redirectLocation(resp: Response, currentUrl: string): string | null {
+  if (resp.status < 300 || resp.status > 399) return null;
+  const location = resp.headers.get("location");
+  if (!location) return null;
+  return new URL(location, currentUrl).toString();
+}
+
 /** Distinguishes "truly 0 results" from "layout changed / blocked" so callers can tell. */
 export async function webSearch(
   query: string,
@@ -75,33 +256,65 @@ export async function webSearch(
   if (opts.engine === "metaso") {
     return searchMetaso(query, opts);
   }
+  if (opts.engine === "baidu") {
+    return searchBaidu(query, opts);
+  }
   if (opts.engine === "searxng") {
     return searchSearxng(query, opts);
   }
-  return searchMojeek(query, opts);
+  if (opts.engine === "tavily") {
+    return searchTavily(query, opts);
+  }
+  if (opts.engine === "perplexity") {
+    return searchPerplexity(query, opts);
+  }
+  if (opts.engine === "exa") {
+    return searchExa(query, opts);
+  }
+  if (opts.engine === "ollama") {
+    return searchOllama(query, opts);
+  }
+  if (opts.engine === "brave") {
+    return searchBrave(query, opts);
+  }
+  if (opts.engine === "bing-intl") {
+    return searchBing(query, opts, BING_INTL_ENDPOINT);
+  }
+  return searchBing(query, opts);
 }
 
-async function searchMojeek(query: string, opts: WebSearchOptions = {}): Promise<SearchResult[]> {
+/** Combine caller's abort signal with the per-request search timeout. */
+function searchSignal(callerSignal?: AbortSignal): AbortSignal {
+  const t = AbortSignal.timeout(SEARCH_TIMEOUT_MS);
+  return callerSignal ? AbortSignal.any([callerSignal, t]) : t;
+}
+
+async function searchBing(
+  query: string,
+  opts: WebSearchOptions = {},
+  endpoint = BING_ENDPOINT,
+): Promise<SearchResult[]> {
   const topK = Math.max(1, Math.min(10, opts.topK ?? DEFAULT_TOPK));
-  const resp = await fetch(`${MOJEEK_ENDPOINT}?q=${encodeURIComponent(query)}`, {
+  const signal = searchSignal(opts.signal);
+  const resp = await fetch(`${endpoint}?q=${encodeURIComponent(query)}`, {
     headers: {
       "User-Agent": USER_AGENT,
       Accept: "text/html,application/xhtml+xml,application/xml;q=0.9",
-      "Accept-Language": "en-US,en;q=0.9",
+      "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
     },
-    signal: opts.signal,
+    signal,
     redirect: "follow",
   });
   if (!resp.ok) throw new Error(searchStatusError(resp.status));
   const html = await resp.text();
-  const results = parseMojeekResults(html).slice(0, topK);
+  const results = parseBingResults(html).slice(0, topK);
   if (results.length === 0) {
     if (/no results found|did not match any documents/i.test(html)) return [];
     if (/captcha|verify you are human|access denied|forbidden/i.test(html)) {
-      throw new Error(t("webErrors.mojeekBlocked"));
+      throw new Error(t("webErrors.bingBlocked"));
     }
     throw new Error(
-      t("webErrors.mojeekNoResults", {
+      t("webErrors.bingNoResults", {
         chars: html.length,
         preview: html.slice(0, 120).replace(/\s+/g, " "),
       }),
@@ -137,7 +350,7 @@ async function searchSearxng(query: string, opts: WebSearchOptions = {}): Promis
         "User-Agent": USER_AGENT,
         Accept: "text/html",
       },
-      signal: opts.signal,
+      signal: searchSignal(opts.signal),
     });
   } catch (err) {
     if (err instanceof TypeError && (err as Error).message.includes("fetch")) {
@@ -177,7 +390,8 @@ interface MetasoSearchResponse {
 
 async function searchMetaso(query: string, opts: WebSearchOptions = {}): Promise<SearchResult[]> {
   const topK = Math.max(1, Math.min(100, opts.topK ?? DEFAULT_TOPK));
-  const apiKey = loadMetasoApiKey();
+  const apiKey = loadMetasoApiKey(opts.configPath);
+  if (!apiKey) throw new Error(t("webErrors.metasoMissingKey"));
 
   let resp: Response;
   try {
@@ -193,7 +407,7 @@ async function searchMetaso(query: string, opts: WebSearchOptions = {}): Promise
         scope: "webpage",
         size: topK,
       }),
-      signal: opts.signal,
+      signal: searchSignal(opts.signal),
     });
   } catch (err) {
     if (err instanceof TypeError && (err as Error).message.includes("fetch")) {
@@ -203,13 +417,6 @@ async function searchMetaso(query: string, opts: WebSearchOptions = {}): Promise
   }
 
   const raw = await resp.text();
-  let data: MetasoSearchResponse;
-  try {
-    data = JSON.parse(raw) as MetasoSearchResponse;
-  } catch {
-    throw new Error(t("webErrors.metasoParseError", { status: resp.status }));
-  }
-
   if (!resp.ok) {
     if (resp.status === 401 || resp.status === 403) {
       throw new Error(t("webErrors.metasoUnauthorized"));
@@ -218,6 +425,13 @@ async function searchMetaso(query: string, opts: WebSearchOptions = {}): Promise
       throw new Error(t("webErrors.metasoRateLimit"));
     }
     throw new Error(t("webErrors.metasoServerError", { status: resp.status }));
+  }
+
+  let data: MetasoSearchResponse;
+  try {
+    data = JSON.parse(raw) as MetasoSearchResponse;
+  } catch {
+    throw new Error(t("webErrors.metasoParseError", { status: resp.status }));
   }
 
   if (data.code === 3003) {
@@ -242,6 +456,496 @@ async function searchMetaso(query: string, opts: WebSearchOptions = {}): Promise
     url: wp.link,
     snippet: wp.snippet ?? wp.summary ?? "",
   }));
+}
+
+interface BaiduReference {
+  title?: string;
+  url?: string;
+  content?: string;
+  snippet?: string;
+}
+
+interface BaiduSearchResponse {
+  references?: BaiduReference[];
+}
+
+async function searchBaidu(query: string, opts: WebSearchOptions = {}): Promise<SearchResult[]> {
+  const topK = Math.max(1, Math.min(10, opts.topK ?? DEFAULT_TOPK));
+  const apiKey = loadBaiduApiKey(opts.configPath);
+  if (!apiKey) throw new Error(t("webErrors.baiduMissingKey"));
+
+  let resp: Response;
+  try {
+    resp = await fetch(BAIDU_AI_SEARCH_ENDPOINT, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({
+        messages: [{ role: "user", content: query }],
+      }),
+      signal: searchSignal(opts.signal),
+    });
+  } catch (err) {
+    if (err instanceof TypeError && (err as Error).message.includes("fetch")) {
+      throw new Error(t("webErrors.cannotReach", { endpoint: BAIDU_AI_SEARCH_ENDPOINT }));
+    }
+    throw err;
+  }
+
+  const raw = await resp.text();
+  if (!resp.ok) {
+    if (resp.status === 401 || resp.status === 403) {
+      throw new Error(t("webErrors.baiduUnauthorized"));
+    }
+    if (resp.status === 429) throw new Error(t("webErrors.baiduRateLimit"));
+    throw new Error(t("webErrors.baiduServerError", { status: resp.status }));
+  }
+
+  let data: BaiduSearchResponse;
+  try {
+    data = raw ? (JSON.parse(raw) as BaiduSearchResponse) : {};
+  } catch {
+    throw new Error(t("webErrors.baiduParseError", { status: resp.status }));
+  }
+
+  return (data.references ?? [])
+    .filter((r) => typeof r.title === "string" && typeof r.url === "string")
+    .slice(0, topK)
+    .map((r) => ({
+      title: r.title!,
+      url: r.url!,
+      snippet: r.content ?? r.snippet ?? "",
+    }));
+}
+
+interface TavilyResultItem {
+  title: string;
+  url: string;
+  content?: string;
+  score?: number;
+}
+
+interface TavilySearchResponse {
+  results?: TavilyResultItem[];
+  // Tavily error responses use { detail: { error: "..." } } shape.
+  detail?: { error?: string } | string;
+}
+
+async function searchTavily(query: string, opts: WebSearchOptions = {}): Promise<SearchResult[]> {
+  const topK = Math.max(1, Math.min(20, opts.topK ?? DEFAULT_TOPK));
+  const apiKey = loadTavilyApiKey();
+  if (!apiKey) throw new Error(t("webErrors.tavilyMissingKey"));
+
+  let resp: Response;
+  try {
+    resp = await fetch(TAVILY_ENDPOINT, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({
+        api_key: apiKey,
+        query,
+        search_depth: "basic",
+        max_results: topK,
+        include_answer: false,
+        include_raw_content: false,
+        include_images: false,
+      }),
+      signal: searchSignal(opts.signal),
+    });
+  } catch (err) {
+    if (err instanceof TypeError && (err as Error).message.includes("fetch")) {
+      throw new Error(t("webErrors.cannotReach", { endpoint: TAVILY_ENDPOINT }));
+    }
+    throw err;
+  }
+
+  if (!resp.ok) {
+    if (resp.status === 401 || resp.status === 403) {
+      throw new Error(t("webErrors.tavilyUnauthorized"));
+    }
+    if (resp.status === 429) throw new Error(t("webErrors.tavilyRateLimit"));
+    throw new Error(t("webErrors.tavilyServerError", { status: resp.status }));
+  }
+
+  let data: TavilySearchResponse;
+  try {
+    data = (await resp.json()) as TavilySearchResponse;
+  } catch {
+    throw new Error(t("webErrors.tavilyParseError", { status: resp.status }));
+  }
+
+  const results = data.results ?? [];
+  return results.slice(0, topK).map((r) => ({
+    title: r.title,
+    url: r.url,
+    snippet: r.content ?? "",
+  }));
+}
+
+interface PerplexityChoice {
+  message?: { content?: string };
+}
+
+interface PerplexityResponse {
+  choices?: PerplexityChoice[];
+  citations?: unknown[];
+}
+
+async function searchPerplexity(
+  query: string,
+  opts: WebSearchOptions = {},
+): Promise<SearchResult[]> {
+  const topK = Math.max(1, Math.min(20, opts.topK ?? DEFAULT_TOPK));
+  const apiKey = loadPerplexityApiKey();
+  if (!apiKey) throw new Error(t("webErrors.perplexityMissingKey"));
+
+  let resp: Response;
+  try {
+    resp = await fetch(PERPLEXITY_ENDPOINT, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "sonar",
+        messages: [{ role: "user", content: query }],
+        max_tokens: 1024,
+        return_related_questions: false,
+      }),
+      signal: searchSignal(opts.signal),
+    });
+  } catch (err) {
+    if (err instanceof TypeError && (err as Error).message.includes("fetch")) {
+      throw new Error(t("webErrors.cannotReach", { endpoint: PERPLEXITY_ENDPOINT }));
+    }
+    throw err;
+  }
+
+  if (!resp.ok) {
+    if (resp.status === 401 || resp.status === 403) {
+      throw new Error(t("webErrors.perplexityUnauthorized"));
+    }
+    if (resp.status === 429) throw new Error(t("webErrors.perplexityRateLimit"));
+    throw new Error(t("webErrors.perplexityServerError", { status: resp.status }));
+  }
+
+  const raw = await resp.text();
+  let data: PerplexityResponse;
+  try {
+    data = JSON.parse(raw) as PerplexityResponse;
+  } catch {
+    throw new Error(t("webErrors.perplexityParseError", { status: resp.status }));
+  }
+
+  const answer = data.choices?.[0]?.message?.content ?? "";
+  const citations = Array.isArray(data.citations) ? data.citations : [];
+
+  const results: SearchResult[] = [];
+
+  // First entry carries the AI answer
+  if (answer) {
+    results.push({ title: answer, url: "", snippet: "", answer });
+  }
+
+  const count = Math.min(citations.length, topK);
+  for (let i = 0; i < count; i++) {
+    const c = citations[i];
+    if (typeof c === "string") {
+      results.push({ title: `Source ${i + 1}`, url: c, snippet: "" });
+    } else if (
+      c &&
+      typeof c === "object" &&
+      typeof (c as Record<string, unknown>).url === "string"
+    ) {
+      const item = c as Record<string, unknown>;
+      results.push({
+        title: typeof item.title === "string" ? item.title : `Source ${i + 1}`,
+        url: item.url as string,
+        snippet: "",
+      });
+    }
+  }
+
+  return results;
+}
+
+interface ExaCitation {
+  url?: string;
+  title?: string;
+  text?: string;
+  publishedDate?: string;
+}
+
+interface ExaAnswerResponse {
+  answer?: string;
+  citations?: ExaCitation[];
+}
+
+async function searchExa(query: string, opts: WebSearchOptions = {}): Promise<SearchResult[]> {
+  const topK = Math.max(1, Math.min(20, opts.topK ?? DEFAULT_TOPK));
+  const apiKey = loadExaApiKey();
+  if (!apiKey) throw new Error(t("webErrors.exaMissingKey"));
+
+  let resp: Response;
+  try {
+    resp = await fetch(EXA_ENDPOINT, {
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ query, text: true }),
+      signal: searchSignal(opts.signal),
+    });
+  } catch (err) {
+    if (err instanceof TypeError && (err as Error).message.includes("fetch")) {
+      throw new Error(t("webErrors.cannotReach", { endpoint: EXA_ENDPOINT }));
+    }
+    throw err;
+  }
+
+  if (!resp.ok) {
+    if (resp.status === 401 || resp.status === 403) {
+      throw new Error(t("webErrors.exaUnauthorized"));
+    }
+    if (resp.status === 429) throw new Error(t("webErrors.exaRateLimit"));
+    throw new Error(t("webErrors.exaServerError", { status: resp.status }));
+  }
+
+  const raw = await resp.text();
+  let data: ExaAnswerResponse;
+  try {
+    data = JSON.parse(raw) as ExaAnswerResponse;
+  } catch {
+    throw new Error(t("webErrors.exaParseError", { status: resp.status }));
+  }
+
+  const answer = data.answer ?? "";
+  const citations = data.citations ?? [];
+
+  const results: SearchResult[] = [];
+
+  // First entry carries the AI answer
+  if (answer) {
+    results.push({ title: answer, url: "", snippet: "", answer });
+  }
+
+  const count = Math.min(citations.length, topK);
+  for (let i = 0; i < count; i++) {
+    const c = citations[i]!;
+    if (!c.url) continue;
+    results.push({
+      title: c.title || `Source ${i + 1}`,
+      url: c.url,
+      snippet: c.text ?? "",
+    });
+  }
+
+  return results;
+}
+
+interface OllamaSearchItem {
+  title?: string;
+  url?: string;
+  content?: string;
+}
+
+interface OllamaSearchResponse {
+  results?: OllamaSearchItem[];
+}
+
+async function searchOllama(query: string, opts: WebSearchOptions = {}): Promise<SearchResult[]> {
+  const topK = Math.max(1, Math.min(10, opts.topK ?? DEFAULT_TOPK));
+  const apiKey = loadOllamaApiKey(opts.configPath);
+  if (!apiKey) {
+    throw new Error(t("webErrors.ollamaMissingKey"));
+  }
+
+  let resp: Response;
+  try {
+    resp = await fetch(OLLAMA_WEB_SEARCH_ENDPOINT, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({ query, max_results: topK }),
+      signal: searchSignal(opts.signal),
+    });
+  } catch (err) {
+    if (err instanceof TypeError && (err as Error).message.includes("fetch")) {
+      throw new Error(t("webErrors.cannotReach", { endpoint: OLLAMA_WEB_SEARCH_ENDPOINT }));
+    }
+    throw err;
+  }
+
+  if (!resp.ok) {
+    if (resp.status === 401 || resp.status === 403) {
+      throw new Error(t("webErrors.ollamaUnauthorized"));
+    }
+    if (resp.status === 429) {
+      throw new Error(t("webErrors.ollamaRateLimit"));
+    }
+    throw new Error(
+      t("webErrors.ollamaServerError", { status: resp.status, url: OLLAMA_WEB_SEARCH_ENDPOINT }),
+    );
+  }
+
+  let data: OllamaSearchResponse;
+  try {
+    data = (await resp.json()) as OllamaSearchResponse;
+  } catch {
+    throw new Error(
+      t("webErrors.ollamaParseError", { status: resp.status, url: OLLAMA_WEB_SEARCH_ENDPOINT }),
+    );
+  }
+
+  return (data.results ?? []).slice(0, topK).map((r, i) => ({
+    title: r.title || `Result ${i + 1}`,
+    url: r.url || "",
+    snippet: r.content ?? "",
+  }));
+}
+
+interface BraveWebResult {
+  title?: string;
+  url?: string;
+  description?: string;
+}
+
+interface BraveSearchResponse {
+  web?: {
+    results?: BraveWebResult[];
+  };
+}
+
+async function searchBrave(query: string, opts: WebSearchOptions = {}): Promise<SearchResult[]> {
+  const topK = Math.max(1, Math.min(20, opts.topK ?? DEFAULT_TOPK));
+  const apiKey = loadBraveApiKey(opts.configPath);
+  if (!apiKey) throw new Error(t("webErrors.braveMissingKey"));
+
+  const url = `${BRAVE_ENDPOINT}?q=${encodeURIComponent(query)}&count=${topK}`;
+
+  let resp: Response;
+  try {
+    resp = await fetch(url, {
+      headers: {
+        Accept: "application/json",
+        "Accept-Encoding": "gzip",
+        "X-Subscription-Token": apiKey,
+      },
+      signal: searchSignal(opts.signal),
+    });
+  } catch (err) {
+    if (err instanceof TypeError && (err as Error).message.includes("fetch")) {
+      throw new Error(t("webErrors.cannotReach", { endpoint: BRAVE_ENDPOINT }));
+    }
+    throw err;
+  }
+
+  if (!resp.ok) {
+    if (resp.status === 401 || resp.status === 403) {
+      throw new Error(t("webErrors.braveUnauthorized"));
+    }
+    if (resp.status === 429) {
+      throw new Error(t("webErrors.braveRateLimit"));
+    }
+    throw new Error(t("webErrors.braveServerError", { status: resp.status }));
+  }
+
+  const raw = await resp.text();
+  let data: BraveSearchResponse;
+  try {
+    data = JSON.parse(raw) as BraveSearchResponse;
+  } catch {
+    throw new Error(t("webErrors.braveParseError", { status: resp.status }));
+  }
+
+  const results = data.web?.results ?? [];
+  return results.slice(0, topK).map((r) => ({
+    title: r.title ?? "",
+    url: r.url ?? "",
+    snippet: r.description ?? "",
+  }));
+}
+
+interface OllamaFetchResponse {
+  title?: string;
+  content?: string;
+  links?: string[];
+}
+
+async function webFetchOllama(
+  url: string,
+  opts: WebFetchOptions = {},
+): Promise<PageContent & { links?: string[] }> {
+  const apiKey = loadOllamaApiKey(opts.configPath);
+  if (!apiKey) {
+    throw new Error(t("webErrors.fetchOllamaMissingKey"));
+  }
+
+  const ctrl = new AbortController();
+  const timeout = setTimeout(
+    () =>
+      ctrl.abort(
+        new Error(
+          t("webErrors.fetchTimeout", { ms: opts.timeoutMs ?? DEFAULT_FETCH_TIMEOUT_MS, url }),
+        ),
+      ),
+    opts.timeoutMs ?? DEFAULT_FETCH_TIMEOUT_MS,
+  );
+  const signal = opts.signal ? AbortSignal.any([opts.signal, ctrl.signal]) : ctrl.signal;
+
+  let resp: Response;
+  try {
+    resp = await fetch(OLLAMA_WEB_FETCH_ENDPOINT, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({ url }),
+      signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  if (!resp.ok) {
+    if (resp.status === 401 || resp.status === 403) {
+      throw new Error(t("webErrors.fetchOllamaUnauthorized"));
+    }
+    if (resp.status === 429) {
+      throw new Error(t("webErrors.fetchOllamaRateLimit"));
+    }
+    throw new Error(t("webErrors.fetchOllamaServerError", { status: resp.status, url }));
+  }
+
+  let data: OllamaFetchResponse;
+  try {
+    data = (await resp.json()) as OllamaFetchResponse;
+  } catch {
+    throw new Error(t("webErrors.fetchOllamaParseError", { status: resp.status, url }));
+  }
+
+  const maxChars = opts.maxChars ?? DEFAULT_FETCH_MAX_CHARS;
+  const text = data.content ?? "";
+  return {
+    url,
+    title: data.title,
+    text: text.length > maxChars ? text.slice(0, maxChars) : text,
+    truncated: text.length > maxChars,
+    links: data.links,
+  };
 }
 
 /** Parse SearXNG HTML search results using node-html-parser. */
@@ -290,40 +994,39 @@ export function parseSearxngHtmlResults(html: string): SearchResult[] {
   return results;
 }
 
+/** Decode Bing /ck/a click-tracking redirects to the real target. www.bing.com (bing-intl) emits
+ *  these as root-relative `/ck/a?…` hrefs, so resolve against a base before parsing (a bare
+ *  `new URL("/ck/a?…")` throws); the `u=a1…` value is base64url, often unpadded. */
+function unwrapBingUrl(href: string): string {
+  if (!/\/ck\/a\b/.test(href)) return href;
+  try {
+    const u = new URL(href, BING_INTL_ENDPOINT).searchParams.get("u");
+    if (!u) return href;
+    const b64 = u.startsWith("a1") ? u.slice(2) : u;
+    const decoded = Buffer.from(b64, "base64url").toString("utf-8");
+    if (/^https?:\/\//i.test(decoded)) return decoded;
+  } catch {
+    // ignore decode errors and fall back to raw href
+  }
+  return href;
+}
+
 /** Title-anchor + snippet-paragraph passes paired positionally — robust to attribute reorder. */
-export function parseMojeekResults(html: string): SearchResult[] {
-  const titles: string[] = [];
-  const titleAnchorRe = /<a\b[^>]*\bclass="title"[^>]*>[\s\S]*?<\/a>/g;
-  let m: RegExpExecArray | null;
-  while (true) {
-    m = titleAnchorRe.exec(html);
-    if (m === null) break;
-    titles.push(m[0]);
-  }
-
-  const snippets: string[] = [];
-  const snippetRe = /<p\b[^>]*\bclass="s"[^>]*>([\s\S]*?)<\/p>/g;
-  while (true) {
-    m = snippetRe.exec(html);
-    if (m === null) break;
-    snippets.push(m[1] ?? "");
-  }
-
-  const hrefRe = /href="([^"]+)"/;
-  const innerRe = /<a\b[^>]*>([\s\S]*?)<\/a>/;
+export function parseBingResults(html: string): SearchResult[] {
+  // DOM walk rather than regex — `<li[^>]*\bclass\b[^>]*>` triggers
+  // polynomial backtracking on adversarial input (CodeQL js/polynomial-redos).
+  const root = parseHtml(html);
   const results: SearchResult[] = [];
-  for (let i = 0; i < titles.length; i++) {
-    const anchor = titles[i]!;
-    const hrefMatch = anchor.match(hrefRe);
-    const innerMatch = anchor.match(innerRe);
-    if (!hrefMatch?.[1]) continue;
-    results.push({
-      title: decodeHtmlEntities(stripHtml(innerMatch?.[1] ?? "")).trim(),
-      url: hrefMatch[1],
-      snippet: decodeHtmlEntities(stripHtml(snippets[i] ?? ""))
-        .replace(/\s+/g, " ")
-        .trim(),
-    });
+  for (const li of root.querySelectorAll("li.b_algo")) {
+    const anchor = li.querySelector("h2 a[href]");
+    if (!anchor) continue;
+    const href = unwrapBingUrl(anchor.getAttribute("href") || "");
+    if (!href) continue;
+    const title = anchor.textContent.trim();
+    if (!title) continue;
+    const cap = li.querySelector("div.b_caption p");
+    const snippet = cap ? cap.textContent.trim().replace(/\s+/g, " ") : "";
+    results.push({ title, url: href, snippet });
   }
   return results;
 }
@@ -343,12 +1046,23 @@ export async function webFetch(url: string, opts: WebFetchOptions = {}): Promise
   const cancel = () => ctl.abort();
   opts.signal?.addEventListener("abort", cancel, { once: true });
   let resp: Response;
+  let currentUrl = url;
   try {
-    resp = await fetch(url, {
-      headers: { "User-Agent": USER_AGENT, Accept: "text/html,text/plain,*/*" },
-      signal: ctl.signal,
-      redirect: "follow",
-    });
+    for (let redirects = 0; ; redirects++) {
+      const parsed = await assertPublicHttpUrl(currentUrl);
+      if (ctl.signal.aborted) throw new DOMException("aborted", "AbortError");
+      resp = await fetch(parsed, {
+        headers: { "User-Agent": USER_AGENT, Accept: "text/html,text/plain,*/*" },
+        signal: ctl.signal,
+        redirect: "manual",
+      });
+      const nextUrl = redirectLocation(resp, parsed.toString());
+      if (!nextUrl) break;
+      if (redirects >= FETCH_MAX_REDIRECTS) {
+        throw new Error(`web_fetch redirect limit exceeded for ${url}`);
+      }
+      currentUrl = nextUrl;
+    }
   } catch (err) {
     if (timedOut) {
       throw new Error(t("webErrors.fetchTimeout", { ms: timeoutMs, url }));
@@ -373,7 +1087,7 @@ export async function webFetch(url: string, opts: WebFetchOptions = {}): Promise
   const finalText = truncated
     ? `${text.slice(0, maxChars)}\n\n[… truncated ${text.length - maxChars} chars …]`
     : text;
-  return { url, title, text: finalText, truncated };
+  return { url: currentUrl, title, text: finalText, truncated };
 }
 
 /** Streams + caps so chunked responses (or servers lying about Content-Length) can't balloon the heap. */
@@ -509,10 +1223,8 @@ export interface WebToolsOptions {
   defaultTopK?: number;
   /** Byte cap for `web_fetch` extracted text. */
   maxFetchChars?: number;
-  /** Backend engine: "mojeek" (default, scrapes Mojeek), "searxng" (self-hosted SearXNG), or "metaso" (Metaso API). */
-  webSearchEngine?: "mojeek" | "searxng" | "metaso";
-  /** Base URL for SearXNG (default http://localhost:8080). */
-  webSearchEndpoint?: string;
+  /** Config path to read at tool-call time. Defaults to ~/.reasonix/config.json. */
+  configPath?: string;
 }
 
 export function registerWebTools(registry: ToolRegistry, opts: WebToolsOptions = {}): ToolRegistry {
@@ -522,8 +1234,7 @@ export function registerWebTools(registry: ToolRegistry, opts: WebToolsOptions =
   registry.register({
     name: "web_search",
     description:
-      "Search the public web. Returns ranked results with title, url, and snippet. Call this when the answer's correctness depends on current state — anything that changes over time (events, prices, releases, status of a thing in the real world). Composing such answers from training memory invents stale numbers; search first, then ground the answer in the results. For evergreen / definitional questions you don't need this." +
-      " To change the backend, use /search-engine mojeek|searxng|metaso.",
+      "Search the public web. Returns ranked results with title, url, and snippet. Call this when the answer's correctness depends on current state — anything that changes over time (events, prices, releases, status of a thing in the real world). Composing such answers from training memory invents stale numbers; search first, then ground the answer in the results. For evergreen / definitional questions you don't need this.",
     readOnly: true,
     parallelSafe: true,
     parameters: {
@@ -532,19 +1243,21 @@ export function registerWebTools(registry: ToolRegistry, opts: WebToolsOptions =
         query: { type: "string", description: "Natural-language search query." },
         topK: {
           type: "integer",
-          description: `Number of results to return (1..10). Default ${defaultTopK}.`,
+          description: `Number of results to return. Default ${defaultTopK}.`,
         },
       },
       required: ["query"],
     },
     fn: async (args: { query: string; topK?: number }, ctx) => {
-      const engine = opts.webSearchEngine ?? loadWebSearchEngine();
-      const endpoint = opts.webSearchEndpoint ?? loadWebSearchEndpoint();
+      // Read at call time, not registration time — `/search-engine` mutates config mid-session (#1309).
+      const engine = loadWebSearchEngine(opts.configPath);
+      const endpoint = loadWebSearchEndpoint(opts.configPath);
       const results = await webSearch(args.query, {
         topK: args.topK ?? defaultTopK,
         signal: ctx?.signal,
         engine,
         endpoint,
+        configPath: opts.configPath,
       });
       return formatSearchResults(args.query, results);
     },
@@ -567,6 +1280,16 @@ export function registerWebTools(registry: ToolRegistry, opts: WebToolsOptions =
       if (!/^https?:\/\//i.test(args.url)) {
         throw new Error(t("webErrors.fetchInvalidUrl"));
       }
+      if (loadWebSearchEngine(opts.configPath) === "ollama") {
+        const page = await webFetchOllama(args.url, {
+          maxChars: maxFetchChars,
+          signal: ctx?.signal,
+          configPath: opts.configPath,
+        });
+        const header = page.title ? `${page.title}\n${page.url}` : page.url;
+        const links = page.links?.length ? `\n\nlinks:\n${page.links.join("\n")}` : "";
+        return `${header}\n\n${page.text}${links}`;
+      }
       const page = await webFetch(args.url, { maxChars: maxFetchChars, signal: ctx?.signal });
       const header = page.title ? `${page.title}\n${page.url}` : page.url;
       return `${header}\n\n${page.text}`;
@@ -577,11 +1300,29 @@ export function registerWebTools(registry: ToolRegistry, opts: WebToolsOptions =
 }
 
 export function formatSearchResults(query: string, results: SearchResult[]): string {
-  const lines: string[] = [`query: ${query}`, `\nresults (${results.length}):`];
-  results.forEach((r, i) => {
-    lines.push(`\n${i + 1}. ${r.title}`);
-    lines.push(`   ${r.url}`);
-    if (r.snippet) lines.push(`   ${r.snippet}`);
-  });
+  const lines: string[] = [`query: ${query}`];
+
+  // Check if the first result carries an AI answer (Perplexity/Exa)
+  const hasAnswer = results.length > 0 && results[0]?.url === "" && results[0]?.answer;
+
+  if (hasAnswer) {
+    lines.push("\nanswer:");
+    lines.push(`  ${results[0]!.answer}`);
+    const sources = results.slice(1);
+    lines.push(`\nsources (${sources.length}):`);
+    sources.forEach((r, i) => {
+      lines.push(`\n${i + 1}. ${r.title}`);
+      lines.push(`   ${r.url}`);
+      if (r.snippet) lines.push(`   ${r.snippet}`);
+    });
+  } else {
+    lines.push(`\nresults (${results.length}):`);
+    results.forEach((r, i) => {
+      lines.push(`\n${i + 1}. ${r.title}`);
+      lines.push(`   ${r.url}`);
+      if (r.snippet) lines.push(`   ${r.snippet}`);
+    });
+  }
+
   return lines.join("\n");
 }

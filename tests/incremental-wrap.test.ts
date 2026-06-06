@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { type WrapCache, wrapIncremental } from "../src/cli/ui/cards/useIncrementalWrap.js";
-import { wrapToCells } from "../src/frame/width.js";
+import { wrapToCells } from "../src/cli/ui/text-width.js";
 
 function fullWrap(text: string, lineCells: number): string[] {
   if (text.length === 0) return [""];

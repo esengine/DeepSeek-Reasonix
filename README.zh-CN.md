@@ -7,6 +7,8 @@
   &nbsp;·&nbsp;
   <strong>简体中文</strong>
   &nbsp;·&nbsp;
+  <a href="./README.ja-JP.md">日本語</a>
+  &nbsp;·&nbsp;
   <a href="https://esengine.github.io/DeepSeek-Reasonix/">官方网站</a>
   &nbsp;·&nbsp;
   <a href="https://esengine.github.io/DeepSeek-Reasonix/configuration.html?lang=zh">配置指南</a>
@@ -14,6 +16,8 @@
   <a href="./docs/ARCHITECTURE.md">架构文档</a>
   &nbsp;·&nbsp;
   <a href="./benchmarks/">基准测试</a>
+  &nbsp;·&nbsp;
+  <strong><a href="https://discord.gg/XF78rEME2D">Discord</a></strong>
 </p>
 
 <p align="center">
@@ -23,8 +27,10 @@
   <a href="https://www.npmjs.com/package/reasonix"><img src="https://img.shields.io/npm/dm/reasonix.svg?style=flat-square&color=3fb950&labelColor=161b22&label=downloads" alt="downloads"/></a>
   <a href="./package.json"><img src="https://img.shields.io/node/v/reasonix.svg?style=flat-square&color=5fa04e&labelColor=161b22&logo=nodedotjs&logoColor=white" alt="node"/></a>
   <a href="https://github.com/esengine/reasonix/stargazers"><img src="https://img.shields.io/github/stars/esengine/reasonix.svg?style=flat-square&color=dbab09&labelColor=161b22&logo=github&logoColor=white" alt="GitHub stars"/></a>
+  <a href="https://atomgit.com/esengine/DeepSeek-Reasonix"><img src="https://atomgit.com/esengine/DeepSeek-Reasonix/star/badge.svg" alt="AtomGit stars"/></a>
   <a href="https://github.com/esengine/reasonix/graphs/contributors"><img src="https://img.shields.io/github/contributors/esengine/reasonix.svg?style=flat-square&color=bc8cff&labelColor=161b22&logo=github&logoColor=white" alt="contributors"/></a>
   <a href="https://github.com/esengine/reasonix/discussions"><img src="https://img.shields.io/github/discussions/esengine/reasonix.svg?style=flat-square&color=58a6ff&labelColor=161b22&logo=github&logoColor=white" alt="Discussions"/></a>
+  <a href="https://discord.gg/XF78rEME2D"><img src="https://img.shields.io/badge/discord-join-5865F2.svg?style=flat-square&labelColor=161b22&logo=discord&logoColor=white" alt="Discord"/></a>
 </p>
 
 <p align="center">
@@ -48,6 +54,9 @@
 
 > [!TIP]
 > **缓存稳定不是开关，而是循环要围绕设计的不变量。** 这就是 Reasonix 只支持 DeepSeek 的根本原因 —— 每一层都为 DeepSeek 字节稳定的前缀缓存机制调过。
+
+> [!IMPORTANT]
+> **加入社区 · Community** — 中英双语 Discord，频道包括 `#求助` / `#help`、`#分享` / `#showcase`、`#想法反馈`、贡献者专属 PR 协调区。在群内绑定 GitHub 后自动识别贡献者身份。→ **<https://discord.gg/XF78rEME2D>**
 
 <br/>
 
@@ -74,31 +83,15 @@ npx reasonix code   # 首次运行粘贴 DeepSeek API Key，之后会记住
 
 ### QQ 通道
 
-Reasonix 可以把 QQ 挂到现有的 `chat` / `code` 会话上，作为远程通信通道使用。它不是一个独立的新模式。
+Reasonix 可以把现有的 `chat`、`code` 或桌面端会话延伸到 QQ 上，作为远程通道使用；它扩展的是当前会话，不是独立的新运行模式。
 
-先启动一个会话：
+- CLI：先启动会话，再执行 `/qq connect`
+- 桌面端：打开 `设置 -> 通用 -> QQ通道`
 
-~~~bash
-reasonix code
-# 或
-reasonix chat
-~~~
+连接成功后，QQ 消息可以进入当前会话，助手回复会回到 QQ，后续确认和跟进交互也可以继续在 QQ 上完成。
 
-然后在会话里连接 QQ：
+完整配置、桌面端快速上手与排障说明见：[QQ 连接指南](./docs/qq-connect.zh-CN.md)。
 
-~~~text
-/qq connect
-~~~
-
-可用命令：
-
-- `/qq connect`
-- `/qq status`
-- `/qq disconnect`
-
-启用后，后续的 `chat` / `code` 会话会自动启动 QQ 通道。斜杠命令、确认提示，以及后续助手回复都可以通过 QQ 继续完成，不需要回到终端交互。
-
-详细说明见 [QQ 连接指南](./docs/qq-connect.zh-CN.md)。
 <details>
 <summary><strong>切换工作区 · chat vs. code · 写第一个 Skill</strong></summary>
 
@@ -145,7 +138,7 @@ npx reasonix code --dir /path/to/project
 | [Memory](https://esengine.github.io/DeepSeek-Reasonix/configuration.html?lang=zh#memory) | 用户私有的知识，钉进前缀。`user` / `feedback` / `project` / `reference` 四类。 |
 | [Hooks](https://esengine.github.io/DeepSeek-Reasonix/configuration.html?lang=zh#hooks) | 生命周期事件触发的 shell 命令。`PreToolUse`（拦截）· `PostToolUse` · `UserPromptSubmit` · `Stop`。 |
 | [权限](https://esengine.github.io/DeepSeek-Reasonix/configuration.html?lang=zh#permissions) | 按工作区的 shell 白名单，精确前缀匹配。 |
-| [Web 搜索](https://esengine.github.io/DeepSeek-Reasonix/configuration.html?lang=zh#search) | 默认 Mojeek；用 `/search-engine` 可切到自托管的 SearXNG 或 Metaso。 |
+| [Web 搜索](https://esengine.github.io/DeepSeek-Reasonix/configuration.html?lang=zh#search) | 默认 Bing；可用 `/search-engine` 切到百度 AI Search、自托管 SearXNG、Metaso、Tavily、Perplexity、Exa、Brave 或 Ollama。 |
 | [语义索引](https://esengine.github.io/DeepSeek-Reasonix/configuration.html?lang=zh#index) | `reasonix index` —— 本地 Ollama，或任何 OpenAI 兼容的 embedding 接口。 |
 
 <br/>
@@ -191,7 +184,7 @@ npx reasonix code --dir /path/to/project
 
 - [**架构**](./docs/ARCHITECTURE.md) —— 四大支柱、缓存优先循环、思维提取、脚手架
 - [**CLI 参考**](./docs/CLI-REFERENCE.md) —— 每个 shell 子命令、每个 slash 命令、每个快捷键
-- [**QQ 连接指南**](./docs/qq-connect.zh-CN.md) —— 通道定位、命令、配置流程和 QQ 开放平台凭据
+- [**QQ 连接指南**](./docs/qq-connect.zh-CN.md) —— CLI 首次连接流程、桌面端入口和 QQ 开放平台凭据
 - [**基准测试**](./benchmarks/) —— τ-bench-lite harness、transcript、成本方法论
 - [**官方网站**](https://esengine.github.io/DeepSeek-Reasonix/) —— 入门、Dashboard 设计稿、TUI 设计稿
 - [**贡献指南**](./CONTRIBUTING.md) —— 注释规则、错误处理、用现成库不手写
@@ -202,7 +195,7 @@ npx reasonix code --dir /path/to/project
 ## 社区
 
 > [!NOTE]
-> Reasonix 是开源、社区共建的项目。下面贡献者墙不是装饰 —— 每一个头像都对应一次真实合并的 PR。
+> Reasonix 是开源、社区共建的项目。文末"致谢"那面贡献者墙上的每一个头像，都对应一次真实合并的 PR。
 
 给新手准备的入门 issue —— 每个都带背景说明、代码定位、验收标准、提示 —— 全部挂在 [`good first issue`](https://github.com/esengine/reasonix/labels/good%20first%20issue) 标签下。挑任意一个还没人认领的就行。
 
@@ -221,12 +214,6 @@ npx reasonix code --dir /path/to/project
 </p>
 
 **第一次提 PR 之前**：先读 [`CONTRIBUTING.md`](./CONTRIBUTING.md) —— 短小、严格的项目规则（注释、错误处理、用现成库不手写）。`tests/comment-policy.test.ts` 静态强制执行注释那部分，`npm run verify` 是 push 前的闸。参与本项目即同意 [行为准则](./CODE_OF_CONDUCT.md)。安全相关问题请走 [SECURITY.md](./SECURITY.md)。
-
-<p align="center">
-  <a href="https://github.com/esengine/reasonix/graphs/contributors">
-    <img src="https://contrib.rocks/image?repo=esengine/DeepSeek-Reasonix&max=100&columns=12" alt="esengine/DeepSeek-Reasonix 贡献者" width="860"/>
-  </a>
-</p>
 
 <br/>
 
@@ -254,10 +241,50 @@ npx reasonix code --dir /path/to/project
 
 <br/>
 
+## 支持本项目
+
+如果 Reasonix 帮你省了时间或 token，欢迎请杯咖啡。捐助不会换来 feature 优先级，也不会影响 issue 的处理顺序——就是「谢谢」。
+
+- **国内** — 微信支付（扫下方二维码）
+- **海外** — PayPal: [paypal.me/yuhuahui](https://paypal.me/yuhuahui)
+
+<p align="center">
+  <img src=".github/sponsor/wechat-pay.jpg" alt="微信支付收款码" width="240"/>
+</p>
+
+<br/>
+
+## 致谢
+
+下面这些朋友的工作塑造了 Reasonix 今天的样子 —— 综合 commit 数和代码量两个维度。
+**按字母顺序排列，排名不分先后。** 完整贡献者列表在
+[GitHub](https://github.com/esengine/DeepSeek-Reasonix/graphs/contributors)。
+
+- [**ctharvey**](https://github.com/ctharvey)
+- [**dimasd-angga**](https://github.com/dimasd-angga)（Dimas D. Angga）
+- [**Evan-Pycraft**](https://github.com/Evan-Pycraft)
+- [**ForeverYoungPp**](https://github.com/ForeverYoungPp)
+- [**GTC2080**](https://github.com/GTC2080)（TaoMu）
+- [**kabaka9527**](https://github.com/kabaka9527)
+- [**lisniuse**](https://github.com/lisniuse)（Richie）
+- [**wade19990814-hue**](https://github.com/wade19990814-hue)
+- [**wviana**](https://github.com/wviana)（Wesley Viana）
+
+另外特别感谢 [**Bernardxu123**](https://github.com/Bernardxu123) 设计的项目 logo
+（见 [`docs/brand/`](./docs/brand/)），以及 [AIGC Link](https://xhslink.com/m/80ngts127cA) 在小红书上的推广。
+
+<p align="center">
+  <a href="https://github.com/esengine/DeepSeek-Reasonix/graphs/contributors">
+    <img src="https://contrib.rocks/image?repo=esengine/DeepSeek-Reasonix&max=100&columns=12" alt="esengine/DeepSeek-Reasonix 贡献者" width="860"/>
+  </a>
+</p>
+
+<br/>
+
 ---
 
 <p align="center">
   <sub>MIT —— 见 <a href="./LICENSE">LICENSE</a></sub>
   <br/>
-  <sub>由 <a href="https://github.com/esengine/reasonix/graphs/contributors">esengine/reasonix</a> 社区共建</sub>
+  <sub>由 <a href="https://github.com/esengine/DeepSeek-Reasonix/graphs/contributors">esengine/DeepSeek-Reasonix</a> 社区共建</sub>
 </p>

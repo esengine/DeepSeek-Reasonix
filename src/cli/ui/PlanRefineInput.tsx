@@ -1,4 +1,4 @@
-import { Box, Text } from "ink";
+import { Box, type Color, Text } from "ink";
 import React, { useState } from "react";
 import { t } from "../../i18n/index.js";
 import { ApprovalCard, type ApprovalCardProps } from "./cards/ApprovalCard.js";
@@ -26,14 +26,14 @@ interface ModeMeta {
   title: string;
   glyph: string;
   tone: ApprovalCardProps["tone"];
-  cursorColor: string;
+  cursorColor: Color;
   hint: string;
   blankHint: string;
 }
 
 const MODE_VISUALS: Record<
   PlanRefineMode,
-  { glyph: string; tone: ApprovalCardProps["tone"]; cursorColor: string }
+  { glyph: string; tone: ApprovalCardProps["tone"]; cursorColor: Color }
 > = {
   approve: { glyph: "◇", tone: "user", cursorColor: CARD.user.color },
   refine: { glyph: "✎", tone: "warn", cursorColor: CARD.warn.color },

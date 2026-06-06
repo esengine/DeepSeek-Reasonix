@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { I } from "../icons";
 import { t, useLang } from "../i18n";
+import { Shortcut } from "./shortcut";
 
 type Anchor = { top?: number; bottom?: number; left: number };
 
@@ -12,6 +13,7 @@ export function WorkdirPop({
   anchor,
   onPick,
   onBrowse,
+  onRemoveRecent,
 }: {
   open: boolean;
   onClose: () => void;
@@ -20,6 +22,7 @@ export function WorkdirPop({
   anchor?: Anchor;
   onPick: (path: string) => void;
   onBrowse: () => void;
+  onRemoveRecent?: (path: string) => void;
 }) {
   useLang();
   const [query, setQuery] = useState("");
@@ -61,7 +64,7 @@ export function WorkdirPop({
               color: "var(--muted)",
             }}
           >
-            ⌘O
+            <Shortcut keys={["mod", "O"]} />
           </span>
         </div>
         <input
@@ -118,6 +121,19 @@ export function WorkdirPop({
                   <span className="pin">
                     <I.check size={11} />
                   </span>
+                ) : onRemoveRecent ? (
+                  <button
+                    type="button"
+                    className="wd-del"
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onRemoveRecent(p);
+                    }}
+                    title={t("workdir.removeRecent")}
+                  >
+                    <I.trash size={11} />
+                  </button>
                 ) : null}
               </div>
             );

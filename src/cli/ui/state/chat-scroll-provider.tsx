@@ -9,20 +9,21 @@ const Ctx = React.createContext<ChatScrollStore | null>(null);
 
 export function ChatScrollProvider({
   children,
+  wheelRows,
 }: {
   children: React.ReactNode;
+  wheelRows?: number;
 }): React.ReactElement {
-  const store = React.useMemo(() => createChatScrollStore(), []);
+  const store = React.useMemo(() => createChatScrollStore({ wheelRows }), [wheelRows]);
   return <Ctx.Provider value={store}>{children}</Ctx.Provider>;
 }
 
 function useStore(): ChatScrollStore {
-  const s = React.useContext(Ctx);
-  if (!s) throw new Error("useChatScroll* must be used inside ChatScrollProvider");
-  return s;
+  const store = React.useContext(Ctx);
+  if (!store) throw new Error("useChatScroll* must be used inside ChatScrollProvider");
+  return store;
 }
 
-/** Subscribes to a slice of scroll state — only re-renders when that slice changes. */
 export function useChatScrollState<T>(selector: (s: ChatScrollState) => T): T {
   const store = useStore();
   const subscribe = React.useCallback((cb: () => void) => store.subscribe(cb), [store]);
@@ -30,13 +31,14 @@ export function useChatScrollState<T>(selector: (s: ChatScrollState) => T): T {
   return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 
-/** Returns the action set — stable across renders, never triggers re-renders by itself. */
 export function useChatScrollActions(): Pick<
   ChatScrollStore,
   | "scrollUp"
   | "scrollDown"
   | "scrollPageUp"
   | "scrollPageDown"
+  | "scrollWheelUp"
+  | "scrollWheelDown"
   | "jumpToBottom"
   | "setMaxScroll"
   | "setCardHeight"

@@ -1,11 +1,11 @@
 /** Wizard data-transform — buildSpec → parseMcpSpec round-trip; bugs here = silent config-save failures. */
 
-import { render } from "ink-testing-library";
 import React from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import { Wizard, buildSpec, validateDeepSeekApiKey } from "../src/cli/ui/Wizard.js";
-import { setLanguageRuntime } from "../src/i18n/index.js";
+import { setLanguageRuntime, t } from "../src/i18n/index.js";
 import { parseMcpSpec } from "../src/mcp/spec.js";
+import { render } from "./helpers/ink-test.js";
 
 describe("Wizard.buildSpec → parseMcpSpec round-trip", () => {
   it("builds a filesystem spec the parser accepts", () => {
@@ -38,6 +38,26 @@ describe("Wizard.buildSpec → parseMcpSpec round-trip", () => {
     // sees an unfamiliar name on re-run, we degrade gracefully rather
     // than throwing.
     expect(buildSpec("not-in-catalog", {})).toBe("not-in-catalog");
+  });
+});
+
+describe("Wizard — shell-exec discoverability (issue #866)", () => {
+  afterEach(() => {
+    setLanguageRuntime("EN");
+  });
+
+  it("EN saved-step hint surfaces the per-call shell-exec gate", () => {
+    setLanguageRuntime("EN");
+    const hint = t("wizard.savedShellHint");
+    expect(hint).toMatch(/shell/i);
+    expect(hint.toLowerCase()).toContain("allow always");
+  });
+
+  it("zh-CN saved-step hint surfaces the per-call shell-exec gate", () => {
+    setLanguageRuntime("zh-CN");
+    const hint = t("wizard.savedShellHint");
+    expect(hint).toContain("shell");
+    expect(hint).toContain("allow always");
   });
 });
 
@@ -88,6 +108,23 @@ describe("Wizard API-key validation", () => {
 
     await expect(
       validateDeepSeekApiKey("sk-valid1234567890", { fetch: fetcher as typeof fetch }),
-    ).resolves.toMatchObject({ ok: false, reason: "failed", message: "DeepSeek 503" });
+    ).resolves.toMatchObject({ ok: false, reason: "failed", message: "HTTP 503" });
+  });
+
+  it("hits /models, not /user/balance — third-party endpoints (DashScope etc.) accept it", async () => {
+    const calls: string[] = [];
+    const fetcher = async (url: string) => {
+      calls.push(url);
+      return new Response(JSON.stringify({ data: [] }), { status: 200 });
+    };
+
+    await expect(
+      validateDeepSeekApiKey("sk-valid1234567890", {
+        baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        fetch: fetcher as typeof fetch,
+      }),
+    ).resolves.toEqual({ ok: true });
+
+    expect(calls).toEqual(["https://dashscope.aliyuncs.com/compatible-mode/v1/models"]);
   });
 });

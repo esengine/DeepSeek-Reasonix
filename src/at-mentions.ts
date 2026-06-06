@@ -3,6 +3,7 @@
 import { type Dirent, existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
+import { TtlLruCache } from "./core/lru.js";
 import {
   type GitignoreLayer,
   ignoredByLayers,
@@ -258,6 +259,9 @@ export interface ListDirectoryOptions {
   respectGitignore?: boolean;
 }
 
+/** Keystroke bursts hit the same dir 5–10× in half a second — short TTL collapses those to one readdir. */
+const listDirectoryCache = new TtlLruCache<string, DirEntry[]>(64, 5_000);
+
 /** One-level browse for the @-picker. Folders first then files, alpha within each group. Resolves outside-root to []. */
 export async function listDirectory(
   root: string,
@@ -270,6 +274,10 @@ export async function listDirectory(
   const dirAbs = resolve(rootAbs, relDir);
   const rel = relative(rootAbs, dirAbs);
   if (rel.startsWith("..") || isAbsolute(rel)) return [];
+
+  const cacheKey = `${dirAbs}\u0000${respectGi ? "g" : ""}\u0000${[...ignoreDirs].sort().join(",")}`;
+  const cached = listDirectoryCache.get(cacheKey);
+  if (cached) return cached;
 
   const layers: GitignoreLayer[] = [];
   if (respectGi) {
@@ -330,7 +338,9 @@ export async function listDirectory(
   }
   dirs.sort((a, b) => a.name.localeCompare(b.name));
   fileEntries.sort((a, b) => a.name.localeCompare(b.name));
-  return [...dirs, ...fileEntries];
+  const result = [...dirs, ...fileEntries];
+  listDirectoryCache.set(cacheKey, result);
+  return result;
 }
 
 export interface ParsedAtQuery {

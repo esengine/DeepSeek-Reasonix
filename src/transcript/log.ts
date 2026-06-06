@@ -2,6 +2,7 @@
 
 import { type WriteStream, createWriteStream, readFileSync } from "node:fs";
 import type { LoopEvent } from "../loop.js";
+import type { CacheDiagnosticEntry } from "../telemetry/cache-diagnostics.js";
 import type { RawUsage } from "../types.js";
 
 export interface TranscriptRecord {
@@ -25,8 +26,19 @@ export interface TranscriptRecord {
   model?: string;
   /** Lets diff attribute cache-hit delta to log stability vs prompt change. */
   prefixHash?: string;
+  /** Optional local cache-diagnostic evidence. DeepSeek reports tokens; Reasonix infers miss reasons from prefix hashes. */
+  cacheDiagnostic?: CacheDiagnosticEntry;
   /** Optional error message (role === "error"). */
   error?: string;
+  /** Structured error detail (role === "error"). */
+  errorDetail?: {
+    name: string;
+    message: string;
+    code?: string;
+    phase?: string;
+    retryable: boolean;
+    recoverable: boolean;
+  };
 }
 
 export interface TranscriptMeta {
@@ -62,6 +74,8 @@ export function recordFromLoopEvent(
   if (ev.toolName !== undefined) rec.tool = ev.toolName;
   if (ev.toolArgs !== undefined) rec.args = ev.toolArgs;
   if (ev.error !== undefined) rec.error = ev.error;
+  if (ev.errorDetail !== undefined) rec.errorDetail = ev.errorDetail;
+  if (ev.cacheDiagnostic !== undefined) rec.cacheDiagnostic = ev.cacheDiagnostic;
   if (ev.stats) {
     rec.usage = {
       prompt_tokens: ev.stats.usage.promptTokens,

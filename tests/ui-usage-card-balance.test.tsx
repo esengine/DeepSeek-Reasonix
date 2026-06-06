@@ -10,7 +10,16 @@ import React from "react";
 import { describe, expect, it } from "vitest";
 import { UsageCard } from "../src/cli/ui/cards/UsageCard.js";
 import type { UsageCard as UsageCardData } from "../src/cli/ui/state/cards.js";
+import { AgentStoreProvider } from "../src/cli/ui/state/provider.js";
+import type { SessionInfo } from "../src/cli/ui/state/state.js";
 import { makeFakeStdin, makeFakeStdout } from "./helpers/ink-stdio.js";
+
+const SESSION: SessionInfo = {
+  id: "test",
+  branch: "main",
+  workspace: "/tmp",
+  model: "deepseek-chat",
+};
 
 function baseCard(overrides: Partial<UsageCardData> = {}): UsageCardData {
   return {
@@ -29,10 +38,14 @@ function baseCard(overrides: Partial<UsageCardData> = {}): UsageCardData {
 
 function renderCard(card: UsageCardData): string {
   const stdout = makeFakeStdout();
-  const { unmount } = render(React.createElement(UsageCard, { card }), {
-    stdout: stdout as never,
-    stdin: makeFakeStdin() as never,
-  });
+  const { unmount } = render(
+    React.createElement(
+      AgentStoreProvider,
+      { session: SESSION },
+      React.createElement(UsageCard, { card }),
+    ),
+    { stdout: stdout as never, stdin: makeFakeStdin() as never },
+  );
   unmount();
   return stdout.text();
 }

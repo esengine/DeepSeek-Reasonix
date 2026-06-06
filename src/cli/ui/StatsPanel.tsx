@@ -1,5 +1,5 @@
 import { basename } from "node:path";
-import { Box, Text, useStdout } from "ink";
+import { Box, type Color, Text, useStdout } from "ink";
 import React from "react";
 import stringWidth from "string-width";
 import type { EditMode } from "../../config.js";
@@ -7,7 +7,7 @@ import { t } from "../../i18n/index.js";
 import type { SessionSummary } from "../../telemetry/stats.js";
 import { Bar, ChromeRule } from "./primitives.js";
 import { COLOR, GRADIENT } from "./theme.js";
-import { formatBalance, formatCost } from "./theme/tokens.js";
+import { FG, formatBalance, formatCost } from "./theme/tokens.js";
 
 const COLD_START_TURNS = 3;
 
@@ -17,8 +17,6 @@ export interface StatsPanelProps {
   editMode?: EditMode;
   balance?: { currency: string; total: number } | null;
   updateAvailable?: string | null;
-  proArmed?: boolean;
-  escalated?: boolean;
   budgetUsd?: number | null;
   rootDir?: string;
   sessionName?: string | null;
@@ -30,8 +28,6 @@ export function StatsPanel({
   editMode,
   balance,
   updateAvailable,
-  proArmed,
-  escalated,
   budgetUsd,
   rootDir,
   sessionName,
@@ -42,8 +38,6 @@ export function StatsPanel({
       <ChromeRow
         editMode={editMode}
         planMode={planMode}
-        proArmed={proArmed ?? false}
-        escalated={escalated ?? false}
         summary={summary}
         coldStart={coldStart}
         rootDir={rootDir}
@@ -62,8 +56,6 @@ export function StatsPanel({
 function ChromeRow({
   editMode,
   planMode,
-  proArmed,
-  escalated,
   summary,
   coldStart,
   rootDir,
@@ -73,8 +65,6 @@ function ChromeRow({
 }: {
   editMode?: EditMode;
   planMode?: boolean;
-  proArmed: boolean;
-  escalated: boolean;
   summary: SessionSummary;
   coldStart: boolean;
   rootDir?: string;
@@ -83,12 +73,6 @@ function ChromeRow({
   balance?: { currency: string; total: number } | null;
 }) {
   const modePill = pickModePill(planMode, editMode);
-  const proLabel = t("statsPanel.pro");
-  const proPill = escalated
-    ? { label: proLabel, color: COLOR.err }
-    : proArmed
-      ? { label: proLabel, color: COLOR.warn }
-      : null;
   const projectName = rootDir ? basename(rootDir) : null;
   const cachePct = (summary.cacheHitRatio * 100).toFixed(1);
   const cacheColor =
@@ -100,13 +84,10 @@ function ChromeRow({
   const cacheLabel = "[c ▰▰▰▰▰▰ 100%]";
   const updateLabel = updateAvailable ? `↑ ${updateAvailable}` : "";
 
-  // Greedy width-aware fit. Layout (every gap = 2 cells, applied as suffix
-  // to update/mode/pro and as prefix to balance/cache):
-  //   [brand][·project][›session]<spacer>[update][mode][pro][cost][balance][cache]
-  // Always shown: brand, project (if rootDir), mode (if set), pro (if armed),
-  //               cost. These carve fixedLeft / fixedRight first.
+  // Greedy width-aware fit. Layout (every gap = 2 cells):
+  //   [brand][·project][›session]<spacer>[update][mode][cost][balance][cache]
+  // Always shown: brand, project (if rootDir), mode (if set), cost.
   // Optional, dropped greedy by priority: balance > cache > session > update.
-  // The flexbox spacer can shrink to 0, so no minimum reserve.
   const { stdout } = useStdout();
   const cols = (stdout?.columns ?? 80) - 2; // subtract paddingX={1} on both sides
   const SEP_DOT = stringWidth("  ·  ");
@@ -116,8 +97,7 @@ function ChromeRow({
   const fixedLeft =
     stringWidth("◈ reasonix") + (projectName ? SEP_DOT + stringWidth(projectName) : 0);
   const modeW = modePill ? GAP + stringWidth(`[${modePill.label}]`) : 0;
-  const proW = proPill ? GAP + stringWidth(`[${proPill.label}]`) : 0;
-  const fixedRight = modeW + proW + stringWidth(costLabel);
+  const fixedRight = modeW + stringWidth(costLabel);
   let budget = cols - fixedLeft - fixedRight;
 
   const balW = balance ? GAP + stringWidth(balanceLabel) : 0;
@@ -144,15 +124,11 @@ function ChromeRow({
       </Text>
       {projectName ? (
         <>
-          <Text color={COLOR.info} dimColor>
-            {"  ·  "}
-          </Text>
+          <Text color={FG.faint}>{"  ·  "}</Text>
           <Text>{projectName}</Text>
           {showSession && sessionName ? (
             <>
-              <Text color={COLOR.info} dimColor>
-                {"  ›  "}
-              </Text>
+              <Text color={FG.faint}>{"  ›  "}</Text>
               <Text color={COLOR.info}>{sessionName}</Text>
             </>
           ) : null}
@@ -177,20 +153,9 @@ function ChromeRow({
           <Text>{"  "}</Text>
         </>
       ) : null}
-      {proPill ? (
-        <>
-          <Text color={proPill.color} bold>
-            {`[${proPill.label}]`}
-          </Text>
-          <Text>{"  "}</Text>
-        </>
-      ) : null}
       <Text
-        color={
-          summary.turns === 0 || coldStart ? COLOR.info : sessionCostColor(summary.totalCostUsd)
-        }
+        color={summary.turns === 0 || coldStart ? FG.faint : sessionCostColor(summary.totalCostUsd)}
         bold={summary.turns > 0 && !coldStart}
-        dimColor={summary.turns === 0 || coldStart}
       >
         {costLabel}
       </Text>
@@ -205,19 +170,14 @@ function ChromeRow({
       {showCache ? (
         <>
           <Text>{"  "}</Text>
-          <Text dimColor>{"["}</Text>
-          <Text dimColor>{"c "}</Text>
-          <Bar
-            ratio={summary.cacheHitRatio}
-            color={coldStart ? COLOR.info : cacheColor}
-            cells={6}
-            dim={coldStart}
-          />
+          <Text color={FG.faint}>{"["}</Text>
+          <Text color={FG.faint}>{"c "}</Text>
+          <Bar ratio={summary.cacheHitRatio} color={coldStart ? FG.faint : cacheColor} cells={6} />
           <Text> </Text>
-          <Text color={coldStart ? undefined : cacheColor} dimColor={coldStart}>
+          <Text color={coldStart ? FG.faint : cacheColor}>
             {coldStart && summary.turns === 0 ? "—" : `${cachePct}%`}
           </Text>
-          <Text dimColor>{"]"}</Text>
+          <Text color={FG.faint}>{"]"}</Text>
         </>
       ) : null}
     </Box>
@@ -227,7 +187,7 @@ function ChromeRow({
 function pickModePill(
   planMode: boolean | undefined,
   editMode: EditMode | undefined,
-): { label: string; color: string } | null {
+): { label: string; color: Color } | null {
   if (planMode) return { label: t("statsPanel.modePlan"), color: COLOR.err };
   if (editMode === "yolo") return { label: t("statsPanel.modeYolo"), color: COLOR.err };
   if (editMode === "auto") return { label: t("statsPanel.modeAuto"), color: COLOR.primary };
@@ -240,16 +200,16 @@ function BudgetRow({ spent, cap }: { spent: number; cap: number }) {
   const color = pct >= 100 ? "#f87171" : pct >= 80 ? "#fbbf24" : "#94a3b8";
   return (
     <Box>
-      <Text dimColor>{t("statsPanel.budget")}</Text>
+      <Text color={FG.faint}>{t("statsPanel.budget")}</Text>
       <Text color={color}>
         {`$${spent.toFixed(4)} / $${cap.toFixed(2)}`}
-        <Text dimColor>{`  (${pct.toFixed(0)}%)`}</Text>
+        <Text color={FG.faint}>{`  (${pct.toFixed(0)}%)`}</Text>
       </Text>
     </Box>
   );
 }
 
-function sessionCostColor(cost: number): string | undefined {
+function sessionCostColor(cost: number): Color | undefined {
   if (cost <= 0) return undefined;
   if (cost >= 5) return COLOR.err;
   if (cost >= 0.5) return COLOR.warn;
