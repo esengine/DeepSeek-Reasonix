@@ -82,6 +82,7 @@ const RIGHT_DOCK_MAX_WIDTH = 860;
 type RightDockMode = "context" | "files" | "changed";
 const SHOW_CONTEXT_DOCK = false;
 type HistoryScopeFilter = { scope: "global" | "project"; workspaceRoot: string };
+type DesktopPlatform = "darwin" | "windows" | "linux";
 type HistoryViewState =
   | { kind: "history"; source: "scope"; filter: HistoryScopeFilter; sessions: SessionMeta[] }
   | { kind: "history"; source: "all"; sessions: SessionMeta[] }
@@ -148,6 +149,28 @@ function loadSidebarWidth(): number {
 
 function saveSidebarWidth(width: number): void {
   saveLayoutSize("sidebarWidth", width, clampSidebarWidth);
+}
+
+function normalizeDesktopPlatform(value: string): DesktopPlatform {
+  if (value === "darwin" || value === "windows") return value;
+  return "linux";
+}
+
+function browserPlatformOverride(): DesktopPlatform | null {
+  if (typeof window === "undefined" || window.runtime) return null;
+  const value = new URLSearchParams(window.location.search).get("platform");
+  if (value === "darwin" || value === "windows" || value === "linux") return value;
+  return null;
+}
+
+function detectBrowserPlatform(): DesktopPlatform {
+  const override = browserPlatformOverride();
+  if (override) return override;
+  if (typeof navigator === "undefined") return "linux";
+  const marker = `${navigator.platform} ${navigator.userAgent}`;
+  if (/Win/i.test(marker)) return "windows";
+  if (/Mac/i.test(marker)) return "darwin";
+  return "linux";
 }
 
 function loadRightDockTreeWidth(): number {
@@ -289,6 +312,7 @@ export default function App() {
   const [composerInsertRequest, setComposerInsertRequest] = useState<ComposerInsertRequest | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [capsOpen, setCapsOpen] = useState(false);
+  const [desktopPlatform, setDesktopPlatform] = useState<DesktopPlatform>(detectBrowserPlatform);
   const [renamingTopicId, setRenamingTopicId] = useState<string | null>(null);
   const [topicTitleDraft, setTopicTitleDraft] = useState("");
   const topicRenameSkipCommitRef = useRef(false);
@@ -296,6 +320,27 @@ export default function App() {
 
   // Persist window geometry across launches.
   useWindowStatePersistence();
+
+  useEffect(() => {
+    let cancelled = false;
+    const override = browserPlatformOverride();
+    if (override) {
+      setDesktopPlatform(override);
+      return () => {
+        cancelled = true;
+      };
+    }
+    void app.Platform()
+      .then((value) => {
+        if (!cancelled) setDesktopPlatform(normalizeDesktopPlatform(value));
+      })
+      .catch((e) => {
+        console.warn("platform probe failed", e);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -1146,7 +1191,7 @@ export default function App() {
   return (
     <ShellExpandProvider>
     <ShellHotkeys />
-    <div className="app">
+    <div className={`app app--${desktopPlatform}`}>
       <div
         ref={layoutRef}
         className={[
@@ -1175,7 +1220,7 @@ export default function App() {
             aria-label={sidebarToggleTitle}
             aria-disabled={sidebarExpandBlocked}
           >
-            {sidebarCollapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
+            {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
           </button>
           <div className="app-chrome__identity" aria-label="Reasonix">
             <img src={logoWordmark} alt="" className="app-chrome__logo" />
