@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 
 	"reasonix/internal/acp"
 	"reasonix/internal/agent"
@@ -15,8 +16,12 @@ import (
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/i18n"
+	"reasonix/internal/instruction"
+	"reasonix/internal/memory"
+	"reasonix/internal/netclient"
 	"reasonix/internal/permission"
 	"reasonix/internal/plugin"
+	"reasonix/internal/provider"
 	"reasonix/internal/sandbox"
 	"reasonix/internal/tool"
 	"reasonix/internal/tool/builtin"
@@ -95,6 +100,9 @@ func (f *acpFactory) NewSession(ctx context.Context, p acp.SessionParams) (*cont
 	if err != nil {
 		return nil, err
 	}
+	mem := memory.Load(memory.Options{CWD: p.Cwd, UserDir: config.MemoryUserDir()})
+	projectChecks := instruction.ExtractHostChecks(mem.Docs)
+	sysPrompt = memory.Compose(sysPrompt, mem)
 
 	// Built-ins rooted at the session cwd. Writes confine to that cwd by default
 	// (Workspace makes Dir the sole write root when WriteRoots is empty), which is
@@ -105,9 +113,7 @@ func (f *acpFactory) NewSession(ctx context.Context, p acp.SessionParams) (*cont
 	if p.Cwd != "" {
 		writeRoots = []string{p.Cwd}
 	}
-	bashSpec := sandbox.Spec{Mode: cfg.BashMode(), WriteRoots: writeRoots, Network: cfg.Sandbox.Network}
-	ws := builtin.Workspace{Dir: p.Cwd, WriteRoots: writeRoots, Bash: bashSpec, Search: builtin.ResolveSearch(cfg.Tools.Search.Engine, cfg.Tools.Search.RgPath, nil)}
-	for _, t := range ws.Tools(cfg.Tools.Enabled...) {
+	for _, t := range acpBuiltinTools(cfg, p.Cwd, writeRoots) {
 		reg.Add(t)
 	}
 
@@ -137,15 +143,19 @@ func (f *acpFactory) NewSession(ctx context.Context, p acp.SessionParams) (*cont
 	maxSteps := cfg.Agent.MaxSteps
 	policy := permission.New(cfg.Permissions.Mode, cfg.Permissions.Allow, cfg.Permissions.Ask, cfg.Permissions.Deny)
 	headlessGate := permission.NewGate(policy, nil)
+	taskModel, taskEffort := acpTaskProfileDefaults(cfg)
+	resolveSubagentProvider := newACPSubagentProviderResolver(cfg, entry, proxySpec)
 	reg.Add(agent.NewTaskTool(execProv, entry.Price, reg, maxSteps,
 		entry.ContextWindow, cfg.Agent.SoftCompactRatio, cfg.Agent.CompactRatio, cfg.Agent.CompactForceRatio,
-		cfg.Agent.Temperature, config.ArchiveDir(), "", headlessGate))
+		cfg.Agent.Temperature, config.ArchiveDir(), "", headlessGate,
+		taskModel, taskEffort, resolveSubagentProvider))
 
 	executor := agent.New(execProv, reg, agent.NewSession(sysPrompt), agent.Options{
 		MaxSteps:          maxSteps,
 		Temperature:       cfg.Agent.Temperature,
 		Pricing:           entry.Price,
 		Gate:              headlessGate,
+		ProjectChecks:     projectChecks,
 		ContextWindow:     entry.ContextWindow,
 		SoftCompactRatio:  cfg.Agent.SoftCompactRatio,
 		CompactRatio:      cfg.Agent.CompactRatio,
@@ -169,8 +179,17 @@ func (f *acpFactory) NewSession(ctx context.Context, p acp.SessionParams) (*cont
 				cleanup()
 				return nil, fmt.Errorf("planner %q: %w", pm, err)
 			}
-			plannerSess := agent.NewSession(agent.DefaultPlannerPrompt)
-			runner = agent.NewCoordinator(plannerProv, plannerSess, pe.Price, executor, cfg.Agent.Temperature, p.Sink, control.TaskWarrantsPlanner)
+			plannerSess := agent.NewSession(agent.PlannerPromptWithContext(mem.Block()))
+			plannerTools := agent.PlannerToolRegistry(reg)
+			runner = agent.NewCoordinator(plannerProv, plannerSess, pe.Price, plannerTools, agent.Options{
+				MaxSteps:          agent.PlannerMaxSteps(maxSteps),
+				Gate:              headlessGate,
+				ContextWindow:     pe.ContextWindow,
+				SoftCompactRatio:  cfg.Agent.SoftCompactRatio,
+				CompactRatio:      cfg.Agent.CompactRatio,
+				CompactForceRatio: cfg.Agent.CompactForceRatio,
+				ArchiveDir:        config.ArchiveDir(),
+			}, executor, cfg.Agent.Temperature, p.Sink, control.TaskWarrantsPlanner)
 			label = entry.Model + " + planner " + pe.Model
 		}
 	}
@@ -187,4 +206,66 @@ func (f *acpFactory) NewSession(ctx context.Context, p acp.SessionParams) (*cont
 		Commands:     cmds,
 		Cleanup:      cleanup,
 	}), nil
+}
+
+func acpBuiltinTools(cfg *config.Config, cwd string, writeRoots []string) []tool.Tool {
+	bashSpec := sandbox.Spec{Mode: cfg.BashMode(), WriteRoots: writeRoots, Network: cfg.Sandbox.Network}
+	ws := builtin.Workspace{
+		Dir:        cwd,
+		WriteRoots: writeRoots,
+		Bash:       bashSpec,
+		Search:     builtin.ResolveSearch(cfg.Tools.Search.Engine, cfg.Tools.Search.RgPath, nil),
+	}
+	return ws.Tools(cfg.Tools.Enabled...)
+}
+
+func acpTaskProfileDefaults(cfg *config.Config) (string, string) {
+	if cfg == nil {
+		return "", ""
+	}
+	model := strings.TrimSpace(cfg.Agent.SubagentModels["task"])
+	if model == "" {
+		model = strings.TrimSpace(cfg.Agent.SubagentModel)
+	}
+	effort := strings.TrimSpace(cfg.Agent.SubagentEfforts["task"])
+	if effort == "" {
+		effort = strings.TrimSpace(cfg.Agent.SubagentEffort)
+	}
+	return model, effort
+}
+
+func newACPSubagentProviderResolver(cfg *config.Config, parent *config.ProviderEntry, proxySpec netclient.ProxySpec) func(string, string) (provider.Provider, *provider.Pricing, int, error) {
+	return func(modelRef, effort string) (provider.Provider, *provider.Pricing, int, error) {
+		modelRef = strings.TrimSpace(modelRef)
+		effort = strings.TrimSpace(effort)
+
+		var entry *config.ProviderEntry
+		if modelRef != "" {
+			var ok bool
+			entry, ok = cfg.ResolveModel(modelRef)
+			if !ok {
+				return nil, nil, 0, fmt.Errorf("subagent_model %q is not a configured provider", modelRef)
+			}
+		} else {
+			cp := *parent
+			entry = &cp
+		}
+
+		if effort != "" {
+			normalized, err := config.NormalizeEffort(entry, effort)
+			if err != nil {
+				return nil, nil, 0, err
+			}
+			entry.Effort = normalized
+			if entry.Kind == "anthropic" && strings.TrimSpace(entry.Effort) != "" && strings.TrimSpace(entry.Thinking) == "" {
+				entry.Thinking = "adaptive"
+			}
+		}
+
+		prov, err := boot.NewProviderWithProxy(entry, proxySpec)
+		if err != nil {
+			return nil, nil, 0, err
+		}
+		return prov, entry.Price, entry.ContextWindow, nil
+	}
 }

@@ -90,6 +90,8 @@ tags are the CLI release). Pushing one triggers `.github/workflows/release-deskt
 which builds on a native runner per platform (Wails can't cross-compile a
 CGO/WebKit binary), packages each artifact, signs it with minisign, generates a
 `latest.json` manifest, publishes a GitHub release, and mirrors everything to R2.
+The Linux artifact links against WebKitGTK 4.1 (`-tags webkit2_41`), so it needs
+`libwebkit2gtk-4.1-0` at runtime — present by default on Ubuntu 22.04+, Fedora 40+.
 
 ```sh
 git tag desktop-v1.1.0 && git push origin desktop-v1.1.0
@@ -111,8 +113,9 @@ has a manual check. Self-update behavior by platform:
 There are no Apple/Windows code-signing certificates yet, so a downloaded build
 trips the OS gatekeepers on first run:
 
-- **macOS** — Gatekeeper may report the app "is damaged" or is from an
-  unidentified developer. Clear the quarantine attribute, then open it:
+- **macOS** — open `Reasonix-darwin-universal.dmg` and drag Reasonix into
+  Applications. Gatekeeper may then report the app "is damaged" or is from an
+  unidentified developer; clear the quarantine attribute and open it:
   ```sh
   xattr -dr com.apple.quarantine /Applications/Reasonix.app
   ```

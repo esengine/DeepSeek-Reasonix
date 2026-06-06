@@ -16,6 +16,16 @@ func TestToWire(t *testing.T) {
 		}
 	})
 
+	t.Run("tool dispatch profile", func(t *testing.T) {
+		w := toWire(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{
+			Name: "task", Args: `{"prompt":"x"}`,
+			Profile: &event.Profile{Model: "deepseek-pro", Effort: "max"},
+		}})
+		if w.Tool == nil || w.Tool.Profile == nil || w.Tool.Profile.Model != "deepseek-pro" || w.Tool.Profile.Effort != "max" {
+			t.Errorf("profile = %+v", w.Tool)
+		}
+	})
+
 	t.Run("usage with cost", func(t *testing.T) {
 		w := toWire(event.Event{
 			Kind:    event.Usage,
@@ -27,7 +37,7 @@ func TestToWire(t *testing.T) {
 				LogRewriteVersion:   1,
 			},
 		})
-		if w.Usage == nil || w.Usage.TotalTokens != 1200 || w.Usage.CostUSD <= 0 {
+		if w.Usage == nil || w.Usage.TotalTokens != 1200 || w.Usage.Cost <= 0 || w.Usage.CostUSD <= 0 || w.Usage.Currency != "¥" {
 			t.Errorf("usage = %+v", w.Usage)
 		}
 		if w.Usage.CacheDiagnostics == nil || w.Usage.CacheDiagnostics.PrefixChangeReasons[0] != "log_rewrite" {

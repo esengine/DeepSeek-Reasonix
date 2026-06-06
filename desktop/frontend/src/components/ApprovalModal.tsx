@@ -22,6 +22,7 @@ export function ApprovalModal({
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const isPlanApproval = approval.tool === "exit_plan_mode";
   const subject = approval.subject.trim();
+  const subjectSummary = subject.split("\n").find((line) => line.trim())?.trim() ?? "";
 
   const choosePlanAction = (key: string) => {
     if (key === "1") setRevisionOpen((open) => !open);
@@ -123,10 +124,11 @@ export function ApprovalModal({
       barRef={cardRef}
       titleId="tool-approval-title"
       title={t("approval.toolPending")}
+      actionsWrap
       meta={
         <>
           <span className="tool__name">{approval.tool}</span>
-          {subject && <span className="prompt-shelf__subject"> · {subject}</span>}
+          {subjectSummary && <span className="prompt-shelf__subject"> · {subjectSummary}</span>}
         </>
       }
       actions={

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/BurntSushi/toml"
@@ -14,6 +15,14 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	orig.Language = "zh"
 	orig.UI.Theme = "light"
 	orig.UI.ThemeStyle = "glacier"
+	orig.Desktop.Language = "en"
+	orig.Desktop.Theme = "dark"
+	orig.Desktop.ThemeStyle = "graphite"
+	orig.Desktop.CloseBehavior = "background"
+	orig.Notifications.Enabled = true
+	orig.Notifications.TurnDone = true
+	orig.Notifications.ApprovalRequest = true
+	orig.Notifications.AskRequest = true
 	orig.Agent.AutoPlanClassifier = "deepseek-flash"
 	orig.Agent.SubagentModel = "mimo-pro"
 	orig.Agent.SubagentModels = map[string]string{"review": "deepseek-pro"}
@@ -35,6 +44,7 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	}
 	orig.Skills.Paths = []string{"~/my-skills", "../shared/skills"}
 	orig.Skills.DisabledSkills = []string{"review", "explore"}
+	orig.Skills.MaxDepth = 2
 	orig.Codegraph = CodegraphConfig{Enabled: true, AutoInstall: false, Path: "/opt/codegraph", Tier: "background"}
 	orig.Plugins = []PluginEntry{
 		{Name: "example", Command: "reasonix-plugin-example"},
@@ -55,6 +65,9 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	if got.DefaultModel != "mimo-pro" {
 		t.Errorf("default_model = %q, want mimo-pro", got.DefaultModel)
 	}
+	if got.ConfigVersion != 2 {
+		t.Errorf("config_version = %d, want 2", got.ConfigVersion)
+	}
 	if got.Language != "zh" {
 		t.Errorf("language = %q, want zh", got.Language)
 	}
@@ -64,14 +77,29 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	if got.UI.ThemeStyle != "glacier" {
 		t.Errorf("ui.theme_style = %q, want glacier", got.UI.ThemeStyle)
 	}
+	if got.Desktop.Language != "en" {
+		t.Errorf("desktop.language = %q, want en", got.Desktop.Language)
+	}
+	if got.Desktop.Theme != "dark" {
+		t.Errorf("desktop.theme = %q, want dark", got.Desktop.Theme)
+	}
+	if got.Desktop.ThemeStyle != "graphite" {
+		t.Errorf("desktop.theme_style = %q, want graphite", got.Desktop.ThemeStyle)
+	}
+	if got.Desktop.CloseBehavior != "background" {
+		t.Errorf("desktop.close_behavior = %q, want background", got.Desktop.CloseBehavior)
+	}
+	if !got.Notifications.Enabled || !got.Notifications.TurnDone || !got.Notifications.ApprovalRequest || !got.Notifications.AskRequest {
+		t.Errorf("notifications not preserved: %+v", got.Notifications)
+	}
 	if got.Agent.MaxSteps != orig.Agent.MaxSteps {
 		t.Errorf("max_steps = %d, want %d", got.Agent.MaxSteps, orig.Agent.MaxSteps)
 	}
 	if got.Agent.Temperature != orig.Agent.Temperature {
 		t.Errorf("temperature = %v, want %v", got.Agent.Temperature, orig.Agent.Temperature)
 	}
-	if got.Agent.AutoPlan != "ask" {
-		t.Errorf("auto_plan = %q, want ask", got.Agent.AutoPlan)
+	if got.Agent.AutoPlan != "off" {
+		t.Errorf("auto_plan = %q, want off", got.Agent.AutoPlan)
 	}
 	if got.Agent.AutoPlanClassifier != "deepseek-flash" {
 		t.Errorf("auto_plan_classifier = %q, want deepseek-flash", got.Agent.AutoPlanClassifier)
@@ -97,8 +125,8 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	if got.Codegraph.Path != "/opt/codegraph" {
 		t.Errorf("codegraph.path = %q, want /opt/codegraph", got.Codegraph.Path)
 	}
-	if got.Codegraph.Tier != "background" {
-		t.Errorf("codegraph.tier = %q, want background", got.Codegraph.Tier)
+	if got.Codegraph.Tier != "" {
+		t.Errorf("codegraph.tier = %q, want migrated empty", got.Codegraph.Tier)
 	}
 	if got.Agent.SubagentModel != "mimo-pro" {
 		t.Errorf("subagent_model = %q, want mimo-pro", got.Agent.SubagentModel)
@@ -133,6 +161,9 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	if len(got.Skills.DisabledSkills) != 2 || got.Skills.DisabledSkills[0] != "review" || got.Skills.DisabledSkills[1] != "explore" {
 		t.Errorf("skills.disabled_skills = %v", got.Skills.DisabledSkills)
 	}
+	if got.SkillMaxDepth() != 2 {
+		t.Errorf("skills.max_depth = %d, want 2", got.SkillMaxDepth())
+	}
 	if len(got.Plugins) != 2 {
 		t.Fatalf("plugins count = %d, want 2", len(got.Plugins))
 	}
@@ -146,8 +177,73 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	if stripe.AutoStart == nil || *stripe.AutoStart {
 		t.Errorf("auto_start should render and parse as false, got %+v", stripe.AutoStart)
 	}
-	if stripe.Tier != "background" {
-		t.Errorf("plugin tier should render and parse as background, got %q", stripe.Tier)
+	if stripe.Tier != "" {
+		t.Errorf("plugin tier should be omitted from new config, got %q", stripe.Tier)
+	}
+	if strings.Contains(rendered, "\ntier") {
+		t.Errorf("rendered config should not contain MCP tier fields:\n%s", rendered)
+	}
+}
+
+func TestNotificationsDefaultsKeepEventSwitchesEnabled(t *testing.T) {
+	cfg := Default()
+	if cfg.Notifications.Enabled {
+		t.Fatal("notifications.enabled default = true, want false")
+	}
+	if !cfg.Notifications.TurnDone || !cfg.Notifications.ApprovalRequest || !cfg.Notifications.AskRequest {
+		t.Fatalf("notification event switches default off: %+v", cfg.Notifications)
+	}
+
+	if _, err := toml.Decode("[notifications]\nenabled = true\n", cfg); err != nil {
+		t.Fatalf("decode notifications: %v", err)
+	}
+	if !cfg.Notifications.Enabled || !cfg.Notifications.TurnDone || !cfg.Notifications.ApprovalRequest || !cfg.Notifications.AskRequest {
+		t.Fatalf("enabled-only config should keep event switches on: %+v", cfg.Notifications)
+	}
+}
+
+func TestScopedRenderSeparatesUserAndProjectConfig(t *testing.T) {
+	c := Default()
+	c.Language = "zh"
+	c.Desktop.Language = "zh"
+	c.Desktop.Theme = "dark"
+	c.Desktop.ThemeStyle = "graphite"
+	c.Desktop.CloseBehavior = "background"
+
+	user := RenderTOMLForScope(c, RenderScopeUser)
+	for _, want := range []string{"config_version = 2", "[desktop]", `theme = "dark"`, `close_behavior = "background"`, "[notifications]"} {
+		if !strings.Contains(user, want) {
+			t.Fatalf("user render missing %q:\n%s", want, user)
+		}
+	}
+
+	project := RenderTOMLForScope(c, RenderScopeProject)
+	for _, forbidden := range []string{"[desktop]", "[notifications]", "close_behavior ="} {
+		if strings.Contains(project, forbidden) {
+			t.Fatalf("project render should not contain %q:\n%s", forbidden, project)
+		}
+	}
+	if strings.Contains(project, "\nsystem_prompt = \"\"\"") {
+		t.Fatalf("project render should not pin the built-in system prompt:\n%s", project)
+	}
+	if !strings.Contains(project, "# system_prompt =") {
+		t.Fatalf("project render should leave a system prompt hint:\n%s", project)
+	}
+}
+
+func TestProjectRenderPreservesNonDefaultLegacySections(t *testing.T) {
+	c := Default()
+	c.UI.Theme = "light"
+	c.UI.CloseBehavior = "quit"
+	c.Network.ProxyMode = "custom"
+	c.Network.Proxy.Server = "127.0.0.1"
+	c.Network.Proxy.Port = 7890
+
+	project := RenderTOMLForScope(c, RenderScopeProject)
+	for _, want := range []string{"[ui]", `theme = "light"`, `close_behavior = "quit"`, "[network]", `proxy_mode = "custom"`, `server = "127.0.0.1"`} {
+		if !strings.Contains(project, want) {
+			t.Fatalf("project render missing legacy/non-default %q:\n%s", want, project)
+		}
 	}
 }
 

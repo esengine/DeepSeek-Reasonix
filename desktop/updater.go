@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -248,7 +249,10 @@ func applyLinux(targz []byte) error {
 
 // applyWindows writes the downloaded NSIS installer to a temp file and launches it.
 // The per-user installer needs no admin rights and its finish page relaunches the
-// app; the caller then exits so the installer can replace the running exe.
+// app; the caller then exits so the installer can replace the running exe. The
+// installer targets the running app's own directory (issue #3217) so an update
+// overwrites in place instead of landing a second copy at the per-user default —
+// this also covers upgrades from builds that predate the registry InstallLocation.
 func applyWindows(installer []byte) error {
 	f, err := os.CreateTemp("", "reasonix-update-*.exe")
 	if err != nil {
@@ -262,7 +266,21 @@ func applyWindows(installer []byte) error {
 	if err := f.Close(); err != nil {
 		return err
 	}
-	return exec.Command(name).Start()
+	return installerCommand(name, currentInstallDir()).Start()
+}
+
+// currentInstallDir is the directory of the running executable — the location a
+// Windows update must overwrite. Empty when it can't be resolved, in which case
+// the installer falls back to its own InstallDir logic.
+func currentInstallDir() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = resolved
+	}
+	return filepath.Dir(exe)
 }
 
 // relaunch starts a fresh copy of the (just-replaced) executable.

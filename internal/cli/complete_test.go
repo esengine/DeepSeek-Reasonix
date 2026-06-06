@@ -388,6 +388,23 @@ func TestSlashArgCompletionLanguage(t *testing.T) {
 	}
 }
 
+func TestSlashArgCompletionAutoPlan(t *testing.T) {
+	m := newTestChatTUI()
+	m.input.SetValue("/auto-plan ")
+	m.updateCompletion()
+	if !m.completion.active || m.completion.kind != compSlashArg {
+		t.Fatalf("/auto-plan should open arg completion: %+v", m.completion)
+	}
+	for _, want := range []string{"off", "on"} {
+		if !hasLabel(m.completion.items, want) {
+			t.Fatalf("/auto-plan completion missing %q: %v", want, labels(m.completion.items))
+		}
+	}
+	if hasLabel(m.completion.items, "ask") {
+		t.Fatalf("/auto-plan completion should not include legacy ask: %v", labels(m.completion.items))
+	}
+}
+
 func labels(items []compItem) []string {
 	out := make([]string, len(items))
 	for i, it := range items {

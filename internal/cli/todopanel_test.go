@@ -24,3 +24,27 @@ func TestRenderTodoPanelNesting(t *testing.T) {
 		t.Fatalf("sub-step not indented under its phase:\n%s", out)
 	}
 }
+
+func TestRenderTodoPanelScrollsToInProgressTodo(t *testing.T) {
+	m := newTestChatTUI()
+	m.width = 72
+	m.todoArgs = `{"todos":[` +
+		`{"content":"Item 01","status":"completed"},` +
+		`{"content":"Item 02","status":"completed"},` +
+		`{"content":"Item 03","status":"completed"},` +
+		`{"content":"Item 04","status":"completed"},` +
+		`{"content":"Item 05","status":"completed"},` +
+		`{"content":"Item 06","status":"completed"},` +
+		`{"content":"Item 07","status":"completed"},` +
+		`{"content":"Item 08","status":"completed"},` +
+		`{"content":"Item 09","status":"in_progress","activeForm":"Working item 09"},` +
+		`{"content":"Item 10","status":"pending"}]}`
+
+	out := ansi.Strip(m.renderTodoPanel())
+	if !strings.Contains(out, "Working item 09") {
+		t.Fatalf("panel should keep the in-progress todo visible:\n%s", out)
+	}
+	if strings.Contains(out, "Item 01") {
+		t.Fatalf("panel should window around the active todo instead of pinning the first rows:\n%s", out)
+	}
+}

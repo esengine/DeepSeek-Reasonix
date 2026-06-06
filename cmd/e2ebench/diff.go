@@ -430,12 +430,17 @@ func changedLineSet(repo, base string, srcFiles []string) map[string]map[int]boo
 			out[file] = map[int]bool{}
 		case strings.HasPrefix(ln, "@@"):
 			// @@ -a,b +c,d @@ — start collecting at new-side line c.
+			// Digit-only cut: malformed headers (e.g. `@@ +abc @@`) fail closed.
 			if plus := strings.Index(ln, "+"); plus >= 0 {
 				num := ln[plus+1:]
-				if sp := strings.IndexAny(num, ", "); sp >= 0 {
-					num = num[:sp]
+				end := len(num)
+				for i := 0; i < len(num); i++ {
+					if num[i] < '0' || num[i] > '9' {
+						end = i
+						break
+					}
 				}
-				_, _ = fmt.Sscanf(num, "%d", &newLine)
+				_, _ = fmt.Sscanf(num[:end], "%d", &newLine)
 			}
 		case strings.HasPrefix(ln, "+") && !strings.HasPrefix(ln, "+++"):
 			if file != "" {

@@ -66,6 +66,78 @@ func TestFlatAndDirLayout(t *testing.T) {
 	}
 }
 
+func TestNestedSkillsDiscoveredByDefault(t *testing.T) {
+	home := t.TempDir()
+	writeSkill(t, home, ".reasonix/skills/superpower/skill-a.md", "---\ndescription: nested flat\n---\nflat body")
+	writeSkill(t, home, ".reasonix/skills/superpower/tool-a/SKILL.md", "---\ndescription: nested dir\n---\ndir body")
+	writeSkill(t, home, ".reasonix/skills/superpower/references/notes.md", "---\ndescription: not a skill\n---\nnotes")
+
+	st := New(Options{HomeDir: home, DisableBuiltins: true})
+	list := st.List()
+	if _, ok := find(list, "skill-a"); !ok {
+		t.Fatal("default max depth should discover nested flat skills")
+	}
+	if _, ok := find(list, "tool-a"); !ok {
+		t.Fatal("default max depth should discover nested directory skills")
+	}
+	if _, ok := find(list, "notes"); ok {
+		t.Fatal("references directories should not be scanned as skill roots")
+	}
+	if sk, ok := st.Read("skill-a"); !ok || sk.Description != "nested flat" || !strings.Contains(sk.Body, "flat body") {
+		t.Fatalf("Read should resolve nested skills from the same discovery path: %+v ok=%v", sk, ok)
+	}
+}
+
+func TestMaxDepthOnePreservesRootOnlyDiscovery(t *testing.T) {
+	home := t.TempDir()
+	writeSkill(t, home, ".reasonix/skills/superpower/skill-a.md", "---\ndescription: nested flat\n---\nflat body")
+	writeSkill(t, home, ".reasonix/skills/superpower/tool-a/SKILL.md", "---\ndescription: nested dir\n---\ndir body")
+
+	st := New(Options{HomeDir: home, MaxDepth: 1, DisableBuiltins: true})
+	if _, ok := find(st.List(), "skill-a"); ok {
+		t.Fatal("max depth 1 should not discover nested flat skills")
+	}
+	if _, ok := find(st.List(), "tool-a"); ok {
+		t.Fatal("max depth 1 should not discover nested directory skills")
+	}
+}
+
+func TestNestedSkillsRequireDescription(t *testing.T) {
+	home := t.TempDir()
+	writeSkill(t, home, ".reasonix/skills/root.md", "---\n---\nroot body")
+	writeSkill(t, home, ".reasonix/skills/superpower/draft.md", "---\n---\ndraft body")
+	writeSkill(t, home, ".reasonix/skills/superpower/tool/SKILL.md", "---\n---\ntool body")
+
+	st := New(Options{HomeDir: home, DisableBuiltins: true})
+	list := st.List()
+	if _, ok := find(list, "root"); !ok {
+		t.Fatal("root-level skills without description should keep legacy discovery behavior")
+	}
+	if _, ok := find(list, "draft"); ok {
+		t.Fatal("nested flat skills without description should be ignored")
+	}
+	if _, ok := find(list, "tool"); ok {
+		t.Fatal("nested directory skills without description should be ignored")
+	}
+	if _, ok := st.Read("draft"); ok {
+		t.Fatal("Read should not resolve nested skills filtered for missing description")
+	}
+}
+
+func TestNestedDirectorySkillStopsTraversal(t *testing.T) {
+	home := t.TempDir()
+	writeSkill(t, home, ".reasonix/skills/pack/SKILL.md", "---\ndescription: pack\n---\npack body")
+	writeSkill(t, home, ".reasonix/skills/pack/child.md", "---\ndescription: child\n---\nchild body")
+
+	st := New(Options{HomeDir: home, MaxDepth: 3, DisableBuiltins: true})
+	if _, ok := find(st.List(), "pack"); !ok {
+		t.Fatal("directory-layout skill should be discovered")
+	}
+	if _, ok := find(st.List(), "child"); ok {
+		t.Fatal("directory-layout skill packages should not be scanned for child skills")
+	}
+}
+
 func TestConventionDirsDiscovered(t *testing.T) {
 	proj := t.TempDir()
 	writeSkill(t, proj, ".claude/skills/fromclaude.md", "---\ndescription: c\n---\nb")

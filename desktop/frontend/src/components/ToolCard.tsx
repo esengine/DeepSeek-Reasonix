@@ -1,4 +1,4 @@
-import { memo, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import {
   Ban,
   Check,
@@ -19,9 +19,12 @@ import { CodeViewer } from "./CodeViewer";
 import { DiffView } from "./DiffView";
 import { useT } from "../lib/i18n";
 import { diffsFor, subjectOf, summarize } from "../lib/tools";
+import { useShellExpand } from "../lib/shellExpand";
 import type { Item } from "../lib/useController";
 
 type ToolItem = Extract<Item, { kind: "tool" }>;
+
+const SUBAGENT_TOOLS = new Set(["task", "run_skill", "explore", "research", "review", "security_review"]);
 
 const ICONS: Record<string, LucideIcon> = {
   edit_file: FilePen,
@@ -35,6 +38,9 @@ const ICONS: Record<string, LucideIcon> = {
   web_fetch: Globe,
   task: ListTree,
 };
+
+/** Lines shown by default in a shell output block before the "show all" button. */
+const SHELL_PREVIEW_LINES = 10;
 
 function pretty(json: string): string {
   try {
@@ -51,6 +57,14 @@ function StatusGlyph({ status }: { status: ToolItem["status"] }) {
   return <Check className="ico ico--ok" size={13} />;
 }
 
+/** Returns the first n lines of text and the total line count. */
+function splitPreview(text: string, n: number): { preview: string; total: number; hasMore: boolean } {
+  const lines = text.split("\n");
+  const total = lines.length;
+  if (total <= n) return { preview: text, total, hasMore: false };
+  return { preview: lines.slice(0, n).join("\n"), total, hasMore: true };
+}
+
 // ToolCard renders one tool call. `subcalls` are sub-agent calls nested under a
 // `task` card (their ParentID points at this call); they render inline, live, so
 // the sub-agent's work is visible as it happens.
@@ -61,6 +75,10 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
   const Icon = ICONS[item.name] ?? Wrench;
   const nested = subcalls ?? [];
   const hasNested = nested.length > 0;
+  const profileText =
+    SUBAGENT_TOOLS.has(item.name) && item.profile
+      ? [item.profile.model, item.profile.effort ? `effort ${item.profile.effort}` : ""].filter(Boolean).join(" · ")
+      : "";
 
   // A task's summary is its step count; everything else derives from the result.
   const summary =
@@ -72,9 +90,19 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
 
   // edit diffs are the point of the card, so they're shown inline; everything
   // else folds its args/output away by default. Nested children always show.
+  // Shell commands default to open so the output is immediately visible.
   const hasBody = diffs.length === 0 && (!!item.args || !!item.output);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(item.isShell && hasBody);
+  const [showAll, setShowAll] = useState(false);
   const expandable = hasBody;
+
+  // Register this shell card's toggle with the global ShellExpand context so
+  // Ctrl/Cmd+B can expand/collapse the most recent shell output.
+  const shellExpand = useShellExpand();
+  useEffect(() => {
+    if (!item.isShell || !shellExpand) return;
+    return shellExpand.register(item.id, () => setOpen((v) => !v));
+  }, [item.isShell, item.id, shellExpand]);
 
   // Read-only "research" calls (read/grep/ls/glob/web_fetch) are quieted to a
   // slim, borderless, dim row so a long run of them doesn't bury the few calls
@@ -82,6 +110,10 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
   // full card. Uses the readOnly flag, not a tool-name list.
   const quiet =
     item.readOnly && !hasNested && item.status !== "error" && item.status !== "stopped";
+
+  // Shell output: split into preview + "show all" toggle.
+  const shellOutput = item.isShell && item.output ? item.output : null;
+  const shellPreview = shellOutput ? splitPreview(shellOutput, SHELL_PREVIEW_LINES) : null;
 
   return (
     <div className={`tool tool--${item.status} ${quiet ? "tool--quiet" : ""}`}>
@@ -97,6 +129,7 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
         <Icon className="tool__icon" size={14} />
         <span className="tool__name">{item.name}</span>
         {subject && <span className="tool__subject">{subject}</span>}
+        {profileText && <span className="tool__profile">{profileText}</span>}
         <span className="tool__meta">
           <StatusGlyph status={item.status} />
         </span>
@@ -119,7 +152,21 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
         </div>
       )}
 
-      {hasBody && open && (
+      {/* Shell output: always visible (auto-open), with preview/show-all toggle */}
+      {shellPreview && open && (
+        <div className="tool__body">
+          <CodeViewer value={showAll ? shellOutput! : shellPreview.preview} maxHeight={showAll ? 480 : 260} />
+          {shellPreview.hasMore && !showAll && (
+            <button className="tool__showall" onClick={() => setShowAll(true)}>
+              {t("tool.showAllLines", { n: shellPreview.total })}
+            </button>
+          )}
+          {item.truncated && <div className="tool__note">{t("tool.truncated")}</div>}
+        </div>
+      )}
+
+      {/* Non-shell body: args + output, gated by open */}
+      {!shellPreview && hasBody && open && (
         <div className="tool__body">
           {item.args && <CodeViewer value={pretty(item.args)} language="json" maxHeight={180} />}
           {item.output && (

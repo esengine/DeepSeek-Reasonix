@@ -116,6 +116,11 @@ func TestSlashArgItems(t *testing.T) {
 	if !has(items, "auto") || !has(items, "high") || !has(items, "max") || has(items, "off") {
 		t.Errorf("/effort should offer auto/high/max only; got %v", labelsOf(items))
 	}
+	// /auto-plan
+	items, _ = SlashArgItems("/auto-plan ", data)
+	if !has(items, "off") || !has(items, "on") || has(items, "ask") {
+		t.Errorf("/auto-plan should offer only off/on; got %v", labelsOf(items))
+	}
 	// /theme
 	items, _ = SlashArgItems("/theme ", data)
 	if !has(items, "auto") || !has(items, "light") || !has(items, "graphite") || !has(items, "glacier") {

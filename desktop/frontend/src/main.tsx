@@ -4,11 +4,33 @@ import App from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { installGlobalCrashHandlers } from "./lib/crash";
 import { LocaleProvider } from "./lib/i18n";
+import { initTextSize } from "./lib/textSize";
 import { initTheme } from "./lib/theme";
 import "./styles.css";
 
 // Apply the saved appearance (auto/light/dark) before the first paint.
 initTheme();
+initTextSize();
+
+// Pre-warm font fallback stacks so the first frame doesn't flicker between the
+// browser default font and the app's configured typeface. Inserting a hidden span
+// with CJK + emoji + math glyphs forces the OS font subsystem to resolve and
+// cache the fallback chains before React mounts.
+function prewarmFontFallbacks() {
+  const span = document.createElement("span");
+  span.style.cssText = "position:absolute;visibility:hidden;font-size:1px;pointer-events:none";
+  span.textContent = "中文日本語한국어 математика 😀🎉✓⚠∑∏∫";
+  document.body.appendChild(span);
+  // Force layout so the browser resolves font fallback chains.
+  void span.offsetHeight;
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      span.remove();
+    });
+  });
+}
+prewarmFontFallbacks();
+
 installGlobalCrashHandlers();
 
 // Inside the Wails shell, suppress the webview's default right-click menu — its

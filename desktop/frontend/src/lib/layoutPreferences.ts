@@ -1,6 +1,8 @@
 export type LayoutSizeKey =
   | "sidebarWidth"
-  | "workspacePanelWidth"
+  | "rightDockWidth"
+  | "rightDockTreeWidth"
+  | "rightDockPreviewWidth"
   | "workspaceFileTreePanelWidth"
   | "workspaceTreeWidth"
   | "composerHeight"
@@ -15,7 +17,9 @@ const STORAGE_KEY = "reasonix.layoutPreferences.v1";
 
 const LEGACY_SIZE_KEYS: Record<LayoutSizeKey, string[]> = {
   sidebarWidth: ["reasonix.sidebar.width"],
-  workspacePanelWidth: ["reasonix.workspacePanel.width"],
+  rightDockWidth: [],
+  rightDockTreeWidth: [],
+  rightDockPreviewWidth: [],
   workspaceFileTreePanelWidth: [],
   workspaceTreeWidth: ["reasonix.workspaceTree.width"],
   composerHeight: ["reasonix.composerHeight"],

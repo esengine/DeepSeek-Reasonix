@@ -386,6 +386,8 @@ function post(path, body) {
 function scrollDown() { requestAnimationFrame(()=>{log.scrollTop=log.scrollHeight;});}
 function hideWelcome() { if(welcome) welcome.style.display='none';}
 function fmtTok(n) { return n>=1000?(n/1000).toFixed(1).replace(/\.0$/,'')+'k':String(n);}
+function currencySymbol(c){const v=String(c||'¥').trim();if(/^(cny|rmb|yuan)$/i.test(v))return '¥';if(/^(usd|dollar)$/i.test(v))return '$';return v||'¥';}
+function fmtMoney(n,c){if(typeof n!=='number'||!isFinite(n))return '—';const s=currencySymbol(c);return s+(n<1?n.toFixed(4):n.toFixed(2));}
 function fmtElapsed(ms) { const s=Math.floor(ms/1000); return s<60?s+'s':Math.floor(s/60)+'m '+s%60+'s';}
 function escHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 function el(tag,cls,text) { const e=document.createElement(tag); if(cls)e.className=cls; if(text)e.textContent=text; return e;}
@@ -610,7 +612,8 @@ es.onmessage=ev=>{setConnState('connected');
           const sp=el('span','item');sp.innerHTML=it.l+' <span class="v '+it.c+'">'+it.v+'</span>';strip.appendChild(sp);
         });
         if(e.usage.cacheHitTokens){const sp=el('span','item');sp.innerHTML='Cache <span class="v acc">'+Math.round(e.usage.cacheHitTokens/Math.max(1,e.usage.cacheHitTokens+e.usage.cacheMissTokens)*100)+'%</span>';strip.appendChild(sp);}
-        if(e.usage.costUsd){const sp=el('span','item');sp.innerHTML='Cost <span class="v">$'+e.usage.costUsd.toFixed(4)+'</span>';strip.appendChild(sp);}
+        const usageCost=e.usage.cost??e.usage.costUsd;
+        if(typeof usageCost==='number'&&usageCost>0){const sp=el('span','item');sp.innerHTML='Cost <span class="v">'+fmtMoney(usageCost,e.usage.currency)+'</span>';strip.appendChild(sp);}
         log.appendChild(strip);scrollDown();
       } break;
     case 'notice': log.appendChild(el('div','notice'+(e.level==='warn'?' notice--warn':''),(e.level==='warn'?'! ':'')+(e.text||'')));scrollDown();break;
@@ -638,8 +641,8 @@ function fetchStatus(){
     // sidebar metrics
     const cacheTotal=(s.cacheHit||0)+(s.cacheMiss||0);
     $('#sm-cache').textContent=cacheTotal>0?Math.round((s.cacheHit||0)/cacheTotal*100)+'%':'—';
-    if(s.lastUsage?.costUsd!=null)$('#sm-cost').textContent='$'+s.lastUsage.costUsd.toFixed(4);
-    else if(s.lastUsage?.totalCost!=null)$('#sm-cost').textContent='$'+s.lastUsage.totalCost.toFixed(4);
+    const lastCost=s.lastUsage?.cost??s.lastUsage?.costUsd??s.lastUsage?.totalCost;
+    if(typeof lastCost==='number')$('#sm-cost').textContent=fmtMoney(lastCost,s.lastUsage?.currency);
     if(s.balance?.display)$('#sm-balance').textContent=s.balance.display;
     if(s.balance?.display)balanceInfo.textContent='💰 '+s.balance.display;
   }).catch(()=>{});
@@ -647,11 +650,39 @@ function fetchStatus(){
 setInterval(fetchStatus,30000);
 
 // ── history ──
-fetch('/history').then(r=>r.json()).then(ms=>{
-  if(!ms||ms.length===0)return; hideWelcome();
-  ms.forEach(m=>{if(!m.content)return; if(m.role==='user'){addUserMsg(m.content);}else{const d=el('div','msg msg--assistant');d.appendChild(el('div','msg__text',m.content));log.appendChild(d);}});
+function renderHistoryMessages(ms){
+  if(!ms||ms.length===0)return;
+  hideWelcome(); toolCards={};
+  const resultById=new Map();
+  ms.forEach(m=>{if(m.role==='tool'&&m.toolCallId&&!resultById.has(m.toolCallId))resultById.set(m.toolCallId,m);});
+  const consumed=new Set();
+  let seq=0;
+  ms.forEach(m=>{
+    if(m.role==='system')return;
+    if(m.role==='user'){if(m.content)addUserMsg(m.content);return;}
+    if(m.role==='assistant'){
+      if(m.reasoning)appendReasoning(m.reasoning);
+      if(m.content)appendText(m.content);
+      if(m.content||m.reasoning)finalizeMsg();
+      (m.toolCalls||[]).forEach(tc=>{
+        const id=tc.id||'hist-tool-'+(seq++);
+        renderToolDispatch({id,name:tc.name,args:tc.arguments||'',readOnly:false});
+        const result=resultById.get(tc.id);
+        if(tc.id)consumed.add(tc.id);
+        if(result)renderToolResult({id,name:tc.name,output:result.content||''});
+      });
+      return;
+    }
+    if(m.role==='tool'){
+      if(m.toolCallId&&consumed.has(m.toolCallId))return;
+      const id=m.toolCallId||'hist-tool-'+(seq++);
+      renderToolDispatch({id,name:m.toolName||'tool',args:'',readOnly:false});
+      renderToolResult({id,name:m.toolName||'tool',output:m.content||''});
+    }
+  });
   currentMsg=null;currentText=null;currentReasoning=null; scrollDown();
-}).catch(()=>{});
+}
+fetch('/history').then(r=>r.json()).then(renderHistoryMessages).catch(()=>{});
 
 // ── session list ──
 function loadSessions(){
@@ -665,7 +696,7 @@ function loadSessions(){
       const title=s.title||name.replace(/^\w+-/,'').replace(/T/,' ').replace(/[-_]/g,' ').slice(0,30);
       const meta=s.turns?s.turns+' turns':'';
       item.innerHTML='<svg class="session-item__icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><div class="session-item__body"><div class="session-item__title">'+escHtml(title)+'</div><div class="session-item__meta">'+escHtml(meta)+'</div></div>';
-      item.onclick=()=>{if(running||s.current)return;post('/resume',{path:s.path}).then(()=>{log.innerHTML='';log.appendChild(welcome);welcome.style.display='';loadSessions();setTimeout(()=>fetch('/history').then(r=>r.json()).then(ms=>{if(!ms||ms.length===0)return;hideWelcome();ms.forEach(m=>{if(!m.content)return;if(m.role==='user')addUserMsg(m.content);else{const d=el('div','msg msg--assistant');d.appendChild(el('div','msg__text',m.content));log.appendChild(d);}});currentMsg=null;scrollDown();}),300);});};
+      item.onclick=()=>{if(running||s.current)return;post('/resume',{path:s.path}).then(()=>{log.innerHTML='';log.appendChild(welcome);welcome.style.display='';loadSessions();setTimeout(()=>fetch('/history').then(r=>r.json()).then(renderHistoryMessages),300);});};
       list.appendChild(item);
     });
   }).catch(()=>{const list=$('#session-list');if(list)list.innerHTML='<div style="padding:10px;color:var(--muted-2);font-size:12px">Error loading</div>';});

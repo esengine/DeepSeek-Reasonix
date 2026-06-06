@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
@@ -25,7 +24,7 @@ type workspaceChangeAccumulator struct {
 
 func (a *App) WorkspaceChanges() WorkspaceChangesView {
 	out := WorkspaceChangesView{GitAvailable: true}
-	base, err := os.Getwd()
+	base, err := a.activeWorkspaceBase()
 	if err != nil {
 		out.GitAvailable = false
 		out.GitErr = err.Error()
@@ -45,7 +44,7 @@ func (a *App) WorkspaceChanges() WorkspaceChangesView {
 	}
 
 	a.mu.RLock()
-	ctrl := a.ctrl
+	ctrl := a.activeCtrlLocked()
 	a.mu.RUnlock()
 	if ctrl != nil {
 		for _, meta := range ctrl.Checkpoints() {

@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
+    "test:todo-visibility": "node scripts/test-todo-visibility.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -24,6 +25,7 @@
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
+    "terser": "^5.48.0",
     "typescript": "^5.6.3",
     "vite": "^6.0.7"
   },

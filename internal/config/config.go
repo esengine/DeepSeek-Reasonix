@@ -39,27 +39,49 @@ func SkillNameKey(name string) string {
 
 // Config is Reasonix's runtime configuration.
 type Config struct {
-	DefaultModel string            `toml:"default_model"`
-	Language     string            `toml:"language"` // ui/model language tag (e.g. "zh"); empty = auto-detect from $LANG / $REASONIX_LANG
-	UI           UIConfig          `toml:"ui"`
-	Agent        AgentConfig       `toml:"agent"`
-	Providers    []ProviderEntry   `toml:"providers"`
-	Tools        ToolsConfig       `toml:"tools"`
-	Permissions  PermissionsConfig `toml:"permissions"`
-	Sandbox      SandboxConfig     `toml:"sandbox"`
-	Network      NetworkConfig     `toml:"network"`
-	Plugins      []PluginEntry     `toml:"plugins"`
-	Skills       SkillsConfig      `toml:"skills"`
-	Codegraph    CodegraphConfig   `toml:"codegraph"`
-	Statusline   StatuslineConfig  `toml:"statusline"`
-	LSP          LSPConfig         `toml:"lsp"`
+	ConfigVersion int                 `toml:"config_version"`
+	DefaultModel  string              `toml:"default_model"`
+	Language      string              `toml:"language"` // ui/model language tag (e.g. "zh"); empty = auto-detect from $LANG / $REASONIX_LANG
+	UI            UIConfig            `toml:"ui"`
+	Desktop       DesktopConfig       `toml:"desktop"`
+	Notifications NotificationsConfig `toml:"notifications"`
+	Agent         AgentConfig         `toml:"agent"`
+	Providers     []ProviderEntry     `toml:"providers"`
+	Tools         ToolsConfig         `toml:"tools"`
+	Permissions   PermissionsConfig   `toml:"permissions"`
+	Sandbox       SandboxConfig       `toml:"sandbox"`
+	Network       NetworkConfig       `toml:"network"`
+	Plugins       []PluginEntry       `toml:"plugins"`
+	Skills        SkillsConfig        `toml:"skills"`
+	Codegraph     CodegraphConfig     `toml:"codegraph"`
+	Statusline    StatuslineConfig    `toml:"statusline"`
+	LSP           LSPConfig           `toml:"lsp"`
 }
 
-// UIConfig controls presentation-only settings. Theme affects CLI rendering; the
-// desktop frontend keeps its own browser-local theme setting.
+// UIConfig controls CLI presentation-only settings. Desktop appearance is kept in
+// DesktopConfig so desktop preferences cannot alter terminal output or prompts.
 type UIConfig struct {
-	Theme      string `toml:"theme"`       // auto|dark|light; empty resolves to auto
-	ThemeStyle string `toml:"theme_style"` // graphite|ember|aurora|midnight|sandstone|porcelain|linen|glacier
+	Theme         string `toml:"theme"`          // auto|dark|light; empty resolves to auto
+	ThemeStyle    string `toml:"theme_style"`    // graphite|ember|aurora|midnight|sandstone|porcelain|linen|glacier
+	CloseBehavior string `toml:"close_behavior"` // legacy desktop close behavior; prefer desktop.close_behavior
+}
+
+// DesktopConfig controls desktop-only UI preferences. It is intentionally
+// separate from top-level language and [ui] so desktop choices do not affect CLI
+// language, terminal colours, or provider-visible prompt/request data.
+type DesktopConfig struct {
+	Language      string `toml:"language"`       // auto|en|zh; empty/auto = browser/OS auto-detect
+	Theme         string `toml:"theme"`          // auto|dark|light; empty resolves to dark
+	ThemeStyle    string `toml:"theme_style"`    // graphite|ember|aurora|midnight|sandstone|porcelain|linen|glacier
+	CloseBehavior string `toml:"close_behavior"` // quit|background; desktop window close behavior
+}
+
+// NotificationsConfig controls optional system notifications for CLI chat/run.
+type NotificationsConfig struct {
+	Enabled         bool `toml:"enabled"`
+	TurnDone        bool `toml:"turn_done"`
+	ApprovalRequest bool `toml:"approval_request"`
+	AskRequest      bool `toml:"ask_request"`
 }
 
 // UITheme normalizes ui.theme to a supported value.
@@ -77,12 +99,75 @@ func (c *Config) UITheme() string {
 // UIThemeStyle normalizes ui.theme_style. Empty means "pick the default style
 // for the resolved light/dark shell".
 func (c *Config) UIThemeStyle() string {
-	switch strings.ToLower(strings.TrimSpace(c.UI.ThemeStyle)) {
+	return normalizeThemeStyle(c.UI.ThemeStyle)
+}
+
+func normalizeThemeStyle(style string) string {
+	switch strings.ToLower(strings.TrimSpace(style)) {
 	case "graphite", "ember", "aurora", "midnight", "sandstone", "porcelain", "linen", "glacier":
-		return strings.ToLower(strings.TrimSpace(c.UI.ThemeStyle))
+		return strings.ToLower(strings.TrimSpace(style))
 	default:
 		return ""
 	}
+}
+
+func normalizeCloseBehavior(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "quit", "exit":
+		return "quit"
+	default:
+		return "background"
+	}
+}
+
+// DesktopLanguage normalizes the desktop UI language. Empty means auto-detect
+// from the browser/OS locale; it deliberately does not read top-level language,
+// which is used by the CLI/model-facing runtime.
+func (c *Config) DesktopLanguage() string {
+	switch strings.ToLower(strings.TrimSpace(c.Desktop.Language)) {
+	case "en":
+		return "en"
+	case "zh":
+		return "zh"
+	default:
+		return ""
+	}
+}
+
+// DesktopTheme normalizes desktop.theme. New desktop users default to the dark
+// graphite product look; an explicit auto/light/dark is preserved.
+func (c *Config) DesktopTheme() string {
+	switch strings.ToLower(strings.TrimSpace(c.Desktop.Theme)) {
+	case "auto":
+		return "auto"
+	case "light":
+		return "light"
+	case "dark":
+		return "dark"
+	default:
+		return "dark"
+	}
+}
+
+// DesktopThemeStyle normalizes desktop.theme_style. Empty means the frontend
+// chooses the default style for the resolved desktop theme.
+func (c *Config) DesktopThemeStyle() string {
+	return normalizeThemeStyle(c.Desktop.ThemeStyle)
+}
+
+// DesktopCloseBehavior normalizes the desktop close-window preference. It falls
+// back to the legacy ui.close_behavior value for configs written before [desktop]
+// existed.
+func (c *Config) DesktopCloseBehavior() string {
+	if strings.TrimSpace(c.Desktop.CloseBehavior) != "" {
+		return normalizeCloseBehavior(c.Desktop.CloseBehavior)
+	}
+	return normalizeCloseBehavior(c.UI.CloseBehavior)
+}
+
+// UICloseBehavior is the legacy name for DesktopCloseBehavior.
+func (c *Config) UICloseBehavior() string {
+	return c.DesktopCloseBehavior()
 }
 
 // LSPConfig governs the optional Language Server Protocol tools (lsp_definition,
@@ -220,6 +305,7 @@ func (c *Config) NetworkProxyMode() string {
 type SkillsConfig struct {
 	Paths          []string `toml:"paths"`
 	DisabledSkills []string `toml:"disabled_skills"`
+	MaxDepth       int      `toml:"max_depth"`
 }
 
 // SkillCustomPaths returns the configured custom skill roots with ${VAR}
@@ -232,6 +318,25 @@ func (c *Config) SkillCustomPaths() []string {
 		}
 	}
 	return out
+}
+
+// SkillMaxDepth bounds nested skill discovery. Depth 3 favors bundled skill
+// packs while Store keeps nested markdown safe by requiring descriptions.
+func (c *Config) SkillMaxDepth() int {
+	const (
+		defaultDepth = 3
+		maxDepth     = 5
+	)
+	if c == nil || c.Skills.MaxDepth == 0 {
+		return defaultDepth
+	}
+	if c.Skills.MaxDepth < 1 {
+		return 1
+	}
+	if c.Skills.MaxDepth > maxDepth {
+		return maxDepth
+	}
+	return c.Skills.MaxDepth
 }
 
 // DisabledSkillNames returns valid disabled skill identifiers, preserving the
@@ -343,12 +448,15 @@ type AgentConfig struct {
 	PlannerModel     string            `toml:"planner_model"`
 	SubagentModel    string            `toml:"subagent_model"`
 	SubagentModels   map[string]string `toml:"subagent_models"`
+	SubagentEffort   string            `toml:"subagent_effort"`
+	SubagentEfforts  map[string]string `toml:"subagent_efforts"`
 	// OutputStyle selects a persona/tone block folded into the system prompt at
 	// startup (a built-in like "explanatory"/"learning"/"concise", or a custom
 	// .reasonix/output-styles/<name>.md). Empty = the unmodified prompt.
 	OutputStyle string `toml:"output_style"`
 	// AutoPlan controls whether interactive turns that look multi-step start in
-	// plan mode automatically: "off" disables it, "ask"/"on" enable the gate.
+	// plan mode automatically: "off" keeps plan mode manual, "on" enables the
+	// approval gate. Legacy "ask" is treated as "on".
 	AutoPlan string `toml:"auto_plan"`
 	// AutoPlanClassifier optionally names a provider/model used to classify
 	// borderline auto-plan decisions. Empty keeps the zero-cost heuristic path.
@@ -382,6 +490,15 @@ type ProviderEntry struct {
 	// Empty = provider default.
 	Thinking string `toml:"thinking"`
 	Effort   string `toml:"effort"`
+	// SupportedEfforts lists the /effort levels this provider/model exposes.
+	// When non-empty, it overrides the built-in defaults derived from
+	// Kind/BaseURL and makes /effort configurable. "auto" is the implicit
+	// prefix — always accepted. DefaultEffort resolves it; omit DefaultEffort
+	// (or set one outside this list) to fall back to SupportedEfforts[0].
+	SupportedEfforts []string `toml:"supported_efforts"`
+	// DefaultEffort is the /effort level used when the user picks "auto" or
+	// has not set Effort. Ignored when SupportedEfforts is empty.
+	DefaultEffort string `toml:"default_effort"`
 	// NoProxy reaches this provider's base_url directly, never through the proxy.
 	// For China-only endpoints a foreign-exit proxy resets the TLS handshake (#2803).
 	NoProxy bool `toml:"no_proxy"`
@@ -471,10 +588,11 @@ type PluginEntry struct {
 	//                  servers whose tools the system prompt depends on.
 	//   "lazy"       — registers placeholder tools immediately (from on-disk
 	//                  schema cache when available) and only spawns the real
-	//                  subprocess on first model use. Default for user plugins.
+	//                  subprocess on first model use. Kept for legacy configs.
 	//   "background" — placeholder + spawn fired at boot but not waited on;
 	//                  swap happens once the spawn finishes.
-	// Empty defaults to "lazy" so adding a plugin never slows the next launch.
+	// Empty defaults to "background" so enabled MCPs connect automatically
+	// without blocking chat. Unknown non-empty values fall back to "lazy".
 	Tier string `toml:"tier"`
 }
 
@@ -494,6 +612,8 @@ func resolvedMCPTier(tier string) string {
 	case "eager":
 		return "eager"
 	case "background":
+		return "background"
+	case "":
 		return "background"
 	default:
 		return "lazy"
@@ -537,8 +657,15 @@ const LanguagePolicy = `Reply in the same language the user is using in their mo
 // Default returns the built-in default configuration (DeepSeek + MiMo presets).
 func Default() *Config {
 	return &Config{
-		DefaultModel: "deepseek-flash",
-		UI:           UIConfig{Theme: "auto"},
+		ConfigVersion: 2,
+		DefaultModel:  "deepseek-flash",
+		UI:            UIConfig{Theme: "auto"},
+		Notifications: NotificationsConfig{
+			Enabled:         false,
+			TurnDone:        true,
+			ApprovalRequest: true,
+			AskRequest:      true,
+		},
 		Agent: AgentConfig{
 			SystemPrompt: DefaultSystemPrompt,
 			// 0 = no step cap: the agent loops until the model gives a final answer,
@@ -546,7 +673,7 @@ func Default() *Config {
 			// compaction, not by a round count. Set a positive agent.max_steps only
 			// if you want a hard guard against runaway.
 			MaxSteps:          0,
-			AutoPlan:          "ask",
+			AutoPlan:          "off",
 			SoftCompactRatio:  0.5,
 			CompactRatio:      0.8,
 			CompactForceRatio: 0.9,
@@ -610,6 +737,9 @@ func LoadForRoot(root string) (*Config, error) {
 	for _, path := range tomlSources {
 		if _, err := os.Stat(path); err == nil {
 			sawConfigFile = true
+			if err := migrateLegacyMCPTiersFile(path); err != nil {
+				slog.Warn("config: legacy mcp tier migration failed", "path", path, "err", err)
+			}
 		}
 		if err := mergeFile(cfg, path); err != nil {
 			return nil, err
@@ -642,6 +772,8 @@ func LoadForRoot(root string) (*Config, error) {
 	// the v2 config or .mcp.json already declared wins on a name collision.
 	cfg.mergeMCPJSON(loadLegacyMCP(legacyConfigPath()))
 	normalizeLegacyEffort(cfg)
+	normalizeLegacyMCPTiers(cfg)
+	normalizeEffortConfig(cfg)
 	backfillDeepSeekPro(cfg)
 	// First run (no config file anywhere): keep CodeGraph off until the user opts
 	// in. An existing config — even one without a [codegraph] section — keeps the
@@ -739,9 +871,17 @@ func mergeTOMLPlugins(paths []string) ([]PluginEntry, error) {
 func LoadForEdit(path string) *Config {
 	loadDotEnv()
 	cfg := Default()
+	if _, err := os.Stat(path); err == nil {
+		if err := migrateLegacyMCPTiersFile(path); err != nil {
+			slog.Warn("config: legacy mcp tier migration failed", "path", path, "err", err)
+		}
+	}
 	if err := mergeFile(cfg, path); err != nil {
 		slog.Warn("config: load for edit failed, using defaults", "path", path, "err", err)
 	}
+	normalizeLegacyEffort(cfg)
+	normalizeLegacyMCPTiers(cfg)
+	normalizeEffortConfig(cfg)
 	return cfg
 }
 
@@ -754,6 +894,80 @@ func mergeFile(cfg *Config, path string) error {
 		return fmt.Errorf("config %s: %w", path, err)
 	}
 	return nil
+}
+
+// normalizeLegacyMCPTiers keeps loaded legacy config files on the new product
+// behavior: enabled MCP servers connect in the background by default, and the
+// retired per-server startup tier is no longer a user-facing setting.
+func normalizeLegacyMCPTiers(c *Config) {
+	if c == nil {
+		return
+	}
+	c.Codegraph.Tier = ""
+	for i := range c.Plugins {
+		c.Plugins[i].Tier = ""
+	}
+}
+
+func migrateLegacyMCPTiersFile(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	next, changed := stripLegacyMCPTierLines(string(raw))
+	if !changed {
+		return nil
+	}
+	return os.WriteFile(path, []byte(next), info.Mode().Perm())
+}
+
+func stripLegacyMCPTierLines(raw string) (string, bool) {
+	lines := strings.Split(raw, "\n")
+	section := ""
+	changed := false
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if header := tomlSectionHeader(line); header != "" {
+			section = header
+		}
+		if (section == "codegraph" || section == "plugins") && isTOMLKeyAssignment(line, "tier") {
+			changed = true
+			continue
+		}
+		out = append(out, line)
+	}
+	return strings.Join(out, "\n"), changed
+}
+
+func tomlSectionHeader(line string) string {
+	trimmed := strings.TrimSpace(line)
+	if !strings.HasPrefix(trimmed, "[") {
+		return ""
+	}
+	if i := strings.Index(trimmed, "#"); i >= 0 {
+		trimmed = strings.TrimSpace(trimmed[:i])
+	}
+	switch trimmed {
+	case "[codegraph]":
+		return "codegraph"
+	case "[[plugins]]":
+		return "plugins"
+	default:
+		return "other"
+	}
+}
+
+func isTOMLKeyAssignment(line, key string) bool {
+	trimmed := strings.TrimSpace(line)
+	if strings.HasPrefix(trimmed, "#") || !strings.HasPrefix(trimmed, key) {
+		return false
+	}
+	rest := strings.TrimSpace(strings.TrimPrefix(trimmed, key))
+	return strings.HasPrefix(rest, "=")
 }
 
 func userConfigPath() string {
@@ -902,7 +1116,7 @@ func SourcePathForRoot(root string) string {
 
 // WriteFile writes the configuration to path as annotated TOML.
 func (c *Config) WriteFile(path string) error {
-	return os.WriteFile(path, []byte(RenderTOML(c)), 0o644)
+	return os.WriteFile(path, []byte(RenderTOMLForScope(c, renderScopeForPath(path))), 0o644)
 }
 
 // Provider returns the named provider entry.

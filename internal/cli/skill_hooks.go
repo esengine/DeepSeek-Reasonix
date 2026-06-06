@@ -226,10 +226,12 @@ func (m *chatTUI) skillPaths() {
 func (m *chatTUI) skillStore() *skill.Store {
 	cwd, _ := os.Getwd()
 	var custom []string
+	maxDepth := 3
 	if cfg, err := config.Load(); err == nil {
 		custom = cfg.SkillCustomPaths()
+		maxDepth = cfg.SkillMaxDepth()
 	}
-	return skill.New(skill.Options{ProjectRoot: cwd, CustomPaths: custom})
+	return skill.New(skill.Options{ProjectRoot: cwd, CustomPaths: custom, MaxDepth: maxDepth})
 }
 
 func (m *chatTUI) runHooksSubcommand(input string) {

@@ -11,12 +11,15 @@
 package control
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
@@ -31,12 +34,14 @@ import (
 	"reasonix/internal/diff"
 	"reasonix/internal/event"
 	"reasonix/internal/hook"
+	"reasonix/internal/i18n"
 	"reasonix/internal/jobs"
 	"reasonix/internal/memory"
 	"reasonix/internal/nilutil"
 	"reasonix/internal/permission"
 	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
+	"reasonix/internal/sandbox"
 	"reasonix/internal/skill"
 	"reasonix/internal/tool"
 )
@@ -391,7 +396,7 @@ func (c *Controller) runTurnWithRaw(ctx context.Context, input, raw string) erro
 		return nil // keep planning; plan mode stays on
 	}
 	c.SetPlanMode(false)
-	c.seedPlanTodos(proposal)
+	seededTodos := c.seedPlanTodos(proposal)
 	// The plan is the go-ahead: don't re-prompt for each write of the approved
 	// work. Auto-approve writers for the duration of this execution turn only.
 	c.mu.Lock()
@@ -402,7 +407,11 @@ func (c *Controller) runTurnWithRaw(ctx context.Context, input, raw string) erro
 		c.autoApprove = false
 		c.mu.Unlock()
 	}()
-	return c.runner.Run(ctx, planApprovedMessage)
+	if err := c.runner.Run(ctx, planApprovedMessage); err != nil {
+		return err
+	}
+	c.completePlanTodos(seededTodos)
+	return nil
 }
 
 // lastAssistantText returns the content of the most recent assistant message with
@@ -433,6 +442,10 @@ func (c *Controller) Submit(input string) {
 	}
 	if note, ok := RememberCommandNote(trimmed); ok {
 		c.rememberProjectNote(note)
+		return
+	}
+	if strings.HasPrefix(trimmed, "!") {
+		c.RunShell(trimmed[1:])
 		return
 	}
 	switch {
@@ -501,6 +514,17 @@ func (c *Controller) Submit(input string) {
 				c.notice(err.Error())
 			}
 			return
+		case "/rewind":
+			args := strings.TrimSpace(strings.TrimPrefix(trimmed, fields[0]))
+			turn, scope, err := parseRewind(args, c.Checkpoints())
+			if err != nil {
+				c.notice("usage: /rewind [turn] [code|conversation|both]")
+				return
+			}
+			if err := c.Rewind(turn, scope); err != nil {
+				c.notice(err.Error())
+			}
+			return
 		}
 		if c.managementNotice(trimmed) {
 			return
@@ -535,6 +559,94 @@ func (c *Controller) rememberProjectNote(note string) {
 	} else {
 		c.notice("remembered → " + path)
 	}
+}
+
+// shellTimeout is the maximum time a user-invoked "!command" may run. Matches
+// the bash tool's timeout so behaviour is consistent across invocation paths.
+const shellTimeout = 120 * time.Second
+
+// shellWaitDelay bounds how long cmd.Run() waits after context cancellation for
+// the child's pipes to drain, matching the bash tool's WaitDelay.
+const shellWaitDelay = 5 * time.Second
+
+// shellWriter forwards each chunk of shell output to a callback, so RunShell
+// can stream live progress to the frontend as the command produces output.
+type shellWriter struct{ emit func(string) }
+
+func (w *shellWriter) Write(p []byte) (int, error) {
+	w.emit(string(p))
+	return len(p), nil
+}
+
+// RunShell executes a shell command directly (bypassing the model) and streams
+// the output as ToolDispatch/ToolProgress/ToolResult events. It uses the same
+// bash-tool infrastructure (shell resolution, timeout) and shares the runGuarded
+// lock with model turns — only one can run at a time. User-invoked "!" commands
+// run without the OS sandbox (the user typed the command explicitly).
+func (c *Controller) RunShell(command string) {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		c.notice(i18n.M.ShellExecEmpty)
+		return
+	}
+	c.runGuarded(func(ctx context.Context) error {
+		sh := sandbox.ResolveShell()
+		argv, _ := sandbox.Command(sandbox.Spec{}, sh, command) // false = unsandboxed (user invoked)
+
+		preview := []rune(command)
+		if len(preview) > 32 {
+			preview = preview[:32]
+		}
+		id := "shell-" + string(preview)
+
+		c.sink.Emit(event.Event{
+			Kind: event.ToolDispatch,
+			Tool: event.Tool{
+				ID:   id,
+				Name: "bash",
+				Args: fmt.Sprintf(`{"command":%q}`, command),
+			},
+		})
+
+		ctx, cancel := context.WithTimeout(ctx, shellTimeout)
+		defer cancel()
+
+		cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+		setShellKillTree(cmd)
+		cmd.WaitDelay = shellWaitDelay
+		cmd.Dir = c.cpRoot
+		var buf bytes.Buffer
+		w := io.MultiWriter(&buf, &shellWriter{emit: func(chunk string) {
+			c.sink.Emit(event.Event{
+				Kind: event.ToolProgress,
+				Tool: event.Tool{ID: id, Output: chunk},
+			})
+		}})
+		cmd.Stdout = w
+		cmd.Stderr = w
+		err := cmd.Run()
+		out := buf.String()
+
+		if ctx.Err() == context.DeadlineExceeded {
+			c.sink.Emit(event.Event{
+				Kind: event.ToolResult,
+				Tool: event.Tool{ID: id, Name: "bash", Output: out, Err: fmt.Sprintf(i18n.M.ShellExecTimeoutFmt, shellTimeout)},
+			})
+			return nil
+		}
+		if err != nil {
+			c.sink.Emit(event.Event{
+				Kind: event.ToolResult,
+				Tool: event.Tool{ID: id, Name: "bash", Output: out, Err: fmt.Sprintf(i18n.M.ShellExecFailedFmt, err)},
+			})
+			return nil
+		}
+		c.sink.Emit(event.Event{
+			Kind: event.ToolResult,
+			Tool: event.Tool{ID: id, Name: "bash", Output: out},
+		})
+		return nil
+	})
 }
 
 // runRefTurn resolves a line's @references into a context block and starts a
@@ -631,8 +743,16 @@ func (c *Controller) EnableInteractiveApproval() {
 // AnswerQuestion(ID, …) answers or ctx is cancelled. promptMu serialises it
 // against tool-approval prompts so at most one user prompt is outstanding.
 func (c *Controller) Ask(ctx context.Context, questions []event.AskQuestion) ([]event.AskAnswer, error) {
+	if c.bypassEnabled() {
+		return recommendedAskAnswers(questions), nil
+	}
+
 	c.promptMu.Lock()
 	defer c.promptMu.Unlock()
+
+	if c.bypassEnabled() {
+		return recommendedAskAnswers(questions), nil
+	}
 
 	c.mu.Lock()
 	c.nextID++
@@ -652,6 +772,23 @@ func (c *Controller) Ask(ctx context.Context, questions []event.AskQuestion) ([]
 		c.mu.Unlock()
 		return nil, ctx.Err()
 	}
+}
+
+func (c *Controller) bypassEnabled() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.bypass
+}
+
+func recommendedAskAnswers(questions []event.AskQuestion) []event.AskAnswer {
+	out := make([]event.AskAnswer, len(questions))
+	for i, q := range questions {
+		out[i] = event.AskAnswer{QuestionID: q.ID}
+		if len(q.Options) > 0 {
+			out[i].Selected = []string{q.Options[0].Label}
+		}
+	}
+	return out
 }
 
 // AnswerQuestion resolves a pending AskRequest by ID with the user's selections.
@@ -676,6 +813,13 @@ func (c *Controller) SetPlanMode(v bool) {
 	if c.executor != nil {
 		c.executor.SetPlanMode(v)
 	}
+}
+
+// SetAutoPlan updates the interactive auto-plan gate for subsequent turns.
+func (c *Controller) SetAutoPlan(mode string) {
+	c.mu.Lock()
+	c.autoPlan = normalizeAutoPlan(mode)
+	c.mu.Unlock()
 }
 
 // PlanMode reports whether outgoing turns currently receive the plan-mode
@@ -820,6 +964,17 @@ func (c *Controller) Fork(turn int) (string, error) {
 }
 
 func (c *Controller) ForkNamed(turn int, name string) (string, error) {
+	return c.forkNamed(turn, name, true)
+}
+
+// ForkSession copies the conversation at the start of turn into a new session
+// file without switching this controller to it. Desktop uses this to open the
+// branch in a new tab while the source tab keeps its current transcript.
+func (c *Controller) ForkSession(turn int, name string) (string, error) {
+	return c.forkNamed(turn, name, false)
+}
+
+func (c *Controller) forkNamed(turn int, name string, switchToFork bool) (string, error) {
 	if c.executor == nil {
 		return "", c.rewindFail(fmt.Errorf("checkpoints unavailable"))
 	}
@@ -864,14 +1019,23 @@ func (c *Controller) ForkNamed(turn int, name string) (string, error) {
 	}); err != nil {
 		return "", c.rewindFail(err)
 	}
-	c.executor.SetSession(sess)
-	c.mu.Lock()
-	c.sessionPath = newPath
-	c.mu.Unlock()
-	c.rebindCheckpoints(newPath)
+	if switchToFork {
+		c.executor.SetSession(sess)
+		c.mu.Lock()
+		c.sessionPath = newPath
+		c.mu.Unlock()
+		c.rebindCheckpoints(newPath)
+	}
 	c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
 		Text: fmt.Sprintf("forked conversation at turn %d into a new session", turn)})
 	return newPath, nil
+}
+
+func (c *Controller) CheckpointHasBoundary(turn int) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	_, ok := c.cpBound[turn]
+	return ok
 }
 
 // Branch copies the current conversation into a child branch and switches to it.
@@ -1297,6 +1461,13 @@ func (c *Controller) AddMCPServer(e config.PluginEntry) (int, error) {
 	return n, nil
 }
 
+// ConnectMCPServer connects an MCP server entry for this session without writing
+// it to config. Desktop owns config placement so it can keep user-level settings
+// out of project reasonix.toml while preserving the CLI AddMCPServer semantics.
+func (c *Controller) ConnectMCPServer(e config.PluginEntry) (int, error) {
+	return c.connectMCPServer(e)
+}
+
 func (c *Controller) connectMCPServer(e config.PluginEntry) (int, error) {
 	exp := e.ExpandedPlugin()
 	return c.connectMCPSpec(plugin.Spec{
@@ -1373,6 +1544,13 @@ func (c *Controller) ConnectConfiguredMCPServer(name string) (int, error) {
 		return c.connectCodegraphMCPServer(cfg)
 	}
 	return 0, fmt.Errorf("no configured MCP server named %q", name)
+}
+
+// ConnectCodegraphMCPServer connects the built-in CodeGraph server using an
+// already-resolved config. Desktop uses this after saving user-level settings so
+// a stale project config cannot override the just-applied choice.
+func (c *Controller) ConnectCodegraphMCPServer(cfg *config.Config) (int, error) {
+	return c.connectCodegraphMCPServer(cfg)
 }
 
 func (c *Controller) connectCodegraphMCPServer(cfg *config.Config) (int, error) {
@@ -1669,14 +1847,29 @@ type seedTodo struct {
 // user approves — a structural guarantee, not a prompt the model might ignore.
 // The model still flips item status as it works (only it knows its own
 // progress); this just makes the list exist. No-op when the plan has no list.
-func (c *Controller) seedPlanTodos(plan string) {
+func (c *Controller) seedPlanTodos(plan string) string {
 	args := PlanTodosJSON(plan)
 	if args == "" {
-		return
+		return ""
 	}
 	t := event.Tool{ID: "plan-seed", Name: "todo_write", Args: args, ReadOnly: true}
 	c.sink.Emit(event.Event{Kind: event.ToolDispatch, Tool: t})
 	t.Output = "task list seeded from the approved plan"
+	c.sink.Emit(event.Event{Kind: event.ToolResult, Tool: t})
+	return args
+}
+
+func (c *Controller) completePlanTodos(args string) {
+	if args == "" {
+		return
+	}
+	done := completedPlanTodosJSON(args)
+	if done == "" {
+		return
+	}
+	t := event.Tool{ID: "plan-seed", Name: "todo_write", Args: done, ReadOnly: true}
+	c.sink.Emit(event.Event{Kind: event.ToolDispatch, Tool: t})
+	t.Output = "approved plan finished"
 	c.sink.Emit(event.Event{Kind: event.ToolResult, Tool: t})
 }
 
@@ -1691,6 +1884,23 @@ func PlanTodosJSON(plan string) string {
 		return ""
 	}
 	b, err := json.Marshal(map[string]any{"todos": items})
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
+func completedPlanTodosJSON(args string) string {
+	var p struct {
+		Todos []seedTodo `json:"todos"`
+	}
+	if err := json.Unmarshal([]byte(args), &p); err != nil || len(p.Todos) == 0 {
+		return ""
+	}
+	for i := range p.Todos {
+		p.Todos[i].Status = "completed"
+	}
+	b, err := json.Marshal(map[string]any{"todos": p.Todos})
 	if err != nil {
 		return ""
 	}
@@ -1787,6 +1997,41 @@ func listItem(line string) (content string, level int, ok bool) {
 // requestApproval emits an ApprovalRequest and blocks until Approve(ID, …)
 // answers or ctx is cancelled. A prior session grant for the same tool+subject
 // short-circuits. promptMu serialises outstanding prompts.
+// parseRewind parses the arguments after "/rewind". The user may provide:
+//
+//	/rewind              → latest checkpoint, both
+//	/rewind <turn>       → that turn, both
+//	/rewind <turn> <scope> → that turn, code|conversation|both
+//
+// If no turn is given, the latest checkpoint is used. If no scope is given, Both is assumed.
+func parseRewind(args string, cps []checkpoint.Meta) (int, RewindScope, error) {
+	fields := strings.Fields(args)
+	if len(fields) == 0 {
+		if len(cps) == 0 {
+			return 0, RewindBoth, fmt.Errorf("no checkpoints available")
+		}
+		return cps[len(cps)-1].Turn, RewindBoth, nil
+	}
+	turn, err := strconv.Atoi(fields[0])
+	if err != nil {
+		return 0, RewindBoth, fmt.Errorf("invalid turn: %w", err)
+	}
+	scope := RewindBoth
+	if len(fields) >= 2 {
+		switch strings.ToLower(fields[1]) {
+		case "code":
+			scope = RewindCode
+		case "conversation":
+			scope = RewindConversation
+		case "both":
+			scope = RewindBoth
+		default:
+			return 0, RewindBoth, fmt.Errorf("unknown scope %q", fields[1])
+		}
+	}
+	return turn, scope, nil
+}
+
 func (c *Controller) requestApproval(ctx context.Context, tool, subject string) (bool, bool, error) {
 	key := tool + "\x00" + subject
 

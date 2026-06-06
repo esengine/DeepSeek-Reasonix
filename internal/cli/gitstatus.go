@@ -12,6 +12,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 const gitStatusTimeout = 700 * time.Millisecond
@@ -116,14 +117,18 @@ func countUntracked(out string) int {
 	return n
 }
 
-func (m chatTUI) gitTag() string {
-	return m.gitStatus.RenderRepo(themeFg(m.statusModeColor(), m.gitStatus.Repo))
+func (m chatTUI) gitTag(maxWidth int) string {
+	if maxWidth <= 0 {
+		return ""
+	}
+	return m.gitStatus.RenderWithin(maxWidth, m.statusModeColor())
 }
 
 var (
-	statusAutoColor = cliColor{"#f59e0b", 214}
-	statusPlanColor = cliColor{"#2563eb", 27}
-	statusYoloColor = cliColor{"#e5484d", 167}
+	statusAutoColor  = cliColor{"#f59e0b", 214}
+	statusPlanColor  = cliColor{"#2563eb", 27}
+	statusYoloColor  = cliColor{"#e5484d", 167}
+	statusShellColor = cliColor{"#16a34a", 71} // green — shell mode indicator
 )
 
 func (m chatTUI) statusModeColor() cliColor {
@@ -145,13 +150,73 @@ func (s gitStatus) RenderRepo(repo string) string {
 	if strings.TrimSpace(s.Repo) == "" || strings.TrimSpace(s.Branch) == "" {
 		return ""
 	}
+	return s.render(repo, s.Branch)
+}
+
+func (s gitStatus) RenderWithin(maxWidth int, repoColor cliColor) string {
+	if strings.TrimSpace(s.Repo) == "" || strings.TrimSpace(s.Branch) == "" {
+		return ""
+	}
+	repo, branch := s.compactIdentity(maxWidth)
+	out := s.render(themeFg(repoColor, repo), branch)
+	if maxWidth > 0 && visibleWidth(out) > maxWidth {
+		return ansi.Truncate(out, maxWidth, "…")
+	}
+	return out
+}
+
+func (s gitStatus) compactIdentity(maxWidth int) (repo, branch string) {
+	repo = strings.TrimSpace(s.Repo)
+	branch = strings.TrimSpace(s.Branch)
+	if maxWidth <= 0 {
+		return repo, branch
+	}
+	dirtyWidth := visibleWidth(s.dirtyPlain())
+	nameBudget := maxWidth - dirtyWidth - visibleWidth("@")
+	if nameBudget <= 2 {
+		return compactEnd(repo, max(1, nameBudget)), ""
+	}
+	repoWidth := visibleWidth(repo)
+	branchWidth := visibleWidth(branch)
+	if repoWidth+branchWidth <= nameBudget {
+		return repo, branch
+	}
+
+	minRepo := min(repoWidth, 8)
+	if repoBudget := nameBudget - branchWidth; repoBudget >= minRepo {
+		return compactMiddle(repo, repoBudget), branch
+	}
+
+	repoBudget := min(repoWidth, max(4, min(10, nameBudget/3)))
+	if nameBudget-repoBudget < 8 {
+		repoBudget = max(1, nameBudget-8)
+	}
+	branchBudget := max(1, nameBudget-repoBudget)
+	return compactMiddle(repo, repoBudget), compactMiddle(branch, branchBudget)
+}
+
+func (s gitStatus) dirtyPlain() string {
+	var parts []string
+	if s.Added > 0 || s.Removed > 0 {
+		parts = append(parts, fmt.Sprintf("+%d", s.Added), fmt.Sprintf("-%d", s.Removed))
+	}
+	if s.Untracked > 0 {
+		parts = append(parts, fmt.Sprintf("?%d", s.Untracked))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return " (" + strings.Join(parts, " ") + ")"
+}
+
+func (s gitStatus) render(repo, branch string) string {
 	var b strings.Builder
 	b.WriteString(repo)
 	b.WriteString(dim("@"))
 	if s.Detached {
-		b.WriteString(yellow(s.Branch))
+		b.WriteString(yellow(branch))
 	} else {
-		b.WriteString(green(s.Branch))
+		b.WriteString(green(branch))
 	}
 
 	var parts []string

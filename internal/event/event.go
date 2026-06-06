@@ -93,6 +93,12 @@ const (
 	LevelWarn
 )
 
+// Profile carries the subagent model/effort resolved for this call.
+type Profile struct {
+	Model  string
+	Effort string
+}
+
 // Tool describes a tool call for ToolDispatch / ToolResult events. On dispatch
 // only ID/Name/Args/ReadOnly are set; on result Output/Err/Truncated are filled
 // in. Args is the raw JSON arguments — a sink compacts it for display.
@@ -113,6 +119,7 @@ type Tool struct {
 	// them under it. Empty for top-level calls.
 	ParentID string
 	FileDiff
+	Profile *Profile // ToolDispatch: subagent model/effort (set for task/skill calls)
 }
 
 // FileDiff is a previewed change carried on a writer tool's full ToolDispatch

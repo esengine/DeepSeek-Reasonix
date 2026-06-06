@@ -360,13 +360,6 @@ func themeStyle(c cliColor) lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(themeLipColor(c))
 }
 
-func themeBGStyle(c cliColor) lipgloss.Style {
-	if !colorEnabled {
-		return lipgloss.NewStyle()
-	}
-	return lipgloss.NewStyle().Background(themeLipColor(c))
-}
-
 func withThemeFG(st lipgloss.Style, c cliColor) lipgloss.Style {
 	if !colorEnabled {
 		return st

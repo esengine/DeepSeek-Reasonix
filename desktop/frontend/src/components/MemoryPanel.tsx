@@ -83,7 +83,7 @@ export function MemoryPanel({
   const scrollToFact = (name: string) => {
     const el = factRefs.current[name];
     if (!el) return;
-    el.scrollIntoView({ block: "center", behavior: "smooth" });
+    el.scrollIntoView({ block: "center", behavior: "auto" });
     setHighlight(name);
     window.setTimeout(() => setHighlight((h) => (h === name ? null : h)), 1200);
   };

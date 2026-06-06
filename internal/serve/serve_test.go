@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"reasonix/internal/control"
+	"reasonix/internal/provider"
 )
 
 // fakeRunner stands in for an agent.Runner: it records the composed input and
@@ -85,6 +86,29 @@ func TestServeEndpoints(t *testing.T) {
 
 	if resp, _ := http.Post(srv.URL+"/submit", "application/json", strings.NewReader(`{}`)); resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("empty submit should be 400, got %d", resp.StatusCode)
+	}
+}
+
+func TestHistoryMessagesPreserveToolDetails(t *testing.T) {
+	got := historyMessages([]provider.Message{
+		{Role: provider.RoleUser, Content: "run command"},
+		{Role: provider.RoleAssistant, Content: "checking", ReasoningContent: "think", ToolCalls: []provider.ToolCall{{
+			ID: "call_1", Name: "bash", Arguments: `{"command":"pwd"}`,
+		}}},
+		{Role: provider.RoleTool, Name: "bash", ToolCallID: "call_1", Content: "/tmp/project\n"},
+	})
+
+	if len(got) != 3 {
+		t.Fatalf("history length = %d, want 3", len(got))
+	}
+	if got[1].Reasoning != "think" {
+		t.Fatalf("assistant reasoning = %q, want think", got[1].Reasoning)
+	}
+	if len(got[1].ToolCalls) != 1 || got[1].ToolCalls[0].ID != "call_1" || got[1].ToolCalls[0].Name != "bash" || got[1].ToolCalls[0].Arguments != `{"command":"pwd"}` {
+		t.Fatalf("assistant tool calls not preserved: %+v", got[1].ToolCalls)
+	}
+	if got[2].ToolCallID != "call_1" || got[2].ToolName != "bash" || got[2].Content != "/tmp/project\n" {
+		t.Fatalf("tool result details not preserved: %+v", got[2])
 	}
 }
 
