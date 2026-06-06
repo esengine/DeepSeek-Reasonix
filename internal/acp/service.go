@@ -114,28 +114,36 @@ type acpSession struct {
 
 	mu      sync.Mutex
 	cancel  context.CancelFunc
+	done    chan struct{}
 	running bool
+	deleted bool
 }
 
 func (s *acpSession) begin(ctx context.Context) (context.Context, context.CancelFunc, bool) {
 	runCtx, cancel := context.WithCancel(ctx)
 	s.mu.Lock()
-	if s.running {
+	if s.running || s.deleted {
 		s.mu.Unlock()
 		cancel()
 		return nil, nil, false
 	}
 	s.running = true
 	s.cancel = cancel
+	s.done = make(chan struct{})
 	s.mu.Unlock()
 	return runCtx, cancel, true
 }
 
 func (s *acpSession) finish() {
 	s.mu.Lock()
+	done := s.done
 	s.running = false
 	s.cancel = nil
+	s.done = nil
 	s.mu.Unlock()
+	if done != nil {
+		close(done)
+	}
 }
 
 func (s *acpSession) abort() {
@@ -144,6 +152,33 @@ func (s *acpSession) abort() {
 	s.mu.Unlock()
 	if c != nil {
 		c()
+	}
+}
+
+func (s *acpSession) abortAndWait() {
+	s.mu.Lock()
+	c := s.cancel
+	done := s.done
+	s.mu.Unlock()
+	if c != nil {
+		c()
+	}
+	if done != nil {
+		<-done
+	}
+}
+
+func (s *acpSession) deleteAndWait() {
+	s.mu.Lock()
+	s.deleted = true
+	c := s.cancel
+	done := s.done
+	s.mu.Unlock()
+	if c != nil {
+		c()
+	}
+	if done != nil {
+		<-done
 	}
 }
 
@@ -218,10 +253,6 @@ func (s *service) sessionNew(ctx context.Context, raw json.RawMessage) (any, err
 	if dir := ctrl.SessionDir(); dir != "" {
 		sess.transcript = transcriptPath(dir, id)
 		ctrl.SetSessionPath(sess.transcript)
-		if err := saveACPMeta(sess.transcript, sess.meta()); err != nil {
-			ctrl.Close()
-			return nil, &RPCError{Code: ErrInternal, Message: "session/new: " + err.Error()}
-		}
 	}
 
 	s.mu.Lock()
@@ -361,7 +392,7 @@ func (s *service) sessionPrompt(ctx context.Context, raw json.RawMessage) (any, 
 	}
 	sess.sink.setTurnContext(runCtx)
 	defer func() {
-		sess.sink.setTurnContext(nil)
+		sess.sink.clearTurnContext()
 		sess.finish()
 		cancel()
 	}()
@@ -369,11 +400,7 @@ func (s *service) sessionPrompt(ctx context.Context, raw json.RawMessage) (any, 
 
 	// Persist after the turn (best-effort) so a crash loses at most this prompt;
 	// save even on cancel/error since the partial conversation is still resumable.
-	_ = sess.ctrl.Snapshot()
-	sess.touch(text)
-	if sess.transcript != "" {
-		_ = saveACPMeta(sess.transcript, sess.meta())
-	}
+	sess.persistAfterTurn(text)
 
 	stop := StopEndTurn
 	if runErr != nil {
@@ -401,7 +428,7 @@ func (s *service) sessionClose(_ context.Context, raw json.RawMessage) (any, err
 		return nil, err
 	}
 	if sess := s.takeSession(p.SessionID); sess != nil {
-		sess.abort()
+		sess.abortAndWait()
 		sess.ctrl.Close()
 	}
 	return SessionCloseResult{}, nil
@@ -472,7 +499,7 @@ func (s *service) sessionDelete(_ context.Context, raw json.RawMessage) (any, er
 
 	path := ""
 	if sess := s.takeSession(p.SessionID); sess != nil {
-		sess.abort()
+		sess.deleteAndWait()
 		sess.ctrl.Close()
 		path = sess.transcript
 	}
@@ -589,15 +616,28 @@ func (s *service) closeAll() {
 	}
 }
 
-func (s *acpSession) touch(prompt string) {
+func (s *acpSession) persistAfterTurn(prompt string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.deleted {
+		return
+	}
+	_ = s.ctrl.Snapshot()
 	if s.title == "" {
 		s.title = previewTitle(prompt)
 	}
 	s.updatedAt = time.Now().UTC()
 	if s.createdAt.IsZero() {
 		s.createdAt = s.updatedAt
+	}
+	if s.transcript != "" && sessionFileExists(s.transcript) {
+		_ = saveACPMeta(s.transcript, acpSessionMeta{
+			SessionID: s.id,
+			Cwd:       s.cwd,
+			Title:     s.title,
+			CreatedAt: s.createdAt,
+			UpdatedAt: s.updatedAt,
+		})
 	}
 }
 
@@ -754,7 +794,11 @@ func listACPMetas(dir string) ([]acpSessionMeta, error) {
 			continue
 		}
 		id := strings.TrimSuffix(e.Name(), ".acp.json")
-		meta, ok, err := loadACPMeta(transcriptPath(dir, id))
+		sessionPath := transcriptPath(dir, id)
+		if !sessionFileExists(sessionPath) {
+			continue
+		}
+		meta, ok, err := loadACPMeta(sessionPath)
 		if err != nil || !ok {
 			continue
 		}
@@ -767,6 +811,11 @@ func listACPMetas(dir string) ([]acpSessionMeta, error) {
 		out = append(out, meta)
 	}
 	return out, nil
+}
+
+func sessionFileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
 }
 
 func acpMetaPath(sessionPath string) string {

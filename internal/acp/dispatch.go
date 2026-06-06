@@ -66,6 +66,12 @@ func (s *updateSink) setTurnContext(ctx context.Context) {
 	s.mu.Unlock()
 }
 
+func (s *updateSink) clearTurnContext() {
+	s.mu.Lock()
+	s.turnCtx = nil
+	s.mu.Unlock()
+}
+
 func (s *updateSink) currentTurnContext() context.Context {
 	s.mu.Lock()
 	ctx := s.turnCtx

@@ -349,7 +349,7 @@ func TestE2ESessionListResumeAndDelete(t *testing.T) {
 	default:
 	}
 
-	deleteResp := client2.call(t, "session/delete", SessionDeleteParams{SessionID: nr.SessionID})
+	deleteResp := client2.call(t, "session/delete", SessionDeleteParams(nr))
 	if deleteResp.Error != nil {
 		t.Fatalf("session/delete errored: %+v", deleteResp.Error)
 	}
@@ -363,6 +363,108 @@ func TestE2ESessionListResumeAndDelete(t *testing.T) {
 	if _, err := os.Stat(transcript); !os.IsNotExist(err) {
 		t.Fatalf("transcript after delete stat err = %v, want not exist", err)
 	}
+}
+
+func TestE2ESessionListSkipsUnpromptedSessionAfterRestart(t *testing.T) {
+	dir := t.TempDir()
+	factory := &e2eFactory{
+		prov: &scriptedProvider{name: "fake", responses: [][]provider.Chunk{
+			{{Type: provider.ChunkText, Text: "unused"}, {Type: provider.ChunkDone}},
+		}},
+		tool:       fakeTool{name: "peek", ro: true, out: "unused"},
+		policy:     permission.New("ask", nil, nil, nil),
+		sessionDir: dir,
+	}
+
+	client1, stop1 := startServer(t, factory)
+	client1.call(t, "initialize", InitializeParams{ProtocolVersion: 1})
+	resp := client1.call(t, "session/new", SessionNewParams{Cwd: t.TempDir()})
+	var nr SessionNewResult
+	if err := json.Unmarshal(resp.Result, &nr); err != nil || nr.SessionID == "" {
+		t.Fatalf("session/new: %v (%q)", err, nr.SessionID)
+	}
+	stop1()
+
+	client2, stop2 := startServer(t, factory)
+	defer stop2()
+	client2.call(t, "initialize", InitializeParams{ProtocolVersion: 1})
+	listResp := client2.call(t, "session/list", SessionListParams{})
+	var lr SessionListResult
+	if err := json.Unmarshal(listResp.Result, &lr); err != nil {
+		t.Fatalf("session/list result: %v", err)
+	}
+	if len(lr.Sessions) != 0 {
+		t.Fatalf("session/list returned unprompted session: %+v", lr.Sessions)
+	}
+}
+
+func TestE2EDeleteActiveSessionDoesNotRecreateFiles(t *testing.T) {
+	dir := t.TempDir()
+	releaseTool := make(chan struct{})
+	started := make(chan struct{})
+	prov := &scriptedProvider{name: "fake", responses: [][]provider.Chunk{
+		{
+			{Type: provider.ChunkText, Text: "Starting."},
+			toolCallChunk("c1", "slow", `{}`),
+			{Type: provider.ChunkDone},
+		},
+		{{Type: provider.ChunkText, Text: "unreachable"}, {Type: provider.ChunkDone}},
+	}}
+	factory := &e2eFactory{
+		prov:       prov,
+		tool:       blockingTool{started: started, release: releaseTool},
+		policy:     permission.New("ask", nil, nil, nil),
+		sessionDir: dir,
+	}
+	client, stop := startServer(t, factory)
+	defer stop()
+
+	sid := openSession(t, client)
+	promptCh := client.callAsync("session/prompt", SessionPromptParams{
+		SessionID: sid,
+		Prompt:    []ContentBlock{{Type: "text", Text: "delete me while running"}},
+	})
+
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("tool never started")
+	}
+	deleteResp := client.call(t, "session/delete", SessionDeleteParams{SessionID: sid})
+	if deleteResp.Error != nil {
+		t.Fatalf("session/delete errored: %+v", deleteResp.Error)
+	}
+
+	select {
+	case resp := <-promptCh:
+		if resp.Error != nil {
+			t.Fatalf("prompt errored after delete: %+v", resp.Error)
+		}
+		var pr SessionPromptResult
+		if err := json.Unmarshal(resp.Result, &pr); err != nil {
+			t.Fatalf("prompt result: %v", err)
+		}
+		if pr.StopReason != StopCancelled {
+			t.Fatalf("stopReason = %q, want cancelled", pr.StopReason)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("prompt did not finish after delete")
+	}
+
+	listResp := client.call(t, "session/list", SessionListParams{})
+	var lr SessionListResult
+	if err := json.Unmarshal(listResp.Result, &lr); err != nil {
+		t.Fatalf("session/list result: %v", err)
+	}
+	if len(lr.Sessions) != 0 {
+		t.Fatalf("session/list after active delete = %+v, want empty", lr.Sessions)
+	}
+	for _, path := range []string{transcriptPath(dir, sid), acpMetaPath(transcriptPath(dir, sid))} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("%s after active delete stat err = %v, want not exist", path, err)
+		}
+	}
+	close(releaseTool)
 }
 
 // TestE2EApprovalRoundTrip drives a write tool through the gate: the policy asks,

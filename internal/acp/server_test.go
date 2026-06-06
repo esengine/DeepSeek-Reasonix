@@ -220,7 +220,7 @@ func TestServeLifecycle(t *testing.T) {
 		t.Errorf("image must not be advertised")
 	}
 
-	newResp := client.call(t, "session/new", SessionNewParams{Cwd: "/tmp"})
+	newResp := client.call(t, "session/new", SessionNewParams{Cwd: t.TempDir()})
 	var nr SessionNewResult
 	if err := json.Unmarshal(newResp.Result, &nr); err != nil || nr.SessionID == "" {
 		t.Fatalf("session/new result: %v (%q)", err, nr.SessionID)
@@ -348,7 +348,7 @@ func TestServeSessionClose(t *testing.T) {
 	var nr SessionNewResult
 	json.Unmarshal(newResp.Result, &nr)
 
-	closeResp := client.call(t, "session/close", SessionCloseParams{SessionID: nr.SessionID})
+	closeResp := client.call(t, "session/close", SessionCloseParams(nr))
 	if closeResp.Error != nil {
 		t.Fatalf("session/close errored: %+v", closeResp.Error)
 	}
