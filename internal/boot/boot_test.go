@@ -505,7 +505,6 @@ func TestBuildMigratesLegacySessionsFromConfigSessionDir(t *testing.T) {
 	t.Setenv("AppData", filepath.Join(home, "AppData"))
 
 	proj := t.TempDir()
-	t.Chdir(proj)
 	writeFile(t, proj, "reasonix.toml", "[codegraph]\nenabled = false\n")
 
 	legacyDir := config.SessionDir()
@@ -520,7 +519,11 @@ func TestBuildMigratesLegacySessionsFromConfigSessionDir(t *testing.T) {
 		}
 	})
 
-	ctrl, err := Build(context.Background(), Options{Sink: sink})
+	// Pass the project root via WorkspaceRoot instead of t.Chdir: changing the
+	// process cwd into a t.TempDir makes Windows refuse to remove that dir during
+	// test cleanup (the cwd counts as "in use"), which is the only thing this test
+	// failed on. WorkspaceRoot loads the same config without touching the cwd.
+	ctrl, err := Build(context.Background(), Options{Sink: sink, WorkspaceRoot: proj})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
