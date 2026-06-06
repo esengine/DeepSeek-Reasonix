@@ -1,7 +1,6 @@
 // Golden-case verification for math rendering pipeline.
 // Run: tsx src/__tests__/math-golden.test.ts
 import katex from "katex";
-import { isInlineMathLike } from "../components/CodeOrMath";
 import { stripMathDelimiters, latexNormalizeForKatex } from "../components/latexNormalize";
 import { isLikelyInlineMath } from "../components/mathClassify";
 
@@ -22,7 +21,6 @@ function eq(a: any, b: any, label: string) {
     process.stdout.write(`  PASS  ${label}\n`);
     passed += 1;
   } else {
-    // prettier-ignore
     process.stdout.write(`  FAIL  ${label}: expected ${JSON.stringify(b)}, got ${JSON.stringify(a)}\n`);
     failed += 1;
   }
@@ -56,48 +54,7 @@ eq(latexNormalizeForKatex("\\textrm{test #}"), "\\textrm{test \\#}", "\\textrm a
 eq(latexNormalizeForKatex("\\textbf{hello world}"), "\\textbf{hello world}", "\\textbf no special chars");
 eq(latexNormalizeForKatex("\\tfrac{a}{b}"), "\\tfrac{a}{b}", "nested braces in command");
 
-// ── isInlineMathLike (CodeOrMath classifier) ───────────────────────────────────
-
-console.log("\nisInlineMathLike — math");
-check("\\text command", () => isInlineMathLike("\\text{baryon #}") === true);
-check("\\frac", () => isInlineMathLike("\\frac{a}{b}") === true);
-check("\\sqrt", () => isInlineMathLike("\\sqrt{x}") === true);
-check("\\alpha", () => isInlineMathLike("\\alpha + \\beta") === true);
-check("\\sum", () => isInlineMathLike("\\sum_{i=1}^{n}") === true);
-check("\\int", () => isInlineMathLike("\\int_0^\\infty") === true);
-check("\\begin", () => isInlineMathLike("\\begin{matrix} a & b \\end{matrix}") === true);
-check("sub/superscript x_i^2", () => isInlineMathLike("x_i^2") === true);
-check("superscript E=mc^2", () => isInlineMathLike("E=mc^2") === true);
-check("\\forall", () => isInlineMathLike("\\forall x \\in \\mathbb{R}") === true);
-check("\\(x+1\\) wrapped", () => isInlineMathLike("\\(x+1\\)") === true);
-check("$x+1$ wrapped", () => isInlineMathLike("$x+1$") === true);
-check("\\mathbf{bold}", () => isInlineMathLike("\\mathbf{x}") === true);
-check("\\mathbb{R}", () => isInlineMathLike("\\mathbb{R}") === true);
-check("a \\le b", () => isInlineMathLike("a \\le b") === true);
-
-console.log("\nisInlineMathLike — code");
-check("npm run build", () => isInlineMathLike("npm run build") === false);
-check("Markdown.tsx", () => isInlineMathLike("Markdown.tsx") === false);
-check("const x = 1", () => isInlineMathLike("const x = 1") === false);
-check("arrow =>", () => isInlineMathLike("=> x") === false);
-check("equality ==", () => isInlineMathLike("a == b") === false);
-check("strict ===", () => isInlineMathLike("a === b") === false);
-check("SQL SELECT", () => isInlineMathLike("SELECT * FROM users") === false);
-check("Go func", () => isInlineMathLike("func foo()") === false);
-check("env $PATH", () => isInlineMathLike("$PATH") === false);
-check("env $HOME", () => isInlineMathLike("$HOME") === false);
-check("docker ps", () => isInlineMathLike("docker ps") === false);
-check("git log", () => isInlineMathLike("git log") === false);
-check("ssh user@host", () => isInlineMathLike("ssh user@host") === false);
-check("curl URL", () => isInlineMathLike("curl https://example.com") === false);
-check("3 char no math", () => isInlineMathLike("abc") === false);
-check("file size 5mb", () => isInlineMathLike("5mb") === false);
-check("npx cmd", () => isInlineMathLike("npx tsx") === false);
-check("pnpm cmd", () => isInlineMathLike("pnpm install") === false);
-check("yarn cmd", () => isInlineMathLike("yarn dev") === false);
-check("import stmt", () => isInlineMathLike("import React from 'react'") === false);
-check("export stmt", () => isInlineMathLike("export default App") === false);
-check(".env filename", () => isInlineMathLike(".env") === false);
+// ── isLikelyInlineMath (mathClassify) ──────────────────────────────────────────
 
 console.log("\nisLikelyInlineMath — math");
 check("$x$ (single var)", () => isLikelyInlineMath("x") === true);
@@ -153,36 +110,38 @@ check("\\|x\\| renders as double bars", () => {
   return !html.includes("katex-error") && html.includes("∥");
 });
 
-// ── looksLikeFormula (CodeBlockOrMath fenced-code classifier) ──────────────────
-// Mirrors the looksLikeFormula logic from CodeBlockOrMath.tsx.
+// ── normalizeMath pre-pass (LLM delimiters + classifier) ───────────────────────
+// Simulates Markdown.normalizeMath: converts \(…\)/\[…\] → $/$$, protects
+// \\[ line-break spacing, and filters non-math single-$ pairs.
 
-const LATEX_COMMAND_RE = /\\(?:frac|sqrt|begin|end|sum|int|prod|lim|infty|partial|nabla|alpha|beta|gamma|delta|epsilon|theta|lambda|mu|pi|sigma|tau|phi|omega|mathbf|mathrm|mathcal|mathbb|mathfrak|text|textbf|textit|widehat|widetilde|overline|underline|vec|hat|tilde|bar|dot)(?![A-Za-z])/;
+function simulateNormalizeMath(s: string): string {
+  const DM = "\x00DM\x00";
+  const IM = "\x00IM\x00";
+  const lb = "\x00LB\x00";
+  let r = s.replace(/\\\\\[/g, lb);
+  r = r.replace(/\\\[/g, () => "$$").replace(/\\\]/g, () => "$$");
+  r = r.replace(/\\\(/g, () => "$").replace(/\\\)/g, () => "$");
+  r = r.replace(/\x00LB\x00/g, "\\\\[");
+  // $$…$$ first, then $…$ (avoids cross-matching)
+  r = r.replace(/\$\$([\s\S]*?)\$\$/g, (_m: string, m: string) => `${DM}${m}${DM}`);
+  r = r.replace(/\$([^$\n]+)\$/g, (_m: string, m: string) => {
+    if (!isLikelyInlineMath(m.trim())) return `＄${m}＄`;
+    return `${IM}${m}${IM}`;
+  });
+  return r.replace(/\x00DM\x00/g, () => "$$").replace(/\x00IM\x00/g, () => "$");
+}
 
-const looksLikeFormula = (content: string): boolean => {
-  const trimmed = content.trim();
-  if (!trimmed) return false;
-  if (!trimmed.includes("\n") && LATEX_COMMAND_RE.test(trimmed)) return true;
-  if (/\\begin\{/.test(trimmed) || /\\end\{/.test(trimmed)) return true;
-  if (/\\(?:align|equation|gather|multline|matrix|pmatrix|bmatrix|array|tabular|split|cases)\b/.test(trimmed)) return true;
-  if (trimmed.includes("\n")) return false;
-  return false;
-};
+console.log("\nnormalizeMath — LLM delimiter conversion");
+eq(simulateNormalizeMath("\\(x^2\\)"), "$x^2$", "\\(…\\) → $…$");
+eq(simulateNormalizeMath("\\[E=mc^2\\]"), "$$E=mc^2$$", "\\[…\\] → $$…$$");
+eq(simulateNormalizeMath("\\\\[4pt]"), "\\\\[4pt]", "\\\\[ line-break spacing protected");
 
-console.log("\nlooksLikeFormula — formula");
-check("single-line \\frac", () => looksLikeFormula("\\frac{a}{b}") === true);
-check("single-line \\sqrt", () => looksLikeFormula("\\sqrt{x^2+1}") === true);
-check("single-line \\sum", () => looksLikeFormula("\\sum_{i=1}^{n} i") === true);
-check("single-line \\int", () => looksLikeFormula("\\int_0^\\infty e^{-x} dx") === true);
-check("multiline \\begin{aligned}", () => looksLikeFormula("\\begin{aligned}\nx &= 1 \\\\\ny &= 2\n\\end{aligned}") === true);
-check("multiline \\begin{bmatrix}", () => looksLikeFormula("\\begin{bmatrix} a & b \\\\ c & d \\end{bmatrix}") === true);
-check("multiline \\end only", () => looksLikeFormula("x = 1 \\\\\n\\end{aligned}") === true);
-check("multiline \\equation", () => looksLikeFormula("\\equation\nE = mc^2\n") === true);
-
-console.log("\nlooksLikeFormula — code");
-check("multiline no-LaTeX", () => looksLikeFormula("line one\nline two\nline three") === false);
-check("empty", () => looksLikeFormula("") === false);
-check("plain text", () => looksLikeFormula("hello world") === false);
-check("code snippet", () => looksLikeFormula("const x = 1;\nconst y = 2;") === false);
+console.log("\nnormalizeMath — non-math dollar filtering");
+eq(simulateNormalizeMath("costs $5$ today"), "costs ＄5＄ today", "$5$ not math");
+eq(simulateNormalizeMath("env $PATH$ here"), "env ＄PATH＄ here", "$PATH$ not math");
+eq(simulateNormalizeMath("solve $x^2 + y^2 = z^2$ please"), "solve $x^2 + y^2 = z^2$ please", "$x^2+y^2$ is math");
+eq(simulateNormalizeMath("$\\alpha + \\beta$"), "$\\alpha + \\beta$", "$\\alpha+\\beta$ is math");
+eq(simulateNormalizeMath("price is $10.50$ each"), "price is ＄10.50＄ each", "$10.50$ not math");
 
 // ── Summary ────────────────────────────────────────────────────────────────────
 
