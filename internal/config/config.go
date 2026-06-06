@@ -39,22 +39,23 @@ func SkillNameKey(name string) string {
 
 // Config is Reasonix's runtime configuration.
 type Config struct {
-	ConfigVersion int               `toml:"config_version"`
-	DefaultModel  string            `toml:"default_model"`
-	Language      string            `toml:"language"` // ui/model language tag (e.g. "zh"); empty = auto-detect from $LANG / $REASONIX_LANG
-	UI            UIConfig          `toml:"ui"`
-	Desktop       DesktopConfig     `toml:"desktop"`
-	Agent         AgentConfig       `toml:"agent"`
-	Providers     []ProviderEntry   `toml:"providers"`
-	Tools         ToolsConfig       `toml:"tools"`
-	Permissions   PermissionsConfig `toml:"permissions"`
-	Sandbox       SandboxConfig     `toml:"sandbox"`
-	Network       NetworkConfig     `toml:"network"`
-	Plugins       []PluginEntry     `toml:"plugins"`
-	Skills        SkillsConfig      `toml:"skills"`
-	Codegraph     CodegraphConfig   `toml:"codegraph"`
-	Statusline    StatuslineConfig  `toml:"statusline"`
-	LSP           LSPConfig         `toml:"lsp"`
+	ConfigVersion int                 `toml:"config_version"`
+	DefaultModel  string              `toml:"default_model"`
+	Language      string              `toml:"language"` // ui/model language tag (e.g. "zh"); empty = auto-detect from $LANG / $REASONIX_LANG
+	UI            UIConfig            `toml:"ui"`
+	Desktop       DesktopConfig       `toml:"desktop"`
+	Notifications NotificationsConfig `toml:"notifications"`
+	Agent         AgentConfig         `toml:"agent"`
+	Providers     []ProviderEntry     `toml:"providers"`
+	Tools         ToolsConfig         `toml:"tools"`
+	Permissions   PermissionsConfig   `toml:"permissions"`
+	Sandbox       SandboxConfig       `toml:"sandbox"`
+	Network       NetworkConfig       `toml:"network"`
+	Plugins       []PluginEntry       `toml:"plugins"`
+	Skills        SkillsConfig        `toml:"skills"`
+	Codegraph     CodegraphConfig     `toml:"codegraph"`
+	Statusline    StatuslineConfig    `toml:"statusline"`
+	LSP           LSPConfig           `toml:"lsp"`
 }
 
 // UIConfig controls CLI presentation-only settings. Desktop appearance is kept in
@@ -73,6 +74,14 @@ type DesktopConfig struct {
 	Theme         string `toml:"theme"`          // auto|dark|light; empty resolves to dark
 	ThemeStyle    string `toml:"theme_style"`    // graphite|ember|aurora|midnight|sandstone|porcelain|linen|glacier
 	CloseBehavior string `toml:"close_behavior"` // quit|background; desktop window close behavior
+}
+
+// NotificationsConfig controls optional system notifications for CLI chat/run.
+type NotificationsConfig struct {
+	Enabled         bool `toml:"enabled"`
+	TurnDone        bool `toml:"turn_done"`
+	ApprovalRequest bool `toml:"approval_request"`
+	AskRequest      bool `toml:"ask_request"`
 }
 
 // UITheme normalizes ui.theme to a supported value.
@@ -626,6 +635,12 @@ func Default() *Config {
 		ConfigVersion: 2,
 		DefaultModel:  "deepseek-flash",
 		UI:            UIConfig{Theme: "auto"},
+		Notifications: NotificationsConfig{
+			Enabled:         false,
+			TurnDone:        true,
+			ApprovalRequest: true,
+			AskRequest:      true,
+		},
 		Agent: AgentConfig{
 			SystemPrompt: DefaultSystemPrompt,
 			// 0 = no step cap: the agent loops until the model gives a final answer,

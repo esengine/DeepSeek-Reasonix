@@ -14,6 +14,7 @@ import (
 func newTestChatTUI() chatTUI {
 	commit := []string{}
 	ti := textarea.New()
+	configureChatTextarea(&ti)
 	ti.SetWidth(80)
 	return chatTUI{
 		input:                ti,

@@ -19,6 +19,10 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	orig.Desktop.Theme = "dark"
 	orig.Desktop.ThemeStyle = "graphite"
 	orig.Desktop.CloseBehavior = "background"
+	orig.Notifications.Enabled = true
+	orig.Notifications.TurnDone = true
+	orig.Notifications.ApprovalRequest = true
+	orig.Notifications.AskRequest = true
 	orig.Agent.AutoPlanClassifier = "deepseek-flash"
 	orig.Agent.SubagentModel = "mimo-pro"
 	orig.Agent.SubagentModels = map[string]string{"review": "deepseek-pro"}
@@ -83,6 +87,9 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	}
 	if got.Desktop.CloseBehavior != "background" {
 		t.Errorf("desktop.close_behavior = %q, want background", got.Desktop.CloseBehavior)
+	}
+	if !got.Notifications.Enabled || !got.Notifications.TurnDone || !got.Notifications.ApprovalRequest || !got.Notifications.AskRequest {
+		t.Errorf("notifications not preserved: %+v", got.Notifications)
 	}
 	if got.Agent.MaxSteps != orig.Agent.MaxSteps {
 		t.Errorf("max_steps = %d, want %d", got.Agent.MaxSteps, orig.Agent.MaxSteps)
@@ -171,6 +178,23 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	}
 }
 
+func TestNotificationsDefaultsKeepEventSwitchesEnabled(t *testing.T) {
+	cfg := Default()
+	if cfg.Notifications.Enabled {
+		t.Fatal("notifications.enabled default = true, want false")
+	}
+	if !cfg.Notifications.TurnDone || !cfg.Notifications.ApprovalRequest || !cfg.Notifications.AskRequest {
+		t.Fatalf("notification event switches default off: %+v", cfg.Notifications)
+	}
+
+	if _, err := toml.Decode("[notifications]\nenabled = true\n", cfg); err != nil {
+		t.Fatalf("decode notifications: %v", err)
+	}
+	if !cfg.Notifications.Enabled || !cfg.Notifications.TurnDone || !cfg.Notifications.ApprovalRequest || !cfg.Notifications.AskRequest {
+		t.Fatalf("enabled-only config should keep event switches on: %+v", cfg.Notifications)
+	}
+}
+
 func TestScopedRenderSeparatesUserAndProjectConfig(t *testing.T) {
 	c := Default()
 	c.Language = "zh"
@@ -180,14 +204,14 @@ func TestScopedRenderSeparatesUserAndProjectConfig(t *testing.T) {
 	c.Desktop.CloseBehavior = "background"
 
 	user := RenderTOMLForScope(c, RenderScopeUser)
-	for _, want := range []string{"config_version = 2", "[desktop]", `theme = "dark"`, `close_behavior = "background"`} {
+	for _, want := range []string{"config_version = 2", "[desktop]", `theme = "dark"`, `close_behavior = "background"`, "[notifications]"} {
 		if !strings.Contains(user, want) {
 			t.Fatalf("user render missing %q:\n%s", want, user)
 		}
 	}
 
 	project := RenderTOMLForScope(c, RenderScopeProject)
-	for _, forbidden := range []string{"[desktop]", "close_behavior ="} {
+	for _, forbidden := range []string{"[desktop]", "[notifications]", "close_behavior ="} {
 		if strings.Contains(project, forbidden) {
 			t.Fatalf("project render should not contain %q:\n%s", forbidden, project)
 		}

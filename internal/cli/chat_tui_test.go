@@ -122,6 +122,65 @@ func TestTranscriptViewportSizing(t *testing.T) {
 	}
 }
 
+func TestManualNewlineGrowsComposerWithoutHidingFirstLine(t *testing.T) {
+	ctrl := control.New(control.Options{})
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 40)
+
+	m0, _ := m.Update(tea.WindowSizeMsg{Width: 40, Height: 12})
+	m = m0.(chatTUI)
+	m.input.SetValue("first line")
+
+	m0, _ = m.Update(tea.KeyPressMsg{Code: 'j', Mod: tea.ModCtrl})
+	m = m0.(chatTUI)
+
+	if got := m.input.Height(); got != 2 {
+		t.Fatalf("input height after Ctrl+J = %d, want 2", got)
+	}
+	if got := m.input.ScrollYOffset(); got != 0 {
+		t.Fatalf("input scroll offset after Ctrl+J = %d, want 0 so the first line remains visible", got)
+	}
+}
+
+func TestManualNewlineCanExceedVisibleComposerRows(t *testing.T) {
+	ctrl := control.New(control.Options{})
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 40)
+
+	m0, _ := m.Update(tea.WindowSizeMsg{Width: 40, Height: 12})
+	m = m0.(chatTUI)
+	m.input.SetValue("first line")
+
+	for range maxInputRows + 1 {
+		m0, _ = m.Update(tea.KeyPressMsg{Code: 'j', Mod: tea.ModCtrl})
+		m = m0.(chatTUI)
+	}
+
+	if got, want := strings.Count(m.input.Value(), "\n"), maxInputRows+1; got != want {
+		t.Fatalf("manual newlines preserved = %d, want %d", got, want)
+	}
+	if got := m.input.Height(); got != maxInputRows {
+		t.Fatalf("visible input height = %d, want capped at %d", got, maxInputRows)
+	}
+}
+
+func TestSoftWrappedInputGrowsComposerAndShrinksTranscript(t *testing.T) {
+	ctrl := control.New(control.Options{})
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 24)
+
+	m0, _ := m.Update(tea.WindowSizeMsg{Width: 24, Height: 12})
+	m = m0.(chatTUI)
+	initialViewportHeight := m.viewport.Height()
+
+	m0, _ = m.Update(tea.PasteMsg{Content: strings.Repeat("x", 60)})
+	m = m0.(chatTUI)
+
+	if got := m.input.Height(); got <= 1 {
+		t.Fatalf("input height after soft-wrapped paste = %d, want > 1", got)
+	}
+	if got := m.viewport.Height(); got >= initialViewportHeight {
+		t.Fatalf("viewport height after composer growth = %d, want less than initial %d", got, initialViewportHeight)
+	}
+}
+
 func TestMCPManagerHidesComposerBox(t *testing.T) {
 	ctrl := control.New(control.Options{})
 	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)

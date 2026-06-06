@@ -419,18 +419,7 @@ type clipboardPasteMsg struct {
 // the controller, so a resumed session pre-populates scrollback.
 func newChatTUI(ctrl *control.Controller, missing string, eventCh chan event.Event, termW int) chatTUI {
 	ti := textarea.New()
-	ti.Prompt = ""
-	ti.CharLimit = 16384
-	ti.SetHeight(1)
-	ti.ShowLineNumbers = false
-	applyTextareaTheme(&ti)
-	// Use the real terminal cursor (not a styled virtual one) so View can place
-	// it at the insertion point and IME candidate windows anchor to the input.
-	ti.SetVirtualCursor(false)
-	// Plain Enter submits (the chatTUI handler intercepts it), so the textarea's
-	// own InsertNewline binding moves to Alt+Enter / Ctrl+J / Shift+Enter.
-	ti.KeyMap.InsertNewline = key.NewBinding(key.WithKeys("alt+enter", "ctrl+j", "shift+enter"))
-	ti.Focus()
+	configureChatTextarea(&ti)
 
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
@@ -464,6 +453,25 @@ func newChatTUI(ctrl *control.Controller, missing string, eventCh chan event.Eve
 		skills:               ctrl.Skills(),
 		viewport:             viewport.New(viewport.WithWidth(termW)),
 	}
+}
+
+func configureChatTextarea(ti *textarea.Model) {
+	ti.Prompt = ""
+	ti.CharLimit = 16384
+	ti.DynamicHeight = true
+	ti.MinHeight = 1
+	ti.MaxHeight = maxInputRows
+	ti.MaxContentHeight = ti.CharLimit
+	ti.SetHeight(1)
+	ti.ShowLineNumbers = false
+	applyTextareaTheme(ti)
+	// Use the real terminal cursor (not a styled virtual one) so View can place
+	// it at the insertion point and IME candidate windows anchor to the input.
+	ti.SetVirtualCursor(false)
+	// Plain Enter submits (the chatTUI handler intercepts it), so the textarea's
+	// own InsertNewline binding moves to Alt+Enter / Ctrl+J / Shift+Enter.
+	ti.KeyMap.InsertNewline = key.NewBinding(key.WithKeys("alt+enter", "ctrl+j", "shift+enter"))
+	ti.Focus()
 }
 
 func (m *chatTUI) rememberSubmittedInput(input string) {
@@ -788,7 +796,6 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				case "enter":
 					val := strings.TrimSpace(m.input.Value())
 					m.input.Reset()
-					m.input.SetHeight(1)
 					m.chooser.typing = false
 					if val == "" {
 						return m, finalize(m, cmds)
@@ -799,7 +806,6 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				case "esc":
 					m.chooser.typing = false
 					m.input.Reset()
-					m.input.SetHeight(1)
 					return m, finalize(m, cmds)
 				}
 				var ic tea.Cmd
@@ -1005,7 +1011,6 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.queueEditDraft = ""
 				}
 				m.input.Reset()
-				m.input.SetHeight(1)
 				m.pastedBlocks = nil
 				return m, finalize(m, cmds)
 			}
@@ -1026,7 +1031,6 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// space keeps "#7" / "#issue" prompts from being swallowed.
 			if note, ok := control.MemoryQuickAddNote(line); ok {
 				m.input.Reset()
-				m.input.SetHeight(1)
 				m.pastedBlocks = nil
 				if note == "" {
 					m.notice(i18n.M.QuickRememberEmpty)
@@ -1043,13 +1047,11 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmd := strings.TrimPrefix(line, "!")
 				if strings.TrimSpace(cmd) == "" {
 					m.input.Reset()
-					m.input.SetHeight(1)
 					m.pastedBlocks = nil
 					m.notice(i18n.M.ShellExecEmpty)
 					return m, finalize(m, cmds)
 				}
 				m.input.Reset()
-				m.input.SetHeight(1)
 				m.pastedBlocks = nil
 				m.state = tuiRunning
 				m.runStart = time.Now()
@@ -1074,7 +1076,6 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					line = ref
 				} else {
 					m.input.Reset()
-					m.input.SetHeight(1)
 					m.pastedBlocks = nil
 					cmds = append(cmds, m.runSlashCommand(line))
 					return m, finalize(m, cmds)
@@ -1083,7 +1084,6 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			sentLine := m.expandPastedBlocks(line)
 			m.input.Reset()
-			m.input.SetHeight(1)
 
 			// @references (local files / MCP resources, including inline image
 			// attachments) are resolved off the event loop by the controller; the turn
@@ -2448,6 +2448,9 @@ func (m *chatTUI) clearSubmittedPastes() {
 }
 
 func (m *chatTUI) growInputToFit() {
+	if m.input.DynamicHeight {
+		return
+	}
 	lines := strings.Count(m.input.Value(), "\n") + 1
 	if lines < 1 {
 		lines = 1

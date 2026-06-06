@@ -11,6 +11,8 @@ import (
 	"testing"
 
 	"reasonix/internal/config"
+	"reasonix/internal/event"
+	"reasonix/internal/notify"
 	"reasonix/internal/provider"
 )
 
@@ -219,6 +221,54 @@ func TestWelcomePromptMissingKeysRequiresConfigSource(t *testing.T) {
 	}
 	if !welcomeShouldPromptMissingKeys("reasonix.toml", nil) {
 		t.Fatal("valid config source should enter the missing-key prompt path")
+	}
+}
+
+type cliRecordSink struct {
+	events []event.Kind
+}
+
+func (s *cliRecordSink) Emit(e event.Event) {
+	s.events = append(s.events, e.Kind)
+}
+
+type cliRecordSender struct {
+	messages []notify.Message
+}
+
+func (s *cliRecordSender) Send(m notify.Message) error {
+	s.messages = append(s.messages, m)
+	return nil
+}
+
+func TestWithNotificationsWrapsCLISinkWithConfiguredSender(t *testing.T) {
+	inner := &cliRecordSink{}
+	sender := &cliRecordSender{}
+	calls := 0
+	prev := newNotificationSender
+	newNotificationSender = func() notify.Sender {
+		calls++
+		return sender
+	}
+	t.Cleanup(func() { newNotificationSender = prev })
+
+	cfg := config.Default()
+	cfg.Notifications.Enabled = true
+
+	wrapped := withNotifications(inner, cfg)
+	wrapped.Emit(event.Event{Kind: event.TurnDone})
+
+	if calls != 1 {
+		t.Fatalf("newNotificationSender calls = %d, want 1", calls)
+	}
+	if len(inner.events) != 1 || inner.events[0] != event.TurnDone {
+		t.Fatalf("forwarded events = %v, want [TurnDone]", inner.events)
+	}
+	if len(sender.messages) != 1 {
+		t.Fatalf("notifications = %d, want 1", len(sender.messages))
+	}
+	if sender.messages[0].Body != "Turn finished" {
+		t.Fatalf("notification body = %q, want Turn finished", sender.messages[0].Body)
 	}
 }
 

@@ -24,6 +24,7 @@ import (
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/i18n"
+	"reasonix/internal/notify"
 	"reasonix/internal/provider"
 	"reasonix/internal/provider/openai"
 	"reasonix/internal/serve"
@@ -181,6 +182,16 @@ func chdirTo(dir string) int {
 	return 0
 }
 
+var newNotificationSender = func() notify.Sender { return notify.NewPlatformSender() }
+
+// withNotifications adds system notifications to CLI event streams when configured.
+func withNotifications(sink event.Sink, cfg *config.Config) event.Sink {
+	if cfg == nil || !cfg.Notifications.Enabled {
+		return sink
+	}
+	return notify.NewSink(sink, newNotificationSender(), cfg.Notifications)
+}
+
 func runAgent(args []string) int {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	model := fs.String("model", "", "provider name (default: config default_model)")
@@ -194,6 +205,7 @@ func runAgent(args []string) int {
 	if rc := chdirTo(*dir); rc != 0 {
 		return rc
 	}
+	cfg, _ := config.Load()
 	configureCLIThemeFromConfigForTTYOutput()
 
 	prompt := strings.TrimSpace(strings.Join(fs.Args(), " "))
@@ -227,6 +239,7 @@ func runAgent(args []string) int {
 		metrics = &metricsSink{inner: textSink}
 		sink = metrics
 	}
+	sink = withNotifications(sink, cfg)
 	ctrl, err := setup(ctx, *model, *maxSteps, true, sink)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
@@ -235,6 +248,9 @@ func runAgent(args []string) int {
 	defer ctrl.Close()
 
 	runErr := ctrl.Run(ctx, prompt)
+	if cfg != nil {
+		notify.SendEvent(newNotificationSender(), cfg.Notifications, event.Event{Kind: event.TurnDone, Err: runErr})
+	}
 	if metrics != nil {
 		if err := writeMetrics(*metricsPath, metrics.m); err != nil {
 			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
@@ -312,7 +328,8 @@ func chatREPL(args []string) int {
 	if rc := chdirTo(*dir); rc != 0 {
 		return rc
 	}
-	if cfg, err := config.Load(); err == nil {
+	cfg, err := config.Load()
+	if err == nil {
 		configureCLIThemeWithStyle(cfg.UITheme(), cfg.UIThemeStyle())
 	}
 
@@ -347,7 +364,8 @@ func chatREPL(args []string) int {
 	// agent goroutine.
 	eventCh := make(chan event.Event, 1024)
 
-	sink := &eventSink{ch: eventCh}
+	var sink event.Sink = &eventSink{ch: eventCh}
+	sink = withNotifications(sink, cfg)
 	ctrl, err := setup(ctx, *model, *maxSteps, false, sink)
 	if err != nil && errors.Is(err, boot.ErrUnknownModel) && isInteractive() && config.SourcePath() == "" {
 		// True first run whose default model can't resolve: guide setup, then retry.
