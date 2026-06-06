@@ -87,3 +87,80 @@ func TestE2EGBKRoundTrip(t *testing.T) {
 		t.Errorf("grep did not match decoded GBK content:\n%s", grepOut)
 	}
 }
+
+func e2eArgs(m map[string]any) json.RawMessage {
+	b, _ := json.Marshal(m)
+	return json.RawMessage(b)
+}
+
+// write_file must preserve the encoding of a file it overwrites rather than
+// always writing UTF-8, which would silently corrupt a GBK file.
+func TestE2EWriteFilePreservesGBKOnOverwrite(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "gbk.txt")
+	if err := os.WriteFile(path, gbkBytes(t, "原始内容\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeTL, _ := tool.LookupBuiltin("write_file")
+	if _, err := writeTL.Execute(context.Background(), e2eArgs(map[string]any{
+		"path":    path,
+		"content": "全新中文内容\n第二行\n",
+	})); err != nil {
+		t.Fatalf("write_file: %v", err)
+	}
+	raw, _ := os.ReadFile(path)
+	if utf8.Valid(raw) {
+		t.Error("write_file rewrote an existing GBK file as UTF-8 on disk")
+	}
+	decoded, _, _ := transform.Bytes(simplifiedchinese.GB18030.NewDecoder(), raw)
+	if s := string(decoded); !strings.Contains(s, "全新中文内容") || !strings.Contains(s, "第二行") {
+		t.Errorf("write_file content wrong after GBK round-trip: %q", s)
+	}
+}
+
+// A newly created file (no existing encoding to preserve) defaults to UTF-8.
+func TestE2EWriteFileNewFileIsUTF8(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "new.txt")
+	writeTL, _ := tool.LookupBuiltin("write_file")
+	if _, err := writeTL.Execute(context.Background(), e2eArgs(map[string]any{
+		"path":    path,
+		"content": "新文件中文\n",
+	})); err != nil {
+		t.Fatalf("write_file: %v", err)
+	}
+	raw, _ := os.ReadFile(path)
+	if !utf8.Valid(raw) {
+		t.Error("a newly created file should be written as UTF-8")
+	}
+	if string(raw) != "新文件中文\n" {
+		t.Errorf("new file content = %q, want UTF-8 Chinese", raw)
+	}
+}
+
+// delete_range must decode a GBK file before matching anchors (a UTF-8 anchor
+// would never match the GBK bytes otherwise) and re-encode it on write.
+func TestE2EDeleteRangePreservesGBK(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "gbk.txt")
+	if err := os.WriteFile(path, gbkBytes(t, "第一行\n第二行\n第三行\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	delTL, _ := tool.LookupBuiltin("delete_range")
+	if _, err := delTL.Execute(context.Background(), e2eArgs(map[string]any{
+		"path":         path,
+		"start_anchor": "第二行",
+		"end_anchor":   "第二行",
+	})); err != nil {
+		t.Fatalf("delete_range on GBK file: %v", err)
+	}
+	raw, _ := os.ReadFile(path)
+	if utf8.Valid(raw) {
+		t.Error("delete_range rewrote a GBK file as UTF-8 on disk")
+	}
+	decoded, _, _ := transform.Bytes(simplifiedchinese.GB18030.NewDecoder(), raw)
+	s := string(decoded)
+	if strings.Contains(s, "第二行") {
+		t.Errorf("delete_range did not remove the target line: %q", s)
+	}
+	if !strings.Contains(s, "第一行") || !strings.Contains(s, "第三行") {
+		t.Errorf("delete_range removed the wrong lines: %q", s)
+	}
+}
