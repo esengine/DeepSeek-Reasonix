@@ -171,6 +171,7 @@ var Chinese = Messages{
 	CmdHelp:         "查看命令列表",
 	CmdTodo:         "清除任务清单",
 	CmdQuit:         "退出会话",
+	CmdLoop:         "定时自动提交提示词",
 	ArgSkillList:    "列出 skills",
 	ArgSkillShow:    "查看 skill 内容",
 	ArgSkillNew:     "新建一个 skill",

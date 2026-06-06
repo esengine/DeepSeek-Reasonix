@@ -170,6 +170,7 @@ var English = Messages{
 	CmdHelp:         "list commands",
 	CmdTodo:         "dismiss the task list",
 	CmdQuit:         "exit the session",
+	CmdLoop:         "auto-resubmit a prompt on a timer",
 	ArgSkillList:    "list skills",
 	ArgSkillShow:    "show a skill's body",
 	ArgSkillNew:     "scaffold a new skill",

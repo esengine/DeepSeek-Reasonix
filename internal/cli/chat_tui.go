@@ -102,6 +102,13 @@ type chatTUI struct {
 	// moves past the end.
 	queueEditDraft string
 
+	// loopPrompt is the active /loop prompt. Empty means no loop is active.
+	loopPrompt string
+	// loopInterval is the re-submission interval. Zero when no loop is active.
+	loopInterval time.Duration
+	// loopIter counts how many times the loop has fired.
+	loopIter int
+
 	// history is a resumed session's messages, committed to scrollback once on
 	// the first WindowSizeMsg so a reopened chat shows its prior transcript.
 	history []provider.Message
@@ -296,6 +303,10 @@ type compactDoneMsg struct{ err error }
 // elapsedTickMsg fires once a second while a turn runs, driving the "thinking
 // Ns" counter in the status line.
 type elapsedTickMsg struct{}
+
+// loopTickMsg is fired by a scheduled tea.Tick when a /loop interval expires.
+// It triggers re-submitting the loop prompt.
+type loopTickMsg struct{}
 
 // balanceMsg carries the result of an async wallet-balance fetch; text is the
 // formatted readout ("" when none/failed).
@@ -1027,6 +1038,14 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.rememberSubmittedInput(line)
 
+			// User typing their own input cancels any active /loop.
+			if m.loopPrompt != "" {
+				m.notice(fmt.Sprintf("▸ /loop stopped (after %d iter%s) — user input", m.loopIter, pluralS(m.loopIter)))
+				m.loopPrompt = ""
+				m.loopInterval = 0
+				m.loopIter = 0
+			}
+
 			// "# <note>" quick-adds a memory line locally, no model turn. The
 			// space keeps "#7" / "#issue" prompts from being swallowed.
 			if note, ok := control.MemoryQuickAddNote(line); ok {
@@ -1138,6 +1157,11 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.queueEditCursor = -1
 				m.queueEditDraft = ""
 				cmds = append(cmds, m.startTurn(interject, interject, interject))
+			}
+			// If a /loop is active and no pending interject was consumed,
+			// schedule the next loop tick.
+			if m.loopPrompt != "" && len(m.pendingInterject) == 0 {
+				cmds = append(cmds, tea.Tick(m.loopInterval, func(_ time.Time) tea.Msg { return loopTickMsg{} }))
 			}
 		}
 		if turnDone || gitMaybeChanged {
@@ -1251,12 +1275,22 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, finalize(m, cmds)
 		}
 
-	case elapsedTickMsg:
-		if m.state == tuiRunning {
-			m.elapsed = int(time.Since(m.runStart).Seconds())
-			m.tickToolRunning()
-			cmds = append(cmds, elapsedTick())
-		}
+		case elapsedTickMsg:
+			if m.state == tuiRunning {
+				m.elapsed = int(time.Since(m.runStart).Seconds())
+				m.tickToolRunning()
+				cmds = append(cmds, elapsedTick())
+			}
+
+		case loopTickMsg:
+			if m.loopPrompt != "" && m.state != tuiRunning {
+				m.loopIter++
+				m.notice(fmt.Sprintf("▸ /loop iter %d → %s", m.loopIter, m.loopPrompt))
+				cmds = append(cmds, m.startTurnWithRaw(m.loopPrompt, "/loop: "+m.loopPrompt, m.loopPrompt, m.loopPrompt))
+			} else if m.loopPrompt != "" && m.state == tuiRunning {
+				// Busy: re-schedule and try again later
+				cmds = append(cmds, loopTick())
+			}
 
 	case spinner.TickMsg:
 		if m.state == tuiRunning {
@@ -2925,6 +2959,11 @@ func elapsedTick() tea.Cmd {
 	return tea.Tick(time.Second, func(_ time.Time) tea.Msg { return elapsedTickMsg{} })
 }
 
+// loopTick schedules a /loop re-submission after the configured interval.
+func loopTick() tea.Cmd {
+	return tea.Tick(time.Second, func(_ time.Time) tea.Msg { return loopTickMsg{} })
+}
+
 // runSlashCommand handles "/<cmd> <args>" input. Local commands queue their
 // output to scrollback; MCP prompt / custom commands resolve to a model turn.
 func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
@@ -3019,6 +3058,9 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 	case "/language":
 		m.echoLocalCommand(input)
 		m.runLanguageSubcommand(input)
+	case "/loop":
+		m.echoLocalCommand(input)
+		m.runLoopCommand(input)
 	case "/help":
 		m.echoLocalCommand(input)
 		m.showHelp()
