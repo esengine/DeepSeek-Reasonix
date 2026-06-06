@@ -58,3 +58,13 @@ Thumbs.db
 # Scratch / agent working dirs (never committed)
 /tmp/
 /.codex/
+
+# Local artifacts
+DeepSeek-Reasonix/
+__pycache__/
+*.pyc
+*.bak
+desktop/reasonix-desktop.exe
+desktop/resource_windows_amd64.syso
+update_build.py
+AGENTS.md
