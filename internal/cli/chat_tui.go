@@ -170,6 +170,7 @@ type chatTUI struct {
 	transcript   []string
 	wrappedLines []string // transcript wrapped to viewport width (rendered each frame)
 	viewport     viewport.Model
+	scrollBottom bool
 	sel          selection
 	// autoScroll drives edge-drag scrolling: -1 up, +1 down, 0 off. dragX is the
 	// column the drag is held at, so the ticker can extend the selection head.
@@ -198,6 +199,9 @@ type chatTUI struct {
 	// run goroutine is blocked awaiting ctrl.AnswerQuestion and keys drive the card.
 	chooser *chooser
 
+	// turnTree holds the /turntree conversation-tree overlay (nil when closed);
+	// while set, keys navigate the tree and Enter jumps to the selected turn.
+	turnTree *turnTreePicker
 	// rewind holds the Esc-Esc / "/rewind" picker (nil when closed); while set,
 	// keys drive it and it renders as an overlay. lastEsc times the double-Esc
 	// gesture that opens it on an empty composer.
@@ -636,6 +640,10 @@ func (m chatTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cm.viewport.GotoBottom() // tail-follow: stay pinned to newest output
 		}
 	}
+	if cm.scrollBottom {
+		cm.viewport.GotoBottom()
+		cm.scrollBottom = false
+	}
 	cm.transcriptDirty = false
 	// Any viewport scroll (wheel, PgUp/PgDn, edge auto-scroll, or tail-follow to
 	// newest output) shifts the whole window. Some terminals (Warp) mishandle
@@ -657,6 +665,7 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.input.SetWidth(msg.Width - 4)
+		m.growInputToFit()
 		m.renderer = newMarkdownRenderer(msg.Width)
 		// Commit the banner — and a resumed session's transcript — once, now
 		// that the width is known.
@@ -815,6 +824,10 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, finalize(m, cmds)
 			}
 			return m.handleChooserKey(msg)
+		}
+		// The turn-tree picker is modal while open: keys navigate it.
+		if m.turnTree != nil {
+			return m.handleTurnTreeKey(msg)
 		}
 		// The rewind picker is modal while open: keys navigate it.
 		if m.rewind != nil {
@@ -1328,6 +1341,7 @@ func (m chatTUI) bottomRows() int {
 		m.renderTodoPanel(),
 		m.renderApprovalBanner(),
 		m.renderChooser(),
+		m.renderTurnTree(),
 		m.renderRewind(),
 		m.renderResumePicker(),
 		m.renderCompletion(),
@@ -1361,7 +1375,7 @@ func (m chatTUI) bottomRows() int {
 // reserve rows for a composer that cannot receive input, leaving a confusing
 // blank/bordered area at the bottom of the TUI.
 func (m chatTUI) hideComposer() bool {
-	if m.mcp != nil || m.skillPick != nil || m.resumePick != nil || m.rewind != nil || m.pendingApproval != nil {
+	if m.mcp != nil || m.skillPick != nil || m.resumePick != nil || m.turnTree != nil || m.rewind != nil || m.pendingApproval != nil {
 		return true
 	}
 	return m.chooser != nil && !m.chooser.typing
@@ -1912,6 +1926,8 @@ func (m chatTUI) View() tea.View {
 	ctxTag := m.contextTag()
 	var status string
 	switch {
+	case m.turnTree != nil:
+		status = "  " + modeTag + " · 🌳 turn tree"
 	case m.rewind != nil:
 		status = "  " + modeTag + " · ⟲ rewind"
 	case m.resumePick != nil:
@@ -1998,6 +2014,10 @@ func (m chatTUI) View() tea.View {
 		rowsAboveBox += strings.Count(banner, "\n") + 1
 	}
 	if card := m.renderChooser(); card != "" {
+		parts = append(parts, card)
+		rowsAboveBox += strings.Count(card, "\n") + 1
+	}
+	if card := m.renderTurnTree(); card != "" {
 		parts = append(parts, card)
 		rowsAboveBox += strings.Count(card, "\n") + 1
 	}
@@ -2451,7 +2471,7 @@ func (m *chatTUI) growInputToFit() {
 	if m.input.DynamicHeight {
 		return
 	}
-	lines := strings.Count(m.input.Value(), "\n") + 1
+	lines := inputDisplayRows(m.input.Value(), m.inputWidth())
 	if lines < 1 {
 		lines = 1
 	}
@@ -2461,6 +2481,29 @@ func (m *chatTUI) growInputToFit() {
 	if lines != m.input.Height() {
 		m.input.SetHeight(lines)
 	}
+}
+
+func (m *chatTUI) inputWidth() int {
+	if w := m.input.Width(); w > 0 {
+		return max(w, 1)
+	}
+	if m.width > 4 {
+		return m.width - 4
+	}
+	return 80
+}
+
+func inputDisplayRows(value string, width int) int {
+	width = max(width, 1)
+	if value == "" {
+		return 1
+	}
+	rows := 0
+	for _, line := range strings.Split(strings.ReplaceAll(strings.ReplaceAll(value, "\r\n", "\n"), "\r", "\n"), "\n") {
+		cells := ansi.StringWidth(line)
+		rows += max(1, (cells+width-1)/width)
+	}
+	return rows
 }
 
 func pasteClipboardImage() tea.Cmd {
@@ -2979,6 +3022,9 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 	case "/tree":
 		m.echoLocalCommand(input)
 		m.showBranchTree()
+	case "/turntree":
+		m.echoLocalCommand(input)
+		m.openTurnTree()
 	case "/branch":
 		m.echoLocalCommand(input)
 		m.runBranchCommand(input)

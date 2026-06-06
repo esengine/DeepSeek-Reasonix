@@ -141,12 +141,23 @@ type Controller struct {
 	// a fresh memory takes effect this session without busting the prompt cache;
 	// it joins the prefix naturally on the next session.
 	pendingMemory []string
+
+	// jumpOrigin records a temporary JumpToTurn preview. The branch materializes
+	// only when the user sends from the preview or explicitly creates /branch.
+	jumpOrigin             jumpOrigin
+	pendingSessionDisplays []pendingSessionDisplay
 }
 
 type approvalReply struct {
 	allow   bool
 	session bool
 	persist bool // true = write "always allow" rule to config
+}
+
+type pendingSessionDisplay struct {
+	content string
+	display string
+	record  func(sessionPath, content, display string) error
 }
 
 // Options carries the already-built pieces setup assembles. Lifecycle metadata
@@ -291,12 +302,12 @@ func (c *Controller) beginCheckpoint(input string) {
 // runGuarded runs body on a background goroutine under a fresh cancellable
 // context, guarding against concurrent turns and emitting a TurnDone event when
 // it finishes (Err set on failure; nil also for a user Cancel). A no-op if a
-// turn is already in flight.
-func (c *Controller) runGuarded(body func(ctx context.Context) error) {
+// turn is already in flight. Returns whether a turn was started.
+func (c *Controller) runGuarded(body func(ctx context.Context) error) bool {
 	c.mu.Lock()
 	if c.running {
 		c.mu.Unlock()
-		return
+		return false
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	c.cancel = cancel
@@ -312,6 +323,7 @@ func (c *Controller) runGuarded(body func(ctx context.Context) error) {
 		c.mu.Unlock()
 		c.sink.Emit(event.Event{Kind: event.TurnDone, Err: explainError(err)})
 	}()
+	return true
 }
 
 // Send starts a turn with an uncomposed message. The controller applies
@@ -326,7 +338,9 @@ func (c *Controller) Send(input string) {
 // resolved @-reference payloads so referenced file contents cannot inflate the
 // complexity score.
 func (c *Controller) SendWithRaw(input, raw string) {
-	c.runGuarded(func(ctx context.Context) error { return c.runTurnWithRaw(ctx, input, raw) })
+	if !c.runGuarded(func(ctx context.Context) error { return c.runTurnWithRaw(ctx, input, raw) }) {
+		c.clearPendingSessionDisplays()
+	}
 }
 
 // planApprovalTool is the Tool name on the ApprovalRequest the controller emits
@@ -357,9 +371,7 @@ func (c *Controller) runTurnWithRaw(ctx context.Context, input, raw string) erro
 	input = c.Compose(input)
 	startMessages := c.messageCount()
 	defer c.snapshotActivityIfChanged(startMessages)
-	// Open a checkpoint for this turn before the user message is appended, so the
-	// recorded message boundary precedes it and pre-edit snapshots land here.
-	c.beginCheckpoint(input)
+
 	// UserPromptSubmit / Stop hooks bracket the whole turn (incl. the plan
 	// research + approved-execution sub-turns below): a gating UserPromptSubmit
 	// aborts before any model call; Stop fires once when the turn returns.
@@ -369,10 +381,18 @@ func (c *Controller) runTurnWithRaw(ctx context.Context, input, raw string) erro
 		turn := c.turn
 		c.mu.Unlock()
 		if block, _ := c.hooks.PromptSubmit(ctx, input, turn); block {
+			c.clearPendingSessionDisplays()
 			return nil // the hook's notify callback already surfaced the reason
 		}
 		defer func() { c.hooks.Stop(ctx, lastAssistantText(c.History()), turn) }()
 	}
+	if err := c.materializeJumpOrigin(""); err != nil {
+		return err
+	}
+	c.flushPendingSessionDisplays(raw)
+	// Open a checkpoint for this turn before the user message is appended, so the
+	// recorded message boundary precedes it and pre-edit snapshots land here.
+	c.beginCheckpoint(input)
 	if err := c.runner.Run(ctx, input); err != nil {
 		return err
 	}
@@ -437,14 +457,17 @@ func lastAssistantText(msgs []provider.Message) string {
 func (c *Controller) Submit(input string) {
 	trimmed := strings.TrimSpace(input)
 	if note, ok := MemoryQuickAddNote(trimmed); ok {
+		c.clearPendingSessionDisplays()
 		c.rememberProjectNote(note)
 		return
 	}
 	if note, ok := RememberCommandNote(trimmed); ok {
+		c.clearPendingSessionDisplays()
 		c.rememberProjectNote(note)
 		return
 	}
 	if strings.HasPrefix(trimmed, "!") {
+		c.clearPendingSessionDisplays()
 		c.RunShell(trimmed[1:])
 		return
 	}
@@ -461,6 +484,7 @@ func (c *Controller) Submit(input string) {
 				}
 			}
 		}()
+		c.clearPendingSessionDisplays()
 	case trimmed == "/new":
 		go func() {
 			if err := c.NewSession(); err != nil {
@@ -469,18 +493,22 @@ func (c *Controller) Submit(input string) {
 				c.notice("new session")
 			}
 		}()
+		c.clearPendingSessionDisplays()
 	case strings.HasPrefix(trimmed, "/mcp__"):
-		c.runGuarded(func(ctx context.Context) error {
+		if !c.runGuarded(func(ctx context.Context) error {
 			sent, found, err := c.MCPPrompt(ctx, trimmed)
 			if err != nil {
 				return err
 			}
 			if !found {
+				c.clearPendingSessionDisplays()
 				c.notice("unknown command: " + trimmed)
 				return nil
 			}
 			return c.runTurnWithRaw(ctx, sent, sent)
-		})
+		}) {
+			c.clearPendingSessionDisplays()
+		}
 	case strings.HasPrefix(trimmed, "/"):
 		if ref, ok := FileRefLine(trimmed); ok {
 			c.runRefTurn(ref)
@@ -492,9 +520,15 @@ func (c *Controller) Submit(input string) {
 		fields := strings.Fields(trimmed)
 		switch fields[0] {
 		case "/tree":
+			c.clearPendingSessionDisplays()
 			c.notice(c.BranchTreeText())
 			return
+		case "/turntree":
+			c.clearPendingSessionDisplays()
+			c.notice("open the graphical conversation tree from the desktop toolbar, or use /turntree in the chat TUI")
+			return
 		case "/branch":
+			c.clearPendingSessionDisplays()
 			args := strings.TrimSpace(strings.TrimPrefix(trimmed, fields[0]))
 			if turn, name, fromTurn, err := ParseBranchTarget(args); err != nil {
 				c.notice(err.Error())
@@ -509,12 +543,14 @@ func (c *Controller) Submit(input string) {
 			}
 			return
 		case "/switch":
+			c.clearPendingSessionDisplays()
 			ref := strings.TrimSpace(strings.TrimPrefix(trimmed, fields[0]))
 			if _, err := c.SwitchBranch(ref); err != nil {
 				c.notice(err.Error())
 			}
 			return
 		case "/rewind":
+			c.clearPendingSessionDisplays()
 			args := strings.TrimSpace(strings.TrimPrefix(trimmed, fields[0]))
 			turn, scope, err := parseRewind(args, c.Checkpoints())
 			if err != nil {
@@ -527,26 +563,85 @@ func (c *Controller) Submit(input string) {
 			return
 		}
 		if c.managementNotice(trimmed) {
+			c.clearPendingSessionDisplays()
 			return
 		}
 		// A custom command wins over a skill of the same name; both resolve to a
 		// turn. (Built-in slash verbs like /compact are handled above.)
 		if sent, ok := c.CustomCommand(trimmed); ok {
-			c.runGuarded(func(ctx context.Context) error {
+			if !c.runGuarded(func(ctx context.Context) error {
 				return c.runTurnWithRaw(ctx, sent, sent)
-			})
+			}) {
+				c.clearPendingSessionDisplays()
+			}
 			return
 		}
 		if sent, ok := c.RunSkill(trimmed); ok {
-			c.runGuarded(func(ctx context.Context) error {
+			if !c.runGuarded(func(ctx context.Context) error {
 				return c.runTurnWithRaw(ctx, sent, sent)
-			})
+			}) {
+				c.clearPendingSessionDisplays()
+			}
 			return
 		}
+		c.clearPendingSessionDisplays()
 		c.notice("unknown command: " + trimmed)
 	default:
 		c.runRefTurn(input)
 	}
+}
+
+// SubmitDisplay runs Submit while preserving a frontend-only display string for
+// the raw prompt. Existing sessions record immediately; temporary turn-tree
+// previews record after materialization gives the branch a real session path.
+func (c *Controller) SubmitDisplay(input, display string, record func(sessionPath, content, display string) error) {
+	if c.queueSessionDisplay(input, display, record) {
+		c.Submit(input)
+	}
+}
+
+func (c *Controller) queueSessionDisplay(content, display string, record func(sessionPath, content, display string) error) bool {
+	if record == nil || strings.TrimSpace(content) == "" || content == display || strings.TrimSpace(display) == "" {
+		return true
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.running {
+		return false
+	}
+	if c.sessionPath != "" {
+		_ = record(c.sessionPath, content, display)
+		return true
+	}
+	c.pendingSessionDisplays = append(c.pendingSessionDisplays, pendingSessionDisplay{
+		content: content,
+		display: display,
+		record:  record,
+	})
+	return true
+}
+
+func (c *Controller) flushPendingSessionDisplays(content string) {
+	c.mu.Lock()
+	sessionPath := c.sessionPath
+	pending := c.pendingSessionDisplays
+	c.pendingSessionDisplays = nil
+	c.mu.Unlock()
+	if strings.TrimSpace(sessionPath) == "" || len(pending) == 0 {
+		return
+	}
+	for _, item := range pending {
+		if item.content != content || item.record == nil {
+			continue
+		}
+		_ = item.record(sessionPath, item.content, item.display)
+	}
+}
+
+func (c *Controller) clearPendingSessionDisplays() {
+	c.mu.Lock()
+	c.pendingSessionDisplays = nil
+	c.mu.Unlock()
 }
 
 func (c *Controller) rememberProjectNote(note string) {
@@ -652,7 +747,7 @@ func (c *Controller) RunShell(command string) {
 // runRefTurn resolves a line's @references into a context block and starts a
 // turn with it prepended (or the raw line when nothing resolved).
 func (c *Controller) runRefTurn(input string) {
-	c.runGuarded(func(ctx context.Context) error {
+	if !c.runGuarded(func(ctx context.Context) error {
 		block, errs := c.ResolveRefs(ctx, input)
 		for _, e := range errs {
 			c.notice(e)
@@ -662,7 +757,9 @@ func (c *Controller) runRefTurn(input string) {
 			sent = "Referenced context:\n\n" + block + "\n\n" + input
 		}
 		return c.runTurnWithRaw(ctx, sent, input)
-	})
+	}) {
+		c.clearPendingSessionDisplays()
+	}
 }
 
 // notice emits an informational Notice event.
@@ -860,6 +957,7 @@ func (c *Controller) NewSession() error {
 	if c.executor == nil {
 		return nil
 	}
+	c.ClearJumpOrigin()
 	if err := c.Snapshot(); err != nil {
 		return err
 	}
@@ -1053,6 +1151,15 @@ func (c *Controller) Branch(name string) (string, error) {
 	if running {
 		return "", c.rewindFail(fmt.Errorf("cannot branch while a turn is running"))
 	}
+	c.mu.Lock()
+	preview := c.jumpOrigin.active
+	c.mu.Unlock()
+	if preview {
+		if err := c.materializeJumpOrigin(name); err != nil {
+			return "", c.rewindFail(err)
+		}
+		return c.SessionPath(), nil
+	}
 	if !c.executor.Session().HasContent() {
 		return "", c.rewindFail(fmt.Errorf("nothing to branch yet"))
 	}
@@ -1063,6 +1170,7 @@ func (c *Controller) Branch(name string) (string, error) {
 	parentID := agent.BranchID(parentPath)
 	src := c.executor.Session().Snapshot()
 	branched := append([]provider.Message(nil), src...)
+	forkTurn := countUserTurns(branched) - 1
 	sess := agent.NewSession("")
 	sess.Messages = branched
 
@@ -1073,7 +1181,7 @@ func (c *Controller) Branch(name string) (string, error) {
 	if err := agent.SaveBranchMeta(newPath, agent.BranchMeta{
 		Name:             strings.TrimSpace(name),
 		ParentID:         parentID,
-		ForkTurn:         -1,
+		ForkTurn:         forkTurn,
 		ForkMessageIndex: len(branched),
 	}); err != nil {
 		return "", c.rewindFail(err)
@@ -1086,6 +1194,16 @@ func (c *Controller) Branch(name string) (string, error) {
 	c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
 		Text: fmt.Sprintf("created branch %s", agent.BranchID(newPath))})
 	return newPath, nil
+}
+
+func countUserTurns(msgs []provider.Message) int {
+	n := 0
+	for _, m := range msgs {
+		if m.Role == provider.RoleUser {
+			n++
+		}
+	}
+	return n
 }
 
 // Branches lists saved conversation branches in this controller's session dir.
@@ -1127,6 +1245,7 @@ func (c *Controller) SwitchBranch(ref string) (agent.BranchInfo, error) {
 	}
 	c.mu.Lock()
 	c.sessionPath = match.Path
+	c.clearJumpPreviewLocked()
 	c.mu.Unlock()
 	c.rebindCheckpoints(match.Path)
 	c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
@@ -1225,6 +1344,7 @@ func (c *Controller) Resume(s *agent.Session, path string) {
 	}
 	c.mu.Lock()
 	c.sessionPath = path
+	c.clearJumpPreviewLocked()
 	c.mu.Unlock()
 	c.rebindCheckpoints(path)
 }
@@ -1291,6 +1411,7 @@ func (c *Controller) snapshotActivityIfChanged(startMessages int) {
 func (c *Controller) SetSessionPath(p string) {
 	c.mu.Lock()
 	c.sessionPath = p
+	c.clearJumpPreviewLocked()
 	c.mu.Unlock()
 	c.rebindCheckpoints(p)
 }

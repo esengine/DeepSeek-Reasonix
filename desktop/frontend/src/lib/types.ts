@@ -216,6 +216,33 @@ export interface CheckpointMeta {
   canConversation?: boolean;
 }
 
+export interface TurnNodeInfo {
+  branchId: string;
+  branchName: string;
+  turn: number;
+  prompt: string;
+  response: string;
+  prefixChars: number;
+  isCurrent: boolean;
+  depth: number;
+  hasFork: boolean;
+  childCount: number;
+  key: string;
+  parentKey: string;
+  rootKey: string;
+  rootIndex: number;
+  scope: string;
+  workspaceRoot: string;
+  topicId: string;
+  topicTitle: string;
+}
+
+export interface TurnTreeData {
+  roots: TurnNodeInfo[];
+  nodes: TurnNodeInfo[];
+  currentKey: string;
+}
+
 // SessionMeta is one saved session for the history panel.
 export interface SessionMeta {
   path: string;

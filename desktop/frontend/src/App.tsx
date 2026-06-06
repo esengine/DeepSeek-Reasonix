@@ -35,6 +35,7 @@ import { SettingsPanel } from "./components/SettingsPanel";
 import { CapabilitiesPanel } from "./components/CapabilitiesPanel";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { ContextPanel } from "./components/ContextPanel";
+import { TurnTreePanel } from "./components/TurnTreePanel";
 import { WorkspacePanel } from "./components/WorkspacePanel";
 import { Tooltip } from "./components/Tooltip";
 import { OnboardingOverlay } from "./components/OnboardingOverlay";
@@ -42,7 +43,7 @@ import { TabBar } from "./components/TabBar";
 import { ProjectTree } from "./components/ProjectTree";
 import { parseTodos } from "./lib/tools";
 import { shouldShowTodoPanel } from "./lib/todoVisibility";
-import type { ComposerInsertRequest, MemoryView, Meta, Mode, SessionMeta, TabMeta } from "./lib/types";
+import type { ComposerInsertRequest, MemoryView, Meta, Mode, SessionMeta, TabMeta, TurnNodeInfo } from "./lib/types";
 import { loadLayoutSize, saveLayoutSize } from "./lib/layoutPreferences";
 import {
   applyTheme,
@@ -180,6 +181,14 @@ function topicTitle(tab?: TabMeta): string {
   return topic === workspaceTitle ? workspaceTitle : `${workspaceTitle} / ${topic}`;
 }
 
+function turnTreeTopicTitle(baseTitle: string | undefined, turn: number, fallback: string): string {
+  const marker = `T${turn}`;
+  const base = (baseTitle ?? "").trim();
+  if (!base) return fallback;
+  if (base.endsWith(`· ${marker}`) || base.endsWith(`- ${marker}`) || base.endsWith(`-${marker}`)) return base;
+  return `${base} · ${marker}`;
+}
+
 function topicScopeLabel(tab?: TabMeta): string {
   if (!tab) return t("scope.global");
   if (tab.scope === "global") return tab.workspaceName || t("scope.global");
@@ -262,6 +271,8 @@ export default function App() {
     closeTab,
     reorderTabs,
     syncActiveTab,
+    waitForTabReady,
+    reloadTranscript,
   } = useController();
   const { locale, setPref: setLocalePref } = useI18n();
   const t = useT();
@@ -289,6 +300,7 @@ export default function App() {
   const [composerInsertRequest, setComposerInsertRequest] = useState<ComposerInsertRequest | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [capsOpen, setCapsOpen] = useState(false);
+  const [turnTreeOpen, setTurnTreeOpen] = useState(false);
   const [renamingTopicId, setRenamingTopicId] = useState<string | null>(null);
   const [topicTitleDraft, setTopicTitleDraft] = useState("");
   const topicRenameSkipCommitRef = useRef(false);
@@ -562,6 +574,10 @@ export default function App() {
       }
       if (trimmed === "/memory") {
         void openMemory();
+        return;
+      }
+      if (trimmed === "/turntree") {
+        setTurnTreeOpen(true);
         return;
       }
       const theme = /^\/theme(?:\s+(\S+))?$/.exec(trimmed);
@@ -1131,6 +1147,39 @@ export default function App() {
     [saveDoc, fetchMemory],
   );
 
+  const resolveTurnNodeTab = useCallback(async (node: TurnNodeInfo, mode: "current" | "new"): Promise<{ tabId: string; rollback?: () => Promise<void> } | undefined> => {
+    if (mode === "current") return activeTabId ? { tabId: activeTabId } : undefined;
+    const nodeScope = node.scope === "project" ? "project" : "global";
+    const topic = await app.CreateTopic(
+      nodeScope,
+      nodeScope === "project" ? node.workspaceRoot : "",
+      turnTreeTopicTitle(node.topicTitle || activeTab?.topicTitle, node.turn + 1, t("turnTree.newTopicTitle", { turn: node.turn + 1 })),
+    );
+
+    const target =
+      nodeScope === "project" && node.workspaceRoot
+        ? await openProjectTab(node.workspaceRoot, topic.id)
+        : await openGlobalTab(topic.id);
+    if (target?.id) {
+      const rollback = async () => {
+        await closeTab(target.id);
+        await app.DeleteTopic(topic.id).catch(() => {});
+        await refreshTabMetas();
+        setProjectRevision((value) => value + 1);
+      };
+      try {
+        await waitForTabReady(target.id);
+        await refreshTabMetas();
+        return { tabId: target.id, rollback };
+      } catch (error) {
+        await rollback();
+        throw error;
+      }
+    }
+    await app.DeleteTopic(topic.id).catch(() => {});
+    throw new Error(t("turnTree.openNewFailed"));
+  }, [activeTab?.topicTitle, activeTabId, closeTab, openGlobalTab, openProjectTab, refreshTabMetas, t, waitForTabReady]);
+
   const sidebarExpandBlocked = false;
   const sidebarToggleTitle = sidebarCollapsed
       ? t("sidebar.expand")
@@ -1350,6 +1399,16 @@ export default function App() {
             </div>
             <div className="topicbar__spacer" />
             <div className="topicbar__actions">
+              <Tooltip label={t("turnTree.title")}>
+                <button
+                  className={`topicbar__icon-btn${turnTreeOpen ? " topicbar__icon-btn--active" : ""}`}
+                  type="button"
+                  onClick={() => setTurnTreeOpen(true)}
+                  aria-label={t("turnTree.title")}
+                >
+                  <GitBranch size={16} />
+                </button>
+              </Tooltip>
               <Tooltip label={t("topicBar.more")}>
                 <button className="topicbar__icon-btn">
                   <MoreHorizontal size={16} />
@@ -1571,6 +1630,20 @@ export default function App() {
       {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} onChanged={() => void refreshMeta()} />}
 
       {capsOpen && <CapabilitiesPanel onClose={() => setCapsOpen(false)} />}
+
+      {turnTreeOpen && activeTabId && (
+        <TurnTreePanel
+          tabId={activeTabId}
+          running={state.running}
+          onClose={() => setTurnTreeOpen(false)}
+          resolveNodeTab={resolveTurnNodeTab}
+          onJumped={async (targetTabId) => {
+            await reloadTranscript(targetTabId);
+            await refreshTabMetas();
+            setProjectRevision((value) => value + 1);
+          }}
+        />
+      )}
 
       {needsOnboarding && <OnboardingOverlay onComplete={() => setNeedsOnboarding(false)} />}
     </div>

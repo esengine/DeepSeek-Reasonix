@@ -1400,8 +1400,8 @@ func migrateLegacySessionsIntoGlobalTopics(dir string) []string {
 	}
 	legacyMigrationMu.Lock()
 	defer legacyMigrationMu.Unlock()
-	infos, err := agent.ListSessions(dir)
-	if err != nil || len(infos) == 0 {
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) == 0 {
 		return nil
 	}
 	titles := loadSessionTitles(dir)
@@ -1410,34 +1410,23 @@ func migrateLegacySessionsIntoGlobalTopics(dir string) []string {
 	f := loadProjectsFile()
 
 	var migratedTopicIDs []string
-	for _, info := range infos {
-		if strings.TrimSpace(info.TopicID) != "" {
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".jsonl" {
 			continue
 		}
-		topicID := legacySessionTopicID(info.Path)
-		if topicID == "" {
-			continue
-		}
-		title := strings.TrimSpace(titles[filepath.Base(info.Path)])
-		if title == "" {
-			title = topicTitleFromText(info.Preview)
-		} else if normalized := topicTitleFromText(title); normalized != "" {
-			title = normalized
-		}
-		if title == "" {
-			when := info.LastActivityAt
-			if when.IsZero() {
-				when = info.ModTime
-			}
-			if when.IsZero() {
-				title = "历史会话"
-			} else {
-				title = "历史会话 " + when.Local().Format("2006-01-02")
-			}
-		}
-
-		meta, err := agent.EnsureBranchMeta(info.Path)
+		path := filepath.Join(dir, entry.Name())
+		info, err := entry.Info()
 		if err != nil {
+			continue
+		}
+		meta, ok, err := agent.LoadBranchMeta(path)
+		if err != nil {
+			continue
+		}
+		if !ok {
+			meta = agent.BranchMeta{ID: agent.BranchID(path)}
+		}
+		if strings.TrimSpace(meta.TopicID) != "" {
 			continue
 		}
 		// Only adopt genuinely-global, unscoped legacy sessions. A session that
@@ -1446,11 +1435,38 @@ func migrateLegacySessionsIntoGlobalTopics(dir string) []string {
 		if meta.Scope == "project" || strings.TrimSpace(meta.WorkspaceRoot) != "" {
 			continue
 		}
+		preview, turns := agent.PreviewSessionForTopicMigration(path)
+		if turns == 0 {
+			continue
+		}
+		topicID := legacySessionTopicID(path)
+		if topicID == "" {
+			continue
+		}
+		title := strings.TrimSpace(titles[filepath.Base(path)])
+		if title == "" {
+			title = topicTitleFromText(preview)
+		} else if normalized := topicTitleFromText(title); normalized != "" {
+			title = normalized
+		}
+		if title == "" {
+			when := info.ModTime()
+			if when.IsZero() {
+				title = "历史会话"
+			} else {
+				title = "历史会话 " + when.Local().Format("2006-01-02")
+			}
+		}
+
+		meta, err = agent.EnsureBranchMeta(path)
+		if err != nil {
+			continue
+		}
 		meta.Scope = "global"
 		meta.WorkspaceRoot = ""
 		meta.TopicID = topicID
 		meta.TopicTitle = title
-		if err := agent.SaveBranchMetaPreserveUpdated(info.Path, meta); err != nil {
+		if err := agent.SaveBranchMetaPreserveUpdated(path, meta); err != nil {
 			continue
 		}
 		if strings.TrimSpace(topicTitles[topicID]) == "" {

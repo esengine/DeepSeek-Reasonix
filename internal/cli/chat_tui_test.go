@@ -181,6 +181,28 @@ func TestSoftWrappedInputGrowsComposerAndShrinksTranscript(t *testing.T) {
 	}
 }
 
+func TestComposerGrowInputToFitSoftWrapsLongLines(t *testing.T) {
+	if got := inputDisplayRows(strings.Repeat("a", 35), 10); got != 4 {
+		t.Fatalf("display rows = %d, want 4", got)
+	}
+
+	m := newTestChatTUI()
+	m.input.SetWidth(10)
+	m.input.SetValue(strings.Repeat("a", 35))
+
+	m.growInputToFit()
+
+	if got := m.input.Height(); got <= 1 {
+		t.Fatalf("soft-wrapped composer height = %d, want greater than 1", got)
+	}
+
+	m.input.SetValue(strings.Repeat("a", 500))
+	m.growInputToFit()
+	if got := m.input.Height(); got != maxInputRows {
+		t.Fatalf("soft-wrapped composer height should cap at %d, got %d", maxInputRows, got)
+	}
+}
+
 func TestMCPManagerHidesComposerBox(t *testing.T) {
 	ctrl := control.New(control.Options{})
 	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)

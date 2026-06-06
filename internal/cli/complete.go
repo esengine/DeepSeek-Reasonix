@@ -65,6 +65,7 @@ func (m *chatTUI) slashItems() []compItem {
 		{label: "/resume", insert: "/resume ", hint: i18n.M.CmdResume},
 		{label: "/rewind", insert: "/rewind", hint: i18n.M.CmdRewind},
 		{label: "/tree", insert: "/tree", hint: i18n.M.CmdTree},
+		{label: "/turntree", insert: "/turntree", hint: "turn-level conversation tree"},
 		{label: "/branch", insert: "/branch ", hint: i18n.M.CmdBranch},
 		{label: "/switch", insert: "/switch ", hint: i18n.M.CmdSwitchBranch},
 		{label: "/mcp", insert: "/mcp", hint: i18n.M.CmdMcp},

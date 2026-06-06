@@ -518,8 +518,9 @@ func (a *App) SubmitDisplayToTab(tabID, display, input string) {
 	if ctrl == nil {
 		return
 	}
-	_ = recordSessionDisplay(config.SessionDir(), ctrl.SessionPath(), input, display)
-	ctrl.Submit(input)
+	ctrl.SubmitDisplay(input, display, func(sessionPath, content, display string) error {
+		return recordSessionDisplay(config.SessionDir(), sessionPath, content, display)
+	})
 }
 
 // Cancel aborts the in-flight turn.

@@ -17,6 +17,12 @@ import {
   type ThemeStyle,
 } from "../lib/theme";
 import { TEXT_SIZES, applyTextSize, getTextSize, type TextSize } from "../lib/textSize";
+import {
+  readTurnTreeLayoutPreference,
+  saveTurnTreeLayoutPreference,
+  TURN_TREE_LAYOUT_MODES,
+  type TurnTreeLayoutMode,
+} from "../lib/turnTreeLayout";
 import type { NetworkView, ProviderView, SettingsView } from "../lib/types";
 import { InlineConfirmButton } from "./InlineConfirmButton";
 import { ResizableDrawer } from "./ResizableDrawer";
@@ -38,6 +44,7 @@ export function SettingsPanel({ onClose, onChanged }: { onClose: () => void; onC
   const [theme, setThemeState] = useState<Theme>(getTheme());
   const [themeStyle, setThemeStyleState] = useState<ThemeStyle>(() => getThemeStyle(getTheme()));
   const [textSize, setTextSizeState] = useState<TextSize>(getTextSize());
+  const [turnTreeLayout, setTurnTreeLayoutState] = useState<TurnTreeLayoutMode>(() => readTurnTreeLayoutPreference());
   const [tab, setTab] = useState<SettingsTab>("general");
 
   const reload = async () => setS(normalizeSettingsView(await app.Settings().catch(() => null)));
@@ -109,6 +116,7 @@ export function SettingsPanel({ onClose, onChanged }: { onClose: () => void; onC
                     theme={theme}
                     themeStyle={themeStyle}
                     textSize={textSize}
+                    turnTreeLayout={turnTreeLayout}
                     onTheme={(t) => {
                       const nextStyle = themeForStyle(themeStyle) === getResolvedTheme(t) ? themeStyle : defaultStyleForTheme(t);
                       applyTheme(t, nextStyle, { persist: false });
@@ -126,6 +134,10 @@ export function SettingsPanel({ onClose, onChanged }: { onClose: () => void; onC
                     onTextSize={(size) => {
                       applyTextSize(size);
                       setTextSizeState(size);
+                    }}
+                    onTurnTreeLayout={(mode) => {
+                      saveTurnTreeLayoutPreference(mode);
+                      setTurnTreeLayoutState(mode);
                     }}
                   />
                 )}
@@ -1035,16 +1047,20 @@ function AppearanceSection({
   theme,
   themeStyle,
   textSize,
+  turnTreeLayout,
   onTheme,
   onThemeStyle,
   onTextSize,
+  onTurnTreeLayout,
 }: {
   theme: Theme;
   themeStyle: ThemeStyle;
   textSize: TextSize;
+  turnTreeLayout: TurnTreeLayoutMode;
   onTheme: (t: Theme) => void;
   onThemeStyle: (style: ThemeStyle) => void;
   onTextSize: (size: TextSize) => void;
+  onTurnTreeLayout: (mode: TurnTreeLayoutMode) => void;
 }) {
   const t = useT();
   const themeOptions: Theme[] = ["auto", "light", "dark"];
@@ -1094,6 +1110,20 @@ function AppearanceSection({
           ))}
         </div>
       </div>
+      <div className="set-row set-row--stack">
+        <label className="set-label">{t("settings.turnTreeLayout")}</label>
+        <div className="set-seg">
+          {TURN_TREE_LAYOUT_MODES.map((mode) => (
+            <button
+              key={mode}
+              className={`set-seg__btn${turnTreeLayout === mode ? " set-seg__btn--on" : ""}`}
+              onClick={() => onTurnTreeLayout(mode)}
+            >
+              {turnTreeLayoutName(mode, t)}
+            </button>
+          ))}
+        </div>
+      </div>
     </section>
   );
 }
@@ -1119,6 +1149,17 @@ function textSizeName(size: TextSize, t: ReturnType<typeof useT>): string {
       return t("settings.textSizeLarge");
     case "xlarge":
       return t("settings.textSizeXLarge");
+  }
+}
+
+function turnTreeLayoutName(mode: TurnTreeLayoutMode, t: ReturnType<typeof useT>): string {
+  switch (mode) {
+    case "lanes":
+      return t("settings.turnTreeLayoutLanes");
+    case "metro":
+      return t("settings.turnTreeLayoutMetro");
+    default:
+      return t("settings.turnTreeLayoutTree");
   }
 }
 

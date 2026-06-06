@@ -433,9 +433,12 @@ export function useController() {
     for (let attempt = 0; attempt < 60; attempt += 1) {
       const tabs = asArray(await app.ListTabs().catch(() => [] as TabMeta[]));
       const tab = tabs.find((candidate) => candidate.id === tabId);
-      if (!tab || tab.ready || tab.startupErr) return;
+      if (!tab) throw new Error(`tab ${tabId} is not available`);
+      if (tab.startupErr) throw new Error(tab.startupErr);
+      if (tab.ready) return;
       await new Promise((resolve) => window.setTimeout(resolve, 100));
     }
+    throw new Error(`tab ${tabId} did not become ready`);
   }, []);
 
   const syncActiveTabFromBackend = useCallback(async (reset = false): Promise<string | undefined> => {
@@ -582,6 +585,19 @@ export function useController() {
     } catch { /* ignore */ }
   }, [activeTabId, dispatchTo]);
 
+  const reloadTranscript = useCallback(async (tabId?: string) => {
+    const targetTabId = tabId || activeTabId;
+    if (!targetTabId) return;
+    const messages = asArray(await app.HistoryForTab(targetTabId).catch(() => [] as HistoryMessage[]));
+    dispatchTo(targetTabId, { type: "reset" });
+    if (messages.length) dispatchTo(targetTabId, { type: "history", messages });
+    try {
+      dispatchTo(targetTabId, { type: "meta", meta: await app.MetaForTab(targetTabId) });
+      dispatchTo(targetTabId, { type: "context", context: await app.ContextUsageForTab(targetTabId) });
+      dispatchTo(targetTabId, { type: "checkpoints", checkpoints: asArray(await app.CheckpointsForTab(targetTabId)) });
+    } catch { /* ignore */ }
+  }, [activeTabId, dispatchTo]);
+
   const refreshWorkspaceState = useCallback(async (path: string): Promise<string> => {
     if (path) await syncActiveTabFromBackend(true);
     return path;
@@ -709,9 +725,10 @@ export function useController() {
     activeTabId,
     send, runShell, notice, cancel, approve, answerQuestion, setControllerMode,
     newSession, listSessions, listTrashedSessions, resumeSession, previewSession, deleteSession, restoreSession, purgeTrashedSession, renameSession,
-    refreshMeta, pickWorkspace, switchWorkspace, compact, rewind, setModel, setEffort,
+    refreshMeta, reloadActiveTranscript: reloadTranscript, reloadTranscript, pickWorkspace, switchWorkspace, compact, rewind, setModel, setEffort,
     fetchMemory, remember, forget, saveDoc,
     switchTab, openProjectTab, openGlobalTab, closeTab, reorderTabs,
     syncActiveTab: syncActiveTabFromBackend,
+    waitForTabReady,
   };
 }

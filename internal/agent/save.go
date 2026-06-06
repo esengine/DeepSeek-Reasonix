@@ -194,6 +194,13 @@ func previewSession(path string) (string, int) {
 	return first, turns
 }
 
+// PreviewSessionForTopicMigration returns the same lightweight preview as
+// ListSessions, but lets desktop migration avoid decoding every modern session
+// before it knows whether migration is needed.
+func PreviewSessionForTopicMigration(path string) (string, int) {
+	return previewSession(path)
+}
+
 // ContinueSessionPath returns where a conversation carried into a rebuilt
 // controller (model switch, config change) should keep auto-saving: its existing
 // file when it has one, so the continued session stays a single file instead of

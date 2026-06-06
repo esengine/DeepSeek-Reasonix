@@ -59,6 +59,7 @@ func builtinHelpItems() []compItem {
 		{label: "/new", hint: i18n.M.CmdNew},
 		{label: "/rewind", hint: i18n.M.CmdRewind},
 		{label: "/tree", hint: i18n.M.CmdTree},
+		{label: "/turntree", hint: "turn-level conversation tree"},
 		{label: "/branch", hint: i18n.M.CmdBranch},
 		{label: "/switch", hint: i18n.M.CmdSwitchBranch},
 		{label: "/todo", hint: i18n.M.CmdTodo},

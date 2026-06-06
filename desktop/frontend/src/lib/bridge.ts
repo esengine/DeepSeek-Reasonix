@@ -38,6 +38,7 @@ import type {
   SlashArgsResult,
   TabMeta,
   TopicMeta,
+  TurnTreeData,
   UpdateInfo,
   UpdateProgress,
   WireEvent,
@@ -97,6 +98,11 @@ export interface AppBindings {
   HistoryForTab(tabID: string): Promise<HistoryMessage[]>;
   Checkpoints(): Promise<CheckpointMeta[]>;
   CheckpointsForTab(tabID: string): Promise<CheckpointMeta[]>;
+  TurnTree(): Promise<TurnTreeData>;
+  TurnTreeForTab(tabID: string): Promise<TurnTreeData>;
+  JumpToTurn(branchID: string, turn: number): Promise<void>;
+  JumpToTurnForTab(tabID: string, branchID: string, turn: number): Promise<void>;
+  PersistTurnPreviewForTab(tabID: string): Promise<void>;
   Rewind(turn: number, scope: string): Promise<void>;
   Fork(turn: number): Promise<TabMeta>;
   SummarizeFrom(turn: number): Promise<void>;
@@ -885,6 +891,23 @@ function makeMockApp(): AppBindings {
     async CheckpointsForTab() {
       return this.Checkpoints();
     },
+    async TurnTree() {
+      return {
+        currentKey: "mock-root:1",
+        roots: [{ branchId: "mock-root", branchName: "main", turn: 0, prompt: "Start the desktop mock session", response: "The mock session is ready and the tree can branch from this point.", prefixChars: 96, isCurrent: false, depth: 0, hasFork: true, childCount: 1, key: "mock-root:0", parentKey: "", rootKey: "mock-root:0", rootIndex: 0, scope: "global", workspaceRoot: "", topicId: "mock-topic", topicTitle: "Mock Topic" }],
+        nodes: [
+          { branchId: "mock-root", branchName: "main", turn: 0, prompt: "Start the desktop mock session", response: "The mock session is ready and the tree can branch from this point.", prefixChars: 96, isCurrent: false, depth: 0, hasFork: true, childCount: 1, key: "mock-root:0", parentKey: "", rootKey: "mock-root:0", rootIndex: 0, scope: "global", workspaceRoot: "", topicId: "mock-topic", topicTitle: "Mock Topic" },
+          { branchId: "mock-alt", branchName: "alternate", turn: 1, prompt: "Try an alternate branch from the first turn", response: "This alternate branch explores a different response path.", prefixChars: 195, isCurrent: false, depth: 1, hasFork: false, childCount: 0, key: "mock-alt:1", parentKey: "mock-root:0", rootKey: "mock-root:0", rootIndex: 0, scope: "global", workspaceRoot: "", topicId: "mock-topic", topicTitle: "Mock Topic" },
+          { branchId: "mock-root", branchName: "main", turn: 1, prompt: "Continue on the main line", response: "The main line continues from the original conversation.", prefixChars: 178, isCurrent: true, depth: 0, hasFork: false, childCount: 0, key: "mock-root:1", parentKey: "mock-root:0", rootKey: "mock-root:0", rootIndex: 0, scope: "global", workspaceRoot: "", topicId: "mock-topic", topicTitle: "Mock Topic" },
+        ],
+      };
+    },
+    async TurnTreeForTab() {
+      return this.TurnTree();
+    },
+    async JumpToTurn() {},
+    async JumpToTurnForTab() {},
+    async PersistTurnPreviewForTab() {},
     async Rewind() {},
     async Fork() {
       const active = mockTabs.find((tab) => tab.active) ?? mockTabs[0];
