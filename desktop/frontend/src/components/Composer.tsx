@@ -45,6 +45,10 @@ type PastedBlock = {
   text: string;
 };
 
+type WebkitFileEntry = {
+  isDirectory?: boolean;
+};
+
 function lineCount(s: string): number {
   if (s === "") return 0;
   return s.split(/\r\n|\r|\n/).length;
@@ -573,6 +577,34 @@ export function Composer({
   const hasFileDrag = (dataTransfer: DataTransfer): boolean =>
     Array.from(dataTransfer.items).some((it) => it.kind === "file") || dataTransfer.files.length > 0;
 
+  const getWebkitFileEntry = (item: DataTransferItem): WebkitFileEntry | null => {
+    const getAsEntry = (item as DataTransferItem & { webkitGetAsEntry?: () => WebkitFileEntry | null }).webkitGetAsEntry;
+    return typeof getAsEntry === "function" ? getAsEntry.call(item) : null;
+  };
+
+  const hasDirectoryDrop = (dataTransfer: DataTransfer): boolean =>
+    Array.from(dataTransfer.items).some((item) => item.kind === "file" && getWebkitFileEntry(item)?.isDirectory === true);
+
+  const clearWailsDropTarget = () => {
+    document.querySelectorAll(".wails-drop-target-active").forEach((el) => el.classList.remove("wails-drop-target-active"));
+  };
+
+  const stopNativeFileDrop = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.nativeEvent.stopImmediatePropagation();
+    clearWailsDropTarget();
+  };
+
+  const onFileDropCapture = (e: DragEvent<HTMLDivElement>) => {
+    if (hasWorkspaceReferenceDrag(e.dataTransfer) || !hasFileDrag(e.dataTransfer) || hasDirectoryDrop(e.dataTransfer)) return;
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length === 0) return;
+    stopNativeFileDrop(e);
+    setDragOver(false);
+    attachFiles(files);
+  };
+
   const onDrop = (e: DragEvent<HTMLDivElement>) => {
     const droppedWorkspaceRef = readWorkspaceReferenceDrag(e.dataTransfer);
     if (droppedWorkspaceRef) {
@@ -826,6 +858,7 @@ export function Composer({
     <div
       className={`composer-wrap${decisionPending ? " composer-wrap--decision-pending" : ""}`}
       style={{ "--wails-drop-target": "drop" } as CSSProperties}
+      onDropCapture={onFileDropCapture}
     >
       <AnchoredPopover
         open={workspaceMenuOpen && !!cwd}
