@@ -20,6 +20,7 @@ export const zh: Record<DictKey, string> = {
   "common.auto": "自动",
   "common.busyHint": "请先完成或停止当前回合",
   "common.loading": "加载中…",
+  "app.splashSubtitle": "Agent Workspace",
 
   // 顶栏
   "topbar.history": "历史",

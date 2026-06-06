@@ -19,6 +19,7 @@ export const en = {
   "common.auto": "auto",
   "common.busyHint": "Finish or stop the current turn first",
   "common.loading": "Loading…",
+  "app.splashSubtitle": "Agent Workspace",
 
   // top bar
   "topbar.history": "History",

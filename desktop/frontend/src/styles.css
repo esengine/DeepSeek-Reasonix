@@ -784,6 +784,94 @@ a[href] {
     opacity: 1;
   }
 }
+
+/* Startup splash restored from the v0.50 desktop intro. It masks cold boot while
+   the Wails bridge and background startup work settle, then yields to the app. */
+.startup-splash {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  transition: opacity 0.42s ease;
+}
+.startup-splash[data-leaving="true"] {
+  opacity: 0;
+  pointer-events: none;
+}
+.startup-splash__card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  animation: startup-splash-in 0.55s cubic-bezier(0.2, 0.7, 0.1, 1) both;
+}
+.startup-splash__mark {
+  width: 64px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  filter: drop-shadow(0 14px 22px color-mix(in srgb, #0153e5 34%, transparent));
+  margin-bottom: 22px;
+}
+.startup-splash__mark img {
+  width: 64px;
+  height: 64px;
+  display: block;
+}
+.startup-splash__name {
+  font-size: 27px;
+  font-weight: 650;
+  letter-spacing: 0;
+  line-height: 1.1;
+  color: var(--fg);
+}
+.startup-splash__sub {
+  margin-top: 9px;
+  font-size: 13px;
+  letter-spacing: 0.05em;
+  color: var(--fg-faint);
+}
+.startup-splash__dots {
+  display: flex;
+  gap: 8px;
+  margin-top: 31px;
+}
+.startup-splash__dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--fg-faint);
+  animation: startup-splash-pulse 1s ease-in-out infinite;
+}
+.startup-splash__dots span:nth-child(2) {
+  animation-delay: 0.16s;
+}
+.startup-splash__dots span:nth-child(3) {
+  animation-delay: 0.32s;
+}
+@keyframes startup-splash-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes startup-splash-pulse {
+  0%, 100% {
+    opacity: 0.25;
+    transform: scale(0.8);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
 .transcript {
   position: relative;
   height: 100%;
