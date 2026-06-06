@@ -204,7 +204,8 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	}
 	searchSpec := builtin.ResolveSearch(cfg.Tools.Search.Engine, cfg.Tools.Search.RgPath, stderr)
 	bashTimeout := time.Duration(cfg.BashTimeoutSeconds()) * time.Second
-	addBuiltins(reg, cfg.Tools.Enabled, cfg.WriteRootsForRoot(root), bashSpec, bashTimeout, searchSpec, stderr, root)
+	proxyURL := netclient.ResolveProxyURL(proxySpec)
+	addBuiltins(reg, cfg.Tools.Enabled, cfg.WriteRootsForRoot(root), bashSpec, bashTimeout, searchSpec, stderr, root, proxyURL)
 	// Always construct a host, even with no plugins configured, so the controller's
 	// host pointer is stable for the session and `/mcp add` can hot-add into it.
 	pluginHost := plugin.NewHost()
@@ -861,12 +862,12 @@ func NewProviderWithProxy(e *config.ProviderEntry, proxy netclient.ProxySpec) (p
 // instance bound to writeRoots (preserving registry order).
 // When workDir is non-empty, tools resolve relative paths against it instead of
 // the process cwd, enabling concurrent multi-project sessions.
-func addBuiltins(reg *tool.Registry, enabled, writeRoots []string, bashSpec sandbox.Spec, bashTimeout time.Duration, searchSpec builtin.SearchSpec, stderr io.Writer, workDir string) {
+func addBuiltins(reg *tool.Registry, enabled, writeRoots []string, bashSpec sandbox.Spec, bashTimeout time.Duration, searchSpec builtin.SearchSpec, stderr io.Writer, workDir string, proxyURL string) {
 	// If a workspace directory is set, use workspace-bound tools that resolve
 	// paths relative to that directory. Otherwise fall back to the process-cwd
 	// compile-time builtins.
 	if workDir != "" {
-		ws := builtin.Workspace{Dir: workDir, WriteRoots: writeRoots, Bash: bashSpec, BashTimeout: bashTimeout, Search: searchSpec}
+		ws := builtin.Workspace{Dir: workDir, WriteRoots: writeRoots, Bash: bashSpec, BashTimeout: bashTimeout, Search: searchSpec, ProxyURL: proxyURL}
 		for _, t := range ws.Tools(enabled...) {
 			reg.Add(t)
 		}
@@ -888,8 +889,8 @@ func addBuiltins(reg *tool.Registry, enabled, writeRoots []string, bashSpec sand
 	}
 	// Replace the unconfined defaults with confined instances (registry order is
 	// preserved on replace): file-writers bound to the workspace, bash to the OS
-	// sandbox. Only replace tools actually enabled/present.
-	confined := append(builtin.ConfineWriters(writeRoots), builtin.ConfineBash(bashSpec, bashTimeout), builtin.ConfineSearch(searchSpec))
+	// sandbox, web_fetch to the proxy. Only replace tools actually enabled/present.
+	confined := append(builtin.ConfineWriters(writeRoots), builtin.ConfineBash(bashSpec, bashTimeout), builtin.ConfineSearch(searchSpec), builtin.ConfineWebFetch(proxyURL))
 	for _, t := range confined {
 		if _, ok := reg.Get(t.Name()); ok {
 			reg.Add(t)
