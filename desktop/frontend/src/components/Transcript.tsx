@@ -99,6 +99,25 @@ export function Transcript({
     if (el) stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
   };
 
+  // Track question count so we can detect when the user sends a new message.
+  const prevQuestionsLen = useRef(0);
+
+  // When the user submits a new message (questions array grows), force-scroll
+  // to the bottom regardless of the current stick state — the user's own action
+  // should reveal the new interaction.
+  useEffect(() => {
+    if (questions.length > prevQuestionsLen.current) {
+      stick.current = true;
+      const el = scrollRef.current;
+      if (el) {
+        requestAnimationFrame(() => {
+          el.scrollTop = el.scrollHeight;
+        });
+      }
+    }
+    prevQuestionsLen.current = questions.length;
+  }, [questions]);
+
   // Follow new content by setting scrollTop directly (no scrollIntoView fighting
   // the browser's scroll anchoring), and inside rAF so layout has settled first —
   // together with plain-text streaming this keeps the view from jittering. The
@@ -277,10 +296,7 @@ function QuestionJumpBar({ questions, onJump }: { questions: QuestionAnchor[]; o
 
   useEffect(() => {
     if (questions.length === 0) return;
-    setActive((cur) => {
-      if (cur !== null && questions.some((question) => question.turn === cur)) return cur;
-      return questions[questions.length - 1]?.turn ?? null;
-    });
+    setActive(questions[questions.length - 1]?.turn ?? null);
   }, [questions]);
 
   useEffect(() => {
