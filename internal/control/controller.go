@@ -14,6 +14,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -45,6 +46,10 @@ import (
 	"reasonix/internal/skill"
 	"reasonix/internal/tool"
 )
+
+// ErrTurnRunning reports that a caller tried to start a second foreground turn
+// while one is already active in the same Controller.
+var ErrTurnRunning = errors.New("turn already running")
 
 // Controller drives one chat session. Construct with New; drive with the command
 // methods; observe through the Sink passed in Options.
@@ -349,6 +354,32 @@ const planApprovedMessage = "Plan approved — plan mode is off; you're cleared 
 // `Run` path (which doesn't call this) never blocks on a prompt.
 func (c *Controller) runTurn(ctx context.Context, input string) error {
 	return c.runTurnWithRaw(ctx, input, input)
+}
+
+// RunTurn executes one foreground turn synchronously through the same lifecycle
+// used by interactive frontends: auto-plan, transient memory/background-job
+// composition, checkpoints, hooks, and plan approval. It is for transports that
+// need a blocking request/response boundary, such as ACP session/prompt.
+func (c *Controller) RunTurn(ctx context.Context, input string) error {
+	ctx, cancel := context.WithCancel(ctx)
+	c.mu.Lock()
+	if c.running {
+		c.mu.Unlock()
+		cancel()
+		return ErrTurnRunning
+	}
+	c.cancel = cancel
+	c.running = true
+	c.mu.Unlock()
+
+	defer func() {
+		c.mu.Lock()
+		c.running = false
+		c.cancel = nil
+		c.mu.Unlock()
+		cancel()
+	}()
+	return c.runTurn(ctx, input)
 }
 
 func (c *Controller) runTurnWithRaw(ctx context.Context, input, raw string) error {

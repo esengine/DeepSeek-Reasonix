@@ -70,6 +70,10 @@ type Options struct {
 	// so each tab loads its own config/skills/hooks without changing the process
 	// cwd — enabling concurrent multi-project sessions.
 	WorkspaceRoot string
+	// ExtraPlugins are session-scoped MCP servers supplied by a host transport
+	// (for example ACP session/new). They are connected eagerly for this
+	// controller but are not persisted to reasonix.toml.
+	ExtraPlugins []plugin.Spec
 }
 
 // Build loads config, resolves the model(s), and returns a Controller wrapping a
@@ -302,6 +306,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 				Text: "codegraph: not installed — run `reasonix codegraph install` to enable symbol-graph tools"})
 		}
 	}
+	eagerSpecs = append(eagerSpecs, opts.ExtraPlugins...)
 
 	// Apply caller-supplied stderr override to every spec across tiers.
 	if opts.Stderr != nil {

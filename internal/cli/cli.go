@@ -44,6 +44,9 @@ func Run(args []string, version string) int {
 	if len(args) > 0 {
 		cmd = args[0]
 	}
+	if cmd == "--acp" {
+		cmd = "acp"
+	}
 	if shouldMigrateLegacyConfigForCLI(cmd) {
 		migrateLegacyConfigForCLI()
 	}

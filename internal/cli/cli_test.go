@@ -97,6 +97,20 @@ func TestMetadataCommandsDoNotProbeTerminalTheme(t *testing.T) {
 	}
 }
 
+func TestRunDispatchesACPLongFlagAlias(t *testing.T) {
+	errOut := captureStderr(t, func() {
+		if rc := Run([]string{"--acp", "-h"}, "test-version"); rc != 2 {
+			t.Fatalf("Run --acp -h rc = %d, want 2", rc)
+		}
+	})
+	if !strings.Contains(errOut, "Usage of acp:") {
+		t.Fatalf("--acp should dispatch to the ACP command, got stderr:\n%s", errOut)
+	}
+	if strings.Contains(errOut, "unknown command") {
+		t.Fatalf("--acp should not be treated as an unknown command:\n%s", errOut)
+	}
+}
+
 func TestRunMigratesLegacyConfigBeforeConfigOnlyCommands(t *testing.T) {
 	isolateCLIConfigHome(t)
 	legacyPath := filepath.Join(filepath.Dir(config.UserConfigPath()), "reasonix.toml")
@@ -688,4 +702,25 @@ func TestWriteDefaultConfigDisablesCodegraph(t *testing.T) {
 	if c := config.LoadForEdit(path); c.Codegraph.Enabled {
 		t.Fatal("a freshly scaffolded config left codegraph enabled; new users should start without it")
 	}
+}
+
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	old := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = w
+	defer func() { os.Stderr = old }()
+
+	fn()
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
 }
