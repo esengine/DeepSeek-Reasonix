@@ -16,6 +16,7 @@ func init() { tool.RegisterBuiltin(deleteRange{}) }
 type deleteRange struct {
 	roots   []string
 	workDir string
+	fileEnc string
 }
 
 func (deleteRange) Name() string { return "delete_range" }

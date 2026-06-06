@@ -17,6 +17,7 @@ func init() { tool.RegisterBuiltin(multiEdit{}) }
 type multiEdit struct {
 	roots   []string
 	workDir string
+	fileEnc string
 }
 
 // editStep is one edit in a multi_edit operation. Mirrors edit_file's args

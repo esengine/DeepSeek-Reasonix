@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	fileenc "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/tool"
 )
 
@@ -16,9 +17,12 @@ func init() { tool.RegisterBuiltin(writeFile{}) }
 // workspace (see confine); the zero value registered at init is unconfined and
 // is overridden per run by ConfineWriters. workDir, when non-empty, is the
 // directory a relative path resolves against (see resolveIn).
+// fileEnc is the project-level encoding override; empty means auto-detect for
+// existing files and UTF-8 for new files.
 type writeFile struct {
 	roots   []string
 	workDir string
+	fileEnc string // project encoding override (e.g. "GB18030"); empty = auto-detect
 }
 
 func (writeFile) Name() string { return "write_file" }
@@ -48,15 +52,31 @@ func (w writeFile) Execute(ctx context.Context, args json.RawMessage) (string, e
 	if err := confine(w.roots, p.Path); err != nil {
 		return "", err
 	}
-	if existing, err := os.ReadFile(p.Path); err == nil && string(existing) == p.Content {
-		return fmt.Sprintf("%s already contains the exact content; no changes made", p.Path), nil
+
+	// Determine the encoding to use when writing.
+	// For existing files: detect and preserve the original encoding.
+	// For new files: use the project config encoding if set, else UTF-8.
+	enc := fileenc.UTF8
+	if existing, detEnc, readErr := readFileEncoded(p.Path); readErr == nil {
+		// File exists — use its detected encoding for round-trip.
+		enc = detEnc
+		// No-op check: same content already present?
+		if existing == p.Content {
+			return fmt.Sprintf("%s already contains the exact content; no changes made", p.Path), nil
+		}
+	} else if w.fileEnc != "" {
+		// New file — honour project encoding setting.
+		if forced, ok := fileenc.ParseName(w.fileEnc); ok {
+			enc = forced
+		}
 	}
+
 	if dir := filepath.Dir(p.Path); dir != "" && dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return "", fmt.Errorf("mkdir %s: %w", dir, err)
 		}
 	}
-	if err := os.WriteFile(p.Path, []byte(p.Content), 0o644); err != nil {
+	if err := writeFileEncoded(p.Path, p.Content, enc); err != nil {
 		return "", fmt.Errorf("write %s: %w", p.Path, err)
 	}
 	return fmt.Sprintf("wrote %d bytes to %s", len(p.Content), p.Path), nil

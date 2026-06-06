@@ -201,6 +201,11 @@ export function WorkspacePanel({
   const [recentOpen, setRecentOpen] = useState(false);
   const recentAnchorRef = useRef<HTMLButtonElement>(null);
   const openDirsRef = useRef(openDirs);
+  const [fileEncoding, setFileEncoding] = useState("");
+
+  useEffect(() => {
+    app.Settings().then((s) => setFileEncoding(s.fileEncoding ?? "")).catch(() => {});
+  }, []);
 
   useEffect(() => {
     openDirsRef.current = openDirs;
@@ -312,7 +317,7 @@ export function WorkspacePanel({
     let live = true;
     setLoadingPreview(true);
     app
-      .ReadFile(selectedPath)
+      .ReadFile(selectedPath, fileEncoding)
       .then((next) => {
         if (live) setPreview(next);
       })
@@ -557,7 +562,7 @@ export function WorkspacePanel({
     const target = treeMenu;
     setTreeMenu(null);
     try {
-      const file = await app.ReadFile(target.path);
+      const file = await app.ReadFile(target.path, fileEncoding);
       if (file.err || file.binary) {
         onAddToChat?.(formatWorkspaceReference(target.path, false));
         return;
@@ -881,6 +886,25 @@ export function WorkspacePanel({
             )}
           </div>
         )}
+
+        <div className="workspace-encoding-row">
+          <label className="workspace-encoding-label">{t("settings.fileEncoding")}</label>
+          <select
+            className="workspace-encoding-select"
+            value={fileEncoding}
+            onChange={(e) => {
+              const v = e.target.value;
+              setFileEncoding(v);
+              void app.SetFileEncoding(v);
+            }}
+          >
+            <option value="">{t("settings.fileEncoding.auto")}</option>
+            <option value="UTF-8">UTF-8</option>
+            <option value="GB18030">GB18030</option>
+            <option value="UTF-16 LE">UTF-16 LE</option>
+            <option value="UTF-16 BE">UTF-16 BE</option>
+          </select>
+        </div>
 
         <div className="workspace-search">
           <Search size={14} />

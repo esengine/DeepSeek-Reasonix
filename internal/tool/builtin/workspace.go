@@ -23,6 +23,7 @@ type Workspace struct {
 	WriteRoots []string
 	Bash       sandbox.Spec
 	Search     SearchSpec
+	FileEncoding string // project-level encoding (e.g. "GB18030"); empty = auto-detect
 }
 
 // Tools returns the built-in tools bound to the workspace, ready to Add to a
@@ -39,12 +40,12 @@ func (w Workspace) Tools(enabled ...string) []tool.Tool {
 
 	overrides := map[string]tool.Tool{
 		"read_file":     readFile{workDir: w.Dir},
-		"write_file":    writeFile{workDir: w.Dir, roots: roots},
-		"edit_file":     editFile{workDir: w.Dir, roots: roots},
-		"multi_edit":    multiEdit{workDir: w.Dir, roots: roots},
+		"write_file":    writeFile{workDir: w.Dir, roots: roots, fileEnc: w.FileEncoding},
+		"edit_file":     editFile{workDir: w.Dir, roots: roots, fileEnc: w.FileEncoding},
+		"multi_edit":    multiEdit{workDir: w.Dir, roots: roots, fileEnc: w.FileEncoding},
 		"notebook_edit": notebookEdit{workDir: w.Dir, roots: roots},
-		"delete_range":  deleteRange{workDir: w.Dir, roots: roots},
-		"delete_symbol": deleteSymbol{workDir: w.Dir, roots: roots},
+		"delete_range":  deleteRange{workDir: w.Dir, roots: roots, fileEnc: w.FileEncoding},
+		"delete_symbol": deleteSymbol{workDir: w.Dir, roots: roots, fileEnc: w.FileEncoding},
 		"bash":          bash{workDir: w.Dir, sb: w.Bash},
 		"ls":            listDir{workDir: w.Dir},
 		"glob":          globTool{workDir: w.Dir},

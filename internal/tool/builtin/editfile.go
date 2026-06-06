@@ -17,6 +17,7 @@ func init() { tool.RegisterBuiltin(editFile{}) }
 type editFile struct {
 	roots   []string
 	workDir string
+	fileEnc string
 }
 
 func (editFile) Name() string { return "edit_file" }

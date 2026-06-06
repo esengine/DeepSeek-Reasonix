@@ -20,6 +20,7 @@ func init() { tool.RegisterBuiltin(deleteSymbol{}) }
 type deleteSymbol struct {
 	roots   []string
 	workDir string
+	fileEnc string
 }
 
 type symbolMatch struct {

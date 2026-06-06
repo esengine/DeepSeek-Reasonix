@@ -194,6 +194,7 @@ func acpBuiltinTools(cfg *config.Config, cwd string, writeRoots []string) []tool
 		WriteRoots: writeRoots,
 		Bash:       bashSpec,
 		Search:     builtin.ResolveSearch(cfg.Tools.Search.Engine, cfg.Tools.Search.RgPath, nil),
+		FileEncoding: cfg.FileEncoding,
 	}
 	return ws.Tools(cfg.Tools.Enabled...)
 }

@@ -81,6 +81,7 @@ type SettingsView struct {
 	Network           NetworkView     `json:"network"`
 	Agent             AgentView       `json:"agent"`
 	DesktopLanguage   string          `json:"desktopLanguage"`
+	FileEncoding      string          `json:"fileEncoding"`
 	DesktopTheme      string          `json:"desktopTheme"`
 	DesktopThemeStyle string          `json:"desktopThemeStyle"`
 	CloseBehavior     string          `json:"closeBehavior"`
@@ -155,6 +156,7 @@ func (a *App) Settings() SettingsView {
 		},
 		Agent:             AgentView{Temperature: cfg.Agent.Temperature, MaxSteps: cfg.Agent.MaxSteps, SystemPrompt: cfg.Agent.SystemPrompt},
 		DesktopLanguage:   cfg.DesktopLanguage(),
+		FileEncoding:      cfg.FileEncoding,
 		DesktopTheme:      cfg.DesktopTheme(),
 		DesktopThemeStyle: cfg.DesktopThemeStyle(),
 		CloseBehavior:     cfg.DesktopCloseBehavior(),
@@ -174,6 +176,11 @@ func (a *App) Settings() SettingsView {
 			SupportedEfforts: nonNil(p.SupportedEfforts),
 			DefaultEffort:    p.DefaultEffort,
 		})
+	}
+	// Override fileEncoding from the merged (project + user) config so the
+	// workspace panel shows the project-level encoding, not just the user-level.
+	if merged, err := config.LoadForRoot(a.activeWorkspaceRoot()); err == nil && merged.FileEncoding != "" {
+		v.FileEncoding = merged.FileEncoding
 	}
 	return v
 }
@@ -549,6 +556,29 @@ func (a *App) SetAgentParams(temperature float64, maxSteps int, systemPrompt str
 		c.Agent.SystemPrompt = systemPrompt
 		return nil
 	})
+}
+
+// SetFileEncoding sets the project-level file encoding (e.g. "UTF-8", "GB18030").
+// The value is written to the project's reasonix.toml (not the global user config),
+// so each workspace can have its own encoding. Empty string means auto-detect.
+func (a *App) SetFileEncoding(encoding string) error {
+	root := a.activeWorkspaceRoot()
+	enc := strings.TrimSpace(encoding)
+
+	projectTOML := filepath.Join(root, "reasonix.toml")
+	if _, err := os.Stat(projectTOML); err == nil {
+		// Project config exists — load, modify, save.
+		cfg := config.LoadForEdit(projectTOML)
+		cfg.FileEncoding = enc
+		return cfg.SaveTo(projectTOML)
+	}
+
+	// No project config yet — create a minimal one.
+	body := fmt.Sprintf("# Reasonix project configuration.\n# Project-local overrides are merged over the user config.\n\nfile_encoding = %q\n", enc)
+	if err := os.MkdirAll(filepath.Dir(projectTOML), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(projectTOML, []byte(body), 0o644)
 }
 
 // trimList drops blank entries from a string slice (and returns a non-nil slice).
