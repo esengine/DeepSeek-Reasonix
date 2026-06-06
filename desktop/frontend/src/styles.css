@@ -1301,6 +1301,72 @@ a[href] {
   border-radius: 5px;
   padding: 1px 5px;
 }
+
+/* ── inline math (KaTeX + hover source) ─────────────────────────────────── */
+.inline-math {
+  position: relative;
+  display: inline;
+}
+.inline-math .katex {
+  font-size: 1.05em;
+}
+.inline-math__source {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  background: var(--bg-elev-1);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  z-index: 10;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.inline-math__source code {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+/* ── display math (KaTeX + copy) ────────────────────────────────────────── */
+.block-math {
+  position: relative;
+  margin: 12px 0;
+  padding: 12px 16px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  overflow-x: auto;
+}
+.block-math .katex-display {
+  margin: 4px 0;
+}
+.block-math__copy {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 2;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.block-math:hover .block-math__copy {
+  opacity: 1;
+}
+.block-math-fallback {
+  margin: 12px 0;
+  padding: 11px 13px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-x: auto;
+}
 .md table {
   border-collapse: collapse;
   margin: 0 0 12px;

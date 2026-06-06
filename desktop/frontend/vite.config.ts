@@ -43,8 +43,6 @@ export default defineConfig({
           "vendor-markdown": [
             "react-markdown",
             "remark-gfm",
-            "remark-math",
-            "rehype-katex",
             "katex",
           ],
           "vendor-highlight": ["highlight.js"],
