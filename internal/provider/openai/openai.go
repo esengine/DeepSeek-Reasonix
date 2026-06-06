@@ -164,7 +164,15 @@ func (c *client) streamWithReconnect(ctx context.Context, resp *http.Response, n
 		if err == nil {
 			return
 		}
-		if emitted || attempt >= maxStreamReconnects || !provider.IsConnReset(err) {
+		if !provider.IsConnReset(err) {
+			out <- provider.Chunk{Type: provider.ChunkError, Err: err}
+			return
+		}
+		if emitted {
+			out <- provider.Chunk{Type: provider.ChunkError, Err: &provider.StreamInterruptedError{Err: err}}
+			return
+		}
+		if attempt >= maxStreamReconnects {
 			out <- provider.Chunk{Type: provider.ChunkError, Err: err}
 			return
 		}
