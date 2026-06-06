@@ -174,7 +174,22 @@
     --accent-fg: #fff;
     --accent-soft: rgba(47, 95, 168, 0.12);
     --accent-strong: #244f91;
-    --ok: #5d9b66;
+    --ok: #15803d;
+    --warn: #b45309;
+    --err: #dc2626;
+    --add-bg: rgba(21, 128, 61, 0.08);
+    --add-fg: #15803d;
+    --del-bg: rgba(220, 38, 38, 0.08);
+    --del-fg: #dc2626;
+    /* syntax (light) */
+    --hl-keyword: #cf222e;
+    --hl-string: #0a3069;
+    --hl-number: #0550ae;
+    --hl-comment: #6e7781;
+    --hl-func: #8250df;
+    --hl-type: #116329;
+    --hl-builtin: #0550ae;
+    --hl-meta: #6e7781;
     --list-row-title: #334155;
     --list-row-meta: #8a94a6;
     --list-row-hover-bg: #e8edf4;
@@ -223,7 +238,22 @@
   --accent-fg: #fff;
   --accent-soft: rgba(47, 95, 168, 0.12);
   --accent-strong: #244f91;
-  --ok: #5d9b66;
+  --ok: #15803d;
+  --warn: #b45309;
+  --err: #dc2626;
+  --add-bg: rgba(21, 128, 61, 0.08);
+  --add-fg: #15803d;
+  --del-bg: rgba(220, 38, 38, 0.08);
+  --del-fg: #dc2626;
+  /* syntax (light) */
+  --hl-keyword: #cf222e;
+  --hl-string: #0a3069;
+  --hl-number: #0550ae;
+  --hl-comment: #6e7781;
+  --hl-func: #8250df;
+  --hl-type: #116329;
+  --hl-builtin: #0550ae;
+  --hl-meta: #6e7781;
   --list-row-title: #334155;
   --list-row-meta: #8a94a6;
   --list-row-hover-bg: #e8edf4;
@@ -2976,10 +3006,15 @@ a[href] {
 }
 .hljs-string,
 .hljs-regexp,
-.hljs-addition,
 .hljs-attribute,
 .hljs-meta .hljs-string {
   color: var(--hl-string);
+}
+.hljs-addition {
+  color: var(--add-fg);
+}
+.hljs-deletion {
+  color: var(--del-fg);
 }
 .hljs-number,
 .hljs-symbol,
