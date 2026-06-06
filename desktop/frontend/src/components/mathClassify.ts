@@ -14,5 +14,8 @@ export function isLikelyInlineMath(math: string): boolean {
   if (/^v\d+(?:\.\d+)*$/i.test(math)) return false;
   if (/^[A-Za-z]{2,}$/.test(math)) return false;
 
-  return /^[A-Za-z]$/.test(math);
+  // Only allow a single lowercase letter as a math token. Capitalised
+  // single letters (I, A, V) are too often English / Roman numerals /
+  // acronyms to risk misclassifying them.
+  return /^[a-z]$/.test(math);
 }
