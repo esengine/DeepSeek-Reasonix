@@ -892,7 +892,7 @@ export function Composer({
             {filteredWorkspaces.length === 0 && <div className="workspace-switcher__empty">{t("composer.noProjectMatches")}</div>}
           </div>
           <div className="workspace-switcher__actions">
-            <button onClick={() => void chooseWorkspace()}>
+            <button type="button" onClick={() => void chooseWorkspace()}>
               <FolderPlus size={15} />
               <span>{t("composer.addProject")}</span>
             </button>

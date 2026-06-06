@@ -7579,6 +7579,40 @@ a[href] {
   font-size: 12px;
 }
 
+.project-tree__empty-state {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 2px 0 0;
+}
+
+.project-tree__empty-primary {
+  --wails-draggable: no-drag;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: 32px;
+  margin: 0 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg-elev));
+  color: var(--accent-strong);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 620;
+}
+
+.project-tree__empty-primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 21%, var(--bg-elev));
+  color: var(--fg);
+}
+
+.project-tree__empty-primary:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
 .context-inspector,
 .workbench-dock {
   grid-row: 2;

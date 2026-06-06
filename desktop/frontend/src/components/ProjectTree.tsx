@@ -763,7 +763,18 @@ export function ProjectTree({
           query.trim() ? (
             <div className="project-tree__empty">{t("projectTree.emptyNoMatch")}</div>
           ) : (
-            <div className="project-tree__empty project-tree__empty--subtle">{t("projectTree.emptyNoProjects")}</div>
+            <div className="project-tree__empty-state">
+              <div className="project-tree__empty project-tree__empty--subtle">{t("projectTree.emptyNoProjects")}</div>
+              <button
+                type="button"
+                className="project-tree__empty-primary"
+                onClick={() => void handleAddProject()}
+                disabled={addingProject}
+              >
+                <FolderPlus size={14} />
+                <span>{t("projectTree.addProjectTooltip")}</span>
+              </button>
+            </div>
           )
         ) : (
           visibleTree.map((node) => renderNode(node, 0))

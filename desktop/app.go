@@ -1013,12 +1013,54 @@ func (a *App) PickWorkspace() (string, error) {
 	a.mu.RUnlock()
 	dir, err := runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
 		Title:            "Choose working folder",
-		DefaultDirectory: cur,
+		DefaultDirectory: dialogDefaultDirectory(cur),
 	})
 	if err != nil || dir == "" {
 		return "", err
 	}
 	return a.SwitchWorkspace(dir)
+}
+
+func dialogDefaultDirectory(preferred string) string {
+	if dir := nearestExistingDirectory(preferred); dir != "" {
+		return dir
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		if dir := nearestExistingDirectory(cwd); dir != "" {
+			return dir
+		}
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		if dir := nearestExistingDirectory(home); dir != "" {
+			return dir
+		}
+	}
+	return ""
+}
+
+func nearestExistingDirectory(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs
+	}
+	for {
+		info, err := os.Stat(path)
+		if err == nil {
+			if info.IsDir() {
+				return path
+			}
+			path = filepath.Dir(path)
+			continue
+		}
+		parent := filepath.Dir(path)
+		if parent == path {
+			return ""
+		}
+		path = parent
+	}
 }
 
 func (a *App) ListWorkspaces() []WorkspaceMeta {
@@ -1753,7 +1795,7 @@ func (a *App) PickSkillFolder() (string, error) {
 	cur, _ := os.Getwd()
 	dir, err := runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
 		Title:            "Choose skills folder",
-		DefaultDirectory: cur,
+		DefaultDirectory: dialogDefaultDirectory(cur),
 	})
 	if err != nil || dir == "" {
 		return "", err
