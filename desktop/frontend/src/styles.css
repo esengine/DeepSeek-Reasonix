@@ -1060,12 +1060,18 @@ a[href] {
 }
 .msg--user {
   display: flex;
-  gap: 10px;
-  align-items: baseline;
+  gap: 8px;
+  align-items: flex-start;
   color: var(--fg);
+  background: var(--accent-soft);
+  border-radius: 14px 14px 4px 14px;
+  padding: 10px 14px;
+  margin-left: auto;
+  margin-right: 0;
+  max-width: 75%;
+  width: fit-content;
 }
 .rewind {
-  margin-left: auto;
   flex-shrink: 0;
   position: relative;
 }
@@ -1167,15 +1173,14 @@ a[href] {
   background: color-mix(in srgb, var(--danger) 12%, transparent);
 }
 .msg__caret {
-  color: var(--accent);
-  font-family: var(--mono);
-  font-weight: 600;
-  flex-shrink: 0;
+  display: none;
 }
 .msg--user .msg__text {
   white-space: pre-wrap;
   word-break: break-word;
   font-weight: 450;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 .msg--assistant {
   color: var(--fg);
