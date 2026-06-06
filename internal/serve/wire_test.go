@@ -65,4 +65,11 @@ func TestToWire(t *testing.T) {
 			t.Errorf("turn_done = %+v", w)
 		}
 	})
+
+	t.Run("steer", func(t *testing.T) {
+		w := toWire(event.Event{Kind: event.Steer, Text: "mid-turn guidance"})
+		if w.Kind != "steer" || w.Text != "mid-turn guidance" {
+			t.Errorf("steer = %+v", w)
+		}
+	})
 }

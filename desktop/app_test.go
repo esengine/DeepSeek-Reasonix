@@ -1190,6 +1190,37 @@ func (r *blockingRunner) Run(ctx context.Context, _ string) error {
 	}
 }
 
+func TestSteerForTabNoPanic(t *testing.T) {
+	dir := t.TempDir()
+	path := agent.NewSessionPath(dir, "steer-test")
+	sess := agent.NewSession("sys")
+	exec := agent.New(nil, nil, sess, agent.Options{}, event.Discard)
+
+	ctrl := control.New(control.Options{
+		Executor:    exec,
+		Sink:        event.Discard,
+		SessionDir:  dir,
+		SessionPath: path,
+		Label:       "steer-tab",
+	})
+	defer ctrl.Close()
+
+	app := NewApp()
+	app.tabs = map[string]*WorkspaceTab{
+		"tab-a": {ID: "tab-a", Scope: "global", Ready: true, Ctrl: ctrl, model: "test"},
+	}
+	app.activeTabID = "tab-a"
+
+	// SteerForTab with valid tab — should not panic.
+	app.SteerForTab("tab-a", "guidance")
+
+	// SteerForTab with non-existent tab — should not panic.
+	app.SteerForTab("nonexistent", "should not panic")
+
+	// App.Steer (legacy, no tab ID) — no panic.
+	app.Steer("fallback guidance")
+}
+
 func waitNotRunning(t *testing.T, ctrl *control.Controller) {
 	t.Helper()
 	deadline := time.Now().Add(time.Second)

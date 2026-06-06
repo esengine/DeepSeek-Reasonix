@@ -165,10 +165,18 @@ func TestToWireTurnDoneNoError(t *testing.T) {
 
 // --- kindNames completeness ---
 
+func TestToWireSteer(t *testing.T) {
+	e := event.Event{Kind: event.Steer, Text: "please use smaller diffs"}
+	w := toWire(e)
+	if w.Kind != "steer" || w.Text != "please use smaller diffs" {
+		t.Errorf("steer wire = %+v", w)
+	}
+}
+
 func TestKindNamesComplete(t *testing.T) {
-	// ToolProgress is the last Kind; every value through it must have a wire name,
+	// Steer is the last Kind; every value through it must have a wire name,
 	// or toWire emits kind:"" and the frontend reducer falls through to undefined.
-	for k := event.Kind(0); k <= event.ToolProgress; k++ {
+	for k := event.Kind(0); k <= event.Steer; k++ {
 		if kindNames[k] == "" {
 			t.Errorf("kind %d has no wire name — toWire would emit kind:\"\"", k)
 		}

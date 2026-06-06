@@ -533,6 +533,18 @@ func (a *App) CancelTab(tabID string) {
 	}
 }
 
+// Steer sends mid-turn guidance to the agent without interrupting the in-flight request.
+func (a *App) Steer(text string) {
+	a.SteerForTab("", text)
+}
+
+// SteerForTab sends mid-turn guidance to a specific tab's agent.
+func (a *App) SteerForTab(tabID, text string) {
+	if ctrl := a.ctrlByTabID(tabID); ctrl != nil {
+		ctrl.Steer(text)
+	}
+}
+
 // Approve answers a pending approval_request by ID: allow runs the call, session
 // also remembers the grant for the rest of the session.
 func (a *App) Approve(id string, allow, session, persist bool) {

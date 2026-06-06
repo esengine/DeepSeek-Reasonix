@@ -121,17 +121,11 @@ type Action =
 // ---- reducer helpers (unchanged logic) ----
 
 export function historyMessagesToItems(messages: HistoryMessage[], idPrefix: string, startSeq = 0): { items: Item[]; seq: number } {
-  const resultByID = new Map<string, HistoryMessage>();
-  for (const m of messages) {
-    if (m.role === "tool" && m.toolCallId && !resultByID.has(m.toolCallId)) {
-      resultByID.set(m.toolCallId, m);
-    }
-  }
-
   const items: Item[] = [];
   let seq = startSeq;
   const consumedToolIDs = new Set<string>();
-  for (const m of messages) {
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
     if (m.role === "system") continue;
     if (m.role === "user") {
       if (m.content.trim() === "") continue;
@@ -145,8 +139,11 @@ export function historyMessagesToItems(messages: HistoryMessage[], idPrefix: str
         items.push({ kind: "assistant", id: `${idPrefix}${seq}`, text: m.content, reasoning: m.reasoning ?? "", streaming: false });
         seq++;
       }
+      // Position-aware: collect tool results only up to the next user or
+      // assistant message, matching SanitizeToolPairing's turn scoping.
+      const toolResults = collectToolResultsAfter(messages, i);
       for (const tc of m.toolCalls ?? []) {
-        const result = resultByID.get(tc.id);
+        const result = toolResults.get(tc.id);
         if (tc.id) consumedToolIDs.add(tc.id);
         const output = result?.content ?? "";
         const error = output.startsWith("[error") || output.startsWith("Error:") ? output : undefined;
@@ -184,6 +181,23 @@ export function historyMessagesToItems(messages: HistoryMessage[], idPrefix: str
     }
   }
   return { items, seq };
+}
+
+// collectToolResultsAfter scans forward from the assistant message at
+// assistantIndex, collecting tool results until the next user or assistant
+// message (exclusive). Returns a Map keyed by toolCallId. When duplicate IDs
+// exist within a turn the first result wins — matching pairToolResults'
+// idDistinct behaviour in internal/provider/provider.go.
+function collectToolResultsAfter(messages: HistoryMessage[], assistantIndex: number): Map<string, HistoryMessage> {
+  const results = new Map<string, HistoryMessage>();
+  for (let j = assistantIndex + 1; j < messages.length; j++) {
+    const m = messages[j];
+    if (m.role === "user" || m.role === "assistant") break;
+    if (m.role === "tool" && m.toolCallId && !results.has(m.toolCallId)) {
+      results.set(m.toolCallId, m);
+    }
+  }
+  return results;
 }
 
 function ensureAssistant(s: State): { items: Item[]; id: string; seq: number } {
@@ -286,6 +300,9 @@ function applyEvent(s: State, e: WireEvent): State {
       const sessionCurrency = e.usage?.currency || s.sessionCurrency || "¥";
       return { ...s, usage: e.usage, context: { ...s.context, used }, turnTokens, sessionCost, sessionCurrency };
     }
+    case "steer":
+      // Show a compact guidance notice when the backend confirms delivery.
+      return { ...s, seq: s.seq + 1, items: [...s.items, { kind: "notice", id: `s${s.seq}`, level: "info", text: `\u2192 ${e.text ?? ""}` }] };
     case "notice":
       return { ...s, running: s.turnActive ? s.running : false, seq: s.seq + 1, items: [...s.items, { kind: "notice", id: `n${s.seq}`, level: e.level ?? "info", text: e.text ?? "" }] };
     case "phase":
@@ -506,6 +523,15 @@ export function useController() {
     app.RunShell(command).catch(() => {});
   }, [activeTabId, dispatchTo]);
 
+  const steer = useCallback((text: string) => {
+    if (!activeTabId) return;
+    // Steer is queued to the agent and persisted to session for history
+    // replay. We do NOT dispatch a user bubble here — instead the backend
+    // Steer event drives a compact guidance notice in the transcript,
+    // visually distinct from a full conversation turn.
+    app.SteerForTab(activeTabId, text).catch(() => {});
+  }, [activeTabId]);
+
   const notice = useCallback((text: string, level: "info" | "warn" = "info") => {
     if (!activeTabId) return;
     dispatchTo(activeTabId, { type: "local_notice", level, text });
@@ -707,7 +733,7 @@ export function useController() {
   return {
     state: activeState,
     activeTabId,
-    send, runShell, notice, cancel, approve, answerQuestion, setControllerMode,
+    send, runShell, steer, notice, cancel, approve, answerQuestion, setControllerMode,
     newSession, listSessions, listTrashedSessions, resumeSession, previewSession, deleteSession, restoreSession, purgeTrashedSession, renameSession,
     refreshMeta, pickWorkspace, switchWorkspace, compact, rewind, setModel, setEffort,
     fetchMemory, remember, forget, saveDoc,
