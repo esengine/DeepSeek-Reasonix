@@ -328,6 +328,7 @@ func (a *App) rebuild() error {
 	} else if path != "" {
 		ctrl.SetSessionPath(path)
 	}
+	a.persistTabSessionPath(tab, path)
 	return nil
 }
 

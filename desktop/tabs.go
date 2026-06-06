@@ -37,6 +37,7 @@ type WorkspaceTab struct {
 	WorkspaceRoot string              // project root dir (empty for global)
 	TopicID       string              // topic within the project
 	TopicTitle    string              // display title
+	SessionPath   string              // exact .jsonl file this tab continues
 	Ctrl          *control.Controller // nil while booting / on error
 	Label         string              // model label (for the tab badge)
 	Ready         bool                // true once boot.Build completes
@@ -82,6 +83,18 @@ func cloneServerViewMap(in map[string]ServerView) map[string]ServerView {
 		out[name] = view
 	}
 	return out
+}
+
+func (t *WorkspaceTab) currentSessionPath() string {
+	if t == nil {
+		return ""
+	}
+	if t.Ctrl != nil {
+		if path := strings.TrimSpace(t.Ctrl.SessionPath()); path != "" {
+			return path
+		}
+	}
+	return strings.TrimSpace(t.SessionPath)
 }
 
 func (t *WorkspaceTab) recordReadFile(rec readFileRecord) {
@@ -545,9 +558,18 @@ func (a *App) buildTabController(tab *WorkspaceTab) {
 			a.mu.Unlock()
 		}
 		var path string
-		// When the tab has a TopicID, look for an existing session for this topic
-		// so the user continues the conversation rather than starting fresh.
-		if tab.TopicID != "" {
+		// Prefer the exact session file persisted for this tab. Topic lookup is a
+		// compatibility fallback for older desktop-tabs.json files that only stored
+		// topicId and could pick the wrong session when one topic had multiple files.
+		if loaded, pinnedPath, ok := loadPinnedTabSession(dir, tab.SessionPath); ok {
+			if loaded != nil {
+				ctrl.Resume(loaded, pinnedPath)
+			} else {
+				ctrl.SetSessionPath(pinnedPath)
+			}
+			path = pinnedPath
+		}
+		if path == "" && tab.TopicID != "" {
 			existingPath := findTopicSession(dir, tab.TopicID)
 			if existingPath != "" {
 				if loaded, err := agent.LoadSession(existingPath); err == nil {
@@ -562,12 +584,7 @@ func (a *App) buildTabController(tab *WorkspaceTab) {
 		}
 		// Write/update scope/session meta.
 		if path != "" {
-			m, _ := agent.EnsureBranchMeta(path)
-			m.Scope = tab.Scope
-			m.WorkspaceRoot = tab.WorkspaceRoot
-			m.TopicID = tab.TopicID
-			m.TopicTitle = tab.TopicTitle
-			_ = agent.SaveBranchMeta(path, m)
+			a.persistTabSessionPath(tab, path)
 			// Restore existing telemetry if resuming a session.
 			telemetryPath := path + ".telemetry.json"
 			if records := loadTelemetry(telemetryPath); len(records) > 0 {
@@ -843,6 +860,7 @@ type desktopTabEntry struct {
 	Scope         string  `json:"scope"`
 	WorkspaceRoot string  `json:"workspaceRoot"`
 	TopicID       string  `json:"topicId"`
+	SessionPath   string  `json:"sessionPath,omitempty"`
 	Model         string  `json:"model,omitempty"`
 	Effort        *string `json:"effort,omitempty"`
 	Mode          string  `json:"mode,omitempty"`
@@ -873,6 +891,7 @@ func (a *App) saveTabsLocked() {
 				Scope:         tab.Scope,
 				WorkspaceRoot: tab.WorkspaceRoot,
 				TopicID:       tab.TopicID,
+				SessionPath:   tab.currentSessionPath(),
 				Model:         tab.model,
 				Effort:        cloneStringPtr(tab.effort),
 				Mode:          persistedTabMode(currentTabMode(tab)),
@@ -2216,6 +2235,75 @@ func globalTabWorkspaceRoot() string {
 		return globalWorkspaceRoot()
 	}
 	return root
+}
+
+func loadPinnedTabSession(dir, sessionPath string) (*agent.Session, string, bool) {
+	sessionPath = strings.TrimSpace(sessionPath)
+	if sessionPath == "" || dir == "" {
+		return nil, "", false
+	}
+	path, _, err := validateSessionPath(dir, sessionPath)
+	if err != nil {
+		return nil, "", false
+	}
+	loaded, err := agent.LoadSession(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, path, true
+		}
+		return nil, "", false
+	}
+	return loaded, path, true
+}
+
+func saveTabSessionMeta(tab *WorkspaceTab, path string) error {
+	if tab == nil || strings.TrimSpace(path) == "" {
+		return nil
+	}
+	m, err := agent.EnsureBranchMeta(path)
+	if err != nil {
+		return err
+	}
+	m.Scope = tab.Scope
+	m.WorkspaceRoot = tab.WorkspaceRoot
+	m.TopicID = tab.TopicID
+	m.TopicTitle = tab.TopicTitle
+	return agent.SaveBranchMetaPreserveUpdated(path, m)
+}
+
+func canonicalTabSessionPath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	if validPath, _, err := validateSessionPath(config.SessionDir(), path); err == nil {
+		return validPath
+	}
+	return path
+}
+
+func (a *App) rememberTabSessionPath(tab *WorkspaceTab, path string) {
+	path = canonicalTabSessionPath(path)
+	if tab == nil || path == "" {
+		return
+	}
+	a.mu.Lock()
+	if current := a.tabs[tab.ID]; current == tab {
+		tab.SessionPath = path
+		a.saveTabsLocked()
+	} else {
+		tab.SessionPath = path
+	}
+	a.mu.Unlock()
+}
+
+func (a *App) persistTabSessionPath(tab *WorkspaceTab, path string) {
+	path = canonicalTabSessionPath(path)
+	if tab == nil || path == "" {
+		return
+	}
+	_ = saveTabSessionMeta(tab, path)
+	a.rememberTabSessionPath(tab, path)
 }
 
 // findTopicSession scans the session directory for a .jsonl file whose .meta

@@ -335,6 +335,7 @@ func (a *App) restoreOrBuildTabs() {
 
 	f := loadTabsFile()
 	if len(f.Tabs) > 0 {
+		toBuild := make([]*WorkspaceTab, 0, len(f.Tabs))
 		for _, entry := range f.Tabs {
 			a.mu.Lock()
 			id := a.restoredTabIDLocked(entry.ID)
@@ -349,12 +350,13 @@ func (a *App) restoreOrBuildTabs() {
 			tab.model = entry.Model
 			tab.effort = cloneStringPtr(entry.Effort)
 			tab.mode = persistedTabMode(entry.Mode)
+			tab.SessionPath = strings.TrimSpace(entry.SessionPath)
 			tab.sink = &tabEventSink{tabID: tab.ID, app: a, ctx: ctx}
 			a.mu.Lock()
 			a.tabs[tab.ID] = tab
 			a.tabOrder = append(a.tabOrder, tab.ID)
 			a.mu.Unlock()
-			go a.buildTabController(tab)
+			toBuild = append(toBuild, tab)
 		}
 		a.mu.Lock()
 		if _, ok := a.tabs[f.ActiveTab]; ok {
@@ -366,6 +368,9 @@ func (a *App) restoreOrBuildTabs() {
 			}
 		}
 		a.mu.Unlock()
+		for _, tab := range toBuild {
+			go a.buildTabController(tab)
+		}
 		return
 	}
 
@@ -636,12 +641,17 @@ func (a *App) Compact() error {
 // NewSession snapshots the current conversation and rotates to a fresh one.
 func (a *App) NewSession() error {
 	a.mu.RLock()
+	tab := a.activeTabLocked()
 	ctrl := a.activeCtrlLocked()
 	a.mu.RUnlock()
 	if ctrl == nil {
 		return nil
 	}
-	return ctrl.NewSession()
+	if err := ctrl.NewSession(); err != nil {
+		return err
+	}
+	a.persistTabSessionPath(tab, ctrl.SessionPath())
+	return nil
 }
 
 // CheckpointMeta summarises one rewind point (a user turn) for the desktop.
@@ -754,6 +764,7 @@ func (a *App) Fork(turn int) (TabMeta, error) {
 		WorkspaceRoot: workspaceRoot,
 		TopicID:       topicID,
 		TopicTitle:    topicTitle,
+		SessionPath:   newPath,
 		model:         model,
 		effort:        effort,
 		mode:          mode,
@@ -908,8 +919,8 @@ func (a *App) openSessionPaths(dir string) map[string]struct{} {
 	a.mu.RLock()
 	paths := make([]string, 0, len(a.tabs))
 	for _, tab := range a.tabs {
-		if tab != nil && tab.Ctrl != nil {
-			paths = append(paths, tab.Ctrl.SessionPath())
+		if tab != nil {
+			paths = append(paths, tab.currentSessionPath())
 		}
 	}
 	a.mu.RUnlock()
@@ -927,8 +938,8 @@ func (a *App) openSessionPaths(dir string) map[string]struct{} {
 func (a *App) activeSessionPath(dir string) string {
 	a.mu.RLock()
 	var path string
-	if tab := a.tabs[a.activeTabID]; tab != nil && tab.Ctrl != nil {
-		path = tab.Ctrl.SessionPath()
+	if tab := a.tabs[a.activeTabID]; tab != nil {
+		path = tab.currentSessionPath()
 	}
 	a.mu.RUnlock()
 	currentPath, _, err := validateSessionPath(dir, path)
@@ -980,16 +991,18 @@ func (a *App) ResumeSession(path string) ([]HistoryMessage, error) {
 // matching tab should resume on that exact controller instead of whichever tab is
 // active by the time the async call reaches the backend.
 func (a *App) ResumeSessionForTab(tabID, path string) ([]HistoryMessage, error) {
-	ctrl := a.ctrlByTabID(tabID)
-	if ctrl == nil {
+	tab := a.tabByID(tabID)
+	if tab == nil || tab.Ctrl == nil {
 		return []HistoryMessage{}, fmt.Errorf("tab is not ready")
 	}
+	ctrl := tab.Ctrl
 	loaded, err := agent.LoadSession(path)
 	if err != nil {
 		return nil, err
 	}
 	_ = ctrl.Snapshot() // persist the current session before switching away
 	ctrl.Resume(loaded, path)
+	a.rememberTabSessionPath(tab, path)
 	return a.HistoryForTab(tabID), nil
 }
 
@@ -2561,6 +2574,7 @@ func (a *App) SetModelForTab(tabID, name string) error {
 	} else if path != "" {
 		newCtrl.SetSessionPath(path)
 	}
+	a.persistTabSessionPath(tab, path)
 	return nil
 }
 
@@ -2650,6 +2664,7 @@ func (a *App) SetEffortForTab(tabID, level string) error {
 	} else if path != "" {
 		newCtrl.SetSessionPath(path)
 	}
+	a.persistTabSessionPath(tab, path)
 	return nil
 }
 

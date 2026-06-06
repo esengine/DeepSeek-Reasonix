@@ -114,6 +114,17 @@ func TestResumeSessionForTabTargetsSpecifiedTab(t *testing.T) {
 	if inactiveCtrl.SessionPath() != targetPath {
 		t.Fatalf("inactive tab session path = %q, want %q", inactiveCtrl.SessionPath(), targetPath)
 	}
+	f := loadTabsFile()
+	var savedInactive string
+	for _, entry := range f.Tabs {
+		if entry.ID == "inactive" {
+			savedInactive = entry.SessionPath
+			break
+		}
+	}
+	if filepath.Clean(savedInactive) != filepath.Clean(targetPath) {
+		t.Fatalf("saved inactive session path = %q, want %q", savedInactive, targetPath)
+	}
 	if len(got) != 1 || got[0].Content != "target prompt" {
 		t.Fatalf("resumed history = %+v, want target prompt", got)
 	}
