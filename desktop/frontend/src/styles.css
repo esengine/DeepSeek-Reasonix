@@ -573,6 +573,8 @@ a[href] {
   background: var(--border-soft);
   transition: background 0.12s, box-shadow 0.12s;
 }
+.workspace-panel-resizer:hover::after,
+.workspace-panel-resizer:focus-visible::after,
 .layout--workspace-resizing .workspace-panel-resizer::after {
   background: var(--accent);
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 24%, transparent);
