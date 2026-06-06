@@ -256,6 +256,7 @@ var Chinese = Messages{
 	AnthropicFetchEmpty:        "/models 返回为空 — Anthropic 兼容服务通常不提供此端点，回退到手动输入",
 	SkipStaleCustomEntryFmt:    "跳过 reasonix.toml 里的旧 %q 条目（指向 %s）— 请手动从 [[providers]] 里删除",
 	APIKeyAlreadySetFmt:        "复用已设置的 %s",
+	APIKeyResetPromptFmt:       "重新输入 %s？",
 
 	// custom provider
 	CustomProviderLabel:  "自定义模型",

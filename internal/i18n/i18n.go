@@ -293,6 +293,7 @@ type Messages struct {
 	AnthropicFetchEmpty        string // "/models returned an empty list — Anthropic-compatible providers usually don't expose one, falling back to manual entry"
 	SkipStaleCustomEntryFmt    string // "skipping stale %q entry from reasonix.toml (pointing at %s) — please remove it"
 	APIKeyAlreadySetFmt        string // "reusing existing value for %s"
+	APIKeyResetPromptFmt       string // "Re-enter %s?"
 
 	// custom provider
 	CustomProviderLabel  string // "Custom Model"
