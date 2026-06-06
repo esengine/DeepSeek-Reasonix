@@ -50,6 +50,11 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	} else {
 		b.WriteString("# language      = \"zh\"   # ui/model language; empty = auto-detect from $LANG / $REASONIX_LANG\n")
 	}
+	if c.FileEncoding != "" {
+		fmt.Fprintf(&b, "file_encoding = %q   # project file encoding (e.g. \"UTF-8\", \"GB18030\"); empty = auto-detect\n", c.FileEncoding)
+	} else {
+		b.WriteString("# file_encoding = \"GB18030\"   # project file encoding; empty = auto-detect per file\n")
+	}
 	b.WriteString("\n")
 
 	if shouldRenderUI(c, defaults, scope) {

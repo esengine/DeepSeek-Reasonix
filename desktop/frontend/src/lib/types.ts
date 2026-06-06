@@ -491,6 +491,7 @@ export interface SettingsView {
   network: NetworkView;
   agent: AgentView;
   desktopLanguage: string; // "" | "en" | "zh"; empty = auto
+  fileEncoding: string; // "" | "UTF-8" | "GB18030" | ...; empty = auto-detect
   desktopTheme: string; // "auto" | "dark" | "light"
   desktopThemeStyle: string;
   closeBehavior: string; // "background" | "quit"

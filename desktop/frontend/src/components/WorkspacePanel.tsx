@@ -312,7 +312,7 @@ export function WorkspacePanel({
     let live = true;
     setLoadingPreview(true);
     app
-      .ReadFile(selectedPath)
+      .ReadFile(selectedPath, "")
       .then((next) => {
         if (live) setPreview(next);
       })
@@ -557,7 +557,7 @@ export function WorkspacePanel({
     const target = treeMenu;
     setTreeMenu(null);
     try {
-      const file = await app.ReadFile(target.path);
+      const file = await app.ReadFile(target.path, "");
       if (file.err || file.binary) {
         onAddToChat?.(formatWorkspaceReference(target.path, false));
         return;

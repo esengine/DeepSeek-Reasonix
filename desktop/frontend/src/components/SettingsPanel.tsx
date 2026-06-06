@@ -343,6 +343,22 @@ function GeneralSection({ s, busy, apply }: SectionProps) {
           ))}
         </div>
       </div>
+      <div className="set-row">
+        <label className="set-label">{t("settings.fileEncoding")}</label>
+        <select
+          className="mem-select set-grow"
+          value={s.fileEncoding}
+          disabled={busy}
+          onChange={(e) => void apply(() => app.SetFileEncoding(e.target.value))}
+        >
+          <option value="">{t("settings.fileEncoding.auto")}</option>
+          <option value="UTF-8">UTF-8</option>
+          <option value="GB18030">GB18030 / GBK / GB2312</option>
+          <option value="UTF-16 LE">UTF-16 LE</option>
+          <option value="UTF-16 BE">UTF-16 BE</option>
+        </select>
+      </div>
+      <div className="mem-hint">{t("settings.fileEncoding.hint")}</div>
     </section>
   );
 }

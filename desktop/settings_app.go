@@ -81,6 +81,7 @@ type SettingsView struct {
 	Network           NetworkView     `json:"network"`
 	Agent             AgentView       `json:"agent"`
 	DesktopLanguage   string          `json:"desktopLanguage"`
+	FileEncoding      string          `json:"fileEncoding"`
 	DesktopTheme      string          `json:"desktopTheme"`
 	DesktopThemeStyle string          `json:"desktopThemeStyle"`
 	CloseBehavior     string          `json:"closeBehavior"`
@@ -155,6 +156,7 @@ func (a *App) Settings() SettingsView {
 		},
 		Agent:             AgentView{Temperature: cfg.Agent.Temperature, MaxSteps: cfg.Agent.MaxSteps, SystemPrompt: cfg.Agent.SystemPrompt},
 		DesktopLanguage:   cfg.DesktopLanguage(),
+		FileEncoding:      cfg.FileEncoding,
 		DesktopTheme:      cfg.DesktopTheme(),
 		DesktopThemeStyle: cfg.DesktopThemeStyle(),
 		CloseBehavior:     cfg.DesktopCloseBehavior(),
@@ -547,6 +549,15 @@ func (a *App) SetAgentParams(temperature float64, maxSteps int, systemPrompt str
 		c.Agent.Temperature = temperature
 		c.Agent.MaxSteps = maxSteps
 		c.Agent.SystemPrompt = systemPrompt
+		return nil
+	})
+}
+
+// SetFileEncoding sets the project-level file encoding (e.g. "UTF-8", "GB18030").
+// Empty string means auto-detect.
+func (a *App) SetFileEncoding(encoding string) error {
+	return a.applyConfigChange(func(c *config.Config) error {
+		c.FileEncoding = strings.TrimSpace(encoding)
 		return nil
 	})
 }
