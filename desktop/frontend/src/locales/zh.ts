@@ -1141,6 +1141,9 @@ export const zh: Record<DictKey, string> = {
   "rewind.busyCode": "正在回滚代码…",
   "rewind.busyBoth": "正在回滚代码和对话…",
   "msg.copied": "已复制",
+  "msg.referencedSessions": "引用的会话",
+  "msg.referencedSessionsLabel": "引用的会话：",
+  "msg.referenceTurns": "· {count} 轮",
 
   // 工具卡片摘要
   "tool.stepOne": "{n} 步",

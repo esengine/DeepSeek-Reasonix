@@ -254,6 +254,12 @@ func purgeTrashedSessionFile(dir, path string) error {
 			return err
 		}
 	}
+	if rm := loadSessionReferences(dir); rm[key] != nil {
+		delete(rm, key)
+		if err := saveSessionReferences(dir, rm); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -494,4 +500,72 @@ func sessionDisplayResolver(dir, sessionPath string) func(content string) string
 
 func resolveSessionDisplay(dir, sessionPath, content string) string {
 	return sessionDisplayResolver(dir, sessionPath)(content)
+}
+
+// --- references sidecar (.references.json) ---
+
+const sessionReferencesFile = ".references.json"
+
+type sessionReferencesMap map[string]map[string]json.RawMessage
+
+func sessionReferencesPath(dir string) string { return filepath.Join(dir, sessionReferencesFile) }
+
+func loadSessionReferences(dir string) sessionReferencesMap {
+	m := sessionReferencesMap{}
+	b, err := os.ReadFile(sessionReferencesPath(dir))
+	if err != nil {
+		return m
+	}
+	_ = json.Unmarshal(b, &m)
+	return m
+}
+
+func saveSessionReferences(dir string, m sessionReferencesMap) error {
+	b, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, ".references.*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	if _, err := tmp.Write(b); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+	return fileutil.ReplaceFile(tmpPath, sessionReferencesPath(dir))
+}
+
+func recordSessionReferences(dir, sessionPath, content string, refs json.RawMessage) error {
+	if strings.TrimSpace(sessionPath) == "" || len(refs) == 0 {
+		return nil
+	}
+	m := loadSessionReferences(dir)
+	key := filepath.Base(sessionPath)
+	if m[key] == nil {
+		m[key] = map[string]json.RawMessage{}
+	}
+	m[key][messageDisplayKey(content)] = refs
+	return saveSessionReferences(dir, m)
+}
+
+func sessionReferencesResolver(dir, sessionPath string) func(string) json.RawMessage {
+	byHash := loadSessionReferences(dir)[filepath.Base(sessionPath)]
+	return func(content string) json.RawMessage {
+		if byHash != nil {
+			if refs := byHash[messageDisplayKey(content)]; len(refs) > 0 {
+				return refs
+			}
+		}
+		return nil
+	}
 }

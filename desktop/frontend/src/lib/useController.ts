@@ -22,6 +22,7 @@ import type {
   Mode,
   QuestionAnswer,
   SessionMeta,
+  SessionReference,
   TabMeta,
   ToolApprovalMode,
   WireApproval,
@@ -37,7 +38,7 @@ export type MessageActionScope = "fork" | "summ-from" | "summ-upto" | "conversat
 export type MessageActionState = { turn: number; scope: MessageActionScope };
 
 export type Item =
-  | { kind: "user"; id: string; text: string; failed?: boolean }
+  | { kind: "user"; id: string; text: string; failed?: boolean; references?: SessionReference[] }
   | { kind: "assistant"; id: string; text: string; reasoning: string; streaming: boolean }
   | { kind: "phase"; id: string; text: string }
   | { kind: "notice"; id: string; level: "info" | "warn"; text: string }
@@ -83,6 +84,7 @@ interface State {
   currentAssistant?: string;
   live?: LiveStream;
   pendingUser?: string;
+  pendingReferences?: SessionReference[];
   discardTurn?: boolean;
   turnStartAt: number;
   turnTokens: number;
@@ -166,7 +168,7 @@ function isReadOnlyTool(name: string): boolean {
 
 type Action =
   | { type: "event"; e: WireEvent }
-  | { type: "user"; text: string; seq: number }
+  | { type: "user"; text: string; seq: number; references?: SessionReference[] }
   | { type: "unsend" }
   | { type: "send_failed"; error: string }
   | { type: "backend_status"; running: boolean }
@@ -228,7 +230,8 @@ export function historyMessagesToItems(messages: HistoryMessage[], idPrefix: str
     }
     if (m.role === "user") {
       if (m.content.trim() === "") continue;
-      items.push({ kind: "user", id: `${idPrefix}${seq}`, text: m.content });
+      const refs = typeof m.references === "string" ? (() => { try { return JSON.parse(m.references); } catch { return undefined; } })() : m.references;
+      items.push({ kind: "user", id: `${idPrefix}${seq}`, text: m.content, references: Array.isArray(refs) ? refs : undefined });
       seq++;
       continue;
     }
@@ -299,8 +302,9 @@ function flushPendingUser(s: State): State {
   return {
     ...s,
     seq: s.seq + 1,
-    items: [...s.items, { kind: "user", id: `u${s.seq}`, text: s.pendingUser }],
+    items: [...s.items, { kind: "user", id: `u${s.seq}`, text: s.pendingUser, references: s.pendingReferences }],
     pendingUser: undefined,
+    pendingReferences: undefined,
   };
 }
 
@@ -444,16 +448,17 @@ export function reducer(s: State, a: Action): State {
       return {
         ...s,
         seq: seq + 1,
-        items: [...s.items, { kind: "user", id: `u${seq}`, text: a.text }],
+        items: [...s.items, { kind: "user", id: `u${seq}`, text: a.text, references: a.references }],
         running: true,
         turnStartAt: Date.now(),
         turnTokens: 0,
         turnTotalTokens: 0,
         pendingUser: a.text,
+        pendingReferences: a.references,
         discardTurn: false,
       };
     }
-    case "unsend": return { ...s, pendingUser: undefined, discardTurn: true, running: false, live: undefined };
+    case "unsend": return { ...s, pendingUser: undefined, pendingReferences: undefined, discardTurn: true, running: false, live: undefined };
     case "send_failed": {
       if (s.pendingUser === undefined) return s;
       let idx = -1;
@@ -463,7 +468,7 @@ export function reducer(s: State, a: Action): State {
       }
       const items = idx >= 0 ? s.items.map((it, i) => (i === idx ? { ...it, failed: true } : it)) : s.items;
       const notice: Item = { kind: "notice", id: `n${s.seq}`, level: "warn", text: a.error };
-      return { ...s, pendingUser: undefined, running: false, turnActive: false, live: undefined, seq: s.seq + 1, items: [...items, notice] };
+      return { ...s, pendingUser: undefined, pendingReferences: undefined, running: false, turnActive: false, live: undefined, seq: s.seq + 1, items: [...items, notice] };
     }
     case "backend_status": {
       if (a.running === s.running) return s;
@@ -712,6 +717,7 @@ export function useController() {
     return () => { textBatch.drain(); off(); offReady(); };
   }, [dispatchTo, loadSessionDataForTab, refreshCheckpoints, syncActiveTabFromBackend]);
 
+<<<<<<< HEAD
   // Stale-stream watchdog: if the frontend thinks the agent is running but
   // no token events have arrived for 30 seconds, reconcile with the backend.
   // This catches the case where the Wails event channel silently drops the
@@ -734,15 +740,22 @@ export function useController() {
     return () => window.clearTimeout(timer);
   }, [activeTabId, reconcileTabRuntime, activeState.running, activeState.live]);
 
-  const send = useCallback((displayText: string, submitText = displayText) => {
+  const send = useCallback((displayText: string, submitText = displayText, references?: SessionReference[]) => {
     const submitForTab = (tabId: string) => {
       const seq = getOrCreateState(statesRef.current, tabId).seq;
-      dispatchTo(tabId, { type: "user", text: displayText, seq });
+      dispatchTo(tabId, { type: "user", text: displayText, seq, references });
       const display = displayText.trim();
       const submit = submitText.trim();
-      (display !== submit ? app.SubmitDisplayToTab(tabId, display, submit) : app.SubmitToTab(tabId, submit)).catch((error) => {
-        dispatchTo(tabId, { type: "send_failed", error: `Send failed: ${error instanceof Error ? error.message : String(error)}` });
-      });
+      const refsJson = references && references.length > 0 ? JSON.stringify(references) : "";
+      if (refsJson) {
+        app.SubmitDisplayToTabWithRefs(tabId, display, submit, refsJson).catch((error) => {
+          dispatchTo(tabId, { type: "send_failed", error: `Send failed: ${error instanceof Error ? error.message : String(error)}` });
+        });
+      } else {
+        (display !== submit ? app.SubmitDisplayToTab(tabId, display, submit) : app.SubmitToTab(tabId, submit)).catch((error) => {
+          dispatchTo(tabId, { type: "send_failed", error: `Send failed: ${error instanceof Error ? error.message : String(error)}` });
+        });
+      }
     };
     const tabId = activeTabIdRef.current ?? activeTabId;
     if (tabId) {

@@ -7,7 +7,7 @@ import { parseAttachmentRefsForDisplay, sortDisplayAttachments } from "../lib/at
 import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
 import type { Item, MessageActionScope } from "../lib/useController";
-import type { CheckpointMeta } from "../lib/types";
+import type { CheckpointMeta, SessionReference } from "../lib/types";
 
 type AssistantItem = Extract<Item, { kind: "assistant" }>;
 export type TurnActionMenu = "summary" | "rewind";
@@ -60,15 +60,26 @@ function attachmentIcon(kind: "image" | "file" | "folder") {
   return <FileText size={15} />;
 }
 
+// Extract the basename of a session .md path. Tolerates both / and \ separators
+// and trims any trailing ones before splitting. Returns the original string when
+// no separator is present (e.g. a bare filename).
+function baseName(p: string): string {
+  const trimmed = p.replace(/[\\/]+$/, "");
+  const parts = trimmed.split(/[\\/]/);
+  return parts[parts.length - 1] || trimmed;
+}
+
 export function UserMessage({
   text,
   failed,
+  references,
   turn,
   anchorId,
   id,
 }: {
   text: string;
   failed?: boolean;
+  references?: SessionReference[];
   turn?: number;
   anchorId?: string;
   id?: string;
@@ -144,6 +155,21 @@ export function UserMessage({
                       : `${attachment.ext || t("msg.fileAttachment")} · ${attachment.source === "workspace" ? t("msg.workspaceReference") : attachment.kind === "image" ? t("msg.imageAttachment") : t("msg.fileAttachment")}`}
                   </span>
                 </span>
+              </div>
+            ))}
+          </div>
+        )}
+        {references && references.length > 0 && (
+          <div className="msg__references" aria-label={t("msg.referencedSessions")}>
+            <div className="msg__references-label">{t("msg.referencedSessionsLabel")}</div>
+            {references.map((ref) => (
+              <div key={ref.path} className="msg__reference-item" title={ref.path}>
+                <MessageSquare size={13} className="msg__reference-icon" />
+                <span className="msg__reference-title">{ref.title}</span>
+                {typeof ref.turns === "number" && (
+                  <span className="msg__reference-turns">{t("msg.referenceTurns", { count: ref.turns })}</span>
+                )}
+                <span className="msg__reference-path">{baseName(ref.path)}</span>
               </div>
             ))}
           </div>
