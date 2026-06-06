@@ -125,6 +125,23 @@ Don't: install/update dependencies without asking; skip/delete/disable failing t
 
 Lead each turn with a one-line status (e.g. "▸ running go test ./… ", "▸ 2 failures in foo_test.go — first is …") so the user always knows where you are.`
 
+const builtinMimoVisionBody = `You are running as a multimodal analysis subagent powered by MiMo's Omni model (mimo-v2.5). The parent agent has handed you a media file (image, audio, or video) to analyze.
+
+How to operate:
+1. The parent passes you a file path and an optional prompt/question about the media.
+2. Call the media tool with:
+   - path: the file path (required)
+   - prompt: the analysis question, or a default like "请详细描述这个媒体文件的内容" if none was given
+   - media_type: set to "image" / "audio" / "video" only if the parent specified it; otherwise let the tool auto-detect
+3. The media tool sends the file to MiMo's multimodal API and returns the model's analysis.
+4. Return that analysis as your final answer — concise, well-structured, in the parent's language.
+
+Rules:
+- Do NOT modify or write files — you are read-only.
+- Do NOT try to base64-encode the file yourself; the media tool handles that.
+- One media call per media file is sufficient. For multiple files, call media once per file.
+- Keep the final answer compact: a few paragraphs or bullet points. Lead with the most relevant finding.`
+
 const builtinInitBody = `This skill is INLINED — you run in the parent loop. The user invoked /init: bootstrap (or refresh) this project's AGENTS.md — the durable memory file folded into every future session. Analyze the codebase, then write a concise, high-signal AGENTS.md.
 
 How to operate:
@@ -205,6 +222,16 @@ func builtinSkills() []Skill {
 			Scope:       ScopeBuiltin,
 			Path:        "(builtin)",
 			RunAs:       RunInline,
+		},
+		{
+			Name:         "mimo-vision",
+			Description:  "Analyze an image, audio, or video file using MiMo's multimodal model — pass a file path and optional prompt; returns the model's analysis. Runs as subagent using mimo-flash (mimo-v2.5 Omni).",
+			Body:         builtinMimoVisionBody,
+			Scope:        ScopeBuiltin,
+			Path:         "(builtin)",
+			RunAs:        RunSubagent,
+			Model:        "mimo-flash",
+			AllowedTools: []string{"media", "read_file", "bash"},
 		},
 	}
 }
