@@ -38,7 +38,7 @@ func (a *App) setTestCtrl(ctrl *control.Controller, model string) {
 
 func isolateDesktopUserDirs(t *testing.T) string {
 	t.Helper()
-	home := t.TempDir()
+	home := robustTempDir(t)
 	xdg := filepath.Join(home, ".config")
 	appData := filepath.Join(home, "AppData")
 	for _, dir := range []string{xdg, appData} {
@@ -154,7 +154,7 @@ func TestSetEffortPersistsAndAutoClears(t *testing.T) {
 func TestSettingsUsesUserDesktopPreferencesNotProjectConfig(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
-	project := t.TempDir()
+	project := robustTempDir(t)
 	if err := os.WriteFile(filepath.Join(project, "reasonix.toml"), []byte(`
 [desktop]
 language = "zh"
@@ -194,7 +194,7 @@ close_behavior = "quit"
 func TestSettingsSeedsMissingUserConfigFromLegacyProjectConfig(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
-	project := t.TempDir()
+	project := robustTempDir(t)
 	if err := os.WriteFile(filepath.Join(project, "reasonix.toml"), []byte(`
 default_model = "legacy-provider/legacy-model"
 
@@ -343,7 +343,7 @@ func TestSearchFileRefsFindsNestedBasename(t *testing.T) {
 	orig, _ := os.Getwd()
 	defer os.Chdir(orig)
 
-	dir := t.TempDir()
+	dir := robustTempDir(t)
 	if err := os.MkdirAll(filepath.Join(dir, "frontend", "wailsjs", "runtime"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -373,8 +373,8 @@ func TestFileRefsUseActiveTabWorkspaceRoot(t *testing.T) {
 	orig, _ := os.Getwd()
 	defer os.Chdir(orig)
 
-	launchRoot := t.TempDir()
-	projectRoot := t.TempDir()
+	launchRoot := robustTempDir(t)
+	projectRoot := robustTempDir(t)
 	if err := os.WriteFile(filepath.Join(launchRoot, "launch-only.txt"), []byte("wrong"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -516,7 +516,7 @@ func (r *appendingDesktopRunner) Run(_ context.Context, input string) error {
 func TestForkCreatesActiveTabWithoutSwitchingSourceController(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
-	workspace := t.TempDir()
+	workspace := robustTempDir(t)
 	if err := os.WriteFile(filepath.Join(workspace, "reasonix.toml"), []byte("[codegraph]\nenabled = false\n"), 0o644); err != nil {
 		t.Fatalf("write workspace config: %v", err)
 	}
@@ -609,7 +609,7 @@ func TestForkCreatesActiveTabWithoutSwitchingSourceController(t *testing.T) {
 
 func TestCapabilitiesShowsDefaultMCPAsInitializingNotDisabled(t *testing.T) {
 	isolateDesktopUserDirs(t)
-	dir := t.TempDir()
+	dir := robustTempDir(t)
 	t.Chdir(dir)
 	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
 [codegraph]
@@ -645,7 +645,7 @@ args = ["-y", "@playwright/mcp"]
 
 func TestCapabilitiesShowsDefaultCodegraphDisabled(t *testing.T) {
 	isolateDesktopUserDirs(t)
-	dir := t.TempDir()
+	dir := robustTempDir(t)
 	t.Chdir(dir)
 
 	app := NewApp()
@@ -675,7 +675,7 @@ func TestCapabilitiesShowsDefaultCodegraphDisabled(t *testing.T) {
 
 func TestCapabilitiesMarksBackgroundRemoteMCPAuthPossible(t *testing.T) {
 	isolateDesktopUserDirs(t)
-	dir := t.TempDir()
+	dir := robustTempDir(t)
 	t.Chdir(dir)
 	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
 [codegraph]
@@ -708,7 +708,7 @@ tier = "lazy"
 
 func TestCapabilitiesDoesNotMarkRemoteMCPWithAuthHeaderPossible(t *testing.T) {
 	isolateDesktopUserDirs(t)
-	dir := t.TempDir()
+	dir := robustTempDir(t)
 	t.Chdir(dir)
 	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
 [codegraph]
@@ -742,7 +742,7 @@ tier = "lazy"
 
 func TestCapabilitiesMarksAuthFailureRequired(t *testing.T) {
 	isolateDesktopUserDirs(t)
-	dir := t.TempDir()
+	dir := robustTempDir(t)
 	t.Chdir(dir)
 	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
 [codegraph]
@@ -777,7 +777,7 @@ tier = "lazy"
 
 func TestClearMCPServerAuthenticationClearsConfigAndFailure(t *testing.T) {
 	isolateDesktopUserDirs(t)
-	dir := t.TempDir()
+	dir := robustTempDir(t)
 	t.Chdir(dir)
 	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
 [codegraph]
@@ -840,7 +840,7 @@ tier = "lazy"
 
 func TestUpdateMCPServerMigratesLegacyTierToBackground(t *testing.T) {
 	isolateDesktopUserDirs(t)
-	dir := t.TempDir()
+	dir := robustTempDir(t)
 	t.Chdir(dir)
 	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
 [codegraph]
@@ -914,7 +914,7 @@ tier = "lazy"
 
 func TestUpdateMCPServerRecordsReconnectFailure(t *testing.T) {
 	isolateDesktopUserDirs(t)
-	dir := t.TempDir()
+	dir := robustTempDir(t)
 	t.Chdir(dir)
 	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
 [codegraph]
@@ -969,7 +969,7 @@ tier = "background"
 
 func TestSetMCPServerTierRecordsConnectFailure(t *testing.T) {
 	isolateDesktopUserDirs(t)
-	dir := t.TempDir()
+	dir := robustTempDir(t)
 	t.Chdir(dir)
 	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
 [codegraph]
@@ -1032,13 +1032,13 @@ tier = "lazy"
 }
 
 func TestSetMCPServerTierPersistsCodegraphConfig(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("USERPROFILE", t.TempDir())
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	t.Setenv("AppData", t.TempDir())
-	t.Setenv("PATH", t.TempDir())
-	t.Setenv("REASONIX_CACHE_DIR", t.TempDir()) // isolate the codegraph bundle cache so Resolve fails deterministically
-	dir := t.TempDir()
+	t.Setenv("HOME", robustTempDir(t))
+	t.Setenv("USERPROFILE", robustTempDir(t))
+	t.Setenv("XDG_CONFIG_HOME", robustTempDir(t))
+	t.Setenv("AppData", robustTempDir(t))
+	t.Setenv("PATH", robustTempDir(t))
+	t.Setenv("REASONIX_CACHE_DIR", robustTempDir(t)) // isolate the codegraph bundle cache so Resolve fails deterministically
+	dir := robustTempDir(t)
 	t.Chdir(dir)
 	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
 [codegraph]
@@ -1092,7 +1092,7 @@ auto_install = true
 
 func TestSetMCPServerEnabledPersistsCodegraphOff(t *testing.T) {
 	isolateDesktopUserDirs(t)
-	dir := t.TempDir()
+	dir := robustTempDir(t)
 	t.Chdir(dir)
 	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
 [codegraph]
@@ -1134,7 +1134,7 @@ tier = "lazy"
 
 func TestCapabilitiesMigratesFailedMCPConfiguredTierAfterRestart(t *testing.T) {
 	isolateDesktopUserDirs(t)
-	dir := t.TempDir()
+	dir := robustTempDir(t)
 	t.Chdir(dir)
 	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
 [codegraph]
