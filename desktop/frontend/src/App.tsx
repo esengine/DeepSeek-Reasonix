@@ -21,8 +21,9 @@ import logoWordmark from "./assets/logo-wordmark.svg";
 import { asArray } from "./lib/array";
 import { clearLegacyLangPref, normalizeLangPref, readLegacyLangPref, t, useI18n, useT } from "./lib/i18n";
 import { useController, type Item, type LiveStream } from "./lib/useController";
-import { app, onProjectTreeChanged, onTurnDone } from "./lib/bridge";
+import { app, onProjectTreeChanged, onTurnDone, onEvent } from "./lib/bridge";
 import { playSuccessChime } from "./lib/sound";
+import { generativeMusic, isGenerativeMusicEnabled } from "./lib/generative-music";
 import { Transcript } from "./components/Transcript";
 import { Composer } from "./components/Composer";
 import { TodoPanel } from "./components/TodoPanel";
@@ -635,6 +636,27 @@ export default function App() {
   useEffect(() => {
     const unsub = onTurnDone(() => {
       playSuccessChime();
+    });
+    return unsub;
+  }, []);
+
+  // Play generative ambient music while the agent is generating.
+  // Start/stop the AudioContext engine based on running state.
+  useEffect(() => {
+    if (state.running && isGenerativeMusicEnabled()) {
+      generativeMusic.start();
+    } else {
+      generativeMusic.stop();
+    }
+  }, [state.running]);
+
+  // Per-token: play a note every time a text/reasoning chunk arrives.
+  // playTokenNote() is a no-op when the engine isn't running.
+  useEffect(() => {
+    const unsub = onEvent((e) => {
+      if (e.kind === "text" || e.kind === "reasoning") {
+        generativeMusic.playTokenNote();
+      }
     });
     return unsub;
   }, []);

@@ -26,6 +26,7 @@ import { AnchoredPopover } from "./AnchoredPopover";
 import { MCPServersSettingsPage, SkillsSettingsPage } from "./CapabilitiesPanel";
 import { MemorySettingsPage } from "./MemoryPanel";
 import { getSuccessPreference, setSuccessPreference, getAttentionPreference, setAttentionPreference, playSuccessChime, playAttentionChime, type SoundWavPref } from "../lib/sound";
+import { getGenerativePreset, setGenerativePreset, generativeMusic, type GenerativePreset } from "../lib/generative-music";
 
 const SETTINGS_TABS: SettingsTab[] = ["general", "models", "mcp", "skills", "memory", "permissions", "sandbox", "network", "appearance", "updates"];
 
@@ -484,6 +485,7 @@ function GeneralSection({ s, busy, apply }: SectionProps) {
   const languagePref = normalizeLangPref(s.desktopLanguage);
   const [soundPref, setSoundPref] = useState<SoundWavPref>(getSuccessPreference());
   const [attentionPref, setAttentionPref] = useState<SoundWavPref>(getAttentionPreference());
+  const [genMusicPreset, setGenMusicPreset] = useState<GenerativePreset>(getGenerativePreset());
   const setLanguage = (next: LangPref) => {
     setPref(next);
     void apply(() => app.SetDesktopLanguage(next));
@@ -583,6 +585,35 @@ function GeneralSection({ s, busy, apply }: SectionProps) {
             type="button"
             onClick={() => playAttentionChime()}
             title={t("settings.notificationSoundPreview")}
+          >
+            <Play size={13} />
+          </button>
+        </div>
+      </SettingsField>
+      <SettingsField label={t("settings.generativeMusic")} hint={t("settings.generativeMusicHint")} stacked>
+        <div className="settings-notification-sound-row">
+          <span>{t("settings.generativeMusicPreset")}</span>
+          <select
+            className="mem-select"
+            value={genMusicPreset}
+            onChange={(e) => {
+              const next = e.target.value as GenerativePreset;
+              setGenMusicPreset(next);
+              setGenerativePreset(next);
+              if (next !== "off") generativeMusic.playPreview(next);
+            }}
+          >
+            <option value="off">{t("settings.generativeMusic.off")}</option>
+            <option value="classic">{t("settings.generativeMusic.presets.classic")}</option>
+            <option value="ethereal">{t("settings.generativeMusic.presets.ethereal")}</option>
+            <option value="digital">{t("settings.generativeMusic.presets.digital")}</option>
+            <option value="retro">{t("settings.generativeMusic.presets.retro")}</option>
+          </select>
+          <button
+            className="chip"
+            type="button"
+            onClick={() => { if (genMusicPreset !== "off") generativeMusic.playPreview(genMusicPreset); }}
+            title={t("settings.generativeMusicPreview")}
           >
             <Play size={13} />
           </button>
