@@ -74,8 +74,10 @@ context_window = 65536
 # Custom /effort levels for a provider. When supported_efforts is set, the
 # /effort command exposes these levels; default_effort is what "/effort auto"
 # (or unset) resolves to. Leave both commented to keep the built-in defaults
-# (DeepSeek: high|max; Anthropic: low|medium|high|xhigh|max). Other kinds
-# (e.g. mimo-pro) don't expose /effort unless you opt in here.
+# (DeepSeek models: high|max; Anthropic: low|medium|high|xhigh|max). DeepSeek
+# models behind a proxy are detected by model name; set reasoning_protocol =
+# "none" to disable that or "openai" to force ordinary reasoning_effort.
+# Other kinds (e.g. mimo-pro) don't expose /effort unless you opt in here.
 #
 # [[providers]]
 # name           = "mimo-custom"
@@ -83,6 +85,7 @@ context_window = 65536
 # base_url       = "https://token-plan-cn.xiaomimimo.com/v1"
 # model          = "mimo-v2.5-pro"
 # api_key_env    = "MIMO_API_KEY"
+# reasoning_protocol = "openai"   # auto|deepseek|openai|none
 # supported_efforts = ["low", "medium", "high"]
 # default_effort    = "high"
 

@@ -438,17 +438,24 @@ export interface MemoryView {
   available: boolean;
 }
 
+// SettingsTab is the top-level navigation item in the Settings Centre modal.
+export type SettingsTab = "general" | "models" | "providers" | "mcp" | "skills" | "memory" | "permissions" | "sandbox" | "network" | "appearance" | "updates";
+
 // Settings panel payloads (desktop/settings_app.go).
 export interface ProviderView {
   name: string;
+  builtIn: boolean;
+  added: boolean;
   kind: string;
   baseUrl: string;
   models: string[];
+  modelsUrl: string; // optional override for model discovery; empty derives from baseUrl
   default: string;
   apiKeyEnv: string;
   keySet: boolean; // the env var currently resolves to a value
   balanceUrl: string; // optional wallet-balance endpoint; "" disables the readout
   contextWindow: number;
+  reasoningProtocol: string; // auto|deepseek|openai|none; empty = auto/model registry
   supportedEfforts: string[]; // custom /effort levels; empty = use built-in Kind/BaseURL default
   defaultEffort: string; // /effort level when user picks "auto" or unset; "" = supportedEfforts[0]
 }
@@ -513,6 +520,7 @@ export interface SettingsView {
   subagentEffort: string;
   autoPlan: string;
   providers: ProviderView[];
+  officialProviders: ProviderView[];
   permissions: PermissionsView;
   sandbox: SandboxView;
   network: NetworkView;

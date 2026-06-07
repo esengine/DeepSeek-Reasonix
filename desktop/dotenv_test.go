@@ -39,6 +39,32 @@ func TestUpsertEnvFile(t *testing.T) {
 	}
 }
 
+func TestRemoveEnvFileDeletesKeyAndUnsetsProcessEnv(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "credentials")
+	if err := os.WriteFile(path, []byte("# comment\nFOO=old\nexport BAR=remove\nBAZ=keep\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BAR", "remove")
+
+	if err := removeEnvFile(path, "BAR"); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+
+	b, _ := os.ReadFile(path)
+	got := string(b)
+	for _, want := range []string{"# comment", "FOO=old", "BAZ=keep"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "BAR=") {
+		t.Errorf("removed key should be absent:\n%s", got)
+	}
+	if _, ok := os.LookupEnv("BAR"); ok {
+		t.Errorf("process env BAR should be unset")
+	}
+}
+
 // TestPromoteProviderKeysLiftsProjectKeyAndStripsHomeEnv proves a provider key
 // that resolves only from a project .env / ~/.env is copied into the global
 // credentials store, removed from ~/.env, and that unrelated env vars are ignored.

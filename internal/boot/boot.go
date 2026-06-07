@@ -794,10 +794,11 @@ func NewProviderWithProxy(e *config.ProviderEntry, proxy netclient.ProxySpec) (p
 		// provider-kind-specific knobs. EffectiveEffort applies a configured
 		// default_effort when the user has not explicitly selected /effort.
 		Extra: map[string]any{
-			"api_key_env": e.APIKeyEnv,
-			"thinking":    e.Thinking,
-			"effort":      config.EffectiveEffort(e),
-			"proxy_spec":  proxy,
+			"api_key_env":        e.APIKeyEnv,
+			"thinking":           e.Thinking,
+			"effort":             config.EffectiveEffort(e),
+			"reasoning_protocol": config.ReasoningProtocolForEntry(e),
+			"proxy_spec":         proxy,
 		},
 	})
 }

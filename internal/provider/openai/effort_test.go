@@ -53,3 +53,35 @@ func TestEffortInvalidRejected(t *testing.T) {
 		t.Fatalf("expected a low/medium/high validation error, got: %v", err)
 	}
 }
+
+func TestReasoningProtocolOverridesEndpointHeuristic(t *testing.T) {
+	p, err := New(provider.Config{
+		Name:    "deepseek-proxy",
+		BaseURL: "https://proxy.example.com/v1",
+		Model:   "deepseek-v4-flash",
+		APIKey:  "k",
+		Extra:   map[string]any{"reasoning_protocol": "deepseek"},
+	})
+	if err != nil {
+		t.Fatalf("New deepseek protocol: %v", err)
+	}
+	c := p.(*client)
+	if !c.deepseek || c.effort != "high" {
+		t.Fatalf("deepseek=%v effort=%q, want true/high", c.deepseek, c.effort)
+	}
+
+	p, err = New(provider.Config{
+		Name:    "deepseek-direct",
+		BaseURL: "https://api.deepseek.com/v1",
+		Model:   "deepseek-v4-flash",
+		APIKey:  "k",
+		Extra:   map[string]any{"reasoning_protocol": "none", "effort": "max"},
+	})
+	if err != nil {
+		t.Fatalf("New none protocol: %v", err)
+	}
+	c = p.(*client)
+	if c.deepseek || c.effort != "" {
+		t.Fatalf("deepseek=%v effort=%q, want false/empty", c.deepseek, c.effort)
+	}
+}

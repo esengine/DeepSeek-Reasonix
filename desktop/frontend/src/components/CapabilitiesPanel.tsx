@@ -15,8 +15,10 @@ type CapTab = "servers" | "skills";
 
 export function CapabilitiesPanel({
   onClose,
+  initialTab = "servers",
 }: {
   onClose: () => void;
+  initialTab?: CapTab;
 }) {
   const t = useT();
   const [view, setView] = useState<CapabilitiesView | null>(null);
@@ -24,7 +26,7 @@ export function CapabilitiesPanel({
   const [err, setErr] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
-  const [tab, setTab] = useState<CapTab>("servers");
+  const [tab, setTab] = useState<CapTab>(initialTab);
   const [skillQuery, setSkillQuery] = useState("");
   const [expandedSkills, setExpandedSkills] = useState<Set<string>>(() => new Set());
   const [expandedErrors, setExpandedErrors] = useState<Set<string>>(() => new Set());
@@ -1307,4 +1309,227 @@ function AddServerForm({
       </div>
     </div>
   );
+}
+
+// MCPServersSettingsPage is a self-contained MCP servers management page
+// embedded inside the settings centre.
+export function MCPServersSettingsPage() {
+	const t = useT();
+	const [view, setView] = useState<CapabilitiesView | null>(null);
+	const [busy, setBusy] = useState(false);
+	const [err, setErr] = useState<string | null>(null);
+	const [adding, setAdding] = useState(false);
+	const [editing, setEditing] = useState<string | null>(null);
+	const [expandedErrors, setExpandedErrors] = useState<Set<string>>(() => new Set());
+	const [expandedServers, setExpandedServers] = useState<Set<string>>(() => new Set());
+	const [expandedServerTools, setExpandedServerTools] = useState<Set<string>>(() => new Set());
+
+	const reload = useCallback(async () => {
+		setView(normalizeCapabilitiesView(await app.Capabilities().catch(() => ({ servers: [], skills: [], skillRoots: [] }))));
+	}, []);
+	useEffect(() => { void reload(); }, [reload]);
+	useEffect(() => {
+		if (!view || !view.servers.some((s) => s.status === "initializing" || s.status === "deferred")) return;
+		const id = window.setInterval(() => void reload(), 2500);
+		return () => window.clearInterval(id);
+	}, [reload, view]);
+
+	const mutate = async (fn: () => Promise<unknown>) => {
+		setBusy(true);
+		setErr(null);
+		try {
+			await fn();
+			await reload();
+			return true;
+		} catch (e) {
+			setErr(String((e as Error)?.message ?? e));
+			await reload();
+			return false;
+		} finally {
+			setBusy(false);
+		}
+	};
+
+	const serverGroups = useMemo(() => {
+		const servers = sortServersForDisplay(view?.servers ?? []);
+		return {
+			failed: servers.filter((s) => s.status === "failed"),
+			active: servers.filter((s) => s.status !== "failed"),
+		};
+	}, [view]);
+
+	const toggleError = useCallback((name: string) => {
+		setExpandedErrors((prev) => { const next = new Set(prev); if (next.has(name)) next.delete(name); else next.add(name); return next; });
+	}, []);
+	const toggleServer = useCallback((name: string) => {
+		setExpandedServers((prev) => { const next = new Set(prev); if (next.has(name)) next.delete(name); else next.add(name); return next; });
+	}, []);
+	const toggleServerTools = useCallback((name: string) => {
+		setExpandedServerTools((prev) => { const next = new Set(prev); if (next.has(name)) next.delete(name); else next.add(name); return next; });
+	}, []);
+
+	const summary = useMemo(() => {
+		if (!view) return "";
+		const connected = view.servers.filter((s) => s.status === "connected").length;
+		const failed = view.servers.filter((s) => s.status === "failed").length;
+		return t("caps.summary", { connected, failed, skills: 0 }).replace(/· \d+ skills/, "").trim();
+	}, [view, t]);
+
+	if (!view) return <div className="empty">{t("caps.loading")}</div>;
+
+	return (
+		<section className="mem-section">
+			{err && <div className="banner banner--error">{err}</div>}
+			{view.servers.length > 0 && (
+				<div className="drawer__summary" style={{ marginBottom: 12 }}>{summary}</div>
+			)}
+			<div className="mem-section__actions">
+				{!adding && (
+					<button className="btn btn--small" disabled={busy} onClick={() => setAdding(true)}>
+						{t("caps.addServer")}
+					</button>
+				)}
+			</div>
+			{serverGroups.failed.length > 0 && (
+				<FailedServersNotice
+					servers={serverGroups.failed}
+					expanded={expandedErrors}
+					busy={busy}
+					onToggle={toggleError}
+					onRetry={(name) => void mutate(() => app.ReconnectMCPServer(name))}
+					onConfirmClearAuth={(name) => void mutate(() => app.ClearMCPServerAuthentication(name))}
+					onConfirm={(name) => void mutate(() => app.RemoveMCPServer(name))}
+				/>
+			)}
+			{view.servers.length === 0 && !adding && (
+				<div className="mem-empty">{t("caps.noServers")}</div>
+			)}
+			<ServerGroup
+				busy={busy}
+				servers={serverGroups.active}
+				expanded={expandedServers}
+				expandedTools={expandedServerTools}
+				editing={editing}
+				onConfirm={(name) => void mutate(() => app.RemoveMCPServer(name))}
+				onEdit={(name) => { setEditing(name); }}
+				onCancelEdit={() => setEditing(null)}
+				onRetry={(name) => void mutate(() => app.ReconnectMCPServer(name))}
+				onReconnect={(name) => void mutate(() => app.ReconnectMCPServer(name))}
+				onConfirmClearAuth={(name) => void mutate(() => app.ClearMCPServerAuthentication(name))}
+				onToggle={(name, on) => void mutate(() => app.SetMCPServerEnabled(name, on))}
+				onUpdate={(name, input) =>
+					void mutate(() => app.UpdateMCPServer(name, input)).then((ok) => {
+						if (ok) setEditing(null);
+					})
+				}
+				onToggleDetails={toggleServer}
+				onToggleTools={toggleServerTools}
+			/>
+			{adding ? (
+				<AddServerForm busy={busy} onCancel={() => setAdding(false)} onAdd={async (input) => (await mutate(() => app.AddMCPServer(input))) && setAdding(false)} />
+			) : null}
+		</section>
+	);
+}
+
+// SkillsSettingsPage is a self-contained skills management page embedded inside
+// the settings centre.
+export function SkillsSettingsPage() {
+	const t = useT();
+	const [view, setView] = useState<CapabilitiesView | null>(null);
+	const [busy, setBusy] = useState(false);
+	const [err, setErr] = useState<string | null>(null);
+	const [skillQuery, setSkillQuery] = useState("");
+	const [expandedSkills, setExpandedSkills] = useState<Set<string>>(() => new Set());
+
+	const reload = useCallback(async () => {
+		setView(normalizeCapabilitiesView(await app.Capabilities().catch(() => ({ servers: [], skills: [], skillRoots: [] }))));
+	}, []);
+	useEffect(() => { void reload(); }, [reload]);
+
+	const mutate = async (fn: () => Promise<unknown>) => {
+		setBusy(true);
+		setErr(null);
+		try {
+			await fn();
+			await reload();
+			return true;
+		} catch (e) {
+			setErr(String((e as Error)?.message ?? e));
+			await reload();
+			return false;
+		} finally {
+			setBusy(false);
+		}
+	};
+
+	const filteredSkills = useMemo(() => {
+		if (!view) return [];
+		const q = skillQuery.trim().toLowerCase();
+		if (!q) return view.skills;
+		return view.skills.filter((sk) => {
+			const text = [sk.name, "/" + sk.name, sk.description, sk.scope, sk.runAs].join(" ").toLowerCase();
+			return text.includes(q);
+		});
+	}, [view, skillQuery]);
+
+	const skillSummary = useMemo(() => {
+		if (!view) return "";
+		return skillListSummary(view.skills, filteredSkills, skillQuery.trim().length > 0, t);
+	}, [filteredSkills, skillQuery, t, view]);
+
+	const toggleSkill = useCallback((name: string) => {
+		setExpandedSkills((prev) => { const next = new Set(prev); if (next.has(name)) next.delete(name); else next.add(name); return next; });
+	}, []);
+
+	if (!view) return <div className="empty">{t("caps.loading")}</div>;
+
+	return (
+		<section className="mem-section">
+			{err && <div className="banner banner--error">{err}</div>}
+			<div className="cap-search">
+				<input
+					className="mem-input"
+					type="search"
+					placeholder={t("caps.searchSkills")}
+					value={skillQuery}
+					onChange={(e) => setSkillQuery(e.target.value)}
+				/>
+			</div>
+			<SkillSources
+				roots={view.skillRoots ?? []}
+				busy={busy}
+				onAdd={() => mutate(async () => {
+					const path = await app.PickSkillFolder();
+					if (path) await app.AddSkillPath(path);
+				})}
+				onRefresh={() => mutate(() => app.RefreshSkills())}
+				onRemove={(path) => mutate(() => app.RemoveSkillPath(path))}
+			/>
+			<div className="cap-skills-head">
+				<div className="cap-skills-head__copy">
+					<div className="cap-skills-head__title">{t("caps.skills")}</div>
+					<div className="cap-skills-head__summary">{skillSummary}</div>
+				</div>
+			</div>
+			{view.skills.length === 0 ? (
+				<div className="mem-empty">{t("caps.noSkills")}</div>
+			) : filteredSkills.length === 0 ? (
+				<div className="mem-empty">{t("caps.noSkillMatches")}</div>
+			) : (
+				<div className="cap-skills">
+					{filteredSkills.map((sk) => (
+						<SkillRow
+							key={sk.name}
+							skill={sk}
+							busy={busy}
+							expanded={expandedSkills.has(sk.name)}
+							onToggle={() => toggleSkill(sk.name)}
+							onToggleEnabled={(enabled) => void mutate(() => app.SetSkillEnabled(sk.name, enabled))}
+						/>
+					))}
+				</div>
+			)}
+		</section>
+	);
 }

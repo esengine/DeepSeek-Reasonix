@@ -118,6 +118,46 @@ func TestNewProviderAppliesConfiguredDefaultEffort(t *testing.T) {
 	}
 }
 
+func TestNewProviderAppliesModelReasoningProtocol(t *testing.T) {
+	var gotReq map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotReq); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n"))
+	}))
+	defer srv.Close()
+
+	p, err := NewProvider(&config.ProviderEntry{
+		Name:    "deepseek-proxy",
+		Kind:    "openai",
+		BaseURL: srv.URL,
+		Model:   "deepseek-v4-flash",
+	})
+	if err != nil {
+		t.Fatalf("NewProvider: %v", err)
+	}
+	ch, err := p.Stream(context.Background(), provider.Request{
+		Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	for chunk := range ch {
+		if chunk.Type == provider.ChunkError {
+			t.Fatalf("stream error: %v", chunk.Err)
+		}
+	}
+	if got := gotReq["reasoning_effort"]; got != "high" {
+		t.Fatalf("reasoning_effort = %#v, want high from DeepSeek model capability", got)
+	}
+	thinking, ok := gotReq["thinking"].(map[string]any)
+	if !ok || thinking["type"] != "enabled" {
+		t.Fatalf("thinking = %#v, want enabled", gotReq["thinking"])
+	}
+}
+
 // TestBuildDiscoversSkills proves the skill wiring end-to-end: a project skill
 // is discovered at boot, surfaced via Controller.Skills(), and its name folds
 // into the cache-stable system prompt's "# Skills" index alongside a built-in.

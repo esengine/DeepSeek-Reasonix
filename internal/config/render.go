@@ -80,6 +80,9 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 			b.WriteString("# theme_style = \"graphite\"   # graphite|ember|aurora|midnight|sandstone|porcelain|linen|glacier\n")
 		}
 		fmt.Fprintf(&b, "close_behavior = %q   # desktop: quit|background when the window close button is clicked\n", c.DesktopCloseBehavior())
+		if len(c.Desktop.ProviderAccess) > 0 {
+			fmt.Fprintf(&b, "provider_access = %s   # desktop settings: providers shown on Settings > Model > Access\n", renderStringArray(c.Desktop.ProviderAccess))
+		}
 		b.WriteString("\n")
 
 		b.WriteString("[notifications]\n")
@@ -228,6 +231,9 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 			}
 			if p.Effort != "" {
 				fmt.Fprintf(&b, "effort      = %q\n", p.Effort)
+			}
+			if p.ReasoningProtocol != "" {
+				fmt.Fprintf(&b, "reasoning_protocol = %q   # auto|deepseek|openai|none; overrides model/endpoint reasoning detection\n", p.ReasoningProtocol)
 			}
 			if len(p.SupportedEfforts) > 0 {
 				fmt.Fprintf(&b, "supported_efforts = %s   # custom /effort levels exposed by this provider; overrides the built-in Kind/BaseURL default\n", renderStringArray(p.SupportedEfforts))

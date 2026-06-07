@@ -1,14 +1,17 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/boot"
 	"reasonix/internal/config"
+	"reasonix/internal/control"
 	"reasonix/internal/provider"
 )
 
@@ -22,17 +25,21 @@ import (
 // --- read ---
 
 type ProviderView struct {
-	Name             string   `json:"name"`
-	Kind             string   `json:"kind"`
-	BaseURL          string   `json:"baseUrl"`
-	Models           []string `json:"models"`
-	Default          string   `json:"default"`
-	APIKeyEnv        string   `json:"apiKeyEnv"`
-	KeySet           bool     `json:"keySet"` // the env var currently resolves to a non-empty value
-	BalanceURL       string   `json:"balanceUrl"`
-	ContextWindow    int      `json:"contextWindow"`
-	SupportedEfforts []string `json:"supportedEfforts"`
-	DefaultEffort    string   `json:"defaultEffort"`
+	Name              string   `json:"name"`
+	BuiltIn           bool     `json:"builtIn"`
+	Added             bool     `json:"added"`
+	Kind              string   `json:"kind"`
+	BaseURL           string   `json:"baseUrl"`
+	Models            []string `json:"models"`
+	ModelsURL         string   `json:"modelsUrl"`
+	Default           string   `json:"default"`
+	APIKeyEnv         string   `json:"apiKeyEnv"`
+	KeySet            bool     `json:"keySet"` // the env var currently resolves to a non-empty value
+	BalanceURL        string   `json:"balanceUrl"`
+	ContextWindow     int      `json:"contextWindow"`
+	ReasoningProtocol string   `json:"reasoningProtocol"`
+	SupportedEfforts  []string `json:"supportedEfforts"`
+	DefaultEffort     string   `json:"defaultEffort"`
 }
 
 type PermissionsView struct {
@@ -78,6 +85,7 @@ type SettingsView struct {
 	SubagentEffort    string          `json:"subagentEffort"`
 	AutoPlan          string          `json:"autoPlan"`
 	Providers         []ProviderView  `json:"providers"`
+	OfficialProviders []ProviderView  `json:"officialProviders"`
 	Permissions       PermissionsView `json:"permissions"`
 	Sandbox           SandboxView     `json:"sandbox"`
 	Network           NetworkView     `json:"network"`
@@ -103,13 +111,111 @@ func nonNil(s []string) []string {
 	return s
 }
 
+func providerRemovalFallbackRef(c *config.Config, name string) string {
+	for i := range c.Providers {
+		p := &c.Providers[i]
+		if p.Name == name || !p.Configured() || len(p.ModelList()) == 0 {
+			continue
+		}
+		return p.Name + "/" + p.DefaultModel()
+	}
+	return ""
+}
+
+func desktopModelRefsProvider(c *config.Config, ref, name string) bool {
+	if config.ModelRefsProvider(ref, name) {
+		return true
+	}
+	if e, ok := c.ResolveModel(ref); ok {
+		return e.Name == name
+	}
+	return false
+}
+
+func builtInProviderNames() map[string]bool {
+	out := map[string]bool{}
+	for _, p := range config.Default().Providers {
+		out[p.Name] = true
+	}
+	for _, name := range []string{"deepseek-flash", "mimo-api", "mimo-pro"} {
+		out[name] = true
+	}
+	return out
+}
+
+func providerAccessSet(names []string) map[string]bool {
+	out := map[string]bool{}
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name != "" {
+			out[name] = true
+		}
+	}
+	return out
+}
+
+func addProviderAccess(c *config.Config, names ...string) {
+	seen := providerAccessSet(c.Desktop.ProviderAccess)
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" || seen[name] {
+			continue
+		}
+		c.Desktop.ProviderAccess = append(c.Desktop.ProviderAccess, name)
+		seen[name] = true
+	}
+}
+
+func removeProviderAccess(c *config.Config, names ...string) {
+	remove := providerAccessSet(names)
+	if len(remove) == 0 {
+		return
+	}
+	out := c.Desktop.ProviderAccess[:0]
+	for _, name := range c.Desktop.ProviderAccess {
+		if !remove[name] {
+			out = append(out, name)
+		}
+	}
+	c.Desktop.ProviderAccess = out
+}
+
+func providerViewFromEntry(p config.ProviderEntry, builtIn, added bool) ProviderView {
+	return ProviderView{
+		Name: p.Name, BuiltIn: builtIn, Added: added, Kind: p.Kind, BaseURL: p.BaseURL,
+		Models: nonNil(p.ModelList()), ModelsURL: p.ModelsURL, Default: p.DefaultModel(),
+		APIKeyEnv:         p.APIKeyEnv,
+		KeySet:            p.APIKeyEnv != "" && os.Getenv(p.APIKeyEnv) != "",
+		BalanceURL:        p.BalanceURL,
+		ContextWindow:     p.ContextWindow,
+		ReasoningProtocol: p.ReasoningProtocol,
+		SupportedEfforts:  nonNil(p.SupportedEfforts),
+		DefaultEffort:     p.DefaultEffort,
+	}
+}
+
+func officialProviderViews(added map[string]bool) []ProviderView {
+	var out []ProviderView
+	for _, kind := range []string{"deepseek", "mimo-api", "mimo-token-plan"} {
+		entries, _, err := officialProviderTemplate(kind)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			out = append(out, providerViewFromEntry(entry, true, added[entry.Name]))
+		}
+	}
+	return out
+}
+
 // Settings returns the current configuration for the Settings panel.
 func (a *App) Settings() SettingsView {
 	cfg, cfgPath, err := a.loadDesktopUserConfigForEdit()
 	if err != nil {
 		return SettingsView{
-			Providers:     []ProviderView{},
-			ProviderKinds: nonNil(provider.Kinds()),
+			Providers:         []ProviderView{},
+			OfficialProviders: officialProviderViews(map[string]bool{}),
+			ProviderKinds:     nonNil(provider.Kinds()),
 			Permissions: PermissionsView{
 				Mode:  "ask",
 				Allow: []string{},
@@ -129,12 +235,13 @@ func (a *App) Settings() SettingsView {
 		bash = "enforce"
 	}
 	v := SettingsView{
-		DefaultModel:   cfg.DefaultModel,
-		PlannerModel:   cfg.Agent.PlannerModel,
-		SubagentModel:  cfg.Agent.SubagentModel,
-		SubagentEffort: cfg.Agent.SubagentEffort,
-		AutoPlan:       desktopAutoPlanMode(cfg.Agent.AutoPlan),
-		Providers:      []ProviderView{},
+		DefaultModel:      cfg.DefaultModel,
+		PlannerModel:      cfg.Agent.PlannerModel,
+		SubagentModel:     cfg.Agent.SubagentModel,
+		SubagentEffort:    cfg.Agent.SubagentEffort,
+		AutoPlan:          desktopAutoPlanMode(cfg.Agent.AutoPlan),
+		Providers:         []ProviderView{},
+		OfficialProviders: []ProviderView{},
 		Permissions: PermissionsView{
 			Mode:  orDefault(cfg.Permissions.Mode, "ask"),
 			Allow: nonNil(cfg.Permissions.Allow),
@@ -166,18 +273,12 @@ func (a *App) Settings() SettingsView {
 		ProviderKinds:     nonNil(provider.Kinds()),
 		Bypass:            ctrl != nil && ctrl.Bypass(),
 	}
+	builtIns := builtInProviderNames()
+	added := providerAccessSet(cfg.Desktop.ProviderAccess)
+	v.OfficialProviders = officialProviderViews(added)
 	for i := range cfg.Providers {
 		p := &cfg.Providers[i]
-		v.Providers = append(v.Providers, ProviderView{
-			Name: p.Name, Kind: p.Kind, BaseURL: p.BaseURL,
-			Models: nonNil(p.ModelList()), Default: p.DefaultModel(),
-			APIKeyEnv:        p.APIKeyEnv,
-			KeySet:           p.APIKeyEnv != "" && os.Getenv(p.APIKeyEnv) != "",
-			BalanceURL:       p.BalanceURL,
-			ContextWindow:    p.ContextWindow,
-			SupportedEfforts: nonNil(p.SupportedEfforts),
-			DefaultEffort:    p.DefaultEffort,
-		})
+		v.Providers = append(v.Providers, providerViewFromEntry(*p, builtIns[p.Name], added[p.Name]))
 	}
 	return v
 }
@@ -289,11 +390,11 @@ func (a *App) rebuild() error {
 	}
 	model := tab.model
 	if cfg, err := config.LoadForRoot(tab.WorkspaceRoot); err == nil {
-		if _, ok := cfg.ResolveModel(model); !ok {
-			model = cfg.DefaultModel
-			if e, ok := cfg.ResolveModel(model); ok {
-				model = e.Name + "/" + e.Model
+		if resolved, fallback, ok := cfg.ResolveModelWithFallback(model); ok {
+			if fallback && strings.TrimSpace(model) != "" {
+				a.noticeForTab(tab.ID, fmt.Sprintf("model %q is no longer available; switched to %s", model, resolved))
 			}
+			model = resolved
 		}
 	}
 	ctrl, err := boot.Build(a.bootContext(), boot.Options{
@@ -448,15 +549,57 @@ func desktopAutoPlanMode(mode string) string {
 	}
 }
 
+func officialProviderTemplate(kind string) ([]config.ProviderEntry, string, error) {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "deepseek", "deepseek-official":
+		return []config.ProviderEntry{{
+			Name:          "deepseek-flash",
+			Kind:          "openai",
+			BaseURL:       "https://api.deepseek.com",
+			Models:        []string{"deepseek-v4-flash", "deepseek-v4-pro"},
+			Default:       "deepseek-v4-flash",
+			APIKeyEnv:     "DEEPSEEK_API_KEY",
+			BalanceURL:    "https://api.deepseek.com/user/balance",
+			ContextWindow: 1_000_000,
+		}}, "DEEPSEEK_API_KEY", nil
+	case "mimo-api", "xiaomi-mimo", "xiaomi_mimo":
+		return []config.ProviderEntry{{
+			Name:          "mimo-api",
+			Kind:          "openai",
+			BaseURL:       "https://api.xiaomimimo.com/v1",
+			Models:        []string{"mimo-v2.5-pro"},
+			Default:       "mimo-v2.5-pro",
+			APIKeyEnv:     "MIMO_API_KEY",
+			ContextWindow: 1_048_576,
+			NoProxy:       true,
+		}}, "MIMO_API_KEY", nil
+	case "mimo-token-plan", "xiaomi-mimo-token-plan", "xiaomi_mimo_token_plan":
+		return []config.ProviderEntry{{
+			Name:          "mimo-pro",
+			Kind:          "openai",
+			BaseURL:       "https://token-plan-cn.xiaomimimo.com/v1",
+			Models:        []string{"mimo-v2.5-pro"},
+			Default:       "mimo-v2.5-pro",
+			APIKeyEnv:     "MIMO_API_KEY",
+			ContextWindow: 1_048_576,
+			NoProxy:       true,
+		}}, "MIMO_API_KEY", nil
+	default:
+		return nil, "", fmt.Errorf("unknown official provider template %q", kind)
+	}
+}
+
 // SaveProvider adds or updates a provider. A single model fills `model`; several
 // fill `models` (with `default`). The shared key/endpoint live on the entry.
 func (a *App) SaveProvider(p ProviderView) error {
 	return a.applyConfigChange(func(c *config.Config) error {
 		e := config.ProviderEntry{
 			Name: p.Name, Kind: p.Kind, BaseURL: p.BaseURL,
+			ModelsURL: p.ModelsURL,
 			APIKeyEnv: p.APIKeyEnv, BalanceURL: strings.TrimSpace(p.BalanceURL), ContextWindow: p.ContextWindow,
-			SupportedEfforts: p.SupportedEfforts,
-			DefaultEffort:    p.DefaultEffort,
+			ReasoningProtocol: p.ReasoningProtocol,
+			SupportedEfforts:  p.SupportedEfforts,
+			DefaultEffort:     p.DefaultEffort,
 		}
 		if len(p.Models) > 0 {
 			e.Model = p.Models[0] // also satisfies validateProvider's model requirement
@@ -465,13 +608,162 @@ func (a *App) SaveProvider(p ProviderView) error {
 				e.Default = p.Default
 			}
 		}
-		return c.UpsertProvider(e)
+		if err := c.UpsertProvider(e); err != nil {
+			return err
+		}
+		addProviderAccess(c, p.Name)
+		return nil
 	})
 }
 
-// DeleteProvider removes a provider (refused for the current default_model).
+// AddOfficialProviderAccess adds one curated desktop provider template to the
+// Settings > Model > Access list. The runtime default providers still exist
+// independently; this only records the user's explicit access setup.
+func (a *App) AddOfficialProviderAccess(kind, key string) error {
+	entries, keyEnv, err := officialProviderTemplate(kind)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(key) != "" && keyEnv != "" {
+		if err := upsertDotEnv(keyEnv, key); err != nil {
+			return err
+		}
+	}
+	return a.applyConfigChange(func(c *config.Config) error {
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			if err := c.UpsertProvider(e); err != nil {
+				return err
+			}
+			names = append(names, e.Name)
+		}
+		addProviderAccess(c, names...)
+		return nil
+	})
+}
+
+// FetchProviderModels probes the provider's OpenAI-compatible model-list
+// endpoint and returns the available model IDs. This is a settings-only helper:
+// it never touches chat request serialization or provider-visible prompt data.
+func (a *App) FetchProviderModels(p ProviderView) ([]string, error) {
+	e := config.ProviderEntry{
+		Name:      p.Name,
+		BaseURL:   p.BaseURL,
+		ModelsURL: p.ModelsURL,
+		APIKeyEnv: p.APIKeyEnv,
+	}
+	ctx, cancel := context.WithTimeout(a.reqCtx(), 15*time.Second)
+	defer cancel()
+	models, err := e.FetchModels(ctx)
+	if err != nil {
+		return []string{}, err
+	}
+	return nonNil(models), nil
+}
+
+// DeleteProvider removes a provider and retargets open idle tabs that used it.
 func (a *App) DeleteProvider(name string) error {
-	return a.applyConfigChange(func(c *config.Config) error { return c.RemoveProvider(name) })
+	return a.deleteProviderAndRetargetTabs(name)
+}
+
+// RemoveProviderAccess hides a provider from Settings > Model > Access. Built-in
+// providers remain available as defaults; custom providers are deleted outright.
+func (a *App) RemoveProviderAccess(name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("remove provider access: empty provider name")
+	}
+	if builtInProviderNames()[name] {
+		return a.applyConfigChange(func(c *config.Config) error {
+			removeProviderAccess(c, name)
+			return nil
+		})
+	}
+	return a.deleteProviderAndRetargetTabs(name)
+}
+
+type providerRemovalTab struct {
+	id   string
+	ctrl *control.Controller
+}
+
+func (a *App) deleteProviderAndRetargetTabs(name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("remove provider: empty provider name")
+	}
+	cfg, path, err := a.loadDesktopUserConfigForEdit()
+	if err != nil {
+		return err
+	}
+	fallbackRef := providerRemovalFallbackRef(cfg, name)
+
+	var affected []providerRemovalTab
+	a.mu.RLock()
+	for _, id := range a.orderedTabIDsLocked() {
+		tab := a.tabs[id]
+		if tab == nil {
+			continue
+		}
+		ref := tab.model
+		if strings.TrimSpace(ref) == "" {
+			ref = cfg.DefaultModel
+		}
+		if !desktopModelRefsProvider(cfg, ref, name) {
+			continue
+		}
+		if tab.Ctrl != nil && tab.Ctrl.Running() {
+			a.mu.RUnlock()
+			return fmt.Errorf("finish or cancel conversations using %q before deleting the provider", name)
+		}
+		affected = append(affected, providerRemovalTab{id: id, ctrl: tab.Ctrl})
+	}
+	a.mu.RUnlock()
+
+	if len(affected) > 0 && fallbackRef == "" {
+		return fmt.Errorf("remove provider: %q is used by open tabs and no other configured provider exists", name)
+	}
+	if err := cfg.RemoveProvider(name); err != nil {
+		return err
+	}
+	removeProviderAccess(cfg, name)
+	if err := cfg.SaveTo(path); err != nil {
+		return err
+	}
+
+	if len(affected) == 0 {
+		return a.rebuild()
+	}
+	for _, item := range affected {
+		if item.ctrl != nil {
+			_ = item.ctrl.Snapshot()
+			item.ctrl.Close()
+		}
+	}
+
+	var rebuildTabs []*WorkspaceTab
+	a.mu.Lock()
+	for _, item := range affected {
+		tab := a.tabs[item.id]
+		if tab == nil {
+			continue
+		}
+		tab.Ctrl = nil
+		tab.model = fallbackRef
+		tab.Label = fallbackRef
+		tab.StartupErr = ""
+		tab.Ready = a.ctx == nil
+		if a.ctx != nil {
+			rebuildTabs = append(rebuildTabs, tab)
+		}
+	}
+	a.saveTabsLocked()
+	a.mu.Unlock()
+
+	for _, tab := range rebuildTabs {
+		go a.buildTabController(tab)
+	}
+	return nil
 }
 
 // SetProviderKey writes a secret to the global credentials file under the given
@@ -482,6 +774,18 @@ func (a *App) SetProviderKey(apiKeyEnv, value string) error {
 		return fmt.Errorf("this provider has no api_key_env set")
 	}
 	if err := upsertDotEnv(apiKeyEnv, value); err != nil {
+		return err
+	}
+	return a.rebuild()
+}
+
+// ClearProviderKey removes a provider secret from the global credentials file
+// and rebuilds so the provider immediately becomes unauthenticated.
+func (a *App) ClearProviderKey(apiKeyEnv string) error {
+	if strings.TrimSpace(apiKeyEnv) == "" {
+		return fmt.Errorf("this provider has no api_key_env set")
+	}
+	if err := removeDotEnv(apiKeyEnv); err != nil {
 		return err
 	}
 	return a.rebuild()

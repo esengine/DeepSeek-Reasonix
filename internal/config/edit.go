@@ -200,11 +200,37 @@ func (c *Config) SetNetwork(n NetworkConfig) error {
 	return netclient.Validate(c.NetworkProxySpec())
 }
 
-// RemoveProvider deletes the named provider. It refuses to remove the current
-// default_model (reassign it first, so the config never points at a missing
-// model); if the removed provider was the planner, planner_model is cleared as
-// a side effect since it is optional. Errors when the name isn't configured.
+// ModelRefsProvider reports whether ref targets the named provider. It matches
+// both bare provider names ("deepseek") and "provider/model" refs.
+func ModelRefsProvider(ref, name string) bool {
+	ref = strings.TrimSpace(ref)
+	name = strings.TrimSpace(name)
+	if ref == "" || name == "" {
+		return false
+	}
+	if ref == name {
+		return true
+	}
+	prov, _, ok := strings.Cut(ref, "/")
+	return ok && prov == name
+}
+
+func (c *Config) modelRefTargetsProvider(ref, name string) bool {
+	if ModelRefsProvider(ref, name) {
+		return true
+	}
+	if e, ok := c.ResolveModel(ref); ok {
+		return e.Name == name
+	}
+	return false
+}
+
+// RemoveProvider deletes the named provider. References to the removed provider
+// are migrated to the first remaining configured provider when possible. The
+// default model is required, so removal is refused when no fallback exists;
+// optional planner/subagent refs are cleared instead of being left dangling.
 func (c *Config) RemoveProvider(name string) error {
+	name = strings.TrimSpace(name)
 	idx := -1
 	for i := range c.Providers {
 		if c.Providers[i].Name == name {
@@ -215,14 +241,55 @@ func (c *Config) RemoveProvider(name string) error {
 	if idx < 0 {
 		return fmt.Errorf("remove provider: no provider %q", name)
 	}
-	if c.DefaultModel == name {
-		return fmt.Errorf("remove provider: %q is the default model — set a different default_model first", name)
+
+	defaultRefsProvider := c.modelRefTargetsProvider(c.DefaultModel, name)
+	plannerRefsProvider := c.modelRefTargetsProvider(c.Agent.PlannerModel, name)
+	subagentRefsProvider := c.modelRefTargetsProvider(c.Agent.SubagentModel, name)
+	subagentModelRefsProvider := map[string]bool{}
+	for skill, ref := range c.Agent.SubagentModels {
+		if c.modelRefTargetsProvider(ref, name) {
+			subagentModelRefsProvider[skill] = true
+		}
 	}
+
+	fallback := ""
+	if defaultRefsProvider || plannerRefsProvider || subagentRefsProvider || len(subagentModelRefsProvider) > 0 {
+		fallback = c.providerRemovalFallback(name)
+	}
+	if defaultRefsProvider && fallback == "" {
+		return fmt.Errorf("remove provider: %q is referenced by default_model and no other configured provider exists", name)
+	}
+
 	c.Providers = append(c.Providers[:idx], c.Providers[idx+1:]...)
-	if c.Agent.PlannerModel == name {
-		c.Agent.PlannerModel = ""
+
+	if defaultRefsProvider {
+		c.DefaultModel = fallback
+	}
+	if plannerRefsProvider {
+		c.Agent.PlannerModel = fallback
+	}
+	if subagentRefsProvider {
+		c.Agent.SubagentModel = fallback
+	}
+	for skill := range subagentModelRefsProvider {
+		if fallback != "" {
+			c.Agent.SubagentModels[skill] = fallback
+		} else {
+			delete(c.Agent.SubagentModels, skill)
+		}
 	}
 	return nil
+}
+
+func (c *Config) providerRemovalFallback(name string) string {
+	for i := range c.Providers {
+		p := &c.Providers[i]
+		if p.Name == name || !p.Configured() || len(p.ModelList()) == 0 {
+			continue
+		}
+		return p.Name
+	}
+	return ""
 }
 
 // validateProvider checks the fields a provider can't function without.
