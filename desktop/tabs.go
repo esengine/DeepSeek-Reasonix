@@ -1099,27 +1099,6 @@ func removeString(values []string, value string) []string {
 	return out
 }
 
-func orderedTopicIDs(explicit []string, titleMap map[string]string) []string {
-	seen := map[string]bool{}
-	out := make([]string, 0, len(explicit)+len(titleMap))
-	for _, tid := range explicit {
-		tid = strings.TrimSpace(tid)
-		if tid == "" || seen[tid] {
-			continue
-		}
-		seen[tid] = true
-		out = append(out, tid)
-	}
-	var remaining []string
-	for tid := range titleMap {
-		if !seen[tid] {
-			remaining = append(remaining, tid)
-		}
-	}
-	sort.Strings(remaining)
-	return append(out, remaining...)
-}
-
 // sortTopicIDsByActivity collects all topic IDs from explicit + titleMap,
 // deduplicates, and returns them sorted by lastActivityAt descending (most
 // recent first).  Topics with no activity (0) sink to the bottom; ties are
