@@ -1489,7 +1489,10 @@ func (c *Config) ResolveModelWithFallback(ref string) (resolvedRef string, fallb
 	}
 	for i := range c.Providers {
 		p := &c.Providers[i]
-		if len(p.ModelList()) == 0 {
+		// Skip providers with no models or no API key: falling back onto a keyless
+		// provider just boots the tab onto something that fails on first use. Mirrors
+		// the Configured() gate the provider-removal/selection paths already apply.
+		if len(p.ModelList()) == 0 || !p.Configured() {
 			continue
 		}
 		return p.Name + "/" + p.DefaultModel(), true, true
