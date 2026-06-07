@@ -351,6 +351,88 @@ func TestBuildRequestDeepSeekThinking(t *testing.T) {
 	}
 }
 
+// TestBuildRequestMiniMaxThinking covers the M3 wire shape: thinking.type is
+// the only knob (no reasoning_effort), and the empty-effort / auto case still
+// emits an explicit "adaptive" because that's what the M3 model default means
+// (M3 has no implicit "no thinking" mode at the wire level).
+func TestBuildRequestMiniMaxThinking(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		effort       string
+		wantThinking string
+	}{
+		{name: "auto-defaults-to-adaptive", effort: "", wantThinking: "adaptive"},
+		{name: "adaptive", effort: "adaptive", wantThinking: "adaptive"},
+		{name: "disabled", effort: "disabled", wantThinking: "disabled"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := (&client{model: "MiniMax-M3", minimax: true, effort: tc.effort}).buildRequest(provider.Request{})
+			if req.Thinking == nil || req.Thinking.Type != tc.wantThinking {
+				t.Fatalf("Thinking = %+v, want %q", req.Thinking, tc.wantThinking)
+			}
+			if req.ReasoningEffort != "" {
+				t.Fatalf("MiniMax must not send reasoning_effort, got %q", req.ReasoningEffort)
+			}
+		})
+	}
+}
+
+// TestNewMiniMaxEffortValidation locks in the boot-time validation for the
+// MiniMax path. The config effort layer remaps legacy level names, so by the
+// time effort reaches this factory it must be one of: "", "adaptive",
+// "disabled". Anything else is a config bug, surfaced now (not at request
+// time) for an actionable error.
+func TestNewMiniMaxEffortValidation(t *testing.T) {
+	base := provider.Config{Name: "m3", BaseURL: "https://api.minimaxi.com/v1", Model: "MiniMax-M3", APIKey: "k"}
+	// happy path: auto (empty effort) and both explicit values are accepted
+	for _, ok := range []string{"", "adaptive", "disabled"} {
+		if _, err := New(withEffort(base, ok)); err != nil {
+			t.Errorf("effort=%q should be accepted: %v", ok, err)
+		}
+	}
+	// unhappy: anything else is rejected up front
+	for _, bad := range []string{"high", "low", "max", "turbo"} {
+		if _, err := New(withEffort(base, bad)); err == nil {
+			t.Errorf("effort=%q should be rejected", bad)
+		}
+	}
+}
+
+// TestNewMiniMaxSetsFlag is a smoke test for base-URL detection: the factory
+// must set the `minimax` flag when the base URL points at api.minimaxi.com
+// (with or without the /v1 suffix) so buildRequest picks the right wire shape.
+func TestNewMiniMaxSetsFlag(t *testing.T) {
+	for _, baseURL := range []string{
+		"https://api.minimaxi.com/v1",
+		"https://api.minimaxi.com",
+	} {
+		p, err := New(provider.Config{Name: "m3", BaseURL: baseURL, Model: "MiniMax-M3", APIKey: "k"})
+		if err != nil {
+			t.Fatalf("New(%q): %v", baseURL, err)
+		}
+		c := p.(*client)
+		if !c.minimax {
+			t.Errorf("minimax flag not set for baseURL=%q", baseURL)
+		}
+	}
+}
+
+func withEffort(c provider.Config, effort string) provider.Config {
+	extra := c.Extra
+	if extra == nil {
+		extra = map[string]any{}
+	} else {
+		cp := make(map[string]any, len(extra)+1)
+		for k, v := range extra {
+			cp[k] = v
+		}
+		extra = cp
+	}
+	extra["effort"] = effort
+	c.Extra = extra
+	return c
+}
+
 func TestBuildRequestNonDeepSeekOmitsThinking(t *testing.T) {
 	req := (&client{model: "mimo-v2", effort: "high"}).buildRequest(provider.Request{})
 	if req.Thinking != nil {
