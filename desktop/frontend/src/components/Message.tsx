@@ -240,18 +240,7 @@ export const AssistantMessage = memo(function AssistantMessage({
       )}
       {hasText && (
         <div className="msg__body">
-          {item.streaming ? (
-            // Render markdown in real time while streaming.  useDeferredValue
-            // inside <Markdown> lets React prioritise the cursor + layout frame
-            // over the expensive markdown parse — new tokens paint immediately,
-            // the formatted catch-up runs in idle frames.
-            <div className="msg__stream">
-              <Markdown text={item.text} />
-              <span className="msg__cursor" />
-            </div>
-          ) : (
-            <Markdown text={item.text} />
-          )}
+          <Markdown text={item.text} showCursor={item.streaming} />
         </div>
       )}
     </div>
