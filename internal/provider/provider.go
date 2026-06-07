@@ -7,6 +7,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 
@@ -214,6 +215,33 @@ type Chunk struct {
 	ToolCall  *ToolCall // ChunkToolCallStart (ID+Name only), ChunkToolCall (complete)
 	Usage     *Usage    // ChunkUsage
 	Err       error     // ChunkError
+}
+
+// StreamInterruptedError marks a recoverable transport cut that happened after
+// the caller had already received model output. Providers must not replay these
+// requests themselves because doing so could duplicate visible text or tool
+// calls; the agent can append a tail recovery prompt instead.
+type StreamInterruptedError struct {
+	Err error
+}
+
+func (e *StreamInterruptedError) Error() string {
+	if e == nil || e.Err == nil {
+		return "stream interrupted"
+	}
+	return e.Err.Error()
+}
+
+func (e *StreamInterruptedError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+func IsStreamInterrupted(err error) bool {
+	var interrupted *StreamInterruptedError
+	return errors.As(err, &interrupted)
 }
 
 // Provider is a chat-capable model backend.

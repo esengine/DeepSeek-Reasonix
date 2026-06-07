@@ -169,6 +169,7 @@ func mcpArgItems(prior []string, cur string, d ArgData) []SlashItem {
 			{Label: "show", Insert: "show ", Hint: "show MCP server details", Descend: true},
 			{Label: "tools", Insert: "tools ", Hint: "show MCP server tools", Descend: true},
 			{Label: "remove", Insert: "remove ", Hint: i18n.M.ArgMcpRemove, Descend: true},
+			{Label: "import", Insert: "import", Hint: "import Codex-enabled servers from cc-switch"},
 		}
 	}
 	switch prior[1] {

@@ -332,7 +332,7 @@ func (a *App) OpenProjectTab(workspaceRoot, topicID string) (TabMeta, error) {
 	a.saveTabsLocked()
 	a.mu.Unlock()
 
-	go a.buildTabController(tab)
+	a.startTabControllerBuild(tab)
 	return a.tabMeta(tab, true), nil
 }
 
@@ -374,7 +374,7 @@ func (a *App) OpenGlobalTab(topicID string) (TabMeta, error) {
 	a.saveTabsLocked()
 	a.mu.Unlock()
 
-	go a.buildTabController(tab)
+	a.startTabControllerBuild(tab)
 	return a.tabMeta(tab, true), nil
 }
 
@@ -475,6 +475,14 @@ func (a *App) CloseTab(tabID string) error {
 // buildTabController assembles a controller for a tab in the background, the
 // same way buildController works for the single-controller App. On success it
 // wires the controller and flips Ready; on failure it stores StartupErr.
+func (a *App) startTabControllerBuild(tab *WorkspaceTab) {
+	if a.ctx == nil {
+		a.buildTabController(tab)
+		return
+	}
+	go a.buildTabController(tab)
+}
+
 func (a *App) buildTabController(tab *WorkspaceTab) {
 	wailsCtx := a.ctx
 	buildCtx := a.bootContext()
