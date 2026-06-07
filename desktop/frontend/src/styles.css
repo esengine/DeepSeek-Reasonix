@@ -66,6 +66,31 @@
   --danger-fg: #fff;
   --shell-accent: #22c55e;
 
+  /* z-index scale */
+  --z-local-raised: 2;
+  --z-local-handle: 4;
+  --z-local-handle-active: 5;
+  --z-layout-resizer: 12;
+  --z-layout-resizer-active: 13;
+  --z-inline-sticky: 20;
+  --z-local-backdrop: 30;
+  --z-local-popover: 31;
+  --z-workspace-float: 40;
+  --z-app-chrome: 70;
+  --z-drawer-backdrop: 90;
+  --z-menu-backdrop: 95;
+  --z-menu: 96;
+  --z-dock: 100;
+  --z-floating-menu: 110;
+  --z-topicbar-menu: 210;
+  --z-startup-overlay: 300;
+  --z-modal: 1200;
+  --z-overlay-backdrop: 1300;
+  --z-popover: 1301;
+  --z-tooltip: 1302;
+  --z-onboarding: 9999;
+  --z-crash-overlay: 99999;
+
   /* component recipes */
   --list-row-height: 38px;
   --list-row-radius: 7px;
@@ -147,22 +172,24 @@
   --sans: "PingFang SC", "Microsoft YaHei", "Noto Sans SC",
     -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
     "Helvetica Neue", Arial, sans-serif;
+}
 
-	/* font-family presets */
-	:root[data-font-family="yahei"] {
-	  --sans: "Microsoft YaHei", "微软雅黑", "PingFang SC", "Noto Sans SC",
-	    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-	}
-	:root[data-font-family="pingfang"] {
-	  --sans: "PingFang SC", "苹方-简", "Noto Sans SC",
-	    "Microsoft YaHei", -apple-system, BlinkMacSystemFont,
-	    "Segoe UI", Roboto, sans-serif;
-	}
-	:root[data-font-family="noto"] {
-	  --sans: "Noto Sans SC", "Noto Sans", "PingFang SC",
-	    "Microsoft YaHei", -apple-system, BlinkMacSystemFont,
-	    "Segoe UI", Roboto, sans-serif;
-	}
+/* font-family presets */
+:root[data-font-family="yahei"] {
+  --sans: "Microsoft YaHei", "微软雅黑", "PingFang SC", "Noto Sans SC",
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+:root[data-font-family="pingfang"] {
+  --sans: "PingFang SC", "苹方-简", "Noto Sans SC",
+    "Microsoft YaHei", -apple-system, BlinkMacSystemFont,
+    "Segoe UI", Roboto, sans-serif;
+}
+
+:root[data-font-family="noto"] {
+  --sans: "Noto Sans SC", "Noto Sans", "PingFang SC",
+    "Microsoft YaHei", -apple-system, BlinkMacSystemFont,
+    "Segoe UI", Roboto, sans-serif;
 }
 
 @media (prefers-color-scheme: light) {
@@ -447,7 +474,7 @@ a[href] {
   right: 0;
   bottom: 0;
   width: var(--workspace-width);
-  z-index: 100;
+  z-index: var(--z-dock);
   box-shadow: -4px 0 24px rgba(0, 0, 0, 0.3);
   border-left: 1px solid var(--border);
 }
@@ -568,7 +595,7 @@ a[href] {
   top: 38px;
   bottom: 0;
   left: calc(var(--sidebar-width) - 4px);
-  z-index: 12;
+  z-index: var(--z-layout-resizer);
   width: 8px;
   padding: 0;
   border: 0;
@@ -602,7 +629,7 @@ a[href] {
   grid-column: 3;
   align-self: stretch;
   justify-self: stretch;
-  z-index: 13;
+  z-index: var(--z-layout-resizer-active);
   width: auto;
   min-width: var(--workspace-resizer-width);
   padding: 0;
@@ -840,7 +867,7 @@ a[href] {
 .startup-splash {
   position: fixed;
   inset: 0;
-  z-index: 300;
+  z-index: var(--z-startup-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -956,7 +983,7 @@ a[href] {
 .jump-bar {
   position: sticky;
   top: 50%;
-  z-index: 20;
+  z-index: var(--z-inline-sticky);
   display: flex;
   flex-direction: column;
   align-items: flex-end;
@@ -1247,7 +1274,7 @@ a[href] {
   bottom: 100%;
   right: 0;
   margin-bottom: 4px;
-  z-index: 20;
+  z-index: var(--z-inline-sticky);
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -1646,7 +1673,7 @@ a[href] {
   position: absolute;
   top: 7px;
   right: 7px;
-  z-index: 2;
+  z-index: var(--z-local-raised);
   opacity: 0;
   padding: 3px 5px;
   transition: opacity 0.12s;
@@ -1990,7 +2017,7 @@ a[href] {
   top: 0;
   left: 14px;
   right: 14px;
-  z-index: 5;
+  z-index: var(--z-local-handle-active);
   height: 8px;
   cursor: ns-resize;
   touch-action: none;
@@ -2027,7 +2054,7 @@ a[href] {
   border-radius: 10px;
   padding: 5px;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
-  z-index: 20;
+  z-index: var(--z-inline-sticky);
 }
 .slashmenu__item {
   display: flex;
@@ -2380,7 +2407,7 @@ a[href] {
   position: absolute;
   left: 10px;
   bottom: 44px;
-  z-index: 40;
+  z-index: var(--z-workspace-float);
   width: clamp(260px, 24vw, 300px);
   max-width: calc(100vw - 16px);
   padding: 8px;
@@ -2541,14 +2568,14 @@ a[href] {
   --wails-draggable: no-drag;
   position: fixed;
   inset: 0;
-  z-index: 80;
+  z-index: var(--z-overlay-backdrop);
   background: transparent;
 }
 
 .anchored-popover {
   --wails-draggable: no-drag;
   position: fixed;
-  z-index: 81;
+  z-index: var(--z-popover);
 }
 
 .anchored-popover.workspace-switcher {
@@ -2734,13 +2761,13 @@ a[href] {
 .modelsw__backdrop {
   position: fixed;
   inset: 0;
-  z-index: 30;
+  z-index: var(--z-local-backdrop);
 }
 .modelsw__menu {
   position: absolute;
   bottom: calc(100% + 8px);
   left: 0;
-  z-index: 31;
+  z-index: var(--z-local-popover);
   min-width: 200px;
   max-width: 320px;
   background: var(--bg-elev);
@@ -2754,7 +2781,7 @@ a[href] {
   left: auto;
   top: auto;
   bottom: auto;
-  z-index: 81;
+  z-index: var(--z-popover);
 }
 .modelsw__item {
   display: flex;
@@ -2778,11 +2805,23 @@ a[href] {
 .modelsw__item--current {
   color: var(--accent);
 }
-.modelsw__model {
+.modelsw__copy {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.modelsw__model,
+.modelsw__provider {
+  display: block;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.modelsw__provider {
+  color: var(--fg-faint);
+  font-size: 11px;
 }
 .modelsw__check {
   flex-shrink: 0;
@@ -3390,7 +3429,7 @@ a[href] {
   top: 0;
   left: calc(var(--workspace-tree-width) - 4px);
   bottom: 0;
-  z-index: 13;
+  z-index: var(--z-layout-resizer-active);
   width: 8px;
   padding: 0;
   border: 0;
@@ -3732,7 +3771,7 @@ a[href] {
 .floating-menu {
   --wails-draggable: no-drag;
   position: fixed;
-  z-index: 110;
+  z-index: var(--z-floating-menu);
   min-width: 148px;
   padding: 5px;
   border: 1px solid var(--border);
@@ -3772,7 +3811,7 @@ a[href] {
   --tooltip-arrow-x: 50%;
   --tooltip-arrow-y: 50%;
   position: fixed;
-  z-index: 300;
+  z-index: var(--z-tooltip);
   max-width: min(320px, calc(100vw - 16px));
   padding: 6px 8px;
   border: 1px solid var(--border);
@@ -4123,7 +4162,7 @@ a[href] {
   background: rgba(0, 0, 0, 0.4);
   display: flex;
   justify-content: flex-end;
-  z-index: 90;
+  z-index: var(--z-drawer-backdrop);
 }
 .drawer-backdrop--subtle {
   background: rgba(0, 0, 0, 0.16);
@@ -4148,7 +4187,7 @@ a[href] {
   top: 0;
   bottom: 0;
   left: -4px;
-  z-index: 4;
+  z-index: var(--z-local-handle);
   width: 8px;
   padding: 0;
   border: 0;
@@ -4710,13 +4749,13 @@ a[href] {
 .menu-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 95;
+  z-index: var(--z-menu-backdrop);
 }
 .menu {
   position: absolute;
   top: 32px;
   right: 0;
-  z-index: 96;
+  z-index: var(--z-menu);
   min-width: 160px;
   padding: 5px;
   background: var(--bg-elev);
@@ -5635,7 +5674,7 @@ a[href] {
   --wails-draggable: no-drag;
   position: fixed;
   inset: 0;
-  z-index: 1200;
+  z-index: var(--z-modal);
   background: rgba(0, 0, 0, 0.48);
   display: flex;
   align-items: center;
@@ -5763,6 +5802,16 @@ a[href] {
 .history-clear:hover {
   color: var(--fg);
 }
+.history-clear--confirm {
+  color: #ff8b6d;
+  border-color: rgba(255, 139, 109, 0.45);
+  background: rgba(255, 139, 109, 0.1);
+}
+.history-clear--confirm:hover {
+  color: #ff9f86;
+  border-color: rgba(255, 139, 109, 0.62);
+  background: rgba(255, 139, 109, 0.16);
+}
 .history-preview {
   min-width: 0;
   min-height: 0;
@@ -5777,7 +5826,7 @@ a[href] {
 }
 .history-preview__head {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 14px;
   padding: 14px 16px;
@@ -5785,6 +5834,7 @@ a[href] {
   background: var(--bg-soft);
 }
 .history-preview__copy {
+  flex: 1 1 auto;
   min-width: 0;
 }
 .history-preview__title {
@@ -5802,12 +5852,15 @@ a[href] {
   font-size: var(--font-caption);
 }
 .history-preview__actions {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 8px;
-  max-width: 48%;
+}
+.history-preview__actions .btn {
+  white-space: nowrap;
 }
 .history-preview__body {
   flex: 1;
@@ -5925,6 +5978,10 @@ a[href] {
   .history-preview__head {
     flex-wrap: wrap;
   }
+  .history-preview__actions {
+    flex-wrap: wrap;
+    max-width: 100%;
+  }
   .history-content {
     grid-template-columns: 1fr;
   }
@@ -5937,7 +5994,7 @@ a[href] {
 .settings-modal-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 1200;
+  z-index: var(--z-modal);
   background: rgba(0, 0, 0, 0.48);
   display: flex;
   align-items: center;
@@ -6552,6 +6609,9 @@ a[href] {
   transform: rotate(180deg);
 }
 .settings-model-picker__menu {
+  display: flex;
+  flex-direction: column;
+  max-height: min(420px, calc(100vh - 24px));
   overflow: hidden;
   border-radius: 8px;
   border: 1px solid var(--border);
@@ -6560,6 +6620,7 @@ a[href] {
   isolation: isolate;
 }
 .settings-model-picker__search {
+  flex: 0 0 auto;
   padding: 8px;
   border-bottom: 1px solid var(--border-soft);
   background: var(--bg-elev);
@@ -6580,8 +6641,11 @@ a[href] {
   border-color: var(--accent);
 }
 .settings-model-picker__list {
+  min-height: 0;
+  flex: 1 1 auto;
   max-height: 330px;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 6px;
   background: var(--bg-elev);
 }
@@ -6873,11 +6937,12 @@ a[href] {
 }
 .provider-access-card__head {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
 }
 .provider-access-card__identity {
+  flex: 1 1 auto;
   min-width: 0;
 }
 .provider-access-card__title {
@@ -6896,12 +6961,15 @@ a[href] {
   line-height: 1.4;
 }
 .provider-access-card__actions {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   justify-content: flex-end;
   gap: 8px;
-  flex: 0 0 auto;
+}
+.provider-access-card__actions .btn {
+  white-space: nowrap;
 }
 .provider-access-meta {
   display: flex;
@@ -7001,6 +7069,16 @@ a[href] {
 .provider-key-status--managed {
   align-items: center;
 }
+.provider-key-status--compact {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.provider-key-status--compact > span {
+  color: var(--fg-dim);
+  font-size: var(--font-control-small);
+  font-weight: 600;
+}
 .provider-key-status__actions {
   min-width: 0;
   display: flex;
@@ -7070,6 +7148,10 @@ a[href] {
 }
 .provider-editor--wizard {
   gap: 10px;
+}
+.provider-editor--key-only {
+  gap: 10px;
+  padding: 10px;
 }
 .provider-readonly-field {
   min-height: 44px;
@@ -7339,6 +7421,13 @@ a[href] {
   }
   .settings-model-current__meta {
     width: 100%;
+  }
+  .provider-access-card__head {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .provider-access-card__actions {
+    flex-wrap: wrap;
   }
   .set-hint {
     margin-left: 0;
@@ -7773,12 +7862,18 @@ a[href] {
   flex-shrink: 0;
   color: var(--fg-faint);
 }
-.composer__pasted-head span {
+.composer__pasted-label {
   min-width: 0;
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.composer__pasted-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
 }
 .composer__pasted-head button {
   --wails-draggable: no-drag;
@@ -7896,7 +7991,7 @@ a[href] {
 #crash-overlay {
   position: fixed;
   inset: 0;
-  z-index: 99999;
+  z-index: var(--z-crash-overlay);
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -7933,7 +8028,7 @@ a[href] {
 .onboarding {
   position: fixed;
   inset: 0;
-  z-index: 9999;
+  z-index: var(--z-onboarding);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -8256,7 +8351,7 @@ a[href] {
   grid-row: 1;
   grid-column: 1 / -1;
   position: relative;
-  z-index: 70;
+  z-index: var(--z-app-chrome);
   display: flex;
   align-items: center;
   min-width: 0;
@@ -8543,7 +8638,7 @@ a[href] {
   position: absolute;
   right: 0;
   top: calc(100% + 7px);
-  z-index: 70;
+  z-index: var(--z-app-chrome);
   min-width: 172px;
   padding: 5px;
   border: 1px solid var(--border);
@@ -8642,7 +8737,7 @@ a[href] {
   position: absolute;
   top: calc(100% + 6px);
   right: 0;
-  z-index: 210;
+  z-index: var(--z-topicbar-menu);
   min-width: 168px;
   padding: 5px;
   border: 1px solid var(--border);
@@ -9258,7 +9353,10 @@ a[href] {
 .context-menu {
   --wails-draggable: no-drag;
   position: fixed;
-  z-index: 260;
+  z-index: var(--z-overlay-backdrop);
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 5px;
   border: 1px solid var(--border);
   border-radius: 8px;

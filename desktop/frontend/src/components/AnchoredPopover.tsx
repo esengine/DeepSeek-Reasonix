@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { CSSProperties, ReactNode, RefObject } from "react";
 import { createPortal } from "react-dom";
 
@@ -61,6 +61,7 @@ export function AnchoredPopover({
   style?: CSSProperties;
 }) {
   const [position, setPosition] = useState<PopoverPosition | null>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
 
   useLayoutEffect(() => {
     if (!open) {
@@ -79,14 +80,19 @@ export function AnchoredPopover({
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
     };
+    const closeOnScroll = (event: Event) => {
+      const target = event.target;
+      if (target instanceof Node && popoverRef.current?.contains(target)) return;
+      onClose();
+    };
     const closeOnViewportChange = () => onClose();
     window.addEventListener("keydown", closeOnEscape);
     window.addEventListener("resize", closeOnViewportChange);
-    window.addEventListener("scroll", closeOnViewportChange, true);
+    window.addEventListener("scroll", closeOnScroll, true);
     return () => {
       window.removeEventListener("keydown", closeOnEscape);
       window.removeEventListener("resize", closeOnViewportChange);
-      window.removeEventListener("scroll", closeOnViewportChange, true);
+      window.removeEventListener("scroll", closeOnScroll, true);
     };
   }, [onClose, open]);
 
@@ -96,6 +102,7 @@ export function AnchoredPopover({
     <>
       <div className="anchored-popover__backdrop" onMouseDown={onClose} />
       <div
+        ref={popoverRef}
         data-anchored-popover="active"
         className={`anchored-popover ${className}`}
         style={{

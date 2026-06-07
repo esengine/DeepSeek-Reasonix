@@ -62,6 +62,14 @@ func providerNamesFromView(providers []ProviderView) []string {
 	return out
 }
 
+func modelRefsFromView(models []ModelInfo) map[string]bool {
+	out := map[string]bool{}
+	for _, m := range models {
+		out[m.Ref] = true
+	}
+	return out
+}
+
 func TestCommandsIncludesEffortNotThinking(t *testing.T) {
 	app := NewApp()
 	cmds := app.Commands()
@@ -244,6 +252,7 @@ close_behavior = "quit"
 
 func TestSettingsSubagentDefaultsRoundTrip(t *testing.T) {
 	isolateDesktopUserDirs(t)
+	t.Setenv("DEEPSEEK_API_KEY", "sk-test")
 	if err := os.MkdirAll(filepath.Dir(config.UserConfigPath()), 0o755); err != nil {
 		t.Fatalf("mkdir config dir: %v", err)
 	}
@@ -256,6 +265,7 @@ kind = "openai"
 base_url = "https://api.deepseek.com"
 models = ["deepseek-v4-flash", "deepseek-v4-pro"]
 default = "deepseek-v4-flash"
+api_key_env = "DEEPSEEK_API_KEY"
 `), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -287,8 +297,227 @@ func TestSettingsSurfacesOfficialProviderTemplatesSeparately(t *testing.T) {
 	if providers["mimo-api"] {
 		t.Fatalf("mimo-api should not be mixed into configured providers: %+v", got.Providers)
 	}
-	if !official["deepseek-flash"] || !official["mimo-api"] || !official["mimo-pro"] {
-		t.Fatalf("official providers = %+v, want deepseek-flash, mimo-api, and mimo-pro", got.OfficialProviders)
+	if !official["deepseek"] || !official["mimo-api"] || !official["mimo-token-plan"] {
+		t.Fatalf("official providers = %+v, want deepseek, mimo-api, and mimo-token-plan", got.OfficialProviders)
+	}
+}
+
+func TestSettingsRepairsLegacyOfficialProviderWithoutModel(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	if err := os.MkdirAll(filepath.Dir(config.UserConfigPath()), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.WriteFile(config.UserConfigPath(), []byte(`
+default_model = "deepseek-flash"
+
+[[providers]]
+name = "deepseek-flash"
+kind = "openai"
+base_url = "https://api.deepseek.com"
+api_key_env = "DEEPSEEK_API_KEY"
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	got := NewApp().Settings()
+	for _, p := range got.Providers {
+		if p.Name != "deepseek-flash" {
+			continue
+		}
+		if len(p.Models) != 1 || p.Models[0] != "deepseek-v4-flash" || p.Default != "deepseek-v4-flash" {
+			t.Fatalf("deepseek-flash provider = %+v, want repaired flash model", p)
+		}
+		return
+	}
+	t.Fatalf("settings providers missing deepseek-flash: %+v", got.Providers)
+}
+
+func TestAddOfficialProviderAccessReplacesLegacyProviderWithoutModel(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	if err := os.MkdirAll(filepath.Dir(config.UserConfigPath()), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.WriteFile(config.UserConfigPath(), []byte(`
+default_model = "deepseek-flash"
+
+[[providers]]
+name = "deepseek-flash"
+kind = "openai"
+base_url = "https://api.deepseek.com"
+api_key_env = "DEEPSEEK_API_KEY"
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	if err := NewApp().AddOfficialProviderAccess("deepseek", "test-key"); err != nil {
+		t.Fatalf("AddOfficialProviderAccess: %v", err)
+	}
+	cfg := config.LoadForEdit(config.UserConfigPath())
+	p, ok := cfg.Provider("deepseek")
+	if !ok {
+		t.Fatal("deepseek provider not saved")
+	}
+	if len(p.Models) != 2 || p.Models[0] != "deepseek-v4-flash" || p.Models[1] != "deepseek-v4-pro" || p.Default != "deepseek-v4-flash" {
+		t.Fatalf("deepseek provider after add = %+v, want official model list", p)
+	}
+	if !providerAccessSet(cfg.Desktop.ProviderAccess)["deepseek"] {
+		t.Fatalf("provider_access missing deepseek: %+v", cfg.Desktop.ProviderAccess)
+	}
+	if cfg.DefaultModel != "deepseek/deepseek-v4-flash" {
+		t.Fatalf("default_model = %q, want deepseek/deepseek-v4-flash", cfg.DefaultModel)
+	}
+}
+
+func TestRemoveBuiltInProviderAccessRetargetsDefaultToRemainingAccess(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	if err := os.MkdirAll(filepath.Dir(config.UserConfigPath()), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.WriteFile(config.UserConfigPath(), []byte(`
+default_model = "deepseek-flash/deepseek-v4-pro"
+
+[desktop]
+provider_access = ["deepseek-flash", "mimo-pro"]
+
+[[providers]]
+name = "deepseek-flash"
+kind = "openai"
+base_url = "https://api.deepseek.com"
+models = ["deepseek-v4-flash", "deepseek-v4-pro"]
+default = "deepseek-v4-flash"
+api_key_env = "DEEPSEEK_API_KEY"
+
+[[providers]]
+name = "mimo-pro"
+kind = "openai"
+base_url = "https://token-plan-cn.xiaomimimo.com/v1"
+model = "mimo-v2.5-pro"
+api_key_env = "MIMO_API_KEY"
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	if err := NewApp().RemoveProviderAccess("deepseek"); err != nil {
+		t.Fatalf("RemoveProviderAccess: %v", err)
+	}
+	cfg := config.LoadForEdit(config.UserConfigPath())
+	access := providerAccessSet(cfg.Desktop.ProviderAccess)
+	if access["deepseek"] || !access["mimo-token-plan"] {
+		t.Fatalf("provider_access = %+v, want only mimo-token-plan", cfg.Desktop.ProviderAccess)
+	}
+	if cfg.DefaultModel != "mimo-token-plan/mimo-v2.5-pro" {
+		t.Fatalf("default_model = %q, want mimo-token-plan/mimo-v2.5-pro", cfg.DefaultModel)
+	}
+}
+
+func TestModelsForTabOnlyListsProviderAccessWhenConfigured(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	t.Setenv("DEEPSEEK_API_KEY", "sk-test")
+	t.Setenv("MIMO_API_KEY", "sk-test")
+
+	cfg := config.Default()
+	cfg.DefaultModel = "deepseek-flash/deepseek-v4-flash"
+	cfg.Desktop.ProviderAccess = []string{"deepseek-flash", "mimo-pro"}
+	deepseek, _ := cfg.Provider("deepseek-flash")
+	deepseek.Model = ""
+	deepseek.Models = []string{"deepseek-v4-flash", "deepseek-v4-pro"}
+	deepseek.Default = "deepseek-v4-flash"
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	models := NewApp().Models()
+	refs := modelRefsFromView(models)
+	for _, want := range []string{
+		"deepseek/deepseek-v4-flash",
+		"deepseek/deepseek-v4-pro",
+		"mimo-token-plan/mimo-v2.5-pro",
+	} {
+		if !refs[want] {
+			t.Fatalf("Models() refs = %+v, missing %s", models, want)
+		}
+	}
+	for _, hidden := range []string{
+		"deepseek-pro/deepseek-v4-pro",
+		"mimo-flash/mimo-v2.5",
+	} {
+		if refs[hidden] {
+			t.Fatalf("Models() refs = %+v, should not include hidden provider %s", models, hidden)
+		}
+	}
+	if len(models) != 3 {
+		t.Fatalf("Models() len = %d, want 3: %+v", len(models), models)
+	}
+}
+
+func TestModelsForTabListsMimoAPIPaidAccess(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	t.Setenv("MIMO_API_KEY", "sk-test")
+
+	cfg := config.Default()
+	cfg.DefaultModel = "mimo-api/mimo-v2.5-pro"
+	cfg.Desktop.ProviderAccess = []string{"mimo-api"}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	models := NewApp().Models()
+	refs := modelRefsFromView(models)
+	if !refs["mimo-api/mimo-v2.5-pro"] {
+		t.Fatalf("Models() refs = %+v, missing mimo-api/mimo-v2.5-pro", models)
+	}
+	if len(models) != 1 {
+		t.Fatalf("Models() len = %d, want 1: %+v", len(models), models)
+	}
+}
+
+func TestSetModelForTabRejectsProviderOutsideAccess(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	t.Setenv("DEEPSEEK_API_KEY", "sk-test")
+	t.Setenv("MIMO_API_KEY", "sk-test")
+
+	cfg := config.Default()
+	cfg.DefaultModel = "deepseek-flash/deepseek-v4-flash"
+	cfg.Desktop.ProviderAccess = []string{"deepseek-flash"}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	app := NewApp()
+	app.ctx = context.Background()
+	tab := &WorkspaceTab{ID: "tab_a", Scope: "global", Ready: true, model: "deepseek-flash/deepseek-v4-flash"}
+	app.tabs = map[string]*WorkspaceTab{tab.ID: tab}
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+
+	err := app.SetModelForTab(tab.ID, "mimo-flash/mimo-v2.5")
+	if err == nil || !strings.Contains(err.Error(), "not available") {
+		t.Fatalf("SetModelForTab hidden provider error = %v, want not available", err)
+	}
+}
+
+func TestSetDefaultModelRejectsProviderWithoutKey(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	t.Setenv("MIMO_API_KEY", "")
+
+	cfg := config.Default()
+	cfg.Desktop.ProviderAccess = []string{"mimo-api"}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	app := NewApp()
+	tab := &WorkspaceTab{ID: "tab_a", Scope: "global", Ready: true, model: "deepseek-flash/deepseek-v4-flash"}
+	app.tabs = map[string]*WorkspaceTab{tab.ID: tab}
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+
+	err := app.SetDefaultModel("mimo-api/mimo-v2.5-pro")
+	if err == nil || !strings.Contains(err.Error(), "has no key") {
+		t.Fatalf("SetDefaultModel no-key error = %v, want has no key", err)
+	}
+	if tab.model != "deepseek-flash/deepseek-v4-flash" {
+		t.Fatalf("tab model after failed default change = %q, want previous", tab.model)
 	}
 }
 

@@ -2725,10 +2725,14 @@ func (a *App) ModelsForTab(tabID string) []ModelInfo {
 	if err != nil {
 		return []ModelInfo{}
 	}
+	if entry, ok := cfg.ResolveModel(curModel); ok {
+		curModel = entry.Name + "/" + entry.Model
+	}
+	access := providerAccessSet(cfg.Desktop.ProviderAccess)
 	out := []ModelInfo{}
 	for i := range cfg.Providers {
 		p := &cfg.Providers[i]
-		if !p.Configured() {
+		if !modelProviderAccessAllowed(access, p.Name) || !p.Configured() {
 			continue
 		}
 		for _, m := range p.ModelList() {
@@ -2737,6 +2741,13 @@ func (a *App) ModelsForTab(tabID string) []ModelInfo {
 		}
 	}
 	return out
+}
+
+func modelProviderAccessAllowed(access map[string]bool, name string) bool {
+	if len(access) == 0 {
+		return true
+	}
+	return access[strings.TrimSpace(name)]
 }
 
 // SetModel switches the active model and carries the current conversation into the
@@ -2767,6 +2778,9 @@ func (a *App) SetModelForTab(tabID, name string) error {
 	entry, ok := cfg.ResolveModel(name)
 	if !ok {
 		return fmt.Errorf("unknown model %q", name)
+	}
+	if !modelProviderAccessAllowed(providerAccessSet(cfg.Desktop.ProviderAccess), entry.Name) {
+		return fmt.Errorf("model %q is not available because provider %q is not added", name, entry.Name)
 	}
 	name = entry.Name + "/" + entry.Model
 	effortOverride := cloneStringPtr(tab.effort)

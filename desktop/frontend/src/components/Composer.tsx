@@ -1027,22 +1027,24 @@ export function Composer({
               <div className="composer__pasted-block" key={block.label}>
                 <div className="composer__pasted-head">
                   <FileText size={15} />
-                  <span>{block.label}</span>
-                  <Tooltip label={t(open ? "composer.pastedHidePreview" : "composer.pastedShowPreview")}>
-                    <button type="button" onClick={() => togglePastedPreview(block.label)}>
-                      <Eye size={14} />
-                    </button>
-                  </Tooltip>
-                  <Tooltip label={t("composer.pastedExpand")}>
-                    <button type="button" onClick={() => expandPastedBlock(block)}>
-                      {t("composer.pastedExpand")}
-                    </button>
-                  </Tooltip>
-                  <Tooltip label={t("composer.pastedRemove")}>
-                    <button type="button" onClick={() => removePastedBlock(block)}>
-                      <Trash2 size={14} />
-                    </button>
-                  </Tooltip>
+                  <span className="composer__pasted-label">{block.label}</span>
+                  <div className="composer__pasted-actions">
+                    <Tooltip label={t(open ? "composer.pastedHidePreview" : "composer.pastedShowPreview")}>
+                      <button type="button" onClick={() => togglePastedPreview(block.label)}>
+                        <Eye size={14} />
+                      </button>
+                    </Tooltip>
+                    <Tooltip label={t("composer.pastedExpand")}>
+                      <button type="button" onClick={() => expandPastedBlock(block)}>
+                        {t("composer.pastedExpand")}
+                      </button>
+                    </Tooltip>
+                    <Tooltip label={t("composer.pastedRemove")}>
+                      <button type="button" onClick={() => removePastedBlock(block)}>
+                        <Trash2 size={14} />
+                      </button>
+                    </Tooltip>
+                  </div>
                 </div>
                 {open && <pre className="composer__pasted-preview">{block.text}</pre>}
               </div>

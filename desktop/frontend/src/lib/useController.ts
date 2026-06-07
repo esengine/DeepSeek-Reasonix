@@ -413,6 +413,12 @@ function messageActionBusyText(scope: MessageActionScope): string {
   }
 }
 
+function errorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === "string") return err;
+  return String(err || "");
+}
+
 export function useController() {
   const statesRef = useRef<TabStates>(new Map());
   const [activeTabId, setActiveTabId] = useState<string | undefined>();
@@ -670,7 +676,12 @@ export function useController() {
 
   const setModel = useCallback(async (name: string) => {
     if (!activeTabId) return;
-    await app.SetModelForTab(activeTabId, name).catch(() => {});
+    try {
+      await app.SetModelForTab(activeTabId, name);
+    } catch (err) {
+      dispatchTo(activeTabId, { type: "local_notice", level: "warn", text: t("status.modelSwitchFailed", { err: errorMessage(err) }) });
+      return;
+    }
     try {
       dispatchTo(activeTabId, { type: "meta", meta: await app.MetaForTab(activeTabId) });
       dispatchTo(activeTabId, { type: "context", context: await app.ContextUsageForTab(activeTabId) });

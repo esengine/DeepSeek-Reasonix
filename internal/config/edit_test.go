@@ -204,6 +204,17 @@ func TestUpsertProvider(t *testing.T) {
 		t.Errorf("replace didn't apply: %+v", got)
 	}
 
+	// Multi-model providers may omit the back-compat single model field.
+	if err := c.UpsertProvider(ProviderEntry{
+		Name:    "multi",
+		Kind:    "openai",
+		BaseURL: "http://localhost:8888/v1",
+		Models:  []string{"m1", "m2"},
+		Default: "m1",
+	}); err != nil {
+		t.Fatalf("multi-model add: %v", err)
+	}
+
 	// Missing required fields error.
 	for _, bad := range []ProviderEntry{
 		{Kind: "openai", BaseURL: "u", Model: "m"}, // no name

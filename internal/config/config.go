@@ -792,6 +792,8 @@ func LoadForRoot(root string) (*Config, error) {
 	cfg.mergeMCPJSON(loadLegacyMCP(legacyConfigPath()))
 	normalizeLegacyEffort(cfg)
 	normalizeLegacyMCPTiers(cfg)
+	normalizeLegacyProviderModels(cfg)
+	normalizeDesktopOfficialProviderAccess(cfg)
 	normalizeEffortConfig(cfg)
 	backfillDeepSeekPro(cfg)
 	// First run (no config file anywhere): keep CodeGraph off until the user opts
@@ -900,6 +902,8 @@ func LoadForEdit(path string) *Config {
 	}
 	normalizeLegacyEffort(cfg)
 	normalizeLegacyMCPTiers(cfg)
+	normalizeLegacyProviderModels(cfg)
+	normalizeDesktopOfficialProviderAccess(cfg)
 	normalizeEffortConfig(cfg)
 	return cfg
 }
@@ -987,6 +991,276 @@ func isTOMLKeyAssignment(line, key string) bool {
 	}
 	rest := strings.TrimSpace(strings.TrimPrefix(trimmed, key))
 	return strings.HasPrefix(rest, "=")
+}
+
+// normalizeLegacyProviderModels repairs provider entries written by older
+// desktop builds that carried the official provider name/endpoint but omitted the
+// model field. The repair is intentionally narrow: valid user-provided model
+// lists are left untouched, while known official aliases get the model implied by
+// their preset name so model pickers and provider validation have an option.
+func normalizeLegacyProviderModels(c *Config) {
+	if c == nil {
+		return
+	}
+	for i := range c.Providers {
+		p := &c.Providers[i]
+		if providerHasAnyModel(*p) {
+			continue
+		}
+		if model := legacyOfficialProviderModel(p.Name); model != "" {
+			p.Model = model
+		}
+	}
+}
+
+func legacyOfficialProviderModel(name string) string {
+	switch strings.TrimSpace(name) {
+	case "deepseek-flash":
+		return "deepseek-v4-flash"
+	case "deepseek-pro":
+		return "deepseek-v4-pro"
+	case "mimo-api", "mimo-pro":
+		return "mimo-v2.5-pro"
+	case "mimo-flash":
+		return "mimo-v2.5"
+	default:
+		return ""
+	}
+}
+
+func normalizeDesktopOfficialProviderAccess(c *Config) {
+	if c == nil || len(c.Desktop.ProviderAccess) == 0 {
+		return
+	}
+	seen := desktopProviderAccessMap(nil)
+	next := make([]string, 0, len(c.Desktop.ProviderAccess))
+	includeMimoFlash := false
+	for _, name := range c.Desktop.ProviderAccess {
+		if strings.TrimSpace(name) == "mimo-flash" {
+			includeMimoFlash = true
+		}
+		name = canonicalDesktopOfficialProviderName(name)
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		next = append(next, name)
+	}
+	c.Desktop.ProviderAccess = next
+	if seen["deepseek"] {
+		ensureDeepSeekOfficialProvider(c)
+	}
+	if seen["mimo-api"] {
+		ensureMimoAPIProvider(c)
+	}
+	if seen["mimo-token-plan"] {
+		ensureMimoTokenPlanProvider(c, includeMimoFlash)
+	}
+	retargetDesktopOfficialRefs(c, seen)
+}
+
+func canonicalDesktopOfficialProviderName(name string) string {
+	switch strings.TrimSpace(name) {
+	case "deepseek-flash", "deepseek-pro":
+		return "deepseek"
+	case "mimo", "xiaomi-mimo", "xiaomi_mimo":
+		return "mimo-api"
+	case "mimo-pro", "mimo-flash":
+		return "mimo-token-plan"
+	default:
+		return strings.TrimSpace(name)
+	}
+}
+
+func desktopProviderAccessMap(names []string) map[string]bool {
+	out := map[string]bool{}
+	for _, name := range names {
+		name = canonicalDesktopOfficialProviderName(name)
+		if name != "" {
+			out[name] = true
+		}
+	}
+	return out
+}
+
+func ensureDeepSeekOfficialProvider(c *Config) {
+	if _, ok := c.Provider("deepseek"); ok {
+		return
+	}
+	entry := ProviderEntry{
+		Name:          "deepseek",
+		Kind:          "openai",
+		BaseURL:       "https://api.deepseek.com",
+		Models:        []string{"deepseek-v4-flash", "deepseek-v4-pro"},
+		Default:       "deepseek-v4-flash",
+		APIKeyEnv:     "DEEPSEEK_API_KEY",
+		BalanceURL:    "https://api.deepseek.com/user/balance",
+		ContextWindow: 1_000_000,
+	}
+	if old, ok := c.Provider("deepseek-flash"); ok {
+		entry = officialProviderFromLegacy(entry, old)
+		entry.Models = mergeModelLists([]string{"deepseek-v4-flash", "deepseek-v4-pro"}, old.ModelList())
+		entry.Default = firstKnownModel(entry.Default, entry.Models, "deepseek-v4-flash")
+	}
+	c.Providers = append(c.Providers, entry)
+}
+
+func ensureMimoAPIProvider(c *Config) {
+	if _, ok := c.Provider("mimo-api"); ok {
+		return
+	}
+	c.Providers = append(c.Providers, ProviderEntry{
+		Name:          "mimo-api",
+		Kind:          "openai",
+		BaseURL:       "https://api.xiaomimimo.com/v1",
+		Models:        []string{"mimo-v2.5-pro"},
+		Default:       "mimo-v2.5-pro",
+		APIKeyEnv:     "MIMO_API_KEY",
+		ContextWindow: 1_048_576,
+		NoProxy:       true,
+	})
+}
+
+func ensureMimoTokenPlanProvider(c *Config, includeMimoFlash bool) {
+	if _, ok := c.Provider("mimo-token-plan"); ok {
+		return
+	}
+	entry := ProviderEntry{
+		Name:          "mimo-token-plan",
+		Kind:          "openai",
+		BaseURL:       "https://token-plan-cn.xiaomimimo.com/v1",
+		Models:        []string{"mimo-v2.5-pro"},
+		Default:       "mimo-v2.5-pro",
+		APIKeyEnv:     "MIMO_API_KEY",
+		ContextWindow: 1_048_576,
+		NoProxy:       true,
+	}
+	if old, ok := c.Provider("mimo-pro"); ok {
+		entry = officialProviderFromLegacy(entry, old)
+		entry.Models = mergeModelLists([]string{"mimo-v2.5-pro"}, old.ModelList())
+		entry.Default = firstKnownModel(entry.Default, entry.Models, "mimo-v2.5-pro")
+	}
+	if old, ok := c.Provider("mimo-flash"); includeMimoFlash && ok {
+		if !providerHasAnyModel(entry) {
+			entry = officialProviderFromLegacy(entry, old)
+		}
+		entry.Models = mergeModelLists(entry.Models, old.ModelList())
+		entry.Default = firstKnownModel(entry.Default, entry.Models, entry.Default)
+	}
+	c.Providers = append(c.Providers, entry)
+}
+
+func officialProviderFromLegacy(entry ProviderEntry, old *ProviderEntry) ProviderEntry {
+	entry.Kind = old.Kind
+	entry.BaseURL = old.BaseURL
+	entry.ModelsURL = old.ModelsURL
+	entry.APIKeyEnv = old.APIKeyEnv
+	entry.BalanceURL = old.BalanceURL
+	entry.ContextWindow = old.ContextWindow
+	entry.Price = old.Price
+	entry.Thinking = old.Thinking
+	entry.Effort = old.Effort
+	entry.ReasoningProtocol = old.ReasoningProtocol
+	entry.SupportedEfforts = append([]string(nil), old.SupportedEfforts...)
+	entry.DefaultEffort = old.DefaultEffort
+	entry.NoProxy = old.NoProxy
+	return entry
+}
+
+func mergeModelLists(primary, extra []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(primary)+len(extra))
+	for _, list := range [][]string{primary, extra} {
+		for _, model := range list {
+			model = strings.TrimSpace(model)
+			if model == "" || seen[model] {
+				continue
+			}
+			seen[model] = true
+			out = append(out, model)
+		}
+	}
+	return out
+}
+
+func firstKnownModel(current string, models []string, fallback string) string {
+	current = strings.TrimSpace(current)
+	for _, model := range models {
+		if model == current {
+			return current
+		}
+	}
+	for _, model := range models {
+		if model == fallback {
+			return fallback
+		}
+	}
+	if len(models) > 0 {
+		return models[0]
+	}
+	return ""
+}
+
+func retargetDesktopOfficialRefs(c *Config, access map[string]bool) {
+	c.DefaultModel = retargetDesktopOfficialRef(c.DefaultModel, access)
+	c.Agent.PlannerModel = retargetDesktopOfficialRef(c.Agent.PlannerModel, access)
+	c.Agent.SubagentModel = retargetDesktopOfficialRef(c.Agent.SubagentModel, access)
+	c.Agent.AutoPlanClassifier = retargetDesktopOfficialRef(c.Agent.AutoPlanClassifier, access)
+	for skill, ref := range c.Agent.SubagentModels {
+		c.Agent.SubagentModels[skill] = retargetDesktopOfficialRef(ref, access)
+	}
+}
+
+func retargetDesktopOfficialRef(ref string, access map[string]bool) string {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return ""
+	}
+	provider, model, hasModel := strings.Cut(ref, "/")
+	switch provider {
+	case "deepseek-flash":
+		if !access["deepseek"] {
+			return ref
+		}
+		if !hasModel || strings.TrimSpace(model) == "" {
+			model = "deepseek-v4-flash"
+		}
+		return "deepseek/" + model
+	case "deepseek-pro":
+		if !access["deepseek"] {
+			return ref
+		}
+		if !hasModel || strings.TrimSpace(model) == "" {
+			model = "deepseek-v4-pro"
+		}
+		return "deepseek/" + model
+	case "mimo-pro":
+		if !access["mimo-token-plan"] {
+			return ref
+		}
+		if !hasModel || strings.TrimSpace(model) == "" {
+			model = "mimo-v2.5-pro"
+		}
+		return "mimo-token-plan/" + model
+	case "mimo", "xiaomi-mimo", "xiaomi_mimo":
+		if !access["mimo-api"] {
+			return ref
+		}
+		if !hasModel || strings.TrimSpace(model) == "" {
+			model = "mimo-v2.5-pro"
+		}
+		return "mimo-api/" + model
+	case "mimo-flash":
+		if !access["mimo-token-plan"] {
+			return ref
+		}
+		if !hasModel || strings.TrimSpace(model) == "" {
+			model = "mimo-v2.5"
+		}
+		return "mimo-token-plan/" + model
+	default:
+		return ref
+	}
 }
 
 func userConfigPath() string {
@@ -1161,6 +1435,9 @@ func (c *Config) Provider(name string) (*ProviderEntry, bool) {
 func (c *Config) ResolveModel(ref string) (*ProviderEntry, bool) {
 	if ref == "" {
 		return nil, false
+	}
+	if access := desktopProviderAccessMap(c.Desktop.ProviderAccess); len(access) > 0 {
+		ref = retargetDesktopOfficialRef(ref, access)
 	}
 	// "provider/model"
 	if prov, model, ok := strings.Cut(ref, "/"); ok {

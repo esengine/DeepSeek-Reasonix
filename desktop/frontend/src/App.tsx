@@ -4,8 +4,6 @@ import { ShellExpandProvider, useShellExpand } from "./lib/shellExpand";
 import {
   Download,
   SquarePen,
-  Brain,
-  Blocks,
   CircleGauge,
   FileText,
   FileJson,
@@ -1317,18 +1315,6 @@ export default function App() {
               >
                 <Trash2 size={15} />
                 <span>{t("sidebar.trash")}</span>
-              </button>
-            </Tooltip>
-            <Tooltip label={t("topbar.memory")} fill side="right" disabled={sidebarNavTooltipDisabled}>
-              <button className="sidebar__navitem" onClick={() => setSettingsTarget("memory")}>
-                <Brain size={15} />
-                <span>{t("topbar.memory")}</span>
-              </button>
-            </Tooltip>
-            <Tooltip label={t("caps.title")} fill side="right" disabled={sidebarNavTooltipDisabled}>
-              <button className="sidebar__navitem" onClick={() => setSettingsTarget("mcp")}>
-                <Blocks size={15} />
-                <span>{t("caps.title")}</span>
               </button>
             </Tooltip>
             <Tooltip label={t("topbar.settings")} fill side="right" disabled={sidebarNavTooltipDisabled}>

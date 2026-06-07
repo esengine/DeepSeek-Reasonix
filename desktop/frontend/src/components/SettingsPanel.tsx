@@ -296,7 +296,7 @@ function settingsTabLabel(id: SettingsTab, t: ReturnType<typeof useT>): string {
 function settingsTabMeta(id: SettingsTab, s: SettingsView, t: ReturnType<typeof useT>): string {
   switch (id) {
     case "models":
-      return toRef(s.defaultModel, s) || t("common.none");
+      return settingsModelMeta(s, t);
     case "general":
       return `${closeBehaviorLabel(normalizeCloseBehavior(s.closeBehavior), t)} · ${t(`settings.autoPlan.${normalizeAutoPlan(s.autoPlan)}`)}`;
     case "providers":
@@ -306,7 +306,7 @@ function settingsTabMeta(id: SettingsTab, s: SettingsView, t: ReturnType<typeof 
     case "skills":
       return t("caps.skillsTab");
     case "memory":
-      return t("topbar.memory");
+      return t("settings.tabSub.memory");
     case "network":
       return proxyModeLabel(normalizeProxyMode(s.network.proxyMode), t);
     case "permissions":
@@ -320,10 +320,23 @@ function settingsTabMeta(id: SettingsTab, s: SettingsView, t: ReturnType<typeof 
   }
 }
 
+function settingsModelMeta(s: SettingsView, t: ReturnType<typeof useT>): string {
+  const ref = toRef(s.defaultModel, s);
+  if (!ref) return t("common.none");
+  if (!ref.includes("/")) return ref;
+  const [provider, ...modelParts] = ref.split("/");
+  const model = modelParts.join("/") || ref;
+  const providerView = s.providers.find((p) => p.name === provider);
+  return `${modelProviderLabel(provider, providerView, t)} · ${model}`;
+}
+
 // allRefs flattens providers into "provider/model" refs for the model selectors.
 function allRefs(s: SettingsView): string[] {
   const out: string[] = [];
-  for (const p of s.providers) for (const m of p.models) out.push(`${p.name}/${m}`);
+  for (const p of s.providers) {
+    if (!p.added || !p.keySet) continue;
+    for (const m of p.models) out.push(`${p.name}/${m}`);
+  }
   return out;
 }
 
@@ -1047,6 +1060,12 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
     }
   };
 
+  const saveProviderKey = async (group: ProviderAccessGroup, apiKeyEnv: string, value: string) => {
+    if (!apiKeyEnv) return;
+    setGroupFetchResult(group.id, null);
+    await apply(() => app.SetProviderKey(apiKeyEnv, value));
+  };
+
   const clearProviderKey = async (apiKeyEnv: string) => {
     if (!apiKeyEnv) return;
     await apply(() => app.ClearProviderKey(apiKeyEnv));
@@ -1102,7 +1121,7 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
             onCancelEdit={() => setEditing(null)}
             onSave={(pv) => apply(() => app.SaveProvider(pv)).then(() => setEditing(null))}
             onRefresh={() => void refreshGroup(group)}
-            onSaveEditorKey={(env, value) => saveKeyEnvAndAutoRefresh(group, env, value)}
+            onSaveEditorKey={(env, value) => group.builtIn ? saveProviderKey(group, env, value) : saveKeyEnvAndAutoRefresh(group, env, value)}
             onClearEditorKey={clearProviderKey}
             onDelete={(p) => apply(() => app.RemoveProviderAccess(p.name))}
           />
@@ -1327,7 +1346,7 @@ function ProviderAccessCard({
           )}
           <button
             className="btn btn--small"
-            disabled={busy || fetching || !group.baseUrl || !group.apiKeyEnv}
+            disabled={busy || fetching || !group.baseUrl || !group.apiKeyEnv || !group.keySet}
             onClick={onRefresh}
           >
             {fetching ? t("settings.fetchingModels") : t("settings.fetchModels")}
@@ -1358,8 +1377,8 @@ function ProviderAccessCard({
       </div>
 
       <div className="provider-card-block">
-        <div className="provider-card-block__label">{t("settings.availableModels")}</div>
-        <div className="provider-model-chips" aria-label={t("settings.availableModels")}>
+        <div className="provider-card-block__label">{t(group.keySet ? "settings.availableModels" : "settings.modelList")}</div>
+        <div className="provider-model-chips" aria-label={t(group.keySet ? "settings.availableModels" : "settings.modelList")}>
           {visibleModels.length > 0 ? visibleModels.map((model) => (
             <span className="provider-model-chip" key={model}>
               {model}
@@ -1371,6 +1390,11 @@ function ProviderAccessCard({
             </span>
           )}
         </div>
+        {!group.keySet && (
+          <div className="provider-card-status provider-card-status--warn">
+            {t("settings.modelsRequireKey")}
+          </div>
+        )}
         {fetchResult && (
           <div className={`provider-card-status provider-card-status--${fetchResult.kind}`}>
             {fetchResult.text}
@@ -1522,7 +1546,6 @@ function ProviderEditor({
   const [fetchErr, setFetchErr] = useState<string | null>(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const builtIn = initial?.builtIn ?? false;
-  const providerDisplayName = initial ? providerGroupLabel(initial, t) : name.trim();
   const isNewCustomProvider = !initial;
 
   // Offer the kinds the kernel actually registered; if the stored kind is a
@@ -1626,29 +1649,21 @@ function ProviderEditor({
   if (builtIn) {
     const keyEnv = initial?.apiKeyEnv.trim() ?? "";
     return (
-      <div className="provider-editor provider-editor--builtin">
-        <label className="set-label">{t("settings.providerName")}</label>
-        <div className="provider-readonly-field" aria-readonly="true">
-          {providerDisplayName}
-        </div>
+      <div className="provider-editor provider-editor--builtin provider-editor--key-only">
         {initial && onSaveKey && keyEnv && (
           <>
-            <label className="set-label">{t("settings.providerKey")}</label>
-            <div className="provider-key-status provider-key-status--managed">
-              <span>{t("settings.keyStatus")}</span>
-              <div className="provider-key-status__actions">
-                <strong>{initial.keySet ? t("settings.configuredKey", { env: keyEnv }) : t("settings.notConfiguredKey", { env: keyEnv })}</strong>
-                {initial.keySet && onClearKey && (
-                  <InlineConfirmButton
-                    label={t("settings.clearKey")}
-                    confirmLabel={t("settings.confirmClearKey")}
-                    cancelLabel={t("common.cancel")}
-                    disabled={busy}
-                    danger
-                    onConfirm={() => onClearKey(keyEnv)}
-                  />
-                )}
-              </div>
+            <div className="provider-key-status provider-key-status--managed provider-key-status--compact">
+              <span>{initial.keySet ? t("settings.configuredKey", { env: keyEnv }) : t("settings.notConfiguredKey", { env: keyEnv })}</span>
+              {initial.keySet && onClearKey && (
+                <InlineConfirmButton
+                  label={t("settings.clearKey")}
+                  confirmLabel={t("settings.confirmClearKey")}
+                  cancelLabel={t("common.cancel")}
+                  disabled={busy}
+                  danger
+                  onConfirm={() => onClearKey(keyEnv)}
+                />
+              )}
             </div>
             <KeyField
               apiKeyEnv={keyEnv}
@@ -1791,8 +1806,8 @@ function ProviderEditor({
 
   return (
     <div className={`provider-editor${isNewCustomProvider ? " provider-editor--wizard" : ""}`}>
-      <label className="set-label">{t("settings.providerName")}</label>
-      <input className="mem-input" placeholder={t("settings.providerNamePlaceholder")} value={name} onChange={(e) => setName(e.target.value)} disabled={!!initial} />
+      <label className="set-label">{t("settings.customProviderName")}</label>
+      <input className="mem-input" placeholder={t("settings.customProviderNamePlaceholder")} value={name} onChange={(e) => setName(e.target.value)} disabled={!!initial} />
       <label className="set-label">{t("settings.providerProtocol")}</label>
       {protocolField}
       <label className="set-label">{t("settings.providerBaseUrlLabel")}</label>

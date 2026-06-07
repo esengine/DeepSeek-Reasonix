@@ -70,8 +70,8 @@ func (c *Config) SetAutoPlan(mode string) error {
 }
 
 // UpsertProvider adds e, or replaces an existing provider with the same name
-// (preserving its position). Required fields (name, kind, base_url, model) are
-// validated; whether the kind is actually registered and the key resolves is
+// (preserving its position). Required fields (name, kind, base_url, model/models)
+// are validated; whether the kind is actually registered and the key resolves is
 // checked later by provider.New / Validate, which give actionable errors.
 func (c *Config) UpsertProvider(e ProviderEntry) error {
 	normalizeProviderEffortFields(&e)
@@ -301,10 +301,22 @@ func validateProvider(e ProviderEntry) error {
 		return fmt.Errorf("provider %q: kind is required", e.Name)
 	case strings.TrimSpace(e.BaseURL) == "":
 		return fmt.Errorf("provider %q: base_url is required", e.Name)
-	case strings.TrimSpace(e.Model) == "":
+	case !providerHasAnyModel(e):
 		return fmt.Errorf("provider %q: model is required", e.Name)
 	}
 	return nil
+}
+
+func providerHasAnyModel(e ProviderEntry) bool {
+	if strings.TrimSpace(e.Model) != "" {
+		return true
+	}
+	for _, m := range e.Models {
+		if strings.TrimSpace(m) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // SetPermissionMode sets the writer-fallback mode. Accepts "ask", "allow", or

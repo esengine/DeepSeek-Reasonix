@@ -137,7 +137,7 @@ func builtInProviderNames() map[string]bool {
 	for _, p := range config.Default().Providers {
 		out[p.Name] = true
 	}
-	for _, name := range []string{"deepseek-flash", "mimo-api", "mimo-pro"} {
+	for _, name := range []string{"deepseek", "deepseek-flash", "mimo-api", "mimo-token-plan", "mimo-pro"} {
 		out[name] = true
 	}
 	return out
@@ -471,10 +471,12 @@ func (a *App) SetDefaultModel(ref string) error {
 	prev := tab.model
 	tab.model = ref
 	if err := a.applyConfigChange(func(c *config.Config) error {
-		if _, ok := c.ResolveModel(ref); !ok {
-			return fmt.Errorf("unknown model %q", ref)
+		resolved, err := selectableDesktopModelRef(c, ref)
+		if err != nil {
+			return err
 		}
-		c.DefaultModel = ref
+		c.DefaultModel = resolved
+		tab.model = resolved
 		return nil
 	}); err != nil {
 		tab.model = prev
@@ -487,9 +489,11 @@ func (a *App) SetDefaultModel(ref string) error {
 func (a *App) SetPlannerModel(ref string) error {
 	return a.applyConfigChange(func(c *config.Config) error {
 		if ref != "" {
-			if _, ok := c.ResolveModel(ref); !ok {
-				return fmt.Errorf("unknown planner model %q", ref)
+			resolved, err := selectableDesktopModelRef(c, ref)
+			if err != nil {
+				return err
 			}
+			ref = resolved
 		}
 		c.Agent.PlannerModel = ref
 		return nil
@@ -501,13 +505,29 @@ func (a *App) SetSubagentModel(ref string) error {
 	return a.applyConfigChange(func(c *config.Config) error {
 		ref = strings.TrimSpace(ref)
 		if ref != "" {
-			if _, ok := c.ResolveModel(ref); !ok {
-				return fmt.Errorf("unknown subagent model %q", ref)
+			resolved, err := selectableDesktopModelRef(c, ref)
+			if err != nil {
+				return err
 			}
+			ref = resolved
 		}
 		c.Agent.SubagentModel = ref
 		return nil
 	})
+}
+
+func selectableDesktopModelRef(c *config.Config, ref string) (string, error) {
+	entry, ok := c.ResolveModel(ref)
+	if !ok {
+		return "", fmt.Errorf("unknown model %q", ref)
+	}
+	if !modelProviderAccessAllowed(providerAccessSet(c.Desktop.ProviderAccess), entry.Name) {
+		return "", fmt.Errorf("model %q is not available because provider %q is not added", ref, entry.Name)
+	}
+	if !entry.Configured() {
+		return "", fmt.Errorf("model %q is not available because provider %q has no key", ref, entry.Name)
+	}
+	return entry.Name + "/" + entry.Model, nil
 }
 
 // SetSubagentEffort sets (or clears) the default effort used by subagent entry points.
@@ -553,7 +573,7 @@ func officialProviderTemplate(kind string) ([]config.ProviderEntry, string, erro
 	switch strings.ToLower(strings.TrimSpace(kind)) {
 	case "deepseek", "deepseek-official":
 		return []config.ProviderEntry{{
-			Name:          "deepseek-flash",
+			Name:          "deepseek",
 			Kind:          "openai",
 			BaseURL:       "https://api.deepseek.com",
 			Models:        []string{"deepseek-v4-flash", "deepseek-v4-pro"},
@@ -575,7 +595,7 @@ func officialProviderTemplate(kind string) ([]config.ProviderEntry, string, erro
 		}}, "MIMO_API_KEY", nil
 	case "mimo-token-plan", "xiaomi-mimo-token-plan", "xiaomi_mimo_token_plan":
 		return []config.ProviderEntry{{
-			Name:          "mimo-pro",
+			Name:          "mimo-token-plan",
 			Kind:          "openai",
 			BaseURL:       "https://token-plan-cn.xiaomimimo.com/v1",
 			Models:        []string{"mimo-v2.5-pro"},
@@ -678,18 +698,18 @@ func (a *App) DeleteProvider(name string) error {
 	return a.deleteProviderAndRetargetTabs(name)
 }
 
-// RemoveProviderAccess hides a provider from Settings > Model > Access. Built-in
-// providers remain available as defaults; custom providers are deleted outright.
+// RemoveProviderAccess hides a provider from Settings > Model > Access and from
+// settings model pickers. Built-in provider entries remain in the runtime config
+// for back-compat, but visible defaults and idle tabs are retargeted away from
+// the removed access entry when another accessed provider is available. Custom
+// providers are deleted outright.
 func (a *App) RemoveProviderAccess(name string) error {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return fmt.Errorf("remove provider access: empty provider name")
 	}
 	if builtInProviderNames()[name] {
-		return a.applyConfigChange(func(c *config.Config) error {
-			removeProviderAccess(c, name)
-			return nil
-		})
+		return a.removeBuiltInProviderAccessAndRetargetTabs(name)
 	}
 	return a.deleteProviderAndRetargetTabs(name)
 }
@@ -697,6 +717,113 @@ func (a *App) RemoveProviderAccess(name string) error {
 type providerRemovalTab struct {
 	id   string
 	ctrl *control.Controller
+}
+
+func providerAccessFallbackRef(c *config.Config, name string) string {
+	name = strings.TrimSpace(name)
+	for _, candidate := range c.Desktop.ProviderAccess {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" || candidate == name {
+			continue
+		}
+		p, ok := c.Provider(candidate)
+		if !ok || len(p.ModelList()) == 0 {
+			continue
+		}
+		return p.Name + "/" + p.DefaultModel()
+	}
+	return ""
+}
+
+func retargetProviderReferences(c *config.Config, name, fallbackRef string) {
+	if strings.TrimSpace(fallbackRef) == "" {
+		return
+	}
+	if desktopModelRefsProvider(c, c.DefaultModel, name) {
+		c.DefaultModel = fallbackRef
+	}
+	if desktopModelRefsProvider(c, c.Agent.PlannerModel, name) {
+		c.Agent.PlannerModel = fallbackRef
+	}
+	if desktopModelRefsProvider(c, c.Agent.SubagentModel, name) {
+		c.Agent.SubagentModel = fallbackRef
+	}
+	for skill, ref := range c.Agent.SubagentModels {
+		if desktopModelRefsProvider(c, ref, name) {
+			c.Agent.SubagentModels[skill] = fallbackRef
+		}
+	}
+}
+
+func (a *App) removeBuiltInProviderAccessAndRetargetTabs(name string) error {
+	cfg, path, err := a.loadDesktopUserConfigForEdit()
+	if err != nil {
+		return err
+	}
+	fallbackRef := providerAccessFallbackRef(cfg, name)
+
+	var affected []providerRemovalTab
+	if fallbackRef != "" {
+		a.mu.RLock()
+		for _, id := range a.orderedTabIDsLocked() {
+			tab := a.tabs[id]
+			if tab == nil {
+				continue
+			}
+			ref := tab.model
+			if strings.TrimSpace(ref) == "" {
+				ref = cfg.DefaultModel
+			}
+			if !desktopModelRefsProvider(cfg, ref, name) {
+				continue
+			}
+			if tab.Ctrl != nil && tab.Ctrl.Running() {
+				a.mu.RUnlock()
+				return fmt.Errorf("finish or cancel conversations using %q before removing the provider access", name)
+			}
+			affected = append(affected, providerRemovalTab{id: id, ctrl: tab.Ctrl})
+		}
+		a.mu.RUnlock()
+	}
+
+	retargetProviderReferences(cfg, name, fallbackRef)
+	removeProviderAccess(cfg, name)
+	if err := cfg.SaveTo(path); err != nil {
+		return err
+	}
+	if len(affected) == 0 {
+		return a.rebuild()
+	}
+	for _, item := range affected {
+		if item.ctrl != nil {
+			_ = item.ctrl.Snapshot()
+			item.ctrl.Close()
+		}
+	}
+
+	var rebuildTabs []*WorkspaceTab
+	a.mu.Lock()
+	for _, item := range affected {
+		tab := a.tabs[item.id]
+		if tab == nil {
+			continue
+		}
+		tab.Ctrl = nil
+		tab.model = fallbackRef
+		tab.Label = fallbackRef
+		tab.StartupErr = ""
+		tab.Ready = a.ctx == nil
+		if a.ctx != nil {
+			rebuildTabs = append(rebuildTabs, tab)
+		}
+	}
+	a.saveTabsLocked()
+	a.mu.Unlock()
+
+	for _, tab := range rebuildTabs {
+		go a.buildTabController(tab)
+	}
+	return nil
 }
 
 func (a *App) deleteProviderAndRetargetTabs(name string) error {
