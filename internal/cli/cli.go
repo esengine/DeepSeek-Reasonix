@@ -1318,17 +1318,12 @@ func providersWithMissingKeys(cfg *config.Config) []config.ProviderEntry {
 }
 
 // configureKeys reconciles each enabled provider's API key with the
-// environment. For every distinct api_key_env: if the variable is already
-// set — either by loadDotEnv from .env, or by an earlier wizard step that
-// called os.Setenv (the URL-fetch flow asks for the key once so it can call
-// /models) — the existing value is reused and a single-line confirmation is
-// printed so the user can see why no prompt appeared. Otherwise the user is
-// asked once per env var (deduped across providers that share one, e.g.
-// both DeepSeek models). Returns KEY=value lines to append to .env: any
-// env var that was already set in the process goes through too, so a
-// re-run of `reasonix setup` re-pins the current value into .env (a
-// loadDotEnv is first-wins, so without re-pinning, an old .env line would
-// shadow the fresh value).
+// environment. For every distinct api_key_env: if the variable is already set,
+// setup asks whether to re-enter it; Enter keeps and re-pins the existing value.
+// Otherwise the user is asked once per env var (deduped across providers that
+// share one, e.g. both DeepSeek models). Returns KEY=value lines to append to
+// .env. Re-pinning matters because loadDotEnv is first-wins, so a stale key left
+// earlier in the credentials file would otherwise keep shadowing the fresh value.
 func configureKeys(selected []config.ProviderEntry, r io.Reader, w io.Writer) []string {
 	in := bufio.NewScanner(r)
 	fmt.Fprintln(w, "\n"+i18n.M.EnterAPIKeysHeader)
@@ -1341,11 +1336,14 @@ func configureKeys(selected []config.ProviderEntry, r io.Reader, w io.Writer) []
 		}
 		seen[p.APIKeyEnv] = true
 
-		// Reuse any value the wizard or .env already set. The URL-fetch
-		// flow (promptCustomProviderFromURL) calls os.Setenv(keyEnv, apiKey)
-		// before the /models probe; that value is the user's "real" key
-		// and we'd be wrong to discard it by asking again.
 		if cur := os.Getenv(p.APIKeyEnv); cur != "" {
+			reset := ask(in, w, "  "+fmt.Sprintf(i18n.M.APIKeyResetPromptFmt, p.APIKeyEnv), "y/N")
+			if reset == "y" || reset == "Y" {
+				if key := ask(in, w, "  "+p.APIKeyEnv, ""); key != "" {
+					envLines = append(envLines, p.APIKeyEnv+"="+key)
+					continue
+				}
+			}
 			fmt.Fprintf(w, "  %s %s\n", green("✓"), fmt.Sprintf(i18n.M.APIKeyAlreadySetFmt, p.APIKeyEnv))
 			envLines = append(envLines, p.APIKeyEnv+"="+cur)
 			continue

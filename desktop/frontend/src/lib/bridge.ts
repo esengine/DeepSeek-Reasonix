@@ -359,13 +359,20 @@ function baseName(path: string): string {
   return path.replace(/[/\\]+$/, "").split(/[/\\]/).filter(Boolean).pop() ?? path;
 }
 
+function mockScenario(): "demo" | "fresh" {
+  if (typeof window === "undefined") return "demo";
+  const value = new URLSearchParams(window.location.search).get("mock")?.trim().toLowerCase();
+  return value === "fresh" || value === "empty" || value === "first-run" ? "fresh" : "demo";
+}
+
 function makeMockApp(): AppBindings {
+  const freshMock = mockScenario() === "fresh";
   let cancelled = false;
   let pendingAskPreview = false;
   let pendingApprovalPreview = false;
-  let cwd = "~/projects/joyquant-db"; // mutable so PickWorkspace is visible in dev
   const globalWorkspaceRoot = "~/Library/Application Support/reasonix/global-workspace";
-  let workspaces = ["~/projects/joyquant-db", "~/projects/joyquant-sys", "~/projects/reasonix", "~/projects/blade"];
+  let cwd = freshMock ? globalWorkspaceRoot : "~/projects/joyquant-db"; // mutable so PickWorkspace is visible in dev
+  let workspaces = freshMock ? [] : ["~/projects/joyquant-db", "~/projects/joyquant-sys", "~/projects/reasonix", "~/projects/blade"];
   let mockEffort = "auto";
   const day = 86_400_000;
   const t0 = Date.now();
@@ -515,6 +522,10 @@ function makeMockApp(): AppBindings {
       topicTitle: t("mock.trashGlobalProductTitle"),
     },
   ];
+  if (freshMock) {
+    sessions.splice(0);
+    trashedSessions.splice(0);
+  }
   // Mutable settings so the Settings panel's edits are observable in browser dev.
   const settings: SettingsView = {
     defaultModel: "deepseek-flash",
@@ -543,7 +554,13 @@ function makeMockApp(): AppBindings {
     providerKinds: ["openai"],
     bypass: false,
   };
-  const mockProjectTree: ProjectNode[] = [
+  settings.providers = settings.providers.map((provider) =>
+    provider.apiKeyEnv === "DEEPSEEK_API_KEY" ? { ...provider, keySet: !freshMock } : provider,
+  );
+  if (freshMock) {
+    settings.configPath = "~/.config/reasonix/config.toml";
+  }
+  const mockProjectTree: ProjectNode[] = freshMock ? [] : [
     {
       key: "project_~/projects/joyquant-db",
       kind: "project",
@@ -600,7 +617,22 @@ function makeMockApp(): AppBindings {
   const setMockActiveTab = (tabId: string) => {
     mockTabs = mockTabs.map((tab) => ({ ...tab, active: tab.id === tabId }));
   };
-  let mockTabs: TabMeta[] = [
+  let mockTabs: TabMeta[] = freshMock ? [
+    {
+      id: "tab_global",
+      scope: "global",
+      workspaceRoot: globalWorkspaceRoot,
+      workspaceName: "Global",
+      topicId: "",
+      topicTitle: "Global",
+      label: "DeepSeek-R1",
+      ready: true,
+      running: false,
+      mode: "normal",
+      active: true,
+      cwd: globalWorkspaceRoot,
+    },
+  ] : [
     {
       id: "tab_joyquant_db",
       scope: "project",

@@ -255,6 +255,7 @@ var English = Messages{
 	AnthropicFetchEmpty:        "/models returned an empty list — Anthropic-compatible providers usually don't expose one, falling back to manual entry",
 	SkipStaleCustomEntryFmt:    "skipping stale %q entry from reasonix.toml (pointing at %s) — please remove it from [[providers]]",
 	APIKeyAlreadySetFmt:        "reusing existing value for %s",
+	APIKeyResetPromptFmt:       "Re-enter %s?",
 
 	// custom provider
 	CustomProviderLabel:  "Custom Model",

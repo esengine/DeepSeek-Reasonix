@@ -209,6 +209,7 @@ export function historyMessagesToItems(messages: HistoryMessage[], idPrefix: str
         isShell: (m.toolCallId || "").startsWith("shell-"),
       });
       seq++;
+      continue;
     }
   }
   return { items, seq };

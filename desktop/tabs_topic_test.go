@@ -33,6 +33,29 @@ func writeTopicSession(t *testing.T, dir, name, topicID, topicTitle, workspaceRo
 	return path
 }
 
+func writeTopicSessionWithPrompt(t *testing.T, dir, name, topicID, topicTitle, workspaceRoot, prompt string, updatedAt time.Time) string {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte(`{"role":"user","content":`+strconv.Quote(prompt)+`}`+"\n"), 0o644); err != nil {
+		t.Fatalf("write session: %v", err)
+	}
+	scope := "global"
+	if strings.TrimSpace(workspaceRoot) != "" {
+		scope = "project"
+	}
+	if err := agent.SaveBranchMetaPreserveUpdated(path, agent.BranchMeta{
+		CreatedAt:     updatedAt.Add(-time.Minute),
+		UpdatedAt:     updatedAt,
+		Scope:         scope,
+		WorkspaceRoot: workspaceRoot,
+		TopicID:       topicID,
+		TopicTitle:    topicTitle,
+	}); err != nil {
+		t.Fatalf("save branch meta: %v", err)
+	}
+	return path
+}
+
 func writeLegacySession(t *testing.T, dir, name, prompt string, modTime time.Time) string {
 	t.Helper()
 	path := filepath.Join(dir, name)
@@ -307,6 +330,83 @@ func TestDefaultGlobalTabGetsMigratedTopicID(t *testing.T) {
 	f := loadTabsFile()
 	if len(f.Tabs) != 1 || f.Tabs[0].ID != "tab_legacy" || f.Tabs[0].TopicID != wantTopicID {
 		t.Fatalf("desktop tabs file = %+v, want tab id and migrated topic", f)
+	}
+}
+
+func TestBuildTabControllerRestoresPinnedSessionBeforeTopicFallback(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	topicID := "topic_same"
+	topicTitle := "Pinned topic"
+	pinned := writeTopicSessionWithPrompt(t, dir, "long.jsonl", topicID, topicTitle, "", "full 64-turn conversation", time.Now().Add(-2*time.Hour))
+	_ = writeTopicSessionWithPrompt(t, dir, "short.jsonl", topicID, topicTitle, "", "early 5-turn snapshot", time.Now().Add(time.Hour))
+
+	app := NewApp()
+	tab := app.createTabEntryWithID("global", globalTabWorkspaceRoot(), topicID, "tab_pinned")
+	tab.TopicTitle = topicTitle
+	tab.SessionPath = pinned
+	tab.sink = &tabEventSink{tabID: tab.ID, app: app}
+	app.tabs[tab.ID] = tab
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+
+	app.buildTabController(tab)
+	if tab.Ctrl == nil {
+		t.Fatalf("tab controller was not built: %s", tab.StartupErr)
+	}
+	defer tab.Ctrl.Close()
+
+	if got := filepath.Clean(tab.Ctrl.SessionPath()); got != filepath.Clean(pinned) {
+		t.Fatalf("restored session path = %q, want pinned %q", got, pinned)
+	}
+	history := tab.Ctrl.History()
+	if len(history) == 0 || history[0].Content != "full 64-turn conversation" {
+		t.Fatalf("restored history = %+v, want pinned long conversation", history)
+	}
+	f := loadTabsFile()
+	if len(f.Tabs) != 1 || filepath.Clean(f.Tabs[0].SessionPath) != filepath.Clean(pinned) {
+		t.Fatalf("desktop tabs file = %+v, want pinned session path %q", f, pinned)
+	}
+}
+
+func TestBuildTabControllerKeepsMissingPinnedSessionPath(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	topicID := "topic_empty"
+	topicTitle := "Empty pinned topic"
+	_ = writeTopicSessionWithPrompt(t, dir, "old.jsonl", topicID, topicTitle, "", "old topic history", time.Now())
+	pinned := filepath.Join(dir, "empty-new.jsonl")
+
+	app := NewApp()
+	tab := app.createTabEntryWithID("global", globalTabWorkspaceRoot(), topicID, "tab_empty")
+	tab.TopicTitle = topicTitle
+	tab.SessionPath = pinned
+	tab.sink = &tabEventSink{tabID: tab.ID, app: app}
+	app.tabs[tab.ID] = tab
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+
+	app.buildTabController(tab)
+	if tab.Ctrl == nil {
+		t.Fatalf("tab controller was not built: %s", tab.StartupErr)
+	}
+	defer tab.Ctrl.Close()
+
+	if got := filepath.Clean(tab.Ctrl.SessionPath()); got != filepath.Clean(pinned) {
+		t.Fatalf("empty pinned session path = %q, want %q", got, pinned)
+	}
+	for _, msg := range tab.Ctrl.History() {
+		if msg.Content == "old topic history" {
+			t.Fatalf("empty pinned session loaded fallback topic history: %+v", tab.Ctrl.History())
+		}
 	}
 }
 

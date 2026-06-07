@@ -328,7 +328,7 @@ func TestConfigureKeysReusesExistingEnv(t *testing.T) {
 
 	selected := config.Default().Providers
 	var output bytes.Buffer
-	env := configureKeys(selected, strings.NewReader("mi-key-from-input\n"), &output)
+	env := configureKeys(selected, strings.NewReader("\nmi-key-from-input\n"), &output)
 
 	if len(env) != 2 {
 		t.Fatalf("env = %v (want 2: DeepSeek reused + MiMo entered)", env)
@@ -344,16 +344,36 @@ func TestConfigureKeysReusesExistingEnv(t *testing.T) {
 	}
 }
 
-// TestConfigureKeysAllSetSkipsInput ensures that when every env var is
-// already populated, configureKeys returns without reading anything from
-// the input — critical for the first-time-setup flow, where the URL-fetch
-// step has already collected all keys and configureKeys is a no-op.
-func TestConfigureKeysAllSetSkipsInput(t *testing.T) {
+func TestConfigureKeysCanResetExistingEnv(t *testing.T) {
+	t.Setenv("DEEPSEEK_API_KEY", "stale-ds-key")
+	t.Setenv("MIMO_API_KEY", "") // ask for this one normally
+
+	selected := config.Default().Providers
+	var output bytes.Buffer
+	env := configureKeys(selected, strings.NewReader("y\nfresh-ds-key\nmi-key\n"), &output)
+
+	if len(env) != 2 {
+		t.Fatalf("env = %v (want 2: DeepSeek reset + MiMo entered)", env)
+	}
+	if env[0] != "DEEPSEEK_API_KEY=fresh-ds-key" {
+		t.Errorf("env[0] = %q, want freshly entered value", env[0])
+	}
+	if env[1] != "MIMO_API_KEY=mi-key" {
+		t.Errorf("env[1] = %q, want typed MiMo value", env[1])
+	}
+	if !strings.Contains(output.String(), "[y/N]:") || !strings.Contains(output.String(), "DEEPSEEK_API_KEY") {
+		t.Errorf("expected a reset confirmation for DEEPSEEK_API_KEY, got:\n%s", output.String())
+	}
+}
+
+// TestConfigureKeysAllSetDefaultsToReusingInput ensures that when every env var
+// is already populated, pressing Enter at each confirmation keeps the values.
+func TestConfigureKeysAllSetDefaultsToReusingInput(t *testing.T) {
 	t.Setenv("DEEPSEEK_API_KEY", "ds")
 	t.Setenv("MIMO_API_KEY", "mi")
 
 	selected := config.Default().Providers
-	env := configureKeys(selected, strings.NewReader("should-not-be-consumed\n"), io.Discard)
+	env := configureKeys(selected, strings.NewReader("\n\n"), io.Discard)
 	if len(env) != 2 {
 		t.Errorf("env = %v, want 2 (both reused)", env)
 	}

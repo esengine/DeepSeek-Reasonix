@@ -142,9 +142,27 @@
 
   --radius: 9px;
   --maxw: 940px;
-  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
-  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans",
-    "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, "Cascadia Code", Consolas,
+    "Liberation Mono", Menlo, monospace;
+  --sans: "PingFang SC", "Microsoft YaHei", "Noto Sans SC",
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+
+	/* font-family presets */
+	:root[data-font-family="yahei"] {
+	  --sans: "Microsoft YaHei", "微软雅黑", "PingFang SC", "Noto Sans SC",
+	    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+	}
+	:root[data-font-family="pingfang"] {
+	  --sans: "PingFang SC", "苹方-简", "Noto Sans SC",
+	    "Microsoft YaHei", -apple-system, BlinkMacSystemFont,
+	    "Segoe UI", Roboto, sans-serif;
+	}
+	:root[data-font-family="noto"] {
+	  --sans: "Noto Sans SC", "Noto Sans", "PingFang SC",
+	    "Microsoft YaHei", -apple-system, BlinkMacSystemFont,
+	    "Segoe UI", Roboto, sans-serif;
+	}
 }
 
 @media (prefers-color-scheme: light) {
@@ -174,7 +192,22 @@
     --accent-fg: #fff;
     --accent-soft: rgba(47, 95, 168, 0.12);
     --accent-strong: #244f91;
-    --ok: #5d9b66;
+    --ok: #15803d;
+    --warn: #b45309;
+    --err: #dc2626;
+    --add-bg: rgba(21, 128, 61, 0.08);
+    --add-fg: #15803d;
+    --del-bg: rgba(220, 38, 38, 0.08);
+    --del-fg: #dc2626;
+    /* syntax (light) */
+    --hl-keyword: #cf222e;
+    --hl-string: #0a3069;
+    --hl-number: #0550ae;
+    --hl-comment: #6e7781;
+    --hl-func: #8250df;
+    --hl-type: #116329;
+    --hl-builtin: #0550ae;
+    --hl-meta: #6e7781;
     --list-row-title: #334155;
     --list-row-meta: #8a94a6;
     --list-row-hover-bg: #e8edf4;
@@ -223,7 +256,22 @@
   --accent-fg: #fff;
   --accent-soft: rgba(47, 95, 168, 0.12);
   --accent-strong: #244f91;
-  --ok: #5d9b66;
+  --ok: #15803d;
+  --warn: #b45309;
+  --err: #dc2626;
+  --add-bg: rgba(21, 128, 61, 0.08);
+  --add-fg: #15803d;
+  --del-bg: rgba(220, 38, 38, 0.08);
+  --del-fg: #dc2626;
+  /* syntax (light) */
+  --hl-keyword: #cf222e;
+  --hl-string: #0a3069;
+  --hl-number: #0550ae;
+  --hl-comment: #6e7781;
+  --hl-func: #8250df;
+  --hl-type: #116329;
+  --hl-builtin: #0550ae;
+  --hl-meta: #6e7781;
   --list-row-title: #334155;
   --list-row-meta: #8a94a6;
   --list-row-hover-bg: #e8edf4;
@@ -573,6 +621,8 @@ a[href] {
   background: var(--border-soft);
   transition: background 0.12s, box-shadow 0.12s;
 }
+.workspace-panel-resizer:hover::after,
+.workspace-panel-resizer:focus-visible::after,
 .layout--workspace-resizing .workspace-panel-resizer::after {
   background: var(--accent);
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 24%, transparent);
@@ -782,6 +832,94 @@ a[href] {
 @keyframes anim-fade-in {
   to {
     opacity: 1;
+  }
+}
+
+/* Startup splash restored from the v0.50 desktop intro. It masks cold boot while
+   the Wails bridge and background startup work settle, then yields to the app. */
+.startup-splash {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  transition: opacity 0.42s ease;
+}
+.startup-splash[data-leaving="true"] {
+  opacity: 0;
+  pointer-events: none;
+}
+.startup-splash__card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  animation: startup-splash-in 0.55s cubic-bezier(0.2, 0.7, 0.1, 1) both;
+}
+.startup-splash__mark {
+  width: 64px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  filter: drop-shadow(0 14px 22px color-mix(in srgb, #0153e5 34%, transparent));
+  margin-bottom: 22px;
+}
+.startup-splash__mark img {
+  width: 64px;
+  height: 64px;
+  display: block;
+}
+.startup-splash__name {
+  font-size: 27px;
+  font-weight: 650;
+  letter-spacing: 0;
+  line-height: 1.1;
+  color: var(--fg);
+}
+.startup-splash__sub {
+  margin-top: 9px;
+  font-size: 13px;
+  letter-spacing: 0.05em;
+  color: var(--fg-faint);
+}
+.startup-splash__dots {
+  display: flex;
+  gap: 8px;
+  margin-top: 31px;
+}
+.startup-splash__dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--fg-faint);
+  animation: startup-splash-pulse 1s ease-in-out infinite;
+}
+.startup-splash__dots span:nth-child(2) {
+  animation-delay: 0.16s;
+}
+.startup-splash__dots span:nth-child(3) {
+  animation-delay: 0.32s;
+}
+@keyframes startup-splash-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes startup-splash-pulse {
+  0%, 100% {
+    opacity: 0.25;
+    transform: scale(0.8);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
   }
 }
 .transcript {
@@ -3116,10 +3254,15 @@ a[href] {
 }
 .hljs-string,
 .hljs-regexp,
-.hljs-addition,
 .hljs-attribute,
 .hljs-meta .hljs-string {
   color: var(--hl-string);
+}
+.hljs-addition {
+  color: var(--add-fg);
+}
+.hljs-deletion {
+  color: var(--del-fg);
 }
 .hljs-number,
 .hljs-symbol,
@@ -5426,6 +5569,7 @@ a[href] {
 
 /* ── management modals: shared shell for settings, history, and trash ───────── */
 .management-modal-backdrop {
+  --wails-draggable: no-drag;
   position: fixed;
   inset: 0;
   z-index: 1200;
@@ -5433,6 +5577,7 @@ a[href] {
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 24px;
   overflow: hidden;
 }
 
@@ -5446,6 +5591,13 @@ a[href] {
   border-radius: 14px;
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.32);
   overflow: hidden;
+  animation: modal-in 0.12s ease;
+}
+.history-modal {
+  width: min(1180px, calc(100vw - 96px));
+}
+.history-modal--wide {
+  width: min(1360px, calc(100vw - 96px));
 }
 
 .management-modal__head {
@@ -5476,6 +5628,12 @@ a[href] {
   gap: 8px;
   flex-shrink: 0;
 }
+@keyframes modal-in {
+  from {
+    transform: translateY(8px) scale(0.99);
+    opacity: 0.72;
+  }
+}
 
 /* ── history manager: searchable list with preview and actions ─────────────── */
 .history-manager {
@@ -5504,6 +5662,9 @@ a[href] {
   overflow-y: auto;
   padding: 14px 14px 16px;
   border-right: 1px solid var(--border);
+}
+.history-list--trash {
+  min-height: 0;
 }
 .history-search {
   flex: 1 1 360px;
@@ -5546,6 +5707,10 @@ a[href] {
   display: flex;
   flex-direction: column;
   background: var(--bg);
+}
+.history-preview--empty {
+  align-items: center;
+  justify-content: center;
 }
 .history-preview__head {
   display: flex;
@@ -5600,6 +5765,11 @@ a[href] {
 .history-preview__body .transcript > * {
   max-width: none;
 }
+.history-filter-select select:focus {
+  border-color: var(--accent);
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
 .hist-item {
   display: flex;
   align-items: stretch;
@@ -5645,6 +5815,7 @@ a[href] {
 .hist-item__meta {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
   min-width: 0;
   font-size: 11px;
@@ -5674,6 +5845,29 @@ a[href] {
   color: var(--fg);
   font: inherit;
   font-size: 13px;
+}
+@media (max-width: 760px) {
+  .management-modal-backdrop {
+    align-items: stretch;
+    padding: 12px;
+  }
+  .management-modal,
+  .history-modal,
+  .history-modal--wide {
+    width: calc(100vw - 24px);
+    max-height: calc(100vh - 24px);
+  }
+  .management-modal__head,
+  .history-toolbar,
+  .history-preview__head {
+    flex-wrap: wrap;
+  }
+  .history-content {
+    grid-template-columns: 1fr;
+  }
+  .history-preview {
+    min-height: 260px;
+  }
 }
 
 /* ── settings drawer ───────────────────────────────────────────────────────── */
@@ -6508,6 +6702,7 @@ a[href] {
   color: var(--fg);
   background: var(--hover);
 }
+
 .composer__pasted {
   display: flex;
   flex-direction: column;
@@ -6853,6 +7048,118 @@ a[href] {
 .onboarding__skip:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+
+
+/* InlineDiff: a compact before/after diff card. The header strip carries
+   the filename, the +/- counts, and a Copy button. The body is a monospace
+   pre with +/- row coloring. The CSS tokens are the same --add-bg /
+   --del-bg the existing DiffView uses, so light/dark theme changes apply
+   uniformly. */
+.inline-diff {
+  margin: 4px 0;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  background: var(--bg-soft);
+  overflow: hidden;
+}
+.inline-diff__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 9px;
+  border-bottom: 1px solid var(--border-soft);
+  font-size: 11px;
+}
+.inline-diff__file {
+  font-family: var(--mono);
+  color: var(--fg-dim);
+  max-width: 60%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.inline-diff__stats {
+  display: inline-flex;
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+}
+.inline-diff__add {
+  color: var(--add-fg);
+}
+.inline-diff__del {
+  color: var(--del-fg);
+}
+.inline-diff__spacer {
+  flex: 1;
+}
+.inline-diff__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  font-family: var(--sans);
+  font-size: 10.5px;
+  color: var(--fg-dim);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.inline-diff__btn:hover {
+  color: var(--fg);
+  background: var(--bg-elev);
+}
+.inline-diff__body {
+  margin: 0;
+  padding: 4px 0;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.55;
+  max-height: 320px;
+  overflow: auto;
+}
+.inline-diff__row {
+  display: flex;
+  gap: 6px;
+  padding: 0 8px;
+}
+.inline-diff__row--add {
+  background: var(--add-bg);
+}
+.inline-diff__row--del {
+  background: var(--del-bg);
+}
+.inline-diff__sign {
+  width: 10px;
+  flex-shrink: 0;
+  text-align: center;
+  opacity: 0.6;
+  user-select: none;
+}
+.inline-diff__text {
+  flex: 1;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.inline-diff__more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  width: 100%;
+  padding: 5px 0;
+  font-size: 11px;
+  color: var(--fg-dim);
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--border-soft);
+  cursor: pointer;
+}
+.inline-diff__more:hover {
+  color: var(--accent);
+  background: var(--bg-elev);
+
 }
 
 /* --- Right panel tabs (Files / Context) ------------------------------- */
@@ -6976,7 +7283,7 @@ a[href] {
   padding-right: 16px;
   color: var(--fg-dim);
   font-size: 15px;
-  line-height: 1;
+  line-height: 1.35;
   white-space: nowrap;
 }
 
@@ -7024,6 +7331,7 @@ a[href] {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  line-height: 1.35;
 }
 
 .app-chrome__spacer {
@@ -7245,6 +7553,81 @@ a[href] {
 .topicbar__icon-btn:disabled:hover {
   color: var(--fg-faint);
   background: transparent;
+}
+
+.topicbar__action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 30px;
+  height: 30px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--fg-faint);
+  font: inherit;
+}
+
+.topicbar__action-btn--icon {
+  width: 30px;
+  padding: 0;
+}
+
+.topicbar__action-btn:hover:not(:disabled),
+.topicbar__action-btn:focus-visible:not(:disabled),
+.topicbar__export--open .topicbar__action-btn {
+  color: var(--fg);
+  background: var(--button-bg);
+  outline: none;
+}
+
+.topicbar__action-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.topicbar__export {
+  position: relative;
+  display: inline-flex;
+}
+
+.topicbar__export-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 210;
+  min-width: 168px;
+  padding: 5px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elev);
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.36);
+  --wails-draggable: no-drag;
+}
+
+.topicbar__export-menu button {
+  width: 100%;
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+}
+
+.topicbar__export-menu button:hover,
+.topicbar__export-menu button:focus-visible {
+  color: var(--fg);
+  background: var(--sidebar-hover);
+  outline: none;
 }
 
 .tabbar {
@@ -7909,6 +8292,40 @@ a[href] {
 .project-tree__empty--subtle {
   padding: 8px 12px;
   font-size: 12px;
+}
+
+.project-tree__empty-state {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 2px 0 0;
+}
+
+.project-tree__empty-primary {
+  --wails-draggable: no-drag;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: 32px;
+  margin: 0 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg-elev));
+  color: var(--accent-strong);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 620;
+}
+
+.project-tree__empty-primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 21%, var(--bg-elev));
+  color: var(--fg);
+}
+
+.project-tree__empty-primary:disabled {
+  cursor: default;
+  opacity: 0.45;
 }
 
 .context-inspector,

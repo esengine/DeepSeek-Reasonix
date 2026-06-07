@@ -64,6 +64,27 @@ func TestSaveWorkspaceOnlyRemembersLastWorkspace(t *testing.T) {
 	}
 }
 
+func TestDialogDefaultDirectoryFallsBackFromMissingWorkspace(t *testing.T) {
+	parent := t.TempDir()
+	missing := filepath.Join(parent, "deleted", "project")
+
+	if got := dialogDefaultDirectory(missing); got != parent {
+		t.Fatalf("dialogDefaultDirectory(%q) = %q, want %q", missing, got, parent)
+	}
+}
+
+func TestDialogDefaultDirectoryUsesFileParent(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "reasonix.toml")
+	if err := os.WriteFile(file, []byte("default_model = \"x\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := dialogDefaultDirectory(file); got != dir {
+		t.Fatalf("dialogDefaultDirectory(file) = %q, want %q", got, dir)
+	}
+}
+
 // --- cwdWritable ---
 
 func TestCwdWritable(t *testing.T) {

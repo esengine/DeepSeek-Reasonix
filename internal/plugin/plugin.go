@@ -50,6 +50,12 @@ type Spec struct {
 	// the server omits annotations.readOnlyHint. It is for first-party adapters
 	// with known semantics; user-configured plugins should rely on MCP metadata.
 	ReadOnlyToolNames map[string]bool
+	// StripRawPrefix, when non-empty, removes this prefix from each MCP tool's
+	// raw name before namespacing. For example, StripRawPrefix="codegraph_" turns
+	// "codegraph_context" into "context", yielding "mcp__codegraph__context"
+	// instead of the redundant "mcp__codegraph__codegraph_context". The original
+	// raw name is preserved for MCP protocol calls.
+	StripRawPrefix string
 }
 
 // transport carries JSON-RPC messages to and from one MCP server. call sends a
@@ -744,10 +750,14 @@ func (c *Client) listTools(ctx context.Context) ([]tool.Tool, error) {
 	tools := make([]tool.Tool, 0, len(out.Tools))
 	for _, t := range out.Tools {
 		hinted := t.Annotations != nil && t.Annotations.ReadOnlyHint
+		visibleName := t.Name
+		if c.spec.StripRawPrefix != "" {
+			visibleName = strings.TrimPrefix(visibleName, c.spec.StripRawPrefix)
+		}
 		toolInfos = append(toolInfos, ToolInfo{Name: t.Name, Description: t.Description})
 		tools = append(tools, &remoteTool{
 			client:   c,
-			name:     toolName(c.name, t.Name),
+			name:     toolName(c.name, visibleName),
 			rawName:  t.Name,
 			desc:     t.Description,
 			schema:   canonicalizeSchema(t.InputSchema),

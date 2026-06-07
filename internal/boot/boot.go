@@ -247,6 +247,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		case ok:
 			spec := plugin.Spec{
 				Name:              "codegraph",
+				StripRawPrefix:    "codegraph_",
 				Command:           bin,
 				Args:              []string{"serve", "--mcp"},
 				Dir:               root,
@@ -346,6 +347,24 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	}
 	registerDeferred(lazySpecs, false)
 	registerDeferred(bgSpecs, true)
+
+	// Inject codegraph steering into the system prompt when symbol-graph tools
+	// are available, so the model knows to prefer them for architecture / call-graph
+	// questions over grep/read_file. Also register codegraph tool names in the
+	// subagent allowed-tools list so explore/research/review can use them.
+	if cfg.Codegraph.Enabled {
+		prefix := plugin.ToolPrefix("codegraph")
+		var cgTools []string
+		for _, name := range reg.Names() {
+			if strings.HasPrefix(name, prefix) {
+				cgTools = append(cgTools, name)
+			}
+		}
+		if len(cgTools) > 0 {
+			sysPrompt += "\n\n" + codegraph.SteerText
+			skill.SetExtraReadTools(cgTools)
+		}
+	}
 
 	for _, msg := range demoteMessages {
 		sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: msg})
