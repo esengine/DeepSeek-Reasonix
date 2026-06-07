@@ -180,6 +180,41 @@ func workspaceGitBranch(base string) string {
 	return "@" + short
 }
 
+// GitBranches returns all local git branches for the active workspace's repo.
+func (a *App) GitBranches() ([]string, error) {
+	base, err := a.activeWorkspaceBase()
+	if err != nil {
+		return nil, err
+	}
+	cmd := exec.Command("git", "-C", base, "branch", "--format=%(refname:short)")
+	proc.HideWindowDetached(cmd)
+	raw, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+	branches := strings.FieldsFunc(strings.TrimSpace(string(raw)), func(r rune) bool { return r == '\n' })
+	return branches, nil
+}
+
+// GitCheckout switches the active workspace's git branch and returns the
+// current branch name, or an error when git is unavailable.
+func (a *App) GitCheckout(branch string) error {
+	base, err := a.activeWorkspaceBase()
+	if err != nil {
+		return err
+	}
+	cmd := exec.Command("git", "-C", base, "checkout", branch)
+	proc.HideWindowDetached(cmd)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		if len(out) > 0 {
+			return fmt.Errorf("git checkout: %s", strings.TrimSpace(string(out)))
+		}
+		return err
+	}
+	return nil
+}
+
 func normalizeWorkspaceRelPath(base, path string) string {
 	path = strings.TrimSpace(path)
 	if path == "" {
