@@ -349,8 +349,8 @@ func (m chatTUI) clearMCPAuthentication(v mcpServerView) (tea.Model, tea.Cmd) {
 
 func mcpModeIndex(tier string) int {
 	tier = normalizeMCPTierForCLI(tier)
-	for i, choice := range mcpModeChoices {
-		if choice.tier == tier {
+	for i, choice := range mcpTierChoices {
+		if choice == tier {
 			return i
 		}
 	}
@@ -362,6 +362,8 @@ func normalizeMCPTierForCLI(tier string) string {
 	case "eager":
 		return "eager"
 	case "background":
+		return "background"
+	case "":
 		return "background"
 	default:
 		return "lazy"

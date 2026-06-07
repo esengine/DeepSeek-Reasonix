@@ -305,6 +305,7 @@ func (c *Config) NetworkProxyMode() string {
 type SkillsConfig struct {
 	Paths          []string `toml:"paths"`
 	DisabledSkills []string `toml:"disabled_skills"`
+	MaxDepth       int      `toml:"max_depth"`
 }
 
 // SkillCustomPaths returns the configured custom skill roots with ${VAR}
@@ -317,6 +318,25 @@ func (c *Config) SkillCustomPaths() []string {
 		}
 	}
 	return out
+}
+
+// SkillMaxDepth bounds nested skill discovery. Depth 3 favors bundled skill
+// packs while Store keeps nested markdown safe by requiring descriptions.
+func (c *Config) SkillMaxDepth() int {
+	const (
+		defaultDepth = 3
+		maxDepth     = 5
+	)
+	if c == nil || c.Skills.MaxDepth == 0 {
+		return defaultDepth
+	}
+	if c.Skills.MaxDepth < 1 {
+		return 1
+	}
+	if c.Skills.MaxDepth > maxDepth {
+		return maxDepth
+	}
+	return c.Skills.MaxDepth
 }
 
 // DisabledSkillNames returns valid disabled skill identifiers, preserving the
@@ -428,6 +448,8 @@ type AgentConfig struct {
 	PlannerModel     string            `toml:"planner_model"`
 	SubagentModel    string            `toml:"subagent_model"`
 	SubagentModels   map[string]string `toml:"subagent_models"`
+	SubagentEffort   string            `toml:"subagent_effort"`
+	SubagentEfforts  map[string]string `toml:"subagent_efforts"`
 	// OutputStyle selects a persona/tone block folded into the system prompt at
 	// startup (a built-in like "explanatory"/"learning"/"concise", or a custom
 	// .reasonix/output-styles/<name>.md). Empty = the unmodified prompt.
@@ -566,10 +588,11 @@ type PluginEntry struct {
 	//                  servers whose tools the system prompt depends on.
 	//   "lazy"       — registers placeholder tools immediately (from on-disk
 	//                  schema cache when available) and only spawns the real
-	//                  subprocess on first model use. Default for user plugins.
+	//                  subprocess on first model use. Kept for legacy configs.
 	//   "background" — placeholder + spawn fired at boot but not waited on;
 	//                  swap happens once the spawn finishes.
-	// Empty defaults to "lazy" so adding a plugin never slows the next launch.
+	// Empty defaults to "background" so enabled MCPs connect automatically
+	// without blocking chat. Unknown non-empty values fall back to "lazy".
 	Tier string `toml:"tier"`
 }
 
@@ -589,6 +612,8 @@ func resolvedMCPTier(tier string) string {
 	case "eager":
 		return "eager"
 	case "background":
+		return "background"
+	case "":
 		return "background"
 	default:
 		return "lazy"
@@ -712,6 +737,9 @@ func LoadForRoot(root string) (*Config, error) {
 	for _, path := range tomlSources {
 		if _, err := os.Stat(path); err == nil {
 			sawConfigFile = true
+			if err := migrateLegacyMCPTiersFile(path); err != nil {
+				slog.Warn("config: legacy mcp tier migration failed", "path", path, "err", err)
+			}
 		}
 		if err := mergeFile(cfg, path); err != nil {
 			return nil, err
@@ -744,6 +772,7 @@ func LoadForRoot(root string) (*Config, error) {
 	// the v2 config or .mcp.json already declared wins on a name collision.
 	cfg.mergeMCPJSON(loadLegacyMCP(legacyConfigPath()))
 	normalizeLegacyEffort(cfg)
+	normalizeLegacyMCPTiers(cfg)
 	normalizeEffortConfig(cfg)
 	backfillDeepSeekPro(cfg)
 	// First run (no config file anywhere): keep CodeGraph off until the user opts
@@ -842,10 +871,16 @@ func mergeTOMLPlugins(paths []string) ([]PluginEntry, error) {
 func LoadForEdit(path string) *Config {
 	loadDotEnv()
 	cfg := Default()
+	if _, err := os.Stat(path); err == nil {
+		if err := migrateLegacyMCPTiersFile(path); err != nil {
+			slog.Warn("config: legacy mcp tier migration failed", "path", path, "err", err)
+		}
+	}
 	if err := mergeFile(cfg, path); err != nil {
 		slog.Warn("config: load for edit failed, using defaults", "path", path, "err", err)
 	}
 	normalizeLegacyEffort(cfg)
+	normalizeLegacyMCPTiers(cfg)
 	normalizeEffortConfig(cfg)
 	return cfg
 }
@@ -859,6 +894,80 @@ func mergeFile(cfg *Config, path string) error {
 		return fmt.Errorf("config %s: %w", path, err)
 	}
 	return nil
+}
+
+// normalizeLegacyMCPTiers keeps loaded legacy config files on the new product
+// behavior: enabled MCP servers connect in the background by default, and the
+// retired per-server startup tier is no longer a user-facing setting.
+func normalizeLegacyMCPTiers(c *Config) {
+	if c == nil {
+		return
+	}
+	c.Codegraph.Tier = ""
+	for i := range c.Plugins {
+		c.Plugins[i].Tier = ""
+	}
+}
+
+func migrateLegacyMCPTiersFile(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	next, changed := stripLegacyMCPTierLines(string(raw))
+	if !changed {
+		return nil
+	}
+	return os.WriteFile(path, []byte(next), info.Mode().Perm())
+}
+
+func stripLegacyMCPTierLines(raw string) (string, bool) {
+	lines := strings.Split(raw, "\n")
+	section := ""
+	changed := false
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if header := tomlSectionHeader(line); header != "" {
+			section = header
+		}
+		if (section == "codegraph" || section == "plugins") && isTOMLKeyAssignment(line, "tier") {
+			changed = true
+			continue
+		}
+		out = append(out, line)
+	}
+	return strings.Join(out, "\n"), changed
+}
+
+func tomlSectionHeader(line string) string {
+	trimmed := strings.TrimSpace(line)
+	if !strings.HasPrefix(trimmed, "[") {
+		return ""
+	}
+	if i := strings.Index(trimmed, "#"); i >= 0 {
+		trimmed = strings.TrimSpace(trimmed[:i])
+	}
+	switch trimmed {
+	case "[codegraph]":
+		return "codegraph"
+	case "[[plugins]]":
+		return "plugins"
+	default:
+		return "other"
+	}
+}
+
+func isTOMLKeyAssignment(line, key string) bool {
+	trimmed := strings.TrimSpace(line)
+	if strings.HasPrefix(trimmed, "#") || !strings.HasPrefix(trimmed, key) {
+		return false
+	}
+	rest := strings.TrimSpace(strings.TrimPrefix(trimmed, key))
+	return strings.HasPrefix(rest, "=")
 }
 
 func userConfigPath() string {

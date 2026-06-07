@@ -55,8 +55,10 @@ export type Item =
       output?: string;
       error?: string;
       truncated?: boolean;
+      durationMs?: number;
       isShell?: boolean; // true for !-prefix shell commands (controls default expand)
       parentId?: string; // a sub-agent call nests under the `task` call with this id
+      profile?: { model?: string; effort?: string }; // subagent model/effort from tool event
     };
 
 interface State {
@@ -132,6 +134,33 @@ export function historyMessagesToItems(messages: HistoryMessage[], idPrefix: str
   const consumedToolIDs = new Set<string>();
   for (const m of messages) {
     if (m.role === "system") continue;
+    if (m.role === "phase") {
+      if (m.content.trim() !== "") {
+        items.push({ kind: "phase", id: `${idPrefix}${seq}`, text: m.content });
+        seq++;
+      }
+      continue;
+    }
+    if (m.role === "notice") {
+      if (m.content.trim() !== "") {
+        items.push({ kind: "notice", id: `${idPrefix}${seq}`, level: m.level === "warn" ? "warn" : "info", text: m.content });
+        seq++;
+      }
+      continue;
+    }
+    if (m.role === "compaction") {
+      items.push({
+        kind: "compaction",
+        id: `${idPrefix}${seq}`,
+        pending: Boolean(m.pending),
+        trigger: m.trigger ?? "",
+        messages: m.messages ?? 0,
+        summary: m.summary ?? "",
+        archive: m.archive ?? "",
+      });
+      seq++;
+      continue;
+    }
     if (m.role === "user") {
       if (m.content.trim() === "") continue;
       items.push({ kind: "user", id: `${idPrefix}${seq}`, text: m.content });
@@ -180,6 +209,7 @@ export function historyMessagesToItems(messages: HistoryMessage[], idPrefix: str
         isShell: (m.toolCallId || "").startsWith("shell-"),
       });
       seq++;
+      continue;
     }
   }
   return { items, seq };
@@ -245,10 +275,10 @@ function applyEvent(s: State, e: WireEvent): State {
       if (idx >= 0) {
         const next = [...s.items];
         const it = next[idx];
-        if (it.kind === "tool") next[idx] = { ...it, name: t.name, args: t.args ? t.args : it.args, readOnly: t.readOnly };
+        if (it.kind === "tool") next[idx] = { ...it, name: t.name, args: t.args ? t.args : it.args, readOnly: t.readOnly, profile: t.profile ?? it.profile };
         return { ...s, items: next };
       }
-      return { ...s, seq: s.seq + 1, items: [...s.items, { kind: "tool", id, name: t.name, args: t.args ?? "", readOnly: t.readOnly, status: "running", isShell: id.startsWith("shell-"), parentId: t.parentId }] };
+      return { ...s, seq: s.seq + 1, items: [...s.items, { kind: "tool", id, name: t.name, args: t.args ?? "", readOnly: t.readOnly, status: "running", isShell: id.startsWith("shell-"), parentId: t.parentId, profile: t.profile }] };
     }
     case "tool_result": {
       const t = e.tool;
@@ -263,7 +293,7 @@ function applyEvent(s: State, e: WireEvent): State {
       }
       if (idx >= 0) {
         const it = next[idx];
-        if (it.kind === "tool") next[idx] = { ...it, status: t.err ? "error" : "done", output: t.output, error: t.err, truncated: t.truncated };
+        if (it.kind === "tool") next[idx] = { ...it, status: t.err ? "error" : "done", output: t.output, error: t.err, truncated: t.truncated, durationMs: t.durationMs };
       }
       return { ...s, items: next };
     }

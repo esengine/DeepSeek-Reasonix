@@ -1,0 +1,51 @@
+# Area labels auto-applied to PRs by .github/workflows/pr-auto-label.yml
+# (actions/labeler), based on the changed file paths. Keep the area set in sync
+# with issue-auto-label.yml. severity/platform are issue-only — a PR is a change,
+# not a bug report — and v1/v2 are handled by pr-version-label.yml.
+
+agent:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'internal/agent/**'
+          - 'internal/control/**'
+
+mcp:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'internal/plugin/**'
+          - 'internal/codegraph/**'
+
+config:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'internal/config/**'
+          - 'internal/boot/**'
+
+provider:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'internal/provider/**'
+
+skills:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'internal/skill/**'
+          - 'internal/tool/**'
+
+tui:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'internal/cli/**'
+
+desktop:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'desktop/**'
+
+updater:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'desktop/cmd/sign/**'
+          - 'desktop/updater*.go'
+          - 'scripts/desktop-build.sh'
+          - '.github/workflows/release*.yml'

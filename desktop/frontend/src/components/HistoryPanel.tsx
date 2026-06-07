@@ -5,14 +5,17 @@ import { t, useT } from "../lib/i18n";
 import { sessionActivityTime } from "../lib/session";
 import type { HistoryMessage, SessionMeta } from "../lib/types";
 import { historyMessagesToItems, type Item } from "../lib/useController";
-import { ResizableDrawer } from "./ResizableDrawer";
 import { Tooltip } from "./Tooltip";
 import { Transcript } from "./Transcript";
 import { ContextMenu, contextMenuPointFromEvent, type ContextMenuItem, type ContextMenuPoint } from "./ContextMenu";
 
-// HistoryPanel lists saved sessions newest-first. Idle clicks resume a session;
-// running clicks load a read-only preview so the active stream keeps writing to
-// the current controller/session.
+type HistoryScopeFilter = "all" | "project" | "global";
+type HistoryStatusFilter = "all" | "current" | "open";
+type HistoryDateFilter = "all" | "today" | "yesterday" | "older";
+
+// HistoryPanel lists saved sessions newest-first. In the wide management modal,
+// a single click selects a read-only preview; explicit actions resume, restore,
+// rename, or delete the selected session.
 export function HistoryPanel({
   kind = "history",
   sessions,
@@ -43,6 +46,9 @@ export function HistoryPanel({
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [query, setQuery] = useState("");
+  const [scopeFilter, setScopeFilter] = useState<HistoryScopeFilter>("all");
+  const [statusFilter, setStatusFilter] = useState<HistoryStatusFilter>("all");
+  const [dateFilter, setDateFilter] = useState<HistoryDateFilter>("all");
   const [menuSession, setMenuSession] = useState<SessionMeta | null>(null);
   const [menuPoint, setMenuPoint] = useState<ContextMenuPoint | null>(null);
   const [blankMenuPoint, setBlankMenuPoint] = useState<ContextMenuPoint | null>(null);
@@ -87,28 +93,64 @@ export function HistoryPanel({
     [isTrash, onPreview, tr],
   );
 
+  const scopeCounts = useMemo(
+    () => ({
+      all: sessions.length,
+      project: sessions.filter((s) => sessionScope(s) === "project").length,
+      global: sessions.filter((s) => sessionScope(s) === "global").length,
+    }),
+    [sessions],
+  );
+  const statusCounts = useMemo(
+    () => ({
+      all: sessions.length,
+      current: sessions.filter((s) => s.current).length,
+      open: sessions.filter((s) => s.open && !s.current).length,
+    }),
+    [sessions],
+  );
+  const dateCounts = useMemo(() => {
+    const counts: Record<HistoryDateFilter, number> = { all: sessions.length, today: 0, yesterday: 0, older: 0 };
+    for (const s of sessions) counts[dateBucket(sessionTimeForGrouping(s, isTrash))]++;
+    return counts;
+  }, [isTrash, sessions]);
+
+  useEffect(() => {
+    if (scopeFilter === "project" && scopeCounts.project === 0) setScopeFilter("all");
+    if (scopeFilter === "global" && scopeCounts.global === 0) setScopeFilter("all");
+  }, [scopeCounts.global, scopeCounts.project, scopeFilter]);
+
+  useEffect(() => {
+    if (isTrash) return;
+    if (statusFilter === "current" && statusCounts.current === 0) setStatusFilter("all");
+    if (statusFilter === "open" && statusCounts.open === 0) setStatusFilter("all");
+  }, [isTrash, statusCounts.current, statusCounts.open, statusFilter]);
+
+  useEffect(() => {
+    if (dateFilter !== "all" && dateCounts[dateFilter] === 0) setDateFilter("all");
+  }, [dateCounts, dateFilter]);
+
   const filteredSessions = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return sessions;
-    return sessions.filter((s) =>
-      [s.title, s.preview, s.path].some((part) => (part ?? "").toLowerCase().includes(q)),
-    );
-  }, [query, sessions]);
+    return sessions.filter((s) => {
+      if (scopeFilter !== "all" && sessionScope(s) !== scopeFilter) return false;
+      if (!isTrash && statusFilter === "current" && !s.current) return false;
+      if (!isTrash && statusFilter === "open" && (!s.open || s.current)) return false;
+      if (dateFilter !== "all" && dateBucket(sessionTimeForGrouping(s, isTrash)) !== dateFilter) return false;
+      if (!q) return true;
+      return [s.title, s.preview, s.path, s.topicTitle, s.workspaceRoot].some((part) => (part ?? "").toLowerCase().includes(q));
+    });
+  }, [dateFilter, isTrash, query, scopeFilter, sessions, statusFilter]);
 
   // Sessions arrive newest-first; bucket consecutive ones under a day heading
   // (Today / Yesterday / a date) while preserving that order.
   const groups: { label: string; items: SessionMeta[] }[] = [];
   for (const s of filteredSessions) {
-    const label = dayLabel(isTrash ? s.deletedAt || sessionActivityTime(s) : sessionActivityTime(s));
+    const label = dayLabel(sessionTimeForGrouping(s, isTrash));
     const last = groups[groups.length - 1];
     if (last && last.label === label) last.items.push(s);
     else groups.push({ label, items: [s] });
   }
-
-  useEffect(() => {
-    if (!preview) return;
-    if (!filteredSessions.some((s) => s.path === preview.path)) setPreview(null);
-  }, [filteredSessions, preview]);
 
   useEffect(() => {
     setMenuSession(null);
@@ -118,15 +160,26 @@ export function HistoryPanel({
   }, [isTrash]);
 
   useEffect(() => {
-    if (!running) return;
+    if (isTrash) setStatusFilter("all");
+  }, [isTrash]);
+
+  useEffect(() => {
     setEditing(null);
-    if (preview || filteredSessions.length === 0) return;
+    if (filteredSessions.length === 0) {
+      if (preview) setPreview(null);
+      return;
+    }
+    if (preview && filteredSessions.some((s) => s.path === preview.path)) return;
     const first = filteredSessions.find((s) => !s.current) ?? filteredSessions[0];
     void loadPreview(first);
-  }, [filteredSessions, loadPreview, preview, running]);
+  }, [filteredSessions, loadPreview, preview]);
 
   const previewItems = useMemo(() => previewMessagesToItems(preview?.messages ?? []), [preview?.messages]);
   const showPreview = preview !== null;
+  const selectedSession = useMemo(
+    () => (preview ? filteredSessions.find((s) => s.path === preview.path) ?? null : null),
+    [filteredSessions, preview],
+  );
   const openSessionMenu = (event: ReactMouseEvent<HTMLElement>, s: SessionMeta) => {
     event.preventDefault();
     event.stopPropagation();
@@ -259,19 +312,53 @@ export function HistoryPanel({
             onSelect: () => setMenuConfirmTarget({ kind: "clear" }),
           },
         ];
+  const actionConfirmDelete =
+    selectedSession && menuConfirmTarget?.kind === "delete" && menuConfirmTarget.path === selectedSession.path;
+  const actionConfirmPurge =
+    selectedSession && menuConfirmTarget?.kind === "purge" && menuConfirmTarget.path === selectedSession.path;
+
+  const openSelected = () => {
+    if (!selectedSession || running || isTrash) return;
+    onResume(selectedSession);
+  };
+  const renameSelected = () => {
+    if (!selectedSession || running || isTrash) return;
+    closeHistoryMenus();
+    startRename(selectedSession);
+  };
+  const moveSelectedToTrash = () => {
+    if (!selectedSession || running || isTrash || selectedSession.current) return;
+    if (actionConfirmDelete) deleteHistorySession(selectedSession);
+    else setMenuConfirmTarget({ kind: "delete", path: selectedSession.path });
+  };
+  const restoreSelected = () => {
+    if (!selectedSession || !isTrash) return;
+    closeHistoryMenus();
+    onRestore?.(selectedSession.path);
+  };
+  const purgeSelected = () => {
+    if (!selectedSession || !isTrash) return;
+    if (actionConfirmPurge) purgeTrashSession(selectedSession);
+    else setMenuConfirmTarget({ kind: "purge", path: selectedSession.path });
+  };
 
   return (
-    <ResizableDrawer onClose={onClose} wide={showPreview || running}>
-      <header className="drawer__head">
+    <div className="management-modal-backdrop history-modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <section
+        className={`management-modal history-modal${showPreview || running ? " history-modal--wide" : ""}`}
+        aria-label={tr(isTrash ? "history.trashTitle" : "history.title")}
+        onClick={(e) => e.stopPropagation()}
+      >
+      <header className="management-modal__head history-modal__head">
         <div>
-          <div className="drawer__title">{tr(isTrash ? "history.trashTitle" : "history.title")}</div>
+          <div className="management-modal__title history-modal__title">{tr(isTrash ? "history.trashTitle" : "history.title")}</div>
           {isTrash ? (
-            <div className="drawer__summary">{tr("history.trashHint")}</div>
+            <div className="management-modal__summary history-modal__summary">{tr("history.trashHint")}</div>
           ) : (
-            running && <div className="drawer__summary">{tr("history.readOnlyHint")}</div>
+            running && <div className="management-modal__summary history-modal__summary">{tr("history.readOnlyHint")}</div>
           )}
         </div>
-        <div className="drawer__actions">
+        <div className="management-modal__actions history-modal__actions">
           {isTrash && sessions.length > 0 && (
             <button
               className="chip history-clear"
@@ -290,104 +377,182 @@ export function HistoryPanel({
       </header>
 
       <div
-        className={`drawer__body history-drawer${showPreview ? " history-drawer--preview" : ""}`}
+        className="history-manager"
         onContextMenu={openTrashBlankMenu}
       >
-        <div className={`history-list${isTrash ? " history-list--trash" : ""}`}>
+        <div className="history-toolbar" aria-label={tr("history.filters")}>
           {sessions.length > 0 && (
             <label className="mem-search history-search">
               <Search size={13} />
               <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={tr("history.searchPlaceholder")} />
             </label>
           )}
-          {sessions.length === 0 ? (
-            <div className={`mem-empty${isTrash ? " mem-empty--trash" : ""}`}>
-              {isTrash && <Trash2 size={22} />}
-              <span>{tr(isTrash ? "history.trashEmpty" : "history.empty")}</span>
-            </div>
-          ) : filteredSessions.length === 0 ? (
-            <div className="mem-empty">{tr("history.noResults")}</div>
-          ) : (
-            groups.map((g) => (
-              <section className="mem-section" key={g.label}>
-                <div className="mem-section__title">{g.label}</div>
-                {g.items.map((s) => {
-                  const selected = preview?.path === s.path;
-                  return (
-                    <div
-                      className={`hist-item${s.current ? " hist-item--current" : ""}${selected ? " hist-item--selected" : ""}`}
-                      key={s.path}
-                      onContextMenu={(event) => openSessionMenu(event, s)}
-                    >
-                      {editing === s.path ? (
-                        <input
-                          className="hist-item__rename"
-                          autoFocus
-                          value={draft}
-                          onChange={(e) => setDraft(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") commitRename(s.path);
-                            if (e.key === "Escape") setEditing(null);
-                          }}
-                          onBlur={() => commitRename(s.path)}
-                          placeholder={tr("history.namePlaceholder")}
-                        />
-                      ) : (
-                        <button
-                          className="hist-item__main"
-                          onClick={() => {
-                            if (isTrash || running) void loadPreview(s);
-                            else onResume(s);
-                          }}
-                        >
-                          <div className="hist-item__preview">{sessionDisplayTitle(s, tr("history.emptySession"))}</div>
-                          <div className="hist-item__meta">
-                            {!isTrash && s.current && <span className="hist-item__badge">{tr("history.current")}</span>}
-                            {!isTrash && !s.current && s.open && <span className="hist-item__badge">{tr("history.open")}</span>}
-                            <span>{tr(s.turns === 1 ? "history.turnOne" : "history.turnOther", { n: s.turns })}</span>
-                            <span>·</span>
-                            <span>{timeLabel(isTrash ? s.deletedAt || sessionActivityTime(s) : sessionActivityTime(s))}</span>
-                            {isTrash && s.deletedAt && (
-                              <>
-                                <span>·</span>
-                                <span>{tr("history.deleted")}</span>
-                              </>
-                            )}
-                            {!isTrash && running && (
-                              <>
-                                <span>·</span>
-                                <span>{tr("history.preview")}</span>
-                              </>
-                            )}
-                          </div>
-                        </button>
-                      )}
-
-                    </div>
-                  );
-                })}
-              </section>
-            ))
+          <HistoryFilterSelect
+            label={tr("history.filterScope")}
+            options={[
+              { id: "all", label: tr("history.filterAll"), count: scopeCounts.all },
+              { id: "project", label: tr("history.filterProject"), count: scopeCounts.project },
+              { id: "global", label: tr("history.filterGlobal"), count: scopeCounts.global },
+            ]}
+            value={scopeFilter}
+            onChange={(next) => setScopeFilter(next as HistoryScopeFilter)}
+          />
+          {!isTrash && (
+            <HistoryFilterSelect
+              label={tr("history.filterStatus")}
+              options={[
+                { id: "all", label: tr("history.filterAll"), count: statusCounts.all },
+                { id: "current", label: tr("history.filterCurrent"), count: statusCounts.current },
+                { id: "open", label: tr("history.filterOpen"), count: statusCounts.open },
+              ]}
+              value={statusFilter}
+              onChange={(next) => setStatusFilter(next as HistoryStatusFilter)}
+            />
           )}
+          <HistoryFilterSelect
+            label={tr(isTrash ? "history.filterDeletedAt" : "history.filterActivity")}
+            options={[
+              { id: "all", label: tr("history.filterAll"), count: dateCounts.all },
+              { id: "today", label: tr("history.today"), count: dateCounts.today },
+              { id: "yesterday", label: tr("history.yesterday"), count: dateCounts.yesterday },
+              { id: "older", label: tr("history.older"), count: dateCounts.older },
+            ]}
+            value={dateFilter}
+            onChange={(next) => setDateFilter(next as HistoryDateFilter)}
+          />
         </div>
 
-        {showPreview && (
-          <section className="history-preview">
-            <div className="history-preview__head">
-              <div className="history-preview__title">{preview.title}</div>
-              <div className="history-preview__meta">{preview.meta}</div>
-            </div>
-            <div className="history-preview__body">
-              {preview.loading ? (
-                <div className="mem-empty">{tr("common.loading")}</div>
-              ) : previewItems.length === 0 ? (
-                <div className="mem-empty">{tr("history.previewEmpty")}</div>
-              ) : (
-                <Transcript items={previewItems} onPrompt={() => {}} questionNavigator={false} />
-              )}
-            </div>
+        <div className="history-content">
+          <div className={`history-list${isTrash ? " history-list--trash" : ""}`}>
+            {sessions.length === 0 ? (
+              <div className={`mem-empty${isTrash ? " mem-empty--trash" : ""}`}>
+                {isTrash && <Trash2 size={22} />}
+                <span>{tr(isTrash ? "history.trashEmpty" : "history.empty")}</span>
+              </div>
+            ) : filteredSessions.length === 0 ? (
+              <div className="mem-empty">{tr("history.noResults")}</div>
+            ) : (
+              groups.map((g) => (
+                <section className="mem-section" key={g.label}>
+                  <div className="mem-section__title">{g.label}</div>
+                  {g.items.map((s) => {
+                    const selected = preview?.path === s.path;
+                    return (
+                      <div
+                        className={`hist-item${s.current ? " hist-item--current" : ""}${selected ? " hist-item--selected" : ""}`}
+                        key={s.path}
+                        onContextMenu={(event) => openSessionMenu(event, s)}
+                      >
+                        {editing === s.path ? (
+                          <input
+                            className="hist-item__rename"
+                            autoFocus
+                            value={draft}
+                            onChange={(e) => setDraft(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") commitRename(s.path);
+                              if (e.key === "Escape") setEditing(null);
+                            }}
+                            onBlur={() => commitRename(s.path)}
+                            placeholder={tr("history.namePlaceholder")}
+                          />
+                        ) : (
+                          <button
+                            className="hist-item__main"
+                            aria-pressed={selected}
+                            onClick={() => {
+                              setMenuConfirmTarget(null);
+                              void loadPreview(s);
+                            }}
+                            onDoubleClick={() => {
+                              if (!isTrash && !running) onResume(s);
+                            }}
+                          >
+                            <div className="hist-item__preview">{sessionDisplayTitle(s, tr("history.emptySession"))}</div>
+                            <div className="hist-item__meta">
+                              {sessionLocation(s, tr) && <span className="hist-item__scope">{sessionLocation(s, tr)}</span>}
+                              {!isTrash && s.current && <span className="hist-item__badge">{tr("history.current")}</span>}
+                              {!isTrash && !s.current && s.open && <span className="hist-item__badge">{tr("history.open")}</span>}
+                              <span>{tr(s.turns === 1 ? "history.turnOne" : "history.turnOther", { n: s.turns })}</span>
+                              <span>·</span>
+                              <span>{timeLabel(isTrash ? s.deletedAt || sessionActivityTime(s) : sessionActivityTime(s))}</span>
+                              {isTrash && s.deletedAt && (
+                                <>
+                                  <span>·</span>
+                                  <span>{tr("history.deleted")}</span>
+                                </>
+                              )}
+                              {!isTrash && running && (
+                                <>
+                                  <span>·</span>
+                                  <span>{tr("history.preview")}</span>
+                                </>
+                              )}
+                            </div>
+                          </button>
+                        )}
+
+                      </div>
+                    );
+                  })}
+                </section>
+              ))
+            )}
+          </div>
+
+          <section className={`history-preview${!preview ? " history-preview--empty" : ""}`}>
+            {preview ? (
+              <>
+              <div className="history-preview__head">
+                <div className="history-preview__copy">
+                  <div className="history-preview__title">{preview.title}</div>
+                  <div className="history-preview__meta">{preview.meta}</div>
+                </div>
+                <div className="history-preview__actions">
+                  {isTrash ? (
+                    <>
+                      <button className="btn btn--primary btn--small" type="button" disabled={!selectedSession} onClick={restoreSelected}>
+                        {tr("history.restore")}
+                      </button>
+                      <button className="btn btn--small btn--danger" type="button" disabled={!selectedSession} onClick={purgeSelected}>
+                        {actionConfirmPurge ? tr("history.confirmPurge") : tr("history.purge")}
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button className="btn btn--primary btn--small" type="button" disabled={!selectedSession || running} onClick={openSelected}>
+                        {tr("history.openSession")}
+                      </button>
+                      <button className="btn btn--small" type="button" disabled={!selectedSession || running} onClick={renameSelected}>
+                        {tr("history.rename")}
+                      </button>
+                      <button
+                        className="btn btn--small btn--danger"
+                        type="button"
+                        disabled={!selectedSession || running || selectedSession.current}
+                        onClick={moveSelectedToTrash}
+                      >
+                        {actionConfirmDelete ? tr("history.confirmMoveToTrash") : tr("history.moveToTrash")}
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+              <div className="history-preview__body">
+                {preview.loading ? (
+                  <div className="mem-empty">{tr("common.loading")}</div>
+                ) : previewItems.length === 0 ? (
+                  <div className="mem-empty">{tr("history.previewEmpty")}</div>
+                ) : (
+                  <Transcript items={previewItems} onPrompt={() => {}} questionNavigator={false} />
+                )}
+              </div>
+              </>
+            ) : (
+              <div className="history-preview__empty">{tr("history.selectSession")}</div>
+            )}
           </section>
-        )}
+            </div>
         <ContextMenu
           open={Boolean(menuSession)}
           point={menuPoint}
@@ -405,7 +570,8 @@ export function HistoryPanel({
           onClose={closeHistoryMenus}
         />
       </div>
-    </ResizableDrawer>
+      </section>
+    </div>
   );
 }
 
@@ -424,6 +590,31 @@ function timeLabel(ms: number): string {
   return new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+function dateBucket(ms: number): Exclude<HistoryDateFilter, "all"> {
+  const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const days = Math.round((startOfDay(new Date()) - startOfDay(new Date(ms))) / 86_400_000);
+  if (days <= 0) return "today";
+  if (days === 1) return "yesterday";
+  return "older";
+}
+
+function sessionTimeForGrouping(s: SessionMeta, isTrash: boolean): number {
+  return isTrash ? s.deletedAt || sessionActivityTime(s) : sessionActivityTime(s);
+}
+
+function sessionScope(s: SessionMeta): "project" | "global" {
+  return s.scope === "project" ? "project" : "global";
+}
+
+function sessionLocation(s: SessionMeta, tr: ReturnType<typeof useT>): string {
+  if (s.topicTitle) return s.topicTitle;
+  if (s.workspaceRoot) {
+    const parts = s.workspaceRoot.split(/[\\/]/).filter(Boolean);
+    return parts[parts.length - 1] || s.workspaceRoot;
+  }
+  return sessionScope(s) === "project" ? tr("history.filterProject") : tr("history.filterGlobal");
+}
+
 function sessionDisplayTitle(s: SessionMeta, fallback: string): string {
   return s.title || s.preview || fallback;
 }
@@ -436,4 +627,30 @@ function sessionMetaLine(s: SessionMeta, tr: ReturnType<typeof useT>, isTrash = 
 
 function previewMessagesToItems(messages: HistoryMessage[]): Item[] {
   return historyMessagesToItems(messages, "hp").items;
+}
+
+function HistoryFilterSelect({
+  label,
+  options,
+  value,
+  onChange,
+}: {
+  label: string;
+  options: { id: string; label: string; count: number }[];
+  value: string;
+  onChange: (next: string) => void;
+}) {
+  const visibleOptions = options.filter((option) => option.id === "all" || option.id === value || option.count > 0);
+  return (
+    <label className="history-filter-select">
+      <span>{label}</span>
+      <select value={value} onChange={(event) => onChange(event.target.value)}>
+        {visibleOptions.map((option) => (
+          <option key={option.id} value={option.id} disabled={option.id !== "all" && option.count === 0}>
+            {option.label} ({option.count})
+          </option>
+        ))}
+      </select>
+    </label>
+  );
 }

@@ -15,6 +15,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -241,9 +242,13 @@ func LazyToolset(spec Spec, cs *CachedSchema, host *Host, reg *tool.Registry, se
 	} else {
 		out = make([]tool.Tool, 0, len(cs.Tools))
 		for _, ct := range cs.Tools {
+			visibleName := ct.Name
+			if spec.StripRawPrefix != "" {
+				visibleName = strings.TrimPrefix(visibleName, spec.StripRawPrefix)
+			}
 			out = append(out, &lazyTool{
 				shared:   shared,
-				name:     toolName(spec.Name, ct.Name),
+				name:     toolName(spec.Name, visibleName),
 				desc:     ct.Description,
 				schema:   ct.Schema,
 				readOnly: spec.toolReadOnly(ct.Name, ct.ReadOnly),

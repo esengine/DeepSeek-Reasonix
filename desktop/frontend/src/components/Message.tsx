@@ -1,20 +1,39 @@
 import { memo, useState } from "react";
-import { ChevronRight, MoreHorizontal } from "lucide-react";
+import { ChevronDown, GitBranch, RotateCcw, ScrollText } from "lucide-react";
 import { Markdown } from "./Markdown";
 import { CopyButton } from "./CopyButton";
-import { Tooltip } from "./Tooltip";
+import { ProcessBrainIcon, ProcessCard, ProcessStatusIcon } from "./ProcessCard";
 import { useT } from "../lib/i18n";
-import type { Item } from "../lib/useController";
+import type { Item, MessageActionScope } from "../lib/useController";
 import type { CheckpointMeta } from "../lib/types";
 
 type AssistantItem = Extract<Item, { kind: "assistant" }>;
+export type TurnActionMenu = "summary" | "rewind";
 
 export function UserMessage({
   text,
   turn,
   anchorId,
-  open,
-  onToggle,
+}: {
+  text: string;
+  turn?: number;
+  anchorId?: string;
+}) {
+  const displayText = text.replace(/@\.reasonix\/attachments\/[^\s]+/g, "[image]");
+  return (
+    <div className="msg msg--user" id={anchorId} data-question-anchor={anchorId} data-turn={turn}>
+      <div className="msg__body">
+        <div className="msg__text">{displayText}</div>
+      </div>
+    </div>
+  );
+}
+
+export function TurnActions({
+  text,
+  turn,
+  openMenu,
+  onOpenMenu,
   onRewind,
   checkpoint,
   actionPending = false,
@@ -22,17 +41,16 @@ export function UserMessage({
 }: {
   text: string;
   turn?: number;
-  anchorId?: string;
-  open?: boolean; // whether this message's rewind menu is the open one (lifted to Transcript)
-  onToggle?: () => void;
-  onRewind?: (turn: number, scope: string) => void;
+  openMenu?: TurnActionMenu | null;
+  onOpenMenu?: (menu: TurnActionMenu | null) => void;
+  onRewind?: (turn: number, scope: MessageActionScope) => void;
   checkpoint?: CheckpointMeta;
   actionPending?: boolean;
   rewindDisabled?: boolean;
 }) {
   const t = useT();
-  const [confirmScope, setConfirmScope] = useState<string | null>(null);
-  const canRewind = onRewind != null && turn != null;
+  const [confirmScope, setConfirmScope] = useState<MessageActionScope | null>(null);
+  const canAct = onRewind != null && turn != null;
   const actionDisabledReason = (scope: string): string => {
     if (rewindDisabled || actionPending) return t("rewind.disabledRunning");
     if (!checkpoint) return t("rewind.disabledNoCheckpoint");
@@ -50,7 +68,7 @@ export function UserMessage({
     }
     return "";
   };
-  const actionLabel = (scope: string): string => {
+  const actionLabel = (scope: MessageActionScope): string => {
     if (confirmScope !== scope) {
       switch (scope) {
         case "fork":
@@ -82,17 +100,18 @@ export function UserMessage({
         return t("rewind.confirmBoth");
     }
   };
-  const actionMeta = (scope: string): string => {
+  const actionMeta = (scope: MessageActionScope): string => {
     if ((scope === "code" || scope === "both") && checkpoint?.files?.length) {
       return t("rewind.filesChanged", { count: checkpoint.files.length });
     }
     return "";
   };
-  const runAction = (scope: string) => {
+  const runAction = (scope: MessageActionScope) => {
     setConfirmScope(null);
+    onOpenMenu?.(null);
     onRewind?.(turn as number, scope);
   };
-  const selectRewind = (scope: string) => {
+  const selectRewind = (scope: MessageActionScope) => {
     if (actionDisabledReason(scope)) return;
     if (confirmScope !== scope) {
       setConfirmScope(scope);
@@ -100,7 +119,7 @@ export function UserMessage({
     }
     runAction(scope);
   };
-  const renderAction = (scope: string, danger = false) => {
+  const renderAction = (scope: MessageActionScope, danger = false) => {
     const disabledReason = actionDisabledReason(scope);
     const meta = actionMeta(scope);
     return (
@@ -120,83 +139,117 @@ export function UserMessage({
       </button>
     );
   };
-  const displayText = text.replace(/@\.reasonix\/attachments\/[^\s]+/g, "[image]");
+  const forkDisabledReason = canAct ? actionDisabledReason("fork") : "";
+  const toggleMenu = (menu: TurnActionMenu) => {
+    setConfirmScope(null);
+    onOpenMenu?.(openMenu === menu ? null : menu);
+  };
+
   return (
-    <div className="msg msg--user" id={anchorId} data-question-anchor={anchorId} data-turn={turn}>
-      <span className="msg__caret">›</span>
-      <div className="msg__text">{displayText}</div>
-      {canRewind && (
-        <div className={`rewind${open ? " rewind--open" : ""}`}>
-          <Tooltip label={t("rewind.label")}>
+    <div className="turn-actions">
+      <CopyButton text={text} label={t("msg.copy")} />
+      {canAct && (
+        <>
+          <button
+            className={`turn-actions__btn${confirmScope === "fork" ? " turn-actions__btn--confirm" : ""}`}
+            type="button"
+            disabled={Boolean(forkDisabledReason)}
+            title={forkDisabledReason || undefined}
+            onClick={() => selectRewind("fork")}
+          >
+            <GitBranch size={13} />
+            <span>{actionLabel("fork")}</span>
+          </button>
+          <div className={`turn-actions__group${openMenu === "summary" ? " turn-actions__group--open" : ""}`}>
             <button
-              className="rewind__btn"
+              className="turn-actions__btn"
               type="button"
-              aria-label={t("rewind.label")}
-              aria-expanded={Boolean(open)}
-              onClick={() => {
-                setConfirmScope(null);
-                onToggle?.();
-              }}
+              aria-haspopup="menu"
+              aria-expanded={openMenu === "summary"}
+              onClick={() => toggleMenu("summary")}
             >
-              <MoreHorizontal size={15} />
+              <ScrollText size={13} />
+              <span>{t("turnActions.summary")}</span>
+              <ChevronDown size={12} />
             </button>
-          </Tooltip>
-          {open && (
-            <div className="rewind__menu">
-              {rewindDisabled && <div className="rewind__menu-hint">{t("rewind.disabledRunning")}</div>}
-              {!rewindDisabled && !checkpoint && <div className="rewind__menu-hint">{t("rewind.disabledNoCheckpoint")}</div>}
-              {renderAction("fork")}
-              <div className="rewind__menu-separator" />
-              {renderAction("summ-from")}
-              {renderAction("summ-upto")}
-              <div className="rewind__menu-separator" />
-              {renderAction("conversation")}
-              {renderAction("code")}
-              {renderAction("both", true)}
-            </div>
-          )}
-        </div>
+            {openMenu === "summary" && (
+              <div className="rewind__menu turn-actions__menu" role="menu">
+                {rewindDisabled && <div className="rewind__menu-hint">{t("rewind.disabledRunning")}</div>}
+                {!rewindDisabled && !checkpoint && <div className="rewind__menu-hint">{t("rewind.disabledNoCheckpoint")}</div>}
+                {renderAction("summ-from")}
+                {renderAction("summ-upto")}
+              </div>
+            )}
+          </div>
+          <div className={`turn-actions__group${openMenu === "rewind" ? " turn-actions__group--open" : ""}`}>
+            <button
+              className="turn-actions__btn"
+              type="button"
+              aria-haspopup="menu"
+              aria-expanded={openMenu === "rewind"}
+              onClick={() => toggleMenu("rewind")}
+            >
+              <RotateCcw size={13} />
+              <span>{t("turnActions.rewind")}</span>
+              <ChevronDown size={12} />
+            </button>
+            {openMenu === "rewind" && (
+              <div className="rewind__menu turn-actions__menu" role="menu">
+                {rewindDisabled && <div className="rewind__menu-hint">{t("rewind.disabledRunning")}</div>}
+                {!rewindDisabled && !checkpoint && <div className="rewind__menu-hint">{t("rewind.disabledNoCheckpoint")}</div>}
+                {renderAction("conversation")}
+                {renderAction("code")}
+                {renderAction("both", true)}
+              </div>
+            )}
+          </div>
+        </>
       )}
     </div>
   );
 }
 
-// memo: an unchanged message keeps a stable `item` ref across a streaming turn's
-// per-token re-renders, so only the live bubble re-parses markdown, not the whole
-// backlog.
-export const AssistantMessage = memo(function AssistantMessage({ item }: { item: AssistantItem }) {
+export const AssistantMessage = memo(function AssistantMessage({
+  item,
+}: {
+  item: AssistantItem;
+}) {
   const t = useT();
-  const [open, setOpen] = useState(false);
+  const hasText = item.streaming || item.text.trim() !== "";
+  const processOnly = Boolean(item.reasoning) && !hasText;
+  const processWithText = Boolean(item.reasoning) && hasText;
   return (
-    <div className="msg msg--assistant">
+    <div className={`msg msg--assistant${processOnly ? " msg--process-only" : ""}${processWithText ? " msg--process-with-text" : ""}`}>
       {item.reasoning && (
-        <div className="reasoning">
-          <button className="reasoning__toggle" onClick={() => setOpen((v) => !v)}>
-            <ChevronRight
-              className={`reasoning__chevron ${open ? "reasoning__chevron--open" : ""}`}
-              size={12}
-            />
-            {t("msg.thinking")}
-          </button>
-          {open && <div className="reasoning__body">{item.reasoning}</div>}
-        </div>
+        <ProcessCard
+          tone="violet"
+          icon={<ProcessBrainIcon size={12} />}
+          kind="reasoning"
+          name={t("msg.thinking")}
+          meta={
+            <>
+              <ProcessStatusIcon state={item.streaming ? "running" : "done"} label={item.streaming ? t("msg.thinkingRunning") : t("msg.thinkingDone")} />
+              <span>{item.streaming ? t("msg.thinkingRunning") : t("msg.thinkingDone")}</span>
+            </>
+          }
+          defaultOpen={item.streaming}
+        >
+          <div className="reasoning__body">{item.reasoning}</div>
+        </ProcessCard>
       )}
-      <div className="msg__body">
-        {item.streaming ? (
-          // While streaming, render raw text (stable, monospace-free) instead of
-          // re-parsing markdown on every token — partial markdown reflows the
-          // layout and makes the view jitter. Markdown renders once, on completion.
-          <div className="msg__stream">
-            {item.text}
-            <span className="cursor" />
-          </div>
-        ) : (
-          <Markdown text={item.text} />
-        )}
-      </div>
-      {!item.streaming && item.text && (
-        <div className="msg__actions">
-          <CopyButton text={item.text} label={t("msg.copy")} />
+      {hasText && (
+        <div className="msg__body">
+          {item.streaming ? (
+            // While streaming, render raw text (stable, monospace-free) instead of
+            // re-parsing markdown on every token — partial markdown reflows the
+            // layout and makes the view jitter. Markdown renders once, on completion.
+            <div className="msg__stream">
+              {item.text}
+              <span className="cursor" />
+            </div>
+          ) : (
+            <Markdown text={item.text} />
+          )}
         </div>
       )}
     </div>

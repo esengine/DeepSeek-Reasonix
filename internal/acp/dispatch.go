@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
+	"unicode/utf8"
 
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
@@ -44,6 +46,8 @@ type updateSink struct {
 	conn      notifier
 	sessionID string
 	approve   func(id string, allow, session, persist bool)
+	mu        sync.Mutex
+	turnCtx   context.Context
 }
 
 func newUpdateSink(conn notifier, sessionID string) *updateSink {
@@ -54,6 +58,28 @@ func newUpdateSink(conn notifier, sessionID string) *updateSink {
 // once the controller exists (the sink is built first, to hand to the Factory).
 func (s *updateSink) bindApprove(fn func(id string, allow, session, persist bool)) {
 	s.approve = fn
+}
+
+func (s *updateSink) setTurnContext(ctx context.Context) {
+	s.mu.Lock()
+	s.turnCtx = ctx
+	s.mu.Unlock()
+}
+
+func (s *updateSink) clearTurnContext() {
+	s.mu.Lock()
+	s.turnCtx = nil
+	s.mu.Unlock()
+}
+
+func (s *updateSink) currentTurnContext() context.Context {
+	s.mu.Lock()
+	ctx := s.turnCtx
+	s.mu.Unlock()
+	if ctx == nil {
+		return context.Background()
+	}
+	return ctx
 }
 
 // Emit implements event.Sink. The agent calls it serially (see event.Sink), so no
@@ -125,7 +151,8 @@ func (s *updateSink) Emit(e event.Event) {
 		// The run loop is now blocked awaiting Approve(id, …). Do the
 		// client round-trip off the emit goroutine so Emit returns at once
 		// (the agent emits serially); the answer unblocks the loop.
-		go s.requestPermission(e.Approval)
+		turnCtx := s.currentTurnContext()
+		go s.requestPermission(turnCtx, e.Approval)
 	}
 }
 
@@ -176,7 +203,7 @@ func (s *updateSink) replay(msgs []provider.Message) {
 // session/request_permission round-trip and feeds the outcome back through
 // approve. Any transport failure or a cancelled/rejected outcome denies the call,
 // so the model gets a blocked result rather than the turn hanging.
-func (s *updateSink) requestPermission(a event.Approval) {
+func (s *updateSink) requestPermission(ctx context.Context, a event.Approval) {
 	if s.approve == nil {
 		return
 	}
@@ -201,9 +228,7 @@ func (s *updateSink) requestPermission(a event.Approval) {
 	}
 
 	allow, session, persist := false, false, false
-	// context.Background: Conn.Request also unblocks on connection close, so the
-	// round-trip can't outlive the wire even without a turn-scoped context here.
-	if raw, err := s.conn.Request(context.Background(), "session/request_permission", params); err == nil {
+	if raw, err := s.conn.Request(ctx, "session/request_permission", params); err == nil {
 		var res PermissionRequestResult
 		if json.Unmarshal(raw, &res) == nil && res.Outcome.Outcome == "selected" {
 			switch PermissionOptionKind(res.Outcome.OptionID) {
@@ -236,8 +261,12 @@ func clip(text string) string {
 	if len(text) <= maxResultChars {
 		return text
 	}
-	return text[:maxResultChars] + "\n…(" +
-		strconv.Itoa(len(text)-maxResultChars) + " more chars truncated)"
+	end := maxResultChars
+	for end > 0 && !utf8.ValidString(text[:end]) {
+		end--
+	}
+	return text[:end] + "\n…(" +
+		strconv.Itoa(len(text)-end) + " more chars truncated)"
 }
 
 // toolKindFor maps a tool name to the ACP tool kind the host uses to categorize

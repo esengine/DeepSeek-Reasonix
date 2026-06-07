@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"reasonix/internal/event"
+	"reasonix/internal/evidence"
 	"reasonix/internal/instruction"
 	"reasonix/internal/provider"
 	"reasonix/internal/tool"
@@ -75,6 +76,16 @@ func sessionHasUserMessageContaining(s *Session, needle string) bool {
 		}
 	}
 	return false
+}
+
+type readinessAuditSink struct {
+	events []evidence.ReadinessAudit
+}
+
+func (s *readinessAuditSink) Emit(event.Event) {}
+
+func (s *readinessAuditSink) RecordReadinessAudit(a evidence.ReadinessAudit) {
+	s.events = append(s.events, a)
 }
 
 // TestEvidenceFlowEndToEnd drives a full Run(): turn 1 runs bash then signs the
@@ -185,6 +196,46 @@ func TestFinalReadinessAllowsWriterWithoutChecksOrTodos(t *testing.T) {
 	}
 }
 
+func TestFinalReadinessAuditSkipsWhenGateDoesNotApply(t *testing.T) {
+	t.Run("no writer", func(t *testing.T) {
+		prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{
+			{{Type: provider.ChunkText, Text: "done"}, {Type: provider.ChunkDone}},
+		}}
+		sink := &readinessAuditSink{}
+		a := New(prov, tool.NewRegistry(), NewSession(""), Options{
+			ProjectChecks: []instruction.VerifyCheck{{Command: "go test ./...", SourcePath: "AGENTS.md", Line: 3}},
+		}, sink)
+
+		if err := a.Run(context.Background(), "inspect only"); err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		if len(sink.events) != 0 {
+			t.Fatalf("readiness audit events = %d, want 0: %+v", len(sink.events), sink.events)
+		}
+	})
+
+	t.Run("writer without checks or todo", func(t *testing.T) {
+		reg := tool.NewRegistry()
+		reg.Add(fakeTool{name: "write_file", readOnly: false})
+		prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{
+			{
+				toolCallChunk("c1", "write_file", `{"path":"changed.go","content":"package main"}`),
+				{Type: provider.ChunkDone},
+			},
+			{{Type: provider.ChunkText, Text: "done"}, {Type: provider.ChunkDone}},
+		}}
+		sink := &readinessAuditSink{}
+		a := New(prov, reg, NewSession(""), Options{}, sink)
+
+		if err := a.Run(context.Background(), "simple edit"); err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		if len(sink.events) != 0 {
+			t.Fatalf("readiness audit events = %d, want 0: %+v", len(sink.events), sink.events)
+		}
+	})
+}
+
 func TestFinalReadinessBlocksUntilProjectCheckRunsAfterWriter(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(fakeTool{name: "write_file", readOnly: false})
@@ -216,6 +267,43 @@ func TestFinalReadinessBlocksUntilProjectCheckRunsAfterWriter(t *testing.T) {
 	}
 	if got := lastToolResult(a.session, "bash"); !strings.Contains(got, "bash done") {
 		t.Fatalf("bash tool result = %q, want command rerun after block", got)
+	}
+}
+
+func TestFinalReadinessAuditRecordsBlockAndRecovery(t *testing.T) {
+	reg := tool.NewRegistry()
+	reg.Add(fakeTool{name: "write_file", readOnly: false})
+	reg.Add(fakeTool{name: "bash", readOnly: false})
+	prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{
+		{
+			toolCallChunk("c1", "write_file", `{"path":"changed.go","content":"package main"}`),
+			{Type: provider.ChunkDone},
+		},
+		{{Type: provider.ChunkText, Text: "premature"}, {Type: provider.ChunkDone}},
+		{
+			toolCallChunk("c2", "bash", `{"command":"go test ./..."}`),
+			{Type: provider.ChunkDone},
+		},
+		{{Type: provider.ChunkText, Text: "verified done"}, {Type: provider.ChunkDone}},
+	}}
+	sink := &readinessAuditSink{}
+	a := New(prov, reg, NewSession(""), Options{
+		ProjectChecks: []instruction.VerifyCheck{{Command: "go test ./...", SourcePath: "AGENTS.md", Line: 3}},
+	}, sink)
+
+	if err := a.Run(context.Background(), "edit and finish"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(sink.events) != 2 {
+		t.Fatalf("readiness audit events = %d, want 2: %+v", len(sink.events), sink.events)
+	}
+	blocked := sink.events[0]
+	if blocked.Result != evidence.ReadinessBlocked || blocked.MissingProjectChecks != 1 || blocked.CommandMismatchMissing != 1 {
+		t.Fatalf("blocked audit = %+v, want missing project check command", blocked)
+	}
+	recovered := sink.events[1]
+	if recovered.Result != evidence.ReadinessAllowed || !recovered.Recovered {
+		t.Fatalf("recovery audit = %+v, want allowed recovered", recovered)
 	}
 }
 
@@ -321,6 +409,40 @@ func TestFinalReadinessStopsAfterRepeatedBlocks(t *testing.T) {
 	}
 	if prov.call != 4 {
 		t.Fatalf("provider calls = %d, want three blocked final answers after writer turn", prov.call)
+	}
+}
+
+func TestFinalReadinessAuditRecordsTerminalError(t *testing.T) {
+	todoWrite, ok := tool.LookupBuiltin("todo_write")
+	if !ok {
+		t.Fatal("todo_write builtin not registered")
+	}
+	reg := tool.NewRegistry()
+	reg.Add(fakeTool{name: "write_file", readOnly: false})
+	reg.Add(todoWrite)
+	prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{
+		{
+			toolCallChunk("c1", "write_file", `{"path":"changed.go","content":"package main"}`),
+			toolCallChunk("c2", "todo_write", `{"todos":[{"content":"Edit code","status":"in_progress"}]}`),
+			{Type: provider.ChunkDone},
+		},
+		{{Type: provider.ChunkText, Text: "premature 1"}, {Type: provider.ChunkDone}},
+		{{Type: provider.ChunkText, Text: "premature 2"}, {Type: provider.ChunkDone}},
+		{{Type: provider.ChunkText, Text: "premature 3"}, {Type: provider.ChunkDone}},
+	}}
+	sink := &readinessAuditSink{}
+	a := New(prov, reg, NewSession(""), Options{}, sink)
+
+	err := a.Run(context.Background(), "edit with todo and never sign off")
+	if err == nil {
+		t.Fatal("expected repeated readiness blocks to stop the run")
+	}
+	if len(sink.events) != 3 {
+		t.Fatalf("readiness audit events = %d, want 3: %+v", len(sink.events), sink.events)
+	}
+	last := sink.events[len(sink.events)-1]
+	if last.Result != evidence.ReadinessErrored || !last.MissingCompleteStep {
+		t.Fatalf("terminal audit = %+v, want errored missing complete_step", last)
 	}
 }
 

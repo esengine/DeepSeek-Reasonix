@@ -2,6 +2,7 @@ package cli
 
 import (
 	"errors"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -382,7 +383,7 @@ func TestMCPEditConfigLaunchUsesSystemDefaultLast(t *testing.T) {
 	}
 }
 
-func TestApplyMCPModePersistsTier(t *testing.T) {
+func TestApplyMCPModeDropsLegacyTier(t *testing.T) {
 	isolateUserConfig(t)
 	cfg := config.Default()
 	cfg.Plugins = []config.PluginEntry{{Name: "github", Command: "npx", Args: []string{"server"}, Tier: "lazy"}}
@@ -404,8 +405,15 @@ func TestApplyMCPModePersistsTier(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
-	if len(loaded.Plugins) != 1 || loaded.Plugins[0].Tier != "background" {
-		t.Fatalf("tier not persisted, plugins=%+v", loaded.Plugins)
+	if len(loaded.Plugins) != 1 || loaded.Plugins[0].Tier != "" {
+		t.Fatalf("tier should be migrated away, plugins=%+v", loaded.Plugins)
+	}
+	raw, err := os.ReadFile("reasonix.toml")
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	if strings.Contains(string(raw), "\ntier") {
+		t.Fatalf("legacy tier should not be written back:\n%s", raw)
 	}
 }
 

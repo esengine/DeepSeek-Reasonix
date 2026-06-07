@@ -110,12 +110,11 @@ enabled = []   # empty = all built-in tools
 # trace / node tools. Off by default for first-run sessions. Once enabled, the
 # runtime is fetched into a per-version cache when missing (auto_install);
 # .codegraph/ is then initialised (fast) and CodeGraph's daemon indexes in the
-# background. Choose tier the same way as ordinary MCP servers.
+# background once enabled.
 # [codegraph]
 # enabled      = false
 # auto_install = true
 # path         = ""   # empty = cache, then PATH, then a bundle beside reasonix
-# tier         = "lazy"   # lazy | background | eager
 
 # Skills are invokable playbooks (SKILL.md / <name>.md with frontmatter), found
 # under .reasonix/skills, .agents/skills, .agent/skills, .claude/skills (project)
@@ -146,11 +145,5 @@ enabled = []   # empty = all built-in tools
 # [[plugins]]
 # name    = "example"
 # command = "reasonix-plugin-example"
-# tier    = "lazy"  # eager | lazy (default) | background
-# # tier guidance:
-# #   eager      — handshake at boot; the agent waits. Use when the plugin's
-# #                tools must be in the very first turn's system prompt.
-# #   lazy       — placeholder tools (from cached schema, when present) until
-# #                the model uses them, then handshake on-demand. Default.
-# #   background — placeholder + spawn at boot in a goroutine so an idle
-# #                session warms up without blocking the user.
+# # Enabled MCP servers connect automatically in the background after session
+# # start. Use /mcp or the desktop MCP panel to refresh, reconnect, or disable.

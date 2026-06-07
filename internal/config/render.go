@@ -178,6 +178,16 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	} else {
 		b.WriteString("# subagent_models = { review = \"deepseek-pro\", security_review = \"deepseek-pro\" }   # per-skill overrides\n")
 	}
+	if c.Agent.SubagentEffort != "" {
+		fmt.Fprintf(&b, "subagent_effort = %q   # default effort for subagent entry points\n", c.Agent.SubagentEffort)
+	} else {
+		b.WriteString("# subagent_effort = \"high\"   # optional default effort for subagents\n")
+	}
+	if len(c.Agent.SubagentEfforts) > 0 {
+		fmt.Fprintf(&b, "subagent_efforts = %s   # per-tool/skill effort overrides\n", renderStringMap(c.Agent.SubagentEfforts))
+	} else {
+		b.WriteString("# subagent_efforts = { review = \"max\", task = \"high\" }   # per-tool/skill effort overrides\n")
+	}
 	if c.Agent.OutputStyle != "" {
 		fmt.Fprintf(&b, "output_style = %q   # persona/tone folded into the prompt\n", c.Agent.OutputStyle)
 	} else {
@@ -254,11 +264,6 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	} else {
 		b.WriteString("# path       = \"\"   # empty = cache, then PATH, then a bundle beside reasonix\n")
 	}
-	if strings.TrimSpace(c.Codegraph.Tier) != "" {
-		fmt.Fprintf(&b, "tier         = %q   # lazy|background|eager\n", c.Codegraph.ResolvedTier())
-	} else {
-		b.WriteString("# tier       = \"lazy\"   # lazy|background|eager\n")
-	}
 	b.WriteString("\n")
 
 	b.WriteString("[skills]\n")
@@ -266,6 +271,11 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		fmt.Fprintf(&b, "paths = %s   # extra custom skill roots\n", renderStringArray(c.Skills.Paths))
 	} else {
 		b.WriteString("# paths = [\"~/my-skills\", \"../shared/skills\"]   # extra custom skill roots\n")
+	}
+	if c.Skills.MaxDepth != 0 {
+		fmt.Fprintf(&b, "max_depth = %d   # nested scan depth; default 3, set 1 for legacy root-only discovery\n", c.SkillMaxDepth())
+	} else {
+		b.WriteString("# max_depth = 3   # nested scan depth; set 1 for legacy root-only discovery\n")
 	}
 	if disabled := c.DisabledSkillNames(); len(disabled) > 0 {
 		fmt.Fprintf(&b, "disabled_skills = %s   # hidden from the prompt, slash invocation, and skill tools\n\n", renderStringArray(disabled))
@@ -351,9 +361,6 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 			}
 			if pl.AutoStart != nil {
 				fmt.Fprintf(&b, "auto_start = %v\n", *pl.AutoStart)
-			}
-			if strings.TrimSpace(pl.Tier) != "" {
-				fmt.Fprintf(&b, "tier    = %q\n", pl.Tier)
 			}
 		}
 	}

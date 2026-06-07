@@ -182,8 +182,8 @@ func mcpList() int {
 	listed := 0
 	// CodeGraph is a built-in server injected by boot, not a [[plugins]] entry, so
 	// report its resolved status here too. It is listed even when disabled, matching
-	// the MCP manager where the user can enable it and choose a startup tier.
-	codegraphMeta := fmt.Sprintf(" [auto_start=%v tier=%s]", cfg.Codegraph.Enabled, cfg.Codegraph.ResolvedTier())
+	// the MCP manager where the user can enable it.
+	codegraphMeta := fmt.Sprintf(" [enabled=%v auto_install=%v]", cfg.Codegraph.Enabled, cfg.Codegraph.AutoInstall)
 	if bin, ok := codegraph.Resolve(cfg.Codegraph.Path); ok {
 		fmt.Printf("%-16s (stdio, built-in)%s  %s serve --mcp\n", "codegraph", codegraphMeta, bin)
 	} else {

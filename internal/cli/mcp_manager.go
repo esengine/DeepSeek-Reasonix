@@ -93,15 +93,7 @@ type mcpExternalDoneMsg struct {
 	err    error
 }
 
-var mcpModeChoices = []struct {
-	tier  string
-	label string
-	desc  string
-}{
-	{"lazy", "Connect when this MCP is used", "Do not pre-connect; connect automatically on first tool use."},
-	{"background", "Connect in background after session starts", "New sessions connect automatically without blocking chat."},
-	{"eager", "Connect before chat starts", "New sessions wait for this MCP before chat begins."},
-}
+var mcpTierChoices = []string{"background", "eager", "lazy"}
 
 func (m *chatTUI) openMCPManager(name string) {
 	m.mcp = &mcpManager{stage: mcpStageList, snapshot: m.buildMCPSnapshot()}
@@ -159,6 +151,8 @@ func (m chatTUI) handleMCPManagerKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			if p.sel < len(p.snapshot.servers)-1 {
 				p.sel++
 			}
+		case "r":
+			p.snapshot = m.buildMCPSnapshot()
 		case "enter", "right", "l":
 			if len(p.snapshot.servers) > 0 {
 				p.name = p.snapshot.servers[p.sel].Name
@@ -199,15 +193,15 @@ func (m chatTUI) handleMCPManagerKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				p.mode--
 			}
 		case "down", "j":
-			if p.mode < len(mcpModeChoices)-1 {
+			if p.mode < len(mcpTierChoices)-1 {
 				p.mode++
 			}
 		case "enter":
-			return m.applyMCPMode(mcpModeChoices[p.mode].tier)
+			return m.applyMCPMode(mcpTierChoices[p.mode])
 		default:
-			if idx, ok := numberKeyIndex(msg.String(), len(mcpModeChoices)); ok {
+			if idx, ok := numberKeyIndex(msg.String(), len(mcpTierChoices)); ok {
 				p.mode = idx
-				return m.applyMCPMode(mcpModeChoices[p.mode].tier)
+				return m.applyMCPMode(mcpTierChoices[p.mode])
 			}
 		}
 	case mcpStageConfirmRemove:
@@ -268,8 +262,8 @@ func (p *mcpManager) clamp() {
 	if p.mode < 0 {
 		p.mode = 0
 	}
-	if p.mode >= len(mcpModeChoices) {
-		p.mode = len(mcpModeChoices) - 1
+	if p.mode >= len(mcpTierChoices) {
+		p.mode = len(mcpTierChoices) - 1
 	}
 	if p.confirm < 0 || p.confirm > 1 {
 		p.confirm = 0

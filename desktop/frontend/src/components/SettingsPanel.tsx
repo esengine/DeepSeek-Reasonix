@@ -17,6 +17,7 @@ import {
   type ThemeStyle,
 } from "../lib/theme";
 import { TEXT_SIZES, applyTextSize, getTextSize, type TextSize } from "../lib/textSize";
+import { FONT_FAMILIES, applyFontFamily, getFontFamily, type FontFamily } from "../lib/fontFamily";
 import type { NetworkView, ProviderView, SettingsView } from "../lib/types";
 import { InlineConfirmButton } from "./InlineConfirmButton";
 import { ResizableDrawer } from "./ResizableDrawer";
@@ -38,6 +39,7 @@ export function SettingsPanel({ onClose, onChanged }: { onClose: () => void; onC
   const [theme, setThemeState] = useState<Theme>(getTheme());
   const [themeStyle, setThemeStyleState] = useState<ThemeStyle>(() => getThemeStyle(getTheme()));
   const [textSize, setTextSizeState] = useState<TextSize>(getTextSize());
+  const [fontFamily, setFontFamilyState] = useState<FontFamily>(getFontFamily());
   const [tab, setTab] = useState<SettingsTab>("general");
 
   const reload = async () => setS(normalizeSettingsView(await app.Settings().catch(() => null)));
@@ -109,6 +111,7 @@ export function SettingsPanel({ onClose, onChanged }: { onClose: () => void; onC
                     theme={theme}
                     themeStyle={themeStyle}
                     textSize={textSize}
+                    fontFamily={fontFamily}
                     onTheme={(t) => {
                       const nextStyle = themeForStyle(themeStyle) === getResolvedTheme(t) ? themeStyle : defaultStyleForTheme(t);
                       applyTheme(t, nextStyle, { persist: false });
@@ -126,6 +129,10 @@ export function SettingsPanel({ onClose, onChanged }: { onClose: () => void; onC
                     onTextSize={(size) => {
                       applyTextSize(size);
                       setTextSizeState(size);
+                    }}
+                    onFontFamily={(font) => {
+                      applyFontFamily(font);
+                      setFontFamilyState(font);
                     }}
                   />
                 )}
@@ -165,25 +172,8 @@ function settingsTabLabel(id: SettingsTab, t: ReturnType<typeof useT>): string {
   }
 }
 
-function settingsTabMeta(id: SettingsTab, s: SettingsView, t: ReturnType<typeof useT>): string {
-  switch (id) {
-    case "models":
-      return toRef(s.defaultModel, s) || t("common.none");
-    case "general":
-      return `${closeBehaviorLabel(normalizeCloseBehavior(s.closeBehavior), t)} · ${t(`settings.autoPlan.${normalizeAutoPlan(s.autoPlan)}`)}`;
-    case "providers":
-      return t("settings.providerCount", { n: s.providers.length });
-    case "network":
-      return proxyModeLabel(normalizeProxyMode(s.network.proxyMode), t);
-    case "permissions":
-      return s.permissions.mode;
-    case "sandbox":
-      return s.sandbox.bash;
-    case "appearance":
-      return t("settings.appearanceMeta");
-    case "updates":
-      return t("settings.updatesMeta");
-  }
+function settingsTabMeta(id: SettingsTab, _s: SettingsView, t: ReturnType<typeof useT>): string {
+  return t(`settings.tabSub.${id}`);
 }
 
 // allRefs flattens providers into "provider/model" refs for the model selectors.
@@ -251,6 +241,8 @@ function normalizeSettingsView(view: SettingsView | null | undefined): SettingsV
   const agent = view.agent ?? { temperature: 0, maxSteps: 0, systemPrompt: "" };
   return {
     ...view,
+    subagentModel: view.subagentModel ?? "",
+    subagentEffort: view.subagentEffort ?? "",
     providers: asArray(view.providers).map((p) => ({ ...p, models: asArray(p.models) })),
     providerKinds: asArray(view.providerKinds),
     permissions: {
@@ -473,6 +465,7 @@ function ModelsSection({ s, busy, apply, onManageProviders }: SectionProps & { o
   const refs = allRefs(s);
   const defaultRef = toRef(s.defaultModel, s);
   const plannerRef = toRef(s.plannerModel, s);
+  const subagentRef = toRef(s.subagentModel, s);
   const [defaultProvider, defaultModel] = defaultRef.split("/");
   const plannerModeDetail = plannerRef
     ? t("settings.plannerDualDetail", { planner: plannerRef, executor: defaultRef || t("common.none") })
@@ -520,6 +513,41 @@ function ModelsSection({ s, busy, apply, onManageProviders }: SectionProps & { o
         </select>
       </div>
 
+      <div className="set-row">
+        <label className="set-label">{t("settings.subagentModel")}</label>
+        <select
+          className="mem-select set-grow"
+          value={subagentRef}
+          disabled={busy}
+          onChange={(e) => void apply(() => app.SetSubagentModel(e.target.value))}
+        >
+          <option value="">{t("settings.subagentModelDefault")}</option>
+          {refs.map((r) => (
+            <option key={r} value={r}>
+              {r}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="set-row">
+        <label className="set-label">{t("settings.subagentEffort")}</label>
+        <select
+          className="mem-select set-grow"
+          value={s.subagentEffort || ""}
+          disabled={busy}
+          onChange={(e) => void apply(() => app.SetSubagentEffort(e.target.value))}
+        >
+          <option value="">{t("settings.subagentEffortDefault")}</option>
+          {EFFORT_PRESETS.map((level) => (
+            <option key={level} value={level}>
+              {level}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="mem-hint">{t("settings.subagentHint")}</div>
+
       <div className="settings-model-card">
         <div>
           <span>{t("settings.activeProvider")}</span>
@@ -531,18 +559,13 @@ function ModelsSection({ s, busy, apply, onManageProviders }: SectionProps & { o
           <strong>{plannerRef ? t("settings.plannerDual") : t("settings.plannerSingle")}</strong>
           <small>{plannerModeDetail}</small>
         </div>
+        <div>
+          <span>{t("settings.subagentDefaults")}</span>
+          <strong>{subagentRef || t("common.auto")}</strong>
+          <small>{s.subagentEffort ? `effort ${s.subagentEffort}` : t("common.auto")}</small>
+        </div>
       </div>
 
-      <div className="settings-summary-grid">
-        <div className="settings-summary">
-          <span>{t("settings.providers")}</span>
-          <strong>{s.providers.length}</strong>
-        </div>
-        <div className="settings-summary">
-          <span>{t("settings.availableModels")}</span>
-          <strong>{refs.length}</strong>
-        </div>
-      </div>
     </section>
   );
 }
@@ -992,16 +1015,20 @@ function AppearanceSection({
   theme,
   themeStyle,
   textSize,
+  fontFamily,
   onTheme,
   onThemeStyle,
   onTextSize,
+  onFontFamily,
 }: {
   theme: Theme;
   themeStyle: ThemeStyle;
   textSize: TextSize;
+  fontFamily: FontFamily;
   onTheme: (t: Theme) => void;
   onThemeStyle: (style: ThemeStyle) => void;
   onTextSize: (size: TextSize) => void;
+  onFontFamily: (font: FontFamily) => void;
 }) {
   const t = useT();
   const themeOptions: Theme[] = ["auto", "light", "dark"];
@@ -1051,6 +1078,20 @@ function AppearanceSection({
           ))}
         </div>
       </div>
+      <div className="set-row">
+        <label className="set-label">{t("settings.fontFamily")}</label>
+        <div className="set-seg">
+          {FONT_FAMILIES.map((font) => (
+            <button
+              key={font}
+              className={`set-seg__btn${fontFamily === font ? " set-seg__btn--on" : ""}`}
+              onClick={() => onFontFamily(font)}
+            >
+              {fontFamilyName(font, t)}
+            </button>
+          ))}
+        </div>
+      </div>
     </section>
   );
 }
@@ -1076,6 +1117,19 @@ function textSizeName(size: TextSize, t: ReturnType<typeof useT>): string {
       return t("settings.textSizeLarge");
     case "xlarge":
       return t("settings.textSizeXLarge");
+  }
+}
+
+function fontFamilyName(font: FontFamily, t: ReturnType<typeof useT>): string {
+  switch (font) {
+    case "system":
+      return t("settings.fontFamilySystem");
+    case "yahei":
+      return t("settings.fontFamilyYaHei");
+    case "pingfang":
+      return t("settings.fontFamilyPingFang");
+    case "noto":
+      return t("settings.fontFamilyNoto");
   }
 }
 

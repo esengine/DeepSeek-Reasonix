@@ -165,8 +165,10 @@ When `agent.planner_model` names a provider different from the executor, a
 `Coordinator` runs two models in **separate sessions** to keep each one's prompt
 prefix cache-stable:
 
-- The **planner** (low-frequency) runs in its own session with no tools and
-  produces a concise plan.
+- The **planner** (low-frequency) runs in its own session with the same standing
+  memory context plus a filtered read-only research tool set, then produces a
+  concise plan. It can inspect files/docs before planning, but writer and
+  workflow tools are not exposed to it.
 - The plan is handed off as structured text to the **executor** — a full
   tool-using `Agent` in its own session — which carries it out.
 - The sessions never mix, so neither model's prefix is disturbed by the other's
