@@ -3149,6 +3149,115 @@ func (a *App) SearchFileRefs(query string) []DirEntry {
 	return out
 }
 
+// codegraphDB is the relative path to the codegraph SQLite index inside a workspace.
+const codegraphDB = ".codegraph/codegraph.db"
+
+// GenerateWelcomePrompts reads the codegraph index (if present) in the active
+// workspace and produces three Chinese welcome prompts tailored to the project.
+// Returns a JSON array of 3 strings. Falls back to empty string on any error —
+// the frontend keeps its i18n fallback in that case.
+func (a *App) GenerateWelcomePrompts() string {
+	return a.GenerateWelcomePromptsForTab("")
+}
+
+// GenerateWelcomePromptsForTab is the tab-aware variant.
+func (a *App) GenerateWelcomePromptsForTab(tabID string) string {
+	a.mu.RLock()
+	tab := a.tabs[a.activeTabID]
+	if tabID != "" {
+		tab = a.tabs[tabID]
+	}
+	a.mu.RUnlock()
+
+	if tab == nil || tab.WorkspaceRoot == "" {
+		return ""
+	}
+
+	dbPath := filepath.Join(tab.WorkspaceRoot, codegraphDB)
+	if _, err := os.Stat(dbPath); err != nil {
+		return ""
+	}
+
+	// Query language distribution.
+	langs, err := cgQuery(dbPath, "SELECT language, COUNT(*) as cnt FROM files GROUP BY language ORDER BY cnt DESC LIMIT 5")
+	if err != nil {
+		return ""
+	}
+
+	// Query top exported symbols by kind.
+	topFuncs, _ := cgQuery(dbPath, "SELECT name FROM nodes WHERE kind='function' AND is_exported=1 ORDER BY length(docstring) DESC LIMIT 5")
+	topTypes, _ := cgQuery(dbPath, "SELECT name FROM nodes WHERE kind IN ('struct','interface','type_alias') AND is_exported=1 LIMIT 5")
+	routes, _ := cgQuery(dbPath, "SELECT name FROM nodes WHERE kind='route' LIMIT 5")
+
+	// Detect project characteristics.
+	langSet := make(map[string]bool)
+	for _, l := range langs {
+		langSet[strings.ToLower(l)] = true
+	}
+
+	prompts := generateChinesePrompts(langSet, topFuncs, topTypes, routes)
+	out, _ := json.Marshal(prompts)
+	return string(out)
+}
+
+// cgQuery runs a single-column query against the codegraph SQLite DB using the
+// sqlite3 CLI. Returns the column values. Errors silently return nil — the
+// caller falls back gracefully.
+func cgQuery(dbPath, query string) ([]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "sqlite3", "-noheader", "-csv", dbPath, query)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+	var results []string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			results = append(results, line)
+		}
+	}
+	return results, nil
+}
+
+// generateChinesePrompts builds three Chinese welcome prompts from codegraph data.
+func generateChinesePrompts(langs map[string]bool, topFuncs, topTypes, routes []string) []string {
+	// Prompt 1: architecture overview — always present.
+	p1 := "帮我梳理一下这个项目的整体架构"
+	if langs["go"] {
+		p1 = "帮我梳理一下这个 Go 项目的模块结构和依赖关系"
+	} else if langs["typescript"] || langs["tsx"] || langs["javascript"] {
+		p1 = "帮我梳理一下这个前端项目的组件结构和路由"
+	} else if langs["python"] {
+		p1 = "帮我梳理一下这个 Python 项目的包结构和入口点"
+	} else if langs["rust"] {
+		p1 = "帮我梳理一下这个 Rust 项目的 crate 结构"
+	}
+
+	// Prompt 2: pick the most useful "second question" based on data.
+	p2 := "帮我总结一下最近的 git 变更"
+	if len(routes) > 0 {
+		p2 = "帮我梳理一下项目的 API 路由和接口设计"
+	} else if len(topFuncs) > 0 {
+		p2 = fmt.Sprintf("帮我分析一下核心函数 %s 的实现逻辑", topFuncs[0])
+	} else if langs["go"] {
+		p2 = "帮我分析一下 cmd/ 和 internal/ 的职责划分"
+	}
+
+	// Prompt 3: dive into a specific area.
+	p3 := "帮我找一下项目的入口点和主要流程"
+	if len(topTypes) > 0 {
+		p3 = fmt.Sprintf("帮我分析一下 %s 等核心数据结构的设计", topTypes[0])
+	} else if len(topFuncs) > 1 {
+		p3 = fmt.Sprintf("帮我解释一下 %s 和 %s 之间的调用关系", topFuncs[0], topFuncs[1])
+	} else if langs["typescript"] || langs["tsx"] {
+		p3 = "帮我分析一下主要组件的 props 和状态管理"
+	}
+
+	return []string{p1, p2, p3}
+}
+
 // ReadFile returns a small text preview for a file under the current workspace.
 func (a *App) ReadFile(rel string) FilePreview {
 	out := FilePreview{Path: rel}
