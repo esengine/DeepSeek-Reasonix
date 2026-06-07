@@ -512,6 +512,7 @@ a[href] {
 }
 .sidebar__new {
   display: flex;
+  flex-shrink: 0;
   align-items: center;
   gap: 9px;
   height: 36px;
@@ -9491,6 +9492,7 @@ a[href] {
 
 .project-tree__search {
   display: flex;
+  flex-shrink: 0;
   align-items: center;
   gap: 8px;
   height: 34px;
@@ -9519,6 +9521,7 @@ a[href] {
 
 .project-tree__header {
   display: flex;
+  flex-shrink: 0;
   align-items: center;
   justify-content: space-between;
   gap: 6px;
