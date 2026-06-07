@@ -4222,7 +4222,7 @@ a[href] {
   margin: 0 10px 6px;
   padding: 4px 9px;
   font-size: 12.5px;
-  color: var(--fg-muted);
+  color: var(--fg-faint);
   border-radius: 6px;
   background: var(--bg);
 }
@@ -6958,7 +6958,7 @@ a[href] {
   border: 1px solid var(--border-soft);
   border-radius: 999px;
   background: var(--bg-elev-2);
-  color: var(--fg-muted);
+  color: var(--fg-dim);
   font-family: var(--mono);
   font-size: var(--text-2xs);
   line-height: 1;
@@ -7598,7 +7598,7 @@ a[href] {
   min-height: 64px;
 }
 .provider-readonly-field--stacked span {
-  color: var(--fg-muted);
+  color: var(--fg-faint);
   font-size: var(--font-control-small);
   font-weight: 500;
   line-height: 1.35;
@@ -7616,7 +7616,7 @@ a[href] {
   gap: 8px 10px;
 }
 .provider-model-fetch-row span {
-  color: var(--fg-muted);
+  color: var(--fg-faint);
   font-size: var(--font-control-small);
   line-height: 1.4;
 }
@@ -8784,7 +8784,7 @@ a[href] {
   gap: 4px;
   padding: 4px 10px;
   font-size: 11px;
-  color: var(--fg-muted);
+  color: var(--fg-dim);
   background: transparent;
   border: none;
   border-bottom: 2px solid transparent;
