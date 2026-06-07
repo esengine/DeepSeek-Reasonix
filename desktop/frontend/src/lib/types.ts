@@ -323,6 +323,7 @@ export interface WorkspaceChangesView {
   gitAvailable: boolean;
   gitErr?: string;
   gitBranch?: string;
+  gitBranch?: string;
 }
 
 export interface GitCommitView {
@@ -335,6 +336,7 @@ export interface GitCommitView {
 export interface GitCommitDetailView {
   diff?: string;
   files?: string[];
+}
 }
 
 export interface ComposerInsertRequest {

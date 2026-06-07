@@ -788,6 +788,37 @@ func TestWorkspaceChangesGitStatusFromRepoSubdirectory(t *testing.T) {
 	}
 }
 
+func TestWorkspaceChangesGitBranchDetachedHead(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	orig, _ := os.Getwd()
+	defer os.Chdir(orig)
+
+	dir := t.TempDir()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, "init")
+	runGit(t, "config", "user.email", "test@example.com")
+	runGit(t, "config", "user.name", "Test User")
+	if err := os.WriteFile("tracked.txt", []byte("v1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, "add", "tracked.txt")
+	runGit(t, "commit", "-m", "init")
+	short := gitOutput(t, "rev-parse", "--short", "HEAD")
+	runGit(t, "checkout", "--detach", "HEAD")
+
+	got := (&App{}).WorkspaceChanges()
+	if !got.GitAvailable {
+		t.Fatalf("git unavailable: %s", got.GitErr)
+	}
+	if got.GitBranch != "@"+short {
+		t.Fatalf("git branch = %q, want @%s", got.GitBranch, short)
+	}
+}
+
 func TestWorkspaceChangesUntrackedDirectoryListsFiles(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")

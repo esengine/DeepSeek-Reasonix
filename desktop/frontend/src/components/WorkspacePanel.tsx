@@ -1003,6 +1003,13 @@ export function WorkspacePanel({
           </div>
         )}
 
+        {viewMode === "changed" && changes?.gitBranch && (
+          <div className="workspace-branch-indicator">
+            <GitBranch size={13} />
+            <span>{changes.gitBranch}</span>
+          </div>
+        )}
+
         <div className="workspace-search">
           <Search size={14} />
           <input ref={filterRef} value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={searchPlaceholder} />

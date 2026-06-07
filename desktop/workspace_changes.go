@@ -153,6 +153,33 @@ func parseGitStatusPorcelainZ(raw []byte) []gitStatusEntry {
 	return out
 }
 
+// workspaceGitBranch returns the current git branch name for the repo rooted
+// at base, or an empty string when base is not inside a git repository or when
+// git is unavailable.
+func workspaceGitBranch(base string) string {
+	cmd := exec.Command("git", "-C", base, "branch", "--show-current")
+	proc.HideWindowDetached(cmd)
+	raw, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	if branch := strings.TrimSpace(string(raw)); branch != "" {
+		return branch
+	}
+
+	headCmd := exec.Command("git", "-C", base, "rev-parse", "--short", "HEAD")
+	proc.HideWindowDetached(headCmd)
+	raw, err = headCmd.Output()
+	if err != nil {
+		return ""
+	}
+	short := strings.TrimSpace(string(raw))
+	if short == "" {
+		return ""
+	}
+	return "@" + short
+}
+
 func normalizeWorkspaceRelPath(base, path string) string {
 	path = strings.TrimSpace(path)
 	if path == "" {
