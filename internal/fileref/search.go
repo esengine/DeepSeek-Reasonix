@@ -8,6 +8,7 @@ import (
 )
 
 var skipDirs = map[string]bool{
+	".codegraph":   true,
 	".git":         true,
 	"node_modules": true,
 	"dist":         true,

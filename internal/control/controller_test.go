@@ -29,6 +29,15 @@ func (r appendingRunner) Run(_ context.Context, input string) error {
 	return nil
 }
 
+type handoffRunner struct {
+	session *agent.Session
+}
+
+func (r handoffRunner) Run(_ context.Context, input string) error {
+	r.session.Add(provider.Message{Role: provider.RoleUser, Content: "handoff: " + input})
+	return nil
+}
+
 type fakeControlTool struct{ name string }
 
 func (t fakeControlTool) Name() string { return t.name }
@@ -74,6 +83,28 @@ func TestRunTurnSnapshotsActivityWhenTranscriptChanges(t *testing.T) {
 	}
 	if meta.UpdatedAt.IsZero() {
 		t.Fatal("activity meta should be marked")
+	}
+}
+
+func TestRunTurnRecordsDisplayForPersistedUserMessage(t *testing.T) {
+	sess := agent.NewSession("sys")
+	exec := agent.New(nil, nil, sess, agent.Options{}, event.Discard)
+	c := New(Options{Runner: handoffRunner{session: sess}, Executor: exec})
+	var gotContent, gotDisplay string
+	c.SetDisplayRecorder(func(content, display string) {
+		gotContent = content
+		gotDisplay = display
+	})
+
+	if err := c.runTurnWithRawDisplay(context.Background(), "expanded prompt", "raw prompt", "visible prompt"); err != nil {
+		t.Fatal(err)
+	}
+
+	if gotContent != "handoff: expanded prompt" {
+		t.Fatalf("display recorded against %q, want persisted user message", gotContent)
+	}
+	if gotDisplay != "visible prompt" {
+		t.Fatalf("display = %q, want visible prompt", gotDisplay)
 	}
 }
 

@@ -17,6 +17,7 @@ import {
   type ThemeStyle,
 } from "../lib/theme";
 import { TEXT_SIZES, applyTextSize, getTextSize, type TextSize } from "../lib/textSize";
+import { FONT_FAMILIES, applyFontFamily, getFontFamily, type FontFamily } from "../lib/fontFamily";
 import type { NetworkView, ProviderView, SettingsView } from "../lib/types";
 import { InlineConfirmButton } from "./InlineConfirmButton";
 import { ResizableDrawer } from "./ResizableDrawer";
@@ -38,6 +39,7 @@ export function SettingsPanel({ onClose, onChanged }: { onClose: () => void; onC
   const [theme, setThemeState] = useState<Theme>(getTheme());
   const [themeStyle, setThemeStyleState] = useState<ThemeStyle>(() => getThemeStyle(getTheme()));
   const [textSize, setTextSizeState] = useState<TextSize>(getTextSize());
+  const [fontFamily, setFontFamilyState] = useState<FontFamily>(getFontFamily());
   const [tab, setTab] = useState<SettingsTab>("general");
 
   const reload = async () => setS(normalizeSettingsView(await app.Settings().catch(() => null)));
@@ -109,6 +111,7 @@ export function SettingsPanel({ onClose, onChanged }: { onClose: () => void; onC
                     theme={theme}
                     themeStyle={themeStyle}
                     textSize={textSize}
+                    fontFamily={fontFamily}
                     onTheme={(t) => {
                       const nextStyle = themeForStyle(themeStyle) === getResolvedTheme(t) ? themeStyle : defaultStyleForTheme(t);
                       applyTheme(t, nextStyle, { persist: false });
@@ -126,6 +129,10 @@ export function SettingsPanel({ onClose, onChanged }: { onClose: () => void; onC
                     onTextSize={(size) => {
                       applyTextSize(size);
                       setTextSizeState(size);
+                    }}
+                    onFontFamily={(font) => {
+                      applyFontFamily(font);
+                      setFontFamilyState(font);
                     }}
                   />
                 )}
@@ -1008,16 +1015,20 @@ function AppearanceSection({
   theme,
   themeStyle,
   textSize,
+  fontFamily,
   onTheme,
   onThemeStyle,
   onTextSize,
+  onFontFamily,
 }: {
   theme: Theme;
   themeStyle: ThemeStyle;
   textSize: TextSize;
+  fontFamily: FontFamily;
   onTheme: (t: Theme) => void;
   onThemeStyle: (style: ThemeStyle) => void;
   onTextSize: (size: TextSize) => void;
+  onFontFamily: (font: FontFamily) => void;
 }) {
   const t = useT();
   const themeOptions: Theme[] = ["auto", "light", "dark"];
@@ -1067,6 +1078,20 @@ function AppearanceSection({
           ))}
         </div>
       </div>
+      <div className="set-row">
+        <label className="set-label">{t("settings.fontFamily")}</label>
+        <div className="set-seg">
+          {FONT_FAMILIES.map((font) => (
+            <button
+              key={font}
+              className={`set-seg__btn${fontFamily === font ? " set-seg__btn--on" : ""}`}
+              onClick={() => onFontFamily(font)}
+            >
+              {fontFamilyName(font, t)}
+            </button>
+          ))}
+        </div>
+      </div>
     </section>
   );
 }
@@ -1092,6 +1117,19 @@ function textSizeName(size: TextSize, t: ReturnType<typeof useT>): string {
       return t("settings.textSizeLarge");
     case "xlarge":
       return t("settings.textSizeXLarge");
+  }
+}
+
+function fontFamilyName(font: FontFamily, t: ReturnType<typeof useT>): string {
+  switch (font) {
+    case "system":
+      return t("settings.fontFamilySystem");
+    case "yahei":
+      return t("settings.fontFamilyYaHei");
+    case "pingfang":
+      return t("settings.fontFamilyPingFang");
+    case "noto":
+      return t("settings.fontFamilyNoto");
   }
 }
 
