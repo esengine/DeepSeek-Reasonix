@@ -48,6 +48,7 @@ func (m *chatTUI) stopLoop() {
 	m.loopPrompt = ""
 	m.loopInterval = 0
 	m.loopIter = 0
+	m.loopTickStart = time.Time{}
 }
 
 // showLoopStatus prints the current /loop state.
