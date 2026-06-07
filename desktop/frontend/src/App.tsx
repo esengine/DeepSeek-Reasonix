@@ -36,7 +36,6 @@ import { WorkspacePanel } from "./components/WorkspacePanel";
 import { Tooltip } from "./components/Tooltip";
 import { StartupSplash, shouldShowStartupSplash } from "./components/StartupSplash";
 import { OnboardingOverlay } from "./components/OnboardingOverlay";
-import { TabBar } from "./components/TabBar";
 import { ProjectTree } from "./components/ProjectTree";
 import { CopyButton } from "./components/CopyButton";
 import { CommandPalette, type PaletteItem } from "./components/CommandPalette";
@@ -385,19 +384,19 @@ export default function App() {
     rewind,
     setModel,
     setEffort,
-    switchTab,
+    fetchMemory,
+    remember,
+    forget,
+    saveDoc,
     openProjectTab,
     openGlobalTab,
-    closeTab,
-    reorderTabs,
     syncActiveTab,
   } = useController();
   const { locale, setPref: setLocalePref } = useI18n();
   const t = useT();
   const [modesByTab, setModesByTab] = useState<Record<string, Mode>>({});
   const [tabMetas, setTabMetas] = useState<TabMeta[]>([]);
-  const [tabOrderIds, setTabOrderIds] = useState<string[]>([]);
-  const [tabRevealSignal, setTabRevealSignal] = useState(0);
+
   const [startupSplashVisible, setStartupSplashVisible] = useState<boolean>(() => shouldShowStartupSplash());
   // null until the mount probe resolves; true shows the overlay. Probed once —
   // clearing the key mid-session is the Settings panel's job, not the gate's.
@@ -526,29 +525,6 @@ export default function App() {
   );
   const topicbarEditing = Boolean(activeTab?.topicId && activeTab.topicId === renamingTopicId);
   const topicbarProjectPrefix = activeTab ? tabWorkspaceTitle(activeTab) : "";
-  const visibleTabId = activeTabId;
-  const visibleTabs = useMemo(() => {
-    const byId = new Map(tabMetas.map((tab) => [tab.id, tab]));
-    const ordered = tabOrderIds.map((id) => byId.get(id)).filter((tab): tab is TabMeta => Boolean(tab));
-    const missing = tabMetas.filter((tab) => !tabOrderIds.includes(tab.id));
-    return [...ordered, ...missing].map((tab) => ({
-      ...tab,
-      mode: modesByTab[tab.id] ?? normalizeModeValue(tab.mode),
-      active: tab.id === visibleTabId,
-    }));
-  }, [modesByTab, tabMetas, tabOrderIds, visibleTabId]);
-
-  useEffect(() => {
-    const ids = tabMetas.map((tab) => tab.id);
-    setTabOrderIds((current) => {
-      const next = current.filter((id) => ids.includes(id));
-      for (const id of ids) {
-        if (!next.includes(id)) next.push(id);
-      }
-      return next.join("\u0000") === current.join("\u0000") ? current : next;
-    });
-  }, [tabMetas]);
-
   useEffect(() => {
     const ids = new Set(tabMetas.map((tab) => tab.id));
     setModesByTab((current) => {
@@ -1033,93 +1009,12 @@ export default function App() {
     setComposerInsertRequest({ id: Date.now(), text });
   }, []);
 
-  const handleTabChange = useCallback(async (id: string) => {
-    await switchTab(id);
-    await refreshTabMetas();
-    setTabRevealSignal((signal) => signal + 1);
-  }, [refreshTabMetas, switchTab]);
-
-  const handleTabClose = useCallback(async (id: string) => {
-    setModesByTab((current) => {
-      if (!(id in current)) return current;
-      const next = { ...current };
-      delete next[id];
-      return next;
-    });
-    setTabMetas((current) => {
-      if (current.length <= 1) return current;
-      const closingIndex = current.findIndex((tab) => tab.id === id);
-      if (closingIndex < 0) return current;
-      const closingTab = current[closingIndex];
-      const remaining = current.filter((tab) => tab.id !== id);
-      if (!closingTab.active && closingTab.id !== activeTabId) return remaining;
-      const nextIndex = Math.min(closingIndex, remaining.length - 1);
-      const nextActiveId = remaining[nextIndex]?.id;
-      return remaining.map((tab) => ({ ...tab, active: tab.id === nextActiveId }));
-    });
-    await closeTab(id);
-    await refreshTabMetas();
-    setTabRevealSignal((signal) => signal + 1);
-  }, [activeTabId, closeTab, refreshTabMetas]);
-
-  const handleTabsClose = useCallback(async (ids: string[], nextActiveTabId?: string) => {
-    const currentIds = tabMetas.map((tab) => tab.id);
-    const targets = ids.filter((id, index) => currentIds.includes(id) && ids.indexOf(id) === index);
-    if (targets.length === 0) return;
-    for (const id of targets) {
-      await closeTab(id);
-    }
-    if (nextActiveTabId && currentIds.includes(nextActiveTabId)) {
-      await switchTab(nextActiveTabId);
-    }
-    await refreshTabMetas();
-    setTabRevealSignal((signal) => signal + 1);
-  }, [closeTab, refreshTabMetas, switchTab, tabMetas]);
-
-  const handleTabsReorder = useCallback(async (ids: string[]) => {
-    setTabOrderIds(ids);
-    setTabMetas((current) => {
-      const byId = new Map(current.map((tab) => [tab.id, tab]));
-      const ordered = ids.map((id) => byId.get(id)).filter((tab): tab is TabMeta => Boolean(tab));
-      return ordered.length === current.length ? ordered : current;
-    });
-    await reorderTabs(ids);
-    await refreshTabMetas();
-    setTabRevealSignal((signal) => signal + 1);
-  }, [refreshTabMetas, reorderTabs]);
-
-  const handleNewTab = useCallback(async () => {
-    const activeWorkspaceRoot = activeTab?.workspaceRoot || state.meta?.cwd || "";
-    const targetScope = activeTab?.scope === "global" || !activeWorkspaceRoot ? "global" : "project";
-    const workspaceRoot = targetScope === "project" ? activeWorkspaceRoot : "";
-    const topic = await app.CreateTopic(targetScope, workspaceRoot, "");
-    if (targetScope === "global" || !workspaceRoot) {
-      await openGlobalTab(topic.id);
-    } else {
-      await openProjectTab(workspaceRoot, topic.id);
-    }
-    setProjectRevision((value) => value + 1);
-    await refreshTabMetas();
-    setTabRevealSignal((signal) => signal + 1);
-  }, [activeTab?.scope, activeTab?.workspaceRoot, openGlobalTab, openProjectTab, refreshTabMetas, state.meta?.cwd]);
-
-  // ── Command palette (⌘K) ────────────────────────────────────────────
-  useEffect(() => {
-    const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey || event.key.toLowerCase() !== "k") return;
-      event.preventDefault();
-      setPaletteOpen((open) => !open);
-    };
-    window.addEventListener("keydown", onKeyDown, { capture: true });
-    return () => window.removeEventListener("keydown", onKeyDown, { capture: true });
-  }, []);
 
   const handleMessageAction = useCallback(async (turn: number, scope: string) => {
     await rewind(turn, scope);
     if (scope === "fork") {
       await refreshTabMetas();
       setProjectRevision((value) => value + 1);
-      setTabRevealSignal((signal) => signal + 1);
       return;
     }
     if (scope === "code" || scope === "both") {
@@ -1135,7 +1030,6 @@ export default function App() {
       await openProjectTab(workspaceRoot, topicId);
     }
     await refreshTabMetas();
-    setTabRevealSignal((signal) => signal + 1);
   }, [openGlobalTab, openProjectTab, refreshTabMetas]);
 
   // History drawer: project menus can open a scoped saved-session list. Idle row
@@ -1214,7 +1108,6 @@ export default function App() {
       await resumeSession(session.path, targetTab?.id);
       if (targetTab) {
         await refreshTabMetas();
-        setTabRevealSignal((signal) => signal + 1);
       }
     },
     [openGlobalTab, openProjectTab, refreshTabMetas, state.running, resumeSession],
@@ -1477,38 +1370,6 @@ export default function App() {
         />
 
         <section className="chat-pane">
-          <header className="workspace-tabs-bar">
-            <TabBar
-              tabs={visibleTabs}
-              activeTabId={visibleTabId}
-              revealActiveSignal={tabRevealSignal}
-              onTabChange={(id) => void handleTabChange(id)}
-              onTabClose={(id) => void handleTabClose(id)}
-              onTabsClose={(ids, nextActiveTabId) => void handleTabsClose(ids, nextActiveTabId)}
-              onTabsReorder={(ids) => void handleTabsReorder(ids)}
-              onNewTab={() => void handleNewTab()}
-            />
-            {!workspacePanelMaximized && (
-              <Tooltip
-                label={workspacePanelRenderable ? t("rightDock.collapse") : t("rightDock.expand")}
-                className={[
-                  "workspace-dock-toggle",
-                  workspacePanelRenderable ? "workspace-dock-toggle--open" : "workspace-dock-toggle--closed",
-                ].join(" ")}
-              >
-                <button
-                  className="workspace-dock-toggle__button"
-                  type="button"
-                  onClick={workspacePanelRenderable ? closeWorkspacePanel : () => openWorkspacePanel("files")}
-                  aria-label={workspacePanelRenderable ? t("rightDock.collapse") : t("rightDock.expand")}
-                  aria-pressed={workspacePanelRenderable}
-                >
-                  {workspacePanelRenderable ? <PanelRightClose size={15} /> : <PanelRightOpen size={15} />}
-                </button>
-              </Tooltip>
-            )}
-          </header>
-
           <>
           <header className="topicbar">
             <div className="topicbar__identity">
@@ -1587,6 +1448,19 @@ export default function App() {
                   </div>
                 )}
               </div>
+              {!workspacePanelMaximized && (
+                <Tooltip label={workspacePanelRenderable ? t("rightDock.collapse") : t("rightDock.expand")}>
+                  <button
+                    className="topicbar__action-btn topicbar__action-btn--icon"
+                    type="button"
+                    onClick={workspacePanelRenderable ? closeWorkspacePanel : () => openWorkspacePanel("files")}
+                    aria-label={workspacePanelRenderable ? t("rightDock.collapse") : t("rightDock.expand")}
+                    aria-pressed={workspacePanelRenderable}
+                  >
+                    {workspacePanelRenderable ? <PanelRightClose size={15} /> : <PanelRightOpen size={15} />}
+                  </button>
+                </Tooltip>
+              )}
             </div>
           </header>
 
