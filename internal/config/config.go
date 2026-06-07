@@ -39,22 +39,23 @@ func SkillNameKey(name string) string {
 
 // Config is Reasonix's runtime configuration.
 type Config struct {
-	ConfigVersion int               `toml:"config_version"`
-	DefaultModel  string            `toml:"default_model"`
-	Language      string            `toml:"language"` // ui/model language tag (e.g. "zh"); empty = auto-detect from $LANG / $REASONIX_LANG
-	UI            UIConfig          `toml:"ui"`
-	Desktop       DesktopConfig     `toml:"desktop"`
-	Agent         AgentConfig       `toml:"agent"`
-	Providers     []ProviderEntry   `toml:"providers"`
-	Tools         ToolsConfig       `toml:"tools"`
-	Permissions   PermissionsConfig `toml:"permissions"`
-	Sandbox       SandboxConfig     `toml:"sandbox"`
-	Network       NetworkConfig     `toml:"network"`
-	Plugins       []PluginEntry     `toml:"plugins"`
-	Skills        SkillsConfig      `toml:"skills"`
-	Codegraph     CodegraphConfig   `toml:"codegraph"`
-	Statusline    StatuslineConfig  `toml:"statusline"`
-	LSP           LSPConfig         `toml:"lsp"`
+	ConfigVersion int                 `toml:"config_version"`
+	DefaultModel  string              `toml:"default_model"`
+	Language      string              `toml:"language"` // ui/model language tag (e.g. "zh"); empty = auto-detect from $LANG / $REASONIX_LANG
+	UI            UIConfig            `toml:"ui"`
+	Desktop       DesktopConfig       `toml:"desktop"`
+	Notifications NotificationsConfig `toml:"notifications"`
+	Agent         AgentConfig         `toml:"agent"`
+	Providers     []ProviderEntry     `toml:"providers"`
+	Tools         ToolsConfig         `toml:"tools"`
+	Permissions   PermissionsConfig   `toml:"permissions"`
+	Sandbox       SandboxConfig       `toml:"sandbox"`
+	Network       NetworkConfig       `toml:"network"`
+	Plugins       []PluginEntry       `toml:"plugins"`
+	Skills        SkillsConfig        `toml:"skills"`
+	Codegraph     CodegraphConfig     `toml:"codegraph"`
+	Statusline    StatuslineConfig    `toml:"statusline"`
+	LSP           LSPConfig           `toml:"lsp"`
 }
 
 // UIConfig controls CLI presentation-only settings. Desktop appearance is kept in
@@ -73,6 +74,14 @@ type DesktopConfig struct {
 	Theme         string `toml:"theme"`          // auto|dark|light; empty resolves to dark
 	ThemeStyle    string `toml:"theme_style"`    // graphite|ember|aurora|midnight|sandstone|porcelain|linen|glacier
 	CloseBehavior string `toml:"close_behavior"` // quit|background; desktop window close behavior
+}
+
+// NotificationsConfig controls optional system notifications for CLI chat/run.
+type NotificationsConfig struct {
+	Enabled         bool `toml:"enabled"`
+	TurnDone        bool `toml:"turn_done"`
+	ApprovalRequest bool `toml:"approval_request"`
+	AskRequest      bool `toml:"ask_request"`
 }
 
 // UITheme normalizes ui.theme to a supported value.
@@ -296,6 +305,7 @@ func (c *Config) NetworkProxyMode() string {
 type SkillsConfig struct {
 	Paths          []string `toml:"paths"`
 	DisabledSkills []string `toml:"disabled_skills"`
+	MaxDepth       int      `toml:"max_depth"`
 }
 
 // SkillCustomPaths returns the configured custom skill roots with ${VAR}
@@ -308,6 +318,25 @@ func (c *Config) SkillCustomPaths() []string {
 		}
 	}
 	return out
+}
+
+// SkillMaxDepth bounds nested skill discovery. Depth 3 favors bundled skill
+// packs while Store keeps nested markdown safe by requiring descriptions.
+func (c *Config) SkillMaxDepth() int {
+	const (
+		defaultDepth = 3
+		maxDepth     = 5
+	)
+	if c == nil || c.Skills.MaxDepth == 0 {
+		return defaultDepth
+	}
+	if c.Skills.MaxDepth < 1 {
+		return 1
+	}
+	if c.Skills.MaxDepth > maxDepth {
+		return maxDepth
+	}
+	return c.Skills.MaxDepth
 }
 
 // DisabledSkillNames returns valid disabled skill identifiers, preserving the
@@ -419,6 +448,8 @@ type AgentConfig struct {
 	PlannerModel     string            `toml:"planner_model"`
 	SubagentModel    string            `toml:"subagent_model"`
 	SubagentModels   map[string]string `toml:"subagent_models"`
+	SubagentEffort   string            `toml:"subagent_effort"`
+	SubagentEfforts  map[string]string `toml:"subagent_efforts"`
 	// OutputStyle selects a persona/tone block folded into the system prompt at
 	// startup (a built-in like "explanatory"/"learning"/"concise", or a custom
 	// .reasonix/output-styles/<name>.md). Empty = the unmodified prompt.
@@ -557,10 +588,11 @@ type PluginEntry struct {
 	//                  servers whose tools the system prompt depends on.
 	//   "lazy"       — registers placeholder tools immediately (from on-disk
 	//                  schema cache when available) and only spawns the real
-	//                  subprocess on first model use. Default for user plugins.
+	//                  subprocess on first model use. Kept for legacy configs.
 	//   "background" — placeholder + spawn fired at boot but not waited on;
 	//                  swap happens once the spawn finishes.
-	// Empty defaults to "lazy" so adding a plugin never slows the next launch.
+	// Empty defaults to "background" so enabled MCPs connect automatically
+	// without blocking chat. Unknown non-empty values fall back to "lazy".
 	Tier string `toml:"tier"`
 }
 
@@ -580,6 +612,8 @@ func resolvedMCPTier(tier string) string {
 	case "eager":
 		return "eager"
 	case "background":
+		return "background"
+	case "":
 		return "background"
 	default:
 		return "lazy"
@@ -626,6 +660,12 @@ func Default() *Config {
 		ConfigVersion: 2,
 		DefaultModel:  "deepseek-flash",
 		UI:            UIConfig{Theme: "auto"},
+		Notifications: NotificationsConfig{
+			Enabled:         false,
+			TurnDone:        true,
+			ApprovalRequest: true,
+			AskRequest:      true,
+		},
 		Agent: AgentConfig{
 			SystemPrompt: DefaultSystemPrompt,
 			// 0 = no step cap: the agent loops until the model gives a final answer,
@@ -697,6 +737,9 @@ func LoadForRoot(root string) (*Config, error) {
 	for _, path := range tomlSources {
 		if _, err := os.Stat(path); err == nil {
 			sawConfigFile = true
+			if err := migrateLegacyMCPTiersFile(path); err != nil {
+				slog.Warn("config: legacy mcp tier migration failed", "path", path, "err", err)
+			}
 		}
 		if err := mergeFile(cfg, path); err != nil {
 			return nil, err
@@ -730,6 +773,7 @@ func LoadForRoot(root string) (*Config, error) {
 	cfg.mergeMCPJSON(loadLegacyMCP(legacyConfigPath()))
 	normalizePluginCommandLines(cfg)
 	normalizeLegacyEffort(cfg)
+	normalizeLegacyMCPTiers(cfg)
 	normalizeEffortConfig(cfg)
 	backfillDeepSeekPro(cfg)
 	// First run (no config file anywhere): keep CodeGraph off until the user opts
@@ -829,11 +873,17 @@ func mergeTOMLPlugins(paths []string) ([]PluginEntry, error) {
 func LoadForEdit(path string) *Config {
 	loadDotEnv()
 	cfg := Default()
+	if _, err := os.Stat(path); err == nil {
+		if err := migrateLegacyMCPTiersFile(path); err != nil {
+			slog.Warn("config: legacy mcp tier migration failed", "path", path, "err", err)
+		}
+	}
 	if err := mergeFile(cfg, path); err != nil {
 		slog.Warn("config: load for edit failed, using defaults", "path", path, "err", err)
 	}
 	normalizePluginCommandLines(cfg)
 	normalizeLegacyEffort(cfg)
+	normalizeLegacyMCPTiers(cfg)
 	normalizeEffortConfig(cfg)
 	return cfg
 }
@@ -847,6 +897,80 @@ func mergeFile(cfg *Config, path string) error {
 		return fmt.Errorf("config %s: %w", path, err)
 	}
 	return nil
+}
+
+// normalizeLegacyMCPTiers keeps loaded legacy config files on the new product
+// behavior: enabled MCP servers connect in the background by default, and the
+// retired per-server startup tier is no longer a user-facing setting.
+func normalizeLegacyMCPTiers(c *Config) {
+	if c == nil {
+		return
+	}
+	c.Codegraph.Tier = ""
+	for i := range c.Plugins {
+		c.Plugins[i].Tier = ""
+	}
+}
+
+func migrateLegacyMCPTiersFile(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	next, changed := stripLegacyMCPTierLines(string(raw))
+	if !changed {
+		return nil
+	}
+	return os.WriteFile(path, []byte(next), info.Mode().Perm())
+}
+
+func stripLegacyMCPTierLines(raw string) (string, bool) {
+	lines := strings.Split(raw, "\n")
+	section := ""
+	changed := false
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if header := tomlSectionHeader(line); header != "" {
+			section = header
+		}
+		if (section == "codegraph" || section == "plugins") && isTOMLKeyAssignment(line, "tier") {
+			changed = true
+			continue
+		}
+		out = append(out, line)
+	}
+	return strings.Join(out, "\n"), changed
+}
+
+func tomlSectionHeader(line string) string {
+	trimmed := strings.TrimSpace(line)
+	if !strings.HasPrefix(trimmed, "[") {
+		return ""
+	}
+	if i := strings.Index(trimmed, "#"); i >= 0 {
+		trimmed = strings.TrimSpace(trimmed[:i])
+	}
+	switch trimmed {
+	case "[codegraph]":
+		return "codegraph"
+	case "[[plugins]]":
+		return "plugins"
+	default:
+		return "other"
+	}
+}
+
+func isTOMLKeyAssignment(line, key string) bool {
+	trimmed := strings.TrimSpace(line)
+	if strings.HasPrefix(trimmed, "#") || !strings.HasPrefix(trimmed, key) {
+		return false
+	}
+	rest := strings.TrimSpace(strings.TrimPrefix(trimmed, key))
+	return strings.HasPrefix(rest, "=")
 }
 
 func userConfigPath() string {

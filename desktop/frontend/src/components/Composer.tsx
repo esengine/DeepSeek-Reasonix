@@ -45,6 +45,10 @@ type PastedBlock = {
   text: string;
 };
 
+type WebkitFileEntry = {
+  isDirectory?: boolean;
+};
+
 function lineCount(s: string): number {
   if (s === "") return 0;
   return s.split(/\r\n|\r|\n/).length;
@@ -186,6 +190,13 @@ export function Composer({
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
   const [workspaceQuery, setWorkspaceQuery] = useState("");
   const [workspaces, setWorkspaces] = useState<WorkspaceView[]>([]);
+  // Two-click delete: the first click on the trash icon moves the row into a
+  // "Confirm?" state and shows a real label ("Delete?") on the icon; the
+  // second click (within ~3s) actually fires the removal. A click anywhere
+  // else, Escape, or a workspace switch resets the row. We keep the existing
+  // server-side RemoveWorkspace as the actual delete so the projects file
+  // stays the single source of truth — this is purely a confirmation gate.
+  const [confirmRemovePath, setConfirmRemovePath] = useState<string | null>(null);
   const [composerHeight, setComposerHeight] = useState<number | null>(loadComposerHeight);
   const [composerResizing, setComposerResizing] = useState(false);
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -566,6 +577,40 @@ export function Composer({
   const hasFileDrag = (dataTransfer: DataTransfer): boolean =>
     Array.from(dataTransfer.items).some((it) => it.kind === "file") || dataTransfer.files.length > 0;
 
+  const fileDragItems = (dataTransfer: DataTransfer): DataTransferItem[] =>
+    Array.from(dataTransfer.items).filter((item) => item.kind === "file");
+
+  const getWebkitFileEntry = (item: DataTransferItem): WebkitFileEntry | null => {
+    const getAsEntry = (item as DataTransferItem & { webkitGetAsEntry?: () => WebkitFileEntry | null }).webkitGetAsEntry;
+    return typeof getAsEntry === "function" ? getAsEntry.call(item) : null;
+  };
+
+  const hasPathlessFileDrop = (dataTransfer: DataTransfer): boolean => {
+    const items = fileDragItems(dataTransfer);
+    if (items.length === 0) return dataTransfer.files.length > 0;
+    return items.some((item) => getWebkitFileEntry(item) === null);
+  };
+
+  const clearWailsDropTarget = () => {
+    document.querySelectorAll(".wails-drop-target-active").forEach((el) => el.classList.remove("wails-drop-target-active"));
+  };
+
+  const stopNativeFileDrop = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.nativeEvent.stopImmediatePropagation();
+    clearWailsDropTarget();
+  };
+
+  const onFileDropCapture = (e: DragEvent<HTMLDivElement>) => {
+    if (hasWorkspaceReferenceDrag(e.dataTransfer) || !hasFileDrag(e.dataTransfer) || !hasPathlessFileDrop(e.dataTransfer)) return;
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length === 0) return;
+    stopNativeFileDrop(e);
+    setDragOver(false);
+    attachFiles(files);
+  };
+
   const onDrop = (e: DragEvent<HTMLDivElement>) => {
     const droppedWorkspaceRef = readWorkspaceReferenceDrag(e.dataTransfer);
     if (droppedWorkspaceRef) {
@@ -657,7 +702,22 @@ export function Composer({
   const removeWorkspace = async (path: string) => {
     await onRemoveWorkspace(path);
     setWorkspaces((prev) => prev.filter((w) => w.path !== path));
+    setConfirmRemovePath(null);
   };
+
+  // First click on the trash icon arms the confirmation; second click fires.
+  // We reset the armed state after a short idle window so the user doesn't
+  // accidentally delete a workspace they walked past 30s ago.
+  useEffect(() => {
+    if (!confirmRemovePath) return;
+    const id = window.setTimeout(() => setConfirmRemovePath(null), 3000);
+    return () => window.clearTimeout(id);
+  }, [confirmRemovePath]);
+
+  // Escape / menu close / workspace switch all clear the armed delete.
+  useEffect(() => {
+    if (!workspaceMenuOpen) setConfirmRemovePath(null);
+  }, [workspaceMenuOpen]);
 
   useEffect(() => {
     const onResize = () => setComposerHeight((height) => (height === null ? null : clampComposerHeight(height)));
@@ -804,6 +864,7 @@ export function Composer({
     <div
       className={`composer-wrap${decisionPending ? " composer-wrap--decision-pending" : ""}`}
       style={{ "--wails-drop-target": "drop" } as CSSProperties}
+      onDropCapture={onFileDropCapture}
     >
       <AnchoredPopover
         open={workspaceMenuOpen && !!cwd}
@@ -842,24 +903,35 @@ export function Composer({
                   {w.current && <Check size={15} />}
                 </button>
                 <button
-                  className="workspace-switcher__remove"
+                  className={`workspace-switcher__remove${confirmRemovePath === w.path ? " workspace-switcher__remove--armed" : ""}${w.current ? " workspace-switcher__remove--current" : ""}`}
                   type="button"
-                  aria-label={t("composer.removeProject")}
-                  title={t("composer.removeProject")}
-                  disabled={running}
+                  aria-label={confirmRemovePath === w.path ? t("composer.confirmRemoveProject") : t("composer.removeProject")}
+                  title={
+                    w.current
+                      ? t("composer.cannotRemoveCurrent")
+                      : confirmRemovePath === w.path
+                        ? t("composer.confirmRemoveProject")
+                        : t("composer.removeProject")
+                  }
+                  disabled={running || w.current}
                   onClick={(event) => {
                     event.stopPropagation();
-                    void removeWorkspace(w.path);
+                    if (w.current) return;
+                    if (confirmRemovePath === w.path) {
+                      void removeWorkspace(w.path);
+                    } else {
+                      setConfirmRemovePath(w.path);
+                    }
                   }}
                 >
-                  <Trash2 size={14} />
+                  {confirmRemovePath === w.path ? <Check size={14} /> : <Trash2 size={14} />}
                 </button>
               </div>
             ))}
             {filteredWorkspaces.length === 0 && <div className="workspace-switcher__empty">{t("composer.noProjectMatches")}</div>}
           </div>
           <div className="workspace-switcher__actions">
-            <button onClick={() => void chooseWorkspace()}>
+            <button type="button" onClick={() => void chooseWorkspace()}>
               <FolderPlus size={15} />
               <span>{t("composer.addProject")}</span>
             </button>

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"bytes"
 	"errors"
 	"io"
@@ -11,6 +12,9 @@ import (
 	"testing"
 
 	"reasonix/internal/config"
+	"reasonix/internal/event"
+	"reasonix/internal/i18n"
+	"reasonix/internal/notify"
 	"reasonix/internal/provider"
 )
 
@@ -90,6 +94,20 @@ func TestMetadataCommandsDoNotProbeTerminalTheme(t *testing.T) {
 	})
 	if !strings.Contains(out, "Usage:") {
 		t.Fatalf("help output missing usage:\n%s", out)
+	}
+}
+
+func TestRunDispatchesACPLongFlagAlias(t *testing.T) {
+	errOut := captureStderr(t, func() {
+		if rc := Run([]string{"--acp", "-h"}, "test-version"); rc != 2 {
+			t.Fatalf("Run --acp -h rc = %d, want 2", rc)
+		}
+	})
+	if !strings.Contains(errOut, "Usage of acp:") {
+		t.Fatalf("--acp should dispatch to the ACP command, got stderr:\n%s", errOut)
+	}
+	if strings.Contains(errOut, "unknown command") {
+		t.Fatalf("--acp should not be treated as an unknown command:\n%s", errOut)
 	}
 }
 
@@ -222,6 +240,68 @@ func TestWelcomePromptMissingKeysRequiresConfigSource(t *testing.T) {
 	}
 }
 
+type cliRecordSink struct {
+	events []event.Kind
+}
+
+func (s *cliRecordSink) Emit(e event.Event) {
+	s.events = append(s.events, e.Kind)
+}
+
+type cliRecordSender struct {
+	messages []notify.Message
+}
+
+func (s *cliRecordSender) Send(m notify.Message) error {
+	s.messages = append(s.messages, m)
+	return nil
+}
+
+func TestWithNotificationsWrapsCLISinkWithConfiguredSender(t *testing.T) {
+	inner := &cliRecordSink{}
+	sender := &cliRecordSender{}
+	calls := 0
+	prev := newNotificationSender
+	newNotificationSender = func() notify.Sender {
+		calls++
+		return sender
+	}
+	t.Cleanup(func() { newNotificationSender = prev })
+
+	cfg := config.Default()
+	cfg.Notifications.Enabled = true
+
+	wrapped := withNotifications(inner, cfg)
+	wrapped.Emit(event.Event{Kind: event.TurnDone})
+
+	if calls != 1 {
+		t.Fatalf("newNotificationSender calls = %d, want 1", calls)
+	}
+	if len(inner.events) != 1 || inner.events[0] != event.TurnDone {
+		t.Fatalf("forwarded events = %v, want [TurnDone]", inner.events)
+	}
+	if len(sender.messages) != 1 {
+		t.Fatalf("notifications = %d, want 1", len(sender.messages))
+	}
+	if sender.messages[0].Body != "Turn finished" {
+		t.Fatalf("notification body = %q, want Turn finished", sender.messages[0].Body)
+	}
+}
+
+func TestSetupOverwritePromptShowsYNDefault(t *testing.T) {
+	t.Cleanup(func() { i18n.DetectLanguage("en") })
+	for _, lang := range []string{"en", "zh"} {
+		i18n.DetectLanguage(lang)
+		var out bytes.Buffer
+		if confirmReconfigureExistingConfig("config.toml", bufio.NewScanner(strings.NewReader("\n")), &out) {
+			t.Fatalf("%s empty overwrite answer should keep existing config", lang)
+		}
+		if !strings.Contains(out.String(), "[y/N]:") {
+			t.Fatalf("%s overwrite prompt should show explicit [y/N] default, got %q", lang, out.String())
+		}
+	}
+}
+
 // TestConfigureKeys verifies that a shared api_key_env (each vendor's SKUs use
 // the same env var) is asked only once, and entered keys become env lines.
 func TestConfigureKeys(t *testing.T) {
@@ -262,7 +342,7 @@ func TestConfigureKeysReusesExistingEnv(t *testing.T) {
 
 	selected := config.Default().Providers
 	var output bytes.Buffer
-	env := configureKeys(selected, strings.NewReader("mi-key-from-input\n"), &output)
+	env := configureKeys(selected, strings.NewReader("\nmi-key-from-input\n"), &output)
 
 	if len(env) != 2 {
 		t.Fatalf("env = %v (want 2: DeepSeek reused + MiMo entered)", env)
@@ -278,16 +358,36 @@ func TestConfigureKeysReusesExistingEnv(t *testing.T) {
 	}
 }
 
-// TestConfigureKeysAllSetSkipsInput ensures that when every env var is
-// already populated, configureKeys returns without reading anything from
-// the input — critical for the first-time-setup flow, where the URL-fetch
-// step has already collected all keys and configureKeys is a no-op.
-func TestConfigureKeysAllSetSkipsInput(t *testing.T) {
+func TestConfigureKeysCanResetExistingEnv(t *testing.T) {
+	t.Setenv("DEEPSEEK_API_KEY", "stale-ds-key")
+	t.Setenv("MIMO_API_KEY", "") // ask for this one normally
+
+	selected := config.Default().Providers
+	var output bytes.Buffer
+	env := configureKeys(selected, strings.NewReader("y\nfresh-ds-key\nmi-key\n"), &output)
+
+	if len(env) != 2 {
+		t.Fatalf("env = %v (want 2: DeepSeek reset + MiMo entered)", env)
+	}
+	if env[0] != "DEEPSEEK_API_KEY=fresh-ds-key" {
+		t.Errorf("env[0] = %q, want freshly entered value", env[0])
+	}
+	if env[1] != "MIMO_API_KEY=mi-key" {
+		t.Errorf("env[1] = %q, want typed MiMo value", env[1])
+	}
+	if !strings.Contains(output.String(), "[y/N]:") || !strings.Contains(output.String(), "DEEPSEEK_API_KEY") {
+		t.Errorf("expected a reset confirmation for DEEPSEEK_API_KEY, got:\n%s", output.String())
+	}
+}
+
+// TestConfigureKeysAllSetDefaultsToReusingInput ensures that when every env var
+// is already populated, pressing Enter at each confirmation keeps the values.
+func TestConfigureKeysAllSetDefaultsToReusingInput(t *testing.T) {
 	t.Setenv("DEEPSEEK_API_KEY", "ds")
 	t.Setenv("MIMO_API_KEY", "mi")
 
 	selected := config.Default().Providers
-	env := configureKeys(selected, strings.NewReader("should-not-be-consumed\n"), io.Discard)
+	env := configureKeys(selected, strings.NewReader("\n\n"), io.Discard)
 	if len(env) != 2 {
 		t.Errorf("env = %v, want 2 (both reused)", env)
 	}
@@ -622,4 +722,25 @@ func TestWriteDefaultConfigDisablesCodegraph(t *testing.T) {
 	if c := config.LoadForEdit(path); c.Codegraph.Enabled {
 		t.Fatal("a freshly scaffolded config left codegraph enabled; new users should start without it")
 	}
+}
+
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	old := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = w
+	defer func() { os.Stderr = old }()
+
+	fn()
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
 }

@@ -96,8 +96,8 @@ func (s *TextSink) Emit(e event.Event) {
 		}
 
 	case event.Usage:
-		// Close a still-open raw text block (the planner path streams text with
-		// no Message redraw) before the usage line, matching the old Fprintln.
+		// Close a still-open raw text block before the usage line, matching the
+		// old Fprintln path for streams that do not emit a Message redraw.
 		if s.textWritten {
 			fmt.Fprintln(s.out)
 			s.textWritten = false

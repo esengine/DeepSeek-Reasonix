@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"reasonix/internal/event"
 	"reasonix/internal/tool"
 )
 
@@ -18,6 +19,10 @@ import (
 // silently inlining, which would lose the isolation the author asked for).
 type SubagentRunner func(ctx context.Context, sk Skill, task string) (string, error)
 
+// ProfileResolver returns the model/effort profile a subagent skill will use.
+// It is optional; without one, skill frontmatter still supplies display metadata.
+type ProfileResolver func(sk Skill) *event.Profile
+
 // InstalledHook fires after install_skill writes a new file, so a host can
 // refresh UI (e.g. a skills sidebar) without a reload. nil is fine.
 type InstalledHook func(name, path string, scope Scope)
@@ -25,14 +30,19 @@ type InstalledHook func(name, path string, scope Scope)
 // --- run_skill ---
 
 type runSkillTool struct {
-	store  *Store
-	runner SubagentRunner
+	store           *Store
+	runner          SubagentRunner
+	profileResolver ProfileResolver
 }
 
 // NewRunSkillTool builds the general skill-invocation tool. runner may be nil
 // (subagent skills then error).
-func NewRunSkillTool(store *Store, runner SubagentRunner) tool.Tool {
-	return &runSkillTool{store: store, runner: runner}
+func NewRunSkillTool(store *Store, runner SubagentRunner, profileResolver ...ProfileResolver) tool.Tool {
+	var pr ProfileResolver
+	if len(profileResolver) > 0 {
+		pr = profileResolver[0]
+	}
+	return &runSkillTool{store: store, runner: runner, profileResolver: pr}
 }
 
 func (*runSkillTool) Name() string { return "run_skill" }
@@ -87,6 +97,37 @@ func (t *runSkillTool) Execute(ctx context.Context, args json.RawMessage) (strin
 	return renderInline(sk, rawArgs), nil
 }
 
+func (t *runSkillTool) ResolveProfile(args json.RawMessage) *event.Profile {
+	var p struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(args, &p); err != nil {
+		return nil
+	}
+	name := cleanSkillName(p.Name)
+	if name == "" {
+		return nil
+	}
+	sk, ok := t.store.Read(name)
+	if !ok || sk.RunAs != RunSubagent {
+		return nil
+	}
+	return t.profileForSkill(sk)
+}
+
+func (t *runSkillTool) profileForSkill(sk Skill) *event.Profile {
+	if t.profileResolver != nil {
+		if pr := t.profileResolver(sk); pr != nil {
+			return pr
+		}
+	}
+	model, effort := strings.TrimSpace(sk.Model), strings.TrimSpace(sk.Effort)
+	if model == "" && effort == "" {
+		return nil
+	}
+	return &event.Profile{Model: model, Effort: effort}
+}
+
 // --- dedicated subagent wrappers (explore / research / review / security_review) ---
 
 type subagentSkillTool struct {
@@ -96,6 +137,7 @@ type subagentSkillTool struct {
 	taskDesc    string
 	store       *Store
 	runner      SubagentRunner
+	profile     ProfileResolver
 }
 
 func (t *subagentSkillTool) Name() string        { return t.toolName }
@@ -133,11 +175,32 @@ func (t *subagentSkillTool) Execute(ctx context.Context, args json.RawMessage) (
 	return t.runner(ctx, sk, task)
 }
 
+func (t *subagentSkillTool) ResolveProfile(json.RawMessage) *event.Profile {
+	sk, ok := t.store.Read(t.skillName)
+	if !ok || sk.RunAs != RunSubagent {
+		return nil
+	}
+	if t.profile != nil {
+		if pr := t.profile(sk); pr != nil {
+			return pr
+		}
+	}
+	model, effort := strings.TrimSpace(sk.Model), strings.TrimSpace(sk.Effort)
+	if model == "" && effort == "" {
+		return nil
+	}
+	return &event.Profile{Model: model, Effort: effort}
+}
+
 // BuiltinSubagentTools returns top-level wrapper tools for the built-in subagent
 // skills, named after the verb so the model picks them naturally (affordance >
 // prompt rules). Each is skipped when its underlying skill isn't present (e.g. a
 // user disabled it), so the tool set never advertises a phantom skill.
-func BuiltinSubagentTools(store *Store, runner SubagentRunner) []tool.Tool {
+func BuiltinSubagentTools(store *Store, runner SubagentRunner, profileResolver ...ProfileResolver) []tool.Tool {
+	var pr ProfileResolver
+	if len(profileResolver) > 0 {
+		pr = profileResolver[0]
+	}
 	specs := []struct {
 		toolName, skillName, description, taskDesc string
 	}{
@@ -166,6 +229,7 @@ func BuiltinSubagentTools(store *Store, runner SubagentRunner) []tool.Tool {
 			taskDesc:    s.taskDesc,
 			store:       store,
 			runner:      runner,
+			profile:     pr,
 		})
 	}
 	return out
@@ -204,6 +268,7 @@ func (*installSkillTool) Schema() json.RawMessage {
   "scope":{"type":"string","enum":["project","global"],"description":"Where to write. Defaults to project when a workspace exists, else global."},
   "runAs":{"type":"string","enum":["inline","subagent"],"description":"inline (default) folds the body into the parent turn; subagent spawns an isolated child loop returning only its final answer (use for context-heavy work)."},
   "model":{"type":"string","description":"Optional model override for runAs=subagent (a configured provider/model name). Ignored otherwise."},
+  "effort":{"type":"string","description":"Optional effort for runAs=subagent (e.g. high, max). Ignored otherwise."},
   "allowedTools":{"type":"array","items":{"type":"string"},"description":"Optional tool allowlist for runAs=subagent (e.g. ['read_file','grep'])."}
 },
 "required":["name","description","body"]
@@ -218,6 +283,7 @@ func (t *installSkillTool) Execute(_ context.Context, args json.RawMessage) (str
 		Scope        string   `json:"scope"`
 		RunAs        string   `json:"runAs"`
 		Model        string   `json:"model"`
+		Effort       string   `json:"effort"`
 		AllowedTools []string `json:"allowedTools"`
 	}
 	if err := json.Unmarshal(args, &p); err != nil {
@@ -255,7 +321,7 @@ func (t *installSkillTool) Execute(_ context.Context, args json.RawMessage) (str
 		runAs = RunSubagent
 	}
 
-	content := renderSkillFile(name, desc, p.Body, runAs, strings.TrimSpace(p.Model), p.AllowedTools)
+	content := renderSkillFile(name, desc, p.Body, runAs, strings.TrimSpace(p.Model), strings.TrimSpace(p.Effort), p.AllowedTools)
 	path, err := t.store.CreateWithContent(name, scope, content)
 	if err != nil {
 		return "", err
@@ -276,13 +342,16 @@ func (t *installSkillTool) Execute(_ context.Context, args json.RawMessage) (str
 
 // renderSkillFile assembles a skill file's frontmatter + body. Subagent-only
 // fields (model, allowed-tools) are emitted only when relevant.
-func renderSkillFile(name, desc, body string, runAs RunAs, model string, allowedTools []string) string {
+func renderSkillFile(name, desc, body string, runAs RunAs, model, effort string, allowedTools []string) string {
 	var fm strings.Builder
 	fm.WriteString("---\nname: " + name + "\ndescription: " + desc + "\n")
 	if runAs == RunSubagent {
 		fm.WriteString("runAs: subagent\n")
 		if model != "" {
 			fm.WriteString("model: " + model + "\n")
+		}
+		if effort != "" {
+			fm.WriteString("effort: " + effort + "\n")
 		}
 		var tools []string
 		for _, t := range allowedTools {

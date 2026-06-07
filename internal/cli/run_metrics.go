@@ -5,19 +5,29 @@ import (
 	"os"
 
 	"reasonix/internal/event"
+	"reasonix/internal/evidence"
 )
 
 // RunMetrics is the machine-readable token/cache/cost summary `run --metrics`
 // writes, so a benchmark harness can read a run's cost without scraping stdout.
 type RunMetrics struct {
-	PromptTokens     int     `json:"prompt_tokens"`
-	CompletionTokens int     `json:"completion_tokens"`
-	CacheHitTokens   int     `json:"cache_hit_tokens"`
-	CacheMissTokens  int     `json:"cache_miss_tokens"`
-	Steps            int     `json:"steps"` // model calls (one per stream, incl. tool rounds)
-	Cost             float64 `json:"cost"`
-	Currency         string  `json:"currency"`
-	Compactions      int     `json:"compactions"`
+	PromptTokens                  int     `json:"prompt_tokens"`
+	CompletionTokens              int     `json:"completion_tokens"`
+	CacheHitTokens                int     `json:"cache_hit_tokens"`
+	CacheMissTokens               int     `json:"cache_miss_tokens"`
+	Steps                         int     `json:"steps"` // model calls (one per stream, incl. tool rounds)
+	Cost                          float64 `json:"cost"`
+	Currency                      string  `json:"currency"`
+	Compactions                   int     `json:"compactions"`
+	ReadinessChecks               int     `json:"readiness_checks"`
+	ReadinessAllowed              int     `json:"readiness_allowed"`
+	ReadinessBlocks               int     `json:"readiness_blocks"`
+	ReadinessRecoveries           int     `json:"readiness_recoveries"`
+	ReadinessErrors               int     `json:"readiness_errors"`
+	ReadinessMissingProjectChecks int     `json:"readiness_missing_project_checks"`
+	ReadinessMissingCompleteSteps int     `json:"readiness_missing_complete_steps"`
+	ReadinessIncompleteTodos      int     `json:"readiness_incomplete_todos"`
+	ReadinessCommandMismatches    int     `json:"readiness_command_mismatches"`
 }
 
 // metricsSink forwards every event to the real sink and accumulates the per-call
@@ -47,6 +57,30 @@ func (s *metricsSink) Emit(e event.Event) {
 		s.m.Compactions++
 	}
 	s.inner.Emit(e)
+}
+
+func (s *metricsSink) RecordReadinessAudit(a evidence.ReadinessAudit) {
+	if s == nil {
+		return
+	}
+	s.m.ReadinessChecks++
+	switch a.Result {
+	case evidence.ReadinessAllowed:
+		s.m.ReadinessAllowed++
+	case evidence.ReadinessBlocked:
+		s.m.ReadinessBlocks++
+	case evidence.ReadinessErrored:
+		s.m.ReadinessErrors++
+	}
+	if a.Recovered {
+		s.m.ReadinessRecoveries++
+	}
+	s.m.ReadinessMissingProjectChecks += a.MissingProjectChecks
+	if a.MissingCompleteStep {
+		s.m.ReadinessMissingCompleteSteps++
+	}
+	s.m.ReadinessIncompleteTodos += a.IncompleteTodos
+	s.m.ReadinessCommandMismatches += a.CommandMismatchMissing
 }
 
 func writeMetrics(path string, m RunMetrics) error {

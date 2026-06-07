@@ -111,6 +111,27 @@ function languageFor(path: string): string | undefined {
   return byExt[ext];
 }
 
+function renderMediaPreview(preview: FilePreview): JSX.Element | null {
+  if (!preview.url) return null;
+  if (preview.kind === "image") {
+    return (
+      <div className="workspace-media workspace-media--image">
+        <img src={preview.url} alt={basename(preview.path)} decoding="async" />
+      </div>
+    );
+  }
+  if (preview.kind === "pdf") {
+    return (
+      <iframe
+        className="workspace-media workspace-media--pdf"
+        src={preview.url}
+        title={basename(preview.path)}
+      />
+    );
+  }
+  return null;
+}
+
 function fenceFor(text: string): string {
   let longest = 0;
   for (const match of text.matchAll(/`+/g)) {
@@ -507,7 +528,7 @@ export function WorkspacePanel({
   };
 
   const openSelectionMenu = (event: ReactMouseEvent<HTMLDivElement>) => {
-    if (!selectedPath || loadingPreview || preview?.err || preview?.binary) return;
+    if (!selectedPath || loadingPreview || preview?.err || preview?.binary || preview?.kind) return;
     const text = selectedTextFromPreview();
     if (text.trim() === "") return;
     event.preventDefault();
@@ -558,7 +579,7 @@ export function WorkspacePanel({
     setTreeMenu(null);
     try {
       const file = await app.ReadFile(target.path);
-      if (file.err || file.binary) {
+      if (file.err || file.binary || file.kind) {
         onAddToChat?.(formatWorkspaceReference(target.path, false));
         return;
       }
@@ -777,6 +798,8 @@ export function WorkspacePanel({
             <div className="workspace-empty">{t("workspace.loading")}</div>
           ) : preview?.err ? (
             <div className="workspace-empty workspace-empty--error">{preview.err}</div>
+          ) : preview?.kind ? (
+            renderMediaPreview(preview)
           ) : preview?.binary ? (
             <div className="workspace-empty">{t("workspace.binary")}</div>
           ) : preview ? (

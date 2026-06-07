@@ -7,7 +7,8 @@
 # desktop/cmd/sign's `manifest` subcommand maps back to update.PlatformKey:
 #   macOS:   Reasonix-darwin-<arch>.zip                  (ditto archive; updater channel)
 #            Reasonix-darwin-universal.dmg               (drag-to-install; human download)
-#   Windows: Reasonix-windows-<arch>-installer.exe       (NSIS per-user installer)
+#   Windows: Reasonix-windows-<arch>-installer.exe       (NSIS per-user installer; updater channel)
+#            Reasonix-windows-<arch>.zip                 (portable human download)
 #   Linux:   Reasonix-linux-<arch>.tar.gz                (bare binary)
 #
 # Usage: scripts/desktop-build.sh <os/arch> <version>
@@ -90,6 +91,14 @@ windows)
 	installer=$(ls build/bin/*installer*.exe 2>/dev/null | head -n1 || true)
 	[ -n "$installer" ] || { echo "no NSIS installer found in build/bin" >&2; exit 1; }
 	cp "$installer" "$ROOT/dist/${APPNAME}-windows-${arch}-installer.exe"
+	portable=$(find build/bin -maxdepth 1 -type f -name "*.exe" ! -name "*installer*.exe" | head -n1 || true)
+	[ -n "$portable" ] || { echo "no portable Windows exe found in build/bin" >&2; exit 1; }
+	staging=$(mktemp -d)
+	cp "$portable" "$staging/${APPNAME}.exe"
+	src_win=$(cygpath -w "$staging/${APPNAME}.exe")
+	zip_win=$(cygpath -w "$ROOT/dist/${APPNAME}-windows-${arch}.zip")
+	powershell.exe -NoProfile -Command "Compress-Archive -Force -LiteralPath '$src_win' -DestinationPath '$zip_win'"
+	rm -rf "$staging"
 	;;
 linux)
 	tar -czf "$ROOT/dist/${APPNAME}-linux-${arch}.tar.gz" -C build/bin "$BINNAME"

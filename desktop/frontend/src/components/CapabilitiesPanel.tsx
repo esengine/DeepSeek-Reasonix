@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { asArray } from "../lib/array";
 import { app, openExternal } from "../lib/bridge";
 import { useT } from "../lib/i18n";
@@ -140,6 +140,11 @@ export function CapabilitiesPanel({
               ✕
             </button>
           </Tooltip>
+          <Tooltip label={t("caps.refresh")}>
+            <button className="chip" disabled={busy} onClick={() => void reload()}>
+              ↻
+            </button>
+          </Tooltip>
         </header>
 
         {!view ? (
@@ -181,9 +186,8 @@ export function CapabilitiesPanel({
                     servers={serverGroups.failed}
                     expanded={expandedErrors}
                     onToggle={toggleError}
-                    onRetry={(name) => void mutate(() => app.RetryMCPServer(name))}
+                    onRetry={(name) => void mutate(() => app.ReconnectMCPServer(name))}
                     onConfirmClearAuth={(name) => void mutate(() => app.ClearMCPServerAuthentication(name))}
-                    onSetTier={(name, tier) => void mutate(() => app.SetMCPServerTier(name, tier))}
                     onConfirm={(name) => void mutate(() => app.RemoveMCPServer(name))}
                     busy={busy}
                   />
@@ -202,10 +206,10 @@ export function CapabilitiesPanel({
                     setEditing(name);
                   }}
                   onCancelEdit={() => setEditing(null)}
-                  onRetry={(name) => void mutate(() => app.RetryMCPServer(name))}
+                  onRetry={(name) => void mutate(() => app.ReconnectMCPServer(name))}
+                  onReconnect={(name) => void mutate(() => app.ReconnectMCPServer(name))}
                   onConfirmClearAuth={(name) => void mutate(() => app.ClearMCPServerAuthentication(name))}
                   onToggle={(name, on) => void mutate(() => app.SetMCPServerEnabled(name, on))}
-                  onSetTier={(name, tier) => void mutate(() => app.SetMCPServerTier(name, tier))}
                   onUpdate={(name, input) =>
                     void mutate(() => app.UpdateMCPServer(name, input)).then((ok) => {
                       if (ok) setEditing(null);
@@ -594,9 +598,9 @@ function ServerGroup({
   onEdit,
   onCancelEdit,
   onRetry,
+  onReconnect,
   onConfirmClearAuth,
   onToggle,
-  onSetTier,
   onUpdate,
   onToggleDetails,
   onToggleTools,
@@ -610,9 +614,9 @@ function ServerGroup({
   onEdit: (name: string) => void;
   onCancelEdit: () => void;
   onRetry: (name: string) => void;
+  onReconnect: (name: string) => void;
   onConfirmClearAuth: (name: string) => void;
   onToggle: (name: string, on: boolean) => void;
-  onSetTier: (name: string, tier: string) => void;
   onUpdate: (name: string, input: MCPServerInput) => void;
   onToggleDetails: (name: string) => void;
   onToggleTools: (name: string) => void;
@@ -632,9 +636,9 @@ function ServerGroup({
           onEdit={() => onEdit(s.name)}
           onCancelEdit={onCancelEdit}
           onRetry={() => onRetry(s.name)}
+          onReconnect={() => onReconnect(s.name)}
           onConfirmClearAuth={() => onConfirmClearAuth(s.name)}
           onToggle={(on) => onToggle(s.name, on)}
-          onSetTier={(tier) => onSetTier(s.name, tier)}
           onUpdate={(input) => onUpdate(s.name, input)}
           onToggleDetails={() => onToggleDetails(s.name)}
           onToggleTools={() => onToggleTools(s.name)}
@@ -651,7 +655,6 @@ function FailedServersNotice({
   onToggle,
   onRetry,
   onConfirmClearAuth,
-  onSetTier,
   onConfirm,
 }: {
   servers: ServerView[];
@@ -660,7 +663,6 @@ function FailedServersNotice({
   onToggle: (name: string) => void;
   onRetry: (name: string) => void;
   onConfirmClearAuth: (name: string) => void;
-  onSetTier: (name: string, tier: string) => void;
   onConfirm: (name: string) => void;
 }) {
   const t = useT();
@@ -677,7 +679,6 @@ function FailedServersNotice({
           const open = expanded.has(s.name);
           const error = s.error || t("caps.failed");
           const actionLabel = serverActionLabel(s, t);
-          const canConfigure = s.configured;
           const handlePrimaryAction = () => {
             if (shouldOpenAuth(s)) {
               openExternal((s.authUrl || "").trim());
@@ -721,11 +722,6 @@ function FailedServersNotice({
                   />
                 )}
               </div>
-              {canConfigure && (
-                <div className="cap-failure__mode">
-                  <AutoConnectControls tier={s.tier || "lazy"} busy={busy} onTierChange={(tier) => onSetTier(s.name, tier)} />
-                </div>
-              )}
               {open && (
                 <div className="cap-failure__logbox">
                   <div className="cap-failure__logbar">
@@ -755,9 +751,9 @@ function ServerRow({
   onEdit,
   onCancelEdit,
   onRetry,
+  onReconnect,
   onConfirmClearAuth,
   onToggle,
-  onSetTier,
   onUpdate,
   onToggleDetails,
   onToggleTools,
@@ -771,9 +767,9 @@ function ServerRow({
   onEdit: () => void;
   onCancelEdit: () => void;
   onRetry: () => void;
+  onReconnect: () => void;
   onConfirmClearAuth: () => void;
   onToggle: (on: boolean) => void;
-  onSetTier: (tier: string) => void;
   onUpdate: (input: MCPServerInput) => void;
   onToggleDetails: () => void;
   onToggleTools: () => void;
@@ -856,8 +852,8 @@ function ServerRow({
           busy={busy}
           onConfirm={onConfirm}
           onConnectNow={onRetry}
+          onReconnect={onReconnect}
           onConfirmClearAuth={onConfirmClearAuth}
-          onSetTier={onSetTier}
           toolsExpanded={toolsExpanded}
           editing={editing}
           onEdit={onEdit}
@@ -876,8 +872,8 @@ function ServerDetails({
   busy,
   onConfirm,
   onConnectNow,
+  onReconnect,
   onConfirmClearAuth,
-  onSetTier,
   toolsExpanded,
   editing,
   onEdit,
@@ -890,8 +886,8 @@ function ServerDetails({
   busy: boolean;
   onConfirm: () => void;
   onConnectNow: () => void;
+  onReconnect: () => void;
   onConfirmClearAuth: () => void;
-  onSetTier: (tier: string) => void;
   toolsExpanded: boolean;
   editing: boolean;
   onEdit: () => void;
@@ -901,9 +897,9 @@ function ServerDetails({
 }) {
   const t = useT();
   const command = serverCommand(s);
-  const canConfigure = s.configured;
   const canEditConfig = s.configured && !s.builtIn;
   const canConnectNow = s.status === "deferred" || s.status === "disabled";
+  const canReconnect = s.status === "connected";
   const canShowTools = (s.tools ?? 0) > 0 || (tools?.length ?? 0) > 0;
   const showClearAuth = canClearAuth(s);
   const authLabel = serverAuthLabel(s, t);
@@ -931,9 +927,6 @@ function ServerDetails({
             <span className="cap-detail__value">{authLabel}</span>
           </div>
         )}
-        {canConfigure && (
-          <AutoConnectControls tier={s.tier || "lazy"} busy={busy} onTierChange={onSetTier} />
-        )}
         {command && (
           <div className="cap-detail cap-detail--wide">
             <span className="cap-detail__label">{s.transport === "stdio" ? t("caps.command") : t("caps.url")}</span>
@@ -951,6 +944,11 @@ function ServerDetails({
         {canConnectNow && (
           <button className="btn btn--small" disabled={busy} onClick={onConnectNow}>
             {t("caps.connectNow")}
+          </button>
+        )}
+        {canReconnect && (
+          <button className="btn btn--small" disabled={busy} onClick={onReconnect}>
+            {t("caps.reconnect")}
           </button>
         )}
         {canShowTools && (
@@ -1019,7 +1017,6 @@ function EditServerForm({
   const [command, setCommand] = useState(initialTransport === "stdio" ? serverCommand(s) : "");
   const [url, setUrl] = useState(initialTransport === "stdio" ? "" : s.url || serverCommand(s));
   const [env, setEnv] = useState("");
-  const [tier, setTier] = useState(s.tier || "lazy");
   const isStdio = transport === "stdio";
   const ready = isStdio ? command.trim() !== "" : url.trim() !== "";
 
@@ -1033,7 +1030,6 @@ function EditServerForm({
       args: isStdio ? parts.slice(1) : [],
       url: isStdio ? "" : url.trim(),
       env: envText === "" ? null : parseEnvText(envText),
-      tier,
     });
   };
 
@@ -1063,7 +1059,6 @@ function EditServerForm({
             <input className="mem-input" value={url} disabled={busy} onChange={(e) => setUrl(e.target.value)} placeholder={t("caps.urlPlaceholder")} />
           </label>
         )}
-        <AutoConnectControls tier={tier} busy={busy} onTierChange={setTier} />
         <label className="cap-detail cap-detail--wide">
           <span className="cap-detail__label">{t("caps.envLabel")}</span>
           <textarea className="mem-textarea cap-config-edit__env" value={env} disabled={busy} onChange={(e) => setEnv(e.target.value)} placeholder={t("caps.envPlaceholder")} spellCheck={false} />
@@ -1088,58 +1083,9 @@ function EditServerForm({
   );
 }
 
-function AutoConnectControls({
-  tier,
-  busy,
-  onTierChange,
-}: {
-  tier: string;
-  busy: boolean;
-  onTierChange: (tier: string) => void;
-}) {
-  const t = useT();
-  const groupId = useId();
-  const normalized = normalizeTierValue(tier);
-  const options = [
-    { tier: "lazy", label: t("caps.launchLazy"), hint: t("caps.launchLazyHint") },
-    { tier: "background", label: t("caps.launchBackground"), hint: t("caps.launchBackgroundHint") },
-    { tier: "eager", label: t("caps.launchEager"), hint: t("caps.launchEagerHint") },
-  ];
-  return (
-    <fieldset className="cap-detail cap-detail--wide cap-connection-mode">
-      <legend className="cap-detail__label">{t("caps.launchMode")}</legend>
-      <div className="cap-connection-options">
-        {options.map((option) => (
-          <label
-            className={`cap-connection-option${normalized === option.tier ? " cap-connection-option--selected" : ""}${busy ? " cap-connection-option--disabled" : ""}`}
-            key={option.tier}
-          >
-            <input
-              type="radio"
-              name={`mcp-connection-tier-${groupId}`}
-              value={option.tier}
-              checked={normalized === option.tier}
-              disabled={busy}
-              onChange={() => onTierChange(option.tier)}
-            />
-            <span className="cap-connection-option__text">
-              <span className="cap-connection-option__label">{option.label}</span>
-              <span className="cap-connection-option__hint">{option.hint}</span>
-            </span>
-          </label>
-        ))}
-      </div>
-    </fieldset>
-  );
-}
-
 function serverCommand(s: ServerView): string {
   if (s.transport === "stdio") return [s.command, ...(s.args ?? [])].filter(Boolean).join(" ").trim();
   return (s.url || "").trim();
-}
-
-function normalizeTierValue(tier: string): string {
-  return tier === "background" || tier === "eager" ? tier : "lazy";
 }
 
 function normalizeTransportValue(transport: string): string {
@@ -1313,7 +1259,6 @@ function AddServerForm({
   const [command, setCommand] = useState("");
   const [url, setUrl] = useState("");
   const [env, setEnv] = useState("");
-  const [tier, setTier] = useState("lazy");
 
   const isStdio = transport === "stdio";
   const ready = name.trim() !== "" && (isStdio ? command.trim() !== "" : url.trim() !== "");
@@ -1332,7 +1277,6 @@ function AddServerForm({
       args: isStdio ? parts.slice(1) : [],
       url: isStdio ? "" : url.trim(),
       env: envMap,
-      tier,
     });
   };
 
@@ -1350,7 +1294,6 @@ function AddServerForm({
       ) : (
         <input className="mem-input" placeholder={t("caps.urlPlaceholder")} value={url} onChange={(e) => setUrl(e.target.value)} />
       )}
-      <AutoConnectControls tier={tier} busy={busy} onTierChange={setTier} />
       <label className="set-label">{t("caps.envLabel")}</label>
       <textarea className="mem-textarea" value={env} onChange={(e) => setEnv(e.target.value)} placeholder={t("caps.envPlaceholder")} spellCheck={false} />
       <div className="prov-card__actions">

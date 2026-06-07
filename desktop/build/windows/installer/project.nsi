@@ -14,11 +14,13 @@ Unicode true
 ##      wails.deleteUninstaller macros hard-code HKLM, which a non-admin install
 ##      cannot write - so we inline HKCU versions below instead.
 ##   3. InstallDir is remembered across updates via InstallDirRegKey +
-##      InstallLocation (HKCU\...\Uninstall\InstallLocation). Without this, every
-##      release forces the user back to %LOCALAPPDATA%\Programs\Reasonix even if
-##      they had moved the install to a different drive (e.g. D:\Tools\Reasonix);
-##      the silent auto-updater would re-run with /S into the wrong dir, leaving
-##      the old install orphaned.
+##      InstallLocation (HKCU\...\Uninstall\InstallLocation). When upgrading from
+##      a build that did not write InstallLocation yet, .onInit falls back to the
+##      old DisplayIcon path before using the default. Without this, every release
+##      forces the user back to %LOCALAPPDATA%\Programs\Reasonix even if they had
+##      moved the install to a different drive (e.g. D:\Tools\Reasonix); the silent
+##      auto-updater would re-run with /S into the wrong dir, leaving the old
+##      install orphaned.
 ##
 ## Everything else mirrors Wails' generated default. Defines below override the
 ## ProjectInfo values that wails_tools.nsh would otherwise populate.
@@ -33,6 +35,7 @@ Unicode true
 ## wails.* macros used below).
 ####
 !include "wails_tools.nsh"
+!include "FileFunc.nsh"
 
 # The version information for this two must consist of 4 parts
 VIProductVersion "${INFO_PRODUCTVERSION}.0"
@@ -111,12 +114,20 @@ ShowInstDetails show # This will always show the installation details.
 Function .onInit
    !insertmacro wails.checkArchitecture
 
-   ; InstallDirRegKey leaves $INSTDIR empty when the InstallLocation value
-   ; is missing (first install, or the user wiped the uninstaller registry).
-   ; Fall back to the per-user default so the directory page lands on a
-   ; usable path instead of crashing the install with "InstallDir empty".
-   StrCmp $INSTDIR "" 0 +2
+   ; InstallDirRegKey leaves $INSTDIR empty when the InstallLocation value is
+   ; missing. Older installers still wrote DisplayIcon, so use its parent folder
+   ; as a compatibility bridge before falling back to the per-user default.
+   StrCmp $INSTDIR "" 0 done
+   ClearErrors
+   ReadRegStr $0 HKCU "${UNINST_KEY}" "DisplayIcon"
+   IfErrors fallback
+   StrCmp $0 "" fallback
+   ${GetParent} "$0" $INSTDIR
+   StrCmp $INSTDIR "" fallback done
+
+fallback:
    StrCpy $INSTDIR "${REASONIX_DEFAULT_INSTALLDIR}"
+done:
 FunctionEnd
 
 Section

@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"reasonix/internal/agent"
@@ -15,8 +16,10 @@ import (
 func TestHistoryMessagesIncludeAssistantReasoning(t *testing.T) {
 	msgs := []provider.Message{
 		{Role: provider.RoleUser, Content: "expanded prompt"},
-		{Role: provider.RoleAssistant, Content: "answer", ReasoningContent: "thinking trace"},
-		{Role: provider.RoleTool, Content: "tool output", ReasoningContent: "ignored by frontend filter"},
+		{Role: provider.RoleAssistant, Content: "answer", ReasoningContent: "thinking trace", ToolCalls: []provider.ToolCall{{
+			ID: "call_1", Name: "bash", Arguments: `{"command":"pwd"}`,
+		}}},
+		{Role: provider.RoleTool, Name: "bash", ToolCallID: "call_1", Content: "tool output", ReasoningContent: "ignored by frontend filter"},
 		{Role: provider.RoleAssistant, ReasoningContent: "tool-call-only thinking"},
 	}
 
@@ -35,6 +38,12 @@ func TestHistoryMessagesIncludeAssistantReasoning(t *testing.T) {
 	}
 	if got[1].Reasoning != "thinking trace" {
 		t.Fatalf("assistant reasoning = %q, want thinking trace", got[1].Reasoning)
+	}
+	if len(got[1].ToolCalls) != 1 || got[1].ToolCalls[0].ID != "call_1" || got[1].ToolCalls[0].Name != "bash" || got[1].ToolCalls[0].Arguments != `{"command":"pwd"}` {
+		t.Fatalf("assistant tool calls not preserved: %+v", got[1].ToolCalls)
+	}
+	if got[2].ToolCallID != "call_1" || got[2].ToolName != "bash" || got[2].Content != "tool output" {
+		t.Fatalf("tool result details not preserved: %+v", got[2])
 	}
 	if got[2].Reasoning != "" {
 		t.Fatalf("non-assistant reasoning should stay hidden, got %q", got[2].Reasoning)
@@ -63,6 +72,45 @@ func TestPreviewSessionMessagesLoadsWithoutResuming(t *testing.T) {
 	}
 	if got[1].Reasoning != "saved reasoning" {
 		t.Fatalf("preview reasoning = %q, want saved reasoning", got[1].Reasoning)
+	}
+}
+
+func TestPreviewSessionMessagesIncludesProcessEvents(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "events.jsonl")
+	body := strings.Join([]string{
+		`{"kind":"phase","text":"Preparing context"}`,
+		`{"kind":"notice","level":"warn","text":"Network changed"}`,
+		`{"kind":"compaction_started","compaction":{"trigger":"manual"}}`,
+		`{"kind":"compaction_done","compaction":{"trigger":"manual","messages":6,"summary":"Kept the current task.","archive":"/tmp/archive.jsonl"}}`,
+		`{"type":"user.message","text":"hello"}`,
+		`{"type":"model.final","content":"hi","reasoningContent":"thinking"}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := previewSessionMessages(dir, path)
+	if err != nil {
+		t.Fatalf("previewSessionMessages: %v", err)
+	}
+	if len(got) != 6 {
+		t.Fatalf("preview history length = %d, want 6: %+v", len(got), got)
+	}
+	if got[0].Role != "phase" || got[0].Content != "Preparing context" {
+		t.Fatalf("phase event not preserved: %+v", got[0])
+	}
+	if got[1].Role != "notice" || got[1].Level != "warn" || got[1].Content != "Network changed" {
+		t.Fatalf("notice event not preserved: %+v", got[1])
+	}
+	if got[2].Role != "compaction" || !got[2].Pending || got[2].Trigger != "manual" {
+		t.Fatalf("pending compaction event not preserved: %+v", got[2])
+	}
+	if got[3].Role != "compaction" || got[3].Pending || got[3].Messages != 6 || got[3].Summary != "Kept the current task." || got[3].Archive != "/tmp/archive.jsonl" {
+		t.Fatalf("finished compaction event not preserved: %+v", got[3])
+	}
+	if got[4].Role != "user" || got[5].Reasoning != "thinking" {
+		t.Fatalf("conversation events not preserved: %+v", got[4:])
 	}
 }
 
@@ -105,6 +153,17 @@ func TestResumeSessionForTabTargetsSpecifiedTab(t *testing.T) {
 	}
 	if inactiveCtrl.SessionPath() != targetPath {
 		t.Fatalf("inactive tab session path = %q, want %q", inactiveCtrl.SessionPath(), targetPath)
+	}
+	f := loadTabsFile()
+	var savedInactive string
+	for _, entry := range f.Tabs {
+		if entry.ID == "inactive" {
+			savedInactive = entry.SessionPath
+			break
+		}
+	}
+	if filepath.Clean(savedInactive) != filepath.Clean(targetPath) {
+		t.Fatalf("saved inactive session path = %q, want %q", savedInactive, targetPath)
 	}
 	if len(got) != 1 || got[0].Content != "target prompt" {
 		t.Fatalf("resumed history = %+v, want target prompt", got)

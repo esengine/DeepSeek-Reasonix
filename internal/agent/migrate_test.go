@@ -155,6 +155,30 @@ func TestMigrateLegacySessionsSourceMarkersAreIndependent(t *testing.T) {
 	}
 }
 
+func TestMigrateLegacyConfigSourceDoesNotBlockHomeSource(t *testing.T) {
+	configSrc := t.TempDir()
+	homeSrc := t.TempDir()
+	dest := t.TempDir()
+	os.WriteFile(filepath.Join(homeSrc, "home-chat.events.jsonl"), []byte(legacyEventLog), 0o644)
+
+	if n, err := MigrateLegacySessionsFromConfigDir(configSrc, dest); err != nil || n != 0 {
+		t.Fatalf("config source without events: n=%d err=%v, want 0 nil", n, err)
+	}
+	if _, err := os.Stat(filepath.Join(dest, legacyEventsConfigImportMarker)); err != nil {
+		t.Fatalf("config source marker missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dest, legacyImportMarker)); !os.IsNotExist(err) {
+		t.Fatalf("config source must not block the home source with the generic marker, stat err=%v", err)
+	}
+
+	if n, err := MigrateLegacySessions(homeSrc, dest); err != nil || n != 1 {
+		t.Fatalf("home source after config source: n=%d err=%v, want 1 nil", n, err)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "home-chat.jsonl")); err != nil {
+		t.Fatalf("home source should still import after config source marker: %v", err)
+	}
+}
+
 func TestMigrateLegacySessionsSkipsAlreadyImported(t *testing.T) {
 	src := t.TempDir()
 	dest := t.TempDir()

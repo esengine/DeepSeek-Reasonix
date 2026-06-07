@@ -26,6 +26,11 @@ export interface WireCompaction {
   archive?: string; // done: archive path, if any
 }
 
+export interface WireProfile {
+  model?: string;
+  effort?: string;
+}
+
 export interface WireTool {
   id?: string;
   name: string;
@@ -34,8 +39,10 @@ export interface WireTool {
   err?: string;
   readOnly: boolean;
   truncated?: boolean;
+  durationMs?: number;
   partial?: boolean; // an early dispatch (name only) — a full one with args follows
   parentId?: string; // set on a sub-agent's calls — the parent `task` call's id
+  profile?: WireProfile; // subagent model/effort resolved for this call
 }
 
 export interface WireUsage {
@@ -189,6 +196,21 @@ export interface HistoryMessage {
   role: string;
   content: string;
   reasoning?: string;
+  level?: "info" | "warn";
+  toolCalls?: HistoryToolCall[];
+  toolCallId?: string;
+  toolName?: string;
+  pending?: boolean;
+  trigger?: string;
+  messages?: number;
+  summary?: string;
+  archive?: string;
+}
+
+export interface HistoryToolCall {
+  id: string;
+  name: string;
+  arguments: string;
 }
 
 // CheckpointMeta is one rewind point (a user turn) for the rewind UI.
@@ -269,6 +291,9 @@ export interface FilePreview {
   size: number;
   truncated: boolean;
   binary: boolean;
+  kind?: "image" | "pdf";
+  mime?: string;
+  url?: string;
   err?: string;
 }
 
@@ -355,7 +380,6 @@ export interface MCPServerInput {
   args: string[];
   url: string;
   env?: Record<string, string> | null;
-  tier: string;
 }
 
 export interface ModelInfo {
@@ -484,6 +508,8 @@ export interface AgentView {
 export interface SettingsView {
   defaultModel: string;
   plannerModel: string;
+  subagentModel: string;
+  subagentEffort: string;
   autoPlan: string;
   providers: ProviderView[];
   permissions: PermissionsView;

@@ -2,16 +2,16 @@ import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } f
 import type { CSSProperties, KeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import { ShellExpandProvider, useShellExpand } from "./lib/shellExpand";
 import {
-  SquarePen,
-  Brain,
   Blocks,
+  Download,
+  SquarePen,
   CircleGauge,
   FileText,
+  FileJson,
   GitBranch,
   History,
   Settings as SettingsIcon,
   Pencil,
-  MoreHorizontal,
   PanelLeftClose,
   PanelLeftOpen,
   PanelRightClose,
@@ -21,7 +21,7 @@ import {
 import logoWordmark from "./assets/logo-wordmark.svg";
 import { asArray } from "./lib/array";
 import { clearLegacyLangPref, normalizeLangPref, readLegacyLangPref, t, useI18n, useT } from "./lib/i18n";
-import { useController } from "./lib/useController";
+import { useController, type Item, type LiveStream } from "./lib/useController";
 import { app, onProjectTreeChanged } from "./lib/bridge";
 import { Transcript } from "./components/Transcript";
 import { Composer } from "./components/Composer";
@@ -37,9 +37,11 @@ import { UpdateBanner } from "./components/UpdateBanner";
 import { ContextPanel } from "./components/ContextPanel";
 import { WorkspacePanel } from "./components/WorkspacePanel";
 import { Tooltip } from "./components/Tooltip";
+import { StartupSplash, shouldShowStartupSplash } from "./components/StartupSplash";
 import { OnboardingOverlay } from "./components/OnboardingOverlay";
 import { TabBar } from "./components/TabBar";
 import { ProjectTree } from "./components/ProjectTree";
+import { CopyButton } from "./components/CopyButton";
 import { parseTodos } from "./lib/tools";
 import { shouldShowTodoPanel } from "./lib/todoVisibility";
 import type { ComposerInsertRequest, MemoryView, Meta, Mode, SessionMeta, TabMeta } from "./lib/types";
@@ -63,7 +65,7 @@ const SIDEBAR_DEFAULT_WIDTH = 264;
 const SIDEBAR_DEFAULT_RATIO = 0.175;
 const SIDEBAR_MIN_WIDTH = 228;
 const SIDEBAR_MAX_WIDTH = 420;
-const CHAT_MIN_WIDTH = 760;
+const CHAT_MIN_WIDTH = 400;
 const WORKSPACE_RESIZER_WIDTH = 8;
 
 function isThemeMode(value: string): value is Theme {
@@ -78,7 +80,6 @@ const RIGHT_DOCK_TREE_MIN_WIDTH = 260;
 const RIGHT_DOCK_TREE_MAX_WIDTH = 560;
 const RIGHT_DOCK_PREVIEW_DEFAULT_WIDTH = 640;
 const RIGHT_DOCK_MAX_WIDTH = 860;
-const RIGHT_DOCK_MIN_RENDER_WIDTH = 220;
 
 type RightDockMode = "context" | "files" | "changed";
 const SHOW_CONTEXT_DOCK = false;
@@ -118,10 +119,10 @@ function defaultRightDockTreeWidth(): number {
   return clampRightDockTreeWidth(width * RIGHT_DOCK_TREE_DEFAULT_RATIO);
 }
 
-function resolveRightDockWidth(mainWidth: number, desiredDockWidth: number): number {
+function resolveRightDockWidth(mainWidth: number, desiredDockWidth: number, minWidth: number): number {
   const budget = Math.max(0, Math.round(mainWidth) - CHAT_MIN_WIDTH - WORKSPACE_RESIZER_WIDTH);
-  if (budget < RIGHT_DOCK_MIN_RENDER_WIDTH) return 0;
-  const desired = Math.min(RIGHT_DOCK_MAX_WIDTH, Math.max(RIGHT_DOCK_MIN_RENDER_WIDTH, Math.round(desiredDockWidth)));
+  if (budget < minWidth) return 0;
+  const desired = Math.min(RIGHT_DOCK_MAX_WIDTH, Math.max(minWidth, Math.round(desiredDockWidth)));
   return Math.min(budget, desired);
 }
 
@@ -209,6 +210,95 @@ function workspaceDisplayName(path?: string): string {
   return parts.length > 0 ? parts[parts.length - 1] : path;
 }
 
+function materializeLiveItems(items: Item[], live?: LiveStream): Item[] {
+  if (!live) return items;
+  return items.map((item) => {
+    if (item.kind !== "assistant" || item.id !== live.id) return item;
+    return { ...item, text: live.text, reasoning: live.reasoning, streaming: true };
+  });
+}
+
+function fence(label: string, value: string): string {
+  if (!value.trim()) return "";
+  const fenceToken = value.includes("```") ? "````" : "```";
+  return `${label}\n${fenceToken}\n${value.trim()}\n${fenceToken}`;
+}
+
+function sessionItemsToMarkdown(title: string, items: Item[], live?: LiveStream): string {
+  const lines: string[] = [`# ${title.trim() || "Reasonix session"}`, ""];
+  for (const item of materializeLiveItems(items, live)) {
+    switch (item.kind) {
+      case "user":
+        lines.push("## User", "", item.text.trim(), "");
+        break;
+      case "assistant":
+        lines.push("## Assistant");
+        if (item.reasoning.trim()) {
+          lines.push("", "### Reasoning", "", item.reasoning.trim());
+        }
+        if (item.text.trim()) {
+          lines.push("", item.text.trim());
+        }
+        lines.push("");
+        break;
+      case "tool":
+        lines.push(`### Tool: ${item.name}`);
+        if (item.args.trim()) lines.push("", fence("Args", item.args));
+        if (item.output?.trim()) lines.push("", fence("Output", item.output));
+        if (item.error?.trim()) lines.push("", fence("Error", item.error));
+        lines.push("");
+        break;
+      case "phase":
+        lines.push(`### Phase`, "", item.text.trim(), "");
+        break;
+      case "notice":
+        lines.push(`### ${item.level === "warn" ? "Warning" : "Notice"}`, "", item.text.trim(), "");
+        break;
+      case "compaction":
+        lines.push("### Context Compaction", "");
+        if (item.pending) {
+          lines.push("Compaction pending.");
+        } else {
+          lines.push(`Messages: ${item.messages}`);
+          if (item.trigger) lines.push(`Trigger: ${item.trigger}`);
+          if (item.summary.trim()) lines.push("", item.summary.trim());
+        }
+        lines.push("");
+        break;
+    }
+  }
+  return lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
+}
+
+function sessionItemsToJson(title: string, items: Item[], live?: LiveStream): string {
+  return JSON.stringify(
+    {
+      title,
+      exportedAt: new Date().toISOString(),
+      items: materializeLiveItems(items, live),
+    },
+    null,
+    2,
+  );
+}
+
+function safeFilename(name: string): string {
+  const cleaned = name.trim().replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, " ").slice(0, 80);
+  return cleaned || "reasonix-session";
+}
+
+function downloadTextFile(filename: string, text: string, mime: string): void {
+  const blob = new Blob([text], { type: `${mime};charset=utf-8` });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 
 /** Global hotkey handler for shell-expand toggle (Ctrl/Cmd+B). */
 function ShellHotkeys() {
@@ -270,6 +360,7 @@ export default function App() {
   const [tabMetas, setTabMetas] = useState<TabMeta[]>([]);
   const [tabOrderIds, setTabOrderIds] = useState<string[]>([]);
   const [tabRevealSignal, setTabRevealSignal] = useState(0);
+  const [startupSplashVisible, setStartupSplashVisible] = useState<boolean>(() => shouldShowStartupSplash());
   // null until the mount probe resolves; true shows the overlay. Probed once —
   // clearing the key mid-session is the Settings panel's job, not the gate's.
   const [needsOnboarding, setNeedsOnboarding] = useState<boolean | null>(null);
@@ -292,6 +383,7 @@ export default function App() {
   const [capsOpen, setCapsOpen] = useState(false);
   const [renamingTopicId, setRenamingTopicId] = useState<string | null>(null);
   const [topicTitleDraft, setTopicTitleDraft] = useState("");
+  const [topicExportOpen, setTopicExportOpen] = useState(false);
   const topicRenameSkipCommitRef = useRef(false);
   const topicRenameCommitHandledRef = useRef(false);
 
@@ -343,16 +435,23 @@ export default function App() {
       : rightDockTreeWidth;
   const sidebarRenderWidth = sidebarCollapsed ? 0 : sidebarWidth;
   const measuredMainWidth = layoutWidth > 0 ? Math.max(0, layoutWidth - sidebarRenderWidth) : CHAT_MIN_WIDTH + WORKSPACE_RESIZER_WIDTH + preferredWorkspacePanelWidth;
+  const workspacePanelMinWidth = workspacePreviewActive ? RIGHT_DOCK_MIN_WIDTH : RIGHT_DOCK_TREE_MIN_WIDTH;
+
+  const budget = Math.max(0, measuredMainWidth - CHAT_MIN_WIDTH - WORKSPACE_RESIZER_WIDTH);
+  const workspacePanelFloating = workspacePanelOpen && !workspacePanelMaximized && budget < workspacePanelMinWidth;
+
   const resolvedWorkspacePanelWidth = workspacePanelOpen && !workspacePanelMaximized
-    ? resolveRightDockWidth(measuredMainWidth, preferredWorkspacePanelWidth)
+    ? (workspacePanelFloating ? Math.min(measuredMainWidth, Math.max(workspacePanelMinWidth, preferredWorkspacePanelWidth)) : resolveRightDockWidth(measuredMainWidth, preferredWorkspacePanelWidth, workspacePanelMinWidth))
     : preferredWorkspacePanelWidth;
+
   const workspacePanelRenderable = workspacePanelOpen && (workspacePanelMaximized || resolvedWorkspacePanelWidth > 0);
-  const workspacePanelGridOpen = workspacePanelRenderable && !workspacePanelMaximized;
+  const workspacePanelGridOpen = workspacePanelRenderable && !workspacePanelMaximized && !workspacePanelFloating;
   const workspacePanelRenderWidth = workspacePanelMaximized ? preferredWorkspacePanelWidth : resolvedWorkspacePanelWidth;
   const activeTab = useMemo(
     () => tabMetas.find((tab) => tab.id === activeTabId) ?? tabMetas.find((tab) => tab.active),
     [activeTabId, tabMetas],
   );
+  const startupSplashHold = state.meta?.ready !== true && !state.meta?.startupErr;
   const mode = activeTabId ? modesByTab[activeTabId] ?? "normal" : "normal";
   const setMode = useCallback(
     (next: Mode | ((prev: Mode) => Mode)) => {
@@ -515,6 +614,30 @@ export default function App() {
   // and a transcript update collide, the keystroke is processed immediately
   // and the transcript re-render is deferred to idle time.
   const deferredItems = useDeferredValue(state.items);
+  const sessionTitle = topicTitle(activeTab);
+  const sessionMarkdown = useMemo(() => sessionItemsToMarkdown(sessionTitle, state.items, state.live), [sessionTitle, state.items, state.live]);
+  const sessionJson = useMemo(() => sessionItemsToJson(sessionTitle, state.items, state.live), [sessionTitle, state.items, state.live]);
+  const sessionHasContent = state.items.length > 0 || Boolean(state.live?.text || state.live?.reasoning);
+
+  useEffect(() => {
+    if (!topicExportOpen) return;
+    const onDown = (event: MouseEvent) => {
+      const target = event.target as Element | null;
+      if (!target?.closest(".topicbar__export")) setTopicExportOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [topicExportOpen]);
+
+  const exportSession = useCallback(
+    (format: "markdown" | "json") => {
+      const base = safeFilename(sessionTitle);
+      if (format === "json") downloadTextFile(`${base}.json`, sessionJson, "application/json");
+      else downloadTextFile(`${base}.md`, sessionMarkdown, "text/markdown");
+      setTopicExportOpen(false);
+    },
+    [sessionJson, sessionMarkdown, sessionTitle],
+  );
 
   useEffect(() => {
     if (!pendingPlanRevision || state.running) return;
@@ -795,15 +918,24 @@ export default function App() {
   const openWorkspacePanel = useCallback(
     (mode: RightDockMode = rightDockMode) => {
       setRightDockMode(mode);
+      let nextMaximized = workspacePanelMaximized;
       if (mode === "context") {
+        nextMaximized = false;
+        setWorkspacePanelMaximized(false);
+      } else {
+        // When user explicitly opens the panel, we do NOT force maximize.
+        // If there's not enough room, the panel will open in floating mode
+        // over the chat area, preserving the chat area's minimum width
+        // and keeping the panel's close button accessible.
+        nextMaximized = false;
         setWorkspacePanelMaximized(false);
       }
-      if (workspacePanelOpen) {
+      if (workspacePanelOpen && workspacePanelMaximized === nextMaximized) {
         return;
       }
       setWorkspacePanelOpen(true);
     },
-    [rightDockMode, workspacePanelOpen],
+    [rightDockMode, workspacePanelMaximized, workspacePanelOpen],
   );
 
   const closeWorkspacePanel = useCallback(() => {
@@ -1127,7 +1259,6 @@ export default function App() {
     : workspacePreviewActive
     ? RIGHT_DOCK_PREVIEW_DEFAULT_WIDTH
     : defaultRightDockTreeWidth();
-  const workspacePanelMinWidth = workspacePreviewActive ? RIGHT_DOCK_MIN_WIDTH : RIGHT_DOCK_TREE_MIN_WIDTH;
   const workspacePanelMaxWidth = workspacePreviewActive ? RIGHT_DOCK_MAX_WIDTH : RIGHT_DOCK_TREE_MAX_WIDTH;
 
   return (
@@ -1141,7 +1272,7 @@ export default function App() {
           sidebarCollapsed ? "layout--sidebar-collapsed" : "",
           sidebarResizing ? "layout--resizing layout--sidebar-resizing" : "",
           workspacePanelGridOpen ? "layout--workspace-open" : "",
-          workspacePanelOpen && !workspacePanelGridOpen && !workspacePanelMaximized ? "layout--workspace-constrained" : "",
+          workspacePanelFloating ? "layout--workspace-floating" : "",
           workspacePanelOpen && workspacePanelMaximized ? "layout--workspace-maximized" : "",
           workspacePanelResizing ? "layout--resizing layout--workspace-resizing" : "",
         ]
@@ -1191,7 +1322,6 @@ export default function App() {
               activeScope={activeTab?.scope}
               activeWorkspaceRoot={activeTab?.workspaceRoot}
               activeTopicId={activeTab?.topicId}
-              currentWorkspaceName={workspaceDisplayName(state.meta?.cwd)}
               onOpenTopic={handleOpenTopic}
               onOpenProjectHistory={openProjectHistory}
               onTopicsChanged={refreshProjectsAndTabs}
@@ -1200,9 +1330,6 @@ export default function App() {
               onAddProject={async () => {
                 await switchFolder();
               }}
-              onUseCurrentProject={state.meta?.cwd ? async () => {
-                await switchFolder(state.meta?.cwd);
-              } : undefined}
             />
           </section>
 
@@ -1225,16 +1352,13 @@ export default function App() {
                 <span>{t("sidebar.trash")}</span>
               </button>
             </Tooltip>
-            <Tooltip label={t("topbar.memory")} fill side="right" disabled={sidebarNavTooltipDisabled}>
-              <button className="sidebar__navitem" onClick={() => void openMemory()}>
-                <Brain size={15} />
-                <span>{t("topbar.memory")}</span>
-              </button>
-            </Tooltip>
-            <Tooltip label={t("caps.title")} fill side="right" disabled={sidebarNavTooltipDisabled}>
-              <button className="sidebar__navitem" onClick={() => setCapsOpen(true)}>
+            <Tooltip label={t("sidebar.capabilities")} fill side="right" disabled={sidebarNavTooltipDisabled}>
+              <button
+                className="sidebar__navitem"
+                onClick={() => setCapsOpen(true)}
+              >
                 <Blocks size={15} />
-                <span>{t("caps.title")}</span>
+                <span>{t("sidebar.capabilities")}</span>
               </button>
             </Tooltip>
             <Tooltip label={t("topbar.settings")} fill side="right" disabled={sidebarNavTooltipDisabled}>
@@ -1277,20 +1401,20 @@ export default function App() {
             />
             {!workspacePanelMaximized && (
               <Tooltip
-                label={workspacePanelOpen ? t("rightDock.collapse") : t("rightDock.expand")}
+                label={workspacePanelRenderable ? t("rightDock.collapse") : t("rightDock.expand")}
                 className={[
                   "workspace-dock-toggle",
-                  workspacePanelOpen ? "workspace-dock-toggle--open" : "workspace-dock-toggle--closed",
+                  workspacePanelRenderable ? "workspace-dock-toggle--open" : "workspace-dock-toggle--closed",
                 ].join(" ")}
               >
                 <button
                   className="workspace-dock-toggle__button"
                   type="button"
-                  onClick={workspacePanelOpen ? closeWorkspacePanel : () => openWorkspacePanel("files")}
-                  aria-label={workspacePanelOpen ? t("rightDock.collapse") : t("rightDock.expand")}
-                  aria-pressed={workspacePanelOpen}
+                  onClick={workspacePanelRenderable ? closeWorkspacePanel : () => openWorkspacePanel("files")}
+                  aria-label={workspacePanelRenderable ? t("rightDock.collapse") : t("rightDock.expand")}
+                  aria-pressed={workspacePanelRenderable}
                 >
-                  {workspacePanelOpen ? <PanelRightClose size={15} /> : <PanelRightOpen size={15} />}
+                  {workspacePanelRenderable ? <PanelRightClose size={15} /> : <PanelRightOpen size={15} />}
                 </button>
               </Tooltip>
             )}
@@ -1341,11 +1465,39 @@ export default function App() {
             </div>
             <div className="topicbar__spacer" />
             <div className="topicbar__actions">
-              <Tooltip label={t("topicBar.more")}>
-                <button className="topicbar__icon-btn">
-                  <MoreHorizontal size={16} />
-                </button>
-              </Tooltip>
+              <CopyButton
+                text={sessionMarkdown}
+                label={t("topicBar.copyAll")}
+                showLabel={false}
+                className="topicbar__action-btn topicbar__action-btn--icon"
+              />
+              <div className={`topicbar__export${topicExportOpen ? " topicbar__export--open" : ""}`}>
+                <Tooltip label={t("topicBar.export")}>
+                  <button
+                    className="topicbar__action-btn topicbar__action-btn--icon"
+                    type="button"
+                    disabled={!sessionHasContent}
+                    aria-label={t("topicBar.export")}
+                    aria-haspopup="menu"
+                    aria-expanded={topicExportOpen}
+                    onClick={() => setTopicExportOpen((open) => !open)}
+                  >
+                    <Download size={14} />
+                  </button>
+                </Tooltip>
+                {topicExportOpen && (
+                  <div className="topicbar__export-menu" role="menu">
+                    <button type="button" role="menuitem" onClick={() => exportSession("markdown")}>
+                      <FileText size={13} />
+                      <span>{t("topicBar.exportMarkdown")}</span>
+                    </button>
+                    <button type="button" role="menuitem" onClick={() => exportSession("json")}>
+                      <FileJson size={13} />
+                      <span>{t("topicBar.exportJson")}</span>
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </header>
 
@@ -1562,6 +1714,10 @@ export default function App() {
       {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} onChanged={() => void refreshMeta()} />}
 
       {capsOpen && <CapabilitiesPanel onClose={() => setCapsOpen(false)} />}
+
+      {startupSplashVisible && (
+        <StartupSplash hold={startupSplashHold} onDone={() => setStartupSplashVisible(false)} />
+      )}
 
       {needsOnboarding && <OnboardingOverlay onComplete={() => setNeedsOnboarding(false)} />}
     </div>

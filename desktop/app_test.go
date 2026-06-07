@@ -33,12 +33,13 @@ func (a *App) setTestCtrl(ctrl *control.Controller, model string) {
 	}
 	tab := a.tabs["test"]
 	tab.Ctrl = ctrl
+	a.bindControllerDisplayRecorder(ctrl)
 	tab.model = model
 }
 
 func isolateDesktopUserDirs(t *testing.T) string {
 	t.Helper()
-	home := t.TempDir()
+	home := robustTempDir(t)
 	xdg := filepath.Join(home, ".config")
 	appData := filepath.Join(home, "AppData")
 	for _, dir := range []string{xdg, appData} {
@@ -95,6 +96,23 @@ func TestBeforeCloseAllowsSystemQuitWhenBackgroundCloseEnabled(t *testing.T) {
 	}
 }
 
+func TestBackgroundCloseHideStrategyByPlatform(t *testing.T) {
+	tests := []struct {
+		goos string
+		want bool
+	}{
+		{goos: "darwin", want: true},
+		{goos: "windows", want: false},
+		{goos: "linux", want: false},
+		{goos: "freebsd", want: false},
+	}
+	for _, tt := range tests {
+		if got := backgroundCloseUsesApplicationHide(tt.goos); got != tt.want {
+			t.Fatalf("backgroundCloseUsesApplicationHide(%q) = %v, want %v", tt.goos, got, tt.want)
+		}
+	}
+}
+
 func TestEmitReadyInvokesReadyHook(t *testing.T) {
 	app := NewApp()
 	var calls int32
@@ -137,7 +155,7 @@ func TestSetEffortPersistsAndAutoClears(t *testing.T) {
 func TestSettingsUsesUserDesktopPreferencesNotProjectConfig(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
-	project := t.TempDir()
+	project := robustTempDir(t)
 	if err := os.WriteFile(filepath.Join(project, "reasonix.toml"), []byte(`
 [desktop]
 language = "zh"
@@ -177,7 +195,7 @@ close_behavior = "quit"
 func TestSettingsSeedsMissingUserConfigFromLegacyProjectConfig(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
-	project := t.TempDir()
+	project := robustTempDir(t)
 	if err := os.WriteFile(filepath.Join(project, "reasonix.toml"), []byte(`
 default_model = "legacy-provider/legacy-model"
 
@@ -213,6 +231,42 @@ close_behavior = "quit"
 	userCfg := config.LoadForEdit(config.UserConfigPath())
 	if userCfg.DesktopLanguage() != "en" || userCfg.DesktopTheme() != "light" || userCfg.DesktopThemeStyle() != "glacier" || userCfg.DesktopCloseBehavior() != "quit" {
 		t.Fatalf("saved user config did not preserve seeded desktop prefs: lang:%q theme:%q style:%q close:%q", userCfg.DesktopLanguage(), userCfg.DesktopTheme(), userCfg.DesktopThemeStyle(), userCfg.DesktopCloseBehavior())
+	}
+}
+
+func TestSettingsSubagentDefaultsRoundTrip(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	if err := os.MkdirAll(filepath.Dir(config.UserConfigPath()), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.WriteFile(config.UserConfigPath(), []byte(`
+default_model = "deepseek/deepseek-v4-flash"
+
+[[providers]]
+name = "deepseek"
+kind = "openai"
+base_url = "https://api.deepseek.com"
+models = ["deepseek-v4-flash", "deepseek-v4-pro"]
+default = "deepseek-v4-flash"
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	app := NewApp()
+	if err := app.SetSubagentModel("deepseek/deepseek-v4-pro"); err != nil {
+		t.Fatalf("SetSubagentModel: %v", err)
+	}
+	if err := app.SetSubagentEffort("max"); err != nil {
+		t.Fatalf("SetSubagentEffort: %v", err)
+	}
+
+	got := app.Settings()
+	if got.SubagentModel != "deepseek/deepseek-v4-pro" || got.SubagentEffort != "max" {
+		t.Fatalf("subagent settings = model:%q effort:%q", got.SubagentModel, got.SubagentEffort)
+	}
+	cfg := config.LoadForEdit(config.UserConfigPath())
+	if cfg.Agent.SubagentModel != "deepseek/deepseek-v4-pro" || cfg.Agent.SubagentEffort != "max" {
+		t.Fatalf("saved config = model:%q effort:%q", cfg.Agent.SubagentModel, cfg.Agent.SubagentEffort)
 	}
 }
 
@@ -290,7 +344,7 @@ func TestSearchFileRefsFindsNestedBasename(t *testing.T) {
 	orig, _ := os.Getwd()
 	defer os.Chdir(orig)
 
-	dir := t.TempDir()
+	dir := robustTempDir(t)
 	if err := os.MkdirAll(filepath.Join(dir, "frontend", "wailsjs", "runtime"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -303,16 +357,31 @@ func TestSearchFileRefsFindsNestedBasename(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "node_modules", "pkg", "runtime.js"), []byte("noise"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.MkdirAll(filepath.Join(dir, ".codegraph", "cache"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".codegraph", "cache", "runtime.js"), []byte("index"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Chdir(dir); err != nil {
 		t.Fatal(err)
 	}
 
-	got := (&App{}).SearchFileRefs("runtime.js")
+	app := &App{}
+	listed := app.ListDir("")
+	if hasDirEntry(listed, ".codegraph") {
+		t.Fatalf("ListDir should hide CodeGraph project index, got %+v", listed)
+	}
+
+	got := app.SearchFileRefs("runtime.js")
 	if !hasDirEntry(got, "frontend/wailsjs/runtime/runtime.js") {
 		t.Fatalf("SearchFileRefs(runtime.js) should find nested workspace file, got %+v", got)
 	}
 	if hasDirEntry(got, "node_modules/pkg/runtime.js") {
 		t.Fatalf("SearchFileRefs should skip node_modules noise, got %+v", got)
+	}
+	if hasDirEntry(got, ".codegraph/cache/runtime.js") {
+		t.Fatalf("SearchFileRefs should skip CodeGraph project index, got %+v", got)
 	}
 }
 
@@ -320,8 +389,8 @@ func TestFileRefsUseActiveTabWorkspaceRoot(t *testing.T) {
 	orig, _ := os.Getwd()
 	defer os.Chdir(orig)
 
-	launchRoot := t.TempDir()
-	projectRoot := t.TempDir()
+	launchRoot := robustTempDir(t)
+	projectRoot := robustTempDir(t)
 	if err := os.WriteFile(filepath.Join(launchRoot, "launch-only.txt"), []byte("wrong"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -460,10 +529,58 @@ func (r *appendingDesktopRunner) Run(_ context.Context, input string) error {
 	return nil
 }
 
+func TestSubmitToTabHistoryDisplaysRawInputAfterMemoryCompose(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	path := filepath.Join(dir, "memory-display.jsonl")
+	sess := agent.NewSession("sys")
+	exec := agent.New(nil, nil, sess, agent.Options{}, event.Discard)
+	runner := &appendingDesktopRunner{session: sess, started: make(chan string, 1)}
+	ctrl := control.New(control.Options{
+		Runner:      runner,
+		Executor:    exec,
+		Sink:        event.Discard,
+		SessionDir:  dir,
+		SessionPath: path,
+		Label:       "test",
+	})
+	defer ctrl.Close()
+
+	app := NewApp()
+	app.setTestCtrl(ctrl, "deepseek/test")
+	ctrl.QueueMemory(`Saved memory "reasonix-contributions": contribution count updated`)
+
+	const prompt = "不要，删了"
+	app.SubmitToTab("test", prompt)
+	composed := <-runner.started
+	waitNotRunning(t, ctrl)
+
+	if !strings.Contains(composed, "<memory-update>") || !strings.HasSuffix(composed, prompt) {
+		t.Fatalf("model input should include memory update followed by prompt, got %q", composed)
+	}
+	got := app.HistoryForTab("test")
+	if len(got) < 2 {
+		t.Fatalf("history length = %d, want user + assistant", len(got))
+	}
+	if got[0].Role != "system" || got[1].Role != "user" {
+		t.Fatalf("history roles = %+v, want system then user", got[:min(len(got), 2)])
+	}
+	if got[1].Content != prompt {
+		t.Fatalf("displayed user content = %q, want %q", got[1].Content, prompt)
+	}
+	if strings.Contains(got[1].Content, "<memory-update>") {
+		t.Fatalf("displayed user content leaked memory update: %q", got[1].Content)
+	}
+}
+
 func TestForkCreatesActiveTabWithoutSwitchingSourceController(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
-	workspace := t.TempDir()
+	workspace := robustTempDir(t)
 	if err := os.WriteFile(filepath.Join(workspace, "reasonix.toml"), []byte("[codegraph]\nenabled = false\n"), 0o644); err != nil {
 		t.Fatalf("write workspace config: %v", err)
 	}
@@ -554,9 +671,9 @@ func TestForkCreatesActiveTabWithoutSwitchingSourceController(t *testing.T) {
 	}
 }
 
-func TestCapabilitiesShowsLazyMCPAsDeferredNotDisabled(t *testing.T) {
+func TestCapabilitiesShowsDefaultMCPAsInitializingNotDisabled(t *testing.T) {
 	isolateDesktopUserDirs(t)
-	dir := t.TempDir()
+	dir := robustTempDir(t)
 	t.Chdir(dir)
 	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
 [codegraph]
@@ -581,8 +698,8 @@ args = ["-y", "@playwright/mcp"]
 	view := app.Capabilities()
 	for _, s := range view.Servers {
 		if s.Name == "playwright" {
-			if s.Status != "deferred" {
-				t.Fatalf("lazy MCP status = %q, want deferred; server = %+v", s.Status, s)
+			if s.Status != "initializing" {
+				t.Fatalf("default MCP status = %q, want initializing; server = %+v", s.Status, s)
 			}
 			return
 		}
@@ -592,7 +709,7 @@ args = ["-y", "@playwright/mcp"]
 
 func TestCapabilitiesShowsDefaultCodegraphDisabled(t *testing.T) {
 	isolateDesktopUserDirs(t)
-	dir := t.TempDir()
+	dir := robustTempDir(t)
 	t.Chdir(dir)
 
 	app := NewApp()
@@ -611,8 +728,8 @@ func TestCapabilitiesShowsDefaultCodegraphDisabled(t *testing.T) {
 			if s.AutoStart {
 				t.Fatalf("codegraph autoStart = true, want false; server = %+v", s)
 			}
-			if s.Tier != "lazy" {
-				t.Fatalf("codegraph tier = %q, want lazy; server = %+v", s.Tier, s)
+			if s.Tier != "background" {
+				t.Fatalf("codegraph tier = %q, want background; server = %+v", s.Tier, s)
 			}
 			return
 		}
@@ -620,9 +737,9 @@ func TestCapabilitiesShowsDefaultCodegraphDisabled(t *testing.T) {
 	t.Fatalf("codegraph missing from Capabilities: %+v", view.Servers)
 }
 
-func TestCapabilitiesMarksDeferredRemoteMCPAuthPossible(t *testing.T) {
+func TestCapabilitiesMarksBackgroundRemoteMCPAuthPossible(t *testing.T) {
 	isolateDesktopUserDirs(t)
-	dir := t.TempDir()
+	dir := robustTempDir(t)
 	t.Chdir(dir)
 	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
 [codegraph]
@@ -644,7 +761,7 @@ tier = "lazy"
 	view := app.Capabilities()
 	for _, s := range view.Servers {
 		if s.Name == "dida" {
-			if s.Status != "deferred" || s.AuthStatus != "possible" || s.AuthURL != "https://mcp.dida365.com" {
+			if s.Status != "initializing" || s.AuthStatus != "possible" || s.AuthURL != "https://mcp.dida365.com" {
 				t.Fatalf("dida auth diagnosis = %+v", s)
 			}
 			return
@@ -655,7 +772,7 @@ tier = "lazy"
 
 func TestCapabilitiesDoesNotMarkRemoteMCPWithAuthHeaderPossible(t *testing.T) {
 	isolateDesktopUserDirs(t)
-	dir := t.TempDir()
+	dir := robustTempDir(t)
 	t.Chdir(dir)
 	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
 [codegraph]
@@ -689,7 +806,7 @@ tier = "lazy"
 
 func TestCapabilitiesMarksAuthFailureRequired(t *testing.T) {
 	isolateDesktopUserDirs(t)
-	dir := t.TempDir()
+	dir := robustTempDir(t)
 	t.Chdir(dir)
 	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
 [codegraph]
@@ -724,7 +841,7 @@ tier = "lazy"
 
 func TestClearMCPServerAuthenticationClearsConfigAndFailure(t *testing.T) {
 	isolateDesktopUserDirs(t)
-	dir := t.TempDir()
+	dir := robustTempDir(t)
 	t.Chdir(dir)
 	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
 [codegraph]
@@ -776,8 +893,8 @@ tier = "lazy"
 	view := app.Capabilities()
 	for _, s := range view.Servers {
 		if s.Name == "figma" {
-			if s.Status != "deferred" || s.AuthStatus != "possible" {
-				t.Fatalf("figma should return to deferred possible auth: %+v", s)
+			if s.Status != "initializing" || s.AuthStatus != "possible" {
+				t.Fatalf("figma should return to background possible auth: %+v", s)
 			}
 			return
 		}
@@ -785,9 +902,9 @@ tier = "lazy"
 	t.Fatalf("figma MCP missing from Capabilities: %+v", view.Servers)
 }
 
-func TestUpdateMCPServerKeepsLazyMCPDeferred(t *testing.T) {
+func TestUpdateMCPServerMigratesLegacyTierToBackground(t *testing.T) {
 	isolateDesktopUserDirs(t)
-	dir := t.TempDir()
+	dir := robustTempDir(t)
 	t.Chdir(dir)
 	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
 [codegraph]
@@ -798,6 +915,7 @@ name = "playwright"
 command = "npx"
 args = ["-y", "@playwright/mcp"]
 env = { TOKEN = "${PLAYWRIGHT_TOKEN}" }
+tier = "lazy"
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -815,7 +933,6 @@ env = { TOKEN = "${PLAYWRIGHT_TOKEN}" }
 		Transport: "stdio",
 		Command:   "node",
 		Args:      []string{"server.js"},
-		Tier:      "lazy",
 	}); err != nil {
 		t.Fatalf("UpdateMCPServer: %v", err)
 	}
@@ -837,6 +954,9 @@ env = { TOKEN = "${PLAYWRIGHT_TOKEN}" }
 	if userPlugin.Command != "node" || userPlugin.Env["TOKEN"] != "${PLAYWRIGHT_TOKEN}" {
 		t.Fatalf("user plugin after migration = %+v", userPlugin)
 	}
+	if userPlugin.Tier != "" {
+		t.Fatalf("user plugin tier = %q, want migrated empty", userPlugin.Tier)
+	}
 	projectCfg := config.LoadForEdit(filepath.Join(dir, "reasonix.toml"))
 	if _, ok := findPluginEntry(projectCfg.Plugins, "playwright"); ok {
 		t.Fatalf("project plugin should be removed after desktop migration: %+v", projectCfg.Plugins)
@@ -844,8 +964,8 @@ env = { TOKEN = "${PLAYWRIGHT_TOKEN}" }
 	view := app.Capabilities()
 	for _, s := range view.Servers {
 		if s.Name == "playwright" {
-			if s.Status != "deferred" {
-				t.Fatalf("updated lazy MCP status = %q, want deferred; server = %+v", s.Status, s)
+			if s.Status != "failed" {
+				t.Fatalf("updated MCP status = %q, want failed after immediate reconnect attempt; server = %+v", s.Status, s)
 			}
 			if s.Command != "node" || len(s.Args) != 1 || s.Args[0] != "server.js" {
 				t.Fatalf("server command not refreshed: %+v", s)
@@ -899,7 +1019,7 @@ args = ["-y", "@playwright/mcp"]
 
 func TestUpdateMCPServerRecordsReconnectFailure(t *testing.T) {
 	isolateDesktopUserDirs(t)
-	dir := t.TempDir()
+	dir := robustTempDir(t)
 	t.Chdir(dir)
 	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
 [codegraph]
@@ -908,7 +1028,7 @@ enabled = false
 [[plugins]]
 name = "broken"
 command = "npx"
-tier = "lazy"
+tier = "background"
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -921,7 +1041,6 @@ tier = "lazy"
 		Name:      "broken",
 		Transport: "stdio",
 		Command:   "reasonix-missing-mcp-binary",
-		Tier:      "background",
 	}); err != nil {
 		t.Fatalf("UpdateMCPServer should persist config even when reconnect fails: %v", err)
 	}
@@ -932,8 +1051,8 @@ tier = "lazy"
 	if got := cfg.Plugins[0].Command; got != "reasonix-missing-mcp-binary" {
 		t.Fatalf("updated command = %q, want missing binary", got)
 	}
-	if got := cfg.Plugins[0].Tier; got != "background" {
-		t.Fatalf("updated tier = %q, want background", got)
+	if got := cfg.Plugins[0].Tier; got != "" {
+		t.Fatalf("updated tier = %q, want migrated empty", got)
 	}
 	if !mcpFailed(app.activeCtrl(), "broken") {
 		t.Fatalf("Host.Failures() = %+v, want broken failure recorded", app.activeCtrl().Host().Failures())
@@ -955,7 +1074,7 @@ tier = "lazy"
 
 func TestSetMCPServerTierRecordsConnectFailure(t *testing.T) {
 	isolateDesktopUserDirs(t)
-	dir := t.TempDir()
+	dir := robustTempDir(t)
 	t.Chdir(dir)
 	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
 [codegraph]
@@ -978,22 +1097,22 @@ tier = "lazy"
 	}()
 
 	if err := app.SetMCPServerTier("broken", "background"); err != nil {
-		t.Fatalf("SetMCPServerTier should persist tier even when immediate connect fails: %v", err)
+		t.Fatalf("SetMCPServerTier legacy binding: %v", err)
 	}
 	cfg, err := config.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := cfg.Plugins[0].Tier; got != "background" {
-		t.Fatalf("saved tier = %q, want background", got)
+	if got := cfg.Plugins[0].Tier; got != "" {
+		t.Fatalf("saved tier = %q, want migrated empty", got)
 	}
 	userCfg := config.LoadForEdit(config.UserConfigPath())
 	userPlugin, ok := findPluginEntry(userCfg.Plugins, "broken")
 	if !ok {
 		t.Fatalf("broken should be migrated to user config: %+v", userCfg.Plugins)
 	}
-	if userPlugin.Tier != "background" {
-		t.Fatalf("user plugin tier = %q, want background", userPlugin.Tier)
+	if userPlugin.Tier != "" {
+		t.Fatalf("user plugin tier = %q, want migrated empty", userPlugin.Tier)
 	}
 	projectCfg := config.LoadForEdit(filepath.Join(dir, "reasonix.toml"))
 	if _, ok := findPluginEntry(projectCfg.Plugins, "broken"); ok {
@@ -1018,13 +1137,13 @@ tier = "lazy"
 }
 
 func TestSetMCPServerTierPersistsCodegraphConfig(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("USERPROFILE", t.TempDir())
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	t.Setenv("AppData", t.TempDir())
-	t.Setenv("PATH", t.TempDir())
-	t.Setenv("REASONIX_CACHE_DIR", t.TempDir()) // isolate the codegraph bundle cache so Resolve fails deterministically
-	dir := t.TempDir()
+	t.Setenv("HOME", robustTempDir(t))
+	t.Setenv("USERPROFILE", robustTempDir(t))
+	t.Setenv("XDG_CONFIG_HOME", robustTempDir(t))
+	t.Setenv("AppData", robustTempDir(t))
+	t.Setenv("PATH", robustTempDir(t))
+	t.Setenv("REASONIX_CACHE_DIR", robustTempDir(t)) // isolate the codegraph bundle cache so Resolve fails deterministically
+	dir := robustTempDir(t)
 	t.Chdir(dir)
 	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
 [codegraph]
@@ -1048,15 +1167,15 @@ auto_install = true
 	if !cfg.Codegraph.Enabled {
 		t.Fatal("codegraph enabled = false, want true after selecting a startup tier")
 	}
-	if got := cfg.Codegraph.Tier; got != "background" {
-		t.Fatalf("codegraph tier = %q, want background", got)
+	if got := cfg.Codegraph.Tier; got != "" {
+		t.Fatalf("codegraph tier = %q, want migrated empty", got)
 	}
 	userCfg := config.LoadForEdit(config.UserConfigPath())
 	if !userCfg.Codegraph.Enabled {
 		t.Fatal("user codegraph enabled = false, want true after selecting a startup tier")
 	}
-	if got := userCfg.Codegraph.Tier; got != "background" {
-		t.Fatalf("user codegraph tier = %q, want background", got)
+	if got := userCfg.Codegraph.Tier; got != "" {
+		t.Fatalf("user codegraph tier = %q, want migrated empty", got)
 	}
 	if !mcpFailed(app.activeCtrl(), "codegraph") {
 		t.Fatalf("Host.Failures() = %+v, want codegraph failure recorded for missing runtime", app.activeCtrl().Host().Failures())
@@ -1078,7 +1197,7 @@ auto_install = true
 
 func TestSetMCPServerEnabledPersistsCodegraphOff(t *testing.T) {
 	isolateDesktopUserDirs(t)
-	dir := t.TempDir()
+	dir := robustTempDir(t)
 	t.Chdir(dir)
 	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
 [codegraph]
@@ -1118,9 +1237,9 @@ tier = "lazy"
 	t.Fatalf("codegraph missing from Capabilities: %+v", view.Servers)
 }
 
-func TestCapabilitiesKeepsFailedMCPConfiguredTierAfterRestart(t *testing.T) {
+func TestCapabilitiesMigratesFailedMCPConfiguredTierAfterRestart(t *testing.T) {
 	isolateDesktopUserDirs(t)
-	dir := t.TempDir()
+	dir := robustTempDir(t)
 	t.Chdir(dir)
 	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
 [codegraph]
@@ -1149,8 +1268,8 @@ tier = "eager"
 			if s.Status != "failed" {
 				t.Fatalf("server status = %q, want failed; server = %+v", s.Status, s)
 			}
-			if s.Tier != "eager" {
-				t.Fatalf("server tier = %q, want eager so failed UI preserves the configured selection", s.Tier)
+			if s.Tier != "background" {
+				t.Fatalf("server tier = %q, want migrated background default", s.Tier)
 			}
 			if !s.Configured {
 				t.Fatalf("server configured = false, want true; server = %+v", s)

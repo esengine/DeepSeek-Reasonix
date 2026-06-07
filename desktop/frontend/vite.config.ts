@@ -1,6 +1,8 @@
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 
+const devPort = Number(process.env.REASONIX_DESKTOP_VITE_PORT || "5173");
+
 // On macOS ≤ 12 (Safari 15 WebKit) a crossorigin module/stylesheet fetched over the
 // wails:// scheme is CORS-blocked (no Access-Control-Allow-Origin from the handler),
 // so the bundle never loads and the window paints blank; newer WebKit tolerates it.
@@ -57,7 +59,7 @@ export default defineConfig({
     // Bind IPv4 — unset host listens on ::1, and the Wails dev proxy's [::1]
     // dial fails on Windows hosts where IPv6 loopback is filtered.
     host: "127.0.0.1",
-    port: 5173,
+    port: devPort,
     strictPort: true,
   },
 });

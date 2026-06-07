@@ -24,6 +24,7 @@ import (
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/i18n"
+	"reasonix/internal/notify"
 	"reasonix/internal/provider"
 	"reasonix/internal/provider/openai"
 	"reasonix/internal/serve"
@@ -42,6 +43,9 @@ func Run(args []string, version string) int {
 	cmd := ""
 	if len(args) > 0 {
 		cmd = args[0]
+	}
+	if cmd == "--acp" {
+		cmd = "acp"
 	}
 	if shouldMigrateLegacyConfigForCLI(cmd) {
 		migrateLegacyConfigForCLI()
@@ -181,6 +185,16 @@ func chdirTo(dir string) int {
 	return 0
 }
 
+var newNotificationSender = func() notify.Sender { return notify.NewPlatformSender() }
+
+// withNotifications adds system notifications to CLI event streams when configured.
+func withNotifications(sink event.Sink, cfg *config.Config) event.Sink {
+	if cfg == nil || !cfg.Notifications.Enabled {
+		return sink
+	}
+	return notify.NewSink(sink, newNotificationSender(), cfg.Notifications)
+}
+
 func runAgent(args []string) int {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	model := fs.String("model", "", "provider name (default: config default_model)")
@@ -194,6 +208,7 @@ func runAgent(args []string) int {
 	if rc := chdirTo(*dir); rc != 0 {
 		return rc
 	}
+	cfg, _ := config.Load()
 	configureCLIThemeFromConfigForTTYOutput()
 
 	prompt := strings.TrimSpace(strings.Join(fs.Args(), " "))
@@ -227,6 +242,7 @@ func runAgent(args []string) int {
 		metrics = &metricsSink{inner: textSink}
 		sink = metrics
 	}
+	sink = withNotifications(sink, cfg)
 	ctrl, err := setup(ctx, *model, *maxSteps, true, sink)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
@@ -235,6 +251,9 @@ func runAgent(args []string) int {
 	defer ctrl.Close()
 
 	runErr := ctrl.Run(ctx, prompt)
+	if cfg != nil {
+		notify.SendEvent(newNotificationSender(), cfg.Notifications, event.Event{Kind: event.TurnDone, Err: runErr})
+	}
 	if metrics != nil {
 		if err := writeMetrics(*metricsPath, metrics.m); err != nil {
 			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
@@ -312,7 +331,8 @@ func chatREPL(args []string) int {
 	if rc := chdirTo(*dir); rc != 0 {
 		return rc
 	}
-	if cfg, err := config.Load(); err == nil {
+	cfg, err := config.Load()
+	if err == nil {
 		configureCLIThemeWithStyle(cfg.UITheme(), cfg.UIThemeStyle())
 	}
 
@@ -347,7 +367,8 @@ func chatREPL(args []string) int {
 	// agent goroutine.
 	eventCh := make(chan event.Event, 1024)
 
-	sink := &eventSink{ch: eventCh}
+	var sink event.Sink = &eventSink{ch: eventCh}
+	sink = withNotifications(sink, cfg)
 	ctrl, err := setup(ctx, *model, *maxSteps, false, sink)
 	if err != nil && errors.Is(err, boot.ErrUnknownModel) && isInteractive() && config.SourcePath() == "" {
 		// True first run whose default model can't resolve: guide setup, then retry.
@@ -541,8 +562,7 @@ func setupConfig(args []string) int {
 			return 1
 		}
 		in := bufio.NewScanner(os.Stdin)
-		ans := ask(in, os.Stdout, fmt.Sprintf(i18n.M.ConfirmReconfigureFmt, path), "N")
-		if ans != "y" && ans != "Y" {
+		if !confirmReconfigureExistingConfig(path, in, os.Stdout) {
 			fmt.Println(i18n.M.KeepingExisting)
 			return 0
 		}
@@ -557,6 +577,11 @@ func setupConfig(args []string) int {
 		return rc
 	}
 	return writeDefaultConfig(t.config)
+}
+
+func confirmReconfigureExistingConfig(path string, in *bufio.Scanner, w io.Writer) bool {
+	ans := ask(in, w, fmt.Sprintf(i18n.M.ConfirmReconfigureFmt, path), "y/N")
+	return ans == "y" || ans == "Y"
 }
 
 func writeDefaultConfig(path string) int {
@@ -1296,17 +1321,12 @@ func providersWithMissingKeys(cfg *config.Config) []config.ProviderEntry {
 }
 
 // configureKeys reconciles each enabled provider's API key with the
-// environment. For every distinct api_key_env: if the variable is already
-// set — either by loadDotEnv from .env, or by an earlier wizard step that
-// called os.Setenv (the URL-fetch flow asks for the key once so it can call
-// /models) — the existing value is reused and a single-line confirmation is
-// printed so the user can see why no prompt appeared. Otherwise the user is
-// asked once per env var (deduped across providers that share one, e.g.
-// both DeepSeek models). Returns KEY=value lines to append to .env: any
-// env var that was already set in the process goes through too, so a
-// re-run of `reasonix setup` re-pins the current value into .env (a
-// loadDotEnv is first-wins, so without re-pinning, an old .env line would
-// shadow the fresh value).
+// environment. For every distinct api_key_env: if the variable is already set,
+// setup asks whether to re-enter it; Enter keeps and re-pins the existing value.
+// Otherwise the user is asked once per env var (deduped across providers that
+// share one, e.g. both DeepSeek models). Returns KEY=value lines to append to
+// .env. Re-pinning matters because loadDotEnv is first-wins, so a stale key left
+// earlier in the credentials file would otherwise keep shadowing the fresh value.
 func configureKeys(selected []config.ProviderEntry, r io.Reader, w io.Writer) []string {
 	in := bufio.NewScanner(r)
 	fmt.Fprintln(w, "\n"+i18n.M.EnterAPIKeysHeader)
@@ -1319,11 +1339,14 @@ func configureKeys(selected []config.ProviderEntry, r io.Reader, w io.Writer) []
 		}
 		seen[p.APIKeyEnv] = true
 
-		// Reuse any value the wizard or .env already set. The URL-fetch
-		// flow (promptCustomProviderFromURL) calls os.Setenv(keyEnv, apiKey)
-		// before the /models probe; that value is the user's "real" key
-		// and we'd be wrong to discard it by asking again.
 		if cur := os.Getenv(p.APIKeyEnv); cur != "" {
+			reset := ask(in, w, "  "+fmt.Sprintf(i18n.M.APIKeyResetPromptFmt, p.APIKeyEnv), "y/N")
+			if reset == "y" || reset == "Y" {
+				if key := ask(in, w, "  "+p.APIKeyEnv, ""); key != "" {
+					envLines = append(envLines, p.APIKeyEnv+"="+key)
+					continue
+				}
+			}
 			fmt.Fprintf(w, "  %s %s\n", green("✓"), fmt.Sprintf(i18n.M.APIKeyAlreadySetFmt, p.APIKeyEnv))
 			envLines = append(envLines, p.APIKeyEnv+"="+cur)
 			continue

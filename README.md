@@ -179,6 +179,11 @@ url     = "https://mcp.stripe.com"
 headers = { Authorization = "Bearer ${STRIPE_KEY}" }
 ```
 
+Enabled MCP servers start connecting automatically in the background after a
+session begins, so chat stays usable while tools come online. Use `/mcp` or the
+desktop MCP panel to refresh status, reconnect a server, inspect failures, or
+disable a server for the current session.
+
 **Already have an `.mcp.json`?** Drop it in the project root and Reasonix
 reads it as-is — the `mcpServers` spec (`command`/`args`/`env`, `type`/`url`/
 `headers`, `${VAR}` expansion) maps field-for-field onto `[[plugins]]`. Both
@@ -242,6 +247,10 @@ separate cache-stable sessions) is a one-line edit afterwards — set
 [agent]
 planner_model = "deepseek-pro"   # used as the low-frequency planner
 ```
+
+The planner sees loaded `REASONIX.md` / `AGENTS.md` memory and a small read-only
+research tool set, so it can inspect relevant files before handing a plan to the
+executor. Writer and workflow tools remain executor-only.
 
 Subagent skills inherit the executor model by default. Set `subagent_model` to
 run them on another configured model, or use `subagent_models` to override only

@@ -3,13 +3,18 @@ package serve
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"reasonix/internal/config"
 	"reasonix/internal/control"
+	"reasonix/internal/provider"
 )
 
 // fakeRunner stands in for an agent.Runner: it records the composed input and
@@ -85,6 +90,29 @@ func TestServeEndpoints(t *testing.T) {
 
 	if resp, _ := http.Post(srv.URL+"/submit", "application/json", strings.NewReader(`{}`)); resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("empty submit should be 400, got %d", resp.StatusCode)
+	}
+}
+
+func TestHistoryMessagesPreserveToolDetails(t *testing.T) {
+	got := historyMessages([]provider.Message{
+		{Role: provider.RoleUser, Content: "run command"},
+		{Role: provider.RoleAssistant, Content: "checking", ReasoningContent: "think", ToolCalls: []provider.ToolCall{{
+			ID: "call_1", Name: "bash", Arguments: `{"command":"pwd"}`,
+		}}},
+		{Role: provider.RoleTool, Name: "bash", ToolCallID: "call_1", Content: "/tmp/project\n"},
+	})
+
+	if len(got) != 3 {
+		t.Fatalf("history length = %d, want 3", len(got))
+	}
+	if got[1].Reasoning != "think" {
+		t.Fatalf("assistant reasoning = %q, want think", got[1].Reasoning)
+	}
+	if len(got[1].ToolCalls) != 1 || got[1].ToolCalls[0].ID != "call_1" || got[1].ToolCalls[0].Name != "bash" || got[1].ToolCalls[0].Arguments != `{"command":"pwd"}` {
+		t.Fatalf("assistant tool calls not preserved: %+v", got[1].ToolCalls)
+	}
+	if got[2].ToolCallID != "call_1" || got[2].ToolName != "bash" || got[2].Content != "/tmp/project\n" {
+		t.Fatalf("tool result details not preserved: %+v", got[2])
 	}
 }
 
@@ -177,6 +205,110 @@ func TestServeIndexPage(t *testing.T) {
 	ct := resp.Header.Get("Content-Type")
 	if !strings.Contains(ct, "text/html") {
 		t.Errorf("index content-type = %q, want text/html", ct)
+	}
+}
+
+func TestServeIndexPagePassesLanguagePreferenceToClient(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+
+	bc := NewBroadcaster()
+	ctrl := control.New(control.Options{Sink: bc})
+	srv := httptest.NewServer(New(ctrl, bc).Handler())
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(body)
+	if !strings.Contains(html, "const __LANG_PREF = 'auto';") {
+		t.Fatalf("default language preference was not passed as auto:\n%s", html)
+	}
+	if !strings.Contains(html, "applyStaticI18n();") {
+		t.Fatal("index should translate static __('key') placeholders on the client")
+	}
+
+	cfgPath := config.UserConfigPath()
+	if cfgPath == "" {
+		t.Fatal("user config path is empty")
+	}
+	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cfgPath, []byte("[desktop]\nlanguage = \"en\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err = http.Get(srv.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "const __LANG_PREF = 'en';") {
+		t.Fatalf("pinned desktop language was not passed through:\n%s", string(body))
+	}
+}
+
+func TestDeleteSessionRequiresSessionNameInsideSessionDir(t *testing.T) {
+	dir := t.TempDir()
+	active := filepath.Join(dir, "active.jsonl")
+	old := filepath.Join(dir, "old.jsonl")
+	for _, path := range []string{active, old} {
+		if err := os.WriteFile(path, []byte(`{"role":"user","content":"hi"}`+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sibling := dir + "-other"
+	if err := os.MkdirAll(sibling, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	escape := filepath.Join(sibling, "escape.jsonl")
+	if err := os.WriteFile(escape, []byte("keep\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	bc := NewBroadcaster()
+	ctrl := control.New(control.Options{Sink: bc, SessionDir: dir, SessionPath: active})
+	srv := httptest.NewServer(New(ctrl, bc).Handler())
+	defer srv.Close()
+
+	post := func(body string) int {
+		resp, err := http.Post(srv.URL+"/delete-session", "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	if got := post(`{"path":"` + escape + `"}`); got != http.StatusBadRequest {
+		t.Fatalf("legacy path delete status = %d, want 400", got)
+	}
+	if got := post(`{"name":"../` + filepath.Base(sibling) + `/escape"}`); got != http.StatusBadRequest {
+		t.Fatalf("sibling traversal status = %d, want 400", got)
+	}
+	if _, err := os.Stat(escape); err != nil {
+		t.Fatalf("sibling session was removed: %v", err)
+	}
+	if got := post(`{"name":"active"}`); got != http.StatusConflict {
+		t.Fatalf("active delete status = %d, want 409", got)
+	}
+	if got := post(`{"name":"old"}`); got != http.StatusNoContent {
+		t.Fatalf("valid delete status = %d, want 204", got)
+	}
+	if _, err := os.Stat(old); !os.IsNotExist(err) {
+		t.Fatalf("old session still exists or stat failed unexpectedly: %v", err)
 	}
 }
 

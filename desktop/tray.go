@@ -4,7 +4,6 @@ import (
 	"sync"
 
 	"fyne.io/systray"
-	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 type desktopTray struct {
@@ -32,6 +31,8 @@ func (a *App) startTray() {
 		systray.SetTitle("Reasonix")
 		systray.SetTooltip("Reasonix")
 		systray.SetOnTapped(func() { a.showFromTray() })
+		// Keep secondary/right-click on systray's native menu path.
+		systray.SetOnSecondaryTapped(nil)
 
 		labels := trayMenuLabels(a.trayLocale())
 		t.openItem = systray.AddMenuItem(labels.openTitle, labels.openTooltip)
@@ -95,9 +96,7 @@ func (a *App) showFromTray() {
 	if ctx == nil {
 		return
 	}
-	wruntime.Show(ctx)
-	wruntime.WindowShow(ctx)
-	wruntime.WindowUnminimise(ctx)
+	showFromBackground(ctx)
 }
 
 func (a *App) quitFromTray() {
