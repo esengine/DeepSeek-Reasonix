@@ -1,451 +1,512 @@
-# Reasonix 智能体能力评估报告
+# Reasonix 智能体能力评估报告（完整版）
 
 **报告日期**: 2026-06-07  
-**评估范围**: 从智能体（Agent）能力角度评估项目成熟度，不涉及商业/插件市场层面  
-**评估方法**: 源代码分析（~19,000 行 Go 代码）
+**评估范围**: 编码智能体（Coding Agent）全部核心能力维度，不涉及商业运营/插件市场  
+**评估方法**: 源代码分析（~19,000 行 Go 代码），覆盖全部 29 个内部包  
+**对比基准**: Claude Code CLI（行业标杆）
 
 ---
 
-## 总评
+## 快速总览
 
-| 维度 | 评分 | 一句话概括 |
+| 分类 | 评分 | 一句话概括 |
 |:-----|:----:|:----------|
-| **工具系统 (Tools)** | ★★★★★ | 17 个内置工具 + 动态注册，完备且成熟 |
-| **LLM 提供商** | ★★★★★ | 可插拔架构，开源模型中独一档 |
-| **提示缓存** | ★★★★★ | 缓存稳定前缀是架构级设计 |
-| **回环防护** | ★★★★★ | 风暴检测 + 重复阻断，双保险 |
-| **证据系统** | ★★★★★ | 防幻觉的独特设计 |
-| **MCP/插件** | ★★★★☆ | 协议完整，但缺插件发现/市场 |
-| **Skill 技能** | ★★★★☆ | 多种约定兼容，子代理隔离 |
-| **Hook 钩子** | ★★★★☆ | 10 个事件点，但缺 HTTP hooks |
-| **LSP/CodeGraph** | ★★★★☆ | 14 语言 LSP + 树搜索器符号分析 |
-| **权限/沙箱** | ★★★★☆ | 四层防护，但 Linux 沙箱不完整 |
-| **记忆系统** | ★★★★☆ | 层级文档 + 自动记忆 |
-| **前端覆盖** | ★★★☆☆ | TUI+HTTP+Desktop，缺 IDE 插件 |
-| **会话管理** | ★★★★★ | 持久化 + 恢复 + 分支 + 检查点 |
+| **Agent 核心循环** | ★★★★★ | 可靠的主循环 + 回环防护 + 证据系统（独家） |
+| **工具系统** | ★★★★☆ | 架构 5★，覆盖面 4★（缺 git/正则/视觉工具） |
+| **LLM 集成** | ★★★★★ | 多提供商可插拔，开源模型唯一选择 |
+| **代码智能** | ★★★★☆ | CodeGraph + LSP 14 语言，但缺代码补全 |
+| **记忆系统** | ★★★★☆ | 层级文档 + 4 类自动记忆 |
+| **技能/命令** | ★★★★☆ | Skill + 命令模板 + 子代理隔离 |
+| **Hook 扩展** | ★★★★☆ | 10 事件点 + PostLLMCall 改写推理，但缺 HTTP/异步 |
+| **MCP/插件** | ★★★★☆ | 3 传输 + 3 启动层 + 热管理，但缺市场/发现 |
+| **安全/权限** | ★★★★☆ | 4 层防护，但 Linux 沙箱不完整 |
+| **上下文管理** | ★★★★★ | 三阈值压缩 + 缓存稳定前缀（独家） |
+| **会话管理** | ★★★★★ | JSONL 持久化 + 分支 + 检查点 + 跨进程恢复 |
+| **前端覆盖** | ★★★☆☆ | TUI+HTTP+Desktop 三端，缺 IDE 插件 |
+| **国际化/诊断** | ★★★★☆ | 完整 i18n + doctor 诊断 |
+| **成本控制** | ★★★★☆ | 用量跟踪 + 余额查询 |
 | **代码质量** | ★★★★☆ | 架构清晰，但核心文件过大 |
 
-**综合评分: ★★★★☆ (成熟)**
+**综合评分: ★★★★☆ (成熟，有明确改进方向)**
 
 ---
 
-## 一、工具系统 (Tools) — ★★★★★
+## 第一章：能力完整度总览
 
-### 内置工具清单（17 个）
+### 编码智能体的全部能力域
 
-| 工具 | 只读 | 类别 | 特点 |
-|:-----|:----:|:----|:-----|
-| `bash` | ❌ | 执行 | 登录 shell PATH 探测缓存，Seatbelt 沙箱，120s 超时 |
-| `read_file` | ✅ | 读取 | 支持 offset/limit 分页，UTF-16 兼容，行号前缀 |
-| `write_file` | ❌ | 写入 | 自动建父目录，原子写入（tmp+rename） |
-| `edit_file` | ❌ | 写入 | 精确字符串替换，唯一性校验 |
-| `multi_edit` | ❌ | 写入 | 批量原子编辑，失败不回滚整个文件 |
-| `delete_range` | ❌ | 写入 | 双锚点范围删除，非唯一锚点报错 |
-| `delete_symbol` | ❌ | 写入 | AST 驱动删除 Go 符号，保留注释变空白 |
-| `ls` | ✅ | 读取 | 递归/非递归，文件大小显示 |
-| `glob` | ✅ | 读取 | **递归 `**/*` 匹配** |
-| `grep` | ✅ | 搜索 | ripgrep 后端，路径定位输出 |
-| `web_fetch` | ✅ | 获取 | HTML→文本净化，SSRF 防护 |
-| `notebook_edit` | ❌ | 写入 | Jupyter notebook 单元编辑 |
-| `todo_write` | ❌ | 元 | 结构化任务列表 |
-| `complete_step` | ❌ | 元 | 证据交叉验证签字 |
-| `bash_output` | ✅ | 后台 | 读取后台 bash 输出 |
-| `wait_job` | ✅ | 后台 | 等待后台任务 |
-| `kill_shell` | ❌ | 后台 | 终止后台任务 |
+我将一个编码智能体应具备的能力分为 7 大类、28 个子项：
 
-### 工具系统成熟度标志
+| # | 能力域 | 子项 | Reasonix | Claude Code | 差距 |
+|:--|:-------|:-----|:--------:|:-----------:|:----|
+| | **1. 代码操作** | | | | |
+| 1 | | 文件读写 | ✅ 完整 | ✅ | — |
+| 2 | | 代码编辑（精确替换） | ✅ edit_file/multi_edit | ✅ | — |
+| 3 | | **正则搜索替换** | ❌ | ❌ | 两个都缺 |
+| 4 | | **Git 原生操作** | ❌ 仅 bash | ❌ 仅 bash | 两个都缺 |
+| 5 | | 批量操作 | ⚠️ 无批量删除/重命名 | ⚠️ | — |
+| 6 | | Jupyter 编辑 | ✅ notebook_edit | ❌ | **领先** |
+| | **2. 代码智能** | | | | |
+| 7 | | 符号搜索/引用 | ✅ LSP 4工具+CodeGraph 7工具 | ✅ | — |
+| 8 | | 诊断/错误 | ✅ lsp_diagnostics | ✅ | — |
+| 9 | | **代码补全** | ❌ 无 lsp_completion | ❌ | 两个都缺 |
+| 10 | | 影响分析 | ✅ codegraph_impact | ⚠️ 依赖模型 | **领先** |
+| | **3. 上下文管理** | | | | |
+| 11 | | 会话持久化 | ✅ JSONL 原子写入 | ✅ | — |
+| 12 | | 自动压缩 | ✅ 三阈值 token-budgeted | ✅ | — |
+| 13 | | 提示缓存 | ✅ 缓存稳定前缀（架构级） | ✅ API 端 | **架构优势** |
+| 14 | | 检查点/回退 | ✅ 文件+对话双回退 | ✅ | — |
+| | **4. 安全控制** | | | | |
+| 15 | | 权限规则 | ✅ deny/allow/ask 链 | ✅ 更细粒度 | — |
+| 16 | | 沙箱隔离 | ⚠️ 仅 macOS Seatbelt | ✅ Docker+dev container | **落后** |
+| 17 | | 审批流程 | ✅ 交互式审批 | ✅ | — |
+| | **5. 模型与推理** | | | | |
+| 18 | | 多模型切换 | ✅ 运行时切换 | ✅ | — |
+| 19 | | **多提供商支持** | ✅ **OpenAI+Anthropic+DeepSeek** | ❌ 仅 Claude | **独家优势** |
+| 20 | | 双模型协作 | ✅ Coordinator 独立 session | ✅ opusplan | — |
+| 21 | | **视觉/多模态** | ❌ 无图片输入 | ✅ Claude 支持 | **落后** |
+| | **6. 扩展性** | | | | |
+| 22 | | MCP 协议 | ✅ 3 传输层 | ✅ | — |
+| 23 | | Hook 脚本 | ✅ 10 事件点 | ✅ 更丰富 | — |
+| 24 | | Skill 技能 | ✅ 多约定+子代理 | ✅ | — |
+| 25 | | **插件市场** | ❌ | ✅ | **落后** |
+| | **7. 可靠性** | | | | |
+| 26 | | 回环防护 | ✅ **Storm+Repeat 双保险** | ❌ 未公开 | **独家优势** |
+| 27 | | 证据验证 | ✅ **complete_step 交叉验证** | ❌ | **独家优势** |
+| 28 | | 后台任务 | ✅ bgjobs + /loop | ✅ | — |
 
-- ✅ 静态 `ReadOnly()` 标记 → 并行执行只读工具
-- ✅ `Previewer` 接口 → 写入前预览 diff，支撑 checkpoint 和审批
-- ✅ `confine` 机制 → bash 限制在 workspace 内
-- ✅ 所有工具通过 `init()` 自注册，无需手动清单
+---
+
+## 第二章：核心能力深度分析
+
+### 2.1 Agent 核心循环 — ★★★★★
+
+| 组件 | 状态 | 关键实现 |
+|:-----|:----|:---------|
+| 主循环 | ✅ | `agent.Run()` — 流式接收 → 并行只读/串行写入 → 结果回馈 |
+| 风暴检测 | ✅ 独家 | 3 次相同 (tool, error) 签名触发中断 |
+| 重复阻断 | ✅ 独家 | 3 次相同 (tool, args) 成功写入直接阻断 |
+| 并行调度 | ✅ | ReadOnly=true 的工具批量并行执行 |
+| 证据验证 | ✅ 独家 | `complete_step` 交叉验证模型声明 vs 工具输出 |
+| 最终答案检查 | ✅ | ReadinessAudit 确保所有步骤已签字 |
+| 子代理 | ✅ | `task` 工具 → 独立 session + 过滤工具集 |
+| 后台任务 | ✅ | bgjobs 跨轮次存活，输出可后续读取 |
+| 重试 | ✅ | provider/retry.go 带退避重试 |
+
+**代码成熟度**: `agent.go` (1239行) 和 `controller.go` (~1900行) 承担了过多职责，是重构候选。
+
+### 2.2 工具系统 — ★★★★☆
+
+#### 已实现的 17 个内置工具
+
+```
+文件操作:  read_file, write_file, edit_file, multi_edit, delete_range, delete_symbol
+目录搜索:  ls, glob, grep
+执行:      bash, web_fetch
+笔记本:    notebook_edit
+元操作:    todo_write, complete_step
+后台:      bash_output, wait_job, kill_shell
+```
+
+#### 架构优势
+- ✅ ReadOnly 标记 → 并行执行
+- ✅ Previewer 接口 → 写入前 diff 预览，支撑 checkpoint 和审批
+- ✅ `confine` 限域 → bash 限制在 workspace 内
+- ✅ `init()` 自注册 → 新增工具无需修改清单
 - ✅ Schema 规范化 + 缓存
 
-### 不足
+#### 工具覆盖面缺口
 
-- 缺少 `timeout` 参数（只有 bash 有硬编码 120s 超时）
-- 没有工具间的依赖/条件执行机制
+| 缺失工具 | 影响 | 替代方案 | 修复难度 |
+|:---------|:-----|:--------|:--------|
+| **Git 工具** | 🔴 高 — 模型不了解 git 操作结构，出错风险高 | bash 调用 git | 🟡 中 — 封装 git commit/diff/branch/PR 为结构化工具 |
+| **正则搜索替换** | 🟡 中 — 不能做跨文件重构 | grep(读)+edit_file(逐个替换) | 🟢 低 — 类似 multi_edit 但支持正则 |
+| **批量文件操作** | 🟢 低 — 多文件重命名/删除 | bash mv/rm | 🟢 低 |
+| **图片/视觉输入** | 🟡 中 — 不能分析 UI 截图/流程图 | 无 | 🔴 高 — 需要多模态模型支持 |
+| **结构化输出** | 🟡 中 — 不能保证模型返回合法 JSON | 模型 prompt 约束 | 🟡 中 — 需 provider 层支持 |
 
----
+**关键缺口: 缺少 Git 原生工具**
 
-## 二、LLM 提供商 (Provider) — ★★★★★
+当前 agent 通过 `bash` 执行 git 命令，这意味着:
+- 模型必须自己构造正确的 git 命令字符串
+- 权限系统只能看到 "bash" 不能看到 "git commit"
+- 没有结构化输出 (diff stat, commit hash, branch list)
+- git 错误信息直接回传模型，不经过格式化
 
-### 支持的提供商
+建议新增工具:
+- `git_status` — 工作区状态
+- `git_diff` — 结构化 diff
+- `git_commit` — 安全提交（可审批）
+- `git_branch` — 分支管理
+- `git_log` — 提交历史
 
-| 后端 | 类型 | 状态 |
-|:-----|:----|:----|
-| OpenAI 兼容 | `openai` | ✅ 完整实现，含 think token 处理 |
-| Anthropic | `anthropic` | ✅ 完整实现，含推理签名 |
-| 自定义 | — | ✅ `Factory` 接口可注册任意后端 |
+### 2.3 LLM 提供商集成 — ★★★★★
 
-### 架构亮点
+| 后端 | 注册方式 | 状态 |
+|:-----|:--------|:-----|
+| OpenAI 兼容 | `provider.Register("openai", New)` | ✅ 完整，含 think token 处理 |
+| Anthropic | `provider.Register("anthropic", New)` | ✅ 完整，含推理签名 |
+| 自定义 | `provider.Register("custom", New)` | ✅ Factory 接口，约 100 行实现 |
+
+**与竞品差异**:
+- Claude Code: ❌ 仅 Anthropic
+- Codex CLI: ❌ 仅 OpenAI
+- **Reasonix: ✅ 三者皆可，开源模型唯一选择**
+
+**接口简洁度**: `Provider` 接口仅一个方法 `Stream(ctx, Request) → <-chan Chunk`
+
+### 2.4 Hook 系统 — ★★★★☆
+
+#### 10 个事件挂钩点
 
 ```
-provider.Register("openai", New)    // internal/provider/openai
-provider.Register("anthropic", New)  // internal/provider/anthropic
+PreToolUse       → 工具执行前（✅ 可阻断）
+PostToolUse      → 工具执行后
+UserPromptSubmit → 轮次开始前（✅ 可阻断）
+Stop             → 轮次结束后
+PostLLMCall      → 模型流结束后（✅ 可改写推理内容）
+SessionStart     → 会话开始
+SessionEnd       → 会话关闭
+SubagentStop     → 子代理结束
+Notification     → 需要用户注意
+PreCompact       → 压缩开始前（✅ 可注入压缩指导）
 ```
 
-- `Provider` 接口仅一个方法：`Stream(ctx, Request) → <-chan Chunk`
-- `SanitizeToolPairing` — 修复历史以符合各 API 合约
-- 缓存命中/未命中 token 标准化（DeepSeek ↔ OpenAI 两种 Shape）
-- Pricing 模型分离
+#### 执行机制
+- Hook 是 **shell 命令**，JSON 载荷从 stdin 传入
+- 退出码: 0=通过, 2=阻断, 其他=警告
+- 项目级 + 用户级 settings.json 配置
 
-### 与竞品对比
+#### 缺口
 
-| 能力 | Reasonix | Claude Code | Codex |
-|:-----|:--------:|:-----------:|:-----:|
-| 多提供商 | ✅ | ❌ 仅 Anthropic | ❌ 仅 OpenAI |
-| 开源可用 | ✅ | ❌ | ✅（仅OpenAI） |
-| DeepSeek 支持 | ✅ | ❌ | ❌ |
+| 缺失能力 | 影响 |
+|:---------|:-----|
+| ❌ **HTTP 钩子** | 不能通过 Webhook 通知外部系统 |
+| ❌ **异步钩子** | 所有钩子同步执行，延长轮次响应时间 |
+| ❌ **MCP 工具钩子** | 不能钩住 MCP 插件的工具调用 |
 
----
+### 2.5 Skill 技能系统 — ★★★★☆
 
-## 三、Hook 系统 — ★★★★☆
-
-### 事件点（10 个）
-
-| 事件 | 时机 | 可阻断 | 典型用途 |
-|:-----|:----|:------|:--------|
-| `PreToolUse` | 工具执行前 | ✅ 阻断 | 安全检查、日志 |
-| `PostToolUse` | 工具执行后 | ❌ | 审计、告警 |
-| `UserPromptSubmit` | 轮次开始前 | ✅ 阻断 | 内容过滤 |
-| `Stop` | 轮次结束后 | ❌ | 清理、通知 |
-| `PostLLMCall` | 模型流结束后 | ❌ | **推理内容替换** |
-| `SessionStart` | 会话开始 | ❌ | 环境初始化 |
-| `SessionEnd` | 会话关闭 | ❌ | 清理资源 |
-| `SubagentStop` | 子代理结束 | ❌ | 结果汇总 |
-| `Notification` | 需要用户注意 | ❌ | 桌面通知 |
-| `PreCompact` | 压缩开始前 | ❌ | **注入压缩指导** |
-
-### 钩子执行机制
-
-- Hook 是 shell 命令（非 HTTP），JSON 载荷从 stdin 传入
-- 退出码 0=通过，2=阻断，其他=警告
-- cwd 固定为项目根目录
-- Runner 可空（nil *Runner 是无操作）
-
-### 亮点
-
-- **PostLLMCall** 可替换推理内容——不仅是读，还能改写模型的思维过程
-- **PreCompact** 可注入压缩指导——让外部脚本影响上下文压缩策略
-- 支持 Hooks 配置在 settings.json 中，项目级 + 用户级
-
-### 不足
-
-- ❌ 不支持 **HTTP 钩子**（代码中有 `allowedHttpHookUrls` 配置项但注释说已保留给将来）
-- ❌ 不支持异步钩子（所有钩子同步执行，延长轮次时间）
-- ⚠️ 测试覆盖有限（runner_test.go 主要测试文件，但覆盖不全）
-
----
-
-## 四、Skill 技能系统 — ★★★★☆
-
-### 能力概要
+#### 能力矩阵
 
 | 维度 | 支持度 |
 |:-----|:------|
-| 发现路径 | `.reasonix/skills/` , `.agents/skills/` , `.agent/skills/` , `.claude/skills/` |
+| 发现路径 | `.reasonix / .agents / .agent / .claude` 4 种 |
 | 作用域 | project > custom > global > builtin |
 | 目录布局 | `name/SKILL.md` 或 `name.md` |
-| 热加载 | ✅ `/ <name>` 按需加载 |
-| 子代理隔离 | ✅ `runAs: subagent` → 独立上下文 |
-| 子代理工具限制 | ✅ `allowed-tools:` 前置过滤 |
-| 跨工具兼容 | ✅ Claude Code 的 `.claude/skills/` 可直接迁移 |
-| 与 ACP 集成 | ✅ 子代理模式通过 ACP session 运行 |
+| 加载方式 | 仅索引 (name+description) 入缓存前缀，body 按需加载 |
+| 运行模式 | inline（同上下文） / subagent（隔离上下文） |
+| 子代理限制 | `allowed-tools` 白名单过滤、`model` 模型覆盖 |
+| 跨工具兼容 | Claude Code 的 `.claude/skills/` 可直接迁移 |
 
-### 索引机制
+#### 缺口
+- ❌ 无运行时热修改的命令行 UI
+- ⚠️ 不能禁用单个内置 skill（只能全关）
 
-```
-Index（缓存稳定前缀）
-  └─ 仅 name + description 进入 system prompt
-      └─ body 按需加载 → 不增加前缀 token
-```
+### 2.6 MCP / 插件系统 — ★★★★☆
 
-### 不足
+#### 传输层
 
-- ❌ 没有运行时热修改能力的 UI/命令
-- ⚠️ 不能禁用单个内置 skill（只能 `DisableBuiltins: true` 全关）
-- ⚠️ 子代理父上下文不能传递文件状态变化
-
----
-
-## 五、MCP / 插件系统 — ★★★★☆
-
-### 传输层支持
-
-| 传输 | 状态 | 详情 |
+| 传输 | 状态 | 用途 |
 |:-----|:----|:-----|
-| stdio | ✅ 完整 | 子进程 + JSON-RPC 2.0 |
-| Streamable HTTP | ✅ 完整 | 无状态 HTTP 流 |
-| Legacy SSE | ✅ 完整 | HTTP + SSE 事件流 |
+| **stdio** | ✅ 完整 | 本地插件子进程 |
+| **Streamable HTTP** | ✅ 完整 | 远程 MCP 服务器 |
+| **Legacy SSE** | ✅ 完整 | 兼容旧协议 |
 
-### 启动层级
-
-```
-eager    → 启动时阻塞，必须成功
-lazy     → 首次调用 tool 时才连接
-background → 异步启动，不阻塞主流程
-```
-
-**自动降级**: 某 MCP 服务器如果多次启动慢，自动从 eager 降为 lazy。
-
-### 热管理
-
-| 操作 | ACP | HTTP/SSE | CLI |
-|:-----|:---:|:--------:|:---:|
-| 添加 MCP 服务器 | ❌ | ✅ | ✅ |
-| 移除 MCP 服务器 | ❌ | ✅ | ✅ |
-| 查看 MCP 状态 | ❌ | ✅ | ✅ |
-| 列出 MCP 工具 | ❌ | ✅ | ✅ |
-
-### 命名与去重
-
-- `mcp__<server>__<tool>` 命名空间防止冲突
-- `StripRawPrefix` 避免冗余前缀（如 `codegraph_context` → `context`）
-- FNV hash 后缀规范化名称
-
-### 不足
-
-- ❌ 无 MCP 工具执行超时控制
-- ❌ 无 MCP 服务器健康检查/自动重连
-- ❌ 无插件市场
-- ⚠️ ACP 模式不支持声明 MCP 服务器（HTTP: false, SSE: false）
-
----
-
-## 六、代码智能 (LSP + CodeGraph) — ★★★★☆
-
-### LSP 支持（14 种语言）
+#### 启动层级
 
 ```
-gopls, rust-analyzer, typescript-language-server,
-pyright, clangd, ... → 通过 PATH 解析，不捆绑
+eager      → 启动时阻塞，必须成功    （核心 MCP）
+lazy       → 首次调用才连接          （按需 MCP）
+background → 异步启动，不阻塞主流程  （非关键 MCP）
 ```
 
-| 工具 | 描述 |
-|:-----|:-----|
-| `lsp_definition` | 跳转到定义 |
-| `lsp_references` | 列出所有引用 |
-| `lsp_hover` | 类型签名 + 文档 |
-| `lsp_diagnostics` | 诊断信息（2s 超时等待） |
+自动降级: 慢速 eager 服务器自动降为 lazy。
 
-### CodeGraph（树搜索器 + SQLite FTS5）
+#### 缺口
+
+| 缺失能力 | 影响 |
+|:---------|:-----|
+| ❌ **MCP 执行超时** | 插件工具可能无限挂起 |
+| ❌ **自动重连** | 断开后需手动重连 |
+| ❌ **插件市场** | 无发现/安装/更新机制 |
+| ❌ **ACP 模式下 MCP 受限** | 仅支持 stdio，不支持 HTTP/SSE |
+
+### 2.7 代码智能 — ★★★★☆
+
+#### LSP 工具（4 个）
+
+| 工具 | 描述 | 状态 |
+|:-----|:-----|:----|
+| `lsp_definition` | 跳转到定义 | ✅ |
+| `lsp_references` | 列出引用 | ✅ |
+| `lsp_hover` | 类型签名 + 文档 | ✅ |
+| `lsp_diagnostics` | 错误/警告（2s 超时） | ✅ |
+
+#### CodeGraph 工具（7 个）
 
 | 工具 | 复杂度 | 描述 |
 |:-----|:------|:-----|
-| `codegraph_context` | 综合性 | **首选**：入口点 + 相关符号 + 代码 |
-| `codegraph_search` | 快速 | 按名称搜索符号 |
-| `codegraph_callers` | 快速 | 谁调用了这个函数 |
-| `codegraph_callees` | 快速 | 这个函数调用了谁 |
-| `codegraph_impact` | 深度 | 修改此符号会影响到谁 |
-| `codegraph_trace` | 路径 | 从符号 A 到符号 B 的完整路径 |
-| `codegraph_files` | 快速 | 项目文件树 |
+| `codegraph_context` | ★★★ 综合 | **首选**：入口+符号+代码 |
+| `codegraph_search` | ★ | 按名称查符号 |
+| `codegraph_callers` | ★ | 谁调了此函数 |
+| `codegraph_callees` | ★ | 此函数调了谁 |
+| `codegraph_impact` | ★★ | 修改影响分析 |
+| `codegraph_trace` | ★★ | A→B 完整调用路径 |
+| `codegraph_files` | ★ | 项目文件树+符号计数 |
 
-**亮点**: CodeGraph 是独立 MCP 服务器（不在模型内部），提供确定性分析。按需下载（不捆绑）。项目级别并行索引，热项目自动提升为 eager 启动。
+#### 缺口
 
-### 不足
+| 缺失能力 | 影响 |
+|:---------|:-----|
+| ❌ **lsp_completion** | 不能请求代码补全建议 |
+| ❌ **代码格式化** | 无工具触发 formatter |
+| ⚠️ **diagnostics 超时短** | 大型项目 2s 可能不够 |
+| ⚠️ **CodeGraph Go-only** | 对 JS/Python 项目，树搜索器符号分析可能不完整 |
 
-- ⚠️ CodeGraph 索引需时间（大型项目首次约数秒）
-- ❌ 没有代码补全工具（lsp_completion）
-- ⚠️ diagnostics 只等待 2s，大型项目可能不够
+### 2.8 安全与权限 — ★★★★☆
 
----
-
-## 七、权限与安全 — ★★★★☆
-
-### 四层防护
+#### 四层防护架构
 
 ```
-① OS 沙箱 (macOS Seatbelt) → 文件系统 + 网络隔离
-② confine 机制              → bash 限制在 workspace 内
-③ 权限策略                  → deny/allow/ask 规则
-④ 交互式审批                → 用户确认每次工具调用
+Layer 1: OS 沙箱 (macOS Seatbelt)    → 文件系统 + 网络隔离
+Layer 2: confine                      → bash 限制在 workspace 内
+Layer 3: 权限策略                     → deny → allow → ask 规则链
+Layer 4: 交互式审批                   → 用户确认每次工具调用
 ```
 
-### 权限模式
+#### 权限模式
 
 | 模式 | 说明 |
 |:-----|:------|
-| deny → allow → ask | 优先级递减的规则链 |
-| YOLO/Bypass | 跳过审批（deny 仍然生效）|
-| 交互式审批 | 前端收到 ApprovalRequest → 用户选择 |
+| deny 规则 | 绝对禁止（如 `Bash(rm *)`）|
+| allow 规则 | 直接放行（如 `Read(./src/**)`）|
+| ask 规则 | 需要用户确认 |
+| YOLO 模式 | 跳过审批（deny 仍然生效）|
 | 持久化规则 | "Always allow" 写入 config |
 
-### 不足
+#### 缺口
 
-- ⚠️ Linux 没有 Seatbelt（仅 macOS），使用 confine + policy 两级
-- ⚠️ Windows 基本无沙箱
-- ⚠️ 没有计划运行时的沙箱降级策略
+| 缺失能力 | 严重度 | 说明 |
+|:---------|:------|:-----|
+| ⚠️ Linux 无 Seatbelt | 🟡 中 | 仅 confine+policy 两级 |
+| ⚠️ Windows 基本无沙箱 | 🟡 中 | 仅有 confine |
+| ❌ Docker 沙箱 | 🟢 低 | Claude Code 支持 Docker + dev container |
 
----
+### 2.9 证据与回环防护 — ★★★★★（独家）
 
-## 八、证据与回环防护 — ★★★★★ (独特)
+这是 Reasonix 最独特的创新点，Claude Code 和 Codex 均无对应物。
 
-### 证据系统 (Evidence)
-
-```
-每轮工具调用 → Ledger 记录
-complete_step → 交叉验证模型声明 vs 实际工具输出
-                ├─ HasSuccessfulCommand  → bash 确实执行了
-                ├─ HasSuccessfulWrite    → 文件确实写入了
-                ├─ MatchLatestTodoStep   → todo 状态匹配
-                └─ UnverifiedCompletedTodos → 发现未签字的步骤
-```
-
-**这是 Reasonix 最独特的设计**，Claude Code 和 Codex 均无对应物。
-
-### 回环双防护
-
-| 机制 | 检测对象 | 触发条件 | 动作 |
-|:-----|:--------|:--------|:-----|
-| Storm Breaker | (tool, error) 签名 | 3 次相同错误 | 注入中断消息 |
-| Repeat-Success Blocker | (tool, arguments) 签名 | 3 次相同成功写入 | 直接阻断 |
-
----
-
-## 九、记忆系统 — ★★★★☆
-
-### 结构
-
-| 类型 | 范围 | 作用 |
-|:-----|:-----|:-----|
-| 文档记忆 | REASONIX.md / AGENTS.md / CLAUDE.md | 项目级/本地/用户级层级 |
-| 自动记忆 | 前端数据文件（per-project） | 分为 user/feedback/project/reference 四种 |
-| MEMORY.md 索引 | 全部自动记忆的目录索引 | 快速查找 |
-
-### 记忆修改
+#### 证据系统流程
 
 ```
-修改请求 → memory.Queue（不修改缓存稳定前缀）
-       ↓
-Turn-tail 注入 → 当前轮次立即生效
-       ↓
-下一会话 → 重建前缀 → 变更持久化
+每轮工具调用
+    ↓
+Ledger 记录 (工具名 + 参数 + 成功/失败 + 输出)
+    ↓
+模型的 complete_step 声明 "我做了 X"
+    ↓
+系统交叉验证:
+  ├─ 检查 Ledger 中是否有成功的 X 操作
+  ├─ 检查命令是否真的执行了
+  ├─ 检查文件是否真的写入了
+  └─ 检查是否有未签字的 todo
+    ↓
+通过 → 继续 | 不通过 → 阻断最终答案
 ```
 
-### 工具
+#### 回环双防护
 
-| 工具 | 作用 |
-|:-----|:-----|
-| `remember` | 保存持久事实到项目记忆 |
-| `forget` | 删除记忆事实 |
-| `#<note>` | 快速追加到 REASONIX.md（quickadd） |
+| 机制 | 检测 | 触发 | 动作 |
+|:-----|:-----|:-----|:-----|
+| Storm Breaker | (tool, error) 签名 | 3 次相同 | 注入中断消息 |
+| Repeat-Success Blocker | (tool, args) 签名 | 3 次相同写入 | 直接阻断 |
 
----
+### 2.10 记忆系统 — ★★★★☆
 
-## 十、上下文压缩 — ★★★★☆
+| 记忆类型 | 作用域 | 持久化 |
+|:---------|:------|:-------|
+| REASONIX.md | 项目/本地/用户 | 手动编辑 |
+| 自动记忆 (4 类) | user/feedback/project/reference | 自动保存 |
+| MEMORY.md 索引 | 全部自动记忆 | 自动更新 |
 
-### 三阈值策略
+**关键设计**: 记忆变更走 turn-tail 注入，不修改缓存稳定前缀。
 
-| 阈值 | 比率 | 行为 |
-|:-----|:----|:-----|
-| softCompactRatio | 0.5 | 通知但不压缩 |
-| compactRatio | 0.8 | 触发压缩 |
-| compactForceRatio | 0.9 | 强制压缩低价值折叠 |
+### 2.11 上下文压缩 — ★★★★★
 
-### 亮点
+| 特性 | 详情 |
+|:-----|:------|
+| 阈值策略 | soft(0.5)→通知, compact(0.8)→触发, force(0.9)→强制 |
+| 尾部保留 | Token-budgeted（不是消息数） |
+| stuck 锁 | 超窗口时停止压缩 |
+| tok_per_char | 来自实际 provider 用量数据 |
+| 外部指导 | PreCompact hook 可注入压缩提示 |
 
-- **Token-budgeted 保留尾部**（不是消息计数）——防止大型工具输出导致每轮压缩
-- **compactStuck 锁**：系统提示 + 一轮对话已超窗口时停止压缩
-- **tok_per_char** 来自实际提供商使用数据，非硬编码
-- **PreCompact hook** 可注入外部压缩指导
+### 2.12 会话管理 — ★★★★★
 
----
+| 能力 | 实现 |
+|:-----|:------|
+| 持久化 | JSONL 原子写入（tmp + rename）|
+| 自动保存 | 每次轮次后 `snapshotActivityIfChanged` |
+| 恢复 | `--continue`（最新）/ `--resume <path>`（指定）|
+| 分支 | ForkNamed + SwitchBranch + BranchTreeText |
+| 检查点 | Rewind（代码/对话/二者）|
+| 跨进程 | ACP session/load |
 
-## 十一、会话管理 — ★★★★★
+### 2.13 国际化 (i18n) — ★★★★☆
 
-| 能力 | 实现 | 状态 |
+- 完整的 Messages 结构，编译时检查缺失翻译
+- 当前支持中英文
+- 范围适配: CLI 交互文本（非系统提示）
+
+### 2.14 成本控制 — ★★★★☆
+
+- `internal/billing/balance.go` — 余额查询（DeepSeek 格式）
+- `internal/provider/pricing.go` — token 计价
+- `Usage` 统计: prompt tokens, completion tokens, cache hit/miss, reasoning tokens
+- `-metrics` 参数: 输出 JSON 用量报告
+
+### 2.15 前端覆盖 — ★★★☆☆
+
+| 前端 | 状态 | 评分 |
 |:-----|:-----|:----|
-| JSONL 持久化 | `Session.Save()` / `LoadSession()` | ✅ 原子写入 (tmp+rename) |
-| 自动保存 | `snapshotActivityIfChanged()` | ✅ 每次轮次后自动保存 |
-| 分支 | `ForkNamed()` / `SwitchBranch()` | ✅ 基于检查点的分支树 |
-| 检查点 | `Checkpoints()` / `Rewind()` | ✅ 可回退代码/对话/二者 |
-| 恢复 | `--continue` / `--resume` | ✅ chat + serve 模式 |
-| 列表 | `ListSessions()` | ✅ 按最近活跃排序 |
-| 跨进程恢复 | ACP `session/load` | ✅ |
+| CLI TUI (Bubbletea) | ✅ 正常缓冲渲染、历史 scrollback | ★★★★★ |
+| HTTP/SSE Web | ✅ 23 端点、内嵌 Web UI | ★★★★ |
+| Wails 桌面 | ✅ 多 Tab、MCP/记忆管理 | ★★★ |
+| ACP 协议 | ✅ JSON-RPC 2.0、编辑器集成 | ★★★★ |
+| **VS Code 插件** | ❌ | ⭐ 最大缺失 |
+| **JetBrains 插件** | ❌ | ⭐ |
 
 ---
 
-## 十二、前端覆盖 — ★★★☆☆
+## 第三章：缺口分级与影响
 
-| 前端 | 状态 | 成熟度 |
-|:-----|:-----|:------|
-| CLI TUI (Bubbletea) | ✅ 完整 | ★★★★★ — 正常缓冲渲染、历史 scrollback、任务面板 |
-| HTTP/SSE Web | ✅ 完整 | ★★★★☆ — 23 个端点，内嵌 Web UI |
-| Wails 桌面 | ✅ 完整 | ★★★☆☆ — 多 Tab、MCP/记忆管理，但依赖 WebView |
-| ACP 协议 | ✅ 完整 | ★★★★☆ — 标准 JSON-RPC，编辑器集成 |
-| **VS Code 插件** | ❌ 无 | ⭐ — **最大空白** |
-| **JetBrains 插件** | ❌ 无 | ⭐ |
+### 🔴 高影响缺口（影响核心体验）
 
----
+| 缺口 | 影响 | 补救成本 |
+|:-----|:-----|:--------|
+| **无 VS Code/JetBrains 插件** | 开发者主要工作环境无法接入 | 🔴 高（需开发/维护 IDE 插件）|
+| **无 Git 原生工具** | git 操作不可见、不可控、不可审批 | 🟡 中（封装 5 个结构化工具）|
+| **无多模态/视觉** | 不能处理 UI 截图、流程图、设计稿 | 🔴 高（需模型层支持）|
 
-## 十三、代码质量 — ★★★★☆
+### 🟡 中影响缺口（影响效率）
 
-### 强项
+| 缺口 | 影响 | 补救成本 |
+|:-----|:-----|:--------|
+| 无正则搜索替换 | 跨文件重构效率低 | 🟢 低（新增一个 replaceAll 工具）|
+| Linux 沙箱缺失 | Linux 用户安全防护降级 | 🔴 高（需要 Bubblewrap 或 Docker 沙箱）|
+| MCP 无超时/重连 | 插件可靠性不足 | 🟡 中 |
+| HTTP 钩子缺失 | 不能对接外部事件系统 | 🟡 中 |
 
-- **包结构清晰**：29 个内部包，各司其职
-- **接口隔离**：`Provider`（单方法接口）、`Tool`（4方法）、`Sink`（1方法）
-- **测试覆盖率**：整体较好，部分包有 e2e 测试
-- **编译隔离**：CLI (`CGO_ENABLED=0`) 与 Desktop (Wails/CGO) 分两个模块
+### 🟢 低影响缺口（锦上添花）
 
-### 弱项
-
-| 文件 | 行数 | 问题 |
-|:-----|:----|:-----|
-| `internal/agent/agent.go` | 1239 | `Run()` 主循环包含 storm 检测、重复阻断、并行调度等混杂逻辑 |
-| `internal/control/controller.go` | ~1900 | 违反了单一职责（session、MCP、记忆、审批、hook、checkpoint） |
-| `internal/serve/serve.go` | 964 | handler 方法过多，可提取子路由 |
-| `internal/acp/service.go` | 972 | session 管理需大量样板代码 |
-| `internal/cli/cli.go` | 1644 | setup 逻辑、模型探测、配置向导混杂 |
+| 缺口 | 补救成本 |
+|:-----|:--------|
+| 批量文件操作 | 🟢 低 |
+| 代码补全工具 | 🟡 中 |
+| 代码格式化工具 | 🟢 低 |
+| 异步钩子 | 🟡 中 |
+| 热加载单个 skill 禁用 | 🟢 低 |
 
 ---
 
-## 十四、风险评估
+## 第四章：代码质量评估
 
-| 风险 | 等级 | 说明 |
-|:-----|:----|:------|
-| `agent.Run()` 单方法过长 | 🟡 中 | 核心循环难以单独测试，修改易引入回归 |
-| 多提供商适配膨胀 | 🟡 中 | 每个新 LLM 需要 Stream() 适配 + token 计算 + SanitizeToolPairing |
-| 无 IDE 插件 | 🟡 中 | 限制了主流开发者日常使用场景 |
-| Desktop 前端测试不足 | 🟢 低 | desktop/frontend 没有持续集成 |
-| Linux 沙箱缺失 | 🟢 低 | 只有 macOS 有 Seatbelt 沙箱 |
-| 文档分散 | 🟢 低 | 关键架构需要读源码才能理解 |
+### 架构亮点
+
+| 特征 | 评价 |
+|:-----|:-----|
+| 包职责清晰 | ★★★★★ — 29 包各司其职 |
+| 接口隔离 | ★★★★★ — Provider(1方法)、Tool(5方法)、Sink(1方法) |
+| 编译隔离 | ★★★★★ — CLI(`CGO_ENABLED=0`) 与 Desktop(Wails/CGO) 分模块 |
+| 测试覆盖 | ★★★★☆ — 部分包有 e2e 测试，整体较好 |
+| 事务安全 | ★★★★★ — JSONL 原子写入、原子 multi_edit、session 读写锁 |
+
+### 重构候选
+
+| 文件 | 行数 | 问题 | 建议 |
+|:-----|:----|:-----|:-----|
+| `control/controller.go` | ~1900 | 管理 session+MCP+记忆+审批+checkpoint+命令解析 | 拆分出 Commands、Checkpointer、Approver 子对象 |
+| `agent/agent.go` | 1239 | Run() 混合流接收+并行调度+风暴检测+证据记录 | 抽出 StreamConsumer、GuardDetector 等 |
+| `cli/cli.go` | 1644 | 模型探测+配置向导+子命令处理混杂 | 分离 wizard、子命令 handler |
+| `serve/serve.go` | 964 | 所有 handler 写在一个文件 | 按职责拆分路由文件 |
+| `acp/service.go` | 972 | session 管理样板多 | 可复用 controller 的 session 逻辑 |
 
 ---
 
-## 十五、总结
+## 第五章：综合改进路线图
+
+### 短期可补（低代码成本）
 
 ```
-Reasonix 智能体能力成熟度
-═══════════════════════
+1.  └── Git 工具（5个）       → ~200 行，新增 internal/tool/git/
+      ├── git_status
+      ├── git_diff
+      ├── git_commit
+      ├── git_branch
+      └── git_log
 
-已完成（★★★★★）:
-  工具系统 — 17 个内置工具，ReadOnly/Previewer/confine
-  LLM 提供商 — 可插拔，开源模型唯一选择
-  提示缓存 — 缓存稳定前缀架构
-  回环防护 — Storm + Repeat 双保险（独家）
-  证据系统 — 防幻觉设计（独家）
-  会话管理 — 持久化/分支/检查点/恢复
+2.  正则搜索替换              → ~80 行，扩展 grep 或新增 replace_tool
 
-基本成熟（★★★★☆）:
-  MCP — 三层级 + 自动降级，缺市场/发现
-  LSP — 14 语言，缺补全
-  CodeGraph — 确定性符号分析
-  Hook — 10 事件点，缺 HTTP/异步
-  Skill — 多约定兼容，子代理隔离
-  记忆 — 层级 + 自动，缺同步机制
-  权限/沙箱 — 四层防护，Linux 不全
-  上下文压缩 — 三阈值策略
+3.  CLI run 会话持久化        → ~20 行，加 --continue/--resume 和 SetSessionPath
 
-需加强（★★★☆☆）:
-  前端覆盖 — 缺 VS Code/JetBrains 插件
-
-开发者 100% 可控制的核心:
-  ✓ LLM 选择（深层次可替换）
-  ✓ 工具系统扩展
-  ✓ Hook 脚本注入
-  ✓ Skill 技能编写
-  ✓ MCP 服务器连接
-  ✓ 安全策略配置
-  ✓ 记忆管理
+4.  批量文件操作              → ~60 行，mv/rm/cp 安全封装
 ```
+
+### 中期可补（中等代码成本）
+
+```
+5.  HTTP 钩子                  → 复用现有 Hook 框架，加 HTTP 传输
+6.  MCP 超时/重连              → plugin/client.go 加超时控制
+7.  LSP 代码补全               → lsp/tool.go 加 completion 工具
+8.  CodeGraph 多语言扩展       → 扩展树搜索器语言支持
+```
+
+### 长期（高代码成本）
+
+```
+9.  VS Code 插件              → 通过 ACP 或 HTTP API 对接
+10. Linux 沙箱 (Bubblewrap)   → 类似 macOS Seatbelt 实现
+11. 多模态支持                → 需 provider 层 + ACP 协议 + 工具链
+```
+
+---
+
+## 第六章：总结
+
+### Reasonix 的独特价值
+
+```
+独家能力（Claude Code / Codex 没有）:
+├── 多 LLM 提供商可插拔 — 开源模型唯一选择
+├── 证据系统 — complete_step 防幻觉
+├── 缓存稳定前缀 — 架构级设计，非 API 端缓存
+├── 回环双防护 — Storm + Repeat 双保险
+├── CodeGraph 确定性符号分析
+├── MCP 启动层级 + 自动降级
+├── 前端共享 Controller — TUI/HTTP/Desktop 行为一致
+└── Go 库可直接引用
+```
+
+### Reasonix 的能力短板
+
+```
+与行业标杆的差距:
+├── 无 IDE 插件（🔴 最大缺失）
+├── 无 Git 原生工具（🔴 次大缺失）
+├── 无多模态支持（🟡 中）
+├── 无 Linux 沙箱（🟡 中）
+├── 工具覆盖面不够广（17个 vs 应有 ~25个）
+└── 核心文件过大（重构候选）
+```
+
+### 最终评分
+
+| 维度 | 评分 | 趋势 |
+|:-----|:----:|:-----|
+| **架构设计** | ★★★★★ | 稳固 |
+| **核心功能** | ★★★★☆ | 小幅提升中 |
+| **工具覆盖面** | ★★★☆☆ | 需系统补全 |
+| **生态系统** | ★★☆☆☆ | 需大幅建设 |
+| **代码质量** | ★★★★☆ | 需重构核心文件 |
+| **综合** | ★★★★☆ | **成熟，可投入生产** |
