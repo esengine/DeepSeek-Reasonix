@@ -615,9 +615,15 @@ export default function App() {
   // and the transcript re-render is deferred to idle time.
   const deferredItems = useDeferredValue(state.items);
   const sessionTitle = topicTitle(activeTab);
-  const sessionMarkdown = useMemo(() => sessionItemsToMarkdown(sessionTitle, state.items, state.live), [sessionTitle, state.items, state.live]);
-  const sessionJson = useMemo(() => sessionItemsToJson(sessionTitle, state.items, state.live), [sessionTitle, state.items, state.live]);
   const sessionHasContent = state.items.length > 0 || Boolean(state.live?.text || state.live?.reasoning);
+  const getSessionMarkdown = useCallback(
+    () => sessionItemsToMarkdown(sessionTitle, state.items, state.live),
+    [sessionTitle, state.items, state.live],
+  );
+  const getSessionJson = useCallback(
+    () => sessionItemsToJson(sessionTitle, state.items, state.live),
+    [sessionTitle, state.items, state.live],
+  );
 
   useEffect(() => {
     if (!topicExportOpen) return;
@@ -632,11 +638,11 @@ export default function App() {
   const exportSession = useCallback(
     (format: "markdown" | "json") => {
       const base = safeFilename(sessionTitle);
-      if (format === "json") downloadTextFile(`${base}.json`, sessionJson, "application/json");
-      else downloadTextFile(`${base}.md`, sessionMarkdown, "text/markdown");
+      if (format === "json") downloadTextFile(`${base}.json`, getSessionJson(), "application/json");
+      else downloadTextFile(`${base}.md`, getSessionMarkdown(), "text/markdown");
       setTopicExportOpen(false);
     },
-    [sessionJson, sessionMarkdown, sessionTitle],
+    [getSessionJson, getSessionMarkdown, sessionTitle],
   );
 
   useEffect(() => {
@@ -1466,7 +1472,7 @@ export default function App() {
             <div className="topicbar__spacer" />
             <div className="topicbar__actions">
               <CopyButton
-                text={sessionMarkdown}
+                getText={getSessionMarkdown}
                 label={t("topicBar.copyAll")}
                 showLabel={false}
                 className="topicbar__action-btn topicbar__action-btn--icon"

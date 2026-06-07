@@ -3,16 +3,18 @@ import { Check, Copy } from "lucide-react";
 import { useT } from "../lib/i18n";
 import { Tooltip } from "./Tooltip";
 
-// CopyButton copies `text` to the clipboard on click and briefly flips to a check.
+// CopyButton copies text to the clipboard on click and briefly flips to a check.
 // navigator.clipboard works in the webview under the click's user gesture; a
 // failure is swallowed (nothing to copy to).
 export function CopyButton({
   text,
+  getText,
   className,
   label,
   showLabel = Boolean(label),
 }: {
-  text: string;
+  text?: string;
+  getText?: () => string | Promise<string>;
   className?: string;
   label?: string;
   showLabel?: boolean;
@@ -22,7 +24,8 @@ export function CopyButton({
   const actionLabel = label ?? t("msg.copy");
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(text);
+      const value = getText ? await getText() : text ?? "";
+      await navigator.clipboard.writeText(value);
       setCopied(true);
       setTimeout(() => setCopied(false), 1200);
     } catch {

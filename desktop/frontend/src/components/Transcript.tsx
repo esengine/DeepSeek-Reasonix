@@ -1,4 +1,15 @@
-import { type CSSProperties, type MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef, useState } from "react";
+import {
+  createContext,
+  memo,
+  type CSSProperties,
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { Item, LiveStream } from "../lib/useController";
 import type { CheckpointMeta } from "../lib/types";
 import { useT } from "../lib/i18n";
@@ -8,10 +19,18 @@ import { ToolCard } from "./ToolCard";
 import { Welcome } from "./Welcome";
 
 type ToolItem = Extract<Item, { kind: "tool" }>;
+type AssistantItem = Extract<Item, { kind: "assistant" }>;
 type OpenTurnAction = { turn: number; menu: "summary" | "rewind" };
 type QuestionAnchor = { id: string; text: string; turn: number };
 
 const QUESTION_NAV_MIN_COUNT = 2;
+const LiveStreamContext = createContext<LiveStream | undefined>(undefined);
+
+const LiveAssistantMessage = memo(function LiveAssistantMessage({ item }: { item: AssistantItem }) {
+  const live = useContext(LiveStreamContext);
+  const shown = live && live.id === item.id ? { ...item, text: live.text, reasoning: live.reasoning, streaming: true } : item;
+  return <AssistantMessage item={shown} />;
+});
 
 function questionAnchorId(id: string): string {
   return `question-anchor-${id}`;
@@ -204,6 +223,10 @@ export function Transcript({
   // targets the matching checkpoint.
   const userTurn = useMemo(() => new Map(questions.map((question) => [question.id, question.turn])), [questions]);
   const checkpointsByTurn = useMemo(() => new Map(checkpoints.map((checkpoint) => [checkpoint.turn, checkpoint])), [checkpoints]);
+  const liveIndex = useMemo(() => {
+    if (!live) return -1;
+    return items.findIndex((item) => item.kind === "assistant" && item.id === live.id);
+  }, [items, live?.id]);
 
   const jumpToQuestion = (question: QuestionAnchor) => {
     const el = scrollRef.current;
@@ -221,87 +244,91 @@ export function Transcript({
   };
 
   const empty = items.length === 0;
-  let activeTurn: number | undefined;
-  let actionText = "";
-  let actionReady = false;
-  const renderedItems = [];
-  const pushTurnActions = () => {
-    if (activeTurn == null || !actionReady || actionText.trim() === "") return;
-    const turn = activeTurn;
-    const openMenu = openAction && openAction.turn === turn ? openAction.menu : null;
-    renderedItems.push(
-      <TurnActions
-        key={`turn-actions-${turn}`}
-        text={actionText}
-        turn={turn}
-        openMenu={openMenu}
-        onOpenMenu={(menu) => setOpenAction(menu ? { turn, menu } : null)}
-        checkpoint={checkpointsByTurn.get(turn)}
-        actionPending={actionPending}
-        rewindDisabled={rewindDisabled}
-        onRewind={(targetTurn, scope) => {
-          onRewind?.(targetTurn, scope);
-          setOpenAction(null);
-        }}
-      />,
-    );
-    actionText = "";
-    actionReady = false;
-  };
-  for (const it of items) {
-    switch (it.kind) {
-      case "user": {
-        pushTurnActions();
-        const tn = userTurn.get(it.id);
-        activeTurn = tn;
-        renderedItems.push(
-          <UserMessage
-            key={it.id}
-            text={it.text}
-            turn={tn}
-            anchorId={questionAnchorId(it.id)}
-          />,
-        );
-        break;
-      }
-      case "assistant": {
-        // The streaming segment's text lives in `live`, not in items, so the
-        // backlog ref stays stable per token; overlay it only on its own item.
-        const shown = live && live.id === it.id ? { ...it, text: live.text, reasoning: live.reasoning, streaming: true } : it;
-        renderedItems.push(
-          <AssistantMessage
-            key={it.id}
-            item={shown}
-          />,
-        );
-        if (!shown.streaming && shown.text.trim() !== "") {
-          actionText = shown.text;
-          actionReady = true;
+  const renderedItems = useMemo<ReactNode[]>(() => {
+    let activeTurn: number | undefined;
+    let actionText = "";
+    let actionReady = false;
+    const nodes: ReactNode[] = [];
+    const pushTurnActions = () => {
+      if (activeTurn == null || !actionReady || actionText.trim() === "") return;
+      const turn = activeTurn;
+      const openMenu = openAction && openAction.turn === turn ? openAction.menu : null;
+      nodes.push(
+        <TurnActions
+          key={`turn-actions-${turn}`}
+          text={actionText}
+          turn={turn}
+          openMenu={openMenu}
+          onOpenMenu={(menu) => setOpenAction(menu ? { turn, menu } : null)}
+          checkpoint={checkpointsByTurn.get(turn)}
+          actionPending={actionPending}
+          rewindDisabled={rewindDisabled}
+          onRewind={(targetTurn, scope) => {
+            onRewind?.(targetTurn, scope);
+            setOpenAction(null);
+          }}
+        />,
+      );
+      actionText = "";
+      actionReady = false;
+    };
+    items.forEach((it, index) => {
+      switch (it.kind) {
+        case "user": {
+          pushTurnActions();
+          const tn = userTurn.get(it.id);
+          activeTurn = tn;
+          nodes.push(
+            <UserMessage
+              key={it.id}
+              text={it.text}
+              turn={tn}
+              anchorId={questionAnchorId(it.id)}
+            />,
+          );
+          break;
         }
-        break;
+        case "assistant": {
+          if (index === liveIndex) {
+            nodes.push(<LiveAssistantMessage key={it.id} item={it} />);
+            break;
+          }
+          nodes.push(
+            <AssistantMessage
+              key={it.id}
+              item={it}
+            />,
+          );
+          if (!it.streaming && it.text.trim() !== "") {
+            actionText = it.text;
+            actionReady = true;
+          }
+          break;
+        }
+        case "tool": {
+          if (it.parentId) break; // rendered nested under its parent
+          if (it.name === "todo_write") break; // shown live in the pinned TodoPanel
+          if (it.name === "exit_plan_mode") break; // the plan was shown in the approval card
+          nodes.push(<ToolCard key={it.id} item={it} subcalls={subcallsByParent.get(it.id)} />);
+          break;
+        }
+        case "phase": {
+          nodes.push(<PhaseCard key={it.id} text={it.text} />);
+          break;
+        }
+        case "notice": {
+          nodes.push(<NoticeCard key={it.id} level={it.level} text={it.text} />);
+          break;
+        }
+        case "compaction": {
+          nodes.push(<CompactionCard key={it.id} item={it} />);
+          break;
+        }
       }
-      case "tool": {
-        if (it.parentId) break; // rendered nested under its parent
-        if (it.name === "todo_write") break; // shown live in the pinned TodoPanel
-        if (it.name === "exit_plan_mode") break; // the plan was shown in the approval card
-        renderedItems.push(<ToolCard key={it.id} item={it} subcalls={subcallsByParent.get(it.id)} />);
-        break;
-      }
-      case "phase": {
-        renderedItems.push(<PhaseCard key={it.id} text={it.text} />);
-        break;
-      }
-      case "notice": {
-        renderedItems.push(<NoticeCard key={it.id} level={it.level} text={it.text} />);
-        break;
-      }
-      case "compaction": {
-        renderedItems.push(<CompactionCard key={it.id} item={it} />);
-        break;
-      }
-    }
-  }
-  pushTurnActions();
+    });
+    pushTurnActions();
+    return nodes;
+  }, [actionPending, checkpointsByTurn, items, liveIndex, onRewind, openAction, rewindDisabled, subcallsByParent, userTurn]);
 
   return (
     <div
@@ -315,7 +342,9 @@ export function Transcript({
         <QuestionJumpBar questions={questions} onJump={jumpToQuestion} />
       )}
 
-      {renderedItems}
+      <LiveStreamContext.Provider value={live}>
+        {renderedItems}
+      </LiveStreamContext.Provider>
     </div>
   );
 }
