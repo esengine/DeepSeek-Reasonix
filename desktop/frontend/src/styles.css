@@ -2182,6 +2182,8 @@ a[href] {
   position: relative;
   border: 1px solid var(--border);
   border-radius: 12px;
+  margin-left: -1px;
+  margin-right: -1px;
   background: var(--bg-elev);
   overflow: visible;
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.08);
