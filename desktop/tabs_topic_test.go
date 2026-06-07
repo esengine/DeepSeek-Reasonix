@@ -14,6 +14,36 @@ import (
 	"reasonix/internal/config"
 )
 
+func waitForTabReady(t *testing.T, app *App, tabID string) *WorkspaceTab {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		app.mu.RLock()
+		tab := app.tabs[tabID]
+		ready := tab != nil && tab.Ready
+		startupErr := ""
+		if tab != nil {
+			startupErr = tab.StartupErr
+		}
+		app.mu.RUnlock()
+		if tab == nil {
+			t.Fatalf("tab %q was not found", tabID)
+		}
+		if ready {
+			if startupErr != "" {
+				t.Fatalf("tab %q startup error: %s", tabID, startupErr)
+			}
+			if tab.Ctrl != nil {
+				t.Cleanup(func() { tab.Ctrl.Close() })
+			}
+			return tab
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("tab %q was not ready before timeout", tabID)
+	return nil
+}
+
 func writeTopicSession(t *testing.T, dir, name, topicID, topicTitle, workspaceRoot string) string {
 	t.Helper()
 	path := filepath.Join(dir, name)
@@ -706,6 +736,7 @@ func TestRenameTopicUpdatesOpenTabMeta(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open project tab: %v", err)
 	}
+	waitForTabReady(t, app, tab.ID)
 	if tab.TopicTitle != "旧标题" {
 		t.Fatalf("opened tab title = %q, want 旧标题", tab.TopicTitle)
 	}
@@ -731,9 +762,11 @@ func TestRenameTopicRecreatesDeletedProjectTitleIndexFromOpenTab(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create topic: %v", err)
 	}
-	if _, err := app.OpenProjectTab(projectRoot, topic.ID); err != nil {
+	tab, err := app.OpenProjectTab(projectRoot, topic.ID)
+	if err != nil {
 		t.Fatalf("open project tab: %v", err)
 	}
+	waitForTabReady(t, app, tab.ID)
 	if err := os.Remove(topicTitlesPath(projectRoot)); err != nil {
 		t.Fatalf("remove topic titles: %v", err)
 	}
