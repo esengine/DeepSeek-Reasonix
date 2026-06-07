@@ -3155,22 +3155,13 @@ const codegraphDB = ".codegraph/codegraph.db"
 
 // debugWelcome writes debug info to /tmp/welcome-debug.log.
 func debugWelcome(format string, args ...interface{}) {
-	msg := fmt.Sprintf(format, args...)
-	f, err := os.OpenFile("/tmp/welcome-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-	fmt.Fprintf(f, "[%s] %s\n", time.Now().Format("15:04:05"), msg)
 }
-
 
 // GenerateWelcomePrompts reads the codegraph index (if present) in the active
 // workspace and produces three Chinese welcome prompts tailored to the project.
 // Returns a JSON array of 3 strings. Falls back to empty string on any error —
 // the frontend keeps its i18n fallback in that case.
 func (a *App) GenerateWelcomePrompts() string {
-	debugWelcome("GenerateWelcomePrompts called")
 	return a.GenerateWelcomePromptsForTab("")
 }
 
@@ -3178,17 +3169,16 @@ func (a *App) GenerateWelcomePrompts() string {
 func (a *App) GenerateWelcomePromptsForTab(tabID string) string {
 	base, err := a.activeWorkspaceBase()
 	if err != nil || base == "" {
-		debugWelcome("base empty or error: err=%v", err)
 		return ""
 	}
 
-	debugWelcome("base=%s", base)
+	debugWelcome("base=%s err=%v", base, err)
 
 	dbPath := filepath.Join(base, codegraphDB)
 	if _, err := os.Stat(dbPath); err == nil {
 		// codegraph index available — use rich symbol data.
 		langs, err := cgQuery(dbPath, "SELECT language, COUNT(*) as cnt FROM files GROUP BY language ORDER BY cnt DESC LIMIT 5")
-		if err == nil {
+		if err == nil && len(langs) > 0 {
 			topFuncs, _ := cgQuery(dbPath, "SELECT name FROM nodes WHERE kind='function' AND is_exported=1 ORDER BY length(docstring) DESC LIMIT 5")
 			topTypes, _ := cgQuery(dbPath, "SELECT name FROM nodes WHERE kind IN ('struct','interface','type_alias') AND is_exported=1 LIMIT 5")
 			routes, _ := cgQuery(dbPath, "SELECT name FROM nodes WHERE kind='route' LIMIT 5")
@@ -3201,7 +3191,7 @@ func (a *App) GenerateWelcomePromptsForTab(tabID string) string {
 			debugWelcome("codegraph result: %s", string(out))
 			return string(out)
 		}
-		debugWelcome("codegraph query error: %v", err)
+		debugWelcome("codegraph empty or error: langs=%v err=%v", langs, err)
 	}
 
 	// Fallback: generate prompts from workspace file listing.
