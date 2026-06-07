@@ -390,6 +390,8 @@ export const zh: Record<DictKey, string> = {
   "projectTree.emptyNoProjects": "还没有项目",
   "projectTree.newTopicTooltip": "新建会话",
   "projectTree.addProjectTooltip": "添加新项目",
+  "projectTree.collapseAll": "全部折叠",
+  "projectTree.expandAll": "全部展开",
 
   // 记忆抽屉
   "memory.title": "记忆",

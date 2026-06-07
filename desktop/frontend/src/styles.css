@@ -9550,6 +9550,35 @@ a[href] {
   justify-content: center;
 }
 
+.project-tree__header-actions {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.project-tree__header-action-btn {
+  --wails-draggable: no-drag;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--fg-faint);
+  padding: 0;
+  opacity: 0.78;
+  cursor: pointer;
+}
+
+.project-tree__header-action-btn:hover {
+  background: var(--button-bg);
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--border-soft));
+  color: var(--fg);
+  opacity: 1;
+}
+
 .project-tree__add-project,
 .project-tree__new-topic {
   --wails-draggable: no-drag;

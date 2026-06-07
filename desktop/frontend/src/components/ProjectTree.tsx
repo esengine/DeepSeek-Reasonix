@@ -4,7 +4,7 @@
 // new topic.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
-import { Archive, ChevronRight, ChevronDown, Pencil, Plus, FolderPlus, Search, BriefcaseBusiness, Copy, FolderOpen, XCircle, History, Check } from "lucide-react";
+import { Archive, ChevronRight, ChevronDown, Pencil, Plus, FolderPlus, Search, BriefcaseBusiness, Copy, FolderOpen, XCircle, History, Check, ChevronsUpDown } from "lucide-react";
 import { asArray } from "../lib/array";
 import { app } from "../lib/bridge";
 import type { ProjectNode } from "../lib/types";
@@ -345,6 +345,49 @@ export function ProjectTree({
       /* ignore */
     }
   };
+
+  /** Recursively collect keys of all expandable nodes (those with children). */
+  const expandableKeys = useMemo<string[]>(() => {
+    const keys: string[] = [];
+    const walk = (nodes: ProjectNode[], depth: number) => {
+      for (const node of nodes) {
+        if (!node) continue;
+        const children = asArray(node.children);
+        if (children.length > 0) {
+          keys.push(projectNodeKey(node, depth));
+          walk(children, depth + 1);
+        }
+      }
+    };
+    walk(tree, 0);
+    return keys;
+  }, [tree]);
+
+  /** All expandable keys are currently expanded? */
+  const allExpanded = useMemo(
+    () => expandableKeys.length > 0 && expandableKeys.every((key) => expanded.has(key)),
+    [expandableKeys, expanded],
+  );
+
+  const toggleAll = useCallback(() => {
+    if (allExpanded) {
+      // Collapse everything
+      setExpanded(new Set());
+      setManuallyCollapsed((prev) => {
+        const next = new Set(prev);
+        for (const key of expandableKeys) next.add(key);
+        return next;
+      });
+    } else {
+      // Expand everything
+      setExpanded((prev) => {
+        const next = new Set(prev);
+        for (const key of expandableKeys) next.add(key);
+        return next;
+      });
+      setManuallyCollapsed(new Set());
+    }
+  }, [allExpanded, expandableKeys]);
 
   const visibleTree = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -745,7 +788,18 @@ export function ProjectTree({
           <BriefcaseBusiness size={13} />
           {t("projectTree.workspaceTitle")}
         </span>
-        <Tooltip label={t("projectTree.addProjectTooltip")} className="project-tree__action-slot">
+        <div className="project-tree__header-actions">
+          <Tooltip label={allExpanded ? t("projectTree.collapseAll") : t("projectTree.expandAll")}>
+            <button
+              type="button"
+              className="project-tree__header-action-btn"
+              onClick={toggleAll}
+              aria-label={allExpanded ? t("projectTree.collapseAll") : t("projectTree.expandAll")}
+            >
+              <ChevronsUpDown size={13} />
+            </button>
+          </Tooltip>
+          <Tooltip label={t("projectTree.addProjectTooltip")} className="project-tree__action-slot">
           <button
             type="button"
             className="project-tree__add-project"
@@ -756,6 +810,7 @@ export function ProjectTree({
             <FolderPlus size={13} />
           </button>
         </Tooltip>
+        </div>
       </div>
       <div className="project-tree__list">
         {visibleTree.length === 0 ? (
