@@ -5426,6 +5426,7 @@ a[href] {
 
 /* ── management modals: shared shell for settings, history, and trash ───────── */
 .management-modal-backdrop {
+  --wails-draggable: no-drag;
   position: fixed;
   inset: 0;
   z-index: 1200;
@@ -5433,6 +5434,7 @@ a[href] {
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 24px;
   overflow: hidden;
 }
 
@@ -5446,6 +5448,13 @@ a[href] {
   border-radius: 14px;
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.32);
   overflow: hidden;
+  animation: modal-in 0.12s ease;
+}
+.history-modal {
+  width: min(1180px, calc(100vw - 96px));
+}
+.history-modal--wide {
+  width: min(1360px, calc(100vw - 96px));
 }
 
 .management-modal__head {
@@ -5476,6 +5485,12 @@ a[href] {
   gap: 8px;
   flex-shrink: 0;
 }
+@keyframes modal-in {
+  from {
+    transform: translateY(8px) scale(0.99);
+    opacity: 0.72;
+  }
+}
 
 /* ── history manager: searchable list with preview and actions ─────────────── */
 .history-manager {
@@ -5504,6 +5519,9 @@ a[href] {
   overflow-y: auto;
   padding: 14px 14px 16px;
   border-right: 1px solid var(--border);
+}
+.history-list--trash {
+  min-height: 0;
 }
 .history-search {
   flex: 1 1 360px;
@@ -5546,6 +5564,10 @@ a[href] {
   display: flex;
   flex-direction: column;
   background: var(--bg);
+}
+.history-preview--empty {
+  align-items: center;
+  justify-content: center;
 }
 .history-preview__head {
   display: flex;
@@ -5600,6 +5622,11 @@ a[href] {
 .history-preview__body .transcript > * {
   max-width: none;
 }
+.history-filter-select select:focus {
+  border-color: var(--accent);
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
 .hist-item {
   display: flex;
   align-items: stretch;
@@ -5645,6 +5672,7 @@ a[href] {
 .hist-item__meta {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
   min-width: 0;
   font-size: 11px;
@@ -5674,6 +5702,29 @@ a[href] {
   color: var(--fg);
   font: inherit;
   font-size: 13px;
+}
+@media (max-width: 760px) {
+  .management-modal-backdrop {
+    align-items: stretch;
+    padding: 12px;
+  }
+  .management-modal,
+  .history-modal,
+  .history-modal--wide {
+    width: calc(100vw - 24px);
+    max-height: calc(100vh - 24px);
+  }
+  .management-modal__head,
+  .history-toolbar,
+  .history-preview__head {
+    flex-wrap: wrap;
+  }
+  .history-content {
+    grid-template-columns: 1fr;
+  }
+  .history-preview {
+    min-height: 260px;
+  }
 }
 
 /* ── settings drawer ───────────────────────────────────────────────────────── */
