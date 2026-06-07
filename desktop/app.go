@@ -2921,8 +2921,31 @@ type WorkspaceChangesView struct {
 	GitErr       string                `json:"gitErr,omitempty"`
 }
 
-// atSkip are entries the file tree and "@" menu hide as local workspace noise.
-var atSkip = map[string]bool{".git": true, ".codegraph": true, "node_modules": true, ".DS_Store": true}
+// workspaceNoiseNames are local cache/vendor entries hidden from the file tree
+// and "@" menu regardless of where they appear.
+var workspaceNoiseNames = map[string]bool{
+	".codex":       true,
+	".codegraph":   true,
+	".DS_Store":    true,
+	".git":         true,
+	".npm":         true,
+	".pnpm-store":  true,
+	"node_modules": true,
+	"Thumbs.db":    true,
+}
+
+var workspaceNoiseDirs = map[string]bool{
+	"bin":                      true,
+	"desktop/build":            true,
+	"desktop/frontend/dist":    true,
+	"desktop/frontend/wailsjs": true,
+	"dist":                     true,
+	"npm/.stage":               true,
+	"site/.astro":              true,
+	"site/dist":                true,
+	"stage":                    true,
+	"tmp":                      true,
+}
 
 const filePreviewLimit = 256 * 1024
 const fileRefSearchLimit = 20
@@ -2966,6 +2989,21 @@ func previewMediaKind(path string) (kind string, mime string) {
 		return "pdf", mime
 	}
 	return "", ""
+}
+
+func workspaceEntryRel(rel, name string) string {
+	rel = strings.Trim(filepath.ToSlash(rel), "/")
+	if rel == "" || rel == "." {
+		return name
+	}
+	return rel + "/" + name
+}
+
+func skipWorkspaceEntry(rel, name string, isDir bool) bool {
+	if workspaceNoiseNames[name] {
+		return true
+	}
+	return isDir && workspaceNoiseDirs[workspaceEntryRel(rel, name)]
 }
 
 func (a *App) activeWorkspaceBase() (string, error) {
@@ -3039,7 +3077,7 @@ func (a *App) ListDir(rel string) []DirEntry {
 	dirs, files := []DirEntry{}, []DirEntry{}
 	for _, e := range es {
 		name := e.Name()
-		if atSkip[name] {
+		if skipWorkspaceEntry(rel, name, e.IsDir()) {
 			continue
 		}
 		if e.IsDir() {
