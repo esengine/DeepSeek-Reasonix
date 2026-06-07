@@ -351,6 +351,12 @@ func TestSearchFileRefsFindsNestedBasename(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "frontend", "wailsjs", "runtime", "runtime.js"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(dir, "frontend", "Thumbs.db"), []byte("noise"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "frontend", ".DS_Store"), []byte("noise"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.MkdirAll(filepath.Join(dir, "node_modules", "pkg"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -398,6 +404,12 @@ func TestSearchFileRefsFindsNestedBasename(t *testing.T) {
 	if hasDirEntry(desktopFrontend, "wailsjs") {
 		t.Fatalf("ListDir should hide generated Wails bindings, got %+v", desktopFrontend)
 	}
+	frontendEntries := app.ListDir("frontend")
+	for _, hidden := range []string{".DS_Store", "Thumbs.db"} {
+		if hasDirEntry(frontendEntries, hidden) {
+			t.Fatalf("ListDir should hide local noise file %q, got %+v", hidden, frontendEntries)
+		}
+	}
 
 	got := app.SearchFileRefs("runtime.js")
 	if !hasDirEntry(got, "frontend/wailsjs/runtime/runtime.js") {
@@ -423,6 +435,12 @@ func TestSearchFileRefsFindsNestedBasename(t *testing.T) {
 		if hasDirEntry(got, hidden) {
 			t.Fatalf("SearchFileRefs should skip local noise %q, got %+v", hidden, got)
 		}
+	}
+	if noise := app.SearchFileRefs("Thumbs"); hasDirEntry(noise, "frontend/Thumbs.db") {
+		t.Fatalf("SearchFileRefs should skip Thumbs.db noise, got %+v", noise)
+	}
+	if noise := app.SearchFileRefs(".DS"); hasDirEntry(noise, "frontend/.DS_Store") {
+		t.Fatalf("SearchFileRefs should skip .DS_Store noise even for dot-prefixed search, got %+v", noise)
 	}
 }
 
