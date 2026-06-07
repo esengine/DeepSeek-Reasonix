@@ -3,7 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
+	cryptorand "crypto/rand"
+	mathrand "math/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -140,7 +141,7 @@ func (s *mediaTokenStore) create(absPath, filename, mime, kind string, size int6
 	s.cleanupLocked()
 
 	tok := make([]byte, 16)
-	if _, err := rand.Read(tok); err != nil {
+	if _, err := cryptorand.Read(tok); err != nil {
 		panic("crypto/rand.Read failed: " + err.Error())
 	}
 	token := hex.EncodeToString(tok)
@@ -3152,11 +3153,24 @@ func (a *App) SearchFileRefs(query string) []DirEntry {
 // codegraphDB is the relative path to the codegraph SQLite index inside a workspace.
 const codegraphDB = ".codegraph/codegraph.db"
 
+// debugWelcome writes debug info to /tmp/welcome-debug.log.
+func debugWelcome(format string, args ...interface{}) {
+	msg := fmt.Sprintf(format, args...)
+	f, err := os.OpenFile("/tmp/welcome-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	fmt.Fprintf(f, "[%s] %s\n", time.Now().Format("15:04:05"), msg)
+}
+
+
 // GenerateWelcomePrompts reads the codegraph index (if present) in the active
 // workspace and produces three Chinese welcome prompts tailored to the project.
 // Returns a JSON array of 3 strings. Falls back to empty string on any error —
 // the frontend keeps its i18n fallback in that case.
 func (a *App) GenerateWelcomePrompts() string {
+	debugWelcome("GenerateWelcomePrompts called")
 	return a.GenerateWelcomePromptsForTab("")
 }
 
@@ -3164,8 +3178,11 @@ func (a *App) GenerateWelcomePrompts() string {
 func (a *App) GenerateWelcomePromptsForTab(tabID string) string {
 	base, err := a.activeWorkspaceBase()
 	if err != nil || base == "" {
+		debugWelcome("base empty or error: err=%v", err)
 		return ""
 	}
+
+	debugWelcome("base=%s", base)
 
 	dbPath := filepath.Join(base, codegraphDB)
 	if _, err := os.Stat(dbPath); err == nil {
@@ -3181,21 +3198,26 @@ func (a *App) GenerateWelcomePromptsForTab(tabID string) string {
 			}
 			prompts := generateChinesePrompts(langSet, topFuncs, topTypes, routes)
 			out, _ := json.Marshal(prompts)
+			debugWelcome("codegraph result: %s", string(out))
 			return string(out)
 		}
+		debugWelcome("codegraph query error: %v", err)
 	}
 
 	// Fallback: generate prompts from workspace file listing.
 	entries, err := os.ReadDir(base)
 	if err != nil {
+		debugWelcome("ReadDir error: %v", err)
 		return ""
 	}
 	var names []string
 	for _, e := range entries {
 		names = append(names, e.Name())
 	}
+	debugWelcome("files: %v", names)
 	prompts := generateChinesePromptsFromFiles(names)
 	out, _ := json.Marshal(prompts)
+	debugWelcome("fallback result: %s", string(out))
 	return string(out)
 }
 
@@ -3220,9 +3242,25 @@ func cgQuery(dbPath, query string) ([]string, error) {
 	return results, nil
 }
 
+// welcomeRand is seeded once per process for prompt randomization.
+var welcomeRand = mathrand.New(mathrand.NewSource(time.Now().UnixNano()))
+
+// pickRandom picks a random element from a non-empty slice.
+func pickRandom(ss []string) string {
+	return ss[welcomeRand.Intn(len(ss))]
+}
+
+// shuffle returns a shuffled copy of ss.
+func shuffle(ss []string) []string {
+	out := make([]string, len(ss))
+	copy(out, ss)
+	welcomeRand.Shuffle(len(out), func(i, j int) { out[i], out[j] = out[j], out[i] })
+	return out
+}
+
 // generateChinesePromptsFromFiles builds three Chinese welcome prompts by
 // inspecting root-level file and folder names. Used when no codegraph index
-// is available.
+// is available. Each call returns a different random combination.
 func generateChinesePromptsFromFiles(names []string) []string {
 	set := make(map[string]bool, len(names))
 	for _, n := range names {
@@ -3239,82 +3277,112 @@ func generateChinesePromptsFromFiles(names []string) []string {
 	hasTests := has("test") || has("tests") || has("__tests__") || has("spec")
 	hasDocs := has("docs") || has("doc") || has("README.md")
 
-	// Prompt 1: architecture overview.
-	p1 := "帮我梳理一下这个项目的整体架构"
+	// Collect candidates for each slot.
+	var slot1, slot2, slot3 []string
+
+	// Slot 1: architecture / overview.
+	slot1 = append(slot1, "帮我梳理一下这个项目的整体架构")
 	if isGo {
-		p1 = "帮我梳理一下这个 Go 项目的模块结构和依赖关系"
+		slot1 = append(slot1, "帮我梳理一下这个 Go 项目的模块结构和依赖关系")
+		slot1 = append(slot1, "帮我分析一下这个 Go 项目的目录结构")
 	} else if isJS {
-		p1 = "帮我梳理一下这个前端项目的组件结构和路由"
+		slot1 = append(slot1, "帮我梳理一下这个前端项目的组件结构和路由")
+		slot1 = append(slot1, "帮我分析一下这个项目的前端架构")
 	} else if isPython {
-		p1 = "帮我梳理一下这个 Python 项目的包结构和入口点"
+		slot1 = append(slot1, "帮我梳理一下这个 Python 项目的包结构和入口点")
 	} else if isRust {
-		p1 = "帮我梳理一下这个 Rust 项目的 crate 结构"
+		slot1 = append(slot1, "帮我梳理一下这个 Rust 项目的 crate 结构")
 	}
 
-	// Prompt 2: pick the most useful "second question".
-	p2 := "帮我总结一下最近的 git 变更"
+	// Slot 2: most useful "second question".
+	slot2 = append(slot2, "帮我总结一下最近的 git 变更")
 	if hasDocker {
-		p2 = "帮我解释一下 Docker 的配置和服务连接方式"
-	} else if hasCI {
-		p2 = "帮我梳理一下 CI/CD 流水线的配置"
-	} else if hasTests {
-		p2 = "帮我分析一下测试套件的结构"
-	} else if isGo {
-		p2 = "帮我分析一下 cmd/ 和 internal/ 的职责划分"
+		slot2 = append(slot2, "帮我解释一下 Docker 的配置和服务连接方式")
+	}
+	if hasCI {
+		slot2 = append(slot2, "帮我梳理一下 CI/CD 流水线的配置")
+	}
+	if hasTests {
+		slot2 = append(slot2, "帮我分析一下测试套件的结构")
+	}
+	if isGo {
+		slot2 = append(slot2, "帮我分析一下 cmd/ 和 internal/ 的职责划分")
+	}
+	if hasDocs {
+		slot2 = append(slot2, "帮我总结一下 README 中的项目说明")
 	}
 
-	// Prompt 3: dive into a specific area.
-	p3 := "帮我找一下项目的入口点和主要流程"
+	// Slot 3: dive into a specific area.
+	slot3 = append(slot3, "帮我找一下项目的入口点和主要流程")
 	if isJS && has("src") {
-		p3 = "帮我分析一下 src/ 下的组件结构和状态管理"
-	} else if isGo && (has("cmd") || has("internal")) {
-		p3 = "帮我分析一下主要包之间的调用关系"
-	} else if isRust && has("src") {
-		p3 = "帮我分析一下 src/ 下各模块的职责"
-	} else if isPython && has("src") {
-		p3 = "帮我分析一下包的布局和主要入口"
-	} else if hasDocs {
-		p3 = "帮我总结一下 README 中的项目说明"
+		slot3 = append(slot3, "帮我分析一下 src/ 下的组件结构和状态管理")
+	}
+	if isGo && (has("cmd") || has("internal")) {
+		slot3 = append(slot3, "帮我分析一下主要包之间的调用关系")
+	}
+	if isRust && has("src") {
+		slot3 = append(slot3, "帮我分析一下 src/ 下各模块的职责")
+	}
+	if isPython && has("src") {
+		slot3 = append(slot3, "帮我分析一下包的布局和主要入口")
+	}
+	if hasDocs {
+		slot3 = append(slot3, "帮我看看文档里关于项目架构的描述")
 	}
 
-	return []string{p1, p2, p3}
+	return []string{pickRandom(slot1), pickRandom(slot2), pickRandom(slot3)}
 }
 
 // generateChinesePrompts builds three Chinese welcome prompts from codegraph data.
+// Each call returns a different random combination.
 func generateChinesePrompts(langs map[string]bool, topFuncs, topTypes, routes []string) []string {
-	// Prompt 1: architecture overview — always present.
-	p1 := "帮我梳理一下这个项目的整体架构"
+	var slot1, slot2, slot3 []string
+
+	// Slot 1: architecture overview.
+	slot1 = append(slot1, "帮我梳理一下这个项目的整体架构")
 	if langs["go"] {
-		p1 = "帮我梳理一下这个 Go 项目的模块结构和依赖关系"
+		slot1 = append(slot1, "帮我梳理一下这个 Go 项目的模块结构和依赖关系")
+		slot1 = append(slot1, "帮我分析一下这个 Go 项目的目录结构")
 	} else if langs["typescript"] || langs["tsx"] || langs["javascript"] {
-		p1 = "帮我梳理一下这个前端项目的组件结构和路由"
+		slot1 = append(slot1, "帮我梳理一下这个前端项目的组件结构和路由")
+		slot1 = append(slot1, "帮我分析一下这个项目的前端架构")
 	} else if langs["python"] {
-		p1 = "帮我梳理一下这个 Python 项目的包结构和入口点"
+		slot1 = append(slot1, "帮我梳理一下这个 Python 项目的包结构和入口点")
 	} else if langs["rust"] {
-		p1 = "帮我梳理一下这个 Rust 项目的 crate 结构"
+		slot1 = append(slot1, "帮我梳理一下这个 Rust 项目的 crate 结构")
 	}
 
-	// Prompt 2: pick the most useful "second question" based on data.
-	p2 := "帮我总结一下最近的 git 变更"
+	// Slot 2: most useful "second question".
+	slot2 = append(slot2, "帮我总结一下最近的 git 变更")
 	if len(routes) > 0 {
-		p2 = "帮我梳理一下项目的 API 路由和接口设计"
-	} else if len(topFuncs) > 0 {
-		p2 = fmt.Sprintf("帮我分析一下核心函数 %s 的实现逻辑", topFuncs[0])
-	} else if langs["go"] {
-		p2 = "帮我分析一下 cmd/ 和 internal/ 的职责划分"
+		slot2 = append(slot2, "帮我梳理一下项目的 API 路由和接口设计")
+	}
+	if len(topFuncs) > 0 {
+		slot2 = append(slot2, fmt.Sprintf("帮我分析一下核心函数 %s 的实现逻辑", topFuncs[0]))
+	}
+	if len(topFuncs) > 1 {
+		slot2 = append(slot2, fmt.Sprintf("帮我解释一下 %s 函数的作用", topFuncs[1]))
+	}
+	if langs["go"] {
+		slot2 = append(slot2, "帮我分析一下 cmd/ 和 internal/ 的职责划分")
 	}
 
-	// Prompt 3: dive into a specific area.
-	p3 := "帮我找一下项目的入口点和主要流程"
+	// Slot 3: dive into a specific area.
+	slot3 = append(slot3, "帮我找一下项目的入口点和主要流程")
 	if len(topTypes) > 0 {
-		p3 = fmt.Sprintf("帮我分析一下 %s 等核心数据结构的设计", topTypes[0])
-	} else if len(topFuncs) > 1 {
-		p3 = fmt.Sprintf("帮我解释一下 %s 和 %s 之间的调用关系", topFuncs[0], topFuncs[1])
-	} else if langs["typescript"] || langs["tsx"] {
-		p3 = "帮我分析一下主要组件的 props 和状态管理"
+		slot3 = append(slot3, fmt.Sprintf("帮我分析一下 %s 等核心数据结构的设计", topTypes[0]))
+	}
+	if len(topTypes) > 1 {
+		slot3 = append(slot3, fmt.Sprintf("帮我解释一下 %s 和 %s 的关系", topTypes[0], topTypes[1]))
+	}
+	if len(topFuncs) > 1 {
+		slot3 = append(slot3, fmt.Sprintf("帮我解释一下 %s 和 %s 之间的调用关系", topFuncs[0], topFuncs[1]))
+	}
+	if langs["typescript"] || langs["tsx"] {
+		slot3 = append(slot3, "帮我分析一下主要组件的 props 和状态管理")
 	}
 
-	return []string{p1, p2, p3}
+	return []string{pickRandom(slot1), pickRandom(slot2), pickRandom(slot3)}
 }
 
 // ReadFile returns a small text preview for a file under the current workspace.
