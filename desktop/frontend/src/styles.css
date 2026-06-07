@@ -1508,10 +1508,20 @@ a[href] {
   white-space: pre-wrap;
 }
 
-/* raw answer text while it streams (markdown takes over once complete) */
+/* live bubble while the answer streams — markdown renders in real time */
 .msg__stream {
-  white-space: pre-wrap;
-  word-break: break-word;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.msg__cursor {
+  display: inline-block;
+  width: 7px;
+  height: 1.05em;
+  margin-top: 4px;
+  background: var(--accent);
+  vertical-align: text-bottom;
+  animation: blink 1.05s steps(2, start) infinite;
 }
 .cursor {
   display: inline-block;

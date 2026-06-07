@@ -240,12 +240,13 @@ export const AssistantMessage = memo(function AssistantMessage({
       {hasText && (
         <div className="msg__body">
           {item.streaming ? (
-            // While streaming, render raw text (stable, monospace-free) instead of
-            // re-parsing markdown on every token — partial markdown reflows the
-            // layout and makes the view jitter. Markdown renders once, on completion.
+            // Render markdown in real time while streaming.  useDeferredValue
+            // inside <Markdown> lets React prioritise the cursor + layout frame
+            // over the expensive markdown parse — new tokens paint immediately,
+            // the formatted catch-up runs in idle frames.
             <div className="msg__stream">
-              {item.text}
-              <span className="cursor" />
+              <Markdown text={item.text} />
+              <span className="msg__cursor" />
             </div>
           ) : (
             <Markdown text={item.text} />
