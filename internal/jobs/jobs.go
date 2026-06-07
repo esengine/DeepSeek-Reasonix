@@ -127,25 +127,33 @@ func (m *Manager) Start(kind, label string, run func(ctx context.Context, out io
 	go func() {
 		defer m.wg.Done()
 		result, err := run(ctx, jobWriter{j})
-		j.mu.Lock()
-		j.result = result
+
+		var st Status
 		switch {
 		case ctx.Err() != nil:
-			j.status = Killed
+			st = Killed
 		case err != nil:
-			j.status = Failed
+			st = Failed
 			if result == "" {
-				j.result = err.Error()
+				result = err.Error()
 			}
 		default:
-			j.status = Done
+			st = Done
 		}
-		st := j.status
-		j.mu.Unlock()
-		// Record completion (queue the drain note + emit the closing Notice) BEFORE
-		// signalling done, so a Wait that unblocks on j.done sees the note already
-		// queued — otherwise DrainCompletedNote can race ahead of the bookkeeping.
+		// Queue the drain note (and emit the closing Notice) BEFORE publishing the
+		// terminal status. Wait(nil)/resolve only block on Running jobs, so if the
+		// status flipped to terminal before the note was queued, a Wait could observe
+		// completion, skip j.done, and DrainCompletedNote would race ahead of the
+		// bookkeeping (the TestDrainMultiple -race flake). Recording first makes an
+		// observed terminal status imply the note is already queued.
 		m.recordCompletion(id, kind, label, st, err)
+
+		j.mu.Lock()
+		j.result = result
+		if j.status != Killed { // a concurrent Kill already published Killed — keep it
+			j.status = st
+		}
+		j.mu.Unlock()
 		close(j.done)
 	}()
 	return j
