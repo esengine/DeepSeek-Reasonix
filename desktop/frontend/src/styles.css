@@ -9931,7 +9931,7 @@ a[href] {
   animation: project-tree-pulse 1.2s ease-in-out infinite;
 }
 .project-tree__topic-indicator--unread {
-  background: var(--fg-muted);
+  background: var(--fg-dim);
 }
 @keyframes project-tree-pulse {
   0%, 100% { opacity: 1; transform: scale(1); }
