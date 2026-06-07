@@ -654,7 +654,7 @@ export default function App() {
   // playTokenNote() is a no-op when the engine isn't running.
   useEffect(() => {
     const unsub = onEvent((e) => {
-      if (e.kind === "text" || e.kind === "reasoning") {
+      if (e.kind === "text" || e.kind === "reasoning" || e.kind === "tool_dispatch") {
         generativeMusic.playTokenNote();
       }
     });
@@ -1632,9 +1632,6 @@ export default function App() {
 	              disabled={state.meta?.ready === false || state.messageAction != null || state.approval != null || state.ask != null}
 	              decisionPending={state.messageAction != null || state.approval != null || state.ask != null}
               ready={state.meta?.ready === true}
-              turnStartAt={state.turnStartAt}
-              turnTokens={state.turnTokens}
-              retry={state.retry}
               workspaceRefreshSignal={projectRevision}
             />
             <StatusBar
@@ -1646,6 +1643,7 @@ export default function App() {
               mode={mode}
               cost={state.sessionCost}
               currency={state.sessionCurrency}
+              turnTokens={state.turnTokens}
             />
           </footer>
           </>

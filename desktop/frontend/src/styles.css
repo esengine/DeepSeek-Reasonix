@@ -486,7 +486,7 @@ a[href] {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  padding: 12px 10px;
+  padding: 12px 6px;
   background: var(--sidebar-bg);
   border-right: 1px solid var(--border-soft);
   --wails-draggable: drag;
@@ -636,7 +636,7 @@ a[href] {
   min-width: var(--workspace-resizer-width);
   padding: 0;
   border: 0;
-  background: transparent;
+  background: var(--chat-bg);
   cursor: col-resize;
   touch-action: none;
 }
@@ -2434,8 +2434,8 @@ a[href] {
 .composer-meta {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  justify-content: flex-start;
+  gap: 8px;
   min-width: 0;
   min-height: 40px;
   padding: 5px 14px 6px;
@@ -2445,17 +2445,12 @@ a[href] {
   font-size: 12px;
 }
 
-.composer-meta--no-workspace {
-  justify-content: flex-end;
-}
-
 .composer-meta__params {
   display: inline-flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: 6px;
   min-width: 0;
-  margin-left: auto;
 }
 
 .composer-meta__control {
@@ -2476,10 +2471,7 @@ a[href] {
   max-width: 160px;
 }
 
-.composer-meta--has-workspace .composer-meta__params {
-  padding-left: 12px;
-  border-left: 1px solid color-mix(in srgb, var(--border-soft) 74%, transparent);
-}
+/* separator between workspace and modebar is on .composer-modebar instead */
 
 .composer-meta__control--model {
   flex: 0 1 220px;
@@ -2587,10 +2579,6 @@ a[href] {
     max-width: 150px;
   }
 
-  .composer-meta--has-workspace .composer-meta__params {
-    padding-left: 8px;
-  }
-
   .composer-meta__control--model {
     flex-basis: 168px;
     max-width: 34vw;
@@ -2612,10 +2600,6 @@ a[href] {
     width: 132px;
     min-width: 118px;
     max-width: 132px;
-  }
-
-  .composer-meta--has-workspace .composer-meta__params {
-    padding-left: 6px;
   }
 
   .composer-meta__control--model {
@@ -8140,30 +8124,20 @@ a[href] {
   padding-left: 20px;
 }
 
-/* ── composer mode switcher ───────────────────────────────────────────────── */
-.composer-toolbar {
-  --wails-draggable: no-drag;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  max-width: var(--maxw);
-  margin: 0 auto 8px;
-}
-
 .composer-modebar {
   --wails-draggable: no-drag;
-  flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
-  width: fit-content;
-  max-width: 100%;
-  margin: 0;
-  padding: 3px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--bg-elev) 72%, var(--bg));
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--fg) 4%, transparent);
+  gap: 2px;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: none;
+}
+.composer-meta--has-workspace .composer-modebar {
+  padding-left: 10px;
+  border-left: 1px solid color-mix(in srgb, var(--border-soft) 74%, transparent);
 }
 .composer-wrap--decision-pending .composer-modebar {
   opacity: 0.46;
@@ -8179,7 +8153,7 @@ a[href] {
   justify-content: center;
   gap: 6px;
   height: 30px;
-  padding: 0 13px;
+  padding: 0 5px;
   border: 1px solid transparent;
   border-radius: 7px;
   background: transparent;
@@ -8220,6 +8194,7 @@ a[href] {
   border-color: var(--mode-active-border);
   color: var(--mode-active-fg);
   font-weight: 620;
+  padding: 0 9px;
   box-shadow:
     inset 0 1px 0 color-mix(in srgb, #fff 20%, transparent),
     0 1px 3px color-mix(in srgb, #000 36%, transparent);
@@ -8237,40 +8212,32 @@ a[href] {
     0 0 0 2px color-mix(in srgb, var(--mode-active-border) 42%, transparent);
 }
 
-.composer-runstatus {
-  --wails-draggable: no-drag;
-  flex: 0 1 auto;
-  min-width: 0;
+.statusbar__trailing {
   display: inline-flex;
   align-items: center;
-  justify-content: flex-end;
   gap: 8px;
-  height: 34px;
-  padding: 0 5px 0 11px;
-  border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--border));
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--accent) 9%, var(--bg-elev));
+  margin-left: 12px;
+  flex-shrink: 0;
+  min-width: 0;
+}
+
+.statusbar__tokens {
+  color: var(--fg-dim);
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.statusbar__spinner {
   color: var(--accent);
   font-family: var(--mono);
   font-size: 12px;
-  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 6%, transparent);
-}
-
-.composer-runstatus__dot {
-  flex: 0 0 auto;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: currentColor;
-  animation: pulse 1.2s ease-in-out infinite;
-}
-
-.composer-runstatus__text {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
-  font-variant-numeric: tabular-nums;
+  animation: pulse 1.8s ease-in-out infinite;
+}
+
+.composer-meta__stop-wrap {
+  margin-left: auto;
 }
 
 .composer-runstatus__stop {
@@ -9135,8 +9102,8 @@ a[href] {
   display: flex;
   align-items: center;
   gap: 14px;
-  min-height: 56px;
-  padding: 10px 32px;
+  min-height: 44px;
+  padding: 6px 32px;
   background: var(--chat-bg);
   border-bottom: 1px solid var(--border-soft);
   --wails-draggable: drag;
@@ -9167,9 +9134,9 @@ a[href] {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--fg);
-  font-size: 18px;
-  line-height: 1.25;
-  font-weight: 680;
+  font-size: 15px;
+  line-height: 1.3;
+  font-weight: 600;
 }
 
 .topicbar__title-edit {
@@ -9188,16 +9155,16 @@ a[href] {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--fg);
-  font-size: 18px;
-  line-height: 1.25;
-  font-weight: 680;
+  font-size: 15px;
+  line-height: 1.3;
+  font-weight: 600;
 }
 
 .topicbar__title-input {
   flex: 1 1 auto;
   min-width: 180px;
   width: min(420px, 40vw);
-  height: 32px;
+  height: 28px;
   padding: 0 9px;
   border: 1px solid var(--border);
   border-radius: 7px;
@@ -9205,9 +9172,9 @@ a[href] {
   background: var(--bg-elev);
   color: var(--fg);
   font: inherit;
-  font-size: 18px;
-  line-height: 1.25;
-  font-weight: 680;
+  font-size: 15px;
+  line-height: 1.3;
+  font-weight: 600;
   --wails-draggable: no-drag;
 }
 

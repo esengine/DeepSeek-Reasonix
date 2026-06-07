@@ -4,7 +4,7 @@ import { AlertTriangle, ArrowUp, Check, ChevronDown, Eye, FileText, Folder, Fold
 import { asArray } from "../lib/array";
 import { DedupIndex, sha256 } from "../lib/attachDedup";
 import { app, onFilesDropped } from "../lib/bridge";
-import { SPINNER_WORDS, useI18n } from "../lib/i18n";
+import { useI18n } from "../lib/i18n";
 import { clearLayoutSize, loadOptionalLayoutSize, saveLayoutSize } from "../lib/layoutPreferences";
 import type { CommandInfo, ComposerInsertRequest, DirEntry, EffortInfo, HistoryMessage, Mode, SessionMeta, SessionReference, SlashArgItem, SlashArgsResult, WorkspaceView } from "../lib/types";
 import {
@@ -95,18 +95,6 @@ function loadComposerHeight(): number | null {
   return loadOptionalLayoutSize("composerHeight", clampComposerHeight);
 }
 
-function fmtTokens(n: number): string {
-  if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, "") + "k";
-  return String(n);
-}
-
-function fmtElapsed(ms: number): string {
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s}s`;
-  return `${Math.floor(s / 60)}m ${s % 60}s`;
-}
-
-// --- past:chats hover preview helpers (PR-C2) ---
 // Pure formatting helpers used by the past:chats list tooltip. They never read
 // from disk, never call PreviewSession — they only shape the data that already
 // lives in the SessionMeta snapshot we fetched on entry.
@@ -132,16 +120,6 @@ function fmtSessionTime(value?: number): string {
 
 function pastChatTitle(session: SessionMeta): string {
   return session.title || session.topicTitle || session.preview || "Untitled";
-}
-
-function useTick(on: boolean): number {
-  const [, setN] = useState(0);
-  useEffect(() => {
-    if (!on) return;
-    const id = window.setInterval(() => setN((n) => n + 1), 1000);
-    return () => window.clearInterval(id);
-  }, [on]);
-  return Date.now();
 }
 
 function isImeKeyEvent(
@@ -265,9 +243,6 @@ export function Composer({
   disabled,
   decisionPending = false,
   ready,
-  turnStartAt,
-  turnTokens,
-  retry,
   workspaceRefreshSignal,
 }: {
   running: boolean;
@@ -294,13 +269,9 @@ export function Composer({
   // is nil before then), the available set changes when the workspace switches,
   // and a completed turn may have installed skills or MCP prompts.
   ready?: boolean;
-  turnStartAt?: number;
-  turnTokens?: number;
-  retry?: { attempt: number; max: number };
   workspaceRefreshSignal?: number;
 }) {
-  const { t, locale } = useI18n();
-  const now = useTick(running);
+  const { t } = useI18n();
   const [text, setText] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [workspaceRefs, setWorkspaceRefs] = useState<WorkspaceReference[]>([]);
@@ -1267,17 +1238,6 @@ export function Composer({
     { id: "plan", label: "plan", icon: <List size={13} /> },
     { id: "yolo", label: "yolo", icon: <AlertTriangle size={13} /> },
   ];
-  const runActivity = retry
-    ? t("status.retrying", { attempt: retry.attempt, max: retry.max })
-    : running && turnStartAt
-      ? (() => {
-          const elapsedMs = Math.max(0, now - turnStartAt);
-          const words = SPINNER_WORDS[locale];
-          const word = words[Math.floor(elapsedMs / 3000) % words.length];
-          const tok = turnTokens && turnTokens > 0 ? ` · ↓ ${fmtTokens(turnTokens)} ${t("status.tokens")}` : "";
-          return `${word}… ${fmtElapsed(elapsedMs)}${tok}`;
-        })()
-      : null;
   const hasWorkspace = Boolean(cwd);
   const hasEffort = Boolean(effort?.supported);
   const composerMetaClass = [
@@ -1502,35 +1462,6 @@ export function Composer({
           />
         )
       )}
-      <div className="composer-toolbar">
-        <div className="composer-modebar" role="toolbar" aria-label={t("composer.modeTitle")}>
-          {modeOptions.map((option) => (
-            <button
-              key={option.id}
-              type="button"
-              className={`composer-modebar__item composer-modebar__item--${option.id}${mode === option.id ? " composer-modebar__item--active" : ""}`}
-              onClick={() => onSetMode(option.id)}
-              aria-pressed={mode === option.id}
-              disabled={disabled || running}
-            >
-              {option.icon}
-              <span>{option.label}</span>
-            </button>
-          ))}
-        </div>
-        {runActivity && (
-          <div className="composer-runstatus" role="status" aria-live="polite">
-            <span className="composer-runstatus__dot" />
-            <span className="composer-runstatus__text">{runActivity}</span>
-            <Tooltip label={t("composer.stop")}>
-              <button className="composer-runstatus__stop" type="button" onClick={handleCancel} disabled={decisionPending}>
-                <Square size={10} fill="currentColor" />
-                <span>{t("composer.stopShort")}</span>
-              </button>
-            </Tooltip>
-          </div>
-        )}
-      </div>
       {(attachments.length > 0 || workspaceRefs.length > 0 || sessionRefs.length > 0) && (
         <div className="composer-context" aria-label={t("composer.contextItems")}>
           {attachments.map((a) => (
@@ -1706,6 +1637,25 @@ export function Composer({
               </button>
             </div>
           )}
+          <div className="composer-modebar" role="toolbar" aria-label={t("composer.modeTitle")}>
+            {modeOptions.map((option) => {
+              const isActive = mode === option.id;
+              const btn = (
+                <button
+                  key={option.id}
+                  type="button"
+                  className={`composer-modebar__item composer-modebar__item--${option.id}${isActive ? " composer-modebar__item--active" : ""}`}
+                  onClick={() => onSetMode(option.id)}
+                  aria-pressed={isActive}
+                  disabled={disabled || running}
+                >
+                  {option.icon}
+                  {isActive && <span>{option.label}</span>}
+                </button>
+              );
+              return isActive ? btn : <Tooltip key={option.id} label={option.label}>{btn}</Tooltip>;
+            })}
+          </div>
           <div className="composer-meta__params">
             <div className="composer-meta__control composer-meta__control--model">
               <ModelSwitcher label={modelLabel} tabId={tabId} onPick={onSwitchModel} />
@@ -1716,6 +1666,16 @@ export function Composer({
               </div>
             )}
           </div>
+          {running && (
+            <div className="composer-meta__stop-wrap">
+              <Tooltip label={t("composer.stop")}>
+                <button className="composer-runstatus__stop" type="button" onClick={handleCancel} disabled={decisionPending}>
+                  <Square size={10} fill="currentColor" />
+                  <span>{t("composer.stopShort")}</span>
+                </button>
+              </Tooltip>
+            </div>
+          )}
         </div>
       </div>
     </div>
