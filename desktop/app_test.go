@@ -54,6 +54,14 @@ func isolateDesktopUserDirs(t *testing.T) string {
 	return home
 }
 
+func providerNamesFromView(providers []ProviderView) []string {
+	out := make([]string, 0, len(providers))
+	for _, p := range providers {
+		out = append(out, p.Name)
+	}
+	return out
+}
+
 func TestCommandsIncludesEffortNotThinking(t *testing.T) {
 	app := NewApp()
 	cmds := app.Commands()
@@ -267,6 +275,20 @@ default = "deepseek-v4-flash"
 	cfg := config.LoadForEdit(config.UserConfigPath())
 	if cfg.Agent.SubagentModel != "deepseek/deepseek-v4-pro" || cfg.Agent.SubagentEffort != "max" {
 		t.Fatalf("saved config = model:%q effort:%q", cfg.Agent.SubagentModel, cfg.Agent.SubagentEffort)
+	}
+}
+
+func TestSettingsSurfacesOfficialProviderTemplatesSeparately(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	got := NewApp().Settings()
+	providers := providerAccessSet(providerNamesFromView(got.Providers))
+	official := providerAccessSet(providerNamesFromView(got.OfficialProviders))
+	if providers["mimo-api"] {
+		t.Fatalf("mimo-api should not be mixed into configured providers: %+v", got.Providers)
+	}
+	if !official["deepseek-flash"] || !official["mimo-api"] || !official["mimo-pro"] {
+		t.Fatalf("official providers = %+v, want deepseek-flash, mimo-api, and mimo-pro", got.OfficialProviders)
 	}
 }
 

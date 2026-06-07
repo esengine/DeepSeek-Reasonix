@@ -242,6 +242,19 @@ function normalizeAutoPlan(mode: string | undefined): AutoPlanMode {
   return mode === "ask" || mode === "on" ? "on" : "off";
 }
 
+function normalizeProviderView(p: ProviderView): ProviderView {
+  return {
+    ...p,
+    builtIn: Boolean(p.builtIn),
+    added: Boolean(p.added),
+    models: asArray(p.models),
+    modelsUrl: p.modelsUrl ?? "",
+    reasoningProtocol: p.reasoningProtocol ?? "",
+    supportedEfforts: asArray(p.supportedEfforts),
+    defaultEffort: p.defaultEffort ?? "",
+  };
+}
+
 function normalizeSettingsView(view: SettingsView | null | undefined): SettingsView | null {
   if (!view) return null;
   const permissions = view.permissions ?? { mode: "ask", allow: [], ask: [], deny: [] };
@@ -257,16 +270,8 @@ function normalizeSettingsView(view: SettingsView | null | undefined): SettingsV
     ...view,
     subagentModel: view.subagentModel ?? "",
     subagentEffort: view.subagentEffort ?? "",
-    providers: asArray(view.providers).map((p) => ({
-      ...p,
-      builtIn: Boolean(p.builtIn),
-      added: Boolean(p.added),
-      models: asArray(p.models),
-      modelsUrl: p.modelsUrl ?? "",
-      reasoningProtocol: p.reasoningProtocol ?? "",
-      supportedEfforts: asArray(p.supportedEfforts),
-      defaultEffort: p.defaultEffort ?? "",
-    })),
+    providers: asArray(view.providers).map(normalizeProviderView),
+    officialProviders: asArray(view.officialProviders).map(normalizeProviderView),
     providerKinds: asArray(view.providerKinds),
     permissions: {
       ...permissions,
@@ -629,12 +634,13 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
   const defaultProvider = toRef(s.defaultModel, s).split("/")[0];
   const [editing, setEditing] = useState<string | null>(null); // provider name, or "__new__"
   const accessProviders = s.providers.filter((p) => p.added || !p.builtIn);
-  const availableOfficial = s.providers.filter((p) => p.builtIn && !p.added);
+  const availableOfficial = availableOfficialProviders(s);
 
   const refreshModels = (p: ProviderView) =>
     apply(async () => {
       const models = await app.FetchProviderModels(p);
-      await app.SaveProvider({ ...p, added: true, models, default: models[0] || p.default });
+      const nextDefault = models.includes(p.default) ? p.default : models[0] || p.default;
+      await app.SaveProvider({ ...p, added: true, models, default: nextDefault });
     });
 
   return (
@@ -755,17 +761,46 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
 
 function providerAccessKind(p: ProviderView): string {
   if (p.name === "mimo-api") return "mimo-api";
-  if (p.name === "mimo-pro") return "mimo-token-plan";
+  if (p.name === "mimo-pro" || p.name === "mimo-flash") return "mimo-token-plan";
   return "deepseek";
+}
+
+function providerAccessOrder(kind: string): number {
+  switch (kind) {
+    case "deepseek":
+      return 0;
+    case "mimo-api":
+      return 1;
+    case "mimo-token-plan":
+      return 2;
+    default:
+      return 99;
+  }
+}
+
+function availableOfficialProviders(s: SettingsView): ProviderView[] {
+  const addedKinds = new Set(s.providers.filter((p) => p.builtIn && p.added).map(providerAccessKind));
+  const seenKinds = new Set<string>();
+  return (s.officialProviders.length > 0 ? s.officialProviders : s.providers)
+    .filter((p) => p.builtIn && !p.added)
+    .sort((a, b) => providerAccessOrder(providerAccessKind(a)) - providerAccessOrder(providerAccessKind(b)))
+    .filter((p) => {
+      const kind = providerAccessKind(p);
+      if (addedKinds.has(kind) || seenKinds.has(kind)) return false;
+      seenKinds.add(kind);
+      return true;
+    });
 }
 
 function providerLabel(p: ProviderView, t: ReturnType<typeof useT>): string {
   switch (p.name) {
     case "deepseek-flash":
+    case "deepseek-pro":
       return t("settings.providerLabel.deepseek");
     case "mimo-api":
       return t("settings.providerLabel.mimoApi");
     case "mimo-pro":
+    case "mimo-flash":
       return t("settings.providerLabel.mimoTokenPlan");
     default:
       return p.name;

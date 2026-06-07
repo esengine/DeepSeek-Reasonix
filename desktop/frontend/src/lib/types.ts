@@ -519,6 +519,7 @@ export interface SettingsView {
   subagentEffort: string;
   autoPlan: string;
   providers: ProviderView[];
+  officialProviders: ProviderView[];
   permissions: PermissionsView;
   sandbox: SandboxView;
   network: NetworkView;

@@ -85,6 +85,7 @@ type SettingsView struct {
 	SubagentEffort    string          `json:"subagentEffort"`
 	AutoPlan          string          `json:"autoPlan"`
 	Providers         []ProviderView  `json:"providers"`
+	OfficialProviders []ProviderView  `json:"officialProviders"`
 	Permissions       PermissionsView `json:"permissions"`
 	Sandbox           SandboxView     `json:"sandbox"`
 	Network           NetworkView     `json:"network"`
@@ -179,13 +180,42 @@ func removeProviderAccess(c *config.Config, names ...string) {
 	c.Desktop.ProviderAccess = out
 }
 
+func providerViewFromEntry(p config.ProviderEntry, builtIn, added bool) ProviderView {
+	return ProviderView{
+		Name: p.Name, BuiltIn: builtIn, Added: added, Kind: p.Kind, BaseURL: p.BaseURL,
+		Models: nonNil(p.ModelList()), ModelsURL: p.ModelsURL, Default: p.DefaultModel(),
+		APIKeyEnv:         p.APIKeyEnv,
+		KeySet:            p.APIKeyEnv != "" && os.Getenv(p.APIKeyEnv) != "",
+		BalanceURL:        p.BalanceURL,
+		ContextWindow:     p.ContextWindow,
+		ReasoningProtocol: p.ReasoningProtocol,
+		SupportedEfforts:  nonNil(p.SupportedEfforts),
+		DefaultEffort:     p.DefaultEffort,
+	}
+}
+
+func officialProviderViews(added map[string]bool) []ProviderView {
+	var out []ProviderView
+	for _, kind := range []string{"deepseek", "mimo-api", "mimo-token-plan"} {
+		entries, _, err := officialProviderTemplate(kind)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			out = append(out, providerViewFromEntry(entry, true, added[entry.Name]))
+		}
+	}
+	return out
+}
+
 // Settings returns the current configuration for the Settings panel.
 func (a *App) Settings() SettingsView {
 	cfg, cfgPath, err := a.loadDesktopUserConfigForEdit()
 	if err != nil {
 		return SettingsView{
-			Providers:     []ProviderView{},
-			ProviderKinds: nonNil(provider.Kinds()),
+			Providers:         []ProviderView{},
+			OfficialProviders: officialProviderViews(map[string]bool{}),
+			ProviderKinds:     nonNil(provider.Kinds()),
 			Permissions: PermissionsView{
 				Mode:  "ask",
 				Allow: []string{},
@@ -205,12 +235,13 @@ func (a *App) Settings() SettingsView {
 		bash = "enforce"
 	}
 	v := SettingsView{
-		DefaultModel:   cfg.DefaultModel,
-		PlannerModel:   cfg.Agent.PlannerModel,
-		SubagentModel:  cfg.Agent.SubagentModel,
-		SubagentEffort: cfg.Agent.SubagentEffort,
-		AutoPlan:       desktopAutoPlanMode(cfg.Agent.AutoPlan),
-		Providers:      []ProviderView{},
+		DefaultModel:      cfg.DefaultModel,
+		PlannerModel:      cfg.Agent.PlannerModel,
+		SubagentModel:     cfg.Agent.SubagentModel,
+		SubagentEffort:    cfg.Agent.SubagentEffort,
+		AutoPlan:          desktopAutoPlanMode(cfg.Agent.AutoPlan),
+		Providers:         []ProviderView{},
+		OfficialProviders: []ProviderView{},
 		Permissions: PermissionsView{
 			Mode:  orDefault(cfg.Permissions.Mode, "ask"),
 			Allow: nonNil(cfg.Permissions.Allow),
@@ -244,19 +275,10 @@ func (a *App) Settings() SettingsView {
 	}
 	builtIns := builtInProviderNames()
 	added := providerAccessSet(cfg.Desktop.ProviderAccess)
+	v.OfficialProviders = officialProviderViews(added)
 	for i := range cfg.Providers {
 		p := &cfg.Providers[i]
-		v.Providers = append(v.Providers, ProviderView{
-			Name: p.Name, BuiltIn: builtIns[p.Name], Added: added[p.Name], Kind: p.Kind, BaseURL: p.BaseURL,
-			Models: nonNil(p.ModelList()), ModelsURL: p.ModelsURL, Default: p.DefaultModel(),
-			APIKeyEnv:         p.APIKeyEnv,
-			KeySet:            p.APIKeyEnv != "" && os.Getenv(p.APIKeyEnv) != "",
-			BalanceURL:        p.BalanceURL,
-			ContextWindow:     p.ContextWindow,
-			ReasoningProtocol: p.ReasoningProtocol,
-			SupportedEfforts:  nonNil(p.SupportedEfforts),
-			DefaultEffort:     p.DefaultEffort,
-		})
+		v.Providers = append(v.Providers, providerViewFromEntry(*p, builtIns[p.Name], added[p.Name]))
 	}
 	return v
 }
