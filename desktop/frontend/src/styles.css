@@ -6843,7 +6843,7 @@ a[href] {
   transition: background 0.12s;
 }
 
-.tabbar__tab:hover {
+.tabbar__tab:not(.tabbar__tab--active):hover {
   background: color-mix(in srgb, var(--bg-elev-2) 42%, transparent);
 }
 
