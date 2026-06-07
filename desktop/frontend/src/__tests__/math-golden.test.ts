@@ -134,11 +134,13 @@ eq(normalizeMath("\\[E=mc^2\\]"), "$$E=mc^2$$", "\\[…\\] → $$…$$");
 eq(normalizeMath("\\\\[4pt]"), "\\\\[4pt]", "\\\\[ line-break spacing protected");
 
 console.log("\nnormalizeMath — non-math dollar filtering");
-eq(normalizeMath("costs $5$ today"), "costs ＄5＄ today", "$5$ not math");
-eq(normalizeMath("env $PATH$ here"), "env ＄PATH＄ here", "$PATH$ not math");
+eq(normalizeMath("costs $5$ today"), "costs &#36;5&#36; today", "$5$ not math");
+eq(normalizeMath("env $PATH$ here"), "env &#36;PATH&#36; here", "$PATH$ not math");
 eq(normalizeMath("solve $x^2 + y^2 = z^2$ please"), "solve $x^2 + y^2 = z^2$ please", "$x^2+y^2$ is math");
 eq(normalizeMath("$\\alpha + \\beta$"), "$\\alpha + \\beta$", "$\\alpha+\\beta$ is math");
-eq(normalizeMath("price is $10.50$ each"), "price is ＄10.50＄ each", "$10.50$ not math");
+eq(normalizeMath("price is $10.50$ each"), "price is &#36;10.50&#36; each", "$10.50$ not math");
+eq(normalizeMath("$I$ think"), "&#36;I&#36; think", "$I$ not math");
+eq(normalizeMath("it costs $5 and $10 total"), "it costs &#36;5 and &#36;10 total", "multiple prose $ stays literal");
 
 // ── normalizeMath — text-mode escapes (regression for PR #3287) ───────────────
 // The whole point of running latexNormalizeForKatex inside normalizeMath is
@@ -232,8 +234,9 @@ for (const [src, label] of e2e) {
 console.log("\nnormalizeMath — non-math inputs pass through");
 type Passthrough = { src: string; expected: string; label: string };
 const passthrough: Passthrough[] = [
-  // $5$ is filtered to fullwidth ＄5＄ so remark-math leaves it literal.
-  { src: "costs $5$ today", expected: "costs ＄5＄ today", label: "currency stays literal (fullwidth)" },
+  // $5$ is filtered to dollar entities so remark-math leaves it literal
+  // and the rendered prose still shows normal dollar signs.
+  { src: "costs $5$ today", expected: "costs &#36;5&#36; today", label: "currency stays literal" },
   { src: "line break \\\\[4pt] here", expected: "line break \\\\[4pt] here", label: "LaTeX line-break spacing" },
   { src: "hello world", expected: "hello world", label: "plain text" },
 ];
