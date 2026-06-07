@@ -350,6 +350,54 @@ function ShellHotkeys() {
   return null;
 }
 
+/** Close current tab with Cmd+W when the tab bar is visible.
+ *
+ * On macOS the native menu intercepts Cmd+W and emits "app:close-tab" via Wails
+ * runtime event; on Windows/Linux the menu is nil so a JS keydown listener is
+ * kept as a fallback.  Both pathways gate on tabBarHidden so the shortcut is
+ * only active when the tab strip is visible. */
+function TabHotkeys({
+  tabBarHidden,
+  activeTabId,
+  onCloseTab,
+}: {
+  tabBarHidden: boolean;
+  activeTabId?: string;
+  onCloseTab: (id: string) => void;
+}) {
+  // Refs keep the Wails event closure fresh without re-registering.
+  const tabBarHiddenRef = useRef(tabBarHidden);
+  tabBarHiddenRef.current = tabBarHidden;
+  const activeTabIdRef = useRef(activeTabId);
+  activeTabIdRef.current = activeTabId;
+  const onCloseTabRef = useRef(onCloseTab);
+  onCloseTabRef.current = onCloseTab;
+
+  // Wails event – primary path on macOS where Cmd+W is handled by the menu.
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.runtime) return;
+    return window.runtime.EventsOn("app:close-tab", () => {
+      if (!tabBarHiddenRef.current && activeTabIdRef.current) {
+        onCloseTabRef.current(activeTabIdRef.current);
+      }
+    });
+  }, []);
+
+  // JS keydown – fallback for Windows/Linux (no native menu).
+  useEffect(() => {
+    if (tabBarHidden) return;
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "w") {
+        e.preventDefault();
+        if (activeTabId) onCloseTab(activeTabId);
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [tabBarHidden, activeTabId, onCloseTab]);
+  return null;
+}
+
 export default function App() {
   const {
     state,
@@ -1330,6 +1378,11 @@ export default function App() {
   return (
     <ShellExpandProvider>
     <ShellHotkeys />
+    <TabHotkeys
+      tabBarHidden={tabBarHidden}
+      activeTabId={visibleTabId}
+      onCloseTab={(id) => void handleTabClose(id)}
+    />
     <div className={`app app--${desktopPlatform}`}>
       <div
         ref={layoutRef}

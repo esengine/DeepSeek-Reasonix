@@ -22,6 +22,12 @@ func (a *App) createAppMenu() *menu.Menu {
 	m.Append(menu.AppMenu())
 
 	fileMenu := m.AddSubmenu("File")
+	fileMenu.AddText("Close Tab", keys.CmdOrCtrl("w"), func(_ *menu.CallbackData) {
+		if a.ctx != nil {
+			runtime.EventsEmit(a.ctx, "app:close-tab")
+		}
+	})
+	fileMenu.AddSeparator()
 	fileMenu.AddText("Settings", keys.CmdOrCtrl(","), func(_ *menu.CallbackData) {
 		if a.ctx != nil {
 			runtime.EventsEmit(a.ctx, "app:open-settings")
@@ -34,7 +40,23 @@ func (a *App) createAppMenu() *menu.Menu {
 		a.quitApp()
 	})
 	m.Append(menu.EditMenu())
-	m.Append(menu.WindowMenu())
+
+	// Custom Window submenu — replaces menu.WindowMenu() which registers
+	// Cmd+W for "Close Window", conflicting with our Close Tab accelerator.
+	windowMenu := m.AddSubmenu("Window")
+	windowMenu.AddText("Minimize", keys.CmdOrCtrl("m"), func(_ *menu.CallbackData) {
+		if a.ctx != nil {
+			runtime.WindowMinimise(a.ctx)
+		}
+	})
+	windowMenu.AddText("Zoom", nil, func(_ *menu.CallbackData) {
+		if a.ctx != nil {
+			runtime.WindowMaximise(a.ctx)
+		}
+	})
+	windowMenu.AddText("Bring All to Front", nil, func(_ *menu.CallbackData) {
+		a.showMainWindow()
+	})
 
 	return m
 }
