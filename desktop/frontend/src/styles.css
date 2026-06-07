@@ -2159,7 +2159,7 @@ a[href] {
   opacity: 0.72;
   transition: background 0.12s, box-shadow 0.12s, opacity 0.12s;
 }
-.composer-card:hover .composer-resize-handle::before,
+.composer-resize-handle:hover::before,
 .composer-resize-handle:focus-visible::before,
 .composer-card--resizing .composer-resize-handle::before {
   background: var(--accent);
