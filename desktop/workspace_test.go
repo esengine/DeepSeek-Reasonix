@@ -618,6 +618,30 @@ func TestClearWorkspace(t *testing.T) {
 	}
 }
 
+// --- OpenProjectTab updates active workspace pointer ---
+
+func TestOpenProjectTabUpdatesActiveWorkspacePointer(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	if workspaceStatePath() == "" {
+		t.Fatal("workspaceStatePath() is empty after isolating")
+	}
+
+	projectRoot := t.TempDir()
+	app := NewApp()
+	topic, err := app.CreateTopic("project", projectRoot, "")
+	if err != nil {
+		t.Fatalf("create topic: %v", err)
+	}
+
+	if _, err := app.OpenProjectTab(projectRoot, topic.ID); err != nil {
+		t.Fatalf("open project tab: %v", err)
+	}
+
+	if got := loadWorkspace(); got != projectRoot {
+		t.Errorf("loadWorkspace = %q after OpenProjectTab, want %q", got, projectRoot)
+	}
+}
+
 func TestWindowsOpenWorkspacePathAvoidsCmdShell(t *testing.T) {
 	src, err := os.ReadFile("open_workspace_windows.go")
 	if err != nil {
