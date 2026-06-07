@@ -506,7 +506,6 @@ export default function App() {
     [activeTabId],
   );
   const topicbarEditing = Boolean(activeTab?.topicId && activeTab.topicId === renamingTopicId);
-  const topicbarProjectPrefix = activeTab ? tabWorkspaceTitle(activeTab) : "";
   useEffect(() => {
     const ids = new Set(tabMetas.map((tab) => tab.id));
     setModesByTab((current) => {
@@ -1348,9 +1347,6 @@ export default function App() {
               <div className="topicbar__title-row">
                 {topicbarEditing ? (
                   <div className="topicbar__title-edit">
-                    {topicbarProjectPrefix && (
-                      <span className="topicbar__title-prefix">{topicbarProjectPrefix} /</span>
-                    )}
                     <input
                       autoFocus
                       className="topicbar__title-input"
@@ -1370,7 +1366,7 @@ export default function App() {
                     />
                   </div>
                 ) : (
-                  <h1>{topicTitle(activeTab)}</h1>
+                  <h1>{activeTab?.topicTitle || "Untitled"}</h1>
                 )}
                 <Tooltip label={t("topicBar.renameSession")}>
                   <button
