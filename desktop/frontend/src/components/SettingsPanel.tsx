@@ -23,9 +23,9 @@ import { InlineConfirmButton } from "./InlineConfirmButton";
 import { ResizableDrawer } from "./ResizableDrawer";
 import { Tooltip } from "./Tooltip";
 
-type SettingsTab = "general" | "models" | "providers" | "capabilities" | "network" | "permissions" | "sandbox" | "appearance" | "updates";
+type SettingsTab = "general" | "models" | "mcp" | "skills" | "memory" | "permissions" | "sandbox" | "network" | "appearance" | "updates";
 
-const SETTINGS_TABS: SettingsTab[] = ["general", "models", "providers", "capabilities", "network", "permissions", "sandbox", "appearance", "updates"];
+const SETTINGS_TABS: SettingsTab[] = ["general", "models", "mcp", "skills", "memory", "permissions", "sandbox", "network", "appearance", "updates"];
 
 // SettingsPanel is the desktop settings surface, aligning with Claude Code's
 // settings: model & providers (incl. API keys), permissions, sandbox, and
@@ -34,11 +34,15 @@ const SETTINGS_TABS: SettingsTab[] = ["general", "models", "providers", "capabil
 export function SettingsPanel({
   onClose,
   onChanged,
-  onManageCapabilities,
+  onManageMcp,
+  onManageSkills,
+  onManageMemory,
 }: {
   onClose: () => void;
   onChanged: () => void;
-  onManageCapabilities: () => void;
+  onManageMcp: () => void;
+  onManageSkills: () => void;
+  onManageMemory: () => void;
 }) {
   const t = useT();
   const [s, setS] = useState<SettingsView | null>(null);
@@ -109,12 +113,13 @@ export function SettingsPanel({
               <main className="settings-content">
                 {err && <div className="banner banner--error">{err}</div>}
                 {tab === "general" && <GeneralSection s={s} busy={busy} apply={apply} />}
-                {tab === "models" && <ModelsSection s={s} busy={busy} apply={apply} onManageProviders={() => setTab("providers")} />}
-                {tab === "providers" && <ProvidersSection s={s} busy={busy} apply={apply} />}
-                {tab === "capabilities" && <CapabilitiesSection onManage={onManageCapabilities} />}
-                {tab === "network" && <NetworkSection s={s} busy={busy} apply={apply} />}
+                {tab === "models" && <ModelsSection s={s} busy={busy} apply={apply} />}
+                {tab === "mcp" && <SettingsManagementSection title={t("settings.tab.mcp")} description={t("settings.mcpDescription")} actionLabel={t("settings.openMcp")} onManage={onManageMcp} />}
+                {tab === "skills" && <SettingsManagementSection title={t("settings.tab.skills")} description={t("settings.skillsDescription")} actionLabel={t("settings.openSkills")} onManage={onManageSkills} />}
+                {tab === "memory" && <SettingsManagementSection title={t("settings.tab.memory")} description={t("settings.memoryDescription")} actionLabel={t("settings.openMemory")} onManage={onManageMemory} />}
                 {tab === "permissions" && <PermissionsSection s={s} busy={busy} apply={apply} />}
                 {tab === "sandbox" && <SandboxSection s={s} busy={busy} apply={apply} />}
+                {tab === "network" && <NetworkSection s={s} busy={busy} apply={apply} />}
                 {tab === "appearance" && (
                   <AppearanceSection
                     theme={theme}
@@ -166,10 +171,12 @@ function settingsTabLabel(id: SettingsTab, t: ReturnType<typeof useT>): string {
       return t("settings.tab.models");
     case "general":
       return t("settings.tab.general");
-    case "providers":
-      return t("settings.tab.providers");
-    case "capabilities":
-      return t("settings.tab.capabilities");
+    case "mcp":
+      return t("settings.tab.mcp");
+    case "skills":
+      return t("settings.tab.skills");
+    case "memory":
+      return t("settings.tab.memory");
     case "network":
       return t("settings.tab.network");
     case "permissions":
@@ -187,17 +194,26 @@ function settingsTabMeta(id: SettingsTab, _s: SettingsView, t: ReturnType<typeof
   return t(`settings.tabSub.${id}`);
 }
 
-function CapabilitiesSection({ onManage }: { onManage: () => void }) {
-  const t = useT();
+function SettingsManagementSection({
+  title,
+  description,
+  actionLabel,
+  onManage,
+}: {
+  title: string;
+  description: string;
+  actionLabel: string;
+  onManage: () => void;
+}) {
   return (
     <section className="mem-section">
       <div className="mem-section__head">
         <div>
-          <div className="mem-section__title">{t("settings.tab.capabilities")}</div>
-          <div className="settings-summary">{t("settings.capabilitiesDescription")}</div>
+          <div className="mem-section__title">{title}</div>
+          <div className="settings-summary">{description}</div>
         </div>
         <button className="btn btn--primary btn--small" onClick={onManage}>
-          {t("settings.openCapabilities")}
+          {actionLabel}
         </button>
       </div>
     </section>
@@ -488,8 +504,9 @@ function NetworkSection({ s, busy, apply }: SectionProps) {
   );
 }
 
-function ModelsSection({ s, busy, apply, onManageProviders }: SectionProps & { onManageProviders: () => void }) {
+function ModelsSection({ s, busy, apply }: SectionProps) {
   const t = useT();
+  const [subtab, setSubtab] = useState<"usage" | "access">("usage");
   const refs = allRefs(s);
   const defaultRef = toRef(s.defaultModel, s);
   const plannerRef = toRef(s.plannerModel, s);
@@ -500,101 +517,120 @@ function ModelsSection({ s, busy, apply, onManageProviders }: SectionProps & { o
     : t("settings.plannerSingleDetail", { model: defaultRef || t("common.none") });
 
   return (
-    <section className="mem-section">
-      <div className="mem-section__head">
-        <div className="mem-section__title">{t("settings.tab.models")}</div>
-        <button className="btn btn--small" onClick={onManageProviders}>
-          {t("settings.manageProviders")}
+    <>
+      <div className="set-seg settings-model-subtabs" role="tablist" aria-label={t("settings.tab.models")}>
+        <button
+          className={`set-seg__btn${subtab === "usage" ? " set-seg__btn--on" : ""}`}
+          role="tab"
+          aria-selected={subtab === "usage"}
+          onClick={() => setSubtab("usage")}
+        >
+          {t("settings.modelTab.usage")}
+        </button>
+        <button
+          className={`set-seg__btn${subtab === "access" ? " set-seg__btn--on" : ""}`}
+          role="tab"
+          aria-selected={subtab === "access"}
+          onClick={() => setSubtab("access")}
+        >
+          {t("settings.modelTab.access")}
         </button>
       </div>
 
-      <div className="set-row">
-        <label className="set-label">{t("settings.defaultModel")}</label>
-        <select
-          className="mem-select set-grow"
-          value={toRef(s.defaultModel, s)}
-          disabled={busy}
-          onChange={(e) => void apply(() => app.SetDefaultModel(e.target.value))}
-        >
-          {refs.map((r) => (
-            <option key={r} value={r}>
-              {r}
-            </option>
-          ))}
-        </select>
-      </div>
+      {subtab === "usage" ? (
+        <section className="mem-section">
+          <div className="mem-section__title">{t("settings.tab.models")}</div>
 
-      <div className="set-row">
-        <label className="set-label">{t("settings.plannerModel")}</label>
-        <select
-          className="mem-select set-grow"
-          value={toRef(s.plannerModel, s)}
-          disabled={busy}
-          onChange={(e) => void apply(() => app.SetPlannerModel(e.target.value))}
-        >
-          <option value="">{t("settings.plannerNone")}</option>
-          {refs.map((r) => (
-            <option key={r} value={r}>
-              {r}
-            </option>
-          ))}
-        </select>
-      </div>
+          <div className="set-row">
+            <label className="set-label">{t("settings.defaultModel")}</label>
+            <select
+              className="mem-select set-grow"
+              value={toRef(s.defaultModel, s)}
+              disabled={busy}
+              onChange={(e) => void apply(() => app.SetDefaultModel(e.target.value))}
+            >
+              {refs.map((r) => (
+                <option key={r} value={r}>
+                  {r}
+                </option>
+              ))}
+            </select>
+          </div>
 
-      <div className="set-row">
-        <label className="set-label">{t("settings.subagentModel")}</label>
-        <select
-          className="mem-select set-grow"
-          value={subagentRef}
-          disabled={busy}
-          onChange={(e) => void apply(() => app.SetSubagentModel(e.target.value))}
-        >
-          <option value="">{t("settings.subagentModelDefault")}</option>
-          {refs.map((r) => (
-            <option key={r} value={r}>
-              {r}
-            </option>
-          ))}
-        </select>
-      </div>
+          <div className="set-row">
+            <label className="set-label">{t("settings.plannerModel")}</label>
+            <select
+              className="mem-select set-grow"
+              value={toRef(s.plannerModel, s)}
+              disabled={busy}
+              onChange={(e) => void apply(() => app.SetPlannerModel(e.target.value))}
+            >
+              <option value="">{t("settings.plannerNone")}</option>
+              {refs.map((r) => (
+                <option key={r} value={r}>
+                  {r}
+                </option>
+              ))}
+            </select>
+          </div>
 
-      <div className="set-row">
-        <label className="set-label">{t("settings.subagentEffort")}</label>
-        <select
-          className="mem-select set-grow"
-          value={s.subagentEffort || ""}
-          disabled={busy}
-          onChange={(e) => void apply(() => app.SetSubagentEffort(e.target.value))}
-        >
-          <option value="">{t("settings.subagentEffortDefault")}</option>
-          {EFFORT_PRESETS.map((level) => (
-            <option key={level} value={level}>
-              {level}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div className="mem-hint">{t("settings.subagentHint")}</div>
+          <div className="set-row">
+            <label className="set-label">{t("settings.subagentModel")}</label>
+            <select
+              className="mem-select set-grow"
+              value={subagentRef}
+              disabled={busy}
+              onChange={(e) => void apply(() => app.SetSubagentModel(e.target.value))}
+            >
+              <option value="">{t("settings.subagentModelDefault")}</option>
+              {refs.map((r) => (
+                <option key={r} value={r}>
+                  {r}
+                </option>
+              ))}
+            </select>
+          </div>
 
-      <div className="settings-model-card">
-        <div>
-          <span>{t("settings.activeProvider")}</span>
-          <strong>{defaultProvider || t("common.none")}</strong>
-          <small>{defaultModel || defaultRef || t("common.none")}</small>
-        </div>
-        <div>
-          <span>{t("settings.plannerStatus")}</span>
-          <strong>{plannerRef ? t("settings.plannerDual") : t("settings.plannerSingle")}</strong>
-          <small>{plannerModeDetail}</small>
-        </div>
-        <div>
-          <span>{t("settings.subagentDefaults")}</span>
-          <strong>{subagentRef || t("common.auto")}</strong>
-          <small>{s.subagentEffort ? `effort ${s.subagentEffort}` : t("common.auto")}</small>
-        </div>
-      </div>
+          <div className="set-row">
+            <label className="set-label">{t("settings.subagentEffort")}</label>
+            <select
+              className="mem-select set-grow"
+              value={s.subagentEffort || ""}
+              disabled={busy}
+              onChange={(e) => void apply(() => app.SetSubagentEffort(e.target.value))}
+            >
+              <option value="">{t("settings.subagentEffortDefault")}</option>
+              {EFFORT_PRESETS.map((level) => (
+                <option key={level} value={level}>
+                  {level}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="mem-hint">{t("settings.subagentHint")}</div>
 
-    </section>
+          <div className="settings-model-card">
+            <div>
+              <span>{t("settings.activeProvider")}</span>
+              <strong>{defaultProvider || t("common.none")}</strong>
+              <small>{defaultModel || defaultRef || t("common.none")}</small>
+            </div>
+            <div>
+              <span>{t("settings.plannerStatus")}</span>
+              <strong>{plannerRef ? t("settings.plannerDual") : t("settings.plannerSingle")}</strong>
+              <small>{plannerModeDetail}</small>
+            </div>
+            <div>
+              <span>{t("settings.subagentDefaults")}</span>
+              <strong>{subagentRef || t("common.auto")}</strong>
+              <small>{s.subagentEffort ? `effort ${s.subagentEffort}` : t("common.auto")}</small>
+            </div>
+          </div>
+        </section>
+      ) : (
+        <ProvidersSection s={s} busy={busy} apply={apply} />
+      )}
+    </>
   );
 }
 
