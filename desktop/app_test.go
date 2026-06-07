@@ -270,6 +270,45 @@ default = "deepseek-v4-flash"
 	}
 }
 
+func TestSaveProviderPersistsReasoningProtocol(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	app := NewApp()
+	if err := app.SaveProvider(ProviderView{
+		Name:              "deepseek-proxy",
+		Kind:              "openai",
+		BaseURL:           "https://proxy.example.com/v1",
+		Models:            []string{"deepseek-v4-flash"},
+		Default:           "deepseek-v4-flash",
+		APIKeyEnv:         "DEEPSEEK_PROXY_KEY",
+		ReasoningProtocol: "none",
+		SupportedEfforts:  []string{"high", "max"},
+		DefaultEffort:     "max",
+	}); err != nil {
+		t.Fatalf("SaveProvider: %v", err)
+	}
+
+	cfg := config.LoadForEdit(config.UserConfigPath())
+	got, ok := cfg.Provider("deepseek-proxy")
+	if !ok {
+		t.Fatal("saved provider not found")
+	}
+	if got.ReasoningProtocol != "none" || got.DefaultEffort != "max" {
+		t.Fatalf("saved provider = %+v, want reasoning_protocol none and default_effort max", got)
+	}
+
+	view := app.Settings()
+	for _, p := range view.Providers {
+		if p.Name == "deepseek-proxy" {
+			if p.ReasoningProtocol != "none" {
+				t.Fatalf("settings reasoningProtocol = %q, want none", p.ReasoningProtocol)
+			}
+			return
+		}
+	}
+	t.Fatalf("Settings() missing saved provider: %+v", view.Providers)
+}
+
 func TestMigrateDesktopPreferencesDoesNotOverwriteExistingConfig(t *testing.T) {
 	isolateDesktopUserDirs(t)
 

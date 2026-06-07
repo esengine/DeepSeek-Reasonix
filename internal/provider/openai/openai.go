@@ -38,8 +38,13 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	}
 	keyEnv, _ := cfg.Extra["api_key_env"].(string) // for actionable auth errors
 	effort, _ := cfg.Extra["effort"].(string)
-	deepseek := isDeepSeekBaseURL(cfg.BaseURL)
-	if deepseek {
+	protocol, _ := cfg.Extra["reasoning_protocol"].(string)
+	protocol = normalizeReasoningProtocol(protocol)
+	deepseek := protocol == "deepseek" || (protocol == "" && isDeepSeekBaseURL(cfg.BaseURL))
+	switch {
+	case protocol == "none":
+		effort = ""
+	case deepseek:
 		effort = strings.ToLower(strings.TrimSpace(effort))
 		switch effort {
 		case "", "off": // "off" is a retired level (disabled thinking); fall back to the default depth
@@ -48,7 +53,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		default:
 			return nil, fmt.Errorf("openai: provider %q uses DeepSeek thinking; effort must be high or max", name)
 		}
-	} else if effort != "" {
+	case effort != "":
 		// Non-DeepSeek backends use OpenAI's reasoning_effort scale (low/medium/
 		// high); "max" is a DeepSeek-ism MiMo et al. reject with 400, so clamp it
 		// to the OpenAI ceiling and reject other values at boot, not at request time.
@@ -107,6 +112,15 @@ func isDeepSeekBaseURL(baseURL string) bool {
 	}
 	host := strings.ToLower(u.Hostname())
 	return host == "api.deepseek.com" || strings.HasSuffix(host, ".deepseek.com")
+}
+
+func normalizeReasoningProtocol(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "deepseek", "openai", "none":
+		return strings.ToLower(strings.TrimSpace(raw))
+	default:
+		return ""
+	}
 }
 
 // bufPool reuses byte buffers for JSON-marshalled request bodies. Each turn

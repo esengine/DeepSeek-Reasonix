@@ -19,7 +19,9 @@ import {
 import { TEXT_SIZES, applyTextSize, getTextSize, type TextSize } from "../lib/textSize";
 import { FONT_FAMILIES, applyFontFamily, getFontFamily, type FontFamily } from "../lib/fontFamily";
 import type { NetworkView, ProviderView, SettingsView } from "../lib/types";
+import { MCPServersSettingsPage, SkillsSettingsPage } from "./CapabilitiesPanel";
 import { InlineConfirmButton } from "./InlineConfirmButton";
+import { MemorySettingsPage } from "./MemoryPanel";
 import { ResizableDrawer } from "./ResizableDrawer";
 import { Tooltip } from "./Tooltip";
 
@@ -34,15 +36,9 @@ const SETTINGS_TABS: SettingsTab[] = ["general", "models", "mcp", "skills", "mem
 export function SettingsPanel({
   onClose,
   onChanged,
-  onManageMcp,
-  onManageSkills,
-  onManageMemory,
 }: {
   onClose: () => void;
   onChanged: () => void;
-  onManageMcp: () => void;
-  onManageSkills: () => void;
-  onManageMemory: () => void;
 }) {
   const t = useT();
   const [s, setS] = useState<SettingsView | null>(null);
@@ -114,9 +110,9 @@ export function SettingsPanel({
                 {err && <div className="banner banner--error">{err}</div>}
                 {tab === "general" && <GeneralSection s={s} busy={busy} apply={apply} />}
                 {tab === "models" && <ModelsSection s={s} busy={busy} apply={apply} />}
-                {tab === "mcp" && <SettingsManagementSection title={t("settings.tab.mcp")} description={t("settings.mcpDescription")} actionLabel={t("settings.openMcp")} onManage={onManageMcp} />}
-                {tab === "skills" && <SettingsManagementSection title={t("settings.tab.skills")} description={t("settings.skillsDescription")} actionLabel={t("settings.openSkills")} onManage={onManageSkills} />}
-                {tab === "memory" && <SettingsManagementSection title={t("settings.tab.memory")} description={t("settings.memoryDescription")} actionLabel={t("settings.openMemory")} onManage={onManageMemory} />}
+                {tab === "mcp" && <MCPServersSettingsPage />}
+                {tab === "skills" && <SkillsSettingsPage />}
+                {tab === "memory" && <MemorySettingsPage />}
                 {tab === "permissions" && <PermissionsSection s={s} busy={busy} apply={apply} />}
                 {tab === "sandbox" && <SandboxSection s={s} busy={busy} apply={apply} />}
                 {tab === "network" && <NetworkSection s={s} busy={busy} apply={apply} />}
@@ -194,32 +190,6 @@ function settingsTabMeta(id: SettingsTab, _s: SettingsView, t: ReturnType<typeof
   return t(`settings.tabSub.${id}`);
 }
 
-function SettingsManagementSection({
-  title,
-  description,
-  actionLabel,
-  onManage,
-}: {
-  title: string;
-  description: string;
-  actionLabel: string;
-  onManage: () => void;
-}) {
-  return (
-    <section className="mem-section">
-      <div className="mem-section__head">
-        <div>
-          <div className="mem-section__title">{title}</div>
-          <div className="settings-summary">{description}</div>
-        </div>
-        <button className="btn btn--primary btn--small" onClick={onManage}>
-          {actionLabel}
-        </button>
-      </div>
-    </section>
-  );
-}
-
 // allRefs flattens providers into "provider/model" refs for the model selectors.
 function allRefs(s: SettingsView): string[] {
   const out: string[] = [];
@@ -287,7 +257,16 @@ function normalizeSettingsView(view: SettingsView | null | undefined): SettingsV
     ...view,
     subagentModel: view.subagentModel ?? "",
     subagentEffort: view.subagentEffort ?? "",
-    providers: asArray(view.providers).map((p) => ({ ...p, models: asArray(p.models) })),
+    providers: asArray(view.providers).map((p) => ({
+      ...p,
+      builtIn: Boolean(p.builtIn),
+      added: Boolean(p.added),
+      models: asArray(p.models),
+      modelsUrl: p.modelsUrl ?? "",
+      reasoningProtocol: p.reasoningProtocol ?? "",
+      supportedEfforts: asArray(p.supportedEfforts),
+      defaultEffort: p.defaultEffort ?? "",
+    })),
     providerKinds: asArray(view.providerKinds),
     permissions: {
       ...permissions,
@@ -647,15 +626,24 @@ function proxyModeLabel(mode: ProxyMode, t: ReturnType<typeof useT>): string {
 
 function ProvidersSection({ s, busy, apply }: SectionProps) {
   const t = useT();
-  // The provider backing the default model — can't be deleted (would dangle the
-  // default). default_model may be a provider name or a "provider/model" ref.
   const defaultProvider = toRef(s.defaultModel, s).split("/")[0];
   const [editing, setEditing] = useState<string | null>(null); // provider name, or "__new__"
+  const accessProviders = s.providers.filter((p) => p.added || !p.builtIn);
+  const availableOfficial = s.providers.filter((p) => p.builtIn && !p.added);
+
+  const refreshModels = (p: ProviderView) =>
+    apply(async () => {
+      const models = await app.FetchProviderModels(p);
+      await app.SaveProvider({ ...p, added: true, models, default: models[0] || p.default });
+    });
 
   return (
     <section className="mem-section">
       <div className="mem-section__head">
-        <div className="mem-section__title">{t("settings.tab.providers")}</div>
+        <div>
+          <div className="mem-section__title">{t("settings.providerAccess")}</div>
+          <div className="settings-summary">{t("settings.providerAccessHint")}</div>
+        </div>
         {editing !== "__new__" && (
           <button className="btn btn--small" disabled={busy} onClick={() => setEditing("__new__")}>
             {t("settings.addProvider")}
@@ -664,7 +652,10 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
       </div>
 
       <div className="provider-list">
-        {s.providers.map((p) =>
+        {accessProviders.length === 0 && editing !== "__new__" && (
+          <div className="mem-empty">{t("settings.providerAccessEmptyTitle")}</div>
+        )}
+        {accessProviders.map((p) =>
           editing === p.name ? (
             <ProviderEditor
               key={p.name}
@@ -677,28 +668,32 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
           ) : (
             <div className="prov-card" key={p.name}>
               <div className="prov-card__head">
-                <span className="prov-card__name">{p.name}</span>
+                <span className="prov-card__name">{providerLabel(p, t)}</span>
                 <span className={`badge ${p.keySet ? "badge--project" : "badge--feedback"}`}>
                   {p.keySet ? t("settings.keySet") : t("settings.noKey")}
                 </span>
+                {p.builtIn && <span className="badge">{t("settings.builtinProvider")}</span>}
                 <span className="prov-card__spacer" />
+                <button className="btn btn--small" disabled={busy} onClick={() => void refreshModels(p)}>
+                  {t("settings.fetchModels")}
+                </button>
                 <button className="btn btn--small" disabled={busy} onClick={() => setEditing(p.name)}>
                   {t("common.edit")}
                 </button>
                 {defaultProvider === p.name ? (
-                  <Tooltip label={t("settings.cantDeleteDefault")}>
+                  <Tooltip label={t("settings.cantRemoveDefault")}>
                     <button className="btn btn--small" disabled>
-                      {t("common.delete")}
+                      {t("settings.removeProviderAccess")}
                     </button>
                   </Tooltip>
                 ) : (
                   <InlineConfirmButton
-                    label={t("common.delete")}
-                    confirmLabel={t("settings.confirmDeleteProvider")}
+                    label={t("settings.removeProviderAccess")}
+                    confirmLabel={p.builtIn ? t("settings.confirmRemoveProviderAccess") : t("settings.confirmDeleteProvider")}
                     cancelLabel={t("common.cancel")}
                     disabled={busy}
                     danger
-                    onConfirm={() => apply(() => app.DeleteProvider(p.name))}
+                    onConfirm={() => apply(() => app.RemoveProviderAccess(p.name))}
                   />
                 )}
               </div>
@@ -706,12 +701,45 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
                 <span>{p.kind}</span>
                 <span>{p.baseUrl}</span>
                 <span>{p.models.join(", ")}</span>
+                {p.reasoningProtocol && <span>{t("settings.providerReasoningProtocol")}: {p.reasoningProtocol}</span>}
               </div>
-              <KeyField apiKeyEnv={p.apiKeyEnv} busy={busy} onSet={(v) => apply(() => app.SetProviderKey(p.apiKeyEnv, v))} />
+              <KeyField
+                apiKeyEnv={p.apiKeyEnv}
+                busy={busy}
+                canClear={p.keySet}
+                onSet={(v) => apply(() => app.SetProviderKey(p.apiKeyEnv, v))}
+                onClear={() => apply(() => app.ClearProviderKey(p.apiKeyEnv))}
+              />
             </div>
           ),
         )}
       </div>
+
+      {availableOfficial.length > 0 && (
+        <div className="provider-list provider-list--compact">
+          <div className="mem-section__title">{t("settings.builtinProviders")}</div>
+          {availableOfficial.map((p) => (
+            <div className="prov-card" key={p.name}>
+              <div className="prov-card__head">
+                <span className="prov-card__name">{providerLabel(p, t)}</span>
+                <span className="badge">{p.models.join(", ")}</span>
+                <span className="prov-card__spacer" />
+                <button
+                  className="btn btn--small"
+                  disabled={busy}
+                  onClick={() => void apply(() => app.AddOfficialProviderAccess(providerAccessKind(p), ""))}
+                >
+                  {t("settings.addProviderAccess")}
+                </button>
+              </div>
+              <div className="prov-card__meta">
+                <span>{p.baseUrl}</span>
+                <span>{p.apiKeyEnv}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {editing === "__new__" && (
         <ProviderEditor
@@ -723,6 +751,25 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
       )}
     </section>
   );
+}
+
+function providerAccessKind(p: ProviderView): string {
+  if (p.name === "mimo-api") return "mimo-api";
+  if (p.name === "mimo-pro") return "mimo-token-plan";
+  return "deepseek";
+}
+
+function providerLabel(p: ProviderView, t: ReturnType<typeof useT>): string {
+  switch (p.name) {
+    case "deepseek-flash":
+      return t("settings.providerLabel.deepseek");
+    case "mimo-api":
+      return t("settings.providerLabel.mimoApi");
+    case "mimo-pro":
+      return t("settings.providerLabel.mimoTokenPlan");
+    default:
+      return p.name;
+  }
 }
 
 function ProviderEditor({
@@ -742,6 +789,7 @@ function ProviderEditor({
   const [name, setName] = useState(initial?.name ?? "");
   const [kind, setKind] = useState(initial?.kind ?? kinds[0] ?? "openai");
   const [baseUrl, setBaseUrl] = useState(initial?.baseUrl ?? "");
+  const [modelsUrl, setModelsUrl] = useState(initial?.modelsUrl ?? "");
   const [models, setModels] = useState((initial?.models ?? []).join(", "));
   const [apiKeyEnv, setApiKeyEnv] = useState(initial?.apiKeyEnv ?? "");
   const [balanceUrl, setBalanceUrl] = useState(initial?.balanceUrl ?? "");
@@ -751,6 +799,7 @@ function ProviderEditor({
   const [supportedEfforts, setSupportedEfforts] = useState<string[]>(initial?.supportedEfforts ?? []);
   const [customEffortDraft, setCustomEffortDraft] = useState("");
   const [defaultEffort, setDefaultEffort] = useState(initial?.defaultEffort ?? "");
+  const [reasoningProtocol, setReasoningProtocol] = useState(initial?.reasoningProtocol ?? "");
 
   // Offer the kinds the kernel actually registered; if the stored kind is a
   // legacy/unknown one, keep it as an option so editing doesn't silently change it.
@@ -792,14 +841,18 @@ function ProviderEditor({
       .filter(Boolean);
     onSave({
       name: name.trim(),
+      builtIn: initial?.builtIn ?? false,
+      added: true,
       kind: kind.trim() || kinds[0] || "openai",
       baseUrl: baseUrl.trim(),
       models: ms,
+      modelsUrl: modelsUrl.trim(),
       default: ms[0] ?? "",
       apiKeyEnv: apiKeyEnv.trim(),
       keySet: initial?.keySet ?? false,
       balanceUrl: balanceUrl.trim(),
       contextWindow: Number(ctx) || 0,
+      reasoningProtocol,
       supportedEfforts,
       // Clear the stored default if no levels are selected; the backend's
       // NormalizeEffort would otherwise silently ignore an unsupported value.
@@ -819,6 +872,7 @@ function ProviderEditor({
         ))}
       </select>
       <input className="mem-input" placeholder={t("settings.providerBaseUrl")} value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
+      <input className="mem-input" placeholder={t("settings.providerModelsUrl")} value={modelsUrl} onChange={(e) => setModelsUrl(e.target.value)} />
       <input className="mem-input" placeholder={t("settings.providerModels")} value={models} onChange={(e) => setModels(e.target.value)} />
       <input className="mem-input" placeholder={t("settings.providerApiKeyEnv")} value={apiKeyEnv} onChange={(e) => setApiKeyEnv(e.target.value)} />
       <label className="set-label">{t("settings.providerBalanceUrl")}</label>
@@ -827,6 +881,14 @@ function ProviderEditor({
       <label className="set-label">{t("settings.providerContextWindow")}</label>
       <input className="mem-input" placeholder={t("settings.contextWindowPlaceholder")} value={ctx} onChange={(e) => setCtx(e.target.value)} inputMode="numeric" />
       <div className="mem-hint">{t("settings.contextWindowHint")}</div>
+      <label className="set-label">{t("settings.providerReasoningProtocol")}</label>
+      <select className="mem-select" value={reasoningProtocol} onChange={(e) => setReasoningProtocol(e.target.value)}>
+        <option value="">{t("settings.providerReasoningProtocolAuto")}</option>
+        <option value="deepseek">deepseek</option>
+        <option value="openai">openai</option>
+        <option value="none">none</option>
+      </select>
+      <div className="mem-hint">{t("settings.providerReasoningProtocolHint")}</div>
       <label className="set-label">{t("settings.supportedEfforts")}</label>
       {EFFORT_PRESETS.map((level) => (
         <label key={level} className="set-check">
@@ -914,7 +976,19 @@ function ProviderEditor({
   );
 }
 
-function KeyField({ apiKeyEnv, busy, onSet }: { apiKeyEnv: string; busy: boolean; onSet: (v: string) => Promise<void> }) {
+function KeyField({
+  apiKeyEnv,
+  busy,
+  canClear,
+  onSet,
+  onClear,
+}: {
+  apiKeyEnv: string;
+  busy: boolean;
+  canClear: boolean;
+  onSet: (v: string) => Promise<void>;
+  onClear: () => Promise<void>;
+}) {
   const t = useT();
   const [val, setVal] = useState("");
   if (!apiKeyEnv) return null;
@@ -937,6 +1011,16 @@ function KeyField({ apiKeyEnv, busy, onSet }: { apiKeyEnv: string; busy: boolean
       >
         {t("settings.saveKey")}
       </button>
+      {canClear && (
+        <InlineConfirmButton
+          label={t("settings.clearKey")}
+          confirmLabel={t("settings.confirmClearKey")}
+          cancelLabel={t("common.cancel")}
+          disabled={busy}
+          danger
+          onConfirm={onClear}
+        />
+      )}
     </div>
   );
 }

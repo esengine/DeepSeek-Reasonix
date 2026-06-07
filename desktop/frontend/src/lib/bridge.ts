@@ -167,8 +167,12 @@ export interface AppBindings {
   SetSubagentEffort(level: string): Promise<void>;
   SetAutoPlan(mode: string): Promise<void>;
   SaveProvider(p: ProviderView): Promise<void>;
+  AddOfficialProviderAccess(kind: string, key: string): Promise<void>;
+  FetchProviderModels(p: ProviderView): Promise<string[]>;
   DeleteProvider(name: string): Promise<void>;
+  RemoveProviderAccess(name: string): Promise<void>;
   SetProviderKey(apiKeyEnv: string, value: string): Promise<void>;
+  ClearProviderKey(apiKeyEnv: string): Promise<void>;
   SetPermissionMode(mode: string): Promise<void>;
   AddPermissionRule(list: string, rule: string): Promise<void>;
   RemovePermissionRule(list: string, rule: string): Promise<void>;
@@ -534,8 +538,8 @@ function makeMockApp(): AppBindings {
     subagentEffort: "",
     autoPlan: "off",
     providers: [
-      { name: "deepseek-flash", kind: "openai", baseUrl: "https://api.deepseek.com", models: ["deepseek-v4-flash"], default: "deepseek-v4-flash", apiKeyEnv: "DEEPSEEK_API_KEY", keySet: true, balanceUrl: "https://api.deepseek.com/user/balance", contextWindow: 1_000_000, supportedEfforts: [], defaultEffort: "" },
-      { name: "mimo-pro", kind: "openai", baseUrl: "https://api.xiaomimimo.com/v1", models: ["mimo-v2.5-pro"], default: "mimo-v2.5-pro", apiKeyEnv: "MIMO_API_KEY", keySet: false, balanceUrl: "", contextWindow: 1_000_000, supportedEfforts: [], defaultEffort: "" },
+      { name: "deepseek-flash", builtIn: true, added: false, kind: "openai", baseUrl: "https://api.deepseek.com", modelsUrl: "", models: ["deepseek-v4-flash"], default: "deepseek-v4-flash", apiKeyEnv: "DEEPSEEK_API_KEY", keySet: true, balanceUrl: "https://api.deepseek.com/user/balance", contextWindow: 1_000_000, reasoningProtocol: "", supportedEfforts: [], defaultEffort: "" },
+      { name: "mimo-pro", builtIn: true, added: false, kind: "openai", baseUrl: "https://token-plan-cn.xiaomimimo.com/v1", modelsUrl: "", models: ["mimo-v2.5-pro"], default: "mimo-v2.5-pro", apiKeyEnv: "MIMO_API_KEY", keySet: false, balanceUrl: "", contextWindow: 1_048_576, reasoningProtocol: "", supportedEfforts: [], defaultEffort: "" },
     ],
     permissions: { mode: "ask", allow: ["ls", "read_file"], ask: [], deny: ["bash(rm *)"] },
     sandbox: { bash: "enforce", network: true, workspaceRoot: "", allowWrite: [] },
@@ -1426,16 +1430,46 @@ function makeMockApp(): AppBindings {
       settings.autoPlan = mode;
     },
     async SaveProvider(p: ProviderView) {
+      p.added = true;
       const i = settings.providers.findIndex((x) => x.name === p.name);
       if (i >= 0) settings.providers[i] = p;
       else settings.providers.push(p);
     },
+    async AddOfficialProviderAccess(kind: string, key: string) {
+      const templates: Record<string, ProviderView> = {
+        deepseek: { name: "deepseek-flash", builtIn: true, added: true, kind: "openai", baseUrl: "https://api.deepseek.com", modelsUrl: "", models: ["deepseek-v4-flash", "deepseek-v4-pro"], default: "deepseek-v4-flash", apiKeyEnv: "DEEPSEEK_API_KEY", keySet: !!key.trim(), balanceUrl: "https://api.deepseek.com/user/balance", contextWindow: 1_000_000, reasoningProtocol: "", supportedEfforts: [], defaultEffort: "" },
+        "mimo-api": { name: "mimo-api", builtIn: true, added: true, kind: "openai", baseUrl: "https://api.xiaomimimo.com/v1", modelsUrl: "", models: ["mimo-v2.5-pro"], default: "mimo-v2.5-pro", apiKeyEnv: "MIMO_API_KEY", keySet: !!key.trim(), balanceUrl: "", contextWindow: 1_048_576, reasoningProtocol: "", supportedEfforts: [], defaultEffort: "" },
+        "mimo-token-plan": { name: "mimo-pro", builtIn: true, added: true, kind: "openai", baseUrl: "https://token-plan-cn.xiaomimimo.com/v1", modelsUrl: "", models: ["mimo-v2.5-pro"], default: "mimo-v2.5-pro", apiKeyEnv: "MIMO_API_KEY", keySet: !!key.trim(), balanceUrl: "", contextWindow: 1_048_576, reasoningProtocol: "", supportedEfforts: [], defaultEffort: "" },
+      };
+      const next = templates[kind] ?? templates.deepseek;
+      const i = settings.providers.findIndex((x) => x.name === next.name);
+      if (i >= 0) settings.providers[i] = { ...settings.providers[i], ...next, keySet: next.keySet || settings.providers[i].keySet };
+      else settings.providers.push(next);
+    },
+    async FetchProviderModels(p: ProviderView) {
+      if (!p.baseUrl.trim()) throw new Error(t("settings.fetchModelsMissingBaseUrl"));
+      if (!p.apiKeyEnv.trim()) throw new Error(t("settings.fetchModelsMissingKeyEnv"));
+      await delay(350);
+      if (p.baseUrl.includes("deepseek")) return ["deepseek-v4-flash", "deepseek-v4-pro"];
+      if (p.baseUrl.includes("mimo") || p.baseUrl.includes("xiaomimimo")) return ["mimo-v2.5", "mimo-v2.5-pro"];
+      return ["gpt-5", "gpt-5-mini", "qwen3-coder"];
+    },
     async DeleteProvider(name: string) {
       settings.providers = settings.providers.filter((p) => p.name !== name);
     },
-    async SetProviderKey(apiKeyEnv: string) {
+    async RemoveProviderAccess(name: string) {
+      const p = settings.providers.find((x) => x.name === name);
+      if (p?.builtIn) p.added = false;
+      else settings.providers = settings.providers.filter((x) => x.name !== name);
+    },
+    async SetProviderKey(apiKeyEnv: string, _value: string) {
       settings.providers.forEach((p) => {
         if (p.apiKeyEnv === apiKeyEnv) p.keySet = true;
+      });
+    },
+    async ClearProviderKey(apiKeyEnv: string) {
+      settings.providers.forEach((p) => {
+        if (p.apiKeyEnv === apiKeyEnv) p.keySet = false;
       });
     },
     async SetPermissionMode(mode: string) {

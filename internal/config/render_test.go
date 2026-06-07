@@ -52,6 +52,7 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	}
 	mm, _ := orig.Provider("mimo-pro")
 	mm.BaseURL = "http://localhost:8000/v1"
+	mm.ReasoningProtocol = "openai"
 	ds, _ := orig.Provider("deepseek-flash")
 	ds.Effort = "max"
 
@@ -134,7 +135,7 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	if got.Agent.SubagentModels["review"] != "deepseek-pro" {
 		t.Errorf("subagent_models.review = %q, want deepseek-pro", got.Agent.SubagentModels["review"])
 	}
-	if g, _ := got.Provider("mimo-pro"); g == nil || g.BaseURL != "http://localhost:8000/v1" {
+	if g, _ := got.Provider("mimo-pro"); g == nil || g.BaseURL != "http://localhost:8000/v1" || g.ReasoningProtocol != "openai" {
 		t.Errorf("mimo-pro base_url not preserved: %+v", g)
 	}
 	if g, _ := got.Provider("deepseek-flash"); g == nil || g.Effort != "max" {

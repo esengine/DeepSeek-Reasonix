@@ -31,7 +31,6 @@ import { StatusBar } from "./components/StatusBar";
 import { MemoryPanel } from "./components/MemoryPanel";
 import { HistoryPanel } from "./components/HistoryPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
-import { CapabilitiesPanel } from "./components/CapabilitiesPanel";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { ContextPanel } from "./components/ContextPanel";
 import { WorkspacePanel } from "./components/WorkspacePanel";
@@ -81,7 +80,6 @@ const RIGHT_DOCK_PREVIEW_DEFAULT_WIDTH = 640;
 const RIGHT_DOCK_MAX_WIDTH = 860;
 
 type RightDockMode = "context" | "files" | "changed";
-type CapabilitiesInitialTab = "servers" | "skills";
 const SHOW_CONTEXT_DOCK = false;
 type HistoryScopeFilter = { scope: "global" | "project"; workspaceRoot: string };
 type HistoryViewState =
@@ -380,8 +378,6 @@ export default function App() {
   const [projectRevision, setProjectRevision] = useState(0);
   const [composerInsertRequest, setComposerInsertRequest] = useState<ComposerInsertRequest | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [capsOpen, setCapsOpen] = useState(false);
-  const [capsInitialTab, setCapsInitialTab] = useState<CapabilitiesInitialTab>("servers");
   const [renamingTopicId, setRenamingTopicId] = useState<string | null>(null);
   const [topicTitleDraft, setTopicTitleDraft] = useState("");
   const [topicExportOpen, setTopicExportOpen] = useState(false);
@@ -1707,24 +1703,8 @@ export default function App() {
         <SettingsPanel
           onClose={() => setSettingsOpen(false)}
           onChanged={() => void refreshMeta()}
-          onManageMcp={() => {
-            setSettingsOpen(false);
-            setCapsInitialTab("servers");
-            setCapsOpen(true);
-          }}
-          onManageSkills={() => {
-            setSettingsOpen(false);
-            setCapsInitialTab("skills");
-            setCapsOpen(true);
-          }}
-          onManageMemory={() => {
-            setSettingsOpen(false);
-            void openMemory();
-          }}
         />
       )}
-
-      {capsOpen && <CapabilitiesPanel initialTab={capsInitialTab} onClose={() => setCapsOpen(false)} />}
 
       {startupSplashVisible && (
         <StartupSplash hold={startupSplashHold} onDone={() => setStartupSplashVisible(false)} />

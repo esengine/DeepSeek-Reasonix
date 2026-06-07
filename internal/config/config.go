@@ -70,10 +70,11 @@ type UIConfig struct {
 // separate from top-level language and [ui] so desktop choices do not affect CLI
 // language, terminal colours, or provider-visible prompt/request data.
 type DesktopConfig struct {
-	Language      string `toml:"language"`       // auto|en|zh; empty/auto = browser/OS auto-detect
-	Theme         string `toml:"theme"`          // auto|dark|light; empty resolves to dark
-	ThemeStyle    string `toml:"theme_style"`    // graphite|ember|aurora|midnight|sandstone|porcelain|linen|glacier
-	CloseBehavior string `toml:"close_behavior"` // quit|background; desktop window close behavior
+	Language       string   `toml:"language"`        // auto|en|zh; empty/auto = browser/OS auto-detect
+	Theme          string   `toml:"theme"`           // auto|dark|light; empty resolves to dark
+	ThemeStyle     string   `toml:"theme_style"`     // graphite|ember|aurora|midnight|sandstone|porcelain|linen|glacier
+	CloseBehavior  string   `toml:"close_behavior"`  // quit|background; desktop window close behavior
+	ProviderAccess []string `toml:"provider_access"` // desktop-only list of provider entries shown in Settings > Model > Access
 }
 
 // NotificationsConfig controls optional system notifications for CLI chat/run.
@@ -490,6 +491,10 @@ type ProviderEntry struct {
 	// Empty = provider default.
 	Thinking string `toml:"thinking"`
 	Effort   string `toml:"effort"`
+	// ReasoningProtocol selects the request shape for OpenAI-compatible reasoning
+	// models. Empty/auto uses the model capability registry plus endpoint
+	// heuristics; none disables automatic reasoning controls for this provider.
+	ReasoningProtocol string `toml:"reasoning_protocol"`
 	// SupportedEfforts lists the /effort levels this provider/model exposes.
 	// When non-empty, it overrides the built-in defaults derived from
 	// Kind/BaseURL and makes /effort configurable. "auto" is the implicit

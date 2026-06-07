@@ -2731,7 +2731,7 @@ func (a *App) SetModelForTab(tabID, name string) error {
 	name = entry.Name + "/" + entry.Model
 	effortOverride := cloneStringPtr(tab.effort)
 	if effortOverride != nil {
-		normalized, err := config.NormalizeEffort(entry, config.EffortDisplay(&config.ProviderEntry{Effort: *effortOverride, Name: entry.Name, Kind: entry.Kind, BaseURL: entry.BaseURL}))
+		normalized, err := config.NormalizeEffort(entry, config.EffortDisplay(&config.ProviderEntry{Effort: *effortOverride}))
 		if err != nil {
 			effortOverride = nil
 		} else {
