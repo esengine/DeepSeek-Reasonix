@@ -1296,11 +1296,8 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.loopTickStart = time.Time{} // now running, no tick pending
 				m.notice(fmt.Sprintf("▸ /loop iter %d → %s", m.loopIter, m.loopPrompt))
 				cmds = append(cmds, m.startTurnWithRaw(m.loopPrompt, "/loop: "+m.loopPrompt, m.loopPrompt, m.loopPrompt))
-			} else if m.loopPrompt != "" && m.state == tuiRunning {
-				// Busy: re-schedule and try again later
-				m.loopTickStart = time.Now()
-				cmds = append(cmds, loopTick())
 			}
+			// Busy: discard, next TurnDone will schedule a fresh tick.
 
 	case spinner.TickMsg:
 		if m.state == tuiRunning {
@@ -2028,7 +2025,7 @@ func (m chatTUI) View() tea.View {
 			if remaining < 0 {
 				remaining = 0
 			}
-			loopTag += " " + formatDuration(remaining) // countdown
+			loopTag += " " + strconv.Itoa(int(remaining.Seconds())) + "s" // countdown
 		}
 		if m.loopIter > 0 {
 			loopTag += " #" + strconv.Itoa(m.loopIter)
@@ -2986,11 +2983,6 @@ func waitForAgentEvent(ch chan event.Event) tea.Cmd {
 
 func elapsedTick() tea.Cmd {
 	return tea.Tick(time.Second, func(_ time.Time) tea.Msg { return elapsedTickMsg{} })
-}
-
-// loopTick schedules a /loop re-submission after the configured interval.
-func loopTick() tea.Cmd {
-	return tea.Tick(time.Second, func(_ time.Time) tea.Msg { return loopTickMsg{} })
 }
 
 // runSlashCommand handles "/<cmd> <args>" input. Local commands queue their
