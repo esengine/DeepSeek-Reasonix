@@ -103,13 +103,14 @@ type Profile struct {
 // only ID/Name/Args/ReadOnly are set; on result Output/Err/Truncated are filled
 // in. Args is the raw JSON arguments — a sink compacts it for display.
 type Tool struct {
-	ID        string
-	Name      string
-	Args      string
-	Output    string // ToolResult: the result text fed to the model
-	Err       string // ToolResult: non-empty when the call failed or was blocked
-	ReadOnly  bool
-	Truncated bool // ToolResult: Output was head+tailed before display/model
+	ID         string
+	Name       string
+	Args       string
+	Output     string // ToolResult: the result text fed to the model
+	Err        string // ToolResult: non-empty when the call failed or was blocked
+	ReadOnly   bool
+	Truncated  bool  // ToolResult: Output was head+tailed before display/model
+	DurationMs int64 // ToolResult: wall-clock execution time in milliseconds
 	// Partial marks an early ToolDispatch emitted when a call begins (ID/Name set,
 	// Args still streaming) so a frontend can show the card immediately; a second,
 	// full ToolDispatch (Partial false, Args set) follows when the call completes.

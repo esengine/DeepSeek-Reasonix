@@ -2,11 +2,13 @@ import { type CSSProperties, type MouseEvent as ReactMouseEvent, useEffect, useM
 import type { Item, LiveStream } from "../lib/useController";
 import type { CheckpointMeta } from "../lib/types";
 import { useT } from "../lib/i18n";
-import { AssistantMessage, UserMessage } from "./Message";
+import { AssistantMessage, TurnActions, UserMessage } from "./Message";
+import { ProcessCard, ProcessCompactIcon, ProcessInfoIcon, ProcessPhaseIcon, ProcessStatusIcon } from "./ProcessCard";
 import { ToolCard } from "./ToolCard";
 import { Welcome } from "./Welcome";
 
 type ToolItem = Extract<Item, { kind: "tool" }>;
+type OpenTurnAction = { turn: number; menu: "summary" | "rewind" };
 type QuestionAnchor = { id: string; text: string; turn: number };
 
 const QUESTION_NAV_MIN_COUNT = 2;
@@ -186,18 +188,17 @@ export function Transcript({
     return m;
   }, [items]);
 
-  // The rewind menu's open state is lifted here so at most one is open at a time;
-  // a mousedown outside any .rewind closes it.
-  const [openTurn, setOpenTurn] = useState<number | null>(null);
+  // The turn action menu's open state is lifted here so at most one is open.
+  const [openAction, setOpenAction] = useState<OpenTurnAction | null>(null);
   useEffect(() => {
-    if (openTurn === null) return;
+    if (openAction === null) return;
     const onDown = (e: MouseEvent) => {
       const el = e.target as Element | null;
-      if (!el || !el.closest(".rewind")) setOpenTurn(null);
+      if (!el || !el.closest(".turn-actions")) setOpenAction(null);
     };
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
-  }, [openTurn]);
+  }, [openAction]);
 
   // Each user message's turn = its ordinal among user messages, so a rewind
   // targets the matching checkpoint.
@@ -220,6 +221,87 @@ export function Transcript({
   };
 
   const empty = items.length === 0;
+  let activeTurn: number | undefined;
+  let actionText = "";
+  let actionReady = false;
+  const renderedItems = [];
+  const pushTurnActions = () => {
+    if (activeTurn == null || !actionReady || actionText.trim() === "") return;
+    const turn = activeTurn;
+    const openMenu = openAction && openAction.turn === turn ? openAction.menu : null;
+    renderedItems.push(
+      <TurnActions
+        key={`turn-actions-${turn}`}
+        text={actionText}
+        turn={turn}
+        openMenu={openMenu}
+        onOpenMenu={(menu) => setOpenAction(menu ? { turn, menu } : null)}
+        checkpoint={checkpointsByTurn.get(turn)}
+        actionPending={actionPending}
+        rewindDisabled={rewindDisabled}
+        onRewind={(targetTurn, scope) => {
+          onRewind?.(targetTurn, scope);
+          setOpenAction(null);
+        }}
+      />,
+    );
+    actionText = "";
+    actionReady = false;
+  };
+  for (const it of items) {
+    switch (it.kind) {
+      case "user": {
+        pushTurnActions();
+        const tn = userTurn.get(it.id);
+        activeTurn = tn;
+        renderedItems.push(
+          <UserMessage
+            key={it.id}
+            text={it.text}
+            turn={tn}
+            anchorId={questionAnchorId(it.id)}
+          />,
+        );
+        break;
+      }
+      case "assistant": {
+        // The streaming segment's text lives in `live`, not in items, so the
+        // backlog ref stays stable per token; overlay it only on its own item.
+        const shown = live && live.id === it.id ? { ...it, text: live.text, reasoning: live.reasoning, streaming: true } : it;
+        renderedItems.push(
+          <AssistantMessage
+            key={it.id}
+            item={shown}
+          />,
+        );
+        if (!shown.streaming && shown.text.trim() !== "") {
+          actionText = shown.text;
+          actionReady = true;
+        }
+        break;
+      }
+      case "tool": {
+        if (it.parentId) break; // rendered nested under its parent
+        if (it.name === "todo_write") break; // shown live in the pinned TodoPanel
+        if (it.name === "exit_plan_mode") break; // the plan was shown in the approval card
+        renderedItems.push(<ToolCard key={it.id} item={it} subcalls={subcallsByParent.get(it.id)} />);
+        break;
+      }
+      case "phase": {
+        renderedItems.push(<PhaseCard key={it.id} text={it.text} />);
+        break;
+      }
+      case "notice": {
+        renderedItems.push(<NoticeCard key={it.id} level={it.level} text={it.text} />);
+        break;
+      }
+      case "compaction": {
+        renderedItems.push(<CompactionCard key={it.id} item={it} />);
+        break;
+      }
+    }
+  }
+  pushTurnActions();
 
   return (
     <div
@@ -233,55 +315,7 @@ export function Transcript({
         <QuestionJumpBar questions={questions} onJump={jumpToQuestion} />
       )}
 
-      {items.map((it) => {
-        switch (it.kind) {
-          case "user": {
-            const tn = userTurn.get(it.id);
-            return (
-              <UserMessage
-                key={it.id}
-                text={it.text}
-                turn={tn}
-                anchorId={questionAnchorId(it.id)}
-	                open={tn != null && openTurn === tn}
-	                onToggle={() => setOpenTurn((cur) => (cur === tn ? null : (tn ?? null)))}
-	                checkpoint={tn != null ? checkpointsByTurn.get(tn) : undefined}
-	                actionPending={actionPending}
-	                rewindDisabled={rewindDisabled}
-	                onRewind={(turn, scope) => {
-                  onRewind?.(turn, scope);
-                  setOpenTurn(null);
-                }}
-              />
-            );
-          }
-          case "assistant": {
-            // The streaming segment's text lives in `live`, not in items, so the
-            // backlog ref stays stable per token; overlay it only on its own item.
-            const shown = live && live.id === it.id ? { ...it, text: live.text, reasoning: live.reasoning, streaming: true } : it;
-            return <AssistantMessage key={it.id} item={shown} />;
-          }
-          case "tool":
-            if (it.parentId) return null; // rendered nested under its parent
-            if (it.name === "todo_write") return null; // shown live in the pinned TodoPanel
-            if (it.name === "exit_plan_mode") return null; // the plan was shown in the approval card
-            return <ToolCard key={it.id} item={it} subcalls={subcallsByParent.get(it.id)} />;
-          case "phase":
-            return (
-              <div key={it.id} className="phase">
-                {it.text}
-              </div>
-            );
-          case "notice":
-            return (
-              <div key={it.id} className={`notice notice--${it.level}`}>
-                {it.text}
-              </div>
-            );
-          case "compaction":
-            return <CompactionCard key={it.id} item={it} />;
-        }
-      })}
+      {renderedItems}
     </div>
   );
 }
@@ -415,6 +449,37 @@ function QuestionJumpBar({ questions, onJump }: { questions: QuestionAnchor[]; o
 }
 
 type CompactionItem = Extract<Item, { kind: "compaction" }>;
+type NoticeItem = Extract<Item, { kind: "notice" }>;
+
+function PhaseCard({ text }: { text: string }) {
+  return (
+    <ProcessCard
+      tone="accent"
+      icon={<ProcessPhaseIcon size={12} />}
+      kind="phase"
+      name={text}
+      className="phase process-card--phase"
+    />
+  );
+}
+
+function NoticeCard({ level, text }: { level: NoticeItem["level"]; text: string }) {
+  const t = useT();
+  const warning = level === "warn";
+  return (
+    <ProcessCard
+      tone={warning ? "warning" : "default"}
+      icon={<ProcessInfoIcon size={12} />}
+      kind="notice"
+      name={t(warning ? "notice.warning" : "notice.info")}
+      meta={warning ? <ProcessStatusIcon state="waiting" label={t("notice.warning")} /> : undefined}
+      defaultOpen
+      className={`notice notice--${level}`}
+    >
+      <div className="notice__body">{text}</div>
+    </ProcessCard>
+  );
+}
 
 // CompactionCard marks a context-compaction boundary in the transcript. While
 // the pass runs it shows a "compacting…" placeholder; once done it shows the
@@ -422,25 +487,28 @@ type CompactionItem = Extract<Item, { kind: "compaction" }>;
 // summary is the new context base, so it's available but doesn't flood the view).
 function CompactionCard({ item }: { item: CompactionItem }) {
   const t = useT();
-  const [open, setOpen] = useState(false);
   if (item.pending) {
     return (
-      <div className="compaction compaction--pending">
-        <span className="compaction__spinner">⋯</span> {t("compaction.working")}
-      </div>
+      <ProcessCard
+        tone="accent"
+        icon={<ProcessCompactIcon size={12} />}
+        kind="context"
+        name={t("compaction.working")}
+        meta={<ProcessStatusIcon state="running" label={t("compaction.working")} />}
+        className="compaction compaction--pending"
+      />
     );
   }
   return (
-    <div className="compaction">
-      <button className="compaction__head" onClick={() => setOpen((v) => !v)}>
-        <span className="compaction__icon">◆</span>
-        <span className="compaction__title">{t("compaction.title")}</span>
-        <span className="compaction__meta">
-          {t("compaction.messages", { n: item.messages })} · {item.trigger}
-        </span>
-        <span className="compaction__toggle">{open ? t("compaction.hideSummary") : t("compaction.showSummary")}</span>
-      </button>
-      {open && <pre className="compaction__summary">{item.summary}</pre>}
-    </div>
+    <ProcessCard
+      tone="accent"
+      icon={<ProcessCompactIcon size={12} />}
+      kind="context"
+      name={t("compaction.title")}
+      meta={`${t("compaction.messages", { n: item.messages })}${item.trigger ? ` · ${item.trigger}` : ""}`}
+      className="compaction"
+    >
+      <pre className="compaction__summary">{item.summary}</pre>
+    </ProcessCard>
   );
 }

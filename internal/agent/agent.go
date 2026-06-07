@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 	"unicode/utf8"
 
 	"reasonix/internal/diff"
@@ -729,8 +730,11 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) []s
 
 	results := make([]string, len(calls))
 	outcomes := make([]toolOutcome, len(calls))
+	durations := make([]int64, len(calls))
 	run := func(i int) {
+		start := time.Now()
 		outcomes[i] = a.executeOne(ctx, calls[i])
+		durations[i] = time.Since(start).Milliseconds()
 		results[i] = outcomes[i].output
 	}
 
@@ -748,13 +752,14 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) []s
 		o := outcomes[i]
 		t, ok := a.tools.Get(c.Name)
 		a.sink.Emit(event.Event{Kind: event.ToolResult, Tool: event.Tool{
-			ID:        c.ID,
-			Name:      c.Name,
-			Args:      c.Arguments,
-			Output:    o.output,
-			Err:       o.errMsg,
-			ReadOnly:  ok && t.ReadOnly(),
-			Truncated: o.truncated,
+			ID:         c.ID,
+			Name:       c.Name,
+			Args:       c.Arguments,
+			Output:     o.output,
+			Err:        o.errMsg,
+			ReadOnly:   ok && t.ReadOnly(),
+			Truncated:  o.truncated,
+			DurationMs: durations[i],
 		}})
 		if o.truncated && o.truncMsg != "" {
 			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: o.truncMsg})

@@ -79,9 +79,9 @@ func TestToWireToolDispatchProfile(t *testing.T) {
 }
 
 func TestToWireToolResult(t *testing.T) {
-	e := event.Event{Kind: event.ToolResult, Tool: event.Tool{ID: "1", Output: "ok", Truncated: true}}
+	e := event.Event{Kind: event.ToolResult, Tool: event.Tool{ID: "1", Output: "ok", Truncated: true, DurationMs: 522}}
 	w := toWire(e)
-	if w.Tool == nil || w.Tool.Output != "ok" || !w.Tool.Truncated {
+	if w.Tool == nil || w.Tool.Output != "ok" || !w.Tool.Truncated || w.Tool.DurationMs != 522 {
 		t.Errorf("tool result = %+v", w.Tool)
 	}
 }

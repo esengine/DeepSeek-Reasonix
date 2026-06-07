@@ -55,6 +55,7 @@ export type Item =
       output?: string;
       error?: string;
       truncated?: boolean;
+      durationMs?: number;
       isShell?: boolean; // true for !-prefix shell commands (controls default expand)
       parentId?: string; // a sub-agent call nests under the `task` call with this id
       profile?: { model?: string; effort?: string }; // subagent model/effort from tool event
@@ -133,6 +134,33 @@ export function historyMessagesToItems(messages: HistoryMessage[], idPrefix: str
   const consumedToolIDs = new Set<string>();
   for (const m of messages) {
     if (m.role === "system") continue;
+    if (m.role === "phase") {
+      if (m.content.trim() !== "") {
+        items.push({ kind: "phase", id: `${idPrefix}${seq}`, text: m.content });
+        seq++;
+      }
+      continue;
+    }
+    if (m.role === "notice") {
+      if (m.content.trim() !== "") {
+        items.push({ kind: "notice", id: `${idPrefix}${seq}`, level: m.level === "warn" ? "warn" : "info", text: m.content });
+        seq++;
+      }
+      continue;
+    }
+    if (m.role === "compaction") {
+      items.push({
+        kind: "compaction",
+        id: `${idPrefix}${seq}`,
+        pending: Boolean(m.pending),
+        trigger: m.trigger ?? "",
+        messages: m.messages ?? 0,
+        summary: m.summary ?? "",
+        archive: m.archive ?? "",
+      });
+      seq++;
+      continue;
+    }
     if (m.role === "user") {
       if (m.content.trim() === "") continue;
       items.push({ kind: "user", id: `${idPrefix}${seq}`, text: m.content });
@@ -182,29 +210,6 @@ export function historyMessagesToItems(messages: HistoryMessage[], idPrefix: str
       });
       seq++;
       continue;
-    }
-    if (m.role === "phase") {
-      items.push({ kind: "phase", id: `${idPrefix}${seq}`, text: m.content });
-      seq++;
-      continue;
-    }
-    if (m.role === "notice") {
-      items.push({ kind: "notice", id: `${idPrefix}${seq}`, level: m.level === "warn" ? "warn" : "info", text: m.content });
-      seq++;
-      continue;
-    }
-    if (m.role === "compaction") {
-      if (!m.pending && !m.summary) continue;
-      items.push({
-        kind: "compaction",
-        id: `${idPrefix}${seq}`,
-        pending: m.pending ?? false,
-        trigger: m.trigger ?? "",
-        messages: m.messages ?? 0,
-        summary: m.summary ?? "",
-        archive: m.archive ?? "",
-      });
-      seq++;
     }
   }
   return { items, seq };
@@ -288,7 +293,7 @@ function applyEvent(s: State, e: WireEvent): State {
       }
       if (idx >= 0) {
         const it = next[idx];
-        if (it.kind === "tool") next[idx] = { ...it, status: t.err ? "error" : "done", output: t.output, error: t.err, truncated: t.truncated };
+        if (it.kind === "tool") next[idx] = { ...it, status: t.err ? "error" : "done", output: t.output, error: t.err, truncated: t.truncated, durationMs: t.durationMs };
       }
       return { ...s, items: next };
     }

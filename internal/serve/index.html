@@ -57,6 +57,7 @@ input,textarea{font:inherit;color:inherit}
 .sidebar__item svg{width:15px;height:15px;flex-shrink:0;opacity:.7}
 .sidebar__item--active svg,.sidebar__item--accent svg{opacity:1}
 .sidebar__section{padding:8px;border-top:1px solid var(--border)}
+.sidebar__sep{height:1px;background:var(--border);margin:4px 8px}
 .sidebar__label{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600;padding:4px 10px}
 .sidebar__ctx{padding:6px 10px;display:flex;flex-direction:column;gap:5px}
 .ctx-bar{height:3px;border-radius:99px;background:var(--panel-2);overflow:hidden}
@@ -230,6 +231,9 @@ input,textarea{font:inherit;color:inherit}
 .session-item__title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500;font-size:12.5px;line-height:1.3}
 .session-item__meta{font-family:var(--mono);font-size:10px;color:var(--muted-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .session-item__path{font-family:var(--mono);font-size:10px;color:var(--muted-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.session-del{flex-shrink:0;padding:2px 6px;color:var(--muted-2);font-size:14px;line-height:1;display:none}
+.session-item:hover .session-del,.session-del:focus-visible{display:inline-flex}
+.session-del:hover{color:var(--danger)}
 
 @media(max-width:768px){
   .app{grid-template-columns:1fr}
@@ -237,6 +241,22 @@ input,textarea{font:inherit;color:inherit}
   .footer{padding:10px 16px 12px}
   .transcript{padding:16px}
 }
+
+/* stats modal */
+.modal-overlay{position:fixed;inset:0;background:oklch(0% 0 0/.55);display:flex;align-items:center;justify-content:center;z-index:200;animation:msg-in .15s ease}
+.modal{background:var(--panel);border:1px solid var(--border-strong);border-radius:var(--radius-lg);width:min(520px,90vw);max-height:80vh;overflow-y:auto;box-shadow:var(--shadow-lg)}
+.modal__head{padding:14px 16px;border-bottom:1px solid var(--border);font-family:var(--heading);font-weight:600;font-size:15px;display:flex;align-items:center;gap:8px}
+.modal__body{padding:14px 16px}
+.modal__close{margin-left:auto;cursor:pointer;color:var(--muted-2);width:24px;height:24px;display:flex;align-items:center;justify-content:center;border-radius:6px;transition:background .15s}
+.modal__close:hover{background:var(--card-hover);color:var(--fg)}
+.stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.stat-card{background:var(--bg-2);border:1px solid var(--border);border-radius:var(--radius);padding:12px}
+.stat-card__label{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600}
+.stat-card__value{font-family:var(--mono);font-size:18px;font-weight:600;color:var(--fg);margin-top:4px}
+.stat-card__value.acc{color:var(--accent)}
+.stat-card__value.ok{color:var(--success)}
+.stat-card--wide{grid-column:1/-1}
+.sidebar__item--danger{color:var(--danger)}
 </style>
 </head>
 <body>
@@ -249,35 +269,40 @@ input,textarea{font:inherit;color:inherit}
 <nav class="sidebar__nav" style="border-top:none;padding-top:0">
       <div class="sidebar__item sidebar__item--accent" id="btn-new">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-        <span>New Session</span>
+        <span>__('new_session')</span>
       </div>
       <div class="sidebar__item" id="btn-compact">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
-        <span>Compact</span>
+        <span>__('compact')</span>
       </div>
       <div class="sidebar__item" id="btn-rewind">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
-        <span>Rewind</span>
+        <span>__('rewind')</span>
       </div>
       <div class="sidebar__item" id="btn-tree">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
-        <span>Branches</span>
+        <span>__('branches')</span>
+      </div>
+      <div class="sidebar__sep"></div>
+      <div class="sidebar__item" id="btn-stats">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20v-6"/></svg>
+        <span>__('stats')</span>
       </div>
     </nav>
-    <div class="sidebar__label" style="padding:8px 10px 4px">Sessions</div>
+    <div class="sidebar__label" style="padding:8px 10px 4px">__('sessions')</div>
     <div class="session-list" id="session-list">
-      <div style="padding:10px;color:var(--muted-2);font-size:12px">Loading...</div>
+      <div style="padding:10px;color:var(--muted-2);font-size:12px">__('loading')</div>
     </div>
     <div class="sidebar__section">
-      <div class="sidebar__label">Status</div>
+      <div class="sidebar__label">__('status')</div>
       <div class="sidebar__ctx">
         <div class="ctx-bar"><div class="ctx-bar__fill" id="ctx-fill" style="width:0%"></div></div>
         <div class="ctx-label"><span id="ctx-used">0 tok</span><span id="ctx-window">0 tok</span></div>
       </div>
       <div class="status-metrics" id="status-metrics">
-        <div class="sm-item"><span class="sm-val" id="sm-cache">—</span><span>Cache</span></div>
-        <div class="sm-item"><span class="sm-val" id="sm-cost">—</span><span>Cost</span></div>
-        <div class="sm-item"><span class="sm-val acc" id="sm-balance">—</span><span>Balance</span></div>
+        <div class="sm-item"><span class="sm-val" id="sm-cache">—</span><span>__('cache')</span></div>
+        <div class="sm-item"><span class="sm-val" id="sm-cost">—</span><span>__('cost')</span></div>
+        <div class="sm-item"><span class="sm-val acc" id="sm-balance">—</span><span>__('balance')</span></div>
       </div>
       <div style="padding:4px 10px">
         <div class="status" id="sidebar-status"><span class="status__dot" id="status-dot"></span><span id="status-model">-</span></div>
@@ -289,16 +314,16 @@ input,textarea{font:inherit;color:inherit}
     <div class="welcome" id="welcome">
       <div class="welcome__logo">R</div>
       <div class="welcome__title">Reasonix</div>
-      <div class="welcome__tag">AI coding agent</div>
+      <div class="welcome__tag">__('welcome_tag')</div>
       <div class="welcome__hints">
-        <span><kbd>/</kbd> commands</span>
-        <span><kbd>Shift+Tab</kbd> mode</span>
-        <span><kbd>Esc&times;2</kbd> rewind</span>
+        <span><kbd>/</kbd> __('hint_commands')</span>
+        <span><kbd>Shift+Tab</kbd> __('hint_mode')</span>
+        <span><kbd>Esc&times;2</kbd> __('hint_rewind')</span>
       </div>
       <div class="welcome__examples">
-        <button class="welcome__ex" data-prompt="Explain the project structure">Explain the project structure</button>
-        <button class="welcome__ex" data-prompt="Find and fix any bugs">Find and fix any bugs</button>
-        <button class="welcome__ex" data-prompt="Write tests for the main module">Write tests for the main module</button>
+        <button class="welcome__ex" data-prompt="">__('example_explain')</button>
+        <button class="welcome__ex" data-prompt="">__('example_fix')</button>
+        <button class="welcome__ex" data-prompt="">__('example_test')</button>
       </div>
     </div>
   </section>
@@ -306,22 +331,22 @@ input,textarea{font:inherit;color:inherit}
   <footer class="footer">
     <div id="slash-menu-anchor"></div>
     <div class="toolbar">
-      <button class="toolbar__btn toolbar__btn--ok" id="btn-auto" title="Auto mode">
+      <button class="toolbar__btn toolbar__btn--ok" id="btn-auto" title="__('auto_mode')">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 12l2 2 4-4"/></svg>
-        Auto
+        __('auto')
       </button>
-      <button class="toolbar__btn" id="btn-plan" title="Plan mode (read-only)">
+      <button class="toolbar__btn" id="btn-plan" title="__('plan_mode')">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
-        Plan
+        __('plan')
       </button>
-      <button class="toolbar__btn" id="btn-bypass" title="YOLO mode (auto-approve)">
+      <button class="toolbar__btn" id="btn-bypass" title="__('yolo_mode')">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-        YOLO
+        __('yolo')
       </button>
       <div class="toolbar__sep"></div>
       <div class="status">
         <span class="status__dot" id="status-dot-footer"></span>
-        <span id="status-text">Ready</span>
+        <span id="status-text">__('ready')</span>
       </div>
       <div class="toolbar__spacer"></div>
       <div class="status" id="turn-info"></div>
@@ -329,19 +354,275 @@ input,textarea{font:inherit;color:inherit}
     </div>
     <div class="composer">
       <span class="composer__caret">&#8250;</span>
-      <textarea class="composer__input" id="in" placeholder="Message Reasonix...  / for commands" rows="1" autofocus></textarea>
-      <button class="composer__btn composer__btn--send" id="btn-send" title="Send (Enter)">
+      <textarea class="composer__input" id="in" placeholder="__('placeholder')" rows="1" autofocus></textarea>
+      <button class="composer__btn composer__btn--send" id="btn-send" title="__('send')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
       </button>
-      <button class="composer__btn composer__btn--stop" id="btn-stop" title="Cancel (Esc)" style="display:none">
+      <button class="composer__btn composer__btn--stop" id="btn-stop" title="__('cancel')" style="display:none">
         <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
       </button>
     </div>
   </footer>
 </div>
 
+<!-- stats modal -->
+<div class="modal-overlay" id="stats-modal" style="display:none">
+  <div class="modal">
+    <div class="modal__head">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20v-6"/></svg>
+      __('statistics')
+      <span class="modal__close" id="stats-modal-close">&times;</span>
+    </div>
+    <div class="modal__body">
+      <div class="stat-grid">
+        <div class="stat-card">
+          <div class="stat-card__label">__('model')</div>
+          <div class="stat-card__value" id="stats-model">-</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card__label">__('sessions')</div>
+          <div class="stat-card__value" id="stats-sessions">0</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card__label">__('total_tokens')</div>
+          <div class="stat-card__value acc" id="stats-total-tokens">0</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card__label">__('cache_hit_rate')</div>
+          <div class="stat-card__value ok" id="stats-cache-rate">0%</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card__label">__('total_cost')</div>
+          <div class="stat-card__value" id="stats-total-cost">-</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card__label">__('balance')</div>
+          <div class="stat-card__value" id="stats-balance">-</div>
+        </div>
+        <div class="stat-card stat-card--wide">
+          <div class="stat-card__label">__('context_usage')</div>
+          <div class="ctx-bar" style="margin-top:8px"><div class="ctx-bar__fill" id="stats-ctx-fill" style="width:0%"></div></div>
+          <div class="ctx-label" style="margin-top:4px"><span id="stats-ctx-used">0 tok</span><span id="stats-ctx-window">0 tok</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 <script>
-const $ = s => document.querySelector(s);
+// ── i18n ──
+const __LANG_PREF = '__LANG__';
+const __LANG = (__LANG_PREF === 'zh' || __LANG_PREF === 'en') ? __LANG_PREF : ((navigator.language || '').startsWith('zh') ? 'zh' : 'en');
+document.documentElement.lang = __LANG;
+const __T = {
+  en: {
+    'new_session': 'New Session',
+    'compact': 'Compact',
+    'rewind': 'Rewind',
+    'branches': 'Branches',
+    'sessions': 'Sessions',
+    'status': 'Status',
+    'loading': 'Loading...',
+    'cache': 'Cache',
+    'cost': 'Cost',
+    'balance': 'Balance',
+    'ready': 'Ready',
+    'thinking': 'Thinking...',
+    'stats': 'Stats',
+    'statistics': 'Statistics',
+    'model': 'Model',
+    'total_tokens': 'Total Tokens',
+    'cache_hit_rate': 'Cache Hit Rate',
+    'total_cost': 'Total Cost',
+    'context_usage': 'Context Usage',
+
+    'connected': 'Connected',
+    'reconnecting': 'Reconnecting...',
+    'disconnected': 'Disconnected',
+    'placeholder': 'Message Reasonix...  / for commands',
+    'cmd_compact': 'Compact conversation',
+    'cmd_new': 'New session',
+    'cmd_resume': 'Resume session',
+    'cmd_rewind': 'Rewind to checkpoint',
+    'cmd_tree': 'Show branch tree',
+    'cmd_branch': 'Create branch',
+    'cmd_switch': 'Switch branch',
+    'cmd_model': 'List/switch models',
+    'cmd_effort': 'Reasoning effort level',
+    'cmd_mcp': 'MCP servers',
+    'cmd_skill': 'Skills',
+    'cmd_hooks': 'Hooks',
+    'cmd_memory': 'Show memory',
+    'cmd_forget': 'Forget memory',
+    'cmd_thinking': 'Thinking effort',
+    'cmd_verbose': 'Toggle reasoning',
+    'cmd_help': 'Help',
+    'submit': 'Submit',
+    'approval_title': 'Approval Required',
+    'allow': 'Allow',
+    'session': 'Session',
+    'deny': 'Deny',
+    'auto_mode': 'Auto mode',
+    'plan_mode': 'Plan mode (read-only)',
+    'yolo_mode': 'YOLO mode (auto-approve)',
+    'auto': 'Auto',
+    'plan': 'Plan',
+    'yolo': 'YOLO',
+    'send': 'Send (Enter)',
+    'cancel': 'Cancel (Esc)',
+    'no_sessions': 'No sessions',
+    'error_loading': 'Error loading',
+    'no_checkpoints': 'No checkpoints available.',
+    'compacted': 'Compacted',
+    'messages': 'messages',
+    'compacting': 'Compacting...',
+    'scope_both': 'Code + conversation',
+    'scope_conversation': 'Conversation only',
+    'scope_code': 'Code only',
+    'scope_fork': 'Fork (new branch)',
+    'scope_sumfrom': 'Summarize from here',
+    'scope_sumupto': 'Summarize up to here',
+    'delete_confirm': 'Delete this session?',
+    'welcome_tag': 'AI coding agent',
+    'hint_commands': '/ commands',
+    'hint_mode': 'Shift+Tab mode',
+    'hint_rewind': 'Esc×2 rewind',
+    'example_explain': 'Explain the project structure',
+    'example_fix': 'Find and fix any bugs',
+    'example_test': 'Write tests for the main module',
+    'total': 'Total',
+    'in': 'In',
+    'out': 'Out',
+    'nav_jk': 'j/k or ↑↓ to navigate',
+    'nav_enter_esc': 'Enter to select · Esc to close',
+    'nav_keys': 'b/c/d/f/s/u quick keys',
+    'nav_apply_esc': 'Enter to apply · Esc to go back',
+    'rewind_title': 'Rewind — Select Turn',
+    'action_title': 'Turn #{turn} — Select Action',
+    'files': 'files',
+  },
+  zh: {
+    'new_session': '新会话',
+    'compact': '压缩',
+    'rewind': '回退',
+    'branches': '分支',
+    'sessions': '会话',
+    'status': '状态',
+    'loading': '加载中...',
+    'cache': '缓存',
+    'cost': '费用',
+    'balance': '余额',
+    'ready': '就绪',
+    'thinking': '思考中...',
+    'stats': '统计',
+    'statistics': '统计',
+    'model': '模型',
+    'total_tokens': '总 Token',
+    'cache_hit_rate': '缓存命中率',
+    'total_cost': '总费用',
+    'context_usage': '上下文用量',
+
+    'connected': '已连接',
+    'reconnecting': '重新连接...',
+    'disconnected': '已断开',
+    'placeholder': '给 Reasonix 发消息...  / 查看命令',
+    'cmd_compact': '压缩对话',
+    'cmd_new': '新建会话',
+    'cmd_resume': '恢复会话',
+    'cmd_rewind': '回退到检查点',
+    'cmd_tree': '显示分支树',
+    'cmd_branch': '创建分支',
+    'cmd_switch': '切换分支',
+    'cmd_model': '列出/切换模型',
+    'cmd_effort': '推理努力级别',
+    'cmd_mcp': 'MCP 服务器',
+    'cmd_skill': '技能',
+    'cmd_hooks': '钩子',
+    'cmd_memory': '显示记忆',
+    'cmd_forget': '忘记记忆',
+    'cmd_thinking': '思考努力',
+    'cmd_verbose': '切换推理显示',
+    'cmd_help': '帮助',
+    'submit': '提交',
+    'approval_title': '需要批准',
+    'allow': '允许',
+    'session': '会话期',
+    'deny': '拒绝',
+    'auto_mode': '自动模式',
+    'plan_mode': '计划模式（只读）',
+    'yolo_mode': 'YOLO 模式（自动批准）',
+    'auto': '自动',
+    'plan': '计划',
+    'yolo': 'YOLO',
+    'send': '发送 (Enter)',
+    'cancel': '取消 (Esc)',
+    'no_sessions': '暂无会话',
+    'error_loading': '加载失败',
+    'no_checkpoints': '暂无可用检查点',
+    'compacted': '已压缩',
+    'messages': '条消息',
+    'compacting': '压缩中...',
+    'scope_both': '代码 + 对话',
+    'scope_conversation': '仅对话',
+    'scope_code': '仅代码',
+    'scope_fork': '分叉（新分支）',
+    'scope_sumfrom': '从此处总结',
+    'scope_sumupto': '总结到此处',
+    'delete_confirm': '删除此会话？',
+    'welcome_tag': 'AI 编码助手',
+    'hint_commands': '/ 命令',
+    'hint_mode': 'Shift+Tab 模式',
+    'hint_rewind': 'Esc×2 回退',
+    'example_explain': '解释项目结构',
+    'example_fix': '查找并修复错误',
+    'example_test': '为主模块编写测试',
+    'total': '总计',
+    'in': '输入',
+    'out': '输出',
+    'nav_jk': 'j/k 或 ↑↓ 导航',
+    'nav_enter_esc': 'Enter 选择 · Esc 关闭',
+    'nav_keys': 'b/c/d/f/s/u 快捷键',
+    'nav_apply_esc': 'Enter 应用 · Esc 返回',
+    'rewind_title': '回退 — 选择轮次',
+    'action_title': '第 #{turn} 轮 — 选择操作',
+    'files': '个文件',
+  }
+};
+const __ = (key, ...args) => {
+  let s = __T[__LANG]?.[key] ?? __T.en[key] ?? key;
+  if (args.length) args.forEach((v, i) => { s = s.replace('#{' + ['turn','n'][i] + '}', v); });
+  return s;
+};
+function translateTokens(text) {
+  return String(text).replace(/__\('([^']+)'\)/g, (_, key) => __(key));
+}
+function applyStaticI18n() {
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      const parent = node.parentElement;
+      if (!parent || parent.closest('script,style')) return NodeFilter.FILTER_REJECT;
+      return node.nodeValue.includes("__('") ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+    }
+  });
+  const nodes = [];
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) nodes.push(node);
+  nodes.forEach(node => { node.nodeValue = translateTokens(node.nodeValue); });
+  document.querySelectorAll('[title],[placeholder]').forEach(node => {
+    if (node.hasAttribute('title')) node.setAttribute('title', translateTokens(node.getAttribute('title')));
+    if (node.hasAttribute('placeholder')) node.setAttribute('placeholder', translateTokens(node.getAttribute('placeholder')));
+  });
+}
+applyStaticI18n();
+
+// ── populate welcome examples ──
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('.welcome__ex').forEach((btn, i) => {
+    const keys = ['example_explain', 'example_fix', 'example_test'];
+    if (i < keys.length) btn.dataset.prompt = __(keys[i]);
+  });
+});
+
+
+
 const $$ = s => document.querySelectorAll(s);
 const log = $('#log'), input = $('#in'), btnSend = $('#btn-send'), btnStop = $('#btn-stop');
 const statusDot = $('#status-dot-footer'), statusText = $('#status-text');
@@ -360,23 +641,23 @@ let escTimer = null;
 
 // ── slash commands registry ──
 const SLASH_CMDS = [
-  {cmd:'compact',desc:'Compact conversation'},
-  {cmd:'new',desc:'New session'},
-  {cmd:'resume',desc:'Resume session'},
-  {cmd:'rewind',desc:'Rewind to checkpoint'},
-  {cmd:'tree',desc:'Show branch tree'},
-  {cmd:'branch',desc:'Create branch'},
-  {cmd:'switch',desc:'Switch branch'},
-  {cmd:'model',desc:'List/switch models'},
-  {cmd:'effort',desc:'Reasoning effort level'},
-  {cmd:'mcp',desc:'MCP servers'},
-  {cmd:'skill',desc:'Skills'},
-  {cmd:'hooks',desc:'Hooks'},
-  {cmd:'memory',desc:'Show memory'},
-  {cmd:'forget',desc:'Forget memory'},
-  {cmd:'thinking',desc:'Thinking effort'},
-  {cmd:'verbose',desc:'Toggle reasoning'},
-  {cmd:'help',desc:'Help'},
+  {cmd:'compact',desc:__('cmd_compact')},
+  {cmd:'new',desc:__('cmd_new')},
+  {cmd:'resume',desc:__('cmd_resume')},
+  {cmd:'rewind',desc:__('cmd_rewind')},
+  {cmd:'tree',desc:__('cmd_tree')},
+  {cmd:'branch',desc:__('cmd_branch')},
+  {cmd:'switch',desc:__('cmd_switch')},
+  {cmd:'model',desc:__('cmd_model')},
+  {cmd:'effort',desc:__('cmd_effort')},
+  {cmd:'mcp',desc:__('cmd_mcp')},
+  {cmd:'skill',desc:__('cmd_skill')},
+  {cmd:'hooks',desc:__('cmd_hooks')},
+  {cmd:'memory',desc:__('cmd_memory')},
+  {cmd:'forget',desc:__('cmd_forget')},
+  {cmd:'thinking',desc:__('cmd_thinking')},
+  {cmd:'verbose',desc:__('cmd_verbose')},
+  {cmd:'help',desc:__('cmd_help')},
 ];
 
 // ── helpers ──
@@ -389,7 +670,8 @@ function fmtTok(n) { return n>=1000?(n/1000).toFixed(1).replace(/\.0$/,'')+'k':S
 function currencySymbol(c){const v=String(c||'¥').trim();if(/^(cny|rmb|yuan)$/i.test(v))return '¥';if(/^(usd|dollar)$/i.test(v))return '$';return v||'¥';}
 function fmtMoney(n,c){if(typeof n!=='number'||!isFinite(n))return '—';const s=currencySymbol(c);return s+(n<1?n.toFixed(4):n.toFixed(2));}
 function fmtElapsed(ms) { const s=Math.floor(ms/1000); return s<60?s+'s':Math.floor(s/60)+'m '+s%60+'s';}
-function escHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function escAttr(s) { return escHtml(s).replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
 function el(tag,cls,text) { const e=document.createElement(tag); if(cls)e.className=cls; if(text)e.textContent=text; return e;}
 
 function setRunning(on) {
@@ -398,7 +680,7 @@ function setRunning(on) {
   btnStop.style.display=on?'':'none';
   statusDot.className=on?'status__dot status__dot--busy':'status__dot';
   statusDotSidebar.className=statusDot.className;
-  statusText.textContent=on?'Thinking...':'Ready';
+  statusText.textContent=on?__('thinking'):__('ready');
   if(on){turnStartAt=Date.now();turnTokens=0;tickTimer=setInterval(()=>{
     const ms=Date.now()-turnStartAt; const tok=turnTokens>0?' · ↓ '+fmtTok(turnTokens)+' tok':'';
     turnInfo.textContent=fmtElapsed(ms)+tok;
@@ -408,7 +690,7 @@ function setRunning(on) {
 function setConnState(state) {
   // state: 'connected' | 'reconnecting' | 'disconnected'
   const colors={connected:'var(--success)',reconnecting:'var(--warning)',disconnected:'var(--danger)'};
-  const labels={connected:'Connected',reconnecting:'Reconnecting...',disconnected:'Disconnected'};
+  const labels={connected:__('connected'),reconnecting:__('reconnecting'),disconnected:__('disconnected')};
   if(!running){
     statusDot.style.background=colors[state]||'';
     statusDot.className='status__dot'+(state==='reconnecting'?' status__dot--busy':'');
@@ -421,7 +703,7 @@ function setConnState(state) {
 function addUserMsg(text) { hideWelcome(); const d=el('div','msg msg--user'); d.appendChild(el('span','msg__caret','›')); d.appendChild(el('div','msg__text',text)); log.appendChild(d); scrollDown(); currentMsg=null;currentText=null;currentReasoning=null; }
 function ensureMsg() { if(!currentMsg){hideWelcome();currentMsg=el('div','msg msg--assistant');log.appendChild(currentMsg);} return currentMsg; }
 function appendText(t) { const m=ensureMsg(); if(!currentText){currentText=document.createElement('span');currentText.className='msg__text'; const old=m.querySelector('.cursor');if(old)old.remove(); m.appendChild(currentText); m.appendChild(el('span','cursor'));} currentText.textContent+=t; scrollDown(); }
-function appendReasoning(t) { const m=ensureMsg(); if(!currentReasoning){const w=el('div','reasoning'); const b=el('button','reasoning__toggle'); b.innerHTML='<span class="reasoning__chevron">▶</span> Thinking...'; const body=el('div','reasoning__body'); body.style.display='none'; b.onclick=()=>{body.style.display=body.style.display==='none'?'':'none';b.querySelector('.reasoning__chevron').className='reasoning__chevron'+(body.style.display!=='none'?' reasoning__chevron--open':'');}; w.appendChild(b);w.appendChild(body); if(currentText) m.insertBefore(w,currentText); else m.appendChild(w); currentReasoning=body;} currentReasoning.textContent+=t; scrollDown(); }
+function appendReasoning(t) { const m=ensureMsg(); if(!currentReasoning){const w=el('div','reasoning'); const b=el('button','reasoning__toggle'); b.innerHTML='<span class="reasoning__chevron">▶</span> '+__('thinking'); const body=el('div','reasoning__body'); body.style.display='none'; b.onclick=()=>{body.style.display=body.style.display==='none'?'':'none';b.querySelector('.reasoning__chevron').className='reasoning__chevron'+(body.style.display!=='none'?' reasoning__chevron--open':'');}; w.appendChild(b);w.appendChild(body); if(currentText) m.insertBefore(w,currentText); else m.appendChild(w); currentReasoning=body;} currentReasoning.textContent+=t; scrollDown(); }
 function finalizeMsg() { if(currentMsg){const c=currentMsg.querySelector('.cursor');if(c)c.remove();} currentMsg=null;currentText=null;currentReasoning=null; }
 
 // ── tool cards (v1 pattern) ──
@@ -453,7 +735,7 @@ function renderToolProgress(tool) {
 // ── approval ──
 function showApproval(a) {
   const d=el('div','approval');
-  d.innerHTML='<div class="approval__header"><svg class="approval__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg><span class="approval__title">Approval Required</span></div><div class="approval__subject">'+escHtml(a.tool)+(a.subject?' — '+escHtml(a.subject):'')+'</div><div class="approval__actions"><button class="approval__btn approval__btn--allow" data-allow="true" data-session="false"><span class="approval__key">Y</span> Allow</button><button class="approval__btn approval__btn--allow" data-allow="true" data-session="true"><span class="approval__key">A</span> Session</button><button class="approval__btn approval__btn--deny" data-allow="false"><span class="approval__key">N</span> Deny</button></div>';
+  d.innerHTML='<div class="approval__header"><svg class="approval__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg><span class="approval__title">'+__('approval_title')+'</span></div><div class="approval__subject">'+escHtml(a.tool)+(a.subject?' — '+escHtml(a.subject):'')+'</div><div class="approval__actions"><button class="approval__btn approval__btn--allow" data-allow="true" data-session="false"><span class="approval__key">Y</span> '+__('allow')+'</button><button class="approval__btn approval__btn--allow" data-allow="true" data-session="true"><span class="approval__key">A</span> '+__('session')+'</button><button class="approval__btn approval__btn--deny" data-allow="false"><span class="approval__key">N</span> '+__('deny')+'</button></div>';
   log.appendChild(d);scrollDown();
   d.querySelectorAll('.approval__btn').forEach(btn=>{btn.onclick=()=>{post('/approve',{id:a.id,allow:btn.dataset.allow==='true',session:btn.dataset.session==='true'});d.remove();};});
   const onkey=e=>{if(e.key==='y'||e.key==='1'){post('/approve',{id:a.id,allow:true,session:false});d.remove();document.removeEventListener('keydown',onkey);}else if(e.key==='a'||e.key==='2'){post('/approve',{id:a.id,allow:true,session:true});d.remove();document.removeEventListener('keydown',onkey);}else if(e.key==='n'||e.key==='3'){post('/approve',{id:a.id,allow:false,session:false});d.remove();document.removeEventListener('keydown',onkey);}};
@@ -472,7 +754,7 @@ function showAsk(ask) {
       opts.appendChild(opt);
     });
     qDiv.appendChild(opts);
-    const submit=el('button','ask__submit','Submit'); submit.disabled=true;
+    const submit=el('button','ask__submit',__('submit')); submit.disabled=true;
     opts.addEventListener('click',()=>{submit.disabled=selected.size===0;});
     submit.onclick=()=>{const answers=ask.questions.map(qq=>({questionId:qq.id,selected:Array.from(selected).map(i=>qq.options[i].label)}));post('/answer',{id:ask.id,answers});d.remove();};
     qDiv.appendChild(submit); d.appendChild(qDiv);
@@ -483,8 +765,8 @@ function showAsk(ask) {
 // ── compaction ──
 function showCompaction(c) {
   const d=el('div','compaction');
-  if(c.summary){const head=el('div','compaction__head');head.innerHTML='<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/></svg>';head.appendChild(el('span','compaction__title','Compacted'));head.appendChild(el('span','',c.messages+' messages'));const body=el('div','compaction__body',c.summary);head.onclick=()=>body.classList.toggle('compaction__body--open');d.appendChild(head);d.appendChild(body);}
-  else d.textContent='Compacting...';
+  if(c.summary){const head=el('div','compaction__head');head.innerHTML='<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/></svg>';head.appendChild(el('span','compaction__title',__('compacted')));head.appendChild(el('span','',c.messages+' '+__('messages')));const body=el('div','compaction__body',c.summary);head.onclick=()=>body.classList.toggle('compaction__body--open');d.appendChild(head);d.appendChild(body);}
+  else d.textContent=__('compacting');
   log.appendChild(d);scrollDown();
 }
 
@@ -492,17 +774,17 @@ function showCompaction(c) {
 let rewindCheckpoints = [];
 let rewindStage = 0, rewindSelected = 0, rewindScope = 0;
 const SCOPES = [
-  {key:'b',label:'Code + conversation',scope:'both'},
-  {key:'c',label:'Conversation only',scope:'conversation'},
-  {key:'d',label:'Code only',scope:'code'},
-  {key:'f',label:'Fork (new branch)',scope:'fork'},
-  {key:'s',label:'Summarize from here',scope:'sumfrom'},
-  {key:'u',label:'Summarize up to here',scope:'sumupto'},
+  {key:'b',label:__('scope_both'),scope:'both'},
+  {key:'c',label:__('scope_conversation'),scope:'conversation'},
+  {key:'d',label:__('scope_code'),scope:'code'},
+  {key:'f',label:__('scope_fork'),scope:'fork'},
+  {key:'s',label:__('scope_sumfrom'),scope:'sumfrom'},
+  {key:'u',label:__('scope_sumupto'),scope:'sumupto'},
 ];
 
 function openRewindPicker() {
   fetch('/checkpoints').then(r=>r.json()).then(cps=>{
-    if(!cps||cps.length===0){log.appendChild(el('div','notice','No checkpoints available.'));scrollDown();return;}
+    if(!cps||cps.length===0){log.appendChild(el('div','notice',__('no_checkpoints')));scrollDown();return;}
     rewindCheckpoints=cps; rewindStage=0; rewindSelected=0; rewindScope=0;
     renderRewindPicker();
   }).catch(()=>{});
@@ -514,19 +796,19 @@ function renderRewindPicker() {
   const picker=el('div','rewind-picker');
 
   if(rewindStage===0){
-    picker.innerHTML='<div class="rewind-picker__head"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg> Rewind — Select Turn</div>';
+    picker.innerHTML='<div class="rewind-picker__head"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg> '+__('rewind_title')+'</div>';
     const list=el('div','rewind-picker__list');
     rewindCheckpoints.forEach((cp,i)=>{
       const item=el('div','rewind-picker__item'+(i===rewindSelected?' rewind-picker__item--active':''));
-      item.innerHTML='<span class="rewind-picker__turn">#'+cp.turn+'</span><span class="rewind-picker__prompt">'+escHtml((cp.prompt||'').slice(0,80))+'</span><span class="rewind-picker__files">'+cp.files+' files</span>';
+      item.innerHTML='<span class="rewind-picker__turn">#'+cp.turn+'</span><span class="rewind-picker__prompt">'+escHtml((cp.prompt||'').slice(0,80))+'</span><span class="rewind-picker__files">'+cp.files+' '+__('files')+'</span>';
       item.onclick=()=>{rewindSelected=i;renderRewindPicker();};
       list.appendChild(item);
     });
     picker.appendChild(list);
-    picker.appendChild(el('div','rewind-picker__foot','<span>j/k or ↑↓ to navigate</span><span>Enter to select · Esc to close</span>'));
+    picker.appendChild(el('div','rewind-picker__foot','<span>'+__('nav_jk')+'</span><span>'+__('nav_enter_esc')+'</span>'));
   } else {
     const cp=rewindCheckpoints[rewindSelected];
-    picker.innerHTML='<div class="rewind-picker__head"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg> Turn #'+cp.turn+' — Select Action</div>';
+    picker.innerHTML='<div class="rewind-picker__head"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg> '+__('action_title').replace('#{turn}',cp.turn)+'</div>';
     const scopes=el('div','rewind-picker__scopes');
     SCOPES.forEach((s,i)=>{
       const item=el('div','rewind-picker__scope'+(i===rewindScope?' rewind-picker__scope--active':''));
@@ -535,7 +817,7 @@ function renderRewindPicker() {
       scopes.appendChild(item);
     });
     picker.appendChild(scopes);
-    picker.appendChild(el('div','rewind-picker__foot','<span>b/c/d/f/s/u quick keys</span><span>Enter to apply · Esc to go back</span>'));
+    picker.appendChild(el('div','rewind-picker__foot','<span>'+__('nav_keys')+'</span><span>'+__('nav_apply_esc')+'</span>'));
   }
 
   overlay.appendChild(picker);
@@ -607,13 +889,17 @@ es.onmessage=ev=>{setConnState('connected');
     case 'tool_progress': if(e.tool)renderToolProgress(e.tool); break;
     case 'usage':
       if(e.usage){turnTokens=e.usage.completionTokens||0;
+        cumulativeTokens+=e.usage.totalTokens||0;
+        const usageCost=e.usage.cost??e.usage.costUsd;
+        if(typeof usageCost==='number')cumulativeCost+=usageCost;
+        cumulativeCacheHit+=e.usage.cacheHitTokens||0;
+        cumulativeCacheMiss+=e.usage.cacheMissTokens||0;
         const strip=el('div','metric-strip');
-        [{l:'Total',v:fmtTok(e.usage.totalTokens),c:''},{l:'In',v:fmtTok(e.usage.promptTokens),c:'acc'},{l:'Out',v:fmtTok(e.usage.completionTokens),c:'ok'}].forEach(it=>{
+        [{l:__('total'),v:fmtTok(e.usage.totalTokens),c:''},{l:__('in'),v:fmtTok(e.usage.promptTokens),c:'acc'},{l:__('out'),v:fmtTok(e.usage.completionTokens),c:'ok'}].forEach(it=>{
           const sp=el('span','item');sp.innerHTML=it.l+' <span class="v '+it.c+'">'+it.v+'</span>';strip.appendChild(sp);
         });
-        if(e.usage.cacheHitTokens){const sp=el('span','item');sp.innerHTML='Cache <span class="v acc">'+Math.round(e.usage.cacheHitTokens/Math.max(1,e.usage.cacheHitTokens+e.usage.cacheMissTokens)*100)+'%</span>';strip.appendChild(sp);}
-        const usageCost=e.usage.cost??e.usage.costUsd;
-        if(typeof usageCost==='number'&&usageCost>0){const sp=el('span','item');sp.innerHTML='Cost <span class="v">'+fmtMoney(usageCost,e.usage.currency)+'</span>';strip.appendChild(sp);}
+        if(e.usage.cacheHitTokens){const sp=el('span','item');sp.innerHTML=__('cache')+' <span class="v acc">'+Math.round(e.usage.cacheHitTokens/Math.max(1,e.usage.cacheHitTokens+e.usage.cacheMissTokens)*100)+'%</span>';strip.appendChild(sp);}
+        if(typeof usageCost==='number'&&usageCost>0){const sp=el('span','item');sp.innerHTML=__('cost')+' <span class="v">'+fmtMoney(usageCost,e.usage.currency)+'</span>';strip.appendChild(sp);}
         log.appendChild(strip);scrollDown();
       } break;
     case 'notice': log.appendChild(el('div','notice'+(e.level==='warn'?' notice--warn':''),(e.level==='warn'?'! ':'')+(e.text||'')));scrollDown();break;
@@ -686,20 +972,22 @@ fetch('/history').then(r=>r.json()).then(renderHistoryMessages).catch(()=>{});
 
 // ── session list ──
 function loadSessions(){
+  sessionCount=0;
   fetch('/sessions').then(r=>r.json()).then(ss=>{
     const list=$('#session-list'); if(!list)return;
-    if(!ss||ss.length===0){list.innerHTML='<div style="padding:10px;color:var(--muted-2);font-size:12px">No sessions</div>';return;}
+    if(!ss||ss.length===0){list.innerHTML='<div style="padding:10px;color:var(--muted-2);font-size:12px">'+__('no_sessions')+'</div>';return;}
     list.innerHTML='';
     ss.forEach(s=>{
+    sessionCount++;
       const item=el('div','session-item'+(s.current?' session-item--active':''));
       const name=s.name.replace(/^.*\//,'').replace(/\.jsonl$/,'');
       const title=s.title||name.replace(/^\w+-/,'').replace(/T/,' ').replace(/[-_]/g,' ').slice(0,30);
       const meta=s.turns?s.turns+' turns':'';
-      item.innerHTML='<svg class="session-item__icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><div class="session-item__body"><div class="session-item__title">'+escHtml(title)+'</div><div class="session-item__meta">'+escHtml(meta)+'</div></div>';
+	      item.innerHTML='<svg class="session-item__icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><div class="session-item__body"><div class="session-item__title">'+escHtml(title)+'</div><div class="session-item__meta">'+escHtml(meta)+'</div></div><button type="button" class="session-del" data-name="'+escAttr(s.name)+'" title="'+escAttr(__('delete_confirm'))+'">&times;</button>';
       item.onclick=()=>{if(running||s.current)return;post('/resume',{path:s.path}).then(()=>{log.innerHTML='';log.appendChild(welcome);welcome.style.display='';loadSessions();setTimeout(()=>fetch('/history').then(r=>r.json()).then(renderHistoryMessages),300);});};
       list.appendChild(item);
     });
-  }).catch(()=>{const list=$('#session-list');if(list)list.innerHTML='<div style="padding:10px;color:var(--muted-2);font-size:12px">Error loading</div>';});
+  }).catch(()=>{const list=$('#session-list');if(list)list.innerHTML='<div style="padding:10px;color:var(--muted-2);font-size:12px">'+__('error_loading')+'</div>';});
 }
 loadSessions();
 
@@ -756,6 +1044,40 @@ $('#btn-new').onclick=()=>{if(running)return;post('/new').then(()=>{log.innerHTM
 $('#btn-compact').onclick=()=>{if(!running)post('/compact');};
 $('#btn-rewind').onclick=()=>openRewindPicker();
 $('#btn-tree').onclick=()=>{post('/submit',{input:'/tree'});};
+$('#btn-stats').onclick=()=>openStats();
+
+// ── cumulative stats ──
+let cumulativeTokens=0, cumulativeCost=0, cumulativeCacheHit=0, cumulativeCacheMiss=0, sessionCount=0;
+function openStats(){
+  const modal=$('#stats-modal');
+  if(!modal)return;
+  // populate from latest status
+  fetch('/status').then(r=>r.json()).then(s=>{
+    $('#stats-model').textContent=s.label||'-';
+    $('#stats-sessions').textContent=sessionCount||'0';
+    const total=cumulativeTokens||s.used||0;
+    $('#stats-total-tokens').textContent=total>=1000?fmtTok(total):String(total);
+    const hit=cumulativeCacheHit||s.cacheHit||0, miss=cumulativeCacheMiss||s.cacheMiss||0;
+    const rate=hit+miss>0?Math.round(hit/(hit+miss)*100)+'%':'0%';
+    $('#stats-cache-rate').textContent=rate;
+    const cost=cumulativeCost||s.lastUsage?.cost||0;
+    $('#stats-total-cost').textContent=cost>0?fmtMoney(cost,s.lastUsage?.currency):'-';
+    $('#stats-balance').textContent=s.balance?.display||'-';
+    if(s.window){const pct=Math.min(100,Math.round(s.used/s.window*100));$('#stats-ctx-fill').style.width=pct+'%';$('#stats-ctx-used').textContent=fmtTok(s.used)+' tok';$('#stats-ctx-window').textContent=fmtTok(s.window)+' tok';}
+  }).catch(()=>{});
+  modal.style.display='flex';
+}
+$('#stats-modal-close').onclick=()=>{const m=$('#stats-modal');if(m)m.style.display='none';};
+$('#stats-modal').onclick=e=>{if(e.target===e.currentTarget){const m=$('#stats-modal');if(m)m.style.display='none';}};
+
+// ── session delete ──
+document.addEventListener('click',e=>{
+  const del=e.target.closest('.session-del');
+  if(!del)return;
+  e.stopPropagation();
+  const name=del.dataset.name;
+  if(name&&confirm(__('delete_confirm'))){post('/delete-session',{name}).then(()=>loadSessions());}
+});
 
 // welcome examples
 $$('.welcome__ex').forEach(btn=>{btn.onclick=()=>{input.value=btn.dataset.prompt;send();};});

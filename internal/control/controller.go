@@ -624,26 +624,28 @@ func (c *Controller) RunShell(command string) {
 		}})
 		cmd.Stdout = w
 		cmd.Stderr = w
+		start := time.Now()
 		err := cmd.Run()
+		durationMs := time.Since(start).Milliseconds()
 		out := buf.String()
 
 		if ctx.Err() == context.DeadlineExceeded {
 			c.sink.Emit(event.Event{
 				Kind: event.ToolResult,
-				Tool: event.Tool{ID: id, Name: "bash", Output: out, Err: fmt.Sprintf(i18n.M.ShellExecTimeoutFmt, shellTimeout)},
+				Tool: event.Tool{ID: id, Name: "bash", Output: out, Err: fmt.Sprintf(i18n.M.ShellExecTimeoutFmt, shellTimeout), DurationMs: durationMs},
 			})
 			return nil
 		}
 		if err != nil {
 			c.sink.Emit(event.Event{
 				Kind: event.ToolResult,
-				Tool: event.Tool{ID: id, Name: "bash", Output: out, Err: fmt.Sprintf(i18n.M.ShellExecFailedFmt, err)},
+				Tool: event.Tool{ID: id, Name: "bash", Output: out, Err: fmt.Sprintf(i18n.M.ShellExecFailedFmt, err), DurationMs: durationMs},
 			})
 			return nil
 		}
 		c.sink.Emit(event.Event{
 			Kind: event.ToolResult,
-			Tool: event.Tool{ID: id, Name: "bash", Output: out},
+			Tool: event.Tool{ID: id, Name: "bash", Output: out, DurationMs: durationMs},
 		})
 		return nil
 	})

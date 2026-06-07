@@ -757,8 +757,32 @@ function makeMockApp(): AppBindings {
             }),
             output: "todo list updated",
             readOnly: false,
+            durationMs: 150,
           },
         });
+        emit({ kind: "turn_done" });
+        return;
+      }
+      if (trimmedInput === "/process-preview" || trimmedInput === "process preview" || trimmedInput === "过程预览") {
+        await delay(200);
+        if (cancelled) return;
+        emit({ kind: "phase", text: "Preparing context" });
+        await delay(120);
+        emit({ kind: "notice", level: "info", text: "Loaded project instructions from AGENTS.md." });
+        await delay(120);
+        emit({ kind: "notice", level: "warn", text: "Network access is enabled; external results may change over time." });
+        await delay(120);
+        emit({ kind: "compaction_started", compaction: { trigger: "manual" } });
+        await delay(320);
+        emit({
+          kind: "compaction_done",
+          compaction: {
+            trigger: "manual",
+            messages: 6,
+            summary: "Preserved the active task, relevant files, and UI decisions while trimming earlier exploratory context.",
+          },
+        });
+        emit({ kind: "message", text: "Process card preview complete." });
         emit({ kind: "turn_done" });
         return;
       }
@@ -790,7 +814,7 @@ function makeMockApp(): AppBindings {
       await delay(350);
       emit({
         kind: "tool_result",
-        tool: { id: "t1", name: "edit_file", output: "edited main.go", readOnly: false },
+        tool: { id: "t1", name: "edit_file", output: "edited main.go", readOnly: false, durationMs: 350 },
       });
       emit({
         kind: "usage",
@@ -827,7 +851,7 @@ function makeMockApp(): AppBindings {
           emit({ kind: "tool_progress", tool: { id, name: "bash", output: `$ ${command}\n(mock output)\n`, readOnly: false } });
           await delay(100);
           if (cancelled) return;
-          emit({ kind: "tool_result", tool: { id, name: "bash", output: `$ ${command}\n(mock output)\n`, readOnly: false } });
+          emit({ kind: "tool_result", tool: { id, name: "bash", output: `$ ${command}\n(mock output)\n`, readOnly: false, durationMs: 300 } });
           emit({ kind: "turn_done" });
         },
         async Cancel() {
@@ -930,11 +954,14 @@ function makeMockApp(): AppBindings {
       const s = sessions.find((x) => x.path === path) ?? trashedSessions.find((x) => x.path === path);
       return [
         { role: "user", content: s?.preview || `(mock) preview ${path}` },
+        { role: "phase", content: "Preparing read-only preview" },
         {
           role: "assistant",
           content: "This is a read-only mock preview. The active conversation is unchanged.",
           reasoning: "Preview reads the saved session without resuming it.",
         },
+        { role: "notice", level: "info", content: "Preview mode keeps the active conversation untouched." },
+        { role: "compaction", content: "", trigger: "manual", messages: 3, summary: "Mock preview preserved the latest task, tool result, and answer summary." },
       ];
     },
     async DeleteSession(path: string) {
