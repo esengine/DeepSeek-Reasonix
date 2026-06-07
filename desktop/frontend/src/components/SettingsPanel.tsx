@@ -654,6 +654,7 @@ function ModelsSection({ s, busy, apply, backgroundApply }: ModelsSectionProps) 
   const refs = allRefs(s);
   const defaultRef = toRef(s.defaultModel, s);
   const plannerRef = toRef(s.plannerModel, s);
+  const subagentRef = toRef(s.subagentModel, s);
   const plannerSelectRef = plannerRef === defaultRef ? "" : plannerRef;
   const [defaultProvider, defaultModel] = defaultRef.split("/");
   const defaultProviderView = s.providers.find((p) => p.name === defaultProvider);
@@ -734,6 +735,34 @@ function ModelsSection({ s, busy, apply, backgroundApply }: ModelsSectionProps) 
             />
           </SettingsField>
 
+          <SettingsField label={t("settings.subagentModel")}>
+            <ModelPicker
+              s={s}
+              refs={refs}
+              value={subagentRef}
+              disabled={busy}
+              emptyOptionLabel={t("settings.subagentModelDefault")}
+              emptyOptionHint={t("common.auto")}
+              onPick={(ref) => void apply(() => app.SetSubagentModel(ref))}
+            />
+          </SettingsField>
+
+          <SettingsField label={t("settings.subagentEffort")} hint={t("settings.subagentHint")}>
+            <select
+              className="mem-select set-grow"
+              value={s.subagentEffort || ""}
+              disabled={busy}
+              onChange={(e) => void apply(() => app.SetSubagentEffort(e.target.value))}
+            >
+              <option value="">{t("settings.subagentEffortDefault")}</option>
+              {EFFORT_PRESETS.map((level) => (
+                <option key={level} value={level}>
+                  {level}
+                </option>
+              ))}
+            </select>
+          </SettingsField>
+
           <div className="settings-model-current" aria-label={t("settings.modelCurrentStatus")}>
             <div>
               <span>{t("settings.modelCurrentStatus")}</span>
@@ -766,6 +795,8 @@ function ModelPicker({
   value,
   disabled,
   includeSameDefault = false,
+  emptyOptionLabel,
+  emptyOptionHint,
   onPick,
 }: {
   s: SettingsView;
@@ -773,6 +804,8 @@ function ModelPicker({
   value: string;
   disabled: boolean;
   includeSameDefault?: boolean;
+  emptyOptionLabel?: string;
+  emptyOptionHint?: string;
   onPick: (ref: string) => void;
 }) {
   const t = useT();
@@ -780,16 +813,19 @@ function ModelPicker({
   const [query, setQuery] = useState("");
   const triggerRef = useRef<HTMLButtonElement>(null);
   const q = query.trim().toLowerCase();
+  const emptyLabel = includeSameDefault ? t("settings.plannerNone") : emptyOptionLabel;
+  const emptyHint = includeSameDefault ? t("settings.plannerNoneHint") : emptyOptionHint;
+  const emptyMeta = includeSameDefault ? t("settings.plannerNoneHintShort") : emptyOptionHint;
   const selected = refs.includes(value) ? modelOptionFromRef(value, s) : null;
-  const selectedLabel = value === "" && includeSameDefault
-    ? t("settings.plannerNone")
+  const selectedLabel = value === "" && emptyLabel
+    ? emptyLabel
     : selected?.model || value || t("common.none");
-  const selectedMeta = value === "" && includeSameDefault
-    ? t("settings.plannerNoneHintShort")
+  const selectedMeta = value === "" && emptyLabel
+    ? emptyMeta || ""
     : selected
     ? modelOptionMeta(selected, t)
     : t("settings.noModelsConfigured");
-  const sameDefaultVisible = includeSameDefault && (!q || t("settings.plannerNone").toLowerCase().includes(q) || t("settings.plannerNoneHint").toLowerCase().includes(q));
+  const emptyOptionVisible = Boolean(emptyLabel) && (!q || `${emptyLabel} ${emptyHint || ""}`.toLowerCase().includes(q));
 
   const groups = useMemo(() => {
     const providerOrder: string[] = [];
@@ -869,7 +905,7 @@ function ModelPicker({
           />
         </div>
         <div className="settings-model-picker__list" role="listbox">
-          {sameDefaultVisible && (
+          {emptyOptionVisible && (
             <button
               type="button"
               role="option"
@@ -878,8 +914,8 @@ function ModelPicker({
               onClick={() => pick("")}
             >
               <span>
-                <strong>{t("settings.plannerNone")}</strong>
-                <small>{t("settings.plannerNoneHint")}</small>
+                <strong>{emptyLabel}</strong>
+                {emptyHint && <small>{emptyHint}</small>}
               </span>
               {value === "" && <Check size={14} />}
             </button>
@@ -908,7 +944,7 @@ function ModelPicker({
               ))}
             </div>
           ))}
-          {!sameDefaultVisible && groups.length === 0 && <div className="settings-model-picker__empty">{t("settings.noMatchingModels")}</div>}
+          {!emptyOptionVisible && groups.length === 0 && <div className="settings-model-picker__empty">{t("settings.noMatchingModels")}</div>}
         </div>
       </AnchoredPopover>
     </div>
