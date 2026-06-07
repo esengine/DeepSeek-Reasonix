@@ -565,6 +565,10 @@ func (c *Controller) submit(input, display string) {
 			}
 			return c.runTurnWithRawDisplay(ctx, sent, sent, display)
 		})
+	case strings.HasPrefix(trimmed, "//"):
+		// Double-slash — not a command. Common in code snippets (JS
+		// comments, file:// URLs). Run as a normal turn.
+		c.runRefTurn(input, display)
 	case strings.HasPrefix(trimmed, "/"):
 		if ref, ok := FileRefLine(trimmed); ok {
 			c.runRefTurn(ref, display)
