@@ -90,6 +90,10 @@ func NewTool(opts Options) tool.Tool {
 	if client == nil {
 		client = &http.Client{}
 	}
+	// install_source fetches untrusted URLs (SKILL.md, .mcp.json, GitHub
+	// manifests); guard the dial against SSRF the same way web_fetch does, so a
+	// prompt-injected source can't reach cloud metadata / internal services.
+	client = ssrfGuardClient(client)
 	return &installSourceTool{
 		root:         root,
 		home:         home,

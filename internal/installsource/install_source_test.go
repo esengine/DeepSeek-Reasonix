@@ -918,6 +918,21 @@ func TestFetchTextAuthMapsToErrAuthRequired(t *testing.T) {
 	}
 }
 
+func TestFetchTextRefusesInternalAddress(t *testing.T) {
+	// SSRF guard: an install source pointed at cloud-metadata / internal IPs must
+	// be refused at dial time, not fetched. These are IP literals so no real
+	// network or DNS is involved — the guard blocks before connecting.
+	tl := NewTool(Options{ProjectRoot: t.TempDir(), HomeDir: t.TempDir()}).(*installSourceTool)
+	for _, target := range []string{
+		"http://169.254.169.254/latest/meta-data/", // cloud metadata
+		"http://10.0.0.1/",                         // RFC1918 internal
+	} {
+		if _, err := tl.fetchText(context.Background(), target); !errors.Is(err, ErrSourceUnreadable) {
+			t.Errorf("fetchText(%q) err = %v, want ErrSourceUnreadable (SSRF-refused)", target, err)
+		}
+	}
+}
+
 func TestPlanMarkdownSkillURL(t *testing.T) {
 	project := t.TempDir()
 	home := t.TempDir()
