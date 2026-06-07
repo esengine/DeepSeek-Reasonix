@@ -241,7 +241,7 @@ function applyEvent(s: State, e: WireEvent): State {
     if (e.kind === "turn_done") return { ...s, discardTurn: false, running: false, turnActive: false, currentAssistant: undefined, live: undefined };
     return s;
   }
-  if (s.pendingUser !== undefined && e.kind !== "turn_started" && e.kind !== "turn_done") {
+  if (s.pendingUser !== undefined && e.kind !== "turn_done") {
     s = flushPendingUser(s);
   }
   if (e.kind === "retrying") {
@@ -249,8 +249,16 @@ function applyEvent(s: State, e: WireEvent): State {
   }
   if (s.retry) s = { ...s, retry: undefined };
   switch (e.kind) {
-    case "turn_started":
-      return { ...s, running: true, turnActive: true, currentAssistant: undefined, turnStartAt: Date.now(), turnTokens: 0 };
+    case "turn_started": {
+      // Flush the user message and pre-create an empty assistant bubble
+      // immediately so the user sees their message + a blinking cursor the
+      // instant the backend acknowledges the turn — no dead gap waiting for
+      // the first text/reasoning token.
+      let cur: State = s;
+      if (cur.pendingUser !== undefined) cur = flushPendingUser(cur);
+      const { items, id, seq } = ensureAssistant(cur);
+      return { ...cur, items, currentAssistant: id, seq, live: { id, text: "", reasoning: "" }, running: true, turnActive: true, turnStartAt: Date.now(), turnTokens: 0 };
+    }
     case "text":
     case "reasoning": {
       const { items, id, seq } = ensureAssistant(s);
