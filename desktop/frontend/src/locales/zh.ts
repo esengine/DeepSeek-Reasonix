@@ -40,6 +40,7 @@ export const zh: Record<DictKey, string> = {
   "sidebar.conversations": "会话",
   "sidebar.allHistory": "全部历史",
   "sidebar.trash": "回收站",
+  "sidebar.capabilities": "MCP 与技能",
   "sidebar.workspace": "工作区",
   "sidebar.changeWorkspace": "更改",
   "sidebar.navigation": "Reasonix 导航",

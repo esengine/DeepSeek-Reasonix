@@ -2,6 +2,7 @@ import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } f
 import type { CSSProperties, KeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import { ShellExpandProvider, useShellExpand } from "./lib/shellExpand";
 import {
+  Blocks,
   Download,
   SquarePen,
   CircleGauge,
@@ -1346,6 +1347,15 @@ export default function App() {
               >
                 <Trash2 size={15} />
                 <span>{t("sidebar.trash")}</span>
+              </button>
+            </Tooltip>
+            <Tooltip label={t("sidebar.capabilities")} fill side="right" disabled={sidebarNavTooltipDisabled}>
+              <button
+                className="sidebar__navitem"
+                onClick={() => setCapsOpen(true)}
+              >
+                <Blocks size={15} />
+                <span>{t("sidebar.capabilities")}</span>
               </button>
             </Tooltip>
             <Tooltip label={t("topbar.settings")} fill side="right" disabled={sidebarNavTooltipDisabled}>
