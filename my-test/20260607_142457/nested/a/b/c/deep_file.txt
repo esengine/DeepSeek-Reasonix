@@ -1,0 +1,2 @@
+This file is in a nested subdirectory.
+Parent dirs should be auto-created.

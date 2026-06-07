@@ -1,0 +1,5 @@
+header line
+THIS LINE IS EXACTLY THE SAME
+middle unique line
+THIS LINE IS EXACTLY THE SAME
+footer line
