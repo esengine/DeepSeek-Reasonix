@@ -127,6 +127,29 @@ jobs:
       - name: test
         run: go test ./...
 
+      - name: install wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+
+      # tsc needs the generated wailsjs bindings, which are gitignored — generate
+      # them first. This rides the desktop job because it already has Go and the
+      # webkit toolchain. It's the only gate that catches frontend TS errors (e.g.
+      # duplicate locale keys from merged PRs) before `wails build` — see #3410.
+      - name: Generate frontend bindings
+        run: wails generate module
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Frontend typecheck
+        working-directory: desktop/frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run typecheck
+
   lint:
     runs-on: ubuntu-latest
     steps:

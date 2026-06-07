@@ -28,6 +28,7 @@ fi
 wails_port="${REASONIX_DESKTOP_WAILS_PORT:-$((vite_port + 29000))}"
 
 export REASONIX_DESKTOP_VITE_PORT="$vite_port"
+export REASONIX_DEV=1
 
 echo "Reasonix desktop dev"
 echo "  worktree: $root"

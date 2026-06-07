@@ -5,6 +5,8 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -335,6 +337,7 @@ func (a *App) restoreOrBuildTabs() {
 
 	f := loadTabsFile()
 	if len(f.Tabs) > 0 {
+		toBuild := make([]*WorkspaceTab, 0, len(f.Tabs))
 		for _, entry := range f.Tabs {
 			a.mu.Lock()
 			id := a.restoredTabIDLocked(entry.ID)
@@ -349,12 +352,13 @@ func (a *App) restoreOrBuildTabs() {
 			tab.model = entry.Model
 			tab.effort = cloneStringPtr(entry.Effort)
 			tab.mode = persistedTabMode(entry.Mode)
+			tab.SessionPath = strings.TrimSpace(entry.SessionPath)
 			tab.sink = &tabEventSink{tabID: tab.ID, app: a, ctx: ctx}
 			a.mu.Lock()
 			a.tabs[tab.ID] = tab
 			a.tabOrder = append(a.tabOrder, tab.ID)
 			a.mu.Unlock()
-			a.startTabControllerBuild(tab)
+			toBuild = append(toBuild, tab)
 		}
 		a.mu.Lock()
 		if _, ok := a.tabs[f.ActiveTab]; ok {
@@ -366,6 +370,9 @@ func (a *App) restoreOrBuildTabs() {
 			}
 		}
 		a.mu.Unlock()
+		for _, tab := range toBuild {
+			a.startTabControllerBuild(tab)
+		}
 		return
 	}
 
@@ -495,7 +502,7 @@ func (a *App) SubmitToTab(tabID, input string) {
 		return
 	}
 	if ctrl := a.ctrlByTabID(tabID); ctrl != nil {
-		ctrl.Submit(input)
+		ctrl.SubmitDisplay(input, input)
 	}
 }
 
@@ -518,8 +525,20 @@ func (a *App) SubmitDisplayToTab(tabID, display, input string) {
 	if ctrl == nil {
 		return
 	}
-	_ = recordSessionDisplay(config.SessionDir(), ctrl.SessionPath(), input, display)
-	ctrl.Submit(input)
+	ctrl.SubmitDisplay(display, input)
+}
+
+func (a *App) bindControllerDisplayRecorder(ctrl *control.Controller) {
+	if ctrl == nil {
+		return
+	}
+	ctrl.SetDisplayRecorder(func(content, display string) {
+		dir := ctrl.SessionDir()
+		if dir == "" {
+			dir = config.SessionDir()
+		}
+		_ = recordSessionDisplay(dir, ctrl.SessionPath(), content, display)
+	})
 }
 
 // Cancel aborts the in-flight turn.
@@ -636,12 +655,17 @@ func (a *App) Compact() error {
 // NewSession snapshots the current conversation and rotates to a fresh one.
 func (a *App) NewSession() error {
 	a.mu.RLock()
+	tab := a.activeTabLocked()
 	ctrl := a.activeCtrlLocked()
 	a.mu.RUnlock()
 	if ctrl == nil {
 		return nil
 	}
-	return ctrl.NewSession()
+	if err := ctrl.NewSession(); err != nil {
+		return err
+	}
+	a.persistTabSessionPath(tab, ctrl.SessionPath())
+	return nil
 }
 
 // CheckpointMeta summarises one rewind point (a user turn) for the desktop.
@@ -754,6 +778,7 @@ func (a *App) Fork(turn int) (TabMeta, error) {
 		WorkspaceRoot: workspaceRoot,
 		TopicID:       topicID,
 		TopicTitle:    topicTitle,
+		SessionPath:   newPath,
 		model:         model,
 		effort:        effort,
 		mode:          mode,
@@ -908,8 +933,8 @@ func (a *App) openSessionPaths(dir string) map[string]struct{} {
 	a.mu.RLock()
 	paths := make([]string, 0, len(a.tabs))
 	for _, tab := range a.tabs {
-		if tab != nil && tab.Ctrl != nil {
-			paths = append(paths, tab.Ctrl.SessionPath())
+		if tab != nil {
+			paths = append(paths, tab.currentSessionPath())
 		}
 	}
 	a.mu.RUnlock()
@@ -927,8 +952,8 @@ func (a *App) openSessionPaths(dir string) map[string]struct{} {
 func (a *App) activeSessionPath(dir string) string {
 	a.mu.RLock()
 	var path string
-	if tab := a.tabs[a.activeTabID]; tab != nil && tab.Ctrl != nil {
-		path = tab.Ctrl.SessionPath()
+	if tab := a.tabs[a.activeTabID]; tab != nil {
+		path = tab.currentSessionPath()
 	}
 	a.mu.RUnlock()
 	currentPath, _, err := validateSessionPath(dir, path)
@@ -980,16 +1005,18 @@ func (a *App) ResumeSession(path string) ([]HistoryMessage, error) {
 // matching tab should resume on that exact controller instead of whichever tab is
 // active by the time the async call reaches the backend.
 func (a *App) ResumeSessionForTab(tabID, path string) ([]HistoryMessage, error) {
-	ctrl := a.ctrlByTabID(tabID)
-	if ctrl == nil {
+	tab := a.tabByID(tabID)
+	if tab == nil || tab.Ctrl == nil {
 		return []HistoryMessage{}, fmt.Errorf("tab is not ready")
 	}
+	ctrl := tab.Ctrl
 	loaded, err := agent.LoadSession(path)
 	if err != nil {
 		return nil, err
 	}
 	_ = ctrl.Snapshot() // persist the current session before switching away
 	ctrl.Resume(loaded, path)
+	a.rememberTabSessionPath(tab, path)
 	return a.HistoryForTab(tabID), nil
 }
 
@@ -1013,12 +1040,54 @@ func (a *App) PickWorkspace() (string, error) {
 	a.mu.RUnlock()
 	dir, err := runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
 		Title:            "Choose working folder",
-		DefaultDirectory: cur,
+		DefaultDirectory: dialogDefaultDirectory(cur),
 	})
 	if err != nil || dir == "" {
 		return "", err
 	}
 	return a.SwitchWorkspace(dir)
+}
+
+func dialogDefaultDirectory(preferred string) string {
+	if dir := nearestExistingDirectory(preferred); dir != "" {
+		return dir
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		if dir := nearestExistingDirectory(cwd); dir != "" {
+			return dir
+		}
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		if dir := nearestExistingDirectory(home); dir != "" {
+			return dir
+		}
+	}
+	return ""
+}
+
+func nearestExistingDirectory(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs
+	}
+	for {
+		info, err := os.Stat(path)
+		if err == nil {
+			if info.IsDir() {
+				return path
+			}
+			path = filepath.Dir(path)
+			continue
+		}
+		parent := filepath.Dir(path)
+		if parent == path {
+			return ""
+		}
+		path = parent
+	}
 }
 
 func (a *App) ListWorkspaces() []WorkspaceMeta {
@@ -1130,9 +1199,15 @@ type HistoryMessage struct {
 	Role       string            `json:"role"`
 	Content    string            `json:"content"`
 	Reasoning  string            `json:"reasoning,omitempty"`
+	Level      string            `json:"level,omitempty"`
 	ToolCalls  []HistoryToolCall `json:"toolCalls,omitempty"`
 	ToolCallID string            `json:"toolCallId,omitempty"`
 	ToolName   string            `json:"toolName,omitempty"`
+	Pending    bool              `json:"pending,omitempty"`
+	Trigger    string            `json:"trigger,omitempty"`
+	Messages   int               `json:"messages,omitempty"`
+	Summary    string            `json:"summary,omitempty"`
+	Archive    string            `json:"archive,omitempty"`
 }
 
 type HistoryToolCall struct {
@@ -1183,11 +1258,149 @@ func historyMessages(msgs []provider.Message, resolveUserContent func(string) st
 }
 
 func previewSessionMessages(sessionDir, path string) ([]HistoryMessage, error) {
+	if out, ok, err := previewEventSessionMessages(path); ok || err != nil {
+		return out, err
+	}
 	loaded, err := agent.LoadSession(path)
 	if err != nil {
 		return nil, err
 	}
 	return historyMessages(loaded.Snapshot(), sessionDisplayResolver(sessionDir, path)), nil
+}
+
+type previewEventRecord struct {
+	Kind             string             `json:"kind"`
+	Type             string             `json:"type"`
+	Role             string             `json:"role"`
+	Text             string             `json:"text"`
+	Content          string             `json:"content"`
+	Reasoning        string             `json:"reasoning"`
+	ReasoningContent string             `json:"reasoningContent"`
+	Level            string             `json:"level"`
+	ToolCalls        []previewToolCall  `json:"toolCalls"`
+	CallID           string             `json:"callId"`
+	ToolCallID       string             `json:"toolCallId"`
+	ToolName         string             `json:"toolName"`
+	Name             string             `json:"name"`
+	Output           string             `json:"output"`
+	Compaction       *previewCompaction `json:"compaction"`
+	Trigger          string             `json:"trigger"`
+	Messages         int                `json:"messages"`
+	Summary          string             `json:"summary"`
+	Archive          string             `json:"archive"`
+}
+
+type previewToolCall struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+	Function  struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	} `json:"function"`
+}
+
+type previewCompaction struct {
+	Trigger  string `json:"trigger"`
+	Messages int    `json:"messages"`
+	Summary  string `json:"summary"`
+	Archive  string `json:"archive"`
+}
+
+func previewEventSessionMessages(path string) ([]HistoryMessage, bool, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, false, err
+	}
+	defer f.Close()
+
+	dec := json.NewDecoder(f)
+	out := []HistoryMessage{}
+	toolName := map[string]string{}
+	sawEvent := false
+	for {
+		var rec previewEventRecord
+		if err := dec.Decode(&rec); err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			if sawEvent {
+				return out, true, nil
+			}
+			return nil, false, nil
+		}
+		eventName := strings.TrimSpace(rec.Kind)
+		if eventName == "" {
+			eventName = strings.TrimSpace(rec.Type)
+		}
+		if eventName == "" {
+			continue
+		}
+		sawEvent = true
+		switch eventName {
+		case "user.message":
+			if rec.Text != "" {
+				out = append(out, HistoryMessage{Role: "user", Content: rec.Text})
+			}
+		case "model.final":
+			hm := HistoryMessage{Role: "assistant", Content: rec.Content, Reasoning: firstNonEmpty(rec.Reasoning, rec.ReasoningContent)}
+			for _, tc := range rec.ToolCalls {
+				id := tc.ID
+				name := firstNonEmpty(tc.Name, tc.Function.Name)
+				args := firstNonEmpty(tc.Arguments, tc.Function.Arguments)
+				hm.ToolCalls = append(hm.ToolCalls, HistoryToolCall{ID: id, Name: name, Arguments: args})
+				if id != "" {
+					toolName[id] = name
+				}
+			}
+			out = append(out, hm)
+		case "tool.result":
+			callID := firstNonEmpty(rec.CallID, rec.ToolCallID)
+			out = append(out, HistoryMessage{
+				Role:       "tool",
+				ToolCallID: callID,
+				ToolName:   firstNonEmpty(rec.ToolName, rec.Name, toolName[callID]),
+				Content:    firstNonEmpty(rec.Output, rec.Content),
+			})
+		case "phase":
+			out = append(out, HistoryMessage{Role: "phase", Content: firstNonEmpty(rec.Text, rec.Content)})
+		case "notice":
+			level := rec.Level
+			if level != "warn" {
+				level = "info"
+			}
+			out = append(out, HistoryMessage{Role: "notice", Level: level, Content: firstNonEmpty(rec.Text, rec.Content)})
+		case "compaction_started":
+			c := rec.compactionPayload()
+			out = append(out, HistoryMessage{Role: "compaction", Pending: true, Trigger: c.Trigger})
+		case "compaction_done":
+			c := rec.compactionPayload()
+			out = append(out, HistoryMessage{
+				Role:     "compaction",
+				Trigger:  c.Trigger,
+				Messages: c.Messages,
+				Summary:  c.Summary,
+				Archive:  c.Archive,
+			})
+		}
+	}
+	return out, sawEvent, nil
+}
+
+func (r previewEventRecord) compactionPayload() previewCompaction {
+	if r.Compaction != nil {
+		return *r.Compaction
+	}
+	return previewCompaction{Trigger: r.Trigger, Messages: r.Messages, Summary: r.Summary, Archive: r.Archive}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 // ContextInfo is the prompt-vs-window gauge payload. Both zero means no data yet.
@@ -1753,7 +1966,7 @@ func (a *App) PickSkillFolder() (string, error) {
 	cur, _ := os.Getwd()
 	dir, err := runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
 		Title:            "Choose skills folder",
-		DefaultDirectory: cur,
+		DefaultDirectory: dialogDefaultDirectory(cur),
 	})
 	if err != nil || dir == "" {
 		return "", err
@@ -2545,6 +2758,7 @@ func (a *App) SetModelForTab(tabID, name string) error {
 	if err != nil {
 		return err
 	}
+	a.bindControllerDisplayRecorder(newCtrl)
 	a.mu.Lock()
 	tab.Ctrl = newCtrl
 	tab.model = name
@@ -2561,6 +2775,7 @@ func (a *App) SetModelForTab(tabID, name string) error {
 	} else if path != "" {
 		newCtrl.SetSessionPath(path)
 	}
+	a.persistTabSessionPath(tab, path)
 	return nil
 }
 
@@ -2634,6 +2849,7 @@ func (a *App) SetEffortForTab(tabID, level string) error {
 	if err != nil {
 		return err
 	}
+	a.bindControllerDisplayRecorder(newCtrl)
 	a.mu.Lock()
 	tab.Ctrl = newCtrl
 	tab.effort = &effort
@@ -2650,6 +2866,7 @@ func (a *App) SetEffortForTab(tabID, level string) error {
 	} else if path != "" {
 		newCtrl.SetSessionPath(path)
 	}
+	a.persistTabSessionPath(tab, path)
 	return nil
 }
 
@@ -2704,8 +2921,8 @@ type WorkspaceChangesView struct {
 	GitErr       string                `json:"gitErr,omitempty"`
 }
 
-// atSkip are entries the "@" menu hides as noise.
-var atSkip = map[string]bool{".git": true, "node_modules": true, ".DS_Store": true}
+// atSkip are entries the file tree and "@" menu hide as local workspace noise.
+var atSkip = map[string]bool{".git": true, ".codegraph": true, "node_modules": true, ".DS_Store": true}
 
 const filePreviewLimit = 256 * 1024
 const fileRefSearchLimit = 20
