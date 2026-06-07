@@ -505,13 +505,12 @@ func (a *App) buildTabController(tab *WorkspaceTab) {
 	if model == "" {
 		model = cfg.DefaultModel
 	}
-	if e, ok := cfg.ResolveModel(model); ok {
-		model = e.Name + "/" + e.Model
-	} else {
-		model = cfg.DefaultModel
-		if e, ok := cfg.ResolveModel(model); ok {
-			model = e.Name + "/" + e.Model
+	requestedModel := model
+	if resolved, fallback, ok := cfg.ResolveModelWithFallback(model); ok {
+		if fallback && strings.TrimSpace(tab.model) != "" {
+			a.noticeForTab(tab.ID, fmt.Sprintf("model %q is no longer available; switched to %s", requestedModel, resolved))
 		}
+		model = resolved
 	}
 
 	a.mu.Lock()

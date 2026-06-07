@@ -11,6 +11,7 @@ import (
 	"reasonix/internal/agent"
 	"reasonix/internal/boot"
 	"reasonix/internal/config"
+	"reasonix/internal/control"
 	"reasonix/internal/provider"
 )
 
@@ -107,6 +108,27 @@ func nonNil(s []string) []string {
 		return []string{}
 	}
 	return s
+}
+
+func providerRemovalFallbackRef(c *config.Config, name string) string {
+	for i := range c.Providers {
+		p := &c.Providers[i]
+		if p.Name == name || !p.Configured() || len(p.ModelList()) == 0 {
+			continue
+		}
+		return p.Name + "/" + p.DefaultModel()
+	}
+	return ""
+}
+
+func desktopModelRefsProvider(c *config.Config, ref, name string) bool {
+	if config.ModelRefsProvider(ref, name) {
+		return true
+	}
+	if e, ok := c.ResolveModel(ref); ok {
+		return e.Name == name
+	}
+	return false
 }
 
 func builtInProviderNames() map[string]bool {
@@ -346,11 +368,11 @@ func (a *App) rebuild() error {
 	}
 	model := tab.model
 	if cfg, err := config.LoadForRoot(tab.WorkspaceRoot); err == nil {
-		if _, ok := cfg.ResolveModel(model); !ok {
-			model = cfg.DefaultModel
-			if e, ok := cfg.ResolveModel(model); ok {
-				model = e.Name + "/" + e.Model
+		if resolved, fallback, ok := cfg.ResolveModelWithFallback(model); ok {
+			if fallback && strings.TrimSpace(model) != "" {
+				a.noticeForTab(tab.ID, fmt.Sprintf("model %q is no longer available; switched to %s", model, resolved))
 			}
+			model = resolved
 		}
 	}
 	ctrl, err := boot.Build(a.bootContext(), boot.Options{
@@ -617,30 +639,109 @@ func (a *App) FetchProviderModels(p ProviderView) ([]string, error) {
 	return nonNil(models), nil
 }
 
-// DeleteProvider removes a provider (refused for the current default_model).
+// DeleteProvider removes a provider and retargets open idle tabs that used it.
 func (a *App) DeleteProvider(name string) error {
-	return a.applyConfigChange(func(c *config.Config) error { return c.RemoveProvider(name) })
+	return a.deleteProviderAndRetargetTabs(name)
 }
 
 // RemoveProviderAccess hides a provider from Settings > Model > Access. Built-in
 // providers remain available as defaults; custom providers are deleted outright.
 func (a *App) RemoveProviderAccess(name string) error {
-	return a.applyConfigChange(func(c *config.Config) error {
-		name = strings.TrimSpace(name)
-		if name == "" {
-			return fmt.Errorf("remove provider access: empty provider name")
-		}
-		builtIns := builtInProviderNames()
-		if builtIns[name] {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("remove provider access: empty provider name")
+	}
+	if builtInProviderNames()[name] {
+		return a.applyConfigChange(func(c *config.Config) error {
 			removeProviderAccess(c, name)
 			return nil
+		})
+	}
+	return a.deleteProviderAndRetargetTabs(name)
+}
+
+type providerRemovalTab struct {
+	id   string
+	ctrl *control.Controller
+}
+
+func (a *App) deleteProviderAndRetargetTabs(name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("remove provider: empty provider name")
+	}
+	cfg, path, err := a.loadDesktopUserConfigForEdit()
+	if err != nil {
+		return err
+	}
+	fallbackRef := providerRemovalFallbackRef(cfg, name)
+
+	var affected []providerRemovalTab
+	a.mu.RLock()
+	for _, id := range a.orderedTabIDsLocked() {
+		tab := a.tabs[id]
+		if tab == nil {
+			continue
 		}
-		if err := c.RemoveProvider(name); err != nil {
-			return err
+		ref := tab.model
+		if strings.TrimSpace(ref) == "" {
+			ref = cfg.DefaultModel
 		}
-		removeProviderAccess(c, name)
-		return nil
-	})
+		if !desktopModelRefsProvider(cfg, ref, name) {
+			continue
+		}
+		if tab.Ctrl != nil && tab.Ctrl.Running() {
+			a.mu.RUnlock()
+			return fmt.Errorf("finish or cancel conversations using %q before deleting the provider", name)
+		}
+		affected = append(affected, providerRemovalTab{id: id, ctrl: tab.Ctrl})
+	}
+	a.mu.RUnlock()
+
+	if len(affected) > 0 && fallbackRef == "" {
+		return fmt.Errorf("remove provider: %q is used by open tabs and no other configured provider exists", name)
+	}
+	if err := cfg.RemoveProvider(name); err != nil {
+		return err
+	}
+	removeProviderAccess(cfg, name)
+	if err := cfg.SaveTo(path); err != nil {
+		return err
+	}
+
+	if len(affected) == 0 {
+		return a.rebuild()
+	}
+	for _, item := range affected {
+		if item.ctrl != nil {
+			_ = item.ctrl.Snapshot()
+			item.ctrl.Close()
+		}
+	}
+
+	var rebuildTabs []*WorkspaceTab
+	a.mu.Lock()
+	for _, item := range affected {
+		tab := a.tabs[item.id]
+		if tab == nil {
+			continue
+		}
+		tab.Ctrl = nil
+		tab.model = fallbackRef
+		tab.Label = fallbackRef
+		tab.StartupErr = ""
+		tab.Ready = a.ctx == nil
+		if a.ctx != nil {
+			rebuildTabs = append(rebuildTabs, tab)
+		}
+	}
+	a.saveTabsLocked()
+	a.mu.Unlock()
+
+	for _, tab := range rebuildTabs {
+		go a.buildTabController(tab)
+	}
+	return nil
 }
 
 // SetProviderKey writes a secret to the global credentials file under the given

@@ -3274,9 +3274,13 @@ func (a *App) currentProviderEntryForTab(tabID string) (*config.ProviderEntry, e
 	if strings.TrimSpace(ref) == "" {
 		ref = cfg.DefaultModel
 	}
-	entry, ok := cfg.ResolveModel(ref)
+	resolved, _, ok := cfg.ResolveModelWithFallback(ref)
 	if !ok {
 		return nil, fmt.Errorf("unknown model %q", ref)
+	}
+	entry, ok := cfg.ResolveModel(resolved)
+	if !ok {
+		return nil, fmt.Errorf("unknown model %q", resolved)
 	}
 	if effortOverride != nil {
 		entry.Effort = *effortOverride

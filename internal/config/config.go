@@ -1173,6 +1173,25 @@ func (c *Config) ResolveModel(ref string) (*ProviderEntry, bool) {
 	return nil, false
 }
 
+// ResolveModelWithFallback resolves a model reference to the canonical
+// "provider/model" form used by the desktop runtime. If ref is stale or empty,
+// it falls back to the first provider with at least one model.
+func (c *Config) ResolveModelWithFallback(ref string) (resolvedRef string, fallback bool, ok bool) {
+	if strings.TrimSpace(ref) != "" {
+		if e, found := c.ResolveModel(ref); found {
+			return e.Name + "/" + e.Model, false, true
+		}
+	}
+	for i := range c.Providers {
+		p := &c.Providers[i]
+		if len(p.ModelList()) == 0 {
+			continue
+		}
+		return p.Name + "/" + p.DefaultModel(), true, true
+	}
+	return "", false, false
+}
+
 // APIKey resolves the entry's API key from its api_key_env.
 func (e *ProviderEntry) APIKey() string {
 	if e.APIKeyEnv == "" {

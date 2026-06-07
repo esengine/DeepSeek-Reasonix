@@ -322,7 +322,10 @@ func TestRemoveProvider(t *testing.T) {
 	c := Default()
 	c.Agent.PlannerModel = "deepseek-pro"
 
-	// Cannot remove the default model.
+	// Cannot remove the default model when no configured fallback is available.
+	for i := range c.Providers {
+		c.Providers[i].APIKeyEnv = ""
+	}
 	if err := c.RemoveProvider(c.DefaultModel); err == nil {
 		t.Error("expected error removing the default model")
 	}
