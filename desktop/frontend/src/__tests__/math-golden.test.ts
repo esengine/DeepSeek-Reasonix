@@ -142,6 +142,12 @@ eq(normalizeMath("price is $10.50$ each"), "price is &#36;10.50&#36; each", "$10
 eq(normalizeMath("$I$ think"), "&#36;I&#36; think", "$I$ not math");
 eq(normalizeMath("it costs $5 and $10 total"), "it costs &#36;5 and &#36;10 total", "multiple prose $ stays literal");
 
+console.log("\nnormalizeMath — Markdown code regions stay literal");
+eq(normalizeMath("`$PATH$`"), "`$PATH$`", "inline code with env token");
+eq(normalizeMath("Use `$HOME` and `$PATH$`."), "Use `$HOME` and `$PATH$`.", "multiple inline code spans");
+eq(normalizeMath("```sh\necho $PATH$\n```"), "```sh\necho $PATH$\n```", "fenced code with env token");
+eq(normalizeMath("```\necho $PATH$\n```\n\nsolve $x^2$"), "```\necho $PATH$\n```\n\nsolve $x^2$", "fenced code protected while prose math renders");
+
 // ── normalizeMath — text-mode escapes (regression for PR #3287) ───────────────
 // The whole point of running latexNormalizeForKatex inside normalizeMath is
 // that LLM output like "$\text{price is $5}$" reaches KaTeX with the inner
