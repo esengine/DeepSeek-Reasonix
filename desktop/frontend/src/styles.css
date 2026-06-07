@@ -951,9 +951,6 @@ a[href] {
   margin-left: auto;
   margin-right: auto;
 }
-  margin-left: auto;
-  margin-right: auto;
-}
 .transcript--empty {
   container-type: size;
   display: grid;
