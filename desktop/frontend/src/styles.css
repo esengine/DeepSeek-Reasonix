@@ -951,6 +951,9 @@ a[href] {
   margin-left: auto;
   margin-right: auto;
 }
+  margin-left: auto;
+  margin-right: auto;
+}
 .transcript--empty {
   container-type: size;
   display: grid;
@@ -961,6 +964,101 @@ a[href] {
 .transcript--empty > * {
   max-width: none;
   margin: 0;
+}
+.warm-collapse {
+  display: block;
+  width: 100%;
+  max-width: var(--maxw);
+  margin: 6px auto;
+  padding: 11px 14px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg-faint);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: center;
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s, background 0.12s;
+}
+.warm-collapse:hover {
+  color: var(--fg);
+  border-color: var(--accent-soft);
+  background: var(--bg-elev);
+}
+.warm-turn {
+  max-width: var(--maxw);
+  margin: 6px auto;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--bg-elev);
+  overflow: hidden;
+  transition: border-color 0.12s;
+}
+.warm-turn:hover {
+  border-color: var(--border);
+}
+.warm-turn__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.warm-turn__head:hover {
+  background: var(--bg-soft);
+  color: var(--fg);
+}
+.warm-turn__chevron {
+  flex-shrink: 0;
+  color: var(--fg-faint);
+  transition: transform 0.15s;
+}
+.warm-turn__chevron--open {
+  transform: rotate(90deg);
+}
+.warm-turn__preview {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg);
+  font-weight: 500;
+}
+.warm-turn__meta {
+  flex-shrink: 0;
+  color: var(--fg-faint);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.warm-turn__assistant {
+  padding: 0 12px 10px 41px;
+  color: var(--fg-faint);
+  font-size: 12px;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.warm-turn__body {
+  border-top: 1px solid var(--border-soft);
+  background: var(--bg);
+  padding: 4px 0;
+}
+.warm-turn__body > * {
+  max-width: var(--maxw);
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .transcript > .jump-bar {
@@ -1596,7 +1694,6 @@ a[href] {
   border-radius: 5px;
   padding: 1px 5px;
 }
-
 .md table {
   border-collapse: collapse;
   margin: 0 0 12px;

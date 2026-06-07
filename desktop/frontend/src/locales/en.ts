@@ -566,6 +566,8 @@ export const en = {
   "msg.copy": "Copy",
   "turnActions.summary": "Summary",
   "turnActions.rewind": "Rewind",
+  "transcript.showEarlierHistory": "Show {n} earlier turns",
+  "transcript.toolCount": "{n} tools",
   "notice.info": "Notice",
   "notice.warning": "Warning",
   "questionNav.label": "Question navigation",

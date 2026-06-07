@@ -1,21 +1,11 @@
-import {
-  createContext,
-  memo,
-  type CSSProperties,
-  type MouseEvent as ReactMouseEvent,
-  type ReactNode,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { createContext, memo, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { Item, LiveStream } from "../lib/useController";
 import type { CheckpointMeta } from "../lib/types";
 import { useT } from "../lib/i18n";
 import { AssistantMessage, TurnActions, UserMessage } from "./Message";
 import { ProcessCard, ProcessCompactIcon, ProcessInfoIcon, ProcessPhaseIcon, ProcessStatusIcon } from "./ProcessCard";
 import { ToolCard } from "./ToolCard";
+import { ChevronRight } from "lucide-react";
 import { Welcome } from "./Welcome";
 
 type ToolItem = Extract<Item, { kind: "tool" }>;
@@ -31,6 +21,25 @@ const LiveAssistantMessage = memo(function LiveAssistantMessage({ item }: { item
   const shown = live && live.id === item.id ? { ...item, text: live.text, reasoning: live.reasoning, streaming: true } : item;
   return <AssistantMessage item={shown} />;
 });
+
+// ── Layer budgets ─────────────────────────────────────────────────────────────
+// Hot zone: the most recent N user turns are always fully rendered. All data
+// stays in memory (items[]), so expanding a warm turn is instant — no API call.
+// Cold zone: a "load more" button paginates the warm zone in batches.
+//
+//   items[0]  ─┐
+//   ...        │ Cold zone  ───  paginated, shown on "load more"
+//              ├────────────  warmTurnStart
+//   ...        │ Warm zone  ───  collapsible summary cards (individual expand)
+//              ├────────────  hotStartIdx
+//   items[N]  ─┤ Hot zone   ───  fully rendered
+//   ...        │
+//   items[end] ┘
+
+const HOT_TURNS = 30;
+const WARM_PAGE_SIZE = 20; // cold-zone pagination batch
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function questionAnchorId(id: string): string {
   return `question-anchor-${id}`;
@@ -64,7 +73,6 @@ function repinIfWasPinned(
   containerHeightDelta: number,
 ) {
   const bottomDistance = el.scrollHeight - el.scrollTop - el.clientHeight;
-  // + delta reconstructs the bottom distance from before the height changed
   if (!stick.current && bottomDistance + containerHeightDelta >= 80) return;
   stick.current = true;
   if (frame.current !== null) cancelAnimationFrame(frame.current);
@@ -73,6 +81,64 @@ function repinIfWasPinned(
     frame.current = null;
   });
 }
+
+// Summarise a warm turn for its compact card.
+function warmUserPreview(text: string): string {
+  const cleaned = text.replace(/@\.reasonix\/attachments\/[^\s]+/g, "[image]").replace(/\s+/g, " ").trim();
+  return cleaned.length <= 80 ? cleaned : cleaned.slice(0, 77) + "...";
+}
+
+// ── Turn grouping ─────────────────────────────────────────────────────────────
+// A turn is everything from one UserMessage up to (but not including) the next
+// UserMessage. This grouping is used only for warm-zone rendering; the hot zone
+// still uses the flat items array to preserve the existing rendering logic.
+
+interface TurnGroup {
+  userItem: Item;
+  assistantPreview: string;
+  toolCount: number;
+  startIdx: number; // first index in items[] (the user message)
+  endIdx: number;   // exclusive end
+}
+
+function buildTurnGroups(items: Item[], questions: QuestionAnchor[]): TurnGroup[] {
+  const groups: TurnGroup[] = [];
+  let turnIdx = 0;
+  let start = -1;
+  for (let i = 0; i < items.length; i++) {
+    if (items[i].kind === "user") {
+      if (start >= 0) {
+        // finalise previous turn
+        groups[groups.length - 1].endIdx = i;
+      }
+      start = i;
+      turnIdx = questions.findIndex((q) => q.id === items[i].id);
+      if (turnIdx < 0) turnIdx = groups.length;
+      groups.push({
+        userItem: items[i],
+        assistantPreview: "",
+        toolCount: 0,
+        startIdx: i,
+        endIdx: items.length,
+      });
+    } else if (start >= 0 && groups.length > 0) {
+      const g = groups[groups.length - 1];
+      const it = items[i];
+      if (it.kind === "assistant" && !it.streaming) {
+        const previewText = it.text?.trim() || "";
+        if (previewText) {
+          g.assistantPreview = warmUserPreview(previewText);
+        }
+      }
+      if (it.kind === "tool" && !it.parentId) {
+        g.toolCount++;
+      }
+    }
+  }
+  return groups;
+}
+
+// ── Transcript component ──────────────────────────────────────────────────────
 
 export function Transcript({
   items,
@@ -96,8 +162,6 @@ export function Transcript({
   questionNavigator?: boolean;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  // stick tracks whether the view is pinned to the bottom; once the user scrolls
-  // up to read, we stop yanking them back down.
   const stick = useRef(true);
   const resizeFrame = useRef<number | null>(null);
   const lastClientHeight = useRef<number | null>(null);
@@ -124,8 +188,7 @@ export function Transcript({
   const prevQuestionsLen = useRef(0);
 
   // When the user submits a new message (questions array grows), force-scroll
-  // to the bottom regardless of the current stick state — the user's own action
-  // should reveal the new interaction.
+  // to the bottom regardless of the current stick state.
   useEffect(() => {
     if (questions.length > prevQuestionsLen.current) {
       stick.current = true;
@@ -139,14 +202,6 @@ export function Transcript({
     prevQuestionsLen.current = questions.length;
   }, [questions]);
 
-  // Follow new content by setting scrollTop directly (no scrollIntoView fighting
-  // the browser's scroll anchoring), and inside rAF so layout has settled first —
-  // together with plain-text streaming this keeps the view from jittering. The
-  // dependency tracks rendered content, not just array identity, so streaming
-  // still follows the bottom if a reducer reuses the items array.
-  // scrollVersion is O(items); recompute only when the backlog changes, not on
-  // every streamed token. The live bubble's growth drives follow-to-bottom via
-  // its length added to the effect deps below.
   const contentVersion = useMemo(() => scrollVersion(items), [items]);
   useEffect(() => {
     if (!stick.current) return;
@@ -193,8 +248,6 @@ export function Transcript({
 
   // Sub-agent calls carry a parentId; collect them under their parent `task`
   // call so the parent card can render them nested, and skip them at top level.
-  // Memoized so a `task` card's `subcalls` ref stays stable and its memo holds
-  // across a streaming turn's per-token re-renders.
   const subcallsByParent = useMemo(() => {
     const m = new Map<string, ToolItem[]>();
     for (const it of items) {
@@ -207,7 +260,33 @@ export function Transcript({
     return m;
   }, [items]);
 
-  // The turn action menu's open state is lifted here so at most one is open.
+  // ── Layer state ────────────────────────────────────────────────────────────
+  const [expandedWarmTurns, setExpandedWarmTurns] = useState<Set<number>>(new Set());
+  const [coldPage, setColdPage] = useState(0);
+
+  // Compute turn groups (memoised — only rebuilds when user turns change,
+  // not on every streaming token). The warm previews are static once built.
+  const turnGroupKey = questions.length;
+  const turnGroups = useMemo(() => buildTurnGroups(items, questions), [turnGroupKey, questions]);
+
+  // hotStartIdx: first index of the hot zone in items[].
+  const hotStartIdx = useMemo(() => {
+    let needed = HOT_TURNS;
+    for (let i = items.length - 1; i >= 0; i--) {
+      if (items[i].kind === "user") {
+        needed--;
+        if (needed <= 0) return i;
+      }
+    }
+    return 0;
+  }, [items]);
+
+  // How many turns are in the cold zone (not yet shown).
+  const warmTurnCount = turnGroups.length - Math.min(turnGroups.length, HOT_TURNS);
+  const shownWarmStart = Math.max(0, warmTurnCount - coldPage * WARM_PAGE_SIZE);
+  const coldTurnCount = shownWarmStart;
+
+  // ── The turn action menu ──────────────────────────────────────────────────
   const [openAction, setOpenAction] = useState<OpenTurnAction | null>(null);
   useEffect(() => {
     if (openAction === null) return;
@@ -219,15 +298,10 @@ export function Transcript({
     return () => document.removeEventListener("mousedown", onDown);
   }, [openAction]);
 
-  // Each user message's turn = its ordinal among user messages, so a rewind
-  // targets the matching checkpoint.
   const userTurn = useMemo(() => new Map(questions.map((question) => [question.id, question.turn])), [questions]);
   const checkpointsByTurn = useMemo(() => new Map(checkpoints.map((checkpoint) => [checkpoint.turn, checkpoint])), [checkpoints]);
-  const liveIndex = useMemo(() => {
-    if (!live) return -1;
-    return items.findIndex((item) => item.kind === "assistant" && item.id === live.id);
-  }, [items, live?.id]);
 
+  // ── JumpBar integration ───────────────────────────────────────────────────
   const jumpToQuestion = (question: QuestionAnchor) => {
     const el = scrollRef.current;
     const node = document.getElementById(questionAnchorId(question.id));
@@ -243,19 +317,35 @@ export function Transcript({
     el.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
   };
 
+  const handleJumpToQuestion = useCallback((question: QuestionAnchor) => {
+    // Auto-expand the warm turn when jumping to an old question.
+    const warmTurnStart = turnGroups.length - HOT_TURNS;
+    if (question.turn < warmTurnStart) {
+      setExpandedWarmTurns((prev) => {
+        if (prev.has(question.turn)) return prev;
+        return new Set([...prev, question.turn]);
+      });
+    }
+    jumpToQuestion(question);
+  }, [turnGroups.length]);
+
+  // ── Hot zone: fully rendered from hotStartIdx to end ─────────────────────
+  // Memoized separately from the assembly so streaming tokens don't rebuild
+  // the warm/cold zone JSX trees. Uses LiveStreamContext for streaming data
+  // (added by upstream PR #3423) instead of per-call renderSegments.
   const empty = items.length === 0;
-  const renderedItems = useMemo<ReactNode[]>(() => {
-    let activeTurn: number | undefined;
+  const hotZoneNodes = useMemo<ReactNode[]>(() => {
+    const out: ReactNode[] = [];
     let actionText = "";
     let actionReady = false;
-    const nodes: ReactNode[] = [];
+    let activeTurn: number | undefined;
     const pushTurnActions = () => {
       if (activeTurn == null || !actionReady || actionText.trim() === "") return;
       const turn = activeTurn;
       const openMenu = openAction && openAction.turn === turn ? openAction.menu : null;
-      nodes.push(
+      out.push(
         <TurnActions
-          key={`turn-actions-${turn}`}
+          key={`ta-${turn}`}
           text={actionText}
           turn={turn}
           openMenu={openMenu}
@@ -272,64 +362,45 @@ export function Transcript({
       actionText = "";
       actionReady = false;
     };
-    items.forEach((it, index) => {
+
+    for (let i = hotStartIdx; i < items.length; i++) {
+      const it = items[i];
       switch (it.kind) {
         case "user": {
           pushTurnActions();
           const tn = userTurn.get(it.id);
           activeTurn = tn;
-          nodes.push(
-            <UserMessage
-              key={it.id}
-              text={it.text}
-              turn={tn}
-              anchorId={questionAnchorId(it.id)}
-            />,
+          out.push(
+            <UserMessage key={it.id} text={it.text} turn={tn} anchorId={questionAnchorId(it.id)} />,
           );
           break;
         }
-        case "assistant": {
-          if (index === liveIndex) {
-            nodes.push(<LiveAssistantMessage key={it.id} item={it} />);
-            break;
-          }
-          nodes.push(
-            <AssistantMessage
-              key={it.id}
-              item={it}
-            />,
-          );
+        case "assistant":
+          out.push(<LiveAssistantMessage key={it.id} item={it as AssistantItem} />);
           if (!it.streaming && it.text.trim() !== "") {
             actionText = it.text;
             actionReady = true;
           }
           break;
-        }
-        case "tool": {
-          if (it.parentId) break; // rendered nested under its parent
-          if (it.name === "todo_write") break; // shown live in the pinned TodoPanel
-          if (it.name === "exit_plan_mode") break; // the plan was shown in the approval card
-          nodes.push(<ToolCard key={it.id} item={it} subcalls={subcallsByParent.get(it.id)} />);
+        case "tool":
+          if (it.parentId) break;
+          if (it.name === "todo_write") break;
+          if (it.name === "exit_plan_mode") break;
+          out.push(<ToolCard key={it.id} item={it} subcalls={subcallsByParent.get(it.id)} />);
           break;
-        }
-        case "phase": {
-          nodes.push(<PhaseCard key={it.id} text={it.text} />);
-          break;
-        }
-        case "notice": {
-          nodes.push(<NoticeCard key={it.id} level={it.level} text={it.text} />);
-          break;
-        }
-        case "compaction": {
-          nodes.push(<CompactionCard key={it.id} item={it} />);
-          break;
-        }
+        case "phase": out.push(<PhaseCard key={it.id} text={it.text} />); break;
+        case "notice": out.push(<NoticeCard key={it.id} level={it.level} text={it.text} />); break;
+        case "compaction": out.push(<CompactionCard key={it.id} item={it} />); break;
       }
-    });
+    }
     pushTurnActions();
-    return nodes;
-  }, [actionPending, checkpointsByTurn, items, liveIndex, onRewind, openAction, rewindDisabled, subcallsByParent, userTurn]);
+    return out;
+  }, [hotStartIdx, items, openAction, actionPending, rewindDisabled, onRewind, subcallsByParent, userTurn, checkpointsByTurn]);
 
+  // ── Assemble rendered output ──────────────────────────────────────────────
+  // Warm/cold zone is a separate memo'd WarmZone component so streaming tokens
+  // don't rebuild it. The hot zone uses LiveAssistantMessage (reads live from
+  // LiveStreamContext) so streaming updates are captured immediately.
   return (
     <div
       className={`transcript${empty ? " transcript--empty" : ""}`}
@@ -339,15 +410,296 @@ export function Transcript({
       {empty && <Welcome onPrompt={onPrompt} />}
 
       {!empty && showQuestionNav && (
-        <QuestionJumpBar questions={questions} onJump={jumpToQuestion} />
+        <QuestionJumpBar questions={questions} onJump={handleJumpToQuestion} />
       )}
 
       <LiveStreamContext.Provider value={live}>
-        {renderedItems}
+        {turnGroups.length > HOT_TURNS && (
+          <WarmZone
+            turnGroups={turnGroups}
+            expandedWarmTurns={expandedWarmTurns}
+            shownWarmStart={shownWarmStart}
+            coldTurnCount={coldTurnCount}
+            scrollRef={scrollRef}
+            warmItems={items}
+            warmSubcalls={subcallsByParent}
+            warmUserTurn={userTurn}
+            warmCheckpoints={checkpointsByTurn}
+            warmOpenAction={openAction}
+            warmActionPending={actionPending}
+            warmRewindDisabled={rewindDisabled}
+            warmOnRewind={onRewind}
+            warmSetOpenAction={setOpenAction}
+            onToggleColdPage={() => setColdPage((p) => p + 1)}
+            onToggleWarmTurn={(g, expand) => {
+              setExpandedWarmTurns((prev) => {
+                const next = new Set(prev);
+                if (expand) next.add(g); else next.delete(g);
+                return next;
+              });
+            }}
+          />
+        )}
+        {hotZoneNodes}
       </LiveStreamContext.Provider>
     </div>
   );
 }
+
+// ── WarmZone sub-component (React.memo for streaming isolation) ────────────
+// Receives structural props only; reads streaming state (items, live) via refs
+// so it never invalidates on streaming token arrival.
+
+const WarmZone = memo(function WarmZone({
+  turnGroups,
+  expandedWarmTurns,
+  shownWarmStart,
+  coldTurnCount,
+  scrollRef,
+  warmItems,
+  warmSubcalls,
+  warmUserTurn,
+  warmCheckpoints,
+  warmOpenAction,
+  warmActionPending,
+  warmRewindDisabled,
+  warmOnRewind,
+  warmSetOpenAction,
+  onToggleColdPage,
+  onToggleWarmTurn,
+}: {
+  turnGroups: TurnGroup[];
+  expandedWarmTurns: ReadonlySet<number>;
+  shownWarmStart: number;
+  coldTurnCount: number;
+  scrollRef: React.RefObject<HTMLDivElement | null>;
+  warmItems: readonly Item[];
+  warmSubcalls: ReadonlyMap<string, ToolItem[]>;
+  warmUserTurn: ReadonlyMap<string, number>;
+  warmCheckpoints: ReadonlyMap<number, CheckpointMeta>;
+  warmOpenAction: OpenTurnAction | null;
+  warmActionPending: boolean;
+  warmRewindDisabled: boolean;
+  warmOnRewind: ((turn: number, scope: string) => void) | undefined;
+  warmSetOpenAction: (action: OpenTurnAction | null) => void;
+  onToggleColdPage: () => void;
+  onToggleWarmTurn: (g: number, expand: boolean) => void;
+}) {
+  const t = useT();
+  const out: React.ReactNode[] = [];
+
+  // 1. Cold zone: paginated warm turns (show more button).
+  if (coldTurnCount > 0) {
+    out.push(
+      <button
+        key="cold-load-more"
+        type="button"
+        className="warm-collapse"
+        onClick={onToggleColdPage}
+      >
+        {t("transcript.showEarlierHistory", { n: coldTurnCount })}
+      </button>,
+    );
+  }
+
+  // 2. Warm zone: collapsed/expanded warm turn cards.
+  let warmStartTurn = 0;
+  if (turnGroups.length > HOT_TURNS) {
+    warmStartTurn = turnGroups.length - HOT_TURNS - shownWarmStart;
+    for (let g = warmStartTurn; g < turnGroups.length - HOT_TURNS; g++) {
+      const group = turnGroups[g];
+      if (!group) continue;
+      const expanded = expandedWarmTurns.has(g);
+
+      if (expanded) {
+        const userText = group.userItem.kind === "user" ? group.userItem.text : "";
+        out.push(
+          <WarmTurnCard
+            key={`warm-${g}`}
+            userText={warmUserPreview(userText)}
+            assistantPreview={group.assistantPreview}
+            toolCount={group.toolCount}
+            expanded={true}
+            onToggle={() => onToggleWarmTurn(g, false)}
+          >
+            {/* Expanded warm turns render items that are stable (never the
+                streaming turn), so this captures items/live via a ref. */}
+            <WarmTurnItems
+              startIdx={group.startIdx}
+              endIdx={group.endIdx}
+              items={warmItems}
+              subcalls={warmSubcalls}
+              userTurnMap={warmUserTurn}
+              checkpoints={warmCheckpoints}
+              openAction={warmOpenAction}
+              actionPending={warmActionPending}
+              rewindDisabled={warmRewindDisabled}
+              onRewind={warmOnRewind}
+              setOpenAction={warmSetOpenAction}
+            />
+          </WarmTurnCard>,
+        );
+      } else {
+        const userText = group.userItem.kind === "user" ? group.userItem.text : "";
+        out.push(
+          <WarmTurnCard
+            key={`warm-${g}`}
+            userText={warmUserPreview(userText)}
+            assistantPreview={group.assistantPreview}
+            toolCount={group.toolCount}
+            expanded={false}
+            onToggle={() => {
+              onToggleWarmTurn(g, true);
+              const el = scrollRef.current;
+              const node = document.getElementById(questionAnchorId(group.userItem.id));
+              if (el && node) {
+                requestAnimationFrame(() => {
+                  el.scrollTo({ top: node.offsetTop - el.offsetTop - 80, behavior: "smooth" });
+                });
+              }
+            }}
+          />,
+        );
+      }
+    }
+  }
+
+  return out;
+});
+
+function WarmTurnItems({
+  startIdx,
+  endIdx,
+  items,
+  subcalls,
+  userTurnMap,
+  checkpoints,
+  openAction,
+  actionPending,
+  rewindDisabled,
+  onRewind,
+  setOpenAction,
+}: {
+  startIdx: number;
+  endIdx: number;
+  items: readonly Item[];
+  subcalls: ReadonlyMap<string, ToolItem[]>;
+  userTurnMap: ReadonlyMap<string, number>;
+  checkpoints: ReadonlyMap<number, CheckpointMeta>;
+  openAction: OpenTurnAction | null;
+  actionPending: boolean;
+  rewindDisabled: boolean;
+  onRewind: ((turn: number, scope: string) => void) | undefined;
+  setOpenAction: (action: OpenTurnAction | null) => void;
+}) {
+  const nodes: React.ReactNode[] = [];
+  let actionText = "";
+  let actionReady = false;
+  let activeTurn: number | undefined;
+  const pushTurnActions = () => {
+    if (activeTurn == null || !actionReady || actionText.trim() === "") return;
+    const turn = activeTurn;
+    const openMenu = openAction && openAction.turn === turn ? openAction.menu : null;
+    nodes.push(
+      <TurnActions
+        key={`ta-${turn}`}
+        text={actionText}
+        turn={turn}
+        openMenu={openMenu}
+        onOpenMenu={(menu) => setOpenAction(menu ? { turn, menu } : null)}
+        checkpoint={checkpoints.get(turn)}
+        actionPending={actionPending}
+        rewindDisabled={rewindDisabled}
+        onRewind={(targetTurn, scope) => {
+          onRewind?.(targetTurn, scope);
+          setOpenAction(null);
+        }}
+      />,
+    );
+    actionText = "";
+    actionReady = false;
+  };
+
+  for (let i = startIdx; i < endIdx && i < items.length; i++) {
+    const it = items[i];
+    switch (it.kind) {
+      case "user": {
+        pushTurnActions();
+        const tn = userTurnMap.get(it.id);
+        activeTurn = tn;
+        nodes.push(
+          <UserMessage key={it.id} text={it.text} turn={tn} anchorId={questionAnchorId(it.id)} />,
+        );
+        break;
+      }
+      case "assistant": {
+        nodes.push(<AssistantMessage key={it.id} item={it} />);
+        if (!it.streaming && it.text.trim() !== "") {
+          actionText = it.text;
+          actionReady = true;
+        }
+        break;
+      }
+      case "tool": {
+        if (it.parentId) break;
+        if (it.name === "todo_write") break;
+        if (it.name === "exit_plan_mode") break;
+        nodes.push(<ToolCard key={it.id} item={it} subcalls={subcalls.get(it.id)} />);
+        break;
+      }
+      case "phase": nodes.push(<PhaseCard key={it.id} text={it.text} />); break;
+      case "notice": nodes.push(<NoticeCard key={it.id} level={it.level} text={it.text} />); break;
+      case "compaction": nodes.push(<CompactionCard key={it.id} item={it} />); break;
+    }
+  }
+  pushTurnActions();
+  return nodes;
+}
+
+// ── Warm turn summary card ────────────────────────────────────────────────────
+
+function WarmTurnCard({
+  userText,
+  assistantPreview,
+  toolCount,
+  expanded,
+  onToggle,
+  children,
+}: {
+  userText: string;
+  assistantPreview: string;
+  toolCount: number;
+  expanded: boolean;
+  onToggle: () => void;
+  children?: React.ReactNode;
+}) {
+  const t = useT();
+  return (
+    <div className={`warm-turn${expanded ? " warm-turn--expanded" : ""}`}>
+      <button
+        type="button"
+        className="warm-turn__head"
+        onClick={onToggle}
+        aria-expanded={expanded}
+      >
+        <span className="warm-turn__chevron">
+          <ChevronRight className={expanded ? "warm-turn__chevron--open" : ""} size={13} />
+        </span>
+        <span className="warm-turn__preview">{userText}</span>
+        <span className="warm-turn__meta">
+          {toolCount > 0 && <span>{t("transcript.toolCount", { n: toolCount })}</span>}
+        </span>
+      </button>
+      {expanded ? (
+        <div className="warm-turn__body">{children}</div>
+      ) : (
+        assistantPreview && <div className="warm-turn__assistant">{assistantPreview}</div>
+      )}
+    </div>
+  );
+}
+
+// ── JumpBar, PhaseCard, NoticeCard, CompactionCard ────────────────────────────
 
 function QuestionJumpBar({ questions, onJump }: { questions: QuestionAnchor[]; onJump: (question: QuestionAnchor) => void }) {
   const t = useT();
@@ -510,10 +862,6 @@ function NoticeCard({ level, text }: { level: NoticeItem["level"]; text: string 
   );
 }
 
-// CompactionCard marks a context-compaction boundary in the transcript. While
-// the pass runs it shows a "compacting…" placeholder; once done it shows the
-// message count and trigger with the summary collapsed behind a toggle (the
-// summary is the new context base, so it's available but doesn't flood the view).
 function CompactionCard({ item }: { item: CompactionItem }) {
   const t = useT();
   if (item.pending) {
