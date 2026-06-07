@@ -4232,6 +4232,32 @@ a[href] {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.workspace-branch-refresh {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin-left: auto;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg-faint);
+  cursor: pointer;
+  padding: 0;
+}
+.workspace-branch-refresh:hover {
+  background: var(--sidebar-hover);
+  color: var(--fg-dim);
+}
+.workspace-branch-refresh:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+.workspace-branch-refresh .spinning {
+  animation: spin 0.8s linear infinite;
+}
 
 .workspace-search {
   flex: 0 0 auto;

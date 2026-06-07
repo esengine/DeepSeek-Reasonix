@@ -1007,6 +1007,14 @@ export function WorkspacePanel({
           <div className="workspace-branch-indicator">
             <GitBranch size={13} />
             <span>{changes.gitBranch}</span>
+            <button
+              className="workspace-branch-refresh"
+              onClick={loadChanges}
+              disabled={loadingChanges}
+              title={t("workspace.refreshChanges")}
+            >
+              <RefreshCw size={12} className={loadingChanges ? "spinning" : ""} />
+            </button>
           </div>
         )}
 
