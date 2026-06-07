@@ -10461,13 +10461,19 @@ a[href] {
 .workspace-branch-menu {
   min-width: 140px;
   max-width: 260px;
-  max-height: 240px;
+  max-height: 300px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+  overflow: hidden;
 }
 
 .workspace-branch-menu__inner {
   display: flex;
   flex-direction: column;
   overflow-y: auto;
+  background: var(--bg-elev);
 }
 
 .workspace-branch-menu__loading {
