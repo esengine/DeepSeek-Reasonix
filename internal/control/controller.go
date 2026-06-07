@@ -269,6 +269,22 @@ func (c *Controller) recordDisplay(content, display string) {
 	}
 }
 
+func (c *Controller) recordDisplayForNewUser(startMessages int, display string) {
+	if strings.TrimSpace(display) == "" {
+		return
+	}
+	msgs := c.History()
+	if startMessages > len(msgs) {
+		startMessages = len(msgs)
+	}
+	for _, m := range msgs[startMessages:] {
+		if m.Role == provider.RoleUser {
+			c.recordDisplay(m.Content, display)
+			return
+		}
+	}
+}
+
 // ckptDir derives a session's checkpoint directory from its file path
 // (…/<id>.jsonl → …/<id>.ckpt). Empty path → empty (in-memory checkpoints).
 func ckptDir(sessionPath string) string {
@@ -383,6 +399,7 @@ func (c *Controller) runTurnWithRawDisplay(ctx context.Context, input, raw, disp
 	input = c.Compose(input)
 	startMessages := c.messageCount()
 	defer c.snapshotActivityIfChanged(startMessages)
+	defer c.recordDisplayForNewUser(startMessages, display)
 	// Open a checkpoint for this turn before the user message is appended, so the
 	// recorded message boundary precedes it and pre-edit snapshots land here.
 	c.beginCheckpoint(input)
@@ -399,7 +416,6 @@ func (c *Controller) runTurnWithRawDisplay(ctx context.Context, input, raw, disp
 		}
 		defer func() { c.hooks.Stop(ctx, lastAssistantText(c.History()), turn) }()
 	}
-	c.recordDisplay(input, display)
 	if err := c.runner.Run(ctx, input); err != nil {
 		return err
 	}
