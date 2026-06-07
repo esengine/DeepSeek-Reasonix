@@ -47,6 +47,7 @@
   --font-content: var(--text-base);
   --font-control: var(--text-md);
   --font-control-small: var(--text-sm);
+  --font-status: var(--font-control-small);
   --scrollbar-size: 10px;
   --scrollbar-track: transparent;
   --scrollbar-thumb: color-mix(in srgb, var(--fg-faint) 42%, transparent);
@@ -1707,29 +1708,42 @@ a[href] {
 }
 .composer-resize-handle {
   --wails-draggable: no-drag;
+  appearance: none;
   position: absolute;
-  top: 0;
-  left: 14px;
-  right: 14px;
+  top: -10px;
+  left: 0;
+  right: 0;
   z-index: 5;
-  height: 8px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  background: transparent;
   cursor: ns-resize;
   touch-action: none;
 }
 .composer-resize-handle::before {
   content: "";
   position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 2px;
+  top: 7px;
+  left: 50%;
+  width: 72px;
+  height: 4px;
+  transform: translateX(-50%);
   border-radius: 999px;
-  background: transparent;
-  transition: background 0.12s;
+  background: color-mix(in srgb, var(--fg-faint) 38%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--border) 82%, transparent);
+  opacity: 0.72;
+  transition: background 0.12s, box-shadow 0.12s, opacity 0.12s;
 }
 .composer-card:hover .composer-resize-handle::before,
+.composer-resize-handle:focus-visible::before,
 .composer-card--resizing .composer-resize-handle::before {
-  background: var(--border);
+  background: var(--accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 70%, transparent);
+  opacity: 0.95;
+}
+.composer-resize-handle:focus-visible {
+  outline: none;
 }
 .composer-resizing,
 .composer-resizing * {
@@ -1815,7 +1829,8 @@ a[href] {
   border-radius: 0;
   padding: 10px 10px 9px 13px;
 }
-.composer-card--resized .composer {
+.composer-card--resized .composer,
+.composer-card--autosized .composer {
   flex: 1;
   align-items: flex-start;
 }
@@ -1857,9 +1872,9 @@ a[href] {
   font: inherit;
   font-size: var(--font-content);
   line-height: 1.55;
-  max-height: 200px;
+  min-height: calc(var(--font-content) * 1.55);
   outline: none;
-  field-sizing: content;
+  overflow-y: hidden;
 }
 .composer-card--resized .composer__input {
   height: 100%;
@@ -2286,7 +2301,8 @@ a[href] {
   align-items: center;
   gap: 6px;
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--font-status);
+  line-height: 1.45;
   color: var(--fg-faint);
   /* One line, always: without this a narrow window squeezes the flex items and
      CJK text breaks one character per line. The metric chips keep their width
@@ -2370,7 +2386,7 @@ a[href] {
   padding: 0;
   font: inherit;
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: inherit;
   color: var(--fg-dim);
 }
 .statusbar__jobs:hover {
@@ -2451,6 +2467,9 @@ a[href] {
 }
 .modelsw__trigger:hover {
   color: var(--fg);
+}
+.statusbar .modelsw__trigger {
+  font-size: inherit;
 }
 .modelsw__backdrop {
   position: fixed;

@@ -239,6 +239,7 @@ export const en = {
   "composer.confirmRemoveProject": "Click again to confirm",
   "composer.cannotRemoveCurrent": "The current workspace cannot be removed",
   "composer.removeCurrentProjectDisabled": "Current project cannot be removed",
+  "composer.resize": "Drag to resize composer, double-click to reset",
   "composer.send": "Send (Enter)",
   "composer.stop": "Stop (Esc)",
   "composer.stopShort": "Stop",
