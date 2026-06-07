@@ -170,9 +170,10 @@ export function Composer({
   insertRequest?: ComposerInsertRequest | null;
   disabled?: boolean;
   decisionPending?: boolean;
-  // ready/cwd re-trigger the command fetch: Commands() returns only built-ins
-  // until boot.Build finishes (the controller, hence skills/custom/MCP, is nil
-  // before then), and the available set changes when the workspace switches.
+  // ready/cwd/running re-trigger the command fetch: Commands() returns only
+  // built-ins until boot.Build finishes (the controller, hence skills/custom/MCP,
+  // is nil before then), the available set changes when the workspace switches,
+  // and a completed turn may have installed skills or MCP prompts.
   ready?: boolean;
   turnStartAt?: number;
   turnTokens?: number;
@@ -228,7 +229,7 @@ export function Composer({
   const [commands, setCommands] = useState<CommandInfo[]>([]);
   useEffect(() => {
     app.Commands().then((next) => setCommands(asArray(next))).catch(() => {});
-  }, [ready, cwd]);
+  }, [ready, cwd, running]);
 
   const slashQuery = useMemo(() => {
     if (!text.startsWith("/") || /\s/.test(text)) return null;

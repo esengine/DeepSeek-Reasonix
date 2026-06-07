@@ -104,12 +104,22 @@ func (c *Controller) RunSkill(input string) (sent string, found bool) {
 		return "", false
 	}
 	name := strings.TrimPrefix(fields[0], "/")
-	for _, sk := range c.skills {
-		if sk.Name == name {
-			return skill.Render(sk, strings.Join(fields[1:], " ")), true
-		}
+	if sk, ok := c.skillByName(name); ok {
+		return skill.Render(sk, strings.Join(fields[1:], " ")), true
 	}
 	return "", false
+}
+
+func (c *Controller) skillByName(name string) (skill.Skill, bool) {
+	if c.skillStore != nil {
+		return c.skillStore.Read(name)
+	}
+	for _, sk := range c.skills {
+		if sk.Name == name {
+			return sk, true
+		}
+	}
+	return skill.Skill{}, false
 }
 
 // MCPPrompt resolves a "/mcp__server__prompt args…" line: it maps the positional

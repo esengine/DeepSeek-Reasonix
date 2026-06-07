@@ -59,20 +59,22 @@ type Controller struct {
 	sink     event.Sink
 	policy   permission.Policy
 
-	label        string
-	systemPrompt string
-	sessionDir   string
-	host         *plugin.Host
-	commands     []command.Command
-	skills       []skill.Skill
-	allSkills    []skill.Skill
-	hooks        *hook.Runner // session hook runner; nil-safe (no hooks configured)
-	mem          *memory.Set
-	cleanup      func()
-	autoPlan     string
-	classifier   autoPlanClassifier
-	startedOnce  bool              // guards the one-shot SessionStart hook on first turn
-	onRemember   func(rule string) // set via Options; invoked when user picks "always allow"
+	label         string
+	systemPrompt  string
+	sessionDir    string
+	host          *plugin.Host
+	commands      []command.Command
+	skills        []skill.Skill
+	allSkills     []skill.Skill
+	skillStore    *skill.Store
+	allSkillStore *skill.Store
+	hooks         *hook.Runner // session hook runner; nil-safe (no hooks configured)
+	mem           *memory.Set
+	cleanup       func()
+	autoPlan      string
+	classifier    autoPlanClassifier
+	startedOnce   bool              // guards the one-shot SessionStart hook on first turn
+	onRemember    func(rule string) // set via Options; invoked when user picks "always allow"
 
 	// balanceURL/balanceKey target the active provider's optional wallet-balance
 	// endpoint (empty when the provider declares none). Captured at build so a
@@ -160,21 +162,23 @@ type approvalReply struct {
 // lets the controller mint and rotate session files; Host/Commands are surfaced
 // to frontends that resolve MCP prompts and slash commands.
 type Options struct {
-	Runner       agent.Runner
-	Executor     *agent.Agent
-	Sink         event.Sink
-	Policy       permission.Policy
-	Label        string
-	SystemPrompt string
-	SessionDir   string
-	SessionPath  string
-	Host         *plugin.Host
-	Commands     []command.Command
-	Skills       []skill.Skill
-	AllSkills    []skill.Skill
-	Hooks        *hook.Runner
-	Memory       *memory.Set
-	Cleanup      func()
+	Runner        agent.Runner
+	Executor      *agent.Agent
+	Sink          event.Sink
+	Policy        permission.Policy
+	Label         string
+	SystemPrompt  string
+	SessionDir    string
+	SessionPath   string
+	Host          *plugin.Host
+	Commands      []command.Command
+	Skills        []skill.Skill
+	AllSkills     []skill.Skill
+	SkillStore    *skill.Store
+	AllSkillStore *skill.Store
+	Hooks         *hook.Runner
+	Memory        *memory.Set
+	Cleanup       func()
 	// BalanceURL/BalanceKey wire the active provider's optional wallet-balance
 	// endpoint and bearer key; empty when the provider declares no balance_url.
 	BalanceURL    string
@@ -224,6 +228,8 @@ func New(opts Options) *Controller {
 		commands:      opts.Commands,
 		skills:        opts.Skills,
 		allSkills:     opts.AllSkills,
+		skillStore:    opts.SkillStore,
+		allSkillStore: opts.AllSkillStore,
 		hooks:         opts.Hooks,
 		mem:           opts.Memory,
 		cleanup:       opts.Cleanup,
@@ -1467,11 +1473,21 @@ func (c *Controller) Host() *plugin.Host { return c.host }
 func (c *Controller) Commands() []command.Command { return c.commands }
 
 // Skills returns the discoverable skills (for the slash menu and `/skills`).
-func (c *Controller) Skills() []skill.Skill { return c.skills }
+// When a live Store is available, scan it on demand so skills installed during
+// this session appear without rewriting the cache-stable system prompt.
+func (c *Controller) Skills() []skill.Skill {
+	if c.skillStore != nil {
+		return c.skillStore.List()
+	}
+	return c.skills
+}
 
 // AllSkills returns every discoverable skill, including disabled ones, for
 // management surfaces that need to re-enable a hidden skill.
 func (c *Controller) AllSkills() []skill.Skill {
+	if c.allSkillStore != nil {
+		return c.allSkillStore.List()
+	}
 	if len(c.allSkills) > 0 {
 		return c.allSkills
 	}
