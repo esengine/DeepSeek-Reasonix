@@ -12,16 +12,20 @@
                     ┌──────────────────────────────────────┐
                     │        control.Controller 内核        │
                     │    (所有模式共享同一个底层引擎)         │
+                    │   Session +  Snapshot +  Resume       │
                     └──────────────────────────────────────┘
-                               ▲            │
-              ┌────────────────┼────────────┼───────────────┐
-              │                │            │               │
-     ┌────────┴──────┐ ┌──────┴─────┐ ┌─────┴──────┐  ┌───┴────────┐
-     │  ACP (stdio)  │ │ HTTP/SSE   │ │ CLI "run"  │  │ CLI "chat" │
-     │  JSON-RPC 2.0 │ │ REST + SSE │ │ 一次性执行  │  │ TUI 会话   │
-     │  持久会话     │ │ 持久会话   │ │  无状态    │  │ 持久会话   │
-     └───────────────┘ └────────────┘ └────────────┘  └────────────┘
+                      ▲         ▲          ▲         ▲
+                      │         │          │         │
+     ┌─────────────────┼─────────┼──────────┼─────────┼─────────────────┐
+     │                 │         │          │         │                 │
+     │  ACP (stdio)    │  HTTP/SSE         │  CLI "run"    CLI "chat"   │
+     │  JSON-RPC 2.0   │  REST+SSE         │  ❌ 缺少      TUI 会话     │
+     │  ✅ 多会话      │  ✅ 会话持久化    │  会话持久化  ✅ 会话持久化 │
+     │  ✅ 会话持久化  │  ✅ --resume      │  (代码遗漏)  ✅ --continue │
+     └─────────────────┴───────────────────┴──────────────┴─────────────┘
 ```
+
+> **关键纠正**: 会话持久化的基础设施（`agent.Session.Save/Load`、`agent.ListSessions`、`ctrl.Resume`、`ctrl.SetSessionPath`、`ctrl.Snapshot`）由所有模式共享，是 `control.Controller` 内核的一部分。`reasonix run` 之所以"无状态"，**不是架构限制，而是 `runAgent()` 函数没有调用这些 API**——这是个实现漏洞，随时可以补上。相比之下，`chatREPL` 和 `runServe` 都正确调用了这些 API 实现 `--continue`/`--resume`。
 
 ---
 
@@ -165,61 +169,86 @@ POST /delete-session → 删除会话文件
 
 #### 连接方式
 - **传输层**: 一次性进程
-- **一句话描述**: **启动 → 执行一轮 → 退出**，完全无状态
+- **一句话描述**: **启动 → 执行一轮 → 退出**，但基础设施支持会话持久化，只是 `runAgent()` 没有调用
 
 #### 生命周期
 ```bash
 $ reasonix run "为这个项目写一个 README"
   ↓
-  启动 boot.Build → 创建 Controller
+  启动 boot.Build → 创建 Controller（SessionDir 已配置）
   ↓
-  ctrl.Run(ctx, prompt)   # 同步阻塞，等待 Agent 完成一轮
+  ❌ 没有调用 SetSessionPath — 即使配置了 session 目录也不保存
+  ❌ 没有检查 --resume / --continue 参数 — 不支持恢复
+  ↓
+  ctrl.Run(ctx, prompt)   # 同步阻塞
   ↓
   事件流 → TextSink → stdout
   ↓
   ctrl.Close() → 进程退出码 0/1
+  ↓
+  snapshotActivityIfChanged() 被调用，但因 sessionPath=="" 不保存
 ```
 
-#### 关键特征
+#### 与会话持久化模式的代码对比
 
 ```go
-// 核心调用链：
-// 1. setup() — boot.Build() 创建 Controller（同 chat/ACP 一模一样的内核）
-// 2. ctrl.Run(ctx, prompt) — 同步执行一轮（返回后 agent 完成）
-// 3. ctrl.Close() — 清理资源、关闭 MCP 连接
-// 4. os.Exit(0) 或 os.Exit(1)
+// runAgent（目前实现）— 无会话持久化
+ctrl, _ := setup(ctx, model, maxSteps, true, sink)
+// ❌ 缺失：
+//   ctrl.SetSessionPath(agent.NewSessionPath(ctrl.SessionDir(), ctrl.Label()))
+//   ctrl.Resume(loaded, resumePath)
+runErr := ctrl.Run(ctx, prompt)
+
+// chatREPL (TUI) — 有会话持久化
+ctrl, _ := setup(ctx, model, maxSteps, false, sink)
+if resumePath != "" {
+    loaded, _ := agent.LoadSession(resumePath)
+    ctrl.Resume(loaded, resumePath)          // ✅ 恢复已有会话
+} else {
+    ctrl.SetSessionPath(                     // ✅ 新会话自动保存
+        agent.NewSessionPath(ctrl.SessionDir(), ctrl.Label()))
+}
+// 后续所有 turn 自动触发 snapshotActivityIfChanged → Save()
+
+// runServe (HTTP) — 有会话持久化
+ctrl, _ := setup(ctx, model, maxSteps, true, bc)
+if *resume != "" {
+    loaded, _ := agent.LoadSession(*resume)
+    ctrl.Resume(loaded, *resume)             // ✅ 恢复指定文件
+} else if dir := ctrl.SessionDir(); dir != "" {
+    ctrl.SetSessionPath(                     // ✅ 新会话自动保存
+        agent.NewSessionPath(dir, ctrl.Label()))
+}
 ```
 
-- **状态**: **无** — 进程退出后一切消失（除非手动配置 session 持久化）
-- **输入来源**: 命令行参数或 stdin（`echo "hello" | reasonix run`）
-- **输出目标**: stdout（Markdown 渲染）或 pipe（纯文本流）
-- **渲染**: TTY 检测——有终端时 Markdown 渲染，pipe 时纯文本
-- **参数**:
-  - `-model <name>` — 指定模型
-  - `-max-steps <n>` — 限制工具调用轮次
-  - `-show-thinking` — 显示思考过程
-  - `-metrics <path>` — 输出 token/缓存/成本 JSON
-  - `-dir <path>` — 指定工作目录
+#### 参数
+- `-model <name>` — 指定模型
+- `-max-steps <n>` — 限制工具调用轮次
+- `-show-thinking` — 显示思考过程
+- `-metrics <path>` — 输出 token/缓存/成本 JSON
+- `-dir <path>` — 指定工作目录
 
-#### 无法做到的事
+#### 缺失能力的修复代价
 
-| 能力 | 是否支持 | 原因 |
-|------|:--------:|------|
-| 多轮对话 | ❌ | 进程退出了，上下文丢失 |
-| 工具调用审批 | ❌ | 没有交互式审批机制（gate 是静默允许或拒绝）|
-| 用户问答 (`ask` 工具) | ❌ | `Asker` 是 nil，Agent 不能问问题 |
-| 取消执行 | ❌ | 只能通过 Ctrl+C 杀掉进程 |
-| 运行中状态查询 | ❌ | 没有外部可访问的状态端口 |
-| 恢复断电续传 | ❌ | 一次性调用 |
+| 能力 | chat 模式 | serve 模式 | run 模式 | 所需代码行 |
+|:-----|:--------:|:--------:|:--------:|:----------|
+| `--continue` / `-c` 恢复最近会话 | ✅ | ❌ | ❌ | ~10行（加 flag + ListSessions + Resume）|
+| `--resume <path>` 恢复指定文件 | ✅ | ✅ | ❌ | ~8行（加 flag + LoadSession + Resume）|
+| 自动保存本次会话 | ✅ | ✅ | ❌ | ~2行（加 SetSessionPath）|
+| `--list-sessions` 列出可用会话 | ✅（内置） | ✅（/sessions） | ❌ | ~5行 |
+
+**关键结论**: 上述缺失不是架构限制。`agent.Session.Save/Load`、`agent.ListSessions`、`ctrl.Resume()`、`ctrl.SetSessionPath()`、`ctrl.Snapshot()` 这些 API 全部存在且被其他模式使用。`runAgent()` 只是没有调用它们。
 
 ---
 
 ## 3. 功能完备性对照矩阵
 
+> **⚠️ 重要说明**: 下表中的 CLI run 列评估的是**当前代码实现**，不是架构能力。标记为 ❌ 的项中，会话持久化相关（新建/清空/恢复会话等）是 `runAgent()` 没有调用已有 API 导致的实现缺口，基础设施已就绪。
+
 将三种模式与"全部功能"对照，使用以下标识：
 - ✅ **完全支持**  
 - ⚠️ **有限支持**（有变通方案或部分能力）  
-- ❌ **不支持**  
+- ❌ **不支持**（架构限制或代码缺口）
 
 ### 3.1 Agent 核心操作
 
@@ -230,11 +259,11 @@ $ reasonix run "为这个项目写一个 README"
 | 流式接收推理过程 | ✅ | ✅ | ✅ | ACP=agent_thought_chunk, HTTP=SSE reasoning |
 | 工具调用执行与结果 | ✅ | ✅ | ✅ | ACP=tool_call+tool_call_update, HTTP=SSE full events |
 | 取消执行 | ✅ | ✅ | ⚠️ | 仅 Ctrl+C 杀进程 |
-| 新建/清空会话 | ✅ | ✅ | ❌ | CLI run 每次新建 |
+| 新建/清空会话 | ✅ | ✅ | ⚠️ | **代码缺口**: 基础设施就绪（NewSessionPath），runAgent 没调 |
 | 多会话管理 | ✅ | ❌ | ❌ | HTTP 只能同时一个会话 |
-| 会话恢复（进程间） | ✅ | ✅ | ❌ | CLI run 单向输出 |
-| 上下文压缩 | ⚠️ | ✅ | ❌ | ACP 只通知不触发；HTTP 有 POST /compact |
-| plan 模式切换 | ❌ | ✅ | ❌ | ACP 协议无此方法 |
+| 会话恢复（进程间） | ✅ | ✅ | ⚠️ | **代码缺口**: LoadSession + Resume 已实现，runAgent 没调 |
+| 上下文压缩 | ⚠️ | ✅ | ❌ | run 只有一轮，压缩不相关 |
+| plan 模式切换 | ❌ | ✅ | ❌ | ACP 协议无此方法，run 只有一轮 |
 
 ### 3.2 交互能力
 
@@ -482,19 +511,21 @@ Go 服务（核心）         非 Go 服务（客户端）
 | 核心需求 | ACP | HTTP/SSE | CLI run | Go 库 |
 |:---------|:---:|:--------:|:-------:|:-----:|
 | 执行一轮 | ✅ | ✅ | ✅ | ✅ |
-| 多轮对话 | ✅ | ✅ | ❌ | ✅ |
+| 多轮对话 | ✅ | ✅ | ⚠️ | ✅ |
 | 流式输出 | ✅ | ✅ | ✅ | ✅ |
 | 权限审批 | ✅ | ✅ | ❌ | ✅ |
 | 用户问答 | ❌ | ✅ | ❌ | ✅ |
 | 多会话并发 | ✅ | ❌ | ❌ | ✅ |
-| 会话持久化 | ✅ | ✅ | ❌ | ✅ |
+| 会话持久化 | ✅ | ✅ | ⚠️ | ✅ |
 | 检查点/回退 | ❌ | ✅ | ❌ | ✅ |
 | 模型切换 | ❌ | ✅ | ❌ | ✅ |
 | plan 模式 | ❌ | ✅ | ❌ | ✅ |
 | 远程调用 | ❌ | ✅ | ❌ | ❌（与 Go 耦合）|
 | 跨语言 | ✅ | ✅ | ✅ | ❌（仅 Go）|
 | 类型安全 | ⚠️ | ⚠️ | ❌ | ✅ |
-| 完整功能覆盖 | ~60% | ~85% | ~25% | **~100%** |
+| 完整功能覆盖 | ~60% | ~85% | ~30%* | **~100%** |
+
+> **注**: CLI run 的 ~30% 是基于**当前代码**。其中会话持久化（自动保存、`--continue`、`--resume`）是代码缺失而非架构限制——补上约 20 行代码后覆盖率可接近 chat 模式的 ~75%。交互能力（审批、ask）才是真正的架构限制，因为 run 的定位就是非交互式。
 
 ---
 
@@ -511,7 +542,12 @@ Go 服务（核心）         非 Go 服务（客户端）
 
 4. **如果功能完整性的某个缺口阻塞了你**，那这就是去给那个模式补代码的机会——所有模式共享同一个 `control.Controller` 内核，新功能在内核中实现后，再在各模式的 adapter 层暴露即可。
 
-5. **最坏的选择是 CLI `reasonix run`**（除了最简单的一次性脚本）。
+5. **`reasonix run` 的会话持久化缺口是代码遗漏，随时可补**。需要做的只是：
+   - 加 `--continue` / `-c` flag：调用 `agent.ListSessions()` 取最新会话 → `ctrl.Resume()`（~10行）
+   - 加 `--resume <path>` flag：调用 `agent.LoadSession(path)` → `ctrl.Resume()`（~8行）
+   - 默认自动保存：加一行 `ctrl.SetSessionPath(agent.NewSessionPath(...))`（~2行）
+   
+   补齐后，`reasonix run` 就不再是"一次性脚本"工具，而是一个完整的一轮会话执​​行者，可以继续已中断的工作。
 
 ---
 
