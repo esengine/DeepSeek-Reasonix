@@ -244,6 +244,7 @@ export const en = {
   "composer.confirmRemoveProject": "Click again to confirm",
   "composer.cannotRemoveCurrent": "The current workspace cannot be removed",
   "composer.removeCurrentProjectDisabled": "Current project cannot be removed",
+  "composer.resize": "Drag to resize composer, double-click to reset",
   "composer.send": "Send (Enter)",
   "composer.stop": "Stop (Esc)",
   "composer.stopShort": "Stop",
@@ -431,9 +432,13 @@ export const en = {
   "memory.missingLinks": "{n} missing linked memory",
   "memory.appliesNow": "Changes apply in this session.",
   "memory.storedUnder": "stored under {dir}",
+
   "memory.forget": "Forget",
   "memory.confirmForget": "Confirm forget",
   "memory.deadLink": "No memory named “{name}”",
+
+  "memory.filterPlaceholder": "Filter docs and facts…",
+  "memory.noFilterMatch": "Nothing matches the current filter.",
 
   // settings drawer
   "settings.title": "Settings",

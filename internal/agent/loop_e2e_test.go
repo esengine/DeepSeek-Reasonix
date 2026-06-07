@@ -78,6 +78,78 @@ func TestRunCancelledMidStreamLeavesResumableSession(t *testing.T) {
 	}
 }
 
+func TestRunRecoversInterruptedStreamAfterPartialText(t *testing.T) {
+	interrupted := &provider.StreamInterruptedError{Err: errors.New("deepseek-flash: read stream: unexpected EOF")}
+	mp := testutil.NewMock("m",
+		testutil.Turn{Text: "partial ", ChunkError: interrupted},
+		testutil.Turn{Text: "continued"},
+	)
+	sink := &recordSink{}
+	a := New(mp, echoRegistry(), NewSession(""), Options{}, sink)
+
+	if err := a.Run(context.Background(), "go"); err != nil {
+		t.Fatalf("Run should recover the interrupted stream, got %v", err)
+	}
+	if mp.CallCount() != 2 {
+		t.Fatalf("provider calls = %d, want 2", mp.CallCount())
+	}
+
+	reqs := mp.Requests()
+	if len(reqs) != 2 {
+		t.Fatalf("recorded requests = %d, want 2", len(reqs))
+	}
+	second := reqs[1].Messages
+	if len(second) < 3 {
+		t.Fatalf("second request should include partial assistant and recovery prompt: %+v", second)
+	}
+	if second[len(second)-2].Role != provider.RoleAssistant || second[len(second)-2].Content != "partial " {
+		t.Fatalf("partial assistant was not preserved before recovery: %+v", second)
+	}
+	if second[len(second)-1].Role != provider.RoleUser || !strings.Contains(second[len(second)-1].Content, "Do not repeat") {
+		t.Fatalf("recovery prompt missing duplicate guard: %+v", second[len(second)-1])
+	}
+
+	var streamed strings.Builder
+	for _, e := range sink.kinds(event.Text) {
+		streamed.WriteString(e.Text)
+	}
+	if streamed.String() != "partial continued" {
+		t.Fatalf("streamed text = %q, want %q", streamed.String(), "partial continued")
+	}
+	retries := sink.kinds(event.Retrying)
+	if len(retries) != 1 || retries[0].RetryAttempt != 1 || retries[0].RetryMax != maxStreamRecoveries {
+		t.Fatalf("retry events = %+v, want one stream recovery retry", retries)
+	}
+}
+
+func TestRunRecoversInterruptedPartialToolCallWithoutExecutingIt(t *testing.T) {
+	interrupted := &provider.StreamInterruptedError{Err: errors.New("deepseek-flash: read stream: unexpected EOF")}
+	mp := testutil.NewMock("m",
+		testutil.Turn{Chunks: []provider.Chunk{
+			{Type: provider.ChunkToolCallStart, ToolCall: &provider.ToolCall{ID: "c1", Name: "echo"}},
+			{Type: provider.ChunkError, Err: interrupted},
+		}},
+		testutil.Turn{Text: "recovered"},
+	)
+	a := New(mp, echoRegistry(), NewSession(""), Options{}, event.Discard)
+
+	if err := a.Run(context.Background(), "go"); err != nil {
+		t.Fatalf("Run should recover the interrupted tool-call stream, got %v", err)
+	}
+
+	for _, m := range a.Session().Messages {
+		if m.Role == provider.RoleTool {
+			t.Fatalf("partial tool call should not have executed or produced a tool result: %+v", m)
+		}
+	}
+	reqs := mp.Requests()
+	second := reqs[1].Messages
+	last := second[len(second)-1]
+	if last.Role != provider.RoleUser || !strings.Contains(last.Content, "fresh complete tool call") {
+		t.Fatalf("partial-tool recovery prompt missing fresh-call instruction: %+v", last)
+	}
+}
+
 // TestRunWellFormedToolLoopRoundTrips is the happy-path baseline: a tool round
 // then a final answer. The session must end with the assistant answer and pair
 // cleanly (the repair is a no-op on well-formed histories).

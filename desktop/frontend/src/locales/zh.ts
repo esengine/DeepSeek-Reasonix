@@ -245,6 +245,7 @@ export const zh: Record<DictKey, string> = {
   "composer.confirmRemoveProject": "再次点击以确认",
   "composer.cannotRemoveCurrent": "当前工作区不能移除",
   "composer.removeCurrentProjectDisabled": "不能移除当前项目",
+  "composer.resize": "拖动调整输入区高度，双击重置",
   "composer.send": "发送（Enter）",
   "composer.stop": "停止（Esc）",
   "composer.stopShort": "停止",
@@ -432,9 +433,14 @@ export const zh: Record<DictKey, string> = {
   "memory.missingLinks": "{n} 条互链目标不存在",
   "memory.appliesNow": "变更会在当前会话生效。",
   "memory.storedUnder": "存放于 {dir}",
+
   "memory.forget": "删除",
   "memory.confirmForget": "确认删除",
   "memory.deadLink": "没有名为「{name}」的记忆",
+
+  "memory.filterPlaceholder": "筛选指令文件与记忆…",
+  "memory.noFilterMatch": "没有匹配当前筛选的内容。",
+
 
   // 设置抽屉
   "settings.title": "设置",

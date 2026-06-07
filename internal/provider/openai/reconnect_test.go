@@ -2,6 +2,7 @@ package openai
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -100,12 +101,15 @@ func TestStreamDoesNotReplayAfterOutput(t *testing.T) {
 
 	var text strings.Builder
 	var gotErr bool
+	var gotInterrupted bool
 	for chunk := range ch {
 		switch chunk.Type {
 		case provider.ChunkText:
 			text.WriteString(chunk.Text)
 		case provider.ChunkError:
 			gotErr = true
+			var interrupted *provider.StreamInterruptedError
+			gotInterrupted = errors.As(chunk.Err, &interrupted)
 		}
 	}
 	if text.String() != "partial" {
@@ -113,6 +117,9 @@ func TestStreamDoesNotReplayAfterOutput(t *testing.T) {
 	}
 	if !gotErr {
 		t.Error("a reset after output should surface a ChunkError")
+	}
+	if !gotInterrupted {
+		t.Error("a reset after output should be marked as a stream interruption")
 	}
 	if reqs != 1 {
 		t.Errorf("server saw %d requests, want 1 (no replay after output)", reqs)

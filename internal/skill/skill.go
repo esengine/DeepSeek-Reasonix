@@ -74,6 +74,7 @@ type Options struct {
 	HomeDir         string
 	ProjectRoot     string
 	CustomPaths     []string
+	ExcludedPaths   []string
 	DisabledNames   []string
 	MaxDepth        int
 	DisableBuiltins bool // suppress shipped built-ins (test-only knob)
@@ -88,6 +89,7 @@ type Store struct {
 	homeDir         string
 	projectRoot     string
 	customPaths     []string
+	excludedPaths   map[string]bool
 	disabled        map[string]bool
 	maxDepth        int
 	disableBuiltins bool
@@ -116,6 +118,10 @@ func New(opts Options) *Store {
 		}
 	}
 	custom := dedupePaths(resolveCustomPaths(opts.CustomPaths, base, home))
+	excluded := map[string]bool{}
+	for _, p := range dedupePaths(resolveCustomPaths(opts.ExcludedPaths, base, home)) {
+		excluded[config.CanonicalSkillPath(p)] = true
+	}
 	stderr := opts.Stderr
 	if stderr == nil {
 		stderr = os.Stderr
@@ -124,6 +130,7 @@ func New(opts Options) *Store {
 		homeDir:         home,
 		projectRoot:     root,
 		customPaths:     custom,
+		excludedPaths:   excluded,
 		disabled:        disabledNameSet(opts.DisabledNames),
 		maxDepth:        normalizeMaxDepth(opts.MaxDepth),
 		disableBuiltins: opts.DisableBuiltins,
@@ -173,9 +180,12 @@ func (s *Store) roots() []Root {
 	for _, c := range config.ConventionDirs {
 		dirs = append(dirs, de{filepath.Join(s.homeDir, c, SkillsDirname), ScopeGlobal})
 	}
-	out := make([]Root, len(dirs))
-	for i, d := range dirs {
-		out[i] = Root{Dir: d.dir, Scope: d.scope, Priority: i, Status: pathStatus(d.dir)}
+	out := make([]Root, 0, len(dirs))
+	for _, d := range dirs {
+		if s.excludedPaths[config.CanonicalSkillPath(d.dir)] {
+			continue
+		}
+		out = append(out, Root{Dir: d.dir, Scope: d.scope, Priority: len(out), Status: pathStatus(d.dir)})
 	}
 	return out
 }

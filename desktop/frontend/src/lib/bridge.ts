@@ -82,6 +82,7 @@ export interface AppBindings {
   SubmitDisplay(display: string, input: string): Promise<void>;
   SubmitDisplayToTab(tabID: string, display: string, input: string): Promise<void>;
   RunShell(command: string): Promise<void>;
+  RunShellForTab(tabID: string, command: string): Promise<void>;
   Cancel(): Promise<void>;
   CancelTab(tabID: string): Promise<void>;
   Approve(id: string, allow: boolean, session: boolean, persist: boolean): Promise<void>;
@@ -363,6 +364,12 @@ function baseName(path: string): string {
   return path.replace(/[/\\]+$/, "").split(/[/\\]/).filter(Boolean).pop() ?? path;
 }
 
+function browserPlatformOverride(): "darwin" | "windows" | "linux" | "" {
+  if (typeof window === "undefined" || window.runtime) return "";
+  const value = new URLSearchParams(window.location.search).get("platform");
+  return value === "darwin" || value === "windows" || value === "linux" ? value : "";
+}
+
 function mockScenario(): "demo" | "fresh" {
   if (typeof window === "undefined") return "demo";
   const value = new URLSearchParams(window.location.search).get("mock")?.trim().toLowerCase();
@@ -433,13 +440,14 @@ function makeMockApp(): AppBindings {
     { name: "init", description: "Scaffold a REASONIX.md for this repo", scope: "builtin", runAs: "inline", enabled: true },
   ];
   let capSkillRoots: SkillRootView[] = [
-    { dir: "~/projects/reasonix/.reasonix/skills", scope: "project", priority: 1, status: "missing", configured: false, skills: 0 },
+    { dir: "~/projects/reasonix/.reasonix/skills", scope: "project", priority: 1, status: "missing", configured: false, removable: true, skills: 0 },
     {
       dir: "~/my-skills",
       scope: "custom",
       priority: 5,
       status: "ok",
       configured: true,
+      removable: true,
       skills: 1,
       skillItems: [{ name: "review", description: "Review the staged diff", scope: "custom", runAs: "inline" }],
     },
@@ -449,6 +457,7 @@ function makeMockApp(): AppBindings {
       priority: 6,
       status: "ok",
       configured: false,
+      removable: true,
       skills: 2,
       skillItems: [
         { name: "explore", description: "Investigate the codebase in an isolated subagent", scope: "global", runAs: "subagent" },
@@ -689,6 +698,8 @@ function makeMockApp(): AppBindings {
   ];
   return {
     async Platform() {
+      const override = browserPlatformOverride();
+      if (override) return override;
       // Mirror the OS the browser dev mock runs on.
       const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
       if (/Win/i.test(ua)) return "windows";
@@ -894,6 +905,9 @@ function makeMockApp(): AppBindings {
           if (cancelled) return;
           emit({ kind: "tool_result", tool: { id, name: "bash", output: `$ ${command}\n(mock output)\n`, readOnly: false, durationMs: 300 } });
           emit({ kind: "turn_done" });
+        },
+        async RunShellForTab(_tabID, command) {
+          await this.RunShell(command);
         },
         async Cancel() {
           cancelled = true;
@@ -1194,6 +1208,7 @@ function makeMockApp(): AppBindings {
           priority: capSkillRoots.length + 1,
           status: "ok",
           configured: true,
+          removable: true,
           skills: 1,
           skillItems: [{ name: "local-dev", description: "Local custom development workflow", scope: "custom", runAs: "inline" }],
         });
@@ -1203,7 +1218,7 @@ function makeMockApp(): AppBindings {
       }
     },
     async RemoveSkillPath(path: string) {
-      capSkillRoots = capSkillRoots.filter((r) => !(r.scope === "custom" && r.dir === path));
+      capSkillRoots = capSkillRoots.filter((r) => r.dir !== path);
       if (!capSkillRoots.some((r) => r.scope === "custom")) {
         const idx = capSkills.findIndex((s) => s.name === "local-dev");
         if (idx >= 0) capSkills.splice(idx, 1);

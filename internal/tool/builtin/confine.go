@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"reasonix/internal/sandbox"
 	"reasonix/internal/tool"
@@ -12,8 +13,12 @@ import (
 // ConfineBash returns the bash built-in bound to an OS-sandbox spec, overriding
 // the unconfined instance registered at init. When the spec enforces, bash runs
 // each command through the sandbox (see package sandbox).
-func ConfineBash(spec sandbox.Spec) tool.Tool {
-	return bash{sb: spec, shell: sandbox.ResolveShell()}
+func ConfineBash(spec sandbox.Spec, timeout ...time.Duration) tool.Tool {
+	b := bash{sb: spec, shell: sandbox.ResolveShell()}
+	if len(timeout) > 0 {
+		b.timeout = timeout[0]
+	}
+	return b
 }
 
 // ConfineWriters returns the file-writing built-ins (write_file, edit_file,

@@ -114,7 +114,7 @@ const builtinTestBody = `This skill is INLINED — you run in the parent loop. T
 
 How to operate:
 1. Detect the test command. Look at the project: go.mod → ` + "`go test ./...`" + `; package.json scripts.test → ` + "`npm test`" + ` (or pnpm/yarn); pyproject.toml/requirements.txt → ` + "`pytest`" + `; Cargo.toml → ` + "`cargo test`" + `. If you can't tell, ASK — don't guess.
-2. Run it via bash (timeout ~120s, more for a big suite). Capture stdout + stderr.
+2. Run it via bash. Capture stdout + stderr; for intentionally long-running commands, start them in the background and use wait/bash_output.
 3. Read the failures: which tests failed, the actual error, the file + line that threw. Locate the exact assertion or stack frame.
 4. Fix each distinct failure:
    - Production bug (test caught a real defect) → fix the production code.

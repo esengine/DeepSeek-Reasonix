@@ -107,6 +107,7 @@ effort         = "high"
 
 [tools]
 enabled = []   # empty = all built-in tools
+bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local cap
 
 # CodeGraph code intelligence (symbol/call-graph search via tree-sitter + SQLite),
 # a built-in MCP server giving the agent codegraph_* search / context / explore /
@@ -126,6 +127,7 @@ enabled = []   # empty = all built-in tools
 # invoke them via /<name>. Manage with /skill (list, show, enable, disable, new, paths).
 # [skills]
 # paths = ["~/my-skills", "../shared/skills"]   # extra "custom"-scope skill roots
+# excluded_paths = ["~/.agents/skills"]         # hide convention roots without deleting folders
 # disabled_skills = ["review"]                  # hide from prompt, slash invocation, and skill tools
 
 # Hooks run shell commands around the loop (PreToolUse / PostToolUse /

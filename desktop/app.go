@@ -371,7 +371,7 @@ func (a *App) restoreOrBuildTabs() {
 		}
 		a.mu.Unlock()
 		for _, tab := range toBuild {
-			go a.buildTabController(tab)
+			a.startTabControllerBuild(tab)
 		}
 		return
 	}
@@ -385,7 +385,7 @@ func (a *App) restoreOrBuildTabs() {
 	a.tabOrder = append(a.tabOrder, tab.ID)
 	a.activeTabID = tab.ID
 	a.mu.Unlock()
-	go a.buildTabController(tab)
+	a.startTabControllerBuild(tab)
 }
 
 func (a *App) createTabEntry(scope, workspaceRoot, topicID string) *WorkspaceTab {
@@ -509,7 +509,11 @@ func (a *App) SubmitToTab(tabID, input string) {
 // RunShell executes a shell command directly (bypassing the model) and streams
 // output as events on eventChannel.
 func (a *App) RunShell(command string) {
-	if ctrl := a.activeCtrl(); ctrl != nil {
+	a.RunShellForTab("", command)
+}
+
+func (a *App) RunShellForTab(tabID, command string) {
+	if ctrl := a.ctrlByTabID(tabID); ctrl != nil {
 		ctrl.RunShell(command)
 	}
 }
@@ -794,7 +798,7 @@ func (a *App) Fork(turn int) (TabMeta, error) {
 	a.mu.Unlock()
 
 	a.emitProjectTreeChanged()
-	go a.buildTabController(tab)
+	a.startTabControllerBuild(tab)
 	return meta, nil
 }
 
@@ -1702,6 +1706,7 @@ type SkillRootView struct {
 	Priority   int                  `json:"priority"`
 	Status     string               `json:"status"`
 	Configured bool                 `json:"configured"`
+	Removable  bool                 `json:"removable"`
 	Skills     int                  `json:"skills"`
 	SkillItems []SkillRootSkillView `json:"skillItems,omitempty"`
 	Warning    string               `json:"warning,omitempty"`
@@ -1886,12 +1891,14 @@ func skillRootsView() []SkillRootView {
 	cfg, _ := config.Load()
 	userCfg := config.LoadForEdit(config.UserConfigPath())
 	var custom []string
+	var excluded []string
 	maxDepth := 3
 	if cfg != nil {
 		custom = cfg.SkillCustomPaths()
+		excluded = cfg.SkillExcludedPaths()
 		maxDepth = cfg.SkillMaxDepth()
 	}
-	st := skill.New(skill.Options{ProjectRoot: cwd, CustomPaths: custom, MaxDepth: maxDepth, DisableBuiltins: true, Stderr: io.Discard})
+	st := skill.New(skill.Options{ProjectRoot: cwd, CustomPaths: custom, ExcludedPaths: excluded, MaxDepth: maxDepth, DisableBuiltins: true, Stderr: io.Discard})
 	counts := map[string]int{}
 	skillItems := map[string][]SkillRootSkillView{}
 	roots := st.Roots()
@@ -1925,6 +1932,7 @@ func skillRootsView() []SkillRootView {
 			Priority:   r.Priority + 1,
 			Status:     string(r.Status),
 			Configured: r.Scope == skill.ScopeCustom && userConfigured[dir],
+			Removable:  true,
 			Skills:     counts[dir],
 			SkillItems: skillItems[dir],
 		}
@@ -1940,6 +1948,7 @@ func skillRootsView() []SkillRootView {
 				Scope:      string(skill.ScopeCustom),
 				Status:     "inactive",
 				Configured: true,
+				Removable:  true,
 				Warning:    "configured in user config but not active in this workspace; project [skills].paths may override it",
 			})
 		}
@@ -1978,17 +1987,25 @@ func (a *App) PickSkillFolder() (string, error) {
 // controller so the skills index and slash menu reflect it immediately.
 func (a *App) AddSkillPath(path string) error {
 	path = normalizeSkillPath(path)
+	workspaceRoot := a.activeWorkspaceRoot()
 	return a.applyConfigChange(func(c *config.Config) error {
+		if isConventionSkillRoot(path, workspaceRoot) {
+			return c.RestoreSkillPath(path)
+		}
 		return c.AddSkillPath(path)
 	})
 }
 
-// RemoveSkillPath removes a custom skill root from the user config and rebuilds.
+// RemoveSkillPath removes a skill source from the user config and rebuilds. For
+// convention roots, it records a pseudo-delete in excluded_paths.
 func (a *App) RemoveSkillPath(path string) error {
 	path = normalizeSkillPath(path)
 	return a.applyConfigChange(func(c *config.Config) error {
-		_, err := c.RemoveSkillPath(path)
-		return err
+		removed, err := c.RemoveSkillPath(path)
+		if err != nil || removed {
+			return err
+		}
+		return c.ExcludeSkillPath(path)
 	})
 }
 
@@ -2039,6 +2056,29 @@ func normalizeSkillPath(path string) string {
 		}
 	}
 	return filepath.Clean(path)
+}
+
+func isConventionSkillRoot(path, workspaceRoot string) bool {
+	want := config.CanonicalSkillPath(path)
+	if want == "" {
+		return false
+	}
+	bases := []string{workspaceRoot}
+	if home, err := os.UserHomeDir(); err == nil {
+		bases = append(bases, home)
+	}
+	for _, base := range bases {
+		base = strings.TrimSpace(base)
+		if base == "" {
+			continue
+		}
+		for _, dir := range config.ConventionDirs {
+			if want == config.CanonicalSkillPath(filepath.Join(base, dir, skill.SkillsDirname)) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func skillRootPath(path string) string {
@@ -2921,8 +2961,31 @@ type WorkspaceChangesView struct {
 	GitErr       string                `json:"gitErr,omitempty"`
 }
 
-// atSkip are entries the file tree and "@" menu hide as local workspace noise.
-var atSkip = map[string]bool{".git": true, ".codegraph": true, "node_modules": true, ".DS_Store": true}
+// workspaceNoiseNames are local cache/vendor entries hidden from the file tree
+// and "@" menu regardless of where they appear.
+var workspaceNoiseNames = map[string]bool{
+	".codex":       true,
+	".codegraph":   true,
+	".DS_Store":    true,
+	".git":         true,
+	".npm":         true,
+	".pnpm-store":  true,
+	"node_modules": true,
+	"Thumbs.db":    true,
+}
+
+var workspaceNoiseDirs = map[string]bool{
+	"bin":                      true,
+	"desktop/build":            true,
+	"desktop/frontend/dist":    true,
+	"desktop/frontend/wailsjs": true,
+	"dist":                     true,
+	"npm/.stage":               true,
+	"site/.astro":              true,
+	"site/dist":                true,
+	"stage":                    true,
+	"tmp":                      true,
+}
 
 const filePreviewLimit = 256 * 1024
 const fileRefSearchLimit = 20
@@ -2966,6 +3029,21 @@ func previewMediaKind(path string) (kind string, mime string) {
 		return "pdf", mime
 	}
 	return "", ""
+}
+
+func workspaceEntryRel(rel, name string) string {
+	rel = strings.Trim(filepath.ToSlash(rel), "/")
+	if rel == "" || rel == "." {
+		return name
+	}
+	return rel + "/" + name
+}
+
+func skipWorkspaceEntry(rel, name string, isDir bool) bool {
+	if workspaceNoiseNames[name] {
+		return true
+	}
+	return isDir && workspaceNoiseDirs[workspaceEntryRel(rel, name)]
 }
 
 func (a *App) activeWorkspaceBase() (string, error) {
@@ -3039,7 +3117,7 @@ func (a *App) ListDir(rel string) []DirEntry {
 	dirs, files := []DirEntry{}, []DirEntry{}
 	for _, e := range es {
 		name := e.Name()
-		if atSkip[name] {
+		if skipWorkspaceEntry(rel, name, e.IsDir()) {
 			continue
 		}
 		if e.IsDir() {

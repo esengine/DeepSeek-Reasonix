@@ -26,6 +26,7 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	orig.Agent.AutoPlanClassifier = "deepseek-flash"
 	orig.Agent.SubagentModel = "mimo-pro"
 	orig.Agent.SubagentModels = map[string]string{"review": "deepseek-pro"}
+	orig.Tools.BashTimeoutSeconds = intPtr(900)
 	orig.Permissions = PermissionsConfig{
 		Mode:  "deny",
 		Deny:  []string{"bash(rm -rf*)"},
@@ -43,6 +44,7 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 		},
 	}
 	orig.Skills.Paths = []string{"~/my-skills", "../shared/skills"}
+	orig.Skills.ExcludedPaths = []string{"~/.agents/skills"}
 	orig.Skills.DisabledSkills = []string{"review", "explore"}
 	orig.Skills.MaxDepth = 2
 	orig.Codegraph = CodegraphConfig{Enabled: true, AutoInstall: false, Path: "/opt/codegraph", Tier: "background"}
@@ -135,6 +137,9 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	if got.Agent.SubagentModels["review"] != "deepseek-pro" {
 		t.Errorf("subagent_models.review = %q, want deepseek-pro", got.Agent.SubagentModels["review"])
 	}
+	if got.Tools.BashTimeoutSeconds == nil || *got.Tools.BashTimeoutSeconds != 900 {
+		t.Errorf("tools.bash_timeout_seconds = %v, want 900", got.Tools.BashTimeoutSeconds)
+	}
 	if g, _ := got.Provider("mimo-pro"); g == nil || g.BaseURL != "http://localhost:8000/v1" || g.ReasoningProtocol != "openai" {
 		t.Errorf("mimo-pro base_url not preserved: %+v", g)
 	}
@@ -158,6 +163,9 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	}
 	if len(got.Skills.Paths) != 2 || got.Skills.Paths[0] != "~/my-skills" {
 		t.Errorf("skills.paths = %v", got.Skills.Paths)
+	}
+	if len(got.Skills.ExcludedPaths) != 1 || got.Skills.ExcludedPaths[0] != "~/.agents/skills" {
+		t.Errorf("skills.excluded_paths = %v", got.Skills.ExcludedPaths)
 	}
 	if len(got.Skills.DisabledSkills) != 2 || got.Skills.DisabledSkills[0] != "review" || got.Skills.DisabledSkills[1] != "explore" {
 		t.Errorf("skills.disabled_skills = %v", got.Skills.DisabledSkills)
@@ -249,3 +257,5 @@ func TestProjectRenderPreservesNonDefaultLegacySections(t *testing.T) {
 }
 
 func boolPtr(v bool) *bool { return &v }
+
+func intPtr(v int) *int { return &v }
