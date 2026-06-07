@@ -15,8 +15,10 @@ type CapTab = "servers" | "skills";
 
 export function CapabilitiesPanel({
   onClose,
+  initialTab = "servers",
 }: {
   onClose: () => void;
+  initialTab?: CapTab;
 }) {
   const t = useT();
   const [view, setView] = useState<CapabilitiesView | null>(null);
@@ -24,7 +26,7 @@ export function CapabilitiesPanel({
   const [err, setErr] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
-  const [tab, setTab] = useState<CapTab>("servers");
+  const [tab, setTab] = useState<CapTab>(initialTab);
   const [skillQuery, setSkillQuery] = useState("");
   const [expandedSkills, setExpandedSkills] = useState<Set<string>>(() => new Set());
   const [expandedErrors, setExpandedErrors] = useState<Set<string>>(() => new Set());

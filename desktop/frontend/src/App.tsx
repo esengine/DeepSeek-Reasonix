@@ -81,6 +81,7 @@ const RIGHT_DOCK_PREVIEW_DEFAULT_WIDTH = 640;
 const RIGHT_DOCK_MAX_WIDTH = 860;
 
 type RightDockMode = "context" | "files" | "changed";
+type CapabilitiesInitialTab = "servers" | "skills";
 const SHOW_CONTEXT_DOCK = false;
 type HistoryScopeFilter = { scope: "global" | "project"; workspaceRoot: string };
 type HistoryViewState =
@@ -380,6 +381,7 @@ export default function App() {
   const [composerInsertRequest, setComposerInsertRequest] = useState<ComposerInsertRequest | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [capsOpen, setCapsOpen] = useState(false);
+  const [capsInitialTab, setCapsInitialTab] = useState<CapabilitiesInitialTab>("servers");
   const [renamingTopicId, setRenamingTopicId] = useState<string | null>(null);
   const [topicTitleDraft, setTopicTitleDraft] = useState("");
   const [topicExportOpen, setTopicExportOpen] = useState(false);
@@ -1705,14 +1707,24 @@ export default function App() {
         <SettingsPanel
           onClose={() => setSettingsOpen(false)}
           onChanged={() => void refreshMeta()}
-          onManageCapabilities={() => {
+          onManageMcp={() => {
             setSettingsOpen(false);
+            setCapsInitialTab("servers");
             setCapsOpen(true);
+          }}
+          onManageSkills={() => {
+            setSettingsOpen(false);
+            setCapsInitialTab("skills");
+            setCapsOpen(true);
+          }}
+          onManageMemory={() => {
+            setSettingsOpen(false);
+            void openMemory();
           }}
         />
       )}
 
-      {capsOpen && <CapabilitiesPanel onClose={() => setCapsOpen(false)} />}
+      {capsOpen && <CapabilitiesPanel initialTab={capsInitialTab} onClose={() => setCapsOpen(false)} />}
 
       {startupSplashVisible && (
         <StartupSplash hold={startupSplashHold} onDone={() => setStartupSplashVisible(false)} />
