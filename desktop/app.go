@@ -2704,8 +2704,8 @@ type WorkspaceChangesView struct {
 	GitErr       string                `json:"gitErr,omitempty"`
 }
 
-// atSkip are entries the "@" menu hides as noise.
-var atSkip = map[string]bool{".git": true, "node_modules": true, ".DS_Store": true}
+// atSkip are entries the file tree and "@" menu hide as local workspace noise.
+var atSkip = map[string]bool{".git": true, ".codegraph": true, "node_modules": true, ".DS_Store": true}
 
 const filePreviewLimit = 256 * 1024
 const fileRefSearchLimit = 20

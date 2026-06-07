@@ -356,16 +356,31 @@ func TestSearchFileRefsFindsNestedBasename(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "node_modules", "pkg", "runtime.js"), []byte("noise"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.MkdirAll(filepath.Join(dir, ".codegraph", "cache"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".codegraph", "cache", "runtime.js"), []byte("index"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Chdir(dir); err != nil {
 		t.Fatal(err)
 	}
 
-	got := (&App{}).SearchFileRefs("runtime.js")
+	app := &App{}
+	listed := app.ListDir("")
+	if hasDirEntry(listed, ".codegraph") {
+		t.Fatalf("ListDir should hide CodeGraph project index, got %+v", listed)
+	}
+
+	got := app.SearchFileRefs("runtime.js")
 	if !hasDirEntry(got, "frontend/wailsjs/runtime/runtime.js") {
 		t.Fatalf("SearchFileRefs(runtime.js) should find nested workspace file, got %+v", got)
 	}
 	if hasDirEntry(got, "node_modules/pkg/runtime.js") {
 		t.Fatalf("SearchFileRefs should skip node_modules noise, got %+v", got)
+	}
+	if hasDirEntry(got, ".codegraph/cache/runtime.js") {
+		t.Fatalf("SearchFileRefs should skip CodeGraph project index, got %+v", got)
 	}
 }
 
