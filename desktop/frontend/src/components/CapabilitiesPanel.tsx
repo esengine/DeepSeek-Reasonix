@@ -1219,7 +1219,11 @@ function SkillRow({
         </Tooltip>
       </div>
       <div className="cap-skill-card__desc">{expanded ? skill.description : summary}</div>
-      {canExpand && <div className="cap-skill-card__more">{expanded ? t("common.collapse") : t("common.expand")}</div>}
+      {canExpand && (
+        <button className="cap-skill-card__more" type="button" onClick={onToggle} aria-expanded={expanded}>
+          {expanded ? t("common.collapse") : t("common.expand")}
+        </button>
+      )}
     </div>
   );
 }
