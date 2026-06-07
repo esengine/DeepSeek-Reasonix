@@ -1,5 +1,12 @@
 name: Release
 
+# CLI binary line. Tag namespace `v<semver>` triggers this — it builds the
+# release archives + checksums, publishes the GitHub release, and updates the
+# Homebrew cask. npm is a SEPARATE line (release-npm.yml, `npm-v*`) so an npm
+# prerelease can ship without forcing the stable cask, and vice versa; desktop is
+# `desktop-v*` (release-desktop.yml). A prerelease `v*-rc*` still builds archives
+# and a prerelease GitHub release, but goreleaser auto-skips the cask upload
+# (brew has no prerelease channel — see .goreleaser.yaml).
 on:
   push:
     tags: ['v*']
@@ -38,21 +45,3 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-
-  npm:
-    name: publish npm packages
-    needs: cache-guard
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          registry-url: 'https://registry.npmjs.org'
-      - run: node npm/build.mjs "${GITHUB_REF_NAME}" --publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
