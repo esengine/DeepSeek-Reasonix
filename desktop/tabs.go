@@ -152,6 +152,11 @@ func (s *tabEventSink) Emit(e event.Event) {
 			s.app.emitProjectTreeChanged()
 		}
 	}
+	// Emit a dedicated "generation complete" event so the frontend can play a
+	// success sound without mis-firing on tab switches.
+	if e.Kind == event.TurnDone && s.ctx != nil {
+		runtime.EventsEmit(s.ctx, "agent:turn-done")
+	}
 	// Record read_file successes in the tab's telemetry.
 	if e.Kind == event.ToolResult && e.Tool.Name == "read_file" && e.Tool.Err == "" {
 		s.recordReadTelemetry(e)

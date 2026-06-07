@@ -319,6 +319,14 @@ export function onProjectTreeChanged(cb: () => void): () => void {
   return () => {};
 }
 
+/** Fires when any topic's generation finishes (TurnDone). Used for sound. */
+export function onTurnDone(cb: () => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn("agent:turn-done", () => cb());
+  }
+  return () => {};
+}
+
 // app proxies each call to the live binding (or the dev mock only when truly
 // outside the shell), so a late-injected window.go is picked up transparently.
 export const app: AppBindings = new Proxy({} as AppBindings, {
