@@ -378,6 +378,7 @@ export default function App() {
     restoreSession,
     purgeTrashedSession,
     renameSession,
+    markTopicRead,
     refreshMeta,
     pickWorkspace,
     switchWorkspace,
@@ -1028,8 +1029,9 @@ export default function App() {
     } else {
       await openProjectTab(workspaceRoot, topicId);
     }
+    if (topicId) await markTopicRead(topicId);
     await refreshTabMetas();
-  }, [openGlobalTab, openProjectTab, refreshTabMetas]);
+  }, [markTopicRead, openGlobalTab, openProjectTab, refreshTabMetas]);
 
   // History drawer: project menus can open a scoped saved-session list. Idle row
   // clicks resume; running row clicks only preview through PreviewSession.

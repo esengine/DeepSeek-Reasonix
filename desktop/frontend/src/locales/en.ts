@@ -387,10 +387,18 @@ export const en = {
   "projectTree.colorPink": "Pink",
   "projectTree.emptyNoMatch": "No matching projects or sessions",
   "projectTree.emptyNoProjects": "No projects yet",
+  "projectTree.emptyNoTimeFilterMatch": "No activity in this time range",
   "projectTree.newTopicTooltip": "New session",
   "projectTree.addProjectTooltip": "Add new project",
   "projectTree.collapseAll": "Collapse all",
   "projectTree.expandAll": "Expand all",
+  "projectTree.timeFilter": "Filter by time",
+  "projectTree.timeFilterAll": "All",
+  "projectTree.timeFilter1h": "Last hour",
+  "projectTree.timeFilter3h": "Last 3 hours",
+  "projectTree.timeFilter5h": "Last 5 hours",
+  "projectTree.timeFilter1d": "Last 24 hours",
+  "projectTree.clearTimeFilter": "Clear filter",
 
   // memory drawer
   "memory.title": "Memory",

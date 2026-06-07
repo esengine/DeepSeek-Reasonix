@@ -388,10 +388,18 @@ export const zh: Record<DictKey, string> = {
   "projectTree.colorPink": "粉色",
   "projectTree.emptyNoMatch": "没有匹配的项目或会话",
   "projectTree.emptyNoProjects": "还没有项目",
+  "projectTree.emptyNoTimeFilterMatch": "该时间范围内没有活动",
   "projectTree.newTopicTooltip": "新建会话",
   "projectTree.addProjectTooltip": "添加新项目",
   "projectTree.collapseAll": "全部折叠",
   "projectTree.expandAll": "全部展开",
+  "projectTree.timeFilter": "时间筛选",
+  "projectTree.timeFilterAll": "全部",
+  "projectTree.timeFilter1h": "最近1小时",
+  "projectTree.timeFilter3h": "最近3小时",
+  "projectTree.timeFilter5h": "最近5小时",
+  "projectTree.timeFilter1d": "最近1天",
+  "projectTree.clearTimeFilter": "清除筛选",
 
   // 记忆抽屉
   "memory.title": "记忆",

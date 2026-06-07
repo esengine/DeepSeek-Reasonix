@@ -32,17 +32,18 @@ import (
 // memory, permissions) scoped to a workspace root, so multiple projects and
 // topics can be active concurrently without interfering.
 type WorkspaceTab struct {
-	ID            string              // stable random id
-	Scope         string              // "project" | "global"
-	WorkspaceRoot string              // project root dir (empty for global)
-	TopicID       string              // topic within the project
-	TopicTitle    string              // display title
-	SessionPath   string              // exact .jsonl file this tab continues
-	Ctrl          *control.Controller // nil while booting / on error
-	Label         string              // model label (for the tab badge)
-	Ready         bool                // true once boot.Build completes
-	StartupErr    string              // build error, surfaced to the frontend
-	sink          *tabEventSink       // routes events with this tab's ID
+	ID             string              // stable random id
+	Scope          string              // "project" | "global"
+	WorkspaceRoot  string              // project root dir (empty for global)
+	TopicID        string              // topic within the project
+	TopicTitle     string              // display title
+	SessionPath    string              // exact .jsonl file this tab continues
+	LastActivityAt int64               // in-memory activity timestamp for live sidebar state
+	Ctrl           *control.Controller // nil while booting / on error
+	Label          string              // model label (for the tab badge)
+	Ready          bool                // true once boot.Build completes
+	StartupErr     string              // build error, surfaced to the frontend
+	sink           *tabEventSink       // routes events with this tab's ID
 
 	// Per-turn autosave per tab.
 	saveMu    sync.Mutex
@@ -122,6 +123,34 @@ type tabEventSink struct {
 func (s *tabEventSink) Emit(e event.Event) {
 	if s.ctx != nil {
 		runtime.EventsEmit(s.ctx, eventChannel, toWireTab(e, s.tabID))
+	}
+	var tab *WorkspaceTab
+	active := false
+	if s.app != nil && s.tabID != "" && (e.Kind == event.TurnStarted || e.Kind == event.TurnDone) {
+		now := time.Now().UnixMilli()
+		s.app.mu.Lock()
+		tab = s.app.tabs[s.tabID]
+		active = s.app.activeTabID == s.tabID
+		if tab != nil {
+			tab.LastActivityAt = now
+		}
+		s.app.mu.Unlock()
+	}
+	if e.Kind == event.TurnStarted && s.app != nil && tab != nil && !active && strings.TrimSpace(tab.TopicID) != "" {
+		_ = s.app.markTopicReadForTab(tab, false, true)
+	}
+	// When a turn finishes on the currently active tab, update the read
+	// timestamp so the topic does not show an unread indicator for the
+	// conversation the user is actively watching.
+	if e.Kind == event.TurnDone && s.app != nil && tab != nil && active && strings.TrimSpace(tab.TopicID) != "" {
+		_ = s.app.markTopicReadForTab(tab, false, false)
+	}
+	// Refresh the sidebar tree when running/read state changes, so per-topic
+	// Running and HasUnread indicators update in real time.
+	if e.Kind == event.TurnStarted || e.Kind == event.TurnDone {
+		if s.app != nil {
+			s.app.emitProjectTreeChanged()
+		}
 	}
 	// Record read_file successes in the tab's telemetry.
 	if e.Kind == event.ToolResult && e.Tool.Name == "read_file" && e.Tool.Err == "" {
@@ -1215,6 +1244,7 @@ func projectTitle(root string) string {
 const (
 	topicTitlesFile        = "desktop-topic-titles.json"
 	topicTitleSourcesFile  = "desktop-topic-title-sources.json"
+	topicReadFile          = "desktop-topic-read.json"
 	defaultTopicTitle      = "新的会话"
 	topicTitleSourceAuto   = "auto"
 	topicTitleSourceManual = "manual"
@@ -1292,6 +1322,110 @@ func loadTopicTitle(workspaceRoot, topicID string) string {
 
 func loadTopicTitleSource(workspaceRoot, topicID string) string {
 	return loadTopicTitleSources(workspaceRoot)[topicID]
+}
+
+func topicReadPath(workspaceRoot string) string {
+	if workspaceRoot == "" {
+		return filepath.Join(desktopConfigDir(), "global", topicReadFile)
+	}
+	return filepath.Join(workspaceRoot, ".reasonix", topicReadFile)
+}
+
+func loadTopicReadStatus(workspaceRoot string) map[string]int64 {
+	m := map[string]int64{}
+	b, err := os.ReadFile(topicReadPath(workspaceRoot))
+	if err != nil {
+		return m
+	}
+	json.Unmarshal(b, &m)
+	return m
+}
+
+func saveTopicReadStatus(workspaceRoot string, m map[string]int64) error {
+	b, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return err
+	}
+	path := topicReadPath(workspaceRoot)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+// MarkTopicRead records that the user has read the topic, clearing its unread
+// indicator. Called from the frontend when the user opens or switches to a topic.
+func (a *App) MarkTopicRead(topicID string) error {
+	return a.markTopicRead(topicID, true)
+}
+
+func (a *App) markTopicRead(topicID string, notify bool) error {
+	if strings.TrimSpace(topicID) == "" {
+		return nil
+	}
+	// Determine the workspace root for this topic.
+	var workspaceRoot string
+	a.mu.RLock()
+	for _, tab := range a.tabs {
+		if tab != nil && tab.TopicID == topicID {
+			workspaceRoot = topicReadWorkspaceRoot(tab)
+			break
+		}
+	}
+	a.mu.RUnlock()
+
+	return saveTopicReadMarker(workspaceRoot, topicID, notify, false, a.emitProjectTreeChanged)
+}
+
+func (a *App) markTopicReadForTab(tab *WorkspaceTab, notify, onlyIfMissing bool) error {
+	if tab == nil {
+		return nil
+	}
+	return saveTopicReadMarker(topicReadWorkspaceRoot(tab), tab.TopicID, notify, onlyIfMissing, a.emitProjectTreeChanged)
+}
+
+func topicReadWorkspaceRoot(tab *WorkspaceTab) string {
+	if tab != nil && tab.Scope == "project" {
+		return tab.WorkspaceRoot
+	}
+	return ""
+}
+
+func saveTopicReadMarker(workspaceRoot, topicID string, notify, onlyIfMissing bool, emit func()) error {
+	if strings.TrimSpace(topicID) == "" {
+		return nil
+	}
+	readMap := loadTopicReadStatus(workspaceRoot)
+	if onlyIfMissing {
+		if _, ok := readMap[topicID]; ok {
+			return nil
+		}
+	}
+	readMap[topicID] = time.Now().UnixMilli()
+	if err := saveTopicReadStatus(workspaceRoot, readMap); err != nil {
+		return err
+	}
+	if notify && emit != nil {
+		emit()
+	}
+	return nil
+}
+
+// topicHasUnread checks whether a topic has new activity since the user last
+// read it.
+func topicHasUnread(workspaceRoot, topicID string, lastActivityAt int64, readMap map[string]int64) bool {
+	if lastActivityAt <= 0 {
+		return false
+	}
+	lastRead, ok := readMap[topicID]
+	if !ok {
+		return false
+	}
+	return lastActivityAt > lastRead
 }
 
 func topicTitleForTab(scope, workspaceRoot, topicID string) string {
@@ -1457,9 +1591,10 @@ type ProjectNode struct {
 	TopicID        string        `json:"topicId,omitempty"`
 	ProjectColor   string        `json:"projectColor,omitempty"`
 	Turns          int           `json:"turns,omitempty"`
-	LastActivityAt int64         `json:"lastActivityAt,omitempty"`
+	LastActivityAt int64         `json:"lastActivityAt"`
 	Open           bool          `json:"open,omitempty"`
 	Running        bool          `json:"running,omitempty"`
+	HasUnread      bool          `json:"hasUnread,omitempty"`
 	Children       []ProjectNode `json:"children,omitempty"`
 }
 
@@ -2077,8 +2212,10 @@ func (a *App) ListProjectTree() []ProjectNode {
 		}
 	}
 	openTopics := map[string]struct {
-		open    bool
-		running bool
+		open           bool
+		running        bool
+		active         bool
+		lastActivityAt int64
 	}{}
 	a.mu.RLock()
 	for _, tab := range a.tabs {
@@ -2088,6 +2225,12 @@ func (a *App) ListProjectTree() []ProjectNode {
 		key := topicSummaryKey(tab.Scope, tab.WorkspaceRoot, tab.TopicID)
 		status := openTopics[key]
 		status.open = true
+		if tab.ID == a.activeTabID {
+			status.active = true
+		}
+		if tab.LastActivityAt > status.lastActivityAt {
+			status.lastActivityAt = tab.LastActivityAt
+		}
 		if tab.Ctrl != nil && tab.Ctrl.Running() {
 			status.running = true
 		}
@@ -2103,12 +2246,17 @@ func (a *App) ListProjectTree() []ProjectNode {
 			globalTitle = "Global"
 		}
 		globalColor := normalizeProjectColor(f.GlobalColor)
+		globalReadMap := loadTopicReadStatus("")
 		globalTopicIDs := orderedTopicIDs(f.GlobalTopics, globalTitleMap)
 		children := make([]ProjectNode, 0, len(globalTopicIDs))
 		for _, id := range globalTopicIDs {
 			title := globalTitleMap[id]
-			summary := topicSummaries[topicSummaryKey("global", "", id)]
-			status := openTopics[topicSummaryKey("global", "", id)]
+			key := topicSummaryKey("global", "", id)
+			summary := topicSummaries[key]
+			status := openTopics[key]
+			if status.lastActivityAt > summary.lastActivityAt {
+				summary.lastActivityAt = status.lastActivityAt
+			}
 			children = append(children, ProjectNode{
 				Key:            "global_topic_" + id,
 				Kind:           "global_topic",
@@ -2119,6 +2267,7 @@ func (a *App) ListProjectTree() []ProjectNode {
 				LastActivityAt: summary.lastActivityAt,
 				Open:           status.open,
 				Running:        status.running,
+				HasUnread:      !status.active && topicHasUnread("", id, summary.lastActivityAt, globalReadMap),
 			})
 		}
 		out = append(out, ProjectNode{
@@ -2146,6 +2295,7 @@ func (a *App) ListProjectTree() []ProjectNode {
 		// Gather topics: explicit topic list + all known topic titles.
 		titleMap := loadTopicTitles(p.Root)
 		topicIDs := orderedTopicIDs(p.Topics, titleMap)
+		projectReadMap := loadTopicReadStatus(p.Root)
 
 		children := make([]ProjectNode, 0, len(topicIDs))
 		for _, tid := range topicIDs {
@@ -2155,6 +2305,9 @@ func (a *App) ListProjectTree() []ProjectNode {
 			}
 			summary := topicSummaries[topicSummaryKey("project", p.Root, tid)]
 			status := openTopics[topicSummaryKey("project", p.Root, tid)]
+			if status.lastActivityAt > summary.lastActivityAt {
+				summary.lastActivityAt = status.lastActivityAt
+			}
 			children = append(children, ProjectNode{
 				Key:            "topic_" + tid,
 				Kind:           "topic",
@@ -2166,6 +2319,7 @@ func (a *App) ListProjectTree() []ProjectNode {
 				LastActivityAt: summary.lastActivityAt,
 				Open:           status.open,
 				Running:        status.running,
+				HasUnread:      !status.active && topicHasUnread(p.Root, tid, summary.lastActivityAt, projectReadMap),
 			})
 		}
 		node.Label = title

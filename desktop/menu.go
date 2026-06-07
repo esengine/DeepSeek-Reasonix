@@ -22,6 +22,11 @@ func (a *App) createAppMenu() *menu.Menu {
 	m.Append(menu.AppMenu())
 
 	fileMenu := m.AddSubmenu("File")
+	fileMenu.AddText("Close Conversation", keys.CmdOrCtrl("w"), func(_ *menu.CallbackData) {
+		if a.ctx != nil {
+			runtime.EventsEmit(a.ctx, "app:close-active-tab")
+		}
+	})
 	fileMenu.AddText("Settings", keys.CmdOrCtrl(","), func(_ *menu.CallbackData) {
 		if a.ctx != nil {
 			runtime.EventsEmit(a.ctx, "app:open-settings")

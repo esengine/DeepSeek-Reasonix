@@ -4,9 +4,10 @@
 // new topic.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
-import { Archive, ChevronRight, ChevronDown, ChevronsUpDown, ChevronsDownUp, Pencil, Plus, FolderPlus, Search, BriefcaseBusiness, Copy, FolderOpen, XCircle, History, Check } from "lucide-react";
+import { Archive, ChevronRight, ChevronDown, ChevronsUpDown, ChevronsDownUp, Pencil, Plus, FolderPlus, Search, BriefcaseBusiness, Copy, FolderOpen, XCircle, History, Check, Clock } from "lucide-react";
 import { asArray } from "../lib/array";
 import { app } from "../lib/bridge";
+import { topicActivityTime } from "../lib/session";
 import type { ProjectNode } from "../lib/types";
 import { getLocale, useT, type Translator } from "../lib/i18n";
 import { PROJECT_COLOR_OPTIONS, projectColorValue } from "../lib/projectColors";
@@ -54,7 +55,7 @@ function topicActivityLabel(ms: number): string {
   const minute = 60_000;
   const hour = 60 * minute;
   const day = 24 * hour;
-  if (delta < minute) return new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  if (delta < minute) return rtf.format(-1, "minute");
   if (delta < hour) return rtf.format(-Math.max(1, Math.round(delta / minute)), "minute");
   if (delta < day) return rtf.format(-Math.round(delta / hour), "hour");
   if (delta < 7 * day) return rtf.format(-Math.round(delta / day), "day");
@@ -158,6 +159,10 @@ export function ProjectTree({
   const [dropProject, setDropProject] = useState<{ root: string; position: ProjectDropPosition } | null>(null);
   const [platform, setPlatform] = useState("");
   const creatingRef = useRef(false);
+  const filterRef = useRef<HTMLDivElement>(null);
+  type TimeFilter = "all" | "1h" | "3h" | "5h" | "1d";
+  const [timeFilter, setTimeFilter] = useState<TimeFilter>("all");
+  const [filterMenuOpen, setFilterMenuOpen] = useState(false);
 
   const closeMenu = useCallback(() => {
     setMenuTopic(null);
@@ -166,6 +171,17 @@ export function ProjectTree({
     setConfirmAction(null);
     setConfirmRemoveProject(null);
   }, []);
+
+  useEffect(() => {
+    if (!filterMenuOpen) return;
+    const close = (event: MouseEvent) => {
+      if (filterRef.current && !filterRef.current.contains(event.target as Node)) {
+        setFilterMenuOpen(false);
+      }
+    };
+    window.addEventListener("pointerdown", close);
+    return () => window.removeEventListener("pointerdown", close);
+  }, [filterMenuOpen]);
 
   const refresh = useCallback(async () => {
     try {
@@ -391,20 +407,32 @@ export function ProjectTree({
 
   const visibleTree = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return tree;
-    const matches = (node: ProjectNode) =>
-      [node.label, node.root, node.topicId].some((value) => (value ?? "").toLowerCase().includes(q));
+    const now = Date.now();
+    const cutoff: number | null = timeFilter === "all" ? null
+      : timeFilter === "1h" ? now - 60 * 60 * 1000
+      : timeFilter === "3h" ? now - 3 * 60 * 60 * 1000
+      : timeFilter === "5h" ? now - 5 * 60 * 60 * 1000
+      : now - 24 * 60 * 60 * 1000; // 1d
+    const topicMatchesTime = (node: ProjectNode): boolean =>
+      !cutoff || topicActivityTime(node) >= cutoff;
+    const matchesQuery = (node: ProjectNode): boolean =>
+      !q || [node.label, node.root, node.topicId].some((value) => (value ?? "").toLowerCase().includes(q));
     const filterNode = (node: ProjectNode): ProjectNode | null => {
       const children = asArray(node.children)
         .map(filterNode)
         .filter((child): child is ProjectNode => child !== null);
-      if (matches(node) || children.length > 0) return { ...node, children };
+      if (children.length > 0) return { ...node, children };
+      const isFolder = node.kind === "project" || node.kind === "global_folder";
+      if (isFolder && !cutoff && matchesQuery(node)) return { ...node, children };
+      if (isFolder) return null;
+      if (!topicMatchesTime(node)) return null;
+      if (matchesQuery(node)) return { ...node };
       return null;
     };
     return tree
       .map(filterNode)
       .filter((node): node is ProjectNode => node !== null);
-  }, [query, tree]);
+  }, [query, tree, timeFilter]);
 
   const projectDragEnabled = query.trim() === "";
 
@@ -461,7 +489,7 @@ export function ProjectTree({
     if (!node) return null;
     const key = projectNodeKey(node, depth);
     const children = asArray(node.children);
-    const isExpanded = query.trim() ? true : expanded.has(key);
+    const isExpanded = query.trim() || timeFilter !== "all" ? true : expanded.has(key);
     const hasChildren = children.length > 0;
 
     if (node.kind === "topic" || node.kind === "global_topic") {
@@ -544,9 +572,13 @@ export function ProjectTree({
             <span className="project-tree__topic-copy">
               <span className="project-tree__topic-label">{label}</span>
             </span>
-            {timeLabel && (
+            {node.running ? (
+              <span className="project-tree__topic-indicator project-tree__topic-indicator--running" />
+            ) : node.hasUnread ? (
+              <span className="project-tree__topic-indicator project-tree__topic-indicator--unread" />
+            ) : timeLabel ? (
               <span className="project-tree__topic-time">{timeLabel}</span>
-            )}
+            ) : null}
           </button>
           <ContextMenu
             open={topicMenuOpen}
@@ -795,6 +827,58 @@ export function ProjectTree({
           {t("projectTree.workspaceTitle")}
         </span>
         <div className="project-tree__header-actions">
+          <div className="project-tree__time-filter" ref={filterRef}>
+            <Tooltip label={t("projectTree.timeFilter")}>
+              <button
+                type="button"
+                className={`project-tree__header-action-btn${timeFilter !== "all" ? " project-tree__header-action-btn--active" : ""}`}
+                onClick={() => setFilterMenuOpen((open) => !open)}
+                aria-label={t("projectTree.timeFilter")}
+                aria-expanded={filterMenuOpen}
+              >
+                <Clock size={13} />
+              </button>
+            </Tooltip>
+            {filterMenuOpen && (
+              <div className="project-tree__time-filter-menu">
+                <button
+                  type="button"
+                  className={`project-tree__time-filter-opt${timeFilter === "all" ? " project-tree__time-filter-opt--on" : ""}`}
+                  onClick={() => { setTimeFilter("all"); setFilterMenuOpen(false); }}
+                >
+                  {t("projectTree.timeFilterAll")}
+                </button>
+                <button
+                  type="button"
+                  className={`project-tree__time-filter-opt${timeFilter === "1h" ? " project-tree__time-filter-opt--on" : ""}`}
+                  onClick={() => { setTimeFilter("1h"); setFilterMenuOpen(false); }}
+                >
+                  {t("projectTree.timeFilter1h")}
+                </button>
+                <button
+                  type="button"
+                  className={`project-tree__time-filter-opt${timeFilter === "3h" ? " project-tree__time-filter-opt--on" : ""}`}
+                  onClick={() => { setTimeFilter("3h"); setFilterMenuOpen(false); }}
+                >
+                  {t("projectTree.timeFilter3h")}
+                </button>
+                <button
+                  type="button"
+                  className={`project-tree__time-filter-opt${timeFilter === "5h" ? " project-tree__time-filter-opt--on" : ""}`}
+                  onClick={() => { setTimeFilter("5h"); setFilterMenuOpen(false); }}
+                >
+                  {t("projectTree.timeFilter5h")}
+                </button>
+                <button
+                  type="button"
+                  className={`project-tree__time-filter-opt${timeFilter === "1d" ? " project-tree__time-filter-opt--on" : ""}`}
+                  onClick={() => { setTimeFilter("1d"); setFilterMenuOpen(false); }}
+                >
+                  {t("projectTree.timeFilter1d")}
+                </button>
+              </div>
+            )}
+          </div>
           <Tooltip label={allExpanded ? t("projectTree.collapseAll") : t("projectTree.expandAll")}>
             <button
               type="button"
@@ -822,6 +906,17 @@ export function ProjectTree({
         {visibleTree.length === 0 ? (
           query.trim() ? (
             <div className="project-tree__empty">{t("projectTree.emptyNoMatch")}</div>
+          ) : timeFilter !== "all" ? (
+            <div className="project-tree__empty-state">
+              <div className="project-tree__empty project-tree__empty--subtle">{t("projectTree.emptyNoTimeFilterMatch")}</div>
+              <button
+                type="button"
+                className="project-tree__empty-primary"
+                onClick={() => setTimeFilter("all")}
+              >
+                {t("projectTree.clearTimeFilter")}
+              </button>
+            </div>
           ) : (
             <div className="project-tree__empty-state">
               <div className="project-tree__empty project-tree__empty--subtle">{t("projectTree.emptyNoProjects")}</div>
