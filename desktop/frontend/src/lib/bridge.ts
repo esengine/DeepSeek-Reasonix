@@ -365,13 +365,20 @@ function browserPlatformOverride(): "darwin" | "windows" | "linux" | "" {
   return value === "darwin" || value === "windows" || value === "linux" ? value : "";
 }
 
+function mockScenario(): "demo" | "fresh" {
+  if (typeof window === "undefined") return "demo";
+  const value = new URLSearchParams(window.location.search).get("mock")?.trim().toLowerCase();
+  return value === "fresh" || value === "empty" || value === "first-run" ? "fresh" : "demo";
+}
+
 function makeMockApp(): AppBindings {
+  const freshMock = mockScenario() === "fresh";
   let cancelled = false;
   let pendingAskPreview = false;
   let pendingApprovalPreview = false;
-  let cwd = "~/projects/joyquant-db"; // mutable so PickWorkspace is visible in dev
   const globalWorkspaceRoot = "~/Library/Application Support/reasonix/global-workspace";
-  let workspaces = ["~/projects/joyquant-db", "~/projects/joyquant-sys", "~/projects/reasonix", "~/projects/blade"];
+  let cwd = freshMock ? globalWorkspaceRoot : "~/projects/joyquant-db"; // mutable so PickWorkspace is visible in dev
+  let workspaces = freshMock ? [] : ["~/projects/joyquant-db", "~/projects/joyquant-sys", "~/projects/reasonix", "~/projects/blade"];
   let mockEffort = "auto";
   const day = 86_400_000;
   const t0 = Date.now();
@@ -521,6 +528,10 @@ function makeMockApp(): AppBindings {
       topicTitle: t("mock.trashGlobalProductTitle"),
     },
   ];
+  if (freshMock) {
+    sessions.splice(0);
+    trashedSessions.splice(0);
+  }
   // Mutable settings so the Settings panel's edits are observable in browser dev.
   const settings: SettingsView = {
     defaultModel: "deepseek-flash",
@@ -549,7 +560,13 @@ function makeMockApp(): AppBindings {
     providerKinds: ["openai"],
     bypass: false,
   };
-  const mockProjectTree: ProjectNode[] = [
+  settings.providers = settings.providers.map((provider) =>
+    provider.apiKeyEnv === "DEEPSEEK_API_KEY" ? { ...provider, keySet: !freshMock } : provider,
+  );
+  if (freshMock) {
+    settings.configPath = "~/.config/reasonix/config.toml";
+  }
+  const mockProjectTree: ProjectNode[] = freshMock ? [] : [
     {
       key: "project_~/projects/joyquant-db",
       kind: "project",
@@ -606,7 +623,22 @@ function makeMockApp(): AppBindings {
   const setMockActiveTab = (tabId: string) => {
     mockTabs = mockTabs.map((tab) => ({ ...tab, active: tab.id === tabId }));
   };
-  let mockTabs: TabMeta[] = [
+  let mockTabs: TabMeta[] = freshMock ? [
+    {
+      id: "tab_global",
+      scope: "global",
+      workspaceRoot: globalWorkspaceRoot,
+      workspaceName: "Global",
+      topicId: "",
+      topicTitle: "Global",
+      label: "DeepSeek-R1",
+      ready: true,
+      running: false,
+      mode: "normal",
+      active: true,
+      cwd: globalWorkspaceRoot,
+    },
+  ] : [
     {
       id: "tab_joyquant_db",
       scope: "project",
@@ -765,8 +797,32 @@ function makeMockApp(): AppBindings {
             }),
             output: "todo list updated",
             readOnly: false,
+            durationMs: 150,
           },
         });
+        emit({ kind: "turn_done" });
+        return;
+      }
+      if (trimmedInput === "/process-preview" || trimmedInput === "process preview" || trimmedInput === "过程预览") {
+        await delay(200);
+        if (cancelled) return;
+        emit({ kind: "phase", text: "Preparing context" });
+        await delay(120);
+        emit({ kind: "notice", level: "info", text: "Loaded project instructions from AGENTS.md." });
+        await delay(120);
+        emit({ kind: "notice", level: "warn", text: "Network access is enabled; external results may change over time." });
+        await delay(120);
+        emit({ kind: "compaction_started", compaction: { trigger: "manual" } });
+        await delay(320);
+        emit({
+          kind: "compaction_done",
+          compaction: {
+            trigger: "manual",
+            messages: 6,
+            summary: "Preserved the active task, relevant files, and UI decisions while trimming earlier exploratory context.",
+          },
+        });
+        emit({ kind: "message", text: "Process card preview complete." });
         emit({ kind: "turn_done" });
         return;
       }
@@ -798,7 +854,7 @@ function makeMockApp(): AppBindings {
       await delay(350);
       emit({
         kind: "tool_result",
-        tool: { id: "t1", name: "edit_file", output: "edited main.go", readOnly: false },
+        tool: { id: "t1", name: "edit_file", output: "edited main.go", readOnly: false, durationMs: 350 },
       });
       emit({
         kind: "usage",
@@ -835,7 +891,7 @@ function makeMockApp(): AppBindings {
           emit({ kind: "tool_progress", tool: { id, name: "bash", output: `$ ${command}\n(mock output)\n`, readOnly: false } });
           await delay(100);
           if (cancelled) return;
-          emit({ kind: "tool_result", tool: { id, name: "bash", output: `$ ${command}\n(mock output)\n`, readOnly: false } });
+          emit({ kind: "tool_result", tool: { id, name: "bash", output: `$ ${command}\n(mock output)\n`, readOnly: false, durationMs: 300 } });
           emit({ kind: "turn_done" });
         },
         async Cancel() {
@@ -938,11 +994,14 @@ function makeMockApp(): AppBindings {
       const s = sessions.find((x) => x.path === path) ?? trashedSessions.find((x) => x.path === path);
       return [
         { role: "user", content: s?.preview || `(mock) preview ${path}` },
+        { role: "phase", content: "Preparing read-only preview" },
         {
           role: "assistant",
           content: "This is a read-only mock preview. The active conversation is unchanged.",
           reasoning: "Preview reads the saved session without resuming it.",
         },
+        { role: "notice", level: "info", content: "Preview mode keeps the active conversation untouched." },
+        { role: "compaction", content: "", trigger: "manual", messages: 3, summary: "Mock preview preserved the latest task, tool result, and answer summary." },
       ];
     },
     async DeleteSession(path: string) {

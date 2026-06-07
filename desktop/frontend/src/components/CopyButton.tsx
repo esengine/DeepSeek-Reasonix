@@ -10,13 +10,16 @@ export function CopyButton({
   text,
   className,
   label,
+  showLabel = Boolean(label),
 }: {
   text: string;
   className?: string;
   label?: string;
+  showLabel?: boolean;
 }) {
   const t = useT();
   const [copied, setCopied] = useState(false);
+  const actionLabel = label ?? t("msg.copy");
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(text);
@@ -27,15 +30,15 @@ export function CopyButton({
     }
   };
   return (
-    <Tooltip label={t("msg.copy")}>
+    <Tooltip label={copied ? t("msg.copied") : actionLabel}>
       <button
         className={`copybtn ${className ?? ""}`}
         onClick={copy}
-        aria-label={t("msg.copy")}
+        aria-label={actionLabel}
         type="button"
       >
         {copied ? <Check size={13} /> : <Copy size={13} />}
-        {label && <span className="copybtn__label">{copied ? t("msg.copied") : label}</span>}
+        {label && showLabel && <span className="copybtn__label">{copied ? t("msg.copied") : label}</span>}
       </button>
     </Tooltip>
   );

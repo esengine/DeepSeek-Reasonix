@@ -39,6 +39,7 @@ export interface WireTool {
   err?: string;
   readOnly: boolean;
   truncated?: boolean;
+  durationMs?: number;
   partial?: boolean; // an early dispatch (name only) — a full one with args follows
   parentId?: string; // set on a sub-agent's calls — the parent `task` call's id
   profile?: WireProfile; // subagent model/effort resolved for this call
@@ -195,9 +196,15 @@ export interface HistoryMessage {
   role: string;
   content: string;
   reasoning?: string;
+  level?: "info" | "warn";
   toolCalls?: HistoryToolCall[];
   toolCallId?: string;
   toolName?: string;
+  pending?: boolean;
+  trigger?: string;
+  messages?: number;
+  summary?: string;
+  archive?: string;
 }
 
 export interface HistoryToolCall {

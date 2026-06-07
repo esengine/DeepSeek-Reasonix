@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -209,11 +210,17 @@ func TestServeLifecycle(t *testing.T) {
 	if !ir.AgentCapabilities.PromptCapabilities.EmbeddedContext {
 		t.Errorf("embeddedContext should be advertised")
 	}
+	if ir.AgentCapabilities.SessionCapabilities.List == nil ||
+		ir.AgentCapabilities.SessionCapabilities.Resume == nil ||
+		ir.AgentCapabilities.SessionCapabilities.Close == nil ||
+		ir.AgentCapabilities.SessionCapabilities.Delete == nil {
+		t.Errorf("sessionCapabilities = %+v, want list/resume/close/delete", ir.AgentCapabilities.SessionCapabilities)
+	}
 	if ir.AgentCapabilities.PromptCapabilities.Image {
 		t.Errorf("image must not be advertised")
 	}
 
-	newResp := client.call(t, "session/new", SessionNewParams{Cwd: "/tmp"})
+	newResp := client.call(t, "session/new", SessionNewParams{Cwd: t.TempDir()})
 	var nr SessionNewResult
 	if err := json.Unmarshal(newResp.Result, &nr); err != nil || nr.SessionID == "" {
 		t.Fatalf("session/new result: %v (%q)", err, nr.SessionID)
@@ -279,6 +286,93 @@ func TestServeCancel(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("cancel did not end the prompt")
+	}
+}
+
+func TestServeRejectsConcurrentPromptForSameSession(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	factory := &fakeFactory{behavior: func(_ context.Context, _ event.Sink, _ string) error {
+		once.Do(func() { close(started) })
+		<-release
+		return nil
+	}}
+	client, stop := startServer(t, factory)
+	defer stop()
+
+	client.call(t, "initialize", InitializeParams{ProtocolVersion: 1})
+	newResp := client.call(t, "session/new", SessionNewParams{})
+	var nr SessionNewResult
+	json.Unmarshal(newResp.Result, &nr)
+
+	first := client.callAsync("session/prompt", SessionPromptParams{
+		SessionID: nr.SessionID,
+		Prompt:    []ContentBlock{{Type: "text", Text: "first"}},
+	})
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first prompt never started")
+	}
+
+	second := client.call(t, "session/prompt", SessionPromptParams{
+		SessionID: nr.SessionID,
+		Prompt:    []ContentBlock{{Type: "text", Text: "second"}},
+	})
+	if second.Error == nil {
+		t.Fatal("second concurrent prompt should return an error")
+	}
+	if second.Error.Code != ErrInvalidRequest || !strings.Contains(second.Error.Message, "active prompt") {
+		t.Fatalf("second prompt error = %+v, want active-prompt invalid request", second.Error)
+	}
+
+	close(release)
+	select {
+	case resp := <-first:
+		if resp.Error != nil {
+			t.Fatalf("first prompt errored: %+v", resp.Error)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("first prompt did not finish")
+	}
+}
+
+func TestServeSessionClose(t *testing.T) {
+	factory := &fakeFactory{behavior: func(context.Context, event.Sink, string) error { return nil }}
+	client, stop := startServer(t, factory)
+	defer stop()
+
+	client.call(t, "initialize", InitializeParams{ProtocolVersion: 1})
+	newResp := client.call(t, "session/new", SessionNewParams{})
+	var nr SessionNewResult
+	json.Unmarshal(newResp.Result, &nr)
+
+	closeResp := client.call(t, "session/close", SessionCloseParams(nr))
+	if closeResp.Error != nil {
+		t.Fatalf("session/close errored: %+v", closeResp.Error)
+	}
+
+	promptResp := client.call(t, "session/prompt", SessionPromptParams{
+		SessionID: nr.SessionID,
+		Prompt:    []ContentBlock{{Type: "text", Text: "after close"}},
+	})
+	if promptResp.Error == nil || !strings.Contains(promptResp.Error.Message, "unknown session") {
+		t.Fatalf("prompt after close error = %+v, want unknown session", promptResp.Error)
+	}
+}
+
+func TestServeRejectsPathLikeSessionID(t *testing.T) {
+	factory := &fakeFactory{behavior: func(context.Context, event.Sink, string) error { return nil }}
+	client, stop := startServer(t, factory)
+	defer stop()
+
+	resp := client.call(t, "session/delete", SessionDeleteParams{SessionID: "../outside"})
+	if resp.Error == nil {
+		t.Fatal("session/delete with path-like sessionId should fail")
+	}
+	if resp.Error.Code != ErrInvalidParams || !strings.Contains(resp.Error.Message, "invalid sessionId") {
+		t.Fatalf("session/delete error = %+v, want invalid sessionId", resp.Error)
 	}
 }
 
