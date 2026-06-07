@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import logoWordmark from "../assets/logo-wordmark.svg";
 import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
@@ -27,12 +27,9 @@ export function Welcome({ onPrompt }: { onPrompt: (text: string) => void }) {
   const t = useT();
   const fallback = [t("welcome.ex1"), t("welcome.ex2"), t("welcome.ex3")];
   const [prompts, setPrompts] = useState<string[]>(fallback);
-  const fetchedRef = useRef(false);
 
   useEffect(() => {
-    if (fetchedRef.current) return;
-    fetchedRef.current = true;
-
+    setPrompts(fallback);
     app
       .GenerateWelcomePrompts()
       .then((raw) => {
