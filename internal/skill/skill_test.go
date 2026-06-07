@@ -6,6 +6,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"reasonix/internal/config"
 )
 
 func writeSkill(t *testing.T, base, rel, content string) string {
@@ -148,6 +150,26 @@ func TestConventionDirsDiscovered(t *testing.T) {
 	for _, name := range []string{"fromclaude", "fromagents", "fromagent"} {
 		if _, ok := find(list, name); !ok {
 			t.Errorf("convention dir for %q not scanned", name)
+		}
+	}
+}
+
+func TestExcludedPathsHideConventionRoots(t *testing.T) {
+	home := t.TempDir()
+	writeSkill(t, home, ".reasonix/skills/keep.md", "---\ndescription: keep\n---\nb")
+	writeSkill(t, home, ".agents/skills/noisy.md", "---\ndescription: noisy\n---\nb")
+	excluded := filepath.Join(home, ".agents", "skills")
+	st := New(Options{HomeDir: home, ExcludedPaths: []string{excluded}, DisableBuiltins: true})
+
+	if _, ok := find(st.List(), "keep"); !ok {
+		t.Fatal("non-excluded skill should be listed")
+	}
+	if _, ok := find(st.List(), "noisy"); ok {
+		t.Fatal("excluded skill should not be listed")
+	}
+	for _, root := range st.Roots() {
+		if config.CanonicalSkillPath(root.Dir) == config.CanonicalSkillPath(excluded) {
+			t.Fatalf("excluded root should be hidden from Roots: %+v", st.Roots())
 		}
 	}
 }

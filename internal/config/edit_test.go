@@ -382,8 +382,14 @@ func TestPermissionMutators(t *testing.T) {
 func TestSkillPathMutators(t *testing.T) {
 	c := Default()
 	root := t.TempDir()
+	if err := c.ExcludeSkillPath(root); err != nil {
+		t.Fatalf("exclude skill path: %v", err)
+	}
 	if err := c.AddSkillPath(root); err != nil {
 		t.Fatalf("add skill path: %v", err)
+	}
+	if len(c.Skills.ExcludedPaths) != 0 {
+		t.Fatalf("add skill path should restore excluded path, got %v", c.Skills.ExcludedPaths)
 	}
 	if err := c.AddSkillPath(filepath.Join(root, ".")); err != nil {
 		t.Fatalf("duplicate skill path: %v", err)
@@ -403,6 +409,27 @@ func TestSkillPathMutators(t *testing.T) {
 	}
 	if removed, err := c.RemoveSkillPath(root); err != nil || removed {
 		t.Fatalf("remove absent: removed=%v err=%v", removed, err)
+	}
+	if err := c.ExcludeSkillPath(filepath.Join(root, ".")); err != nil {
+		t.Fatalf("exclude skill path: %v", err)
+	}
+	if err := c.ExcludeSkillPath(root); err != nil {
+		t.Fatalf("duplicate exclude skill path: %v", err)
+	}
+	if len(c.Skills.ExcludedPaths) != 1 {
+		t.Fatalf("excluded paths = %v, want one deduped entry", c.Skills.ExcludedPaths)
+	}
+	if err := c.ExcludeSkillPath(" "); err == nil {
+		t.Fatal("empty excluded skill path should error")
+	}
+	if err := c.RestoreSkillPath(root); err != nil {
+		t.Fatalf("restore skill path: %v", err)
+	}
+	if len(c.Skills.ExcludedPaths) != 0 {
+		t.Fatalf("excluded paths after restore = %v, want empty", c.Skills.ExcludedPaths)
+	}
+	if err := c.RestoreSkillPath(" "); err == nil {
+		t.Fatal("empty restored skill path should error")
 	}
 }
 

@@ -314,6 +314,7 @@ func (c *Config) AddSkillPath(path string) error {
 		return fmt.Errorf("skill path: empty path")
 	}
 	want := CanonicalSkillPath(path)
+	c.removeExcludedSkillPath(want)
 	for _, existing := range c.Skills.Paths {
 		if CanonicalSkillPath(existing) == want {
 			return nil
@@ -338,6 +339,50 @@ func (c *Config) RemoveSkillPath(path string) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+// RestoreSkillPath removes a pseudo-deleted skill source from excluded_paths.
+func (c *Config) RestoreSkillPath(path string) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return fmt.Errorf("skill path: empty path")
+	}
+	want := CanonicalSkillPath(path)
+	if want == "" {
+		return fmt.Errorf("skill path: empty path")
+	}
+	c.removeExcludedSkillPath(want)
+	return nil
+}
+
+// ExcludeSkillPath hides any skill discovery root matching path. This is used by
+// UI "remove source" actions for convention roots that are not stored in paths.
+func (c *Config) ExcludeSkillPath(path string) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return fmt.Errorf("skill path: empty path")
+	}
+	want := CanonicalSkillPath(path)
+	if want == "" {
+		return fmt.Errorf("skill path: empty path")
+	}
+	for _, existing := range c.Skills.ExcludedPaths {
+		if CanonicalSkillPath(existing) == want {
+			return nil
+		}
+	}
+	c.Skills.ExcludedPaths = append(c.Skills.ExcludedPaths, path)
+	return nil
+}
+
+func (c *Config) removeExcludedSkillPath(want string) {
+	next := c.Skills.ExcludedPaths[:0]
+	for _, existing := range c.Skills.ExcludedPaths {
+		if CanonicalSkillPath(existing) != want {
+			next = append(next, existing)
+		}
+	}
+	c.Skills.ExcludedPaths = next
 }
 
 // SetSkillEnabled persists a per-skill enable/disable preference. Skills are

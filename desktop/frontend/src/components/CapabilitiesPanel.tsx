@@ -288,6 +288,7 @@ function normalizeCapabilitiesView(view: CapabilitiesView | null | undefined): C
     skills: asArray(view?.skills),
     skillRoots: asArray(view?.skillRoots).map((root) => ({
       ...root,
+      removable: Boolean(root.removable),
       skillItems: asArray(root.skillItems),
     })),
   };
@@ -434,7 +435,7 @@ function SkillSources({
                 const rootSkillsExpanded = expandedRootSkills.has(key);
                 const rootSkillsFull = fullRootSkills.has(key);
                 const canShowRootSkills = rootSkills.length > 0;
-                const canRemoveRoot = root.scope === "custom" && root.configured;
+                const canRemoveRoot = root.removable;
                 return (
                   <div className={`cap-source cap-source--${skillRootTone(root)}`} key={key}>
                     <span className={`cap-dot cap-dot--${skillRootDot(root)}`} />

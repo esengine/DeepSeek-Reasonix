@@ -364,6 +364,7 @@ export interface SkillRootView {
   priority: number;
   status: string;
   configured: boolean;
+  removable: boolean;
   skills: number;
   skillItems?: SkillRootSkillView[];
   warning?: string;

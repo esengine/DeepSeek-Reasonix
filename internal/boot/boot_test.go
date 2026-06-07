@@ -244,6 +244,55 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 	}
 }
 
+func TestBuildOmitsExcludedSkillRootsFromPromptAndRuntimeList(t *testing.T) {
+	dir := robustTempDir(t)
+	home := robustTempDir(t)
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Chdir(dir)
+	excluded := filepath.Join(home, ".agents", "skills")
+	writeFile(t, home, ".reasonix/skills/keep.md", "---\ndescription: keep\n---\nplaybook")
+	writeFile(t, home, ".agents/skills/noisy.md", "---\ndescription: noisy\n---\nplaybook")
+	writeFile(t, dir, "reasonix.toml", fmt.Sprintf(`
+default_model = "test-model"
+
+[codegraph]
+enabled = false
+
+[agent]
+system_prompt = "BASE"
+
+[skills]
+excluded_paths = [%q]
+
+[[providers]]
+name = "test-model"
+kind = "openai"
+base_url = "https://example.invalid"
+model = "x"
+api_key_env = "REASONIX_TEST_KEY_UNSET"
+`, excluded))
+
+	ctrl, err := Build(context.Background(), Options{})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer ctrl.Close()
+
+	for _, s := range ctrl.Skills() {
+		if s.Name == "noisy" {
+			t.Fatalf("excluded skill should not be executable: %v", ctrl.Skills())
+		}
+	}
+	sys := systemMessage(ctrl.History())
+	if strings.Contains(sys, "noisy") {
+		t.Fatalf("excluded skill name should be omitted from system prompt:\n%s", sys)
+	}
+	if !strings.Contains(sys, "keep") {
+		t.Fatalf("non-excluded skill should remain in system prompt:\n%s", sys)
+	}
+}
+
 // TestBuildWithoutMemoryLeavesPromptUnchanged is the inverse invariant: with no
 // memory files, the system prompt is exactly the configured base — the cache
 // prefix is untouched by the memory feature.

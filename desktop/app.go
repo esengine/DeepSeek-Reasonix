@@ -1702,6 +1702,7 @@ type SkillRootView struct {
 	Priority   int                  `json:"priority"`
 	Status     string               `json:"status"`
 	Configured bool                 `json:"configured"`
+	Removable  bool                 `json:"removable"`
 	Skills     int                  `json:"skills"`
 	SkillItems []SkillRootSkillView `json:"skillItems,omitempty"`
 	Warning    string               `json:"warning,omitempty"`
@@ -1886,12 +1887,14 @@ func skillRootsView() []SkillRootView {
 	cfg, _ := config.Load()
 	userCfg := config.LoadForEdit(config.UserConfigPath())
 	var custom []string
+	var excluded []string
 	maxDepth := 3
 	if cfg != nil {
 		custom = cfg.SkillCustomPaths()
+		excluded = cfg.SkillExcludedPaths()
 		maxDepth = cfg.SkillMaxDepth()
 	}
-	st := skill.New(skill.Options{ProjectRoot: cwd, CustomPaths: custom, MaxDepth: maxDepth, DisableBuiltins: true, Stderr: io.Discard})
+	st := skill.New(skill.Options{ProjectRoot: cwd, CustomPaths: custom, ExcludedPaths: excluded, MaxDepth: maxDepth, DisableBuiltins: true, Stderr: io.Discard})
 	counts := map[string]int{}
 	skillItems := map[string][]SkillRootSkillView{}
 	roots := st.Roots()
@@ -1925,6 +1928,7 @@ func skillRootsView() []SkillRootView {
 			Priority:   r.Priority + 1,
 			Status:     string(r.Status),
 			Configured: r.Scope == skill.ScopeCustom && userConfigured[dir],
+			Removable:  true,
 			Skills:     counts[dir],
 			SkillItems: skillItems[dir],
 		}
@@ -1940,6 +1944,7 @@ func skillRootsView() []SkillRootView {
 				Scope:      string(skill.ScopeCustom),
 				Status:     "inactive",
 				Configured: true,
+				Removable:  true,
 				Warning:    "configured in user config but not active in this workspace; project [skills].paths may override it",
 			})
 		}
@@ -1978,17 +1983,25 @@ func (a *App) PickSkillFolder() (string, error) {
 // controller so the skills index and slash menu reflect it immediately.
 func (a *App) AddSkillPath(path string) error {
 	path = normalizeSkillPath(path)
+	workspaceRoot := a.activeWorkspaceRoot()
 	return a.applyConfigChange(func(c *config.Config) error {
+		if isConventionSkillRoot(path, workspaceRoot) {
+			return c.RestoreSkillPath(path)
+		}
 		return c.AddSkillPath(path)
 	})
 }
 
-// RemoveSkillPath removes a custom skill root from the user config and rebuilds.
+// RemoveSkillPath removes a skill source from the user config and rebuilds. For
+// convention roots, it records a pseudo-delete in excluded_paths.
 func (a *App) RemoveSkillPath(path string) error {
 	path = normalizeSkillPath(path)
 	return a.applyConfigChange(func(c *config.Config) error {
-		_, err := c.RemoveSkillPath(path)
-		return err
+		removed, err := c.RemoveSkillPath(path)
+		if err != nil || removed {
+			return err
+		}
+		return c.ExcludeSkillPath(path)
 	})
 }
 
@@ -2039,6 +2052,29 @@ func normalizeSkillPath(path string) string {
 		}
 	}
 	return filepath.Clean(path)
+}
+
+func isConventionSkillRoot(path, workspaceRoot string) bool {
+	want := config.CanonicalSkillPath(path)
+	if want == "" {
+		return false
+	}
+	bases := []string{workspaceRoot}
+	if home, err := os.UserHomeDir(); err == nil {
+		bases = append(bases, home)
+	}
+	for _, base := range bases {
+		base = strings.TrimSpace(base)
+		if base == "" {
+			continue
+		}
+		for _, dir := range config.ConventionDirs {
+			if want == config.CanonicalSkillPath(filepath.Join(base, dir, skill.SkillsDirname)) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func skillRootPath(path string) string {

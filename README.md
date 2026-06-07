@@ -119,6 +119,7 @@ enabled = []   # omit/empty = all built-ins
 
 [skills]
 # paths = ["~/my-skills", "../shared/skills"]   # extra custom skill roots
+# excluded_paths = ["~/.agents/skills"]         # hide convention roots without deleting folders
 # disabled_skills = ["review"]                  # hide skills until /skill enable <name>
 
 [permissions]

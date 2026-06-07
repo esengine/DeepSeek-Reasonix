@@ -298,12 +298,14 @@ func (c *Config) NetworkProxyMode() string {
 
 // SkillsConfig configures skill discovery. Paths adds extra "custom"-scope skill
 // roots — each a directory of SKILL.md / <name>.md playbooks — scanned between
-// the project roots (.reasonix/.agents/.claude under the workspace) and the
-// global roots (the same three under the home dir). ~ and relative paths and
-// ${VAR} expansion are supported. DisabledSkills hides named skills from the
-// agent prompt, slash invocation, and skill tools while keeping them manageable.
+// the project roots (.reasonix/.agents/.agent/.claude under the workspace) and
+// the global roots. ExcludedPaths hides matching discovery roots without deleting
+// folders. ~, relative paths, and ${VAR} expansion are supported. DisabledSkills
+// hides named skills from the agent prompt, slash invocation, and skill tools
+// while keeping them manageable.
 type SkillsConfig struct {
 	Paths          []string `toml:"paths"`
+	ExcludedPaths  []string `toml:"excluded_paths"`
 	DisabledSkills []string `toml:"disabled_skills"`
 	MaxDepth       int      `toml:"max_depth"`
 }
@@ -313,6 +315,18 @@ type SkillsConfig struct {
 func (c *Config) SkillCustomPaths() []string {
 	var out []string
 	for _, p := range c.Skills.Paths {
+		if p = ExpandVars(p); strings.TrimSpace(p) != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// SkillExcludedPaths returns configured skill roots that should be hidden from
+// discovery, with ${VAR} expanded and empty entries dropped.
+func (c *Config) SkillExcludedPaths() []string {
+	var out []string
+	for _, p := range c.Skills.ExcludedPaths {
 		if p = ExpandVars(p); strings.TrimSpace(p) != "" {
 			out = append(out, p)
 		}

@@ -115,6 +115,7 @@ enabled = []   # 省略/为空 = 全部内置工具
 
 [skills]
 # paths = ["~/my-skills", "../shared/skills"]   # 额外的自定义技能目录
+# excluded_paths = ["~/.agents/skills"]         # 隐藏约定来源，不删除目录
 # disabled_skills = ["review"]                  # 隐藏技能，直到 /skill enable <name>
 
 [permissions]

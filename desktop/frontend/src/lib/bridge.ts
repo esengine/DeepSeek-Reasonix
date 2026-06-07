@@ -429,13 +429,14 @@ function makeMockApp(): AppBindings {
     { name: "init", description: "Scaffold a REASONIX.md for this repo", scope: "builtin", runAs: "inline", enabled: true },
   ];
   let capSkillRoots: SkillRootView[] = [
-    { dir: "~/projects/reasonix/.reasonix/skills", scope: "project", priority: 1, status: "missing", configured: false, skills: 0 },
+    { dir: "~/projects/reasonix/.reasonix/skills", scope: "project", priority: 1, status: "missing", configured: false, removable: true, skills: 0 },
     {
       dir: "~/my-skills",
       scope: "custom",
       priority: 5,
       status: "ok",
       configured: true,
+      removable: true,
       skills: 1,
       skillItems: [{ name: "review", description: "Review the staged diff", scope: "custom", runAs: "inline" }],
     },
@@ -445,6 +446,7 @@ function makeMockApp(): AppBindings {
       priority: 6,
       status: "ok",
       configured: false,
+      removable: true,
       skills: 2,
       skillItems: [
         { name: "explore", description: "Investigate the codebase in an isolated subagent", scope: "global", runAs: "subagent" },
@@ -1185,6 +1187,7 @@ function makeMockApp(): AppBindings {
           priority: capSkillRoots.length + 1,
           status: "ok",
           configured: true,
+          removable: true,
           skills: 1,
           skillItems: [{ name: "local-dev", description: "Local custom development workflow", scope: "custom", runAs: "inline" }],
         });
@@ -1194,7 +1197,7 @@ function makeMockApp(): AppBindings {
       }
     },
     async RemoveSkillPath(path: string) {
-      capSkillRoots = capSkillRoots.filter((r) => !(r.scope === "custom" && r.dir === path));
+      capSkillRoots = capSkillRoots.filter((r) => r.dir !== path);
       if (!capSkillRoots.some((r) => r.scope === "custom")) {
         const idx = capSkills.findIndex((s) => s.name === "local-dev");
         if (idx >= 0) capSkills.splice(idx, 1);
