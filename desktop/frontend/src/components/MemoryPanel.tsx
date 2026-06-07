@@ -105,12 +105,19 @@ export function MemoryPanel({
   const [editingPath, setEditingPath] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
+
   const [highlight, setHighlight] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
   const [expanded, setExpanded] = useState<string | null>(null);
   const [confirmForget, setConfirmForget] = useState<string | null>(null);
   const factRefs = useRef<Record<string, HTMLElement | null>>({});
+
+  // Filter input — a single substring search across docs and facts. The
+  // substring is case-insensitive and matches anywhere in the body or the
+  // path; an empty string shows everything. The filter is purely frontend
+  // (no kernel round-trip) so it's instant and reversible.
+  const [filter, setFilter] = useState("");
 
   const facts = view?.facts ?? [];
   const factNames = useMemo(() => new Set(facts.map((f) => f.name)), [facts]);
@@ -119,17 +126,22 @@ export function MemoryPanel({
     [facts],
   );
   const normalizedQuery = query.trim().toLowerCase();
+  const normalizedFilter = filter.trim().toLowerCase();
   const filteredFacts = useMemo(
     () =>
       facts.filter((f) => {
         if (typeFilter !== "all" && f.type !== typeFilter) return false;
+        if (normalizedFilter) {
+          const hay = [f.name, f.description, f.body].join(" ").toLowerCase();
+          if (!hay.includes(normalizedFilter)) return false;
+        }
         if (!normalizedQuery) return true;
         return [displayTitle(f), f.name, f.description, f.type, f.body]
           .join(" ")
           .toLowerCase()
           .includes(normalizedQuery);
       }),
-    [facts, normalizedQuery, typeFilter],
+    [facts, normalizedQuery, normalizedFilter, typeFilter],
   );
 
   const scrollToFact = (name: string) => {
@@ -194,6 +206,13 @@ export function MemoryPanel({
       setBusy(false);
     }
   };
+
+  const filteredDocs = useMemo(() => {
+    if (!view) return [];
+    const q = filter.trim().toLowerCase();
+    if (!q) return view.docs;
+    return view.docs.filter((d) => d.body.toLowerCase().includes(q) || d.path.toLowerCase().includes(q));
+  }, [view, filter]);
 
   const scopes = view?.scopes ?? [];
   // Default the scope selector to "project" when present, else the first option.
@@ -457,10 +476,18 @@ export function MemoryPanel({
             {/* Doc files — editable in place. */}
             <section className="mem-section">
               <div className="mem-section__title">{t("memory.instructionFiles")}</div>
-              {view.docs.length === 0 && (
-                <div className="mem-empty">{t("memory.noDocs")}</div>
+              <input
+                className="mem-input mem-filter"
+                placeholder={t("memory.filterPlaceholder")}
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                spellCheck={false}
+                aria-label={t("memory.filterPlaceholder")}
+              />
+              {filteredDocs.length === 0 && (
+                <div className="mem-empty">{filter ? t("memory.noFilterMatch") : t("memory.noDocs")}</div>
               )}
-              {view.docs.map((d) => {
+              {filteredDocs.map((d) => {
                 const editing = editingPath === d.path;
                 return (
                   <div className="mem-doc" key={d.path}>
@@ -507,6 +534,31 @@ export function MemoryPanel({
                   </div>
                 );
               })}
+            </section>
+
+
+
+            {/* Saved auto-memories — read-only; the model owns these. */}
+            <section className="mem-section">
+              <div className="mem-section__title">{t("memory.savedMemories")}</div>
+              {filteredFacts.length === 0 ? (
+                <div className="mem-empty">{filter ? t("memory.noFilterMatch") : t("memory.noFacts")}</div>
+              ) : (
+                filteredFacts.map((f) => (
+                  <div className="mem-fact" key={f.name} title={f.body}>
+                    <span className={`badge badge--${f.type}`}>{f.type}</span>
+                    <div className="mem-fact__text">
+                      <div className="mem-fact__name">{f.name}</div>
+                      <div className="mem-fact__desc">{f.description}</div>
+                    </div>
+                  </div>
+                ))
+              )}
+              {view.storeDir && (
+                <div className="mem-hint" title={view.storeDir}>
+                  {t("memory.storedUnder", { dir: view.storeDir })}
+                </div>
+              )}
             </section>
           </div>
         )}

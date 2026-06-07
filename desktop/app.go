@@ -371,7 +371,7 @@ func (a *App) restoreOrBuildTabs() {
 		}
 		a.mu.Unlock()
 		for _, tab := range toBuild {
-			go a.buildTabController(tab)
+			a.startTabControllerBuild(tab)
 		}
 		return
 	}
@@ -385,7 +385,7 @@ func (a *App) restoreOrBuildTabs() {
 	a.tabOrder = append(a.tabOrder, tab.ID)
 	a.activeTabID = tab.ID
 	a.mu.Unlock()
-	go a.buildTabController(tab)
+	a.startTabControllerBuild(tab)
 }
 
 func (a *App) createTabEntry(scope, workspaceRoot, topicID string) *WorkspaceTab {
@@ -798,7 +798,7 @@ func (a *App) Fork(turn int) (TabMeta, error) {
 	a.mu.Unlock()
 
 	a.emitProjectTreeChanged()
-	go a.buildTabController(tab)
+	a.startTabControllerBuild(tab)
 	return meta, nil
 }
 

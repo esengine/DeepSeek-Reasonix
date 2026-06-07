@@ -1584,6 +1584,55 @@ func (c *Controller) connectMCPSpec(s plugin.Spec) (int, error) {
 	return len(tools), nil
 }
 
+// ImportMCPEntries persists selected MCP entries and attempts to connect them
+// live. A connection failure does not roll back the config import: the user can
+// fix local dependencies and reconnect in a later session.
+func (c *Controller) ImportMCPEntries(entries []config.PluginEntry) (total, added, updated, connected, failed, skipped int, err error) {
+	cfg, lerr := config.Load()
+	if lerr != nil {
+		return 0, 0, 0, 0, 0, 0, lerr
+	}
+	existing := make(map[string]bool, len(cfg.Plugins))
+	for _, p := range cfg.Plugins {
+		existing[p.Name] = true
+	}
+	for _, e := range entries {
+		if existing[e.Name] {
+			updated++
+		} else {
+			added++
+		}
+		if err := cfg.UpsertPlugin(e); err != nil {
+			return 0, 0, 0, 0, 0, 0, err
+		}
+		existing[e.Name] = true
+	}
+	if err := cfg.Save(); err != nil {
+		return 0, 0, 0, 0, 0, 0, err
+	}
+	for _, e := range entries {
+		if c.host != nil && containsString(c.host.ServerNames(), e.Name) {
+			skipped++
+			continue
+		}
+		if _, err := c.AddMCPServer(e); err != nil {
+			failed++
+			continue
+		}
+		connected++
+	}
+	return len(entries), added, updated, connected, failed, skipped, nil
+}
+
+func containsString(ss []string, want string) bool {
+	for _, s := range ss {
+		if s == want {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *Controller) ConfiguredMCPNames() []string {
 	cfg, err := config.Load()
 	if err != nil {

@@ -385,6 +385,7 @@ api_key_env = "MIMO_API_KEY"
 
 [tools]
 enabled = []   # omit/empty = all built-ins
+bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local cap
 
 [skills]
 # paths = ["~/my-skills", "../shared/skills"]   # extra custom skill roots

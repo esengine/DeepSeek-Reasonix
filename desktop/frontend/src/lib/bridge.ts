@@ -364,6 +364,12 @@ function baseName(path: string): string {
   return path.replace(/[/\\]+$/, "").split(/[/\\]/).filter(Boolean).pop() ?? path;
 }
 
+function browserPlatformOverride(): "darwin" | "windows" | "linux" | "" {
+  if (typeof window === "undefined" || window.runtime) return "";
+  const value = new URLSearchParams(window.location.search).get("platform");
+  return value === "darwin" || value === "windows" || value === "linux" ? value : "";
+}
+
 function mockScenario(): "demo" | "fresh" {
   if (typeof window === "undefined") return "demo";
   const value = new URLSearchParams(window.location.search).get("mock")?.trim().toLowerCase();
@@ -692,6 +698,8 @@ function makeMockApp(): AppBindings {
   ];
   return {
     async Platform() {
+      const override = browserPlatformOverride();
+      if (override) return override;
       // Mirror the OS the browser dev mock runs on.
       const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
       if (/Win/i.test(ua)) return "windows";
