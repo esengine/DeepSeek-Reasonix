@@ -46,6 +46,16 @@ func saveWorkspace(dir string) {
 	_ = os.WriteFile(p, []byte(dir), 0o644)
 }
 
+// clearWorkspace removes the active workspace pointer file so that no stale
+// reference remains after the current workspace is deleted.
+func clearWorkspace() {
+	p := workspaceStatePath()
+	if p == "" {
+		return
+	}
+	_ = os.Remove(p)
+}
+
 // loadWorkspace returns the remembered working folder, or "" if none.
 func loadWorkspace() string {
 	p := workspaceStatePath()
