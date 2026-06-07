@@ -10386,6 +10386,136 @@ a[href] {
   animation: none !important;
 }
 
+/* ── Branch indicator (changed-files view) ──────────────────────────── */
+.workspace-branch-indicator {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+.workspace-branch-indicator > svg {
+  flex-shrink: 0;
+  opacity: 0.6;
+}
+
+.workspace-branch-indicator > .workspace-branch-name {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.workspace-branch-indicator > .workspace-branch-name:hover {
+  background: var(--bg-hover, rgba(128, 128, 128, 0.08));
+}
+
+.workspace-branch-indicator > .workspace-branch-name span {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-branch-refresh {
+  margin-left: auto;
+  border: none;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.workspace-branch-refresh:hover {
+  color: var(--fg);
+  background: var(--bg-hover, rgba(128, 128, 128, 0.08));
+}
+
+.workspace-branch-refresh:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.workspace-branch-refresh .spinning {
+  animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.workspace-branch-menu {
+  min-width: 140px;
+  max-width: 260px;
+  max-height: 240px;
+}
+
+.workspace-branch-menu__inner {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.workspace-branch-menu__loading {
+  padding: 10px 12px;
+  color: var(--fg-muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.workspace-branch-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 12px;
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  text-align: left;
+}
+
+.workspace-branch-menu__item:hover {
+  background: var(--bg-hover, rgba(128, 128, 128, 0.08));
+}
+
+.workspace-branch-menu__item--active {
+  font-weight: 600;
+}
+
+.workspace-branch-menu__item svg {
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+.workspace-branch-menu__item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-branch-menu__item:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 /* Respect the OS reduced-motion preference: squash all animations and force
    instant scrolling so the UI feels immediate rather than web-like. */
 @media (prefers-reduced-motion: reduce) {

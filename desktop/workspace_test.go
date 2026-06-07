@@ -612,6 +612,7 @@ func TestWorkspaceChangesGitStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	runGit(t, "init")
+	runGit(t, "checkout", "-b", "feature/test")
 	if err := os.WriteFile("tracked.txt", []byte("v1\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -626,6 +627,9 @@ func TestWorkspaceChangesGitStatus(t *testing.T) {
 	got := (&App{}).WorkspaceChanges()
 	if !got.GitAvailable {
 		t.Fatalf("git unavailable: %s", got.GitErr)
+	}
+	if got.GitBranch != "feature/test" {
+		t.Fatalf("git branch = %q, want feature/test", got.GitBranch)
 	}
 	byPath := map[string]WorkspaceChangeView{}
 	for _, file := range got.Files {
@@ -725,6 +729,37 @@ func TestWorkspaceChangesUntrackedDirectoryListsFiles(t *testing.T) {
 	}
 }
 
+func TestWorkspaceChangesGitBranchDetachedHead(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	orig, _ := os.Getwd()
+	defer os.Chdir(orig)
+
+	dir := t.TempDir()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, "init")
+	runGit(t, "config", "user.email", "test@example.com")
+	runGit(t, "config", "user.name", "Test User")
+	if err := os.WriteFile("tracked.txt", []byte("v1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, "add", "tracked.txt")
+	runGit(t, "commit", "-m", "init")
+	short := gitOutput(t, "rev-parse", "--short", "HEAD")
+	runGit(t, "checkout", "--detach", "HEAD")
+
+	got := (&App{}).WorkspaceChanges()
+	if !got.GitAvailable {
+		t.Fatalf("git unavailable: %s", got.GitErr)
+	}
+	if got.GitBranch != "@"+short {
+		t.Fatalf("git branch = %q, want @%s", got.GitBranch, short)
+	}
+}
+
 func runGit(t *testing.T, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", args...)
@@ -732,6 +767,16 @@ func runGit(t *testing.T, args ...string) {
 	if err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
+}
+
+func gitOutput(t *testing.T, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // --- settings_app.go helpers ---

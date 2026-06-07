@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os/exec"
 	"path/filepath"
 	"sort"
@@ -30,6 +31,8 @@ func (a *App) WorkspaceChanges() WorkspaceChangesView {
 		out.GitErr = err.Error()
 		return out
 	}
+
+	out.GitBranch = workspaceGitBranch(base)
 
 	changes := map[string]*workspaceChangeAccumulator{}
 	add := func(path string) *workspaceChangeAccumulator {
@@ -176,4 +179,66 @@ func workspaceRelPathFromGitStatus(repoRoot, base, path string) string {
 		path = filepath.Join(repoRoot, filepath.FromSlash(path))
 	}
 	return normalizeWorkspaceRelPath(base, path)
+}
+
+// workspaceGitBranch returns the current git branch name for the repo rooted
+// at base, or an empty string when base is not inside a git repository or when
+// git is unavailable.
+func workspaceGitBranch(base string) string {
+	cmd := exec.Command("git", "-C", base, "branch", "--show-current")
+	proc.HideWindowDetached(cmd)
+	raw, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	if branch := strings.TrimSpace(string(raw)); branch != "" {
+		return branch
+	}
+
+	headCmd := exec.Command("git", "-C", base, "rev-parse", "--short", "HEAD")
+	proc.HideWindowDetached(headCmd)
+	raw, err = headCmd.Output()
+	if err != nil {
+		return ""
+	}
+	short := strings.TrimSpace(string(raw))
+	if short == "" {
+		return ""
+	}
+	return "@" + short
+}
+
+// GitBranches returns all local git branches for the active workspace's repo.
+func (a *App) GitBranches() ([]string, error) {
+	base, err := a.activeWorkspaceBase()
+	if err != nil {
+		return nil, err
+	}
+	cmd := exec.Command("git", "-C", base, "branch", "--format=%(refname:short)")
+	proc.HideWindowDetached(cmd)
+	raw, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+	branches := strings.FieldsFunc(strings.TrimSpace(string(raw)), func(r rune) bool { return r == '\n' })
+	return branches, nil
+}
+
+// GitCheckout switches the active workspace's git branch and returns the
+// current branch name, or an error when git is unavailable.
+func (a *App) GitCheckout(branch string) error {
+	base, err := a.activeWorkspaceBase()
+	if err != nil {
+		return err
+	}
+	cmd := exec.Command("git", "-C", base, "checkout", branch)
+	proc.HideWindowDetached(cmd)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		if len(out) > 0 {
+			return fmt.Errorf("git checkout: %s", strings.TrimSpace(string(out)))
+		}
+		return err
+	}
+	return nil
 }

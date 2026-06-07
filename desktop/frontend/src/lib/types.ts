@@ -321,6 +321,7 @@ export interface WorkspaceChangesView {
   files: WorkspaceChangeView[];
   gitAvailable: boolean;
   gitErr?: string;
+  gitBranch?: string;
 }
 
 export interface ComposerInsertRequest {

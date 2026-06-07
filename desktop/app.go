@@ -2983,6 +2983,7 @@ type WorkspaceChangesView struct {
 	Files        []WorkspaceChangeView `json:"files"`
 	GitAvailable bool                  `json:"gitAvailable"`
 	GitErr       string                `json:"gitErr,omitempty"`
+	GitBranch    string                `json:"gitBranch,omitempty"`
 }
 
 // workspaceNoiseNames are local cache/vendor entries hidden from the file tree

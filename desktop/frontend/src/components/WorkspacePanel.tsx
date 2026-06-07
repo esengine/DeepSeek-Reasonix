@@ -13,6 +13,7 @@ import {
   Folder,
   FolderTree,
   FolderX,
+  Check,
   GitBranch,
   Maximize2,
   MessageSquarePlus,
@@ -221,6 +222,10 @@ export function WorkspacePanel({
   const [treeResizing, setTreeResizing] = useState(false);
   const [recentOpen, setRecentOpen] = useState(false);
   const recentAnchorRef = useRef<HTMLButtonElement>(null);
+  const [branchMenuOpen, setBranchMenuOpen] = useState(false);
+  const [branchList, setBranchList] = useState<string[]>([]);
+  const [switchingBranch, setSwitchingBranch] = useState(false);
+  const branchBtnRef = useRef<HTMLButtonElement>(null);
   const openDirsRef = useRef(openDirs);
 
   useEffect(() => {
@@ -247,6 +252,33 @@ export function WorkspacePanel({
       if (changesRequestRef.current === requestId) setLoadingChanges(false);
     }
   }, []);
+
+  const openBranchMenu = useCallback(async () => {
+    try {
+      const branches = await app.GitBranches();
+      setBranchList(branches);
+    } catch {
+      setBranchList([]);
+    }
+    setBranchMenuOpen((prev) => !prev);
+  }, []);
+
+  const switchBranch = useCallback(
+    async (branch: string) => {
+      if (branch === changes?.gitBranch) return;
+      setSwitchingBranch(true);
+      try {
+        await app.GitCheckout(branch);
+        await loadChanges();
+      } catch {
+        // Error message shown via the changes view
+      } finally {
+        setSwitchingBranch(false);
+        setBranchMenuOpen(false);
+      }
+    },
+    [changes?.gitBranch, loadChanges],
+  );
 
   const selectFile = useCallback(
     (path: string) => {
@@ -902,6 +934,56 @@ export function WorkspacePanel({
                 </button>
               </Tooltip>
             )}
+          </div>
+        )}
+
+        {viewMode === "changed" && changes?.gitBranch && (
+          <div className="workspace-branch-indicator">
+            <GitBranch size={13} />
+            <button
+              ref={branchBtnRef}
+              className="workspace-branch-name"
+              onClick={openBranchMenu}
+            >
+              <span>{changes.gitBranch}</span>
+              <ChevronDown size={11} />
+            </button>
+            <AnchoredPopover
+              open={branchMenuOpen}
+              anchorRef={branchBtnRef}
+              onClose={() => setBranchMenuOpen(false)}
+              className="workspace-branch-menu"
+              placement="bottom"
+              align="start"
+              offset={4}
+            >
+              <div className="workspace-branch-menu__inner">
+                {branchList.length === 0 ? (
+                  <div className="workspace-branch-menu__loading">{t("workspace.loading")}</div>
+                ) : (
+                  branchList.map((b) => (
+                    <button
+                      key={b}
+                      type="button"
+                      className={`workspace-branch-menu__item${b === changes.gitBranch ? " workspace-branch-menu__item--active" : ""}`}
+                      onClick={() => switchBranch(b)}
+                      disabled={switchingBranch}
+                    >
+                      {b === changes.gitBranch && <Check size={13} />}
+                      <span>{b}</span>
+                    </button>
+                  ))
+                )}
+              </div>
+            </AnchoredPopover>
+            <button
+              className="workspace-branch-refresh"
+              onClick={loadChanges}
+              disabled={loadingChanges}
+              title={t("workspace.refreshChanges")}
+            >
+              <RefreshCw size={12} className={loadingChanges ? "spinning" : ""} />
+            </button>
           </div>
         )}
 
