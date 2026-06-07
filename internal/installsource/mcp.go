@@ -240,8 +240,12 @@ func parseMCPJSON(b []byte) ([]config.PluginEntry, []string, error) {
 // validateMCPEntry enforces the per-transport required fields. It is the
 // last line of defense before a server entry is persisted.
 func validateMCPEntry(e config.PluginEntry) error {
-	if strings.TrimSpace(e.Name) == "" {
+	name := strings.TrimSpace(e.Name)
+	if name == "" {
 		return newErr(ErrInvalidManifest, "MCP server name is required")
+	}
+	if !config.IsValidSkillName(name) {
+		return newErr(ErrInvalidManifest, "MCP server name %q is invalid; use letters, digits, '.', '_', or '-', starting with a letter or digit, up to 64 characters", e.Name)
 	}
 	// Reject explicit unknown transports. Without this check, normalizeTransport
 	// would silently map "carrier-pigeon" -> "auto" -> "stdio" and the entry

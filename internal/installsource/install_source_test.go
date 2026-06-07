@@ -504,6 +504,7 @@ func TestPlanMCPJSONRejectsInvalid(t *testing.T) {
 		{"stdio no command", `{"mcpServers": {"x": {"type": "stdio"}}}`},
 		{"http no url", `{"mcpServers": {"x": {"type": "http"}}}`},
 		{"unknown transport", `{"mcpServers": {"x": {"type": "smoke", "command": "c"}}}`},
+		{"invalid name", `{"mcpServers": {"bad/name": {"command": "c"}}}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1191,6 +1192,9 @@ func TestValidateMCPEntry(t *testing.T) {
 	}
 	if err := validateMCPEntry(config.PluginEntry{Name: ""}); err == nil {
 		t.Error("empty name should fail")
+	}
+	if err := validateMCPEntry(config.PluginEntry{Name: "bad/name", Command: "y"}); err == nil {
+		t.Error("invalid name should fail")
 	}
 	if err := validateMCPEntry(config.PluginEntry{Name: "x", Type: "carrier-pigeon", Command: "c"}); err == nil {
 		t.Error("unknown transport should fail")

@@ -1,8 +1,8 @@
 // Package installsource implements the `install_source` tool: a two-phase
 // installer for Reasonix skills and MCP servers. A single call resolves a
 // source (URL, local file/folder, .mcp.json, package name, or local executable)
-// into a deterministic plan, then — only when the caller sets apply=true and
-// any registered ApprovalFunc consents — performs the writes and MCP connects.
+// into a deterministic plan. When the caller sets apply=true, any registered
+// ApprovalFunc may still deny that exact plan before writes or MCP connects run.
 //
 // The two-phase design exists so the model (or a UI) can inspect a plan before
 // it touches disk or spawns subprocesses. `install_source` deliberately does
