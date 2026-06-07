@@ -45,6 +45,10 @@ type PastedBlock = {
   text: string;
 };
 
+type WebkitFileEntry = {
+  isDirectory?: boolean;
+};
+
 function lineCount(s: string): number {
   if (s === "") return 0;
   return s.split(/\r\n|\r|\n/).length;
@@ -573,6 +577,40 @@ export function Composer({
   const hasFileDrag = (dataTransfer: DataTransfer): boolean =>
     Array.from(dataTransfer.items).some((it) => it.kind === "file") || dataTransfer.files.length > 0;
 
+  const fileDragItems = (dataTransfer: DataTransfer): DataTransferItem[] =>
+    Array.from(dataTransfer.items).filter((item) => item.kind === "file");
+
+  const getWebkitFileEntry = (item: DataTransferItem): WebkitFileEntry | null => {
+    const getAsEntry = (item as DataTransferItem & { webkitGetAsEntry?: () => WebkitFileEntry | null }).webkitGetAsEntry;
+    return typeof getAsEntry === "function" ? getAsEntry.call(item) : null;
+  };
+
+  const hasPathlessFileDrop = (dataTransfer: DataTransfer): boolean => {
+    const items = fileDragItems(dataTransfer);
+    if (items.length === 0) return dataTransfer.files.length > 0;
+    return items.some((item) => getWebkitFileEntry(item) === null);
+  };
+
+  const clearWailsDropTarget = () => {
+    document.querySelectorAll(".wails-drop-target-active").forEach((el) => el.classList.remove("wails-drop-target-active"));
+  };
+
+  const stopNativeFileDrop = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.nativeEvent.stopImmediatePropagation();
+    clearWailsDropTarget();
+  };
+
+  const onFileDropCapture = (e: DragEvent<HTMLDivElement>) => {
+    if (hasWorkspaceReferenceDrag(e.dataTransfer) || !hasFileDrag(e.dataTransfer) || !hasPathlessFileDrop(e.dataTransfer)) return;
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length === 0) return;
+    stopNativeFileDrop(e);
+    setDragOver(false);
+    attachFiles(files);
+  };
+
   const onDrop = (e: DragEvent<HTMLDivElement>) => {
     const droppedWorkspaceRef = readWorkspaceReferenceDrag(e.dataTransfer);
     if (droppedWorkspaceRef) {
@@ -826,6 +864,7 @@ export function Composer({
     <div
       className={`composer-wrap${decisionPending ? " composer-wrap--decision-pending" : ""}`}
       style={{ "--wails-drop-target": "drop" } as CSSProperties}
+      onDropCapture={onFileDropCapture}
     >
       <AnchoredPopover
         open={workspaceMenuOpen && !!cwd}
@@ -892,7 +931,7 @@ export function Composer({
             {filteredWorkspaces.length === 0 && <div className="workspace-switcher__empty">{t("composer.noProjectMatches")}</div>}
           </div>
           <div className="workspace-switcher__actions">
-            <button onClick={() => void chooseWorkspace()}>
+            <button type="button" onClick={() => void chooseWorkspace()}>
               <FolderPlus size={15} />
               <span>{t("composer.addProject")}</span>
             </button>

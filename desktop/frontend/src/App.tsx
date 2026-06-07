@@ -2,16 +2,16 @@ import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } f
 import type { CSSProperties, KeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import { ShellExpandProvider, useShellExpand } from "./lib/shellExpand";
 import {
-  SquarePen,
-  Brain,
   Blocks,
+  Download,
+  SquarePen,
   CircleGauge,
   FileText,
+  FileJson,
   GitBranch,
   History,
   Settings as SettingsIcon,
   Pencil,
-  MoreHorizontal,
   PanelLeftClose,
   PanelLeftOpen,
   PanelRightClose,
@@ -21,7 +21,7 @@ import {
 import logoWordmark from "./assets/logo-wordmark.svg";
 import { asArray } from "./lib/array";
 import { clearLegacyLangPref, normalizeLangPref, readLegacyLangPref, t, useI18n, useT } from "./lib/i18n";
-import { useController } from "./lib/useController";
+import { useController, type Item, type LiveStream } from "./lib/useController";
 import { app, onProjectTreeChanged } from "./lib/bridge";
 import { Transcript } from "./components/Transcript";
 import { Composer } from "./components/Composer";
@@ -37,9 +37,11 @@ import { UpdateBanner } from "./components/UpdateBanner";
 import { ContextPanel } from "./components/ContextPanel";
 import { WorkspacePanel } from "./components/WorkspacePanel";
 import { Tooltip } from "./components/Tooltip";
+import { StartupSplash, shouldShowStartupSplash } from "./components/StartupSplash";
 import { OnboardingOverlay } from "./components/OnboardingOverlay";
 import { TabBar } from "./components/TabBar";
 import { ProjectTree } from "./components/ProjectTree";
+import { CopyButton } from "./components/CopyButton";
 import { parseTodos } from "./lib/tools";
 import { shouldShowTodoPanel } from "./lib/todoVisibility";
 import type { ComposerInsertRequest, MemoryView, Meta, Mode, SessionMeta, TabMeta } from "./lib/types";
@@ -208,6 +210,95 @@ function workspaceDisplayName(path?: string): string {
   return parts.length > 0 ? parts[parts.length - 1] : path;
 }
 
+function materializeLiveItems(items: Item[], live?: LiveStream): Item[] {
+  if (!live) return items;
+  return items.map((item) => {
+    if (item.kind !== "assistant" || item.id !== live.id) return item;
+    return { ...item, text: live.text, reasoning: live.reasoning, streaming: true };
+  });
+}
+
+function fence(label: string, value: string): string {
+  if (!value.trim()) return "";
+  const fenceToken = value.includes("```") ? "````" : "```";
+  return `${label}\n${fenceToken}\n${value.trim()}\n${fenceToken}`;
+}
+
+function sessionItemsToMarkdown(title: string, items: Item[], live?: LiveStream): string {
+  const lines: string[] = [`# ${title.trim() || "Reasonix session"}`, ""];
+  for (const item of materializeLiveItems(items, live)) {
+    switch (item.kind) {
+      case "user":
+        lines.push("## User", "", item.text.trim(), "");
+        break;
+      case "assistant":
+        lines.push("## Assistant");
+        if (item.reasoning.trim()) {
+          lines.push("", "### Reasoning", "", item.reasoning.trim());
+        }
+        if (item.text.trim()) {
+          lines.push("", item.text.trim());
+        }
+        lines.push("");
+        break;
+      case "tool":
+        lines.push(`### Tool: ${item.name}`);
+        if (item.args.trim()) lines.push("", fence("Args", item.args));
+        if (item.output?.trim()) lines.push("", fence("Output", item.output));
+        if (item.error?.trim()) lines.push("", fence("Error", item.error));
+        lines.push("");
+        break;
+      case "phase":
+        lines.push(`### Phase`, "", item.text.trim(), "");
+        break;
+      case "notice":
+        lines.push(`### ${item.level === "warn" ? "Warning" : "Notice"}`, "", item.text.trim(), "");
+        break;
+      case "compaction":
+        lines.push("### Context Compaction", "");
+        if (item.pending) {
+          lines.push("Compaction pending.");
+        } else {
+          lines.push(`Messages: ${item.messages}`);
+          if (item.trigger) lines.push(`Trigger: ${item.trigger}`);
+          if (item.summary.trim()) lines.push("", item.summary.trim());
+        }
+        lines.push("");
+        break;
+    }
+  }
+  return lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
+}
+
+function sessionItemsToJson(title: string, items: Item[], live?: LiveStream): string {
+  return JSON.stringify(
+    {
+      title,
+      exportedAt: new Date().toISOString(),
+      items: materializeLiveItems(items, live),
+    },
+    null,
+    2,
+  );
+}
+
+function safeFilename(name: string): string {
+  const cleaned = name.trim().replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, " ").slice(0, 80);
+  return cleaned || "reasonix-session";
+}
+
+function downloadTextFile(filename: string, text: string, mime: string): void {
+  const blob = new Blob([text], { type: `${mime};charset=utf-8` });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 
 /** Global hotkey handler for shell-expand toggle (Ctrl/Cmd+B). */
 function ShellHotkeys() {
@@ -269,6 +360,7 @@ export default function App() {
   const [tabMetas, setTabMetas] = useState<TabMeta[]>([]);
   const [tabOrderIds, setTabOrderIds] = useState<string[]>([]);
   const [tabRevealSignal, setTabRevealSignal] = useState(0);
+  const [startupSplashVisible, setStartupSplashVisible] = useState<boolean>(() => shouldShowStartupSplash());
   // null until the mount probe resolves; true shows the overlay. Probed once —
   // clearing the key mid-session is the Settings panel's job, not the gate's.
   const [needsOnboarding, setNeedsOnboarding] = useState<boolean | null>(null);
@@ -291,6 +383,7 @@ export default function App() {
   const [capsOpen, setCapsOpen] = useState(false);
   const [renamingTopicId, setRenamingTopicId] = useState<string | null>(null);
   const [topicTitleDraft, setTopicTitleDraft] = useState("");
+  const [topicExportOpen, setTopicExportOpen] = useState(false);
   const topicRenameSkipCommitRef = useRef(false);
   const topicRenameCommitHandledRef = useRef(false);
 
@@ -358,6 +451,7 @@ export default function App() {
     () => tabMetas.find((tab) => tab.id === activeTabId) ?? tabMetas.find((tab) => tab.active),
     [activeTabId, tabMetas],
   );
+  const startupSplashHold = state.meta?.ready !== true && !state.meta?.startupErr;
   const mode = activeTabId ? modesByTab[activeTabId] ?? "normal" : "normal";
   const setMode = useCallback(
     (next: Mode | ((prev: Mode) => Mode)) => {
@@ -520,6 +614,30 @@ export default function App() {
   // and a transcript update collide, the keystroke is processed immediately
   // and the transcript re-render is deferred to idle time.
   const deferredItems = useDeferredValue(state.items);
+  const sessionTitle = topicTitle(activeTab);
+  const sessionMarkdown = useMemo(() => sessionItemsToMarkdown(sessionTitle, state.items, state.live), [sessionTitle, state.items, state.live]);
+  const sessionJson = useMemo(() => sessionItemsToJson(sessionTitle, state.items, state.live), [sessionTitle, state.items, state.live]);
+  const sessionHasContent = state.items.length > 0 || Boolean(state.live?.text || state.live?.reasoning);
+
+  useEffect(() => {
+    if (!topicExportOpen) return;
+    const onDown = (event: MouseEvent) => {
+      const target = event.target as Element | null;
+      if (!target?.closest(".topicbar__export")) setTopicExportOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [topicExportOpen]);
+
+  const exportSession = useCallback(
+    (format: "markdown" | "json") => {
+      const base = safeFilename(sessionTitle);
+      if (format === "json") downloadTextFile(`${base}.json`, sessionJson, "application/json");
+      else downloadTextFile(`${base}.md`, sessionMarkdown, "text/markdown");
+      setTopicExportOpen(false);
+    },
+    [sessionJson, sessionMarkdown, sessionTitle],
+  );
 
   useEffect(() => {
     if (!pendingPlanRevision || state.running) return;
@@ -1234,16 +1352,13 @@ export default function App() {
                 <span>{t("sidebar.trash")}</span>
               </button>
             </Tooltip>
-            <Tooltip label={t("topbar.memory")} fill side="right" disabled={sidebarNavTooltipDisabled}>
-              <button className="sidebar__navitem" onClick={() => void openMemory()}>
-                <Brain size={15} />
-                <span>{t("topbar.memory")}</span>
-              </button>
-            </Tooltip>
-            <Tooltip label={t("caps.title")} fill side="right" disabled={sidebarNavTooltipDisabled}>
-              <button className="sidebar__navitem" onClick={() => setCapsOpen(true)}>
+            <Tooltip label={t("sidebar.capabilities")} fill side="right" disabled={sidebarNavTooltipDisabled}>
+              <button
+                className="sidebar__navitem"
+                onClick={() => setCapsOpen(true)}
+              >
                 <Blocks size={15} />
-                <span>{t("caps.title")}</span>
+                <span>{t("sidebar.capabilities")}</span>
               </button>
             </Tooltip>
             <Tooltip label={t("topbar.settings")} fill side="right" disabled={sidebarNavTooltipDisabled}>
@@ -1350,11 +1465,39 @@ export default function App() {
             </div>
             <div className="topicbar__spacer" />
             <div className="topicbar__actions">
-              <Tooltip label={t("topicBar.more")}>
-                <button className="topicbar__icon-btn">
-                  <MoreHorizontal size={16} />
-                </button>
-              </Tooltip>
+              <CopyButton
+                text={sessionMarkdown}
+                label={t("topicBar.copyAll")}
+                showLabel={false}
+                className="topicbar__action-btn topicbar__action-btn--icon"
+              />
+              <div className={`topicbar__export${topicExportOpen ? " topicbar__export--open" : ""}`}>
+                <Tooltip label={t("topicBar.export")}>
+                  <button
+                    className="topicbar__action-btn topicbar__action-btn--icon"
+                    type="button"
+                    disabled={!sessionHasContent}
+                    aria-label={t("topicBar.export")}
+                    aria-haspopup="menu"
+                    aria-expanded={topicExportOpen}
+                    onClick={() => setTopicExportOpen((open) => !open)}
+                  >
+                    <Download size={14} />
+                  </button>
+                </Tooltip>
+                {topicExportOpen && (
+                  <div className="topicbar__export-menu" role="menu">
+                    <button type="button" role="menuitem" onClick={() => exportSession("markdown")}>
+                      <FileText size={13} />
+                      <span>{t("topicBar.exportMarkdown")}</span>
+                    </button>
+                    <button type="button" role="menuitem" onClick={() => exportSession("json")}>
+                      <FileJson size={13} />
+                      <span>{t("topicBar.exportJson")}</span>
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </header>
 
@@ -1571,6 +1714,10 @@ export default function App() {
       {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} onChanged={() => void refreshMeta()} />}
 
       {capsOpen && <CapabilitiesPanel onClose={() => setCapsOpen(false)} />}
+
+      {startupSplashVisible && (
+        <StartupSplash hold={startupSplashHold} onDone={() => setStartupSplashVisible(false)} />
+      )}
 
       {needsOnboarding && <OnboardingOverlay onComplete={() => setNeedsOnboarding(false)} />}
     </div>

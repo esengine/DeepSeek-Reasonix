@@ -7,6 +7,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"reasonix/internal/event"
 )
@@ -14,10 +15,11 @@ import (
 // fakeNotifier captures Notify calls and answers Request via an injectable hook,
 // standing in for *Conn in adapter unit tests.
 type fakeNotifier struct {
-	mu      sync.Mutex
-	notifs  []capturedNotif
-	onReq   func(method string, params any) (json.RawMessage, error)
-	reqSeen []capturedNotif
+	mu       sync.Mutex
+	notifs   []capturedNotif
+	onReq    func(method string, params any) (json.RawMessage, error)
+	onReqCtx func(ctx context.Context, method string, params any) (json.RawMessage, error)
+	reqSeen  []capturedNotif
 }
 
 type capturedNotif struct {
@@ -32,10 +34,13 @@ func (f *fakeNotifier) Notify(method string, params any) error {
 	return nil
 }
 
-func (f *fakeNotifier) Request(_ context.Context, method string, params any) (json.RawMessage, error) {
+func (f *fakeNotifier) Request(ctx context.Context, method string, params any) (json.RawMessage, error) {
 	f.mu.Lock()
 	f.reqSeen = append(f.reqSeen, capturedNotif{method, params})
 	f.mu.Unlock()
+	if f.onReqCtx != nil {
+		return f.onReqCtx(ctx, method, params)
+	}
 	if f.onReq != nil {
 		return f.onReq(method, params)
 	}
@@ -255,6 +260,48 @@ func TestUpdateSinkApprovalDenied(t *testing.T) {
 				t.Fatal("approve was never called")
 			}
 		})
+	}
+}
+
+func TestUpdateSinkApprovalUsesTurnContext(t *testing.T) {
+	reqStarted := make(chan struct{})
+	fn := &fakeNotifier{onReqCtx: func(ctx context.Context, _ string, _ any) (json.RawMessage, error) {
+		close(reqStarted)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}}
+	sink := newUpdateSink(fn, "sess-1")
+	turnCtx, cancel := context.WithCancel(context.Background())
+	sink.setTurnContext(turnCtx)
+	got := make(chan approveCall, 1)
+	sink.bindApprove(func(id string, allow, session, persist bool) { got <- approveCall{id, allow, session, persist} })
+
+	sink.Emit(event.Event{Kind: event.ApprovalRequest, Approval: event.Approval{ID: "7", Tool: "bash"}})
+	select {
+	case <-reqStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("permission request did not start")
+	}
+	cancel()
+
+	select {
+	case c := <-got:
+		if c.id != "7" || c.allow || c.session || c.persist {
+			t.Fatalf("approve after context cancel = %+v, want denied id=7", c)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("turn context cancellation did not deny permission request")
+	}
+}
+
+func TestClipKeepsValidUTF8(t *testing.T) {
+	text := strings.Repeat("a", maxResultChars-1) + "界" + strings.Repeat("b", 20)
+	got := clip(text)
+	if !utf8.ValidString(got) {
+		t.Fatalf("clip returned invalid UTF-8")
+	}
+	if strings.Contains(got, "\ufffd") {
+		t.Fatalf("clip inserted replacement characters: %q", got[len(got)-40:])
 	}
 }
 

@@ -1,22 +1,7 @@
 import { memo, useEffect, useState } from "react";
-import {
-  Ban,
-  Check,
-  ChevronRight,
-  FilePen,
-  FileText,
-  FolderOpen,
-  Globe,
-  Loader2,
-  ListTree,
-  Search,
-  SquareTerminal,
-  Wrench,
-  X,
-  type LucideIcon,
-} from "lucide-react";
 import { CodeViewer } from "./CodeViewer";
 import { DiffView } from "./DiffView";
+import { ProcessCard, ProcessStatusIcon, ProcessToolIcon, type ProcessState, type ProcessTone } from "./ProcessCard";
 import { useT } from "../lib/i18n";
 import { diffsFor, subjectOf, summarize } from "../lib/tools";
 import { useShellExpand } from "../lib/shellExpand";
@@ -25,19 +10,6 @@ import type { Item } from "../lib/useController";
 type ToolItem = Extract<Item, { kind: "tool" }>;
 
 const SUBAGENT_TOOLS = new Set(["task", "run_skill", "explore", "research", "review", "security_review"]);
-
-const ICONS: Record<string, LucideIcon> = {
-  edit_file: FilePen,
-  multi_edit: FilePen,
-  write_file: FilePen,
-  read_file: FileText,
-  bash: SquareTerminal,
-  ls: FolderOpen,
-  glob: Search,
-  grep: Search,
-  web_fetch: Globe,
-  task: ListTree,
-};
 
 /** Lines shown by default in a shell output block before the "show all" button. */
 const SHELL_PREVIEW_LINES = 10;
@@ -50,11 +22,23 @@ function pretty(json: string): string {
   }
 }
 
-function StatusGlyph({ status }: { status: ToolItem["status"] }) {
-  if (status === "running") return <Loader2 className="ico spin" size={13} />;
-  if (status === "error") return <X className="ico ico--err" size={13} />;
-  if (status === "stopped") return <Ban className="ico ico--stopped" size={13} />;
-  return <Check className="ico ico--ok" size={13} />;
+function processState(status: ToolItem["status"]): ProcessState {
+  if (status === "running") return "running";
+  if (status === "error") return "failed";
+  if (status === "stopped") return "stopped";
+  return "done";
+}
+
+function processTone(status: ToolItem["status"]): ProcessTone {
+  if (status === "error") return "danger";
+  if (status === "stopped") return "warning";
+  if (status === "done") return "success";
+  return "default";
+}
+
+function formatDuration(ms?: number): string {
+  if (typeof ms !== "number" || !Number.isFinite(ms) || ms < 0) return "";
+  return `${Math.round(ms)} ms`;
 }
 
 /** Returns the first n lines of text and the total line count. */
@@ -72,7 +56,6 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
   const t = useT();
   const diffs = diffsFor(item.name, item.args);
   const subject = subjectOf(item.name, item.args);
-  const Icon = ICONS[item.name] ?? Wrench;
   const nested = subcalls ?? [];
   const hasNested = nested.length > 0;
   const profileText =
@@ -91,10 +74,9 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
   // edit diffs are the point of the card, so they're shown inline; everything
   // else folds its args/output away by default. Nested children always show.
   // Shell commands default to open so the output is immediately visible.
-  const hasBody = diffs.length === 0 && (!!item.args || !!item.output);
-  const [open, setOpen] = useState(item.isShell && hasBody);
+  const hasArgsOrOutput = diffs.length === 0 && (!!item.args || !!item.output);
+  const [open, setOpen] = useState(item.isShell && hasArgsOrOutput);
   const [showAll, setShowAll] = useState(false);
-  const expandable = hasBody;
 
   // Register this shell card's toggle with the global ShellExpand context so
   // Ctrl/Cmd+B can expand/collapse the most recent shell output.
@@ -114,26 +96,32 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
   // Shell output: split into preview + "show all" toggle.
   const shellOutput = item.isShell && item.output ? item.output : null;
   const shellPreview = shellOutput ? splitPreview(shellOutput, SHELL_PREVIEW_LINES) : null;
+  const hasProcessBody = Boolean(summary || diffs.length || hasNested || shellPreview || (!shellPreview && hasArgsOrOutput) || item.error);
+  const duration = item.status === "running" ? "" : formatDuration(item.durationMs);
 
   return (
-    <div className={`tool tool--${item.status} ${quiet ? "tool--quiet" : ""}`}>
-      <div
-        className={`tool__row ${expandable ? "tool__row--clickable" : ""}`}
-        onClick={expandable ? () => setOpen((v) => !v) : undefined}
-      >
-        {expandable ? (
-          <ChevronRight className={`tool__chevron ${open ? "tool__chevron--open" : ""}`} size={13} />
-        ) : (
-          <span className="tool__chevron tool__chevron--placeholder" />
-        )}
-        <Icon className="tool__icon" size={14} />
-        <span className="tool__name">{item.name}</span>
-        {subject && <span className="tool__subject">{subject}</span>}
-        {profileText && <span className="tool__profile">{profileText}</span>}
-        <span className="tool__meta">
-          <StatusGlyph status={item.status} />
-        </span>
-      </div>
+    <ProcessCard
+      tone={processTone(item.status)}
+      icon={<ProcessToolIcon size={12} />}
+      kind="tool"
+      name={
+        <>
+          <span className="tool__name">{item.name}</span>
+          {subject && <span className="tool__subject">{subject}</span>}
+          {profileText && <span className="tool__profile">{profileText}</span>}
+        </>
+      }
+      meta={
+        <>
+          <ProcessStatusIcon state={processState(item.status)} label={item.status} />
+          {duration && <span className="tool__duration">{duration}</span>}
+        </>
+      }
+      open={hasProcessBody ? open : undefined}
+      onOpenChange={hasProcessBody ? setOpen : undefined}
+      defaultOpen={item.isShell && hasArgsOrOutput}
+      className={`tool tool--${item.status}${quiet ? " tool--quiet" : ""}`}
+    >
 
       {summary && <div className="tool__summary">{summary}</div>}
 
@@ -153,7 +141,7 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
       )}
 
       {/* Shell output: always visible (auto-open), with preview/show-all toggle */}
-      {shellPreview && open && (
+      {shellPreview && (
         <div className="tool__body">
           <CodeViewer value={showAll ? shellOutput! : shellPreview.preview} maxHeight={showAll ? 480 : 260} />
           {shellPreview.hasMore && !showAll && (
@@ -166,7 +154,7 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
       )}
 
       {/* Non-shell body: args + output, gated by open */}
-      {!shellPreview && hasBody && open && (
+      {!shellPreview && hasArgsOrOutput && (
         <div className="tool__body">
           {item.args && <CodeViewer value={pretty(item.args)} language="json" maxHeight={180} />}
           {item.output && (
@@ -179,6 +167,6 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
       )}
 
       {item.error && <div className="tool__err">{item.error}</div>}
-    </div>
+    </ProcessCard>
   );
 });

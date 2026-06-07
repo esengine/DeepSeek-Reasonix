@@ -14,9 +14,10 @@ const tuiFormatting = `Keep the final answer compact and terminal-friendly: shor
 const builtinExploreBody = `You are running as an exploration subagent. Investigate the codebase the parent pointed you at, then return one focused, distilled answer.
 
 How to operate:
-- Use read_file, grep, glob, ls as your primary tools. Stay read-only.
-- For "find all places that call / reference / use X" questions, use ` + "`grep`" + ` (content search) — NOT ` + "`glob`" + ` (which only matches file names). Using the wrong one gives empty results and wastes your budget.
-- Cast a wide net first (grep for symbol references, ls/glob for structure) to map the territory; then read the 3-10 most relevant files in full.
+- Use codegraph tools (codegraph_context, codegraph_search, codegraph_callers, codegraph_callees, codegraph_trace) as your PRIMARY tools for symbol/code-structure questions. Fall back to read_file, grep, glob, ls for content search (comments, strings, config) or when codegraph tools are not available. Stay read-only.
+- codegraph_context is the best starting point for "how does X work" / architecture questions — it returns entry points + related symbols + key code in one call.
+- For "find all places that call / reference / use X" questions: use codegraph_callers (preferred) or ` + "`grep`" + ` (content search) — NOT ` + "`glob`" + ` (which only matches file names). Using the wrong one gives empty results and wastes your budget.
+- Cast a wide net first (codegraph_search for symbols, grep for content references, ls/glob for structure) to map the territory; then read the 3-10 most relevant files in full.
 - Don't read every file — be selective. Breadth on the first pass, depth only where the question demands it.
 - Stop exploring as soon as you can answer. The parent doesn't see your tool calls, so over-exploration is pure waste.
 
@@ -34,8 +35,9 @@ The 'task' the parent gave you is the question you must answer. Treat any other 
 const builtinResearchBody = `You are running as a research subagent. Gather information from code AND the web, synthesize it, and return one focused conclusion.
 
 How to operate:
-- Combine code reading (read_file, grep, glob) with web_fetch as appropriate. (There is no dedicated web-search tool — fetch the canonical doc/spec URL directly when you know it.)
-- For "how does X work" / "is Y supported" questions: fetch the canonical reference, then verify against the local code.
+- Combine code reading (codegraph tools + read_file, grep, glob) with web_fetch as appropriate. (There is no dedicated web-search tool — fetch the canonical doc/spec URL directly when you know it.)
+- For "how does X work" questions: use codegraph_context first for symbol-level understanding, then read_file for full context.
+- For "is Y supported" questions: fetch the canonical reference, then verify against the local code.
 - For "what's our policy on Z" / "where do we use Q": local code first, web only to compare against external standards.
 - Cap yourself at ~10 tool calls. If you can't converge, return what you have plus a note on what's missing.
 
@@ -57,7 +59,7 @@ How to operate:
 - Default scope: the current branch's diff vs the default branch. If the task names a specific commit range or files, honor that instead.
 - Discover scope first: ` + "`bash git status`" + `, ` + "`git diff --stat`" + `, ` + "`git log --oneline`" + `. Then ` + "`git diff`" + ` (or ` + "`git diff <base>...HEAD`" + `) for the hunks.
 - Read touched files (read_file) when the diff alone lacks context — signatures, surrounding invariants, callers.
-- For "any callers depending on this?" questions: grep the symbol BEFORE asserting impact.
+- For "any callers depending on this?" questions: use codegraph_callers or codegraph_impact (preferred) or grep the symbol BEFORE asserting impact.
 - Stay read-only. Never commit, never write files, never propose edits as applied changes. The parent decides whether to act.
 - Cap yourself at ~12 tool calls. If the diff is too big, pick the riskiest 2-3 files and say so.
 
@@ -85,7 +87,7 @@ const builtinSecurityReviewBody = `You are running as a security-review subagent
 How to operate:
 - Default scope: the current branch's diff vs the default branch. Honor a named range or directory if given.
 - Discover scope first: ` + "`bash git status`" + `, ` + "`git diff --stat`" + `, ` + "`git diff <base>...HEAD`" + `. Read touched files (read_file) when the diff lacks security context — auth checks, input validation, the handler that calls the changed code.
-- Use grep to verify "is this user-controlled input ever sanitized later?" / "what other call sites depend on this validation?" before asserting impact.
+- Use codegraph_callers or codegraph_impact (preferred) or grep to verify "is this user-controlled input ever sanitized later?" / "what other call sites depend on this validation?" before asserting impact.
 - Stay read-only. Never write, never run destructive commands. The parent decides what to act on.
 - Cap yourself at ~12 tool calls. If the diff is too big, focus on the riskiest 2-3 files and say so.
 
@@ -148,11 +150,20 @@ Rules:
 - Don't fabricate conventions the code doesn't demonstrate.
 - After writing, summarize in one or two lines what you captured and tell the user to review and edit it.`
 
+// extraReadTools holds additional tool names (e.g. codegraph tools) injected at
+// boot time so subagent skills can use them without hardcoding MCP-prefixed names.
+var extraReadTools []string
+
+// SetExtraReadTools registers additional read-only tool names that subagent
+// skills (explore, research, review, security-review) are allowed to use. Call
+// from boot after plugin tools are registered.
+func SetExtraReadTools(names []string) { extraReadTools = names }
+
 // builtinSkills returns the shipped skills. A fresh slice each call so callers
 // can't mutate the shared set.
 func builtinSkills() []Skill {
-	readCodeTools := []string{"read_file", "ls", "glob", "grep"}
-	reviewTools := []string{"read_file", "ls", "glob", "grep", "bash"}
+	readCodeTools := append([]string{"read_file", "ls", "glob", "grep"}, extraReadTools...)
+	reviewTools := append(append([]string(nil), readCodeTools...), "bash")
 	return []Skill{
 		{
 			Name:        "init",

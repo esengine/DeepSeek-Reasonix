@@ -34,7 +34,7 @@ import (
 // into the session's system message (the cached prefix), and the `remember`
 // tool is registered. It builds a real Controller from a throwaway project dir.
 func TestBuildFoldsProjectMemoryIntoSystemPrompt(t *testing.T) {
-	dir := t.TempDir()
+	dir := robustTempDir(t)
 	t.Chdir(dir)
 
 	writeFile(t, dir, "reasonix.toml", `
@@ -122,8 +122,8 @@ func TestNewProviderAppliesConfiguredDefaultEffort(t *testing.T) {
 // is discovered at boot, surfaced via Controller.Skills(), and its name folds
 // into the cache-stable system prompt's "# Skills" index alongside a built-in.
 func TestBuildDiscoversSkills(t *testing.T) {
-	dir := t.TempDir()
-	home := t.TempDir()
+	dir := robustTempDir(t)
+	home := robustTempDir(t)
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Chdir(dir)
@@ -176,7 +176,7 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 func TestAddBuiltinsWithWorkspaceRootKeepsSessionTools(t *testing.T) {
 	reg := tool.NewRegistry()
 	var stderr bytes.Buffer
-	addBuiltins(reg, nil, []string{t.TempDir()}, sandbox.Spec{}, 120*time.Second, builtin.SearchSpec{}, &stderr, t.TempDir())
+	addBuiltins(reg, nil, []string{robustTempDir(t)}, sandbox.Spec{}, 120*time.Second, builtin.SearchSpec{}, &stderr, robustTempDir(t))
 	for _, name := range []string{
 		"todo_write",
 		"complete_step",
@@ -192,8 +192,8 @@ func TestAddBuiltinsWithWorkspaceRootKeepsSessionTools(t *testing.T) {
 }
 
 func TestBuildOmitsDisabledSkillsFromPromptAndRuntimeList(t *testing.T) {
-	dir := t.TempDir()
-	home := t.TempDir()
+	dir := robustTempDir(t)
+	home := robustTempDir(t)
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Chdir(dir)
@@ -248,7 +248,7 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 // memory files, the system prompt is exactly the configured base — the cache
 // prefix is untouched by the memory feature.
 func TestBuildWithoutMemoryLeavesPromptUnchanged(t *testing.T) {
-	dir := t.TempDir()
+	dir := robustTempDir(t)
 	t.Chdir(dir)
 	writeFile(t, dir, "reasonix.toml", `
 default_model = "test-model"
@@ -292,7 +292,7 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 }
 
 func TestBuildLanguagePolicyIsAppended(t *testing.T) {
-	dir := t.TempDir()
+	dir := robustTempDir(t)
 	t.Chdir(dir)
 	writeFile(t, dir, "reasonix.toml", `
 default_model = "test-model"
@@ -350,14 +350,14 @@ func writeFile(t *testing.T, dir, name, body string) {
 }
 
 func TestRememberPermissionRuleUsesWorkspaceRoot(t *testing.T) {
-	home := t.TempDir()
+	home := robustTempDir(t)
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Setenv("AppData", filepath.Join(home, "AppData"))
 
-	cwd := t.TempDir()
-	workspace := t.TempDir()
+	cwd := robustTempDir(t)
+	workspace := robustTempDir(t)
 	t.Chdir(cwd)
 	writeFile(t, cwd, "reasonix.toml", `
 [permissions]
@@ -382,13 +382,13 @@ allow = ["bash(workspace*)"]
 }
 
 func TestRememberPermissionRuleEmptyRootUsesSourcePath(t *testing.T) {
-	home := t.TempDir()
+	home := robustTempDir(t)
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Setenv("AppData", filepath.Join(home, "AppData"))
 
-	cwd := t.TempDir()
+	cwd := robustTempDir(t)
 	t.Chdir(cwd)
 	userConfig := config.UserConfigPath()
 	writeFile(t, filepath.Dir(userConfig), filepath.Base(userConfig), `
@@ -421,14 +421,14 @@ func hasPermissionRule(rules []string, want string) bool {
 // ~/.reasonix/config.json with no v1+ config present must be imported during
 // Build — config written, key pinned into the env, and the user told via a notice.
 func TestBuildMigratesLegacyConfigEndToEnd(t *testing.T) {
-	home := t.TempDir()
+	home := robustTempDir(t)
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)                               // os.UserHomeDir on Windows
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config")) // os.UserConfigDir on Linux
 	t.Setenv("AppData", filepath.Join(home, "AppData"))         // os.UserConfigDir on Windows
 	t.Setenv("DEEPSEEK_API_KEY", "")                            // track for cleanup; migration os.Setenv's it live
 
-	proj := t.TempDir()
+	proj := robustTempDir(t)
 	t.Chdir(proj)
 	// codegraph off keeps Build offline; it merges over the migrated user config
 	// without dropping the migrated plugins.
@@ -498,36 +498,13 @@ func TestBuildMigratesLegacyConfigEndToEnd(t *testing.T) {
 }
 
 func TestBuildMigratesLegacySessionsFromConfigSessionDir(t *testing.T) {
-	home := t.TempDir()
+	home := robustTempDir(t)
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "xdg-config"))
 	t.Setenv("AppData", filepath.Join(home, "AppData"))
 
-	proj, err := os.MkdirTemp("", "reasonix-legacy-session-project-*")
-	if err != nil {
-		t.Fatalf("temp project dir: %v", err)
-	}
-	t.Cleanup(func() {
-		var err error
-		for i := 0; i < 20; i++ {
-			if err = os.RemoveAll(proj); err == nil {
-				return
-			}
-			time.Sleep(50 * time.Millisecond)
-		}
-		if runtime.GOOS == "windows" {
-			t.Logf("leaving temp project dir %s after Windows cleanup failed: %v", proj, err)
-			return
-		}
-		t.Fatalf("remove temp project dir %s: %v", proj, err)
-	})
-	oldwd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("get cwd: %v", err)
-	}
-	t.Chdir(proj)
-	defer func() { _ = os.Chdir(oldwd) }()
+	proj := robustTempDir(t)
 	writeFile(t, proj, "reasonix.toml", "[codegraph]\nenabled = false\n")
 
 	legacyDir := config.SessionDir()
@@ -542,7 +519,11 @@ func TestBuildMigratesLegacySessionsFromConfigSessionDir(t *testing.T) {
 		}
 	})
 
-	ctrl, err := Build(context.Background(), Options{Sink: sink})
+	// Pass the project root via WorkspaceRoot instead of t.Chdir: changing the
+	// process cwd into a t.TempDir makes Windows refuse to remove that dir during
+	// test cleanup (the cwd counts as "in use"), which is the only thing this test
+	// failed on. WorkspaceRoot loads the same config without touching the cwd.
+	ctrl, err := Build(context.Background(), Options{Sink: sink, WorkspaceRoot: proj})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -578,7 +559,7 @@ func TestBuildMigratesLegacySessionsFromConfigSessionDir(t *testing.T) {
 // withTempCache helper in internal/plugin/stats_test.go.
 func isolateConfigHome(t *testing.T) string {
 	t.Helper()
-	dir := t.TempDir()
+	dir := robustTempDir(t)
 	t.Setenv("HOME", dir)
 	t.Setenv("XDG_CONFIG_HOME", dir)
 	return dir
@@ -613,7 +594,7 @@ func TestPartitionByTier(t *testing.T) {
 
 func TestBuildMigratesLegacyEagerTierToBackground(t *testing.T) {
 	isolateConfigHome(t)
-	dir := t.TempDir()
+	dir := robustTempDir(t)
 	t.Chdir(dir)
 
 	writeFile(t, dir, "reasonix.toml", `
@@ -661,7 +642,7 @@ tier = "eager"
 
 func TestBuildMigratesLegacyLazyTierToBackground(t *testing.T) {
 	isolateConfigHome(t)
-	dir := t.TempDir()
+	dir := robustTempDir(t)
 	t.Chdir(dir)
 
 	writeFile(t, dir, "reasonix.toml", `
@@ -709,7 +690,7 @@ tier = "lazy"
 
 func TestBuildColdCodegraphStartsInBackground(t *testing.T) {
 	isolateConfigHome(t)
-	dir := t.TempDir()
+	dir := robustTempDir(t)
 	t.Chdir(dir)
 	launcher := writeCodegraphHelper(t, dir)
 	t.Setenv("GO_WANT_HELPER_PROCESS", "1")
@@ -775,7 +756,7 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 
 func TestBuildMigratesLegacyEagerBeforeStatsDemotion(t *testing.T) {
 	isolateConfigHome(t)
-	dir := t.TempDir()
+	dir := robustTempDir(t)
 	t.Chdir(dir)
 
 	// Three samples above 2*budget — the rule in stats.go's Recommend triggers

@@ -310,6 +310,7 @@ func (a *App) rebuild() error {
 		a.emitReady(a.ctx)
 		return err
 	}
+	a.bindControllerDisplayRecorder(ctrl)
 	a.mu.Lock()
 	tab.Ctrl = ctrl
 	tab.model = model
@@ -328,6 +329,7 @@ func (a *App) rebuild() error {
 	} else if path != "" {
 		ctrl.SetSessionPath(path)
 	}
+	a.persistTabSessionPath(tab, path)
 	return nil
 }
 

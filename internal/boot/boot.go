@@ -71,6 +71,10 @@ type Options struct {
 	// so each tab loads its own config/skills/hooks without changing the process
 	// cwd — enabling concurrent multi-project sessions.
 	WorkspaceRoot string
+	// ExtraPlugins are session-scoped MCP servers supplied by a host transport
+	// (for example ACP session/new). They are connected eagerly for this
+	// controller but are not persisted to reasonix.toml.
+	ExtraPlugins []plugin.Spec
 }
 
 // Build loads config, resolves the model(s), and returns a Controller wrapping a
@@ -249,6 +253,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		case ok:
 			spec := plugin.Spec{
 				Name:              "codegraph",
+				StripRawPrefix:    "codegraph_",
 				Command:           bin,
 				Args:              []string{"serve", "--mcp"},
 				Dir:               root,
@@ -304,6 +309,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 				Text: "codegraph: not installed — run `reasonix codegraph install` to enable symbol-graph tools"})
 		}
 	}
+	eagerSpecs = append(eagerSpecs, opts.ExtraPlugins...)
 
 	// Apply caller-supplied stderr override to every spec across tiers.
 	if opts.Stderr != nil {
@@ -348,6 +354,24 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	}
 	registerDeferred(lazySpecs, false)
 	registerDeferred(bgSpecs, true)
+
+	// Inject codegraph steering into the system prompt when symbol-graph tools
+	// are available, so the model knows to prefer them for architecture / call-graph
+	// questions over grep/read_file. Also register codegraph tool names in the
+	// subagent allowed-tools list so explore/research/review can use them.
+	if cfg.Codegraph.Enabled {
+		prefix := plugin.ToolPrefix("codegraph")
+		var cgTools []string
+		for _, name := range reg.Names() {
+			if strings.HasPrefix(name, prefix) {
+				cgTools = append(cgTools, name)
+			}
+		}
+		if len(cgTools) > 0 {
+			sysPrompt += "\n\n" + codegraph.SteerText
+			skill.SetExtraReadTools(cgTools)
+		}
+	}
 
 	for _, msg := range demoteMessages {
 		sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: msg})

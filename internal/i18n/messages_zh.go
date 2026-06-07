@@ -256,6 +256,7 @@ var Chinese = Messages{
 	AnthropicFetchEmpty:        "/models 返回为空 — Anthropic 兼容服务通常不提供此端点，回退到手动输入",
 	SkipStaleCustomEntryFmt:    "跳过 reasonix.toml 里的旧 %q 条目（指向 %s）— 请手动从 [[providers]] 里删除",
 	APIKeyAlreadySetFmt:        "复用已设置的 %s",
+	APIKeyResetPromptFmt:       "重新输入 %s？",
 
 	// custom provider
 	CustomProviderLabel:  "自定义模型",
@@ -309,6 +310,7 @@ var Chinese = Messages{
   reasonix chat [--model NAME] [-c|--continue] [--resume]   交互式会话（多轮；-c 恢复最近一次，--resume 选择一个）
   reasonix run  [--model NAME] [--max-steps N] <task>   执行单次任务后退出
   reasonix serve [--model NAME] [--addr HOST:PORT]      通过 HTTP+SSE 提供会话（浏览器客户端在 /）
+  reasonix acp [--model NAME]                           通过 stdio 提供 Agent Client Protocol（也可用：reasonix --acp）
   reasonix setup [path]                                 交互式配置向导；生成 reasonix.toml（及 .env）
   reasonix config auto-plan [off|on]                    配置自动计划模式
   reasonix mcp <add|remove|list>                        管理 reasonix.toml 里的 MCP 服务器

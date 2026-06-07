@@ -33,12 +33,13 @@ func (a *App) setTestCtrl(ctrl *control.Controller, model string) {
 	}
 	tab := a.tabs["test"]
 	tab.Ctrl = ctrl
+	a.bindControllerDisplayRecorder(ctrl)
 	tab.model = model
 }
 
 func isolateDesktopUserDirs(t *testing.T) string {
 	t.Helper()
-	home := t.TempDir()
+	home := robustTempDir(t)
 	xdg := filepath.Join(home, ".config")
 	appData := filepath.Join(home, "AppData")
 	for _, dir := range []string{xdg, appData} {
@@ -154,7 +155,7 @@ func TestSetEffortPersistsAndAutoClears(t *testing.T) {
 func TestSettingsUsesUserDesktopPreferencesNotProjectConfig(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
-	project := t.TempDir()
+	project := robustTempDir(t)
 	if err := os.WriteFile(filepath.Join(project, "reasonix.toml"), []byte(`
 [desktop]
 language = "zh"
@@ -194,7 +195,7 @@ close_behavior = "quit"
 func TestSettingsSeedsMissingUserConfigFromLegacyProjectConfig(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
-	project := t.TempDir()
+	project := robustTempDir(t)
 	if err := os.WriteFile(filepath.Join(project, "reasonix.toml"), []byte(`
 default_model = "legacy-provider/legacy-model"
 
@@ -343,7 +344,7 @@ func TestSearchFileRefsFindsNestedBasename(t *testing.T) {
 	orig, _ := os.Getwd()
 	defer os.Chdir(orig)
 
-	dir := t.TempDir()
+	dir := robustTempDir(t)
 	if err := os.MkdirAll(filepath.Join(dir, "frontend", "wailsjs", "runtime"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -356,16 +357,31 @@ func TestSearchFileRefsFindsNestedBasename(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "node_modules", "pkg", "runtime.js"), []byte("noise"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.MkdirAll(filepath.Join(dir, ".codegraph", "cache"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".codegraph", "cache", "runtime.js"), []byte("index"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Chdir(dir); err != nil {
 		t.Fatal(err)
 	}
 
-	got := (&App{}).SearchFileRefs("runtime.js")
+	app := &App{}
+	listed := app.ListDir("")
+	if hasDirEntry(listed, ".codegraph") {
+		t.Fatalf("ListDir should hide CodeGraph project index, got %+v", listed)
+	}
+
+	got := app.SearchFileRefs("runtime.js")
 	if !hasDirEntry(got, "frontend/wailsjs/runtime/runtime.js") {
 		t.Fatalf("SearchFileRefs(runtime.js) should find nested workspace file, got %+v", got)
 	}
 	if hasDirEntry(got, "node_modules/pkg/runtime.js") {
 		t.Fatalf("SearchFileRefs should skip node_modules noise, got %+v", got)
+	}
+	if hasDirEntry(got, ".codegraph/cache/runtime.js") {
+		t.Fatalf("SearchFileRefs should skip CodeGraph project index, got %+v", got)
 	}
 }
 
@@ -373,8 +389,8 @@ func TestFileRefsUseActiveTabWorkspaceRoot(t *testing.T) {
 	orig, _ := os.Getwd()
 	defer os.Chdir(orig)
 
-	launchRoot := t.TempDir()
-	projectRoot := t.TempDir()
+	launchRoot := robustTempDir(t)
+	projectRoot := robustTempDir(t)
 	if err := os.WriteFile(filepath.Join(launchRoot, "launch-only.txt"), []byte("wrong"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -513,10 +529,58 @@ func (r *appendingDesktopRunner) Run(_ context.Context, input string) error {
 	return nil
 }
 
+func TestSubmitToTabHistoryDisplaysRawInputAfterMemoryCompose(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	path := filepath.Join(dir, "memory-display.jsonl")
+	sess := agent.NewSession("sys")
+	exec := agent.New(nil, nil, sess, agent.Options{}, event.Discard)
+	runner := &appendingDesktopRunner{session: sess, started: make(chan string, 1)}
+	ctrl := control.New(control.Options{
+		Runner:      runner,
+		Executor:    exec,
+		Sink:        event.Discard,
+		SessionDir:  dir,
+		SessionPath: path,
+		Label:       "test",
+	})
+	defer ctrl.Close()
+
+	app := NewApp()
+	app.setTestCtrl(ctrl, "deepseek/test")
+	ctrl.QueueMemory(`Saved memory "reasonix-contributions": contribution count updated`)
+
+	const prompt = "不要，删了"
+	app.SubmitToTab("test", prompt)
+	composed := <-runner.started
+	waitNotRunning(t, ctrl)
+
+	if !strings.Contains(composed, "<memory-update>") || !strings.HasSuffix(composed, prompt) {
+		t.Fatalf("model input should include memory update followed by prompt, got %q", composed)
+	}
+	got := app.HistoryForTab("test")
+	if len(got) < 2 {
+		t.Fatalf("history length = %d, want user + assistant", len(got))
+	}
+	if got[0].Role != "system" || got[1].Role != "user" {
+		t.Fatalf("history roles = %+v, want system then user", got[:min(len(got), 2)])
+	}
+	if got[1].Content != prompt {
+		t.Fatalf("displayed user content = %q, want %q", got[1].Content, prompt)
+	}
+	if strings.Contains(got[1].Content, "<memory-update>") {
+		t.Fatalf("displayed user content leaked memory update: %q", got[1].Content)
+	}
+}
+
 func TestForkCreatesActiveTabWithoutSwitchingSourceController(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
-	workspace := t.TempDir()
+	workspace := robustTempDir(t)
 	if err := os.WriteFile(filepath.Join(workspace, "reasonix.toml"), []byte("[codegraph]\nenabled = false\n"), 0o644); err != nil {
 		t.Fatalf("write workspace config: %v", err)
 	}
@@ -609,7 +673,7 @@ func TestForkCreatesActiveTabWithoutSwitchingSourceController(t *testing.T) {
 
 func TestCapabilitiesShowsDefaultMCPAsInitializingNotDisabled(t *testing.T) {
 	isolateDesktopUserDirs(t)
-	dir := t.TempDir()
+	dir := robustTempDir(t)
 	t.Chdir(dir)
 	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
 [codegraph]
@@ -645,7 +709,7 @@ args = ["-y", "@playwright/mcp"]
 
 func TestCapabilitiesShowsDefaultCodegraphDisabled(t *testing.T) {
 	isolateDesktopUserDirs(t)
-	dir := t.TempDir()
+	dir := robustTempDir(t)
 	t.Chdir(dir)
 
 	app := NewApp()
@@ -675,7 +739,7 @@ func TestCapabilitiesShowsDefaultCodegraphDisabled(t *testing.T) {
 
 func TestCapabilitiesMarksBackgroundRemoteMCPAuthPossible(t *testing.T) {
 	isolateDesktopUserDirs(t)
-	dir := t.TempDir()
+	dir := robustTempDir(t)
 	t.Chdir(dir)
 	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
 [codegraph]
@@ -708,7 +772,7 @@ tier = "lazy"
 
 func TestCapabilitiesDoesNotMarkRemoteMCPWithAuthHeaderPossible(t *testing.T) {
 	isolateDesktopUserDirs(t)
-	dir := t.TempDir()
+	dir := robustTempDir(t)
 	t.Chdir(dir)
 	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
 [codegraph]
@@ -742,7 +806,7 @@ tier = "lazy"
 
 func TestCapabilitiesMarksAuthFailureRequired(t *testing.T) {
 	isolateDesktopUserDirs(t)
-	dir := t.TempDir()
+	dir := robustTempDir(t)
 	t.Chdir(dir)
 	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
 [codegraph]
@@ -777,7 +841,7 @@ tier = "lazy"
 
 func TestClearMCPServerAuthenticationClearsConfigAndFailure(t *testing.T) {
 	isolateDesktopUserDirs(t)
-	dir := t.TempDir()
+	dir := robustTempDir(t)
 	t.Chdir(dir)
 	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
 [codegraph]
@@ -840,7 +904,7 @@ tier = "lazy"
 
 func TestUpdateMCPServerMigratesLegacyTierToBackground(t *testing.T) {
 	isolateDesktopUserDirs(t)
-	dir := t.TempDir()
+	dir := robustTempDir(t)
 	t.Chdir(dir)
 	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
 [codegraph]
@@ -914,7 +978,7 @@ tier = "lazy"
 
 func TestUpdateMCPServerRecordsReconnectFailure(t *testing.T) {
 	isolateDesktopUserDirs(t)
-	dir := t.TempDir()
+	dir := robustTempDir(t)
 	t.Chdir(dir)
 	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
 [codegraph]
@@ -969,7 +1033,7 @@ tier = "background"
 
 func TestSetMCPServerTierRecordsConnectFailure(t *testing.T) {
 	isolateDesktopUserDirs(t)
-	dir := t.TempDir()
+	dir := robustTempDir(t)
 	t.Chdir(dir)
 	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
 [codegraph]
@@ -1032,13 +1096,13 @@ tier = "lazy"
 }
 
 func TestSetMCPServerTierPersistsCodegraphConfig(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("USERPROFILE", t.TempDir())
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	t.Setenv("AppData", t.TempDir())
-	t.Setenv("PATH", t.TempDir())
-	t.Setenv("REASONIX_CACHE_DIR", t.TempDir()) // isolate the codegraph bundle cache so Resolve fails deterministically
-	dir := t.TempDir()
+	t.Setenv("HOME", robustTempDir(t))
+	t.Setenv("USERPROFILE", robustTempDir(t))
+	t.Setenv("XDG_CONFIG_HOME", robustTempDir(t))
+	t.Setenv("AppData", robustTempDir(t))
+	t.Setenv("PATH", robustTempDir(t))
+	t.Setenv("REASONIX_CACHE_DIR", robustTempDir(t)) // isolate the codegraph bundle cache so Resolve fails deterministically
+	dir := robustTempDir(t)
 	t.Chdir(dir)
 	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
 [codegraph]
@@ -1092,7 +1156,7 @@ auto_install = true
 
 func TestSetMCPServerEnabledPersistsCodegraphOff(t *testing.T) {
 	isolateDesktopUserDirs(t)
-	dir := t.TempDir()
+	dir := robustTempDir(t)
 	t.Chdir(dir)
 	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
 [codegraph]
@@ -1134,7 +1198,7 @@ tier = "lazy"
 
 func TestCapabilitiesMigratesFailedMCPConfiguredTierAfterRestart(t *testing.T) {
 	isolateDesktopUserDirs(t)
-	dir := t.TempDir()
+	dir := robustTempDir(t)
 	t.Chdir(dir)
 	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
 [codegraph]
