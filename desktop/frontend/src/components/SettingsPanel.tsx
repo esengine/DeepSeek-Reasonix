@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Check, ChevronDown } from "lucide-react";
+import { Check, ChevronDown, Play } from "lucide-react";
 import { asArray } from "../lib/array";
 import { app } from "../lib/bridge";
 import { normalizeLangPref, useI18n, useT, type DictKey, type LangPref } from "../lib/i18n";
@@ -25,6 +25,7 @@ import { Tooltip } from "./Tooltip";
 import { AnchoredPopover } from "./AnchoredPopover";
 import { MCPServersSettingsPage, SkillsSettingsPage } from "./CapabilitiesPanel";
 import { MemorySettingsPage } from "./MemoryPanel";
+import { getSuccessPreference, setSuccessPreference, getAttentionPreference, setAttentionPreference, playSuccessChime, playAttentionChime, type SoundWavPref } from "../lib/sound";
 
 const SETTINGS_TABS: SettingsTab[] = ["general", "models", "mcp", "skills", "memory", "permissions", "sandbox", "network", "appearance", "updates"];
 
@@ -481,6 +482,8 @@ function GeneralSection({ s, busy, apply }: SectionProps) {
   const closeBehavior = normalizeCloseBehavior(s.closeBehavior);
   const autoPlan = normalizeAutoPlan(s.autoPlan);
   const languagePref = normalizeLangPref(s.desktopLanguage);
+  const [soundPref, setSoundPref] = useState<SoundWavPref>(getSuccessPreference());
+  const [attentionPref, setAttentionPref] = useState<SoundWavPref>(getAttentionPreference());
   const setLanguage = (next: LangPref) => {
     setPref(next);
     void apply(() => app.SetDesktopLanguage(next));
@@ -527,6 +530,62 @@ function GeneralSection({ s, busy, apply }: SectionProps) {
               {t(`settings.autoPlan.${mode}`)}
             </button>
           ))}
+        </div>
+      </SettingsField>
+      <SettingsField label={t("settings.notificationSound")} hint={t("settings.notificationSoundHint")} stacked>
+        <div className="settings-notification-sound-row">
+          <span>{t("settings.notificationSoundSuccess")}</span>
+          <select
+            className="mem-select"
+            value={soundPref}
+            onChange={(e) => {
+              const next = e.target.value as SoundWavPref;
+              setSoundPref(next);
+              setSuccessPreference(next);
+              playSuccessChime();
+            }}
+          >
+            <option value="synth">{t("settings.notificationSound.synth")}</option>
+            <option value="positive">{t("settings.notificationSound.positive")}</option>
+            <option value="correct">{t("settings.notificationSound.correct")}</option>
+            <option value="start">{t("settings.notificationSound.start")}</option>
+            <option value="back">{t("settings.notificationSound.back")}</option>
+          </select>
+          <button
+            className="chip"
+            type="button"
+            onClick={() => playSuccessChime()}
+            title={t("settings.notificationSoundPreview")}
+          >
+            <Play size={13} />
+          </button>
+        </div>
+        <div className="settings-notification-sound-row" style={{ marginTop: 6 }}>
+          <span>{t("settings.notificationSoundAttention")}</span>
+          <select
+            className="mem-select"
+            value={attentionPref}
+            onChange={(e) => {
+              const next = e.target.value as SoundWavPref;
+              setAttentionPref(next);
+              setAttentionPreference(next);
+              playAttentionChime();
+            }}
+          >
+            <option value="synth">{t("settings.notificationSound.synth")}</option>
+            <option value="positive">{t("settings.notificationSound.positive")}</option>
+            <option value="correct">{t("settings.notificationSound.correct")}</option>
+            <option value="start">{t("settings.notificationSound.start")}</option>
+            <option value="back">{t("settings.notificationSound.back")}</option>
+          </select>
+          <button
+            className="chip"
+            type="button"
+            onClick={() => playAttentionChime()}
+            title={t("settings.notificationSoundPreview")}
+          >
+            <Play size={13} />
+          </button>
         </div>
       </SettingsField>
     </SettingsSection>

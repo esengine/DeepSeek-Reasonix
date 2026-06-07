@@ -21,7 +21,8 @@ import logoWordmark from "./assets/logo-wordmark.svg";
 import { asArray } from "./lib/array";
 import { clearLegacyLangPref, normalizeLangPref, readLegacyLangPref, t, useI18n, useT } from "./lib/i18n";
 import { useController, type Item, type LiveStream } from "./lib/useController";
-import { app, onProjectTreeChanged } from "./lib/bridge";
+import { app, onProjectTreeChanged, onTurnDone } from "./lib/bridge";
+import { playSuccessChime } from "./lib/sound";
 import { Transcript } from "./components/Transcript";
 import { Composer } from "./components/Composer";
 import { TodoPanel } from "./components/TodoPanel";
@@ -630,6 +631,14 @@ export default function App() {
     return () => window.clearInterval(id);
   }, [showTodos]);
 
+  // Play a success chime when any turn finishes (agent:turn-done event).
+  useEffect(() => {
+    const unsub = onTurnDone(() => {
+      playSuccessChime();
+    });
+    return unsub;
+  }, []);
+
   const todoStale = useMemo(() => {
     if (!showTodos || !todoEntry) return false;
     const after = state.items.slice(todoEntry.index + 1);
@@ -1010,6 +1019,7 @@ export default function App() {
   }, []);
 
 
+
   const handleMessageAction = useCallback(async (turn: number, scope: string) => {
     await rewind(turn, scope);
     if (scope === "fork") {
@@ -1032,6 +1042,71 @@ export default function App() {
     if (topicId) await markTopicRead(topicId);
     await refreshTabMetas();
   }, [markTopicRead, openGlobalTab, openProjectTab, refreshTabMetas]);
+
+  // ⌘G: jump to the next unread topic that is not currently running
+  useEffect(() => {
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey || event.key.toLowerCase() !== "g") return;
+      event.preventDefault();
+
+      const findNextUnread = async () => {
+        try {
+          const tree = await app.ListProjectTree();
+          const nodes = asArray(tree);
+
+          // Flatten: collect topic / global_topic nodes in tree order
+          const topics: { scope: string; root: string; topicId: string; running?: boolean; hasUnread?: boolean }[] = [];
+          for (const node of nodes) {
+            const children = asArray(node.children);
+            for (const child of children) {
+              if (child.kind === "topic" || child.kind === "global_topic") {
+                topics.push({
+                  scope: child.kind === "global_topic" ? "global" : "project",
+                  root: child.root ?? "",
+                  topicId: child.topicId ?? "",
+                  running: child.running,
+                  hasUnread: child.hasUnread,
+                });
+              }
+            }
+          }
+
+          if (topics.length === 0) return;
+
+          // Start looking after the current topic (or from the beginning)
+          const currentId = activeTab?.topicId;
+          const startIndex = currentId ? topics.findIndex((t) => t.topicId === currentId) + 1 : 0;
+
+          // Priority 1: unread + not running (stopped generating but unread)
+          for (let i = 0; i < topics.length; i++) {
+            const idx = (startIndex + i) % topics.length;
+            const topic = topics[idx];
+            if (topic.hasUnread && !topic.running) {
+              await handleOpenTopic(topic.scope, topic.root, topic.topicId);
+              return;
+            }
+          }
+
+          // Priority 2: running (currently generating)
+          for (let i = 0; i < topics.length; i++) {
+            const idx = (startIndex + i) % topics.length;
+            const topic = topics[idx];
+            if (topic.running) {
+              await handleOpenTopic(topic.scope, topic.root, topic.topicId);
+              return;
+            }
+          }
+        } catch {
+          /* bridge unavailable */
+        }
+      };
+
+      void findNextUnread();
+    };
+
+    window.addEventListener("keydown", onKeyDown, { capture: true });
+    return () => window.removeEventListener("keydown", onKeyDown, { capture: true });
+  }, [activeTab, handleOpenTopic]);
 
   // History drawer: project menus can open a scoped saved-session list. Idle row
   // clicks resume; running row clicks only preview through PreviewSession.
@@ -1680,8 +1755,8 @@ export default function App() {
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}
         items={buildPaletteItems()}
-        placeholder="Quick actions…"
-        emptyText="No matches"
+        placeholder={t("topbar.newSession") + "..."}
+        emptyText={t("sidebar.conversations")}
       />
     </div>
     </ShellExpandProvider>
