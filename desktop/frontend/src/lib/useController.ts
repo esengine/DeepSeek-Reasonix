@@ -103,7 +103,7 @@ const initialState: State = {
 
 type Action =
   | { type: "event"; e: WireEvent }
-  | { type: "user"; text: string }
+  | { type: "user"; text: string; seq: number }
   | { type: "unsend" }
   | { type: "backend_status"; running: boolean }
   | { type: "meta"; meta: Meta }
@@ -228,6 +228,10 @@ function ensureAssistant(s: State): { items: Item[]; id: string; seq: number } {
 
 function flushPendingUser(s: State): State {
   if (s.pendingUser === undefined) return s;
+  const lastItem = s.items[s.items.length - 1];
+  if (lastItem?.kind === "user" && lastItem.text === s.pendingUser) {
+    return { ...s, pendingUser: undefined };
+  }
   return {
     ...s,
     seq: s.seq + 1,
@@ -353,7 +357,19 @@ function applyEvent(s: State, e: WireEvent): State {
 
 function reducer(s: State, a: Action): State {
   switch (a.type) {
-    case "user": return { ...s, running: true, turnStartAt: Date.now(), turnTokens: 0, pendingUser: a.text, discardTurn: false };
+    case "user": {
+      const seq = a.seq !== undefined ? a.seq : s.seq;
+      return {
+        ...s,
+        seq: seq + 1,
+        items: [...s.items, { kind: "user", id: `u${seq}`, text: a.text }],
+        running: true,
+        turnStartAt: Date.now(),
+        turnTokens: 0,
+        pendingUser: a.text,
+        discardTurn: false,
+      };
+    }
     case "unsend": return { ...s, pendingUser: undefined, discardTurn: true, running: false, live: undefined };
     case "backend_status": {
       if (a.running === s.running) return s;
@@ -565,14 +581,15 @@ export function useController() {
 
   const send = useCallback((displayText: string, submitText = displayText) => {
     if (!activeTabId) return;
-    dispatchTo(activeTabId, { type: "user", text: displayText });
+    const seq = getOrCreateState(statesRef.current, activeTabId).seq;
+    dispatchTo(activeTabId, { type: "user", text: displayText, seq });
     const display = displayText.trim(); const submit = submitText.trim();
     (display !== submit ? app.SubmitDisplayToTab(activeTabId, display, submit) : app.SubmitToTab(activeTabId, submit)).catch(() => {});
   }, [activeTabId, dispatchTo]);
 
   const runShell = useCallback((command: string) => {
     if (!activeTabId) return;
-    dispatchTo(activeTabId, { type: "user", text: `!${command}` });
+    dispatchTo(activeTabId, { type: "user", text: `!${command}`, seq: getOrCreateState(statesRef.current, activeTabId).seq });
     app.RunShellForTab(activeTabId, command).catch(() => {});
   }, [activeTabId, dispatchTo]);
 
