@@ -509,7 +509,11 @@ func (a *App) SubmitToTab(tabID, input string) {
 // RunShell executes a shell command directly (bypassing the model) and streams
 // output as events on eventChannel.
 func (a *App) RunShell(command string) {
-	if ctrl := a.activeCtrl(); ctrl != nil {
+	a.RunShellForTab("", command)
+}
+
+func (a *App) RunShellForTab(tabID, command string) {
+	if ctrl := a.ctrlByTabID(tabID); ctrl != nil {
 		ctrl.RunShell(command)
 	}
 }

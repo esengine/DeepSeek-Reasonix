@@ -105,6 +105,7 @@ type Action =
   | { type: "event"; e: WireEvent }
   | { type: "user"; text: string }
   | { type: "unsend" }
+  | { type: "backend_status"; running: boolean }
   | { type: "meta"; meta: Meta }
   | { type: "context"; context: ContextInfo }
   | { type: "balance"; balance: BalanceInfo }
@@ -354,6 +355,17 @@ function reducer(s: State, a: Action): State {
   switch (a.type) {
     case "user": return { ...s, running: true, turnStartAt: Date.now(), turnTokens: 0, pendingUser: a.text, discardTurn: false };
     case "unsend": return { ...s, pendingUser: undefined, discardTurn: true, running: false, live: undefined };
+    case "backend_status": {
+      if (a.running === s.running) return s;
+      if (a.running) return { ...s, running: true, turnActive: true, turnStartAt: s.turnStartAt || Date.now() };
+      const finalized = s.items.map((it) => {
+        if (it.kind === "assistant" && s.live && it.id === s.live.id) return { ...it, text: s.live.text, reasoning: s.live.reasoning, streaming: false };
+        if (it.kind === "assistant" && it.streaming) return { ...it, streaming: false };
+        if (it.kind === "tool" && it.status === "running") return { ...it, status: "stopped" as const };
+        return it;
+      });
+      return { ...s, items: finalized, running: false, turnActive: false, live: undefined, currentAssistant: undefined, approval: undefined, ask: undefined };
+    }
     case "meta": return { ...s, meta: a.meta };
     case "context": return { ...s, context: a.context };
     case "balance": return { ...s, balance: a.balance };
@@ -404,6 +416,7 @@ function messageActionBusyText(scope: MessageActionScope): string {
 export function useController() {
   const statesRef = useRef<TabStates>(new Map());
   const [activeTabId, setActiveTabId] = useState<string | undefined>();
+  const activeTabIdRef = useRef<string | undefined>(undefined);
   // A render-triggering counter so that mutations to a non-active tab's state still
   // cause a re-render when that tab becomes active.
   const [, setVersion] = useState(0);
@@ -412,6 +425,7 @@ export function useController() {
   // The active tab's current state, with a stable identity for cancel().
   const activeState = activeTabId ? getOrCreateState(statesRef.current, activeTabId) : initialState;
   const stateRef = useRef(activeState);
+  activeTabIdRef.current = activeTabId;
   stateRef.current = activeState;
 
   // Dispatch to a specific tab's state. If the tab doesn't have state yet, it's
@@ -427,6 +441,15 @@ export function useController() {
   }, [bump]);
 
   const checkpointRefreshSeq = useRef(new Map<string, number>());
+  const sessionLoadSeq = useRef(new Map<string, number>());
+  const bumpSessionLoadSeq = useCallback((tabId: string): number => {
+    const seq = (sessionLoadSeq.current.get(tabId) ?? 0) + 1;
+    sessionLoadSeq.current.set(tabId, seq);
+    return seq;
+  }, []);
+  const sessionLoadCurrent = useCallback((tabId: string, seq: number): boolean => {
+    return sessionLoadSeq.current.get(tabId) === seq;
+  }, []);
   const bumpCheckpointRefreshSeq = useCallback((tabId: string): number => {
     const seq = (checkpointRefreshSeq.current.get(tabId) ?? 0) + 1;
     checkpointRefreshSeq.current.set(tabId, seq);
@@ -440,18 +463,28 @@ export function useController() {
   }, [bumpCheckpointRefreshSeq, dispatchTo]);
 
   const loadSessionDataForTab = useCallback(async (tabId: string, reset = false) => {
-    try {
-      if (reset) dispatchTo(tabId, { type: "reset" });
-      dispatchTo(tabId, { type: "meta", meta: await app.MetaForTab(tabId) });
-      dispatchTo(tabId, { type: "context", context: await app.ContextUsageForTab(tabId) });
-      dispatchTo(tabId, { type: "effort", effort: await app.EffortForTab(tabId) });
-      dispatchTo(tabId, { type: "balance", balance: await app.BalanceForTab(tabId) });
-      dispatchTo(tabId, { type: "jobs", jobs: asArray(await app.JobsForTab(tabId)) });
-      await refreshCheckpoints(tabId);
-      const history = asArray(await app.HistoryForTab(tabId));
-      if (history && history.length) dispatchTo(tabId, { type: "history", messages: history });
-    } catch { /* ignore */ }
-  }, [dispatchTo, refreshCheckpoints]);
+    const seq = bumpSessionLoadSeq(tabId);
+    const safe = <T,>(p: Promise<T>): Promise<T | undefined> => p.catch(() => undefined);
+    const [meta, context, effort, balance, jobs, checkpoints, history] = await Promise.all([
+      safe(app.MetaForTab(tabId)),
+      safe(app.ContextUsageForTab(tabId)),
+      safe(app.EffortForTab(tabId)),
+      safe(app.BalanceForTab(tabId)),
+      safe(app.JobsForTab(tabId)),
+      safe(app.CheckpointsForTab(tabId)),
+      safe(app.HistoryForTab(tabId)),
+    ]);
+    if (!sessionLoadCurrent(tabId, seq)) return;
+    if (reset) dispatchTo(tabId, { type: "reset" });
+    if (meta) dispatchTo(tabId, { type: "meta", meta });
+    if (context) dispatchTo(tabId, { type: "context", context });
+    if (effort) dispatchTo(tabId, { type: "effort", effort });
+    if (balance) dispatchTo(tabId, { type: "balance", balance });
+    if (jobs) dispatchTo(tabId, { type: "jobs", jobs: asArray(jobs) });
+    if (checkpoints) dispatchTo(tabId, { type: "checkpoints", checkpoints: asArray(checkpoints) });
+    const messages = asArray(history);
+    if (messages.length) dispatchTo(tabId, { type: "history", messages });
+  }, [bumpSessionLoadSeq, dispatchTo, sessionLoadCurrent]);
 
   const activeTabFromBackend = useCallback(async (): Promise<TabMeta | undefined> => {
     const tabs = asArray(await app.ListTabs().catch(() => [] as TabMeta[]));
@@ -475,17 +508,31 @@ export function useController() {
     return active.id;
   }, [activeTabFromBackend, loadSessionDataForTab]);
 
-  const loadSessionData = useCallback(async () => {
-    if (activeTabId) {
-      await loadSessionDataForTab(activeTabId);
+  const reconcileTabRuntime = useCallback(async (tabId: string) => {
+    const tabs = asArray(await app.ListTabs().catch(() => [] as TabMeta[]));
+    const tab = tabs.find((candidate) => candidate.id === tabId);
+    if (!tab) return;
+    const local = statesRef.current.get(tabId);
+    const needsInitialLoad = !local?.meta;
+    const missedTurnDone = Boolean(local?.running && !tab.running);
+    dispatchTo(tabId, { type: "backend_status", running: Boolean(tab.running) });
+    if (needsInitialLoad || missedTurnDone) {
+      await loadSessionDataForTab(tabId, missedTurnDone);
       return;
     }
-    await syncActiveTabFromBackend();
-  }, [activeTabId, loadSessionDataForTab, syncActiveTabFromBackend]);
+    const [jobs, effort, balance] = await Promise.all([
+      app.JobsForTab(tabId).catch(() => undefined),
+      app.EffortForTab(tabId).catch(() => undefined),
+      app.BalanceForTab(tabId).catch(() => undefined),
+    ]);
+    if (jobs) dispatchTo(tabId, { type: "jobs", jobs: asArray(jobs) });
+    if (effort) dispatchTo(tabId, { type: "effort", effort });
+    if (balance) dispatchTo(tabId, { type: "balance", balance });
+  }, [dispatchTo, loadSessionDataForTab]);
 
   useEffect(() => {
     const off = onEvent((e) => {
-      const targetTabId = e.tabId || activeTabId;
+      const targetTabId = e.tabId || activeTabIdRef.current;
       if (!targetTabId) return;
       dispatchTo(targetTabId, { type: "event", e });
       if (e.kind === "turn_done") {
@@ -503,24 +550,18 @@ export function useController() {
     });
 
     const offReady = onReady(() => {
-      void loadSessionData();
-      const readyTabId = activeTabId;
+      const readyTabId = activeTabIdRef.current;
       if (readyTabId) {
-        app.BalanceForTab(readyTabId).then((balance) => dispatchTo(readyTabId, { type: "balance", balance })).catch(() => {});
-        app.JobsForTab(readyTabId).then((jobs) => dispatchTo(readyTabId, { type: "jobs", jobs: asArray(jobs) })).catch(() => {});
-        app.EffortForTab(readyTabId).then((effort) => dispatchTo(readyTabId, { type: "effort", effort })).catch(() => {});
+        void loadSessionDataForTab(readyTabId);
+        return;
       }
+      void syncActiveTabFromBackend();
     });
 
-    void loadSessionData();
-    if (activeTabId) {
-      app.BalanceForTab(activeTabId).then((balance) => dispatchTo(activeTabId, { type: "balance", balance })).catch(() => {});
-      app.EffortForTab(activeTabId).then((effort) => dispatchTo(activeTabId, { type: "effort", effort })).catch(() => {});
-      app.JobsForTab(activeTabId).then((jobs) => dispatchTo(activeTabId, { type: "jobs", jobs: asArray(jobs) })).catch(() => {});
-    }
+    void syncActiveTabFromBackend();
 
     return () => { off(); offReady(); };
-  }, [loadSessionData, activeTabId, dispatchTo]);
+  }, [dispatchTo, loadSessionDataForTab, refreshCheckpoints, syncActiveTabFromBackend]);
 
   const send = useCallback((displayText: string, submitText = displayText) => {
     if (!activeTabId) return;
@@ -532,7 +573,7 @@ export function useController() {
   const runShell = useCallback((command: string) => {
     if (!activeTabId) return;
     dispatchTo(activeTabId, { type: "user", text: `!${command}` });
-    app.RunShell(command).catch(() => {});
+    app.RunShellForTab(activeTabId, command).catch(() => {});
   }, [activeTabId, dispatchTo]);
 
   const notice = useCallback((text: string, level: "info" | "warn" = "info") => {
@@ -689,16 +730,12 @@ export function useController() {
 
   // Tab management: switch preserves per-tab state; open creates it.
   const switchTab = useCallback(async (tabId: string) => {
+    setActiveTabId(tabId);
     try {
       await app.SetActiveTab(tabId);
-      setActiveTabId(tabId);
-      // Load session data into the tab's state if it hasn't been loaded yet.
-      const states = statesRef.current;
-      if (!states.has(tabId) || !states.get(tabId)?.meta) {
-        await loadSessionDataForTab(tabId);
-      }
+      await reconcileTabRuntime(tabId);
     } catch { /* ignore */ }
-  }, [loadSessionDataForTab]);
+  }, [reconcileTabRuntime]);
 
   const openProjectTab = useCallback(async (workspaceRoot: string, topicId: string): Promise<TabMeta | undefined> => {
     try {

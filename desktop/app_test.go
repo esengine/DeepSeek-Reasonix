@@ -1239,6 +1239,52 @@ tier = "eager"
 	t.Fatalf("broken MCP missing from Capabilities: %+v", view.Servers)
 }
 
+func TestRunShellForTabRoutesToRequestedTab(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	activeEvents := make(chan event.Event, 16)
+	inactiveEvents := make(chan event.Event, 16)
+	activeCtrl := control.New(control.Options{Sink: event.FuncSink(func(e event.Event) { activeEvents <- e })})
+	inactiveCtrl := control.New(control.Options{Sink: event.FuncSink(func(e event.Event) { inactiveEvents <- e })})
+	defer activeCtrl.Close()
+	defer inactiveCtrl.Close()
+
+	app := &App{
+		tabs: map[string]*WorkspaceTab{
+			"active":   {ID: "active", Scope: "global", Ctrl: activeCtrl, Ready: true},
+			"inactive": {ID: "inactive", Scope: "global", Ctrl: inactiveCtrl, Ready: true},
+		},
+		tabOrder:    []string{"active", "inactive"},
+		activeTabID: "active",
+	}
+
+	app.RunShellForTab("inactive", "echo route-test")
+
+	sawDispatch := false
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case e := <-inactiveEvents:
+			if e.Kind == event.ToolDispatch && strings.Contains(e.Tool.Args, "route-test") {
+				sawDispatch = true
+			}
+			if e.Kind == event.TurnDone {
+				if !sawDispatch {
+					t.Fatal("inactive tab finished without receiving shell dispatch")
+				}
+				select {
+				case active := <-activeEvents:
+					t.Fatalf("active tab received event for inactive shell: %+v", active)
+				default:
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for inactive shell turn")
+		}
+	}
+}
+
 type blockingRunner struct {
 	started chan struct{}
 	release chan struct{}

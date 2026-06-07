@@ -82,6 +82,7 @@ export interface AppBindings {
   SubmitDisplay(display: string, input: string): Promise<void>;
   SubmitDisplayToTab(tabID: string, display: string, input: string): Promise<void>;
   RunShell(command: string): Promise<void>;
+  RunShellForTab(tabID: string, command: string): Promise<void>;
   Cancel(): Promise<void>;
   CancelTab(tabID: string): Promise<void>;
   Approve(id: string, allow: boolean, session: boolean, persist: boolean): Promise<void>;
@@ -885,6 +886,9 @@ function makeMockApp(): AppBindings {
           if (cancelled) return;
           emit({ kind: "tool_result", tool: { id, name: "bash", output: `$ ${command}\n(mock output)\n`, readOnly: false, durationMs: 300 } });
           emit({ kind: "turn_done" });
+        },
+        async RunShellForTab(_tabID, command) {
+          await this.RunShell(command);
         },
         async Cancel() {
           cancelled = true;
