@@ -108,9 +108,6 @@ type chatTUI struct {
 	loopInterval time.Duration
 	// loopIter counts how many times the loop has fired.
 	loopIter int
-	// loopTickStart records when the current loop tick timer started, so the
-	// TUI can display a live countdown to the next re-submission.
-	loopTickStart time.Time
 
 	// history is a resumed session's messages, committed to scrollback once on
 	// the first WindowSizeMsg so a reopened chat shows its prior transcript.
@@ -1168,7 +1165,6 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// If a /loop is active and no pending interject was consumed,
 			// schedule the next loop tick.
 			if m.loopPrompt != "" && len(m.pendingInterject) == 0 {
-				m.loopTickStart = time.Now()
 				cmds = append(cmds, tea.Tick(m.loopInterval, func(_ time.Time) tea.Msg { return loopTickMsg{} }))
 			}
 		}
@@ -1293,7 +1289,6 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case loopTickMsg:
 			if m.loopPrompt != "" && m.state != tuiRunning {
 				m.loopIter++
-				m.loopTickStart = time.Time{} // now running, no tick pending
 				m.notice(fmt.Sprintf("▸ /loop iter %d → %s", m.loopIter, m.loopPrompt))
 				cmds = append(cmds, m.startTurnWithRaw(m.loopPrompt, "/loop: "+m.loopPrompt, m.loopPrompt, m.loopPrompt))
 			}
@@ -2012,25 +2007,6 @@ func (m chatTUI) View() tea.View {
 	}
 	if ctxTag != "" {
 		data = append(data, ctxTag)
-	}
-	if m.loopPrompt != "" {
-		// Build loop display: "↺ 2m45s · "prompt…" · #3"
-		preview := m.loopPrompt
-		if len(preview) > 24 {
-			preview = preview[:21] + "..."
-		}
-		loopTag := "↺ " + preview
-		if !m.loopTickStart.IsZero() {
-			remaining := m.loopInterval - time.Since(m.loopTickStart)
-			if remaining < 0 {
-				remaining = 0
-			}
-			loopTag += " " + strconv.Itoa(int(remaining.Seconds())) + "s" // countdown
-		}
-		if m.loopIter > 0 {
-			loopTag += " #" + strconv.Itoa(m.loopIter)
-		}
-		data = append(data, dim(loopTag))
 	}
 	if jt := m.jobsTag(); jt != "" {
 		data = append(data, jt)
