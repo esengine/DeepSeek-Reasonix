@@ -2035,6 +2035,14 @@ a[href] {
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 70%, transparent);
   opacity: 0.95;
 }
+/* Hide the resize handle while the input is focused — the user is typing,
+   not resizing.  The handle otherwise appears as a colored pill above the
+   card on hover (which always co-occurs with focus after a click). */
+.composer-card:focus-within .composer-resize-handle::before {
+  opacity: 0 !important;
+  background: color-mix(in srgb, var(--fg-faint) 38%, transparent) !important;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--border) 82%, transparent) !important;
+}
 .composer-resize-handle:focus-visible {
   outline: none;
 }
@@ -2168,11 +2176,20 @@ a[href] {
   min-height: calc(var(--font-content) * 1.55);
   outline: none;
   overflow-y: hidden;
+  scrollbar-width: none;           /* Firefox */
+}
+.composer__input::-webkit-scrollbar {
+  display: none;                    /* Chrome / Safari / Wails webview */
 }
 .composer-card--resized .composer__input {
   height: 100%;
   max-height: none;
   overflow-y: auto;
+  scrollbar-width: thin;           /* restore scrollbar when resized */
+}
+.composer-card--resized .composer__input::-webkit-scrollbar {
+  display: block;
+  width: 6px;
 }
 .composer__input::placeholder {
   color: var(--fg-faint);
