@@ -3162,18 +3162,12 @@ func (a *App) GenerateWelcomePrompts() string {
 
 // GenerateWelcomePromptsForTab is the tab-aware variant.
 func (a *App) GenerateWelcomePromptsForTab(tabID string) string {
-	a.mu.RLock()
-	tab := a.tabs[a.activeTabID]
-	if tabID != "" {
-		tab = a.tabs[tabID]
-	}
-	a.mu.RUnlock()
-
-	if tab == nil || tab.WorkspaceRoot == "" {
+	base, err := a.activeWorkspaceBase()
+	if err != nil || base == "" {
 		return ""
 	}
 
-	dbPath := filepath.Join(tab.WorkspaceRoot, codegraphDB)
+	dbPath := filepath.Join(base, codegraphDB)
 	if _, err := os.Stat(dbPath); err == nil {
 		// codegraph index available — use rich symbol data.
 		langs, err := cgQuery(dbPath, "SELECT language, COUNT(*) as cnt FROM files GROUP BY language ORDER BY cnt DESC LIMIT 5")
@@ -3192,7 +3186,7 @@ func (a *App) GenerateWelcomePromptsForTab(tabID string) string {
 	}
 
 	// Fallback: generate prompts from workspace file listing.
-	entries, err := os.ReadDir(tab.WorkspaceRoot)
+	entries, err := os.ReadDir(base)
 	if err != nil {
 		return ""
 	}
