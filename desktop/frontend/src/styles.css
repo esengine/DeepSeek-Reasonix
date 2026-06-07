@@ -8254,19 +8254,7 @@ a[href] {
 
 .project-tree__topic--active {
   background: color-mix(in srgb, var(--project-accent, var(--accent)) 10%, var(--sidebar-hover));
-  border-radius: 0;
   color: var(--fg);
-}
-
-.project-tree__topic--active::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 4px;
-  background: color-mix(in srgb, var(--project-accent, var(--accent)) 88%, #ff9d22);
-  pointer-events: none;
 }
 
 .project-tree__topic--menu-open {
@@ -8311,6 +8299,15 @@ a[href] {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.project-tree__topic-time {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--fg-faint);
+  white-space: nowrap;
+  margin-left: 6px;
+  line-height: 1;
 }
 
 .project-tree__topic-main:focus-visible {

@@ -4,7 +4,7 @@
 // new topic.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
-import { Archive, ChevronRight, ChevronDown, Pencil, Plus, FolderPlus, Search, BriefcaseBusiness, Copy, FolderOpen, XCircle, History, Check, ChevronsUpDown } from "lucide-react";
+import { Archive, ChevronRight, ChevronDown, ChevronsUpDown, ChevronsDownUp, Pencil, Plus, FolderPlus, Search, BriefcaseBusiness, Copy, FolderOpen, XCircle, History, Check } from "lucide-react";
 import { asArray } from "../lib/array";
 import { app } from "../lib/bridge";
 import type { ProjectNode } from "../lib/types";
@@ -470,6 +470,8 @@ export function ProjectTree({
       const label = (node.label || node.topicId || "Untitled").replace(/^●\s*/, "");
       const meta = topicMetaLine(node, t);
       const topicId = node.topicId ?? "";
+      const lastActivityAt = node.lastActivityAt;
+      const timeLabel = lastActivityAt != null && lastActivityAt > 0 ? topicActivityLabel(lastActivityAt).replace(/前$/, "") : null;
       const topicMenuOpen = menuTopic === topicId;
       const openTopicMenu = (event: ReactMouseEvent<HTMLElement> | ReactKeyboardEvent<HTMLElement>) => {
         event.preventDefault();
@@ -532,6 +534,7 @@ export function ProjectTree({
             title={meta ? `${label} · ${meta}` : label}
             style={{ paddingLeft: 14 + depth * 16 }}
             onClick={() => onOpenTopic(scope, node.root ?? "", topicId)}
+            onDoubleClick={() => startRenameTopic(node, label)}
             onKeyDown={(event) => {
               if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
                 openTopicMenu(event);
@@ -541,6 +544,9 @@ export function ProjectTree({
             <span className="project-tree__topic-copy">
               <span className="project-tree__topic-label">{label}</span>
             </span>
+            {timeLabel && (
+              <span className="project-tree__topic-time">{timeLabel}</span>
+            )}
           </button>
           <ContextMenu
             open={topicMenuOpen}
@@ -796,7 +802,7 @@ export function ProjectTree({
               onClick={toggleAll}
               aria-label={allExpanded ? t("projectTree.collapseAll") : t("projectTree.expandAll")}
             >
-              <ChevronsUpDown size={13} />
+              {allExpanded ? <ChevronsDownUp size={13} /> : <ChevronsUpDown size={13} />}
             </button>
           </Tooltip>
           <Tooltip label={t("projectTree.addProjectTooltip")} className="project-tree__action-slot">
