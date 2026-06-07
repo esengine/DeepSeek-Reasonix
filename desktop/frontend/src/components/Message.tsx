@@ -3,6 +3,7 @@ import { ChevronDown, GitBranch, RotateCcw, ScrollText } from "lucide-react";
 import { Markdown } from "./Markdown";
 import { CopyButton } from "./CopyButton";
 import { ProcessBrainIcon, ProcessCard, ProcessStatusIcon } from "./ProcessCard";
+import { replaceAttachmentRefsForDisplay } from "../lib/attachmentDisplay";
 import { useT } from "../lib/i18n";
 import type { Item, MessageActionScope } from "../lib/useController";
 import type { CheckpointMeta } from "../lib/types";
@@ -19,7 +20,7 @@ export function UserMessage({
   turn?: number;
   anchorId?: string;
 }) {
-  const displayText = text.replace(/@\.reasonix\/attachments\/[^\s]+/g, "[image]");
+  const displayText = replaceAttachmentRefsForDisplay(text);
   return (
     <div className="msg msg--user" id={anchorId} data-question-anchor={anchorId} data-turn={turn}>
       <div className="msg__body">
