@@ -495,7 +495,7 @@ func (a *App) SubmitToTab(tabID, input string) {
 		return
 	}
 	if ctrl := a.ctrlByTabID(tabID); ctrl != nil {
-		ctrl.Submit(input)
+		ctrl.SubmitDisplay(input, input)
 	}
 }
 
@@ -518,8 +518,20 @@ func (a *App) SubmitDisplayToTab(tabID, display, input string) {
 	if ctrl == nil {
 		return
 	}
-	_ = recordSessionDisplay(config.SessionDir(), ctrl.SessionPath(), input, display)
-	ctrl.Submit(input)
+	ctrl.SubmitDisplay(display, input)
+}
+
+func (a *App) bindControllerDisplayRecorder(ctrl *control.Controller) {
+	if ctrl == nil {
+		return
+	}
+	ctrl.SetDisplayRecorder(func(content, display string) {
+		dir := ctrl.SessionDir()
+		if dir == "" {
+			dir = config.SessionDir()
+		}
+		_ = recordSessionDisplay(dir, ctrl.SessionPath(), content, display)
+	})
 }
 
 // Cancel aborts the in-flight turn.
@@ -2545,6 +2557,7 @@ func (a *App) SetModelForTab(tabID, name string) error {
 	if err != nil {
 		return err
 	}
+	a.bindControllerDisplayRecorder(newCtrl)
 	a.mu.Lock()
 	tab.Ctrl = newCtrl
 	tab.model = name
@@ -2634,6 +2647,7 @@ func (a *App) SetEffortForTab(tabID, level string) error {
 	if err != nil {
 		return err
 	}
+	a.bindControllerDisplayRecorder(newCtrl)
 	a.mu.Lock()
 	tab.Ctrl = newCtrl
 	tab.effort = &effort

@@ -141,6 +141,8 @@ type Controller struct {
 	// a fresh memory takes effect this session without busting the prompt cache;
 	// it joins the prefix naturally on the next session.
 	pendingMemory []string
+
+	displayRecorder func(content, display string)
 }
 
 type approvalReply struct {
@@ -245,6 +247,26 @@ func New(opts Options) *Controller {
 		c.executor.SetMemoryQueue(c)
 	}
 	return c
+}
+
+// SetDisplayRecorder installs an optional hook used by frontends that persist a
+// shorter user-facing transcript than the fully composed model prompt.
+func (c *Controller) SetDisplayRecorder(fn func(content, display string)) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.displayRecorder = fn
+}
+
+func (c *Controller) recordDisplay(content, display string) {
+	if strings.TrimSpace(display) == "" || content == display {
+		return
+	}
+	c.mu.Lock()
+	record := c.displayRecorder
+	c.mu.Unlock()
+	if record != nil {
+		record(content, display)
+	}
 }
 
 // ckptDir derives a session's checkpoint directory from its file path
@@ -352,6 +374,10 @@ func (c *Controller) runTurn(ctx context.Context, input string) error {
 }
 
 func (c *Controller) runTurnWithRaw(ctx context.Context, input, raw string) error {
+	return c.runTurnWithRawDisplay(ctx, input, raw, "")
+}
+
+func (c *Controller) runTurnWithRawDisplay(ctx context.Context, input, raw, display string) error {
 	c.maybeSessionStart(ctx)
 	c.maybeAutoPlan(ctx, raw)
 	input = c.Compose(input)
@@ -373,6 +399,7 @@ func (c *Controller) runTurnWithRaw(ctx context.Context, input, raw string) erro
 		}
 		defer func() { c.hooks.Stop(ctx, lastAssistantText(c.History()), turn) }()
 	}
+	c.recordDisplay(input, display)
 	if err := c.runner.Run(ctx, input); err != nil {
 		return err
 	}
@@ -435,6 +462,16 @@ func lastAssistantText(msgs []provider.Message) string {
 // resolve to a turn; an unknown slash emits a Notice. Anything else is a normal
 // turn with its @-references resolved first.
 func (c *Controller) Submit(input string) {
+	c.submit(input, "")
+}
+
+// SubmitDisplay runs input as a turn while remembering the user-facing display
+// text for transcript replay when controller-side composition expands input.
+func (c *Controller) SubmitDisplay(display, input string) {
+	c.submit(input, display)
+}
+
+func (c *Controller) submit(input, display string) {
 	trimmed := strings.TrimSpace(input)
 	if note, ok := MemoryQuickAddNote(trimmed); ok {
 		c.rememberProjectNote(note)
@@ -479,11 +516,11 @@ func (c *Controller) Submit(input string) {
 				c.notice("unknown command: " + trimmed)
 				return nil
 			}
-			return c.runTurnWithRaw(ctx, sent, sent)
+			return c.runTurnWithRawDisplay(ctx, sent, sent, display)
 		})
 	case strings.HasPrefix(trimmed, "/"):
 		if ref, ok := FileRefLine(trimmed); ok {
-			c.runRefTurn(ref)
+			c.runRefTurn(ref, display)
 			return
 		}
 		// Read-only management verbs (/model /memory /skills /hooks /mcp) emit a
@@ -533,19 +570,19 @@ func (c *Controller) Submit(input string) {
 		// turn. (Built-in slash verbs like /compact are handled above.)
 		if sent, ok := c.CustomCommand(trimmed); ok {
 			c.runGuarded(func(ctx context.Context) error {
-				return c.runTurnWithRaw(ctx, sent, sent)
+				return c.runTurnWithRawDisplay(ctx, sent, sent, display)
 			})
 			return
 		}
 		if sent, ok := c.RunSkill(trimmed); ok {
 			c.runGuarded(func(ctx context.Context) error {
-				return c.runTurnWithRaw(ctx, sent, sent)
+				return c.runTurnWithRawDisplay(ctx, sent, sent, display)
 			})
 			return
 		}
 		c.notice("unknown command: " + trimmed)
 	default:
-		c.runRefTurn(input)
+		c.runRefTurn(input, display)
 	}
 }
 
@@ -651,7 +688,7 @@ func (c *Controller) RunShell(command string) {
 
 // runRefTurn resolves a line's @references into a context block and starts a
 // turn with it prepended (or the raw line when nothing resolved).
-func (c *Controller) runRefTurn(input string) {
+func (c *Controller) runRefTurn(input, display string) {
 	c.runGuarded(func(ctx context.Context) error {
 		block, errs := c.ResolveRefs(ctx, input)
 		for _, e := range errs {
@@ -661,7 +698,7 @@ func (c *Controller) runRefTurn(input string) {
 		if block != "" {
 			sent = "Referenced context:\n\n" + block + "\n\n" + input
 		}
-		return c.runTurnWithRaw(ctx, sent, input)
+		return c.runTurnWithRawDisplay(ctx, sent, input, display)
 	})
 }
 
