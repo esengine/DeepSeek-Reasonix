@@ -1120,6 +1120,37 @@ func orderedTopicIDs(explicit []string, titleMap map[string]string) []string {
 	return append(out, remaining...)
 }
 
+// sortTopicIDsByActivity collects all topic IDs from explicit + titleMap,
+// deduplicates, and returns them sorted by lastActivityAt descending (most
+// recent first).  Topics with no activity (0) sink to the bottom; ties are
+// broken alphabetically by title.
+func sortTopicIDsByActivity(explicit []string, titleMap map[string]string, getActivity func(id string) int64) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(explicit)+len(titleMap))
+	for _, tid := range explicit {
+		tid = strings.TrimSpace(tid)
+		if tid == "" || seen[tid] {
+			continue
+		}
+		seen[tid] = true
+		out = append(out, tid)
+	}
+	for tid := range titleMap {
+		if !seen[tid] {
+			out = append(out, tid)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		ai := getActivity(out[i])
+		aj := getActivity(out[j])
+		if ai != aj {
+			return ai > aj // descending — most recent first
+		}
+		return titleMap[out[i]] < titleMap[out[j]] // alphabetical tiebreaker
+	})
+	return out
+}
+
 func projectDisplayName(p desktopProject) string {
 	if title := strings.TrimSpace(p.Title); title != "" {
 		return title
@@ -2247,7 +2278,14 @@ func (a *App) ListProjectTree() []ProjectNode {
 		}
 		globalColor := normalizeProjectColor(f.GlobalColor)
 		globalReadMap := loadTopicReadStatus("")
-		globalTopicIDs := orderedTopicIDs(f.GlobalTopics, globalTitleMap)
+		globalTopicIDs := sortTopicIDsByActivity(f.GlobalTopics, globalTitleMap, func(id string) int64 {
+			key := topicSummaryKey("global", "", id)
+			a := topicSummaries[key].lastActivityAt
+			if s := openTopics[key].lastActivityAt; s > a {
+				a = s
+			}
+			return a
+		})
 		children := make([]ProjectNode, 0, len(globalTopicIDs))
 		for _, id := range globalTopicIDs {
 			title := globalTitleMap[id]
@@ -2294,7 +2332,14 @@ func (a *App) ListProjectTree() []ProjectNode {
 
 		// Gather topics: explicit topic list + all known topic titles.
 		titleMap := loadTopicTitles(p.Root)
-		topicIDs := orderedTopicIDs(p.Topics, titleMap)
+		topicIDs := sortTopicIDsByActivity(p.Topics, titleMap, func(tid string) int64 {
+			key := topicSummaryKey("project", p.Root, tid)
+			a := topicSummaries[key].lastActivityAt
+			if s := openTopics[key].lastActivityAt; s > a {
+				a = s
+			}
+			return a
+		})
 		projectReadMap := loadTopicReadStatus(p.Root)
 
 		children := make([]ProjectNode, 0, len(topicIDs))
