@@ -593,14 +593,26 @@ func officialProviderTemplate(kind string) ([]config.ProviderEntry, string, erro
 // fill `models` (with `default`). The shared key/endpoint live on the entry.
 func (a *App) SaveProvider(p ProviderView) error {
 	return a.applyConfigChange(func(c *config.Config) error {
-		e := config.ProviderEntry{
-			Name: p.Name, Kind: p.Kind, BaseURL: p.BaseURL,
-			ModelsURL: p.ModelsURL,
-			APIKeyEnv: p.APIKeyEnv, BalanceURL: strings.TrimSpace(p.BalanceURL), ContextWindow: p.ContextWindow,
-			ReasoningProtocol: p.ReasoningProtocol,
-			SupportedEfforts:  p.SupportedEfforts,
-			DefaultEffort:     p.DefaultEffort,
+		e := config.ProviderEntry{Name: p.Name}
+		for i := range c.Providers {
+			if c.Providers[i].Name == p.Name {
+				e = c.Providers[i]
+				break
+			}
 		}
+		e.Name = p.Name
+		e.Kind = p.Kind
+		e.BaseURL = p.BaseURL
+		e.ModelsURL = p.ModelsURL
+		e.APIKeyEnv = p.APIKeyEnv
+		e.BalanceURL = strings.TrimSpace(p.BalanceURL)
+		e.ContextWindow = p.ContextWindow
+		e.ReasoningProtocol = p.ReasoningProtocol
+		e.SupportedEfforts = p.SupportedEfforts
+		e.DefaultEffort = p.DefaultEffort
+		e.Model = ""
+		e.Models = nil
+		e.Default = ""
 		if len(p.Models) > 0 {
 			e.Model = p.Models[0] // also satisfies validateProvider's model requirement
 			if len(p.Models) > 1 {
