@@ -7048,7 +7048,7 @@ a[href] {
 .onboarding__skip:disabled {
   opacity: 0.4;
   cursor: not-allowed;
-
+}
 
 /* InlineDiff: a compact before/after diff card. The header strip carries
    the filename, the +/- counts, and a Copy button. The body is a monospace
