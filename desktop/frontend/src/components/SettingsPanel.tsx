@@ -23,15 +23,23 @@ import { InlineConfirmButton } from "./InlineConfirmButton";
 import { ResizableDrawer } from "./ResizableDrawer";
 import { Tooltip } from "./Tooltip";
 
-type SettingsTab = "general" | "models" | "providers" | "network" | "permissions" | "sandbox" | "appearance" | "updates";
+type SettingsTab = "general" | "models" | "providers" | "capabilities" | "network" | "permissions" | "sandbox" | "appearance" | "updates";
 
-const SETTINGS_TABS: SettingsTab[] = ["general", "models", "providers", "network", "permissions", "sandbox", "appearance", "updates"];
+const SETTINGS_TABS: SettingsTab[] = ["general", "models", "providers", "capabilities", "network", "permissions", "sandbox", "appearance", "updates"];
 
 // SettingsPanel is the desktop settings surface, aligning with Claude Code's
 // settings: model & providers (incl. API keys), permissions, sandbox, and
 // appearance. Every change writes reasonix.toml (or .env for keys)
 // through the kernel's config edit API and rebuilds the controller live.
-export function SettingsPanel({ onClose, onChanged }: { onClose: () => void; onChanged: () => void }) {
+export function SettingsPanel({
+  onClose,
+  onChanged,
+  onManageCapabilities,
+}: {
+  onClose: () => void;
+  onChanged: () => void;
+  onManageCapabilities: () => void;
+}) {
   const t = useT();
   const [s, setS] = useState<SettingsView | null>(null);
   const [busy, setBusy] = useState(false);
@@ -103,6 +111,7 @@ export function SettingsPanel({ onClose, onChanged }: { onClose: () => void; onC
                 {tab === "general" && <GeneralSection s={s} busy={busy} apply={apply} />}
                 {tab === "models" && <ModelsSection s={s} busy={busy} apply={apply} onManageProviders={() => setTab("providers")} />}
                 {tab === "providers" && <ProvidersSection s={s} busy={busy} apply={apply} />}
+                {tab === "capabilities" && <CapabilitiesSection onManage={onManageCapabilities} />}
                 {tab === "network" && <NetworkSection s={s} busy={busy} apply={apply} />}
                 {tab === "permissions" && <PermissionsSection s={s} busy={busy} apply={apply} />}
                 {tab === "sandbox" && <SandboxSection s={s} busy={busy} apply={apply} />}
@@ -159,6 +168,8 @@ function settingsTabLabel(id: SettingsTab, t: ReturnType<typeof useT>): string {
       return t("settings.tab.general");
     case "providers":
       return t("settings.tab.providers");
+    case "capabilities":
+      return t("settings.tab.capabilities");
     case "network":
       return t("settings.tab.network");
     case "permissions":
@@ -174,6 +185,23 @@ function settingsTabLabel(id: SettingsTab, t: ReturnType<typeof useT>): string {
 
 function settingsTabMeta(id: SettingsTab, _s: SettingsView, t: ReturnType<typeof useT>): string {
   return t(`settings.tabSub.${id}`);
+}
+
+function CapabilitiesSection({ onManage }: { onManage: () => void }) {
+  const t = useT();
+  return (
+    <section className="mem-section">
+      <div className="mem-section__head">
+        <div>
+          <div className="mem-section__title">{t("settings.tab.capabilities")}</div>
+          <div className="settings-summary">{t("settings.capabilitiesDescription")}</div>
+        </div>
+        <button className="btn btn--primary btn--small" onClick={onManage}>
+          {t("settings.openCapabilities")}
+        </button>
+      </div>
+    </section>
+  );
 }
 
 // allRefs flattens providers into "provider/model" refs for the model selectors.
