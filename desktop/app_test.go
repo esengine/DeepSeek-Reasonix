@@ -1000,7 +1000,6 @@ args = ["-y", "@playwright/mcp"]
 		Name:      "playwright",
 		Transport: "stdio",
 		Command:   "npx -y @modelcontextprotocol/server-filesystem .",
-		Tier:      "lazy",
 	}); err != nil {
 		t.Fatalf("UpdateMCPServer: %v", err)
 	}
