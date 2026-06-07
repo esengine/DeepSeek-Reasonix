@@ -636,7 +636,7 @@ a[href] {
   min-width: var(--workspace-resizer-width);
   padding: 0;
   border: 0;
-  background: var(--chat-bg);
+  background: var(--workspace-files-bg);
   cursor: col-resize;
   touch-action: none;
 }
@@ -2169,7 +2169,6 @@ a[href] {
 /* ── footer: composer + status line ──────────────────────────────────────── */
 .footer {
   flex: 0 0 auto;
-  border-top: 1px solid var(--border-soft);
   background: var(--chat-bg);
   padding: 12px 32px 10px;
 }
