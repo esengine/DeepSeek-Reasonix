@@ -8213,7 +8213,6 @@ a[href] {
   padding-bottom: 0;
   padding-left: 0 !important;
   margin-left: 22px;
-  margin-right: var(--project-tree-action-column);
   padding-right: 8px;
   border-radius: 6px;
   color: var(--fg-dim);
