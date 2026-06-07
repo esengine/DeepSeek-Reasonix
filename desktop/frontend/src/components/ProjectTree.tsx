@@ -161,8 +161,15 @@ export function ProjectTree({
   const creatingRef = useRef(false);
   const filterRef = useRef<HTMLDivElement>(null);
   type TimeFilter = "all" | "1h" | "3h" | "5h" | "1d";
-  const [timeFilter, setTimeFilter] = useState<TimeFilter>("all");
+  const [timeFilter, setTimeFilter] = useState<TimeFilter>(() => {
+    const saved = localStorage.getItem("projectTree:timeFilter");
+    return (saved === "1h" || saved === "3h" || saved === "5h" || saved === "1d") ? saved : "all";
+  });
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
+
+  useEffect(() => {
+    localStorage.setItem("projectTree:timeFilter", timeFilter);
+  }, [timeFilter]);
 
   const closeMenu = useCallback(() => {
     setMenuTopic(null);
