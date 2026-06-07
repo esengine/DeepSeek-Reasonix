@@ -165,25 +165,8 @@ function settingsTabLabel(id: SettingsTab, t: ReturnType<typeof useT>): string {
   }
 }
 
-function settingsTabMeta(id: SettingsTab, s: SettingsView, t: ReturnType<typeof useT>): string {
-  switch (id) {
-    case "models":
-      return toRef(s.defaultModel, s) || t("common.none");
-    case "general":
-      return `${closeBehaviorLabel(normalizeCloseBehavior(s.closeBehavior), t)} · ${t(`settings.autoPlan.${normalizeAutoPlan(s.autoPlan)}`)}`;
-    case "providers":
-      return t("settings.providerCount", { n: s.providers.length });
-    case "network":
-      return proxyModeLabel(normalizeProxyMode(s.network.proxyMode), t);
-    case "permissions":
-      return s.permissions.mode;
-    case "sandbox":
-      return s.sandbox.bash;
-    case "appearance":
-      return t("settings.appearanceMeta");
-    case "updates":
-      return t("settings.updatesMeta");
-  }
+function settingsTabMeta(id: SettingsTab, _s: SettingsView, t: ReturnType<typeof useT>): string {
+  return t(`settings.tabSub.${id}`);
 }
 
 // allRefs flattens providers into "provider/model" refs for the model selectors.
@@ -576,16 +559,6 @@ function ModelsSection({ s, busy, apply, onManageProviders }: SectionProps & { o
         </div>
       </div>
 
-      <div className="settings-summary-grid">
-        <div className="settings-summary">
-          <span>{t("settings.providers")}</span>
-          <strong>{s.providers.length}</strong>
-        </div>
-        <div className="settings-summary">
-          <span>{t("settings.availableModels")}</span>
-          <strong>{refs.length}</strong>
-        </div>
-      </div>
     </section>
   );
 }
