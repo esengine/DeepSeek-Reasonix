@@ -74,8 +74,10 @@ context_window = 65536
 # Custom /effort levels for a provider. When supported_efforts is set, the
 # /effort command exposes these levels; default_effort is what "/effort auto"
 # (or unset) resolves to. Leave both commented to keep the built-in defaults
-# (DeepSeek: high|max; Anthropic: low|medium|high|xhigh|max). Other kinds
-# (e.g. mimo-pro) don't expose /effort unless you opt in here.
+# (DeepSeek models: high|max; Anthropic: low|medium|high|xhigh|max). DeepSeek
+# models behind a proxy are detected by model name; set reasoning_protocol =
+# "none" to disable that or "openai" to force ordinary reasoning_effort.
+# Other kinds (e.g. mimo-pro) don't expose /effort unless you opt in here.
 #
 # [[providers]]
 # name           = "mimo-custom"
@@ -83,6 +85,7 @@ context_window = 65536
 # base_url       = "https://token-plan-cn.xiaomimimo.com/v1"
 # model          = "mimo-v2.5-pro"
 # api_key_env    = "MIMO_API_KEY"
+# reasoning_protocol = "openai"   # auto|deepseek|openai|none
 # supported_efforts = ["low", "medium", "high"]
 # default_effort    = "high"
 
@@ -104,6 +107,7 @@ effort         = "high"
 
 [tools]
 enabled = []   # empty = all built-in tools
+bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local cap
 
 # CodeGraph code intelligence (symbol/call-graph search via tree-sitter + SQLite),
 # a built-in MCP server giving the agent codegraph_* search / context / explore /
@@ -123,6 +127,7 @@ enabled = []   # empty = all built-in tools
 # invoke them via /<name>. Manage with /skill (list, show, enable, disable, new, paths).
 # [skills]
 # paths = ["~/my-skills", "../shared/skills"]   # extra "custom"-scope skill roots
+# excluded_paths = ["~/.agents/skills"]         # hide convention roots without deleting folders
 # disabled_skills = ["review"]                  # hide from prompt, slash invocation, and skill tools
 
 # Hooks run shell commands around the loop (PreToolUse / PostToolUse /

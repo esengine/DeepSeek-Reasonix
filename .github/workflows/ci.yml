@@ -87,12 +87,21 @@ jobs:
           cache: true
           cache-dependency-path: desktop/go.sum
 
-      # The Go main package embeds frontend/dist; a placeholder lets the Go
-      # build/test resolve the embed without a full frontend build.
-      - name: Stub embedded frontend
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+          run_install: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: desktop/frontend/pnpm-lock.yaml
+
+      - name: Install Wails CLI
         run: |
-          mkdir -p frontend/dist
-          echo '<!doctype html><title>ci</title>' > frontend/dist/index.html
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
 
       - name: gofmt
         run: |
@@ -118,6 +127,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc libgtk-3-dev libwebkit2gtk-4.0-dev
 
+      - name: Build frontend
+        run: |
+          wails generate module
+          pnpm --dir frontend install --frozen-lockfile
+          pnpm --dir frontend build
+
       - name: vet
         run: go vet ./...
 
@@ -126,29 +141,6 @@ jobs:
 
       - name: test
         run: go test ./...
-
-      - name: install wails CLI
-        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
-
-      # tsc needs the generated wailsjs bindings, which are gitignored — generate
-      # them first. This rides the desktop job because it already has Go and the
-      # webkit toolchain. It's the only gate that catches frontend TS errors (e.g.
-      # duplicate locale keys from merged PRs) before `wails build` — see #3410.
-      - name: Generate frontend bindings
-        run: wails generate module
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10
-
-      - name: Frontend typecheck
-        working-directory: desktop/frontend
-        run: |
-          pnpm install --frozen-lockfile
-          pnpm run typecheck
 
   lint:
     runs-on: ubuntu-latest

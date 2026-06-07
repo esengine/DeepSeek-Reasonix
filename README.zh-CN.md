@@ -112,9 +112,11 @@ api_key_env = "DEEPSEEK_API_KEY"
 
 [tools]
 enabled = []   # 省略/为空 = 全部内置工具
+bash_timeout_seconds = 120   # 前台安全上限；设为 0 表示不设工具层超时
 
 [skills]
 # paths = ["~/my-skills", "../shared/skills"]   # 额外的自定义技能目录
+# excluded_paths = ["~/.agents/skills"]         # 隐藏约定来源，不删除目录
 # disabled_skills = ["review"]                  # 隐藏技能，直到 /skill enable <name>
 
 [permissions]

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ClipboardEvent, DragEvent, KeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { AlertTriangle, ArrowUp, Check, ChevronDown, Eye, FileText, Folder, FolderGit2, FolderPlus, List, Search, Square, Trash2, X, Zap } from "lucide-react";
 import { asArray } from "../lib/array";
@@ -35,6 +35,7 @@ const LONG_PASTE_MIN_LINES = 20;
 const COMPOSER_MIN_HEIGHT = 86;
 const COMPOSER_MAX_HEIGHT = 360;
 const COMPOSER_MAX_VIEWPORT_RATIO = 0.4;
+const COMPOSER_AUTO_RESERVED_HEIGHT = 58;
 // Grace after compositionend to swallow a confirm-Enter that lands just after
 // it; the real gap is a few ms, so keep it short or a deliberate quick second
 // Enter (submit) gets eaten too.
@@ -78,6 +79,10 @@ function composerMaxHeight(): number {
 
 function clampComposerHeight(height: number): number {
   return Math.min(Math.max(Math.round(height), COMPOSER_MIN_HEIGHT), composerMaxHeight());
+}
+
+function composerAutoInputMaxHeight(): number {
+  return Math.max(32, composerMaxHeight() - COMPOSER_AUTO_RESERVED_HEIGHT);
 }
 
 function loadComposerHeight(): number | null {
@@ -199,6 +204,8 @@ export function Composer({
   const [confirmRemovePath, setConfirmRemovePath] = useState<string | null>(null);
   const [composerHeight, setComposerHeight] = useState<number | null>(loadComposerHeight);
   const [composerResizing, setComposerResizing] = useState(false);
+  const [textareaAutoHeight, setTextareaAutoHeight] = useState<number | null>(null);
+  const [textareaAutoOverflow, setTextareaAutoOverflow] = useState(false);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const composerCardRef = useRef<HTMLDivElement>(null);
   const workspaceAnchorRef = useRef<HTMLDivElement>(null);
@@ -725,6 +732,48 @@ export function Composer({
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
+  const measureTextareaAutoHeight = useCallback(() => {
+    if (composerHeight !== null) {
+      setTextareaAutoHeight(null);
+      setTextareaAutoOverflow(false);
+      return;
+    }
+    const node = taRef.current;
+    if (!node) return;
+    const previousHeight = node.style.height;
+    node.style.height = "auto";
+    const maxHeight = composerAutoInputMaxHeight();
+    const nextHeight = Math.min(node.scrollHeight, maxHeight);
+    const nextOverflow = node.scrollHeight > maxHeight + 1;
+    node.style.height = previousHeight;
+    setTextareaAutoHeight((current) => (current === nextHeight ? current : nextHeight));
+    setTextareaAutoOverflow((current) => (current === nextOverflow ? current : nextOverflow));
+  }, [composerHeight]);
+
+  useLayoutEffect(() => {
+    measureTextareaAutoHeight();
+  }, [text, measureTextareaAutoHeight]);
+
+  useEffect(() => {
+    if (composerHeight !== null) return;
+    let frame = 0;
+    const update = () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        frame = 0;
+        measureTextareaAutoHeight();
+      });
+    };
+    window.addEventListener("resize", update);
+    const observer = new MutationObserver(update);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-text-size"] });
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      window.removeEventListener("resize", update);
+      observer.disconnect();
+    };
+  }, [composerHeight, measureTextareaAutoHeight]);
+
   const saveComposerHeight = (height: number) => {
     saveLayoutSize("composerHeight", height, clampComposerHeight);
   };
@@ -734,7 +783,7 @@ export function Composer({
     clearLayoutSize("composerHeight");
   };
 
-  const onComposerResizeStart = (e: ReactPointerEvent<HTMLDivElement>) => {
+  const onComposerResizeStart = (e: ReactPointerEvent<HTMLButtonElement>) => {
     if (e.button !== 0) return;
     const card = composerCardRef.current;
     if (!card) return;
@@ -764,6 +813,22 @@ export function Composer({
     document.addEventListener("pointermove", onMove);
     document.addEventListener("pointerup", onUp);
     document.addEventListener("pointercancel", onUp);
+  };
+
+  const onComposerResizeKeyDown = (e: KeyboardEvent<HTMLButtonElement>) => {
+    const card = composerCardRef.current;
+    const current = composerHeight ?? card?.getBoundingClientRect().height ?? COMPOSER_MIN_HEIGHT;
+    const step = e.shiftKey ? 32 : 16;
+    let next: number | null = null;
+    if (e.key === "ArrowUp" || e.key === "PageUp") next = current + step;
+    else if (e.key === "ArrowDown" || e.key === "PageDown") next = current - step;
+    else if (e.key === "Home") next = COMPOSER_MIN_HEIGHT;
+    else if (e.key === "End") next = composerMaxHeight();
+    if (next === null) return;
+    e.preventDefault();
+    const height = clampComposerHeight(next);
+    setComposerHeight(height);
+    saveComposerHeight(height);
   };
 
   const pickEntry = (e: DirEntry) => {
@@ -836,6 +901,10 @@ export function Composer({
   };
 
   const composerCardStyle = composerHeight === null ? undefined : ({ "--composer-height": `${composerHeight}px` } as CSSProperties);
+  const textareaStyle = composerHeight === null && textareaAutoHeight !== null
+    ? ({ height: `${textareaAutoHeight}px`, overflowY: textareaAutoOverflow ? "auto" : "hidden" } as CSSProperties)
+    : undefined;
+  const composerAutoExpanded = composerHeight === null && textareaAutoHeight !== null && textareaAutoHeight > 40;
   const modeOptions: Array<{ id: Mode; label: string; icon: ReactNode }> = [
     { id: "normal", label: "auto", icon: <Zap size={13} /> },
     { id: "plan", label: "plan", icon: <List size={13} /> },
@@ -1051,13 +1120,17 @@ export function Composer({
         </div>
       )}
       <div
-        className={`composer-card${composerHeight !== null ? " composer-card--resized" : ""}${composerResizing ? " composer-card--resizing" : ""}`}
+        className={`composer-card${composerHeight !== null ? " composer-card--resized" : ""}${composerAutoExpanded ? " composer-card--autosized" : ""}${composerResizing ? " composer-card--resizing" : ""}`}
         ref={composerCardRef}
         style={composerCardStyle}
       >
-        <div
+        <button
           className="composer-resize-handle"
+          type="button"
+          aria-label={t("composer.resize")}
+          title={t("composer.resize")}
           onPointerDown={onComposerResizeStart}
+          onKeyDown={onComposerResizeKeyDown}
           onDoubleClick={resetComposerHeight}
         />
         <div
@@ -1085,6 +1158,7 @@ export function Composer({
               composingRef.current = false;
               lastCompositionEndAt.current = Date.now();
             }}
+            style={textareaStyle}
             placeholder={disabled ? t("common.loading") : t("composer.placeholder")}
             rows={1}
             disabled={disabled}

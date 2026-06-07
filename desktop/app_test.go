@@ -54,6 +54,14 @@ func isolateDesktopUserDirs(t *testing.T) string {
 	return home
 }
 
+func providerNamesFromView(providers []ProviderView) []string {
+	out := make([]string, 0, len(providers))
+	for _, p := range providers {
+		out = append(out, p.Name)
+	}
+	return out
+}
+
 func TestCommandsIncludesEffortNotThinking(t *testing.T) {
 	app := NewApp()
 	cmds := app.Commands()
@@ -270,6 +278,139 @@ default = "deepseek-v4-flash"
 	}
 }
 
+func TestSettingsSurfacesOfficialProviderTemplatesSeparately(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	got := NewApp().Settings()
+	providers := providerAccessSet(providerNamesFromView(got.Providers))
+	official := providerAccessSet(providerNamesFromView(got.OfficialProviders))
+	if providers["mimo-api"] {
+		t.Fatalf("mimo-api should not be mixed into configured providers: %+v", got.Providers)
+	}
+	if !official["deepseek-flash"] || !official["mimo-api"] || !official["mimo-pro"] {
+		t.Fatalf("official providers = %+v, want deepseek-flash, mimo-api, and mimo-pro", got.OfficialProviders)
+	}
+}
+
+func TestSaveProviderPersistsReasoningProtocol(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	app := NewApp()
+	if err := app.SaveProvider(ProviderView{
+		Name:              "deepseek-proxy",
+		Kind:              "openai",
+		BaseURL:           "https://proxy.example.com/v1",
+		Models:            []string{"deepseek-v4-flash"},
+		Default:           "deepseek-v4-flash",
+		APIKeyEnv:         "DEEPSEEK_PROXY_KEY",
+		ReasoningProtocol: "none",
+		SupportedEfforts:  []string{"high", "max"},
+		DefaultEffort:     "max",
+	}); err != nil {
+		t.Fatalf("SaveProvider: %v", err)
+	}
+
+	cfg := config.LoadForEdit(config.UserConfigPath())
+	got, ok := cfg.Provider("deepseek-proxy")
+	if !ok {
+		t.Fatal("saved provider not found")
+	}
+	if got.ReasoningProtocol != "none" || got.DefaultEffort != "max" {
+		t.Fatalf("saved provider = %+v, want reasoning_protocol none and default_effort max", got)
+	}
+
+	view := app.Settings()
+	for _, p := range view.Providers {
+		if p.Name == "deepseek-proxy" {
+			if p.ReasoningProtocol != "none" {
+				t.Fatalf("settings reasoningProtocol = %q, want none", p.ReasoningProtocol)
+			}
+			return
+		}
+	}
+	t.Fatalf("Settings() missing saved provider: %+v", view.Providers)
+}
+
+func TestDeleteProviderMigratesConfigAndOpenTabs(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	t.Setenv("REASONIX_TEST_KEY", "sk-test")
+
+	cfg := config.Default()
+	cfg.DefaultModel = "prov-a/model-a2"
+	cfg.Providers = []config.ProviderEntry{
+		{Name: "prov-a", Kind: "openai", BaseURL: "https://a.example.com", Model: "model-a1", Models: []string{"model-a1", "model-a2"}, APIKeyEnv: "REASONIX_TEST_KEY"},
+		{Name: "prov-b", Kind: "openai", BaseURL: "https://b.example.com", Model: "model-b1", APIKeyEnv: "REASONIX_TEST_KEY"},
+	}
+	cfg.Agent.PlannerModel = "prov-a"
+	cfg.Desktop.ProviderAccess = []string{"prov-a", "prov-b"}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	ctrl := control.New(control.Options{Label: "old"})
+	defer ctrl.Close()
+	app := NewApp()
+	tab := &WorkspaceTab{ID: "tab_a", Scope: "global", Ctrl: ctrl, Label: "prov-a/model-a1", Ready: true, model: "prov-a/model-a1"}
+	app.tabs = map[string]*WorkspaceTab{tab.ID: tab}
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+
+	if err := app.DeleteProvider("prov-a"); err != nil {
+		t.Fatalf("DeleteProvider: %v", err)
+	}
+
+	got := config.LoadForEdit(config.UserConfigPath())
+	if _, ok := got.Provider("prov-a"); ok {
+		t.Fatal("prov-a should be removed")
+	}
+	if got.DefaultModel != "prov-b" || got.Agent.PlannerModel != "prov-b" {
+		t.Fatalf("model refs after delete = default:%q planner:%q, want prov-b", got.DefaultModel, got.Agent.PlannerModel)
+	}
+	if providerAccessSet(got.Desktop.ProviderAccess)["prov-a"] {
+		t.Fatalf("provider access still contains prov-a: %+v", got.Desktop.ProviderAccess)
+	}
+	if tab.model != "prov-b/model-b1" || tab.Label != "prov-b/model-b1" {
+		t.Fatalf("tab model after delete = model:%q label:%q, want prov-b/model-b1", tab.model, tab.Label)
+	}
+	if tab.Ctrl != nil {
+		t.Fatal("tab controller should be closed and cleared when retargeted without a running app context")
+	}
+}
+
+func TestDeleteProviderRejectsRunningAffectedTab(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	t.Setenv("REASONIX_TEST_KEY", "sk-test")
+
+	cfg := config.Default()
+	cfg.DefaultModel = "prov-a/model-a1"
+	cfg.Providers = []config.ProviderEntry{
+		{Name: "prov-a", Kind: "openai", BaseURL: "https://a.example.com", Model: "model-a1", APIKeyEnv: "REASONIX_TEST_KEY"},
+		{Name: "prov-b", Kind: "openai", BaseURL: "https://b.example.com", Model: "model-b1", APIKeyEnv: "REASONIX_TEST_KEY"},
+	}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	runner := &blockingRunner{started: make(chan struct{}), release: make(chan struct{})}
+	app := NewApp()
+	app.setTestCtrl(control.New(control.Options{Runner: runner}), "prov-a/model-a1")
+	ctrl := app.activeCtrl()
+	ctrl.Submit("work")
+	<-runner.started
+
+	err := app.DeleteProvider("prov-a")
+	if err == nil || !strings.Contains(err.Error(), "finish or cancel") {
+		t.Fatalf("DeleteProvider while running error = %v, want finish/cancel guard", err)
+	}
+	if _, ok := config.LoadForEdit(config.UserConfigPath()).Provider("prov-a"); !ok {
+		t.Fatal("provider should remain after rejected deletion")
+	}
+
+	close(runner.release)
+	waitNotRunning(t, ctrl)
+	ctrl.Close()
+}
+
 func TestMigrateDesktopPreferencesDoesNotOverwriteExistingConfig(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
@@ -351,6 +492,12 @@ func TestSearchFileRefsFindsNestedBasename(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "frontend", "wailsjs", "runtime", "runtime.js"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(dir, "frontend", "Thumbs.db"), []byte("noise"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "frontend", ".DS_Store"), []byte("noise"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.MkdirAll(filepath.Join(dir, "node_modules", "pkg"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -363,25 +510,78 @@ func TestSearchFileRefsFindsNestedBasename(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, ".codegraph", "cache", "runtime.js"), []byte("index"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	for _, noise := range []string{".codex", ".npm", ".pnpm-store", "bin", "dist", "stage", "tmp"} {
+		if err := os.MkdirAll(filepath.Join(dir, noise), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, noise, "runtime.js"), []byte("noise"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "desktop", "frontend", "wailsjs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "desktop", "frontend", "wailsjs", "runtime.js"), []byte("generated"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "product", "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "product", "bin", "runtime.js"), []byte("real"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Chdir(dir); err != nil {
 		t.Fatal(err)
 	}
 
 	app := &App{}
 	listed := app.ListDir("")
-	if hasDirEntry(listed, ".codegraph") {
-		t.Fatalf("ListDir should hide CodeGraph project index, got %+v", listed)
+	for _, hidden := range []string{".codex", ".codegraph", ".npm", ".pnpm-store", "bin", "dist", "stage", "tmp"} {
+		if hasDirEntry(listed, hidden) {
+			t.Fatalf("ListDir should hide local noise %q, got %+v", hidden, listed)
+		}
+	}
+	desktopFrontend := app.ListDir("desktop/frontend")
+	if hasDirEntry(desktopFrontend, "wailsjs") {
+		t.Fatalf("ListDir should hide generated Wails bindings, got %+v", desktopFrontend)
+	}
+	frontendEntries := app.ListDir("frontend")
+	for _, hidden := range []string{".DS_Store", "Thumbs.db"} {
+		if hasDirEntry(frontendEntries, hidden) {
+			t.Fatalf("ListDir should hide local noise file %q, got %+v", hidden, frontendEntries)
+		}
 	}
 
 	got := app.SearchFileRefs("runtime.js")
 	if !hasDirEntry(got, "frontend/wailsjs/runtime/runtime.js") {
 		t.Fatalf("SearchFileRefs(runtime.js) should find nested workspace file, got %+v", got)
 	}
+	if !hasDirEntry(got, "product/bin/runtime.js") {
+		t.Fatalf("SearchFileRefs should keep non-root bin directories searchable, got %+v", got)
+	}
 	if hasDirEntry(got, "node_modules/pkg/runtime.js") {
 		t.Fatalf("SearchFileRefs should skip node_modules noise, got %+v", got)
 	}
-	if hasDirEntry(got, ".codegraph/cache/runtime.js") {
-		t.Fatalf("SearchFileRefs should skip CodeGraph project index, got %+v", got)
+	for _, hidden := range []string{
+		".codex/runtime.js",
+		".codegraph/cache/runtime.js",
+		".npm/runtime.js",
+		".pnpm-store/runtime.js",
+		"bin/runtime.js",
+		"desktop/frontend/wailsjs/runtime.js",
+		"dist/runtime.js",
+		"stage/runtime.js",
+		"tmp/runtime.js",
+	} {
+		if hasDirEntry(got, hidden) {
+			t.Fatalf("SearchFileRefs should skip local noise %q, got %+v", hidden, got)
+		}
+	}
+	if noise := app.SearchFileRefs("Thumbs"); hasDirEntry(noise, "frontend/Thumbs.db") {
+		t.Fatalf("SearchFileRefs should skip Thumbs.db noise, got %+v", noise)
+	}
+	if noise := app.SearchFileRefs(".DS"); hasDirEntry(noise, "frontend/.DS_Store") {
+		t.Fatalf("SearchFileRefs should skip .DS_Store noise even for dot-prefixed search, got %+v", noise)
 	}
 }
 
@@ -1237,6 +1437,52 @@ tier = "eager"
 		}
 	}
 	t.Fatalf("broken MCP missing from Capabilities: %+v", view.Servers)
+}
+
+func TestRunShellForTabRoutesToRequestedTab(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	activeEvents := make(chan event.Event, 16)
+	inactiveEvents := make(chan event.Event, 16)
+	activeCtrl := control.New(control.Options{Sink: event.FuncSink(func(e event.Event) { activeEvents <- e })})
+	inactiveCtrl := control.New(control.Options{Sink: event.FuncSink(func(e event.Event) { inactiveEvents <- e })})
+	defer activeCtrl.Close()
+	defer inactiveCtrl.Close()
+
+	app := &App{
+		tabs: map[string]*WorkspaceTab{
+			"active":   {ID: "active", Scope: "global", Ctrl: activeCtrl, Ready: true},
+			"inactive": {ID: "inactive", Scope: "global", Ctrl: inactiveCtrl, Ready: true},
+		},
+		tabOrder:    []string{"active", "inactive"},
+		activeTabID: "active",
+	}
+
+	app.RunShellForTab("inactive", "echo route-test")
+
+	sawDispatch := false
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case e := <-inactiveEvents:
+			if e.Kind == event.ToolDispatch && strings.Contains(e.Tool.Args, "route-test") {
+				sawDispatch = true
+			}
+			if e.Kind == event.TurnDone {
+				if !sawDispatch {
+					t.Fatal("inactive tab finished without receiving shell dispatch")
+				}
+				select {
+				case active := <-activeEvents:
+					t.Fatalf("active tab received event for inactive shell: %+v", active)
+				default:
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for inactive shell turn")
+		}
+	}
 }
 
 type blockingRunner struct {

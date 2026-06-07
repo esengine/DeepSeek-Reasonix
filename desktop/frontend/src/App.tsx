@@ -2,7 +2,6 @@ import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } f
 import type { CSSProperties, KeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import { ShellExpandProvider, useShellExpand } from "./lib/shellExpand";
 import {
-  Blocks,
   Download,
   SquarePen,
   CircleGauge,
@@ -32,7 +31,6 @@ import { StatusBar } from "./components/StatusBar";
 import { MemoryPanel } from "./components/MemoryPanel";
 import { HistoryPanel } from "./components/HistoryPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
-import { CapabilitiesPanel } from "./components/CapabilitiesPanel";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { ContextPanel } from "./components/ContextPanel";
 import { WorkspacePanel } from "./components/WorkspacePanel";
@@ -84,6 +82,7 @@ const RIGHT_DOCK_MAX_WIDTH = 860;
 type RightDockMode = "context" | "files" | "changed";
 const SHOW_CONTEXT_DOCK = false;
 type HistoryScopeFilter = { scope: "global" | "project"; workspaceRoot: string };
+type DesktopPlatform = "darwin" | "windows" | "linux";
 type HistoryViewState =
   | { kind: "history"; source: "scope"; filter: HistoryScopeFilter; sessions: SessionMeta[] }
   | { kind: "history"; source: "all"; sessions: SessionMeta[] }
@@ -150,6 +149,28 @@ function loadSidebarWidth(): number {
 
 function saveSidebarWidth(width: number): void {
   saveLayoutSize("sidebarWidth", width, clampSidebarWidth);
+}
+
+function normalizeDesktopPlatform(value: string): DesktopPlatform {
+  if (value === "darwin" || value === "windows") return value;
+  return "linux";
+}
+
+function browserPlatformOverride(): DesktopPlatform | null {
+  if (typeof window === "undefined" || window.runtime) return null;
+  const value = new URLSearchParams(window.location.search).get("platform");
+  if (value === "darwin" || value === "windows" || value === "linux") return value;
+  return null;
+}
+
+function detectBrowserPlatform(): DesktopPlatform {
+  const override = browserPlatformOverride();
+  if (override) return override;
+  if (typeof navigator === "undefined") return "linux";
+  const marker = `${navigator.platform} ${navigator.userAgent}`;
+  if (/Win/i.test(marker)) return "windows";
+  if (/Mac/i.test(marker)) return "darwin";
+  return "linux";
 }
 
 function loadRightDockTreeWidth(): number {
@@ -380,7 +401,7 @@ export default function App() {
   const [projectRevision, setProjectRevision] = useState(0);
   const [composerInsertRequest, setComposerInsertRequest] = useState<ComposerInsertRequest | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [capsOpen, setCapsOpen] = useState(false);
+  const [desktopPlatform, setDesktopPlatform] = useState<DesktopPlatform>(detectBrowserPlatform);
   const [renamingTopicId, setRenamingTopicId] = useState<string | null>(null);
   const [topicTitleDraft, setTopicTitleDraft] = useState("");
   const [topicExportOpen, setTopicExportOpen] = useState(false);
@@ -389,6 +410,27 @@ export default function App() {
 
   // Persist window geometry across launches.
   useWindowStatePersistence();
+
+  useEffect(() => {
+    let cancelled = false;
+    const override = browserPlatformOverride();
+    if (override) {
+      setDesktopPlatform(override);
+      return () => {
+        cancelled = true;
+      };
+    }
+    void app.Platform()
+      .then((value) => {
+        if (!cancelled) setDesktopPlatform(normalizeDesktopPlatform(value));
+      })
+      .catch((e) => {
+        console.warn("platform probe failed", e);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -615,9 +657,15 @@ export default function App() {
   // and the transcript re-render is deferred to idle time.
   const deferredItems = useDeferredValue(state.items);
   const sessionTitle = topicTitle(activeTab);
-  const sessionMarkdown = useMemo(() => sessionItemsToMarkdown(sessionTitle, state.items, state.live), [sessionTitle, state.items, state.live]);
-  const sessionJson = useMemo(() => sessionItemsToJson(sessionTitle, state.items, state.live), [sessionTitle, state.items, state.live]);
   const sessionHasContent = state.items.length > 0 || Boolean(state.live?.text || state.live?.reasoning);
+  const getSessionMarkdown = useCallback(
+    () => sessionItemsToMarkdown(sessionTitle, state.items, state.live),
+    [sessionTitle, state.items, state.live],
+  );
+  const getSessionJson = useCallback(
+    () => sessionItemsToJson(sessionTitle, state.items, state.live),
+    [sessionTitle, state.items, state.live],
+  );
 
   useEffect(() => {
     if (!topicExportOpen) return;
@@ -632,11 +680,11 @@ export default function App() {
   const exportSession = useCallback(
     (format: "markdown" | "json") => {
       const base = safeFilename(sessionTitle);
-      if (format === "json") downloadTextFile(`${base}.json`, sessionJson, "application/json");
-      else downloadTextFile(`${base}.md`, sessionMarkdown, "text/markdown");
+      if (format === "json") downloadTextFile(`${base}.json`, getSessionJson(), "application/json");
+      else downloadTextFile(`${base}.md`, getSessionMarkdown(), "text/markdown");
       setTopicExportOpen(false);
     },
-    [sessionJson, sessionMarkdown, sessionTitle],
+    [getSessionJson, getSessionMarkdown, sessionTitle],
   );
 
   useEffect(() => {
@@ -1222,7 +1270,11 @@ export default function App() {
     if (!topicId) return;
     const nextTitle = topicTitleDraft.trim();
     if (!nextTitle) return;
-    await renameTopic(topicId, nextTitle);
+    try {
+      await renameTopic(topicId, nextTitle);
+    } catch {
+      /* keep the app usable if a stale topic cannot be renamed */
+    }
   }, [renameTopic, renamingTopicId, topicTitleDraft]);
 
   const onRemember = useCallback(
@@ -1264,7 +1316,7 @@ export default function App() {
   return (
     <ShellExpandProvider>
     <ShellHotkeys />
-    <div className="app">
+    <div className={`app app--${desktopPlatform}`}>
       <div
         ref={layoutRef}
         className={[
@@ -1293,7 +1345,7 @@ export default function App() {
             aria-label={sidebarToggleTitle}
             aria-disabled={sidebarExpandBlocked}
           >
-            {sidebarCollapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
+            {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
           </button>
           <div className="app-chrome__identity" aria-label="Reasonix">
             <img src={logoWordmark} alt="" className="app-chrome__logo" />
@@ -1350,15 +1402,6 @@ export default function App() {
               >
                 <Trash2 size={15} />
                 <span>{t("sidebar.trash")}</span>
-              </button>
-            </Tooltip>
-            <Tooltip label={t("sidebar.capabilities")} fill side="right" disabled={sidebarNavTooltipDisabled}>
-              <button
-                className="sidebar__navitem"
-                onClick={() => setCapsOpen(true)}
-              >
-                <Blocks size={15} />
-                <span>{t("sidebar.capabilities")}</span>
               </button>
             </Tooltip>
             <Tooltip label={t("topbar.settings")} fill side="right" disabled={sidebarNavTooltipDisabled}>
@@ -1466,7 +1509,7 @@ export default function App() {
             <div className="topicbar__spacer" />
             <div className="topicbar__actions">
               <CopyButton
-                text={sessionMarkdown}
+                getText={getSessionMarkdown}
                 label={t("topicBar.copyAll")}
                 showLabel={false}
                 className="topicbar__action-btn topicbar__action-btn--icon"
@@ -1711,9 +1754,12 @@ export default function App() {
         />
       )}
 
-      {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} onChanged={() => void refreshMeta()} />}
-
-      {capsOpen && <CapabilitiesPanel onClose={() => setCapsOpen(false)} />}
+      {settingsOpen && (
+        <SettingsPanel
+          onClose={() => setSettingsOpen(false)}
+          onChanged={() => void refreshMeta()}
+        />
+      )}
 
       {startupSplashVisible && (
         <StartupSplash hold={startupSplashHold} onDone={() => setStartupSplashVisible(false)} />

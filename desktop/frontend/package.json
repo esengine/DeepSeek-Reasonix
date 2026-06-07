@@ -5,8 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "node scripts/check-css-syntax.mjs src/styles.css && tsc --noEmit && vite build",
     "preview": "vite preview",
+    "check:css": "node scripts/check-css-syntax.mjs src/styles.css",
     "test:todo-visibility": "node scripts/test-todo-visibility.mjs",
     "typecheck": "tsc --noEmit",
     "test": "tsx src/__tests__/math-golden.test.ts",

@@ -70,10 +70,11 @@ type UIConfig struct {
 // separate from top-level language and [ui] so desktop choices do not affect CLI
 // language, terminal colours, or provider-visible prompt/request data.
 type DesktopConfig struct {
-	Language      string `toml:"language"`       // auto|en|zh; empty/auto = browser/OS auto-detect
-	Theme         string `toml:"theme"`          // auto|dark|light; empty resolves to dark
-	ThemeStyle    string `toml:"theme_style"`    // graphite|ember|aurora|midnight|sandstone|porcelain|linen|glacier
-	CloseBehavior string `toml:"close_behavior"` // quit|background; desktop window close behavior
+	Language       string   `toml:"language"`        // auto|en|zh; empty/auto = browser/OS auto-detect
+	Theme          string   `toml:"theme"`           // auto|dark|light; empty resolves to dark
+	ThemeStyle     string   `toml:"theme_style"`     // graphite|ember|aurora|midnight|sandstone|porcelain|linen|glacier
+	CloseBehavior  string   `toml:"close_behavior"`  // quit|background; desktop window close behavior
+	ProviderAccess []string `toml:"provider_access"` // desktop-only list of provider entries shown in Settings > Model > Access
 }
 
 // NotificationsConfig controls optional system notifications for CLI chat/run.
@@ -298,12 +299,14 @@ func (c *Config) NetworkProxyMode() string {
 
 // SkillsConfig configures skill discovery. Paths adds extra "custom"-scope skill
 // roots — each a directory of SKILL.md / <name>.md playbooks — scanned between
-// the project roots (.reasonix/.agents/.claude under the workspace) and the
-// global roots (the same three under the home dir). ~ and relative paths and
-// ${VAR} expansion are supported. DisabledSkills hides named skills from the
-// agent prompt, slash invocation, and skill tools while keeping them manageable.
+// the project roots (.reasonix/.agents/.agent/.claude under the workspace) and
+// the global roots. ExcludedPaths hides matching discovery roots without deleting
+// folders. ~, relative paths, and ${VAR} expansion are supported. DisabledSkills
+// hides named skills from the agent prompt, slash invocation, and skill tools
+// while keeping them manageable.
 type SkillsConfig struct {
 	Paths          []string `toml:"paths"`
+	ExcludedPaths  []string `toml:"excluded_paths"`
 	DisabledSkills []string `toml:"disabled_skills"`
 	MaxDepth       int      `toml:"max_depth"`
 }
@@ -313,6 +316,18 @@ type SkillsConfig struct {
 func (c *Config) SkillCustomPaths() []string {
 	var out []string
 	for _, p := range c.Skills.Paths {
+		if p = ExpandVars(p); strings.TrimSpace(p) != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// SkillExcludedPaths returns configured skill roots that should be hidden from
+// discovery, with ${VAR} expanded and empty entries dropped.
+func (c *Config) SkillExcludedPaths() []string {
+	var out []string
+	for _, p := range c.Skills.ExcludedPaths {
 		if p = ExpandVars(p); strings.TrimSpace(p) != "" {
 			out = append(out, p)
 		}
@@ -490,6 +505,10 @@ type ProviderEntry struct {
 	// Empty = provider default.
 	Thinking string `toml:"thinking"`
 	Effort   string `toml:"effort"`
+	// ReasoningProtocol selects the request shape for OpenAI-compatible reasoning
+	// models. Empty/auto uses the model capability registry plus endpoint
+	// heuristics; none disables automatic reasoning controls for this provider.
+	ReasoningProtocol string `toml:"reasoning_protocol"`
 	// SupportedEfforts lists the /effort levels this provider/model exposes.
 	// When non-empty, it overrides the built-in defaults derived from
 	// Kind/BaseURL and makes /effort configurable. "auto" is the implicit
@@ -540,8 +559,22 @@ func (e *ProviderEntry) HasModel(m string) bool {
 
 // ToolsConfig selects which built-in tools are enabled. Empty means all of them.
 type ToolsConfig struct {
-	Enabled []string     `toml:"enabled"`
-	Search  SearchConfig `toml:"search"`
+	Enabled            []string     `toml:"enabled"`
+	BashTimeoutSeconds *int         `toml:"bash_timeout_seconds"`
+	Search             SearchConfig `toml:"search"`
+}
+
+const defaultBashTimeoutSeconds = 120
+
+// BashTimeoutSeconds returns the foreground bash timeout in seconds. An omitted
+// config keeps the historical 120s safety cap, explicit 0 disables the
+// tool-local cap, and positive values set a custom cap. Negative values fall
+// back to the default so a typo cannot silently remove the safety net.
+func (c *Config) BashTimeoutSeconds() int {
+	if c.Tools.BashTimeoutSeconds == nil || *c.Tools.BashTimeoutSeconds < 0 {
+		return defaultBashTimeoutSeconds
+	}
+	return *c.Tools.BashTimeoutSeconds
 }
 
 // SearchConfig tunes the grep tool's engine. Engine is "auto" (default — use
@@ -1166,6 +1199,25 @@ func (c *Config) ResolveModel(ref string) (*ProviderEntry, bool) {
 		}
 	}
 	return nil, false
+}
+
+// ResolveModelWithFallback resolves a model reference to the canonical
+// "provider/model" form used by the desktop runtime. If ref is stale or empty,
+// it falls back to the first provider with at least one model.
+func (c *Config) ResolveModelWithFallback(ref string) (resolvedRef string, fallback bool, ok bool) {
+	if strings.TrimSpace(ref) != "" {
+		if e, found := c.ResolveModel(ref); found {
+			return e.Name + "/" + e.Model, false, true
+		}
+	}
+	for i := range c.Providers {
+		p := &c.Providers[i]
+		if len(p.ModelList()) == 0 {
+			continue
+		}
+		return p.Name + "/" + p.DefaultModel(), true, true
+	}
+	return "", false, false
 }
 
 // APIKey resolves the entry's API key from its api_key_env.

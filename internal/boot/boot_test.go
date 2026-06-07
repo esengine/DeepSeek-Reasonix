@@ -118,6 +118,46 @@ func TestNewProviderAppliesConfiguredDefaultEffort(t *testing.T) {
 	}
 }
 
+func TestNewProviderAppliesModelReasoningProtocol(t *testing.T) {
+	var gotReq map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotReq); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n"))
+	}))
+	defer srv.Close()
+
+	p, err := NewProvider(&config.ProviderEntry{
+		Name:    "deepseek-proxy",
+		Kind:    "openai",
+		BaseURL: srv.URL,
+		Model:   "deepseek-v4-flash",
+	})
+	if err != nil {
+		t.Fatalf("NewProvider: %v", err)
+	}
+	ch, err := p.Stream(context.Background(), provider.Request{
+		Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	for chunk := range ch {
+		if chunk.Type == provider.ChunkError {
+			t.Fatalf("stream error: %v", chunk.Err)
+		}
+	}
+	if got := gotReq["reasoning_effort"]; got != "high" {
+		t.Fatalf("reasoning_effort = %#v, want high from DeepSeek model capability", got)
+	}
+	thinking, ok := gotReq["thinking"].(map[string]any)
+	if !ok || thinking["type"] != "enabled" {
+		t.Fatalf("thinking = %#v, want enabled", gotReq["thinking"])
+	}
+}
+
 // TestBuildDiscoversSkills proves the skill wiring end-to-end: a project skill
 // is discovered at boot, surfaced via Controller.Skills(), and its name folds
 // into the cache-stable system prompt's "# Skills" index alongside a built-in.
@@ -176,7 +216,7 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 func TestAddBuiltinsWithWorkspaceRootKeepsSessionTools(t *testing.T) {
 	reg := tool.NewRegistry()
 	var stderr bytes.Buffer
-	addBuiltins(reg, nil, []string{robustTempDir(t)}, sandbox.Spec{}, builtin.SearchSpec{}, &stderr, robustTempDir(t))
+	addBuiltins(reg, nil, []string{robustTempDir(t)}, sandbox.Spec{}, 120*time.Second, builtin.SearchSpec{}, &stderr, robustTempDir(t))
 	for _, name := range []string{
 		"todo_write",
 		"complete_step",
@@ -241,6 +281,55 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 	sys := systemMessage(ctrl.History())
 	if strings.Contains(sys, "projskill") || strings.Contains(sys, "- review ") {
 		t.Fatalf("disabled skill names should be omitted from system prompt:\n%s", sys)
+	}
+}
+
+func TestBuildOmitsExcludedSkillRootsFromPromptAndRuntimeList(t *testing.T) {
+	dir := robustTempDir(t)
+	home := robustTempDir(t)
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Chdir(dir)
+	excluded := filepath.Join(home, ".agents", "skills")
+	writeFile(t, home, ".reasonix/skills/keep.md", "---\ndescription: keep\n---\nplaybook")
+	writeFile(t, home, ".agents/skills/noisy.md", "---\ndescription: noisy\n---\nplaybook")
+	writeFile(t, dir, "reasonix.toml", fmt.Sprintf(`
+default_model = "test-model"
+
+[codegraph]
+enabled = false
+
+[agent]
+system_prompt = "BASE"
+
+[skills]
+excluded_paths = [%q]
+
+[[providers]]
+name = "test-model"
+kind = "openai"
+base_url = "https://example.invalid"
+model = "x"
+api_key_env = "REASONIX_TEST_KEY_UNSET"
+`, excluded))
+
+	ctrl, err := Build(context.Background(), Options{})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer ctrl.Close()
+
+	for _, s := range ctrl.Skills() {
+		if s.Name == "noisy" {
+			t.Fatalf("excluded skill should not be executable: %v", ctrl.Skills())
+		}
+	}
+	sys := systemMessage(ctrl.History())
+	if strings.Contains(sys, "noisy") {
+		t.Fatalf("excluded skill name should be omitted from system prompt:\n%s", sys)
+	}
+	if !strings.Contains(sys, "keep") {
+		t.Fatalf("non-excluded skill should remain in system prompt:\n%s", sys)
 	}
 }
 
