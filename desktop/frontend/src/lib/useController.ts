@@ -181,6 +181,30 @@ export function historyMessagesToItems(messages: HistoryMessage[], idPrefix: str
         isShell: (m.toolCallId || "").startsWith("shell-"),
       });
       seq++;
+      continue;
+    }
+    if (m.role === "phase") {
+      items.push({ kind: "phase", id: `${idPrefix}${seq}`, text: m.content });
+      seq++;
+      continue;
+    }
+    if (m.role === "notice") {
+      items.push({ kind: "notice", id: `${idPrefix}${seq}`, level: m.level === "warn" ? "warn" : "info", text: m.content });
+      seq++;
+      continue;
+    }
+    if (m.role === "compaction") {
+      if (!m.pending && !m.summary) continue;
+      items.push({
+        kind: "compaction",
+        id: `${idPrefix}${seq}`,
+        pending: m.pending ?? false,
+        trigger: m.trigger ?? "",
+        messages: m.messages ?? 0,
+        summary: m.summary ?? "",
+        archive: m.archive ?? "",
+      });
+      seq++;
     }
   }
   return { items, seq };

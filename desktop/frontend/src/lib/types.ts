@@ -195,9 +195,15 @@ export interface HistoryMessage {
   role: string;
   content: string;
   reasoning?: string;
+  level?: string;
   toolCalls?: HistoryToolCall[];
   toolCallId?: string;
   toolName?: string;
+  pending?: boolean;
+  trigger?: string;
+  messages?: number;
+  summary?: string;
+  archive?: string;
 }
 
 export interface HistoryToolCall {
