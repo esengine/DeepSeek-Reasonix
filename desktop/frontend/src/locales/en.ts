@@ -390,6 +390,8 @@ export const en = {
   "projectTree.emptyNoProjects": "No projects yet",
   "projectTree.newTopicTooltip": "New session",
   "projectTree.addProjectTooltip": "Add new project",
+  "projectTree.collapseAll": "Collapse all",
+  "projectTree.expandAll": "Expand all",
 
   // memory drawer
   "memory.title": "Memory",
