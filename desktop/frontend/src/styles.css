@@ -7457,6 +7457,22 @@ a[href] {
   }
 }
 
+.workspace-tabs-bar {
+  position: relative;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: stretch;
+  height: 38px;
+  background: var(--bg-soft);
+  border-bottom: 1px solid var(--border-soft);
+  --wails-draggable: drag;
+}
+
+.workspace-tabs-bar .tabbar,
+.workspace-tabs-bar .tabbar * {
+  --wails-draggable: no-drag;
+}
+
 .topicbar {
   flex: 0 0 auto;
   display: flex;

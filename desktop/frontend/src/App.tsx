@@ -39,6 +39,7 @@ import { WorkspacePanel } from "./components/WorkspacePanel";
 import { Tooltip } from "./components/Tooltip";
 import { StartupSplash, shouldShowStartupSplash } from "./components/StartupSplash";
 import { OnboardingOverlay } from "./components/OnboardingOverlay";
+import { TabBar } from "./components/TabBar";
 import { ProjectTree } from "./components/ProjectTree";
 import { CopyButton } from "./components/CopyButton";
 import { parseTodos } from "./lib/tools";
@@ -60,6 +61,7 @@ import {
 import { useWindowStatePersistence } from "./lib/windowState";
 
 const SIDEBAR_COLLAPSED_KEY = "reasonix.sidebar.collapsed";
+const TAB_BAR_HIDDEN_KEY = "reasonix.desktop.tabBarHidden";
 const SIDEBAR_DEFAULT_WIDTH = 264;
 const SIDEBAR_DEFAULT_RATIO = 0.175;
 const SIDEBAR_MIN_WIDTH = 228;
@@ -141,6 +143,15 @@ function saveSidebarCollapsed(collapsed: boolean): void {
     window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, collapsed ? "1" : "0");
   } catch {
     /* ignore storage failures */
+  }
+}
+
+function loadTabBarHidden(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(TAB_BAR_HIDDEN_KEY) === "1";
+  } catch {
+    return false;
   }
 }
 
@@ -369,8 +380,11 @@ export default function App() {
     remember,
     forget,
     saveDoc,
+    switchTab,
     openProjectTab,
     openGlobalTab,
+    closeTab,
+    reorderTabs,
     syncActiveTab,
   } = useController();
   const { locale, setPref: setLocalePref } = useI18n();
@@ -385,6 +399,13 @@ export default function App() {
   const [memView, setMemView] = useState<MemoryView | null>(null);
   const [histView, setHistView] = useState<HistoryViewState | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(loadSidebarCollapsed);
+  const [tabBarHidden, setTabBarHidden] = useState(loadTabBarHidden);
+  useEffect(() => {
+    const handler = () => setTabBarHidden(loadTabBarHidden());
+    window.addEventListener("reasonix:tabbar-visibility-changed", handler);
+    return () => window.removeEventListener("reasonix:tabbar-visibility-changed", handler);
+  }, []);
+  const [tabRevealSignal, setTabRevealSignal] = useState(0);
   const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidth);
   const [sidebarResizing, setSidebarResizing] = useState(false);
   const [workspacePanelOpen, setWorkspacePanelOpen] = useState(true);
@@ -505,7 +526,29 @@ export default function App() {
     },
     [activeTabId],
   );
+  const [tabOrderIds, setTabOrderIds] = useState<string[]>([]);
   const topicbarEditing = Boolean(activeTab?.topicId && activeTab.topicId === renamingTopicId);
+  const visibleTabId = activeTabId;
+  const visibleTabs = useMemo(() => {
+    const byId = new Map(tabMetas.map((tab) => [tab.id, tab]));
+    const ordered = tabOrderIds.map((id) => byId.get(id)).filter((tab): tab is TabMeta => Boolean(tab));
+    const missing = tabMetas.filter((tab) => !tabOrderIds.includes(tab.id));
+    return [...ordered, ...missing].map((tab) => ({
+      ...tab,
+      mode: modesByTab[tab.id] ?? normalizeModeValue(tab.mode),
+      active: tab.id === visibleTabId,
+    }));
+  }, [modesByTab, tabMetas, tabOrderIds, visibleTabId]);
+  useEffect(() => {
+    const ids = tabMetas.map((tab) => tab.id);
+    setTabOrderIds((current) => {
+      const next = current.filter((id) => ids.includes(id));
+      for (const id of ids) {
+        if (!next.includes(id)) next.push(id);
+      }
+      return next.join("\u0000") === current.join("\u0000") ? current : next;
+    });
+  }, [tabMetas]);
   useEffect(() => {
     const ids = new Set(tabMetas.map((tab) => tab.id));
     setModesByTab((current) => {
@@ -998,6 +1041,76 @@ export default function App() {
     setComposerInsertRequest({ id: Date.now(), text });
   }, []);
 
+  const handleTabChange = useCallback(async (id: string) => {
+    await switchTab(id);
+    await refreshTabMetas();
+    setTabRevealSignal((signal) => signal + 1);
+  }, [refreshTabMetas, switchTab]);
+
+  const handleTabClose = useCallback(async (id: string) => {
+    setModesByTab((current) => {
+      if (!(id in current)) return current;
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
+    setTabMetas((current) => {
+      if (current.length <= 1) return current;
+      const closingIndex = current.findIndex((tab) => tab.id === id);
+      if (closingIndex < 0) return current;
+      const closingTab = current[closingIndex];
+      const remaining = current.filter((tab) => tab.id !== id);
+      if (!closingTab.active && closingTab.id !== activeTabId) return remaining;
+      const nextIndex = Math.min(closingIndex, remaining.length - 1);
+      const nextActiveId = remaining[nextIndex]?.id;
+      return remaining.map((tab) => ({ ...tab, active: tab.id === nextActiveId }));
+    });
+    await closeTab(id);
+    await refreshTabMetas();
+    setTabRevealSignal((signal) => signal + 1);
+  }, [activeTabId, closeTab, refreshTabMetas]);
+
+  const handleTabsClose = useCallback(async (ids: string[], nextActiveTabId?: string) => {
+    const currentIds = tabMetas.map((tab) => tab.id);
+    const targets = ids.filter((id, index) => currentIds.includes(id) && ids.indexOf(id) === index);
+    if (targets.length === 0) return;
+    for (const id of targets) {
+      await closeTab(id);
+    }
+    if (nextActiveTabId && currentIds.includes(nextActiveTabId)) {
+      await switchTab(nextActiveTabId);
+    }
+    await refreshTabMetas();
+    setTabRevealSignal((signal) => signal + 1);
+  }, [closeTab, refreshTabMetas, switchTab, tabMetas]);
+
+  const handleTabsReorder = useCallback(async (ids: string[]) => {
+    setTabOrderIds(ids);
+    setTabMetas((current) => {
+      const byId = new Map(current.map((tab) => [tab.id, tab]));
+      const ordered = ids.map((id) => byId.get(id)).filter((tab): tab is TabMeta => Boolean(tab));
+      return ordered.length === current.length ? ordered : current;
+    });
+    await reorderTabs(ids);
+    await refreshTabMetas();
+    setTabRevealSignal((signal) => signal + 1);
+  }, [refreshTabMetas, reorderTabs]);
+
+  const handleNewTab = useCallback(async () => {
+    const activeWorkspaceRoot = activeTab?.workspaceRoot || state.meta?.cwd || "";
+    const targetScope = activeTab?.scope === "global" || !activeWorkspaceRoot ? "global" : "project";
+    const workspaceRoot = targetScope === "project" ? activeWorkspaceRoot : "";
+    const topic = await app.CreateTopic(targetScope, workspaceRoot, "");
+    if (targetScope === "global" || !workspaceRoot) {
+      await openGlobalTab(topic.id);
+    } else {
+      await openProjectTab(workspaceRoot, topic.id);
+    }
+    setProjectRevision((value) => value + 1);
+    await refreshTabMetas();
+    setTabRevealSignal((signal) => signal + 1);
+  }, [activeTab?.scope, activeTab?.workspaceRoot, openGlobalTab, openProjectTab, refreshTabMetas, state.meta?.cwd]);
+
   const handleMessageAction = useCallback(async (turn: number, scope: string) => {
     await rewind(turn, scope);
     if (scope === "fork") {
@@ -1341,7 +1454,39 @@ export default function App() {
         />
 
         <section className="chat-pane">
-          <>
+          {!tabBarHidden && (
+          <header className="workspace-tabs-bar">
+            <TabBar
+              tabs={visibleTabs}
+              activeTabId={visibleTabId}
+              revealActiveSignal={tabRevealSignal}
+              onTabChange={(id) => void handleTabChange(id)}
+              onTabClose={(id) => void handleTabClose(id)}
+              onTabsClose={(ids, nextActiveTabId) => void handleTabsClose(ids, nextActiveTabId)}
+              onTabsReorder={(ids) => void handleTabsReorder(ids)}
+              onNewTab={() => void handleNewTab()}
+            />
+            {!workspacePanelMaximized && (
+              <Tooltip
+                label={workspacePanelRenderable ? t("rightDock.collapse") : t("rightDock.expand")}
+                className={[
+                  "workspace-dock-toggle",
+                  workspacePanelRenderable ? "workspace-dock-toggle--open" : "workspace-dock-toggle--closed",
+                ].join(" ")}
+              >
+                <button
+                  className="workspace-dock-toggle__button"
+                  type="button"
+                  onClick={workspacePanelRenderable ? closeWorkspacePanel : () => openWorkspacePanel("files")}
+                  aria-label={workspacePanelRenderable ? t("rightDock.collapse") : t("rightDock.expand")}
+                  aria-pressed={workspacePanelRenderable}
+                >
+                  {workspacePanelRenderable ? <PanelRightClose size={15} /> : <PanelRightOpen size={15} />}
+                </button>
+              </Tooltip>
+            )}
+          </header>
+          )}
           <header className="topicbar">
             <div className="topicbar__identity">
               <div className="topicbar__title-row">
@@ -1416,7 +1561,7 @@ export default function App() {
                   </div>
                 )}
               </div>
-              {!workspacePanelMaximized && (
+              {tabBarHidden && !workspacePanelMaximized && (
                 <Tooltip label={workspacePanelRenderable ? t("rightDock.collapse") : t("rightDock.expand")}>
                   <button
                     className="topicbar__action-btn topicbar__action-btn--icon"
@@ -1431,7 +1576,6 @@ export default function App() {
               )}
             </div>
           </header>
-
           {state.meta?.startupErr && (
             <div className="banner banner--error">{t("topbar.startupError", { msg: state.meta.startupErr })}</div>
           )}
@@ -1521,7 +1665,6 @@ export default function App() {
               currency={state.sessionCurrency}
             />
           </footer>
-          </>
         </section>
 
         {workspacePanelGridOpen && (
