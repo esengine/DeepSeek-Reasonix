@@ -72,10 +72,17 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
         : summarize(item.name, item.args, item.output, item.error);
 
   // edit diffs are the point of the card, so they're shown inline; everything
-  // else folds its args/output away by default. Nested children always show.
-  // Shell commands default to open so the output is immediately visible.
+  // else folds its args/output away by default.  Nested sub-agent calls (an
+  // /explore's read_file / grep chain) follow the parent's expand state — a
+  // single chevron now collapses the whole subagent tree to one line.  Open by
+  // default while the sub-agent is still running so the user can watch it
+  // progress; closed by default once it settles.
   const hasArgsOrOutput = diffs.length === 0 && (!!item.args || !!item.output);
-  const [open, setOpen] = useState(item.isShell && hasArgsOrOutput);
+  const [open, setOpen] = useState(() => {
+    if (item.isShell) return hasArgsOrOutput;
+    if (hasNested) return item.status === "running";
+    return false;
+  });
   const [showAll, setShowAll] = useState(false);
 
   // Register this shell card's toggle with the global ShellExpand context so
