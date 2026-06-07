@@ -218,6 +218,11 @@ type chatTUI struct {
 	// window). Reset when Ctrl+C clears non-empty input instead.
 	lastCtrlCAt time.Time
 
+	// mcpImport holds the interactive cc-switch MCP import picker (nil when
+	// closed). It writes selected servers to config and hot-connects the ones that
+	// can start successfully.
+	mcpImport *mcpImportPicker
+
 	// host is the running MCP servers (nil when no plugins). The TUI reads
 	// prompts (slash commands), resources (@-references), and server status
 	// (/mcp) from it.
@@ -766,7 +771,7 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.updateCompletion()
 			return m, finalize(m, cmds)
 		}
-		if !m.chooserTyping() && m.pendingApproval == nil && m.rewind == nil && m.resumePick == nil && m.mcp == nil && m.skillPick == nil && m.shouldFoldPaste(msg.Content) {
+		if !m.chooserTyping() && m.pendingApproval == nil && m.rewind == nil && m.resumePick == nil && m.mcp == nil && m.mcpImport == nil && m.skillPick == nil && m.shouldFoldPaste(msg.Content) {
 			m.insertFoldedPaste(msg.Content)
 			m.growInputToFit()
 			m.updateCompletion()
@@ -819,6 +824,10 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// The rewind picker is modal while open: keys navigate it.
 		if m.rewind != nil {
 			return m.handleRewindKey(msg)
+		}
+		// The MCP import picker is modal while open: keys select candidates.
+		if m.mcpImport != nil {
+			return m.handleMCPImportKey(msg)
 		}
 		// The resume picker is modal while open: keys navigate it.
 		if m.resumePick != nil {
@@ -1329,6 +1338,7 @@ func (m chatTUI) bottomRows() int {
 		m.renderApprovalBanner(),
 		m.renderChooser(),
 		m.renderRewind(),
+		m.renderMCPImport(),
 		m.renderResumePicker(),
 		m.renderCompletion(),
 	} {
@@ -1361,7 +1371,7 @@ func (m chatTUI) bottomRows() int {
 // reserve rows for a composer that cannot receive input, leaving a confusing
 // blank/bordered area at the bottom of the TUI.
 func (m chatTUI) hideComposer() bool {
-	if m.mcp != nil || m.skillPick != nil || m.resumePick != nil || m.rewind != nil || m.pendingApproval != nil {
+	if m.mcp != nil || m.mcpImport != nil || m.skillPick != nil || m.resumePick != nil || m.rewind != nil || m.pendingApproval != nil {
 		return true
 	}
 	return m.chooser != nil && !m.chooser.typing
@@ -1914,6 +1924,8 @@ func (m chatTUI) View() tea.View {
 	switch {
 	case m.rewind != nil:
 		status = "  " + modeTag + " · ⟲ rewind"
+	case m.mcpImport != nil:
+		status = "  " + modeTag + " · MCP import"
 	case m.resumePick != nil:
 		status = "  " + modeTag + " · " + i18n.M.StatusResumePicker
 	case m.mcp != nil:
@@ -2002,6 +2014,10 @@ func (m chatTUI) View() tea.View {
 		rowsAboveBox += strings.Count(card, "\n") + 1
 	}
 	if card := m.renderRewind(); card != "" {
+		parts = append(parts, card)
+		rowsAboveBox += strings.Count(card, "\n") + 1
+	}
+	if card := m.renderMCPImport(); card != "" {
 		parts = append(parts, card)
 		rowsAboveBox += strings.Count(card, "\n") + 1
 	}
@@ -3141,8 +3157,10 @@ func (m *chatTUI) runMCPSubcommand(input string) {
 		} else {
 			m.notice("removed " + name + " from config")
 		}
+	case "import":
+		m.openMCPImportPicker()
 	default:
-		m.notice("unknown /mcp subcommand " + args[1] + " — try: /mcp, /mcp list, /mcp show, /mcp add, /mcp connect, /mcp remove")
+		m.notice("unknown /mcp subcommand " + args[1] + " — try: /mcp, /mcp list, /mcp show, /mcp add, /mcp connect, /mcp import, /mcp remove")
 	}
 }
 

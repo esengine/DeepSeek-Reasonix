@@ -244,7 +244,7 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 
 	b.WriteString("[tools]\n")
 	if len(c.Tools.Enabled) == 0 {
-		b.WriteString("enabled = []   # empty = all built-in tools\n\n")
+		b.WriteString("enabled = []   # empty = all built-in tools\n")
 	} else {
 		b.WriteString("enabled = [")
 		for i, t := range c.Tools.Enabled {
@@ -253,8 +253,9 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 			}
 			fmt.Fprintf(&b, "%q", t)
 		}
-		b.WriteString("]\n\n")
+		b.WriteString("]\n")
 	}
+	fmt.Fprintf(&b, "bash_timeout_seconds = %d   # foreground safety cap; set 0 for no tool-local cap\n\n", c.BashTimeoutSeconds())
 
 	b.WriteString("[codegraph]\n")
 	fmt.Fprintf(&b, "enabled      = %v   # built-in MCP server; off by default for first-run sessions\n", c.Codegraph.Enabled)

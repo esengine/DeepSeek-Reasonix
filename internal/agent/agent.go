@@ -30,6 +30,7 @@ const maxToolOutputBytes = 32 * 1024
 
 const maxFinalReadinessBlocks = 3
 const maxEmptyFinalBlocks = 3
+const maxStreamRecoveries = 1
 
 // Renderer redraws the assistant's final-answer text as styled output. It is
 // applied only after a turn's text stream completes, so the user sees raw
@@ -401,6 +402,7 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 
 	finalReadinessBlocks := 0
 	emptyFinalBlocks := 0
+	streamRecoveries := 0
 	for step := 0; a.maxSteps <= 0 || step < a.maxSteps; step++ {
 		schemas := a.tools.Schemas()
 		prefixShape := a.capturePrefixShape(schemas)
@@ -409,10 +411,29 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 			prevPrefixShape = prefixShape
 		}
 
-		text, reasoning, signature, calls, usage, err := a.stream(ctx, step+1)
+		text, reasoning, signature, calls, usage, interrupted, partialToolStarted, err := a.stream(ctx, step+1)
 		if err != nil {
+			if interrupted && streamRecoveries < maxStreamRecoveries {
+				streamRecoveries++
+				if hasVisibleFinalAnswer(text) {
+					a.session.Add(provider.Message{
+						Role:               provider.RoleAssistant,
+						Content:            text,
+						ReasoningContent:   reasoning,
+						ReasoningSignature: signature,
+					})
+				}
+				a.session.Add(provider.Message{
+					Role:    provider.RoleUser,
+					Content: streamRecoveryMessage(hasVisibleFinalAnswer(text), partialToolStarted),
+				})
+				a.sink.Emit(event.Event{Kind: event.Retrying, RetryAttempt: streamRecoveries, RetryMax: maxStreamRecoveries})
+				step-- // recovery retries do not consume the tool-round maxSteps budget
+				continue
+			}
 			return err
 		}
+		streamRecoveries = 0
 		cacheDiagnostics := CompareShape(prevPrefixShape, prefixShape, usage)
 		a.lastPrefixShape = prefixShape
 		a.haveLastPrefixShape = true
@@ -595,12 +616,23 @@ func emptyFinalRetryMessage() string {
 	return "The previous assistant response finished without any visible answer text. Continue the same task now and provide a concise visible answer to the user. Do not send reasoning only."
 }
 
+func streamRecoveryMessage(hasPartialText, hadPartialTool bool) string {
+	switch {
+	case hadPartialTool:
+		return "The previous assistant response was interrupted while a tool call was streaming. Continue the same task now. If a tool is still needed, issue a fresh complete tool call from scratch; do not rely on any partial tool-call arguments from the interrupted stream."
+	case hasPartialText:
+		return "The previous assistant response was interrupted during streaming. Continue the same task from immediately after the partial assistant message above. Do not repeat text that is already visible."
+	default:
+		return "The previous assistant response was interrupted during streaming before visible answer text was completed. Continue the same task now and provide the next useful response."
+	}
+}
+
 // stream runs one completion, emitting reasoning and text deltas as typed
 // events and collecting complete tool calls. A Message event closes the text
 // stream so a sink can re-render the streamed raw text as styled markdown. The
 // accumulated text and reasoning are also returned so the caller can round-trip
 // reasoning on the next turn.
-func (a *Agent) stream(ctx context.Context, turn int) (string, string, string, []provider.ToolCall, *provider.Usage, error) {
+func (a *Agent) stream(ctx context.Context, turn int) (string, string, string, []provider.ToolCall, *provider.Usage, bool, bool, error) {
 	ctx = provider.WithRetryNotify(ctx, func(info provider.RetryInfo) {
 		a.sink.Emit(event.Event{Kind: event.Retrying, RetryAttempt: info.Attempt, RetryMax: info.Max})
 	})
@@ -610,7 +642,7 @@ func (a *Agent) stream(ctx context.Context, turn int) (string, string, string, [
 		Temperature: a.temperature,
 	})
 	if err != nil {
-		return "", "", "", nil, nil, err
+		return "", "", "", nil, nil, false, false, err
 	}
 
 	// A PostLLMCall hook rewrites the whole reasoning block, so when one is wired
@@ -623,6 +655,22 @@ func (a *Agent) stream(ctx context.Context, turn int) (string, string, string, [
 	var signature string // provider-issued proof for the reasoning (Anthropic thinking)
 	var calls []provider.ToolCall
 	var usage *provider.Usage
+	var partialToolStarted bool
+	finishReasoning := func() (stored, display string) {
+		original := reasoning.String()
+		display = original
+		if transformReasoning && original != "" {
+			display = a.hooks.PostLLMCall(ctx, original, turn)
+			if display != "" {
+				a.sink.Emit(event.Event{Kind: event.Reasoning, Text: display})
+			}
+		}
+		stored = display
+		if signature != "" {
+			stored = original
+		}
+		return stored, display
+	}
 	for chunk := range ch {
 		switch chunk.Type {
 		case provider.ChunkReasoning:
@@ -637,6 +685,7 @@ func (a *Agent) stream(ctx context.Context, turn int) (string, string, string, [
 			text.WriteString(chunk.Text)
 			a.sink.Emit(event.Event{Kind: event.Text, Text: chunk.Text})
 		case provider.ChunkToolCallStart:
+			partialToolStarted = true
 			// Surface the tool card as soon as the call begins — before its
 			// (possibly large) arguments finish streaming — so the user sees it
 			// working instead of a stall. executeBatch emits the full dispatch
@@ -647,6 +696,7 @@ func (a *Agent) stream(ctx context.Context, turn int) (string, string, string, [
 				}})
 			}
 		case provider.ChunkToolCall:
+			partialToolStarted = true
 			calls = append(calls, *chunk.ToolCall)
 		case provider.ChunkUsage:
 			usage = chunk.Usage
@@ -654,36 +704,30 @@ func (a *Agent) stream(ctx context.Context, turn int) (string, string, string, [
 			a.sessCacheHit.Add(int64(chunk.Usage.CacheHitTokens))
 			a.sessCacheMiss.Add(int64(chunk.Usage.CacheMissTokens))
 		case provider.ChunkError:
-			return "", "", "", nil, nil, chunk.Err
+			if provider.IsStreamInterrupted(chunk.Err) {
+				stored, _ := finishReasoning()
+				return text.String(), stored, signature, calls, usage, true, partialToolStarted, chunk.Err
+			}
+			return "", "", "", nil, nil, false, false, chunk.Err
 		}
 	}
 	// With a PostLLMCall hook, the live stream was suppressed above; transform the
 	// full reasoning now and emit it once so the sink never sees the untranslated
 	// text. Without a hook this is skipped — the chunk-by-chunk events already fired.
-	original := reasoning.String()
-	display := original
-	if transformReasoning && original != "" {
-		display = a.hooks.PostLLMCall(ctx, original, turn)
-		if display != "" {
-			a.sink.Emit(event.Event{Kind: event.Reasoning, Text: display})
-		}
-	}
+	stored, display := finishReasoning()
 	// Store the transformed reasoning — except when a provider signature pins it to
 	// the original text (Anthropic extended thinking). That signed thinking block is
 	// replayed verbatim on the next tool-call turn; re-uploading transformed text
 	// under the original signature is rejected, so keep the original for storage
-	// while the user still sees the transformed version live.
-	stored := display
-	if signature != "" {
-		stored = original
-	}
+	// while the user still sees the transformed version live. finishReasoning did
+	// that choice above.
 	// Close the text stream: a sink may re-render the streamed raw text as
 	// styled markdown now that it is complete. Reasoning rides along so the sink
 	// has the full chain if it wants it.
 	if text.Len() > 0 || display != "" {
 		a.sink.Emit(event.Event{Kind: event.Message, Text: text.String(), Reasoning: display})
 	}
-	return text.String(), stored, signature, calls, usage, nil
+	return text.String(), stored, signature, calls, usage, false, false, nil
 }
 
 func (a *Agent) capturePrefixShape(schemas []provider.ToolSchema) PrefixShape {

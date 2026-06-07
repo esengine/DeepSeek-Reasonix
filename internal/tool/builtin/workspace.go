@@ -2,6 +2,7 @@ package builtin
 
 import (
 	"path/filepath"
+	"time"
 
 	"reasonix/internal/sandbox"
 	"reasonix/internal/tool"
@@ -19,10 +20,11 @@ import (
 // root, so writes stay inside the project by default. Bash is the OS-sandbox
 // spec for the bash tool (as ConfineBash).
 type Workspace struct {
-	Dir        string
-	WriteRoots []string
-	Bash       sandbox.Spec
-	Search     SearchSpec
+	Dir         string
+	WriteRoots  []string
+	Bash        sandbox.Spec
+	BashTimeout time.Duration
+	Search      SearchSpec
 }
 
 // Tools returns the built-in tools bound to the workspace, ready to Add to a
@@ -45,7 +47,7 @@ func (w Workspace) Tools(enabled ...string) []tool.Tool {
 		"notebook_edit": notebookEdit{workDir: w.Dir, roots: roots},
 		"delete_range":  deleteRange{workDir: w.Dir, roots: roots},
 		"delete_symbol": deleteSymbol{workDir: w.Dir, roots: roots},
-		"bash":          bash{workDir: w.Dir, sb: w.Bash},
+		"bash":          bash{workDir: w.Dir, sb: w.Bash, timeout: w.BashTimeout},
 		"ls":            listDir{workDir: w.Dir},
 		"glob":          globTool{workDir: w.Dir},
 		"grep":          grepTool{workDir: w.Dir, rg: w.Search.RgPath},

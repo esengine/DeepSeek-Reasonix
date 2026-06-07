@@ -26,6 +26,7 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	orig.Agent.AutoPlanClassifier = "deepseek-flash"
 	orig.Agent.SubagentModel = "mimo-pro"
 	orig.Agent.SubagentModels = map[string]string{"review": "deepseek-pro"}
+	orig.Tools.BashTimeoutSeconds = intPtr(900)
 	orig.Permissions = PermissionsConfig{
 		Mode:  "deny",
 		Deny:  []string{"bash(rm -rf*)"},
@@ -134,6 +135,9 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	}
 	if got.Agent.SubagentModels["review"] != "deepseek-pro" {
 		t.Errorf("subagent_models.review = %q, want deepseek-pro", got.Agent.SubagentModels["review"])
+	}
+	if got.Tools.BashTimeoutSeconds == nil || *got.Tools.BashTimeoutSeconds != 900 {
+		t.Errorf("tools.bash_timeout_seconds = %v, want 900", got.Tools.BashTimeoutSeconds)
 	}
 	if g, _ := got.Provider("mimo-pro"); g == nil || g.BaseURL != "http://localhost:8000/v1" {
 		t.Errorf("mimo-pro base_url not preserved: %+v", g)
@@ -252,3 +256,5 @@ func TestProjectRenderPreservesNonDefaultLegacySections(t *testing.T) {
 }
 
 func boolPtr(v bool) *bool { return &v }
+
+func intPtr(v int) *int { return &v }

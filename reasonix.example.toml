@@ -104,6 +104,7 @@ effort         = "high"
 
 [tools]
 enabled = []   # empty = all built-in tools
+bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local cap
 
 # CodeGraph code intelligence (symbol/call-graph search via tree-sitter + SQLite),
 # a built-in MCP server giving the agent codegraph_* search / context / explore /
