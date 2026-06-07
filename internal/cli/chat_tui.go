@@ -910,6 +910,10 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		switch msg.String() {
 		case "esc":
+			// Esc always stops an active /loop first, regardless of state.
+			if m.loopPrompt != "" {
+				m.stopLoop()
+			}
 			// "Back out" of the most specific in-progress state: un-send a just-sent
 			// turn (server not yet replied), cancel a streaming turn, turn plan mode
 			// off, or clear typed-but-unsent input. YOLO mode is only exited via
