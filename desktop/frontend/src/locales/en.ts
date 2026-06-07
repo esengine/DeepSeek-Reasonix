@@ -40,7 +40,6 @@ export const en = {
   "sidebar.conversations": "Chats",
   "sidebar.allHistory": "All history",
   "sidebar.trash": "Trash",
-  "sidebar.capabilities": "MCP & Skills",
   "sidebar.workspace": "Workspace",
   "sidebar.changeWorkspace": "Change",
   "sidebar.navigation": "Reasonix navigation",
