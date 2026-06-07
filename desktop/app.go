@@ -2936,6 +2936,14 @@ func (a *App) applyProviderEffortConfig(entry *config.ProviderEntry, effort stri
 				return err
 			}
 		}
+		canonicalName := config.CanonicalDesktopOfficialProviderName(entry.Name)
+		if canonicalName != entry.Name {
+			if _, ok := cfg.Provider(canonicalName); ok {
+				if err := cfg.SetProviderEffort(canonicalName, effort); err != nil {
+					return err
+				}
+			}
+		}
 		return cfg.SetProviderEffort(entry.Name, effort)
 	})
 }

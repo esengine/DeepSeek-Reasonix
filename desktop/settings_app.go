@@ -327,16 +327,48 @@ func (a *App) loadDesktopUserConfigForEdit() (*config.Config, string, error) {
 		return nil, "", fmt.Errorf("cannot resolve user config directory")
 	}
 	if _, err := os.Stat(userPath); err == nil {
-		return config.LoadForEdit(userPath), userPath, nil
+		cfg := config.LoadForEdit(userPath)
+		normalizeLegacyDesktopProviderAccessForSettings(cfg, userPath)
+		return cfg, userPath, nil
 	}
 	cfg := config.LoadForEdit(userPath)
 	legacyPath := config.SourcePathForRoot(a.activeWorkspaceRoot())
 	if legacyPath == "" || sameConfigPath(legacyPath, userPath) {
+		normalizeLegacyDesktopProviderAccessForSettings(cfg, userPath)
 		return cfg, userPath, nil
 	}
 	legacyCfg := config.LoadForEdit(legacyPath)
+	normalizeLegacyDesktopProviderAccessForSettings(legacyCfg, legacyPath)
 	legacyCfg.ConfigVersion = config.Default().ConfigVersion
 	return legacyCfg, userPath, nil
+}
+
+func normalizeLegacyDesktopProviderAccessForSettings(cfg *config.Config, path string) {
+	if cfg == nil || len(cfg.Desktop.ProviderAccess) > 0 || configDeclaresProviderAccess(path) {
+		return
+	}
+	config.NormalizeLegacyDesktopProviderAccess(cfg)
+}
+
+func configDeclaresProviderAccess(path string) bool {
+	if strings.TrimSpace(path) == "" {
+		return false
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(body), "\n") {
+		if before, _, ok := strings.Cut(line, "#"); ok {
+			line = before
+		}
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "provider_access") {
+			rest := strings.TrimSpace(strings.TrimPrefix(line, "provider_access"))
+			return strings.HasPrefix(rest, "=")
+		}
+	}
+	return false
 }
 
 func (a *App) activeWorkspaceRoot() string {

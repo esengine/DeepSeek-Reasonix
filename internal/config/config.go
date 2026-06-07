@@ -1073,6 +1073,52 @@ func normalizeDesktopOfficialProviderAccess(c *Config) {
 	retargetDesktopOfficialRefs(c, seen)
 }
 
+// NormalizeLegacyDesktopProviderAccess seeds the desktop provider-access list
+// for configs written before Settings tracked explicit provider access. Callers
+// should only use this when they know the TOML did not declare provider_access;
+// an explicit empty list means the user removed all access entries.
+func NormalizeLegacyDesktopProviderAccess(c *Config) {
+	if c == nil || len(c.Desktop.ProviderAccess) > 0 {
+		return
+	}
+	seen := desktopProviderAccessMap(nil)
+	var access []string
+	add := func(name string) {
+		name = canonicalDesktopOfficialProviderName(name)
+		if name == "" || seen[name] {
+			return
+		}
+		seen[name] = true
+		access = append(access, name)
+	}
+	addRef := func(ref string) {
+		if entry, ok := c.ResolveModel(ref); ok {
+			if !entry.Configured() {
+				return
+			}
+			add(entry.Name)
+		}
+	}
+	addRef(c.DefaultModel)
+	addRef(c.Agent.PlannerModel)
+	addRef(c.Agent.SubagentModel)
+	addRef(c.Agent.AutoPlanClassifier)
+	for _, ref := range c.Agent.SubagentModels {
+		addRef(ref)
+	}
+	for i := range c.Providers {
+		p := &c.Providers[i]
+		if p.Configured() {
+			add(p.Name)
+		}
+	}
+	if len(access) == 0 {
+		return
+	}
+	c.Desktop.ProviderAccess = access
+	normalizeDesktopOfficialProviderAccess(c)
+}
+
 func canonicalDesktopOfficialProviderName(name string) string {
 	switch strings.TrimSpace(name) {
 	case "deepseek-flash", "deepseek-pro":
@@ -1084,6 +1130,12 @@ func canonicalDesktopOfficialProviderName(name string) string {
 	default:
 		return strings.TrimSpace(name)
 	}
+}
+
+// CanonicalDesktopOfficialProviderName returns the Settings Center provider ID
+// for built-in official provider aliases.
+func CanonicalDesktopOfficialProviderName(name string) string {
+	return canonicalDesktopOfficialProviderName(name)
 }
 
 func desktopProviderAccessMap(names []string) map[string]bool {

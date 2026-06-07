@@ -304,6 +304,7 @@ func TestSettingsSurfacesOfficialProviderTemplatesSeparately(t *testing.T) {
 
 func TestSettingsRepairsLegacyOfficialProviderWithoutModel(t *testing.T) {
 	isolateDesktopUserDirs(t)
+	t.Setenv("DEEPSEEK_API_KEY", "sk-test")
 	if err := os.MkdirAll(filepath.Dir(config.UserConfigPath()), 0o755); err != nil {
 		t.Fatalf("mkdir config dir: %v", err)
 	}
@@ -321,15 +322,124 @@ api_key_env = "DEEPSEEK_API_KEY"
 
 	got := NewApp().Settings()
 	for _, p := range got.Providers {
-		if p.Name != "deepseek-flash" {
+		if p.Name != "deepseek" {
 			continue
 		}
-		if len(p.Models) != 1 || p.Models[0] != "deepseek-v4-flash" || p.Default != "deepseek-v4-flash" {
-			t.Fatalf("deepseek-flash provider = %+v, want repaired flash model", p)
+		if !p.Added || !p.KeySet || len(p.Models) != 2 || p.Models[0] != "deepseek-v4-flash" || p.Models[1] != "deepseek-v4-pro" || p.Default != "deepseek-v4-flash" {
+			t.Fatalf("deepseek provider = %+v, want added repaired official model list", p)
+		}
+		if got.DefaultModel != "deepseek/deepseek-v4-flash" {
+			t.Fatalf("default_model = %q, want deepseek/deepseek-v4-flash", got.DefaultModel)
 		}
 		return
 	}
-	t.Fatalf("settings providers missing deepseek-flash: %+v", got.Providers)
+	t.Fatalf("settings providers missing deepseek: %+v", got.Providers)
+}
+
+func TestSettingsInfersLegacyProviderAccessWhenMissing(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	t.Setenv("DEEPSEEK_API_KEY", "sk-test")
+	t.Setenv("MIMO_API_KEY", "sk-test")
+	if err := os.MkdirAll(filepath.Dir(config.UserConfigPath()), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.WriteFile(config.UserConfigPath(), []byte(`
+default_model = "deepseek-flash/deepseek-v4-pro"
+
+[[providers]]
+name = "deepseek-flash"
+kind = "openai"
+base_url = "https://api.deepseek.com"
+models = ["deepseek-v4-flash", "deepseek-v4-pro"]
+default = "deepseek-v4-flash"
+api_key_env = "DEEPSEEK_API_KEY"
+
+[[providers]]
+name = "mimo-pro"
+kind = "openai"
+base_url = "https://token-plan-cn.xiaomimimo.com/v1"
+model = "mimo-v2.5-pro"
+api_key_env = "MIMO_API_KEY"
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	got := NewApp().Settings()
+	providers := map[string]ProviderView{}
+	for _, p := range got.Providers {
+		providers[p.Name] = p
+	}
+	if !providers["deepseek"].Added || !providers["deepseek"].KeySet {
+		t.Fatalf("deepseek provider = %+v, want inferred added key-set provider", providers["deepseek"])
+	}
+	if !providers["mimo-token-plan"].Added || !providers["mimo-token-plan"].KeySet {
+		t.Fatalf("mimo-token-plan provider = %+v, want inferred added key-set provider", providers["mimo-token-plan"])
+	}
+	if got.DefaultModel != "deepseek/deepseek-v4-pro" {
+		t.Fatalf("default_model = %q, want deepseek/deepseek-v4-pro", got.DefaultModel)
+	}
+}
+
+func TestSettingsDoesNotInferProviderAccessWhenExplicitlyEmpty(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	t.Setenv("DEEPSEEK_API_KEY", "sk-test")
+	if err := os.MkdirAll(filepath.Dir(config.UserConfigPath()), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.WriteFile(config.UserConfigPath(), []byte(`
+default_model = "deepseek-flash/deepseek-v4-flash"
+
+[desktop]
+provider_access = []
+
+[[providers]]
+name = "deepseek-flash"
+kind = "openai"
+base_url = "https://api.deepseek.com"
+models = ["deepseek-v4-flash"]
+default = "deepseek-v4-flash"
+api_key_env = "DEEPSEEK_API_KEY"
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	got := NewApp().Settings()
+	for _, p := range got.Providers {
+		if p.Added {
+			t.Fatalf("provider %+v should not be inferred as added when provider_access is explicit empty", p)
+		}
+	}
+}
+
+func TestSettingsInfersConfiguredBuiltInsWithoutConfigFile(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	t.Setenv("DEEPSEEK_API_KEY", "sk-test")
+	t.Setenv("MIMO_API_KEY", "sk-test")
+
+	got := NewApp().Settings()
+	providers := map[string]ProviderView{}
+	for _, p := range got.Providers {
+		providers[p.Name] = p
+	}
+	if !providers["deepseek"].Added || !providers["deepseek"].KeySet {
+		t.Fatalf("deepseek provider = %+v, want inferred added provider from configured key", providers["deepseek"])
+	}
+	if !providers["mimo-token-plan"].Added || !providers["mimo-token-plan"].KeySet {
+		t.Fatalf("mimo-token-plan provider = %+v, want inferred added provider from configured key", providers["mimo-token-plan"])
+	}
+}
+
+func TestSettingsDoesNotInferBuiltInsWithoutKeys(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	t.Setenv("DEEPSEEK_API_KEY", "")
+	t.Setenv("MIMO_API_KEY", "")
+
+	got := NewApp().Settings()
+	for _, p := range got.Providers {
+		if p.Added {
+			t.Fatalf("provider %+v should not be inferred as added without a configured key", p)
+		}
+	}
 }
 
 func TestAddOfficialProviderAccessReplacesLegacyProviderWithoutModel(t *testing.T) {
