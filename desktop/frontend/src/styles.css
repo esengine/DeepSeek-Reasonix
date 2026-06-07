@@ -7082,6 +7082,7 @@ a[href] {
 .onboarding__skip:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
 
 
 /* Memory filter input: a full-width mem-input variant that sits below
