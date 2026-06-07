@@ -3174,28 +3174,33 @@ func (a *App) GenerateWelcomePromptsForTab(tabID string) string {
 	}
 
 	dbPath := filepath.Join(tab.WorkspaceRoot, codegraphDB)
-	if _, err := os.Stat(dbPath); err != nil {
-		return ""
+	if _, err := os.Stat(dbPath); err == nil {
+		// codegraph index available — use rich symbol data.
+		langs, err := cgQuery(dbPath, "SELECT language, COUNT(*) as cnt FROM files GROUP BY language ORDER BY cnt DESC LIMIT 5")
+		if err == nil {
+			topFuncs, _ := cgQuery(dbPath, "SELECT name FROM nodes WHERE kind='function' AND is_exported=1 ORDER BY length(docstring) DESC LIMIT 5")
+			topTypes, _ := cgQuery(dbPath, "SELECT name FROM nodes WHERE kind IN ('struct','interface','type_alias') AND is_exported=1 LIMIT 5")
+			routes, _ := cgQuery(dbPath, "SELECT name FROM nodes WHERE kind='route' LIMIT 5")
+			langSet := make(map[string]bool)
+			for _, l := range langs {
+				langSet[strings.ToLower(l)] = true
+			}
+			prompts := generateChinesePrompts(langSet, topFuncs, topTypes, routes)
+			out, _ := json.Marshal(prompts)
+			return string(out)
+		}
 	}
 
-	// Query language distribution.
-	langs, err := cgQuery(dbPath, "SELECT language, COUNT(*) as cnt FROM files GROUP BY language ORDER BY cnt DESC LIMIT 5")
+	// Fallback: generate prompts from workspace file listing.
+	entries, err := os.ReadDir(tab.WorkspaceRoot)
 	if err != nil {
 		return ""
 	}
-
-	// Query top exported symbols by kind.
-	topFuncs, _ := cgQuery(dbPath, "SELECT name FROM nodes WHERE kind='function' AND is_exported=1 ORDER BY length(docstring) DESC LIMIT 5")
-	topTypes, _ := cgQuery(dbPath, "SELECT name FROM nodes WHERE kind IN ('struct','interface','type_alias') AND is_exported=1 LIMIT 5")
-	routes, _ := cgQuery(dbPath, "SELECT name FROM nodes WHERE kind='route' LIMIT 5")
-
-	// Detect project characteristics.
-	langSet := make(map[string]bool)
-	for _, l := range langs {
-		langSet[strings.ToLower(l)] = true
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
 	}
-
-	prompts := generateChinesePrompts(langSet, topFuncs, topTypes, routes)
+	prompts := generateChinesePromptsFromFiles(names)
 	out, _ := json.Marshal(prompts)
 	return string(out)
 }
@@ -3219,6 +3224,66 @@ func cgQuery(dbPath, query string) ([]string, error) {
 		}
 	}
 	return results, nil
+}
+
+// generateChinesePromptsFromFiles builds three Chinese welcome prompts by
+// inspecting root-level file and folder names. Used when no codegraph index
+// is available.
+func generateChinesePromptsFromFiles(names []string) []string {
+	set := make(map[string]bool, len(names))
+	for _, n := range names {
+		set[n] = true
+	}
+	has := func(f string) bool { return set[f] }
+
+	isJS := has("package.json")
+	isGo := has("go.mod")
+	isRust := has("Cargo.toml")
+	isPython := has("pyproject.toml") || has("setup.py") || has("requirements.txt")
+	hasDocker := has("Dockerfile") || has("docker-compose.yml") || has("docker-compose.yaml")
+	hasCI := has(".github") || has(".gitlab-ci.yml") || has(".circleci")
+	hasTests := has("test") || has("tests") || has("__tests__") || has("spec")
+	hasDocs := has("docs") || has("doc") || has("README.md")
+
+	// Prompt 1: architecture overview.
+	p1 := "帮我梳理一下这个项目的整体架构"
+	if isGo {
+		p1 = "帮我梳理一下这个 Go 项目的模块结构和依赖关系"
+	} else if isJS {
+		p1 = "帮我梳理一下这个前端项目的组件结构和路由"
+	} else if isPython {
+		p1 = "帮我梳理一下这个 Python 项目的包结构和入口点"
+	} else if isRust {
+		p1 = "帮我梳理一下这个 Rust 项目的 crate 结构"
+	}
+
+	// Prompt 2: pick the most useful "second question".
+	p2 := "帮我总结一下最近的 git 变更"
+	if hasDocker {
+		p2 = "帮我解释一下 Docker 的配置和服务连接方式"
+	} else if hasCI {
+		p2 = "帮我梳理一下 CI/CD 流水线的配置"
+	} else if hasTests {
+		p2 = "帮我分析一下测试套件的结构"
+	} else if isGo {
+		p2 = "帮我分析一下 cmd/ 和 internal/ 的职责划分"
+	}
+
+	// Prompt 3: dive into a specific area.
+	p3 := "帮我找一下项目的入口点和主要流程"
+	if isJS && has("src") {
+		p3 = "帮我分析一下 src/ 下的组件结构和状态管理"
+	} else if isGo && (has("cmd") || has("internal")) {
+		p3 = "帮我分析一下主要包之间的调用关系"
+	} else if isRust && has("src") {
+		p3 = "帮我分析一下 src/ 下各模块的职责"
+	} else if isPython && has("src") {
+		p3 = "帮我分析一下包的布局和主要入口"
+	} else if hasDocs {
+		p3 = "帮我总结一下 README 中的项目说明"
+	}
+
+	return []string{p1, p2, p3}
 }
 
 // generateChinesePrompts builds three Chinese welcome prompts from codegraph data.
