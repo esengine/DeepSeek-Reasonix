@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { CSSProperties, ClipboardEvent, DragEvent, KeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { AlertTriangle, ArrowUp, Check, ChevronDown, Eye, FileText, Folder, FolderGit2, FolderPlus, List, MessageSquare, Search, Square, Trash2, X, Zap } from "lucide-react";
 import { asArray } from "../lib/array";
+import { DedupIndex, sha256 } from "../lib/attachDedup";
 import { app, onFilesDropped } from "../lib/bridge";
 import { SPINNER_WORDS, useI18n } from "../lib/i18n";
 import { clearLayoutSize, loadOptionalLayoutSize, saveLayoutSize } from "../lib/layoutPreferences";
@@ -23,6 +24,11 @@ import { AnchoredPopover } from "./AnchoredPopover";
 interface Attachment {
   path: string;
   previewUrl?: string;
+}
+
+interface AttachmentDedupKey {
+  hash: string;
+  source: string;
 }
 
 interface WorkspaceReference {
@@ -336,6 +342,8 @@ export function Composer({
   const lastSelectionRef = useRef({ start: 0, end: 0 });
   const consumedInsertIdRef = useRef(0);
   const submittingRef = useRef(false);
+  const attachmentDedupRef = useRef(new DedupIndex());
+  const attachmentDedupKeysRef = useRef<Record<string, AttachmentDedupKey>>({});
 
   useEffect(() => {
     if (wasRunning.current && !running && text.trim() === "") {
@@ -605,6 +613,36 @@ export function Composer({
     return expanded;
   };
 
+  const rememberAttachment = (path: string, key: AttachmentDedupKey) => {
+    attachmentDedupRef.current.add(key.hash, key.source);
+    attachmentDedupKeysRef.current[path] = key;
+  };
+
+  const forgetAttachment = (path: string) => {
+    const key = attachmentDedupKeysRef.current[path];
+    if (key) {
+      attachmentDedupRef.current.forget(key.hash, key.source);
+      delete attachmentDedupKeysRef.current[path];
+    }
+  };
+
+  const clearAttachments = () => {
+    setAttachments([]);
+    attachmentDedupRef.current.clear();
+    attachmentDedupKeysRef.current = {};
+  };
+
+  const removeAttachment = (path: string) => {
+    forgetAttachment(path);
+    setAttachments((prev) => prev.filter((x) => x.path !== path));
+    requestAnimationFrame(() => taRef.current?.focus());
+  };
+
+  const fileDedupKey = async (file: File): Promise<AttachmentDedupKey> => ({
+    hash: await sha256(file),
+    source: `file:${file.name}:${file.size}:${file.lastModified}`,
+  });
+
   const submit = async () => {
     if (disabled || submittingRef.current) return;
     const t = text.trim();
@@ -626,7 +664,7 @@ export function Composer({
     const submitText = sessionContext ? `${sessionContext}${baseSubmitText}` : baseSubmitText;
     onSend(displayText, submitText);
     setText("");
-    setAttachments([]);
+    clearAttachments();
     setWorkspaceRefs([]);
     setSessionRefs([]);
     } finally {
@@ -649,9 +687,12 @@ export function Composer({
     for (const file of images) {
       setPendingPaste((n) => n + 1);
       try {
+        const key = await fileDedupKey(file);
+        if (attachmentDedupRef.current.seen(key.hash, key.source)) continue;
         const dataUrl = await readFileAsDataURL(file);
         const path = await app.SavePastedImage(dataUrl);
         const previewUrl = await app.AttachmentDataURL(path);
+        rememberAttachment(path, key);
         setAttachments((prev) => [...prev, { path, previewUrl }]);
       } catch {
         // non-fatal: a failed image attach must not block normal text input
@@ -669,8 +710,11 @@ export function Composer({
     for (const file of others) {
       setPendingPaste((n) => n + 1);
       try {
+        const key = await fileDedupKey(file);
+        if (attachmentDedupRef.current.seen(key.hash, key.source)) continue;
         const dataUrl = await readFileAsDataURL(file);
         const path = await app.SavePastedFile(file.name, dataUrl);
+        rememberAttachment(path, key);
         setAttachments((prev) => [...prev, { path }]);
       } catch {
         // non-fatal: a failed attach must not block normal text input
@@ -693,10 +737,13 @@ export function Composer({
     for (const path of paths) {
       setPendingPaste((n) => n + 1);
       try {
+        const key = { hash: "", source: `path:${path}` };
+        if (attachmentDedupRef.current.seen(key.hash, key.source)) continue;
         const item = await app.AttachDropped(path);
         if (item.kind === "workspace") {
           addWorkspaceReference({ path: item.path, isDir: item.isDir });
         } else {
+          rememberAttachment(item.path, key);
           setAttachments((prev) => [...prev, { path: item.path, previewUrl: item.previewUrl }]);
         }
       } catch {
@@ -1487,7 +1534,7 @@ export function Composer({
               <Tooltip label={t("composer.removeImage")}>
                 <button
                   type="button"
-                  onClick={() => setAttachments((prev) => prev.filter((x) => x.path !== a.path))}
+                  onClick={() => removeAttachment(a.path)}
                 >
                   <X size={14} />
                 </button>

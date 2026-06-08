@@ -1,15 +1,21 @@
 import { memo, useState } from "react";
-import { ChevronDown, GitBranch, RotateCcw, ScrollText } from "lucide-react";
+import { ChevronDown, FileText, Folder, GitBranch, Image, RotateCcw, ScrollText } from "lucide-react";
 import { Markdown } from "./Markdown";
 import { CopyButton } from "./CopyButton";
 import { ProcessBrainIcon, ProcessCard, ProcessStatusIcon } from "./ProcessCard";
-import { replaceAttachmentRefsForDisplay } from "../lib/attachmentDisplay";
+import { parseAttachmentRefsForDisplay } from "../lib/attachmentDisplay";
 import { useT } from "../lib/i18n";
 import type { Item, MessageActionScope } from "../lib/useController";
 import type { CheckpointMeta } from "../lib/types";
 
 type AssistantItem = Extract<Item, { kind: "assistant" }>;
 export type TurnActionMenu = "summary" | "rewind";
+
+function attachmentIcon(kind: "image" | "file" | "folder") {
+  if (kind === "image") return <Image size={15} />;
+  if (kind === "folder") return <Folder size={15} />;
+  return <FileText size={15} />;
+}
 
 export function UserMessage({
   text,
@@ -20,11 +26,31 @@ export function UserMessage({
   turn?: number;
   anchorId?: string;
 }) {
-  const displayText = replaceAttachmentRefsForDisplay(text);
+  const t = useT();
+  const { text: displayText, attachments } = parseAttachmentRefsForDisplay(text);
   return (
     <div className="msg msg--user" id={anchorId} data-question-anchor={anchorId} data-turn={turn}>
       <div className="msg__body">
-        <div className="msg__text">{displayText}</div>
+        {displayText && <div className="msg__text">{displayText}</div>}
+        {attachments.length > 0 && (
+          <div className="msg-attachments" aria-label={t("msg.attachments")}>
+            {attachments.map((attachment, index) => (
+              <div className="msg-attachment" key={`${attachment.path}:${index}`} title={attachment.path}>
+                <span className={`msg-attachment__icon msg-attachment__icon--${attachment.kind}`} aria-hidden="true">
+                  {attachmentIcon(attachment.kind)}
+                </span>
+                <span className="msg-attachment__main">
+                  <span className="msg-attachment__name">{attachment.name}</span>
+                  <span className="msg-attachment__meta">
+                    {attachment.kind === "folder"
+                      ? t("msg.folderReference")
+                      : `${attachment.ext || t("msg.fileAttachment")} · ${attachment.source === "workspace" ? t("msg.workspaceReference") : attachment.kind === "image" ? t("msg.imageAttachment") : t("msg.fileAttachment")}`}
+                  </span>
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
