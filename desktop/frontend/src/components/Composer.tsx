@@ -341,6 +341,10 @@ export function Composer({
   const lastSelectionRef = useRef({ start: 0, end: 0 });
   const consumedInsertIdRef = useRef(0);
   const submittingRef = useRef(false);
+  // Snapshot of the current cwd so async callbacks (openPastChats) can detect
+  // workspace switches and discard stale responses (issue #3601).
+  const cwdRef = useRef(cwd);
+  cwdRef.current = cwd;
   const attachmentDedupRef = useRef(new DedupIndex());
   const attachmentDedupKeysRef = useRef<Record<string, AttachmentDedupKey>>({});
 
@@ -431,6 +435,27 @@ export function Composer({
   const [searchEntries, setSearchEntries] = useState<DirEntry[]>([]);
   const dirCache = useRef<Record<string, DirEntry[]>>({});
   const searchCache = useRef<Record<string, DirEntry[]>>({});
+
+  // When the workspace/project changes (cwd prop), invalidate all @ mention
+  // state so the picker reloads candidates for the new project. Without this,
+  // dirCache/searchCache retain entries from the old project and the picker
+  // shows stale results (issue #3601).
+  const prevCwdRef = useRef(cwd);
+  useEffect(() => {
+    if (prevCwdRef.current === cwd) return; // skip mount — state already initial
+    prevCwdRef.current = cwd;
+    dirCache.current = {};
+    searchCache.current = {};
+    setEntries([]);
+    setSearchEntries([]);
+    setShowPastChats(false);
+    setPastChats([]);
+    setPastChatQuery("");
+    setLoadingPastChats(false);
+    setActive(0);
+    setDismissed(false);
+  }, [cwd]);
+
   useEffect(() => {
     if (atRaw === null) return;
     const cached = dirCache.current[atDir];
@@ -450,8 +475,8 @@ export function Composer({
     return () => {
       live = false;
     };
-    // re-fetch only when the menu opens or the directory level changes
-  }, [atRaw === null, atDir]);
+    // re-fetch when the menu opens or the directory level changes
+  }, [atRaw === null, atDir, cwd]);
   useEffect(() => {
     if (atRaw === null || atDir !== "" || atFrag === "") {
       setSearchEntries([]);
@@ -475,7 +500,7 @@ export function Composer({
     return () => {
       live = false;
     };
-  }, [atRaw === null, atDir, atFrag]);
+  }, [atRaw === null, atDir, atFrag, cwd]);
   const atMatches = useMemo(
     () => {
       if (atRaw === null) return [];
@@ -1050,12 +1075,15 @@ export function Composer({
 
   // --- past:chats session reference ---
   const openPastChats = async () => {
+    const snapshotCwd = cwdRef.current;
     setShowPastChats(true);
     setActive(0);
     setPastChatQuery("");
     setLoadingPastChats(true);
     try {
       const sessions = await app.ListSessions();
+      // Discard stale response if workspace changed while the request was in-flight.
+      if (cwdRef.current !== snapshotCwd) return;
       const sorted = asArray(sessions)
         .filter((s) => !s.current)
         .sort((a, b) => {
@@ -1066,9 +1094,10 @@ export function Composer({
         .slice(0, 50);
       setPastChats(sorted);
     } catch {
+      if (cwdRef.current !== snapshotCwd) return;
       setPastChats([]);
     } finally {
-      setLoadingPastChats(false);
+      if (cwdRef.current === snapshotCwd) setLoadingPastChats(false);
     }
   };
 
