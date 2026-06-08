@@ -371,7 +371,7 @@ func (c *Controller) modelListText() string {
 		if !p.Configured() {
 			continue
 		}
-		for _, m := range p.ModelList() {
+		for _, m := range p.ChatModelList() {
 			fmt.Fprintf(&b, "  %s/%s\n", p.Name, m)
 		}
 	}

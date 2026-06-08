@@ -183,7 +183,7 @@ func removeProviderAccess(c *config.Config, names ...string) {
 func providerViewFromEntry(p config.ProviderEntry, builtIn, added bool) ProviderView {
 	return ProviderView{
 		Name: p.Name, BuiltIn: builtIn, Added: added, Kind: p.Kind, BaseURL: p.BaseURL,
-		Models: nonNil(p.ModelList()), ModelsURL: p.ModelsURL, Default: p.DefaultModel(),
+		Models: nonNil(p.ChatModelList()), ModelsURL: p.ModelsURL, Default: p.DefaultModel(),
 		APIKeyEnv:         p.APIKeyEnv,
 		KeySet:            p.APIKeyEnv != "" && os.Getenv(p.APIKeyEnv) != "",
 		BalanceURL:        p.BalanceURL,

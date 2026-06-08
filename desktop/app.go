@@ -2737,7 +2737,7 @@ func (a *App) ModelsForTab(tabID string) []ModelInfo {
 		if !modelProviderAccessAllowed(access, p.Name) || !p.Configured() {
 			continue
 		}
-		for _, m := range p.ModelList() {
+		for _, m := range p.ChatModelList() {
 			ref := p.Name + "/" + m
 			out = append(out, ModelInfo{Ref: ref, Provider: p.Name, Model: m, Current: ref == curModel})
 		}

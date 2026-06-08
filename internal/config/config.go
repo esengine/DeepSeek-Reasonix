@@ -535,6 +535,74 @@ func (e *ProviderEntry) ModelList() []string {
 	return nil
 }
 
+// IsLikelyChatModel reports whether a model ID looks like a chat/completion
+// model rather than a specialised audio/vision/embedding model. It applies a
+// conservative name-based heuristic — the OpenAI-compatible /models API does
+// not return capability/modality metadata, so this is the most reliable
+// fallback until providers add such fields.
+//
+// The heuristic works in two passes:
+//  1. Multi-word substring check for compound terms that span separators
+//     (e.g. "text-embedding", "text-to-speech").
+//  2. Token-level check: the model ID is split on common separators (- _ . / :)
+//     and each token is compared against a set of known non-chat keywords.
+//
+// "voice" is intentionally absent from the non-chat set because it is too
+// broad — legitimate future chat models may include it in their name.
+func IsLikelyChatModel(model string) bool {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return false
+	}
+	lower := strings.ToLower(model)
+
+	// Pass 1: compound terms that span separator boundaries.
+	var compoundNonChat = []string{
+		"text-embedding", "text-to-speech", "speech-to-text",
+	}
+	for _, c := range compoundNonChat {
+		if strings.Contains(lower, c) {
+			return false
+		}
+	}
+
+	// Pass 2: token-level check.
+	tokens := strings.FieldsFunc(lower, func(r rune) bool {
+		return r == '-' || r == '_' || r == '.' || r == '/' || r == ':'
+	})
+	var nonChatTokens = map[string]bool{
+		"asr": true, "stt": true, "tts": true,
+		"whisper": true, "embedding": true,
+		"moderation": true, "rerank": true, "dall": true,
+		"transcription": true,
+	}
+	for _, tok := range tokens {
+		if nonChatTokens[tok] {
+			return false
+		}
+	}
+	return true
+}
+
+// ChatModelList returns ModelList filtered to likely chat/completion models.
+// Non-chat models (TTS, STT, ASR, embedding, etc.) are excluded so they do
+// not appear in the chat model picker. Use ModelList() only when the full
+// raw provider model list is needed, such as config serialization, provider
+// diagnostics, or model-fetch editing.
+func (e *ProviderEntry) ChatModelList() []string {
+	raw := e.ModelList()
+	if len(raw) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(raw))
+	for _, m := range raw {
+		if IsLikelyChatModel(m) {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
 // DefaultModel returns the provider's default model: the explicit `default`, else
 // the first of ModelList.
 func (e *ProviderEntry) DefaultModel() string {
