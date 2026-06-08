@@ -1608,17 +1608,6 @@ export function Composer({
             rows={1}
             disabled={disabled}
           />
-          {!running && (
-            <Tooltip label={t("composer.send")}>
-              <button
-                className="composer__btn composer__btn--send"
-                onClick={submit}
-                disabled={submitting || pendingPaste > 0 || (!text.trim() && attachments.length === 0 && workspaceRefs.length === 0) || disabled}
-              >
-                <ArrowUp size={16} />
-              </button>
-            </Tooltip>
-          )}
         </div>
         <div className={composerMetaClass}>
           {cwd && (
@@ -1665,16 +1654,25 @@ export function Composer({
               </div>
             )}
           </div>
-          {running && (
-            <div className="composer-meta__stop-wrap">
+          <div className="composer-meta__stop-wrap">
+            {running ? (
               <Tooltip label={t("composer.stop")}>
-                <button className="composer-runstatus__stop" type="button" onClick={handleCancel} disabled={decisionPending}>
-                  <Square size={10} fill="currentColor" />
-                  <span>{t("composer.stopShort")}</span>
+                <button className="composer-meta__action-btn composer-meta__action-btn--stop" type="button" onClick={handleCancel} disabled={decisionPending}>
+                  <Square size={14} fill="currentColor" />
                 </button>
               </Tooltip>
-            </div>
-          )}
+            ) : (
+              <Tooltip label={t("composer.send")}>
+                <button
+                  className="composer-meta__action-btn composer-meta__action-btn--send"
+                  onClick={submit}
+                  disabled={submitting || pendingPaste > 0 || (!text.trim() && attachments.length === 0 && workspaceRefs.length === 0) || disabled}
+                >
+                  <ArrowUp size={16} />
+                </button>
+              </Tooltip>
+            )}
+          </div>
         </div>
       </div>
     </div>

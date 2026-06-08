@@ -2423,8 +2423,6 @@ a[href] {
   min-height: 0;
   background: transparent;
   border: none;
-  border-bottom: 1px solid var(--border-soft);
-  border-radius: 0;
   padding: 10px;
 }
 .composer-card--resized .composer,
@@ -2441,15 +2439,7 @@ a[href] {
   pointer-events: none;
 }
 .composer--disabled:focus-within {
-  border-color: var(--border);
   box-shadow: none;
-}
-.composer--shell {
-  border-bottom-color: var(--shell-accent);
-}
-.composer--shell:focus-within {
-  border-bottom-color: var(--shell-accent);
-  box-shadow: 0 1px 0 0 var(--shell-accent);
 }
 
 .composer__input {
@@ -2512,6 +2502,7 @@ a[href] {
   cursor: default;
   transform: none;
 }
+
 .composer-meta {
   display: flex;
   align-items: center;
@@ -8381,41 +8372,33 @@ a[href] {
   margin-left: auto;
 }
 
-.composer-runstatus__stop {
+/* Unified action button in the composer meta bar — shared by send and stop */
+.composer-meta__action-btn {
   --wails-draggable: no-drag;
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
-  height: 26px;
-  padding: 0 9px;
-  border: 1px solid color-mix(in srgb, var(--err) 42%, transparent);
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--err) 14%, var(--bg-elev-2));
-  color: var(--err);
-  font: inherit;
-  font-weight: 620;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 8px;
+  background: rgb(2, 83, 229);
+  color: #fff;
+  transition: color 0.12s, background 0.12s, box-shadow 0.12s;
 }
-
-.composer-runstatus__stop:hover,
-.composer-runstatus__stop:focus-visible {
-  color: var(--fg);
-  background: color-mix(in srgb, var(--err) 38%, var(--bg-elev-2));
-  border-color: color-mix(in srgb, var(--err) 70%, var(--border));
+.composer-meta__action-btn:not(:disabled):hover {
+  background: color-mix(in srgb, rgb(2, 83, 229) 88%, #000);
 }
-.composer-runstatus__stop:disabled {
-  cursor: not-allowed;
+.composer-meta__action-btn:not(:disabled):focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.composer-meta__action-btn:disabled {
+  cursor: default;
   opacity: 0.48;
-  color: var(--fg-faint);
-  background: var(--button-bg);
-  border-color: var(--border-soft);
-}
-.composer-runstatus__stop:disabled:hover,
-.composer-runstatus__stop:disabled:focus-visible {
-  color: var(--fg-faint);
-  background: var(--button-bg);
-  border-color: var(--border-soft);
+  background: var(--control-disabled-bg);
+  color: var(--control-disabled-fg);
 }
 
 .composer-context {
@@ -11361,7 +11344,7 @@ a[href] {
   justify-content: center;
   background: var(--bg, rgba(26, 26, 46, 0.7));
   backdrop-filter: blur(2px);
-  z-index: 2;
+  z-index: var(--z-local-raised);
   pointer-events: none;
   animation: browser-fade-in 0.15s ease-out;
 }
@@ -11382,7 +11365,6 @@ a[href] {
   font-family: var(--font-mono, monospace);
   opacity: 0.7;
   pointer-events: none;
-  z-index: 1;
 }
 
 /* Nav button variants */
