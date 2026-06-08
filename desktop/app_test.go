@@ -325,6 +325,9 @@ api_key_env = "DEEPSEEK_API_KEY"
 		if p.Name != "deepseek" {
 			continue
 		}
+		if !p.BuiltIn {
+			t.Fatalf("deepseek provider should be marked built-in for official endpoint: %+v", p)
+		}
 		if !p.Added || !p.KeySet || len(p.Models) != 2 || p.Models[0] != "deepseek-v4-flash" || p.Models[1] != "deepseek-v4-pro" || p.Default != "deepseek-v4-flash" {
 			t.Fatalf("deepseek provider = %+v, want added repaired official model list", p)
 		}
@@ -334,6 +337,53 @@ api_key_env = "DEEPSEEK_API_KEY"
 		return
 	}
 	t.Fatalf("settings providers missing deepseek: %+v", got.Providers)
+}
+
+func TestSettingsTreatsReservedProviderNameWithExternalEndpointAsCustom(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	t.Setenv("DEEPSEEK_API_KEY", "sk-test")
+	if err := os.MkdirAll(filepath.Dir(config.UserConfigPath()), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.WriteFile(config.UserConfigPath(), []byte(`
+default_model = "deepseek/deepseek-v4-Flash"
+
+[desktop]
+provider_access = ["deepseek"]
+
+[[providers]]
+name = "deepseek"
+kind = "openai"
+base_url = "https://opencode.ai/zen/go/v1"
+models = ["deepseek-v4-Flash", "deepseek-v4-pro", "glm-5"]
+default = "deepseek-v4-Flash"
+api_key_env = "DEEPSEEK_API_KEY"
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	got := NewApp().Settings()
+	var custom *ProviderView
+	for i := range got.Providers {
+		if got.Providers[i].Name == "deepseek" {
+			custom = &got.Providers[i]
+			break
+		}
+	}
+	if custom == nil {
+		t.Fatalf("settings providers missing deepseek: %+v", got.Providers)
+	}
+	if custom.BuiltIn {
+		t.Fatalf("external deepseek endpoint should be custom, got built-in provider: %+v", *custom)
+	}
+	if !custom.Added || !custom.KeySet || custom.BaseURL != "https://opencode.ai/zen/go/v1" {
+		t.Fatalf("external deepseek provider = %+v, want added key-set custom opencode endpoint", *custom)
+	}
+	for _, p := range got.OfficialProviders {
+		if p.Name == "deepseek" && p.Added {
+			t.Fatalf("official DeepSeek template should not be marked added by external endpoint: %+v", p)
+		}
+	}
 }
 
 func TestSettingsInfersLegacyProviderAccessWhenMissing(t *testing.T) {

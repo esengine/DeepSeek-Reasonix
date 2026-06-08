@@ -92,7 +92,7 @@ func (c *Config) UpsertProvider(e ProviderEntry) error {
 func (c *Config) SetProviderEffort(name, effort string) error {
 	for i := range c.Providers {
 		if c.Providers[i].Name == name {
-			c.Providers[i].Effort = strings.ToLower(strings.TrimSpace(effort))
+			c.Providers[i].Effort = normalizeStoredEffort(effort)
 			return nil
 		}
 	}

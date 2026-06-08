@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -133,15 +134,35 @@ func desktopModelRefsProvider(c *config.Config, ref, name string) bool {
 	return false
 }
 
-func builtInProviderNames() map[string]bool {
-	out := map[string]bool{}
-	for _, p := range config.Default().Providers {
-		out[p.Name] = true
+func officialProviderHost(baseURL string) string {
+	u, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil {
+		return ""
 	}
-	for _, name := range []string{"deepseek", "deepseek-flash", "mimo-api", "mimo-token-plan", "mimo-pro"} {
-		out[name] = true
+	return strings.ToLower(u.Hostname())
+}
+
+func officialProviderKindFromEntry(p config.ProviderEntry) string {
+	host := officialProviderHost(p.BaseURL)
+	switch config.CanonicalDesktopOfficialProviderName(p.Name) {
+	case "deepseek":
+		if host == "api.deepseek.com" {
+			return "deepseek"
+		}
+	case "mimo-api":
+		if host == "api.xiaomimimo.com" {
+			return "mimo-api"
+		}
+	case "mimo-token-plan":
+		if host == "token-plan-cn.xiaomimimo.com" {
+			return "mimo-token-plan"
+		}
 	}
-	return out
+	return ""
+}
+
+func isOfficialBuiltInProvider(p config.ProviderEntry) bool {
+	return officialProviderKindFromEntry(p) != ""
 }
 
 func providerAccessSet(names []string) map[string]bool {
@@ -204,6 +225,24 @@ func officialProviderViews(added map[string]bool) []ProviderView {
 		}
 		for _, entry := range entries {
 			out = append(out, providerViewFromEntry(entry, true, added[entry.Name]))
+		}
+	}
+	return out
+}
+
+func officialProviderAddedSet(cfg *config.Config) map[string]bool {
+	out := map[string]bool{}
+	if cfg == nil {
+		return out
+	}
+	access := providerAccessSet(cfg.Desktop.ProviderAccess)
+	for i := range cfg.Providers {
+		p := cfg.Providers[i]
+		if !access[p.Name] {
+			continue
+		}
+		if kind := officialProviderKindFromEntry(p); kind != "" {
+			out[kind] = true
 		}
 	}
 	return out
@@ -275,12 +314,11 @@ func (a *App) Settings() SettingsView {
 		ProviderKinds:     nonNil(provider.Kinds()),
 		Bypass:            ctrl != nil && ctrl.Bypass(),
 	}
-	builtIns := builtInProviderNames()
 	added := providerAccessSet(cfg.Desktop.ProviderAccess)
-	v.OfficialProviders = officialProviderViews(added)
+	v.OfficialProviders = officialProviderViews(officialProviderAddedSet(cfg))
 	for i := range cfg.Providers {
 		p := &cfg.Providers[i]
-		v.Providers = append(v.Providers, providerViewFromEntry(*p, builtIns[p.Name], added[p.Name]))
+		v.Providers = append(v.Providers, providerViewFromEntry(*p, isOfficialBuiltInProvider(*p), added[p.Name]))
 	}
 	return v
 }
@@ -742,7 +780,11 @@ func (a *App) RemoveProviderAccess(name string) error {
 	if name == "" {
 		return fmt.Errorf("remove provider access: empty provider name")
 	}
-	if builtInProviderNames()[name] {
+	cfg, _, err := a.loadDesktopUserConfigForEdit()
+	if err != nil {
+		return err
+	}
+	if p, ok := cfg.Provider(name); ok && isOfficialBuiltInProvider(*p) {
 		return a.removeBuiltInProviderAccessAndRetargetTabs(name)
 	}
 	return a.deleteProviderAndRetargetTabs(name)

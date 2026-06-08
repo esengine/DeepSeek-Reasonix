@@ -1579,6 +1579,7 @@ function providerAccessGroups(providers: ProviderView[], t: ReturnType<typeof us
   const groups = new Map<string, ProviderAccessGroup>();
   for (const p of providers) {
     const id = providerGroupID(p);
+    const builtIn = id.startsWith("builtin:");
     const existing = groups.get(id);
     if (existing) {
       existing.providers.push(p);
@@ -1590,7 +1591,7 @@ function providerAccessGroups(providers: ProviderView[], t: ReturnType<typeof us
       id,
       label: providerGroupLabel(p, t),
       description: providerGroupDescription(p, t),
-      builtIn: p.builtIn,
+      builtIn,
       providers: [p],
       apiKeyEnv: p.apiKeyEnv,
       keySet: p.keySet,
@@ -1602,13 +1603,45 @@ function providerAccessGroups(providers: ProviderView[], t: ReturnType<typeof us
   return Array.from(groups.values());
 }
 
+function providerBaseHost(baseUrl: string): string {
+  try {
+    return new URL(baseUrl).hostname.toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+function canonicalOfficialProviderName(name: string): string {
+  switch (name.trim()) {
+    case "deepseek-flash":
+    case "deepseek-pro":
+      return "deepseek";
+    case "mimo":
+    case "xiaomi-mimo":
+    case "xiaomi_mimo":
+      return "mimo-api";
+    case "mimo-pro":
+    case "mimo-flash":
+      return "mimo-token-plan";
+    default:
+      return name.trim();
+  }
+}
+
+function officialProviderKind(p: ProviderView): string {
+  if (!p.builtIn) return "";
+  const name = canonicalOfficialProviderName(p.name);
+  const host = providerBaseHost(p.baseUrl);
+  if (name === "deepseek" && host === "api.deepseek.com") return "deepseek";
+  if (name === "mimo-token-plan" && host === "token-plan-cn.xiaomimimo.com") return "mimo-token-plan";
+  if (name === "mimo-api" && host === "api.xiaomimimo.com") return "mimo-api";
+  return "";
+}
+
 function providerGroupID(p: ProviderView): string {
-  if (!p.builtIn) return `custom:${p.name}`;
-  const base = p.baseUrl.toLowerCase();
-  if (p.apiKeyEnv === "DEEPSEEK_API_KEY" || base.includes("deepseek")) return "builtin:deepseek";
-  if (base.includes("token-plan-cn.xiaomimimo.com")) return "builtin:mimo-token-plan";
-  if (base.includes("api.xiaomimimo.com") || base.includes("mimo") || base.includes("xiaomimimo")) return "builtin:mimo-api";
-  return `builtin:${p.name}`;
+  const official = officialProviderKind(p);
+  if (official) return `builtin:${official}`;
+  return `custom:${p.name}`;
 }
 
 function providerGroupLabel(p: ProviderView, t?: ReturnType<typeof useT>): string {

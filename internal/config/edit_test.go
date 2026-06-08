@@ -275,18 +275,21 @@ func TestNormalizeEffortDeepSeek(t *testing.T) {
 	}
 }
 
-func TestNormalizeLegacyEffortMigratesOff(t *testing.T) {
+func TestNormalizeLegacyEffortMigratesProviderDefaults(t *testing.T) {
 	c := &Config{Providers: []ProviderEntry{
 		{Name: "deepseek", Effort: "off"},
 		{Name: "deepseek-upper", Effort: "OFF"},
+		{Name: "deepseek-auto", Effort: "auto"},
+		{Name: "deepseek-auto-upper", Effort: "AUTO"},
 		{Name: "keep", Effort: "high"},
 	}}
 	normalizeLegacyEffort(c)
-	if c.Providers[0].Effort != "" || c.Providers[1].Effort != "" {
-		t.Fatalf("legacy off should migrate to empty, got %q/%q", c.Providers[0].Effort, c.Providers[1].Effort)
+	normalizeEffortConfig(c)
+	if c.Providers[0].Effort != "" || c.Providers[1].Effort != "" || c.Providers[2].Effort != "" || c.Providers[3].Effort != "" {
+		t.Fatalf("provider default efforts should migrate to empty, got %q/%q/%q/%q", c.Providers[0].Effort, c.Providers[1].Effort, c.Providers[2].Effort, c.Providers[3].Effort)
 	}
-	if c.Providers[2].Effort != "high" {
-		t.Fatalf("non-legacy effort changed: %q", c.Providers[2].Effort)
+	if c.Providers[4].Effort != "high" {
+		t.Fatalf("non-legacy effort changed: %q", c.Providers[4].Effort)
 	}
 }
 
@@ -874,6 +877,10 @@ func TestNormalizeEffortCustomDefaultEffort(t *testing.T) {
 	// /effort auto still maps to "" regardless of DefaultEffort.
 	if got, err := NormalizeEffort(e, "auto"); err != nil || got != "" {
 		t.Fatalf("NormalizeEffort(auto) = %q/%v, want empty/nil", got, err)
+	}
+	e.Effort = "auto"
+	if got := EffectiveEffort(e); got != "low" {
+		t.Fatalf("stored auto should fall through to default_effort, got %q", got)
 	}
 	e.Effort = "high"
 	if got := EffectiveEffort(e); got != "high" {

@@ -38,6 +38,10 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	}
 	keyEnv, _ := cfg.Extra["api_key_env"].(string) // for actionable auth errors
 	effort, _ := cfg.Extra["effort"].(string)
+	effort = strings.ToLower(strings.TrimSpace(effort))
+	if effort == "auto" {
+		effort = ""
+	}
 	protocol, _ := cfg.Extra["reasoning_protocol"].(string)
 	protocol = normalizeReasoningProtocol(protocol)
 	deepseek := protocol == "deepseek" || (protocol == "" && isDeepSeekBaseURL(cfg.BaseURL))
@@ -45,7 +49,6 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	case protocol == "none":
 		effort = ""
 	case deepseek:
-		effort = strings.ToLower(strings.TrimSpace(effort))
 		switch effort {
 		case "", "off": // "off" is a retired level (disabled thinking); fall back to the default depth
 			effort = "high"
@@ -57,7 +60,6 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		// Non-DeepSeek backends use OpenAI's reasoning_effort scale (low/medium/
 		// high); "max" is a DeepSeek-ism MiMo et al. reject with 400, so clamp it
 		// to the OpenAI ceiling and reject other values at boot, not at request time.
-		effort = strings.ToLower(strings.TrimSpace(effort))
 		switch effort {
 		case "max":
 			effort = "high"

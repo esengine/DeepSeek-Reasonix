@@ -143,7 +143,7 @@ func EffectiveEffort(e *ProviderEntry) string {
 	if e == nil {
 		return ""
 	}
-	if effort := normalizeEffortLevel(e.Effort); effort != "" {
+	if effort := normalizeStoredEffort(e.Effort); effort != "" {
 		return effort
 	}
 	supported := normalizedSupportedEfforts(e)
@@ -170,13 +170,18 @@ func normalizeProviderEffortFields(e *ProviderEntry) {
 	if e == nil {
 		return
 	}
-	e.Effort = normalizeEffortLevel(e.Effort)
-	if e.Effort == "off" {
-		e.Effort = ""
-	}
+	e.Effort = normalizeStoredEffort(e.Effort)
 	e.ReasoningProtocol = normalizeReasoningProtocol(e.ReasoningProtocol)
 	e.DefaultEffort = normalizeEffortLevel(e.DefaultEffort)
 	e.SupportedEfforts = normalizedSupportedEfforts(e)
+}
+
+func normalizeStoredEffort(raw string) string {
+	level := normalizeEffortLevel(raw)
+	if level == "auto" || level == "off" {
+		return ""
+	}
+	return level
 }
 
 // ReasoningProtocolForEntry resolves the provider request shape for reasoning

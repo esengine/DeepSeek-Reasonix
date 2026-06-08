@@ -32,9 +32,11 @@ func TestEffortNormalization(t *testing.T) {
 		{mimo, "medium", "medium"},
 		{mimo, "low", "low"},
 		{mimo, "MAX", "high"}, // case-insensitive
+		{mimo, "auto", ""},    // UI/config auto means omit provider-specific effort
 		{mimo, "", ""},        // unset stays omitted
 		{deepseek, "max", "max"},
 		{deepseek, "high", "high"},
+		{deepseek, "auto", "high"},
 		{deepseek, "", "high"}, // DeepSeek default depth
 	}
 	for _, tc := range tests {

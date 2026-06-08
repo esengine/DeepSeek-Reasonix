@@ -2949,16 +2949,46 @@ func (a *App) applyProviderEffortConfig(entry *config.ProviderEntry, effort stri
 				return err
 			}
 		}
-		canonicalName := config.CanonicalDesktopOfficialProviderName(entry.Name)
-		if canonicalName != entry.Name {
-			if _, ok := cfg.Provider(canonicalName); ok {
-				if err := cfg.SetProviderEffort(canonicalName, effort); err != nil {
-					return err
-				}
+		for _, name := range providerEffortTargetNames(cfg, entry) {
+			if err := cfg.SetProviderEffort(name, effort); err != nil {
+				return err
 			}
 		}
-		return cfg.SetProviderEffort(entry.Name, effort)
+		return nil
 	})
+}
+
+func providerEffortTargetNames(cfg *config.Config, entry *config.ProviderEntry) []string {
+	if cfg == nil || entry == nil {
+		return nil
+	}
+	out := []string{entry.Name}
+	seen := map[string]bool{entry.Name: true}
+	kind := officialProviderKindFromEntry(*entry)
+	if kind == "" {
+		return out
+	}
+	var family []string
+	switch kind {
+	case "deepseek":
+		family = []string{"deepseek", "deepseek-flash", "deepseek-pro"}
+	case "mimo-token-plan":
+		family = []string{"mimo-token-plan", "mimo-pro", "mimo-flash"}
+	case "mimo-api":
+		family = []string{"mimo-api"}
+	}
+	for _, name := range family {
+		if seen[name] {
+			continue
+		}
+		p, ok := cfg.Provider(name)
+		if !ok || officialProviderKindFromEntry(*p) != kind {
+			continue
+		}
+		seen[name] = true
+		out = append(out, name)
+	}
+	return out
 }
 
 // DirEntry is one entry in the "@" file-reference menu.
