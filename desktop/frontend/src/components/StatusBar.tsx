@@ -80,6 +80,21 @@ function formatMoney(amount?: number, currency?: string): string {
   return `${symbol}${amount < 1 ? amount.toFixed(4) : amount.toFixed(2)}`;
 }
 
+function currencyMatches(value: string | undefined, wanted: string): boolean {
+  const symbol = currencySymbol(wanted);
+  const normalized = (value || "").trim();
+  if (!normalized) return false;
+  if (currencySymbol(normalized) === symbol) return true;
+  return normalized.toUpperCase() === wanted.trim().toUpperCase();
+}
+
+function balanceLabel(balance?: BalanceInfo, currency?: string): string {
+  if (!balance?.available) return "-";
+  const preferred = currency ? balance.balances?.find((b) => currencyMatches(b.currency, currency)) : undefined;
+  if (preferred) return `${currencySymbol(preferred.currency)}${preferred.amount.trim()}`;
+  return balance.display || "-";
+}
+
 export function StatusBar({
   context,
   usage,
@@ -106,6 +121,7 @@ export function StatusBar({
   const avgPct = avgRate(usage);
   const jobsList = jobs ?? [];
   const costLabel = formatMoney(cost, currency);
+  const balanceAmount = balanceLabel(balance, currency);
 
   return (
     <div className="statusbar">
@@ -128,7 +144,7 @@ export function StatusBar({
       <span className="statusbar__sep">·</span>
       <Tooltip label={t("status.balanceTitle")}>
         <span className="statusbar__item statusbar__balance">
-          {t("status.balance", { amount: balance?.available && balance.display ? balance.display : "-" })}
+          {t("status.balance", { amount: balanceAmount })}
         </span>
       </Tooltip>
       <span className="statusbar__spacer" />

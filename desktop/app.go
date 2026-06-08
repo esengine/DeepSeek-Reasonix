@@ -1444,9 +1444,15 @@ func (a *App) ContextUsageForTab(tabID string) ContextInfo {
 // and is "" when the active provider declares no balance_url — the frontend then
 // omits the readout. Err carries a fetch failure for an optional tooltip.
 type BalanceInfo struct {
-	Available bool   `json:"available"`
-	Display   string `json:"display"`
-	Err       string `json:"err,omitempty"`
+	Available bool            `json:"available"`
+	Display   string          `json:"display"`
+	Balances  []BalanceAmount `json:"balances,omitempty"`
+	Err       string          `json:"err,omitempty"`
+}
+
+type BalanceAmount struct {
+	Currency string `json:"currency"`
+	Amount   string `json:"amount"`
 }
 
 // Balance queries the active provider's wallet balance (a network call). It
@@ -1469,7 +1475,11 @@ func (a *App) BalanceForTab(tabID string) BalanceInfo {
 	if b == nil {
 		return BalanceInfo{} // provider declares no balance endpoint
 	}
-	return BalanceInfo{Available: true, Display: b.Display()}
+	info := BalanceInfo{Available: true, Display: b.Display()}
+	for _, bi := range b.Infos {
+		info.Balances = append(info.Balances, BalanceAmount{Currency: bi.Currency, Amount: bi.TotalBalance})
+	}
+	return info
 }
 
 // JobView is one running background job (bash/task started with
