@@ -144,7 +144,7 @@ func buildReviewTask(diff string, extra string) string {
 	if len(diff) > maxLen {
 		b.WriteString(diff[:maxLen])
 		b.WriteString("\n```\n\n(diff truncated at ")
-		b.WriteString(fmt.Sprint(maxLen))
+		fmt.Fprint(&b, maxLen)
 		b.WriteString(" chars — focus on the changes shown)")
 	} else {
 		b.WriteString(diff)
