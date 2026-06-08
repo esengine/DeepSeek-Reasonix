@@ -77,9 +77,9 @@ const RIGHT_DOCK_MIN_WIDTH = CONTEXT_PANEL_MIN_WIDTH;
 const RIGHT_DOCK_TREE_DEFAULT_WIDTH = 320;
 const RIGHT_DOCK_TREE_DEFAULT_RATIO = 0.25;
 const RIGHT_DOCK_TREE_MIN_WIDTH = 260;
-const RIGHT_DOCK_TREE_MAX_WIDTH = 560;
+const RIGHT_DOCK_TREE_MAX_WIDTH = 999999;
 const RIGHT_DOCK_PREVIEW_DEFAULT_WIDTH = 640;
-const RIGHT_DOCK_MAX_WIDTH = 860;
+const RIGHT_DOCK_MAX_WIDTH = 999999;
 
 const DEFAULT_DOCK_TABS: DockTab[] = [
   { id: "files", type: "files", title: "文件", icon: FileText, closable: false },
@@ -926,18 +926,19 @@ export default function App() {
       const startX = event.clientX;
       const startDockWidth = preferredWorkspacePanelWidth;
       let nextDockWidth = startDockWidth;
+      // Write CSS variable directly during drag to avoid React re-render on
+      // every pixel. Only state + localStorage are committed on pointerup.
+      const root = document.documentElement;
+      root.style.setProperty("--workspace-width", `${startDockWidth}px`);
       const onMove = (moveEvent: PointerEvent) => {
         const delta = moveEvent.clientX - startX;
         nextDockWidth = startDockWidth - delta;
-        if (workspacePreviewActive) {
-          setRightDockPreviewWidth(clampRightDockWidth(nextDockWidth));
-        } else {
-          setRightDockTreeWidth(clampRightDockTreeWidth(nextDockWidth));
-        }
+        root.style.setProperty("--workspace-width", `${Math.round(nextDockWidth)}px`);
       };
       const onDone = () => {
         setSavedWorkspacePanelWidth(nextDockWidth);
         setWorkspacePanelResizing(false);
+        root.style.removeProperty("--workspace-width");
         window.removeEventListener("pointermove", onMove);
         window.removeEventListener("pointerup", onDone);
         window.removeEventListener("pointercancel", onDone);
@@ -1388,6 +1389,7 @@ export default function App() {
     : defaultRightDockTreeWidth();
   const workspacePanelMaxWidth = workspacePreviewActive ? RIGHT_DOCK_MAX_WIDTH : RIGHT_DOCK_TREE_MAX_WIDTH;
 
+
   return (
     <ShellExpandProvider>
     <ShellHotkeys />
@@ -1425,15 +1427,15 @@ export default function App() {
                   <SquarePen size={15} />
                 </button>
               </Tooltip>
+              <button
+                className="sidebar__collapse-btn"
+                type="button"
+                onClick={toggleSidebar}
+                aria-label={sidebarToggleTitle}
+              >
+                {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+              </button>
             </div>
-            <button
-              className="sidebar__collapse-btn"
-              type="button"
-              onClick={toggleSidebar}
-              aria-label={sidebarToggleTitle}
-            >
-              {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
-            </button>
           </div>
 
           <section className="sidebar__section sidebar__section--projects">
@@ -1498,7 +1500,7 @@ export default function App() {
         />
 
         <section className="chat-pane">
-          <>
+
           <header className="topicbar">
             <div className="topicbar__identity">
               <div className="topicbar__title-row">
@@ -1573,19 +1575,29 @@ export default function App() {
                   </div>
                 )}
               </div>
-              {!workspacePanelMaximized && (
-                <Tooltip label={workspacePanelRenderable ? t("rightDock.collapse") : t("rightDock.expand")}>
+              {!workspacePanelMaximized && (workspacePanelRenderable ? (
+                <Tooltip label={t("rightDock.collapse")}>
                   <button
                     className="topicbar__action-btn topicbar__action-btn--icon"
                     type="button"
-                    onClick={workspacePanelRenderable ? closeWorkspacePanel : () => openWorkspacePanel("files")}
-                    aria-label={workspacePanelRenderable ? t("rightDock.collapse") : t("rightDock.expand")}
-                    aria-pressed={workspacePanelRenderable}
+                    onClick={closeWorkspacePanel}
+                    aria-label={t("rightDock.collapse")}
                   >
-                    {workspacePanelRenderable ? <PanelRightClose size={15} /> : <PanelRightOpen size={15} />}
+                    <PanelRightClose size={15} />
                   </button>
                 </Tooltip>
-              )}
+              ) : (
+                <Tooltip label={t("rightDock.expand")}>
+                  <button
+                    className="topicbar__action-btn topicbar__action-btn--icon"
+                    type="button"
+                    onClick={() => openWorkspacePanel("files")}
+                    aria-label={t("rightDock.expand")}
+                  >
+                    <PanelRightOpen size={15} />
+                  </button>
+                </Tooltip>
+              ))}
             </div>
           </header>
 
@@ -1680,73 +1692,74 @@ export default function App() {
               </footer>
             </div>
 
-            {workspacePanelGridOpen && (
-              <button
-                className="workspace-panel-resizer"
-                type="button"
-                role="separator"
-                aria-orientation="vertical"
-                aria-label={t("rightDock.resize")}
-                aria-valuemin={workspacePanelMinWidth}
-                aria-valuemax={Math.max(workspacePanelMaxWidth, workspacePanelRenderWidth)}
-                aria-valuenow={workspacePanelRenderWidth}
-                onPointerDown={startWorkspacePanelResize}
-                onKeyDown={resizeWorkspacePanelWithKeyboard}
-                onDoubleClick={() => setSavedWorkspacePanelWidth(workspacePanelResetWidth)}
-              />
-            )}
-
-
-          {workspacePanelRenderable && (
-            <aside
-              className="workbench-dock"
-              aria-label={t("rightDock.workbench")}
-            >
-              <DockTabBar
-                tabs={dockTabs}
-                activeId={activeDockTabId}
-                onSelect={activateDockTab}
-                onClose={closeDockTab}
-                onAdd={addBrowserTab}
-              />
-              <div className="workbench-dock__body">
-                {activeDockTabId === "context" ? (
-                  <ContextPanel
-                    tabId={activeTabId}
-                    context={state.context}
-                    usage={state.usage}
-                    sessionCost={state.sessionCost}
-                    sessionCurrency={state.sessionCurrency}
-                    scopeLabel={topicScopeLabel(activeTab)}
-                    refreshKey={dockRefreshKey}
-                  />
-                ) : (
-                  dockTabs.map((tab) =>
-                    tab.id === activeDockTabId ? (
-                      <DockContent
-                        key={tab.id}
-                        tab={tab}
-                        open={workspacePanelRenderable}
-                        cwd={state.meta?.cwd}
-                        maximized={workspacePanelMaximized}
-                        panelWidth={workspacePanelRenderWidth}
-                        onClose={() => setWorkspacePanel(false)}
-                        onToggleMaximized={() => setWorkspacePanelMaximized((value) => !value)}
-                        onPreviewModeChange={setWorkspacePreviewActive}
-                        onAddToChat={addWorkspaceTextToComposer}
-                        onRequestPanelWidth={ensureWorkspacePanelWidth}
-                        refreshKey={dockRefreshKey}
-                        onMetadataUpdate={handleDockMetadataUpdate}
-                        onTitleUpdate={handleDockTitleUpdate}
-                      />
-                    ) : null,
-                  )
-                )}
-              </div>
-            </aside>
-          )}
           </div>
         </section>
+
+        {workspacePanelGridOpen && (
+          <button
+            className="workspace-panel-resizer"
+            type="button"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label={t("rightDock.resize")}
+            aria-valuemin={workspacePanelMinWidth}
+            aria-valuemax={Math.max(workspacePanelMaxWidth, workspacePanelRenderWidth)}
+            aria-valuenow={workspacePanelRenderWidth}
+            onPointerDown={startWorkspacePanelResize}
+            onKeyDown={resizeWorkspacePanelWithKeyboard}
+            onDoubleClick={() => setSavedWorkspacePanelWidth(workspacePanelResetWidth)}
+          />
+        )}
+
+        {workspacePanelRenderable && (
+          <aside
+            className="workbench-dock"
+            aria-label={t("rightDock.workbench")}
+          >
+            <DockTabBar
+              tabs={dockTabs}
+              activeId={activeDockTabId}
+              onSelect={activateDockTab}
+              onClose={closeDockTab}
+              onAdd={addBrowserTab}
+              rightExtra={null}
+            />
+            <div className="workbench-dock__body">
+              {activeDockTabId === "context" ? (
+                <ContextPanel
+                  tabId={activeTabId}
+                  context={state.context}
+                  usage={state.usage}
+                  sessionCost={state.sessionCost}
+                  sessionCurrency={state.sessionCurrency}
+                  scopeLabel={topicScopeLabel(activeTab)}
+                  refreshKey={dockRefreshKey}
+                />
+              ) : (
+                dockTabs.map((tab) =>
+                  tab.id === activeDockTabId ? (
+                    <DockContent
+                      key={tab.id}
+                      tab={tab}
+                      open={workspacePanelRenderable}
+                      cwd={state.meta?.cwd}
+                      maximized={workspacePanelMaximized}
+                      panelWidth={workspacePanelRenderWidth}
+                      onClose={() => setWorkspacePanel(false)}
+                      onToggleMaximized={() => setWorkspacePanelMaximized((value) => !value)}
+                      onPreviewModeChange={setWorkspacePreviewActive}
+                      onAddToChat={addWorkspaceTextToComposer}
+                      onRequestPanelWidth={ensureWorkspacePanelWidth}
+                      refreshKey={dockRefreshKey}
+                      onMetadataUpdate={handleDockMetadataUpdate}
+                      onTitleUpdate={handleDockTitleUpdate}
+                    />
+                  ) : null,
+                )
+              )}
+            </div>
+          </aside>
+        )}
       </div>
 
       {histView !== null && (

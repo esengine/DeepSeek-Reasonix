@@ -4,7 +4,7 @@
 // new topic.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
-import { Archive, ChevronRight, ChevronDown, ChevronsUpDown, ChevronsDownUp, Pencil, Plus, Folder, FolderPlus, Search, BriefcaseBusiness, Copy, FolderOpen, XCircle, History, Check, Clock } from "lucide-react";
+import { Archive, ChevronRight, ChevronDown, ChevronsUpDown, ChevronsDownUp, Pencil, Plus, FolderClosed, FolderPlus, Search, Copy, FolderOpen, XCircle, History, Check, Clock } from "lucide-react";
 import { asArray } from "../lib/array";
 import { app } from "../lib/bridge";
 import { topicActivityTime } from "../lib/session";
@@ -496,7 +496,7 @@ export function ProjectTree({
     if (!node) return null;
     const key = projectNodeKey(node, depth);
     const children = asArray(node.children);
-    const isExpanded = query.trim() || timeFilter !== "all" ? true : expanded.has(key);
+    const isExpanded = query.trim() ? true : expanded.has(key);
     const hasChildren = children.length > 0;
 
     if (node.kind === "topic" || node.kind === "global_topic") {
@@ -779,7 +779,7 @@ export function ProjectTree({
             }}
             aria-expanded={hasChildren ? isExpanded : undefined}
           >
-            <Folder size={12} className="project-tree__folder-icon" />
+            {hasChildren && isExpanded ? <FolderOpen size={14} className="project-tree__folder-icon" /> : <FolderClosed size={14} className="project-tree__folder-icon" />}
             <span className="project-tree__folder-label">{projectLabel}</span>
             {hasChildren ? (
               isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />
@@ -828,7 +828,6 @@ export function ProjectTree({
       </label>
       <div className="project-tree__header">
         <span className="project-tree__header-title">
-          <BriefcaseBusiness size={13} />
           {t("projectTree.workspaceTitle")}
         </span>
         <div className="project-tree__header-actions">

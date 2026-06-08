@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"mime"
 	"net/http"
 	"net/url"
@@ -39,6 +40,8 @@ import (
 	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
 	"reasonix/internal/skill"
+
+	"reasonix/desktop/internal/browser"
 )
 
 // eventChannel is the Wails runtime event name the frontend subscribes to for the
@@ -75,6 +78,8 @@ type App struct {
 	tray                *desktopTray
 
 	mediaTokens *mediaTokenStore
+
+	browser *browser.Service
 }
 
 // mediaTokenEntry holds metadata for a workspace media file served via temporary URL.
@@ -243,7 +248,7 @@ func (a *App) workspaceMediaMiddleware() func(http.Handler) http.Handler {
 // NewApp constructs the bound object. Tabs are restored in startup from the
 // last session's desktop-tabs.json.
 func NewApp() *App {
-	return &App{tabs: map[string]*WorkspaceTab{}, mediaTokens: newMediaTokenStore()}
+	return &App{tabs: map[string]*WorkspaceTab{}, mediaTokens: newMediaTokenStore(), browser: browser.New()}
 }
 
 func (a *App) bootContext() context.Context {
@@ -268,6 +273,13 @@ func (a *App) startup(ctx context.Context) {
 	a.startTray()
 
 	go a.restoreOrBuildTabs()
+
+	// Start the browser service in the background (Chrome launch may take time).
+	go func() {
+		if err := a.browser.Start(ctx); err != nil {
+			log.Printf("[browser] failed to start: %v", err)
+		}
+	}()
 }
 
 func (a *App) beforeClose(ctx context.Context) bool {
@@ -461,6 +473,9 @@ func (a *App) shutdown(context.Context) {
 			t.Ctrl.Close()
 		}
 	}
+
+	// Stop the headless browser service.
+	a.browser.Stop()
 }
 
 // domReady is called (via OnDomReady) after the webview finishes loading its DOM
@@ -681,6 +696,9 @@ func (a *App) Compact() error {
 }
 
 // NewSession snapshots the current conversation and rotates to a fresh one.
+// The tab's TopicID is cleared so the new blank session does not pollute the
+// original topic's session lookup (the old session snapshot retains its topic
+// association and remains findable via findTopicSession).
 func (a *App) NewSession() error {
 	a.mu.RLock()
 	tab := a.activeTabLocked()
@@ -693,6 +711,16 @@ func (a *App) NewSession() error {
 		return err
 	}
 	a.persistTabSessionPath(tab, ctrl.SessionPath())
+
+	// Disassociate the tab from any topic so the new session is not mistaken for
+	// the original topic when the user later re-opens that topic from the sidebar
+	// or when findTopicSession scans session files by TopicID.
+	a.mu.Lock()
+	tab.TopicID = ""
+	tab.TopicTitle = ""
+	a.saveTabsLocked()
+	a.mu.Unlock()
+
 	return nil
 }
 
@@ -3364,6 +3392,82 @@ func (a *App) OpenURL(rawURL string) error {
 		rawURL = "https://" + rawURL
 	}
 	return exec.Command("open", rawURL).Start()
+}
+
+// --- Browser Control Methods (Wails-bound, auto-registered) ---
+
+// BrowserNavigate tells the embedded headless browser to navigate to url.
+// The url is normalized (https:// prefix added if missing). Returns
+// "currentURL|||pageTitle" so the frontend can update the URL bar and tab title.
+func (a *App) BrowserNavigate(rawURL string) (string, error) {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return "", os.ErrInvalid
+	}
+	if !strings.HasPrefix(rawURL, "http://") && !strings.HasPrefix(rawURL, "https://") {
+		rawURL = "https://" + rawURL
+	}
+	return a.browser.Navigate(rawURL)
+}
+
+// BrowserBack navigates one step back in history.
+func (a *App) BrowserBack() (string, error) {
+	return a.browser.Back()
+}
+
+// BrowserForward navigates one step forward in history.
+func (a *App) BrowserForward() (string, error) {
+	return a.browser.Forward()
+}
+
+// BrowserRefresh reloads the current page.
+func (a *App) BrowserRefresh() (string, error) {
+	return a.browser.Refresh()
+}
+
+// BrowserScreenshot takes a screenshot of the current page and returns it
+// as a data-URL (base64-encoded PNG).
+func (a *App) BrowserScreenshot() (string, error) {
+	return a.browser.Screenshot()
+}
+
+// BrowserEval executes JavaScript in the current page and returns the result.
+func (a *App) BrowserEval(js string) (string, error) {
+	return a.browser.Eval(js)
+}
+
+// BrowserClick clicks on an element matching the given CSS selector.
+func (a *App) BrowserClick(selector string) error {
+	return a.browser.Click(selector)
+}
+
+// BrowserClickAtPoint clicks at specific viewport coordinates (x, y).
+func (a *App) BrowserClickAtPoint(x, y float64) error {
+	return a.browser.ClickAtPoint(x, y)
+}
+
+// BrowserType types text into an element matching the given CSS selector.
+func (a *App) BrowserType(selector, text string) error {
+	return a.browser.Type(selector, text)
+}
+
+// BrowserScrollDown scrolls the page down by the given number of pixels.
+func (a *App) BrowserScrollDown(pixels int) error {
+	return a.browser.ScrollDown(pixels)
+}
+
+// BrowserCurrentURL returns the current page URL and title as "url|||title".
+func (a *App) BrowserCurrentURL() (string, error) {
+	u, title, err := a.browser.GetCurrentURL()
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%s|||%s", u, title), nil
+}
+
+// BrowserIsRunning reports whether the headless browser service is active.
+func (a *App) BrowserIsRunning() bool {
+	return a.browser.IsRunning()
 }
 
 func revealPath(path string) error {

@@ -64,6 +64,12 @@ export const en = {
   "rightDock.browserUrlPlaceholder": "Enter URL…",
   "rightDock.browserOpen": "Open in browser",
   "rightDock.browserEmpty": "Enter a URL to start browsing",
+  "rightDock.browserGo": "Go",
+  "rightDock.browserOpenExternal": "Open in system browser",
+  "rightDock.browserRefresh": "Refresh",
+  "rightDock.browserStop": "Stop",
+  "rightDock.browserLoading": "Loading…",
+  "rightDock.browserNewTab": "New browser tab",
   "rightDock.newBrowserTab": "New browser tab",
 
   // topic bar
@@ -371,7 +377,7 @@ export const en = {
   "history.trashActions": "Trash actions",
 
   // project tree
-  "projectTree.workspaceTitle": "Project workspace",
+  "projectTree.workspaceTitle": "Project",
   "projectTree.searchPlaceholder": "Search projects or sessions",
   "projectTree.newTopic": "New session",
   "projectTree.renameTopic": "Rename session",

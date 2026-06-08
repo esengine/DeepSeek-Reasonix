@@ -152,6 +152,19 @@ export interface AppBindings {
   RevealWorkspacePath(rel: string): Promise<void>;
   RevealPath(path: string): Promise<void>;
   OpenURL(url: string): Promise<void>;
+  // Browser automation (headless Chrome via rod/CDP).
+  BrowserNavigate(url: string): Promise<string>;
+  BrowserBack(): Promise<string>;
+  BrowserForward(): Promise<string>;
+  BrowserRefresh(): Promise<string>;
+  BrowserScreenshot(): Promise<string>;
+  BrowserEval(js: string): Promise<string>;
+  BrowserClick(selector: string): Promise<void>;
+  BrowserClickAtPoint(x: number, y: number): Promise<void>;
+  BrowserType(selector: string, text: string): Promise<void>;
+  BrowserScrollDown(pixels: number): Promise<void>;
+  BrowserCurrentURL(): Promise<string>;
+  BrowserIsRunning(): Promise<boolean>;
   SavePastedImage(dataUrl: string): Promise<string>;
   SavePastedFile(name: string, dataUrl: string): Promise<string>;
   AttachDropped(path: string): Promise<DroppedItem>;
@@ -1387,6 +1400,36 @@ function makeMockApp(): AppBindings {
     },
     async OpenURL(url: string) {
       console.info("mock OpenURL", url);
+    },
+    // Browser automation mocks (in-browser dev mode — minimal stubs).
+    async BrowserNavigate(url: string) {
+      console.info("mock BrowserNavigate", url);
+      return `${url}|||Mock Page`;
+    },
+    async BrowserBack() {
+      return "about:blank|||Mock";
+    },
+    async BrowserForward() {
+      return "about:blank|||Mock";
+    },
+    async BrowserRefresh() {
+      return "about:blank|||Mock";
+    },
+    async BrowserScreenshot() {
+      return "data:image/png;base64,iVBORw0KGgo=";
+    },
+    async BrowserEval(js: string) {
+      return `/* mock eval: ${js} */`;
+    },
+    async BrowserClick(_selector: string) {},
+    async BrowserClickAtPoint(_x: number, _y: number) {},
+    async BrowserType(_selector: string, _text: string) {},
+    async BrowserScrollDown(_pixels: number) {},
+    async BrowserCurrentURL() {
+      return "about:blank|||Mock";
+    },
+    async BrowserIsRunning() {
+      return false;
     },
     async SavePastedImage(_dataUrl: string) {
       return ".reasonix/attachments/mock.png";

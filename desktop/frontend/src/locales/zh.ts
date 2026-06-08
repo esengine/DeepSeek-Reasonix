@@ -65,6 +65,12 @@ export const zh: Record<DictKey, string> = {
   "rightDock.browserUrlPlaceholder": "输入网址…",
   "rightDock.browserOpen": "在浏览器打开",
   "rightDock.browserEmpty": "输入网址开始浏览",
+  "rightDock.browserGo": "前往",
+  "rightDock.browserOpenExternal": "在系统浏览器中打开",
+  "rightDock.browserRefresh": "刷新",
+  "rightDock.browserStop": "停止",
+  "rightDock.browserLoading": "加载中…",
+  "rightDock.browserNewTab": "新建浏览器标签页",
   "rightDock.newBrowserTab": "新建浏览器标签页",
 
   // 话题栏
@@ -372,7 +378,7 @@ export const zh: Record<DictKey, string> = {
   "history.trashActions": "回收站操作",
 
   // 项目树
-  "projectTree.workspaceTitle": "项目工作区",
+  "projectTree.workspaceTitle": "项目",
   "projectTree.searchPlaceholder": "搜索项目或会话",
   "projectTree.newTopic": "新会话",
   "projectTree.renameTopic": "重命名会话",

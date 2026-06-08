@@ -1,4 +1,5 @@
 import { Plus, X } from "lucide-react";
+import type { ReactNode } from "react";
 import { useT } from "../lib/i18n";
 import type { DockTab } from "../lib/types";
 
@@ -8,9 +9,10 @@ interface DockTabBarProps {
   onSelect: (id: string) => void;
   onClose: (id: string) => void;
   onAdd: () => void;
+  rightExtra?: ReactNode;
 }
 
-export function DockTabBar({ tabs, activeId, onSelect, onClose, onAdd }: DockTabBarProps) {
+export function DockTabBar({ tabs, activeId, onSelect, onClose, onAdd, rightExtra }: DockTabBarProps) {
   const t = useT();
   return (
     <div className="dock-tabbar">
@@ -55,6 +57,7 @@ export function DockTabBar({ tabs, activeId, onSelect, onClose, onAdd }: DockTab
       >
         <Plus size={14} />
       </button>
+      {rightExtra}
     </div>
   );
 }
