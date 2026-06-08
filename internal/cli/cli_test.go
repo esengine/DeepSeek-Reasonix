@@ -92,8 +92,11 @@ func TestMetadataCommandsDoNotProbeTerminalTheme(t *testing.T) {
 			t.Fatalf("help rc = %d, want 0", rc)
 		}
 	})
-	if !strings.Contains(out, "Usage:") {
+	if !strings.Contains(out, "Usage:") && !strings.Contains(out, "用法：") {
 		t.Fatalf("help output missing usage:\n%s", out)
+	}
+	if !strings.Contains(out, "reasonix run  [--model NAME] [--max-steps N] [-c|--continue] [--resume PATH] <task>") {
+		t.Fatalf("help output missing run resume flags:\n%s", out)
 	}
 }
 

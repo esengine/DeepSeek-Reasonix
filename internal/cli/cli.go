@@ -205,6 +205,9 @@ func runAgent(args []string) int {
 	showThinking := fs.Bool("show-thinking", false, "show thinking text instead of the collapsed thinking marker")
 	metricsPath := fs.String("metrics", "", "write a JSON token/cache/cost summary of the run to this path")
 	dir := fs.String("dir", "", "change to this directory first (project root); config, sandbox and file tools resolve from here")
+	cont := fs.Bool("continue", false, "resume the most recent saved session")
+	fs.BoolVar(cont, "c", false, "shorthand for --continue")
+	resume := fs.String("resume", "", "resume a specific session file (non-interactive; takes precedence over --continue)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -252,6 +255,38 @@ func runAgent(args []string) int {
 		return 1
 	}
 	defer ctrl.Close()
+
+	// --resume: load a specific session file (non-interactive, meant for
+	// MCP/API callers that manage their own per-project session). Takes
+	// precedence over --continue.
+	// --continue: resume the most recent saved session.
+	if *resume != "" {
+		loaded, err := agent.LoadSession(*resume)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+			return 1
+		}
+		ctrl.Resume(loaded, *resume)
+	} else if *cont {
+		sessions, err := agent.ListSessions(config.SessionDir())
+		if err != nil {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+			return 1
+		}
+		if len(sessions) == 0 {
+			fmt.Fprintln(os.Stderr, i18n.M.NoSessionToResume)
+			return 1
+		}
+		loaded, err := agent.LoadSession(sessions[0].Path)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+			return 1
+		}
+		ctrl.Resume(loaded, sessions[0].Path)
+	}
+	if ctrl.SessionPath() == "" && ctrl.SessionDir() != "" {
+		ctrl.SetSessionPath(agent.NewSessionPath(ctrl.SessionDir(), ctrl.Label()))
+	}
 
 	runErr := ctrl.Run(ctx, prompt)
 	if cfg != nil {

@@ -308,7 +308,7 @@ var Chinese = Messages{
 
 用法：
   reasonix chat [--model NAME] [-c|--continue] [--resume]   交互式会话（多轮；-c 恢复最近一次，--resume 选择一个）
-  reasonix run  [--model NAME] [--max-steps N] <task>   执行单次任务后退出
+  reasonix run  [--model NAME] [--max-steps N] [-c|--continue] [--resume PATH] <task>   执行单次任务后退出
   reasonix serve [--model NAME] [--addr HOST:PORT]      通过 HTTP+SSE 提供会话（浏览器客户端在 /）
   reasonix acp [--model NAME]                           通过 stdio 提供 Agent Client Protocol（也可用：reasonix --acp）
   reasonix setup [path]                                 交互式配置向导；生成 reasonix.toml（及 .env）
