@@ -1289,6 +1289,47 @@ a[href] {
   }
 }
 
+/* ── Scroll-to-bottom FAB ──────────────────────────────────────────────── */
+
+.scroll-to-bottom-fab {
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: var(--z-inline-sticky);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--bg-elev);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  color: var(--fg-soft);
+  cursor: pointer;
+  opacity: 0;
+  animation: fab-in 0.18s ease-out forwards;
+  transition:
+    color 150ms,
+    box-shadow 150ms;
+  pointer-events: auto;
+}
+.scroll-to-bottom-fab:hover {
+  color: var(--fg);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
+}
+.scroll-to-bottom-fab:active {
+  transform: translateX(-50%) scale(0.92);
+}
+
+@keyframes fab-in {
+  to {
+    opacity: 1;
+  }
+}
+
 .welcome {
   width: min(100%, 600px);
   max-height: 100%;
@@ -10696,7 +10737,6 @@ a[href] {
   align-items: center;
   gap: 5px;
   padding: 6px 10px;
-  border-bottom: 1px solid var(--border);
   color: var(--fg-muted);
   font-size: 12px;
 }
@@ -10729,37 +10769,6 @@ a[href] {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.workspace-branch-refresh {
-  margin-left: auto;
-  border: none;
-  background: transparent;
-  color: var(--fg-muted);
-  cursor: pointer;
-  padding: 2px;
-  border-radius: 3px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.workspace-branch-refresh:hover {
-  color: var(--fg);
-  background: var(--bg-hover, rgba(128, 128, 128, 0.08));
-}
-
-.workspace-branch-refresh:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
-.workspace-branch-refresh .spinning {
-  animation: spin 0.6s linear infinite;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
 }
 
 .workspace-branch-menu {
@@ -10824,6 +10833,29 @@ a[href] {
 .workspace-branch-menu__item:disabled {
   opacity: 0.4;
   cursor: default;
+}
+
+.workspace-branch-menu__item-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.workspace-branch-menu__item-name {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-branch-menu__item-commit {
+  font-size: 11px;
+  color: var(--fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ── Command palette (⌘K) ─────────────────────────────────────────── */

@@ -6,7 +6,7 @@ import { replaceAttachmentRefsForDisplay } from "../lib/attachmentDisplay";
 import { AssistantMessage, TurnActions, UserMessage } from "./Message";
 import { ProcessCard, ProcessCompactIcon, ProcessInfoIcon, ProcessPhaseIcon, ProcessStatusIcon } from "./ProcessCard";
 import { ToolCard } from "./ToolCard";
-import { ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { Welcome } from "./Welcome";
 
 type ToolItem = Extract<Item, { kind: "tool" }>;
@@ -167,6 +167,8 @@ export function Transcript({
   const resizeFrame = useRef<number | null>(null);
   const lastClientHeight = useRef<number | null>(null);
   const lastFooterHeight = useRef<number | null>(null);
+  const showFABRef = useRef(false);
+  const [showFAB, setShowFAB] = useState(false);
 
   const questions = useMemo<QuestionAnchor[]>(() => {
     const anchors: QuestionAnchor[] = [];
@@ -182,7 +184,14 @@ export function Transcript({
 
   const onScroll = () => {
     const el = scrollRef.current;
-    if (el) stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    if (!el) return;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    stick.current = atBottom;
+    const shouldShow = !atBottom;
+    if (shouldShow !== showFABRef.current) {
+      showFABRef.current = shouldShow;
+      setShowFAB(shouldShow);
+    }
   };
 
   // Track question count so we can detect when the user sends a new message.
@@ -330,6 +339,27 @@ export function Transcript({
     jumpToQuestion(question);
   }, [turnGroups.length]);
 
+  const scrollToBottom = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    stick.current = true;
+    showFABRef.current = false;
+    setShowFAB(false);
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+  }, []);
+
+  // Keyboard shortcut: Cmd+↓ scrolls to bottom
+  useEffect(() => {
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key === "ArrowDown" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        scrollToBottom();
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [scrollToBottom]);
+
   // ── Hot zone: fully rendered from hotStartIdx to end ─────────────────────
   // Memoized separately from the assembly so streaming tokens don't rebuild
   // the warm/cold zone JSX trees. Uses LiveStreamContext for streaming data
@@ -444,6 +474,17 @@ export function Transcript({
 
       {!empty && showQuestionNav && (
         <QuestionJumpBar questions={questions} onJump={handleJumpToQuestion} />
+      )}
+
+      {!empty && showFAB && (
+        <button
+          type="button"
+          className="scroll-to-bottom-fab"
+          onClick={scrollToBottom}
+          aria-label="Scroll to bottom"
+        >
+          <ChevronDown size={20} />
+        </button>
       )}
     </div>
   );
