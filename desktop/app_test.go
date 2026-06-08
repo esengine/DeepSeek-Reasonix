@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -144,6 +145,36 @@ func TestBackgroundRestoreMaximiseStrategy(t *testing.T) {
 		if got := backgroundRestoreShouldMaximise(tt.goos, tt.maximised); got != tt.want {
 			t.Fatalf("backgroundRestoreShouldMaximise(%q, %v) = %v, want %v", tt.goos, tt.maximised, got, tt.want)
 		}
+	}
+}
+
+func TestBackgroundRestorePlanAvoidsNormalWindowFlash(t *testing.T) {
+	tests := []struct {
+		name      string
+		goos      string
+		maximised bool
+		want      backgroundRestorePlan
+	}{
+		{
+			name:      "maximised Windows window",
+			goos:      "windows",
+			maximised: true,
+			want:      backgroundRestorePlan{maximiseBeforeShow: true},
+		},
+		{
+			name:      "normal Windows window",
+			goos:      "windows",
+			maximised: false,
+			want:      backgroundRestorePlan{unminimiseAfterShow: true},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := backgroundRestorePlanFor(tt.goos, tt.maximised)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("backgroundRestorePlanFor(%q, %v) = %v, want %v", tt.goos, tt.maximised, got, tt.want)
+			}
+		})
 	}
 }
 

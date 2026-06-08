@@ -318,15 +318,30 @@ func showFromBackground(ctx context.Context, wasMaximised bool) {
 	if backgroundCloseUsesApplicationHide(goruntime.GOOS) {
 		runtime.Show(ctx)
 	}
-	runtime.WindowShow(ctx)
-	runtime.WindowUnminimise(ctx)
-	if backgroundRestoreShouldMaximise(goruntime.GOOS, wasMaximised) {
+	plan := backgroundRestorePlanFor(goruntime.GOOS, wasMaximised)
+	if plan.maximiseBeforeShow {
 		runtime.WindowMaximise(ctx)
+	}
+	runtime.WindowShow(ctx)
+	if plan.unminimiseAfterShow {
+		runtime.WindowUnminimise(ctx)
 	}
 }
 
 func backgroundCloseUsesApplicationHide(goos string) bool {
 	return goos == "darwin"
+}
+
+type backgroundRestorePlan struct {
+	maximiseBeforeShow  bool
+	unminimiseAfterShow bool
+}
+
+func backgroundRestorePlanFor(goos string, wasMaximised bool) backgroundRestorePlan {
+	if backgroundRestoreShouldMaximise(goos, wasMaximised) {
+		return backgroundRestorePlan{maximiseBeforeShow: true}
+	}
+	return backgroundRestorePlan{unminimiseAfterShow: true}
 }
 
 func backgroundRestoreShouldMaximise(goos string, wasMaximised bool) bool {
