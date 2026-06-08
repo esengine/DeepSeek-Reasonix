@@ -74,7 +74,7 @@ func TestCoordinatorHandsPlanToExecutor(t *testing.T) {
 	if got := lastUser(planner.lastReq); !strings.Contains(got, "fix the bug") {
 		t.Errorf("planner saw user %q, want it to contain the task", got)
 	}
-	if got := lastUser(exec.lastReq); !strings.Contains(got, "read main.go") || !strings.Contains(got, "fix the bug") || !strings.Contains(got, "You are the executor now") {
+	if got := lastUser(exec.requests[0]); !strings.Contains(got, "read main.go") || !strings.Contains(got, "fix the bug") || !strings.Contains(got, "You are the executor now") {
 		t.Errorf("executor saw user %q, want task + plan", got)
 	}
 	// planner session must accumulate (system, user, assistant-plan) so its
@@ -170,7 +170,7 @@ func TestCoordinatorPlannerUsesReadOnlyResearchTools(t *testing.T) {
 			t.Fatalf("planner tools = %v, must not include %s", tools, forbidden)
 		}
 	}
-	if got := lastUser(exec.lastReq); !strings.Contains(got, "follow the loaded rule") || !strings.Contains(got, "fix the bug") {
+	if got := lastUser(exec.requests[0]); !strings.Contains(got, "follow the loaded rule") || !strings.Contains(got, "fix the bug") {
 		t.Errorf("executor saw user %q, want task + planner plan", got)
 	}
 	if got := plannerSess.Messages[0].Content; !strings.Contains(got, "Rule: keep changes narrow.") {
@@ -249,19 +249,21 @@ func TestCoordinatorPlannerMaxStepsZeroIsUnlimited(t *testing.T) {
 	if got := len(planner.requests); got != 3 {
 		t.Fatalf("planner requests = %d, want all 3 scripted planner turns", got)
 	}
-	if got := lastUser(exec.lastReq); !strings.Contains(got, "use both files") {
+	if got := lastUser(exec.requests[0]); !strings.Contains(got, "use both files") {
 		t.Fatalf("executor did not receive planner output: %q", got)
 	}
 }
 
-func TestCoordinatorRetriesExecutorWhenItAnswersAsPlanner(t *testing.T) {
+func TestCoordinatorNudgesExecutorThatAnswersWithoutActing(t *testing.T) {
 	planner := &mockProvider{name: "planner", chunks: []provider.Chunk{
 		{Type: provider.ChunkText, Text: "Write the requested skill file."},
 		{Type: provider.ChunkDone},
 	}}
+	// The first turn is a plain final answer with no tool call and no
+	// planner-vocabulary — the nudge must fire on the missing action, not on words.
 	exec := &mockProvider{name: "executor", streams: [][]provider.Chunk{
 		{
-			{Type: provider.ChunkText, Text: "我是 Planner，只有只读工具，需要交给 Executor 执行。"},
+			{Type: provider.ChunkText, Text: "这个计划看起来没问题,应该很好实现。"},
 			{Type: provider.ChunkDone},
 		},
 		{
@@ -283,13 +285,45 @@ func TestCoordinatorRetriesExecutorWhenItAnswersAsPlanner(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 	if got := len(exec.requests); got != 3 {
-		t.Fatalf("executor requests = %d, want original confusion, retry tool call, final answer", got)
+		t.Fatalf("executor requests = %d, want answer-without-acting, nudge tool call, final answer", got)
 	}
-	if got := lastUser(exec.requests[1]); !strings.Contains(got, "already in the executor phase") {
-		t.Fatalf("second executor request missing handoff retry message: %q", got)
+	if got := lastUser(exec.requests[1]); !strings.Contains(got, "Use your available tools now to carry out the task") {
+		t.Fatalf("second executor request missing handoff nudge message: %q", got)
 	}
-	if len(exec.requests[1].Messages) == 0 {
-		t.Fatal("executor request should contain messages")
+}
+
+func TestCoordinatorDoesNotNudgeExecutorThatActs(t *testing.T) {
+	planner := &mockProvider{name: "planner", chunks: []provider.Chunk{
+		{Type: provider.ChunkText, Text: "Write the requested skill file."},
+		{Type: provider.ChunkDone},
+	}}
+	// Executor calls a tool on its first turn, then answers — no nudge expected.
+	exec := &mockProvider{name: "executor", streams: [][]provider.Chunk{
+		{
+			{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "call-1", Name: "write_file", Arguments: `{"path":"kan-tu.md"}`}},
+			{Type: provider.ChunkDone},
+		},
+		{
+			{Type: provider.ChunkText, Text: "Done."},
+			{Type: provider.ChunkDone},
+		},
+	}}
+
+	execReg := tool.NewRegistry()
+	execReg.Add(coordinatorTestTool{name: "write_file", readOnly: false, output: "wrote file"})
+	executor := New(exec, execReg, NewSession("exec-sys"), Options{}, event.Discard)
+	coord := NewCoordinator(planner, NewSession("planner-sys"), nil, nil, Options{}, executor, 0, event.Discard, nil)
+
+	if err := coord.Run(context.Background(), "install the skill"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := len(exec.requests); got != 2 {
+		t.Fatalf("executor requests = %d, want tool call + final answer with no nudge", got)
+	}
+	for i, req := range exec.requests {
+		if strings.Contains(lastUser(req), "Use your available tools now to carry out the task") {
+			t.Fatalf("request %d unexpectedly received a handoff nudge", i)
+		}
 	}
 }
 
@@ -326,29 +360,6 @@ func BenchmarkPlannerToolRegistry(b *testing.B) {
 		reg := PlannerToolRegistry(parentReg)
 		if reg.Len() == 0 {
 			b.Fatal("planner registry should retain read-only research tools")
-		}
-	}
-}
-
-func TestHandoffConfusionDetectionExcludesLegitBlockers(t *testing.T) {
-	confused := []string{
-		"我是 Planner，只有只读工具，需要交给 Executor 执行。",
-		"As the planner I only have read-only tools, hand off to executor.",
-	}
-	legit := []string{
-		"I cannot write to /etc/hosts because it is outside the writable workspace. Please grant access.",
-		"我没有写入权限去修改 /etc/hosts，该路径在工作区之外，请提供工作区内的路径。",
-		"The deploy step failed: no write access to the production bucket.",
-		"Done. I edited main.go and added the missing return.",
-	}
-	for _, s := range confused {
-		if !finalAnswerConfusesExecutorWithPlanner(s) {
-			t.Errorf("want confusion=true for %q", s)
-		}
-	}
-	for _, s := range legit {
-		if finalAnswerConfusesExecutorWithPlanner(s) {
-			t.Errorf("want confusion=false for %q", s)
 		}
 	}
 }

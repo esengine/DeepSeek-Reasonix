@@ -31,7 +31,7 @@ const maxToolOutputBytes = 32 * 1024
 const maxFinalReadinessBlocks = 3
 const maxEmptyFinalBlocks = 3
 const maxStreamRecoveries = 1
-const maxExecutorHandoffConfusionBlocks = 2
+const maxExecutorHandoffNudges = 1
 
 // Renderer redraws the assistant's final-answer text as styled output. It is
 // applied only after a turn's text stream completes, so the user sees raw
@@ -415,7 +415,8 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 
 	finalReadinessBlocks := 0
 	emptyFinalBlocks := 0
-	handoffConfusionBlocks := 0
+	handoffNudges := 0
+	usedAnyTool := false
 	streamRecoveries := 0
 	executorHandoff := a.executorHandoffGuard && strings.Contains(input, executorHandoffMarker)
 	for step := 0; a.maxSteps <= 0 || step < a.maxSteps; step++ {
@@ -499,12 +500,9 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 				a.maybeCompact(ctx, usage)
 				continue
 			}
-			if executorHandoff && finalAnswerConfusesExecutorWithPlanner(text) {
-				handoffConfusionBlocks++
-				if handoffConfusionBlocks >= maxExecutorHandoffConfusionBlocks {
-					return fmt.Errorf("executor handoff failed: model kept responding as the planner instead of executing")
-				}
-				a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "executor handoff blocked: model responded as planner instead of executing; retrying with explicit executor instructions"})
+			if executorHandoff && !usedAnyTool && handoffNudges < maxExecutorHandoffNudges {
+				handoffNudges++
+				a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "executor answered without taking any action; nudging it to use its tools"})
 				a.session.Add(provider.Message{Role: provider.RoleUser, Content: executorHandoffRetryMessage()})
 				a.maybeCompact(ctx, usage)
 				continue
@@ -515,6 +513,7 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 			return nil // model gave a final answer
 		}
 		emptyFinalBlocks = 0
+		usedAnyTool = true
 
 		results := a.executeBatch(ctx, calls)
 		for i, call := range calls {
@@ -631,45 +630,6 @@ func finalReadinessCheckSource(check instruction.VerifyCheck) string {
 
 func finalReadinessRetryMessage(reason string) string {
 	return "Host final-answer readiness check failed. Before giving a final answer, address the missing host-observable receipts: " + reason + ". Run the required tool calls, then answer when readiness is satisfied."
-}
-
-func finalAnswerConfusesExecutorWithPlanner(text string) bool {
-	s := strings.ToLower(strings.TrimSpace(text))
-	if s == "" {
-		return false
-	}
-	// Role-identity phrases only. Bare permission claims ("no write access",
-	// "没有写入权限") are excluded — a correctly-executing model uses that exact
-	// vocabulary to report a genuine blocker, which is the desired behavior.
-	patterns := []string{
-		"我是 planner",
-		"我是planner",
-		"我是规划器",
-		"我只是 planner",
-		"我只是planner",
-		"只有只读工具",
-		"交给 executor",
-		"触发 executor",
-		"如何触发 executor",
-		"需要 executor",
-		"i am planner",
-		"i am the planner",
-		"i'm planner",
-		"i'm the planner",
-		"as the planner",
-		"only have read-only tools",
-		"read-only tools only",
-		"hand off to executor",
-		"handoff to executor",
-		"trigger the executor",
-		"need the executor",
-	}
-	for _, pattern := range patterns {
-		if strings.Contains(s, pattern) {
-			return true
-		}
-	}
-	return false
 }
 
 func executorHandoffRetryMessage() string {
