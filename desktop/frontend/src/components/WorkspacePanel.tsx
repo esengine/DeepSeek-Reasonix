@@ -229,6 +229,7 @@ export function WorkspacePanel({
   const [recentOpen, setRecentOpen] = useState(false);
   const recentAnchorRef = useRef<HTMLButtonElement>(null);
   const [gitBranch, setGitBranch] = useState("");
+  const [changesData, setChangesData] = useState<{files: {path: string; oldPath?: string; gitStatus?: string}[]; gitAvailable: boolean; gitErr?: string} | null>(null);
   const [branchMenuOpen, setBranchMenuOpen] = useState(false);
   const [branchList, setBranchList] = useState<string[]>([]);
   const [switchingBranch, setSwitchingBranch] = useState(false);
@@ -287,10 +288,11 @@ export function WorkspacePanel({
     [gitBranch],
   );
 
-  const fetchGitBranch = useCallback(async () => {
+  const fetchGitData = useCallback(async () => {
     try {
-      const wc = await app.WorkspaceChanges();
+      const wc: any = await app.WorkspaceChanges();
       if (wc.gitBranch) setGitBranch(wc.gitBranch);
+      setChangesData({ files: wc.files ?? [], gitAvailable: wc.gitAvailable, gitErr: wc.gitErr });
     } catch {
       // git not available
     }
@@ -404,10 +406,10 @@ export function WorkspacePanel({
   }, [selectedPath, viewMode, loadGitHistory, open]);
 
   useEffect(() => {
-    if (viewMode === "changed" && !gitBranch) {
-      void fetchGitBranch();
+    if (viewMode === "changed") {
+      void fetchGitData();
     }
-  }, [viewMode, gitBranch, fetchGitBranch]);
+  }, [viewMode, fetchGitData]);
 
   useEffect(() => {
     if (!open || !refreshKey) return;
@@ -1154,6 +1156,30 @@ export function WorkspacePanel({
         {effectiveMode === "changes" && changes && !changes.gitAvailable && changes.gitErr && (
           <div className="workspace-note workspace-note--compact">{t("workspace.gitUnavailable")}</div>
         )}
+        {viewMode === "changed" ? (
+          <div className="workspace-changes-list">
+            {!changesData ? (
+              <div className="workspace-empty">{t("workspace.loading")}</div>
+            ) : !changesData.gitAvailable ? (
+              <div className="workspace-empty workspace-empty--compact">{t("workspace.gitUnavailable")}</div>
+            ) : changesData.files.length === 0 ? (
+              <div className="workspace-empty">{t("workspace.noChanges")}</div>
+            ) : (
+              changesData.files.map((f) => (
+                <button
+                  key={f.path}
+                  className="workspace-change"
+                  onClick={() => {/* TODO: open diff */}}
+                >
+                  <span className={`workspace-change__status workspace-change__status--${(f.gitStatus || "M").toLowerCase()}`}>
+                    {f.gitStatus || "M"}
+                  </span>
+                  <span className="workspace-change__path">{f.path}</span>
+                </button>
+              ))
+            )}
+          </div>
+        ) : (
         <div className="workspace-tree" onContextMenu={openTreeBlankMenu}>
           {effectiveMode === "changes"
             ? renderChangedRows()
@@ -1195,6 +1221,7 @@ export function WorkspacePanel({
               })
             : renderRows("", 0)}
         </div>
+        )}
       </section>
       {treeMenu && (
         <FloatingMenu
