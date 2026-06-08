@@ -115,8 +115,8 @@ type Messages struct {
 	// chat TUI slash commands.
 	SlashCompactDone   string // "/compact" succeeded
 	SlashCompactFailed string // "/compact" errored, prefixed before the underlying error
-	SlashNewDone       string // "/new" succeeded
-	SlashNewFailed     string // "/new" errored
+	SlashNewDone       string // "/new" or "/clear" succeeded
+	SlashNewFailed     string // "/new" or "/clear" errored
 	SlashTodoCleared   string // "/todo" dismissed the pinned task list
 	SlashUnavailable   string // the command is configured off (no callback wired)
 	SlashUnknown       string // shown when the user types an unrecognised "/cmd"
@@ -135,7 +135,7 @@ type Messages struct {
 
 	// slash command + sub-command descriptions shown in the menu (CLI and desktop
 	// share these via i18n.M, so both frontends localize identically).
-	CmdNew          string // /new
+	CmdNew          string // /new, /clear
 	CmdCompact      string // /compact
 	CmdRewind       string // /rewind
 	CmdTree         string // /tree

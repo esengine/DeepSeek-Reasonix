@@ -168,6 +168,35 @@ func TestSnapshotActivityRefreshesSessionActivity(t *testing.T) {
 	}
 }
 
+func TestSubmitClearAliasStartsFreshContextAndSavesTranscript(t *testing.T) {
+	dir := t.TempDir()
+	sess := agent.NewSession("sys")
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "old context"})
+	exec := agent.New(nil, nil, sess, agent.Options{}, event.Discard)
+	path := filepath.Join(dir, "session.jsonl")
+	c := New(Options{Executor: exec, SystemPrompt: "sys", SessionDir: dir, SessionPath: path, Label: "test"})
+
+	c.submit("/clear", "")
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) && c.SessionPath() == path {
+		time.Sleep(time.Millisecond)
+	}
+	if c.SessionPath() == path {
+		t.Fatal("/clear did not rotate to a fresh session path")
+	}
+	loaded, err := agent.LoadSession(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Messages) != 2 || loaded.Messages[1].Content != "old context" {
+		t.Fatalf("previous transcript was not saved: %+v", loaded.Messages)
+	}
+	current := exec.Session().Snapshot()
+	if len(current) != 1 || current[0].Role != provider.RoleSystem || current[0].Content != "sys" {
+		t.Fatalf("fresh context = %+v, want only system prompt", current)
+	}
+}
+
 func TestDisconnectMCPServerRemovesLazyPlaceholder(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(fakeControlTool{name: "mcp__mock__connect"})

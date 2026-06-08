@@ -2963,7 +2963,7 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 		// guidance steering what the summary keeps.
 		focus := strings.TrimSpace(strings.TrimPrefix(input, cmd))
 		return func() tea.Msg { return compactDoneMsg{err: m.ctrl.Compact(context.Background(), focus)} }
-	case "/new":
+	case "/new", "/clear":
 		m.echoLocalCommand(input)
 		if err := m.ctrl.NewSession(); err != nil {
 			m.notice(fmt.Sprintf("%s: %v", i18n.M.SlashNewFailed, err))

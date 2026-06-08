@@ -84,12 +84,12 @@ var English = Messages{
 
 	SlashCompactDone:   "session compacted — older middle replaced by a summary, recent turns kept",
 	SlashCompactFailed: "compaction failed",
-	SlashNewDone:       "fresh session started — previous transcript saved",
+	SlashNewDone:       "fresh context started — previous transcript saved",
 	SlashNewFailed:     "could not start a new session",
 	SlashUnavailable:   "command unavailable in this build",
 	SlashUnknown:       "unknown command",
 	SlashTodoCleared:   "task list dismissed",
-	SlashHelp:          "commands: /compact · /new · /resume · /rewind · /tree · /branch · /switch · /todo · /verbose · /model (switch model) · /effort · /theme · /language · /mcp · /skills · /hooks · /paste-image · /memory · /remember · /quit · /help · plus skills (/init, /explore, …)",
+	SlashHelp:          "commands: /compact · /new (/clear) · /resume · /rewind · /tree · /branch · /switch · /todo · /verbose · /model (switch model) · /effort · /theme · /language · /mcp · /skills · /hooks · /paste-image · /memory · /remember · /quit · /help · plus skills (/init, /explore, …)",
 
 	SkillPickerTitle:             "Skills",
 	SkillPickerAvailableFmt:      "%d available",
@@ -146,7 +146,7 @@ var English = Messages{
 	ShellExecTimeoutFmt: "shell command timed out (> %s)",
 	ShellModeHint:       "Enter runs shell · Esc cancels · click output to expand",
 
-	CmdNew:          "fork a fresh session",
+	CmdNew:          "start fresh context; save transcript",
 	CmdCompact:      "compact context",
 	CmdRewind:       "rewind to an earlier turn",
 	CmdTree:         "show conversation branches",

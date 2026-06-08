@@ -85,12 +85,12 @@ var Chinese = Messages{
 
 	SlashCompactDone:   "已压缩 — 旧的中段换成一段摘要，最近几轮保留原样",
 	SlashCompactFailed: "压缩失败",
-	SlashNewDone:       "已新建会话 — 之前的对话已存档",
+	SlashNewDone:       "已开启新上下文 — 之前的对话已存档",
 	SlashNewFailed:     "新建会话失败",
 	SlashUnavailable:   "当前构建不支持该命令",
 	SlashUnknown:       "未知命令",
 	SlashTodoCleared:   "已清除任务清单",
-	SlashHelp:          "命令：/compact · /new · /resume · /rewind · /tree · /branch · /switch · /todo · /verbose · /model（切换模型）· /effort · /theme · /language · /mcp · /skills · /hooks · /paste-image · /memory · /remember · /quit · /help · 以及 skills（/init、/explore …）",
+	SlashHelp:          "命令：/compact · /new（/clear）· /resume · /rewind · /tree · /branch · /switch · /todo · /verbose · /model（切换模型）· /effort · /theme · /language · /mcp · /skills · /hooks · /paste-image · /memory · /remember · /quit · /help · 以及 skills（/init、/explore …）",
 
 	SkillPickerTitle:             "Skills",
 	SkillPickerAvailableFmt:      "%d 个可用",
@@ -147,7 +147,7 @@ var Chinese = Messages{
 	ShellExecTimeoutFmt: "Shell 命令超时（>%s）",
 	ShellModeHint:       "Enter 执行 Shell · Esc 取消 · 点击输出展开",
 
-	CmdNew:          "开启新会话",
+	CmdNew:          "清空上下文并保存历史",
 	CmdCompact:      "压缩上下文",
 	CmdRewind:       "回滚到更早的一轮",
 	CmdTree:         "查看对话分支树",

@@ -510,8 +510,8 @@ func lastAssistantText(msgs []provider.Message) string {
 // composition — emitting all output as events. The HTTP/SSE server uses this so
 // a browser client only POSTs the typed line.
 //
-// Slash commands route to the matching primitive: /compact and /new run their
-// session op and emit a Notice; /mcp__server__prompt and custom /commands
+// Slash commands route to the matching primitive: /compact and /new (or /clear)
+// run their session op and emit a Notice; /mcp__server__prompt and custom /commands
 // resolve to a turn; an unknown slash emits a Notice. Anything else is a normal
 // turn with its @-references resolved first.
 func (c *Controller) Submit(input string) {
@@ -551,7 +551,7 @@ func (c *Controller) submit(input, display string) {
 				}
 			}
 		}()
-	case trimmed == "/new":
+	case trimmed == "/new" || trimmed == "/clear":
 		go func() {
 			if err := c.NewSession(); err != nil {
 				c.notice("new session failed: " + err.Error())
