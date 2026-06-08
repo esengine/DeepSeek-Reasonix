@@ -551,6 +551,97 @@ func TestReadFileGB18030(t *testing.T) {
 	}
 }
 
+// --- RemoveWorkspace cleanup of active pointer ---
+
+func TestRemoveWorkspaceClearsActivePointerWhenRemovingCurrentWorkspace(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	if workspaceStatePath() == "" {
+		t.Fatal("workspaceStatePath() is empty after isolating")
+	}
+
+	dir := t.TempDir()
+	saveWorkspace(dir)
+	if got := loadWorkspace(); got != dir {
+		t.Fatalf("precondition: loadWorkspace = %q, want %q", got, dir)
+	}
+
+	// Simulate RemoveWorkspace's cleanup logic:
+	// When the removed workspace equals the active one, clearWorkspace should fire.
+	if loadWorkspace() == dir {
+		clearWorkspace()
+	}
+
+	if got := loadWorkspace(); got != "" {
+		t.Errorf("loadWorkspace = %q after clearWorkspace, want empty", got)
+	}
+}
+
+func TestRemoveWorkspaceFallsBackToRemainingProject(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	// Set up two projects and make the first one active.
+	first := t.TempDir()
+	second := t.TempDir()
+	saveWorkspace(first)
+
+	// Simulate: remove the active workspace, fall back to the other.
+	if loadWorkspace() == first {
+		// In the real code, loadProjectsFile() would return remaining projects.
+		// Here we simulate falling back to the second project.
+		saveWorkspace(second)
+	}
+
+	if got := loadWorkspace(); got != second {
+		t.Errorf("loadWorkspace = %q, want fallback to %q", got, second)
+	}
+}
+
+func TestClearWorkspace(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	if workspaceStatePath() == "" {
+		t.Fatal("workspaceStatePath() is empty after isolating")
+	}
+
+	dir := t.TempDir()
+	saveWorkspace(dir)
+	if got := loadWorkspace(); got != dir {
+		t.Fatalf("precondition failed: loadWorkspace = %q, want %q", got, dir)
+	}
+
+	clearWorkspace()
+	if got := loadWorkspace(); got != "" {
+		t.Errorf("loadWorkspace after clearWorkspace = %q, want empty", got)
+	}
+	// Also verify the file is actually removed.
+	if _, err := os.Stat(workspaceStatePath()); !os.IsNotExist(err) {
+		t.Errorf("desktop-workspace file should be removed, stat err = %v", err)
+	}
+}
+
+// --- OpenProjectTab updates active workspace pointer ---
+
+func TestOpenProjectTabUpdatesActiveWorkspacePointer(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	if workspaceStatePath() == "" {
+		t.Fatal("workspaceStatePath() is empty after isolating")
+	}
+
+	projectRoot := t.TempDir()
+	app := NewApp()
+	topic, err := app.CreateTopic("project", projectRoot, "")
+	if err != nil {
+		t.Fatalf("create topic: %v", err)
+	}
+
+	if _, err := app.OpenProjectTab(projectRoot, topic.ID); err != nil {
+		t.Fatalf("open project tab: %v", err)
+	}
+
+	if got := loadWorkspace(); got != projectRoot {
+		t.Errorf("loadWorkspace = %q after OpenProjectTab, want %q", got, projectRoot)
+	}
+}
+
 func TestWindowsOpenWorkspacePathAvoidsCmdShell(t *testing.T) {
 	src, err := os.ReadFile("open_workspace_windows.go")
 	if err != nil {

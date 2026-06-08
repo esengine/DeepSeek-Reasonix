@@ -1,6 +1,7 @@
 package control
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -56,7 +57,13 @@ func TestParseRefTokens(t *testing.T) {
 
 func TestClassifyRef(t *testing.T) {
 	known := map[string]bool{"docs": true}
-	files := map[string]bool{"src/main.go": true, "README.md": true, ".reasonix/attachments/clipboard-20260601-010203.000000.png": true}
+	files := map[string]bool{
+		"src/main.go": true,
+		"README.md":   true,
+		".reasonix/attachments/clipboard-20260601-010203.000000.png": true,
+		".reasonix/attachments/clipboard-20260601-010203.000000.yml": true,
+		".reasonix/attachments/clipboard-20260601-010203.000000.zip": true,
+	}
 	exists := func(p string) bool { return files[p] }
 
 	cases := []struct {
@@ -68,6 +75,8 @@ func TestClassifyRef(t *testing.T) {
 		{"src/main.go", true, refFile},          // existing file
 		{"README.md", true, refFile},            // existing file
 		{".reasonix/attachments/clipboard-20260601-010203.000000.png", true, refImage},
+		{".reasonix/attachments/clipboard-20260601-010203.000000.yml", true, refFile},
+		{".reasonix/attachments/clipboard-20260601-010203.000000.zip", true, refFile},
 		{"ghost:issue://1", false, 0}, // unknown server, no such file
 		{"missing.go", false, 0},      // nonexistent path → not a ref
 		{"docs:", false, 0},           // empty uri → not a resource, no file
@@ -81,6 +90,54 @@ func TestClassifyRef(t *testing.T) {
 		if ok && r.kind != c.wantKnd {
 			t.Errorf("classifyRef(%q) kind = %v, want %v", c.token, r.kind, c.wantKnd)
 		}
+	}
+}
+
+func TestResolveRefsAttachmentKinds(t *testing.T) {
+	temp := t.TempDir()
+	attachmentsDir := filepath.Join(temp, ".reasonix", "attachments")
+	if err := os.MkdirAll(attachmentsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ymlRef := filepath.ToSlash(".reasonix/attachments/config.yml")
+	zipRef := filepath.ToSlash(".reasonix/attachments/archive.zip")
+	pngRef := filepath.ToSlash(".reasonix/attachments/shot.png")
+	if err := os.WriteFile(filepath.Join(temp, filepath.FromSlash(ymlRef)), []byte("name: reasonix\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(temp, filepath.FromSlash(zipRef)), []byte{'P', 'K', 0x03, 0x04, 0x00}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(temp, filepath.FromSlash(pngRef)), []byte("\x89PNG\r\n\x1a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	oldCwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(temp); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(oldCwd); err != nil {
+			t.Error(err)
+		}
+	})
+
+	line := "check @" + ymlRef + " @" + zipRef + " @" + pngRef
+	block, errs := (&Controller{}).ResolveRefs(context.Background(), line)
+	if len(errs) != 0 {
+		t.Fatalf("ResolveRefs errors = %v", errs)
+	}
+	if !strings.Contains(block, `<file path="`+ymlRef+`">`) || !strings.Contains(block, "name: reasonix") {
+		t.Fatalf("expected yml attachment to resolve as file content, got: %s", block)
+	}
+	if !strings.Contains(block, `<file path="`+zipRef+`">`) || !strings.Contains(block, "[binary file "+zipRef) {
+		t.Fatalf("expected zip attachment to resolve as binary file note, got: %s", block)
+	}
+	if !strings.Contains(block, `<image path="`+pngRef+`">`) {
+		t.Fatalf("expected png attachment to resolve as image block, got: %s", block)
 	}
 }
 

@@ -2,6 +2,7 @@ import { createContext, memo, type CSSProperties, type MouseEvent as ReactMouseE
 import type { Item, LiveStream } from "../lib/useController";
 import type { CheckpointMeta } from "../lib/types";
 import { useT } from "../lib/i18n";
+import { replaceAttachmentRefsForDisplay } from "../lib/attachmentDisplay";
 import { AssistantMessage, TurnActions, UserMessage } from "./Message";
 import { ProcessCard, ProcessCompactIcon, ProcessInfoIcon, ProcessPhaseIcon, ProcessStatusIcon } from "./ProcessCard";
 import { ToolCard } from "./ToolCard";
@@ -46,7 +47,7 @@ function questionAnchorId(id: string): string {
 }
 
 function compactQuestionText(text: string): string {
-  const cleaned = text.replace(/@\.reasonix\/attachments\/[^\s]+/g, "[image]").replace(/\s+/g, " ").trim();
+  const cleaned = replaceAttachmentRefsForDisplay(text).replace(/\s+/g, " ").trim();
   if (cleaned.length <= 80) return cleaned;
   return cleaned.slice(0, 80);
 }
@@ -84,7 +85,7 @@ function repinIfWasPinned(
 
 // Summarise a warm turn for its compact card.
 function warmUserPreview(text: string): string {
-  const cleaned = text.replace(/@\.reasonix\/attachments\/[^\s]+/g, "[image]").replace(/\s+/g, " ").trim();
+  const cleaned = replaceAttachmentRefsForDisplay(text).replace(/\s+/g, " ").trim();
   return cleaned.length <= 80 ? cleaned : cleaned.slice(0, 77) + "...";
 }
 

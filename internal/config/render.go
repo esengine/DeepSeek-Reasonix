@@ -273,6 +273,8 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	}
 	b.WriteString("\n")
 
+	renderLSPConfig(&b, c.LSP)
+
 	b.WriteString("[skills]\n")
 	if len(c.Skills.Paths) > 0 {
 		fmt.Fprintf(&b, "paths = %s   # extra custom skill roots\n", renderStringArray(c.Skills.Paths))
@@ -413,6 +415,68 @@ func shouldRenderSystemPrompt(c, defaults *Config, scope RenderScope) bool {
 		return true
 	}
 	return strings.TrimSpace(c.Agent.SystemPrompt) != "" && c.Agent.SystemPrompt != defaults.Agent.SystemPrompt
+}
+
+func renderLSPConfig(b *strings.Builder, cfg LSPConfig) {
+	b.WriteString("[lsp]\n")
+	fmt.Fprintf(b, "enabled = %v   # language server tools; servers launch lazily when used\n", cfg.Enabled)
+	if len(cfg.Servers) == 0 {
+		b.WriteString("# [lsp.servers.go]\n")
+		b.WriteString("# command = \"gopls\"\n")
+		b.WriteString("# args = []\n")
+		b.WriteString("# extensions = [\".go\"]\n\n")
+		return
+	}
+	b.WriteString("\n")
+
+	langs := make([]string, 0, len(cfg.Servers))
+	for lang := range cfg.Servers {
+		langs = append(langs, lang)
+	}
+	sort.Strings(langs)
+	for _, lang := range langs {
+		srv := cfg.Servers[lang]
+		fmt.Fprintf(b, "[lsp.servers.%s]\n", renderTOMLKeyPart(lang))
+		if srv.Command != "" {
+			fmt.Fprintf(b, "command = %q\n", srv.Command)
+		}
+		if len(srv.Args) > 0 {
+			fmt.Fprintf(b, "args = %s\n", renderStringArray(srv.Args))
+		}
+		if len(srv.Env) > 0 {
+			fmt.Fprintf(b, "env = %s\n", renderStringMap(srv.Env))
+		}
+		if srv.LanguageID != "" {
+			fmt.Fprintf(b, "language_id = %q\n", srv.LanguageID)
+		}
+		if len(srv.Extensions) > 0 {
+			fmt.Fprintf(b, "extensions = %s\n", renderStringArray(srv.Extensions))
+		}
+		if srv.InstallHint != "" {
+			fmt.Fprintf(b, "install_hint = %q\n", srv.InstallHint)
+		}
+		b.WriteString("\n")
+	}
+}
+
+func renderTOMLKeyPart(key string) string {
+	if isBareTOMLKey(key) {
+		return key
+	}
+	return strconv.Quote(key)
+}
+
+func isBareTOMLKey(key string) bool {
+	if key == "" {
+		return false
+	}
+	for _, r := range key {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_' || r == '-' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 // renderStringArray renders a []string as a TOML inline array.

@@ -1127,6 +1127,17 @@ func (a *App) RemoveWorkspace(dir string) error {
 	if err := removeProject(dir); err != nil {
 		return err
 	}
+	// If the removed workspace was the active one, clear the pointer
+	// so we don't leave a stale reference to a deleted project.
+	if loadWorkspace() == dir {
+		if remaining := loadProjectsFile(); len(remaining.Projects) > 0 {
+			// Fall back to the first remaining project
+			saveWorkspace(remaining.Projects[0].Root)
+		} else {
+			// No projects left; clear the active pointer entirely
+			clearWorkspace()
+		}
+	}
 	a.emitProjectTreeChanged()
 	return nil
 }
@@ -2737,7 +2748,7 @@ func (a *App) ModelsForTab(tabID string) []ModelInfo {
 		if !modelProviderAccessAllowed(access, p.Name) || !p.Configured() {
 			continue
 		}
-		for _, m := range p.ModelList() {
+		for _, m := range p.ChatModelList() {
 			ref := p.Name + "/" + m
 			out = append(out, ModelInfo{Ref: ref, Provider: p.Name, Model: m, Current: ref == curModel})
 		}

@@ -300,6 +300,7 @@ func (a *App) OpenProjectTab(workspaceRoot, topicID string) (TabMeta, error) {
 	if abs, err := filepath.Abs(workspaceRoot); err == nil {
 		workspaceRoot = abs
 	}
+	saveWorkspace(workspaceRoot)
 
 	a.mu.Lock()
 	// If already open, just activate.

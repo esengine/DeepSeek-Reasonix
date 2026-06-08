@@ -87,7 +87,7 @@ func (m *chatTUI) showModels() {
 		if !p.Configured() {
 			continue
 		}
-		for _, model := range p.ModelList() {
+		for _, model := range p.ChatModelList() {
 			refs = append(refs, p.Name+"/"+model)
 		}
 	}
@@ -106,7 +106,7 @@ func modelRefs() []string {
 		if !p.Configured() {
 			continue
 		}
-		for _, model := range p.ModelList() {
+		for _, model := range p.ChatModelList() {
 			out = append(out, p.Name+"/"+model)
 		}
 	}
