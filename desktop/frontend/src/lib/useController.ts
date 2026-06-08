@@ -671,8 +671,9 @@ export function useController() {
     const messages = asArray(
       await (tabId ? app.ResumeSessionForTab(tabId, path) : app.ResumeSession(path)).catch(() => [] as HistoryMessage[]),
     );
+    if (messages.length === 0) return;
     dispatchTo(targetTabId, { type: "reset" });
-    if (messages.length) dispatchTo(targetTabId, { type: "history", messages });
+    dispatchTo(targetTabId, { type: "history", messages });
     app.ContextUsageForTab(targetTabId).then((context) => dispatchTo(targetTabId, { type: "context", context })).catch(() => {});
     void refreshCheckpoints(targetTabId);
   }, [activeTabId, dispatchTo, refreshCheckpoints, waitForTabReady]);
@@ -782,22 +783,18 @@ export function useController() {
     } catch { /* ignore */ }
   }, [reconcileTabRuntime]);
 
-  const openProjectTab = useCallback(async (workspaceRoot: string, topicId: string): Promise<TabMeta | undefined> => {
-    try {
-      const meta = await app.OpenProjectTab(workspaceRoot, topicId);
-      setActiveTabId(meta.id);
-      await loadSessionDataForTab(meta.id, !statesRef.current.has(meta.id));
-      return meta;
-    } catch { return undefined; }
+  const openProjectTab = useCallback(async (workspaceRoot: string, topicId: string): Promise<TabMeta> => {
+    const meta = await app.OpenProjectTab(workspaceRoot, topicId);
+    setActiveTabId(meta.id);
+    await loadSessionDataForTab(meta.id, !statesRef.current.has(meta.id));
+    return meta;
   }, [loadSessionDataForTab]);
 
-  const openGlobalTab = useCallback(async (topicId: string): Promise<TabMeta | undefined> => {
-    try {
-      const meta = await app.OpenGlobalTab(topicId);
-      setActiveTabId(meta.id);
-      await loadSessionDataForTab(meta.id, !statesRef.current.has(meta.id));
-      return meta;
-    } catch { return undefined; }
+  const openGlobalTab = useCallback(async (topicId: string): Promise<TabMeta> => {
+    const meta = await app.OpenGlobalTab(topicId);
+    setActiveTabId(meta.id);
+    await loadSessionDataForTab(meta.id, !statesRef.current.has(meta.id));
+    return meta;
   }, [loadSessionDataForTab]);
 
   const closeTab = useCallback(async (tabId: string) => {

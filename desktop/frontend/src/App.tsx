@@ -18,6 +18,7 @@ import {
   Trash2,
 } from "lucide-react";
 import logoWordmark from "./assets/logo-wordmark.svg";
+import { useToast } from "./lib/toast";
 import { asArray } from "./lib/array";
 import { clearLegacyLangPref, normalizeLangPref, readLegacyLangPref, t, useI18n, useT } from "./lib/i18n";
 import { useController, type Item, type LiveStream } from "./lib/useController";
@@ -404,6 +405,7 @@ export default function App() {
   const [needsOnboarding, setNeedsOnboarding] = useState<boolean | null>(null);
   const [settingsTarget, setSettingsTarget] = useState<SettingsTab | null>(null);
   const [histView, setHistView] = useState<HistoryViewState | null>(null);
+  const { showToast } = useToast();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(loadSidebarCollapsed);
   const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidth);
   const [sidebarResizing, setSidebarResizing] = useState(false);
@@ -1170,21 +1172,33 @@ export default function App() {
   const onResumeSession = useCallback(
     async (session: SessionMeta) => {
       if (state.running) return;
-      setHistView(null);
       const scope = session.scope || (session.workspaceRoot ? "project" : "global");
-      let targetTab: TabMeta | undefined;
-      if (scope === "project" && session.workspaceRoot && session.topicId) {
-        targetTab = await openProjectTab(session.workspaceRoot, session.topicId);
-      } else if (scope === "global" && session.topicId) {
-        targetTab = await openGlobalTab(session.topicId);
-      }
-      await resumeSession(session.path, targetTab?.id);
-      if (targetTab) {
+      try {
+        let targetTab: TabMeta;
+        if (scope === "project" && session.workspaceRoot && session.topicId) {
+          targetTab = await openProjectTab(session.workspaceRoot, session.topicId);
+        } else if (scope === "global" && session.topicId) {
+          targetTab = await openGlobalTab(session.topicId);
+        } else {
+          throw new Error(scope === "global" && !session.topicId
+            ? t("history.failedOpenSession")
+            : (session.topicId ? "Missing workspaceRoot" : t("history.failedOpenSession")));
+        }
+        setHistView(null);
+        await resumeSession(session.path, targetTab.id);
         await refreshTabMetas();
         setTabRevealSignal((signal) => signal + 1);
+      } catch (err: any) {
+        setHistView(null);
+        if (scope === "project" && session.workspaceRoot) {
+          const name = workspaceDisplayName(session.workspaceRoot);
+          showToast(t("history.failedOpenProject", { name, path: session.workspaceRoot }));
+        } else {
+          showToast(err?.message || String(err));
+        }
       }
     },
-    [openGlobalTab, openProjectTab, refreshTabMetas, state.running, resumeSession],
+    [openGlobalTab, openProjectTab, refreshTabMetas, state.running, resumeSession, t, showToast],
   );
   // Delete / rename act on disk, then re-fetch so the panel reflects the change.
   const onDeleteSession = useCallback(
