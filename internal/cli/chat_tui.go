@@ -2926,6 +2926,10 @@ func (m chatTUI) modeTagText() string {
 
 func (m *chatTUI) toggleVerboseReasoning(notify bool) {
 	m.showReasoning = !m.showReasoning
+	if m.cfg != nil {
+		_ = m.cfg.SetShowReasoning(m.showReasoning)
+		_ = m.cfg.Save()
+	}
 	if !notify {
 		return
 	}

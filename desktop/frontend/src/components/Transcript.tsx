@@ -17,10 +17,10 @@ type QuestionAnchor = { id: string; text: string; turn: number };
 const QUESTION_NAV_MIN_COUNT = 2;
 const LiveStreamContext = createContext<LiveStream | undefined>(undefined);
 
-const LiveAssistantMessage = memo(function LiveAssistantMessage({ item }: { item: AssistantItem }) {
+const LiveAssistantMessage = memo(function LiveAssistantMessage({ item, defaultExpanded = false }: { item: AssistantItem; defaultExpanded?: boolean }) {
   const live = useContext(LiveStreamContext);
   const shown = live && live.id === item.id ? { ...item, text: live.text, reasoning: live.reasoning, streaming: true } : item;
-  return <AssistantMessage item={shown} />;
+  return <AssistantMessage item={shown} defaultExpanded={defaultExpanded} />;
 });
 
 // ── Layer budgets ─────────────────────────────────────────────────────────────
@@ -151,6 +151,7 @@ export function Transcript({
   actionPending = false,
   rewindDisabled = false,
   questionNavigator = true,
+  defaultExpandThinking = false,
 }: {
   items: Item[];
   live?: LiveStream;
@@ -161,6 +162,7 @@ export function Transcript({
   actionPending?: boolean;
   rewindDisabled?: boolean;
   questionNavigator?: boolean;
+  defaultExpandThinking?: boolean;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
@@ -377,7 +379,7 @@ export function Transcript({
           break;
         }
         case "assistant":
-          out.push(<LiveAssistantMessage key={it.id} item={it as AssistantItem} />);
+          out.push(<LiveAssistantMessage key={it.id} item={it as AssistantItem} defaultExpanded={defaultExpandThinking} />);
           if (!it.streaming && it.text.trim() !== "") {
             actionText = it.text;
             actionReady = true;
@@ -431,6 +433,7 @@ export function Transcript({
             warmRewindDisabled={rewindDisabled}
             warmOnRewind={onRewind}
             warmSetOpenAction={setOpenAction}
+            defaultExpandThinking={defaultExpandThinking}
             onToggleColdPage={() => setColdPage((p) => p + 1)}
             onToggleWarmTurn={(g, expand) => {
               setExpandedWarmTurns((prev) => {
@@ -466,6 +469,7 @@ const WarmZone = memo(function WarmZone({
   warmRewindDisabled,
   warmOnRewind,
   warmSetOpenAction,
+  defaultExpandThinking = false,
   onToggleColdPage,
   onToggleWarmTurn,
 }: {
@@ -483,6 +487,7 @@ const WarmZone = memo(function WarmZone({
   warmRewindDisabled: boolean;
   warmOnRewind: ((turn: number, scope: string) => void) | undefined;
   warmSetOpenAction: (action: OpenTurnAction | null) => void;
+  defaultExpandThinking?: boolean;
   onToggleColdPage: () => void;
   onToggleWarmTurn: (g: number, expand: boolean) => void;
 }) {
@@ -537,6 +542,7 @@ const WarmZone = memo(function WarmZone({
               rewindDisabled={warmRewindDisabled}
               onRewind={warmOnRewind}
               setOpenAction={warmSetOpenAction}
+              defaultExpandThinking={defaultExpandThinking}
             />
           </WarmTurnCard>,
         );
@@ -580,6 +586,7 @@ function WarmTurnItems({
   rewindDisabled,
   onRewind,
   setOpenAction,
+  defaultExpandThinking = false,
 }: {
   startIdx: number;
   endIdx: number;
@@ -592,6 +599,7 @@ function WarmTurnItems({
   rewindDisabled: boolean;
   onRewind: ((turn: number, scope: string) => void) | undefined;
   setOpenAction: (action: OpenTurnAction | null) => void;
+  defaultExpandThinking?: boolean;
 }) {
   const nodes: React.ReactNode[] = [];
   let actionText = "";
@@ -634,7 +642,7 @@ function WarmTurnItems({
         break;
       }
       case "assistant": {
-        nodes.push(<AssistantMessage key={it.id} item={it} />);
+        nodes.push(<AssistantMessage key={it.id} item={it} defaultExpanded={defaultExpandThinking} />);
         if (!it.streaming && it.text.trim() !== "") {
           actionText = it.text;
           actionReady = true;

@@ -648,6 +648,20 @@ function GeneralSection({ s, busy, apply }: SectionProps) {
           ))}
         </div>
       </SettingsField>
+      <SettingsField label={t("settings.expandThinking")}>
+        <div className="set-seg">
+          {([false, true] as const).map((val) => (
+            <button
+              key={val ? "on" : "off"}
+              className={`set-seg__btn${s.expandThinking === val ? " set-seg__btn--on" : ""}`}
+              disabled={busy}
+              onClick={() => void apply(() => app.SetExpandThinking(val))}
+            >
+              {val ? t("settings.expandThinking.expanded") : t("settings.expandThinking.collapsed")}
+            </button>
+          ))}
+        </div>
+      </SettingsField>
       <SettingsField label={t("settings.autoPlan")}>
         <div className="set-seg">
           {AUTO_PLAN_MODES.map((mode) => (

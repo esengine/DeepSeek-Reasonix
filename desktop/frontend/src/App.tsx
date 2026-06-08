@@ -459,6 +459,7 @@ export default function App() {
   const [composerInsertRequest, setComposerInsertRequest] = useState<ComposerInsertRequest | null>(null);
   const [transientOverlayDismissSignal, setTransientOverlayDismissSignal] = useState(0);
   const [desktopPlatform, setDesktopPlatform] = useState<DesktopPlatform>(detectBrowserPlatform);
+  const [expandThinking, setExpandThinking] = useState(false);
   const [renamingTopicId, setRenamingTopicId] = useState<string | null>(null);
   const [topicTitleDraft, setTopicTitleDraft] = useState("");
   const [topicExportOpen, setTopicExportOpen] = useState(false);
@@ -571,6 +572,7 @@ export default function App() {
       const settings = await app.Settings();
       if (cancelled) return;
       applyDesktopPreferences(settings);
+      setExpandThinking(settings.expandThinking);
     };
     void syncDesktopPreferences().catch((e) => {
       console.warn("desktop preferences sync failed", e);
@@ -1986,6 +1988,7 @@ export default function App() {
                 checkpoints={state.checkpoints}
                 actionPending={state.messageAction != null}
                 rewindDisabled={state.running || state.messageAction != null || state.approval != null || state.ask != null || clearContextPending}
+                defaultExpandThinking={expandThinking}
               />
             )}
           </main>
