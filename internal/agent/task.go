@@ -320,6 +320,16 @@ func (t *TaskTool) runSub(ctx context.Context, prompt string, subReg *tool.Regis
 // tool registry (already filtered), and the run Options (model budget, gate).
 func RunSubAgent(ctx context.Context, prov provider.Provider, reg *tool.Registry, sysPrompt, prompt string, opts Options, sink event.Sink) (string, error) {
 	sess := NewSession(sysPrompt)
+	return RunSubAgentWithSession(ctx, prov, reg, sess, prompt, opts, sink)
+}
+
+// RunSubAgentWithSession continues an existing sub-agent session with prompt and
+// returns the latest final assistant answer. Callers use this for transcript
+// continuation; fresh sub-agents should keep using RunSubAgent.
+func RunSubAgentWithSession(ctx context.Context, prov provider.Provider, reg *tool.Registry, sess *Session, prompt string, opts Options, sink event.Sink) (string, error) {
+	if sess == nil {
+		return "", fmt.Errorf("sub-agent session is nil")
+	}
 	sub := New(prov, reg, sess, opts, sink)
 	if err := sub.Run(ctx, prompt); err != nil {
 		return "", fmt.Errorf("sub-agent: %w", err)
