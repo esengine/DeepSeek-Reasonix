@@ -780,7 +780,18 @@ a[href] {
   font-weight: 500;
   line-height: 1.25;
   border-radius: var(--button-radius);
-  transition: color 0.12s, border-color 0.12s, background 0.12s;
+  transition:
+    color 0.12s,
+    border-color 0.15s cubic-bezier(0.16, 1, 0.3, 1),
+    background 0.15s cubic-bezier(0.16, 1, 0.3, 1),
+    transform 0.12s cubic-bezier(0.16, 1, 0.3, 1);
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.chip:active:not(:disabled) {
+  transform: scale(0.96);
 }
 .chip--icon {
   width: var(--button-icon-size);
@@ -3123,7 +3134,19 @@ a[href] {
   line-height: 1.25;
   border-radius: var(--button-radius);
   white-space: nowrap;
-  transition: color 0.12s, border-color 0.12s, background 0.12s, box-shadow 0.12s;
+  transition:
+    color 0.12s,
+    border-color 0.15s cubic-bezier(0.16, 1, 0.3, 1),
+    background 0.15s cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 0.15s cubic-bezier(0.16, 1, 0.3, 1),
+    transform 0.12s cubic-bezier(0.16, 1, 0.3, 1);
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.btn:active:not(:disabled) {
+  transform: scale(0.97);
 }
 .btn:hover {
   background: var(--button-bg-hover);
@@ -6481,11 +6504,20 @@ a[href] {
   position: fixed;
   inset: 0;
   z-index: var(--z-modal);
-  background: rgba(0, 0, 0, 0.48);
+  background: rgba(0, 0, 0, 0.55);
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
+  backdrop-filter: none;
+}
+
+@supports (backdrop-filter: blur(8px)) {
+  .settings-modal-backdrop {
+    background: rgba(0, 0, 0, 0.38);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+  }
 }
 
 .settings-modal {
@@ -6495,8 +6527,10 @@ a[href] {
   height: min(900px, calc(100vh - 80px));
   background: var(--bg-soft);
   border: 1px solid var(--border);
-  border-radius: 14px;
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.32);
+  border-radius: 16px;
+  box-shadow:
+    0 20px 60px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.03);
   overflow: hidden;
 }
 
@@ -6504,16 +6538,18 @@ a[href] {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 20px;
+  padding: 14px 24px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-elev);
   flex: 0 0 auto;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
 }
 
 .settings-modal__title {
   font-size: var(--text-base);
   font-weight: 700;
   color: var(--fg);
+  letter-spacing: -0.01em;
 }
 
 /* ── settings centre layout ─────────────────────────────────────────────────── */
@@ -6530,6 +6566,7 @@ a[href] {
   background: var(--bg-soft);
   padding: 10px;
   overflow-y: auto;
+  scrollbar-width: thin;
 }
 
 .settings-center__navitem {
@@ -6540,7 +6577,7 @@ a[href] {
   gap: 2px;
   width: 100%;
   min-width: 0;
-  padding: 9px 10px;
+  padding: 9px 12px;
   border: none;
   border-radius: 8px;
   background: transparent;
@@ -6548,6 +6585,15 @@ a[href] {
   font: inherit;
   text-align: left;
   cursor: pointer;
+  transition:
+    color 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+    background 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+    transform 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.settings-center__navitem:active {
+  transform: scale(0.97);
 }
 
 .settings-center__navitem:hover {
@@ -6558,7 +6604,9 @@ a[href] {
 .settings-center__navitem--active {
   background: var(--bg-elev-2);
   color: var(--fg);
-  box-shadow: inset 0 0 0 1px var(--border), 0 8px 18px rgba(0, 0, 0, 0.14);
+  box-shadow:
+    inset 0 0 0 1px var(--border),
+    0 8px 18px rgba(0, 0, 0, 0.14);
 }
 
 .settings-center__navitem--active::before {
@@ -6570,6 +6618,7 @@ a[href] {
   width: 3px;
   border-radius: 999px;
   background: var(--accent);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
 .settings-center__navitem span,
@@ -6582,19 +6631,22 @@ a[href] {
 .settings-center__navitem span {
   font-size: var(--font-control);
   font-weight: 650;
+  letter-spacing: -0.01em;
 }
 
 .settings-center__navitem small {
   color: var(--fg-dim);
   font-size: var(--text-2xs);
   font-family: var(--mono);
+  opacity: 0.75;
 }
 
 .settings-center__content {
   min-width: 0;
   overflow-y: auto;
-  padding: 24px 32px;
+  padding: 28px 36px;
   background: var(--bg-elev);
+  scrollbar-width: thin;
 }
 
 /* ── settings page header ───────────────────────────────────────────────────── */
@@ -6613,8 +6665,8 @@ a[href] {
 }
 
 .settings-page__header {
-  margin-bottom: 18px;
-  padding-bottom: 14px;
+  margin-bottom: 20px;
+  padding-bottom: 16px;
   border-bottom: 1px solid var(--border-soft);
 }
 
@@ -6623,25 +6675,32 @@ a[href] {
   font-weight: 700;
   color: var(--fg);
   margin: 0 0 4px 0;
+  letter-spacing: -0.015em;
 }
 
 .settings-page__desc {
   font-size: var(--font-control-small);
   color: var(--fg-dim);
   margin: 0;
-  line-height: 1.45;
+  line-height: 1.5;
 }
 
 /* ── settings design system ─────────────────────────────────────────────────── */
 .settings-section,
 .settings-page--manager .mem-section {
   min-width: 0;
-  margin-bottom: 16px;
-  padding: 16px;
+  margin-bottom: 18px;
+  padding: 20px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: color-mix(in srgb, var(--bg-elev-2) 76%, var(--bg-elev));
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.08);
+  box-shadow:
+    0 12px 28px -8px rgba(0, 0, 0, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.02);
+}
+
+.settings-section:last-child {
+  margin-bottom: 0;
 }
 
 .settings-section__head {
@@ -6649,7 +6708,7 @@ a[href] {
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 12px;
+  margin-bottom: 14px;
 }
 
 .settings-section__title,
@@ -6657,13 +6716,14 @@ a[href] {
   font-size: var(--font-control);
   font-weight: 700;
   color: var(--fg);
+  letter-spacing: -0.01em;
 }
 
 .settings-section__desc {
   margin-top: 4px;
   color: var(--fg-dim);
   font-size: var(--font-caption);
-  line-height: 1.45;
+  line-height: 1.5;
 }
 
 .settings-section__actions,
@@ -6686,8 +6746,9 @@ a[href] {
   grid-template-columns: minmax(180px, 260px) minmax(320px, 1fr);
   gap: 24px;
   align-items: center;
-  padding: 13px 0;
+  padding: 14px 0;
   border-top: 1px solid var(--border-soft);
+  transition: padding 0.15s ease;
 }
 
 .settings-field:first-child {
@@ -6711,7 +6772,7 @@ a[href] {
   color: var(--fg);
   font-size: var(--font-control-small);
   font-weight: 650;
-  line-height: 1.35;
+  line-height: 1.4;
 }
 
 .settings-field__hint {
@@ -6719,6 +6780,7 @@ a[href] {
   color: var(--fg-dim);
   font-size: var(--text-2xs);
   line-height: 1.45;
+  max-width: 55ch;
 }
 
 .settings-field__control {
@@ -6801,7 +6863,7 @@ a[href] {
 .settings-page .cap-skill-card,
 .settings-page .mem-fact,
 .settings-page .mem-doc {
-  border-radius: 8px;
+  border-radius: 10px;
   box-shadow: none;
 }
 
@@ -6916,8 +6978,9 @@ a[href] {
 /* ── responsive: stacked nav on narrow screens ──────────────────────────────── */
 @media (max-width: 760px) {
   .settings-modal {
-    width: min(100vw, 100vw);
-    height: min(100vh, 100vh);
+    width: 100vw;
+    height: 100vh;
+    height: 100dvh;
     border-radius: 0;
   }
 
@@ -6955,7 +7018,7 @@ a[href] {
   }
 
   .settings-center__content {
-    padding: 14px 14px;
+    padding: 16px;
   }
 
   .settings-page--form,
@@ -6966,6 +7029,10 @@ a[href] {
   .settings-section,
   .settings-page--manager .mem-section {
     padding: 14px;
+  }
+
+  .settings-section {
+    margin-bottom: 14px;
   }
 
   .settings-section__head {

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Check, ChevronDown, Play } from "lucide-react";
+import { Check, ChevronDown, Play, X } from "lucide-react";
 import { asArray } from "../lib/array";
 import { app } from "../lib/bridge";
 import { normalizeLangPref, useI18n, useT, type DictKey, type LangPref } from "../lib/i18n";
@@ -102,7 +102,7 @@ export function SettingsPanel({ onClose, onChanged, initialTab }: { onClose: () 
         <header className="settings-modal__head">
           <div className="settings-modal__title">{t("settings.title")}</div>
           <Tooltip label={t("common.close")}>
-            <button className="chip" aria-label={t("common.close")} onClick={onClose}>✕</button>
+            <button className="chip" aria-label={t("common.close")} onClick={onClose}><X size={14} /></button>
           </Tooltip>
         </header>
 
@@ -2244,7 +2244,7 @@ function RuleList({
             {r}
             <Tooltip label={t("common.delete")}>
               <button className="set-rule__x" disabled={busy} onClick={() => void onRemove(r)}>
-                ✕
+                <X size={11} />
               </button>
             </Tooltip>
           </span>
