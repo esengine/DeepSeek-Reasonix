@@ -164,23 +164,18 @@ func (s *SubagentStore) PrepareFork(ref string, spec SubagentSpec) (*SubagentRun
 		sourceRelease()
 		return nil, fmt.Errorf("load subagent transcript %q: %w", sourceRef, err)
 	}
+	sourceRelease()
 	newRef, err := s.newRef()
 	if err != nil {
-		sourceRelease()
 		return nil, err
 	}
 	newRelease, err := s.lock(newRef)
 	if err != nil {
-		sourceRelease()
 		return nil, err
 	}
 	now := time.Now().UTC()
 	newMeta := metaFromSpec(newRef, SubagentRunning, now, now, spec)
-	release := func() {
-		newRelease()
-		sourceRelease()
-	}
-	return &SubagentRun{Ref: newRef, Session: sess, Meta: newMeta, store: s, release: release}, nil
+	return &SubagentRun{Ref: newRef, Session: sess, Meta: newMeta, store: s, release: newRelease}, nil
 }
 
 func (s *SubagentStore) MarkRunning(run *SubagentRun) error {

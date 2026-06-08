@@ -61,6 +61,31 @@ func TestSubagentStoreForkCreatesIndependentReference(t *testing.T) {
 	}
 }
 
+func TestSubagentStoreForkReleasesSourceLockAfterCopy(t *testing.T) {
+	store := NewSubagentStore(t.TempDir())
+	spec := testSubagentSpec(t, "review")
+	run, err := store.PrepareFresh(spec)
+	if err != nil {
+		t.Fatalf("PrepareFresh: %v", err)
+	}
+	run.Session.Add(provider.Message{Role: provider.RoleUser, Content: "review diff"})
+	if err := store.SaveCompleted(run); err != nil {
+		t.Fatalf("SaveCompleted: %v", err)
+	}
+	run.Release()
+
+	forked, err := store.PrepareFork(run.Ref, spec)
+	if err != nil {
+		t.Fatalf("PrepareFork: %v", err)
+	}
+	defer forked.Release()
+	continued, err := store.PrepareContinue(run.Ref, spec)
+	if err != nil {
+		t.Fatalf("source should not stay locked by fork run: %v", err)
+	}
+	continued.Release()
+}
+
 func TestSubagentStoreRejectsIncompatibleTranscript(t *testing.T) {
 	store := NewSubagentStore(t.TempDir())
 	spec := testSubagentSpec(t, "review")
