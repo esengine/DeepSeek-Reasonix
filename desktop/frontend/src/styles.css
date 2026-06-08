@@ -2278,7 +2278,6 @@ a[href] {
   margin-right: -1px;
   background: var(--bg-elev);
   overflow: visible;
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.08);
   transition: border-color 0.12s;
 }
 .composer-card--resized {
@@ -2286,9 +2285,7 @@ a[href] {
   display: flex;
   flex-direction: column;
 }
-.composer-card:focus-within {
-  border-color: var(--fg-faint);
-}
+/* focus-within: keep default border */
 .composer-resize-handle {
   --wails-draggable: no-drag;
   appearance: none;
@@ -2421,14 +2418,14 @@ a[href] {
 }
 .composer {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   align-items: center;
   min-height: 0;
   background: transparent;
   border: none;
   border-bottom: 1px solid var(--border-soft);
   border-radius: 0;
-  padding: 10px 10px 9px 13px;
+  padding: 10px;
 }
 .composer-card--resized .composer,
 .composer-card--autosized .composer {
@@ -2454,16 +2451,7 @@ a[href] {
   border-bottom-color: var(--shell-accent);
   box-shadow: 0 1px 0 0 var(--shell-accent);
 }
-.composer--shell .composer__caret {
-  color: var(--shell-accent);
-}
-.composer__caret {
-  color: var(--accent);
-  font-family: var(--mono);
-  font-weight: 600;
-  line-height: 1.55;
-  flex-shrink: 0;
-}
+
 .composer__input {
   flex: 1;
   resize: none;

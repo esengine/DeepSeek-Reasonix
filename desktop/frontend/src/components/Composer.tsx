@@ -1585,7 +1585,6 @@ export function Composer({
           onDragOver={onDragOver}
           onDragLeave={onDragLeave}
         >
-          <span className="composer__caret">{text.trimStart().startsWith("!") ? "$" : "›"}</span>
           <textarea
             ref={taRef}
             className="composer__input"
