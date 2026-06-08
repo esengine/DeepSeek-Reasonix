@@ -282,6 +282,9 @@ func (t *TaskTool) prepareTranscriptRun(subReg *tool.Registry, modelRef, effortR
 	if continueFrom != "" && forkFrom != "" {
 		return nil, fmt.Errorf("continue_from and fork_from are mutually exclusive")
 	}
+	if t.transcripts == nil {
+		return nil, fmt.Errorf("subagent transcript store is required")
+	}
 	identityModel, identityEffort := t.effectiveIdentity(modelRef, effortRef)
 	spec := SubagentSpec{
 		Kind:             "task",
@@ -294,16 +297,10 @@ func (t *TaskTool) prepareTranscriptRun(subReg *tool.Registry, modelRef, effortR
 		Effort:           identityEffort,
 	}
 	if continueFrom != "" || forkFrom != "" {
-		if t.transcripts == nil {
-			return nil, fmt.Errorf("subagent continuation is not available in this session")
-		}
 		if continueFrom != "" {
 			return t.transcripts.PrepareContinue(continueFrom, spec)
 		}
 		return t.transcripts.PrepareFork(forkFrom, spec)
-	}
-	if t.transcripts == nil {
-		return &SubagentRun{Session: NewSession(t.sysPrompt)}, nil
 	}
 	return t.transcripts.PrepareFresh(spec)
 }
@@ -404,13 +401,6 @@ func FilterReadOnlyRegistry(parent *tool.Registry, exclude ...string) *tool.Regi
 	return sub
 }
 
-// runSub builds a sub-agent over subReg, runs prompt to completion emitting to
-// sink, and returns its final assistant answer. Shared by the foreground and
-// background paths. modelRef and effort override the parent defaults when non-empty.
-func (t *TaskTool) runSub(ctx context.Context, prompt string, subReg *tool.Registry, sink event.Sink, maxSteps int, modelRef, effort string) (string, error) {
-	return t.runSubSession(ctx, prompt, subReg, sink, maxSteps, modelRef, effort, NewSession(t.sysPrompt))
-}
-
 func (t *TaskTool) runSubSession(ctx context.Context, prompt string, subReg *tool.Registry, sink event.Sink, maxSteps int, modelRef, effort string, sess *Session) (string, error) {
 	prov, pricing, ctxWin := t.prov, t.pricing, t.contextWindow
 	if t.resolveProvider != nil && (modelRef != "" || effort != "") {
@@ -446,19 +436,9 @@ func FormatSubagentResult(answer, ref string, failed bool) string {
 	return "Subagent reference: " + ref + "\n\nFinal answer:\n" + answer
 }
 
-// RunSubAgent runs prompt to completion in a fresh sub-agent session over reg,
-// emitting tool activity to sink, and returns the sub-agent's final assistant
-// answer. It is the shared core behind the `task` tool and subagent skills: a
-// caller supplies the system prompt (the task persona or the skill body), the
-// tool registry (already filtered), and the run Options (model budget, gate).
-func RunSubAgent(ctx context.Context, prov provider.Provider, reg *tool.Registry, sysPrompt, prompt string, opts Options, sink event.Sink) (string, error) {
-	sess := NewSession(sysPrompt)
-	return RunSubAgentWithSession(ctx, prov, reg, sess, prompt, opts, sink)
-}
-
 // RunSubAgentWithSession continues an existing sub-agent session with prompt and
-// returns the latest final assistant answer. Callers use this for transcript
-// continuation; fresh sub-agents should keep using RunSubAgent.
+// returns the latest final assistant answer. Fresh sub-agents pass a newly-created
+// session; continued sub-agents pass a loaded transcript session.
 func RunSubAgentWithSession(ctx context.Context, prov provider.Provider, reg *tool.Registry, sess *Session, prompt string, opts Options, sink event.Sink) (string, error) {
 	if sess == nil {
 		return "", fmt.Errorf("sub-agent session is nil")

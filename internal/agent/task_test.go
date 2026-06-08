@@ -11,20 +11,21 @@ import (
 )
 
 // TestTaskToolReturnsSubAgentFinalAnswer runs a task against a mock provider
-// that emits a single text turn, and verifies the tool returns exactly that
-// text — sub-agent intermediate state isn't supposed to leak.
+// that emits a single text turn, and verifies the tool returns that text with a
+// transcript reference — sub-agent intermediate state isn't supposed to leak.
 func TestTaskToolReturnsSubAgentFinalAnswer(t *testing.T) {
 	sub := &mockProvider{name: "sub", chunks: []provider.Chunk{
 		{Type: provider.ChunkText, Text: "found 3 callers of Foo"},
 		{Type: provider.ChunkDone},
 	}}
 	parentReg := tool.NewRegistry()
-	task := NewTaskTool(sub, nil, parentReg, 20, 0, 0, 0, 0, 0.0, "", "test-sys-prompt", nil, "", "", nil)
+	task := newTestTaskTool(t, sub, parentReg, "test-sys-prompt", "", "", nil)
 
 	out, err := task.Execute(context.Background(), []byte(`{"prompt":"find callers of Foo"}`))
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
+	_ = subagentRefFromOutput(t, out)
 	if !strings.Contains(out, "found 3 callers of Foo") {
 		t.Errorf("got %q, want sub-agent final answer", out)
 	}
@@ -52,7 +53,7 @@ func TestTaskToolFiltersTools(t *testing.T) {
 	parentReg.Add(fakeTool{name: "read_file", readOnly: true})
 	parentReg.Add(fakeTool{name: "write_file", readOnly: false})
 	parentReg.Add(fakeTool{name: "bash", readOnly: false})
-	task := NewTaskTool(sub, nil, parentReg, 20, 0, 0, 0, 0, 0.0, "", "sys", nil, "", "", nil)
+	task := newTestTaskTool(t, sub, parentReg, "sys", "", "", nil)
 	parentReg.Add(task) // simulate the wiring in cli.setup
 	parentReg.Add(fakeTool{name: "run_skill", readOnly: false})
 	parentReg.Add(fakeTool{name: "research", readOnly: false})
@@ -81,7 +82,7 @@ func TestTaskToolDefaultsToParentToolsWithoutMetaTools(t *testing.T) {
 	parentReg := tool.NewRegistry()
 	parentReg.Add(fakeTool{name: "read_file", readOnly: true})
 	parentReg.Add(fakeTool{name: "grep", readOnly: true})
-	task := NewTaskTool(sub, nil, parentReg, 20, 0, 0, 0, 0, 0.0, "", "sys", nil, "", "", nil)
+	task := newTestTaskTool(t, sub, parentReg, "sys", "", "", nil)
 	parentReg.Add(task)
 	parentReg.Add(fakeTool{name: "run_skill", readOnly: false})
 	parentReg.Add(fakeTool{name: "explore", readOnly: false})
@@ -113,11 +114,11 @@ func TestTaskToolUsesConfiguredProfileForExecution(t *testing.T) {
 		{Type: provider.ChunkDone},
 	}}
 	var gotModel, gotEffort string
-	task := NewTaskTool(parent, nil, tool.NewRegistry(), 20, 0, 0, 0, 0, 0.0, "", "sys", nil, "deepseek-pro", "max",
-		func(model, effort string) (provider.Provider, *provider.Pricing, int, error) {
-			gotModel, gotEffort = model, effort
-			return resolved, nil, 0, nil
-		})
+	resolve := func(model, effort string) (provider.Provider, *provider.Pricing, int, error) {
+		gotModel, gotEffort = model, effort
+		return resolved, nil, 0, nil
+	}
+	task := newTestTaskTool(t, parent, tool.NewRegistry(), "sys", "deepseek-pro", "max", resolve)
 
 	out, err := task.Execute(context.Background(), []byte(`{"prompt":"x"}`))
 	if err != nil {
@@ -136,14 +137,27 @@ func TestTaskToolReturnsProfileResolutionErrors(t *testing.T) {
 		{Type: provider.ChunkText, Text: "parent answer"},
 		{Type: provider.ChunkDone},
 	}}
-	task := NewTaskTool(parent, nil, tool.NewRegistry(), 20, 0, 0, 0, 0, 0.0, "", "sys", nil, "", "",
-		func(string, string) (provider.Provider, *provider.Pricing, int, error) {
-			return nil, nil, 0, errors.New("bad effort")
-		})
+	resolve := func(string, string) (provider.Provider, *provider.Pricing, int, error) {
+		return nil, nil, 0, errors.New("bad effort")
+	}
+	task := newTestTaskTool(t, parent, tool.NewRegistry(), "sys", "", "", resolve)
 
 	_, err := task.Execute(context.Background(), []byte(`{"prompt":"x","effort":"turbo"}`))
 	if err == nil || !strings.Contains(err.Error(), "bad effort") {
 		t.Fatalf("Execute error = %v, want profile resolution error", err)
+	}
+}
+
+func TestTaskToolRequiresTranscriptStore(t *testing.T) {
+	sub := &mockProvider{name: "sub", chunks: []provider.Chunk{
+		{Type: provider.ChunkText, Text: "answer"},
+		{Type: provider.ChunkDone},
+	}}
+	task := NewTaskTool(sub, nil, tool.NewRegistry(), 20, 0, 0, 0, 0, 0.0, "", "sys", nil, "", "", nil)
+
+	_, err := task.Execute(context.Background(), []byte(`{"prompt":"x"}`))
+	if err == nil || !strings.Contains(err.Error(), "transcript store is required") {
+		t.Fatalf("Execute error = %v, want transcript store requirement", err)
 	}
 }
 
@@ -160,9 +174,8 @@ func TestTaskToolPersistsAndContinuesTranscript(t *testing.T) {
 	}}
 	reg := tool.NewRegistry()
 	reg.Add(fakeTool{name: "read_file", readOnly: true})
-	store := NewSubagentStore(t.TempDir())
-	task := NewTaskTool(sub, nil, reg, 20, 0, 0, 0, 0, 0.0, "", "sys", nil, "", "", nil).
-		WithTranscripts(store, t.TempDir(), "base-model", "base-effort")
+	task := newTestTaskTool(t, sub, reg, "sys", "", "", nil).
+		WithTranscripts(NewSubagentStore(t.TempDir()), t.TempDir(), "base-model", "base-effort")
 
 	first, err := task.Execute(context.Background(), []byte(`{"prompt":"first task"}`))
 	if err != nil {
@@ -197,9 +210,8 @@ func TestTaskToolRejectsMismatchedContinuationProfile(t *testing.T) {
 		{Type: provider.ChunkText, Text: "answer"},
 		{Type: provider.ChunkDone},
 	}}
-	store := NewSubagentStore(t.TempDir())
-	task := NewTaskTool(sub, nil, tool.NewRegistry(), 20, 0, 0, 0, 0, 0.0, "", "sys", nil, "", "", nil).
-		WithTranscripts(store, t.TempDir(), "base-model", "")
+	task := newTestTaskTool(t, sub, tool.NewRegistry(), "sys", "", "", nil).
+		WithTranscripts(NewSubagentStore(t.TempDir()), t.TempDir(), "base-model", "")
 
 	out, err := task.Execute(context.Background(), []byte(`{"prompt":"first task"}`))
 	if err != nil {
@@ -221,4 +233,10 @@ func subagentRefFromOutput(t *testing.T, out string) string {
 	}
 	t.Fatalf("no subagent reference in output:\n%s", out)
 	return ""
+}
+
+func newTestTaskTool(t *testing.T, prov provider.Provider, reg *tool.Registry, sysPrompt, subagentModel, subagentEffort string, resolve func(string, string) (provider.Provider, *provider.Pricing, int, error)) *TaskTool {
+	t.Helper()
+	return NewTaskTool(prov, nil, reg, 20, 0, 0, 0, 0, 0.0, "", sysPrompt, nil, subagentModel, subagentEffort, resolve).
+		WithTranscripts(NewSubagentStore(t.TempDir()), t.TempDir(), "base-model", "base-effort")
 }

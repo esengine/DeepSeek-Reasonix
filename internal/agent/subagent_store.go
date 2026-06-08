@@ -92,7 +92,7 @@ func NewSubagentStore(dir string) *SubagentStore {
 
 func (s *SubagentStore) PrepareFresh(spec SubagentSpec) (*SubagentRun, error) {
 	if s == nil {
-		return &SubagentRun{Session: NewSession(spec.SystemPrompt)}, nil
+		return nil, fmt.Errorf("subagent transcript store is required")
 	}
 	ref, err := s.newRef()
 	if err != nil {
