@@ -44,6 +44,9 @@ jobs:
     name: publish npm packages
     needs: cache-guard
     runs-on: ubuntu-latest
+    # A tag push (npm-v*) publishes a stable/next release and goes through the
+    # `release` environment (esengine approves); a canary dispatch runs free.
+    environment: ${{ github.event_name == 'workflow_dispatch' && 'canary' || 'release' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5

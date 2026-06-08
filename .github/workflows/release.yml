@@ -30,6 +30,9 @@ jobs:
     name: archives + checksums + homebrew tap
     needs: cache-guard
     runs-on: ubuntu-latest
+    # CLI stable release (archives + GitHub release + Homebrew cask). Gated on the
+    # `release` environment so only esengine can approve it going public.
+    environment: release
     steps:
       - uses: actions/checkout@v4
         with:

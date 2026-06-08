@@ -138,6 +138,9 @@ jobs:
     name: publish release
     needs: build
     runs-on: ubuntu-latest
+    # Stable publishes go through the `release` environment (esengine must
+    # approve); canary uses the open `canary` environment so maintainers self-serve.
+    environment: ${{ (github.event_name == 'workflow_dispatch' && inputs.channel == 'canary') && 'canary' || 'release' }}
     steps:
       - uses: actions/checkout@v4
 
