@@ -6867,7 +6867,10 @@ a[href] {
 
   .step-limit-control {
     justify-content: flex-start;
-    flex-wrap: wrap;
+  }
+
+  .step-limit-control .set-seg {
+    flex-shrink: 0;
   }
 
   .settings-subtabs {
@@ -7735,6 +7738,7 @@ a[href] {
   font-size: var(--font-control-small);
   padding: 5px 13px;
   text-transform: capitalize;
+  white-space: nowrap;
 }
 .set-seg__btn--on {
   background: var(--accent-soft);
