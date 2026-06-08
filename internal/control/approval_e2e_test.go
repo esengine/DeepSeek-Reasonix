@@ -18,8 +18,8 @@ type recordingWriter struct {
 	paths []string
 }
 
-func (w *recordingWriter) Name() string          { return "write_file" }
-func (w *recordingWriter) Description() string    { return "write a file" }
+func (w *recordingWriter) Name() string        { return "write_file" }
+func (w *recordingWriter) Description() string { return "write a file" }
 func (w *recordingWriter) Schema() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}}}`)
 }
