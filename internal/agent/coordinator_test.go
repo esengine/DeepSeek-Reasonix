@@ -74,7 +74,7 @@ func TestCoordinatorHandsPlanToExecutor(t *testing.T) {
 	if got := lastUser(planner.lastReq); !strings.Contains(got, "fix the bug") {
 		t.Errorf("planner saw user %q, want it to contain the task", got)
 	}
-	if got := lastUser(exec.lastReq); !strings.Contains(got, "read main.go") || !strings.Contains(got, "fix the bug") {
+	if got := lastUser(exec.lastReq); !strings.Contains(got, "read main.go") || !strings.Contains(got, "fix the bug") || !strings.Contains(got, "You are the executor now") {
 		t.Errorf("executor saw user %q, want task + plan", got)
 	}
 	// planner session must accumulate (system, user, assistant-plan) so its
@@ -251,6 +251,45 @@ func TestCoordinatorPlannerMaxStepsZeroIsUnlimited(t *testing.T) {
 	}
 	if got := lastUser(exec.lastReq); !strings.Contains(got, "use both files") {
 		t.Fatalf("executor did not receive planner output: %q", got)
+	}
+}
+
+func TestCoordinatorRetriesExecutorWhenItAnswersAsPlanner(t *testing.T) {
+	planner := &mockProvider{name: "planner", chunks: []provider.Chunk{
+		{Type: provider.ChunkText, Text: "Write the requested skill file."},
+		{Type: provider.ChunkDone},
+	}}
+	exec := &mockProvider{name: "executor", streams: [][]provider.Chunk{
+		{
+			{Type: provider.ChunkText, Text: "我是 Planner，只有只读工具，需要交给 Executor 执行。"},
+			{Type: provider.ChunkDone},
+		},
+		{
+			{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "call-1", Name: "write_file", Arguments: `{"path":"kan-tu.md"}`}},
+			{Type: provider.ChunkDone},
+		},
+		{
+			{Type: provider.ChunkText, Text: "Done."},
+			{Type: provider.ChunkDone},
+		},
+	}}
+
+	execReg := tool.NewRegistry()
+	execReg.Add(coordinatorTestTool{name: "write_file", readOnly: false, output: "wrote file"})
+	executor := New(exec, execReg, NewSession("exec-sys"), Options{}, event.Discard)
+	coord := NewCoordinator(planner, NewSession("planner-sys"), nil, nil, Options{}, executor, 0, event.Discard, nil)
+
+	if err := coord.Run(context.Background(), "install the skill"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := len(exec.requests); got != 3 {
+		t.Fatalf("executor requests = %d, want original confusion, retry tool call, final answer", got)
+	}
+	if got := lastUser(exec.requests[1]); !strings.Contains(got, "already in the executor phase") {
+		t.Fatalf("second executor request missing handoff retry message: %q", got)
+	}
+	if len(exec.requests[1].Messages) == 0 {
+		t.Fatal("executor request should contain messages")
 	}
 }
 

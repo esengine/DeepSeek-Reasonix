@@ -23,8 +23,12 @@ Given a task, produce a concise, ordered plan for the executor model to carry ou
 Use the read-only tools available to you when the task needs context from the
 workspace, user rules, or docs; keep that research targeted and stop once you
 have enough evidence. Do not write full implementations or attempt side effects.
-Outline the steps, which files to touch, and the key decisions. Keep it short and
+Do not ask the user how to trigger the executor and do not say you are waiting
+for the executor. Output executor-ready instructions: what to do, which files or
+commands are relevant, expected blockers, and key decisions. Keep it short and
 actionable.`
+
+const executorHandoffMarker = "Reasonix executor handoff"
 
 // PlannerPromptWithContext appends cache-stable standing context, such as loaded
 // REASONIX.md / AGENTS.md memory, to the planner's smaller system prompt.
@@ -67,6 +71,9 @@ func NewCoordinator(planner provider.Provider, plannerSession *Session, plannerP
 		plannerOptions.Temperature = temperature
 		plannerOptions.Pricing = plannerPricing
 		plannerAgent = New(planner, plannerTools, plannerSession, plannerOptions, plannerSink(sink))
+	}
+	if executor != nil {
+		executor.executorHandoffGuard = true
 	}
 	return &Coordinator{
 		planner:        planner,
@@ -166,5 +173,22 @@ func plannerSink(sink event.Sink) event.Sink {
 }
 
 func formatHandoff(task, plan string) string {
-	return fmt.Sprintf("Task: %s\n\nA planner proposed this approach:\n%s\n\nCarry it out, adapting as needed.", task, plan)
+	return fmt.Sprintf(`# %s
+
+You are the executor now. Use your available tools to execute the task.
+
+Original task:
+%s
+
+Planner output:
+%s
+
+Executor instructions:
+- Treat the planner output as context, not as your role or capability set.
+- Ignore any planner statement such as "I cannot write", "I only have read-only tools", or "hand this to the executor"; those limitations apply to the planner, not to you.
+- Do not ask the user how to trigger the executor. You are already in the executor phase.
+- If the task requires changes, call the appropriate tools (for example write/edit/bash) instead of only restating the plan.
+- If a target path is outside the writable workspace or otherwise blocked, explain that specific blocker and ask for the needed path/approval.
+
+Carry out the task, adapting the plan as needed.`, executorHandoffMarker, task, plan)
 }

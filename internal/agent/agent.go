@@ -31,6 +31,7 @@ const maxToolOutputBytes = 32 * 1024
 const maxFinalReadinessBlocks = 3
 const maxEmptyFinalBlocks = 3
 const maxStreamRecoveries = 1
+const maxExecutorHandoffConfusionBlocks = 2
 
 // Renderer redraws the assistant's final-answer text as styled output. It is
 // applied only after a turn's text stream completes, so the user sees raw
@@ -122,8 +123,11 @@ type Agent struct {
 	sessMu      sync.Mutex // guards the session pointer for external Session()/SetSession
 	maxSteps    int
 	maxStepsKey string
-	temperature float64
-	pricing     *provider.Pricing
+	// executorHandoffGuard is enabled by Coordinator for the executor agent. The
+	// per-turn marker check in Run keeps ordinary single-model turns unaffected.
+	executorHandoffGuard bool
+	temperature          float64
+	pricing              *provider.Pricing
 
 	// sink receives the turn's typed event stream (reasoning/text deltas, tool
 	// dispatch/results, usage, notices). The agent no longer formats output
@@ -411,7 +415,9 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 
 	finalReadinessBlocks := 0
 	emptyFinalBlocks := 0
+	handoffConfusionBlocks := 0
 	streamRecoveries := 0
+	executorHandoff := a.executorHandoffGuard && strings.Contains(input, executorHandoffMarker)
 	for step := 0; a.maxSteps <= 0 || step < a.maxSteps; step++ {
 		schemas := a.tools.Schemas()
 		prefixShape := a.capturePrefixShape(schemas)
@@ -490,6 +496,16 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 				}
 				a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "empty final answer blocked: model returned no visible answer text; retrying"})
 				a.session.Add(provider.Message{Role: provider.RoleUser, Content: emptyFinalRetryMessage()})
+				a.maybeCompact(ctx, usage)
+				continue
+			}
+			if executorHandoff && finalAnswerConfusesExecutorWithPlanner(text) {
+				handoffConfusionBlocks++
+				if handoffConfusionBlocks >= maxExecutorHandoffConfusionBlocks {
+					return fmt.Errorf("executor handoff failed: model kept responding as the planner instead of executing")
+				}
+				a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "executor handoff blocked: model responded as planner instead of executing; retrying with explicit executor instructions"})
+				a.session.Add(provider.Message{Role: provider.RoleUser, Content: executorHandoffRetryMessage()})
 				a.maybeCompact(ctx, usage)
 				continue
 			}
@@ -615,6 +631,55 @@ func finalReadinessCheckSource(check instruction.VerifyCheck) string {
 
 func finalReadinessRetryMessage(reason string) string {
 	return "Host final-answer readiness check failed. Before giving a final answer, address the missing host-observable receipts: " + reason + ". Run the required tool calls, then answer when readiness is satisfied."
+}
+
+func finalAnswerConfusesExecutorWithPlanner(text string) bool {
+	s := strings.ToLower(strings.TrimSpace(text))
+	if s == "" {
+		return false
+	}
+	patterns := []string{
+		"我是 planner",
+		"我是planner",
+		"我是规划器",
+		"我只是 planner",
+		"我只是planner",
+		"我只能读不能写",
+		"只有只读工具",
+		"没有写入权限",
+		"没有执行权限",
+		"交给 executor",
+		"触发 executor",
+		"如何触发 executor",
+		"需要 executor",
+		"i am planner",
+		"i am the planner",
+		"i'm planner",
+		"i'm the planner",
+		"as the planner",
+		"only have read-only tools",
+		"read-only tools only",
+		"cannot write",
+		"can't write",
+		"no write access",
+		"hand off to executor",
+		"handoff to executor",
+		"trigger the executor",
+		"need the executor",
+	}
+	for _, pattern := range patterns {
+		if strings.Contains(s, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+func executorHandoffRetryMessage() string {
+	return `You are already in the executor phase. The planner's read-only limitations do not apply to you.
+
+Do not answer as the planner and do not ask how to trigger the executor.
+Use your available tools now to carry out the task. If a write or command is blocked by permissions or workspace boundaries, state that specific blocker and ask for the needed approval/path.`
 }
 
 func hasVisibleFinalAnswer(text string) bool {
