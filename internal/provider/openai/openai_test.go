@@ -126,9 +126,10 @@ func TestStreamAuthError(t *testing.T) {
 }
 
 // TestBuildRequestAlwaysSerializesContent guards the DeepSeek 400 regression:
-// an assistant turn that is pure tool_calls (no preamble text) has empty
-// content, and DeepSeek rejects a message missing the `content` field. Every
-// message — including that one — must serialize a content field.
+// DeepSeek rejects a message missing the `content` field, so every message must
+// serialize one. A pure tool_calls assistant turn carries null (OpenAI-spec,
+// and accepted by DeepSeek — verified against a live multi-tool session); other
+// roles serialize a string. The field must never be absent.
 func TestBuildRequestAlwaysSerializesContent(t *testing.T) {
 	c := &client{model: "deepseek-v4"}
 	req := c.buildRequest(provider.Request{
@@ -156,9 +157,9 @@ func TestBuildRequestAlwaysSerializesContent(t *testing.T) {
 			t.Errorf("messages[%d] is missing the content field: %s", i, b)
 		}
 	}
-	// The tool-call-only assistant message must carry content:"" and its tool_calls.
-	if got := string(raw[1]["content"]); got != `""` {
-		t.Errorf("assistant content = %s, want \"\"", got)
+	// The tool-call-only assistant message must carry content:null and its tool_calls.
+	if got := string(raw[1]["content"]); got != `null` {
+		t.Errorf("assistant content = %s, want null", got)
 	}
 	if _, ok := raw[1]["tool_calls"]; !ok {
 		t.Errorf("assistant message lost its tool_calls: %s", b)
@@ -424,8 +425,8 @@ func TestBuildRequestPreservesEmptyIDToolResults(t *testing.T) {
 	})
 	var toolContents []string
 	for _, m := range req.Messages {
-		if m.Role == string(provider.RoleTool) {
-			toolContents = append(toolContents, m.Content)
+		if m.Role == string(provider.RoleTool) && m.Content != nil {
+			toolContents = append(toolContents, *m.Content)
 		}
 	}
 	if len(toolContents) != 2 {
@@ -471,5 +472,37 @@ func TestStreamSynthesizesMissingToolCallIDs(t *testing.T) {
 	}
 	if ids[0] == ids[1] {
 		t.Errorf("synthesized ids must be distinct, got %v", ids)
+	}
+}
+
+func TestBuildRequestContentNullForAssistantToolCalls(t *testing.T) {
+	c := &client{name: "x", model: "m", baseURL: "https://api.example.com/v1"}
+	req := provider.Request{
+		Messages: []provider.Message{
+			{Role: provider.RoleAssistant, Content: "", ToolCalls: []provider.ToolCall{{ID: "c1", Name: "ls", Arguments: `{}`}}},
+			{Role: provider.RoleTool, Content: "", ToolCallID: "c1", Name: "ls"},
+			{Role: provider.RoleAssistant, Content: "all done"},
+		},
+		Tools: []provider.ToolSchema{{Name: "noargs", Parameters: provider.CanonicalizeSchema(nil)}},
+	}
+	body, err := json.Marshal(c.buildRequest(req))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !json.Valid(body) {
+		t.Fatalf("invalid JSON body: %s", body)
+	}
+	s := string(body)
+	if !strings.Contains(s, `"tool_calls"`) || !strings.Contains(s, `"content":null`) {
+		t.Errorf("assistant tool_calls turn should carry null content: %s", s)
+	}
+	if !strings.Contains(s, `{"role":"tool","content":""`) {
+		t.Errorf("tool message should keep empty-string content, not null: %s", s)
+	}
+	if !strings.Contains(s, `"content":"all done"`) {
+		t.Errorf("text assistant turn should keep its string content: %s", s)
+	}
+	if !strings.Contains(s, `"parameters":{"type":"object"}`) {
+		t.Errorf("no-param tool should serialize a valid empty-object schema: %s", s)
 	}
 }
