@@ -146,3 +146,79 @@ func TestTaskToolReturnsProfileResolutionErrors(t *testing.T) {
 		t.Fatalf("Execute error = %v, want profile resolution error", err)
 	}
 }
+
+func TestTaskToolPersistsAndContinuesTranscript(t *testing.T) {
+	sub := &mockProvider{name: "sub", streams: [][]provider.Chunk{
+		{
+			{Type: provider.ChunkText, Text: "first answer"},
+			{Type: provider.ChunkDone},
+		},
+		{
+			{Type: provider.ChunkText, Text: "second answer"},
+			{Type: provider.ChunkDone},
+		},
+	}}
+	reg := tool.NewRegistry()
+	reg.Add(fakeTool{name: "read_file", readOnly: true})
+	store := NewSubagentStore(t.TempDir())
+	task := NewTaskTool(sub, nil, reg, 20, 0, 0, 0, 0, 0.0, "", "sys", nil, "", "", nil).
+		WithTranscripts(store, t.TempDir(), "base-model", "base-effort")
+
+	first, err := task.Execute(context.Background(), []byte(`{"prompt":"first task"}`))
+	if err != nil {
+		t.Fatalf("first Execute: %v", err)
+	}
+	ref := subagentRefFromOutput(t, first)
+	if !strings.Contains(first, "first answer") {
+		t.Fatalf("first output = %q, want answer", first)
+	}
+
+	second, err := task.Execute(context.Background(), []byte(`{"prompt":"second task","continue_from":"`+ref+`"}`))
+	if err != nil {
+		t.Fatalf("second Execute: %v", err)
+	}
+	if !strings.Contains(second, "second answer") {
+		t.Fatalf("second output = %q, want answer", second)
+	}
+	if len(sub.requests) != 2 {
+		t.Fatalf("provider requests = %d, want 2", len(sub.requests))
+	}
+	msgs := sub.requests[1].Messages
+	if len(msgs) < 4 {
+		t.Fatalf("continued request messages = %+v, want prior transcript plus new task", msgs)
+	}
+	if msgs[1].Content != "first task" || msgs[2].Content != "first answer" || lastUser(sub.requests[1]) != "second task" {
+		t.Fatalf("continued request messages = %+v, want first task/answer then second task", msgs)
+	}
+}
+
+func TestTaskToolRejectsMismatchedContinuationProfile(t *testing.T) {
+	sub := &mockProvider{name: "sub", chunks: []provider.Chunk{
+		{Type: provider.ChunkText, Text: "answer"},
+		{Type: provider.ChunkDone},
+	}}
+	store := NewSubagentStore(t.TempDir())
+	task := NewTaskTool(sub, nil, tool.NewRegistry(), 20, 0, 0, 0, 0, 0.0, "", "sys", nil, "", "", nil).
+		WithTranscripts(store, t.TempDir(), "base-model", "")
+
+	out, err := task.Execute(context.Background(), []byte(`{"prompt":"first task"}`))
+	if err != nil {
+		t.Fatalf("first Execute: %v", err)
+	}
+	ref := subagentRefFromOutput(t, out)
+	_, err = task.Execute(context.Background(), []byte(`{"prompt":"second task","continue_from":"`+ref+`","model":"other-model"}`))
+	if err == nil || !strings.Contains(err.Error(), "model/effort") {
+		t.Fatalf("mismatched model error = %v, want compatibility failure", err)
+	}
+}
+
+func subagentRefFromOutput(t *testing.T, out string) string {
+	t.Helper()
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "Subagent reference: ") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "Subagent reference: "))
+		}
+	}
+	t.Fatalf("no subagent reference in output:\n%s", out)
+	return ""
+}
