@@ -24,7 +24,8 @@ export function DockContent({ tab, onMetadataUpdate, onTitleUpdate, ...workspace
       return (
         <WorkspacePanel
           key="files"
-          mode="files"
+          initialViewMode="files"
+          showViewTabs={false}
           {...workspaceProps}
         />
       );
@@ -32,7 +33,8 @@ export function DockContent({ tab, onMetadataUpdate, onTitleUpdate, ...workspace
       return (
         <WorkspacePanel
           key="changes"
-          mode="changes"
+          initialViewMode="changed"
+          showViewTabs={false}
           {...workspaceProps}
         />
       );

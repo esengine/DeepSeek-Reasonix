@@ -166,6 +166,8 @@ export interface AppBindings {
   BrowserScrollDown(pixels: number): Promise<void>;
   BrowserCurrentURL(): Promise<string>;
   BrowserIsRunning(): Promise<boolean>;
+  BrowserInspectElement(x: number, y: number): Promise<string>;
+  BrowserSetViewportSize(width: number, height: number): Promise<void>;
   SavePastedImage(dataUrl: string): Promise<string>;
   SavePastedFile(name: string, dataUrl: string): Promise<string>;
   AttachDropped(path: string): Promise<DroppedItem>;
@@ -1433,6 +1435,10 @@ function makeMockApp(): AppBindings {
     async BrowserIsRunning() {
       return false;
     },
+    async BrowserInspectElement(_x: number, _y: number) {
+      return "";
+    },
+    async BrowserSetViewportSize(_width: number, _height: number) {},
     async SavePastedImage(_dataUrl: string) {
       return ".reasonix/attachments/mock.png";
     },

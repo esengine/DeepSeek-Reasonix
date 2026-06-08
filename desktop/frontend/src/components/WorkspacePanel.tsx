@@ -7,7 +7,6 @@ import type {
   PointerEvent as ReactPointerEvent,
 } from "react";
 import {
-  Check,
   ChevronDown,
   ChevronRight,
   FileText,
@@ -185,7 +184,8 @@ export function WorkspacePanel({
   onAddToChat,
   onRequestPanelWidth,
   refreshKey,
-  mode,
+  initialViewMode = "files",
+  showViewTabs = true,
 }: {
   open: boolean;
   cwd?: string;
@@ -197,10 +197,10 @@ export function WorkspacePanel({
   onAddToChat?: (text: string) => void;
   onRequestPanelWidth?: (width: number) => void;
   refreshKey?: number;
-  mode?: "files" | "changes";
+  initialViewMode?: "files" | "changed";
+  showViewTabs?: boolean;
 }) {
   const t = useT();
-  const effectiveMode = mode ?? "files";
   const panelRef = useRef<HTMLElement>(null);
   const filterRef = useRef<HTMLInputElement>(null);
   const previewBodyRef = useRef<HTMLDivElement>(null);
@@ -227,10 +227,6 @@ export function WorkspacePanel({
   const [treeResizing, setTreeResizing] = useState(false);
   const [recentOpen, setRecentOpen] = useState(false);
   const recentAnchorRef = useRef<HTMLButtonElement>(null);
-  const [branchMenuOpen, setBranchMenuOpen] = useState(false);
-  const [branchList, setBranchList] = useState<string[]>([]);
-  const [switchingBranch, setSwitchingBranch] = useState(false);
-  const branchBtnRef = useRef<HTMLButtonElement>(null);
   const openDirsRef = useRef(openDirs);
 
   useEffect(() => {
@@ -502,8 +498,7 @@ export function WorkspacePanel({
     if (!q) return rows;
     return rows.filter((row) => `${row.path} ${row.oldPath ?? ""} ${row.gitStatus ?? ""}`.toLowerCase().includes(q));
   }, [changes?.files, filter]);
-  const searchPlaceholder = effectiveMode === "changes" ? t("workspace.filterChanges") : t("workspace.filter"); (fix(desktop): branch switcher reload file tree after checkout, enlarge hover area)
-
+  const searchPlaceholder = effectiveMode === "changes" ? t("workspace.filterChanges") : t("workspace.filter");
   const effectiveTreeWidth = useMemo(() => clampWorkspaceTreeWidth(treeWidth, panelWidth), [panelWidth, treeWidth]);
   const previewVisible = viewMode === "changed" || openTabs.length > 0 || selectedPath !== null;
   const selectedFileVisible = selectedPath !== null;
@@ -511,8 +506,8 @@ export function WorkspacePanel({
     treeVisible && selectedFileVisible && panelWidth !== undefined && panelWidth < WORKSPACE_DUAL_PANEL_MIN_WIDTH;
   const actualTreeVisible = treeVisible;
   const previewModeActive = open && previewVisible;
-  const embeddedDockMode = true;
-  const showFileTools = previewVisible;
+  const embeddedDockMode = !showViewTabs;
+  const showFileTools = showViewTabs || previewVisible;
 
   const panelStyle = useMemo(
     () =>
@@ -724,7 +719,7 @@ export function WorkspacePanel({
     {
       key: "refresh-tree",
       icon: <RefreshCw size={13} />,
-      label: t(effectiveMode === "changes" ? "workspace.refreshChanges" : "workspace.refreshTree"),
+      label: t(viewMode === "changed" ? "workspace.refreshChanges" : "workspace.refreshTree"),
       onSelect: refreshWorkspaceList,
     },
   ];
@@ -1051,7 +1046,7 @@ export function WorkspacePanel({
                   <RefreshCw size={14} />
                 </button>
               </Tooltip>
-            )} (fix(desktop): branch switcher reload file tree after checkout, enlarge hover area)
+            )}
           </div>
         )}
 
@@ -1093,43 +1088,15 @@ export function WorkspacePanel({
                   ))
                 )}
               </div>
-            </AnchoredPopover>
-            <button
-              className="workspace-branch-refresh"
-              onClick={loadChanges}
-              disabled={loadingChanges}
-              title={t("workspace.refreshChanges")}
-            >
-              <RefreshCw size={12} className={loadingChanges ? "spinning" : ""} />
-            </button>
+            )}
+            {showViewTabs && (
+              <Tooltip label={t("workspace.refreshChanges")}>
+                <button className="workspace-iconbtn" onClick={() => void loadGitHistory()}>
+                  <RefreshCw size={14} />
+                </button>
+              </Tooltip>
+            )}
           </div>
-        )}
-        {showViewTabs && (
-          <div className="workspace-files__tabs" role="tablist" aria-label={t("workspace.viewMode")}>
-            <button
-              className={viewMode === "files" ? "workspace-files__tab workspace-files__tab--active" : "workspace-files__tab"}
-              onClick={() => setViewMode("files")}
-            >
-              {t("workspace.filesTab")}
-            </button>
-            <button
-              className={viewMode === "changed" ? "workspace-files__tab workspace-files__tab--active" : "workspace-files__tab"}
-              onClick={() => {
-                setViewMode("changed");
-                void loadGitHistory();
-              }}
-            >
-              <GitBranch size={13} />
-              {t("workspace.changedTab")}
-            </button>
-          </div>
-        )}
-        {showViewTabs && viewMode === "changed" && (
-          <Tooltip label={t("workspace.refreshChanges")}>
-            <button className="workspace-iconbtn" onClick={() => void loadGitHistory()}>
-              <RefreshCw size={14} />
-            </button>
-          </Tooltip>
         )}
 
         <div className="workspace-search">
@@ -1144,7 +1111,7 @@ export function WorkspacePanel({
             ? renderChangedRows()
             : viewMode === "changed"
             ? renderGitHistory()
-            : flattened (fix(desktop): branch switcher reload file tree after checkout, enlarge hover area)
+            : flattened
             ? flattened.map(({ path, entry }) => {
                 const dir = parentPath(path);
                 return (
