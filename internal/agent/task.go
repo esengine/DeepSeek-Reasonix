@@ -70,6 +70,7 @@ type TaskTool struct {
 	workspaceRoot     string
 	baseModel         string
 	baseEffort        string
+	identityProfile   func(modelRef, effort string) (string, string)
 }
 
 // NewTaskTool wires a task tool to the parent agent's environment so its
@@ -111,6 +112,11 @@ func (t *TaskTool) WithTranscripts(store *SubagentStore, workspaceRoot, baseMode
 	t.workspaceRoot = strings.TrimSpace(workspaceRoot)
 	t.baseModel = strings.TrimSpace(baseModel)
 	t.baseEffort = strings.TrimSpace(baseEffort)
+	return t
+}
+
+func (t *TaskTool) WithTranscriptIdentityResolver(resolve func(modelRef, effort string) (string, string)) *TaskTool {
+	t.identityProfile = resolve
 	return t
 }
 
@@ -241,13 +247,13 @@ func (t *TaskTool) Execute(ctx context.Context, args json.RawMessage) (string, e
 			answer, err := t.runSubSession(jobCtx, p.Prompt, subReg, nested, maxSteps, modelRef, effortRef, run.Session)
 			if err != nil {
 				_ = t.transcripts.SaveFailed(run)
-				return formatSubagentResult("", run.Ref, true), err
+				return FormatSubagentResult("", run.Ref, true), err
 			}
 			if err := t.transcripts.SaveCompleted(run); err != nil {
 				_ = t.transcripts.SaveFailed(run)
-				return formatSubagentResult("", run.Ref, true), err
+				return FormatSubagentResult("", run.Ref, true), err
 			}
-			return formatSubagentResult(answer, run.Ref, false), nil
+			return FormatSubagentResult(answer, run.Ref, false), nil
 		})
 		if run != nil && run.Ref != "" {
 			return fmt.Sprintf("Started background task %q (%s).\nSubagent reference: %s\nIt runs across turns; collect its final answer with wait (or wait will return it once done), and you'll be notified when it finishes.", job.ID, label, run.Ref), nil
@@ -265,7 +271,7 @@ func (t *TaskTool) Execute(ctx context.Context, args json.RawMessage) (string, e
 		if err := t.transcripts.SaveCompleted(run); err != nil {
 			return "", err
 		}
-		return formatSubagentResult(answer, run.Ref, false), nil
+		return FormatSubagentResult(answer, run.Ref, false), nil
 	}
 	return answer, nil
 }
@@ -276,6 +282,7 @@ func (t *TaskTool) prepareTranscriptRun(subReg *tool.Registry, modelRef, effortR
 	if continueFrom != "" && forkFrom != "" {
 		return nil, fmt.Errorf("continue_from and fork_from are mutually exclusive")
 	}
+	identityModel, identityEffort := t.effectiveIdentity(modelRef, effortRef)
 	spec := SubagentSpec{
 		Kind:             "task",
 		Name:             "task",
@@ -283,8 +290,8 @@ func (t *TaskTool) prepareTranscriptRun(subReg *tool.Registry, modelRef, effortR
 		ParentToolCallID: parentID,
 		SystemPrompt:     t.sysPrompt,
 		Registry:         subReg,
-		Model:            t.effectiveModelIdentity(modelRef),
-		Effort:           t.effectiveEffortIdentity(effortRef),
+		Model:            identityModel,
+		Effort:           identityEffort,
 	}
 	if continueFrom != "" || forkFrom != "" {
 		if t.transcripts == nil {
@@ -299,6 +306,14 @@ func (t *TaskTool) prepareTranscriptRun(subReg *tool.Registry, modelRef, effortR
 		return &SubagentRun{Session: NewSession(t.sysPrompt)}, nil
 	}
 	return t.transcripts.PrepareFresh(spec)
+}
+
+func (t *TaskTool) effectiveIdentity(modelRef, effort string) (string, string) {
+	if t.identityProfile != nil {
+		model, eff := t.identityProfile(modelRef, effort)
+		return strings.TrimSpace(model), strings.TrimSpace(eff)
+	}
+	return t.effectiveModelIdentity(modelRef), t.effectiveEffortIdentity(effort)
 }
 
 func (t *TaskTool) effectiveModelIdentity(modelRef string) string {
@@ -418,7 +433,7 @@ func (t *TaskTool) runSubSession(ctx context.Context, prompt string, subReg *too
 	}, sink)
 }
 
-func formatSubagentResult(answer, ref string, failed bool) string {
+func FormatSubagentResult(answer, ref string, failed bool) string {
 	if ref == "" {
 		return answer
 	}

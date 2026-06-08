@@ -432,13 +432,34 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		}
 		return p, me.Price, me.ContextWindow, nil
 	}
+	subagentIdentity := func(modelRef, effort string) (string, string) {
+		me := *entry
+		modelID := modelName
+		if strings.TrimSpace(modelRef) != "" {
+			if resolved, ok := cfg.ResolveModel(modelRef); ok {
+				me = *resolved
+				modelID = strings.TrimSpace(modelRef)
+			} else {
+				modelID = strings.TrimSpace(modelRef)
+			}
+		}
+		if strings.TrimSpace(effort) != "" {
+			if normalized, err := config.NormalizeEffort(&me, effort); err == nil {
+				me.Effort = normalized
+			} else {
+				me.Effort = strings.TrimSpace(effort)
+			}
+		}
+		return modelID, strings.TrimSpace(me.Effort)
+	}
 	taskModel := firstNonEmpty(cfg.Agent.SubagentModels["task"], cfg.Agent.SubagentModel)
 	taskEffort := firstNonEmpty(cfg.Agent.SubagentEfforts["task"], cfg.Agent.SubagentEffort)
 	reg.Add(agent.NewTaskTool(execProv, entry.Price, reg, maxSteps,
 		entry.ContextWindow, cfg.Agent.SoftCompactRatio, cfg.Agent.CompactRatio, cfg.Agent.CompactForceRatio,
 		cfg.Agent.Temperature, config.ArchiveDir(), "", headlessGate,
 		taskModel, taskEffort, resolveSubagentProvider).
-		WithTranscripts(subagentStore, root, modelName, entry.Effort))
+		WithTranscripts(subagentStore, root, modelName, entry.Effort).
+		WithTranscriptIdentityResolver(subagentIdentity))
 
 	// The `remember` tool lets the model persist durable facts to the project's
 	// auto-memory store; `forget` prunes ones that turn out wrong. The saved index
@@ -458,7 +479,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// as system prompt, a tool set scoped to the skill's allowed-tools (minus the
 	// task/skill meta-tools, to bar recursion), and an optional per-skill model.
 	// Its tool activity nests under the invoking call, like `task`.
-	skillRunner := func(sctx context.Context, sk skill.Skill, task string) (string, error) {
+	skillRunner := func(sctx context.Context, sk skill.Skill, task string, runOpts skill.SubagentRunOptions) (string, error) {
 		prov, price, ctxWin := execProv, entry.Price, entry.ContextWindow
 		modelRef := subagentModelRef(cfg, sk)
 		effortRef := subagentEffortRef(cfg, sk)
@@ -470,13 +491,43 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			prov, price, ctxWin = p, pr, cw
 		}
 		subReg := agent.FilterRegistry(reg, sk.AllowedTools, agent.SubagentMetaTools()...)
+		continueFrom, forkFrom := strings.TrimSpace(runOpts.ContinueFrom), strings.TrimSpace(runOpts.ForkFrom)
+		if continueFrom != "" && forkFrom != "" {
+			return "", fmt.Errorf("continue_from and fork_from are mutually exclusive")
+		}
+		parentID, _, _, _ := agent.CallContext(sctx)
+		identityModel, identityEffort := subagentIdentity(modelRef, effortRef)
+		spec := agent.SubagentSpec{
+			Kind:             "skill",
+			Name:             sk.Name,
+			WorkspaceRoot:    root,
+			ParentToolCallID: parentID,
+			SystemPrompt:     sk.Body,
+			Registry:         subReg,
+			Model:            identityModel,
+			Effort:           identityEffort,
+		}
+		var run *agent.SubagentRun
+		var prepErr error
+		switch {
+		case continueFrom != "":
+			run, prepErr = subagentStore.PrepareContinue(continueFrom, spec)
+		case forkFrom != "":
+			run, prepErr = subagentStore.PrepareFork(forkFrom, spec)
+		default:
+			run, prepErr = subagentStore.PrepareFresh(spec)
+		}
+		if prepErr != nil {
+			return "", prepErr
+		}
+		defer run.Release()
 		steps := maxSteps
 		if steps > 0 {
 			if steps /= 2; steps < 5 {
 				steps = 5
 			}
 		}
-		return agent.RunSubAgent(sctx, prov, subReg, sk.Body, task, agent.Options{
+		answer, err := agent.RunSubAgentWithSession(sctx, prov, subReg, run.Session, task, agent.Options{
 			MaxSteps:      steps,
 			Temperature:   cfg.Agent.Temperature,
 			Pricing:       price,
@@ -484,6 +535,13 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			ContextWindow: ctxWin,
 			ArchiveDir:    config.ArchiveDir(),
 		}, agent.NestedSink(sctx, event.Discard))
+		if err != nil {
+			return "", err
+		}
+		if err := subagentStore.SaveCompleted(run); err != nil {
+			return "", err
+		}
+		return agent.FormatSubagentResult(answer, run.Ref, false), nil
 	}
 	skillProfile := func(sk skill.Skill) *event.Profile {
 		model, effort := subagentModelRef(cfg, sk), subagentEffortRef(cfg, sk)
