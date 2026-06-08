@@ -461,6 +461,33 @@ a[href] {
   display: none;
 }
 
+.layout--workspace-open {
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr) var(--workspace-width);
+}
+
+.layout--workspace-open .chat-pane {
+  border-radius: 12px 0 0 12px;
+}
+
+.layout--workspace-open .workbench-dock {
+  grid-column: 3;
+  grid-row: 1;
+  width: 100%;
+  height: 100%;
+  flex: none;
+  border-left: 1px solid var(--border-soft);
+  border-radius: 0 12px 12px 0;
+  overflow: hidden;
+}
+
+.layout--workspace-open .workspace-panel-resizer {
+  grid-column: 3;
+  grid-row: 1;
+  align-self: stretch;
+  justify-self: start;
+  position: relative;
+}
+
 .layout--workspace-floating {
   grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
 }
@@ -472,7 +499,6 @@ a[href] {
   top: 0;
   right: 0;
   bottom: 0;
-  flex: none;
   width: var(--workspace-width);
   z-index: var(--z-dock);
   box-shadow: -4px 0 24px rgba(0, 0, 0, 0.3);
@@ -485,7 +511,7 @@ a[href] {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  padding: 0 6px;
+  padding: 0 6px 0 0;
   background: var(--sidebar-bg);
   border-right: 1px solid var(--border-soft);
 
@@ -503,10 +529,10 @@ a[href] {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   height: 38px;
-  padding-left: 76px;
-  padding-right: 4px;
+  padding: 0 4px;
+  gap: 2px;
   line-height: 0;
   --wails-draggable: drag;
   user-select: none;
@@ -636,7 +662,7 @@ a[href] {
   padding-right: 0;
   justify-content: center;
 }
-.sidebar--collapsed .sidebar__header-left {
+.sidebar--collapsed .sidebar__new-icon {
   display: none;
 }
 .sidebar--collapsed .sidebar__navitem {
@@ -721,57 +747,6 @@ a[href] {
   background: var(--accent);
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 24%, transparent);
 }
-.workspace-dock-toggle {
-  --wails-draggable: no-drag;
-  flex: 0 0 42px;
-  align-self: stretch;
-  display: inline-flex;
-  align-items: stretch;
-  justify-content: center;
-  width: 42px;
-  height: 38px;
-  border-left: 1px solid var(--border-soft);
-  border-right: 1px solid var(--border-soft);
-}
-.workspace-dock-toggle__button {
-  --wails-draggable: no-drag;
-  width: 42px;
-  height: 38px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  color: var(--fg-faint);
-  box-shadow: none;
-  opacity: 0.86;
-  transition: color 0.12s, background 0.12s, box-shadow 0.12s, opacity 0.12s;
-}
-.workspace-dock-toggle__button:hover {
-  color: var(--fg);
-  background: color-mix(in srgb, var(--fg-faint) 10%, transparent);
-  opacity: 1;
-}
-.workspace-dock-toggle__button:active {
-  color: var(--accent-strong);
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
-}
-.workspace-dock-toggle--open .workspace-dock-toggle__button {
-  color: var(--accent);
-  background: transparent;
-  box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--accent) 86%, transparent);
-  opacity: 1;
-}
-.workspace-dock-toggle--open .workspace-dock-toggle__button:hover {
-  color: var(--accent-strong);
-  background: color-mix(in srgb, var(--fg-faint) 10%, transparent);
-}
-.layout--resizing .workspace-dock-toggle {
-  pointer-events: none;
-  opacity: 0.65;
-}
 .chat-pane {
   grid-row: 1;
   grid-column: 2;
@@ -781,16 +756,16 @@ a[href] {
   min-height: 0;
   background: var(--chat-bg);
   position: relative;
+  border-radius: 12px;
+  overflow: hidden;
 }
 
 .chat-pane__body {
   position: relative;
   flex: 1 1 auto;
   min-height: 0;
-  display: flex;
-  flex-direction: row;
-  align-items: stretch;
   overflow: hidden;
+  display: flex;
 }
 
 .chat-area {
@@ -1066,8 +1041,9 @@ a[href] {
   position: relative;
   height: 100%;
   overflow-y: auto;
+  overflow-y: overlay;
   overflow-x: hidden;
-  scrollbar-gutter: stable;
+  scrollbar-gutter: auto;
   padding: 24px 32px 32px;
   scrollbar-width: thin;
   scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
@@ -1195,6 +1171,10 @@ a[href] {
 .transcript-wrap > .jump-bar {
   position: absolute;
   top: 50%;
+  /* Float the jump-rail in the right-hand gutter of the chat pane, 32px to
+     the right of the centered transcript content (var(--maxw)). When the
+     pane is narrower than --maxw the gutter collapses and the rail parks
+     flush to the pane's right edge with 32px padding. */
   right: 0;
   transform: translate(0, -50%);
   z-index: var(--z-inline-sticky);
@@ -1767,7 +1747,6 @@ a[href] {
 .process-card__body {
   box-sizing: border-box;
   border-top: 1px solid var(--border-soft);
-  background: var(--bg-soft);
 }
 .process-card__status {
   flex-shrink: 0;
@@ -8630,6 +8609,7 @@ a[href] {
   }
   .chat-pane {
     grid-column: 1;
+    border-radius: 12px;
   }
   .topbar {
     padding: 0 12px 0 82px; /* clear macOS inset traffic lights when the sidebar is hidden */
@@ -9046,7 +9026,7 @@ a[href] {
 }
 
 .sidebar {
-  padding-top: 12px;
+  padding-top: 7px;
 }
 
 .sidebar__new {
@@ -9056,6 +9036,19 @@ a[href] {
 .sidebar__section--projects {
   flex: 1 1 auto;
   min-height: 160px;
+  padding-top: 5px;
+}
+
+.workspace-tabs-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  border-bottom: 1px solid var(--border);
+}
+
+.workspace-tabs-bar__spacer {
+  flex: 1;
 }
 
 .workspace-tabs-bar .tabbar,
@@ -9068,7 +9061,7 @@ a[href] {
   align-items: center;
   gap: 14px;
   min-height: 44px;
-  padding: 6px 32px;
+  padding: 6px 16px 6px 32px;
   background: var(--chat-bg);
   border-bottom: 1px solid var(--border-soft);
   --wails-draggable: drag;
@@ -9344,7 +9337,7 @@ a[href] {
   display: flex;
   align-items: center;
   padding: 0 10px 0 0;
-  gap: 3px;
+  gap: 0;
   background: transparent;
   border-bottom: none;
   overflow: hidden;
@@ -9354,7 +9347,7 @@ a[href] {
   display: flex;
   align-self: stretch;
   flex: 0 1 auto;
-  max-width: calc(100% - 36px);
+  max-width: calc(100% - 30px);
   gap: 0;
   overflow-x: auto;
   scrollbar-width: none;
@@ -9537,7 +9530,6 @@ a[href] {
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-left: 1px;
   border: none;
   border-radius: 7px;
   background: transparent;
@@ -9610,6 +9602,7 @@ a[href] {
   gap: 7px;
   min-width: 0;
   flex: 1 1 auto;
+  padding-left: 8px;
 }
 
 .project-tree__action-slot {
@@ -10020,6 +10013,7 @@ a[href] {
 .project-tree__children {
   display: flex;
   flex-direction: column;
+  padding-top: 2px;
 }
 
 .context-menu {
@@ -10145,7 +10139,6 @@ a[href] {
 
 .context-inspector,
 .workbench-dock {
-  flex: 0 0 var(--workspace-width);
   min-width: 0;
   height: 100%;
   display: flex;
@@ -10159,12 +10152,12 @@ a[href] {
   justify-self: stretch;
   width: 100%;
   max-width: none;
-  container-type: inline-size;
 }
 
 .layout--workspace-maximized .workbench-dock {
-  flex-basis: 100%;
-  width: auto;
+  grid-column: 2;
+  grid-row: 1;
+  width: 100%;
   max-width: none;
 }
 
@@ -10239,34 +10232,6 @@ a[href] {
   background: var(--bg-elev);
   color: var(--fg);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.16);
-}
-
-@container (max-width: 520px) {
-  .workbench-dock__tabs {
-    width: 100%;
-  }
-
-  .workbench-dock__tab {
-    flex: 1 1 0;
-    max-width: none;
-  }
-}
-
-@container (max-width: 340px) {
-  .workbench-dock__tabs {
-    width: auto;
-  }
-
-  .workbench-dock__tab {
-    flex: 0 0 30px;
-    width: 30px;
-    padding: 0;
-    gap: 0;
-  }
-
-  .workbench-dock__tab-label {
-    display: none;
-  }
 }
 
 .workbench-dock__body {
@@ -11050,7 +11015,6 @@ a[href] {
   width: min(520px, 90vw);
   max-height: 60vh;
   background: var(--bg-elev);
-  border: 1px solid var(--border);
   border-radius: 10px;
   box-shadow: 0 12px 48px rgba(0, 0, 0, 0.36);
   display: flex;
@@ -11181,9 +11145,10 @@ a[href] {
   --wails-draggable: no-drag;
   display: flex;
   align-items: center;
-  height: 36px;
-  background: var(--bg-soft);
+  height: 48px;
+  padding: 0 10px;
   border-bottom: 1px solid var(--border-soft);
+  background: var(--chat-bg);
   flex-shrink: 0;
 }
 
@@ -11193,6 +11158,8 @@ a[href] {
   overflow-x: auto;
   scrollbar-width: none;
   min-width: 0;
+  gap: 4px;
+  padding: 4px 0;
 }
 
 .dock-tabbar__tabs::-webkit-scrollbar {
@@ -11203,8 +11170,8 @@ a[href] {
   display: flex;
   align-items: center;
   gap: 6px;
-  height: 36px;
-  padding: 0 12px;
+  height: 30px;
+  padding: 0 10px;
   font-size: 12px;
   color: var(--fg-dim);
   cursor: pointer;
@@ -11212,10 +11179,8 @@ a[href] {
   flex: 0 1 auto;
   min-width: 0;
   border: 0;
-  border-right: 1px solid var(--border-soft);
-  border-radius: 0;
+  border-radius: 7px;
   background: transparent;
-  position: relative;
   transition: background 0.1s, color 0.1s;
   font-family: inherit;
 }
@@ -11227,8 +11192,7 @@ a[href] {
 
 .dock-tabbar__tab--active {
   color: var(--fg);
-  background: var(--bg);
-  box-shadow: inset 0 -2px 0 var(--accent);
+  background: var(--sidebar-active);
 }
 
 .dock-tabbar__tab-label {
@@ -11263,8 +11227,8 @@ a[href] {
 
 .dock-tabbar__add {
   --wails-draggable: no-drag;
-  width: 36px;
-  height: 36px;
+  width: 30px;
+  height: 30px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -11272,14 +11236,37 @@ a[href] {
   cursor: pointer;
   flex-shrink: 0;
   border: 0;
-  border-left: 1px solid var(--border-soft);
-  border-radius: 0;
+  border-radius: 7px;
   background: transparent;
   transition: background 0.1s, color 0.1s;
   font-family: inherit;
 }
 
 .dock-tabbar__add:hover {
+  background: var(--sidebar-hover);
+  color: var(--fg);
+}
+
+.dock-tabbar .tooltip-trigger {
+  display: flex;
+  align-items: center;
+}
+
+.dock-tabbar .topicbar__action-btn--icon {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--fg-faint);
+  cursor: pointer;
+  padding: 0;
+}
+
+.dock-tabbar .topicbar__action-btn--icon:hover {
   background: var(--sidebar-hover);
   color: var(--fg);
 }
