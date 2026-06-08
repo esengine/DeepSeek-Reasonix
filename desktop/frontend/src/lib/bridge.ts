@@ -111,7 +111,6 @@ export interface AppBindings {
   RestoreSession(path: string): Promise<void>;
   PurgeTrashedSession(path: string): Promise<void>;
   GenerateWelcomePrompts(): Promise<string>;
-  GenerateWelcomePromptsForTab(tabID: string): Promise<string>;
   RenameSession(path: string, title: string): Promise<void>;
   ListWorkspaces(): Promise<WorkspaceView[]>;
   PickWorkspace(): Promise<string>;
@@ -1050,9 +1049,6 @@ function makeMockApp(): AppBindings {
       if (i >= 0) trashedSessions.splice(i, 1);
     },
     async GenerateWelcomePrompts() {
-      return "";
-    },
-    async GenerateWelcomePromptsForTab(_tabID: string) {
       return "";
     },
     async RenameSession(path: string, title: string) {
