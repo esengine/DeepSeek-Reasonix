@@ -278,20 +278,13 @@ func (g *Gate) Check(ctx context.Context, toolName string, args json.RawMessage,
 			return false, "the user declined this tool call — do not retry it; ask how they would like to proceed or choose another approach.", nil
 		}
 		if remember && g.OnRemember != nil {
-			g.OnRemember(rememberRule(toolName, subject))
+			// "Always allow" is tool-wide: persist the bare tool name so any
+			// later subject (a different file / command) is allowed without
+			// re-prompting. Deny rules still take precedence on every call.
+			g.OnRemember(toolName)
 		}
 		return true, "", nil
 	default:
 		return true, "", nil
 	}
-}
-
-// rememberRule builds the rule string persisted when the user picks "always
-// allow". It pins the exact subject (command / path) so the remembered grant is
-// narrow; the user can broaden it by hand later.
-func rememberRule(toolName, subject string) string {
-	if subject == "" {
-		return toolName
-	}
-	return toolName + "=" + subject
 }

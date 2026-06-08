@@ -809,7 +809,7 @@ func (c *Controller) Turn() int {
 }
 
 // Approve answers a pending ApprovalRequest by ID: allow runs the call, session
-// also remembers a grant for the rest of the session so the same tool+subject
+// also remembers a tool-wide grant for the rest of the session so that tool
 // isn't re-prompted. Unknown/expired IDs are ignored.
 func (c *Controller) Approve(id string, allow, session, persist bool) {
 	c.mu.Lock()
@@ -2150,8 +2150,8 @@ func listItem(line string) (content string, level int, ok bool) {
 }
 
 // requestApproval emits an ApprovalRequest and blocks until Approve(ID, …)
-// answers or ctx is cancelled. A prior session grant for the same tool+subject
-// short-circuits. promptMu serialises outstanding prompts.
+// answers or ctx is cancelled. A prior tool-wide session grant short-circuits.
+// promptMu serialises outstanding prompts.
 // parseRewind parses the arguments after "/rewind". The user may provide:
 //
 //	/rewind              → latest checkpoint, both
@@ -2188,7 +2188,11 @@ func parseRewind(args string, cps []checkpoint.Meta) (int, RewindScope, error) {
 }
 
 func (c *Controller) requestApproval(ctx context.Context, tool, subject string) (bool, bool, error) {
-	key := tool + "\x00" + subject
+	// Session grants are tool-wide: "allow for this session" / "allow persistently"
+	// mean the user trusts this tool (write_file, bash, …), not just this one
+	// file/command, so a different subject for the same tool isn't re-prompted.
+	// Deny rules still bite upstream of here.
+	key := tool
 
 	c.mu.Lock()
 	// YOLO/bypass and the just-approved-plan window auto-allow every approval
