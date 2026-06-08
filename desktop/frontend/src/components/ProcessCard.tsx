@@ -1,4 +1,5 @@
 import { Children, type ReactNode, type SVGProps, useState } from "react";
+import { BrainCircuit } from "lucide-react";
 
 type IconProps = SVGProps<SVGSVGElement> & { size?: number };
 export type ProcessTone = "default" | "success" | "warning" | "danger" | "accent" | "violet";
@@ -47,19 +48,14 @@ export function ProcessXIcon(props: IconProps) {
   );
 }
 
-export function ProcessBrainIcon(props: IconProps) {
-  return (
-    <ProcessIcon {...props}>
-      <path d="M9 4a3 3 0 0 0-3 3v0a3 3 0 0 0-2 5 3 3 0 0 0 2 5 3 3 0 0 0 3 3h0a3 3 0 0 0 3-3V4" />
-      <path d="M15 4a3 3 0 0 1 3 3 3 3 0 0 1 2 5 3 3 0 0 1-2 5 3 3 0 0 1-3 3" />
-    </ProcessIcon>
-  );
+export function ProcessBrainIcon({ size = 14, ...rest }: IconProps) {
+  return <BrainCircuit size={size} strokeWidth={1.8} {...rest} />;
 }
 
 export function ProcessToolIcon(props: IconProps) {
   return (
     <ProcessIcon {...props}>
-      <path d="M14 7a4 4 0 1 0 4 4l3 3-3 3-3-3a4 4 0 0 1-4-4l-3-3-3 3 3 3a4 4 0 0 0 6 0" />
+      <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
     </ProcessIcon>
   );
 }

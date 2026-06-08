@@ -21,7 +21,9 @@ import logoWordmark from "./assets/logo-wordmark.svg";
 import { asArray } from "./lib/array";
 import { clearLegacyLangPref, normalizeLangPref, readLegacyLangPref, t, useI18n, useT } from "./lib/i18n";
 import { useController, type Item, type LiveStream } from "./lib/useController";
-import { app, onProjectTreeChanged } from "./lib/bridge";
+import { app, onProjectTreeChanged, onTurnDone, onEvent } from "./lib/bridge";
+import { playSuccessChime } from "./lib/sound";
+import { generativeMusic, isGenerativeMusicEnabled } from "./lib/generative-music";
 import { Transcript } from "./components/Transcript";
 import { Composer } from "./components/Composer";
 import { TodoPanel } from "./components/TodoPanel";
@@ -60,6 +62,7 @@ import { applyTextSize, DEFAULT_TEXT_SIZE, getTextSize, nextTextSize } from "./l
 import { useWindowStatePersistence } from "./lib/windowState";
 
 const SIDEBAR_COLLAPSED_KEY = "reasonix.sidebar.collapsed";
+const TAB_BAR_HIDDEN_KEY = "reasonix.desktop.tabBarHidden";
 const SIDEBAR_DEFAULT_WIDTH = 264;
 const SIDEBAR_DEFAULT_RATIO = 0.175;
 const SIDEBAR_MIN_WIDTH = 228;
@@ -141,6 +144,15 @@ function saveSidebarCollapsed(collapsed: boolean): void {
     window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, collapsed ? "1" : "0");
   } catch {
     /* ignore storage failures */
+  }
+}
+
+function loadTabBarHidden(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(TAB_BAR_HIDDEN_KEY) === "1";
+  } catch {
+    return false;
   }
 }
 
@@ -379,6 +391,7 @@ export default function App() {
     restoreSession,
     purgeTrashedSession,
     renameSession,
+    markTopicRead,
     refreshMeta,
     pickWorkspace,
     switchWorkspace,
@@ -396,8 +409,7 @@ export default function App() {
   const t = useT();
   const [modesByTab, setModesByTab] = useState<Record<string, Mode>>({});
   const [tabMetas, setTabMetas] = useState<TabMeta[]>([]);
-  const [tabOrderIds, setTabOrderIds] = useState<string[]>([]);
-  const [tabRevealSignal, setTabRevealSignal] = useState(0);
+
   const [startupSplashVisible, setStartupSplashVisible] = useState<boolean>(() => shouldShowStartupSplash());
   // null until the mount probe resolves; true shows the overlay. Probed once —
   // clearing the key mid-session is the Settings panel's job, not the gate's.
@@ -405,6 +417,13 @@ export default function App() {
   const [settingsTarget, setSettingsTarget] = useState<SettingsTab | null>(null);
   const [histView, setHistView] = useState<HistoryViewState | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(loadSidebarCollapsed);
+  const [tabBarHidden, setTabBarHidden] = useState(loadTabBarHidden);
+  useEffect(() => {
+    const handler = () => setTabBarHidden(loadTabBarHidden());
+    window.addEventListener("reasonix:tabbar-visibility-changed", handler);
+    return () => window.removeEventListener("reasonix:tabbar-visibility-changed", handler);
+  }, []);
+  const [tabRevealSignal, setTabRevealSignal] = useState(0);
   const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidth);
   const [sidebarResizing, setSidebarResizing] = useState(false);
   const [workspacePanelOpen, setWorkspacePanelOpen] = useState(true);
@@ -524,8 +543,8 @@ export default function App() {
     },
     [activeTabId],
   );
+  const [tabOrderIds, setTabOrderIds] = useState<string[]>([]);
   const topicbarEditing = Boolean(activeTab?.topicId && activeTab.topicId === renamingTopicId);
-  const topicbarProjectPrefix = activeTab ? tabWorkspaceTitle(activeTab) : "";
   const visibleTabId = activeTabId;
   const visibleTabs = useMemo(() => {
     const byId = new Map(tabMetas.map((tab) => [tab.id, tab]));
@@ -537,7 +556,6 @@ export default function App() {
       active: tab.id === visibleTabId,
     }));
   }, [modesByTab, tabMetas, tabOrderIds, visibleTabId]);
-
   useEffect(() => {
     const ids = tabMetas.map((tab) => tab.id);
     setTabOrderIds((current) => {
@@ -548,7 +566,6 @@ export default function App() {
       return next.join("\u0000") === current.join("\u0000") ? current : next;
     });
   }, [tabMetas]);
-
   useEffect(() => {
     const ids = new Set(tabMetas.map((tab) => tab.id));
     setModesByTab((current) => {
@@ -653,6 +670,35 @@ export default function App() {
     const id = window.setInterval(() => setTodoNow(Date.now()), 15000);
     return () => window.clearInterval(id);
   }, [showTodos]);
+
+  // Play a success chime when any turn finishes (agent:turn-done event).
+  useEffect(() => {
+    const unsub = onTurnDone(() => {
+      playSuccessChime();
+    });
+    return unsub;
+  }, []);
+
+  // Play generative ambient music while the agent is generating.
+  // Start/stop the AudioContext engine based on running state.
+  useEffect(() => {
+    if (state.running && isGenerativeMusicEnabled()) {
+      generativeMusic.start();
+    } else {
+      generativeMusic.stop();
+    }
+  }, [state.running]);
+
+  // Per-token: play a note every time a text/reasoning chunk arrives.
+  // playTokenNote() is a no-op when the engine isn't running.
+  useEffect(() => {
+    const unsub = onEvent((e) => {
+      if (e.kind === "text" || e.kind === "reasoning" || e.kind === "tool_dispatch") {
+        generativeMusic.playTokenNote();
+      }
+    });
+    return unsub;
+  }, []);
 
   const todoStale = useMemo(() => {
     if (!showTodos || !todoEntry) return false;
@@ -1035,9 +1081,12 @@ export default function App() {
 
   const handleTabChange = useCallback(async (id: string) => {
     await switchTab(id);
+    // Mark the topic as read when switching to a tab.
+    const tab = tabMetas.find((t) => t.id === id);
+    if (tab?.topicId) await markTopicRead(tab.topicId).catch(() => {});
     await refreshTabMetas();
     setTabRevealSignal((signal) => signal + 1);
-  }, [refreshTabMetas, switchTab]);
+  }, [markTopicRead, refreshTabMetas, switchTab, tabMetas]);
 
   const handleTabClose = useCallback(async (id: string) => {
     setModesByTab((current) => {
@@ -1061,6 +1110,37 @@ export default function App() {
     await refreshTabMetas();
     setTabRevealSignal((signal) => signal + 1);
   }, [activeTabId, closeTab, refreshTabMetas]);
+
+  const closeActiveTab = useCallback(() => {
+    if (!activeTabId || tabMetas.length <= 1) return;
+    void handleTabClose(activeTabId);
+  }, [activeTabId, handleTabClose, tabMetas.length]);
+
+  useEffect(() => {
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey || event.key.toLowerCase() !== "k") return;
+      event.preventDefault();
+      setPaletteOpen((open) => !open);
+    };
+    window.addEventListener("keydown", onKeyDown, { capture: true });
+    return () => window.removeEventListener("keydown", onKeyDown, { capture: true });
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey || event.key.toLowerCase() !== "w") return;
+      event.preventDefault();
+      closeActiveTab();
+    };
+    window.addEventListener("keydown", onKeyDown, { capture: true });
+    return () => window.removeEventListener("keydown", onKeyDown, { capture: true });
+  }, [closeActiveTab]);
+
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.runtime) return;
+    return window.runtime.EventsOn("app:close-active-tab", closeActiveTab);
+  }, [closeActiveTab]);
 
   const handleTabsClose = useCallback(async (ids: string[], nextActiveTabId?: string) => {
     const currentIds = tabMetas.map((tab) => tab.id);
@@ -1103,23 +1183,11 @@ export default function App() {
     setTabRevealSignal((signal) => signal + 1);
   }, [activeTab?.scope, activeTab?.workspaceRoot, openGlobalTab, openProjectTab, refreshTabMetas, state.meta?.cwd]);
 
-  // ── Command palette (⌘K) ────────────────────────────────────────────
-  useEffect(() => {
-    const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey || event.key.toLowerCase() !== "k") return;
-      event.preventDefault();
-      setPaletteOpen((open) => !open);
-    };
-    window.addEventListener("keydown", onKeyDown, { capture: true });
-    return () => window.removeEventListener("keydown", onKeyDown, { capture: true });
-  }, []);
-
   const handleMessageAction = useCallback(async (turn: number, scope: string) => {
     await rewind(turn, scope);
     if (scope === "fork") {
       await refreshTabMetas();
       setProjectRevision((value) => value + 1);
-      setTabRevealSignal((signal) => signal + 1);
       return;
     }
     if (scope === "code" || scope === "both") {
@@ -1134,9 +1202,74 @@ export default function App() {
     } else {
       await openProjectTab(workspaceRoot, topicId);
     }
+    if (topicId) await markTopicRead(topicId);
     await refreshTabMetas();
-    setTabRevealSignal((signal) => signal + 1);
-  }, [openGlobalTab, openProjectTab, refreshTabMetas]);
+  }, [markTopicRead, openGlobalTab, openProjectTab, refreshTabMetas]);
+
+  // ⌘G: jump to the next unread topic that is not currently running
+  useEffect(() => {
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey || event.key.toLowerCase() !== "g") return;
+      event.preventDefault();
+
+      const findNextUnread = async () => {
+        try {
+          const tree = await app.ListProjectTree();
+          const nodes = asArray(tree);
+
+          // Flatten: collect topic / global_topic nodes in tree order
+          const topics: { scope: string; root: string; topicId: string; running?: boolean; hasUnread?: boolean }[] = [];
+          for (const node of nodes) {
+            const children = asArray(node.children);
+            for (const child of children) {
+              if (child.kind === "topic" || child.kind === "global_topic") {
+                topics.push({
+                  scope: child.kind === "global_topic" ? "global" : "project",
+                  root: child.root ?? "",
+                  topicId: child.topicId ?? "",
+                  running: child.running,
+                  hasUnread: child.hasUnread,
+                });
+              }
+            }
+          }
+
+          if (topics.length === 0) return;
+
+          // Start looking after the current topic (or from the beginning)
+          const currentId = activeTab?.topicId;
+          const startIndex = currentId ? topics.findIndex((t) => t.topicId === currentId) + 1 : 0;
+
+          // Priority 1: unread + not running (stopped generating but unread)
+          for (let i = 0; i < topics.length; i++) {
+            const idx = (startIndex + i) % topics.length;
+            const topic = topics[idx];
+            if (topic.hasUnread && !topic.running) {
+              await handleOpenTopic(topic.scope, topic.root, topic.topicId);
+              return;
+            }
+          }
+
+          // Priority 2: running (currently generating)
+          for (let i = 0; i < topics.length; i++) {
+            const idx = (startIndex + i) % topics.length;
+            const topic = topics[idx];
+            if (topic.running) {
+              await handleOpenTopic(topic.scope, topic.root, topic.topicId);
+              return;
+            }
+          }
+        } catch {
+          /* bridge unavailable */
+        }
+      };
+
+      void findNextUnread();
+    };
+
+    window.addEventListener("keydown", onKeyDown, { capture: true });
+    return () => window.removeEventListener("keydown", onKeyDown, { capture: true });
+  }, [activeTab, handleOpenTopic]);
 
   // History drawer: project menus can open a scoped saved-session list. Idle row
   // clicks resume; running row clicks only preview through PreviewSession.
@@ -1152,7 +1285,7 @@ export default function App() {
   }, [listTrashedSessions]);
   const closeHistory = useCallback(() => setHistView(null), []);
 
-  // ── Command palette (⌘K) item builder ───────────────────────────────
+  // ── Command palette (⌘K) ────────────────────────────────────────────
   const buildPaletteItems = useCallback((): PaletteItem[] => {
     const items: PaletteItem[] = [];
 
@@ -1214,7 +1347,6 @@ export default function App() {
       await resumeSession(session.path, targetTab?.id);
       if (targetTab) {
         await refreshTabMetas();
-        setTabRevealSignal((signal) => signal + 1);
       }
     },
     [openGlobalTab, openProjectTab, refreshTabMetas, state.running, resumeSession],
@@ -1394,7 +1526,7 @@ export default function App() {
             {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
           </button>
           <div className="app-chrome__identity" aria-label="Reasonix">
-            <img src={logoWordmark} alt="" className="app-chrome__logo" draggable={false} />
+            <img src={logoWordmark} alt="" className="app-chrome__logo" />
             <span className="app-chrome__separator">/</span>
             <span className="app-chrome__scope">{appChromeScopeLabel(activeTab, state.meta)}</span>
           </div>
@@ -1477,6 +1609,7 @@ export default function App() {
         />
 
         <section className="chat-pane">
+          {!tabBarHidden && (
           <header className="workspace-tabs-bar">
             <TabBar
               tabs={visibleTabs}
@@ -1508,16 +1641,12 @@ export default function App() {
               </Tooltip>
             )}
           </header>
-
-          <>
+          )}
           <header className="topicbar">
             <div className="topicbar__identity">
               <div className="topicbar__title-row">
                 {topicbarEditing ? (
                   <div className="topicbar__title-edit">
-                    {topicbarProjectPrefix && (
-                      <span className="topicbar__title-prefix">{topicbarProjectPrefix} /</span>
-                    )}
                     <input
                       autoFocus
                       className="topicbar__title-input"
@@ -1537,7 +1666,7 @@ export default function App() {
                     />
                   </div>
                 ) : (
-                  <h1>{topicTitle(activeTab)}</h1>
+                  <h1>{activeTab?.topicTitle || "Untitled"}</h1>
                 )}
                 <Tooltip label={t("topicBar.renameSession")}>
                   <button
@@ -1587,9 +1716,21 @@ export default function App() {
                   </div>
                 )}
               </div>
+              {tabBarHidden && !workspacePanelMaximized && (
+                <Tooltip label={workspacePanelRenderable ? t("rightDock.collapse") : t("rightDock.expand")}>
+                  <button
+                    className="topicbar__action-btn topicbar__action-btn--icon"
+                    type="button"
+                    onClick={workspacePanelRenderable ? closeWorkspacePanel : () => openWorkspacePanel("files")}
+                    aria-label={workspacePanelRenderable ? t("rightDock.collapse") : t("rightDock.expand")}
+                    aria-pressed={workspacePanelRenderable}
+                  >
+                    {workspacePanelRenderable ? <PanelRightClose size={15} /> : <PanelRightOpen size={15} />}
+                  </button>
+                </Tooltip>
+              )}
             </div>
           </header>
-
           {state.meta?.startupErr && (
             <div className="banner banner--error">{t("topbar.startupError", { msg: state.meta.startupErr })}</div>
           )}
@@ -1663,9 +1804,6 @@ export default function App() {
 	              disabled={state.meta?.ready === false || state.messageAction != null || state.approval != null || state.ask != null}
 	              decisionPending={state.messageAction != null || state.approval != null || state.ask != null}
               ready={state.meta?.ready === true}
-              turnStartAt={state.turnStartAt}
-              turnTokens={state.turnTokens}
-              retry={state.retry}
               workspaceRefreshSignal={projectRevision}
             />
             <StatusBar
@@ -1677,9 +1815,9 @@ export default function App() {
               mode={mode}
               cost={state.sessionCost}
               currency={state.sessionCurrency}
+              turnTokens={state.turnTokens}
             />
           </footer>
-          </>
         </section>
 
         {workspacePanelGridOpen && (
@@ -1808,8 +1946,8 @@ export default function App() {
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}
         items={buildPaletteItems()}
-        placeholder="Quick actions…"
-        emptyText="No matches"
+        placeholder={t("topbar.newSession") + "..."}
+        emptyText={t("sidebar.conversations")}
       />
     </div>
     </ShellExpandProvider>

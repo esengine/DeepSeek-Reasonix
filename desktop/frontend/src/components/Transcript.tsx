@@ -403,18 +403,15 @@ export function Transcript({
   // don't rebuild it. The hot zone uses LiveAssistantMessage (reads live from
   // LiveStreamContext) so streaming updates are captured immediately.
   return (
-    <div
-      className={`transcript${empty ? " transcript--empty" : ""}`}
-      ref={scrollRef}
-      onScroll={onScroll}
-    >
-      {empty && <Welcome onPrompt={onPrompt} />}
+    <div className="transcript-wrap">
+      <div
+        className={`transcript${empty ? " transcript--empty" : ""}`}
+        ref={scrollRef}
+        onScroll={onScroll}
+      >
+        {empty && <Welcome onPrompt={onPrompt} />}
 
-      {!empty && showQuestionNav && (
-        <QuestionJumpBar questions={questions} onJump={handleJumpToQuestion} />
-      )}
-
-      <LiveStreamContext.Provider value={live}>
+        <LiveStreamContext.Provider value={live}>
         {turnGroups.length > HOT_TURNS && (
           <WarmZone
             turnGroups={turnGroups}
@@ -443,6 +440,11 @@ export function Transcript({
         )}
         {hotZoneNodes}
       </LiveStreamContext.Provider>
+      </div>
+
+      {!empty && showQuestionNav && (
+        <QuestionJumpBar questions={questions} onJump={handleJumpToQuestion} />
+      )}
     </div>
   );
 }

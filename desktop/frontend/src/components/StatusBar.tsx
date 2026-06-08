@@ -1,7 +1,12 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Tooltip } from "./Tooltip";
-import { useI18n } from "../lib/i18n";
+import { useI18n, SPINNER_WORDS } from "../lib/i18n";
 import type { BalanceInfo, ContextInfo, JobView, Mode, WireUsage } from "../lib/types";
+
+function fmtTokens(n: number): string {
+  if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, "") + "k";
+  return String(n);
+}
 
 // JobsChip is the status-bar background-jobs indicator: a count that opens an
 // upward popover listing the running jobs (id · label · status), mirroring the
@@ -89,6 +94,7 @@ export function StatusBar({
   mode,
   cost,
   currency,
+  turnTokens,
 }: {
   context: ContextInfo;
   usage?: WireUsage;
@@ -98,8 +104,19 @@ export function StatusBar({
   mode: Mode;
   cost?: number;
   currency?: string;
+  turnTokens?: number;
 }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!running) return;
+    const id = window.setInterval(() => setTick((n) => n + 1), 1000);
+    return () => window.clearInterval(id);
+  }, [running]);
+  const spinnerRunning = running;
+  const spinnerWord = spinnerRunning
+    ? SPINNER_WORDS[locale][Math.floor(Date.now() / 3000) % SPINNER_WORDS[locale].length]
+    : "";
   const pct = context.window ? Math.min(100, Math.round((context.used / context.window) * 100)) : null;
   const compactPct = context.compactRatio ? Math.round(context.compactRatio * 100) : null;
   const nowPct = nowRate(usage);
@@ -132,7 +149,15 @@ export function StatusBar({
         </span>
       </Tooltip>
       <span className="statusbar__spacer" />
-      {mode === "plan" && <span className="statusbar__plan">{t("status.plan")}</span>}
+      <div className="statusbar__trailing">
+        {spinnerRunning && (
+          <span className="statusbar__spinner">{spinnerWord}…</span>
+        )}
+        {(turnTokens ?? 0) > 0 && (
+          <span className="statusbar__tokens">↓ {fmtTokens(turnTokens ?? 0)} {t("status.tokens")}</span>
+        )}
+        {mode === "plan" && <span className="statusbar__plan">{t("status.plan")}</span>}
+      </div>
     </div>
   );
 }
