@@ -165,7 +165,10 @@ func TestSaveTabsPersistsModelAndEffort(t *testing.T) {
 	}
 }
 
-func TestSaveTabsDoesNotPersistYoloMode(t *testing.T) {
+// TestSaveTabsPersistsYoloMode is the regression for #3517: yolo used to be
+// dropped on save, so relaunching reverted to normal. It now round-trips through
+// the real saveTabsLocked/loadTabsFile path.
+func TestSaveTabsPersistsYoloMode(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
 	app := NewApp()
@@ -184,8 +187,8 @@ func TestSaveTabsDoesNotPersistYoloMode(t *testing.T) {
 	if len(got.Tabs) != 1 {
 		t.Fatalf("tabs len = %d, want 1", len(got.Tabs))
 	}
-	if got.Tabs[0].Mode != "" {
-		t.Fatalf("saved yolo mode = %q, want empty", got.Tabs[0].Mode)
+	if got.Tabs[0].Mode != "yolo" {
+		t.Fatalf("saved yolo mode = %q, want yolo (#3517)", got.Tabs[0].Mode)
 	}
 }
 
@@ -194,30 +197,4 @@ func userConfigPathForTest() string {
 		return dir + "/reasonix/reasonix.toml"
 	}
 	return ""
-}
-
-// TestTabModeYoloSurvivesPersist is the regression for #3517: yolo used to be
-// dropped on persist, so a tab reopened (or the app relaunched) in "normal".
-// Both the save side (currentTabMode) and the load side go through
-// persistedTabMode, so this proves a yolo tab round-trips.
-func TestTabModeYoloSurvivesPersist(t *testing.T) {
-	tab := testTab("y", t.TempDir())
-	tab.Ctrl.SetMode(false, true) // yolo
-	if got := currentTabMode(tab); got != "yolo" {
-		t.Fatalf("currentTabMode = %q, want yolo", got)
-	}
-	saved := persistedTabMode(currentTabMode(tab)) // what gets written with the tab
-	if saved != "yolo" {
-		t.Fatalf("persisted yolo tab = %q, want yolo (#3517)", saved)
-	}
-	if restored := persistedTabMode(saved); restored != "yolo" { // load side
-		t.Fatalf("yolo did not survive reload: %q", restored)
-	}
-	// plan still persists; normal stays the un-persisted default.
-	if persistedTabMode("plan") != "plan" {
-		t.Error("plan mode should persist")
-	}
-	if persistedTabMode("normal") != "" {
-		t.Error("normal mode should not be persisted")
-	}
 }
