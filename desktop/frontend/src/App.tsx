@@ -415,7 +415,7 @@ export default function App() {
   const [workspacePreviewActive, setWorkspacePreviewActive] = useState(false);
   const [workspacePanelResizing, setWorkspacePanelResizing] = useState(false);
   const [workspacePanelMaximized, setWorkspacePanelMaximized] = useState(false);
-  const [rightDockMode, setRightDockMode] = useState<RightDockMode>("files");
+
   const [dockRefreshKey, setDockRefreshKey] = useState(0);
   const [projectRevision, setProjectRevision] = useState(0);
   const [composerInsertRequest, setComposerInsertRequest] = useState<ComposerInsertRequest | null>(null);
@@ -489,9 +489,7 @@ export default function App() {
   const footerRef = useRef<HTMLElement>(null);
   const [layoutWidth, setLayoutWidth] = useState(0);
   const preferredWorkspacePanelWidth =
-    rightDockMode === "context"
-      ? RIGHT_DOCK_CONTEXT_WIDTH
-      : workspacePreviewActive
+    workspacePreviewActive
       ? rightDockPreviewWidth
       : rightDockTreeWidth;
   const sidebarRenderWidth = sidebarCollapsed ? 0 : sidebarWidth;
@@ -903,7 +901,6 @@ export default function App() {
 
   const setSavedWorkspacePanelWidth = useCallback(
     (width: number) => {
-      if (rightDockMode === "context") return;
       if (workspacePreviewActive) {
         const next = clampRightDockWidth(width);
         setRightDockPreviewWidth(next);
@@ -914,17 +911,16 @@ export default function App() {
       setRightDockTreeWidth(next);
       saveRightDockTreeWidth(next);
     },
-    [rightDockMode, workspacePreviewActive],
+    [workspacePreviewActive],
   );
 
   const ensureWorkspacePanelWidth = useCallback(
     (width: number) => {
-      if (rightDockMode === "context") return;
       const next = clampRightDockWidth(width);
       setRightDockPreviewWidth(next);
       saveRightDockPreviewWidth(next);
     },
-    [rightDockMode],
+    [],
   );
 
   const startWorkspacePanelResize = useCallback(
@@ -938,7 +934,6 @@ export default function App() {
       const onMove = (moveEvent: PointerEvent) => {
         const delta = moveEvent.clientX - startX;
         nextDockWidth = startDockWidth - delta;
-        if (rightDockMode === "context") return;
         if (workspacePreviewActive) {
           setRightDockPreviewWidth(clampRightDockWidth(nextDockWidth));
         } else {
@@ -960,7 +955,7 @@ export default function App() {
       window.addEventListener("pointerup", onDone);
       window.addEventListener("pointercancel", onDone);
     },
-    [preferredWorkspacePanelWidth, rightDockMode, setSavedWorkspacePanelWidth, workspacePanelOpen, workspacePreviewActive],
+    [preferredWorkspacePanelWidth, setSavedWorkspacePanelWidth, workspacePanelOpen, workspacePreviewActive],
   );
 
   const resizeWorkspacePanelWithKeyboard = useCallback(
@@ -979,27 +974,83 @@ export default function App() {
     [preferredWorkspacePanelWidth, setSavedWorkspacePanelWidth, workspacePreviewActive],
   );
 
-  const openWorkspacePanel = useCallback(
-    (mode: RightDockMode = rightDockMode) => {
-      setRightDockMode(mode);
-      let nextMaximized = workspacePanelMaximized;
-      if (mode === "context") {
-        nextMaximized = false;
-        setWorkspacePanelMaximized(false);
-      } else {
-        // When user explicitly opens the panel, we do NOT force maximize.
-        // If there's not enough room, the panel will open in floating mode
-        // over the chat area, preserving the chat area's minimum width
-        // and keeping the panel's close button accessible.
-        nextMaximized = false;
+  const activateDockTab = useCallback(
+    (id: string) => {
+      const tab = dockTabs.find((t) => t.id === id);
+      if (tab) {
+        setActiveDockTabId(id);
+        setWorkspacePanelOpen(true);
         setWorkspacePanelMaximized(false);
       }
-      if (workspacePanelOpen && workspacePanelMaximized === nextMaximized) {
+    },
+    [dockTabs],
+  );
+
+  const closeDockTab = useCallback(
+    (id: string) => {
+      setDockTabs((prev) => {
+        const idx = prev.findIndex((t) => t.id === id);
+        const next = prev.filter((t) => t.id !== id);
+        if (next.length === 0) {
+          setWorkspacePanelOpen(false);
+        } else if (activeDockTabId === id) {
+          const newIdx = Math.min(idx, next.length - 1);
+          setActiveDockTabId(next[newIdx].id);
+        }
+        return next;
+      });
+    },
+    [activeDockTabId],
+  );
+
+  const addBrowserTab = useCallback(() => {
+    const id = `browser_${Date.now()}`;
+    const newTab: DockTab = {
+      id,
+      type: "browser",
+      title: "新标签页",
+      icon: Globe,
+      closable: true,
+      metadata: { url: "about:blank", history: [], historyIndex: -1, isLoading: false },
+    };
+    setDockTabs((prev) => [...prev, newTab]);
+    setActiveDockTabId(id);
+    setWorkspacePanelOpen(true);
+    setWorkspacePanelMaximized(false);
+  }, []);
+
+  const handleDockMetadataUpdate = useCallback(
+    (id: string, meta: Record<string, unknown>) => {
+      setDockTabs((prev) =>
+        prev.map((t) =>
+          t.id === id ? { ...t, metadata: { ...((t.metadata ?? {}) as Record<string, unknown>), ...meta } } : t,
+        ),
+      );
+    },
+    [],
+  );
+
+  const handleDockTitleUpdate = useCallback(
+    (id: string, title: string) => {
+      setDockTabs((prev) => prev.map((t) => (t.id === id ? { ...t, title } : t)));
+    },
+    [],
+  );
+
+  const openWorkspacePanel = useCallback(
+    (mode: string) => {
+      const existing = dockTabs.find((t) => t.id === mode || t.type === mode);
+      if (existing) {
+        setActiveDockTabId(existing.id);
+        setWorkspacePanelOpen(true);
+        setWorkspacePanelMaximized(false);
         return;
       }
-      setWorkspacePanelOpen(true);
+      if (mode === "browser") {
+        addBrowserTab();
+      }
     },
-    [rightDockMode, workspacePanelMaximized, workspacePanelOpen],
+    [dockTabs, addBrowserTab],
   );
 
   const closeWorkspacePanel = useCallback(() => {
@@ -1009,13 +1060,6 @@ export default function App() {
     setWorkspacePanelMaximized(false);
     setWorkspacePanelOpen(false);
   }, [workspacePanelOpen]);
-
-  const openRightDockMode = useCallback(
-    (mode: RightDockMode) => {
-      openWorkspacePanel(mode);
-    },
-    [openWorkspacePanel],
-  );
 
   const layoutStyle = useMemo(
     () =>
@@ -1342,9 +1386,7 @@ export default function App() {
       ? t("sidebar.expand")
       : t("sidebar.collapse");
   const sidebarNavTooltipDisabled = !sidebarCollapsed;
-  const workspacePanelResetWidth = rightDockMode === "context"
-    ? RIGHT_DOCK_CONTEXT_WIDTH
-    : workspacePreviewActive
+  const workspacePanelResetWidth = workspacePreviewActive
     ? RIGHT_DOCK_PREVIEW_DEFAULT_WIDTH
     : defaultRightDockTreeWidth();
   const workspacePanelMaxWidth = workspacePreviewActive ? RIGHT_DOCK_MAX_WIDTH : RIGHT_DOCK_TREE_MAX_WIDTH;
@@ -1666,79 +1708,53 @@ export default function App() {
         )}
 
         {workspacePanelRenderable && (
-          <aside
-            className={[
-              "workbench-dock",
-              `workbench-dock--${rightDockMode}`,
-            ].join(" ")}
-            aria-label={t("rightDock.workbench")}
-          >
-            <div className="workbench-dock__tools">
-              <div className="workbench-dock__tabs" role="tablist" aria-label={t("rightDock.views")}>
-                {SHOW_CONTEXT_DOCK && (
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={rightDockMode === "context"}
-                    className={`workbench-dock__tab${rightDockMode === "context" ? " workbench-dock__tab--active" : ""}`}
-                    onClick={() => openRightDockMode("context")}
-                  >
-                    <CircleGauge size={13} />
-                    <span className="workbench-dock__tab-label">{t("rightDock.overview")}</span>
-                  </button>
+            <aside
+              className="workbench-dock"
+              aria-label={t("rightDock.workbench")}
+            >
+              <DockTabBar
+                tabs={dockTabs}
+                activeId={activeDockTabId}
+                onSelect={activateDockTab}
+                onClose={closeDockTab}
+                onAdd={addBrowserTab}
+              />
+              <div className="workbench-dock__body">
+                {activeDockTabId === "context" ? (
+                  <ContextPanel
+                    tabId={activeTabId}
+                    context={state.context}
+                    usage={state.usage}
+                    sessionCost={state.sessionCost}
+                    sessionCurrency={state.sessionCurrency}
+                    scopeLabel={topicScopeLabel(activeTab)}
+                    refreshKey={dockRefreshKey}
+                  />
+                ) : (
+                  dockTabs.map((tab) =>
+                    tab.id === activeDockTabId ? (
+                      <DockContent
+                        key={tab.id}
+                        tab={tab}
+                        open={workspacePanelRenderable}
+                        cwd={state.meta?.cwd}
+                        maximized={workspacePanelMaximized}
+                        panelWidth={workspacePanelRenderWidth}
+                        onClose={() => setWorkspacePanel(false)}
+                        onToggleMaximized={() => setWorkspacePanelMaximized((value) => !value)}
+                        onPreviewModeChange={setWorkspacePreviewActive}
+                        onAddToChat={addWorkspaceTextToComposer}
+                        onRequestPanelWidth={ensureWorkspacePanelWidth}
+                        refreshKey={dockRefreshKey}
+                        onMetadataUpdate={handleDockMetadataUpdate}
+                        onTitleUpdate={handleDockTitleUpdate}
+                      />
+                    ) : null,
+                  )
                 )}
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={rightDockMode === "files"}
-                  className={`workbench-dock__tab${rightDockMode === "files" ? " workbench-dock__tab--active" : ""}`}
-                  onClick={() => openRightDockMode("files")}
-                >
-                  <FileText size={13} />
-                  <span className="workbench-dock__tab-label">{t("workspace.filesTab")}</span>
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={rightDockMode === "changed"}
-                  className={`workbench-dock__tab${rightDockMode === "changed" ? " workbench-dock__tab--active" : ""}`}
-                  onClick={() => openRightDockMode("changed")}
-                >
-                  <GitBranch size={13} />
-                  <span className="workbench-dock__tab-label">{t("workspace.changedTab")}</span>
-                </button>
               </div>
-            </div>
-            <div className="workbench-dock__body">
-              {rightDockMode === "context" ? (
-                <ContextPanel
-                  tabId={activeTabId}
-                  context={state.context}
-                  usage={state.usage}
-                  sessionCost={state.sessionCost}
-                  sessionCurrency={state.sessionCurrency}
-                  scopeLabel={topicScopeLabel(activeTab)}
-                  refreshKey={dockRefreshKey}
-                />
-              ) : (
-                <WorkspacePanel
-                  open={workspacePanelRenderable}
-                  cwd={state.meta?.cwd}
-                  maximized={workspacePanelMaximized}
-                  panelWidth={workspacePanelRenderWidth}
-                  onClose={() => setWorkspacePanel(false)}
-                  onToggleMaximized={() => setWorkspacePanelMaximized((value) => !value)}
-                  onPreviewModeChange={setWorkspacePreviewActive}
-                  onAddToChat={addWorkspaceTextToComposer}
-                  onRequestPanelWidth={ensureWorkspacePanelWidth}
-                  refreshKey={dockRefreshKey}
-                  initialViewMode={rightDockMode === "changed" ? "changed" : "files"}
-                  showViewTabs={false}
-                />
-              )}
-            </div>
-          </aside>
-        )}
+            </aside>
+          )}
       </div>
 
       {histView !== null && (

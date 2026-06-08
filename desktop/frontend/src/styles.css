@@ -4236,7 +4236,7 @@ a[href] {
   align-items: center;
   gap: 0;
   margin: 0 10px 6px;
-  padding: 4px 9px;
+  padding: 6px 9px;
   font-size: 12.5px;
   color: var(--fg-faint);
   border-radius: 6px;
@@ -4253,13 +4253,13 @@ a[href] {
   color: inherit;
   font: inherit;
   cursor: pointer;
-  padding: 0 4px 0 6px;
+  padding: 6px 8px;
   border-radius: 4px;
-  line-height: 1;
+  line-height: 1.6;
 }
 .workspace-branch-indicator > .workspace-branch-name:hover {
   background: var(--sidebar-hover);
-  color: var(--fg-dim);
+  color: var(--fg);
 }
 .workspace-branch-indicator > .workspace-branch-name span {
   min-width: 0;
@@ -4296,9 +4296,9 @@ a[href] {
 
 .workspace-branch-menu {
   min-width: 180px;
-  max-height: 260px;
+  max-height: 320px;
   overflow-y: auto;
-  padding: 4px;
+  padding: 6px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--bg-elev);
@@ -4307,6 +4307,7 @@ a[href] {
 .workspace-branch-menu__inner {
   display: flex;
   flex-direction: column;
+  gap: 2px;
 }
 .workspace-branch-menu__loading {
   padding: 8px 12px;
@@ -4317,19 +4318,19 @@ a[href] {
   width: 100%;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
+  gap: 8px;
+  padding: 10px 14px;
   border: none;
   border-radius: 6px;
   background: transparent;
   color: var(--fg-dim);
   font: inherit;
-  font-size: 12.5px;
+  font-size: 13px;
   text-align: left;
   cursor: pointer;
 }
 .workspace-branch-menu__item:hover {
-  background: var(--sidebar-hover);
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg-elev));
   color: var(--fg);
 }
 .workspace-branch-menu__item--active {

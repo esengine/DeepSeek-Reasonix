@@ -185,8 +185,7 @@ export function WorkspacePanel({
   onAddToChat,
   onRequestPanelWidth,
   refreshKey,
-  initialViewMode = "files",
-  showViewTabs = true,
+  mode,
 }: {
   open: boolean;
   cwd?: string;
@@ -198,10 +197,10 @@ export function WorkspacePanel({
   onAddToChat?: (text: string) => void;
   onRequestPanelWidth?: (width: number) => void;
   refreshKey?: number;
-  initialViewMode?: "files" | "changed";
-  showViewTabs?: boolean;
+  mode?: "files" | "changes";
 }) {
   const t = useT();
+  const effectiveMode = mode ?? "files";
   const panelRef = useRef<HTMLElement>(null);
   const filterRef = useRef<HTMLInputElement>(null);
   const previewBodyRef = useRef<HTMLDivElement>(null);
@@ -217,6 +216,8 @@ export function WorkspacePanel({
   const [expandedCommit, setExpandedCommit] = useState<string | null>(null);
   const [commitDetail, setCommitDetail] = useState<GitCommitDetailView | null>(null);
   const [loadingCommit, setLoadingCommit] = useState(false);
+  const [changes, setChanges] = useState<WorkspaceChangesView | null>(null);
+  const [loadingChanges, setLoadingChanges] = useState(false);
   const [selectionMenu, setSelectionMenu] = useState<{ x: number; y: number; text: string; path: string } | null>(null);
   const [treeMenu, setTreeMenu] = useState<{ x: number; y: number; path: string; isDir: boolean } | null>(null);
   const [treeBlankMenuPoint, setTreeBlankMenuPoint] = useState<ContextMenuPoint | null>(null);
@@ -298,8 +299,11 @@ export function WorkspacePanel({
       setSwitchingBranch(true);
       try {
         await app.GitCheckout(branch);
-        // Reload the changes view to reflect the new branch
+        // Reload both the changes view and the file tree
         await loadChanges();
+        const dirs = Array.from(openDirsRef.current);
+        setEntriesByDir({});
+        dirs.forEach((dir) => void loadDir(dir));
       } catch {
         // Error message shown via the changes view
       } finally {
@@ -307,7 +311,7 @@ export function WorkspacePanel({
         setBranchMenuOpen(false);
       }
     },
-    [changes?.gitBranch, loadChanges],
+    [changes?.gitBranch, loadChanges, loadDir],
   );
 
   const selectFile = useCallback(
@@ -349,6 +353,10 @@ export function WorkspacePanel({
       void loadGitHistory();
     }
   }, [initialViewMode, loadGitHistory, open]);
+  useEffect(() => {
+    if (!open) return;
+    if (effectiveMode === "changes") void loadChanges();
+  }, [effectiveMode, loadChanges, open]); (fix(desktop): branch switcher reload file tree after checkout, enlarge hover area)
 
   useEffect(() => {
     if (!open) return;
@@ -388,6 +396,10 @@ export function WorkspacePanel({
     setTreeBlankMenuPoint(null);
     setSelectionMenu(null);
     setTreeMenu(null);
+    if (effectiveMode === "changes") {
+      void loadChanges();
+      return;
+    }
     if (viewMode === "changed") {
       void loadGitHistory();
       return;
@@ -395,7 +407,7 @@ export function WorkspacePanel({
     const dirs = Array.from(openDirsRef.current);
     setEntriesByDir({});
     dirs.forEach((dir) => void loadDir(dir));
-  }, [loadGitHistory, loadDir, viewMode]);
+  }, [loadChanges, loadDir, effectiveMode, loadGitHistory, viewMode]);
 
   const refreshSelected = useCallback(() => {
     if (!selectedPath) return;
@@ -484,7 +496,13 @@ export function WorkspacePanel({
       .sort((a, b) => a.path.localeCompare(b.path));
   }, [entriesByDir, filter]);
 
-  const searchPlaceholder = t("workspace.filter");
+  const changedRows = useMemo(() => {
+    const rows = changes?.files ?? [];
+    const q = filter.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter((row) => `${row.path} ${row.oldPath ?? ""} ${row.gitStatus ?? ""}`.toLowerCase().includes(q));
+  }, [changes?.files, filter]);
+  const searchPlaceholder = effectiveMode === "changes" ? t("workspace.filterChanges") : t("workspace.filter"); (fix(desktop): branch switcher reload file tree after checkout, enlarge hover area)
 
   const effectiveTreeWidth = useMemo(() => clampWorkspaceTreeWidth(treeWidth, panelWidth), [panelWidth, treeWidth]);
   const previewVisible = viewMode === "changed" || openTabs.length > 0 || selectedPath !== null;
@@ -493,8 +511,8 @@ export function WorkspacePanel({
     treeVisible && selectedFileVisible && panelWidth !== undefined && panelWidth < WORKSPACE_DUAL_PANEL_MIN_WIDTH;
   const actualTreeVisible = treeVisible;
   const previewModeActive = open && previewVisible;
-  const embeddedDockMode = !showViewTabs;
-  const showFileTools = showViewTabs || previewVisible;
+  const embeddedDockMode = true;
+  const showFileTools = previewVisible;
 
   const panelStyle = useMemo(
     () =>
@@ -706,7 +724,7 @@ export function WorkspacePanel({
     {
       key: "refresh-tree",
       icon: <RefreshCw size={13} />,
-      label: t(viewMode === "changed" ? "workspace.refreshChanges" : "workspace.refreshTree"),
+      label: t(effectiveMode === "changes" ? "workspace.refreshChanges" : "workspace.refreshTree"),
       onSelect: refreshWorkspaceList,
     },
   ];
@@ -1033,11 +1051,11 @@ export function WorkspacePanel({
                   <RefreshCw size={14} />
                 </button>
               </Tooltip>
-            )}
+            )} (fix(desktop): branch switcher reload file tree after checkout, enlarge hover area)
           </div>
         )}
 
-        {viewMode === "changed" && changes?.gitBranch && (
+        {effectiveMode === "changes" && changes?.gitBranch && (
           <div className="workspace-branch-indicator">
             <GitBranch size={13} />
             <button
@@ -1091,8 +1109,15 @@ export function WorkspacePanel({
           <Search size={14} />
           <input ref={filterRef} value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={searchPlaceholder} />
         </div>
+        {effectiveMode === "changes" && changes && !changes.gitAvailable && changes.gitErr && (
+          <div className="workspace-note workspace-note--compact">{t("workspace.gitUnavailable")}</div>
+        )}
         <div className="workspace-tree" onContextMenu={openTreeBlankMenu}>
-          {flattened
+          {effectiveMode === "changes"
+            ? renderChangedRows()
+            : viewMode === "changed"
+            ? renderGitHistory()
+            : flattened (fix(desktop): branch switcher reload file tree after checkout, enlarge hover area)
             ? flattened.map(({ path, entry }) => {
                 const dir = parentPath(path);
                 return (
