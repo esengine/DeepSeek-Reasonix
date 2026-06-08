@@ -169,6 +169,7 @@ export function Transcript({
   const lastFooterHeight = useRef<number | null>(null);
   const showFABRef = useRef(false);
   const [showFAB, setShowFAB] = useState(false);
+  const scrollingRef = useRef(false);
 
   const questions = useMemo<QuestionAnchor[]>(() => {
     const anchors: QuestionAnchor[] = [];
@@ -185,6 +186,7 @@ export function Transcript({
   const onScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
+    if (scrollingRef.current) return;
     const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
     stick.current = atBottom;
     const shouldShow = !atBottom;
@@ -345,13 +347,19 @@ export function Transcript({
     stick.current = true;
     showFABRef.current = false;
     setShowFAB(false);
+    scrollingRef.current = true;
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    const clear = () => { scrollingRef.current = false; };
+    el.addEventListener("scrollend", clear, { once: true });
   }, []);
 
   // Keyboard shortcut: Cmd+↓ scrolls to bottom
   useEffect(() => {
     const onKey = (e: globalThis.KeyboardEvent) => {
       if (e.key === "ArrowDown" && (e.metaKey || e.ctrlKey)) {
+        const target = e.target as HTMLElement | null;
+        const tag = target?.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || target?.isContentEditable) return;
         e.preventDefault();
         scrollToBottom();
       }
