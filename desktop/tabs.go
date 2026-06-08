@@ -142,8 +142,27 @@ func (s *tabEventSink) Emit(e event.Event) {
 	// When a turn finishes on the currently active tab, update the read
 	// timestamp so the topic does not show an unread indicator for the
 	// conversation the user is actively watching.
-	if e.Kind == event.TurnDone && s.app != nil && tab != nil && active && strings.TrimSpace(tab.TopicID) != "" {
-		_ = s.app.markTopicReadForTab(tab, false, false)
+	if e.Kind == event.TurnDone && s.app != nil && tab != nil && strings.TrimSpace(tab.TopicID) != "" {
+		// Bump the read marker to at least the session's last activity time so
+		// the sidebar never shows a false unread after restart (race: the
+		// controller defers TouchBranchMeta into the deferred in
+		// runTurnWithRawDisplay, which runs before the TurnDone event emitted
+		// by runGuarded, so meta.UpdatedAt is final by the time we get here).
+		minReadMs := time.Now().UnixMilli()
+		if ctrl := tab.Ctrl; ctrl != nil {
+			if sp := ctrl.SessionPath(); sp != "" {
+				if meta, ok, err := agent.LoadBranchMeta(sp); err == nil && ok && !meta.UpdatedAt.IsZero() {
+					if metaMs := meta.UpdatedAt.UnixMilli(); metaMs > minReadMs {
+						minReadMs = metaMs
+					}
+				}
+			}
+		}
+		readMap := loadTopicReadStatus(topicReadWorkspaceRoot(tab))
+		if existing, hasExisting := readMap[tab.TopicID]; !hasExisting || minReadMs > existing {
+			readMap[tab.TopicID] = minReadMs
+			_ = saveTopicReadStatus(topicReadWorkspaceRoot(tab), readMap)
+		}
 	}
 	// Refresh the sidebar tree when running/read state changes, so per-topic
 	// Running and HasUnread indicators update in real time.
@@ -2561,6 +2580,17 @@ func saveTabSessionMeta(tab *WorkspaceTab, path string) error {
 	if err != nil {
 		return err
 	}
+
+	// HINT: If this is a freshly created meta (CreatedAt == UpdatedAt), the
+	// timestamp is the file's ModTime — likely the current restart time.
+	// Inherit the topic's actual last-activity time from existing sessions
+	// so ListProjectTree picks the correct value for the sidebar.
+	if tab.TopicID != "" && m.CreatedAt.Equal(m.UpdatedAt) {
+		if best := maxTopicUpdatedAt(filepath.Dir(path), tab.TopicID, path); best.After(m.UpdatedAt) {
+			m.UpdatedAt = best
+		}
+	}
+
 	m.Scope = tab.Scope
 	m.WorkspaceRoot = tab.WorkspaceRoot
 	m.TopicID = tab.TopicID
@@ -2634,4 +2664,38 @@ func findTopicSession(dir, topicID string) string {
 		}
 	}
 	return bestPath
+}
+
+// maxTopicUpdatedAt scans the session directory for all .jsonl files whose .meta
+// carries the given topicID and returns the maximum UpdatedAt among them,
+// excluding the optional excludePath. Returns zero time if none found.
+func maxTopicUpdatedAt(dir, topicID, excludePath string) time.Time {
+	if topicID == "" || dir == "" {
+		return time.Time{}
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return time.Time{}
+	}
+	var best time.Time
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".jsonl" {
+			continue
+		}
+		path := filepath.Join(dir, e.Name())
+		if path == excludePath {
+			continue
+		}
+		meta, ok, err := agent.LoadBranchMeta(path)
+		if err != nil || !ok {
+			continue
+		}
+		if meta.TopicID != topicID {
+			continue
+		}
+		if meta.UpdatedAt.After(best) {
+			best = meta.UpdatedAt
+		}
+	}
+	return best
 }

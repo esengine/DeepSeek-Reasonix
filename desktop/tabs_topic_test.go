@@ -303,8 +303,11 @@ func TestBackgroundTurnDoneMarksTopicUnreadImmediately(t *testing.T) {
 		t.Fatalf("project tree = %#v, want one topic", nodes)
 	}
 	child := nodes[0].Children[0]
-	if !child.HasUnread {
-		t.Fatalf("background turn should show unread immediately: %#v", child)
+	// The TurnDone handler now updates the read marker for all tabs (not just
+	// the active one), so background topics no longer show a false unread after
+	// restart. The sidebar shows the in-memory activity time instead.
+	if child.HasUnread {
+		t.Fatalf("background turn should not show unread (read marker catches up): %#v", child)
 	}
 	if child.LastActivityAt <= 0 {
 		t.Fatalf("lastActivityAt = %d, want in-memory activity", child.LastActivityAt)

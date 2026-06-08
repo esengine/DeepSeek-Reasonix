@@ -25,7 +25,7 @@ import {
 import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
 import { loadLayoutSize, saveLayoutSize } from "../lib/layoutPreferences";
-import type { DirEntry, FilePreview, GitCommitView, GitCommitDetailView } from "../lib/types";
+import type { DirEntry, FilePreview, GitCommitView, GitCommitDetailView, WorkspaceChangesView } from "../lib/types";
 import { formatWorkspaceReference, WORKSPACE_REF_DRAG_TYPE } from "../lib/workspaceDrag";
 import { cleanGitDiff } from "../lib/diff";
 import { CodeViewer } from "./CodeViewer";
@@ -174,6 +174,22 @@ function formatCommitDate(dateStr: string): string {
   return `${day} ${month} ${year} ${hours}:${minutes}`;
 }
 
+function isDeletedChange(row: { gitStatus?: string }): boolean {
+  return !!row.gitStatus && row.gitStatus.includes("D");
+}
+
+function changeDetail(row: {
+  path: string;
+  oldPath?: string;
+  latestPrompt?: string;
+  turns?: number[];
+}): string {
+  if (row.latestPrompt) return row.latestPrompt;
+  if (row.oldPath) return `← ${row.oldPath}`;
+  if (row.turns && row.turns.length > 0) return `#${row.turns.join(", #")}`;
+  return row.path;
+}
+
 export function WorkspacePanel({
   open,
   cwd,
@@ -229,7 +245,9 @@ export function WorkspacePanel({
   const [recentOpen, setRecentOpen] = useState(false);
   const recentAnchorRef = useRef<HTMLButtonElement>(null);
   const [gitBranch, setGitBranch] = useState("");
-  const [changesData, setChangesData] = useState<{files: {path: string; oldPath?: string; gitStatus?: string}[]; gitAvailable: boolean; gitErr?: string} | null>(null);
+  const [changes, setChanges] = useState<WorkspaceChangesView | null>(null);
+  const [loadingChanges, setLoadingChanges] = useState(false);
+  const changesRequestRef = useRef(0);
   const [branchMenuOpen, setBranchMenuOpen] = useState(false);
   const [branchList, setBranchList] = useState<string[]>([]);
   const [switchingBranch, setSwitchingBranch] = useState(false);
@@ -288,13 +306,28 @@ export function WorkspacePanel({
     [gitBranch],
   );
 
-  const fetchGitData = useCallback(async () => {
+  const fetchGitBranch = useCallback(async () => {
     try {
-      const wc: any = await app.WorkspaceChanges();
+      const wc = await app.WorkspaceChanges();
       if (wc.gitBranch) setGitBranch(wc.gitBranch);
-      setChangesData({ files: wc.files ?? [], gitAvailable: wc.gitAvailable, gitErr: wc.gitErr });
     } catch {
       // git not available
+    }
+  }, []);
+
+  const loadChanges = useCallback(async () => {
+    const requestId = changesRequestRef.current + 1;
+    changesRequestRef.current = requestId;
+    setLoadingChanges(true);
+    try {
+      const next = await app.WorkspaceChanges();
+      if (changesRequestRef.current === requestId) setChanges(next);
+    } catch (err) {
+      if (changesRequestRef.current === requestId) {
+        setChanges({ files: [], gitAvailable: false, gitErr: String((err as Error)?.message ?? err) });
+      }
+    } finally {
+      if (changesRequestRef.current === requestId) setLoadingChanges(false);
     }
   }, []);
 
@@ -407,9 +440,10 @@ export function WorkspacePanel({
 
   useEffect(() => {
     if (viewMode === "changed") {
-      void fetchGitData();
+      void loadChanges();
+      void fetchGitBranch();
     }
-  }, [viewMode, fetchGitData]);
+  }, [viewMode, loadChanges, fetchGitBranch]);
 
   useEffect(() => {
     if (!open || !refreshKey) return;
@@ -765,6 +799,40 @@ export function WorkspacePanel({
   };
 
   const isMarkdown = selectedPath?.toLowerCase().endsWith(".md") ?? false;
+
+  const renderChangedRows = () => {
+    if (loadingChanges) return <div className="workspace-empty">{t("workspace.loading")}</div>;
+    if (!changes) return null;
+    if (changedRows.length === 0) return <div className="workspace-empty">{t("workspace.noChanges")}</div>;
+    return changedRows.map((row) => {
+      const deleted = isDeletedChange(row);
+      return (
+        <button
+          key={`${row.path}-${row.sources?.join("-") ?? row.path}`}
+          className={`workspace-change${selectedPath === row.path ? " workspace-change--active" : ""}${deleted ? " workspace-change--disabled" : ""}`}
+          draggable
+          onDragStart={(event) => startTreeDrag(event, row.path, false)}
+          onContextMenu={(event) => openTreeMenu(event, row.path, false)}
+          onClick={() => {
+            if (!deleted) selectFile(row.path);
+          }}
+          type="button"
+        >
+          <FileText size={14} className="workspace-tree__icon" />
+          <span className="workspace-change__body">
+            <span className="workspace-change__name">{basename(row.path)}</span>
+            <span className="workspace-change__path">{row.path}</span>
+            <span className="workspace-change__detail">{changeDetail(row)}</span>
+          </span>
+          <span className="workspace-change__meta">
+            {row.gitStatus && <span className="workspace-change__badge workspace-change__badge--git">{row.gitStatus}</span>}
+            {deleted && <span className="workspace-change__badge">{t("workspace.deleted")}</span>}
+          </span>
+        </button>
+      );
+    });
+  };
+
   const treeBlankMenuItems: ContextMenuItem[] = [
     {
       key: "refresh-tree",
@@ -1146,6 +1214,14 @@ export function WorkspacePanel({
                 </button>
               </Tooltip>
             )}
+            <button
+              className="workspace-branch-refresh"
+              onClick={loadChanges}
+              disabled={loadingChanges}
+              title={t("workspace.refreshChanges")}
+            >
+              <RefreshCw size={12} className={loadingChanges ? "spinning" : ""} />
+            </button>
           </div>
         )}
 
@@ -1157,27 +1233,8 @@ export function WorkspacePanel({
           <div className="workspace-note workspace-note--compact">{t("workspace.gitUnavailable")}</div>
         )}
         {viewMode === "changed" ? (
-          <div className="workspace-changes-list">
-            {!changesData ? (
-              <div className="workspace-empty">{t("workspace.loading")}</div>
-            ) : !changesData.gitAvailable ? (
-              <div className="workspace-empty workspace-empty--compact">{t("workspace.gitUnavailable")}</div>
-            ) : changesData.files.length === 0 ? (
-              <div className="workspace-empty">{t("workspace.noChanges")}</div>
-            ) : (
-              changesData.files.map((f) => (
-                <button
-                  key={f.path}
-                  className="workspace-change"
-                  onClick={() => {/* TODO: open diff */}}
-                >
-                  <span className={`workspace-change__status workspace-change__status--${(f.gitStatus || "M").toLowerCase()}`}>
-                    {f.gitStatus || "M"}
-                  </span>
-                  <span className="workspace-change__path">{f.path}</span>
-                </button>
-              ))
-            )}
+          <div className="workspace-tree" onContextMenu={openTreeBlankMenu}>
+            {renderChangedRows()}
           </div>
         ) : (
         <div className="workspace-tree" onContextMenu={openTreeBlankMenu}>
