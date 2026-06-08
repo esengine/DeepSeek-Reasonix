@@ -1100,24 +1100,31 @@ a[href] {
 }
 
 .transcript > .jump-bar {
-  max-width: none;
-  margin-left: auto;
-  margin-right: -48px;
-}
-.jump-bar {
-  position: sticky;
+  position: absolute;
   top: 50%;
+  right: 0;
+  transform: translate(0, -50%);
   z-index: var(--z-inline-sticky);
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   width: 56px;
   height: 240px;
-  margin-bottom: -240px;
+  padding: 0 12px;
+  margin: 0;
+  opacity: 0;
+  pointer-events: none;
+  animation: jump-bar-in 0.18s ease-out 0.08s forwards;
+}
+.jump-bar {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  width: 56px;
+  height: 240px;
   padding: 0 12px;
   opacity: 0;
   pointer-events: none;
-  transform: translate(4px, -50%);
   animation: jump-bar-in 0.18s ease-out 0.08s forwards;
 }
 .jump-scroll {
