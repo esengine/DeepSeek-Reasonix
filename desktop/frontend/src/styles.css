@@ -2196,6 +2196,16 @@ a[href] {
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
   z-index: var(--z-inline-sticky);
 }
+.slashmenu__sizer {
+  position: relative;
+  width: 100%;
+}
+.slashmenu__row {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+}
 .slashmenu__item {
   display: flex;
   align-items: baseline;
