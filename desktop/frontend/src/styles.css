@@ -4213,20 +4213,40 @@ a[href] {
   font-weight: 580;
 }
 .workspace-branch-indicator {
-  flex: 0 0 auto;
-  min-width: 0;
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin: 0 10px 6px;
-  padding: 4px 9px;
-  font-size: 12.5px;
-  color: var(--fg-faint);
-  border-radius: 6px;
-  background: var(--bg);
+  gap: 5px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--fg-muted);
+  font-size: 12px;
 }
-.workspace-branch-indicator span {
-  min-width: 0;
+
+.workspace-branch-indicator > svg {
+  flex-shrink: 0;
+  opacity: 0.6;
+}
+
+.workspace-branch-indicator > .workspace-branch-name {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.workspace-branch-indicator > .workspace-branch-name:hover {
+  background: var(--bg-hover, rgba(128, 128, 128, 0.08));
+}
+
+.workspace-branch-indicator > .workspace-branch-name span {
+  max-width: 160px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
