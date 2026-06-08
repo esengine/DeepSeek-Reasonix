@@ -14,7 +14,7 @@ import {
 } from "../lib/workspaceDrag";
 import { SlashMenu } from "./SlashMenu";
 import { ArgMenu } from "./ArgMenu";
-import { FileMenu } from "./FileMenu";
+import { VirtualMenu } from "./VirtualMenu";
 import { EffortSwitcher } from "./EffortSwitcher";
 import { ModelSwitcher } from "./ModelSwitcher";
 import { Tooltip } from "./Tooltip";
@@ -327,7 +327,6 @@ export function Composer({
   const [loadingPastChats, setLoadingPastChats] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const taRef = useRef<HTMLTextAreaElement>(null);
-  const pastChatsItemRef = useRef<HTMLButtonElement>(null);
   const composerCardRef = useRef<HTMLDivElement>(null);
   const workspaceAnchorRef = useRef<HTMLDivElement>(null);
   const wasRunning = useRef(running);
@@ -357,7 +356,7 @@ export function Composer({
     return text.slice(1).toLowerCase();
   }, [text]);
   const slashMatches = useMemo(
-    () => (slashQuery === null ? [] : commands.filter((c) => c.name.toLowerCase().includes(slashQuery)).slice(0, 8)),
+    () => (slashQuery === null ? [] : commands.filter((c) => c.name.toLowerCase().includes(slashQuery))),
     [slashQuery, commands],
   );
 
@@ -478,7 +477,7 @@ export function Composer({
         const basename = e.name.split("/").pop()?.toLowerCase() ?? "";
         return basename.includes(atFrag) && !seen.has(e.name);
       });
-      return [...local, ...searched].slice(0, 10);
+      return [...local, ...searched];
     },
     [atRaw, atFrag, entries, searchEntries],
   );
@@ -1059,11 +1058,6 @@ export function Composer({
     setActive((prev) => (prev > maxIdx ? 0 : prev));
   }, [count]);
 
-  useEffect(() => {
-    if (menuMode === "at" && !showPastChats && includePastChatsItem && active === 0) {
-      pastChatsItemRef.current?.scrollIntoView({ block: "nearest" });
-    }
-  }, [active, includePastChatsItem, menuMode, showPastChats]);
 
   const removeAtToken = (value: string) => {
     return value.replace(/(?:^|\s)@[^\s]*$/, "").trimEnd();
@@ -1418,28 +1412,47 @@ export function Composer({
             </button>
           </div>
         ) : (
-          <div className="slashmenu" role="listbox">
-            {includePastChatsItem && (
-              <button
-                ref={pastChatsItemRef}
-                className={`slashmenu__item${active === 0 ? " slashmenu__item--active" : ""}`}
-                onMouseDown={(ev) => {
-                  ev.preventDefault();
-                  void openPastChats();
-                }}
-                onMouseMove={() => setActive(0)}
-              >
-                <MessageSquare size={13} className="filemenu__icon" />
-                <span className="slashmenu__name">{PAST_CHATS_MENU_ITEM}</span>
-              </button>
-            )}
-            <FileMenu
-              items={atMatches}
-              activeIndex={active - (includePastChatsItem ? 1 : 0)}
-              onPick={pickEntry}
-              onHover={(i) => setActive(i + (includePastChatsItem ? 1 : 0))}
-            />
-          </div>
+          <VirtualMenu
+            items={atMenuItems}
+            activeIndex={active}
+            itemKey={(it) => (it.kind === "pastChats" ? "past:chats" : (it.entry.isDir ? "d:" : "f:") + it.entry.name)}
+            renderItem={(it, i) =>
+              it.kind === "pastChats" ? (
+                <button
+                  className={`slashmenu__item${i === active ? " slashmenu__item--active" : ""}`}
+                  onMouseDown={(ev) => {
+                    ev.preventDefault();
+                    void openPastChats();
+                  }}
+                  onMouseMove={() => setActive(i)}
+                >
+                  <MessageSquare size={13} className="filemenu__icon" />
+                  <span className="slashmenu__name">{PAST_CHATS_MENU_ITEM}</span>
+                </button>
+              ) : (
+                <button
+                  role="option"
+                  aria-selected={i === active}
+                  className={`slashmenu__item ${i === active ? "slashmenu__item--active" : ""}`}
+                  onMouseDown={(ev) => {
+                    ev.preventDefault();
+                    pickEntry(it.entry);
+                  }}
+                  onMouseMove={() => setActive(i)}
+                >
+                  {it.entry.isDir ? (
+                    <Folder size={13} className="filemenu__icon filemenu__icon--dir" />
+                  ) : (
+                    <FileText size={13} className="filemenu__icon" />
+                  )}
+                  <span className="slashmenu__name slashmenu__name--file">
+                    {it.entry.name}
+                    {it.entry.isDir ? "/" : ""}
+                  </span>
+                </button>
+              )
+            }
+          />
         )
       )}
       <div className="composer-toolbar">
