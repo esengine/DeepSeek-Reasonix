@@ -18,7 +18,7 @@ provides the pre-release buffer instead of a long-lived branch.
 | Surface | Stable | Pre-release buffer |
 |---|---|---|
 | npm | `latest` (0.x), `next` (1.x) | `canary` (`npm i reasonix@canary`) |
-| Desktop | R2 `latest/` pointer | R2 `canary/` pointer (rolling `desktop-canary` release) |
+| Desktop | R2 `latest/` pointer | R2 `canary/` pointer (R2-only — never on the GitHub releases page) |
 
 A canary build is isolated: it **never** moves `latest` / `next` / desktop `latest/`.
 Testers opt in explicitly. (Desktop builds carry `-X main.channel=canary`; npm versions
@@ -46,9 +46,9 @@ the `release` environment deployment.
 2. **Cut a canary** before the intended release (e.g. heading for `1.4.0`):
    - Desktop: Actions → **Release desktop** → `channel: canary`, `base_version: 1.4.0`
    - CLI: Actions → **Release npm** → `base_version: 1.4.0`
-   - Publishes `1.4.0-canary.N` to the desktop `canary/` pointer and npm `@canary`.
-3. **Test** — testers install `reasonix@canary` (CLI) or download the `desktop-canary`
-   pre-release, and report bugs.
+   - Publishes `1.4.0-canary.N` to the desktop R2 `canary/` pointer (no GitHub release) and npm `@canary`.
+3. **Test** — testers install `reasonix@canary` (CLI) or grab the desktop canary
+   build from its R2 link, and report bugs.
 4. **Fix** on `main-v2` via PRs; re-cut the canary as needed (`canary.N` bumps).
 5. **Ship stable** when the canary is clean — push the three tags:
    ```sh
@@ -68,5 +68,5 @@ the `release` environment deployment.
 - Canary version numbers use the workflow `run_number`, so the desktop and CLI canary
   numbers differ (e.g. `canary.11` vs `canary.2`). Only monotonicity per channel matters.
 - A stable `-rc` tag (e.g. `npm-v1.4.0-rc.1`) still ships under `next`, not `canary`.
-- macOS canary self-update is manual (no notarization); testers download from the
-  `desktop-canary` release page.
+- macOS canary self-update is manual (no notarization); testers download the canary
+  build from its R2 link (canary is not on the GitHub releases page).

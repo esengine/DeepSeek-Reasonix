@@ -44,10 +44,9 @@ const (
 // for the running build's channel.
 func manifestEndpoints() []string {
 	if channel == "canary" {
-		return []string{
-			r2Base + "/canary/latest.json",
-			ghReleasesBase + "/download/desktop-canary/latest.json",
-		}
+		// Canary publishes only to R2 (no GitHub release), so there is no
+		// GitHub fallback for this channel.
+		return []string{r2Base + "/canary/latest.json"}
 	}
 	return []string{
 		r2Base + "/latest/latest.json",

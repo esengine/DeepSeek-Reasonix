@@ -11,10 +11,10 @@ name: Release desktop
 # release and mirrored to R2 (the updater reads R2 first, GitHub as fallback).
 #
 # The same build/sign/manifest pipeline serves two channels. A `desktop-v*` tag
-# (or manual stable dispatch) publishes the stable line and moves R2's latest/
-# pointer. A manual `channel: canary` dispatch builds with -X main.channel=canary,
-# publishes a rolling `desktop-canary` pre-release, and moves only the canary/
-# pointer — it never touches latest/, so stable installs can't update onto it.
+# (or manual stable dispatch) publishes a GitHub release and moves R2's latest/
+# pointer. A manual `channel: canary` dispatch builds with -X main.channel=canary
+# and uploads only to R2's canary/ pointer — no GitHub release, so canary never
+# shows on the releases page and never touches latest/.
 on:
   push:
     tags: ["desktop-v*"]
@@ -173,24 +173,25 @@ jobs:
         working-directory: desktop
         run: go run ./cmd/sign manifest ../dist "${{ steps.ver.outputs.version }}" "${{ steps.ver.outputs.tag }}"
 
+      # Canary is R2-only and never appears on the GitHub releases page; the mirror
+      # job picks up the signed dist via the canary-dist artifact below. Stable
+      # publishes a GitHub release as usual.
       - name: Publish GitHub release
+        if: steps.ver.outputs.channel != 'canary'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if [ "${{ steps.ver.outputs.channel }}" = "canary" ]; then
-            # Rolling channel: replace the previous desktop-canary release+tag so it
-            # always holds exactly the latest canary build.
-            gh release delete "${{ steps.ver.outputs.tag }}" --cleanup-tag --yes 2>/dev/null || true
-            gh release create "${{ steps.ver.outputs.tag }}" dist/* \
-              --target "${{ github.sha }}" \
-              --title "Reasonix Desktop ${{ steps.ver.outputs.version }} (canary)" \
-              --notes "Opt-in canary build for testers. Not a stable release. Built from ${{ github.sha }}." \
-              --prerelease
-          else
-            args=(--title "Reasonix Desktop ${{ steps.ver.outputs.version }}" --generate-notes)
-            [ "${{ steps.ver.outputs.prerelease }}" = "true" ] && args+=(--prerelease)
-            gh release create "${{ steps.ver.outputs.tag }}" dist/* "${args[@]}"
-          fi
+          args=(--title "Reasonix Desktop ${{ steps.ver.outputs.version }}" --generate-notes)
+          [ "${{ steps.ver.outputs.prerelease }}" = "true" ] && args+=(--prerelease)
+          gh release create "${{ steps.ver.outputs.tag }}" dist/* "${args[@]}"
+
+      - name: Upload canary dist for mirror
+        if: steps.ver.outputs.channel == 'canary'
+        uses: actions/upload-artifact@v4
+        with:
+          name: canary-dist
+          path: dist/*
+          if-no-files-found: error
 
   mirror:
     name: mirror to R2
@@ -214,8 +215,17 @@ jobs:
           REF_NAME: ${{ github.ref_name }}
           RUN_NUMBER: ${{ github.run_number }}
 
+      # Canary has no GitHub release — pull the signed dist from the workflow
+      # artifact. Stable pulls from the published release.
+      - name: Download canary dist
+        if: env.HAS_R2 == 'true' && steps.ver.outputs.channel == 'canary'
+        uses: actions/download-artifact@v4
+        with:
+          name: canary-dist
+          path: assets
+
       - name: Download release assets
-        if: env.HAS_R2 == 'true'
+        if: env.HAS_R2 == 'true' && steps.ver.outputs.channel != 'canary'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
