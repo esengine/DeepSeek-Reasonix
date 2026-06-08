@@ -71,6 +71,12 @@ brew install esengine/reasonix/reasonix   # macOS
 Prebuilt archives (`darwin|linux|windows × amd64|arm64`) and `SHA256SUMS` are on
 every [GitHub release](https://github.com/esengine/DeepSeek-Reasonix/releases).
 
+### Code signing
+
+Windows builds are code-signed with a free certificate provided by the
+[SignPath Foundation](https://signpath.org/), with signing through
+[SignPath.io](https://signpath.io/).
+
 ### Build from source
 
 ```sh

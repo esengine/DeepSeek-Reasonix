@@ -68,6 +68,11 @@ brew install esengine/reasonix/reasonix   # macOS
 预编译归档(`darwin|linux|windows × amd64|arm64`)和 `SHA256SUMS` 见每个
 [GitHub release](https://github.com/esengine/DeepSeek-Reasonix/releases)。
 
+### 代码签名
+
+Windows 构建使用 [SignPath 基金会](https://signpath.org/) 提供的免费代码签名证书,
+通过 [SignPath.io](https://signpath.io/) 完成签名。
+
 ### 从源码构建
 
 ```sh
