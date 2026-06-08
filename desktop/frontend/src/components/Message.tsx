@@ -252,7 +252,6 @@ export const AssistantMessage = memo(function AssistantMessage({
           tone="violet"
           icon={<ProcessBrainIcon size={12} />}
           kind="reasoning"
-          name={t("msg.thinking")}
           meta={
             <>
               <ProcessStatusIcon state={item.streaming ? "running" : "done"} label={item.streaming ? t("msg.thinkingRunning") : t("msg.thinkingDone")} />
