@@ -1,11 +1,4 @@
-import {
-  Children,
-  cloneElement,
-  isValidElement,
-  memo,
-  useDeferredValue,
-  type ReactNode,
-} from "react";
+import { memo, useDeferredValue, useLayoutEffect, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -26,82 +19,71 @@ import { openExternal } from "../lib/bridge";
 // pairs through a classifier to avoid false positives on $5, $PATH, etc.,
 // and runs KaTeX-specific normalisations (text-mode escapes, |→\vert).
 
-// Inline private-use sentinel that never appears in real LLM output. We
-// append it to the text while streaming, then replace it with the actual
-// cursor span inside the markdown renderers. That way the cursor lives
-// *inside* the rendered markdown content (e.g. as the last inline token of
-// the current paragraph/list item/table cell) instead of as a sibling of
-// the whole <Markdown /> block — which is what the PR2 review required.
-const CURSOR_SENTINEL = "\uE000";
+const STREAMING_CURSOR_CLASS = "cursor";
 
-function CursorSpan(): ReactNode {
-  return <span className="cursor" data-streaming-cursor="true" />;
+// Inject a blinking cursor span at the end of the last inline content node
+// inside the container, skipping code blocks entirely.  Called from
+// useLayoutEffect so the cursor appears synchronously before paint.
+function injectStreamingCursor(container: HTMLElement): void {
+  // Remove any cursor injected by a previous render cycle.
+  container
+    .querySelectorAll(`.${STREAMING_CURSOR_CLASS}`)
+    .forEach((el) => el.remove());
+
+  // Walk the rendered tree and collect every text node outside <pre> blocks.
+  const walker = document.createTreeWalker(
+    container,
+    NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT,
+    {
+      acceptNode(node) {
+        if (node.nodeType === Node.ELEMENT_NODE) {
+          const tag = (node as Element).tagName;
+          // Skip entire code-block subtrees.
+          if (tag === "PRE") return NodeFilter.FILTER_REJECT;
+          return NodeFilter.FILTER_SKIP;
+        }
+        // Accept text nodes (but reject whitespace-only noise).
+        if (node.nodeType === Node.TEXT_NODE) {
+          return (node as Text).data.trim()
+            ? NodeFilter.FILTER_ACCEPT
+            : NodeFilter.FILTER_SKIP;
+        }
+        return NodeFilter.FILTER_SKIP;
+      },
+    },
+  );
+
+  let lastText: Text | null = null;
+  while (walker.nextNode()) lastText = walker.currentNode as Text;
+
+  const cursor = document.createElement("span");
+  cursor.className = STREAMING_CURSOR_CLASS;
+  cursor.dataset.streamingCursor = "true";
+
+  if (lastText?.parentElement) {
+    lastText.parentElement.appendChild(cursor);
+  } else {
+    // Fallback: no visible text yet (empty streaming start).
+    container.appendChild(cursor);
+  }
 }
 
-// Walk a children tree (string + element) and replace the CURSOR_SENTINEL
-// with <CursorSpan />. Used by inline-aware custom renderers (p / li / td /
-// th / inline code) so the cursor lands at the end of the current
-// streaming text fragment.
-function renderCursorChildren(children: ReactNode): ReactNode {
-  return Children.map(children, (child) => {
-    if (typeof child === "string") {
-      const idx = child.indexOf(CURSOR_SENTINEL);
-      if (idx < 0) return child;
-      const before = child.slice(0, idx);
-      const after = child.slice(idx + CURSOR_SENTINEL.length);
-      // Recurse into `after` in case the LLM somehow re-emits the sentinel.
-      return (
-        <>
-          {before}
-          <CursorSpan />
-          {renderCursorChildren(after)}
-        </>
-      );
-    }
-    if (isValidElement(child)) {
-      // Drop the sentinel element itself if it ever leaks through.
-      const props = child.props as { children?: ReactNode };
-      if ((child.type as unknown) === CURSOR_SENTINEL) return null;
-      // Preserve the wrapper element (<strong>, <em>, etc.) while recursing
-      // into its children to find and replace the sentinel.
-      return cloneElement(child, { children: renderCursorChildren(props.children) });
-    }
-    return child;
-  });
-}
-
-// For block-level contexts where we don't want to render an extra cursor
-// span (e.g. code blocks must stay pure text), just strip the sentinel.
-function stripSentinel(children: ReactNode): ReactNode {
-  return Children.map(children, (child) => {
-    if (typeof child === "string") {
-      const idx = child.indexOf(CURSOR_SENTINEL);
-      if (idx < 0) return child;
-      return child.slice(0, idx) + child.slice(idx + CURSOR_SENTINEL.length);
-    }
-    if (isValidElement(child)) {
-      const props = child.props as { children?: ReactNode };
-      if ((child.type as unknown) === CURSOR_SENTINEL) return null;
-      return cloneElement(child, { children: stripSentinel(props.children) });
-    }
-    return child;
-  });
+function removeStreamingCursor(container: HTMLElement): void {
+  container
+    .querySelectorAll(`.${STREAMING_CURSOR_CLASS}`)
+    .forEach((el) => el.remove());
 }
 
 const components: Components = {
-  p: ({ children }) => <p>{renderCursorChildren(children)}</p>,
-  li: ({ children }) => <li>{renderCursorChildren(children)}</li>,
-  td: ({ children }) => <td>{renderCursorChildren(children)}</td>,
-  th: ({ children }) => <th>{renderCursorChildren(children)}</th>,
   pre: ({ children }) => <>{children}</>,
   code: ({ className, children }) => {
-    const text = String(stripSentinel(children ?? ""));
+    const text = String(children ?? "");
     const match = /language-([\w-]+)/.exec(className ?? "");
     const isBlock = match !== null || text.includes("\n");
     if (isBlock) {
       return <CodeViewer value={text.replace(/\n$/, "")} language={match?.[1]} maxHeight={360} />;
     }
-    return <code className="md-code">{text}</code>;
+    return <code className="md-code">{children}</code>;
   },
   a: ({ href, children }) => (
     <a
@@ -124,15 +106,29 @@ export const Markdown = memo(function Markdown({
   showCursor?: boolean;
 }) {
   const deferred = useDeferredValue(text);
-  const withCursor = showCursor ? deferred + CURSOR_SENTINEL : deferred;
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Inject / remove cursor after every React render cycle so the cursor
+  // always sits at the tail of the current streaming content — without
+  // ever touching the raw Markdown string that ReactMarkdown parses.
+  useLayoutEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    if (showCursor) {
+      injectStreamingCursor(el);
+    } else {
+      removeStreamingCursor(el);
+    }
+  });
+
   return (
-    <div className="md">
+    <div className="md" ref={containerRef}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[rehypeKatex]}
         components={components}
       >
-        {normalizeMath(withCursor)}
+        {normalizeMath(deferred)}
       </ReactMarkdown>
     </div>
   );
