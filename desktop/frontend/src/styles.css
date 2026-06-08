@@ -5964,7 +5964,7 @@ a[href] {
 .history-content {
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(340px, 0.38fr) minmax(0, 0.62fr);
+  grid-template-columns: minmax(0, 0.38fr) minmax(0, 0.62fr);
   overflow: hidden;
 }
 .history-list {
@@ -6191,7 +6191,10 @@ a[href] {
     max-width: 100%;
   }
   .history-content {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .history-list {
+    max-height: 40vh;
   }
   .history-preview {
     min-height: 260px;
