@@ -475,6 +475,17 @@ func (m *chatTUI) completionBareOverlayCommand() bool {
 	}
 }
 
+func (m *chatTUI) completionSelectedInsertPresent() bool {
+	if !m.completion.active || m.completion.sel >= len(m.completion.items) {
+		return false
+	}
+	val := m.input.Value()
+	if m.completion.replaceFrom > len(val) {
+		return false
+	}
+	return val[m.completion.replaceFrom:] == m.completion.items[m.completion.sel].insert
+}
+
 // acceptCompletion applies the selected item to the input, then recomputes the
 // menu from the new value: it re-opens one level deeper (a descended directory
 // or a freshly completed command's arguments) or closes when nothing applies.

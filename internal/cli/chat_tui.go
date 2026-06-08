@@ -869,15 +869,12 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.completion = completion{}
 					break // fall through to regular Enter and submit the command
 				}
-				// When Enter is pressed and the completion has exactly one item
-				// already fully present in the input, close the menu and let Enter
-				// fall through to submit the command (/resume 3 → resume session 3).
-				if msg.String() == "enter" && len(m.completion.items) == 1 {
-					tok := m.input.Value()[m.completion.replaceFrom:]
-					if tok == m.completion.items[0].insert {
-						m.completion = completion{}
-						break // fall through to regular Enter
-					}
+				// When Enter is pressed and the selected completion is already fully
+				// present in the input, close the menu and submit instead of accepting
+				// the same item again (/resume 1 still has /resume 10 as a prefix match).
+				if msg.String() == "enter" && m.completionSelectedInsertPresent() {
+					m.completion = completion{}
+					break // fall through to regular Enter
 				}
 				m.acceptCompletion()
 				return m, nil
