@@ -195,3 +195,29 @@ func userConfigPathForTest() string {
 	}
 	return ""
 }
+
+// TestTabModeYoloSurvivesPersist is the regression for #3517: yolo used to be
+// dropped on persist, so a tab reopened (or the app relaunched) in "normal".
+// Both the save side (currentTabMode) and the load side go through
+// persistedTabMode, so this proves a yolo tab round-trips.
+func TestTabModeYoloSurvivesPersist(t *testing.T) {
+	tab := testTab("y", t.TempDir())
+	tab.Ctrl.SetMode(false, true) // yolo
+	if got := currentTabMode(tab); got != "yolo" {
+		t.Fatalf("currentTabMode = %q, want yolo", got)
+	}
+	saved := persistedTabMode(currentTabMode(tab)) // what gets written with the tab
+	if saved != "yolo" {
+		t.Fatalf("persisted yolo tab = %q, want yolo (#3517)", saved)
+	}
+	if restored := persistedTabMode(saved); restored != "yolo" { // load side
+		t.Fatalf("yolo did not survive reload: %q", restored)
+	}
+	// plan still persists; normal stays the un-persisted default.
+	if persistedTabMode("plan") != "plan" {
+		t.Error("plan mode should persist")
+	}
+	if persistedTabMode("normal") != "" {
+		t.Error("normal mode should not be persisted")
+	}
+}

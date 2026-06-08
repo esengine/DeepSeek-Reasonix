@@ -2300,9 +2300,13 @@ func currentTabMode(tab *WorkspaceTab) string {
 	return normalizeTabMode(tab.mode)
 }
 
+// persistedTabMode is the composer mode saved with a tab so it survives reload
+// and app relaunch. plan and yolo are both remembered (a restored yolo tab keeps
+// its status-bar indicator); "normal" is the default and isn't persisted. (#3517)
 func persistedTabMode(mode string) string {
-	if normalizeTabMode(mode) == "plan" {
-		return "plan"
+	switch normalizeTabMode(mode) {
+	case "plan", "yolo":
+		return normalizeTabMode(mode)
 	}
 	return ""
 }
