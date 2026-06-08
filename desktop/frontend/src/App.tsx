@@ -613,39 +613,6 @@ export default function App() {
   const todos = useMemo(() => (todoItem ? parseTodos(todoItem.args) : []), [todoItem]);
   const [dismissedTodo, setDismissedTodo] = useState<string | null>(null);
   const showTodos = shouldShowTodoPanel(todoItem?.id, dismissedTodo, todos);
-  const [todoNow, setTodoNow] = useState(() => Date.now());
-  const todoSeenRef = useRef<{ id: string; at: number } | null>(null);
-
-  useEffect(() => {
-    if (!todoItem) {
-      todoSeenRef.current = null;
-      return;
-    }
-    if (todoSeenRef.current?.id !== todoItem.id) {
-      todoSeenRef.current = { id: todoItem.id, at: Date.now() };
-      setTodoNow(Date.now());
-    }
-  }, [todoItem]);
-
-  useEffect(() => {
-    if (!showTodos) return;
-    const id = window.setInterval(() => setTodoNow(Date.now()), 15000);
-    return () => window.clearInterval(id);
-  }, [showTodos]);
-
-  const todoStale = useMemo(() => {
-    if (!showTodos || !todoEntry) return false;
-    const after = state.items.slice(todoEntry.index + 1);
-    const completedToolsAfter = after.filter(
-      (it) => it.kind === "tool" && it.name !== "todo_write" && !it.parentId && (it.status === "done" || it.status === "error"),
-    ).length;
-    const finalAssistantAfter = after.some((it) => it.kind === "assistant" && !it.streaming && it.text.trim() !== "");
-    const readinessNoticeAfter = after.some(
-      (it) => it.kind === "notice" && /final-answer readiness|todo_write|complete_step/i.test(it.text),
-    );
-    const staleByTime = state.running && todoSeenRef.current?.id === todoEntry.item.id && todoNow - todoSeenRef.current.at > 90_000;
-    return completedToolsAfter >= 2 || finalAssistantAfter || readinessNoticeAfter || staleByTime;
-  }, [showTodos, state.items, state.running, todoEntry, todoNow]);
 
   // useDeferredValue lets React prioritise Composer input (high-priority) over
   // Transcript re-renders (low-priority) during streaming. When a keystroke
@@ -1595,7 +1562,7 @@ export default function App() {
           </main>
 
           <footer className="footer" ref={footerRef}>
-            {showTodos && <TodoPanel todos={todos} stale={todoStale} onDismiss={() => setDismissedTodo(todoItem!.id)} />}
+            {showTodos && <TodoPanel todos={todos} onDismiss={() => setDismissedTodo(todoItem!.id)} />}
             {state.approval && (
               <ApprovalModal
                 approval={state.approval}

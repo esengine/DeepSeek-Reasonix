@@ -441,8 +441,8 @@ func TestFinalReadinessAuditRecordsTerminalError(t *testing.T) {
 		t.Fatalf("readiness audit events = %d, want 3: %+v", len(sink.events), sink.events)
 	}
 	last := sink.events[len(sink.events)-1]
-	if last.Result != evidence.ReadinessErrored || !last.MissingCompleteStep {
-		t.Fatalf("terminal audit = %+v, want errored missing complete_step", last)
+	if last.Result != evidence.ReadinessErrored || last.IncompleteTodos == 0 {
+		t.Fatalf("terminal audit = %+v, want errored with incomplete todos", last)
 	}
 }
 

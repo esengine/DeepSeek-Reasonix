@@ -7868,21 +7868,6 @@ a[href] {
   color: var(--fg-faint);
   flex-shrink: 0;
 }
-.todobar__stale {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
-  max-width: 160px;
-  overflow: hidden;
-  color: var(--fg-faint);
-  font-size: 11px;
-  white-space: nowrap;
-}
-.todobar__stale > svg {
-  flex: 0 0 auto;
-  opacity: 0.72;
-}
 .todobar__current {
   margin-left: 4px;
   font-size: 12px;

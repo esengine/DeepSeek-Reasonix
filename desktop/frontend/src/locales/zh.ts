@@ -721,7 +721,6 @@ export const zh: Record<DictKey, string> = {
   // 待办栏
   "todo.title": "待办",
   "todo.dismiss": "关闭待办列表",
-  "todo.stale": "进度可能未同步",
 
   // 斜杠菜单标签
   "slash.project": "项目",

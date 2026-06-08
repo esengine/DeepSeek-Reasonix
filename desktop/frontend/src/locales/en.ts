@@ -719,7 +719,6 @@ export const en = {
   // todo bar
   "todo.title": "To-dos",
   "todo.dismiss": "Dismiss the task list",
-  "todo.stale": "Progress may be stale",
 
   // slash menu tags
   "slash.project": "project",
