@@ -998,8 +998,15 @@ func TestViewAltScreenFillsHeight(t *testing.T) {
 	if !v.AltScreen {
 		t.Error("View must request alt-screen so resize repaints the whole grid")
 	}
-	if v.MouseMode != tea.MouseModeCellMotion {
-		t.Error("View must enable mouse so the wheel scrolls the transcript")
+	// In Termux environment, mouse mode is disabled to avoid soft keyboard issues.
+	if isTermuxTerminal() {
+		if v.MouseMode != tea.MouseModeNone {
+			t.Error("View must not enable mouse mode in Termux environment")
+		}
+	} else {
+		if v.MouseMode != tea.MouseModeCellMotion {
+			t.Error("View must enable mouse so the wheel scrolls the transcript")
+		}
 	}
 	if lines := strings.Count(v.Content, "\n") + 1; lines != 24 {
 		t.Errorf("alt-screen frame = %d lines, want 24 (full terminal height)", lines)
