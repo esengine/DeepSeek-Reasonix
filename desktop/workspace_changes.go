@@ -242,3 +242,83 @@ func (a *App) GitCheckout(branch string) error {
 	}
 	return nil
 }
+
+type GitCommitView struct {
+	Hash    string `json:"hash"`
+	Author  string `json:"author"`
+	Date    string `json:"date"`
+	Message string `json:"message"`
+}
+
+type GitCommitDetailView struct {
+	Diff  *string  `json:"diff,omitempty"`
+	Files []string `json:"files,omitempty"`
+}
+
+func (a *App) WorkspaceGitHistory(path string) ([]GitCommitView, error) {
+	base, err := a.activeWorkspaceBase()
+	if err != nil {
+		return nil, err
+	}
+
+	args := []string{"-C", base, "log", "--pretty=format:%H%x00%an%x00%ad%x00%s", "-z", "-n", "100"}
+	if path != "" {
+		args = append(args, "--", path)
+	}
+
+	cmd := exec.Command("git", args...)
+	proc.HideWindowDetached(cmd)
+	raw, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+
+	parts := bytes.Split(raw, []byte{0})
+	var out []GitCommitView
+	// 4 parts per commit: hash, author, date, message
+	for i := 0; i+3 < len(parts); i += 4 {
+		out = append(out, GitCommitView{
+			Hash:    string(parts[i]),
+			Author:  string(parts[i+1]),
+			Date:    string(parts[i+2]),
+			Message: string(parts[i+3]),
+		})
+	}
+	return out, nil
+}
+
+func (a *App) WorkspaceGitCommitDetail(hash string, path string) (GitCommitDetailView, error) {
+	base, err := a.activeWorkspaceBase()
+	if err != nil {
+		return GitCommitDetailView{}, err
+	}
+
+	if path != "" {
+		// Single file diff
+		cmd := exec.Command("git", "-C", base, "show", "--relative", "--pretty=format:", "--patch", hash, "--", path)
+		proc.HideWindowDetached(cmd)
+		raw, err := cmd.Output()
+		if err != nil {
+			return GitCommitDetailView{}, err
+		}
+		diffStr := strings.TrimSpace(string(raw))
+		return GitCommitDetailView{Diff: &diffStr}, nil
+	}
+
+	// Project level: list of files changed
+	cmd := exec.Command("git", "-C", base, "diff-tree", "--relative", "--no-commit-id", "--name-only", "-r", hash)
+	proc.HideWindowDetached(cmd)
+	raw, err := cmd.Output()
+	if err != nil {
+		return GitCommitDetailView{}, err
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	var files []string
+	for _, line := range lines {
+		if line != "" {
+			files = append(files, line)
+		}
+	}
+	return GitCommitDetailView{Files: files}, nil
+}

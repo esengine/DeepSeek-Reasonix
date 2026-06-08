@@ -4294,6 +4294,99 @@ a[href] {
   color: var(--accent);
   border-color: color-mix(in srgb, var(--accent) 32%, var(--border-soft));
 }
+.workspace-git-history {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.workspace-git-history__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.workspace-git-history__item {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--bg-soft);
+  overflow: hidden;
+}
+.workspace-git-history__head {
+  --wails-draggable: no-drag;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+}
+.workspace-git-history__head-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+.workspace-git-history__head-bottom {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 22px;
+  margin-top: 4px;
+}
+.workspace-git-history__head:hover {
+  background: var(--sidebar-hover);
+}
+.workspace-git-history__message {
+  flex: 1;
+  font-weight: 560;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workspace-git-history__author {
+  color: var(--fg-dim);
+  font-size: 12px;
+}
+.workspace-git-history__date {
+  color: var(--fg-faint);
+  font-size: 11.5px;
+}
+.workspace-git-history__hash {
+  font-family: var(--mono);
+  margin-left: 6px;
+  opacity: 0.8;
+}
+.workspace-git-history__detail {
+  padding: 12px;
+  border-top: 1px solid var(--border-soft);
+  background: var(--bg);
+}
+.workspace-git-history__files {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.workspace-git-history__file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--fg-dim);
+  background: transparent;
+  border: none;
+  padding: 4px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  text-align: left;
+}
+.workspace-git-history__file:hover {
+  background: var(--sidebar-hover);
+  color: var(--fg);
+}
 .workspace-tree__chev {
   width: 13px;
   height: 13px;

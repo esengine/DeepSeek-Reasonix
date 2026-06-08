@@ -851,6 +851,119 @@ func TestWorkspaceChangesGitBranchDetachedHead(t *testing.T) {
 	}
 }
 
+func TestWorkspaceGitHistory(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	orig, _ := os.Getwd()
+	defer os.Chdir(orig)
+
+	dir := t.TempDir()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	runGit(t, "init")
+	runGit(t, "config", "user.email", "test@example.com")
+	runGit(t, "config", "user.name", "Test User")
+
+	if err := os.WriteFile("file1.txt", []byte("v1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, "add", "file1.txt")
+	runGit(t, "commit", "-m", "init file1")
+
+	if err := os.WriteFile("file2.txt", []byte("v1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, "add", "file2.txt")
+	runGit(t, "commit", "-m", "init file2")
+
+	app := &App{}
+	history, err := app.WorkspaceGitHistory("")
+	if err != nil {
+		t.Fatalf("WorkspaceGitHistory err = %v", err)
+	}
+	if len(history) != 2 {
+		t.Fatalf("expected 2 commits, got %d", len(history))
+	}
+	if history[0].Message != "init file2" {
+		t.Errorf("expected latest commit message 'init file2', got %q", history[0].Message)
+	}
+	if history[1].Message != "init file1" {
+		t.Errorf("expected older commit message 'init file1', got %q", history[1].Message)
+	}
+
+	// Test history for specific file
+	history, err = app.WorkspaceGitHistory("file1.txt")
+	if err != nil {
+		t.Fatalf("WorkspaceGitHistory err = %v", err)
+	}
+	if len(history) != 1 {
+		t.Fatalf("expected 1 commit for file1.txt, got %d", len(history))
+	}
+	if history[0].Message != "init file1" {
+		t.Errorf("expected commit message 'init file1', got %q", history[0].Message)
+	}
+}
+
+func TestWorkspaceGitCommitDetail(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	orig, _ := os.Getwd()
+	defer os.Chdir(orig)
+
+	dir := t.TempDir()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	runGit(t, "init")
+	runGit(t, "config", "user.email", "test@example.com")
+	runGit(t, "config", "user.name", "Test User")
+
+	if err := os.WriteFile("file1.txt", []byte("v1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, "add", "file1.txt")
+	runGit(t, "commit", "-m", "init file1")
+
+	if err := os.WriteFile("file1.txt", []byte("v2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, "add", "file1.txt")
+	runGit(t, "commit", "-m", "update file1")
+
+	hash := gitOutput(t, "rev-parse", "HEAD")
+
+	app := &App{}
+
+	// Test project level detail
+	detail, err := app.WorkspaceGitCommitDetail(hash, "")
+	if err != nil {
+		t.Fatalf("WorkspaceGitCommitDetail err = %v", err)
+	}
+	if len(detail.Files) != 1 || detail.Files[0] != "file1.txt" {
+		t.Fatalf("expected files [file1.txt], got %v", detail.Files)
+	}
+	if detail.Diff != nil {
+		t.Fatal("expected nil diff for project level")
+	}
+
+	// Test file level detail
+	detail, err = app.WorkspaceGitCommitDetail(hash, "file1.txt")
+	if err != nil {
+		t.Fatalf("WorkspaceGitCommitDetail err = %v", err)
+	}
+	if len(detail.Files) != 0 {
+		t.Fatalf("expected no files for file level, got %v", detail.Files)
+	}
+	if detail.Diff == nil || !strings.Contains(*detail.Diff, "+v2") {
+		t.Fatalf("expected diff to contain '+v2', got %v", detail.Diff)
+	}
+}
+
 func runGit(t *testing.T, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", args...)

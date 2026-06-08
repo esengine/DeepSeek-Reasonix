@@ -42,6 +42,8 @@ import type {
   UpdateProgress,
   WireEvent,
   WorkspaceChangesView,
+  GitCommitView,
+  GitCommitDetailView,
   WorkspaceView,
 } from "./types";
 
@@ -144,6 +146,8 @@ export interface AppBindings {
   WorkspaceChanges(): Promise<WorkspaceChangesView>;
   GitBranches(): Promise<string[]>;
   GitCheckout(branch: string): Promise<void>;
+  WorkspaceGitHistory(path: string): Promise<GitCommitView[]>;
+  WorkspaceGitCommitDetail(hash: string, path: string): Promise<GitCommitDetailView>;
   OpenWorkspacePath(rel: string): Promise<void>;
   RevealWorkspacePath(rel: string): Promise<void>;
   RevealPath(path: string): Promise<void>;
@@ -1350,6 +1354,17 @@ function makeMockApp(): AppBindings {
     },
     async GitCheckout(_branch: string) {
       console.info("mock GitCheckout", _branch);
+    },
+    async WorkspaceGitHistory(path: string) {
+      return [
+        { hash: "abcdef123456", author: "Mock Author", date: new Date().toISOString(), message: "Mock commit message for " + path },
+      ];
+    },
+    async WorkspaceGitCommitDetail(_hash: string, path: string) {
+      if (path) {
+        return { diff: "--- a/mock\n+++ b/mock\n@@ -1,1 +1,1 @@\n-mock\n+mock diff" };
+      }
+      return { files: ["mock_file_1.ts", "mock_file_2.ts"] };
     },
     async OpenWorkspacePath(rel: string) {
       console.info("mock OpenWorkspacePath", rel);
