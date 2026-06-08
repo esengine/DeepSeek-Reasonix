@@ -4,7 +4,7 @@
 // new topic.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
-import { Archive, ChevronRight, ChevronDown, ChevronsUpDown, ChevronsDownUp, Pencil, Plus, FolderPlus, Search, BriefcaseBusiness, Copy, FolderOpen, XCircle, History, Check, Clock } from "lucide-react";
+import { Archive, ChevronRight, ChevronDown, ChevronsUpDown, ChevronsDownUp, Pencil, Plus, Folder, FolderPlus, Search, BriefcaseBusiness, Copy, FolderOpen, XCircle, History, Check, Clock } from "lucide-react";
 import { asArray } from "../lib/array";
 import { app } from "../lib/bridge";
 import { topicActivityTime } from "../lib/session";
@@ -540,7 +540,7 @@ export function ProjectTree({
           <div
             key={key}
             className={`project-tree__topic project-tree__topic--editing${active ? " project-tree__topic--active" : ""}`}
-            style={{ paddingLeft: 14 + depth * 16 }}
+            style={{ paddingLeft: 27 }}
           >
             <input
               autoFocus
@@ -567,7 +567,7 @@ export function ProjectTree({
             type="button"
             className="project-tree__topic-main"
             title={meta ? `${label} · ${meta}` : label}
-            style={{ paddingLeft: 14 + depth * 16 }}
+            style={{ paddingLeft: 27 }}
             onClick={() => onOpenTopic(scope, node.root ?? "", topicId)}
             onDoubleClick={() => startRenameTopic(node, label)}
             onKeyDown={(event) => {
@@ -779,13 +779,11 @@ export function ProjectTree({
             }}
             aria-expanded={hasChildren ? isExpanded : undefined}
           >
+            <Folder size={12} className="project-tree__folder-icon" />
+            <span className="project-tree__folder-label">{projectLabel}</span>
             {hasChildren ? (
               isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />
-            ) : (
-              <span style={{ width: 12 }} />
-            )}
-            <span className="project-tree__folder-color" aria-hidden="true" />
-            <span className="project-tree__folder-label">{projectLabel}</span>
+            ) : null}
           </button>
           <Tooltip label={t("projectTree.newTopicTooltip")} className="project-tree__action-slot">
             <button

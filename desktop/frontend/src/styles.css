@@ -9823,13 +9823,9 @@ a[href] {
   font-weight: 560;
 }
 
-.project-tree__folder-color {
+.project-tree__folder-icon {
   flex: 0 0 auto;
-  width: 7px;
-  height: 7px;
-  border-radius: 999px;
-  background: var(--project-accent, var(--accent));
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--project-accent, var(--accent)) 14%, transparent);
+  color: var(--project-accent, var(--accent));
 }
 
 .project-tree__folder-main:focus-visible {
@@ -9900,7 +9896,6 @@ a[href] {
   padding-top: 0;
   padding-bottom: 0;
   padding-left: 0 !important;
-  margin-left: 11px;
   padding-right: 8px;
   border-radius: 6px;
   color: var(--fg-dim);
