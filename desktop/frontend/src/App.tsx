@@ -56,6 +56,7 @@ import {
   themeForStyle,
   type Theme,
 } from "./lib/theme";
+import { applyTextSize, DEFAULT_TEXT_SIZE, getTextSize, nextTextSize } from "./lib/textSize";
 import { useWindowStatePersistence } from "./lib/windowState";
 
 const SIDEBAR_COLLAPSED_KEY = "reasonix.sidebar.collapsed";
@@ -335,6 +336,26 @@ function ShellHotkeys() {
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [shellExpand]);
+  return null;
+}
+
+/** Global hotkey handler for text-size shortcuts (Ctrl/Cmd + Plus/Minus/0). */
+function TextSizeHotkeys() {
+  useEffect(() => {
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      if (e.key !== "+" && e.key !== "=" && e.key !== "-" && e.key !== "0") return;
+
+      e.preventDefault();
+      if (e.key === "0") {
+        applyTextSize(DEFAULT_TEXT_SIZE);
+        return;
+      }
+      applyTextSize(nextTextSize(getTextSize(), e.key === "-" ? -1 : 1));
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
   return null;
 }
 
@@ -1340,6 +1361,7 @@ export default function App() {
   return (
     <ShellExpandProvider>
     <ShellHotkeys />
+    <TextSizeHotkeys />
     <div className={`app app--${desktopPlatform}`}>
       <div
         ref={layoutRef}
