@@ -157,3 +157,32 @@ func TestWebFetchSOCKS5Proxy(t *testing.T) {
 		t.Logf("expected error (no SOCKS5 server): %v", err)
 	}
 }
+
+func TestSSRFBlocksPrivateTargetThroughSOCKS5(t *testing.T) {
+	wf := webFetch{proxyURL: "socks5://127.0.0.1:1080"}
+	for _, u := range []string{"http://169.254.169.254/latest/meta-data", "http://10.0.0.1/", "http://192.168.1.1/"} {
+		t.Run(u, func(t *testing.T) {
+			args, _ := json.Marshal(map[string]string{"url": u})
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			_, err := wf.Execute(ctx, args)
+			if err == nil || !strings.Contains(err.Error(), "refusing to fetch internal address") {
+				t.Errorf("want SSRF block for %s, got %v", u, err)
+			}
+		})
+	}
+}
+
+func TestSOCKS5ProxyOnPrivateAddressNotSSRFBlocked(t *testing.T) {
+	// A SOCKS proxy commonly lives on a private/LAN address; the SSRF guard must
+	// not reject the proxy itself. Reaching the (absent) proxy fails, but never
+	// with an SSRF "internal address" error.
+	wf := webFetch{proxyURL: "socks5://10.0.0.1:1080"}
+	args, _ := json.Marshal(map[string]string{"url": "https://example.com"})
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, err := wf.Execute(ctx, args)
+	if err != nil && strings.Contains(err.Error(), "refusing to fetch internal address") {
+		t.Fatalf("proxy on private address was SSRF-blocked: %v", err)
+	}
+}

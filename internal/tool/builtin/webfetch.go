@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/net/proxy"
+
 	"reasonix/internal/tool"
 )
 
@@ -146,7 +148,31 @@ func ssrfGuardedClient(proxyURL string) *http.Client {
 				tr.Proxy = nil
 
 			case "socks5", "socks5h":
-				tr.Proxy = http.ProxyURL(pu)
+				// Tunnel through SOCKS5. Dial the trusted proxy with a plain
+				// dialer (a proxy on a private/LAN address must not be rejected
+				// by the SSRF guard), then route the target through it. IP-literal
+				// targets are still SSRF-checked; hostnames are resolved by the
+				// proxy — the same boundary as the HTTP CONNECT path above.
+				var auth *proxy.Auth
+				if pu.User != nil {
+					pass, _ := pu.User.Password()
+					auth = &proxy.Auth{User: pu.User.Username(), Password: pass}
+				}
+				if sd, err := proxy.SOCKS5("tcp", pu.Host, auth, dialer); err == nil {
+					if cd, ok := sd.(proxy.ContextDialer); ok {
+						tr.Proxy = nil
+						tr.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+							host, _, err := net.SplitHostPort(addr)
+							if err != nil {
+								return nil, err
+							}
+							if ip := net.ParseIP(host); ip != nil && blockedFetchIP(ip) {
+								return nil, fmt.Errorf("refusing to fetch internal address %s (resolves to %s)", host, ip)
+							}
+							return cd.DialContext(ctx, network, addr)
+						}
+					}
+				}
 			}
 		}
 	}
