@@ -745,7 +745,7 @@ a[href] {
   font-weight: 600;
 }
 .topbar__model {
-  font-family: var(--mono);
+  font-family: inherit;
   font-size: 11px;
   color: var(--fg-dim);
   overflow: hidden;
@@ -6480,7 +6480,7 @@ a[href] {
 .settings-center__navitem small {
   color: var(--fg-dim);
   font-size: var(--text-2xs);
-  font-family: var(--mono);
+  font-family: inherit;
 }
 
 .settings-center__content {
@@ -6922,7 +6922,7 @@ a[href] {
   font-size: var(--text-base);
   font-weight: 700;
   color: var(--fg);
-  font-family: var(--mono);
+  font-family: inherit;
 }
 .settings-model-current__meta {
   display: flex;
@@ -6938,7 +6938,7 @@ a[href] {
   border-radius: 999px;
   background: var(--bg-elev-2);
   color: var(--fg-muted);
-  font-family: var(--mono);
+  font-family: inherit;
   font-size: var(--text-2xs);
   line-height: 1;
   padding: 5px 8px;
@@ -6994,7 +6994,7 @@ a[href] {
 }
 .settings-model-picker__selected span {
   color: var(--fg);
-  font-family: var(--mono);
+  font-family: inherit;
   font-size: var(--font-control);
   font-weight: 650;
 }
