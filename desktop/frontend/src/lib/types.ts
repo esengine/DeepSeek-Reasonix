@@ -339,7 +339,6 @@ export interface GitCommitDetailView {
   diff?: string;
   files?: string[];
 }
-}
 
 export interface ComposerInsertRequest {
   id: number;

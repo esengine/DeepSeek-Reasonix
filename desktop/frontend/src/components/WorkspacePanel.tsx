@@ -1104,6 +1104,33 @@ export function WorkspacePanel({
             </button>
           </div>
         )}
+        {showViewTabs && (
+          <div className="workspace-files__tabs" role="tablist" aria-label={t("workspace.viewMode")}>
+            <button
+              className={viewMode === "files" ? "workspace-files__tab workspace-files__tab--active" : "workspace-files__tab"}
+              onClick={() => setViewMode("files")}
+            >
+              {t("workspace.filesTab")}
+            </button>
+            <button
+              className={viewMode === "changed" ? "workspace-files__tab workspace-files__tab--active" : "workspace-files__tab"}
+              onClick={() => {
+                setViewMode("changed");
+                void loadGitHistory();
+              }}
+            >
+              <GitBranch size={13} />
+              {t("workspace.changedTab")}
+            </button>
+          </div>
+        )}
+        {showViewTabs && viewMode === "changed" && (
+          <Tooltip label={t("workspace.refreshChanges")}>
+            <button className="workspace-iconbtn" onClick={() => void loadGitHistory()}>
+              <RefreshCw size={14} />
+            </button>
+          </Tooltip>
+        )}
 
         <div className="workspace-search">
           <Search size={14} />
