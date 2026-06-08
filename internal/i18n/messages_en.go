@@ -165,6 +165,7 @@ var English = Messages{
 	CmdLanguage:     "switch CLI language",
 	CmdSkill:        "manage skills",
 	CmdVerbose:      "toggle thinking text",
+	CmdSandbox:      "show sandbox status",
 	CmdEffort:       "set reasoning effort",
 	CmdAutoPlan:     "configure automatic plan mode",
 	CmdHelp:         "list commands",

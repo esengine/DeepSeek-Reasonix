@@ -166,6 +166,7 @@ var Chinese = Messages{
 	CmdLanguage:     "切换 CLI 语言",
 	CmdSkill:        "管理 skills",
 	CmdVerbose:      "切换 thinking 原文显示",
+	CmdSandbox:      "查看沙箱状态",
 	CmdEffort:       "设置推理强度",
 	CmdAutoPlan:     "配置自动计划模式",
 	CmdHelp:         "查看命令列表",

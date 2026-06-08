@@ -24,6 +24,7 @@ import (
 
 	"reasonix/internal/agent"
 	"reasonix/internal/command"
+	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/hook"
@@ -32,6 +33,7 @@ import (
 	"reasonix/internal/outputstyle"
 	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
+	"reasonix/internal/sandbox"
 	"reasonix/internal/skill"
 	"reasonix/internal/tool"
 )
@@ -117,6 +119,7 @@ type chatTUI struct {
 	pendingCommit *[]string
 	renderer      *mdRenderer
 	showReasoning bool // Ctrl+O / /verbose: show raw thinking text in the CLI
+	cfg           *config.Config
 	// reasoningLineIdx is the transcript index of the live "▎ thinking…" marker
 	// while a reasoning block streams; it's rewritten to "▎ thought for Ns" when
 	// the block closes. -1 when no block is open. transcriptDirty forces a
@@ -2987,6 +2990,9 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 		m.notice(i18n.M.SlashTodoCleared)
 	case "/verbose":
 		m.toggleVerboseReasoning(true)
+	case "/sandbox":
+		m.echoLocalCommand(input)
+		m.showSandboxStatus()
 	case "/effort":
 		return m.runEffortCommand(input)
 	case "/auto-plan":
@@ -3088,6 +3094,41 @@ func (m *chatTUI) commandNames() string {
 		names[i] = "/" + c.Name
 	}
 	return strings.Join(names, " · ")
+}
+
+// showSandboxStatus displays the current sandbox configuration and whether
+// the OS sandbox backend is available. It reads from the stored config so
+// the user can inspect sandbox state without leaving the TUI (closes #3316).
+func (m *chatTUI) showSandboxStatus() {
+	if m.cfg == nil {
+		m.notice("sandbox: config not loaded")
+		return
+	}
+	bash := m.cfg.BashMode()
+	network := m.cfg.Sandbox.Network
+	available := sandbox.Available()
+	roots := m.cfg.WriteRoots()
+
+	var b strings.Builder
+	b.WriteString("sandbox\n")
+	b.WriteString("  phase 0  file-writer confinement\n")
+	if len(roots) > 0 {
+		fmt.Fprintf(&b, "    write_roots  %s\n", strings.Join(roots, ", "))
+	}
+	if m.cfg.Sandbox.WorkspaceRoot != "" {
+		fmt.Fprintf(&b, "    workspace_root  %s\n", m.cfg.Sandbox.WorkspaceRoot)
+	}
+	if len(m.cfg.Sandbox.AllowWrite) > 0 {
+		fmt.Fprintf(&b, "    allow_write  %s\n", strings.Join(m.cfg.Sandbox.AllowWrite, ", "))
+	}
+	b.WriteString("  phase 1  OS bash sandbox\n")
+	fmt.Fprintf(&b, "    bash        %s", bash)
+	if bash == "enforce" && !available {
+		b.WriteString(" (inactive: no OS sandbox on this host — bash runs unconfined)")
+	}
+	b.WriteString("\n")
+	fmt.Fprintf(&b, "    network     %v\n", network)
+	m.notice(b.String())
 }
 
 // runMCPSubcommand handles "/mcp" (status), "/mcp add …" (connect a server live
