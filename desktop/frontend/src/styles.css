@@ -969,7 +969,7 @@ a[href] {
 .transcript {
   position: relative;
   height: 100%;
-  overflow-y: auto;
+  overflow-y: overlay;
   overflow-x: hidden;
   padding: 24px 32px 32px;
   scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
