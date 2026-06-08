@@ -2440,7 +2440,7 @@ a[href] {
   padding: 5px 14px 6px;
   overflow: hidden;
   color: var(--fg-dim);
-  font-family: var(--mono);
+  font-family: var(--sans);
   font-size: 12px;
 }
 
@@ -2817,8 +2817,9 @@ a[href] {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-family: var(--mono);
+  font-family: var(--sans);
   font-size: var(--font-status);
+  font-variant-numeric: tabular-nums;
   line-height: 1.45;
   color: var(--fg-faint);
   /* One line, always: without this a narrow window squeezes the flex items and
@@ -2902,7 +2903,7 @@ a[href] {
   border: none;
   padding: 0;
   font: inherit;
-  font-family: var(--mono);
+  font-family: inherit;
   font-size: inherit;
   color: var(--fg-dim);
 }
@@ -2959,7 +2960,7 @@ a[href] {
   border: none;
   color: var(--fg-dim);
   font: inherit;
-  font-family: var(--mono);
+  font-family: inherit;
   font-size: inherit;
   padding: 0;
   white-space: nowrap;
@@ -3024,7 +3025,7 @@ a[href] {
   border-radius: 6px;
   color: var(--fg-dim);
   font: inherit;
-  font-family: var(--mono);
+  font-family: inherit;
   font-size: 12px;
   text-align: left;
 }
@@ -6480,7 +6481,7 @@ a[href] {
 .settings-center__navitem small {
   color: var(--fg-dim);
   font-size: var(--text-2xs);
-  font-family: var(--mono);
+  font-family: inherit;
 }
 
 .settings-center__content {
@@ -7920,15 +7921,16 @@ a[href] {
   background: var(--bg-elev);
 }
 .todobar__title {
-  font-family: var(--mono);
+  font-family: inherit;
   font-size: 12px;
   font-weight: 600;
   color: var(--fg-dim);
   flex-shrink: 0;
 }
 .todobar__count {
-  font-family: var(--mono);
+  font-family: inherit;
   font-size: 11px;
+  font-variant-numeric: tabular-nums;
   color: var(--fg-faint);
   flex-shrink: 0;
 }
@@ -8113,7 +8115,7 @@ a[href] {
   border-radius: 10px;
   background: color-mix(in srgb, var(--accent) 9%, var(--bg-elev));
   color: var(--accent);
-  font-family: var(--mono);
+  font-family: var(--sans);
   font-size: 12px;
   box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 6%, transparent);
 }
