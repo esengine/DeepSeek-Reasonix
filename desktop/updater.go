@@ -32,13 +32,37 @@ import (
 // the thin Wails binding that wires these into App methods and progress events.
 
 // Manifest endpoints — R2 CDN first (fast, especially in CN), GitHub releases as
-// fallback. Mirrors the v1 desktop's two-endpoint scheme.
+// fallback. The build channel picks the rolling pointer so a canary build polls
+// the canary line and a stable build polls latest; the two never cross.
 const (
-	manifestPrimary     = "https://pub-147fb53b9c1e4bbf891a257968619ea7.r2.dev/latest/latest.json"
-	manifestFallback    = "https://github.com/esengine/reasonix/releases/latest/download/latest.json"
-	defaultDownloadPage = "https://github.com/esengine/reasonix/releases/latest"
-	httpTimeout         = 15 * time.Second
+	r2Base         = "https://pub-147fb53b9c1e4bbf891a257968619ea7.r2.dev"
+	ghReleasesBase = "https://github.com/esengine/reasonix/releases"
+	httpTimeout    = 15 * time.Second
 )
+
+// manifestEndpoints returns the primary (R2) then fallback (GitHub) manifest URLs
+// for the running build's channel.
+func manifestEndpoints() []string {
+	if channel == "canary" {
+		return []string{
+			r2Base + "/canary/latest.json",
+			ghReleasesBase + "/download/desktop-canary/latest.json",
+		}
+	}
+	return []string{
+		r2Base + "/latest/latest.json",
+		ghReleasesBase + "/latest/download/latest.json",
+	}
+}
+
+// downloadPage is the human-facing releases page shown when self-update is
+// unavailable (macOS) or the manifest omits its own link.
+func downloadPage() string {
+	if channel == "canary" {
+		return ghReleasesBase // lists pre-releases too
+	}
+	return ghReleasesBase + "/latest"
+}
 
 // UpdateInfo is the CheckUpdate result that drives the frontend's update banner.
 type UpdateInfo struct {
@@ -95,7 +119,7 @@ func normalizeVersion(v string) (string, bool) {
 // and decodes it.
 func fetchManifest(ctx context.Context, c *http.Client) (*update.Manifest, error) {
 	var lastErr error
-	for _, url := range []string{manifestPrimary, manifestFallback} {
+	for _, url := range manifestEndpoints() {
 		b, err := fetchBytes(ctx, c, url)
 		if err != nil {
 			lastErr = err
@@ -116,7 +140,7 @@ func fetchManifest(ctx context.Context, c *http.Client) (*update.Manifest, error
 func evaluate(current string, m *update.Manifest) UpdateInfo {
 	page := m.DownloadPage
 	if page == "" {
-		page = defaultDownloadPage
+		page = downloadPage()
 	}
 	info := UpdateInfo{
 		Current:       current,

@@ -9,14 +9,29 @@ name: Release desktop
 # runner per platform. Artifacts are minisign-signed (MINISIGN_* secrets), a
 # latest.json manifest is generated, and everything is published to a GitHub
 # release and mirrored to R2 (the updater reads R2 first, GitHub as fallback).
+#
+# The same build/sign/manifest pipeline serves two channels. A `desktop-v*` tag
+# (or manual stable dispatch) publishes the stable line and moves R2's latest/
+# pointer. A manual `channel: canary` dispatch builds with -X main.channel=canary,
+# publishes a rolling `desktop-canary` pre-release, and moves only the canary/
+# pointer — it never touches latest/, so stable installs can't update onto it.
 on:
   push:
     tags: ["desktop-v*"]
   workflow_dispatch:
     inputs:
+      channel:
+        description: "Release channel"
+        type: choice
+        options: [stable, canary]
+        default: stable
       tag:
-        description: "Tag to publish (e.g. desktop-v1.1.0). Required when run manually."
-        required: true
+        description: "stable: tag to publish (e.g. desktop-v1.1.0)"
+        required: false
+        type: string
+      base_version:
+        description: "canary: intended next stable version, e.g. 1.5.0"
+        required: false
         type: string
 
 permissions:
@@ -94,13 +109,17 @@ jobs:
 
       - name: Resolve version
         id: ver
-        run: |
-          TAG="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "version=${TAG#desktop-}" >> "$GITHUB_OUTPUT"
+        run: bash scripts/resolve-desktop-release.sh
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          IN_CHANNEL: ${{ inputs.channel }}
+          IN_TAG: ${{ inputs.tag }}
+          IN_BASE_VERSION: ${{ inputs.base_version }}
+          REF_NAME: ${{ github.ref_name }}
+          RUN_NUMBER: ${{ github.run_number }}
 
       - name: Build and package
-        run: scripts/desktop-build.sh "${{ matrix.platform }}" "${{ steps.ver.outputs.version }}"
+        run: scripts/desktop-build.sh "${{ matrix.platform }}" "${{ steps.ver.outputs.version }}" "${{ steps.ver.outputs.channel }}"
 
       - name: Sign artifacts (minisign)
         working-directory: desktop
@@ -136,13 +155,14 @@ jobs:
 
       - name: Resolve version
         id: ver
-        run: |
-          TAG="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
-          VERSION="${TAG#desktop-}"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          # A version with a suffix (v1.0.0-rc1) is a prerelease.
-          case "$VERSION" in *-*) echo "prerelease=true" >> "$GITHUB_OUTPUT";; *) echo "prerelease=false" >> "$GITHUB_OUTPUT";; esac
+        run: bash scripts/resolve-desktop-release.sh
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          IN_CHANNEL: ${{ inputs.channel }}
+          IN_TAG: ${{ inputs.tag }}
+          IN_BASE_VERSION: ${{ inputs.base_version }}
+          REF_NAME: ${{ github.ref_name }}
+          RUN_NUMBER: ${{ github.run_number }}
 
       # Generate latest.json with GitHub release download URLs; the mirror step
       # rewrites them to R2 afterwards. GITHUB_REPOSITORY is provided by the runner.
@@ -154,9 +174,20 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          args=(--title "Reasonix Desktop ${{ steps.ver.outputs.version }}" --generate-notes)
-          [ "${{ steps.ver.outputs.prerelease }}" = "true" ] && args+=(--prerelease)
-          gh release create "${{ steps.ver.outputs.tag }}" dist/* "${args[@]}"
+          if [ "${{ steps.ver.outputs.channel }}" = "canary" ]; then
+            # Rolling channel: replace the previous desktop-canary release+tag so it
+            # always holds exactly the latest canary build.
+            gh release delete "${{ steps.ver.outputs.tag }}" --cleanup-tag --yes 2>/dev/null || true
+            gh release create "${{ steps.ver.outputs.tag }}" dist/* \
+              --target "${{ github.sha }}" \
+              --title "Reasonix Desktop ${{ steps.ver.outputs.version }} (canary)" \
+              --notes "Opt-in canary build for testers. Not a stable release. Built from ${{ github.sha }}." \
+              --prerelease
+          else
+            args=(--title "Reasonix Desktop ${{ steps.ver.outputs.version }}" --generate-notes)
+            [ "${{ steps.ver.outputs.prerelease }}" = "true" ] && args+=(--prerelease)
+            gh release create "${{ steps.ver.outputs.tag }}" dist/* "${args[@]}"
+          fi
 
   mirror:
     name: mirror to R2
@@ -167,12 +198,18 @@ jobs:
     env:
       HAS_R2: ${{ secrets.R2_ACCESS_KEY_ID != '' && secrets.R2_SECRET_ACCESS_KEY != '' && secrets.R2_ACCOUNT_ID != '' && secrets.R2_BUCKET != '' }}
     steps:
-      - name: Resolve tag
+      - uses: actions/checkout@v4
+
+      - name: Resolve version
         id: ver
-        run: |
-          TAG="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          case "${TAG#desktop-}" in *-*) echo "prerelease=true" >> "$GITHUB_OUTPUT";; *) echo "prerelease=false" >> "$GITHUB_OUTPUT";; esac
+        run: bash scripts/resolve-desktop-release.sh
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          IN_CHANNEL: ${{ inputs.channel }}
+          IN_TAG: ${{ inputs.tag }}
+          IN_BASE_VERSION: ${{ inputs.base_version }}
+          REF_NAME: ${{ github.ref_name }}
+          RUN_NUMBER: ${{ github.run_number }}
 
       - name: Download release assets
         if: env.HAS_R2 == 'true'
@@ -216,9 +253,11 @@ jobs:
         run: |
           ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
           aws s3 cp assets/ "s3://${R2_BUCKET}/${TAG}/" --recursive --endpoint-url "$ENDPOINT"
-          # Prereleases publish to their own tag prefix but must not move the
-          # updater's latest/ pointer; stable releases do.
-          if [ "${{ steps.ver.outputs.prerelease }}" = "true" ]; then
+          # The pointer a release moves is its channel's alone: canary writes
+          # canary/, stable writes latest/. A stable prerelease (rc) moves neither.
+          if [ "${{ steps.ver.outputs.channel }}" = "canary" ]; then
+            aws s3 cp assets/ "s3://${R2_BUCKET}/canary/" --recursive --endpoint-url "$ENDPOINT"
+          elif [ "${{ steps.ver.outputs.prerelease }}" = "true" ]; then
             echo "prerelease — leaving R2 latest/ untouched"
           else
             aws s3 cp assets/ "s3://${R2_BUCKET}/latest/" --recursive --endpoint-url "$ENDPOINT"

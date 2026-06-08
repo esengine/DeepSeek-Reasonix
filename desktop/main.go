@@ -36,6 +36,11 @@ var assets embed.FS
 // prompts to update.
 var version = "dev"
 
+// channel selects which updater pointer this build polls, injected via
+// `-X main.channel=canary`. Default "stable" tracks the public release; "canary"
+// tracks the opt-in pre-release line and never crosses over to stable.
+var channel = "stable"
+
 func main() {
 	app := NewApp()
 
