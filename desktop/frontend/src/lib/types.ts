@@ -218,7 +218,7 @@ export interface HistoryMessage {
   messages?: number;
   summary?: string;
   archive?: string;
-  references?: SessionReference[];
+  references?: SessionReference[] | string;
 }
 
 export interface HistoryToolCall {

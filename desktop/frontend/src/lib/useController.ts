@@ -717,7 +717,6 @@ export function useController() {
     return () => { textBatch.drain(); off(); offReady(); };
   }, [dispatchTo, loadSessionDataForTab, refreshCheckpoints, syncActiveTabFromBackend]);
 
-<<<<<<< HEAD
   // Stale-stream watchdog: if the frontend thinks the agent is running but
   // no token events have arrived for 30 seconds, reconcile with the backend.
   // This catches the case where the Wails event channel silently drops the
