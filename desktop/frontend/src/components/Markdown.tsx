@@ -37,6 +37,13 @@ const components: Components = {
         e.preventDefault();
         if (href) openExternal(href);
       }}
+      onAuxClick={(e) => {
+        e.preventDefault();
+        if (href) openExternal(href);
+      }}
+      onMouseDown={(e) => {
+        if (e.button === 1) e.preventDefault();
+      }}
     >
       {children}
     </a>
