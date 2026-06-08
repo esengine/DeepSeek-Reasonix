@@ -3402,16 +3402,32 @@ func (a *App) currentProviderEntryForTab(tabID string) (*config.ProviderEntry, e
 	return entry, nil
 }
 
-// SavePastedImage stores a browser clipboard image data URL under
-// .reasonix/attachments and returns the relative @-reference path.
+// SavePastedImage stores a browser clipboard image data URL under the active
+// tab's workspace .reasonix/attachments and returns the relative @-reference path.
 func (a *App) SavePastedImage(dataURL string) (string, error) {
+	root := a.activeWorkspaceRoot()
+	if root != "" && root != "." {
+		if prev, err := os.Getwd(); err == nil {
+			if err := os.Chdir(root); err == nil {
+				defer func() { _ = os.Chdir(prev) }()
+			}
+		}
+	}
 	return control.SaveImageDataURL(dataURL)
 }
 
 // SavePastedFile stores a dropped non-image file (the browser exposes its bytes
-// as a data URL but not a real path) under .reasonix/attachments and returns the
-// relative @-reference path.
+// as a data URL but not a real path) under the active tab's workspace
+// .reasonix/attachments and returns the relative @-reference path.
 func (a *App) SavePastedFile(name, dataURL string) (string, error) {
+	root := a.activeWorkspaceRoot()
+	if root != "" && root != "." {
+		if prev, err := os.Getwd(); err == nil {
+			if err := os.Chdir(root); err == nil {
+				defer func() { _ = os.Chdir(prev) }()
+			}
+		}
+	}
 	return control.SaveAttachmentDataURL(name, dataURL)
 }
 
