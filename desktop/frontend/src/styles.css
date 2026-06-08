@@ -6949,7 +6949,6 @@ a[href] {
 }
 .settings-model-picker__option strong {
   color: var(--fg);
-  font-family: var(--mono);
   font-size: var(--font-control-small);
   font-weight: 700;
 }
