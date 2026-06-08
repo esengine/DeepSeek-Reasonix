@@ -375,7 +375,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	if opts.MaxSteps > 0 {
 		maxSteps = opts.MaxSteps
 	}
-	subagentStore := agent.NewSubagentStore(filepath.Join(config.SessionDir(), "subagents"))
+	subagentStore := newSubagentStore(config.SessionDir())
 
 	// Permission policy gates every tool call. The headless gate (no Approver)
 	// resolves "ask" to allow — preserving `reasonix run` autonomy — while deny
@@ -433,24 +433,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		return p, me.Price, me.ContextWindow, nil
 	}
 	subagentIdentity := func(modelRef, effort string) (string, string) {
-		me := *entry
-		modelID := modelName
-		if strings.TrimSpace(modelRef) != "" {
-			if resolved, ok := cfg.ResolveModel(modelRef); ok {
-				me = *resolved
-				modelID = strings.TrimSpace(modelRef)
-			} else {
-				modelID = strings.TrimSpace(modelRef)
-			}
-		}
-		if strings.TrimSpace(effort) != "" {
-			if normalized, err := config.NormalizeEffort(&me, effort); err == nil {
-				me.Effort = normalized
-			} else {
-				me.Effort = strings.TrimSpace(effort)
-			}
-		}
-		return modelID, strings.TrimSpace(me.Effort)
+		return subagentEffectiveIdentity(cfg, modelName, entry, modelRef, effort)
 	}
 	taskModel := firstNonEmpty(cfg.Agent.SubagentModels["task"], cfg.Agent.SubagentModel)
 	taskEffort := firstNonEmpty(cfg.Agent.SubagentEfforts["task"], cfg.Agent.SubagentEffort)
@@ -929,6 +912,51 @@ func nearestGitRoot(start string) (string, bool) {
 func isGitMarker(path string) bool {
 	fi, err := os.Stat(path)
 	return err == nil && (fi.IsDir() || fi.Mode().IsRegular())
+}
+
+func newSubagentStore(sessionDir string) *agent.SubagentStore {
+	sessionDir = strings.TrimSpace(sessionDir)
+	if sessionDir == "" {
+		return nil
+	}
+	return agent.NewSubagentStore(filepath.Join(sessionDir, "subagents"))
+}
+
+func subagentEffectiveIdentity(cfg *config.Config, baseModelRef string, base *config.ProviderEntry, modelRef, effort string) (string, string) {
+	var entry config.ProviderEntry
+	if base != nil {
+		entry = *base
+	}
+	ref := strings.TrimSpace(modelRef)
+	if ref == "" {
+		ref = strings.TrimSpace(baseModelRef)
+	}
+	if cfg != nil && ref != "" {
+		if resolved, ok := cfg.ResolveModel(ref); ok {
+			entry = *resolved
+		} else if strings.TrimSpace(modelRef) != "" {
+			entry.Model = ref
+		}
+	} else if strings.TrimSpace(modelRef) != "" {
+		entry.Model = strings.TrimSpace(modelRef)
+	}
+	if rawEffort := strings.TrimSpace(effort); rawEffort != "" {
+		if normalized, err := config.NormalizeEffort(&entry, rawEffort); err == nil {
+			entry.Effort = normalized
+		} else {
+			entry.Effort = rawEffort
+		}
+	}
+	modelID := strings.TrimSpace(entry.Name)
+	model := strings.TrimSpace(entry.Model)
+	if modelID != "" && model != "" {
+		modelID += "/" + model
+	} else if model != "" {
+		modelID = model
+	} else if modelID == "" {
+		modelID = ref
+	}
+	return modelID, strings.TrimSpace(config.EffectiveEffort(&entry))
 }
 
 // NewProvider builds a provider.Provider from a configured entry. Exported so
