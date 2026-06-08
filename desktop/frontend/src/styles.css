@@ -644,8 +644,9 @@ a[href] {
   position: absolute;
   top: 0;
   bottom: 0;
-  left: 0;
+  left: 50%;
   width: 1px;
+  transform: translateX(-50%);
   background: var(--border-soft);
   transition: background 0.12s, box-shadow 0.12s;
 }
