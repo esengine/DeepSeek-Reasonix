@@ -1110,7 +1110,7 @@ func repeatSuccessSignature(call provider.ToolCall, t tool.Tool) (string, bool) 
 		return "", false
 	}
 	switch call.Name {
-	case "write_file", "edit_file", "multi_edit", "notebook_edit":
+	case "write_file", "edit_file", "multi_edit", "notebook_edit", "remember", "forget":
 		return call.Name + "\x00" + canonicalToolArgs(call.Arguments), true
 	case "bash":
 		var p struct {
@@ -1120,12 +1120,15 @@ func repeatSuccessSignature(call provider.ToolCall, t tool.Tool) (string, bool) 
 		if err := json.Unmarshal([]byte(call.Arguments), &p); err != nil {
 			return "", false
 		}
-		if p.RunInBackground || !isShellFileWriteCommand(p.Command) {
+		if p.RunInBackground {
+			return "", false
+		}
+		if !isShellFileWriteCommand(normalizeShellCommand(p.Command)) {
 			return "", false
 		}
 		return "bash\x00" + normalizeShellCommand(p.Command), true
 	default:
-		return "", false
+		return call.Name + "::" + canonicalToolArgs(call.Arguments), true
 	}
 }
 

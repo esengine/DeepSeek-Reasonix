@@ -32,10 +32,10 @@ const DefaultPlannerMaxSteps = 6
 // gains context access without letting planning turns become long-running agent
 // sessions. A lower explicit agent.max_steps remains respected.
 func PlannerMaxSteps(configured int) int {
-	if configured > 0 && configured < DefaultPlannerMaxSteps {
-		return configured
+	if configured <= 0 {
+		return 0 // unlimited
 	}
-	return DefaultPlannerMaxSteps
+	return configured // respect user's explicit value
 }
 
 // PlannerPromptWithContext appends cache-stable standing context, such as loaded

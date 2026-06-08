@@ -86,3 +86,90 @@ func TestRepeatGuardAllowsTwoRepeatedWriterSuccesses(t *testing.T) {
 		t.Fatalf("second repeated writer call should still be allowed, got %q", last)
 	}
 }
+
+func TestRepeatGuardBlocksRepeatedRemember(t *testing.T) {
+	var calls int32
+	reg := tool.NewRegistry()
+	reg.Add(fakeTool{name: "remember", readOnly: false, calls: &calls})
+	args := `{"body": "test fact", "description": "test", "name": "test-fact", "type": "project"}`
+	prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{
+		{toolCallChunk("c1", "remember", args), {Type: provider.ChunkDone}},
+		{toolCallChunk("c2", "remember", args), {Type: provider.ChunkDone}},
+		{toolCallChunk("c3", "remember", args), {Type: provider.ChunkDone}},
+		{{Type: provider.ChunkText, Text: "done"}, {Type: provider.ChunkDone}},
+	}}
+	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
+
+	if err := a.Run(context.Background(), "remember repeatedly"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := atomic.LoadInt32(&calls); got != 2 {
+		t.Fatalf("remember executed %d times, want 2 before the repeat guard blocks", got)
+	}
+	results := toolResults(a.session, "remember")
+	if len(results) != 3 {
+		t.Fatalf("tool results = %d, want 3", len(results))
+	}
+	last := results[len(results)-1]
+	if !strings.Contains(last, "[loop guard]") || !strings.Contains(last, "edit_file") {
+		t.Fatalf("third repeated remember should nudge the model to change tools, got %q", last)
+	}
+}
+
+func TestRepeatGuardBlocksRepeatedForget(t *testing.T) {
+	var calls int32
+	reg := tool.NewRegistry()
+	reg.Add(fakeTool{name: "forget", readOnly: false, calls: &calls})
+	args := `{"name": "test-fact"}`
+	prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{
+		{toolCallChunk("c1", "forget", args), {Type: provider.ChunkDone}},
+		{toolCallChunk("c2", "forget", args), {Type: provider.ChunkDone}},
+		{toolCallChunk("c3", "forget", args), {Type: provider.ChunkDone}},
+		{{Type: provider.ChunkText, Text: "done"}, {Type: provider.ChunkDone}},
+	}}
+	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
+
+	if err := a.Run(context.Background(), "forget repeatedly"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := atomic.LoadInt32(&calls); got != 2 {
+		t.Fatalf("forget executed %d times, want 2 before the repeat guard blocks", got)
+	}
+	results := toolResults(a.session, "forget")
+	if len(results) != 3 {
+		t.Fatalf("tool results = %d, want 3", len(results))
+	}
+	last := results[len(results)-1]
+	if !strings.Contains(last, "[loop guard]") {
+		t.Fatalf("third repeated forget should trigger loop guard, got %q", last)
+	}
+}
+
+func TestRepeatGuardBlocksRepeatedUnknownTool(t *testing.T) {
+	var calls int32
+	reg := tool.NewRegistry()
+	reg.Add(fakeTool{name: "my_custom_tool", readOnly: false, calls: &calls})
+	args := `{"input": "hello"}`
+	prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{
+		{toolCallChunk("c1", "my_custom_tool", args), {Type: provider.ChunkDone}},
+		{toolCallChunk("c2", "my_custom_tool", args), {Type: provider.ChunkDone}},
+		{toolCallChunk("c3", "my_custom_tool", args), {Type: provider.ChunkDone}},
+		{{Type: provider.ChunkText, Text: "done"}, {Type: provider.ChunkDone}},
+	}}
+	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
+
+	if err := a.Run(context.Background(), "use custom tool repeatedly"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := atomic.LoadInt32(&calls); got != 2 {
+		t.Fatalf("my_custom_tool executed %d times, want 2 before the repeat guard blocks", got)
+	}
+	results := toolResults(a.session, "my_custom_tool")
+	if len(results) != 3 {
+		t.Fatalf("tool results = %d, want 3", len(results))
+	}
+	last := results[len(results)-1]
+	if !strings.Contains(last, "[loop guard]") {
+		t.Fatalf("third repeated unknown tool should trigger loop guard, got %q", last)
+	}
+}
