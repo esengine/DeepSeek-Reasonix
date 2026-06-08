@@ -7,6 +7,7 @@ import type {
   PointerEvent as ReactPointerEvent,
 } from "react";
 import {
+  Check,
   ChevronDown,
   ChevronRight,
   FileText,
@@ -227,6 +228,11 @@ export function WorkspacePanel({
   const [treeResizing, setTreeResizing] = useState(false);
   const [recentOpen, setRecentOpen] = useState(false);
   const recentAnchorRef = useRef<HTMLButtonElement>(null);
+  const [gitBranch, setGitBranch] = useState("");
+  const [branchMenuOpen, setBranchMenuOpen] = useState(false);
+  const [branchList, setBranchList] = useState<string[]>([]);
+  const [switchingBranch, setSwitchingBranch] = useState(false);
+  const branchBtnRef = useRef<HTMLButtonElement>(null);
   const openDirsRef = useRef(openDirs);
 
   useEffect(() => {
@@ -252,6 +258,42 @@ export function WorkspacePanel({
 
   const toggleCommit = useCallback((hash: string) => {
     setExpandedCommit((prev) => (prev === hash ? null : hash));
+  }, []);
+
+  const openBranchMenu = useCallback(async () => {
+    try {
+      const branches = await app.GitBranches();
+      setBranchList(branches);
+    } catch {
+      setBranchList([]);
+    }
+    setBranchMenuOpen((prev) => !prev);
+  }, []);
+
+  const switchBranch = useCallback(
+    async (branch: string) => {
+      if (branch === gitBranch) return;
+      setSwitchingBranch(true);
+      try {
+        await app.GitCheckout(branch);
+        setGitBranch(branch);
+      } catch {
+        // Error shown via the changes view
+      } finally {
+        setSwitchingBranch(false);
+        setBranchMenuOpen(false);
+      }
+    },
+    [gitBranch],
+  );
+
+  const fetchGitBranch = useCallback(async () => {
+    try {
+      const wc = await app.WorkspaceChanges();
+      if (wc.gitBranch) setGitBranch(wc.gitBranch);
+    } catch {
+      // git not available
+    }
   }, []);
 
   useEffect(() => {
@@ -360,6 +402,12 @@ export function WorkspacePanel({
       void loadGitHistory();
     }
   }, [selectedPath, viewMode, loadGitHistory, open]);
+
+  useEffect(() => {
+    if (viewMode === "changed" && !gitBranch) {
+      void fetchGitBranch();
+    }
+  }, [viewMode, gitBranch, fetchGitBranch]);
 
   useEffect(() => {
     if (!open || !refreshKey) return;
@@ -1088,7 +1136,7 @@ export function WorkspacePanel({
                   ))
                 )}
               </div>
-            )}
+            </AnchoredPopover>
             {showViewTabs && (
               <Tooltip label={t("workspace.refreshChanges")}>
                 <button className="workspace-iconbtn" onClick={() => void loadGitHistory()}>
