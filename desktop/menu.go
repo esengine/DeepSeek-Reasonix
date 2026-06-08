@@ -40,7 +40,7 @@ func (a *App) createAppMenu() *menu.Menu {
 	})
 	fileMenu.AddText("Toggle Developer Tools", keys.CmdOrCtrl("i"), func(_ *menu.CallbackData) {
 		if a.ctx != nil {
-			runtime.EventsEmit(a.ctx, "wails:openInspector")
+			runtime.WindowExecJS(a.ctx, `window.webkit.messageHandlers.external.postMessage("wails:openInspector");`)
 		}
 	})
 	m.Append(menu.EditMenu())
