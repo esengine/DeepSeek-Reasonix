@@ -32,6 +32,34 @@ func TestResolveStdioExecutableWindowsPathAndPATHEXT(t *testing.T) {
 	}
 }
 
+func TestResolveStdioExecutableWindowsUsesCommonNodeFallback(t *testing.T) {
+	root := t.TempDir()
+	localAppData := filepath.Join(root, "Local")
+	nodeDir := filepath.Join(localAppData, "Programs", "nodejs")
+	if err := os.MkdirAll(nodeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	npx := filepath.Join(nodeDir, "npx.cmd")
+	if err := os.WriteFile(npx, []byte("@echo off\r\n"), 0o644); err != nil {
+		t.Fatalf("write fake npx.cmd: %v", err)
+	}
+
+	exe, env, err := resolveStdioExecutable(context.Background(), Spec{Name: "fs", Command: "npx"}, []string{
+		"Path=",
+		"PATHEXT=.CMD;.EXE",
+		"LOCALAPPDATA=" + localAppData,
+	})
+	if err != nil {
+		t.Fatalf("resolveStdioExecutable: %v", err)
+	}
+	if !strings.EqualFold(exe, npx) {
+		t.Fatalf("resolved executable = %q, want %q", exe, npx)
+	}
+	if got, ok := envValue(env, "PATH"); !ok || !strings.Contains(strings.ToLower(got), strings.ToLower(nodeDir)) {
+		t.Fatalf("env PATH = %q, %v; want node fallback dir", got, ok)
+	}
+}
+
 func TestSetEnvValueWindowsReplacesPathCaseInsensitively(t *testing.T) {
 	env := setEnvValue([]string{"Path=C:\\old", "OTHER=x"}, "PATH", "C:\\new")
 	if got, ok := envValue(env, "Path"); !ok || got != "C:\\new" {

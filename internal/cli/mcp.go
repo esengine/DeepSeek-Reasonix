@@ -163,6 +163,8 @@ func mcpCommand(args []string) int {
 		return mcpAddCLI(args[1:])
 	case "remove", "rm":
 		return mcpRemoveCLI(args[1:])
+	case "import":
+		return mcpImportCLI()
 	case "help", "-h", "--help":
 		mcpUsage()
 		return 0
@@ -171,6 +173,16 @@ func mcpCommand(args []string) int {
 		mcpUsage()
 		return 2
 	}
+}
+
+func mcpImportCLI() int {
+	total, added, updated, err := config.ImportCCSwitchMCP()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	fmt.Printf("imported %d MCP servers from cc-switch (%d added, %d updated) — servers load on the next session\n", total, added, updated)
+	return 0
 }
 
 func mcpList() int {
@@ -182,8 +194,8 @@ func mcpList() int {
 	listed := 0
 	// CodeGraph is a built-in server injected by boot, not a [[plugins]] entry, so
 	// report its resolved status here too. It is listed even when disabled, matching
-	// the MCP manager where the user can enable it and choose a startup tier.
-	codegraphMeta := fmt.Sprintf(" [auto_start=%v tier=%s]", cfg.Codegraph.Enabled, cfg.Codegraph.ResolvedTier())
+	// the MCP manager where the user can enable it.
+	codegraphMeta := fmt.Sprintf(" [enabled=%v auto_install=%v]", cfg.Codegraph.Enabled, cfg.Codegraph.AutoInstall)
 	if bin, ok := codegraph.Resolve(cfg.Codegraph.Path); ok {
 		fmt.Printf("%-16s (stdio, built-in)%s  %s serve --mcp\n", "codegraph", codegraphMeta, bin)
 	} else {
@@ -271,6 +283,7 @@ Usage:
   reasonix mcp add <name> <command> [args...]        stdio server
   reasonix mcp add <name> --http <url> [--header K=V] remote (Streamable HTTP)
   reasonix mcp add <name> --sse  <url>               remote (legacy SSE)
+  reasonix mcp import                                import Codex-enabled servers from cc-switch
   reasonix mcp remove <name>
 
 Flags for add:

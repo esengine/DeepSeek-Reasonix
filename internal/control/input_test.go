@@ -12,6 +12,7 @@ import (
 	"reasonix/internal/command"
 	"reasonix/internal/event"
 	"reasonix/internal/memory"
+	"reasonix/internal/skill"
 )
 
 type fakeAutoPlanClassifier struct {
@@ -46,6 +47,40 @@ func TestCustomCommandLookup(t *testing.T) {
 	}
 	if _, ok := c.CustomCommand("/missing"); ok {
 		t.Error("missing should not be found")
+	}
+}
+
+func TestSkillsReflectStoreChangesAfterControllerBuild(t *testing.T) {
+	project := t.TempDir()
+	home := t.TempDir()
+	store := skill.New(skill.Options{HomeDir: home, ProjectRoot: project, DisableBuiltins: true})
+	c := New(Options{SkillStore: store, Skills: store.List()})
+
+	if _, ok := c.RunSkill("/hot now"); ok {
+		t.Fatal("skill should not exist before it is written")
+	}
+	writeControlSkill(t, project, ".reasonix/skills/hot/SKILL.md", "---\nname: hot\ndescription: Hot install\n---\nHot body")
+
+	if skills := c.Skills(); len(skills) != 1 || skills[0].Name != "hot" {
+		t.Fatalf("Skills() = %+v, want newly installed hot skill", skills)
+	}
+	sent, ok := c.RunSkill("/hot now")
+	if !ok {
+		t.Fatal("RunSkill should find newly installed skill")
+	}
+	if !strings.Contains(sent, "Hot body") || !strings.Contains(sent, "Arguments: now") {
+		t.Fatalf("rendered skill = %q", sent)
+	}
+}
+
+func writeControlSkill(t *testing.T, root, rel, body string) {
+	t.Helper()
+	path := filepath.Join(root, rel)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -183,7 +218,7 @@ func TestRunTurnAutoPlanComplexTask(t *testing.T) {
 	var notices []string
 	runner := &fakeTurnRunner{}
 	c := New(Options{
-		AutoPlan: "ask",
+		AutoPlan: "on",
 		Runner:   runner,
 		Sink: event.FuncSink(func(e event.Event) {
 			if e.Kind == event.Notice {
@@ -209,7 +244,7 @@ func TestRunTurnAutoPlanComplexTask(t *testing.T) {
 
 func TestRunTurnAutoPlanSkipsSimpleQuestion(t *testing.T) {
 	runner := &fakeTurnRunner{}
-	c := New(Options{AutoPlan: "ask", Runner: runner})
+	c := New(Options{AutoPlan: "on", Runner: runner})
 
 	if err := c.runTurn(context.Background(), "解释一下这个函数做什么？"); err != nil {
 		t.Fatal(err)
@@ -238,10 +273,24 @@ func TestRunTurnAutoPlanOff(t *testing.T) {
 	}
 }
 
+func TestSetAutoPlanAffectsNextTurn(t *testing.T) {
+	runner := &fakeTurnRunner{}
+	c := New(Options{AutoPlan: "off", Runner: runner})
+	c.SetAutoPlan("on")
+
+	input := "实现 GitHub issue #2395：\n- 新增配置项\n- 自动判断复杂任务\n- 补测试和文档"
+	if err := c.runTurn(context.Background(), input); err != nil {
+		t.Fatal(err)
+	}
+	if len(runner.inputs) != 1 || !strings.HasPrefix(runner.inputs[0], PlanModeMarker) {
+		t.Fatalf("SetAutoPlan should affect next turn, inputs=%q", runner.inputs)
+	}
+}
+
 func TestRunTurnAutoPlanClassifierBorderlineTrue(t *testing.T) {
 	classifier := &fakeAutoPlanClassifier{needsPlan: true, reason: "borderline multi-step"}
 	runner := &fakeTurnRunner{}
-	c := New(Options{AutoPlan: "ask", Classifier: classifier, Runner: runner})
+	c := New(Options{AutoPlan: "on", Classifier: classifier, Runner: runner})
 
 	if err := c.runTurn(context.Background(), "实现一个小的配置入口"); err != nil {
 		t.Fatal(err)
@@ -257,7 +306,7 @@ func TestRunTurnAutoPlanClassifierBorderlineTrue(t *testing.T) {
 func TestRunTurnAutoPlanClassifierBorderlineFalse(t *testing.T) {
 	classifier := &fakeAutoPlanClassifier{needsPlan: false, reason: "single obvious edit"}
 	runner := &fakeTurnRunner{}
-	c := New(Options{AutoPlan: "ask", Classifier: classifier, Runner: runner})
+	c := New(Options{AutoPlan: "on", Classifier: classifier, Runner: runner})
 
 	if err := c.runTurn(context.Background(), "实现一个小的配置入口"); err != nil {
 		t.Fatal(err)
@@ -276,7 +325,7 @@ func TestRunTurnAutoPlanClassifierBorderlineFalse(t *testing.T) {
 func TestRunTurnAutoPlanClassifierFallback(t *testing.T) {
 	classifier := &fakeAutoPlanClassifier{err: errors.New("bad json")}
 	runner := &fakeTurnRunner{}
-	c := New(Options{AutoPlan: "ask", Classifier: classifier, Runner: runner})
+	c := New(Options{AutoPlan: "on", Classifier: classifier, Runner: runner})
 
 	if err := c.runTurn(context.Background(), "实现 README 文档更新"); err != nil {
 		t.Fatal(err)
@@ -292,7 +341,7 @@ func TestRunTurnAutoPlanClassifierFallback(t *testing.T) {
 func TestRunTurnAutoPlanTypedNilClassifierFallsBack(t *testing.T) {
 	var classifier *ProviderAutoPlanClassifier
 	runner := &fakeTurnRunner{}
-	c := New(Options{AutoPlan: "ask", Classifier: classifier, Runner: runner})
+	c := New(Options{AutoPlan: "on", Classifier: classifier, Runner: runner})
 
 	if err := c.runTurn(context.Background(), "实现 README 文档更新"); err != nil {
 		t.Fatal(err)
@@ -304,7 +353,7 @@ func TestRunTurnAutoPlanTypedNilClassifierFallsBack(t *testing.T) {
 
 func TestRunTurnAutoPlanScoresRawPromptNotResolvedRefs(t *testing.T) {
 	runner := &fakeTurnRunner{}
-	c := New(Options{AutoPlan: "ask", Runner: runner})
+	c := New(Options{AutoPlan: "on", Runner: runner})
 
 	resolved := "Referenced context:\n\n" +
 		strings.Repeat("实现 重构 配置 测试 文档 多个文件\n", 20) +

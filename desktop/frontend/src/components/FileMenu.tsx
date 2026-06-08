@@ -2,9 +2,11 @@ import { useEffect, useRef } from "react";
 import { Folder, FileText } from "lucide-react";
 import type { DirEntry } from "../lib/types";
 
-// FileMenu is the "@" file-reference dropdown above the composer. Like SlashMenu,
-// it's presentational — the Composer owns navigation and the one-level-at-a-time
-// descend logic. Reuses the .slashmenu container styling.
+// FileMenu is the "@" file-reference list — it renders only the items and
+// expects the caller (Composer) to wrap them in a .slashmenu container, since
+// nesting two .slashmenu absolute containers mis-positions the inner one. The
+// Composer owns navigation and the one-level-at-a-time descend logic; this
+// stays presentational.
 export function FileMenu({
   items,
   activeIndex,
@@ -22,7 +24,7 @@ export function FileMenu({
     activeRef.current?.scrollIntoView({ block: "nearest" });
   }, [activeIndex]);
   return (
-    <div className="slashmenu" role="listbox">
+    <>
       {items.map((e, i) => (
         <button
           key={(e.isDir ? "d:" : "f:") + e.name}
@@ -47,6 +49,6 @@ export function FileMenu({
           </span>
         </button>
       ))}
-    </div>
+    </>
   );
 }

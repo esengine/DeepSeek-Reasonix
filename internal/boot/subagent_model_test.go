@@ -50,3 +50,42 @@ func TestSubagentModelRefAcceptsToolNameAliases(t *testing.T) {
 		t.Fatalf("security_review alias should configure security-review, got %q", got)
 	}
 }
+
+func TestSubagentEffortRefHonorsPrecedence(t *testing.T) {
+	cfg := config.Default()
+	cfg.Agent.SubagentEffort = "high"
+	cfg.Agent.SubagentEfforts = map[string]string{"review": "max"}
+
+	got := subagentEffortRef(cfg, skill.Skill{
+		Name:   "review",
+		RunAs:  skill.RunSubagent,
+		Effort: "low",
+	})
+	if got != "max" {
+		t.Fatalf("per-skill effort config should override skill frontmatter and default, got %q", got)
+	}
+
+	got = subagentEffortRef(cfg, skill.Skill{
+		Name:   "custom",
+		RunAs:  skill.RunSubagent,
+		Effort: "medium",
+	})
+	if got != "medium" {
+		t.Fatalf("skill frontmatter effort should override default config, got %q", got)
+	}
+
+	got = subagentEffortRef(cfg, skill.Skill{Name: "other", RunAs: skill.RunSubagent})
+	if got != "high" {
+		t.Fatalf("default subagent effort = %q, want high", got)
+	}
+}
+
+func TestSubagentEffortRefAcceptsToolNameAliases(t *testing.T) {
+	cfg := config.Default()
+	cfg.Agent.SubagentEfforts = map[string]string{"security_review": "max"}
+
+	got := subagentEffortRef(cfg, skill.Skill{Name: "security-review", RunAs: skill.RunSubagent})
+	if got != "max" {
+		t.Fatalf("security_review alias should configure security-review effort, got %q", got)
+	}
+}

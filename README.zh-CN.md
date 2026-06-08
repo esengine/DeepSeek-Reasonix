@@ -99,7 +99,7 @@ default_model = "deepseek-flash"   # 执行器；设 [agent].planner_model 可�
 # planner_model = "mimo-pro"          # 可选的低频规划器
 # subagent_model = "deepseek-pro"     # runAs=subagent skill 的默认模型
 # subagent_models = { review = "deepseek-pro", security_review = "deepseek-pro" }
-auto_plan = "ask"                  # off|ask|on；复杂聊天任务自动进入计划模式
+auto_plan = "off"                  # off|on；off 表示计划模式仅手动开启
 # auto_plan_classifier = "deepseek-flash"   # 可选；只在边界任务上调用
 
 [[providers]]
@@ -112,9 +112,11 @@ api_key_env = "DEEPSEEK_API_KEY"
 
 [tools]
 enabled = []   # 省略/为空 = 全部内置工具
+bash_timeout_seconds = 120   # 前台安全上限；设为 0 表示不设工具层超时
 
 [skills]
 # paths = ["~/my-skills", "../shared/skills"]   # 额外的自定义技能目录
+# excluded_paths = ["~/.agents/skills"]         # 隐藏约定来源，不删除目录
 # disabled_skills = ["review"]                  # 隐藏技能，直到 /skill enable <name>
 
 [permissions]
@@ -224,12 +226,19 @@ session），向导后手动在 `reasonix.toml` 加一行即可：
 planner_model = "deepseek-pro"   # 作为低频规划器
 ```
 
+Planner 会看到已加载的 `REASONIX.md` / `AGENTS.md` 记忆，并拿到一小组只读研究工具，
+因此可以先检查相关文件再把计划交给执行器。写入类和流程类工具仍只给执行器使用。
+
 Subagent skills 默认继承执行器模型。设置 `subagent_model` 可让它们统一走另一个已配置
 模型；设置 `subagent_models` 则只覆盖 `review`、`security_review` 等指定 skill。
 
-交互式前端中，`agent.auto_plan = "ask"` 会让看起来复杂的任务自动进入 plan
-mode：Reasonix 先只读生成计划，待用户批准后才编辑文件或执行有副作用的命令。
-`auto_plan_classifier` 可以指定便宜的 provider，例如 `deepseek-flash`；它只在边界输入上调用，分类失败会回退到启发式规则。
+交互式前端中，计划模式默认手动开启。设置 `agent.auto_plan = "on"` 后，看起来复杂
+的任务会自动进入 plan mode：Reasonix 先只读生成计划，待用户批准后才
+编辑文件或执行有副作用的命令。`auto_plan_classifier` 可以指定便宜的 provider，例如
+`deepseek-flash`；它只在边界输入上调用，分类失败会回退到启发式规则。也可以用
+`reasonix chat` 里的 `/auto-plan off|on` 修改用户级设置，或在 shell/脚本里用
+`reasonix config auto-plan off|on`。只有明确想写项目级覆盖时，才给 shell 命令加
+`--local`。
 
 ## 架构
 

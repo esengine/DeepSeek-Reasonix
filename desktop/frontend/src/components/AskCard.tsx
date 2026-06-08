@@ -150,6 +150,7 @@ export function AskCard({
       barRef={shelfRef}
       titleId="ask-shelf-title"
       title={t("ask.title")}
+      actionsWrap
       badges={
         <>
           {q.header && <PromptBadge>{q.header}</PromptBadge>}
@@ -159,6 +160,11 @@ export function AskCard({
       meta={q.prompt}
       actions={
         <>
+          {active > 0 && (
+            <button className="prompt-action prompt-action--quiet" onClick={goBack}>
+              <span className="prompt-action__label">{t("ask.back")}</span>
+            </button>
+          )}
           {q.options.map((o, index) => {
             const on = (sel[q.id] ?? []).includes(o.label);
             return (
@@ -171,12 +177,20 @@ export function AskCard({
               />
             );
           })}
+          {q.multi && (
+            <button className="prompt-action prompt-action--selected" onClick={() => finishOrAdvance()} disabled={!currentAnswered}>
+              <span className="prompt-action__label">{isLast ? t("common.submit") : t("ask.next")}</span>
+            </button>
+          )}
           <PromptDetailToggle
             open={detailsOpen}
             label={t("ask.details")}
             openLabel={t("ask.hideDetails")}
             onClick={() => setDetailsOpen((open) => !open)}
           />
+          <button className="prompt-action prompt-action--quiet" onClick={onDismiss}>
+            <span className="prompt-action__label">{t("ask.justChat")}</span>
+          </button>
         </>
       }
       crumbs={
@@ -188,25 +202,6 @@ export function AskCard({
             </span>
           ))}
         </div>
-        )
-      }
-      quickActions={
-        !detailsOpen && (
-          <div className="ask-shelf__quick-actions">
-            {active > 0 && (
-              <button className="btn" onClick={goBack}>
-                {t("ask.back")}
-              </button>
-            )}
-            <button className="btn" onClick={onDismiss}>
-              {t("ask.justChat")}
-            </button>
-            {q.multi && (
-              <button className="btn btn--primary" onClick={() => finishOrAdvance()} disabled={!currentAnswered}>
-                {isLast ? t("common.submit") : t("ask.next")}
-              </button>
-            )}
-          </div>
         )
       }
     >

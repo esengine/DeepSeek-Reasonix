@@ -113,8 +113,9 @@ has a manual check. Self-update behavior by platform:
 There are no Apple/Windows code-signing certificates yet, so a downloaded build
 trips the OS gatekeepers on first run:
 
-- **macOS** — Gatekeeper may report the app "is damaged" or is from an
-  unidentified developer. Clear the quarantine attribute, then open it:
+- **macOS** — open `Reasonix-darwin-universal.dmg` and drag Reasonix into
+  Applications. Gatekeeper may then report the app "is damaged" or is from an
+  unidentified developer; clear the quarantine attribute and open it:
   ```sh
   xattr -dr com.apple.quarantine /Applications/Reasonix.app
   ```

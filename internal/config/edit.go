@@ -54,11 +54,27 @@ func (c *Config) SetPlannerModel(name string) error {
 	return nil
 }
 
+// SetAutoPlan sets the interactive auto-plan gate. "off" keeps plan mode manual;
+// "on" opts into automatic read-only planning for complex-looking turns.
+// "ask" is accepted as a legacy synonym for "on" but is never written back.
+func (c *Config) SetAutoPlan(mode string) error {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "off":
+		c.Agent.AutoPlan = "off"
+	case "on", "ask":
+		c.Agent.AutoPlan = "on"
+	default:
+		return fmt.Errorf("auto_plan %q: must be off|on", mode)
+	}
+	return nil
+}
+
 // UpsertProvider adds e, or replaces an existing provider with the same name
-// (preserving its position). Required fields (name, kind, base_url, model) are
-// validated; whether the kind is actually registered and the key resolves is
+// (preserving its position). Required fields (name, kind, base_url, model/models)
+// are validated; whether the kind is actually registered and the key resolves is
 // checked later by provider.New / Validate, which give actionable errors.
 func (c *Config) UpsertProvider(e ProviderEntry) error {
+	normalizeProviderEffortFields(&e)
 	if err := validateProvider(e); err != nil {
 		return err
 	}
@@ -83,7 +99,7 @@ func (c *Config) SetProviderEffort(name, effort string) error {
 	return fmt.Errorf("set provider effort: no provider %q", name)
 }
 
-// SetLanguage pins the CLI UI language; empty/auto clears the override so runtime detection falls back to REASONIX_LANG / locale.
+// SetLanguage pins the CLI UI/model language; empty/auto clears the override so runtime detection falls back to REASONIX_LANG / locale.
 func (c *Config) SetLanguage(lang string) error {
 	switch strings.ToLower(strings.TrimSpace(lang)) {
 	case "", "auto":
@@ -96,6 +112,67 @@ func (c *Config) SetLanguage(lang string) error {
 		return fmt.Errorf("language %q: must be auto|en|zh", lang)
 	}
 	return nil
+}
+
+// SetDesktopLanguage pins the desktop UI language. It intentionally does not
+// modify Config.Language, which is used by the CLI/model-facing runtime.
+func (c *Config) SetDesktopLanguage(lang string) error {
+	switch strings.ToLower(strings.TrimSpace(lang)) {
+	case "", "auto":
+		c.Desktop.Language = ""
+	case "en":
+		c.Desktop.Language = "en"
+	case "zh":
+		c.Desktop.Language = "zh"
+	default:
+		return fmt.Errorf("desktop language %q: must be auto|en|zh", lang)
+	}
+	return nil
+}
+
+// SetDesktopAppearance sets desktop-only theme preferences. It must not affect
+// CLI theme settings or provider-visible request data.
+func (c *Config) SetDesktopAppearance(theme, style string) error {
+	switch strings.ToLower(strings.TrimSpace(theme)) {
+	case "auto":
+		c.Desktop.Theme = "auto"
+	case "light":
+		c.Desktop.Theme = "light"
+	case "", "dark":
+		c.Desktop.Theme = "dark"
+	default:
+		return fmt.Errorf("desktop theme %q: must be auto|dark|light", theme)
+	}
+	if strings.TrimSpace(style) == "" {
+		c.Desktop.ThemeStyle = ""
+		return nil
+	}
+	normalized := normalizeThemeStyle(style)
+	if normalized == "" {
+		return fmt.Errorf("desktop theme style %q: must be graphite|ember|aurora|midnight|sandstone|porcelain|linen|glacier", style)
+	}
+	c.Desktop.ThemeStyle = normalized
+	return nil
+}
+
+// SetDesktopCloseBehavior sets the desktop close-window preference. It is
+// intentionally UI-only and must not affect model prompts or provider-visible
+// request data.
+func (c *Config) SetDesktopCloseBehavior(mode string) error {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "quit", "exit":
+		c.Desktop.CloseBehavior = "quit"
+	case "", "background", "hide":
+		c.Desktop.CloseBehavior = "background"
+	default:
+		return fmt.Errorf("close behavior %q: must be quit|background", mode)
+	}
+	return nil
+}
+
+// SetUICloseBehavior is kept for callers compiled against the old edit API.
+func (c *Config) SetUICloseBehavior(mode string) error {
+	return c.SetDesktopCloseBehavior(mode)
 }
 
 // SetProviderThinking updates a provider's provider-specific thinking mode knob.
@@ -123,11 +200,37 @@ func (c *Config) SetNetwork(n NetworkConfig) error {
 	return netclient.Validate(c.NetworkProxySpec())
 }
 
-// RemoveProvider deletes the named provider. It refuses to remove the current
-// default_model (reassign it first, so the config never points at a missing
-// model); if the removed provider was the planner, planner_model is cleared as
-// a side effect since it is optional. Errors when the name isn't configured.
+// ModelRefsProvider reports whether ref targets the named provider. It matches
+// both bare provider names ("deepseek") and "provider/model" refs.
+func ModelRefsProvider(ref, name string) bool {
+	ref = strings.TrimSpace(ref)
+	name = strings.TrimSpace(name)
+	if ref == "" || name == "" {
+		return false
+	}
+	if ref == name {
+		return true
+	}
+	prov, _, ok := strings.Cut(ref, "/")
+	return ok && prov == name
+}
+
+func (c *Config) modelRefTargetsProvider(ref, name string) bool {
+	if ModelRefsProvider(ref, name) {
+		return true
+	}
+	if e, ok := c.ResolveModel(ref); ok {
+		return e.Name == name
+	}
+	return false
+}
+
+// RemoveProvider deletes the named provider. References to the removed provider
+// are migrated to the first remaining configured provider when possible. The
+// default model is required, so removal is refused when no fallback exists;
+// optional planner/subagent refs are cleared instead of being left dangling.
 func (c *Config) RemoveProvider(name string) error {
+	name = strings.TrimSpace(name)
 	idx := -1
 	for i := range c.Providers {
 		if c.Providers[i].Name == name {
@@ -138,14 +241,55 @@ func (c *Config) RemoveProvider(name string) error {
 	if idx < 0 {
 		return fmt.Errorf("remove provider: no provider %q", name)
 	}
-	if c.DefaultModel == name {
-		return fmt.Errorf("remove provider: %q is the default model — set a different default_model first", name)
+
+	defaultRefsProvider := c.modelRefTargetsProvider(c.DefaultModel, name)
+	plannerRefsProvider := c.modelRefTargetsProvider(c.Agent.PlannerModel, name)
+	subagentRefsProvider := c.modelRefTargetsProvider(c.Agent.SubagentModel, name)
+	subagentModelRefsProvider := map[string]bool{}
+	for skill, ref := range c.Agent.SubagentModels {
+		if c.modelRefTargetsProvider(ref, name) {
+			subagentModelRefsProvider[skill] = true
+		}
 	}
+
+	fallback := ""
+	if defaultRefsProvider || plannerRefsProvider || subagentRefsProvider || len(subagentModelRefsProvider) > 0 {
+		fallback = c.providerRemovalFallback(name)
+	}
+	if defaultRefsProvider && fallback == "" {
+		return fmt.Errorf("remove provider: %q is referenced by default_model and no other configured provider exists", name)
+	}
+
 	c.Providers = append(c.Providers[:idx], c.Providers[idx+1:]...)
-	if c.Agent.PlannerModel == name {
-		c.Agent.PlannerModel = ""
+
+	if defaultRefsProvider {
+		c.DefaultModel = fallback
+	}
+	if plannerRefsProvider {
+		c.Agent.PlannerModel = fallback
+	}
+	if subagentRefsProvider {
+		c.Agent.SubagentModel = fallback
+	}
+	for skill := range subagentModelRefsProvider {
+		if fallback != "" {
+			c.Agent.SubagentModels[skill] = fallback
+		} else {
+			delete(c.Agent.SubagentModels, skill)
+		}
 	}
 	return nil
+}
+
+func (c *Config) providerRemovalFallback(name string) string {
+	for i := range c.Providers {
+		p := &c.Providers[i]
+		if p.Name == name || !p.Configured() || len(p.ModelList()) == 0 {
+			continue
+		}
+		return p.Name
+	}
+	return ""
 }
 
 // validateProvider checks the fields a provider can't function without.
@@ -157,10 +301,22 @@ func validateProvider(e ProviderEntry) error {
 		return fmt.Errorf("provider %q: kind is required", e.Name)
 	case strings.TrimSpace(e.BaseURL) == "":
 		return fmt.Errorf("provider %q: base_url is required", e.Name)
-	case strings.TrimSpace(e.Model) == "":
+	case !providerHasAnyModel(e):
 		return fmt.Errorf("provider %q: model is required", e.Name)
 	}
 	return nil
+}
+
+func providerHasAnyModel(e ProviderEntry) bool {
+	if strings.TrimSpace(e.Model) != "" {
+		return true
+	}
+	for _, m := range e.Models {
+		if strings.TrimSpace(m) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // SetPermissionMode sets the writer-fallback mode. Accepts "ask", "allow", or
@@ -237,6 +393,7 @@ func (c *Config) AddSkillPath(path string) error {
 		return fmt.Errorf("skill path: empty path")
 	}
 	want := CanonicalSkillPath(path)
+	c.removeExcludedSkillPath(want)
 	for _, existing := range c.Skills.Paths {
 		if CanonicalSkillPath(existing) == want {
 			return nil
@@ -261,6 +418,50 @@ func (c *Config) RemoveSkillPath(path string) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+// RestoreSkillPath removes a pseudo-deleted skill source from excluded_paths.
+func (c *Config) RestoreSkillPath(path string) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return fmt.Errorf("skill path: empty path")
+	}
+	want := CanonicalSkillPath(path)
+	if want == "" {
+		return fmt.Errorf("skill path: empty path")
+	}
+	c.removeExcludedSkillPath(want)
+	return nil
+}
+
+// ExcludeSkillPath hides any skill discovery root matching path. This is used by
+// UI "remove source" actions for convention roots that are not stored in paths.
+func (c *Config) ExcludeSkillPath(path string) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return fmt.Errorf("skill path: empty path")
+	}
+	want := CanonicalSkillPath(path)
+	if want == "" {
+		return fmt.Errorf("skill path: empty path")
+	}
+	for _, existing := range c.Skills.ExcludedPaths {
+		if CanonicalSkillPath(existing) == want {
+			return nil
+		}
+	}
+	c.Skills.ExcludedPaths = append(c.Skills.ExcludedPaths, path)
+	return nil
+}
+
+func (c *Config) removeExcludedSkillPath(want string) {
+	next := c.Skills.ExcludedPaths[:0]
+	for _, existing := range c.Skills.ExcludedPaths {
+		if CanonicalSkillPath(existing) != want {
+			next = append(next, existing)
+		}
+	}
+	c.Skills.ExcludedPaths = next
 }
 
 // SetSkillEnabled persists a per-skill enable/disable preference. Skills are
@@ -321,6 +522,7 @@ func CanonicalSkillPath(path string) string {
 // position). The transport-specific required fields are validated: stdio needs
 // a command, http/sse need a url.
 func (c *Config) UpsertPlugin(e PluginEntry) error {
+	e, _ = NormalizePluginCommandLine(e)
 	if err := validatePlugin(e); err != nil {
 		return err
 	}
@@ -429,6 +631,35 @@ func validatePlugin(e PluginEntry) error {
 // half-written reasonix.toml that fails to parse on next load. Parent directories
 // are created as needed.
 func (c *Config) SaveTo(path string) error {
+	return c.SaveToScope(path, renderScopeForPath(path))
+}
+
+func (c *Config) SaveToScope(path string, scope RenderScope) error {
+	if strings.TrimSpace(path) == "" {
+		return fmt.Errorf("save: empty config path")
+	}
+	return writeConfigFile(path, RenderTOMLForScope(c, scope))
+}
+
+// SaveMinimalProjectAutoPlan writes a new project config that only overrides
+// [agent].auto_plan. It is intentionally minimal so toggling a project-local
+// auto-plan preference in an otherwise unconfigured workspace does not pin
+// default_model or providers from built-in defaults.
+func SaveMinimalProjectAutoPlan(path, mode string) (string, error) {
+	cfg := Default()
+	if err := cfg.SetAutoPlan(mode); err != nil {
+		return "", err
+	}
+	body := fmt.Sprintf(`# Reasonix project configuration.
+# Project-local overrides are merged over the user config.
+
+[agent]
+auto_plan = %q
+`, cfg.Agent.AutoPlan)
+	return cfg.Agent.AutoPlan, writeConfigFile(path, body)
+}
+
+func writeConfigFile(path, body string) error {
 	if strings.TrimSpace(path) == "" {
 		return fmt.Errorf("save: empty config path")
 	}
@@ -441,7 +672,7 @@ func (c *Config) SaveTo(path string) error {
 		return fmt.Errorf("save: create temp: %w", err)
 	}
 	tmpPath := tmp.Name()
-	if _, err := tmp.WriteString(RenderTOML(c)); err != nil {
+	if _, err := tmp.WriteString(body); err != nil {
 		tmp.Close()
 		os.Remove(tmpPath)
 		return fmt.Errorf("save: write: %w", err)
@@ -451,6 +682,27 @@ func (c *Config) SaveTo(path string) error {
 		return fmt.Errorf("save: close temp: %w", err)
 	}
 	return fileutil.ReplaceFile(tmpPath, path)
+}
+
+func renderScopeForPath(path string) RenderScope {
+	if isUserConfigPath(path) {
+		return RenderScopeUser
+	}
+	return RenderScopeProject
+}
+
+func isUserConfigPath(path string) bool {
+	path = strings.TrimSpace(path)
+	uc := strings.TrimSpace(userConfigPath())
+	if path == "" || uc == "" {
+		return false
+	}
+	pathAbs, pathErr := filepath.Abs(path)
+	ucAbs, ucErr := filepath.Abs(uc)
+	if pathErr == nil && ucErr == nil {
+		return filepath.Clean(pathAbs) == filepath.Clean(ucAbs)
+	}
+	return filepath.Clean(path) == filepath.Clean(uc)
 }
 
 // Save writes the configuration back to the file it was loaded from

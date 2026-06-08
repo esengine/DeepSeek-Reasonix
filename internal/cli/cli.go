@@ -24,6 +24,7 @@ import (
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/i18n"
+	"reasonix/internal/notify"
 	"reasonix/internal/provider"
 	"reasonix/internal/provider/openai"
 	"reasonix/internal/serve"
@@ -39,6 +40,16 @@ func Run(args []string, version string) int {
 	// welcome banner) come through localized. Env-only first; if a config
 	// exists and pins a language, that wins.
 	i18n.DetectLanguage("")
+	cmd := ""
+	if len(args) > 0 {
+		cmd = args[0]
+	}
+	if cmd == "--acp" {
+		cmd = "acp"
+	}
+	if shouldMigrateLegacyConfigForCLI(cmd) {
+		migrateLegacyConfigForCLI()
+	}
 	if cfg, err := config.Load(); err == nil {
 		if cfg.Language != "" {
 			i18n.DetectLanguage(cfg.Language)
@@ -50,7 +61,7 @@ func Run(args []string, version string) int {
 		return welcome(version)
 	}
 
-	cmd, rest := args[0], args[1:]
+	rest := args[1:]
 	switch cmd {
 	case "run":
 		return runAgent(rest)
@@ -61,6 +72,9 @@ func Run(args []string, version string) int {
 	case "setup":
 		configureCLIThemeFromConfigForTTYOutput()
 		return setupConfig(rest)
+	case "config":
+		configureCLIThemeFromConfigNoProbe()
+		return configCommand(rest)
 	case "init":
 		// Project memory (AGENTS.md) is model-generated in-session — `/init` runs
 		// the codebase analysis. This CLI entry just points there (and to `setup`
@@ -89,6 +103,21 @@ func Run(args []string, version string) int {
 		fmt.Fprintf(os.Stderr, i18n.M.UnknownCommandFmt+"\n\n", cmd)
 		usage()
 		return 2
+	}
+}
+
+func shouldMigrateLegacyConfigForCLI(cmd string) bool {
+	switch cmd {
+	case "", "run", "chat", "code", "serve", "setup", "config", "init", "acp", "mcp", "codegraph", "doctor":
+		return true
+	default:
+		return false
+	}
+}
+
+func migrateLegacyConfigForCLI() {
+	if _, err := config.MigrateLegacyIfNeeded(); err != nil {
+		fmt.Fprintln(os.Stderr, "warning: config migration failed:", err)
 	}
 }
 
@@ -156,6 +185,16 @@ func chdirTo(dir string) int {
 	return 0
 }
 
+var newNotificationSender = func() notify.Sender { return notify.NewPlatformSender() }
+
+// withNotifications adds system notifications to CLI event streams when configured.
+func withNotifications(sink event.Sink, cfg *config.Config) event.Sink {
+	if cfg == nil || !cfg.Notifications.Enabled {
+		return sink
+	}
+	return notify.NewSink(sink, newNotificationSender(), cfg.Notifications)
+}
+
 func runAgent(args []string) int {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	model := fs.String("model", "", "provider name (default: config default_model)")
@@ -169,6 +208,7 @@ func runAgent(args []string) int {
 	if rc := chdirTo(*dir); rc != 0 {
 		return rc
 	}
+	cfg, _ := config.Load()
 	configureCLIThemeFromConfigForTTYOutput()
 
 	prompt := strings.TrimSpace(strings.Join(fs.Args(), " "))
@@ -202,6 +242,7 @@ func runAgent(args []string) int {
 		metrics = &metricsSink{inner: textSink}
 		sink = metrics
 	}
+	sink = withNotifications(sink, cfg)
 	ctrl, err := setup(ctx, *model, *maxSteps, true, sink)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
@@ -210,6 +251,9 @@ func runAgent(args []string) int {
 	defer ctrl.Close()
 
 	runErr := ctrl.Run(ctx, prompt)
+	if cfg != nil {
+		notify.SendEvent(newNotificationSender(), cfg.Notifications, event.Event{Kind: event.TurnDone, Err: runErr})
+	}
 	if metrics != nil {
 		if err := writeMetrics(*metricsPath, metrics.m); err != nil {
 			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
@@ -287,7 +331,8 @@ func chatREPL(args []string) int {
 	if rc := chdirTo(*dir); rc != 0 {
 		return rc
 	}
-	if cfg, err := config.Load(); err == nil {
+	cfg, err := config.Load()
+	if err == nil {
 		configureCLIThemeWithStyle(cfg.UITheme(), cfg.UIThemeStyle())
 	}
 
@@ -322,7 +367,8 @@ func chatREPL(args []string) int {
 	// agent goroutine.
 	eventCh := make(chan event.Event, 1024)
 
-	sink := &eventSink{ch: eventCh}
+	var sink event.Sink = &eventSink{ch: eventCh}
+	sink = withNotifications(sink, cfg)
 	ctrl, err := setup(ctx, *model, *maxSteps, false, sink)
 	if err != nil && errors.Is(err, boot.ErrUnknownModel) && isInteractive() && config.SourcePath() == "" {
 		// True first run whose default model can't resolve: guide setup, then retry.
@@ -516,8 +562,7 @@ func setupConfig(args []string) int {
 			return 1
 		}
 		in := bufio.NewScanner(os.Stdin)
-		ans := ask(in, os.Stdout, fmt.Sprintf(i18n.M.ConfirmReconfigureFmt, path), "N")
-		if ans != "y" && ans != "Y" {
+		if !confirmReconfigureExistingConfig(path, in, os.Stdout) {
 			fmt.Println(i18n.M.KeepingExisting)
 			return 0
 		}
@@ -532,6 +577,11 @@ func setupConfig(args []string) int {
 		return rc
 	}
 	return writeDefaultConfig(t.config)
+}
+
+func confirmReconfigureExistingConfig(path string, in *bufio.Scanner, w io.Writer) bool {
+	ans := ask(in, w, fmt.Sprintf(i18n.M.ConfirmReconfigureFmt, path), "y/N")
+	return ans == "y" || ans == "Y"
 }
 
 func writeDefaultConfig(path string) int {
@@ -1271,17 +1321,12 @@ func providersWithMissingKeys(cfg *config.Config) []config.ProviderEntry {
 }
 
 // configureKeys reconciles each enabled provider's API key with the
-// environment. For every distinct api_key_env: if the variable is already
-// set — either by loadDotEnv from .env, or by an earlier wizard step that
-// called os.Setenv (the URL-fetch flow asks for the key once so it can call
-// /models) — the existing value is reused and a single-line confirmation is
-// printed so the user can see why no prompt appeared. Otherwise the user is
-// asked once per env var (deduped across providers that share one, e.g.
-// both DeepSeek models). Returns KEY=value lines to append to .env: any
-// env var that was already set in the process goes through too, so a
-// re-run of `reasonix setup` re-pins the current value into .env (a
-// loadDotEnv is first-wins, so without re-pinning, an old .env line would
-// shadow the fresh value).
+// environment. For every distinct api_key_env: if the variable is already set,
+// setup asks whether to re-enter it; Enter keeps and re-pins the existing value.
+// Otherwise the user is asked once per env var (deduped across providers that
+// share one, e.g. both DeepSeek models). Returns KEY=value lines to append to
+// .env. Re-pinning matters because loadDotEnv is first-wins, so a stale key left
+// earlier in the credentials file would otherwise keep shadowing the fresh value.
 func configureKeys(selected []config.ProviderEntry, r io.Reader, w io.Writer) []string {
 	in := bufio.NewScanner(r)
 	fmt.Fprintln(w, "\n"+i18n.M.EnterAPIKeysHeader)
@@ -1294,11 +1339,14 @@ func configureKeys(selected []config.ProviderEntry, r io.Reader, w io.Writer) []
 		}
 		seen[p.APIKeyEnv] = true
 
-		// Reuse any value the wizard or .env already set. The URL-fetch
-		// flow (promptCustomProviderFromURL) calls os.Setenv(keyEnv, apiKey)
-		// before the /models probe; that value is the user's "real" key
-		// and we'd be wrong to discard it by asking again.
 		if cur := os.Getenv(p.APIKeyEnv); cur != "" {
+			reset := ask(in, w, "  "+fmt.Sprintf(i18n.M.APIKeyResetPromptFmt, p.APIKeyEnv), "y/N")
+			if reset == "y" || reset == "Y" {
+				if key := ask(in, w, "  "+p.APIKeyEnv, ""); key != "" {
+					envLines = append(envLines, p.APIKeyEnv+"="+key)
+					continue
+				}
+			}
 			fmt.Fprintf(w, "  %s %s\n", green("✓"), fmt.Sprintf(i18n.M.APIKeyAlreadySetFmt, p.APIKeyEnv))
 			envLines = append(envLines, p.APIKeyEnv+"="+cur)
 			continue
@@ -1407,9 +1455,8 @@ func readStdin() string {
 func welcome(version string) int {
 	src := config.SourcePath()
 
-	// Load early: config.Load merges the cwd-local and user-global sources, so a
-	// successful load means the user has configured before — even when run from a
-	// directory without a local reasonix.toml (SourcePath is then "").
+	// Load early for the welcome/status view. config.Load also succeeds with the
+	// built-in defaults, so SourcePath is the actual "user has configured" signal.
 	cfg, cfgErr := config.Load()
 	if cfgErr != nil {
 		cfg = config.Default()
@@ -1418,9 +1465,8 @@ func welcome(version string) int {
 	// First run on an interactive terminal: actively guide setup rather than
 	// printing a static screen and exiting. interactiveSetup owns the language
 	// prompt and welcome banner so every prompt the user sees is already
-	// localized to their choice. Only when no config loads from ANY source — not
-	// merely when the cwd lacks a local file.
-	if src == "" && cfgErr != nil && isInteractive() {
+	// localized to their choice.
+	if src == "" && isInteractive() {
 		if rc := interactiveSetup(defaultConfigTarget(), defaultEnvTarget()); rc != 0 {
 			return rc
 		}
@@ -1437,12 +1483,14 @@ func welcome(version string) int {
 		return 0
 	}
 
-	// Config loads from any source (cwd-local or user-global) on a terminal: go
-	// into chat. If any enabled provider's key isn't set yet, re-run the wizard's
-	// key-entry step inline — first run already chose language and providers, so
-	// we don't re-ask those. Skipping the prompts is still fine; the chat banner
-	// falls back to a one-line warning.
-	if cfgErr == nil && isInteractive() {
+	// A real config source exists (cwd-local or user-global) on a terminal: go into
+	// chat. If any enabled provider's key isn't set yet, re-run the wizard's key-entry
+	// step inline — first run already chose language and providers, so we don't
+	// re-ask those. Skipping the prompts is still fine; the chat banner falls back
+	// to a one-line warning. Do not do this for the built-in defaults alone: that
+	// would ask for every default provider key even though the user has not opted
+	// into those providers yet.
+	if welcomeShouldPromptMissingKeys(src, cfgErr) && isInteractive() {
 		if rc := promptMissingKeys(cfg); rc != 0 {
 			return rc
 		}
@@ -1499,6 +1547,98 @@ func welcome(version string) int {
 	return 0
 }
 
+func welcomeShouldPromptMissingKeys(src string, cfgErr error) bool {
+	return strings.TrimSpace(src) != "" && cfgErr == nil
+}
+
 func usage() {
 	fmt.Print(i18n.M.UsageBody)
+}
+
+func configCommand(args []string) int {
+	if len(args) == 0 {
+		configUsage()
+		return 2
+	}
+	switch args[0] {
+	case "auto-plan":
+		return configAutoPlanCommand(args[1:])
+	default:
+		configUsage()
+		return 2
+	}
+}
+
+func configAutoPlanCommand(args []string) int {
+	fs := flag.NewFlagSet("config auto-plan", flag.ContinueOnError)
+	local := fs.Bool("local", false, "write ./reasonix.toml instead of the user config")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	rest := fs.Args()
+	if len(rest) > 1 {
+		configAutoPlanUsage()
+		return 2
+	}
+	if len(rest) == 0 {
+		cfg, err := config.Load()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+			return 1
+		}
+		mode := cfg.Agent.AutoPlan
+		mode = cliAutoPlanMode(mode)
+		fmt.Printf("auto_plan = %q\n", mode)
+		return 0
+	}
+	path := config.UserConfigPath()
+	if *local {
+		path = "reasonix.toml"
+	}
+	if path == "" {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "cannot resolve config path")
+		return 1
+	}
+	if *local {
+		if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+			probe := config.Default()
+			if err := probe.SetAutoPlan(rest[0]); err != nil {
+				fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+				return 2
+			}
+			mode, err := config.SaveMinimalProjectAutoPlan(path, rest[0])
+			if err != nil {
+				fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+				return 1
+			}
+			fmt.Printf("auto_plan = %q (%s)\n", mode, displayPath(path))
+			return 0
+		} else if err != nil {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+			return 1
+		}
+	}
+	cfg := config.LoadForEdit(path)
+	if err := cfg.SetAutoPlan(rest[0]); err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		return 2
+	}
+	if err := cfg.SaveTo(path); err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		return 1
+	}
+	fmt.Printf("auto_plan = %q (%s)\n", cfg.Agent.AutoPlan, displayPath(path))
+	return 0
+}
+
+func configUsage() {
+	fmt.Print(`Usage:
+  reasonix config auto-plan [--local] [off|on]
+`)
+}
+
+func configAutoPlanUsage() {
+	fmt.Print(`Usage:
+  reasonix config auto-plan [--local] [off|on]
+`)
 }

@@ -131,23 +131,36 @@ func TestDeleteSessionFile(t *testing.T) {
 	if err := deleteSessionFile(dir, sessionPath); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-	// File should be gone.
+	trashPath := filepath.Join(dir, sessionTrashDir, "session.jsonl", "session.jsonl")
+	trashMetaPath := trashPath + ".meta"
+	trashCkptDir := filepath.Join(dir, sessionTrashDir, "session.jsonl", "session.ckpt")
+
+	// File should be moved out of the active session list.
 	if _, err := os.Stat(sessionPath); !os.IsNotExist(err) {
-		t.Error("session file should be deleted")
+		t.Error("session file should be removed from active sessions")
 	}
 	if _, err := os.Stat(metaPath); !os.IsNotExist(err) {
-		t.Error("session meta should be deleted")
+		t.Error("session meta should be removed from active sessions")
 	}
 	if _, err := os.Stat(ckptDir); !os.IsNotExist(err) {
-		t.Error("session checkpoints should be deleted")
+		t.Error("session checkpoints should be removed from active sessions")
 	}
-	// Title should be gone.
+	if _, err := os.Stat(trashPath); err != nil {
+		t.Fatalf("session file should be in trash: %v", err)
+	}
+	if _, err := os.Stat(trashMetaPath); err != nil {
+		t.Fatalf("session meta should be in trash: %v", err)
+	}
+	if _, err := os.Stat(trashCkptDir); err != nil {
+		t.Fatalf("session checkpoints should be in trash: %v", err)
+	}
+	// Title/display should be retained until permanent deletion.
 	m := loadSessionTitles(dir)
-	if _, ok := m["session.jsonl"]; ok {
-		t.Error("title should be removed after delete")
+	if m["session.jsonl"] != "My Title" {
+		t.Errorf("title should be retained in trash, got %q", m["session.jsonl"])
 	}
-	if got := resolveSessionDisplay(dir, sessionPath, "expanded prompt"); got != "expanded prompt" {
-		t.Errorf("display sidecar should be removed after delete, got %q", got)
+	if got := resolveSessionDisplay(dir, sessionPath, "expanded prompt"); got != "[Pasted text #1 · 5 lines]" {
+		t.Errorf("display sidecar should be retained in trash, got %q", got)
 	}
 }
 
@@ -160,7 +173,104 @@ func TestDeleteSessionFileNoTitle(t *testing.T) {
 		t.Fatalf("delete: %v", err)
 	}
 	if _, err := os.Stat(sessionPath); !os.IsNotExist(err) {
-		t.Error("session file should be deleted")
+		t.Error("session file should be removed from active sessions")
+	}
+	if _, err := os.Stat(filepath.Join(dir, sessionTrashDir, "no-title.jsonl", "no-title.jsonl")); err != nil {
+		t.Fatalf("session file should be in trash: %v", err)
+	}
+}
+
+func TestRestoreTrashedSessionFile(t *testing.T) {
+	dir := t.TempDir()
+	sessionPath := filepath.Join(dir, "session.jsonl")
+	if err := os.WriteFile(sessionPath, []byte("data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sessionPath+".meta", []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ckptDir := filepath.Join(dir, "session.ckpt")
+	if err := os.MkdirAll(ckptDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ckptDir, "1.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := setSessionTitle(dir, sessionPath, "My Title"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := deleteSessionFile(dir, sessionPath); err != nil {
+		t.Fatalf("trash: %v", err)
+	}
+	trashPath := filepath.Join(dir, sessionTrashDir, "session.jsonl", "session.jsonl")
+	if err := restoreTrashedSessionFile(dir, trashPath); err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+
+	if _, err := os.Stat(sessionPath); err != nil {
+		t.Fatalf("session file should be restored: %v", err)
+	}
+	if _, err := os.Stat(sessionPath + ".meta"); err != nil {
+		t.Fatalf("session meta should be restored: %v", err)
+	}
+	if _, err := os.Stat(ckptDir); err != nil {
+		t.Fatalf("session checkpoints should be restored: %v", err)
+	}
+	if _, err := os.Stat(filepath.Dir(trashPath)); !os.IsNotExist(err) {
+		t.Fatalf("trash item should be removed after restore, stat err = %v", err)
+	}
+	if got := loadSessionTitles(dir)["session.jsonl"]; got != "My Title" {
+		t.Fatalf("title should survive restore, got %q", got)
+	}
+}
+
+func TestPurgeTrashedSessionFile(t *testing.T) {
+	dir := t.TempDir()
+	sessionPath := filepath.Join(dir, "session.jsonl")
+	os.WriteFile(sessionPath, []byte("data"), 0o644)
+	if err := setSessionTitle(dir, sessionPath, "My Title"); err != nil {
+		t.Fatal(err)
+	}
+	if err := recordSessionDisplay(dir, sessionPath, "expanded prompt", "[Pasted text #1 · 5 lines]"); err != nil {
+		t.Fatal(err)
+	}
+	if err := deleteSessionFile(dir, sessionPath); err != nil {
+		t.Fatalf("trash: %v", err)
+	}
+	trashPath := filepath.Join(dir, sessionTrashDir, "session.jsonl", "session.jsonl")
+	if err := purgeTrashedSessionFile(dir, trashPath); err != nil {
+		t.Fatalf("purge: %v", err)
+	}
+	if _, err := os.Stat(filepath.Dir(trashPath)); !os.IsNotExist(err) {
+		t.Fatalf("trash item should be removed after purge, stat err = %v", err)
+	}
+	if _, ok := loadSessionTitles(dir)["session.jsonl"]; ok {
+		t.Fatal("title should be removed after purge")
+	}
+	if got := resolveSessionDisplay(dir, sessionPath, "expanded prompt"); got != "expanded prompt" {
+		t.Fatalf("display sidecar should be removed after purge, got %q", got)
+	}
+}
+
+func TestListTrashedSessionFilesRejectsSymlinkEscape(t *testing.T) {
+	dir := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "outside.jsonl")
+	os.WriteFile(outside, []byte("data"), 0o644)
+	itemDir := filepath.Join(dir, sessionTrashDir, "outside.jsonl")
+	if err := os.MkdirAll(itemDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(itemDir, "outside.jsonl")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	got, err := listTrashedSessionFiles(dir)
+	if err != nil {
+		t.Fatalf("list trash: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("trash listing should skip symlink escape, got %v", got)
 	}
 }
 

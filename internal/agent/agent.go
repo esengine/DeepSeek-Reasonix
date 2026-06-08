@@ -1,12 +1,14 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 	"unicode/utf8"
 
 	"reasonix/internal/diff"
@@ -27,6 +29,8 @@ import (
 const maxToolOutputBytes = 32 * 1024
 
 const maxFinalReadinessBlocks = 3
+const maxEmptyFinalBlocks = 3
+const maxStreamRecoveries = 1
 
 // Renderer redraws the assistant's final-answer text as styled output. It is
 // applied only after a turn's text stream completes, so the user sees raw
@@ -218,6 +222,12 @@ type Agent struct {
 	// (a different failure shape, or any success). See applyStormBreaker.
 	stormSig   string
 	stormCount int
+
+	// repeatSuccessCounts tracks write-like tool calls that have already
+	// succeeded in this user turn. This catches the complementary loop shape to
+	// stormSig: a model keeps doing the same successful write, so there is no
+	// error for the failure-only storm breaker to see.
+	repeatSuccessCounts map[string]int
 }
 
 // SetPlanMode flips the read-only gate. While true, executeOne refuses any
@@ -386,10 +396,13 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 	if a.evidence != nil {
 		a.evidence.Reset()
 	}
+	a.repeatSuccessCounts = nil
 	a.sink.Emit(event.Event{Kind: event.TurnStarted})
 	a.session.Add(provider.Message{Role: provider.RoleUser, Content: input})
 
 	finalReadinessBlocks := 0
+	emptyFinalBlocks := 0
+	streamRecoveries := 0
 	for step := 0; a.maxSteps <= 0 || step < a.maxSteps; step++ {
 		schemas := a.tools.Schemas()
 		prefixShape := a.capturePrefixShape(schemas)
@@ -398,10 +411,29 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 			prevPrefixShape = prefixShape
 		}
 
-		text, reasoning, signature, calls, usage, err := a.stream(ctx, step+1)
+		text, reasoning, signature, calls, usage, interrupted, partialToolStarted, err := a.stream(ctx, step+1)
 		if err != nil {
+			if interrupted && streamRecoveries < maxStreamRecoveries {
+				streamRecoveries++
+				if hasVisibleFinalAnswer(text) {
+					a.session.Add(provider.Message{
+						Role:               provider.RoleAssistant,
+						Content:            text,
+						ReasoningContent:   reasoning,
+						ReasoningSignature: signature,
+					})
+				}
+				a.session.Add(provider.Message{
+					Role:    provider.RoleUser,
+					Content: streamRecoveryMessage(hasVisibleFinalAnswer(text), partialToolStarted),
+				})
+				a.sink.Emit(event.Event{Kind: event.Retrying, RetryAttempt: streamRecoveries, RetryMax: maxStreamRecoveries})
+				step-- // recovery retries do not consume the tool-round maxSteps budget
+				continue
+			}
 			return err
 		}
+		streamRecoveries = 0
 		cacheDiagnostics := CompareShape(prevPrefixShape, prefixShape, usage)
 		a.lastPrefixShape = prefixShape
 		a.haveLastPrefixShape = true
@@ -427,18 +459,37 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 		})
 
 		if len(calls) == 0 {
-			if reason := a.finalReadinessFailure(); reason != "" {
+			readiness := a.finalReadinessCheck()
+			if readiness.reason != "" {
 				finalReadinessBlocks++
+				result := evidence.ReadinessBlocked
 				if finalReadinessBlocks >= maxFinalReadinessBlocks {
-					return fmt.Errorf("final-answer readiness failed %d times: %s", finalReadinessBlocks, reason)
+					result = evidence.ReadinessErrored
+					event.RecordReadinessAudit(a.sink, readiness.audit(result, false))
+					return fmt.Errorf("final-answer readiness failed %d times: %s", finalReadinessBlocks, readiness.reason)
 				}
-				a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "final-answer readiness blocked: " + reason})
-				a.session.Add(provider.Message{Role: provider.RoleUser, Content: finalReadinessRetryMessage(reason)})
+				event.RecordReadinessAudit(a.sink, readiness.audit(result, false))
+				a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "final-answer readiness blocked: " + readiness.reason})
+				a.session.Add(provider.Message{Role: provider.RoleUser, Content: finalReadinessRetryMessage(readiness.reason)})
 				a.maybeCompact(ctx, usage)
 				continue
 			}
+			if !hasVisibleFinalAnswer(text) {
+				emptyFinalBlocks++
+				if emptyFinalBlocks >= maxEmptyFinalBlocks {
+					return fmt.Errorf("model finished without a visible final answer %d times", emptyFinalBlocks)
+				}
+				a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "empty final answer blocked: model returned no visible answer text; retrying"})
+				a.session.Add(provider.Message{Role: provider.RoleUser, Content: emptyFinalRetryMessage()})
+				a.maybeCompact(ctx, usage)
+				continue
+			}
+			if readiness.applies {
+				event.RecordReadinessAudit(a.sink, readiness.audit(evidence.ReadinessAllowed, finalReadinessBlocks > 0))
+			}
 			return nil // model gave a final answer
 		}
+		emptyFinalBlocks = 0
 
 		results := a.executeBatch(ctx, calls)
 		for i, call := range calls {
@@ -461,41 +512,73 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 }
 
 func (a *Agent) finalReadinessFailure() string {
+	return a.finalReadinessCheck().reason
+}
+
+type finalReadinessCheck struct {
+	applies              bool
+	reason               string
+	missingProjectChecks int
+	missingCompleteStep  bool
+	incompleteTodos      int
+}
+
+func (c finalReadinessCheck) audit(result evidence.ReadinessAuditResult, recovered bool) evidence.ReadinessAudit {
+	return evidence.ReadinessAudit{
+		Result:                 result,
+		Recovered:              recovered,
+		MissingProjectChecks:   c.missingProjectChecks,
+		MissingCompleteStep:    c.missingCompleteStep,
+		IncompleteTodos:        c.incompleteTodos,
+		CommandMismatchMissing: c.missingProjectChecks,
+	}
+}
+
+func (a *Agent) finalReadinessCheck() finalReadinessCheck {
 	if a.evidence == nil {
-		return ""
+		return finalReadinessCheck{}
 	}
 	var missing []string
+	out := finalReadinessCheck{}
 	if !a.planMode.Load() {
 		if incomplete, hasTodos := a.evidence.IncompleteLatestTodos(); hasTodos && len(incomplete) > 0 {
+			out.applies = true
+			out.incompleteTodos = len(incomplete)
 			missing = append(missing, finalReadinessIncompleteTodos(incomplete))
 		}
 	}
 	writer, hasWriter := a.evidence.LatestSuccessfulWriterIndex()
 	if !hasWriter {
-		return strings.Join(missing, "; ")
+		if len(missing) > 0 {
+			out.reason = strings.Join(missing, "; ")
+		}
+		return out
 	}
 	hasProjectChecks := len(a.projectChecks) > 0
 	hasTodoReceipt := a.evidence.HasSuccessfulTodoWrite()
 	if !hasProjectChecks && !hasTodoReceipt && len(missing) == 0 {
-		return ""
+		return finalReadinessCheck{}
 	}
-
+	out.applies = true
 	for _, check := range a.projectChecks {
 		command := strings.TrimSpace(check.Command)
 		if command == "" {
 			continue
 		}
 		if !a.evidence.HasSuccessfulCommandAfter(command, writer) {
+			out.missingProjectChecks++
 			missing = append(missing, fmt.Sprintf("run %q from %s after the latest write", command, finalReadinessCheckSource(check)))
 		}
 	}
 	if hasTodoReceipt && !a.evidence.HasSuccessfulCompleteStepAfter(writer) {
+		out.missingCompleteStep = true
 		missing = append(missing, "call complete_step after the latest write")
 	}
 	if len(missing) == 0 {
-		return ""
+		return out
 	}
-	return strings.Join(missing, "; ")
+	out.reason = strings.Join(missing, "; ")
+	return out
 }
 
 func finalReadinessIncompleteTodos(items []evidence.TodoStepMatch) string {
@@ -525,12 +608,31 @@ func finalReadinessRetryMessage(reason string) string {
 	return "Host final-answer readiness check failed. Before giving a final answer, address the missing host-observable receipts: " + reason + ". Run the required tool calls, then answer when readiness is satisfied."
 }
 
+func hasVisibleFinalAnswer(text string) bool {
+	return strings.TrimSpace(text) != ""
+}
+
+func emptyFinalRetryMessage() string {
+	return "The previous assistant response finished without any visible answer text. Continue the same task now and provide a concise visible answer to the user. Do not send reasoning only."
+}
+
+func streamRecoveryMessage(hasPartialText, hadPartialTool bool) string {
+	switch {
+	case hadPartialTool:
+		return "The previous assistant response was interrupted while a tool call was streaming. Continue the same task now. If a tool is still needed, issue a fresh complete tool call from scratch; do not rely on any partial tool-call arguments from the interrupted stream."
+	case hasPartialText:
+		return "The previous assistant response was interrupted during streaming. Continue the same task from immediately after the partial assistant message above. Do not repeat text that is already visible."
+	default:
+		return "The previous assistant response was interrupted during streaming before visible answer text was completed. Continue the same task now and provide the next useful response."
+	}
+}
+
 // stream runs one completion, emitting reasoning and text deltas as typed
 // events and collecting complete tool calls. A Message event closes the text
 // stream so a sink can re-render the streamed raw text as styled markdown. The
 // accumulated text and reasoning are also returned so the caller can round-trip
 // reasoning on the next turn.
-func (a *Agent) stream(ctx context.Context, turn int) (string, string, string, []provider.ToolCall, *provider.Usage, error) {
+func (a *Agent) stream(ctx context.Context, turn int) (string, string, string, []provider.ToolCall, *provider.Usage, bool, bool, error) {
 	ctx = provider.WithRetryNotify(ctx, func(info provider.RetryInfo) {
 		a.sink.Emit(event.Event{Kind: event.Retrying, RetryAttempt: info.Attempt, RetryMax: info.Max})
 	})
@@ -540,7 +642,7 @@ func (a *Agent) stream(ctx context.Context, turn int) (string, string, string, [
 		Temperature: a.temperature,
 	})
 	if err != nil {
-		return "", "", "", nil, nil, err
+		return "", "", "", nil, nil, false, false, err
 	}
 
 	// A PostLLMCall hook rewrites the whole reasoning block, so when one is wired
@@ -553,6 +655,22 @@ func (a *Agent) stream(ctx context.Context, turn int) (string, string, string, [
 	var signature string // provider-issued proof for the reasoning (Anthropic thinking)
 	var calls []provider.ToolCall
 	var usage *provider.Usage
+	var partialToolStarted bool
+	finishReasoning := func() (stored, display string) {
+		original := reasoning.String()
+		display = original
+		if transformReasoning && original != "" {
+			display = a.hooks.PostLLMCall(ctx, original, turn)
+			if display != "" {
+				a.sink.Emit(event.Event{Kind: event.Reasoning, Text: display})
+			}
+		}
+		stored = display
+		if signature != "" {
+			stored = original
+		}
+		return stored, display
+	}
 	for chunk := range ch {
 		switch chunk.Type {
 		case provider.ChunkReasoning:
@@ -567,6 +685,7 @@ func (a *Agent) stream(ctx context.Context, turn int) (string, string, string, [
 			text.WriteString(chunk.Text)
 			a.sink.Emit(event.Event{Kind: event.Text, Text: chunk.Text})
 		case provider.ChunkToolCallStart:
+			partialToolStarted = true
 			// Surface the tool card as soon as the call begins — before its
 			// (possibly large) arguments finish streaming — so the user sees it
 			// working instead of a stall. executeBatch emits the full dispatch
@@ -577,6 +696,7 @@ func (a *Agent) stream(ctx context.Context, turn int) (string, string, string, [
 				}})
 			}
 		case provider.ChunkToolCall:
+			partialToolStarted = true
 			calls = append(calls, *chunk.ToolCall)
 		case provider.ChunkUsage:
 			usage = chunk.Usage
@@ -584,36 +704,30 @@ func (a *Agent) stream(ctx context.Context, turn int) (string, string, string, [
 			a.sessCacheHit.Add(int64(chunk.Usage.CacheHitTokens))
 			a.sessCacheMiss.Add(int64(chunk.Usage.CacheMissTokens))
 		case provider.ChunkError:
-			return "", "", "", nil, nil, chunk.Err
+			if provider.IsStreamInterrupted(chunk.Err) {
+				stored, _ := finishReasoning()
+				return text.String(), stored, signature, calls, usage, true, partialToolStarted, chunk.Err
+			}
+			return "", "", "", nil, nil, false, false, chunk.Err
 		}
 	}
 	// With a PostLLMCall hook, the live stream was suppressed above; transform the
 	// full reasoning now and emit it once so the sink never sees the untranslated
 	// text. Without a hook this is skipped — the chunk-by-chunk events already fired.
-	original := reasoning.String()
-	display := original
-	if transformReasoning && original != "" {
-		display = a.hooks.PostLLMCall(ctx, original, turn)
-		if display != "" {
-			a.sink.Emit(event.Event{Kind: event.Reasoning, Text: display})
-		}
-	}
+	stored, display := finishReasoning()
 	// Store the transformed reasoning — except when a provider signature pins it to
 	// the original text (Anthropic extended thinking). That signed thinking block is
 	// replayed verbatim on the next tool-call turn; re-uploading transformed text
 	// under the original signature is rejected, so keep the original for storage
-	// while the user still sees the transformed version live.
-	stored := display
-	if signature != "" {
-		stored = original
-	}
+	// while the user still sees the transformed version live. finishReasoning did
+	// that choice above.
 	// Close the text stream: a sink may re-render the streamed raw text as
 	// styled markdown now that it is complete. Reasoning rides along so the sink
 	// has the full chain if it wants it.
 	if text.Len() > 0 || display != "" {
 		a.sink.Emit(event.Event{Kind: event.Message, Text: text.String(), Reasoning: display})
 	}
-	return text.String(), stored, signature, calls, usage, nil
+	return text.String(), stored, signature, calls, usage, false, false, nil
 }
 
 func (a *Agent) capturePrefixShape(schemas []provider.ToolSchema) PrefixShape {
@@ -649,14 +763,22 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) []s
 			if ch, ok := tool.PreviewChange(t, json.RawMessage(c.Arguments)); ok {
 				ev.FileDiff = event.FileDiff{Diff: ch.Diff, Added: ch.Added, Removed: ch.Removed}
 			}
+			if pr, ok := t.(interface {
+				ResolveProfile(json.RawMessage) *event.Profile
+			}); ok {
+				ev.Profile = pr.ResolveProfile(json.RawMessage(c.Arguments))
+			}
 		}
 		a.sink.Emit(event.Event{Kind: event.ToolDispatch, Tool: ev})
 	}
 
 	results := make([]string, len(calls))
 	outcomes := make([]toolOutcome, len(calls))
+	durations := make([]int64, len(calls))
 	run := func(i int) {
+		start := time.Now()
 		outcomes[i] = a.executeOne(ctx, calls[i])
+		durations[i] = time.Since(start).Milliseconds()
 		results[i] = outcomes[i].output
 	}
 
@@ -674,13 +796,14 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) []s
 		o := outcomes[i]
 		t, ok := a.tools.Get(c.Name)
 		a.sink.Emit(event.Event{Kind: event.ToolResult, Tool: event.Tool{
-			ID:        c.ID,
-			Name:      c.Name,
-			Args:      c.Arguments,
-			Output:    o.output,
-			Err:       o.errMsg,
-			ReadOnly:  ok && t.ReadOnly(),
-			Truncated: o.truncated,
+			ID:         c.ID,
+			Name:       c.Name,
+			Args:       c.Arguments,
+			Output:     o.output,
+			Err:        o.errMsg,
+			ReadOnly:   ok && t.ReadOnly(),
+			Truncated:  o.truncated,
+			DurationMs: durations[i],
 		}})
 		if o.truncated && o.truncMsg != "" {
 			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: o.truncMsg})
@@ -752,6 +875,12 @@ func runParallel(start, end int, run func(int)) {
 // whose arguments are truncated at the output-token ceiling, which the model then
 // re-emits (re-worded but still over-long), truncating the same way again.
 const stormBreakThreshold = 3
+
+// repeatSuccessBreakThreshold is how many identical write-like successes the
+// agent allows before refusing another copy in the same user turn. Two gives the
+// model room for a natural self-correction; the third repeat is usually a
+// no-op/write loop and should be redirected to a different tool or final answer.
+const repeatSuccessBreakThreshold = 2
 
 // applyStormBreaker detects a run of identically-failing turns and, past the
 // threshold, rewrites the model-facing result (results[0]) into a directive to
@@ -838,6 +967,13 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 		return toolOutcome{
 			output: fmt.Sprintf("error: unknown tool %q", call.Name),
 			errMsg: fmt.Sprintf("unknown tool %q", call.Name),
+		}
+	}
+	if out, blocked := a.repeatedSuccessBlock(call, t); blocked {
+		return toolOutcome{
+			output:  out,
+			blocked: true,
+			errMsg:  "blocked by loop guard",
 		}
 	}
 	if a.planMode.Load() && !t.ReadOnly() {
@@ -933,6 +1069,7 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 		body, truncMsg := truncateToolOutput(fmt.Sprintf("error: %v\n%s", err, detail))
 		return toolOutcome{output: body, errMsg: firstLine(err.Error()), truncated: truncMsg != "", truncMsg: truncMsg}
 	}
+	a.recordRepeatSuccess(call, t)
 	// A foreground `task` sub-agent just finished — its result is the final answer.
 	// (A backgrounded one returns a "Started…" string and stops later in a job, so
 	// it doesn't fire here.) SubagentStop lets a hook react to delegated work.
@@ -941,6 +1078,134 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 	}
 	body, truncMsg := truncateToolOutput(result)
 	return toolOutcome{output: body, truncated: truncMsg != "", truncMsg: truncMsg}
+}
+
+func (a *Agent) repeatedSuccessBlock(call provider.ToolCall, t tool.Tool) (string, bool) {
+	sig, ok := repeatSuccessSignature(call, t)
+	if !ok || a.repeatSuccessCounts == nil {
+		return "", false
+	}
+	count := a.repeatSuccessCounts[sig]
+	if count < repeatSuccessBreakThreshold {
+		return "", false
+	}
+	return fmt.Sprintf(
+		"blocked: [loop guard] %q has already succeeded %d times with the same write-like arguments in this user turn. Re-running it is unlikely to help and may burn tokens or repeat file writes. Change approach: use edit_file or multi_edit for file changes, verify with a read/test command, or explain the blocker in your final answer.",
+		call.Name, count), true
+}
+
+func (a *Agent) recordRepeatSuccess(call provider.ToolCall, t tool.Tool) {
+	sig, ok := repeatSuccessSignature(call, t)
+	if !ok {
+		return
+	}
+	if a.repeatSuccessCounts == nil {
+		a.repeatSuccessCounts = make(map[string]int)
+	}
+	a.repeatSuccessCounts[sig]++
+}
+
+func repeatSuccessSignature(call provider.ToolCall, t tool.Tool) (string, bool) {
+	if t.ReadOnly() {
+		return "", false
+	}
+	switch call.Name {
+	case "write_file", "edit_file", "multi_edit", "notebook_edit":
+		return call.Name + "\x00" + canonicalToolArgs(call.Arguments), true
+	case "bash":
+		var p struct {
+			Command         string `json:"command"`
+			RunInBackground bool   `json:"run_in_background"`
+		}
+		if err := json.Unmarshal([]byte(call.Arguments), &p); err != nil {
+			return "", false
+		}
+		if p.RunInBackground || !isShellFileWriteCommand(p.Command) {
+			return "", false
+		}
+		return "bash\x00" + normalizeShellCommand(p.Command), true
+	default:
+		return "", false
+	}
+}
+
+func canonicalToolArgs(raw string) string {
+	var v any
+	if err := json.Unmarshal([]byte(raw), &v); err != nil {
+		return strings.TrimSpace(raw)
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return strings.TrimSpace(raw)
+	}
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, b); err != nil {
+		return string(b)
+	}
+	return compact.String()
+}
+
+func normalizeShellCommand(command string) string {
+	return strings.Join(strings.Fields(command), " ")
+}
+
+func isShellFileWriteCommand(command string) bool {
+	lower := strings.ToLower(command)
+	switch {
+	case shellPythonOpenWrites(lower):
+		return true
+	case strings.Contains(lower, "set-content") || strings.Contains(lower, "add-content") || strings.Contains(lower, "out-file"):
+		return true
+	case strings.Contains(lower, "sed -i") || strings.Contains(lower, "perl -pi"):
+		return true
+	case hasShellWriteRedirect(command):
+		return true
+	default:
+		return false
+	}
+}
+
+func shellPythonOpenWrites(lower string) bool {
+	if !strings.Contains(lower, "open(") {
+		return false
+	}
+	if strings.Contains(lower, ".write(") {
+		return true
+	}
+	for _, marker := range []string{", 'w", `, "w`, ", 'a", `, "a`, ", 'x", `, "x`, "mode='w", `mode="w`, "mode='a", `mode="a`, "mode='x", `mode="x`} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasShellWriteRedirect(command string) bool {
+	var quote rune
+	var prev rune
+	for _, r := range command {
+		if quote != 0 {
+			if r == quote {
+				quote = 0
+			}
+			prev = r
+			continue
+		}
+		if r == '\'' || r == '"' {
+			quote = r
+			prev = r
+			continue
+		}
+		if r == '>' {
+			if prev == '2' {
+				prev = r
+				continue
+			}
+			return true
+		}
+		prev = r
+	}
+	return false
 }
 
 // isBackgroundTaskCall reports whether a `task` call set run_in_background, so a

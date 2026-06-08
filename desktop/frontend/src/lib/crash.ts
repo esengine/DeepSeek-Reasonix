@@ -1,6 +1,8 @@
 // Last-resort crash surface: a React render error with no boundary unmounts the
 // whole tree (blank window), and global errors/rejections leave no trace either.
 
+import { t } from "./i18n";
+
 function paint(text: string) {
   let host = document.getElementById("crash-overlay");
   if (!host) {
@@ -10,13 +12,13 @@ function paint(text: string) {
   }
   const title = document.createElement("div");
   title.className = "crash-overlay__title";
-  title.textContent = "Reasonix hit an error — screenshot this and send it over";
+  title.textContent = t("crash.title");
   const body = document.createElement("pre");
   body.className = "crash-overlay__body";
   body.textContent = text;
   const copy = document.createElement("button");
   copy.className = "crash-overlay__copy";
-  copy.textContent = "Copy";
+  copy.textContent = t("crash.copy");
   copy.onclick = () => void navigator.clipboard?.writeText(text);
   host.replaceChildren(title, body, copy);
 }

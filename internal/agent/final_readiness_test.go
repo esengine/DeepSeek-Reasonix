@@ -70,4 +70,27 @@ func TestFinalReadinessAllowsIncompleteTodosInPlanMode(t *testing.T) {
 	if got := a.finalReadinessFailure(); got != "" {
 		t.Fatalf("finalReadinessFailure() = %q, want empty in plan mode", got)
 	}
+	if got := a.finalReadinessCheck(); got.applies {
+		t.Fatalf("finalReadinessCheck() applies in plan mode: %+v", got)
+	}
+}
+
+func TestFinalReadinessCheckAuditsIncompleteTodos(t *testing.T) {
+	todo := evidence.Receipt{ToolName: "todo_write", Success: true, Todos: []evidence.TodoItem{{Content: "edit", Status: "in_progress"}}}
+	a := &Agent{evidence: readinessLedger(todo)}
+
+	got := a.finalReadinessCheck()
+	if !got.applies {
+		t.Fatalf("finalReadinessCheck() applies = false, want true")
+	}
+	if got.incompleteTodos != 1 {
+		t.Fatalf("incompleteTodos = %d, want 1", got.incompleteTodos)
+	}
+	if !strings.Contains(got.reason, "latest successful todo_write") {
+		t.Fatalf("reason = %q, want incomplete todo message", got.reason)
+	}
+	audit := got.audit(evidence.ReadinessBlocked, false)
+	if audit.IncompleteTodos != 1 {
+		t.Fatalf("audit.IncompleteTodos = %d, want 1", audit.IncompleteTodos)
+	}
 }

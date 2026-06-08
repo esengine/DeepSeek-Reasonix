@@ -39,20 +39,40 @@ var version = "dev"
 func main() {
 	app := NewApp()
 
+	// Restore saved window size, or fall back to the default.
+	width, height := 1240, 720
+	if saved, ok := loadWindowState(); ok {
+		if saved.Width > 0 {
+			width = saved.Width
+		}
+		if saved.Height > 0 {
+			height = saved.Height
+		}
+	}
+
 	err := wails.Run(&options.App{
 		Title:     "Reasonix",
-		Width:     1240,
-		Height:    720,
+		Width:     width,
+		Height:    height,
 		MinWidth:  760,
 		MinHeight: 480,
-		// Match the dark UI shell so first paint (before CSS loads) doesn't flash
-		// white — particularly visible on WebKitGTK. Uses the dark theme's --bg
-		// colour (#1a1a2e = RGB 26,26,46).
-		BackgroundColour: &options.RGBA{R: 26, G: 26, B: 46, A: 255},
-		AssetServer:      &assetserver.Options{Assets: assets},
-		OnStartup:        app.startup,
-		OnShutdown:       app.shutdown,
-		Bind:             []any{app},
+		// Match the dark UI shell so the initial webview background doesn't flash
+		// white before CSS loads — particularly visible on WebKitGTK.
+		BackgroundColour:   &options.RGBA{R: 26, G: 26, B: 46, A: 255},
+		AssetServer:        &assetserver.Options{Assets: assets, Middleware: app.workspaceMediaMiddleware()},
+		OnStartup:          app.startup,
+		OnDomReady:         app.domReady,
+		OnBeforeClose:      app.beforeClose,
+		OnShutdown:         app.shutdown,
+		Bind:               []any{app},
+		SingleInstanceLock: singleInstanceLock(app),
+
+		// Start hidden — domReady positions and shows the window after restoring
+		// geometry, so the user never sees the default size/position flash.
+		StartHidden: true,
+
+		// Native application menu (File > Settings, Edit, Window).
+		Menu: app.createAppMenu(),
 
 		// Native OS file drops: the webview withholds dropped files' paths from the
 		// HTML drop event, so the frontend (composer) reads them via runtime.OnFileDrop
@@ -63,22 +83,15 @@ func main() {
 		Mac: &mac.Options{
 			// Inset traffic-lights over a frameless-feeling header; the frontend
 			// leaves a drag region at the top (CSS --wails-draggable).
-			TitleBar:   mac.TitleBarHiddenInset(),
-			Appearance: mac.NSAppearanceNameDarkAqua,
+			TitleBar: mac.TitleBarHiddenInset(),
+			// Follow the OS appearance so the title bar matches light/dark system
+			// preference instead of being locked to dark.
+			Appearance: mac.DefaultAppearance,
 		},
 		Windows: &windows.Options{
-			// Paint the OS title bar with the app's dark shell colour instead of the
-			// default light caption that clashed against the dark UI on light-mode
-			// Windows (#2793). Both modes use the shell colour so it always blends.
-			Theme: windows.Dark,
-			CustomTheme: &windows.ThemeSettings{
-				DarkModeTitleBar:   windows.RGB(26, 26, 46),
-				DarkModeTitleText:  windows.RGB(228, 228, 238),
-				DarkModeBorder:     windows.RGB(26, 26, 46),
-				LightModeTitleBar:  windows.RGB(26, 26, 46),
-				LightModeTitleText: windows.RGB(228, 228, 238),
-				LightModeBorder:    windows.RGB(26, 26, 46),
-			},
+			// Follow the OS theme so the title bar matches light/dark system
+			// preference instead of being locked to dark.
+			Theme: windows.SystemDefault,
 		},
 		Linux: &linux.Options{
 			ProgramName: "Reasonix",

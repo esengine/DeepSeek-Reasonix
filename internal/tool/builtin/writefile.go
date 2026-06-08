@@ -48,12 +48,20 @@ func (w writeFile) Execute(ctx context.Context, args json.RawMessage) (string, e
 	if err := confine(w.roots, p.Path); err != nil {
 		return "", err
 	}
+	// Preserve the existing file's encoding (GBK/UTF-16/BOM) on overwrite instead
+	// of always writing UTF-8, which would silently corrupt a non-UTF-8 file.
+	// readFileEncoded returns enc=UTF8 for a missing file — the right default for
+	// a newly created one.
+	existing, enc, rerr := readFileEncoded(p.Path)
+	if rerr == nil && existing == p.Content {
+		return fmt.Sprintf("%s already contains the exact content; no changes made", p.Path), nil
+	}
 	if dir := filepath.Dir(p.Path); dir != "" && dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return "", fmt.Errorf("mkdir %s: %w", dir, err)
 		}
 	}
-	if err := os.WriteFile(p.Path, []byte(p.Content), 0o644); err != nil {
+	if err := writeFileEncoded(p.Path, p.Content, enc); err != nil {
 		return "", fmt.Errorf("write %s: %w", p.Path, err)
 	}
 	return fmt.Sprintf("wrote %d bytes to %s", len(p.Content), p.Path), nil

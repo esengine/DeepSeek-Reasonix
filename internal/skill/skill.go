@@ -62,6 +62,7 @@ type Skill struct {
 	AllowedTools []string
 	RunAs        RunAs  // inline | subagent
 	Model        string // optional model override for runAs=subagent (frontmatter `model:`)
+	Effort       string // optional effort for runAs=subagent (frontmatter `effort:`)
 }
 
 // IsValidName reports whether name is a usable skill identifier.
@@ -73,7 +74,9 @@ type Options struct {
 	HomeDir         string
 	ProjectRoot     string
 	CustomPaths     []string
+	ExcludedPaths   []string
 	DisabledNames   []string
+	MaxDepth        int
 	DisableBuiltins bool // suppress shipped built-ins (test-only knob)
 	// Stderr is the writer for diagnostic warnings. When nil, defaults to
 	// os.Stderr. Set to io.Discard to suppress output (e.g. during model
@@ -86,7 +89,9 @@ type Store struct {
 	homeDir         string
 	projectRoot     string
 	customPaths     []string
+	excludedPaths   map[string]bool
 	disabled        map[string]bool
+	maxDepth        int
 	disableBuiltins bool
 	stderr          io.Writer
 }
@@ -113,6 +118,10 @@ func New(opts Options) *Store {
 		}
 	}
 	custom := dedupePaths(resolveCustomPaths(opts.CustomPaths, base, home))
+	excluded := map[string]bool{}
+	for _, p := range dedupePaths(resolveCustomPaths(opts.ExcludedPaths, base, home)) {
+		excluded[config.CanonicalSkillPath(p)] = true
+	}
 	stderr := opts.Stderr
 	if stderr == nil {
 		stderr = os.Stderr
@@ -121,7 +130,9 @@ func New(opts Options) *Store {
 		homeDir:         home,
 		projectRoot:     root,
 		customPaths:     custom,
+		excludedPaths:   excluded,
 		disabled:        disabledNameSet(opts.DisabledNames),
+		maxDepth:        normalizeMaxDepth(opts.MaxDepth),
 		disableBuiltins: opts.DisableBuiltins,
 		stderr:          stderr,
 	}
@@ -169,9 +180,12 @@ func (s *Store) roots() []Root {
 	for _, c := range config.ConventionDirs {
 		dirs = append(dirs, de{filepath.Join(s.homeDir, c, SkillsDirname), ScopeGlobal})
 	}
-	out := make([]Root, len(dirs))
-	for i, d := range dirs {
-		out[i] = Root{Dir: d.dir, Scope: d.scope, Priority: i, Status: pathStatus(d.dir)}
+	out := make([]Root, 0, len(dirs))
+	for _, d := range dirs {
+		if s.excludedPaths[config.CanonicalSkillPath(d.dir)] {
+			continue
+		}
+		out = append(out, Root{Dir: d.dir, Scope: d.scope, Priority: len(out), Status: pathStatus(d.dir)})
 	}
 	return out
 }
@@ -191,6 +205,23 @@ func disabledNameSet(names []string) map[string]bool {
 
 func (s *Store) disabledName(name string) bool {
 	return s.disabled[config.SkillNameKey(name)]
+}
+
+func normalizeMaxDepth(depth int) int {
+	const (
+		defaultDepth = 3
+		maxDepth     = 5
+	)
+	if depth == 0 {
+		return defaultDepth
+	}
+	if depth < 1 {
+		return 1
+	}
+	if depth > maxDepth {
+		return maxDepth
+	}
+	return depth
 }
 
 // pathStatus classifies a root directory without failing on the common case of
@@ -223,15 +254,7 @@ func (s *Store) List() []Skill {
 		if r.Status != StatusOK {
 			continue
 		}
-		entries, err := os.ReadDir(r.Dir)
-		if err != nil {
-			continue
-		}
-		for _, e := range entries {
-			sk, ok := s.readEntry(r.Dir, r.Scope, e)
-			if !ok {
-				continue
-			}
+		for _, sk := range s.discoverRoot(r) {
 			if s.disabledName(sk.Name) {
 				continue
 			}
@@ -267,24 +290,75 @@ func (s *Store) Read(name string) (Skill, bool) {
 	if s.disabledName(name) {
 		return Skill{}, false
 	}
-	for _, r := range s.roots() {
-		dirCand := filepath.Join(r.Dir, name, SkillFile)
-		if info, err := os.Stat(dirCand); err == nil && info.Mode().IsRegular() {
-			return s.parse(dirCand, name, r.Scope)
-		}
-		flatCand := filepath.Join(r.Dir, name+".md")
-		if info, err := os.Stat(flatCand); err == nil && info.Mode().IsRegular() {
-			return s.parse(flatCand, name, r.Scope)
-		}
-	}
-	if !s.disableBuiltins {
-		for _, sk := range builtinSkills() {
-			if sk.Name == name {
-				return sk, true
-			}
+	for _, sk := range s.List() {
+		if sk.Name == name {
+			return sk, true
 		}
 	}
 	return Skill{}, false
+}
+
+func (s *Store) discoverRoot(r Root) []Skill {
+	var out []Skill
+	s.scanDir(r.Dir, r.Scope, 1, map[string]bool{}, &out)
+	return out
+}
+
+func (s *Store) scanDir(dir string, scope Scope, depth int, seen map[string]bool, out *[]Skill) {
+	key := filepath.Clean(dir)
+	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+		key = filepath.Clean(resolved)
+	}
+	if seen[key] {
+		return
+	}
+	seen[key] = true
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		sk, ok := s.readEntry(dir, scope, e)
+		if ok {
+			if depth == 1 || strings.TrimSpace(sk.Description) != "" {
+				*out = append(*out, sk)
+			}
+			continue
+		}
+		if depth >= s.maxDepth || !s.canScanChildDir(dir, e) {
+			continue
+		}
+		s.scanDir(filepath.Join(dir, e.Name()), scope, depth+1, seen, out)
+	}
+}
+
+func (s *Store) canScanChildDir(dir string, e os.DirEntry) bool {
+	name := e.Name()
+	if shouldSkipScanDir(name) {
+		return false
+	}
+	full := filepath.Join(dir, name)
+	if e.IsDir() {
+		return true
+	}
+	if e.Type()&os.ModeSymlink == 0 {
+		return false
+	}
+	info, err := os.Stat(full)
+	return err == nil && info.IsDir()
+}
+
+func shouldSkipScanDir(name string) bool {
+	if strings.HasPrefix(name, ".") {
+		return true
+	}
+	switch strings.ToLower(name) {
+	case "assets", "node_modules", "references", "scripts":
+		return true
+	default:
+		return false
+	}
 }
 
 // readEntry turns one directory entry into a skill. It resolves symlinks via
@@ -354,6 +428,7 @@ func (s *Store) parse(path, stem string, scope Scope) (Skill, bool) {
 		AllowedTools: parseAllowedTools(fm["allowed-tools"]),
 		RunAs:        parseRunAs(fm["runas"], fm["context"], fm["agent"]),
 		Model:        strings.TrimSpace(fm["model"]),
+		Effort:       strings.TrimSpace(fm["effort"]),
 	}, true
 }
 
@@ -362,9 +437,9 @@ func (s *Store) Create(name string, scope Scope) (string, error) {
 	return s.CreateWithContent(name, scope, stubBody(name))
 }
 
-// CreateWithContent writes caller-supplied file contents as a new flat
-// <name>.md skill, refusing to clobber an existing flat or directory-layout
-// skill of the same name. Returns the written path.
+// CreateWithContent writes caller-supplied file contents as a canonical
+// <name>/SKILL.md skill, refusing to clobber an existing directory-layout or
+// legacy flat skill of the same name. Returns the written path.
 func (s *Store) CreateWithContent(name string, scope Scope, content string) (string, error) {
 	if !IsValidName(name) {
 		return "", fmt.Errorf("invalid skill name %q — use letters, digits, '_', '-', '.'", name)
@@ -381,17 +456,20 @@ func (s *Store) CreateWithContent(name string, scope Scope, content string) (str
 	}
 	flat := filepath.Join(root, name+".md")
 	folder := filepath.Join(root, name, SkillFile)
+	if _, err := os.Stat(flat); err == nil {
+		return "", fmt.Errorf("skill %q already exists at %s", name, flat)
+	}
 	if _, err := os.Stat(folder); err == nil {
 		return "", fmt.Errorf("skill %q already exists at %s", name, folder)
 	}
-	if err := os.MkdirAll(root, 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(folder), 0o755); err != nil {
 		return "", err
 	}
 	// O_EXCL so a concurrent create (or an existing file) is reported, not clobbered.
-	f, err := os.OpenFile(flat, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(folder, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 	if err != nil {
 		if os.IsExist(err) {
-			return "", fmt.Errorf("skill %q already exists at %s", name, flat)
+			return "", fmt.Errorf("skill %q already exists at %s", name, folder)
 		}
 		return "", err
 	}
@@ -399,7 +477,7 @@ func (s *Store) CreateWithContent(name string, scope Scope, content string) (str
 	if _, err := f.WriteString(content); err != nil {
 		return "", err
 	}
-	return flat, nil
+	return folder, nil
 }
 
 // loadBodyWithReferences appends a directory-layout skill's sibling

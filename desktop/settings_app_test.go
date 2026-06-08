@@ -1,8 +1,10 @@
 package main
 
 import (
+	"reflect"
 	"testing"
 
+	"reasonix/internal/config"
 	"reasonix/internal/provider"
 )
 
@@ -36,5 +38,21 @@ func TestWithFreshSystemPromptPrependsMissingSystemMessage(t *testing.T) {
 	}
 	if got[1].Content != "hello" {
 		t.Fatalf("existing user message changed: %+v", got[1])
+	}
+}
+
+func TestProviderViewFromEntry_FiltersNonChatModels(t *testing.T) {
+	p := config.ProviderEntry{
+		Name: "mimo-api",
+		Models: []string{
+			"mimo-v2", "mimo-v2-pro",
+			"mimo-v2-asr", "mimo-v2-tts",
+			"mimo-v2-tts-voiceclone", "mimo-v2-tts-voicedesign",
+		},
+	}
+	view := providerViewFromEntry(p, true, false)
+	want := []string{"mimo-v2", "mimo-v2-pro"}
+	if !reflect.DeepEqual(view.Models, want) {
+		t.Errorf("ProviderView.Models = %v, want %v", view.Models, want)
 	}
 }

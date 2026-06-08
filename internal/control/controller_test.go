@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/checkpoint"
 	"reasonix/internal/event"
 	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
@@ -25,6 +26,15 @@ type appendingRunner struct {
 
 func (r appendingRunner) Run(_ context.Context, input string) error {
 	r.session.Add(provider.Message{Role: provider.RoleUser, Content: input})
+	return nil
+}
+
+type handoffRunner struct {
+	session *agent.Session
+}
+
+func (r handoffRunner) Run(_ context.Context, input string) error {
+	r.session.Add(provider.Message{Role: provider.RoleUser, Content: "handoff: " + input})
 	return nil
 }
 
@@ -73,6 +83,28 @@ func TestRunTurnSnapshotsActivityWhenTranscriptChanges(t *testing.T) {
 	}
 	if meta.UpdatedAt.IsZero() {
 		t.Fatal("activity meta should be marked")
+	}
+}
+
+func TestRunTurnRecordsDisplayForPersistedUserMessage(t *testing.T) {
+	sess := agent.NewSession("sys")
+	exec := agent.New(nil, nil, sess, agent.Options{}, event.Discard)
+	c := New(Options{Runner: handoffRunner{session: sess}, Executor: exec})
+	var gotContent, gotDisplay string
+	c.SetDisplayRecorder(func(content, display string) {
+		gotContent = content
+		gotDisplay = display
+	})
+
+	if err := c.runTurnWithRawDisplay(context.Background(), "expanded prompt", "raw prompt", "visible prompt"); err != nil {
+		t.Fatal(err)
+	}
+
+	if gotContent != "handoff: expanded prompt" {
+		t.Fatalf("display recorded against %q, want persisted user message", gotContent)
+	}
+	if gotDisplay != "visible prompt" {
+		t.Fatalf("display = %q, want visible prompt", gotDisplay)
 	}
 }
 
@@ -247,5 +279,48 @@ func TestApprovalCtxCancel(t *testing.T) {
 	allow, _, err := gateApprover{c}.Approve(ctx, "bash", "x", nil)
 	if err == nil || allow {
 		t.Fatalf("Approve on cancelled ctx = (%v,%v), want (false, error)", allow, err)
+	}
+}
+
+func TestParseRewind(t *testing.T) {
+	cps := []checkpoint.Meta{
+		{Turn: 0, Prompt: "first"},
+		{Turn: 1, Prompt: "second"},
+		{Turn: 2, Prompt: "third"},
+	}
+	cases := []struct {
+		args    string
+		wantT   int
+		wantS   RewindScope
+		wantErr bool
+	}{
+		{"", 2, RewindBoth, false},                       // no args -> latest turn, both
+		{"1", 1, RewindBoth, false},                      // turn only
+		{"0 code", 0, RewindCode, false},                 // turn + code
+		{"1 conversation", 1, RewindConversation, false}, // turn + conversation
+		{"2 both", 2, RewindBoth, false},                 // turn + both
+		{"abc", 0, RewindBoth, true},                     // invalid turn
+		{"0 unknown", 0, RewindBoth, true},               // unknown scope
+	}
+	for _, tc := range cases {
+		t.Run(tc.args, func(t *testing.T) {
+			gotT, gotS, err := parseRewind(tc.args, cps)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("parseRewind(%q) err=%v, wantErr=%v", tc.args, err, tc.wantErr)
+			}
+			if err != nil {
+				return
+			}
+			if gotT != tc.wantT || gotS != tc.wantS {
+				t.Fatalf("parseRewind(%q) = (%d,%d), want (%d,%d)", tc.args, gotT, gotS, tc.wantT, tc.wantS)
+			}
+		})
+	}
+}
+
+func TestParseRewindEmptyCheckpoints(t *testing.T) {
+	_, _, err := parseRewind("", nil)
+	if err == nil {
+		t.Fatal("expected error when no checkpoints")
 	}
 }

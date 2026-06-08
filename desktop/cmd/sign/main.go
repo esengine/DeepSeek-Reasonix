@@ -207,6 +207,9 @@ func genManifest(dir, version, tag string) error {
 
 // matchPlatform returns the platform key embedded in a file name, or "" if none.
 func matchPlatform(name string) string {
+	if strings.Contains(name, "windows-amd64") && !strings.HasSuffix(name, "-installer.exe") {
+		return ""
+	}
 	for _, p := range platforms {
 		if strings.Contains(name, p) {
 			return p

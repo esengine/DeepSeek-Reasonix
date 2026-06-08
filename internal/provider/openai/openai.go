@@ -38,8 +38,13 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	}
 	keyEnv, _ := cfg.Extra["api_key_env"].(string) // for actionable auth errors
 	effort, _ := cfg.Extra["effort"].(string)
-	deepseek := isDeepSeekBaseURL(cfg.BaseURL)
-	if deepseek {
+	protocol, _ := cfg.Extra["reasoning_protocol"].(string)
+	protocol = normalizeReasoningProtocol(protocol)
+	deepseek := protocol == "deepseek" || (protocol == "" && isDeepSeekBaseURL(cfg.BaseURL))
+	switch {
+	case protocol == "none":
+		effort = ""
+	case deepseek:
 		effort = strings.ToLower(strings.TrimSpace(effort))
 		switch effort {
 		case "", "off": // "off" is a retired level (disabled thinking); fall back to the default depth
@@ -48,7 +53,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		default:
 			return nil, fmt.Errorf("openai: provider %q uses DeepSeek thinking; effort must be high or max", name)
 		}
-	} else if effort != "" {
+	case effort != "":
 		// Non-DeepSeek backends use OpenAI's reasoning_effort scale (low/medium/
 		// high); "max" is a DeepSeek-ism MiMo et al. reject with 400, so clamp it
 		// to the OpenAI ceiling and reject other values at boot, not at request time.
@@ -109,6 +114,15 @@ func isDeepSeekBaseURL(baseURL string) bool {
 	return host == "api.deepseek.com" || strings.HasSuffix(host, ".deepseek.com")
 }
 
+func normalizeReasoningProtocol(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "deepseek", "openai", "none":
+		return strings.ToLower(strings.TrimSpace(raw))
+	default:
+		return ""
+	}
+}
+
 // bufPool reuses byte buffers for JSON-marshalled request bodies. Each turn
 // allocates a buffer, marshals the request, and sends it — pooling avoids the
 // GC churn from repeated alloc/free of ~10-100KB buffers. The pool is
@@ -144,8 +158,45 @@ func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provi
 	}
 
 	out := make(chan provider.Chunk)
-	go c.readStream(ctx, resp, out)
+	go c.streamWithReconnect(ctx, resp, newReq, out)
 	return out, nil
+}
+
+// maxStreamReconnects bounds how many times a mid-stream connection drop is
+// replayed from scratch before the error is surfaced — each replay re-runs the
+// whole request (cheap under prompt caching, but not free).
+const maxStreamReconnects = 3
+
+// streamWithReconnect drives readStream and, when the connection is cut before
+// any model output has been forwarded, replays the request rather than failing
+// the turn. Once a token (reasoning/text/tool-call) has been emitted, a replay
+// would duplicate output, so the error is surfaced instead.
+func (c *client) streamWithReconnect(ctx context.Context, resp *http.Response, newReq func(context.Context) (*http.Request, error), out chan<- provider.Chunk) {
+	defer close(out)
+	for attempt := 0; ; attempt++ {
+		emitted, err := c.readStream(ctx, resp, out)
+		if err == nil {
+			return
+		}
+		if !provider.IsConnReset(err) {
+			out <- provider.Chunk{Type: provider.ChunkError, Err: err}
+			return
+		}
+		if emitted {
+			out <- provider.Chunk{Type: provider.ChunkError, Err: &provider.StreamInterruptedError{Err: err}}
+			return
+		}
+		if attempt >= maxStreamReconnects {
+			out <- provider.Chunk{Type: provider.ChunkError, Err: err}
+			return
+		}
+		next, rerr := provider.SendWithRetry(ctx, c.http, c.name, c.keyEnv, newReq)
+		if rerr != nil {
+			out <- provider.Chunk{Type: provider.ChunkError, Err: rerr}
+			return
+		}
+		resp = next
+	}
 }
 
 func (c *client) buildRequest(req provider.Request) chatRequest {
@@ -200,13 +251,13 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 	return out
 }
 
-// readStream parses the SSE stream, emits text deltas live, accumulates tool-call
-// fragments internally, and emits complete ToolCalls (by index) when done. Each
-// call also gets a ChunkToolCallStart the moment its name is known, so a frontend
-// can show the tool card while the arguments are still streaming.
-func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<- provider.Chunk) {
+// readStream parses one SSE response into chunks: text deltas stream live,
+// tool-call fragments accumulate by index and emit complete on [DONE], and a
+// ChunkToolCallStart fires the moment a call's name is known. It returns whether
+// any model output was forwarded (so the caller can decide a replay is safe) and
+// the first fatal error — a nil error means the stream reached [DONE].
+func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<- provider.Chunk) (emitted bool, _ error) {
 	defer resp.Body.Close()
-	defer close(out)
 
 	// Close the response body when the context is canceled so scanner.Scan()
 	// unblocks instead of hanging on a stalled connection. done lets the goroutine
@@ -243,12 +294,10 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 
 		var sr streamResponse
 		if err := json.Unmarshal([]byte(data), &sr); err != nil {
-			out <- provider.Chunk{Type: provider.ChunkError, Err: fmt.Errorf("%s: decode stream: %w", c.name, err)}
-			return
+			return emitted, fmt.Errorf("%s: decode stream: %w", c.name, err)
 		}
 		if sr.Error != nil {
-			out <- provider.Chunk{Type: provider.ChunkError, Err: fmt.Errorf("%s: %s", c.name, sr.Error.Message)}
-			return
+			return emitted, fmt.Errorf("%s: %s", c.name, sr.Error.Message)
 		}
 		if len(sr.Choices) > 0 && sr.Choices[0].FinishReason != nil && *sr.Choices[0].FinishReason != "" {
 			lastFinishReason = *sr.Choices[0].FinishReason
@@ -256,6 +305,7 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 		if sr.Usage != nil {
 			u := normaliseUsage(sr.Usage)
 			u.FinishReason = lastFinishReason
+			emitted = true
 			out <- provider.Chunk{Type: provider.ChunkUsage, Usage: u}
 		}
 		if len(sr.Choices) == 0 {
@@ -264,14 +314,17 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 
 		delta := sr.Choices[0].Delta
 		if delta.ReasoningContent != "" {
+			emitted = true
 			out <- provider.Chunk{Type: provider.ChunkReasoning, Text: delta.ReasoningContent}
 		}
 		if delta.Content != "" {
 			r, txt := think.push(delta.Content)
 			if r != "" {
+				emitted = true
 				out <- provider.Chunk{Type: provider.ChunkReasoning, Text: r}
 			}
 			if txt != "" {
+				emitted = true
 				out <- provider.Chunk{Type: provider.ChunkText, Text: txt}
 			}
 		}
@@ -294,14 +347,14 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 			// (possibly large) arguments finish streaming.
 			if !started[tc.Index] && cur.Name != "" {
 				started[tc.Index] = true
+				emitted = true
 				out <- provider.Chunk{Type: provider.ChunkToolCallStart, ToolCall: &provider.ToolCall{ID: cur.ID, Name: cur.Name}}
 			}
 		}
 	}
 
 	if err := scanner.Err(); err != nil {
-		out <- provider.Chunk{Type: provider.ChunkError, Err: fmt.Errorf("%s: read stream: %w", c.name, err)}
-		return
+		return emitted, fmt.Errorf("%s: read stream: %w", c.name, err)
 	}
 
 	if r, txt := think.flush(); r != "" || txt != "" {
@@ -325,6 +378,7 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 		out <- provider.Chunk{Type: provider.ChunkToolCall, ToolCall: tc}
 	}
 	out <- provider.Chunk{Type: provider.ChunkDone}
+	return emitted, nil
 }
 
 // normaliseUsage folds the two cache-hit shapes the OpenAI-compatible ecosystem

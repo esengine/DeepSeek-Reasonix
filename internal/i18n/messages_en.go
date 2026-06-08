@@ -46,6 +46,8 @@ var English = Messages{
 	ChatStatusIdle:         "ready",
 	ChatStatusYoloIdle:     "approvals skipped",
 	ChatStatusCycleHint:    "shift+tab to cycle",
+	ChatStatusCacheNowFmt:  "turn hit %s",
+	ChatStatusCacheAvgFmt:  "avg %s",
 	ChatStatusPlanApproval: "Enter/y approves & executes · n/Esc keeps planning · PgUp/PgDn scrolls",
 	PlanApprovalPrompt:     "Plan ready above — Enter/y to approve & execute, n/Esc to keep planning",
 	ChatStatusToolApproval: "1 approve once · 2 allow this session · 3 always allow (save) · 4 deny · y/a/p/n also work · Ctrl-C cancels turn",
@@ -139,6 +141,11 @@ var English = Messages{
 	CompHintSlash:                "↑/↓ move · Tab/Enter select · Esc close",
 	CompHintFile:                 "↑/↓ move · Tab/Enter open folder or pick file · Esc close",
 
+	ShellExecEmpty:      "usage: !<command>  (e.g. !ls -la)",
+	ShellExecFailedFmt:  "shell command failed: %v",
+	ShellExecTimeoutFmt: "shell command timed out (> %s)",
+	ShellModeHint:       "Enter runs shell · Esc cancels · click output to expand",
+
 	CmdNew:          "fork a fresh session",
 	CmdCompact:      "compact context",
 	CmdRewind:       "rewind to an earlier turn",
@@ -159,6 +166,7 @@ var English = Messages{
 	CmdSkill:        "manage skills",
 	CmdVerbose:      "toggle thinking text",
 	CmdEffort:       "set reasoning effort",
+	CmdAutoPlan:     "configure automatic plan mode",
 	CmdHelp:         "list commands",
 	CmdTodo:         "dismiss the task list",
 	CmdQuit:         "exit the session",
@@ -247,6 +255,7 @@ var English = Messages{
 	AnthropicFetchEmpty:        "/models returned an empty list — Anthropic-compatible providers usually don't expose one, falling back to manual entry",
 	SkipStaleCustomEntryFmt:    "skipping stale %q entry from reasonix.toml (pointing at %s) — please remove it from [[providers]]",
 	APIKeyAlreadySetFmt:        "reusing existing value for %s",
+	APIKeyResetPromptFmt:       "Re-enter %s?",
 
 	// custom provider
 	CustomProviderLabel:  "Custom Model",
@@ -300,7 +309,9 @@ Usage:
   reasonix chat [--model NAME] [-c|--continue] [--resume]   interactive session (multi-turn; -c resumes the latest, --resume picks one)
   reasonix run  [--model NAME] [--max-steps N] <task>   run one task and exit
   reasonix serve [--model NAME] [--addr HOST:PORT]      serve the session over HTTP+SSE (browser client at /)
+  reasonix acp [--model NAME]                           serve Agent Client Protocol over stdio (also: reasonix --acp)
   reasonix setup [path]                                 interactive config wizard; writes reasonix.toml (+ .env)
+  reasonix config auto-plan [off|on]                    configure automatic plan mode
   reasonix mcp <add|remove|list>                        manage MCP servers in reasonix.toml
   reasonix doctor [--json]                              print redacted local diagnostics
   reasonix version

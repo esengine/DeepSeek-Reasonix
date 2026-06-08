@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/codegraph"
@@ -25,6 +26,7 @@ import (
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/hook"
+	"reasonix/internal/installsource"
 	"reasonix/internal/instruction"
 	"reasonix/internal/jobs"
 	"reasonix/internal/lsp"
@@ -56,6 +58,9 @@ type Options struct {
 	MaxSteps   int
 	RequireKey bool
 	Sink       event.Sink
+	// EffortOverride is a session-local reasoning effort override. Nil means use
+	// the resolved provider config; a non-nil empty string means provider default.
+	EffortOverride *string
 	// Stderr is the writer for diagnostic warnings and plugin subprocess
 	// stderr output. When nil, defaults to os.Stderr. Set to io.Discard
 	// during model switch inside a bubbletea session to prevent any output
@@ -67,6 +72,10 @@ type Options struct {
 	// so each tab loads its own config/skills/hooks without changing the process
 	// cwd — enabling concurrent multi-project sessions.
 	WorkspaceRoot string
+	// ExtraPlugins are session-scoped MCP servers supplied by a host transport
+	// (for example ACP session/new). They are connected eagerly for this
+	// controller but are not persisted to reasonix.toml.
+	ExtraPlugins []plugin.Spec
 }
 
 // Build loads config, resolves the model(s), and returns a Controller wrapping a
@@ -84,8 +93,9 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			root = wd
 		}
 	}
-	// One-time import of a v0.x (~/.reasonix/config.json) install — runs before
-	// Load so the freshly written config + ~/.env are picked up this same boot.
+	// One-time import of v1/v0.5 legacy config — runs before Load so the freshly
+	// written config + ~/.env are picked up this same boot. CLI Run also calls this
+	// before config-only commands; this call stays as the shared frontend fallback.
 	migrated, migErr := config.MigrateLegacyIfNeeded()
 	cfg, err := config.LoadForRoot(root)
 	if err != nil {
@@ -98,6 +108,12 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	entry, ok := cfg.ResolveModel(modelName)
 	if !ok {
 		return nil, fmt.Errorf("%w %q (configured: %s); note: defining [[providers]] replaces the built-in presets, so add a [[providers]] entry for it or use a configured name, or run `reasonix setup` to reconfigure", ErrUnknownModel, modelName, providerNames(cfg))
+	}
+	if opts.EffortOverride != nil {
+		entry.Effort = *opts.EffortOverride
+		if entry.Kind == "anthropic" && strings.TrimSpace(entry.Effort) != "" && strings.TrimSpace(entry.Thinking) == "" {
+			entry.Thinking = "adaptive"
+		}
 	}
 	if opts.RequireKey {
 		if err := cfg.Validate(modelName); err != nil {
@@ -116,16 +132,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	} else if migrated != nil {
 		sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: migrated.Notice()})
 	}
-	// Back-fill v0.x sessions, independent of the config migration. This used to be
-	// nested under the (one-time) config migration above, so a v0.x user who had
-	// already opened v1 never got their old sessions imported (#2869). It is guarded
-	// by its own marker, so running every boot imports any not-yet-imported session
-	// once and is a cheap no-op afterwards.
-	if home, herr := os.UserHomeDir(); herr == nil {
-		if n, serr := agent.MigrateLegacySessions(filepath.Join(home, ".reasonix", "sessions"), config.SessionDir()); serr == nil && n > 0 {
-			sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: fmt.Sprintf("imported %d past session(s) from ~/.reasonix/sessions — resume them with --resume or the history panel", n)})
-		}
-	}
+	migrateLegacySessionSources(sink)
 
 	// A resolvable model whose API key env is unset would otherwise build fine
 	// (RequireKey is false so the UI stays reachable) and then fail silently on the
@@ -177,11 +184,14 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	skillStore := skill.New(skill.Options{
 		ProjectRoot:   root,
 		CustomPaths:   cfg.SkillCustomPaths(),
+		ExcludedPaths: cfg.SkillExcludedPaths(),
 		DisabledNames: cfg.DisabledSkillNames(),
+		MaxDepth:      cfg.SkillMaxDepth(),
 		Stderr:        opts.Stderr,
 	})
 	skills := skillStore.List()
-	allSkills := skill.New(skill.Options{ProjectRoot: root, CustomPaths: cfg.SkillCustomPaths(), Stderr: io.Discard}).List()
+	allSkillStore := skill.New(skill.Options{ProjectRoot: root, CustomPaths: cfg.SkillCustomPaths(), ExcludedPaths: cfg.SkillExcludedPaths(), MaxDepth: cfg.SkillMaxDepth(), Stderr: io.Discard})
+	allSkills := allSkillStore.List()
 	sysPrompt = skill.ApplyIndex(sysPrompt, skills)
 
 	reg := tool.NewRegistry()
@@ -193,14 +203,15 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		fmt.Fprintln(stderr, "warning: bash not found on PATH; the shell tool will run commands under Windows PowerShell. Install Git for Windows or WSL to use bash.")
 	}
 	searchSpec := builtin.ResolveSearch(cfg.Tools.Search.Engine, cfg.Tools.Search.RgPath, stderr)
-	addBuiltins(reg, cfg.Tools.Enabled, cfg.WriteRootsForRoot(root), bashSpec, searchSpec, stderr, root)
+	bashTimeout := time.Duration(cfg.BashTimeoutSeconds()) * time.Second
+	addBuiltins(reg, cfg.Tools.Enabled, cfg.WriteRootsForRoot(root), bashSpec, bashTimeout, searchSpec, stderr, root)
 	// Always construct a host, even with no plugins configured, so the controller's
 	// host pointer is stable for the session and `/mcp add` can hot-add into it.
 	pluginHost := plugin.NewHost()
 
 	// Partition configured plugins by tier so eager/lazy/background can each
-	// take the path that fits them. User entries default to lazy — they don't
-	// slow the next launch unless the user explicitly opts in to eager.
+	// take the path that fits them. User entries default to background: the
+	// session starts immediately while enabled MCP servers warm up.
 	eagerEntries, lazyEntries, bgEntries := partitionByTier(cfg.AutoStartPlugins())
 
 	// Auto-demote: any eager plugin that has been chronically slow (recent
@@ -245,6 +256,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		case ok:
 			spec := plugin.Spec{
 				Name:              "codegraph",
+				StripRawPrefix:    "codegraph_",
 				Command:           bin,
 				Args:              []string{"serve", "--mcp"},
 				Dir:               root,
@@ -300,6 +312,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 				Text: "codegraph: not installed — run `reasonix codegraph install` to enable symbol-graph tools"})
 		}
 	}
+	eagerSpecs = append(eagerSpecs, opts.ExtraPlugins...)
 
 	// Apply caller-supplied stderr override to every spec across tiers.
 	if opts.Stderr != nil {
@@ -344,6 +357,24 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	}
 	registerDeferred(lazySpecs, false)
 	registerDeferred(bgSpecs, true)
+
+	// Inject codegraph steering into the system prompt when symbol-graph tools
+	// are available, so the model knows to prefer them for architecture / call-graph
+	// questions over grep/read_file. Also register codegraph tool names in the
+	// subagent allowed-tools list so explore/research/review can use them.
+	if cfg.Codegraph.Enabled {
+		prefix := plugin.ToolPrefix("codegraph")
+		var cgTools []string
+		for _, name := range reg.Names() {
+			if strings.HasPrefix(name, prefix) {
+				cgTools = append(cgTools, name)
+			}
+		}
+		if len(cgTools) > 0 {
+			sysPrompt += "\n\n" + codegraph.SteerText
+			skill.SetExtraReadTools(cgTools)
+		}
+	}
 
 	for _, msg := range demoteMessages {
 		sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: msg})
@@ -399,9 +430,37 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// sub-agents inherit the full tool set (minus `task` itself, to keep
 	// nesting out of the picture). It registers into the same reg the
 	// executor uses, so the model surfaces it like any other tool.
+	resolveSubagentProvider := func(modelRef, effort string) (provider.Provider, *provider.Pricing, int, error) {
+		me := *entry
+		if strings.TrimSpace(modelRef) != "" {
+			resolved, ok := cfg.ResolveModel(modelRef)
+			if !ok {
+				return nil, nil, 0, fmt.Errorf("unknown model %q", modelRef)
+			}
+			me = *resolved
+		}
+		if strings.TrimSpace(effort) != "" {
+			normalized, err := config.NormalizeEffort(&me, effort)
+			if err != nil {
+				return nil, nil, 0, err
+			}
+			me.Effort = normalized
+			if me.Kind == "anthropic" && strings.TrimSpace(me.Effort) != "" && strings.TrimSpace(me.Thinking) == "" {
+				me.Thinking = "adaptive"
+			}
+		}
+		p, err := NewProviderWithProxy(&me, proxySpec)
+		if err != nil {
+			return nil, nil, 0, err
+		}
+		return p, me.Price, me.ContextWindow, nil
+	}
+	taskModel := firstNonEmpty(cfg.Agent.SubagentModels["task"], cfg.Agent.SubagentModel)
+	taskEffort := firstNonEmpty(cfg.Agent.SubagentEfforts["task"], cfg.Agent.SubagentEffort)
 	reg.Add(agent.NewTaskTool(execProv, entry.Price, reg, maxSteps,
 		entry.ContextWindow, cfg.Agent.SoftCompactRatio, cfg.Agent.CompactRatio, cfg.Agent.CompactForceRatio,
-		cfg.Agent.Temperature, config.ArchiveDir(), "", headlessGate))
+		cfg.Agent.Temperature, config.ArchiveDir(), "", headlessGate,
+		taskModel, taskEffort, resolveSubagentProvider))
 
 	// The `remember` tool lets the model persist durable facts to the project's
 	// auto-memory store; `forget` prunes ones that turn out wrong. The saved index
@@ -423,12 +482,14 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// Its tool activity nests under the invoking call, like `task`.
 	skillRunner := func(sctx context.Context, sk skill.Skill, task string) (string, error) {
 		prov, price, ctxWin := execProv, entry.Price, entry.ContextWindow
-		if modelRef := subagentModelRef(cfg, sk); modelRef != "" {
-			if me, ok := cfg.ResolveModel(modelRef); ok {
-				if p, err := NewProviderWithProxy(me, proxySpec); err == nil {
-					prov, price, ctxWin = p, me.Price, me.ContextWindow
-				}
+		modelRef := subagentModelRef(cfg, sk)
+		effortRef := subagentEffortRef(cfg, sk)
+		if modelRef != "" || effortRef != "" {
+			p, pr, cw, err := resolveSubagentProvider(modelRef, effortRef)
+			if err != nil {
+				return "", fmt.Errorf("subagent skill %q profile: %w", sk.Name, err)
 			}
+			prov, price, ctxWin = p, pr, cw
 		}
 		subReg := agent.FilterRegistry(reg, sk.AllowedTools, agent.SubagentMetaTools()...)
 		steps := maxSteps
@@ -446,9 +507,61 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			ArchiveDir:    config.ArchiveDir(),
 		}, agent.NestedSink(sctx, event.Discard))
 	}
-	reg.Add(skill.NewRunSkillTool(skillStore, skillRunner))
+	skillProfile := func(sk skill.Skill) *event.Profile {
+		model, effort := subagentModelRef(cfg, sk), subagentEffortRef(cfg, sk)
+		if model == "" && effort == "" {
+			return nil
+		}
+		return &event.Profile{Model: model, Effort: effort}
+	}
+	reg.Add(skill.NewRunSkillTool(skillStore, skillRunner, skillProfile))
 	reg.Add(skill.NewInstallSkillTool(skillStore, nil))
-	for _, t := range skill.BuiltinSubagentTools(skillStore, skillRunner) {
+	reg.Add(installsource.NewTool(installsource.Options{
+		ProjectRoot: root,
+		HTTPClient:  balanceClient,
+		ConnectMCP: func(e config.PluginEntry) (installsource.MCPConnectResult, error) {
+			exp := e.ExpandedPlugin()
+			spec := plugin.Spec{
+				Name:    exp.Name,
+				Type:    exp.Type,
+				Command: exp.Command,
+				Args:    exp.Args,
+				Env:     exp.Env,
+				URL:     exp.URL,
+				Headers: exp.Headers,
+			}
+			if opts.Stderr != nil {
+				spec.Stderr = opts.Stderr
+			}
+			tools, err := pluginHost.Add(ctx, spec)
+			if err != nil {
+				return installsource.MCPConnectResult{}, err
+			}
+			reg.RemovePrefix(plugin.ToolPrefix(spec.Name))
+			for _, t := range tools {
+				reg.Add(t)
+			}
+			// Disconnect closes the server and drops its namespaced tools.
+			// Used by the install_source rollback path when SaveTo fails.
+			disconnect := func() {
+				if prefix, ok := pluginHost.Remove(spec.Name); ok {
+					reg.RemovePrefix(prefix)
+				}
+			}
+			return installsource.MCPConnectResult{
+				ToolCount:  len(tools),
+				Disconnect: disconnect,
+			}, nil
+		},
+		OnDisconnect: func(serverName string) bool {
+			if prefix, ok := pluginHost.Remove(serverName); ok {
+				reg.RemovePrefix(prefix)
+				return true
+			}
+			return false
+		},
+	}))
+	for _, t := range skill.BuiltinSubagentTools(skillStore, skillRunner, skillProfile) {
 		reg.Add(t)
 	}
 
@@ -501,7 +614,9 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	var classifier *control.ProviderAutoPlanClassifier
 
 	// Two-model collaboration: a distinct planner_model wraps the executor in a
-	// Coordinator with its own session, kept separate for cache stability.
+	// Coordinator with its own session, kept separate for cache stability. The
+	// planner gets the same standing memory context and a filtered read-only
+	// research tool set, so it can inspect rules/code without side effects.
 	if pm := cfg.Agent.PlannerModel; pm != "" {
 		pe, ok := cfg.ResolveModel(pm)
 		if !ok {
@@ -512,8 +627,17 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			if err != nil {
 				return nil, fmt.Errorf("planner %q: %w", pm, err)
 			}
-			plannerSess := agent.NewSession(agent.DefaultPlannerPrompt)
-			runner = agent.NewCoordinator(plannerProv, plannerSess, pe.Price, executor, cfg.Agent.Temperature, sink, control.TaskWarrantsPlanner)
+			plannerSess := agent.NewSession(agent.PlannerPromptWithContext(mem.Block()))
+			plannerTools := agent.PlannerToolRegistry(reg)
+			runner = agent.NewCoordinator(plannerProv, plannerSess, pe.Price, plannerTools, agent.Options{
+				MaxSteps:          agent.PlannerMaxSteps(maxSteps),
+				Gate:              headlessGate,
+				ContextWindow:     pe.ContextWindow,
+				SoftCompactRatio:  cfg.Agent.SoftCompactRatio,
+				CompactRatio:      cfg.Agent.CompactRatio,
+				CompactForceRatio: cfg.Agent.CompactForceRatio,
+				ArchiveDir:        config.ArchiveDir(),
+			}, executor, cfg.Agent.Temperature, sink, control.TaskWarrantsPlanner)
 			label = entry.Model + " + planner " + pe.Model
 		}
 	}
@@ -542,6 +666,8 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		Commands:      cmds,
 		Skills:        skills,
 		AllSkills:     allSkills,
+		SkillStore:    skillStore,
+		AllSkillStore: allSkillStore,
 		Hooks:         hookRunner,
 		Memory:        mem,
 		Cleanup:       cleanup,
@@ -561,6 +687,49 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		ctrlOpts.Classifier = classifier
 	}
 	return control.New(ctrlOpts), nil
+}
+
+func migrateLegacySessionSources(sink event.Sink) {
+	dest := config.SessionDir()
+	if strings.TrimSpace(dest) == "" {
+		return
+	}
+	type legacySource struct {
+		dir     string
+		label   string
+		migrate func(srcDir, destDir string) (int, error)
+	}
+	var sources []legacySource
+	if home, herr := os.UserHomeDir(); herr == nil {
+		sources = append(sources, legacySource{
+			dir:     filepath.Join(home, ".reasonix", "sessions"),
+			label:   "~/.reasonix/sessions",
+			migrate: agent.MigrateLegacySessions,
+		})
+	}
+	// Back-fill v0.x sessions from the current user config session directory as
+	// well. This covers users whose platform config root was redirected before the
+	// Go rewrite; their event logs can already live where v2 stores sessions.
+	sources = append(sources, legacySource{
+		dir:     dest,
+		label:   dest,
+		migrate: agent.MigrateLegacySessionsFromConfigDir,
+	})
+
+	seen := map[string]bool{}
+	for _, src := range sources {
+		if strings.TrimSpace(src.dir) == "" {
+			continue
+		}
+		key := filepath.Clean(src.dir)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		if n, serr := src.migrate(src.dir, dest); serr == nil && n > 0 {
+			sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: fmt.Sprintf("imported %d past session(s) from %s — resume them with --resume or the history panel", n, src.label)})
+		}
+	}
 }
 
 func rememberPermissionRule(workspaceRoot, rule string) {
@@ -587,6 +756,15 @@ func rememberPermissionConfigPath(workspaceRoot string) string {
 	return path
 }
 
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
+}
+
 func subagentModelRef(cfg *config.Config, sk skill.Skill) string {
 	if cfg != nil {
 		for _, key := range subagentModelKeys(sk.Name) {
@@ -602,6 +780,23 @@ func subagentModelRef(cfg *config.Config, sk skill.Skill) string {
 		return ""
 	}
 	return strings.TrimSpace(cfg.Agent.SubagentModel)
+}
+
+func subagentEffortRef(cfg *config.Config, sk skill.Skill) string {
+	if cfg != nil {
+		for _, key := range subagentModelKeys(sk.Name) {
+			if e := strings.TrimSpace(cfg.Agent.SubagentEfforts[key]); e != "" {
+				return e
+			}
+		}
+	}
+	if e := strings.TrimSpace(sk.Effort); e != "" {
+		return e
+	}
+	if cfg == nil {
+		return ""
+	}
+	return strings.TrimSpace(cfg.Agent.SubagentEffort)
 }
 
 func subagentModelKeys(name string) []string {
@@ -647,13 +842,14 @@ func NewProviderWithProxy(e *config.ProviderEntry, proxy netclient.ProxySpec) (p
 		Model:   e.Model,
 		APIKey:  e.APIKey(),
 		// Pass the key's env var so auth failures can name where to fix it, plus
-		// provider-kind-specific knobs (the anthropic provider reads thinking/effort;
-		// the openai one ignores them).
+		// provider-kind-specific knobs. EffectiveEffort applies a configured
+		// default_effort when the user has not explicitly selected /effort.
 		Extra: map[string]any{
-			"api_key_env": e.APIKeyEnv,
-			"thinking":    e.Thinking,
-			"effort":      e.Effort,
-			"proxy_spec":  proxy,
+			"api_key_env":        e.APIKeyEnv,
+			"thinking":           e.Thinking,
+			"effort":             config.EffectiveEffort(e),
+			"reasoning_protocol": config.ReasoningProtocolForEntry(e),
+			"proxy_spec":         proxy,
 		},
 	})
 }
@@ -664,12 +860,12 @@ func NewProviderWithProxy(e *config.ProviderEntry, proxy netclient.ProxySpec) (p
 // instance bound to writeRoots (preserving registry order).
 // When workDir is non-empty, tools resolve relative paths against it instead of
 // the process cwd, enabling concurrent multi-project sessions.
-func addBuiltins(reg *tool.Registry, enabled, writeRoots []string, bashSpec sandbox.Spec, searchSpec builtin.SearchSpec, stderr io.Writer, workDir string) {
+func addBuiltins(reg *tool.Registry, enabled, writeRoots []string, bashSpec sandbox.Spec, bashTimeout time.Duration, searchSpec builtin.SearchSpec, stderr io.Writer, workDir string) {
 	// If a workspace directory is set, use workspace-bound tools that resolve
 	// paths relative to that directory. Otherwise fall back to the process-cwd
 	// compile-time builtins.
 	if workDir != "" {
-		ws := builtin.Workspace{Dir: workDir, WriteRoots: writeRoots, Bash: bashSpec, Search: searchSpec}
+		ws := builtin.Workspace{Dir: workDir, WriteRoots: writeRoots, Bash: bashSpec, BashTimeout: bashTimeout, Search: searchSpec}
 		for _, t := range ws.Tools(enabled...) {
 			reg.Add(t)
 		}
@@ -692,7 +888,7 @@ func addBuiltins(reg *tool.Registry, enabled, writeRoots []string, bashSpec sand
 	// Replace the unconfined defaults with confined instances (registry order is
 	// preserved on replace): file-writers bound to the workspace, bash to the OS
 	// sandbox. Only replace tools actually enabled/present.
-	confined := append(builtin.ConfineWriters(writeRoots), builtin.ConfineBash(bashSpec), builtin.ConfineSearch(searchSpec))
+	confined := append(builtin.ConfineWriters(writeRoots), builtin.ConfineBash(bashSpec, bashTimeout), builtin.ConfineSearch(searchSpec))
 	for _, t := range confined {
 		if _, ok := reg.Get(t.Name()); ok {
 			reg.Add(t)
@@ -703,7 +899,8 @@ func addBuiltins(reg *tool.Registry, enabled, writeRoots []string, bashSpec sand
 // partitionByTier splits configured plugin entries into the three startup
 // buckets — eager (block boot until ready), lazy (placeholder until first
 // model use), background (placeholder + start spawn now). Entries with an
-// unrecognised or empty tier land in lazy (the default).
+// empty tier land in background; unrecognised non-empty tiers land in lazy so a
+// typo never triggers unexpected background work.
 func partitionByTier(entries []config.PluginEntry) (eager, lazy, bg []config.PluginEntry) {
 	for _, e := range entries {
 		switch e.ResolvedTier() {

@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Check, ChevronDown, ChevronRight, Circle, CircleDot, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Check, ChevronDown, ChevronRight, Circle, CircleDot, RefreshCw, X } from "lucide-react";
 import { useT } from "../lib/i18n";
 import type { Todo } from "../lib/tools";
 import { Tooltip } from "./Tooltip";
@@ -11,13 +11,20 @@ import { Tooltip } from "./Tooltip";
 // shows the current item so the footer stays compact during a long run. The ✕
 // dismisses it (onDismiss) when the user abandons the task; a fresh todo_write
 // brings it back.
-export function TodoPanel({ todos, onDismiss }: { todos: Todo[]; onDismiss: () => void }) {
+export function TodoPanel({ todos, stale, onDismiss }: { todos: Todo[]; stale?: boolean; onDismiss: () => void }) {
   const t = useT();
   const [open, setOpen] = useState(true);
-  if (todos.length === 0) return null;
+  const currentRef = useRef<HTMLLIElement | null>(null);
 
   const done = todos.filter((t) => t.status === "completed").length;
   const current = todos.find((t) => t.status === "in_progress");
+
+  useEffect(() => {
+    if (!open) return;
+    currentRef.current?.scrollIntoView({ block: "nearest" });
+  }, [open, current?.content, current?.activeForm]);
+
+  if (todos.length === 0) return null;
 
   return (
     <div className="todobar">
@@ -28,6 +35,12 @@ export function TodoPanel({ todos, onDismiss }: { todos: Todo[]; onDismiss: () =
           <span className="todobar__count">
             {done}/{todos.length}
           </span>
+          {stale && (
+            <span className="todobar__stale">
+              <RefreshCw size={11} />
+              {t("todo.stale")}
+            </span>
+          )}
           {!open && current && (
             <span className="todobar__current">{current.activeForm || current.content}</span>
           )}
@@ -44,6 +57,7 @@ export function TodoPanel({ todos, onDismiss }: { todos: Todo[]; onDismiss: () =
           {todos.map((t, i) => (
             <li
               key={i}
+              ref={t.status === "in_progress" ? currentRef : undefined}
               className={`todobar__item todobar__item--${t.status}${t.level ? " todobar__item--sub" : ""}`}
             >
               {t.status === "completed" ? (

@@ -3,6 +3,7 @@ package openai
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,6 +11,25 @@ import (
 	"strings"
 	"time"
 )
+
+type modelFetchStatusError struct {
+	status int
+	body   string
+}
+
+func (e modelFetchStatusError) Error() string {
+	return fmt.Sprintf("fetch models: status %d: %s", e.status, strings.TrimSpace(e.body))
+}
+
+// IsModelFetchEndpointMiss reports whether a model-list request reached a
+// plausible endpoint path that the provider does not implement.
+func IsModelFetchEndpointMiss(err error) bool {
+	var statusErr modelFetchStatusError
+	if !errors.As(err, &statusErr) {
+		return false
+	}
+	return statusErr.status == http.StatusNotFound || statusErr.status == http.StatusMethodNotAllowed
+}
 
 // FetchModels calls the OpenAI-compatible GET /models endpoint and returns the
 // available model IDs.
@@ -39,7 +59,7 @@ func FetchModels(ctx context.Context, baseURL, apiKey string) ([]string, error) 
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("fetch models: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return nil, modelFetchStatusError{status: resp.StatusCode, body: truncateFetchBody(string(body))}
 	}
 
 	var result struct {
@@ -59,4 +79,14 @@ func FetchModels(ctx context.Context, baseURL, apiKey string) ([]string, error) 
 	}
 	sort.Strings(ids)
 	return ids, nil
+}
+
+func truncateFetchBody(body string) string {
+	body = strings.TrimSpace(body)
+	const max = 512
+	if len([]rune(body)) <= max {
+		return body
+	}
+	r := []rune(body)
+	return string(r[:max]) + "..."
 }

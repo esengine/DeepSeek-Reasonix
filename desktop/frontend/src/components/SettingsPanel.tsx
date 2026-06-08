@@ -1,6 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Check, ChevronDown } from "lucide-react";
+import { asArray } from "../lib/array";
 import { app } from "../lib/bridge";
-import { useI18n, useT } from "../lib/i18n";
+import { normalizeLangPref, useI18n, useT, type DictKey, type LangPref } from "../lib/i18n";
 import { useUpdater } from "../lib/useUpdater";
 import {
   THEME_STYLES,
@@ -9,38 +11,51 @@ import {
   getResolvedTheme,
   getTheme,
   getThemeStyle,
+  normalizeThemePreference,
+  normalizeThemeStyleForTheme,
   themeForStyle,
   type Theme,
   type ThemeStyle,
 } from "../lib/theme";
-import type { NetworkView, ProviderView, SettingsView } from "../lib/types";
-import { ResizableDrawer } from "./ResizableDrawer";
+import { TEXT_SIZES, applyTextSize, getTextSize, type TextSize } from "../lib/textSize";
+import { FONT_FAMILIES, applyFontFamily, getFontFamily, type FontFamily } from "../lib/fontFamily";
+import type { NetworkView, ProviderView, SettingsTab, SettingsView } from "../lib/types";
+import { InlineConfirmButton } from "./InlineConfirmButton";
 import { Tooltip } from "./Tooltip";
+import { AnchoredPopover } from "./AnchoredPopover";
+import { MCPServersSettingsPage, SkillsSettingsPage } from "./CapabilitiesPanel";
+import { MemorySettingsPage } from "./MemoryPanel";
 
-type SettingsTab = "models" | "providers" | "network" | "permissions" | "sandbox" | "agent" | "appearance" | "updates";
+const SETTINGS_TABS: SettingsTab[] = ["general", "models", "mcp", "skills", "memory", "permissions", "sandbox", "network", "appearance", "updates"];
 
-const SETTINGS_TABS: SettingsTab[] = ["models", "providers", "network", "permissions", "sandbox", "agent", "appearance", "updates"];
-
-// SettingsPanel is the desktop settings surface, aligning with Claude Code's
-// settings: model & providers (incl. API keys), permissions, sandbox, agent
-// params, and appearance. Every change writes reasonix.toml (or .env for keys)
-// through the kernel's config edit API and rebuilds the controller live.
-export function SettingsPanel({ onClose, onChanged }: { onClose: () => void; onChanged: () => void }) {
+// SettingsPanel is the desktop settings centre — a centred modal with left
+// navigation and a right content area. It hosts all settings pages plus MCP,
+// Skills, and Memory management, replacing the old per-feature drawers.
+export function SettingsPanel({ onClose, onChanged, initialTab }: { onClose: () => void; onChanged: () => void; initialTab?: SettingsTab }) {
   const t = useT();
   const [s, setS] = useState<SettingsView | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [theme, setThemeState] = useState<Theme>(getTheme());
   const [themeStyle, setThemeStyleState] = useState<ThemeStyle>(() => getThemeStyle(getTheme()));
-  const [tab, setTab] = useState<SettingsTab>("models");
+  const [textSize, setTextSizeState] = useState<TextSize>(getTextSize());
+  const [fontFamily, setFontFamilyState] = useState<FontFamily>(getFontFamily());
+  const [tab, setTab] = useState<SettingsTab>(initialTab === "providers" ? "models" : initialTab ?? "general");
 
-  const reload = async () => setS(await app.Settings().catch(() => null));
+  const reload = async () => setS(normalizeSettingsView(await app.Settings().catch(() => null)));
   useEffect(() => {
     void reload();
-  }, []);
+    if (initialTab) setTab(initialTab === "providers" ? "models" : initialTab);
+  }, [initialTab]);
+  useEffect(() => {
+    if (!s) return;
+    const nextTheme = normalizeThemePreference(s.desktopTheme);
+    const nextStyle = normalizeThemeStyleForTheme(s.desktopThemeStyle, nextTheme);
+    setThemeState(nextTheme);
+    setThemeStyleState(nextStyle);
+  }, [s?.desktopTheme, s?.desktopThemeStyle]);
 
-  // apply runs a mutation, re-reads settings, and refreshes the topbar/model. A
-  // rejected binding (validation / rebuild failure) surfaces as an inline banner.
+  // apply runs a mutation, re-reads settings, and refreshes the topbar/model.
   const apply = async (fn: () => Promise<void>) => {
     setBusy(true);
     setErr(null);
@@ -54,68 +69,191 @@ export function SettingsPanel({ onClose, onChanged }: { onClose: () => void; onC
       setBusy(false);
     }
   };
+  const backgroundApply = async (fn: () => Promise<void>) => {
+    setErr(null);
+    try {
+      await fn();
+      await reload();
+      onChanged();
+    } catch (e) {
+      setErr(String((e as Error)?.message ?? e));
+    }
+  };
+
+  // Close on Esc
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !document.querySelector("[data-anchored-popover='active']")) onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  // The settings-reliant pages (general, models, network, permissions,
+  // sandbox, appearance, updates) need SettingsView loaded. MCP, Skills, and Memory
+  // load their own data and render regardless.
+  const needsSettings = tab === "general" || tab === "models" || tab === "network" || tab === "permissions" || tab === "sandbox" || tab === "appearance" || tab === "updates";
 
   return (
-    <ResizableDrawer onClose={onClose} wide>
-        <header className="drawer__head">
-          <div className="drawer__title">{t("settings.title")}</div>
+    <div className="settings-modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="settings-modal">
+        <header className="settings-modal__head">
+          <div className="settings-modal__title">{t("settings.title")}</div>
           <Tooltip label={t("common.close")}>
-            <button className="chip" onClick={onClose}>
-              ✕
-            </button>
+            <button className="chip" aria-label={t("common.close")} onClick={onClose}>✕</button>
           </Tooltip>
         </header>
 
-        {!s ? (
-          <div className="empty">{t("settings.loading")}</div>
-        ) : (
-          <div className="drawer__body drawer__body--settings">
-            <div className="settings-shell">
-              <nav className="settings-nav" aria-label={t("settings.title")}>
-                {SETTINGS_TABS.map((id) => (
-                  <button
-                    key={id}
-                    className={`settings-nav__item${tab === id ? " settings-nav__item--active" : ""}`}
-                    onClick={() => setTab(id)}
-                  >
-                    <span>{settingsTabLabel(id, t)}</span>
-                    <small>{settingsTabMeta(id, s, t)}</small>
-                  </button>
-                ))}
-              </nav>
-              <main className="settings-content">
-                {err && <div className="banner banner--error">{err}</div>}
-                {tab === "models" && <ModelsSection s={s} busy={busy} apply={apply} onManageProviders={() => setTab("providers")} />}
-                {tab === "providers" && <ProvidersSection s={s} busy={busy} apply={apply} />}
-                {tab === "network" && <NetworkSection s={s} busy={busy} apply={apply} />}
-                {tab === "permissions" && <PermissionsSection s={s} busy={busy} apply={apply} />}
-                {tab === "sandbox" && <SandboxSection s={s} busy={busy} apply={apply} />}
-                {tab === "agent" && <AgentSection s={s} busy={busy} apply={apply} />}
-                {tab === "appearance" && (
-                  <AppearanceSection
-                    theme={theme}
-                    themeStyle={themeStyle}
-                    onTheme={(t) => {
-                      const nextStyle = themeForStyle(themeStyle) === getResolvedTheme(t) ? themeStyle : defaultStyleForTheme(t);
-                      applyTheme(t, nextStyle);
-                      setThemeState(t);
-                      setThemeStyleState(nextStyle);
-                    }}
-                    onThemeStyle={(style) => {
-                      const nextTheme = themeForStyle(style);
-                      applyTheme(nextTheme, style);
-                      setThemeState(nextTheme);
-                      setThemeStyleState(style);
-                    }}
-                  />
+        <div className="settings-center">
+          <nav className="settings-center__nav" aria-label={t("settings.title")}>
+            {SETTINGS_TABS.map((id) => (
+              <button
+                key={id}
+                className={`settings-center__navitem${tab === id ? " settings-center__navitem--active" : ""}`}
+                onClick={() => setTab(id)}
+              >
+                <span>{settingsTabLabel(id, t)}</span>
+                {s && <small>{settingsTabMeta(id, s, t)}</small>}
+              </button>
+            ))}
+          </nav>
+          <main className="settings-center__content">
+            {needsSettings && err && <div className="banner banner--error">{err}</div>}
+            {needsSettings && !s ? (
+              <div className="empty">{t("settings.loading")}</div>
+            ) : (
+              <>
+                {tab === "general" && s && <SettingsPageShell s={s} tab={tab} busy={busy} apply={apply}><GeneralSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
+                {tab === "models" && s && <SettingsPageShell s={s} tab={tab} busy={busy} apply={apply}><ModelsSection s={s} busy={busy} apply={apply} backgroundApply={backgroundApply} /></SettingsPageShell>}
+                {tab === "mcp" && <SettingsPageShell s={s} tab={tab} busy={false} apply={apply}><MCPServersSettingsPage /></SettingsPageShell>}
+                {tab === "skills" && <SettingsPageShell s={s} tab={tab} busy={false} apply={apply}><SkillsSettingsPage /></SettingsPageShell>}
+                {tab === "memory" && <SettingsPageShell s={s} tab={tab} busy={false} apply={apply}><MemorySettingsPage /></SettingsPageShell>}
+                {tab === "permissions" && s && <SettingsPageShell s={s} tab={tab} busy={busy} apply={apply}><PermissionsSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
+                {tab === "sandbox" && s && <SettingsPageShell s={s} tab={tab} busy={busy} apply={apply}><SandboxSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
+                {tab === "network" && s && <SettingsPageShell s={s} tab={tab} busy={busy} apply={apply}><NetworkSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
+                {tab === "appearance" && s && (
+                  <SettingsPageShell s={s} tab={tab} busy={busy} apply={apply}>
+                    <AppearanceSection
+                      theme={theme}
+                      themeStyle={themeStyle}
+                      textSize={textSize}
+                      fontFamily={fontFamily}
+                      onTheme={(t) => {
+                        const nextStyle = themeForStyle(themeStyle) === getResolvedTheme(t) ? themeStyle : defaultStyleForTheme(t);
+                        applyTheme(t, nextStyle, { persist: false });
+                        setThemeState(t);
+                        setThemeStyleState(nextStyle);
+                        void apply(() => app.SetDesktopAppearance(t, nextStyle));
+                      }}
+                      onThemeStyle={(style) => {
+                        const nextTheme = themeForStyle(style);
+                        applyTheme(nextTheme, style, { persist: false });
+                        setThemeState(nextTheme);
+                        setThemeStyleState(style);
+                        void apply(() => app.SetDesktopAppearance(nextTheme, style));
+                      }}
+                      onTextSize={(size) => {
+                        applyTextSize(size);
+                        setTextSizeState(size);
+                      }}
+                      onFontFamily={(font) => {
+                        applyFontFamily(font);
+                        setFontFamilyState(font);
+                      }}
+                    />
+                  </SettingsPageShell>
                 )}
-                {tab === "updates" && <UpdatesSection configPath={s.configPath} />}
-              </main>
-            </div>
-          </div>
-        )}
-    </ResizableDrawer>
+                {tab === "updates" && s && <SettingsPageShell s={s} tab={tab} busy={busy} apply={apply}><UpdatesSection configPath={s.configPath} /></SettingsPageShell>}
+              </>
+            )}
+          </main>
+        </div>
+      </div>
+    </div>
   );
+}
+
+function SettingsPageShell({ s: _s, tab, children }: { s: SettingsView | null; tab: SettingsTab; busy: boolean; apply: (fn: () => Promise<void>) => Promise<void>; children: ReactNode }) {
+  const t = useT();
+  const descKey = `settings.pageDesc.${tab}` as keyof typeof import("../locales/en").en;
+  const desc = t(descKey as any);
+  return (
+    <div className={`settings-page settings-page--${settingsPageKind(tab)}`}>
+      <div className="settings-page__header">
+        <h2 className="settings-page__title">{settingsTabPageTitle(tab, t)}</h2>
+        {typeof desc === "string" && desc !== `settings.pageDesc.${tab}` && <p className="settings-page__desc">{desc}</p>}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function settingsPageKind(tab: SettingsTab): "form" | "manager" {
+  switch (tab) {
+    case "models":
+    case "mcp":
+    case "skills":
+    case "memory":
+      return "manager";
+    default:
+      return "form";
+  }
+}
+
+function SettingsSection({
+  title,
+  description,
+  actions,
+  children,
+}: {
+  title: ReactNode;
+  description?: ReactNode;
+  actions?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <section className="settings-section">
+      <div className="settings-section__head">
+        <div>
+          <div className="settings-section__title">{title}</div>
+          {description && <div className="settings-section__desc">{description}</div>}
+        </div>
+        {actions && <div className="settings-section__actions">{actions}</div>}
+      </div>
+      <div className="settings-section__body">{children}</div>
+    </section>
+  );
+}
+
+function SettingsField({
+  label,
+  hint,
+  children,
+  stacked = false,
+}: {
+  label: ReactNode;
+  hint?: ReactNode;
+  children: ReactNode;
+  stacked?: boolean;
+}) {
+  return (
+    <div className={`settings-field${stacked ? " settings-field--stacked" : ""}`}>
+      <div className="settings-field__copy">
+        <div className="settings-field__label">{label}</div>
+        {hint && <div className="settings-field__hint">{hint}</div>}
+      </div>
+      <div className="settings-field__control">{children}</div>
+    </div>
+  );
+}
+
+function settingsTabPageTitle(id: SettingsTab, t: ReturnType<typeof useT>): string {
+  switch (id) {
+    case "mcp": return t("settings.tab.mcp");
+    case "skills": return t("settings.tab.skills");
+    case "memory": return t("settings.tab.memory");
+    default: return settingsTabLabel(id, t);
+  }
 }
 
 type SectionProps = {
@@ -124,20 +262,30 @@ type SectionProps = {
   apply: (fn: () => Promise<void>) => Promise<void>;
 };
 
+type ModelsSectionProps = SectionProps & {
+  backgroundApply: (fn: () => Promise<void>) => Promise<void>;
+};
+
 function settingsTabLabel(id: SettingsTab, t: ReturnType<typeof useT>): string {
   switch (id) {
+    case "general":
+      return t("settings.tab.general");
     case "models":
       return t("settings.tab.models");
     case "providers":
       return t("settings.tab.providers");
+    case "mcp":
+      return t("settings.tab.mcp");
+    case "skills":
+      return t("settings.tab.skills");
+    case "memory":
+      return t("settings.tab.memory");
     case "network":
       return t("settings.tab.network");
     case "permissions":
       return t("settings.tab.permissions");
     case "sandbox":
       return t("settings.tab.sandbox");
-    case "agent":
-      return t("settings.tab.agent");
     case "appearance":
       return t("settings.tab.appearance");
     case "updates":
@@ -148,17 +296,23 @@ function settingsTabLabel(id: SettingsTab, t: ReturnType<typeof useT>): string {
 function settingsTabMeta(id: SettingsTab, s: SettingsView, t: ReturnType<typeof useT>): string {
   switch (id) {
     case "models":
-      return toRef(s.defaultModel, s) || t("common.none");
+      return settingsModelMeta(s, t);
+    case "general":
+      return `${closeBehaviorLabel(normalizeCloseBehavior(s.closeBehavior), t)} · ${t(`settings.autoPlan.${normalizeAutoPlan(s.autoPlan)}`)}`;
     case "providers":
       return t("settings.providerCount", { n: s.providers.length });
+    case "mcp":
+      return t("caps.connectorsTab");
+    case "skills":
+      return t("caps.skillsTab");
+    case "memory":
+      return t("settings.tabSub.memory");
     case "network":
       return proxyModeLabel(normalizeProxyMode(s.network.proxyMode), t);
     case "permissions":
-      return s.permissions.mode;
+      return permissionModeLabel(s.permissions.mode, t);
     case "sandbox":
-      return s.sandbox.bash;
-    case "agent":
-      return t("settings.agentMeta", { temp: s.agent.temperature, steps: s.agent.maxSteps || "∞" });
+      return sandboxModeLabel(s.sandbox.bash, t);
     case "appearance":
       return t("settings.appearanceMeta");
     case "updates":
@@ -166,10 +320,23 @@ function settingsTabMeta(id: SettingsTab, s: SettingsView, t: ReturnType<typeof 
   }
 }
 
+function settingsModelMeta(s: SettingsView, t: ReturnType<typeof useT>): string {
+  const ref = toRef(s.defaultModel, s);
+  if (!ref) return t("common.none");
+  if (!ref.includes("/")) return ref;
+  const [provider, ...modelParts] = ref.split("/");
+  const model = modelParts.join("/") || ref;
+  const providerView = s.providers.find((p) => p.name === provider);
+  return `${modelProviderLabel(provider, providerView, t)} · ${model}`;
+}
+
 // allRefs flattens providers into "provider/model" refs for the model selectors.
 function allRefs(s: SettingsView): string[] {
   const out: string[] = [];
-  for (const p of s.providers) for (const m of p.models) out.push(`${p.name}/${m}`);
+  for (const p of s.providers) {
+    if (!p.added || !p.keySet) continue;
+    for (const m of p.models) out.push(`${p.name}/${m}`);
+  }
   return out;
 }
 
@@ -186,9 +353,19 @@ function toRef(model: string, s: SettingsView): string {
 }
 
 const PROXY_MODES = ["auto", "custom", "off"] as const;
+
+// EFFORT_PRESETS is the canonical union of /effort levels the kernel
+// recognises. The settings UI exposes these as toggleable checkboxes; users
+// can additionally add arbitrary custom names via the "Add" input. The order
+// here is what the user sees in the dropdown.
+const EFFORT_PRESETS: readonly string[] = ["low", "medium", "high", "xhigh", "max"];
+const REASONING_PROTOCOLS: readonly string[] = ["", "deepseek", "openai", "none"];
 const PROXY_TYPES = ["http", "https", "socks5", "socks5h"] as const;
+const LANGUAGE_PREFS: LangPref[] = ["", "zh", "en"];
+const AUTO_PLAN_MODES = ["off", "on"] as const;
 
 type ProxyMode = (typeof PROXY_MODES)[number];
+type AutoPlanMode = (typeof AUTO_PLAN_MODES)[number];
 
 function normalizeProxyMode(mode: string): ProxyMode {
   switch (mode) {
@@ -205,6 +382,155 @@ function normalizeNetworkView(network: NetworkView): NetworkView {
   return { ...network, proxyMode: normalizeProxyMode(network.proxyMode) };
 }
 
+function normalizeAutoPlan(mode: string | undefined): AutoPlanMode {
+  return mode === "ask" || mode === "on" ? "on" : "off";
+}
+
+function normalizeReasoningProtocol(protocol: string | undefined): string {
+  return REASONING_PROTOCOLS.includes(protocol ?? "") ? protocol ?? "" : "";
+}
+
+function normalizeSettingsView(view: SettingsView | null | undefined): SettingsView | null {
+  if (!view) return null;
+  const permissions = view.permissions ?? { mode: "ask", allow: [], ask: [], deny: [] };
+  const sandbox = view.sandbox ?? { bash: "enforce", network: false, workspaceRoot: "", allowWrite: [] };
+  const network = view.network ?? {
+    proxyMode: "auto",
+    proxyUrl: "",
+    noProxy: "",
+    proxy: { type: "socks5", server: "", port: 0, username: "", password: "" },
+  };
+  const agent = view.agent ?? { temperature: 0, maxSteps: 0, systemPrompt: "" };
+  return {
+    ...view,
+    providers: asArray(view.providers).map((p) => ({
+      ...p,
+      builtIn: Boolean(p.builtIn),
+      added: Boolean(p.added),
+      models: asArray(p.models),
+      modelsUrl: p.modelsUrl ?? "",
+      reasoningProtocol: normalizeReasoningProtocol(p.reasoningProtocol),
+      supportedEfforts: asArray(p.supportedEfforts),
+    })),
+    providerKinds: asArray(view.providerKinds),
+    permissions: {
+      ...permissions,
+      allow: asArray(permissions.allow),
+      ask: asArray(permissions.ask),
+      deny: asArray(permissions.deny),
+    },
+    sandbox: {
+      ...sandbox,
+      allowWrite: asArray(sandbox.allowWrite),
+    },
+    network: {
+      ...network,
+      proxy: network.proxy ?? { type: "socks5", server: "", port: 0, username: "", password: "" },
+    },
+    agent,
+    autoPlan: normalizeAutoPlan(view.autoPlan),
+    desktopLanguage: normalizeLangPref(view.desktopLanguage),
+    desktopTheme: normalizeThemePreference(view.desktopTheme),
+    desktopThemeStyle: normalizeThemeStyleForTheme(view.desktopThemeStyle, normalizeThemePreference(view.desktopTheme)),
+    closeBehavior: normalizeCloseBehavior(view.closeBehavior),
+  };
+}
+
+type CloseBehavior = "background" | "quit";
+
+function normalizeCloseBehavior(mode: string | undefined): CloseBehavior {
+  return mode === "quit" ? "quit" : "background";
+}
+
+function closeBehaviorLabel(mode: CloseBehavior, t: ReturnType<typeof useT>): string {
+  return mode === "quit" ? t("settings.closeBehavior.quit") : t("settings.closeBehavior.background");
+}
+
+function permissionModeLabel(mode: string, t: ReturnType<typeof useT>): string {
+  switch (mode) {
+    case "allow":
+      return t("settings.modeAllowShort");
+    case "deny":
+      return t("settings.modeDenyShort");
+    default:
+      return t("settings.modeAskShort");
+  }
+}
+
+function sandboxModeLabel(mode: string, t: ReturnType<typeof useT>): string {
+  return mode === "off" ? t("settings.bashOffShort") : t("settings.bashEnforceShort");
+}
+
+function reasoningProtocolLabel(protocol: string, t: ReturnType<typeof useT>): string {
+  switch (protocol) {
+    case "deepseek":
+      return t("settings.reasoningProtocol.deepseek");
+    case "openai":
+      return t("settings.reasoningProtocol.openai");
+    case "none":
+      return t("settings.reasoningProtocol.none");
+    default:
+      return t("settings.reasoningProtocol.auto");
+  }
+}
+
+function GeneralSection({ s, busy, apply }: SectionProps) {
+  const { t, setPref } = useI18n();
+  const closeBehavior = normalizeCloseBehavior(s.closeBehavior);
+  const autoPlan = normalizeAutoPlan(s.autoPlan);
+  const languagePref = normalizeLangPref(s.desktopLanguage);
+  const setLanguage = (next: LangPref) => {
+    setPref(next);
+    void apply(() => app.SetDesktopLanguage(next));
+  };
+  return (
+    <SettingsSection title={t("settings.tab.general")}>
+      <SettingsField label={t("settings.language")}>
+        <div className="set-seg">
+          {LANGUAGE_PREFS.map((pref) => (
+            <button
+              key={pref || "auto"}
+              className={`set-seg__btn${languagePref === pref ? " set-seg__btn--on" : ""}`}
+              disabled={busy}
+              onClick={() => setLanguage(pref)}
+            >
+              {pref === "" ? t("settings.langAuto") : pref === "zh" ? "中文" : "English"}
+            </button>
+          ))}
+        </div>
+      </SettingsField>
+      <SettingsField label={t("settings.closeBehavior")}>
+        <div className="set-seg">
+          {(["background", "quit"] as const).map((mode) => (
+            <button
+              key={mode}
+              className={`set-seg__btn${closeBehavior === mode ? " set-seg__btn--on" : ""}`}
+              disabled={busy}
+              onClick={() => void apply(() => app.SetCloseBehavior(mode))}
+            >
+              {closeBehaviorLabel(mode, t)}
+            </button>
+          ))}
+        </div>
+      </SettingsField>
+      <SettingsField label={t("settings.autoPlan")}>
+        <div className="set-seg">
+          {AUTO_PLAN_MODES.map((mode) => (
+            <button
+              key={mode}
+              className={`set-seg__btn${autoPlan === mode ? " set-seg__btn--on" : ""}`}
+              disabled={busy}
+              onClick={() => void apply(() => app.SetAutoPlan(mode))}
+            >
+              {t(`settings.autoPlan.${mode}`)}
+            </button>
+          ))}
+        </div>
+      </SettingsField>
+    </SettingsSection>
+  );
+}
+
 function NetworkSection({ s, busy, apply }: SectionProps) {
   const t = useT();
   const savedNetwork = normalizeNetworkView(s.network);
@@ -216,10 +542,19 @@ function NetworkSection({ s, busy, apply }: SectionProps) {
   };
 
   return (
-    <section className="mem-section">
-      <div className="mem-section__title">{t("settings.tab.network")}</div>
-      <div className="set-row">
-        <label className="set-label">{t("settings.proxyMode")}</label>
+    <SettingsSection
+      title={t("settings.tab.network")}
+      actions={
+        <button
+          className="btn btn--primary btn--small"
+          disabled={busy || !dirty}
+          onClick={() => void apply(() => app.SetNetwork(draft))}
+        >
+          {t("settings.saveNetwork")}
+        </button>
+      }
+    >
+      <SettingsField label={t("settings.proxyMode")}>
         <div className="set-seg">
           {PROXY_MODES.map((mode) => (
             <button
@@ -232,12 +567,11 @@ function NetworkSection({ s, busy, apply }: SectionProps) {
             </button>
           ))}
         </div>
-      </div>
+      </SettingsField>
 
       {draft.proxyMode === "custom" && (
         <>
-          <div className="set-row">
-            <label className="set-label">{t("settings.proxyType")}</label>
+          <SettingsField label={t("settings.proxyType")}>
             <div className="set-seg">
               {PROXY_TYPES.map((typ) => (
                 <button
@@ -250,9 +584,9 @@ function NetworkSection({ s, busy, apply }: SectionProps) {
                 </button>
               ))}
             </div>
-          </div>
-          <div className="set-row">
-            <label className="set-label">{t("settings.proxyServer")}</label>
+          </SettingsField>
+          <SettingsField label={t("settings.proxyServer")}>
+            <div className="settings-inline-controls">
             <input
               className="mem-input set-grow"
               placeholder="127.0.0.1"
@@ -269,9 +603,10 @@ function NetworkSection({ s, busy, apply }: SectionProps) {
               inputMode="numeric"
               onChange={(e) => setProxy({ port: Number(e.target.value) || 0 })}
             />
-          </div>
-          <div className="set-row">
-            <label className="set-label">{t("settings.proxyUsername")}</label>
+            </div>
+          </SettingsField>
+          <SettingsField label={t("settings.proxyUsername")}>
+            <div className="settings-inline-controls">
             <input
               className="mem-input set-grow"
               value={draft.proxy.username}
@@ -286,10 +621,9 @@ function NetworkSection({ s, busy, apply }: SectionProps) {
               disabled={busy || !!draft.proxyUrl.trim()}
               onChange={(e) => setProxy({ password: e.target.value })}
             />
-          </div>
-          <div className="set-field">
-            <div className="set-row">
-              <label className="set-label">{t("settings.proxyUrl")}</label>
+            </div>
+          </SettingsField>
+          <SettingsField label={t("settings.proxyUrl")} hint={t("settings.proxyUrlHint")}>
               <input
                 className="mem-input set-grow"
                 placeholder="socks5://127.0.0.1:7890"
@@ -297,11 +631,8 @@ function NetworkSection({ s, busy, apply }: SectionProps) {
                 disabled={busy}
                 onChange={(e) => setDraft({ ...draft, proxyUrl: e.target.value })}
               />
-            </div>
-            <div className="mem-hint set-hint">{t("settings.proxyUrlHint")}</div>
-          </div>
-          <div className="set-row">
-            <label className="set-label">{t("settings.noProxy")}</label>
+          </SettingsField>
+          <SettingsField label={t("settings.noProxy")}>
             <input
               className="mem-input set-grow"
               placeholder="localhost,127.0.0.1,.local"
@@ -309,97 +640,356 @@ function NetworkSection({ s, busy, apply }: SectionProps) {
               disabled={busy}
               onChange={(e) => setDraft({ ...draft, noProxy: e.target.value })}
             />
-          </div>
+          </SettingsField>
         </>
       )}
-
-      <div className="prov-card__actions">
-        <button
-          className="btn btn--primary btn--small"
-          disabled={busy || !dirty}
-          onClick={() => void apply(() => app.SetNetwork(draft))}
-        >
-          {t("settings.saveNetwork")}
-        </button>
-      </div>
-    </section>
+    </SettingsSection>
   );
 }
 
-function ModelsSection({ s, busy, apply, onManageProviders }: SectionProps & { onManageProviders: () => void }) {
+function ModelsSection({ s, busy, apply, backgroundApply }: ModelsSectionProps) {
   const t = useT();
+  const [subtab, setSubtab] = useState<"usage" | "access">("usage");
+  const autoRefreshKeyRef = useRef("");
   const refs = allRefs(s);
   const defaultRef = toRef(s.defaultModel, s);
   const plannerRef = toRef(s.plannerModel, s);
+  const subagentRef = toRef(s.subagentModel, s);
+  const plannerSelectRef = plannerRef === defaultRef ? "" : plannerRef;
   const [defaultProvider, defaultModel] = defaultRef.split("/");
+  const defaultProviderView = s.providers.find((p) => p.name === defaultProvider);
+  const currentModelLabel = defaultModel || defaultRef || t("common.none");
+  const providerLabel = defaultProvider ? modelProviderLabel(defaultProvider, defaultProviderView, t) : t("common.none");
+  const plannerLabel = plannerSelectRef || t("settings.plannerNone");
+  const keyStatusLabel = defaultProviderView?.keySet ? t("settings.keySet") : t("settings.noKey");
+
+  useEffect(() => {
+    if (subtab !== "usage") return;
+    const groups = providerAccessGroups(s.providers.filter((p) => p.added), t);
+    const candidates = groups
+      .map((group) => {
+        const provider = group.providers.find((p) => p.keySet && p.apiKeyEnv && p.baseUrl);
+        return provider ? { group, provider } : null;
+      })
+      .filter((item): item is { group: ProviderAccessGroup; provider: ProviderView } => Boolean(item));
+    const refreshKey = candidates.map(({ group, provider }) => `${group.id}:${provider.apiKeyEnv}`).join("|");
+    if (!refreshKey || autoRefreshKeyRef.current === refreshKey) return;
+    autoRefreshKeyRef.current = refreshKey;
+
+    void backgroundApply(async () => {
+      for (const { provider } of candidates) {
+        try {
+          const fetched = await app.FetchProviderModels(provider);
+          if (fetched.length === 0) continue;
+          const currentDefault = provider.default && fetched.includes(provider.default) ? provider.default : fetched[0];
+          if (sameStringList(provider.models, fetched) && provider.default === currentDefault) continue;
+          await app.SaveProvider({ ...provider, models: fetched, default: currentDefault });
+        } catch {
+          // Background discovery is opportunistic; manual refresh shows errors.
+        }
+      }
+    });
+  }, [backgroundApply, s.providers, subtab, t]);
 
   return (
-    <section className="mem-section">
-      <div className="mem-section__head">
-        <div className="mem-section__title">{t("settings.tab.models")}</div>
-        <button className="btn btn--small" onClick={onManageProviders}>
-          {t("settings.manageProviders")}
+    <>
+      <div className="settings-subtabs">
+        <button
+          type="button"
+          className={`settings-subtab${subtab === "usage" ? " settings-subtab--active" : ""}`}
+          aria-selected={subtab === "usage"}
+          onClick={() => setSubtab("usage")}
+        >
+          {t("settings.modelTab.usage")}
+        </button>
+        <button
+          type="button"
+          className={`settings-subtab${subtab === "access" ? " settings-subtab--active" : ""}`}
+          aria-selected={subtab === "access"}
+          onClick={() => setSubtab("access")}
+        >
+          {t("settings.modelTab.access")}
         </button>
       </div>
 
-      <div className="set-row">
-        <label className="set-label">{t("settings.defaultModel")}</label>
-        <select
-          className="mem-select set-grow"
-          value={toRef(s.defaultModel, s)}
-          disabled={busy}
-          onChange={(e) => void apply(() => app.SetDefaultModel(e.target.value))}
-        >
-          {refs.map((r) => (
-            <option key={r} value={r}>
-              {r}
-            </option>
-          ))}
-        </select>
-      </div>
+      {subtab === "usage" ? (
+        <SettingsSection title={t("settings.modelUsage")}>
+          <SettingsField label={t("settings.defaultModel")}>
+            <ModelPicker
+              s={s}
+              refs={refs}
+              value={toRef(s.defaultModel, s)}
+              disabled={busy}
+              onPick={(ref) => void apply(() => app.SetDefaultModel(ref))}
+            />
+          </SettingsField>
 
-      <div className="set-row">
-        <label className="set-label">{t("settings.plannerModel")}</label>
-        <select
-          className="mem-select set-grow"
-          value={toRef(s.plannerModel, s)}
-          disabled={busy}
-          onChange={(e) => void apply(() => app.SetPlannerModel(e.target.value))}
-        >
-          <option value="">{t("settings.plannerNone")}</option>
-          {refs.map((r) => (
-            <option key={r} value={r}>
-              {r}
-            </option>
-          ))}
-        </select>
-      </div>
+          <SettingsField label={t("settings.plannerModel")}>
+            <ModelPicker
+              s={s}
+              refs={refs}
+              value={plannerSelectRef}
+              disabled={busy}
+              includeSameDefault
+              onPick={(ref) => void apply(() => app.SetPlannerModel(ref))}
+            />
+          </SettingsField>
 
-      <div className="settings-model-card">
-        <div>
-          <span>{t("settings.activeProvider")}</span>
-          <strong>{defaultProvider || t("common.none")}</strong>
-          <small>{defaultModel || defaultRef || t("common.none")}</small>
-        </div>
-        <div>
-          <span>{t("settings.plannerStatus")}</span>
-          <strong>{plannerRef ? t("settings.plannerEnabled") : t("settings.plannerDisabled")}</strong>
-          <small>{plannerRef || t("settings.plannerNone")}</small>
-        </div>
-      </div>
+          <SettingsField label={t("settings.subagentModel")}>
+            <ModelPicker
+              s={s}
+              refs={refs}
+              value={subagentRef}
+              disabled={busy}
+              emptyOptionLabel={t("settings.subagentModelDefault")}
+              emptyOptionHint={t("common.auto")}
+              onPick={(ref) => void apply(() => app.SetSubagentModel(ref))}
+            />
+          </SettingsField>
 
-      <div className="settings-summary-grid">
-        <div className="settings-summary">
-          <span>{t("settings.providers")}</span>
-          <strong>{s.providers.length}</strong>
-        </div>
-        <div className="settings-summary">
-          <span>{t("settings.availableModels")}</span>
-          <strong>{refs.length}</strong>
-        </div>
-      </div>
-    </section>
+          <SettingsField label={t("settings.subagentEffort")} hint={t("settings.subagentHint")}>
+            <select
+              className="mem-select set-grow"
+              value={s.subagentEffort || ""}
+              disabled={busy}
+              onChange={(e) => void apply(() => app.SetSubagentEffort(e.target.value))}
+            >
+              <option value="">{t("settings.subagentEffortDefault")}</option>
+              {EFFORT_PRESETS.map((level) => (
+                <option key={level} value={level}>
+                  {level}
+                </option>
+              ))}
+            </select>
+          </SettingsField>
+
+          <div className="settings-model-current" aria-label={t("settings.modelCurrentStatus")}>
+            <div>
+              <span>{t("settings.modelCurrentStatus")}</span>
+              <strong>{currentModelLabel}</strong>
+            </div>
+            <div className="settings-model-current__meta">
+              <span>{providerLabel}</span>
+              <span>{plannerLabel}</span>
+              <span>{keyStatusLabel}</span>
+            </div>
+          </div>
+        </SettingsSection>
+      ) : (
+        <ProvidersSection s={s} busy={busy} apply={apply} />
+      )}
+    </>
   );
+}
+
+type ModelPickerOption = {
+  ref: string;
+  provider: string;
+  model: string;
+  providerView?: ProviderView;
+};
+
+function ModelPicker({
+  s,
+  refs,
+  value,
+  disabled,
+  includeSameDefault = false,
+  emptyOptionLabel,
+  emptyOptionHint,
+  onPick,
+}: {
+  s: SettingsView;
+  refs: string[];
+  value: string;
+  disabled: boolean;
+  includeSameDefault?: boolean;
+  emptyOptionLabel?: string;
+  emptyOptionHint?: string;
+  onPick: (ref: string) => void;
+}) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const q = query.trim().toLowerCase();
+  const emptyLabel = includeSameDefault ? t("settings.plannerNone") : emptyOptionLabel;
+  const emptyHint = includeSameDefault ? t("settings.plannerNoneHint") : emptyOptionHint;
+  const emptyMeta = includeSameDefault ? t("settings.plannerNoneHintShort") : emptyOptionHint;
+  const selected = refs.includes(value) ? modelOptionFromRef(value, s) : null;
+  const selectedLabel = value === "" && emptyLabel
+    ? emptyLabel
+    : selected?.model || value || t("common.none");
+  const selectedMeta = value === "" && emptyLabel
+    ? emptyMeta || ""
+    : selected
+    ? modelOptionMeta(selected, t)
+    : t("settings.noModelsConfigured");
+  const emptyOptionVisible = Boolean(emptyLabel) && (!q || `${emptyLabel} ${emptyHint || ""}`.toLowerCase().includes(q));
+
+  const groups = useMemo(() => {
+    const providerOrder: string[] = [];
+    const providerSeen = new Set<string>();
+    for (const p of s.providers) {
+      const id = providerGroupID(p);
+      if (!providerSeen.has(id)) {
+        providerOrder.push(id);
+        providerSeen.add(id);
+      }
+    }
+    const options = refs
+      .map((ref) => modelOptionFromRef(ref, s))
+      .filter((opt): opt is ModelPickerOption => Boolean(opt))
+      .filter((opt) => !q || `${opt.ref} ${opt.provider} ${modelProviderLabel(opt.provider, opt.providerView, t)} ${opt.model}`.toLowerCase().includes(q));
+    for (const opt of options) {
+      const groupID = modelOptionGroupID(opt);
+      if (!providerSeen.has(groupID)) {
+        providerOrder.push(groupID);
+        providerSeen.add(groupID);
+      }
+    }
+    return providerOrder
+      .map((groupID) => {
+        const providerViews = s.providers.filter((p) => providerGroupID(p) === groupID);
+        const firstProvider = providerViews[0];
+        return {
+          groupID,
+          label: firstProvider ? providerGroupLabel(firstProvider, t) : groupID,
+          keySet: providerViews.some((p) => p.keySet),
+          options: uniqueModelOptions(options.filter((opt) => modelOptionGroupID(opt) === groupID)),
+        };
+      })
+      .filter((group) => group.options.length > 0);
+  }, [q, refs, s, t]);
+
+  useEffect(() => {
+    if (!open) setQuery("");
+  }, [open]);
+
+  const pick = (ref: string) => {
+    setOpen(false);
+    if (ref !== value) onPick(ref);
+  };
+
+  return (
+    <div className="settings-model-picker">
+      <button
+        ref={triggerRef}
+        type="button"
+        className="settings-model-picker__trigger"
+        disabled={disabled || (!includeSameDefault && refs.length === 0)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen((next) => !next)}
+      >
+        <span className="settings-model-picker__selected">
+          <span>{selectedLabel}</span>
+          <small>{selectedMeta}</small>
+        </span>
+        <ChevronDown size={16} className={`settings-model-picker__chev${open ? " settings-model-picker__chev--open" : ""}`} />
+      </button>
+      <AnchoredPopover
+        open={open && !disabled}
+        anchorRef={triggerRef}
+        onClose={() => setOpen(false)}
+        className="settings-model-picker__menu"
+        placement="bottom"
+        style={{ width: triggerRef.current?.getBoundingClientRect().width }}
+      >
+        <div className="settings-model-picker__search">
+          <input
+            value={query}
+            placeholder={t("settings.searchModels")}
+            onChange={(e) => setQuery(e.target.value)}
+            autoFocus
+          />
+        </div>
+        <div className="settings-model-picker__list" role="listbox">
+          {emptyOptionVisible && (
+            <button
+              type="button"
+              role="option"
+              aria-selected={value === ""}
+              className={`settings-model-picker__option settings-model-picker__option--pinned${value === "" ? " settings-model-picker__option--selected" : ""}`}
+              onClick={() => pick("")}
+            >
+              <span>
+                <strong>{emptyLabel}</strong>
+                {emptyHint && <small>{emptyHint}</small>}
+              </span>
+              {value === "" && <Check size={14} />}
+            </button>
+          )}
+          {groups.map((group) => (
+            <div className="settings-model-picker__group" key={group.groupID}>
+              <div className="settings-model-picker__group-title">
+                <span>{group.label}</span>
+                <small>{group.keySet ? t("settings.keySet") : t("settings.noKey")}</small>
+              </div>
+              {group.options.map((opt) => (
+                <button
+                  key={opt.ref}
+                  type="button"
+                  role="option"
+                  aria-selected={opt.ref === value}
+                  className={`settings-model-picker__option${opt.ref === value ? " settings-model-picker__option--selected" : ""}`}
+                  onClick={() => pick(opt.ref)}
+                >
+                  <span>
+                    <strong>{opt.model}</strong>
+                    <small>{modelOptionMeta(opt, t)}</small>
+                  </span>
+                  {opt.ref === value && <Check size={14} />}
+                </button>
+              ))}
+            </div>
+          ))}
+          {!emptyOptionVisible && groups.length === 0 && <div className="settings-model-picker__empty">{t("settings.noMatchingModels")}</div>}
+        </div>
+      </AnchoredPopover>
+    </div>
+  );
+}
+
+function modelOptionFromRef(ref: string, s: SettingsView): ModelPickerOption | null {
+  if (!ref) return null;
+  const [provider, ...modelParts] = ref.split("/");
+  const model = modelParts.join("/") || ref;
+  return {
+    ref,
+    provider,
+    model,
+    providerView: s.providers.find((p) => p.name === provider),
+  };
+}
+
+function modelOptionMeta(option: ModelPickerOption, t: ReturnType<typeof useT>): string {
+  const key = option.providerView?.keySet ? t("settings.keySet") : t("settings.noKey");
+  return `${modelProviderLabel(option.provider, option.providerView, t)} · ${key}`;
+}
+
+function modelProviderLabel(provider: string, providerView: ProviderView | undefined, t: ReturnType<typeof useT>): string {
+  return providerView ? providerGroupLabel(providerView, t) : provider;
+}
+
+function modelOptionGroupID(option: ModelPickerOption): string {
+  return option.providerView ? providerGroupID(option.providerView) : `custom:${option.provider}`;
+}
+
+function uniqueModelOptions(options: ModelPickerOption[]): ModelPickerOption[] {
+  const seen = new Set<string>();
+  const out: ModelPickerOption[] = [];
+  for (const option of options) {
+    if (seen.has(option.model)) continue;
+    seen.add(option.model);
+    out.push(option);
+  }
+  return out;
+}
+
+function sameStringList(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((value, i) => value === b[i]);
 }
 
 function proxyModeLabel(mode: ProxyMode, t: ReturnType<typeof useT>): string {
@@ -415,75 +1005,543 @@ function proxyModeLabel(mode: ProxyMode, t: ReturnType<typeof useT>): string {
 
 function ProvidersSection({ s, busy, apply }: SectionProps) {
   const t = useT();
-  // The provider backing the default model — can't be deleted (would dangle the
-  // default). default_model may be a provider name or a "provider/model" ref.
   const defaultProvider = toRef(s.defaultModel, s).split("/")[0];
-  const [editing, setEditing] = useState<string | null>(null); // provider name, or "__new__"
+  const [editing, setEditing] = useState<string | null>(null);
+  const [adding, setAdding] = useState<AddProviderMode>(null);
+  const [fetchingProvider, setFetchingProvider] = useState<string | null>(null);
+  const [fetchResults, setFetchResults] = useState<Record<string, ProviderFetchResult>>({});
+  const groups = providerAccessGroups(s.providers.filter((p) => p.added), t);
+
+  const setGroupFetchResult = (groupID: string, result: ProviderFetchResult | null) => {
+    setFetchResults((prev) => {
+      const next = { ...prev };
+      if (result) next[groupID] = result;
+      else delete next[groupID];
+      return next;
+    });
+  };
+
+  const refreshModels = async (group: ProviderAccessGroup, p: ProviderView) => {
+    setFetchingProvider(group.id);
+    setGroupFetchResult(group.id, null);
+    try {
+      await apply(async () => {
+        let fetched: string[];
+        try {
+          fetched = await app.FetchProviderModels(p);
+        } catch (e) {
+          setGroupFetchResult(group.id, {
+            kind: "warn",
+            text: t("settings.fetchModelsFailedForProvider", { provider: group.label, err: String((e as Error)?.message ?? e) }),
+          });
+          return;
+        }
+        if (fetched.length === 0) {
+          setGroupFetchResult(group.id, {
+            kind: "warn",
+            text: t("settings.fetchModelsEmptyForProvider", { provider: group.label }),
+          });
+          return;
+        }
+        const currentDefault = p.default && fetched.includes(p.default) ? p.default : fetched[0];
+        await app.SaveProvider({ ...p, models: fetched, default: currentDefault });
+        setGroupFetchResult(group.id, {
+          kind: "ok",
+          text: t("settings.fetchModelsUpdatedForProvider", { provider: group.label, n: fetched.length }),
+        });
+      });
+    } finally {
+      setFetchingProvider(null);
+    }
+  };
+
+  const refreshGroup = async (group: ProviderAccessGroup) => {
+    const probe = group.providers[0];
+    if (!probe) return;
+    await refreshModels(group, probe);
+  };
+
+  const saveKeyEnvAndAutoRefresh = async (group: ProviderAccessGroup, apiKeyEnv: string, value: string) => {
+    const probe = group.providers[0];
+    if (!probe || !apiKeyEnv) return;
+    setFetchingProvider(group.id);
+    setGroupFetchResult(group.id, null);
+    try {
+      await apply(async () => {
+        await app.SetProviderKey(apiKeyEnv, value);
+        try {
+          const fetched = await app.FetchProviderModels({ ...probe, apiKeyEnv });
+          if (fetched.length > 0) {
+            const currentDefault = probe.default && fetched.includes(probe.default) ? probe.default : fetched[0];
+            await app.SaveProvider({ ...probe, apiKeyEnv, models: fetched, default: currentDefault });
+            setGroupFetchResult(group.id, {
+              kind: "ok",
+              text: t("settings.fetchModelsUpdatedForProvider", { provider: group.label, n: fetched.length }),
+            });
+            return;
+          }
+          setGroupFetchResult(group.id, {
+            kind: "warn",
+            text: t("settings.fetchModelsEmptyForProvider", { provider: group.label }),
+          });
+        } catch (e) {
+          setGroupFetchResult(group.id, {
+            kind: "warn",
+            text: t("settings.fetchModelsAfterKeyFailedForProvider", { provider: group.label, err: String((e as Error)?.message ?? e) }),
+          });
+        }
+      });
+    } finally {
+      setFetchingProvider(null);
+    }
+  };
+
+  const saveProviderKey = async (group: ProviderAccessGroup, apiKeyEnv: string, value: string) => {
+    if (!apiKeyEnv) return;
+    setGroupFetchResult(group.id, null);
+    await apply(() => app.SetProviderKey(apiKeyEnv, value));
+  };
+
+  const clearProviderKey = async (apiKeyEnv: string) => {
+    if (!apiKeyEnv) return;
+    await apply(() => app.ClearProviderKey(apiKeyEnv));
+  };
 
   return (
-    <section className="mem-section">
-      <div className="mem-section__head">
-        <div className="mem-section__title">{t("settings.tab.providers")}</div>
-        {editing !== "__new__" && (
-          <button className="btn btn--small" disabled={busy} onClick={() => setEditing("__new__")}>
-            {t("settings.addProvider")}
-          </button>
-        )}
-      </div>
-
-      <div className="provider-list">
-        {s.providers.map((p) =>
-          editing === p.name ? (
-            <ProviderEditor
-              key={p.name}
-              initial={p}
-              kinds={s.providerKinds}
-              busy={busy}
-              onCancel={() => setEditing(null)}
-              onSave={(pv) => apply(() => app.SaveProvider(pv)).then(() => setEditing(null))}
-            />
-          ) : (
-            <div className="prov-card" key={p.name}>
-              <div className="prov-card__head">
-                <span className="prov-card__name">{p.name}</span>
-                <span className={`badge ${p.keySet ? "badge--project" : "badge--feedback"}`}>
-                  {p.keySet ? t("settings.keySet") : t("settings.noKey")}
-                </span>
-                <span className="prov-card__spacer" />
-                <button className="btn btn--small" disabled={busy} onClick={() => setEditing(p.name)}>
-                  {t("common.edit")}
-                </button>
-                <Tooltip label={defaultProvider === p.name ? t("settings.cantDeleteDefault") : t("settings.deleteProvider")}>
-                  <button
-                    className="btn btn--small"
-                    disabled={busy || defaultProvider === p.name}
-                    onClick={() => void apply(() => app.DeleteProvider(p.name))}
-                  >
-                    {t("common.delete")}
-                  </button>
-                </Tooltip>
-              </div>
-              <div className="prov-card__meta">
-                <span>{p.kind}</span>
-                <span>{p.baseUrl}</span>
-                <span>{p.models.join(", ")}</span>
-              </div>
-              <KeyField apiKeyEnv={p.apiKeyEnv} busy={busy} onSet={(v) => apply(() => app.SetProviderKey(p.apiKeyEnv, v))} />
+    <SettingsSection
+      title={t("settings.providerAccess")}
+      description={t("settings.providerAccessHint")}
+      actions={
+        <button className="btn btn--small" disabled={busy || adding !== null} onClick={() => setAdding("official")}>
+          {t("settings.addProvider")}
+        </button>
+      }
+    >
+      <div className="provider-access-grid">
+        {groups.length === 0 && adding === null && (
+          <div className="provider-empty">
+            <strong>{t("settings.providerAccessEmptyTitle")}</strong>
+            <span>{t("settings.providerAccessEmptyHint")}</span>
+            <div className="provider-empty__actions">
+              <button type="button" className="btn btn--small" disabled={busy} onClick={() => setAdding("official")}>
+                {t("settings.addProvider.officialChoice")}
+              </button>
+              <button type="button" className="btn btn--small" disabled={busy} onClick={() => setAdding("custom")}>
+                {t("settings.addProvider.customChoice")}
+              </button>
             </div>
-          ),
+          </div>
+        )}
+        {adding !== null && (
+          <AddProviderPanel
+            mode={adding}
+            kinds={s.providerKinds}
+            busy={busy}
+            onMode={setAdding}
+            onCancel={() => setAdding(null)}
+            onAddOfficial={(kind, key) => apply(() => app.AddOfficialProviderAccess(kind, key)).then(() => setAdding(null))}
+            onAddCustom={(pv) => apply(() => app.SaveProvider(pv)).then(() => setAdding(null))}
+          />
+        )}
+        {adding === null && groups.map((group) => (
+          <ProviderAccessCard
+            key={group.id}
+            group={group}
+            busy={busy}
+            fetching={fetchingProvider === group.id || group.providers.some((p) => fetchingProvider === p.name)}
+            fetchResult={fetchResults[group.id]}
+            defaultProvider={defaultProvider}
+            editing={editing}
+            kinds={s.providerKinds}
+            onEdit={setEditing}
+            onCancelEdit={() => setEditing(null)}
+            onSave={(pv) => apply(() => app.SaveProvider(pv)).then(() => setEditing(null))}
+            onRefresh={() => void refreshGroup(group)}
+            onSaveEditorKey={(env, value) => group.builtIn ? saveProviderKey(group, env, value) : saveKeyEnvAndAutoRefresh(group, env, value)}
+            onClearEditorKey={clearProviderKey}
+            onDelete={(p) => apply(() => app.RemoveProviderAccess(p.name))}
+          />
+        ))}
+      </div>
+    </SettingsSection>
+  );
+}
+
+type ProviderAccessGroup = {
+  id: string;
+  label: string;
+  description: string;
+  builtIn: boolean;
+  providers: ProviderView[];
+  apiKeyEnv: string;
+  keySet: boolean;
+  baseUrl: string;
+  kind: string;
+  models: string[];
+};
+
+type ProviderFetchResult = {
+  kind: "ok" | "warn";
+  text: string;
+};
+
+type AddProviderMode = null | "official" | "custom";
+type OfficialProviderKind = "deepseek" | "mimo-api" | "mimo-token-plan";
+
+const OFFICIAL_PROVIDER_CHOICES: Array<{ kind: OfficialProviderKind; labelKey: DictKey; descKey: DictKey; keyEnv: string }> = [
+  { kind: "deepseek", labelKey: "settings.addProvider.official.deepseek", descKey: "settings.addProvider.official.deepseekDesc", keyEnv: "DEEPSEEK_API_KEY" },
+  { kind: "mimo-api", labelKey: "settings.addProvider.official.mimoApi", descKey: "settings.addProvider.official.mimoApiDesc", keyEnv: "MIMO_API_KEY" },
+  { kind: "mimo-token-plan", labelKey: "settings.addProvider.official.mimoTokenPlan", descKey: "settings.addProvider.official.mimoTokenPlanDesc", keyEnv: "MIMO_API_KEY" },
+];
+
+function AddProviderPanel({
+  mode,
+  kinds,
+  busy,
+  onMode,
+  onCancel,
+  onAddOfficial,
+  onAddCustom,
+}: {
+  mode: AddProviderMode;
+  kinds: string[];
+  busy: boolean;
+  onMode: (mode: AddProviderMode) => void;
+  onCancel: () => void;
+  onAddOfficial: (kind: OfficialProviderKind, key: string) => Promise<void>;
+  onAddCustom: (p: ProviderView) => void | Promise<void>;
+}) {
+  const t = useT();
+  const [officialKind, setOfficialKind] = useState<OfficialProviderKind>("deepseek");
+  const [key, setKey] = useState("");
+  const selected = OFFICIAL_PROVIDER_CHOICES.find((choice) => choice.kind === officialKind) ?? OFFICIAL_PROVIDER_CHOICES[0];
+
+  const header = (
+    <div className="provider-add-panel__head">
+      <div>
+        <strong>{t("settings.addProvider.chooseTitle")}</strong>
+        <span>{t("settings.addProvider.chooseHint")}</span>
+      </div>
+      <button type="button" className="btn btn--small" disabled={busy} onClick={onCancel}>
+        {t("common.cancel")}
+      </button>
+    </div>
+  );
+  const modeSwitch = (
+    <div className="provider-add-segmented" role="tablist" aria-label={t("settings.addProvider.chooseTitle")}>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={mode === "official"}
+        className={mode === "official" ? "provider-add-segmented__item provider-add-segmented__item--active" : "provider-add-segmented__item"}
+        disabled={busy}
+        onClick={() => onMode("official")}
+      >
+        {t("settings.addProvider.officialChoice")}
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={mode === "custom"}
+        className={mode === "custom" ? "provider-add-segmented__item provider-add-segmented__item--active" : "provider-add-segmented__item"}
+        disabled={busy}
+        onClick={() => onMode("custom")}
+      >
+        {t("settings.addProvider.customChoice")}
+      </button>
+    </div>
+  );
+
+  if (mode === "official") {
+    return (
+      <div className="provider-add-panel">
+        {header}
+        {modeSwitch}
+        <div className="provider-add-panel__hint">{t("settings.addProvider.officialHint")}</div>
+        <div className="provider-template-grid">
+          {OFFICIAL_PROVIDER_CHOICES.map((choice) => (
+            <button
+              key={choice.kind}
+              type="button"
+              className={`provider-template-card${officialKind === choice.kind ? " provider-template-card--active" : ""}`}
+              disabled={busy}
+              onClick={() => setOfficialKind(choice.kind)}
+            >
+              <strong>{t(choice.labelKey)}</strong>
+              <span>{t(choice.descKey)}</span>
+            </button>
+          ))}
+        </div>
+        <label className="set-label">{t("settings.providerKeyOptional")}</label>
+        <input
+          className="mem-input"
+          type="password"
+          placeholder={t("settings.setKey", { env: selected.keyEnv })}
+          value={key}
+          disabled={busy}
+          onChange={(e) => setKey(e.target.value)}
+        />
+        <div className="prov-card__actions">
+          <button type="button" className="btn btn--small" disabled={busy} onClick={onCancel}>
+            {t("common.cancel")}
+          </button>
+          <button
+            type="button"
+            className="btn btn--primary btn--small"
+            disabled={busy}
+            onClick={() => void onAddOfficial(officialKind, key.trim())}
+          >
+            {t("settings.addProvider.confirm")}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (mode === "custom") {
+    return (
+      <div className="provider-add-panel">
+        {header}
+        {modeSwitch}
+        <div className="provider-add-panel__hint">{t("settings.addProvider.customHint")}</div>
+        <ProviderEditor
+          kinds={kinds}
+          busy={busy}
+          onCancel={onCancel}
+          onSave={onAddCustom}
+        />
+      </div>
+    );
+  }
+  return null;
+}
+
+function ProviderAccessCard({
+  group,
+  busy,
+  fetching,
+  fetchResult,
+  defaultProvider,
+  editing,
+  kinds,
+  onEdit,
+  onCancelEdit,
+  onSave,
+  onRefresh,
+  onSaveEditorKey,
+  onClearEditorKey,
+  onDelete,
+}: {
+  group: ProviderAccessGroup;
+  busy: boolean;
+  fetching: boolean;
+  fetchResult?: ProviderFetchResult;
+  defaultProvider: string;
+  editing: string | null;
+  kinds: string[];
+  onEdit: (name: string) => void;
+  onCancelEdit: () => void;
+  onSave: (p: ProviderView) => void | Promise<void>;
+  onRefresh: () => void;
+  onSaveEditorKey: (apiKeyEnv: string, value: string) => Promise<void>;
+  onClearEditorKey?: (apiKeyEnv: string) => Promise<void>;
+  onDelete?: (p: ProviderView) => Promise<void>;
+}) {
+  const t = useT();
+  const editableProvider = group.providers[0];
+  const isDefault = group.providers.some((p) => p.name === defaultProvider);
+  const editingProvider = group.providers.find((p) => editing === p.name);
+  const primaryProviderExpanded = Boolean(editableProvider && editing === editableProvider.name);
+  const visibleModels = group.models.slice(0, 6);
+  const hiddenModelCount = Math.max(0, group.models.length - visibleModels.length);
+  return (
+    <article className={`provider-access-card${group.builtIn ? " provider-access-card--builtin" : ""}`}>
+      <div className="provider-access-card__head">
+        <div className="provider-access-card__identity">
+          <div className="provider-access-card__title">
+            {group.label}
+            <span className={`badge ${group.builtIn ? "badge--project" : "badge--neutral"}`}>
+              {group.builtIn ? t("settings.builtinProviderBadge") : t("settings.customProviderBadge")}
+            </span>
+            <span className={`badge ${group.keySet ? "badge--project" : "badge--feedback"}`}>
+              {group.keySet ? t("settings.keySet") : t("settings.noKey")}
+            </span>
+          </div>
+          <div className="provider-access-card__desc">{group.description}</div>
+        </div>
+        <div className="provider-access-card__actions">
+          {editableProvider && (
+            <button
+              className="btn btn--small"
+              disabled={busy}
+              aria-expanded={primaryProviderExpanded}
+              onClick={() => primaryProviderExpanded ? onCancelEdit() : onEdit(editableProvider.name)}
+            >
+              {primaryProviderExpanded ? t("common.collapse") : t("settings.configureProvider")}
+            </button>
+          )}
+          <button
+            className="btn btn--small"
+            disabled={busy || fetching || !group.baseUrl || !group.apiKeyEnv || !group.keySet}
+            onClick={onRefresh}
+          >
+            {fetching ? t("settings.fetchingModels") : t("settings.fetchModels")}
+          </button>
+          {editableProvider && onDelete && (
+            isDefault && !group.builtIn ? (
+              <Tooltip label={t("settings.cantDeleteDefault")}>
+                <button className="btn btn--small" disabled>{t("settings.removeProviderAccess")}</button>
+              </Tooltip>
+            ) : (
+              <InlineConfirmButton
+                label={t("settings.removeProviderAccess")}
+                confirmLabel={group.builtIn ? t("settings.confirmRemoveProviderAccess") : t("settings.confirmDeleteProvider")}
+                cancelLabel={t("common.cancel")}
+                disabled={busy}
+                danger={!group.builtIn}
+                onConfirm={() => onDelete(editableProvider)}
+              />
+            )
+          )}
+        </div>
+      </div>
+
+      <div className="provider-access-meta">
+        <span>{group.kind}</span>
+        <span>{group.baseUrl}</span>
+        <span>{group.apiKeyEnv || t("common.none")}</span>
+      </div>
+
+      <div className="provider-card-block">
+        <div className="provider-card-block__label">{t(group.keySet ? "settings.availableModels" : "settings.modelList")}</div>
+        <div className="provider-model-chips" aria-label={t(group.keySet ? "settings.availableModels" : "settings.modelList")}>
+          {visibleModels.length > 0 ? visibleModels.map((model) => (
+            <span className="provider-model-chip" key={model}>
+              {model}
+            </span>
+          )) : <span className="provider-model-chip provider-model-chip--empty">{t("settings.noModelsConfigured")}</span>}
+          {hiddenModelCount > 0 && (
+            <span className="provider-model-chip provider-model-chip--more">
+              {t("settings.moreModels", { n: hiddenModelCount })}
+            </span>
+          )}
+        </div>
+        {!group.keySet && (
+          <div className="provider-card-status provider-card-status--warn">
+            {t("settings.modelsRequireKey")}
+          </div>
+        )}
+        {fetchResult && (
+          <div className={`provider-card-status provider-card-status--${fetchResult.kind}`}>
+            {fetchResult.text}
+          </div>
         )}
       </div>
 
-      {editing === "__new__" && (
+      {group.providers.length > 1 && (
+        <div className="provider-profiles">
+          {group.providers.map((p) => {
+            const profileExpanded = editing === p.name;
+            return (
+              <div className="provider-profile-row" key={p.name}>
+                <span>{p.name}</span>
+                <span>{p.models.join(", ") || t("common.none")}</span>
+                <button
+                  className="btn btn--small"
+                  disabled={busy}
+                  aria-expanded={profileExpanded}
+                  onClick={() => profileExpanded ? onCancelEdit() : onEdit(p.name)}
+                >
+                  {profileExpanded ? t("common.collapse") : t("settings.configureProfile")}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {editingProvider && (
         <ProviderEditor
-          kinds={s.providerKinds}
+          initial={editingProvider}
+          kinds={kinds}
           busy={busy}
-          onCancel={() => setEditing(null)}
-          onSave={(pv) => apply(() => app.SaveProvider(pv)).then(() => setEditing(null))}
+          onCancel={onCancelEdit}
+          onSave={onSave}
+          onSaveKey={onSaveEditorKey}
+          onClearKey={onClearEditorKey}
         />
       )}
-    </section>
+    </article>
   );
+}
+
+function providerAccessGroups(providers: ProviderView[], t: ReturnType<typeof useT>): ProviderAccessGroup[] {
+  const groups = new Map<string, ProviderAccessGroup>();
+  for (const p of providers) {
+    const id = providerGroupID(p);
+    const existing = groups.get(id);
+    if (existing) {
+      existing.providers.push(p);
+      existing.keySet = existing.keySet || p.keySet;
+      existing.models = uniqueStrings([...existing.models, ...p.models]);
+      continue;
+    }
+    groups.set(id, {
+      id,
+      label: providerGroupLabel(p, t),
+      description: providerGroupDescription(p, t),
+      builtIn: p.builtIn,
+      providers: [p],
+      apiKeyEnv: p.apiKeyEnv,
+      keySet: p.keySet,
+      baseUrl: p.baseUrl,
+      kind: p.kind,
+      models: uniqueStrings(p.models),
+    });
+  }
+  return Array.from(groups.values());
+}
+
+function providerGroupID(p: ProviderView): string {
+  if (!p.builtIn) return `custom:${p.name}`;
+  const base = p.baseUrl.toLowerCase();
+  if (p.apiKeyEnv === "DEEPSEEK_API_KEY" || base.includes("deepseek")) return "builtin:deepseek";
+  if (base.includes("token-plan-cn.xiaomimimo.com")) return "builtin:mimo-token-plan";
+  if (base.includes("api.xiaomimimo.com") || base.includes("mimo") || base.includes("xiaomimimo")) return "builtin:mimo-api";
+  return `builtin:${p.name}`;
+}
+
+function providerGroupLabel(p: ProviderView, t?: ReturnType<typeof useT>): string {
+  const id = providerGroupID(p);
+  if (id === "builtin:deepseek") return t ? t("settings.providerLabel.deepseek") : "DeepSeek";
+  if (id === "builtin:mimo-api") return t ? t("settings.providerLabel.mimoApi") : "Mimo API";
+  if (id === "builtin:mimo-token-plan") return t ? t("settings.providerLabel.mimoTokenPlan") : "Mimo Token Plan";
+  return p.name;
+}
+
+function providerGroupDescription(p: ProviderView, t: ReturnType<typeof useT>): string {
+  const id = providerGroupID(p);
+  if (id === "builtin:deepseek") return t("settings.providerDesc.deepseek");
+  if (id === "builtin:mimo-api") return t("settings.providerDesc.mimoApi");
+  if (id === "builtin:mimo-token-plan") return t("settings.providerDesc.mimoTokenPlan");
+  return p.baseUrl;
+}
+
+function uniqueStrings(values: string[]): string[] {
+  const out: string[] = [];
+  for (const value of values) {
+    if (value && !out.includes(value)) out.push(value);
+  }
+  return out;
+}
+
+function apiKeyEnvFromProviderName(name: string): string {
+  const stem = name
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return stem ? `${stem}_API_KEY` : "CUSTOM_API_KEY";
 }
 
 function ProviderEditor({
@@ -492,71 +1550,362 @@ function ProviderEditor({
   busy,
   onCancel,
   onSave,
+  onSaveKey,
+  onClearKey,
 }: {
   initial?: ProviderView;
   kinds: string[];
   busy: boolean;
   onCancel: () => void;
   onSave: (p: ProviderView) => void;
+  onSaveKey?: (apiKeyEnv: string, value: string) => Promise<void>;
+  onClearKey?: (apiKeyEnv: string) => Promise<void>;
 }) {
   const t = useT();
   const [name, setName] = useState(initial?.name ?? "");
   const [kind, setKind] = useState(initial?.kind ?? kinds[0] ?? "openai");
   const [baseUrl, setBaseUrl] = useState(initial?.baseUrl ?? "");
   const [models, setModels] = useState((initial?.models ?? []).join(", "));
+  const [modelsUrl] = useState(initial?.modelsUrl ?? "");
   const [apiKeyEnv, setApiKeyEnv] = useState(initial?.apiKeyEnv ?? "");
+  const [keyDraft, setKeyDraft] = useState("");
   const [balanceUrl, setBalanceUrl] = useState(initial?.balanceUrl ?? "");
   // Empty when unset so the placeholder (and its "0 = default" hint) reads instead
   // of a bare "0"; saved back as 0.
   const [ctx, setCtx] = useState(initial?.contextWindow ? String(initial.contextWindow) : "");
+  const [reasoningProtocol, setReasoningProtocol] = useState(normalizeReasoningProtocol(initial?.reasoningProtocol));
+  const [supportedEfforts, setSupportedEfforts] = useState<string[]>(initial?.supportedEfforts ?? []);
+  const [customEffortDraft, setCustomEffortDraft] = useState("");
+  const [defaultEffort, setDefaultEffort] = useState(initial?.defaultEffort ?? "");
+  const [fetchingModels, setFetchingModels] = useState(false);
+  const [fetchStatus, setFetchStatus] = useState<string | null>(null);
+  const [fetchErr, setFetchErr] = useState<string | null>(null);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const builtIn = initial?.builtIn ?? false;
+  const isNewCustomProvider = !initial;
 
   // Offer the kinds the kernel actually registered; if the stored kind is a
   // legacy/unknown one, keep it as an option so editing doesn't silently change it.
   const kindOptions = kind && !kinds.includes(kind) ? [kind, ...kinds] : kinds;
 
-  const save = () => {
+  // Split supportedEfforts into the 5 canonical presets (for checkbox UI) and
+  // any user-added custom names (rendered as removable chips). The preset order
+  // is fixed; custom names keep insertion order.
+  const presetEfforts = supportedEfforts.filter((e) => EFFORT_PRESETS.includes(e));
+  const customEfforts = supportedEfforts.filter((e) => !EFFORT_PRESETS.includes(e));
+
+  const togglePreset = (level: string) => {
+    const has = presetEfforts.includes(level);
+    const nextPresets = has ? presetEfforts.filter((e) => e !== level) : [...presetEfforts, level];
+    setSupportedEfforts([...nextPresets, ...customEfforts]);
+    // If the removed preset was the default, fall back to "auto" (empty string).
+    if (has && defaultEffort === level) setDefaultEffort("");
+  };
+
+  const addCustomEffort = () => {
+    const v = customEffortDraft.trim().toLowerCase();
+    if (!v || supportedEfforts.includes(v)) {
+      setCustomEffortDraft("");
+      return;
+    }
+    setSupportedEfforts([...presetEfforts, ...customEfforts, v]);
+    setCustomEffortDraft("");
+  };
+
+  const removeCustomEffort = (level: string) => {
+    setSupportedEfforts(supportedEfforts.filter((e) => e !== level));
+    if (defaultEffort === level) setDefaultEffort("");
+  };
+
+  const fetchModels = async () => {
+    setFetchingModels(true);
+    setFetchStatus(null);
+    setFetchErr(null);
+    try {
+      const effectiveApiKeyEnv = apiKeyEnv.trim() || apiKeyEnvFromProviderName(name);
+      if (!apiKeyEnv.trim()) setApiKeyEnv(effectiveApiKeyEnv);
+      if (keyDraft.trim()) await app.SetProviderKey(effectiveApiKeyEnv, keyDraft.trim());
+      const fetched = await app.FetchProviderModels({
+        name: name.trim() || t("settings.newProviderDraftName"),
+        builtIn: initial?.builtIn ?? false,
+        added: initial?.added ?? true,
+        kind: kind.trim() || kinds[0] || "openai",
+        baseUrl: baseUrl.trim(),
+        modelsUrl,
+        models: [],
+        default: "",
+        apiKeyEnv: effectiveApiKeyEnv,
+        keySet: Boolean(keyDraft.trim()) || (initial?.keySet ?? false),
+        balanceUrl: balanceUrl.trim(),
+        contextWindow: Number(ctx) || 0,
+        reasoningProtocol,
+        supportedEfforts,
+        defaultEffort,
+      });
+      if (fetched.length === 0) throw new Error(t("settings.fetchModelsEmpty"));
+      setModels(fetched.join(", "));
+      if (keyDraft.trim()) setKeyDraft("");
+      setDefaultEffort((v) => v);
+      setFetchStatus(t("settings.fetchModelsSuccess", { n: fetched.length }));
+    } catch (e) {
+      setFetchErr(String((e as Error)?.message ?? e));
+    } finally {
+      setFetchingModels(false);
+    }
+  };
+
+  const save = async () => {
     const ms = models
       .split(",")
       .map((m) => m.trim())
       .filter(Boolean);
+    const effectiveApiKeyEnv = apiKeyEnv.trim() || apiKeyEnvFromProviderName(name);
+    if (keyDraft.trim()) await app.SetProviderKey(effectiveApiKeyEnv, keyDraft.trim());
     onSave({
       name: name.trim(),
+      builtIn: initial?.builtIn ?? false,
+      added: initial?.added ?? true,
       kind: kind.trim() || kinds[0] || "openai",
       baseUrl: baseUrl.trim(),
       models: ms,
       default: ms[0] ?? "",
-      apiKeyEnv: apiKeyEnv.trim(),
-      keySet: initial?.keySet ?? false,
+      apiKeyEnv: effectiveApiKeyEnv,
+      modelsUrl,
+      keySet: Boolean(keyDraft.trim()) || (initial?.keySet ?? false),
       balanceUrl: balanceUrl.trim(),
       contextWindow: Number(ctx) || 0,
+      reasoningProtocol,
+      supportedEfforts,
+      // Clear the stored default if no levels are selected; the backend's
+      // NormalizeEffort would otherwise silently ignore an unsupported value.
+      defaultEffort: supportedEfforts.length > 0 ? defaultEffort : "",
     });
   };
 
-  return (
-    <div className="prov-card prov-card--edit">
-      <input className="mem-input" placeholder={t("settings.providerName")} value={name} onChange={(e) => setName(e.target.value)} disabled={!!initial} />
-      <label className="set-label">{t("settings.providerKind")}</label>
-      <select className="mem-select" value={kind} onChange={(e) => setKind(e.target.value)}>
-        {kindOptions.map((k) => (
-          <option key={k} value={k}>
-            {k}
-          </option>
+  if (builtIn) {
+    const keyEnv = initial?.apiKeyEnv.trim() ?? "";
+    return (
+      <div className="provider-editor provider-editor--builtin provider-editor--key-only">
+        {initial && onSaveKey && keyEnv && (
+          <>
+            <div className="provider-key-status provider-key-status--managed provider-key-status--compact">
+              <span>{initial.keySet ? t("settings.configuredKey", { env: keyEnv }) : t("settings.notConfiguredKey", { env: keyEnv })}</span>
+              {initial.keySet && onClearKey && (
+                <InlineConfirmButton
+                  label={t("settings.clearKey")}
+                  confirmLabel={t("settings.confirmClearKey")}
+                  cancelLabel={t("common.cancel")}
+                  disabled={busy}
+                  danger
+                  onConfirm={() => onClearKey(keyEnv)}
+                />
+              )}
+            </div>
+            <KeyField
+              apiKeyEnv={keyEnv}
+              busy={busy}
+              keySet={initial.keySet}
+              onSet={(env, value) => onSaveKey(env, value)}
+            />
+          </>
+        )}
+      </div>
+    );
+  }
+
+  const modelNames = models
+    .split(",")
+    .map((m) => m.trim())
+    .filter(Boolean);
+  const canFetch = Boolean(name.trim() && baseUrl.trim() && (keyDraft.trim() || apiKeyEnv.trim()));
+
+  const protocolField = initial ? (
+    <select className="mem-select" value={kind} onChange={(e) => setKind(e.target.value)}>
+      {kindOptions.map((k) => (
+        <option key={k} value={k}>
+          {k === "openai" ? t("settings.providerProtocolOpenAI") : k}
+        </option>
+      ))}
+    </select>
+  ) : (
+    <div className="provider-readonly-field provider-readonly-field--stacked" aria-readonly="true">
+      <strong>{t("settings.providerProtocolOpenAI")}</strong>
+      <span>{t("settings.providerProtocolOpenAIHint")}</span>
+    </div>
+  );
+
+  const advancedFields = (
+    <details className="provider-editor-advanced" open={advancedOpen} onToggle={(e) => setAdvancedOpen(e.currentTarget.open)}>
+      <summary>{t("settings.providerAdvancedSettings")}</summary>
+      <div className="provider-editor-advanced__body">
+        <label className="set-label">{t("settings.providerApiKeyEnv")}</label>
+        <input
+          className="mem-input"
+          placeholder={apiKeyEnvFromProviderName(name)}
+          value={apiKeyEnv}
+          onChange={(e) => setApiKeyEnv(e.target.value)}
+        />
+        <div className="mem-hint">{t("settings.providerApiKeyEnvHint")}</div>
+        <label className="set-label">{t("settings.providerBalanceUrl")}</label>
+        <input className="mem-input" placeholder={t("settings.balanceUrlPlaceholder")} value={balanceUrl} onChange={(e) => setBalanceUrl(e.target.value)} />
+        <div className="mem-hint">{t("settings.balanceUrlHint")}</div>
+        <label className="set-label">{t("settings.providerContextWindow")}</label>
+        <input className="mem-input" placeholder={t("settings.contextWindowPlaceholder")} value={ctx} onChange={(e) => setCtx(e.target.value)} inputMode="numeric" />
+        <div className="mem-hint">{t("settings.contextWindowHint")}</div>
+        <label className="set-label">{t("settings.reasoningProtocol")}</label>
+        <select className="mem-select" value={reasoningProtocol} onChange={(e) => setReasoningProtocol(e.target.value)}>
+          {REASONING_PROTOCOLS.map((protocol) => (
+            <option key={protocol || "auto"} value={protocol}>
+              {reasoningProtocolLabel(protocol, t)}
+            </option>
+          ))}
+        </select>
+        <div className="mem-hint">{t("settings.reasoningProtocolHint")}</div>
+        <label className="set-label">{t("settings.supportedEfforts")}</label>
+        {EFFORT_PRESETS.map((level) => (
+          <label key={level} className="set-check">
+            <input
+              type="checkbox"
+              checked={presetEfforts.includes(level)}
+              onChange={() => togglePreset(level)}
+            />
+            {level}
+          </label>
         ))}
-      </select>
+        <div className="set-row">
+          <input
+            className="mem-input set-grow"
+            placeholder={t("settings.supportedEffortsCustomPlaceholder")}
+            value={customEffortDraft}
+            onChange={(e) => setCustomEffortDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                addCustomEffort();
+              }
+            }}
+          />
+          <button
+            type="button"
+            className="btn btn--small"
+            disabled={
+              !customEffortDraft.trim() || supportedEfforts.includes(customEffortDraft.trim().toLowerCase())
+            }
+            onClick={addCustomEffort}
+          >
+            {t("common.add")}
+          </button>
+        </div>
+        {customEfforts.length > 0 && (
+          <div className="set-rules__chips">
+            {customEfforts.map((level) => (
+              <span className="set-rule" key={level}>
+                {level}
+                <Tooltip label={t("common.delete")}>
+                  <button
+                    type="button"
+                    className="set-rule__x"
+                    disabled={busy}
+                    onClick={() => removeCustomEffort(level)}
+                  >
+                    ×
+                  </button>
+                </Tooltip>
+              </span>
+            ))}
+          </div>
+        )}
+        <div className="mem-hint">{t("settings.supportedEffortsHint")}</div>
+        <label className="set-label">{t("settings.defaultEffort")}</label>
+        {supportedEfforts.length > 0 ? (
+          <select
+            className="mem-select"
+            value={defaultEffort}
+            onChange={(e) => setDefaultEffort(e.target.value)}
+          >
+            <option value="">{t("settings.defaultEffortAuto")}</option>
+            {supportedEfforts.map((level) => (
+              <option key={level} value={level}>
+                {level}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <select className="mem-select" value="" disabled>
+            <option value="">{t("settings.defaultEffortAuto")}</option>
+          </select>
+        )}
+        <div className="mem-hint">{t("settings.defaultEffortHint")}</div>
+      </div>
+    </details>
+  );
+
+  return (
+    <div className={`provider-editor${isNewCustomProvider ? " provider-editor--wizard" : ""}`}>
+      <label className="set-label">{t("settings.customProviderName")}</label>
+      <input className="mem-input" placeholder={t("settings.customProviderNamePlaceholder")} value={name} onChange={(e) => setName(e.target.value)} disabled={!!initial} />
+      <label className="set-label">{t("settings.providerProtocol")}</label>
+      {protocolField}
+      <label className="set-label">{t("settings.providerBaseUrlLabel")}</label>
       <input className="mem-input" placeholder={t("settings.providerBaseUrl")} value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
+      {!initial && (
+        <>
+          <label className="set-label">{t("settings.providerKey")}</label>
+          <input
+            className="mem-input"
+            type="password"
+            placeholder={t("settings.providerKeyPlaceholder")}
+            value={keyDraft}
+            onChange={(e) => setKeyDraft(e.target.value)}
+          />
+        </>
+      )}
+      {initial && onSaveKey && apiKeyEnv.trim() && (
+        <>
+          <label className="set-label">{t("settings.providerKey")}</label>
+          <KeyField
+            apiKeyEnv={apiKeyEnv.trim()}
+            busy={busy || fetchingModels}
+            keySet={initial.keySet}
+            onSet={(env, value) => onSaveKey(env, value)}
+          />
+        </>
+      )}
+      <div className="provider-model-fetch-row">
+        <button
+          type="button"
+          className="btn btn--small"
+          disabled={busy || fetchingModels || !canFetch}
+          onClick={() => void fetchModels()}
+        >
+          {fetchingModels ? t("settings.fetchingModels") : t("settings.testFetchModels")}
+        </button>
+        <span>{t("settings.testFetchModelsHint")}</span>
+      </div>
+      {fetchStatus && <div className="provider-fetch-status provider-fetch-status--ok">{fetchStatus}</div>}
+      {fetchErr && <div className="provider-fetch-status provider-fetch-status--error">{fetchErr}</div>}
+      {modelNames.length > 0 && (
+        <div className="provider-card-block">
+          <div className="provider-card-block__label">{t("settings.availableModels")}</div>
+          <div className="provider-model-chips">
+            {modelNames.slice(0, 8).map((model) => (
+              <span className="provider-model-chip" key={model}>{model}</span>
+            ))}
+            {modelNames.length > 8 && (
+              <span className="provider-model-chip provider-model-chip--more">{t("settings.moreModels", { n: modelNames.length - 8 })}</span>
+            )}
+          </div>
+        </div>
+      )}
+      <label className="set-label">{t("settings.manualModels")}</label>
       <input className="mem-input" placeholder={t("settings.providerModels")} value={models} onChange={(e) => setModels(e.target.value)} />
-      <input className="mem-input" placeholder={t("settings.providerApiKeyEnv")} value={apiKeyEnv} onChange={(e) => setApiKeyEnv(e.target.value)} />
-      <label className="set-label">{t("settings.providerBalanceUrl")}</label>
-      <input className="mem-input" placeholder={t("settings.balanceUrlPlaceholder")} value={balanceUrl} onChange={(e) => setBalanceUrl(e.target.value)} />
-      <div className="mem-hint">{t("settings.balanceUrlHint")}</div>
-      <label className="set-label">{t("settings.providerContextWindow")}</label>
-      <input className="mem-input" placeholder={t("settings.contextWindowPlaceholder")} value={ctx} onChange={(e) => setCtx(e.target.value)} inputMode="numeric" />
-      <div className="mem-hint">{t("settings.contextWindowHint")}</div>
+      <div className="mem-hint">{t("settings.manualModelsHint")}</div>
+      {advancedFields}
       <div className="prov-card__actions">
         <button className="btn btn--small" onClick={onCancel} disabled={busy}>
           {t("common.cancel")}
         </button>
-        <button className="btn btn--primary btn--small" onClick={save} disabled={busy || !name.trim() || !baseUrl.trim()}>
+        <button className="btn btn--primary btn--small" onClick={() => void save()} disabled={busy || !name.trim() || !baseUrl.trim() || !models.trim()}>
           {t("common.save")}
         </button>
       </div>
@@ -564,7 +1913,17 @@ function ProviderEditor({
   );
 }
 
-function KeyField({ apiKeyEnv, busy, onSet }: { apiKeyEnv: string; busy: boolean; onSet: (v: string) => Promise<void> }) {
+function KeyField({
+  apiKeyEnv,
+  busy,
+  keySet = false,
+  onSet,
+}: {
+  apiKeyEnv: string;
+  busy: boolean;
+  keySet?: boolean;
+  onSet: (apiKeyEnv: string, value: string) => Promise<void>;
+}) {
   const t = useT();
   const [val, setVal] = useState("");
   if (!apiKeyEnv) return null;
@@ -573,7 +1932,7 @@ function KeyField({ apiKeyEnv, busy, onSet }: { apiKeyEnv: string; busy: boolean
       <input
         className="mem-input"
         type="password"
-        placeholder={t("settings.setKey", { env: apiKeyEnv })}
+        placeholder={t(keySet ? "settings.updateKey" : "settings.setKey", { env: apiKeyEnv })}
         value={val}
         onChange={(e) => setVal(e.target.value)}
       />
@@ -581,11 +1940,11 @@ function KeyField({ apiKeyEnv, busy, onSet }: { apiKeyEnv: string; busy: boolean
         className="btn btn--small"
         disabled={busy || !val.trim()}
         onClick={() => {
-          void onSet(val.trim());
+          void onSet(apiKeyEnv, val.trim());
           setVal("");
         }}
       >
-        {t("settings.saveKey")}
+        {t(keySet ? "settings.updateKeyAction" : "settings.saveKey")}
       </button>
     </div>
   );
@@ -594,10 +1953,9 @@ function KeyField({ apiKeyEnv, busy, onSet }: { apiKeyEnv: string; busy: boolean
 function PermissionsSection({ s, busy, apply }: SectionProps) {
   const t = useT();
   return (
-    <section className="mem-section">
-      <div className="mem-section__title">{t("settings.permissions")}</div>
-      <div className="set-row">
-        <label className="set-label">{t("settings.writerMode")}</label>
+    <>
+    <SettingsSection title={t("settings.permissions")} description={t("settings.permissionsModeHint")}>
+      <SettingsField label={t("settings.writerMode")}>
         <select
           className="mem-select set-grow"
           value={s.permissions.mode}
@@ -608,7 +1966,9 @@ function PermissionsSection({ s, busy, apply }: SectionProps) {
           <option value="allow">{t("settings.modeAllow")}</option>
           <option value="deny">{t("settings.modeDeny")}</option>
         </select>
-      </div>
+      </SettingsField>
+    </SettingsSection>
+    <SettingsSection title={t("settings.permissionRules")} description={t("settings.ruleForm")}>
       <div className="set-rules-grid">
         {(["deny", "ask", "allow"] as const).map((list) => (
           <RuleList
@@ -621,8 +1981,8 @@ function PermissionsSection({ s, busy, apply }: SectionProps) {
           />
         ))}
       </div>
-      <div className="mem-hint">{t("settings.ruleForm")}</div>
-    </section>
+    </SettingsSection>
+    </>
   );
 }
 
@@ -650,7 +2010,10 @@ function RuleList({
   };
   return (
     <div className="set-rules">
-      <div className="set-rules__label">{list}</div>
+      <div className="set-rules__head">
+        <div className="set-rules__label">{ruleListLabel(list, t)}</div>
+        {ruleListHint(list, t) && <div className="set-rules__hint">{ruleListHint(list, t)}</div>}
+      </div>
       <div className="set-rules__chips">
         {rules.length === 0 && <span className="mem-empty">{t("common.none")}</span>}
         {rules.map((r) => (
@@ -682,6 +2045,34 @@ function RuleList({
   );
 }
 
+function ruleListLabel(list: string, t: ReturnType<typeof useT>): string {
+  switch (list) {
+    case "deny":
+      return t("settings.ruleDeny");
+    case "ask":
+      return t("settings.ruleAsk");
+    case "allow":
+      return t("settings.ruleAllow");
+    case "allow_write":
+      return t("settings.ruleAllowWrite");
+    default:
+      return list;
+  }
+}
+
+function ruleListHint(list: string, t: ReturnType<typeof useT>): string {
+  switch (list) {
+    case "deny":
+      return t("settings.ruleDenyHint");
+    case "ask":
+      return t("settings.ruleAskHint");
+    case "allow":
+      return t("settings.ruleAllowHint");
+    default:
+      return "";
+  }
+}
+
 function SandboxSection({ s, busy, apply }: SectionProps) {
   const t = useT();
   const sb = s.sandbox;
@@ -690,21 +2081,20 @@ function SandboxSection({ s, busy, apply }: SectionProps) {
     apply(() => app.SetSandbox(next.bash ?? sb.bash, next.network ?? sb.network, next.workspaceRoot ?? sb.workspaceRoot, next.allowWrite ?? sb.allowWrite));
 
   return (
-    <section className="mem-section">
-      <div className="mem-section__title">{t("settings.sandboxTitle")}</div>
-      <div className="set-row">
-        <label className="set-label">{t("settings.bashSandbox")}</label>
+    <SettingsSection title={t("settings.sandboxTitle")}>
+      <SettingsField label={t("settings.bashSandbox")}>
         <select className="mem-select set-grow" value={sb.bash} disabled={busy} onChange={(e) => void set({ bash: e.target.value })}>
           <option value="enforce">{t("settings.bashEnforce")}</option>
           <option value="off">{t("settings.bashOff")}</option>
         </select>
-      </div>
-      <label className="set-check">
-        <input type="checkbox" checked={sb.network} disabled={busy} onChange={(e) => void set({ network: e.target.checked })} />
-        {t("settings.allowNetwork")}
-      </label>
-      <div className="set-row">
-        <label className="set-label">{t("settings.workspaceRoot")}</label>
+      </SettingsField>
+      <SettingsField label={t("settings.allowNetwork")}>
+        <label className="set-check set-check--inline">
+          <input type="checkbox" checked={sb.network} disabled={busy} onChange={(e) => void set({ network: e.target.checked })} />
+          {t("settings.allowNetwork")}
+        </label>
+      </SettingsField>
+      <SettingsField label={t("settings.workspaceRoot")}>
         <input
           className="mem-input set-grow"
           placeholder={t("settings.workspaceDefault")}
@@ -713,7 +2103,7 @@ function SandboxSection({ s, busy, apply }: SectionProps) {
           onChange={(e) => setRoot(e.target.value)}
           onBlur={() => root !== sb.workspaceRoot && void set({ workspaceRoot: root })}
         />
-      </div>
+      </SettingsField>
       <RuleList
         list="allow_write"
         rules={sb.allowWrite}
@@ -721,60 +2111,34 @@ function SandboxSection({ s, busy, apply }: SectionProps) {
         onAdd={(d) => set({ allowWrite: [...sb.allowWrite, d] })}
         onRemove={(d) => set({ allowWrite: sb.allowWrite.filter((x) => x !== d) })}
       />
-    </section>
-  );
-}
-
-function AgentSection({ s, busy, apply }: SectionProps) {
-  const t = useT();
-  const [temp, setTemp] = useState(String(s.agent.temperature));
-  const [steps, setSteps] = useState(String(s.agent.maxSteps));
-  const [prompt, setPrompt] = useState(s.agent.systemPrompt);
-  const dirty = temp !== String(s.agent.temperature) || steps !== String(s.agent.maxSteps) || prompt !== s.agent.systemPrompt;
-
-  return (
-    <section className="mem-section">
-      <div className="mem-section__title">{t("settings.agent")}</div>
-      <div className="set-row">
-        <label className="set-label">{t("settings.temperature")}</label>
-        <input className="mem-input set-narrow" value={temp} onChange={(e) => setTemp(e.target.value)} disabled={busy} inputMode="decimal" />
-        <label className="set-label">{t("settings.maxSteps")}</label>
-        <input className="mem-input set-narrow" value={steps} onChange={(e) => setSteps(e.target.value)} disabled={busy} inputMode="numeric" />
-        <span className="mem-hint">{t("settings.unlimited")}</span>
-      </div>
-      <div className="set-rules__label">{t("settings.systemPrompt")}</div>
-      <textarea className="mem-textarea" value={prompt} onChange={(e) => setPrompt(e.target.value)} disabled={busy} spellCheck={false} />
-      <div className="prov-card__actions">
-        <button
-          className="btn btn--primary btn--small"
-          disabled={busy || !dirty}
-          onClick={() => void apply(() => app.SetAgentParams(Number(temp) || 0, Number(steps) || 0, prompt))}
-        >
-          {t("settings.saveAgent")}
-        </button>
-      </div>
-    </section>
+    </SettingsSection>
   );
 }
 
 function AppearanceSection({
   theme,
   themeStyle,
+  textSize,
+  fontFamily,
   onTheme,
   onThemeStyle,
+  onTextSize,
+  onFontFamily,
 }: {
   theme: Theme;
   themeStyle: ThemeStyle;
+  textSize: TextSize;
+  fontFamily: FontFamily;
   onTheme: (t: Theme) => void;
   onThemeStyle: (style: ThemeStyle) => void;
+  onTextSize: (size: TextSize) => void;
+  onFontFamily: (font: FontFamily) => void;
 }) {
-  const { t, pref, setPref } = useI18n();
+  const t = useT();
   const themeOptions: Theme[] = ["auto", "light", "dark"];
   return (
-    <section className="mem-section">
-      <div className="mem-section__title">{t("settings.appearance")}</div>
-      <div className="set-row">
-        <label className="set-label">{t("settings.theme")}</label>
+    <SettingsSection title={t("settings.appearance")}>
+      <SettingsField label={t("settings.theme")}>
         <div className="set-seg">
           {themeOptions.map((opt) => (
             <button
@@ -786,9 +2150,8 @@ function AppearanceSection({
             </button>
           ))}
         </div>
-      </div>
-      <div className="set-row set-row--stack">
-        <label className="set-label">{t("settings.themeStyle")}</label>
+      </SettingsField>
+      <SettingsField label={t("settings.themeStyle")} stacked>
         <div className="theme-style-grid">
           {THEME_STYLES.map((opt) => (
             <button
@@ -801,16 +2164,34 @@ function AppearanceSection({
             </button>
           ))}
         </div>
-      </div>
-      <div className="set-row">
-        <label className="set-label">{t("settings.language")}</label>
-        <select className="mem-select set-grow" value={pref} onChange={(e) => setPref(e.target.value as "" | "en" | "zh")}>
-          <option value="">{t("settings.langAuto")}</option>
-          <option value="zh">中文</option>
-          <option value="en">English</option>
-        </select>
-      </div>
-    </section>
+      </SettingsField>
+      <SettingsField label={t("settings.textSize")}>
+        <div className="set-seg">
+          {TEXT_SIZES.map((size) => (
+            <button
+              key={size}
+              className={`set-seg__btn${textSize === size ? " set-seg__btn--on" : ""}`}
+              onClick={() => onTextSize(size)}
+            >
+              {textSizeName(size, t)}
+            </button>
+          ))}
+        </div>
+      </SettingsField>
+      <SettingsField label={t("settings.fontFamily")}>
+        <div className="set-seg">
+          {FONT_FAMILIES.map((font) => (
+            <button
+              key={font}
+              className={`set-seg__btn${fontFamily === font ? " set-seg__btn--on" : ""}`}
+              onClick={() => onFontFamily(font)}
+            >
+              {fontFamilyName(font, t)}
+            </button>
+          ))}
+        </div>
+      </SettingsField>
+    </SettingsSection>
   );
 }
 
@@ -822,6 +2203,32 @@ function themeName(theme: Theme, t: ReturnType<typeof useT>): string {
       return t("settings.themeLight");
     case "dark":
       return t("settings.themeDark");
+  }
+}
+
+function textSizeName(size: TextSize, t: ReturnType<typeof useT>): string {
+  switch (size) {
+    case "small":
+      return t("settings.textSizeSmall");
+    case "default":
+      return t("settings.textSizeDefault");
+    case "large":
+      return t("settings.textSizeLarge");
+    case "xlarge":
+      return t("settings.textSizeXLarge");
+  }
+}
+
+function fontFamilyName(font: FontFamily, t: ReturnType<typeof useT>): string {
+  switch (font) {
+    case "system":
+      return t("settings.fontFamilySystem");
+    case "yahei":
+      return t("settings.fontFamilyYaHei");
+    case "pingfang":
+      return t("settings.fontFamilyPingFang");
+    case "noto":
+      return t("settings.fontFamilyNoto");
   }
 }
 
@@ -843,25 +2250,20 @@ function UpdatesSection({ configPath }: { configPath: string }) {
     status.kind === "checking" || status.kind === "downloading" || status.kind === "verifying" || status.kind === "applying";
 
   return (
-    <section className="mem-section">
-      <div className="mem-section__title">{t("updater.title")}</div>
-      <div className="set-row">
-        <label className="set-label">{t("updater.currentVersion", { v: version || "…" })}</label>
-        <span className="prov-card__spacer" />
+    <SettingsSection title={t("updater.title")}>
+      <SettingsField label={t("updater.currentVersion", { v: version || "…" })}>
         <button className="btn btn--small" disabled={busy} onClick={() => void check()}>
           {status.kind === "checking" ? t("updater.checking") : t("updater.checkButton")}
         </button>
-      </div>
+      </SettingsField>
       {status.kind === "upToDate" && <div className="mem-hint">{t("updater.upToDate")}</div>}
       {status.kind === "available" && (
         <>
-          <div className="set-row">
-            <span className="set-label">{t("updater.available", { v: status.info.latest })}</span>
-            <span className="prov-card__spacer" />
+          <SettingsField label={t("updater.available", { v: status.info.latest })}>
             <button className="btn btn--primary btn--small" onClick={() => apply(status.info)}>
               {status.info.canSelfUpdate ? t("updater.installNow") : t("updater.goToDownload")}
             </button>
-          </div>
+          </SettingsField>
           {!status.info.canSelfUpdate && <div className="mem-hint">{t("updater.macHint")}</div>}
         </>
       )}
@@ -883,6 +2285,6 @@ function UpdatesSection({ configPath }: { configPath: string }) {
           {t("settings.config", { path: configPath })}
         </Tooltip>
       )}
-    </section>
+    </SettingsSection>
   );
 }

@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -76,6 +78,27 @@ func transientErr(err error) bool {
 		return false
 	}
 	return true
+}
+
+// IsConnReset reports whether err is a connection-level drop (peer reset,
+// truncated body, closed socket) as opposed to a protocol or caller error. A
+// stream cut this way mid-body can be replayed from scratch, unlike a decode or
+// 4xx error. The common trigger is a local proxy (v2rayN/sing-box) idle-closing
+// the long-lived SSE connection during a reasoner's first-token gap.
+func IsConnReset(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) ||
+		errors.Is(err, net.ErrClosed) ||
+		errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.ECONNABORTED) {
+		return true
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr)
 }
 
 func backoffDelay(attempt int, retryAfter time.Duration) time.Duration {

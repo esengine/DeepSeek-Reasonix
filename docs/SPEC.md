@@ -165,8 +165,10 @@ When `agent.planner_model` names a provider different from the executor, a
 `Coordinator` runs two models in **separate sessions** to keep each one's prompt
 prefix cache-stable:
 
-- The **planner** (low-frequency) runs in its own session with no tools and
-  produces a concise plan.
+- The **planner** (low-frequency) runs in its own session with the same standing
+  memory context plus a filtered read-only research tool set, then produces a
+  concise plan. It can inspect files/docs before planning, but writer and
+  workflow tools are not exposed to it.
 - The plan is handed off as structured text to the **executor** — a full
   tool-using `Agent` in its own session — which carries it out.
 - The sessions never mix, so neither model's prefix is disturbed by the other's
@@ -383,9 +385,11 @@ api_key_env = "MIMO_API_KEY"
 
 [tools]
 enabled = []   # omit/empty = all built-ins
+bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local cap
 
 [skills]
 # paths = ["~/my-skills", "../shared/skills"]   # extra custom skill roots
+# excluded_paths = ["~/.agents/skills"]         # hide convention roots without deleting folders
 # disabled_skills = ["review"]                  # hidden from prompt, slash invocation, and skill tools
 
 [permissions]

@@ -213,6 +213,7 @@ func (s *Server) handler() http.Handler {
 	mux.HandleFunc("GET /status", s.status)
 	mux.HandleFunc("GET /sessions", s.sessions)
 	mux.HandleFunc("GET /skills", s.skills)
+	mux.HandleFunc("POST /delete-session", s.deleteSession)
 	return logMiddleware(csrfGuard(mux))
 }
 
@@ -277,7 +278,16 @@ func (s *Server) RunGraceful(ctx context.Context, addr string) error {
 
 func (s *Server) index(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write(indexHTML)
+	_, _ = config.MigrateLegacyIfNeeded()
+	lang := "auto"
+	if cfg, err := config.Load(); err == nil {
+		if dl := cfg.DesktopLanguage(); dl != "" {
+			lang = dl
+		}
+	}
+	html := string(indexHTML)
+	html = strings.ReplaceAll(html, "__LANG__", lang)
+	_, _ = w.Write([]byte(html))
 }
 
 // sseKeepaliveInterval is how often the /events handler emits a `: ping`
@@ -425,20 +435,49 @@ func (s *Server) newSession(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// history returns the session's message log as {role, content} pairs so a
-// reconnecting client can repopulate its transcript. Supports ETag caching:
+type historyToolCall struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+}
+
+type historyMessage struct {
+	Role       string            `json:"role"`
+	Content    string            `json:"content"`
+	Reasoning  string            `json:"reasoning,omitempty"`
+	ToolCalls  []historyToolCall `json:"toolCalls,omitempty"`
+	ToolCallID string            `json:"toolCallId,omitempty"`
+	ToolName   string            `json:"toolName,omitempty"`
+}
+
+func historyMessages(msgs []provider.Message) []historyMessage {
+	out := make([]historyMessage, 0, len(msgs))
+	for _, m := range msgs {
+		hm := historyMessage{Role: string(m.Role), Content: m.Content}
+		if m.Role == provider.RoleAssistant {
+			hm.Reasoning = m.ReasoningContent
+			if len(m.ToolCalls) > 0 {
+				hm.ToolCalls = make([]historyToolCall, len(m.ToolCalls))
+				for i, tc := range m.ToolCalls {
+					hm.ToolCalls[i] = historyToolCall{ID: tc.ID, Name: tc.Name, Arguments: tc.Arguments}
+				}
+			}
+		}
+		if m.Role == provider.RoleTool {
+			hm.ToolCallID = m.ToolCallID
+			hm.ToolName = m.Name
+		}
+		out = append(out, hm)
+	}
+	return out
+}
+
+// history returns the session's message log so a reconnecting client can
+// repopulate its transcript, including historical tool cards. Supports ETag caching:
 // if the client sends If-None-Match with the current ETag, the server returns
 // 304 Not Modified with no body, saving bandwidth on reconnects.
 func (s *Server) history(w http.ResponseWriter, r *http.Request) {
-	type msg struct {
-		Role    string `json:"role"`
-		Content string `json:"content"`
-	}
-	var out []msg
-	for _, m := range s.ctl().History() {
-		out = append(out, msg{Role: string(m.Role), Content: m.Content})
-	}
-	writeJSONCached(w, r, out)
+	writeJSONCached(w, r, historyMessages(s.ctl().History()))
 }
 
 // context returns the prompt-vs-window gauge numbers. Supports ETag caching
@@ -799,6 +838,56 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 		out = []sessionEntry{}
 	}
 	writeJSON(w, out)
+}
+
+// deleteSession removes a saved session by the session name returned from /sessions.
+func (s *Server) deleteSession(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		http.Error(w, "name required", http.StatusBadRequest)
+		return
+	}
+	if name == "." || name == ".." || strings.ContainsAny(name, `/\`) {
+		http.Error(w, "invalid session name", http.StatusBadRequest)
+		return
+	}
+	dir := s.ctl().SessionDir()
+	if dir == "" {
+		http.Error(w, "sessions disabled", http.StatusBadRequest)
+		return
+	}
+	target := filepath.Join(dir, name+".jsonl")
+	abs, err := filepath.Abs(target)
+	if err != nil {
+		http.Error(w, "invalid session path", http.StatusBadRequest)
+		return
+	}
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		http.Error(w, "invalid session dir", http.StatusBadRequest)
+		return
+	}
+	rel, err := filepath.Rel(absDir, abs)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		http.Error(w, "path outside session dir", http.StatusForbidden)
+		return
+	}
+	if filepath.Clean(abs) == filepath.Clean(s.ctl().SessionPath()) {
+		http.Error(w, "cannot delete active session", http.StatusConflict)
+		return
+	}
+	if err := os.Remove(abs); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // sessionTitle returns a title for a session: the cached flash-generated title

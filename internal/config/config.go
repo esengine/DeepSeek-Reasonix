@@ -39,27 +39,50 @@ func SkillNameKey(name string) string {
 
 // Config is Reasonix's runtime configuration.
 type Config struct {
-	DefaultModel string            `toml:"default_model"`
-	Language     string            `toml:"language"` // ui/model language tag (e.g. "zh"); empty = auto-detect from $LANG / $REASONIX_LANG
-	UI           UIConfig          `toml:"ui"`
-	Agent        AgentConfig       `toml:"agent"`
-	Providers    []ProviderEntry   `toml:"providers"`
-	Tools        ToolsConfig       `toml:"tools"`
-	Permissions  PermissionsConfig `toml:"permissions"`
-	Sandbox      SandboxConfig     `toml:"sandbox"`
-	Network      NetworkConfig     `toml:"network"`
-	Plugins      []PluginEntry     `toml:"plugins"`
-	Skills       SkillsConfig      `toml:"skills"`
-	Codegraph    CodegraphConfig   `toml:"codegraph"`
-	Statusline   StatuslineConfig  `toml:"statusline"`
-	LSP          LSPConfig         `toml:"lsp"`
+	ConfigVersion int                 `toml:"config_version"`
+	DefaultModel  string              `toml:"default_model"`
+	Language      string              `toml:"language"` // ui/model language tag (e.g. "zh"); empty = auto-detect from $LANG / $REASONIX_LANG
+	UI            UIConfig            `toml:"ui"`
+	Desktop       DesktopConfig       `toml:"desktop"`
+	Notifications NotificationsConfig `toml:"notifications"`
+	Agent         AgentConfig         `toml:"agent"`
+	Providers     []ProviderEntry     `toml:"providers"`
+	Tools         ToolsConfig         `toml:"tools"`
+	Permissions   PermissionsConfig   `toml:"permissions"`
+	Sandbox       SandboxConfig       `toml:"sandbox"`
+	Network       NetworkConfig       `toml:"network"`
+	Plugins       []PluginEntry       `toml:"plugins"`
+	Skills        SkillsConfig        `toml:"skills"`
+	Codegraph     CodegraphConfig     `toml:"codegraph"`
+	Statusline    StatuslineConfig    `toml:"statusline"`
+	LSP           LSPConfig           `toml:"lsp"`
 }
 
-// UIConfig controls presentation-only settings. Theme affects CLI rendering; the
-// desktop frontend keeps its own browser-local theme setting.
+// UIConfig controls CLI presentation-only settings. Desktop appearance is kept in
+// DesktopConfig so desktop preferences cannot alter terminal output or prompts.
 type UIConfig struct {
-	Theme      string `toml:"theme"`       // auto|dark|light; empty resolves to auto
-	ThemeStyle string `toml:"theme_style"` // graphite|ember|aurora|midnight|sandstone|porcelain|linen|glacier
+	Theme         string `toml:"theme"`          // auto|dark|light; empty resolves to auto
+	ThemeStyle    string `toml:"theme_style"`    // graphite|ember|aurora|midnight|sandstone|porcelain|linen|glacier
+	CloseBehavior string `toml:"close_behavior"` // legacy desktop close behavior; prefer desktop.close_behavior
+}
+
+// DesktopConfig controls desktop-only UI preferences. It is intentionally
+// separate from top-level language and [ui] so desktop choices do not affect CLI
+// language, terminal colours, or provider-visible prompt/request data.
+type DesktopConfig struct {
+	Language       string   `toml:"language"`        // auto|en|zh; empty/auto = browser/OS auto-detect
+	Theme          string   `toml:"theme"`           // auto|dark|light; empty resolves to dark
+	ThemeStyle     string   `toml:"theme_style"`     // graphite|ember|aurora|midnight|sandstone|porcelain|linen|glacier
+	CloseBehavior  string   `toml:"close_behavior"`  // quit|background; desktop window close behavior
+	ProviderAccess []string `toml:"provider_access"` // desktop-only list of provider entries shown in Settings > Model > Access
+}
+
+// NotificationsConfig controls optional system notifications for CLI chat/run.
+type NotificationsConfig struct {
+	Enabled         bool `toml:"enabled"`
+	TurnDone        bool `toml:"turn_done"`
+	ApprovalRequest bool `toml:"approval_request"`
+	AskRequest      bool `toml:"ask_request"`
 }
 
 // UITheme normalizes ui.theme to a supported value.
@@ -77,12 +100,75 @@ func (c *Config) UITheme() string {
 // UIThemeStyle normalizes ui.theme_style. Empty means "pick the default style
 // for the resolved light/dark shell".
 func (c *Config) UIThemeStyle() string {
-	switch strings.ToLower(strings.TrimSpace(c.UI.ThemeStyle)) {
+	return normalizeThemeStyle(c.UI.ThemeStyle)
+}
+
+func normalizeThemeStyle(style string) string {
+	switch strings.ToLower(strings.TrimSpace(style)) {
 	case "graphite", "ember", "aurora", "midnight", "sandstone", "porcelain", "linen", "glacier":
-		return strings.ToLower(strings.TrimSpace(c.UI.ThemeStyle))
+		return strings.ToLower(strings.TrimSpace(style))
 	default:
 		return ""
 	}
+}
+
+func normalizeCloseBehavior(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "quit", "exit":
+		return "quit"
+	default:
+		return "background"
+	}
+}
+
+// DesktopLanguage normalizes the desktop UI language. Empty means auto-detect
+// from the browser/OS locale; it deliberately does not read top-level language,
+// which is used by the CLI/model-facing runtime.
+func (c *Config) DesktopLanguage() string {
+	switch strings.ToLower(strings.TrimSpace(c.Desktop.Language)) {
+	case "en":
+		return "en"
+	case "zh":
+		return "zh"
+	default:
+		return ""
+	}
+}
+
+// DesktopTheme normalizes desktop.theme. New desktop users default to the dark
+// graphite product look; an explicit auto/light/dark is preserved.
+func (c *Config) DesktopTheme() string {
+	switch strings.ToLower(strings.TrimSpace(c.Desktop.Theme)) {
+	case "auto":
+		return "auto"
+	case "light":
+		return "light"
+	case "dark":
+		return "dark"
+	default:
+		return "dark"
+	}
+}
+
+// DesktopThemeStyle normalizes desktop.theme_style. Empty means the frontend
+// chooses the default style for the resolved desktop theme.
+func (c *Config) DesktopThemeStyle() string {
+	return normalizeThemeStyle(c.Desktop.ThemeStyle)
+}
+
+// DesktopCloseBehavior normalizes the desktop close-window preference. It falls
+// back to the legacy ui.close_behavior value for configs written before [desktop]
+// existed.
+func (c *Config) DesktopCloseBehavior() string {
+	if strings.TrimSpace(c.Desktop.CloseBehavior) != "" {
+		return normalizeCloseBehavior(c.Desktop.CloseBehavior)
+	}
+	return normalizeCloseBehavior(c.UI.CloseBehavior)
+}
+
+// UICloseBehavior is the legacy name for DesktopCloseBehavior.
+func (c *Config) UICloseBehavior() string {
+	return c.DesktopCloseBehavior()
 }
 
 // LSPConfig governs the optional Language Server Protocol tools (lsp_definition,
@@ -213,13 +299,16 @@ func (c *Config) NetworkProxyMode() string {
 
 // SkillsConfig configures skill discovery. Paths adds extra "custom"-scope skill
 // roots — each a directory of SKILL.md / <name>.md playbooks — scanned between
-// the project roots (.reasonix/.agents/.claude under the workspace) and the
-// global roots (the same three under the home dir). ~ and relative paths and
-// ${VAR} expansion are supported. DisabledSkills hides named skills from the
-// agent prompt, slash invocation, and skill tools while keeping them manageable.
+// the project roots (.reasonix/.agents/.agent/.claude under the workspace) and
+// the global roots. ExcludedPaths hides matching discovery roots without deleting
+// folders. ~, relative paths, and ${VAR} expansion are supported. DisabledSkills
+// hides named skills from the agent prompt, slash invocation, and skill tools
+// while keeping them manageable.
 type SkillsConfig struct {
 	Paths          []string `toml:"paths"`
+	ExcludedPaths  []string `toml:"excluded_paths"`
 	DisabledSkills []string `toml:"disabled_skills"`
+	MaxDepth       int      `toml:"max_depth"`
 }
 
 // SkillCustomPaths returns the configured custom skill roots with ${VAR}
@@ -232,6 +321,37 @@ func (c *Config) SkillCustomPaths() []string {
 		}
 	}
 	return out
+}
+
+// SkillExcludedPaths returns configured skill roots that should be hidden from
+// discovery, with ${VAR} expanded and empty entries dropped.
+func (c *Config) SkillExcludedPaths() []string {
+	var out []string
+	for _, p := range c.Skills.ExcludedPaths {
+		if p = ExpandVars(p); strings.TrimSpace(p) != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// SkillMaxDepth bounds nested skill discovery. Depth 3 favors bundled skill
+// packs while Store keeps nested markdown safe by requiring descriptions.
+func (c *Config) SkillMaxDepth() int {
+	const (
+		defaultDepth = 3
+		maxDepth     = 5
+	)
+	if c == nil || c.Skills.MaxDepth == 0 {
+		return defaultDepth
+	}
+	if c.Skills.MaxDepth < 1 {
+		return 1
+	}
+	if c.Skills.MaxDepth > maxDepth {
+		return maxDepth
+	}
+	return c.Skills.MaxDepth
 }
 
 // DisabledSkillNames returns valid disabled skill identifiers, preserving the
@@ -343,12 +463,15 @@ type AgentConfig struct {
 	PlannerModel     string            `toml:"planner_model"`
 	SubagentModel    string            `toml:"subagent_model"`
 	SubagentModels   map[string]string `toml:"subagent_models"`
+	SubagentEffort   string            `toml:"subagent_effort"`
+	SubagentEfforts  map[string]string `toml:"subagent_efforts"`
 	// OutputStyle selects a persona/tone block folded into the system prompt at
 	// startup (a built-in like "explanatory"/"learning"/"concise", or a custom
 	// .reasonix/output-styles/<name>.md). Empty = the unmodified prompt.
 	OutputStyle string `toml:"output_style"`
 	// AutoPlan controls whether interactive turns that look multi-step start in
-	// plan mode automatically: "off" disables it, "ask"/"on" enable the gate.
+	// plan mode automatically: "off" keeps plan mode manual, "on" enables the
+	// approval gate. Legacy "ask" is treated as "on".
 	AutoPlan string `toml:"auto_plan"`
 	// AutoPlanClassifier optionally names a provider/model used to classify
 	// borderline auto-plan decisions. Empty keeps the zero-cost heuristic path.
@@ -382,6 +505,19 @@ type ProviderEntry struct {
 	// Empty = provider default.
 	Thinking string `toml:"thinking"`
 	Effort   string `toml:"effort"`
+	// ReasoningProtocol selects the request shape for OpenAI-compatible reasoning
+	// models. Empty/auto uses the model capability registry plus endpoint
+	// heuristics; none disables automatic reasoning controls for this provider.
+	ReasoningProtocol string `toml:"reasoning_protocol"`
+	// SupportedEfforts lists the /effort levels this provider/model exposes.
+	// When non-empty, it overrides the built-in defaults derived from
+	// Kind/BaseURL and makes /effort configurable. "auto" is the implicit
+	// prefix — always accepted. DefaultEffort resolves it; omit DefaultEffort
+	// (or set one outside this list) to fall back to SupportedEfforts[0].
+	SupportedEfforts []string `toml:"supported_efforts"`
+	// DefaultEffort is the /effort level used when the user picks "auto" or
+	// has not set Effort. Ignored when SupportedEfforts is empty.
+	DefaultEffort string `toml:"default_effort"`
 	// NoProxy reaches this provider's base_url directly, never through the proxy.
 	// For China-only endpoints a foreign-exit proxy resets the TLS handshake (#2803).
 	NoProxy bool `toml:"no_proxy"`
@@ -397,6 +533,74 @@ func (e *ProviderEntry) ModelList() []string {
 		return []string{e.Model}
 	}
 	return nil
+}
+
+// IsLikelyChatModel reports whether a model ID looks like a chat/completion
+// model rather than a specialised audio/vision/embedding model. It applies a
+// conservative name-based heuristic — the OpenAI-compatible /models API does
+// not return capability/modality metadata, so this is the most reliable
+// fallback until providers add such fields.
+//
+// The heuristic works in two passes:
+//  1. Multi-word substring check for compound terms that span separators
+//     (e.g. "text-embedding", "text-to-speech").
+//  2. Token-level check: the model ID is split on common separators (- _ . / :)
+//     and each token is compared against a set of known non-chat keywords.
+//
+// "voice" is intentionally absent from the non-chat set because it is too
+// broad — legitimate future chat models may include it in their name.
+func IsLikelyChatModel(model string) bool {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return false
+	}
+	lower := strings.ToLower(model)
+
+	// Pass 1: compound terms that span separator boundaries.
+	var compoundNonChat = []string{
+		"text-embedding", "text-to-speech", "speech-to-text",
+	}
+	for _, c := range compoundNonChat {
+		if strings.Contains(lower, c) {
+			return false
+		}
+	}
+
+	// Pass 2: token-level check.
+	tokens := strings.FieldsFunc(lower, func(r rune) bool {
+		return r == '-' || r == '_' || r == '.' || r == '/' || r == ':'
+	})
+	var nonChatTokens = map[string]bool{
+		"asr": true, "stt": true, "tts": true,
+		"whisper": true, "embedding": true,
+		"moderation": true, "rerank": true, "dall": true,
+		"transcription": true,
+	}
+	for _, tok := range tokens {
+		if nonChatTokens[tok] {
+			return false
+		}
+	}
+	return true
+}
+
+// ChatModelList returns ModelList filtered to likely chat/completion models.
+// Non-chat models (TTS, STT, ASR, embedding, etc.) are excluded so they do
+// not appear in the chat model picker. Use ModelList() only when the full
+// raw provider model list is needed, such as config serialization, provider
+// diagnostics, or model-fetch editing.
+func (e *ProviderEntry) ChatModelList() []string {
+	raw := e.ModelList()
+	if len(raw) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(raw))
+	for _, m := range raw {
+		if IsLikelyChatModel(m) {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 // DefaultModel returns the provider's default model: the explicit `default`, else
@@ -423,8 +627,22 @@ func (e *ProviderEntry) HasModel(m string) bool {
 
 // ToolsConfig selects which built-in tools are enabled. Empty means all of them.
 type ToolsConfig struct {
-	Enabled []string     `toml:"enabled"`
-	Search  SearchConfig `toml:"search"`
+	Enabled            []string     `toml:"enabled"`
+	BashTimeoutSeconds *int         `toml:"bash_timeout_seconds"`
+	Search             SearchConfig `toml:"search"`
+}
+
+const defaultBashTimeoutSeconds = 120
+
+// BashTimeoutSeconds returns the foreground bash timeout in seconds. An omitted
+// config keeps the historical 120s safety cap, explicit 0 disables the
+// tool-local cap, and positive values set a custom cap. Negative values fall
+// back to the default so a typo cannot silently remove the safety net.
+func (c *Config) BashTimeoutSeconds() int {
+	if c.Tools.BashTimeoutSeconds == nil || *c.Tools.BashTimeoutSeconds < 0 {
+		return defaultBashTimeoutSeconds
+	}
+	return *c.Tools.BashTimeoutSeconds
 }
 
 // SearchConfig tunes the grep tool's engine. Engine is "auto" (default — use
@@ -471,10 +689,11 @@ type PluginEntry struct {
 	//                  servers whose tools the system prompt depends on.
 	//   "lazy"       — registers placeholder tools immediately (from on-disk
 	//                  schema cache when available) and only spawns the real
-	//                  subprocess on first model use. Default for user plugins.
+	//                  subprocess on first model use. Kept for legacy configs.
 	//   "background" — placeholder + spawn fired at boot but not waited on;
 	//                  swap happens once the spawn finishes.
-	// Empty defaults to "lazy" so adding a plugin never slows the next launch.
+	// Empty defaults to "background" so enabled MCPs connect automatically
+	// without blocking chat. Unknown non-empty values fall back to "lazy".
 	Tier string `toml:"tier"`
 }
 
@@ -494,6 +713,8 @@ func resolvedMCPTier(tier string) string {
 	case "eager":
 		return "eager"
 	case "background":
+		return "background"
+	case "":
 		return "background"
 	default:
 		return "lazy"
@@ -537,8 +758,15 @@ const LanguagePolicy = `Reply in the same language the user is using in their mo
 // Default returns the built-in default configuration (DeepSeek + MiMo presets).
 func Default() *Config {
 	return &Config{
-		DefaultModel: "deepseek-flash",
-		UI:           UIConfig{Theme: "auto"},
+		ConfigVersion: 2,
+		DefaultModel:  "deepseek-flash",
+		UI:            UIConfig{Theme: "auto"},
+		Notifications: NotificationsConfig{
+			Enabled:         false,
+			TurnDone:        true,
+			ApprovalRequest: true,
+			AskRequest:      true,
+		},
 		Agent: AgentConfig{
 			SystemPrompt: DefaultSystemPrompt,
 			// 0 = no step cap: the agent loops until the model gives a final answer,
@@ -546,7 +774,7 @@ func Default() *Config {
 			// compaction, not by a round count. Set a positive agent.max_steps only
 			// if you want a hard guard against runaway.
 			MaxSteps:          0,
-			AutoPlan:          "ask",
+			AutoPlan:          "off",
 			SoftCompactRatio:  0.5,
 			CompactRatio:      0.8,
 			CompactForceRatio: 0.9,
@@ -610,6 +838,9 @@ func LoadForRoot(root string) (*Config, error) {
 	for _, path := range tomlSources {
 		if _, err := os.Stat(path); err == nil {
 			sawConfigFile = true
+			if err := migrateLegacyMCPTiersFile(path); err != nil {
+				slog.Warn("config: legacy mcp tier migration failed", "path", path, "err", err)
+			}
 		}
 		if err := mergeFile(cfg, path); err != nil {
 			return nil, err
@@ -641,7 +872,12 @@ func LoadForRoot(root string) (*Config, error) {
 	// from the TypeScript line keeps MCP servers without rewriting them. Anything
 	// the v2 config or .mcp.json already declared wins on a name collision.
 	cfg.mergeMCPJSON(loadLegacyMCP(legacyConfigPath()))
+	normalizePluginCommandLines(cfg)
 	normalizeLegacyEffort(cfg)
+	normalizeLegacyMCPTiers(cfg)
+	normalizeLegacyProviderModels(cfg)
+	normalizeDesktopOfficialProviderAccess(cfg)
+	normalizeEffortConfig(cfg)
 	backfillDeepSeekPro(cfg)
 	// First run (no config file anywhere): keep CodeGraph off until the user opts
 	// in. An existing config — even one without a [codegraph] section — keeps the
@@ -720,6 +956,7 @@ func mergeTOMLPlugins(paths []string) ([]PluginEntry, error) {
 			return nil, fmt.Errorf("config %s: %w", path, err)
 		}
 		for _, p := range f.Plugins {
+			p, _ = NormalizePluginCommandLine(p)
 			if i, ok := index[p.Name]; ok {
 				merged[i] = p
 				continue
@@ -739,9 +976,20 @@ func mergeTOMLPlugins(paths []string) ([]PluginEntry, error) {
 func LoadForEdit(path string) *Config {
 	loadDotEnv()
 	cfg := Default()
+	if _, err := os.Stat(path); err == nil {
+		if err := migrateLegacyMCPTiersFile(path); err != nil {
+			slog.Warn("config: legacy mcp tier migration failed", "path", path, "err", err)
+		}
+	}
 	if err := mergeFile(cfg, path); err != nil {
 		slog.Warn("config: load for edit failed, using defaults", "path", path, "err", err)
 	}
+	normalizePluginCommandLines(cfg)
+	normalizeLegacyEffort(cfg)
+	normalizeLegacyMCPTiers(cfg)
+	normalizeLegacyProviderModels(cfg)
+	normalizeDesktopOfficialProviderAccess(cfg)
+	normalizeEffortConfig(cfg)
 	return cfg
 }
 
@@ -754,6 +1002,402 @@ func mergeFile(cfg *Config, path string) error {
 		return fmt.Errorf("config %s: %w", path, err)
 	}
 	return nil
+}
+
+// normalizeLegacyMCPTiers keeps loaded legacy config files on the new product
+// behavior: enabled MCP servers connect in the background by default, and the
+// retired per-server startup tier is no longer a user-facing setting.
+func normalizeLegacyMCPTiers(c *Config) {
+	if c == nil {
+		return
+	}
+	c.Codegraph.Tier = ""
+	for i := range c.Plugins {
+		c.Plugins[i].Tier = ""
+	}
+}
+
+func migrateLegacyMCPTiersFile(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	next, changed := stripLegacyMCPTierLines(string(raw))
+	if !changed {
+		return nil
+	}
+	return os.WriteFile(path, []byte(next), info.Mode().Perm())
+}
+
+func stripLegacyMCPTierLines(raw string) (string, bool) {
+	lines := strings.Split(raw, "\n")
+	section := ""
+	changed := false
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if header := tomlSectionHeader(line); header != "" {
+			section = header
+		}
+		if (section == "codegraph" || section == "plugins") && isTOMLKeyAssignment(line, "tier") {
+			changed = true
+			continue
+		}
+		out = append(out, line)
+	}
+	return strings.Join(out, "\n"), changed
+}
+
+func tomlSectionHeader(line string) string {
+	trimmed := strings.TrimSpace(line)
+	if !strings.HasPrefix(trimmed, "[") {
+		return ""
+	}
+	if i := strings.Index(trimmed, "#"); i >= 0 {
+		trimmed = strings.TrimSpace(trimmed[:i])
+	}
+	switch trimmed {
+	case "[codegraph]":
+		return "codegraph"
+	case "[[plugins]]":
+		return "plugins"
+	default:
+		return "other"
+	}
+}
+
+func isTOMLKeyAssignment(line, key string) bool {
+	trimmed := strings.TrimSpace(line)
+	if strings.HasPrefix(trimmed, "#") || !strings.HasPrefix(trimmed, key) {
+		return false
+	}
+	rest := strings.TrimSpace(strings.TrimPrefix(trimmed, key))
+	return strings.HasPrefix(rest, "=")
+}
+
+// normalizeLegacyProviderModels repairs provider entries written by older
+// desktop builds that carried the official provider name/endpoint but omitted the
+// model field. The repair is intentionally narrow: valid user-provided model
+// lists are left untouched, while known official aliases get the model implied by
+// their preset name so model pickers and provider validation have an option.
+func normalizeLegacyProviderModels(c *Config) {
+	if c == nil {
+		return
+	}
+	for i := range c.Providers {
+		p := &c.Providers[i]
+		if providerHasAnyModel(*p) {
+			continue
+		}
+		if model := legacyOfficialProviderModel(p.Name); model != "" {
+			p.Model = model
+		}
+	}
+}
+
+func legacyOfficialProviderModel(name string) string {
+	switch strings.TrimSpace(name) {
+	case "deepseek-flash":
+		return "deepseek-v4-flash"
+	case "deepseek-pro":
+		return "deepseek-v4-pro"
+	case "mimo-api", "mimo-pro":
+		return "mimo-v2.5-pro"
+	case "mimo-flash":
+		return "mimo-v2.5"
+	default:
+		return ""
+	}
+}
+
+func normalizeDesktopOfficialProviderAccess(c *Config) {
+	if c == nil || len(c.Desktop.ProviderAccess) == 0 {
+		return
+	}
+	seen := desktopProviderAccessMap(nil)
+	next := make([]string, 0, len(c.Desktop.ProviderAccess))
+	includeMimoFlash := false
+	for _, name := range c.Desktop.ProviderAccess {
+		if strings.TrimSpace(name) == "mimo-flash" {
+			includeMimoFlash = true
+		}
+		name = canonicalDesktopOfficialProviderName(name)
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		next = append(next, name)
+	}
+	c.Desktop.ProviderAccess = next
+	if seen["deepseek"] {
+		ensureDeepSeekOfficialProvider(c)
+	}
+	if seen["mimo-api"] {
+		ensureMimoAPIProvider(c)
+	}
+	if seen["mimo-token-plan"] {
+		ensureMimoTokenPlanProvider(c, includeMimoFlash)
+	}
+	retargetDesktopOfficialRefs(c, seen)
+}
+
+// NormalizeLegacyDesktopProviderAccess seeds the desktop provider-access list
+// for configs written before Settings tracked explicit provider access. Callers
+// should only use this when they know the TOML did not declare provider_access;
+// an explicit empty list means the user removed all access entries.
+func NormalizeLegacyDesktopProviderAccess(c *Config) {
+	if c == nil || len(c.Desktop.ProviderAccess) > 0 {
+		return
+	}
+	seen := desktopProviderAccessMap(nil)
+	var access []string
+	add := func(name string) {
+		name = canonicalDesktopOfficialProviderName(name)
+		if name == "" || seen[name] {
+			return
+		}
+		seen[name] = true
+		access = append(access, name)
+	}
+	addRef := func(ref string) {
+		if entry, ok := c.ResolveModel(ref); ok {
+			if !entry.Configured() {
+				return
+			}
+			add(entry.Name)
+		}
+	}
+	addRef(c.DefaultModel)
+	addRef(c.Agent.PlannerModel)
+	addRef(c.Agent.SubagentModel)
+	addRef(c.Agent.AutoPlanClassifier)
+	for _, ref := range c.Agent.SubagentModels {
+		addRef(ref)
+	}
+	for i := range c.Providers {
+		p := &c.Providers[i]
+		if p.Configured() {
+			add(p.Name)
+		}
+	}
+	if len(access) == 0 {
+		return
+	}
+	c.Desktop.ProviderAccess = access
+	normalizeDesktopOfficialProviderAccess(c)
+}
+
+func canonicalDesktopOfficialProviderName(name string) string {
+	switch strings.TrimSpace(name) {
+	case "deepseek-flash", "deepseek-pro":
+		return "deepseek"
+	case "mimo", "xiaomi-mimo", "xiaomi_mimo":
+		return "mimo-api"
+	case "mimo-pro", "mimo-flash":
+		return "mimo-token-plan"
+	default:
+		return strings.TrimSpace(name)
+	}
+}
+
+// CanonicalDesktopOfficialProviderName returns the Settings Center provider ID
+// for built-in official provider aliases.
+func CanonicalDesktopOfficialProviderName(name string) string {
+	return canonicalDesktopOfficialProviderName(name)
+}
+
+func desktopProviderAccessMap(names []string) map[string]bool {
+	out := map[string]bool{}
+	for _, name := range names {
+		name = canonicalDesktopOfficialProviderName(name)
+		if name != "" {
+			out[name] = true
+		}
+	}
+	return out
+}
+
+func ensureDeepSeekOfficialProvider(c *Config) {
+	if _, ok := c.Provider("deepseek"); ok {
+		return
+	}
+	entry := ProviderEntry{
+		Name:          "deepseek",
+		Kind:          "openai",
+		BaseURL:       "https://api.deepseek.com",
+		Models:        []string{"deepseek-v4-flash", "deepseek-v4-pro"},
+		Default:       "deepseek-v4-flash",
+		APIKeyEnv:     "DEEPSEEK_API_KEY",
+		BalanceURL:    "https://api.deepseek.com/user/balance",
+		ContextWindow: 1_000_000,
+	}
+	if old, ok := c.Provider("deepseek-flash"); ok {
+		entry = officialProviderFromLegacy(entry, old)
+		entry.Models = mergeModelLists([]string{"deepseek-v4-flash", "deepseek-v4-pro"}, old.ModelList())
+		entry.Default = firstKnownModel(entry.Default, entry.Models, "deepseek-v4-flash")
+	}
+	c.Providers = append(c.Providers, entry)
+}
+
+func ensureMimoAPIProvider(c *Config) {
+	if _, ok := c.Provider("mimo-api"); ok {
+		return
+	}
+	c.Providers = append(c.Providers, ProviderEntry{
+		Name:          "mimo-api",
+		Kind:          "openai",
+		BaseURL:       "https://api.xiaomimimo.com/v1",
+		Models:        []string{"mimo-v2.5-pro"},
+		Default:       "mimo-v2.5-pro",
+		APIKeyEnv:     "MIMO_API_KEY",
+		ContextWindow: 1_048_576,
+		NoProxy:       true,
+	})
+}
+
+func ensureMimoTokenPlanProvider(c *Config, includeMimoFlash bool) {
+	if _, ok := c.Provider("mimo-token-plan"); ok {
+		return
+	}
+	entry := ProviderEntry{
+		Name:          "mimo-token-plan",
+		Kind:          "openai",
+		BaseURL:       "https://token-plan-cn.xiaomimimo.com/v1",
+		Models:        []string{"mimo-v2.5-pro"},
+		Default:       "mimo-v2.5-pro",
+		APIKeyEnv:     "MIMO_API_KEY",
+		ContextWindow: 1_048_576,
+		NoProxy:       true,
+	}
+	if old, ok := c.Provider("mimo-pro"); ok {
+		entry = officialProviderFromLegacy(entry, old)
+		entry.Models = mergeModelLists([]string{"mimo-v2.5-pro"}, old.ModelList())
+		entry.Default = firstKnownModel(entry.Default, entry.Models, "mimo-v2.5-pro")
+	}
+	if old, ok := c.Provider("mimo-flash"); includeMimoFlash && ok {
+		if !providerHasAnyModel(entry) {
+			entry = officialProviderFromLegacy(entry, old)
+		}
+		entry.Models = mergeModelLists(entry.Models, old.ModelList())
+		entry.Default = firstKnownModel(entry.Default, entry.Models, entry.Default)
+	}
+	c.Providers = append(c.Providers, entry)
+}
+
+func officialProviderFromLegacy(entry ProviderEntry, old *ProviderEntry) ProviderEntry {
+	entry.Kind = old.Kind
+	entry.BaseURL = old.BaseURL
+	entry.ModelsURL = old.ModelsURL
+	entry.APIKeyEnv = old.APIKeyEnv
+	entry.BalanceURL = old.BalanceURL
+	entry.ContextWindow = old.ContextWindow
+	entry.Price = old.Price
+	entry.Thinking = old.Thinking
+	entry.Effort = old.Effort
+	entry.ReasoningProtocol = old.ReasoningProtocol
+	entry.SupportedEfforts = append([]string(nil), old.SupportedEfforts...)
+	entry.DefaultEffort = old.DefaultEffort
+	entry.NoProxy = old.NoProxy
+	return entry
+}
+
+func mergeModelLists(primary, extra []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(primary)+len(extra))
+	for _, list := range [][]string{primary, extra} {
+		for _, model := range list {
+			model = strings.TrimSpace(model)
+			if model == "" || seen[model] {
+				continue
+			}
+			seen[model] = true
+			out = append(out, model)
+		}
+	}
+	return out
+}
+
+func firstKnownModel(current string, models []string, fallback string) string {
+	current = strings.TrimSpace(current)
+	for _, model := range models {
+		if model == current {
+			return current
+		}
+	}
+	for _, model := range models {
+		if model == fallback {
+			return fallback
+		}
+	}
+	if len(models) > 0 {
+		return models[0]
+	}
+	return ""
+}
+
+func retargetDesktopOfficialRefs(c *Config, access map[string]bool) {
+	c.DefaultModel = retargetDesktopOfficialRef(c.DefaultModel, access)
+	c.Agent.PlannerModel = retargetDesktopOfficialRef(c.Agent.PlannerModel, access)
+	c.Agent.SubagentModel = retargetDesktopOfficialRef(c.Agent.SubagentModel, access)
+	c.Agent.AutoPlanClassifier = retargetDesktopOfficialRef(c.Agent.AutoPlanClassifier, access)
+	for skill, ref := range c.Agent.SubagentModels {
+		c.Agent.SubagentModels[skill] = retargetDesktopOfficialRef(ref, access)
+	}
+}
+
+func retargetDesktopOfficialRef(ref string, access map[string]bool) string {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return ""
+	}
+	provider, model, hasModel := strings.Cut(ref, "/")
+	switch provider {
+	case "deepseek-flash":
+		if !access["deepseek"] {
+			return ref
+		}
+		if !hasModel || strings.TrimSpace(model) == "" {
+			model = "deepseek-v4-flash"
+		}
+		return "deepseek/" + model
+	case "deepseek-pro":
+		if !access["deepseek"] {
+			return ref
+		}
+		if !hasModel || strings.TrimSpace(model) == "" {
+			model = "deepseek-v4-pro"
+		}
+		return "deepseek/" + model
+	case "mimo-pro":
+		if !access["mimo-token-plan"] {
+			return ref
+		}
+		if !hasModel || strings.TrimSpace(model) == "" {
+			model = "mimo-v2.5-pro"
+		}
+		return "mimo-token-plan/" + model
+	case "mimo", "xiaomi-mimo", "xiaomi_mimo":
+		if !access["mimo-api"] {
+			return ref
+		}
+		if !hasModel || strings.TrimSpace(model) == "" {
+			model = "mimo-v2.5-pro"
+		}
+		return "mimo-api/" + model
+	case "mimo-flash":
+		if !access["mimo-token-plan"] {
+			return ref
+		}
+		if !hasModel || strings.TrimSpace(model) == "" {
+			model = "mimo-v2.5"
+		}
+		return "mimo-token-plan/" + model
+	default:
+		return ref
+	}
 }
 
 func userConfigPath() string {
@@ -902,7 +1546,7 @@ func SourcePathForRoot(root string) string {
 
 // WriteFile writes the configuration to path as annotated TOML.
 func (c *Config) WriteFile(path string) error {
-	return os.WriteFile(path, []byte(RenderTOML(c)), 0o644)
+	return os.WriteFile(path, []byte(RenderTOMLForScope(c, renderScopeForPath(path))), 0o644)
 }
 
 // Provider returns the named provider entry.
@@ -929,6 +1573,9 @@ func (c *Config) ResolveModel(ref string) (*ProviderEntry, bool) {
 	if ref == "" {
 		return nil, false
 	}
+	if access := desktopProviderAccessMap(c.Desktop.ProviderAccess); len(access) > 0 {
+		ref = retargetDesktopOfficialRef(ref, access)
+	}
 	// "provider/model"
 	if prov, model, ok := strings.Cut(ref, "/"); ok {
 		if e, found := c.Provider(prov); found && e.HasModel(model) {
@@ -952,6 +1599,28 @@ func (c *Config) ResolveModel(ref string) (*ProviderEntry, bool) {
 		}
 	}
 	return nil, false
+}
+
+// ResolveModelWithFallback resolves a model reference to the canonical
+// "provider/model" form used by the desktop runtime. If ref is stale or empty,
+// it falls back to the first provider with at least one model.
+func (c *Config) ResolveModelWithFallback(ref string) (resolvedRef string, fallback bool, ok bool) {
+	if strings.TrimSpace(ref) != "" {
+		if e, found := c.ResolveModel(ref); found {
+			return e.Name + "/" + e.Model, false, true
+		}
+	}
+	for i := range c.Providers {
+		p := &c.Providers[i]
+		// Skip providers with no models or no API key: falling back onto a keyless
+		// provider just boots the tab onto something that fails on first use. Mirrors
+		// the Configured() gate the provider-removal/selection paths already apply.
+		if len(p.ModelList()) == 0 || !p.Configured() {
+			continue
+		}
+		return p.Name + "/" + p.DefaultModel(), true, true
+	}
+	return "", false, false
 }
 
 // APIKey resolves the entry's API key from its api_key_env.

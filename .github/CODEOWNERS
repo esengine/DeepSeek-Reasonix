@@ -1,3 +1,3 @@
-# Every pull request requires review from the maintainer.
-# The repo owner is optional (can review anything, but is not required).
-* @SivanCola
+# Every pull request requests review from the maintainers below.
+# Either maintainer can review and merge any change.
+* @SivanCola @esengine

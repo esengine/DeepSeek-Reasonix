@@ -1,14 +1,17 @@
 package main
 
 import (
+	"context"
 	"fmt"
-	"io"
 	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/boot"
 	"reasonix/internal/config"
+	"reasonix/internal/control"
 	"reasonix/internal/provider"
 )
 
@@ -22,15 +25,21 @@ import (
 // --- read ---
 
 type ProviderView struct {
-	Name          string   `json:"name"`
-	Kind          string   `json:"kind"`
-	BaseURL       string   `json:"baseUrl"`
-	Models        []string `json:"models"`
-	Default       string   `json:"default"`
-	APIKeyEnv     string   `json:"apiKeyEnv"`
-	KeySet        bool     `json:"keySet"` // the env var currently resolves to a non-empty value
-	BalanceURL    string   `json:"balanceUrl"`
-	ContextWindow int      `json:"contextWindow"`
+	Name              string   `json:"name"`
+	BuiltIn           bool     `json:"builtIn"`
+	Added             bool     `json:"added"`
+	Kind              string   `json:"kind"`
+	BaseURL           string   `json:"baseUrl"`
+	Models            []string `json:"models"`
+	ModelsURL         string   `json:"modelsUrl"`
+	Default           string   `json:"default"`
+	APIKeyEnv         string   `json:"apiKeyEnv"`
+	KeySet            bool     `json:"keySet"` // the env var currently resolves to a non-empty value
+	BalanceURL        string   `json:"balanceUrl"`
+	ContextWindow     int      `json:"contextWindow"`
+	ReasoningProtocol string   `json:"reasoningProtocol"`
+	SupportedEfforts  []string `json:"supportedEfforts"`
+	DefaultEffort     string   `json:"defaultEffort"`
 }
 
 type PermissionsView struct {
@@ -70,14 +79,22 @@ type AgentView struct {
 
 // SettingsView is the whole Settings panel payload.
 type SettingsView struct {
-	DefaultModel string          `json:"defaultModel"`
-	PlannerModel string          `json:"plannerModel"`
-	Providers    []ProviderView  `json:"providers"`
-	Permissions  PermissionsView `json:"permissions"`
-	Sandbox      SandboxView     `json:"sandbox"`
-	Network      NetworkView     `json:"network"`
-	Agent        AgentView       `json:"agent"`
-	ConfigPath   string          `json:"configPath"`
+	DefaultModel      string          `json:"defaultModel"`
+	PlannerModel      string          `json:"plannerModel"`
+	SubagentModel     string          `json:"subagentModel"`
+	SubagentEffort    string          `json:"subagentEffort"`
+	AutoPlan          string          `json:"autoPlan"`
+	Providers         []ProviderView  `json:"providers"`
+	OfficialProviders []ProviderView  `json:"officialProviders"`
+	Permissions       PermissionsView `json:"permissions"`
+	Sandbox           SandboxView     `json:"sandbox"`
+	Network           NetworkView     `json:"network"`
+	Agent             AgentView       `json:"agent"`
+	DesktopLanguage   string          `json:"desktopLanguage"`
+	DesktopTheme      string          `json:"desktopTheme"`
+	DesktopThemeStyle string          `json:"desktopThemeStyle"`
+	CloseBehavior     string          `json:"closeBehavior"`
+	ConfigPath        string          `json:"configPath"`
 	// ProviderKinds lists the provider implementations the kernel actually
 	// registered (provider.Kinds()), so the editor's "kind" picker offers only
 	// kinds that resolve — selecting an unregistered one would fail the rebuild.
@@ -94,30 +111,137 @@ func nonNil(s []string) []string {
 	return s
 }
 
+func providerRemovalFallbackRef(c *config.Config, name string) string {
+	for i := range c.Providers {
+		p := &c.Providers[i]
+		if p.Name == name || !p.Configured() || len(p.ModelList()) == 0 {
+			continue
+		}
+		return p.Name + "/" + p.DefaultModel()
+	}
+	return ""
+}
+
+func desktopModelRefsProvider(c *config.Config, ref, name string) bool {
+	if config.ModelRefsProvider(ref, name) {
+		return true
+	}
+	if e, ok := c.ResolveModel(ref); ok {
+		return e.Name == name
+	}
+	return false
+}
+
+func builtInProviderNames() map[string]bool {
+	out := map[string]bool{}
+	for _, p := range config.Default().Providers {
+		out[p.Name] = true
+	}
+	for _, name := range []string{"deepseek", "deepseek-flash", "mimo-api", "mimo-token-plan", "mimo-pro"} {
+		out[name] = true
+	}
+	return out
+}
+
+func providerAccessSet(names []string) map[string]bool {
+	out := map[string]bool{}
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name != "" {
+			out[name] = true
+		}
+	}
+	return out
+}
+
+func addProviderAccess(c *config.Config, names ...string) {
+	seen := providerAccessSet(c.Desktop.ProviderAccess)
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" || seen[name] {
+			continue
+		}
+		c.Desktop.ProviderAccess = append(c.Desktop.ProviderAccess, name)
+		seen[name] = true
+	}
+}
+
+func removeProviderAccess(c *config.Config, names ...string) {
+	remove := providerAccessSet(names)
+	if len(remove) == 0 {
+		return
+	}
+	out := c.Desktop.ProviderAccess[:0]
+	for _, name := range c.Desktop.ProviderAccess {
+		if !remove[name] {
+			out = append(out, name)
+		}
+	}
+	c.Desktop.ProviderAccess = out
+}
+
+func providerViewFromEntry(p config.ProviderEntry, builtIn, added bool) ProviderView {
+	return ProviderView{
+		Name: p.Name, BuiltIn: builtIn, Added: added, Kind: p.Kind, BaseURL: p.BaseURL,
+		Models: nonNil(p.ChatModelList()), ModelsURL: p.ModelsURL, Default: p.DefaultModel(),
+		APIKeyEnv:         p.APIKeyEnv,
+		KeySet:            p.APIKeyEnv != "" && os.Getenv(p.APIKeyEnv) != "",
+		BalanceURL:        p.BalanceURL,
+		ContextWindow:     p.ContextWindow,
+		ReasoningProtocol: p.ReasoningProtocol,
+		SupportedEfforts:  nonNil(p.SupportedEfforts),
+		DefaultEffort:     p.DefaultEffort,
+	}
+}
+
+func officialProviderViews(added map[string]bool) []ProviderView {
+	var out []ProviderView
+	for _, kind := range []string{"deepseek", "mimo-api", "mimo-token-plan"} {
+		entries, _, err := officialProviderTemplate(kind)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			out = append(out, providerViewFromEntry(entry, true, added[entry.Name]))
+		}
+	}
+	return out
+}
+
 // Settings returns the current configuration for the Settings panel.
 func (a *App) Settings() SettingsView {
-	cfg, err := config.Load()
+	cfg, cfgPath, err := a.loadDesktopUserConfigForEdit()
 	if err != nil {
 		return SettingsView{
-			Providers:     []ProviderView{},
-			ProviderKinds: nonNil(provider.Kinds()),
+			Providers:         []ProviderView{},
+			OfficialProviders: officialProviderViews(map[string]bool{}),
+			ProviderKinds:     nonNil(provider.Kinds()),
 			Permissions: PermissionsView{
 				Mode:  "ask",
 				Allow: []string{},
 				Ask:   []string{},
 				Deny:  []string{},
 			},
-			Sandbox: SandboxView{Bash: "enforce", AllowWrite: []string{}},
+			Sandbox:           SandboxView{Bash: "enforce", AllowWrite: []string{}},
+			AutoPlan:          "off",
+			DesktopTheme:      "dark",
+			DesktopThemeStyle: "graphite",
+			CloseBehavior:     "background",
 		}
 	}
+	ctrl := a.activeCtrl()
 	bash := cfg.Sandbox.Bash
 	if bash == "" {
 		bash = "enforce"
 	}
 	v := SettingsView{
-		DefaultModel: cfg.DefaultModel,
-		PlannerModel: cfg.Agent.PlannerModel,
-		Providers:    []ProviderView{},
+		DefaultModel:      cfg.DefaultModel,
+		PlannerModel:      cfg.Agent.PlannerModel,
+		SubagentModel:     cfg.Agent.SubagentModel,
+		SubagentEffort:    cfg.Agent.SubagentEffort,
+		AutoPlan:          desktopAutoPlanMode(cfg.Agent.AutoPlan),
+		Providers:         []ProviderView{},
+		OfficialProviders: []ProviderView{},
 		Permissions: PermissionsView{
 			Mode:  orDefault(cfg.Permissions.Mode, "ask"),
 			Allow: nonNil(cfg.Permissions.Allow),
@@ -140,21 +264,21 @@ func (a *App) Settings() SettingsView {
 				Password: cfg.Network.Proxy.Password,
 			},
 		},
-		Agent:         AgentView{Temperature: cfg.Agent.Temperature, MaxSteps: cfg.Agent.MaxSteps, SystemPrompt: cfg.Agent.SystemPrompt},
-		ConfigPath:    config.SourcePath(),
-		ProviderKinds: provider.Kinds(),
-		Bypass:        a.ctrl != nil && a.ctrl.Bypass(),
+		Agent:             AgentView{Temperature: cfg.Agent.Temperature, MaxSteps: cfg.Agent.MaxSteps, SystemPrompt: cfg.Agent.SystemPrompt},
+		DesktopLanguage:   cfg.DesktopLanguage(),
+		DesktopTheme:      cfg.DesktopTheme(),
+		DesktopThemeStyle: cfg.DesktopThemeStyle(),
+		CloseBehavior:     cfg.DesktopCloseBehavior(),
+		ConfigPath:        cfgPath,
+		ProviderKinds:     nonNil(provider.Kinds()),
+		Bypass:            ctrl != nil && ctrl.Bypass(),
 	}
+	builtIns := builtInProviderNames()
+	added := providerAccessSet(cfg.Desktop.ProviderAccess)
+	v.OfficialProviders = officialProviderViews(added)
 	for i := range cfg.Providers {
 		p := &cfg.Providers[i]
-		v.Providers = append(v.Providers, ProviderView{
-			Name: p.Name, Kind: p.Kind, BaseURL: p.BaseURL,
-			Models: nonNil(p.ModelList()), Default: p.DefaultModel(),
-			APIKeyEnv:     p.APIKeyEnv,
-			KeySet:        p.APIKeyEnv != "" && os.Getenv(p.APIKeyEnv) != "",
-			BalanceURL:    p.BalanceURL,
-			ContextWindow: p.ContextWindow,
-		})
+		v.Providers = append(v.Providers, providerViewFromEntry(*p, builtIns[p.Name], added[p.Name]))
 	}
 	return v
 }
@@ -173,11 +297,10 @@ func orDefault(s, def string) string {
 // keys are account-level, not per-project: writing them to the global config
 // rather than the cwd's reasonix.toml is what lets them survive a workspace switch.
 func (a *App) applyConfigChange(mutate func(*config.Config) error) error {
-	path := config.UserConfigPath()
-	if path == "" {
-		return fmt.Errorf("cannot resolve user config directory")
+	cfg, path, err := a.loadDesktopUserConfigForEdit()
+	if err != nil {
+		return err
 	}
-	cfg := config.LoadForEdit(path)
 	if err := mutate(cfg); err != nil {
 		return err
 	}
@@ -187,6 +310,97 @@ func (a *App) applyConfigChange(mutate func(*config.Config) error) error {
 	return a.rebuild()
 }
 
+func (a *App) applyConfigOnly(mutate func(*config.Config) error) error {
+	cfg, path, err := a.loadDesktopUserConfigForEdit()
+	if err != nil {
+		return err
+	}
+	if err := mutate(cfg); err != nil {
+		return err
+	}
+	return cfg.SaveTo(path)
+}
+
+func (a *App) loadDesktopUserConfigForEdit() (*config.Config, string, error) {
+	userPath := config.UserConfigPath()
+	if userPath == "" {
+		return nil, "", fmt.Errorf("cannot resolve user config directory")
+	}
+	if _, err := os.Stat(userPath); err == nil {
+		cfg := config.LoadForEdit(userPath)
+		normalizeLegacyDesktopProviderAccessForSettings(cfg, userPath)
+		return cfg, userPath, nil
+	}
+	cfg := config.LoadForEdit(userPath)
+	legacyPath := config.SourcePathForRoot(a.activeWorkspaceRoot())
+	if legacyPath == "" || sameConfigPath(legacyPath, userPath) {
+		normalizeLegacyDesktopProviderAccessForSettings(cfg, userPath)
+		return cfg, userPath, nil
+	}
+	legacyCfg := config.LoadForEdit(legacyPath)
+	normalizeLegacyDesktopProviderAccessForSettings(legacyCfg, legacyPath)
+	legacyCfg.ConfigVersion = config.Default().ConfigVersion
+	return legacyCfg, userPath, nil
+}
+
+func normalizeLegacyDesktopProviderAccessForSettings(cfg *config.Config, path string) {
+	if cfg == nil || len(cfg.Desktop.ProviderAccess) > 0 || configDeclaresProviderAccess(path) {
+		return
+	}
+	config.NormalizeLegacyDesktopProviderAccess(cfg)
+}
+
+func configDeclaresProviderAccess(path string) bool {
+	if strings.TrimSpace(path) == "" {
+		return false
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(body), "\n") {
+		if before, _, ok := strings.Cut(line, "#"); ok {
+			line = before
+		}
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "provider_access") {
+			rest := strings.TrimSpace(strings.TrimPrefix(line, "provider_access"))
+			return strings.HasPrefix(rest, "=")
+		}
+	}
+	return false
+}
+
+func (a *App) activeWorkspaceRoot() string {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if tab := a.activeTabLocked(); tab != nil {
+		return tab.WorkspaceRoot
+	}
+	return "."
+}
+
+func projectConfigPathForRoot(root string) string {
+	if strings.TrimSpace(root) == "" || root == "." {
+		return "reasonix.toml"
+	}
+	return filepath.Join(root, "reasonix.toml")
+}
+
+func sameConfigPath(a, b string) bool {
+	a = strings.TrimSpace(a)
+	b = strings.TrimSpace(b)
+	if a == "" || b == "" {
+		return false
+	}
+	aAbs, aErr := filepath.Abs(a)
+	bAbs, bErr := filepath.Abs(b)
+	if aErr == nil && bErr == nil {
+		return filepath.Clean(aAbs) == filepath.Clean(bAbs)
+	}
+	return filepath.Clean(a) == filepath.Clean(b)
+}
+
 // rebuild tears down the controller and rebuilds it from the (just-changed)
 // config, carrying the conversation forward. It keeps the active model if it
 // still resolves; otherwise it falls back to the new default. Mirrors SetModel.
@@ -194,36 +408,53 @@ func (a *App) rebuild() error {
 	if a.ctx == nil {
 		return nil
 	}
+	tab := a.activeTab()
+	if tab == nil {
+		return fmt.Errorf("no active tab")
+	}
 	var carried []provider.Message
 	prevPath := ""
-	if a.ctrl != nil {
-		prevPath = a.ctrl.SessionPath()
-		_ = a.ctrl.Snapshot()
-		carried = a.ctrl.History()
+	if tab.Ctrl != nil {
+		prevPath = tab.Ctrl.SessionPath()
+		_ = tab.Ctrl.Snapshot()
+		carried = tab.Ctrl.History()
+		tab.Ctrl.Close()
 	}
-	model := a.model
-	if cfg, err := config.Load(); err == nil {
-		if _, ok := cfg.ResolveModel(model); !ok {
-			model = cfg.DefaultModel
-			if e, ok := cfg.ResolveModel(model); ok {
-				model = e.Name + "/" + e.Model
+	model := tab.model
+	if cfg, err := config.LoadForRoot(tab.WorkspaceRoot); err == nil {
+		if resolved, fallback, ok := cfg.ResolveModelWithFallback(model); ok {
+			if fallback && strings.TrimSpace(model) != "" {
+				a.noticeForTab(tab.ID, fmt.Sprintf("model %q is no longer available; switched to %s", model, resolved))
 			}
+			model = resolved
 		}
 	}
-	ctrl, err := boot.Build(a.ctx, boot.Options{Model: model, RequireKey: false, Sink: a.sink, Stderr: io.Discard})
+	ctrl, err := boot.Build(a.bootContext(), boot.Options{
+		Model: model, RequireKey: false,
+		Sink:           tab.sink,
+		WorkspaceRoot:  tab.WorkspaceRoot,
+		EffortOverride: cloneStringPtr(tab.effort),
+	})
 	if err != nil {
-		a.startupErr = err.Error()
+		a.mu.Lock()
+		tab.StartupErr = err.Error()
+		tab.Ready = true
+		a.mu.Unlock()
+		a.emitReady(a.ctx)
 		return err
 	}
-	old := a.ctrl
-	a.ctrl = ctrl
-	a.model = model
-	a.label = ctrl.Label()
-	a.startupErr = ""
-	if old != nil {
-		old.Close()
-	}
+	a.bindControllerDisplayRecorder(ctrl)
+	a.mu.Lock()
+	tab.Ctrl = ctrl
+	tab.model = model
+	tab.Label = ctrl.Label()
+	tab.StartupErr = ""
+	tab.Ready = true
+	a.saveTabsLocked()
+	a.mu.Unlock()
+	a.emitReady(a.ctx)
 	ctrl.EnableInteractiveApproval()
+	applyTabModeToController(ctrl, tab.mode)
 	path := agent.ContinueSessionPath(prevPath, ctrl.SessionDir(), ctrl.Label())
 	if len(carried) > 0 {
 		carried = withFreshSystemPrompt(carried, systemPromptFrom(ctrl.History()))
@@ -231,6 +462,7 @@ func (a *App) rebuild() error {
 	} else if path != "" {
 		ctrl.SetSessionPath(path)
 	}
+	a.persistTabSessionPath(tab, path)
 	return nil
 }
 
@@ -264,16 +496,22 @@ func withFreshSystemPrompt(messages []provider.Message, system string) []provide
 
 // SetDefaultModel sets the config default and switches the live model to it.
 func (a *App) SetDefaultModel(ref string) error {
-	prev := a.model
-	a.model = ref
+	tab := a.activeTab()
+	if tab == nil {
+		return fmt.Errorf("no active tab")
+	}
+	prev := tab.model
+	tab.model = ref
 	if err := a.applyConfigChange(func(c *config.Config) error {
-		if _, ok := c.ResolveModel(ref); !ok {
-			return fmt.Errorf("unknown model %q", ref)
+		resolved, err := selectableDesktopModelRef(c, ref)
+		if err != nil {
+			return err
 		}
-		c.DefaultModel = ref
+		c.DefaultModel = resolved
+		tab.model = resolved
 		return nil
 	}); err != nil {
-		a.model = prev
+		tab.model = prev
 		return err
 	}
 	return nil
@@ -283,23 +521,150 @@ func (a *App) SetDefaultModel(ref string) error {
 func (a *App) SetPlannerModel(ref string) error {
 	return a.applyConfigChange(func(c *config.Config) error {
 		if ref != "" {
-			if _, ok := c.ResolveModel(ref); !ok {
-				return fmt.Errorf("unknown planner model %q", ref)
+			resolved, err := selectableDesktopModelRef(c, ref)
+			if err != nil {
+				return err
 			}
+			ref = resolved
 		}
 		c.Agent.PlannerModel = ref
 		return nil
 	})
 }
 
+// SetSubagentModel sets (or clears) the default model used by subagent entry points.
+func (a *App) SetSubagentModel(ref string) error {
+	return a.applyConfigChange(func(c *config.Config) error {
+		ref = strings.TrimSpace(ref)
+		if ref != "" {
+			resolved, err := selectableDesktopModelRef(c, ref)
+			if err != nil {
+				return err
+			}
+			ref = resolved
+		}
+		c.Agent.SubagentModel = ref
+		return nil
+	})
+}
+
+func selectableDesktopModelRef(c *config.Config, ref string) (string, error) {
+	entry, ok := c.ResolveModel(ref)
+	if !ok {
+		return "", fmt.Errorf("unknown model %q", ref)
+	}
+	if !modelProviderAccessAllowed(providerAccessSet(c.Desktop.ProviderAccess), entry.Name) {
+		return "", fmt.Errorf("model %q is not available because provider %q is not added", ref, entry.Name)
+	}
+	if !entry.Configured() {
+		return "", fmt.Errorf("model %q is not available because provider %q has no key", ref, entry.Name)
+	}
+	return entry.Name + "/" + entry.Model, nil
+}
+
+// SetSubagentEffort sets (or clears) the default effort used by subagent entry points.
+func (a *App) SetSubagentEffort(level string) error {
+	return a.applyConfigChange(func(c *config.Config) error {
+		level = strings.TrimSpace(level)
+		if level == "" || level == "auto" {
+			c.Agent.SubagentEffort = ""
+			return nil
+		}
+		model := strings.TrimSpace(c.Agent.SubagentModel)
+		if model == "" {
+			model = c.DefaultModel
+		}
+		entry, ok := c.ResolveModel(model)
+		if !ok {
+			return fmt.Errorf("unknown subagent model %q", model)
+		}
+		effort, err := config.NormalizeEffort(entry, level)
+		if err != nil {
+			return err
+		}
+		c.Agent.SubagentEffort = effort
+		return nil
+	})
+}
+
+// SetAutoPlan updates the automatic plan-mode gate (off|on).
+func (a *App) SetAutoPlan(mode string) error {
+	return a.applyConfigChange(func(c *config.Config) error { return c.SetAutoPlan(mode) })
+}
+
+func desktopAutoPlanMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "on", "ask":
+		return "on"
+	default:
+		return "off"
+	}
+}
+
+func officialProviderTemplate(kind string) ([]config.ProviderEntry, string, error) {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "deepseek", "deepseek-official":
+		return []config.ProviderEntry{{
+			Name:          "deepseek",
+			Kind:          "openai",
+			BaseURL:       "https://api.deepseek.com",
+			Models:        []string{"deepseek-v4-flash", "deepseek-v4-pro"},
+			Default:       "deepseek-v4-flash",
+			APIKeyEnv:     "DEEPSEEK_API_KEY",
+			BalanceURL:    "https://api.deepseek.com/user/balance",
+			ContextWindow: 1_000_000,
+		}}, "DEEPSEEK_API_KEY", nil
+	case "mimo-api", "xiaomi-mimo", "xiaomi_mimo":
+		return []config.ProviderEntry{{
+			Name:          "mimo-api",
+			Kind:          "openai",
+			BaseURL:       "https://api.xiaomimimo.com/v1",
+			Models:        []string{"mimo-v2.5-pro"},
+			Default:       "mimo-v2.5-pro",
+			APIKeyEnv:     "MIMO_API_KEY",
+			ContextWindow: 1_048_576,
+			NoProxy:       true,
+		}}, "MIMO_API_KEY", nil
+	case "mimo-token-plan", "xiaomi-mimo-token-plan", "xiaomi_mimo_token_plan":
+		return []config.ProviderEntry{{
+			Name:          "mimo-token-plan",
+			Kind:          "openai",
+			BaseURL:       "https://token-plan-cn.xiaomimimo.com/v1",
+			Models:        []string{"mimo-v2.5-pro"},
+			Default:       "mimo-v2.5-pro",
+			APIKeyEnv:     "MIMO_API_KEY",
+			ContextWindow: 1_048_576,
+			NoProxy:       true,
+		}}, "MIMO_API_KEY", nil
+	default:
+		return nil, "", fmt.Errorf("unknown official provider template %q", kind)
+	}
+}
+
 // SaveProvider adds or updates a provider. A single model fills `model`; several
 // fill `models` (with `default`). The shared key/endpoint live on the entry.
 func (a *App) SaveProvider(p ProviderView) error {
 	return a.applyConfigChange(func(c *config.Config) error {
-		e := config.ProviderEntry{
-			Name: p.Name, Kind: p.Kind, BaseURL: p.BaseURL,
-			APIKeyEnv: p.APIKeyEnv, BalanceURL: strings.TrimSpace(p.BalanceURL), ContextWindow: p.ContextWindow,
+		e := config.ProviderEntry{Name: p.Name}
+		for i := range c.Providers {
+			if c.Providers[i].Name == p.Name {
+				e = c.Providers[i]
+				break
+			}
 		}
+		e.Name = p.Name
+		e.Kind = p.Kind
+		e.BaseURL = p.BaseURL
+		e.ModelsURL = p.ModelsURL
+		e.APIKeyEnv = p.APIKeyEnv
+		e.BalanceURL = strings.TrimSpace(p.BalanceURL)
+		e.ContextWindow = p.ContextWindow
+		e.ReasoningProtocol = p.ReasoningProtocol
+		e.SupportedEfforts = p.SupportedEfforts
+		e.DefaultEffort = p.DefaultEffort
+		e.Model = ""
+		e.Models = nil
+		e.Default = ""
 		if len(p.Models) > 0 {
 			e.Model = p.Models[0] // also satisfies validateProvider's model requirement
 			if len(p.Models) > 1 {
@@ -307,13 +672,269 @@ func (a *App) SaveProvider(p ProviderView) error {
 				e.Default = p.Default
 			}
 		}
-		return c.UpsertProvider(e)
+		if err := c.UpsertProvider(e); err != nil {
+			return err
+		}
+		addProviderAccess(c, p.Name)
+		return nil
 	})
 }
 
-// DeleteProvider removes a provider (refused for the current default_model).
+// AddOfficialProviderAccess adds one curated desktop provider template to the
+// Settings > Model > Access list. The runtime default providers still exist
+// independently; this only records the user's explicit access setup.
+func (a *App) AddOfficialProviderAccess(kind, key string) error {
+	entries, keyEnv, err := officialProviderTemplate(kind)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(key) != "" && keyEnv != "" {
+		if err := upsertDotEnv(keyEnv, key); err != nil {
+			return err
+		}
+	}
+	return a.applyConfigChange(func(c *config.Config) error {
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			if err := c.UpsertProvider(e); err != nil {
+				return err
+			}
+			names = append(names, e.Name)
+		}
+		addProviderAccess(c, names...)
+		return nil
+	})
+}
+
+// FetchProviderModels probes the provider's OpenAI-compatible model-list
+// endpoint and returns the available model IDs. This is a settings-only helper:
+// it never touches chat request serialization or provider-visible prompt data.
+func (a *App) FetchProviderModels(p ProviderView) ([]string, error) {
+	e := config.ProviderEntry{
+		Name:      p.Name,
+		BaseURL:   p.BaseURL,
+		ModelsURL: p.ModelsURL,
+		APIKeyEnv: p.APIKeyEnv,
+	}
+	ctx, cancel := context.WithTimeout(a.reqCtx(), 15*time.Second)
+	defer cancel()
+	models, err := e.FetchModels(ctx)
+	if err != nil {
+		return []string{}, err
+	}
+	return nonNil(models), nil
+}
+
+// DeleteProvider removes a provider and retargets open idle tabs that used it.
 func (a *App) DeleteProvider(name string) error {
-	return a.applyConfigChange(func(c *config.Config) error { return c.RemoveProvider(name) })
+	return a.deleteProviderAndRetargetTabs(name)
+}
+
+// RemoveProviderAccess hides a provider from Settings > Model > Access and from
+// settings model pickers. Built-in provider entries remain in the runtime config
+// for back-compat, but visible defaults and idle tabs are retargeted away from
+// the removed access entry when another accessed provider is available. Custom
+// providers are deleted outright.
+func (a *App) RemoveProviderAccess(name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("remove provider access: empty provider name")
+	}
+	if builtInProviderNames()[name] {
+		return a.removeBuiltInProviderAccessAndRetargetTabs(name)
+	}
+	return a.deleteProviderAndRetargetTabs(name)
+}
+
+type providerRemovalTab struct {
+	id   string
+	ctrl *control.Controller
+}
+
+func providerAccessFallbackRef(c *config.Config, name string) string {
+	name = strings.TrimSpace(name)
+	for _, candidate := range c.Desktop.ProviderAccess {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" || candidate == name {
+			continue
+		}
+		p, ok := c.Provider(candidate)
+		if !ok || len(p.ModelList()) == 0 {
+			continue
+		}
+		return p.Name + "/" + p.DefaultModel()
+	}
+	return ""
+}
+
+func retargetProviderReferences(c *config.Config, name, fallbackRef string) {
+	if strings.TrimSpace(fallbackRef) == "" {
+		return
+	}
+	if desktopModelRefsProvider(c, c.DefaultModel, name) {
+		c.DefaultModel = fallbackRef
+	}
+	if desktopModelRefsProvider(c, c.Agent.PlannerModel, name) {
+		c.Agent.PlannerModel = fallbackRef
+	}
+	if desktopModelRefsProvider(c, c.Agent.SubagentModel, name) {
+		c.Agent.SubagentModel = fallbackRef
+	}
+	for skill, ref := range c.Agent.SubagentModels {
+		if desktopModelRefsProvider(c, ref, name) {
+			c.Agent.SubagentModels[skill] = fallbackRef
+		}
+	}
+}
+
+func (a *App) removeBuiltInProviderAccessAndRetargetTabs(name string) error {
+	cfg, path, err := a.loadDesktopUserConfigForEdit()
+	if err != nil {
+		return err
+	}
+	fallbackRef := providerAccessFallbackRef(cfg, name)
+
+	var affected []providerRemovalTab
+	if fallbackRef != "" {
+		a.mu.RLock()
+		for _, id := range a.orderedTabIDsLocked() {
+			tab := a.tabs[id]
+			if tab == nil {
+				continue
+			}
+			ref := tab.model
+			if strings.TrimSpace(ref) == "" {
+				ref = cfg.DefaultModel
+			}
+			if !desktopModelRefsProvider(cfg, ref, name) {
+				continue
+			}
+			if tab.Ctrl != nil && tab.Ctrl.Running() {
+				a.mu.RUnlock()
+				return fmt.Errorf("finish or cancel conversations using %q before removing the provider access", name)
+			}
+			affected = append(affected, providerRemovalTab{id: id, ctrl: tab.Ctrl})
+		}
+		a.mu.RUnlock()
+	}
+
+	retargetProviderReferences(cfg, name, fallbackRef)
+	removeProviderAccess(cfg, name)
+	if err := cfg.SaveTo(path); err != nil {
+		return err
+	}
+	if len(affected) == 0 {
+		return a.rebuild()
+	}
+	for _, item := range affected {
+		if item.ctrl != nil {
+			_ = item.ctrl.Snapshot()
+			item.ctrl.Close()
+		}
+	}
+
+	var rebuildTabs []*WorkspaceTab
+	a.mu.Lock()
+	for _, item := range affected {
+		tab := a.tabs[item.id]
+		if tab == nil {
+			continue
+		}
+		tab.Ctrl = nil
+		tab.model = fallbackRef
+		tab.Label = fallbackRef
+		tab.StartupErr = ""
+		tab.Ready = a.ctx == nil
+		if a.ctx != nil {
+			rebuildTabs = append(rebuildTabs, tab)
+		}
+	}
+	a.saveTabsLocked()
+	a.mu.Unlock()
+
+	for _, tab := range rebuildTabs {
+		go a.buildTabController(tab)
+	}
+	return nil
+}
+
+func (a *App) deleteProviderAndRetargetTabs(name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("remove provider: empty provider name")
+	}
+	cfg, path, err := a.loadDesktopUserConfigForEdit()
+	if err != nil {
+		return err
+	}
+	fallbackRef := providerRemovalFallbackRef(cfg, name)
+
+	var affected []providerRemovalTab
+	a.mu.RLock()
+	for _, id := range a.orderedTabIDsLocked() {
+		tab := a.tabs[id]
+		if tab == nil {
+			continue
+		}
+		ref := tab.model
+		if strings.TrimSpace(ref) == "" {
+			ref = cfg.DefaultModel
+		}
+		if !desktopModelRefsProvider(cfg, ref, name) {
+			continue
+		}
+		if tab.Ctrl != nil && tab.Ctrl.Running() {
+			a.mu.RUnlock()
+			return fmt.Errorf("finish or cancel conversations using %q before deleting the provider", name)
+		}
+		affected = append(affected, providerRemovalTab{id: id, ctrl: tab.Ctrl})
+	}
+	a.mu.RUnlock()
+
+	if len(affected) > 0 && fallbackRef == "" {
+		return fmt.Errorf("remove provider: %q is used by open tabs and no other configured provider exists", name)
+	}
+	if err := cfg.RemoveProvider(name); err != nil {
+		return err
+	}
+	removeProviderAccess(cfg, name)
+	if err := cfg.SaveTo(path); err != nil {
+		return err
+	}
+
+	if len(affected) == 0 {
+		return a.rebuild()
+	}
+	for _, item := range affected {
+		if item.ctrl != nil {
+			_ = item.ctrl.Snapshot()
+			item.ctrl.Close()
+		}
+	}
+
+	var rebuildTabs []*WorkspaceTab
+	a.mu.Lock()
+	for _, item := range affected {
+		tab := a.tabs[item.id]
+		if tab == nil {
+			continue
+		}
+		tab.Ctrl = nil
+		tab.model = fallbackRef
+		tab.Label = fallbackRef
+		tab.StartupErr = ""
+		tab.Ready = a.ctx == nil
+		if a.ctx != nil {
+			rebuildTabs = append(rebuildTabs, tab)
+		}
+	}
+	a.saveTabsLocked()
+	a.mu.Unlock()
+
+	for _, tab := range rebuildTabs {
+		go a.buildTabController(tab)
+	}
+	return nil
 }
 
 // SetProviderKey writes a secret to the global credentials file under the given
@@ -324,6 +945,18 @@ func (a *App) SetProviderKey(apiKeyEnv, value string) error {
 		return fmt.Errorf("this provider has no api_key_env set")
 	}
 	if err := upsertDotEnv(apiKeyEnv, value); err != nil {
+		return err
+	}
+	return a.rebuild()
+}
+
+// ClearProviderKey removes a provider secret from the global credentials file
+// and rebuilds so the provider immediately becomes unauthenticated.
+func (a *App) ClearProviderKey(apiKeyEnv string) error {
+	if strings.TrimSpace(apiKeyEnv) == "" {
+		return fmt.Errorf("this provider has no api_key_env set")
+	}
+	if err := removeDotEnv(apiKeyEnv); err != nil {
 		return err
 	}
 	return a.rebuild()
@@ -373,6 +1006,57 @@ func (a *App) SetNetwork(n NetworkView) error {
 				Password: n.Proxy.Password,
 			},
 		})
+	})
+}
+
+// SetCloseBehavior updates desktop-only window close behavior without rebuilding
+// the active controller. It must stay out of provider-visible prompt/request data.
+func (a *App) SetCloseBehavior(mode string) error {
+	return a.applyConfigOnly(func(c *config.Config) error { return c.SetDesktopCloseBehavior(mode) })
+}
+
+// SetDesktopLanguage updates only the desktop UI language. It deliberately does
+// not touch config.language, which the CLI/model-facing runtime uses.
+func (a *App) SetDesktopLanguage(lang string) error {
+	if err := a.applyConfigOnly(func(c *config.Config) error { return c.SetDesktopLanguage(lang) }); err != nil {
+		return err
+	}
+	a.updateTrayLocale(lang)
+	return nil
+}
+
+// SetTrayLocale mirrors the resolved desktop UI language into the native tray
+// menu. It is runtime-only; the persisted preference remains [desktop].language.
+func (a *App) SetTrayLocale(locale string) error {
+	if locale != "zh" {
+		locale = "en"
+	}
+	a.updateTrayLocale(locale)
+	return nil
+}
+
+// SetDesktopAppearance updates only desktop theme preferences. It does not
+// rebuild the active controller and must stay out of provider-visible requests.
+func (a *App) SetDesktopAppearance(theme, style string) error {
+	return a.applyConfigOnly(func(c *config.Config) error { return c.SetDesktopAppearance(theme, style) })
+}
+
+// MigrateDesktopPreferences imports old browser-local desktop preferences into
+// the user config once. Existing [desktop] values win so stale localStorage never
+// overwrites an explicit config edit.
+func (a *App) MigrateDesktopPreferences(language, theme, style string) error {
+	return a.applyConfigOnly(func(c *config.Config) error {
+		if strings.TrimSpace(c.Desktop.Language) == "" {
+			if err := c.SetDesktopLanguage(language); err != nil {
+				return err
+			}
+		}
+		if strings.TrimSpace(c.Desktop.Theme) == "" && strings.TrimSpace(c.Desktop.ThemeStyle) == "" {
+			if err := c.SetDesktopAppearance(theme, style); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 }
 

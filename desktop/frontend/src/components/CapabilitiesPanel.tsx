@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useId, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { asArray } from "../lib/array";
 import { app, openExternal } from "../lib/bridge";
 import { useT } from "../lib/i18n";
 import type { CapabilitiesView, MCPServerInput, ServerView, SkillRootSkillView, SkillRootView, SkillView } from "../lib/types";
+import { InlineConfirmButton } from "./InlineConfirmButton";
 import { ResizableDrawer } from "./ResizableDrawer";
 import { Tooltip } from "./Tooltip";
 
@@ -13,17 +15,18 @@ type CapTab = "servers" | "skills";
 
 export function CapabilitiesPanel({
   onClose,
+  initialTab = "servers",
 }: {
   onClose: () => void;
+  initialTab?: CapTab;
 }) {
   const t = useT();
   const [view, setView] = useState<CapabilitiesView | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
-  const [confirming, setConfirming] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
-  const [tab, setTab] = useState<CapTab>("servers");
+  const [tab, setTab] = useState<CapTab>(initialTab);
   const [skillQuery, setSkillQuery] = useState("");
   const [expandedSkills, setExpandedSkills] = useState<Set<string>>(() => new Set());
   const [expandedErrors, setExpandedErrors] = useState<Set<string>>(() => new Set());
@@ -31,7 +34,7 @@ export function CapabilitiesPanel({
   const [expandedServerTools, setExpandedServerTools] = useState<Set<string>>(() => new Set());
 
   const reload = useCallback(async () => {
-    setView(await app.Capabilities().catch(() => ({ servers: [], skills: [], skillRoots: [] })));
+    setView(normalizeCapabilitiesView(await app.Capabilities().catch(() => ({ servers: [], skills: [], skillRoots: [] }))));
   }, []);
   useEffect(() => {
     void reload();
@@ -84,7 +87,7 @@ export function CapabilitiesPanel({
   }, [filteredSkills, skillQuery, t, view]);
 
   const serverGroups = useMemo(() => {
-    const servers = view?.servers ?? [];
+    const servers = sortServersForDisplay(view?.servers ?? []);
     return {
       failed: servers.filter((s) => s.status === "failed"),
       active: servers.filter((s) => s.status !== "failed"),
@@ -139,6 +142,11 @@ export function CapabilitiesPanel({
               ✕
             </button>
           </Tooltip>
+          <Tooltip label={t("caps.refresh")}>
+            <button className="chip" disabled={busy} onClick={() => void reload()}>
+              ↻
+            </button>
+          </Tooltip>
         </header>
 
         {!view ? (
@@ -180,11 +188,9 @@ export function CapabilitiesPanel({
                     servers={serverGroups.failed}
                     expanded={expandedErrors}
                     onToggle={toggleError}
-                    onRetry={(name) => void mutate(() => app.RetryMCPServer(name))}
-                    confirming={confirming}
-                    onConfirm={setConfirming}
-                    onCancelConfirm={() => setConfirming(null)}
-                    onRemove={(name) => mutate(() => app.RemoveMCPServer(name)).then(() => setConfirming(null))}
+                    onRetry={(name) => void mutate(() => app.ReconnectMCPServer(name))}
+                    onConfirmClearAuth={(name) => void mutate(() => app.ClearMCPServerAuthentication(name))}
+                    onConfirm={(name) => void mutate(() => app.RemoveMCPServer(name))}
                     busy={busy}
                   />
                 )}
@@ -196,19 +202,16 @@ export function CapabilitiesPanel({
                   servers={serverGroups.active}
                   expanded={expandedServers}
                   expandedTools={expandedServerTools}
-                  confirming={confirming}
                   editing={editing}
-                  onConfirm={setConfirming}
-                  onCancelConfirm={() => setConfirming(null)}
+                  onConfirm={(name) => void mutate(() => app.RemoveMCPServer(name))}
                   onEdit={(name) => {
                     setEditing(name);
-                    setConfirming(null);
                   }}
                   onCancelEdit={() => setEditing(null)}
-                  onRemove={(name) => mutate(() => app.RemoveMCPServer(name)).then(() => setConfirming(null))}
-                  onRetry={(name) => void mutate(() => app.RetryMCPServer(name))}
+                  onRetry={(name) => void mutate(() => app.ReconnectMCPServer(name))}
+                  onReconnect={(name) => void mutate(() => app.ReconnectMCPServer(name))}
+                  onConfirmClearAuth={(name) => void mutate(() => app.ClearMCPServerAuthentication(name))}
                   onToggle={(name, on) => void mutate(() => app.SetMCPServerEnabled(name, on))}
-                  onSetTier={(name, tier) => void mutate(() => app.SetMCPServerTier(name, tier))}
                   onUpdate={(name, input) =>
                     void mutate(() => app.UpdateMCPServer(name, input)).then((ok) => {
                       if (ok) setEditing(null);
@@ -258,8 +261,10 @@ export function CapabilitiesPanel({
                       <SkillRow
                         key={sk.name}
                         skill={sk}
+                        busy={busy}
                         expanded={expandedSkills.has(sk.name)}
                         onToggle={() => toggleSkill(sk.name)}
+                        onToggleEnabled={(enabled) => void mutate(() => app.SetSkillEnabled(sk.name, enabled))}
                       />
                     ))}
                   </div>
@@ -270,6 +275,40 @@ export function CapabilitiesPanel({
         )}
     </ResizableDrawer>
   );
+}
+
+function normalizeCapabilitiesView(view: CapabilitiesView | null | undefined): CapabilitiesView {
+  return {
+    servers: sortServersForDisplay(
+      asArray(view?.servers).map((server) => ({
+        ...server,
+        args: asArray(server.args),
+        envKeys: asArray(server.envKeys),
+        toolList: asArray(server.toolList),
+      })),
+    ),
+    skills: asArray(view?.skills),
+    skillRoots: asArray(view?.skillRoots).map((root) => ({
+      ...root,
+      removable: Boolean(root.removable),
+      skillItems: asArray(root.skillItems),
+    })),
+  };
+}
+
+function sortServersForDisplay(servers: ServerView[]): ServerView[] {
+  return [...servers].sort((a, b) => {
+    const priority = serverDisplayPriority(a) - serverDisplayPriority(b);
+    if (priority !== 0) return priority;
+    return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+  });
+}
+
+function serverDisplayPriority(server: ServerView): number {
+  if (server.status === "failed" || server.authStatus === "required") return 0;
+  if (server.builtIn) return 1;
+  if (server.status !== "disabled") return 2;
+  return 3;
 }
 
 function skillListSummary(skills: SkillView[], filtered: SkillView[], searching: boolean, t: ReturnType<typeof useT>): string {
@@ -324,7 +363,6 @@ function SkillSources({
   const t = useT();
   const [expanded, setExpanded] = useState(false);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
-  const [confirmingRoot, setConfirmingRoot] = useState<string | null>(null);
   const [expandedRootSkills, setExpandedRootSkills] = useState<Set<string>>(() => new Set());
   const [fullRootSkills, setFullRootSkills] = useState<Set<string>>(() => new Set());
   const primaryRoots = roots.filter(isPrimarySkillRoot);
@@ -335,11 +373,6 @@ function SkillSources({
   const active = summaryRoots.filter((root) => root.skills > 0).length;
   const missing = summaryRoots.filter((root) => root.status === "missing").length;
   const empty = summaryRoots.filter((root) => root.status === "ok" && root.skills === 0).length;
-  useEffect(() => {
-    if (!confirmingRoot) return;
-    const stillRemovable = roots.some((root) => root.dir === confirmingRoot && root.scope === "custom" && root.configured);
-    if (!stillRemovable) setConfirmingRoot(null);
-  }, [confirmingRoot, roots]);
   const toggleRootSkills = (key: string) => {
     setExpandedRootSkills((prev) => {
       const next = new Set(prev);
@@ -404,7 +437,7 @@ function SkillSources({
                 const rootSkillsExpanded = expandedRootSkills.has(key);
                 const rootSkillsFull = fullRootSkills.has(key);
                 const canShowRootSkills = rootSkills.length > 0;
-                const canRemoveRoot = root.scope === "custom" && root.configured;
+                const canRemoveRoot = root.removable;
                 return (
                   <div className={`cap-source cap-source--${skillRootTone(root)}`} key={key}>
                     <span className={`cap-dot cap-dot--${skillRootDot(root)}`} />
@@ -421,43 +454,29 @@ function SkillSources({
                       </div>
                       {(canShowRootSkills || canRemoveRoot) && (
                         <div className="cap-source-actions">
-                          {confirmingRoot === root.dir && canRemoveRoot ? (
-                            <>
+                          <>
+                            {canShowRootSkills && (
                               <button
                                 className="btn btn--small"
                                 disabled={busy}
-                                onClick={() => {
-                                  onRemove(root.dir);
-                                  setConfirmingRoot(null);
-                                }}
+                                type="button"
+                                aria-expanded={rootSkillsExpanded}
+                                onClick={() => toggleRootSkills(key)}
                               >
-                                {t("caps.skillRootConfirmRemove")}
+                                {rootSkillsExpanded ? t("caps.hideSkills") : t("caps.showSkills")}
                               </button>
-                              <button className="btn btn--small" disabled={busy} onClick={() => setConfirmingRoot(null)}>
-                                {t("common.cancel")}
-                              </button>
-                              <div className="cap-confirm-hint">{t("caps.skillRootRemoveHint")}</div>
-                            </>
-                          ) : (
-                            <>
-                              {canShowRootSkills && (
-                                <button
-                                  className="btn btn--small"
-                                  disabled={busy}
-                                  type="button"
-                                  aria-expanded={rootSkillsExpanded}
-                                  onClick={() => toggleRootSkills(key)}
-                                >
-                                  {rootSkillsExpanded ? t("caps.hideSkills") : t("caps.showSkills")}
-                                </button>
                               )}
                               {canRemoveRoot && (
-                                <button className="btn btn--small" disabled={busy} onClick={() => setConfirmingRoot(root.dir)}>
-                                  {t("caps.skillRootRemove")}
-                                </button>
+                                <InlineConfirmButton
+                                  label={t("caps.skillRootRemove")}
+                                  confirmLabel={t("caps.skillRootConfirmRemove")}
+                                  cancelLabel={t("common.cancel")}
+                                  disabled={busy}
+                                  danger
+                                  onConfirm={() => onRemove(root.dir)}
+                                />
                               )}
                             </>
-                          )}
                         </div>
                       )}
                       {rootSkillsExpanded && rootSkills.length > 0 && (
@@ -577,16 +596,14 @@ function ServerGroup({
   expanded,
   expandedTools,
   busy,
-  confirming,
   editing,
   onConfirm,
-  onCancelConfirm,
   onEdit,
   onCancelEdit,
-  onRemove,
   onRetry,
+  onReconnect,
+  onConfirmClearAuth,
   onToggle,
-  onSetTier,
   onUpdate,
   onToggleDetails,
   onToggleTools,
@@ -595,16 +612,14 @@ function ServerGroup({
   expanded: Set<string>;
   expandedTools: Set<string>;
   busy: boolean;
-  confirming: string | null;
   editing: string | null;
   onConfirm: (name: string) => void;
-  onCancelConfirm: () => void;
   onEdit: (name: string) => void;
   onCancelEdit: () => void;
-  onRemove: (name: string) => void;
   onRetry: (name: string) => void;
+  onReconnect: (name: string) => void;
+  onConfirmClearAuth: (name: string) => void;
   onToggle: (name: string, on: boolean) => void;
-  onSetTier: (name: string, tier: string) => void;
   onUpdate: (name: string, input: MCPServerInput) => void;
   onToggleDetails: (name: string) => void;
   onToggleTools: (name: string) => void;
@@ -619,16 +634,14 @@ function ServerGroup({
           expanded={expanded.has(s.name)}
           toolsExpanded={expandedTools.has(s.name)}
           busy={busy}
-          confirming={confirming === s.name}
           editing={editing === s.name}
           onConfirm={() => onConfirm(s.name)}
-          onCancelConfirm={onCancelConfirm}
           onEdit={() => onEdit(s.name)}
           onCancelEdit={onCancelEdit}
-          onRemove={() => onRemove(s.name)}
           onRetry={() => onRetry(s.name)}
+          onReconnect={() => onReconnect(s.name)}
+          onConfirmClearAuth={() => onConfirmClearAuth(s.name)}
           onToggle={(on) => onToggle(s.name, on)}
-          onSetTier={(tier) => onSetTier(s.name, tier)}
           onUpdate={(input) => onUpdate(s.name, input)}
           onToggleDetails={() => onToggleDetails(s.name)}
           onToggleTools={() => onToggleTools(s.name)}
@@ -642,22 +655,18 @@ function FailedServersNotice({
   servers,
   expanded,
   busy,
-  confirming,
   onToggle,
   onRetry,
+  onConfirmClearAuth,
   onConfirm,
-  onCancelConfirm,
-  onRemove,
 }: {
   servers: ServerView[];
   expanded: Set<string>;
   busy: boolean;
-  confirming: string | null;
   onToggle: (name: string) => void;
   onRetry: (name: string) => void;
+  onConfirmClearAuth: (name: string) => void;
   onConfirm: (name: string) => void;
-  onCancelConfirm: () => void;
-  onRemove: (name: string) => void;
 }) {
   const t = useT();
   return (
@@ -673,10 +682,9 @@ function FailedServersNotice({
           const open = expanded.has(s.name);
           const error = s.error || t("caps.failed");
           const actionLabel = serverActionLabel(s, t);
-          const authURL = authURLForServer(s);
           const handlePrimaryAction = () => {
-            if (isAuthFailure(error) && authURL) {
-              openExternal(authURL);
+            if (shouldOpenAuth(s)) {
+              openExternal((s.authUrl || "").trim());
               return;
             }
             onRetry(s.name);
@@ -687,34 +695,34 @@ function FailedServersNotice({
                 <span className="cap-dot cap-dot--failed" />
                 <div className="cap-failure__text">
                   <div className="cap-failure__name">{s.name}</div>
-                  <div className="cap-failure__summary">{summarizeServerError(error, t)}</div>
+                  <div className="cap-failure__summary">{s.authStatus === "required" ? t("caps.authRequiredSummary") : summarizeServerError(error, t)}</div>
                 </div>
               </div>
               <div className="cap-failure__actions">
-                {confirming === s.name ? (
-                  <>
-                    <button className="btn btn--small" disabled={busy} onClick={() => onRemove(s.name)}>
-                      {t("caps.confirmRemove")}
-                    </button>
-                    <button className="btn btn--small" disabled={busy} onClick={onCancelConfirm}>
-                      {t("common.cancel")}
-                    </button>
-                    <div className="cap-confirm-hint">{t("caps.removeHint")}</div>
-                  </>
-                ) : (
-                  <>
-                    <button className="btn btn--small" disabled={busy} onClick={handlePrimaryAction}>
-                      {actionLabel}
-                    </button>
-                    <button className="btn btn--small" onClick={() => onToggle(s.name)} aria-expanded={open}>
-                      {open ? t("common.collapse") : t("caps.showLog")}
-                    </button>
-                    {!s.builtIn && (
-                      <button className="btn btn--small" disabled={busy} onClick={() => onConfirm(s.name)}>
-                        {t("caps.remove")}
-                      </button>
-                    )}
-                  </>
+                <button className="btn btn--small" disabled={busy} onClick={handlePrimaryAction}>
+                  {actionLabel}
+                </button>
+                {canClearAuth(s) && (
+                  <InlineConfirmButton
+                    label={t("caps.clearAuth")}
+                    confirmLabel={t("caps.confirmClearAuth")}
+                    cancelLabel={t("common.cancel")}
+                    disabled={busy}
+                    onConfirm={() => onConfirmClearAuth(s.name)}
+                  />
+                )}
+                <button className="btn btn--small" onClick={() => onToggle(s.name)} aria-expanded={open}>
+                  {open ? t("common.collapse") : t("caps.showLog")}
+                </button>
+                {!s.builtIn && (
+                  <InlineConfirmButton
+                    label={t("caps.remove")}
+                    confirmLabel={t("caps.confirmRemove")}
+                    cancelLabel={t("common.cancel")}
+                    disabled={busy}
+                    danger
+                    onConfirm={() => onConfirm(s.name)}
+                  />
                 )}
               </div>
               {open && (
@@ -741,16 +749,14 @@ function ServerRow({
   expanded,
   toolsExpanded,
   busy,
-  confirming,
   editing,
   onConfirm,
-  onCancelConfirm,
   onEdit,
   onCancelEdit,
-  onRemove,
   onRetry,
+  onReconnect,
+  onConfirmClearAuth,
   onToggle,
-  onSetTier,
   onUpdate,
   onToggleDetails,
   onToggleTools,
@@ -759,16 +765,14 @@ function ServerRow({
   expanded: boolean;
   toolsExpanded: boolean;
   busy: boolean;
-  confirming: boolean;
   editing: boolean;
   onConfirm: () => void;
-  onCancelConfirm: () => void;
   onEdit: () => void;
   onCancelEdit: () => void;
-  onRemove: () => void;
   onRetry: () => void;
+  onReconnect: () => void;
+  onConfirmClearAuth: () => void;
   onToggle: (on: boolean) => void;
-  onSetTier: (tier: string) => void;
   onUpdate: (input: MCPServerInput) => void;
   onToggleDetails: () => void;
   onToggleTools: () => void;
@@ -776,7 +780,7 @@ function ServerRow({
   const t = useT();
   const actionLabel = serverActionLabel(s, t);
   const tools = s.toolList ?? [];
-  const sub =
+  let sub =
     s.status === "failed"
       ? s.error || t("caps.failed")
       : s.status === "initializing"
@@ -788,7 +792,17 @@ function ServerRow({
           ? t("caps.disabledAutoStart")
           : t("caps.disabled")
         : t("caps.counts", { tools: s.tools, prompts: s.prompts, resources: s.resources });
+  if (s.authStatus === "possible" && s.status !== "failed") {
+    sub = `${sub} · ${t("caps.authPossibleShort")}`;
+  }
   const enabled = s.status === "connected" || s.status === "deferred" || s.status === "initializing";
+  const handlePrimaryAction = () => {
+    if (shouldOpenAuth(s)) {
+      openExternal((s.authUrl || "").trim());
+      return;
+    }
+    onRetry();
+  };
   return (
     <div className={`cap-server-entry${s.status === "disabled" ? " cap-server-entry--disabled" : ""}`}>
       <Tooltip label={s.error} disabled={!s.error} fill block>
@@ -807,49 +821,29 @@ function ServerRow({
             <div className="cap-row__head">
               <span className="cap-row__name">{s.name}</span>
               <span className="cap-row__transport">{s.transport}</span>
+              {s.builtIn && <span className="cap-row__builtin">{t("caps.builtIn")}</span>}
             </div>
             <div className="cap-row__sub">{sub}</div>
           </div>
           <div className="cap-row__actions">
-            {confirming ? (
-              <>
-                <button className="btn btn--small" disabled={busy} onClick={onRemove}>
-                  {t("caps.confirmRemove")}
-                </button>
-                <button className="btn btn--small" disabled={busy} onClick={onCancelConfirm}>
-                  {t("common.cancel")}
-                </button>
-              </>
+            {s.status === "failed" ? (
+              <button className="btn btn--small" disabled={busy} onClick={handlePrimaryAction}>
+                {actionLabel}
+              </button>
+            ) : s.status === "initializing" ? (
+              <span className="cap-row__pending">{t("caps.initializingShort")}</span>
             ) : (
-              <>
-                {s.status === "failed" ? (
-                  <button className="btn btn--small" disabled={busy} onClick={onRetry}>
-                    {actionLabel}
-                  </button>
-                ) : s.status === "initializing" ? (
-                  <span className="cap-row__pending">{t("caps.initializingShort")}</span>
-                ) : s.builtIn ? (
-                  s.status === "disabled" ? (
-                    <button className="btn btn--small" disabled={busy} onClick={() => onToggle(true)}>
-                      {t("caps.enable")}
-                    </button>
-                  ) : (
-                    <span className="cap-row__builtin">{t("caps.builtIn")}</span>
-                  )
-                ) : (
-                  <Tooltip label={enabled ? t("caps.disable") : t("caps.enable")}>
-                    <label className="cap-switch">
-                      <input
-                        type="checkbox"
-                        checked={enabled}
-                        disabled={busy}
-                        onChange={(e) => onToggle(e.target.checked)}
-                      />
-                      <span className="cap-switch__track" />
-                    </label>
-                  </Tooltip>
-                )}
-              </>
+              <Tooltip label={enabled ? t("caps.disable") : t("caps.enable")}>
+                <label className="cap-switch">
+                  <input
+                    type="checkbox"
+                    checked={enabled}
+                    disabled={busy}
+                    onChange={(e) => onToggle(e.target.checked)}
+                  />
+                  <span className="cap-switch__track" />
+                </label>
+              </Tooltip>
             )}
           </div>
         </div>
@@ -859,12 +853,10 @@ function ServerRow({
           s={s}
           tools={tools}
           busy={busy}
-          confirming={confirming}
           onConfirm={onConfirm}
-          onCancelConfirm={onCancelConfirm}
-          onRemove={onRemove}
           onConnectNow={onRetry}
-          onSetTier={onSetTier}
+          onReconnect={onReconnect}
+          onConfirmClearAuth={onConfirmClearAuth}
           toolsExpanded={toolsExpanded}
           editing={editing}
           onEdit={onEdit}
@@ -881,12 +873,10 @@ function ServerDetails({
   s,
   tools,
   busy,
-  confirming,
   onConfirm,
-  onCancelConfirm,
-  onRemove,
   onConnectNow,
-  onSetTier,
+  onReconnect,
+  onConfirmClearAuth,
   toolsExpanded,
   editing,
   onEdit,
@@ -897,12 +887,10 @@ function ServerDetails({
   s: ServerView;
   tools: ServerView["toolList"];
   busy: boolean;
-  confirming: boolean;
   onConfirm: () => void;
-  onCancelConfirm: () => void;
-  onRemove: () => void;
   onConnectNow: () => void;
-  onSetTier: (tier: string) => void;
+  onReconnect: () => void;
+  onConfirmClearAuth: () => void;
   toolsExpanded: boolean;
   editing: boolean;
   onEdit: () => void;
@@ -912,10 +900,13 @@ function ServerDetails({
 }) {
   const t = useT();
   const command = serverCommand(s);
-  const canConfigure = s.configured && !s.builtIn;
-  const canConnectNow = !s.builtIn && (s.status === "deferred" || s.status === "disabled");
+  const canEditConfig = s.configured && !s.builtIn;
+  const canConnectNow = s.status === "deferred" || s.status === "disabled";
+  const canReconnect = s.status === "connected";
   const canShowTools = (s.tools ?? 0) > 0 || (tools?.length ?? 0) > 0;
-  if (editing && canConfigure) {
+  const showClearAuth = canClearAuth(s);
+  const authLabel = serverAuthLabel(s, t);
+  if (editing && canEditConfig) {
     return (
       <div className="cap-server-details">
         <EditServerForm s={s} busy={busy} onCancel={onCancelEdit} onSave={onUpdate} />
@@ -933,8 +924,11 @@ function ServerDetails({
           <span className="cap-detail__label">{t("caps.transport")}</span>
           <span className="cap-detail__value">{s.transport}</span>
         </div>
-        {canConfigure && (
-          <AutoConnectControls tier={s.tier || "lazy"} busy={busy} onTierChange={onSetTier} />
+        {authLabel && (
+          <div className="cap-detail">
+            <span className="cap-detail__label">{t("caps.auth")}</span>
+            <span className="cap-detail__value">{authLabel}</span>
+          </div>
         )}
         {command && (
           <div className="cap-detail cap-detail--wide">
@@ -955,32 +949,40 @@ function ServerDetails({
             {t("caps.connectNow")}
           </button>
         )}
+        {canReconnect && (
+          <button className="btn btn--small" disabled={busy} onClick={onReconnect}>
+            {t("caps.reconnect")}
+          </button>
+        )}
         {canShowTools && (
           <button className="btn btn--small" disabled={busy} onClick={onToggleTools} aria-expanded={toolsExpanded}>
             {toolsExpanded ? t("caps.hideTools") : t("caps.showTools")}
           </button>
         )}
-        {canConfigure && (
-          <button className="btn btn--small" disabled={busy} onClick={onEdit}>
-            {t("caps.editConfig")}
-          </button>
+        {showClearAuth && (
+          <InlineConfirmButton
+            label={t("caps.clearAuth")}
+            confirmLabel={t("caps.confirmClearAuth")}
+            cancelLabel={t("common.cancel")}
+            disabled={busy}
+            onConfirm={onConfirmClearAuth}
+          />
         )}
-        {canConfigure &&
-          (confirming ? (
-            <>
-              <button className="btn btn--small" disabled={busy} onClick={onRemove}>
-                {t("caps.confirmRemove")}
-              </button>
-              <button className="btn btn--small" disabled={busy} onClick={onCancelConfirm}>
-                {t("common.cancel")}
-              </button>
-              <div className="cap-confirm-hint">{t("caps.removeHint")}</div>
-            </>
-          ) : (
-            <button className="btn btn--small" disabled={busy} onClick={onConfirm}>
-              {t("caps.remove")}
+        {canEditConfig && (
+          <>
+            <button className="btn btn--small" disabled={busy} onClick={onEdit}>
+              {t("caps.editConfig")}
             </button>
-          ))}
+            <InlineConfirmButton
+              label={t("caps.remove")}
+              confirmLabel={t("caps.confirmRemove")}
+              cancelLabel={t("common.cancel")}
+              disabled={busy}
+              danger
+              onConfirm={onConfirm}
+            />
+          </>
+        )}
       </div>
       {toolsExpanded && (
         tools && tools.length > 0 ? (
@@ -1018,7 +1020,6 @@ function EditServerForm({
   const [command, setCommand] = useState(initialTransport === "stdio" ? serverCommand(s) : "");
   const [url, setUrl] = useState(initialTransport === "stdio" ? "" : s.url || serverCommand(s));
   const [env, setEnv] = useState("");
-  const [tier, setTier] = useState(s.tier || "lazy");
   const isStdio = transport === "stdio";
   const ready = isStdio ? command.trim() !== "" : url.trim() !== "";
 
@@ -1032,7 +1033,6 @@ function EditServerForm({
       args: isStdio ? parts.slice(1) : [],
       url: isStdio ? "" : url.trim(),
       env: envText === "" ? null : parseEnvText(envText),
-      tier,
     });
   };
 
@@ -1062,7 +1062,6 @@ function EditServerForm({
             <input className="mem-input" value={url} disabled={busy} onChange={(e) => setUrl(e.target.value)} placeholder={t("caps.urlPlaceholder")} />
           </label>
         )}
-        <AutoConnectControls tier={tier} busy={busy} onTierChange={setTier} />
         <label className="cap-detail cap-detail--wide">
           <span className="cap-detail__label">{t("caps.envLabel")}</span>
           <textarea className="mem-textarea cap-config-edit__env" value={env} disabled={busy} onChange={(e) => setEnv(e.target.value)} placeholder={t("caps.envPlaceholder")} spellCheck={false} />
@@ -1087,58 +1086,9 @@ function EditServerForm({
   );
 }
 
-function AutoConnectControls({
-  tier,
-  busy,
-  onTierChange,
-}: {
-  tier: string;
-  busy: boolean;
-  onTierChange: (tier: string) => void;
-}) {
-  const t = useT();
-  const groupId = useId();
-  const normalized = normalizeTierValue(tier);
-  const options = [
-    { tier: "lazy", label: t("caps.launchLazy"), hint: t("caps.launchLazyHint") },
-    { tier: "background", label: t("caps.launchBackground"), hint: t("caps.launchBackgroundHint") },
-    { tier: "eager", label: t("caps.launchEager"), hint: t("caps.launchEagerHint") },
-  ];
-  return (
-    <fieldset className="cap-detail cap-detail--wide cap-connection-mode">
-      <legend className="cap-detail__label">{t("caps.launchMode")}</legend>
-      <div className="cap-connection-options">
-        {options.map((option) => (
-          <label
-            className={`cap-connection-option${normalized === option.tier ? " cap-connection-option--selected" : ""}${busy ? " cap-connection-option--disabled" : ""}`}
-            key={option.tier}
-          >
-            <input
-              type="radio"
-              name={`mcp-connection-tier-${groupId}`}
-              value={option.tier}
-              checked={normalized === option.tier}
-              disabled={busy}
-              onChange={() => onTierChange(option.tier)}
-            />
-            <span className="cap-connection-option__text">
-              <span className="cap-connection-option__label">{option.label}</span>
-              <span className="cap-connection-option__hint">{option.hint}</span>
-            </span>
-          </label>
-        ))}
-      </div>
-    </fieldset>
-  );
-}
-
 function serverCommand(s: ServerView): string {
   if (s.transport === "stdio") return [s.command, ...(s.args ?? [])].filter(Boolean).join(" ").trim();
   return (s.url || "").trim();
-}
-
-function normalizeTierValue(tier: string): string {
-  return tier === "background" || tier === "eager" ? tier : "lazy";
 }
 
 function normalizeTransportValue(transport: string): string {
@@ -1165,6 +1115,7 @@ function serverStatusLabel(s: ServerView, t: ReturnType<typeof useT>): string {
     case "disabled":
       return s.configured && !s.autoStart ? t("caps.disabledAutoStart") : t("caps.disabled");
     case "failed":
+      if (s.authStatus === "required") return t("caps.authRequired");
       return t("caps.failed");
     default:
       return s.status;
@@ -1186,21 +1137,9 @@ function summarizeServerError(error: string, t: ReturnType<typeof useT>): string
   return summary.length > 180 ? `${summary.slice(0, 176).trim()}…` : summary;
 }
 
-function isAuthFailure(error: string): boolean {
-  const err = error.toLowerCase();
-  return err.includes("401") || err.includes("403") || err.includes("unauthorized") || err.includes("forbidden") || err.includes("invalid token") || err.includes("login required");
-}
-
-function authURLForServer(s: ServerView): string {
-  if (!isAuthFailure(s.error || "")) return "";
-  if (s.transport !== "http" && s.transport !== "sse") return "";
-  const url = (s.url || "").trim();
-  return /^https?:\/\//i.test(url) ? url : "";
-}
-
 function serverActionLabel(s: ServerView, t: ReturnType<typeof useT>): string {
   const err = (s.error || "").toLowerCase();
-  if (isAuthFailure(err)) return t("caps.reauthorize");
+  if (shouldOpenAuth(s)) return t("caps.reauthorize");
   if (
     err.includes("command not found") ||
     err.includes("executable file not found") ||
@@ -1212,38 +1151,80 @@ function serverActionLabel(s: ServerView, t: ReturnType<typeof useT>): string {
   return t("caps.retry");
 }
 
+function serverAuthLabel(s: ServerView, t: ReturnType<typeof useT>): string {
+  if (s.authStatus === "required") return t("caps.authRequired");
+  if (s.authStatus === "possible") return t("caps.authPossible");
+  return "";
+}
+
+function shouldOpenAuth(s: ServerView): boolean {
+  const url = (s.authUrl || "").trim();
+  return s.authStatus === "required" && /^https?:\/\//i.test(url);
+}
+
+function canClearAuth(s: ServerView): boolean {
+  if (!s.configured || s.builtIn) return false;
+  return Boolean(s.authConfigured || s.authStatus === "required" || s.authStatus === "possible" || isRemoteTransport(s.transport));
+}
+
+function isRemoteTransport(transport?: string): boolean {
+  const value = (transport || "").trim().toLowerCase();
+  return value === "http" || value === "streamable-http" || value === "sse";
+}
+
 function SkillRow({
   skill,
+  busy,
   expanded,
   onToggle,
+  onToggleEnabled,
 }: {
   skill: SkillView;
+  busy: boolean;
   expanded: boolean;
   onToggle: () => void;
+  onToggleEnabled: (enabled: boolean) => void;
 }) {
   const t = useT();
   const summary = summarizeSkillDescription(skill.description);
   const canExpand = summary !== skill.description;
   return (
-    <button
-      className={`cap-skill-card${expanded ? " cap-skill-card--expanded" : ""}${canExpand ? " cap-skill-card--expandable" : ""}`}
-      type="button"
-      onClick={onToggle}
-      aria-expanded={expanded}
+    <div
+      className={`cap-skill-card${expanded ? " cap-skill-card--expanded" : ""}${canExpand ? " cap-skill-card--expandable" : ""}${!skill.enabled ? " cap-skill-card--disabled" : ""}`}
     >
-      <div className="cap-skill-card__head">
-        <span className="cap-skill-card__icon">/</span>
-        <span className="cap-skill-card__main">
-          <span className="cap-skill-card__command">{skill.name}</span>
-          <span className="cap-skill-card__badges">
-            <span className={`cap-skill-badge cap-skill-badge--${skill.scope}`}>{skillScopeLabel(skill.scope, t)}</span>
-            {skill.runAs === "subagent" && <span className="cap-skill-badge cap-skill-badge--run">{t("caps.subagent")}</span>}
+      <div className="cap-skill-card__top">
+        <button className="cap-skill-card__toggle" type="button" onClick={onToggle} aria-expanded={expanded}>
+          <span className="cap-skill-card__head">
+            <span className="cap-skill-card__icon">/</span>
+            <span className="cap-skill-card__main">
+              <span className="cap-skill-card__command">{skill.name}</span>
+              <span className="cap-skill-card__badges">
+                <span className={`cap-skill-badge cap-skill-badge--${skill.scope}`}>{skillScopeLabel(skill.scope, t)}</span>
+                {skill.runAs === "subagent" && <span className="cap-skill-badge cap-skill-badge--run">{t("caps.subagent")}</span>}
+                {!skill.enabled && <span className="cap-skill-badge cap-skill-badge--off">{t("caps.skillDisabled")}</span>}
+              </span>
+            </span>
           </span>
-        </span>
+        </button>
+        <Tooltip label={skill.enabled ? t("caps.disableSkill") : t("caps.enableSkill")}>
+          <label className="cap-switch">
+            <input
+              type="checkbox"
+              checked={skill.enabled}
+              disabled={busy}
+              onChange={(e) => onToggleEnabled(e.target.checked)}
+            />
+            <span className="cap-switch__track" />
+          </label>
+        </Tooltip>
       </div>
       <div className="cap-skill-card__desc">{expanded ? skill.description : summary}</div>
-      {canExpand && <div className="cap-skill-card__more">{expanded ? t("common.collapse") : t("common.expand")}</div>}
-    </button>
+      {canExpand && (
+        <button className="cap-skill-card__more" type="button" onClick={onToggle} aria-expanded={expanded}>
+          {expanded ? t("common.collapse") : t("common.expand")}
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -1285,7 +1266,6 @@ function AddServerForm({
   const [command, setCommand] = useState("");
   const [url, setUrl] = useState("");
   const [env, setEnv] = useState("");
-  const [tier, setTier] = useState("lazy");
 
   const isStdio = transport === "stdio";
   const ready = name.trim() !== "" && (isStdio ? command.trim() !== "" : url.trim() !== "");
@@ -1304,7 +1284,6 @@ function AddServerForm({
       args: isStdio ? parts.slice(1) : [],
       url: isStdio ? "" : url.trim(),
       env: envMap,
-      tier,
     });
   };
 
@@ -1322,7 +1301,6 @@ function AddServerForm({
       ) : (
         <input className="mem-input" placeholder={t("caps.urlPlaceholder")} value={url} onChange={(e) => setUrl(e.target.value)} />
       )}
-      <AutoConnectControls tier={tier} busy={busy} onTierChange={setTier} />
       <label className="set-label">{t("caps.envLabel")}</label>
       <textarea className="mem-textarea" value={env} onChange={(e) => setEnv(e.target.value)} placeholder={t("caps.envPlaceholder")} spellCheck={false} />
       <div className="prov-card__actions">
@@ -1335,4 +1313,227 @@ function AddServerForm({
       </div>
     </div>
   );
+}
+
+// MCPServersSettingsPage is a self-contained MCP servers management page
+// embedded inside the settings centre.
+export function MCPServersSettingsPage() {
+	const t = useT();
+	const [view, setView] = useState<CapabilitiesView | null>(null);
+	const [busy, setBusy] = useState(false);
+	const [err, setErr] = useState<string | null>(null);
+	const [adding, setAdding] = useState(false);
+	const [editing, setEditing] = useState<string | null>(null);
+	const [expandedErrors, setExpandedErrors] = useState<Set<string>>(() => new Set());
+	const [expandedServers, setExpandedServers] = useState<Set<string>>(() => new Set());
+	const [expandedServerTools, setExpandedServerTools] = useState<Set<string>>(() => new Set());
+
+	const reload = useCallback(async () => {
+		setView(normalizeCapabilitiesView(await app.Capabilities().catch(() => ({ servers: [], skills: [], skillRoots: [] }))));
+	}, []);
+	useEffect(() => { void reload(); }, [reload]);
+	useEffect(() => {
+		if (!view || !view.servers.some((s) => s.status === "initializing" || s.status === "deferred")) return;
+		const id = window.setInterval(() => void reload(), 2500);
+		return () => window.clearInterval(id);
+	}, [reload, view]);
+
+	const mutate = async (fn: () => Promise<unknown>) => {
+		setBusy(true);
+		setErr(null);
+		try {
+			await fn();
+			await reload();
+			return true;
+		} catch (e) {
+			setErr(String((e as Error)?.message ?? e));
+			await reload();
+			return false;
+		} finally {
+			setBusy(false);
+		}
+	};
+
+	const serverGroups = useMemo(() => {
+		const servers = sortServersForDisplay(view?.servers ?? []);
+		return {
+			failed: servers.filter((s) => s.status === "failed"),
+			active: servers.filter((s) => s.status !== "failed"),
+		};
+	}, [view]);
+
+	const toggleError = useCallback((name: string) => {
+		setExpandedErrors((prev) => { const next = new Set(prev); if (next.has(name)) next.delete(name); else next.add(name); return next; });
+	}, []);
+	const toggleServer = useCallback((name: string) => {
+		setExpandedServers((prev) => { const next = new Set(prev); if (next.has(name)) next.delete(name); else next.add(name); return next; });
+	}, []);
+	const toggleServerTools = useCallback((name: string) => {
+		setExpandedServerTools((prev) => { const next = new Set(prev); if (next.has(name)) next.delete(name); else next.add(name); return next; });
+	}, []);
+
+	const summary = useMemo(() => {
+		if (!view) return "";
+		const connected = view.servers.filter((s) => s.status === "connected").length;
+		const failed = view.servers.filter((s) => s.status === "failed").length;
+		return t("caps.summary", { connected, failed, skills: 0 }).replace(/· \d+ skills/, "").trim();
+	}, [view, t]);
+
+	if (!view) return <div className="empty">{t("caps.loading")}</div>;
+
+	return (
+		<section className="mem-section">
+			{err && <div className="banner banner--error">{err}</div>}
+			{view.servers.length > 0 && (
+				<div className="drawer__summary" style={{ marginBottom: 12 }}>{summary}</div>
+			)}
+			<div className="mem-section__actions">
+				{!adding && (
+					<button className="btn btn--small" disabled={busy} onClick={() => setAdding(true)}>
+						{t("caps.addServer")}
+					</button>
+				)}
+			</div>
+			{serverGroups.failed.length > 0 && (
+				<FailedServersNotice
+					servers={serverGroups.failed}
+					expanded={expandedErrors}
+					busy={busy}
+					onToggle={toggleError}
+					onRetry={(name) => void mutate(() => app.ReconnectMCPServer(name))}
+					onConfirmClearAuth={(name) => void mutate(() => app.ClearMCPServerAuthentication(name))}
+					onConfirm={(name) => void mutate(() => app.RemoveMCPServer(name))}
+				/>
+			)}
+			{view.servers.length === 0 && !adding && (
+				<div className="mem-empty">{t("caps.noServers")}</div>
+			)}
+			<ServerGroup
+				busy={busy}
+				servers={serverGroups.active}
+				expanded={expandedServers}
+				expandedTools={expandedServerTools}
+				editing={editing}
+				onConfirm={(name) => void mutate(() => app.RemoveMCPServer(name))}
+				onEdit={(name) => { setEditing(name); }}
+				onCancelEdit={() => setEditing(null)}
+				onRetry={(name) => void mutate(() => app.ReconnectMCPServer(name))}
+				onReconnect={(name) => void mutate(() => app.ReconnectMCPServer(name))}
+				onConfirmClearAuth={(name) => void mutate(() => app.ClearMCPServerAuthentication(name))}
+				onToggle={(name, on) => void mutate(() => app.SetMCPServerEnabled(name, on))}
+				onUpdate={(name, input) =>
+					void mutate(() => app.UpdateMCPServer(name, input)).then((ok) => {
+						if (ok) setEditing(null);
+					})
+				}
+				onToggleDetails={toggleServer}
+				onToggleTools={toggleServerTools}
+			/>
+			{adding ? (
+				<AddServerForm busy={busy} onCancel={() => setAdding(false)} onAdd={async (input) => (await mutate(() => app.AddMCPServer(input))) && setAdding(false)} />
+			) : null}
+		</section>
+	);
+}
+
+// SkillsSettingsPage is a self-contained skills management page embedded inside
+// the settings centre.
+export function SkillsSettingsPage() {
+	const t = useT();
+	const [view, setView] = useState<CapabilitiesView | null>(null);
+	const [busy, setBusy] = useState(false);
+	const [err, setErr] = useState<string | null>(null);
+	const [skillQuery, setSkillQuery] = useState("");
+	const [expandedSkills, setExpandedSkills] = useState<Set<string>>(() => new Set());
+
+	const reload = useCallback(async () => {
+		setView(normalizeCapabilitiesView(await app.Capabilities().catch(() => ({ servers: [], skills: [], skillRoots: [] }))));
+	}, []);
+	useEffect(() => { void reload(); }, [reload]);
+
+	const mutate = async (fn: () => Promise<unknown>) => {
+		setBusy(true);
+		setErr(null);
+		try {
+			await fn();
+			await reload();
+			return true;
+		} catch (e) {
+			setErr(String((e as Error)?.message ?? e));
+			await reload();
+			return false;
+		} finally {
+			setBusy(false);
+		}
+	};
+
+	const filteredSkills = useMemo(() => {
+		if (!view) return [];
+		const q = skillQuery.trim().toLowerCase();
+		if (!q) return view.skills;
+		return view.skills.filter((sk) => {
+			const text = [sk.name, "/" + sk.name, sk.description, sk.scope, sk.runAs].join(" ").toLowerCase();
+			return text.includes(q);
+		});
+	}, [view, skillQuery]);
+
+	const skillSummary = useMemo(() => {
+		if (!view) return "";
+		return skillListSummary(view.skills, filteredSkills, skillQuery.trim().length > 0, t);
+	}, [filteredSkills, skillQuery, t, view]);
+
+	const toggleSkill = useCallback((name: string) => {
+		setExpandedSkills((prev) => { const next = new Set(prev); if (next.has(name)) next.delete(name); else next.add(name); return next; });
+	}, []);
+
+	if (!view) return <div className="empty">{t("caps.loading")}</div>;
+
+	return (
+		<section className="mem-section">
+			{err && <div className="banner banner--error">{err}</div>}
+			<div className="cap-search">
+				<input
+					className="mem-input"
+					type="search"
+					placeholder={t("caps.searchSkills")}
+					value={skillQuery}
+					onChange={(e) => setSkillQuery(e.target.value)}
+				/>
+			</div>
+			<SkillSources
+				roots={view.skillRoots ?? []}
+				busy={busy}
+				onAdd={() => mutate(async () => {
+					const path = await app.PickSkillFolder();
+					if (path) await app.AddSkillPath(path);
+				})}
+				onRefresh={() => mutate(() => app.RefreshSkills())}
+				onRemove={(path) => mutate(() => app.RemoveSkillPath(path))}
+			/>
+			<div className="cap-skills-head">
+				<div className="cap-skills-head__copy">
+					<div className="cap-skills-head__title">{t("caps.skills")}</div>
+					<div className="cap-skills-head__summary">{skillSummary}</div>
+				</div>
+			</div>
+			{view.skills.length === 0 ? (
+				<div className="mem-empty">{t("caps.noSkills")}</div>
+			) : filteredSkills.length === 0 ? (
+				<div className="mem-empty">{t("caps.noSkillMatches")}</div>
+			) : (
+				<div className="cap-skills">
+					{filteredSkills.map((sk) => (
+						<SkillRow
+							key={sk.name}
+							skill={sk}
+							busy={busy}
+							expanded={expandedSkills.has(sk.name)}
+							onToggle={() => toggleSkill(sk.name)}
+							onToggleEnabled={(enabled) => void mutate(() => app.SetSkillEnabled(sk.name, enabled))}
+						/>
+					))}
+				</div>
+			)}
+		</section>
+	);
 }

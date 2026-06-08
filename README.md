@@ -103,7 +103,7 @@ default_model = "deepseek-flash"   # executor; set [agent].planner_model to add 
 # planner_model = "mimo-pro"          # optional low-frequency planner
 # subagent_model = "deepseek-pro"     # optional default for runAs=subagent skills
 # subagent_models = { review = "deepseek-pro", security_review = "deepseek-pro" }
-auto_plan = "ask"                  # off|ask|on; complex chat tasks start in plan mode
+auto_plan = "off"                  # off|on; off keeps plan mode manual
 # auto_plan_classifier = "deepseek-flash"   # optional; only borderline tasks call it
 
 [[providers]]
@@ -116,9 +116,11 @@ api_key_env = "DEEPSEEK_API_KEY"
 
 [tools]
 enabled = []   # omit/empty = all built-ins
+bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local cap
 
 [skills]
 # paths = ["~/my-skills", "../shared/skills"]   # extra custom skill roots
+# excluded_paths = ["~/.agents/skills"]         # hide convention roots without deleting folders
 # disabled_skills = ["review"]                  # hide skills until /skill enable <name>
 
 [permissions]
@@ -178,6 +180,11 @@ type    = "http"
 url     = "https://mcp.stripe.com"
 headers = { Authorization = "Bearer ${STRIPE_KEY}" }
 ```
+
+Enabled MCP servers start connecting automatically in the background after a
+session begins, so chat stays usable while tools come online. Use `/mcp` or the
+desktop MCP panel to refresh status, reconnect a server, inspect failures, or
+disable a server for the current session.
 
 **Already have an `.mcp.json`?** Drop it in the project root and Reasonix
 reads it as-is — the `mcpServers` spec (`command`/`args`/`env`, `type`/`url`/
@@ -243,15 +250,23 @@ separate cache-stable sessions) is a one-line edit afterwards — set
 planner_model = "deepseek-pro"   # used as the low-frequency planner
 ```
 
+The planner sees loaded `REASONIX.md` / `AGENTS.md` memory and a small read-only
+research tool set, so it can inspect relevant files before handing a plan to the
+executor. Writer and workflow tools remain executor-only.
+
 Subagent skills inherit the executor model by default. Set `subagent_model` to
 run them on another configured model, or use `subagent_models` to override only
 specific skills such as `review` or `security_review`.
 
-For interactive frontends, `agent.auto_plan = "ask"` makes complex-looking tasks
-enter plan mode automatically: Reasonix first drafts a read-only plan, then waits
-for approval before editing or running side-effecting commands. `auto_plan_classifier`
-can name a cheap provider such as `deepseek-flash`; it is only called for
-borderline inputs and falls back to the heuristic if classification fails.
+For interactive frontends, plan mode is manual by default. Set
+`agent.auto_plan = "on"` to make complex-looking tasks enter plan mode
+automatically: Reasonix first drafts a read-only plan, then waits for approval
+before editing or running side-effecting commands. `auto_plan_classifier` can
+name a cheap provider such as `deepseek-flash`; it is only called for borderline
+inputs and falls back to the heuristic if classification fails. Use
+`/auto-plan off|on` in `reasonix chat` to change the user-level setting, or
+`reasonix config auto-plan off|on` from a shell/script. Pass `--local` to the
+shell command only when you intentionally want a project-local override.
 
 ## Architecture
 

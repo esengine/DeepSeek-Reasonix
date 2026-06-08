@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -180,5 +181,114 @@ func TestSetModeAppliesBothGates(t *testing.T) {
 	c.SetMode(false, false)
 	if c.PlanMode() || c.Bypass() {
 		t.Fatalf("normal mode: plan=%v bypass=%v, want false/false", c.PlanMode(), c.Bypass())
+	}
+}
+
+func TestBypassAutoAnswersAskWithRecommendedOptions(t *testing.T) {
+	var askRequested bool
+	c := New(Options{
+		Sink: event.FuncSink(func(e event.Event) {
+			if e.Kind == event.AskRequest {
+				askRequested = true
+			}
+		}),
+	})
+	c.SetBypass(true)
+
+	answers, err := c.Ask(context.Background(), []event.AskQuestion{
+		{
+			ID:     "approach",
+			Header: "Approach",
+			Prompt: "Which path?",
+			Options: []event.AskOption{
+				{Label: "Recommended path"},
+				{Label: "Alternative path"},
+			},
+		},
+		{
+			ID:     "scope",
+			Header: "Scope",
+			Prompt: "How broad?",
+			Options: []event.AskOption{
+				{Label: "Minimal"},
+				{Label: "Broad"},
+			},
+			Multi: true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Ask: %v", err)
+	}
+	if askRequested {
+		t.Fatal("bypass must not emit an AskRequest event")
+	}
+	want := []event.AskAnswer{
+		{QuestionID: "approach", Selected: []string{"Recommended path"}},
+		{QuestionID: "scope", Selected: []string{"Minimal"}},
+	}
+	if len(answers) != len(want) {
+		t.Fatalf("answers len = %d, want %d: %#v", len(answers), len(want), answers)
+	}
+	for i := range want {
+		if answers[i].QuestionID != want[i].QuestionID || len(answers[i].Selected) != 1 || answers[i].Selected[0] != want[i].Selected[0] {
+			t.Fatalf("answers[%d] = %#v, want %#v", i, answers[i], want[i])
+		}
+	}
+}
+
+func TestBypassRecheckedForAskAfterPromptLock(t *testing.T) {
+	askRequests := make(chan struct{}, 1)
+	c := New(Options{
+		Sink: event.FuncSink(func(e event.Event) {
+			if e.Kind == event.AskRequest {
+				askRequests <- struct{}{}
+			}
+		}),
+	})
+	questions := []event.AskQuestion{{
+		ID:     "q1",
+		Header: "Choice",
+		Prompt: "Which path?",
+		Options: []event.AskOption{
+			{Label: "Recommended"},
+			{Label: "Alternative"},
+		},
+	}}
+
+	c.promptMu.Lock()
+	started := make(chan struct{})
+	done := make(chan []event.AskAnswer, 1)
+	errs := make(chan error, 1)
+	var once sync.Once
+	go func() {
+		once.Do(func() { close(started) })
+		answers, err := c.Ask(context.Background(), questions)
+		if err != nil {
+			errs <- err
+			return
+		}
+		done <- answers
+	}()
+	<-started
+	time.Sleep(20 * time.Millisecond)
+
+	c.SetBypass(true)
+	c.promptMu.Unlock()
+
+	select {
+	case err := <-errs:
+		t.Fatalf("Ask: %v", err)
+	case answers := <-done:
+		if len(answers) != 1 || answers[0].QuestionID != "q1" || len(answers[0].Selected) != 1 || answers[0].Selected[0] != "Recommended" {
+			t.Fatalf("answers = %#v, want recommended option", answers)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Ask stayed blocked after bypass turned on while queued behind promptMu")
+	}
+
+	select {
+	case <-askRequests:
+		t.Fatal("bypass must not emit AskRequest after acquiring promptMu")
+	default:
 	}
 }

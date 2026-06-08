@@ -1,0 +1,53 @@
+name: Release npm
+
+# npm line. Tag namespace `npm-v<semver>` triggers this — plain `v<semver>` tags
+# are the CLI binary + Homebrew release (release.yml) and intentionally do NOT
+# trigger here (GitHub glob `npm-v*` does not match `v*`). Splitting npm onto its
+# own tag lets a prerelease ship to npm's `next` channel without touching the
+# stable Homebrew cask (and lets a stable cask ship without forcing npm to leave
+# its rc). Bump with:
+#   git tag npm-vX.Y.Z          # stable  -> publishes under `next`
+#   git tag npm-vX.Y.Z-rc.N     # prerelease -> publishes under `next`
+#   git push origin <tag>
+#
+# build.mjs decides the dist-tag: only the 0.x stable line is `latest`; the 1.x
+# line and every prerelease ship under `next`. Promote a 1.x stable to the default
+# install with a manual `npm dist-tag add reasonix@X.Y.Z latest`.
+on:
+  push:
+    tags: ['npm-v*']
+
+permissions:
+  contents: read
+
+jobs:
+  cache-guard:
+    name: cache hit guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: ./scripts/cache-guard.sh
+
+  npm:
+    name: publish npm packages
+    needs: cache-guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+      # build.mjs strips the leading `npm-`/`v`, so it derives the bare semver from
+      # the `npm-v*` tag (e.g. npm-v1.3.0-rc.1 -> 1.3.0-rc.1).
+      - run: node npm/build.mjs "${GITHUB_REF_NAME}" --publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

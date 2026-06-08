@@ -6,6 +6,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,12 +20,13 @@ import (
 	"reasonix/internal/event"
 	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
+	"reasonix/internal/sandbox"
+	"reasonix/internal/tool"
+	"reasonix/internal/tool/builtin"
 
-	// Blank imports register the provider kind and built-in tools the same way
-	// cmd/reasonix's main does; without them Build sees an empty provider
-	// registry and a bare tool set.
+	// Blank import registers the provider kind the same way cmd/reasonix's main
+	// does; importing builtin above registers the built-in tools.
 	_ "reasonix/internal/provider/openai"
-	_ "reasonix/internal/tool/builtin"
 )
 
 // TestBuildFoldsProjectMemoryIntoSystemPrompt is the end-to-end proof of the
@@ -31,7 +34,7 @@ import (
 // into the session's system message (the cached prefix), and the `remember`
 // tool is registered. It builds a real Controller from a throwaway project dir.
 func TestBuildFoldsProjectMemoryIntoSystemPrompt(t *testing.T) {
-	dir := t.TempDir()
+	dir := robustTempDir(t)
 	t.Chdir(dir)
 
 	writeFile(t, dir, "reasonix.toml", `
@@ -77,12 +80,90 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 	}
 }
 
+func TestNewProviderAppliesConfiguredDefaultEffort(t *testing.T) {
+	var gotReq map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotReq); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n"))
+	}))
+	defer srv.Close()
+
+	p, err := NewProvider(&config.ProviderEntry{
+		Name:             "custom",
+		Kind:             "openai",
+		BaseURL:          srv.URL,
+		Model:            "m",
+		SupportedEfforts: []string{"low", "medium", "high"},
+		DefaultEffort:    "MEDIUM",
+	})
+	if err != nil {
+		t.Fatalf("NewProvider: %v", err)
+	}
+	ch, err := p.Stream(context.Background(), provider.Request{
+		Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	for chunk := range ch {
+		if chunk.Type == provider.ChunkError {
+			t.Fatalf("stream error: %v", chunk.Err)
+		}
+	}
+	if got := gotReq["reasoning_effort"]; got != "medium" {
+		t.Fatalf("reasoning_effort = %#v, want medium from default_effort", got)
+	}
+}
+
+func TestNewProviderAppliesModelReasoningProtocol(t *testing.T) {
+	var gotReq map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotReq); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n"))
+	}))
+	defer srv.Close()
+
+	p, err := NewProvider(&config.ProviderEntry{
+		Name:    "deepseek-proxy",
+		Kind:    "openai",
+		BaseURL: srv.URL,
+		Model:   "deepseek-v4-flash",
+	})
+	if err != nil {
+		t.Fatalf("NewProvider: %v", err)
+	}
+	ch, err := p.Stream(context.Background(), provider.Request{
+		Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	for chunk := range ch {
+		if chunk.Type == provider.ChunkError {
+			t.Fatalf("stream error: %v", chunk.Err)
+		}
+	}
+	if got := gotReq["reasoning_effort"]; got != "high" {
+		t.Fatalf("reasoning_effort = %#v, want high from DeepSeek model capability", got)
+	}
+	thinking, ok := gotReq["thinking"].(map[string]any)
+	if !ok || thinking["type"] != "enabled" {
+		t.Fatalf("thinking = %#v, want enabled", gotReq["thinking"])
+	}
+}
+
 // TestBuildDiscoversSkills proves the skill wiring end-to-end: a project skill
 // is discovered at boot, surfaced via Controller.Skills(), and its name folds
 // into the cache-stable system prompt's "# Skills" index alongside a built-in.
 func TestBuildDiscoversSkills(t *testing.T) {
-	dir := t.TempDir()
-	home := t.TempDir()
+	dir := robustTempDir(t)
+	home := robustTempDir(t)
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Chdir(dir)
@@ -132,9 +213,27 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 	}
 }
 
+func TestAddBuiltinsWithWorkspaceRootKeepsSessionTools(t *testing.T) {
+	reg := tool.NewRegistry()
+	var stderr bytes.Buffer
+	addBuiltins(reg, nil, []string{robustTempDir(t)}, sandbox.Spec{}, 120*time.Second, builtin.SearchSpec{}, &stderr, robustTempDir(t))
+	for _, name := range []string{
+		"todo_write",
+		"complete_step",
+		"bash_output",
+		"kill_shell",
+		"wait",
+		"notebook_edit",
+	} {
+		if _, ok := reg.Get(name); !ok {
+			t.Fatalf("workspace builtins missing %q; got %v", name, reg.Names())
+		}
+	}
+}
+
 func TestBuildOmitsDisabledSkillsFromPromptAndRuntimeList(t *testing.T) {
-	dir := t.TempDir()
-	home := t.TempDir()
+	dir := robustTempDir(t)
+	home := robustTempDir(t)
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Chdir(dir)
@@ -185,10 +284,16 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 	}
 }
 
-func TestBuildRecordsMCPStartupFailure(t *testing.T) {
-	dir := t.TempDir()
+func TestBuildOmitsExcludedSkillRootsFromPromptAndRuntimeList(t *testing.T) {
+	dir := robustTempDir(t)
+	home := robustTempDir(t)
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Chdir(dir)
-	writeFile(t, dir, "reasonix.toml", `
+	excluded := filepath.Join(home, ".agents", "skills")
+	writeFile(t, home, ".reasonix/skills/keep.md", "---\ndescription: keep\n---\nplaybook")
+	writeFile(t, home, ".agents/skills/noisy.md", "---\ndescription: noisy\n---\nplaybook")
+	writeFile(t, dir, "reasonix.toml", fmt.Sprintf(`
 default_model = "test-model"
 
 [codegraph]
@@ -197,43 +302,34 @@ enabled = false
 [agent]
 system_prompt = "BASE"
 
+[skills]
+excluded_paths = [%q]
+
 [[providers]]
 name = "test-model"
 kind = "openai"
 base_url = "https://example.invalid"
 model = "x"
 api_key_env = "REASONIX_TEST_KEY_UNSET"
+`, excluded))
 
-[[plugins]]
-name = "missing"
-command = "reasonix-missing-mcp-binary"
-tier = "eager"
-`)
-	var notices []event.Event
-	ctrl, err := Build(context.Background(), Options{
-		Sink: event.FuncSink(func(e event.Event) {
-			if e.Kind == event.Notice {
-				notices = append(notices, e)
-			}
-		}),
-	})
+	ctrl, err := Build(context.Background(), Options{})
 	if err != nil {
-		t.Fatalf("Build should not fail when an MCP server is unavailable: %v", err)
+		t.Fatalf("Build: %v", err)
 	}
 	defer ctrl.Close()
-	failures := ctrl.Host().Failures()
-	if len(failures) != 1 || failures[0].Name != "missing" {
-		t.Fatalf("failures = %+v, want missing", failures)
-	}
-	foundNotice := false
-	for _, n := range notices {
-		if strings.Contains(n.Text, "failed to start") {
-			foundNotice = true
-			break
+
+	for _, s := range ctrl.Skills() {
+		if s.Name == "noisy" {
+			t.Fatalf("excluded skill should not be executable: %v", ctrl.Skills())
 		}
 	}
-	if !foundNotice {
-		t.Fatalf("missing startup warning notice: %+v", notices)
+	sys := systemMessage(ctrl.History())
+	if strings.Contains(sys, "noisy") {
+		t.Fatalf("excluded skill name should be omitted from system prompt:\n%s", sys)
+	}
+	if !strings.Contains(sys, "keep") {
+		t.Fatalf("non-excluded skill should remain in system prompt:\n%s", sys)
 	}
 }
 
@@ -241,7 +337,7 @@ tier = "eager"
 // memory files, the system prompt is exactly the configured base — the cache
 // prefix is untouched by the memory feature.
 func TestBuildWithoutMemoryLeavesPromptUnchanged(t *testing.T) {
-	dir := t.TempDir()
+	dir := robustTempDir(t)
 	t.Chdir(dir)
 	writeFile(t, dir, "reasonix.toml", `
 default_model = "test-model"
@@ -285,7 +381,7 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 }
 
 func TestBuildLanguagePolicyIsAppended(t *testing.T) {
-	dir := t.TempDir()
+	dir := robustTempDir(t)
 	t.Chdir(dir)
 	writeFile(t, dir, "reasonix.toml", `
 default_model = "test-model"
@@ -343,14 +439,14 @@ func writeFile(t *testing.T, dir, name, body string) {
 }
 
 func TestRememberPermissionRuleUsesWorkspaceRoot(t *testing.T) {
-	home := t.TempDir()
+	home := robustTempDir(t)
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Setenv("AppData", filepath.Join(home, "AppData"))
 
-	cwd := t.TempDir()
-	workspace := t.TempDir()
+	cwd := robustTempDir(t)
+	workspace := robustTempDir(t)
 	t.Chdir(cwd)
 	writeFile(t, cwd, "reasonix.toml", `
 [permissions]
@@ -375,13 +471,13 @@ allow = ["bash(workspace*)"]
 }
 
 func TestRememberPermissionRuleEmptyRootUsesSourcePath(t *testing.T) {
-	home := t.TempDir()
+	home := robustTempDir(t)
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Setenv("AppData", filepath.Join(home, "AppData"))
 
-	cwd := t.TempDir()
+	cwd := robustTempDir(t)
 	t.Chdir(cwd)
 	userConfig := config.UserConfigPath()
 	writeFile(t, filepath.Dir(userConfig), filepath.Base(userConfig), `
@@ -414,14 +510,14 @@ func hasPermissionRule(rules []string, want string) bool {
 // ~/.reasonix/config.json with no v1+ config present must be imported during
 // Build — config written, key pinned into the env, and the user told via a notice.
 func TestBuildMigratesLegacyConfigEndToEnd(t *testing.T) {
-	home := t.TempDir()
+	home := robustTempDir(t)
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)                               // os.UserHomeDir on Windows
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config")) // os.UserConfigDir on Linux
 	t.Setenv("AppData", filepath.Join(home, "AppData"))         // os.UserConfigDir on Windows
 	t.Setenv("DEEPSEEK_API_KEY", "")                            // track for cleanup; migration os.Setenv's it live
 
-	proj := t.TempDir()
+	proj := robustTempDir(t)
 	t.Chdir(proj)
 	// codegraph off keeps Build offline; it merges over the migrated user config
 	// without dropping the migrated plugins.
@@ -468,8 +564,11 @@ func TestBuildMigratesLegacyConfigEndToEnd(t *testing.T) {
 		t.Errorf("DEEPSEEK_API_KEY not pinned into env after migration: %q", got)
 	}
 
-	if data, err := os.ReadFile(filepath.Join(home, ".env")); err != nil || !strings.Contains(string(data), "DEEPSEEK_API_KEY=sk-e2e") {
-		t.Errorf("~/.env missing migrated key: %q (err %v)", data, err)
+	if data, err := os.ReadFile(config.UserCredentialsPath()); err != nil || !strings.Contains(string(data), "DEEPSEEK_API_KEY=sk-e2e") {
+		t.Errorf("credentials store missing migrated key: %q (err %v)", data, err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".env")); !os.IsNotExist(err) {
+		t.Errorf("migration must not write the user's ~/.env, stat err=%v", err)
 	}
 
 	sessionImported := false
@@ -487,6 +586,60 @@ func TestBuildMigratesLegacyConfigEndToEnd(t *testing.T) {
 	}
 }
 
+func TestBuildMigratesLegacySessionsFromConfigSessionDir(t *testing.T) {
+	home := robustTempDir(t)
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "xdg-config"))
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
+
+	proj := robustTempDir(t)
+	writeFile(t, proj, "reasonix.toml", "[codegraph]\nenabled = false\n")
+
+	legacyDir := config.SessionDir()
+	writeFile(t, legacyDir, "custom-root.events.jsonl",
+		`{"type":"user.message","id":1,"ts":"t","turn":0,"text":"hello from redirected config root"}`+"\n"+
+			`{"type":"model.final","id":2,"ts":"t","turn":0,"content":"hi from redirected root","toolCalls":[],"usage":{},"costUsd":0}`+"\n")
+
+	var notices []string
+	sink := event.FuncSink(func(e event.Event) {
+		if e.Kind == event.Notice {
+			notices = append(notices, e.Text)
+		}
+	})
+
+	// Pass the project root via WorkspaceRoot instead of t.Chdir: changing the
+	// process cwd into a t.TempDir makes Windows refuse to remove that dir during
+	// test cleanup (the cwd counts as "in use"), which is the only thing this test
+	// failed on. WorkspaceRoot loads the same config without touching the cwd.
+	ctrl, err := Build(context.Background(), Options{Sink: sink, WorkspaceRoot: proj})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer ctrl.Close()
+
+	sessionPath := filepath.Join(config.SessionDir(), "custom-root.jsonl")
+	data, err := os.ReadFile(sessionPath)
+	if err != nil {
+		t.Fatalf("legacy config-root session not imported to %s: %v", sessionPath, err)
+	}
+	if !strings.Contains(string(data), "hello from redirected config root") {
+		t.Fatalf("migrated session missing legacy content:\n%s", data)
+	}
+	if _, err := os.Stat(filepath.Join(config.SessionDir(), ".legacy-imported.v0-events-config")); err != nil {
+		t.Fatalf("config-root legacy import marker missing: %v", err)
+	}
+	sessionImported := false
+	for _, n := range notices {
+		if strings.Contains(n, "imported") && strings.Contains(n, "past session") && strings.Contains(n, legacyDir) {
+			sessionImported = true
+		}
+	}
+	if !sessionImported {
+		t.Errorf("no config-root session-import notice emitted; got %v", notices)
+	}
+}
+
 // isolateConfigHome redirects os.UserConfigDir() (and the cache subtree under
 // it) at a per-test temp dir by overriding the env vars Go's stdlib reads —
 // HOME on darwin, XDG_CONFIG_HOME on linux. Without this, Build's plugin path
@@ -495,7 +648,7 @@ func TestBuildMigratesLegacyConfigEndToEnd(t *testing.T) {
 // withTempCache helper in internal/plugin/stats_test.go.
 func isolateConfigHome(t *testing.T) string {
 	t.Helper()
-	dir := t.TempDir()
+	dir := robustTempDir(t)
 	t.Setenv("HOME", dir)
 	t.Setenv("XDG_CONFIG_HOME", dir)
 	return dir
@@ -504,15 +657,15 @@ func isolateConfigHome(t *testing.T) string {
 // TestPartitionByTier pins the bucket assignment contract that the rest of
 // boot.go's plugin orchestration depends on: each tier string maps to its own
 // slice, the original order inside a tier is preserved (so /mcp status and
-// stats land deterministically), and a missing/unknown tier value falls into
-// lazy — the project default that keeps adding a plugin from ever slowing the
-// next launch.
+// stats land deterministically), an empty/missing tier defaults to background
+// (connects after session start without blocking chat), and unknown non-empty
+// values fall back to lazy so a typo never forces unwanted background connects.
 func TestPartitionByTier(t *testing.T) {
 	entries := []config.PluginEntry{
 		{Name: "e1", Tier: "eager"},
 		{Name: "l1", Tier: "lazy"},
 		{Name: "b1", Tier: "background"},
-		{Name: "default", Tier: ""}, // empty must default to lazy
+		{Name: "default", Tier: ""}, // empty defaults to background
 	}
 
 	eager, lazy, bg := partitionByTier(entries)
@@ -520,28 +673,20 @@ func TestPartitionByTier(t *testing.T) {
 	if len(eager) != 1 || eager[0].Name != "e1" {
 		t.Fatalf("eager bucket = %+v, want [e1]", eager)
 	}
-	if len(bg) != 1 || bg[0].Name != "b1" {
-		t.Fatalf("background bucket = %+v, want [b1]", bg)
+	if len(bg) != 2 || bg[0].Name != "b1" || bg[1].Name != "default" {
+		t.Fatalf("background bucket = %+v, want [b1, default] preserving input order", bg)
 	}
-	// Lazy holds both the explicit lazy entry and the default-fallback one, in
-	// the order they appeared in the input — proves the empty-tier default
-	// flows through partition without reshuffling.
-	if len(lazy) != 2 || lazy[0].Name != "l1" || lazy[1].Name != "default" {
-		t.Fatalf("lazy bucket = %+v, want [l1, default] preserving input order", lazy)
+	if len(lazy) != 1 || lazy[0].Name != "l1" {
+		t.Fatalf("lazy bucket = %+v, want [l1]", lazy)
 	}
 }
 
-// TestBuildEagerStartsAtBoot proves an eager-tier plugin actually completes
-// its handshake on the boot critical path: Host.ServerNames() must include the
-// plugin after Build returns. We point the plugin at this test binary running
-// as a stdio MCP helper (see TestHelperProcess), so the spawn is real but
-// deterministic and hermetic — no external MCP server required on PATH.
-func TestBuildEagerStartsAtBoot(t *testing.T) {
+func TestBuildMigratesLegacyEagerTierToBackground(t *testing.T) {
 	isolateConfigHome(t)
-	dir := t.TempDir()
+	dir := robustTempDir(t)
 	t.Chdir(dir)
 
-	writeFile(t, dir, "reasonix.toml", fmt.Sprintf(`
+	writeFile(t, dir, "reasonix.toml", `
 default_model = "test-model"
 
 [codegraph]
@@ -558,12 +703,10 @@ model = "x"
 api_key_env = "REASONIX_TEST_KEY_UNSET"
 
 [[plugins]]
-name = "eagermock"
-command = %q
-args = ["-test.run=TestHelperProcess", "--"]
+name = "legacy-eager"
+command = "reasonix-missing-legacy-eager-mcp"
 tier = "eager"
-env = { GO_WANT_HELPER_PROCESS = "1" }
-`, os.Args[0]))
+`)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -573,37 +716,25 @@ env = { GO_WANT_HELPER_PROCESS = "1" }
 	}
 	defer ctrl.Close()
 
-	names := ctrl.Host().ServerNames()
-	found := false
-	for _, n := range names {
-		if n == "eagermock" {
-			found = true
-			break
-		}
+	failures := waitForMCPFailure(t, ctrl.Host(), "legacy-eager", 2*time.Second)
+	if len(failures) != 1 || failures[0].Name != "legacy-eager" {
+		t.Fatalf("failures = %+v, want background startup failure for migrated legacy eager plugin", failures)
 	}
-	if !found {
-		t.Fatalf("eager plugin missing from Host.ServerNames() = %v — boot did not block on its handshake", names)
+	raw, err := os.ReadFile(filepath.Join(dir, "reasonix.toml"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if got := ctrl.Host().Failures(); len(got) != 0 {
-		t.Fatalf("Host.Failures() = %+v, want empty for a healthy eager plugin", got)
+	if strings.Contains(string(raw), "\ntier") {
+		t.Fatalf("legacy eager tier should be removed during load:\n%s", raw)
 	}
 }
 
-// TestBuildLazyDoesNotConnectAtBoot is the inverse of the eager test: a
-// lazy-tier plugin must NOT trigger a subprocess handshake during Build, so
-// the boot critical path stays empty even with a slow-to-spawn server in
-// config. We assert through Host.ServerNames() (must not list the plugin) and
-// Host.Failures() (lazy plugins never appear here — a failure surfaces only on
-// first model use, not at boot). The placeholder tool registration itself is
-// covered by internal/plugin/lazy_test.go's TestLazy* suite; the Registry has
-// no public accessor on Controller, so at this layer we pin the load-bearing
-// boot-time invariant — no spawn — rather than re-validating the placeholder.
-func TestBuildLazyDoesNotConnectAtBoot(t *testing.T) {
+func TestBuildMigratesLegacyLazyTierToBackground(t *testing.T) {
 	isolateConfigHome(t)
-	dir := t.TempDir()
+	dir := robustTempDir(t)
 	t.Chdir(dir)
 
-	writeFile(t, dir, "reasonix.toml", fmt.Sprintf(`
+	writeFile(t, dir, "reasonix.toml", `
 default_model = "test-model"
 
 [codegraph]
@@ -620,12 +751,10 @@ model = "x"
 api_key_env = "REASONIX_TEST_KEY_UNSET"
 
 [[plugins]]
-name = "lazymock"
-command = %q
-args = ["-test.run=TestHelperProcess", "--"]
+name = "legacy-lazy"
+command = "reasonix-missing-legacy-lazy-mcp"
 tier = "lazy"
-env = { GO_WANT_HELPER_PROCESS = "1" }
-`, os.Args[0]))
+`)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -635,34 +764,22 @@ env = { GO_WANT_HELPER_PROCESS = "1" }
 	}
 	defer ctrl.Close()
 
-	for _, n := range ctrl.Host().ServerNames() {
-		if n == "lazymock" {
-			t.Fatalf("lazy plugin %q appeared in Host.ServerNames() — boot connected it eagerly", n)
-		}
+	failures := waitForMCPFailure(t, ctrl.Host(), "legacy-lazy", 2*time.Second)
+	if len(failures) != 1 || failures[0].Name != "legacy-lazy" {
+		t.Fatalf("failures = %+v, want background startup failure for migrated legacy lazy plugin", failures)
 	}
-	if got := ctrl.Host().Failures(); len(got) != 0 {
-		t.Fatalf("Host.Failures() = %+v, want empty — lazy plugins must not even attempt a boot-time spawn", got)
+	raw, err := os.ReadFile(filepath.Join(dir, "reasonix.toml"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	// The configured plugin is still recognised as a configured-but-disconnected
-	// server, the same signal /mcp uses to render its "lazy, will connect on
-	// first use" line — proves the entry made it through partition into the
-	// lazy bucket rather than being dropped.
-	dconn := ctrl.DisconnectedMCPNames()
-	foundDisconnected := false
-	for _, n := range dconn {
-		if n == "lazymock" {
-			foundDisconnected = true
-			break
-		}
-	}
-	if !foundDisconnected {
-		t.Fatalf("DisconnectedMCPNames() = %v, want it to include the lazy plugin (configured but not connected)", dconn)
+	if strings.Contains(string(raw), "\ntier") {
+		t.Fatalf("legacy lazy tier should be removed during load:\n%s", raw)
 	}
 }
 
 func TestBuildColdCodegraphStartsInBackground(t *testing.T) {
 	isolateConfigHome(t)
-	dir := t.TempDir()
+	dir := robustTempDir(t)
 	t.Chdir(dir)
 	launcher := writeCodegraphHelper(t, dir)
 	t.Setenv("GO_WANT_HELPER_PROCESS", "1")
@@ -726,18 +843,9 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 	}
 }
 
-// TestBuildAutoDemoteFromStats proves the Phase 5 telemetry → Phase 4 tier
-// bridge: three consecutive over-budget startup samples must demote an
-// eager-tier plugin to lazy at the *next* boot, so the user pays for a slow
-// MCP server at most a handful of starts. We pre-seed three 30s samples for
-// "slowserver" (well above 2 * DefaultStartupBudget = 10s) via the public
-// RecordStartup API, then Build a config that declares "slowserver" eager and
-// verify (a) boot did NOT block on its handshake — the plugin is absent from
-// Host.ServerNames() — and (b) a Notice carrying the demote reason fired so
-// the user understands why their explicit "eager" was ignored this session.
-func TestBuildAutoDemoteFromStats(t *testing.T) {
+func TestBuildMigratesLegacyEagerBeforeStatsDemotion(t *testing.T) {
 	isolateConfigHome(t)
-	dir := t.TempDir()
+	dir := robustTempDir(t)
 	t.Chdir(dir)
 
 	// Three samples above 2*budget — the rule in stats.go's Recommend triggers
@@ -786,17 +894,9 @@ tier = "eager"
 	}
 	defer ctrl.Close()
 
-	for _, n := range ctrl.Host().ServerNames() {
-		if n == "slowserver" {
-			t.Fatalf("demoted plugin %q still appeared in Host.ServerNames() — auto-demote did not move it out of the eager bucket", n)
-		}
-	}
-	// Crucially the missing-binary command never ran: a real eager attempt
-	// would have surfaced as a Failure with a spawn error. An empty failures
-	// list proves boot skipped the spawn entirely, not that it tried and
-	// silently swallowed the error.
-	if got := ctrl.Host().Failures(); len(got) != 0 {
-		t.Fatalf("Host.Failures() = %+v, want empty — demoted plugin should never have been spawned", got)
+	failures := waitForMCPFailure(t, ctrl.Host(), "slowserver", 2*time.Second)
+	if len(failures) != 1 || failures[0].Name != "slowserver" {
+		t.Fatalf("Host.Failures() = %+v, want background startup failure for migrated plugin", failures)
 	}
 
 	foundDemoteNotice := false
@@ -806,8 +906,25 @@ tier = "eager"
 			break
 		}
 	}
-	if !foundDemoteNotice {
-		t.Fatalf("no demote notice surfaced; got %+v", notices)
+	if foundDemoteNotice {
+		t.Fatalf("legacy tier should be migrated before demotion logic; got notices %+v", notices)
+	}
+}
+
+func waitForMCPFailure(t *testing.T, h *plugin.Host, name string, timeout time.Duration) []plugin.Failure {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		failures := h.Failures()
+		for _, f := range failures {
+			if f.Name == name {
+				return failures
+			}
+		}
+		if time.Now().After(deadline) {
+			return failures
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 

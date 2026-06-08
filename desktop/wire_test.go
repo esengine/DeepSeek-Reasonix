@@ -67,10 +67,21 @@ func TestToWireToolDispatch(t *testing.T) {
 	}
 }
 
-func TestToWireToolResult(t *testing.T) {
-	e := event.Event{Kind: event.ToolResult, Tool: event.Tool{ID: "1", Output: "ok", Truncated: true}}
+func TestToWireToolDispatchProfile(t *testing.T) {
+	e := event.Event{Kind: event.ToolDispatch, Tool: event.Tool{
+		ID: "1", Name: "task", Args: `{"prompt":"x"}`,
+		Profile: &event.Profile{Model: "deepseek-pro", Effort: "max"},
+	}}
 	w := toWire(e)
-	if w.Tool == nil || w.Tool.Output != "ok" || !w.Tool.Truncated {
+	if w.Tool == nil || w.Tool.Profile == nil || w.Tool.Profile.Model != "deepseek-pro" || w.Tool.Profile.Effort != "max" {
+		t.Errorf("tool profile = %+v", w.Tool)
+	}
+}
+
+func TestToWireToolResult(t *testing.T) {
+	e := event.Event{Kind: event.ToolResult, Tool: event.Tool{ID: "1", Output: "ok", Truncated: true, DurationMs: 522}}
+	w := toWire(e)
+	if w.Tool == nil || w.Tool.Output != "ok" || !w.Tool.Truncated || w.Tool.DurationMs != 522 {
 		t.Errorf("tool result = %+v", w.Tool)
 	}
 }
@@ -106,8 +117,11 @@ func TestToWireUsageWithPricing(t *testing.T) {
 		Pricing: &provider.Pricing{CacheHit: 1.0, Input: 2.0, Output: 10.0},
 	}
 	w := toWire(e)
-	if w.Usage == nil || w.Usage.CostUSD != 1.0 {
-		t.Errorf("cost = %f, want 1.0", w.Usage.CostUSD)
+	if w.Usage == nil || w.Usage.Cost != 1.0 || w.Usage.CostUSD != 1.0 {
+		t.Errorf("cost = %+v, want cost and compat costUsd of 1.0", w.Usage)
+	}
+	if w.Usage.Currency != "¥" {
+		t.Errorf("currency = %q, want ¥", w.Usage.Currency)
 	}
 }
 

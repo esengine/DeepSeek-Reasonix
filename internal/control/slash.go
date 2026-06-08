@@ -38,8 +38,8 @@ type ArgData struct {
 // (everything after the command word). It returns the suggestions filtered by
 // the token being typed and the byte offset where that token begins, so a caller
 // replaces just that token. Only structured commands participate (/mcp /model
-// /skills /hooks /effort /theme /language); others yield nil. Single source of truth for CLI +
-// desktop.
+// /skills /hooks /effort /auto-plan /theme /language); others yield nil. Single
+// source of truth for CLI + desktop.
 func SlashArgItems(line string, d ArgData) ([]SlashItem, int) {
 	cmdEnd := strings.IndexAny(line, " \t")
 	if cmdEnd < 0 {
@@ -60,6 +60,8 @@ func SlashArgItems(line string, d ArgData) ([]SlashItem, int) {
 		raw = hooksArgItems(prior)
 	case "/effort":
 		raw = effortArgItems(prior, d)
+	case "/auto-plan":
+		raw = autoPlanArgItems(prior)
 	case "/theme":
 		raw = themeArgItems(prior)
 	case "/language":
@@ -68,6 +70,16 @@ func SlashArgItems(line string, d ArgData) ([]SlashItem, int) {
 		return nil, from
 	}
 	return filterSlash(raw, line, from, cur), from
+}
+
+func autoPlanArgItems(prior []string) []SlashItem {
+	if len(prior) > 1 {
+		return nil
+	}
+	return []SlashItem{
+		{Label: "off", Insert: "off", Hint: "manual plan mode only"},
+		{Label: "on", Insert: "on", Hint: "auto-enter plan mode for complex tasks"},
+	}
 }
 
 func languageArgItems(prior []string) []SlashItem {
@@ -157,6 +169,7 @@ func mcpArgItems(prior []string, cur string, d ArgData) []SlashItem {
 			{Label: "show", Insert: "show ", Hint: "show MCP server details", Descend: true},
 			{Label: "tools", Insert: "tools ", Hint: "show MCP server tools", Descend: true},
 			{Label: "remove", Insert: "remove ", Hint: i18n.M.ArgMcpRemove, Descend: true},
+			{Label: "import", Insert: "import", Hint: "import Codex-enabled servers from cc-switch"},
 		}
 	}
 	switch prior[1] {
@@ -358,7 +371,7 @@ func (c *Controller) modelListText() string {
 		if !p.Configured() {
 			continue
 		}
-		for _, m := range p.ModelList() {
+		for _, m := range p.ChatModelList() {
 			fmt.Fprintf(&b, "  %s/%s\n", p.Name, m)
 		}
 	}

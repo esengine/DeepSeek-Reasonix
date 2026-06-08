@@ -5,8 +5,10 @@
 #
 # Output lands in <repo>/dist/ with stable, platform-keyed names that
 # desktop/cmd/sign's `manifest` subcommand maps back to update.PlatformKey:
-#   macOS:   Reasonix-darwin-<arch>.zip                  (ditto archive of the .app)
-#   Windows: Reasonix-windows-<arch>-installer.exe       (NSIS per-user installer)
+#   macOS:   Reasonix-darwin-<arch>.zip                  (ditto archive; updater channel)
+#            Reasonix-darwin-universal.dmg               (drag-to-install; human download)
+#   Windows: Reasonix-windows-<arch>-installer.exe       (NSIS per-user installer; updater channel)
+#            Reasonix-windows-<arch>.zip                 (portable human download)
 #   Linux:   Reasonix-linux-<arch>.tar.gz                (bare binary)
 #
 # Usage: scripts/desktop-build.sh <os/arch> <version>
@@ -65,7 +67,23 @@ darwin)
 	else
 		ditto -c -k --keepParent "$app" "$ROOT/dist/${APPNAME}-darwin-${arch}.zip"
 	fi
-	rm -rf "$staging"
+	# A drag-to-Applications .dmg for first-time human download. Named -universal so
+	# cmd/sign's substring match (darwin-arm64/darwin-amd64) skips it: the .zip stays
+	# the updater channel, the .dmg is release-page only. create-dmg can exit nonzero
+	# while still writing the image, so gate on the file existing, not the exit code.
+	dmgsrc=$(mktemp -d)
+	cp -R "$app" "$dmgsrc/${APPNAME}.app"
+	dmg="$ROOT/dist/${APPNAME}-darwin-universal.dmg"
+	create-dmg \
+		--volname "$APPNAME" \
+		--window-size 540 380 \
+		--icon-size 110 \
+		--icon "${APPNAME}.app" 150 190 \
+		--app-drop-link 390 190 \
+		--no-internet-enable \
+		"$dmg" "$dmgsrc" || true
+	[ -f "$dmg" ] || { echo "create-dmg did not produce $dmg" >&2; exit 1; }
+	rm -rf "$staging" "$dmgsrc"
 	;;
 windows)
 	# `wails build -nsis` writes the installer under build/bin; its exact name
@@ -73,6 +91,14 @@ windows)
 	installer=$(ls build/bin/*installer*.exe 2>/dev/null | head -n1 || true)
 	[ -n "$installer" ] || { echo "no NSIS installer found in build/bin" >&2; exit 1; }
 	cp "$installer" "$ROOT/dist/${APPNAME}-windows-${arch}-installer.exe"
+	portable=$(find build/bin -maxdepth 1 -type f -name "*.exe" ! -name "*installer*.exe" | head -n1 || true)
+	[ -n "$portable" ] || { echo "no portable Windows exe found in build/bin" >&2; exit 1; }
+	staging=$(mktemp -d)
+	cp "$portable" "$staging/${APPNAME}.exe"
+	src_win=$(cygpath -w "$staging/${APPNAME}.exe")
+	zip_win=$(cygpath -w "$ROOT/dist/${APPNAME}-windows-${arch}.zip")
+	powershell.exe -NoProfile -Command "Compress-Archive -Force -LiteralPath '$src_win' -DestinationPath '$zip_win'"
+	rm -rf "$staging"
 	;;
 linux)
 	tar -czf "$ROOT/dist/${APPNAME}-linux-${arch}.tar.gz" -C build/bin "$BINNAME"
