@@ -214,6 +214,7 @@ export interface AppBindings {
   RenameTopic(topicID: string, title: string): Promise<void>;
   DeleteTopic(topicID: string): Promise<void>;
   TrashTopic(topicID: string): Promise<void>;
+  MarkTopicRead(topicID: string): Promise<void>;
   ContextPanel(tabID: string): Promise<ContextPanelInfo>;
   // New native-feel bindings (added with the desktop native-feel plan).
   ConfirmAction(req: NativeConfirmRequest): Promise<boolean>;
@@ -1738,6 +1739,9 @@ function makeMockApp(): AppBindings {
     },
     async SaveWindowState(_state) {
       // no-op in browser dev — no real window geometry to persist
+    },
+    async MarkTopicRead(_topicID: string) {
+      console.info("mock MarkTopicRead", _topicID);
     },
     async ContextPanel(_tabID: string) {
       const now = Date.now();

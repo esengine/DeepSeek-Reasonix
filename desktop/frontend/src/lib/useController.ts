@@ -664,6 +664,9 @@ export function useController() {
 
   const listSessions = useCallback(async (): Promise<SessionMeta[]> => asArray<SessionMeta>(await app.ListSessions().catch(() => [])), []);
   const listTrashedSessions = useCallback(async (): Promise<SessionMeta[]> => asArray<SessionMeta>(await app.ListTrashedSessions().catch(() => [])), []);
+  const markTopicRead = useCallback(async (topicId: string) => {
+    await app.MarkTopicRead(topicId).catch(() => {});
+  }, []);
   const resumeSession = useCallback(async (path: string, tabId?: string) => {
     const targetTabId = tabId || activeTabId;
     if (!targetTabId) return;
@@ -821,7 +824,7 @@ export function useController() {
     send, runShell, notice, cancel, approve, answerQuestion, setControllerMode,
     newSession, listSessions, listTrashedSessions, resumeSession, previewSession, deleteSession, restoreSession, purgeTrashedSession, renameSession,
     refreshMeta, pickWorkspace, switchWorkspace, compact, rewind, setModel, setEffort,
-    fetchMemory, remember, forget, saveDoc,
+    fetchMemory, remember, forget, saveDoc, markTopicRead,
     switchTab, openProjectTab, openGlobalTab, closeTab, reorderTabs,
     syncActiveTab: syncActiveTabFromBackend,
   };

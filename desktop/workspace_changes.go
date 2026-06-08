@@ -153,34 +153,6 @@ func parseGitStatusPorcelainZ(raw []byte) []gitStatusEntry {
 	return out
 }
 
-func normalizeWorkspaceRelPath(base, path string) string {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return ""
-	}
-	if filepath.IsAbs(path) {
-		if rel, err := filepath.Rel(base, path); err == nil {
-			path = rel
-		}
-	}
-	path = filepath.Clean(path)
-	if path == "." || path == ".." || strings.HasPrefix(path, ".."+string(filepath.Separator)) {
-		return ""
-	}
-	return filepath.ToSlash(path)
-}
-
-func workspaceRelPathFromGitStatus(repoRoot, base, path string) string {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return ""
-	}
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(repoRoot, filepath.FromSlash(path))
-	}
-	return normalizeWorkspaceRelPath(base, path)
-}
-
 // workspaceGitBranch returns the current git branch name for the repo rooted
 // at base, or an empty string when base is not inside a git repository or when
 // git is unavailable.
@@ -242,6 +214,35 @@ func (a *App) GitCheckout(branch string) error {
 	}
 	return nil
 }
+
+func normalizeWorkspaceRelPath(base, path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	if filepath.IsAbs(path) {
+		if rel, err := filepath.Rel(base, path); err == nil {
+			path = rel
+		}
+	}
+	path = filepath.Clean(path)
+	if path == "." || path == ".." || strings.HasPrefix(path, ".."+string(filepath.Separator)) {
+		return ""
+	}
+	return filepath.ToSlash(path)
+}
+
+func workspaceRelPathFromGitStatus(repoRoot, base, path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(repoRoot, filepath.FromSlash(path))
+	}
+	return normalizeWorkspaceRelPath(base, path)
+}
+
 
 type GitCommitView struct {
 	Hash    string `json:"hash"`

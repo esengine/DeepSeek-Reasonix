@@ -12,6 +12,7 @@ import (
 
 	"reasonix/internal/agent"
 	"reasonix/internal/config"
+	"reasonix/internal/event"
 )
 
 func waitForTabReady(t *testing.T, app *App, tabID string) *WorkspaceTab {
@@ -168,6 +169,145 @@ func TestRenameProjectUpdatesSidebarTitle(t *testing.T) {
 	nodes = NewApp().ListProjectTree()
 	if got, want := nodes[0].Label, filepath.Base(projectRoot); got != want {
 		t.Fatalf("cleared project label = %q, want %q", got, want)
+	}
+}
+
+func TestProjectTreeDoesNotMarkUnseenHistoryUnread(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectRoot := t.TempDir()
+	topicID := "topic_history"
+	if err := addProject(projectRoot, ""); err != nil {
+		t.Fatalf("add project: %v", err)
+	}
+	if err := setTopicTitle(projectRoot, topicID, "History"); err != nil {
+		t.Fatalf("set topic title: %v", err)
+	}
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	writeTopicSession(t, dir, "history.jsonl", topicID, "History", projectRoot)
+
+	nodes := NewApp().ListProjectTree()
+	if len(nodes) != 1 || len(nodes[0].Children) != 1 {
+		t.Fatalf("project tree = %#v, want one topic", nodes)
+	}
+	child := nodes[0].Children[0]
+	if child.LastActivityAt <= 0 {
+		t.Fatalf("lastActivityAt = %d, want activity time", child.LastActivityAt)
+	}
+	if child.HasUnread {
+		t.Fatalf("existing history without a read marker should show time, not unread: %#v", child)
+	}
+}
+
+func TestMarkGlobalTopicReadUsesGlobalReadStatus(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	topicID := "topic_global_read"
+	if err := setTopicTitle("", topicID, "Global read"); err != nil {
+		t.Fatalf("set topic title: %v", err)
+	}
+	f := loadProjectsFile()
+	f.GlobalTopics = prependUniqueString(f.GlobalTopics, topicID)
+	if err := saveProjectsFile(f); err != nil {
+		t.Fatalf("save projects: %v", err)
+	}
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	updatedAt := time.Now().Add(-time.Hour)
+	writeTopicSessionWithPrompt(t, dir, "global-read.jsonl", topicID, "Global read", "", "hello", updatedAt)
+	if err := saveTopicReadStatus("", map[string]int64{topicID: updatedAt.Add(-time.Hour).UnixMilli()}); err != nil {
+		t.Fatalf("seed read status: %v", err)
+	}
+
+	nodes := NewApp().ListProjectTree()
+	if len(nodes) != 1 || len(nodes[0].Children) != 1 || !nodes[0].Children[0].HasUnread {
+		t.Fatalf("project tree = %#v, want unread global topic", nodes)
+	}
+
+	app := &App{
+		tabs: map[string]*WorkspaceTab{
+			"global": {
+				ID:            "global",
+				Scope:         "global",
+				WorkspaceRoot: globalWorkspaceRoot(),
+				TopicID:       topicID,
+				TopicTitle:    "Global read",
+			},
+		},
+		activeTabID: "global",
+	}
+	if err := app.MarkTopicRead(topicID); err != nil {
+		t.Fatalf("mark topic read: %v", err)
+	}
+
+	globalRead := loadTopicReadStatus("")
+	if got := globalRead[topicID]; got <= updatedAt.UnixMilli() {
+		t.Fatalf("global read marker = %d, want after %d", got, updatedAt.UnixMilli())
+	}
+	if wrong := loadTopicReadStatus(globalWorkspaceRoot())[topicID]; wrong != 0 {
+		t.Fatalf("global topic read marker was written to workspace path: %d", wrong)
+	}
+	nodes = NewApp().ListProjectTree()
+	if len(nodes) != 1 || len(nodes[0].Children) != 1 || nodes[0].Children[0].HasUnread {
+		t.Fatalf("project tree = %#v, want read global topic", nodes)
+	}
+}
+
+func TestBackgroundTurnDoneMarksTopicUnreadImmediately(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectRoot := t.TempDir()
+	topicID := "topic_background_done"
+	if err := addProject(projectRoot, ""); err != nil {
+		t.Fatalf("add project: %v", err)
+	}
+	if err := setTopicTitle(projectRoot, topicID, "Background done"); err != nil {
+		t.Fatalf("set topic title: %v", err)
+	}
+	bgTab := &WorkspaceTab{
+		ID:            "background",
+		Scope:         "project",
+		WorkspaceRoot: projectRoot,
+		TopicID:       topicID,
+		TopicTitle:    "Background done",
+		Ready:         true,
+		disabledMCP:   map[string]ServerView{},
+	}
+	app := &App{
+		tabs: map[string]*WorkspaceTab{
+			"background": bgTab,
+			"active": {
+				ID:          "active",
+				Scope:       "global",
+				TopicID:     "topic_active",
+				TopicTitle:  "Active",
+				Ready:       true,
+				disabledMCP: map[string]ServerView{},
+			},
+		},
+		activeTabID: "active",
+	}
+	bgTab.sink = &tabEventSink{tabID: "background", app: app}
+
+	bgTab.sink.Emit(event.Event{Kind: event.TurnStarted})
+	time.Sleep(2 * time.Millisecond)
+	bgTab.sink.Emit(event.Event{Kind: event.TurnDone})
+
+	nodes := app.ListProjectTree()
+	if len(nodes) != 1 || len(nodes[0].Children) != 1 {
+		t.Fatalf("project tree = %#v, want one topic", nodes)
+	}
+	child := nodes[0].Children[0]
+	if !child.HasUnread {
+		t.Fatalf("background turn should show unread immediately: %#v", child)
+	}
+	if child.LastActivityAt <= 0 {
+		t.Fatalf("lastActivityAt = %d, want in-memory activity", child.LastActivityAt)
 	}
 }
 

@@ -147,6 +147,7 @@ export interface ProjectNode {
   lastActivityAt?: number;
   open?: boolean;
   running?: boolean;
+  hasUnread?: boolean;
   children?: ProjectNode[];
 }
 

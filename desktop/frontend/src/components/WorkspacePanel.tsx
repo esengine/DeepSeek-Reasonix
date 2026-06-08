@@ -7,6 +7,7 @@ import type {
   PointerEvent as ReactPointerEvent,
 } from "react";
 import {
+  Check,
   ChevronDown,
   ChevronRight,
   FileText,
@@ -24,7 +25,7 @@ import {
 import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
 import { loadLayoutSize, saveLayoutSize } from "../lib/layoutPreferences";
-import type { DirEntry, FilePreview, GitCommitView, GitCommitDetailView } from "../lib/types";
+import type { DirEntry, FilePreview, GitCommitView, GitCommitDetailView, WorkspaceChangesView } from "../lib/types";
 import { formatWorkspaceReference, WORKSPACE_REF_DRAG_TYPE } from "../lib/workspaceDrag";
 import { cleanGitDiff } from "../lib/diff";
 import { CodeViewer } from "./CodeViewer";
@@ -217,6 +218,9 @@ export function WorkspacePanel({
   const [commitDetail, setCommitDetail] = useState<GitCommitDetailView | null>(null);
   const [loadingCommit, setLoadingCommit] = useState(false);
   const [selectionMenu, setSelectionMenu] = useState<{ x: number; y: number; text: string; path: string } | null>(null);
+  const [changes, setChanges] = useState<WorkspaceChangesView | null>(null);
+  const [loadingChanges, setLoadingChanges] = useState(false);
+  const changesRequestRef = useRef(0);
   const [treeMenu, setTreeMenu] = useState<{ x: number; y: number; path: string; isDir: boolean } | null>(null);
   const [treeBlankMenuPoint, setTreeBlankMenuPoint] = useState<ContextMenuPoint | null>(null);
   const [filter, setFilter] = useState("");
@@ -225,6 +229,10 @@ export function WorkspacePanel({
   const [treeResizing, setTreeResizing] = useState(false);
   const [recentOpen, setRecentOpen] = useState(false);
   const recentAnchorRef = useRef<HTMLButtonElement>(null);
+  const [branchMenuOpen, setBranchMenuOpen] = useState(false);
+  const [branchList, setBranchList] = useState<string[]>([]);
+  const [switchingBranch, setSwitchingBranch] = useState(false);
+  const branchBtnRef = useRef<HTMLButtonElement>(null);
   const openDirsRef = useRef(openDirs);
 
   useEffect(() => {
@@ -234,6 +242,22 @@ export function WorkspacePanel({
   const loadDir = useCallback(async (dir: string) => {
     const entries = await app.ListDir(dir).catch(() => []);
     setEntriesByDir((prev) => ({ ...prev, [dir]: entries ?? [] }));
+  }, []);
+
+  const loadChanges = useCallback(async () => {
+    const requestId = changesRequestRef.current + 1;
+    changesRequestRef.current = requestId;
+    setLoadingChanges(true);
+    try {
+      const next = await app.WorkspaceChanges();
+      if (changesRequestRef.current === requestId) setChanges(next);
+    } catch (err) {
+      if (changesRequestRef.current === requestId) {
+        setChanges({ files: [], gitAvailable: false, gitErr: String((err as Error)?.message ?? err) });
+      }
+    } finally {
+      if (changesRequestRef.current === requestId) setLoadingChanges(false);
+    }
   }, []);
 
   const loadGitHistory = useCallback(async () => {
@@ -251,6 +275,33 @@ export function WorkspacePanel({
   const toggleCommit = useCallback((hash: string) => {
     setExpandedCommit((prev) => (prev === hash ? null : hash));
   }, []);
+
+  const openBranchMenu = useCallback(async () => {
+    try {
+      const branches = await app.GitBranches();
+      setBranchList(branches);
+    } catch {
+      setBranchList([]);
+    }
+    setBranchMenuOpen((prev) => !prev);
+  }, []);
+
+  const switchBranch = useCallback(
+    async (branch: string) => {
+      if (branch === changes?.gitBranch) return;
+      setSwitchingBranch(true);
+      try {
+        await app.GitCheckout(branch);
+        await loadChanges();
+      } catch {
+        // Error message shown via the changes view
+      } finally {
+        setSwitchingBranch(false);
+        setBranchMenuOpen(false);
+      }
+    },
+    [changes?.gitBranch, loadChanges],
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -1000,6 +1051,56 @@ export function WorkspacePanel({
                 </button>
               </Tooltip>
             )}
+          </div>
+        )}
+
+        {viewMode === "changed" && changes?.gitBranch && (
+          <div className="workspace-branch-indicator">
+            <GitBranch size={13} />
+            <button
+              ref={branchBtnRef}
+              className="workspace-branch-name"
+              onClick={openBranchMenu}
+            >
+              <span>{changes.gitBranch}</span>
+              <ChevronDown size={11} />
+            </button>
+            <AnchoredPopover
+              open={branchMenuOpen}
+              anchorRef={branchBtnRef}
+              onClose={() => setBranchMenuOpen(false)}
+              className="workspace-branch-menu"
+              placement="bottom"
+              align="start"
+              offset={4}
+            >
+              <div className="workspace-branch-menu__inner">
+                {branchList.length === 0 ? (
+                  <div className="workspace-branch-menu__loading">{t("workspace.loading")}</div>
+                ) : (
+                  branchList.map((b) => (
+                    <button
+                      key={b}
+                      type="button"
+                      className={`workspace-branch-menu__item${b === changes.gitBranch ? " workspace-branch-menu__item--active" : ""}`}
+                      onClick={() => switchBranch(b)}
+                      disabled={switchingBranch}
+                    >
+                      {b === changes.gitBranch && <Check size={13} />}
+                      <span>{b}</span>
+                    </button>
+                  ))
+                )}
+              </div>
+            </AnchoredPopover>
+            <button
+              className="workspace-branch-refresh"
+              onClick={loadChanges}
+              disabled={loadingChanges}
+              title={t("workspace.refreshChanges")}
+            >
+              <RefreshCw size={12} className={loadingChanges ? "spinning" : ""} />
+            </button>
           </div>
         )}
 
