@@ -198,15 +198,12 @@ export function HistoryPanel({
     setMenuPoint(null);
     setBlankMenuPoint(contextMenuPointFromEvent(event));
   };
-  const openTrashClearMenu = (event: ReactMouseEvent<HTMLElement>) => {
+  const armClearTrash = () => {
     if (!isTrash || sessions.length === 0) return;
-    event.preventDefault();
-    event.stopPropagation();
-    const rect = event.currentTarget.getBoundingClientRect();
     setMenuSession(null);
     setMenuPoint(null);
+    setBlankMenuPoint(null);
     setMenuConfirmTarget({ kind: "clear" });
-    setBlankMenuPoint({ left: rect.left, top: rect.bottom + 6 });
   };
   const closeHistoryMenus = () => {
     setMenuSession(null);
@@ -316,6 +313,7 @@ export function HistoryPanel({
     selectedSession && menuConfirmTarget?.kind === "delete" && menuConfirmTarget.path === selectedSession.path;
   const actionConfirmPurge =
     selectedSession && menuConfirmTarget?.kind === "purge" && menuConfirmTarget.path === selectedSession.path;
+  const actionConfirmClearTrash = isTrash && menuConfirmTarget?.kind === "clear";
 
   const openSelected = () => {
     if (!selectedSession || running || isTrash) return;
@@ -352,20 +350,16 @@ export function HistoryPanel({
       <header className="management-modal__head history-modal__head">
         <div>
           <div className="management-modal__title history-modal__title">{tr(isTrash ? "history.trashTitle" : "history.title")}</div>
-          {isTrash ? (
-            <div className="management-modal__summary history-modal__summary">{tr("history.trashHint")}</div>
-          ) : (
-            running && <div className="management-modal__summary history-modal__summary">{tr("history.readOnlyHint")}</div>
-          )}
+          {!isTrash && running && <div className="management-modal__summary history-modal__summary">{tr("history.readOnlyHint")}</div>}
         </div>
         <div className="management-modal__actions history-modal__actions">
           {isTrash && sessions.length > 0 && (
             <button
-              className="chip history-clear"
+              className={`chip history-clear${actionConfirmClearTrash ? " history-clear--confirm" : ""}`}
               type="button"
-              onClick={openTrashClearMenu}
+              onClick={actionConfirmClearTrash ? clearTrash : armClearTrash}
             >
-              {tr("history.clearTrash")}
+              {tr(actionConfirmClearTrash ? "history.confirmClearTrash" : "history.clearTrash")}
             </button>
           )}
           <Tooltip label={tr("common.close")}>

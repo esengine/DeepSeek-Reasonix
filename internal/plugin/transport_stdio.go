@@ -112,6 +112,17 @@ func resolveStdioExecutable(ctx context.Context, s Spec, env []string) (string, 
 			currentPath = fallbackPath
 		}
 	}
+	if runtime.GOOS == "windows" {
+		fallbackPath := mergePathLists(windowsStdioFallbackPATH(env), currentPath)
+		if fallbackPath != currentPath {
+			fallbackEnv := setEnvValue(env, "PATH", fallbackPath)
+			if exe, ok := lookPathInEnv(s.Command, fallbackEnv); ok {
+				return exe, fallbackEnv, nil
+			}
+			env = fallbackEnv
+			currentPath = fallbackPath
+		}
+	}
 
 	return "", env, fmt.Errorf("stdio plugin %q: command %q not found on PATH; GUI launches and non-interactive sessions may not inherit your shell PATH. Use an absolute command path or set PATH in the MCP server env. PATH=%q",
 		s.Name, s.Command, currentPath)
@@ -174,6 +185,53 @@ func isExecutableFile(path string) bool {
 		return true
 	}
 	return info.Mode().Perm()&0o111 != 0
+}
+
+func windowsStdioFallbackPATH(env []string) string {
+	if runtime.GOOS != "windows" {
+		return ""
+	}
+	programFiles, _ := envValue(env, "ProgramFiles")
+	programFilesX86, _ := envValue(env, "ProgramFiles(x86)")
+	localAppData, _ := envValue(env, "LOCALAPPDATA")
+	appData, _ := envValue(env, "APPDATA")
+	userProfile, _ := envValue(env, "USERPROFILE")
+	chocolatey, _ := envValue(env, "ChocolateyInstall")
+	if localAppData == "" && userProfile != "" {
+		localAppData = filepath.Join(userProfile, "AppData", "Local")
+	}
+	if appData == "" && userProfile != "" {
+		appData = filepath.Join(userProfile, "AppData", "Roaming")
+	}
+	candidates := []string{
+		filepath.Join(programFiles, "nodejs"),
+		filepath.Join(programFilesX86, "nodejs"),
+		filepath.Join(localAppData, "Programs", "nodejs"),
+		filepath.Join(appData, "npm"),
+		filepath.Join(localAppData, "Microsoft", "WindowsApps"),
+		filepath.Join(userProfile, "scoop", "shims"),
+		filepath.Join(userProfile, ".bun", "bin"),
+		filepath.Join(userProfile, ".cargo", "bin"),
+		filepath.Join(chocolatey, "bin"),
+	}
+	var existing []string
+	for _, dir := range candidates {
+		if isDir(dir) {
+			existing = append(existing, dir)
+		}
+	}
+	return strings.Join(existing, string(os.PathListSeparator))
+}
+
+func isDir(path string) bool {
+	if path == "" {
+		return false
+	}
+	if !filepath.IsAbs(path) {
+		return false
+	}
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
 }
 
 func defaultStdioShellPATH(ctx context.Context) string {

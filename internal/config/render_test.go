@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
@@ -26,6 +27,7 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	orig.Agent.AutoPlanClassifier = "deepseek-flash"
 	orig.Agent.SubagentModel = "mimo-pro"
 	orig.Agent.SubagentModels = map[string]string{"review": "deepseek-pro"}
+	orig.Tools.BashTimeoutSeconds = intPtr(900)
 	orig.Permissions = PermissionsConfig{
 		Mode:  "deny",
 		Deny:  []string{"bash(rm -rf*)"},
@@ -43,15 +45,30 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 		},
 	}
 	orig.Skills.Paths = []string{"~/my-skills", "../shared/skills"}
+	orig.Skills.ExcludedPaths = []string{"~/.agents/skills"}
 	orig.Skills.DisabledSkills = []string{"review", "explore"}
 	orig.Skills.MaxDepth = 2
 	orig.Codegraph = CodegraphConfig{Enabled: true, AutoInstall: false, Path: "/opt/codegraph", Tier: "background"}
+	orig.LSP = LSPConfig{
+		Enabled: true,
+		Servers: map[string]LSPServer{
+			"lua": {
+				Command:     "lua-language-server",
+				Args:        []string{"--stdio"},
+				Env:         map[string]string{"LUA_PATH": "./?.lua"},
+				LanguageID:  "lua",
+				Extensions:  []string{".lua", ".script", ".gui_script"},
+				InstallHint: "install lua-language-server",
+			},
+		},
+	}
 	orig.Plugins = []PluginEntry{
 		{Name: "example", Command: "reasonix-plugin-example"},
 		{Name: "stripe", Type: "http", URL: "https://mcp.stripe.com", Headers: map[string]string{"Authorization": "Bearer x"}, AutoStart: boolPtr(false), Tier: "background"},
 	}
 	mm, _ := orig.Provider("mimo-pro")
 	mm.BaseURL = "http://localhost:8000/v1"
+	mm.ReasoningProtocol = "openai"
 	ds, _ := orig.Provider("deepseek-flash")
 	ds.Effort = "max"
 
@@ -95,6 +112,9 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	if got.Agent.MaxSteps != orig.Agent.MaxSteps {
 		t.Errorf("max_steps = %d, want %d", got.Agent.MaxSteps, orig.Agent.MaxSteps)
 	}
+	if got.Agent.PlannerMaxSteps != orig.Agent.PlannerMaxSteps {
+		t.Errorf("planner_max_steps = %d, want %d", got.Agent.PlannerMaxSteps, orig.Agent.PlannerMaxSteps)
+	}
 	if got.Agent.Temperature != orig.Agent.Temperature {
 		t.Errorf("temperature = %v, want %v", got.Agent.Temperature, orig.Agent.Temperature)
 	}
@@ -128,13 +148,32 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	if got.Codegraph.Tier != "" {
 		t.Errorf("codegraph.tier = %q, want migrated empty", got.Codegraph.Tier)
 	}
+	if !got.LSP.Enabled {
+		t.Error("lsp.enabled = false, want true")
+	}
+	lua := got.LSP.Servers["lua"]
+	if lua.Command != "lua-language-server" || lua.LanguageID != "lua" || lua.InstallHint != "install lua-language-server" {
+		t.Errorf("lsp.servers.lua scalar fields not preserved: %+v", lua)
+	}
+	if len(lua.Args) != 1 || lua.Args[0] != "--stdio" {
+		t.Errorf("lsp.servers.lua.args = %v, want [--stdio]", lua.Args)
+	}
+	if lua.Env["LUA_PATH"] != "./?.lua" {
+		t.Errorf("lsp.servers.lua.env = %v, want LUA_PATH", lua.Env)
+	}
+	if len(lua.Extensions) != 3 || lua.Extensions[2] != ".gui_script" {
+		t.Errorf("lsp.servers.lua.extensions = %v", lua.Extensions)
+	}
 	if got.Agent.SubagentModel != "mimo-pro" {
 		t.Errorf("subagent_model = %q, want mimo-pro", got.Agent.SubagentModel)
 	}
 	if got.Agent.SubagentModels["review"] != "deepseek-pro" {
 		t.Errorf("subagent_models.review = %q, want deepseek-pro", got.Agent.SubagentModels["review"])
 	}
-	if g, _ := got.Provider("mimo-pro"); g == nil || g.BaseURL != "http://localhost:8000/v1" {
+	if got.Tools.BashTimeoutSeconds == nil || *got.Tools.BashTimeoutSeconds != 900 {
+		t.Errorf("tools.bash_timeout_seconds = %v, want 900", got.Tools.BashTimeoutSeconds)
+	}
+	if g, _ := got.Provider("mimo-pro"); g == nil || g.BaseURL != "http://localhost:8000/v1" || g.ReasoningProtocol != "openai" {
 		t.Errorf("mimo-pro base_url not preserved: %+v", g)
 	}
 	if g, _ := got.Provider("deepseek-flash"); g == nil || g.Effort != "max" {
@@ -157,6 +196,9 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	}
 	if len(got.Skills.Paths) != 2 || got.Skills.Paths[0] != "~/my-skills" {
 		t.Errorf("skills.paths = %v", got.Skills.Paths)
+	}
+	if len(got.Skills.ExcludedPaths) != 1 || got.Skills.ExcludedPaths[0] != "~/.agents/skills" {
+		t.Errorf("skills.excluded_paths = %v", got.Skills.ExcludedPaths)
 	}
 	if len(got.Skills.DisabledSkills) != 2 || got.Skills.DisabledSkills[0] != "review" || got.Skills.DisabledSkills[1] != "explore" {
 		t.Errorf("skills.disabled_skills = %v", got.Skills.DisabledSkills)
@@ -182,6 +224,103 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	}
 	if strings.Contains(rendered, "\ntier") {
 		t.Errorf("rendered config should not contain MCP tier fields:\n%s", rendered)
+	}
+}
+
+func TestScopedRenderPreservesLSPConfig(t *testing.T) {
+	const src = `
+config_version = 2
+default_model = "mimo"
+
+[lsp]
+enabled = true
+
+[lsp.servers.lua]
+command = "lua-language-server"
+args = ["--stdio"]
+env = { LUA_PATH = "./?.lua" }
+language_id = "lua"
+extensions = [".lua", ".script", ".gui_script"]
+install_hint = "install lua-language-server"
+
+[lsp.servers."c++"]
+command = "clangd"
+extensions = [".cc", ".cpp", ".hpp"]
+`
+
+	var cfg Config
+	if _, err := toml.Decode(src, &cfg); err != nil {
+		t.Fatalf("decode source TOML: %v", err)
+	}
+
+	for _, scope := range []RenderScope{RenderScopeFull, RenderScopeUser, RenderScopeProject} {
+		t.Run(string(scope), func(t *testing.T) {
+			rendered := RenderTOMLForScope(&cfg, scope)
+			if !strings.Contains(rendered, "[lsp]") {
+				t.Fatalf("render missing [lsp]:\n%s", rendered)
+			}
+			if !strings.Contains(rendered, "[lsp.servers.lua]") {
+				t.Fatalf("render missing [lsp.servers.lua]:\n%s", rendered)
+			}
+			if !strings.Contains(rendered, `[lsp.servers."c++"]`) {
+				t.Fatalf("render missing quoted c++ server key:\n%s", rendered)
+			}
+
+			var got Config
+			if _, err := toml.Decode(rendered, &got); err != nil {
+				t.Fatalf("decode rendered TOML: %v\n---\n%s", err, rendered)
+			}
+			if !got.LSP.Enabled {
+				t.Fatalf("lsp.enabled = false, want true")
+			}
+			lua, ok := got.LSP.Servers["lua"]
+			if !ok {
+				t.Fatalf("lsp.servers.lua missing after round-trip: %+v", got.LSP.Servers)
+			}
+			if lua.Command != "lua-language-server" || lua.LanguageID != "lua" || lua.InstallHint != "install lua-language-server" {
+				t.Fatalf("lsp.servers.lua scalar fields not preserved: %+v", lua)
+			}
+			if len(lua.Args) != 1 || lua.Args[0] != "--stdio" {
+				t.Fatalf("lsp.servers.lua.args = %v, want [--stdio]", lua.Args)
+			}
+			if lua.Env["LUA_PATH"] != "./?.lua" {
+				t.Fatalf("lsp.servers.lua.env = %v, want LUA_PATH", lua.Env)
+			}
+			if len(lua.Extensions) != 3 || lua.Extensions[0] != ".lua" || lua.Extensions[2] != ".gui_script" {
+				t.Fatalf("lsp.servers.lua.extensions = %v", lua.Extensions)
+			}
+			cpp, ok := got.LSP.Servers["c++"]
+			if !ok {
+				t.Fatalf("lsp.servers.c++ missing after round-trip: %+v", got.LSP.Servers)
+			}
+			if cpp.Command != "clangd" || len(cpp.Extensions) != 3 || cpp.Extensions[1] != ".cpp" {
+				t.Fatalf("lsp.servers.c++ not preserved: %+v", cpp)
+			}
+		})
+	}
+}
+
+func BenchmarkRenderTOMLWithLSPServers(b *testing.B) {
+	cfg := Default()
+	cfg.LSP.Servers = make(map[string]LSPServer, 64)
+	for i := 0; i < 64; i++ {
+		lang := "lang" + strconv.Itoa(i)
+		cfg.LSP.Servers[lang] = LSPServer{
+			Command:     "server-" + strconv.Itoa(i),
+			Args:        []string{"--stdio", "--flag"},
+			Env:         map[string]string{"SERVER_MODE": "stdio", "SERVER_ROOT": "."},
+			LanguageID:  lang,
+			Extensions:  []string{"." + lang, "." + lang + "x"},
+			InstallHint: "install server-" + strconv.Itoa(i),
+		}
+	}
+
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		rendered := RenderTOML(cfg)
+		if len(rendered) == 0 {
+			b.Fatal("empty render")
+		}
 	}
 }
 
@@ -248,3 +387,5 @@ func TestProjectRenderPreservesNonDefaultLegacySections(t *testing.T) {
 }
 
 func boolPtr(v bool) *bool { return &v }
+
+func intPtr(v int) *int { return &v }

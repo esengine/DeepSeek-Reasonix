@@ -18,10 +18,11 @@ const TARGETS = [
 
 const tag = process.argv[2] ?? process.env.GITHUB_REF_NAME;
 if (!tag) {
-  console.error("usage: node npm/build.mjs <tag>   (e.g. v1.0.0)");
+  console.error("usage: node npm/build.mjs <tag>   (e.g. v1.0.0 or npm-v1.0.0)");
   process.exit(1);
 }
-const version = tag.replace(/^v/, "");
+// npm ships on its own `npm-v*` tag (release-npm.yml); also accept a bare `v*`.
+const version = tag.replace(/^(npm-)?v/, "");
 const publish = process.argv.includes("--publish");
 
 rmSync(STAGE, { recursive: true, force: true });
@@ -98,11 +99,16 @@ if (!publish) {
   process.exit(0);
 }
 
-// Only the v0.x stable line is the promoted default (`latest`). The v2 (1.x) line
-// and every prerelease ship under `next` so a bare `npm i reasonix` keeps resolving
-// 0.53.x; opt in with `npm i reasonix@next`. (npm rejects `v2` as a tag — it parses
-// as a SemVer range.) Promote v2 with a manual `npm dist-tag add reasonix@<ver> latest`.
-const distTag = version.startsWith("0.") && !version.includes("-") ? "latest" : "next";
+// Three independent dist-tags: 0.x stable is the promoted default (`latest`); a
+// `-canary.` build is the opt-in tester channel (`canary`); everything else — the
+// 1.x line and rc prereleases — ships under `next`. Only a `--tag canary` publish
+// moves canary, so `next`/`latest` users never resolve a canary. Promote a 1.x
+// stable to default with a manual `npm dist-tag add reasonix@<ver> latest`.
+const distTag = version.includes("-canary.")
+  ? "canary"
+  : version.startsWith("0.") && !version.includes("-")
+    ? "latest"
+    : "next";
 const publishArgs = ["publish", "--access", "public", "--tag", distTag];
 
 for (const sub of subPackages) {

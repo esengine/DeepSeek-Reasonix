@@ -167,8 +167,10 @@ func TestGateInteractive(t *testing.T) {
 	if ap.calls != 1 {
 		t.Errorf("approver calls = %d, want 1", ap.calls)
 	}
-	if remembered != "bash=go build" {
-		t.Errorf("remembered rule = %q, want %q", remembered, "bash=go build")
+	// "Always allow" is tool-wide: the persisted rule is the bare tool name, not
+	// pinned to "go build", so any later command runs without re-prompting.
+	if remembered != "bash" {
+		t.Errorf("remembered rule = %q, want tool-wide %q", remembered, "bash")
 	}
 
 	// Decline path.

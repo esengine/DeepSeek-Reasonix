@@ -6,6 +6,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"reasonix/internal/config"
 )
 
 func writeSkill(t *testing.T, base, rel, content string) string {
@@ -152,6 +154,26 @@ func TestConventionDirsDiscovered(t *testing.T) {
 	}
 }
 
+func TestExcludedPathsHideConventionRoots(t *testing.T) {
+	home := t.TempDir()
+	writeSkill(t, home, ".reasonix/skills/keep.md", "---\ndescription: keep\n---\nb")
+	writeSkill(t, home, ".agents/skills/noisy.md", "---\ndescription: noisy\n---\nb")
+	excluded := filepath.Join(home, ".agents", "skills")
+	st := New(Options{HomeDir: home, ExcludedPaths: []string{excluded}, DisableBuiltins: true})
+
+	if _, ok := find(st.List(), "keep"); !ok {
+		t.Fatal("non-excluded skill should be listed")
+	}
+	if _, ok := find(st.List(), "noisy"); ok {
+		t.Fatal("excluded skill should not be listed")
+	}
+	for _, root := range st.Roots() {
+		if config.CanonicalSkillPath(root.Dir) == config.CanonicalSkillPath(excluded) {
+			t.Fatalf("excluded root should be hidden from Roots: %+v", st.Roots())
+		}
+	}
+}
+
 func TestFrontmatterFields(t *testing.T) {
 	home := t.TempDir()
 	writeSkill(t, home, ".reasonix/skills/sub.md",
@@ -238,7 +260,7 @@ func TestBuiltinSubagentSkillsDeclareAllowedTools(t *testing.T) {
 		if !sameStrings(sk.AllowedTools, want) {
 			t.Errorf("%s AllowedTools = %v, want %v", name, sk.AllowedTools, want)
 		}
-		for _, meta := range []string{"task", "run_skill", "install_skill", "explore", "research", "review", "security_review"} {
+		for _, meta := range []string{"task", "run_skill", "install_skill", "install_source", "explore", "research", "review", "security_review"} {
 			if containsString(sk.AllowedTools, meta) {
 				t.Errorf("%s AllowedTools should not include meta-tool %q: %v", name, meta, sk.AllowedTools)
 			}
@@ -258,6 +280,32 @@ func TestBuiltinsPresentAndOverridable(t *testing.T) {
 	ex, _ := st2.Read("explore")
 	if ex.Scope == ScopeBuiltin || ex.Description != "mine" {
 		t.Errorf("user explore should override builtin: scope=%s desc=%q", ex.Scope, ex.Description)
+	}
+}
+
+func TestInstallCapabilityBuiltinIsInlineWithExpectedMetadata(t *testing.T) {
+	st := New(Options{HomeDir: t.TempDir()})
+	sk, ok := st.Read("install-capability")
+	if !ok {
+		t.Fatal("install-capability builtin skill must be registered")
+	}
+	if sk.Scope != ScopeBuiltin {
+		t.Errorf("install-capability scope = %s, want builtin", sk.Scope)
+	}
+	if sk.RunAs != RunInline {
+		t.Errorf("install-capability runAs = %s, want inline (it folds into the parent turn)", sk.RunAs)
+	}
+	if !strings.Contains(sk.Description, "install_source") {
+		t.Errorf("description should mention install_source, got %q", sk.Description)
+	}
+	if !strings.Contains(sk.Description, "uninstall") {
+		t.Errorf("description should advertise op=uninstall, got %q", sk.Description)
+	}
+	if !strings.Contains(sk.Body, "riskLevel") {
+		t.Error("body should mention the per-action riskLevel field so the model reads it")
+	}
+	if !strings.Contains(sk.Body, "planId") {
+		t.Error("body should mention the planId echo requirement on apply=true")
 	}
 }
 
@@ -402,10 +450,15 @@ func TestCreateRefusesOverwrite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if !strings.HasSuffix(path, filepath.Join(".reasonix", "skills", "mine.md")) {
+	if !strings.HasSuffix(path, filepath.Join(".reasonix", "skills", "mine", SkillFile)) {
 		t.Errorf("unexpected path %q", path)
 	}
 	if _, err := st.Create("mine", ScopeGlobal); err == nil {
 		t.Error("second create should refuse to overwrite")
+	}
+
+	writeSkill(t, home, ".reasonix/skills/legacy.md", "---\ndescription: legacy\n---\nbody")
+	if _, err := st.Create("legacy", ScopeGlobal); err == nil {
+		t.Error("create should refuse to shadow an existing legacy flat skill")
 	}
 }

@@ -106,7 +106,7 @@ func loadLegacyMCP(path string) []PluginEntry {
 }
 
 func pluginEntryFromMCPSpec(name string, s mcpServerSpec) PluginEntry {
-	return PluginEntry{
+	e := PluginEntry{
 		Name:      name,
 		Type:      s.Type,
 		Command:   s.Command,
@@ -116,6 +116,8 @@ func pluginEntryFromMCPSpec(name string, s mcpServerSpec) PluginEntry {
 		Headers:   s.Headers,
 		AutoStart: s.AutoStart,
 	}
+	e, _ = NormalizePluginCommandLine(e)
+	return e
 }
 
 // mergeMCPJSON appends servers from .mcp.json that the TOML config did not

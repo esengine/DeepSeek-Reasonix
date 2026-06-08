@@ -62,13 +62,28 @@ func classifyRef(token string, known map[string]bool, exists func(string) bool) 
 	if i := strings.Index(token, ":"); i > 0 && i+1 < len(token) && known[token[:i]] {
 		return ref{kind: refResource, server: token[:i], uri: token[i+1:], raw: token}, true
 	}
-	if strings.HasPrefix(filepath.ToSlash(token), ".reasonix/attachments/") && exists(token) {
-		return ref{kind: refImage, path: token, raw: token}, true
+	if isAttachmentRef(token) && exists(token) {
+		if isImageAttachmentRef(token) {
+			return ref{kind: refImage, path: token, raw: token}, true
+		}
+		return ref{kind: refFile, path: token, raw: token}, true
 	}
 	if exists(token) {
 		return ref{kind: refFile, path: token, raw: token}, true
 	}
 	return ref{}, false
+}
+
+func isAttachmentRef(token string) bool {
+	return strings.HasPrefix(filepath.ToSlash(token), ".reasonix/attachments/")
+}
+
+func isImageAttachmentRef(token string) bool {
+	switch strings.ToLower(filepath.Ext(token)) {
+	case ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg", ".tif", ".tiff":
+		return true
+	}
+	return false
 }
 
 // detectRefs finds the @references in a line: MCP resources for connected

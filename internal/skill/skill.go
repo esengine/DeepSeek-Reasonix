@@ -74,6 +74,7 @@ type Options struct {
 	HomeDir         string
 	ProjectRoot     string
 	CustomPaths     []string
+	ExcludedPaths   []string
 	DisabledNames   []string
 	MaxDepth        int
 	DisableBuiltins bool // suppress shipped built-ins (test-only knob)
@@ -88,6 +89,7 @@ type Store struct {
 	homeDir         string
 	projectRoot     string
 	customPaths     []string
+	excludedPaths   map[string]bool
 	disabled        map[string]bool
 	maxDepth        int
 	disableBuiltins bool
@@ -116,6 +118,10 @@ func New(opts Options) *Store {
 		}
 	}
 	custom := dedupePaths(resolveCustomPaths(opts.CustomPaths, base, home))
+	excluded := map[string]bool{}
+	for _, p := range dedupePaths(resolveCustomPaths(opts.ExcludedPaths, base, home)) {
+		excluded[config.CanonicalSkillPath(p)] = true
+	}
 	stderr := opts.Stderr
 	if stderr == nil {
 		stderr = os.Stderr
@@ -124,6 +130,7 @@ func New(opts Options) *Store {
 		homeDir:         home,
 		projectRoot:     root,
 		customPaths:     custom,
+		excludedPaths:   excluded,
 		disabled:        disabledNameSet(opts.DisabledNames),
 		maxDepth:        normalizeMaxDepth(opts.MaxDepth),
 		disableBuiltins: opts.DisableBuiltins,
@@ -173,9 +180,12 @@ func (s *Store) roots() []Root {
 	for _, c := range config.ConventionDirs {
 		dirs = append(dirs, de{filepath.Join(s.homeDir, c, SkillsDirname), ScopeGlobal})
 	}
-	out := make([]Root, len(dirs))
-	for i, d := range dirs {
-		out[i] = Root{Dir: d.dir, Scope: d.scope, Priority: i, Status: pathStatus(d.dir)}
+	out := make([]Root, 0, len(dirs))
+	for _, d := range dirs {
+		if s.excludedPaths[config.CanonicalSkillPath(d.dir)] {
+			continue
+		}
+		out = append(out, Root{Dir: d.dir, Scope: d.scope, Priority: len(out), Status: pathStatus(d.dir)})
 	}
 	return out
 }
@@ -427,9 +437,9 @@ func (s *Store) Create(name string, scope Scope) (string, error) {
 	return s.CreateWithContent(name, scope, stubBody(name))
 }
 
-// CreateWithContent writes caller-supplied file contents as a new flat
-// <name>.md skill, refusing to clobber an existing flat or directory-layout
-// skill of the same name. Returns the written path.
+// CreateWithContent writes caller-supplied file contents as a canonical
+// <name>/SKILL.md skill, refusing to clobber an existing directory-layout or
+// legacy flat skill of the same name. Returns the written path.
 func (s *Store) CreateWithContent(name string, scope Scope, content string) (string, error) {
 	if !IsValidName(name) {
 		return "", fmt.Errorf("invalid skill name %q — use letters, digits, '_', '-', '.'", name)
@@ -446,17 +456,20 @@ func (s *Store) CreateWithContent(name string, scope Scope, content string) (str
 	}
 	flat := filepath.Join(root, name+".md")
 	folder := filepath.Join(root, name, SkillFile)
+	if _, err := os.Stat(flat); err == nil {
+		return "", fmt.Errorf("skill %q already exists at %s", name, flat)
+	}
 	if _, err := os.Stat(folder); err == nil {
 		return "", fmt.Errorf("skill %q already exists at %s", name, folder)
 	}
-	if err := os.MkdirAll(root, 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(folder), 0o755); err != nil {
 		return "", err
 	}
 	// O_EXCL so a concurrent create (or an existing file) is reported, not clobbered.
-	f, err := os.OpenFile(flat, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(folder, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 	if err != nil {
 		if os.IsExist(err) {
-			return "", fmt.Errorf("skill %q already exists at %s", name, flat)
+			return "", fmt.Errorf("skill %q already exists at %s", name, folder)
 		}
 		return "", err
 	}
@@ -464,7 +477,7 @@ func (s *Store) CreateWithContent(name string, scope Scope, content string) (str
 	if _, err := f.WriteString(content); err != nil {
 		return "", err
 	}
-	return flat, nil
+	return folder, nil
 }
 
 // loadBodyWithReferences appends a directory-layout skill's sibling

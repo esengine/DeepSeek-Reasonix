@@ -53,6 +53,35 @@ Your final answer:
 
 The 'task' the parent gave you is the research question. Stay on it.`
 
+const builtinInstallCapabilityBody = `This skill is INLINED. Use it when the user asks to install a Reasonix MCP server or skill from a URL, local file, local folder, .mcp.json, or package name. For removing a previously installed skill or MCP server, follow the "Uninstall" rules at the bottom — same tool, different op.
+
+Operate as an installer, not as a shell-script guesser:
+1. Extract the source string exactly from the user's request. It may be an https URL, GitHub URL, local path, .mcp.json, executable path, or npm package name.
+2. Decide kind only when it is explicit. Use kind="auto" when unsure.
+3. First call install_source with apply=false. Include scope when the user says project/global. Include mode when they say copy/link/register; otherwise leave mode="auto".
+4. Read the returned plan. If status is blocked or failed, report the concrete next step. Do not invent a command from a README when the tool could not identify a manifest.
+5. Inspect the plan's actions. Each one carries a riskLevel:
+   - low → safe to apply without asking.
+   - medium → safe to apply, but mention what was written.
+   - high → ask the user to confirm in one short question before apply=true. High actions include MCP installs that send auth headers, eager-tier servers, link targets that are absolute paths outside the project/home root, and any replace=true on an existing entry.
+6. If the plan is acceptable and any needed user confirmation has happened, call install_source again with apply=true and echo back the same planId you got from the planning call. The tool refuses to apply when the planId does not match, so always re-fetch by running apply=false again if the user changed their mind about the source. Host permissions may still deny the apply call.
+7. After apply=true, report what was installed, where it was persisted, and whether it is usable in the current session. For skills, prefer actions[].canonicalPath, actions[].installRoot, actions[].discoverable, and actions[].indexed over guessing from the source path. The plan's kinds field tells you how many skills vs MCP servers were touched.
+
+Defaults:
+- A folder containing many skills should be registered as a skill root, not copied.
+- A single SKILL.md, <name>.md, or <name>/SKILL.md should be copied unless the user asked to link/register. The installer writes canonical <skill-name>/SKILL.md paths by default; flat <name>.md is compatibility input, not the preferred output.
+- A local SKILL.md source may have references/, scripts/, assets/, or other sibling files. Treat its parent directory as the skill package so those files remain available after install.
+- Local skill folders may contain grouped skills up to a bounded depth. Let install_source decide which roots to register instead of telling the user to manually split every nested folder first.
+- Remote MCP URLs should use http unless the endpoint is explicitly SSE.
+- Package-name MCP installs should default to npx -y <package>.
+- Never put raw tokens in headers or config. Prefer ${VAR} placeholders and tell the user which env var to set.
+
+Uninstall (op=uninstall):
+- Use op=uninstall with the same name and scope as the original install. Source is ignored.
+- Skill and MCP server matching happen in the chosen scope's active config; if you don't know where the entry lives, ask the user. Removal is destructive but symmetric with a previously approved install, so it is applied directly (no approval step).
+
+Stop rather than guessing when the source is only a documentation page, README without a manifest, or a repo whose install command cannot be determined.`
+
 const builtinReviewBody = `You are running as a code-review subagent. Inspect the changes the user is about to ship — usually the current git branch vs its upstream — and produce a focused review the parent can hand back.
 
 How to operate:
@@ -114,7 +143,7 @@ const builtinTestBody = `This skill is INLINED — you run in the parent loop. T
 
 How to operate:
 1. Detect the test command. Look at the project: go.mod → ` + "`go test ./...`" + `; package.json scripts.test → ` + "`npm test`" + ` (or pnpm/yarn); pyproject.toml/requirements.txt → ` + "`pytest`" + `; Cargo.toml → ` + "`cargo test`" + `. If you can't tell, ASK — don't guess.
-2. Run it via bash (timeout ~120s, more for a big suite). Capture stdout + stderr.
+2. Run it via bash. Capture stdout + stderr; for intentionally long-running commands, start them in the background and use wait/bash_output.
 3. Read the failures: which tests failed, the actual error, the file + line that threw. Locate the exact assertion or stack frame.
 4. Fix each distinct failure:
    - Production bug (test caught a real defect) → fix the production code.
@@ -190,6 +219,14 @@ func builtinSkills() []Skill {
 			Path:         "(builtin)",
 			RunAs:        RunSubagent,
 			AllowedTools: append(append([]string(nil), readCodeTools...), "web_fetch"),
+		},
+		{
+			Name:        "install-capability",
+			Description: "Install or uninstall Reasonix MCP servers and skills from a URL, GitHub/raw file, local path/folder, .mcp.json, executable, or package name. Plans with install_source (op=install or op=uninstall) before applying, surfacing per-action riskLevel.",
+			Body:        builtinInstallCapabilityBody,
+			Scope:       ScopeBuiltin,
+			Path:        "(builtin)",
+			RunAs:       RunInline,
 		},
 		{
 			Name:         "review",

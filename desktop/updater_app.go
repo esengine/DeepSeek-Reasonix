@@ -30,7 +30,7 @@ func (a *App) CheckUpdate() (*UpdateInfo, error) {
 		return &UpdateInfo{
 			Current:       version,
 			CanSelfUpdate: canSelfUpdate(),
-			DownloadURL:   defaultDownloadPage,
+			DownloadURL:   downloadPage(),
 			Err:           err.Error(),
 		}, nil
 	}
@@ -41,7 +41,7 @@ func (a *App) CheckUpdate() (*UpdateInfo, error) {
 		return &UpdateInfo{
 			Current:       version,
 			CanSelfUpdate: canSelfUpdate(),
-			DownloadURL:   defaultDownloadPage,
+			DownloadURL:   downloadPage(),
 			Err:           err.Error(),
 		}, nil
 	}
@@ -52,7 +52,7 @@ func (a *App) CheckUpdate() (*UpdateInfo, error) {
 // OpenDownloadPage opens the releases page in the browser — the macOS manual-update
 // path and a fallback link elsewhere.
 func (a *App) OpenDownloadPage() {
-	page := defaultDownloadPage
+	page := downloadPage()
 	if c, err := httpClient(); err == nil {
 		ctx, cancel := context.WithTimeout(a.reqCtx(), httpTimeout)
 		defer cancel()

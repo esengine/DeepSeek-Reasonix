@@ -1,8 +1,10 @@
 package main
 
 import (
+	"reflect"
 	"testing"
 
+	"reasonix/internal/config"
 	"reasonix/internal/provider"
 )
 
@@ -36,5 +38,46 @@ func TestWithFreshSystemPromptPrependsMissingSystemMessage(t *testing.T) {
 	}
 	if got[1].Content != "hello" {
 		t.Fatalf("existing user message changed: %+v", got[1])
+	}
+}
+
+func TestProviderViewFromEntry_FiltersNonChatModels(t *testing.T) {
+	p := config.ProviderEntry{
+		Name: "mimo-api",
+		Models: []string{
+			"mimo-v2", "mimo-v2-pro",
+			"mimo-v2-asr", "mimo-v2-tts",
+			"mimo-v2-tts-voiceclone", "mimo-v2-tts-voicedesign",
+		},
+	}
+	view := providerViewFromEntry(p, true, false)
+	want := []string{"mimo-v2", "mimo-v2-pro"}
+	if !reflect.DeepEqual(view.Models, want) {
+		t.Errorf("ProviderView.Models = %v, want %v", view.Models, want)
+	}
+}
+
+func TestSetAgentParamsPersistsStepLimitsToUserConfig(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	app := NewApp()
+	if err := app.SetAgentParams(0.35, 37, 9, "custom system"); err != nil {
+		t.Fatalf("SetAgentParams: %v", err)
+	}
+
+	view := app.Settings()
+	if view.Agent.MaxSteps != 37 || view.Agent.PlannerMaxSteps != 9 {
+		t.Fatalf("Settings().Agent = %+v, want maxSteps=37 plannerMaxSteps=9", view.Agent)
+	}
+	if view.Agent.Temperature != 0.35 || view.Agent.SystemPrompt != "custom system" {
+		t.Fatalf("Settings().Agent did not preserve other agent params: %+v", view.Agent)
+	}
+
+	cfg := config.LoadForEdit(config.UserConfigPath())
+	if cfg.Agent.MaxSteps != 37 || cfg.Agent.PlannerMaxSteps != 9 {
+		t.Fatalf("saved config agent steps = max:%d planner:%d, want 37/9", cfg.Agent.MaxSteps, cfg.Agent.PlannerMaxSteps)
+	}
+	if cfg.Agent.Temperature != 0.35 || cfg.Agent.SystemPrompt != "custom system" {
+		t.Fatalf("saved config did not preserve other agent params: %+v", cfg.Agent)
 	}
 }

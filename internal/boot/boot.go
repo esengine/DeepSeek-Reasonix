@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/codegraph"
@@ -25,6 +26,7 @@ import (
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/hook"
+	"reasonix/internal/installsource"
 	"reasonix/internal/instruction"
 	"reasonix/internal/jobs"
 	"reasonix/internal/lsp"
@@ -182,12 +184,14 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	skillStore := skill.New(skill.Options{
 		ProjectRoot:   root,
 		CustomPaths:   cfg.SkillCustomPaths(),
+		ExcludedPaths: cfg.SkillExcludedPaths(),
 		DisabledNames: cfg.DisabledSkillNames(),
 		MaxDepth:      cfg.SkillMaxDepth(),
 		Stderr:        opts.Stderr,
 	})
 	skills := skillStore.List()
-	allSkills := skill.New(skill.Options{ProjectRoot: root, CustomPaths: cfg.SkillCustomPaths(), MaxDepth: cfg.SkillMaxDepth(), Stderr: io.Discard}).List()
+	allSkillStore := skill.New(skill.Options{ProjectRoot: root, CustomPaths: cfg.SkillCustomPaths(), ExcludedPaths: cfg.SkillExcludedPaths(), MaxDepth: cfg.SkillMaxDepth(), Stderr: io.Discard})
+	allSkills := allSkillStore.List()
 	sysPrompt = skill.ApplyIndex(sysPrompt, skills)
 
 	reg := tool.NewRegistry()
@@ -199,7 +203,8 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		fmt.Fprintln(stderr, "warning: bash not found on PATH; the shell tool will run commands under Windows PowerShell. Install Git for Windows or WSL to use bash.")
 	}
 	searchSpec := builtin.ResolveSearch(cfg.Tools.Search.Engine, cfg.Tools.Search.RgPath, stderr)
-	addBuiltins(reg, cfg.Tools.Enabled, cfg.WriteRootsForRoot(root), bashSpec, searchSpec, stderr, root)
+	bashTimeout := time.Duration(cfg.BashTimeoutSeconds()) * time.Second
+	addBuiltins(reg, cfg.Tools.Enabled, cfg.WriteRootsForRoot(root), bashSpec, bashTimeout, searchSpec, stderr, root)
 	// Always construct a host, even with no plugins configured, so the controller's
 	// host pointer is stable for the session and `/mcp add` can hot-add into it.
 	pluginHost := plugin.NewHost()
@@ -511,6 +516,51 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	}
 	reg.Add(skill.NewRunSkillTool(skillStore, skillRunner, skillProfile))
 	reg.Add(skill.NewInstallSkillTool(skillStore, nil))
+	reg.Add(installsource.NewTool(installsource.Options{
+		ProjectRoot: root,
+		HTTPClient:  balanceClient,
+		ConnectMCP: func(e config.PluginEntry) (installsource.MCPConnectResult, error) {
+			exp := e.ExpandedPlugin()
+			spec := plugin.Spec{
+				Name:    exp.Name,
+				Type:    exp.Type,
+				Command: exp.Command,
+				Args:    exp.Args,
+				Env:     exp.Env,
+				URL:     exp.URL,
+				Headers: exp.Headers,
+			}
+			if opts.Stderr != nil {
+				spec.Stderr = opts.Stderr
+			}
+			tools, err := pluginHost.Add(ctx, spec)
+			if err != nil {
+				return installsource.MCPConnectResult{}, err
+			}
+			reg.RemovePrefix(plugin.ToolPrefix(spec.Name))
+			for _, t := range tools {
+				reg.Add(t)
+			}
+			// Disconnect closes the server and drops its namespaced tools.
+			// Used by the install_source rollback path when SaveTo fails.
+			disconnect := func() {
+				if prefix, ok := pluginHost.Remove(spec.Name); ok {
+					reg.RemovePrefix(prefix)
+				}
+			}
+			return installsource.MCPConnectResult{
+				ToolCount:  len(tools),
+				Disconnect: disconnect,
+			}, nil
+		},
+		OnDisconnect: func(serverName string) bool {
+			if prefix, ok := pluginHost.Remove(serverName); ok {
+				reg.RemovePrefix(prefix)
+				return true
+			}
+			return false
+		},
+	}))
 	for _, t := range skill.BuiltinSubagentTools(skillStore, skillRunner, skillProfile) {
 		reg.Add(t)
 	}
@@ -580,7 +630,8 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			plannerSess := agent.NewSession(agent.PlannerPromptWithContext(mem.Block()))
 			plannerTools := agent.PlannerToolRegistry(reg)
 			runner = agent.NewCoordinator(plannerProv, plannerSess, pe.Price, plannerTools, agent.Options{
-				MaxSteps:          agent.PlannerMaxSteps(maxSteps),
+				MaxSteps:          cfg.Agent.PlannerMaxSteps,
+				MaxStepsKey:       "agent.planner_max_steps",
 				Gate:              headlessGate,
 				ContextWindow:     pe.ContextWindow,
 				SoftCompactRatio:  cfg.Agent.SoftCompactRatio,
@@ -616,6 +667,8 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		Commands:      cmds,
 		Skills:        skills,
 		AllSkills:     allSkills,
+		SkillStore:    skillStore,
+		AllSkillStore: allSkillStore,
 		Hooks:         hookRunner,
 		Memory:        mem,
 		Cleanup:       cleanup,
@@ -793,10 +846,11 @@ func NewProviderWithProxy(e *config.ProviderEntry, proxy netclient.ProxySpec) (p
 		// provider-kind-specific knobs. EffectiveEffort applies a configured
 		// default_effort when the user has not explicitly selected /effort.
 		Extra: map[string]any{
-			"api_key_env": e.APIKeyEnv,
-			"thinking":    e.Thinking,
-			"effort":      config.EffectiveEffort(e),
-			"proxy_spec":  proxy,
+			"api_key_env":        e.APIKeyEnv,
+			"thinking":           e.Thinking,
+			"effort":             config.EffectiveEffort(e),
+			"reasoning_protocol": config.ReasoningProtocolForEntry(e),
+			"proxy_spec":         proxy,
 		},
 	})
 }
@@ -807,12 +861,12 @@ func NewProviderWithProxy(e *config.ProviderEntry, proxy netclient.ProxySpec) (p
 // instance bound to writeRoots (preserving registry order).
 // When workDir is non-empty, tools resolve relative paths against it instead of
 // the process cwd, enabling concurrent multi-project sessions.
-func addBuiltins(reg *tool.Registry, enabled, writeRoots []string, bashSpec sandbox.Spec, searchSpec builtin.SearchSpec, stderr io.Writer, workDir string) {
+func addBuiltins(reg *tool.Registry, enabled, writeRoots []string, bashSpec sandbox.Spec, bashTimeout time.Duration, searchSpec builtin.SearchSpec, stderr io.Writer, workDir string) {
 	// If a workspace directory is set, use workspace-bound tools that resolve
 	// paths relative to that directory. Otherwise fall back to the process-cwd
 	// compile-time builtins.
 	if workDir != "" {
-		ws := builtin.Workspace{Dir: workDir, WriteRoots: writeRoots, Bash: bashSpec, Search: searchSpec}
+		ws := builtin.Workspace{Dir: workDir, WriteRoots: writeRoots, Bash: bashSpec, BashTimeout: bashTimeout, Search: searchSpec}
 		for _, t := range ws.Tools(enabled...) {
 			reg.Add(t)
 		}
@@ -835,7 +889,7 @@ func addBuiltins(reg *tool.Registry, enabled, writeRoots []string, bashSpec sand
 	// Replace the unconfined defaults with confined instances (registry order is
 	// preserved on replace): file-writers bound to the workspace, bash to the OS
 	// sandbox. Only replace tools actually enabled/present.
-	confined := append(builtin.ConfineWriters(writeRoots), builtin.ConfineBash(bashSpec), builtin.ConfineSearch(searchSpec))
+	confined := append(builtin.ConfineWriters(writeRoots), builtin.ConfineBash(bashSpec, bashTimeout), builtin.ConfineSearch(searchSpec))
 	for _, t := range confined {
 		if _, ok := reg.Get(t.Name()); ok {
 			reg.Add(t)

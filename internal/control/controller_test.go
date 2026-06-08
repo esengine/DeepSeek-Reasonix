@@ -249,23 +249,25 @@ func TestApprovalDeny(t *testing.T) {
 	}
 }
 
-// TestApprovalSessionGrant proves an "allow this session" answer short-circuits
-// later prompts for the same tool+subject: only the first reaches the frontend.
+// TestApprovalSessionGrant proves an "allow this session" answer is tool-wide:
+// later calls to the same tool with DIFFERENT subjects short-circuit, so only the
+// first reaches the frontend. (Regression for "I clicked allow-for-session and it
+// kept re-prompting on every new command/file" — #3498 / #3520.)
 func TestApprovalSessionGrant(t *testing.T) {
 	c, ids, prompts := approvalIDs()
-	// Only the first call reaches the frontend (the session grant short-circuits
+	// Only the first call reaches the frontend (the tool-wide grant short-circuits
 	// the rest), so a single approval is all this needs — ranging would block on
 	// a second ID that never arrives.
 	go func() { c.Approve(<-ids, true, true, false) }()
 
-	for i := 0; i < 3; i++ {
-		allow, _, err := gateApprover{c}.Approve(context.Background(), "bash", "go build", nil)
+	for _, subject := range []string{"go build", "go test ./...", "npm install"} {
+		allow, _, err := gateApprover{c}.Approve(context.Background(), "bash", subject, nil)
 		if err != nil || !allow {
-			t.Fatalf("call %d = (%v,%v), want allow", i, allow, err)
+			t.Fatalf("call %q = (%v,%v), want allow", subject, allow, err)
 		}
 	}
 	if *prompts != 1 {
-		t.Errorf("prompted %d times, want 1 (session grant should short-circuit)", *prompts)
+		t.Errorf("prompted %d times, want 1 (tool-wide session grant must short-circuit other subjects)", *prompts)
 	}
 }
 

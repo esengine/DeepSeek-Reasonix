@@ -38,8 +38,13 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	}
 	keyEnv, _ := cfg.Extra["api_key_env"].(string) // for actionable auth errors
 	effort, _ := cfg.Extra["effort"].(string)
-	deepseek := isDeepSeekBaseURL(cfg.BaseURL)
-	if deepseek {
+	protocol, _ := cfg.Extra["reasoning_protocol"].(string)
+	protocol = normalizeReasoningProtocol(protocol)
+	deepseek := protocol == "deepseek" || (protocol == "" && isDeepSeekBaseURL(cfg.BaseURL))
+	switch {
+	case protocol == "none":
+		effort = ""
+	case deepseek:
 		effort = strings.ToLower(strings.TrimSpace(effort))
 		switch effort {
 		case "", "off": // "off" is a retired level (disabled thinking); fall back to the default depth
@@ -48,7 +53,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		default:
 			return nil, fmt.Errorf("openai: provider %q uses DeepSeek thinking; effort must be high or max", name)
 		}
-	} else if effort != "" {
+	case effort != "":
 		// Non-DeepSeek backends use OpenAI's reasoning_effort scale (low/medium/
 		// high); "max" is a DeepSeek-ism MiMo et al. reject with 400, so clamp it
 		// to the OpenAI ceiling and reject other values at boot, not at request time.
@@ -109,6 +114,15 @@ func isDeepSeekBaseURL(baseURL string) bool {
 	return host == "api.deepseek.com" || strings.HasSuffix(host, ".deepseek.com")
 }
 
+func normalizeReasoningProtocol(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "deepseek", "openai", "none":
+		return strings.ToLower(strings.TrimSpace(raw))
+	default:
+		return ""
+	}
+}
+
 // bufPool reuses byte buffers for JSON-marshalled request bodies. Each turn
 // allocates a buffer, marshals the request, and sends it — pooling avoids the
 // GC churn from repeated alloc/free of ~10-100KB buffers. The pool is
@@ -164,7 +178,15 @@ func (c *client) streamWithReconnect(ctx context.Context, resp *http.Response, n
 		if err == nil {
 			return
 		}
-		if emitted || attempt >= maxStreamReconnects || !provider.IsConnReset(err) {
+		if !provider.IsConnReset(err) {
+			out <- provider.Chunk{Type: provider.ChunkError, Err: err}
+			return
+		}
+		if emitted {
+			out <- provider.Chunk{Type: provider.ChunkError, Err: &provider.StreamInterruptedError{Err: err}}
+			return
+		}
+		if attempt >= maxStreamReconnects {
 			out <- provider.Chunk{Type: provider.ChunkError, Err: err}
 			return
 		}
@@ -192,7 +214,6 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 		// still keeps it (for display/archive); we just don't pay to re-upload it.
 		cm := chatMessage{
 			Role:       string(m.Role),
-			Content:    m.Content,
 			ToolCallID: m.ToolCallID,
 			Name:       m.Name,
 		}
@@ -201,6 +222,10 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 			wire.Function.Name = tc.Name
 			wire.Function.Arguments = tc.Arguments
 			cm.ToolCalls = append(cm.ToolCalls, wire)
+		}
+		if m.Role != provider.RoleAssistant || len(cm.ToolCalls) == 0 || m.Content != "" {
+			content := m.Content
+			cm.Content = &content
 		}
 		msgs[i] = cm
 	}
@@ -411,13 +436,12 @@ type streamOptions struct {
 
 type chatMessage struct {
 	Role string `json:"role"`
-	// content is always serialized, even when empty: an assistant turn that is
-	// pure tool_calls (no preamble text) has empty content, and DeepSeek's
-	// strict deserializer rejects a message missing the field ("missing field
-	// `content`"). An empty string satisfies presence and is accepted by every
-	// OpenAI-compatible backend for all roles (unlike null, which some reject
-	// for a tool message).
-	Content    string         `json:"content"`
+	// content is always present (never omitted): DeepSeek's strict deserializer
+	// rejects a message missing the field. A pure tool_calls assistant turn
+	// serializes as null (OpenAI-spec, and what strict clones expect); every
+	// other role/message serializes as a string, empty included — null is
+	// rejected by some backends for a tool message.
+	Content    *string        `json:"content"`
 	ToolCalls  []chatToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string         `json:"tool_call_id,omitempty"`
 	Name       string         `json:"name,omitempty"`

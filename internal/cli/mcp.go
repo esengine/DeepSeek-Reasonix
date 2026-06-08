@@ -163,6 +163,8 @@ func mcpCommand(args []string) int {
 		return mcpAddCLI(args[1:])
 	case "remove", "rm":
 		return mcpRemoveCLI(args[1:])
+	case "import":
+		return mcpImportCLI()
 	case "help", "-h", "--help":
 		mcpUsage()
 		return 0
@@ -171,6 +173,16 @@ func mcpCommand(args []string) int {
 		mcpUsage()
 		return 2
 	}
+}
+
+func mcpImportCLI() int {
+	total, added, updated, err := config.ImportCCSwitchMCP()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	fmt.Printf("imported %d MCP servers from cc-switch (%d added, %d updated) — servers load on the next session\n", total, added, updated)
+	return 0
 }
 
 func mcpList() int {
@@ -271,6 +283,7 @@ Usage:
   reasonix mcp add <name> <command> [args...]        stdio server
   reasonix mcp add <name> --http <url> [--header K=V] remote (Streamable HTTP)
   reasonix mcp add <name> --sse  <url>               remote (legacy SSE)
+  reasonix mcp import                                import Codex-enabled servers from cc-switch
   reasonix mcp remove <name>
 
 Flags for add:

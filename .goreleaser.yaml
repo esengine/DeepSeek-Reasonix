@@ -36,6 +36,8 @@ homebrew_casks:
     ids: [reasonix]
     # Prereleases (v*-rc*) must not update the stable tap; brew has no separate
     # prerelease channel, so a pushed rc cask becomes the default `brew install`.
+    # npm is a separate line (release-npm.yml, `npm-v*`), so an npm prerelease no
+    # longer drags brew along — a stable `v*` cask can ship while npm stays on rc.
     skip_upload: "auto"
     repository:
       owner: esengine

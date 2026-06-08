@@ -74,7 +74,7 @@ func TestCoordinatorHandsPlanToExecutor(t *testing.T) {
 	if got := lastUser(planner.lastReq); !strings.Contains(got, "fix the bug") {
 		t.Errorf("planner saw user %q, want it to contain the task", got)
 	}
-	if got := lastUser(exec.lastReq); !strings.Contains(got, "read main.go") || !strings.Contains(got, "fix the bug") {
+	if got := lastUser(exec.requests[0]); !strings.Contains(got, "read main.go") || !strings.Contains(got, "fix the bug") || !strings.Contains(got, "You are the executor now") {
 		t.Errorf("executor saw user %q, want task + plan", got)
 	}
 	// planner session must accumulate (system, user, assistant-plan) so its
@@ -170,11 +170,160 @@ func TestCoordinatorPlannerUsesReadOnlyResearchTools(t *testing.T) {
 			t.Fatalf("planner tools = %v, must not include %s", tools, forbidden)
 		}
 	}
-	if got := lastUser(exec.lastReq); !strings.Contains(got, "follow the loaded rule") || !strings.Contains(got, "fix the bug") {
+	if got := lastUser(exec.requests[0]); !strings.Contains(got, "follow the loaded rule") || !strings.Contains(got, "fix the bug") {
 		t.Errorf("executor saw user %q, want task + planner plan", got)
 	}
 	if got := plannerSess.Messages[0].Content; !strings.Contains(got, "Rule: keep changes narrow.") {
 		t.Errorf("planner system prompt missing planning context: %q", got)
+	}
+}
+
+func TestCoordinatorPlannerMaxStepsUsesPlannerConfigKey(t *testing.T) {
+	planner := &mockProvider{name: "planner", chunks: []provider.Chunk{
+		{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "call-1", Name: "read_file", Arguments: `{"path":"REASONIX.md"}`}},
+		{Type: provider.ChunkDone},
+	}}
+	exec := &mockProvider{name: "executor", chunks: []provider.Chunk{
+		{Type: provider.ChunkText, Text: "Done."},
+		{Type: provider.ChunkDone},
+	}}
+
+	parentReg := tool.NewRegistry()
+	parentReg.Add(coordinatorTestTool{name: "read_file", readOnly: true, output: "keep reading"})
+	executor := New(exec, tool.NewRegistry(), NewSession("exec-sys"), Options{}, event.Discard)
+	coord := NewCoordinator(planner, NewSession("planner-sys"), nil, PlannerToolRegistry(parentReg), Options{
+		MaxSteps:    2,
+		MaxStepsKey: "agent.planner_max_steps",
+	}, executor, 0, event.Discard, nil)
+
+	err := coord.Run(context.Background(), "plan a change")
+	if err == nil {
+		t.Fatal("Run should pause when the planner reaches its configured step limit")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "planner: paused after 2 tool-call rounds (agent.planner_max_steps)") {
+		t.Fatalf("pause error = %q, want planner_max_steps message", msg)
+	}
+	if strings.Contains(msg, "agent.max_steps") {
+		t.Fatalf("planner pause should not point at agent.max_steps: %q", msg)
+	}
+	if got := len(planner.requests); got != 2 {
+		t.Fatalf("planner requests = %d, want exactly the configured 2 rounds", got)
+	}
+	if len(exec.requests) != 0 {
+		t.Fatal("executor should not run when planner pauses before producing a plan")
+	}
+}
+
+func TestCoordinatorPlannerMaxStepsZeroIsUnlimited(t *testing.T) {
+	planner := &mockProvider{name: "planner", streams: [][]provider.Chunk{
+		{
+			{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "call-1", Name: "read_file", Arguments: `{"path":"a"}`}},
+			{Type: provider.ChunkDone},
+		},
+		{
+			{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "call-2", Name: "read_file", Arguments: `{"path":"b"}`}},
+			{Type: provider.ChunkDone},
+		},
+		{
+			{Type: provider.ChunkText, Text: "1. use both files"},
+			{Type: provider.ChunkDone},
+		},
+	}}
+	exec := &mockProvider{name: "executor", chunks: []provider.Chunk{
+		{Type: provider.ChunkText, Text: "Done."},
+		{Type: provider.ChunkDone},
+	}}
+
+	parentReg := tool.NewRegistry()
+	parentReg.Add(coordinatorTestTool{name: "read_file", readOnly: true, output: "ok"})
+	executor := New(exec, tool.NewRegistry(), NewSession("exec-sys"), Options{}, event.Discard)
+	coord := NewCoordinator(planner, NewSession("planner-sys"), nil, PlannerToolRegistry(parentReg), Options{
+		MaxSteps:    0,
+		MaxStepsKey: "agent.planner_max_steps",
+	}, executor, 0, event.Discard, nil)
+
+	if err := coord.Run(context.Background(), "plan a change"); err != nil {
+		t.Fatalf("Run with planner max steps 0 should not pause: %v", err)
+	}
+	if got := len(planner.requests); got != 3 {
+		t.Fatalf("planner requests = %d, want all 3 scripted planner turns", got)
+	}
+	if got := lastUser(exec.requests[0]); !strings.Contains(got, "use both files") {
+		t.Fatalf("executor did not receive planner output: %q", got)
+	}
+}
+
+func TestCoordinatorNudgesExecutorThatAnswersWithoutActing(t *testing.T) {
+	planner := &mockProvider{name: "planner", chunks: []provider.Chunk{
+		{Type: provider.ChunkText, Text: "Write the requested skill file."},
+		{Type: provider.ChunkDone},
+	}}
+	// The first turn is a plain final answer with no tool call and no
+	// planner-vocabulary — the nudge must fire on the missing action, not on words.
+	exec := &mockProvider{name: "executor", streams: [][]provider.Chunk{
+		{
+			{Type: provider.ChunkText, Text: "这个计划看起来没问题,应该很好实现。"},
+			{Type: provider.ChunkDone},
+		},
+		{
+			{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "call-1", Name: "write_file", Arguments: `{"path":"kan-tu.md"}`}},
+			{Type: provider.ChunkDone},
+		},
+		{
+			{Type: provider.ChunkText, Text: "Done."},
+			{Type: provider.ChunkDone},
+		},
+	}}
+
+	execReg := tool.NewRegistry()
+	execReg.Add(coordinatorTestTool{name: "write_file", readOnly: false, output: "wrote file"})
+	executor := New(exec, execReg, NewSession("exec-sys"), Options{}, event.Discard)
+	coord := NewCoordinator(planner, NewSession("planner-sys"), nil, nil, Options{}, executor, 0, event.Discard, nil)
+
+	if err := coord.Run(context.Background(), "install the skill"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := len(exec.requests); got != 3 {
+		t.Fatalf("executor requests = %d, want answer-without-acting, nudge tool call, final answer", got)
+	}
+	if got := lastUser(exec.requests[1]); !strings.Contains(got, "Use your available tools now to carry out the task") {
+		t.Fatalf("second executor request missing handoff nudge message: %q", got)
+	}
+}
+
+func TestCoordinatorDoesNotNudgeExecutorThatActs(t *testing.T) {
+	planner := &mockProvider{name: "planner", chunks: []provider.Chunk{
+		{Type: provider.ChunkText, Text: "Write the requested skill file."},
+		{Type: provider.ChunkDone},
+	}}
+	// Executor calls a tool on its first turn, then answers — no nudge expected.
+	exec := &mockProvider{name: "executor", streams: [][]provider.Chunk{
+		{
+			{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "call-1", Name: "write_file", Arguments: `{"path":"kan-tu.md"}`}},
+			{Type: provider.ChunkDone},
+		},
+		{
+			{Type: provider.ChunkText, Text: "Done."},
+			{Type: provider.ChunkDone},
+		},
+	}}
+
+	execReg := tool.NewRegistry()
+	execReg.Add(coordinatorTestTool{name: "write_file", readOnly: false, output: "wrote file"})
+	executor := New(exec, execReg, NewSession("exec-sys"), Options{}, event.Discard)
+	coord := NewCoordinator(planner, NewSession("planner-sys"), nil, nil, Options{}, executor, 0, event.Discard, nil)
+
+	if err := coord.Run(context.Background(), "install the skill"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := len(exec.requests); got != 2 {
+		t.Fatalf("executor requests = %d, want tool call + final answer with no nudge", got)
+	}
+	for i, req := range exec.requests {
+		if strings.Contains(lastUser(req), "Use your available tools now to carry out the task") {
+			t.Fatalf("request %d unexpectedly received a handoff nudge", i)
+		}
 	}
 }
 

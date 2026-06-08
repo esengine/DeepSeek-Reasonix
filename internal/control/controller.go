@@ -59,20 +59,22 @@ type Controller struct {
 	sink     event.Sink
 	policy   permission.Policy
 
-	label        string
-	systemPrompt string
-	sessionDir   string
-	host         *plugin.Host
-	commands     []command.Command
-	skills       []skill.Skill
-	allSkills    []skill.Skill
-	hooks        *hook.Runner // session hook runner; nil-safe (no hooks configured)
-	mem          *memory.Set
-	cleanup      func()
-	autoPlan     string
-	classifier   autoPlanClassifier
-	startedOnce  bool              // guards the one-shot SessionStart hook on first turn
-	onRemember   func(rule string) // set via Options; invoked when user picks "always allow"
+	label         string
+	systemPrompt  string
+	sessionDir    string
+	host          *plugin.Host
+	commands      []command.Command
+	skills        []skill.Skill
+	allSkills     []skill.Skill
+	skillStore    *skill.Store
+	allSkillStore *skill.Store
+	hooks         *hook.Runner // session hook runner; nil-safe (no hooks configured)
+	mem           *memory.Set
+	cleanup       func()
+	autoPlan      string
+	classifier    autoPlanClassifier
+	startedOnce   bool              // guards the one-shot SessionStart hook on first turn
+	onRemember    func(rule string) // set via Options; invoked when user picks "always allow"
 
 	// balanceURL/balanceKey target the active provider's optional wallet-balance
 	// endpoint (empty when the provider declares none). Captured at build so a
@@ -160,21 +162,23 @@ type approvalReply struct {
 // lets the controller mint and rotate session files; Host/Commands are surfaced
 // to frontends that resolve MCP prompts and slash commands.
 type Options struct {
-	Runner       agent.Runner
-	Executor     *agent.Agent
-	Sink         event.Sink
-	Policy       permission.Policy
-	Label        string
-	SystemPrompt string
-	SessionDir   string
-	SessionPath  string
-	Host         *plugin.Host
-	Commands     []command.Command
-	Skills       []skill.Skill
-	AllSkills    []skill.Skill
-	Hooks        *hook.Runner
-	Memory       *memory.Set
-	Cleanup      func()
+	Runner        agent.Runner
+	Executor      *agent.Agent
+	Sink          event.Sink
+	Policy        permission.Policy
+	Label         string
+	SystemPrompt  string
+	SessionDir    string
+	SessionPath   string
+	Host          *plugin.Host
+	Commands      []command.Command
+	Skills        []skill.Skill
+	AllSkills     []skill.Skill
+	SkillStore    *skill.Store
+	AllSkillStore *skill.Store
+	Hooks         *hook.Runner
+	Memory        *memory.Set
+	Cleanup       func()
 	// BalanceURL/BalanceKey wire the active provider's optional wallet-balance
 	// endpoint and bearer key; empty when the provider declares no balance_url.
 	BalanceURL    string
@@ -224,6 +228,8 @@ func New(opts Options) *Controller {
 		commands:      opts.Commands,
 		skills:        opts.Skills,
 		allSkills:     opts.AllSkills,
+		skillStore:    opts.SkillStore,
+		allSkillStore: opts.AllSkillStore,
 		hooks:         opts.Hooks,
 		mem:           opts.Memory,
 		cleanup:       opts.Cleanup,
@@ -565,6 +571,10 @@ func (c *Controller) submit(input, display string) {
 			}
 			return c.runTurnWithRawDisplay(ctx, sent, sent, display)
 		})
+	case strings.HasPrefix(trimmed, "//"):
+		// Double-slash — not a command. Common in code snippets (JS
+		// comments, file:// URLs). Run as a normal turn.
+		c.runRefTurn(input, display)
 	case strings.HasPrefix(trimmed, "/"):
 		if ref, ok := FileRefLine(trimmed); ok {
 			c.runRefTurn(ref, display)
@@ -799,7 +809,7 @@ func (c *Controller) Turn() int {
 }
 
 // Approve answers a pending ApprovalRequest by ID: allow runs the call, session
-// also remembers a grant for the rest of the session so the same tool+subject
+// also remembers a tool-wide grant for the rest of the session so that tool
 // isn't re-prompted. Unknown/expired IDs are ignored.
 func (c *Controller) Approve(id string, allow, session, persist bool) {
 	c.mu.Lock()
@@ -1463,11 +1473,21 @@ func (c *Controller) Host() *plugin.Host { return c.host }
 func (c *Controller) Commands() []command.Command { return c.commands }
 
 // Skills returns the discoverable skills (for the slash menu and `/skills`).
-func (c *Controller) Skills() []skill.Skill { return c.skills }
+// When a live Store is available, scan it on demand so skills installed during
+// this session appear without rewriting the cache-stable system prompt.
+func (c *Controller) Skills() []skill.Skill {
+	if c.skillStore != nil {
+		return c.skillStore.List()
+	}
+	return c.skills
+}
 
 // AllSkills returns every discoverable skill, including disabled ones, for
 // management surfaces that need to re-enable a hidden skill.
 func (c *Controller) AllSkills() []skill.Skill {
+	if c.allSkillStore != nil {
+		return c.allSkillStore.List()
+	}
 	if len(c.allSkills) > 0 {
 		return c.allSkills
 	}
@@ -1582,6 +1602,55 @@ func (c *Controller) connectMCPSpec(s plugin.Spec) (int, error) {
 		}
 	}
 	return len(tools), nil
+}
+
+// ImportMCPEntries persists selected MCP entries and attempts to connect them
+// live. A connection failure does not roll back the config import: the user can
+// fix local dependencies and reconnect in a later session.
+func (c *Controller) ImportMCPEntries(entries []config.PluginEntry) (total, added, updated, connected, failed, skipped int, err error) {
+	cfg, lerr := config.Load()
+	if lerr != nil {
+		return 0, 0, 0, 0, 0, 0, lerr
+	}
+	existing := make(map[string]bool, len(cfg.Plugins))
+	for _, p := range cfg.Plugins {
+		existing[p.Name] = true
+	}
+	for _, e := range entries {
+		if existing[e.Name] {
+			updated++
+		} else {
+			added++
+		}
+		if err := cfg.UpsertPlugin(e); err != nil {
+			return 0, 0, 0, 0, 0, 0, err
+		}
+		existing[e.Name] = true
+	}
+	if err := cfg.Save(); err != nil {
+		return 0, 0, 0, 0, 0, 0, err
+	}
+	for _, e := range entries {
+		if c.host != nil && containsString(c.host.ServerNames(), e.Name) {
+			skipped++
+			continue
+		}
+		if _, err := c.AddMCPServer(e); err != nil {
+			failed++
+			continue
+		}
+		connected++
+	}
+	return len(entries), added, updated, connected, failed, skipped, nil
+}
+
+func containsString(ss []string, want string) bool {
+	for _, s := range ss {
+		if s == want {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *Controller) ConfiguredMCPNames() []string {
@@ -2081,8 +2150,8 @@ func listItem(line string) (content string, level int, ok bool) {
 }
 
 // requestApproval emits an ApprovalRequest and blocks until Approve(ID, …)
-// answers or ctx is cancelled. A prior session grant for the same tool+subject
-// short-circuits. promptMu serialises outstanding prompts.
+// answers or ctx is cancelled. A prior tool-wide session grant short-circuits.
+// promptMu serialises outstanding prompts.
 // parseRewind parses the arguments after "/rewind". The user may provide:
 //
 //	/rewind              → latest checkpoint, both
@@ -2119,7 +2188,11 @@ func parseRewind(args string, cps []checkpoint.Meta) (int, RewindScope, error) {
 }
 
 func (c *Controller) requestApproval(ctx context.Context, tool, subject string) (bool, bool, error) {
-	key := tool + "\x00" + subject
+	// Session grants are tool-wide: "allow for this session" / "allow persistently"
+	// mean the user trusts this tool (write_file, bash, …), not just this one
+	// file/command, so a different subject for the same tool isn't re-prompted.
+	// Deny rules still bite upstream of here.
+	key := tool
 
 	c.mu.Lock()
 	// YOLO/bypass and the just-approved-plan window auto-allow every approval

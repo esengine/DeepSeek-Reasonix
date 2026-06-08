@@ -3,6 +3,9 @@ package skill
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -170,6 +173,22 @@ func TestInstallSkill(t *testing.T) {
 	}
 	if !strings.Contains(out, `"ok":true`) {
 		t.Errorf("expected ok result, got %s", out)
+	}
+	var res struct {
+		Path string `json:"path"`
+	}
+	if err := json.Unmarshal([]byte(out), &res); err != nil {
+		t.Fatalf("result JSON: %v", err)
+	}
+	wantPath := filepath.Join(home, ".reasonix", "skills", "deploy", SkillFile)
+	if res.Path != wantPath {
+		t.Fatalf("install_skill should report canonical path %s, got %s", wantPath, res.Path)
+	}
+	if _, err := os.Stat(wantPath); err != nil {
+		t.Fatalf("install_skill should write canonical SKILL.md: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".reasonix", "skills", "deploy.md")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("install_skill should not write legacy flat deploy.md, stat err=%v", err)
 	}
 	// Round-trips through the store with the frontmatter we wrote.
 	sk, ok := st.Read("deploy")

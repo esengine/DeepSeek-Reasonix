@@ -11,12 +11,14 @@
 #            Reasonix-windows-<arch>.zip                 (portable human download)
 #   Linux:   Reasonix-linux-<arch>.tar.gz                (bare binary)
 #
-# Usage: scripts/desktop-build.sh <os/arch> <version>
+# Usage: scripts/desktop-build.sh <os/arch> <version> [channel]
 #   e.g. scripts/desktop-build.sh darwin/arm64 v1.1.0
+#        scripts/desktop-build.sh darwin/arm64 v1.5.0-canary.20260608.42 canary
 set -euo pipefail
 
-PLATFORM="${1:?usage: desktop-build.sh <os/arch> <version>}"
-VERSION="${2:?usage: desktop-build.sh <os/arch> <version>}"
+PLATFORM="${1:?usage: desktop-build.sh <os/arch> <version> [channel]}"
+VERSION="${2:?usage: desktop-build.sh <os/arch> <version> [channel]}"
+CHANNEL="${3:-stable}"
 
 os="${PLATFORM%/*}"
 arch="${PLATFORM#*/}"
@@ -36,7 +38,7 @@ numver="${VERSION#v}"; numver="${numver%%-*}"
 node -e 'const fs=require("fs"),f="wails.json",j=JSON.parse(fs.readFileSync(f,"utf8"));j.info.productVersion=process.argv[1];fs.writeFileSync(f,JSON.stringify(j,null,2)+"\n")' "$numver"
 
 # NSIS installer is Windows-only (Wails requires a single windows target for -nsis).
-build_args=(-clean -platform "$PLATFORM" -ldflags "-X main.version=$VERSION")
+build_args=(-clean -platform "$PLATFORM" -ldflags "-X main.version=$VERSION -X main.channel=$CHANNEL")
 [ "$os" = windows ] && build_args+=(-nsis)
 # Link cgo against WebKitGTK 4.1: 4.0 (libwebkit2gtk-4.0.so.37) is gone on
 # Ubuntu 24.04+/Fedora 40+, while 4.1 ships from Ubuntu 22.04 onward.

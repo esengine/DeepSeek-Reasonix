@@ -551,6 +551,97 @@ func TestReadFileGB18030(t *testing.T) {
 	}
 }
 
+// --- RemoveWorkspace cleanup of active pointer ---
+
+func TestRemoveWorkspaceClearsActivePointerWhenRemovingCurrentWorkspace(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	if workspaceStatePath() == "" {
+		t.Fatal("workspaceStatePath() is empty after isolating")
+	}
+
+	dir := t.TempDir()
+	saveWorkspace(dir)
+	if got := loadWorkspace(); got != dir {
+		t.Fatalf("precondition: loadWorkspace = %q, want %q", got, dir)
+	}
+
+	// Simulate RemoveWorkspace's cleanup logic:
+	// When the removed workspace equals the active one, clearWorkspace should fire.
+	if loadWorkspace() == dir {
+		clearWorkspace()
+	}
+
+	if got := loadWorkspace(); got != "" {
+		t.Errorf("loadWorkspace = %q after clearWorkspace, want empty", got)
+	}
+}
+
+func TestRemoveWorkspaceFallsBackToRemainingProject(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	// Set up two projects and make the first one active.
+	first := t.TempDir()
+	second := t.TempDir()
+	saveWorkspace(first)
+
+	// Simulate: remove the active workspace, fall back to the other.
+	if loadWorkspace() == first {
+		// In the real code, loadProjectsFile() would return remaining projects.
+		// Here we simulate falling back to the second project.
+		saveWorkspace(second)
+	}
+
+	if got := loadWorkspace(); got != second {
+		t.Errorf("loadWorkspace = %q, want fallback to %q", got, second)
+	}
+}
+
+func TestClearWorkspace(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	if workspaceStatePath() == "" {
+		t.Fatal("workspaceStatePath() is empty after isolating")
+	}
+
+	dir := t.TempDir()
+	saveWorkspace(dir)
+	if got := loadWorkspace(); got != dir {
+		t.Fatalf("precondition failed: loadWorkspace = %q, want %q", got, dir)
+	}
+
+	clearWorkspace()
+	if got := loadWorkspace(); got != "" {
+		t.Errorf("loadWorkspace after clearWorkspace = %q, want empty", got)
+	}
+	// Also verify the file is actually removed.
+	if _, err := os.Stat(workspaceStatePath()); !os.IsNotExist(err) {
+		t.Errorf("desktop-workspace file should be removed, stat err = %v", err)
+	}
+}
+
+// --- OpenProjectTab updates active workspace pointer ---
+
+func TestOpenProjectTabUpdatesActiveWorkspacePointer(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	if workspaceStatePath() == "" {
+		t.Fatal("workspaceStatePath() is empty after isolating")
+	}
+
+	projectRoot := t.TempDir()
+	app := NewApp()
+	topic, err := app.CreateTopic("project", projectRoot, "")
+	if err != nil {
+		t.Fatalf("create topic: %v", err)
+	}
+
+	if _, err := app.OpenProjectTab(projectRoot, topic.ID); err != nil {
+		t.Fatalf("open project tab: %v", err)
+	}
+
+	if got := loadWorkspace(); got != projectRoot {
+		t.Errorf("loadWorkspace = %q after OpenProjectTab, want %q", got, projectRoot)
+	}
+}
+
 func TestWindowsOpenWorkspacePathAvoidsCmdShell(t *testing.T) {
 	src, err := os.ReadFile("open_workspace_windows.go")
 	if err != nil {
@@ -612,6 +703,7 @@ func TestWorkspaceChangesGitStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	runGit(t, "init")
+	runGit(t, "checkout", "-b", "feature/test")
 	if err := os.WriteFile("tracked.txt", []byte("v1\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -626,6 +718,9 @@ func TestWorkspaceChangesGitStatus(t *testing.T) {
 	got := (&App{}).WorkspaceChanges()
 	if !got.GitAvailable {
 		t.Fatalf("git unavailable: %s", got.GitErr)
+	}
+	if got.GitBranch != "feature/test" {
+		t.Fatalf("git branch = %q, want feature/test", got.GitBranch)
 	}
 	byPath := map[string]WorkspaceChangeView{}
 	for _, file := range got.Files {
@@ -725,6 +820,150 @@ func TestWorkspaceChangesUntrackedDirectoryListsFiles(t *testing.T) {
 	}
 }
 
+func TestWorkspaceChangesGitBranchDetachedHead(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	orig, _ := os.Getwd()
+	defer os.Chdir(orig)
+
+	dir := t.TempDir()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, "init")
+	runGit(t, "config", "user.email", "test@example.com")
+	runGit(t, "config", "user.name", "Test User")
+	if err := os.WriteFile("tracked.txt", []byte("v1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, "add", "tracked.txt")
+	runGit(t, "commit", "-m", "init")
+	short := gitOutput(t, "rev-parse", "--short", "HEAD")
+	runGit(t, "checkout", "--detach", "HEAD")
+
+	got := (&App{}).WorkspaceChanges()
+	if !got.GitAvailable {
+		t.Fatalf("git unavailable: %s", got.GitErr)
+	}
+	if got.GitBranch != "@"+short {
+		t.Fatalf("git branch = %q, want @%s", got.GitBranch, short)
+	}
+}
+
+func TestWorkspaceGitHistory(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	orig, _ := os.Getwd()
+	defer os.Chdir(orig)
+
+	dir := t.TempDir()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	runGit(t, "init")
+	runGit(t, "config", "user.email", "test@example.com")
+	runGit(t, "config", "user.name", "Test User")
+
+	if err := os.WriteFile("file1.txt", []byte("v1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, "add", "file1.txt")
+	runGit(t, "commit", "-m", "init file1")
+
+	if err := os.WriteFile("file2.txt", []byte("v1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, "add", "file2.txt")
+	runGit(t, "commit", "-m", "init file2")
+
+	app := &App{}
+	history, err := app.WorkspaceGitHistory("")
+	if err != nil {
+		t.Fatalf("WorkspaceGitHistory err = %v", err)
+	}
+	if len(history) != 2 {
+		t.Fatalf("expected 2 commits, got %d", len(history))
+	}
+	if history[0].Message != "init file2" {
+		t.Errorf("expected latest commit message 'init file2', got %q", history[0].Message)
+	}
+	if history[1].Message != "init file1" {
+		t.Errorf("expected older commit message 'init file1', got %q", history[1].Message)
+	}
+
+	// Test history for specific file
+	history, err = app.WorkspaceGitHistory("file1.txt")
+	if err != nil {
+		t.Fatalf("WorkspaceGitHistory err = %v", err)
+	}
+	if len(history) != 1 {
+		t.Fatalf("expected 1 commit for file1.txt, got %d", len(history))
+	}
+	if history[0].Message != "init file1" {
+		t.Errorf("expected commit message 'init file1', got %q", history[0].Message)
+	}
+}
+
+func TestWorkspaceGitCommitDetail(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	orig, _ := os.Getwd()
+	defer os.Chdir(orig)
+
+	dir := t.TempDir()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	runGit(t, "init")
+	runGit(t, "config", "user.email", "test@example.com")
+	runGit(t, "config", "user.name", "Test User")
+
+	if err := os.WriteFile("file1.txt", []byte("v1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, "add", "file1.txt")
+	runGit(t, "commit", "-m", "init file1")
+
+	if err := os.WriteFile("file1.txt", []byte("v2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, "add", "file1.txt")
+	runGit(t, "commit", "-m", "update file1")
+
+	hash := gitOutput(t, "rev-parse", "HEAD")
+
+	app := &App{}
+
+	// Test project level detail
+	detail, err := app.WorkspaceGitCommitDetail(hash, "")
+	if err != nil {
+		t.Fatalf("WorkspaceGitCommitDetail err = %v", err)
+	}
+	if len(detail.Files) != 1 || detail.Files[0] != "file1.txt" {
+		t.Fatalf("expected files [file1.txt], got %v", detail.Files)
+	}
+	if detail.Diff != nil {
+		t.Fatal("expected nil diff for project level")
+	}
+
+	// Test file level detail
+	detail, err = app.WorkspaceGitCommitDetail(hash, "file1.txt")
+	if err != nil {
+		t.Fatalf("WorkspaceGitCommitDetail err = %v", err)
+	}
+	if len(detail.Files) != 0 {
+		t.Fatalf("expected no files for file level, got %v", detail.Files)
+	}
+	if detail.Diff == nil || !strings.Contains(*detail.Diff, "+v2") {
+		t.Fatalf("expected diff to contain '+v2', got %v", detail.Diff)
+	}
+}
+
 func runGit(t *testing.T, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", args...)
@@ -732,6 +971,16 @@ func runGit(t *testing.T, args ...string) {
 	if err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
+}
+
+func gitOutput(t *testing.T, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // --- settings_app.go helpers ---

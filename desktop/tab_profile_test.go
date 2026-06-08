@@ -94,6 +94,44 @@ effort = "max"
 	}
 }
 
+func TestEffortForTabUsesKnownModelRegistry(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectRoot := t.TempDir()
+	configBody := `default_model = "project-provider/deepseek-v4-flash"
+[[providers]]
+name = "project-provider"
+kind = "openai"
+base_url = "https://proxy.example.com/v1"
+model = "deepseek-v4-flash"
+api_key_env = "PROJECT_API_KEY"
+`
+	if err := os.WriteFile(filepath.Join(projectRoot, "reasonix.toml"), []byte(configBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp()
+	tab := testTab("project", projectRoot)
+	tab.model = "project-provider/deepseek-v4-flash"
+	app.tabs = map[string]*WorkspaceTab{tab.ID: tab}
+	app.activeTabID = tab.ID
+	defer tab.Ctrl.Close()
+
+	got := app.EffortForTab(tab.ID)
+	if !got.Supported || got.Current != "auto" || got.Default != "high" {
+		t.Fatalf("EffortForTab model registry = %+v, want supported auto/high", got)
+	}
+	wantLevels := []string{"auto", "high", "max"}
+	if len(got.Levels) != len(wantLevels) {
+		t.Fatalf("levels = %v, want %v", got.Levels, wantLevels)
+	}
+	for i, want := range wantLevels {
+		if got.Levels[i] != want {
+			t.Fatalf("levels[%d] = %q, want %q", i, got.Levels[i], want)
+		}
+	}
+}
+
 func TestSaveTabsPersistsModelAndEffort(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
@@ -127,7 +165,10 @@ func TestSaveTabsPersistsModelAndEffort(t *testing.T) {
 	}
 }
 
-func TestSaveTabsDoesNotPersistYoloMode(t *testing.T) {
+// TestSaveTabsPersistsYoloMode is the regression for #3517: yolo used to be
+// dropped on save, so relaunching reverted to normal. It now round-trips through
+// the real saveTabsLocked/loadTabsFile path.
+func TestSaveTabsPersistsYoloMode(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
 	app := NewApp()
@@ -146,8 +187,8 @@ func TestSaveTabsDoesNotPersistYoloMode(t *testing.T) {
 	if len(got.Tabs) != 1 {
 		t.Fatalf("tabs len = %d, want 1", len(got.Tabs))
 	}
-	if got.Tabs[0].Mode != "" {
-		t.Fatalf("saved yolo mode = %q, want empty", got.Tabs[0].Mode)
+	if got.Tabs[0].Mode != "yolo" {
+		t.Fatalf("saved yolo mode = %q, want yolo (#3517)", got.Tabs[0].Mode)
 	}
 }
 

@@ -14,6 +14,36 @@ import (
 	"reasonix/internal/config"
 )
 
+func waitForTabReady(t *testing.T, app *App, tabID string) *WorkspaceTab {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		app.mu.RLock()
+		tab := app.tabs[tabID]
+		ready := tab != nil && tab.Ready
+		startupErr := ""
+		if tab != nil {
+			startupErr = tab.StartupErr
+		}
+		app.mu.RUnlock()
+		if tab == nil {
+			t.Fatalf("tab %q was not found", tabID)
+		}
+		if ready {
+			if startupErr != "" {
+				t.Fatalf("tab %q startup error: %s", tabID, startupErr)
+			}
+			if tab.Ctrl != nil {
+				t.Cleanup(func() { tab.Ctrl.Close() })
+			}
+			return tab
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("tab %q was not ready before timeout", tabID)
+	return nil
+}
+
 func writeTopicSession(t *testing.T, dir, name, topicID, topicTitle, workspaceRoot string) string {
 	t.Helper()
 	path := filepath.Join(dir, name)
@@ -706,6 +736,7 @@ func TestRenameTopicUpdatesOpenTabMeta(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open project tab: %v", err)
 	}
+	waitForTabReady(t, app, tab.ID)
 	if tab.TopicTitle != "旧标题" {
 		t.Fatalf("opened tab title = %q, want 旧标题", tab.TopicTitle)
 	}
@@ -719,6 +750,91 @@ func TestRenameTopicUpdatesOpenTabMeta(t *testing.T) {
 	}
 	if got := tabs[0].TopicTitle; got != "新标题" {
 		t.Fatalf("open tab title = %q, want 新标题", got)
+	}
+}
+
+func TestRenameTopicRecreatesDeletedProjectTitleIndexFromOpenTab(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectRoot := t.TempDir()
+	app := NewApp()
+	topic, err := app.CreateTopic("project", projectRoot, "旧标题")
+	if err != nil {
+		t.Fatalf("create topic: %v", err)
+	}
+	tab, err := app.OpenProjectTab(projectRoot, topic.ID)
+	if err != nil {
+		t.Fatalf("open project tab: %v", err)
+	}
+	waitForTabReady(t, app, tab.ID)
+	if err := os.Remove(topicTitlesPath(projectRoot)); err != nil {
+		t.Fatalf("remove topic titles: %v", err)
+	}
+	if err := os.Remove(topicTitleSourcesPath(projectRoot)); err != nil {
+		t.Fatalf("remove topic title sources: %v", err)
+	}
+
+	if err := app.RenameTopic(topic.ID, "恢复标题"); err != nil {
+		t.Fatalf("rename topic after deleting title index: %v", err)
+	}
+	if got := loadTopicTitle(projectRoot, topic.ID); got != "恢复标题" {
+		t.Fatalf("restored topic title = %q, want 恢复标题", got)
+	}
+	nodes := app.ListProjectTree()
+	if len(nodes) != 1 || len(nodes[0].Children) != 1 || nodes[0].Children[0].TopicID != topic.ID {
+		t.Fatalf("project tree should still contain topic, got %#v", nodes)
+	}
+}
+
+func TestRenameTopicRecreatesDeletedProjectTitleIndexFromSessionMeta(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectRoot := t.TempDir()
+	topicID := "topic_missing_index"
+	if err := addProject(projectRoot, ""); err != nil {
+		t.Fatalf("add project: %v", err)
+	}
+	if err := setTopicTitle(projectRoot, topicID, "旧标题"); err != nil {
+		t.Fatalf("set topic title: %v", err)
+	}
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	writeTopicSession(t, dir, "missing-index.jsonl", topicID, "旧标题", projectRoot)
+	if err := os.Remove(topicTitlesPath(projectRoot)); err != nil {
+		t.Fatalf("remove topic titles: %v", err)
+	}
+	if err := os.Remove(topicTitleSourcesPath(projectRoot)); err != nil {
+		t.Fatalf("remove topic title sources: %v", err)
+	}
+
+	if err := NewApp().RenameTopic(topicID, "恢复标题"); err != nil {
+		t.Fatalf("rename topic from session meta after deleting title index: %v", err)
+	}
+	if got := loadTopicTitle(projectRoot, topicID); got != "恢复标题" {
+		t.Fatalf("restored topic title = %q, want 恢复标题", got)
+	}
+	nodes := NewApp().ListProjectTree()
+	if len(nodes) != 1 || len(nodes[0].Children) != 1 || nodes[0].Children[0].TopicID != topicID {
+		t.Fatalf("project tree should contain restored topic, got %#v", nodes)
+	}
+}
+
+func TestEnsureTopicIndexedPreservesGlobalAutoTitleSource(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	topicID := "topic_global_auto"
+	if err := setTopicTitleWithSource("", topicID, defaultTopicTitle, topicTitleSourceAuto); err != nil {
+		t.Fatalf("set global topic title: %v", err)
+	}
+	source := loadTopicTitleSource(topicTitleRoot("global", globalTabWorkspaceRoot()), topicID)
+	if err := ensureTopicIndexed("global", globalTabWorkspaceRoot(), topicID, defaultTopicTitle, source); err != nil {
+		t.Fatalf("ensure global topic indexed: %v", err)
+	}
+
+	if got := loadTopicTitleSource("", topicID); got != topicTitleSourceAuto {
+		t.Fatalf("global title source = %q, want %q", got, topicTitleSourceAuto)
 	}
 }
 
@@ -1045,6 +1161,47 @@ func TestLegacyMigrationConcurrentRunsHaveNoLostUpdates(t *testing.T) {
 	for id := range want {
 		if !gotSet[id] {
 			t.Fatalf("concurrent migration lost topic %q; GlobalTopics=%v", id, loadProjectsFile().GlobalTopics)
+		}
+	}
+}
+
+func TestEnsureTopicIndexedConcurrentRunsHaveNoLostProjectUpdates(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectRoot := t.TempDir()
+	const n = 12
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			topicID := fmt.Sprintf("topic_recovered_%02d", i)
+			if err := ensureTopicIndexed("project", projectRoot, topicID, fmt.Sprintf("Recovered %02d", i), topicTitleSourceManual); err != nil {
+				t.Errorf("ensure topic indexed: %v", err)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	nodes := NewApp().ListProjectTree()
+	if len(nodes) != 1 {
+		t.Fatalf("project tree len = %d, want 1: %#v", len(nodes), nodes)
+	}
+	got := map[string]bool{}
+	for _, child := range nodes[0].Children {
+		got[child.TopicID] = true
+	}
+	for i := 0; i < n; i++ {
+		topicID := fmt.Sprintf("topic_recovered_%02d", i)
+		if !got[topicID] {
+			t.Fatalf("concurrent topic index recovery lost %q; children=%#v", topicID, nodes[0].Children)
+		}
+		if title := loadTopicTitle(projectRoot, topicID); title == "" {
+			t.Fatalf("title index missing %q", topicID)
 		}
 	}
 }

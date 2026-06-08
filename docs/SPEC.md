@@ -168,7 +168,8 @@ prefix cache-stable:
 - The **planner** (low-frequency) runs in its own session with the same standing
   memory context plus a filtered read-only research tool set, then produces a
   concise plan. It can inspect files/docs before planning, but writer and
-  workflow tools are not exposed to it.
+  workflow tools are not exposed to it. `agent.planner_max_steps` bounds this
+  read-only exploration independently from the executor's `agent.max_steps`.
 - The plan is handed off as structured text to the **executor** — a full
   tool-using `Agent` in its own session — which carries it out.
 - The sessions never mix, so neither model's prefix is disturbed by the other's
@@ -344,7 +345,9 @@ type Chunk struct {
 Resolution order: **flag > project `./reasonix.toml` > user `~/.config/reasonix/config.toml`
 > built-in defaults**. Secrets come from the environment via `api_key_env` and
 are never stored in config files. A `.env` in the working directory is loaded if
-present.
+present. Step-limit preferences usually belong in the user config; project
+`reasonix.toml` should override them only when the repository needs shared
+runtime bounds.
 
 ```toml
 default_model = "deepseek"   # provider name (→ its default model) or "provider/model"
@@ -352,8 +355,9 @@ default_model = "deepseek"   # provider name (→ its default model) or "provide
 
 [agent]
 system_prompt = "You are Reasonix, a coding agent..."  # or system_prompt_file = "..."
-max_steps     = 25
-temperature   = 0.0
+max_steps         = 0    # executor tool-call rounds; 0 = no limit
+planner_max_steps = 12   # planner read-only tool-call rounds; 0 = no limit
+temperature       = 0.0
 # planner_model = "mimo"   # optional: two-model collaboration (low-frequency planner)
 # subagent_model = "deepseek-pro"   # optional default for runAs=subagent skills
 # subagent_models = { review = "deepseek-pro", security_review = "deepseek-pro" }
@@ -385,9 +389,11 @@ api_key_env = "MIMO_API_KEY"
 
 [tools]
 enabled = []   # omit/empty = all built-ins
+bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local cap
 
 [skills]
 # paths = ["~/my-skills", "../shared/skills"]   # extra custom skill roots
+# excluded_paths = ["~/.agents/skills"]         # hide convention roots without deleting folders
 # disabled_skills = ["review"]                  # hidden from prompt, slash invocation, and skill tools
 
 [permissions]

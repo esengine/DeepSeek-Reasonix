@@ -7,12 +7,29 @@ import (
 	"strings"
 )
 
-var skipDirs = map[string]bool{
+var skipEntryNames = map[string]bool{
+	".codex":       true,
 	".codegraph":   true,
+	".DS_Store":    true,
 	".git":         true,
+	".npm":         true,
+	".pnpm-store":  true,
 	"node_modules": true,
-	"dist":         true,
-	"build":        true,
+	"Thumbs.db":    true,
+}
+
+var skipDirNames = map[string]bool{
+	"build": true,
+	"dist":  true,
+}
+
+var skipDirPaths = map[string]bool{
+	"bin":                      true,
+	"desktop/frontend/wailsjs": true,
+	"npm/.stage":               true,
+	"site/.astro":              true,
+	"stage":                    true,
+	"tmp":                      true,
 }
 
 const (
@@ -49,9 +66,17 @@ func Search(root, query string, limit int) []string {
 
 		name := d.Name()
 		if d.IsDir() {
-			if skipDirs[name] || (!showHidden && strings.HasPrefix(name, ".")) {
+			rel, err := filepath.Rel(root, path)
+			if err != nil {
 				return filepath.SkipDir
 			}
+			rel = filepath.ToSlash(rel)
+			if skipEntryNames[name] || skipDirNames[name] || skipDirPaths[rel] || (!showHidden && strings.HasPrefix(name, ".")) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if skipEntryNames[name] {
 			return nil
 		}
 		if len(matches) >= limit {

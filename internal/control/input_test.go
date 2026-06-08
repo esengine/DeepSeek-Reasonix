@@ -12,6 +12,7 @@ import (
 	"reasonix/internal/command"
 	"reasonix/internal/event"
 	"reasonix/internal/memory"
+	"reasonix/internal/skill"
 )
 
 type fakeAutoPlanClassifier struct {
@@ -46,6 +47,40 @@ func TestCustomCommandLookup(t *testing.T) {
 	}
 	if _, ok := c.CustomCommand("/missing"); ok {
 		t.Error("missing should not be found")
+	}
+}
+
+func TestSkillsReflectStoreChangesAfterControllerBuild(t *testing.T) {
+	project := t.TempDir()
+	home := t.TempDir()
+	store := skill.New(skill.Options{HomeDir: home, ProjectRoot: project, DisableBuiltins: true})
+	c := New(Options{SkillStore: store, Skills: store.List()})
+
+	if _, ok := c.RunSkill("/hot now"); ok {
+		t.Fatal("skill should not exist before it is written")
+	}
+	writeControlSkill(t, project, ".reasonix/skills/hot/SKILL.md", "---\nname: hot\ndescription: Hot install\n---\nHot body")
+
+	if skills := c.Skills(); len(skills) != 1 || skills[0].Name != "hot" {
+		t.Fatalf("Skills() = %+v, want newly installed hot skill", skills)
+	}
+	sent, ok := c.RunSkill("/hot now")
+	if !ok {
+		t.Fatal("RunSkill should find newly installed skill")
+	}
+	if !strings.Contains(sent, "Hot body") || !strings.Contains(sent, "Arguments: now") {
+		t.Fatalf("rendered skill = %q", sent)
+	}
+}
+
+func writeControlSkill(t *testing.T, root, rel, body string) {
+	t.Helper()
+	path := filepath.Join(root, rel)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 

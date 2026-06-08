@@ -80,6 +80,9 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 			b.WriteString("# theme_style = \"graphite\"   # graphite|ember|aurora|midnight|sandstone|porcelain|linen|glacier\n")
 		}
 		fmt.Fprintf(&b, "close_behavior = %q   # desktop: quit|background when the window close button is clicked\n", c.DesktopCloseBehavior())
+		if len(c.Desktop.ProviderAccess) > 0 {
+			fmt.Fprintf(&b, "provider_access = %s   # desktop settings: providers shown on Settings > Model > Access\n", renderStringArray(c.Desktop.ProviderAccess))
+		}
 		b.WriteString("\n")
 
 		b.WriteString("[notifications]\n")
@@ -145,8 +148,9 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	} else {
 		b.WriteString("# system_prompt_file = \"prompts/system.md\"   # overrides system_prompt when set\n")
 	}
-	fmt.Fprintf(&b, "max_steps   = %d\n", c.Agent.MaxSteps)
-	fmt.Fprintf(&b, "temperature = %s\n", formatFloat(c.Agent.Temperature))
+	fmt.Fprintf(&b, "max_steps         = %d   # executor tool-call rounds; 0 = no limit\n", c.Agent.MaxSteps)
+	fmt.Fprintf(&b, "planner_max_steps = %d   # planner read-only tool-call rounds; 0 = no limit\n", c.Agent.PlannerMaxSteps)
+	fmt.Fprintf(&b, "temperature       = %s\n", formatFloat(c.Agent.Temperature))
 	autoPlan := c.Agent.AutoPlan
 	switch strings.ToLower(strings.TrimSpace(autoPlan)) {
 	case "on", "ask":
@@ -229,6 +233,9 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 			if p.Effort != "" {
 				fmt.Fprintf(&b, "effort      = %q\n", p.Effort)
 			}
+			if p.ReasoningProtocol != "" {
+				fmt.Fprintf(&b, "reasoning_protocol = %q   # auto|deepseek|openai|none; overrides model/endpoint reasoning detection\n", p.ReasoningProtocol)
+			}
 			if len(p.SupportedEfforts) > 0 {
 				fmt.Fprintf(&b, "supported_efforts = %s   # custom /effort levels exposed by this provider; overrides the built-in Kind/BaseURL default\n", renderStringArray(p.SupportedEfforts))
 			}
@@ -244,7 +251,7 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 
 	b.WriteString("[tools]\n")
 	if len(c.Tools.Enabled) == 0 {
-		b.WriteString("enabled = []   # empty = all built-in tools\n\n")
+		b.WriteString("enabled = []   # empty = all built-in tools\n")
 	} else {
 		b.WriteString("enabled = [")
 		for i, t := range c.Tools.Enabled {
@@ -253,8 +260,9 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 			}
 			fmt.Fprintf(&b, "%q", t)
 		}
-		b.WriteString("]\n\n")
+		b.WriteString("]\n")
 	}
+	fmt.Fprintf(&b, "bash_timeout_seconds = %d   # foreground safety cap; set 0 for no tool-local cap\n\n", c.BashTimeoutSeconds())
 
 	b.WriteString("[codegraph]\n")
 	fmt.Fprintf(&b, "enabled      = %v   # built-in MCP server; off by default for first-run sessions\n", c.Codegraph.Enabled)
@@ -266,11 +274,18 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	}
 	b.WriteString("\n")
 
+	renderLSPConfig(&b, c.LSP)
+
 	b.WriteString("[skills]\n")
 	if len(c.Skills.Paths) > 0 {
 		fmt.Fprintf(&b, "paths = %s   # extra custom skill roots\n", renderStringArray(c.Skills.Paths))
 	} else {
 		b.WriteString("# paths = [\"~/my-skills\", \"../shared/skills\"]   # extra custom skill roots\n")
+	}
+	if len(c.Skills.ExcludedPaths) > 0 {
+		fmt.Fprintf(&b, "excluded_paths = %s   # skill roots hidden from discovery\n", renderStringArray(c.Skills.ExcludedPaths))
+	} else {
+		b.WriteString("# excluded_paths = [\"~/.agents/skills\"]   # hide convention roots without deleting folders\n")
 	}
 	if c.Skills.MaxDepth != 0 {
 		fmt.Fprintf(&b, "max_depth = %d   # nested scan depth; default 3, set 1 for legacy root-only discovery\n", c.SkillMaxDepth())
@@ -401,6 +416,68 @@ func shouldRenderSystemPrompt(c, defaults *Config, scope RenderScope) bool {
 		return true
 	}
 	return strings.TrimSpace(c.Agent.SystemPrompt) != "" && c.Agent.SystemPrompt != defaults.Agent.SystemPrompt
+}
+
+func renderLSPConfig(b *strings.Builder, cfg LSPConfig) {
+	b.WriteString("[lsp]\n")
+	fmt.Fprintf(b, "enabled = %v   # language server tools; servers launch lazily when used\n", cfg.Enabled)
+	if len(cfg.Servers) == 0 {
+		b.WriteString("# [lsp.servers.go]\n")
+		b.WriteString("# command = \"gopls\"\n")
+		b.WriteString("# args = []\n")
+		b.WriteString("# extensions = [\".go\"]\n\n")
+		return
+	}
+	b.WriteString("\n")
+
+	langs := make([]string, 0, len(cfg.Servers))
+	for lang := range cfg.Servers {
+		langs = append(langs, lang)
+	}
+	sort.Strings(langs)
+	for _, lang := range langs {
+		srv := cfg.Servers[lang]
+		fmt.Fprintf(b, "[lsp.servers.%s]\n", renderTOMLKeyPart(lang))
+		if srv.Command != "" {
+			fmt.Fprintf(b, "command = %q\n", srv.Command)
+		}
+		if len(srv.Args) > 0 {
+			fmt.Fprintf(b, "args = %s\n", renderStringArray(srv.Args))
+		}
+		if len(srv.Env) > 0 {
+			fmt.Fprintf(b, "env = %s\n", renderStringMap(srv.Env))
+		}
+		if srv.LanguageID != "" {
+			fmt.Fprintf(b, "language_id = %q\n", srv.LanguageID)
+		}
+		if len(srv.Extensions) > 0 {
+			fmt.Fprintf(b, "extensions = %s\n", renderStringArray(srv.Extensions))
+		}
+		if srv.InstallHint != "" {
+			fmt.Fprintf(b, "install_hint = %q\n", srv.InstallHint)
+		}
+		b.WriteString("\n")
+	}
+}
+
+func renderTOMLKeyPart(key string) string {
+	if isBareTOMLKey(key) {
+		return key
+	}
+	return strconv.Quote(key)
+}
+
+func isBareTOMLKey(key string) bool {
+	if key == "" {
+		return false
+	}
+	for _, r := range key {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_' || r == '-' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 // renderStringArray renders a []string as a TOML inline array.

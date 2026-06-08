@@ -5,10 +5,14 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "node scripts/check-css-syntax.mjs src/styles.css && node scripts/check-z-index-tokens.mjs src/styles.css && tsc --noEmit && vite build",
     "preview": "vite preview",
+    "check:css": "node scripts/check-css-syntax.mjs src/styles.css && node scripts/check-z-index-tokens.mjs src/styles.css",
     "test:todo-visibility": "node scripts/test-todo-visibility.mjs",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "tsx src/__tests__/math-golden.test.ts",
+    "test:typecheck": "tsc --noEmit -p tsconfig.test.json",
+    "test:all": "tsc --noEmit -p tsconfig.test.json && tsx src/__tests__/math-golden.test.ts"
   },
   "dependencies": {
     "highlight.js": "^11.10.0",
@@ -22,10 +26,12 @@
     "remark-math": "^6.0.0"
   },
   "devDependencies": {
+    "@types/node": "^25.9.1",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
     "terser": "^5.48.0",
+    "tsx": "^4.22.4",
     "typescript": "^5.6.3",
     "vite": "^6.0.7"
   },

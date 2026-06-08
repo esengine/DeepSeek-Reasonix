@@ -47,6 +47,77 @@ func TestLoadMCPJSON(t *testing.T) {
 	}
 }
 
+func TestNormalizePluginCommandLine(t *testing.T) {
+	cases := []struct {
+		name        string
+		in          PluginEntry
+		wantCommand string
+		wantArgs    []string
+		wantChanged bool
+	}{
+		{
+			name:        "npx pasted with args",
+			in:          PluginEntry{Name: "playwright", Command: "npx -y @playwright/mcp"},
+			wantCommand: "npx",
+			wantArgs:    []string{"-y", "@playwright/mcp"},
+			wantChanged: true,
+		},
+		{
+			name:        "quoted command path",
+			in:          PluginEntry{Name: "quoted", Command: `"C:\Program Files\nodejs\npx.cmd" -y @example/mcp`},
+			wantCommand: `C:\Program Files\nodejs\npx.cmd`,
+			wantArgs:    []string{"-y", "@example/mcp"},
+			wantChanged: true,
+		},
+		{
+			name:        "empty quoted arg preserved",
+			in:          PluginEntry{Name: "empty", Command: `npx --token "" @example/mcp`},
+			wantCommand: "npx",
+			wantArgs:    []string{"--token", "", "@example/mcp"},
+			wantChanged: true,
+		},
+		{
+			name:        "unquoted command path with spaces stays literal",
+			in:          PluginEntry{Name: "literal", Command: `C:\Program Files\nodejs\npx.cmd`},
+			wantCommand: `C:\Program Files\nodejs\npx.cmd`,
+			wantChanged: false,
+		},
+		{
+			name:        "remote entry untouched",
+			in:          PluginEntry{Name: "remote", Type: "http", URL: "https://mcp.example.com/mcp", Command: "npx -y nope"},
+			wantCommand: "npx -y nope",
+			wantChanged: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, changed := NormalizePluginCommandLine(tc.in)
+			if changed != tc.wantChanged {
+				t.Fatalf("changed = %v, want %v", changed, tc.wantChanged)
+			}
+			if got.Command != tc.wantCommand {
+				t.Fatalf("command = %q, want %q", got.Command, tc.wantCommand)
+			}
+			if strings.Join(got.Args, "\x00") != strings.Join(tc.wantArgs, "\x00") {
+				t.Fatalf("args = %v, want %v", got.Args, tc.wantArgs)
+			}
+		})
+	}
+}
+
+func TestUpsertPluginNormalizesPastedCommandLine(t *testing.T) {
+	cfg := &Config{}
+	if err := cfg.UpsertPlugin(PluginEntry{Name: "playwright", Command: "npx -y @playwright/mcp"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Plugins[0].Command; got != "npx" {
+		t.Fatalf("command = %q, want npx", got)
+	}
+	if got := cfg.Plugins[0].Args; len(got) != 2 || got[0] != "-y" || got[1] != "@playwright/mcp" {
+		t.Fatalf("args = %v, want [-y @playwright/mcp]", got)
+	}
+}
+
 func TestLoadMCPJSONAbsentAndMalformed(t *testing.T) {
 	dir := t.TempDir()
 
@@ -142,6 +213,31 @@ func TestLoadMergesPluginsAcrossTOMLSources(t *testing.T) {
 	}
 	if !names["globalmcp"] || !names["projectmcp"] {
 		t.Fatalf("a project reasonix.toml [[plugins]] dropped the global config's server; got %+v", cfg.Plugins)
+	}
+}
+
+func TestLoadNormalizesTOMLPastedCommandLine(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "xdg"))
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
+	t.Chdir(t.TempDir())
+
+	if err := os.WriteFile("reasonix.toml", []byte("[[plugins]]\nname = \"playwright\"\ncommand = \"npx -y @playwright/mcp\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Plugins) != 1 {
+		t.Fatalf("plugins = %+v", cfg.Plugins)
+	}
+	if cfg.Plugins[0].Command != "npx" {
+		t.Fatalf("command = %q, want npx", cfg.Plugins[0].Command)
+	}
+	if got := cfg.Plugins[0].Args; len(got) != 2 || got[0] != "-y" || got[1] != "@playwright/mcp" {
+		t.Fatalf("args = %v, want [-y @playwright/mcp]", got)
 	}
 }
 

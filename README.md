@@ -71,6 +71,12 @@ brew install esengine/reasonix/reasonix   # macOS
 Prebuilt archives (`darwin|linux|windows × amd64|arm64`) and `SHA256SUMS` are on
 every [GitHub release](https://github.com/esengine/DeepSeek-Reasonix/releases).
 
+### Code signing
+
+Windows builds are code-signed with a free certificate provided by the
+[SignPath Foundation](https://signpath.org/), with signing through
+[SignPath.io](https://signpath.io/).
+
 ### Build from source
 
 ```sh
@@ -100,6 +106,8 @@ default_model = "deepseek-flash"   # executor; set [agent].planner_model to add 
 # language    = "zh"               # ui language; empty = auto-detect from $LANG / $REASONIX_LANG
 
 [agent]
+max_steps = 0                    # executor tool-call rounds; 0 = no limit
+planner_max_steps = 12           # planner read-only tool-call rounds; 0 = no limit
 # planner_model = "mimo-pro"          # optional low-frequency planner
 # subagent_model = "deepseek-pro"     # optional default for runAs=subagent skills
 # subagent_models = { review = "deepseek-pro", security_review = "deepseek-pro" }
@@ -116,9 +124,11 @@ api_key_env = "DEEPSEEK_API_KEY"
 
 [tools]
 enabled = []   # omit/empty = all built-ins
+bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local cap
 
 [skills]
 # paths = ["~/my-skills", "../shared/skills"]   # extra custom skill roots
+# excluded_paths = ["~/.agents/skills"]         # hide convention roots without deleting folders
 # disabled_skills = ["review"]                  # hide skills until /skill enable <name>
 
 [permissions]
@@ -246,11 +256,18 @@ separate cache-stable sessions) is a one-line edit afterwards — set
 ```toml
 [agent]
 planner_model = "deepseek-pro"   # used as the low-frequency planner
+planner_max_steps = 12           # read-only tool-call rounds before pausing
 ```
 
 The planner sees loaded `REASONIX.md` / `AGENTS.md` memory and a small read-only
 research tool set, so it can inspect relevant files before handing a plan to the
-executor. Writer and workflow tools remain executor-only.
+executor. Writer and workflow tools remain executor-only. `max_steps` limits the
+executor; `planner_max_steps` limits only the planner, and either can be set to
+`0` for no round limit.
+
+Keep personal step-limit preferences in the user config. Add them to a project's
+`./reasonix.toml` only when that repository needs a shared override, such as a
+larger planner limit for a very large codebase.
 
 Subagent skills inherit the executor model by default. Set `subagent_model` to
 run them on another configured model, or use `subagent_models` to override only

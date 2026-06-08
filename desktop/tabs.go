@@ -300,6 +300,7 @@ func (a *App) OpenProjectTab(workspaceRoot, topicID string) (TabMeta, error) {
 	if abs, err := filepath.Abs(workspaceRoot); err == nil {
 		workspaceRoot = abs
 	}
+	saveWorkspace(workspaceRoot)
 
 	a.mu.Lock()
 	// If already open, just activate.
@@ -332,7 +333,7 @@ func (a *App) OpenProjectTab(workspaceRoot, topicID string) (TabMeta, error) {
 	a.saveTabsLocked()
 	a.mu.Unlock()
 
-	go a.buildTabController(tab)
+	a.startTabControllerBuild(tab)
 	return a.tabMeta(tab, true), nil
 }
 
@@ -374,7 +375,7 @@ func (a *App) OpenGlobalTab(topicID string) (TabMeta, error) {
 	a.saveTabsLocked()
 	a.mu.Unlock()
 
-	go a.buildTabController(tab)
+	a.startTabControllerBuild(tab)
 	return a.tabMeta(tab, true), nil
 }
 
@@ -475,6 +476,14 @@ func (a *App) CloseTab(tabID string) error {
 // buildTabController assembles a controller for a tab in the background, the
 // same way buildController works for the single-controller App. On success it
 // wires the controller and flips Ready; on failure it stores StartupErr.
+func (a *App) startTabControllerBuild(tab *WorkspaceTab) {
+	if a.ctx == nil {
+		a.buildTabController(tab)
+		return
+	}
+	go a.buildTabController(tab)
+}
+
 func (a *App) buildTabController(tab *WorkspaceTab) {
 	wailsCtx := a.ctx
 	buildCtx := a.bootContext()
@@ -505,13 +514,12 @@ func (a *App) buildTabController(tab *WorkspaceTab) {
 	if model == "" {
 		model = cfg.DefaultModel
 	}
-	if e, ok := cfg.ResolveModel(model); ok {
-		model = e.Name + "/" + e.Model
-	} else {
-		model = cfg.DefaultModel
-		if e, ok := cfg.ResolveModel(model); ok {
-			model = e.Name + "/" + e.Model
+	requestedModel := model
+	if resolved, fallback, ok := cfg.ResolveModelWithFallback(model); ok {
+		if fallback && strings.TrimSpace(tab.model) != "" {
+			a.noticeForTab(tab.ID, fmt.Sprintf("model %q is no longer available; switched to %s", requestedModel, resolved))
 		}
+		model = resolved
 	}
 
 	a.mu.Lock()
@@ -586,6 +594,11 @@ func (a *App) buildTabController(tab *WorkspaceTab) {
 		// Write/update scope/session meta.
 		if path != "" {
 			a.persistTabSessionPath(tab, path)
+			if strings.TrimSpace(tab.TopicID) != "" {
+				if err := ensureTopicIndexed(tab.Scope, tab.WorkspaceRoot, tab.TopicID, tab.TopicTitle, loadTopicTitleSource(topicTitleRoot(tab.Scope, tab.WorkspaceRoot), tab.TopicID)); err == nil {
+					a.emitProjectTreeChanged()
+				}
+			}
 			// Restore existing telemetry if resuming a session.
 			telemetryPath := path + ".telemetry.json"
 			if records := loadTelemetry(telemetryPath); len(records) > 0 {
@@ -1282,10 +1295,7 @@ func loadTopicTitleSource(workspaceRoot, topicID string) string {
 }
 
 func topicTitleForTab(scope, workspaceRoot, topicID string) string {
-	titleRoot := workspaceRoot
-	if scope == "global" {
-		titleRoot = ""
-	}
+	titleRoot := topicTitleRoot(scope, workspaceRoot)
 	if title := strings.TrimSpace(loadTopicTitle(titleRoot, topicID)); title != "" {
 		return title
 	}
@@ -1293,6 +1303,13 @@ func topicTitleForTab(scope, workspaceRoot, topicID string) string {
 		return "Global"
 	}
 	return defaultTopicTitle
+}
+
+func topicTitleRoot(scope, workspaceRoot string) string {
+	if scope == "global" {
+		return ""
+	}
+	return workspaceRoot
 }
 
 func forkTopicTitle(title string) string {
@@ -1338,6 +1355,49 @@ func setTopicTitleSource(workspaceRoot, topicID, source string) error {
 		sources[topicID] = strings.TrimSpace(source)
 	}
 	return saveTopicTitleSources(workspaceRoot, sources)
+}
+
+// topicIndexMu serializes recovery writes to desktop-projects.json and topic
+// title indexes. Startup builds restored tabs concurrently, and each tab may
+// repair its missing index.
+var topicIndexMu sync.Mutex
+
+func ensureTopicIndexed(scope, workspaceRoot, topicID, title, source string) error {
+	topicID = strings.TrimSpace(topicID)
+	if topicID == "" {
+		return fmt.Errorf("topicID is required")
+	}
+	topicIndexMu.Lock()
+	defer topicIndexMu.Unlock()
+	if strings.TrimSpace(scope) == "global" {
+		workspaceRoot = ""
+	} else {
+		workspaceRoot = normalizeProjectRoot(workspaceRoot)
+	}
+	title = strings.TrimSpace(title)
+	if title == "" {
+		title = defaultTopicTitle
+	}
+	source = strings.TrimSpace(source)
+	if source == "" {
+		source = topicTitleSourceManual
+	}
+	if err := setTopicTitleWithSource(workspaceRoot, topicID, title, source); err != nil {
+		return err
+	}
+	f := loadProjectsFile()
+	if workspaceRoot == "" {
+		f.GlobalTopics = prependUniqueString(f.GlobalTopics, topicID)
+		return saveProjectsFile(f)
+	}
+	for i, p := range f.Projects {
+		if p.Root == workspaceRoot {
+			f.Projects[i].Topics = prependUniqueString(p.Topics, topicID)
+			return saveProjectsFile(f)
+		}
+	}
+	f.Projects = append(f.Projects, desktopProject{Root: workspaceRoot, Topics: []string{topicID}})
+	return saveProjectsFile(f)
 }
 
 // --- telemetry --------------------------------------------------------------
@@ -1734,7 +1794,56 @@ func (a *App) RenameTopic(topicID, title string) error {
 		a.emitProjectTreeChanged()
 		return nil
 	}
+	if scope, workspaceRoot, ok := a.findTopicLocation(topicID); ok {
+		if err := ensureTopicIndexed(scope, workspaceRoot, topicID, trimmed, topicTitleSourceManual); err != nil {
+			return err
+		}
+		a.updateOpenTopicTitle(topicID, trimmed)
+		a.updateTopicSessionTitles(topicID, trimmed)
+		a.emitProjectTreeChanged()
+		return nil
+	}
 	return fmt.Errorf("topic %q not found", topicID)
+}
+
+func (a *App) findTopicLocation(topicID string) (string, string, bool) {
+	topicID = strings.TrimSpace(topicID)
+	if topicID == "" {
+		return "", "", false
+	}
+	a.mu.RLock()
+	for _, tab := range a.tabs {
+		if tab == nil || tab.TopicID != topicID {
+			continue
+		}
+		scope := tab.Scope
+		workspaceRoot := tab.WorkspaceRoot
+		a.mu.RUnlock()
+		if scope == "global" {
+			return "global", "", true
+		}
+		return "project", normalizeProjectRoot(workspaceRoot), true
+	}
+	a.mu.RUnlock()
+
+	infos, err := agent.ListSessions(config.SessionDir())
+	if err != nil {
+		return "", "", false
+	}
+	for _, info := range infos {
+		if strings.TrimSpace(info.TopicID) != topicID {
+			continue
+		}
+		scope := strings.TrimSpace(info.Scope)
+		if scope == "" {
+			scope = "global"
+		}
+		if scope == "global" {
+			return "global", "", true
+		}
+		return "project", normalizeProjectRoot(info.WorkspaceRoot), true
+	}
+	return "", "", false
 }
 
 func (a *App) updateOpenTopicTitle(topicID, title string) {
@@ -2191,9 +2300,13 @@ func currentTabMode(tab *WorkspaceTab) string {
 	return normalizeTabMode(tab.mode)
 }
 
+// persistedTabMode is the composer mode saved with a tab so it survives reload
+// and app relaunch. plan and yolo are both remembered (a restored yolo tab keeps
+// its status-bar indicator); "normal" is the default and isn't persisted. (#3517)
 func persistedTabMode(mode string) string {
-	if normalizeTabMode(mode) == "plan" {
-		return "plan"
+	switch normalizeTabMode(mode) {
+	case "plan", "yolo":
+		return normalizeTabMode(mode)
 	}
 	return ""
 }

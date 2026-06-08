@@ -24,6 +24,7 @@ var subagentMetaTools = []string{
 	"task",
 	"run_skill",
 	"install_skill",
+	"install_source",
 	"explore",
 	"research",
 	"review",

@@ -9,7 +9,11 @@ import (
 // schema always produces the same byte representation.
 func CanonicalizeSchema(raw json.RawMessage) json.RawMessage {
 	if len(raw) == 0 {
-		return raw
+		// A tool with no parameters (common for MCP tools) yields an empty
+		// schema. An empty json.RawMessage makes json.Marshal of the enclosing
+		// request fail ("unexpected end of JSON input") and bricks the whole
+		// provider; emit a valid empty-object schema instead.
+		return json.RawMessage(`{"type":"object"}`)
 	}
 	var v any
 	if err := json.Unmarshal(raw, &v); err != nil {
