@@ -11335,6 +11335,7 @@ a[href] {
   font-size: 13px;
 }
 
+
 /* Loading overlay */
 .browser-loading {
   position: absolute;
@@ -11365,8 +11366,16 @@ a[href] {
   font-family: var(--font-mono, monospace);
   opacity: 0.7;
   pointer-events: none;
+  transition: color 0.2s, background 0.2s;
 }
 
+.browser-status--online {
+  color: #4ade80;
+  background: rgba(74, 222, 128, 0.1);
+  opacity: 0.85;
+}
+
+/* Type-into-page bar (CDP interactive) */
 /* Nav button variants */
 .browser-nav__btn--go {
   color: var(--accent, #4a9eff);

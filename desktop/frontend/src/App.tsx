@@ -1004,7 +1004,7 @@ export default function App() {
     const newTab: DockTab = {
       id,
       type: "browser",
-      title: "新标签页",
+      title: "浏览器",
       icon: Globe,
       closable: true,
       metadata: { url: "about:blank", history: [], historyIndex: -1, isLoading: false },

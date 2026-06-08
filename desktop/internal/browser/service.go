@@ -7,6 +7,7 @@ package browser
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -20,6 +21,13 @@ import (
 
 // ErrNotConnected is returned when no browser is available.
 var ErrNotConnected = errors.New("browser not connected")
+
+// Viewport dimensions used for the headless browser window. These are exported
+// so the frontend can scale click coordinates correctly.
+const (
+	ViewportWidth  = 1280
+	ViewportHeight = 800
+)
 
 // Service provides browser automation primitives to the desktop frontend.
 // It is safe for concurrent use.
@@ -67,8 +75,8 @@ func (s *Service) Start(ctx context.Context) error {
 	}
 
 	_ = page.SetViewport(&proto.EmulationSetDeviceMetricsOverride{
-		Width:             1280,
-		Height:            800,
+		Width:             ViewportWidth,
+		Height:            ViewportHeight,
 		DeviceScaleFactor: 1,
 		Mobile:            false,
 	})
@@ -286,6 +294,20 @@ func (s *Service) Type(selector, text string) error {
 	return el.Input(text)
 }
 
+// TypeText types text into the currently focused page element using CDP's
+// Input.insertText command. After clicking at a point to focus an input,
+// call this to type arbitrary text (handles all characters correctly).
+func (s *Service) TypeText(text string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.ensureReady(); err != nil {
+		return err
+	}
+
+	return proto.InputInsertText{Text: text}.Call(s.page)
+}
+
 // ScrollDown scrolls the page down by the given number of pixels.
 func (s *Service) ScrollDown(pixels int) error {
 	s.mu.Lock()
@@ -329,4 +351,96 @@ func (s *Service) IsRunning() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.started
+}
+
+// SetViewportSize updates the headless browser's viewport. Used to match the
+// sidebar iframe dimensions so element coordinates work correctly.
+func (s *Service) SetViewportSize(width, height int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.ensureReady(); err != nil {
+		return err
+	}
+	return s.page.SetViewport(&proto.EmulationSetDeviceMetricsOverride{
+		Width:             width,
+		Height:            height,
+		DeviceScaleFactor: 1,
+		Mobile:            false,
+	})
+}
+
+// InspectElementInfo holds details about a DOM element returned by InspectElement.
+type InspectElementInfo struct {
+	Tag       string  `json:"tag"`
+	ID        string  `json:"id"`
+	Classes   string  `json:"classes"`
+	Text      string  `json:"text"`
+	OuterHTML string  `json:"outerHTML"`
+	Selector  string  `json:"selector"`
+	RectX     float64 `json:"rectX"`
+	RectY     float64 `json:"rectY"`
+	RectW     float64 `json:"rectW"`
+	RectH     float64 `json:"rectH"`
+}
+
+// InspectElement finds the element at viewport coordinates (x, y) via CDP's
+// elementFromPoint and returns its tag, selector, text, and outerHTML as JSON.
+func (s *Service) InspectElement(x, y float64) (*InspectElementInfo, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.ensureReady(); err != nil {
+		return nil, err
+	}
+
+	js := fmt.Sprintf(`(() => {
+		const el = document.elementFromPoint(%f, %f);
+		if (!el) return null;
+		const rect = el.getBoundingClientRect();
+		const getSelector = (e) => {
+			const parts = [];
+			while (e && e.nodeType === 1) {
+				let sel = e.tagName.toLowerCase();
+				if (e.id) { parts.unshift('#' + e.id); break; }
+				if (e.className && typeof e.className === 'string' && e.className.trim()) {
+					sel += '.' + e.className.trim().split(/\s+/).join('.');
+				}
+				const p = e.parentElement;
+				if (p) {
+					const siblings = Array.from(p.children).filter(c => c.tagName === e.tagName);
+					if (siblings.length > 1) {
+						const idx = Array.from(p.children).indexOf(e) + 1;
+						sel += ':nth-child(' + idx + ')';
+					}
+				}
+				parts.unshift(sel);
+				e = p;
+			}
+			return parts.join(' > ');
+		};
+		return {
+			tag: el.tagName,
+			id: el.id || '',
+			classes: (typeof el.className === 'string' ? el.className.trim() : Array.from(el.classList).join(' ')),
+			text: (el.textContent || '').trim().slice(0, 500),
+			outerHTML: el.outerHTML.slice(0, 2000),
+			selector: getSelector(el),
+			rect: { x: rect.x, y: rect.y, w: rect.width, h: rect.height }
+		};
+	})()`, x, y)
+
+	result, err := s.page.Eval(js)
+	if err != nil {
+		return nil, fmt.Errorf("browser: inspect element failed: %w", err)
+	}
+	if result == nil || result.Value.Nil() || result.Value.String() == "" || result.Value.String() == "null" {
+		return nil, nil
+	}
+
+	// Parse the JSON string returned by Eval.
+	src := result.Value.String()
+	var info InspectElementInfo
+	if err := json.Unmarshal([]byte(src), &info); err != nil {
+		return nil, fmt.Errorf("browser: parse inspect result failed: %w", err)
+	}
+	return &info, nil
 }

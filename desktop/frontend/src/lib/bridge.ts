@@ -162,6 +162,7 @@ export interface AppBindings {
   BrowserClick(selector: string): Promise<void>;
   BrowserClickAtPoint(x: number, y: number): Promise<void>;
   BrowserType(selector: string, text: string): Promise<void>;
+  BrowserTypeText(text: string): Promise<void>;
   BrowserScrollDown(pixels: number): Promise<void>;
   BrowserCurrentURL(): Promise<string>;
   BrowserIsRunning(): Promise<boolean>;
@@ -1424,6 +1425,7 @@ function makeMockApp(): AppBindings {
     async BrowserClick(_selector: string) {},
     async BrowserClickAtPoint(_x: number, _y: number) {},
     async BrowserType(_selector: string, _text: string) {},
+    async BrowserTypeText(_text: string) {},
     async BrowserScrollDown(_pixels: number) {},
     async BrowserCurrentURL() {
       return "about:blank|||Mock";

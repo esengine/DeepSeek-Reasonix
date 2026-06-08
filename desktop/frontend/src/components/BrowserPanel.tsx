@@ -14,7 +14,7 @@ function normalizeURL(raw: string): string {
   const trimmed = raw.trim();
   if (!trimmed) return "";
   if (/^https?:\/\//i.test(trimmed)) return trimmed;
-  // Support common localhost patterns without a protocol.
+  // Support common localhost/private patterns without a protocol.
   if (/^localhost[:\/]|^127\.|^0\.|^10\.|^172\.(1[6-9]|2\d|3[01])\.|^192\.168\./.test(trimmed)) {
     return `http://${trimmed}`;
   }
@@ -36,17 +36,20 @@ export function BrowserPanel({ tab, onMetadataUpdate, onTitleUpdate }: BrowserPa
   const [urlInput, setUrlInput] = useState(meta.url === DEFAULT_HOMEPAGE ? "" : meta.url);
   const [currentUrl, setCurrentUrl] = useState(meta.url);
   const [isLoading, setIsLoading] = useState(false);
-  const [canGoBack, setCanGoBack] = useState(false);
-  const [canGoForward, setCanGoForward] = useState(false);
+  const [isCdpReady, setIsCdpReady] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const currentUrlRef = useRef(currentUrl);
 
-  // Keep ref in sync.
   useEffect(() => {
     currentUrlRef.current = currentUrl;
   }, [currentUrl]);
 
-  // --- Navigation helpers ---
+  // Check CDP readiness on mount.
+  useEffect(() => {
+    app.BrowserIsRunning().then(setIsCdpReady).catch(() => {});
+  }, []);
+
+  // --- Navigation (iframe-based) ---
 
   const navigateTo = useCallback(
     (target: string) => {
@@ -56,6 +59,8 @@ export function BrowserPanel({ tab, onMetadataUpdate, onTitleUpdate }: BrowserPa
       setCurrentUrl(normalized);
       setIsLoading(true);
       onMetadataUpdate(tab.id, { url: normalized, isLoading: true });
+      // Also tell the CDP backend so AI can follow along.
+      app.BrowserNavigate(normalized).catch(() => {});
     },
     [tab.id, onMetadataUpdate],
   );
@@ -78,25 +83,21 @@ export function BrowserPanel({ tab, onMetadataUpdate, onTitleUpdate }: BrowserPa
     if (iframeRef.current && currentUrl !== DEFAULT_HOMEPAGE) {
       setIsLoading(true);
       iframeRef.current.src = currentUrl;
+      app.BrowserRefresh().catch(() => {});
     }
   }, [currentUrl]);
 
   const handleBack = useCallback(() => {
     try {
       iframeRef.current?.contentWindow?.history.back();
-    } catch {
-      // Cross-origin iframe will throw — silently degrade.
-    }
-    // For the Go backend, also try backend navigation if available.
+    } catch { /* cross-origin */ }
     app.BrowserBack().catch(() => {});
   }, []);
 
   const handleForward = useCallback(() => {
     try {
       iframeRef.current?.contentWindow?.history.forward();
-    } catch {
-      // Cross-origin iframe will throw — silently degrade.
-    }
+    } catch { /* cross-origin */ }
     app.BrowserForward().catch(() => {});
   }, []);
 
@@ -106,35 +107,35 @@ export function BrowserPanel({ tab, onMetadataUpdate, onTitleUpdate }: BrowserPa
     }
   }, [currentUrl]);
 
-  // --- Iframe lifecycle ---
+  // --- Iframe load: sync URL bar + title when same-origin ---
 
   const handleIframeLoad = useCallback(() => {
     setIsLoading(false);
     onMetadataUpdate(tab.id, { isLoading: false });
 
-    // Try to read the iframe's current URL and title.
     try {
       const iframe = iframeRef.current;
       if (!iframe?.contentWindow) return;
 
       const doc = iframe.contentDocument ?? iframe.contentWindow.document;
-      const title = doc.title || "Untitled";
+      const title = doc.title || "";
       const href = doc.URL || currentUrlRef.current;
 
-      if (href && href !== DEFAULT_HOMEPAGE && href !== "about:blank") {
+      if (title) {
+        onTitleUpdate(tab.id, title);
+      }
+
+      if (href && href !== DEFAULT_HOMEPAGE && href !== "about:blank" && href !== currentUrlRef.current) {
         setCurrentUrl(href);
         setUrlInput(href);
         onMetadataUpdate(tab.id, { url: href });
       }
-      if (title) {
-        onTitleUpdate(tab.id, title);
-      }
     } catch {
-      // Cross-origin — can't read document props. That's fine.
+      // Cross-origin — can't read doc props; that's normal.
     }
   }, [tab.id, onMetadataUpdate, onTitleUpdate]);
 
-  // --- Open from external (e.g., user clicked a link in chat) ---
+  // --- Open from external (metadata.openUrl trigger) ---
 
   useEffect(() => {
     const storedUrl = (tab.metadata as Record<string, unknown>)?.openUrl as string | undefined;
@@ -145,22 +146,19 @@ export function BrowserPanel({ tab, onMetadataUpdate, onTitleUpdate }: BrowserPa
         setCurrentUrl(normalized);
         setIsLoading(true);
       }
-      // Clear the openUrl so we don't re-navigate on re-render.
       onMetadataUpdate(tab.id, { openUrl: undefined });
     }
   }, [tab.metadata, tab.id, onMetadataUpdate]);
 
-  // Update the iframe src when currentUrl changes.
+  // Drive iframe src when currentUrl changes (avoids re-setting the same URL).
   useEffect(() => {
     if (currentUrl && currentUrl !== DEFAULT_HOMEPAGE && iframeRef.current) {
-      // Only set src if it's different from the iframe's current src to avoid loops.
       try {
         const iframeDoc = iframeRef.current.contentDocument ?? iframeRef.current.contentWindow?.document;
-        if (iframeDoc?.URL !== currentUrl) {
+        if (iframeDoc && iframeDoc.URL !== currentUrl) {
           iframeRef.current.src = currentUrl;
         }
       } catch {
-        // Cross-origin — just set it anyway.
         iframeRef.current.src = currentUrl;
       }
     }
@@ -170,35 +168,15 @@ export function BrowserPanel({ tab, onMetadataUpdate, onTitleUpdate }: BrowserPa
 
   return (
     <div className="browser-panel">
-      {/* Navigation bar */}
+      {/* ── Navigation bar ── */}
       <div className="browser-nav">
-        <button
-          className="browser-nav__btn"
-          type="button"
-          aria-label="Back"
-          onClick={handleBack}
-          disabled={!canGoBack}
-          title={t("rightDock.browserBack") || "Back"}
-        >
+        <button className="browser-nav__btn" type="button" aria-label="Back" onClick={handleBack} title={t("rightDock.browserBack") || "Back"}>
           <ArrowLeft size={14} />
         </button>
-        <button
-          className="browser-nav__btn"
-          type="button"
-          aria-label="Forward"
-          onClick={handleForward}
-          disabled={!canGoForward}
-          title={t("rightDock.browserForward") || "Forward"}
-        >
+        <button className="browser-nav__btn" type="button" aria-label="Forward" onClick={handleForward} title={t("rightDock.browserForward") || "Forward"}>
           <ArrowRight size={14} />
         </button>
-        <button
-          className="browser-nav__btn"
-          type="button"
-          aria-label="Refresh"
-          onClick={handleRefresh}
-          title={t("rightDock.browserRefresh") || "Refresh"}
-        >
+        <button className="browser-nav__btn" type="button" aria-label="Refresh" onClick={handleRefresh} title={t("rightDock.browserRefresh") || "Refresh"}>
           {isLoading ? <Loader2 size={14} className="spinning" /> : <RefreshCw size={14} />}
         </button>
         <div className="browser-url">
@@ -211,29 +189,17 @@ export function BrowserPanel({ tab, onMetadataUpdate, onTitleUpdate }: BrowserPa
             placeholder={t("rightDock.browserUrlPlaceholder")}
           />
         </div>
-        <button
-          className="browser-nav__btn browser-nav__btn--go"
-          type="button"
-          aria-label={t("rightDock.browserOpen")}
-          onClick={handleGo}
-          title={t("rightDock.browserGo") || "Go"}
-        >
+        <button className="browser-nav__btn browser-nav__btn--go" type="button" aria-label={t("rightDock.browserOpen")} onClick={handleGo} title={t("rightDock.browserGo") || "Go"}>
           <Globe size={14} />
         </button>
         {showBrowser && (
-          <button
-            className="browser-nav__btn"
-            type="button"
-            aria-label="Open in system browser"
-            onClick={handleOpenInSystem}
-            title={t("rightDock.browserOpenExternal") || "Open in browser"}
-          >
+          <button className="browser-nav__btn" type="button" aria-label="Open in system browser" onClick={handleOpenInSystem} title={t("rightDock.browserOpenExternal") || "Open in browser"}>
             <ExternalLink size={14} />
           </button>
         )}
       </div>
 
-      {/* Browser content */}
+      {/* ── Iframe browser content ── */}
       <div className="browser-frame-container">
         {showBrowser ? (
           <iframe
@@ -257,13 +223,11 @@ export function BrowserPanel({ tab, onMetadataUpdate, onTitleUpdate }: BrowserPa
           </div>
         )}
 
-        {/* Backend connection status */}
-        {showBrowser && !meta.isLoading && (
-          <div className="browser-status">
-            <RotateCcw size={10} />
-            <span>CDP</span>
-          </div>
-        )}
+        {/* CDP status badge */}
+        <div className={`browser-status ${isCdpReady ? "browser-status--online" : ""}`}>
+          <RotateCcw size={10} />
+          <span>CDP</span>
+        </div>
       </div>
     </div>
   );

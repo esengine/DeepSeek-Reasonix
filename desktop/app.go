@@ -3451,6 +3451,12 @@ func (a *App) BrowserType(selector, text string) error {
 	return a.browser.Type(selector, text)
 }
 
+// BrowserTypeText types text into the currently focused page element.
+// Used by the CDP screenshot interactive mode (user taps the "Type into page" bar).
+func (a *App) BrowserTypeText(text string) error {
+	return a.browser.TypeText(text)
+}
+
 // BrowserScrollDown scrolls the page down by the given number of pixels.
 func (a *App) BrowserScrollDown(pixels int) error {
 	return a.browser.ScrollDown(pixels)
@@ -3468,6 +3474,24 @@ func (a *App) BrowserCurrentURL() (string, error) {
 // BrowserIsRunning reports whether the headless browser service is active.
 func (a *App) BrowserIsRunning() bool {
 	return a.browser.IsRunning()
+}
+
+// BrowserSetViewportSize updates the headless browser viewport to match the
+// sidebar iframe display dimensions, so element inspection coordinates are correct.
+func (a *App) BrowserSetViewportSize(width, height int) error {
+	return a.browser.SetViewportSize(width, height)
+}
+
+// BrowserInspectElement finds the DOM element at viewport coordinates (x, y)
+// and returns a JSON string with its tag, selector, text, outerHTML, and rect.
+// Returns empty string if no element found.
+func (a *App) BrowserInspectElement(x, y float64) string {
+	info, err := a.browser.InspectElement(x, y)
+	if err != nil || info == nil {
+		return ""
+	}
+	data, _ := json.Marshal(info)
+	return string(data)
 }
 
 func revealPath(path string) error {
