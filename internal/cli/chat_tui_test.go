@@ -1101,6 +1101,54 @@ func TestTranscriptTailFollow(t *testing.T) {
 	}
 }
 
+// TestEmptyEnterScrollsToBottom proves that pressing Enter with an empty composer
+// scrolls the viewport to the bottom in both idle and running states, so the user
+// can quickly tail-follow after scrolling up to read history.
+func TestEmptyEnterScrollsToBottom(t *testing.T) {
+	ctrl := control.New(control.Options{})
+	ch := make(chan event.Event, 1)
+	notice := agentEventMsg(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "line"})
+	adv := func(m chatTUI, msg tea.Msg) chatTUI {
+		n, _ := m.Update(msg)
+		return n.(chatTUI)
+	}
+
+	// --- idle state ---
+	t.Run("idle", func(t *testing.T) {
+		cur := adv(newChatTUI(ctrl, "", ch, 80), tea.WindowSizeMsg{Width: 80, Height: 8})
+		for i := 0; i < 12; i++ {
+			cur = adv(cur, notice)
+		}
+		// Scroll up to leave the bottom.
+		cur = adv(cur, tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+		if cur.viewport.AtBottom() {
+			t.Fatal("wheel-up should break the bottom pin")
+		}
+		// Empty enter → should snap back to bottom.
+		cur = adv(cur, tea.KeyPressMsg{Code: tea.KeyEnter})
+		if !cur.viewport.AtBottom() {
+			t.Error("empty enter while idle should scroll viewport to bottom")
+		}
+	})
+
+	// --- running state ---
+	t.Run("running", func(t *testing.T) {
+		cur := adv(newChatTUI(ctrl, "", ch, 80), tea.WindowSizeMsg{Width: 80, Height: 8})
+		for i := 0; i < 12; i++ {
+			cur = adv(cur, notice)
+		}
+		cur.state = tuiRunning
+		cur = adv(cur, tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+		if cur.viewport.AtBottom() {
+			t.Fatal("wheel-up should break the bottom pin")
+		}
+		cur = adv(cur, tea.KeyPressMsg{Code: tea.KeyEnter})
+		if !cur.viewport.AtBottom() {
+			t.Error("empty enter while running should scroll viewport to bottom")
+		}
+	})
+}
+
 func TestFoldedPasteUsesPlaceholderAndExpandsOnSend(t *testing.T) {
 	m := newTestChatTUI()
 	pasted := "{\n  \"a\": 1,\n  \"b\": 2,\n  \"c\": 3,\n  \"d\": 4\n}"
