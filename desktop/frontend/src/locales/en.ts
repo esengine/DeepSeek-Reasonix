@@ -56,6 +56,14 @@ export const en = {
   "rightDock.workbench": "Right workbench",
   "rightDock.views": "Right workbench views",
   "rightDock.overview": "Overview",
+  "rightDock.closeTab": "Close tab",
+  "rightDock.addTab": "Add tab",
+  "rightDock.browserBack": "Back",
+  "rightDock.browserForward": "Forward",
+  "rightDock.browserReload": "Reload",
+  "rightDock.browserUrlPlaceholder": "Enter URL…",
+  "rightDock.browserEmpty": "Enter a URL to start browsing",
+  "rightDock.newBrowserTab": "New browser tab",
 
   // topic bar
   "topicBar.renameSession": "Rename session",

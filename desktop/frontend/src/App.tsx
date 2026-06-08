@@ -4,7 +4,7 @@ import { ShellExpandProvider, useShellExpand } from "./lib/shellExpand";
 import {
   Download,
   SquarePen,
-  CircleGauge,
+  Globe,
   FileText,
   FileJson,
   GitBranch,
@@ -17,7 +17,6 @@ import {
   PanelRightOpen,
   Trash2,
 } from "lucide-react";
-import logoWordmark from "./assets/logo-wordmark.svg";
 import { asArray } from "./lib/array";
 import { clearLegacyLangPref, normalizeLangPref, readLegacyLangPref, t, useI18n, useT } from "./lib/i18n";
 import { useController, type Item, type LiveStream } from "./lib/useController";
@@ -34,7 +33,8 @@ import { HistoryPanel } from "./components/HistoryPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { ContextPanel } from "./components/ContextPanel";
-import { WorkspacePanel } from "./components/WorkspacePanel";
+import { DockTabBar } from "./components/DockTabBar";
+import { DockContent } from "./components/DockContent";
 import { Tooltip } from "./components/Tooltip";
 import { StartupSplash, shouldShowStartupSplash } from "./components/StartupSplash";
 import { OnboardingOverlay } from "./components/OnboardingOverlay";
@@ -43,7 +43,7 @@ import { CopyButton } from "./components/CopyButton";
 import { CommandPalette, type PaletteItem } from "./components/CommandPalette";
 import { parseTodos } from "./lib/tools";
 import { shouldShowTodoPanel } from "./lib/todoVisibility";
-import type { ComposerInsertRequest, Meta, Mode, SessionMeta, SettingsTab, TabMeta } from "./lib/types";
+import type { ComposerInsertRequest, DockTab, Mode, SessionMeta, SettingsTab, TabMeta } from "./lib/types";
 import { loadLayoutSize, saveLayoutSize } from "./lib/layoutPreferences";
 import {
   applyTheme,
@@ -65,6 +65,7 @@ const SIDEBAR_DEFAULT_WIDTH = 264;
 const SIDEBAR_DEFAULT_RATIO = 0.175;
 const SIDEBAR_MIN_WIDTH = 228;
 const SIDEBAR_MAX_WIDTH = 420;
+const SIDEBAR_COLLAPSED_WIDTH = 48;
 const CHAT_MIN_WIDTH = 400;
 const WORKSPACE_RESIZER_WIDTH = 8;
 
@@ -73,7 +74,6 @@ function isThemeMode(value: string): value is Theme {
 }
 const CONTEXT_PANEL_MIN_WIDTH = 340;
 const RIGHT_DOCK_MIN_WIDTH = CONTEXT_PANEL_MIN_WIDTH;
-const RIGHT_DOCK_CONTEXT_WIDTH = 380;
 const RIGHT_DOCK_TREE_DEFAULT_WIDTH = 320;
 const RIGHT_DOCK_TREE_DEFAULT_RATIO = 0.25;
 const RIGHT_DOCK_TREE_MIN_WIDTH = 260;
@@ -81,8 +81,11 @@ const RIGHT_DOCK_TREE_MAX_WIDTH = 560;
 const RIGHT_DOCK_PREVIEW_DEFAULT_WIDTH = 640;
 const RIGHT_DOCK_MAX_WIDTH = 860;
 
-type RightDockMode = "context" | "files" | "changed";
-const SHOW_CONTEXT_DOCK = false;
+const DEFAULT_DOCK_TABS: DockTab[] = [
+  { id: "files", type: "files", title: "文件", icon: FileText, closable: false },
+  { id: "changes", type: "changes", title: "改动", icon: GitBranch, closable: false },
+];
+
 type HistoryScopeFilter = { scope: "global" | "project"; workspaceRoot: string };
 type DesktopPlatform = "darwin" | "windows" | "linux";
 type HistoryViewState =
@@ -211,10 +214,6 @@ function topicScopeLabel(tab?: TabMeta): string {
   return t("scope.project", { name: tab.workspaceName || tab.workspaceRoot || "Project" });
 }
 
-function appChromeScopeLabel(tab?: TabMeta, meta?: Meta): string {
-  if (tab?.scope === "project" || tab?.scope === "global") return tabWorkspaceTitle(tab);
-  return workspaceDisplayName(meta?.cwd) || meta?.label || "Global";
-}
 
 function normalizeModeValue(mode?: string): Mode {
   return mode === "plan" || mode === "yolo" ? mode : "normal";
@@ -225,12 +224,6 @@ function sessionsForScope(sessions: SessionMeta[], filter: HistoryScopeFilter): 
     return sessions.filter((session) => session.scope === "project" && session.workspaceRoot === filter.workspaceRoot);
   }
   return sessions.filter((session) => (session.scope || "global") === "global");
-}
-
-function workspaceDisplayName(path?: string): string {
-  if (!path) return "";
-  const parts = path.split(/[/\\]/).filter(Boolean);
-  return parts.length > 0 ? parts[parts.length - 1] : path;
 }
 
 function materializeLiveItems(items: Item[], live?: LiveStream): Item[] {
@@ -415,6 +408,8 @@ export default function App() {
   const [workspacePreviewActive, setWorkspacePreviewActive] = useState(false);
   const [workspacePanelResizing, setWorkspacePanelResizing] = useState(false);
   const [workspacePanelMaximized, setWorkspacePanelMaximized] = useState(false);
+  const [dockTabs, setDockTabs] = useState<DockTab[]>(DEFAULT_DOCK_TABS);
+  const [activeDockTabId, setActiveDockTabId] = useState("files");
 
   const [dockRefreshKey, setDockRefreshKey] = useState(0);
   const [projectRevision, setProjectRevision] = useState(0);
@@ -492,7 +487,7 @@ export default function App() {
     workspacePreviewActive
       ? rightDockPreviewWidth
       : rightDockTreeWidth;
-  const sidebarRenderWidth = sidebarCollapsed ? 0 : sidebarWidth;
+  const sidebarRenderWidth = sidebarCollapsed ? SIDEBAR_COLLAPSED_WIDTH : sidebarWidth;
   const measuredMainWidth = layoutWidth > 0 ? Math.max(0, layoutWidth - sidebarRenderWidth) : CHAT_MIN_WIDTH + WORKSPACE_RESIZER_WIDTH + preferredWorkspacePanelWidth;
   const workspacePanelMinWidth = workspacePreviewActive ? RIGHT_DOCK_MIN_WIDTH : RIGHT_DOCK_TREE_MIN_WIDTH;
 
@@ -1074,11 +1069,14 @@ export default function App() {
 
   const setWorkspacePanel = useCallback((open: boolean) => {
     if (open) {
-      openWorkspacePanel();
+      if (activeDockTabId) {
+        setWorkspacePanelOpen(true);
+        setWorkspacePanelMaximized(false);
+      }
     } else {
       closeWorkspacePanel();
     }
-  }, [closeWorkspacePanel, openWorkspacePanel]);
+  }, [activeDockTabId, closeWorkspacePanel]);
 
   const addWorkspaceTextToComposer = useCallback((text: string) => {
     setComposerInsertRequest({ id: Date.now(), text });
@@ -1381,7 +1379,6 @@ export default function App() {
     }
   }, [renameTopic, renamingTopicId, topicTitleDraft]);
 
-  const sidebarExpandBlocked = false;
   const sidebarToggleTitle = sidebarCollapsed
       ? t("sidebar.expand")
       : t("sidebar.collapse");
@@ -1411,42 +1408,33 @@ export default function App() {
           .join(" ")}
         style={layoutStyle}
       >
-        <header className="app-chrome">
-          <button
-            className={[
-              "app-chrome__panel-toggle",
-              "app-chrome__panel-toggle--left",
-              !sidebarCollapsed ? "app-chrome__panel-toggle--active" : "",
-              sidebarExpandBlocked ? "app-chrome__panel-toggle--blocked" : "",
-            ].filter(Boolean).join(" ")}
-            type="button"
-            onClick={sidebarExpandBlocked ? undefined : toggleSidebar}
-            aria-label={sidebarToggleTitle}
-            aria-disabled={sidebarExpandBlocked}
-          >
-            {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
-          </button>
-          <div className="app-chrome__identity" aria-label="Reasonix">
-            <img src={logoWordmark} alt="" className="app-chrome__logo" draggable={false} />
-            <span className="app-chrome__separator">/</span>
-            <span className="app-chrome__scope">{appChromeScopeLabel(activeTab, state.meta)}</span>
-          </div>
-          <div className="app-chrome__spacer" />
-        </header>
+
 
         <aside className={`sidebar${sidebarCollapsed ? " sidebar--collapsed" : ""}`} aria-label={t("sidebar.navigation")}>
-          <Tooltip label={t("topbar.newSession")} fill>
+          <div className="sidebar__header">
+            <div className="sidebar__header-left">
+              <Tooltip label={t("topbar.newSession")} fill>
+                <button
+                  className="sidebar__new-icon"
+                  onClick={() => {
+                    if (state.running) cancel();
+                    void startNewSession();
+                  }}
+                  aria-label={t("topbar.newSession")}
+                >
+                  <SquarePen size={15} />
+                </button>
+              </Tooltip>
+            </div>
             <button
-              className="sidebar__new"
-              onClick={() => {
-                if (state.running) cancel();
-                void startNewSession();
-              }}
+              className="sidebar__collapse-btn"
+              type="button"
+              onClick={toggleSidebar}
+              aria-label={sidebarToggleTitle}
             >
-              <SquarePen size={15} />
-              <span>{t("topbar.newSession")}</span>
+              {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
             </button>
-          </Tooltip>
+          </div>
 
           <section className="sidebar__section sidebar__section--projects">
             <ProjectTree
@@ -1607,107 +1595,109 @@ export default function App() {
 
           <UpdateBanner />
 
-          <main className="main">
-            {state.meta?.ready === false && !state.meta?.startupErr ? (
-              <div className="loading-screen">
-                <div className="loading-screen__spinner" />
-                <span className="loading-screen__text">{t("common.loading")}</span>
-              </div>
-            ) : (
-	              <Transcript
-	                items={deferredItems}
-	                live={state.live}
-	                footerHeight={footerHeight}
-	                onPrompt={send}
-	                onRewind={handleMessageAction}
-	                checkpoints={state.checkpoints}
-	                actionPending={state.messageAction != null}
-	                rewindDisabled={state.running || state.messageAction != null || state.approval != null || state.ask != null}
-	              />
-            )}
-          </main>
+          <div className="chat-pane__body">
+            <div className="chat-area">
+              <main className="main">
+                {state.meta?.ready === false && !state.meta?.startupErr ? (
+                  <div className="loading-screen">
+                    <div className="loading-screen__spinner" />
+                    <span className="loading-screen__text">{t("common.loading")}</span>
+                  </div>
+                ) : (
+                  <Transcript
+                    items={deferredItems}
+                    live={state.live}
+                    footerHeight={footerHeight}
+                    onPrompt={send}
+                    onRewind={handleMessageAction}
+                    checkpoints={state.checkpoints}
+                    actionPending={state.messageAction != null}
+                    rewindDisabled={state.running || state.messageAction != null || state.approval != null || state.ask != null}
+                  />
+                )}
+              </main>
 
-          <footer className="footer" ref={footerRef}>
-            {showTodos && <TodoPanel todos={todos} stale={todoStale} onDismiss={() => setDismissedTodo(todoItem!.id)} />}
-            {state.approval && (
-              <ApprovalModal
-                approval={state.approval}
-                onAnswer={(allow, session, persist) => {
-                  // Approving an exit_plan_mode plan leaves plan mode; sync the
-                  // tab-local indicator and persisted safe mode immediately.
-                  if (state.approval!.tool === "exit_plan_mode" && allow) applyMode("normal");
-                  approve(state.approval!.id, allow, session, persist);
-                }}
-                onRevisePlan={(text) => {
-                  setPendingPlanRevision(text);
-                  approve(state.approval!.id, false, false, false);
-                }}
-                onExitPlan={() => {
-                  applyMode("normal");
-                  approve(state.approval!.id, false, false, false);
-                }}
+              <footer className="footer" ref={footerRef}>
+                {showTodos && <TodoPanel todos={todos} stale={todoStale} onDismiss={() => setDismissedTodo(todoItem!.id)} />}
+                {state.approval && (
+                  <ApprovalModal
+                    approval={state.approval}
+                    onAnswer={(allow, session, persist) => {
+                      // Approving an exit_plan_mode plan leaves plan mode; sync the
+                      // tab-local indicator and persisted safe mode immediately.
+                      if (state.approval!.tool === "exit_plan_mode" && allow) applyMode("normal");
+                      approve(state.approval!.id, allow, session, persist);
+                    }}
+                    onRevisePlan={(text) => {
+                      setPendingPlanRevision(text);
+                      approve(state.approval!.id, false, false, false);
+                    }}
+                    onExitPlan={() => {
+                      applyMode("normal");
+                      approve(state.approval!.id, false, false, false);
+                    }}
+                  />
+                )}
+                {state.ask && (
+                  <AskCard
+                    ask={state.ask}
+                    onAnswer={answerQuestion}
+                    onDismiss={() => answerQuestion(state.ask!.id, [])}
+                  />
+                )}
+                <Composer
+                  running={state.running}
+                  mode={mode}
+                  cwd={state.meta?.cwd}
+                  modelLabel={state.meta?.label ?? t("status.connecting")}
+                  tabId={activeTabId}
+                  effort={state.effort}
+                  onSend={handleSend}
+                  onCancel={cancel}
+                  onCycleMode={cycleMode}
+                  onSetMode={applyMode}
+                  onSwitchModel={switchModel}
+                  onSetEffort={setEffort}
+                  onPickFolder={switchFolder}
+                  onRemoveWorkspace={removeWorkspace}
+                  insertRequest={composerInsertRequest}
+                  disabled={state.meta?.ready === false || state.messageAction != null || state.approval != null || state.ask != null}
+                  decisionPending={state.messageAction != null || state.approval != null || state.ask != null}
+                  ready={state.meta?.ready === true}
+                  workspaceRefreshSignal={projectRevision}
+                />
+                <StatusBar
+                  context={state.context}
+                  usage={state.usage}
+                  balance={state.balance}
+                  jobs={state.jobs}
+                  running={state.running}
+                  mode={mode}
+                  cost={state.sessionCost}
+                  currency={state.sessionCurrency}
+                  turnTokens={state.turnTokens}
+                />
+              </footer>
+            </div>
+
+            {workspacePanelGridOpen && (
+              <button
+                className="workspace-panel-resizer"
+                type="button"
+                role="separator"
+                aria-orientation="vertical"
+                aria-label={t("rightDock.resize")}
+                aria-valuemin={workspacePanelMinWidth}
+                aria-valuemax={Math.max(workspacePanelMaxWidth, workspacePanelRenderWidth)}
+                aria-valuenow={workspacePanelRenderWidth}
+                onPointerDown={startWorkspacePanelResize}
+                onKeyDown={resizeWorkspacePanelWithKeyboard}
+                onDoubleClick={() => setSavedWorkspacePanelWidth(workspacePanelResetWidth)}
               />
             )}
-            {state.ask && (
-              <AskCard
-                ask={state.ask}
-                onAnswer={answerQuestion}
-                onDismiss={() => answerQuestion(state.ask!.id, [])}
-              />
-            )}
-	              <Composer
-	              running={state.running}
-              mode={mode}
-              cwd={state.meta?.cwd}
-              modelLabel={state.meta?.label ?? t("status.connecting")}
-              tabId={activeTabId}
-              effort={state.effort}
-              onSend={handleSend}
-              onCancel={cancel}
-              onCycleMode={cycleMode}
-              onSetMode={applyMode}
-              onSwitchModel={switchModel}
-              onSetEffort={setEffort}
-              onPickFolder={switchFolder}
-              onRemoveWorkspace={removeWorkspace}
-              insertRequest={composerInsertRequest}
-	              disabled={state.meta?.ready === false || state.messageAction != null || state.approval != null || state.ask != null}
-	              decisionPending={state.messageAction != null || state.approval != null || state.ask != null}
-              ready={state.meta?.ready === true}
-              workspaceRefreshSignal={projectRevision}
-            />
-            <StatusBar
-              context={state.context}
-              usage={state.usage}
-              balance={state.balance}
-              jobs={state.jobs}
-              running={state.running}
-              mode={mode}
-              cost={state.sessionCost}
-              currency={state.sessionCurrency}
-              turnTokens={state.turnTokens}
-            />
-          </footer>
-          </>
-        </section>
 
-        {workspacePanelGridOpen && (
-          <button
-            className="workspace-panel-resizer"
-            type="button"
-            role="separator"
-            aria-orientation="vertical"
-            aria-label={t("rightDock.resize")}
-            aria-valuemin={workspacePanelMinWidth}
-            aria-valuemax={Math.max(workspacePanelMaxWidth, workspacePanelRenderWidth)}
-            aria-valuenow={workspacePanelRenderWidth}
-            onPointerDown={startWorkspacePanelResize}
-            onKeyDown={resizeWorkspacePanelWithKeyboard}
-            onDoubleClick={() => setSavedWorkspacePanelWidth(workspacePanelResetWidth)}
-          />
-        )}
 
-        {workspacePanelRenderable && (
+          {workspacePanelRenderable && (
             <aside
               className="workbench-dock"
               aria-label={t("rightDock.workbench")}
@@ -1755,6 +1745,8 @@ export default function App() {
               </div>
             </aside>
           )}
+          </div>
+        </section>
       </div>
 
       {histView !== null && (

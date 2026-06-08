@@ -57,6 +57,14 @@ export const zh: Record<DictKey, string> = {
   "rightDock.workbench": "右侧工作台",
   "rightDock.views": "右侧工作台视图",
   "rightDock.overview": "概览",
+  "rightDock.closeTab": "关闭标签页",
+  "rightDock.addTab": "新增标签页",
+  "rightDock.browserBack": "后退",
+  "rightDock.browserForward": "前进",
+  "rightDock.browserReload": "刷新",
+  "rightDock.browserUrlPlaceholder": "输入网址…",
+  "rightDock.browserEmpty": "输入网址开始浏览",
+  "rightDock.newBrowserTab": "新建浏览器标签页",
 
   // 话题栏
   "topicBar.renameSession": "重命名会话",
