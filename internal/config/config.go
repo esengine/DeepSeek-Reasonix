@@ -229,9 +229,8 @@ func (c CodegraphConfig) ResolvedTier() string {
 	return resolvedMCPTier(c.Tier)
 }
 
-// NetworkConfig controls ordinary outbound HTTP traffic such as model providers,
-// wallet-balance lookups, updater checks, and CodeGraph downloads. It intentionally
-// does not apply to web_fetch, which keeps its own SSRF-guarded dialer.
+// NetworkConfig controls outbound HTTP proxy settings. web_fetch reuses these
+// proxy settings while keeping its own SSRF-guarded dialer.
 type NetworkConfig struct {
 	// ProxyMode is "auto" (default; environment proxy for now), "env", "custom",
 	// or "off". auto leaves room for OS proxy detection later without changing the

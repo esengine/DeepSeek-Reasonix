@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"reasonix/internal/netclient"
 	"reasonix/internal/sandbox"
 	"reasonix/internal/tool"
 )
@@ -25,7 +26,7 @@ type Workspace struct {
 	Bash        sandbox.Spec
 	BashTimeout time.Duration
 	Search      SearchSpec
-	ProxyURL    string // resolved proxy URL for web_fetch
+	ProxySpec   netclient.ProxySpec
 }
 
 // Tools returns the built-in tools bound to the workspace, ready to Add to a
@@ -52,7 +53,7 @@ func (w Workspace) Tools(enabled ...string) []tool.Tool {
 		"ls":            listDir{workDir: w.Dir},
 		"glob":          globTool{workDir: w.Dir},
 		"grep":          grepTool{workDir: w.Dir, rg: w.Search.RgPath},
-		"web_fetch":     webFetch{proxyURL: w.ProxyURL},
+		"web_fetch":     webFetch{proxySpec: w.ProxySpec},
 	}
 	all := tool.Builtins()
 	if len(enabled) == 0 {

@@ -16,15 +16,14 @@ import (
 
 	"golang.org/x/net/proxy"
 
+	"reasonix/internal/netclient"
 	"reasonix/internal/tool"
 )
 
 func init() { tool.RegisterBuiltin(webFetch{}) }
 
 type webFetch struct {
-	// proxyURL is resolved from config [network] settings. When non-empty,
-	// outbound requests tunnel through this proxy while preserving SSRF guard.
-	proxyURL string
+	proxySpec netclient.ProxySpec
 }
 
 const (
@@ -50,13 +49,13 @@ func (webFetch) Schema() json.RawMessage {
 
 func (webFetch) ReadOnly() bool { return true }
 
-// ssrfGuardedClient is an HTTP client whose dialer refuses to connect to private,
-// link-local, or unspecified addresses — the SSRF surface a prompt-injected fetch
-// would aim at (cloud metadata at 169.254.169.254, RFC1918 internal services).
-// Loopback is allowed: the agent can already reach localhost via bash, so a local
-// dev server stays fetchable. The check runs at dial time on the resolved IP, so a
-// public host that redirects or DNS-rebinds to an internal address is caught too.
-func ssrfGuardedClient(proxyURL string) *http.Client {
+// ssrfGuardedTransport refuses to connect to private, link-local, or unspecified
+// addresses — the SSRF surface a prompt-injected fetch would aim at (cloud
+// metadata at 169.254.169.254, RFC1918 internal services). Loopback is allowed:
+// the agent can already reach localhost via bash, so a local dev server stays
+// fetchable. The check runs at dial time on the resolved IP, so a public host
+// that redirects or DNS-rebinds to an internal address is caught too.
+func ssrfGuardedTransport(proxyURL string) *http.Transport {
 	dialer := &net.Dialer{Timeout: webFetchTimeout}
 
 	// directDialContext handles SSRF-protected direct connection (no proxy).
@@ -177,9 +176,25 @@ func ssrfGuardedClient(proxyURL string) *http.Client {
 		}
 	}
 
+	return tr
+}
+
+type webFetchRoundTripper struct {
+	proxyURLFor func(*http.Request) (string, error)
+}
+
+func (rt webFetchRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	proxyURL, err := rt.proxyURLFor(req)
+	if err != nil {
+		return nil, fmt.Errorf("resolve proxy: %w", err)
+	}
+	return ssrfGuardedTransport(proxyURL).RoundTrip(req)
+}
+
+func ssrfGuardedClient(proxyURLFor func(*http.Request) (string, error)) *http.Client {
 	return &http.Client{
 		Timeout:   webFetchTimeout,
-		Transport: tr,
+		Transport: webFetchRoundTripper{proxyURLFor: proxyURLFor},
 	}
 }
 
@@ -203,6 +218,21 @@ func blockedFetchIP(ip net.IP) bool {
 		ip.IsLinkLocalMulticast() ||
 		ip.IsUnspecified() || // 0.0.0.0 / ::
 		cgnatRange.Contains(ip) // 100.64.0.0/10 (incl. Alibaba Cloud metadata)
+}
+
+func (wf webFetch) proxyURLFor(req *http.Request) (string, error) {
+	pf, err := netclient.ProxyFunc(wf.proxySpec)
+	if err != nil {
+		return "", err
+	}
+	if pf == nil {
+		return "", nil
+	}
+	u, err := pf(req)
+	if err != nil || u == nil {
+		return "", err
+	}
+	return u.String(), nil
 }
 
 func (wf webFetch) Execute(ctx context.Context, args json.RawMessage) (string, error) {
@@ -231,7 +261,7 @@ func (wf webFetch) Execute(ctx context.Context, args json.RawMessage) (string, e
 	req.Header.Set("User-Agent", "reasonix-web-fetch/1.0")
 	req.Header.Set("Accept", "text/html,text/plain,text/markdown,application/json,*/*;q=0.5")
 
-	resp, err := ssrfGuardedClient(wf.proxyURL).Do(req)
+	resp, err := ssrfGuardedClient(wf.proxyURLFor).Do(req)
 	if err != nil {
 		return "", fmt.Errorf("fetch %s: %w", p.URL, err)
 	}

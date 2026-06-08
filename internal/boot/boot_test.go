@@ -18,6 +18,7 @@ import (
 
 	"reasonix/internal/config"
 	"reasonix/internal/event"
+	"reasonix/internal/netclient"
 	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
 	"reasonix/internal/sandbox"
@@ -216,7 +217,7 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 func TestAddBuiltinsWithWorkspaceRootKeepsSessionTools(t *testing.T) {
 	reg := tool.NewRegistry()
 	var stderr bytes.Buffer
-	addBuiltins(reg, nil, []string{robustTempDir(t)}, sandbox.Spec{}, 120*time.Second, builtin.SearchSpec{}, &stderr, robustTempDir(t), "")
+	addBuiltins(reg, nil, []string{robustTempDir(t)}, sandbox.Spec{}, 120*time.Second, builtin.SearchSpec{}, &stderr, robustTempDir(t), netclient.ProxySpec{})
 	for _, name := range []string{
 		"todo_write",
 		"complete_step",
