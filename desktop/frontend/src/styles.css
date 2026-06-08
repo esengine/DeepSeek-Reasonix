@@ -980,9 +980,11 @@ a[href] {
 .transcript {
   position: relative;
   height: 100%;
-  overflow-y: overlay;
+  overflow-y: auto;
   overflow-x: hidden;
+  scrollbar-gutter: stable;
   padding: 24px 32px 32px;
+  scrollbar-width: thin;
   scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
 }
 .transcript > * {
