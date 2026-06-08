@@ -96,6 +96,7 @@ type SettingsView struct {
 	DesktopTheme      string          `json:"desktopTheme"`
 	DesktopThemeStyle string          `json:"desktopThemeStyle"`
 	CloseBehavior     string          `json:"closeBehavior"`
+	ExpandThinking    bool            `json:"expandThinking"`
 	ConfigPath        string          `json:"configPath"`
 	// ProviderKinds lists the provider implementations the kernel actually
 	// registered (provider.Kinds()), so the editor's "kind" picker offers only
@@ -268,6 +269,7 @@ func (a *App) Settings() SettingsView {
 			DesktopTheme:      "dark",
 			DesktopThemeStyle: "graphite",
 			CloseBehavior:     "background",
+			ExpandThinking:    false,
 		}
 	}
 	ctrl := a.activeCtrl()
@@ -310,6 +312,7 @@ func (a *App) Settings() SettingsView {
 		DesktopTheme:      cfg.DesktopTheme(),
 		DesktopThemeStyle: cfg.DesktopThemeStyle(),
 		CloseBehavior:     cfg.DesktopCloseBehavior(),
+		ExpandThinking:    cfg.Desktop.ExpandThinking,
 		ConfigPath:        cfgPath,
 		ProviderKinds:     nonNil(provider.Kinds()),
 		Bypass:            ctrl != nil && ctrl.Bypass(),
@@ -1083,6 +1086,12 @@ func (a *App) SetTrayLocale(locale string) error {
 // rebuild the active controller and must stay out of provider-visible requests.
 func (a *App) SetDesktopAppearance(theme, style string) error {
 	return a.applyConfigOnly(func(c *config.Config) error { return c.SetDesktopAppearance(theme, style) })
+}
+
+// SetExpandThinking sets whether reasoning text is expanded by default on
+// the desktop. It is desktop-only and does not rebuild the controller.
+func (a *App) SetExpandThinking(on bool) error {
+	return a.applyConfigOnly(func(c *config.Config) error { return c.SetExpandThinking(on) })
 }
 
 // MigrateDesktopPreferences imports old browser-local desktop preferences into

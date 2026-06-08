@@ -238,8 +238,10 @@ export function TurnActions({
 
 export const AssistantMessage = memo(function AssistantMessage({
   item,
+  defaultExpanded = false,
 }: {
   item: AssistantItem;
+  defaultExpanded?: boolean;
 }) {
   const t = useT();
   const hasText = item.streaming || item.text.trim() !== "";
@@ -259,7 +261,7 @@ export const AssistantMessage = memo(function AssistantMessage({
               <span>{item.streaming ? t("msg.thinkingRunning") : t("msg.thinkingDone")}</span>
             </>
           }
-          defaultOpen={item.streaming}
+          defaultOpen={item.streaming || defaultExpanded}
         >
           <div className="reasoning__body">{item.reasoning}</div>
         </ProcessCard>
