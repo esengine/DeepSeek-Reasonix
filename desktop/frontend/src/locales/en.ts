@@ -56,6 +56,21 @@ export const en = {
   "rightDock.workbench": "Right workbench",
   "rightDock.views": "Right workbench views",
   "rightDock.overview": "Overview",
+  "rightDock.closeTab": "Close tab",
+  "rightDock.addTab": "Add tab",
+  "rightDock.browserBack": "Back",
+  "rightDock.browserForward": "Forward",
+  "rightDock.browserReload": "Reload",
+  "rightDock.browserUrlPlaceholder": "Enter URL…",
+  "rightDock.browserOpen": "Open in browser",
+  "rightDock.browserEmpty": "Enter a URL to start browsing",
+  "rightDock.browserGo": "Go",
+  "rightDock.browserOpenExternal": "Open in system browser",
+  "rightDock.browserRefresh": "Refresh",
+  "rightDock.browserStop": "Stop",
+  "rightDock.browserLoading": "Loading…",
+  "rightDock.browserNewTab": "New browser tab",
+  "rightDock.newBrowserTab": "New browser tab",
 
   // topic bar
   "topicBar.renameSession": "Rename session",
@@ -715,6 +730,9 @@ export const en = {
   "settings.language": "Language",
   "settings.langAuto": "Auto (system)",
   "settings.config": "config: {path}",
+  "settings.showTabBar": "Show tab bar",
+  "settings.on": "On",
+  "settings.off": "Off",
 
   // todo bar
   "todo.title": "To-dos",

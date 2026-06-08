@@ -57,6 +57,21 @@ export const zh: Record<DictKey, string> = {
   "rightDock.workbench": "右侧工作台",
   "rightDock.views": "右侧工作台视图",
   "rightDock.overview": "概览",
+  "rightDock.closeTab": "关闭标签页",
+  "rightDock.addTab": "添加标签页",
+  "rightDock.browserBack": "后退",
+  "rightDock.browserForward": "前进",
+  "rightDock.browserReload": "刷新",
+  "rightDock.browserUrlPlaceholder": "输入网址…",
+  "rightDock.browserOpen": "在浏览器中打开",
+  "rightDock.browserEmpty": "输入网址开始浏览",
+  "rightDock.browserGo": "前往",
+  "rightDock.browserOpenExternal": "在系统浏览器中打开",
+  "rightDock.browserRefresh": "刷新",
+  "rightDock.browserStop": "停止",
+  "rightDock.browserLoading": "加载中…",
+  "rightDock.browserNewTab": "新建浏览器标签页",
+  "rightDock.newBrowserTab": "新建浏览器标签页",
 
   // 话题栏
   "topicBar.renameSession": "重命名会话",
@@ -717,6 +732,9 @@ export const zh: Record<DictKey, string> = {
   "settings.language": "语言",
   "settings.langAuto": "自动（跟随系统）",
   "settings.config": "配置文件：{path}",
+  "settings.showTabBar": "显示标签栏",
+  "settings.on": "开",
+  "settings.off": "关",
 
   // 待办栏
   "todo.title": "待办",

@@ -33,6 +33,11 @@ func (a *App) createAppMenu() *menu.Menu {
 	fileMenu.AddText("Quit Reasonix", keys.CmdOrCtrl("q"), func(_ *menu.CallbackData) {
 		a.quitApp()
 	})
+	fileMenu.AddText("Toggle Developer Tools", keys.CmdOrCtrl("i"), func(_ *menu.CallbackData) {
+		if a.ctx != nil {
+			runtime.WindowExecJS(a.ctx, `window.webkit.messageHandlers.external.postMessage("wails:openInspector");`)
+		}
+	})
 	m.Append(menu.EditMenu())
 	m.Append(menu.WindowMenu())
 

@@ -1,6 +1,8 @@
 // Wire contract — mirrors desktop/wire.go (itself mirroring internal/serve/wire.go).
 // One event channel carries every kind; `kind` discriminates the payload.
 
+import type { ComponentType } from "react";
+
 export type EventKind =
   | "turn_started"
   | "reasoning"
@@ -576,4 +578,22 @@ export interface UpdateProgress {
   received: number;
   total: number;
   err?: string;
+}
+
+export type DockTabType = "files" | "changes" | "browser" | "context";
+
+export interface DockTab {
+  id: string;
+  type: DockTabType;
+  title: string;
+  icon: ComponentType<{ size?: number | string }>;
+  closable: boolean;
+  metadata?: Record<string, unknown>;
+}
+
+export interface BrowserTabMeta {
+  url: string;
+  history: string[];
+  historyIndex: number;
+  isLoading: boolean;
 }

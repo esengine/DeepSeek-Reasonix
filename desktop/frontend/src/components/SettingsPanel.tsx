@@ -2324,6 +2324,28 @@ function AppearanceSection({
           ))}
         </div>
       </SettingsField>
+      <SettingsField label={t("settings.showTabBar")}>
+        <div className="set-seg">
+          <button
+            className="set-seg__btn set-seg__btn--on"
+            onClick={() => {
+              try { window.localStorage.setItem("reasonix.desktop.tabBarHidden", ""); } catch {}
+              window.dispatchEvent(new CustomEvent("reasonix:tabbar-visibility-changed"));
+            }}
+          >
+            {t("settings.on")}
+          </button>
+          <button
+            className="set-seg__btn"
+            onClick={() => {
+              try { window.localStorage.setItem("reasonix.desktop.tabBarHidden", "1"); } catch {}
+              window.dispatchEvent(new CustomEvent("reasonix:tabbar-visibility-changed"));
+            }}
+          >
+            {t("settings.off")}
+          </button>
+        </div>
+      </SettingsField>
     </SettingsSection>
   );
 }
