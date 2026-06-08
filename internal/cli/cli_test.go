@@ -49,6 +49,19 @@ func TestChdirTo(t *testing.T) {
 	}
 }
 
+func TestReserveNativeScrollbackFrameWritesOnlyNewlines(t *testing.T) {
+	var b bytes.Buffer
+	reserveNativeScrollbackFrame(&b, 3)
+	if got := b.String(); got != "\n\n\n" {
+		t.Fatalf("reserveNativeScrollbackFrame wrote %q, want only three newlines", got)
+	}
+
+	reserveNativeScrollbackFrame(&b, 0)
+	if got := b.String(); got != "\n\n\n" {
+		t.Fatalf("reserveNativeScrollbackFrame(0) changed output to %q", got)
+	}
+}
+
 func mustGetwd(t *testing.T) string {
 	t.Helper()
 	cwd, err := os.Getwd()

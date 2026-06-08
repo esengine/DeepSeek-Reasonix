@@ -471,9 +471,13 @@ func chatREPL(args []string) int {
 	}
 	m.refreshEffortStatus()
 
-	// No alt-screen: finalized transcript lines are committed to the terminal's
-	// normal buffer (via tea.Println) so native scrollback, the wheel, and copy
-	// all work — the bubbletea-managed region is just the bottom input/status.
+	if m.nativeScrollback {
+		reserveNativeScrollbackFrame(os.Stdout, m.bottomRows())
+	}
+
+	// Non-Termux terminals use an alt-screen transcript viewport. Termux stays
+	// in the normal buffer so native touch scrollback and soft-keyboard focus
+	// keep working; finalized transcript lines are emitted via tea.Println.
 	p := tea.NewProgram(m)
 	final, runErr := p.Run()
 	// Close the active controller plus any retired ones from /model switches.
@@ -498,6 +502,12 @@ func chatREPL(args []string) int {
 		return 1
 	}
 	return 0
+}
+
+func reserveNativeScrollbackFrame(w io.Writer, rows int) {
+	for i := 0; i < rows; i++ {
+		fmt.Fprintln(w)
+	}
 }
 
 // setupTargets is where the wizard writes: the TOML config and the secrets file.

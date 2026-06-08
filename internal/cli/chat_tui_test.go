@@ -24,6 +24,14 @@ import (
 
 type blockingTurnRunner struct{ started chan struct{} }
 
+func TestMain(m *testing.M) {
+	old := detectTermuxTerminal
+	detectTermuxTerminal = func() bool { return false }
+	code := m.Run()
+	detectTermuxTerminal = old
+	os.Exit(code)
+}
+
 func (r *blockingTurnRunner) Run(ctx context.Context, _ string) error {
 	close(r.started)
 	<-ctx.Done()
@@ -95,6 +103,45 @@ func TestTranscriptMirrorsCommits(t *testing.T) {
 		if m.transcript[i] != (*m.pendingCommit)[i] {
 			t.Errorf("line %d mismatch: transcript=%q pendingCommit=%q", i, m.transcript[i], (*m.pendingCommit)[i])
 		}
+	}
+}
+
+func TestTermuxNativeScrollbackCommitsFinalAnswer(t *testing.T) {
+	m := newTestChatTUI()
+	m.nativeScrollback = true
+	m.pending.WriteString("first paragraph\n\nsecond paragraph")
+
+	m.streamAnswer()
+	if len(*m.pendingCommit) != 0 {
+		t.Fatalf("Termux native scrollback should not commit rewritten streaming blocks, got %v", *m.pendingCommit)
+	}
+
+	m.commitPending()
+	if got := strings.Join(*m.pendingCommit, "\n"); !strings.Contains(got, "first paragraph") || !strings.Contains(got, "second paragraph") {
+		t.Fatalf("final answer was not committed to native scrollback: %v", *m.pendingCommit)
+	}
+}
+
+func TestTermuxNativeScrollbackDefaultsToExpandedReasoning(t *testing.T) {
+	old := detectTermuxTerminal
+	detectTermuxTerminal = func() bool { return true }
+	t.Cleanup(func() { detectTermuxTerminal = old })
+
+	ctrl := control.New(control.Options{})
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
+	if !m.nativeScrollback {
+		t.Fatal("Termux should use native scrollback")
+	}
+	if !m.showReasoning {
+		t.Fatal("Termux should expand reasoning by default because live viewport reasoning is unavailable")
+	}
+	m.width = 80
+
+	m.ingestEvent(event.Event{Kind: event.Reasoning, Text: "reasoning details"})
+	m.ingestEvent(event.Event{Kind: event.Text, Text: "answer"})
+	got := strings.Join(*m.pendingCommit, "\n")
+	if !strings.Contains(got, "reasoning details") {
+		t.Fatalf("Termux reasoning was not expanded into native scrollback: %q", got)
 	}
 }
 
@@ -992,24 +1039,36 @@ func TestQueueIndicatorHiddenWhenIdle(t *testing.T) {
 func TestViewAltScreenFillsHeight(t *testing.T) {
 	ctrl := control.New(control.Options{})
 	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
+	m.nativeScrollback = false
 	m0, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	v := m0.(chatTUI).View()
 
 	if !v.AltScreen {
 		t.Error("View must request alt-screen so resize repaints the whole grid")
 	}
-	// In Termux environment, mouse mode is disabled to avoid soft keyboard issues.
-	if isTermuxTerminal() {
-		if v.MouseMode != tea.MouseModeNone {
-			t.Error("View must not enable mouse mode in Termux environment")
-		}
-	} else {
-		if v.MouseMode != tea.MouseModeCellMotion {
-			t.Error("View must enable mouse so the wheel scrolls the transcript")
-		}
+	if v.MouseMode != tea.MouseModeCellMotion {
+		t.Error("View must enable mouse so the wheel scrolls the transcript")
 	}
 	if lines := strings.Count(v.Content, "\n") + 1; lines != 24 {
 		t.Errorf("alt-screen frame = %d lines, want 24 (full terminal height)", lines)
+	}
+}
+
+func TestViewTermuxUsesNativeScrollback(t *testing.T) {
+	ctrl := control.New(control.Options{})
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
+	m.nativeScrollback = true
+	m0, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	v := m0.(chatTUI).View()
+
+	if v.AltScreen {
+		t.Error("Termux view must stay in the normal screen so native touch scrollback works")
+	}
+	if v.MouseMode != tea.MouseModeNone {
+		t.Error("Termux view must not enable mouse mode because it prevents soft-keyboard focus")
+	}
+	if lines := strings.Count(v.Content, "\n") + 1; lines >= 24 {
+		t.Errorf("Termux view should render only the pinned bottom frame, got %d full-screen lines", lines)
 	}
 }
 
