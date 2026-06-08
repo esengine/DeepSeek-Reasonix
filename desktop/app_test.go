@@ -129,6 +129,24 @@ func TestBackgroundCloseHideStrategyByPlatform(t *testing.T) {
 	}
 }
 
+func TestBackgroundRestoreMaximiseStrategy(t *testing.T) {
+	tests := []struct {
+		goos      string
+		maximised bool
+		want      bool
+	}{
+		{goos: "windows", maximised: true, want: true},
+		{goos: "linux", maximised: true, want: true},
+		{goos: "darwin", maximised: true, want: false},
+		{goos: "windows", maximised: false, want: false},
+	}
+	for _, tt := range tests {
+		if got := backgroundRestoreShouldMaximise(tt.goos, tt.maximised); got != tt.want {
+			t.Fatalf("backgroundRestoreShouldMaximise(%q, %v) = %v, want %v", tt.goos, tt.maximised, got, tt.want)
+		}
+	}
+}
+
 func TestEmitReadyInvokesReadyHook(t *testing.T) {
 	app := NewApp()
 	var calls int32
