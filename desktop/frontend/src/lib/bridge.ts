@@ -151,6 +151,7 @@ export interface AppBindings {
   OpenWorkspacePath(rel: string): Promise<void>;
   RevealWorkspacePath(rel: string): Promise<void>;
   RevealPath(path: string): Promise<void>;
+  OpenURL(url: string): Promise<void>;
   SavePastedImage(dataUrl: string): Promise<string>;
   SavePastedFile(name: string, dataUrl: string): Promise<string>;
   AttachDropped(path: string): Promise<DroppedItem>;
@@ -1383,6 +1384,9 @@ function makeMockApp(): AppBindings {
     },
     async RevealPath(path: string) {
       console.info("mock RevealPath", path);
+    },
+    async OpenURL(url: string) {
+      console.info("mock OpenURL", url);
     },
     async SavePastedImage(_dataUrl: string) {
       return ".reasonix/attachments/mock.png";

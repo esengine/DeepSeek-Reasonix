@@ -63,6 +63,7 @@ export const zh: Record<DictKey, string> = {
   "rightDock.browserForward": "前进",
   "rightDock.browserReload": "刷新",
   "rightDock.browserUrlPlaceholder": "输入网址…",
+  "rightDock.browserOpen": "在浏览器打开",
   "rightDock.browserEmpty": "输入网址开始浏览",
   "rightDock.newBrowserTab": "新建浏览器标签页",
 

@@ -3354,6 +3354,18 @@ func (a *App) RevealPath(path string) error {
 	return revealPath(path)
 }
 
+// OpenURL opens the given URL in the system default browser.
+func (a *App) OpenURL(rawURL string) error {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return os.ErrInvalid
+	}
+	if !strings.HasPrefix(rawURL, "http://") && !strings.HasPrefix(rawURL, "https://") {
+		rawURL = "https://" + rawURL
+	}
+	return exec.Command("open", rawURL).Start()
+}
+
 func revealPath(path string) error {
 	switch goruntime.GOOS {
 	case "darwin":

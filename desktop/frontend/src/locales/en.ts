@@ -62,6 +62,7 @@ export const en = {
   "rightDock.browserForward": "Forward",
   "rightDock.browserReload": "Reload",
   "rightDock.browserUrlPlaceholder": "Enter URL…",
+  "rightDock.browserOpen": "Open in browser",
   "rightDock.browserEmpty": "Enter a URL to start browsing",
   "rightDock.newBrowserTab": "New browser tab",
 
