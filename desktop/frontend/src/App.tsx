@@ -6,6 +6,8 @@ import {
   Command,
   Download,
   SquarePen,
+  FileDown,
+  FileImage,
   FileText,
   FileJson,
   GitBranch,
@@ -69,6 +71,7 @@ import {
   type RestorableToolApprovalMode,
 } from "./lib/toolApprovalMode";
 import { loadLayoutSize, saveLayoutSize } from "./lib/layoutPreferences";
+import { blobToBase64, renderSessionImageBlob, renderSessionPdfBlob } from "./lib/sessionExport";
 import {
   applyTheme,
   clearLegacyThemePreference,
@@ -332,19 +335,6 @@ function safeFilename(name: string): string {
   const cleaned = name.trim().replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, " ").slice(0, 80);
   return cleaned || "reasonix-session";
 }
-
-function downloadTextFile(filename: string, text: string, mime: string): void {
-  const blob = new Blob([text], { type: `${mime};charset=utf-8` });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-}
-
 
 /** Global hotkey handler for shell-expand toggle (Ctrl/Cmd+B). */
 function ShellHotkeys() {
@@ -967,11 +957,30 @@ export default function App() {
   }, [topicExportOpen]);
 
   const exportSession = useCallback(
-    (format: "markdown" | "json") => {
+    async (format: "markdown" | "json" | "pdf" | "image") => {
       const base = safeFilename(sessionTitle);
-      if (format === "json") downloadTextFile(`${base}.json`, getSessionJson(), "application/json");
-      else downloadTextFile(`${base}.md`, getSessionMarkdown(), "text/markdown");
       setTopicExportOpen(false);
+      try {
+        if (format === "json") {
+          const path = await app.PickExportFile(`${base}.json`, "application/json");
+          if (path) await app.SaveExportFile(path, getSessionJson(), false);
+        } else if (format === "pdf") {
+          const path = await app.PickExportFile(`${base}.pdf`, "application/pdf");
+          if (!path) return;
+          const blob = await renderSessionPdfBlob(getSessionMarkdown(), sessionTitle);
+          await app.SaveExportFile(path, await blobToBase64(blob), true);
+        } else if (format === "image") {
+          const path = await app.PickExportFile(`${base}.png`, "image/png");
+          if (!path) return;
+          const blob = await renderSessionImageBlob(getSessionMarkdown());
+          await app.SaveExportFile(path, await blobToBase64(blob), true);
+        } else {
+          const path = await app.PickExportFile(`${base}.md`, "text/markdown");
+          if (path) await app.SaveExportFile(path, getSessionMarkdown(), false);
+        }
+      } catch (err) {
+        console.error("Failed to export session", err);
+      }
     },
     [getSessionJson, getSessionMarkdown, sessionTitle],
   );
@@ -1927,13 +1936,21 @@ export default function App() {
                 </Tooltip>
                 {topicExportOpen && (
                   <div className="topicbar__export-menu" role="menu">
-                    <button type="button" role="menuitem" onClick={() => exportSession("markdown")}>
+                    <button type="button" role="menuitem" onClick={() => void exportSession("markdown")}>
                       <FileText size={13} />
                       <span>{t("topicBar.exportMarkdown")}</span>
                     </button>
-                    <button type="button" role="menuitem" onClick={() => exportSession("json")}>
+                    <button type="button" role="menuitem" onClick={() => void exportSession("json")}>
                       <FileJson size={13} />
                       <span>{t("topicBar.exportJson")}</span>
+                    </button>
+                    <button type="button" role="menuitem" onClick={() => void exportSession("pdf")}>
+                      <FileDown size={13} />
+                      <span>{t("topicBar.exportPdf")}</span>
+                    </button>
+                    <button type="button" role="menuitem" onClick={() => void exportSession("image")}>
+                      <FileImage size={13} />
+                      <span>{t("topicBar.exportImage")}</span>
                     </button>
                   </div>
                 )}

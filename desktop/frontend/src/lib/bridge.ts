@@ -172,6 +172,8 @@ export interface AppBindings {
   SavePastedImage(dataUrl: string): Promise<string>;
   SaveClipboardImage(): Promise<string>;
   SavePastedFile(name: string, dataUrl: string): Promise<string>;
+  PickExportFile(defaultFilename: string, mimeType: string): Promise<string>;
+  SaveExportFile(path: string, payload: string, base64Encoded: boolean): Promise<void>;
   AttachDropped(path: string): Promise<DroppedItem>;
   AttachmentDataURL(path: string): Promise<string>;
   Models(): Promise<ModelInfo[]>;
@@ -1773,6 +1775,24 @@ function makeMockApp(): AppBindings {
     },
     async SavePastedFile(name: string, _dataUrl: string) {
       return `.reasonix/attachments/mock-${name}`;
+    },
+    async PickExportFile(defaultFilename: string, _mimeType: string) {
+      return defaultFilename;
+    },
+    async SaveExportFile(path: string, payload: string, base64Encoded: boolean) {
+      const a = document.createElement("a");
+      let url = "";
+      if (base64Encoded) {
+        url = `data:application/octet-stream;base64,${payload}`;
+      } else {
+        url = URL.createObjectURL(new Blob([payload], { type: "text/plain;charset=utf-8" }));
+      }
+      a.href = url;
+      a.download = path;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      if (!base64Encoded) URL.revokeObjectURL(url);
     },
     async AttachDropped(path: string) {
       const name = path.split(/[/\\]/).filter(Boolean).pop() ?? path;

@@ -68,6 +68,8 @@ export const en = {
   "topicBar.export": "Export session",
   "topicBar.exportMarkdown": "Export Markdown",
   "topicBar.exportJson": "Export JSON",
+  "topicBar.exportPdf": "Export PDF",
+  "topicBar.exportImage": "Export Image",
 
   // scope labels
   "scope.global": "Scope: Global",

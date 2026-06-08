@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -3827,6 +3828,77 @@ func (a *App) SavePastedFile(name, dataURL string) (string, error) {
 	return a.withActiveWorkspace(func() (string, error) {
 		return control.SaveAttachmentDataURL(name, dataURL)
 	})
+}
+
+// PickExportFile opens the native save dialog and returns the selected path. It
+// returns "" when the user cancels.
+func (a *App) PickExportFile(defaultFilename, mimeType string) (string, error) {
+	if a.ctx == nil {
+		return "", nil
+	}
+	defaultFilename = safeExportFilename(defaultFilename)
+	ext := strings.ToLower(filepath.Ext(defaultFilename))
+	path, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		Title:                "Export session",
+		DefaultDirectory:     dialogDefaultDirectory(a.activeWorkspaceRoot()),
+		DefaultFilename:      defaultFilename,
+		CanCreateDirectories: true,
+		Filters:              exportFileFilters(mimeType, ext),
+	})
+	if err != nil || path == "" {
+		return "", err
+	}
+	if ext != "" && filepath.Ext(path) == "" {
+		path += ext
+	}
+	return path, nil
+}
+
+// SaveExportFile writes an exported session payload to a path previously picked
+// by PickExportFile. An empty path is treated as a cancelled export.
+func (a *App) SaveExportFile(path, payload string, base64Encoded bool) error {
+	if strings.TrimSpace(path) == "" {
+		return nil
+	}
+	var data []byte
+	var err error
+	if base64Encoded {
+		data, err = base64.StdEncoding.DecodeString(payload)
+		if err != nil {
+			return fmt.Errorf("decode export payload: %w", err)
+		}
+	} else {
+		data = []byte(payload)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return err
+	}
+	return nil
+}
+
+func safeExportFilename(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "reasonix-session.md"
+	}
+	return filepath.Base(name)
+}
+
+func exportFileFilters(mimeType, ext string) []runtime.FileFilter {
+	switch mimeType {
+	case "text/markdown":
+		return []runtime.FileFilter{{DisplayName: "Markdown (*.md)", Pattern: "*.md"}}
+	case "application/json":
+		return []runtime.FileFilter{{DisplayName: "JSON (*.json)", Pattern: "*.json"}}
+	case "application/pdf":
+		return []runtime.FileFilter{{DisplayName: "PDF (*.pdf)", Pattern: "*.pdf"}}
+	case "image/png":
+		return []runtime.FileFilter{{DisplayName: "PNG image (*.png)", Pattern: "*.png"}}
+	}
+	if ext != "" {
+		return []runtime.FileFilter{{DisplayName: strings.ToUpper(strings.TrimPrefix(ext, ".")) + " files (*" + ext + ")", Pattern: "*" + ext}}
+	}
+	return []runtime.FileFilter{{DisplayName: "All files (*.*)", Pattern: "*.*"}}
 }
 
 // AttachmentDataURL returns a safe data URL for a stored image attachment.
