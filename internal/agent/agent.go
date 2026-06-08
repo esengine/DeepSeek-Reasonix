@@ -638,16 +638,16 @@ func finalAnswerConfusesExecutorWithPlanner(text string) bool {
 	if s == "" {
 		return false
 	}
+	// Role-identity phrases only. Bare permission claims ("no write access",
+	// "没有写入权限") are excluded — a correctly-executing model uses that exact
+	// vocabulary to report a genuine blocker, which is the desired behavior.
 	patterns := []string{
 		"我是 planner",
 		"我是planner",
 		"我是规划器",
 		"我只是 planner",
 		"我只是planner",
-		"我只能读不能写",
 		"只有只读工具",
-		"没有写入权限",
-		"没有执行权限",
 		"交给 executor",
 		"触发 executor",
 		"如何触发 executor",
@@ -659,9 +659,6 @@ func finalAnswerConfusesExecutorWithPlanner(text string) bool {
 		"as the planner",
 		"only have read-only tools",
 		"read-only tools only",
-		"cannot write",
-		"can't write",
-		"no write access",
 		"hand off to executor",
 		"handoff to executor",
 		"trigger the executor",

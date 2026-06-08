@@ -329,3 +329,26 @@ func BenchmarkPlannerToolRegistry(b *testing.B) {
 		}
 	}
 }
+
+func TestHandoffConfusionDetectionExcludesLegitBlockers(t *testing.T) {
+	confused := []string{
+		"我是 Planner，只有只读工具，需要交给 Executor 执行。",
+		"As the planner I only have read-only tools, hand off to executor.",
+	}
+	legit := []string{
+		"I cannot write to /etc/hosts because it is outside the writable workspace. Please grant access.",
+		"我没有写入权限去修改 /etc/hosts，该路径在工作区之外，请提供工作区内的路径。",
+		"The deploy step failed: no write access to the production bucket.",
+		"Done. I edited main.go and added the missing return.",
+	}
+	for _, s := range confused {
+		if !finalAnswerConfusesExecutorWithPlanner(s) {
+			t.Errorf("want confusion=true for %q", s)
+		}
+	}
+	for _, s := range legit {
+		if finalAnswerConfusesExecutorWithPlanner(s) {
+			t.Errorf("want confusion=false for %q", s)
+		}
+	}
+}
