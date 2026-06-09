@@ -7,7 +7,6 @@ import type {
   PointerEvent as ReactPointerEvent,
 } from "react";
 import {
-  Check,
   ChevronDown,
   ChevronRight,
   FileText,
@@ -243,12 +242,7 @@ export function WorkspacePanel({
   const [treeResizing, setTreeResizing] = useState(false);
   const [recentOpen, setRecentOpen] = useState(false);
   const recentAnchorRef = useRef<HTMLButtonElement>(null);
-  const [gitBranch, setGitBranch] = useState("");
   const changesRequestRef = useRef(0);
-  const [branchMenuOpen, setBranchMenuOpen] = useState(false);
-  const [branchList, setBranchList] = useState<string[]>([]);
-  const [switchingBranch, setSwitchingBranch] = useState(false);
-  const branchBtnRef = useRef<HTMLButtonElement>(null);
   const openDirsRef = useRef(openDirs);
 
   // "changes" 模式只显示 git diff 文件（通过 loadChanges），不加载完整目录树
@@ -261,25 +255,6 @@ export function WorkspacePanel({
   const loadDir = useCallback(async (dir: string) => {
     const entries = await app.ListDir(dir).catch(() => []);
     setEntriesByDir((prev) => ({ ...prev, [dir]: entries ?? [] }));
-  }, []);
-
-  const openBranchMenu = useCallback(async () => {
-    try {
-      const branches = await app.GitBranches();
-      setBranchList(branches);
-    } catch {
-      setBranchList([]);
-    }
-    setBranchMenuOpen((prev) => !prev);
-  }, []);
-
-  const fetchGitBranch = useCallback(async () => {
-    try {
-      const wc = await app.WorkspaceChanges();
-      if (wc.gitBranch) setGitBranch(wc.gitBranch);
-    } catch {
-      // git not available
-    }
   }, []);
 
   const loadChanges = useCallback(async () => {
@@ -297,23 +272,6 @@ export function WorkspacePanel({
       if (changesRequestRef.current === requestId) setLoadingChanges(false);
     }
   }, []);
-
-  const switchBranch = useCallback(
-    async (branch: string) => {
-      if (branch === gitBranch) return;
-      setSwitchingBranch(true);
-      try {
-        await app.GitCheckout(branch);
-        setGitBranch(branch);
-        // 「改动视图」只展示有改动的文件，无需刷新完整目录树
-        await loadChanges();
-      } catch {
-        // Error shown via the changes view
-      } finally {
-        setSwitchingBranch(false);
-        setBranchMenuOpen(false);
-      }
-    }, [gitBranch, loadChanges]);
 
   const selectFile = useCallback(
     (path: string) => {
@@ -357,9 +315,8 @@ export function WorkspacePanel({
     if (!open) return;
     if (viewMode === "changed") {
       void loadChanges();
-      void fetchGitBranch();
     }
-  }, [open, viewMode, loadChanges, fetchGitBranch]);
+  }, [open, viewMode, loadChanges]);
 
   useEffect(() => {
     if (!open || !refreshKey) return;
@@ -985,53 +942,19 @@ export function WorkspacePanel({
           </div>
         )}
 
-        {effectiveMode === "changes" && changes?.gitBranch && (
-          <div className="workspace-branch-indicator">
-            <GitBranch size={13} />
-            <button
-              ref={branchBtnRef}
-              className="workspace-branch-name"
-              onClick={openBranchMenu}
-            >
-              <span>{changes.gitBranch}</span>
-              <ChevronDown size={11} />
-            </button>
-            <AnchoredPopover
-              open={branchMenuOpen}
-              anchorRef={branchBtnRef}
-              onClose={() => setBranchMenuOpen(false)}
-              className="workspace-branch-menu"
-              placement="bottom"
-              align="start"
-              offset={4}
-            >
-              <div className="workspace-branch-menu__inner">
-                {branchList.length === 0 ? (
-                  <div className="workspace-branch-menu__loading">{t("workspace.loading")}</div>
-                ) : (
-                  branchList.map((b) => (
-                    <button
-                      key={b}
-                      type="button"
-                      className={`workspace-branch-menu__item${b === changes.gitBranch ? " workspace-branch-menu__item--active" : ""}`}
-                      onClick={() => switchBranch(b)}
-                      disabled={switchingBranch}
-                    >
-                      {b === changes.gitBranch && <Check size={13} />}
-                      <span>{b}</span>
-                    </button>
-                  ))
-                )}
-              </div>
-            </AnchoredPopover>
-            <button
-              className="workspace-branch-refresh"
-              onClick={loadChanges}
-              disabled={loadingChanges}
-              title={t("workspace.refreshChanges")}
-            >
-              <RefreshCw size={12} className={loadingChanges ? "spinning" : ""} />
-            </button>
+        {effectiveMode === "changes" && changes && changes.files.length > 0 && (
+          <div className="workspace-changes-summary">
+            {changes.files.length} {changes.files.length === 1 ? "file" : "files"}
+            {(() => {
+              const onlySession = changes.files.filter((f) => f.sources.length === 1 && f.sources[0] === "session").length;
+              const onlyGit = changes.files.filter((f) => f.sources.length === 1 && f.sources[0] === "git").length;
+              const both = changes.files.length - onlySession - onlyGit;
+              const parts: string[] = [];
+              if (both > 0) parts.push(`${both} session+git`);
+              if (onlyGit > 0) parts.push(`${onlyGit} git`);
+              if (onlySession > 0) parts.push(`${onlySession} session`);
+              return parts.length > 0 ? <span className="workspace-changes-summary__detail"> · {parts.join(" · ")}</span> : null;
+            })()}
           </div>
         )}
 

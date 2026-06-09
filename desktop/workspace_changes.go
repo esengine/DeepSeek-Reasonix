@@ -215,6 +215,26 @@ func (a *App) GitCheckout(branch string) error {
 	return nil
 }
 
+// GitDiscardFile discards unstaged changes to a file in the active workspace
+// by running `git checkout -- <file>`. An error is returned when the file is
+// not tracked or git is unavailable.
+func (a *App) GitDiscardFile(path string) error {
+	base, err := a.activeWorkspaceBase()
+	if err != nil {
+		return err
+	}
+	cmd := exec.Command("git", "-C", base, "checkout", "--", path)
+	proc.HideWindowDetached(cmd)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		if len(out) > 0 {
+			return fmt.Errorf("git checkout: %s", strings.TrimSpace(string(out)))
+		}
+		return err
+	}
+	return nil
+}
+
 func normalizeWorkspaceRelPath(base, path string) string {
 	path = strings.TrimSpace(path)
 	if path == "" {

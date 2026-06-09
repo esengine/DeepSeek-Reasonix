@@ -146,6 +146,7 @@ export interface AppBindings {
   WorkspaceChanges(): Promise<WorkspaceChangesView>;
   GitBranches(): Promise<string[]>;
   GitCheckout(branch: string): Promise<void>;
+  GitDiscardFile(path: string): Promise<void>;
   WorkspaceGitHistory(path: string): Promise<GitCommitView[]>;
   WorkspaceGitCommitDetail(hash: string, path: string): Promise<GitCommitDetailView>;
   OpenWorkspacePath(rel: string): Promise<void>;
@@ -1380,6 +1381,9 @@ function makeMockApp(): AppBindings {
     },
     async GitCheckout(_branch: string) {
       console.info("mock GitCheckout", _branch);
+    },
+    async GitDiscardFile(path: string) {
+      console.info("mock GitDiscardFile", path);
     },
     async WorkspaceGitHistory(path: string) {
       return [
