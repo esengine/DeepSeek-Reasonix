@@ -1827,7 +1827,8 @@ export function Composer({
           open={inputMenuPoint !== null}
           point={inputMenuPoint}
           items={inputMenuItems}
-          minWidth={112}
+          className="context-menu--composer-input"
+          minWidth={64}
           ariaLabel={t("composer.inputActions")}
           onClose={() => setInputMenuPoint(null)}
         />
