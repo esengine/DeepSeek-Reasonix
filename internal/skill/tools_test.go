@@ -209,3 +209,30 @@ func TestInstallSkill(t *testing.T) {
 		t.Error("install_skill should require a description")
 	}
 }
+
+func TestReadSkillLoadsInlineAndIsReadOnly(t *testing.T) {
+	home := t.TempDir()
+	writeSkill(t, home, ".reasonix/skills/note.md", "---\ndescription: take a note\n---\nDo the thing.")
+	tl := NewReadSkillTool(New(Options{HomeDir: home, DisableBuiltins: true}))
+
+	if !tl.ReadOnly() {
+		t.Fatal("read_skill must be ReadOnly so it works in plan mode")
+	}
+	out, err := tl.Execute(context.Background(), json.RawMessage(`{"name":"note","arguments":"with args"}`))
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if !strings.Contains(out, "Do the thing.") || !strings.Contains(out, "Arguments: with args") {
+		t.Errorf("inline body/args missing:\n%s", out)
+	}
+}
+
+func TestReadSkillRejectsSubagent(t *testing.T) {
+	home := t.TempDir()
+	writeSkill(t, home, ".reasonix/skills/dig.md", "---\ndescription: dig\nrunAs: subagent\n---\nbody")
+	tl := NewReadSkillTool(New(Options{HomeDir: home, DisableBuiltins: true}))
+
+	if _, err := tl.Execute(context.Background(), json.RawMessage(`{"name":"dig"}`)); err == nil || !strings.Contains(err.Error(), "run_skill") {
+		t.Fatalf("read_skill on a subagent skill should point to run_skill, got %v", err)
+	}
+}
