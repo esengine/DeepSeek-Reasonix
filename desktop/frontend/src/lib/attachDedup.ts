@@ -58,6 +58,11 @@ export class DedupIndex {
     this.paths.add(path);
   }
 
+  forget(hash: string, path: string): void {
+    if (hash) this.hashes.delete(hash);
+    this.paths.delete(path);
+  }
+
   clear(): void {
     this.hashes.clear();
     this.paths.clear();

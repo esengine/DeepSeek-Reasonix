@@ -459,7 +459,7 @@ func TestApplyMCPModeRecordsCodegraphConnectFailure(t *testing.T) {
 	t.Setenv("REASONIX_CACHE_DIR", t.TempDir())
 	cfg := config.Default()
 	cfg.Codegraph.Enabled = false
-	cfg.Codegraph.Tier = "lazy"
+	cfg.Codegraph.Tier = "eager"
 	if err := cfg.SaveTo("reasonix.toml"); err != nil {
 		t.Fatalf("save config: %v", err)
 	}
@@ -472,11 +472,11 @@ func TestApplyMCPModeRecordsCodegraphConnectFailure(t *testing.T) {
 		stage: mcpStageMode,
 		name:  "codegraph",
 		snapshot: mcpSnapshot{configPath: "reasonix.toml", servers: []mcpServerView{{
-			Name: "codegraph", Transport: "stdio", Status: "disabled", BuiltIn: true, Configured: true, Tier: "lazy",
+			Name: "codegraph", Transport: "stdio", Status: "disabled", BuiltIn: true, Configured: true, Tier: "background",
 		}}},
 	}
 
-	_, _ = m.applyMCPMode("background")
+	_, _ = m.applyMCPMode("eager")
 
 	failures := m.ctrl.Host().Failures()
 	if len(failures) != 1 || failures[0].Name != "codegraph" {

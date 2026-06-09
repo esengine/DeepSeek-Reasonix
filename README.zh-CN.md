@@ -68,6 +68,11 @@ brew install esengine/reasonix/reasonix   # macOS
 预编译归档(`darwin|linux|windows × amd64|arm64`)和 `SHA256SUMS` 见每个
 [GitHub release](https://github.com/esengine/DeepSeek-Reasonix/releases)。
 
+### 代码签名
+
+Windows 构建使用 [SignPath 基金会](https://signpath.org/) 提供的免费代码签名证书,
+通过 [SignPath.io](https://signpath.io/) 完成签名。
+
 ### 从源码构建
 
 ```sh
@@ -96,6 +101,8 @@ default_model = "deepseek-flash"   # 执行器；设 [agent].planner_model 可�
 # language    = "zh"               # 界面语言；为空则按 $LANG / $REASONIX_LANG 自动检测
 
 [agent]
+max_steps = 0                    # 执行器工具调用轮数；0 表示不限
+planner_max_steps = 12           # 规划器只读工具调用轮数；0 表示不限
 # planner_model = "mimo-pro"          # 可选的低频规划器
 # subagent_model = "deepseek-pro"     # runAs=subagent skill 的默认模型
 # subagent_models = { review = "deepseek-pro", security_review = "deepseek-pro" }
@@ -121,8 +128,8 @@ bash_timeout_seconds = 120   # 前台安全上限；设为 0 表示不设工具�
 
 [permissions]
 mode  = "ask"                                # 无规则命中时 writer 的兜底：ask|allow|deny
-deny  = ["bash(rm -rf*)", "bash(git push*)"] # 任何模式下都硬阻断
-allow = ["bash(go test*)"]                   # 从不询问
+deny  = ["Bash(rm -rf*)", "Bash(git push*)"] # 任何模式下都硬阻断
+allow = ["Bash(go test:*)"]                  # 从不询问
 
 [sandbox]
 # workspace_root = ""          # 文件写工具被限制在此目录；留空 = 当前目录
@@ -133,8 +140,11 @@ name    = "example"
 command = "reasonix-plugin-example"
 ```
 
-权限逐次调用把关：`deny` > `ask` > `allow` > 兜底（只读工具永远 allow，writer 落到
-`mode`）。`reasonix chat` 会在 writer 调用前征求同意（`1` 本次 · `2` 本会话 · `3` 拒绝，兼容 `y/a/n`）；
+权限逐次调用把关：`deny` > `ask` > `allow` > 兜底。Bash 和文件修改都要审核；
+只读工具一般不需要。审核规则不是按“按钮文案”存，而是按权限规则匹配，比如
+`Bash(npm run build)`、`Bash(npm run test:*)`、`Edit(docs/**)` 这种形式。
+`reasonix chat` 会在 writer 调用前征求同意（普通工具为 `1` 本次 · `2` 本会话允许此范围 · `3` 总是允许此范围（保存） · `4` 拒绝；Bash 可额外选择命令前缀授权）；
+其中 Bash 默认按具体命令记，也可按安全推导出的命令前缀记（如 `Bash(go test:*)`）；文件编辑类工具的本会话授权按编辑能力记，持久授权则写入 `Edit(<path>)` 文件路径规则；
 `reasonix run` 保持自主运行但仍然遵守 `deny`。完整 schema 与契约见
 [`docs/SPEC.md`](docs/SPEC.md)。
 
@@ -190,7 +200,8 @@ headers = { Authorization = "Bearer ${STRIPE_KEY}" }
 
 ### 斜杠命令
 
-`reasonix chat` 里,内置命令(`/compact`、`/new`、`/rewind`、`/tree`、`/branch`、`/switch`、`/todo`、`/model`、`/effort`、`/mcp`、`/help`)在本地执行。
+`reasonix chat` 里,内置命令(`/compact`、`/new`（`/clear`）、`/rewind`、`/tree`、`/branch`、`/switch`、`/todo`、`/model`、`/effort`、`/mcp`、`/help`)在本地执行。
+`/new` 会开启干净的模型上下文,同时保存之前的 transcript 供历史记录和恢复使用;`/clear` 是兼容 Claude Code 习惯的同义命令。
 `/tree` 查看已保存的对话分支,`/branch [name]` 从当前对话末端分支,`/branch <turn> [name]`
 从较早的 checkpoint 轮次分支,`/switch <id|name>` 切换到另一个分支。**自定义命令**
 是放在 `.reasonix/commands/`(项目)或 `~/.config/reasonix/commands/`(用户)下的 Markdown 文件——
@@ -224,10 +235,15 @@ session），向导后手动在 `reasonix.toml` 加一行即可：
 ```toml
 [agent]
 planner_model = "deepseek-pro"   # 作为低频规划器
+planner_max_steps = 12           # 暂停前允许的只读工具调用轮数
 ```
 
 Planner 会看到已加载的 `REASONIX.md` / `AGENTS.md` 记忆，并拿到一小组只读研究工具，
 因此可以先检查相关文件再把计划交给执行器。写入类和流程类工具仍只给执行器使用。
+`max_steps` 限制执行器；`planner_max_steps` 只限制规划器，两者都可设为 `0` 表示不限。
+
+个人偏好的轮数上限建议放在用户级配置。只有当某个仓库确实需要团队共享覆盖时，
+再写进项目的 `./reasonix.toml`，例如超大代码库需要更高的 planner 上限。
 
 Subagent skills 默认继承执行器模型。设置 `subagent_model` 可让它们统一走另一个已配置
 模型；设置 `subagent_models` 则只覆盖 `review`、`security_review` 等指定 skill。

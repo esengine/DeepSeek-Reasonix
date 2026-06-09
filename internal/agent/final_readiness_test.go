@@ -38,7 +38,7 @@ func TestFinalReadinessFailureBranches(t *testing.T) {
 		{"writer without checks or todo never gates", nil, readinessLedger(writer), true, ""},
 		{"missing project check after writer is reported", []instruction.VerifyCheck{check}, readinessLedger(checkAfter, writer), false, "go test ./..."},
 		{"project check run after writer satisfies", []instruction.VerifyCheck{check}, readinessLedger(writer, checkAfter), true, ""},
-		{"todo writer without complete_step is reported", nil, readinessLedger(writer, todo), false, "complete_step"},
+		{"todo writer without complete_step is reported", nil, readinessLedger(writer, todo), false, "incomplete items"},
 		{"complete_step without final todo update is reported", nil, readinessLedger(writer, todo, completeAfter), false, "latest successful todo_write"},
 		{"todo writer with complete_step and completed todo satisfies", nil, readinessLedger(writer, todo, completeAfter, doneTodo), true, ""},
 	}

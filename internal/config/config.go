@@ -211,9 +211,8 @@ type StatuslineConfig struct {
 // enabled but missing; set false to require an explicit `reasonix codegraph
 // install` (e.g. for air-gapped or headless runs). Path overrides binary
 // resolution; empty resolves the cache, then a `codegraph` on PATH, then a
-// bundle beside the executable. Tier matches ordinary MCP servers (lazy,
-// background, eager); when unset it preserves the historical warm→eager /
-// cold→background startup.
+// bundle beside the executable. CodeGraph always starts in the background when
+// enabled; legacy tier values are ignored and removed during config load.
 type CodegraphConfig struct {
 	Enabled     bool   `toml:"enabled"`
 	AutoInstall bool   `toml:"auto_install"`
@@ -226,12 +225,11 @@ func (c CodegraphConfig) ShouldAutoStart() bool {
 }
 
 func (c CodegraphConfig) ResolvedTier() string {
-	return resolvedMCPTier(c.Tier)
+	return "background"
 }
 
-// NetworkConfig controls ordinary outbound HTTP traffic such as model providers,
-// wallet-balance lookups, updater checks, and CodeGraph downloads. It intentionally
-// does not apply to web_fetch, which keeps its own SSRF-guarded dialer.
+// NetworkConfig controls outbound HTTP proxy settings. web_fetch reuses these
+// proxy settings while keeping its own SSRF-guarded dialer.
 type NetworkConfig struct {
 	// ProxyMode is "auto" (default; environment proxy for now), "env", "custom",
 	// or "off". auto leaves room for OS proxy detection later without changing the
@@ -458,7 +456,8 @@ func (c *Config) BashMode() string {
 type AgentConfig struct {
 	SystemPrompt     string            `toml:"system_prompt"`
 	SystemPromptFile string            `toml:"system_prompt_file"`
-	MaxSteps         int               `toml:"max_steps"` // tool-call rounds per turn; 0 = unlimited
+	MaxSteps         int               `toml:"max_steps"`         // tool-call rounds per turn; 0 = unlimited
+	PlannerMaxSteps  int               `toml:"planner_max_steps"` // planner read-only tool-call rounds; 0 = unlimited
 	Temperature      float64           `toml:"temperature"`
 	PlannerModel     string            `toml:"planner_model"`
 	SubagentModel    string            `toml:"subagent_model"`
@@ -533,6 +532,74 @@ func (e *ProviderEntry) ModelList() []string {
 		return []string{e.Model}
 	}
 	return nil
+}
+
+// IsLikelyChatModel reports whether a model ID looks like a chat/completion
+// model rather than a specialised audio/vision/embedding model. It applies a
+// conservative name-based heuristic — the OpenAI-compatible /models API does
+// not return capability/modality metadata, so this is the most reliable
+// fallback until providers add such fields.
+//
+// The heuristic works in two passes:
+//  1. Multi-word substring check for compound terms that span separators
+//     (e.g. "text-embedding", "text-to-speech").
+//  2. Token-level check: the model ID is split on common separators (- _ . / :)
+//     and each token is compared against a set of known non-chat keywords.
+//
+// "voice" is intentionally absent from the non-chat set because it is too
+// broad — legitimate future chat models may include it in their name.
+func IsLikelyChatModel(model string) bool {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return false
+	}
+	lower := strings.ToLower(model)
+
+	// Pass 1: compound terms that span separator boundaries.
+	var compoundNonChat = []string{
+		"text-embedding", "text-to-speech", "speech-to-text",
+	}
+	for _, c := range compoundNonChat {
+		if strings.Contains(lower, c) {
+			return false
+		}
+	}
+
+	// Pass 2: token-level check.
+	tokens := strings.FieldsFunc(lower, func(r rune) bool {
+		return r == '-' || r == '_' || r == '.' || r == '/' || r == ':'
+	})
+	var nonChatTokens = map[string]bool{
+		"asr": true, "stt": true, "tts": true,
+		"whisper": true, "embedding": true,
+		"moderation": true, "rerank": true, "dall": true,
+		"transcription": true,
+	}
+	for _, tok := range tokens {
+		if nonChatTokens[tok] {
+			return false
+		}
+	}
+	return true
+}
+
+// ChatModelList returns ModelList filtered to likely chat/completion models.
+// Non-chat models (TTS, STT, ASR, embedding, etc.) are excluded so they do
+// not appear in the chat model picker. Use ModelList() only when the full
+// raw provider model list is needed, such as config serialization, provider
+// diagnostics, or model-fetch editing.
+func (e *ProviderEntry) ChatModelList() []string {
+	raw := e.ModelList()
+	if len(raw) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(raw))
+	for _, m := range raw {
+		if IsLikelyChatModel(m) {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 // DefaultModel returns the provider's default model: the explicit `default`, else
@@ -706,6 +773,7 @@ func Default() *Config {
 			// compaction, not by a round count. Set a positive agent.max_steps only
 			// if you want a hard guard against runaway.
 			MaxSteps:          0,
+			PlannerMaxSteps:   12,
 			AutoPlan:          "off",
 			SoftCompactRatio:  0.5,
 			CompactRatio:      0.8,

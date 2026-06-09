@@ -165,7 +165,10 @@ func TestSaveTabsPersistsModelAndEffort(t *testing.T) {
 	}
 }
 
-func TestSaveTabsDoesNotPersistYoloMode(t *testing.T) {
+// TestSaveTabsPersistsYoloMode is the regression for #3517: yolo used to be
+// dropped on save, so relaunching reverted to normal. It now round-trips through
+// the real saveTabsLocked/loadTabsFile path.
+func TestSaveTabsPersistsYoloMode(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
 	app := NewApp()
@@ -184,8 +187,8 @@ func TestSaveTabsDoesNotPersistYoloMode(t *testing.T) {
 	if len(got.Tabs) != 1 {
 		t.Fatalf("tabs len = %d, want 1", len(got.Tabs))
 	}
-	if got.Tabs[0].Mode != "" {
-		t.Fatalf("saved yolo mode = %q, want empty", got.Tabs[0].Mode)
+	if got.Tabs[0].Mode != "yolo" {
+		t.Fatalf("saved yolo mode = %q, want yolo (#3517)", got.Tabs[0].Mode)
 	}
 }
 

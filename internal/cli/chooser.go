@@ -157,10 +157,10 @@ func (m chatTUI) chooserActivate(row int) (tea.Model, tea.Cmd) {
 	switch {
 	case row < len(q.Options):
 		if q.Multi {
-			c.sel[c.tab][row] = !c.sel[c.tab][row]
-			c.custom[c.tab] = ""
-			c.cursor = row
-			return m, nil
+			// Space toggles; Enter confirms current selections and advances.
+			// (Toggling is handled in handleChooserKey; we only arrive here
+			// via Enter or number keys, both of which should commit.)
+			return m.chooserAdvance()
 		}
 		c.sel[c.tab] = map[int]bool{row: true}
 		c.custom[c.tab] = ""

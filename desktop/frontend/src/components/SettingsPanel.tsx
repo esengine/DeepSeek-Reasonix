@@ -3,6 +3,7 @@ import { Check, ChevronDown } from "lucide-react";
 import { asArray } from "../lib/array";
 import { app } from "../lib/bridge";
 import { normalizeLangPref, useI18n, useT, type DictKey, type LangPref } from "../lib/i18n";
+import { mergedFetchedProviderModels, providerDefaultModel } from "../lib/providerModels";
 import { useUpdater } from "../lib/useUpdater";
 import {
   THEME_STYLES,
@@ -400,7 +401,9 @@ function normalizeSettingsView(view: SettingsView | null | undefined): SettingsV
     noProxy: "",
     proxy: { type: "socks5", server: "", port: 0, username: "", password: "" },
   };
-  const agent = view.agent ?? { temperature: 0, maxSteps: 0, systemPrompt: "" };
+  const agent = view.agent ?? { temperature: 0, maxSteps: 0, plannerMaxSteps: 12, systemPrompt: "" };
+  agent.plannerMaxSteps = Number.isFinite(agent.plannerMaxSteps) ? Math.max(0, Math.trunc(agent.plannerMaxSteps)) : 12;
+  agent.maxSteps = Number.isFinite(agent.maxSteps) ? Math.max(0, Math.trunc(agent.maxSteps)) : 0;
   return {
     ...view,
     providers: asArray(view.providers).map((p) => ({
@@ -529,6 +532,80 @@ function GeneralSection({ s, busy, apply }: SectionProps) {
       </SettingsField>
     </SettingsSection>
   );
+}
+
+function StepLimitControl({
+  value,
+  presets,
+  busy,
+  onChange,
+}: {
+  value: number;
+  presets: number[];
+  busy: boolean;
+  onChange: (value: number) => void;
+}) {
+  const t = useT();
+  const normalized = normalizeStepLimit(value);
+  const presetSet = new Set(presets.map(normalizeStepLimit));
+  const [custom, setCustom] = useState(String(normalized));
+  useEffect(() => setCustom(String(normalized)), [normalized]);
+  const isCustom = !presetSet.has(normalized);
+  const commitCustom = () => {
+    const next = normalizeStepLimit(Number(custom));
+    setCustom(String(next));
+    if (next !== normalized) onChange(next);
+  };
+  return (
+    <div className="step-limit-control">
+      <div className="set-seg">
+        {presets.map((preset) => {
+          const n = normalizeStepLimit(preset);
+          return (
+            <button
+              key={n}
+              type="button"
+              className={`set-seg__btn${normalized === n ? " set-seg__btn--on" : ""}`}
+              disabled={busy}
+              onClick={() => n !== normalized && onChange(n)}
+            >
+              {stepLimitLabel(n, t)}
+            </button>
+          );
+        })}
+        <button
+          type="button"
+          className={`set-seg__btn${isCustom ? " set-seg__btn--on" : ""}`}
+          disabled={busy}
+          onClick={() => {
+            if (!isCustom) setCustom(String(normalized || 12));
+          }}
+        >
+          {t("settings.stepLimit.custom")}
+        </button>
+      </div>
+      <input
+        className="mem-input step-limit-control__custom"
+        value={custom}
+        disabled={busy}
+        inputMode="numeric"
+        aria-label={t("settings.stepLimit.custom")}
+        onChange={(e) => setCustom(e.target.value.replace(/[^\d]/g, ""))}
+        onBlur={commitCustom}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") e.currentTarget.blur();
+        }}
+      />
+    </div>
+  );
+}
+
+function normalizeStepLimit(value: number): number {
+  return Number.isFinite(value) && value > 0 ? Math.trunc(value) : 0;
+}
+
+function stepLimitLabel(value: number, t: ReturnType<typeof useT>): string {
+  return value === 0 ? t("settings.stepLimit.unlimited") : String(value);
 }
 
 function NetworkSection({ s, busy, apply }: SectionProps) {
@@ -662,6 +739,10 @@ function ModelsSection({ s, busy, apply, backgroundApply }: ModelsSectionProps) 
   const providerLabel = defaultProvider ? modelProviderLabel(defaultProvider, defaultProviderView, t) : t("common.none");
   const plannerLabel = plannerSelectRef || t("settings.plannerNone");
   const keyStatusLabel = defaultProviderView?.keySet ? t("settings.keySet") : t("settings.noKey");
+  const agent = s.agent ?? { temperature: 0, maxSteps: 0, plannerMaxSteps: 12, systemPrompt: "" };
+  const setAgentSteps = (maxSteps: number, plannerMaxSteps: number) => (
+    app.SetAgentParams(agent.temperature, maxSteps, plannerMaxSteps, agent.systemPrompt)
+  );
 
   useEffect(() => {
     if (subtab !== "usage") return;
@@ -681,9 +762,10 @@ function ModelsSection({ s, busy, apply, backgroundApply }: ModelsSectionProps) 
         try {
           const fetched = await app.FetchProviderModels(provider);
           if (fetched.length === 0) continue;
-          const currentDefault = provider.default && fetched.includes(provider.default) ? provider.default : fetched[0];
-          if (sameStringList(provider.models, fetched) && provider.default === currentDefault) continue;
-          await app.SaveProvider({ ...provider, models: fetched, default: currentDefault });
+          const models = mergedFetchedProviderModels(provider.models, fetched, { preserveCurated: true });
+          const currentDefault = providerDefaultModel(provider.default, models);
+          if (sameStringList(provider.models, models) && provider.default === currentDefault) continue;
+          await app.SaveProvider({ ...provider, models, default: currentDefault });
         } catch {
           // Background discovery is opportunistic; manual refresh shows errors.
         }
@@ -713,68 +795,88 @@ function ModelsSection({ s, busy, apply, backgroundApply }: ModelsSectionProps) 
       </div>
 
       {subtab === "usage" ? (
-        <SettingsSection title={t("settings.modelUsage")}>
-          <SettingsField label={t("settings.defaultModel")}>
-            <ModelPicker
-              s={s}
-              refs={refs}
-              value={toRef(s.defaultModel, s)}
-              disabled={busy}
-              onPick={(ref) => void apply(() => app.SetDefaultModel(ref))}
-            />
-          </SettingsField>
+        <>
+          <SettingsSection title={t("settings.modelUsage")}>
+            <SettingsField label={t("settings.defaultModel")}>
+              <ModelPicker
+                s={s}
+                refs={refs}
+                value={toRef(s.defaultModel, s)}
+                disabled={busy}
+                onPick={(ref) => void apply(() => app.SetDefaultModel(ref))}
+              />
+            </SettingsField>
 
-          <SettingsField label={t("settings.plannerModel")}>
-            <ModelPicker
-              s={s}
-              refs={refs}
-              value={plannerSelectRef}
-              disabled={busy}
-              includeSameDefault
-              onPick={(ref) => void apply(() => app.SetPlannerModel(ref))}
-            />
-          </SettingsField>
+            <SettingsField label={t("settings.plannerModel")}>
+              <ModelPicker
+                s={s}
+                refs={refs}
+                value={plannerSelectRef}
+                disabled={busy}
+                includeSameDefault
+                onPick={(ref) => void apply(() => app.SetPlannerModel(ref))}
+              />
+            </SettingsField>
 
-          <SettingsField label={t("settings.subagentModel")}>
-            <ModelPicker
-              s={s}
-              refs={refs}
-              value={subagentRef}
-              disabled={busy}
-              emptyOptionLabel={t("settings.subagentModelDefault")}
-              emptyOptionHint={t("common.auto")}
-              onPick={(ref) => void apply(() => app.SetSubagentModel(ref))}
-            />
-          </SettingsField>
+            <SettingsField label={t("settings.subagentModel")}>
+              <ModelPicker
+                s={s}
+                refs={refs}
+                value={subagentRef}
+                disabled={busy}
+                emptyOptionLabel={t("settings.subagentModelDefault")}
+                emptyOptionHint={t("common.auto")}
+                onPick={(ref) => void apply(() => app.SetSubagentModel(ref))}
+              />
+            </SettingsField>
 
-          <SettingsField label={t("settings.subagentEffort")} hint={t("settings.subagentHint")}>
-            <select
-              className="mem-select set-grow"
-              value={s.subagentEffort || ""}
-              disabled={busy}
-              onChange={(e) => void apply(() => app.SetSubagentEffort(e.target.value))}
-            >
-              <option value="">{t("settings.subagentEffortDefault")}</option>
-              {EFFORT_PRESETS.map((level) => (
-                <option key={level} value={level}>
-                  {level}
-                </option>
-              ))}
-            </select>
-          </SettingsField>
+            <SettingsField label={t("settings.subagentEffort")} hint={t("settings.subagentHint")}>
+              <select
+                className="mem-select set-grow"
+                value={s.subagentEffort || ""}
+                disabled={busy}
+                onChange={(e) => void apply(() => app.SetSubagentEffort(e.target.value))}
+              >
+                <option value="">{t("settings.subagentEffortDefault")}</option>
+                {EFFORT_PRESETS.map((level) => (
+                  <option key={level} value={level}>
+                    {level}
+                  </option>
+                ))}
+              </select>
+            </SettingsField>
 
-          <div className="settings-model-current" aria-label={t("settings.modelCurrentStatus")}>
-            <div>
-              <span>{t("settings.modelCurrentStatus")}</span>
-              <strong>{currentModelLabel}</strong>
+            <div className="settings-model-current" aria-label={t("settings.modelCurrentStatus")}>
+              <div>
+                <span>{t("settings.modelCurrentStatus")}</span>
+                <strong>{currentModelLabel}</strong>
+              </div>
+              <div className="settings-model-current__meta">
+                <span>{providerLabel}</span>
+                <span>{plannerLabel}</span>
+                <span>{keyStatusLabel}</span>
+              </div>
             </div>
-            <div className="settings-model-current__meta">
-              <span>{providerLabel}</span>
-              <span>{plannerLabel}</span>
-              <span>{keyStatusLabel}</span>
-            </div>
-          </div>
-        </SettingsSection>
+          </SettingsSection>
+          <SettingsSection title={t("settings.agentRuntime")} description={t("settings.agentRuntimeHint")}>
+            <SettingsField label={t("settings.executorMaxSteps")} hint={t("settings.executorMaxStepsHint")}>
+              <StepLimitControl
+                value={agent.maxSteps}
+                presets={[0, 10, 25, 50]}
+                busy={busy}
+                onChange={(next) => void apply(() => setAgentSteps(next, agent.plannerMaxSteps))}
+              />
+            </SettingsField>
+            <SettingsField label={t("settings.plannerMaxSteps")} hint={plannerSelectRef ? t("settings.plannerMaxStepsHint") : t("settings.plannerMaxStepsDisabledHint")}>
+              <StepLimitControl
+                value={agent.plannerMaxSteps}
+                presets={[6, 12, 25, 0]}
+                busy={busy}
+                onChange={(next) => void apply(() => setAgentSteps(agent.maxSteps, next))}
+              />
+            </SettingsField>
+          </SettingsSection>
+        </>
       ) : (
         <ProvidersSection s={s} busy={busy} apply={apply} />
       )}
@@ -1043,11 +1145,12 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
           });
           return;
         }
-        const currentDefault = p.default && fetched.includes(p.default) ? p.default : fetched[0];
-        await app.SaveProvider({ ...p, models: fetched, default: currentDefault });
+        const models = mergedFetchedProviderModels(p.models, fetched);
+        const currentDefault = providerDefaultModel(p.default, models);
+        await app.SaveProvider({ ...p, models, default: currentDefault });
         setGroupFetchResult(group.id, {
           kind: "ok",
-          text: t("settings.fetchModelsUpdatedForProvider", { provider: group.label, n: fetched.length }),
+          text: t("settings.fetchModelsUpdatedForProvider", { provider: group.label, n: models.length }),
         });
       });
     } finally {
@@ -1072,11 +1175,12 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
         try {
           const fetched = await app.FetchProviderModels({ ...probe, apiKeyEnv });
           if (fetched.length > 0) {
-            const currentDefault = probe.default && fetched.includes(probe.default) ? probe.default : fetched[0];
-            await app.SaveProvider({ ...probe, apiKeyEnv, models: fetched, default: currentDefault });
+            const models = mergedFetchedProviderModels(probe.models, fetched, { preserveCurated: true });
+            const currentDefault = providerDefaultModel(probe.default, models);
+            await app.SaveProvider({ ...probe, apiKeyEnv, models, default: currentDefault });
             setGroupFetchResult(group.id, {
               kind: "ok",
-              text: t("settings.fetchModelsUpdatedForProvider", { provider: group.label, n: fetched.length }),
+              text: t("settings.fetchModelsUpdatedForProvider", { provider: group.label, n: models.length }),
             });
             return;
           }
@@ -1479,6 +1583,7 @@ function providerAccessGroups(providers: ProviderView[], t: ReturnType<typeof us
   const groups = new Map<string, ProviderAccessGroup>();
   for (const p of providers) {
     const id = providerGroupID(p);
+    const builtIn = id.startsWith("builtin:");
     const existing = groups.get(id);
     if (existing) {
       existing.providers.push(p);
@@ -1490,7 +1595,7 @@ function providerAccessGroups(providers: ProviderView[], t: ReturnType<typeof us
       id,
       label: providerGroupLabel(p, t),
       description: providerGroupDescription(p, t),
-      builtIn: p.builtIn,
+      builtIn,
       providers: [p],
       apiKeyEnv: p.apiKeyEnv,
       keySet: p.keySet,
@@ -1502,13 +1607,45 @@ function providerAccessGroups(providers: ProviderView[], t: ReturnType<typeof us
   return Array.from(groups.values());
 }
 
+function providerBaseHost(baseUrl: string): string {
+  try {
+    return new URL(baseUrl).hostname.toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+function canonicalOfficialProviderName(name: string): string {
+  switch (name.trim()) {
+    case "deepseek-flash":
+    case "deepseek-pro":
+      return "deepseek";
+    case "mimo":
+    case "xiaomi-mimo":
+    case "xiaomi_mimo":
+      return "mimo-api";
+    case "mimo-pro":
+    case "mimo-flash":
+      return "mimo-token-plan";
+    default:
+      return name.trim();
+  }
+}
+
+function officialProviderKind(p: ProviderView): string {
+  if (!p.builtIn) return "";
+  const name = canonicalOfficialProviderName(p.name);
+  const host = providerBaseHost(p.baseUrl);
+  if (name === "deepseek" && host === "api.deepseek.com") return "deepseek";
+  if (name === "mimo-token-plan" && host === "token-plan-cn.xiaomimimo.com") return "mimo-token-plan";
+  if (name === "mimo-api" && host === "api.xiaomimimo.com") return "mimo-api";
+  return "";
+}
+
 function providerGroupID(p: ProviderView): string {
-  if (!p.builtIn) return `custom:${p.name}`;
-  const base = p.baseUrl.toLowerCase();
-  if (p.apiKeyEnv === "DEEPSEEK_API_KEY" || base.includes("deepseek")) return "builtin:deepseek";
-  if (base.includes("token-plan-cn.xiaomimimo.com")) return "builtin:mimo-token-plan";
-  if (base.includes("api.xiaomimimo.com") || base.includes("mimo") || base.includes("xiaomimimo")) return "builtin:mimo-api";
-  return `builtin:${p.name}`;
+  const official = officialProviderKind(p);
+  if (official) return `builtin:${official}`;
+  return `custom:${p.name}`;
 }
 
 function providerGroupLabel(p: ProviderView, t?: ReturnType<typeof useT>): string {

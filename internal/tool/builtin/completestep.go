@@ -146,7 +146,7 @@ func verifyStepEvidence(ctx context.Context, items []stepEvidence) (hostVerified
 			if command == "" {
 				return 0, 0, fmt.Errorf("evidence %d: verification command is required for host verification", i+1)
 			}
-			if !ledger.HasSuccessfulCommand(command) {
+			if !ledger.HasSuccessfulCommand(command) && !verifyCommandFromSession(ctx, command) {
 				return 0, 0, fmt.Errorf("evidence %d: verification command %q has no matching successful bash receipt in this turn", i+1, command)
 			}
 			hostVerified++
@@ -242,4 +242,100 @@ func verifyTodoStep(ctx context.Context, step string) (evidence.TodoStepMatch, b
 	default:
 		return evidence.TodoStepMatch{}, true, fmt.Errorf("step %q matches todo %d (%q) but its status is %q; complete_step requires in_progress or completed", step, match.Index, match.Content, match.Status)
 	}
+}
+
+// verifyCommandFromSession scans the full conversation history (not just the
+// per-turn ledger) so that a complete_step can cite commands that ran in an
+// earlier turn, that used a named tool instead of bash, or that were cited
+// with a slightly different string (trailing …,
+// truncation).
+//
+// Three scenarios this covers:
+//  1. Cross-turn: command ran in a prior turn, ledger was reset — scan the
+//     session transcript for the exact bash command.
+//  2. Non-bash tool: the model used the `ls` reader tool rather than
+//     bash "ls .", but complete_step cites command="ls ." — match by tool
+//     name (the first word of the command).
+//  3. Truncated string: the actual command was
+//     `find . -type f -not -path '*/node_modules/*'` but the model wrote
+//     command="find . -type f ..." — normalize both sides (strip …,
+//     trim, collapse whitespace) and fall back to prefix matching.
+func verifyCommandFromSession(ctx context.Context, command string) bool {
+	msgs, ok := evidence.SessionMessagesFromContext(ctx)
+	if !ok {
+		return false
+	}
+	lookup := normalizeVerifyCommand(command)
+	if lookup == "" {
+		return false
+	}
+	toolName := firstWord(lookup)
+
+	for _, msg := range msgs {
+		for _, tc := range msg.ToolCalls {
+			cmd := extractCommandFromCall(tc.Name, tc.Arguments)
+			if cmd == "" {
+				continue
+			}
+			norm := normalizeVerifyCommand(cmd)
+			if norm == lookup {
+				return true
+			}
+			// Prefix match for truncated commands (scenario 3). Require the
+			// shorter side to be at least 8 chars to prevent false positives
+			// on very short fragments like "find" or "ls".
+			if len(norm) >= 8 && len(lookup) >= 8 {
+				if strings.HasPrefix(norm, lookup) || strings.HasPrefix(lookup, norm) {
+					return true
+				}
+			}
+			// Non-bash tool name match (scenario 2): the first word of the
+			// command matches a tool call name that isn't bash.
+			if toolName != "" && toolName != "bash" && tc.Name == toolName {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// normalizeVerifyCommand strips trailing ellipsis,
+// trims whitespace, and collapses internal whitespace into single spaces.
+func normalizeVerifyCommand(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.TrimSuffix(s, "...")
+	s = strings.TrimSuffix(s, "…")
+	s = strings.TrimSpace(s)
+	return strings.Join(strings.Fields(s), " ")
+}
+
+func firstWord(s string) string {
+	s = strings.TrimSpace(s)
+	if idx := strings.IndexAny(s, " \t\n"); idx >= 0 {
+		return s[:idx]
+	}
+	return s
+}
+
+// extractCommandFromCall extracts the bash "command" argument from a tool call
+// args JSON, or returns the tool name + path for non-bash tools.
+func extractCommandFromCall(name string, argsJSON string) string {
+	if name == "bash" {
+		var args struct {
+			Command string `json:"command"`
+		}
+		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+			return ""
+		}
+		return strings.TrimSpace(args.Command)
+	}
+	// For non-bash tools, return "name path" so the command "ls ." can match
+	// against a tool call `ls` with path `.`.
+	var args struct {
+		Path string `json:"path"`
+	}
+	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil || args.Path == "" {
+		return name
+	}
+	return name + " " + args.Path
 }

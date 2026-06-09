@@ -2,8 +2,9 @@ package config
 
 import (
 	"fmt"
-	"net/url"
 	"strings"
+
+	"reasonix/internal/provider/openai"
 )
 
 const (
@@ -66,6 +67,13 @@ func EffortCapabilityForEntry(e *ProviderEntry) EffortCapability {
 		return openAIEffortCapability()
 	}
 	switch {
+	case isMiniMaxEntry(e):
+		// MiniMax-M3 only exposes a binary thinking knob (adaptive|disabled)
+		// on its OpenAI-compatible endpoint, so /effort mirrors the API
+		// vocabulary verbatim. Default is "adaptive" because the M3 model
+		// runs with thinking on out of the box; "auto" means "don't override
+		// the model default" (== adaptive for M3).
+		return EffortCapability{Supported: true, Levels: []string{"auto", "adaptive", "disabled"}, Default: "adaptive"}
 	case e != nil && e.Kind == "anthropic":
 		return EffortCapability{Supported: true, Levels: []string{"auto", "low", "medium", "high", "xhigh", "max"}, Default: "auto"}
 	default:
@@ -114,6 +122,24 @@ func NormalizeEffort(e *ProviderEntry, raw string) (string, error) {
 		}
 	}
 	switch {
+	case isMiniMaxEntry(e):
+		// The M3 knob is binary; map Anthropic / OpenAI-style levels onto the
+		// nearest valid value so a stale /effort high|low still works. "off"
+		// is a retired DeepSeek level meaning "no thinking" — on M3 that maps
+		// to "disabled" rather than the model default, since M3 actually
+		// supports a "thinking off" mode and "off" is the natural request.
+		switch level {
+		case "adaptive", "disabled":
+			return level, nil
+		case "off":
+			return "disabled", nil
+		case "low", "medium", "high":
+			return "adaptive", nil
+		case "xhigh", "max":
+			return "disabled", nil
+		default:
+			return "", fmt.Errorf("usage: /effort auto|adaptive|disabled")
+		}
 	case e != nil && e.Kind == "anthropic":
 		switch level {
 		case "low", "medium", "high", "xhigh", "max":
@@ -143,7 +169,7 @@ func EffectiveEffort(e *ProviderEntry) string {
 	if e == nil {
 		return ""
 	}
-	if effort := normalizeEffortLevel(e.Effort); effort != "" {
+	if effort := normalizeStoredEffort(e.Effort); effort != "" {
 		return effort
 	}
 	supported := normalizedSupportedEfforts(e)
@@ -170,13 +196,18 @@ func normalizeProviderEffortFields(e *ProviderEntry) {
 	if e == nil {
 		return
 	}
-	e.Effort = normalizeEffortLevel(e.Effort)
-	if e.Effort == "off" {
-		e.Effort = ""
-	}
+	e.Effort = normalizeStoredEffort(e.Effort)
 	e.ReasoningProtocol = normalizeReasoningProtocol(e.ReasoningProtocol)
 	e.DefaultEffort = normalizeEffortLevel(e.DefaultEffort)
 	e.SupportedEfforts = normalizedSupportedEfforts(e)
+}
+
+func normalizeStoredEffort(raw string) string {
+	level := normalizeEffortLevel(raw)
+	if level == "auto" || level == "off" {
+		return ""
+	}
+	return level
 }
 
 // ReasoningProtocolForEntry resolves the provider request shape for reasoning
@@ -217,16 +248,18 @@ func normalizeReasoningProtocol(raw string) string {
 	}
 }
 
+// isDeepSeekEntry reports whether the entry points at DeepSeek's API. The
+// actual host matching lives in provider/openai so the openai package and
+// the config layer stay in lockstep when new gateways are added.
 func isDeepSeekEntry(e *ProviderEntry) bool {
-	if e == nil || e.Kind != "openai" {
-		return false
-	}
-	u, err := url.Parse(e.BaseURL)
-	if err != nil {
-		return false
-	}
-	host := strings.ToLower(u.Hostname())
-	return host == "api.deepseek.com" || strings.HasSuffix(host, ".deepseek.com")
+	return e != nil && e.Kind == "openai" && openai.IsDeepSeek(e.BaseURL)
+}
+
+// isMiniMaxEntry reports whether the entry points at MiniMax's OpenAI-compatible
+// endpoint. See openai.IsMiniMax for the host-matching rule; the entry-wrapper
+// just gates on the openai kind.
+func isMiniMaxEntry(e *ProviderEntry) bool {
+	return e != nil && e.Kind == "openai" && openai.IsMiniMax(e.BaseURL)
 }
 
 func resolvedModelReasoningCapability(e *ProviderEntry) (modelReasoningCapability, bool) {

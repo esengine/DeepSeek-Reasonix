@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ClipboardEvent, DragEvent, KeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
-import { AlertTriangle, ArrowUp, Check, ChevronDown, Eye, FileText, Folder, FolderGit2, FolderPlus, List, Search, Square, Trash2, X, Zap } from "lucide-react";
+import { AlertTriangle, ArrowUp, Check, ChevronDown, Eye, FileText, Folder, FolderGit2, FolderPlus, List, MessageSquare, Search, Square, Trash2, X, Zap } from "lucide-react";
 import { asArray } from "../lib/array";
+import { DedupIndex, sha256 } from "../lib/attachDedup";
 import { app, onFilesDropped } from "../lib/bridge";
 import { SPINNER_WORDS, useI18n } from "../lib/i18n";
 import { clearLayoutSize, loadOptionalLayoutSize, saveLayoutSize } from "../lib/layoutPreferences";
-import type { CommandInfo, ComposerInsertRequest, DirEntry, EffortInfo, Mode, SlashArgItem, SlashArgsResult, WorkspaceView } from "../lib/types";
+import type { CommandInfo, ComposerInsertRequest, DirEntry, EffortInfo, HistoryMessage, Mode, SessionMeta, SessionReference, SlashArgItem, SlashArgsResult, WorkspaceView } from "../lib/types";
 import {
   formatWorkspaceReference,
   parseWorkspaceReference,
@@ -14,7 +15,7 @@ import {
 } from "../lib/workspaceDrag";
 import { SlashMenu } from "./SlashMenu";
 import { ArgMenu } from "./ArgMenu";
-import { FileMenu } from "./FileMenu";
+import { VirtualMenu } from "./VirtualMenu";
 import { EffortSwitcher } from "./EffortSwitcher";
 import { ModelSwitcher } from "./ModelSwitcher";
 import { Tooltip } from "./Tooltip";
@@ -23,6 +24,11 @@ import { AnchoredPopover } from "./AnchoredPopover";
 interface Attachment {
   path: string;
   previewUrl?: string;
+}
+
+interface AttachmentDedupKey {
+  hash: string;
+  source: string;
 }
 
 interface WorkspaceReference {
@@ -100,6 +106,34 @@ function fmtElapsed(ms: number): string {
   return `${Math.floor(s / 60)}m ${s % 60}s`;
 }
 
+// --- past:chats hover preview helpers (PR-C2) ---
+// Pure formatting helpers used by the past:chats list tooltip. They never read
+// from disk, never call PreviewSession — they only shape the data that already
+// lives in the SessionMeta snapshot we fetched on entry.
+const PAST_CHAT_PREVIEW_MAX = 200;
+
+function truncatePreview(value?: string, max = PAST_CHAT_PREVIEW_MAX): string {
+  const text = (value || "").trim();
+  if (text.length <= max) return text;
+  return `${text.slice(0, max)}...`;
+}
+
+function fmtSessionTime(value?: number): string {
+  if (!value) return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mi = String(d.getMinutes()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
+}
+
+function pastChatTitle(session: SessionMeta): string {
+  return session.title || session.topicTitle || session.preview || "Untitled";
+}
+
 function useTick(on: boolean): number {
   const [, setN] = useState(0);
   useEffect(() => {
@@ -125,6 +159,91 @@ function isImeKeyEvent(
     native.keyCode === 229 ||
     Date.now() - lastCompositionEndAt < IME_CONFIRM_GRACE_MS
   );
+}
+
+// --- past:chats session reference → prompt context (PR-B) ---
+// Send-side helpers for "@past:chats" session references. PR-A wired the menu and
+// the composer-context card; this layer reads each referenced session through the
+// existing PreviewSession API and prepends a compact "user / 助手" transcript to
+// submitText so the model sees the referenced chat as background context.
+const SESSION_REF_MAX_MESSAGES = 30;
+const SESSION_REF_MAX_CHARS = 20_000;
+const SESSION_CONTEXT_HEADER = "以下是用户引用的历史会话上下文：";
+const SESSION_CONTEXT_FOOTER = "当前用户问题：";
+const PAST_CHATS_MENU_ITEM = "past:chats";
+
+// limitSessionMessages keeps the most recent useful messages within a char budget.
+// Walks from the end so the truncation is always "drop the oldest", which matches
+// the intuition that the latest turns are the relevant ones for follow-up.
+function limitSessionMessages(
+  messages: HistoryMessage[],
+  maxMessages = SESSION_REF_MAX_MESSAGES,
+  maxChars = SESSION_REF_MAX_CHARS,
+): { messages: HistoryMessage[]; truncated: boolean } {
+  const useful = messages
+    .filter(
+      (m) =>
+        (m.role === "user" || m.role === "assistant") &&
+        typeof m.content === "string" &&
+        m.content.trim().length > 0,
+    )
+    .slice(-maxMessages);
+  const result: HistoryMessage[] = [];
+  let total = 0;
+  let truncated = useful.length >= maxMessages;
+  for (let i = useful.length - 1; i >= 0; i--) {
+    const msg = useful[i];
+    const content = msg.content.trim();
+    if (total + content.length > maxChars) {
+      truncated = true;
+      break;
+    }
+    result.unshift({ ...msg, content });
+    total += content.length;
+  }
+  if (result.length < useful.length) truncated = true;
+  return { messages: result, truncated };
+}
+
+// formatSessionContext renders one referenced session as a labelled transcript.
+// Falls back to a "no usable messages" note when filtering empties the list so
+// the model still sees that something was referenced.
+function formatSessionContext(
+  ref: SessionReference,
+  messages: HistoryMessage[],
+  truncated: boolean,
+): string {
+  const body = messages
+    .map((m) => `${m.role === "user" ? "用户" : "助手"}：${m.content.trim()}`)
+    .join("\n\n");
+  return [
+    `[会话：${ref.title}]`,
+    truncated ? "注意：该会话内容较长，以下只包含最近部分内容。" : "",
+    body || "注意：该会话没有可引用的用户/助手消息。",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+// buildSessionContext reads each referenced session, formats the most recent
+// slice, and joins them with a separator. A single failed read must not block
+// the others; the user gets a clear "读取失败" note for the bad one and the
+// remaining refs still flow through.
+async function buildSessionContext(refs: SessionReference[]): Promise<string> {
+  if (refs.length === 0) return "";
+  let context = `${SESSION_CONTEXT_HEADER}\n\n`;
+  for (const ref of refs) {
+    try {
+      const raw = await app.PreviewSession(ref.path);
+      const limited = limitSessionMessages(asArray(raw));
+      context += `${formatSessionContext(ref, limited.messages, limited.truncated)}\n\n---\n\n`;
+    } catch (error) {
+      console.error("[past:chats] failed to preview session", ref.path, error);
+      context += `[会话：${ref.title}]\n注意：该会话读取失败，已跳过。\n\n---\n\n`;
+    }
+  }
+  context += `${SESSION_CONTEXT_FOOTER}\n`;
+  return context;
 }
 
 export function Composer({
@@ -207,6 +326,12 @@ export function Composer({
   const [composerResizing, setComposerResizing] = useState(false);
   const [textareaAutoHeight, setTextareaAutoHeight] = useState<number | null>(null);
   const [textareaAutoOverflow, setTextareaAutoOverflow] = useState(false);
+  const [showPastChats, setShowPastChats] = useState(false);
+  const [pastChats, setPastChats] = useState<SessionMeta[]>([]);
+  const [pastChatQuery, setPastChatQuery] = useState("");
+  const [sessionRefs, setSessionRefs] = useState<SessionReference[]>([]);
+  const [loadingPastChats, setLoadingPastChats] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const composerCardRef = useRef<HTMLDivElement>(null);
   const workspaceAnchorRef = useRef<HTMLDivElement>(null);
@@ -215,6 +340,13 @@ export function Composer({
   const lastCompositionEndAt = useRef(0);
   const lastSelectionRef = useRef({ start: 0, end: 0 });
   const consumedInsertIdRef = useRef(0);
+  const submittingRef = useRef(false);
+  // Snapshot of the current cwd so async callbacks (openPastChats) can detect
+  // workspace switches and discard stale responses (issue #3601).
+  const cwdRef = useRef(cwd);
+  cwdRef.current = cwd;
+  const attachmentDedupRef = useRef(new DedupIndex());
+  const attachmentDedupKeysRef = useRef<Record<string, AttachmentDedupKey>>({});
 
   useEffect(() => {
     if (wasRunning.current && !running && text.trim() === "") {
@@ -236,7 +368,7 @@ export function Composer({
     return text.slice(1).toLowerCase();
   }, [text]);
   const slashMatches = useMemo(
-    () => (slashQuery === null ? [] : commands.filter((c) => c.name.toLowerCase().includes(slashQuery)).slice(0, 8)),
+    () => (slashQuery === null ? [] : commands.filter((c) => c.name.toLowerCase().includes(slashQuery))),
     [slashQuery, commands],
   );
 
@@ -303,6 +435,27 @@ export function Composer({
   const [searchEntries, setSearchEntries] = useState<DirEntry[]>([]);
   const dirCache = useRef<Record<string, DirEntry[]>>({});
   const searchCache = useRef<Record<string, DirEntry[]>>({});
+
+  // When the workspace/project changes (cwd prop), invalidate all @ mention
+  // state so the picker reloads candidates for the new project. Without this,
+  // dirCache/searchCache retain entries from the old project and the picker
+  // shows stale results (issue #3601).
+  const prevCwdRef = useRef(cwd);
+  useEffect(() => {
+    if (prevCwdRef.current === cwd) return; // skip mount — state already initial
+    prevCwdRef.current = cwd;
+    dirCache.current = {};
+    searchCache.current = {};
+    setEntries([]);
+    setSearchEntries([]);
+    setShowPastChats(false);
+    setPastChats([]);
+    setPastChatQuery("");
+    setLoadingPastChats(false);
+    setActive(0);
+    setDismissed(false);
+  }, [cwd]);
+
   useEffect(() => {
     if (atRaw === null) return;
     const cached = dirCache.current[atDir];
@@ -322,8 +475,8 @@ export function Composer({
     return () => {
       live = false;
     };
-    // re-fetch only when the menu opens or the directory level changes
-  }, [atRaw === null, atDir]);
+    // re-fetch when the menu opens or the directory level changes
+  }, [atRaw === null, atDir, cwd]);
   useEffect(() => {
     if (atRaw === null || atDir !== "" || atFrag === "") {
       setSearchEntries([]);
@@ -347,7 +500,7 @@ export function Composer({
     return () => {
       live = false;
     };
-  }, [atRaw === null, atDir, atFrag]);
+  }, [atRaw === null, atDir, atFrag, cwd]);
   const atMatches = useMemo(
     () => {
       if (atRaw === null) return [];
@@ -357,10 +510,27 @@ export function Composer({
         const basename = e.name.split("/").pop()?.toLowerCase() ?? "";
         return basename.includes(atFrag) && !seen.has(e.name);
       });
-      return [...local, ...searched].slice(0, 10);
+      return [...local, ...searched];
     },
     [atRaw, atFrag, entries, searchEntries],
   );
+
+  // Unified menu item model for the @ menu. "past:chats" is a real selectable
+  // item (kind "pastChats"), not an active===0 special case.
+  type AtMenuItem =
+    | { kind: "pastChats" }
+    | { kind: "file"; entry: DirEntry };
+
+  const includePastChatsItem = atRaw !== null && atDir === "" && (atFrag === "" || PAST_CHATS_MENU_ITEM.startsWith(atFrag));
+
+  const atMenuItems = useMemo<AtMenuItem[]>(
+    () => [
+      ...(includePastChatsItem ? [{ kind: "pastChats" as const }] : []),
+      ...atMatches.map((entry) => ({ kind: "file" as const, entry })),
+    ],
+    [includePastChatsItem, atMatches],
+  );
+
 
   // --- which menu (if any) is open --- (slash command names win; then slash
   // arguments; then @-refs — they're rarely valid at once)
@@ -369,16 +539,16 @@ export function Composer({
       ? "slash"
       : argRes && argRes.items.length > 0 && !dismissed
         ? "slasharg"
-        : atMatches.length > 0 && !dismissed
+        : atRaw !== null && !dismissed
           ? "at"
           : null;
-  const count =
+  const countBase =
     menuMode === "slash"
       ? slashMatches.length
       : menuMode === "slasharg"
         ? argRes!.items.length
         : menuMode === "at"
-          ? atMatches.length
+          ? atMenuItems.length
           : 0;
 
   // Reset highlight + un-dismiss whenever the active query changes.
@@ -386,6 +556,17 @@ export function Composer({
     setActive(0);
     setDismissed(false);
   }, [slashQuery, atRaw]);
+
+  // When the @ trigger disappears (user deleted the @), close the past:chats
+  // sub-menu and reset related state. Without this, showPastChats can outlive
+  // the @ token and leave the session list visible with no way to dismiss it.
+  useEffect(() => {
+    if (menuMode !== "at" && showPastChats) {
+      setShowPastChats(false);
+      setPastChatQuery("");
+      setActive(0);
+    }
+  }, [menuMode]);
 
   const setTextCaretEnd = (next: string) => {
     setText(next);
@@ -456,20 +637,64 @@ export function Composer({
     return expanded;
   };
 
-  const submit = () => {
-    if (disabled) return;
+  const rememberAttachment = (path: string, key: AttachmentDedupKey) => {
+    attachmentDedupRef.current.add(key.hash, key.source);
+    attachmentDedupKeysRef.current[path] = key;
+  };
+
+  const forgetAttachment = (path: string) => {
+    const key = attachmentDedupKeysRef.current[path];
+    if (key) {
+      attachmentDedupRef.current.forget(key.hash, key.source);
+      delete attachmentDedupKeysRef.current[path];
+    }
+  };
+
+  const clearAttachments = () => {
+    setAttachments([]);
+    attachmentDedupRef.current.clear();
+    attachmentDedupKeysRef.current = {};
+  };
+
+  const removeAttachment = (path: string) => {
+    forgetAttachment(path);
+    setAttachments((prev) => prev.filter((x) => x.path !== path));
+    requestAnimationFrame(() => taRef.current?.focus());
+  };
+
+  const fileDedupKey = async (file: File): Promise<AttachmentDedupKey> => ({
+    hash: await sha256(file),
+    source: `file:${file.name}:${file.size}:${file.lastModified}`,
+  });
+
+  const submit = async () => {
+    if (disabled || submittingRef.current) return;
     const t = text.trim();
     if ((!t && attachments.length === 0 && workspaceRefs.length === 0) || pendingPaste > 0) return;
+    submittingRef.current = true;
+    setSubmitting(true);
+    try {
     const refs = [
       ...workspaceRefs.map((ref) => formatWorkspaceReference(ref.path, ref.isDir)),
       ...attachments.map((a) => `@${a.path}`),
     ].join(" ");
     const displayText = [t, refs].filter(Boolean).join(t && refs ? " " : "");
-    const submitText = [expandPastedBlocks(t), refs].filter(Boolean).join(t && refs ? " " : "");
+    // PR-B: when past:chats refs are attached, prepend their formatted transcript
+    // to submitText only (displayText stays unchanged so the user still sees their
+    // original prompt in the input preview). With no refs we keep the original
+    // submitText verbatim — no header, no rewording, byte-identical to pre-PR-B.
+    const sessionContext = sessionRefs.length === 0 ? "" : await buildSessionContext(sessionRefs);
+    const baseSubmitText = [expandPastedBlocks(t), refs].filter(Boolean).join(t && refs ? " " : "");
+    const submitText = sessionContext ? `${sessionContext}${baseSubmitText}` : baseSubmitText;
     onSend(displayText, submitText);
     setText("");
-    setAttachments([]);
+    clearAttachments();
     setWorkspaceRefs([]);
+    setSessionRefs([]);
+    } finally {
+      submittingRef.current = false;
+      setSubmitting(false);
+    }
   };
 
   const readFileAsDataURL = (file: File) =>
@@ -486,9 +711,12 @@ export function Composer({
     for (const file of images) {
       setPendingPaste((n) => n + 1);
       try {
+        const key = await fileDedupKey(file);
+        if (attachmentDedupRef.current.seen(key.hash, key.source)) continue;
         const dataUrl = await readFileAsDataURL(file);
         const path = await app.SavePastedImage(dataUrl);
         const previewUrl = await app.AttachmentDataURL(path);
+        rememberAttachment(path, key);
         setAttachments((prev) => [...prev, { path, previewUrl }]);
       } catch {
         // non-fatal: a failed image attach must not block normal text input
@@ -506,8 +734,11 @@ export function Composer({
     for (const file of others) {
       setPendingPaste((n) => n + 1);
       try {
+        const key = await fileDedupKey(file);
+        if (attachmentDedupRef.current.seen(key.hash, key.source)) continue;
         const dataUrl = await readFileAsDataURL(file);
         const path = await app.SavePastedFile(file.name, dataUrl);
+        rememberAttachment(path, key);
         setAttachments((prev) => [...prev, { path }]);
       } catch {
         // non-fatal: a failed attach must not block normal text input
@@ -530,10 +761,13 @@ export function Composer({
     for (const path of paths) {
       setPendingPaste((n) => n + 1);
       try {
+        const key = { hash: "", source: `path:${path}` };
+        if (attachmentDedupRef.current.seen(key.hash, key.source)) continue;
         const item = await app.AttachDropped(path);
         if (item.kind === "workspace") {
           addWorkspaceReference({ path: item.path, isDir: item.isDir });
         } else {
+          rememberAttachment(item.path, key);
           setAttachments((prev) => [...prev, { path: item.path, previewUrl: item.previewUrl }]);
         }
       } catch {
@@ -839,6 +1073,107 @@ export function Composer({
     setTextCaretEnd(prefix + "@" + atDir + e.name + (e.isDir ? "/" : " "));
   };
 
+  // --- past:chats session reference ---
+  const openPastChats = async () => {
+    const snapshotCwd = cwdRef.current;
+    setShowPastChats(true);
+    setActive(0);
+    setPastChatQuery("");
+    setLoadingPastChats(true);
+    try {
+      const sessions = await app.ListSessions();
+      // Discard stale response if workspace changed while the request was in-flight.
+      if (cwdRef.current !== snapshotCwd) return;
+      const sorted = asArray(sessions)
+        .filter((s) => !s.current)
+        .sort((a, b) => {
+          const at = a.lastActivityAt || a.modTime || a.createdAt || 0;
+          const bt = b.lastActivityAt || b.modTime || b.createdAt || 0;
+          return bt - at;
+        })
+        .slice(0, 50);
+      setPastChats(sorted);
+    } catch {
+      if (cwdRef.current !== snapshotCwd) return;
+      setPastChats([]);
+    } finally {
+      if (cwdRef.current === snapshotCwd) setLoadingPastChats(false);
+    }
+  };
+
+  // PR-C1: client-side filter for the past:chats list. Matches against the
+  // human-visible fields (title, topic, preview, path, workspace) so users
+  // can narrow long session lists without a backend round-trip. Lowercased
+  // substring match keeps the behaviour predictable across locales.
+  const filteredPastChats = useMemo(() => {
+    const q = pastChatQuery.trim().toLowerCase();
+    if (!q) return pastChats;
+    return pastChats.filter((session) =>
+      [
+        session.title,
+        session.topicTitle,
+        session.preview,
+        session.path,
+        session.workspaceRoot,
+      ]
+        .map((value) => String(value ?? "").toLowerCase())
+        .some((value) => value.includes(q)),
+    );
+  }, [pastChats, pastChatQuery]);
+
+  // Final menu item count: when the past:chats list is open, count the
+  // filtered sessions instead of file entries + the "past:chats" row.
+  const count = menuMode === "at" && showPastChats
+    ? filteredPastChats.length
+    : countBase;
+
+  // Clamp active index when the menu item count changes (e.g. switching
+  // between file list and past:chats list, or filtering sessions).
+  useEffect(() => {
+    const maxIdx = Math.max(0, count - 1);
+    setActive((prev) => (prev > maxIdx ? 0 : prev));
+  }, [count]);
+
+
+  const removeAtToken = (value: string) => {
+    return value.replace(/(?:^|\s)@[^\s]*$/, "").trimEnd();
+  };
+
+  const pickSession = (session: SessionMeta) => {
+    setSessionRefs((prev) => {
+      if (prev.some((x) => x.path === session.path)) {
+        return prev;
+      }
+      return [
+        ...prev,
+        {
+          path: session.path,
+          title: session.title || session.topicTitle || session.preview || "Untitled",
+          preview: session.preview,
+          turns: session.turns,
+          createdAt: session.createdAt,
+          lastActivityAt: session.lastActivityAt,
+        },
+      ];
+    });
+    setText((prev) => removeAtToken(prev));
+    setPastChatQuery("");
+    setShowPastChats(false);
+    setActive(0);
+    // Return focus to textarea so the user can keep typing immediately.
+    requestAnimationFrame(() => {
+      taRef.current?.focus();
+      taRef.current?.setSelectionRange(
+        taRef.current.value.length,
+        taRef.current.value.length,
+      );
+    });
+  };
+
+  const removeSessionRef = (path: string) => {
+    setSessionRefs((prev) => prev.filter((ref) => ref.path !== path));
+  };
+
   // pickArg replaces just the current token with the suggestion. A "descend" item
   // (e.g. "/skill show ") ends with a space, so the effect re-fetches the next
   // level; a terminal item leaves the menu (next fetch returns nothing).
@@ -848,9 +1183,30 @@ export function Composer({
   };
 
   const pickActive = () => {
-    if (menuMode === "slash") pickCommand(slashMatches[active]);
-    else if (menuMode === "slasharg" && argRes) pickArg(argRes.items[active]);
-    else if (menuMode === "at") pickEntry(atMatches[active]);
+    if (menuMode === "slash") {
+      const item = slashMatches[active];
+      if (item) pickCommand(item);
+      return;
+    }
+    if (menuMode === "slasharg" && argRes) {
+      const item = argRes.items[active];
+      if (item) pickArg(item);
+      return;
+    }
+    if (menuMode === "at") {
+      if (showPastChats) {
+        const session = filteredPastChats[active];
+        if (session) pickSession(session);
+        return;
+      }
+      const item = atMenuItems[active];
+      if (!item) return;
+      if (item.kind === "pastChats") {
+        void openPastChats();
+        return;
+      }
+      pickEntry(item.entry);
+    }
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -866,12 +1222,12 @@ export function Composer({
     }
 
     if (menuMode && !composing) {
-      if (e.key === "ArrowDown") {
+      if (e.key === "ArrowDown" && count > 0) {
         e.preventDefault();
         setActive((i) => (i + 1) % count);
         return;
       }
-      if (e.key === "ArrowUp") {
+      if (e.key === "ArrowUp" && count > 0) {
         e.preventDefault();
         setActive((i) => (i - 1 + count) % count);
         return;
@@ -883,7 +1239,13 @@ export function Composer({
       }
       if (e.key === "Escape") {
         e.preventDefault();
-        setDismissed(true);
+        if (showPastChats) {
+          setPastChatQuery("");
+          setShowPastChats(false);
+          setActive(0);
+        } else {
+          setDismissed(true);
+        }
         return;
       }
     }
@@ -898,6 +1260,29 @@ export function Composer({
     if (e.key === "Escape" && running && !decisionPending) {
       e.preventDefault();
       handleCancel();
+    }
+  };
+
+  // Keydown handler for the past:chats search <input>. The search input is a
+  // sibling of the <textarea>, so keyboard events never reach the textarea's
+  // onKeyDown. We intercept navigation keys here and delegate to the same
+  // menu logic. Regular typing keys (letters, Backspace, etc.) pass through
+  // so the user can type a search query.
+  const onPastChatSearchKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Enter" || e.key === "Tab" || e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.key === "ArrowDown" && count > 0) {
+        setActive((i) => (i + 1) % count);
+      } else if (e.key === "ArrowUp" && count > 0) {
+        setActive((i) => (i - 1 + count) % count);
+      } else if (e.key === "Enter" || e.key === "Tab") {
+        pickActive();
+      } else if (e.key === "Escape") {
+        setPastChatQuery("");
+        setShowPastChats(false);
+        setActive(0);
+      }
     }
   };
 
@@ -1013,7 +1398,139 @@ export function Composer({
       {menuMode === "slasharg" && argRes && (
         <ArgMenu items={argRes.items} activeIndex={active} onPick={pickArg} onHover={setActive} />
       )}
-      {menuMode === "at" && <FileMenu items={atMatches} activeIndex={active} onPick={pickEntry} onHover={setActive} />}
+      {menuMode === "at" && (
+        showPastChats ? (
+          <div className="slashmenu" role="listbox">
+            {loadingPastChats ? (
+              <div className="slashmenu__item slashmenu__item--empty">
+                <span className="slashmenu__name">正在加载历史会话...</span>
+              </div>
+            ) : pastChats.length === 0 ? (
+              <div className="slashmenu__item slashmenu__item--empty">
+                <span className="slashmenu__name">暂无历史会话</span>
+              </div>
+            ) : (
+              <>
+                <div className="slashmenu__item slashmenu__item--search" onMouseDown={(ev) => ev.preventDefault()}>
+                  <Search size={13} className="filemenu__icon" />
+                  <input
+                    className="slashmenu__search"
+                    type="text"
+                    placeholder="搜索历史会话…"
+                    value={pastChatQuery}
+                    autoFocus
+                    onChange={(ev) => {
+                      setPastChatQuery(ev.target.value);
+                      setActive(0);
+                    }}
+                    onKeyDown={onPastChatSearchKeyDown}
+                  />
+                </div>
+                {filteredPastChats.length === 0 ? (
+                  <div className="slashmenu__item slashmenu__item--empty">
+                    <span className="slashmenu__name">没有匹配的历史会话</span>
+                  </div>
+                ) : (
+                  filteredPastChats.map((session, i) => {
+                    // PR-C2: hover preview uses only the SessionMeta fields we
+                    // already have on hand — no extra PreviewSession call, no
+                    // backend round-trip, no read of the full transcript.
+                    const turns = typeof session.turns === "number";
+                    const ts = session.lastActivityAt || session.modTime || session.createdAt;
+                    const preview = truncatePreview(session.preview);
+                    const pathText = session.workspaceRoot || session.path;
+                    const tooltipLabel =
+                      turns || ts || preview || pathText ? (
+                        <div className="past-chat-hover">
+                          <div className="past-chat-hover__title">{pastChatTitle(session)}</div>
+                          {preview && <div className="past-chat-hover__preview">{preview}</div>}
+                          {(turns || ts) && (
+                            <div className="past-chat-hover__meta">
+                              {turns && <span>{session.turns} 轮</span>}
+                              {ts && <span>· {fmtSessionTime(ts)}</span>}
+                            </div>
+                          )}
+                          {pathText && <div className="past-chat-hover__path">{pathText}</div>}
+                        </div>
+                      ) : null;
+                    return (
+                      <Tooltip key={session.path} block label={tooltipLabel}>
+                        <button
+                          className={`slashmenu__item ${i === active ? "slashmenu__item--active" : ""}`}
+                          onMouseDown={(ev) => {
+                            ev.preventDefault();
+                            pickSession(session);
+                          }}
+                          onMouseMove={() => setActive(i)}
+                        >
+                          <MessageSquare size={13} className="filemenu__icon" />
+                          <span className="slashmenu__name slashmenu__name--file">
+                            {pastChatTitle(session)}
+                            {turns ? ` (${session.turns} 轮)` : ""}
+                          </span>
+                        </button>
+                      </Tooltip>
+                    );
+                  })
+                )}
+              </>
+            )}
+            <button
+              className="slashmenu__item slashmenu__item--back"
+              onMouseDown={(ev) => {
+                ev.preventDefault();
+                setPastChatQuery("");
+                setShowPastChats(false);
+                setActive(0);
+              }}
+            >
+              <span className="slashmenu__name">← 返回文件列表</span>
+            </button>
+          </div>
+        ) : (
+          <VirtualMenu
+            items={atMenuItems}
+            activeIndex={active}
+            itemKey={(it) => (it.kind === "pastChats" ? "past:chats" : (it.entry.isDir ? "d:" : "f:") + it.entry.name)}
+            renderItem={(it, i) =>
+              it.kind === "pastChats" ? (
+                <button
+                  className={`slashmenu__item${i === active ? " slashmenu__item--active" : ""}`}
+                  onMouseDown={(ev) => {
+                    ev.preventDefault();
+                    void openPastChats();
+                  }}
+                  onMouseMove={() => setActive(i)}
+                >
+                  <MessageSquare size={13} className="filemenu__icon" />
+                  <span className="slashmenu__name">{PAST_CHATS_MENU_ITEM}</span>
+                </button>
+              ) : (
+                <button
+                  role="option"
+                  aria-selected={i === active}
+                  className={`slashmenu__item ${i === active ? "slashmenu__item--active" : ""}`}
+                  onMouseDown={(ev) => {
+                    ev.preventDefault();
+                    pickEntry(it.entry);
+                  }}
+                  onMouseMove={() => setActive(i)}
+                >
+                  {it.entry.isDir ? (
+                    <Folder size={13} className="filemenu__icon filemenu__icon--dir" />
+                  ) : (
+                    <FileText size={13} className="filemenu__icon" />
+                  )}
+                  <span className="slashmenu__name slashmenu__name--file">
+                    {it.entry.name}
+                    {it.entry.isDir ? "/" : ""}
+                  </span>
+                </button>
+              )
+            }
+          />
+        )
+      )}
       <div className="composer-toolbar">
         <div className="composer-modebar" role="toolbar" aria-label={t("composer.modeTitle")}>
           {modeOptions.map((option) => (
@@ -1043,7 +1560,7 @@ export function Composer({
           </div>
         )}
       </div>
-      {(attachments.length > 0 || workspaceRefs.length > 0) && (
+      {(attachments.length > 0 || workspaceRefs.length > 0 || sessionRefs.length > 0) && (
         <div className="composer-context" aria-label={t("composer.contextItems")}>
           {attachments.map((a) => (
             <div
@@ -1052,14 +1569,14 @@ export function Composer({
             >
               <Tooltip label={a.path}>
                 <span className="composer-context__label">
-                  {a.previewUrl ? <img src={a.previewUrl} alt="" /> : <FileText size={15} />}
+                  {a.previewUrl ? <img src={a.previewUrl} alt="" draggable={false} /> : <FileText size={15} />}
                   <span>{a.path.split("/").pop()}</span>
                 </span>
               </Tooltip>
               <Tooltip label={t("composer.removeImage")}>
                 <button
                   type="button"
-                  onClick={() => setAttachments((prev) => prev.filter((x) => x.path !== a.path))}
+                  onClick={() => removeAttachment(a.path)}
                 >
                   <X size={14} />
                 </button>
@@ -1081,6 +1598,30 @@ export function Composer({
                 <button
                   type="button"
                   onClick={() => removeWorkspaceReference(ref)}
+                >
+                  <X size={13} />
+                </button>
+              </Tooltip>
+            </div>
+          ))}
+          {sessionRefs.map((ref) => (
+            <div
+              className="composer-context__item composer-context__item--session"
+              key={ref.path}
+            >
+              <Tooltip label={ref.preview || ref.title}>
+                <span className="composer-context__label">
+                  <MessageSquare size={15} />
+                  <span>
+                    {ref.title}
+                    {typeof ref.turns === "number" ? ` (${ref.turns} 轮)` : ""}
+                  </span>
+                </span>
+              </Tooltip>
+              <Tooltip label="移除引用会话">
+                <button
+                  type="button"
+                  onClick={() => removeSessionRef(ref.path)}
                 >
                   <X size={13} />
                 </button>
@@ -1171,7 +1712,7 @@ export function Composer({
               <button
                 className="composer__btn composer__btn--send"
                 onClick={submit}
-                disabled={pendingPaste > 0 || (!text.trim() && attachments.length === 0 && workspaceRefs.length === 0) || disabled}
+                disabled={submitting || pendingPaste > 0 || (!text.trim() && attachments.length === 0 && workspaceRefs.length === 0) || disabled}
               >
                 <ArrowUp size={16} />
               </button>

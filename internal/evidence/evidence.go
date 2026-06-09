@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"reasonix/internal/provider"
 )
 
 // TodoItem mirrors the todo_write item shape the host needs for step matching.
@@ -325,6 +327,7 @@ func (l *Ledger) hasSuccessfulPaths(paths []string, accept func(Receipt) bool) b
 }
 
 type contextKey struct{}
+type sessionMessagesKey struct{}
 
 func WithLedger(ctx context.Context, ledger *Ledger) context.Context {
 	if ledger == nil {
@@ -336,6 +339,20 @@ func WithLedger(ctx context.Context, ledger *Ledger) context.Context {
 func FromContext(ctx context.Context) (*Ledger, bool) {
 	ledger, ok := ctx.Value(contextKey{}).(*Ledger)
 	return ledger, ok && ledger != nil
+}
+
+// WithSessionMessages attaches the full conversation history so verifyStepEvidence
+// can fall back to scanning the transcript when the per-turn ledger misses a
+// command (cross-turn references, non-bash tool calls, truncated command strings).
+func WithSessionMessages(ctx context.Context, msgs []provider.Message) context.Context {
+	return context.WithValue(ctx, sessionMessagesKey{}, msgs)
+}
+
+// SessionMessagesFromContext retrieves the conversation history attached by
+// WithSessionMessages.
+func SessionMessagesFromContext(ctx context.Context) ([]provider.Message, bool) {
+	msgs, ok := ctx.Value(sessionMessagesKey{}).([]provider.Message)
+	return msgs, ok
 }
 
 func ReceiptFromToolCall(toolName string, args json.RawMessage, success bool, readOnly bool) Receipt {

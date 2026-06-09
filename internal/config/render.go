@@ -148,8 +148,9 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	} else {
 		b.WriteString("# system_prompt_file = \"prompts/system.md\"   # overrides system_prompt when set\n")
 	}
-	fmt.Fprintf(&b, "max_steps   = %d\n", c.Agent.MaxSteps)
-	fmt.Fprintf(&b, "temperature = %s\n", formatFloat(c.Agent.Temperature))
+	fmt.Fprintf(&b, "max_steps         = %d   # executor tool-call rounds; 0 = no limit\n", c.Agent.MaxSteps)
+	fmt.Fprintf(&b, "planner_max_steps = %d   # planner read-only tool-call rounds; 0 = no limit\n", c.Agent.PlannerMaxSteps)
+	fmt.Fprintf(&b, "temperature       = %s\n", formatFloat(c.Agent.Temperature))
 	autoPlan := c.Agent.AutoPlan
 	switch strings.ToLower(strings.TrimSpace(autoPlan)) {
 	case "on", "ask":
@@ -273,6 +274,8 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	}
 	b.WriteString("\n")
 
+	renderLSPConfig(&b, c.LSP)
+
 	b.WriteString("[skills]\n")
 	if len(c.Skills.Paths) > 0 {
 		fmt.Fprintf(&b, "paths = %s   # extra custom skill roots\n", renderStringArray(c.Skills.Paths))
@@ -298,15 +301,15 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	b.WriteString("[permissions]\n")
 	b.WriteString("# Per-call gating. mode = writer fallback when no rule matches: ask|allow|deny.\n")
 	b.WriteString("# Readers always default to allow. Precedence: deny > ask > allow > fallback.\n")
-	b.WriteString("# Rules are \"ToolName\" or \"ToolName(glob)\"; '*' matches any run, '?' one char.\n")
+	b.WriteString("# Rules are \"Tool\" or \"Tool(specifier)\"; e.g. Bash(go test:*), Edit(src/**).\n")
 	mode := c.Permissions.Mode
 	if mode == "" {
 		mode = "ask"
 	}
 	fmt.Fprintf(&b, "mode  = %q\n", mode)
-	b.WriteString(renderRuleList("deny", c.Permissions.Deny, `["bash(rm -rf*)", "bash(git push*)"]   # hard-blocked in every mode`))
-	b.WriteString(renderRuleList("allow", c.Permissions.Allow, `["bash(go test*)", "bash(git status*)"]   # never prompted`))
-	b.WriteString(renderRuleList("ask", c.Permissions.Ask, `["write_file"]   # force a prompt even if otherwise allowed`))
+	b.WriteString(renderRuleList("deny", c.Permissions.Deny, `["Bash(rm -rf*)", "Bash(git push*)"]   # hard-blocked in every mode`))
+	b.WriteString(renderRuleList("allow", c.Permissions.Allow, `["Bash(go test:*)", "Bash(git status:*)"]   # never prompted`))
+	b.WriteString(renderRuleList("ask", c.Permissions.Ask, `["Edit(src/**)"]   # force a prompt even if otherwise allowed`))
 	b.WriteString("\n")
 
 	b.WriteString("[sandbox]\n")
@@ -413,6 +416,68 @@ func shouldRenderSystemPrompt(c, defaults *Config, scope RenderScope) bool {
 		return true
 	}
 	return strings.TrimSpace(c.Agent.SystemPrompt) != "" && c.Agent.SystemPrompt != defaults.Agent.SystemPrompt
+}
+
+func renderLSPConfig(b *strings.Builder, cfg LSPConfig) {
+	b.WriteString("[lsp]\n")
+	fmt.Fprintf(b, "enabled = %v   # language server tools; servers launch lazily when used\n", cfg.Enabled)
+	if len(cfg.Servers) == 0 {
+		b.WriteString("# [lsp.servers.go]\n")
+		b.WriteString("# command = \"gopls\"\n")
+		b.WriteString("# args = []\n")
+		b.WriteString("# extensions = [\".go\"]\n\n")
+		return
+	}
+	b.WriteString("\n")
+
+	langs := make([]string, 0, len(cfg.Servers))
+	for lang := range cfg.Servers {
+		langs = append(langs, lang)
+	}
+	sort.Strings(langs)
+	for _, lang := range langs {
+		srv := cfg.Servers[lang]
+		fmt.Fprintf(b, "[lsp.servers.%s]\n", renderTOMLKeyPart(lang))
+		if srv.Command != "" {
+			fmt.Fprintf(b, "command = %q\n", srv.Command)
+		}
+		if len(srv.Args) > 0 {
+			fmt.Fprintf(b, "args = %s\n", renderStringArray(srv.Args))
+		}
+		if len(srv.Env) > 0 {
+			fmt.Fprintf(b, "env = %s\n", renderStringMap(srv.Env))
+		}
+		if srv.LanguageID != "" {
+			fmt.Fprintf(b, "language_id = %q\n", srv.LanguageID)
+		}
+		if len(srv.Extensions) > 0 {
+			fmt.Fprintf(b, "extensions = %s\n", renderStringArray(srv.Extensions))
+		}
+		if srv.InstallHint != "" {
+			fmt.Fprintf(b, "install_hint = %q\n", srv.InstallHint)
+		}
+		b.WriteString("\n")
+	}
+}
+
+func renderTOMLKeyPart(key string) string {
+	if isBareTOMLKey(key) {
+		return key
+	}
+	return strconv.Quote(key)
+}
+
+func isBareTOMLKey(key string) bool {
+	if key == "" {
+		return false
+	}
+	for _, r := range key {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_' || r == '-' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 // renderStringArray renders a []string as a TOML inline array.

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -126,6 +127,54 @@ func TestBackgroundCloseHideStrategyByPlatform(t *testing.T) {
 		if got := backgroundCloseUsesApplicationHide(tt.goos); got != tt.want {
 			t.Fatalf("backgroundCloseUsesApplicationHide(%q) = %v, want %v", tt.goos, got, tt.want)
 		}
+	}
+}
+
+func TestBackgroundRestoreMaximiseStrategy(t *testing.T) {
+	tests := []struct {
+		goos      string
+		maximised bool
+		want      bool
+	}{
+		{goos: "windows", maximised: true, want: true},
+		{goos: "linux", maximised: true, want: true},
+		{goos: "darwin", maximised: true, want: false},
+		{goos: "windows", maximised: false, want: false},
+	}
+	for _, tt := range tests {
+		if got := backgroundRestoreShouldMaximise(tt.goos, tt.maximised); got != tt.want {
+			t.Fatalf("backgroundRestoreShouldMaximise(%q, %v) = %v, want %v", tt.goos, tt.maximised, got, tt.want)
+		}
+	}
+}
+
+func TestBackgroundRestorePlanAvoidsNormalWindowFlash(t *testing.T) {
+	tests := []struct {
+		name      string
+		goos      string
+		maximised bool
+		want      backgroundRestorePlan
+	}{
+		{
+			name:      "maximised Windows window",
+			goos:      "windows",
+			maximised: true,
+			want:      backgroundRestorePlan{maximiseBeforeShow: true},
+		},
+		{
+			name:      "normal Windows window",
+			goos:      "windows",
+			maximised: false,
+			want:      backgroundRestorePlan{unminimiseAfterShow: true},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := backgroundRestorePlanFor(tt.goos, tt.maximised)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("backgroundRestorePlanFor(%q, %v) = %v, want %v", tt.goos, tt.maximised, got, tt.want)
+			}
+		})
 	}
 }
 
@@ -325,6 +374,9 @@ api_key_env = "DEEPSEEK_API_KEY"
 		if p.Name != "deepseek" {
 			continue
 		}
+		if !p.BuiltIn {
+			t.Fatalf("deepseek provider should be marked built-in for official endpoint: %+v", p)
+		}
 		if !p.Added || !p.KeySet || len(p.Models) != 2 || p.Models[0] != "deepseek-v4-flash" || p.Models[1] != "deepseek-v4-pro" || p.Default != "deepseek-v4-flash" {
 			t.Fatalf("deepseek provider = %+v, want added repaired official model list", p)
 		}
@@ -334,6 +386,53 @@ api_key_env = "DEEPSEEK_API_KEY"
 		return
 	}
 	t.Fatalf("settings providers missing deepseek: %+v", got.Providers)
+}
+
+func TestSettingsTreatsReservedProviderNameWithExternalEndpointAsCustom(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	t.Setenv("DEEPSEEK_API_KEY", "sk-test")
+	if err := os.MkdirAll(filepath.Dir(config.UserConfigPath()), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.WriteFile(config.UserConfigPath(), []byte(`
+default_model = "deepseek/deepseek-v4-Flash"
+
+[desktop]
+provider_access = ["deepseek"]
+
+[[providers]]
+name = "deepseek"
+kind = "openai"
+base_url = "https://opencode.ai/zen/go/v1"
+models = ["deepseek-v4-Flash", "deepseek-v4-pro", "glm-5"]
+default = "deepseek-v4-Flash"
+api_key_env = "DEEPSEEK_API_KEY"
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	got := NewApp().Settings()
+	var custom *ProviderView
+	for i := range got.Providers {
+		if got.Providers[i].Name == "deepseek" {
+			custom = &got.Providers[i]
+			break
+		}
+	}
+	if custom == nil {
+		t.Fatalf("settings providers missing deepseek: %+v", got.Providers)
+	}
+	if custom.BuiltIn {
+		t.Fatalf("external deepseek endpoint should be custom, got built-in provider: %+v", *custom)
+	}
+	if !custom.Added || !custom.KeySet || custom.BaseURL != "https://opencode.ai/zen/go/v1" {
+		t.Fatalf("external deepseek provider = %+v, want added key-set custom opencode endpoint", *custom)
+	}
+	for _, p := range got.OfficialProviders {
+		if p.Name == "deepseek" && p.Added {
+			t.Fatalf("official DeepSeek template should not be marked added by external endpoint: %+v", p)
+		}
+	}
 }
 
 func TestSettingsInfersLegacyProviderAccessWhenMissing(t *testing.T) {
@@ -1674,7 +1773,7 @@ tier = "lazy"
 	t.Fatalf("broken MCP missing from Capabilities: %+v", view.Servers)
 }
 
-func TestSetMCPServerTierPersistsCodegraphConfig(t *testing.T) {
+func TestSetMCPServerTierEnablesCodegraphAndIgnoresLegacyTier(t *testing.T) {
 	t.Setenv("HOME", robustTempDir(t))
 	t.Setenv("USERPROFILE", robustTempDir(t))
 	t.Setenv("XDG_CONFIG_HOME", robustTempDir(t))
@@ -1695,7 +1794,7 @@ auto_install = true
 	app.setTestCtrl(control.New(control.Options{Host: plugin.NewHost()}), "")
 	defer app.activeCtrl().Close()
 
-	if err := app.SetMCPServerTier("codegraph", "background"); err != nil {
+	if err := app.SetMCPServerTier("codegraph", "eager"); err != nil {
 		t.Fatalf("SetMCPServerTier(codegraph): %v", err)
 	}
 	cfg, err := config.Load()
@@ -1703,17 +1802,17 @@ auto_install = true
 		t.Fatal(err)
 	}
 	if !cfg.Codegraph.Enabled {
-		t.Fatal("codegraph enabled = false, want true after selecting a startup tier")
+		t.Fatal("codegraph enabled = false, want true after legacy tier update")
 	}
 	if got := cfg.Codegraph.Tier; got != "" {
-		t.Fatalf("codegraph tier = %q, want migrated empty", got)
+		t.Fatalf("codegraph tier = %q, want ignored legacy tier", got)
 	}
 	userCfg := config.LoadForEdit(config.UserConfigPath())
 	if !userCfg.Codegraph.Enabled {
-		t.Fatal("user codegraph enabled = false, want true after selecting a startup tier")
+		t.Fatal("user codegraph enabled = false, want true after legacy tier update")
 	}
 	if got := userCfg.Codegraph.Tier; got != "" {
-		t.Fatalf("user codegraph tier = %q, want migrated empty", got)
+		t.Fatalf("user codegraph tier = %q, want ignored legacy tier", got)
 	}
 	if !mcpFailed(app.activeCtrl(), "codegraph") {
 		t.Fatalf("Host.Failures() = %+v, want codegraph failure recorded for missing runtime", app.activeCtrl().Host().Failures())

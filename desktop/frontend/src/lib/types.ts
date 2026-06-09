@@ -241,6 +241,16 @@ export interface SessionMeta {
   topicTitle?: string;
 }
 
+// SessionReference is a session selected via @ past:chats for context injection.
+export interface SessionReference {
+  path: string;
+  title: string;
+  preview?: string;
+  turns?: number;
+  createdAt?: number;
+  lastActivityAt?: number;
+}
+
 export interface WorkspaceView {
   path: string;
   name: string;
@@ -311,6 +321,19 @@ export interface WorkspaceChangesView {
   files: WorkspaceChangeView[];
   gitAvailable: boolean;
   gitErr?: string;
+  gitBranch?: string;
+}
+
+export interface GitCommitView {
+  hash: string;
+  author: string;
+  date: string;
+  message: string;
+}
+
+export interface GitCommitDetailView {
+  diff?: string;
+  files?: string[];
 }
 
 export interface ComposerInsertRequest {
@@ -510,6 +533,7 @@ export interface NetworkView {
 export interface AgentView {
   temperature: number;
   maxSteps: number;
+  plannerMaxSteps: number;
   systemPrompt: string;
 }
 

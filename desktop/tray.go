@@ -92,11 +92,7 @@ func (a *App) trayLocale() string {
 }
 
 func (a *App) showFromTray() {
-	ctx := a.ctx
-	if ctx == nil {
-		return
-	}
-	showFromBackground(ctx)
+	a.showMainWindow()
 }
 
 func (a *App) quitFromTray() {

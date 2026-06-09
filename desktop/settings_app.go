@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -72,9 +73,10 @@ type NetworkView struct {
 }
 
 type AgentView struct {
-	Temperature  float64 `json:"temperature"`
-	MaxSteps     int     `json:"maxSteps"`
-	SystemPrompt string  `json:"systemPrompt"`
+	Temperature     float64 `json:"temperature"`
+	MaxSteps        int     `json:"maxSteps"`
+	PlannerMaxSteps int     `json:"plannerMaxSteps"`
+	SystemPrompt    string  `json:"systemPrompt"`
 }
 
 // SettingsView is the whole Settings panel payload.
@@ -132,15 +134,35 @@ func desktopModelRefsProvider(c *config.Config, ref, name string) bool {
 	return false
 }
 
-func builtInProviderNames() map[string]bool {
-	out := map[string]bool{}
-	for _, p := range config.Default().Providers {
-		out[p.Name] = true
+func officialProviderHost(baseURL string) string {
+	u, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil {
+		return ""
 	}
-	for _, name := range []string{"deepseek", "deepseek-flash", "mimo-api", "mimo-token-plan", "mimo-pro"} {
-		out[name] = true
+	return strings.ToLower(u.Hostname())
+}
+
+func officialProviderKindFromEntry(p config.ProviderEntry) string {
+	host := officialProviderHost(p.BaseURL)
+	switch config.CanonicalDesktopOfficialProviderName(p.Name) {
+	case "deepseek":
+		if host == "api.deepseek.com" {
+			return "deepseek"
+		}
+	case "mimo-api":
+		if host == "api.xiaomimimo.com" {
+			return "mimo-api"
+		}
+	case "mimo-token-plan":
+		if host == "token-plan-cn.xiaomimimo.com" {
+			return "mimo-token-plan"
+		}
 	}
-	return out
+	return ""
+}
+
+func isOfficialBuiltInProvider(p config.ProviderEntry) bool {
+	return officialProviderKindFromEntry(p) != ""
 }
 
 func providerAccessSet(names []string) map[string]bool {
@@ -183,7 +205,7 @@ func removeProviderAccess(c *config.Config, names ...string) {
 func providerViewFromEntry(p config.ProviderEntry, builtIn, added bool) ProviderView {
 	return ProviderView{
 		Name: p.Name, BuiltIn: builtIn, Added: added, Kind: p.Kind, BaseURL: p.BaseURL,
-		Models: nonNil(p.ModelList()), ModelsURL: p.ModelsURL, Default: p.DefaultModel(),
+		Models: nonNil(p.ChatModelList()), ModelsURL: p.ModelsURL, Default: p.DefaultModel(),
 		APIKeyEnv:         p.APIKeyEnv,
 		KeySet:            p.APIKeyEnv != "" && os.Getenv(p.APIKeyEnv) != "",
 		BalanceURL:        p.BalanceURL,
@@ -208,6 +230,24 @@ func officialProviderViews(added map[string]bool) []ProviderView {
 	return out
 }
 
+func officialProviderAddedSet(cfg *config.Config) map[string]bool {
+	out := map[string]bool{}
+	if cfg == nil {
+		return out
+	}
+	access := providerAccessSet(cfg.Desktop.ProviderAccess)
+	for i := range cfg.Providers {
+		p := cfg.Providers[i]
+		if !access[p.Name] {
+			continue
+		}
+		if kind := officialProviderKindFromEntry(p); kind != "" {
+			out[kind] = true
+		}
+	}
+	return out
+}
+
 // Settings returns the current configuration for the Settings panel.
 func (a *App) Settings() SettingsView {
 	cfg, cfgPath, err := a.loadDesktopUserConfigForEdit()
@@ -223,6 +263,7 @@ func (a *App) Settings() SettingsView {
 				Deny:  []string{},
 			},
 			Sandbox:           SandboxView{Bash: "enforce", AllowWrite: []string{}},
+			Agent:             AgentView{PlannerMaxSteps: 12},
 			AutoPlan:          "off",
 			DesktopTheme:      "dark",
 			DesktopThemeStyle: "graphite",
@@ -264,7 +305,7 @@ func (a *App) Settings() SettingsView {
 				Password: cfg.Network.Proxy.Password,
 			},
 		},
-		Agent:             AgentView{Temperature: cfg.Agent.Temperature, MaxSteps: cfg.Agent.MaxSteps, SystemPrompt: cfg.Agent.SystemPrompt},
+		Agent:             AgentView{Temperature: cfg.Agent.Temperature, MaxSteps: cfg.Agent.MaxSteps, PlannerMaxSteps: cfg.Agent.PlannerMaxSteps, SystemPrompt: cfg.Agent.SystemPrompt},
 		DesktopLanguage:   cfg.DesktopLanguage(),
 		DesktopTheme:      cfg.DesktopTheme(),
 		DesktopThemeStyle: cfg.DesktopThemeStyle(),
@@ -273,12 +314,11 @@ func (a *App) Settings() SettingsView {
 		ProviderKinds:     nonNil(provider.Kinds()),
 		Bypass:            ctrl != nil && ctrl.Bypass(),
 	}
-	builtIns := builtInProviderNames()
 	added := providerAccessSet(cfg.Desktop.ProviderAccess)
-	v.OfficialProviders = officialProviderViews(added)
+	v.OfficialProviders = officialProviderViews(officialProviderAddedSet(cfg))
 	for i := range cfg.Providers {
 		p := &cfg.Providers[i]
-		v.Providers = append(v.Providers, providerViewFromEntry(*p, builtIns[p.Name], added[p.Name]))
+		v.Providers = append(v.Providers, providerViewFromEntry(*p, isOfficialBuiltInProvider(*p), added[p.Name]))
 	}
 	return v
 }
@@ -740,7 +780,11 @@ func (a *App) RemoveProviderAccess(name string) error {
 	if name == "" {
 		return fmt.Errorf("remove provider access: empty provider name")
 	}
-	if builtInProviderNames()[name] {
+	cfg, _, err := a.loadDesktopUserConfigForEdit()
+	if err != nil {
+		return err
+	}
+	if p, ok := cfg.Provider(name); ok && isOfficialBuiltInProvider(*p) {
 		return a.removeBuiltInProviderAccessAndRetargetTabs(name)
 	}
 	return a.deleteProviderAndRetargetTabs(name)
@@ -1060,12 +1104,13 @@ func (a *App) MigrateDesktopPreferences(language, theme, style string) error {
 	})
 }
 
-// SetAgentParams updates sampling temperature, the optional max-steps guard, and
-// the base system prompt.
-func (a *App) SetAgentParams(temperature float64, maxSteps int, systemPrompt string) error {
+// SetAgentParams updates sampling temperature, optional step guards, and the
+// base system prompt.
+func (a *App) SetAgentParams(temperature float64, maxSteps int, plannerMaxSteps int, systemPrompt string) error {
 	return a.applyConfigChange(func(c *config.Config) error {
 		c.Agent.Temperature = temperature
 		c.Agent.MaxSteps = maxSteps
+		c.Agent.PlannerMaxSteps = plannerMaxSteps
 		c.Agent.SystemPrompt = systemPrompt
 		return nil
 	})

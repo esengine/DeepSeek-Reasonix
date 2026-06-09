@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"reasonix/internal/event"
+	"reasonix/internal/permission"
 )
 
 // fakeNotifier captures Notify calls and answers Request via an injectable hook,
@@ -223,6 +224,59 @@ func TestUpdateSinkApprovalAllowAlways(t *testing.T) {
 	case c := <-got:
 		if c != (approveCall{id: "9", allow: true, session: true, persist: false}) {
 			t.Errorf("approve = %+v, want {9 true true}", c)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("approve was never called")
+	}
+}
+
+func TestUpdateSinkApprovalBashPrefix(t *testing.T) {
+	fn := &fakeNotifier{onReq: func(_ string, params any) (json.RawMessage, error) {
+		raw, _ := json.Marshal(params)
+		var p PermissionRequestParams
+		if err := json.Unmarshal(raw, &p); err != nil {
+			t.Fatalf("permission params: %v", err)
+		}
+		var hasExactSession, hasPrefix, hasPersistPrefix bool
+		for _, opt := range p.Options {
+			hasExactSession = hasExactSession || opt.OptionID == string(OptAllowAlways)
+			hasPrefix = hasPrefix || opt.OptionID == string(OptAllowPrefix)
+			hasPersistPrefix = hasPersistPrefix || opt.OptionID == string(OptPersistPrefix)
+		}
+		if hasExactSession {
+			t.Fatalf("options = %+v, exact bash session choice should be omitted when a prefix is available", p.Options)
+		}
+		if !hasPrefix || !hasPersistPrefix {
+			t.Fatalf("options = %+v, want bash prefix choices", p.Options)
+		}
+		if len(p.Options) != 4 {
+			t.Fatalf("options = %+v, want allow once, prefix session, prefix persistent, reject", p.Options)
+		}
+		res, _ := json.Marshal(PermissionRequestResult{
+			Outcome: PermissionOutcome{Outcome: "selected", OptionID: string(OptPersistPrefix)},
+		})
+		return res, nil
+	}}
+	sink := newUpdateSink(fn, "sess-1")
+	type scopedApproveCall struct {
+		id      string
+		allow   bool
+		session bool
+		persist bool
+		scope   string
+	}
+	got := make(chan scopedApproveCall, 1)
+	sink.bindApproveWithScope(func(id string, allow, session, persist bool, scope string) {
+		got <- scopedApproveCall{id, allow, session, persist, scope}
+	})
+
+	sink.Emit(event.Event{Kind: event.ApprovalRequest, Approval: event.Approval{ID: "10", Tool: "bash", Subject: "go test ./..."}})
+
+	select {
+	case c := <-got:
+		want := scopedApproveCall{id: "10", allow: true, session: true, persist: true, scope: permission.ApprovalScopePrefix}
+		if c != want {
+			t.Errorf("approve = %+v, want %+v", c, want)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("approve was never called")

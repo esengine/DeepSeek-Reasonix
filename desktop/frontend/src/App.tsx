@@ -18,6 +18,7 @@ import {
   Trash2,
 } from "lucide-react";
 import logoWordmark from "./assets/logo-wordmark.svg";
+import { useToast } from "./lib/toast";
 import { asArray } from "./lib/array";
 import { clearLegacyLangPref, normalizeLangPref, readLegacyLangPref, t, useI18n, useT } from "./lib/i18n";
 import { useController, type Item, type LiveStream } from "./lib/useController";
@@ -39,6 +40,7 @@ import { OnboardingOverlay } from "./components/OnboardingOverlay";
 import { TabBar } from "./components/TabBar";
 import { ProjectTree } from "./components/ProjectTree";
 import { CopyButton } from "./components/CopyButton";
+import { CommandPalette, type PaletteItem } from "./components/CommandPalette";
 import { parseTodos } from "./lib/tools";
 import { shouldShowTodoPanel } from "./lib/todoVisibility";
 import type { ComposerInsertRequest, Meta, Mode, SessionMeta, SettingsTab, TabMeta } from "./lib/types";
@@ -55,6 +57,7 @@ import {
   themeForStyle,
   type Theme,
 } from "./lib/theme";
+import { applyTextSize, DEFAULT_TEXT_SIZE, getTextSize, nextTextSize } from "./lib/textSize";
 import { useWindowStatePersistence } from "./lib/windowState";
 
 const SIDEBAR_COLLAPSED_KEY = "reasonix.sidebar.collapsed";
@@ -337,6 +340,26 @@ function ShellHotkeys() {
   return null;
 }
 
+/** Global hotkey handler for text-size shortcuts (Ctrl/Cmd + Plus/Minus/0). */
+function TextSizeHotkeys() {
+  useEffect(() => {
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      if (e.key !== "+" && e.key !== "=" && e.key !== "-" && e.key !== "0") return;
+
+      e.preventDefault();
+      if (e.key === "0") {
+        applyTextSize(DEFAULT_TEXT_SIZE);
+        return;
+      }
+      applyTextSize(nextTextSize(getTextSize(), e.key === "-" ? -1 : 1));
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
+  return null;
+}
+
 export default function App() {
   const {
     state,
@@ -382,6 +405,7 @@ export default function App() {
   const [needsOnboarding, setNeedsOnboarding] = useState<boolean | null>(null);
   const [settingsTarget, setSettingsTarget] = useState<SettingsTab | null>(null);
   const [histView, setHistView] = useState<HistoryViewState | null>(null);
+  const { showToast } = useToast();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(loadSidebarCollapsed);
   const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidth);
   const [sidebarResizing, setSidebarResizing] = useState(false);
@@ -399,6 +423,7 @@ export default function App() {
   const [renamingTopicId, setRenamingTopicId] = useState<string | null>(null);
   const [topicTitleDraft, setTopicTitleDraft] = useState("");
   const [topicExportOpen, setTopicExportOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const topicRenameSkipCommitRef = useRef(false);
   const topicRenameCommitHandledRef = useRef(false);
 
@@ -611,39 +636,6 @@ export default function App() {
   const todos = useMemo(() => (todoItem ? parseTodos(todoItem.args) : []), [todoItem]);
   const [dismissedTodo, setDismissedTodo] = useState<string | null>(null);
   const showTodos = shouldShowTodoPanel(todoItem?.id, dismissedTodo, todos);
-  const [todoNow, setTodoNow] = useState(() => Date.now());
-  const todoSeenRef = useRef<{ id: string; at: number } | null>(null);
-
-  useEffect(() => {
-    if (!todoItem) {
-      todoSeenRef.current = null;
-      return;
-    }
-    if (todoSeenRef.current?.id !== todoItem.id) {
-      todoSeenRef.current = { id: todoItem.id, at: Date.now() };
-      setTodoNow(Date.now());
-    }
-  }, [todoItem]);
-
-  useEffect(() => {
-    if (!showTodos) return;
-    const id = window.setInterval(() => setTodoNow(Date.now()), 15000);
-    return () => window.clearInterval(id);
-  }, [showTodos]);
-
-  const todoStale = useMemo(() => {
-    if (!showTodos || !todoEntry) return false;
-    const after = state.items.slice(todoEntry.index + 1);
-    const completedToolsAfter = after.filter(
-      (it) => it.kind === "tool" && it.name !== "todo_write" && !it.parentId && (it.status === "done" || it.status === "error"),
-    ).length;
-    const finalAssistantAfter = after.some((it) => it.kind === "assistant" && !it.streaming && it.text.trim() !== "");
-    const readinessNoticeAfter = after.some(
-      (it) => it.kind === "notice" && /final-answer readiness|todo_write|complete_step/i.test(it.text),
-    );
-    const staleByTime = state.running && todoSeenRef.current?.id === todoEntry.item.id && todoNow - todoSeenRef.current.at > 90_000;
-    return completedToolsAfter >= 2 || finalAssistantAfter || readinessNoticeAfter || staleByTime;
-  }, [showTodos, state.items, state.running, todoEntry, todoNow]);
 
   // useDeferredValue lets React prioritise Composer input (high-priority) over
   // Transcript re-renders (low-priority) during streaming. When a keystroke
@@ -1080,6 +1072,17 @@ export default function App() {
     setTabRevealSignal((signal) => signal + 1);
   }, [activeTab?.scope, activeTab?.workspaceRoot, openGlobalTab, openProjectTab, refreshTabMetas, state.meta?.cwd]);
 
+  // ── Command palette (⌘K) ────────────────────────────────────────────
+  useEffect(() => {
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey || event.key.toLowerCase() !== "k") return;
+      event.preventDefault();
+      setPaletteOpen((open) => !open);
+    };
+    window.addEventListener("keydown", onKeyDown, { capture: true });
+    return () => window.removeEventListener("keydown", onKeyDown, { capture: true });
+  }, []);
+
   const handleMessageAction = useCallback(async (turn: number, scope: string) => {
     await rewind(turn, scope);
     if (scope === "fork") {
@@ -1117,24 +1120,85 @@ export default function App() {
     setHistView({ kind: "trash", sessions: await listTrashedSessions() });
   }, [listTrashedSessions]);
   const closeHistory = useCallback(() => setHistView(null), []);
+
+  // ── Command palette (⌘K) item builder ───────────────────────────────
+  const buildPaletteItems = useCallback((): PaletteItem[] => {
+    const items: PaletteItem[] = [];
+
+    for (const tab of tabMetas) {
+      items.push({
+        id: `tab:${tab.id}`,
+        title: tab.topicTitle || "Untitled",
+        hint: tab.scope === "global" ? "Global" : tab.workspaceName || tab.workspaceRoot,
+        group: t("sidebar.conversations"),
+        keywords: [tab.label],
+        run: () => void handleTabChange(tab.id),
+      });
+    }
+
+    items.push(
+      {
+        id: "action:new-session",
+        title: t("topbar.newSession"),
+        group: "Actions",
+        keywords: ["new", "chat", "session"],
+        run: () => void handleNewTab(),
+      },
+      {
+        id: "action:history",
+        title: t("sidebar.allHistory"),
+        group: "Actions",
+        keywords: ["history", "sessions", "past"],
+        run: () => void openAllHistory(),
+      },
+      {
+        id: "action:settings",
+        title: t("topbar.settings"),
+        group: "Actions",
+        keywords: ["preferences", "config", "options"],
+        run: () => setSettingsTarget("general"),
+      },
+      {
+        id: "action:trash",
+        title: t("sidebar.trash"),
+        group: "Actions",
+        keywords: ["deleted", "bin"],
+        run: () => void openTrash(),
+      },
+    );
+
+    return items;
+  }, [tabMetas, handleTabChange, handleNewTab, openAllHistory, openTrash, t]);
   const onResumeSession = useCallback(
     async (session: SessionMeta) => {
       if (state.running) return;
-      setHistView(null);
       const scope = session.scope || (session.workspaceRoot ? "project" : "global");
-      let targetTab: TabMeta | undefined;
-      if (scope === "project" && session.workspaceRoot && session.topicId) {
-        targetTab = await openProjectTab(session.workspaceRoot, session.topicId);
-      } else if (scope === "global" && session.topicId) {
-        targetTab = await openGlobalTab(session.topicId);
-      }
-      await resumeSession(session.path, targetTab?.id);
-      if (targetTab) {
+      try {
+        let targetTab: TabMeta;
+        if (scope === "project" && session.workspaceRoot && session.topicId) {
+          targetTab = await openProjectTab(session.workspaceRoot, session.topicId);
+        } else if (scope === "global" && session.topicId) {
+          targetTab = await openGlobalTab(session.topicId);
+        } else {
+          throw new Error(scope === "global" && !session.topicId
+            ? t("history.failedOpenSession")
+            : (session.topicId ? "Missing workspaceRoot" : t("history.failedOpenSession")));
+        }
+        setHistView(null);
+        await resumeSession(session.path, targetTab.id);
         await refreshTabMetas();
         setTabRevealSignal((signal) => signal + 1);
+      } catch (err: any) {
+        setHistView(null);
+        if (scope === "project" && session.workspaceRoot) {
+          const name = workspaceDisplayName(session.workspaceRoot);
+          showToast(t("history.failedOpenProject", { name, path: session.workspaceRoot }));
+        } else {
+          showToast(err?.message || String(err));
+        }
       }
     },
-    [openGlobalTab, openProjectTab, refreshTabMetas, state.running, resumeSession],
+    [openGlobalTab, openProjectTab, refreshTabMetas, state.running, resumeSession, t, showToast],
   );
   // Delete / rename act on disk, then re-fetch so the panel reflects the change.
   const onDeleteSession = useCallback(
@@ -1278,6 +1342,7 @@ export default function App() {
   return (
     <ShellExpandProvider>
     <ShellHotkeys />
+    <TextSizeHotkeys />
     <div className={`app app--${desktopPlatform}`}>
       <div
         ref={layoutRef}
@@ -1310,7 +1375,7 @@ export default function App() {
             {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
           </button>
           <div className="app-chrome__identity" aria-label="Reasonix">
-            <img src={logoWordmark} alt="" className="app-chrome__logo" />
+            <img src={logoWordmark} alt="" className="app-chrome__logo" draggable={false} />
             <span className="app-chrome__separator">/</span>
             <span className="app-chrome__scope">{appChromeScopeLabel(activeTab, state.meta)}</span>
           </div>
@@ -1533,15 +1598,15 @@ export default function App() {
           </main>
 
           <footer className="footer" ref={footerRef}>
-            {showTodos && <TodoPanel todos={todos} stale={todoStale} onDismiss={() => setDismissedTodo(todoItem!.id)} />}
+            {showTodos && <TodoPanel todos={todos} onDismiss={() => setDismissedTodo(todoItem!.id)} />}
             {state.approval && (
               <ApprovalModal
                 approval={state.approval}
-                onAnswer={(allow, session, persist) => {
+                onAnswer={(allow, session, persist, scope) => {
                   // Approving an exit_plan_mode plan leaves plan mode; sync the
                   // tab-local indicator and persisted safe mode immediately.
                   if (state.approval!.tool === "exit_plan_mode" && allow) applyMode("normal");
-                  approve(state.approval!.id, allow, session, persist);
+                  approve(state.approval!.id, allow, session, persist, scope);
                 }}
                 onRevisePlan={(text) => {
                   setPendingPlanRevision(text);
@@ -1719,6 +1784,14 @@ export default function App() {
       )}
 
       {needsOnboarding && <OnboardingOverlay onComplete={() => setNeedsOnboarding(false)} />}
+
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        items={buildPaletteItems()}
+        placeholder="Quick actions…"
+        emptyText="No matches"
+      />
     </div>
     </ShellExpandProvider>
   );

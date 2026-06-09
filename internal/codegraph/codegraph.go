@@ -40,17 +40,18 @@ You have codegraph tools for symbol-level code intelligence. For architecture qu
 - codegraph_files — project file tree with symbol counts
 Use grep/read_file for content search (comments, strings, config values) and when codegraph is not available.`
 
-// BundleDirName is the directory, beside the reasonix executable, that the release
-// archive unpacks the CodeGraph bundle into. Its launcher lives at
-// <BundleDirName>/bin/codegraph, with the bundled node runtime and lib/ beside it;
-// the launcher resolves those relative to itself, so the bundle is relocatable.
+// BundleDirName is the optional directory, beside the reasonix executable, where
+// an operator can place an unpacked CodeGraph bundle for offline use. Its
+// launcher lives at <BundleDirName>/bin/codegraph, with the bundled node runtime
+// and lib/ beside it; the launcher resolves those relative to itself, so the
+// bundle is relocatable.
 const BundleDirName = "codegraph"
 
 // Resolve returns the absolute path to the CodeGraph launcher. Search order:
 //  1. override — an explicit [codegraph].path from config (~ and ${VAR} expanded);
-//  2. the per-version cache populated by Install (the normal case);
+//  2. the per-version cache populated by Install;
 //  3. a system-installed `codegraph` on PATH;
-//  4. a bundle placed beside the reasonix executable (fallback for manual setups).
+//  4. a bundle placed beside the executable (manual/offline fallback).
 //
 // ok is false when none resolves — the caller then triggers Install (or skips the
 // feature), so the codegraph_* tools come online once the cache is populated.
@@ -76,6 +77,19 @@ func Resolve(override string) (string, bool) {
 // The executable path is symlink-resolved first so a launcher installed via a
 // symlink (e.g. a package manager's bin shim) still points at the real bundle.
 func bundled() (string, bool) {
+	base, ok := bundledBaseDir()
+	if !ok {
+		return "", false
+	}
+	for _, rel := range launcherNames() {
+		if p := filepath.Join(base, rel); isExec(p) {
+			return p, true
+		}
+	}
+	return "", false
+}
+
+func bundledBaseDir() (string, bool) {
 	exe, err := os.Executable()
 	if err != nil {
 		return "", false
@@ -83,13 +97,7 @@ func bundled() (string, bool) {
 	if real, err := filepath.EvalSymlinks(exe); err == nil {
 		exe = real
 	}
-	base := filepath.Join(filepath.Dir(exe), BundleDirName)
-	for _, rel := range launcherNames() {
-		if p := filepath.Join(base, rel); isExec(p) {
-			return p, true
-		}
-	}
-	return "", false
+	return filepath.Join(filepath.Dir(exe), BundleDirName), true
 }
 
 // launcherNames are the bundle-relative launcher paths to try, per OS. The unix

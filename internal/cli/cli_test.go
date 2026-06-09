@@ -49,6 +49,19 @@ func TestChdirTo(t *testing.T) {
 	}
 }
 
+func TestReserveNativeScrollbackFrameWritesOnlyNewlines(t *testing.T) {
+	var b bytes.Buffer
+	reserveNativeScrollbackFrame(&b, 3)
+	if got := b.String(); got != "\n\n\n" {
+		t.Fatalf("reserveNativeScrollbackFrame wrote %q, want only three newlines", got)
+	}
+
+	reserveNativeScrollbackFrame(&b, 0)
+	if got := b.String(); got != "\n\n\n" {
+		t.Fatalf("reserveNativeScrollbackFrame(0) changed output to %q", got)
+	}
+}
+
 func mustGetwd(t *testing.T) string {
 	t.Helper()
 	cwd, err := os.Getwd()
@@ -92,8 +105,11 @@ func TestMetadataCommandsDoNotProbeTerminalTheme(t *testing.T) {
 			t.Fatalf("help rc = %d, want 0", rc)
 		}
 	})
-	if !strings.Contains(out, "Usage:") {
+	if !strings.Contains(out, "Usage:") && !strings.Contains(out, "用法：") {
 		t.Fatalf("help output missing usage:\n%s", out)
+	}
+	if !strings.Contains(out, "reasonix run  [--model NAME] [--max-steps N] [-c|--continue] [--resume PATH] <task>") {
+		t.Fatalf("help output missing run resume flags:\n%s", out)
 	}
 }
 

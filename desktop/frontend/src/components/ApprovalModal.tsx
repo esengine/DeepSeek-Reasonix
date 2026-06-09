@@ -10,7 +10,7 @@ export function ApprovalModal({
   onExitPlan,
 }: {
   approval: WireApproval;
-  onAnswer: (allow: boolean, session: boolean, persist: boolean) => void;
+  onAnswer: (allow: boolean, session: boolean, persist: boolean, scope?: string) => void;
   onRevisePlan?: (text: string) => void;
   onExitPlan?: () => void;
 }) {
@@ -21,8 +21,14 @@ export function ApprovalModal({
   const cardRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const isPlanApproval = approval.tool === "exit_plan_mode";
+  const isBashApproval = approval.tool === "bash";
   const subject = approval.subject.trim();
+  const bashPrefix = isBashApproval ? bashCommandPrefix(subject) : "";
+  const hasBashPrefix = bashPrefix !== "";
   const subjectSummary = subject.split("\n").find((line) => line.trim())?.trim() ?? "";
+  const exactSessionRule = approvalSessionRule(approval.tool, subject);
+  const exactPersistentRule = approvalPersistentRule(approval.tool, subject);
+  const prefixRule = hasBashPrefix ? `Bash(${bashPrefix})` : "";
 
   const choosePlanAction = (key: string) => {
     if (key === "1") setRevisionOpen((open) => !open);
@@ -32,7 +38,9 @@ export function ApprovalModal({
 
   const chooseToolAction = (key: string) => {
     if (key === "1") onAnswer(true, false, false);
+    else if (key === "2" && hasBashPrefix) onAnswer(true, true, false, "prefix");
     else if (key === "2") onAnswer(true, true, false);
+    else if (key === "3" && hasBashPrefix) onAnswer(true, true, true, "prefix");
     else if (key === "3") onAnswer(true, true, true);
     else if (key === "4" || key === "Escape") onAnswer(false, false, false);
   };
@@ -56,7 +64,7 @@ export function ApprovalModal({
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [isPlanApproval, onAnswer, onExitPlan]);
+  }, [hasBashPrefix, isPlanApproval, onAnswer, onExitPlan]);
 
   useEffect(() => {
     if (revisionOpen) inputRef.current?.focus();
@@ -142,9 +150,35 @@ export function ApprovalModal({
             />
           )}
           <PromptAction keyLabel="1" label={t("approval.allowOnce")} onClick={() => onAnswer(true, false, false)} selected />
-          <PromptAction keyLabel="2" label={t("approval.allowSession")} onClick={() => onAnswer(true, true, false)} />
-          <PromptAction keyLabel="3" label={t("approval.allowPersistent")} onClick={() => onAnswer(true, true, true)} />
-          <PromptAction keyLabel="4" label={t("approval.deny")} onClick={() => onAnswer(false, false, false)} />
+          {hasBashPrefix ? (
+            <>
+              <PromptAction
+                keyLabel="2"
+                label={<RuleActionLabel label={t("approval.allowRuleSession")} rule={prefixRule} />}
+                onClick={() => onAnswer(true, true, false, "prefix")}
+              />
+              <PromptAction
+                keyLabel="3"
+                label={<RuleActionLabel label={t("approval.allowRulePersistent")} rule={prefixRule} />}
+                onClick={() => onAnswer(true, true, true, "prefix")}
+              />
+              <PromptAction keyLabel="4" label={t("approval.deny")} onClick={() => onAnswer(false, false, false)} />
+            </>
+          ) : (
+            <>
+              <PromptAction
+                keyLabel="2"
+                label={<RuleActionLabel label={t("approval.allowRuleSession")} rule={exactSessionRule} />}
+                onClick={() => onAnswer(true, true, false)}
+              />
+              <PromptAction
+                keyLabel="3"
+                label={<RuleActionLabel label={t("approval.allowRulePersistent")} rule={exactPersistentRule} />}
+                onClick={() => onAnswer(true, true, true)}
+              />
+              <PromptAction keyLabel="4" label={t("approval.deny")} onClick={() => onAnswer(false, false, false)} />
+            </>
+          )}
         </>
       }
     >
@@ -153,4 +187,61 @@ export function ApprovalModal({
       )}
     </PromptShelf>
   );
+}
+
+function RuleActionLabel({ label, rule }: { label: string; rule: string }) {
+  return (
+    <span className="approval-rule-label">
+      <span>{label}</span>
+      <code>{rule}</code>
+    </span>
+  );
+}
+
+function approvalSessionRule(tool: string, subject: string): string {
+  if (tool === "bash" && subject) return `Bash(${subject})`;
+  if (isFileMutationTool(tool)) return "Edit";
+  return tool;
+}
+
+function approvalPersistentRule(tool: string, subject: string): string {
+  if (tool === "bash" && subject) return `Bash(${subject})`;
+  if (isFileMutationTool(tool)) return subject ? `Edit(${subject})` : "Edit";
+  return tool;
+}
+
+function bashCommandPrefix(subject: string): string {
+  const command = subject.trim();
+  if (!command || command.includes("`") || command.includes("$(") || /[;|&<>\n]/.test(command)) return "";
+  const fields = command.split(/\s+/).filter(Boolean);
+  if (fields.length < 2) return "";
+  if (dangerousBashCommand(command)) return "";
+  const base = fields[0].toLowerCase();
+  if ((base === "npm" || base === "pnpm" || base === "yarn" || base === "bun") && fields[1]?.toLowerCase() === "run") {
+    return fields.length >= 3 ? `${fields[0]} ${fields[1]} ${fields[2]}:*` : "";
+  }
+  return `${fields[0]} ${fields[1]}:*`;
+}
+
+function dangerousBashCommand(command: string): boolean {
+  return /^rm\s+-[^\s]*[rf][^\s]*\b/.test(command)
+    || /^git\s+push\b.*\s--force\b/.test(command)
+    || /^git\s+push\b.*\s-f\b/.test(command)
+    || /^git\s+reset\s+--hard\b/.test(command)
+    || /^git\s+clean\s+-f\b/.test(command)
+    || /^chmod\s+(?:-R\s+)?777\b/.test(command)
+    || /^chown\b/.test(command)
+    || /^sudo\b/.test(command)
+    || /^mkfs\b/.test(command)
+    || /^dd\s+if=/.test(command)
+    || /^fdisk\b/.test(command);
+}
+
+function isFileMutationTool(tool: string): boolean {
+  return tool === "write_file"
+    || tool === "edit_file"
+    || tool === "multi_edit"
+    || tool === "notebook_edit"
+    || tool === "delete_range"
+    || tool === "delete_symbol";
 }

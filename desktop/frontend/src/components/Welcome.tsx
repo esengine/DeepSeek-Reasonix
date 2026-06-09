@@ -10,7 +10,7 @@ export function Welcome({ onPrompt }: { onPrompt: (text: string) => void }) {
   const examples = [t("welcome.ex1"), t("welcome.ex2"), t("welcome.ex3")];
   return (
     <div className="welcome">
-      <img src={logoWordmark} className="welcome__logo" alt="Reasonix" />
+      <img src={logoWordmark} className="welcome__logo" alt="Reasonix" draggable={false} />
       <div className="welcome__tag">{t("welcome.tagline")}</div>
 
       <div className="welcome__hints">

@@ -300,6 +300,8 @@ func (a *App) OpenProjectTab(workspaceRoot, topicID string) (TabMeta, error) {
 	if abs, err := filepath.Abs(workspaceRoot); err == nil {
 		workspaceRoot = abs
 	}
+	saveWorkspace(workspaceRoot)
+	_ = addProject(workspaceRoot, "")
 
 	a.mu.Lock()
 	// If already open, just activate.
@@ -333,6 +335,7 @@ func (a *App) OpenProjectTab(workspaceRoot, topicID string) (TabMeta, error) {
 	a.mu.Unlock()
 
 	a.startTabControllerBuild(tab)
+	a.emitProjectTreeChanged()
 	return a.tabMeta(tab, true), nil
 }
 
@@ -2299,9 +2302,13 @@ func currentTabMode(tab *WorkspaceTab) string {
 	return normalizeTabMode(tab.mode)
 }
 
+// persistedTabMode is the composer mode saved with a tab so it survives reload
+// and app relaunch. plan and yolo are both remembered (a restored yolo tab keeps
+// its status-bar indicator); "normal" is the default and isn't persisted. (#3517)
 func persistedTabMode(mode string) string {
-	if normalizeTabMode(mode) == "plan" {
-		return "plan"
+	switch normalizeTabMode(mode) {
+	case "plan", "yolo":
+		return normalizeTabMode(mode)
 	}
 	return ""
 }

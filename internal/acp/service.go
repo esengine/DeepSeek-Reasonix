@@ -243,7 +243,7 @@ func (s *service) sessionNew(ctx context.Context, raw json.RawMessage) (any, err
 		return nil, &RPCError{Code: ErrInternal, Message: "session/new: " + err.Error()}
 	}
 	ctrl.EnableInteractiveApproval()
-	sink.bindApprove(ctrl.Approve)
+	sink.bindApproveWithScope(ctrl.ApproveWithScope)
 
 	now := time.Now().UTC()
 	sess := &acpSession{id: id, ctrl: ctrl, sink: sink, cwd: cwd, createdAt: now, updatedAt: now}
@@ -321,7 +321,7 @@ func (s *service) openExistingSession(ctx context.Context, method, id, cwdParam 
 		return &RPCError{Code: ErrInternal, Message: method + ": " + err.Error()}
 	}
 	ctrl.EnableInteractiveApproval()
-	sink.bindApprove(ctrl.Approve)
+	sink.bindApproveWithScope(ctrl.ApproveWithScope)
 
 	dir := ctrl.SessionDir()
 	if dir == "" {

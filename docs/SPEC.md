@@ -168,7 +168,8 @@ prefix cache-stable:
 - The **planner** (low-frequency) runs in its own session with the same standing
   memory context plus a filtered read-only research tool set, then produces a
   concise plan. It can inspect files/docs before planning, but writer and
-  workflow tools are not exposed to it.
+  workflow tools are not exposed to it. `agent.planner_max_steps` bounds this
+  read-only exploration independently from the executor's `agent.max_steps`.
 - The plan is handed off as structured text to the **executor** — a full
   tool-using `Agent` in its own session — which carries it out.
 - The sessions never mix, so neither model's prefix is disturbed by the other's
@@ -215,18 +216,34 @@ type Policy struct { Mode Decision; Allow, Ask, Deny []Rule }
 func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Decision
 ```
 
-- **Rule syntax.** A rule is `ToolName` (matches any call to that tool) or
-  `ToolName(glob)` (matches when the call's *subject* matches the glob, via
-  `path.Match`). The subject is extracted generically from the call's JSON args
-  by a small set of known keys — `command` (bash), `path` / `file_path`
-  (file tools), `pattern` (grep/glob) — so tools need not change. A rule whose
-  subject the args don't expose only matches in its bare `ToolName` form.
+- **Rule syntax.** A rule is `Tool` (matches any call in that tool family) or
+  `Tool(specifier)` (matches when the call's *subject* matches the specifier).
+  Bash and file mutation approvals use Claude Code-style families such as
+  `Bash(npm run build)`, `Bash(npm run test:*)`, and `Edit(docs/**)`. Legacy
+  lowercase tool IDs and `tool=literal` rules still load for compatibility. The
+  `:*` suffix marks a Bash command-prefix approval; generated prefix rules also
+  reject later commands that introduce shell operators, so `Bash(go test:*)`
+  does not cover `go test ./... && rm -rf tmp`.
+  Legacy `Bash(go test *)` prefix rules still load, but new rules are saved as
+  `Bash(go test:*)`. The subject is extracted generically from the call's JSON
+  args by a small set of
+  known keys — `command` (bash), `path` / `file_path` (file tools), `pattern`
+  (grep/glob) — so tools need not change. A rule whose subject the args don't
+  expose only matches in its bare `Tool` form.
 - **Precedence.** `deny` > `ask` > `allow` > fallback. Fallback is `Allow` for
   read-only tools and `Mode` (default `Ask`) for writers. `deny` always wins, so
-  a broad `allow = ["bash"]` can still be carved by `deny = ["bash(rm -rf*)"]`;
+  a broad `allow = ["Bash"]` can still be carved by `deny = ["Bash(rm -rf*)"]`;
   conversely `ask` overrides a broad `allow` to force a prompt on a risky subset.
 - **Resolving `Ask`.** The interactive front-end (the chat TUI) prompts the user
-  — allow once / always allow / deny — via an `Approver`. A non-interactive run
+  — allow once / allow this approval scope for the session / always allow this
+  approval scope / deny — via an `Approver`. For Bash, the default scope is the
+  concrete command subject, and the user may choose a conservative command-prefix
+  scope when available (for example `Bash(go test:*)`) so similar invocations in
+  the same session or saved config do not prompt again. For file-mutation tools,
+  a session grant covers editing for the rest of the session while a persisted
+  grant is path-scoped when a path is available, stored as `Edit(<path>)` so all
+  built-in file-mutating tools share it. A
+  non-interactive run
   (`reasonix run`, a sub-agent, anything with no TTY / no approver) cannot prompt, so
   it resolves `Ask` to **allow** — preserving autonomous behaviour. A `Deny` is a
   hard block in *every* mode: the tool never executes and the model receives a
@@ -243,8 +260,10 @@ each writer/bash call. `deny` rules harden both modes.
 
 The chat TUI accepts `/command` input. Three kinds share one dispatch:
 
-- **Built-in actions** (`/compact`, `/new`, `/effort`, `/mcp`, `/help`) manipulate session
-  state locally and never reach the model.
+- **Built-in actions** (`/compact`, `/new`/`/clear`, `/effort`, `/mcp`, `/help`) manipulate session
+  state locally and never reach the model. `/new` and its Claude Code-compatible
+  alias `/clear` start a fresh model context while saving the previous transcript
+  for resume/history; they do not delete persisted history or project memory.
 - **Custom commands** are Markdown files under `.reasonix/commands/` (project) and
   `~/.config/reasonix/commands/` (user); the project dir overrides the user dir on a
   name clash. A file `review.md` becomes `/review`; a subdirectory namespaces it
@@ -344,7 +363,9 @@ type Chunk struct {
 Resolution order: **flag > project `./reasonix.toml` > user `~/.config/reasonix/config.toml`
 > built-in defaults**. Secrets come from the environment via `api_key_env` and
 are never stored in config files. A `.env` in the working directory is loaded if
-present.
+present. Step-limit preferences usually belong in the user config; project
+`reasonix.toml` should override them only when the repository needs shared
+runtime bounds.
 
 ```toml
 default_model = "deepseek"   # provider name (→ its default model) or "provider/model"
@@ -352,8 +373,9 @@ default_model = "deepseek"   # provider name (→ its default model) or "provide
 
 [agent]
 system_prompt = "You are Reasonix, a coding agent..."  # or system_prompt_file = "..."
-max_steps     = 25
-temperature   = 0.0
+max_steps         = 0    # executor tool-call rounds; 0 = no limit
+planner_max_steps = 12   # planner read-only tool-call rounds; 0 = no limit
+temperature       = 0.0
 # planner_model = "mimo"   # optional: two-model collaboration (low-frequency planner)
 # subagent_model = "deepseek-pro"   # optional default for runAs=subagent skills
 # subagent_models = { review = "deepseek-pro", security_review = "deepseek-pro" }
@@ -394,8 +416,8 @@ bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local ca
 
 [permissions]
 mode  = "ask"                              # writer fallback when no rule matches: ask|allow|deny
-deny  = ["bash(rm -rf*)", "bash(git push*)"]   # hard-blocked in every mode
-allow = ["bash(go test*)", "bash(git status*)"]  # never prompted
+deny  = ["Bash(rm -rf*)", "Bash(git push*)"]   # hard-blocked in every mode
+allow = ["Bash(go test:*)", "Bash(git status:*)"]  # never prompted
 ask   = []                                 # force a prompt even if otherwise allowed
 
 [sandbox]

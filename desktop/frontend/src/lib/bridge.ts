@@ -42,6 +42,8 @@ import type {
   UpdateProgress,
   WireEvent,
   WorkspaceChangesView,
+  GitCommitView,
+  GitCommitDetailView,
   WorkspaceView,
 } from "./types";
 
@@ -86,7 +88,9 @@ export interface AppBindings {
   Cancel(): Promise<void>;
   CancelTab(tabID: string): Promise<void>;
   Approve(id: string, allow: boolean, session: boolean, persist: boolean): Promise<void>;
+  ApproveWithScope(id: string, allow: boolean, session: boolean, persist: boolean, scope: string): Promise<void>;
   ApproveTab(tabID: string, id: string, allow: boolean, session: boolean, persist: boolean): Promise<void>;
+  ApproveTabWithScope(tabID: string, id: string, allow: boolean, session: boolean, persist: boolean, scope: string): Promise<void>;
   AnswerQuestion(id: string, answers: QuestionAnswer[]): Promise<void>;
   AnswerQuestionForTab(tabID: string, id: string, answers: QuestionAnswer[]): Promise<void>;
   SetPlanMode(on: boolean): Promise<void>;
@@ -142,6 +146,10 @@ export interface AppBindings {
   SearchFileRefs(query: string): Promise<DirEntry[]>;
   ReadFile(rel: string): Promise<FilePreview>;
   WorkspaceChanges(): Promise<WorkspaceChangesView>;
+  GitBranches(): Promise<string[]>;
+  GitCheckout(branch: string): Promise<void>;
+  WorkspaceGitHistory(path: string): Promise<GitCommitView[]>;
+  WorkspaceGitCommitDetail(hash: string, path: string): Promise<GitCommitDetailView>;
   OpenWorkspacePath(rel: string): Promise<void>;
   RevealWorkspacePath(rel: string): Promise<void>;
   RevealPath(path: string): Promise<void>;
@@ -183,7 +191,7 @@ export interface AppBindings {
   SetDesktopLanguage(lang: string): Promise<void>;
   SetDesktopAppearance(theme: string, style: string): Promise<void>;
   MigrateDesktopPreferences(language: string, theme: string, style: string): Promise<void>;
-  SetAgentParams(temperature: number, maxSteps: number, systemPrompt: string): Promise<void>;
+  SetAgentParams(temperature: number, maxSteps: number, plannerMaxSteps: number, systemPrompt: string): Promise<void>;
   SetTrayLocale(locale: "en" | "zh"): Promise<void>;
   // SetBypass toggles YOLO mode (auto-approve every tool call this session; deny
   // rules still apply). Runtime-only — not written to config.
@@ -288,10 +296,32 @@ export function onUpdaterProgress(cb: (p: UpdateProgress) => void): () => void {
 export function onFilesDropped(cb: (paths: string[]) => void): () => void {
   const rt = typeof window !== "undefined" ? window.runtime : undefined;
   if (!rt?.OnFileDrop) return () => {};
+
+  // Wails' internal ResolveFilePaths throws when a non-file object (e.g. the
+  // window icon) is dragged onto the webview. The error is uncaught and crashes
+  // the app. Intercept it here so only real file drops reach the callback.
+  const suppressNonFileDragError = (e: ErrorEvent) => {
+    if (e.message?.includes("additional File object is not a file on the disk")) {
+      e.preventDefault();
+    }
+  };
+  const suppressNonFileDragRejection = (e: PromiseRejectionEvent) => {
+    const msg = e.reason?.message ?? String(e.reason);
+    if (msg.includes("additional File object is not a file on the disk")) {
+      e.preventDefault();
+    }
+  };
+  window.addEventListener("error", suppressNonFileDragError);
+  window.addEventListener("unhandledrejection", suppressNonFileDragRejection);
+
   rt.OnFileDrop((_x, _y, paths) => {
     if (Array.isArray(paths) && paths.length > 0) cb(paths);
   }, true);
-  return () => rt.OnFileDropOff?.();
+  return () => {
+    rt.OnFileDropOff?.();
+    window.removeEventListener("error", suppressNonFileDragError);
+    window.removeEventListener("unhandledrejection", suppressNonFileDragRejection);
+  };
 }
 
 // onReady subscribes to the agent:ready event fired when boot.Build completes.
@@ -555,7 +585,7 @@ function makeMockApp(): AppBindings {
       { name: "mimo-api", builtIn: true, added: false, kind: "openai", baseUrl: "https://api.xiaomimimo.com/v1", modelsUrl: "", models: ["mimo-v2.5-pro"], default: "mimo-v2.5-pro", apiKeyEnv: "MIMO_API_KEY", keySet: false, balanceUrl: "", contextWindow: 1_048_576, reasoningProtocol: "", supportedEfforts: [], defaultEffort: "" },
       { name: "mimo-token-plan", builtIn: true, added: false, kind: "openai", baseUrl: "https://token-plan-cn.xiaomimimo.com/v1", modelsUrl: "", models: ["mimo-v2.5-pro"], default: "mimo-v2.5-pro", apiKeyEnv: "MIMO_API_KEY", keySet: false, balanceUrl: "", contextWindow: 1_048_576, reasoningProtocol: "", supportedEfforts: [], defaultEffort: "" },
     ],
-    permissions: { mode: "ask", allow: ["ls", "read_file"], ask: [], deny: ["bash(rm *)"] },
+    permissions: { mode: "ask", allow: ["ls", "read_file"], ask: [], deny: ["Bash(rm:*)"] },
     sandbox: { bash: "enforce", network: true, workspaceRoot: "", allowWrite: [] },
     network: {
       proxyMode: "auto",
@@ -563,7 +593,7 @@ function makeMockApp(): AppBindings {
       noProxy: "",
       proxy: { type: "socks5", server: "127.0.0.1", port: 7890, username: "", password: "" },
     },
-    agent: { temperature: 0.2, maxSteps: 0, systemPrompt: "You are Reasonix, a coding agent." },
+    agent: { temperature: 0.2, maxSteps: 0, plannerMaxSteps: 12, systemPrompt: "You are Reasonix, a coding agent." },
     desktopLanguage: "",
     desktopTheme: "dark",
     desktopThemeStyle: "graphite",
@@ -917,17 +947,24 @@ function makeMockApp(): AppBindings {
           await this.Cancel();
         },
         async Approve(_id, allow, session, persist) {
+          await this.ApproveWithScope(_id, allow, session, persist, "");
+        },
+        async ApproveWithScope(_id, allow, session, persist, scope) {
           if (!pendingApprovalPreview) return;
-      pendingApprovalPreview = false;
-      const suffix = persist ? "persisted" : session ? "allowed for session" : "allowed once";
-      emit({
-        kind: "message",
-        text: `approval preview answered: ${allow ? suffix : "denied"}`,
-      });
+          pendingApprovalPreview = false;
+          const scopeLabel = scope === "prefix" ? "prefix" : "scope";
+          const suffix = persist ? `${scopeLabel} grant saved` : session ? `${scopeLabel} grant active this session` : "allowed once";
+          emit({
+            kind: "message",
+            text: `approval preview answered: ${allow ? suffix : "denied"}`,
+          });
           emit({ kind: "turn_done" });
         },
         async ApproveTab(_tabID, id, allow, session, persist) {
-          await this.Approve(id, allow, session, persist);
+          await this.ApproveTabWithScope(_tabID, id, allow, session, persist, "");
+        },
+        async ApproveTabWithScope(_tabID, id, allow, session, persist, scope) {
+          await this.ApproveWithScope(id, allow, session, persist, scope);
         },
         async AnswerQuestion(_id, answers) {
       if (!pendingAskPreview) return;
@@ -1328,6 +1365,7 @@ function makeMockApp(): AppBindings {
     async WorkspaceChanges() {
       return {
         gitAvailable: true,
+        gitBranch: "main",
         files: [
           {
             path: "desktop/frontend/src/components/WorkspacePanel.tsx",
@@ -1341,6 +1379,23 @@ function makeMockApp(): AppBindings {
           { path: "internal/control/controller.go", sources: ["session"], turns: [1], latestTime: Date.now() - 120_000 },
         ],
       };
+    },
+    async GitBranches() {
+      return ["main", "dev", "feature/branch-switcher"];
+    },
+    async GitCheckout(_branch: string) {
+      console.info("mock GitCheckout", _branch);
+    },
+    async WorkspaceGitHistory(path: string) {
+      return [
+        { hash: "abcdef123456", author: "Mock Author", date: new Date().toISOString(), message: "Mock commit message for " + path },
+      ];
+    },
+    async WorkspaceGitCommitDetail(_hash: string, path: string) {
+      if (path) {
+        return { diff: "--- a/mock\n+++ b/mock\n@@ -1,1 +1,1 @@\n-mock\n+mock diff" };
+      }
+      return { files: ["mock_file_1.ts", "mock_file_2.ts"] };
     },
     async OpenWorkspacePath(rel: string) {
       console.info("mock OpenWorkspacePath", rel);
@@ -1526,8 +1581,8 @@ function makeMockApp(): AppBindings {
             settings.desktopThemeStyle = style;
           }
         },
-    async SetAgentParams(temperature: number, maxSteps: number, systemPrompt: string) {
-      settings.agent = { temperature, maxSteps, systemPrompt };
+    async SetAgentParams(temperature: number, maxSteps: number, plannerMaxSteps: number, systemPrompt: string) {
+      settings.agent = { temperature, maxSteps, plannerMaxSteps, systemPrompt };
     },
     async SetTrayLocale(_locale: "en" | "zh") {},
     async SetBypass(on: boolean) {

@@ -71,6 +71,12 @@ brew install esengine/reasonix/reasonix   # macOS
 Prebuilt archives (`darwin|linux|windows × amd64|arm64`) and `SHA256SUMS` are on
 every [GitHub release](https://github.com/esengine/DeepSeek-Reasonix/releases).
 
+### Code signing
+
+Windows builds are code-signed with a free certificate provided by the
+[SignPath Foundation](https://signpath.org/), with signing through
+[SignPath.io](https://signpath.io/).
+
 ### Build from source
 
 ```sh
@@ -100,6 +106,8 @@ default_model = "deepseek-flash"   # executor; set [agent].planner_model to add 
 # language    = "zh"               # ui language; empty = auto-detect from $LANG / $REASONIX_LANG
 
 [agent]
+max_steps = 0                    # executor tool-call rounds; 0 = no limit
+planner_max_steps = 12           # planner read-only tool-call rounds; 0 = no limit
 # planner_model = "mimo-pro"          # optional low-frequency planner
 # subagent_model = "deepseek-pro"     # optional default for runAs=subagent skills
 # subagent_models = { review = "deepseek-pro", security_review = "deepseek-pro" }
@@ -125,8 +133,8 @@ bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local ca
 
 [permissions]
 mode  = "ask"                                # writer fallback when no rule matches: ask|allow|deny
-deny  = ["bash(rm -rf*)", "bash(git push*)"] # hard-blocked in every mode
-allow = ["bash(go test*)"]                   # never prompted
+deny  = ["Bash(rm -rf*)", "Bash(git push*)"] # hard-blocked in every mode
+allow = ["Bash(go test:*)"]                  # never prompted
 
 [sandbox]
 # workspace_root = ""          # file-writers confined here; empty = current dir
@@ -137,10 +145,15 @@ name    = "example"
 command = "reasonix-plugin-example"
 ```
 
-Permissions gate each tool call: `deny` > `ask` > `allow` > fallback (readers
-always allow; writers fall back to `mode`). `reasonix chat` prompts before writers
-(`y` once · `a` this session · `n` no); `reasonix run` stays autonomous but still
-honours `deny`. See [`docs/SPEC.md`](docs/SPEC.md) for the full schema and contract.
+Permissions gate each tool call: `deny` > `ask` > `allow` > fallback. Bash and
+file mutation tools require approval by default; read-only tools generally do
+not. Approvals are stored and matched as permission rules, not button labels:
+for example `Bash(npm run build)`, `Bash(npm run test:*)`, and `Edit(docs/**)`.
+`reasonix chat` can grant Bash as an exact command or as a conservative command
+prefix (for example `Bash(go test:*)`), while file-editing tools share session
+edit grants and persist path-scoped rules such as `Edit(src/app.go)`.
+`reasonix run` stays autonomous but still honours `deny`. See
+[`docs/SPEC.md`](docs/SPEC.md) for the full schema and contract.
 
 Permissions are *policy* (which calls to allow / prompt). The **sandbox** is
 *enforcement*: the file-writers (`write_file` / `edit_file` / `multi_edit`)
@@ -207,8 +220,10 @@ convenient.
 
 ### Slash commands
 
-In `reasonix chat`, built-in commands (`/compact`, `/new`, `/rewind`, `/tree`,
+In `reasonix chat`, built-in commands (`/compact`, `/new`/`/clear`, `/rewind`, `/tree`,
 `/branch`, `/switch`, `/todo`, `/model`, `/effort`, `/mcp`, `/memory`, `/help`) run locally.
+`/new` starts a fresh model context while saving the previous transcript for
+history/resume; `/clear` is the Claude Code-compatible alias.
 `/tree` shows saved conversation branches, `/branch [name]` forks the current
 conversation tip, `/branch <turn> [name]` forks from an earlier checkpointed turn,
 and `/switch <id|name>` loads another branch. **Custom commands** are Markdown files under
@@ -248,11 +263,18 @@ separate cache-stable sessions) is a one-line edit afterwards — set
 ```toml
 [agent]
 planner_model = "deepseek-pro"   # used as the low-frequency planner
+planner_max_steps = 12           # read-only tool-call rounds before pausing
 ```
 
 The planner sees loaded `REASONIX.md` / `AGENTS.md` memory and a small read-only
 research tool set, so it can inspect relevant files before handing a plan to the
-executor. Writer and workflow tools remain executor-only.
+executor. Writer and workflow tools remain executor-only. `max_steps` limits the
+executor; `planner_max_steps` limits only the planner, and either can be set to
+`0` for no round limit.
+
+Keep personal step-limit preferences in the user config. Add them to a project's
+`./reasonix.toml` only when that repository needs a shared override, such as a
+larger planner limit for a very large codebase.
 
 Subagent skills inherit the executor model by default. Set `subagent_model` to
 run them on another configured model, or use `subagent_models` to override only

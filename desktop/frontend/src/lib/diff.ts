@@ -34,3 +34,34 @@ export function diffLines(a: string, b: string): DiffRow[] {
   while (j < m) rows.push({ type: "add", text: y[j++] });
   return rows;
 }
+
+// cleanGitDiff strips standard git diff headers (diff --git, index, ---, +++)
+// and hunk headers (@@ -x,y +x,y @@) so the view focuses directly on the changed lines.
+export function cleanGitDiff(diff: string): string {
+  const lines = diff.split("\n");
+  const cleaned: string[] = [];
+  let inHunk = false;
+
+  for (const line of lines) {
+    if (line.startsWith("@@ ")) {
+      inHunk = true;
+      // Skip the @@ line itself, optionally we could keep context if needed,
+      // but the user wants pure code changes.
+      continue;
+    }
+    if (inHunk) {
+      cleaned.push(line);
+    }
+  }
+
+  // If no hunks were found (unlikely for a valid diff), fallback to original logic
+  if (cleaned.length === 0) {
+    const match = diff.match(/^@@\s/m);
+    if (match && match.index !== undefined) {
+      return diff.slice(match.index).replace(/^@@.*$\n?/gm, "");
+    }
+    return diff;
+  }
+
+  return cleaned.join("\n");
+}

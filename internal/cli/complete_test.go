@@ -330,6 +330,28 @@ func TestEnterOnMCPWithTrailingSpaceSubmitsManager(t *testing.T) {
 	}
 }
 
+func TestEnterOnExactSlashArgSubmitsWhenPrefixAlsoMatches(t *testing.T) {
+	m := newTestChatTUI()
+	m.ctrl = control.New(control.Options{SessionDir: t.TempDir()})
+	m.input.SetValue("/resume 1")
+	m.completion = completion{
+		active:      true,
+		kind:        compSlashArg,
+		items:       []compItem{{label: "1", insert: "1"}, {label: "10", insert: "10"}},
+		sel:         0,
+		replaceFrom: len("/resume "),
+	}
+
+	got, _ := m.update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	next := got.(chatTUI)
+	if next.completion.active {
+		t.Fatalf("Enter on exact selected arg should close completion: %+v", next.completion)
+	}
+	if got := next.input.Value(); got != "" {
+		t.Fatalf("Enter on exact selected arg should submit command, input=%q", got)
+	}
+}
+
 // TestSlashArgCompletionRemoveNoHost proves "/mcp remove " stays closed when no
 // servers are connected (nothing to suggest), rather than showing an empty box.
 func TestSlashArgCompletionRemoveNoHost(t *testing.T) {

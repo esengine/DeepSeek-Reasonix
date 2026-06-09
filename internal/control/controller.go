@@ -73,8 +73,8 @@ type Controller struct {
 	cleanup       func()
 	autoPlan      string
 	classifier    autoPlanClassifier
-	startedOnce   bool              // guards the one-shot SessionStart hook on first turn
-	onRemember    func(rule string) // set via Options; invoked when user picks "always allow"
+	startedOnce   bool                             // guards the one-shot SessionStart hook on first turn
+	onRemember    func(rule string) RememberResult // set via Options; invoked when user picks "always allow"
 
 	// balanceURL/balanceKey target the active provider's optional wallet-balance
 	// endpoint (empty when the provider declares none). Captured at build so a
@@ -156,6 +156,16 @@ type approvalReply struct {
 	allow   bool
 	session bool
 	persist bool // true = write "always allow" rule to config
+	scope   string
+}
+
+// RememberResult describes what happened when an approval rule was persisted.
+type RememberResult struct {
+	Rule      string
+	Path      string
+	Saved     bool
+	CoveredBy string
+	Err       error
 }
 
 // Options carries the already-built pieces setup assembles. Lifecycle metadata
@@ -196,9 +206,9 @@ type Options struct {
 	AutoPlan      string
 	Classifier    autoPlanClassifier
 	// OnRemember, when set, is invoked with a new allow rule the user chose to
-	// persist to disk (e.g. "bash(go build*)"). The callback is wired into the
+	// persist to disk (e.g. "Bash(go test:*)"). The callback is wired into the
 	// permission Gate on EnableInteractiveApproval.
-	OnRemember func(rule string)
+	OnRemember func(rule string) RememberResult
 }
 
 // New builds a Controller. A nil Sink is replaced with event.Discard.
@@ -510,8 +520,8 @@ func lastAssistantText(msgs []provider.Message) string {
 // composition — emitting all output as events. The HTTP/SSE server uses this so
 // a browser client only POSTs the typed line.
 //
-// Slash commands route to the matching primitive: /compact and /new run their
-// session op and emit a Notice; /mcp__server__prompt and custom /commands
+// Slash commands route to the matching primitive: /compact and /new (or /clear)
+// run their session op and emit a Notice; /mcp__server__prompt and custom /commands
 // resolve to a turn; an unknown slash emits a Notice. Anything else is a normal
 // turn with its @-references resolved first.
 func (c *Controller) Submit(input string) {
@@ -551,7 +561,7 @@ func (c *Controller) submit(input, display string) {
 				}
 			}
 		}()
-	case trimmed == "/new":
+	case trimmed == "/new" || trimmed == "/clear":
 		go func() {
 			if err := c.NewSession(); err != nil {
 				c.notice("new session failed: " + err.Error())
@@ -809,15 +819,21 @@ func (c *Controller) Turn() int {
 }
 
 // Approve answers a pending ApprovalRequest by ID: allow runs the call, session
-// also remembers a grant for the rest of the session so the same tool+subject
-// isn't re-prompted. Unknown/expired IDs are ignored.
+// also remembers a grant for the rest of the session so the same approval scope
+// is not re-prompted. Unknown/expired IDs are ignored.
 func (c *Controller) Approve(id string, allow, session, persist bool) {
+	c.ApproveWithScope(id, allow, session, persist, permission.ApprovalScopeExact)
+}
+
+// ApproveWithScope answers a pending ApprovalRequest with an explicit approval
+// scope. Unknown/expired IDs are ignored.
+func (c *Controller) ApproveWithScope(id string, allow, session, persist bool, scope string) {
 	c.mu.Lock()
 	reply := c.approvals[id]
 	delete(c.approvals, id)
 	c.mu.Unlock()
 	if reply != nil {
-		reply <- approvalReply{allow: allow, session: session, persist: persist} // buffered, never blocks
+		reply <- approvalReply{allow: allow, session: session, persist: persist, scope: scope} // buffered, never blocks
 	}
 }
 
@@ -829,7 +845,11 @@ func (c *Controller) Approve(id string, allow, session, persist bool) {
 func (c *Controller) EnableInteractiveApproval() {
 	if c.executor != nil {
 		gate := permission.NewGate(c.policy, gateApprover{c})
-		gate.OnRemember = c.onRemember // wire "always allow" persistence callback
+		gate.OnRemember = func(rule string) {
+			if c.onRemember != nil {
+				_ = c.onRemember(rule)
+			}
+		} // wire legacy "always allow" persistence callback
 		c.executor.SetGate(gate)
 		c.executor.SetAsker(c)
 	}
@@ -2181,9 +2201,6 @@ func listItem(line string) (content string, level int, ok bool) {
 	return s, 0, true
 }
 
-// requestApproval emits an ApprovalRequest and blocks until Approve(ID, …)
-// answers or ctx is cancelled. A prior session grant for the same tool+subject
-// short-circuits. promptMu serialises outstanding prompts.
 // parseRewind parses the arguments after "/rewind". The user may provide:
 //
 //	/rewind              → latest checkpoint, both
@@ -2219,14 +2236,15 @@ func parseRewind(args string, cps []checkpoint.Meta) (int, RewindScope, error) {
 	return turn, scope, nil
 }
 
+// requestApproval emits an ApprovalRequest and blocks until Approve(ID, …)
+// answers or ctx is cancelled. A prior session grant for the same approval scope
+// short-circuits. promptMu serialises outstanding prompts.
 func (c *Controller) requestApproval(ctx context.Context, tool, subject string) (bool, bool, error) {
-	key := tool + "\x00" + subject
-
 	c.mu.Lock()
 	// YOLO/bypass and the just-approved-plan window auto-allow every approval
 	// without prompting; the plan gate routes through here too, so this is what
 	// stops a bypass session from blocking on plan approval. Deny rules bit upstream.
-	if c.bypass || c.autoApprove || c.granted[key] {
+	if c.bypass || c.autoApprove || c.sessionGrantAllowsLocked(tool, subject) {
 		c.mu.Unlock()
 		return true, false, nil
 	}
@@ -2238,7 +2256,7 @@ func (c *Controller) requestApproval(ctx context.Context, tool, subject string) 
 	// Re-check the grant: a session grant may have landed while we queued behind
 	// another prompt for the same subject.
 	c.mu.Lock()
-	if c.bypass || c.autoApprove || c.granted[key] {
+	if c.bypass || c.autoApprove || c.sessionGrantAllowsLocked(tool, subject) {
 		c.mu.Unlock()
 		return true, false, nil
 	}
@@ -2262,18 +2280,45 @@ func (c *Controller) requestApproval(ctx context.Context, tool, subject string) 
 		// Plan approvals are one-shot — never persist a session grant for them, or
 		// every future plan would auto-approve.
 		if r.allow && r.session && tool != planApprovalTool {
+			rule := permission.SessionGrantRuleForScope(tool, subject, r.scope)
 			c.mu.Lock()
-			c.granted[key] = true
+			c.granted[rule] = true
 			c.mu.Unlock()
 		}
-		// When persist is true, remember=true signals Gate.OnRemember to write
-		// the rule to the on-disk config. Plan approvals are excluded.
-		remember := r.persist && tool != planApprovalTool
-		return r.allow, remember, nil
+		if r.allow && r.persist && tool != planApprovalTool && c.onRemember != nil {
+			c.emitRememberResult(c.onRemember(permission.RememberRuleForScope(tool, subject, r.scope)))
+		}
+		return r.allow, false, nil
 	case <-ctx.Done():
 		c.mu.Lock()
 		delete(c.approvals, id)
 		c.mu.Unlock()
 		return false, false, ctx.Err()
+	}
+}
+
+func (c *Controller) sessionGrantAllowsLocked(tool, subject string) bool {
+	for rule := range c.granted {
+		if permission.RuleMatchesString(rule, tool, subject) {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *Controller) emitRememberResult(r RememberResult) {
+	if r.Err != nil {
+		c.sink.Emit(event.Event{
+			Kind:  event.Notice,
+			Level: event.LevelWarn,
+			Text:  fmt.Sprintf(i18n.M.PermissionSaveFailedFmt, r.Rule, r.Err),
+		})
+		return
+	}
+	switch {
+	case r.Saved:
+		c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: fmt.Sprintf(i18n.M.PermissionSavedFmt, r.Path, r.Rule)})
+	case strings.TrimSpace(r.CoveredBy) != "":
+		c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: fmt.Sprintf(i18n.M.PermissionAlreadyAllowedFmt, r.Path, r.CoveredBy)})
 	}
 }
