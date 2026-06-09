@@ -332,6 +332,16 @@ export function Composer({
   const [sessionRefs, setSessionRefs] = useState<SessionReference[]>([]);
   const [loadingPastChats, setLoadingPastChats] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  // Input history for up/down arrow navigation
+  const [inputHistory, setInputHistory] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem("reasonix:inputHistory");
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
+  const [historyIndex, setHistoryIndex] = useState(-1);
+  const [draftBeforeHistory, setDraftBeforeHistory] = useState("");
+  const navigatingHistoryRef = useRef(false);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const composerCardRef = useRef<HTMLDivElement>(null);
   const workspaceAnchorRef = useRef<HTMLDivElement>(null);
@@ -687,7 +697,19 @@ export function Composer({
     const baseSubmitText = [expandPastedBlocks(t), refs].filter(Boolean).join(t && refs ? " " : "");
     const submitText = sessionContext ? `${sessionContext}${baseSubmitText}` : baseSubmitText;
     onSend(displayText, submitText);
+    // Save to input history (deduplicate consecutive identical inputs)
+    if (t.trim()) {
+      setInputHistory((prev) => {
+        const last = prev.length > 0 ? prev[prev.length - 1] : null;
+        if (last === t.trim()) return prev;
+        const next = [...prev, t.trim()];
+        try { localStorage.setItem("reasonix:inputHistory", JSON.stringify(next)); } catch {}
+        return next;
+      });
+    }
     setText("");
+    setHistoryIndex(-1);
+    setDraftBeforeHistory("");
     clearAttachments();
     setWorkspaceRefs([]);
     setSessionRefs([]);
@@ -1250,6 +1272,48 @@ export function Composer({
       }
     }
 
+    // Input history navigation with Up/Down arrows
+    // Only trigger when cursor is on the first line (for multiline input)
+    if (!menuMode && !composing && inputHistory.length > 0) {
+      const textarea = taRef.current;
+      const cursorOnFirstLine = !textarea || textarea.selectionStart === 0 || !text.substring(0, textarea.selectionStart).includes("\n");
+      const cursorOnLastLine = !textarea || textarea.selectionEnd === text.length || !text.substring(textarea.selectionEnd).includes("\n");
+
+      if (e.key === "ArrowUp" && cursorOnFirstLine) {
+        e.preventDefault();
+        if (historyIndex === -1) {
+          // Save current draft before entering history
+          setDraftBeforeHistory(text);
+          const newIndex = inputHistory.length - 1;
+          setHistoryIndex(newIndex);
+          navigatingHistoryRef.current = true;
+          setText(inputHistory[newIndex]);
+        } else if (historyIndex > 0) {
+          const newIndex = historyIndex - 1;
+          setHistoryIndex(newIndex);
+          navigatingHistoryRef.current = true;
+          setText(inputHistory[newIndex]);
+        }
+        return;
+      }
+      if (e.key === "ArrowDown" && cursorOnLastLine && historyIndex >= 0) {
+        e.preventDefault();
+        if (historyIndex < inputHistory.length - 1) {
+          const newIndex = historyIndex + 1;
+          setHistoryIndex(newIndex);
+          navigatingHistoryRef.current = true;
+          setText(inputHistory[newIndex]);
+        } else {
+          // Restore draft
+          setHistoryIndex(-1);
+          navigatingHistoryRef.current = true;
+          setText(draftBeforeHistory);
+          setDraftBeforeHistory("");
+        }
+        return;
+      }
+    }
+
     // Enter sends; Shift+Enter newline. `composing` guards IME confirms.
     if (e.key === "Enter" && !e.shiftKey && !composing) {
       e.preventDefault();
@@ -1688,7 +1752,16 @@ export function Composer({
             ref={taRef}
             className="composer__input"
             value={text}
-            onChange={(e) => setText(e.target.value)}
+            onChange={(e) => {
+              setText(e.target.value);
+              // Reset history navigation only when user types manually (not when navigating via arrow keys)
+              if (navigatingHistoryRef.current) {
+                navigatingHistoryRef.current = false;
+              } else if (historyIndex !== -1) {
+                setHistoryIndex(-1);
+                setDraftBeforeHistory("");
+              }
+            }}
             onSelect={rememberCaret}
             onClick={rememberCaret}
             onKeyUp={rememberCaret}
