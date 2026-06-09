@@ -92,6 +92,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc libgtk-3-dev libwebkit2gtk-4.1-dev
 
+      # Linux: nfpm builds the .deb in desktop-build.sh's linux branch. go install
+      # drops it in ~/go/bin, already on PATH (same place the wails CLI lands below).
+      - name: Install nfpm
+        if: runner.os == 'Linux'
+        run: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.46.3
+
       # Windows: NSIS provides makensis for `wails build -nsis`.
       - name: Install NSIS
         if: runner.os == 'Windows'
