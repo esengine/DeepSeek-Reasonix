@@ -87,12 +87,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	if stderr == nil {
 		stderr = os.Stderr
 	}
-	root := opts.WorkspaceRoot
-	if root == "" {
-		if wd, err := os.Getwd(); err == nil {
-			root = wd
-		}
-	}
+	root := resolveWorkspaceRoot(opts.WorkspaceRoot)
 	// One-time import of v1/v0.5 legacy config — runs before Load so the freshly
 	// written config + ~/.env are picked up this same boot. CLI Run also calls this
 	// before config-only commands; this call stays as the shared frontend fallback.
@@ -245,11 +240,8 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// tools come online next session — otherwise point the user at the explicit
 	// install command. A failed init or fetch is a notice, not fatal.
 	//
-	// CodeGraph follows the same user-selectable tier model as ordinary MCP
-	// servers when a tier is set. EnsureInit only creates .codegraph/ (fast,
-	// size-independent). With no explicit tier — an upgraded config that predates
-	// the setting — it keeps the historical startup: warm projects eager so
-	// symbol tools are ready on the first turn, cold projects in the background.
+	// CodeGraph is fixed to background startup. Legacy tier values are ignored so
+	// enabling it never blocks chat startup.
 	if cfg.Codegraph.Enabled {
 		bin, ok := codegraph.Resolve(cfg.Codegraph.Path)
 		switch {
@@ -274,24 +266,8 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 						Text: "codegraph: preparing code-intelligence tools in the background — tools will appear when ready"})
 				}
 			}
-			if strings.TrimSpace(cfg.Codegraph.Tier) == "" {
-				if warm {
-					eagerSpecs = append(eagerSpecs, spec)
-				} else {
-					bgSpecs = append(bgSpecs, spec)
-					bgNotice()
-				}
-				break
-			}
-			switch cfg.Codegraph.ResolvedTier() {
-			case "eager":
-				eagerSpecs = append(eagerSpecs, spec)
-			case "background":
-				bgSpecs = append(bgSpecs, spec)
-				bgNotice()
-			default:
-				lazySpecs = append(lazySpecs, spec)
-			}
+			bgSpecs = append(bgSpecs, spec)
+			bgNotice()
 		case cfg.Codegraph.AutoInstall:
 			notify := func(msg string) { sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: msg}) }
 			notify("codegraph: fetching code-intelligence runtime in the background (one-time) — symbol-graph tools available next session")
@@ -825,6 +801,42 @@ func subagentModelKeys(name string) []string {
 		}
 	}
 	return keys
+}
+
+func resolveWorkspaceRoot(explicit string) string {
+	if explicit != "" {
+		return explicit
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	if root, ok := nearestGitRoot(wd); ok {
+		return root
+	}
+	return wd
+}
+
+func nearestGitRoot(start string) (string, bool) {
+	dir, err := filepath.Abs(start)
+	if err != nil {
+		dir = filepath.Clean(start)
+	}
+	for {
+		if isGitMarker(filepath.Join(dir, ".git")) {
+			return dir, true
+		}
+		next := filepath.Dir(dir)
+		if next == dir {
+			return "", false
+		}
+		dir = next
+	}
+}
+
+func isGitMarker(path string) bool {
+	fi, err := os.Stat(path)
+	return err == nil && (fi.IsDir() || fi.Mode().IsRegular())
 }
 
 // NewProvider builds a provider.Provider from a configured entry. Exported so

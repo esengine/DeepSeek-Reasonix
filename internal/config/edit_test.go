@@ -539,7 +539,7 @@ func TestCodegraphDefaultEnabledForUpgrades(t *testing.T) {
 		t.Fatal("default codegraph auto_install = false, want true")
 	}
 	if c.Codegraph.Tier != "" {
-		t.Fatalf("default codegraph tier = %q, want unset (boot then preserves warm→eager/cold→background)", c.Codegraph.Tier)
+		t.Fatalf("default codegraph tier = %q, want unset (background by default)", c.Codegraph.Tier)
 	}
 }
 

@@ -1841,12 +1841,7 @@ func (a *App) Capabilities() CapabilitiesView {
 		if loadedCfg != nil && !seen["codegraph"] {
 			status := "disabled"
 			if loadedCfg.Codegraph.Enabled {
-				switch loadedCfg.Codegraph.ResolvedTier() {
-				case "background", "eager":
-					status = "initializing"
-				default:
-					status = "deferred"
-				}
+				status = "initializing"
 			}
 			if s, ok := disabled["codegraph"]; ok {
 				s.Status = "disabled"
@@ -2353,8 +2348,8 @@ func (a *App) connectConfiguredMCPServerForTab(tab *WorkspaceTab, name string) (
 }
 
 // SetMCPServerTier is kept for old desktop bindings. New config writes drop the
-// retired tier field, so this only affects the active session before the next
-// config reload.
+// retired tier field; for CodeGraph this now means "enable and start in the
+// background".
 func (a *App) SetMCPServerTier(name, tier string) error {
 	if name == "codegraph" {
 		return a.setCodegraphTier(tier)
@@ -2429,14 +2424,13 @@ func (a *App) setCodegraphEnabled(enabled bool) error {
 	return nil
 }
 
-func (a *App) setCodegraphTier(tier string) error {
-	tier = normalizeMCPTier(tier)
+func (a *App) setCodegraphTier(_ string) error {
 	cfg, path, err := a.loadDesktopUserConfigForEdit()
 	if err != nil {
 		return err
 	}
 	cfg.Codegraph.Enabled = true
-	cfg.Codegraph.Tier = tier
+	cfg.Codegraph.Tier = ""
 	if err := cfg.SaveTo(path); err != nil {
 		return err
 	}
@@ -2450,7 +2444,7 @@ func (a *App) setCodegraphTier(tier string) error {
 	a.mu.Lock()
 	delete(tab.disabledMCP, "codegraph")
 	a.mu.Unlock()
-	if tier != "lazy" && !mcpConnected(tab.Ctrl, "codegraph") {
+	if !mcpConnected(tab.Ctrl, "codegraph") {
 		if _, err := tab.Ctrl.ConnectCodegraphMCPServer(cfg); err != nil {
 			recordCodegraphFailure(tab.Ctrl, cfg.Codegraph, err)
 			return nil

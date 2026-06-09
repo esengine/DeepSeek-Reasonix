@@ -211,9 +211,8 @@ type StatuslineConfig struct {
 // enabled but missing; set false to require an explicit `reasonix codegraph
 // install` (e.g. for air-gapped or headless runs). Path overrides binary
 // resolution; empty resolves the cache, then a `codegraph` on PATH, then a
-// bundle beside the executable. Tier matches ordinary MCP servers (lazy,
-// background, eager); when unset it preserves the historical warm→eager /
-// cold→background startup.
+// bundle beside the executable. CodeGraph always starts in the background when
+// enabled; legacy tier values are ignored and removed during config load.
 type CodegraphConfig struct {
 	Enabled     bool   `toml:"enabled"`
 	AutoInstall bool   `toml:"auto_install"`
@@ -226,7 +225,7 @@ func (c CodegraphConfig) ShouldAutoStart() bool {
 }
 
 func (c CodegraphConfig) ResolvedTier() string {
-	return resolvedMCPTier(c.Tier)
+	return "background"
 }
 
 // NetworkConfig controls outbound HTTP proxy settings. web_fetch reuses these

@@ -844,6 +844,85 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 	}
 }
 
+func TestBuildWarmCodegraphIgnoresLegacyEagerTier(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake launcher is a POSIX-sh script")
+	}
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+	if err := os.Mkdir(filepath.Join(dir, ".codegraph"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	launcher := filepath.Join(dir, "slow-codegraph")
+	writeFile(t, dir, "slow-codegraph", "#!/bin/sh\nif [ \"$1\" = serve ]; then sleep 5; fi\n")
+	if err := os.Chmod(launcher, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	writeFile(t, dir, "reasonix.toml", fmt.Sprintf(`
+default_model = "test-model"
+
+[codegraph]
+enabled = true
+path = %q
+tier = "eager"
+
+[agent]
+system_prompt = "BASE"
+
+[[providers]]
+name = "test-model"
+kind = "openai"
+base_url = "https://example.invalid"
+model = "x"
+api_key_env = "REASONIX_TEST_KEY_UNSET"
+`, launcher))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	ctrl, err := Build(ctx, Options{})
+	if err != nil {
+		t.Fatalf("Build should not block on warm codegraph with legacy eager tier: %v", err)
+	}
+	defer ctrl.Close()
+}
+
+func TestBuildDefaultsToNearestGitRoot(t *testing.T) {
+	isolateConfigHome(t)
+	root := robustTempDir(t)
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	subdir := filepath.Join(root, "cmd", "tool")
+	if err := os.MkdirAll(subdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, root, "reasonix.toml", `
+default_model = "root-model"
+
+[codegraph]
+enabled = false
+
+[agent]
+system_prompt = "BASE"
+
+[[providers]]
+name = "root-model"
+kind = "openai"
+base_url = "https://example.invalid"
+model = "x"
+api_key_env = "REASONIX_TEST_KEY_UNSET"
+`)
+	t.Chdir(subdir)
+
+	ctrl, err := Build(context.Background(), Options{Model: "root-model"})
+	if err != nil {
+		t.Fatalf("Build should load config from nearest git root: %v", err)
+	}
+	defer ctrl.Close()
+}
+
 func TestBuildMigratesLegacyEagerBeforeStatsDemotion(t *testing.T) {
 	isolateConfigHome(t)
 	dir := robustTempDir(t)
