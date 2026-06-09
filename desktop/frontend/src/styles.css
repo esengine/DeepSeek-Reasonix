@@ -1934,6 +1934,7 @@ a[href] {
   gap: 8px;
   padding: 0 12px;
   white-space: pre;
+  min-width: min-content;
 }
 .diff__row--add {
   background: var(--add-bg);
@@ -8720,6 +8721,7 @@ a[href] {
   display: flex;
   gap: 6px;
   padding: 0 8px;
+  min-width: min-content;
 }
 .inline-diff__row--add {
   background: var(--add-bg);
