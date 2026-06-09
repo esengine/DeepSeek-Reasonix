@@ -421,6 +421,7 @@ export const zh: Record<DictKey, string> = {
   "projectTree.expandAll": "全部展开",
   "projectTree.timeFilter": "时间筛选",
   "projectTree.timeFilterAll": "全部",
+  "projectTree.timeFilter10": "最新10条",
   "projectTree.timeFilter1h": "最近1小时",
   "projectTree.timeFilter3h": "最近3小时",
   "projectTree.timeFilter5h": "最近5小时",

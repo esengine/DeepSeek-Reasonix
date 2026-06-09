@@ -420,6 +420,7 @@ export const en = {
   "projectTree.expandAll": "Expand all",
   "projectTree.timeFilter": "Filter by time",
   "projectTree.timeFilterAll": "All",
+  "projectTree.timeFilter10": "Latest 10",
   "projectTree.timeFilter1h": "Last hour",
   "projectTree.timeFilter3h": "Last 3 hours",
   "projectTree.timeFilter5h": "Last 5 hours",

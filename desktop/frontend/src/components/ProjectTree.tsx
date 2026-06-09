@@ -160,10 +160,10 @@ export function ProjectTree({
   const [platform, setPlatform] = useState("");
   const creatingRef = useRef(false);
   const filterRef = useRef<HTMLDivElement>(null);
-  type TimeFilter = "all" | "1h" | "3h" | "5h" | "1d";
+  type TimeFilter = "all" | "10" | "1h" | "3h" | "5h" | "1d";
   const [timeFilter, setTimeFilter] = useState<TimeFilter>(() => {
     const saved = localStorage.getItem("projectTree:timeFilter");
-    return (saved === "1h" || saved === "3h" || saved === "5h" || saved === "1d") ? saved : "all";
+    return (saved === "10" || saved === "1h" || saved === "3h" || saved === "5h" || saved === "1d") ? saved : "all";
   });
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
 
@@ -452,11 +452,30 @@ export function ProjectTree({
   const visibleTree = useMemo(() => {
     const q = query.trim().toLowerCase();
     const now = Date.now();
+    const diff = timeFilter === "1h" ? 60 * 60 * 1000
+      : timeFilter === "3h" ? 3 * 60 * 60 * 1000
+      : timeFilter === "5h" ? 5 * 60 * 60 * 1000
+      : timeFilter === "1d" ? 24 * 60 * 60 * 1000
+      : 0;
     const cutoff: number | null = timeFilter === "all" ? null
-      : timeFilter === "1h" ? now - 60 * 60 * 1000
-      : timeFilter === "3h" ? now - 3 * 60 * 60 * 1000
-      : timeFilter === "5h" ? now - 5 * 60 * 60 * 1000
-      : now - 24 * 60 * 60 * 1000; // 1d
+      : timeFilter === "10" ? (() => {
+          const times: number[] = [];
+          const walk = (nodes: ProjectNode[]) => {
+            for (const node of nodes) {
+              if (!node) continue;
+              if (node.kind === "topic" || node.kind === "global_topic") {
+                const t = topicActivityTime(node);
+                if (t > 0) times.push(t);
+              }
+              const children = asArray(node.children);
+              if (children.length > 0) walk(children);
+            }
+          };
+          walk(tree);
+          times.sort((a, b) => b - a);
+          return times.length >= 10 ? times[9] : (times.length > 0 ? times[times.length - 1] : 0);
+        })()
+      : now - diff;
     const topicMatchesTime = (node: ProjectNode): boolean =>
       !cutoff || topicActivityTime(node) >= cutoff;
     const matchesQuery = (node: ProjectNode): boolean =>
@@ -888,6 +907,13 @@ export function ProjectTree({
                   onClick={() => { setTimeFilter("all"); setFilterMenuOpen(false); }}
                 >
                   {t("projectTree.timeFilterAll")}
+                </button>
+                <button
+                  type="button"
+                  className={`project-tree__time-filter-opt${timeFilter === "10" ? " project-tree__time-filter-opt--on" : ""}`}
+                  onClick={() => { setTimeFilter("10"); setFilterMenuOpen(false); }}
+                >
+                  {t("projectTree.timeFilter10")}
                 </button>
                 <button
                   type="button"
