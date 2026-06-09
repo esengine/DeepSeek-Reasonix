@@ -304,6 +304,47 @@ func (l *Ledger) UnverifiedCompletedTodos(current []TodoItem) (missing []TodoSte
 	return missing, true
 }
 
+// CompletedTodosMissingReceipt returns the completed todos in the latest
+// successful todo_write that lack a matching successful complete_step receipt.
+// Enforcement moved here from todo_write (which now only warns), so this is the
+// single place that verifies a finished step was actually signed off with
+// evidence. Unlike UnverifiedCompletedTodos it does not skip earlier-completed
+// items: todo_write no longer rejects them, so "already completed" no longer
+// implies "already verified".
+func (l *Ledger) CompletedTodosMissingReceipt() (missing []TodoStepMatch, hasTodos bool) {
+	if l == nil {
+		return nil, false
+	}
+	l.mu.Lock()
+	receipts := append([]Receipt(nil), l.receipts...)
+	l.mu.Unlock()
+
+	var latest []TodoItem
+	for i := len(receipts) - 1; i >= 0; i-- {
+		r := receipts[i]
+		if !r.Success || r.ToolName != "todo_write" {
+			continue
+		}
+		latest = r.Todos
+		hasTodos = true
+		break
+	}
+	if !hasTodos {
+		return nil, false
+	}
+	for i, t := range latest {
+		if todoStatus(t.Status) != "completed" {
+			continue
+		}
+		index := i + 1
+		if hasSuccessfulCompleteStepForTodo(receipts, index, latest) {
+			continue
+		}
+		missing = append(missing, TodoStepMatch{Found: true, Index: index, Content: t.Content, Status: "completed", ActiveForm: t.ActiveForm})
+	}
+	return missing, true
+}
+
 func (l *Ledger) hasSuccessfulPaths(paths []string, accept func(Receipt) bool) bool {
 	wanted := pathSet(normalizePaths(paths))
 	if l == nil || len(wanted) == 0 {

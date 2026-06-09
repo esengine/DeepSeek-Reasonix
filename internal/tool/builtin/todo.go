@@ -85,27 +85,32 @@ func (todoWrite) Execute(ctx context.Context, args json.RawMessage) (string, err
 			return "", fmt.Errorf("todo %d: invalid status %q (want pending|in_progress|completed)", i+1, t.Status)
 		}
 	}
-	if err := verifyTodoCompletionTransitions(ctx, p.Todos); err != nil {
-		return "", err
+	ack := fmt.Sprintf("Todos updated: %d total — %d completed, %d in progress, %d pending.",
+		len(p.Todos), done, active, pending)
+	if warn := unverifiedCompletionWarning(ctx, p.Todos); warn != "" {
+		ack += "\n" + warn
 	}
-	return fmt.Sprintf("Todos updated: %d total — %d completed, %d in progress, %d pending.",
-		len(p.Todos), done, active, pending), nil
+	return ack, nil
 }
 
-func verifyTodoCompletionTransitions(ctx context.Context, todos []todoItem) error {
+// unverifiedCompletionWarning flags todos flipped to completed without a matching
+// complete_step receipt. It is advisory, not blocking: todo_write only tracks
+// progress, so it must never fail the model mid-flow — the final-answer readiness
+// gate is the single enforcement point. The warning keeps the nudge immediate.
+func unverifiedCompletionWarning(ctx context.Context, todos []todoItem) string {
 	ledger, ok := evidence.FromContext(ctx)
 	if !ok {
-		return nil
+		return ""
 	}
 	missing, hasBaseline := ledger.UnverifiedCompletedTodos(toEvidenceTodos(todos))
 	if !hasBaseline || len(missing) == 0 {
-		return nil
+		return ""
 	}
 	if len(missing) == 1 {
 		m := missing[0]
-		return fmt.Errorf("todo %d %q is newly completed but has no matching successful complete_step receipt in this turn", m.Index, m.Content)
+		return fmt.Sprintf("⚠ todo %d %q is marked completed without a matching complete_step receipt; sign it off with complete_step before finishing.", m.Index, m.Content)
 	}
-	return fmt.Errorf("%d todos are newly completed but have no matching successful complete_step receipts in this turn", len(missing))
+	return fmt.Sprintf("⚠ %d todos are marked completed without matching complete_step receipts; sign each off with complete_step before finishing.", len(missing))
 }
 
 func toEvidenceTodos(todos []todoItem) []evidence.TodoItem {

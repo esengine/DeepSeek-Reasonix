@@ -79,10 +79,15 @@ func sessionHasUserMessageContaining(s *Session, needle string) bool {
 }
 
 type readinessAuditSink struct {
-	events []evidence.ReadinessAudit
+	events  []evidence.ReadinessAudit
+	notices []string
 }
 
-func (s *readinessAuditSink) Emit(event.Event) {}
+func (s *readinessAuditSink) Emit(e event.Event) {
+	if e.Kind == event.Notice {
+		s.notices = append(s.notices, e.Text)
+	}
+}
 
 func (s *readinessAuditSink) RecordReadinessAudit(a evidence.ReadinessAudit) {
 	s.events = append(s.events, a)
@@ -380,39 +385,12 @@ func TestFinalReadinessRequiresCompleteStepAfterWriterWhenTodoSeen(t *testing.T)
 	}
 }
 
-func TestFinalReadinessStopsAfterRepeatedBlocks(t *testing.T) {
-	todoWrite, ok := tool.LookupBuiltin("todo_write")
-	if !ok {
-		t.Fatal("todo_write builtin not registered")
-	}
-	reg := tool.NewRegistry()
-	reg.Add(fakeTool{name: "write_file", readOnly: false})
-	reg.Add(todoWrite)
-	prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{
-		{
-			toolCallChunk("c1", "write_file", `{"path":"changed.go","content":"package main"}`),
-			toolCallChunk("c2", "todo_write", `{"todos":[{"content":"Edit code","status":"in_progress"}]}`),
-			{Type: provider.ChunkDone},
-		},
-		{{Type: provider.ChunkText, Text: "premature 1"}, {Type: provider.ChunkDone}},
-		{{Type: provider.ChunkText, Text: "premature 2"}, {Type: provider.ChunkDone}},
-		{{Type: provider.ChunkText, Text: "premature 3"}, {Type: provider.ChunkDone}},
-	}}
-	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
-
-	err := a.Run(context.Background(), "edit with todo and never sign off")
-	if err == nil {
-		t.Fatal("expected repeated readiness blocks to stop the run")
-	}
-	if !strings.Contains(err.Error(), "final-answer readiness") {
-		t.Fatalf("error = %v, want final-answer readiness", err)
-	}
-	if prov.call != 4 {
-		t.Fatalf("provider calls = %d, want three blocked final answers after writer turn", prov.call)
-	}
-}
-
-func TestFinalReadinessAuditRecordsTerminalError(t *testing.T) {
+// TestFinalReadinessDegradesOnRepeatedReason is the #3664 regression: an
+// unsatisfiable readiness gate must not loop-and-abort. When the same block
+// reason recurs (here the in_progress todo is never signed off), the turn
+// degrades — the answer is accepted with a visible warning rather than burning
+// the full retry budget and then discarding the turn's work with an error.
+func TestFinalReadinessDegradesOnRepeatedReason(t *testing.T) {
 	todoWrite, ok := tool.LookupBuiltin("todo_write")
 	if !ok {
 		t.Fatal("todo_write builtin not registered")
@@ -433,16 +411,87 @@ func TestFinalReadinessAuditRecordsTerminalError(t *testing.T) {
 	sink := &readinessAuditSink{}
 	a := New(prov, reg, NewSession(""), Options{}, sink)
 
-	err := a.Run(context.Background(), "edit with todo and never sign off")
-	if err == nil {
-		t.Fatal("expected repeated readiness blocks to stop the run")
+	if err := a.Run(context.Background(), "edit with todo and never sign off"); err != nil {
+		t.Fatalf("unsatisfiable readiness must degrade gracefully, not error: %v", err)
 	}
-	if len(sink.events) != 3 {
-		t.Fatalf("readiness audit events = %d, want 3: %+v", len(sink.events), sink.events)
+	if prov.call != 3 {
+		t.Fatalf("provider calls = %d, want early-exit on the repeated reason (one nudge, then degrade)", prov.call)
 	}
-	last := sink.events[len(sink.events)-1]
-	if last.Result != evidence.ReadinessErrored || last.IncompleteTodos == 0 {
-		t.Fatalf("terminal audit = %+v, want errored with incomplete todos", last)
+	foundWarn := false
+	for _, n := range sink.notices {
+		if strings.Contains(n, "proceeding without confirmed readiness") {
+			foundWarn = true
+		}
+	}
+	if !foundWarn {
+		t.Fatalf("degrade must emit a visible warning (not silent); notices = %v", sink.notices)
+	}
+	if len(sink.events) != 2 || sink.events[len(sink.events)-1].Result != evidence.ReadinessErrored {
+		t.Fatalf("audits = %+v, want one block then an errored degrade", sink.events)
+	}
+}
+
+// TestFinalReadinessNeverLoopsUnbounded locks the anti-deadloop guarantee: no
+// matter how many premature answers the model would emit, the gate caps the
+// rounds and terminates. The provider scripts 20 premature turns; the run must
+// still stop at the early-exit (3 provider calls) and return.
+func TestFinalReadinessNeverLoopsUnbounded(t *testing.T) {
+	todoWrite, ok := tool.LookupBuiltin("todo_write")
+	if !ok {
+		t.Fatal("todo_write builtin not registered")
+	}
+	reg := tool.NewRegistry()
+	reg.Add(fakeTool{name: "write_file", readOnly: false})
+	reg.Add(todoWrite)
+	turns := [][]provider.Chunk{{
+		toolCallChunk("c1", "write_file", `{"path":"changed.go","content":"package main"}`),
+		toolCallChunk("c2", "todo_write", `{"todos":[{"content":"Edit code","status":"in_progress"}]}`),
+		{Type: provider.ChunkDone},
+	}}
+	for i := 0; i < 20; i++ {
+		turns = append(turns, []provider.Chunk{{Type: provider.ChunkText, Text: "premature"}, {Type: provider.ChunkDone}})
+	}
+	prov := &scriptedProvider{name: "p", turns: turns}
+	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
+
+	if err := a.Run(context.Background(), "never sign off"); err != nil {
+		t.Fatalf("Run must terminate gracefully, got %v", err)
+	}
+	if prov.call > maxFinalReadinessBlocks+1 {
+		t.Fatalf("provider calls = %d, want bounded at %d — the loop is not capped", prov.call, maxFinalReadinessBlocks+1)
+	}
+}
+
+// TestFinalReadinessEnforcesUnsignedCompletionThenDegrades proves the evidence
+// guarantee moved intact to the single readiness gate: a completed todo with a
+// writer but no complete_step receipt is still caught (the block names the
+// missing receipt), and then degrades gracefully instead of looping.
+func TestFinalReadinessEnforcesUnsignedCompletionThenDegrades(t *testing.T) {
+	todoWrite, ok := tool.LookupBuiltin("todo_write")
+	if !ok {
+		t.Fatal("todo_write builtin not registered")
+	}
+	reg := tool.NewRegistry()
+	reg.Add(fakeTool{name: "write_file", readOnly: false})
+	reg.Add(todoWrite)
+	prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{
+		{
+			toolCallChunk("c1", "write_file", `{"path":"changed.go","content":"package main"}`),
+			toolCallChunk("c2", "todo_write", `{"todos":[{"content":"Edit code","status":"completed"}]}`),
+			{Type: provider.ChunkDone},
+		},
+		{{Type: provider.ChunkText, Text: "claiming done without sign-off"}, {Type: provider.ChunkDone}},
+		{{Type: provider.ChunkText, Text: "still no sign-off"}, {Type: provider.ChunkDone}},
+	}}
+	sink := &readinessAuditSink{}
+	a := New(prov, reg, NewSession(""), Options{}, sink)
+
+	if err := a.Run(context.Background(), "edit, mark done, but never sign off"); err != nil {
+		t.Fatalf("must degrade gracefully, not error: %v", err)
+	}
+	joined := strings.Join(sink.notices, "\n")
+	if !strings.Contains(joined, "complete_step receipt") {
+		t.Fatalf("readiness must enforce the moved guarantee (name the missing complete_step receipt); notices = %v", sink.notices)
 	}
 }
 

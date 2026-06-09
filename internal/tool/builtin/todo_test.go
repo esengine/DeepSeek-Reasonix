@@ -26,7 +26,7 @@ func TestTodoWriteRejectsBadLevel(t *testing.T) {
 	}
 }
 
-func TestTodoWriteRejectsNewCompletedWithoutCompleteStepReceipt(t *testing.T) {
+func TestTodoWriteWarnsOnNewCompletedWithoutCompleteStepReceipt(t *testing.T) {
 	ledger := evidence.NewLedger()
 	ledger.Record(evidence.Receipt{
 		ToolName: "todo_write",
@@ -36,9 +36,12 @@ func TestTodoWriteRejectsNewCompletedWithoutCompleteStepReceipt(t *testing.T) {
 	ctx := evidence.WithLedger(context.Background(), ledger)
 	args := json.RawMessage(`{"todos":[{"content":"Add parser","status":"completed"}]}`)
 
-	_, err := (todoWrite{}).Execute(ctx, args)
-	if err == nil || !strings.Contains(err.Error(), "complete_step") {
-		t.Fatalf("new completion without complete_step should be rejected, got %v", err)
+	out, err := (todoWrite{}).Execute(ctx, args)
+	if err != nil {
+		t.Fatalf("todo_write must not fail mid-flow; it only warns: %v", err)
+	}
+	if !strings.Contains(out, "complete_step") {
+		t.Fatalf("completion without complete_step should warn, got %q", out)
 	}
 }
 
@@ -78,8 +81,11 @@ func TestTodoWriteIgnoresFailedCompleteStepReceipt(t *testing.T) {
 	ctx := evidence.WithLedger(context.Background(), ledger)
 	args := json.RawMessage(`{"todos":[{"content":"Add parser","status":"completed"}]}`)
 
-	_, err := (todoWrite{}).Execute(ctx, args)
-	if err == nil || !strings.Contains(err.Error(), "complete_step") {
-		t.Fatalf("failed complete_step should not authorize new completion, got %v", err)
+	out, err := (todoWrite{}).Execute(ctx, args)
+	if err != nil {
+		t.Fatalf("todo_write must not fail mid-flow; it only warns: %v", err)
+	}
+	if !strings.Contains(out, "complete_step") {
+		t.Fatalf("a failed complete_step should still warn (not authorize) the completion, got %q", out)
 	}
 }

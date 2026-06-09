@@ -414,6 +414,7 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 	a.session.Add(provider.Message{Role: provider.RoleUser, Content: input})
 
 	finalReadinessBlocks := 0
+	lastReadinessReason := ""
 	emptyFinalBlocks := 0
 	handoffNudges := 0
 	usedAnyTool := false
@@ -477,14 +478,20 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 		if len(calls) == 0 {
 			readiness := a.finalReadinessCheck()
 			if readiness.reason != "" {
+				// Nudging only helps while the model is resolving the gap. Stop and
+				// accept the answer once the same reason recurs (it's thrashing — e.g.
+				// re-running a check that still won't match) or the retry budget is
+				// spent, so an unsatisfiable gate degrades gracefully instead of
+				// burning rounds and then discarding the turn's work.
+				repeatedReason := finalReadinessBlocks > 0 && readiness.reason == lastReadinessReason
 				finalReadinessBlocks++
-				result := evidence.ReadinessBlocked
-				if finalReadinessBlocks >= maxFinalReadinessBlocks {
-					result = evidence.ReadinessErrored
-					event.RecordReadinessAudit(a.sink, readiness.audit(result, false))
-					return fmt.Errorf("final-answer readiness failed %d times: %s", finalReadinessBlocks, readiness.reason)
+				if repeatedReason || finalReadinessBlocks >= maxFinalReadinessBlocks {
+					event.RecordReadinessAudit(a.sink, readiness.audit(evidence.ReadinessErrored, false))
+					a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "proceeding without confirmed readiness: " + readiness.reason})
+					return nil
 				}
-				event.RecordReadinessAudit(a.sink, readiness.audit(result, false))
+				lastReadinessReason = readiness.reason
+				event.RecordReadinessAudit(a.sink, readiness.audit(evidence.ReadinessBlocked, false))
 				a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "final-answer readiness blocked: " + readiness.reason})
 				a.session.Add(provider.Message{Role: provider.RoleUser, Content: finalReadinessRetryMessage(readiness.reason)})
 				a.maybeCompact(ctx, usage)
@@ -582,6 +589,14 @@ func (a *Agent) finalReadinessCheck() finalReadinessCheck {
 		return finalReadinessCheck{}
 	}
 	out.applies = true
+	// A finished step that changed files must be signed off with complete_step.
+	// Only enforced once there is a writer this turn — no-write flows (research,
+	// Q&A) keep todo sign-off advisory to avoid gating trivial lists.
+	if !a.planMode.Load() {
+		if unsigned, hasTodos := a.evidence.CompletedTodosMissingReceipt(); hasTodos && len(unsigned) > 0 {
+			missing = append(missing, finalReadinessUnsignedTodos(unsigned))
+		}
+	}
 	for _, check := range a.projectChecks {
 		command := strings.TrimSpace(check.Command)
 		if command == "" {
@@ -598,6 +613,18 @@ func (a *Agent) finalReadinessCheck() finalReadinessCheck {
 	}
 	out.reason = strings.Join(missing, "; ")
 	return out
+}
+
+func finalReadinessUnsignedTodos(items []evidence.TodoStepMatch) string {
+	parts := make([]string, 0, len(items))
+	for _, item := range items {
+		label := strings.TrimSpace(item.Content)
+		if label == "" {
+			label = fmt.Sprintf("todo %d", item.Index)
+		}
+		parts = append(parts, label)
+	}
+	return "completed todos lack a matching complete_step receipt: " + strings.Join(parts, ", ")
 }
 
 func finalReadinessIncompleteTodos(items []evidence.TodoStepMatch) string {
