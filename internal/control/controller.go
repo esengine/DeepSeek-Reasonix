@@ -1050,19 +1050,23 @@ func (c *Controller) Rewind(turn int, scope RewindScope) error {
 			return c.rewindFail(fmt.Errorf("conversation rewind unavailable for turn %d (resumed session)", turn))
 		}
 		s := c.executor.Session()
-		if boundary <= len(s.Messages) {
-			s.Messages = s.Messages[:boundary]
-			c.mu.Lock()
-			c.cpTurn = turn // renumber future turns from here; later turns are gone
-			for k := range c.cpBound {
-				if k >= turn {
-					delete(c.cpBound, k)
-				}
+		// boundary is the message-log index at turn start; compaction shrinks the
+		// log without rewriting boundaries, so a stale boundary past the end means
+		// the turn was compacted away — fail loudly instead of skipping silently.
+		if boundary > len(s.Messages) {
+			return c.rewindFail(fmt.Errorf("conversation rewind unavailable for turn %d: the conversation was compacted past this point", turn))
+		}
+		s.Messages = s.Messages[:boundary]
+		c.mu.Lock()
+		c.cpTurn = turn // renumber future turns from here; later turns are gone
+		for k := range c.cpBound {
+			if k >= turn {
+				delete(c.cpBound, k)
 			}
-			c.mu.Unlock()
-			if err := c.Snapshot(); err != nil {
-				slog.Warn("controller: snapshot after rewind", "err", err)
-			}
+		}
+		c.mu.Unlock()
+		if err := c.Snapshot(); err != nil {
+			slog.Warn("controller: snapshot after rewind", "err", err)
 		}
 		c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
 			Text: fmt.Sprintf("rewound conversation to turn %d", turn)})
