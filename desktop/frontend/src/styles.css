@@ -5065,6 +5065,17 @@ a[href] {
   color: var(--danger, #d66);
   font-size: 11.5px;
 }
+.mem-error {
+  margin-top: 8px;
+  padding: 7px 9px;
+  border: 1px solid color-mix(in srgb, var(--danger, #d66) 34%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--danger, #d66) 10%, transparent);
+  color: var(--danger, #d66);
+  font-size: 11.5px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
 .mem-fact--hl {
   background: var(--accent-soft, rgba(120, 170, 255, 0.12));
   border-color: color-mix(in srgb, var(--accent) 42%, transparent);
