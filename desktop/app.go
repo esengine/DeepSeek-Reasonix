@@ -1293,6 +1293,9 @@ func historyMessages(msgs []provider.Message, resolveUserContent func(string) st
 		content := m.Content
 		if m.Role == provider.RoleUser {
 			content = resolveUserContent(m.Content)
+			if control.IsSyntheticUserMessage(content) {
+				continue
+			}
 		}
 		reasoning := ""
 		if m.Role == provider.RoleAssistant {
