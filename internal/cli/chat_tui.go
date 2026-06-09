@@ -3249,6 +3249,7 @@ func renderTUIBanner(label, missing string, width int) string {
 	var b strings.Builder
 	b.WriteString(accent("◆") + " " + bold("reasonix chat") + "  " + dim("· "+label) + "\n")
 	b.WriteString(dim("  "+i18n.M.ChatTip) + "\n")
+	b.WriteString(dim("  tip: Ctrl+C copies selection · Ctrl+Shift+M toggles mouse capture") + "\n")
 	if missing != "" {
 		b.WriteString(wrapForViewport("  ! "+missing, width, activeCLITheme.warn) + "\n")
 	}
