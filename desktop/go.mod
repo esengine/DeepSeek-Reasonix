@@ -13,14 +13,14 @@ require reasonix v0.0.0
 
 require (
 	aead.dev/minisign v0.3.0
-	fyne.io/systray v1.12.1
+	fyne.io/systray v1.12.2
 	github.com/go-rod/rod v0.116.2
 	github.com/godbus/dbus/v5 v5.2.2
 	github.com/minio/selfupdate v0.6.0
 	github.com/wailsapp/wails/v2 v2.12.0
-	golang.org/x/mod v0.36.0
-	golang.org/x/sys v0.45.0
-	golang.org/x/text v0.37.0
+	golang.org/x/mod v0.37.0
+	golang.org/x/sys v0.46.0
+	golang.org/x/text v0.38.0
 )
 
 require (

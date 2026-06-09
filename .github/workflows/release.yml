@@ -19,8 +19,8 @@ jobs:
     name: cache hit guard
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
@@ -34,14 +34,14 @@ jobs:
     # `release` environment so only esengine can approve it going public.
     environment: release
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
-      - uses: goreleaser/goreleaser-action@v6
+      - uses: goreleaser/goreleaser-action@v7
         with:
           version: '~> v2'
           args: release --clean
@@ -57,7 +57,7 @@ jobs:
     env:
       HAS_R2: ${{ secrets.R2_ACCESS_KEY_ID != '' && secrets.R2_SECRET_ACCESS_KEY != '' && secrets.R2_ACCOUNT_ID != '' && secrets.R2_BUCKET != '' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Download CodeGraph release assets
         if: env.HAS_R2 == 'true'
