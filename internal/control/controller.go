@@ -885,12 +885,6 @@ func (c *Controller) Ask(ctx context.Context, questions []event.AskQuestion) ([]
 	}
 }
 
-func (c *Controller) bypassEnabled() bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.bypass
-}
-
 // AnswerQuestion resolves a pending AskRequest by ID with the user's selections.
 // Unknown/expired IDs are ignored.
 func (c *Controller) AnswerQuestion(id string, answers []event.AskAnswer) {
