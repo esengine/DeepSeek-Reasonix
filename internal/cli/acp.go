@@ -91,6 +91,7 @@ func acpBuiltinTools(cfg *config.Config, cwd string, writeRoots []string) []tool
 		Bash:        bashSpec,
 		BashTimeout: time.Duration(cfg.BashTimeoutSeconds()) * time.Second,
 		Search:      builtin.ResolveSearch(cfg.Tools.Search.Engine, cfg.Tools.Search.RgPath, nil),
+		ProxySpec:   cfg.NetworkProxySpec(),
 	}
 	return ws.Tools(cfg.Tools.Enabled...)
 }

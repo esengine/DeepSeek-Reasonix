@@ -316,8 +316,16 @@ export const zh: Record<DictKey, string> = {
   "approval.hideDetails": "收起",
   "approval.deny": "拒绝",
   "approval.allowOnce": "允许一次",
-  "approval.allowSession": "本会话内允许",
-  "approval.allowPersistent": "总是允许（保存）",
+  "approval.allowSession": "本会话允许此工具",
+  "approval.allowPersistent": "总是允许此工具（保存）",
+  "approval.allowCommandSession": "本会话允许此命令",
+  "approval.allowCommandPersistent": "总是允许此命令（保存）",
+  "approval.allowCommandPrefixSession": "本会话允许命令前缀",
+  "approval.allowCommandPrefixPersistent": "总是允许命令前缀（保存）",
+  "approval.allowRuleSession": "本会话允许",
+  "approval.allowRulePersistent": "总是允许（保存）",
+  "approval.allowEditsSession": "本会话允许编辑",
+  "approval.allowFilePersistent": "总是允许此文件（保存）",
 
   // 提问卡片
   "ask.title": "需要你决定",
@@ -372,6 +380,9 @@ export const zh: Record<DictKey, string> = {
   "history.yesterday": "昨天",
   "history.older": "更早",
   "history.openSession": "打开会话",
+  "history.failedOpenProject": "无法打开会话，{name}不存在：{path}",
+  "history.failedOpenSession": "无法打开会话",
+  "history.failedOpenGlobal": "无法打开全局会话",
   "history.selectSession": "选择一个会话以预览。",
   "history.trashSessionActions": "回收站会话操作",
   "history.historySessionActions": "历史会话操作",
@@ -772,7 +783,6 @@ export const zh: Record<DictKey, string> = {
   // 待办栏
   "todo.title": "待办",
   "todo.dismiss": "关闭待办列表",
-  "todo.stale": "进度可能未同步",
 
   // 斜杠菜单标签
   "slash.project": "项目",

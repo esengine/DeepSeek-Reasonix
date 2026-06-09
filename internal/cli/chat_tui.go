@@ -24,29 +24,25 @@ import (
 
 	"reasonix/internal/agent"
 	"reasonix/internal/command"
+	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/hook"
 	"reasonix/internal/i18n"
 	"reasonix/internal/memory"
 	"reasonix/internal/outputstyle"
+	"reasonix/internal/permission"
 	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
+	"reasonix/internal/sandbox"
 	"reasonix/internal/skill"
 	"reasonix/internal/tool"
 )
 
-// chatTUI is a bubbletea Model that runs a chat session in the terminal's
-// normal buffer (no alt-screen). Finalized output — user bubbles, tool dispatch
-// lines, usage lines, reasoning, and the rendered assistant answer — is
-// committed to the native scrollback via tea.Println, so the wheel, scrollbar,
-// and copy all work like any CLI. The bubbletea-managed region is only the
-// bottom — input box, status line, an optional approval/plan banner, and the
-// autocomplete menu — and it is kept a stable height (it changes only on
-// discrete user actions, never per streamed token) so the renderer commits
-// scrollback cleanly without stranding the input box's border lines. This
-// mirrors how Claude Code uses Ink's <Static> to freeze finished output into
-// scrollback while re-rendering just the active prompt.
+// chatTUI is a bubbletea Model that normally owns the terminal with an
+// alt-screen transcript viewport. Termux is the exception: enabling mouse mode
+// prevents taps from raising the soft keyboard, so it stays in the normal buffer
+// and commits finalized output to native scrollback via tea.Println.
 type chatTUI struct {
 	ctrl    *control.Controller
 	label   string
@@ -54,6 +50,9 @@ type chatTUI struct {
 
 	width  int
 	height int
+	// nativeScrollback keeps Termux out of alt-screen/mouse mode so taps still
+	// focus the textarea and raise the soft keyboard.
+	nativeScrollback bool
 
 	input   textarea.Model
 	spinner spinner.Model
@@ -117,6 +116,7 @@ type chatTUI struct {
 	pendingCommit *[]string
 	renderer      *mdRenderer
 	showReasoning bool // Ctrl+O / /verbose: show raw thinking text in the CLI
+	cfg           *config.Config
 	// reasoningLineIdx is the transcript index of the live "▎ thinking…" marker
 	// while a reasoning block streams; it's rewritten to "▎ thought for Ns" when
 	// the block closes. -1 when no block is open. transcriptDirty forces a
@@ -129,7 +129,10 @@ type chatTUI struct {
 	// reasoningView is a bounded trailing window (≤ reasoningViewMax bytes) of the
 	// streaming thought, rendered live; the full text stays in reasoning for verbose.
 	reasoningView []byte
-	thinkStart    time.Time
+	// reasoningNative is the Termux/native-scrollback path: reasoning is buffered
+	// without a live transcript block, then appended once as a final summary.
+	reasoningNative bool
+	thinkStart      time.Time
 	// answerIdx is the transcript index of the streaming answer block (rewritten in
 	// place as completed paragraphs arrive); -1 when none is open. answerFlushed is
 	// how many bytes of pending have already been rendered into it, so a Text packet
@@ -431,10 +434,12 @@ func newChatTUI(ctrl *control.Controller, missing string, eventCh chan event.Eve
 	sp.Style = themeStyle(activeCLITheme.accent)
 
 	commitBuf := []string{}
+	nativeScrollback := detectTermuxTerminal()
 	return chatTUI{
 		ctrl:                 ctrl,
 		label:                ctrl.Label(),
 		missing:              missing,
+		nativeScrollback:     nativeScrollback,
 		input:                ti,
 		spinner:              sp,
 		submittedInputCursor: -1,
@@ -448,6 +453,7 @@ func newChatTUI(ctrl *control.Controller, missing string, eventCh chan event.Eve
 		pending:              &strings.Builder{},
 		pendingCommit:        &commitBuf,
 		renderer:             newMarkdownRenderer(termW),
+		showReasoning:        nativeScrollback,
 		shellOutputs:         make(map[string]string),
 		shellExpanded:        make(map[string]bool),
 		shellTranscriptIdx:   make(map[string]int),
@@ -485,6 +491,8 @@ func isTermuxTerminal() bool {
 	}
 	return strings.Contains(os.Getenv("PREFIX"), "/com.termux/")
 }
+
+var detectTermuxTerminal = isTermuxTerminal
 
 func (m *chatTUI) rememberSubmittedInput(input string) {
 	if strings.TrimSpace(input) == "" {
@@ -653,7 +661,7 @@ func (m chatTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// newest output) shifts the whole window. Some terminals (Warp) mishandle
 	// the renderer's scroll/insert-line optimization and strand stale rows, so
 	// force a full clear+redraw whenever the offset actually moved.
-	if cm.viewport.YOffset() != prevYOff {
+	if cm.viewport.YOffset() != prevYOff && !cm.nativeScrollback {
 		return cm, tea.Batch(tea.ClearScreen, cmd)
 	}
 	return cm, cmd
@@ -869,15 +877,12 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.completion = completion{}
 					break // fall through to regular Enter and submit the command
 				}
-				// When Enter is pressed and the completion has exactly one item
-				// already fully present in the input, close the menu and let Enter
-				// fall through to submit the command (/resume 3 → resume session 3).
-				if msg.String() == "enter" && len(m.completion.items) == 1 {
-					tok := m.input.Value()[m.completion.replaceFrom:]
-					if tok == m.completion.items[0].insert {
-						m.completion = completion{}
-						break // fall through to regular Enter
-					}
+				// When Enter is pressed and the selected completion is already fully
+				// present in the input, close the menu and submit instead of accepting
+				// the same item again (/resume 1 still has /resume 10 as a prefix match).
+				if msg.String() == "enter" && m.completionSelectedInsertPresent() {
+					m.completion = completion{}
+					break // fall through to regular Enter
 				}
 				m.acceptCompletion()
 				return m, nil
@@ -1012,6 +1017,7 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.state == tuiRunning {
 				line := strings.TrimSpace(m.input.Value())
 				if line == "" {
+					m.viewport.GotoBottom()
 					return m, nil
 				}
 				if m.queueEditCursor >= 0 && m.queueEditCursor < len(m.pendingInterject) {
@@ -1036,6 +1042,7 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			line := strings.TrimSpace(m.input.Value())
 
 			if line == "" {
+				m.viewport.GotoBottom()
 				return m, nil
 			}
 			if line == "exit" || line == "quit" || line == ":q" {
@@ -1297,11 +1304,56 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, finalize(m, cmds)
 }
 
-// finalize drains the committed-line queue (its content is already mirrored in
-// the transcript, which the viewport renders) and batches the turn's commands.
+// finalize drains the committed-line queue and batches the turn's commands. In
+// the default alt-screen path the queue is already mirrored in m.transcript. In
+// Termux we cannot enable mouse mode without breaking soft-keyboard focus, so
+// finalized lines are also emitted into the terminal's native scrollback.
 func finalize(m chatTUI, cmds []tea.Cmd) tea.Cmd {
+	if m.nativeScrollback && len(*m.pendingCommit) > 0 {
+		out := strings.TrimRight(clampWidth(strings.Join(*m.pendingCommit, "\n"), m.width), "\n")
+		*m.pendingCommit = (*m.pendingCommit)[:0]
+		var prints []tea.Cmd
+		for _, chunk := range chunkLines(out, m.scrollChunkHeight()) {
+			prints = append(prints, tea.Println(chunk))
+		}
+		cmds = append(cmds, tea.Sequence(prints...))
+		return tea.Batch(cmds...)
+	}
 	*m.pendingCommit = (*m.pendingCommit)[:0]
 	return tea.Batch(cmds...)
+}
+
+// scrollChunkHeight is the largest block (in lines) finalize prints at once in
+// native-scrollback mode, leaving room for the pinned bottom frame.
+func (m chatTUI) scrollChunkHeight() int {
+	if m.height <= 0 {
+		return 100
+	}
+	if n := m.height - m.bottomRows(); n > 1 {
+		return n
+	}
+	return 1
+}
+
+// chunkLines splits s into blocks of at most n lines each, preserving order and
+// line content. A single block is returned when it already fits.
+func chunkLines(s string, n int) []string {
+	if n < 1 {
+		n = 1
+	}
+	lines := strings.Split(s, "\n")
+	if len(lines) <= n {
+		return []string{s}
+	}
+	var out []string
+	for i := 0; i < len(lines); i += n {
+		end := i + n
+		if end > len(lines) {
+			end = len(lines)
+		}
+		out = append(out, strings.Join(lines[i:end], "\n"))
+	}
+	return out
 }
 
 // clampWidth hard-breaks any line wider than width so no scrollback line wraps
@@ -1340,7 +1392,8 @@ func (m *chatTUI) commitSpacer() {
 // bottomRows is the terminal-row height of the pinned bottom region: any open
 // bottom panels (todo / approval / chooser / rewind / completion), the composer
 // when visible, and the two fixed status rows. Full-screen managers such as MCP
-// and skills render inside the main transcript area instead of the bottom rail.
+// and skills normally render inside the main transcript area; in native
+// scrollback mode they join the bottom rail because there is no main viewport.
 func (m chatTUI) bottomRows() int {
 	rows := 0
 	for _, s := range []string{
@@ -1358,6 +1411,11 @@ func (m chatTUI) bottomRows() int {
 	}
 	if m.state == tuiRunning {
 		rows++ // the working spinner line above the box
+	}
+	if m.nativeScrollback {
+		if main := m.renderMainManager(); main != "" {
+			rows += strings.Count(main, "\n") + 1
+		}
 	}
 	if footer := m.renderMainManagerFooter(); footer != "" {
 		rows += strings.Count(footer, "\n") + 1
@@ -1481,10 +1539,10 @@ const reasoningTailLines = 12
 // bounded trailing view (mirrors streamToolOutput), so the chain of thought is
 // visible while the model works without re-rendering the whole thing per token.
 func (m *chatTUI) streamReasoning(chunk string) {
+	m.reasoning.WriteString(chunk) // full text retained for verbose mode
 	if m.reasoningTextIdx < 0 {
 		return
 	}
-	m.reasoning.WriteString(chunk) // full text retained for verbose mode
 	m.reasoningView = append(m.reasoningView, chunk...)
 	if len(m.reasoningView) > reasoningViewMax {
 		drop := len(m.reasoningView) - reasoningViewMax
@@ -1544,8 +1602,12 @@ func (m *chatTUI) streamToolOutput(id, chunk string) {
 		m.toolTail = m.toolTail[:0]
 		m.toolPartial = ""
 		m.toolLineCount = 0
-		m.toolStreamIdx = len(m.transcript)
-		m.commitLine("")
+		if m.nativeScrollback {
+			m.toolStreamIdx = -1
+		} else {
+			m.toolStreamIdx = len(m.transcript)
+			m.commitLine("")
+		}
 	}
 	// Accumulate full output for shell commands so Ctrl+B can expand it.
 	if strings.HasPrefix(id, "shell-") {
@@ -1566,6 +1628,9 @@ func (m *chatTUI) streamToolOutput(id, chunk string) {
 	vis := m.toolTail
 	if m.toolPartial != "" {
 		vis = append(append([]string{}, m.toolTail...), m.toolPartial)
+	}
+	if m.nativeScrollback {
+		return
 	}
 	lines := make([]string, len(vis))
 	for i, ln := range vis {
@@ -1592,6 +1657,44 @@ func (m *chatTUI) pushToolLine(line string) {
 // prefix), it shows the first shellPreviewLines with a Ctrl+B hint instead.
 // No-op when id isn't streaming.
 func (m *chatTUI) collapseToolOutput(id string) {
+	if m.nativeScrollback {
+		if id == "" || m.toolStreamID != id {
+			return
+		}
+		n := m.toolLineCount
+		if m.toolPartial != "" {
+			n++
+		}
+		if n > 0 {
+			if full, ok := m.shellOutputs[id]; ok {
+				lines := strings.Split(strings.TrimRight(full, "\n"), "\n")
+				total := len(lines)
+				if total > shellPreviewLines {
+					preview := make([]string, shellPreviewLines+1)
+					for i := 0; i < shellPreviewLines; i++ {
+						preview[i] = dim(clampPlain(lines[i], m.width-len([]rune(connector))))
+					}
+					preview[shellPreviewLines] = dim(fmt.Sprintf("… %d more lines (Ctrl+B)", total-shellPreviewLines))
+					m.commitLine(connectorBlock(preview))
+				} else {
+					rendered := make([]string, total)
+					for i, ln := range lines {
+						rendered[i] = dim(clampPlain(ln, m.width-len([]rune(connector))))
+					}
+					m.commitLine(connectorBlock(rendered))
+				}
+				m.shellTranscriptIdx[id] = len(m.transcript) - 1
+			} else {
+				m.commitLine(connectorBlock([]string{dim(fmt.Sprintf("%d lines", n))}))
+			}
+		}
+		m.toolStreamIdx = -1
+		m.toolStreamID = ""
+		m.toolTail = m.toolTail[:0]
+		m.toolPartial = ""
+		m.toolLineCount = 0
+		return
+	}
 	if m.toolStreamIdx < 0 || id == "" || m.toolStreamID != id {
 		return
 	}
@@ -1690,6 +1793,9 @@ func (m *chatTUI) toggleShellOutput() {
 		m.transcript[lastIdx] = connectorBlock(rendered)
 	}
 	m.transcriptDirty = true
+	if m.nativeScrollback {
+		m.commitLine(m.transcript[lastIdx])
+	}
 }
 
 // toolWorkingFrames is the braille spinner cycled once per second on the
@@ -1710,6 +1816,10 @@ func (m *chatTUI) beginToolRunning(id string) {
 	m.toolLineCount = 0
 	m.toolStreamStart = time.Now()
 	m.toolStreamFrame = 0
+	if m.nativeScrollback {
+		m.toolStreamIdx = -1
+		return
+	}
 	m.toolStreamIdx = len(m.transcript)
 	m.commitLine(connectorBlock([]string{dim(fmt.Sprintf(i18n.M.ChatToolWorkingFmt, toolWorkingFrames[0], 0))}))
 }
@@ -1717,6 +1827,9 @@ func (m *chatTUI) beginToolRunning(id string) {
 // tickToolRunning re-renders the working line of a tool that's dispatched but
 // hasn't produced output yet. A no-op once output streams in or no tool runs.
 func (m *chatTUI) tickToolRunning() {
+	if m.nativeScrollback {
+		return
+	}
 	if m.toolStreamIdx < 0 || m.toolLineCount != 0 || m.toolPartial != "" {
 		return
 	}
@@ -1732,6 +1845,21 @@ func (m *chatTUI) tickToolRunning() {
 // removed (collapsed) — kept only in verbose mode. The viewport re-wraps from
 // m.transcript, so the change is flagged via transcriptDirty.
 func (m *chatTUI) commitReasoning() {
+	if m.reasoningNative {
+		if strings.TrimSpace(m.reasoning.String()) != "" || !m.thinkStart.IsZero() {
+			secs := int(time.Since(m.thinkStart).Seconds())
+			m.commitSpacer()
+			m.commitLine(dim(fmt.Sprintf("  ▎ "+i18n.M.ChatThoughtForFmt, secs)))
+			if m.showReasoning && strings.TrimSpace(m.reasoning.String()) != "" {
+				m.commitLine(reasoningBlock(m.reasoning.String(), m.width, 0))
+			}
+		}
+		m.reasoning.Reset()
+		m.reasoningView = m.reasoningView[:0]
+		m.reasoningNative = false
+		m.thinkStart = time.Time{}
+		return
+	}
 	if m.reasoningLineIdx < 0 {
 		return
 	}
@@ -1758,6 +1886,9 @@ func (m *chatTUI) commitReasoning() {
 // stays buffered (a half-written fence/list never renders early), and it only
 // re-renders when a new paragraph actually closes.
 func (m *chatTUI) streamAnswer() {
+	if m.nativeScrollback {
+		return
+	}
 	prefix := flushableMarkdownPrefix(m.pending.String())
 	if len(prefix) <= m.answerFlushed {
 		return
@@ -1835,38 +1966,57 @@ func flushableMarkdownPrefix(buf string) string {
 const planApprovalTool = "exit_plan_mode"
 
 // handleApprovalKey resolves a pending approval from a keystroke and re-arms the
-// listener. 1/y/Enter allows once, 2/a allows for the rest of the session,
-// 3/p writes an "always allow" rule to the config file, 4/n/Esc denies.
+// listener. 1/y/Enter allows once, 2/a allows for the rest of the session, and
+// n/Esc denies. Bash approvals with a safe prefix use 2/a for the prefix
+// session grant and 3/p for the persisted prefix. For standard approvals, 3/p
+// writes an "always allow" rule to the config file.
 // Ctrl-C cancels the whole turn via the run context. For a plan approval
 // (planApprovalTool), allowing also drops the local [plan] tag — the
 // controller turns plan mode off on its side.
 func (m chatTUI) handleApprovalKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	answer := func(allow, session, persist bool) (tea.Model, tea.Cmd) {
+	answer := func(allow, session, persist bool, scope string) (tea.Model, tea.Cmd) {
 		if allow && m.pendingApproval.Tool == planApprovalTool {
 			m.planMode = false
 		}
-		m.ctrl.Approve(m.pendingApproval.ID, allow, session, persist)
+		m.ctrl.ApproveWithScope(m.pendingApproval.ID, allow, session, persist, scope)
 		m.pendingApproval = nil
 		return m, nil // the next ApprovalRequest / event arrives on eventCh
 	}
+	hasBashPrefix := m.pendingApproval.Tool == "bash" && permission.BashCommandPrefix(m.pendingApproval.Subject) != ""
 	switch msg.String() {
 	case "ctrl+c":
 		m.ctrl.Cancel() // cancels the run; the approver unblocks via ctx.Done()
-		return answer(false, false, false)
+		return answer(false, false, false, permission.ApprovalScopeExact)
 	case "enter":
-		return answer(true, false, false)
+		return answer(true, false, false, permission.ApprovalScopeExact)
 	case "esc":
-		return answer(false, false, false)
+		return answer(false, false, false, permission.ApprovalScopeExact)
 	}
 	switch strings.ToLower(msg.String()) {
 	case "y", "1":
-		return answer(true, false, false)
+		return answer(true, false, false, permission.ApprovalScopeExact)
 	case "a", "2":
-		return answer(true, true, false) // session grant
-	case "p", "3":
-		return answer(true, true, true) // persist to config
-	case "n", "4":
-		return answer(false, false, false)
+		if hasBashPrefix {
+			return answer(true, true, false, permission.ApprovalScopePrefix) // prefix session grant
+		}
+		return answer(true, true, false, permission.ApprovalScopeExact) // session grant
+	case "3":
+		if hasBashPrefix {
+			return answer(true, true, true, permission.ApprovalScopePrefix) // persist prefix to config
+		}
+		return answer(true, true, true, permission.ApprovalScopeExact) // persist to config
+	case "p":
+		if hasBashPrefix {
+			return answer(true, true, true, permission.ApprovalScopePrefix) // persist prefix to config
+		}
+		return answer(true, true, true, permission.ApprovalScopeExact) // persist to config
+	case "4":
+		if hasBashPrefix {
+			return answer(false, false, false, permission.ApprovalScopeExact)
+		}
+		return answer(false, false, false, permission.ApprovalScopeExact)
+	case "n", "5":
+		return answer(false, false, false, permission.ApprovalScopeExact)
 	}
 	return m, nil // ignore anything else while awaiting a decision
 }
@@ -2039,6 +2189,12 @@ func (m chatTUI) View() tea.View {
 		parts = append(parts, menu)
 		rowsAboveBox += strings.Count(menu, "\n") + 1
 	}
+	if m.nativeScrollback {
+		if card := m.renderMainManager(); card != "" {
+			parts = append(parts, card)
+			rowsAboveBox += strings.Count(card, "\n") + 1
+		}
+	}
 	// Layout: the working spinner (when running), then the composer when visible,
 	// then the two status rows (line 1 = mode + run config + worktree identity, line 2 = live run data).
 	// Each row is clamped to width independently so neither wraps; padding to full
@@ -2061,6 +2217,18 @@ func (m chatTUI) View() tea.View {
 	}
 	parts = append(parts, statusBlockStyle.Width(boxW).MaxWidth(boxW).Render(statusBlock))
 
+	if m.nativeScrollback {
+		v := tea.NewView(strings.Join(parts, "\n"))
+		if !hideComposer {
+			if cur := m.input.Cursor(); cur != nil {
+				cur.X += 1
+				cur.Y += rowsAboveBox + 1
+				v.Cursor = cur
+			}
+		}
+		return v
+	}
+
 	// Full-screen frame: the transcript viewport on top (it pads to exactly its
 	// height), the pinned bottom region beneath. Alt-screen owns the grid, so
 	// resize repaints cleanly — no scrollback reflow, no ghost borders.
@@ -2070,9 +2238,7 @@ func (m chatTUI) View() tea.View {
 	}
 	v := tea.NewView(mainArea + "\n" + strings.Join(parts, "\n"))
 	v.AltScreen = true
-	if !isTermuxTerminal() {
-		v.MouseMode = tea.MouseModeCellMotion // wheel scrolls the transcript
-	}
+	v.MouseMode = tea.MouseModeCellMotion // wheel scrolls the transcript
 	// Anchor the real terminal cursor at the textarea's insertion point only when
 	// the composer is visible. input.Cursor() is relative to the textarea; offset
 	// by the viewport height + rows above + the box's top border row (+1 column
@@ -2247,7 +2413,14 @@ func (m chatTUI) renderApprovalBanner() string {
 	if subj != "" {
 		subj = " " + truncateSubject(subj, w)
 	}
-	text := fmt.Sprintf(i18n.M.ToolApprovalPromptFmt, name, subj, detail)
+	exactSessionRule := permission.SessionGrantRuleForScope(m.pendingApproval.Tool, m.pendingApproval.Subject, permission.ApprovalScopeExact)
+	exactPersistentRule := permission.RememberRuleForScope(m.pendingApproval.Tool, m.pendingApproval.Subject, permission.ApprovalScopeExact)
+	choices := fmt.Sprintf(i18n.M.ToolApprovalChoices, exactSessionRule, exactPersistentRule)
+	if m.pendingApproval.Tool == "bash" && permission.BashCommandPrefix(m.pendingApproval.Subject) != "" {
+		prefixRule := permission.RememberRuleForScope(m.pendingApproval.Tool, m.pendingApproval.Subject, permission.ApprovalScopePrefix)
+		choices = fmt.Sprintf(i18n.M.BashPrefixChoices, prefixRule, prefixRule)
+	}
+	text := fmt.Sprintf(i18n.M.ToolApprovalPromptFmt, name, subj, detail, choices)
 	return approvalBannerStyle.Width(w).Render("⏸ " + text)
 }
 
@@ -2792,6 +2965,14 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 	}
 	switch e.Kind {
 	case event.Reasoning:
+		if m.nativeScrollback {
+			if !m.reasoningNative {
+				m.thinkStart = time.Now()
+				m.reasoningNative = true
+			}
+			m.streamReasoning(e.Text)
+			break
+		}
 		if m.reasoningLineIdx < 0 {
 			// Show the marker plus a live text block the moment thinking starts; the
 			// text streams in below it and the block collapses to "thought for Ns"
@@ -2996,6 +3177,9 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 		m.notice(i18n.M.SlashTodoCleared)
 	case "/verbose":
 		m.toggleVerboseReasoning(true)
+	case "/sandbox":
+		m.echoLocalCommand(input)
+		m.showSandboxStatus()
 	case "/effort":
 		return m.runEffortCommand(input)
 	case "/auto-plan":
@@ -3097,6 +3281,41 @@ func (m *chatTUI) commandNames() string {
 		names[i] = "/" + c.Name
 	}
 	return strings.Join(names, " · ")
+}
+
+// showSandboxStatus displays the current sandbox configuration and whether
+// the OS sandbox backend is available. It reads from the stored config so
+// the user can inspect sandbox state without leaving the TUI (closes #3316).
+func (m *chatTUI) showSandboxStatus() {
+	if m.cfg == nil {
+		m.notice("sandbox: config not loaded")
+		return
+	}
+	bash := m.cfg.BashMode()
+	network := m.cfg.Sandbox.Network
+	available := sandbox.Available()
+	roots := m.cfg.WriteRoots()
+
+	var b strings.Builder
+	b.WriteString("sandbox\n")
+	b.WriteString("  phase 0  file-writer confinement\n")
+	if len(roots) > 0 {
+		fmt.Fprintf(&b, "    write_roots  %s\n", strings.Join(roots, ", "))
+	}
+	if m.cfg.Sandbox.WorkspaceRoot != "" {
+		fmt.Fprintf(&b, "    workspace_root  %s\n", m.cfg.Sandbox.WorkspaceRoot)
+	}
+	if len(m.cfg.Sandbox.AllowWrite) > 0 {
+		fmt.Fprintf(&b, "    allow_write  %s\n", strings.Join(m.cfg.Sandbox.AllowWrite, ", "))
+	}
+	b.WriteString("  phase 1  OS bash sandbox\n")
+	fmt.Fprintf(&b, "    bash        %s", bash)
+	if bash == "enforce" && !available {
+		b.WriteString(" (inactive: no OS sandbox on this host — bash runs unconfined)")
+	}
+	b.WriteString("\n")
+	fmt.Fprintf(&b, "    network     %v\n", network)
+	m.notice(b.String())
 }
 
 // runMCPSubcommand handles "/mcp" (status), "/mcp add …" (connect a server live

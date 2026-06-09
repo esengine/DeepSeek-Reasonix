@@ -73,26 +73,19 @@ export function AnchoredPopover({
     if (!anchor || !menu) return;
     const next = calculatePosition(anchor, menu, align, offset, placement);
     setPosition((current) => (samePosition(current, next) ? current : next));
-  });
+  }, [open, align, offset, placement]);
 
   useEffect(() => {
     if (!open) return;
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
     };
-    const closeOnScroll = (event: Event) => {
-      const target = event.target;
-      if (target instanceof Node && popoverRef.current?.contains(target)) return;
-      onClose();
-    };
     const closeOnViewportChange = () => onClose();
     window.addEventListener("keydown", closeOnEscape);
     window.addEventListener("resize", closeOnViewportChange);
-    window.addEventListener("scroll", closeOnScroll, true);
     return () => {
       window.removeEventListener("keydown", closeOnEscape);
       window.removeEventListener("resize", closeOnViewportChange);
-      window.removeEventListener("scroll", closeOnScroll, true);
     };
   }, [onClose, open]);
 

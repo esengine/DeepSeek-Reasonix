@@ -1,6 +1,6 @@
-// Package netclient builds HTTP clients that share Reasonix's user-facing proxy
-// settings. It is intentionally not used by web_fetch, whose dial-time SSRF guard
-// has a different security boundary from ordinary provider/update traffic.
+// Package netclient builds HTTP clients and proxy resolvers that share Reasonix's
+// user-facing proxy settings. web_fetch reuses the resolver while keeping its own
+// dial-time SSRF guard.
 package netclient
 
 import (
@@ -69,6 +69,11 @@ func NormalizeMode(mode string) string {
 func Validate(spec ProxySpec) error {
 	_, err := proxyFunc(spec)
 	return err
+}
+
+// ProxyFunc returns the per-request proxy resolver for spec.
+func ProxyFunc(spec ProxySpec) (func(*http.Request) (*url.URL, error), error) {
+	return proxyFunc(spec)
 }
 
 // NewHTTPClient returns an HTTP client with Reasonix proxy settings applied.
@@ -251,38 +256,6 @@ func validateProxyURL(u *url.URL) error {
 		return fmt.Errorf("network proxy_url host is required")
 	}
 	return nil
-}
-
-// ResolveProxyURL resolves the ProxySpec into a usable proxy URL string
-// (e.g. "http://127.0.0.1:7897"). Returns "" when the mode is off or when
-// auto/env mode has no environment proxy configured. Exported so web_fetch
-// can apply the same proxy settings as the rest of Reasonix.
-func ResolveProxyURL(spec ProxySpec) string {
-	switch NormalizeMode(spec.Mode) {
-	case ModeOff:
-		return ""
-	case ModeCustom:
-		u, err := customProxyURL(spec)
-		if err != nil {
-			return ""
-		}
-		return u.String()
-	case ModeEnv:
-		cfg := httpproxy.FromEnvironment()
-		if cfg.HTTPSProxy != "" {
-			return cfg.HTTPSProxy
-		}
-		return cfg.HTTPProxy
-	default: // auto
-		cfg := httpproxy.FromEnvironment()
-		if cfg.HTTPSProxy != "" {
-			return cfg.HTTPSProxy
-		}
-		if cfg.HTTPProxy != "" {
-			return cfg.HTTPProxy
-		}
-		return ""
-	}
 }
 
 func redactURL(u *url.URL) string {

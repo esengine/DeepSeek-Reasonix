@@ -88,7 +88,9 @@ export interface AppBindings {
   Cancel(): Promise<void>;
   CancelTab(tabID: string): Promise<void>;
   Approve(id: string, allow: boolean, session: boolean, persist: boolean): Promise<void>;
+  ApproveWithScope(id: string, allow: boolean, session: boolean, persist: boolean, scope: string): Promise<void>;
   ApproveTab(tabID: string, id: string, allow: boolean, session: boolean, persist: boolean): Promise<void>;
+  ApproveTabWithScope(tabID: string, id: string, allow: boolean, session: boolean, persist: boolean, scope: string): Promise<void>;
   AnswerQuestion(id: string, answers: QuestionAnswer[]): Promise<void>;
   AnswerQuestionForTab(tabID: string, id: string, answers: QuestionAnswer[]): Promise<void>;
   SetPlanMode(on: boolean): Promise<void>;
@@ -313,10 +315,32 @@ export function onUpdaterProgress(cb: (p: UpdateProgress) => void): () => void {
 export function onFilesDropped(cb: (paths: string[]) => void): () => void {
   const rt = typeof window !== "undefined" ? window.runtime : undefined;
   if (!rt?.OnFileDrop) return () => {};
+
+  // Wails' internal ResolveFilePaths throws when a non-file object (e.g. the
+  // window icon) is dragged onto the webview. The error is uncaught and crashes
+  // the app. Intercept it here so only real file drops reach the callback.
+  const suppressNonFileDragError = (e: ErrorEvent) => {
+    if (e.message?.includes("additional File object is not a file on the disk")) {
+      e.preventDefault();
+    }
+  };
+  const suppressNonFileDragRejection = (e: PromiseRejectionEvent) => {
+    const msg = e.reason?.message ?? String(e.reason);
+    if (msg.includes("additional File object is not a file on the disk")) {
+      e.preventDefault();
+    }
+  };
+  window.addEventListener("error", suppressNonFileDragError);
+  window.addEventListener("unhandledrejection", suppressNonFileDragRejection);
+
   rt.OnFileDrop((_x, _y, paths) => {
     if (Array.isArray(paths) && paths.length > 0) cb(paths);
   }, true);
-  return () => rt.OnFileDropOff?.();
+  return () => {
+    rt.OnFileDropOff?.();
+    window.removeEventListener("error", suppressNonFileDragError);
+    window.removeEventListener("unhandledrejection", suppressNonFileDragRejection);
+  };
 }
 
 // onReady subscribes to the agent:ready event fired when boot.Build completes.
@@ -588,7 +612,7 @@ function makeMockApp(): AppBindings {
       { name: "mimo-api", builtIn: true, added: false, kind: "openai", baseUrl: "https://api.xiaomimimo.com/v1", modelsUrl: "", models: ["mimo-v2.5-pro"], default: "mimo-v2.5-pro", apiKeyEnv: "MIMO_API_KEY", keySet: false, balanceUrl: "", contextWindow: 1_048_576, reasoningProtocol: "", supportedEfforts: [], defaultEffort: "" },
       { name: "mimo-token-plan", builtIn: true, added: false, kind: "openai", baseUrl: "https://token-plan-cn.xiaomimimo.com/v1", modelsUrl: "", models: ["mimo-v2.5-pro"], default: "mimo-v2.5-pro", apiKeyEnv: "MIMO_API_KEY", keySet: false, balanceUrl: "", contextWindow: 1_048_576, reasoningProtocol: "", supportedEfforts: [], defaultEffort: "" },
     ],
-    permissions: { mode: "ask", allow: ["ls", "read_file"], ask: [], deny: ["bash(rm *)"] },
+    permissions: { mode: "ask", allow: ["ls", "read_file"], ask: [], deny: ["Bash(rm:*)"] },
     sandbox: { bash: "enforce", network: true, workspaceRoot: "", allowWrite: [] },
     network: {
       proxyMode: "auto",
@@ -950,17 +974,24 @@ function makeMockApp(): AppBindings {
           await this.Cancel();
         },
         async Approve(_id, allow, session, persist) {
+          await this.ApproveWithScope(_id, allow, session, persist, "");
+        },
+        async ApproveWithScope(_id, allow, session, persist, scope) {
           if (!pendingApprovalPreview) return;
-      pendingApprovalPreview = false;
-      const suffix = persist ? "persisted" : session ? "allowed for session" : "allowed once";
-      emit({
-        kind: "message",
-        text: `approval preview answered: ${allow ? suffix : "denied"}`,
-      });
+          pendingApprovalPreview = false;
+          const scopeLabel = scope === "prefix" ? "prefix" : "scope";
+          const suffix = persist ? `${scopeLabel} grant saved` : session ? `${scopeLabel} grant active this session` : "allowed once";
+          emit({
+            kind: "message",
+            text: `approval preview answered: ${allow ? suffix : "denied"}`,
+          });
           emit({ kind: "turn_done" });
         },
         async ApproveTab(_tabID, id, allow, session, persist) {
-          await this.Approve(id, allow, session, persist);
+          await this.ApproveTabWithScope(_tabID, id, allow, session, persist, "");
+        },
+        async ApproveTabWithScope(_tabID, id, allow, session, persist, scope) {
+          await this.ApproveWithScope(id, allow, session, persist, scope);
         },
         async AnswerQuestion(_id, answers) {
       if (!pendingAskPreview) return;

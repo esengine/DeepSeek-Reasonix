@@ -77,8 +77,8 @@ and DeepSeek prefix-cache–oriented design.
 - **Code intelligence**: embedding semantic search is replaced by **CodeGraph**
   (`codegraph_*` tools) — a tree-sitter symbol/call graph, no embedding service or
   API cost. New (first-run) configs start with it off; existing configs keep it
-  on across upgrades. Toggle `[codegraph]` in the MCP manager or config, and set
-  `[codegraph].tier` to choose lazy, background, or eager startup.
+  on across upgrades. Toggle `[codegraph]` in the MCP manager or config; when
+  enabled it starts in the background so chat startup is never blocked.
 - **Plan mode** + `complete_step` (evidence-backed step sign-off).
 - **No web dashboard** — the v2 line is terminal + desktop (Wails), by design.
 - Some granular v1 tools are intentionally consolidated (e.g. file-management ops

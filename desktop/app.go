@@ -614,13 +614,21 @@ func (a *App) CancelTab(tabID string) {
 // Approve answers a pending approval_request by ID: allow runs the call, session
 // also remembers the grant for the rest of the session.
 func (a *App) Approve(id string, allow, session, persist bool) {
-	a.ApproveTab("", id, allow, session, persist)
+	a.ApproveWithScope(id, allow, session, persist, "")
+}
+
+func (a *App) ApproveWithScope(id string, allow, session, persist bool, scope string) {
+	a.ApproveTabWithScope("", id, allow, session, persist, scope)
 }
 
 func (a *App) ApproveTab(tabID, id string, allow, session, persist bool) {
+	a.ApproveTabWithScope(tabID, id, allow, session, persist, "")
+}
+
+func (a *App) ApproveTabWithScope(tabID, id string, allow, session, persist bool, scope string) {
 	ctrl := a.ctrlByTabID(tabID)
 	if ctrl != nil {
-		ctrl.Approve(id, allow, session, persist)
+		ctrl.ApproveWithScope(id, allow, session, persist, scope)
 	}
 }
 
@@ -776,6 +784,16 @@ func (a *App) CheckpointsForTab(tabID string) []CheckpointMeta {
 			CanCode:         len(m.Paths) > 0,
 			CanConversation: ctrl.CheckpointHasBoundary(m.Turn),
 		})
+	}
+	// RestoreCode(turn) reverts every file touched in this turn or any later one, so
+	// a turn can rewind code even when it changed no files itself — as long as a
+	// later turn did. Propagate CanCode backwards over the oldest-first list.
+	hasCodeAfter := false
+	for i := len(out) - 1; i >= 0; i-- {
+		if len(out[i].Files) > 0 {
+			hasCodeAfter = true
+		}
+		out[i].CanCode = hasCodeAfter
 	}
 	return out
 }
@@ -1885,12 +1903,7 @@ func (a *App) Capabilities() CapabilitiesView {
 		if loadedCfg != nil && !seen["codegraph"] {
 			status := "disabled"
 			if loadedCfg.Codegraph.Enabled {
-				switch loadedCfg.Codegraph.ResolvedTier() {
-				case "background", "eager":
-					status = "initializing"
-				default:
-					status = "deferred"
-				}
+				status = "initializing"
 			}
 			if s, ok := disabled["codegraph"]; ok {
 				s.Status = "disabled"
@@ -2397,8 +2410,8 @@ func (a *App) connectConfiguredMCPServerForTab(tab *WorkspaceTab, name string) (
 }
 
 // SetMCPServerTier is kept for old desktop bindings. New config writes drop the
-// retired tier field, so this only affects the active session before the next
-// config reload.
+// retired tier field; for CodeGraph this now means "enable and start in the
+// background".
 func (a *App) SetMCPServerTier(name, tier string) error {
 	if name == "codegraph" {
 		return a.setCodegraphTier(tier)
@@ -2473,14 +2486,13 @@ func (a *App) setCodegraphEnabled(enabled bool) error {
 	return nil
 }
 
-func (a *App) setCodegraphTier(tier string) error {
-	tier = normalizeMCPTier(tier)
+func (a *App) setCodegraphTier(_ string) error {
 	cfg, path, err := a.loadDesktopUserConfigForEdit()
 	if err != nil {
 		return err
 	}
 	cfg.Codegraph.Enabled = true
-	cfg.Codegraph.Tier = tier
+	cfg.Codegraph.Tier = ""
 	if err := cfg.SaveTo(path); err != nil {
 		return err
 	}
@@ -2494,7 +2506,7 @@ func (a *App) setCodegraphTier(tier string) error {
 	a.mu.Lock()
 	delete(tab.disabledMCP, "codegraph")
 	a.mu.Unlock()
-	if tier != "lazy" && !mcpConnected(tab.Ctrl, "codegraph") {
+	if !mcpConnected(tab.Ctrl, "codegraph") {
 		if _, err := tab.Ctrl.ConnectCodegraphMCPServer(cfg); err != nil {
 			recordCodegraphFailure(tab.Ctrl, cfg.Codegraph, err)
 			return nil
@@ -3612,16 +3624,32 @@ func (a *App) currentProviderEntryForTab(tabID string) (*config.ProviderEntry, e
 	return entry, nil
 }
 
-// SavePastedImage stores a browser clipboard image data URL under
-// .reasonix/attachments and returns the relative @-reference path.
+// SavePastedImage stores a browser clipboard image data URL under the active
+// tab's workspace .reasonix/attachments and returns the relative @-reference path.
 func (a *App) SavePastedImage(dataURL string) (string, error) {
+	root := a.activeWorkspaceRoot()
+	if root != "" && root != "." {
+		if prev, err := os.Getwd(); err == nil {
+			if err := os.Chdir(root); err == nil {
+				defer func() { _ = os.Chdir(prev) }()
+			}
+		}
+	}
 	return control.SaveImageDataURL(dataURL)
 }
 
 // SavePastedFile stores a dropped non-image file (the browser exposes its bytes
-// as a data URL but not a real path) under .reasonix/attachments and returns the
-// relative @-reference path.
+// as a data URL but not a real path) under the active tab's workspace
+// .reasonix/attachments and returns the relative @-reference path.
 func (a *App) SavePastedFile(name, dataURL string) (string, error) {
+	root := a.activeWorkspaceRoot()
+	if root != "" && root != "." {
+		if prev, err := os.Getwd(); err == nil {
+			if err := os.Chdir(root); err == nil {
+				defer func() { _ = os.Chdir(prev) }()
+			}
+		}
+	}
 	return control.SaveAttachmentDataURL(name, dataURL)
 }
 

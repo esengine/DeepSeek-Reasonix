@@ -16,6 +16,8 @@ func TestParseRule(t *testing.T) {
 		wantOK   bool
 	}{
 		{"bash", "bash", "", false, true},
+		{"Bash(npm run build)", "Bash", "npm run build", false, true},
+		{"Edit(docs/**)", "Edit", "docs/**", false, true},
 		{"bash(rm -rf*)", "bash", "rm -rf*", false, true},
 		{"  read_file  ", "read_file", "", false, true},
 		{"bash( go test ./... )", "bash", " go test ./... ", false, true}, // subject preserved verbatim
@@ -197,10 +199,22 @@ func TestGateInteractive(t *testing.T) {
 	}
 }
 
-// TestLiteralRuleMatchesExactly guards the remembered-approval rule shape: a
-// literal "bash=rm *.log" must allow only that exact command, never the wildcard
-// expansion a glob "bash(rm *.log)" would have matched.
-func TestLiteralRuleMatchesExactly(t *testing.T) {
+func TestClaudeStyleRuleMatchesExactCommandWithoutWildcard(t *testing.T) {
+	p := New("ask", []string{"Bash(go build)"}, nil, nil)
+
+	if got := p.Decide("bash", false, json.RawMessage(`{"command":"go build"}`)); got != Allow {
+		t.Errorf("exact command = %v, want Allow", got)
+	}
+	if got := p.Decide("bash", false, json.RawMessage(`{"command":"go build ./cmd"}`)); got == Allow {
+		t.Errorf("exact command rule matched longer command")
+	}
+}
+
+// TestLegacyLiteralRuleMatchesExactly guards configs written before the
+// Claude-style Bash(...) rules: a literal "bash=rm *.log" must allow only that
+// exact command, never the wildcard expansion a glob "bash(rm *.log)" would
+// have matched.
+func TestLegacyLiteralRuleMatchesExactly(t *testing.T) {
 	p := New("ask", []string{"bash=rm *.log"}, nil, nil)
 
 	if got := p.Decide("bash", false, json.RawMessage(`{"command":"rm *.log"}`)); got != Allow {

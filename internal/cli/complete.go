@@ -75,6 +75,7 @@ func (m *chatTUI) slashItems() []compItem {
 		{label: "/paste-image", insert: "/paste-image", hint: i18n.M.CmdPasteImage},
 		{label: "/output-style", insert: "/output-style", hint: i18n.M.CmdOutputStyle},
 		{label: "/verbose", insert: "/verbose", hint: i18n.M.CmdVerbose},
+		{label: "/sandbox", insert: "/sandbox", hint: i18n.M.CmdSandbox},
 		{label: "/effort", insert: "/effort ", hint: i18n.M.CmdEffort, descend: true},
 		{label: "/auto-plan", insert: "/auto-plan ", hint: i18n.M.CmdAutoPlan, descend: true},
 		{label: "/theme", insert: "/theme ", hint: i18n.M.CmdTheme, descend: true},
@@ -473,6 +474,17 @@ func (m *chatTUI) completionBareOverlayCommand() bool {
 	default:
 		return false
 	}
+}
+
+func (m *chatTUI) completionSelectedInsertPresent() bool {
+	if !m.completion.active || m.completion.sel >= len(m.completion.items) {
+		return false
+	}
+	val := m.input.Value()
+	if m.completion.replaceFrom > len(val) {
+		return false
+	}
+	return val[m.completion.replaceFrom:] == m.completion.items[m.completion.sel].insert
 }
 
 // acceptCompletion applies the selected item to the input, then recomputes the

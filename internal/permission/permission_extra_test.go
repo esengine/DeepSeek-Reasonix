@@ -140,6 +140,146 @@ func TestSubjectPriority(t *testing.T) {
 	}
 }
 
+// --- rememberRule ---
+
+func TestRememberRuleWithBashSubjectUsesCommandScope(t *testing.T) {
+	got := rememberRule("bash", "go test ./...")
+	if got != "Bash(go test ./...)" {
+		t.Errorf("rememberRule = %q", got)
+	}
+	if r, ok := ParseRule(got); !ok || r.Literal || r.Tool != "Bash" || r.Subject != "go test ./..." {
+		t.Errorf("ParseRule(%q) = {%q,%q,lit=%v,ok=%v}", got, r.Tool, r.Subject, r.Literal, ok)
+	}
+}
+
+func TestRememberRuleForBashPrefixUsesGlobScope(t *testing.T) {
+	got := RememberRuleForScope("bash", "go test ./...", ApprovalScopePrefix)
+	if got != "Bash(go test:*)" {
+		t.Errorf("RememberRuleForScope prefix = %q", got)
+	}
+	if !RuleMatchesString(got, "bash", "go test ./internal/control") {
+		t.Errorf("prefix rule should match similar go test command")
+	}
+	if !RuleMatchesString(got, "bash", "go test") {
+		t.Errorf("prefix rule should match the base command without extra args")
+	}
+	if RuleMatchesString(got, "bash", "go build ./...") {
+		t.Errorf("prefix rule should not match different go subcommand")
+	}
+	if RuleMatchesString(got, "bash", "go testing ./...") {
+		t.Errorf("prefix rule should not match partial command words")
+	}
+	if RuleMatchesString(got, "bash", "go test ./... && rm -rf /tmp/x") {
+		t.Errorf("prefix rule should not match commands with shell syntax")
+	}
+	if !RuleMatchesString("Bash(go test *)", "bash", "go test ./legacy") {
+		t.Errorf("legacy space-star prefix should still match similar commands")
+	}
+	if RuleMatchesString("Bash(go test *)", "bash", "go test ./legacy && rm -rf /tmp/x") {
+		t.Errorf("legacy space-star prefix should not match commands with shell syntax")
+	}
+}
+
+func TestRememberRuleWithFileSubjectUsesPathScope(t *testing.T) {
+	got := rememberRule("edit_file", "src/app.go")
+	if got != "Edit(src/app.go)" {
+		t.Errorf("rememberRule = %q", got)
+	}
+	if r, ok := ParseRule(got); !ok || r.Literal || r.Tool != "Edit" || r.Subject != "src/app.go" {
+		t.Errorf("ParseRule(%q) = {%q,%q,lit=%v,ok=%v}", got, r.Tool, r.Subject, r.Literal, ok)
+	}
+}
+
+func TestRememberRuleWithoutSubject(t *testing.T) {
+	got := rememberRule("ls", "")
+	if got != "ls" {
+		t.Errorf("rememberRule = %q", got)
+	}
+}
+
+func TestSessionGrantKeyScopesBashByCommand(t *testing.T) {
+	a := SessionGrantKey("bash", "go build")
+	b := SessionGrantKey("bash", "go test ./...")
+	if a == b {
+		t.Fatalf("bash session grant keys should differ by command: %q", a)
+	}
+}
+
+func TestSessionGrantKeyGroupsFileMutationTools(t *testing.T) {
+	a := SessionGrantKey("edit_file", "src/a.go")
+	b := SessionGrantKey("write_file", "src/b.go")
+	if a != b {
+		t.Fatalf("file mutation session grant keys should match, got %q and %q", a, b)
+	}
+}
+
+func TestSessionGrantRuleForBashPrefix(t *testing.T) {
+	got := SessionGrantRuleForScope("bash", "npm run test -- --watch", ApprovalScopePrefix)
+	if got != "Bash(npm run test:*)" {
+		t.Errorf("SessionGrantRuleForScope prefix = %q", got)
+	}
+	if !RuleMatchesString(got, "bash", "npm run test -- src") {
+		t.Errorf("prefix session rule should match same package script")
+	}
+	if RuleMatchesString(got, "bash", "npm run build") {
+		t.Errorf("prefix session rule should not match another package script")
+	}
+}
+
+func TestBashCommandPrefixRejectsShellSyntax(t *testing.T) {
+	if got := BashCommandPrefix("go test ./... && rm -rf /tmp/x"); got != "" {
+		t.Errorf("BashCommandPrefix with shell syntax = %q, want empty", got)
+	}
+	if got := BashCommandPrefix("rm -rf /tmp/x"); got != "" {
+		t.Errorf("BashCommandPrefix dangerous command = %q, want empty", got)
+	}
+	if got := BashCommandPrefix("go test ./..."); got != "go test:*" {
+		t.Errorf("BashCommandPrefix = %q", got)
+	}
+}
+
+func TestRuleCoversString(t *testing.T) {
+	cases := []struct {
+		existing  string
+		candidate string
+		want      bool
+	}{
+		{"Bash(go test:*)", "Bash(go test ./...)", true},
+		{"Bash(go test *)", "Bash(go test ./...)", true}, // legacy generated prefix
+		{"bash(go test *)", "Bash(go test)", true},
+		{"bash=go test ./...", "Bash(go test ./...)", true},
+		{"Bash(go test *)", "Bash(go test:*)", true}, // existing legacy prefix covers the new shape
+		{"Bash(go test:*)", "Bash(go test *)", true}, // new prefix prunes legacy prefix on save
+		{"Bash(go test ./...)", "Bash(go test:*)", false},
+		{"Edit", "Edit(src/app.go)", true},
+		{"file_mutation", "Edit(src/app.go)", true},
+		{"Edit(src/app.go)", "Edit", false},
+		{"Bash(go test:*)", "Bash(go build ./...)", false},
+	}
+	for _, c := range cases {
+		if got := RuleCoversString(c.existing, c.candidate); got != c.want {
+			t.Errorf("RuleCoversString(%q, %q) = %v, want %v", c.existing, c.candidate, got, c.want)
+		}
+	}
+}
+
+func TestFileMutationRuleMatchesMutationToolsByPath(t *testing.T) {
+	p := New("ask", []string{"Edit(src/app.go)"}, nil, nil)
+
+	if got := p.Decide("write_file", false, json.RawMessage(`{"path":"src/app.go"}`)); got != Allow {
+		t.Errorf("write_file same path = %v, want Allow", got)
+	}
+	if got := p.Decide("multi_edit", false, json.RawMessage(`{"path":"src/app.go"}`)); got != Allow {
+		t.Errorf("multi_edit same path = %v, want Allow", got)
+	}
+	if got := p.Decide("edit_file", false, json.RawMessage(`{"path":"src/other.go"}`)); got == Allow {
+		t.Errorf("edit_file different path = %v, want not Allow", got)
+	}
+	if got := p.Decide("bash", false, json.RawMessage(`{"command":"cat src/app.go"}`)); got == Allow {
+		t.Errorf("bash should not match Edit rule")
+	}
+}
+
 // --- New ---
 
 func TestNewPolicy(t *testing.T) {

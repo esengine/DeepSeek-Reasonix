@@ -1773,7 +1773,7 @@ tier = "lazy"
 	t.Fatalf("broken MCP missing from Capabilities: %+v", view.Servers)
 }
 
-func TestSetMCPServerTierPersistsCodegraphConfig(t *testing.T) {
+func TestSetMCPServerTierEnablesCodegraphAndIgnoresLegacyTier(t *testing.T) {
 	t.Setenv("HOME", robustTempDir(t))
 	t.Setenv("USERPROFILE", robustTempDir(t))
 	t.Setenv("XDG_CONFIG_HOME", robustTempDir(t))
@@ -1794,7 +1794,7 @@ auto_install = true
 	app.setTestCtrl(control.New(control.Options{Host: plugin.NewHost()}), "")
 	defer app.activeCtrl().Close()
 
-	if err := app.SetMCPServerTier("codegraph", "background"); err != nil {
+	if err := app.SetMCPServerTier("codegraph", "eager"); err != nil {
 		t.Fatalf("SetMCPServerTier(codegraph): %v", err)
 	}
 	cfg, err := config.Load()
@@ -1802,17 +1802,17 @@ auto_install = true
 		t.Fatal(err)
 	}
 	if !cfg.Codegraph.Enabled {
-		t.Fatal("codegraph enabled = false, want true after selecting a startup tier")
+		t.Fatal("codegraph enabled = false, want true after legacy tier update")
 	}
 	if got := cfg.Codegraph.Tier; got != "" {
-		t.Fatalf("codegraph tier = %q, want migrated empty", got)
+		t.Fatalf("codegraph tier = %q, want ignored legacy tier", got)
 	}
 	userCfg := config.LoadForEdit(config.UserConfigPath())
 	if !userCfg.Codegraph.Enabled {
-		t.Fatal("user codegraph enabled = false, want true after selecting a startup tier")
+		t.Fatal("user codegraph enabled = false, want true after legacy tier update")
 	}
 	if got := userCfg.Codegraph.Tier; got != "" {
-		t.Fatalf("user codegraph tier = %q, want migrated empty", got)
+		t.Fatalf("user codegraph tier = %q, want ignored legacy tier", got)
 	}
 	if !mcpFailed(app.activeCtrl(), "codegraph") {
 		t.Fatalf("Host.Failures() = %+v, want codegraph failure recorded for missing runtime", app.activeCtrl().Host().Failures())

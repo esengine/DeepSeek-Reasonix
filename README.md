@@ -133,8 +133,8 @@ bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local ca
 
 [permissions]
 mode  = "ask"                                # writer fallback when no rule matches: ask|allow|deny
-deny  = ["bash(rm -rf*)", "bash(git push*)"] # hard-blocked in every mode
-allow = ["bash(go test*)"]                   # never prompted
+deny  = ["Bash(rm -rf*)", "Bash(git push*)"] # hard-blocked in every mode
+allow = ["Bash(go test:*)"]                  # never prompted
 
 [sandbox]
 # workspace_root = ""          # file-writers confined here; empty = current dir
@@ -145,10 +145,15 @@ name    = "example"
 command = "reasonix-plugin-example"
 ```
 
-Permissions gate each tool call: `deny` > `ask` > `allow` > fallback (readers
-always allow; writers fall back to `mode`). `reasonix chat` prompts before writers
-(`y` once · `a` this session · `n` no); `reasonix run` stays autonomous but still
-honours `deny`. See [`docs/SPEC.md`](docs/SPEC.md) for the full schema and contract.
+Permissions gate each tool call: `deny` > `ask` > `allow` > fallback. Bash and
+file mutation tools require approval by default; read-only tools generally do
+not. Approvals are stored and matched as permission rules, not button labels:
+for example `Bash(npm run build)`, `Bash(npm run test:*)`, and `Edit(docs/**)`.
+`reasonix chat` can grant Bash as an exact command or as a conservative command
+prefix (for example `Bash(go test:*)`), while file-editing tools share session
+edit grants and persist path-scoped rules such as `Edit(src/app.go)`.
+`reasonix run` stays autonomous but still honours `deny`. See
+[`docs/SPEC.md`](docs/SPEC.md) for the full schema and contract.
 
 Permissions are *policy* (which calls to allow / prompt). The **sandbox** is
 *enforcement*: the file-writers (`write_file` / `edit_file` / `multi_edit`)

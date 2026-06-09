@@ -315,8 +315,16 @@ export const en = {
   "approval.hideDetails": "Hide",
   "approval.deny": "Deny",
   "approval.allowOnce": "Allow once",
-  "approval.allowSession": "Allow for session",
-  "approval.allowPersistent": "Always allow (save)",
+  "approval.allowSession": "Allow tool for session",
+  "approval.allowPersistent": "Always allow tool (save)",
+  "approval.allowCommandSession": "Allow command for session",
+  "approval.allowCommandPersistent": "Always allow command (save)",
+  "approval.allowCommandPrefixSession": "Allow command prefix for session",
+  "approval.allowCommandPrefixPersistent": "Always allow command prefix (save)",
+  "approval.allowRuleSession": "Allow for session",
+  "approval.allowRulePersistent": "Always allow (save)",
+  "approval.allowEditsSession": "Allow edits for session",
+  "approval.allowFilePersistent": "Always allow this file (save)",
 
   // ask card
   "ask.title": "Need your decision",
@@ -371,6 +379,9 @@ export const en = {
   "history.yesterday": "Yesterday",
   "history.older": "Older",
   "history.openSession": "Open session",
+  "history.failedOpenProject": "Cannot open session, \"{name}\" does not exist: {path}",
+  "history.failedOpenSession": "Cannot open session",
+  "history.failedOpenGlobal": "Cannot open global session",
   "history.selectSession": "Select a session to preview.",
   "history.trashSessionActions": "Trash session actions",
   "history.historySessionActions": "History session actions",
@@ -770,7 +781,6 @@ export const en = {
   // todo bar
   "todo.title": "To-dos",
   "todo.dismiss": "Dismiss the task list",
-  "todo.stale": "Progress may be stale",
 
   // slash menu tags
   "slash.project": "project",

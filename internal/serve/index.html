@@ -459,7 +459,15 @@ const __T = {
     'submit': 'Submit',
     'approval_title': 'Approval Required',
     'allow': 'Allow',
-    'session': 'Session',
+    'session': 'Allow for session',
+    'session_command': 'Command for session',
+    'session_prefix': 'Command prefix for session',
+    'persist_command': 'Always allow command (save)',
+    'persist_prefix': 'Always allow command prefix (save)',
+    'persist_edit': 'Always allow edits (save)',
+    'persist_tool': 'Always allow (save)',
+    'session_edit': 'Edits for session',
+    'session_tool': 'Tool for session',
     'deny': 'Deny',
     'auto_mode': 'Auto mode',
     'plan_mode': 'Plan mode (read-only)',
@@ -545,7 +553,15 @@ const __T = {
     'submit': '提交',
     'approval_title': '需要批准',
     'allow': '允许',
-    'session': '会话期',
+    'session': '本会话允许',
+    'session_command': '本会话允许此命令',
+    'session_prefix': '本会话允许命令前缀',
+    'persist_command': '总是允许此命令（保存）',
+    'persist_prefix': '总是允许命令前缀（保存）',
+    'persist_edit': '总是允许编辑（保存）',
+    'persist_tool': '总是允许（保存）',
+    'session_edit': '本会话允许编辑',
+    'session_tool': '本会话允许此工具',
     'deny': '拒绝',
     'auto_mode': '自动模式',
     'plan_mode': '计划模式（只读）',
@@ -733,12 +749,66 @@ function renderToolProgress(tool) {
 }
 
 // ── approval ──
+function approvalSessionLabel(a) {
+  return __('session')+' '+approvalSessionRule(a);
+}
+function approvalPersistentLabel(a) {
+  return __('persist_tool')+' '+approvalPersistentRule(a);
+}
+function approvalSessionRule(a) {
+  if (a.tool === 'bash' && a.subject) return 'Bash('+String(a.subject).trim()+')';
+  if (['write_file','edit_file','multi_edit','notebook_edit','delete_range','delete_symbol'].includes(a.tool)) return 'Edit';
+  return a.tool;
+}
+function approvalPersistentRule(a) {
+  if (a.tool === 'bash' && a.subject) return 'Bash('+String(a.subject).trim()+')';
+  if (['write_file','edit_file','multi_edit','notebook_edit','delete_range','delete_symbol'].includes(a.tool)) return a.subject ? 'Edit('+String(a.subject).trim()+')' : 'Edit';
+  return a.tool;
+}
+function bashCommandPrefix(subject) {
+  const command = String(subject || '').trim();
+  if (!command || command.includes('`') || command.includes('$(') || /[;|&<>\n]/.test(command)) return '';
+  const fields = command.split(/\s+/).filter(Boolean);
+  if (fields.length < 2) return '';
+  if (dangerousBashCommand(command)) return '';
+  const base = fields[0].toLowerCase();
+  if (['npm','pnpm','yarn','bun'].includes(base) && fields[1] && fields[1].toLowerCase() === 'run') return fields.length >= 3 ? fields[0]+' '+fields[1]+' '+fields[2]+':*' : '';
+  return fields[0]+' '+fields[1]+':*';
+}
+function dangerousBashCommand(command) {
+  return /^rm\s+-[^\s]*[rf][^\s]*\b/.test(command)
+    || /^git\s+push\b.*\s--force\b/.test(command)
+    || /^git\s+push\b.*\s-f\b/.test(command)
+    || /^git\s+reset\s+--hard\b/.test(command)
+    || /^git\s+clean\s+-f\b/.test(command)
+    || /^chmod\s+(?:-R\s+)?777\b/.test(command)
+    || /^chown\b/.test(command)
+    || /^sudo\b/.test(command)
+    || /^mkfs\b/.test(command)
+    || /^dd\s+if=/.test(command)
+    || /^fdisk\b/.test(command);
+}
 function showApproval(a) {
   const d=el('div','approval');
-  d.innerHTML='<div class="approval__header"><svg class="approval__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg><span class="approval__title">'+__('approval_title')+'</span></div><div class="approval__subject">'+escHtml(a.tool)+(a.subject?' — '+escHtml(a.subject):'')+'</div><div class="approval__actions"><button class="approval__btn approval__btn--allow" data-allow="true" data-session="false"><span class="approval__key">Y</span> '+__('allow')+'</button><button class="approval__btn approval__btn--allow" data-allow="true" data-session="true"><span class="approval__key">A</span> '+__('session')+'</button><button class="approval__btn approval__btn--deny" data-allow="false"><span class="approval__key">N</span> '+__('deny')+'</button></div>';
+  const prefix = a.tool === 'bash' ? bashCommandPrefix(a.subject) : '';
+  const hasPrefix = prefix !== '';
+  const prefixRule = hasPrefix ? 'Bash('+prefix+')' : '';
+  const actions = [
+    '<button class="approval__btn approval__btn--allow" data-allow="true" data-session="false"><span class="approval__key">Y</span> '+__('allow')+'</button>',
+  ];
+  if (hasPrefix) {
+    actions.push('<button class="approval__btn approval__btn--allow" data-allow="true" data-session="true" data-scope="prefix"><span class="approval__key">A</span> '+escHtml(__('session')+' '+prefixRule)+'</button>');
+    actions.push('<button class="approval__btn approval__btn--allow" data-allow="true" data-session="true" data-persist="true" data-scope="prefix"><span class="approval__key">P</span> '+escHtml(__('persist_tool')+' '+prefixRule)+'</button>');
+  } else {
+    actions.push('<button class="approval__btn approval__btn--allow" data-allow="true" data-session="true"><span class="approval__key">A</span> '+escHtml(approvalSessionLabel(a))+'</button>');
+    actions.push('<button class="approval__btn approval__btn--allow" data-allow="true" data-session="true" data-persist="true"><span class="approval__key">P</span> '+escHtml(approvalPersistentLabel(a))+'</button>');
+  }
+  actions.push('<button class="approval__btn approval__btn--deny" data-allow="false"><span class="approval__key">N</span> '+__('deny')+'</button>');
+  d.innerHTML='<div class="approval__header"><svg class="approval__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg><span class="approval__title">'+__('approval_title')+'</span></div><div class="approval__subject">'+escHtml(a.tool)+(a.subject?' — '+escHtml(a.subject):'')+'</div><div class="approval__actions">'+actions.join('')+'</div>';
   log.appendChild(d);scrollDown();
-  d.querySelectorAll('.approval__btn').forEach(btn=>{btn.onclick=()=>{post('/approve',{id:a.id,allow:btn.dataset.allow==='true',session:btn.dataset.session==='true'});d.remove();};});
-  const onkey=e=>{if(e.key==='y'||e.key==='1'){post('/approve',{id:a.id,allow:true,session:false});d.remove();document.removeEventListener('keydown',onkey);}else if(e.key==='a'||e.key==='2'){post('/approve',{id:a.id,allow:true,session:true});d.remove();document.removeEventListener('keydown',onkey);}else if(e.key==='n'||e.key==='3'){post('/approve',{id:a.id,allow:false,session:false});d.remove();document.removeEventListener('keydown',onkey);}};
+  const resolve=payload=>{post('/approve',Object.assign({id:a.id},payload));d.remove();document.removeEventListener('keydown',onkey);};
+  d.querySelectorAll('.approval__btn').forEach(btn=>{btn.onclick=()=>resolve({allow:btn.dataset.allow==='true',session:btn.dataset.session==='true',persist:btn.dataset.persist==='true',scope:btn.dataset.scope||''});});
+  const onkey=e=>{const k=e.key.toLowerCase();if(k==='y'||k==='1'){resolve({allow:true,session:false});}else if(k==='a'||k==='2'){resolve({allow:true,session:true});}else if(hasPrefix&&k==='3'){resolve({allow:true,session:true,scope:'prefix'});}else if(k==='p'||(!hasPrefix&&k==='3')||(hasPrefix&&k==='4')){resolve({allow:true,session:true,persist:true,scope:hasPrefix?'prefix':''});}else if(k==='n'||k==='escape'||(!hasPrefix&&k==='4')||(hasPrefix&&k==='5')){resolve({allow:false,session:false});}};
   document.addEventListener('keydown',onkey);
 }
 

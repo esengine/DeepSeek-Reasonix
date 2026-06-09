@@ -4,6 +4,7 @@ import App from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { installGlobalCrashHandlers } from "./lib/crash";
 import { LocaleProvider } from "./lib/i18n";
+import { ToastProvider } from "./lib/toast";
 import { initFontFamily } from "./lib/fontFamily";
 import { initTextSize } from "./lib/textSize";
 import { initTheme } from "./lib/theme";
@@ -53,7 +54,9 @@ createRoot(root).render(
   <StrictMode>
     <ErrorBoundary>
       <LocaleProvider>
-        <App />
+        <ToastProvider>
+          <App />
+        </ToastProvider>
       </LocaleProvider>
     </ErrorBoundary>
   </StrictMode>,

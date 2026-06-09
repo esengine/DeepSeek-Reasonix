@@ -7,7 +7,6 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
@@ -23,6 +22,10 @@ const (
 	// with CODEGRAPH_VERSION in the Makefile and .github/workflows.
 	Version = "v0.9.7"
 	cgRepo  = "colbymchenry/codegraph"
+
+	officialMirrorBase         = "https://pub-147fb53b9c1e4bbf891a257968619ea7.r2.dev/codegraph"
+	officialMainlandMirrorBase = ""
+	perSourceDownloadTimeout   = 15 * time.Second
 
 	renameAttempts = 5
 	renameBackoff  = 200 * time.Millisecond
@@ -79,7 +82,8 @@ func assetName() string {
 }
 
 // Install downloads and unpacks the CodeGraph bundle into CacheDir on first use,
-// verifying it against the release's SHA256SUMS, then returns the launcher path.
+// verifying it against the checksum baked into the reasonix binary, then returns
+// the launcher path.
 // It is idempotent: a present cache is returned untouched. log, if non-nil,
 // receives a couple of progress lines. The extraction is staged in a temp dir and
 // atomically renamed into place, so a cancelled or failed run leaves no partial
@@ -104,21 +108,9 @@ func InstallWithClient(ctx context.Context, client *http.Client, log func(string
 	asset := assetName()
 	logf(log, "codegraph: downloading %s (%s, one-time)…", asset, Version)
 
-	base := fmt.Sprintf("https://github.com/%s/releases/download/%s", cgRepo, Version)
-	sums, err := httpGet(ctx, client, base+"/SHA256SUMS")
-	if err != nil {
-		return "", fmt.Errorf("codegraph: fetch checksums: %w", err)
-	}
-	want, err := sha256For(string(sums), asset)
+	data, err := downloadAsset(ctx, client, asset, log)
 	if err != nil {
 		return "", err
-	}
-	data, err := httpGet(ctx, client, base+"/"+asset)
-	if err != nil {
-		return "", fmt.Errorf("codegraph: download %s: %w", asset, err)
-	}
-	if got := sha256.Sum256(data); hex.EncodeToString(got[:]) != want {
-		return "", fmt.Errorf("codegraph: checksum mismatch for %s", asset)
 	}
 
 	parent := filepath.Dir(dir)
@@ -160,6 +152,65 @@ func InstallWithClient(ctx context.Context, client *http.Client, log func(string
 	}
 	logf(log, "codegraph: installed to %s", dir)
 	return p, nil
+}
+
+func downloadAsset(ctx context.Context, client *http.Client, asset string, log func(string)) ([]byte, error) {
+	want := expectedAssetSHA256(asset)
+	if want == "" {
+		return nil, fmt.Errorf("codegraph: no embedded checksum for %s (%s)", asset, Version)
+	}
+	return downloadAssetFromBases(ctx, client, asset, want, downloadBases(), log)
+}
+
+func downloadAssetFromBases(ctx context.Context, client *http.Client, asset, want string, bases []string, log func(string)) ([]byte, error) {
+	var errs []string
+	for _, base := range bases {
+		url := strings.TrimRight(base, "/") + "/" + asset
+		getCtx := ctx
+		cancel := func() {}
+		if perSourceDownloadTimeout > 0 {
+			getCtx, cancel = context.WithTimeout(ctx, perSourceDownloadTimeout)
+		}
+		data, err := httpGet(getCtx, client, url)
+		cancel()
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", base, err))
+			continue
+		}
+		got := fmt.Sprintf("%x", sha256.Sum256(data))
+		if got != want {
+			errs = append(errs, fmt.Sprintf("%s: checksum mismatch for %s", base, asset))
+			continue
+		}
+		logf(log, "codegraph: downloaded from %s", base)
+		return data, nil
+	}
+	return nil, fmt.Errorf("codegraph: download %s failed (%s)", asset, strings.Join(errs, "; "))
+}
+
+func expectedAssetSHA256(asset string) string {
+	return releaseAssetSHA256[asset]
+}
+
+func downloadBases() []string {
+	bases := []string{officialMirrorBase + "/" + Version}
+	if strings.TrimSpace(officialMainlandMirrorBase) != "" {
+		bases = append(bases, strings.TrimRight(officialMainlandMirrorBase, "/")+"/"+Version)
+	}
+	bases = append(bases, fmt.Sprintf("https://github.com/%s/releases/download/%s", cgRepo, Version))
+	return dedupeStrings(bases)
+}
+
+func dedupeStrings(values []string) []string {
+	var out []string
+	seen := make(map[string]bool, len(values))
+	for _, v := range values {
+		if !seen[v] {
+			seen[v] = true
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 // promote moves the freshly extracted bundle (root) into its versioned home

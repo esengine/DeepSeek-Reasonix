@@ -16,7 +16,6 @@ type ReadinessAudit struct {
 	Result                 ReadinessAuditResult
 	Recovered              bool
 	MissingProjectChecks   int
-	MissingCompleteStep    bool
 	IncompleteTodos        int
 	CommandMismatchMissing int
 }

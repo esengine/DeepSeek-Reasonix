@@ -16,7 +16,6 @@ func TestMetricsSinkAccumulatesReadinessAudit(t *testing.T) {
 	s.RecordReadinessAudit(evidence.ReadinessAudit{
 		Result:                 evidence.ReadinessBlocked,
 		MissingProjectChecks:   2,
-		MissingCompleteStep:    true,
 		IncompleteTodos:        3,
 		CommandMismatchMissing: 2,
 	})
@@ -25,8 +24,7 @@ func TestMetricsSinkAccumulatesReadinessAudit(t *testing.T) {
 		Recovered: true,
 	})
 	s.RecordReadinessAudit(evidence.ReadinessAudit{
-		Result:              evidence.ReadinessErrored,
-		MissingCompleteStep: true,
+		Result: evidence.ReadinessErrored,
 	})
 
 	if s.m.ReadinessChecks != 3 {
@@ -46,9 +44,6 @@ func TestMetricsSinkAccumulatesReadinessAudit(t *testing.T) {
 	}
 	if s.m.ReadinessMissingProjectChecks != 2 {
 		t.Fatalf("missing project checks = %d, want 2", s.m.ReadinessMissingProjectChecks)
-	}
-	if s.m.ReadinessMissingCompleteSteps != 2 {
-		t.Fatalf("missing complete_step = %d, want 2", s.m.ReadinessMissingCompleteSteps)
 	}
 	if s.m.ReadinessIncompleteTodos != 3 {
 		t.Fatalf("incomplete todos = %d, want 3", s.m.ReadinessIncompleteTodos)
@@ -72,7 +67,6 @@ func TestWriteMetricsIncludesReadinessFields(t *testing.T) {
 		ReadinessRecoveries:           1,
 		ReadinessErrors:               0,
 		ReadinessMissingProjectChecks: 0,
-		ReadinessMissingCompleteSteps: 0,
 		ReadinessIncompleteTodos:      0,
 		ReadinessCommandMismatches:    0,
 	}); err != nil {
@@ -94,7 +88,6 @@ func TestWriteMetricsIncludesReadinessFields(t *testing.T) {
 		"readiness_recoveries",
 		"readiness_errors",
 		"readiness_missing_project_checks",
-		"readiness_missing_complete_steps",
 		"readiness_incomplete_todos",
 		"readiness_command_mismatches",
 	} {

@@ -543,7 +543,6 @@ type finalReadinessCheck struct {
 	applies              bool
 	reason               string
 	missingProjectChecks int
-	missingCompleteStep  bool
 	incompleteTodos      int
 }
 
@@ -552,7 +551,6 @@ func (c finalReadinessCheck) audit(result evidence.ReadinessAuditResult, recover
 		Result:                 result,
 		Recovered:              recovered,
 		MissingProjectChecks:   c.missingProjectChecks,
-		MissingCompleteStep:    c.missingCompleteStep,
 		IncompleteTodos:        c.incompleteTodos,
 		CommandMismatchMissing: c.missingProjectChecks,
 	}
@@ -594,10 +592,7 @@ func (a *Agent) finalReadinessCheck() finalReadinessCheck {
 			missing = append(missing, fmt.Sprintf("run %q from %s after the latest write", command, finalReadinessCheckSource(check)))
 		}
 	}
-	if hasTodoReceipt && !a.evidence.HasSuccessfulCompleteStepAfter(writer) {
-		out.missingCompleteStep = true
-		missing = append(missing, "call complete_step after the latest write")
-	}
+
 	if len(missing) == 0 {
 		return out
 	}
@@ -1059,6 +1054,7 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 	cctx := withCallContext(ctx, call.ID, a.sink, a.asker)
 	if a.evidence != nil {
 		cctx = evidence.WithLedger(cctx, a.evidence)
+		cctx = evidence.WithSessionMessages(cctx, a.session.Snapshot())
 	}
 	if len(a.projectChecks) > 0 {
 		cctx = instruction.WithChecks(cctx, a.projectChecks)

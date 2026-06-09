@@ -30,8 +30,8 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	orig.Tools.BashTimeoutSeconds = intPtr(900)
 	orig.Permissions = PermissionsConfig{
 		Mode:  "deny",
-		Deny:  []string{"bash(rm -rf*)"},
-		Allow: []string{"bash(go test*)", "read_file"},
+		Deny:  []string{"Bash(rm -rf*)"},
+		Allow: []string{"Bash(go test:*)", "read_file"},
 	}
 	orig.Network = NetworkConfig{
 		ProxyMode: "custom",
@@ -185,8 +185,8 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	if got.Permissions.Mode != "deny" {
 		t.Errorf("permissions.mode = %q, want deny", got.Permissions.Mode)
 	}
-	if len(got.Permissions.Deny) != 1 || got.Permissions.Deny[0] != "bash(rm -rf*)" {
-		t.Errorf("permissions.deny = %v, want [bash(rm -rf*)]", got.Permissions.Deny)
+	if len(got.Permissions.Deny) != 1 || got.Permissions.Deny[0] != "Bash(rm -rf*)" {
+		t.Errorf("permissions.deny = %v, want [Bash(rm -rf*)]", got.Permissions.Deny)
 	}
 	if len(got.Permissions.Allow) != 2 {
 		t.Errorf("permissions.allow = %v, want 2 entries", got.Permissions.Allow)

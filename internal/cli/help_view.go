@@ -69,6 +69,7 @@ func builtinHelpItems() []compItem {
 		{label: "/hooks", hint: i18n.M.CmdHooks},
 		{label: "/memory", hint: i18n.M.CmdMemory},
 		{label: "/output-style", hint: i18n.M.CmdOutputStyle},
+		{label: "/sandbox", hint: i18n.M.CmdSandbox},
 		{label: "/language", hint: i18n.M.CmdLanguage},
 		{label: "/auto-plan", hint: i18n.M.CmdAutoPlan},
 		{label: "/help", hint: i18n.M.CmdHelp},

@@ -64,24 +64,29 @@ type Messages struct {
 	ResumePickHint      string // keyboard hint in the interactive resume picker
 
 	// chat TUI status line / approval banner.
-	ChatThinking           string // live reasoning marker label, e.g. "thinking…"
-	ChatThoughtForFmt      string // collapsed reasoning summary, "%d" = elapsed s
-	ChatStatusThinkingFmt  string // "%s thinking… (%ds · <cancel hint>)" — %s = spinner, %d = elapsed s
-	ChatToolWorkingFmt     string // "%s working · %ds" under a running tool — %s = spinner, %d = elapsed s
-	ChatStatusRetryingFmt  string // "%s retrying (%d/%d)…" — %s = spinner, %d/%d = attempt/max
-	ChatStatusIdle         string // shortcuts hint when idle
-	ChatStatusYoloIdle     string // shortcuts hint when idle in YOLO/bypass mode
-	ChatStatusCycleHint    string // mode-cycle shortcut hint shown when no modal prompt owns the status row
-	ChatStatusCacheNowFmt  string // cache status tag, "%s" = latest-turn hit rate with percent sign
-	ChatStatusCacheAvgFmt  string // cache status tag, "%s" = session-average hit rate with percent sign
-	ChatStatusPlanApproval string // shortcuts hint while a plan is pending
-	PlanApprovalPrompt     string // one-line "plan above is ready" banner shown above the input
-	ChatStatusToolApproval string // shortcuts hint while a tool call awaits approval
-	ToolApprovalPromptFmt  string // approval banner — tool, subject suffix, and source/intent detail
-	ToolApprovalSourceFmt  string // "Source: %s" / "来源: %s"
-	ToolApprovalBuiltIn    string // built-in tool source label
-	ToolApprovalImageUse   string // image-understanding detail for understand_image-style tools
-	DiffFoldedFmt          string // "… +%d more lines" footer when a writer diff is folded
+	ChatThinking                string // live reasoning marker label, e.g. "thinking…"
+	ChatThoughtForFmt           string // collapsed reasoning summary, "%d" = elapsed s
+	ChatStatusThinkingFmt       string // "%s thinking… (%ds · <cancel hint>)" — %s = spinner, %d = elapsed s
+	ChatToolWorkingFmt          string // "%s working · %ds" under a running tool — %s = spinner, %d = elapsed s
+	ChatStatusRetryingFmt       string // "%s retrying (%d/%d)…" — %s = spinner, %d/%d = attempt/max
+	ChatStatusIdle              string // shortcuts hint when idle
+	ChatStatusYoloIdle          string // shortcuts hint when idle in YOLO/bypass mode
+	ChatStatusCycleHint         string // mode-cycle shortcut hint shown when no modal prompt owns the status row
+	ChatStatusCacheNowFmt       string // cache status tag, "%s" = latest-turn hit rate with percent sign
+	ChatStatusCacheAvgFmt       string // cache status tag, "%s" = session-average hit rate with percent sign
+	ChatStatusPlanApproval      string // shortcuts hint while a plan is pending
+	PlanApprovalPrompt          string // one-line "plan above is ready" banner shown above the input
+	ChatStatusToolApproval      string // shortcuts hint while a tool call awaits approval
+	ToolApprovalPromptFmt       string // approval banner — tool, subject suffix, source/intent detail, choices
+	ToolApprovalChoices         string // standard approval choice list
+	BashPrefixChoices           string // approval choice list when a bash prefix can be granted
+	ToolApprovalSourceFmt       string // "Source: %s" / "来源: %s"
+	ToolApprovalBuiltIn         string // built-in tool source label
+	ToolApprovalImageUse        string // image-understanding detail for understand_image-style tools
+	PermissionSavedFmt          string // permission rule saved notice: path, rule
+	PermissionAlreadyAllowedFmt string // permission rule already covered notice: path, rule
+	PermissionSaveFailedFmt     string // permission rule save failure notice: rule, error
+	DiffFoldedFmt               string // "… +%d more lines" footer when a writer diff is folded
 
 	// `ask` tool question card.
 	AskTypeSomething   string // the "type your own answer" option label
@@ -154,6 +159,7 @@ type Messages struct {
 	CmdLanguage     string // /language
 	CmdSkill        string // /skills
 	CmdVerbose      string // /verbose
+	CmdSandbox      string // /sandbox
 	CmdEffort       string // /effort
 	CmdAutoPlan     string // /auto-plan
 	CmdHelp         string // /help

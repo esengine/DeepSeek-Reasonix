@@ -369,11 +369,11 @@ func TestPermissionMutators(t *testing.T) {
 		t.Error("expected error for bad mode")
 	}
 
-	if err := c.AddPermissionRule("deny", "bash(rm -rf*)"); err != nil {
+	if err := c.AddPermissionRule("deny", "Bash(rm -rf*)"); err != nil {
 		t.Fatalf("add deny: %v", err)
 	}
 	// Duplicate is a no-op, not an error or a second entry.
-	if err := c.AddPermissionRule("deny", "bash(rm -rf*)"); err != nil {
+	if err := c.AddPermissionRule("deny", "Bash(rm -rf*)"); err != nil {
 		t.Fatalf("dup add: %v", err)
 	}
 	if len(c.Permissions.Deny) != 1 {
@@ -387,7 +387,7 @@ func TestPermissionMutators(t *testing.T) {
 		t.Error("expected error for unknown list")
 	}
 
-	removed, err := c.RemovePermissionRule("deny", "bash(rm -rf*)")
+	removed, err := c.RemovePermissionRule("deny", "Bash(rm -rf*)")
 	if err != nil || !removed {
 		t.Errorf("remove: removed=%v err=%v", removed, err)
 	}
@@ -539,7 +539,7 @@ func TestCodegraphDefaultEnabledForUpgrades(t *testing.T) {
 		t.Fatal("default codegraph auto_install = false, want true")
 	}
 	if c.Codegraph.Tier != "" {
-		t.Fatalf("default codegraph tier = %q, want unset (boot then preserves warm→eager/cold→background)", c.Codegraph.Tier)
+		t.Fatalf("default codegraph tier = %q, want unset (background by default)", c.Codegraph.Tier)
 	}
 }
 
@@ -647,7 +647,7 @@ func TestSaveToRoundTrips(t *testing.T) {
 	if err := c.SetPermissionMode("deny"); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.AddPermissionRule("allow", "bash(go test*)"); err != nil {
+	if err := c.AddPermissionRule("allow", "Bash(go test:*)"); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.SetNetwork(NetworkConfig{
@@ -686,7 +686,7 @@ func TestSaveToRoundTrips(t *testing.T) {
 	if got.Permissions.Mode != "deny" {
 		t.Errorf("mode = %q", got.Permissions.Mode)
 	}
-	if len(got.Permissions.Allow) != 1 || got.Permissions.Allow[0] != "bash(go test*)" {
+	if len(got.Permissions.Allow) != 1 || got.Permissions.Allow[0] != "Bash(go test:*)" {
 		t.Errorf("allow list = %v", got.Permissions.Allow)
 	}
 	if got.Network.ProxyMode != "custom" || got.Network.Proxy.Server != "127.0.0.1" || got.Network.Proxy.Port != 7890 {

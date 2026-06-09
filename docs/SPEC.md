@@ -216,18 +216,34 @@ type Policy struct { Mode Decision; Allow, Ask, Deny []Rule }
 func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Decision
 ```
 
-- **Rule syntax.** A rule is `ToolName` (matches any call to that tool) or
-  `ToolName(glob)` (matches when the call's *subject* matches the glob, via
-  `path.Match`). The subject is extracted generically from the call's JSON args
-  by a small set of known keys — `command` (bash), `path` / `file_path`
-  (file tools), `pattern` (grep/glob) — so tools need not change. A rule whose
-  subject the args don't expose only matches in its bare `ToolName` form.
+- **Rule syntax.** A rule is `Tool` (matches any call in that tool family) or
+  `Tool(specifier)` (matches when the call's *subject* matches the specifier).
+  Bash and file mutation approvals use Claude Code-style families such as
+  `Bash(npm run build)`, `Bash(npm run test:*)`, and `Edit(docs/**)`. Legacy
+  lowercase tool IDs and `tool=literal` rules still load for compatibility. The
+  `:*` suffix marks a Bash command-prefix approval; generated prefix rules also
+  reject later commands that introduce shell operators, so `Bash(go test:*)`
+  does not cover `go test ./... && rm -rf tmp`.
+  Legacy `Bash(go test *)` prefix rules still load, but new rules are saved as
+  `Bash(go test:*)`. The subject is extracted generically from the call's JSON
+  args by a small set of
+  known keys — `command` (bash), `path` / `file_path` (file tools), `pattern`
+  (grep/glob) — so tools need not change. A rule whose subject the args don't
+  expose only matches in its bare `Tool` form.
 - **Precedence.** `deny` > `ask` > `allow` > fallback. Fallback is `Allow` for
   read-only tools and `Mode` (default `Ask`) for writers. `deny` always wins, so
-  a broad `allow = ["bash"]` can still be carved by `deny = ["bash(rm -rf*)"]`;
+  a broad `allow = ["Bash"]` can still be carved by `deny = ["Bash(rm -rf*)"]`;
   conversely `ask` overrides a broad `allow` to force a prompt on a risky subset.
 - **Resolving `Ask`.** The interactive front-end (the chat TUI) prompts the user
-  — allow once / always allow / deny — via an `Approver`. A non-interactive run
+  — allow once / allow this approval scope for the session / always allow this
+  approval scope / deny — via an `Approver`. For Bash, the default scope is the
+  concrete command subject, and the user may choose a conservative command-prefix
+  scope when available (for example `Bash(go test:*)`) so similar invocations in
+  the same session or saved config do not prompt again. For file-mutation tools,
+  a session grant covers editing for the rest of the session while a persisted
+  grant is path-scoped when a path is available, stored as `Edit(<path>)` so all
+  built-in file-mutating tools share it. A
+  non-interactive run
   (`reasonix run`, a sub-agent, anything with no TTY / no approver) cannot prompt, so
   it resolves `Ask` to **allow** — preserving autonomous behaviour. A `Deny` is a
   hard block in *every* mode: the tool never executes and the model receives a
@@ -400,8 +416,8 @@ bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local ca
 
 [permissions]
 mode  = "ask"                              # writer fallback when no rule matches: ask|allow|deny
-deny  = ["bash(rm -rf*)", "bash(git push*)"]   # hard-blocked in every mode
-allow = ["bash(go test*)", "bash(git status*)"]  # never prompted
+deny  = ["Bash(rm -rf*)", "Bash(git push*)"]   # hard-blocked in every mode
+allow = ["Bash(go test:*)", "Bash(git status:*)"]  # never prompted
 ask   = []                                 # force a prompt even if otherwise allowed
 
 [sandbox]
