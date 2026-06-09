@@ -165,6 +165,41 @@ func TestTaskToolRequiresTranscriptStore(t *testing.T) {
 	}
 }
 
+// TestTaskToolRunsEphemerallyWithoutParentSession mirrors headless `reasonix run`:
+// the store is wired but the context carries no parent session, so the sub-agent
+// must run without persistence and return its plain answer (no transcript ref).
+func TestTaskToolRunsEphemerallyWithoutParentSession(t *testing.T) {
+	sub := &mockProvider{name: "sub", chunks: []provider.Chunk{
+		{Type: provider.ChunkText, Text: "headless answer"},
+		{Type: provider.ChunkDone},
+	}}
+	task := newTestTaskTool(t, sub, tool.NewRegistry(), "sys", "", "", nil)
+
+	out, err := task.Execute(context.Background(), []byte(`{"prompt":"x"}`))
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(out, "headless answer") {
+		t.Fatalf("got %q, want sub-agent final answer", out)
+	}
+	if strings.Contains(out, "Subagent reference") {
+		t.Fatalf("ephemeral run should not emit a transcript reference: %q", out)
+	}
+}
+
+func TestTaskToolRejectsContinuationWithoutParentSession(t *testing.T) {
+	sub := &mockProvider{name: "sub", chunks: []provider.Chunk{
+		{Type: provider.ChunkText, Text: "answer"},
+		{Type: provider.ChunkDone},
+	}}
+	task := newTestTaskTool(t, sub, tool.NewRegistry(), "sys", "", "", nil)
+
+	_, err := task.Execute(context.Background(), []byte(`{"prompt":"x","continue_from":"sa_whatever"}`))
+	if err == nil || !strings.Contains(err.Error(), "persisted session") {
+		t.Fatalf("Execute error = %v, want persisted-session requirement", err)
+	}
+}
+
 func TestTaskToolPersistsAndContinuesTranscript(t *testing.T) {
 	sub := &mockProvider{name: "sub", streams: [][]provider.Chunk{
 		{

@@ -243,6 +243,129 @@ func subagentRefFromHistory(t *testing.T, msgs []provider.Message) string {
 	return ""
 }
 
+// TestBuildHeadlessRunRunsTaskSubagentWithoutSessionPath reproduces headless
+// `reasonix run`: a controller built via Build with NO SetSessionPath (exactly
+// what internal/cli.runAgent does) must still be able to run a `task` sub-agent.
+// Before the ephemeral fallback this failed with "parent session is required".
+func TestBuildHeadlessRunRunsTaskSubagentWithoutSessionPath(t *testing.T) {
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+
+	registerHeadlessTaskTestProvider()
+	prov := &headlessTaskTestProvider{}
+	setHeadlessTaskTestProvider(t, prov)
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "test-model"
+
+[codegraph]
+enabled = false
+
+[agent]
+system_prompt = "BASE"
+
+[[providers]]
+name = "test-model"
+kind = "boot-headless-test"
+model = "x"
+`)
+
+	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer ctrl.Close()
+
+	// Deliberately NOT calling SetSessionPath — this is the headless run path.
+	if err := ctrl.Run(context.Background(), "use a task subagent"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := ctrl.SessionPath(); got != "" {
+		t.Fatalf("headless run should keep an empty session path, got %q", got)
+	}
+
+	var toolContent string
+	for _, msg := range ctrl.History() {
+		if msg.Role == provider.RoleTool {
+			toolContent += "\n" + msg.Content
+		}
+	}
+	if strings.Contains(toolContent, "parent session is required") {
+		t.Fatalf("task subagent failed in headless run mode: %s", toolContent)
+	}
+	if !strings.Contains(toolContent, "subagent answer") {
+		t.Fatalf("task tool result = %q, want sub-agent answer", toolContent)
+	}
+	if strings.Contains(toolContent, "Subagent reference") {
+		t.Fatalf("ephemeral headless run should not persist a transcript reference: %s", toolContent)
+	}
+}
+
+const headlessTaskTestProviderKind = "boot-headless-test"
+
+var (
+	headlessTaskTestProviderOnce    sync.Once
+	headlessTaskTestProviderCurrent *headlessTaskTestProvider
+	headlessTaskTestProviderMu      sync.Mutex
+)
+
+func registerHeadlessTaskTestProvider() {
+	headlessTaskTestProviderOnce.Do(func() {
+		provider.Register(headlessTaskTestProviderKind, func(provider.Config) (provider.Provider, error) {
+			headlessTaskTestProviderMu.Lock()
+			defer headlessTaskTestProviderMu.Unlock()
+			if headlessTaskTestProviderCurrent == nil {
+				return nil, errors.New("headless task test provider is not installed")
+			}
+			return headlessTaskTestProviderCurrent, nil
+		})
+	})
+}
+
+func setHeadlessTaskTestProvider(t *testing.T, p *headlessTaskTestProvider) {
+	t.Helper()
+	headlessTaskTestProviderMu.Lock()
+	headlessTaskTestProviderCurrent = p
+	headlessTaskTestProviderMu.Unlock()
+	t.Cleanup(func() {
+		headlessTaskTestProviderMu.Lock()
+		if headlessTaskTestProviderCurrent == p {
+			headlessTaskTestProviderCurrent = nil
+		}
+		headlessTaskTestProviderMu.Unlock()
+	})
+}
+
+type headlessTaskTestProvider struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (p *headlessTaskTestProvider) Name() string { return "boot-headless-test" }
+
+func (p *headlessTaskTestProvider) Stream(context.Context, provider.Request) (<-chan provider.Chunk, error) {
+	p.mu.Lock()
+	call := p.calls
+	p.calls++
+	p.mu.Unlock()
+
+	var chunks []provider.Chunk
+	switch call {
+	case 0:
+		chunks = []provider.Chunk{{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "task-1", Name: "task", Arguments: `{"prompt":"find callers"}`}}}
+	case 1:
+		chunks = []provider.Chunk{{Type: provider.ChunkText, Text: "subagent answer"}, {Type: provider.ChunkDone}}
+	default:
+		chunks = []provider.Chunk{{Type: provider.ChunkText, Text: "parent done"}, {Type: provider.ChunkDone}}
+	}
+	ch := make(chan provider.Chunk, len(chunks))
+	for _, chunk := range chunks {
+		ch <- chunk
+	}
+	close(ch)
+	return ch, nil
+}
+
 func TestNewProviderAppliesConfiguredDefaultEffort(t *testing.T) {
 	var gotReq map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

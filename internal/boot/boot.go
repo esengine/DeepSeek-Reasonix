@@ -480,33 +480,41 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		}
 		parentID, _, _, _ := agent.CallContext(sctx)
 		parentSession := agent.ParentSession(sctx)
-		if parentSession == "" {
-			return "", fmt.Errorf("subagent transcript parent session is required")
-		}
-		identityModel, identityEffort := subagentIdentity(modelRef, effortRef)
-		spec := agent.SubagentSpec{
-			Kind:             "skill",
-			Name:             sk.Name,
-			WorkspaceRoot:    root,
-			ParentSession:    parentSession,
-			ParentToolCallID: parentID,
-			SystemPrompt:     sk.Body,
-			Registry:         subReg,
-			Model:            identityModel,
-			Effort:           identityEffort,
-		}
 		var run *agent.SubagentRun
-		var prepErr error
-		switch {
-		case continueFrom != "":
-			run, prepErr = subagentStore.PrepareContinue(continueFrom, spec)
-		case forkFrom != "":
-			run, prepErr = subagentStore.PrepareFork(forkFrom, spec)
-		default:
-			run, prepErr = subagentStore.PrepareFresh(spec)
-		}
-		if prepErr != nil {
-			return "", prepErr
+		if subagentStore == nil || parentSession == "" {
+			// Headless runs (e.g. `reasonix run`) have no persistent session to
+			// own a transcript. Run the skill sub-agent ephemerally, as before
+			// persisted transcripts existed, instead of failing. Continuation and
+			// fork need a persisted owner, so they error here.
+			if continueFrom != "" || forkFrom != "" {
+				return "", fmt.Errorf("continue_from/fork_from require a persisted session; none is active in this run")
+			}
+			run = agent.EphemeralSubagentRun(sk.Body)
+		} else {
+			identityModel, identityEffort := subagentIdentity(modelRef, effortRef)
+			spec := agent.SubagentSpec{
+				Kind:             "skill",
+				Name:             sk.Name,
+				WorkspaceRoot:    root,
+				ParentSession:    parentSession,
+				ParentToolCallID: parentID,
+				SystemPrompt:     sk.Body,
+				Registry:         subReg,
+				Model:            identityModel,
+				Effort:           identityEffort,
+			}
+			var prepErr error
+			switch {
+			case continueFrom != "":
+				run, prepErr = subagentStore.PrepareContinue(continueFrom, spec)
+			case forkFrom != "":
+				run, prepErr = subagentStore.PrepareFork(forkFrom, spec)
+			default:
+				run, prepErr = subagentStore.PrepareFresh(spec)
+			}
+			if prepErr != nil {
+				return "", prepErr
+			}
 		}
 		defer run.Release()
 		steps := maxSteps
