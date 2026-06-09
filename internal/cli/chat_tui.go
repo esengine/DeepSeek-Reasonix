@@ -74,6 +74,15 @@ type chatTUI struct {
 	// turnTokens accumulates this turn's output tokens (summed from per-step Usage
 	// events) for the live "↓N" readout in the running status line.
 	turnTokens int
+	// session accumulators — totals across all turns in the current conversation.
+	sessionPromptTokens     int
+	sessionCompletionTokens int
+	sessionCacheHitTokens   int
+	sessionCacheMissTokens  int
+	sessionReasoningTokens  int
+	sessionTotalTokens      int
+	sessionCost             float64
+	sessionCurrency         string
 
 	// balance is the last-fetched wallet-balance readout (e.g. "¥110.00"), "" when
 	// the provider declares no balance_url or a fetch failed. Refreshed async on
@@ -2002,6 +2011,9 @@ func (m chatTUI) View() tea.View {
 	if jt := m.jobsTag(); jt != "" {
 		data = append(data, jt)
 	}
+	if st := m.sessionTag(); st != "" {
+		data = append(data, st)
+	}
 	if m.balance != "" {
 		data = append(data, dim(m.balance))
 	}
@@ -2189,6 +2201,42 @@ func (m chatTUI) cacheTag() string {
 		return dim(avg)
 	}
 	return ""
+}
+
+// sessionTag returns a compact session total for the status data row, e.g.
+// "∑ 15.2K tok · $0.042". "" before any usage has been reported.
+func (m chatTUI) sessionTag() string {
+	if m.sessionTotalTokens == 0 {
+		return ""
+	}
+	costStr := ""
+	if m.sessionCost > 0 {
+		costStr = fmt.Sprintf(" · %s%.4f", m.sessionCurrency, m.sessionCost)
+	}
+	return dim(fmt.Sprintf("∑ %s%s", shortTokens(m.sessionTotalTokens), costStr))
+}
+
+// sessionSummary returns a full per-turn-style breakdown for the whole session.
+// Uses FormatUsageLine's layout so the numbers look familiar.
+func (m chatTUI) sessionSummary() string {
+	if m.sessionTotalTokens == 0 {
+		return ""
+	}
+	hit, miss := m.sessionCacheHitTokens, m.sessionCacheMissTokens
+	cacheCol := ""
+	if hit+miss > 0 {
+		cacheCol = fmt.Sprintf(" (%d cached / %d new)", hit, miss)
+	}
+	reasoning := ""
+	if m.sessionReasoningTokens > 0 {
+		reasoning = fmt.Sprintf(" (%d reasoning)", m.sessionReasoningTokens)
+	}
+	cost := ""
+	if m.sessionCost > 0 {
+		cost = fmt.Sprintf(" · %s%.4f", m.sessionCurrency, m.sessionCost)
+	}
+	return fmt.Sprintf("  · session: %d tok · in %d%s · out %d%s%s",
+		m.sessionTotalTokens, m.sessionPromptTokens, cacheCol, m.sessionCompletionTokens, reasoning, cost)
 }
 
 // jobsTag shows the count of running background jobs in the status line. Job
@@ -2865,6 +2913,16 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 	case event.Usage:
 		if e.Usage != nil {
 			m.turnTokens += e.Usage.CompletionTokens
+			m.sessionPromptTokens += e.Usage.PromptTokens
+			m.sessionCompletionTokens += e.Usage.CompletionTokens
+			m.sessionCacheHitTokens += e.Usage.CacheHitTokens
+			m.sessionCacheMissTokens += e.Usage.CacheMissTokens
+			m.sessionReasoningTokens += e.Usage.ReasoningTokens
+			m.sessionTotalTokens += e.Usage.TotalTokens
+			if e.Pricing != nil {
+				m.sessionCost += e.Pricing.Cost(e.Usage)
+				m.sessionCurrency = e.Pricing.Symbol()
+			}
 		}
 		if line := agent.FormatUsageLine(e.Usage, e.Pricing, e.CacheDiagnostics); line != "" {
 			m.finalizeStreamed()
@@ -2983,15 +3041,35 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 			m.notice(fmt.Sprintf("%s: %v", i18n.M.SlashNewFailed, err))
 			return nil
 		}
+		// Print session summary before clearing.
+		if summary := m.sessionSummary(); summary != "" {
+			m.commitLine(dim("  ── session closed ──"))
+			m.commitLine(summary)
+		}
 		// Native scrollback keeps the old transcript; mark the fork with a fresh
 		// banner and reset live state.
 		m.pending.Reset()
 		m.reasoning.Reset()
 		m.todoArgs = ""
 		m.chooser = nil
+		m.sessionPromptTokens = 0
+		m.sessionCompletionTokens = 0
+		m.sessionCacheHitTokens = 0
+		m.sessionCacheMissTokens = 0
+		m.sessionReasoningTokens = 0
+		m.sessionTotalTokens = 0
+		m.sessionCost = 0
+		m.sessionCurrency = ""
 		m.commitLine("")
 		m.commitLine(strings.TrimRight(renderTUIBanner(m.label, "", m.width), "\n"))
 		m.notice(i18n.M.SlashNewDone)
+	case "/stats":
+		m.echoLocalCommand(input)
+		if summary := m.sessionSummary(); summary != "" {
+			m.commitLine(summary)
+		} else {
+			m.notice("no session usage yet")
+		}
 	case "/resume":
 		m.runResumeCommand(input)
 	case "/todo":

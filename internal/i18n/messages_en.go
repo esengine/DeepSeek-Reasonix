@@ -168,6 +168,7 @@ var English = Messages{
 	CmdEffort:       "set reasoning effort",
 	CmdAutoPlan:     "configure automatic plan mode",
 	CmdHelp:         "list commands",
+	CmdStats:        "show session token and cost totals",
 	CmdTodo:         "dismiss the task list",
 	CmdQuit:         "exit the session",
 	ArgSkillList:    "list skills",

@@ -169,6 +169,7 @@ var Chinese = Messages{
 	CmdEffort:       "设置推理强度",
 	CmdAutoPlan:     "配置自动计划模式",
 	CmdHelp:         "查看命令列表",
+	CmdStats:        "查看会话总消耗",
 	CmdTodo:         "清除任务清单",
 	CmdQuit:         "退出会话",
 	ArgSkillList:    "列出 skills",
