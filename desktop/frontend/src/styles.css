@@ -5141,6 +5141,18 @@ a[href] {
 .mem-fact:hover {
   border-color: var(--border);
 }
+.mem-fact__dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.mem-fact__dot--user { background: var(--accent); }
+.mem-fact__dot--feedback { background: #e8a838; }
+.mem-fact__dot--project { background: #6b9f6b; }
+.mem-fact__dot--reference { background: #8a8ab8; }
 .mem-fact__summary {
   width: 100%;
   min-width: 0;
@@ -9673,7 +9685,7 @@ a[href] {
   position: absolute;
   top: calc(100% + 4px);
   left: 0;
-  z-index: 250;
+  z-index: var(--z-menu);
   min-width: 108px;
   padding: 5px;
   border: 1px solid var(--border);
@@ -10253,7 +10265,8 @@ a[href] {
 }
 
 .workbench-dock__body > .context-panel,
-.workbench-dock__body > .workspace-panel {
+.workbench-dock__body > .workspace-panel,
+.workbench-dock__body > .workspace-files {
   height: 100%;
 }
 
@@ -11014,7 +11027,7 @@ a[href] {
   --wails-draggable: no-drag;
   display: flex;
   align-items: center;
-  height: 48px;
+  height: 47px;
   padding: 0 10px;
   border-bottom: 1px solid var(--border-soft);
   background: var(--chat-bg);

@@ -2,6 +2,7 @@ import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } f
 import type { CSSProperties, KeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import { ShellExpandProvider, useShellExpand } from "./lib/shellExpand";
 import {
+  BrainCircuit,
   Download,
   SquarePen,
   Globe,
@@ -61,6 +62,7 @@ import { applyTextSize, DEFAULT_TEXT_SIZE, getTextSize, nextTextSize } from "./l
 import { useWindowStatePersistence } from "./lib/windowState";
 
 const SIDEBAR_COLLAPSED_KEY = "reasonix.sidebar.collapsed";
+const DEFAULT_YOLO_KEY = "reasonix.defaultYolo";
 const SIDEBAR_DEFAULT_WIDTH = 264;
 const SIDEBAR_DEFAULT_RATIO = 0.175;
 const SIDEBAR_MIN_WIDTH = 228;
@@ -84,6 +86,7 @@ const RIGHT_DOCK_MAX_WIDTH = 999999;
 const DEFAULT_DOCK_TABS: DockTab[] = [
   { id: "files", type: "files", title: "文件", icon: FileText, closable: false },
   { id: "changes", type: "changes", title: "改动", icon: GitBranch, closable: false },
+  { id: "memory", type: "memory", title: "记忆", icon: BrainCircuit, closable: false },
 ];
 
 type HistoryScopeFilter = { scope: "global" | "project"; workspaceRoot: string };
@@ -217,6 +220,15 @@ function topicScopeLabel(tab?: TabMeta): string {
 
 function normalizeModeValue(mode?: string): Mode {
   return mode === "plan" || mode === "yolo" ? mode : "normal";
+}
+
+function loadDefaultYolo(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(DEFAULT_YOLO_KEY) === "1";
+  } catch {
+    return false;
+  }
 }
 
 function sessionsForScope(sessions: SessionMeta[], filter: HistoryScopeFilter): SessionMeta[] {
@@ -380,10 +392,7 @@ export default function App() {
     rewind,
     setModel,
     setEffort,
-    fetchMemory,
-    remember,
-    forget,
-    saveDoc,
+    switchTab,
     openProjectTab,
     openGlobalTab,
     syncActiveTab,
@@ -522,11 +531,16 @@ export default function App() {
   const topicbarEditing = Boolean(activeTab?.topicId && activeTab.topicId === renamingTopicId);
   useEffect(() => {
     const ids = new Set(tabMetas.map((tab) => tab.id));
+    const defaultYolo = loadDefaultYolo();
     setModesByTab((current) => {
       let changed = false;
       const next: Record<string, Mode> = {};
       for (const tab of tabMetas) {
-        const mode = normalizeModeValue(tab.mode);
+        let mode = normalizeModeValue(tab.mode);
+        // If defaultYolo is on and this is a brand-new tab (not in current), flip it to yolo
+        if (defaultYolo && !(tab.id in current) && mode === "normal") {
+          mode = "yolo";
+        }
         next[tab.id] = mode;
         if (current[tab.id] !== mode) changed = true;
       }
@@ -1187,6 +1201,13 @@ export default function App() {
     setHistView({ kind: "trash", sessions: await listTrashedSessions() });
   }, [listTrashedSessions]);
   const closeHistory = useCallback(() => setHistView(null), []);
+
+  const handleTabChange = useCallback(async (tabId: string) => {
+    await switchTab(tabId);
+  }, [switchTab]);
+  const handleNewTab = useCallback(async () => {
+    await newSession();
+  }, [newSession]);
 
   // ── Command palette (⌘K) item builder ───────────────────────────────
   const buildPaletteItems = useCallback((): PaletteItem[] => {

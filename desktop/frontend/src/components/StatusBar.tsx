@@ -64,8 +64,6 @@ function nowRate(u?: WireUsage): string | null {
 
 // avgRate is the SESSION-AGGREGATE cache-hit % — Σhit/Σ(hit+miss) across every
 // turn — the steadier, cost-oriented number that matches the legacy dashboard.
-// On a non-compacting DeepSeek session it trails nowRate (early cold-start turns
-// drag the average down); it overtakes only when compaction craters single turns.
 function avgRate(u?: WireUsage): string | null {
   if (!u) return null;
   const denom = u.sessionCacheHitTokens + u.sessionCacheMissTokens;
@@ -123,17 +121,25 @@ export function StatusBar({
   const avgPct = avgRate(usage);
   const jobsList = jobs ?? [];
   const costLabel = formatMoney(cost, currency);
+  // 上下文详情 tooltip
+  const ctxTooltip = compactPct !== null
+    ? t("status.compact", { pct: compactPct })
+    : undefined;
+  // 缓存详情 tooltip
+  const cacheTooltip = avgPct !== null
+    ? t("status.cacheAvg", { pct: avgPct })
+    : undefined;
 
   return (
     <div className="statusbar">
       <span className={`statusbar__dot ${running ? "statusbar__dot--busy" : ""}`} />
-      <span className="statusbar__item statusbar__ctx">{pct !== null ? t("status.ctx", { pct }) : t("status.ctxUnknown")}</span>
+      <Tooltip label={ctxTooltip}>
+        <span className="statusbar__item statusbar__ctx">{pct !== null ? t("status.ctx", { pct }) : t("status.ctxUnknown")}</span>
+      </Tooltip>
       <span className="statusbar__sep">·</span>
-      <span className="statusbar__item statusbar__compact">{compactPct !== null ? t("status.compact", { pct: compactPct }) : t("status.compactUnknown")}</span>
-      <span className="statusbar__sep">·</span>
-      <span className="statusbar__item statusbar__cache">{t("status.cache", { pct: nowPct ?? "-" })}</span>
-      <span className="statusbar__sep">·</span>
-      <span className="statusbar__item statusbar__avg">{t("status.cacheAvg", { pct: avgPct ?? "-" })}</span>
+      <Tooltip label={cacheTooltip}>
+        <span className="statusbar__item statusbar__cache">{t("status.cache", { pct: nowPct ?? "-" })}</span>
+      </Tooltip>
       <span className="statusbar__sep">·</span>
       <Tooltip label={t("status.spendTitle")}>
         <span className="statusbar__item statusbar__cost">
@@ -153,7 +159,7 @@ export function StatusBar({
         {spinnerRunning && (
           <span className="statusbar__spinner">{spinnerWord}…</span>
         )}
-        {(turnTokens ?? 0) > 0 && (
+        {running && (turnTokens ?? 0) > 0 && (
           <span className="statusbar__tokens">↓ {fmtTokens(turnTokens ?? 0)} {t("status.tokens")}</span>
         )}
         {mode === "plan" && <span className="statusbar__plan">{t("status.plan")}</span>}

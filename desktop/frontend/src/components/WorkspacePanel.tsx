@@ -245,14 +245,15 @@ export function WorkspacePanel({
   const [recentOpen, setRecentOpen] = useState(false);
   const recentAnchorRef = useRef<HTMLButtonElement>(null);
   const [gitBranch, setGitBranch] = useState("");
-  const [changes, setChanges] = useState<WorkspaceChangesView | null>(null);
-  const [loadingChanges, setLoadingChanges] = useState(false);
   const changesRequestRef = useRef(0);
   const [branchMenuOpen, setBranchMenuOpen] = useState(false);
   const [branchList, setBranchList] = useState<string[]>([]);
   const [switchingBranch, setSwitchingBranch] = useState(false);
   const branchBtnRef = useRef<HTMLButtonElement>(null);
   const openDirsRef = useRef(openDirs);
+
+  // "changes" 模式只显示 git diff 文件（通过 loadChanges），不加载完整目录树
+  const effectiveMode = viewMode === "changed" ? "changes" : "files";
 
   useEffect(() => {
     openDirsRef.current = openDirs;
@@ -289,23 +290,6 @@ export function WorkspacePanel({
     setBranchMenuOpen((prev) => !prev);
   }, []);
 
-  const switchBranch = useCallback(
-    async (branch: string) => {
-      if (branch === gitBranch) return;
-      setSwitchingBranch(true);
-      try {
-        await app.GitCheckout(branch);
-        setGitBranch(branch);
-      } catch {
-        // Error shown via the changes view
-      } finally {
-        setSwitchingBranch(false);
-        setBranchMenuOpen(false);
-      }
-    },
-    [gitBranch],
-  );
-
   const fetchGitBranch = useCallback(async () => {
     try {
       const wc = await app.WorkspaceChanges();
@@ -331,6 +315,25 @@ export function WorkspacePanel({
     }
   }, []);
 
+  const switchBranch = useCallback(
+    async (branch: string) => {
+      if (branch === gitBranch) return;
+      setSwitchingBranch(true);
+      try {
+        await app.GitCheckout(branch);
+        setGitBranch(branch);
+        // 「改动视图」只展示有改动的文件，无需刷新完整目录树
+        await loadChanges();
+      } catch {
+        // Error shown via the changes view
+      } finally {
+        setSwitchingBranch(false);
+        setBranchMenuOpen(false);
+      }
+    },
+    [gitBranch, loadChanges],
+  );
+
   useEffect(() => {
     if (!open) return;
     if (expandedCommit) {
@@ -355,37 +358,7 @@ export function WorkspacePanel({
     }
   }, [expandedCommit, selectedPath, open]);
 
-  const openBranchMenu = useCallback(async () => {
-    // Fetch branches when opening the menu
-    try {
-      const branches = await app.GitBranches();
-      setBranchList(branches);
-    } catch {
-      setBranchList([]);
-    }
-    setBranchMenuOpen((prev) => !prev);
-  }, []);
-
-  const switchBranch = useCallback(
-    async (branch: string) => {
-      if (branch === changes?.gitBranch) return;
-      setSwitchingBranch(true);
-      try {
-        await app.GitCheckout(branch);
-        // Reload both the changes view and the file tree
-        await loadChanges();
-        const dirs = Array.from(openDirsRef.current);
-        setEntriesByDir({});
-        dirs.forEach((dir) => void loadDir(dir));
-      } catch {
-        // Error message shown via the changes view
-      } finally {
-        setSwitchingBranch(false);
-        setBranchMenuOpen(false);
-      }
-    },
-    [changes?.gitBranch, loadChanges, loadDir],
-  );
+  // loadGitHistory already defined
 
   const selectFile = useCallback(
     (path: string) => {
@@ -429,7 +402,7 @@ export function WorkspacePanel({
   useEffect(() => {
     if (!open) return;
     if (effectiveMode === "changes") void loadChanges();
-  }, [effectiveMode, loadChanges, open]); (fix(desktop): branch switcher reload file tree after checkout, enlarge hover area)
+  }, [effectiveMode, loadChanges, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -1238,11 +1211,7 @@ export function WorkspacePanel({
           </div>
         ) : (
         <div className="workspace-tree" onContextMenu={openTreeBlankMenu}>
-          {effectiveMode === "changes"
-            ? renderChangedRows()
-            : viewMode === "changed"
-            ? renderGitHistory()
-            : flattened
+          {flattened
             ? flattened.map(({ path, entry }) => {
                 const dir = parentPath(path);
                 return (

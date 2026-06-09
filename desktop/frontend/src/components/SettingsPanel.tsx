@@ -486,6 +486,10 @@ function GeneralSection({ s, busy, apply }: SectionProps) {
   const [soundPref, setSoundPref] = useState<SoundWavPref>(getSuccessPreference());
   const [attentionPref, setAttentionPref] = useState<SoundWavPref>(getAttentionPreference());
   const [genMusicPreset, setGenMusicPreset] = useState<GenerativePreset>(getGenerativePreset());
+  const [defaultYolo, setDefaultYolo] = useState(() => {
+    if (typeof window === "undefined") return false;
+    try { return window.localStorage.getItem("reasonix.defaultYolo") === "1"; } catch { return false; }
+  });
   const setLanguage = (next: LangPref) => {
     setPref(next);
     void apply(() => app.SetDesktopLanguage(next));
@@ -618,6 +622,17 @@ function GeneralSection({ s, busy, apply }: SectionProps) {
             <Play size={13} />
           </button>
         </div>
+      </SettingsField>
+      <SettingsField label={t("settings.defaultYolo")} hint={t("settings.defaultYoloHint")}>
+        <label className="set-check set-check--inline">
+          <input type="checkbox" checked={defaultYolo}
+            onChange={(e) => {
+              const next = e.target.checked;
+              setDefaultYolo(next);
+              try { window.localStorage.setItem("reasonix.defaultYolo", next ? "1" : "0"); } catch {}
+            }} />
+          {t("settings.defaultYolo")}
+        </label>
       </SettingsField>
     </SettingsSection>
   );

@@ -325,7 +325,6 @@ export interface WorkspaceChangesView {
   gitAvailable: boolean;
   gitErr?: string;
   gitBranch?: string;
-  gitBranch?: string;
 }
 
 export interface GitCommitView {
@@ -582,7 +581,7 @@ export interface UpdateProgress {
   err?: string;
 }
 
-export type DockTabType = "files" | "changes" | "browser" | "context";
+export type DockTabType = "files" | "changes" | "browser" | "context" | "memory";
 
 export interface DockTab {
   id: string;

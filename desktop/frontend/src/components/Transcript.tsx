@@ -351,6 +351,8 @@ export function Transcript({
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
     const clear = () => { scrollingRef.current = false; };
     el.addEventListener("scrollend", clear, { once: true });
+    // scrollend is Safari 15+; fallback for older WebViews
+    setTimeout(clear, 400);
   }, []);
 
   // Keyboard shortcut: Cmd+↓ scrolls to bottom

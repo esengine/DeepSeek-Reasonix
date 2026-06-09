@@ -287,36 +287,38 @@ type wireEventTab struct {
 
 // TabMeta is the frontend-facing shape of one tab.
 type TabMeta struct {
-	ID            string `json:"id"`
-	Scope         string `json:"scope"`
-	WorkspaceRoot string `json:"workspaceRoot"`
-	WorkspaceName string `json:"workspaceName"`
-	TopicID       string `json:"topicId"`
-	TopicTitle    string `json:"topicTitle"`
-	ProjectColor  string `json:"projectColor,omitempty"`
-	Label         string `json:"label"`
-	Ready         bool   `json:"ready"`
-	Running       bool   `json:"running"`
-	Mode          string `json:"mode"`
-	StartupErr    string `json:"startupErr,omitempty"`
-	Active        bool   `json:"active"`
-	Cwd           string `json:"cwd"`
+	ID             string `json:"id"`
+	Scope          string `json:"scope"`
+	WorkspaceRoot  string `json:"workspaceRoot"`
+	WorkspaceName  string `json:"workspaceName"`
+	TopicID        string `json:"topicId"`
+	TopicTitle     string `json:"topicTitle"`
+	ProjectColor   string `json:"projectColor,omitempty"`
+	Label          string `json:"label"`
+	Ready          bool   `json:"ready"`
+	Running        bool   `json:"running"`
+	Mode           string `json:"mode"`
+	StartupErr     string `json:"startupErr,omitempty"`
+	Active         bool   `json:"active"`
+	Cwd            string `json:"cwd"`
+	LastActivityAt int64  `json:"lastActivityAt"`
 }
 
 func (a *App) tabMeta(tab *WorkspaceTab, active bool) TabMeta {
 	m := TabMeta{
-		ID:            tab.ID,
-		Scope:         tab.Scope,
-		WorkspaceRoot: tab.WorkspaceRoot,
-		WorkspaceName: workspaceName(tab.WorkspaceRoot),
-		TopicID:       tab.TopicID,
-		TopicTitle:    tab.TopicTitle,
-		Label:         tab.Label,
-		Ready:         tab.Ready,
-		Mode:          currentTabMode(tab),
-		StartupErr:    tab.StartupErr,
-		Active:        active,
-		Cwd:           tab.WorkspaceRoot,
+		ID:             tab.ID,
+		Scope:          tab.Scope,
+		WorkspaceRoot:  tab.WorkspaceRoot,
+		WorkspaceName:  workspaceName(tab.WorkspaceRoot),
+		TopicID:        tab.TopicID,
+		TopicTitle:     tab.TopicTitle,
+		Label:          tab.Label,
+		Ready:          tab.Ready,
+		Mode:           currentTabMode(tab),
+		StartupErr:     tab.StartupErr,
+		Active:         active,
+		Cwd:            tab.WorkspaceRoot,
+		LastActivityAt: tab.LastActivityAt,
 	}
 	if tab.Scope == "global" {
 		m.ProjectColor = globalProjectColor()
