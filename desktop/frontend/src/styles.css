@@ -3014,6 +3014,8 @@ a[href] {
   top: auto;
   bottom: auto;
   z-index: var(--z-popover);
+  max-height: min(calc(100vh - 16px), 50vh);
+  overflow-y: auto;
 }
 .modelsw__item {
   display: flex;
