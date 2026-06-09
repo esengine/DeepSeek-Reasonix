@@ -22,7 +22,7 @@ jobs:
       matrix:
         include:
           - language: go
-            build-mode: none
+            build-mode: autobuild
           - language: javascript-typescript
             build-mode: none
           - language: actions
