@@ -84,10 +84,11 @@ func (a *Agent) Breakdown(schemas []provider.ToolSchema, cps *checkpoint.Store) 
 		b.CacheHitPct = float64(hit) / float64(total) * 100
 	}
 
-	// Compaction headroom.
+	// Compaction headroom uses the last turn's prompt tokens (what's actually
+	// in the window), not the cumulative sessionUsage.PromptTokens.
 	b.Window = a.contextWindow
-	if b.Window > 0 && b.Usage.PromptTokens > 0 {
-		pct := float64(b.Usage.PromptTokens) / float64(b.Window) * 100
+	if lu := a.LastUsage(); b.Window > 0 && lu != nil && lu.PromptTokens > 0 {
+		pct := float64(lu.PromptTokens) / float64(b.Window) * 100
 		b.CompactPct = pct
 	}
 
@@ -209,9 +210,19 @@ func (b *ContextBreakdown) FormatBreakdown() string {
 		}
 	}
 
-	// Session totals (real API counts).
-	sb.WriteString(fmt.Sprintf("  Session total:  %s · %.1f%% cached · %s%.4f\n",
-		shortTokenCount(b.Usage.TotalTokens), b.CacheHitPct, b.Usage.Currency, b.Usage.Cost))
+	// Cumulative totals broken down by input/output.
+	cachedNew := ""
+	if b.Usage.CacheHitTokens+b.Usage.CacheMissTokens > 0 {
+		cachedNew = fmt.Sprintf(" (%s cached / %s new)", shortTokenCount(b.Usage.CacheHitTokens), shortTokenCount(b.Usage.CacheMissTokens))
+	}
+	reasoning := ""
+	if b.Usage.ReasoningTokens > 0 {
+		reasoning = fmt.Sprintf(" (%s reasoning)", shortTokenCount(b.Usage.ReasoningTokens))
+	}
+	sb.WriteString(fmt.Sprintf("  Cumulative (all turns):  %s · %s%.4f\n",
+		shortTokenCount(b.Usage.TotalTokens), b.Usage.Currency, b.Usage.Cost))
+	sb.WriteString(fmt.Sprintf("    Input:   %s%s\n", shortTokenCount(b.Usage.PromptTokens), cachedNew))
+	sb.WriteString(fmt.Sprintf("    Output:  %s%s\n", shortTokenCount(b.Usage.CompletionTokens), reasoning))
 
 	// Compaction headroom.
 	if b.Window > 0 {
