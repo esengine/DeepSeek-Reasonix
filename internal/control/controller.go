@@ -858,17 +858,12 @@ func (c *Controller) EnableInteractiveApproval() {
 // Ask implements agent.Asker: it emits an AskRequest and blocks until
 // AnswerQuestion(ID, …) answers or ctx is cancelled. promptMu serialises it
 // against tool-approval prompts so at most one user prompt is outstanding.
+// Unlike requestApproval (which auto-approves in yolo/bypass mode), Ask
+// always reaches the user — the model is asking a question, not asking
+// permission. Headless sessions (nil asker) return "decide for yourself".
 func (c *Controller) Ask(ctx context.Context, questions []event.AskQuestion) ([]event.AskAnswer, error) {
-	if c.bypassEnabled() {
-		return recommendedAskAnswers(questions), nil
-	}
-
 	c.promptMu.Lock()
 	defer c.promptMu.Unlock()
-
-	if c.bypassEnabled() {
-		return recommendedAskAnswers(questions), nil
-	}
 
 	c.mu.Lock()
 	c.nextID++
@@ -896,6 +891,12 @@ func (c *Controller) bypassEnabled() bool {
 	return c.bypass
 }
 
+// recommendedAskAnswers returns an auto-answer for every question by picking the
+// first (recommended) option. Used when bypass mode was on — originally the Ask
+// method short-circuited on bypassEnabled() and returned these. As of the #3624
+// fix, bypass no longer suppresses Ask (the model's questions should always reach
+// the user), so this function is retained only for reference and testing and has
+// no live callers in production paths.
 func recommendedAskAnswers(questions []event.AskQuestion) []event.AskAnswer {
 	out := make([]event.AskAnswer, len(questions))
 	for i, q := range questions {
