@@ -205,6 +205,52 @@ func TestTaskToolPersistsAndContinuesTranscript(t *testing.T) {
 	}
 }
 
+func TestTaskToolFailedForegroundContinuationPersistsAndRejectsReuse(t *testing.T) {
+	sub := &mockProvider{name: "sub", streams: [][]provider.Chunk{
+		{
+			{Type: provider.ChunkText, Text: "first answer"},
+			{Type: provider.ChunkDone},
+		},
+		{
+			{Type: provider.ChunkError, Err: errors.New("provider failed")},
+		},
+	}}
+	store := NewSubagentStore(t.TempDir())
+	reg := tool.NewRegistry()
+	reg.Add(fakeTool{name: "read_file", readOnly: true})
+	task := NewTaskTool(sub, nil, reg, 20, 0, 0, 0, 0, 0.0, "", "sys", nil, "", "", nil).
+		WithTranscripts(store, t.TempDir(), "base-model", "base-effort")
+
+	first, err := task.Execute(context.Background(), []byte(`{"prompt":"first task"}`))
+	if err != nil {
+		t.Fatalf("first Execute: %v", err)
+	}
+	ref := subagentRefFromOutput(t, first)
+
+	_, err = task.Execute(context.Background(), []byte(`{"prompt":"second task","continue_from":"`+ref+`"}`))
+	if err == nil || !strings.Contains(err.Error(), "provider failed") {
+		t.Fatalf("second Execute error = %v, want provider failure", err)
+	}
+	meta, err := store.LoadMeta(ref)
+	if err != nil {
+		t.Fatalf("LoadMeta: %v", err)
+	}
+	if meta.Status != SubagentFailed {
+		t.Fatalf("status = %q, want failed", meta.Status)
+	}
+	loaded, err := LoadSession(store.sessionPath(ref))
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	msgs := loaded.Snapshot()
+	if len(msgs) != 4 || msgs[1].Content != "first task" || msgs[2].Content != "first answer" || msgs[3].Content != "second task" {
+		t.Fatalf("failed continuation transcript = %+v, want first task/answer plus second task", msgs)
+	}
+	if _, err := task.Execute(context.Background(), []byte(`{"prompt":"third task","continue_from":"`+ref+`"}`)); err == nil || !strings.Contains(err.Error(), "failed and cannot be continued") {
+		t.Fatalf("reuse error = %v, want failed ref rejection", err)
+	}
+}
+
 func TestTaskToolRejectsMismatchedContinuationProfile(t *testing.T) {
 	sub := &mockProvider{name: "sub", chunks: []provider.Chunk{
 		{Type: provider.ChunkText, Text: "answer"},

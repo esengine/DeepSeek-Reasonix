@@ -519,10 +519,10 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			ArchiveDir:    config.ArchiveDir(),
 		}, agent.NestedSink(sctx, event.Discard))
 		if err != nil {
-			return "", err
+			return "", errors.Join(err, subagentStore.SaveFailed(run))
 		}
 		if err := subagentStore.SaveCompleted(run); err != nil {
-			return "", err
+			return "", errors.Join(err, subagentStore.SaveFailed(run))
 		}
 		return agent.FormatSubagentResult(answer, run.Ref, false), nil
 	}

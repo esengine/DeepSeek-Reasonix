@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -218,6 +219,11 @@ func (t *TaskTool) Execute(ctx context.Context, args json.RawMessage) (string, e
 	if err != nil {
 		return "", err
 	}
+	prov, pricing, ctxWin, err := t.resolveSubSessionRuntime(modelRef, effortRef)
+	if err != nil {
+		run.Release()
+		return "", fmt.Errorf("sub-agent profile: %w", err)
+	}
 
 	// Background: register a job that runs the sub-agent under the manager's
 	// session context (so it survives this turn) and return immediately. The
@@ -244,14 +250,12 @@ func (t *TaskTool) Execute(ctx context.Context, args json.RawMessage) (string, e
 		}
 		job := jm.Start("task", label, func(jobCtx context.Context, _ io.Writer) (string, error) {
 			defer run.Release()
-			answer, err := t.runSubSession(jobCtx, p.Prompt, subReg, nested, maxSteps, modelRef, effortRef, run.Session)
+			answer, err := t.runSubSession(jobCtx, p.Prompt, subReg, nested, maxSteps, prov, pricing, ctxWin, run.Session)
 			if err != nil {
-				_ = t.transcripts.SaveFailed(run)
-				return FormatSubagentResult("", run.Ref, true), err
+				return FormatSubagentResult("", run.Ref, true), errors.Join(err, t.transcripts.SaveFailed(run))
 			}
 			if err := t.transcripts.SaveCompleted(run); err != nil {
-				_ = t.transcripts.SaveFailed(run)
-				return FormatSubagentResult("", run.Ref, true), err
+				return FormatSubagentResult("", run.Ref, true), errors.Join(err, t.transcripts.SaveFailed(run))
 			}
 			return FormatSubagentResult(answer, run.Ref, false), nil
 		})
@@ -263,13 +267,13 @@ func (t *TaskTool) Execute(ctx context.Context, args json.RawMessage) (string, e
 
 	// Foreground: run synchronously, nesting events under this call.
 	defer run.Release()
-	answer, err := t.runSubSession(ctx, p.Prompt, subReg, subSink(ctx), maxSteps, modelRef, effortRef, run.Session)
+	answer, err := t.runSubSession(ctx, p.Prompt, subReg, subSink(ctx), maxSteps, prov, pricing, ctxWin, run.Session)
 	if err != nil {
-		return "", err
+		return "", errors.Join(err, t.transcripts.SaveFailed(run))
 	}
 	if t.transcripts != nil && run.Ref != "" {
 		if err := t.transcripts.SaveCompleted(run); err != nil {
-			return "", err
+			return "", errors.Join(err, t.transcripts.SaveFailed(run))
 		}
 		return FormatSubagentResult(answer, run.Ref, false), nil
 	}
@@ -401,15 +405,19 @@ func FilterReadOnlyRegistry(parent *tool.Registry, exclude ...string) *tool.Regi
 	return sub
 }
 
-func (t *TaskTool) runSubSession(ctx context.Context, prompt string, subReg *tool.Registry, sink event.Sink, maxSteps int, modelRef, effort string, sess *Session) (string, error) {
+func (t *TaskTool) resolveSubSessionRuntime(modelRef, effort string) (provider.Provider, *provider.Pricing, int, error) {
 	prov, pricing, ctxWin := t.prov, t.pricing, t.contextWindow
 	if t.resolveProvider != nil && (modelRef != "" || effort != "") {
 		p, pr, cw, err := t.resolveProvider(modelRef, effort)
 		if err != nil {
-			return "", fmt.Errorf("sub-agent profile: %w", err)
+			return nil, nil, 0, err
 		}
 		prov, pricing, ctxWin = p, pr, cw
 	}
+	return prov, pricing, ctxWin, nil
+}
+
+func (t *TaskTool) runSubSession(ctx context.Context, prompt string, subReg *tool.Registry, sink event.Sink, maxSteps int, prov provider.Provider, pricing *provider.Pricing, ctxWin int, sess *Session) (string, error) {
 	return RunSubAgentWithSession(ctx, prov, subReg, sess, prompt, Options{
 		MaxSteps:          maxSteps,
 		Temperature:       t.temperature,
