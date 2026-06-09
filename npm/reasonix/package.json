@@ -34,6 +34,6 @@
     "@reasonix/cli-linux-arm64": "0.0.0",
     "@reasonix/cli-linux-x64": "0.0.0",
     "@reasonix/cli-win32-arm64": "0.0.0",
-    "@reasonix/cli-win32-x64": "0.0.0"
+    "@reasonix/cli-win32-x64": "1.0.0"
   }
 }
