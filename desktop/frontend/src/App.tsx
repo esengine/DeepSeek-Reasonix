@@ -1710,6 +1710,7 @@ export default function App() {
                   cost={state.sessionCost}
                   currency={state.sessionCurrency}
                   turnTokens={state.turnTokens}
+                  turnStartAt={state.turnStartAt}
                 />
               </footer>
             </div>

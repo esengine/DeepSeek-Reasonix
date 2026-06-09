@@ -93,6 +93,7 @@ export function StatusBar({
   cost,
   currency,
   turnTokens,
+  turnStartAt,
 }: {
   context: ContextInfo;
   usage?: WireUsage;
@@ -103,6 +104,7 @@ export function StatusBar({
   cost?: number;
   currency?: string;
   turnTokens?: number;
+  turnStartAt?: number;
 }) {
   const { t, locale } = useI18n();
   const [, setTick] = useState(0);
@@ -129,6 +131,13 @@ export function StatusBar({
   const cacheTooltip = avgPct !== null
     ? t("status.cacheAvg", { pct: avgPct })
     : undefined;
+  // 生成耗时
+  const elapsed = running && turnStartAt ? Date.now() - turnStartAt : 0;
+  const elapsedLabel = elapsed >= 1000
+    ? elapsed >= 60000
+      ? Math.floor(elapsed / 60000) + "m " + Math.floor((elapsed % 60000) / 1000) + "s"
+      : (elapsed / 1000).toFixed(1) + "s"
+    : "";
 
   return (
     <div className="statusbar">
@@ -160,7 +169,7 @@ export function StatusBar({
           <span className="statusbar__spinner">{spinnerWord}…</span>
         )}
         {running && (turnTokens ?? 0) > 0 && (
-          <span className="statusbar__tokens">↓ {fmtTokens(turnTokens ?? 0)} {t("status.tokens")}</span>
+          <span className="statusbar__tokens">↓ {fmtTokens(turnTokens ?? 0)} {t("status.tokens")} · {elapsedLabel}</span>
         )}
         {mode === "plan" && <span className="statusbar__plan">{t("status.plan")}</span>}
       </div>
