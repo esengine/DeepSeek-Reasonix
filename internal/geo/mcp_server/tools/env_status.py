@@ -108,74 +108,208 @@ def probe_gdal() -> dict:
 
 # ── QGIS 探测 ─────────────────────────────────────────────────────
 
-_QGIS_HINTS_WIN = [
-    r"C:\Program Files\QGIS 3.40.4",
-    r"C:\Program Files\QGIS 3.38.4",
-    r"C:\Program Files\QGIS 3.34.4",
-    r"C:\OSGeo4W",
-]
-
-
-def _find_qgis_python() -> str | None:
-    """查找 QGIS 自带的 Python 解释器路径。"""
+def _scan_qgis_roots() -> list[str]:
+    """扫描系统中所有 QGIS 安装根目录。参照 GeoCode findQgisRootFromHint 逻辑。"""
+    roots = []
     if os.name == "nt":
-        for hint in _QGIS_HINTS_WIN:
-            for sub in ["bin", "apps/Python312", "apps/Python311", "apps/Python310"]:
-                py = Path(hint) / sub / "python3.exe"
-                if py.exists():
-                    return str(py)
-            bat = Path(hint) / "bin" / "python-qgis-ltr.bat"
-            if bat.exists():
-                return str(bat)
+        search_dirs = [r"C:\Program Files", r"C:\Program Files (x86)", "C:\\"]
+        for base in search_dirs:
+            base_path = Path(base)
+            if not base_path.is_dir():
+                continue
+            try:
+                for entry in base_path.iterdir():
+                    if not entry.is_dir():
+                        continue
+                    name = entry.name.lower()
+                    if "qgis" in name or "osgeo" in name:
+                        # 验证是 QGIS 安装根（有 bin 子目录）
+                        if (entry / "bin" / "python3.exe").exists() or \
+                           (entry / "bin" / "python-qgis-ltr.bat").exists() or \
+                           (entry / "bin" / "python-qgis.bat").exists():
+                            roots.append(str(entry))
+            except PermissionError:
+                continue
     else:
-        for name in ["python3", "qgis"]:
-            p = shutil.which(name)
-            if p:
-                return p
-    return None
+        for p in ["/usr", "/usr/local", "/Applications"]:
+            base_path = Path(p)
+            if not base_path.is_dir():
+                continue
+            try:
+                for entry in base_path.iterdir():
+                    if entry.is_dir() and "qgis" in entry.name.lower():
+                        roots.append(str(entry))
+            except PermissionError:
+                continue
+    return roots
 
 
-def _probe_qgis_subprocess(qgis_python: str) -> dict:
+def _find_qgis_python() -> tuple[str | None, str | None, str | None]:
+    """查找 QGIS Python 解释器。返回 (python_path, qgis_root, bat_path)。
+
+    优先用 python-qgis-ltr.bat（自动设置完整 DLL 环境），
+    回退到 bin/python3.exe + 手动 env 构建。
+    """
+    roots = _scan_qgis_roots()
+
+    for root in roots:
+        # 最优: python-qgis-ltr.bat — 自动处理所有 env
+        for bat_name in ["python-qgis-ltr.bat", "python-qgis.bat"]:
+            bat = Path(root) / "bin" / bat_name
+            if bat.exists():
+                # 同时找对应 python3.exe 作为直接调用回退
+                py = Path(root) / "bin" / "python3.exe"
+                return (str(py) if py.exists() else str(bat)), root, str(bat)
+
+        # 备选: bin/python3.exe
+        py = Path(root) / "bin" / "python3.exe"
+        if py.exists():
+            return str(py), root, None
+
+        # 旧版: apps/PythonNNN/python.exe
+        apps_dir = Path(root) / "apps"
+        if apps_dir.is_dir():
+            import re
+            try:
+                for entry in sorted(apps_dir.iterdir(), reverse=True):
+                    if re.match(r"^Python\d+$", entry.name, re.IGNORECASE):
+                        py = entry / "python.exe"
+                        if py.exists():
+                            return str(py), root, None
+            except PermissionError:
+                pass
+
+    return None, None, None
+
+
+def _build_qgis_env(qgis_root: str) -> dict:
+    """构建 QGIS Python 所需的干净环境变量。
+
+    QGIS standalone 的 python3.exe 需要 PYTHONHOME + DLL PATH 配置。
+    关键：必须避免 conda 环境的 GDAL/PROJ DLL 污染，否则 qgis_core.dll 加载崩溃。
+    """
+    # 从干净的系统环境起步，不继承 conda 的 PATH
+    env = {}
+    # 保留必要的系统变量
+    for k in ("SYSTEMROOT", "WINDIR", "TEMP", "TMP", "USERPROFILE",
+              "COMSPEC", "PATHEXT", "PROCESSOR_ARCHITECTURE",
+              "NUMBER_OF_PROCESSORS", "HOMEDRIVE", "HOMEPATH"):
+        if k in os.environ:
+            env[k] = os.environ[k]
+
+    apps_dir = Path(qgis_root) / "apps"
+    python_home = None
+    if apps_dir.is_dir():
+        import re
+        for entry in sorted(apps_dir.iterdir(), reverse=True):
+            if re.match(r"^Python\d+$", entry.name, re.IGNORECASE):
+                python_home = str(entry)
+                break
+    if python_home:
+        env["PYTHONHOME"] = python_home
+
+    # QGIS prefix
+    qgis_prefix = None
+    for sub in ["qgis-ltr", "qgis", "qgis-dev"]:
+        candidate = apps_dir / sub
+        if candidate.is_dir():
+            qgis_prefix = str(candidate)
+            break
+
+    env["QGIS_PREFIX_PATH"] = qgis_prefix or str(qgis_root)
+    env["QGIS_DEBUG"] = "0"
+    env["PYTHONUTF8"] = "1"
+
+    # PYTHONPATH
+    python_paths = []
+    if qgis_prefix:
+        python_paths.append(str(Path(qgis_prefix) / "python"))
+        python_paths.append(str(Path(qgis_prefix) / "python" / "plugins"))
+    env["PYTHONPATH"] = os.pathsep.join(python_paths) if python_paths else ""
+
+    # PATH: QGIS DLL 优先，再追加系统 PATH（不含 conda）
+    qgis_paths = [
+        str(Path(qgis_root) / "bin"),
+        str(Path(qgis_root) / "apps" / "Qt5" / "bin"),
+    ]
+    if qgis_prefix:
+        qgis_paths.append(str(Path(qgis_prefix) / "bin"))
+    system_path = os.environ.get("PATH", "")
+    # 过滤掉 conda 相关的路径，避免 DLL 冲突
+    filtered_system = os.pathsep.join(
+        p for p in system_path.split(os.pathsep)
+        if "conda" not in p.lower() and "miniconda" not in p.lower()
+    )
+    env["PATH"] = os.pathsep.join(qgis_paths + [filtered_system])
+
+    return env
+
+
+def _probe_qgis_subprocess(qgis_python: str, qgis_root: str) -> dict:
     """通过子进程探测 QGIS Python 环境。30s 超时。"""
     probe_script = """
-import json, sys
+import json, math, os, sys, traceback
+info = {"pythonVersion": ".".join(map(str, sys.version_info[:3]))}
+
+# 1. GDAL
 try:
-    from osgeo import gdal
-    gdal_ver = gdal.__version__
+    from osgeo import gdal, osr
+    info["gdalVersion"] = gdal.__version__
 except Exception as e:
-    gdal_ver = None
-    sys.stderr.write(f"gdal import failed: {e}\\n")
+    info["gdalVersion"] = None
+    info["gdalError"] = str(e)
+    print(json.dumps(info))
+    sys.exit(0)
 
+# 1.5 PROJ custom CRS transform — 验证 PROJ 库是否完整
 try:
-    from qgis.core import QgsApplication
-    QgsApplication.setAttribute(
-        getattr(QgsApplication, 'AA_EnableHighDpiScaling', 0), False
-    )
-    app = QgsApplication([], False)
-    app.initQgis()
-    qgis_ver = app.platform()
-    app.exitQgis()
+    src = osr.SpatialReference()
+    src.ImportFromProj4("+proj=lcc +lat_1=25 +lat_2=47 +lat_0=0 +lon_0=105 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs")
+    src.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+    dst = osr.SpatialReference()
+    dst.ImportFromEPSG(4326)
+    dst.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+    transform = osr.CoordinateTransformation(src, dst)
+    lon, lat, _ = transform.TransformPoint(500000, 4000000)
+    info["projTransformReady"] = math.isfinite(lon) and math.isfinite(lat)
 except Exception as e:
-    qgis_ver = None
-    sys.stderr.write(f"qgis import/init failed: {e}\\n")
+    info["projTransformReady"] = False
+    info["projTransformError"] = str(e)
 
+# 2. QGIS + Processing (headless)
+# 关键：import qgis 先于 initQgis；processing 插件路径需手动加入 sys.path
 try:
-    import processing
-    processing_ready = True
-except Exception:
-    processing_ready = False
+    import qgis
+    from qgis.core import QgsApplication, Qgis
+    if hasattr(Qgis, 'version'):
+        info["qgisVersion"] = Qgis.version()
+    elif hasattr(Qgis, 'QGIS_VERSION'):
+        info["qgisVersion"] = Qgis.QGIS_VERSION
+    else:
+        info["qgisVersion"] = "unknown"
+    qgs = QgsApplication([], False)
+    qgs.initQgis()
+    # 手动将 plugins 加入 sys.path（standalone Python 不会自动加）
+    _plugins = os.path.join(os.path.dirname(os.path.dirname(qgis.__file__)), "plugins")
+    if _plugins not in sys.path:
+        sys.path.insert(0, _plugins)
+    from qgis import processing
+    from processing.core.Processing import Processing
+    Processing.initialize()
+    info["processingReady"] = True
+    qgs.exitQgis()
+except Exception as e:
+    info["qgisVersion"] = info.get("qgisVersion", "unknown")
+    info["processingReady"] = False
+    info["processingError"] = str(e)
 
-print(json.dumps({
-    "gdal_version": gdal_ver,
-    "qgis_version": qgis_ver,
-    "processing_ready": processing_ready,
-}))
+print(json.dumps(info))
 """
     try:
         proc = subprocess.run(
             [qgis_python, "-c", probe_script],
             capture_output=True, text=True, timeout=30,
-            env={**os.environ, "PYTHONUTF8": "1", "QGIS_DEBUG": "0"},
+            env=_build_qgis_env(qgis_root),
         )
         if proc.returncode == 0:
             # 解析最后一行 JSON
@@ -192,34 +326,144 @@ print(json.dumps({
 
 
 def probe_qgis() -> dict:
-    """探测 QGIS 环境。"""
-    qgis_python = _find_qgis_python()
+    """探测 QGIS 环境。参照 GeoCode qgis-env.ts 的探测逻辑。
+
+    用 python3.exe + 手动构建 env（PYTHONHOME/PYTHONPATH/PATH），
+    优先于 bat-bridge，因为 bat 未必设置正确的 PYTHONPATH。
+    """
+    qgis_python, qgis_root, bat_path = _find_qgis_python()
 
     if not qgis_python:
         return {
             "status": "not-installed",
             "reason": (
-                "未找到 QGIS 安装。请从 https://qgis.org 下载安装 QGIS，"
+                "未找到 QGIS 安装。请从 https://qgis.org 下载安装，"
                 "安装后 geo_env_status 会自动探测。"
             ),
             "qgis_python": None,
+            "qgis_root": None,
         }
 
-    result = _probe_qgis_subprocess(qgis_python)
+    # 优先 bat-bridge（自动处理完整 DLL 环境），回退直接调 python3.exe
+    if bat_path:
+        result = _probe_qgis_bat(bat_path, qgis_root)
+    else:
+        result = _probe_qgis_subprocess(qgis_python, qgis_root)
+
     if "error" in result:
         return {
             "status": "bad",
             "reason": result["error"],
             "qgis_python": qgis_python,
+            "qgis_root": qgis_root,
         }
 
+    processing_ready = result.get("processingReady", False) or result.get("processing_ready", False)
     return {
-        "status": "ready" if result.get("processing_ready") else "bad",
+        "status": "ready" if processing_ready else "bad",
         "qgis_python": qgis_python,
-        "gdal_version": result.get("gdal_version"),
-        "qgis_version": result.get("qgis_version"),
-        "processing_ready": result.get("processing_ready", False),
+        "qgis_root": qgis_root,
+        "python_version": result.get("pythonVersion"),
+        "gdal_version": result.get("gdalVersion"),
+        "qgis_version": result.get("qgisVersion"),
+        "processing_ready": processing_ready,
+        "proj_transform_ready": result.get("projTransformReady"),
     }
+
+
+def _probe_qgis_bat(bat_path: str, qgis_root: str = "") -> dict:
+    """通过 python-qgis-ltr.bat 探测 QGIS 环境。
+
+    bat 自动设置 DLL PATH，通过临时脚本文件执行。
+    qgis_root 用于推导 PYTHONHOME（apps/Python312）。
+    """
+    import tempfile
+    probe_script = b"""import json, math, os, sys
+info = {"pythonVersion": ".".join(map(str, sys.version_info[:3]))}
+try:
+    from osgeo import gdal, osr
+    info["gdalVersion"] = gdal.__version__
+except Exception as e:
+    info["gdalVersion"] = None
+    info["gdalError"] = str(e)
+    print(json.dumps(info))
+    sys.exit(0)
+try:
+    src = osr.SpatialReference()
+    src.ImportFromProj4("+proj=lcc +lat_1=25 +lat_2=47 +lat_0=0 +lon_0=105 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs")
+    src.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+    dst = osr.SpatialReference()
+    dst.ImportFromEPSG(4326)
+    dst.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+    transform = osr.CoordinateTransformation(src, dst)
+    lon, lat, _ = transform.TransformPoint(500000, 4000000)
+    info["projTransformReady"] = math.isfinite(lon) and math.isfinite(lat)
+except Exception as e:
+    info["projTransformReady"] = False
+    info["projTransformError"] = str(e)
+try:
+    import qgis
+    from qgis.core import QgsApplication, Qgis
+    info["qgisVersion"] = Qgis.QGIS_VERSION if hasattr(Qgis, "QGIS_VERSION") else "unknown"
+    qgs = QgsApplication([], False)
+    qgs.initQgis()
+    _plugins = os.path.join(os.path.dirname(os.path.dirname(qgis.__file__)), "plugins")
+    if _plugins not in sys.path:
+        sys.path.insert(0, _plugins)
+    from qgis import processing
+    from processing.core.Processing import Processing
+    Processing.initialize()
+    info["processingReady"] = True
+    qgs.exitQgis()
+except Exception as e:
+    info["processingReady"] = False
+    info["processingError"] = str(e)
+print(json.dumps(info))
+"""
+    tmp_path = None
+    try:
+        fd, tmp_path = tempfile.mkstemp(suffix=".py", prefix="qgis_probe_")
+        os.write(fd, probe_script)
+        os.close(fd)
+
+        # 通过 shell=True 调用 bat，设置 PYTHONHOME 确保 stdlib 可定位
+        # bat 内部会设置 PATH/PYTHONPATH 等，但需要 PYTHONHOME 预先存在
+        env = os.environ.copy()
+        python_home = str(Path(qgis_root) / "apps" / "Python312")
+        if not Path(python_home).is_dir():
+            # 自动探测 Python 版本
+            apps_dir = Path(qgis_root) / "apps"
+            import re
+            for entry in sorted(apps_dir.iterdir(), reverse=True):
+                if re.match(r"^Python\d+$", entry.name, re.IGNORECASE):
+                    python_home = str(entry)
+                    break
+        env["PYTHONHOME"] = python_home
+        cmd_line = f'"{bat_path}" "{tmp_path}"'
+        proc = subprocess.run(
+            cmd_line,
+            capture_output=True, text=True, timeout=30,
+            shell=True, env=env,
+        )
+        if proc.returncode == 0:
+            for line in reversed(proc.stdout.strip().split("\n")):
+                line = line.strip()
+                if line.startswith("{"):
+                    try:
+                        return json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+        return {"error": f"exit code {proc.returncode}", "stderr": proc.stderr[:500]}
+    except subprocess.TimeoutExpired:
+        return {"error": "QGIS bat 探活超时 (30s)"}
+    except Exception as e:
+        return {"error": str(e)}
+    finally:
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
 
 
 # ── GEE 探测 ──────────────────────────────────────────────────────
