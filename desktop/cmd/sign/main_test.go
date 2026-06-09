@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"aead.dev/minisign"
@@ -57,6 +58,7 @@ func TestGenManifest(t *testing.T) {
 		"Reasonix-windows-amd64-installer.exe",
 		"Reasonix-windows-amd64.zip", // portable download, not the updater channel
 		"Reasonix-linux-amd64.tar.gz",
+		"Reasonix-linux-amd64.deb",            // human download, not the updater channel
 		"Reasonix-linux-amd64.tar.gz.minisig", // must be skipped
 		"README.txt",                          // unmatched, must be skipped
 	}
@@ -97,5 +99,14 @@ func TestGenManifest(t *testing.T) {
 	}
 	if win.SHA256 == "" || win.Size == 0 {
 		t.Fatalf("windows asset missing digest/size: %+v", win)
+	}
+	// The Linux updater channel must stay the .tar.gz; the co-located .deb is a
+	// human download and must not shadow the linux-amd64 key.
+	lin, ok := m.Platforms["linux-amd64"]
+	if !ok {
+		t.Fatal("linux-amd64 missing")
+	}
+	if !strings.HasSuffix(lin.URL, "/Reasonix-linux-amd64.tar.gz") {
+		t.Fatalf("linux-amd64 url = %q, want the .tar.gz, not the .deb", lin.URL)
 	}
 }
