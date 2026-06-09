@@ -2,7 +2,7 @@ import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } f
 import type { CSSProperties, KeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import { ShellExpandProvider, useShellExpand } from "./lib/shellExpand";
 import {
-  BrainCircuit,
+  Lightbulb,
   Download,
   SquarePen,
   Globe,
@@ -86,7 +86,7 @@ const RIGHT_DOCK_MAX_WIDTH = 999999;
 const DEFAULT_DOCK_TABS: DockTab[] = [
   { id: "files", type: "files", title: "文件", icon: FileText, closable: false },
   { id: "changes", type: "changes", title: "改动", icon: GitBranch, closable: false },
-  { id: "memory", type: "memory", title: "记忆", icon: BrainCircuit, closable: false },
+  { id: "memory", type: "memory", title: "记忆", icon: Lightbulb, closable: false },
 ];
 
 type HistoryScopeFilter = { scope: "global" | "project"; workspaceRoot: string };
@@ -430,6 +430,18 @@ export default function App() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const topicRenameSkipCommitRef = useRef(false);
   const topicRenameCommitHandledRef = useRef(false);
+
+  // ⌘K: open the command palette.
+  useEffect(() => {
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "k" && !e.altKey && !e.shiftKey) {
+        e.preventDefault();
+        setPaletteOpen((o) => !o);
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
 
   // Persist window geometry across launches.
   useWindowStatePersistence();
@@ -1689,7 +1701,6 @@ export default function App() {
                   onSend={handleSend}
                   onCancel={cancel}
                   onCycleMode={cycleMode}
-                  onSetMode={applyMode}
                   onSwitchModel={switchModel}
                   onSetEffort={setEffort}
                   onPickFolder={switchFolder}

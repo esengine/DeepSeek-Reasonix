@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, ClipboardEvent, DragEvent, KeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
+import type { CSSProperties, ClipboardEvent, DragEvent, KeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import { AlertTriangle, ArrowUp, Check, ChevronDown, Eye, FileText, Folder, FolderGit2, FolderPlus, List, MessageSquare, Search, Square, Trash2, X, Zap } from "lucide-react";
 import { asArray } from "../lib/array";
 import { DedupIndex, sha256 } from "../lib/attachDedup";
@@ -234,7 +234,6 @@ export function Composer({
   onSend,
   onCancel,
   onCycleMode,
-  onSetMode,
   onSwitchModel,
   onSetEffort,
   onPickFolder,
@@ -256,7 +255,6 @@ export function Composer({
   // be restored to the input); undefined for a normal cancel.
   onCancel: () => string | undefined;
   onCycleMode: () => void;
-  onSetMode: (mode: Mode) => void;
   onSwitchModel: (name: string) => void;
   onSetEffort: (level: string) => void;
   onPickFolder: (path?: string) => Promise<string>;
@@ -1155,6 +1153,14 @@ export function Composer({
     const composing = isImeKeyEvent(e, composingRef.current, lastCompositionEndAt.current);
     if (e.key === "Enter" && composing) return;
 
+    // Tab (no Shift) cycles mode when no menu is open; with menu open Tab picks
+    // the active item (handled below). Prevents default to keep focus in composer.
+    if (e.key === "Tab" && !e.shiftKey && !menuMode && !composing) {
+      e.preventDefault();
+      onCycleMode();
+      return;
+    }
+
     // Shift+Tab cycles the input mode (normal → plan → YOLO → normal). Handled
     // before the menus so it works even while one is open.
     if (e.key === "Tab" && e.shiftKey && !composing) {
@@ -1233,11 +1239,6 @@ export function Composer({
     ? ({ height: `${textareaAutoHeight}px`, overflowY: textareaAutoOverflow ? "auto" : "hidden" } as CSSProperties)
     : undefined;
   const composerAutoExpanded = composerHeight === null && textareaAutoHeight !== null && textareaAutoHeight > 40;
-  const modeOptions: Array<{ id: Mode; label: string; icon: ReactNode }> = [
-    { id: "normal", label: "auto", icon: <Zap size={13} /> },
-    { id: "plan", label: "plan", icon: <List size={13} /> },
-    { id: "yolo", label: "yolo", icon: <AlertTriangle size={13} /> },
-  ];
   const hasWorkspace = Boolean(cwd);
   const hasEffort = Boolean(effort?.supported);
   const composerMetaClass = [
@@ -1625,24 +1626,17 @@ export function Composer({
               </button>
             </div>
           )}
-          <div className="composer-modebar" role="toolbar" aria-label={t("composer.modeTitle")}>
-            {modeOptions.map((option) => {
-              const isActive = mode === option.id;
-              const btn = (
-                <button
-                  key={option.id}
-                  type="button"
-                  className={`composer-modebar__item composer-modebar__item--${option.id}${isActive ? " composer-modebar__item--active" : ""}`}
-                  onClick={() => onSetMode(option.id)}
-                  aria-pressed={isActive}
-                  disabled={disabled || running}
-                >
-                  {option.icon}
-                  {isActive && <span>{option.label}</span>}
-                </button>
-              );
-              return isActive ? btn : <Tooltip key={option.id} label={option.label}>{btn}</Tooltip>;
-            })}
+          <div className="composer-modechip" role="toolbar" aria-label={t("composer.modeTitle")}>
+            <button
+              type="button"
+              className={`composer-modechip__btn composer-modechip__btn--${mode}`}
+              onClick={() => onCycleMode()}
+              disabled={disabled || running}
+              aria-label={`${t("composer.modeTitle")}: ${mode === "normal" ? "auto" : mode}`}
+            >
+              {mode === "normal" ? <Zap size={12} /> : mode === "plan" ? <List size={12} /> : <AlertTriangle size={12} />}
+              <span>{mode === "normal" ? "auto" : mode}</span>
+            </button>
           </div>
           <div className="composer-meta__params">
             <div className="composer-meta__control composer-meta__control--model">

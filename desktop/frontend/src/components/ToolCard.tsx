@@ -3,7 +3,7 @@ import { CodeViewer } from "./CodeViewer";
 import { DiffView } from "./DiffView";
 import { ProcessCard, ProcessStatusIcon, ProcessToolIcon, type ProcessState, type ProcessTone } from "./ProcessCard";
 import { useT } from "../lib/i18n";
-import { diffsFor, subjectOf, summarize } from "../lib/tools";
+import { diffsFor, summarize } from "../lib/tools";
 import { useShellExpand } from "../lib/shellExpand";
 import type { Item } from "../lib/useController";
 
@@ -55,7 +55,6 @@ function splitPreview(text: string, n: number): { preview: string; total: number
 export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolItem; subcalls?: ToolItem[] }) {
   const t = useT();
   const diffs = diffsFor(item.name, item.args);
-  const subject = subjectOf(item.name, item.args);
   const nested = subcalls ?? [];
   const hasNested = nested.length > 0;
   const profileText =
@@ -114,7 +113,6 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
       name={
         <>
           <span className="tool__name">{item.name}</span>
-          {subject && <span className="tool__subject">{subject}</span>}
           {profileText && <span className="tool__profile">{profileText}</span>}
         </>
       }

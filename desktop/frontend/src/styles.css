@@ -17,6 +17,7 @@
   --bg-soft: #111319;
   --bg-elev: #191b22;
   --bg-elev-2: #222631;
+  --card-bg: color-mix(in srgb, var(--bg-elev) 38%, var(--bg));
   --sidebar-bg: #0c0e12;
   --sidebar-hover: #181c24;
   --sidebar-active: rgba(217, 119, 87, 0.13);
@@ -201,6 +202,7 @@
     --bg-soft: #eef2f7;
     --bg-elev: #ffffff;
     --bg-elev-2: #f2f5f9;
+    --card-bg: color-mix(in srgb, var(--bg-soft) 16%, var(--bg));
     --sidebar-bg: #f3f6fa;
     --sidebar-hover: #e8edf4;
     --sidebar-active: #eaf1ff;
@@ -265,6 +267,7 @@
   --bg-soft: #eef2f7;
   --bg-elev: #ffffff;
   --bg-elev-2: #f2f5f9;
+  --card-bg: color-mix(in srgb, var(--bg-soft) 16%, var(--bg));
   --sidebar-bg: #f3f6fa;
   --sidebar-hover: #e8edf4;
   --sidebar-active: #eaf1ff;
@@ -1087,7 +1090,7 @@ a[href] {
 }
 .warm-turn {
   max-width: var(--maxw);
-  margin: 6px auto;
+  margin: 3px auto;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: var(--bg-elev);
@@ -1467,7 +1470,7 @@ a[href] {
 
 /* ── messages ────────────────────────────────────────────────────────────── */
 .msg {
-  margin: 18px auto;
+  margin: 9px auto;
 }
 .msg--user {
   display: flex;
@@ -1661,8 +1664,8 @@ a[href] {
   gap: 8px;
 }
 .msg--process-only {
-  margin-top: 6px;
-  margin-bottom: 6px;
+  margin-top: 3px;
+  margin-bottom: 3px;
 }
 .msg--assistant > .process-card {
   align-self: stretch;
@@ -1686,9 +1689,9 @@ a[href] {
   box-sizing: border-box;
   width: 100%;
   margin: 6px auto;
-  border: 1px solid var(--border-soft);
+  border: none;
   border-radius: 12px;
-  background: var(--bg-elev);
+  background: var(--card-bg);
   overflow: hidden;
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.02);
 }
@@ -1718,13 +1721,13 @@ a[href] {
   align-items: center;
   gap: 9px;
   width: 100%;
-  min-height: 44px;
+  min-height: 28px;
   background: none;
   border: none;
   color: inherit;
   font: inherit;
   font-size: 13px;
-  padding: 8px 14px;
+  padding: 8px;
   text-align: left;
   cursor: pointer;
   user-select: none;
@@ -1819,8 +1822,8 @@ a[href] {
   background: var(--fg-faint);
 }
 .reasoning__body {
-  margin: 12px 16px 14px;
-  padding-left: 16px;
+  margin: 6px 8px 7px;
+  padding-left: 8px;
   border-left: 3px solid color-mix(in srgb, var(--process-tone) 56%, transparent);
   color: var(--fg-dim);
   font-size: 13.5px;
@@ -2094,18 +2097,18 @@ a[href] {
 /* ── process cards: reasoning and tool calls share the same shell ─────────── */
 .tool {
   margin: 6px auto;
-  border: 1px solid var(--border-soft);
+  border: none;
   border-radius: 12px;
-  background: var(--bg-elev);
+  background: var(--card-bg);
   overflow: hidden;
 }
 .tool--running {
-  border-color: var(--accent-soft);
+  background: color-mix(in srgb, var(--accent-soft) 40%, var(--card-bg));
 }
 /* Read-only research calls keep the same process-card shell, but their content
    is visually quieter than write/shell/sub-agent calls. */
 .tool--quiet {
-  border-color: var(--border-soft);
+  background: var(--card-bg);
 }
 .tool--quiet .tool__row {
   color: var(--fg-dim);
@@ -2127,8 +2130,8 @@ a[href] {
   display: flex;
   align-items: center;
   gap: 8px;
-  min-height: 42px;
-  padding: 9px 14px;
+  min-height: 22px;
+  padding: 8px;
   width: 100%;
   background: none;
   border: none;
@@ -2199,7 +2202,7 @@ a[href] {
   flex-shrink: 0;
 }
 .tool__body {
-  padding: 0 11px 10px 30px;
+  padding: 8px;
 }
 .tool__note {
   font-size: var(--font-caption);
@@ -2266,7 +2269,7 @@ a[href] {
 .process-card.notice,
 .process-card.compaction,
 .process-card.phase {
-  margin: 6px auto;
+  margin: 3px auto;
 }
 .process-card.phase {
   opacity: 0.82;
@@ -8317,92 +8320,53 @@ a[href] {
   padding-left: 20px;
 }
 
-.composer-modebar {
+.composer-modechip {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+.composer-modechip__btn {
   --wails-draggable: no-drag;
   display: inline-flex;
   align-items: center;
-  gap: 2px;
-  min-width: 0;
-  padding: 0;
-  border: none;
-  border-radius: 0;
-  background: none;
-}
-.composer-meta--has-workspace .composer-modebar {
-  padding-left: 10px;
-  border-left: 1px solid color-mix(in srgb, var(--border-soft) 74%, transparent);
-}
-.composer-wrap--decision-pending .composer-modebar {
-  opacity: 0.46;
-  filter: saturate(0.55);
-}
-.composer-modebar__item {
-  --wails-draggable: no-drag;
-  --mode-active-bg: var(--mode-auto-bg);
-  --mode-active-border: var(--mode-auto-border);
-  --mode-active-fg: var(--mode-auto-fg);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  height: 30px;
-  padding: 0 5px;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px;
   border: 1px solid transparent;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--fg-faint);
+  border-radius: 6px;
+  background: var(--mode-auto-bg);
+  color: #fff;
   font: inherit;
-  font-size: 13px;
-  transition: color 0.12s, border-color 0.12s, background 0.12s, box-shadow 0.12s;
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: filter 0.12s, box-shadow 0.12s;
 }
-.composer-modebar__item:hover:not(:disabled) {
-  color: var(--fg);
-  background: color-mix(in srgb, var(--bg-elev-2) 58%, transparent);
+.composer-modechip__btn:hover:not(:disabled) {
+  filter: brightness(1.12);
 }
-.composer-modebar__item:focus-visible {
+.composer-modechip__btn:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--mode-active-border) 35%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, #fff 40%, transparent);
 }
-.composer-modebar__item:disabled {
+.composer-modechip__btn:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
-.composer-modebar__item--normal {
-  --mode-active-bg: var(--mode-auto-bg);
-  --mode-active-border: var(--mode-auto-border);
-  --mode-active-fg: var(--mode-auto-fg);
+.composer-modechip__btn--normal {
+  background: var(--mode-auto-bg);
+  color: #fff;
 }
-.composer-modebar__item--plan {
-  --mode-active-bg: var(--mode-plan-bg);
-  --mode-active-border: var(--mode-plan-border);
-  --mode-active-fg: var(--mode-plan-fg);
+.composer-modechip__btn--plan {
+  background: var(--mode-plan-bg);
+  color: #fff;
 }
-.composer-modebar__item--yolo {
-  --mode-active-bg: var(--mode-yolo-bg);
-  --mode-active-border: var(--mode-yolo-border);
-  --mode-active-fg: var(--mode-yolo-fg);
+.composer-modechip__btn--yolo {
+  background: var(--mode-yolo-bg);
+  color: #fff;
 }
-.composer-modebar__item--active {
-  background: var(--mode-active-bg);
-  border-color: var(--mode-active-border);
-  color: var(--mode-active-fg);
-  font-weight: 620;
-  padding: 0 9px;
-  box-shadow:
-    inset 0 1px 0 color-mix(in srgb, #fff 20%, transparent),
-    0 1px 3px color-mix(in srgb, #000 36%, transparent);
-}
-.composer-modebar__item--active:hover:not(:disabled),
-.composer-modebar__item--active:focus-visible {
-  background: var(--mode-active-bg);
-  border-color: var(--mode-active-border);
-  color: var(--mode-active-fg);
-}
-.composer-modebar__item--active:focus-visible {
-  box-shadow:
-    inset 0 1px 0 color-mix(in srgb, #fff 20%, transparent),
-    0 1px 3px color-mix(in srgb, #000 36%, transparent),
-    0 0 0 2px color-mix(in srgb, var(--mode-active-border) 42%, transparent);
+.composer-wrap--decision-pending .composer-modechip {
+  opacity: 0.46;
+  filter: saturate(0.55);
 }
 
 .statusbar__trailing {
