@@ -12,6 +12,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/url"
 	"os"
 	"os/signal"
@@ -944,6 +945,42 @@ func fetchOrFallback(probe *config.ProviderEntry, famName string) []string {
 	return models
 }
 
+// fetchModelListCompat walks the full set of model-list URL candidates a given
+// base URL can resolve to (root, /v1, known OpenAI/Anthropic compat suffixes)
+// and returns the first successful fetch. This is the wizard-time probe for a
+// *user-supplied* custom provider — its baseURL is whatever the user pasted,
+// and "whatever they pasted" might be https://x.com (root, probe /v1/models)
+// or https://x.com/v1 (versioned, probe /v1/models directly). Previously the
+// wizard hardcoded `baseURL + "/models"`, which works for OpenAI-shape URLs
+// but silently fails for Anthropic-shape roots and the reverse — so the
+// wizard's idea of "what models exist" diverged from the chat client's actual
+// endpoint. Returning the empty slice (not an error) on full miss lets the
+// wizard fall through to a manual text input without an error message.
+func fetchModelListCompat(ctx context.Context, baseURL, apiKey string) ([]string, error) {
+	candidates, err := config.BuildModelFetchURLs(baseURL, "")
+	if err != nil {
+		return nil, err
+	}
+	var lastErr error
+	for _, u := range candidates {
+		models, err := openai.FetchModels(ctx, u, apiKey)
+		if err == nil {
+			return models, nil
+		}
+		lastErr = err
+		// An endpoint-miss is not a hard error — try the next candidate.
+		// Anything else (auth, 5xx, bad TLS) bubbles up immediately because
+		// retrying it on a sibling URL won't help.
+		if !openai.IsModelFetchEndpointMiss(err) {
+			return nil, err
+		}
+	}
+	if lastErr != nil {
+		slog.Debug("model-list probe: all candidates missed", "base_url", baseURL, "err", lastErr)
+	}
+	return nil, nil
+}
+
 // buildFamilyEntry returns a single ProviderEntry exposing the user's
 // selected models under one entry. It preserves the preset's API key env,
 // base URL, kind, context window, pricing, and effort — the things that
@@ -1159,7 +1196,7 @@ func promptCustomProviderFromURL() ([]config.ProviderEntry, error) {
 	fmt.Printf("  %s\n", dim(fmt.Sprintf(i18n.M.FetchingModelsFmt, "custom")))
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	models, err := openai.FetchModels(ctx, baseURL+"/models", apiKey)
+	models, err := fetchModelListCompat(ctx, baseURL, apiKey)
 	if err != nil || len(models) == 0 {
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "  %s\n", dim(fmt.Sprintf(i18n.M.FetchModelsFailedFmt, "custom", err)))
@@ -1265,7 +1302,7 @@ func promptAnthropicProviderFromURL() ([]config.ProviderEntry, error) {
 	fmt.Printf("  %s\n", dim(fmt.Sprintf(i18n.M.AnthropicFetchingModelsFmt, "anthropic")))
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	models, err := openai.FetchModels(ctx, baseURL+"/models", apiKey)
+	models, err := fetchModelListCompat(ctx, baseURL, apiKey)
 	if err != nil || len(models) == 0 {
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "  %s\n", dim(fmt.Sprintf(i18n.M.AnthropicFetchModelsFailedFmt, "anthropic", err)))

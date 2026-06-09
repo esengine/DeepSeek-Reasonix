@@ -491,6 +491,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		return &event.Profile{Model: model, Effort: effort}
 	}
 	reg.Add(skill.NewRunSkillTool(skillStore, skillRunner, skillProfile))
+	reg.Add(skill.NewReadSkillTool(skillStore))
 	reg.Add(skill.NewInstallSkillTool(skillStore, nil))
 	reg.Add(installsource.NewTool(installsource.Options{
 		ProjectRoot: root,

@@ -3369,15 +3369,6 @@ a[href] {
   line-height: 1.4;
   padding-block: 1px;
 }
-.prompt-action__label:has(.approval-rule-label) {
-  overflow: visible;
-  text-overflow: clip;
-  white-space: normal;
-}
-.prompt-action:has(.approval-rule-label) {
-  height: auto;
-  padding-block: 5px;
-}
 .prompt-detail-toggle {
   flex: 0 0 auto;
   max-width: 92px;
@@ -3435,22 +3426,6 @@ a[href] {
   max-height: 150px;
   overflow: auto;
 }
-.approval-rule-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  max-width: 100%;
-}
-.approval-rule-label code {
-  min-width: 0;
-  max-width: 24ch;
-  overflow-wrap: anywhere;
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--fg);
-}
-
 /* ── ask tool: decision details ───────────────────────────────────────────── */
 .ask-shelf__crumbs {
   display: flex;
@@ -5064,6 +5039,17 @@ a[href] {
   margin-top: 8px;
   color: var(--danger, #d66);
   font-size: 11.5px;
+}
+.mem-error {
+  margin-top: 8px;
+  padding: 7px 9px;
+  border: 1px solid color-mix(in srgb, var(--danger, #d66) 34%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--danger, #d66) 10%, transparent);
+  color: var(--danger, #d66);
+  font-size: 11.5px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 .mem-fact--hl {
   background: var(--accent-soft, rgba(120, 170, 255, 0.12));

@@ -3,7 +3,6 @@ package control
 import (
 	"context"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -184,18 +183,18 @@ func TestSetModeAppliesBothGates(t *testing.T) {
 	}
 }
 
-func TestBypassAutoAnswersAskWithRecommendedOptions(t *testing.T) {
-	var askRequested bool
+func TestBypassDoesNotAutoAnswerAsk(t *testing.T) {
+	askCh := make(chan event.Ask, 1)
 	c := New(Options{
 		Sink: event.FuncSink(func(e event.Event) {
 			if e.Kind == event.AskRequest {
-				askRequested = true
+				askCh <- e.Ask
 			}
 		}),
 	})
 	c.SetBypass(true)
 
-	answers, err := c.Ask(context.Background(), []event.AskQuestion{
+	questions := []event.AskQuestion{
 		{
 			ID:     "approach",
 			Header: "Approach",
@@ -215,33 +214,69 @@ func TestBypassAutoAnswersAskWithRecommendedOptions(t *testing.T) {
 			},
 			Multi: true,
 		},
+	}
+
+	done := make(chan struct {
+		answers []event.AskAnswer
+		err     error
+	}, 1)
+	go func() {
+		answers, err := c.Ask(context.Background(), questions)
+		done <- struct {
+			answers []event.AskAnswer
+			err     error
+		}{answers, err}
+	}()
+
+	// Even with bypass on, Ask must emit an AskRequest and wait for the user.
+	var ask event.Ask
+	select {
+	case ask = <-askCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Ask did not emit AskRequest under bypass; bypass should not auto-answer ask")
+	}
+
+	// Answer with NON-recommended options to prove the user was consulted.
+	c.AnswerQuestion(ask.ID, []event.AskAnswer{
+		{QuestionID: "approach", Selected: []string{"Alternative path"}},
+		{QuestionID: "scope", Selected: []string{"Broad"}},
 	})
-	if err != nil {
-		t.Fatalf("Ask: %v", err)
+
+	var result struct {
+		answers []event.AskAnswer
+		err     error
 	}
-	if askRequested {
-		t.Fatal("bypass must not emit an AskRequest event")
+	select {
+	case result = <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Ask stayed blocked after AnswerQuestion")
 	}
-	want := []event.AskAnswer{
-		{QuestionID: "approach", Selected: []string{"Recommended path"}},
-		{QuestionID: "scope", Selected: []string{"Minimal"}},
+	if result.err != nil {
+		t.Fatalf("Ask: %v", result.err)
 	}
-	if len(answers) != len(want) {
-		t.Fatalf("answers len = %d, want %d: %#v", len(answers), len(want), answers)
+
+	wantAnswers := []event.AskAnswer{
+		{QuestionID: "approach", Selected: []string{"Alternative path"}},
+		{QuestionID: "scope", Selected: []string{"Broad"}},
 	}
-	for i := range want {
-		if answers[i].QuestionID != want[i].QuestionID || len(answers[i].Selected) != 1 || answers[i].Selected[0] != want[i].Selected[0] {
-			t.Fatalf("answers[%d] = %#v, want %#v", i, answers[i], want[i])
+	if len(result.answers) != len(wantAnswers) {
+		t.Fatalf("answers len = %d, want %d: %#v", len(result.answers), len(wantAnswers), result.answers)
+	}
+	for i := range wantAnswers {
+		if result.answers[i].QuestionID != wantAnswers[i].QuestionID ||
+			len(result.answers[i].Selected) != 1 ||
+			result.answers[i].Selected[0] != wantAnswers[i].Selected[0] {
+			t.Fatalf("answers[%d] = %#v, want %#v", i, result.answers[i], wantAnswers[i])
 		}
 	}
 }
 
-func TestBypassRecheckedForAskAfterPromptLock(t *testing.T) {
-	askRequests := make(chan struct{}, 1)
+func TestAskSerializesBehindPromptLockEvenWithBypass(t *testing.T) {
+	askCh := make(chan event.Ask, 1)
 	c := New(Options{
 		Sink: event.FuncSink(func(e event.Event) {
 			if e.Kind == event.AskRequest {
-				askRequests <- struct{}{}
+				askCh <- e.Ask
 			}
 		}),
 	})
@@ -256,12 +291,9 @@ func TestBypassRecheckedForAskAfterPromptLock(t *testing.T) {
 	}}
 
 	c.promptMu.Lock()
-	started := make(chan struct{})
 	done := make(chan []event.AskAnswer, 1)
 	errs := make(chan error, 1)
-	var once sync.Once
 	go func() {
-		once.Do(func() { close(started) })
 		answers, err := c.Ask(context.Background(), questions)
 		if err != nil {
 			errs <- err
@@ -269,26 +301,42 @@ func TestBypassRecheckedForAskAfterPromptLock(t *testing.T) {
 		}
 		done <- answers
 	}()
-	<-started
+	// Give the goroutine time to block on promptMu.
 	time.Sleep(20 * time.Millisecond)
 
-	c.SetBypass(true)
-	c.promptMu.Unlock()
-
+	// Pre-unlock assertion: while promptMu is still held, Ask must NOT have
+	// emitted AskRequest — proving it truly serialized behind the lock.
 	select {
-	case err := <-errs:
-		t.Fatalf("Ask: %v", err)
-	case answers := <-done:
-		if len(answers) != 1 || answers[0].QuestionID != "q1" || len(answers[0].Selected) != 1 || answers[0].Selected[0] != "Recommended" {
-			t.Fatalf("answers = %#v, want recommended option", answers)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("Ask stayed blocked after bypass turned on while queued behind promptMu")
+	case <-askCh:
+		t.Fatal("Ask emitted AskRequest before acquiring promptMu; it did not serialize behind the lock")
+	default:
 	}
 
+	// Enable bypass while Ask is queued behind promptMu.
+	c.SetBypass(true)
+	// Release the lock — Ask proceeds but must still emit an AskRequest.
+	c.promptMu.Unlock()
+
+	// Post-unlock assertion: Ask must emit AskRequest now that it holds the lock.
+	var ask event.Ask
 	select {
-	case <-askRequests:
-		t.Fatal("bypass must not emit AskRequest after acquiring promptMu")
-	default:
+	case ask = <-askCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Ask did not emit AskRequest after acquiring promptMu with bypass on; bypass should not suppress ask")
+	}
+
+	// Answer and verify we get the user's choice.
+	c.AnswerQuestion(ask.ID, []event.AskAnswer{
+		{QuestionID: "q1", Selected: []string{"Alternative"}},
+	})
+
+	var answers []event.AskAnswer
+	select {
+	case answers = <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Ask stayed blocked after AnswerQuestion")
+	}
+	if len(answers) != 1 || answers[0].QuestionID != "q1" || len(answers[0].Selected) != 1 || answers[0].Selected[0] != "Alternative" {
+		t.Fatalf("answers = %#v, want Alternative (user's choice, not auto-recommended)", answers)
 	}
 }
