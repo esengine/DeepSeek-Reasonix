@@ -512,8 +512,25 @@ def probe_gee() -> dict:
         if "auth" in msg or "credential" in msg or "token" in msg:
             return {
                 "status": "auth-required",
-                "reason": f"GEE 认证已过期或无效: {e}",
+                "reason": (
+                    f"GEE 认证已过期或无效。在终端执行:\n"
+                    f"  earthengine authenticate\n"
+                    f"原始错误: {e}"
+                ),
                 "ee_version": ee_version,
+            }
+        if "not signed up" in msg or "project is not registered" in msg:
+            return {
+                "status": "project-not-registered",
+                "reason": (
+                    "GCP 项目未注册 Earth Engine。\n"
+                    "1. 打开 https://signup.earthengine.google.com\n"
+                    "2. 注册你的 GCP 项目以启用 Earth Engine API\n"
+                    "3. 等待确认邮件（通常即时）\n"
+                    "4. 设置环境变量: set GEE_PROJECT=your-project-id"
+                ),
+                "ee_version": ee_version,
+                "project": project,
             }
         return {
             "status": "init-failed",

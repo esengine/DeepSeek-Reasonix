@@ -129,7 +129,7 @@ TOOLS = [
             "返回各环境的分级诊断结果和 AI 配置指引。"
             "GDAL: ready / raster-only / vector-only / bad。"
             "QGIS: ready / probing / bad。"
-            "GEE:  ready / auth-required / not-installed / init-failed。"
+            "GEE:  ready / auth-required / project-not-registered / not-installed / init-failed。"
         ),
         "inputSchema": {
             "type": "object",
