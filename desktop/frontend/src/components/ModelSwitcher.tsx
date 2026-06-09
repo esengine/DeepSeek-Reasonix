@@ -72,7 +72,7 @@ export function ModelSwitcher({ label, tabId, onPick }: { label: string; tabId?:
         anchorRef={triggerRef}
         onClose={() => closeMenu()}
         className="modelsw__menu modelsw__menu--portal"
-        style={{ width: triggerWidth, minWidth: triggerWidth ? Math.max(triggerWidth, 160) : undefined }}
+        style={{ minWidth: triggerWidth ? Math.max(triggerWidth, 160) : undefined, maxWidth: 400 }}
       >
         <div role="listbox">
           {models.length === 0 && <div className="modelsw__empty">{t("status.noModels")}</div>}

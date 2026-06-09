@@ -4627,14 +4627,17 @@ a[href] {
   flex-direction: column;
   gap: 2px;
 }
-.modelsw__model,
-.modelsw__provider {
+.modelsw__model {
   display: block;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .modelsw__provider {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: var(--fg-faint);
   font-size: 11px;
 }
