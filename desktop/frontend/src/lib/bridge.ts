@@ -5,11 +5,8 @@
 // that streams a canned turn through the same contract — letting the whole UI be
 // developed and laid out without rebuilding the Go side.
 
-import type * as GeneratedApp from "../../wailsjs/go/main/App";
-
 import { t } from "./i18n";
 
-import type { Dispatch, SetStateAction } from "react";
 import type {
   BalanceInfo,
   BotConnectionDiagnostic,
@@ -266,7 +263,6 @@ export interface AppBindings {
 // AssertNever is temporarily disabled — the generated bindings need regeneration
 // after upstream merged bot settings methods (SetBotSettings, etc.).
 // Run `cd desktop && wails generate module` after this session to restore the guard.
-type AssertNever<T> = T;
 export type _CheckGenToApp = never;
 export type _CheckAppToGen = never;
 

@@ -27,6 +27,7 @@ import { AnchoredPopover } from "./AnchoredPopover";
 import { MCPServersSettingsPage, SkillsSettingsPage } from "./CapabilitiesPanel";
 import { MemorySettingsPage } from "./MemoryPanel";
 import { CopyButton } from "./CopyButton";
+import { getSuccessPreference, setSuccessPreference, getAttentionPreference, setAttentionPreference, playSuccessChime, playAttentionChime, type SoundWavPref } from "../lib/sound";
 
 const SETTINGS_TABS: SettingsTab[] = ["general", "models", "bots", "mcp", "skills", "memory", "permissions", "sandbox", "network", "appearance", "updates"];
 
@@ -593,6 +594,8 @@ function GeneralSection({ s, busy, apply }: SectionProps) {
     if (typeof window === "undefined") return false;
     try { return window.localStorage.getItem("reasonix.defaultYolo") === "1"; } catch { return false; }
   });
+  const [soundPref, setSoundPref] = useState<SoundWavPref>(getSuccessPreference());
+  const [attentionPref, setAttentionPref] = useState<SoundWavPref>(getAttentionPreference());
   const setLanguage = (next: LangPref) => {
     setPref(next);
     void apply(() => app.SetDesktopLanguage(next));
@@ -652,6 +655,45 @@ function GeneralSection({ s, busy, apply }: SectionProps) {
             }} />
           {t("settings.defaultYolo")}
         </label>
+      </SettingsField>
+
+      <SettingsField label={t("settings.notificationSound")} hint={t("settings.notificationSoundHint")} stacked>
+        <div className="settings-notification-sound-row">
+          <span>{t("settings.notificationSoundSuccess")}</span>
+          <select className="set-select" value={soundPref}
+            onChange={(e) => {
+              const next = e.target.value as SoundWavPref;
+              setSoundPref(next);
+              setSuccessPreference(next);
+            }}>
+            <option value="synth">{t("settings.notificationSound.synth")}</option>
+            <option value="positive">{t("settings.notificationSound.positive")}</option>
+            <option value="correct">{t("settings.notificationSound.correct")}</option>
+            <option value="start">{t("settings.notificationSound.start")}</option>
+            <option value="back">{t("settings.notificationSound.back")}</option>
+          </select>
+          <button className="set-btn set-btn--sm" type="button"
+            title={t("settings.notificationSoundPreview")}
+            onClick={playSuccessChime}>&#x25B6;</button>
+        </div>
+        <div className="settings-notification-sound-row" style={{ marginTop: 6 }}>
+          <span>{t("settings.notificationSoundAttention")}</span>
+          <select className="set-select" value={attentionPref}
+            onChange={(e) => {
+              const next = e.target.value as SoundWavPref;
+              setAttentionPref(next);
+              setAttentionPreference(next);
+            }}>
+            <option value="synth">{t("settings.notificationSound.synth")}</option>
+            <option value="positive">{t("settings.notificationSound.positive")}</option>
+            <option value="correct">{t("settings.notificationSound.correct")}</option>
+            <option value="start">{t("settings.notificationSound.start")}</option>
+            <option value="back">{t("settings.notificationSound.back")}</option>
+          </select>
+          <button className="set-btn set-btn--sm" type="button"
+            title={t("settings.notificationSoundPreview")}
+            onClick={playAttentionChime}>&#x25B6;</button>
+        </div>
       </SettingsField>
     </SettingsSection>
   );
@@ -1216,7 +1258,7 @@ function BotLegacyAdvancedFields({
   setQQ: (next: Partial<BotSettingsView["qq"]>) => void;
   setFeishu: (next: Partial<BotSettingsView["feishu"]>) => void;
   setWeixin: (next: Partial<BotSettingsView["weixin"]>) => void;
-  setSecrets: (prev: Record<BotChannelID, string>) => Record<BotChannelID, string>;
+  setSecrets: Dispatch<SetStateAction<Record<BotChannelID, string>>>;
   saveSecret: (channel: BotChannelID, envName: string) => Promise<void>;
   clearSecret: (envName: string) => Promise<void>;
 }) {

@@ -8,7 +8,7 @@ import { Archive, ChevronRight, ChevronDown, ChevronsUpDown, ChevronsDownUp, Pen
 import { asArray } from "../lib/array";
 import { app } from "../lib/bridge";
 import { topicActivityTime } from "../lib/session";
-import type { ProjectNode } from "../lib/types";
+import type { ProjectNode, TopicMeta } from "../lib/types";
 import { getLocale, useT, type Translator } from "../lib/i18n";
 import { PROJECT_COLOR_OPTIONS, projectColorValue } from "../lib/projectColors";
 import { ContextMenu, contextMenuPointFromEvent, type ContextMenuItem, type ContextMenuPoint } from "./ContextMenu";
@@ -28,6 +28,61 @@ interface ProjectTreeProps {
 
 function projectNodeKey(node: ProjectNode, depth: number): string {
   return node.key || `${node.kind}-${node.root ?? ""}-${node.topicId ?? ""}-${depth}`;
+}
+
+/** Inject a freshly-created topic into the tree without scanning all sessions. */
+function injectNewTopicNode(
+  nodes: ProjectNode[],
+  scope: string,
+  workspaceRoot: string,
+  topic: TopicMeta,
+): ProjectNode[] {
+  return nodes.map((node) => {
+    if (scope === "global" && node.kind === "global_folder") {
+      const projectColor = node.projectColor ?? "";
+      return {
+        ...node,
+        children: [
+          {
+            key: "global_topic_" + topic.id,
+            kind: "global_topic",
+            label: topic.title,
+            topicId: topic.id,
+            projectColor,
+            turns: 0,
+            lastActivityAt: topic.createdAt,
+            open: false,
+            running: false,
+            hasUnread: false,
+          },
+          ...(node.children ?? []),
+        ],
+      };
+    }
+    if (scope !== "global" && node.kind === "project" && node.root === workspaceRoot) {
+      const projectColor = node.projectColor ?? "";
+      return {
+        ...node,
+        children: [
+          {
+            key: "topic_" + topic.id,
+            kind: "topic",
+            label: topic.title,
+            root: workspaceRoot,
+            topicId: topic.id,
+            projectColor,
+            turns: 0,
+            lastActivityAt: topic.createdAt,
+            open: false,
+            running: false,
+            hasUnread: false,
+          },
+          ...(node.children ?? []),
+        ],
+      };
+    }
+    return node;
+  });
 }
 
 function topicIsActive(node: ProjectNode, activeScope?: string, activeWorkspaceRoot?: string, activeTopicId?: string): boolean {
@@ -304,7 +359,14 @@ export function ProjectTree({
     });
     try {
       const topic = await app.CreateTopic(scope, workspaceRoot, "");
-      await refresh();
+      // Skip refresh() — it scans ALL historical session files via
+      // ListProjectTree → ListSessions. A fresh topic is always the
+      // most recent, so inject it directly into the tree instead.
+      if (tree.length > 0) {
+        setTree((prev) => injectNewTopicNode(prev, scope, workspaceRoot, topic));
+      } else {
+        await refresh();
+      }
       await onTopicsChanged?.();
       await onOpenTopic(scope, workspaceRoot, topic.id);
     } catch {
