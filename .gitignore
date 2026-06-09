@@ -58,3 +58,6 @@ Thumbs.db
 # Scratch / agent working dirs (never committed)
 /tmp/
 /.codex/
+
+# Local-only issue tracking / planning (never committed)
+priority.md

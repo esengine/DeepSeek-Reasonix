@@ -49,6 +49,8 @@
 
 <br/>
 
+> **For contributors:** See **[wow.md](./wow.md)** — the bug-fix workflow guide covering issue classification, reproduction, code changes with proper style, and verification. New contributors should start there.
+
 ## Features
 
 - **Config-driven.** Providers, the agent, enabled tools, and plugins are all
