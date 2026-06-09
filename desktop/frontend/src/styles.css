@@ -9895,6 +9895,12 @@ a[href] {
   padding: 0 8px;
 }
 
+.context-menu--composer-input .context-menu__item {
+  justify-content: center;
+  text-align: center;
+  padding: 0 6px;
+}
+
 .context-menu__item:disabled {
   cursor: not-allowed;
   opacity: 0.45;

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, ClipboardEvent, DragEvent, KeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
+import type { CSSProperties, ClipboardEvent, DragEvent, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { AlertTriangle, ArrowUp, Check, ChevronDown, Eye, FileText, Folder, FolderGit2, FolderPlus, List, MessageSquare, Search, Square, Trash2, X, Zap } from "lucide-react";
 import { asArray } from "../lib/array";
 import { DedupIndex, sha256 } from "../lib/attachDedup";
@@ -20,6 +20,7 @@ import { EffortSwitcher } from "./EffortSwitcher";
 import { ModelSwitcher } from "./ModelSwitcher";
 import { Tooltip } from "./Tooltip";
 import { AnchoredPopover } from "./AnchoredPopover";
+import { ContextMenu, contextMenuPointFromEvent, type ContextMenuItem, type ContextMenuPoint } from "./ContextMenu";
 
 interface Attachment {
   path: string;
@@ -332,6 +333,7 @@ export function Composer({
   const [sessionRefs, setSessionRefs] = useState<SessionReference[]>([]);
   const [loadingPastChats, setLoadingPastChats] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [inputMenuPoint, setInputMenuPoint] = useState<ContextMenuPoint | null>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const composerCardRef = useRef<HTMLDivElement>(null);
   const workspaceAnchorRef = useRef<HTMLDivElement>(null);
@@ -792,25 +794,7 @@ export function Composer({
     if (!shouldFoldPaste(pasted)) return;
 
     e.preventDefault();
-    const ta = e.currentTarget;
-    const start = ta.selectionStart ?? text.length;
-    const end = ta.selectionEnd ?? text.length;
-    const id = nextPasteId.current++;
-    const lines = lineCount(pasted);
-    const label = t("composer.pastedLabel", { id, lines });
-    const block: PastedBlock = { label, text: pasted };
-    const next = text.slice(0, start) + label + text.slice(end);
-
-    pastedBlocksRef.current = [...pastedBlocksRef.current, block];
-    setPastedBlocks((prev) => [...prev, block]);
-    setText(next);
-    requestAnimationFrame(() => {
-      const node = taRef.current;
-      if (!node) return;
-      const pos = start + label.length;
-      node.focus();
-      node.selectionStart = node.selectionEnd = pos;
-    });
+    insertPastedText(pasted, e.currentTarget.selectionStart ?? text.length, e.currentTarget.selectionEnd ?? text.length);
   };
 
   const hasWorkspaceReferenceDrag = (dataTransfer: DataTransfer): boolean =>
@@ -1139,6 +1123,96 @@ export function Composer({
     return value.replace(/(?:^|\s)@[^\s]*$/, "").trimEnd();
   };
 
+  const getInputSelection = () => {
+    const node = taRef.current;
+    const start = node?.selectionStart ?? text.length;
+    const end = node?.selectionEnd ?? text.length;
+    const from = Math.min(start, end);
+    const to = Math.max(start, end);
+    return {
+      from,
+      to,
+      selected: text.slice(from, to),
+    };
+  };
+
+  const focusInputRange = (start: number, end = start) => {
+    requestAnimationFrame(() => {
+      const node = taRef.current;
+      if (!node) return;
+      node.focus();
+      node.setSelectionRange(start, end);
+      lastSelectionRef.current = { start, end };
+    });
+  };
+
+  const replaceInputRange = (value: string, start: number, end: number) => {
+    const next = text.slice(0, start) + value + text.slice(end);
+    setText(next);
+    focusInputRange(start + value.length);
+  };
+
+  const insertPastedText = (pasted: string, start: number, end: number) => {
+    if (!shouldFoldPaste(pasted)) {
+      replaceInputRange(pasted, start, end);
+      return;
+    }
+
+    const id = nextPasteId.current++;
+    const lines = lineCount(pasted);
+    const label = t("composer.pastedLabel", { id, lines });
+    const block: PastedBlock = { label, text: pasted };
+    const next = text.slice(0, start) + label + text.slice(end);
+
+    pastedBlocksRef.current = [...pastedBlocksRef.current, block];
+    setPastedBlocks((prev) => [...prev, block]);
+    setText(next);
+    focusInputRange(start + label.length);
+  };
+
+  const copyComposerSelection = async (cut = false) => {
+    const selection = getInputSelection();
+    setInputMenuPoint(null);
+    if (!selection.selected || !navigator.clipboard?.writeText) {
+      focusInputRange(selection.from, selection.to);
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(selection.selected);
+      if (cut) replaceInputRange("", selection.from, selection.to);
+      else focusInputRange(selection.from, selection.to);
+    } catch {
+      focusInputRange(selection.from, selection.to);
+    }
+  };
+
+  const pasteIntoComposer = async () => {
+    const selection = getInputSelection();
+    setInputMenuPoint(null);
+    if (!navigator.clipboard?.readText) {
+      focusInputRange(selection.from, selection.to);
+      return;
+    }
+    try {
+      const pasted = await navigator.clipboard.readText();
+      insertPastedText(pasted, selection.from, selection.to);
+    } catch {
+      focusInputRange(selection.from, selection.to);
+    }
+  };
+
+  const selectAllComposerText = () => {
+    setInputMenuPoint(null);
+    focusInputRange(0, text.length);
+  };
+
+  const openInputMenu = (event: ReactMouseEvent<HTMLTextAreaElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    rememberCaret();
+    setInputMenuPoint(contextMenuPointFromEvent(event));
+  };
+
   const pickSession = (session: SessionMeta) => {
     setSessionRefs((prev) => {
       if (prev.some((x) => x.path === session.path)) {
@@ -1314,6 +1388,35 @@ export function Composer({
     hasWorkspace ? "composer-meta--has-workspace" : "composer-meta--no-workspace",
     hasEffort ? "composer-meta--has-effort" : "composer-meta--no-effort",
   ].join(" ");
+  const inputSelection = getInputSelection();
+  const hasInputSelection = inputSelection.from !== inputSelection.to;
+  const inputMenuItems: ContextMenuItem[] = [
+    {
+      key: "cut",
+      label: t("common.cut"),
+      disabled: disabled || !hasInputSelection,
+      onSelect: () => void copyComposerSelection(true),
+    },
+    {
+      key: "copy",
+      label: t("common.copy"),
+      disabled: !hasInputSelection,
+      onSelect: () => void copyComposerSelection(),
+    },
+    {
+      key: "paste",
+      label: t("common.paste"),
+      disabled,
+      onSelect: () => void pasteIntoComposer(),
+    },
+    { type: "separator", key: "edit-separator" },
+    {
+      key: "select-all",
+      label: t("common.selectAll"),
+      disabled: text.length === 0,
+      onSelect: selectAllComposerText,
+    },
+  ];
 
   return (
     <div
@@ -1695,6 +1798,7 @@ export function Composer({
             onFocus={rememberCaret}
             onPaste={onPaste}
             onKeyDown={onKeyDown}
+            onContextMenu={openInputMenu}
             onCompositionStart={() => {
               composingRef.current = true;
             }}
@@ -1719,6 +1823,15 @@ export function Composer({
             </Tooltip>
           )}
         </div>
+        <ContextMenu
+          open={inputMenuPoint !== null}
+          point={inputMenuPoint}
+          items={inputMenuItems}
+          className="context-menu--composer-input"
+          minWidth={64}
+          ariaLabel={t("composer.inputActions")}
+          onClose={() => setInputMenuPoint(null)}
+        />
         <div className={composerMetaClass}>
           {cwd && (
             <div className="composer-meta__control composer-meta__control--workspace composer-workspace-wrap" ref={workspaceAnchorRef}>
