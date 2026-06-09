@@ -145,6 +145,7 @@ export interface AppBindings {
   ListDir(rel: string): Promise<DirEntry[]>;
   SearchFileRefs(query: string): Promise<DirEntry[]>;
   ReadFile(rel: string): Promise<FilePreview>;
+  ProbeGeoEnv(): Promise<string>;
   WorkspaceChanges(): Promise<WorkspaceChangesView>;
   GitBranches(): Promise<string[]>;
   GitCheckout(branch: string): Promise<void>;
@@ -1402,6 +1403,15 @@ function makeMockApp(): AppBindings {
         truncated: false,
         binary: false,
       };
+    },
+    async ProbeGeoEnv() {
+      // In browser dev mode, return mock probe result so status dots aren't gray.
+      return JSON.stringify({
+        __env_block__: true,
+        gdal: { status: "ready", version: "3.13.0", bin_dir: "D:\\anaconda\\anaconda3\\envs\\gee\\Library\\bin" },
+        qgis: { status: "ready", version: "3.40.4", python: "D:\\QGIS\\bin\\python3.exe", processing_ready: true },
+        gee: { status: "ready", version: "1.7.26", project: "ee-copythree666" },
+      });
     },
     async WorkspaceChanges() {
       return {

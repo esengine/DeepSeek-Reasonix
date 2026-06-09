@@ -272,6 +272,7 @@ func (a *App) startup(ctx context.Context) {
 }
 
 func (a *App) beforeClose(ctx context.Context) bool {
+	geo.ClosePreviewClient()
 	if a.forceQuit.Swap(false) || consumeSystemQuitRequested() {
 		return false
 	}
@@ -3250,6 +3251,21 @@ func (a *App) SearchFileRefs(query string) []DirEntry {
 		out = append(out, DirEntry{Name: path, IsDir: false})
 	}
 	return out
+}
+
+// ProbeGeoEnv runs the geo_env_status probe via the MCP server and returns the
+// result JSON. Called by the frontend on startup so the status dots show real
+// data instead of "untested".
+func (a *App) ProbeGeoEnv() string {
+	base, _ := a.activeWorkspaceBase()
+	if base == "" {
+		return `{"error":"no workspace"}`
+	}
+	preview, err := geo.GenerateEnvProbe(base)
+	if err != nil {
+		return fmt.Sprintf(`{"error":%q}`, err.Error())
+	}
+	return preview
 }
 
 // ReadFile returns a small text preview for a file under the current workspace.

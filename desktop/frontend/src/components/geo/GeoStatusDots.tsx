@@ -1,4 +1,5 @@
-import { createContext, useContext, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { app } from "../../lib/bridge";
 import gdalSvg from "../../assets/icons/geo/gdal.svg";
 import qgisSvg from "../../assets/icons/geo/qgis.svg";
 import geeSvg from "../../assets/icons/geo/gee.svg";
@@ -84,6 +85,28 @@ const GeoStatusContext = createContext<GeoStatusContextValue>({
 export function GeoStatusProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<GeoComponentStatus>(defaultStatus);
   const [details, setDetails] = useState<GeoDetails>(defaultDetails);
+
+  // Auto-probe on mount — call Go backend's ProbeGeoEnv (which starts MCP server
+  // and calls geo_env_status), then parse result into context. In browser dev mode
+  // the mock bridge returns an error, so dots stay "untested" until a real probe.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const result = await (app as Record<string, unknown>).ProbeGeoEnv?.() as string | undefined;
+        if (cancelled || !result) return;
+        const parsed = parseEnvStatus(result);
+        if (parsed && !cancelled) {
+          setStatus(parsed.status);
+          setDetails(parsed.details);
+        }
+      } catch {
+        // MCP server not available — stay at defaults
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   return (
     <GeoStatusContext.Provider value={{ status, details, setStatus, setDetails }}>
       {children}

@@ -156,6 +156,33 @@ func GeneratePreview(projectDir, filePath string) (*GeoPreview, error) {
 	return preview, nil
 }
 
+// GenerateEnvProbe runs geo_env_status via the MCP server and returns the raw
+// JSON output (the text content from the tool result).
+func GenerateEnvProbe(projectDir string) (string, error) {
+	SetPreviewProjectDir(projectDir)
+	client, err := getMCPClient()
+	if err != nil {
+		return "", err
+	}
+	result, err := client.CallTool("geo_env_status", nil, 0)
+	if err != nil {
+		return "", fmt.Errorf("geo_env_status: %w", err)
+	}
+	var callResult struct {
+		Content []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+	}
+	if err := json.Unmarshal(result, &callResult); err != nil {
+		return "", fmt.Errorf("parse tools/call result: %w", err)
+	}
+	if len(callResult.Content) == 0 {
+		return "", fmt.Errorf("tools/call returned empty content")
+	}
+	return callResult.Content[0].Text, nil
+}
+
 // ClosePreviewClient shuts down the cached MCP client if running.
 func ClosePreviewClient() {
 	previewClientMu.Lock()
