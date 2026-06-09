@@ -1017,6 +1017,7 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.state == tuiRunning {
 				line := strings.TrimSpace(m.input.Value())
 				if line == "" {
+					m.viewport.GotoBottom()
 					return m, nil
 				}
 				if m.queueEditCursor >= 0 && m.queueEditCursor < len(m.pendingInterject) {
@@ -1041,6 +1042,7 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			line := strings.TrimSpace(m.input.Value())
 
 			if line == "" {
+				m.viewport.GotoBottom()
 				return m, nil
 			}
 			if line == "exit" || line == "quit" || line == ":q" {
