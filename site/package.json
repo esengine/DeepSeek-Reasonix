@@ -8,7 +8,7 @@
     "preview": "astro preview"
   },
   "dependencies": {
-    "astro": "^5.7.0",
+    "astro": "^6.4.4",
     "@fontsource-variable/inter": "^5.1.0"
   }
 }
