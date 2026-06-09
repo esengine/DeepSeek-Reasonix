@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """geo_env_status — 探测 GDAL / QGIS / GEE 遥感环境状态。
 
 GDAL 探测：检查关键二进制工具是否存在（gdalinfo, ogrinfo 等），四态分级。
@@ -131,7 +133,16 @@ def _scan_qgis_roots() -> list[str]:
                 if (parent / "bin" / "python3.exe").exists():
                     return [str(parent)]
 
-    # 2. 自动扫描 Program Files
+    # 2. 已知独立安装位置
+    for known in [r"D:\QGIS"]:
+        kp = Path(known)
+        if kp.is_dir() and (
+            (kp / "bin" / "python3.exe").exists() or
+            (kp / "bin" / "python-qgis-ltr.bat").exists()
+        ):
+            roots.append(str(kp))
+
+    # 3. 自动扫描 Program Files
     roots = []
     if os.name == "nt":
         scan_dirs = [r"C:\Program Files", r"C:\Program Files (x86)"]

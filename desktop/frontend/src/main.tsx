@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { GeoStatusProvider } from "./components/geo/GeoStatusDots";
 import { installGlobalCrashHandlers } from "./lib/crash";
 import { LocaleProvider } from "./lib/i18n";
 import { ToastProvider } from "./lib/toast";
@@ -55,7 +56,9 @@ createRoot(root).render(
     <ErrorBoundary>
       <LocaleProvider>
         <ToastProvider>
-          <App />
+          <GeoStatusProvider>
+            <App />
+          </GeoStatusProvider>
         </ToastProvider>
       </LocaleProvider>
     </ErrorBoundary>

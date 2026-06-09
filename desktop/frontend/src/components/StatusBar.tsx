@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Tooltip } from "./Tooltip";
 import { useI18n } from "../lib/i18n";
 import type { BalanceInfo, ContextInfo, JobView, Mode, WireUsage } from "../lib/types";
+import { GeoStatusDots } from "./geo/GeoStatusDots";
 
 // JobsChip is the status-bar background-jobs indicator: a count that opens an
 // upward popover listing the running jobs (id · label · status), mirroring the
@@ -132,6 +133,7 @@ export function StatusBar({
         </span>
       </Tooltip>
       <span className="statusbar__spacer" />
+      <GeoStatusDots />
       {mode === "plan" && <span className="statusbar__plan">{t("status.plan")}</span>}
     </div>
   );

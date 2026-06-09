@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """QGIS 子进程桥接 — 共享的 bat-bridge 调用 + 环境构建。
 
 所有 QGIS 工具（run_qgis_algorithm, qgis_doc）通过此模块调用 QGIS Python。
@@ -43,7 +45,20 @@ def _find_qgis() -> tuple[str, str] | None:
                     logger.info("QGIS from config: %s", _qgis_root)
                     return _qgis_root, _qgis_bat
 
-    # 2. 自动扫描 Program Files
+    # 2. 已知独立安装位置（OSGeo4W @ D:\QGIS 等）
+    for known in [r"D:\QGIS"]:
+        base_path = Path(known)
+        if not base_path.is_dir():
+            continue
+        for bat_name in ["python-qgis-ltr.bat", "python-qgis.bat"]:
+            bat = base_path / "bin" / bat_name
+            if bat.exists():
+                _qgis_root = str(base_path)
+                _qgis_bat = str(bat)
+                logger.info("QGIS auto-detected (known location): %s", _qgis_root)
+                return _qgis_root, _qgis_bat
+
+    # 3. 自动扫描 Program Files
     for base in [r"C:\Program Files", r"C:\Program Files (x86)"]:
         base_path = Path(base)
         if not base_path.is_dir():

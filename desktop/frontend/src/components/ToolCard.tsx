@@ -6,6 +6,8 @@ import { useT } from "../lib/i18n";
 import { diffsFor, subjectOf, summarize } from "../lib/tools";
 import { useShellExpand } from "../lib/shellExpand";
 import type { Item } from "../lib/useController";
+import { GeoResultCard, parsePreview } from "./geo/GeoResultCard";
+import { useGeoStatus, parseEnvStatus } from "./geo/GeoStatusDots";
 
 type ToolItem = Extract<Item, { kind: "tool" }>;
 
@@ -62,6 +64,19 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
     SUBAGENT_TOOLS.has(item.name) && item.profile
       ? [item.profile.model, item.profile.effort ? `effort ${item.profile.effort}` : ""].filter(Boolean).join(" · ")
       : "";
+
+  // Geo tool detection
+  const { setStatus: setGeoStatus } = useGeoStatus();
+  const isGeoRead = item.name === "mcp__geocode__read_geo_data";
+  const isGeoEnv = item.name === "mcp__geocode__geo_env_status";
+  const hasGeoPreview = isGeoRead && item.output && parsePreview(item.output) !== null;
+
+  // Update geo status context when env probe completes
+  useEffect(() => {
+    if (!isGeoEnv || !item.output) return;
+    const parsed = parseEnvStatus(item.output);
+    if (parsed) setGeoStatus(parsed);
+  }, [isGeoEnv, item.output, setGeoStatus]);
 
   // A task's summary is its step count; everything else derives from the result.
   const summary =
@@ -160,8 +175,15 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
         </div>
       )}
 
+      {/* Geo preview: map/table for read_geo_data results */}
+      {hasGeoPreview && item.output && (
+        <div className="tool__body">
+          <GeoResultCard output={item.output} />
+        </div>
+      )}
+
       {/* Non-shell body: args + output, gated by open */}
-      {!shellPreview && hasArgsOrOutput && (
+      {!hasGeoPreview && !shellPreview && hasArgsOrOutput && (
         <div className="tool__body">
           {item.args && <CodeViewer value={pretty(item.args)} language="json" maxHeight={180} />}
           {item.output && (

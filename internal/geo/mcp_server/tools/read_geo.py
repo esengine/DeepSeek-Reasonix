@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """read_geo_data — 读取矢量/栅格遥感数据的元数据和预览。
 
 栅格：gdalinfo 元数据 + 降采样 WebP 预览

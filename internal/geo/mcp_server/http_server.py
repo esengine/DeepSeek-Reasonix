@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """极简 HTTP Server — 随机端口，仅 bind 127.0.0.1，serve 预览图 + GeoJSON。
 
 目的：MCP 工具结果只返回 URL，数据不经过 LLM token 窗口。

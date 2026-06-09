@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """qgis_doc — QGIS Processing 算法文档浏览器。
 
 移植自 GeoCode qgis-doc.ts + qgis-registry.ts。

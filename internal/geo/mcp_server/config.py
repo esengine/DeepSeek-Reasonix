@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """geocode.json 配置加载器。
 
 参照 GeoCode geocode-config.ts 的 schema 和逻辑：
@@ -8,9 +10,9 @@
 
 配置文件格式:
 {
-    "qgis": {"python": "C:/Program Files/QGIS 3.44.10/bin/python3.exe"},
-    "gdal": "D:/Miniconda3/envs/gee/Library/bin",
-    "gee": {"python": "D:/Miniconda3/envs/gee/python.exe", "project": "ee-copythree666"}
+    "qgis": {"python": "D:/QGIS/bin/python3.exe"},
+    "gdal": "D:/anaconda/anaconda3/envs/gee/Library/bin",
+    "gee": {"python": "D:/anaconda/anaconda3/envs/gee/python.exe", "project": "ee-copythree666"}
 }
 """
 
@@ -27,11 +29,11 @@ _CONFIG_DIR: str | None = None
 
 TEMPLATE = """{
     "qgis": {
-        "python": "C:/Program Files/QGIS 3.44.10/bin/python3.exe"
+        "python": "D:/QGIS/bin/python3.exe"
     },
-    "gdal": "D:/Miniconda3/envs/gee/Library/bin",
+    "gdal": "D:/anaconda/anaconda3/envs/gee/Library/bin",
     "gee": {
-        "python": "D:/Miniconda3/envs/gee/python.exe",
+        "python": "D:/anaconda/anaconda3/envs/gee/python.exe",
         "project": "ee-copythree666"
     }
 }
@@ -63,10 +65,18 @@ def _detect_conda_env() -> dict:
     gdal_bin = conda_env / "Library" / "bin"
     gdal_path = str(gdal_bin) if gdal_bin.is_dir() else ""
 
-    # QGIS: 扫描 Program Files
+    # QGIS: 已知独立安装位置优先
     qgis_python = ""
     if os.name == "nt":
         import re as _re
+        for known in [r"D:\QGIS"]:
+            entry = Path(known)
+            if entry.is_dir():
+                py = entry / "bin" / "python3.exe"
+                if py.exists():
+                    qgis_python = str(py)
+                    break
+    if not qgis_python and os.name == "nt":
         for base in [r"C:\Program Files", r"C:\Program Files (x86)"]:
             base_p = Path(base)
             if not base_p.is_dir():

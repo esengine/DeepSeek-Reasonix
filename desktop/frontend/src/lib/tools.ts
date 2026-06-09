@@ -45,6 +45,16 @@ export function subjectOf(name: string, args: string): string {
       return str(a, "description") || str(a, "prompt");
     case "remember":
       return str(a, "name") || str(a, "description");
+    case "mcp__geocode__read_geo_data":
+      return str(a, "path") || "read geo data";
+    case "mcp__geocode__run_qgis_algorithm":
+      return str(a, "algorithm") || "";
+    case "mcp__geocode__qgis_doc":
+      return str(a, "query") || str(a, "action") || "";
+    case "mcp__geocode__run_gee_script":
+      return "GEE script";
+    case "mcp__geocode__geo_env_status":
+      return "";
     case "todo_write":
     case "exit_plan_mode":
       return ""; // these get dedicated cards, not a subject line
@@ -174,6 +184,33 @@ export function summarize(name: string, args: string, output?: string, error?: s
       return countOf(nonEmptyLines(output), "tool.entryOne", "tool.entryOther");
     case "web_fetch":
       return output.split("\n", 1)[0].slice(0, 80);
+    case "mcp__geocode__read_geo_data": {
+      if (!output) return "";
+      try {
+        const obj = JSON.parse(output);
+        if (obj.__geo_type__ === "raster_preview") {
+          const w = obj.preview_width;
+          const h = obj.preview_height;
+          return w && h ? `Raster preview ${w}×${h}` : "Raster preview";
+        }
+        if (obj.__geo_type__ === "vector_preview") {
+          const n = obj.feature_count;
+          return n ? `Vector · ${n} features` : "Vector preview";
+        }
+      } catch { /* ignore */ }
+      return "";
+    }
+    case "mcp__geocode__geo_env_status": {
+      if (!output) return "";
+      try {
+        const obj = JSON.parse(output);
+        if (obj.__env_block__) {
+          const parts = [`GDAL:${obj.gdal?.status ?? "?"}`, `QGIS:${obj.qgis?.status ?? "?"}`, `GEE:${obj.gee?.status ?? "?"}`];
+          return parts.join(" · ");
+        }
+      } catch { /* ignore */ }
+      return "";
+    }
     case "bash":
       return output.trim() === "" ? t("tool.noOutput") : countOf(lineCount(output), "tool.lineOne", "tool.lineOther");
     default:
