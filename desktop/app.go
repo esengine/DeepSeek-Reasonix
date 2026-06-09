@@ -80,6 +80,7 @@ type App struct {
 	mediaTokens *mediaTokenStore
 
 	browser *browser.Service
+	botInstalls map[string]*botInstallSession
 }
 
 // mediaTokenEntry holds metadata for a workspace media file served via temporary URL.
@@ -248,7 +249,7 @@ func (a *App) workspaceMediaMiddleware() func(http.Handler) http.Handler {
 // NewApp constructs the bound object. Tabs are restored in startup from the
 // last session's desktop-tabs.json.
 func NewApp() *App {
-	return &App{tabs: map[string]*WorkspaceTab{}, mediaTokens: newMediaTokenStore(), browser: browser.New()}
+	return &App{tabs: map[string]*WorkspaceTab{}, mediaTokens: newMediaTokenStore(), browser: browser.New(), botInstalls: map[string]*botInstallSession{}}
 }
 
 func (a *App) bootContext() context.Context {
