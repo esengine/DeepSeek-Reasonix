@@ -7,7 +7,7 @@ import { diffsFor, subjectOf, summarize } from "../lib/tools";
 import { useShellExpand } from "../lib/shellExpand";
 import type { Item } from "../lib/useController";
 import { GeoResultCard, parsePreview } from "./geo/GeoResultCard";
-import { useGeoStatus, parseEnvStatus } from "./geo/GeoStatusDots";
+import { useGeoStatus, parseEnvStatus, GEO_TOOL_ICONS } from "./geo/GeoStatusDots";
 
 type ToolItem = Extract<Item, { kind: "tool" }>;
 
@@ -124,7 +124,13 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
   return (
     <ProcessCard
       tone={processTone(item.status)}
-      icon={<ProcessToolIcon size={12} />}
+      icon={
+        GEO_TOOL_ICONS[item.name] ? (
+          <img src={GEO_TOOL_ICONS[item.name]} alt="" width={14} height={14} style={{ flexShrink: 0 }} />
+        ) : (
+          <ProcessToolIcon size={12} />
+        )
+      }
       kind="tool"
       name={
         <>

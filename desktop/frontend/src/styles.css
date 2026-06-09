@@ -11131,24 +11131,114 @@ a[href] {
   padding: 4px 0;
 }
 
-/* ── GeoStatusDots ─────────────────────────────────────────── */
+/* ── GeoStatusDots (titlebar branded icons + badge) ────────── */
 
 .geodots {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 0 4px;
+  gap: 4px;
+  margin-right: 8px;
 }
 
-.geodots__dot {
+.geodot {
+  position: relative;
   display: inline-flex;
-  align-items: center;
 }
 
-.geodots__circle {
-  display: inline-block;
-  width: 7px;
-  height: 7px;
+.geodot__btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+
+.geodot__btn:hover {
+  background: var(--sidebar-hover, #181c24);
+}
+
+.geodot__icon {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+
+.geodot__badge {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
-  transition: background-color 0.3s ease;
+  border: 1px solid var(--bg, #090a0c);
+}
+
+/* Popover */
+.geodot__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 99;
+}
+
+.geodot__popover {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  background: var(--bg-elev, #191b22);
+  border: 1px solid var(--border, #343945);
+  border-radius: 8px;
+  padding: 8px 12px;
+  min-width: 220px;
+  z-index: 100;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+}
+
+.geodot__pophead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.geodot__popicon {
+  width: 14px;
+  height: 14px;
+}
+
+.geodot__popstatus {
+  margin-left: auto;
+  font-weight: 400;
+}
+
+.geodot__popbody {
+  font-size: 11px;
+  color: var(--fg-dim, #888);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.geodot__poprow {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.geodot__popkey {
+  color: var(--fg-faint, #666);
+}
+
+.geodot__popval {
+  color: var(--fg-dim, #aaa);
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 140px;
 }

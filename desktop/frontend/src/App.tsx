@@ -29,6 +29,7 @@ import { TodoPanel } from "./components/TodoPanel";
 import { ApprovalModal } from "./components/ApprovalModal";
 import { AskCard } from "./components/AskCard";
 import { StatusBar } from "./components/StatusBar";
+import { GeoStatusDots } from "./components/geo/GeoStatusDots";
 import { HistoryPanel } from "./components/HistoryPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { UpdateBanner } from "./components/UpdateBanner";
@@ -1380,6 +1381,7 @@ export default function App() {
             <span className="app-chrome__scope">{appChromeScopeLabel(activeTab, state.meta)}</span>
           </div>
           <div className="app-chrome__spacer" />
+          <GeoStatusDots />
         </header>
 
         <aside className={`sidebar${sidebarCollapsed ? " sidebar--collapsed" : ""}`} aria-label={t("sidebar.navigation")}>
