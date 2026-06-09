@@ -52,14 +52,38 @@ mkdir -p "$ROOT/dist"
 case "$os" in
 darwin)
 	# Wails names the bundle after outputfilename (reasonix-desktop.app); repackage
-	# it as Reasonix.app for a clean user-facing name. Ad-hoc sign the copy (still
-	# not notarized — the real fix is a Developer ID cert); this cuts down the
-	# Gatekeeper "is damaged / can't be opened" error on a downloaded build, though
-	# users may still need to clear the quarantine attribute (see desktop/README.md).
+	# it as Reasonix.app for a clean user-facing name.
 	staging=$(mktemp -d)
 	app="$staging/${APPNAME}.app"
 	cp -R "build/bin/reasonix-desktop.app" "$app"
-	codesign --force --deep -s - "$app"
+
+	# Two signing paths, selected by HAS_APPLE_CERT (set by release-desktop.yml when
+	# the APPLE_* secrets are present). With a real Developer ID cert + notarization
+	# key we sign with a hardened runtime, notarize, and staple — a downloaded build
+	# then opens with no Gatekeeper prompt. Without it we ad-hoc sign as before (still
+	# un-notarized; users clear the quarantine attribute per desktop/README.md). The
+	# fallback keeps fork/local builds working with no secrets configured.
+	if [ "${HAS_APPLE_CERT:-}" = "true" ]; then
+		identity="$(security find-identity -v -p codesigning | awk -F'"' '/Developer ID Application/{print $2; exit}')"
+		[ -n "$identity" ] || { echo "HAS_APPLE_CERT=true but no 'Developer ID Application' identity found in the keychain" >&2; exit 1; }
+		echo "==> codesign (Developer ID): $identity"
+		codesign --force --deep --timestamp --options runtime \
+			--entitlements "$ROOT/desktop/build/darwin/entitlements.plist" \
+			-s "$identity" "$app"
+		# notarytool wants an archive, not a bare bundle: zip the .app, submit, wait,
+		# then staple the ticket back onto the bundle so it verifies offline.
+		ditto -c -k --keepParent "$app" "$staging/notarize.zip"
+		echo "==> notarytool submit (app)"
+		xcrun notarytool submit "$staging/notarize.zip" \
+			--key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY_ID" \
+			--issuer "$APPLE_API_ISSUER_ID" --wait
+		xcrun stapler staple "$app"
+	else
+		# Ad-hoc cuts the "is damaged" error somewhat but is NOT notarized; users may
+		# still need `xattr -dr com.apple.quarantine` (see desktop/README.md).
+		codesign --force --deep -s - "$app"
+	fi
+
 	if [ "$arch" = universal ]; then
 		# One universal .app covers Intel + Apple Silicon; publish it under both
 		# manifest keys so the updater's darwin-arm64/darwin-amd64 lookup finds it
@@ -85,6 +109,16 @@ darwin)
 		--no-internet-enable \
 		"$dmg" "$dmgsrc" || true
 	[ -f "$dmg" ] || { echo "create-dmg did not produce $dmg" >&2; exit 1; }
+	# The .dmg is a separately-downloaded artifact, so sign + notarize + staple the
+	# disk image itself too — the stapled .app inside isn't enough for the image.
+	if [ "${HAS_APPLE_CERT:-}" = "true" ]; then
+		codesign --force --timestamp -s "$identity" "$dmg"
+		echo "==> notarytool submit (dmg)"
+		xcrun notarytool submit "$dmg" \
+			--key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY_ID" \
+			--issuer "$APPLE_API_ISSUER_ID" --wait
+		xcrun stapler staple "$dmg"
+	fi
 	rm -rf "$staging" "$dmgsrc"
 	;;
 windows)

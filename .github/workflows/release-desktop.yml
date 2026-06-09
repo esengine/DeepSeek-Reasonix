@@ -104,6 +104,33 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install create-dmg
 
+      # macOS signing: import the Developer ID cert into a throwaway keychain and
+      # stage the notarization key. No-ops (and the build ad-hoc signs) when the
+      # APPLE_* secrets aren't set, so forks still build.
+      - name: Import Apple signing certificate
+        if: runner.os == 'macOS'
+        env:
+          APPLE_CERT_P12: ${{ secrets.APPLE_CERT_P12 }}
+          APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          if [ -z "$APPLE_CERT_P12" ]; then
+            echo "APPLE_CERT_P12 unset — desktop build will ad-hoc sign (un-notarized)"
+            exit 0
+          fi
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASS="$(uuidgen)"
+          security create-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN"
+          echo "$APPLE_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$APPLE_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASS" "$KEYCHAIN" >/dev/null
+          # Prepend the signing keychain to the search list so codesign / find-identity see it.
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          echo "$APPLE_API_KEY_P8" | base64 --decode > "$RUNNER_TEMP/notary.p8"
+          rm -f "$RUNNER_TEMP/cert.p12"
+
       - name: Install Wails CLI
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
 
@@ -119,6 +146,14 @@ jobs:
           RUN_NUMBER: ${{ github.run_number }}
 
       - name: Build and package
+        env:
+          # macOS Developer ID + notarization path turns on only when all five
+          # APPLE_* secrets are present; otherwise desktop-build.sh ad-hoc signs.
+          # Harmless on Windows/Linux runners (only the darwin branch reads these).
+          HAS_APPLE_CERT: ${{ secrets.APPLE_CERT_P12 != '' && secrets.APPLE_CERT_PASSWORD != '' && secrets.APPLE_API_KEY_P8 != '' && secrets.APPLE_API_KEY_ID != '' && secrets.APPLE_API_ISSUER_ID != '' }}
+          APPLE_API_KEY_PATH: ${{ runner.temp }}/notary.p8
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
         run: scripts/desktop-build.sh "${{ matrix.platform }}" "${{ steps.ver.outputs.version }}" "${{ steps.ver.outputs.channel }}"
 
       - name: Sign artifacts (minisign)
