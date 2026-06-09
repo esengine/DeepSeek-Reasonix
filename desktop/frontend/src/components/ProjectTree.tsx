@@ -367,7 +367,8 @@ export function ProjectTree({
       } else {
         await refresh();
       }
-      await onTopicsChanged?.();
+      // onTopicsChanged skipped: tree injected directly; onOpenTopic
+      // (App.tsx handleOpenTopic) already calls refreshTabMetas.
       await onOpenTopic(scope, workspaceRoot, topic.id);
     } catch {
       /* ignore */

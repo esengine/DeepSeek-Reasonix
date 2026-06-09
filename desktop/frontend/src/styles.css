@@ -7009,9 +7009,8 @@ a[href] {
   min-width: 110px;
 }
 .settings-notification-sound-row > select {
-  flex: 0 1 auto;
+  flex: 0 0 160px;
   min-width: 0;
-  max-width: 220px;
 }
 .settings-notification-sound-row > .chip {
   flex: 0 0 auto;
