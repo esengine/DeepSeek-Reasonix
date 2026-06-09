@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -206,11 +207,15 @@ func (s *SubagentStore) SaveFailed(run *SubagentRun) error {
 	if s == nil || run == nil || run.Ref == "" {
 		return nil
 	}
+	var sessionErr error
+	if run.Session != nil {
+		sessionErr = run.Session.Save(s.sessionPath(run.Ref))
+	}
 	meta := run.Meta
 	meta.Status = SubagentFailed
 	meta.UpdatedAt = time.Now().UTC()
 	run.Meta = meta
-	return s.saveMeta(meta)
+	return errors.Join(sessionErr, s.saveMeta(meta))
 }
 
 func (s *SubagentStore) LoadMeta(ref string) (SubagentMeta, error) {

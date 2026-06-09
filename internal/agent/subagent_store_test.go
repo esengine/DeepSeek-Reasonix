@@ -127,6 +127,41 @@ func TestSubagentStoreRejectsConcurrentContinue(t *testing.T) {
 	}
 }
 
+func TestSubagentStoreSaveFailedPersistsTranscriptAndRejectsReuse(t *testing.T) {
+	store := NewSubagentStore(t.TempDir())
+	spec := testSubagentSpec(t, "review")
+	run, err := store.PrepareFresh(spec)
+	if err != nil {
+		t.Fatalf("PrepareFresh: %v", err)
+	}
+	run.Session.Add(provider.Message{Role: provider.RoleUser, Content: "failed continuation"})
+	if err := store.SaveFailed(run); err != nil {
+		t.Fatalf("SaveFailed: %v", err)
+	}
+	run.Release()
+
+	loaded, err := LoadSession(store.sessionPath(run.Ref))
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if got := loaded.Snapshot(); len(got) != 2 || got[1].Content != "failed continuation" {
+		t.Fatalf("failed transcript = %+v, want persisted failed prompt", got)
+	}
+	meta, err := store.LoadMeta(run.Ref)
+	if err != nil {
+		t.Fatalf("LoadMeta: %v", err)
+	}
+	if meta.Status != SubagentFailed {
+		t.Fatalf("status = %q, want failed", meta.Status)
+	}
+	if _, err := store.PrepareContinue(run.Ref, spec); err == nil || !strings.Contains(err.Error(), "failed and cannot be continued") {
+		t.Fatalf("PrepareContinue error = %v, want failed ref rejection", err)
+	}
+	if _, err := store.PrepareFork(run.Ref, spec); err == nil || !strings.Contains(err.Error(), "failed and cannot be continued") {
+		t.Fatalf("PrepareFork error = %v, want failed ref rejection", err)
+	}
+}
+
 func testSubagentSpec(t *testing.T, name string) SubagentSpec {
 	t.Helper()
 	reg := tool.NewRegistry()
