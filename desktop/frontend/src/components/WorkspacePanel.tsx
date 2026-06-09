@@ -25,6 +25,8 @@ import {
 import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
 import { loadLayoutSize, saveLayoutSize } from "../lib/layoutPreferences";
+
+const PREVIEW_DISMISSED_KEY = "reasonix.workspace.previewDismissed";
 import type { DirEntry, FilePreview, GitCommitView, GitCommitDetailView, WorkspaceChangesView } from "../lib/types";
 import { formatWorkspaceReference, WORKSPACE_REF_DRAG_TYPE } from "../lib/workspaceDrag";
 import { cleanGitDiff } from "../lib/diff";
@@ -45,6 +47,16 @@ const WORKSPACE_DUAL_PANEL_TARGET_WIDTH = WORKSPACE_TREE_DEFAULT_WIDTH + WORKSPA
 const WORKSPACE_CONTEXT_MENU_FILE_HEIGHT = 92;
 const WORKSPACE_CONTEXT_MENU_REF_HEIGHT = 48;
 const WORKSPACE_MAX_PREVIEW_TABS = 5;
+
+function loadPreviewDismissed(): boolean {
+  if (typeof window === "undefined") return false;
+  try { return window.localStorage.getItem(PREVIEW_DISMISSED_KEY) === "1"; } catch { return false; }
+}
+
+function savePreviewDismissed(v: boolean): void {
+  if (typeof window === "undefined") return;
+  try { window.localStorage.setItem(PREVIEW_DISMISSED_KEY, v ? "1" : "0"); } catch {}
+}
 
 function clampWorkspaceTreeWidth(width: number, panelWidth?: number): number {
   const maxForPanel =
@@ -233,6 +245,11 @@ export function WorkspacePanel({
   const [expandedCommit, setExpandedCommit] = useState<string | null>(null);
   const [commitDetail, setCommitDetail] = useState<GitCommitDetailView | null>(null);
   const [loadingCommit, setLoadingCommit] = useState(false);
+  const [previewDismissed, setPreviewDismissedState] = useState(loadPreviewDismissed());
+  const setPreviewDismissed = useCallback((v: boolean) => {
+    setPreviewDismissedState(v);
+    savePreviewDismissed(v);
+  }, []);
   const [changes, setChanges] = useState<WorkspaceChangesView | null>(null);
   const [loadingChanges, setLoadingChanges] = useState(false);
   const [selectionMenu, setSelectionMenu] = useState<{ x: number; y: number; text: string; path: string } | null>(null);
@@ -277,6 +294,7 @@ export function WorkspacePanel({
   }, [selectedPath]);
 
   const toggleCommit = useCallback((hash: string) => {
+    setPreviewDismissed(false);
     setExpandedCommit((prev) => (prev === hash ? null : hash));
   }, []);
 
@@ -557,7 +575,7 @@ export function WorkspacePanel({
   }, [changes?.files, filter]);
   const searchPlaceholder = effectiveMode === "changes" ? t("workspace.filterChanges") : t("workspace.filter");
   const effectiveTreeWidth = useMemo(() => clampWorkspaceTreeWidth(treeWidth, panelWidth), [panelWidth, treeWidth]);
-  const previewVisible = viewMode === "changed" || openTabs.length > 0 || selectedPath !== null;
+  const previewVisible = (viewMode === "changed" && !previewDismissed) || openTabs.length > 0 || selectedPath !== null;
   const selectedFileVisible = selectedPath !== null;
   const compactTreeSplit =
     treeVisible && selectedFileVisible && panelWidth !== undefined && panelWidth < WORKSPACE_DUAL_PANEL_MIN_WIDTH;
@@ -584,12 +602,14 @@ export function WorkspacePanel({
   }, [onClose, open, previewVisible, treeVisible]);
 
   const hideTreeOrClosePanel = useCallback(() => {
-    if (previewVisible) {
+    if (previewDismissed) {
+      setPreviewDismissed(false);
+    } else if (previewVisible) {
       setTreeVisible(false);
     } else {
       onClose();
     }
-  }, [onClose, previewVisible]);
+  }, [onClose, previewDismissed, previewVisible]);
 
   const setSavedTreeWidth = useCallback(
     (width: number) => {
@@ -852,13 +872,19 @@ export function WorkspacePanel({
                 {maximized ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
               </button>
             </Tooltip>
-            {selectedPath && (
+            {selectedPath ? (
               <Tooltip label={t("workspace.closePreview")}>
                 <button className="workspace-iconbtn" onClick={() => closeTab(selectedPath)}>
                   <X size={15} />
                 </button>
               </Tooltip>
-            )}
+            ) : viewMode === "changed" ? (
+              <Tooltip label={t("workspace.closePreview")}>
+                <button className="workspace-iconbtn" onClick={() => setPreviewDismissed(true)}>
+                  <X size={15} />
+                </button>
+              </Tooltip>
+            ) : null}
           </div>
           <AnchoredPopover
             open={recentOpen}
