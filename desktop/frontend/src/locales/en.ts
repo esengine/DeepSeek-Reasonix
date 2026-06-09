@@ -12,7 +12,10 @@ export const en = {
   "common.delete": "Delete",
   "common.add": "Add",
   "common.submit": "Submit",
+  "common.cut": "Cut",
   "common.copy": "Copy",
+  "common.paste": "Paste",
+  "common.selectAll": "Select all",
   "common.expand": "Expand",
   "common.collapse": "Collapse",
   "common.none": "none",
@@ -226,6 +229,7 @@ export const en = {
 
   // composer
   "composer.placeholder": "Message Reasonix…  ( / commands · @ files )",
+  "composer.inputActions": "Message input actions",
   "composer.planMode": "plan mode",
   "composer.planModeOn": "plan mode on",
   "composer.planHint": "shift+tab",

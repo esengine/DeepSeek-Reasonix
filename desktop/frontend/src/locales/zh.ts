@@ -13,7 +13,10 @@ export const zh: Record<DictKey, string> = {
   "common.delete": "删除",
   "common.add": "添加",
   "common.submit": "提交",
+  "common.cut": "剪切",
   "common.copy": "复制",
+  "common.paste": "粘贴",
+  "common.selectAll": "全选",
   "common.expand": "展开",
   "common.collapse": "收起",
   "common.none": "无",
@@ -227,6 +230,7 @@ export const zh: Record<DictKey, string> = {
 
   // 输入框
   "composer.placeholder": "给 Reasonix 发消息…  ( / 命令 · @ 文件 )",
+  "composer.inputActions": "消息输入框操作",
   "composer.planMode": "计划模式",
   "composer.planModeOn": "计划模式已开",
   "composer.planHint": "shift+tab",
