@@ -42,9 +42,9 @@ jobs:
     name: cache hit guard
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
@@ -69,18 +69,18 @@ jobs:
       run:
         shell: bash # desktop-build.sh is bash; windows runners default to pwsh otherwise
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: desktop/go.mod
           cache: true
           cache-dependency-path: desktop/go.sum
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: "22"
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 10
 
@@ -169,7 +169,7 @@ jobs:
           MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
         run: go run ./cmd/sign sign ../dist/*
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dist-${{ matrix.name }}
           path: dist/*
@@ -183,15 +183,15 @@ jobs:
     # approve); canary uses the open `canary` environment so maintainers self-serve.
     environment: ${{ (github.event_name == 'workflow_dispatch' && inputs.channel == 'canary') && 'canary' || 'release' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: desktop/go.mod
           cache: true
           cache-dependency-path: desktop/go.sum
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           pattern: dist-*
@@ -228,7 +228,7 @@ jobs:
 
       - name: Upload canary dist for mirror
         if: steps.ver.outputs.channel == 'canary'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: canary-dist
           path: dist/*
@@ -243,7 +243,7 @@ jobs:
     env:
       HAS_R2: ${{ secrets.R2_ACCESS_KEY_ID != '' && secrets.R2_SECRET_ACCESS_KEY != '' && secrets.R2_ACCOUNT_ID != '' && secrets.R2_BUCKET != '' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Resolve version
         id: ver
@@ -260,7 +260,7 @@ jobs:
       # artifact. Stable pulls from the published release.
       - name: Download canary dist
         if: env.HAS_R2 == 'true' && steps.ver.outputs.channel == 'canary'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: canary-dist
           path: assets
