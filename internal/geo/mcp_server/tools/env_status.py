@@ -636,4 +636,28 @@ def run(args: dict) -> tuple[str, bool]:
     lines.append("")
     lines.append("═" * 42)
 
+    # 附加结构化 env block（Agent 可提取写入 CLAUDE.md）
+    env_block = {
+        "__env_block__": True,
+        "gdal": {
+            "status": gdal["status"],
+            "version": gdal.get("gdal_version"),
+            "bin_dir": gdal.get("bin_dir"),
+        },
+        "qgis": {
+            "status": qgis["status"],
+            "version": qgis.get("qgis_version"),
+            "python": qgis.get("qgis_python"),
+            "processing_ready": qgis.get("processing_ready"),
+        },
+        "gee": {
+            "status": gee["status"],
+            "version": gee.get("ee_version"),
+            "project": gee.get("project"),
+        },
+    }
+    lines.append("\n```json")
+    lines.append(json.dumps(env_block, ensure_ascii=False, indent=2))
+    lines.append("```")
+
     return "\n".join(lines), False
