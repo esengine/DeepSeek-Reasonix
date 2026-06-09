@@ -907,6 +907,8 @@ func TestTrashTopicMovesRelatedSessionsToTrash(t *testing.T) {
 		t.Fatalf("mkdir sessions: %v", err)
 	}
 	sessionPath := writeTopicSession(t, dir, "trash-me.jsonl", topicID, "Trash history", projectRoot)
+	ref := "sa_20260102_030405_000000000_aabbccddeeff"
+	writeSubagentArtifact(t, dir, ref, agent.BranchID(sessionPath))
 
 	if err := NewApp().TrashTopic(topicID); err != nil {
 		t.Fatalf("trash topic: %v", err)
@@ -917,6 +919,9 @@ func TestTrashTopicMovesRelatedSessionsToTrash(t *testing.T) {
 	trashPath := filepath.Join(dir, sessionTrashDir, "trash-me.jsonl", "trash-me.jsonl")
 	if _, err := os.Stat(trashPath); err != nil {
 		t.Fatalf("topic session should be moved to trash: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, sessionTrashDir, "trash-me.jsonl", "subagents", ref+".jsonl")); err != nil {
+		t.Fatalf("topic subagent should be moved to trash: %v", err)
 	}
 	if got := loadTopicTitle(projectRoot, topicID); got != "" {
 		t.Fatalf("topic title should be removed, got %q", got)

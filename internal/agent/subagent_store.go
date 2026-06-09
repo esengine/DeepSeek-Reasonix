@@ -68,6 +68,16 @@ type SubagentRun struct {
 	release func()
 }
 
+// SubagentArtifact is a persisted sub-agent transcript and metadata pair owned
+// by a parent session. One file may be missing after a crash; lifecycle cleanup
+// should operate on the paths that exist.
+type SubagentArtifact struct {
+	Ref         string
+	SessionPath string
+	MetaPath    string
+	Meta        SubagentMeta
+}
+
 func (r *SubagentRun) Release() {
 	if r != nil && r.release != nil {
 		r.release()
@@ -89,6 +99,69 @@ func NewSubagentStore(dir string) *SubagentStore {
 		return nil
 	}
 	return &SubagentStore{dir: dir, locked: map[string]bool{}}
+}
+
+// ListSubagentsByParent returns persisted sub-agent artifacts whose metadata
+// declares the given parent session owner.
+func ListSubagentsByParent(sessionDir, parentSession string) ([]SubagentArtifact, error) {
+	parentSession = strings.TrimSpace(parentSession)
+	if strings.TrimSpace(sessionDir) == "" || parentSession == "" {
+		return nil, nil
+	}
+	dir := filepath.Join(sessionDir, "subagents")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	out := []SubagentArtifact{}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".meta.json") {
+			continue
+		}
+		ref := strings.TrimSuffix(entry.Name(), ".meta.json")
+		if !validSubagentRef(ref) {
+			continue
+		}
+		metaPath := filepath.Join(dir, entry.Name())
+		data, err := os.ReadFile(metaPath)
+		if err != nil {
+			return nil, err
+		}
+		var meta SubagentMeta
+		if err := json.Unmarshal(data, &meta); err != nil {
+			continue
+		}
+		if strings.TrimSpace(meta.ParentSession) != parentSession {
+			continue
+		}
+		out = append(out, SubagentArtifact{
+			Ref:         ref,
+			SessionPath: filepath.Join(dir, ref+".jsonl"),
+			MetaPath:    metaPath,
+			Meta:        meta,
+		})
+	}
+	return out, nil
+}
+
+// DeleteSubagentsByParent permanently removes sub-agent artifacts owned by a
+// parent session. Missing counterpart files are ignored.
+func DeleteSubagentsByParent(sessionDir, parentSession string) error {
+	artifacts, err := ListSubagentsByParent(sessionDir, parentSession)
+	if err != nil {
+		return err
+	}
+	for _, artifact := range artifacts {
+		for _, path := range []string{artifact.SessionPath, artifact.MetaPath} {
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (s *SubagentStore) PrepareFresh(spec SubagentSpec) (*SubagentRun, error) {

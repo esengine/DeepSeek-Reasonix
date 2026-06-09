@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/agent"
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/provider"
@@ -282,6 +283,8 @@ func TestDeleteSessionRequiresSessionNameInsideSessionDir(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	ref := "sa_20260102_030405_000000000_aabbccddeeff"
+	writeServeSubagentArtifact(t, dir, ref, agent.BranchID(old))
 	sibling := dir + "-other"
 	if err := os.MkdirAll(sibling, 0o755); err != nil {
 		t.Fatal(err)
@@ -321,6 +324,36 @@ func TestDeleteSessionRequiresSessionNameInsideSessionDir(t *testing.T) {
 	}
 	if _, err := os.Stat(old); !os.IsNotExist(err) {
 		t.Fatalf("old session still exists or stat failed unexpectedly: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "subagents", ref+".jsonl")); !os.IsNotExist(err) {
+		t.Fatalf("old session subagent jsonl still exists or stat failed unexpectedly: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "subagents", ref+".meta.json")); !os.IsNotExist(err) {
+		t.Fatalf("old session subagent meta still exists or stat failed unexpectedly: %v", err)
+	}
+}
+
+func writeServeSubagentArtifact(t *testing.T, dir, ref, parentSession string) {
+	t.Helper()
+	subagentDir := filepath.Join(dir, "subagents")
+	if err := os.MkdirAll(subagentDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(subagentDir, ref+".jsonl"), []byte(`{"role":"user","content":"sub"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(agent.SubagentMeta{
+		Ref:           ref,
+		Status:        agent.SubagentCompleted,
+		Kind:          "task",
+		Name:          "task",
+		ParentSession: parentSession,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(subagentDir, ref+".meta.json"), data, 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 
