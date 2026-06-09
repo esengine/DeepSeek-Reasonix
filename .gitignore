@@ -1,3 +1,8 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
 # Build artifacts
 /bin/
 /dist/
