@@ -70,7 +70,7 @@ export function UpdateBanner({ enabled = true }: { enabled?: boolean }) {
           <button className="btn btn--small btn--primary" onClick={() => void check()}>
             {t("updater.retry")}
           </button>
-          <button className="btn btn--small" onClick={reset}>
+          <button className="btn btn--small" onClick={() => void reset()}>
             {t("updater.dismiss")}
           </button>
         </div>

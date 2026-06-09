@@ -1927,6 +1927,9 @@ a[href] {
   font-size: var(--font-control-small);
 }
 .banner--error {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   background: var(--del-bg);
   color: var(--err);
   border-bottom: 1px solid var(--border-soft);
