@@ -71,21 +71,21 @@ func TestSelectedTextMultiLine(t *testing.T) {
 }
 
 func TestCopyToClipboardPlatformSuccess(t *testing.T) {
-	defer func(fn func(string) error) { clipboardWriteAll = fn }(clipboardWriteAll)
+	defer func(fn func(string) error) { clipboardWrite = fn }(clipboardWrite)
 	var got string
-	clipboardWriteAll = func(s string) error { got = s; return nil }
+	clipboardWrite = func(s string) error { got = s; return nil }
 
 	if msg := copyToClipboard("hello")(); msg != nil {
 		t.Errorf("platform write succeeded; want nil msg (no OSC 52 fallback), got %#v", msg)
 	}
 	if got != "hello" {
-		t.Errorf("clipboardWriteAll got %q, want %q", got, "hello")
+		t.Errorf("clipboardWrite got %q, want %q", got, "hello")
 	}
 }
 
 func TestCopyToClipboardOSC52Fallback(t *testing.T) {
-	defer func(fn func(string) error) { clipboardWriteAll = fn }(clipboardWriteAll)
-	clipboardWriteAll = func(string) error { return errors.New("no display (tmux/ssh)") }
+	defer func(fn func(string) error) { clipboardWrite = fn }(clipboardWrite)
+	clipboardWrite = func(string) error { return errors.New("no display (tmux/ssh)") }
 
 	// On failure the command must return the *message* tea.SetClipboard yields —
 	// the runtime handles it by emitting OSC 52 (bubbletea tea.go: setClipboardMsg

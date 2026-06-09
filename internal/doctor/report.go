@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/clipboard"
 	"reasonix/internal/codegraph"
 	"reasonix/internal/config"
 	"reasonix/internal/netclient"
@@ -35,6 +36,7 @@ type Report struct {
 	Sandbox    SandboxReport    `json:"sandbox"`
 	Network    NetworkReport    `json:"network"`
 	Permission PermissionReport `json:"permission"`
+	Clipboard  ClipboardReport  `json:"clipboard"`
 	Warnings   []string         `json:"warnings,omitempty"`
 }
 
@@ -107,6 +109,14 @@ type PermissionReport struct {
 	DenyRules  int    `json:"deny_rules"`
 }
 
+type ClipboardReport struct {
+	Supported bool   `json:"supported"`
+	ReadOK    bool   `json:"read_ok"`
+	WriteOK   bool   `json:"write_ok"`
+	ReadErr   string `json:"read_err,omitempty"`
+	WriteErr  string `json:"write_err,omitempty"`
+}
+
 func Collect(opts Options) Report {
 	cfg := opts.Config
 	var warnings []string
@@ -160,6 +170,7 @@ func Collect(opts Options) Report {
 		Warnings: warnings,
 	}
 	report.Sessions.Dir = redactHome(report.Sessions.Dir)
+	report.Clipboard = collectClipboard()
 	if p, ok := codegraph.Resolve(cfg.Codegraph.Path); ok {
 		report.Codegraph.Resolved = true
 		report.Codegraph.Path = redactHome(p)
@@ -272,7 +283,40 @@ func RenderText(r Report) string {
 	fmt.Fprintf(&b, "\npermissions\n")
 	fmt.Fprintf(&b, "  mode         %s\n", valueOr(r.Permission.Mode, "ask"))
 	fmt.Fprintf(&b, "  rules        allow:%d ask:%d deny:%d\n", r.Permission.AllowRules, r.Permission.AskRules, r.Permission.DenyRules)
+
+	fmt.Fprintf(&b, "\nclipboard\n")
+	if !r.Clipboard.Supported {
+		fmt.Fprintf(&b, "  unsupported\n")
+	} else {
+		readStatus := "ok"
+		if !r.Clipboard.ReadOK {
+			readStatus = fmt.Sprintf("FAIL: %s", r.Clipboard.ReadErr)
+		}
+		writeStatus := "ok"
+		if !r.Clipboard.WriteOK {
+			writeStatus = fmt.Sprintf("FAIL: %s", r.Clipboard.WriteErr)
+		}
+		fmt.Fprintf(&b, "  read         %s\n", readStatus)
+		fmt.Fprintf(&b, "  write        %s\n", writeStatus)
+	}
 	return b.String()
+}
+
+func collectClipboard() ClipboardReport {
+	r := ClipboardReport{}
+	clipboard.Probe()
+	if _, err := clipboard.Read(); err != nil {
+		r.ReadErr = err.Error()
+	} else {
+		r.ReadOK = true
+	}
+	if err := clipboard.Write(""); err != nil {
+		r.WriteErr = err.Error()
+	} else {
+		r.WriteOK = true
+	}
+	r.Supported = r.ReadOK || r.WriteOK
+	return r
 }
 
 func collectSessions(dir string) SessionsReport {

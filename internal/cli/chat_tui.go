@@ -19,10 +19,10 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/x/ansi"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/clipboard"
 	"reasonix/internal/command"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
@@ -90,6 +90,10 @@ type chatTUI struct {
 	// rides in outgoing user messages so the cache-stable prompt prefix is left
 	// untouched.
 	planMode bool
+
+	// mouseDisabled toggles mouse capture on/off (Ctrl+Shift+M) so the user can
+	// use the terminal's native text selection.
+	mouseDisabled bool
 
 	// pendingInterject queues input typed while a turn runs; each TurnDone
 	// dequeues the front and submits it as the next turn.
@@ -945,7 +949,7 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			return m, nil
-		case "ctrl+c", "super+c", "meta+c":
+		case "ctrl+c", "ctrl+shift+c", "super+c", "meta+c":
 			if m.state == tuiRunning {
 				if m.bubblePending {
 					m.unsendPending() // server not yet replied — restore text, leave no trace
@@ -992,6 +996,14 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, finalize(m, cmds)
 		case "ctrl+o":
 			m.toggleVerboseReasoning(m.state != tuiRunning)
+			return m, finalize(m, cmds)
+		case "ctrl+shift+m":
+			m.mouseDisabled = !m.mouseDisabled
+			if m.mouseDisabled {
+				m.notice("mouse capture disabled — native selection available")
+			} else {
+				m.notice("mouse capture enabled")
+			}
 			return m, finalize(m, cmds)
 		case "ctrl+b":
 			m.toggleShellOutput()
@@ -2063,7 +2075,9 @@ func (m chatTUI) View() tea.View {
 	}
 	v := tea.NewView(mainArea + "\n" + strings.Join(parts, "\n"))
 	v.AltScreen = true
-	v.MouseMode = tea.MouseModeCellMotion // wheel scrolls the transcript
+	if !m.mouseDisabled {
+		v.MouseMode = tea.MouseModeCellMotion // wheel scrolls the transcript
+	}
 	// Anchor the real terminal cursor at the textarea's insertion point only when
 	// the composer is visible. input.Cursor() is relative to the textarea; offset
 	// by the viewport height + rows above + the box's top border row (+1 column
@@ -2491,18 +2505,18 @@ func pasteClipboardImage() tea.Cmd {
 
 func pasteClipboard() tea.Cmd {
 	return func() tea.Msg {
+		text, textErr := clipboard.Read()
+		if textErr == nil && text != "" {
+			return clipboardPasteMsg{text: text}
+		}
 		path, imageErr := control.SaveClipboardImage()
 		if imageErr == nil {
 			return clipboardPasteMsg{path: path}
 		}
-		text, textErr := clipboard.ReadAll()
-		if textErr == nil && text != "" {
-			return clipboardPasteMsg{text: text}
-		}
 		if textErr != nil {
-			return clipboardPasteMsg{err: fmt.Errorf("%v; text paste failed: %w", imageErr, textErr)}
+			return clipboardPasteMsg{err: fmt.Errorf("text: %w; image: %v", textErr, imageErr)}
 		}
-		return clipboardPasteMsg{err: imageErr}
+		return clipboardPasteMsg{err: fmt.Errorf("clipboard empty or inaccessible")}
 	}
 }
 
