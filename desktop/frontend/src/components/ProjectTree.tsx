@@ -897,6 +897,11 @@ export function ProjectTree({
                 aria-expanded={filterMenuOpen}
               >
                 <Clock size={13} />
+                {timeFilter !== "all" && (
+                  <span className="project-tree__time-filter-label">
+                    {timeFilter === "1d" ? "24h" : timeFilter}
+                  </span>
+                )}
               </button>
             </Tooltip>
             {filterMenuOpen && (

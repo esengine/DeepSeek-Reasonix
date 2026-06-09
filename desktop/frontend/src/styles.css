@@ -9574,7 +9574,6 @@ a[href] {
 }
 
 .project-tree {
-  --project-tree-action-column: 36px;
   --project-tree-edge-gap: 6px;
   flex: 1 1 auto;
   min-height: 0;
@@ -9638,23 +9637,19 @@ a[href] {
 }
 
 .project-tree__action-slot {
-  flex: 0 0 var(--project-tree-action-column);
-  width: var(--project-tree-action-column);
   display: inline-flex;
   align-items: center;
-  justify-content: center;
 }
 
 .project-tree__header-actions {
   display: flex;
   position: relative;
   align-items: center;
-  gap: 3px;
+  gap: 6px;
 }
 
 .project-tree__header-action-btn {
   --wails-draggable: no-drag;
-  width: 24px;
   height: 24px;
   display: inline-flex;
   align-items: center;
@@ -9663,7 +9658,7 @@ a[href] {
   border-radius: 7px;
   background: transparent;
   color: var(--fg-faint);
-  padding: 0;
+  padding: 0 5px;
   opacity: 0.78;
   cursor: pointer;
 }
@@ -9689,14 +9684,21 @@ a[href] {
   position: relative;
 }
 
+.project-tree__time-filter-label {
+  font-size: 9px;
+  line-height: 1;
+  margin-left: 1px;
+  font-weight: 500;
+}
+
 .project-tree__time-filter-menu {
   position: absolute;
   top: calc(100% + 4px);
   left: 0;
   z-index: var(--z-menu);
-  min-width: 108px;
-  padding: 5px;
-  border: 1px solid var(--border);
+  min-width: 84px;
+  padding: 4px;
+  border: none;
   border-radius: 8px;
   background: var(--bg-elev);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
@@ -9709,16 +9711,17 @@ a[href] {
   --wails-draggable: no-drag;
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   width: 100%;
-  height: 30px;
-  padding: 0 10px;
+  height: 28px;
+  padding: 0 8px;
   border: none;
-  border-radius: 6px;
+  border-radius: 5px;
   background: transparent;
   color: var(--fg-dim);
   font: inherit;
-  font-size: 13px;
-  text-align: left;
+  font-size: 12px;
+  font-weight: 400;
   cursor: pointer;
   white-space: nowrap;
 }
@@ -9729,8 +9732,8 @@ a[href] {
 }
 
 .project-tree__time-filter-opt--on {
-  color: var(--fg);
-  font-weight: 550;
+  color: var(--accent);
+  font-weight: 400;
 }
 
 .project-tree__add-project,
