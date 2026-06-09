@@ -11,7 +11,8 @@ import { Tooltip } from "./Tooltip";
 // shows the current item so the footer stays compact during a long run. The ✕
 // dismisses it (onDismiss) when the user abandons the task; a fresh todo_write
 // brings it back.
-export function TodoPanel({ todos, onDismiss }: { todos: Todo[]; onDismiss: () => void }) {
+export function TodoPanel({ todos, onDismiss, stale }: { todos: Todo[]; onDismiss: () => void; stale?: boolean }) {
+  void stale;
   const t = useT();
   const [open, setOpen] = useState(false);
   const currentRef = useRef<HTMLLIElement | null>(null);

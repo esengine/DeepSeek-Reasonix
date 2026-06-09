@@ -19,7 +19,6 @@ import {
   PanelRightOpen,
   Trash2,
 } from "lucide-react";
-import logoWordmark from "./assets/logo-wordmark.svg";
 import { useToast } from "./lib/toast";
 import { asArray } from "./lib/array";
 import { clearLegacyLangPref, normalizeLangPref, readLegacyLangPref, t, useI18n, useT } from "./lib/i18n";
@@ -222,6 +221,12 @@ function topicScopeLabel(tab?: TabMeta): string {
 }
 
 
+function workspaceDisplayName(path?: string): string {
+  if (!path) return "";
+  const parts = path.split(/[/\\]/).filter(Boolean);
+  return parts.length > 0 ? parts[parts.length - 1] : path;
+}
+
 function normalizeModeValue(mode?: string): Mode {
   return mode === "plan" || mode === "yolo" ? mode : "normal";
 }
@@ -405,6 +410,8 @@ export default function App() {
   const t = useT();
   const [modesByTab, setModesByTab] = useState<Record<string, Mode>>({});
   const [tabMetas, setTabMetas] = useState<TabMeta[]>([]);
+  const [tabRevealSignal, setTabRevealSignal] = useState(0);
+  void tabRevealSignal;
 
   const [startupSplashVisible, setStartupSplashVisible] = useState<boolean>(() => shouldShowStartupSplash());
   // null until the mount probe resolves; true shows the overlay. Probed once —
