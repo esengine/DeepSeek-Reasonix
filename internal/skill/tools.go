@@ -128,6 +128,58 @@ func (t *runSkillTool) profileForSkill(sk Skill) *event.Profile {
 	return &event.Profile{Model: model, Effort: effort}
 }
 
+// readSkillTool loads an inline skill body into context without running anything.
+type readSkillTool struct {
+	store *Store
+}
+
+// NewReadSkillTool builds a read-only inline-skill loader. Unlike run_skill it
+// stays available in plan mode, so a plan can consult inline playbooks.
+func NewReadSkillTool(store *Store) tool.Tool { return &readSkillTool{store: store} }
+
+func (*readSkillTool) Name() string { return "read_skill" }
+
+// ReadOnly is true: read_skill only renders an inline skill body (no subagent,
+// no side effects), so it is allowed in plan mode where run_skill is not.
+func (*readSkillTool) ReadOnly() bool { return true }
+
+func (*readSkillTool) Description() string {
+	return "Load an inline playbook from the Skills index into your context WITHOUT running anything — the skill body returns as a tool result you read and follow. Read-only, so it works in plan mode (unlike run_skill). Pass `name` as the BARE identifier (e.g. 'commit'), NOT the `[🧬 subagent]` tag. Subagent-tagged skills are rejected: use run_skill (or the dedicated tool) for those, since they execute work."
+}
+
+func (*readSkillTool) Schema() json.RawMessage {
+	return json.RawMessage(`{
+"type":"object",
+"properties":{
+  "name":{"type":"string","description":"Inline skill identifier as it appears in the pinned Skills index. Just the identifier, not the [🧬 subagent] tag."},
+  "arguments":{"type":"string","description":"Optional free-form arguments, appended as an 'Arguments:' line; the skill's own instructions decide how to use them."}
+},
+"required":["name"]
+}`)
+}
+
+func (t *readSkillTool) Execute(_ context.Context, args json.RawMessage) (string, error) {
+	var p struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	}
+	if err := json.Unmarshal(args, &p); err != nil {
+		return "", fmt.Errorf("invalid args: %w", err)
+	}
+	name := cleanSkillName(p.Name)
+	if name == "" {
+		return "", fmt.Errorf("read_skill requires a 'name' argument (got %q, which is just a marker/tag)", p.Name)
+	}
+	sk, ok := t.store.Read(name)
+	if !ok {
+		return "", fmt.Errorf("unknown skill %q — available: %s", name, availableNames(t.store))
+	}
+	if sk.RunAs == RunSubagent {
+		return "", fmt.Errorf("read_skill: skill %q is a subagent and must be executed, not read — use run_skill (or the dedicated %s tool)", name, name)
+	}
+	return renderInline(sk, strings.TrimSpace(p.Arguments)), nil
+}
+
 // --- dedicated subagent wrappers (explore / research / review / security_review) ---
 
 type subagentSkillTool struct {

@@ -1,0 +1,41 @@
+# nfpm config for the Linux .deb package. scripts/desktop-build.sh's linux branch
+# runs `nfpm package` after `wails build`, from the desktop/ dir (so the src paths
+# below are relative to desktop/). The .deb is a human-download artifact only — like
+# the macOS .dmg — so the Linux updater channel stays the .tar.gz and cmd/sign's
+# manifest skips .deb files.
+#
+# $DEB_VERSION and $DEB_ARCH are exported by desktop-build.sh. DEB_VERSION is the tag
+# minus a leading "v" and any prerelease suffix (a strict X.Y.Z that dpkg accepts);
+# DEB_ARCH is the Go arch name, which already matches Debian's (amd64, arm64).
+name: "reasonix-desktop"
+arch: "${DEB_ARCH}"
+platform: "linux"
+version: "${DEB_VERSION}"
+section: "utils"
+priority: "optional"
+maintainer: "esengine <esengine@users.noreply.github.com>"
+description: |
+  Reasonix desktop — a Wails shell around the Go kernel.
+vendor: "Reasonix Contributors"
+homepage: "https://github.com/esengine/DeepSeek-Reasonix"
+license: "MIT"
+# Runtime libraries the WebKitGTK 4.1 build links against (-tags webkit2_41); apt
+# pulls them in on install. These package names ship from Ubuntu 22.04 / Debian 12 on.
+depends:
+  - libgtk-3-0
+  - libwebkit2gtk-4.1-0
+contents:
+  - src: ./build/bin/reasonix-desktop
+    dst: /usr/bin/reasonix-desktop
+    file_info:
+      mode: 0755
+  - src: ./build/linux/reasonix.desktop
+    dst: /usr/share/applications/reasonix.desktop
+    file_info:
+      mode: 0644
+  # appicon.png is 1024x1024 — not a standard hicolor size dir, so install it under
+  # the size-agnostic pixmaps path that the .desktop's `Icon=reasonix-desktop` finds.
+  - src: ./build/appicon.png
+    dst: /usr/share/pixmaps/reasonix-desktop.png
+    file_info:
+      mode: 0644

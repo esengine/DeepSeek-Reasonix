@@ -858,17 +858,12 @@ func (c *Controller) EnableInteractiveApproval() {
 // Ask implements agent.Asker: it emits an AskRequest and blocks until
 // AnswerQuestion(ID, …) answers or ctx is cancelled. promptMu serialises it
 // against tool-approval prompts so at most one user prompt is outstanding.
+// Unlike tool-approval gates, Ask is NOT bypassed in YOLO mode — the `ask`
+// tool exists to get a genuine user decision, and YOLO only auto-approves
+// tool calls; it must not answer the user's questions for them.
 func (c *Controller) Ask(ctx context.Context, questions []event.AskQuestion) ([]event.AskAnswer, error) {
-	if c.bypassEnabled() {
-		return recommendedAskAnswers(questions), nil
-	}
-
 	c.promptMu.Lock()
 	defer c.promptMu.Unlock()
-
-	if c.bypassEnabled() {
-		return recommendedAskAnswers(questions), nil
-	}
 
 	c.mu.Lock()
 	c.nextID++
@@ -888,23 +883,6 @@ func (c *Controller) Ask(ctx context.Context, questions []event.AskQuestion) ([]
 		c.mu.Unlock()
 		return nil, ctx.Err()
 	}
-}
-
-func (c *Controller) bypassEnabled() bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.bypass
-}
-
-func recommendedAskAnswers(questions []event.AskQuestion) []event.AskAnswer {
-	out := make([]event.AskAnswer, len(questions))
-	for i, q := range questions {
-		out[i] = event.AskAnswer{QuestionID: q.ID}
-		if len(q.Options) > 0 {
-			out[i].Selected = []string{q.Options[0].Label}
-		}
-	}
-	return out
 }
 
 // AnswerQuestion resolves a pending AskRequest by ID with the user's selections.
@@ -1050,19 +1028,23 @@ func (c *Controller) Rewind(turn int, scope RewindScope) error {
 			return c.rewindFail(fmt.Errorf("conversation rewind unavailable for turn %d (resumed session)", turn))
 		}
 		s := c.executor.Session()
-		if boundary <= len(s.Messages) {
-			s.Messages = s.Messages[:boundary]
-			c.mu.Lock()
-			c.cpTurn = turn // renumber future turns from here; later turns are gone
-			for k := range c.cpBound {
-				if k >= turn {
-					delete(c.cpBound, k)
-				}
+		// boundary is the message-log index at turn start; compaction shrinks the
+		// log without rewriting boundaries, so a stale boundary past the end means
+		// the turn was compacted away — fail loudly instead of skipping silently.
+		if boundary > len(s.Messages) {
+			return c.rewindFail(fmt.Errorf("conversation rewind unavailable for turn %d: the conversation was compacted past this point", turn))
+		}
+		s.Messages = s.Messages[:boundary]
+		c.mu.Lock()
+		c.cpTurn = turn // renumber future turns from here; later turns are gone
+		for k := range c.cpBound {
+			if k >= turn {
+				delete(c.cpBound, k)
 			}
-			c.mu.Unlock()
-			if err := c.Snapshot(); err != nil {
-				slog.Warn("controller: snapshot after rewind", "err", err)
-			}
+		}
+		c.mu.Unlock()
+		if err := c.Snapshot(); err != nil {
+			slog.Warn("controller: snapshot after rewind", "err", err)
 		}
 		c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
 			Text: fmt.Sprintf("rewound conversation to turn %d", turn)})

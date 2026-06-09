@@ -146,6 +146,26 @@ func TestStoreDeleteMissingIsNoError(t *testing.T) {
 	}
 }
 
+func TestStoreDeleteRepairsReadOnlyMemoryFile(t *testing.T) {
+	s := Store{Dir: t.TempDir()}
+	if _, err := s.Save(Memory{Name: "locked", Description: "d", Type: TypeProject, Body: "b"}); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(s.Dir, "locked.md")
+	if err := os.Chmod(path, 0o400); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Delete("locked"); err != nil {
+		t.Fatalf("delete read-only memory: %v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("locked.md should be gone, stat err = %v", err)
+	}
+	if strings.Contains(s.Index(), "locked.md") {
+		t.Fatalf("deleted read-only entry still in index:\n%s", s.Index())
+	}
+}
+
 // TestNormalizeType maps unknown types to project and keeps known ones.
 func TestNormalizeType(t *testing.T) {
 	if got := NormalizeType("feedback"); got != TypeFeedback {
