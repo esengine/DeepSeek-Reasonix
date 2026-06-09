@@ -1883,7 +1883,12 @@ func (a *App) CreateTopic(scope, workspaceRoot, title string) (TopicMeta, error)
 			}
 		}
 	}
-	a.emitProjectTreeChanged()
+	// NB: do NOT emit project-tree:changed here — the frontend's
+	// handleCreateTopic injects the new node directly into the tree
+	// (ProjectTree.tsx injectNewTopicNode), so a full refresh() would
+	// overwrite that injection and the topic would briefly flash then
+	// disappear (no session file exists yet, so ListSessions returns
+	// a LastActivityAt of 0 for the new topic).
 	return TopicMeta{ID: topicID, Title: trimmedTitle, CreatedAt: time.Now().UnixMilli()}, nil
 }
 

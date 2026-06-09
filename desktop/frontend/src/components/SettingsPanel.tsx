@@ -662,7 +662,7 @@ function GeneralSection({ s, busy, apply }: SectionProps) {
       <SettingsField label={t("settings.notificationSound")} hint={t("settings.notificationSoundHint")} stacked>
         <div className="settings-notification-sound-row">
           <span>{t("settings.notificationSoundSuccess")}</span>
-          <select className="set-select" value={soundPref}
+          <select className="mem-select" value={soundPref}
             onChange={(e) => {
               const next = e.target.value as SoundWavPref;
               setSoundPref(next);
@@ -674,13 +674,13 @@ function GeneralSection({ s, busy, apply }: SectionProps) {
             <option value="start">{t("settings.notificationSound.start")}</option>
             <option value="back">{t("settings.notificationSound.back")}</option>
           </select>
-          <button className="set-btn set-btn--sm" type="button"
+          <button className="chip" type="button"
             title={t("settings.notificationSoundPreview")}
             onClick={playSuccessChime}>&#x25B6;</button>
         </div>
         <div className="settings-notification-sound-row" style={{ marginTop: 6 }}>
           <span>{t("settings.notificationSoundAttention")}</span>
-          <select className="set-select" value={attentionPref}
+          <select className="mem-select" value={attentionPref}
             onChange={(e) => {
               const next = e.target.value as SoundWavPref;
               setAttentionPref(next);
@@ -692,7 +692,7 @@ function GeneralSection({ s, busy, apply }: SectionProps) {
             <option value="start">{t("settings.notificationSound.start")}</option>
             <option value="back">{t("settings.notificationSound.back")}</option>
           </select>
-          <button className="set-btn set-btn--sm" type="button"
+          <button className="chip" type="button"
             title={t("settings.notificationSoundPreview")}
             onClick={playAttentionChime}>&#x25B6;</button>
         </div>
@@ -701,9 +701,7 @@ function GeneralSection({ s, busy, apply }: SectionProps) {
       <SettingsField label={t("settings.generativeMusic")} hint={t("settings.generativeMusicHint")} stacked>
         <div className="settings-notification-sound-row">
           <span>{t("settings.generativeMusicPreset")}</span>
-          <select
-            className="mem-select"
-            value={genMusicPreset}
+          <select className="mem-select" value={genMusicPreset}
             onChange={(e) => {
               const next = e.target.value as GenerativePreset;
               setGenMusicPreset(next);
@@ -717,8 +715,7 @@ function GeneralSection({ s, busy, apply }: SectionProps) {
             <option value="digital">{t("settings.generativeMusic.presets.digital")}</option>
             <option value="retro">{t("settings.generativeMusic.presets.retro")}</option>
           </select>
-          <button
-            className="chip"
+          <button className="chip"
             type="button"
             onClick={() => { if (genMusicPreset !== "off") generativeMusic.playPreview(genMusicPreset); }}
             title={t("settings.generativeMusicPreview")}
