@@ -406,6 +406,32 @@ function mockScenario(): "demo" | "fresh" {
   return value === "fresh" || value === "empty" || value === "first-run" ? "fresh" : "demo";
 }
 
+// Mock geo preview data for browser dev
+function mockRasterPreview(path: string) {
+  return {
+    __geo_type__: "raster_preview",
+    preview_url: "http://127.0.0.1:60068/preview/60a21b5d8c2247fabd7ad520d22fe08c.webp",
+    preview_width: 256, preview_height: 256, preview_size_bytes: 27850,
+    rgb_bands: [1, 1, 1], http_port: 60068,
+    extent: { xmin: 116.0, xmax: 116.256, ymin: 39.744, ymax: 40.0 },
+    metadata: { data_type: "raster", driver: "GTiff", path, crs: "EPSG:4326",
+      size: { width: 256, height: 256 }, band_count: 1,
+      bands: [{ index: 1, data_type: "Float32", nodata: -999, color_interp: "Gray",
+        statistics: { min: 0.31, max: 0.94, mean: 0.60, stddev: 0.09 } }] },
+  };
+}
+
+function mockVectorPreview(path: string) {
+  return {
+    __geo_type__: "vector_preview",
+    geojson_url: "http://127.0.0.1:60068/geojson/60a21b5d8c2247fabd7ad520d22fe08c",
+    feature_count: 156, http_port: 60068,
+    metadata: { data_type: "vector", driver: "ESRI Shapefile", path,
+      feature_count: 156, geometry_types: ["Polygon"],
+      crs: "EPSG:4326", properties: ["id", "name", "area"] },
+  };
+}
+
 function makeMockApp(): AppBindings {
   const freshMock = mockScenario() === "fresh";
   let cancelled = false;
@@ -1348,6 +1374,21 @@ function makeMockApp(): AppBindings {
         .map((name) => ({ name, isDir: false }));
     },
     async ReadFile(rel: string) {
+      // Mock geo file previews for browser dev
+      const ext = rel.includes(".") ? rel.slice(rel.lastIndexOf(".")).toLowerCase() : "";
+      if (ext === ".tif" || ext === ".tiff") {
+        return {
+          path: rel, body: JSON.stringify(mockRasterPreview(rel)), size: 0,
+          truncated: false, binary: false, kind: "geo_raster" as const,
+          url: "http://127.0.0.1:60068/preview/60a21b5d8c2247fabd7ad520d22fe08c.webp",
+        };
+      }
+      if (ext === ".shp" || ext === ".geojson") {
+        return {
+          path: rel, body: JSON.stringify(mockVectorPreview(rel)), size: 0,
+          truncated: false, binary: false, kind: "geo_vector" as const,
+        };
+      }
       const samples: Record<string, string> = {
         "README.md": "# Reasonix\n\nBrowser-dev workspace preview.\n\n- Chat in the center\n- Browse files on the right\n- Keep sessions on the left\n",
         "go.mod": "module reasonix\n\ngo 1.23\n",

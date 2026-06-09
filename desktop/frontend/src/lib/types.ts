@@ -301,7 +301,7 @@ export interface FilePreview {
   size: number;
   truncated: boolean;
   binary: boolean;
-  kind?: "image" | "pdf";
+  kind?: "image" | "pdf" | "geo_raster" | "geo_vector";
   mime?: string;
   url?: string;
   err?: string;

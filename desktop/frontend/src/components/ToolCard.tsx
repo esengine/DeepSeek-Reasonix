@@ -66,17 +66,20 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
       : "";
 
   // Geo tool detection
-  const { setStatus: setGeoStatus } = useGeoStatus();
+  const { setStatus: setGeoStatus, setDetails: setGeoDetails } = useGeoStatus();
   const isGeoRead = item.name === "mcp__geocode__read_geo_data";
   const isGeoEnv = item.name === "mcp__geocode__geo_env_status";
   const hasGeoPreview = isGeoRead && item.output && parsePreview(item.output) !== null;
 
   // Update geo status context when env probe completes
   useEffect(() => {
-    if (!isGeoEnv || !item.output) return;
+    if (!isGeoEnv || !item.output || item.status !== "done") return;
     const parsed = parseEnvStatus(item.output);
-    if (parsed) setGeoStatus(parsed);
-  }, [isGeoEnv, item.output, setGeoStatus]);
+    if (parsed) {
+      setGeoStatus(parsed.status);
+      setGeoDetails(parsed.details);
+    }
+  }, [isGeoEnv, item.output, item.status, setGeoStatus, setGeoDetails]);
 
   // A task's summary is its step count; everything else derives from the result.
   const summary =
