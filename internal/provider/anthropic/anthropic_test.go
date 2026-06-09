@@ -186,16 +186,14 @@ func TestReadStream(t *testing.T) {
 	if full == nil || full.Arguments != `{"city":"Paris"}` {
 		t.Fatalf("tool full = %+v", full)
 	}
-	if usage == nil {
+	switch {
+	case usage == nil:
 		t.Fatal("expected a usage chunk")
-	}
-	if usage.PromptTokens != 150 || usage.CompletionTokens != 25 || usage.TotalTokens != 175 {
+	case usage.PromptTokens != 150 || usage.CompletionTokens != 25 || usage.TotalTokens != 175:
 		t.Fatalf("usage tokens = %+v", usage)
-	}
-	if usage.CacheHitTokens != 50 || usage.CacheMissTokens != 100 {
+	case usage.CacheHitTokens != 50 || usage.CacheMissTokens != 100:
 		t.Fatalf("usage cache = hit %d miss %d", usage.CacheHitTokens, usage.CacheMissTokens)
-	}
-	if usage.FinishReason != "tool_calls" {
+	case usage.FinishReason != "tool_calls":
 		t.Fatalf("finish reason = %q", usage.FinishReason)
 	}
 	if !done {
