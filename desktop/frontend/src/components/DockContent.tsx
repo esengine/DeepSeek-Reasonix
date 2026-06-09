@@ -1,4 +1,5 @@
 import { BrowserPanel } from "./BrowserPanel";
+import { GitPanel } from "./GitPanel";
 import { MemoryDockPanel } from "./MemoryDockPanel";
 import { WorkspacePanel } from "./WorkspacePanel";
 import type { DockTab } from "../lib/types";
@@ -51,6 +52,8 @@ export function DockContent({ tab, onMetadataUpdate, onTitleUpdate, ...workspace
       return <div className="workspace-empty">Context panel</div>;
     case "memory":
       return <MemoryDockPanel />;
+    case "commit":
+      return <GitPanel />;
     default:
       return <div className="workspace-empty">Unknown panel type</div>;
   }

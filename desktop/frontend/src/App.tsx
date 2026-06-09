@@ -9,6 +9,7 @@ import {
   FileText,
   FileJson,
   GitBranch,
+  GitCommit,
   History,
   Settings as SettingsIcon,
   Pencil,
@@ -86,6 +87,7 @@ const RIGHT_DOCK_MAX_WIDTH = 999999;
 const DEFAULT_DOCK_TABS: DockTab[] = [
   { id: "files", type: "files", title: "文件", icon: FileText, closable: false },
   { id: "changes", type: "changes", title: "改动", icon: GitBranch, closable: false },
+  { id: "commit", type: "commit", title: "提交", icon: GitCommit, closable: false },
   { id: "memory", type: "memory", title: "记忆", icon: Lightbulb, closable: false },
 ];
 

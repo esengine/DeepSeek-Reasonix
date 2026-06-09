@@ -582,7 +582,7 @@ export interface UpdateProgress {
   err?: string;
 }
 
-export type DockTabType = "files" | "changes" | "browser" | "context" | "memory";
+export type DockTabType = "files" | "changes" | "commit" | "browser" | "context" | "memory";
 
 export interface DockTab {
   id: string;
