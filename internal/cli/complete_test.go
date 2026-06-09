@@ -35,9 +35,9 @@ func TestSlashCompletionFilterAndAccept(t *testing.T) {
 	if !m.completion.active || m.completion.kind != compSlash {
 		t.Fatalf("typing /co should open the slash menu: %+v", m.completion)
 	}
-	// Only /compact matches the "/co" prefix among the built-ins.
-	if len(m.completion.items) != 1 || m.completion.items[0].label != "/compact" {
-		t.Fatalf("filter = %v, want just /compact", labels(m.completion.items))
+	// /compact and /context match the "/co" prefix among the built-ins.
+	if len(m.completion.items) != 2 || m.completion.items[0].label != "/compact" || m.completion.items[1].label != "/context" {
+		t.Fatalf("filter = %v, want [/compact /context]", labels(m.completion.items))
 	}
 
 	m.acceptCompletion()
