@@ -27,6 +27,7 @@ import (
 
 	"reasonix/internal/agent"
 	"reasonix/internal/billing"
+	"reasonix/internal/geo"
 	"reasonix/internal/boot"
 	"reasonix/internal/config"
 	"reasonix/internal/control"
@@ -3119,46 +3120,6 @@ func trimUTF8PartialSuffix(data []byte) []byte {
 	return data
 }
 
-// geoPreviewKind detects raster/vector geo files and returns a kind + JSON body
-// with basic metadata. Full WebP/GeoJSON preview generation requires the geocode
-// MCP plugin (see batch-4 plan).
-func geoPreviewKind(path string) (kind string, body string) {
-	ext := strings.ToLower(filepath.Ext(path))
-	switch ext {
-	case ".tif", ".tiff":
-		return "geo_raster", geoRasterMetaJSON(path)
-	case ".shp", ".geojson":
-		return "geo_vector", geoVectorMetaJSON(path)
-	}
-	return "", ""
-}
-
-func geoRasterMetaJSON(path string) string {
-	b, _ := json.Marshal(map[string]any{
-		"__geo_type__": "raster_preview",
-		"preview_url":  nil,
-		"metadata": map[string]any{
-			"data_type": "raster",
-			"path":      filepath.ToSlash(path),
-			"driver":    "GTiff",
-		},
-	})
-	return string(b)
-}
-
-func geoVectorMetaJSON(path string) string {
-	b, _ := json.Marshal(map[string]any{
-		"__geo_type__":  "vector_preview",
-		"geojson_url":   nil,
-		"feature_count": 0,
-		"metadata": map[string]any{
-			"data_type": "vector",
-			"path":      filepath.ToSlash(path),
-		},
-	})
-	return string(b)
-}
-
 func previewMediaKind(path string) (kind string, mime string) {
 	mime = previewMediaMIMEs[strings.ToLower(filepath.Ext(path))]
 	if mime == "" {
@@ -3313,9 +3274,11 @@ func (a *App) ReadFile(rel string) FilePreview {
 		return out
 	}
 	out.Size = info.Size()
-	if gk, body := geoPreviewKind(path); gk != "" {
+	base, _ := a.activeWorkspaceBase()
+	if gk, body, url := geo.GeoPreviewKind(base, path); gk != "" {
 		out.Kind = gk
 		out.Body = body
+		out.URL = url
 		out.Size = info.Size()
 		return out
 	}
