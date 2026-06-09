@@ -144,6 +144,11 @@ type Agent struct {
 	sessCacheHit  atomic.Int64
 	sessCacheMiss atomic.Int64
 
+	// sessionUsage accumulates token and cost totals across every API call this
+	// session. Reset via ResetSessionUsage() on /new; persisted to BranchMeta
+	// on snapshot so the TUI can restore it on /resume.
+	sessionUsage SessionUsageMeta
+
 	// lastPrefixShape records the previous provider request's cacheable prefix
 	// so usage events can explain prefix churn on the next request.
 	lastPrefixShape     PrefixShape
@@ -290,6 +295,15 @@ func (a *Agent) LastUsage() *provider.Usage { return a.lastUsage.Load() }
 func (a *Agent) SessionCache() (hit, miss int) {
 	return int(a.sessCacheHit.Load()), int(a.sessCacheMiss.Load())
 }
+
+// SessionUsage returns cumulative token and cost totals for this session.
+func (a *Agent) SessionUsage() SessionUsageMeta { return a.sessionUsage }
+
+// SetSessionUsage restores cumulative session totals (used on /resume).
+func (a *Agent) SetSessionUsage(u SessionUsageMeta) { a.sessionUsage = u }
+
+// ResetSessionUsage zeros the cumulative session totals (used on /new).
+func (a *Agent) ResetSessionUsage() { a.sessionUsage = SessionUsageMeta{} }
 
 // ContextWindow returns the configured context-window size in tokens. 0
 // means compaction is disabled for this agent.
@@ -703,6 +717,19 @@ func (a *Agent) stream(ctx context.Context, turn int) (string, string, string, [
 			a.lastUsage.Store(chunk.Usage)
 			a.sessCacheHit.Add(int64(chunk.Usage.CacheHitTokens))
 			a.sessCacheMiss.Add(int64(chunk.Usage.CacheMissTokens))
+			u := usage
+			a.sessionUsage.PromptTokens += u.PromptTokens
+			a.sessionUsage.CompletionTokens += u.CompletionTokens
+			a.sessionUsage.CacheHitTokens += u.CacheHitTokens
+			a.sessionUsage.CacheMissTokens += u.CacheMissTokens
+			a.sessionUsage.ReasoningTokens += u.ReasoningTokens
+			a.sessionUsage.TotalTokens += u.TotalTokens
+			if a.pricing != nil {
+				a.sessionUsage.Cost += a.pricing.Cost(u)
+				if a.sessionUsage.Currency == "" {
+					a.sessionUsage.Currency = a.pricing.Symbol()
+				}
+			}
 		case provider.ChunkError:
 			if provider.IsStreamInterrupted(chunk.Err) {
 				stored, _ := finishReasoning()

@@ -12,21 +12,36 @@ import (
 	"reasonix/internal/fileutil"
 )
 
+// SessionUsageMeta captures cumulative token and cost data for the session.
+// Saved alongside BranchMeta so it survives resume. Fields are zero when no
+// turns have completed (or when loading a session saved before this existed).
+type SessionUsageMeta struct {
+	PromptTokens     int     `json:"prompt_tokens"`
+	CompletionTokens int     `json:"completion_tokens"`
+	CacheHitTokens   int     `json:"cache_hit_tokens"`
+	CacheMissTokens  int     `json:"cache_miss_tokens"`
+	ReasoningTokens  int     `json:"reasoning_tokens"`
+	TotalTokens      int     `json:"total_tokens"`
+	Cost             float64 `json:"cost"`
+	Currency         string  `json:"currency"`
+}
+
 // BranchMeta is the small sidecar record that turns flat session files into a
 // navigable conversation tree. The conversation itself remains in the .jsonl
 // file; metadata lives beside it at <session>.meta.
 type BranchMeta struct {
-	ID               string    `json:"id"`
-	Name             string    `json:"name,omitempty"`
-	ParentID         string    `json:"parent_id,omitempty"`
-	ForkTurn         int       `json:"fork_turn,omitempty"`
-	ForkMessageIndex int       `json:"fork_message_index,omitempty"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
-	Scope            string    `json:"scope,omitempty"`
-	WorkspaceRoot    string    `json:"workspace_root,omitempty"`
-	TopicID          string    `json:"topic_id,omitempty"`
-	TopicTitle       string    `json:"topic_title,omitempty"`
+	ID               string           `json:"id"`
+	Name             string           `json:"name,omitempty"`
+	ParentID         string           `json:"parent_id,omitempty"`
+	ForkTurn         int              `json:"fork_turn,omitempty"`
+	ForkMessageIndex int              `json:"fork_message_index,omitempty"`
+	CreatedAt        time.Time        `json:"created_at"`
+	UpdatedAt        time.Time        `json:"updated_at"`
+	Scope            string           `json:"scope,omitempty"`
+	WorkspaceRoot    string           `json:"workspace_root,omitempty"`
+	TopicID          string           `json:"topic_id,omitempty"`
+	TopicTitle       string           `json:"topic_title,omitempty"`
+	SessionUsage     *SessionUsageMeta `json:"session_usage,omitempty"`
 }
 
 func (m BranchMeta) DefaultScope() string {
