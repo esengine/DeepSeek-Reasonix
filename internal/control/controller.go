@@ -980,6 +980,7 @@ func (c *Controller) NewSession() error {
 		return err
 	}
 	c.hooks.SessionEnd(context.Background())
+	c.executor.ResetSessionUsage()
 	if c.sessionDir != "" {
 		c.mu.Lock()
 		c.sessionPath = agent.NewSessionPath(c.sessionDir, c.label)
@@ -1347,6 +1348,12 @@ func (c *Controller) Resume(s *agent.Session, path string) {
 	c.sessionPath = path
 	c.mu.Unlock()
 	c.rebindCheckpoints(path)
+	// Restore cumulative session usage from the sidecar metadata.
+	if meta, ok, err := agent.LoadBranchMeta(path); err == nil && ok && meta.SessionUsage != nil {
+		if c.executor != nil {
+			c.executor.SetSessionUsage(*meta.SessionUsage)
+		}
+	}
 }
 
 // Snapshot writes the executor's conversation to the active session file. No-op
@@ -1376,10 +1383,15 @@ func (c *Controller) snapshot(markActivity bool) error {
 	if !s.HasContent() {
 		return nil
 	}
-	if !markActivity {
-		if _, err := agent.EnsureBranchMeta(path); err != nil {
-			return err
-		}
+	meta, err := agent.EnsureBranchMeta(path)
+	if err != nil {
+		return err
+	}
+	if usage := c.SessionUsage(); usage.TotalTokens > 0 {
+		meta.SessionUsage = &usage
+	}
+	if err := agent.SaveBranchMetaPreserveUpdated(path, meta); err != nil {
+		return err
 	}
 	if err := s.Save(path); err != nil {
 		return err
@@ -1436,6 +1448,17 @@ func (c *Controller) History() []provider.Message {
 	return c.executor.Session().Snapshot() // copy — a turn may be appending concurrently
 }
 
+// ContextBreakdown returns a detailed breakdown of the session's context usage:
+// estimated next-request cost, per-turn conversation sizes, tool schema costs,
+// session aggregates, and compaction headroom.
+func (c *Controller) ContextBreakdown() *agent.ContextBreakdown {
+	if c.executor == nil || c.reg == nil {
+		return nil
+	}
+	schemas := c.reg.Schemas()
+	return c.executor.Breakdown(schemas, c.cp)
+}
+
 // ContextSnapshot returns (promptTokens, contextWindow) from the most recent
 // turn. Both zero means no data yet — a gauge hides itself.
 func (c *Controller) ContextSnapshot() (int, int) {
@@ -1475,6 +1498,15 @@ func (c *Controller) SessionCache() (hit, miss int) {
 		return 0, 0
 	}
 	return c.executor.SessionCache()
+}
+
+// SessionUsage returns cumulative token and cost totals for the current session.
+// Zero values before the first turn completes or when no agent exists.
+func (c *Controller) SessionUsage() agent.SessionUsageMeta {
+	if c.executor == nil {
+		return agent.SessionUsageMeta{}
+	}
+	return c.executor.SessionUsage()
 }
 
 // Balance queries the active provider's wallet balance, or (nil, nil) when the

@@ -72,6 +72,8 @@ func builtinHelpItems() []compItem {
 		{label: "/sandbox", hint: i18n.M.CmdSandbox},
 		{label: "/language", hint: i18n.M.CmdLanguage},
 		{label: "/auto-plan", hint: i18n.M.CmdAutoPlan},
+		{label: "/context", hint: i18n.M.CmdContext},
+		{label: "/stats", hint: i18n.M.CmdStats},
 		{label: "/help", hint: i18n.M.CmdHelp},
 	}
 }

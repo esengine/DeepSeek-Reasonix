@@ -19,10 +19,10 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/x/ansi"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/clipboard"
 	"reasonix/internal/command"
 	"reasonix/internal/config"
 	"reasonix/internal/control"
@@ -89,6 +89,10 @@ type chatTUI struct {
 	// rides in outgoing user messages so the cache-stable prompt prefix is left
 	// untouched.
 	planMode bool
+
+	// mouseDisabled toggles mouse capture on/off (Ctrl+Shift+M) so the user can
+	// use the terminal's native text selection.
+	mouseDisabled bool
 
 	// pendingInterject queues input typed while a turn runs; each TurnDone
 	// dequeues the front and submits it as the next turn.
@@ -957,7 +961,7 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			return m, nil
-		case "ctrl+c", "super+c", "meta+c":
+		case "ctrl+c", "ctrl+shift+c", "super+c", "meta+c":
 			if m.state == tuiRunning {
 				if m.bubblePending {
 					m.unsendPending() // server not yet replied — restore text, leave no trace
@@ -1004,6 +1008,14 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, finalize(m, cmds)
 		case "ctrl+o":
 			m.toggleVerboseReasoning(m.state != tuiRunning)
+			return m, finalize(m, cmds)
+		case "ctrl+shift+m":
+			m.mouseDisabled = !m.mouseDisabled
+			if m.mouseDisabled {
+				m.notice("mouse capture disabled — native selection available")
+			} else {
+				m.notice("mouse capture enabled")
+			}
 			return m, finalize(m, cmds)
 		case "ctrl+b":
 			m.toggleShellOutput()
@@ -2147,6 +2159,9 @@ func (m chatTUI) View() tea.View {
 	if jt := m.jobsTag(); jt != "" {
 		data = append(data, jt)
 	}
+	if st := m.sessionTag(); st != "" {
+		data = append(data, st)
+	}
 	if m.balance != "" {
 		data = append(data, dim(m.balance))
 	}
@@ -2238,7 +2253,9 @@ func (m chatTUI) View() tea.View {
 	}
 	v := tea.NewView(mainArea + "\n" + strings.Join(parts, "\n"))
 	v.AltScreen = true
-	v.MouseMode = tea.MouseModeCellMotion // wheel scrolls the transcript
+	if !m.mouseDisabled {
+		v.MouseMode = tea.MouseModeCellMotion // wheel scrolls the transcript
+	}
 	// Anchor the real terminal cursor at the textarea's insertion point only when
 	// the composer is visible. input.Cursor() is relative to the textarea; offset
 	// by the viewport height + rows above + the box's top border row (+1 column
@@ -2350,6 +2367,43 @@ func (m chatTUI) cacheTag() string {
 		return dim(avg)
 	}
 	return ""
+}
+
+// sessionTag returns a compact session total for the status data row, e.g.
+// "∑ 15.2K tok · $0.042". "" before any usage has been reported.
+func (m chatTUI) sessionTag() string {
+	u := m.ctrl.SessionUsage()
+	if u.TotalTokens == 0 {
+		return ""
+	}
+	costStr := ""
+	if u.Cost > 0 {
+		costStr = fmt.Sprintf(" · %s%.4f", u.Currency, u.Cost)
+	}
+	return dim(fmt.Sprintf("∑ %s%s", shortTokens(u.TotalTokens), costStr))
+}
+
+// sessionSummary returns a full per-turn-style breakdown for the whole session.
+// Uses FormatUsageLine's layout so the numbers look familiar.
+func (m chatTUI) sessionSummary() string {
+	u := m.ctrl.SessionUsage()
+	if u.TotalTokens == 0 {
+		return ""
+	}
+	cacheCol := ""
+	if u.CacheHitTokens+u.CacheMissTokens > 0 {
+		cacheCol = fmt.Sprintf(" (%d cached / %d new)", u.CacheHitTokens, u.CacheMissTokens)
+	}
+	reasoning := ""
+	if u.ReasoningTokens > 0 {
+		reasoning = fmt.Sprintf(" (%d reasoning)", u.ReasoningTokens)
+	}
+	cost := ""
+	if u.Cost > 0 {
+		cost = fmt.Sprintf(" · %s%.4f", u.Currency, u.Cost)
+	}
+	return fmt.Sprintf("  · session: %d tok · in %d%s · out %d%s%s",
+		u.TotalTokens, u.PromptTokens, cacheCol, u.CompletionTokens, reasoning, cost)
 }
 
 // jobsTag shows the count of running background jobs in the status line. Job
@@ -2673,18 +2727,18 @@ func pasteClipboardImage() tea.Cmd {
 
 func pasteClipboard() tea.Cmd {
 	return func() tea.Msg {
+		text, textErr := clipboard.Read()
+		if textErr == nil && text != "" {
+			return clipboardPasteMsg{text: text}
+		}
 		path, imageErr := control.SaveClipboardImage()
 		if imageErr == nil {
 			return clipboardPasteMsg{path: path}
 		}
-		text, textErr := clipboard.ReadAll()
-		if textErr == nil && text != "" {
-			return clipboardPasteMsg{text: text}
-		}
 		if textErr != nil {
-			return clipboardPasteMsg{err: fmt.Errorf("%v; text paste failed: %w", imageErr, textErr)}
+			return clipboardPasteMsg{err: fmt.Errorf("text: %w; image: %v", textErr, imageErr)}
 		}
-		return clipboardPasteMsg{err: imageErr}
+		return clipboardPasteMsg{err: fmt.Errorf("clipboard empty or inaccessible")}
 	}
 }
 
@@ -3155,6 +3209,11 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 		return func() tea.Msg { return compactDoneMsg{err: m.ctrl.Compact(context.Background(), focus)} }
 	case "/new", "/clear":
 		m.echoLocalCommand(input)
+		// Print session summary before the agent resets.
+		if summary := m.sessionSummary(); summary != "" {
+			m.commitLine(dim("  ── session closed ──"))
+			m.commitLine(summary)
+		}
 		if err := m.ctrl.NewSession(); err != nil {
 			m.notice(fmt.Sprintf("%s: %v", i18n.M.SlashNewFailed, err))
 			return nil
@@ -3168,6 +3227,23 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 		m.commitLine("")
 		m.commitLine(strings.TrimRight(renderTUIBanner(m.label, "", m.width), "\n"))
 		m.notice(i18n.M.SlashNewDone)
+	case "/stats":
+		m.echoLocalCommand(input)
+		if summary := m.sessionSummary(); summary != "" {
+			m.commitLine(summary)
+		} else {
+			m.notice("no session usage yet")
+		}
+	case "/context":
+		m.echoLocalCommand(input)
+		bk := m.ctrl.ContextBreakdown()
+		if bk == nil || bk.TotalEstimated == 0 && bk.Usage.TotalTokens == 0 {
+			m.notice("no session data yet")
+			break
+		}
+		for _, ln := range strings.Split(bk.FormatBreakdown(), "\n") {
+			m.commitLine(ln)
+		}
 	case "/resume":
 		m.runResumeCommand(input)
 	case "/todo":
@@ -3463,6 +3539,7 @@ func renderTUIBanner(label, missing string, width int) string {
 	var b strings.Builder
 	b.WriteString(accent("◆") + " " + bold("reasonix chat") + "  " + dim("· "+label) + "\n")
 	b.WriteString(dim("  "+i18n.M.ChatTip) + "\n")
+	b.WriteString(dim("  tip: Ctrl+C copies selection · Ctrl+Shift+M toggles mouse capture") + "\n")
 	if missing != "" {
 		b.WriteString(wrapForViewport("  ! "+missing, width, activeCLITheme.warn) + "\n")
 	}

@@ -10,8 +10,9 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/x/ansi"
+
+	"reasonix/internal/clipboard"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/checkpoint"
@@ -1340,8 +1341,8 @@ func TestCtrlCClearsThenDoublePressQuits(t *testing.T) {
 // of arming the double-press quit gesture.
 func TestCtrlCCopySelection(t *testing.T) {
 	var copied string
-	clipboardWriteAll = func(text string) error { copied = text; return nil }
-	defer func() { clipboardWriteAll = clipboard.WriteAll }()
+	clipboardWrite = func(text string) error { copied = text; return nil }
+	defer func() { clipboardWrite = clipboard.Write }()
 
 	m := newTestChatTUI()
 	ctrlC := tea.KeyPressMsg{Code: 'c', Mod: 4}
