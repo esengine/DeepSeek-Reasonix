@@ -8451,6 +8451,17 @@ a[href] {
   color: var(--control-disabled-fg);
 }
 
+/* Stop icon steps: rotate 90° CW, pause, repeat */
+.composer-meta__action-btn--stop:not(:disabled) svg {
+  animation: stop-step 1s ease-in-out infinite;
+}
+
+@keyframes stop-step {
+  0%    { transform: rotate(0deg); }
+  25%   { transform: rotate(90deg); }   /* 0.25s 转完 90° */
+  100%  { transform: rotate(90deg); }   /* 停 0.75s */
+}
+
 .composer-context {
   display: flex;
   flex-wrap: wrap;
