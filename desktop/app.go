@@ -697,11 +697,26 @@ func (a *App) NewSession() error {
 	if ctrl == nil {
 		return nil
 	}
+	// Tab is already blank — just persist and skip the new-session dance.
+	if !ctrl.Running() && !messagesHaveConversationContent(ctrl.History()) {
+		a.persistTabSessionPath(tab, ctrl.SessionPath())
+		return nil
+	}
+
 	if err := ctrl.NewSession(); err != nil {
 		return err
 	}
 	a.persistTabSessionPath(tab, ctrl.SessionPath())
 	return nil
+}
+
+func messagesHaveConversationContent(messages []provider.Message) bool {
+	for _, msg := range messages {
+		if msg.Role != provider.RoleSystem {
+			return true
+		}
+	}
+	return false
 }
 
 // CheckpointMeta summarises one rewind point (a user turn) for the desktop.

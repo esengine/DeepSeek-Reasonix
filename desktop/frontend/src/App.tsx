@@ -371,7 +371,6 @@ export default function App() {
     approve,
     answerQuestion,
     setControllerMode,
-    newSession,
     listSessions,
     listTrashedSessions,
     resumeSession,
@@ -392,6 +391,7 @@ export default function App() {
     closeTab,
     reorderTabs,
     syncActiveTab,
+    ensureBlankTab,
   } = useController();
   const { locale, setPref: setLocalePref } = useI18n();
   const t = useT();
@@ -426,6 +426,7 @@ export default function App() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const topicRenameSkipCommitRef = useRef(false);
   const topicRenameCommitHandledRef = useRef(false);
+  const openingBlankSessionRef = useRef(false);
 
   // Persist window geometry across launches.
   useWindowStatePersistence();
@@ -799,9 +800,33 @@ export default function App() {
     return () => observer.disconnect();
   }, []);
 
+  // Determine the scope and workspace root for a new blank session,
+  // derived from the currently active tab or fallback cwd.
+  const blankSessionTarget = useCallback(() => {
+    const activeWorkspaceRoot = activeTab?.workspaceRoot || state.meta?.cwd || "";
+    const scope = activeTab?.scope === "global" || !activeWorkspaceRoot ? "global" : "project";
+    return { scope, workspaceRoot: scope === "project" ? activeWorkspaceRoot : "" };
+  }, [activeTab?.scope, activeTab?.workspaceRoot, state.meta?.cwd]);
+
+  // Open a blank tab via the backend, bump revision/signal to trigger
+  // project-tree update and tab-reveal UI effect.
+  const openBlankSession = useCallback(async (scope: string, workspaceRoot: string) => {
+    if (openingBlankSessionRef.current) return;
+    openingBlankSessionRef.current = true;
+    try {
+      await ensureBlankTab(scope, workspaceRoot);
+      setProjectRevision((value) => value + 1);
+      await refreshTabMetas();
+      setTabRevealSignal((signal) => signal + 1);
+    } finally {
+      openingBlankSessionRef.current = false;
+    }
+  }, [ensureBlankTab, refreshTabMetas]);
+
   const startNewSession = useCallback(async () => {
-    await newSession();
-  }, [newSession]);
+    const target = blankSessionTarget();
+    await openBlankSession(target.scope, target.workspaceRoot);
+  }, [blankSessionTarget, openBlankSession]);
 
   const toggleSidebar = useCallback(() => {
     setSidebarCollapsed((collapsed) => {
@@ -1058,19 +1083,9 @@ export default function App() {
   }, [refreshTabMetas, reorderTabs]);
 
   const handleNewTab = useCallback(async () => {
-    const activeWorkspaceRoot = activeTab?.workspaceRoot || state.meta?.cwd || "";
-    const targetScope = activeTab?.scope === "global" || !activeWorkspaceRoot ? "global" : "project";
-    const workspaceRoot = targetScope === "project" ? activeWorkspaceRoot : "";
-    const topic = await app.CreateTopic(targetScope, workspaceRoot, "");
-    if (targetScope === "global" || !workspaceRoot) {
-      await openGlobalTab(topic.id);
-    } else {
-      await openProjectTab(workspaceRoot, topic.id);
-    }
-    setProjectRevision((value) => value + 1);
-    await refreshTabMetas();
-    setTabRevealSignal((signal) => signal + 1);
-  }, [activeTab?.scope, activeTab?.workspaceRoot, openGlobalTab, openProjectTab, refreshTabMetas, state.meta?.cwd]);
+    const target = blankSessionTarget();
+    await openBlankSession(target.scope, target.workspaceRoot);
+  }, [blankSessionTarget, openBlankSession]);
 
   // ── Command palette (⌘K) ────────────────────────────────────────────
   useEffect(() => {
@@ -1403,6 +1418,7 @@ export default function App() {
               activeTopicId={activeTab?.topicId}
               onOpenTopic={handleOpenTopic}
               onOpenProjectHistory={openProjectHistory}
+              onCreateTopic={(scope, workspaceRoot) => openBlankSession(scope, scope === "project" ? workspaceRoot : "")}
               onTopicsChanged={refreshProjectsAndTabs}
               onRenameTopic={renameTopic}
               refreshSignal={projectRevision}

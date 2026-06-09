@@ -205,6 +205,7 @@ export interface AppBindings {
   ListTabs(): Promise<TabMeta[]>;
   OpenProjectTab(workspaceRoot: string, topicID: string): Promise<TabMeta>;
   OpenGlobalTab(topicID: string): Promise<TabMeta>;
+  EnsureBlankTab(scope: string, workspaceRoot: string): Promise<TabMeta>;
   SetActiveTab(tabID: string): Promise<void>;
   ReorderTabs(tabIDs: string[]): Promise<void>;
   CloseTab(tabID: string): Promise<void>;
@@ -1684,6 +1685,21 @@ function makeMockApp(): AppBindings {
       };
       mockTabs = [...mockTabs.map((item) => ({ ...item, active: false })), tab];
       return { ...tab };
+    },
+    async EnsureBlankTab(scope: string, workspaceRoot: string) {
+      const targetScope = scope === "project" && workspaceRoot ? "project" : "global";
+      const targetRoot = targetScope === "project" ? workspaceRoot : "";
+      const existing = mockTabs.find((tab) =>
+        tab.scope === targetScope &&
+        (targetScope === "global" || tab.workspaceRoot === targetRoot) &&
+        !tab.running
+      );
+      if (existing) {
+        setMockActiveTab(existing.id);
+        return { ...existing, active: true };
+      }
+      const topic = await this.CreateTopic(targetScope, targetRoot, "");
+      return targetScope === "global" ? this.OpenGlobalTab(topic.id) : this.OpenProjectTab(targetRoot, topic.id);
     },
     async SetActiveTab(_tabID: string) {
       setMockActiveTab(_tabID);
