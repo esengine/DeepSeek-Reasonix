@@ -11,7 +11,7 @@
 //   --only-unlabeled   skip issues that already have an area label
 //   --limit N          process at most N issues (default 200)
 
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 
 const args = process.argv.slice(2);
 const dryRun = args.includes('--dry-run');
@@ -52,8 +52,8 @@ const SYSTEM = [
   'Reply with JSON only: {"area":[],"platform":[],"severity":[]}',
 ].join('\n');
 
-function gh(cmd) {
-  return execSync(`gh ${cmd}`, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+function gh(args) {
+  return execFileSync('gh', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 }
 
 async function classify(title, body) {
@@ -76,7 +76,9 @@ async function classify(title, body) {
   return [...(parsed.area || []), ...(parsed.platform || []), ...(parsed.severity || [])].filter((l) => ALLOWED.has(l));
 }
 
-const issues = JSON.parse(gh(`issue list --state open --limit ${limit} --json number,title,body,labels`));
+const issues = JSON.parse(
+  gh(['issue', 'list', '--state', 'open', '--limit', String(limit), '--json', 'number,title,body,labels']),
+);
 console.log(`${issues.length} open issues; dryRun=${dryRun} onlyUnlabeled=${onlyUnlabeled}`);
 
 let changed = 0;
@@ -101,8 +103,7 @@ for (const it of issues) {
   if (dryRun) {
     console.log(`#${it.number}: would add ${toAdd.join(', ')}  — ${it.title.slice(0, 50)}`);
   } else {
-    const flags = toAdd.map((l) => `--add-label "${l}"`).join(' ');
-    gh(`issue edit ${it.number} ${flags}`);
+    gh(['issue', 'edit', String(it.number), ...toAdd.flatMap((l) => ['--add-label', l])]);
     console.log(`#${it.number}: +${toAdd.join(', ')}`);
   }
   changed++;
