@@ -489,7 +489,6 @@ a[href] {
   min-width: 0;
   padding: 12px 10px;
   background: var(--sidebar-bg);
-  border-right: 1px solid var(--border-soft);
   --wails-draggable: drag;
   user-select: none;
   overflow: hidden;
@@ -548,7 +547,6 @@ a[href] {
   gap: 2px;
   flex: 0 0 auto;
   padding: 10px 0 8px;
-  border-top: 1px solid var(--border-soft);
 }
 .sidebar__navitem {
   display: flex;
@@ -9801,8 +9799,9 @@ a[href] {
   left: 0;
   top: 0;
   bottom: 0;
-  width: 4px;
-  background: color-mix(in srgb, var(--project-accent, var(--accent)) 88%, #ff9d22);
+  width: 3px;
+  border-radius: 0 2px 2px 0;
+  background: color-mix(in srgb, var(--project-accent, var(--accent)) 70%, #ff9d22);
   pointer-events: none;
 }
 
