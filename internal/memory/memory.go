@@ -13,11 +13,13 @@ import (
 // UserDir are retained so the controller can resolve quick-add targets without
 // re-deriving discovery context.
 type Set struct {
-	Docs    []Source // REASONIX.md / AGENTS.md, ascending precedence
-	Store   Store    // auto-memory store (may be a zero/disabled Store)
-	Index   string   // MEMORY.md contents at load time
-	CWD     string   // project working dir used for discovery
-	UserDir string   // user config root (may be "")
+	Docs        []Source // REASONIX.md / AGENTS.md, ascending precedence
+	Store       Store    // auto-memory store (may be a zero/disabled Store)
+	GlobalStore Store    // global auto-memory store (may be a zero/disabled Store)
+	Index       string   // MEMORY.md contents at load time
+	GlobalIndex string   // global MEMORY.md contents at load time
+	CWD         string   // project working dir used for discovery
+	UserDir     string   // user config root (may be "")
 }
 
 // Options configures discovery. CWD defaults to "." and UserDir is the user
@@ -37,12 +39,15 @@ func Load(opts Options) *Set {
 		cwd = "."
 	}
 	store := StoreFor(opts.UserDir, cwd)
+	globalStore := StoreForGlobal(opts.UserDir)
 	return &Set{
-		Docs:    discoverDocs(cwd, opts.UserDir),
-		Store:   store,
-		Index:   store.Index(),
-		CWD:     cwd,
-		UserDir: opts.UserDir,
+		Docs:        discoverDocs(cwd, opts.UserDir),
+		Store:       store,
+		GlobalStore: globalStore,
+		Index:       store.Index(),
+		GlobalIndex: globalStore.Index(),
+		CWD:         cwd,
+		UserDir:     opts.UserDir,
 	}
 }
 
@@ -77,7 +82,7 @@ func (s *Set) DocPath(scope Scope) string {
 // the base prompt byte-for-byte untouched (and the cache prefix maximal) when
 // there is no memory at all.
 func (s *Set) Empty() bool {
-	return s == nil || (len(s.Docs) == 0 && strings.TrimSpace(s.Index) == "")
+	return s == nil || (len(s.Docs) == 0 && strings.TrimSpace(s.Index) == "" && strings.TrimSpace(s.GlobalIndex) == "")
 }
 
 // docScopes are the scopes the panel can target for a quick-add or a new doc.
@@ -143,6 +148,13 @@ func (s *Set) Block() string {
 			"Save new durable facts with the `remember` tool; delete ones that turn out wrong with `forget`.\n\n")
 		b.WriteString(idx)
 		fmt.Fprintf(&b, "\n\n(stored under %s)\n", s.Store.Dir)
+	}
+
+	if gidx := strings.TrimSpace(s.GlobalIndex); gidx != "" {
+		b.WriteString("\n## Global memories\n\n")
+		b.WriteString("Cross-project facts stored globally. Applied automatically in every project.\n\n")
+		b.WriteString(gidx)
+		fmt.Fprintf(&b, "\n\n(stored under %s)\n", s.GlobalStore.Dir)
 	}
 	return b.String()
 }

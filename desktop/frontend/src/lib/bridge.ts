@@ -1501,6 +1501,7 @@ function makeMockApp(): AppBindings {
             body: "Indent with tabs.",
           },
         ],
+        globalFacts: [],
         scopes: [
           { scope: "user", path: "~/.config/reasonix/REASONIX.md" },
           { scope: "project", path: "REASONIX.md" },

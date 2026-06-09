@@ -459,6 +459,7 @@ export interface MemoryScope {
 export interface MemoryView {
   docs: MemoryDoc[];
   facts: MemoryFact[];
+  globalFacts: MemoryFact[];
   scopes: MemoryScope[];
   storeDir: string;
   available: boolean;

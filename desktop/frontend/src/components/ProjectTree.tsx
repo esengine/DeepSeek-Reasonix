@@ -203,9 +203,46 @@ export function ProjectTree({
         return next;
       });
     } catch {
-      /* bridge unavailable */
+      /* bridge unavailable — Wails bindings may not be registered yet on
+       * first render. Retry with exponential backoff so the sidebar
+       * populates once the backend is ready, instead of staying empty
+       * for the entire session. */
+      retryRefresh(0);
     }
   }, [manuallyCollapsed]);
+
+  // Retry refresh when the first call fails due to Wails bindings not yet
+  // being registered on the JS side. Exponential backoff: ~400ms, ~800ms, ~1.6s.
+  const retryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const retryRefresh = useCallback((attempt: number) => {
+    if (attempt > 3) return;
+    retryRef.current = setTimeout(async () => {
+      try {
+        const nodes = await app.ListProjectTree();
+        const list = asArray(nodes);
+        if (list.length === 0 && attempt < 3) {
+          retryRefresh(attempt + 1);
+          return;
+        }
+        setTree(list);
+        setExpanded((prev) => {
+          const next = new Set(prev);
+          for (const node of list) {
+            if (node?.key && !manuallyCollapsed.has(node.key)) next.add(node.key);
+          }
+          return next;
+        });
+      } catch {
+        retryRefresh(attempt + 1);
+      }
+    }, 400 * (attempt + 1));
+  }, [manuallyCollapsed]);
+
+  useEffect(() => {
+    return () => {
+      if (retryRef.current) clearTimeout(retryRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     void refresh();

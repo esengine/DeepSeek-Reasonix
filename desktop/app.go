@@ -412,10 +412,26 @@ func (a *App) restoreOrBuildTabs() {
 		return
 	}
 
-	// First launch: create a default Global tab.
-	tab := a.createTabEntry("global", globalTabWorkspaceRoot(), "")
+	// First launch: create a default Global tab with a real topicID so the
+	// project tree is immediately visible (the old empty-string topicID meant
+	// ensureTopicIndexed never fired, leaving ListProjectTree with nothing).
+	topic, err := a.CreateTopic("global", "", "")
+	if err != nil {
+		log.Printf("create default global topic: %v", err)
+		tab := a.createTabEntry("global", globalTabWorkspaceRoot(), "")
+		tab.sink = &tabEventSink{tabID: tab.ID, app: a, ctx: ctx}
+		tab.TopicTitle = "Global"
+		a.mu.Lock()
+		a.tabs[tab.ID] = tab
+		a.tabOrder = append(a.tabOrder, tab.ID)
+		a.activeTabID = tab.ID
+		a.mu.Unlock()
+		a.startTabControllerBuild(tab)
+		return
+	}
+	tab := a.createTabEntryWithID("global", globalTabWorkspaceRoot(), topic.ID, newTabID())
 	tab.sink = &tabEventSink{tabID: tab.ID, app: a, ctx: ctx}
-	tab.TopicTitle = "Global"
+	tab.TopicTitle = topic.Title
 	a.mu.Lock()
 	a.tabs[tab.ID] = tab
 	a.tabOrder = append(a.tabOrder, tab.ID)
@@ -3702,11 +3718,12 @@ type MemoryScope struct {
 // MemoryView is the whole memory panel payload: hierarchical docs, saved facts,
 // and the writable scopes for the quick-add selector.
 type MemoryView struct {
-	Docs      []MemoryDoc   `json:"docs"`
-	Facts     []MemoryFact  `json:"facts"`
-	Scopes    []MemoryScope `json:"scopes"`
-	StoreDir  string        `json:"storeDir"`
-	Available bool          `json:"available"`
+	Docs        []MemoryDoc   `json:"docs"`
+	Facts       []MemoryFact  `json:"facts"`
+	GlobalFacts []MemoryFact  `json:"globalFacts"`
+	Scopes      []MemoryScope `json:"scopes"`
+	StoreDir    string        `json:"storeDir"`
+	Available   bool          `json:"available"`
 }
 
 // writableScopes are the quick-add targets the panel offers, broad → specific.
@@ -3718,7 +3735,7 @@ var writableScopes = []memory.Scope{memory.ScopeUser, memory.ScopeProject, memor
 func (a *App) Memory() MemoryView {
 	// Always return non-nil slices: a nil Go slice marshals to JSON `null`, which
 	// would crash the panel's `view.facts.length` / `.map`.
-	view := MemoryView{Docs: []MemoryDoc{}, Facts: []MemoryFact{}, Scopes: []MemoryScope{}}
+	view := MemoryView{Docs: []MemoryDoc{}, Facts: []MemoryFact{}, GlobalFacts: []MemoryFact{}, Scopes: []MemoryScope{}}
 	a.mu.RLock()
 	ctrl := a.activeCtrlLocked()
 	a.mu.RUnlock()
@@ -3736,6 +3753,11 @@ func (a *App) Memory() MemoryView {
 	}
 	for _, f := range set.Store.List() {
 		view.Facts = append(view.Facts, MemoryFact{
+			Name: f.Name, Title: f.Title, Description: f.Description, Type: string(f.Type), Body: f.Body,
+		})
+	}
+	for _, f := range set.GlobalStore.List() {
+		view.GlobalFacts = append(view.GlobalFacts, MemoryFact{
 			Name: f.Name, Title: f.Title, Description: f.Description, Type: string(f.Type), Body: f.Body,
 		})
 	}

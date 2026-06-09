@@ -65,6 +65,15 @@ func StoreFor(userDir, cwd string) Store {
 	return Store{Dir: filepath.Join(userDir, "projects", slugify(absOf(cwd)), "memory")}
 }
 
+// StoreForGlobal resolves the global auto-memory directory under the user config
+// root, e.g. ~/.config/reasonix/memory/global. A "" userDir yields a zero Store.
+func StoreForGlobal(userDir string) Store {
+	if userDir == "" {
+		return Store{}
+	}
+	return Store{Dir: filepath.Join(userDir, "memory", "global")}
+}
+
 // indexFile is the human-readable index of saved memories.
 const indexFile = "MEMORY.md"
 

@@ -13,7 +13,7 @@ import { Tooltip } from "./Tooltip";
 // brings it back.
 export function TodoPanel({ todos, stale, onDismiss }: { todos: Todo[]; stale?: boolean; onDismiss: () => void }) {
   const t = useT();
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
   const currentRef = useRef<HTMLLIElement | null>(null);
 
   const done = todos.filter((t) => t.status === "completed").length;
