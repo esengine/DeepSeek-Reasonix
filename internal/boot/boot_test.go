@@ -112,6 +112,8 @@ model = "x"
 		t.Fatalf("Build: %v", err)
 	}
 	defer ctrl.Close()
+	sessionPath := agent.NewSessionPath(ctrl.SessionDir(), ctrl.Label())
+	ctrl.SetSessionPath(sessionPath)
 
 	if err := ctrl.Run(context.Background(), "first review"); err != nil {
 		t.Fatalf("first Run: %v", err)
@@ -129,6 +131,9 @@ model = "x"
 	}
 	if meta.Status != agent.SubagentFailed {
 		t.Fatalf("status = %q, want failed", meta.Status)
+	}
+	if meta.ParentSession != agent.BranchID(sessionPath) {
+		t.Fatalf("parent session = %q, want %q", meta.ParentSession, agent.BranchID(sessionPath))
 	}
 	sess, err := agent.LoadSession(filepath.Join(config.SessionDir(), "subagents", ref+".jsonl"))
 	if err != nil {

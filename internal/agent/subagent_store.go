@@ -95,6 +95,9 @@ func (s *SubagentStore) PrepareFresh(spec SubagentSpec) (*SubagentRun, error) {
 	if s == nil {
 		return nil, fmt.Errorf("subagent transcript store is required")
 	}
+	if err := requireParentSession(spec); err != nil {
+		return nil, err
+	}
 	ref, err := s.newRef()
 	if err != nil {
 		return nil, err
@@ -112,6 +115,9 @@ func (s *SubagentStore) PrepareContinue(ref string, spec SubagentSpec) (*Subagen
 	if s == nil {
 		return nil, fmt.Errorf("subagent continuation is not available in this session")
 	}
+	if err := requireParentSession(spec); err != nil {
+		return nil, err
+	}
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
 		return nil, fmt.Errorf("continue_from requires a subagent reference")
@@ -122,6 +128,10 @@ func (s *SubagentStore) PrepareContinue(ref string, spec SubagentSpec) (*Subagen
 	}
 	meta, err := s.LoadMeta(ref)
 	if err != nil {
+		release()
+		return nil, err
+	}
+	if err := validateContinueOwner(meta, spec); err != nil {
 		release()
 		return nil, err
 	}
@@ -143,6 +153,9 @@ func (s *SubagentStore) PrepareFork(ref string, spec SubagentSpec) (*SubagentRun
 	if s == nil {
 		return nil, fmt.Errorf("subagent continuation is not available in this session")
 	}
+	if err := requireParentSession(spec); err != nil {
+		return nil, err
+	}
 	sourceRef := strings.TrimSpace(ref)
 	if sourceRef == "" {
 		return nil, fmt.Errorf("fork_from requires a subagent reference")
@@ -155,6 +168,10 @@ func (s *SubagentStore) PrepareFork(ref string, spec SubagentSpec) (*SubagentRun
 	if err != nil {
 		sourceRelease()
 		return nil, err
+	}
+	if strings.TrimSpace(meta.ParentSession) == "" {
+		sourceRelease()
+		return nil, fmt.Errorf("subagent reference %q has no parent session; run a fresh subagent instead", sourceRef)
 	}
 	if err := validateMeta(meta, spec); err != nil {
 		sourceRelease()
@@ -278,6 +295,25 @@ func validateMeta(meta SubagentMeta, spec SubagentSpec) error {
 		return fmt.Errorf("subagent reference %q uses model/effort %q/%q, current run would use %q/%q", meta.Ref, meta.Model, meta.Effort, want.Model, want.Effort)
 	}
 	return nil
+}
+
+func requireParentSession(spec SubagentSpec) error {
+	if strings.TrimSpace(spec.ParentSession) == "" {
+		return fmt.Errorf("subagent transcript parent session is required")
+	}
+	return nil
+}
+
+func validateContinueOwner(meta SubagentMeta, spec SubagentSpec) error {
+	current := strings.TrimSpace(spec.ParentSession)
+	owner := strings.TrimSpace(meta.ParentSession)
+	if owner == current {
+		return nil
+	}
+	if owner == "" {
+		return fmt.Errorf("subagent reference %q has no parent session; run a fresh subagent instead", meta.Ref)
+	}
+	return fmt.Errorf("subagent reference %q belongs to parent session %q, current parent session is %q; use fork_from to copy it into this session", meta.Ref, owner, current)
 }
 
 func (s *SubagentStore) lock(ref string) (func(), error) {

@@ -215,7 +215,7 @@ func (t *TaskTool) Execute(ctx context.Context, args json.RawMessage) (string, e
 	subReg := t.buildSubReg(p.Tools)
 	modelRef, effortRef := t.effectiveProfile(p.Model, p.Effort)
 	parentID, parent, _, _ := CallContext(ctx)
-	run, err := t.prepareTranscriptRun(subReg, modelRef, effortRef, parentID, p.ContinueFrom, p.ForkFrom)
+	run, err := t.prepareTranscriptRun(subReg, modelRef, effortRef, ParentSession(ctx), parentID, p.ContinueFrom, p.ForkFrom)
 	if err != nil {
 		return "", err
 	}
@@ -280,20 +280,25 @@ func (t *TaskTool) Execute(ctx context.Context, args json.RawMessage) (string, e
 	return answer, nil
 }
 
-func (t *TaskTool) prepareTranscriptRun(subReg *tool.Registry, modelRef, effortRef, parentID, continueFrom, forkFrom string) (*SubagentRun, error) {
+func (t *TaskTool) prepareTranscriptRun(subReg *tool.Registry, modelRef, effortRef, parentSession, parentID, continueFrom, forkFrom string) (*SubagentRun, error) {
 	continueFrom = strings.TrimSpace(continueFrom)
 	forkFrom = strings.TrimSpace(forkFrom)
+	parentSession = strings.TrimSpace(parentSession)
 	if continueFrom != "" && forkFrom != "" {
 		return nil, fmt.Errorf("continue_from and fork_from are mutually exclusive")
 	}
 	if t.transcripts == nil {
 		return nil, fmt.Errorf("subagent transcript store is required")
 	}
+	if parentSession == "" {
+		return nil, fmt.Errorf("subagent transcript parent session is required")
+	}
 	identityModel, identityEffort := t.effectiveIdentity(modelRef, effortRef)
 	spec := SubagentSpec{
 		Kind:             "task",
 		Name:             "task",
 		WorkspaceRoot:    t.workspaceRoot,
+		ParentSession:    parentSession,
 		ParentToolCallID: parentID,
 		SystemPrompt:     t.sysPrompt,
 		Registry:         subReg,

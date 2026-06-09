@@ -59,6 +59,63 @@ func TestSubagentStoreForkCreatesIndependentReference(t *testing.T) {
 	if got := forked.Session.Snapshot(); len(got) != 2 || got[1].Content != "review diff" {
 		t.Fatalf("fork transcript = %+v, want copied messages", got)
 	}
+	if forked.Meta.ParentSession != spec.ParentSession {
+		t.Fatalf("fork parent session = %q, want %q", forked.Meta.ParentSession, spec.ParentSession)
+	}
+}
+
+func TestSubagentStoreRejectsContinueFromDifferentParentSession(t *testing.T) {
+	store := NewSubagentStore(t.TempDir())
+	spec := testSubagentSpec(t, "review")
+	run, err := store.PrepareFresh(spec)
+	if err != nil {
+		t.Fatalf("PrepareFresh: %v", err)
+	}
+	if err := store.SaveCompleted(run); err != nil {
+		t.Fatalf("SaveCompleted: %v", err)
+	}
+	run.Release()
+
+	other := spec
+	other.ParentSession = "other-parent"
+	if _, err := store.PrepareContinue(run.Ref, other); err == nil || !strings.Contains(err.Error(), "use fork_from") {
+		t.Fatalf("PrepareContinue error = %v, want parent ownership failure", err)
+	}
+}
+
+func TestSubagentStoreForkFromDifferentParentSessionCreatesCurrentOwner(t *testing.T) {
+	store := NewSubagentStore(t.TempDir())
+	spec := testSubagentSpec(t, "review")
+	run, err := store.PrepareFresh(spec)
+	if err != nil {
+		t.Fatalf("PrepareFresh: %v", err)
+	}
+	run.Session.Add(provider.Message{Role: provider.RoleUser, Content: "review diff"})
+	if err := store.SaveCompleted(run); err != nil {
+		t.Fatalf("SaveCompleted: %v", err)
+	}
+	run.Release()
+
+	other := spec
+	other.ParentSession = "other-parent"
+	forked, err := store.PrepareFork(run.Ref, other)
+	if err != nil {
+		t.Fatalf("PrepareFork: %v", err)
+	}
+	defer forked.Release()
+	if forked.Ref == run.Ref {
+		t.Fatalf("fork ref should be new, got %q", forked.Ref)
+	}
+	if forked.Meta.ParentSession != "other-parent" {
+		t.Fatalf("fork parent session = %q, want other-parent", forked.Meta.ParentSession)
+	}
+	sourceMeta, err := store.LoadMeta(run.Ref)
+	if err != nil {
+		t.Fatalf("LoadMeta source: %v", err)
+	}
+	if sourceMeta.ParentSession != spec.ParentSession {
+		t.Fatalf("source parent session = %q, want %q", sourceMeta.ParentSession, spec.ParentSession)
+	}
 }
 
 func TestSubagentStoreForkReleasesSourceLockAfterCopy(t *testing.T) {
@@ -170,6 +227,7 @@ func testSubagentSpec(t *testing.T, name string) SubagentSpec {
 		Kind:          "skill",
 		Name:          name,
 		WorkspaceRoot: t.TempDir(),
+		ParentSession: "parent-session",
 		SystemPrompt:  "review persona",
 		Registry:      reg,
 		Model:         "deepseek",

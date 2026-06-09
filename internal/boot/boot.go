@@ -479,11 +479,16 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			return "", fmt.Errorf("continue_from and fork_from are mutually exclusive")
 		}
 		parentID, _, _, _ := agent.CallContext(sctx)
+		parentSession := agent.ParentSession(sctx)
+		if parentSession == "" {
+			return "", fmt.Errorf("subagent transcript parent session is required")
+		}
 		identityModel, identityEffort := subagentIdentity(modelRef, effortRef)
 		spec := agent.SubagentSpec{
 			Kind:             "skill",
 			Name:             sk.Name,
 			WorkspaceRoot:    root,
+			ParentSession:    parentSession,
 			ParentToolCallID: parentID,
 			SystemPrompt:     sk.Body,
 			Registry:         subReg,
