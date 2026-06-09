@@ -249,6 +249,30 @@ func TestReadFileRefPDFExtraction(t *testing.T) {
 	}
 }
 
+func TestRunPDFTextCommandCapsStderr(t *testing.T) {
+	t.Setenv("GO_WANT_PDF_STDERR_HELPER", "1")
+
+	_, _, err := runPDFTextCommand(os.Args[0], []string{"-test.run=TestPDFStderrHelperProcess", "--"})
+	if err == nil {
+		t.Fatal("expected helper command to fail")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "truncated") {
+		t.Fatalf("expected stderr truncation marker, got: %q", msg)
+	}
+	if len(msg) > maxFileRefBytes+1024 {
+		t.Fatalf("stderr error grew too large: len=%d", len(msg))
+	}
+}
+
+func TestPDFStderrHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_PDF_STDERR_HELPER") != "1" {
+		return
+	}
+	_, _ = os.Stderr.WriteString(strings.Repeat("x", maxFileRefBytes+4096))
+	os.Exit(7)
+}
+
 func TestResolveBareNamesDuplicates(t *testing.T) {
 	temp := t.TempDir()
 

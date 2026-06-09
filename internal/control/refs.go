@@ -22,6 +22,7 @@ import (
 const maxFileRefBytes = 64 * 1024
 
 const pdfExtractTimeout = 8 * time.Second
+const pdfExtractWaitDelay = 1 * time.Second
 
 var extractPDFText = extractPDFTextDefault
 
@@ -369,9 +370,11 @@ func runPDFTextCommand(name string, args []string) (string, bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), pdfExtractTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, name, args...)
+	setShellKillTree(cmd)
+	cmd.WaitDelay = pdfExtractWaitDelay
 	proc.HideWindow(cmd)
 	var stdout limitedBuffer
-	var stderr bytes.Buffer
+	var stderr limitedBuffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	waitErr := cmd.Run()
@@ -381,6 +384,9 @@ func runPDFTextCommand(name string, args []string) (string, bool, error) {
 	if waitErr != nil {
 		msg := strings.TrimSpace(stderr.String())
 		if msg != "" {
+			if stderr.Truncated() {
+				msg += "\n…[truncated]…"
+			}
 			return "", false, fmt.Errorf("%w: %s", waitErr, msg)
 		}
 		return "", false, waitErr
