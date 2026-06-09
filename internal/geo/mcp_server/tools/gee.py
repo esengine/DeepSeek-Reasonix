@@ -97,6 +97,7 @@ def run(args: dict) -> tuple[str, bool]:
 
         last_output = time.time()
         timed_out = False
+        stderr_data = ""
 
         while proc.poll() is None:
             if time.time() - last_output > IDLE_TIMEOUT:
@@ -112,7 +113,7 @@ def run(args: dict) -> tuple[str, bool]:
             else:
                 time.sleep(0.1)
 
-        remaining, _ = proc.communicate(timeout=5)
+        remaining, stderr_data = proc.communicate(timeout=5)
         if remaining:
             output_lines.append(remaining)
             output_total += len(remaining)
@@ -129,7 +130,7 @@ def run(args: dict) -> tuple[str, bool]:
     if output_total > MAX_OUTPUT_LENGTH:
         stdout = stdout[:MAX_OUTPUT_LENGTH] + "\n\n... (output truncated)"
 
-    stderr = proc.stderr.read() if proc.stderr else ""
+    stderr = stderr_data or ""
 
     if timed_out:
         banner = (

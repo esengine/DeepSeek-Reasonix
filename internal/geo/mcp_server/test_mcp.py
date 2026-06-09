@@ -122,8 +122,8 @@ def main():
         # run_qgis_algorithm — 空参数 → QGIS 报错（isError=True）
         results.append(test_tool_call(proc, "run_qgis_algorithm", {"algorithm": "native:buffer", "params": {}}, expect_error=True))
 
-        # run_gee_script — GEE 未认证 → 报错
-        results.append(test_tool_call(proc, "run_gee_script", {"script": "print('hello')"}, expect_error=True))
+        # run_gee_script — GEE ready，简单脚本应成功
+        results.append(test_tool_call(proc, "run_gee_script", {"script": "print('hello')"}))
 
         # qgis_doc — 新参数格式
         results.append(test_tool_call(proc, "qgis_doc", {"action": "search", "query": "buffer"}))
