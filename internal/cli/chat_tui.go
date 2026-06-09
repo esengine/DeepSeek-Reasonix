@@ -806,6 +806,8 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "pgdown":
 			m.viewport.PageDown()
 			return m, finalize(m, cmds)
+		case "ctrl+z":
+			return m, tea.Suspend
 		}
 		// A question card is modal: keys drive it. In its free-text ("Type
 		// something") mode, the keystroke goes to the textarea — Enter confirms the

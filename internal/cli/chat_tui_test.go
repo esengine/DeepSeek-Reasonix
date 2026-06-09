@@ -1288,6 +1288,19 @@ func TestDoubleCtrlCQuit(t *testing.T) {
 	}
 }
 
+func TestCtrlZSendsSuspend(t *testing.T) {
+	m := newTestChatTUI()
+	ctrlZ := tea.KeyPressMsg{Code: 'z', Mod: tea.ModCtrl}
+
+	_, cmd := m.Update(ctrlZ)
+	if cmd == nil {
+		t.Fatal("expected Ctrl+Z to return a suspend command")
+	}
+	if msg := cmd(); msg != (tea.SuspendMsg{}) {
+		t.Fatalf("expected tea.SuspendMsg, got %T", msg)
+	}
+}
+
 // TestCtrlCClearsInput verifies that a single Ctrl+C while idle with non-empty
 // input clears the composer without arming the double-press quit gesture.
 func TestCtrlCClearsInput(t *testing.T) {
