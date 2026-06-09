@@ -56,6 +56,12 @@ func newStdioTransport(ctx context.Context, s Spec) (*stdioTransport, error) {
 	}
 	cmd := exec.CommandContext(ctx, exe, s.Args...)
 	proc.HideWindow(cmd)
+	// Place the child and all its descendants in a new process group so that
+	// KillTree (off Windows) and the Cancel handler can reap the whole tree
+	// with a single negative-pid kill — without this, a launcher shell whose
+	// managed sub-daemon (e.g. codegraph's bundled node runtime) survives
+	// the parent's death leaves orphan grandchildren behind after exit.
+	proc.SetProcessGroupKill(cmd)
 	cmd.Env = env
 	if s.Dir != "" {
 		cmd.Dir = s.Dir // pin cwd-aware servers (e.g. CodeGraph) to the project root

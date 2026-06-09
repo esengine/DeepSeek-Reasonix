@@ -10,6 +10,11 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+// SetProcessGroupKill is a no-op on Windows: the Windows Job Object assigned by
+// TrackTree ensures the whole process tree is killed on exit, so Setpgid is
+// unnecessary and syscall.SysProcAttr.Setpgid doesn't exist on this platform.
+func SetProcessGroupKill(*exec.Cmd) {}
+
 // KillTree terminates cmd and every descendant it spawned. Process.Kill only
 // signals the direct child, so a launcher (cmd.exe → node.exe) leaves the
 // grandchild alive holding the inherited stdout/stderr pipes — which makes
