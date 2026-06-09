@@ -273,7 +273,7 @@ func TestCompleteStepMatchesTodoReceipt(t *testing.T) {
 	}
 }
 
-func TestCompleteStepRejectsTodoMismatchAndPending(t *testing.T) {
+func TestCompleteStepRejectsTodoMismatch(t *testing.T) {
 	ledger := evidence.NewLedger()
 	ledger.Record(evidence.Receipt{
 		ToolName: "todo_write",
@@ -291,8 +291,6 @@ func TestCompleteStepRejectsTodoMismatchAndPending(t *testing.T) {
 		want string
 	}{
 		{name: "missing", step: "Ship parser", want: "matching todo_write item"},
-		{name: "pending", step: "Document parser", want: "pending"},
-		{name: "pending number", step: "2", want: "pending"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -307,6 +305,29 @@ func TestCompleteStepRejectsTodoMismatchAndPending(t *testing.T) {
 				t.Fatalf("error %q missing %q", err, tc.want)
 			}
 		})
+	}
+}
+
+func TestCompleteStepAcceptsPendingTodo(t *testing.T) {
+	ledger := evidence.NewLedger()
+	ledger.Record(evidence.Receipt{
+		ToolName: "todo_write",
+		Success:  true,
+		Todos: []evidence.TodoItem{
+			{Content: "Add parser", Status: "pending"},
+		},
+	})
+	ctx := evidence.WithLedger(context.Background(), ledger)
+
+	out, err := completeStep{}.Execute(ctx, json.RawMessage(`{
+		"step":"Add parser",
+		"result":"parser added",
+		"evidence":[{"kind":"manual","summary":"checked manually"}]}`))
+	if err != nil {
+		t.Fatalf("pending todo should be signable with evidence: %v", err)
+	}
+	if !strings.Contains(out, "todo-matched") {
+		t.Fatalf("ack should mention todo match, got %q", out)
 	}
 }
 

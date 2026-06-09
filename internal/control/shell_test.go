@@ -135,8 +135,7 @@ func TestRunShell_FailingCommand(t *testing.T) {
 	}
 	if result == nil {
 		t.Fatal("expected a ToolResult event")
-	}
-	if result.Tool.Err == "" {
+	} else if result.Tool.Err == "" {
 		t.Error("failing command should produce an error string")
 	}
 }

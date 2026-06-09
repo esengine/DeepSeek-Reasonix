@@ -271,7 +271,17 @@ func (c *Config) NetworkProxySpec() netclient.ProxySpec {
 
 // directProxyHosts collects the base_url hosts of providers marked no_proxy, so
 // netclient bypasses the proxy for them without knowing any provider by name.
+//
+// Only for an auto-detected proxy (auto/env): that proxy is typically a
+// GFW-circumvention one not meant for domestic endpoints (e.g. mimo), so keep
+// them direct. An explicit proxy_mode = "custom" is the user saying "route
+// everything through this" — e.g. a mandatory corporate proxy — so honor it for
+// every provider; a custom-proxy user who wants a host direct uses
+// network.no_proxy instead (#3635).
 func (c *Config) directProxyHosts() []string {
+	if c.NetworkProxyMode() == netclient.ModeCustom {
+		return nil
+	}
 	seen := map[string]bool{}
 	var out []string
 	for _, p := range c.Providers {

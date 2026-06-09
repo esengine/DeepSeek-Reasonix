@@ -26,9 +26,7 @@ export function ApprovalModal({
   const bashPrefix = isBashApproval ? bashCommandPrefix(subject) : "";
   const hasBashPrefix = bashPrefix !== "";
   const subjectSummary = subject.split("\n").find((line) => line.trim())?.trim() ?? "";
-  const exactSessionRule = approvalSessionRule(approval.tool, subject);
-  const exactPersistentRule = approvalPersistentRule(approval.tool, subject);
-  const prefixRule = hasBashPrefix ? `Bash(${bashPrefix})` : "";
+
 
   const choosePlanAction = (key: string) => {
     if (key === "1") setRevisionOpen((open) => !open);
@@ -154,12 +152,12 @@ export function ApprovalModal({
             <>
               <PromptAction
                 keyLabel="2"
-                label={<RuleActionLabel label={t("approval.allowRuleSession")} rule={prefixRule} />}
+                label={t("approval.allowRuleSession")}
                 onClick={() => onAnswer(true, true, false, "prefix")}
               />
               <PromptAction
                 keyLabel="3"
-                label={<RuleActionLabel label={t("approval.allowRulePersistent")} rule={prefixRule} />}
+                label={t("approval.allowRulePersistent")}
                 onClick={() => onAnswer(true, true, true, "prefix")}
               />
               <PromptAction keyLabel="4" label={t("approval.deny")} onClick={() => onAnswer(false, false, false)} />
@@ -168,12 +166,12 @@ export function ApprovalModal({
             <>
               <PromptAction
                 keyLabel="2"
-                label={<RuleActionLabel label={t("approval.allowRuleSession")} rule={exactSessionRule} />}
+                label={t("approval.allowRuleSession")}
                 onClick={() => onAnswer(true, true, false)}
               />
               <PromptAction
                 keyLabel="3"
-                label={<RuleActionLabel label={t("approval.allowRulePersistent")} rule={exactPersistentRule} />}
+                label={t("approval.allowRulePersistent")}
                 onClick={() => onAnswer(true, true, true)}
               />
               <PromptAction keyLabel="4" label={t("approval.deny")} onClick={() => onAnswer(false, false, false)} />
@@ -189,26 +187,7 @@ export function ApprovalModal({
   );
 }
 
-function RuleActionLabel({ label, rule }: { label: string; rule: string }) {
-  return (
-    <span className="approval-rule-label">
-      <span>{label}</span>
-      <code>{rule}</code>
-    </span>
-  );
-}
 
-function approvalSessionRule(tool: string, subject: string): string {
-  if (tool === "bash" && subject) return `Bash(${subject})`;
-  if (isFileMutationTool(tool)) return "Edit";
-  return tool;
-}
-
-function approvalPersistentRule(tool: string, subject: string): string {
-  if (tool === "bash" && subject) return `Bash(${subject})`;
-  if (isFileMutationTool(tool)) return subject ? `Edit(${subject})` : "Edit";
-  return tool;
-}
 
 function bashCommandPrefix(subject: string): string {
   const command = subject.trim();
@@ -235,13 +214,4 @@ function dangerousBashCommand(command: string): boolean {
     || /^mkfs\b/.test(command)
     || /^dd\s+if=/.test(command)
     || /^fdisk\b/.test(command);
-}
-
-function isFileMutationTool(tool: string): boolean {
-  return tool === "write_file"
-    || tool === "edit_file"
-    || tool === "multi_edit"
-    || tool === "notebook_edit"
-    || tool === "delete_range"
-    || tool === "delete_symbol";
 }

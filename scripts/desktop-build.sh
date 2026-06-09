@@ -9,7 +9,8 @@
 #            Reasonix-darwin-universal.dmg               (drag-to-install; human download)
 #   Windows: Reasonix-windows-<arch>-installer.exe       (NSIS per-user installer; updater channel)
 #            Reasonix-windows-<arch>.zip                 (portable human download)
-#   Linux:   Reasonix-linux-<arch>.tar.gz                (bare binary)
+#   Linux:   Reasonix-linux-<arch>.tar.gz                (bare binary; updater channel)
+#            Reasonix-linux-<arch>.deb                   (Debian/Ubuntu package; human download)
 #
 # Usage: scripts/desktop-build.sh <os/arch> <version> [channel]
 #   e.g. scripts/desktop-build.sh darwin/arm64 v1.1.0
@@ -138,6 +139,13 @@ windows)
 	;;
 linux)
 	tar -czf "$ROOT/dist/${APPNAME}-linux-${arch}.tar.gz" -C build/bin "$BINNAME"
+	# Also build a .deb for Debian/Ubuntu users (goreleaser/nfpm; see
+	# desktop/build/linux/nfpm.yaml). Human-download only: the Linux updater channel
+	# stays the tarball and cmd/sign's manifest skips .deb files. nfpm reads
+	# $DEB_VERSION/$DEB_ARCH — dpkg wants a strict numeric version, so reuse numver.
+	DEB_VERSION="$numver" DEB_ARCH="$arch" \
+		nfpm package --config build/linux/nfpm.yaml --packager deb \
+		--target "$ROOT/dist/${APPNAME}-linux-${arch}.deb"
 	;;
 *)
 	echo "unsupported os: $os" >&2

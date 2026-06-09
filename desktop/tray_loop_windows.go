@@ -2,9 +2,21 @@
 
 package main
 
-import "fyne.io/systray"
+import (
+	"runtime"
+
+	"fyne.io/systray"
+)
 
 func startDesktopTray(onReady, onExit func()) func() {
-	go systray.Run(onReady, onExit)
+	go runDesktopTrayLoop(func() {
+		systray.Run(onReady, onExit)
+	})
 	return systray.Quit
+}
+
+func runDesktopTrayLoop(run func()) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	run()
 }
