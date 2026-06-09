@@ -356,7 +356,6 @@ func (a *App) OpenProjectTab(workspaceRoot, topicID string) (TabMeta, error) {
 		workspaceRoot = abs
 	}
 	saveWorkspace(workspaceRoot)
-	_ = addProject(workspaceRoot, "")
 
 	a.mu.Lock()
 	// If already open, just activate.
@@ -390,7 +389,6 @@ func (a *App) OpenProjectTab(workspaceRoot, topicID string) (TabMeta, error) {
 	a.mu.Unlock()
 
 	a.startTabControllerBuild(tab)
-	a.emitProjectTreeChanged()
 	return a.tabMeta(tab, true), nil
 }
 
