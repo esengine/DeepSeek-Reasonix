@@ -53,6 +53,7 @@ type Asker interface {
 
 // callContextKey carries the executing tool call's identity into Execute.
 type callContextKey struct{}
+type parentSessionContextKey struct{}
 
 // callContext is the per-call context a tool can read. parentID is the call being
 // executed and sink is the agent's event sink (the `task` tool uses both to nest
@@ -79,6 +80,18 @@ func CallContext(ctx context.Context) (parentID string, sink event.Sink, asker A
 		return "", nil, nil, false
 	}
 	return cc.parentID, cc.sink, cc.asker, true
+}
+
+// WithParentSession stamps the active parent session ID onto a turn context so
+// persisted sub-agents can record and enforce their owning conversation.
+func WithParentSession(ctx context.Context, parentSession string) context.Context {
+	return context.WithValue(ctx, parentSessionContextKey{}, strings.TrimSpace(parentSession))
+}
+
+// ParentSession returns the active parent session ID carried by a turn context.
+func ParentSession(ctx context.Context) string {
+	parentSession, _ := ctx.Value(parentSessionContextKey{}).(string)
+	return strings.TrimSpace(parentSession)
 }
 
 // Gate decides, per tool call, whether it may run. The agent consults it at

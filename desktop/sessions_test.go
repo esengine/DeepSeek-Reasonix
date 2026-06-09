@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"reasonix/internal/agent"
 )
 
 // --- loadSessionTitles ---
@@ -164,6 +166,40 @@ func TestDeleteSessionFile(t *testing.T) {
 	}
 }
 
+func TestDeleteSessionFileMovesOwnedSubagentsToTrash(t *testing.T) {
+	dir := t.TempDir()
+	sessionPath := filepath.Join(dir, "session.jsonl")
+	os.WriteFile(sessionPath, []byte("data"), 0o644)
+	writeSubagentArtifact(t, dir, "sa_20260102_030405_000000000_aabbccddeeff", agent.BranchID(sessionPath))
+	writeSubagentArtifact(t, dir, "sa_20260102_030405_000000000_112233445566", "other-parent")
+
+	if err := deleteSessionFile(dir, sessionPath); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+
+	ownedJSONL := filepath.Join(dir, "subagents", "sa_20260102_030405_000000000_aabbccddeeff.jsonl")
+	ownedMeta := filepath.Join(dir, "subagents", "sa_20260102_030405_000000000_aabbccddeeff.meta.json")
+	if _, err := os.Stat(ownedJSONL); !os.IsNotExist(err) {
+		t.Fatalf("owned subagent jsonl should be moved out of active dir, stat err = %v", err)
+	}
+	if _, err := os.Stat(ownedMeta); !os.IsNotExist(err) {
+		t.Fatalf("owned subagent meta should be moved out of active dir, stat err = %v", err)
+	}
+	trashSubagentDir := filepath.Join(dir, sessionTrashDir, "session.jsonl", "subagents")
+	if _, err := os.Stat(filepath.Join(trashSubagentDir, "sa_20260102_030405_000000000_aabbccddeeff.jsonl")); err != nil {
+		t.Fatalf("owned subagent jsonl should be in trash: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(trashSubagentDir, "sa_20260102_030405_000000000_aabbccddeeff.meta.json")); err != nil {
+		t.Fatalf("owned subagent meta should be in trash: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "subagents", "sa_20260102_030405_000000000_112233445566.jsonl")); err != nil {
+		t.Fatalf("unowned subagent jsonl should remain active: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "subagents", "sa_20260102_030405_000000000_112233445566.meta.json")); err != nil {
+		t.Fatalf("unowned subagent meta should remain active: %v", err)
+	}
+}
+
 func TestDeleteSessionFileNoTitle(t *testing.T) {
 	dir := t.TempDir()
 	sessionPath := filepath.Join(dir, "no-title.jsonl")
@@ -225,6 +261,61 @@ func TestRestoreTrashedSessionFile(t *testing.T) {
 	}
 }
 
+func TestRestoreTrashedSessionFileRestoresSubagents(t *testing.T) {
+	dir := t.TempDir()
+	sessionPath := filepath.Join(dir, "session.jsonl")
+	if err := os.WriteFile(sessionPath, []byte("data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ref := "sa_20260102_030405_000000000_aabbccddeeff"
+	writeSubagentArtifact(t, dir, ref, agent.BranchID(sessionPath))
+	if err := deleteSessionFile(dir, sessionPath); err != nil {
+		t.Fatalf("trash: %v", err)
+	}
+
+	trashPath := filepath.Join(dir, sessionTrashDir, "session.jsonl", "session.jsonl")
+	if err := restoreTrashedSessionFile(dir, trashPath); err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "subagents", ref+".jsonl")); err != nil {
+		t.Fatalf("subagent jsonl should be restored: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "subagents", ref+".meta.json")); err != nil {
+		t.Fatalf("subagent meta should be restored: %v", err)
+	}
+}
+
+func TestRestoreTrashedSessionFileRejectsSubagentConflict(t *testing.T) {
+	dir := t.TempDir()
+	sessionPath := filepath.Join(dir, "session.jsonl")
+	if err := os.WriteFile(sessionPath, []byte("data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ref := "sa_20260102_030405_000000000_aabbccddeeff"
+	writeSubagentArtifact(t, dir, ref, agent.BranchID(sessionPath))
+	if err := deleteSessionFile(dir, sessionPath); err != nil {
+		t.Fatalf("trash: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "subagents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "subagents", ref+".jsonl"), []byte("conflict"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	trashPath := filepath.Join(dir, sessionTrashDir, "session.jsonl", "session.jsonl")
+	if err := restoreTrashedSessionFile(dir, trashPath); err == nil {
+		t.Fatal("restore should fail on subagent conflict")
+	}
+	if _, err := os.Stat(trashPath); err != nil {
+		t.Fatalf("trash item should remain after failed restore: %v", err)
+	}
+	if _, err := os.Stat(sessionPath); !os.IsNotExist(err) {
+		t.Fatalf("parent session should not be restored after conflict, stat err = %v", err)
+	}
+}
+
 func TestPurgeTrashedSessionFile(t *testing.T) {
 	dir := t.TempDir()
 	sessionPath := filepath.Join(dir, "session.jsonl")
@@ -250,6 +341,24 @@ func TestPurgeTrashedSessionFile(t *testing.T) {
 	}
 	if got := resolveSessionDisplay(dir, sessionPath, "expanded prompt"); got != "expanded prompt" {
 		t.Fatalf("display sidecar should be removed after purge, got %q", got)
+	}
+}
+
+func TestPurgeTrashedSessionFileRemovesSubagents(t *testing.T) {
+	dir := t.TempDir()
+	sessionPath := filepath.Join(dir, "session.jsonl")
+	os.WriteFile(sessionPath, []byte("data"), 0o644)
+	ref := "sa_20260102_030405_000000000_aabbccddeeff"
+	writeSubagentArtifact(t, dir, ref, agent.BranchID(sessionPath))
+	if err := deleteSessionFile(dir, sessionPath); err != nil {
+		t.Fatalf("trash: %v", err)
+	}
+	trashPath := filepath.Join(dir, sessionTrashDir, "session.jsonl", "session.jsonl")
+	if err := purgeTrashedSessionFile(dir, trashPath); err != nil {
+		t.Fatalf("purge: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, sessionTrashDir, "session.jsonl", "subagents", ref+".jsonl")); !os.IsNotExist(err) {
+		t.Fatalf("trashed subagent should be removed by purge, stat err = %v", err)
 	}
 }
 
@@ -322,6 +431,31 @@ func TestDeleteSessionFileRejectsSymlinkEscape(t *testing.T) {
 	}
 	if _, err := os.Stat(outside); err != nil {
 		t.Fatalf("outside target should remain: %v", err)
+	}
+}
+
+func writeSubagentArtifact(t *testing.T, dir, ref, parentSession string) {
+	t.Helper()
+	subagentDir := filepath.Join(dir, "subagents")
+	if err := os.MkdirAll(subagentDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(subagentDir, ref+".jsonl"), []byte(`{"role":"user","content":"sub"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	meta := agent.SubagentMeta{
+		Ref:           ref,
+		Status:        agent.SubagentCompleted,
+		Kind:          "task",
+		Name:          "task",
+		ParentSession: parentSession,
+	}
+	data, err := json.Marshal(meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(subagentDir, ref+".meta.json"), data, 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 
