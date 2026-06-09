@@ -119,14 +119,14 @@ def main():
         # read_geo_data — 无效路径应返回 isError
         results.append(test_tool_call(proc, "read_geo_data", {"path": "/nonexistent/file.tif"}, expect_error=True))
 
-        # run_qgis_algorithm — stub，不报错
-        results.append(test_tool_call(proc, "run_qgis_algorithm", {"algorithm": "native:buffer", "params": {}}))
+        # run_qgis_algorithm — 空参数 → QGIS 报错（isError=True）
+        results.append(test_tool_call(proc, "run_qgis_algorithm", {"algorithm": "native:buffer", "params": {}}, expect_error=True))
 
-        # run_gee_script — stub，不报错
-        results.append(test_tool_call(proc, "run_gee_script", {"script": "print('hello')"}))
+        # run_gee_script — GEE 未认证 → 报错
+        results.append(test_tool_call(proc, "run_gee_script", {"script": "print('hello')"}, expect_error=True))
 
-        # qgis_doc — stub，不报错
-        results.append(test_tool_call(proc, "qgis_doc", {"query": "buffer"}))
+        # qgis_doc — 新参数格式
+        results.append(test_tool_call(proc, "qgis_doc", {"action": "search", "query": "buffer"}))
 
         # 未知方法
         results.append(test_unknown_method(proc))

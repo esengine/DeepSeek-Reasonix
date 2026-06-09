@@ -65,18 +65,22 @@ TOOLS = [
         "name": "run_gee_script",
         "description": (
             "执行 Google Earth Engine Python 脚本。"
-            "脚本可使用预注入的辅助函数（init_gee、load_region、download_image 等）。"
-            "支持超时检测和心跳保活，适用于长时间运行的任务。"
+            "脚本可引用预注入的 geocode 辅助模块（init_gee、load_region、download_image、"
+            "check_coverage、heartbeat 等）。"
+            "支持 idle timeout 检测（60s 无输出则终止），长时间操作用 heartbeat() 保活。"
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "script": {
                     "type": "string",
-                    "description": "要执行的 GEE Python 脚本代码",
-                }
+                    "description": "内联 GEE Python 脚本代码",
+                },
+                "script_path": {
+                    "type": "string",
+                    "description": "GEE Python 脚本文件绝对路径（与 script 二选一）",
+                },
             },
-            "required": ["script"],
         },
         "annotations": {
             "readOnlyHint": False,
@@ -86,19 +90,32 @@ TOOLS = [
     {
         "name": "qgis_doc",
         "description": (
-            "搜索 QGIS Processing 算法文档。"
-            "输入算法名或关键词，返回算法描述、参数 schema、默认值。"
-            "算法索引由 geo_env_status 工具在环境探测时建立。"
+            "浏览和搜索 QGIS Processing 工具箱算法文档。"
+            "支持四种操作：list_groups（列出分组）、list_algorithms（列出分组内算法）、"
+            "read（查看算法详情含参数 schema）、search（关键词搜索）。"
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["list_groups", "list_algorithms", "read", "search"],
+                    "description": "操作类型: list_groups/list_algorithms/read/search",
+                },
+                "group": {
+                    "type": "string",
+                    "description": "分组名（list_algorithms 时必填）",
+                },
+                "algorithm": {
+                    "type": "string",
+                    "description": "算法 ID，如 'native:buffer'（read 时必填）",
+                },
                 "query": {
                     "type": "string",
-                    "description": "算法名或搜索关键词，如 'buffer'、'native:reproject'",
-                }
+                    "description": "搜索关键词（search 时必填）",
+                },
             },
-            "required": ["query"],
+            "required": ["action"],
         },
         "annotations": {
             "readOnlyHint": True,
