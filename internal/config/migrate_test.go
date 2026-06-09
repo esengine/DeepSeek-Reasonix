@@ -47,8 +47,7 @@ func TestMigrateImportsKeyPluginsAndLang(t *testing.T) {
 	}
 	if res == nil {
 		t.Fatal("expected a migration result")
-	}
-	if !res.KeyToEnv || res.Plugins != 2 {
+	} else if !res.KeyToEnv || res.Plugins != 2 {
 		t.Errorf("result = %+v, want KeyToEnv=true Plugins=2", res)
 	}
 

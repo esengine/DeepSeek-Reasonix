@@ -806,6 +806,8 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "pgdown":
 			m.viewport.PageDown()
 			return m, finalize(m, cmds)
+		case "ctrl+z":
+			return m, tea.Suspend
 		}
 		// A question card is modal: keys drive it. In its free-text ("Type
 		// something") mode, the keystroke goes to the textarea — Enter confirms the
@@ -921,10 +923,13 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "esc":
 			// "Back out" of the most specific in-progress state: un-send a just-sent
-			// turn (server not yet replied), cancel a streaming turn, turn plan mode
-			// off, or clear typed-but-unsent input. YOLO mode is only exited via
-			// Shift+Tab cycle (/plan → YOLO → normal) or --yolo flag. Scrollback is
-			// the terminal's now, so there's no viewport to dismiss.
+			// turn (server not yet replied), cancel a streaming turn, or clear
+			// typed-but-unsent input. Mode switches (normal/plan/YOLO) are
+			// exclusively driven by Shift+Tab — Esc must not silently flip a
+			// session from plan or YOLO back to a less-permissive mode. PR #3051
+			// removed the YOLO half of this; plan mode was missed and is fixed
+			// here. Scrollback is the terminal's now, so there's no viewport to
+			// dismiss.
 			switch {
 			case m.state == tuiRunning && m.bubblePending:
 				m.unsendPending()
@@ -937,13 +942,10 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.state = tuiIdle
 					m.confirmBubbleSent()
 				}
-			case m.planMode:
-				m.planMode = false
-				m.ctrl.SetPlanMode(false)
 			default:
-				// Idle with nothing to back out: a double-Esc on an empty composer
-				// opens the rewind picker (Claude Code's gesture); a first Esc just
-				// arms it. Non-empty input clears as before.
+				// Idle (any mode): a double-Esc on an empty composer opens the
+				// rewind picker (Claude Code's gesture); a first Esc just arms
+				// it. Non-empty input clears as before.
 				if strings.TrimSpace(m.input.Value()) == "" {
 					if !m.lastEsc.IsZero() && time.Since(m.lastEsc) < 600*time.Millisecond {
 						m.lastEsc = time.Time{}
@@ -966,21 +968,27 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
-			// Idle: if the composer has text, a single press clears it (like Esc).
-			// On an empty composer: if there's an active text selection, copy to
-			// clipboard (standard terminal convention); otherwise require double-press
-			// within 1.5s to quit.
-			if strings.TrimSpace(m.input.Value()) != "" {
-				m.input.Reset()
-				m.pastedBlocks = nil
-				m.lastCtrlCAt = time.Time{}
-				return m, nil
-			}
+			// Idle: an active text selection takes precedence over the
+			// composer-clear / double-press-quit gestures. Standard terminal
+			// convention is "Ctrl+C copies the selection" — the user can still
+			// clear the input with a second Ctrl+C once the selection is gone.
+			// Hoisting this branch above the clear branch also stops the
+			// previous behaviour where Ctrl+C would dismiss a selection AND
+			// wipe any draft text the user was typing — felt like the
+			// selection was being silently lost.
 			if sel.active && !sel.empty() {
 				m.sel = sel // restore so selectedText() can read it
 				text := m.selectedText()
 				m.sel = selection{}
 				return m, tea.Batch(copyToClipboard(text), finalize(m, cmds))
+			}
+			// No selection: if the composer has text, a single press clears it
+			// (like Esc); on an empty composer a double-press within 1.5s quits.
+			if strings.TrimSpace(m.input.Value()) != "" {
+				m.input.Reset()
+				m.pastedBlocks = nil
+				m.lastCtrlCAt = time.Time{}
+				return m, nil
 			}
 			if !m.lastCtrlCAt.IsZero() && time.Since(m.lastCtrlCAt) < 1500*time.Millisecond {
 				return m, tea.Quit

@@ -1288,6 +1288,19 @@ func TestDoubleCtrlCQuit(t *testing.T) {
 	}
 }
 
+func TestCtrlZSendsSuspend(t *testing.T) {
+	m := newTestChatTUI()
+	ctrlZ := tea.KeyPressMsg{Code: 'z', Mod: tea.ModCtrl}
+
+	_, cmd := m.Update(ctrlZ)
+	if cmd == nil {
+		t.Fatal("expected Ctrl+Z to return a suspend command")
+	}
+	if msg := cmd(); msg != (tea.SuspendMsg{}) {
+		t.Fatalf("expected tea.SuspendMsg, got %T", msg)
+	}
+}
+
 // TestCtrlCClearsInput verifies that a single Ctrl+C while idle with non-empty
 // input clears the composer without arming the double-press quit gesture.
 func TestCtrlCClearsInput(t *testing.T) {
@@ -1455,5 +1468,64 @@ func TestTruncateSubject(t *testing.T) {
 				t.Errorf("truncateSubject(%q, %d) = %q (width %d), want visible width <= %d", tc.input, tc.width, got, w, wantMax)
 			}
 		})
+	}
+}
+
+// TestCtrlCCopyBeatsClearInput — regression for the bug where an active
+// selection AND a non-empty composer both existed: Ctrl+C used to wipe the
+// draft text and discard the selection. The fix hoists the selection-copy
+// branch above the clear-input branch so the user's draft survives. After
+// the copy the user can still press Ctrl+C again to clear the composer.
+func TestCtrlCCopyBeatsClearInput(t *testing.T) {
+	var copied string
+	clipboardWriteAll = func(text string) error { copied = text; return nil }
+	defer func() { clipboardWriteAll = clipboard.WriteAll }()
+
+	m := newTestChatTUI()
+	m.input.SetValue("draft I'm typing") // non-empty composer
+	m.transcript = []string{"selected text"}
+	m.wrappedLines = []string{"selected text"}
+	m.sel = selection{active: true, anchor: selPos{line: 0, col: 0}, head: selPos{line: 0, col: 8}}
+
+	ctrlC := tea.KeyPressMsg{Code: 'c', Mod: 4}
+	out, cmd := m.Update(ctrlC)
+	m2 := out.(chatTUI)
+
+	// Draft text must survive the selection copy.
+	if got := m2.input.Value(); got != "draft I'm typing" {
+		t.Errorf("composer draft wiped by Ctrl+C copy; got %q, want preserved", got)
+	}
+	if cmd == nil {
+		t.Fatal("expected clipboard cmd")
+	}
+	cmd()
+	if copied != "selected" {
+		t.Errorf("clipboard = %q, want %q", copied, "selected")
+	}
+
+	// Second Ctrl+C (no selection, non-empty composer) clears the draft.
+	out2, _ := m2.Update(ctrlC)
+	m3 := out2.(chatTUI)
+	if got := m3.input.Value(); got != "" {
+		t.Errorf("second Ctrl+C should clear composer; got %q", got)
+	}
+}
+
+// TestEscInPlanModeDoesNotExitPlan — regression for the part of PR #3051 that
+// was missed: Esc was still falling into the case m.planMode branch. The
+// Shift+Tab cycle is the only path that flips plan mode; Esc must only
+// rewind / clear input. PR #3051 already removed the equivalent YOLO branch;
+// the m.ctrl.SetBypass path is exercised end-to-end in control/yolo_test.go
+// and intentionally not duplicated here.
+func TestEscInPlanModeDoesNotExitPlan(t *testing.T) {
+	m := newTestChatTUI()
+	m.planMode = true
+
+	esc := tea.KeyPressMsg{Code: tea.KeyEsc}
+	out, _ := m.Update(esc)
+	m2 := out.(chatTUI)
+
+	if !m2.planMode {
+		t.Error("Esc must not exit plan mode; only Shift+Tab should")
 	}
 }

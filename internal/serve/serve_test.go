@@ -208,6 +208,18 @@ func TestServeIndexPage(t *testing.T) {
 	}
 }
 
+func TestServeIndexDefinesQueryHelpers(t *testing.T) {
+	html := string(indexHTML)
+	for _, want := range []string{
+		"const $ = s => document.querySelector(s);",
+		"const $$ = s => document.querySelectorAll(s);",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("serve index missing query helper %q", want)
+		}
+	}
+}
+
 func TestServeIndexPagePassesLanguagePreferenceToClient(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
