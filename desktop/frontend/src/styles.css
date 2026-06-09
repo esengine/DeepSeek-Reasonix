@@ -3369,15 +3369,6 @@ a[href] {
   line-height: 1.4;
   padding-block: 1px;
 }
-.prompt-action__label:has(.approval-rule-label) {
-  overflow: visible;
-  text-overflow: clip;
-  white-space: normal;
-}
-.prompt-action:has(.approval-rule-label) {
-  height: auto;
-  padding-block: 5px;
-}
 .prompt-detail-toggle {
   flex: 0 0 auto;
   max-width: 92px;
@@ -3435,22 +3426,6 @@ a[href] {
   max-height: 150px;
   overflow: auto;
 }
-.approval-rule-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  max-width: 100%;
-}
-.approval-rule-label code {
-  min-width: 0;
-  max-width: 24ch;
-  overflow-wrap: anywhere;
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--fg);
-}
-
 /* ── ask tool: decision details ───────────────────────────────────────────── */
 .ask-shelf__crumbs {
   display: flex;
