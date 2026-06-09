@@ -34,6 +34,7 @@ mem.prof
 /desktop/frontend/package.json.md5
 
 # Environment / local config (reasonix.example.toml is the shared template)
+geocode.json
 .env
 .env.local
 *.local

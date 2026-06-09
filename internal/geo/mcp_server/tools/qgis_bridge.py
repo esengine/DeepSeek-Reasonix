@@ -20,13 +20,31 @@ _qgis_bat: str | None = None
 
 
 def _find_qgis() -> tuple[str, str] | None:
-    """查找 QGIS 安装根目录和 bat 路径。结果缓存。"""
+    """查找 QGIS 安装根目录和 bat 路径。用户配置优先，自动扫描 fallback。结果缓存。"""
     global _qgis_root, _qgis_bat
     if _qgis_root and _qgis_bat:
         return _qgis_root, _qgis_bat
 
-    search_dirs = [r"C:\Program Files", r"C:\Program Files (x86)"]
-    for base in search_dirs:
+    from .. import config
+
+    # 1. 用户配置的 QGIS Python 路径 → 推导 root
+    configured = config.get_qgis_python()
+    if configured:
+        py = Path(configured)
+        if py.exists():
+            root = py.parent  # bin/python3.exe → bin → root
+            if root.name == "bin":
+                root = root.parent
+            for bat_name in ["python-qgis-ltr.bat", "python-qgis.bat"]:
+                bat = root / "bin" / bat_name
+                if bat.exists():
+                    _qgis_root = str(root)
+                    _qgis_bat = str(bat)
+                    logger.info("QGIS from config: %s", _qgis_root)
+                    return _qgis_root, _qgis_bat
+
+    # 2. 自动扫描 Program Files
+    for base in [r"C:\Program Files", r"C:\Program Files (x86)"]:
         base_path = Path(base)
         if not base_path.is_dir():
             continue
@@ -41,7 +59,7 @@ def _find_qgis() -> tuple[str, str] | None:
                     if bat.exists():
                         _qgis_root = str(entry)
                         _qgis_bat = str(bat)
-                        logger.info("found QGIS at %s, bat=%s", _qgis_root, _qgis_bat)
+                        logger.info("QGIS auto-detected: %s", _qgis_root)
                         return _qgis_root, _qgis_bat
         except PermissionError:
             continue

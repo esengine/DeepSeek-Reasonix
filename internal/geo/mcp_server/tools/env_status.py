@@ -13,6 +13,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from .. import config
+
 logger = logging.getLogger(__name__)
 
 # ── GDAL 探测 ─────────────────────────────────────────────────────
@@ -22,12 +24,19 @@ _REQUIRED_GDAL_VECTOR = ["ogrinfo", "ogr2ogr"]
 
 
 def _detect_gdal_bin() -> str | None:
-    """探测 GDAL bin 目录。优先从当前 Python 环境的 conda Library/bin。"""
+    """探测 GDAL bin 目录。用户配置优先，自动探测作为 fallback。"""
+    # 1. 用户配置的路径
+    configured = config.get_gdal_bin()
+    if configured and Path(configured).is_dir():
+        return configured
+
+    # 2. 当前 conda 环境的 Library/bin
     exe_dir = Path(sys.executable).parent
     conda_bin = exe_dir / "Library" / "bin"
     if conda_bin.is_dir():
         return str(conda_bin)
 
+    # 3. PATH 中查找
     found = shutil.which("gdalinfo")
     if found:
         return str(Path(found).parent)
@@ -109,11 +118,24 @@ def probe_gdal() -> dict:
 # ── QGIS 探测 ─────────────────────────────────────────────────────
 
 def _scan_qgis_roots() -> list[str]:
-    """扫描系统中所有 QGIS 安装根目录。参照 GeoCode findQgisRootFromHint 逻辑。"""
+    """扫描系统中所有 QGIS 安装根目录。用户配置优先，自动扫描作为 fallback。"""
+    # 1. 用户配置的 QGIS Python 路径 → 推导 root
+    configured = config.get_qgis_python()
+    if configured:
+        py_path = Path(configured)
+        if py_path.exists():
+            # 向上找到 QGIS 根（含 bin 目录的父目录）
+            for parent in [py_path.parent.parent, py_path.parent.parent.parent]:
+                if (parent / "bin" / "python-qgis-ltr.bat").exists():
+                    return [str(parent)]
+                if (parent / "bin" / "python3.exe").exists():
+                    return [str(parent)]
+
+    # 2. 自动扫描 Program Files
     roots = []
     if os.name == "nt":
-        search_dirs = [r"C:\Program Files", r"C:\Program Files (x86)", "C:\\"]
-        for base in search_dirs:
+        scan_dirs = [r"C:\Program Files", r"C:\Program Files (x86)"]
+        for base in scan_dirs:
             base_path = Path(base)
             if not base_path.is_dir():
                 continue
@@ -123,7 +145,6 @@ def _scan_qgis_roots() -> list[str]:
                         continue
                     name = entry.name.lower()
                     if "qgis" in name or "osgeo" in name:
-                        # 验证是 QGIS 安装根（有 bin 子目录）
                         if (entry / "bin" / "python3.exe").exists() or \
                            (entry / "bin" / "python-qgis-ltr.bat").exists() or \
                            (entry / "bin" / "python-qgis.bat").exists():
@@ -498,8 +519,8 @@ def probe_gee() -> dict:
             "ee_version": ee_version,
         }
 
-    # 尝试 Initialize
-    project = os.environ.get("GEE_PROJECT")
+    # 尝试 Initialize — 用户配置优先，env var 其次
+    project = config.get_gee_project() or os.environ.get("GEE_PROJECT")
     try:
         ee.Initialize(project=project)
         return {

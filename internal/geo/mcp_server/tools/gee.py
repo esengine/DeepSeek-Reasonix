@@ -11,6 +11,8 @@ import sys
 import time
 from pathlib import Path
 
+from .. import config
+
 logger = logging.getLogger(__name__)
 
 # geocode.py helper 所在目录，注入 PYTHONPATH
@@ -36,7 +38,8 @@ def _check_gee() -> tuple[bool, str]:
         pass
 
     try:
-        ee.Initialize(project=os.environ.get("GEE_PROJECT"))
+        project = config.get_gee_project() or os.environ.get("GEE_PROJECT")
+        ee.Initialize(project=project)
         return True, f"GEE ready ({ee.__version__})"
     except Exception as e:
         return False, f"GEE Initialize 失败: {e}"
@@ -75,6 +78,10 @@ def run(args: dict) -> tuple[str, bool]:
     env["PYTHONFAULTHANDLER"] = "1"
     env["PYTHONUTF8"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
+    # 注入 GEE project（优先用凭据默认值，有配置则覆盖）
+    project = config.get_gee_project()
+    if project:
+        env["GEE_PROJECT"] = project
 
     # 注入 geocode.py helper
     existing = env.get("PYTHONPATH", "")
