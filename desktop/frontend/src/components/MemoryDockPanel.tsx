@@ -8,7 +8,7 @@ function displayTitle(fact: MemoryFact): string {
   return fact.title || fact.name.replace(/[-_]/g, " ");
 }
 
-function MemoryDockPanel() {
+function MemoryDockPanel({ refreshKey }: { refreshKey?: number }) {
   const t = useT();
   const [view, setView] = useState<MemoryView | null>(null);
   const [search, setSearch] = useState("");
@@ -18,7 +18,7 @@ function MemoryDockPanel() {
   const reload = useCallback(async () => {
     setView(await app.Memory().catch(() => null));
   }, []);
-  useEffect(() => { void reload(); }, [reload]);
+  useEffect(() => { void reload(); }, [reload, refreshKey]);
 
   const facts = view?.facts ?? [];
   const globalFacts = view?.globalFacts ?? [];

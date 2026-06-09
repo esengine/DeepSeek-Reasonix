@@ -1135,7 +1135,8 @@ export default function App() {
     }
     if (topicId) await markTopicRead(topicId);
     await refreshTabMetas();
-  }, [markTopicRead, openGlobalTab, openProjectTab, refreshTabMetas]);
+    setDockRefreshKey((v) => v + 1);
+  }, [markTopicRead, openGlobalTab, openProjectTab, refreshTabMetas, setDockRefreshKey]);
 
   // ⌘G: jump to the next unread topic that is not currently running
   useEffect(() => {
@@ -1218,7 +1219,8 @@ export default function App() {
 
   const handleTabChange = useCallback(async (tabId: string) => {
     await switchTab(tabId);
-  }, [switchTab]);
+    setDockRefreshKey((v) => v + 1);
+  }, [switchTab, setDockRefreshKey]);
   const handleNewTab = useCallback(async () => {
     await newSession();
   }, [newSession]);

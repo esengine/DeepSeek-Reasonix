@@ -2,10 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Check,
   ChevronDown,
-  ChevronRight,
-  FileText,
   GitBranch,
   RefreshCw,
+  RotateCcw,
   Search,
   X,
 } from "lucide-react";
@@ -16,20 +15,45 @@ import { CodeViewer } from "./CodeViewer";
 import { AnchoredPopover } from "./AnchoredPopover";
 import type { GitCommitView, GitCommitDetailView, WorkspaceChangesView } from "../lib/types";
 
-function formatCommitDate(date: string): string {
-  // ISO → locale, or "X days ago"
+function formatCommitDate(date: string): { relative: string; full: string } {
   const d = new Date(date);
-  if (isNaN(d.getTime())) return date;
+  if (isNaN(d.getTime())) return { relative: date, full: date };
   const now = Date.now();
   const diff = now - d.getTime();
+  const mins = Math.floor(diff / 60000);
+  const hours = Math.floor(diff / 3600000);
   const days = Math.floor(diff / 86400000);
-  if (days === 0) return "today";
-  if (days === 1) return "yesterday";
-  if (days < 14) return `${days} days ago`;
-  return d.toLocaleDateString();
+  const relative =
+    mins < 1 ? "just now" : mins < 60 ? `${mins}m ago` : hours < 24 ? `${hours}h ago` : `${days}d ago`;
+  const full =
+    d.getFullYear() + "-" +
+    String(d.getMonth() + 1).padStart(2, "0") + "-" +
+    String(d.getDate()).padStart(2, "0") + " " +
+    String(d.getHours()).padStart(2, "0") + ":" +
+    String(d.getMinutes()).padStart(2, "0");
+  return { relative, full };
 }
 
-function GitPanel() {
+function gitBadge(status: string): { label: string; color: string } {
+  if (status === "??") return { label: "U", color: "var(--warn)" };
+  if (status.startsWith("D") || status[1] === "D") return { label: "D", color: "var(--err)" };
+  if (status.startsWith("A")) return { label: "A", color: "#4caf50" };
+  if (status.startsWith("R")) return { label: "R", color: "#a78bfa" };
+  return { label: "M", color: "var(--accent)" };
+}
+
+// Static style constants — avoid object recreation on every render
+const changeRowInnerStyle = { display: "flex", alignItems: "baseline", gap: 6, flex: 1, minWidth: 0, overflow: "hidden" } as const;
+const changeNameStyle = { fontWeight: 400, fontSize: 12.5, flexShrink: 0 } as const;
+const changePathStyle = { color: "var(--fg-faint)", fontSize: 10.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } as const;
+const discardBtnStyle = { flexShrink: 0, border: "none", background: "transparent", color: "var(--fg-faint)", cursor: "pointer", padding: 2, borderRadius: 3 } as const;
+const dotContainerStyle = { width: 12, flexShrink: 0, display: "flex", justifyContent: "center", marginLeft: -7, paddingTop: 10 } as const;
+const contentAreaStyle = { flex: 1, minWidth: 0 } as const;
+const commitTitleStyle = { fontWeight: 400, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } as const;
+const fileNameStyle = { fontWeight: 400, fontSize: 12.5, flexShrink: 0 } as const;
+const filePathStyle = { color: "var(--fg-faint)", fontSize: 10.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } as const;
+
+function GitPanel({ refreshKey }: { refreshKey?: number }) {
   const t = useT();
   const [gitHistory, setGitHistory] = useState<GitCommitView[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
@@ -41,6 +65,7 @@ function GitPanel() {
   const [branchMenuOpen, setBranchMenuOpen] = useState(false);
   const [branchList, setBranchList] = useState<string[]>([]);
   const [switchingBranch, setSwitchingBranch] = useState(false);
+  const [discardingFile, setDiscardingFile] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
   const branchBtnRef = useRef<HTMLButtonElement>(null);
   const changesRequestRef = useRef(0);
@@ -61,7 +86,6 @@ function GitPanel() {
     setExpandedCommit((prev) => (prev === hash ? null : hash));
   }, []);
 
-  // Fetch commit detail when expanded
   useEffect(() => {
     if (!expandedCommit) {
       setCommitDetail(null);
@@ -125,10 +149,25 @@ function GitPanel() {
     [changes?.gitBranch, loadChanges, loadGitHistory],
   );
 
+  const discardFile = useCallback(
+    async (path: string) => {
+      setDiscardingFile(path);
+      try {
+        await app.GitDiscardFile(path);
+        await loadChanges();
+      } catch {
+        // error handled via refresh
+      } finally {
+        setDiscardingFile(null);
+      }
+    },
+    [loadChanges],
+  );
+
   useEffect(() => {
     void loadGitHistory();
     void loadChanges();
-  }, [loadGitHistory, loadChanges]);
+  }, [loadGitHistory, loadChanges, refreshKey]);
 
   const q = filter.trim().toLowerCase();
   const filteredHistory = useMemo(
@@ -139,23 +178,34 @@ function GitPanel() {
       }),
     [gitHistory, q],
   );
+  // Only show files tracked by git (ignore session-only files).
+  const gitOnlyFiles = useMemo(
+    () => (changes?.files ?? []).filter((f) => f.sources.includes("git")),
+    [changes?.files],
+  );
+  const filteredChanges = useMemo(
+    () =>
+      gitOnlyFiles.filter((f) => {
+        if (!q) return true;
+        return [f.path, f.gitStatus ?? ""].join(" ").toLowerCase().includes(q);
+      }),
+    [gitOnlyFiles, q],
+  );
 
   return (
     <div className="workspace-files" style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      <div className="workspace-files__tools">
-        <div className="workspace-search" style={{ flex: 1 }}>
-          <Search size={14} />
-          <input
-            placeholder="Filter commits…"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-          />
-          {filter && (
-            <button className="workspace-iconbtn" onClick={() => setFilter("")}>
-              <X size={12} />
-            </button>
-          )}
-        </div>
+      <div className="workspace-search" style={{ margin: "6px 10px 8px" }}>
+        <Search size={14} />
+        <input
+          placeholder="Filter commits & files…"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+        />
+        {filter && (
+          <button className="workspace-iconbtn" onClick={() => setFilter("")}>
+            <X size={12} />
+          </button>
+        )}
       </div>
 
       {changes?.gitBranch && (
@@ -215,50 +265,145 @@ function GitPanel() {
       )}
 
       <div style={{ flex: 1, overflowY: "auto", padding: "0 8px 8px" }}>
+        {/* Working tree changes */}
+        {changes && (
+          <div style={{ marginBottom: 12 }}>
+            <div className="mem-section__title" style={{ padding: "8px 4px 4px", margin: 0 }}>
+              Changes ({filteredChanges.length})
+            </div>
+            {filteredChanges.length === 0 ? (
+              <div className="workspace-empty" style={{ fontSize: 12, padding: "4px 0" }}>
+                {q ? "No matching files" : "No changes"}
+              </div>
+            ) : (
+              filteredChanges.map((f) => {
+                const { label, color } = gitBadge(f.gitStatus ?? "");
+                const isDiscarding = discardingFile === f.path;
+                const canDiscard = f.gitStatus && f.gitStatus !== "??" && !f.gitStatus.startsWith("A") && !f.gitStatus.includes("D");
+                return (
+                  <div
+                    key={f.path}
+                    className="workspace-changes__file"
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                      padding: "3px 6px",
+                      borderRadius: 4,
+                      overflow: "hidden",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <span style={changeRowInnerStyle}>
+                      <span style={changeNameStyle}>{f.path.split("/").pop()}</span>
+                      <span style={changePathStyle}>{f.path}</span>
+                    </span>
+                    {canDiscard && (
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); void discardFile(f.path); }}
+                        disabled={isDiscarding}
+                        title="Discard changes"
+                        className="workspace-discard-btn"
+                        style={discardBtnStyle}
+                      >
+                        <RotateCcw size={12} />
+                      </button>
+                    )}
+                    <span style={{
+                      fontSize: 10.5,
+                      fontWeight: 700,
+                      color,
+                      minWidth: 16,
+                      textAlign: "center",
+                      fontFamily: "var(--mono)",
+                      flexShrink: 0,
+                    }}>{label}</span>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        )}
+
+        {/* Commit history */}
+        <div className="mem-section__title" style={{ padding: "4px 2px", margin: 0, borderTop: "1px solid var(--border-soft)" }}>
+          History ({filteredHistory.length})
+        </div>
         {loadingHistory ? (
           <div className="workspace-empty">{t("workspace.loading")}</div>
         ) : filteredHistory.length === 0 ? (
           <div className="workspace-empty">{t("workspace.noChanges")}</div>
         ) : (
-          <div className="workspace-git-history__list">
-            {filteredHistory.map((commit) => (
-              <div key={commit.hash} className={`workspace-git-history__item${expandedCommit === commit.hash ? " workspace-git-history__item--expanded" : ""}`}>
-                <button
-                  className="workspace-git-history__head"
-                  onClick={() => void toggleCommit(commit.hash)}
-                >
-                  <div className="workspace-git-history__head-top">
-                    {expandedCommit === commit.hash ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                    <span className="workspace-git-history__message">{commit.message}</span>
-                  </div>
-                  <div className="workspace-git-history__head-bottom">
-                    <span className="workspace-git-history__author">{commit.author}</span>
-                    <span className="workspace-git-history__date">
-                      {formatCommitDate(commit.date)} <span className="workspace-git-history__hash">{commit.hash.substring(0, 7)}</span>
+          <div style={{ borderLeft: "2px solid var(--border-soft)", marginLeft: 6, paddingBottom: 4 }}>
+            {filteredHistory.map((commit, idx) => {
+              const d = formatCommitDate(commit.date);
+              const isExpanded = expandedCommit === commit.hash;
+              const isLast = idx === filteredHistory.length - 1;
+              return (
+              <div key={commit.hash} style={{ display: "flex", alignItems: "flex-start", paddingBottom: isLast ? 0 : 8 }}>
+                {/* dot — centered on the 2px borderLeft line */}
+                <div style={dotContainerStyle}>
+                  <span style={{
+                    width: isExpanded ? 10 : 8,
+                    height: isExpanded ? 10 : 8,
+                    borderRadius: "50%",
+                    background: isExpanded ? "var(--accent)" : "var(--fg-faint)",
+                    flexShrink: 0,
+                    transition: "all 0.12s",
+                  }} />
+                </div>
+
+                {/* Content */}
+                <div style={contentAreaStyle}>
+                  <button
+                    type="button"
+                    onClick={() => void toggleCommit(commit.hash)}
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      width: "100%",
+                      border: "none",
+                      background: isExpanded ? "var(--card-bg)" : "transparent",
+                      borderRadius: 6,
+                      padding: "4px 6px 2px",
+                      textAlign: "left",
+                      font: "inherit",
+                      color: "var(--fg)",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <span style={commitTitleStyle}>
+                      {commit.message}
                     </span>
-                  </div>
-                </button>
-                {expandedCommit === commit.hash && (
-                  <div className="workspace-git-history__detail">
-                    {loadingCommit ? (
-                      <div className="workspace-empty">{t("workspace.loading")}</div>
-                    ) : commitDetail?.diff ? (
-                      <CodeViewer value={cleanGitDiff(commitDetail.diff)} language="diff" />
-                    ) : commitDetail?.files ? (
-                      <div className="workspace-git-history__files">
-                        {commitDetail.files.map((file) => (
-                          <div key={file} className="workspace-git-history__file">
-                            <FileText size={14} /> {file}
+                    {isExpanded && (
+                      <div style={{ marginTop: 6, paddingTop: 6, borderTop: "1px solid var(--border-soft)", fontSize: 12 }}>
+                        <div style={{ color: "var(--fg-faint)", marginBottom: 8 }}>
+                          <span>{commit.author}, {d.relative} <span style={{ opacity: 0.7 }}>({d.full})</span> · <span style={{ fontFamily: "var(--mono)", fontSize: 11 }}>{commit.hash.substring(0, 7)}</span></span>
+                        </div>
+                        {loadingCommit ? (
+                          <div className="workspace-empty">{t("workspace.loading")}</div>
+                        ) : commitDetail?.diff ? (
+                          <CodeViewer value={cleanGitDiff(commitDetail.diff)} language="diff" />
+                        ) : commitDetail?.files ? (
+                          <div className="workspace-git-history__files">
+                            {commitDetail.files.map((file) => (
+                              <div key={file} className="workspace-git-history__file">
+                                <span style={fileNameStyle}>{file.split("/").pop()}</span>
+                                <span style={filePathStyle}>{file.split("/").slice(0, -1).join("/")}</span>
+                              </div>
+                            ))}
                           </div>
-                        ))}
+                        ) : (
+                          <div className="workspace-empty">No details available</div>
+                        )}
                       </div>
-                    ) : (
-                      <div className="workspace-empty">No details available</div>
                     )}
-                  </div>
-                )}
+                  </button>
+                </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

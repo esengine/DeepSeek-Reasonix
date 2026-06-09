@@ -1816,6 +1816,7 @@ a[href] {
   border-radius: 999px;
   display: inline-block;
   background: var(--process-tone);
+  margin-left: -7px;
 }
 .process-card__dot--stopped {
   color: var(--fg-faint);
@@ -4448,6 +4449,17 @@ a[href] {
   cursor: default;
 }
 
+.workspace-changes-summary {
+  font-size: 12px;
+  font-weight: 560;
+  color: var(--fg-dim);
+  padding: 6px 10px 0;
+  margin-bottom: 2px;
+}
+.workspace-changes-summary__detail {
+  color: var(--fg-faint);
+  font-weight: 400;
+}
 .workspace-search {
   flex: 0 0 auto;
   display: flex;
@@ -4577,7 +4589,7 @@ a[href] {
 }
 .workspace-change__path {
   color: var(--fg-faint);
-  font-size: 11px;
+  font-size: 10.5px;
 }
 .workspace-change__detail {
   color: var(--fg-faint);
@@ -4617,10 +4629,14 @@ a[href] {
   gap: 8px;
 }
 .workspace-git-history__item {
-  border: 1px solid var(--border-soft);
-  border-radius: 8px;
-  background: var(--bg-soft);
+  border: none;
+  border-radius: 0;
+  background: transparent;
   overflow: hidden;
+}
+.workspace-git-history__item--expanded {
+  background: var(--card-bg);
+  border-radius: 8px;
 }
 .workspace-git-history__head {
   --wails-draggable: no-drag;
@@ -4650,6 +4666,7 @@ a[href] {
 }
 .workspace-git-history__head:hover {
   background: var(--sidebar-hover);
+  border-radius: 6px;
 }
 .workspace-git-history__message {
   flex: 1;
@@ -4674,12 +4691,22 @@ a[href] {
 .workspace-git-history__detail {
   padding: 12px;
   border-top: 1px solid var(--border-soft);
-  background: var(--bg);
+  background: transparent;
+}
+/* Changes file rows — hover handled via CSS instead of JS state */
+.workspace-changes__file:hover {
+  background: var(--tree-row-hover-bg);
+}
+.workspace-changes__file .workspace-discard-btn {
+  display: none;
+}
+.workspace-changes__file:hover .workspace-discard-btn {
+  display: block;
 }
 .workspace-git-history__files {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 2px;
 }
 .workspace-git-history__file {
   display: flex;
@@ -4690,14 +4717,10 @@ a[href] {
   color: var(--fg-dim);
   background: transparent;
   border: none;
-  padding: 4px 6px;
+  padding: 2px 0;
   border-radius: 4px;
   cursor: pointer;
   text-align: left;
-}
-.workspace-git-history__file:hover {
-  background: var(--sidebar-hover);
-  color: var(--fg);
 }
 .workspace-tree__chev {
   width: 13px;
@@ -9956,7 +9979,7 @@ a[href] {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  margin-left: 6px;
+  margin-left: -7px;
   line-height: 1;
   will-change: transform;
 }

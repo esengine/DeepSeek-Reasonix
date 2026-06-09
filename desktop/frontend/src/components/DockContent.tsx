@@ -20,7 +20,7 @@ interface DockContentProps {
   onTitleUpdate: (id: string, title: string) => void;
 }
 
-export function DockContent({ tab, onMetadataUpdate, onTitleUpdate, ...workspaceProps }: DockContentProps) {
+export function DockContent({ tab, refreshKey, onMetadataUpdate, onTitleUpdate, ...workspaceProps }: DockContentProps) {
   switch (tab.type) {
     case "files":
       return (
@@ -51,9 +51,9 @@ export function DockContent({ tab, onMetadataUpdate, onTitleUpdate, ...workspace
     case "context":
       return <div className="workspace-empty">Context panel</div>;
     case "memory":
-      return <MemoryDockPanel />;
+      return <MemoryDockPanel refreshKey={refreshKey} />;
     case "commit":
-      return <GitPanel />;
+      return <GitPanel refreshKey={refreshKey} />;
     default:
       return <div className="workspace-empty">Unknown panel type</div>;
   }
