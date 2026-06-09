@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Geo Components — Dev Preview</title>
+    <style>
+      body { margin: 0; background: #111; color: #eee; font-family: system-ui; }
+      .dev-page { max-width: 900px; margin: 0 auto; padding: 20px; }
+      .dev-page h2 { margin: 24px 0 8px; font-size: 16px; color: #aaa; text-transform: uppercase; }
+      .dev-page .status { font-size: 12px; color: #888; }
+    </style>
+  </head>
+  <body>
+    <div class="dev-page">
+      <h1>RS-Reasonix Geo Components — Dev Preview</h1>
+      <p class="status">MCP Server @ <span id="mcp-port">—</span> · test_ndvi.tif (256×256, EPSG:4326)</p>
+      <div id="root"></div>
+    </div>
+    <script type="module" src="/src/dev-geo.tsx"></script>
+  </body>
+</html>
