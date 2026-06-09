@@ -5132,70 +5132,77 @@ a[href] {
   gap: 8px;
 }
 .mem-fact {
-  border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: color-mix(in srgb, var(--bg-elev) 78%, var(--bg) 22%);
   overflow: hidden;
-  transition: border-color 0.12s, background 0.12s;
+  transition: 0.12s;
 }
 .mem-fact:hover {
-  border-color: var(--border);
+  background: color-mix(in srgb, var(--bg-elev) 88%, var(--bg) 12%);
 }
-.mem-fact__dot {
-  flex: 0 0 auto;
-  width: 8px;
-  height: 8px;
-  margin-top: 5px;
-  border-radius: 50%;
-  background: var(--accent);
-}
-.mem-fact__dot--user { background: var(--accent); }
-.mem-fact__dot--feedback { background: #e8a838; }
-.mem-fact__dot--project { background: #6b9f6b; }
-.mem-fact__dot--reference { background: #8a8ab8; }
 .mem-fact__summary {
   width: 100%;
   min-width: 0;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 7px;
-  padding: 10px;
+  padding: 8px 10px;
   border: none;
   background: transparent;
   color: inherit;
   text-align: left;
   font: inherit;
 }
-.mem-fact__summary > svg {
+.mem-fact__summary svg {
   flex: 0 0 auto;
-  margin-top: 2px;
   color: var(--fg-faint);
 }
 .mem-fact__main {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
   min-width: 0;
   flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 .mem-fact__title {
   min-width: 0;
   font-size: 13px;
-  font-weight: 650;
+  font-weight: 400;
   color: var(--fg);
+  line-height: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  padding: 4px;
 }
 .mem-fact__meta {
-  min-width: 0;
-  color: var(--fg-faint);
-  font-family: var(--mono);
-  font-size: 10.5px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.4;
   white-space: nowrap;
+  color: var(--fg-faint);
+  background: var(--bg-soft);
 }
+.mem-fact__meta--user {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  color: color-mix(in srgb, var(--accent) 60%, var(--fg-faint));
+}
+.mem-fact__meta--feedback {
+  background: color-mix(in srgb, #e8a838 8%, transparent);
+  color: color-mix(in srgb, #e8a838 60%, #888);
+}
+.mem-fact__meta--project {
+  background: color-mix(in srgb, #6b9f6b 8%, transparent);
+  color: color-mix(in srgb, #6b9f6b 60%, #888);
+}
+.mem-fact__meta--reference {
+  background: color-mix(in srgb, #8a8ab8 8%, transparent);
+  color: color-mix(in srgb, #8a8ab8 60%, #888);
+}
+
 .mem-fact__desc {
   min-width: 0;
   font-size: 12px;
@@ -5257,7 +5264,8 @@ a[href] {
   color: var(--danger, #d66);
   border-color: color-mix(in srgb, var(--danger, #d66) 36%, transparent);
 }
-.mem-fact__actions {
+.mem-fact__detail .mem-fact__actions {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;

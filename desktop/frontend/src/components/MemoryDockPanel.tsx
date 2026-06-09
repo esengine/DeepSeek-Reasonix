@@ -1,24 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Book, BrainCircuit, ChevronDown, ChevronRight, FileText, Search, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Search, X } from "lucide-react";
 import { app } from "../lib/bridge";
-import { useT } from "../lib/i18n";
+import { useT, type DictKey } from "../lib/i18n";
 import type { MemoryFact, MemoryView } from "../lib/types";
 
 function displayTitle(fact: MemoryFact): string {
   return fact.title || fact.name.replace(/[-_]/g, " ");
-}
-
-const TYPE_LABEL: Record<string, string> = {
-  user: "User",
-  feedback: "Feedback",
-  project: "Project",
-  reference: "Reference",
-};
-
-function FactIcon({ type }: { type: string }) {
-  return (
-    <span className={`mem-fact__dot mem-fact__dot--${type || "project"}`} title={TYPE_LABEL[type] || type} />
-  );
 }
 
 function MemoryDockPanel() {
@@ -26,9 +13,7 @@ function MemoryDockPanel() {
   const [view, setView] = useState<MemoryView | null>(null);
   const [search, setSearch] = useState("");
   const [expandedFact, setExpandedFact] = useState<string | null>(null);
-  const [expandedDoc, setExpandedDoc] = useState<string | null>(null);
   const [typeFilter, setTypeFilter] = useState("all");
-  const factRefs = useRef<Record<string, HTMLElement | null>>({});
 
   const reload = useCallback(async () => {
     setView(await app.Memory().catch(() => null));
@@ -36,7 +21,7 @@ function MemoryDockPanel() {
   useEffect(() => { void reload(); }, [reload]);
 
   const facts = view?.facts ?? [];
-  const docs = view?.docs ?? [];
+  const globalFacts = view?.globalFacts ?? [];
 
   const factTypes = useMemo(
     () => Array.from(new Set(facts.map((f) => f.type).filter(Boolean))).sort(),
@@ -55,22 +40,13 @@ function MemoryDockPanel() {
     [facts, q, typeFilter],
   );
 
-  const filteredDocs = useMemo(
-    () =>
-      docs.filter((d) => {
-        if (!q) return true;
-        return [d.path, d.body].join(" ").toLowerCase().includes(q);
-      }),
-    [docs, q],
-  );
-
   return (
     <div className="workspace-files">
       <div className="workspace-files__tools">
-        <div className="workspace-search" style={{ flex: 1 }}>
+        <div className="workspace-search" style={{ flex: 1, margin: "4px 0 8px" }}>
           <Search size={14} />
           <input
-            placeholder="Filter memories…"
+            placeholder={t("memory.searchPlaceholder")}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -83,12 +59,12 @@ function MemoryDockPanel() {
       </div>
 
       {factTypes.length > 1 && (
-        <div className="mem-filter" style={{ margin: "0 10px 6px" }}>
+        <div className="mem-filter" style={{ margin: "0 8px 6px" }}>
           <button
             className={`mem-filter__item${typeFilter === "all" ? " mem-filter__item--on" : ""}`}
             onClick={() => setTypeFilter("all")}
           >
-            All
+            {t("memory.allTypes")}
           </button>
           {factTypes.map((ft) => (
             <button
@@ -96,7 +72,7 @@ function MemoryDockPanel() {
               className={`mem-filter__item${typeFilter === ft ? " mem-filter__item--on" : ""}`}
               onClick={() => setTypeFilter(ft)}
             >
-              {TYPE_LABEL[ft] || ft}
+              {t(("memory.typeLabel." + ft) as DictKey) || ft}
             </button>
           ))}
         </div>
@@ -105,22 +81,56 @@ function MemoryDockPanel() {
       <div className="mem-facts" style={{ flex: 1, overflowY: "auto", padding: "0 8px 8px" }}>
         {!view ? (
           <div className="workspace-empty">{t("workspace.loading")}</div>
-        ) : filteredFacts.length === 0 && filteredDocs.length === 0 ? (
-          <div className="workspace-empty">No memories</div>
         ) : (
-          <>
-            {filteredFacts.length > 0 && (
-              <div>
-                <div className="mem-section__title" style={{ padding: "8px 2px 4px", margin: 0 }}>
-                  <BrainCircuit size={12} style={{ marginRight: 4, verticalAlign: "middle" }} />
-                  Facts ({filteredFacts.length})
+          <div>
+            {/* Project-level facts */}
+            <div className="mem-section__title" style={{ padding: "8px 0 4px", margin: 0 }}>
+              {t("memory.savedMemories")} ({filteredFacts.length})
+            </div>
+            {filteredFacts.length === 0 ? (
+              <div className="workspace-empty" style={{ marginBottom: 16 }}>{t("memory.noFacts")}</div>
+            ) : (
+              filteredFacts.map((f) => {
+                const isExpanded = expandedFact === f.name;
+                return (
+                  <div
+                    key={f.name}
+                    className="mem-fact"
+                    style={{ marginBottom: 4 }}
+                  >
+                    <button
+                      className="mem-fact__summary"
+                      onClick={() => setExpandedFact(isExpanded ? null : f.name)}
+                    >
+                      <span className="mem-fact__main">
+                        <span className={`mem-fact__meta mem-fact__meta--${f.type}`}>{f.type}</span>
+                        <span className="mem-fact__title">{displayTitle(f)}</span>
+                      </span>
+                    </button>
+                    {isExpanded && f.body && (
+                      <div className="mem-fact__detail">
+                        <div className="mem-fact__body">{f.body}</div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            )}
+
+            {/* Global facts */}
+            {globalFacts.length > 0 && (
+              <>
+                <div
+                  className="mem-section__title"
+                  style={{ padding: "12px 0 4px", margin: 0, borderTop: "1px solid var(--border-soft)" }}
+                >
+                  {t("memory.globalMemories")} ({globalFacts.length})
                 </div>
-                {filteredFacts.map((f) => {
+                {globalFacts.map((f) => {
                   const isExpanded = expandedFact === f.name;
                   return (
                     <div
                       key={f.name}
-                      ref={(el) => { factRefs.current[f.name] = el; }}
                       className="mem-fact"
                       style={{ marginBottom: 4 }}
                     >
@@ -128,15 +138,10 @@ function MemoryDockPanel() {
                         className="mem-fact__summary"
                         onClick={() => setExpandedFact(isExpanded ? null : f.name)}
                       >
-                        <FactIcon type={f.type} />
                         <span className="mem-fact__main">
+                          <span className={`mem-fact__meta mem-fact__meta--${f.type}`}>{f.type}</span>
                           <span className="mem-fact__title">{displayTitle(f)}</span>
-                          {f.description && (
-                            <span className="mem-fact__desc">{f.description}</span>
-                          )}
-                          <span className="mem-fact__meta">{f.type}</span>
                         </span>
-                        {isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
                       </button>
                       {isExpanded && f.body && (
                         <div className="mem-fact__detail">
@@ -146,44 +151,9 @@ function MemoryDockPanel() {
                     </div>
                   );
                 })}
-              </div>
+              </>
             )}
-
-            {filteredDocs.length > 0 && (
-              <div>
-                <div className="mem-section__title" style={{ padding: "12px 2px 4px", margin: 0 }}>
-                  <FileText size={12} style={{ marginRight: 4, verticalAlign: "middle" }} />
-                  Docs ({filteredDocs.length})
-                </div>
-                {filteredDocs.map((d) => {
-                  const isExpanded = expandedDoc === d.path;
-                  return (
-                    <div key={d.path} className="mem-doc" style={{ marginBottom: 6 }}>
-                      <button
-                        className="mem-doc__head"
-                        onClick={() => setExpandedDoc(isExpanded ? null : d.path)}
-                        style={{ cursor: "pointer", width: "100%", border: "none", textAlign: "left", font: "inherit", color: "inherit", background: "var(--bg-soft)" }}
-                      >
-                        <span className="mem-doc__identity">
-                          <Book size={14} style={{ flex: "0 0 auto", marginTop: 1 }} />
-                          <div>
-                            <strong>{d.path}</strong>
-                            <small>{d.scope}</small>
-                          </div>
-                        </span>
-                        {isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                      </button>
-                      {isExpanded && (
-                        <div className="mem-doc__body">
-                          {d.body || "(empty)"}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </>
+          </div>
         )}
       </div>
     </div>
