@@ -235,12 +235,10 @@ func verifyTodoStep(ctx context.Context, step string) (evidence.TodoStepMatch, b
 		return evidence.TodoStepMatch{}, true, fmt.Errorf("step %q has no matching todo_write item in this turn", step)
 	}
 	switch match.Status {
-	case "in_progress", "completed":
+	case "", "pending", "in_progress", "completed":
 		return match, true, nil
-	case "":
-		return evidence.TodoStepMatch{}, true, fmt.Errorf("step %q matches todo %d (%q) but its status is pending; complete_step requires in_progress or completed", step, match.Index, match.Content)
 	default:
-		return evidence.TodoStepMatch{}, true, fmt.Errorf("step %q matches todo %d (%q) but its status is %q; complete_step requires in_progress or completed", step, match.Index, match.Content, match.Status)
+		return evidence.TodoStepMatch{}, true, fmt.Errorf("step %q matches todo %d (%q) but its status is %q; complete_step requires pending, in_progress, or completed", step, match.Index, match.Content, match.Status)
 	}
 }
 
