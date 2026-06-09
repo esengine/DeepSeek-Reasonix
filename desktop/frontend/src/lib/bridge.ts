@@ -294,10 +294,32 @@ export function onUpdaterProgress(cb: (p: UpdateProgress) => void): () => void {
 export function onFilesDropped(cb: (paths: string[]) => void): () => void {
   const rt = typeof window !== "undefined" ? window.runtime : undefined;
   if (!rt?.OnFileDrop) return () => {};
+
+  // Wails' internal ResolveFilePaths throws when a non-file object (e.g. the
+  // window icon) is dragged onto the webview. The error is uncaught and crashes
+  // the app. Intercept it here so only real file drops reach the callback.
+  const suppressNonFileDragError = (e: ErrorEvent) => {
+    if (e.message?.includes("additional File object is not a file on the disk")) {
+      e.preventDefault();
+    }
+  };
+  const suppressNonFileDragRejection = (e: PromiseRejectionEvent) => {
+    const msg = e.reason?.message ?? String(e.reason);
+    if (msg.includes("additional File object is not a file on the disk")) {
+      e.preventDefault();
+    }
+  };
+  window.addEventListener("error", suppressNonFileDragError);
+  window.addEventListener("unhandledrejection", suppressNonFileDragRejection);
+
   rt.OnFileDrop((_x, _y, paths) => {
     if (Array.isArray(paths) && paths.length > 0) cb(paths);
   }, true);
-  return () => rt.OnFileDropOff?.();
+  return () => {
+    rt.OnFileDropOff?.();
+    window.removeEventListener("error", suppressNonFileDragError);
+    window.removeEventListener("unhandledrejection", suppressNonFileDragRejection);
+  };
 }
 
 // onReady subscribes to the agent:ready event fired when boot.Build completes.
