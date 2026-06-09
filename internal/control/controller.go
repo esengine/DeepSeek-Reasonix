@@ -2198,7 +2198,7 @@ func (c *Controller) requestApproval(ctx context.Context, tool, subject string) 
 	// YOLO/bypass and the just-approved-plan window auto-allow every approval
 	// without prompting; the plan gate routes through here too, so this is what
 	// stops a bypass session from blocking on plan approval. Deny rules bit upstream.
-	if c.bypass || c.autoApprove || c.granted["*"] || c.granted[key] {
+	if c.bypass || c.autoApprove || c.granted[key] {
 		c.mu.Unlock()
 		return true, false, nil
 	}
@@ -2210,7 +2210,7 @@ func (c *Controller) requestApproval(ctx context.Context, tool, subject string) 
 	// Re-check the grant: a session grant may have landed while we queued behind
 	// another prompt for the same subject.
 	c.mu.Lock()
-	if c.bypass || c.autoApprove || c.granted["*"] || c.granted[key] {
+	if c.bypass || c.autoApprove || c.granted[key] {
 		c.mu.Unlock()
 		return true, false, nil
 	}
@@ -2235,13 +2235,7 @@ func (c *Controller) requestApproval(ctx context.Context, tool, subject string) 
 		// every future plan would auto-approve.
 		if r.allow && r.session && tool != planApprovalTool {
 			c.mu.Lock()
-			if r.persist {
-				// "Always allow" — user trusts the agent for this session;
-				// grant all writer tools without further prompting.
-				c.granted["*"] = true
-			} else {
-				c.granted[key] = true
-			}
+			c.granted[key] = true
 			c.mu.Unlock()
 		}
 		// When persist is true, remember=true signals Gate.OnRemember to write
