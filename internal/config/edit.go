@@ -33,6 +33,7 @@ const (
 // forms used by the runtime resolver:
 //   - "provider"          — the provider's own default model;
 //   - "provider/model"    — that specific model under that provider.
+//
 // Either is rejected when the target does not exist, so a UI can't strand
 // the config on a model that doesn't exist.
 func (c *Config) SetDefaultModel(name string) error {
