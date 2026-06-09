@@ -1424,6 +1424,17 @@ func (c *Controller) History() []provider.Message {
 	return c.executor.Session().Snapshot() // copy — a turn may be appending concurrently
 }
 
+// ContextBreakdown returns a detailed breakdown of the session's context usage:
+// estimated next-request cost, per-turn conversation sizes, tool schema costs,
+// session aggregates, and compaction headroom.
+func (c *Controller) ContextBreakdown() *agent.ContextBreakdown {
+	if c.executor == nil || c.reg == nil {
+		return nil
+	}
+	schemas := c.reg.Schemas()
+	return c.executor.Breakdown(schemas, c.cp)
+}
+
 // ContextSnapshot returns (promptTokens, contextWindow) from the most recent
 // turn. Both zero means no data yet — a gauge hides itself.
 func (c *Controller) ContextSnapshot() (int, int) {

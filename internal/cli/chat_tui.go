@@ -3044,6 +3044,16 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 		} else {
 			m.notice("no session usage yet")
 		}
+	case "/context":
+		m.echoLocalCommand(input)
+		bk := m.ctrl.ContextBreakdown()
+		if bk == nil || bk.TotalEstimated == 0 && bk.Usage.TotalTokens == 0 {
+			m.notice("no session data yet")
+			break
+		}
+		for _, ln := range strings.Split(bk.FormatBreakdown(), "\n") {
+			m.commitLine(ln)
+		}
 	case "/resume":
 		m.runResumeCommand(input)
 	case "/todo":
