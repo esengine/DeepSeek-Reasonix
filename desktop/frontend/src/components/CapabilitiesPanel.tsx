@@ -188,10 +188,10 @@ export function CapabilitiesPanel({
                     expanded={expandedErrors}
                     onToggle={toggleError}
                     onRetry={(name) => void mutate(() => app.ReconnectMCPServer(name))}
-                    onRetryMany={(names) => void mutate(() => Promise.all(names.map((name) => app.ReconnectMCPServer(name))))}
+                    onRetryMany={(names) => void mutate(() => Promise.allSettled(names.map((name) => app.ReconnectMCPServer(name))))}
                     onConfirmClearAuth={(name) => void mutate(() => app.ClearMCPServerAuthentication(name))}
                     onConfirm={(name) => void mutate(() => app.RemoveMCPServer(name))}
-                    onConfirmMany={(names) => void mutate(() => Promise.all(names.map((name) => app.RemoveMCPServer(name))))}
+                    onConfirmMany={(names) => void mutate(() => Promise.allSettled(names.map((name) => app.RemoveMCPServer(name))))}
                     busy={busy}
                   />
                 )}
@@ -1516,10 +1516,10 @@ export function MCPServersSettingsPage() {
 					busy={busy}
 					onToggle={toggleError}
 					onRetry={(name) => void mutate(() => app.ReconnectMCPServer(name))}
-					onRetryMany={(names) => void mutate(() => Promise.all(names.map((name) => app.ReconnectMCPServer(name))))}
+					onRetryMany={(names) => void mutate(() => Promise.allSettled(names.map((name) => app.ReconnectMCPServer(name))))}
 					onConfirmClearAuth={(name) => void mutate(() => app.ClearMCPServerAuthentication(name))}
 					onConfirm={(name) => void mutate(() => app.RemoveMCPServer(name))}
-					onConfirmMany={(names) => void mutate(() => Promise.all(names.map((name) => app.RemoveMCPServer(name))))}
+					onConfirmMany={(names) => void mutate(() => Promise.allSettled(names.map((name) => app.RemoveMCPServer(name))))}
 				/>
 			)}
 			{view.servers.length === 0 && !adding && (

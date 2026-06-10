@@ -145,7 +145,7 @@ mustNotContain(
 mustMatch(
   "src/styles.css",
   styles,
-  /\.sidebar__new\s*\{[\s\S]{0,420}height:\s*52px[\s\S]{0,420}border-radius:\s*12px/,
+  /\.sidebar__new\s*\{(?=[^}]*height:\s*52px)(?=[^}]*border-radius:\s*12px)/,
   "sidebar new-session button should keep the larger CTA layout",
 );
 
