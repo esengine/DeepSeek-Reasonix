@@ -80,10 +80,7 @@ func TestKillTrackedReapsProcessGroupGrandchild(t *testing.T) {
 	_ = cmd.Wait()
 
 	deadline := time.Now().Add(5 * time.Second)
-	for {
-		if errors.Is(syscall.Kill(gcPid, 0), syscall.ESRCH) {
-			break
-		}
+	for !errors.Is(syscall.Kill(gcPid, 0), syscall.ESRCH) {
 		if time.Now().After(deadline) {
 			t.Fatalf("grandchild %d survived KillTracked — process group not reaped", gcPid)
 		}
