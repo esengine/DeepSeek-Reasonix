@@ -1556,6 +1556,10 @@ function ModelsSection({ s, busy, apply, backgroundApply }: ModelsSectionProps) 
 
     void backgroundApply(async () => {
       for (const { provider } of candidates) {
+        // Background auto-refresh only protects a user-curated model list.
+        // If the user hasn't specified any models, don't silently populate
+        // the provider with every model from the API.
+        if (!provider.models || provider.models.length === 0) continue;
         try {
           const fetched = await app.FetchProviderModels(provider);
           if (fetched.length === 0) continue;
