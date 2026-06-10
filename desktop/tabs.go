@@ -721,11 +721,39 @@ func (a *App) buildTabController(tab *WorkspaceTab) {
 		tab.sink.ctx = wailsCtx
 	}
 
+	sessionDir := desktopSessionDir(root)
+	topicID := strings.TrimSpace(tab.TopicID)
+	if tab.Scope == "global" {
+		migratedTopics := migrateLegacySessionsIntoGlobalTopics(config.SessionDir())
+		if len(migratedTopics) > 0 {
+			a.emitProjectTreeChanged()
+		}
+		if topicID == "" && len(migratedTopics) > 0 {
+			topicID = migratedTopics[0]
+			topicTitle := topicTitleForTab("global", "", topicID)
+			a.mu.Lock()
+			if strings.TrimSpace(tab.TopicID) == "" {
+				tab.TopicID = topicID
+				tab.TopicTitle = topicTitle
+				a.saveTabsLocked()
+			} else {
+				topicID = strings.TrimSpace(tab.TopicID)
+			}
+			a.mu.Unlock()
+		}
+	}
+	if topicID != "" {
+		if _, dir := a.findKnownTopicSession(topicID); dir != "" {
+			sessionDir = dir
+		}
+	}
+
 	ctrl, err := boot.Build(buildCtx, boot.Options{
 		Model:          model,
 		RequireKey:     false,
 		Sink:           tab.sink,
 		WorkspaceRoot:  root,
+		SessionDir:     sessionDir,
 		EffortOverride: cloneStringPtr(tab.effort),
 	})
 	if err != nil {
@@ -2288,20 +2316,22 @@ func (a *App) updateTopicSessionTitles(topicID, title string) {
 	if strings.TrimSpace(topicID) == "" || strings.TrimSpace(title) == "" {
 		return
 	}
-	infos, err := agent.ListSessions(config.SessionDir())
-	if err != nil {
-		return
-	}
-	for _, info := range infos {
-		if info.TopicID != topicID {
+	for _, dir := range a.knownSessionDirs() {
+		infos, err := agent.ListSessions(dir)
+		if err != nil {
 			continue
 		}
-		meta, ok, err := agent.LoadBranchMeta(info.Path)
-		if err != nil || !ok {
-			continue
+		for _, info := range infos {
+			if info.TopicID != topicID {
+				continue
+			}
+			meta, ok, err := agent.LoadBranchMeta(info.Path)
+			if err != nil || !ok {
+				continue
+			}
+			meta.TopicTitle = title
+			_ = agent.SaveBranchMetaPreserveUpdated(info.Path, meta)
 		}
-		meta.TopicTitle = title
-		_ = agent.SaveBranchMetaPreserveUpdated(info.Path, meta)
 	}
 }
 
@@ -2381,7 +2411,6 @@ func (a *App) TrashTopic(topicID string) error {
 	if strings.TrimSpace(topicID) == "" {
 		return fmt.Errorf("topicID is required")
 	}
-	dir := config.SessionDir()
 
 	type topicTab struct {
 		id            string
@@ -2452,20 +2481,22 @@ func (a *App) TrashTopic(topicID string) error {
 		a.mu.Unlock()
 	}
 
-	infos, err := agent.ListSessions(dir)
-	if err != nil {
-		return err
-	}
-	for _, info := range infos {
-		if info.TopicID != topicID {
-			continue
-		}
-		sessionPath, _, err := validateSessionPath(dir, info.Path)
+	for _, dir := range a.knownSessionDirs() {
+		infos, err := agent.ListSessions(dir)
 		if err != nil {
 			return err
 		}
-		if err := deleteSessionFile(dir, sessionPath); err != nil {
-			return err
+		for _, info := range infos {
+			if info.TopicID != topicID {
+				continue
+			}
+			sessionPath, _, err := validateSessionPath(dir, info.Path)
+			if err != nil {
+				return err
+			}
+			if err := deleteSessionFile(dir, sessionPath); err != nil {
+				return err
+			}
 		}
 	}
 	if err := a.DeleteTopic(topicID); err != nil {
@@ -2503,7 +2534,11 @@ func (a *App) ListProjectTree() []ProjectNode {
 		lastActivityAt int64
 	}
 	topicSummaries := map[string]topicSummary{}
-	if infos, err := agent.ListSessions(config.SessionDir()); err == nil {
+	for _, dir := range a.knownSessionDirs() {
+		infos, err := agent.ListSessions(dir)
+		if err != nil {
+			continue
+		}
 		for _, info := range infos {
 			if strings.TrimSpace(info.TopicID) == "" {
 				continue
@@ -2980,6 +3015,36 @@ func (a *App) persistTabSessionPath(tab *WorkspaceTab, path string) {
 	a.rememberTabSessionPath(tab, path)
 }
 
+func (a *App) knownSessionDirs() []string {
+	seen := map[string]bool{}
+	out := []string{}
+	add := func(dir string) {
+		dir = strings.TrimSpace(dir)
+		if dir == "" {
+			return
+		}
+		if abs, err := filepath.Abs(dir); err == nil {
+			dir = abs
+		}
+		if seen[dir] {
+			return
+		}
+		seen[dir] = true
+		out = append(out, dir)
+	}
+	add(config.SessionDir()) // legacy/global sessions from earlier desktop builds
+	add(desktopSessionDir(globalWorkspaceRoot()))
+	for _, project := range loadProjectsFile().Projects {
+		add(desktopSessionDir(project.Root))
+	}
+	a.mu.RLock()
+	for _, tab := range a.tabs {
+		add(tabSessionDir(tab))
+	}
+	a.mu.RUnlock()
+	return out
+}
+
 // findTopicSession scans the session directory for a .jsonl file whose .meta
 // carries the given topicID. Returns the most recently updated match, or ""
 // if no session exists for this topic.
@@ -3011,4 +3076,13 @@ func findTopicSession(dir, topicID string) string {
 		}
 	}
 	return bestPath
+}
+
+func (a *App) findKnownTopicSession(topicID string) (string, string) {
+	for _, dir := range a.knownSessionDirs() {
+		if path := findTopicSession(dir, topicID); path != "" {
+			return path, dir
+		}
+	}
+	return "", ""
 }

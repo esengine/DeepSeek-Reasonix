@@ -81,6 +81,14 @@ type Host struct {
 	prompts   []Prompt
 	resources []Resource
 	failures  []Failure
+	closed    bool
+
+	// Lazy/background servers may still be handshaking when a session closes.
+	// Close cancels those startup contexts and waits for their goroutines before
+	// taking the client snapshot, so a just-connected stdio child cannot escape
+	// teardown and keep a Windows workspace directory locked.
+	deferredCancels []context.CancelFunc
+	deferredWG      sync.WaitGroup
 
 	// Detached stats/schema-cache writers from Start; off the boot path but
 	// drained by Close so cleanup can't race a still-open cache file.
@@ -326,6 +334,20 @@ func Start(ctx context.Context, specs []Spec, p StartPolicy) (*Host, []tool.Tool
 
 // Close terminates all plugin connections.
 func (h *Host) Close() {
+	h.mu.Lock()
+	if h.closed {
+		h.mu.Unlock()
+		return
+	}
+	h.closed = true
+	cancels := append([]context.CancelFunc(nil), h.deferredCancels...)
+	h.mu.Unlock()
+
+	for _, cancel := range cancels {
+		cancel()
+	}
+	h.deferredWG.Wait()
+
 	h.mu.RLock()
 	clients := append([]*Client(nil), h.clients...) // snapshot; close outside the lock
 	h.mu.RUnlock()
@@ -547,6 +569,30 @@ func (h *Host) clearFailure(name string) {
 // command), which keeps the controller's host pointer stable for the session.
 func NewHost() *Host { return &Host{} }
 
+func (h *Host) registerDeferredCancel(cancel context.CancelFunc) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.closed {
+		cancel()
+		return
+	}
+	h.deferredCancels = append(h.deferredCancels, cancel)
+}
+
+func (h *Host) beginDeferredSpawn() bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.closed {
+		return false
+	}
+	h.deferredWG.Add(1)
+	return true
+}
+
+func (h *Host) endDeferredSpawn() {
+	h.deferredWG.Done()
+}
+
 // has reports whether a server with this name is already connected.
 func (h *Host) has(name string) bool {
 	h.mu.RLock()
@@ -572,6 +618,13 @@ func (h *Host) Add(ctx context.Context, s Spec) ([]tool.Tool, error) {
 }
 
 func (h *Host) addConnected(ctx context.Context, s Spec) ([]tool.Tool, error) {
+	h.mu.RLock()
+	if h.closed {
+		h.mu.RUnlock()
+		return nil, fmt.Errorf("plugin host is closed")
+	}
+	h.mu.RUnlock()
+
 	c, err := start(ctx, ctx, s)
 	if err != nil {
 		return nil, err
@@ -583,6 +636,11 @@ func (h *Host) addConnected(ctx context.Context, s Spec) ([]tool.Tool, error) {
 	}
 	c.toolCount = len(ts)
 	h.mu.Lock()
+	if h.closed {
+		h.mu.Unlock()
+		c.close()
+		return nil, fmt.Errorf("plugin host is closed")
+	}
 	h.clients = append(h.clients, c)
 	h.clearFailure(s.Name)
 	h.mu.Unlock()

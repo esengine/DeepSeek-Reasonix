@@ -995,11 +995,42 @@ type WorkspaceMeta struct {
 	Current bool   `json:"current"`
 }
 
+func controllerSessionDir(ctrl *control.Controller) string {
+	if ctrl != nil {
+		if dir := ctrl.SessionDir(); dir != "" {
+			return dir
+		}
+	}
+	return desktopSessionDir("")
+}
+
+func tabSessionDir(tab *WorkspaceTab) string {
+	if tab != nil {
+		if tab.Ctrl != nil {
+			if dir := tab.Ctrl.SessionDir(); dir != "" {
+				return dir
+			}
+		}
+		if tab.WorkspaceRoot != "" {
+			return desktopSessionDir(tab.WorkspaceRoot)
+		}
+	}
+	return desktopSessionDir("")
+}
+
+func (a *App) activeSessionDir() string {
+	a.mu.RLock()
+	tab := a.activeTabLocked()
+	dir := tabSessionDir(tab)
+	a.mu.RUnlock()
+	return dir
+}
+
 // ListSessions returns the saved sessions newest-first for the history panel,
 // marking the one the current conversation is writing to and attaching any
 // user-chosen titles.
 func (a *App) ListSessions() []SessionMeta {
-	dir := config.SessionDir()
+	dir := a.activeSessionDir()
 	infos, err := agent.ListSessions(dir)
 	if err != nil {
 		return []SessionMeta{}
@@ -1018,20 +1049,21 @@ func (a *App) ListSessions() []SessionMeta {
 // ListTrashedSessions returns sessions that were moved to the local trash,
 // newest-deleted first. These can be previewed, restored, or permanently purged.
 func (a *App) ListTrashedSessions() []SessionMeta {
-	dir := config.SessionDir()
-	paths, err := listTrashedSessionFiles(dir)
-	if err != nil {
-		return []SessionMeta{}
-	}
-	titles := loadSessionTitles(dir)
-	out := make([]SessionMeta, 0, len(paths))
-	for _, path := range paths {
-		infos, err := agent.ListSessions(filepath.Dir(path))
-		if err != nil || len(infos) == 0 {
+	out := []SessionMeta{}
+	for _, dir := range a.knownSessionDirs() {
+		paths, err := listTrashedSessionFiles(dir)
+		if err != nil {
 			continue
 		}
-		deletedAt := trashedSessionDeletedAt(path)
-		out = append(out, sessionMetaFromInfo(infos[0], titles[filepath.Base(path)], false, false, deletedAt))
+		titles := loadSessionTitles(dir)
+		for _, path := range paths {
+			infos, err := agent.ListSessions(filepath.Dir(path))
+			if err != nil || len(infos) == 0 {
+				continue
+			}
+			deletedAt := trashedSessionDeletedAt(path)
+			out = append(out, sessionMetaFromInfo(infos[0], titles[filepath.Base(path)], false, false, deletedAt))
+		}
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].DeletedAt == out[j].DeletedAt {
@@ -1040,6 +1072,25 @@ func (a *App) ListTrashedSessions() []SessionMeta {
 		return out[i].DeletedAt > out[j].DeletedAt
 	})
 	return out
+}
+
+func (a *App) trashedSessionDir(path string) (string, error) {
+	for _, dir := range a.knownSessionDirs() {
+		if _, _, _, err := validateTrashedSessionPath(dir, path); err == nil {
+			return dir, nil
+		}
+	}
+	return "", fmt.Errorf("trashed session path outside known session dirs: %s", path)
+}
+
+func (a *App) sessionDirForPath(path string) (string, string, error) {
+	for _, dir := range a.knownSessionDirs() {
+		sessionPath, _, err := validateSessionPath(dir, path)
+		if err == nil {
+			return dir, sessionPath, nil
+		}
+	}
+	return "", "", fmt.Errorf("session path outside known session dirs: %s", path)
 }
 
 func sessionMetaFromInfo(s agent.SessionInfo, title string, current, open bool, deletedAt int64) SessionMeta {
@@ -1064,7 +1115,7 @@ func sessionMetaFromInfo(s agent.SessionInfo, title string, current, open bool, 
 // DeleteSession moves a saved session to the local trash. It refuses any open
 // session because tab auto-save would recreate or append to the file later.
 func (a *App) DeleteSession(path string) error {
-	dir := config.SessionDir()
+	dir := a.activeSessionDir()
 	sessionPath, key, err := validateSessionPath(dir, path)
 	if err != nil {
 		return err
@@ -1115,7 +1166,10 @@ func (a *App) activeSessionPath(dir string) string {
 
 // RestoreSession moves a trashed session back into the saved-session list.
 func (a *App) RestoreSession(path string) error {
-	dir := config.SessionDir()
+	dir, err := a.trashedSessionDir(path)
+	if err != nil {
+		return err
+	}
 	_, key, _, err := validateTrashedSessionPath(dir, path)
 	if err != nil {
 		return err
@@ -1133,13 +1187,17 @@ func (a *App) RestoreSession(path string) error {
 // PurgeTrashedSession permanently removes a trashed session and its title/display
 // sidecars.
 func (a *App) PurgeTrashedSession(path string) error {
-	return purgeTrashedSessionFile(config.SessionDir(), path)
+	dir, err := a.trashedSessionDir(path)
+	if err != nil {
+		return err
+	}
+	return purgeTrashedSessionFile(dir, path)
 }
 
 // RenameSession sets a custom display name for a session (empty clears it back to
 // the preview). It only affects the history panel; the file on disk is unchanged.
 func (a *App) RenameSession(path, title string) error {
-	return setSessionTitle(config.SessionDir(), path, title)
+	return setSessionTitle(a.activeSessionDir(), path, title)
 }
 
 // ResumeSession snapshots the current conversation, then loads the session at
@@ -1160,20 +1218,28 @@ func (a *App) ResumeSessionForTab(tabID, path string) ([]HistoryMessage, error) 
 		return []HistoryMessage{}, fmt.Errorf("tab is not ready")
 	}
 	ctrl := tab.Ctrl
-	loaded, err := agent.LoadSession(path)
+	sessionPath, _, err := validateSessionPath(controllerSessionDir(ctrl), path)
+	if err != nil {
+		return nil, err
+	}
+	loaded, err := agent.LoadSession(sessionPath)
 	if err != nil {
 		return nil, err
 	}
 	_ = ctrl.Snapshot() // persist the current session before switching away
-	ctrl.Resume(loaded, path)
-	a.rememberTabSessionPath(tab, path)
+	ctrl.Resume(loaded, sessionPath)
+	a.rememberTabSessionPath(tab, sessionPath)
 	return a.HistoryForTab(tabID), nil
 }
 
 // PreviewSession reads a saved session for display only. It does not snapshot or
 // swap the active controller, so the history drawer can call it while a turn runs.
 func (a *App) PreviewSession(path string) ([]HistoryMessage, error) {
-	return previewSessionMessages(config.SessionDir(), path)
+	sessionDir, sessionPath, err := a.sessionDirForPath(path)
+	if err != nil {
+		return nil, err
+	}
+	return previewSessionMessages(sessionDir, sessionPath)
 }
 
 // PickWorkspace opens a folder chooser and, on a pick, opens a new project tab
@@ -1388,7 +1454,7 @@ func (a *App) HistoryForTab(tabID string) []HistoryMessage {
 		return []HistoryMessage{}
 	}
 	msgs := ctrl.History()
-	return historyMessages(msgs, sessionDisplayResolver(config.SessionDir(), ctrl.SessionPath()))
+	return historyMessages(msgs, sessionDisplayResolver(controllerSessionDir(ctrl), ctrl.SessionPath()))
 }
 
 func historyMessages(msgs []provider.Message, resolveUserContent func(string) string) []HistoryMessage {
@@ -1422,14 +1488,18 @@ func historyMessages(msgs []provider.Message, resolveUserContent func(string) st
 }
 
 func previewSessionMessages(sessionDir, path string) ([]HistoryMessage, error) {
-	if out, ok, err := previewEventSessionMessages(path); ok || err != nil {
-		return out, err
-	}
-	loaded, err := agent.LoadSession(path)
+	sessionPath, _, err := validateSessionPath(sessionDir, path)
 	if err != nil {
 		return nil, err
 	}
-	return historyMessages(loaded.Snapshot(), sessionDisplayResolver(sessionDir, path)), nil
+	if out, ok, err := previewEventSessionMessages(sessionPath); ok || err != nil {
+		return out, err
+	}
+	loaded, err := agent.LoadSession(sessionPath)
+	if err != nil {
+		return nil, err
+	}
+	return historyMessages(loaded.Snapshot(), sessionDisplayResolver(sessionDir, sessionPath)), nil
 }
 
 type previewEventRecord struct {
@@ -3054,6 +3124,7 @@ func (a *App) SetModelForTab(tabID, name string) error {
 		RequireKey:     false,
 		Sink:           tab.sink,
 		WorkspaceRoot:  tab.WorkspaceRoot,
+		SessionDir:     tabSessionDir(tab),
 		EffortOverride: cloneStringPtr(effortOverride),
 	})
 	if err != nil {
@@ -3147,6 +3218,7 @@ func (a *App) SetEffortForTab(tabID, level string) error {
 		RequireKey:     false,
 		Sink:           tab.sink,
 		WorkspaceRoot:  tab.WorkspaceRoot,
+		SessionDir:     tabSessionDir(tab),
 		EffortOverride: &effort,
 	})
 	if err != nil {

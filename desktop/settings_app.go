@@ -585,6 +585,7 @@ func (a *App) rebuild() error {
 		Model: model, RequireKey: false,
 		Sink:           tab.sink,
 		WorkspaceRoot:  tab.WorkspaceRoot,
+		SessionDir:     tabSessionDir(tab),
 		EffortOverride: cloneStringPtr(tab.effort),
 	})
 	if err != nil {
