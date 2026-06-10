@@ -794,6 +794,35 @@ func officialProviderTemplate(kind string) ([]config.ProviderEntry, string, erro
 	}
 }
 
+func chatProviderModels(models []string) []string {
+	out := make([]string, 0, len(models))
+	seen := map[string]bool{}
+	for _, model := range models {
+		model = strings.TrimSpace(model)
+		if model == "" || seen[model] || !config.IsLikelyChatModel(model) {
+			continue
+		}
+		seen[model] = true
+		out = append(out, model)
+	}
+	return out
+}
+
+func providerDefaultForModels(currentDefault string, models []string) string {
+	currentDefault = strings.TrimSpace(currentDefault)
+	if currentDefault != "" {
+		for _, model := range models {
+			if model == currentDefault {
+				return currentDefault
+			}
+		}
+	}
+	if len(models) > 0 {
+		return models[0]
+	}
+	return ""
+}
+
 // SaveProvider adds or updates a provider. A single model fills `model`; several
 // fill `models` (with `default`). The shared key/endpoint live on the entry.
 func (a *App) SaveProvider(p ProviderView) error {
@@ -818,11 +847,12 @@ func (a *App) SaveProvider(p ProviderView) error {
 		e.Model = ""
 		e.Models = nil
 		e.Default = ""
-		if len(p.Models) > 0 {
-			e.Model = p.Models[0] // also satisfies validateProvider's model requirement
-			if len(p.Models) > 1 {
-				e.Models = p.Models
-				e.Default = p.Default
+		models := chatProviderModels(p.Models)
+		if len(models) > 0 {
+			e.Model = models[0] // also satisfies validateProvider's model requirement
+			if len(models) > 1 {
+				e.Models = models
+				e.Default = providerDefaultForModels(p.Default, models)
 			}
 		}
 		if err := c.UpsertProvider(e); err != nil {
@@ -875,7 +905,7 @@ func (a *App) FetchProviderModels(p ProviderView) ([]string, error) {
 	if err != nil {
 		return []string{}, err
 	}
-	return nonNil(models), nil
+	return nonNil(chatProviderModels(models)), nil
 }
 
 // DeleteProvider removes a provider and retargets open idle tabs that used it.

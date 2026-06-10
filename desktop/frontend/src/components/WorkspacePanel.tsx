@@ -2,16 +2,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   CSSProperties,
   DragEvent as ReactDragEvent,
-  JSX,
   KeyboardEvent,
   MouseEvent as ReactMouseEvent,
   PointerEvent as ReactPointerEvent,
+  ReactElement,
 } from "react";
 import {
   ChevronDown,
   ChevronRight,
   FileText,
   Folder,
+  FolderOpen,
   FolderTree,
   FolderX,
   GitBranch,
@@ -42,8 +43,9 @@ const WORKSPACE_PREVIEW_MIN_WIDTH = 360;
 const WORKSPACE_PREVIEW_TARGET_WIDTH = 360;
 const WORKSPACE_DUAL_PANEL_MIN_WIDTH = WORKSPACE_TREE_MIN_WIDTH + WORKSPACE_PREVIEW_MIN_WIDTH;
 const WORKSPACE_DUAL_PANEL_TARGET_WIDTH = WORKSPACE_TREE_DEFAULT_WIDTH + WORKSPACE_PREVIEW_TARGET_WIDTH;
-const WORKSPACE_CONTEXT_MENU_FILE_HEIGHT = 92;
-const WORKSPACE_CONTEXT_MENU_REF_HEIGHT = 48;
+const WORKSPACE_CONTEXT_MENU_FILE_HEIGHT = 136;
+const WORKSPACE_CONTEXT_MENU_REF_HEIGHT = 92;
+const WORKSPACE_CONTEXT_MENU_SELECTION_HEIGHT = 48;
 const WORKSPACE_MAX_PREVIEW_TABS = 5;
 
 function clampWorkspaceTreeWidth(width: number, panelWidth?: number): number {
@@ -113,7 +115,7 @@ function languageFor(path: string): string | undefined {
   return byExt[ext];
 }
 
-function renderMediaPreview(preview: FilePreview): JSX.Element | null {
+function renderMediaPreview(preview: FilePreview): ReactElement | null {
   if (!preview.url) return null;
   if (preview.kind === "image") {
     return (
@@ -642,7 +644,13 @@ export function WorkspacePanel({
     }
   };
 
-  const renderRows = (dir: string, depth: number): JSX.Element[] => {
+  const revealInFileManager = () => {
+    if (!treeMenu) return;
+    setTreeMenu(null);
+    void app.RevealWorkspacePath(treeMenu.path);
+  };
+
+  const renderRows = (dir: string, depth: number): ReactElement[] => {
     const entries = entriesByDir[dir] ?? [];
     return entries.flatMap((entry) => {
       const path = entryPath(dir, entry);
@@ -938,7 +946,7 @@ export function WorkspacePanel({
             </>
           ) : null}
           {selectionMenu && (
-            <FloatingMenu x={selectionMenu.x} y={selectionMenu.y} estimatedHeight={WORKSPACE_CONTEXT_MENU_REF_HEIGHT}>
+            <FloatingMenu x={selectionMenu.x} y={selectionMenu.y} estimatedHeight={WORKSPACE_CONTEXT_MENU_SELECTION_HEIGHT}>
               <FloatingMenuItems
                 items={[
                   {
@@ -1095,6 +1103,11 @@ export function WorkspacePanel({
                       onSelect: () => void addTreeFileToChat(),
                     },
                   ]),
+              {
+                icon: <FolderOpen size={14} />,
+                label: t("workspace.revealInFileManager"),
+                onSelect: revealInFileManager,
+              },
             ]}
           />
         </FloatingMenu>
