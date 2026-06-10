@@ -111,6 +111,12 @@ func (a *adapter) Start(ctx context.Context) error {
 
 	switch mode {
 	case "webhook":
+		// Webhook mode exposes a public HTTP endpoint; without a verification
+		// token verificationTokenValid accepts every caller, so fail closed
+		// rather than let anyone drive the agent.
+		if strings.TrimSpace(a.cfg.VerificationToken) == "" {
+			return fmt.Errorf("feishu: webhook mode needs verification_token set — refusing to expose an unauthenticated event endpoint")
+		}
 		go a.runWebhook(ctx)
 	default:
 		go a.runWebSocket(ctx)
