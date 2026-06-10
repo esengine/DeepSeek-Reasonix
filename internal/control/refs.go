@@ -7,15 +7,30 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
+
+	"reasonix/internal/proc"
 )
 
 // maxFileRefBytes caps how much of an @-referenced file is injected into a
 // message, so "@somehuge.log" can't blow the context window. The head is kept
 // and the rest noted as truncated.
 const maxFileRefBytes = 64 * 1024
+
+const pdfExtractTimeout = 8 * time.Second
+const pdfExtractWaitDelay = 1 * time.Second
+
+var extractPDFText = extractPDFTextDefault
+
+type pdfExtractResult struct {
+	text      string
+	tool      string
+	truncated bool
+}
 
 // refKind distinguishes the two things an @reference can resolve to.
 type refKind int
@@ -268,6 +283,10 @@ func readFileRef(path string) (content string, isDir bool, err error) {
 		return b.String(), true, nil
 	}
 
+	if strings.EqualFold(filepath.Ext(path), ".pdf") {
+		return readPDFRef(path, info.Size()), false, nil
+	}
+
 	f, err := os.Open(path)
 	if err != nil {
 		return "", false, err
@@ -292,6 +311,145 @@ func readFileRef(path string) (content string, isDir bool, err error) {
 	}
 	return string(data), false, nil
 }
+
+func readPDFRef(path string, size int64) string {
+	result, err := extractPDFText(path)
+	if err != nil {
+		return fmt.Sprintf("[PDF file %s, %d bytes — text extraction unavailable: %v. If this is a scanned/image-only PDF, use OCR or an available multimodal/vision tool with this path.]", path, size, err)
+	}
+	text := strings.TrimSpace(result.text)
+	if text == "" {
+		return fmt.Sprintf("[PDF file %s, %d bytes — no extractable text found. It may be scanned/image-only; use OCR or an available multimodal/vision tool with this path.]", path, size)
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "[PDF text extracted from %s using %s", path, result.tool)
+	if result.truncated {
+		fmt.Fprintf(&b, "; truncated to the first %d bytes", maxFileRefBytes)
+	}
+	b.WriteString("]\n")
+	b.WriteString(text)
+	return b.String()
+}
+
+func extractPDFTextDefault(path string) (pdfExtractResult, error) {
+	var firstErr error
+	if pdftotext, err := exec.LookPath("pdftotext"); err == nil {
+		if text, truncated, err := runPDFTextCommand(pdftotext, []string{"-enc", "UTF-8", "-layout", path, "-"}); err == nil {
+			return pdfExtractResult{text: text, tool: "pdftotext", truncated: truncated}, nil
+		} else {
+			firstErr = err
+		}
+	}
+	python, err := findPython()
+	if err != nil {
+		if firstErr != nil {
+			return pdfExtractResult{}, fmt.Errorf("pdftotext failed (%v), and Python PDF libraries are not available", firstErr)
+		}
+		return pdfExtractResult{}, fmt.Errorf("pdftotext and Python PDF libraries are not available")
+	}
+	text, truncated, err := runPDFTextCommand(python, []string{"-c", pythonPDFExtractScript, path})
+	if err != nil {
+		if firstErr != nil {
+			return pdfExtractResult{}, fmt.Errorf("pdftotext failed (%v), Python PDF extraction failed (%w)", firstErr, err)
+		}
+		return pdfExtractResult{}, err
+	}
+	return pdfExtractResult{text: text, tool: "Python PDF library", truncated: truncated}, nil
+}
+
+func findPython() (string, error) {
+	for _, name := range []string{"python3", "python", "py"} {
+		if p, err := exec.LookPath(name); err == nil {
+			return p, nil
+		}
+	}
+	return "", fmt.Errorf("python not found")
+}
+
+func runPDFTextCommand(name string, args []string) (string, bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), pdfExtractTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, name, args...)
+	setShellKillTree(cmd)
+	cmd.WaitDelay = pdfExtractWaitDelay
+	proc.HideWindow(cmd)
+	var stdout limitedBuffer
+	var stderr limitedBuffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	waitErr := cmd.Run()
+	if ctx.Err() == context.DeadlineExceeded {
+		return "", false, fmt.Errorf("PDF text extraction timed out")
+	}
+	if waitErr != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if msg != "" {
+			if stderr.Truncated() {
+				msg += "\n…[truncated]…"
+			}
+			return "", false, fmt.Errorf("%w: %s", waitErr, msg)
+		}
+		return "", false, waitErr
+	}
+	return stdout.String(), stdout.Truncated(), nil
+}
+
+type limitedBuffer struct {
+	buf       bytes.Buffer
+	truncated bool
+}
+
+func (b *limitedBuffer) Write(p []byte) (int, error) {
+	remaining := maxFileRefBytes - b.buf.Len()
+	if remaining > 0 {
+		if len(p) > remaining {
+			_, _ = b.buf.Write(p[:remaining])
+			b.truncated = true
+		} else {
+			_, _ = b.buf.Write(p)
+		}
+	} else if len(p) > 0 {
+		b.truncated = true
+	}
+	return len(p), nil
+}
+
+func (b *limitedBuffer) String() string { return b.buf.String() }
+
+func (b *limitedBuffer) Truncated() bool { return b.truncated }
+
+const pythonPDFExtractScript = `
+import sys
+
+path = sys.argv[1]
+
+try:
+    from pypdf import PdfReader
+except Exception:
+    try:
+        from PyPDF2 import PdfReader
+    except Exception:
+        PdfReader = None
+
+if PdfReader is not None:
+    reader = PdfReader(path)
+    for page in reader.pages:
+        text = page.extract_text() or ""
+        if text:
+            print(text)
+    sys.exit(0)
+
+try:
+    import pdfplumber
+except Exception as exc:
+    raise SystemExit("no supported Python PDF library found") from exc
+
+with pdfplumber.open(path) as pdf:
+    for page in pdf.pages:
+        text = page.extract_text() or ""
+        if text:
+            print(text)
+`
 
 func imageMime(data []byte, path string) string {
 	mime := http.DetectContentType(data[:min(len(data), 512)])

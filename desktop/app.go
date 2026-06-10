@@ -389,6 +389,11 @@ func (a *App) restoreOrBuildTabs() {
 			tab.model = entry.Model
 			tab.effort = cloneStringPtr(entry.Effort)
 			tab.mode = persistedTabMode(entry.Mode)
+			tab.goal = strings.TrimSpace(entry.Goal)
+			tab.toolApprovalMode = normalizeToolApprovalMode(entry.ToolApprovalMode)
+			if tab.toolApprovalMode == control.ToolApprovalAsk && tabModeHasAutoApproveTools(entry.Mode) {
+				tab.toolApprovalMode = control.ToolApprovalYolo
+			}
 			tab.SessionPath = strings.TrimSpace(entry.SessionPath)
 			tab.sink = &tabEventSink{tabID: tab.ID, app: a, ctx: ctx}
 			a.mu.Lock()
@@ -447,13 +452,14 @@ func (a *App) createTabEntry(scope, workspaceRoot, topicID string) *WorkspaceTab
 
 func (a *App) createTabEntryWithID(scope, workspaceRoot, topicID, id string) *WorkspaceTab {
 	return &WorkspaceTab{
-		ID:            id,
-		Scope:         scope,
-		WorkspaceRoot: workspaceRoot,
-		TopicID:       topicID,
-		TopicTitle:    topicTitleForTab(scope, workspaceRoot, topicID),
-		mode:          "normal",
-		disabledMCP:   map[string]ServerView{},
+		ID:               id,
+		Scope:            scope,
+		WorkspaceRoot:    workspaceRoot,
+		TopicID:          topicID,
+		TopicTitle:       topicTitleForTab(scope, workspaceRoot, topicID),
+		mode:             "normal",
+		toolApprovalMode: control.ToolApprovalAsk,
+		disabledMCP:      map[string]ServerView{},
 	}
 }
 
@@ -633,18 +639,21 @@ func (a *App) ApproveTabWithScope(tabID, id string, allow, session, persist bool
 	}
 }
 
-// SetPlanMode toggles read-only plan mode.
+// SetPlanMode toggles the read-only plan axis while preserving the current
+// tool-auto-approval axis.
 func (a *App) SetPlanMode(on bool) {
-	if on {
-		a.SetModeForTab("", "plan")
-		return
-	}
-	a.SetModeForTab("", "normal")
+	a.setPlanModeForTab("", on)
 }
 
-// SetMode applies a composer gating mode ("plan" | "yolo" | anything else =
+func (a *App) setPlanModeForTab(tabID string, on bool) {
+	current := a.currentModeForTab(tabID)
+	a.SetModeForTab(tabID, tabModeFromAxes(on, tabModeHasAutoApproveTools(current)))
+}
+
+// SetMode applies a composer gating mode ("plan" | "yolo" | "plan-yolo" |
+// anything else =
 // normal) in one call, so a turn submitted right after the switch can't race a
-// half-applied SetPlanMode/SetBypass pair.
+// half-applied plan/tool-auto-approval pair.
 func (a *App) SetMode(mode string) {
 	a.SetModeForTab("", mode)
 }
@@ -658,10 +667,18 @@ func (a *App) SetModeForTab(tabID, mode string) {
 		return
 	}
 	tab.mode = normalized
+	tab.toolApprovalMode = normalizeToolApprovalMode(tab.toolApprovalMode)
+	if tabModeHasAutoApproveTools(normalized) {
+		tab.toolApprovalMode = control.ToolApprovalYolo
+	} else if tab.toolApprovalMode == control.ToolApprovalYolo {
+		tab.toolApprovalMode = control.ToolApprovalAsk
+	}
 	ctrl := tab.Ctrl
+	approvalMode := tab.toolApprovalMode
 	tabIDForSave := tab.ID
 	a.mu.Unlock()
 	applyTabModeToController(ctrl, normalized)
+	applyTabToolApprovalModeToController(ctrl, approvalMode)
 	a.mu.Lock()
 	if a.tabs[tabIDForSave] == tab {
 		a.saveTabsLocked()
@@ -678,9 +695,79 @@ func applyTabModeToController(ctrl *control.Controller, mode string) {
 		ctrl.SetMode(true, false)
 	case "yolo":
 		ctrl.SetMode(false, true)
+	case "plan-yolo":
+		ctrl.SetMode(true, true)
 	default:
 		ctrl.SetMode(false, false)
 	}
+}
+
+func applyTabToolApprovalModeToController(ctrl *control.Controller, mode string) {
+	if ctrl == nil {
+		return
+	}
+	ctrl.SetToolApprovalMode(normalizeToolApprovalMode(mode))
+}
+
+func (a *App) currentModeForTab(tabID string) string {
+	a.mu.RLock()
+	tab := a.tabByIDLocked(tabID)
+	mode := "normal"
+	if tab != nil {
+		mode = currentTabMode(tab)
+	}
+	a.mu.RUnlock()
+	return mode
+}
+
+func normalizeCollaborationMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "plan":
+		return "plan"
+	case "goal":
+		return "goal"
+	default:
+		return "normal"
+	}
+}
+
+func (a *App) SetCollaborationMode(mode string) {
+	a.SetCollaborationModeForTab("", mode)
+}
+
+func (a *App) SetCollaborationModeForTab(tabID, mode string) {
+	mode = normalizeCollaborationMode(mode)
+	a.mu.Lock()
+	tab := a.tabByIDLocked(tabID)
+	if tab == nil {
+		a.mu.Unlock()
+		return
+	}
+	approvalMode := currentTabToolApprovalMode(tab)
+	switch mode {
+	case "plan":
+		tab.mode = tabModeFromAxes(true, approvalMode == control.ToolApprovalYolo)
+		tab.goal = ""
+	case "goal":
+		tab.mode = tabModeFromAxes(false, approvalMode == control.ToolApprovalYolo)
+	default:
+		tab.mode = tabModeFromAxes(false, approvalMode == control.ToolApprovalYolo)
+		tab.goal = ""
+	}
+	ctrl := tab.Ctrl
+	goal := tab.goal
+	plan := tabModeHasPlan(tab.mode)
+	tabIDForSave := tab.ID
+	a.mu.Unlock()
+	if ctrl != nil {
+		ctrl.SetPlanMode(plan)
+		ctrl.SetGoal(goal)
+	}
+	a.mu.Lock()
+	if a.tabs[tabIDForSave] == tab {
+		a.saveTabsLocked()
+	}
+	a.mu.Unlock()
 }
 
 // QuestionAnswer is the frontend's reply to one question in an ask_request.
@@ -746,6 +833,22 @@ func (a *App) NewSession() error {
 	a.saveTabsLocked()
 	a.mu.Unlock()
 
+	return nil
+}
+
+// ClearSession discards the current conversation and rotates to a fresh unsaved one.
+func (a *App) ClearSession() error {
+	a.mu.RLock()
+	tab := a.activeTabLocked()
+	ctrl := a.activeCtrlLocked()
+	a.mu.RUnlock()
+	if ctrl == nil {
+		return nil
+	}
+	if err := ctrl.ClearSession(); err != nil {
+		return err
+	}
+	a.persistTabSessionPath(tab, ctrl.SessionPath())
 	return nil
 }
 
@@ -936,11 +1039,42 @@ type WorkspaceMeta struct {
 	Current bool   `json:"current"`
 }
 
+func controllerSessionDir(ctrl *control.Controller) string {
+	if ctrl != nil {
+		if dir := ctrl.SessionDir(); dir != "" {
+			return dir
+		}
+	}
+	return desktopSessionDir("")
+}
+
+func tabSessionDir(tab *WorkspaceTab) string {
+	if tab != nil {
+		if tab.Ctrl != nil {
+			if dir := tab.Ctrl.SessionDir(); dir != "" {
+				return dir
+			}
+		}
+		if tab.WorkspaceRoot != "" {
+			return desktopSessionDir(tab.WorkspaceRoot)
+		}
+	}
+	return desktopSessionDir("")
+}
+
+func (a *App) activeSessionDir() string {
+	a.mu.RLock()
+	tab := a.activeTabLocked()
+	dir := tabSessionDir(tab)
+	a.mu.RUnlock()
+	return dir
+}
+
 // ListSessions returns the saved sessions newest-first for the history panel,
 // marking the one the current conversation is writing to and attaching any
 // user-chosen titles.
 func (a *App) ListSessions() []SessionMeta {
-	dir := config.SessionDir()
+	dir := a.activeSessionDir()
 	infos, err := agent.ListSessions(dir)
 	if err != nil {
 		return []SessionMeta{}
@@ -959,20 +1093,21 @@ func (a *App) ListSessions() []SessionMeta {
 // ListTrashedSessions returns sessions that were moved to the local trash,
 // newest-deleted first. These can be previewed, restored, or permanently purged.
 func (a *App) ListTrashedSessions() []SessionMeta {
-	dir := config.SessionDir()
-	paths, err := listTrashedSessionFiles(dir)
-	if err != nil {
-		return []SessionMeta{}
-	}
-	titles := loadSessionTitles(dir)
-	out := make([]SessionMeta, 0, len(paths))
-	for _, path := range paths {
-		infos, err := agent.ListSessions(filepath.Dir(path))
-		if err != nil || len(infos) == 0 {
+	out := []SessionMeta{}
+	for _, dir := range a.knownSessionDirs() {
+		paths, err := listTrashedSessionFiles(dir)
+		if err != nil {
 			continue
 		}
-		deletedAt := trashedSessionDeletedAt(path)
-		out = append(out, sessionMetaFromInfo(infos[0], titles[filepath.Base(path)], false, false, deletedAt))
+		titles := loadSessionTitles(dir)
+		for _, path := range paths {
+			infos, err := agent.ListSessions(filepath.Dir(path))
+			if err != nil || len(infos) == 0 {
+				continue
+			}
+			deletedAt := trashedSessionDeletedAt(path)
+			out = append(out, sessionMetaFromInfo(infos[0], titles[filepath.Base(path)], false, false, deletedAt))
+		}
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].DeletedAt == out[j].DeletedAt {
@@ -981,6 +1116,25 @@ func (a *App) ListTrashedSessions() []SessionMeta {
 		return out[i].DeletedAt > out[j].DeletedAt
 	})
 	return out
+}
+
+func (a *App) trashedSessionDir(path string) (string, error) {
+	for _, dir := range a.knownSessionDirs() {
+		if _, _, _, err := validateTrashedSessionPath(dir, path); err == nil {
+			return dir, nil
+		}
+	}
+	return "", fmt.Errorf("trashed session path outside known session dirs: %s", path)
+}
+
+func (a *App) sessionDirForPath(path string) (string, string, error) {
+	for _, dir := range a.knownSessionDirs() {
+		sessionPath, _, err := validateSessionPath(dir, path)
+		if err == nil {
+			return dir, sessionPath, nil
+		}
+	}
+	return "", "", fmt.Errorf("session path outside known session dirs: %s", path)
 }
 
 func sessionMetaFromInfo(s agent.SessionInfo, title string, current, open bool, deletedAt int64) SessionMeta {
@@ -1005,7 +1159,7 @@ func sessionMetaFromInfo(s agent.SessionInfo, title string, current, open bool, 
 // DeleteSession moves a saved session to the local trash. It refuses any open
 // session because tab auto-save would recreate or append to the file later.
 func (a *App) DeleteSession(path string) error {
-	dir := config.SessionDir()
+	dir := a.activeSessionDir()
 	sessionPath, key, err := validateSessionPath(dir, path)
 	if err != nil {
 		return err
@@ -1056,7 +1210,10 @@ func (a *App) activeSessionPath(dir string) string {
 
 // RestoreSession moves a trashed session back into the saved-session list.
 func (a *App) RestoreSession(path string) error {
-	dir := config.SessionDir()
+	dir, err := a.trashedSessionDir(path)
+	if err != nil {
+		return err
+	}
 	_, key, _, err := validateTrashedSessionPath(dir, path)
 	if err != nil {
 		return err
@@ -1074,13 +1231,17 @@ func (a *App) RestoreSession(path string) error {
 // PurgeTrashedSession permanently removes a trashed session and its title/display
 // sidecars.
 func (a *App) PurgeTrashedSession(path string) error {
-	return purgeTrashedSessionFile(config.SessionDir(), path)
+	dir, err := a.trashedSessionDir(path)
+	if err != nil {
+		return err
+	}
+	return purgeTrashedSessionFile(dir, path)
 }
 
 // RenameSession sets a custom display name for a session (empty clears it back to
 // the preview). It only affects the history panel; the file on disk is unchanged.
 func (a *App) RenameSession(path, title string) error {
-	return setSessionTitle(config.SessionDir(), path, title)
+	return setSessionTitle(a.activeSessionDir(), path, title)
 }
 
 // ResumeSession snapshots the current conversation, then loads the session at
@@ -1101,20 +1262,28 @@ func (a *App) ResumeSessionForTab(tabID, path string) ([]HistoryMessage, error) 
 		return []HistoryMessage{}, fmt.Errorf("tab is not ready")
 	}
 	ctrl := tab.Ctrl
-	loaded, err := agent.LoadSession(path)
+	sessionPath, _, err := validateSessionPath(controllerSessionDir(ctrl), path)
+	if err != nil {
+		return nil, err
+	}
+	loaded, err := agent.LoadSession(sessionPath)
 	if err != nil {
 		return nil, err
 	}
 	_ = ctrl.Snapshot() // persist the current session before switching away
-	ctrl.Resume(loaded, path)
-	a.rememberTabSessionPath(tab, path)
+	ctrl.Resume(loaded, sessionPath)
+	a.rememberTabSessionPath(tab, sessionPath)
 	return a.HistoryForTab(tabID), nil
 }
 
 // PreviewSession reads a saved session for display only. It does not snapshot or
 // swap the active controller, so the history drawer can call it while a turn runs.
 func (a *App) PreviewSession(path string) ([]HistoryMessage, error) {
-	return previewSessionMessages(config.SessionDir(), path)
+	sessionDir, sessionPath, err := a.sessionDirForPath(path)
+	if err != nil {
+		return nil, err
+	}
+	return previewSessionMessages(sessionDir, sessionPath)
 }
 
 // PickWorkspace opens a folder chooser and, on a pick, opens a new project tab
@@ -1329,7 +1498,7 @@ func (a *App) HistoryForTab(tabID string) []HistoryMessage {
 		return []HistoryMessage{}
 	}
 	msgs := ctrl.History()
-	return historyMessages(msgs, sessionDisplayResolver(config.SessionDir(), ctrl.SessionPath()))
+	return historyMessages(msgs, sessionDisplayResolver(controllerSessionDir(ctrl), ctrl.SessionPath()))
 }
 
 func historyMessages(msgs []provider.Message, resolveUserContent func(string) string) []HistoryMessage {
@@ -1338,6 +1507,9 @@ func historyMessages(msgs []provider.Message, resolveUserContent func(string) st
 		content := m.Content
 		if m.Role == provider.RoleUser {
 			content = resolveUserContent(m.Content)
+			if control.IsSyntheticUserMessage(content) {
+				continue
+			}
 		}
 		reasoning := ""
 		if m.Role == provider.RoleAssistant {
@@ -1360,14 +1532,18 @@ func historyMessages(msgs []provider.Message, resolveUserContent func(string) st
 }
 
 func previewSessionMessages(sessionDir, path string) ([]HistoryMessage, error) {
-	if out, ok, err := previewEventSessionMessages(path); ok || err != nil {
-		return out, err
-	}
-	loaded, err := agent.LoadSession(path)
+	sessionPath, _, err := validateSessionPath(sessionDir, path)
 	if err != nil {
 		return nil, err
 	}
-	return historyMessages(loaded.Snapshot(), sessionDisplayResolver(sessionDir, path)), nil
+	if out, ok, err := previewEventSessionMessages(sessionPath); ok || err != nil {
+		return out, err
+	}
+	loaded, err := agent.LoadSession(sessionPath)
+	if err != nil {
+		return nil, err
+	}
+	return historyMessages(loaded.Snapshot(), sessionDisplayResolver(sessionDir, sessionPath)), nil
 }
 
 type previewEventRecord struct {
@@ -1595,12 +1771,16 @@ func (a *App) jobsForCtrl(ctrl *control.Controller, out []JobView) []JobView {
 
 // Meta describes the session for the frontend's header and status line.
 type Meta struct {
-	Label        string `json:"label"`
-	Ready        bool   `json:"ready"`
-	StartupErr   string `json:"startupErr,omitempty"`
-	EventChannel string `json:"eventChannel"`
-	Cwd          string `json:"cwd"`
-	Bypass       bool   `json:"bypass"` // YOLO mode on (auto-approve every tool call)
+	Label            string `json:"label"`
+	Ready            bool   `json:"ready"`
+	StartupErr       string `json:"startupErr,omitempty"`
+	EventChannel     string `json:"eventChannel"`
+	Cwd              string `json:"cwd"`
+	AutoApproveTools bool   `json:"autoApproveTools"`
+	Bypass           bool   `json:"bypass"` // legacy JSON key for YOLO/full-access tool auto-approval
+	ToolApprovalMode string `json:"toolApprovalMode"`
+	Goal             string `json:"goal,omitempty"`
+	GoalStatus       string `json:"goalStatus,omitempty"`
 }
 
 // Meta reports the model label, readiness, any startup error, the working
@@ -1619,25 +1799,110 @@ func (a *App) MetaForTab(tabID string) Meta {
 	if cwd == "" {
 		cwd, _ = os.Getwd()
 	}
+	autoApproveTools := tab.Ctrl != nil && tab.Ctrl.AutoApproveTools()
+	toolApprovalMode := currentTabToolApprovalMode(tab)
+	goal := currentTabGoal(tab)
+	goalStatus := currentTabGoalStatus(tab)
 	return Meta{
-		Label:        tab.Label,
-		Ready:        tab.Ready,
-		StartupErr:   tab.StartupErr,
-		EventChannel: eventChannel,
-		Cwd:          cwd,
-		Bypass:       tab.Ctrl != nil && tab.Ctrl.Bypass(),
+		Label:            tab.Label,
+		Ready:            tab.Ready,
+		StartupErr:       tab.StartupErr,
+		EventChannel:     eventChannel,
+		Cwd:              cwd,
+		AutoApproveTools: autoApproveTools,
+		Bypass:           autoApproveTools,
+		ToolApprovalMode: toolApprovalMode,
+		Goal:             goal,
+		GoalStatus:       goalStatus,
 	}
 }
 
-// SetBypass toggles YOLO mode for the session: auto-approve every tool call
-// (writers and bash run without asking). Deny rules still apply. Runtime-only —
-// not written to config, so it resets on relaunch.
-func (a *App) SetBypass(on bool) {
-	if on {
-		a.SetModeForTab("", "yolo")
+func (a *App) SetGoal(goal string) {
+	a.SetGoalForTab("", goal)
+}
+
+func (a *App) SetGoalForTab(tabID, goal string) {
+	goal = strings.TrimSpace(goal)
+	a.mu.Lock()
+	tab := a.tabByIDLocked(tabID)
+	if tab == nil {
+		a.mu.Unlock()
 		return
 	}
-	a.SetModeForTab("", "normal")
+	tab.goal = goal
+	if goal != "" {
+		tab.mode = tabModeFromAxes(false, currentTabToolApprovalMode(tab) == control.ToolApprovalYolo)
+	}
+	ctrl := tab.Ctrl
+	plan := tabModeHasPlan(tab.mode)
+	tabIDForSave := tab.ID
+	a.mu.Unlock()
+	if ctrl != nil {
+		ctrl.SetPlanMode(plan)
+		ctrl.SetGoal(goal)
+	}
+	a.mu.Lock()
+	if a.tabs[tabIDForSave] == tab {
+		a.saveTabsLocked()
+	}
+	a.mu.Unlock()
+}
+
+func (a *App) ClearGoal() {
+	a.SetGoal("")
+}
+
+func (a *App) ClearGoalForTab(tabID string) {
+	a.SetGoalForTab(tabID, "")
+}
+
+// SetAutoApproveTools toggles YOLO/full-access tool auto-approval:
+// approval-gated tool calls run without asking, while ask questions and plan
+// approvals still wait for the user. Runtime-only — not written to config.
+func (a *App) SetAutoApproveTools(on bool) {
+	if on {
+		a.SetToolApprovalModeForTab("", control.ToolApprovalYolo)
+		return
+	}
+	a.SetToolApprovalModeForTab("", control.ToolApprovalAsk)
+}
+
+func (a *App) setAutoApproveToolsForTab(tabID string, on bool) {
+	if on {
+		a.SetToolApprovalModeForTab(tabID, control.ToolApprovalYolo)
+		return
+	}
+	a.SetToolApprovalModeForTab(tabID, control.ToolApprovalAsk)
+}
+
+// SetBypass is the legacy Wails binding for SetAutoApproveTools.
+func (a *App) SetBypass(on bool) {
+	a.SetAutoApproveTools(on)
+}
+
+func (a *App) SetToolApprovalMode(mode string) {
+	a.SetToolApprovalModeForTab("", mode)
+}
+
+func (a *App) SetToolApprovalModeForTab(tabID, mode string) {
+	mode = normalizeToolApprovalMode(mode)
+	a.mu.Lock()
+	tab := a.tabByIDLocked(tabID)
+	if tab == nil {
+		a.mu.Unlock()
+		return
+	}
+	tab.toolApprovalMode = mode
+	tab.mode = tabModeFromAxes(tabModeHasPlan(currentTabMode(tab)), mode == control.ToolApprovalYolo)
+	ctrl := tab.Ctrl
+	tabIDForSave := tab.ID
+	a.mu.Unlock()
+	applyTabToolApprovalModeToController(ctrl, mode)
+	a.mu.Lock()
+	if a.tabs[tabIDForSave] == tab {
+		a.saveTabsLocked()
+	}
+	a.mu.Unlock()
 }
 
 // CommandInfo describes one available slash command for the composer's "/" menu.
@@ -1654,10 +1919,12 @@ type CommandInfo struct {
 func (a *App) Commands() []CommandInfo {
 	out := []CommandInfo{
 		{Name: "new", Description: i18n.M.CmdNew, Kind: "builtin"},
+		{Name: "clear", Description: i18n.M.CmdClear, Kind: "builtin"},
 		{Name: "compact", Description: i18n.M.CmdCompact, Kind: "builtin"},
 		{Name: "model", Description: i18n.M.CmdModel, Kind: "builtin"},
 		{Name: "effort", Description: i18n.M.CmdEffort, Kind: "builtin"},
 		{Name: "memory", Description: i18n.M.CmdMemory, Kind: "builtin"},
+		{Name: "goal", Description: i18n.M.CmdGoal, Kind: "builtin"},
 		{Name: "remember", Description: i18n.M.CmdRemember, Kind: "builtin"},
 		{Name: "mcp", Description: i18n.M.CmdMcp, Kind: "builtin"},
 		{Name: "hooks", Description: i18n.M.CmdHooks, Kind: "builtin"},
@@ -2901,6 +3168,7 @@ func (a *App) SetModelForTab(tabID, name string) error {
 		RequireKey:     false,
 		Sink:           tab.sink,
 		WorkspaceRoot:  tab.WorkspaceRoot,
+		SessionDir:     tabSessionDir(tab),
 		EffortOverride: cloneStringPtr(effortOverride),
 	})
 	if err != nil {
@@ -2916,6 +3184,8 @@ func (a *App) SetModelForTab(tabID, name string) error {
 	a.mu.Unlock()
 	newCtrl.EnableInteractiveApproval()
 	applyTabModeToController(newCtrl, tab.mode)
+	applyTabToolApprovalModeToController(newCtrl, tab.toolApprovalMode)
+	newCtrl.SetGoal(tab.goal)
 
 	path := agent.ContinueSessionPath(prevPath, newCtrl.SessionDir(), newCtrl.Label())
 	if len(carried) > 0 {
@@ -2992,6 +3262,7 @@ func (a *App) SetEffortForTab(tabID, level string) error {
 		RequireKey:     false,
 		Sink:           tab.sink,
 		WorkspaceRoot:  tab.WorkspaceRoot,
+		SessionDir:     tabSessionDir(tab),
 		EffortOverride: &effort,
 	})
 	if err != nil {
@@ -3008,6 +3279,8 @@ func (a *App) SetEffortForTab(tabID, level string) error {
 	a.mu.Unlock()
 	newCtrl.EnableInteractiveApproval()
 	applyTabModeToController(newCtrl, tab.mode)
+	applyTabToolApprovalModeToController(newCtrl, tab.toolApprovalMode)
+	newCtrl.SetGoal(tab.goal)
 	path := agent.ContinueSessionPath(prevPath, newCtrl.SessionDir(), newCtrl.Label())
 	if len(carried) > 0 {
 		newCtrl.Resume(&agent.Session{Messages: carried}, path)

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { Check, ChevronDown, X } from "lucide-react";
 import { asArray } from "../lib/array";
+import { useDeferredClose } from "../lib/useMountTransition";
 import { app } from "../lib/bridge";
 import { normalizeLangPref, useI18n, useT, type DictKey, type LangPref } from "../lib/i18n";
 import { mergedFetchedProviderModels, providerDefaultModel } from "../lib/providerModels";
@@ -8,13 +9,10 @@ import { useUpdater } from "../lib/useUpdater";
 import {
   THEME_STYLES,
   applyTheme,
-  defaultStyleForTheme,
-  getResolvedTheme,
   getTheme,
   getThemeStyle,
   normalizeThemePreference,
   normalizeThemeStyleForTheme,
-  themeForStyle,
   type Theme,
   type ThemeStyle,
 } from "../lib/theme";
@@ -29,6 +27,7 @@ import { MemorySettingsPage } from "./MemoryPanel";
 import { CopyButton } from "./CopyButton";
 import { getSuccessPreference, setSuccessPreference, getAttentionPreference, setAttentionPreference, playSuccessChime, playAttentionChime, type SoundWavPref } from "../lib/sound";
 import { getGenerativePreset, setGenerativePreset, generativeMusic, type GenerativePreset } from "../lib/generative-music";
+import { ModalCloseButton } from "./ModalCloseButton";
 
 const SETTINGS_TABS: SettingsTab[] = ["general", "models", "bots", "mcp", "skills", "memory", "permissions", "sandbox", "network", "appearance", "updates"];
 
@@ -45,6 +44,8 @@ export function SettingsPanel({ onClose, onChanged, initialTab }: { onClose: () 
   const [textSize, setTextSizeState] = useState<TextSize>(getTextSize());
   const [fontFamily, setFontFamilyState] = useState<FontFamily>(getFontFamily());
   const [tab, setTab] = useState<SettingsTab>(initialTab === "providers" ? "models" : initialTab ?? "general");
+  // Play the modal exit animation, then let the parent unmount us.
+  const { status, requestClose } = useDeferredClose(onClose, 240);
 
   const reload = async () => setS(normalizeSettingsView(await app.Settings().catch(() => null)));
   useEffect(() => {
@@ -87,11 +88,11 @@ export function SettingsPanel({ onClose, onChanged, initialTab }: { onClose: () 
   // Close on Esc
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !document.querySelector("[data-anchored-popover='active']")) onClose();
+      if (e.key === "Escape" && !document.querySelector("[data-anchored-popover='active']")) requestClose();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [requestClose]);
 
   // The settings-reliant pages (general, models, network, permissions,
   // sandbox, appearance, updates) need SettingsView loaded. MCP, Skills, and Memory
@@ -99,13 +100,11 @@ export function SettingsPanel({ onClose, onChanged, initialTab }: { onClose: () 
   const needsSettings = tab === "general" || tab === "models" || tab === "bots" || tab === "network" || tab === "permissions" || tab === "sandbox" || tab === "appearance" || tab === "updates";
 
   return (
-    <div className="settings-modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="settings-modal">
-        <header className="settings-modal__head">
-          <div className="settings-modal__title">{t("settings.title")}</div>
-          <Tooltip label={t("common.close")}>
-            <button className="chip" aria-label={t("common.close")} onClick={onClose}><X size={14} /></button>
-          </Tooltip>
+    <div className="management-modal-backdrop settings-modal-backdrop" data-state={status} onClick={(e) => { if (e.target === e.currentTarget) requestClose(); }}>
+      <div className="management-modal settings-modal" data-state={status}>
+        <header className="management-modal__head settings-modal__head">
+          <div className="management-modal__title settings-modal__title">{t("settings.title")}</div>
+          <ModalCloseButton label={t("common.close")} onClick={requestClose} />
         </header>
 
         <div className="settings-center">
@@ -127,35 +126,32 @@ export function SettingsPanel({ onClose, onChanged, initialTab }: { onClose: () 
               <div className="empty">{t("settings.loading")}</div>
             ) : (
               <>
-                {tab === "general" && s && <SettingsPageShell s={s} tab={tab} busy={busy} apply={apply}><GeneralSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
-                {tab === "models" && s && <SettingsPageShell s={s} tab={tab} busy={busy} apply={apply}><ModelsSection s={s} busy={busy} apply={apply} backgroundApply={backgroundApply} /></SettingsPageShell>}
-                {tab === "bots" && s && <SettingsPageShell s={s} tab={tab} busy={busy} apply={apply}><BotsSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
-                {tab === "mcp" && <SettingsPageShell s={s} tab={tab} busy={false} apply={apply}><MCPServersSettingsPage /></SettingsPageShell>}
-                {tab === "skills" && <SettingsPageShell s={s} tab={tab} busy={false} apply={apply}><SkillsSettingsPage /></SettingsPageShell>}
-                {tab === "memory" && <SettingsPageShell s={s} tab={tab} busy={false} apply={apply}><MemorySettingsPage /></SettingsPageShell>}
-                {tab === "permissions" && s && <SettingsPageShell s={s} tab={tab} busy={busy} apply={apply}><PermissionsSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
-                {tab === "sandbox" && s && <SettingsPageShell s={s} tab={tab} busy={busy} apply={apply}><SandboxSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
-                {tab === "network" && s && <SettingsPageShell s={s} tab={tab} busy={busy} apply={apply}><NetworkSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
+                {tab === "general" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><GeneralSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
+                {tab === "models" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><ModelsSection s={s} busy={busy} apply={apply} backgroundApply={backgroundApply} /></SettingsPageShell>}
+                {tab === "bots" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><BotsSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
+                {tab === "mcp" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><MCPServersSettingsPage /></SettingsPageShell>}
+                {tab === "skills" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><SkillsSettingsPage /></SettingsPageShell>}
+                {tab === "memory" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><MemorySettingsPage /></SettingsPageShell>}
+                {tab === "permissions" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><PermissionsSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
+                {tab === "sandbox" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><SandboxSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
+                {tab === "network" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><NetworkSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
+
                 {tab === "appearance" && s && (
-                  <SettingsPageShell s={s} tab={tab} busy={busy} apply={apply}>
+                  <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}>
                     <AppearanceSection
                       theme={theme}
                       themeStyle={themeStyle}
                       textSize={textSize}
                       fontFamily={fontFamily}
-                      onTheme={(t) => {
-                        const nextStyle = themeForStyle(themeStyle) === getResolvedTheme(t) ? themeStyle : defaultStyleForTheme(t);
-                        applyTheme(t, nextStyle, { persist: false });
-                        setThemeState(t);
-                        setThemeStyleState(nextStyle);
-                        void apply(() => app.SetDesktopAppearance(t, nextStyle));
+                      onTheme={(nextTheme) => {
+                        applyTheme(nextTheme, themeStyle, { persist: false });
+                        setThemeState(nextTheme);
+                        void apply(() => app.SetDesktopAppearance(nextTheme, themeStyle));
                       }}
                       onThemeStyle={(style) => {
-                        const nextTheme = themeForStyle(style);
-                        applyTheme(nextTheme, style, { persist: false });
-                        setThemeState(nextTheme);
+                        applyTheme(theme, style, { persist: false });
                         setThemeStyleState(style);
-                        void apply(() => app.SetDesktopAppearance(nextTheme, style));
+                        void apply(() => app.SetDesktopAppearance(theme, style));
                       }}
                       onTextSize={(size) => {
                         applyTextSize(size);
@@ -168,7 +164,7 @@ export function SettingsPanel({ onClose, onChanged, initialTab }: { onClose: () 
                     />
                   </SettingsPageShell>
                 )}
-                {tab === "updates" && s && <SettingsPageShell s={s} tab={tab} busy={busy} apply={apply}><UpdatesSection configPath={s.configPath} /></SettingsPageShell>}
+                {tab === "updates" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><UpdatesSection configPath={s.configPath} /></SettingsPageShell>}
               </>
             )}
           </main>
@@ -541,6 +537,8 @@ function normalizeSettingsView(view: SettingsView | null | undefined): SettingsV
     agent,
     bot: normalizeBotSettings(view.bot),
     autoPlan: normalizeAutoPlan(view.autoPlan),
+    autoApproveTools: Boolean(view.autoApproveTools ?? view.bypass),
+    bypass: Boolean(view.autoApproveTools ?? view.bypass),
     desktopLanguage: normalizeLangPref(view.desktopLanguage),
     desktopTheme: normalizeThemePreference(view.desktopTheme),
     desktopThemeStyle: normalizeThemeStyleForTheme(view.desktopThemeStyle, normalizeThemePreference(view.desktopTheme)),
@@ -1646,6 +1644,10 @@ function ModelsSection({ s, busy, apply, backgroundApply }: ModelsSectionProps) 
 
     void backgroundApply(async () => {
       for (const { provider } of candidates) {
+        // Background auto-refresh only protects a user-curated model list.
+        // If the user hasn't specified any models, don't silently populate
+        // the provider with every model from the API.
+        if (!provider.models || provider.models.length === 0) continue;
         try {
           const fetched = await app.FetchProviderModels(provider);
           if (fetched.length === 0) continue;
@@ -3139,6 +3141,18 @@ function SandboxSection({ s, busy, apply }: SectionProps) {
   );
 }
 
+// Visual-style metadata for the appearance theme cards. The two surface
+// swatches + accent are read from CSS variables at render time so they always
+// reflect the live token values for the currently-resolved light/dark mode.
+const THEME_STYLE_META: Record<ThemeStyle, { name: string; zh: DictKey; note: DictKey; desc: DictKey }> = {
+  graphite: { name: "Graphite", zh: "settings.style.graphite.zh", note: "settings.style.graphite.note", desc: "settings.style.graphite.desc" },
+  aurora: { name: "Aurora", zh: "settings.style.aurora.zh", note: "settings.style.aurora.note", desc: "settings.style.aurora.desc" },
+  slate: { name: "Slate", zh: "settings.style.slate.zh", note: "settings.style.slate.note", desc: "settings.style.slate.desc" },
+  carbon: { name: "Carbon", zh: "settings.style.carbon.zh", note: "settings.style.carbon.note", desc: "settings.style.carbon.desc" },
+  nocturne: { name: "Nocturne", zh: "settings.style.nocturne.zh", note: "settings.style.nocturne.note", desc: "settings.style.nocturne.desc" },
+  amber: { name: "Amber", zh: "settings.style.amber.zh", note: "settings.style.amber.note", desc: "settings.style.amber.desc" },
+};
+
 function AppearanceSection({
   theme,
   themeStyle,
@@ -3176,17 +3190,37 @@ function AppearanceSection({
         </div>
       </SettingsField>
       <SettingsField label={t("settings.themeStyle")} stacked>
-        <div className="theme-style-grid">
-          {THEME_STYLES.map((opt) => (
-            <button
-              key={opt}
-              className={`theme-style-btn${themeStyle === opt ? " theme-style-btn--on" : ""}`}
-              onClick={() => onThemeStyle(opt)}
-            >
-              <span className="theme-style-swatch" data-theme-style-swatch={opt} />
-              <span>{opt}</span>
-            </button>
-          ))}
+        <div className="theme-card-grid">
+          {THEME_STYLES.map((opt) => {
+            const meta = THEME_STYLE_META[opt];
+            const selected = themeStyle === opt;
+            return (
+              <button
+                key={opt}
+                type="button"
+                role="radio"
+                aria-checked={selected}
+                className={`theme-card${selected ? " theme-card--on" : ""}`}
+                onClick={() => onThemeStyle(opt)}
+              >
+                <span className="theme-card__head">
+                  <span className="theme-card__name">
+                    {meta.name} <span className="theme-card__zh">{t(meta.zh)}</span>
+                  </span>
+                  <span className="theme-card__tag">{t(meta.note)}</span>
+                </span>
+                <span className="theme-card__swatches" data-theme-style-card={opt}>
+                  <span className="theme-card__swatch theme-card__swatch--bg" />
+                  <span className="theme-card__swatch theme-card__swatch--surface" />
+                  <span className="theme-card__swatch theme-card__swatch--accent" />
+                </span>
+                <span className="theme-card__desc">{t(meta.desc)}</span>
+                <span className="theme-card__check" aria-hidden="true">
+                  <Check size={13} strokeWidth={3} />
+                </span>
+              </button>
+            );
+          })}
         </div>
       </SettingsField>
       <SettingsField label={t("settings.textSize")}>

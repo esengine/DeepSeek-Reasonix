@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Tooltip } from "./Tooltip";
 import { useI18n, SPINNER_WORDS } from "../lib/i18n";
-import type { BalanceInfo, ContextInfo, JobView, Mode, WireUsage } from "../lib/types";
+import type { BalanceInfo, CollaborationMode, ContextInfo, JobView, ToolApprovalMode, WireUsage } from "../lib/types";
 
 function fmtTokens(n: number): string {
   if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, "") + "k";
@@ -11,38 +11,49 @@ function fmtTokens(n: number): string {
 // JobsChip is the status-bar background-jobs indicator: a count that opens an
 // upward popover listing the running jobs (id · label · status), mirroring the
 // ModelSwitcher's click-to-open pattern. With no jobs it still reserves a stable
-// "jobs 0" slot so the IDE-style status order does not jump.
+// "任务 0" slot so the IDE-style status order does not jump.
 function JobsChip({ jobs }: { jobs: JobView[] }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const closeOnOutsideClick = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (wrapRef.current?.contains(target)) return;
+      setOpen(false);
+    };
+    document.addEventListener("click", closeOnOutsideClick);
+    return () => document.removeEventListener("click", closeOnOutsideClick);
+  }, [open]);
   if (jobs.length === 0) {
     return (
-      <span className="statusbar__item">
-        {t("status.jobsCount", { n: 0 })}
+      <span className="stat stat--jobs">
+        <span className="stat__label">{t("status.jobsLabel")}</span>
+        <b>-</b>
       </span>
     );
   }
   return (
-    <div className="statusbar__jobswrap">
+    <div className="statusbar__jobswrap" ref={wrapRef}>
       <Tooltip label={t("status.jobsTitle")}>
-        <button className="statusbar__item statusbar__jobs" onClick={() => setOpen((v) => !v)}>
-          {t("status.jobsCount", { n: jobs.length })}
+        <button className="stat stat--jobs statusbar__jobs" onClick={() => setOpen((v) => !v)}>
+          <span className="stat__label">{t("status.jobsLabel")}</span>
+          <b>{jobs.length}</b>
         </button>
       </Tooltip>
       {open && (
-        <>
-          <div className="modelsw__backdrop" onClick={() => setOpen(false)} />
-          <div className="modelsw__menu jobsmenu" role="listbox">
-            <div className="jobsmenu__head">{t("status.jobsTitle")}</div>
-            {jobs.map((j) => (
-              <div className="jobsmenu__item" key={j.id} role="option">
-                <span className="jobsmenu__id">{j.id}</span>
-                <span className="jobsmenu__label">{j.label || j.kind}</span>
-                <span className="jobsmenu__status">{j.status}</span>
-              </div>
-            ))}
-          </div>
-        </>
+        <div className="modelsw__menu jobsmenu" role="listbox">
+          <div className="jobsmenu__head">{t("status.jobsTitle")}</div>
+          {jobs.map((j) => (
+            <div className="jobsmenu__item" key={j.id} role="option">
+              <span className="jobsmenu__id">{j.id}</span>
+              <span className="jobsmenu__label">{j.label || j.kind}</span>
+              <span className="jobsmenu__status">{j.status}</span>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );
@@ -89,22 +100,28 @@ export function StatusBar({
   balance,
   jobs,
   running,
-  mode,
+  collaborationMode,
+  toolApprovalMode,
   cost,
   currency,
   turnTokens,
   turnStartAt,
+  modelLabel,
+  currentTurnCount,
 }: {
   context: ContextInfo;
   usage?: WireUsage;
   balance?: BalanceInfo;
   jobs?: JobView[];
   running: boolean;
-  mode: Mode;
+  collaborationMode: CollaborationMode;
+  toolApprovalMode: ToolApprovalMode;
   cost?: number;
   currency?: string;
   turnTokens?: number;
   turnStartAt?: number;
+  modelLabel?: string;
+  currentTurnCount?: number;
 }) {
   const { t, locale } = useI18n();
   const [, setTick] = useState(0);
@@ -123,14 +140,6 @@ export function StatusBar({
   const avgPct = avgRate(usage);
   const jobsList = jobs ?? [];
   const costLabel = formatMoney(cost, currency);
-  // 上下文详情 tooltip
-  const ctxTooltip = compactPct !== null
-    ? t("status.compact", { pct: compactPct })
-    : undefined;
-  // 缓存详情 tooltip
-  const cacheTooltip = avgPct !== null
-    ? t("status.cacheAvg", { pct: avgPct })
-    : undefined;
   // 生成耗时
   const elapsed = running && turnStartAt ? Date.now() - turnStartAt : 0;
   const elapsedLabel = elapsed >= 1000
@@ -141,38 +150,64 @@ export function StatusBar({
 
   return (
     <div className="statusbar">
-      <span className={`statusbar__dot ${running ? "statusbar__dot--busy" : ""}`} />
-      <Tooltip label={ctxTooltip}>
-        <span className="statusbar__item statusbar__ctx">{pct !== null ? t("status.ctx", { pct }) : t("status.ctxUnknown")}</span>
-      </Tooltip>
-      <span className="statusbar__sep">·</span>
-      <Tooltip label={cacheTooltip}>
-        <span className="statusbar__item statusbar__cache">{t("status.cache", { pct: nowPct ?? "-" })}</span>
-      </Tooltip>
-      <span className="statusbar__sep">·</span>
-      <Tooltip label={t("status.spendTitle")}>
-        <span className="statusbar__item statusbar__cost">
-          {t("status.cost", { amount: costLabel })}
+      <span className="stat stat--model">
+        <span className={`statusbar__dot ${running ? "statusbar__dot--busy" : ""}`} />
+        {modelLabel && <span className="statusbar__model">{modelLabel}</span>}
+      </span>
+      {typeof currentTurnCount === "number" && currentTurnCount > 0 && (
+        <span className="stat statusbar__turns" title={t("status.sessionTurnsTitle")}>
+          <span className="stat__label">{t("status.sessionTurnsLabel")}</span>
+          <b>{t(currentTurnCount === 1 ? "history.turnOne" : "history.turnOther", { n: currentTurnCount })}</b>
         </span>
-      </Tooltip>
-      <span className="statusbar__sep">·</span>
-      <JobsChip jobs={jobsList} />
-      <span className="statusbar__sep">·</span>
-      <Tooltip label={t("status.balanceTitle")}>
-        <span className="statusbar__item statusbar__balance">
-          {t("status.balance", { amount: balance?.available && balance.display ? balance.display : "-" })}
-        </span>
-      </Tooltip>
+      )}
+      <span className="stat statusbar__ctx">
+        <span className="stat__label">{t("status.ctxLabel")}</span>
+        <b>{pct !== null ? `${pct}%` : "-"}</b>
+      </span>
+      <span className="stat statusbar__compact">
+        <span className="stat__label">{t("status.compactLabel")}</span>
+        <b>{compactPct !== null ? `${compactPct}%` : "-"}</b>
+      </span>
+      <span className="stat statusbar__cache">
+        <span className="stat__label">{t("status.cacheLabel")}</span>
+        <b>{nowPct !== null ? `${nowPct}%` : "-"}</b>
+      </span>
+      <span className="stat statusbar__avg">
+        <span className="stat__label">{t("status.cacheAvgLabel")}</span>
+        <b>{avgPct !== null ? `${avgPct}%` : "-"}</b>
+      </span>
       <span className="statusbar__spacer" />
-      <div className="statusbar__trailing">
-        {spinnerRunning && (
-          <span className="statusbar__spinner">{spinnerWord}…</span>
-        )}
-        {running && (turnTokens ?? 0) > 0 && (
-          <span className="statusbar__tokens">↓ {fmtTokens(turnTokens ?? 0)} {t("status.tokens")} · {elapsedLabel}</span>
-        )}
-        {mode === "plan" && <span className="statusbar__plan">{t("status.plan")}</span>}
-      </div>
+      {spinnerRunning && (
+        <span className="statusbar__spinner">{spinnerWord}…</span>
+      )}
+      {running && (turnTokens ?? 0) > 0 && (
+        <span className="statusbar__tokens">↓ {fmtTokens(turnTokens ?? 0)} {t("status.tokens")} · {elapsedLabel}</span>
+      )}
+      <JobsChip jobs={jobsList} />
+      <Tooltip label={t("status.spendTitle")}>
+        <span className="stat statusbar__cost">
+          <span className="stat__label">{t("status.costLabel")}</span>
+          <b>{costLabel}</b>
+        </span>
+      </Tooltip>
+      <Tooltip label={t("status.balanceTitle")}>
+        <span className="stat stat--balance statusbar__balance">
+          <span className="stat__label">{t("status.balanceLabel")}</span>
+          <b>{balanceLabel}</b>
+        </span>
+      </Tooltip>
+      {planMode && <span className="statusbar__plan">{t("status.plan")}</span>}
+      {goalMode && <span className="statusbar__plan">{t("composer.goalMode")}</span>}
+      {toolApprovalMode === "auto" && (
+        <Tooltip label={t("composer.accessAutoTitle")}>
+          <span className="statusbar__yolo">{t("composer.accessAuto")}</span>
+        </Tooltip>
+      )}
+      {toolApprovalMode === "yolo" && (
+        <Tooltip label={t("status.yoloTitle")}>
+          <span className="statusbar__yolo">{t("composer.accessYolo")}</span>
+        </Tooltip>
+      )}
     </div>
   );
 }

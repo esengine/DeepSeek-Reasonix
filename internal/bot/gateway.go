@@ -215,10 +215,19 @@ func (gw *BotGateway) checkAllowlist(plat Platform, msg InboundMessage) bool {
 		return false
 	}
 	groups := gw.groupAllowlist[plat]
-	if msg.ChatType != ChatDM && len(groups) > 0 && !groups[msg.ChatID] {
+	if chatUsesGroupAllowlist(msg.ChatType) && len(groups) > 0 && !groups[msg.ChatID] {
 		return false
 	}
 	return true
+}
+
+func chatUsesGroupAllowlist(chatType ChatType) bool {
+	switch chatType {
+	case ChatGroup, ChatGuild, ChatThread:
+		return true
+	default:
+		return false
+	}
 }
 
 func (gw *BotGateway) handleSlashCommand(ctx context.Context, adapter Adapter, key string, msg InboundMessage) {

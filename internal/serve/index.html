@@ -471,7 +471,7 @@ const __T = {
     'deny': 'Deny',
     'auto_mode': 'Auto mode',
     'plan_mode': 'Plan mode (read-only)',
-    'yolo_mode': 'YOLO mode (auto-approve)',
+    'yolo_mode': 'YOLO mode (auto-approve tool approvals; ask and plan still wait)',
     'auto': 'Auto',
     'plan': 'Plan',
     'yolo': 'YOLO',
@@ -565,7 +565,7 @@ const __T = {
     'deny': '拒绝',
     'auto_mode': '自动模式',
     'plan_mode': '计划模式（只读）',
-    'yolo_mode': 'YOLO 模式（自动批准）',
+    'yolo_mode': 'YOLO 模式（自动批准工具权限；ask 和计划仍会等待）',
     'auto': '自动',
     'plan': '计划',
     'yolo': 'YOLO',
@@ -992,7 +992,7 @@ function fetchStatus(){
   fetch('/status').then(r=>r.json()).then(s=>{
     if(s.label)statusModel.textContent=s.label;
     // sync mode UI without triggering POST (server is source of truth)
-    planMode=!!s.plan; bypassMode=!!s.bypass;
+    planMode=!!s.plan; bypassMode=!!(s.autoApproveTools??s.bypass);
     updateModeButtons();
     if(s.window){const pct=Math.min(100,Math.round(s.used/s.window*100));ctxFill.style.width=pct+'%';ctxFill.style.background=pct>85?'var(--warning)':pct>95?'var(--danger)':'var(--accent)';ctxUsed.textContent=fmtTok(s.used)+' tok';ctxWindow.textContent=fmtTok(s.window)+' tok';}
     // sidebar metrics
@@ -1064,8 +1064,8 @@ loadSessions();
 
 // ── input handling ──
 async function syncModeBeforeSubmit(){
-  if(planMode){ await post('/bypass',{on:false}); await post('/plan',{on:true}); }
-  else if(bypassMode){ await post('/plan',{on:false}); await post('/bypass',{on:true}); }
+  await post('/plan',{on:planMode});
+  await post('/auto-approve-tools',{on:bypassMode});
 }
 async function send(){ const v=input.value.trim(); if(!v)return; await syncModeBeforeSubmit(); addUserMsg(v); post('/submit',{input:v}).then(r=>{if(r.ok&&r.status===204){fetchStatus();loadSessions();}}); input.value='';input.style.height='';closeSlashMenu(); }
 
@@ -1093,16 +1093,17 @@ document.addEventListener('keydown',e=>{
   if(e.key==='/'&&e.target!==input){e.preventDefault();input.focus();return;}
 });
 
-// mode helpers — plan and bypass are mutually exclusive
+// mode helpers — plan is a user-decision gate; bypass/full access only skips
+// tool approvals, so they can be enabled together.
 function updateModeButtons(){
   const auto=!planMode&&!bypassMode;
   $('#btn-auto').classList.toggle('toolbar__btn--ok',auto);
   $('#btn-plan').classList.toggle('toolbar__btn--active',planMode);
   $('#btn-bypass').classList.toggle('toolbar__btn--danger',bypassMode);
 }
-async function setPlan(on){planMode=on;if(on){bypassMode=false;}updateModeButtons();if(on){await post('/bypass',{on:false});}await post('/plan',{on});}
-async function setBypass(on){bypassMode=on;if(on){planMode=false;}updateModeButtons();if(on){await post('/plan',{on:false});}await post('/bypass',{on});}
-async function cycleMode(){if(!planMode&&!bypassMode)await setPlan(true);else if(planMode){await setPlan(false);await setBypass(true);}else await setBypass(false);setTimeout(fetchStatus,200);}
+async function setPlan(on){planMode=on;updateModeButtons();await post('/plan',{on});}
+async function setBypass(on){bypassMode=on;updateModeButtons();await post('/auto-approve-tools',{on});}
+async function cycleMode(){if(!planMode&&!bypassMode)await setPlan(true);else if(planMode&&!bypassMode){await setPlan(false);await setBypass(true);}else if(!planMode&&bypassMode)await setPlan(true);else{await setPlan(false);await setBypass(false);}setTimeout(fetchStatus,200);}
 async function setMode(m){if(m==='auto'){if(planMode)await setPlan(false);if(bypassMode)await setBypass(false);}else if(m==='plan'){await setPlan(true);}else if(m==='yolo'){await setBypass(true);}}
 
 // toolbar buttons

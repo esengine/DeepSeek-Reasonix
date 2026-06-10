@@ -20,6 +20,19 @@ function oppositeSide(side: TooltipSide): TooltipSide {
   return "left";
 }
 
+function samePosition(
+  current: { left: number; top: number; side: TooltipSide; arrowX: number; arrowY: number },
+  next: { left: number; top: number; side: TooltipSide; arrowX: number; arrowY: number },
+): boolean {
+  return (
+    current.side === next.side &&
+    Math.abs(current.left - next.left) < 0.5 &&
+    Math.abs(current.top - next.top) < 0.5 &&
+    Math.abs(current.arrowX - next.arrowX) < 0.5 &&
+    Math.abs(current.arrowY - next.arrowY) < 0.5
+  );
+}
+
 export function Tooltip({
   label,
   children,
@@ -101,13 +114,14 @@ export function Tooltip({
     const arrowX = clamp(rect.left + rect.width / 2 - left, ARROW_PAD, tipRect.width - ARROW_PAD);
     const arrowY = clamp(rect.top + rect.height / 2 - top, ARROW_PAD, tipRect.height - ARROW_PAD);
 
-    setPosition({
+    const next = {
       left,
       top,
       side: actualSide,
       arrowX,
       arrowY,
-    });
+    };
+    setPosition((current) => (samePosition(current, next) ? current : next));
   };
 
   useLayoutEffect(() => {

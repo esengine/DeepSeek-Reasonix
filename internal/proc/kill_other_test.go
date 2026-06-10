@@ -26,15 +26,16 @@ func TestKillTreeTerminatesChild(t *testing.T) {
 }
 
 func TestKillTrackedTerminatesChild(t *testing.T) {
-	if TrackTree(nil) != 0 {
-		t.Fatal("TrackTree is a no-op off Windows; want 0")
-	}
 	cmd := exec.Command("sleep", "30")
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("Start: %v", err)
+	job, err := StartTracked(cmd)
+	if err != nil {
+		t.Fatalf("StartTracked: %v", err)
+	}
+	if job != 0 {
+		t.Fatalf("StartTracked job = %d off Windows; want 0", job)
 	}
 
-	KillTracked(cmd, 0)
+	KillTracked(cmd, job)
 
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()

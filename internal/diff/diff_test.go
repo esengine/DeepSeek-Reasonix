@@ -113,6 +113,29 @@ func TestMyers_MinimalEditScript(t *testing.T) {
 	}
 }
 
+func TestMyersMaxD_CapsWithoutOverflow(t *testing.T) {
+	maxInt := int(^uint(0) >> 1)
+	cases := []struct {
+		name string
+		n    int
+		m    int
+		want int
+	}{
+		{name: "small", n: 3, m: 4, want: 7},
+		{name: "at cap", n: maxDiffEdits - 1, m: 1, want: maxDiffEdits},
+		{name: "over cap", n: maxDiffEdits - 1, m: 2, want: maxDiffEdits},
+		{name: "huge n", n: maxInt, m: 1, want: maxDiffEdits},
+		{name: "huge m", n: 1, m: maxInt, want: maxDiffEdits},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := myersMaxD(tc.n, tc.m); got != tc.want {
+				t.Fatalf("myersMaxD(%d, %d) = %d, want %d", tc.n, tc.m, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestApplyOpsReconstruct verifies the op stream is internally consistent: the
 // equal+delete lines reproduce the old file and equal+insert lines reproduce
 // the new file, for a spread of cases.

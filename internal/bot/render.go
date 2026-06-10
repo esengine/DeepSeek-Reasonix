@@ -83,16 +83,16 @@ func (s *renderSink) Emit(e event.Event) {
 			name = e.Tool.ID
 		}
 		if e.Tool.Err != "" {
-			s.buf.WriteString(fmt.Sprintf("\n❌ %s 出错: %s", name, e.Tool.Err))
+			fmt.Fprintf(&s.buf, "\n❌ %s 出错: %s", name, e.Tool.Err)
 		} else {
 			// 截断输出
 			output := e.Tool.Output
 			if len(output) > 500 {
 				output = output[:500] + "\n... (已截断)"
 			}
-			s.buf.WriteString(fmt.Sprintf("\n✅ %s 完成", name))
+			fmt.Fprintf(&s.buf, "\n✅ %s 完成", name)
 			if output != "" {
-				s.buf.WriteString(fmt.Sprintf("\n```\n%s\n```", output))
+				fmt.Fprintf(&s.buf, "\n```\n%s\n```", output)
 			}
 		}
 		s.maybeFlush()
@@ -115,7 +115,7 @@ func (s *renderSink) Emit(e event.Event) {
 		case PlatformQQ:
 			msg.Keyboard = approvalKeyboard(e.Approval.ID)
 		case PlatformFeishu:
-			msg.Card = approvalCard(e.Approval)
+			msg.Card = approvalCard(e.Approval, s.chatType)
 		}
 		_ = s.send(msg)
 
@@ -127,11 +127,11 @@ func (s *renderSink) Emit(e event.Event) {
 		var qb strings.Builder
 		qb.WriteString("❓ 请回答以下问题:\n")
 		for i, q := range e.Ask.Questions {
-			qb.WriteString(fmt.Sprintf("\n**%d. %s**\n", i+1, q.Prompt))
+			fmt.Fprintf(&qb, "\n**%d. %s**\n", i+1, q.Prompt)
 			for j, opt := range q.Options {
-				qb.WriteString(fmt.Sprintf("  %d. %s", j+1, opt.Label))
+				fmt.Fprintf(&qb, "  %d. %s", j+1, opt.Label)
 				if opt.Description != "" {
-					qb.WriteString(fmt.Sprintf(" — %s", opt.Description))
+					fmt.Fprintf(&qb, " — %s", opt.Description)
 				}
 				qb.WriteString("\n")
 			}
@@ -139,8 +139,8 @@ func (s *renderSink) Emit(e event.Event) {
 				qb.WriteString("  (可多选)\n")
 			}
 		}
-		qb.WriteString(fmt.Sprintf("\nID: `%s`", e.Ask.ID))
-		qb.WriteString(fmt.Sprintf("\n用 /answer %s <选项编号或文本> 回答。", e.Ask.ID))
+		fmt.Fprintf(&qb, "\nID: `%s`", e.Ask.ID)
+		fmt.Fprintf(&qb, "\n用 /answer %s <选项编号或文本> 回答。", e.Ask.ID)
 		msg := OutboundMessage{
 			ChatID:       s.chatID,
 			ChatType:     s.chatType,
@@ -221,18 +221,25 @@ func approvalKeyboard(id string) *InlineKeyboard {
 	}}}
 }
 
-func approvalCard(a event.Approval) *InteractiveCard {
+func approvalCard(a event.Approval, chatType ChatType) *InteractiveCard {
 	return &InteractiveCard{
 		Header: "需要批准操作",
 		Elements: []InteractiveCardElement{
 			{Tag: "markdown", Content: fmt.Sprintf("**工具**: %s\n\n**操作**: %s\n\nID: `%s`", a.Tool, a.Subject, a.ID)},
 			{Tag: "action", Extra: map[string]any{
 				"actions": []map[string]any{
-					{"tag": "button", "text": map[string]string{"tag": "plain_text", "content": "允许一次"}, "type": "primary", "value": map[string]string{"command": "/approve " + a.ID}},
-					{"tag": "button", "text": map[string]string{"tag": "plain_text", "content": "拒绝"}, "type": "danger", "value": map[string]string{"command": "/deny " + a.ID}},
+					{"tag": "button", "text": map[string]string{"tag": "plain_text", "content": "允许一次"}, "type": "primary", "value": cardActionValue("/approve "+a.ID, chatType)},
+					{"tag": "button", "text": map[string]string{"tag": "plain_text", "content": "拒绝"}, "type": "danger", "value": cardActionValue("/deny "+a.ID, chatType)},
 				},
 			}},
 		},
+	}
+}
+
+func cardActionValue(command string, chatType ChatType) map[string]string {
+	return map[string]string{
+		"command":   command,
+		"chat_type": string(chatType),
 	}
 }
 

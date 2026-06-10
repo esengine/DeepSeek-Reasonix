@@ -64,10 +64,6 @@ func (f *fakeAdapter) sentMessages() []OutboundMessage {
 	return out
 }
 
-func (f *fakeAdapter) injectMessage(msg InboundMessage) {
-	f.msgCh <- msg
-}
-
 func TestFakeAdapterInterface(t *testing.T) {
 	fa := newFakeAdapter(PlatformQQ, "fake-qq")
 
@@ -147,6 +143,30 @@ func TestGatewayAllowlistCheck(t *testing.T) {
 	// 不同平台
 	if gw.checkAllowlist(PlatformFeishu, InboundMessage{Platform: PlatformFeishu, ChatType: ChatDM, UserID: "allowed_user_1"}) {
 		t.Error("QQ allowlist should not apply to feishu")
+	}
+}
+
+func TestGatewayAllowlistDoesNotApplyGroupsToDirectMessages(t *testing.T) {
+	cfg := GatewayConfig{
+		Allowlist: AllowlistConfig{
+			Enabled: true,
+			Users: map[Platform][]string{
+				PlatformQQ: {"allowed_user"},
+			},
+			Groups: map[Platform][]string{
+				PlatformQQ: {"allowed_group"},
+			},
+		},
+	}
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	gw := NewGateway(cfg, nil, logger)
+
+	if !gw.checkAllowlist(PlatformQQ, InboundMessage{Platform: PlatformQQ, ChatType: ChatDirect, ChatID: "guild-dm", UserID: "allowed_user"}) {
+		t.Error("direct message should not be rejected by group allowlist")
+	}
+	if gw.checkAllowlist(PlatformQQ, InboundMessage{Platform: PlatformQQ, ChatType: ChatGroup, ChatID: "unknown_group", UserID: "allowed_user"}) {
+		t.Error("unknown group should still be rejected by group allowlist")
 	}
 }
 

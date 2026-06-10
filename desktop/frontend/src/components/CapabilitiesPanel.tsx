@@ -6,6 +6,7 @@ import type { CapabilitiesView, MCPServerInput, ServerView, SkillRootSkillView, 
 import { InlineConfirmButton } from "./InlineConfirmButton";
 import { ResizableDrawer } from "./ResizableDrawer";
 import { Tooltip } from "./Tooltip";
+import { ModalCloseButton } from "./ModalCloseButton";
 
 // CapabilitiesPanel is the desktop MCP & Skills drawer — the GUI counterpart to
 // the CLI's /mcp + /skill, aligning with Claude Code's Customize → Connectors:
@@ -137,16 +138,14 @@ export function CapabilitiesPanel({
             <div className="drawer__title">{t("caps.title")}</div>
             {view && <div className="drawer__summary">{summary}</div>}
           </div>
-          <Tooltip label={t("common.close")}>
-            <button className="chip" onClick={onClose}>
-              ✕
-            </button>
-          </Tooltip>
-          <Tooltip label={t("caps.refresh")}>
-            <button className="chip" disabled={busy} onClick={() => void reload()}>
-              ↻
-            </button>
-          </Tooltip>
+          <div className="drawer__actions">
+            <Tooltip label={t("caps.refresh")}>
+              <button className="chip" disabled={busy} onClick={() => void reload()}>
+                ↻
+              </button>
+            </Tooltip>
+            <ModalCloseButton label={t("common.close")} onClick={onClose} />
+          </div>
         </header>
 
         {!view ? (

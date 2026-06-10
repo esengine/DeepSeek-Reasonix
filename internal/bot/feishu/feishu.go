@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"reasonix/internal/bot"
@@ -83,7 +84,8 @@ type adapter struct {
 	client   *lark.Client
 	wsClient *larkws.Client
 
-	seen map[string]bool // 消息去重
+	seenMu sync.Mutex
+	seen   map[string]bool // 消息去重
 }
 
 // New 创建飞书 Bot 适配器。
@@ -109,6 +111,12 @@ func (a *adapter) Start(ctx context.Context) error {
 
 	switch mode {
 	case "webhook":
+		// Webhook mode exposes a public HTTP endpoint; without a verification
+		// token verificationTokenValid accepts every caller, so fail closed
+		// rather than let anyone drive the agent.
+		if strings.TrimSpace(a.cfg.VerificationToken) == "" {
+			return fmt.Errorf("feishu: webhook mode needs verification_token set — refusing to expose an unauthenticated event endpoint")
+		}
 		go a.runWebhook(ctx)
 	default:
 		go a.runWebSocket(ctx)
@@ -193,12 +201,8 @@ func (a *adapter) handleSDKMessage(event *larkim.P2MessageReceiveV1) {
 		eventID = event.EventV2Base.Header.EventID
 	}
 	if eventID != "" {
-		if a.seen[eventID] {
+		if a.markSeen(eventID) {
 			return
-		}
-		a.seen[eventID] = true
-		if len(a.seen) > 10000 {
-			a.seen = make(map[string]bool)
 		}
 	}
 	msg := event.Event.Message
@@ -248,14 +252,8 @@ func (a *adapter) handleWSEvent(ctx context.Context, raw json.RawMessage) {
 		return
 	}
 
-	// 消息去重
-	if a.seen[evt.Header.EventID] {
+	if a.markSeen(evt.Header.EventID) {
 		return
-	}
-	a.seen[evt.Header.EventID] = true
-	// 清理旧的去重记录
-	if len(a.seen) > 10000 {
-		a.seen = make(map[string]bool)
 	}
 
 	switch evt.Header.EventType {
@@ -295,10 +293,11 @@ func (a *adapter) handleCardAction(raw []byte) bool {
 	if command == "" || payload.Event.Context.OpenChatID == "" {
 		return false
 	}
+	chatType := cardActionChatType(payload.Event.Action.Value["chat_type"])
 	userID := firstNonEmpty(payload.Event.Operator.OperatorID.UnionID, payload.Event.Operator.OperatorID.OpenID, payload.Event.Operator.OperatorID.UserID)
 	ib := bot.InboundMessage{
 		Platform:  bot.PlatformFeishu,
-		ChatType:  bot.ChatGroup,
+		ChatType:  chatType,
 		ChatID:    payload.Event.Context.OpenChatID,
 		UserID:    userID,
 		UserName:  userID,
@@ -311,6 +310,39 @@ func (a *adapter) handleCardAction(raw []byte) bool {
 		a.logger.Warn("feishu card action channel full")
 	}
 	return true
+}
+
+func (a *adapter) markSeen(eventID string) bool {
+	if eventID == "" {
+		return false
+	}
+	a.seenMu.Lock()
+	defer a.seenMu.Unlock()
+	if a.seen == nil {
+		a.seen = make(map[string]bool)
+	}
+	if a.seen[eventID] {
+		return true
+	}
+	a.seen[eventID] = true
+	if len(a.seen) > 10000 {
+		a.seen = make(map[string]bool)
+		a.seen[eventID] = true
+	}
+	return false
+}
+
+func cardActionChatType(raw string) bot.ChatType {
+	switch bot.ChatType(raw) {
+	case bot.ChatDM, bot.ChatGroup, bot.ChatGuild, bot.ChatDirect, bot.ChatThread:
+		return bot.ChatType(raw)
+	default:
+		return bot.ChatGroup
+	}
+}
+
+func (a *adapter) verificationTokenValid(token string) bool {
+	return a.cfg.VerificationToken == "" || token == a.cfg.VerificationToken
 }
 
 func firstNonEmpty(vals ...string) string {
@@ -530,12 +562,14 @@ func (a *adapter) runWebhook(ctx context.Context) {
 		}
 		_ = json.Unmarshal(body, &challenge)
 		if challenge.Type == "url_verification" {
-			if a.cfg.VerificationToken != "" && challenge.Token != a.cfg.VerificationToken {
+			if !a.verificationTokenValid(challenge.Token) {
 				http.Error(w, "forbidden", http.StatusForbidden)
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]string{"challenge": challenge.Challenge})
+			if err := json.NewEncoder(w).Encode(map[string]string{"challenge": challenge.Challenge}); err != nil {
+				a.logger.Error("feishu challenge response error", "err", err)
+			}
 			return
 		}
 
@@ -544,7 +578,7 @@ func (a *adapter) runWebhook(ctx context.Context) {
 			http.Error(w, "bad request", 400)
 			return
 		}
-		if a.cfg.VerificationToken != "" && evt.Header.Token != "" && evt.Header.Token != a.cfg.VerificationToken {
+		if !a.verificationTokenValid(evt.Header.Token) {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
@@ -563,7 +597,9 @@ func (a *adapter) runWebhook(ctx context.Context) {
 
 	go func() {
 		<-ctx.Done()
-		server.Shutdown(context.Background())
+		if err := server.Shutdown(context.Background()); err != nil && err != http.ErrServerClosed {
+			a.logger.Error("feishu webhook shutdown error", "err", err)
+		}
 	}()
 
 	a.logger.Info("feishu webhook listening", "port", port)

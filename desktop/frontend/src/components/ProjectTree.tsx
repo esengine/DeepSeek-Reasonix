@@ -4,12 +4,12 @@
 // new topic.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
-import { Archive, ChevronRight, ChevronDown, ChevronsUpDown, ChevronsDownUp, Pencil, Plus, FolderClosed, FolderPlus, Search, Copy, FolderOpen, XCircle, History, Check, Clock } from "lucide-react";
+import { Archive, ChevronRight, ChevronDown, ChevronsUpDown, ChevronsDownUp, Pencil, Plus, FolderClosed, FolderPlus, Search, Copy, FolderOpen, XCircle, History, Check, Clock, Folder, BriefcaseBusiness, ListCollapse, ListRestart } from "lucide-react";
 import { asArray } from "../lib/array";
 import { app } from "../lib/bridge";
 import { topicActivityTime } from "../lib/session";
-import type { ProjectNode, TopicMeta } from "../lib/types";
-import { getLocale, useT, type Translator } from "../lib/i18n";
+import type { ProjectNode, TopicMeta, ProjectTopicStatus } from "../lib/types";
+import { getLocale, useT, type DictKey, type Translator } from "../lib/i18n";
 import { PROJECT_COLOR_OPTIONS, projectColorValue } from "../lib/projectColors";
 import { ContextMenu, contextMenuPointFromEvent, type ContextMenuItem, type ContextMenuPoint } from "./ContextMenu";
 import { Tooltip } from "./Tooltip";
@@ -96,13 +96,41 @@ function topicIsActive(node: ProjectNode, activeScope?: string, activeWorkspaceR
 }
 
 function topicMetaLine(node: ProjectNode, t: Translator): string {
+  const parts: string[] = [];
   const turns = node.turns ?? 0;
-  if (turns <= 0) return "";
-  const last = node.lastActivityAt ? ` · ${topicActivityLabel(node.lastActivityAt)}` : "";
-  return `${t(turns === 1 ? "history.turnOne" : "history.turnOther", { n: turns })}${last}`;
+  if (turns > 0) parts.push(t(turns === 1 ? "history.turnOne" : "history.turnOther", { n: turns }));
+  const activityAt = node.lastActivityAt || node.createdAt || 0;
+  if (activityAt) parts.push(topicActivityLabel(activityAt, t));
+  if (parts.length === 0) parts.push(t("projectTree.justNow"));
+  return parts.join(" · ");
 }
 
-function topicActivityLabel(ms: number): string {
+const topicStatusLabels: Record<ProjectTopicStatus, DictKey> = {
+  thinking: "projectTree.status.thinking",
+  streaming: "projectTree.status.streaming",
+  waiting_confirmation: "projectTree.status.waitingConfirmation",
+  paused: "projectTree.status.paused",
+  error: "projectTree.status.error",
+};
+
+function normalizeTopicStatus(status?: string): ProjectTopicStatus | "" {
+  if (!status) return "";
+  if (status === "thinking" || status === "streaming" || status === "waiting_confirmation" || status === "paused" || status === "error") {
+    return status;
+  }
+  return "";
+}
+
+function topicStatus(node: ProjectNode): ProjectTopicStatus | "" {
+  return normalizeTopicStatus(node.status) || (node.running ? "streaming" : "");
+}
+
+function topicStatusLabel(node: ProjectNode, t: Translator): string {
+  const status = topicStatus(node);
+  return status ? t(topicStatusLabels[status]) : "";
+}
+
+function topicActivityLabel(ms: number, t: Translator): string {
   if (ms <= 0) return "";
   const delta = Date.now() - ms;
   const locale = getLocale();
@@ -110,7 +138,7 @@ function topicActivityLabel(ms: number): string {
   const minute = 60_000;
   const hour = 60 * minute;
   const day = 24 * hour;
-  if (delta < minute) return rtf.format(-1, "minute");
+  if (delta < minute) return t("projectTree.justNow");
   if (delta < hour) return rtf.format(-Math.max(1, Math.round(delta / minute)), "minute");
   if (delta < day) return rtf.format(-Math.round(delta / hour), "hour");
   if (delta < 7 * day) return rtf.format(-Math.round(delta / day), "day");
@@ -119,10 +147,36 @@ function topicActivityLabel(ms: number): string {
 
 type ProjectDropPosition = "before" | "after";
 
+type CollapseSnapshot = {
+  expanded: Set<string>;
+  manuallyCollapsed: Set<string>;
+};
+
+const GLOBAL_PROJECT_ORDER_KEY = "__global__";
+
+function projectOrderKey(node: ProjectNode): string {
+  if (node.kind === "global_folder") return GLOBAL_PROJECT_ORDER_KEY;
+  if (node.kind === "project" && node.root) return node.root;
+  return "";
+}
+
 function projectRoots(nodes: ProjectNode[]): string[] {
   return nodes
-    .filter((node) => node.kind === "project" && Boolean(node.root))
-    .map((node) => node.root!);
+    .map(projectOrderKey)
+    .filter((key) => key !== "");
+}
+
+function collapsibleFolderKeys(nodes: ProjectNode[], depth = 0): string[] {
+  const keys: string[] = [];
+  for (const node of nodes) {
+    if (!node) continue;
+    const children = asArray(node.children);
+    if ((node.kind === "project" || node.kind === "global_folder") && children.length > 0) {
+      keys.push(projectNodeKey(node, depth));
+    }
+    keys.push(...collapsibleFolderKeys(children, depth + 1));
+  }
+  return keys;
 }
 
 function reorderedProjectRoots(nodes: ProjectNode[], draggedRoot: string, targetRoot: string, position: ProjectDropPosition): string[] {
@@ -136,14 +190,19 @@ function reorderedProjectRoots(nodes: ProjectNode[], draggedRoot: string, target
 }
 
 function applyProjectOrder(nodes: ProjectNode[], roots: string[]): ProjectNode[] {
-  const byRoot = new Map(nodes.filter((node) => node.kind === "project" && node.root).map((node) => [node.root!, node]));
+  const projectEntries = nodes
+    .map((node): [string, ProjectNode] => [projectOrderKey(node), node])
+    .filter(([key]) => key !== "");
+  const byRoot = new Map<string, ProjectNode>(projectEntries);
   const orderedProjects = roots.map((root) => byRoot.get(root)).filter((node): node is ProjectNode => Boolean(node));
-  const nonProjects = nodes.filter((node) => node.kind !== "project");
+  const orderedKeys = new Set(roots);
+  const nonProjects = nodes.filter((node) => !orderedKeys.has(projectOrderKey(node)));
   return [...nonProjects, ...orderedProjects];
 }
 
-function projectAccentStyle(color?: string): CSSProperties | undefined {
-  const value = projectColorValue(color);
+// Global rows use the same project tree recipe; the fallback supplies their non-workspace accent.
+function projectAccentStyle(color?: string, fallbackValue?: string): CSSProperties | undefined {
+  const value = projectColorValue(color) || fallbackValue;
   if (!value) return undefined;
   return { "--project-accent": value } as CSSProperties;
 }
@@ -212,6 +271,7 @@ export function ProjectTree({
   const [confirmRemoveProject, setConfirmRemoveProject] = useState<string | null>(null);
   const [dragProjectRoot, setDragProjectRoot] = useState<string | null>(null);
   const [dropProject, setDropProject] = useState<{ root: string; position: ProjectDropPosition } | null>(null);
+  const [collapseSnapshot, setCollapseSnapshot] = useState<CollapseSnapshot | null>(null);
   const [platform, setPlatform] = useState("");
   const creatingRef = useRef(false);
   const filterRef = useRef<HTMLDivElement>(null);
@@ -221,6 +281,7 @@ export function ProjectTree({
     return (saved === "10" || saved === "1h" || saved === "3h" || saved === "5h" || saved === "1d") ? saved : "all";
   });
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
+  const manuallyCollapsedRef = useRef(manuallyCollapsed);
 
   useEffect(() => {
     localStorage.setItem("projectTree:timeFilter", timeFilter);
@@ -245,6 +306,14 @@ export function ProjectTree({
     return () => window.removeEventListener("pointerdown", close);
   }, [filterMenuOpen]);
 
+  const updateManuallyCollapsed = useCallback((updater: (prev: Set<string>) => Set<string>) => {
+    setManuallyCollapsed((prev) => {
+      const next = updater(prev);
+      manuallyCollapsedRef.current = next;
+      return next;
+    });
+  }, []);
+
   const refresh = useCallback(async () => {
     try {
       const nodes = await app.ListProjectTree();
@@ -252,8 +321,9 @@ export function ProjectTree({
       setTree(list);
       setExpanded((prev) => {
         const next = new Set(prev);
+        const collapsed = manuallyCollapsedRef.current;
         for (const node of list) {
-          if (node?.key && !manuallyCollapsed.has(node.key)) next.add(node.key);
+          if (node?.key && !collapsed.has(node.key)) next.add(node.key);
         }
         return next;
       });
@@ -264,6 +334,10 @@ export function ProjectTree({
        * for the entire session. */
       retryRefresh(0);
     }
+  }, []);
+
+  useEffect(() => {
+    manuallyCollapsedRef.current = manuallyCollapsed;
   }, [manuallyCollapsed]);
 
   // Retry refresh when the first call fails due to Wails bindings not yet
@@ -321,13 +395,67 @@ export function ProjectTree({
       else next.add(key);
       return next;
     });
-    setManuallyCollapsed((prev) => {
+    updateManuallyCollapsed((prev) => {
       const next = new Set(prev);
       if (willCollapse) next.add(key);
       else next.delete(key);
       return next;
     });
   };
+
+  const folderKeys = useMemo(() => collapsibleFolderKeys(tree), [tree]);
+  const searchActive = query.trim().length > 0;
+  const hasExpandedFolders = !searchActive && folderKeys.some((key) => expanded.has(key));
+  const canRestoreCollapsedView = collapseSnapshot !== null;
+  const canToggleCollapsedView = !searchActive && folderKeys.length > 0 && (hasExpandedFolders || canRestoreCollapsedView);
+  const collapseToggleLabel = t(canRestoreCollapsedView ? "projectTree.restoreCollapsedTooltip" : "projectTree.collapseAllTooltip");
+
+  const toggleCollapsedView = useCallback(() => {
+    if (searchActive || folderKeys.length === 0) return;
+    if (collapseSnapshot) {
+      const currentFolderKeys = new Set(folderKeys);
+      setExpanded(() => {
+        const next = new Set<string>();
+        for (const key of collapseSnapshot.expanded) {
+          if (currentFolderKeys.has(key)) next.add(key);
+        }
+        return next;
+      });
+      updateManuallyCollapsed(() => {
+        const next = new Set<string>();
+        for (const key of collapseSnapshot.manuallyCollapsed) {
+          if (currentFolderKeys.has(key)) next.add(key);
+        }
+        return next;
+      });
+      setCollapseSnapshot(null);
+      return;
+    }
+    if (!hasExpandedFolders) return;
+    setCollapseSnapshot({
+      expanded: new Set(expanded),
+      manuallyCollapsed: new Set(manuallyCollapsed),
+    });
+    setExpanded((prev) => {
+      let changed = false;
+      const next = new Set(prev);
+      for (const key of folderKeys) {
+        if (next.delete(key)) changed = true;
+      }
+      return changed ? next : prev;
+    });
+    updateManuallyCollapsed((prev) => {
+      let changed = false;
+      const next = new Set(prev);
+      for (const key of folderKeys) {
+        if (!next.has(key)) {
+          next.add(key);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [collapseSnapshot, expanded, folderKeys, hasExpandedFolders, manuallyCollapsed, searchActive, updateManuallyCollapsed]);
 
   const handleAddProject = async () => {
     if (addingProject) return;
@@ -351,7 +479,7 @@ export function ProjectTree({
       next.add(key);
       return next;
     });
-    setManuallyCollapsed((prev) => {
+    updateManuallyCollapsed((prev) => {
       if (!prev.has(key)) return prev;
       const next = new Set(prev);
       next.delete(key);
@@ -581,6 +709,18 @@ export function ProjectTree({
     setDropProject(null);
   }, []);
 
+  useEffect(() => {
+    if (!dragProjectRoot) return;
+    window.addEventListener("dragend", clearProjectDrag);
+    window.addEventListener("drop", clearProjectDrag);
+    window.addEventListener("blur", clearProjectDrag);
+    return () => {
+      window.removeEventListener("dragend", clearProjectDrag);
+      window.removeEventListener("drop", clearProjectDrag);
+      window.removeEventListener("blur", clearProjectDrag);
+    };
+  }, [clearProjectDrag, dragProjectRoot]);
+
   const activeAncestorKeys = useMemo(() => {
     const walk = (nodes: ProjectNode[], ancestors: string[]): string[] | null => {
       for (const node of nodes) {
@@ -620,9 +760,14 @@ export function ProjectTree({
 
     if (node.kind === "topic" || node.kind === "global_topic") {
       const scope = node.kind === "global_topic" ? "global" : "project";
+      const scopeClass = scope === "global" ? " project-tree__topic--global" : " project-tree__topic--project";
+      const accentStyle = projectAccentStyle(node.projectColor, scope === "global" ? "var(--project-tree-global-accent)" : undefined);
       const active = topicIsActive(node, activeScope, activeWorkspaceRoot, activeTopicId);
       const label = (node.label || node.topicId || "Untitled").replace(/^●\s*/, "");
       const meta = topicMetaLine(node, t);
+      const status = topicStatus(node);
+      const statusLabel = topicStatusLabel(node, t);
+      const title = [label, statusLabel, meta].filter(Boolean).join(" · ");
       const topicId = node.topicId ?? "";
       const lastActivityAt = node.lastActivityAt;
       const timeLabel = lastActivityAt != null && lastActivityAt > 0 ? topicActivityLabel(lastActivityAt).replace(/前$/, "") : null;
@@ -678,15 +823,15 @@ export function ProjectTree({
       return (
         <div
           key={key}
-          className={`project-tree__topic${active ? " project-tree__topic--active" : ""}${topicMenuOpen ? " project-tree__topic--menu-open" : ""}`}
-          style={projectAccentStyle(node.projectColor)}
+          className={`project-tree__topic${scopeClass}${active ? " project-tree__topic--active" : ""}${node.running ? " project-tree__topic--running" : ""}${status ? ` project-tree__topic--status-${status}` : ""}${topicMenuOpen ? " project-tree__topic--menu-open" : ""}${meta ? " project-tree__topic--has-meta" : ""}`}
+          style={accentStyle}
           onContextMenu={openTopicMenu}
         >
           <button
             type="button"
             className="project-tree__topic-main"
-            title={meta ? `${label} · ${meta}` : label}
-            style={{ paddingLeft: 27 }}
+            title={title}
+            style={{ paddingLeft: 14 + depth * 16 }}
             onClick={() => onOpenTopic(scope, node.root ?? "", topicId)}
             onDoubleClick={() => startRenameTopic(node, label)}
             onKeyDown={(event) => {
@@ -696,7 +841,15 @@ export function ProjectTree({
             }}
           >
             <span className="project-tree__topic-copy">
-              <span className="project-tree__topic-label">{label}</span>
+              <span className="project-tree__topic-heading">
+                <span className="project-tree__topic-label">{label}</span>
+                {statusLabel && <span className={`project-tree__topic-status project-tree__topic-status--${status}`}>{statusLabel}</span>}
+              </span>
+              {meta && (
+                <span className="project-tree__topic-meta">
+                  <span className="project-tree__topic-meta-text">{meta}</span>
+                </span>
+              )}
             </span>
             {node.running ? (
               <span className="project-tree__topic-indicator project-tree__topic-indicator--running" />
@@ -719,43 +872,46 @@ export function ProjectTree({
     }
 
     const scope = node.kind === "global_folder" ? "global" : "project";
+    const scopeClass = scope === "global" ? " project-tree__folder--global" : " project-tree__folder--project";
+    const accentStyle = projectAccentStyle(node.projectColor, scope === "global" ? "var(--project-tree-global-accent)" : undefined);
     const projectRoot = scope === "global" ? "" : node.root ?? "";
+    const projectDragKey = scope === "global" ? GLOBAL_PROJECT_ORDER_KEY : projectRoot;
     const projectPath = node.root ?? "";
     const colorTargetRoot = scope === "global" ? "" : projectPath;
     const projectLabel = node.label || (scope === "global" ? "Global" : "Untitled");
     const projectActive = activeScope === scope && (scope === "global" || activeWorkspaceRoot === node.root);
-    const draggableProject = projectDragEnabled && scope === "project" && depth === 0 && Boolean(projectRoot) && editingProject?.key !== key;
-    const projectDropPosition = dropProject?.root === projectRoot ? dropProject.position : null;
-    const handleProjectDragStart = (event: ReactDragEvent<HTMLDivElement>) => {
+    const draggableProject = projectDragEnabled && depth === 0 && Boolean(projectDragKey) && editingProject?.key !== key;
+    const projectDropPosition = dropProject?.root === projectDragKey ? dropProject.position : null;
+    const handleProjectDragStart = (event: ReactDragEvent<HTMLElement>) => {
       if (!draggableProject) return;
-      const target = event.target as HTMLElement | null;
-      if (target?.closest("button,input,textarea,select")) {
+      const target = event.target;
+      if (target instanceof Element && target.closest(".project-tree__action-slot")) {
         event.preventDefault();
         return;
       }
       event.dataTransfer.effectAllowed = "move";
-      event.dataTransfer.setData("text/plain", projectRoot);
-      setDragProjectRoot(projectRoot);
+      event.dataTransfer.setData("text/plain", projectDragKey);
+      setDragProjectRoot(projectDragKey);
       setDropProject(null);
     };
     const handleProjectDragOver = (event: ReactDragEvent<HTMLDivElement>) => {
-      if (!draggableProject || !dragProjectRoot || dragProjectRoot === projectRoot) return;
+      if (!draggableProject || !dragProjectRoot || dragProjectRoot === projectDragKey) return;
       event.preventDefault();
       event.dataTransfer.dropEffect = "move";
       const rect = event.currentTarget.getBoundingClientRect();
       const position: ProjectDropPosition = event.clientY < rect.top + rect.height / 2 ? "before" : "after";
       setDropProject((current) => {
-        if (current?.root === projectRoot && current.position === position) return current;
-        return { root: projectRoot, position };
+        if (current?.root === projectDragKey && current.position === position) return current;
+        return { root: projectDragKey, position };
       });
     };
     const handleProjectDrop = (event: ReactDragEvent<HTMLDivElement>) => {
       if (!draggableProject) return;
       const draggedRoot = dragProjectRoot || event.dataTransfer.getData("text/plain");
-      const position = dropProject?.root === projectRoot ? dropProject.position : "after";
+      const position = dropProject?.root === projectDragKey ? dropProject.position : "after";
       event.preventDefault();
       clearProjectDrag();
-      if (draggedRoot && draggedRoot !== projectRoot) void commitProjectReorder(draggedRoot, projectRoot, position);
+      if (draggedRoot && draggedRoot !== projectDragKey) void commitProjectReorder(draggedRoot, projectDragKey, position);
     };
     const openProjectMenu = (event: ReactMouseEvent<HTMLElement> | ReactKeyboardEvent<HTMLElement>) => {
       event.preventDefault();
@@ -859,9 +1015,11 @@ export function ProjectTree({
               onBlur={() => void commitRenameProject(projectRoot)}
             />
           </div>
-          {isExpanded && hasChildren && (
-            <div className="project-tree__children">
-              {children.map((child) => renderNode(child, depth + 1))}
+          {hasChildren && (
+            <div className={`project-tree__children${isExpanded ? " project-tree__children--expanded" : ""}`}>
+              <div className="project-tree__children-inner">
+                {children.map((child) => renderNode(child, depth + 1))}
+              </div>
             </div>
           )}
         </div>
@@ -871,8 +1029,8 @@ export function ProjectTree({
     return (
       <div key={key}>
         <div
-          className={`project-tree__folder${projectActive ? " project-tree__folder--active" : ""}${menuProject?.key === key ? " project-tree__folder--menu-open" : ""}${dragProjectRoot === projectRoot ? " project-tree__folder--dragging" : ""}${projectDropPosition ? ` project-tree__folder--drop-${projectDropPosition}` : ""}`}
-          style={projectAccentStyle(node.projectColor)}
+          className={`project-tree__folder${scopeClass}${draggableProject ? " project-tree__folder--draggable" : ""}${projectActive ? " project-tree__folder--active" : ""}${menuProject?.key === key ? " project-tree__folder--menu-open" : ""}${dragProjectRoot === projectDragKey ? " project-tree__folder--dragging" : ""}${projectDropPosition ? ` project-tree__folder--drop-${projectDropPosition}` : ""}`}
+          style={accentStyle}
           draggable={draggableProject}
           aria-grabbed={draggableProject ? dragProjectRoot === projectRoot : undefined}
           onDragStart={handleProjectDragStart}
@@ -926,9 +1084,11 @@ export function ProjectTree({
             onClose={closeMenu}
           />
         </div>
-        {isExpanded && hasChildren && (
-          <div className="project-tree__children">
-            {children.map((child) => renderNode(child, depth + 1))}
+        {hasChildren && (
+          <div className={`project-tree__children${isExpanded ? " project-tree__children--expanded" : ""}`}>
+            <div className="project-tree__children-inner">
+              {children.map((child) => renderNode(child, depth + 1))}
+            </div>
           </div>
         )}
       </div>

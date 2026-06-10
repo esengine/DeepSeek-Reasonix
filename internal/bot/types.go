@@ -20,6 +20,7 @@ const (
 	ChatDM     ChatType = "dm"
 	ChatGroup  ChatType = "group"
 	ChatGuild  ChatType = "guild"
+	ChatDirect ChatType = "direct"
 	ChatThread ChatType = "thread"
 )
 

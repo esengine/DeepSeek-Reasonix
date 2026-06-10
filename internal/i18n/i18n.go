@@ -71,7 +71,7 @@ type Messages struct {
 	ChatStatusRetryingFmt       string // "%s retrying (%d/%d)…" — %s = spinner, %d/%d = attempt/max
 	ChatStatusIdle              string // shortcuts hint when idle
 	ChatStatusYoloIdle          string // shortcuts hint when idle in YOLO/bypass mode
-	ChatStatusCycleHint         string // mode-cycle shortcut hint shown when no modal prompt owns the status row
+	ChatStatusCycleHint         string // plan-toggle shortcut hint shown when no modal prompt owns the status row
 	ChatStatusCacheNowFmt       string // cache status tag, "%s" = latest-turn hit rate with percent sign
 	ChatStatusCacheAvgFmt       string // cache status tag, "%s" = session-average hit rate with percent sign
 	ChatStatusPlanApproval      string // shortcuts hint while a plan is pending
@@ -120,8 +120,11 @@ type Messages struct {
 	// chat TUI slash commands.
 	SlashCompactDone   string // "/compact" succeeded
 	SlashCompactFailed string // "/compact" errored, prefixed before the underlying error
-	SlashNewDone       string // "/new" or "/clear" succeeded
-	SlashNewFailed     string // "/new" or "/clear" errored
+	SlashNewDone       string // "/new" succeeded
+	SlashNewFailed     string // "/new" errored
+	SlashClearPrompt   string // "/clear" destructive confirmation prompt
+	SlashClearDone     string // "/clear" succeeded
+	SlashClearFailed   string // "/clear" errored
 	SlashTodoCleared   string // "/todo" dismissed the pinned task list
 	SlashUnavailable   string // the command is configured off (no callback wired)
 	SlashUnknown       string // shown when the user types an unrecognised "/cmd"
@@ -140,7 +143,8 @@ type Messages struct {
 
 	// slash command + sub-command descriptions shown in the menu (CLI and desktop
 	// share these via i18n.M, so both frontends localize identically).
-	CmdNew          string // /new, /clear
+	CmdNew          string // /new
+	CmdClear        string // /clear
 	CmdCompact      string // /compact
 	CmdRewind       string // /rewind
 	CmdTree         string // /tree
@@ -149,6 +153,7 @@ type Messages struct {
 	CmdResume       string // /resume
 	CmdModel        string // /model
 	CmdMemory       string // /memory
+	CmdGoal         string // /goal
 	CmdRemember     string // /remember
 	CmdForget       string // /forget
 	CmdMcp          string // /mcp
@@ -209,6 +214,10 @@ type Messages struct {
 	ForgetDoneFmt          string
 	QuickRememberEmpty     string
 	QuickRememberDoneFmt   string
+	GoalEmpty              string
+	GoalCurrentFmt         string
+	GoalSetFmt             string
+	GoalCleared            string
 	ModelSwitchUnavailable string
 	ModelSwitchBusy        string
 	ModelAlreadyOnFmt      string

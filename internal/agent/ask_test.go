@@ -104,3 +104,27 @@ func TestAskToolTrimsPromptAndOptionsBeforePrompting(t *testing.T) {
 		t.Fatalf("option text not trimmed: %+v", q.Options[0])
 	}
 }
+
+func TestAskToolHeadlessFallbackIsExplicitModelAssumption(t *testing.T) {
+	out, err := NewAskTool().Execute(context.Background(), []byte(`{
+		"questions":[{
+			"header":"Direction",
+			"question":"Which path?",
+			"options":[
+				{"label":"Keep going"},
+				{"label":"Stop"}
+			]
+		}]
+	}`))
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	for _, want := range []string{"No interactive user answered", "model-assumption fallback", "not a user answer"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("headless fallback = %q, want it to contain %q", out, want)
+		}
+	}
+	if strings.Contains(out, "The user answered") {
+		t.Fatalf("headless fallback must not be formatted as a user answer: %q", out)
+	}
+}

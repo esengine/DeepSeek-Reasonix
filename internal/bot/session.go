@@ -21,6 +21,8 @@ func BuildSessionKey(src SessionSource) string {
 		scope = fmt.Sprintf("%s:group:%s:%s", src.Platform, src.ChatID, src.UserID)
 	case ChatGuild:
 		scope = fmt.Sprintf("%s:guild:%s:%s", src.Platform, src.ChatID, src.UserID)
+	case ChatDirect:
+		scope = fmt.Sprintf("%s:direct:%s", src.Platform, src.ChatID)
 	case ChatThread:
 		threadID := src.ThreadID
 		if threadID == "" {

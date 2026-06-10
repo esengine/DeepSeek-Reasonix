@@ -151,7 +151,13 @@ export function ProcessCard({
           </span>
         )}
       </button>
-      {hasBody && actualOpen && <div className="process-card__body">{children}</div>}
+      {hasBody && (
+        <div className="process-card__wrap" aria-hidden={!actualOpen}>
+          <div>
+            <div className="process-card__body">{children}</div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

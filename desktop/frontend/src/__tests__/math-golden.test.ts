@@ -133,6 +133,14 @@ eq(normalizeMath("\\(x^2\\)"), "$x^2$", "\\(…\\) → $…$");
 eq(normalizeMath("\\[E=mc^2\\]"), "$$E=mc^2$$", "\\[…\\] → $$…$$");
 eq(normalizeMath("\\\\[4pt]"), "\\\\[4pt]", "\\\\[ line-break spacing protected");
 
+// ── normalizeMath — \slashed conversion (regression) ──────────────────────────
+// KaTeX has no \slashed (Feynman slash notation); it is rewritten to \not.
+eq(normalizeMath("$\\slashed{p}$"), "$\\not{p}$", "\\slashed{p} → \\not{p}");
+eq(normalizeMath("$\\slashed{\\partial}$"), "$\\not{\\partial}$", "\\slashed{\\partial} → \\not{\\partial}");
+eq(normalizeMath("The momentum $\\slashed{p}$ is conserved"), "The momentum $\\not{p}$ is conserved", "\\slashed in prose");
+eq(normalizeMath("$\\slashed\\epsilon(0)$"), "$\\not{\\epsilon(0)}$", "\\slashed\\epsilon(0) → \\not{\\epsilon(0)} (unbraced fn)");
+eq(normalizeMath("$\\slashed a$"), "$\\not a$", "\\slashed a → \\not a (unbraced letter)");
+
 console.log("\nnormalizeMath — non-math dollar filtering");
 eq(normalizeMath("costs $5$ today"), "costs &#36;5&#36; today", "$5$ not math");
 eq(normalizeMath("env $PATH$ here"), "env &#36;PATH&#36; here", "$PATH$ not math");

@@ -90,7 +90,7 @@ func reviewCommand(args []string) int {
 
 	// 7. Run the review subagent.
 	ctx := context.Background()
-	result, err := agent.RunSubAgent(ctx, prov, reg, reviewSk.Body, task, agent.Options{
+	result, err := agent.RunSubAgentWithSession(ctx, prov, reg, agent.NewSession(reviewSk.Body), task, agent.Options{
 		MaxSteps:      12,
 		Temperature:   cfg.Agent.Temperature,
 		Pricing:       entry.Price,

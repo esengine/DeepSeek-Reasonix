@@ -7,11 +7,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	"golang.org/x/text/encoding/simplifiedchinese"
+	"reasonix/internal/config"
 )
 
 // --- workspaceStatePath ---
@@ -82,6 +84,50 @@ func TestDialogDefaultDirectoryUsesFileParent(t *testing.T) {
 
 	if got := dialogDefaultDirectory(file); got != dir {
 		t.Fatalf("dialogDefaultDirectory(file) = %q, want %q", got, dir)
+	}
+}
+
+func TestDesktopSessionDirIsScopedByWorkspace(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	rootA := filepath.Join(t.TempDir(), "project-a")
+	rootB := filepath.Join(t.TempDir(), "project-b")
+	if err := os.MkdirAll(rootA, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(rootB, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	dirA := desktopSessionDir(rootA)
+	dirB := desktopSessionDir(rootB)
+	if dirA == "" || dirB == "" {
+		t.Fatalf("desktop session dirs should resolve: A=%q B=%q", dirA, dirB)
+	}
+	if dirA == dirB {
+		t.Fatalf("different workspaces must not share a desktop session dir: %q", dirA)
+	}
+	if dirA == config.SessionDir() || dirB == config.SessionDir() {
+		t.Fatalf("desktop workspace sessions should not use the global CLI session dir: A=%q B=%q global=%q", dirA, dirB, config.SessionDir())
+	}
+	wantPrefix := filepath.Join(config.MemoryUserDir(), "projects") + string(filepath.Separator)
+	if !strings.HasPrefix(dirA, wantPrefix) || filepath.Base(dirA) != "sessions" {
+		t.Fatalf("workspace session dir should live under the project state tree, got %q", dirA)
+	}
+}
+
+func BenchmarkDesktopSessionDir(b *testing.B) {
+	root := filepath.Join(b.TempDir(), "project")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		if desktopSessionDir(root) == "" {
+			b.Fatal("empty session dir")
+		}
 	}
 }
 
@@ -265,14 +311,21 @@ func TestMediaTokenHandlerEscapedFilename(t *testing.T) {
 	}
 
 	name := `weird "file" name.png`
+	rawURLChars := []string{" ", `"`}
+	if runtime.GOOS == "windows" {
+		name = "weird #file name.png"
+		rawURLChars = []string{" ", "#"}
+	}
 	if err := os.WriteFile(name, []byte("png"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	app := NewApp()
 	preview := app.ReadFile(name)
-	if strings.Contains(preview.URL, " ") || strings.Contains(preview.URL, `"`) {
-		t.Fatalf("media URL should path-escape filename, got %q", preview.URL)
+	for _, raw := range rawURLChars {
+		if strings.Contains(preview.URL, raw) {
+			t.Fatalf("media URL should path-escape %q in filename, got %q", raw, preview.URL)
+		}
 	}
 
 	handler := app.workspaceMediaMiddleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

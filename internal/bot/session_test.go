@@ -26,6 +26,18 @@ func TestBuildSessionKey(t *testing.T) {
 			wantSame: false,
 		},
 		{
+			name:     "direct same chat different user",
+			src:      SessionSource{Platform: PlatformQQ, ChatType: ChatDirect, ChatID: "guild123", UserID: "a"},
+			src2:     SessionSource{Platform: PlatformQQ, ChatType: ChatDirect, ChatID: "guild123", UserID: "b"},
+			wantSame: true,
+		},
+		{
+			name:     "direct distinct from dm",
+			src:      SessionSource{Platform: PlatformQQ, ChatType: ChatDirect, ChatID: "shared", UserID: "a"},
+			src2:     SessionSource{Platform: PlatformQQ, ChatType: ChatDM, ChatID: "shared", UserID: "a"},
+			wantSame: false,
+		},
+		{
 			name:     "group same chat different user",
 			src:      SessionSource{Platform: PlatformFeishu, ChatType: ChatGroup, ChatID: "group1", UserID: "a"},
 			src2:     SessionSource{Platform: PlatformFeishu, ChatType: ChatGroup, ChatID: "group1", UserID: "b"},
