@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Edit(~/.claude/skills/rsdata/**)",
+      "Bash(git add *)",
+      "Bash(git commit -m '@ *)",
+      "Bash(git push *)"
+    ]
+  }
+}
