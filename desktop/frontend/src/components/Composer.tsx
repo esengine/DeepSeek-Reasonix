@@ -381,7 +381,7 @@ export function Composer({
   // by 120ms so rapid typing doesn't flood the backend with IPC calls — the
   // menu only updates after the user pauses.
   const [argRes, setArgRes] = useState<SlashArgsResult | null>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => {
     if (!text.startsWith("/") || !/\s/.test(text)) {
       setArgRes(null);

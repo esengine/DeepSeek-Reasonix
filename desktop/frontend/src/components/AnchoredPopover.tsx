@@ -54,7 +54,7 @@ export function AnchoredPopover({
   closing = false,
 }: {
   open: boolean;
-  anchorRef: RefObject<HTMLElement>;
+  anchorRef: RefObject<HTMLElement | null>;
   onClose: () => void;
   className: string;
   children: ReactNode;
