@@ -20,6 +20,21 @@ func TestSetDefaultModel(t *testing.T) {
 	if err := c.SetDefaultModel("nope"); err == nil {
 		t.Error("expected error for unknown provider")
 	}
+	// "provider/model" form is also accepted: the /model picker stores the
+	// full ref so a user can land on a non-default model under the same
+	// provider across restarts.
+	if err := c.SetDefaultModel("mimo-pro/mimo-v2.5-pro"); err != nil {
+		t.Fatalf("set provider/model default: %v", err)
+	}
+	if c.DefaultModel != "mimo-pro/mimo-v2.5-pro" {
+		t.Errorf("default = %q, want mimo-pro/mimo-v2.5-pro", c.DefaultModel)
+	}
+	if err := c.SetDefaultModel("mimo-pro/missing"); err == nil {
+		t.Error("expected error for unknown model under known provider")
+	}
+	if err := c.SetDefaultModel(""); err == nil {
+		t.Error("expected error for empty name")
+	}
 }
 
 func TestUIThemeNormalizes(t *testing.T) {

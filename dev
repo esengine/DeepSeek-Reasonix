@@ -29,6 +29,9 @@ wails_port="${REASONIX_DESKTOP_WAILS_PORT:-$((vite_port + 29000))}"
 
 export REASONIX_DESKTOP_VITE_PORT="$vite_port"
 export REASONIX_DEV=1
+# pnpm v11: suppress TTY prompts and skip lockfile age checks in headless mode.
+export PNPM_CONFIG_CONFIRM_MODULES_PURGE=false
+export PNPM_CONFIG_MINIMUM_RELEASE_AGE=0
 
 echo "Reasonix desktop dev"
 echo "  worktree: $root"

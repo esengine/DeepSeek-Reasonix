@@ -443,6 +443,7 @@ func (c *Controller) runTurnWithRaw(ctx context.Context, input, raw string) erro
 func (c *Controller) runTurnWithRawDisplay(ctx context.Context, input, raw, display string) error {
 	c.maybeSessionStart(ctx)
 	c.maybeAutoPlan(ctx, raw)
+	ctx = agent.WithParentSession(ctx, c.parentSessionID())
 	input = c.Compose(input)
 	startMessages := c.messageCount()
 	defer c.snapshotActivityIfChanged(startMessages)
@@ -781,6 +782,7 @@ func (c *Controller) notice(text string) {
 // just needs the exit status — no TurnDone event, no cancel bookkeeping.
 func (c *Controller) Run(ctx context.Context, input string) error {
 	c.maybeSessionStart(ctx)
+	ctx = agent.WithParentSession(ctx, c.parentSessionID())
 	startMessages := c.messageCount()
 	defer c.snapshotActivityIfChanged(startMessages)
 	if c.hooks.Enabled() {
@@ -1403,6 +1405,10 @@ func (c *Controller) SessionPath() string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.sessionPath
+}
+
+func (c *Controller) parentSessionID() string {
+	return agent.BranchID(c.SessionPath())
 }
 
 // History returns the executor's current message log (for repopulating a

@@ -1,0 +1,3 @@
+prompt = "This directory contains a data/ folder with three files: alpha.txt, beta.txt, and gamma.txt. Each file holds a single line of the form name=number. You MUST delegate the reading to a sub-agent: call the `task` tool exactly once, instructing the sub-agent to read all three files under data/ and report the three numbers back to you. Do NOT read the files yourself with your own tools. After the sub-agent reports the numbers, add them together and write ONLY the resulting integer (no other text, no trailing label or newline-prefixed words) to a file named result.txt in the current directory."
+max_steps = 15
+timeout_sec = 300
