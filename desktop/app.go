@@ -3517,10 +3517,10 @@ func (a *App) SearchFileRefs(query string) []DirEntry {
 	if err != nil {
 		return nil
 	}
-	paths := fileref.Search(base, query, fileRefSearchLimit)
-	out := make([]DirEntry, 0, len(paths))
-	for _, path := range paths {
-		out = append(out, DirEntry{Name: path, IsDir: false})
+	results := fileref.Search(base, query, fileRefSearchLimit)
+	out := make([]DirEntry, 0, len(results))
+	for _, r := range results {
+		out = append(out, DirEntry{Name: r.Path, IsDir: r.IsDir})
 	}
 	return out
 }

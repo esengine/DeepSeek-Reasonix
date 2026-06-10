@@ -393,9 +393,13 @@ func (m *chatTUI) searchFileRefs(frag string) []string {
 	if r, ok := m.fileSearchCache[frag]; ok {
 		return r
 	}
-	r := fileref.Search(".", frag, maxFileSearchItems)
-	m.fileSearchCache[frag] = r
-	return r
+	results := fileref.Search(".", frag, maxFileSearchItems)
+	paths := make([]string, 0, len(results))
+	for _, r := range results {
+		paths = append(paths, r.Path)
+	}
+	m.fileSearchCache[frag] = paths
+	return paths
 }
 
 // splitPathToken splits a path token into (dir, frag): dir keeps its trailing
