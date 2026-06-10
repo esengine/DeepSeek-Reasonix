@@ -129,7 +129,7 @@ type Controller struct {
 	goalBlock   string
 	sessionPath string
 	approvals   map[string]pendingApproval
-	asks        map[string]chan []event.AskAnswer
+	asks        map[string]pendingAsk
 	granted     map[string]bool
 	nextID      int
 	// turn counts model turns this session, passed to hooks in their payload.
@@ -178,6 +178,14 @@ type pendingApproval struct {
 	subject   string
 	autoDrain bool
 	reply     chan approvalReply
+}
+
+// pendingAsk is an in-flight ask question batch. questions is retained so the
+// AskRequest can be re-emitted to a frontend that reconnected after the original
+// event (see ReplayPendingPrompts).
+type pendingAsk struct {
+	questions []event.AskQuestion
+	reply     chan []event.AskAnswer
 }
 
 const (
@@ -287,7 +295,7 @@ func New(opts Options) *Controller {
 		cpRoot:           opts.WorkspaceRoot,
 		toolApprovalMode: ToolApprovalAsk,
 		approvals:        map[string]pendingApproval{},
-		asks:             map[string]chan []event.AskAnswer{},
+		asks:             map[string]pendingAsk{},
 		granted:          map[string]bool{},
 	}
 	// Checkpoints: bind a store to the session and route writer pre-edits into it.
@@ -1125,7 +1133,7 @@ func (c *Controller) Ask(ctx context.Context, questions []event.AskQuestion) ([]
 	c.nextID++
 	id := strconv.Itoa(c.nextID)
 	reply := make(chan []event.AskAnswer, 1)
-	c.asks[id] = reply
+	c.asks[id] = pendingAsk{questions: questions, reply: reply}
 	c.mu.Unlock()
 
 	c.sink.Emit(event.Event{Kind: event.AskRequest, Ask: event.Ask{ID: id, Questions: questions}})
@@ -1145,11 +1153,37 @@ func (c *Controller) Ask(ctx context.Context, questions []event.AskQuestion) ([]
 // Unknown/expired IDs are ignored.
 func (c *Controller) AnswerQuestion(id string, answers []event.AskAnswer) {
 	c.mu.Lock()
-	reply := c.asks[id]
+	pending, ok := c.asks[id]
 	delete(c.asks, id)
 	c.mu.Unlock()
-	if reply != nil {
-		reply <- answers // buffered, never blocks
+	if ok {
+		pending.reply <- answers // buffered, never blocks
+	}
+}
+
+// ReplayPendingPrompts re-emits the ApprovalRequest / AskRequest event for every
+// prompt currently blocking the run loop. A frontend that reconnected or reloaded
+// after the original event has no way to rebuild its approval/ask modal otherwise,
+// so the blocked gate goroutine stays stuck forever while the session shows a
+// "waiting" status with no actionable prompt. promptMu serialises Ask and
+// requestApproval, so in practice at most one prompt is outstanding; the loops
+// stay general so a future concurrent prompt would still replay correctly.
+func (c *Controller) ReplayPendingPrompts() {
+	c.mu.Lock()
+	approvals := make([]event.Approval, 0, len(c.approvals))
+	for id, p := range c.approvals {
+		approvals = append(approvals, event.Approval{ID: id, Tool: p.tool, Subject: p.subject})
+	}
+	asks := make([]event.Ask, 0, len(c.asks))
+	for id, p := range c.asks {
+		asks = append(asks, event.Ask{ID: id, Questions: p.questions})
+	}
+	c.mu.Unlock()
+	for _, a := range approvals {
+		c.sink.Emit(event.Event{Kind: event.ApprovalRequest, Approval: a})
+	}
+	for _, a := range asks {
+		c.sink.Emit(event.Event{Kind: event.AskRequest, Ask: a})
 	}
 }
 

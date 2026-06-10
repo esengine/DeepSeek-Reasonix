@@ -608,6 +608,25 @@ func (a *App) ApproveTabWithScope(tabID, id string, allow, session, persist bool
 	}
 }
 
+// ReplayPendingPrompts asks every tab's controller to re-emit any approval/ask
+// prompt that is currently blocking its run loop. The frontend calls this once
+// its event subscription is live (on load/reconnect) so a session that was
+// already awaiting confirmation rebuilds its modal instead of showing a
+// "waiting" status with no way to answer — and no way to stop.
+func (a *App) ReplayPendingPrompts() {
+	a.mu.RLock()
+	tabs := make([]*WorkspaceTab, 0, len(a.tabs))
+	for _, t := range a.tabs {
+		tabs = append(tabs, t)
+	}
+	a.mu.RUnlock()
+	for _, t := range tabs {
+		if t.Ctrl != nil {
+			t.Ctrl.ReplayPendingPrompts()
+		}
+	}
+}
+
 // SetPlanMode toggles the read-only plan axis while preserving the current
 // tool-auto-approval axis.
 func (a *App) SetPlanMode(on bool) {
