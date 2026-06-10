@@ -325,6 +325,7 @@ Usage:
   reasonix config auto-plan [off|on]                    configure automatic plan mode
   reasonix mcp <add|remove|list>                        manage MCP servers in reasonix.toml
   reasonix doctor [--json]                              print redacted local diagnostics
+  reasonix bot start|doctor|weixin-login                multi-channel IM bot gateway
   reasonix version
   reasonix help
 

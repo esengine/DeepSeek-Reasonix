@@ -79,6 +79,56 @@ type AgentView struct {
 	SystemPrompt    string  `json:"systemPrompt"`
 }
 
+type BotAllowlistView struct {
+	Enabled      bool     `json:"enabled"`
+	AllowAll     bool     `json:"allowAll"`
+	QQUsers      []string `json:"qqUsers"`
+	FeishuUsers  []string `json:"feishuUsers"`
+	WeixinUsers  []string `json:"weixinUsers"`
+	QQGroups     []string `json:"qqGroups"`
+	FeishuGroups []string `json:"feishuGroups"`
+	WeixinGroups []string `json:"weixinGroups"`
+}
+
+type QQBotView struct {
+	Enabled      bool   `json:"enabled"`
+	AppID        string `json:"appId"`
+	AppSecretEnv string `json:"appSecretEnv"`
+	SecretSet    bool   `json:"secretSet"`
+}
+
+type FeishuBotView struct {
+	Enabled           bool   `json:"enabled"`
+	Domain            string `json:"domain"`
+	AppID             string `json:"appId"`
+	AppSecretEnv      string `json:"appSecretEnv"`
+	SecretSet         bool   `json:"secretSet"`
+	VerificationToken string `json:"verificationToken"`
+	Mode              string `json:"mode"`
+	WebhookPort       int    `json:"webhookPort"`
+	RequireMention    bool   `json:"requireMention"`
+}
+
+type WeixinBotView struct {
+	Enabled   bool   `json:"enabled"`
+	AccountID string `json:"accountId"`
+	TokenEnv  string `json:"tokenEnv"`
+	TokenSet  bool   `json:"tokenSet"`
+	APIBase   string `json:"apiBase"`
+}
+
+type BotSettingsView struct {
+	Enabled     bool                `json:"enabled"`
+	Model       string              `json:"model"`
+	MaxSteps    int                 `json:"maxSteps"`
+	DebounceMs  int                 `json:"debounceMs"`
+	Allowlist   BotAllowlistView    `json:"allowlist"`
+	QQ          QQBotView           `json:"qq"`
+	Feishu      FeishuBotView       `json:"feishu"`
+	Weixin      WeixinBotView       `json:"weixin"`
+	Connections []BotConnectionView `json:"connections"`
+}
+
 // SettingsView is the whole Settings panel payload.
 type SettingsView struct {
 	DefaultModel      string          `json:"defaultModel"`
@@ -92,6 +142,7 @@ type SettingsView struct {
 	Sandbox           SandboxView     `json:"sandbox"`
 	Network           NetworkView     `json:"network"`
 	Agent             AgentView       `json:"agent"`
+	Bot               BotSettingsView `json:"bot"`
 	DesktopLanguage   string          `json:"desktopLanguage"`
 	DesktopTheme      string          `json:"desktopTheme"`
 	DesktopThemeStyle string          `json:"desktopThemeStyle"`
@@ -267,6 +318,7 @@ func (a *App) Settings() SettingsView {
 			},
 			Sandbox:           SandboxView{Bash: "enforce", AllowWrite: []string{}},
 			Agent:             AgentView{PlannerMaxSteps: 12},
+			Bot:               botSettingsView(config.BotConfig{}),
 			AutoPlan:          "off",
 			DesktopTheme:      "light",
 			DesktopThemeStyle: "graphite",
@@ -309,6 +361,7 @@ func (a *App) Settings() SettingsView {
 			},
 		},
 		Agent:             AgentView{Temperature: cfg.Agent.Temperature, MaxSteps: cfg.Agent.MaxSteps, PlannerMaxSteps: cfg.Agent.PlannerMaxSteps, SystemPrompt: cfg.Agent.SystemPrompt},
+		Bot:               botSettingsView(cfg.Bot),
 		DesktopLanguage:   cfg.DesktopLanguage(),
 		DesktopTheme:      cfg.DesktopTheme(),
 		DesktopThemeStyle: cfg.DesktopThemeStyle(),
@@ -327,11 +380,66 @@ func (a *App) Settings() SettingsView {
 	return v
 }
 
+func botSettingsView(b config.BotConfig) BotSettingsView {
+	mode := strings.TrimSpace(b.Feishu.Mode)
+	if mode == "" {
+		mode = "webhook"
+	}
+	return BotSettingsView{
+		Enabled:    b.Enabled,
+		Model:      b.Model,
+		MaxSteps:   b.MaxSteps,
+		DebounceMs: b.DebounceMs,
+		Allowlist: BotAllowlistView{
+			Enabled:      b.Allowlist.Enabled,
+			AllowAll:     b.Allowlist.AllowAll,
+			QQUsers:      nonNil(b.Allowlist.QQUsers),
+			FeishuUsers:  nonNil(b.Allowlist.FeishuUsers),
+			WeixinUsers:  nonNil(b.Allowlist.WeixinUsers),
+			QQGroups:     nonNil(b.Allowlist.QQGroups),
+			FeishuGroups: nonNil(b.Allowlist.FeishuGroups),
+			WeixinGroups: nonNil(b.Allowlist.WeixinGroups),
+		},
+		QQ: QQBotView{
+			Enabled:      b.QQ.Enabled,
+			AppID:        b.QQ.AppID,
+			AppSecretEnv: b.QQ.AppSecretEnv,
+			SecretSet:    strings.TrimSpace(b.QQ.AppSecretEnv) != "" && os.Getenv(b.QQ.AppSecretEnv) != "",
+		},
+		Feishu: FeishuBotView{
+			Enabled:           b.Feishu.Enabled,
+			Domain:            orDefault(strings.TrimSpace(b.Feishu.Domain), "feishu"),
+			AppID:             b.Feishu.AppID,
+			AppSecretEnv:      b.Feishu.AppSecretEnv,
+			SecretSet:         strings.TrimSpace(b.Feishu.AppSecretEnv) != "" && os.Getenv(b.Feishu.AppSecretEnv) != "",
+			VerificationToken: b.Feishu.VerificationToken,
+			Mode:              mode,
+			WebhookPort:       b.Feishu.WebhookPort,
+			RequireMention:    b.Feishu.RequireMention,
+		},
+		Weixin: WeixinBotView{
+			Enabled:   b.Weixin.Enabled,
+			AccountID: b.Weixin.AccountID,
+			TokenEnv:  b.Weixin.TokenEnv,
+			TokenSet:  strings.TrimSpace(b.Weixin.TokenEnv) != "" && os.Getenv(b.Weixin.TokenEnv) != "",
+			APIBase:   b.Weixin.APIBase,
+		},
+		Connections: botConnectionViews(b.Connections),
+	}
+}
+
 func orDefault(s, def string) string {
 	if strings.TrimSpace(s) == "" {
 		return def
 	}
 	return s
+}
+
+func botDomainOrDefault(domain string) string {
+	if strings.EqualFold(strings.TrimSpace(domain), "lark") {
+		return "lark"
+	}
+	return "feishu"
 }
 
 // --- apply (write config, then rebuild the controller so it's live) ---
@@ -1055,6 +1163,67 @@ func (a *App) SetNetwork(n NetworkView) error {
 			},
 		})
 	})
+}
+
+func (a *App) SetBotSettings(b BotSettingsView) error {
+	return a.applyConfigOnly(func(c *config.Config) error {
+		c.Bot.Enabled = b.Enabled
+		c.Bot.Model = strings.TrimSpace(b.Model)
+		c.Bot.MaxSteps = b.MaxSteps
+		c.Bot.DebounceMs = b.DebounceMs
+		c.Bot.Allowlist = config.BotAllowlist{
+			Enabled:      b.Allowlist.Enabled,
+			AllowAll:     b.Allowlist.AllowAll,
+			QQUsers:      trimList(b.Allowlist.QQUsers),
+			FeishuUsers:  trimList(b.Allowlist.FeishuUsers),
+			WeixinUsers:  trimList(b.Allowlist.WeixinUsers),
+			QQGroups:     trimList(b.Allowlist.QQGroups),
+			FeishuGroups: trimList(b.Allowlist.FeishuGroups),
+			WeixinGroups: trimList(b.Allowlist.WeixinGroups),
+		}
+		c.Bot.QQ = config.QQBotConfig{
+			Enabled:      b.QQ.Enabled,
+			AppID:        strings.TrimSpace(b.QQ.AppID),
+			AppSecretEnv: strings.TrimSpace(b.QQ.AppSecretEnv),
+		}
+		c.Bot.Feishu = config.FeishuBotConfig{
+			Enabled:           b.Feishu.Enabled,
+			Domain:            botDomainOrDefault(b.Feishu.Domain),
+			AppID:             strings.TrimSpace(b.Feishu.AppID),
+			AppSecretEnv:      strings.TrimSpace(b.Feishu.AppSecretEnv),
+			VerificationToken: strings.TrimSpace(b.Feishu.VerificationToken),
+			Mode:              strings.TrimSpace(b.Feishu.Mode),
+			WebhookPort:       b.Feishu.WebhookPort,
+			RequireMention:    b.Feishu.RequireMention,
+		}
+		c.Bot.Weixin = config.WeixinBotConfig{
+			Enabled:   b.Weixin.Enabled,
+			AccountID: strings.TrimSpace(b.Weixin.AccountID),
+			TokenEnv:  strings.TrimSpace(b.Weixin.TokenEnv),
+			APIBase:   strings.TrimRight(strings.TrimSpace(b.Weixin.APIBase), "/"),
+		}
+		c.Bot.Connections = botConnectionConfigs(b.Connections)
+		return nil
+	})
+}
+
+func (a *App) SetBotSecret(envName, value string) error {
+	envName = strings.TrimSpace(envName)
+	if envName == "" {
+		return fmt.Errorf("bot secret env name is empty")
+	}
+	if err := upsertDotEnv(envName, value); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (a *App) ClearBotSecret(envName string) error {
+	envName = strings.TrimSpace(envName)
+	if envName == "" {
+		return fmt.Errorf("bot secret env name is empty")
+	}
+	return removeDotEnv(envName)
 }
 
 // SetCloseBehavior updates desktop-only window close behavior without rebuilding

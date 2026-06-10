@@ -524,7 +524,7 @@ export interface MemoryView {
 }
 
 // SettingsTab is the top-level navigation item in the Settings Centre modal.
-export type SettingsTab = "general" | "models" | "providers" | "mcp" | "skills" | "memory" | "permissions" | "sandbox" | "network" | "appearance" | "updates";
+export type SettingsTab = "general" | "models" | "providers" | "bots" | "mcp" | "skills" | "memory" | "permissions" | "sandbox" | "network" | "appearance" | "updates";
 
 // Settings panel payloads (desktop/settings_app.go).
 export interface ProviderView {
@@ -599,6 +599,113 @@ export interface AgentView {
   systemPrompt: string;
 }
 
+export interface BotAllowlistView {
+  enabled: boolean;
+  allowAll: boolean;
+  qqUsers: string[];
+  feishuUsers: string[];
+  weixinUsers: string[];
+  qqGroups: string[];
+  feishuGroups: string[];
+  weixinGroups: string[];
+}
+
+export interface QQBotView {
+  enabled: boolean;
+  appId: string;
+  appSecretEnv: string;
+  secretSet: boolean;
+}
+
+export interface FeishuBotView {
+  enabled: boolean;
+  domain: string;
+  appId: string;
+  appSecretEnv: string;
+  secretSet: boolean;
+  verificationToken: string;
+  mode: string;
+  webhookPort: number;
+  requireMention: boolean;
+}
+
+export interface WeixinBotView {
+  enabled: boolean;
+  accountId: string;
+  tokenEnv: string;
+  tokenSet: boolean;
+  apiBase: string;
+}
+
+export interface BotConnectionCredentialView {
+  appId: string;
+  appSecretEnv: string;
+  accountId: string;
+  tokenEnv: string;
+  secretSet: boolean;
+}
+
+export interface BotConnectionSessionMappingView {
+  remoteId: string;
+  sessionId: string;
+  updatedAt: string;
+}
+
+export interface BotConnectionView {
+  id: string;
+  provider: "qq" | "feishu" | "weixin" | string;
+  domain: "qq" | "feishu" | "lark" | "weixin" | string;
+  label: string;
+  enabled: boolean;
+  status: "disconnected" | "pending" | "connected" | "error" | string;
+  credential: BotConnectionCredentialView;
+  sessionMappings: BotConnectionSessionMappingView[];
+  lastError: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BotSettingsView {
+  enabled: boolean;
+  model: string;
+  maxSteps: number;
+  debounceMs: number;
+  allowlist: BotAllowlistView;
+  qq: QQBotView;
+  feishu: FeishuBotView;
+  weixin: WeixinBotView;
+  connections: BotConnectionView[];
+}
+
+export interface BotInstallStartResult {
+  ok: boolean;
+  provider: string;
+  domain: string;
+  installId: string;
+  url: string;
+  deviceCode: string;
+  userCode: string;
+  interval: number;
+  expireIn: number;
+  message: string;
+}
+
+export interface BotInstallPollResult {
+  done: boolean;
+  connection: BotConnectionView;
+  status: string;
+  message: string;
+  error: string;
+}
+
+export interface BotConnectionDiagnostic {
+  id: string;
+  label: string;
+  status: string;
+  message: string;
+  messageId: string;
+}
+
 export interface SettingsView {
   defaultModel: string;
   plannerModel: string;
@@ -611,6 +718,7 @@ export interface SettingsView {
   sandbox: SandboxView;
   network: NetworkView;
   agent: AgentView;
+  bot: BotSettingsView;
   desktopLanguage: string; // "" | "en" | "zh"; empty = auto
   desktopTheme: string; // "auto" | "dark" | "light"
   desktopThemeStyle: string;

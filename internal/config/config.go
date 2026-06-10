@@ -56,6 +56,7 @@ type Config struct {
 	Codegraph     CodegraphConfig     `toml:"codegraph"`
 	Statusline    StatuslineConfig    `toml:"statusline"`
 	LSP           LSPConfig           `toml:"lsp"`
+	Bot           BotConfig           `toml:"bot"`
 }
 
 // UIConfig controls CLI presentation-only settings. Desktop appearance is kept in
@@ -226,6 +227,89 @@ func (c CodegraphConfig) ShouldAutoStart() bool {
 
 func (c CodegraphConfig) ResolvedTier() string {
 	return "background"
+}
+
+// BotConfig 控制多渠道 IM bot 消息网关。
+type BotConfig struct {
+	Enabled     bool                  `toml:"enabled"`
+	Model       string                `toml:"model"` // 用于 bot 的模型名，空则用 default_model
+	MaxSteps    int                   `toml:"max_steps"`
+	DebounceMs  int                   `toml:"debounce_ms"` // 消息合并窗口，毫秒
+	Allowlist   BotAllowlist          `toml:"allowlist"`
+	QQ          QQBotConfig           `toml:"qq"`
+	Feishu      FeishuBotConfig       `toml:"feishu"`
+	Weixin      WeixinBotConfig       `toml:"weixin"`
+	Connections []BotConnectionConfig `toml:"connections"`
+}
+
+// BotAllowlist 控制哪些用户可以使用 bot。
+type BotAllowlist struct {
+	Enabled      bool     `toml:"enabled"`
+	AllowAll     bool     `toml:"allow_all"`
+	QQUsers      []string `toml:"qq_users"`
+	FeishuUsers  []string `toml:"feishu_users"`
+	WeixinUsers  []string `toml:"weixin_users"`
+	QQGroups     []string `toml:"qq_groups"`
+	FeishuGroups []string `toml:"feishu_groups"`
+	WeixinGroups []string `toml:"weixin_groups"`
+}
+
+// QQBotConfig QQ 官方 Bot API v2 配置。
+type QQBotConfig struct {
+	Enabled      bool   `toml:"enabled"`
+	AppID        string `toml:"app_id"`
+	AppSecretEnv string `toml:"app_secret_env"` // 环境变量名，如 QQ_BOT_APP_SECRET
+}
+
+// FeishuBotConfig 飞书自建应用 Bot 配置。
+type FeishuBotConfig struct {
+	Enabled           bool   `toml:"enabled"`
+	Domain            string `toml:"domain"` // feishu（默认）| lark
+	AppID             string `toml:"app_id"`
+	AppSecretEnv      string `toml:"app_secret_env"`     // 如 FEISHU_BOT_APP_SECRET
+	VerificationToken string `toml:"verification_token"` // 事件订阅验证 token
+	Mode              string `toml:"mode"`               // webhook（默认）| websocket
+	WebhookPort       int    `toml:"webhook_port"`       // webhook 模式端口
+	RequireMention    bool   `toml:"require_mention"`
+}
+
+// WeixinBotConfig 微信 iLink Bot 配置。
+type WeixinBotConfig struct {
+	Enabled   bool   `toml:"enabled"`
+	AccountID string `toml:"account_id"`
+	TokenEnv  string `toml:"token_env"` // 环境变量名，如 WEIXIN_BOT_TOKEN
+	APIBase   string `toml:"api_base"`  // iLink API base URL
+}
+
+// BotConnectionConfig is the desktop-friendly connection record for IM bot
+// channels. It keeps install/runtime state separate from legacy per-provider
+// knobs so the UI can expose a simple "connect first" flow while old configs
+// keep working.
+type BotConnectionConfig struct {
+	ID              string                        `toml:"id"`
+	Provider        string                        `toml:"provider"` // qq|feishu|weixin
+	Domain          string                        `toml:"domain"`   // feishu|lark|weixin|qq
+	Label           string                        `toml:"label"`
+	Enabled         bool                          `toml:"enabled"`
+	Status          string                        `toml:"status"` // disconnected|pending|connected|error
+	Credential      BotConnectionCredential       `toml:"credential"`
+	SessionMappings []BotConnectionSessionMapping `toml:"session_mappings"`
+	LastError       string                        `toml:"last_error"`
+	CreatedAt       string                        `toml:"created_at"`
+	UpdatedAt       string                        `toml:"updated_at"`
+}
+
+type BotConnectionCredential struct {
+	AppID        string `toml:"app_id"`
+	AppSecretEnv string `toml:"app_secret_env"`
+	AccountID    string `toml:"account_id"`
+	TokenEnv     string `toml:"token_env"`
+}
+
+type BotConnectionSessionMapping struct {
+	RemoteID  string `toml:"remote_id"`
+	SessionID string `toml:"session_id"`
+	UpdatedAt string `toml:"updated_at"`
 }
 
 // NetworkConfig controls ordinary outbound HTTP traffic such as model providers,
@@ -812,6 +896,14 @@ func Default() *Config {
 		// a missing server yields an install hint rather than an error.
 		LSP:     LSPConfig{Enabled: true},
 		Network: NetworkConfig{ProxyMode: netclient.ModeAuto},
+		Bot: BotConfig{
+			MaxSteps:   25,
+			DebounceMs: 1500,
+			Allowlist:  BotAllowlist{Enabled: true},
+			QQ:         QQBotConfig{AppSecretEnv: "QQ_BOT_APP_SECRET"},
+			Feishu:     FeishuBotConfig{Domain: "feishu", AppSecretEnv: "FEISHU_BOT_APP_SECRET", Mode: "webhook", WebhookPort: 8080, RequireMention: true},
+			Weixin:     WeixinBotConfig{AccountID: "default", TokenEnv: "WEIXIN_BOT_TOKEN", APIBase: "https://ilinkai.weixin.qq.com"},
+		},
 		Providers: []ProviderEntry{
 			{Name: "deepseek-flash", Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash", APIKeyEnv: "DEEPSEEK_API_KEY", BalanceURL: "https://api.deepseek.com/user/balance", ContextWindow: 1_000_000, Price: &provider.Pricing{CacheHit: 0.02, Input: 1, Output: 2, Currency: "¥"}},
 			{Name: "deepseek-pro", Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro", APIKeyEnv: "DEEPSEEK_API_KEY", BalanceURL: "https://api.deepseek.com/user/balance", ContextWindow: 1_000_000, Price: &provider.Pricing{CacheHit: 0.025, Input: 3, Output: 6, Currency: "¥"}},
