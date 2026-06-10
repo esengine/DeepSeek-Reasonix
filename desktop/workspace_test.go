@@ -715,13 +715,13 @@ func TestParseGitStatusPorcelainZ(t *testing.T) {
 	if len(got) != 3 {
 		t.Fatalf("entries = %d, want 3: %+v", len(got), got)
 	}
-	if got[0].Path != "changed.go" || got[0].Status != "M" {
+	if got[0].Path != "changed.go" || got[0].Status != "M" || got[0].IndexStatus != "" || got[0].WorktreeStatus != "M" {
 		t.Fatalf("modified entry = %+v", got[0])
 	}
-	if got[1].Path != "new.txt" || got[1].Status != "??" {
+	if got[1].Path != "new.txt" || got[1].Status != "??" || got[1].IndexStatus != "?" || got[1].WorktreeStatus != "?" {
 		t.Fatalf("untracked entry = %+v", got[1])
 	}
-	if got[2].Path != "renamed.go" || got[2].OldPath != "old.go" || got[2].Status != "R" {
+	if got[2].Path != "renamed.go" || got[2].OldPath != "old.go" || got[2].Status != "R" || got[2].IndexStatus != "R" || got[2].WorktreeStatus != "" {
 		t.Fatalf("rename entry = %+v", got[2])
 	}
 }
@@ -901,6 +901,40 @@ func TestWorkspaceChangesGitBranchDetachedHead(t *testing.T) {
 	}
 	if got.GitBranch != "@"+short {
 		t.Fatalf("git branch = %q, want @%s", got.GitBranch, short)
+	}
+}
+
+func TestWorkspaceGitCommitCreatesTargetBranch(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	orig, _ := os.Getwd()
+	defer os.Chdir(orig)
+
+	dir := t.TempDir()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, "init")
+	runGit(t, "config", "user.email", "test@example.com")
+	runGit(t, "config", "user.name", "Test User")
+	if err := os.WriteFile("new.txt", []byte("new\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, "add", "new.txt")
+
+	const branch = "feature/from-commit-dialog"
+	if err := (&App{}).WorkspaceGitCommit("save staged file", false, branch); err != nil {
+		t.Fatalf("WorkspaceGitCommit err = %v", err)
+	}
+	if got := gitOutput(t, "branch", "--show-current"); got != branch {
+		t.Fatalf("current branch = %q, want %q", got, branch)
+	}
+	if got := gitOutput(t, "log", "-1", "--pretty=%s"); got != "save staged file" {
+		t.Fatalf("commit message = %q", got)
+	}
+	if got := gitOutput(t, "status", "--porcelain"); got != "" {
+		t.Fatalf("status = %q, want clean", got)
 	}
 }
 
