@@ -447,6 +447,14 @@ export default function App() {
   const [sidebarTogglePressed, setSidebarTogglePressed] = useState(false);
   const [workspaceTogglePressed, setWorkspaceTogglePressed] = useState(false);
   const [savedTopicTurnCount, setSavedTopicTurnCount] = useState<number | undefined>(undefined);
+  const [windowWidth, setWindowWidth] = useState(() => typeof window !== "undefined" ? window.innerWidth : 1440);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onResize = () => setWindowWidth(window.innerWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
   const [clearContextPending, setClearContextPending] = useState(false);
   const topicRenameSkipCommitRef = useRef(false);
   const topicRenameCommitHandledRef = useRef(false);
@@ -567,12 +575,20 @@ export default function App() {
   const footerHeightRef = useRef(0);
   const footerRef = useRef<HTMLElement>(null);
   const rightDockDetailActive = rightDockMode === "context" ? contextDetailActive : workspacePreviewActive;
+  const activeSidebarWidth = sidebarCollapsed ? 0 : sidebarWidth;
+  const maxRightDockAvailable = Math.max(
+    rightDockDetailActive ? RIGHT_DOCK_PREVIEW_MIN_WIDTH : RIGHT_DOCK_TREE_MIN_WIDTH,
+    windowWidth - activeSidebarWidth - CHAT_DOCKED_MIN_WIDTH - WORKSPACE_RESIZER_WIDTH
+  );
+
   const preferredWorkspacePanelWidth = rightDockDetailActive ? rightDockPreviewWidth : rightDockTreeWidth;
   const workspacePanelMinWidth = rightDockDetailActive ? RIGHT_DOCK_PREVIEW_MIN_WIDTH : RIGHT_DOCK_TREE_MIN_WIDTH;
 
-  const resolvedWorkspacePanelWidth = workspacePanelOpen && !workspacePanelMaximized
-    ? Math.max(workspacePanelMinWidth, preferredWorkspacePanelWidth)
-    : preferredWorkspacePanelWidth;
+  let resolvedWorkspacePanelWidth = preferredWorkspacePanelWidth;
+  if (workspacePanelOpen && !workspacePanelMaximized) {
+    resolvedWorkspacePanelWidth = Math.max(workspacePanelMinWidth, preferredWorkspacePanelWidth);
+    resolvedWorkspacePanelWidth = Math.min(resolvedWorkspacePanelWidth, maxRightDockAvailable);
+  }
 
   const workspacePanelRenderable = workspacePanelOpen && (workspacePanelMaximized || resolvedWorkspacePanelWidth > 0);
   const workspacePanelGridOpen = workspacePanelRenderable && !workspacePanelMaximized;
@@ -1177,8 +1193,10 @@ export default function App() {
       closeTransientOverlays();
       setWorkspacePanelResizing(true);
       const startX = event.clientX;
-      const startDockWidth = preferredWorkspacePanelWidth;
+      // Use the actual rendered width as the starting point so dragging feels 1:1 immediately
+      const startDockWidth = workspacePanelRenderWidth;
       let nextDockWidth = startDockWidth;
+
       const onMove = (moveEvent: PointerEvent) => {
         const delta = moveEvent.clientX - startX;
         nextDockWidth = startDockWidth - delta;
@@ -1203,14 +1221,14 @@ export default function App() {
       window.addEventListener("pointerup", onDone);
       window.addEventListener("pointercancel", onDone);
     },
-    [closeTransientOverlays, preferredWorkspacePanelWidth, rightDockDetailActive, setSavedWorkspacePanelWidth, workspacePanelOpen],
+    [closeTransientOverlays, workspacePanelRenderWidth, rightDockDetailActive, setSavedWorkspacePanelWidth, workspacePanelOpen],
   );
 
   const resizeWorkspacePanelWithKeyboard = useCallback(
     (event: KeyboardEvent<HTMLButtonElement>) => {
       if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
         event.preventDefault();
-        setSavedWorkspacePanelWidth(preferredWorkspacePanelWidth + (event.key === "ArrowLeft" ? 16 : -16));
+        setSavedWorkspacePanelWidth(workspacePanelRenderWidth + (event.key === "ArrowLeft" ? 16 : -16));
       } else if (event.key === "Home") {
         event.preventDefault();
         setSavedWorkspacePanelWidth(rightDockDetailActive ? RIGHT_DOCK_PREVIEW_MIN_WIDTH : RIGHT_DOCK_TREE_MIN_WIDTH);
@@ -1219,7 +1237,7 @@ export default function App() {
         setSavedWorkspacePanelWidth(rightDockDetailActive ? RIGHT_DOCK_MAX_WIDTH : RIGHT_DOCK_TREE_MAX_WIDTH);
       }
     },
-    [preferredWorkspacePanelWidth, rightDockDetailActive, setSavedWorkspacePanelWidth],
+    [workspacePanelRenderWidth, rightDockDetailActive, setSavedWorkspacePanelWidth],
   );
 
   const openWorkspacePanel = useCallback(
