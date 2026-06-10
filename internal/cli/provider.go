@@ -44,24 +44,20 @@ func (m *chatTUI) showProviders() {
 		if !p.Configured() {
 			continue
 		}
+		// Prefer chat models for display; fall back to the full model list
+		// (which includes non-chat models like embeddings) for count/label.
 		models := p.ChatModelList()
-		modelCount := len(models)
-		if modelCount == 0 {
-			modelCount = len(p.ModelList())
+		if len(models) == 0 {
+			models = p.ModelList()
 		}
 
 		status := ""
 		if p.Name == curProvider {
 			status = "  " + viewStatus("active")
 		}
-		modelLabel := fmt.Sprintf("%d models", modelCount)
-		if modelCount == 1 {
+		modelLabel := fmt.Sprintf("%d models", len(models))
+		if len(models) == 1 {
 			modelLabel = models[0]
-			if modelLabel == "" {
-				if l := p.ModelList(); len(l) > 0 {
-					modelLabel = l[0]
-				}
-			}
 		}
 		line := fmt.Sprintf("  %-16s  %-20s  %s%s", p.Name, modelLabel, dim(p.Kind), status)
 		lines = append(lines, line)

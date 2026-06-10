@@ -28,12 +28,23 @@ func termHeight(fd int) int {
 	return h
 }
 
-// maxViewport calculates how many menu rows fit in the terminal after subtracting
-// the header (2 lines) and the hint/footer (1 line), leaving at least 5 rows.
-func maxViewport(totalItems, termRows int) int {
-	avail := termRows - 3 // header + blank + footer
-	if avail < 5 {
-		avail = 5
+// fixedLines returns the number of non-item lines rendered each frame:
+// header label, blank separator, scroll-up indicator, scroll-down indicator.
+// When searching is true the search bar adds one more line.
+func fixedLines(searching bool) int {
+	n := 4 // header + blank + scroll-up + scroll-down
+	if searching {
+		n++ // search bar
+	}
+	return n
+}
+
+// maxViewport calculates how many menu item rows fit after subtracting the
+// fixed lines from the available terminal rows, leaving at least 1 row.
+func maxViewport(totalItems, termRows int, searching bool) int {
+	avail := termRows - fixedLines(searching)
+	if avail < 1 {
+		avail = 1
 	}
 	if totalItems < avail {
 		return totalItems
@@ -81,22 +92,19 @@ func selectOne(label string, items []menuItem) (int, error) {
 	// search state
 	searching := false
 	searchQuery := ""
-	filtered := items                    // indices into original items
-	filterIdx := make([]int, len(items)) // maps filtered position → original index
+	filtered := items
+	filterIdx := make([]int, len(items))
 	for i := range items {
 		filterIdx[i] = i
 	}
 
 	sel := 0
 	scroll := 0
+	prevLines := 0 // lines printed in the previous frame; 0 = first frame
 
 	render := func() {
 		n := len(filtered)
-		if n == 0 {
-			return
-		}
-		// clamp viewport
-		vp := maxViewport(n, th)
+		vp := maxViewport(n, th, searching)
 		// adjust scroll to keep sel visible
 		if sel < scroll {
 			scroll = sel
@@ -108,8 +116,8 @@ func selectOne(label string, items []menuItem) (int, error) {
 			scroll = 0
 		}
 
-		// scroll-up indicator
-		if scroll > 0 {
+		// scroll-up indicator (always 1 line)
+		if n > 0 && scroll > 0 {
 			fmt.Fprintf(w, "\r\033[K%s\n", dim(fmt.Sprintf(i18n.M.SelectMoreAboveFmt, scroll)))
 		} else {
 			fmt.Fprintf(w, "\r\033[K\r\n")
@@ -129,16 +137,20 @@ func selectOne(label string, items []menuItem) (int, error) {
 				fmt.Fprintf(w, "\r\033[K   %s %s\r\n", name, dim(it.desc))
 			}
 		}
+		// if fewer items than viewport, pad with blank lines so the frame
+		// height stays constant
+		for i := end - scroll; i < vp; i++ {
+			fmt.Fprintf(w, "\r\033[K\r\n")
+		}
 
-		// scroll-down indicator
-		if end < n {
+		// scroll-down indicator (always 1 line)
+		if n > 0 && end < n {
 			fmt.Fprintf(w, "\r\033[K%s\n", dim(fmt.Sprintf(i18n.M.SelectMoreBelowFmt, n-end)))
 		} else {
 			fmt.Fprintf(w, "\r\033[K\r\n")
 		}
 	}
 
-	// initial header + search bar area
 	drawHeader := func() {
 		if searching {
 			fmt.Fprintf(w, "\r\033[K%s %s  %s\r\n\r\n", accent("▌"), bold(label), dim(i18n.M.SelectSearchHint))
@@ -148,18 +160,19 @@ func selectOne(label string, items []menuItem) (int, error) {
 		}
 	}
 
-	// total lines to move up for redraw: header(2) + searchbar(if searching)(1) + viewport items + scroll indicators
-	totalLines := func() int {
-		vp := maxViewport(len(filtered), th)
-		lines := 2 + vp + 2 // header + blank + items + top/bottom scroll indicators
-		if searching {
-			lines++ // search bar
+	redraw := func() {
+		if prevLines > 0 {
+			fmt.Fprintf(w, "\033[%dA", prevLines)
 		}
-		return lines
+		drawHeader()
+		render()
+		// Clear everything below the current frame so stale rows from a taller
+		// previous frame don't linger.
+		fmt.Fprint(w, "\033[J")
+		prevLines = fixedLines(searching) + maxViewport(len(filtered), th, searching)
 	}
 
-	drawHeader()
-	render()
+	redraw() // initial draw
 
 	buf := make([]byte, 8)
 	for {
@@ -181,10 +194,7 @@ func selectOne(label string, items []menuItem) (int, error) {
 				}
 				sel = 0
 				scroll = 0
-				// redraw: move up and redraw everything
-				fmt.Fprintf(w, "\033[%dA", totalLines())
-				drawHeader()
-				render()
+				redraw()
 			case k[0] == '\r' || k[0] == '\n':
 				if len(filtered) > 0 {
 					fmt.Fprint(w, "\r\n")
@@ -197,9 +207,7 @@ func selectOne(label string, items []menuItem) (int, error) {
 					filterIdx = filterIndices(items, searchQuery)
 					sel = 0
 					scroll = 0
-					fmt.Fprintf(w, "\033[%dA", totalLines())
-					drawHeader()
-					render()
+					redraw()
 				}
 			case k[0] == 3: // Ctrl-C
 				fmt.Fprint(w, "\r\n")
@@ -210,9 +218,7 @@ func selectOne(label string, items []menuItem) (int, error) {
 				filterIdx = filterIndices(items, searchQuery)
 				sel = 0
 				scroll = 0
-				fmt.Fprintf(w, "\033[%dA", totalLines())
-				drawHeader()
-				render()
+				redraw()
 			default:
 				continue
 			}
@@ -229,9 +235,7 @@ func selectOne(label string, items []menuItem) (int, error) {
 		case k[0] == '/': // enter search mode
 			searching = true
 			searchQuery = ""
-			fmt.Fprintf(w, "\033[%dA", totalLines())
-			drawHeader()
-			render()
+			redraw()
 		case len(k) >= 3 && k[0] == 27 && k[1] == '[' && k[2] == 'A': // up
 			if sel > 0 {
 				sel--
@@ -251,9 +255,7 @@ func selectOne(label string, items []menuItem) (int, error) {
 		default:
 			continue // ignore other keys, no redraw
 		}
-		fmt.Fprintf(w, "\033[%dA", totalLines())
-		drawHeader()
-		render()
+		redraw()
 	}
 }
 
@@ -285,13 +287,11 @@ func selectMany(label string, items []menuItem) ([]int, error) {
 	cur := 0
 	checked := make([]bool, len(items))
 	scroll := 0
+	prevLines := 0
 
 	render := func() {
 		n := len(filtered)
-		if n == 0 {
-			return
-		}
-		vp := maxViewport(n, th)
+		vp := maxViewport(n, th, searching)
 		if cur < scroll {
 			scroll = cur
 		}
@@ -302,7 +302,7 @@ func selectMany(label string, items []menuItem) ([]int, error) {
 			scroll = 0
 		}
 
-		if scroll > 0 {
+		if n > 0 && scroll > 0 {
 			fmt.Fprintf(w, "\r\033[K%s\n", dim(fmt.Sprintf(i18n.M.SelectMoreAboveFmt, scroll)))
 		} else {
 			fmt.Fprintf(w, "\r\033[K\r\n")
@@ -326,21 +326,15 @@ func selectMany(label string, items []menuItem) ([]int, error) {
 				fmt.Fprintf(w, "\r\033[K   %s %s %s\r\n", box, name, dim(it.desc))
 			}
 		}
+		for i := end - scroll; i < vp; i++ {
+			fmt.Fprintf(w, "\r\033[K\r\n")
+		}
 
-		if end < n {
+		if n > 0 && end < n {
 			fmt.Fprintf(w, "\r\033[K%s\n", dim(fmt.Sprintf(i18n.M.SelectMoreBelowFmt, n-end)))
 		} else {
 			fmt.Fprintf(w, "\r\033[K\r\n")
 		}
-	}
-
-	totalLines := func() int {
-		vp := maxViewport(len(filtered), th)
-		lines := 2 + vp + 2
-		if searching {
-			lines++
-		}
-		return lines
 	}
 
 	drawHeader := func() {
@@ -352,8 +346,17 @@ func selectMany(label string, items []menuItem) ([]int, error) {
 		}
 	}
 
-	drawHeader()
-	render()
+	redraw := func() {
+		if prevLines > 0 {
+			fmt.Fprintf(w, "\033[%dA", prevLines)
+		}
+		drawHeader()
+		render()
+		fmt.Fprint(w, "\033[J")
+		prevLines = fixedLines(searching) + maxViewport(len(filtered), th, searching)
+	}
+
+	redraw()
 
 	buf := make([]byte, 8)
 	for {
@@ -375,9 +378,7 @@ func selectMany(label string, items []menuItem) ([]int, error) {
 				}
 				cur = 0
 				scroll = 0
-				fmt.Fprintf(w, "\033[%dA", totalLines())
-				drawHeader()
-				render()
+				redraw()
 			case k[0] == '\r' || k[0] == '\n':
 				var out []int
 				for i, c := range checked {
@@ -402,9 +403,7 @@ func selectMany(label string, items []menuItem) ([]int, error) {
 					filterIdx = filterIndices(items, searchQuery)
 					cur = 0
 					scroll = 0
-					fmt.Fprintf(w, "\033[%dA", totalLines())
-					drawHeader()
-					render()
+					redraw()
 				}
 			case k[0] == 3: // Ctrl-C
 				fmt.Fprint(w, "\r\n")
@@ -415,9 +414,7 @@ func selectMany(label string, items []menuItem) ([]int, error) {
 				filterIdx = filterIndices(items, searchQuery)
 				cur = 0
 				scroll = 0
-				fmt.Fprintf(w, "\033[%dA", totalLines())
-				drawHeader()
-				render()
+				redraw()
 			case len(k) >= 3 && k[0] == 27 && k[1] == '[' && k[2] == 'A':
 				if cur > 0 {
 					cur--
@@ -437,9 +434,7 @@ func selectMany(label string, items []menuItem) ([]int, error) {
 			default:
 				continue
 			}
-			fmt.Fprintf(w, "\033[%dA", totalLines())
-			drawHeader()
-			render()
+			redraw()
 			continue
 		}
 
@@ -462,9 +457,7 @@ func selectMany(label string, items []menuItem) ([]int, error) {
 		case k[0] == '/': // enter search mode
 			searching = true
 			searchQuery = ""
-			fmt.Fprintf(w, "\033[%dA", totalLines())
-			drawHeader()
-			render()
+			redraw()
 		case k[0] == ' ':
 			if len(filtered) > 0 {
 				origIdx := filterIdx[cur]
@@ -489,9 +482,7 @@ func selectMany(label string, items []menuItem) ([]int, error) {
 		default:
 			continue
 		}
-		fmt.Fprintf(w, "\033[%dA", totalLines())
-		drawHeader()
-		render()
+		redraw()
 	}
 }
 
@@ -512,4 +503,10 @@ func filterIndices(items []menuItem, query string) []int {
 		}
 	}
 	return out
+}
+
+// FrameLines is exported for testing. It returns the total number of terminal
+// lines that selectOne/selectMany will print for the given state.
+func FrameLines(filteredLen, termRows int, searching bool) int {
+	return fixedLines(searching) + maxViewport(filteredLen, termRows, searching)
 }

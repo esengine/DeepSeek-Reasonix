@@ -316,8 +316,6 @@ var Chinese = Messages{
 
 	CmdProvider:          "切换供应商",
 	ProviderListHeader:   "供应商（/provider <名称> 切换）",
-	ProviderSwitchingFmt: "正在切换到供应商 %s…",
-	ProviderSwitchedFmt:  "已切换到供应商 %s",
 	ProviderAlreadyOnFmt: "已经在使用供应商 %s",
 	ProviderUnknownFmt:   "未知供应商 %q",
 	ProviderPickLabel:    "选择 %s 的一个模型",

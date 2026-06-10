@@ -356,8 +356,6 @@ type Messages struct {
 	// /provider command
 	CmdProvider          string // /provider
 	ProviderListHeader   string // header for /provider list
-	ProviderSwitchingFmt string // switching to provider
-	ProviderSwitchedFmt  string // switched to provider
 	ProviderAlreadyOnFmt string // already on provider
 	ProviderUnknownFmt   string // unknown provider
 	ProviderPickLabel    string // label for provider model picker

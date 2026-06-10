@@ -315,8 +315,6 @@ var English = Messages{
 
 	CmdProvider:          "switch provider",
 	ProviderListHeader:   "providers (/provider <name> to switch)",
-	ProviderSwitchingFmt: "switching to provider %s…",
-	ProviderSwitchedFmt:  "switched to provider %s",
 	ProviderAlreadyOnFmt: "already using provider %s",
 	ProviderUnknownFmt:   "unknown provider %q",
 	ProviderPickLabel:    "Select a model from %s",
