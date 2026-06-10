@@ -554,7 +554,7 @@ function normalizeCloseBehavior(mode: string | undefined): CloseBehavior {
 type DisplayMode = "standard" | "compact" | "minimal";
 
 function normalizeDisplayMode(mode: string | undefined): DisplayMode {
-  return mode === "compact" || mode === "minimal" ? mode : "standard";
+  return mode === "standard" || mode === "compact" || mode === "minimal" ? mode : "minimal";
 }
 
 function closeBehaviorLabel(mode: CloseBehavior, t: ReturnType<typeof useT>): string {

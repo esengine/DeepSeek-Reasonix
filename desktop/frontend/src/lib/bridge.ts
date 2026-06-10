@@ -676,7 +676,7 @@ function makeMockApp(): AppBindings {
     desktopTheme: "light",
     desktopThemeStyle: "graphite",
     closeBehavior: "background",
-    displayMode: "standard",
+    displayMode: "minimal",
     configPath: "~/projects/reasonix/reasonix.toml",
     providerKinds: ["openai"],
     autoApproveTools: false,

@@ -181,12 +181,12 @@ func (c *Config) SetDesktopCloseBehavior(mode string) error {
 // SetDesktopDisplayMode sets the transcript display mode. UI-only.
 func (c *Config) SetDesktopDisplayMode(mode string) error {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
-	case "", "standard":
-		c.Desktop.DisplayMode = "standard"
 	case "compact":
 		c.Desktop.DisplayMode = "compact"
 	case "minimal":
 		c.Desktop.DisplayMode = "minimal"
+	case "", "standard":
+		c.Desktop.DisplayMode = "standard"
 	default:
 		return fmt.Errorf("display mode %q: must be standard|compact|minimal", mode)
 	}

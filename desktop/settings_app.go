@@ -324,7 +324,7 @@ func (a *App) Settings() SettingsView {
 			DesktopTheme:      "light",
 			DesktopThemeStyle: "graphite",
 			CloseBehavior:     "background",
-			DisplayMode:       "standard",
+			DisplayMode:       "minimal",
 		}
 	}
 	ctrl := a.activeCtrl()
