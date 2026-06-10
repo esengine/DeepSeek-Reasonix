@@ -93,7 +93,8 @@ export function GeoStatusProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     void (async () => {
       try {
-        const result = await (app as Record<string, unknown>).ProbeGeoEnv?.() as string | undefined;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const result = await (app as any).ProbeGeoEnv?.() as string | undefined;
         if (cancelled || !result) return;
         const parsed = parseEnvStatus(result);
         if (parsed && !cancelled) {

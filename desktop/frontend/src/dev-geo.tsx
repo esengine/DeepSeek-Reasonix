@@ -4,7 +4,6 @@
  */
 import { createRoot } from "react-dom/client";
 import { GeoMapViewer } from "./components/geo/GeoMapViewer";
-import { GeoTable } from "./components/geo/GeoTable";
 import "ol/ol.css";
 
 // The MCP server writess geo_output.json to TEMP after each probe.
