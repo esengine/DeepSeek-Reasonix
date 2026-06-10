@@ -352,7 +352,7 @@ func backgroundRestoreShouldMaximise(goos string, wasMaximised bool) bool {
 // restoreOrBuildTabs restores the tabs from the last session, or creates a
 // default Global tab on first launch.
 func (a *App) restoreOrBuildTabs() {
-// Load i18n from the first available config.
+	// Load i18n from the first available config.
 	// Prefer DesktopLanguage (desktop UI setting) over Language (CLI setting),
 	// so the user's language choice in desktop settings takes effect.
 	if cfg, err := config.Load(); err == nil {
