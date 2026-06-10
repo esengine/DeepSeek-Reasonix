@@ -1,4 +1,4 @@
-# Reasonix configuration.
+# RS-Reasonix configuration.
 # Resolution order: flag > ./reasonix.toml > ~/.config/reasonix/config.toml > built-in defaults.
 # Secrets come from the environment via api_key_env; never put keys here.
 
@@ -17,7 +17,7 @@ ask_request = true   # notify when a question is waiting
 
 [agent]
 system_prompt = """
-You are Reasonix, a coding agent focused on executing code tasks.
+You are RS-Reasonix, a remote-sensing AI coding agent focused on executing code tasks.
 Use the provided tools to read and write files and run shell commands.
 Principles: understand the request before acting; verify with tools instead of
 guessing; keep changes minimal and correct; briefly summarize what you did."""

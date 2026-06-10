@@ -56,7 +56,7 @@ func main() {
 	}
 
 	err := wails.Run(&options.App{
-		Title:     "Reasonix",
+		Title:     "RS-Reasonix",
 		Width:     width,
 		Height:    height,
 		MinWidth:  760,
@@ -99,7 +99,7 @@ func main() {
 			Theme: windows.SystemDefault,
 		},
 		Linux: &linux.Options{
-			ProgramName: "Reasonix",
+			ProgramName: "RS-Reasonix",
 			// WebKitGTK GPU compositing is inconsistent across distros/drivers and
 			// is the one real cross-platform rough edge for a Go+webview stack:
 			// "always" can yield blank or flickering webviews on some setups, so
