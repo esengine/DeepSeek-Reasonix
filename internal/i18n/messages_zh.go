@@ -49,7 +49,7 @@ var Chinese = Messages{
 	ChatStatusCycleHint:         "shift+tab 切换计划",
 	ChatStatusCacheNowFmt:       "本次命中 %s",
 	ChatStatusCacheAvgFmt:       "平均 %s",
-	ChatStatusPlanApproval:      "Enter/y 批准并执行 · n/Esc 继续规划 · PgUp/PgDn 滚动",
+	ChatStatusPlanApproval:      "Enter/y 批准并执行 · n/Esc 继续规划 · PgUp/PgDn/Ctrl+Home/End 滚动",
 	PlanApprovalPrompt:          "计划已生成（见上方）— Enter/y 批准执行,n/Esc 继续规划",
 	ChatStatusToolApproval:      "1 本次允许 · 2 本会话允许此范围 · 提供时 3/4 为前缀或保存 · n/Esc 拒绝 · Ctrl-C 取消本轮",
 	AskTypeSomething:            "自己输入",

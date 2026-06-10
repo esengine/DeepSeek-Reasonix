@@ -806,6 +806,12 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "pgdown":
 			m.viewport.PageDown()
 			return m, finalize(m, cmds)
+		case "ctrl+home":
+			m.viewport.GotoTop()
+			return m, finalize(m, cmds)
+		case "ctrl+end":
+			m.viewport.GotoBottom()
+			return m, finalize(m, cmds)
 		case "ctrl+z":
 			return m, tea.Suspend
 		}

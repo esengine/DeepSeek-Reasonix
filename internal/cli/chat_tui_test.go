@@ -582,6 +582,37 @@ func TestInsertNewlineKeyBinding(t *testing.T) {
 	}
 }
 
+func TestCtrlHomeEndScrollKeyBindings(t *testing.T) {
+	ctrl := control.New(control.Options{})
+	ch := make(chan event.Event, 1)
+	notice := agentEventMsg(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "line"})
+	adv := func(m chatTUI, msg tea.Msg) chatTUI {
+		n, _ := m.Update(msg)
+		return n.(chatTUI)
+	}
+
+	cur := adv(newChatTUI(ctrl, "", ch, 80), tea.WindowSizeMsg{Width: 80, Height: 8})
+	for i := 0; i < 12; i++ {
+		cur = adv(cur, notice)
+	}
+	// Viewport should be at the bottom after output.
+	if !cur.viewport.AtBottom() {
+		t.Fatal("viewport should start at the bottom after streaming output")
+	}
+
+	// Ctrl+Home should scroll to the top.
+	cur = adv(cur, tea.KeyPressMsg{Code: tea.KeyHome, Mod: tea.ModCtrl})
+	if !cur.viewport.AtTop() {
+		t.Fatalf("ctrl+home should scroll to top, AtTop=%v, YOffset=%d", cur.viewport.AtTop(), cur.viewport.YOffset())
+	}
+
+	// Ctrl+End should scroll back to the bottom.
+	cur = adv(cur, tea.KeyPressMsg{Code: tea.KeyEnd, Mod: tea.ModCtrl})
+	if !cur.viewport.AtBottom() {
+		t.Fatalf("ctrl+end should scroll to bottom, AtBottom=%v, YOffset=%d", cur.viewport.AtBottom(), cur.viewport.YOffset())
+	}
+}
+
 func TestEchoLocalCommandAddsTranscriptMarker(t *testing.T) {
 	m := newTestChatTUI()
 	m.echoLocalCommand("  /tree  ")

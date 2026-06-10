@@ -48,7 +48,7 @@ var English = Messages{
 	ChatStatusCycleHint:         "shift+tab toggles plan",
 	ChatStatusCacheNowFmt:       "turn hit %s",
 	ChatStatusCacheAvgFmt:       "avg %s",
-	ChatStatusPlanApproval:      "Enter/y approves & executes · n/Esc keeps planning · PgUp/PgDn scrolls",
+	ChatStatusPlanApproval:      "Enter/y approves & executes · n/Esc keeps planning · PgUp/PgDn/Ctrl+Home/End scrolls",
 	PlanApprovalPrompt:          "Plan ready above — Enter/y to approve & execute, n/Esc to keep planning",
 	ChatStatusToolApproval:      "1 approve once · 2 allow scope this session · 3/4 prefix or save when offered · n/Esc deny · Ctrl-C cancels turn",
 	AskTypeSomething:            "Type something else",
