@@ -21,6 +21,12 @@ const TEXT_COMMANDS = new Set([
 ]);
 
 export function latexNormalizeForKatex(source: string): string {
+  // Convert \slashed{X} → \not{X}. KaTeX doesn't support \slashed, but
+  // \not provides a similar visual effect (slash through the character).
+  // This is commonly used in physics for Feynman slash notation (\slashed{p}).
+  // The regex handles one level of nested braces.
+  source = source.replace(/\\slashed\s*\{((?:[^{}]|\{[^{}]*\})*)\}/g, "\\not{$1}");
+
   let out = "";
   let i = 0;
 
