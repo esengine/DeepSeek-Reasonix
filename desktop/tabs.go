@@ -577,8 +577,6 @@ func (a *App) EnsureBlankTab(scope, workspaceRoot string) (TabMeta, error) {
 		scope = "global"
 	}
 
-	// Initialize the path states related to the scope
-	// so that the subsequent reuse logic can uniformly handle both scopes
 	globalRoot := ""
 	if scope == "project" {
 		workspaceRoot = strings.TrimSpace(workspaceRoot)
@@ -600,18 +598,17 @@ func (a *App) EnsureBlankTab(scope, workspaceRoot string) (TabMeta, error) {
 
 	var created *WorkspaceTab
 	a.mu.Lock()
-	for _, id := range a.orderedTabIDsLocked() { // Scan the opened tabs
+	for _, id := range a.orderedTabIDsLocked() {
 		tab := a.tabs[id]
 		if a.blankTabMatchesTargetLocked(tab, scope, workspaceRoot) {
 			a.activeTabID = tab.ID
 			meta := a.tabMeta(tab, true)
 			a.saveTabsLocked()
 			a.mu.Unlock()
-			return meta, nil // Return reusable tab
+			return meta, nil
 		}
 	}
 
-	// Search for tabs in topicTitles and projects.json
 	if topicID := a.indexedBlankTopicIDLocked(scope, workspaceRoot); topicID != "" {
 		a.mu.Unlock()
 		if scope == "global" {
@@ -620,7 +617,6 @@ func (a *App) EnsureBlankTab(scope, workspaceRoot string) (TabMeta, error) {
 		return a.OpenProjectTab(workspaceRoot, topicID)
 	}
 
-	/* Create New Topic */
 	topicID := newTopicID()
 	topicTitle := defaultTopicTitle
 	if err := setTopicTitleWithSource(workspaceRoot, topicID, topicTitle, topicTitleSourceAuto); err != nil {
@@ -672,7 +668,6 @@ func (a *App) EnsureBlankTab(scope, workspaceRoot string) (TabMeta, error) {
 // blankTabMatchesTargetLocked returns true if tab is a reusable blank tab
 // matching the given scope/project root — no running controller, no real history.
 func (a *App) blankTabMatchesTargetLocked(tab *WorkspaceTab, scope, workspaceRoot string) bool {
-
 	if tab == nil || tab.Scope != scope {
 		return false
 	}
@@ -691,7 +686,6 @@ func (a *App) blankTabMatchesTargetLocked(tab *WorkspaceTab, scope, workspaceRoo
 // indexedBlankTopicIDLocked finds a blank topic ID that is indexed on disk
 // but not open in any tab — for reusing without creating a new topic.
 func (a *App) indexedBlankTopicIDLocked(scope, workspaceRoot string) string {
-
 	titleRoot := topicTitleRoot(scope, workspaceRoot)
 	titles := loadTopicTitles(titleRoot)
 	f := loadProjectsFile()
