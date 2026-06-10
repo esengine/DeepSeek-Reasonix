@@ -82,6 +82,7 @@ type DesktopConfig struct {
 	CheckUpdates   *bool    `toml:"check_updates"`   // startup update checks; nil keeps the default enabled
 	Telemetry      *bool    `toml:"telemetry"`       // anonymous launch ping (install id + version + OS); nil keeps the default enabled
 	Metrics        *bool    `toml:"metrics"`         // opt-in aggregate agent metrics (anonymous signal/bucket counts; no content); nil = disabled
+	ShowToolCalls  *bool    `toml:"show_tool_calls"` // nil/true renders tool calls; false hides them. UI-only.
 	ProviderAccess []string `toml:"provider_access"` // desktop-only list of provider entries shown in Settings > Model > Access
 	ExpandThinking bool     `toml:"expand_thinking"` // true = show reasoning text expanded by default; false = collapsed
 }
@@ -232,6 +233,16 @@ func (c *Config) DesktopMetrics() bool {
 		return false
 	}
 	return *c.Desktop.Metrics
+}
+
+// DesktopShowToolCalls reports whether the desktop transcript should render
+// ToolCard blocks. Defaults to true; an explicit false hides them. UI-only —
+// does not affect agent execution, tool invocation, or persisted messages.
+func (c *Config) DesktopShowToolCalls() bool {
+	if c.Desktop.ShowToolCalls == nil {
+		return true
+	}
+	return *c.Desktop.ShowToolCalls
 }
 
 // LSPConfig governs the optional Language Server Protocol tools (lsp_definition,

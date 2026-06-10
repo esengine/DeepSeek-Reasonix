@@ -152,6 +152,7 @@ type SettingsView struct {
 	Telemetry         bool            `json:"telemetry"`
 	Metrics           bool            `json:"metrics"`
 	ExpandThinking    bool            `json:"expandThinking"`
+	ShowToolCalls     bool            `json:"showToolCalls"`
 	ConfigPath        string          `json:"configPath"`
 	// ProviderKinds lists the provider implementations the kernel actually
 	// registered (provider.Kinds()), so the editor's "kind" picker offers only
@@ -333,6 +334,7 @@ func (a *App) Settings() SettingsView {
 			Telemetry:         true,
 			Metrics:           false,
 			ExpandThinking:    false,
+			ShowToolCalls:     true,
 		}
 	}
 	ctrl := a.activeCtrl()
@@ -381,6 +383,7 @@ func (a *App) Settings() SettingsView {
 		Telemetry:         cfg.DesktopTelemetry(),
 		Metrics:           cfg.DesktopMetrics(),
 		ExpandThinking:    cfg.Desktop.ExpandThinking,
+		ShowToolCalls:     cfg.DesktopShowToolCalls(),
 		ConfigPath:        cfgPath,
 		ProviderKinds:     nonNil(provider.Kinds()),
 		AutoApproveTools:  ctrl != nil && ctrl.AutoApproveTools(),
@@ -1281,6 +1284,13 @@ func (a *App) SetCloseBehavior(mode string) error {
 // SetDisplayMode updates the transcript display mode. UI-only, no rebuild needed.
 func (a *App) SetDisplayMode(mode string) error {
 	return a.applyConfigOnly(func(c *config.Config) error { return c.SetDesktopDisplayMode(mode) })
+}
+
+// SetShowToolCalls toggles whether the desktop transcript renders ToolCard
+// blocks. It is a UI-only preference and does not affect agent execution,
+// tool invocation, message history, or provider-visible request data.
+func (a *App) SetShowToolCalls(show bool) error {
+	return a.applyConfigOnly(func(c *config.Config) error { return c.SetDesktopShowToolCalls(show) })
 }
 
 // SetDesktopLanguage updates only the desktop UI language. It deliberately does

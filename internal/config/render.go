@@ -93,6 +93,11 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		fmt.Fprintf(&b, "check_updates = %v   # desktop: check for new versions on startup\n", c.DesktopCheckUpdates())
 		fmt.Fprintf(&b, "telemetry = %v   # desktop: anonymous launch ping (install id + version + OS); never content\n", c.DesktopTelemetry())
 		fmt.Fprintf(&b, "metrics = %v   # desktop: opt-in aggregate agent metrics (anonymous signal/bucket counts); never content\n", c.DesktopMetrics())
+		if c.Desktop.ShowToolCalls != nil {
+			fmt.Fprintf(&b, "show_tool_calls = %v   # desktop: render ToolCard blocks in the transcript; off hides them (UI only)\n", *c.Desktop.ShowToolCalls)
+		} else {
+			b.WriteString("# show_tool_calls = true   # desktop: render ToolCard blocks in the transcript; off hides them (UI only)\n")
+		}
 		if len(c.Desktop.ProviderAccess) > 0 {
 			fmt.Fprintf(&b, "provider_access = %s   # desktop settings: providers shown on Settings > Model > Access\n", renderStringArray(c.Desktop.ProviderAccess))
 		}

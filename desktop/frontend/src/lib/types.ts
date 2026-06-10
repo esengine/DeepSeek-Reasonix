@@ -753,6 +753,7 @@ export interface SettingsView {
   telemetry: boolean; // anonymous launch ping (install id + version + OS)
   metrics: boolean; // opt-in aggregate agent metrics (anonymous signal/bucket counts)
   expandThinking: boolean; // show reasoning text expanded by default
+  showToolCalls: boolean; // whether the transcript renders ToolCard blocks
   configPath: string;
   providerKinds: string[]; // provider implementations the kernel registered (for the kind picker)
   autoApproveTools: boolean;

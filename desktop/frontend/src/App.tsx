@@ -872,6 +872,10 @@ export default function App() {
       hydrateDisplayMode(settings.displayMode);
       setSidebarImConnections(sidebarImConnectionsFromBot(settings.bot, t));
       setImTopicSources(sidebarImTopicSourcesFromBot(settings.bot, t));
+      if (!showToolCallsLoaded.current) {
+        showToolCallsLoaded.current = true;
+        setShowToolCalls(settings.showToolCalls !== false);
+      }
     };
     void syncDesktopPreferences().catch((e) => {
       console.warn("desktop preferences sync failed", e);
@@ -914,6 +918,8 @@ export default function App() {
   const [pendingPlanRevision, setPendingPlanRevision] = useState<string | null>(null);
   const [footerHeight, setFooterHeight] = useState(0);
   const footerHeightRef = useRef(0);
+  const [showToolCalls, setShowToolCalls] = useState<boolean>(true);
+  const showToolCallsLoaded = useRef(false);
   const footerRef = useRef<HTMLElement>(null);
   const runningRef = useRef(state.running);
   const rightDockDetailActive = rightDockMode !== "context" && workspacePreviewActive;
@@ -2557,6 +2563,7 @@ export default function App() {
                 actionPending={state.messageAction != null}
                 rewindDisabled={state.running || state.messageAction != null || state.approval != null || state.ask != null || clearContextPending}
                 defaultExpandThinking={expandThinking}
+                showToolCalls={showToolCalls}
               />
             )}
           </main>
@@ -2779,6 +2786,7 @@ export default function App() {
               .then(applyDesktopPreferences)
               .catch((e) => console.warn("desktop preferences refresh failed", e));
           }}
+          onShowToolCallsChange={setShowToolCalls}
         />
       )}
 

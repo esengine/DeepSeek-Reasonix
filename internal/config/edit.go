@@ -248,6 +248,15 @@ func (c *Config) SetShowReasoning(on bool) error {
 	return nil
 }
 
+// SetDesktopShowToolCalls toggles the UI-only desktop transcript tool-call
+// visibility. It is intentionally a desktop render concern and must not
+// affect agent execution, tool invocation, or persisted messages.
+func (c *Config) SetDesktopShowToolCalls(show bool) error {
+	v := show
+	c.Desktop.ShowToolCalls = &v
+	return nil
+}
+
 // SetProviderThinking updates a provider's provider-specific thinking mode knob.
 func (c *Config) SetProviderThinking(name, thinking string) error {
 	for i := range c.Providers {

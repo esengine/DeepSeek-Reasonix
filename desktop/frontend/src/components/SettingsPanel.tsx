@@ -33,7 +33,7 @@ const SETTINGS_TABS: SettingsTab[] = ["general", "models", "bots", "mcp", "skill
 // SettingsPanel is the desktop settings centre — a centred modal with left
 // navigation and a right content area. It hosts all settings pages plus MCP,
 // Skills, and Memory management, replacing the old per-feature drawers.
-export function SettingsPanel({ onClose, onChanged, initialTab, isDevBuild }: { onClose: () => void; onChanged: () => void; initialTab?: SettingsTab; isDevBuild?: boolean }) {
+export function SettingsPanel({ onClose, onChanged, initialTab, isDevBuild, onShowToolCallsChange }: { onClose: () => void; onChanged: () => void; initialTab?: SettingsTab; isDevBuild?: boolean; onShowToolCallsChange?: (show: boolean) => void }) {
   const t = useT();
   const [s, setS] = useState<SettingsView | null>(null);
   const [busy, setBusy] = useState(false);
@@ -58,6 +58,18 @@ export function SettingsPanel({ onClose, onChanged, initialTab, isDevBuild }: { 
     setThemeState(nextTheme);
     setThemeStyleState(nextStyle);
   }, [s?.desktopTheme, s?.desktopThemeStyle]);
+
+  // Push the persisted showToolCalls flag into App-level state once on load, so
+  // the transcript honours the persisted preference even if the user never opens
+  // Settings. We do not subscribe to s?.showToolCalls here — that would feed our
+  // own optimistic updates back into App and cause stale-button flicker.
+  const syncedShowToolCalls = useRef(false);
+  useEffect(() => {
+    if (s && !syncedShowToolCalls.current) {
+      syncedShowToolCalls.current = true;
+      onShowToolCallsChange?.(s.showToolCalls !== false);
+    }
+  }, [s, onShowToolCallsChange]);
 
   // apply runs a mutation, re-reads settings, and refreshes the topbar/model.
   const apply = async (fn: () => Promise<void>) => {
@@ -125,7 +137,7 @@ export function SettingsPanel({ onClose, onChanged, initialTab, isDevBuild }: { 
               <div className="empty">{t("settings.loading")}</div>
             ) : (
               <>
-                {tab === "general" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><GeneralSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
+                {tab === "general" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><GeneralSection s={s} busy={busy} apply={apply} onShowToolCallsChange={onShowToolCallsChange} onOptimisticShowToolCalls={(next) => setS((prev) => (prev ? { ...prev, showToolCalls: next } : prev))} /></SettingsPageShell>}
                 {tab === "models" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><ModelsSection s={s} busy={busy} apply={apply} backgroundApply={backgroundApply} /></SettingsPageShell>}
                 {tab === "bots" && isDevBuild && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><BotsSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
                 {tab === "mcp" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><MCPServersSettingsPage /></SettingsPageShell>}
@@ -636,7 +648,7 @@ function reasoningProtocolLabel(protocol: string, t: ReturnType<typeof useT>): s
   }
 }
 
-function GeneralSection({ s, busy, apply }: SectionProps) {
+function GeneralSection({ s, busy, apply, onShowToolCallsChange, onOptimisticShowToolCalls }: SectionProps & { onShowToolCallsChange?: (show: boolean) => void; onOptimisticShowToolCalls?: (show: boolean) => void }) {
   const { t, setPref } = useI18n();
   const closeBehavior = normalizeCloseBehavior(s.closeBehavior);
   const [displayMode, setDisplayMode] = useState<DisplayMode>(() => normalizeDisplayMode(getDisplayMode()));
@@ -646,6 +658,13 @@ function GeneralSection({ s, busy, apply }: SectionProps) {
   const setLanguage = (next: LangPref) => {
     setPref(next);
     void apply(() => app.SetDesktopLanguage(next));
+  };
+  const showToolCalls = s.showToolCalls !== false;
+  const setShowToolCalls = (next: boolean) => {
+    if (next === showToolCalls) return;
+    onOptimisticShowToolCalls?.(next);
+    onShowToolCallsChange?.(next);
+    void apply(() => app.SetShowToolCalls(next));
   };
   return (
     <SettingsSection title={t("settings.tab.general")}>
@@ -720,6 +739,24 @@ function GeneralSection({ s, busy, apply }: SectionProps) {
               {t(`settings.autoPlan.${mode}`)}
             </button>
           ))}
+        </div>
+      </SettingsField>
+      <SettingsField label={t("settings.showToolCalls")} hint={t("settings.showToolCallsHint")}>
+        <div className="set-seg">
+          <button
+            className={`set-seg__btn${showToolCalls ? " set-seg__btn--on" : ""}`}
+            disabled={busy}
+            onClick={() => setShowToolCalls(true)}
+          >
+            {t("common.on")}
+          </button>
+          <button
+            className={`set-seg__btn${!showToolCalls ? " set-seg__btn--on" : ""}`}
+            disabled={busy}
+            onClick={() => setShowToolCalls(false)}
+          >
+            {t("common.off")}
+          </button>
         </div>
       </SettingsField>
     </SettingsSection>

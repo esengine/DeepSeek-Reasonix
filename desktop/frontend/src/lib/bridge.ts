@@ -92,6 +92,7 @@ export interface AppBindings {
   SubmitToTab(tabID: string, input: string): Promise<void>;
   SubmitDisplay(display: string, input: string): Promise<void>;
   SubmitDisplayToTab(tabID: string, display: string, input: string): Promise<void>;
+  SubmitDisplayToTabWithRefs(tabID: string, display: string, input: string, refs: string): Promise<void>;
   RunShell(command: string): Promise<void>;
   RunShellForTab(tabID: string, command: string): Promise<void>;
   Steer(text: string): Promise<void>;
@@ -224,6 +225,7 @@ export interface AppBindings {
   TestBotConnection(id: string, target?: string): Promise<BotConnectionDiagnostic>;
   SetCloseBehavior(mode: string): Promise<void>;
   SetDisplayMode(mode: string): Promise<void>;
+  SetShowToolCalls(show: boolean): Promise<void>;
   SetDesktopLanguage(lang: string): Promise<void>;
   SetDesktopAppearance(theme: string, style: string): Promise<void>;
   SetDesktopCheckUpdates(enabled: boolean): Promise<void>;
@@ -785,6 +787,7 @@ function makeMockApp(): AppBindings {
     telemetry: true,
     metrics: false,
     expandThinking: false,
+    showToolCalls: true,
     configPath: "~/projects/reasonix/reasonix.toml",
     providerKinds: ["openai"],
     autoApproveTools: false,
@@ -1373,6 +1376,9 @@ function makeMockApp(): AppBindings {
           await this.Submit(input);
         },
         async SubmitDisplayToTab(_tabID, display, input) {
+          await withMockTabScope(_tabID, () => this.SubmitDisplay(display, input));
+        },
+        async SubmitDisplayToTabWithRefs(_tabID, display, input, _refs) {
           await withMockTabScope(_tabID, () => this.SubmitDisplay(display, input));
         },
         async RunShell(command) {
@@ -2248,6 +2254,9 @@ function makeMockApp(): AppBindings {
         },
         async SetDisplayMode(mode: string) {
           settings.displayMode = mode;
+        },
+        async SetShowToolCalls(show: boolean) {
+          settings.showToolCalls = Boolean(show);
         },
         async SetDesktopLanguage(lang: string) {
           settings.desktopLanguage = lang === "en" || lang === "zh" ? lang : "";

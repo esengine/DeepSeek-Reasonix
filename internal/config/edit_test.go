@@ -816,6 +816,57 @@ func TestEffortCapabilityCustomSupportedEfforts(t *testing.T) {
 	}
 }
 
+// TestDesktopShowToolCallsRoundTrip locks in the round-trip for the desktop-only
+// show_tool_calls preference. A nil pointer must default to true; explicit
+// true and false must survive save → re-read.
+func TestDesktopShowToolCallsRoundTrip(t *testing.T) {
+	t.Run("nil defaults to true", func(t *testing.T) {
+		c := Default()
+		c.Desktop.ShowToolCalls = nil
+		if got := c.DesktopShowToolCalls(); got != true {
+			t.Fatalf("nil Desktop.ShowToolCalls should default to true, got %v", got)
+		}
+	})
+	t.Run("explicit false round-trips", func(t *testing.T) {
+		t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+		path := UserConfigPath()
+		c := Default()
+		if err := c.SetDesktopShowToolCalls(false); err != nil {
+			t.Fatalf("SetDesktopShowToolCalls(false): %v", err)
+		}
+		if err := c.SaveTo(path); err != nil {
+			t.Fatalf("SaveTo: %v", err)
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("ReadFile: %v", err)
+		}
+		if !strings.Contains(string(body), "show_tool_calls = false") {
+			t.Fatalf("expected `show_tool_calls = false` in saved toml, got:\n%s", string(body))
+		}
+		// Re-read from disk and assert the boolean survives.
+		reloaded := LoadForEdit(path)
+		if got := reloaded.DesktopShowToolCalls(); got != false {
+			t.Fatalf("reloaded show_tool_calls = %v, want false", got)
+		}
+	})
+	t.Run("explicit true round-trips", func(t *testing.T) {
+		t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+		path := UserConfigPath()
+		c := Default()
+		if err := c.SetDesktopShowToolCalls(true); err != nil {
+			t.Fatalf("SetDesktopShowToolCalls(true): %v", err)
+		}
+		if err := c.SaveTo(path); err != nil {
+			t.Fatalf("SaveTo: %v", err)
+		}
+		reloaded := LoadForEdit(path)
+		if got := reloaded.DesktopShowToolCalls(); got != true {
+			t.Fatalf("reloaded show_tool_calls = %v, want true", got)
+		}
+	})
+}
+
 func TestEffortCapabilityUsesKnownModelRegistry(t *testing.T) {
 	e := &ProviderEntry{
 		Name:    "deepseek-proxy",
