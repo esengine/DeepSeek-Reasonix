@@ -2,7 +2,7 @@ import { memo, useState } from "react";
 import { ChevronDown, FileText, Folder, GitBranch, Image, RotateCcw, ScrollText } from "lucide-react";
 import { Markdown } from "./Markdown";
 import { CopyButton } from "./CopyButton";
-import { ProcessBrainIcon, ProcessCard, ProcessStatusIcon } from "./ProcessCard";
+import { ProcessBrainIcon } from "./ProcessCard";
 import { parseAttachmentRefsForDisplay } from "../lib/attachmentDisplay";
 import { useT } from "../lib/i18n";
 import type { Item, MessageActionScope } from "../lib/useController";
@@ -242,27 +242,29 @@ export const AssistantMessage = memo(function AssistantMessage({
   item: AssistantItem;
 }) {
   const t = useT();
+  const [reasoningOpen, setReasoningOpen] = useState(item.streaming);
   const hasText = item.streaming || item.text.trim() !== "";
   const processOnly = Boolean(item.reasoning) && !hasText;
   const processWithText = Boolean(item.reasoning) && hasText;
   return (
     <div className={`msg msg--assistant${processOnly ? " msg--process-only" : ""}${processWithText ? " msg--process-with-text" : ""}`}>
       {item.reasoning && (
-        <ProcessCard
-          tone="violet"
-          icon={<ProcessBrainIcon size={12} />}
-          kind="reasoning"
-          name={t("msg.thinking")}
-          meta={
-            <>
-              <ProcessStatusIcon state={item.streaming ? "running" : "done"} label={item.streaming ? t("msg.thinkingRunning") : t("msg.thinkingDone")} />
-              <span>{item.streaming ? t("msg.thinkingRunning") : t("msg.thinkingDone")}</span>
-            </>
-          }
-          defaultOpen={item.streaming}
-        >
-          <div className="reasoning__body">{item.reasoning}</div>
-        </ProcessCard>
+        <div className="reasoning">
+          <button
+            type="button"
+            className="reasoning__head"
+            onClick={() => setReasoningOpen((v) => !v)}
+            aria-expanded={reasoningOpen}
+          >
+            <ProcessBrainIcon size={12} />
+            <span>{t("msg.thinking")}</span>
+            <span className="reasoning__meta">{item.streaming ? t("msg.thinkingRunning") : t("msg.thinkingDone")}</span>
+            <ChevronDown className={`reasoning__chevron${reasoningOpen ? " reasoning__chevron--open" : ""}`} size={12} />
+          </button>
+          {reasoningOpen && (
+            <div className="reasoning__body">{item.reasoning}</div>
+          )}
+        </div>
       )}
       {hasText && (
         <div className="msg__body">

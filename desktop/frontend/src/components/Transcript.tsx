@@ -4,7 +4,7 @@ import type { CheckpointMeta } from "../lib/types";
 import { useT } from "../lib/i18n";
 import { replaceAttachmentRefsForDisplay } from "../lib/attachmentDisplay";
 import { AssistantMessage, TurnActions, UserMessage } from "./Message";
-import { ProcessCard, ProcessCompactIcon, ProcessPhaseIcon, ProcessStatusIcon } from "./ProcessCard";
+import { ProcessCompactIcon, ProcessPhaseIcon } from "./ProcessCard";
 import { ToolCard } from "./ToolCard";
 import { ChevronRight } from "lucide-react";
 import { Welcome } from "./Welcome";
@@ -1012,15 +1012,7 @@ type CompactionItem = Extract<Item, { kind: "compaction" }>;
 type NoticeItem = Extract<Item, { kind: "notice" }>;
 
 function PhaseCard({ text }: { text: string }) {
-  return (
-    <ProcessCard
-      tone="accent"
-      icon={<ProcessPhaseIcon size={12} />}
-      kind="phase"
-      name={text}
-      className="phase process-card--phase"
-    />
-  );
+  return <div className="phase"><ProcessPhaseIcon size={12} /><span>{text}</span></div>;
 }
 
 function NoticeCard({ level, text }: { level: NoticeItem["level"]; text: string }) {
@@ -1034,28 +1026,19 @@ function NoticeCard({ level, text }: { level: NoticeItem["level"]; text: string 
 
 function CompactionCard({ item }: { item: CompactionItem }) {
   const t = useT();
+  const [open, setOpen] = useState(false);
   if (item.pending) {
-    return (
-      <ProcessCard
-        tone="accent"
-        icon={<ProcessCompactIcon size={12} />}
-        kind="context"
-        name={t("compaction.working")}
-        meta={<ProcessStatusIcon state="running" label={t("compaction.working")} />}
-        className="compaction compaction--pending"
-      />
-    );
+    return <div className="compaction compaction--pending"><ProcessCompactIcon size={12} /><span>{t("compaction.working")}</span></div>;
   }
   return (
-    <ProcessCard
-      tone="accent"
-      icon={<ProcessCompactIcon size={12} />}
-      kind="context"
-      name={t("compaction.title")}
-      meta={`${t("compaction.messages", { n: item.messages })}${item.trigger ? ` · ${item.trigger}` : ""}`}
-      className="compaction"
-    >
-      <pre className="compaction__summary">{item.summary}</pre>
-    </ProcessCard>
+    <div className="compaction">
+      <button type="button" className="compaction__head" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+        <ProcessCompactIcon size={12} />
+        <span>{t("compaction.title")}</span>
+        <span className="compaction__meta">{t("compaction.messages", { n: item.messages })}{item.trigger ? ` · ${item.trigger}` : ""}</span>
+        <ChevronRight className={open ? "compaction__chevron--open" : ""} size={12} />
+      </button>
+      {open && <pre className="compaction__body">{item.summary}</pre>}
+    </div>
   );
 }
