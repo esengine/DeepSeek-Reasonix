@@ -24,6 +24,7 @@ import { Tooltip } from "./Tooltip";
 interface Attachment {
   path: string;
   previewUrl?: string;
+  displayName?: string;
 }
 
 interface AttachmentDedupKey {
@@ -70,8 +71,33 @@ function renderPastedBlock(block: PastedBlock): string {
 }
 
 function baseName(path: string): string {
-  const clean = path.replace(/\/$/, "");
-  return clean.split("/").filter(Boolean).pop() ?? path;
+  const clean = path.replace(/[\\/]+$/, "");
+  return clean.split(/[\\/]/).filter(Boolean).pop() ?? path;
+}
+
+function attachmentName(attachment: Attachment): string {
+  return (attachment.displayName || baseName(attachment.path) || "attachment").trim();
+}
+
+function attachmentExt(name: string): string {
+  const dot = name.lastIndexOf(".");
+  return dot >= 0 ? name.slice(dot + 1).toUpperCase() : "";
+}
+
+function displayRefName(name: string): string {
+  return name.replace(/[\[\]\(\)\r\n]+/g, " ").replace(/\s+/g, " ").trim() || "attachment";
+}
+
+function formatAttachmentDisplayReference(attachment: Attachment): string {
+  return `@[${displayRefName(attachmentName(attachment))}](${attachment.path})`;
+}
+
+function sortComposerAttachments(items: Attachment[]): Attachment[] {
+  return [...items].sort((a, b) => {
+    const ai = a.previewUrl ? 0 : 1;
+    const bi = b.previewUrl ? 0 : 1;
+    return ai - bi;
+  });
 }
 
 function workspaceReferenceKey(ref: WorkspaceReference): string {
@@ -721,11 +747,16 @@ export function Composer({
     submittingRef.current = true;
     setSubmitting(true);
     try {
+    const orderedAttachments = sortComposerAttachments(attachments);
     const refs = [
       ...workspaceRefs.map((ref) => formatWorkspaceReference(ref.path, ref.isDir)),
-      ...attachments.map((a) => `@${a.path}`),
+      ...orderedAttachments.map((a) => `@${a.path}`),
     ].join(" ");
-    const displayText = [trimmedText, refs].filter(Boolean).join(trimmedText && refs ? " " : "");
+    const displayRefs = [
+      ...workspaceRefs.map((ref) => formatWorkspaceReference(ref.path, ref.isDir)),
+      ...orderedAttachments.map(formatAttachmentDisplayReference),
+    ].join(" ");
+    const displayText = [trimmedText, displayRefs].filter(Boolean).join(trimmedText && displayRefs ? " " : "");
     // PR-B: when past:chats refs are attached, prepend their formatted transcript
     // to submitText only (displayText stays unchanged so the user still sees their
     // original prompt in the input preview). With no refs we keep the original
@@ -764,7 +795,7 @@ export function Composer({
         const path = await app.SavePastedImage(dataUrl);
         const previewUrl = await app.AttachmentDataURL(path);
         rememberAttachment(path, key);
-        setAttachments((prev) => [...prev, { path, previewUrl }]);
+        setAttachments((prev) => [...prev, { path, previewUrl, displayName: file.name }]);
       } catch {
         // non-fatal: a failed image attach must not block normal text input
       } finally {
@@ -786,7 +817,7 @@ export function Composer({
         const dataUrl = await readFileAsDataURL(file);
         const path = await app.SavePastedFile(file.name, dataUrl);
         rememberAttachment(path, key);
-        setAttachments((prev) => [...prev, { path }]);
+        setAttachments((prev) => [...prev, { path, displayName: file.name }]);
       } catch {
         // non-fatal: a failed attach must not block normal text input
       } finally {
@@ -815,7 +846,7 @@ export function Composer({
           addWorkspaceReference({ path: item.path, isDir: item.isDir });
         } else {
           rememberAttachment(item.path, key);
-          setAttachments((prev) => [...prev, { path: item.path, previewUrl: item.previewUrl }]);
+          setAttachments((prev) => [...prev, { path: item.path, previewUrl: item.previewUrl, displayName: baseName(path) }]);
         }
       } catch {
         // non-fatal: a failed drop attach must not block normal text input
@@ -1549,19 +1580,35 @@ export function Composer({
       )}
       {(attachments.length > 0 || workspaceRefs.length > 0 || sessionRefs.length > 0) && (
         <div className="composer-context" aria-label={t("composer.contextItems")}>
-          {attachments.map((a) => (
+          {sortComposerAttachments(attachments).map((a) => {
+            const imageOnly = Boolean(a.previewUrl) && attachments.every((item) => item.previewUrl) && workspaceRefs.length === 0 && sessionRefs.length === 0;
+            return (
             <div
-              className={`composer-context__item${a.previewUrl ? " composer-context__item--image" : " composer-context__item--attachment"}`}
+              className={`composer-context__item${a.previewUrl ? " composer-context__item--image" : " composer-context__item--attachment"}${imageOnly ? " composer-context__item--image-only" : ""}`}
               key={a.path}
             >
               <Tooltip label={a.path}>
                 <span className="composer-context__label">
-                  {a.previewUrl ? <img src={a.previewUrl} alt="" draggable={false} /> : <FileText size={15} />}
-                  <span>{a.path.split("/").pop()}</span>
+                  {a.previewUrl ? (
+                    <span className="composer-context__thumb">
+                      <img src={a.previewUrl} alt="" draggable={false} />
+                    </span>
+                  ) : (
+                    <>
+                      <span className="composer-context__fileicon">
+                        <FileText size={20} />
+                      </span>
+                      <span className="composer-context__main">
+                        <span className="composer-context__name">{attachmentName(a)}</span>
+                        <span className="composer-context__meta">{attachmentExt(attachmentName(a)) || t("msg.fileAttachment")}</span>
+                      </span>
+                    </>
+                  )}
                 </span>
               </Tooltip>
-              <Tooltip label={t("composer.removeImage")}>
+              <Tooltip label={t("composer.removeImage")} className="composer-context__remove-trigger">
                 <button
+                  className="composer-context__remove"
                   type="button"
                   onClick={() => removeAttachment(a.path)}
                 >
@@ -1569,7 +1616,8 @@ export function Composer({
                 </button>
               </Tooltip>
             </div>
-          ))}
+            );
+          })}
           {workspaceRefs.map((ref) => (
             <div
               className={`composer-context__item composer-context__item--workspace${ref.isDir ? " composer-context__item--folder" : " composer-context__item--file"}`}
@@ -1581,8 +1629,9 @@ export function Composer({
                   <span>{ref.isDir ? `${baseName(ref.path)}/` : baseName(ref.path)}</span>
                 </span>
               </Tooltip>
-              <Tooltip label={t("composer.removeReference")}>
+              <Tooltip label={t("composer.removeReference")} className="composer-context__remove-trigger">
                 <button
+                  className="composer-context__remove"
                   type="button"
                   onClick={() => removeWorkspaceReference(ref)}
                 >

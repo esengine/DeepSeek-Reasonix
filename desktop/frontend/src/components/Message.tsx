@@ -1,9 +1,10 @@
-import { memo, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import { ChevronDown, FileText, Folder, GitBranch, Image, RotateCcw, ScrollText } from "lucide-react";
 import { Markdown } from "./Markdown";
 import { CopyButton } from "./CopyButton";
 import { ProcessBrainIcon, ProcessCard, ProcessStatusIcon } from "./ProcessCard";
-import { parseAttachmentRefsForDisplay } from "../lib/attachmentDisplay";
+import { parseAttachmentRefsForDisplay, sortDisplayAttachments } from "../lib/attachmentDisplay";
+import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
 import type { Item, MessageActionScope } from "../lib/useController";
 import type { CheckpointMeta } from "../lib/types";
@@ -28,16 +29,40 @@ export function UserMessage({
 }) {
   const t = useT();
   const { text: displayText, attachments } = parseAttachmentRefsForDisplay(text);
+  const orderedAttachments = sortDisplayAttachments(attachments);
+  const [imagePreviews, setImagePreviews] = useState<Record<string, string>>({});
+  const imagePreviewKey = orderedAttachments
+    .filter((attachment) => attachment.kind === "image" && attachment.source === "attachment")
+    .map((attachment) => attachment.path)
+    .join("\n");
+
+  useEffect(() => {
+    const paths = imagePreviewKey ? imagePreviewKey.split("\n") : [];
+    if (paths.length === 0) return;
+    let cancelled = false;
+    for (const path of paths) {
+      if (imagePreviews[path]) continue;
+      app.AttachmentDataURL(path)
+        .then((url) => {
+          if (cancelled) return;
+          setImagePreviews((prev) => (prev[path] ? prev : { ...prev, [path]: url }));
+        })
+        .catch(() => {});
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [imagePreviewKey]);
   return (
     <div className="msg msg--user" id={anchorId} data-question-anchor={anchorId} data-turn={turn}>
       <div className="msg__body">
         {displayText && <div className="msg__text">{displayText}</div>}
-        {attachments.length > 0 && (
+        {orderedAttachments.length > 0 && (
           <div className="msg-attachments" aria-label={t("msg.attachments")}>
-            {attachments.map((attachment, index) => (
-              <div className="msg-attachment" key={`${attachment.path}:${index}`} title={attachment.path}>
+            {orderedAttachments.map((attachment, index) => (
+              <div className={`msg-attachment msg-attachment--${attachment.kind}`} key={`${attachment.path}:${index}`} title={attachment.path}>
                 <span className={`msg-attachment__icon msg-attachment__icon--${attachment.kind}`} aria-hidden="true">
-                  {attachmentIcon(attachment.kind)}
+                  {attachment.kind === "image" && imagePreviews[attachment.path] ? <img src={imagePreviews[attachment.path]} alt="" draggable={false} /> : attachmentIcon(attachment.kind)}
                 </span>
                 <span className="msg-attachment__main">
                   <span className="msg-attachment__name">{attachment.name}</span>
