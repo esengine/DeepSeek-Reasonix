@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Tooltip } from "./Tooltip";
 import { useI18n } from "../lib/i18n";
 import { type BalanceInfo, type CollaborationMode, type ContextInfo, type JobView, type ToolApprovalMode, type WireUsage } from "../lib/types";
-import { GeoStatusDots } from "./geo/GeoStatusDots";
+// import { GeoStatusDots } from "./geo/GeoStatusDots";
 
 // JobsChip is the status-bar background-jobs indicator: a count that opens an
 // upward popover listing the running jobs (id · label · status), mirroring the
@@ -157,7 +157,7 @@ export function StatusBar({
         <b>{avgPct !== null ? `${avgPct}%` : "-"}</b>
       </span>
       <span className="statusbar__spacer" />
-      <GeoStatusDots />
+      {/* <GeoStatusDots /> */}
       <JobsChip jobs={jobsList} />
       <Tooltip label={t("status.spendTitle")}>
         <span className="stat statusbar__cost">
