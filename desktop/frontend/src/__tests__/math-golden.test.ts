@@ -133,6 +133,25 @@ eq(normalizeMath("\\(x^2\\)"), "$x^2$", "\\(…\\) → $…$");
 eq(normalizeMath("\\[E=mc^2\\]"), "$$E=mc^2$$", "\\[…\\] → $$…$$");
 eq(normalizeMath("\\\\[4pt]"), "\\\\[4pt]", "\\\\[ line-break spacing protected");
 
+// ── normalizeMath — \\slashed conversion (regression) ─────────────────────────────
+// KaTeX doesn't support \\slashed (used in physics for Feynman slash notation),
+// so convert it to \\not which has a similar visual effect.
+check("\\\\slashed{p} is converted to \\not{p}", () => {
+  return normalizeMath("$\\\\slashed{p}$") === "$\\\\not{p}$";
+});
+check("\\\\slashed{\\\\partial} is converted to \\not{\\\\partial}", () => {
+  return normalizeMath("$\\\\slashed{\\\\partial}$") === "$\\\\not{\\\\partial}$";
+});
+check("\\\\slashed in prose context", () => {
+  return normalizeMath("The momentum $\\\\slashed{p}$ is conserved") === "The momentum $\\\\not{p}$ is conserved";
+});
+check("\\\\slashed\\\\epsilon(0) → \\not{\\epsilon(0)} (Greek + function)", () => {
+  return normalizeMath("$\\slashed\\epsilon(0)$") === "$\\not{\\epsilon(0)}$";
+});
+check("\\\\slashed a → \\not a (single letter)", () => {
+  return normalizeMath("$\\\\slashed a$") === "$\\\\not a$";
+});
+
 console.log("\nnormalizeMath — non-math dollar filtering");
 eq(normalizeMath("costs $5$ today"), "costs &#36;5&#36; today", "$5$ not math");
 eq(normalizeMath("env $PATH$ here"), "env &#36;PATH&#36; here", "$PATH$ not math");
