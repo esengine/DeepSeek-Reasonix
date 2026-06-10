@@ -109,6 +109,7 @@ export const en = {
   "workspace.sourceSession": "Session",
   "workspace.sourceGit": "Git",
   "workspace.deleted": "Deleted",
+  "workspace.revealInFileManager": "Show in file manager",
 
   // mcp & skills drawer
   "caps.title": "MCP & Skills",
