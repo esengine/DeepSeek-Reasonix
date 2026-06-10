@@ -86,8 +86,8 @@ export function ModelSwitcher({ label, tabId, onPick }: { label: string; tabId?:
               onClick={() => pick(m.ref)}
             >
               <span className="modelsw__copy">
-                <span className="modelsw__model">{m.model}</span>
-                <span className="modelsw__provider">{providerLabel(m.provider, t)}</span>
+                <span className="modelsw__model" title={m.model}>{m.model}</span>
+                <span className="modelsw__provider" title={providerLabel(m.provider, t)}>{providerLabel(m.provider, t)}</span>
               </span>
               {m.current && <Check size={13} className="modelsw__check" />}
             </button>

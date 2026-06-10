@@ -4401,11 +4401,29 @@ a[href] {
   z-index: var(--z-local-popover);
   min-width: 200px;
   max-width: 320px;
+  max-height: 280px;
+  overflow-y: auto;
   background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: 9px;
   padding: 5px;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+.modelsw__menu::-webkit-scrollbar {
+  width: 6px;
+}
+.modelsw__menu::-webkit-scrollbar-track {
+  background: transparent;
+  border-radius: 3px;
+}
+.modelsw__menu::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+.modelsw__menu::-webkit-scrollbar-thumb:hover {
+  background: var(--fg-faint);
 }
 .modelsw__menu--portal {
   position: fixed;
