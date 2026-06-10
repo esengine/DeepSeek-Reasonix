@@ -1,8 +1,7 @@
 import { defineConfig } from 'astro/config';
 
-// Served from GitHub Pages under the repo subpath.
+// Served from the custom domain reasonix.io at the site root.
 export default defineConfig({
-  site: 'https://esengine.github.io',
-  base: '/DeepSeek-Reasonix',
+  site: 'https://reasonix.io',
   build: { assets: 'static' },
 });
