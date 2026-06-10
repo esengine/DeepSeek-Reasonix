@@ -97,7 +97,12 @@ interface I18nValue {
   t: Translator;
 }
 
-const I18nContext = createContext<I18nValue | null>(null);
+const i18nGlobal = globalThis as typeof globalThis & {
+  __reasonixI18nContext?: ReturnType<typeof createContext<I18nValue | null>>;
+};
+
+const I18nContext = i18nGlobal.__reasonixI18nContext ?? createContext<I18nValue | null>(null);
+i18nGlobal.__reasonixI18nContext = I18nContext;
 
 export function LocaleProvider({ children }: { children: ReactNode }) {
   const [pref, setPrefState] = useState<LangPref>(() => readPref());

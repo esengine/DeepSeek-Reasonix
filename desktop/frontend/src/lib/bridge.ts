@@ -47,6 +47,7 @@ import type {
   UpdateProgress,
   WireEvent,
   WorkspaceChangesView,
+  WorkspaceGitDiffView,
   GitCommitView,
   GitCommitDetailView,
   WorkspaceView,
@@ -163,6 +164,12 @@ export interface AppBindings {
   SearchFileRefs(query: string): Promise<DirEntry[]>;
   ReadFile(rel: string): Promise<FilePreview>;
   WorkspaceChanges(): Promise<WorkspaceChangesView>;
+  WorkspaceGitDiff(path: string, staged: boolean): Promise<WorkspaceGitDiffView>;
+  WorkspaceGitStage(path: string): Promise<void>;
+  WorkspaceGitUnstage(path: string): Promise<void>;
+  WorkspaceGitStageAll(): Promise<void>;
+  WorkspaceGitUnstageAll(): Promise<void>;
+  WorkspaceGitCommit(message: string, push: boolean, branch: string): Promise<void>;
   GitBranches(): Promise<string[]>;
   GitCheckout(branch: string): Promise<void>;
   WorkspaceGitHistory(path: string): Promise<GitCommitView[]>;
@@ -1734,14 +1741,37 @@ function makeMockApp(): AppBindings {
             path: "desktop/frontend/src/components/WorkspacePanel.tsx",
             sources: ["session", "git"],
             gitStatus: "M",
+            gitIndexStatus: "",
+            gitWorktreeStatus: "M",
             turns: [0, 2],
             latestPrompt: "Mock session edited the workspace panel.",
             latestTime: Date.now() - 60_000,
           },
-          { path: "README.md", sources: ["git"], gitStatus: "??" },
+          { path: "README.md", sources: ["git"], gitStatus: "??", gitIndexStatus: "?", gitWorktreeStatus: "?" },
           { path: "internal/control/controller.go", sources: ["session"], turns: [1], latestTime: Date.now() - 120_000 },
         ],
       };
+    },
+    async WorkspaceGitDiff(path: string, staged: boolean) {
+      return {
+        path,
+        diff: `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n@@ -1,1 +1,1 @@\n-old ${staged ? "staged" : "unstaged"} mock line\n+new ${staged ? "staged" : "unstaged"} mock line`,
+      };
+    },
+    async WorkspaceGitStage(path: string) {
+      console.info("mock WorkspaceGitStage", path);
+    },
+    async WorkspaceGitUnstage(path: string) {
+      console.info("mock WorkspaceGitUnstage", path);
+    },
+    async WorkspaceGitStageAll() {
+      console.info("mock WorkspaceGitStageAll");
+    },
+    async WorkspaceGitUnstageAll() {
+      console.info("mock WorkspaceGitUnstageAll");
+    },
+    async WorkspaceGitCommit(message: string, push: boolean, branch: string) {
+      console.info("mock WorkspaceGitCommit", message, push, branch);
     },
     async GitBranches() {
       return ["main", "dev", "feature/branch-switcher"];

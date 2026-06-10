@@ -16,17 +16,22 @@ import {
   FolderTree,
   FolderX,
   GitBranch,
+  Check,
   Maximize2,
   MessageSquarePlus,
   Minimize2,
+  Plus,
   RefreshCw,
   Search,
+  Upload,
   X,
+  Minus,
 } from "lucide-react";
 import { app } from "../lib/bridge";
-import { useT } from "../lib/i18n";
+import { useT, type DictKey } from "../lib/i18n";
+import { useToast } from "../lib/toast";
 import { loadLayoutSize, saveLayoutSize } from "../lib/layoutPreferences";
-import type { DirEntry, FilePreview, GitCommitView, GitCommitDetailView } from "../lib/types";
+import type { DirEntry, FilePreview, WorkspaceChangesView, WorkspaceChangeView, WorkspaceGitDiffView } from "../lib/types";
 import { formatWorkspaceReference, WORKSPACE_REF_DRAG_TYPE } from "../lib/workspaceDrag";
 import { cleanGitDiff } from "../lib/diff";
 import { CodeViewer } from "./CodeViewer";
@@ -115,6 +120,45 @@ function languageFor(path: string): string | undefined {
   return byExt[ext];
 }
 
+type SelectedChangeKind = "staged" | "unstaged";
+
+function normalizedGitStatus(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  return value.trim();
+}
+
+function isStagedGitChange(change: WorkspaceChangeView): boolean {
+  if (!change.sources.includes("git")) return false;
+  const index = normalizedGitStatus(change.gitIndexStatus);
+  if (index !== undefined) return index !== "" && index !== "?";
+  return false;
+}
+
+function isUnstagedGitChange(change: WorkspaceChangeView): boolean {
+  if (!change.sources.includes("git")) return false;
+  if (change.gitStatus === "??") return true;
+  const worktree = normalizedGitStatus(change.gitWorktreeStatus);
+  if (worktree !== undefined) return worktree !== "";
+  return false;
+}
+
+function unstagedWorkspaceChanges(files: WorkspaceChangeView[] | undefined): WorkspaceChangeView[] {
+  return (files ?? []).filter(isUnstagedGitChange);
+}
+
+function stagedWorkspaceChanges(files: WorkspaceChangeView[] | undefined): WorkspaceChangeView[] {
+  return (files ?? []).filter(isStagedGitChange);
+}
+
+function statusForChange(change: WorkspaceChangeView, kind: SelectedChangeKind = "unstaged"): string {
+  if (kind === "staged") {
+    const index = normalizedGitStatus(change.gitIndexStatus) || normalizedGitStatus(change.gitStatus) || "";
+    return index === "?" || change.gitStatus === "??" ? "A" : index;
+  }
+  if (change.gitStatus === "??" || change.gitWorktreeStatus === "?") return "A";
+  return normalizedGitStatus(change.gitWorktreeStatus) || normalizedGitStatus(change.gitStatus) || "";
+}
+
 function renderMediaPreview(preview: FilePreview): ReactElement | null {
   if (!preview.url) return null;
   if (preview.kind === "image") {
@@ -164,18 +208,6 @@ function formatBytes(n: number): string {
   return `${n} B`;
 }
 
-function formatCommitDate(dateStr: string): string {
-  const d = new Date(dateStr);
-  if (isNaN(d.getTime())) return dateStr;
-  const day = String(d.getDate()).padStart(2, "0");
-  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-  const month = monthNames[d.getMonth()];
-  const year = d.getFullYear();
-  const hours = String(d.getHours()).padStart(2, "0");
-  const minutes = String(d.getMinutes()).padStart(2, "0");
-  return `${day} ${month} ${year} ${hours}:${minutes}`;
-}
-
 export function WorkspacePanel({
   open,
   cwd,
@@ -204,9 +236,12 @@ export function WorkspacePanel({
   showViewTabs?: boolean;
 }) {
   const t = useT();
+  const { showToast } = useToast();
   const panelRef = useRef<HTMLElement>(null);
   const filterRef = useRef<HTMLInputElement>(null);
   const previewBodyRef = useRef<HTMLDivElement>(null);
+  const commitBranchAnchorRef = useRef<HTMLButtonElement>(null);
+  const commitBranchFilterRef = useRef<HTMLInputElement>(null);
   const [entriesByDir, setEntriesByDir] = useState<Record<string, DirEntry[]>>({});
   const [openDirs, setOpenDirs] = useState<Set<string>>(() => new Set([""]));
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
@@ -214,11 +249,18 @@ export function WorkspacePanel({
   const [preview, setPreview] = useState<FilePreview | null>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [viewMode, setViewMode] = useState<"files" | "changed">(initialViewMode);
-  const [gitHistory, setGitHistory] = useState<GitCommitView[]>([]);
-  const [loadingHistory, setLoadingHistory] = useState(false);
-  const [expandedCommit, setExpandedCommit] = useState<string | null>(null);
-  const [commitDetail, setCommitDetail] = useState<GitCommitDetailView | null>(null);
-  const [loadingCommit, setLoadingCommit] = useState(false);
+  const [workspaceChanges, setWorkspaceChanges] = useState<WorkspaceChangesView | null>(null);
+  const [loadingChanges, setLoadingChanges] = useState(false);
+  const [changeDiff, setChangeDiff] = useState<WorkspaceGitDiffView | null>(null);
+  const [selectedChangeKind, setSelectedChangeKind] = useState<SelectedChangeKind>("unstaged");
+  const [loadingChangeDiff, setLoadingChangeDiff] = useState(false);
+  const [gitBusy, setGitBusy] = useState(false);
+  const [commitOpen, setCommitOpen] = useState(false);
+  const [commitMessage, setCommitMessage] = useState("");
+  const [commitBranch, setCommitBranch] = useState("");
+  const [commitBranches, setCommitBranches] = useState<string[]>([]);
+  const [commitBranchOpen, setCommitBranchOpen] = useState(false);
+  const [commitBranchFilter, setCommitBranchFilter] = useState("");
   const [selectionMenu, setSelectionMenu] = useState<{ x: number; y: number; text: string; path: string } | null>(null);
   const [treeMenu, setTreeMenu] = useState<{ x: number; y: number; path: string; isDir: boolean } | null>(null);
   const [treeBlankMenuPoint, setTreeBlankMenuPoint] = useState<ContextMenuPoint | null>(null);
@@ -240,49 +282,111 @@ export function WorkspacePanel({
     setEntriesByDir((prev) => ({ ...prev, [dir]: entries ?? [] }));
   }, []);
 
-  const loadGitHistory = useCallback(async () => {
-    setLoadingHistory(true);
+  const loadWorkspaceChanges = useCallback(async () => {
+    setLoadingChanges(true);
     try {
-      const result = await app.WorkspaceGitHistory(selectedPath || "");
-      setGitHistory(result || []);
+      const result = await app.WorkspaceChanges();
+      setWorkspaceChanges(result ?? { files: [], gitAvailable: false });
+      const files = unstagedWorkspaceChanges(result?.files);
+      setOpenDirs((prev) => {
+        const next = new Set(prev);
+        for (const file of files) {
+          for (const dir of parentDirs(file.path)) next.add(dir);
+        }
+        return next;
+      });
     } catch (err) {
-      setGitHistory([]);
+      setWorkspaceChanges({ files: [], gitAvailable: false, gitErr: err instanceof Error ? err.message : String(err) });
     } finally {
-      setLoadingHistory(false);
+      setLoadingChanges(false);
     }
-  }, [selectedPath]);
+  }, []);
 
-  const toggleCommit = useCallback((hash: string) => {
-    setExpandedCommit((prev) => {
-      const next = prev === hash ? null : hash;
-      if (next) onRequestPanelWidth?.(WORKSPACE_DUAL_PANEL_TARGET_WIDTH);
-      return next;
-    });
-  }, [onRequestPanelWidth]);
-
-  useEffect(() => {
-    if (!open) return;
-    if (expandedCommit) {
-      let live = true;
-      setLoadingCommit(true);
-      app
-        .WorkspaceGitCommitDetail(expandedCommit, selectedPath || "")
-        .then((detail) => {
-          if (live) setCommitDetail(detail);
-        })
-        .catch(() => {
-          if (live) setCommitDetail(null);
-        })
-        .finally(() => {
-          if (live) setLoadingCommit(false);
-        });
-      return () => {
-        live = false;
-      };
-    } else {
-      setCommitDetail(null);
+  const loadSelectedChangeDiff = useCallback(async () => {
+    if (!selectedPath) return;
+    setLoadingChangeDiff(true);
+    try {
+      const result = await app.WorkspaceGitDiff(selectedPath, selectedChangeKind === "staged");
+      setChangeDiff(result);
+    } catch (err) {
+      setChangeDiff({
+        path: selectedPath,
+        diff: "",
+        err: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setLoadingChangeDiff(false);
     }
-  }, [expandedCommit, selectedPath, open]);
+  }, [selectedChangeKind, selectedPath]);
+
+  const clearSelectedChange = useCallback(() => {
+    setSelectedPath(null);
+    setPreview(null);
+    setChangeDiff(null);
+    setRecentOpen(false);
+  }, []);
+
+  const runGitAction = useCallback(
+    async (action: () => Promise<void>, successKey: DictKey, clearSelection = false, nextKind?: SelectedChangeKind) => {
+      setGitBusy(true);
+      try {
+        await action();
+        showToast(t(successKey));
+        if (clearSelection) clearSelectedChange();
+        await loadWorkspaceChanges();
+        if (!clearSelection && selectedPath) {
+          const kind = nextKind ?? selectedChangeKind;
+          setSelectedChangeKind(kind);
+          const result = await app.WorkspaceGitDiff(selectedPath, kind === "staged");
+          setChangeDiff(result);
+        }
+      } catch (err) {
+        showToast(err instanceof Error ? err.message : String(err), "error");
+      } finally {
+        setGitBusy(false);
+      }
+    },
+    [clearSelectedChange, loadWorkspaceChanges, selectedChangeKind, selectedPath, showToast, t],
+  );
+
+  const stageChange = useCallback(
+    (path: string) => {
+      void runGitAction(() => app.WorkspaceGitStage(path), "workspace.gitStaged", false, selectedPath === path ? "staged" : undefined);
+    },
+    [runGitAction, selectedPath],
+  );
+
+  const unstageChange = useCallback(
+    (path: string) => {
+      void runGitAction(() => app.WorkspaceGitUnstage(path), "workspace.gitUnstaged", false, selectedPath === path ? "unstaged" : undefined);
+    },
+    [runGitAction, selectedPath],
+  );
+
+  const stageAllChanges = useCallback(() => {
+    void runGitAction(() => app.WorkspaceGitStageAll(), "workspace.gitStagedAll", false, selectedPath ? "staged" : undefined);
+  }, [runGitAction, selectedPath]);
+
+  const unstageAllChanges = useCallback(() => {
+    void runGitAction(() => app.WorkspaceGitUnstageAll(), "workspace.gitUnstagedAll", false, selectedPath ? "unstaged" : undefined);
+  }, [runGitAction, selectedPath]);
+
+  const commitChanges = useCallback(
+    (push: boolean) => {
+      const message = commitMessage.trim();
+      if (!message) return;
+      void runGitAction(
+        () => app.WorkspaceGitCommit(message, push, commitBranch),
+        push ? "workspace.gitCommittedPushed" : "workspace.gitCommitted",
+        true,
+      );
+      setCommitOpen(false);
+      setCommitBranchOpen(false);
+      setCommitBranchFilter("");
+      setCommitMessage("");
+    },
+    [commitBranch, commitMessage, runGitAction],
+  );
 
   const selectFile = useCallback(
     (path: string) => {
@@ -299,16 +403,30 @@ export function WorkspacePanel({
     [entriesByDir, loadDir, onRequestPanelWidth],
   );
 
+  const selectChangeFile = useCallback(
+    (path: string, kind: SelectedChangeKind) => {
+      setSelectedChangeKind(kind);
+      selectFile(path);
+    },
+    [selectFile],
+  );
+
   useEffect(() => {
     if (!open) return;
     setEntriesByDir({});
     setOpenDirs(new Set([""]));
     setSelectedPath(null);
+    setSelectedChangeKind("unstaged");
     setOpenTabs([]);
     setPreview(null);
-    setGitHistory([]);
-    setExpandedCommit(null);
-    setCommitDetail(null);
+    setWorkspaceChanges(null);
+    setChangeDiff(null);
+    setCommitOpen(false);
+    setCommitMessage("");
+    setCommitBranch("");
+    setCommitBranches([]);
+    setCommitBranchOpen(false);
+    setCommitBranchFilter("");
     setSelectionMenu(null);
     setTreeMenu(null);
     setFilter("");
@@ -319,34 +437,62 @@ export function WorkspacePanel({
   useEffect(() => {
     if (!open) return;
     setViewMode(initialViewMode);
-    setExpandedCommit(null);
-    setCommitDetail(null);
     setSelectionMenu(null);
     setTreeMenu(null);
     setRecentOpen(false);
     if (initialViewMode === "changed") {
       setSelectedPath(null);
-      setOpenTabs([]);
+      setSelectedChangeKind("unstaged");
       setPreview(null);
-      return;
+      setChangeDiff(null);
+      setRecentOpen(false);
+      setFilter("");
+      void loadWorkspaceChanges();
     }
-    setTreeVisible(true);
-  }, [initialViewMode, open]);
+  }, [initialViewMode, loadWorkspaceChanges, open]);
 
   useEffect(() => {
     if (!open) return;
     if (viewMode === "changed") {
-      void loadGitHistory();
+      void loadWorkspaceChanges();
     }
-  }, [selectedPath, viewMode, loadGitHistory, open]);
+  }, [viewMode, loadWorkspaceChanges, open]);
 
   useEffect(() => {
     if (!open || !refreshKey) return;
     if (viewMode === "changed") {
-      void loadGitHistory();
+      void loadWorkspaceChanges();
     }
     openDirsRef.current.forEach((dir) => void loadDir(dir));
-  }, [loadGitHistory, loadDir, open, refreshKey, viewMode]);
+  }, [loadWorkspaceChanges, loadDir, open, refreshKey, viewMode]);
+
+  useEffect(() => {
+    if (!commitOpen) return;
+    let live = true;
+    app
+      .GitBranches()
+      .then((branches) => {
+        if (!live) return;
+        const next = branches ?? [];
+        setCommitBranches(next);
+        setCommitBranch((current) => {
+          if (current && next.includes(current)) return current;
+          const active = workspaceChanges?.gitBranch && !workspaceChanges.gitBranch.startsWith("@") ? workspaceChanges.gitBranch : "";
+          return (active && next.includes(active) ? active : next[0]) ?? "";
+        });
+      })
+      .catch(() => {
+        if (live) setCommitBranches([]);
+      });
+    return () => {
+      live = false;
+    };
+  }, [commitOpen, workspaceChanges?.gitBranch]);
+
+  useEffect(() => {
+    if (!commitBranchOpen) return;
+    commitBranchFilterRef.current?.focus();
+  }, [commitBranchOpen]);
 
   useEffect(() => {
     if (!selectionMenu && !treeMenu) return;
@@ -372,13 +518,13 @@ export function WorkspacePanel({
     setSelectionMenu(null);
     setTreeMenu(null);
     if (viewMode === "changed") {
-      void loadGitHistory();
+      void loadWorkspaceChanges();
       return;
     }
     const dirs = Array.from(openDirsRef.current);
     setEntriesByDir({});
     dirs.forEach((dir) => void loadDir(dir));
-  }, [loadGitHistory, loadDir, viewMode]);
+  }, [loadWorkspaceChanges, loadDir, viewMode]);
 
   const refreshSelected = useCallback(() => {
     if (!selectedPath) return;
@@ -410,9 +556,14 @@ export function WorkspacePanel({
   }, [selectedPath]);
 
   useEffect(() => {
-    if (!open || !selectedPath) return;
+    if (!open || !selectedPath || viewMode === "changed") return;
     return refreshSelected();
-  }, [open, refreshSelected, selectedPath]);
+  }, [open, refreshSelected, selectedPath, viewMode]);
+
+  useEffect(() => {
+    if (!open || viewMode !== "changed" || !selectedPath) return;
+    void loadSelectedChangeDiff();
+  }, [loadSelectedChangeDiff, open, selectedPath, viewMode]);
 
   const toggleDir = useCallback(
     (dir: string) => {
@@ -438,6 +589,8 @@ export function WorkspacePanel({
         setSelectedPath(replacement);
         if (!replacement) {
           setPreview(null);
+          setChangeDiff(null);
+          setSelectedChangeKind("unstaged");
           setTreeVisible(true);
         }
         setSelectionMenu(null);
@@ -456,6 +609,32 @@ export function WorkspacePanel({
   const previewTitle = changedMode && !selectedPath ? t("workspace.changedTab") : currentFileName;
   const previewSubtitle = changedMode && !selectedPath ? shortCwd(cwd) || t("workspace.title") : currentFileDir;
   const recentFiles = useMemo(() => [...openTabs].reverse(), [openTabs]);
+  const allChangedFiles = useMemo(() => workspaceChanges?.files ?? [], [workspaceChanges]);
+  const stagedFiles = useMemo(() => stagedWorkspaceChanges(allChangedFiles), [allChangedFiles]);
+  const unstagedFiles = useMemo(() => unstagedWorkspaceChanges(allChangedFiles), [allChangedFiles]);
+  const filteredStagedFiles = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    if (!q) return stagedFiles;
+    return stagedFiles.filter((change) =>
+      `${change.path} ${change.oldPath ?? ""} ${statusForChange(change, "staged")}`.toLowerCase().includes(q),
+    );
+  }, [filter, stagedFiles]);
+  const filteredUnstagedFiles = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    if (!q) return unstagedFiles;
+    return unstagedFiles.filter((change) =>
+      `${change.path} ${change.oldPath ?? ""} ${statusForChange(change, "unstaged")}`.toLowerCase().includes(q),
+    );
+  }, [filter, unstagedFiles]);
+  const filteredCommitBranches = useMemo(() => {
+    const q = commitBranchFilter.trim().toLowerCase();
+    if (!q) return commitBranches;
+    return commitBranches.filter((branch) => branch.toLowerCase().includes(q));
+  }, [commitBranchFilter, commitBranches]);
+  const newCommitBranch = commitBranchFilter.trim();
+  const canCreateCommitBranch = newCommitBranch !== "" && !commitBranches.includes(newCommitBranch);
+  const commitBranchLabel = commitBranch.trim() || workspaceChanges?.gitBranch || t("workspace.noBranch");
+  const selectedChangeDiff = changeDiff?.diff ? cleanGitDiff(changeDiff.diff) : "";
   const flattened = useMemo(() => {
     const rows: { path: string; entry: DirEntry }[] = [];
     for (const [dir, entries] of Object.entries(entriesByDir)) {
@@ -470,20 +649,17 @@ export function WorkspacePanel({
       .sort((a, b) => a.path.localeCompare(b.path));
   }, [entriesByDir, filter]);
 
-  const searchPlaceholder = t("workspace.filter");
+  const searchPlaceholder = t(viewMode === "changed" ? "workspace.filterChanges" : "workspace.filter");
 
   const effectiveTreeWidth = useMemo(() => clampWorkspaceTreeWidth(treeWidth, panelWidth), [panelWidth, treeWidth]);
-  const filePreviewActive = openTabs.length > 0 || selectedPath !== null;
-  const changeDetailActive = changedMode && expandedCommit !== null;
-  const previewVisible = changedMode || filePreviewActive;
+  const previewVisible = viewMode === "changed" ? selectedPath !== null : openTabs.length > 0 || selectedPath !== null;
   const selectedFileVisible = selectedPath !== null;
   const compactTreeSplit =
     treeVisible && selectedFileVisible && panelWidth !== undefined && panelWidth < WORKSPACE_DUAL_PANEL_MIN_WIDTH;
   const actualTreeVisible = changedMode ? false : treeVisible;
   const showTreeRail = previewVisible && !actualTreeVisible && !changedMode;
-  const previewModeActive = open && (filePreviewActive || changeDetailActive);
+  const previewModeActive = open && previewVisible;
   const embeddedDockMode = !showViewTabs;
-  const showFileTools = showViewTabs || filePreviewActive;
 
   const panelStyle = useMemo(
     () =>
@@ -698,6 +874,63 @@ export function WorkspacePanel({
     });
   };
 
+  const statusToneClass = (status: string): string => {
+    if (status === "M") return " workspace-tree__status--modified";
+    if (status === "D") return " workspace-tree__status--deleted";
+    return "";
+  };
+
+  const renderChangeFileRows = (changes: WorkspaceChangeView[], kind: SelectedChangeKind): ReactElement[] =>
+    changes.map((change) => {
+      const active = selectedPath === change.path && selectedChangeKind === kind;
+      const status = statusForChange(change, kind);
+      const actionLabel = t(kind === "staged" ? "workspace.unstageFile" : "workspace.stageFile");
+      return (
+        <div key={`${kind}-${change.path}`} className={`workspace-change-row${active ? " workspace-change-row--active" : ""}`}>
+          <button
+            type="button"
+            className="workspace-change-row__main"
+            draggable
+            onDragStart={(event) => startTreeDrag(event, change.path, false)}
+            onClick={() => {
+              if (active) {
+                setSelectedPath(null);
+              } else {
+                selectChangeFile(change.path, kind);
+              }
+            }}
+            onContextMenu={(event) => openTreeMenu(event, change.path, false)}
+          >
+            <FileText size={14} className="workspace-tree__icon" />
+            <span className="workspace-tree__result">
+              <span className="workspace-tree__result-name">{basename(change.path)}</span>
+              {parentPath(change.path) && <span className="workspace-tree__result-dir">{parentPath(change.path)}</span>}
+            </span>
+          </button>
+          <div className="workspace-change-row__ops">
+            {status && <span className={`workspace-tree__status${statusToneClass(status)}`}>{status}</span>}
+            <Tooltip label={actionLabel}>
+              <button
+                type="button"
+                className="workspace-change-row__action"
+                aria-label={`${actionLabel} ${change.path}`}
+                disabled={gitBusy}
+                onClick={() => {
+                  if (kind === "staged") {
+                    unstageChange(change.path);
+                  } else {
+                    stageChange(change.path);
+                  }
+                }}
+              >
+                {kind === "staged" ? <Minus size={13} /> : <Plus size={13} />}
+              </button>
+            </Tooltip>
+          </div>
+        </div>
+      );
+    });
+
   const isMarkdown = selectedPath?.toLowerCase().endsWith(".md") ?? false;
   const treeBlankMenuItems: ContextMenuItem[] = [
     {
@@ -707,6 +940,27 @@ export function WorkspacePanel({
       onSelect: refreshWorkspaceList,
     },
   ];
+
+  const closeCommitModal = () => {
+    setCommitOpen(false);
+    setCommitBranchOpen(false);
+    setCommitBranchFilter("");
+  };
+
+  const pickCommitBranch = (branch: string) => {
+    setCommitBranch(branch.trim());
+    setCommitBranchOpen(false);
+    setCommitBranchFilter("");
+  };
+
+  const chooseFirstCommitBranchMatch = () => {
+    if (canCreateCommitBranch) {
+      pickCommitBranch(newCommitBranch);
+      return;
+    }
+    const first = filteredCommitBranches[0];
+    if (first) pickCommitBranch(first);
+  };
 
   return (
     <aside
@@ -832,99 +1086,17 @@ export function WorkspacePanel({
 
         <div className="workspace-preview__body" ref={previewBodyRef} onContextMenu={openSelectionMenu}>
           {viewMode === "changed" && !selectedPath ? (
-            <div className="workspace-git-history">
-              {loadingHistory ? (
-                <div className="workspace-empty">{t("workspace.loading")}</div>
-              ) : gitHistory.length === 0 ? (
-                <div className="workspace-empty">{t("workspace.noChanges")}</div>
-              ) : (
-                <div className="workspace-git-history__list">
-                  {gitHistory.map((commit) => (
-                    <div key={commit.hash} className={`workspace-git-history__item${expandedCommit === commit.hash ? " workspace-git-history__item--expanded" : ""}`}>
-                      <button
-                        className="workspace-git-history__head"
-                        onClick={() => void toggleCommit(commit.hash)}
-                      >
-                        <div className="workspace-git-history__head-top">
-                          {expandedCommit === commit.hash ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                          <span className="workspace-git-history__message">{commit.message}</span>
-                        </div>
-                        <div className="workspace-git-history__head-bottom">
-                          <span className="workspace-git-history__author">{commit.author}</span>
-                          <span className="workspace-git-history__date">
-                            {formatCommitDate(commit.date)} <span className="workspace-git-history__hash">{commit.hash.substring(0, 7)}</span>
-                          </span>
-                        </div>
-                      </button>
-                      {expandedCommit === commit.hash && (
-                        <div className="workspace-git-history__detail">
-                          {loadingCommit ? (
-                            <div className="workspace-empty">{t("workspace.loading")}</div>
-                          ) : commitDetail?.diff ? (
-                            <CodeViewer value={cleanGitDiff(commitDetail.diff)} language="diff" />
-                          ) : commitDetail?.files ? (
-                            <div className="workspace-git-history__files">
-                              {commitDetail.files.map((file) => (
-                                <button
-                                  key={file}
-                                  className="workspace-git-history__file"
-                                  onClick={() => selectFile(file)}
-                                >
-                                  <FileText size={14} /> {file}
-                                </button>
-                              ))}
-                            </div>
-                          ) : (
-                            <div className="workspace-empty">No details available</div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+            <div className="workspace-empty">{t("workspace.pickChangedFile")}</div>
+          ) : viewMode === "changed" && loadingChangeDiff ? (
+            <div className="workspace-empty">{t("workspace.loadingChanges")}</div>
+          ) : viewMode === "changed" && changeDiff?.err ? (
+            <div className="workspace-empty workspace-empty--error">{changeDiff.err}</div>
           ) : viewMode === "changed" && selectedPath ? (
-            <div className="workspace-git-history">
-              {loadingHistory ? (
-                <div className="workspace-empty">{t("workspace.loading")}</div>
-              ) : gitHistory.length === 0 ? (
-                <div className="workspace-empty">{t("workspace.noChanges")}</div>
-              ) : (
-                <div className="workspace-git-history__list">
-                  {gitHistory.map((commit) => (
-                    <div key={commit.hash} className={`workspace-git-history__item${expandedCommit === commit.hash ? " workspace-git-history__item--expanded" : ""}`}>
-                      <button
-                        className="workspace-git-history__head"
-                        onClick={() => void toggleCommit(commit.hash)}
-                      >
-                        <div className="workspace-git-history__head-top">
-                          {expandedCommit === commit.hash ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                          <span className="workspace-git-history__message">{commit.message}</span>
-                        </div>
-                        <div className="workspace-git-history__head-bottom">
-                          <span className="workspace-git-history__author">{commit.author}</span>
-                          <span className="workspace-git-history__date">
-                            {formatCommitDate(commit.date)} <span className="workspace-git-history__hash">{commit.hash.substring(0, 7)}</span>
-                          </span>
-                        </div>
-                      </button>
-                      {expandedCommit === commit.hash && (
-                        <div className="workspace-git-history__detail">
-                          {loadingCommit ? (
-                            <div className="workspace-empty">{t("workspace.loading")}</div>
-                          ) : commitDetail?.diff ? (
-                            <CodeViewer value={cleanGitDiff(commitDetail.diff)} language="diff" />
-                          ) : (
-                            <div className="workspace-empty">No details available</div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+            selectedChangeDiff ? (
+              <CodeViewer value={selectedChangeDiff} language="diff" />
+            ) : (
+              <div className="workspace-empty">{t("workspace.noChanges")}</div>
+            )
           ) : !selectedPath ? (
             <div className="workspace-empty">{t("workspace.pickFile")}</div>
           ) : loadingPreview ? (
@@ -996,54 +1168,116 @@ export function WorkspacePanel({
       )}
 
       <section className="workspace-files">
-        {showFileTools && (
-          <div className={`workspace-files__tools${embeddedDockMode ? " workspace-files__tools--embedded" : ""}`}>
-            <Tooltip label={previewVisible ? t("workspace.hideTree") : t("workspace.close")}>
-              <button
-                className="workspace-iconbtn workspace-iconbtn--on"
-                type="button"
-                aria-label={previewVisible ? t("workspace.hideTree") : t("workspace.close")}
-                onClick={hideTreeOrClosePanel}
-              >
-                {previewVisible ? <FolderX size={15} /> : <X size={15} />}
+        <div className={`workspace-files__tools${embeddedDockMode ? " workspace-files__tools--embedded" : ""}`}>
+          <div className="workspace-files__tool-group">
+            {previewVisible && (
+              <Tooltip label={previewVisible ? t("workspace.hideTree") : t("workspace.close")}>
+                <button
+                  className="workspace-iconbtn workspace-iconbtn--on"
+                  type="button"
+                  aria-label={previewVisible ? t("workspace.hideTree") : t("workspace.close")}
+                  onClick={hideTreeOrClosePanel}
+                >
+                  {previewVisible ? <FolderX size={15} /> : <X size={15} />}
+                </button>
+              </Tooltip>
+            )}
+            <Tooltip label={t(viewMode === "changed" ? "workspace.refreshChanges" : "workspace.refreshTree")}>
+              <button className="workspace-iconbtn" type="button" onClick={refreshWorkspaceList}>
+                <RefreshCw size={14} />
               </button>
             </Tooltip>
-            {showViewTabs && (
-              <div className="workspace-files__tabs" role="tablist" aria-label={t("workspace.viewMode")}>
+            {viewMode === "changed" && (
+              <Tooltip label={t("workspace.commit")}>
                 <button
-                  className={viewMode === "files" ? "workspace-files__tab workspace-files__tab--active" : "workspace-files__tab"}
-                  onClick={() => setViewMode("files")}
+                  className="workspace-iconbtn"
+                  type="button"
+                  aria-label={t("workspace.commit")}
+                  disabled={gitBusy || stagedFiles.length === 0}
+                  onClick={() => setCommitOpen(true)}
                 >
-                  {t("workspace.filesTab")}
-                </button>
-                <button
-                  className={viewMode === "changed" ? "workspace-files__tab workspace-files__tab--active" : "workspace-files__tab"}
-                  onClick={() => {
-                    setViewMode("changed");
-                    void loadGitHistory();
-                  }}
-                >
-                  <GitBranch size={13} />
-                  {t("workspace.changedTab")}
-                </button>
-              </div>
-            )}
-            {showViewTabs && (
-              <Tooltip label={t("workspace.refreshChanges")}>
-                <button className="workspace-iconbtn" onClick={() => void loadGitHistory()}>
-                  <RefreshCw size={14} />
+                  <GitBranch size={14} />
                 </button>
               </Tooltip>
             )}
           </div>
-        )}
+          {showViewTabs && (
+            <div className="workspace-files__tabs" role="tablist" aria-label={t("workspace.viewMode")}>
+              <button
+                className={viewMode === "files" ? "workspace-files__tab workspace-files__tab--active" : "workspace-files__tab"}
+                onClick={() => setViewMode("files")}
+              >
+                {t("workspace.filesTab")}
+              </button>
+              <button
+                className={viewMode === "changed" ? "workspace-files__tab workspace-files__tab--active" : "workspace-files__tab"}
+                onClick={() => {
+                  setViewMode("changed");
+                  setSelectedPath(null);
+                  setSelectedChangeKind("unstaged");
+                  setPreview(null);
+                  setChangeDiff(null);
+                  setRecentOpen(false);
+                  setFilter("");
+                  void loadWorkspaceChanges();
+                }}
+              >
+                <GitBranch size={13} />
+                {t("workspace.changedTab")}
+              </button>
+            </div>
+          )}
+        </div>
 
         <div className="workspace-search">
           <Search size={14} />
           <input ref={filterRef} value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={searchPlaceholder} />
         </div>
         <div className="workspace-tree" onContextMenu={openTreeBlankMenu}>
-          {flattened
+          {viewMode === "changed" ? (
+            loadingChanges ? (
+              <div className="workspace-empty">{t("workspace.loadingChanges")}</div>
+            ) : workspaceChanges?.gitAvailable === false ? (
+              <div className="workspace-empty workspace-empty--error">{workspaceChanges.gitErr || t("workspace.gitUnavailable")}</div>
+            ) : filteredStagedFiles.length === 0 && filteredUnstagedFiles.length === 0 ? (
+              <div className="workspace-empty">{t("workspace.noChanges")}</div>
+            ) : (
+              <>
+                {filteredStagedFiles.length > 0 && (
+                  <div className="workspace-change-section">
+                    <div className="workspace-change-section__title">
+                      <span>{t("workspace.stagedChanges")}</span>
+                      <button
+                        type="button"
+                        className="workspace-change-section__action"
+                        disabled={gitBusy}
+                        onClick={unstageAllChanges}
+                      >
+                        {t("workspace.unstageAll")}
+                      </button>
+                    </div>
+                    {renderChangeFileRows(filteredStagedFiles, "staged")}
+                  </div>
+                )}
+                {filteredUnstagedFiles.length > 0 && (
+                  <div className="workspace-change-section">
+                    <div className="workspace-change-section__title">
+                      <span>{t("workspace.unstagedChanges")}</span>
+                      <button
+                        type="button"
+                        className="workspace-change-section__action"
+                        disabled={gitBusy}
+                        onClick={stageAllChanges}
+                      >
+                        {t("workspace.stageAll")}
+                      </button>
+                    </div>
+                    {renderChangeFileRows(filteredUnstagedFiles, "unstaged")}
+                  </div>
+                )}
+              </>
+            )
+          ) : flattened
             ? flattened.map(({ path, entry }) => {
                 const dir = parentPath(path);
                 return (
@@ -1120,6 +1354,137 @@ export function WorkspacePanel({
         ariaLabel={t("workspace.treeMenu")}
         onClose={() => setTreeBlankMenuPoint(null)}
       />
+      {commitOpen && (
+        <div
+          className="modal-backdrop workspace-commit-modal-backdrop"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) closeCommitModal();
+          }}
+        >
+          <div className="modal workspace-commit-modal" role="dialog" aria-modal="true" aria-labelledby="workspace-commit-title">
+            <div id="workspace-commit-title" className="modal__title">
+              {t("workspace.commitDialogTitle")}
+            </div>
+            <label className="workspace-commit-modal__field">
+              <span>{t("workspace.commitBranch")}</span>
+              <button
+                ref={commitBranchAnchorRef}
+                type="button"
+                className={`workspace-commit-modal__branch-button${commitBranchOpen ? " workspace-commit-modal__branch-button--open" : ""}`}
+                disabled={gitBusy}
+                aria-haspopup="listbox"
+                aria-expanded={commitBranchOpen}
+                onClick={() => setCommitBranchOpen((value) => !value)}
+              >
+                <GitBranch size={14} />
+                <span>{commitBranchLabel}</span>
+                <ChevronDown size={14} />
+              </button>
+            </label>
+            <AnchoredPopover
+              open={commitBranchOpen}
+              anchorRef={commitBranchAnchorRef}
+              onClose={() => {
+                setCommitBranchOpen(false);
+                setCommitBranchFilter("");
+              }}
+              className="workspace-commit-branch-menu"
+              align="start"
+              offset={6}
+              placement="bottom"
+              style={{ width: commitBranchAnchorRef.current?.getBoundingClientRect().width }}
+            >
+              <div className="workspace-commit-branch-menu__search">
+                <Search size={14} />
+                <input
+                  ref={commitBranchFilterRef}
+                  value={commitBranchFilter}
+                  placeholder={t("workspace.branchSearchPlaceholder")}
+                  onChange={(event) => setCommitBranchFilter(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      chooseFirstCommitBranchMatch();
+                    } else if (event.key === "Escape") {
+                      setCommitBranchOpen(false);
+                      setCommitBranchFilter("");
+                    }
+                    event.stopPropagation();
+                  }}
+                />
+              </div>
+              <div className="workspace-commit-branch-menu__list" role="listbox" aria-label={t("workspace.commitBranch")}>
+                {canCreateCommitBranch && (
+                  <button
+                    type="button"
+                    className="workspace-commit-branch-menu__item workspace-commit-branch-menu__item--create"
+                    role="option"
+                    aria-selected={false}
+                    onClick={() => pickCommitBranch(newCommitBranch)}
+                  >
+                    <Plus size={14} />
+                    <span>{t("workspace.createBranch", { branch: newCommitBranch })}</span>
+                  </button>
+                )}
+                {filteredCommitBranches.map((branch) => {
+                  const active = branch === commitBranch;
+                  return (
+                    <button
+                      key={branch}
+                      type="button"
+                      className={`workspace-commit-branch-menu__item${active ? " workspace-commit-branch-menu__item--active" : ""}`}
+                      role="option"
+                      aria-selected={active}
+                      onClick={() => pickCommitBranch(branch)}
+                    >
+                      {active ? <Check size={14} /> : <GitBranch size={14} />}
+                      <span>{branch}</span>
+                    </button>
+                  );
+                })}
+                {!canCreateCommitBranch && filteredCommitBranches.length === 0 && (
+                  <div className="workspace-commit-branch-menu__empty">{t("workspace.noBranches")}</div>
+                )}
+              </div>
+            </AnchoredPopover>
+            <textarea
+              className="workspace-commit-modal__input"
+              value={commitMessage}
+              rows={4}
+              placeholder={t("workspace.commitMessagePlaceholder")}
+              onChange={(event) => setCommitMessage(event.target.value)}
+              onKeyDown={(event) => {
+                if ((event.metaKey || event.ctrlKey) && event.key === "Enter") commitChanges(false);
+                event.stopPropagation();
+              }}
+              autoFocus
+            />
+            <div className="modal__actions">
+              <button type="button" className="btn" disabled={gitBusy} onClick={closeCommitModal}>
+                {t("common.cancel")}
+              </button>
+              <button
+                type="button"
+                className="btn"
+                disabled={gitBusy || commitMessage.trim() === ""}
+                onClick={() => commitChanges(false)}
+              >
+                <GitBranch size={14} />
+                {t("workspace.commit")}
+              </button>
+              <button
+                type="button"
+                className="btn btn--primary workspace-git-primary"
+                disabled={gitBusy || commitMessage.trim() === ""}
+                onClick={() => commitChanges(true)}
+              >
+                <Upload size={14} />
+                {t("workspace.commitAndPush")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </aside>
   );
 }
