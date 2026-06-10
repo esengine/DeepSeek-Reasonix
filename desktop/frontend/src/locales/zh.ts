@@ -963,7 +963,7 @@ export const zh: Record<DictKey, string> = {
   "notice.info": "提示",
   "notice.warning": "警告",
   "transcript.processed": "已处理",
-  "transcript.processedDuration": "已处理 {s}s >",
+  "transcript.processedDuration": "已处理 {s}s",
   "questionNav.label": "问题导航",
   "questionNav.progress": "问题 {current} / {total}",
   "questionNav.jump": "跳转到问题 {n}",

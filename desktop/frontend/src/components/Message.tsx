@@ -1,5 +1,5 @@
 import { memo, useState } from "react";
-import { ChevronDown, FileText, Folder, GitBranch, Image, RotateCcw, ScrollText } from "lucide-react";
+import { ChevronDown, ChevronRight, FileText, Folder, GitBranch, Image, RotateCcw, ScrollText } from "lucide-react";
 import { Markdown } from "./Markdown";
 import { CopyButton } from "./CopyButton";
 import { ProcessBrainIcon } from "./ProcessCard";
@@ -253,13 +253,14 @@ export const AssistantMessage = memo(function AssistantMessage({
           <button
             type="button"
             className="reasoning__head"
+            data-running={item.streaming ? "" : undefined}
             onClick={() => setReasoningOpen((v) => !v)}
             aria-expanded={reasoningOpen}
           >
             <ProcessBrainIcon size={12} />
             <span>{t("msg.thinking")}</span>
             <span className="reasoning__meta">{item.streaming ? t("msg.thinkingRunning") : t("msg.thinkingDone")}</span>
-            <ChevronDown className={`reasoning__chevron${reasoningOpen ? " reasoning__chevron--open" : ""}`} size={12} />
+            <ChevronRight className={`reasoning__chevron${reasoningOpen ? " reasoning__chevron--open" : ""}`} size={12} />
           </button>
           {reasoningOpen && (
             <div className="reasoning__body">{item.reasoning}</div>

@@ -961,7 +961,7 @@ export const en = {
   "notice.info": "Notice",
   "notice.warning": "Warning",
   "transcript.processed": "Processed",
-  "transcript.processedDuration": "Processed {s}s >",
+  "transcript.processedDuration": "Processed {s}s",
   "questionNav.label": "Question navigation",
   "questionNav.progress": "Question {current} / {total}",
   "questionNav.jump": "Jump to question {n}",

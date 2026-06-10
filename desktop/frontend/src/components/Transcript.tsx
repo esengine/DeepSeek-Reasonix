@@ -838,7 +838,7 @@ type ReadOnlyBatchProps = {
 
 function ReadOnlyBatch({ items, subcalls }: ReadOnlyBatchProps) {
   const t = useT();
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
 
   const readCount = items.filter((it) => it.name === "read_file" || it.name === "ls").length;
   const searchCount = items.filter((it) => it.name === "grep" || it.name === "glob" || it.name === "web_fetch").length;
@@ -850,8 +850,8 @@ function ReadOnlyBatch({ items, subcalls }: ReadOnlyBatchProps) {
 
   return (
     <div className={`readonly-batch${open ? " readonly-batch--open" : ""}`}>
-      <button type="button" className="readonly-batch__head" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
-        <ChevronRight className={`readonly-batch__chevron${open ? " readonly-batch__chevron--open" : ""}`} size={13} />
+      <button type="button" className="reasoning__head" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+        <ChevronRight className={`reasoning__chevron${open ? " reasoning__chevron--open" : ""}`} size={12} />
         <span className="readonly-batch__label">{label}</span>
       </button>
       {open && (
@@ -900,11 +900,11 @@ function TurnCollapse({ items, durationMs, mode }: TurnCollapseProps) {
     <div className={`turn-collapse${open ? " turn-collapse--open" : ""}`}>
       <button
         type="button"
-        className="turn-collapse__head"
+        className="reasoning__head"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
       >
-        <ChevronRight className={`turn-collapse__chevron${open ? " turn-collapse__chevron--open" : ""}`} size={13} />
+        <ChevronRight className={`reasoning__chevron${open ? " reasoning__chevron--open" : ""}`} size={12} />
         <span className="turn-collapse__label">{label}</span>
       </button>
       {open && (

@@ -58,3 +58,7 @@ Thumbs.db
 # Scratch / agent working dirs (never committed)
 /tmp/
 /.codex/
+
+# Personal planning docs (not upstream)
+/docs/EVAL_SYSTEM_PLAN.md
+/docs/MEMORY_SYSTEM_IMPROVEMENT.md

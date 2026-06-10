@@ -18,7 +18,7 @@ import {
 } from "../lib/theme";
 import { TEXT_SIZES, applyTextSize, getTextSize, type TextSize } from "../lib/textSize";
 import { FONT_FAMILIES, applyFontFamily, getFontFamily, type FontFamily } from "../lib/fontFamily";
-import { setDisplayMode as setLocalDisplayMode } from "../lib/displayMode";
+import { getDisplayMode, onDisplayModeChange, setDisplayMode as setLocalDisplayMode } from "../lib/displayMode";
 import type { BotConnectionView, BotInstallStartResult, BotSettingsView, NetworkView, ProviderView, SettingsTab, SettingsView } from "../lib/types";
 import { InlineConfirmButton } from "./InlineConfirmButton";
 import { Tooltip } from "./Tooltip";
@@ -592,7 +592,8 @@ function reasoningProtocolLabel(protocol: string, t: ReturnType<typeof useT>): s
 function GeneralSection({ s, busy, apply }: SectionProps) {
   const { t, setPref } = useI18n();
   const closeBehavior = normalizeCloseBehavior(s.closeBehavior);
-  const displayMode = normalizeDisplayMode(s.displayMode);
+  const [displayMode, setDisplayMode] = useState<DisplayMode>(() => normalizeDisplayMode(getDisplayMode()));
+  useEffect(() => onDisplayModeChange((mode) => setDisplayMode(mode)), []);
   const autoPlan = normalizeAutoPlan(s.autoPlan);
   const languagePref = normalizeLangPref(s.desktopLanguage);
   const setLanguage = (next: LangPref) => {
