@@ -151,5 +151,15 @@ bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local ca
 # [[plugins]]
 # name    = "example"
 # command = "reasonix-plugin-example"
-# # Enabled MCP servers connect automatically in the background after session
-# # start. Use /mcp or the desktop MCP panel to refresh, reconnect, or disable.
+
+# --- Geo remote-sensing plugin (RS-Reasonix) ---
+# Uncomment and set python to your conda gee environment, and dir to the
+# RS-Reasonix project root (where geocode.json lives).
+# [[plugins]]
+# name    = "geocode"
+# command = "D:\\anaconda\\anaconda3\\envs\\gee\\python.exe"
+# args    = ["-m", "internal.geo.mcp_server"]
+# dir     = "."   # project root — where geocode.json + internal/geo live
+
+# Enabled MCP servers connect automatically in the background after session
+# start. Use /mcp or the desktop MCP panel to refresh, reconnect, or disable.
