@@ -679,3 +679,200 @@ func TestMidTurnAutosavePersistsDuringLongTurn(t *testing.T) {
 	}
 	t.Fatal("session file was not written while the turn was still running")
 }
+
+type scriptedRunner struct {
+	exec    *agent.Agent
+	scripts []func(input string)
+}
+
+func (r *scriptedRunner) Run(_ context.Context, input string) error {
+	if len(r.scripts) == 0 {
+		return nil
+	}
+	next := r.scripts[0]
+	r.scripts = r.scripts[1:]
+	next(input)
+	return nil
+}
+
+func TestApprovedPlanSurvivesUserPauseUntilTodosComplete(t *testing.T) {
+	exec := agent.New(nil, nil, agent.NewSession("sys"), agent.Options{}, event.Discard)
+	runner := &scriptedRunner{exec: exec}
+
+	var c *Controller
+	approvalPrompts := 0
+	sink := event.FuncSink(func(e event.Event) {
+		if e.Kind != event.ApprovalRequest {
+			return
+		}
+		approvalPrompts++
+		if e.Approval.Tool == planApprovalTool {
+			go c.Approve(e.Approval.ID, true, false, false)
+			return
+		}
+		go c.Approve(e.Approval.ID, false, false, false)
+	})
+	c = New(Options{Runner: runner, Executor: exec, Sink: sink})
+	c.SetPlanMode(true)
+
+	runner.scripts = append(runner.scripts,
+		func(input string) {
+			exec.Session().Add(provider.Message{Role: provider.RoleAssistant, Content: "1. Create the file\n2. Update the file"})
+		},
+		func(input string) {
+			if input != planApprovedMessage {
+				t.Fatalf("approved execution input = %q, want planApprovedMessage", input)
+			}
+			exec.Session().Add(provider.Message{Role: provider.RoleAssistant, Content: "first step done; paused for review", ToolCalls: []provider.ToolCall{{
+				ID: "todo-1", Name: "todo_write", Arguments: `{"todos":[{"content":"Create the file","status":"completed"},{"content":"Update the file","status":"in_progress"}]}`,
+			}}})
+		},
+	)
+
+	if err := c.runTurn(context.Background(), "plan this"); err != nil {
+		t.Fatal(err)
+	}
+	if approvalPrompts != 1 {
+		t.Fatalf("approval prompts after plan = %d, want 1", approvalPrompts)
+	}
+
+	if got := c.Compose("继续"); got == "继续" {
+		t.Fatal("continuation turn should carry the approved-plan execution marker")
+	}
+	allow, _, err := gateApprover{c}.Approve(context.Background(), "write_file", "/tmp/a", nil)
+	if err != nil || !allow {
+		t.Fatalf("writer during unfinished approved plan = (%v,%v), want auto-allow", allow, err)
+	}
+	if approvalPrompts != 1 {
+		t.Fatalf("unfinished approved plan should not prompt for writer, prompts=%d", approvalPrompts)
+	}
+
+	runner.scripts = append(runner.scripts, func(input string) {
+		exec.Session().Add(provider.Message{Role: provider.RoleAssistant, Content: "all done", ToolCalls: []provider.ToolCall{{
+			ID: "todo-2", Name: "todo_write", Arguments: `{"todos":[{"content":"Create the file","status":"completed"},{"content":"Update the file","status":"completed"}]}`,
+		}}})
+	})
+	if err := c.runTurn(context.Background(), c.Compose("继续")); err != nil {
+		t.Fatal(err)
+	}
+
+	allow, _, err = gateApprover{c}.Approve(context.Background(), "write_file", "/tmp/b", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if allow {
+		t.Fatal("writer after approved plan completion should return to normal approval flow")
+	}
+	if approvalPrompts != 2 {
+		t.Fatalf("writer after completion should prompt once, prompts=%d", approvalPrompts)
+	}
+}
+
+func TestApprovedPlanDoesNotAutoApproveNonContinuationTurn(t *testing.T) {
+	exec := agent.New(nil, nil, agent.NewSession("sys"), agent.Options{}, event.Discard)
+	runner := &scriptedRunner{exec: exec}
+
+	var c *Controller
+	approvalPrompts := 0
+	sink := event.FuncSink(func(e event.Event) {
+		if e.Kind != event.ApprovalRequest {
+			return
+		}
+		approvalPrompts++
+		if e.Approval.Tool == planApprovalTool {
+			go c.Approve(e.Approval.ID, true, false, false)
+			return
+		}
+		go c.Approve(e.Approval.ID, false, false, false)
+	})
+	c = New(Options{Runner: runner, Executor: exec, Sink: sink})
+	c.SetPlanMode(true)
+
+	runner.scripts = append(runner.scripts,
+		func(input string) {
+			exec.Session().Add(provider.Message{Role: provider.RoleAssistant, Content: "1. Create the file\n2. Update the file"})
+		},
+		func(input string) {
+			exec.Session().Add(provider.Message{Role: provider.RoleAssistant, Content: "paused", ToolCalls: []provider.ToolCall{{
+				ID: "todo-1", Name: "todo_write", Arguments: `{"todos":[{"content":"Create the file","status":"completed"},{"content":"Update the file","status":"in_progress"}]}`,
+			}}})
+		},
+	)
+
+	if err := c.runTurn(context.Background(), "plan this"); err != nil {
+		t.Fatal(err)
+	}
+	if got := c.Compose("先别继续"); got != "先别继续" {
+		t.Fatalf("non-continuation input should not be marker-prefixed, got %q", got)
+	}
+
+	allow, _, err := gateApprover{c}.Approve(context.Background(), "write_file", "/tmp/a", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if allow {
+		t.Fatal("non-continuation turn should not inherit approved-plan auto approval")
+	}
+	if approvalPrompts != 2 {
+		t.Fatalf("non-continuation writer should prompt after plan approval, prompts=%d", approvalPrompts)
+	}
+}
+
+func TestApprovedPlanContinuationWorksWithoutSeededTodos(t *testing.T) {
+	exec := agent.New(nil, nil, agent.NewSession("sys"), agent.Options{}, event.Discard)
+	runner := &scriptedRunner{exec: exec}
+
+	var c *Controller
+	approvalPrompts := 0
+	sink := event.FuncSink(func(e event.Event) {
+		if e.Kind != event.ApprovalRequest {
+			return
+		}
+		approvalPrompts++
+		if e.Approval.Tool == planApprovalTool {
+			go c.Approve(e.Approval.ID, true, false, false)
+			return
+		}
+		go c.Approve(e.Approval.ID, false, false, false)
+	})
+	c = New(Options{Runner: runner, Executor: exec, Sink: sink})
+	c.SetPlanMode(true)
+
+	runner.scripts = append(runner.scripts,
+		func(input string) {
+			exec.Session().Add(provider.Message{Role: provider.RoleAssistant, Content: "先创建文件，然后暂停让我审核。审核通过后继续修改文件。"})
+		},
+		func(input string) {
+			exec.Session().Add(provider.Message{Role: provider.RoleAssistant, Content: "first step done; paused for review"})
+		},
+	)
+
+	if err := c.runTurn(context.Background(), "plan this"); err != nil {
+		t.Fatal(err)
+	}
+	if approvalPrompts != 1 {
+		t.Fatalf("approval prompts after prose plan = %d, want 1", approvalPrompts)
+	}
+
+	if got := c.Compose("continue"); got == "continue" {
+		t.Fatal("explicit continuation should carry the approved-plan execution marker")
+	}
+	allow, _, err := gateApprover{c}.Approve(context.Background(), "write_file", "/tmp/a", nil)
+	if err != nil || !allow {
+		t.Fatalf("writer during prose-plan continuation = (%v,%v), want auto-allow", allow, err)
+	}
+
+	if got := c.Compose("revise the plan"); got != "revise the plan" {
+		t.Fatalf("non-continuation after prose plan should not be marker-prefixed, got %q", got)
+	}
+	allow, _, err = gateApprover{c}.Approve(context.Background(), "write_file", "/tmp/b", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if allow {
+		t.Fatal("non-continuation after prose plan should return to normal approval flow")
+	}
+	if approvalPrompts != 2 {
+		t.Fatalf("writer after non-continuation should prompt once, prompts=%d", approvalPrompts)
+	}
+}
