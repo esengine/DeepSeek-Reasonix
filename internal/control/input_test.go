@@ -371,3 +371,127 @@ func TestRunTurnAutoPlanScoresRawPromptNotResolvedRefs(t *testing.T) {
 		t.Fatal("controller plan mode should remain off")
 	}
 }
+
+func TestStripComposePrefixes(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "plain user message unchanged",
+			input: "explain this function",
+			want:  "explain this function",
+		},
+		{
+			name:  "plan mode marker stripped",
+			input: PlanModeMarker + "\n\nexplain this function",
+			want:  "explain this function",
+		},
+		{
+			name:  "plan mode marker without trailing newlines",
+			input: PlanModeMarker,
+			want:  "",
+		},
+		{
+			name:  "memory update block stripped",
+			input: "<memory-update>\nThe following project-memory changes were just made and apply from now on:\n- Saved memory \"rmb\": user balance\n</memory-update>\n\nexplain this",
+			want:  "explain this",
+		},
+		{
+			name:  "background jobs block stripped",
+			input: "<background-jobs>\n1 completed\n</background-jobs>\n\nexplain this",
+			want:  "explain this",
+		},
+		{
+			name:  "memory and plan marker both stripped",
+			input: "<memory-update>\n- note\n</memory-update>\n\n" + PlanModeMarker + "\n\nexplain this",
+			want:  "explain this",
+		},
+		{
+			name:  "empty after stripping",
+			input: PlanModeMarker + "\n\n",
+			want:  "",
+		},
+		{
+			name:  "memory update only no user text",
+			input: "<memory-update>\n- note\n</memory-update>\n\n",
+			want:  "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := StripComposePrefixes(tt.input)
+			if got != tt.want {
+				t.Errorf("StripComposePrefixes() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsSyntheticUserMessage(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  bool
+	}{
+		{
+			name:  "plan approved message",
+			input: planApprovedMessage,
+			want:  true,
+		},
+		{
+			name:  "stream recovery interrupted tool",
+			input: "The previous assistant response was interrupted while a tool call was streaming. Continue the same task now.",
+			want:  true,
+		},
+		{
+			name:  "stream recovery interrupted text",
+			input: "The previous assistant response was interrupted during streaming. Continue the same task from immediately after the partial assistant message above.",
+			want:  true,
+		},
+		{
+			name:  "empty final retry",
+			input: "The previous assistant response finished without any visible answer text. Continue the same task now and provide a concise visible answer.",
+			want:  true,
+		},
+		{
+			name:  "readiness retry",
+			input: "Host final-answer readiness check failed. Before giving a final answer, address the missing host-observable receipts: missing evidence.",
+			want:  true,
+		},
+		{
+			name:  "executor handoff",
+			input: "You are already in the executor phase. The planner's read-only limitations do not apply to you.",
+			want:  true,
+		},
+		{
+			name:  "regular user message",
+			input: "explain this function",
+			want:  false,
+		},
+		{
+			name:  "plan mode marker in message",
+			input: PlanModeMarker + "\n\nexplain this",
+			want:  false,
+		},
+		{
+			name:  "stream recovery interrupted before visible",
+			input: "The previous assistant response was interrupted during streaming before visible answer text was completed. Continue the same task now.",
+			want:  true,
+		},
+		{
+			name:  "user quoting interrupted response not synthetic",
+			input: "The previous assistant response was interrupted by my VPN, can you retry?",
+			want:  false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := IsSyntheticUserMessage(tt.input)
+			if got != tt.want {
+				t.Errorf("IsSyntheticUserMessage() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

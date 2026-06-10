@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/control"
 	"reasonix/internal/fileutil"
 )
 
@@ -471,7 +472,7 @@ func sessionDisplayResolver(dir, sessionPath string) func(content string) string
 				return display
 			}
 		}
-		return content
+		return control.StripComposePrefixes(content)
 	}
 }
 
