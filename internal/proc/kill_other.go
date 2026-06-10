@@ -12,9 +12,12 @@ func KillTree(cmd *exec.Cmd) {
 	_ = cmd.Process.Kill()
 }
 
-// TrackTree is a no-op off Windows (returns 0); KillTracked then falls back to
-// KillTree, which is sufficient where the platform reaps the child directly.
-func TrackTree(_ *exec.Cmd) uintptr { return 0 }
+// StartTracked starts cmd. Off Windows there is no Job Object to track it in —
+// the platform reaps the child directly — so it just starts and returns a 0
+// handle, and KillTracked falls back to KillTree.
+func StartTracked(cmd *exec.Cmd) (uintptr, error) {
+	return 0, cmd.Start()
+}
 
 // KillTracked terminates cmd's process tree; the handle is unused off Windows.
 func KillTracked(cmd *exec.Cmd, _ uintptr) { KillTree(cmd) }
