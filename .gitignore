@@ -66,3 +66,4 @@ Thumbs.db
 # Scratch / agent working dirs (never committed)
 /tmp/
 /.codex/
+reasonix-desktop.exe
