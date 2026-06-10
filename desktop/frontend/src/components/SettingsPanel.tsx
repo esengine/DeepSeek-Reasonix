@@ -18,6 +18,7 @@ import {
 } from "../lib/theme";
 import { TEXT_SIZES, applyTextSize, getTextSize, type TextSize } from "../lib/textSize";
 import { FONT_FAMILIES, applyFontFamily, getFontFamily, type FontFamily } from "../lib/fontFamily";
+import { setDisplayMode as setLocalDisplayMode } from "../lib/displayMode";
 import type { BotConnectionView, BotInstallStartResult, BotSettingsView, NetworkView, ProviderView, SettingsTab, SettingsView } from "../lib/types";
 import { InlineConfirmButton } from "./InlineConfirmButton";
 import { Tooltip } from "./Tooltip";
@@ -540,6 +541,7 @@ function normalizeSettingsView(view: SettingsView | null | undefined): SettingsV
     desktopTheme: normalizeThemePreference(view.desktopTheme),
     desktopThemeStyle: normalizeThemeStyleForTheme(view.desktopThemeStyle, normalizeThemePreference(view.desktopTheme)),
     closeBehavior: normalizeCloseBehavior(view.closeBehavior),
+    displayMode: normalizeDisplayMode(view.displayMode),
   };
 }
 
@@ -547,6 +549,12 @@ type CloseBehavior = "background" | "quit";
 
 function normalizeCloseBehavior(mode: string | undefined): CloseBehavior {
   return mode === "quit" ? "quit" : "background";
+}
+
+type DisplayMode = "standard" | "compact" | "minimal";
+
+function normalizeDisplayMode(mode: string | undefined): DisplayMode {
+  return mode === "compact" || mode === "minimal" ? mode : "standard";
 }
 
 function closeBehaviorLabel(mode: CloseBehavior, t: ReturnType<typeof useT>): string {
@@ -584,6 +592,7 @@ function reasoningProtocolLabel(protocol: string, t: ReturnType<typeof useT>): s
 function GeneralSection({ s, busy, apply }: SectionProps) {
   const { t, setPref } = useI18n();
   const closeBehavior = normalizeCloseBehavior(s.closeBehavior);
+  const displayMode = normalizeDisplayMode(s.displayMode);
   const autoPlan = normalizeAutoPlan(s.autoPlan);
   const languagePref = normalizeLangPref(s.desktopLanguage);
   const setLanguage = (next: LangPref) => {
@@ -616,6 +625,23 @@ function GeneralSection({ s, busy, apply }: SectionProps) {
               onClick={() => void apply(() => app.SetCloseBehavior(mode))}
             >
               {closeBehaviorLabel(mode, t)}
+            </button>
+          ))}
+        </div>
+      </SettingsField>
+      <SettingsField label={t("settings.displayMode")}>
+        <div className="set-seg">
+          {(["standard", "compact", "minimal"] as const).map((mode) => (
+            <button
+              key={mode}
+              className={`set-seg__btn${displayMode === mode ? " set-seg__btn--on" : ""}`}
+              disabled={busy}
+              onClick={() => {
+                setLocalDisplayMode(mode);
+                void apply(() => app.SetDisplayMode(mode));
+              }}
+            >
+              {t(`settings.displayMode.${mode}`)}
             </button>
           ))}
         </div>

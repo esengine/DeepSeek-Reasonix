@@ -2203,6 +2203,73 @@ a[href] {
   margin-right: auto;
 }
 
+/* ── Notice line (replaces full ProcessCard for notices) ─────────── */
+.notice-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 6px 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--fg-faint);
+  border-radius: 6px;
+}
+.notice-line--warn {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.notice-line__icon {
+  flex: 0 0 auto;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.notice-line__text {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+}
+
+/* ── TurnCollapse (compact/minimal mode) ─────────────────────────── */
+.turn-collapse {
+  margin: 4px 0;
+}
+.turn-collapse__head {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--fg-faint);
+  font-size: 13px;
+  border-radius: 4px;
+  transition: background 0.15s;
+  -webkit-app-region: no-drag;
+}
+.turn-collapse__head:hover {
+  background: var(--bg-soft);
+  color: var(--fg);
+}
+.turn-collapse__chevron {
+  flex: 0 0 auto;
+  transition: transform 0.15s;
+}
+.turn-collapse__chevron--open {
+  transform: rotate(90deg);
+}
+.turn-collapse__label {
+  white-space: nowrap;
+}
+.turn-collapse__body {
+  margin-top: 6px;
+  padding-left: 12px;
+  border-left: 2px solid var(--border);
+}
+.turn-collapse__body > * {
+  margin-bottom: 6px;
+}
+
 .transcript > .jump-bar {
   max-width: none;
   margin-left: auto;

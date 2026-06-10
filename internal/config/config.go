@@ -75,6 +75,7 @@ type DesktopConfig struct {
 	Theme          string   `toml:"theme"`           // auto|dark|light; empty resolves to dark
 	ThemeStyle     string   `toml:"theme_style"`     // graphite|aurora|slate|carbon|nocturne|amber and legacy aliases
 	CloseBehavior  string   `toml:"close_behavior"`  // quit|background; desktop window close behavior
+	DisplayMode    string   `toml:"display_mode"`    // standard|compact|minimal; transcript display mode
 	ProviderAccess []string `toml:"provider_access"` // desktop-only list of provider entries shown in Settings > Model > Access
 }
 
@@ -170,6 +171,20 @@ func (c *Config) DesktopCloseBehavior() string {
 // UICloseBehavior is the legacy name for DesktopCloseBehavior.
 func (c *Config) UICloseBehavior() string {
 	return c.DesktopCloseBehavior()
+}
+
+// DesktopDisplayMode normalizes the transcript display mode. Default is
+// "standard" (legacy behavior). "compact" and "minimal" progressively collapse
+// model-generated intermediate items (tool calls, reasoning, phase switches).
+func (c *Config) DesktopDisplayMode() string {
+	switch strings.ToLower(strings.TrimSpace(c.Desktop.DisplayMode)) {
+	case "compact":
+		return "compact"
+	case "minimal":
+		return "minimal"
+	default:
+		return "standard"
+	}
 }
 
 // LSPConfig governs the optional Language Server Protocol tools (lsp_definition,

@@ -79,7 +79,6 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
   // progress; closed by default once it settles.
   const hasArgsOrOutput = diffs.length === 0 && (!!item.args || !!item.output);
   const [open, setOpen] = useState(() => {
-    if (item.isShell) return hasArgsOrOutput;
     if (hasNested) return item.status === "running";
     return false;
   });

@@ -1,0 +1,22 @@
+export type DisplayMode = "standard" | "compact" | "minimal";
+
+const DISPLAY_MODE_KEY = "reasonix-display-mode";
+const DISPLAY_MODE_EVENT = "reasonix:display-mode";
+
+export function getDisplayMode(): DisplayMode {
+  if (typeof localStorage === "undefined") return "standard";
+  const stored = localStorage.getItem(DISPLAY_MODE_KEY);
+  if (stored === "compact" || stored === "minimal") return stored;
+  return "standard";
+}
+
+export function setDisplayMode(mode: DisplayMode): void {
+  localStorage.setItem(DISPLAY_MODE_KEY, mode);
+  window.dispatchEvent(new CustomEvent(DISPLAY_MODE_EVENT, { detail: mode }));
+}
+
+export function onDisplayModeChange(cb: (mode: DisplayMode) => void): () => void {
+  const handler = (e: Event) => cb((e as CustomEvent).detail as DisplayMode);
+  window.addEventListener(DISPLAY_MODE_EVENT, handler);
+  return () => window.removeEventListener(DISPLAY_MODE_EVENT, handler);
+}

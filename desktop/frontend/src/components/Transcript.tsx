@@ -4,10 +4,11 @@ import type { CheckpointMeta } from "../lib/types";
 import { useT } from "../lib/i18n";
 import { replaceAttachmentRefsForDisplay } from "../lib/attachmentDisplay";
 import { AssistantMessage, TurnActions, UserMessage } from "./Message";
-import { ProcessCard, ProcessCompactIcon, ProcessInfoIcon, ProcessPhaseIcon, ProcessStatusIcon } from "./ProcessCard";
+import { ProcessCard, ProcessCompactIcon, ProcessPhaseIcon, ProcessStatusIcon } from "./ProcessCard";
 import { ToolCard } from "./ToolCard";
 import { ChevronRight } from "lucide-react";
 import { Welcome } from "./Welcome";
+import { getDisplayMode, onDisplayModeChange, type DisplayMode } from "../lib/displayMode";
 
 type ToolItem = Extract<Item, { kind: "tool" }>;
 type AssistantItem = Extract<Item, { kind: "assistant" }>;
@@ -167,6 +168,9 @@ export function Transcript({
   const resizeFrame = useRef<number | null>(null);
   const lastClientHeight = useRef<number | null>(null);
   const lastFooterHeight = useRef<number | null>(null);
+
+  const [displayMode, setDisplayMode] = useState<DisplayMode>(() => getDisplayMode());
+  useEffect(() => onDisplayModeChange((mode) => setDisplayMode(mode)), []);
 
   const questions = useMemo<QuestionAnchor[]>(() => {
     const anchors: QuestionAnchor[] = [];
@@ -335,6 +339,51 @@ export function Transcript({
   // the warm/cold zone JSX trees. Uses LiveStreamContext for streaming data
   // (added by upstream PR #3423) instead of per-call renderSegments.
   const empty = items.length === 0;
+
+  // In compact/minimal mode, pre-compute turn segments so intermediate items
+  // between user and final assistant can be collapsed.
+  const segments = useMemo(() => {
+    if (displayMode === "standard") return null;
+    const segs: { userIdx: number; intermediate: number[]; finalAssistantIdx: number | null }[] = [];
+    let currentUser = -1;
+    let currentIntermediate: number[] = [];
+    let currentFinalAsst: number | null = null;
+    for (let i = hotStartIdx; i < items.length; i++) {
+      const it = items[i];
+      if (it.kind === "user") {
+        // Push previous segment if any
+        if (currentUser >= 0) {
+          segs.push({ userIdx: currentUser, intermediate: currentIntermediate, finalAssistantIdx: currentFinalAsst });
+        }
+        currentUser = i;
+        currentIntermediate = [];
+        currentFinalAsst = null;
+      } else if (currentUser >= 0) {
+        if (it.kind === "assistant" && !it.streaming && it.text.trim() !== "") {
+          // Check if this is the last assistant in this turn (next item is user or end)
+          const next = items[i + 1];
+          if (!next || next.kind === "user") {
+            currentFinalAsst = i;
+            continue;
+          }
+        }
+        // Collect intermediate items (non-user items that aren't final assistant)
+        if (it.kind === "assistant" && it.streaming) {
+          currentIntermediate.push(i);
+        } else if (it.kind === "assistant" && it.text.trim() === "") {
+          currentIntermediate.push(i);
+        } else if (it.kind !== "assistant") {
+          currentIntermediate.push(i);
+        }
+      }
+    }
+    // Push last segment
+    if (currentUser >= 0) {
+      segs.push({ userIdx: currentUser, intermediate: currentIntermediate, finalAssistantIdx: currentFinalAsst });
+    }
+    return segs;
+  }, [displayMode, hotStartIdx, items]);
+
   const hotZoneNodes = useMemo<ReactNode[]>(() => {
     const out: ReactNode[] = [];
     let actionText = "";
@@ -364,8 +413,42 @@ export function Transcript({
       actionReady = false;
     };
 
+    // Build a set of indices that are wrapped in TurnCollapse (compact/minimal)
+    const collapsedIndices = new Set<number>();
+    if (segments) {
+      for (const seg of segments) {
+        if (seg.intermediate.length > 0) {
+          for (const idx of seg.intermediate) {
+            collapsedIndices.add(idx);
+          }
+        }
+      }
+    }
+
     for (let i = hotStartIdx; i < items.length; i++) {
       const it = items[i];
+
+      // In compact/minimal mode, skip items that are collected in TurnCollapse
+      if (collapsedIndices.has(i)) continue;
+
+      // Render TurnCollapse before the final assistant if we passed through intermediate items
+      if (segments && it.kind === "assistant") {
+        const seg = segments.find((s) => s.finalAssistantIdx === i);
+        if (seg && seg.intermediate.length > 0) {
+          const midItems = seg.intermediate.map((idx) => items[idx]).filter(Boolean);
+          // Estimate duration as a function of intermediate items count
+          const dur = midItems.length * 1500;
+          out.push(
+            <TurnCollapse
+              key={`collapse-${i}`}
+              items={midItems}
+              durationMs={dur}
+              mode={displayMode}
+            />,
+          );
+        }
+      }
+
       switch (it.kind) {
         case "user": {
           pushTurnActions();
@@ -396,7 +479,7 @@ export function Transcript({
     }
     pushTurnActions();
     return out;
-  }, [hotStartIdx, items, openAction, actionPending, rewindDisabled, onRewind, subcallsByParent, userTurn, checkpointsByTurn]);
+  }, [hotStartIdx, items, openAction, actionPending, rewindDisabled, onRewind, subcallsByParent, userTurn, checkpointsByTurn, displayMode, segments]);
 
   // ── Assemble rendered output ──────────────────────────────────────────────
   // Warm/cold zone is a separate memo'd WarmZone component so streaming tokens
@@ -700,6 +783,64 @@ function WarmTurnCard({
   );
 }
 
+// ── TurnCollapse: compact/minimal mode grouping ──────────────────────────────
+
+type TurnCollapseProps = {
+  items: Item[];       // intermediate items (tools, reasoning, phase)
+  durationMs: number;  // estimated time from user to final answer
+  mode: DisplayMode;
+};
+
+function TurnCollapse({ items, durationMs, mode }: TurnCollapseProps) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+
+  // In minimal mode, filter to only writer tools + intermediate assistant messages
+  const displayItems = useMemo(() => {
+    if (mode === "minimal") {
+      return items.filter((it) => {
+        if (it.kind === "assistant") return true; // intermediate model replies
+        if (it.kind !== "tool") return false;
+        if (it.name === "bash") return false;       // shell
+        if (it.readOnly) return false;              // read-only tools
+        return true;                                 // writer tools
+      });
+    }
+    return items; // compact mode: show all
+  }, [items, mode]);
+
+  const hasProcessedBody = displayItems.length > 0;
+  const label = durationMs > 0 ? t("transcript.processedDuration", { s: Math.round(durationMs / 1000) }) : t("transcript.processed");
+
+  if (!hasProcessedBody) return null;
+
+  return (
+    <div className={`turn-collapse${open ? " turn-collapse--open" : ""}`}>
+      <button
+        type="button"
+        className="turn-collapse__head"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+      >
+        <ChevronRight className={`turn-collapse__chevron${open ? " turn-collapse__chevron--open" : ""}`} size={13} />
+        <span className="turn-collapse__label">{label}</span>
+      </button>
+      {open && (
+        <div className="turn-collapse__body">
+          {displayItems.map((it) => {
+            switch (it.kind) {
+              case "tool": return <ToolCard key={it.id} item={it as ToolItem} />;
+              case "phase": return <PhaseCard key={it.id} text={it.text} />;
+              case "assistant": return <AssistantMessage key={it.id} item={it as AssistantItem} />;
+              default: return null;
+            }
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── JumpBar, PhaseCard, NoticeCard, CompactionCard ────────────────────────────
 
 function QuestionJumpBar({ questions, onJump }: { questions: QuestionAnchor[]; onJump: (question: QuestionAnchor) => void }) {
@@ -846,20 +987,11 @@ function PhaseCard({ text }: { text: string }) {
 }
 
 function NoticeCard({ level, text }: { level: NoticeItem["level"]; text: string }) {
-  const t = useT();
-  const warning = level === "warn";
   return (
-    <ProcessCard
-      tone={warning ? "warning" : "default"}
-      icon={<ProcessInfoIcon size={12} />}
-      kind="notice"
-      name={t(warning ? "notice.warning" : "notice.info")}
-      meta={warning ? <ProcessStatusIcon state="waiting" label={t("notice.warning")} /> : undefined}
-      defaultOpen
-      className={`notice notice--${level}`}
-    >
-      <div className="notice__body">{text}</div>
-    </ProcessCard>
+    <div className={`notice-line notice-line--${level}`}>
+      <span className="notice-line__icon">{level === "warn" ? "⚠ " : "ℹ "}</span>
+      <span className="notice-line__text">{text}</span>
+    </div>
   );
 }
 
