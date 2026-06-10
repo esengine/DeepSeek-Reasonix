@@ -2270,6 +2270,46 @@ a[href] {
   margin-bottom: 6px;
 }
 
+/* ── ReadOnly batch (parent fold for read/search tools) ────────────── */
+.readonly-batch {
+  margin: 2px 0;
+}
+.readonly-batch__head {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--fg-faint);
+  font-size: 13px;
+  border-radius: 4px;
+  transition: background 0.15s;
+  -webkit-app-region: no-drag;
+}
+.readonly-batch__head:hover {
+  background: var(--bg-soft);
+  color: var(--fg);
+}
+.readonly-batch__chevron {
+  flex: 0 0 auto;
+  transition: transform 0.15s;
+}
+.readonly-batch__chevron--open {
+  transform: rotate(90deg);
+}
+.readonly-batch__label {
+  white-space: nowrap;
+}
+.readonly-batch__body {
+  display: flex;
+  flex-direction: column;
+}
+.readonly-batch__body > .tool--quiet {
+  padding-left: 20px;
+}
+
 .transcript > .jump-bar {
   max-width: none;
   margin-left: auto;

@@ -454,7 +454,19 @@ export function Transcript({
 
         // Final answer or active step → flush any pending batch then render
         flushCollapseBatch();
+        // Group consecutive readOnly tools into a batch
+        const readOnlyBatch: ToolItem[] = [];
+        const flushReadOnlyBatch = () => {
+          if (readOnlyBatch.length === 0) return;
+          out.push(<ReadOnlyBatch key={`rob-${readOnlyBatch[0].id}`} items={readOnlyBatch} subcalls={subcallsByParent} />);
+          readOnlyBatch.length = 0;
+        };
         for (const it of group.items) {
+          if (it.kind === "tool" && it.readOnly && !it.parentId && it.name !== "todo_write" && it.name !== "exit_plan_mode") {
+            readOnlyBatch.push(it as ToolItem);
+            continue;
+          }
+          flushReadOnlyBatch();
           switch (it.kind) {
             case "assistant":
               out.push(<LiveAssistantMessage key={it.id} item={it as AssistantItem} />);
@@ -474,6 +486,7 @@ export function Transcript({
             case "compaction": out.push(<CompactionCard key={it.id} item={it} />); break;
           }
         }
+        flushReadOnlyBatch();
       }
       flushCollapseBatch();
       pushTurnActions();
@@ -811,6 +824,42 @@ function WarmTurnCard({
         <div className="warm-turn__body">{children}</div>
       ) : (
         assistantPreview && <div className="warm-turn__assistant">{assistantPreview}</div>
+      )}
+    </div>
+  );
+}
+
+// ── ReadOnlyBatch ─────────────────────────────────────────────────────
+
+type ReadOnlyBatchProps = {
+  items: ToolItem[];
+  subcalls: ReadonlyMap<string, ToolItem[]>;
+};
+
+function ReadOnlyBatch({ items, subcalls }: ReadOnlyBatchProps) {
+  const t = useT();
+  const [open, setOpen] = useState(true);
+
+  const readCount = items.filter((it) => it.name === "read_file" || it.name === "ls").length;
+  const searchCount = items.filter((it) => it.name === "grep" || it.name === "glob" || it.name === "web_fetch").length;
+
+  const parts: string[] = [];
+  if (readCount > 0) parts.push(t("tool.readCount", { n: readCount }));
+  if (searchCount > 0) parts.push(t("tool.searchCount", { n: searchCount }));
+  const label = parts.join(" · ");
+
+  return (
+    <div className={`readonly-batch${open ? " readonly-batch--open" : ""}`}>
+      <button type="button" className="readonly-batch__head" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+        <ChevronRight className={`readonly-batch__chevron${open ? " readonly-batch__chevron--open" : ""}`} size={13} />
+        <span className="readonly-batch__label">{label}</span>
+      </button>
+      {open && (
+        <div className="readonly-batch__body">
+          {items.map((it) => (
+            <ToolCard key={it.id} item={it} subcalls={subcalls.get(it.id)} />
+          ))}
+        </div>
       )}
     </div>
   );

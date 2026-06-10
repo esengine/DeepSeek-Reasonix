@@ -82,7 +82,6 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
   // completion so they don't clutter the transcript. During execution they still
   // render so the user sees progress.
   const quiet = item.readOnly && !hasNested;
-  if (quiet && item.status !== "running") return null;
 
   // Shell output: split into preview + "show all" toggle.
   const shellOutput = item.isShell && item.output ? item.output : null;

@@ -1003,6 +1003,8 @@ export const en = {
   "tool.stepOther": "{n} steps",
   "tool.truncated": "output truncated",
   "tool.showAllLines": "show all {n} lines",
+  "tool.readCount": "Read {n} files",
+  "tool.searchCount": "Search {n} files",
   "tool.lineOne": "{n} line",
   "tool.lineOther": "{n} lines",
   "tool.matchOne": "{n} match",
