@@ -245,6 +245,7 @@ export const AssistantMessage = memo(function AssistantMessage({
   const hasText = item.streaming || item.text.trim() !== "";
   const processOnly = Boolean(item.reasoning) && !hasText;
   const processWithText = Boolean(item.reasoning) && hasText;
+  const [reasoningOpen, setReasoningOpen] = useState(item.streaming);
   return (
     <div className={`msg msg--assistant${processOnly ? " msg--process-only" : ""}${processWithText ? " msg--process-with-text" : ""}`}>
       {item.reasoning && (
@@ -259,7 +260,8 @@ export const AssistantMessage = memo(function AssistantMessage({
               <span>{item.streaming ? t("msg.thinkingRunning") : t("msg.thinkingDone")}</span>
             </>
           }
-          defaultOpen={item.streaming}
+          open={reasoningOpen}
+          onOpenChange={setReasoningOpen}
         >
           <div className="reasoning__body">{item.reasoning}</div>
         </ProcessCard>
