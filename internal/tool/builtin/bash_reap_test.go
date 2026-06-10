@@ -3,7 +3,10 @@
 package builtin
 
 import (
+	"context"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -14,17 +17,24 @@ import (
 // TestReapTreeKillsGroupStragglers covers #3702: a foreground command that
 // backgrounds a child (here a long sleep, standing in for `bazel run`'s server)
 // leaves it in the process group after Wait reaps the shell leader. reapTree must
-// kill it so such processes don't accumulate into an OOM.
+// kill it so such processes don't accumulate into an OOM. The child redirects its
+// fds and the pid is passed via a file so the inherited stdout can't block Wait.
 func TestReapTreeKillsGroupStragglers(t *testing.T) {
-	cmd := exec.Command("sh", "-c", "sleep 60 & echo $!")
+	pidFile := filepath.Join(t.TempDir(), "pid")
+	cmd := exec.CommandContext(context.Background(), "sh", "-c",
+		"sleep 60 >/dev/null 2>&1 & echo $! > "+pidFile)
 	setKillTree(cmd) // Setpgid — the shell leads its own group
-	out, err := cmd.Output()
-	if err != nil {
+	if err := cmd.Run(); err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(out)))
+
+	data, err := os.ReadFile(pidFile)
 	if err != nil {
-		t.Fatalf("parse backgrounded pid %q: %v", out, err)
+		t.Fatalf("read pid file: %v", err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		t.Fatalf("parse backgrounded pid %q: %v", data, err)
 	}
 	if err := syscall.Kill(pid, 0); err != nil {
 		t.Skipf("backgrounded child %d not alive after shell exit (%v)", pid, err)
@@ -34,7 +44,7 @@ func TestReapTreeKillsGroupStragglers(t *testing.T) {
 
 	dead := false
 	for i := 0; i < 50; i++ {
-		if err := syscall.Kill(pid, 0); err != nil {
+		if syscall.Kill(pid, 0) != nil {
 			dead = true
 			break
 		}
