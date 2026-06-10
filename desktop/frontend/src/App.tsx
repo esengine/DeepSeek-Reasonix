@@ -44,7 +44,6 @@ import {
   modeHasAutoApproveTools,
   modeHasPlan,
   modeFromAxes,
-  normalizeCollaborationMode,
   normalizeMode,
   normalizeToolApprovalMode,
   type CollaborationMode,
@@ -56,6 +55,13 @@ import {
   type TabMeta,
   type ToolApprovalMode,
 } from "./lib/types";
+import {
+  controllerCollaborationMode,
+  displayedCollaborationMode,
+  keepGoalDraftMode,
+  metaSyncedCollaborationMode,
+  tabListCollaborationMode,
+} from "./lib/goalDraftMode";
 import { loadLayoutSize, saveLayoutSize } from "./lib/layoutPreferences";
 import {
   applyTheme,
@@ -586,7 +592,14 @@ export default function App() {
   const goal = activeTabId ? goalsByTab[activeTabId] ?? state.meta?.goal ?? activeTab?.goal ?? "" : "";
   const goalDraftMode = activeTabId ? Boolean(goalDraftModesByTab[activeTabId]) : false;
   const collaborationMode = activeTabId
-    ? goalDraftMode ? "goal" : collaborationModesByTab[activeTabId] ?? normalizeCollaborationMode(state.meta?.goal ? "goal" : activeTab?.collaborationMode, goal, legacyMode)
+    ? displayedCollaborationMode({
+        goalDraftMode,
+        localMode: collaborationModesByTab[activeTabId],
+        metaGoal: state.meta?.goal,
+        tabMode: activeTab?.collaborationMode,
+        goal,
+        legacyMode,
+      })
     : "normal";
   const toolApprovalMode = activeTabId
     ? toolApprovalModesByTab[activeTabId] ?? normalizeToolApprovalMode(state.meta?.toolApprovalMode ?? activeTab?.toolApprovalMode, legacyMode, state.meta?.autoApproveTools ?? state.meta?.bypass)
@@ -623,7 +636,13 @@ export default function App() {
       ...tab,
       running: tab.id === visibleTabId ? tab.running || state.running : tab.running,
       mode: modesByTab[tab.id] ?? normalizeMode(tab.mode),
-      collaborationMode: goalDraftModesByTab[tab.id] ? "goal" : collaborationModesByTab[tab.id] ?? normalizeCollaborationMode(tab.collaborationMode, goalsByTab[tab.id] ?? tab.goal, normalizeMode(tab.mode)),
+      collaborationMode: tabListCollaborationMode({
+        goalDraftMode: Boolean(goalDraftModesByTab[tab.id]),
+        localMode: collaborationModesByTab[tab.id],
+        tabMode: tab.collaborationMode,
+        tabGoal: goalsByTab[tab.id] ?? tab.goal,
+        legacyMode: normalizeMode(tab.mode),
+      }),
       toolApprovalMode: toolApprovalModesByTab[tab.id] ?? normalizeToolApprovalMode(tab.toolApprovalMode, normalizeMode(tab.mode), tab.toolApprovalMode === "yolo"),
       goal: goalsByTab[tab.id] ?? tab.goal ?? "",
       active: tab.id === visibleTabId,
@@ -647,7 +666,7 @@ export default function App() {
       let changed = false;
       const next: Record<string, boolean> = {};
       for (const tab of tabMetas) {
-        if (current[tab.id] && !(tab.goal ?? "").trim()) {
+        if (keepGoalDraftMode(Boolean(current[tab.id]), tab.goal)) {
           next[tab.id] = true;
         } else if (current[tab.id]) {
           changed = true;
@@ -675,9 +694,12 @@ export default function App() {
       let changed = false;
       const next: Record<string, CollaborationMode> = {};
       for (const tab of tabMetas) {
-        const value = goalDraftModesByTab[tab.id] && !(tab.goal ?? "").trim()
-          ? "goal"
-          : normalizeCollaborationMode(tab.collaborationMode, tab.goal, normalizeMode(tab.mode));
+        const value = tabListCollaborationMode({
+          goalDraftMode: keepGoalDraftMode(Boolean(goalDraftModesByTab[tab.id]), tab.goal),
+          tabMode: tab.collaborationMode,
+          tabGoal: tab.goal,
+          legacyMode: normalizeMode(tab.mode),
+        });
         next[tab.id] = value;
         if (current[tab.id] !== value) changed = true;
       }
@@ -728,7 +750,7 @@ export default function App() {
     if (nextGoal) setGoalDraftModeForTab(activeTabId, false);
     setGoalsByTab((current) => (current[activeTabId] === nextGoal ? current : { ...current, [activeTabId]: nextGoal }));
     setCollaborationModesByTab((current) => {
-      const nextMode = nextGoal || goalDraftMode ? "goal" : normalizeCollaborationMode(undefined, "", legacyMode);
+      const nextMode = metaSyncedCollaborationMode({ nextGoal, goalDraftMode, legacyMode });
       return current[activeTabId] === nextMode ? current : { ...current, [activeTabId]: nextMode };
     });
   }, [activeTabId, goalDraftMode, legacyMode, setGoalDraftModeForTab, state.meta]);
@@ -821,8 +843,7 @@ export default function App() {
   const switchModel = useCallback(
     async (name: string) => {
       await setModel(name);
-      const controllerCollaborationMode = collaborationMode === "goal" && !goal.trim() ? "normal" : collaborationMode;
-      await setControllerCollaborationMode(controllerCollaborationMode);
+      await setControllerCollaborationMode(controllerCollaborationMode({ collaborationMode, goal }));
       await setControllerToolApprovalMode(toolApprovalMode);
       if (goal.trim()) await setControllerGoal(goal);
     },
@@ -835,8 +856,7 @@ export default function App() {
   // SetBypass binding was a harmless no-op.
   useEffect(() => {
     if (!controllerReady) return;
-    const controllerCollaborationMode = collaborationMode === "goal" && !goal.trim() ? "normal" : collaborationMode;
-    void setControllerCollaborationMode(controllerCollaborationMode);
+    void setControllerCollaborationMode(controllerCollaborationMode({ collaborationMode, goal }));
     void setControllerToolApprovalMode(toolApprovalMode);
     if (goal.trim()) void setControllerGoal(goal);
   }, [collaborationMode, controllerReady, goal, setControllerCollaborationMode, setControllerGoal, setControllerToolApprovalMode, toolApprovalMode]);

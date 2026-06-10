@@ -11,9 +11,9 @@
     "check:browser-preview": "node scripts/check-browser-preview-stability.mjs",
     "test:todo-visibility": "node scripts/test-todo-visibility.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "tsx src/__tests__/math-golden.test.ts && tsx src/__tests__/text-size.test.ts && tsx src/__tests__/provider-model-refresh.test.ts",
+    "test": "tsx src/__tests__/math-golden.test.ts && tsx src/__tests__/text-size.test.ts && tsx src/__tests__/provider-model-refresh.test.ts && tsx src/__tests__/goal-draft-mode.test.ts",
     "test:typecheck": "tsc --noEmit -p tsconfig.test.json",
-    "test:all": "tsc --noEmit -p tsconfig.test.json && tsx src/__tests__/math-golden.test.ts && tsx src/__tests__/text-size.test.ts && tsx src/__tests__/provider-model-refresh.test.ts"
+    "test:all": "tsc --noEmit -p tsconfig.test.json && tsx src/__tests__/math-golden.test.ts && tsx src/__tests__/text-size.test.ts && tsx src/__tests__/provider-model-refresh.test.ts && tsx src/__tests__/goal-draft-mode.test.ts"
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.14.2",
