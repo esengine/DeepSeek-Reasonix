@@ -2152,6 +2152,11 @@ func (c *Controller) DisconnectMCPServer(name string) bool {
 // Label returns the human-readable model label, e.g. "deepseek-flash".
 func (c *Controller) Label() string { return c.label }
 
+// WorkspaceRoot returns the workspace root for this controller's session
+// (the directory that file-writers and @-references are scoped to).
+// Empty means no scoping is in effect.
+func (c *Controller) WorkspaceRoot() string { return c.cpRoot }
+
 // Close stops plugin subprocesses and releases resources. A session that ever
 // started fires SessionEnd so a teardown hook runs.
 func (c *Controller) Close() {

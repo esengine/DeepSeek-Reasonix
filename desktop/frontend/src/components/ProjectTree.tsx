@@ -20,6 +20,7 @@ interface ProjectTreeProps {
   onOpenTopic: (scope: string, workspaceRoot: string, topicId: string) => Promise<void> | void;
   onOpenProjectHistory: (scope: "global" | "project", workspaceRoot: string) => Promise<void> | void;
   onAddProject: () => Promise<void>;
+  onCreateTopic?: (scope: string, workspaceRoot: string) => Promise<void> | void;
   onRenameTopic?: (topicId: string, title: string) => Promise<void> | void;
   onTopicsChanged?: () => Promise<void> | void;
   refreshSignal?: number;
@@ -193,6 +194,7 @@ export function ProjectTree({
   onOpenTopic,
   onOpenProjectHistory,
   onAddProject,
+  onCreateTopic,
   onRenameTopic,
   onTopicsChanged,
   refreshSignal,
@@ -371,6 +373,12 @@ export function ProjectTree({
       return next;
     });
     try {
+      if (onCreateTopic) {
+        await onCreateTopic(scope, workspaceRoot);
+        await refresh();
+        await onTopicsChanged?.();
+        return;
+      }
       const topic = await app.CreateTopic(scope, workspaceRoot, "");
       await refresh();
       await onTopicsChanged?.();

@@ -429,15 +429,15 @@ context_window = 1000000   # tokens; harness compacts older history near this li
 [[providers]]
 name        = "mimo-pro"
 kind        = "openai"
-base_url    = "https://api.xiaomimimo.com/v1"
+base_url    = "https://token-plan-cn.xiaomimimo.com/v1"
 model       = "mimo-v2.5-pro"
 api_key_env = "MIMO_API_KEY"
 
 [[providers]]
 name        = "mimo-flash"
 kind        = "openai"
-base_url    = "https://api.xiaomimimo.com/v1"
-model       = "mimo-v2-flash"
+base_url    = "https://token-plan-cn.xiaomimimo.com/v1"
+model       = "mimo-v2.5"
 api_key_env = "MIMO_API_KEY"
 
 [tools]

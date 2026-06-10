@@ -4,7 +4,7 @@ import { asArray } from "../lib/array";
 import { useDeferredClose } from "../lib/useMountTransition";
 import { app } from "../lib/bridge";
 import { normalizeLangPref, useI18n, useT, type DictKey, type LangPref } from "../lib/i18n";
-import { mergedFetchedProviderModels, providerDefaultModel } from "../lib/providerModels";
+import { mergedFetchedProviderModels, providerDefaultModel, providerModelCandidates } from "../lib/providerModels";
 import { useUpdater } from "../lib/useUpdater";
 import {
   THEME_STYLES,
@@ -1913,6 +1913,7 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
   const [adding, setAdding] = useState<AddProviderMode>(null);
   const [fetchingProvider, setFetchingProvider] = useState<string | null>(null);
   const [fetchResults, setFetchResults] = useState<Record<string, ProviderFetchResult>>({});
+  const [modelDrafts, setModelDrafts] = useState<Record<string, ProviderModelDraft>>({});
   const groups = providerAccessGroups(s.providers.filter((p) => p.added), t);
 
   const setGroupFetchResult = (groupID: string, result: ProviderFetchResult | null) => {
@@ -1924,35 +1925,67 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
     });
   };
 
+  const setGroupModelDraft = (groupID: string, draft: ProviderModelDraft | null) => {
+    setModelDrafts((prev) => {
+      const next = { ...prev };
+      if (draft) next[groupID] = draft;
+      else delete next[groupID];
+      return next;
+    });
+  };
+
+  const modelDraftForFetch = (p: ProviderView, fetched: string[]): ProviderModelDraft => {
+    const candidates = providerModelCandidates(p.models, fetched);
+    const selected = mergedFetchedProviderModels(p.models, fetched, { preserveCurated: true });
+    return {
+      providerName: p.name,
+      candidates,
+      selected: candidates.filter((model) => selected.includes(model)),
+    };
+  };
+
+  const updateModelDraftSelection = (groupID: string, nextSelected: (draft: ProviderModelDraft) => string[]) => {
+    setModelDrafts((prev) => {
+      const draft = prev[groupID];
+      if (!draft) return prev;
+      const selectedSet = new Set(nextSelected(draft));
+      return {
+        ...prev,
+        [groupID]: {
+          ...draft,
+          selected: draft.candidates.filter((model) => selectedSet.has(model)),
+        },
+      };
+    });
+  };
+
   const refreshModels = async (group: ProviderAccessGroup, p: ProviderView) => {
     setFetchingProvider(group.id);
     setGroupFetchResult(group.id, null);
+    setGroupModelDraft(group.id, null);
     try {
-      await apply(async () => {
-        let fetched: string[];
-        try {
-          fetched = await app.FetchProviderModels(p);
-        } catch (e) {
-          setGroupFetchResult(group.id, {
-            kind: "warn",
-            text: t("settings.fetchModelsFailedForProvider", { provider: group.label, err: String((e as Error)?.message ?? e) }),
-          });
-          return;
-        }
-        if (fetched.length === 0) {
-          setGroupFetchResult(group.id, {
-            kind: "warn",
-            text: t("settings.fetchModelsEmptyForProvider", { provider: group.label }),
-          });
-          return;
-        }
-        const models = mergedFetchedProviderModels(p.models, fetched, { preserveCurated: true });
-        const currentDefault = providerDefaultModel(p.default, models);
-        await app.SaveProvider({ ...p, models, default: currentDefault });
+      let fetched: string[];
+      try {
+        fetched = await app.FetchProviderModels(p);
+      } catch (e) {
         setGroupFetchResult(group.id, {
-          kind: "ok",
-          text: t("settings.fetchModelsUpdatedForProvider", { provider: group.label, n: models.length }),
+          kind: "warn",
+          text: t("settings.fetchModelsFailedForProvider", { provider: group.label, err: String((e as Error)?.message ?? e) }),
         });
+        return;
+      }
+      if (fetched.length === 0) {
+        setGroupFetchResult(group.id, {
+          kind: "warn",
+          text: t("settings.fetchModelsEmptyForProvider", { provider: group.label }),
+        });
+        return;
+      }
+      const draft = modelDraftForFetch(p, fetched);
+      setGroupModelDraft(group.id, draft);
+      setGroupFetchResult(group.id, {
+        kind: "ok",
+        text: t("settings.fetchModelsReadyForProvider", { provider: group.label, n: draft.candidates.length }),
       });
     } finally {
       setFetchingProvider(null);
@@ -1970,18 +2003,18 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
     if (!probe || !apiKeyEnv) return;
     setFetchingProvider(group.id);
     setGroupFetchResult(group.id, null);
+    setGroupModelDraft(group.id, null);
     try {
       await apply(async () => {
         await app.SetProviderKey(apiKeyEnv, value);
         try {
           const fetched = await app.FetchProviderModels({ ...probe, apiKeyEnv });
           if (fetched.length > 0) {
-            const models = mergedFetchedProviderModels(probe.models, fetched, { preserveCurated: true });
-            const currentDefault = providerDefaultModel(probe.default, models);
-            await app.SaveProvider({ ...probe, apiKeyEnv, models, default: currentDefault });
+            const draft = modelDraftForFetch({ ...probe, apiKeyEnv }, fetched);
+            setGroupModelDraft(group.id, draft);
             setGroupFetchResult(group.id, {
               kind: "ok",
-              text: t("settings.fetchModelsUpdatedForProvider", { provider: group.label, n: models.length }),
+              text: t("settings.fetchModelsReadyForProvider", { provider: group.label, n: draft.candidates.length }),
             });
             return;
           }
@@ -2004,12 +2037,31 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
   const saveProviderKey = async (group: ProviderAccessGroup, apiKeyEnv: string, value: string) => {
     if (!apiKeyEnv) return;
     setGroupFetchResult(group.id, null);
+    setGroupModelDraft(group.id, null);
     await apply(() => app.SetProviderKey(apiKeyEnv, value));
   };
 
   const clearProviderKey = async (apiKeyEnv: string) => {
     if (!apiKeyEnv) return;
     await apply(() => app.ClearProviderKey(apiKeyEnv));
+  };
+
+  const saveModelDraft = async (group: ProviderAccessGroup) => {
+    const draft = modelDrafts[group.id];
+    const provider = draft ? group.providers.find((p) => p.name === draft.providerName) : null;
+    const models = uniqueStrings(draft?.selected ?? []);
+    if (!draft || !provider || models.length === 0) return;
+    let saved = false;
+    await apply(async () => {
+      await app.SaveProvider({ ...provider, models, default: providerDefaultModel(provider.default, models) });
+      saved = true;
+    });
+    if (!saved) return;
+    setGroupModelDraft(group.id, null);
+    setGroupFetchResult(group.id, {
+      kind: "ok",
+      text: t("settings.enabledModelsSavedForProvider", { provider: group.label, n: models.length }),
+    });
   };
 
   return (
@@ -2055,13 +2107,26 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
             busy={busy}
             fetching={fetchingProvider === group.id || group.providers.some((p) => fetchingProvider === p.name)}
             fetchResult={fetchResults[group.id]}
+            modelDraft={modelDrafts[group.id]}
             defaultProvider={defaultProvider}
             editing={editing}
             kinds={s.providerKinds}
             onEdit={setEditing}
             onCancelEdit={() => setEditing(null)}
-            onSave={(pv) => apply(() => app.SaveProvider(pv)).then(() => setEditing(null))}
+            onSave={(pv) => apply(() => app.SaveProvider(pv)).then(() => {
+              setEditing(null);
+              setGroupModelDraft(group.id, null);
+            })}
             onRefresh={() => void refreshGroup(group)}
+            onToggleDraftModel={(model) => updateModelDraftSelection(group.id, (draft) => (
+              draft.selected.includes(model)
+                ? draft.selected.filter((candidate) => candidate !== model)
+                : [...draft.selected, model]
+            ))}
+            onSelectAllDraftModels={() => updateModelDraftSelection(group.id, (draft) => draft.candidates)}
+            onClearDraftModels={() => updateModelDraftSelection(group.id, () => [])}
+            onCancelDraftModels={() => setGroupModelDraft(group.id, null)}
+            onSaveDraftModels={() => void saveModelDraft(group)}
             onSaveEditorKey={(env, value) => group.builtIn ? saveProviderKey(group, env, value) : saveKeyEnvAndAutoRefresh(group, env, value)}
             onClearEditorKey={clearProviderKey}
             onDelete={(p) => apply(() => app.RemoveProviderAccess(p.name))}
@@ -2088,6 +2153,12 @@ type ProviderAccessGroup = {
 type ProviderFetchResult = {
   kind: "ok" | "warn";
   text: string;
+};
+
+type ProviderModelDraft = {
+  providerName: string;
+  candidates: string[];
+  selected: string[];
 };
 
 type AddProviderMode = null | "official" | "custom";
@@ -2226,6 +2297,7 @@ function ProviderAccessCard({
   busy,
   fetching,
   fetchResult,
+  modelDraft,
   defaultProvider,
   editing,
   kinds,
@@ -2233,6 +2305,11 @@ function ProviderAccessCard({
   onCancelEdit,
   onSave,
   onRefresh,
+  onToggleDraftModel,
+  onSelectAllDraftModels,
+  onClearDraftModels,
+  onCancelDraftModels,
+  onSaveDraftModels,
   onSaveEditorKey,
   onClearEditorKey,
   onDelete,
@@ -2241,6 +2318,7 @@ function ProviderAccessCard({
   busy: boolean;
   fetching: boolean;
   fetchResult?: ProviderFetchResult;
+  modelDraft?: ProviderModelDraft;
   defaultProvider: string;
   editing: string | null;
   kinds: string[];
@@ -2248,6 +2326,11 @@ function ProviderAccessCard({
   onCancelEdit: () => void;
   onSave: (p: ProviderView) => void | Promise<void>;
   onRefresh: () => void;
+  onToggleDraftModel: (model: string) => void;
+  onSelectAllDraftModels: () => void;
+  onClearDraftModels: () => void;
+  onCancelDraftModels: () => void;
+  onSaveDraftModels: () => void;
   onSaveEditorKey: (apiKeyEnv: string, value: string) => Promise<void>;
   onClearEditorKey?: (apiKeyEnv: string) => Promise<void>;
   onDelete?: (p: ProviderView) => Promise<void>;
@@ -2318,8 +2401,8 @@ function ProviderAccessCard({
       </div>
 
       <div className="provider-card-block">
-        <div className="provider-card-block__label">{t(group.keySet ? "settings.availableModels" : "settings.modelList")}</div>
-        <div className="provider-model-chips" aria-label={t(group.keySet ? "settings.availableModels" : "settings.modelList")}>
+        <div className="provider-card-block__label">{t(group.keySet ? "settings.enabledModels" : "settings.modelList")}</div>
+        <div className="provider-model-chips" aria-label={t(group.keySet ? "settings.enabledModels" : "settings.modelList")}>
           {visibleModels.length > 0 ? visibleModels.map((model) => (
             <span className="provider-model-chip" key={model}>
               {model}
@@ -2342,6 +2425,19 @@ function ProviderAccessCard({
           </div>
         )}
       </div>
+
+      {modelDraft && (
+        <ProviderModelDraftPicker
+          draft={modelDraft}
+          busy={busy}
+          fetching={fetching}
+          onToggle={onToggleDraftModel}
+          onSelectAll={onSelectAllDraftModels}
+          onClear={onClearDraftModels}
+          onCancel={onCancelDraftModels}
+          onSave={onSaveDraftModels}
+        />
+      )}
 
       {group.providers.length > 1 && (
         <div className="provider-profiles">
@@ -2377,6 +2473,84 @@ function ProviderAccessCard({
         />
       )}
     </article>
+  );
+}
+
+function ProviderModelDraftPicker({
+  draft,
+  busy,
+  fetching,
+  onToggle,
+  onSelectAll,
+  onClear,
+  onCancel,
+  onSave,
+}: {
+  draft: ProviderModelDraft;
+  busy: boolean;
+  fetching: boolean;
+  onToggle: (model: string) => void;
+  onSelectAll: () => void;
+  onClear: () => void;
+  onCancel: () => void;
+  onSave: () => void;
+}) {
+  const t = useT();
+  const [query, setQuery] = useState("");
+  const selected = new Set(draft.selected);
+  const q = query.trim().toLowerCase();
+  const visibleCandidates = q
+    ? draft.candidates.filter((model) => model.toLowerCase().includes(q))
+    : draft.candidates;
+  const disabled = busy || fetching;
+
+  return (
+    <div className="provider-model-draft">
+      <div className="provider-model-draft__head">
+        <div>
+          <div className="provider-card-block__label">{t("settings.modelCandidates")}</div>
+          <span>{t("settings.modelCandidatesSelected", { n: draft.selected.length })}</span>
+        </div>
+        <div className="provider-model-draft__tools">
+          <button type="button" className="btn btn--small" disabled={disabled || draft.selected.length === draft.candidates.length} onClick={onSelectAll}>
+            {t("settings.selectAllModels")}
+          </button>
+          <button type="button" className="btn btn--small" disabled={disabled || draft.selected.length === 0} onClick={onClear}>
+            {t("settings.clearModelSelection")}
+          </button>
+        </div>
+      </div>
+      <input
+        className="mem-input provider-model-draft__search"
+        placeholder={t("settings.modelCandidateSearch")}
+        value={query}
+        disabled={disabled}
+        onChange={(e) => setQuery(e.target.value)}
+      />
+      <div className="provider-model-draft__list" role="list" aria-label={t("settings.modelCandidates")}>
+        {visibleCandidates.length > 0 ? visibleCandidates.map((model) => (
+          <label className="provider-model-draft__option" key={model}>
+            <input
+              type="checkbox"
+              checked={selected.has(model)}
+              disabled={disabled}
+              onChange={() => onToggle(model)}
+            />
+            <span>{model}</span>
+          </label>
+        )) : (
+          <div className="provider-model-draft__empty">{t("settings.noMatchingCandidateModels")}</div>
+        )}
+      </div>
+      <div className="provider-model-draft__actions">
+        <button type="button" className="btn btn--small" disabled={disabled} onClick={onCancel}>
+          {t("common.cancel")}
+        </button>
+        <button type="button" className="btn btn--primary btn--small" disabled={disabled || draft.selected.length === 0} onClick={onSave}>
+          {t("settings.saveEnabledModels")}
+        </button>
+      </div>
+    </div>
   );
 }
 

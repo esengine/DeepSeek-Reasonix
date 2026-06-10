@@ -814,11 +814,26 @@ func (a *App) NewSession() error {
 	if ctrl == nil {
 		return nil
 	}
+	// Tab is already blank — just persist and skip the new-session dance.
+	if !ctrl.Running() && !messagesHaveConversationContent(ctrl.History()) {
+		a.persistTabSessionPath(tab, ctrl.SessionPath())
+		return nil
+	}
+
 	if err := ctrl.NewSession(); err != nil {
 		return err
 	}
 	a.persistTabSessionPath(tab, ctrl.SessionPath())
 	return nil
+}
+
+func messagesHaveConversationContent(messages []provider.Message) bool {
+	for _, msg := range messages {
+		if msg.Role != provider.RoleSystem {
+			return true
+		}
+	}
+	return false
 }
 
 // ClearSession discards the current conversation and rotates to a fresh unsaved one.
@@ -3794,38 +3809,59 @@ func (a *App) currentProviderEntryForTab(tabID string) (*config.ProviderEntry, e
 	return entry, nil
 }
 
+func (a *App) withActiveWorkspace(fn func() (string, error)) (string, error) {
+	var result string
+	err := a.withActiveWorkspaceDo(func() error {
+		var err error
+		result, err = fn()
+		return err
+	})
+	return result, err
+}
+
+func (a *App) withActiveWorkspaceDo(fn func() error) error {
+	root := a.activeWorkspaceRoot()
+	if root != "" && root != "." {
+		prev, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		if err := os.Chdir(root); err != nil {
+			return err
+		}
+		defer func() { _ = os.Chdir(prev) }()
+	}
+	return fn()
+}
+
 // SavePastedImage stores a browser clipboard image data URL under the active
 // tab's workspace .reasonix/attachments and returns the relative @-reference path.
 func (a *App) SavePastedImage(dataURL string) (string, error) {
-	root := a.activeWorkspaceRoot()
-	if root != "" && root != "." {
-		if prev, err := os.Getwd(); err == nil {
-			if err := os.Chdir(root); err == nil {
-				defer func() { _ = os.Chdir(prev) }()
-			}
-		}
-	}
-	return control.SaveImageDataURL(dataURL)
+	return a.withActiveWorkspace(func() (string, error) {
+		return control.SaveImageDataURL(dataURL)
+	})
+}
+
+// SaveClipboardImage reads the native OS clipboard image under the active tab's
+// workspace .reasonix/attachments and returns the relative @-reference path.
+func (a *App) SaveClipboardImage() (string, error) {
+	return a.withActiveWorkspace(control.SaveClipboardImage)
 }
 
 // SavePastedFile stores a dropped non-image file (the browser exposes its bytes
 // as a data URL but not a real path) under the active tab's workspace
 // .reasonix/attachments and returns the relative @-reference path.
 func (a *App) SavePastedFile(name, dataURL string) (string, error) {
-	root := a.activeWorkspaceRoot()
-	if root != "" && root != "." {
-		if prev, err := os.Getwd(); err == nil {
-			if err := os.Chdir(root); err == nil {
-				defer func() { _ = os.Chdir(prev) }()
-			}
-		}
-	}
-	return control.SaveAttachmentDataURL(name, dataURL)
+	return a.withActiveWorkspace(func() (string, error) {
+		return control.SaveAttachmentDataURL(name, dataURL)
+	})
 }
 
 // AttachmentDataURL returns a safe data URL for a stored image attachment.
 func (a *App) AttachmentDataURL(path string) (string, error) {
-	return control.ImageDataURL(path)
+	return a.withActiveWorkspace(func() (string, error) {
+		return control.ImageDataURL(path)
+	})
 }
 
 // DroppedItem is one OS-dropped file resolved into a composer context entry: an
@@ -3843,27 +3879,37 @@ type DroppedItem struct {
 // thumbnail; other in-workspace files are referenced relatively (no copy); files
 // outside the workspace are copied into .reasonix/attachments.
 func (a *App) AttachDropped(path string) (DroppedItem, error) {
-	info, err := os.Lstat(path)
-	if err != nil {
-		return DroppedItem{}, err
-	}
-	if isImageExt(path) {
-		if rel, err := control.SaveImageFile(path); err == nil {
-			preview, _ := control.ImageDataURL(rel)
-			return DroppedItem{Kind: "attachment", Path: rel, PreviewURL: preview}, nil
+	var item DroppedItem
+	err := a.withActiveWorkspaceDo(func() error {
+		info, err := os.Lstat(path)
+		if err != nil {
+			return err
 		}
-	}
-	if rel, ok := workspaceRelative(path); ok {
-		return DroppedItem{Kind: "workspace", Path: rel, IsDir: info.IsDir()}, nil
-	}
-	if info.IsDir() {
-		return DroppedItem{}, fmt.Errorf("can only attach files from outside the workspace")
-	}
-	rel, err := control.SaveAttachmentFile(path)
+		if isImageExt(path) {
+			if rel, err := control.SaveImageFile(path); err == nil {
+				preview, _ := control.ImageDataURL(rel)
+				item = DroppedItem{Kind: "attachment", Path: rel, PreviewURL: preview}
+				return nil
+			}
+		}
+		if rel, ok := workspaceRelativeIn(path, a.activeWorkspaceRoot()); ok {
+			item = DroppedItem{Kind: "workspace", Path: rel, IsDir: info.IsDir()}
+			return nil
+		}
+		if info.IsDir() {
+			return fmt.Errorf("can only attach files from outside the workspace")
+		}
+		rel, err := control.SaveAttachmentFile(path)
+		if err != nil {
+			return err
+		}
+		item = DroppedItem{Kind: "attachment", Path: rel}
+		return nil
+	})
 	if err != nil {
 		return DroppedItem{}, err
 	}
-	return DroppedItem{Kind: "attachment", Path: rel}, nil
+	return item, nil
 }
 
 func isImageExt(path string) bool {
@@ -3874,12 +3920,16 @@ func isImageExt(path string) bool {
 	return false
 }
 
-func workspaceRelative(path string) (string, bool) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "", false
+func workspaceRelativeIn(path, workspaceRoot string) (string, bool) {
+	root := workspaceRoot
+	if !filepath.IsAbs(root) {
+		abs, err := filepath.Abs(root)
+		if err != nil {
+			return "", false
+		}
+		root = abs
 	}
-	rel, err := filepath.Rel(cwd, path)
+	rel, err := filepath.Rel(root, path)
 	if err != nil {
 		return "", false
 	}

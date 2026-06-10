@@ -1,6 +1,9 @@
 package main
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"testing"
 
@@ -54,6 +57,71 @@ func TestProviderViewFromEntry_FiltersNonChatModels(t *testing.T) {
 	want := []string{"mimo-v2", "mimo-v2-pro"}
 	if !reflect.DeepEqual(view.Models, want) {
 		t.Errorf("ProviderView.Models = %v, want %v", view.Models, want)
+	}
+}
+
+func TestFetchProviderModelsFiltersNonChatModels(t *testing.T) {
+	t.Setenv("TEST_PROVIDER_KEY", "test-key")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/models" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Header.Get("Authorization") != "Bearer test-key" {
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"object": "list",
+			"data": []map[string]string{
+				{"id": "mimo-v2.5-pro", "object": "model"},
+				{"id": "mimo-v2.5-asr", "object": "model"},
+				{"id": "mimo-v2.5-tts", "object": "model"},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	got, err := NewApp().FetchProviderModels(ProviderView{
+		Name:      "mimo-api",
+		BaseURL:   srv.URL,
+		APIKeyEnv: "TEST_PROVIDER_KEY",
+	})
+	if err != nil {
+		t.Fatalf("FetchProviderModels: %v", err)
+	}
+	want := []string{"mimo-v2.5-pro"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("FetchProviderModels = %v, want %v", got, want)
+	}
+}
+
+func TestSaveProviderFiltersNonChatModels(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	app := NewApp()
+	if err := app.SaveProvider(ProviderView{
+		Name:      "mimo-api",
+		Kind:      "openai",
+		BaseURL:   "https://api.xiaomimimo.com/v1",
+		Models:    []string{"mimo-v2.5-asr", "mimo-v2.5-pro", "mimo-v2.5-tts"},
+		Default:   "mimo-v2.5-asr",
+		APIKeyEnv: "MIMO_API_KEY",
+	}); err != nil {
+		t.Fatalf("SaveProvider: %v", err)
+	}
+
+	cfg := config.LoadForEdit(config.UserConfigPath())
+	got, ok := cfg.Provider("mimo-api")
+	if !ok {
+		t.Fatal("saved provider not found")
+	}
+	want := []string{"mimo-v2.5-pro"}
+	if !reflect.DeepEqual(got.ModelList(), want) {
+		t.Errorf("saved provider models = %v, want %v", got.ModelList(), want)
+	}
+	if got.DefaultModel() != "mimo-v2.5-pro" {
+		t.Errorf("saved provider default = %q, want mimo-v2.5-pro", got.DefaultModel())
 	}
 }
 

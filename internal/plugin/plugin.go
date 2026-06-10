@@ -248,13 +248,20 @@ func Start(ctx context.Context, specs []Spec, p StartPolicy) (*Host, []tool.Tool
 			}
 
 			phaseAStart := time.Now()
+			recordedPhaseADur := func() time.Duration {
+				dur := time.Since(phaseAStart)
+				if p.PerPluginTimeout > 0 && callCtx.Err() == context.DeadlineExceeded && dur < p.PerPluginTimeout {
+					return p.PerPluginTimeout
+				}
+				return dur
+			}
 
 			// Transport on the parent ctx, startup RPCs on the timed callCtx: the
 			// per-plugin timeout caps initialize+listTools, but the long-lived
 			// stdio child must outlive the startup scope and later phase-B calls.
 			c, err := start(ctx, callCtx, spec)
 			if err != nil {
-				phaseADur := time.Since(phaseAStart)
+				phaseADur := recordedPhaseADur()
 				cancelStartup()
 				h.bgWrites.Add(1)
 				go func() { defer h.bgWrites.Done(); _ = RecordStartup(spec.Name, phaseADur) }()
@@ -264,7 +271,7 @@ func Start(ctx context.Context, specs []Spec, p StartPolicy) (*Host, []tool.Tool
 
 			ts, err := c.listTools(callCtx)
 			if err != nil {
-				phaseADur := time.Since(phaseAStart)
+				phaseADur := recordedPhaseADur()
 				cancelStartup()
 				h.bgWrites.Add(1)
 				go func() { defer h.bgWrites.Done(); _ = RecordStartup(spec.Name, phaseADur) }()
@@ -277,7 +284,7 @@ func Start(ctx context.Context, specs []Spec, p StartPolicy) (*Host, []tool.Tool
 			// Persist for next launch on the side: a slow stats/cache write
 			// must not delay tools coming online, and either failure is
 			// recoverable (we just re-handshake or skip auto-demote).
-			phaseADur := time.Since(phaseAStart)
+			phaseADur := recordedPhaseADur()
 			cancelStartup()
 			h.bgWrites.Add(1)
 			go func() {

@@ -568,6 +568,168 @@ func (a *App) OpenGlobalTab(topicID string) (TabMeta, error) {
 	return a.tabMeta(tab, true), nil
 }
 
+// EnsureBlankTab activates the existing blank tab for the target scope, or
+// creates one if none exists. Reusing a blank tab keeps repeated "new session"
+// clicks from piling up empty conversations.
+func (a *App) EnsureBlankTab(scope, workspaceRoot string) (TabMeta, error) {
+	scope = strings.TrimSpace(scope)
+	if scope != "project" {
+		scope = "global"
+	}
+
+	globalRoot := ""
+	if scope == "project" {
+		workspaceRoot = strings.TrimSpace(workspaceRoot)
+		if workspaceRoot == "" {
+			return TabMeta{}, fmt.Errorf("workspaceRoot is required")
+		}
+		if abs, err := filepath.Abs(workspaceRoot); err == nil {
+			workspaceRoot = abs
+		}
+		saveWorkspace(workspaceRoot)
+		_ = addProject(workspaceRoot, "")
+	} else {
+		workspaceRoot = ""
+		globalRoot = globalWorkspaceRoot()
+		if err := os.MkdirAll(globalRoot, 0o755); err != nil {
+			return TabMeta{}, fmt.Errorf("create global workspace: %w", err)
+		}
+	}
+
+	var created *WorkspaceTab
+	a.mu.Lock()
+	for _, id := range a.orderedTabIDsLocked() {
+		tab := a.tabs[id]
+		if a.blankTabMatchesTargetLocked(tab, scope, workspaceRoot) {
+			a.activeTabID = tab.ID
+			meta := a.tabMeta(tab, true)
+			a.saveTabsLocked()
+			a.mu.Unlock()
+			return meta, nil
+		}
+	}
+
+	if topicID := a.indexedBlankTopicIDLocked(scope, workspaceRoot); topicID != "" {
+		a.mu.Unlock()
+		if scope == "global" {
+			return a.OpenGlobalTab(topicID)
+		}
+		return a.OpenProjectTab(workspaceRoot, topicID)
+	}
+
+	topicID := newTopicID()
+	topicTitle := defaultTopicTitle
+	if err := setTopicTitleWithSource(workspaceRoot, topicID, topicTitle, topicTitleSourceAuto); err != nil {
+		a.mu.Unlock()
+		return TabMeta{}, err
+	}
+	f := loadProjectsFile()
+	if workspaceRoot == "" {
+		f.GlobalTopics = prependUniqueString(f.GlobalTopics, topicID)
+		_ = saveProjectsFile(f)
+	} else {
+		for i, p := range f.Projects {
+			if p.Root == workspaceRoot {
+				f.Projects[i].Topics = prependUniqueString(p.Topics, topicID)
+				_ = saveProjectsFile(f)
+				break
+			}
+		}
+	}
+
+	tabID := a.newUniqueTabIDLocked()
+	actualRoot := workspaceRoot
+	if scope == "global" {
+		actualRoot = globalRoot
+	}
+	created = &WorkspaceTab{
+		ID:               tabID,
+		Scope:            scope,
+		WorkspaceRoot:    actualRoot,
+		TopicID:          topicID,
+		TopicTitle:       topicTitleForTab(scope, workspaceRoot, topicID),
+		mode:             "normal",
+		toolApprovalMode: control.ToolApprovalAsk,
+		disabledMCP:      map[string]ServerView{},
+	}
+	created.sink = &tabEventSink{tabID: tabID, app: a}
+	a.tabs[tabID] = created
+	a.tabOrder = append(a.tabOrder, tabID)
+	a.activeTabID = tabID
+	a.saveTabsLocked()
+	meta := a.tabMeta(created, true)
+	a.mu.Unlock()
+
+	a.startTabControllerBuild(created)
+	a.emitProjectTreeChanged()
+	return meta, nil
+}
+
+// blankTabMatchesTargetLocked returns true if tab is a reusable blank tab
+// matching the given scope/project root — no running controller, no real history.
+func (a *App) blankTabMatchesTargetLocked(tab *WorkspaceTab, scope, workspaceRoot string) bool {
+	if tab == nil || tab.Scope != scope {
+		return false
+	}
+	if scope == "project" && tab.WorkspaceRoot != workspaceRoot {
+		return false
+	}
+	if tab.Ctrl == nil {
+		return strings.TrimSpace(tab.SessionPath) == ""
+	}
+	if tab.Ctrl.Running() {
+		return false
+	}
+	return !messagesHaveConversationContent(tab.Ctrl.History())
+}
+
+// indexedBlankTopicIDLocked finds a blank topic ID that is indexed on disk
+// but not open in any tab — for reusing without creating a new topic.
+func (a *App) indexedBlankTopicIDLocked(scope, workspaceRoot string) string {
+	titleRoot := topicTitleRoot(scope, workspaceRoot)
+	titles := loadTopicTitles(titleRoot)
+	f := loadProjectsFile()
+
+	var topicIDs []string
+	if scope == "global" {
+		topicIDs = orderedTopicIDs(f.GlobalTopics, titles)
+	} else {
+		for _, project := range f.Projects {
+			if project.Root == workspaceRoot {
+				topicIDs = orderedTopicIDs(project.Topics, titles)
+				break
+			}
+		}
+	}
+	if len(topicIDs) == 0 {
+		return ""
+	}
+
+	openTopics := map[string]bool{}
+	for _, tab := range a.tabs {
+		if tab == nil || tab.Scope != scope || strings.TrimSpace(tab.TopicID) == "" {
+			continue
+		}
+		if scope == "project" && tab.WorkspaceRoot != workspaceRoot {
+			continue
+		}
+		openTopics[tab.TopicID] = true
+	}
+	for _, topicID := range topicIDs {
+		if openTopics[topicID] {
+			continue
+		}
+		if topicTitleForTab(scope, workspaceRoot, topicID) != defaultTopicTitle {
+			continue
+		}
+		if findTopicSession(config.SessionDir(), topicID) != "" {
+			continue
+		}
+		return topicID
+	}
+	return ""
+}
+
 // SetActiveTab switches the frontend's active tab. A no-op when tabID is
 // already active or unknown.
 func (a *App) SetActiveTab(tabID string) error {

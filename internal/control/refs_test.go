@@ -162,22 +162,22 @@ func TestReadFileRef(t *testing.T) {
 	}
 
 	// Text file: content verbatim, not a directory.
-	if got, isDir, err := readFileRef(textPath); err != nil || isDir || got != "line one\nline two\n" {
+	if got, isDir, err := readFileRef(textPath, ""); err != nil || isDir || got != "line one\nline two\n" {
 		t.Errorf("text file = (%q, %v, %v)", got, isDir, err)
 	}
 
 	// Binary file: noted, not dumped.
-	if got, _, err := readFileRef(binPath); err != nil || !strings.Contains(got, "binary file") {
+	if got, _, err := readFileRef(binPath, ""); err != nil || !strings.Contains(got, "binary file") {
 		t.Errorf("binary file = (%q, %v), want a binary note", got, err)
 	}
 
 	// Image file: identified as image-specific guidance, not generic binary.
-	if got, _, err := readFileRef(imagePath); err != nil || !strings.Contains(got, "image file") {
+	if got, _, err := readFileRef(imagePath, ""); err != nil || !strings.Contains(got, "image file") {
 		t.Errorf("image file = (%q, %v), want an image note", got, err)
 	}
 
 	// Large file: truncated with a marker.
-	if got, _, err := readFileRef(bigPath); err != nil || !strings.Contains(got, "truncated") {
+	if got, _, err := readFileRef(bigPath, ""); err != nil || !strings.Contains(got, "truncated") {
 		t.Errorf("big file should be truncated, got len=%d err=%v", len(got), err)
 	}
 
@@ -188,7 +188,7 @@ func TestReadFileRef(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "sub", "nested.txt"), []byte("nested"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got, isDir, err := readFileRef(dir)
+	got, isDir, err := readFileRef(dir, "")
 	if err != nil || !isDir {
 		t.Fatalf("dir = (isDir=%v, err=%v)", isDir, err)
 	}
@@ -197,7 +197,7 @@ func TestReadFileRef(t *testing.T) {
 	}
 
 	// Missing path: error.
-	if _, _, err := readFileRef(filepath.Join(dir, "nope")); err == nil {
+	if _, _, err := readFileRef(filepath.Join(dir, "nope"), ""); err == nil {
 		t.Error("missing path should error")
 	}
 }
@@ -218,7 +218,7 @@ func TestReadFileRefPDFExtraction(t *testing.T) {
 		}
 		return pdfExtractResult{text: "Quarterly results\nRevenue up", tool: "test-extractor"}, nil
 	}
-	got, isDir, err := readFileRef(pdfPath)
+	got, isDir, err := readFileRef(pdfPath, "")
 	if err != nil || isDir {
 		t.Fatalf("pdf text = (isDir=%v, err=%v)", isDir, err)
 	}
@@ -229,7 +229,7 @@ func TestReadFileRefPDFExtraction(t *testing.T) {
 	extractPDFText = func(string) (pdfExtractResult, error) {
 		return pdfExtractResult{text: "   ", tool: "test-extractor"}, nil
 	}
-	got, _, err = readFileRef(pdfPath)
+	got, _, err = readFileRef(pdfPath, "")
 	if err != nil {
 		t.Fatalf("empty pdf text err = %v", err)
 	}
@@ -240,7 +240,7 @@ func TestReadFileRefPDFExtraction(t *testing.T) {
 	extractPDFText = func(string) (pdfExtractResult, error) {
 		return pdfExtractResult{}, os.ErrNotExist
 	}
-	got, _, err = readFileRef(pdfPath)
+	got, _, err = readFileRef(pdfPath, "")
 	if err != nil {
 		t.Fatalf("failed pdf text err = %v", err)
 	}
@@ -314,7 +314,7 @@ func TestResolveBareNamesDuplicates(t *testing.T) {
 		{kind: refFile, raw: "main.go"},
 	}
 
-	resolved := resolveBareNames(refs)
+	resolved := resolveBareNames(refs, "")
 
 	if len(resolved) != 2 {
 		t.Fatalf("expected 2 resolved refs, got %d", len(resolved))
@@ -328,5 +328,180 @@ func TestResolveBareNamesDuplicates(t *testing.T) {
 	}
 	if mainRef.path != "c/main.go" {
 		t.Errorf("expected main.go path to be c/main.go, got %q", mainRef.path)
+	}
+}
+
+func TestReadFileRefWithBaseDir(t *testing.T) {
+	base := t.TempDir()
+	sub := filepath.Join(base, "proj")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sub, "hello.txt"), []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Relative path "proj/hello.txt" resolves via baseDir when not in CWD.
+	got, isDir, err := readFileRef("proj/hello.txt", base)
+	if err != nil {
+		t.Fatalf("readFileRef with baseDir: %v", err)
+	}
+	if isDir {
+		t.Error("expected file, not directory")
+	}
+	if got != "hello" {
+		t.Errorf("got %q, want %q", got, "hello")
+	}
+
+	// Empty baseDir falls back to direct path (absolute).
+	got2, _, err2 := readFileRef(filepath.Join(sub, "hello.txt"), "")
+	if err2 != nil {
+		t.Fatalf("readFileRef with empty baseDir: %v", err2)
+	}
+	if got2 != "hello" {
+		t.Errorf("got %q, want %q", got2, "hello")
+	}
+}
+
+func TestResolveBareNamesWithWorkspaceRoot(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "src", "main.go"), []byte("package main"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	refs := []ref{{kind: refFile, raw: "main.go"}}
+	resolved := resolveBareNames(refs, root)
+
+	if len(resolved) != 1 {
+		t.Fatalf("expected 1 ref, got %d", len(resolved))
+	}
+	if resolved[0].path != "src/main.go" {
+		t.Errorf("expected src/main.go, got %q", resolved[0].path)
+	}
+}
+
+func TestResolveAbsRef(t *testing.T) {
+	temp := t.TempDir()
+
+	_, _, ok := resolveAbsRef("foo.txt", "")
+	if !ok {
+		t.Errorf("empty base: expected ok=true with CLI fallback")
+	}
+
+	absInBase := filepath.Join(temp, "foo.txt")
+	absPath, absBase, ok := resolveAbsRef(absInBase, temp)
+	if !ok || absPath != absInBase || absBase != temp {
+		t.Errorf("absolute path under base: got (%q, %q, %v), want (%q, %q, true)", absPath, absBase, ok, absInBase, temp)
+	}
+
+	if _, _, ok := resolveAbsRef(filepath.Join(temp, "..", "outside.txt"), temp); ok {
+		t.Errorf("absolute path outside base should be rejected")
+	}
+
+	want := filepath.Join(temp, "sub", "file.txt")
+	absPath, absBase, ok = resolveAbsRef(filepath.Join("sub", "file.txt"), temp)
+	if !ok || absPath != want || absBase != temp {
+		t.Errorf("relative in base: got (%q, %q, %v), want (%q, %q, true)", absPath, absBase, ok, want, temp)
+	}
+
+	if _, _, ok := resolveAbsRef(".."+string(filepath.Separator)+"outside.txt", temp); ok {
+		t.Errorf("path traversal should be rejected")
+	}
+	if _, _, ok := resolveAbsRef("sub/../../escape.txt", temp); ok {
+		t.Errorf("path traversal should be rejected")
+	}
+}
+
+func TestReadFileRefBlocksPathTraversal(t *testing.T) {
+	temp := t.TempDir()
+	if err := os.WriteFile(filepath.Join(temp, "safe.txt"), []byte("safe"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(temp, "..", "outside.txt"), []byte("outside"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(filepath.Join(temp, "..", "outside.txt")) })
+
+	if _, isDir, err := readFileRef(".."+string(filepath.Separator)+"outside.txt", temp); err == nil {
+		t.Errorf("expected traversal to fail, got isDir=%v err=%v", isDir, err)
+	}
+}
+
+func TestDetectRefsUsesWorkspaceRootNotProcessCWD(t *testing.T) {
+	cwd := t.TempDir()
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(cwd, "cwd-only.txt"), []byte("wrong"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "workspace.txt"), []byte("right"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	oldCwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(cwd); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(oldCwd); err != nil {
+			t.Error(err)
+		}
+	})
+
+	refs := (&Controller{cpRoot: workspace}).detectRefs("see @cwd-only.txt and @workspace.txt")
+	if len(refs) != 1 || refs[0].raw != "workspace.txt" {
+		t.Fatalf("detectRefs should only see workspace files, got %+v", refs)
+	}
+
+	block, errs := (&Controller{cpRoot: workspace}).ResolveRefs(context.Background(), "see @cwd-only.txt")
+	if block != "" || len(errs) != 0 {
+		t.Fatalf("cwd-only file should not be treated as a ref, block=%q errs=%v", block, errs)
+	}
+}
+
+func TestReadFileRefPDFExtractionWithBaseDirUsesAbsPath(t *testing.T) {
+	base := t.TempDir()
+	pdfPath := filepath.Join(base, "docs", "report.pdf")
+	if err := os.MkdirAll(filepath.Dir(pdfPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(pdfPath, []byte("%PDF-1.4 fake"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	outside := t.TempDir()
+	oldCwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(outside); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(oldCwd); err != nil {
+			t.Error(err)
+		}
+	})
+
+	oldExtract := extractPDFText
+	t.Cleanup(func() { extractPDFText = oldExtract })
+	extractPDFText = func(path string) (pdfExtractResult, error) {
+		if path != pdfPath {
+			t.Fatalf("extract path = %q, want %q", path, pdfPath)
+		}
+		return pdfExtractResult{text: "workspace pdf", tool: "test-extractor"}, nil
+	}
+
+	got, isDir, err := readFileRef("docs/report.pdf", base)
+	if err != nil || isDir {
+		t.Fatalf("scoped pdf = (isDir=%v, err=%v)", isDir, err)
+	}
+	if !strings.Contains(got, "workspace pdf") {
+		t.Fatalf("scoped pdf extraction missing text: %s", got)
 	}
 }

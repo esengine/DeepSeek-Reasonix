@@ -80,7 +80,7 @@ import logoWordmark from "./assets/logo-wordmark.svg";
 
 const SIDEBAR_COLLAPSED_KEY = "reasonix.sidebar.collapsed";
 const SIDEBAR_DEFAULT_WIDTH = 264;
-const SIDEBAR_MIN_WIDTH = 248;
+const SIDEBAR_MIN_WIDTH = 264;
 const SIDEBAR_MAX_WIDTH = 300;
 const SIDEBAR_VIEWPORT_RATIO = 0.18;
 const CHAT_MIN_WIDTH = 400;
@@ -411,6 +411,7 @@ export default function App() {
     closeTab,
     reorderTabs,
     syncActiveTab,
+    ensureBlankTab,
   } = useController();
   const { locale, setPref: setLocalePref } = useI18n();
   const t = useT();
@@ -1029,6 +1030,19 @@ export default function App() {
     return tabs;
   }, []);
 
+  const blankSessionTarget = useCallback(() => {
+    const activeWorkspaceRoot = activeTab?.scope === "project" ? activeTab.workspaceRoot || "" : "";
+    const scope = activeWorkspaceRoot ? "project" : "global";
+    return { scope, workspaceRoot: activeWorkspaceRoot };
+  }, [activeTab?.scope, activeTab?.workspaceRoot]);
+
+  const openBlankSession = useCallback(async (scope: string, workspaceRoot: string) => {
+    await ensureBlankTab(scope, scope === "project" ? workspaceRoot : "");
+    setProjectRevision((value) => value + 1);
+    await refreshTabMetas();
+    setTabRevealSignal((signal) => signal + 1);
+  }, [ensureBlankTab, refreshTabMetas]);
+
   useEffect(() => {
     void refreshTabMetas();
     const id = window.setInterval(() => void refreshTabMetas(), 2000);
@@ -1401,19 +1415,9 @@ export default function App() {
 
   const handleNewTab = useCallback(async () => {
     closeTransientOverlays();
-    const activeWorkspaceRoot = activeTab?.scope === "project" ? activeTab.workspaceRoot || "" : "";
-    const targetScope = activeWorkspaceRoot ? "project" : "global";
-    const workspaceRoot = activeWorkspaceRoot;
-    const topic = await app.CreateTopic(targetScope, workspaceRoot, "");
-    if (targetScope === "global" || !workspaceRoot) {
-      await openGlobalTab(topic.id);
-    } else {
-      await openProjectTab(workspaceRoot, topic.id);
-    }
-    setProjectRevision((value) => value + 1);
-    await refreshTabMetas();
-    setTabRevealSignal((signal) => signal + 1);
-  }, [activeTab?.scope, activeTab?.workspaceRoot, closeTransientOverlays, openGlobalTab, openProjectTab, refreshTabMetas]);
+    const target = blankSessionTarget();
+    await openBlankSession(target.scope, target.workspaceRoot);
+  }, [blankSessionTarget, closeTransientOverlays, openBlankSession]);
 
   const handleMessageAction = useCallback(async (turn: number, scope: string) => {
     await rewind(turn, scope);
@@ -1736,6 +1740,7 @@ export default function App() {
               activeTopicId={activeTab?.topicId}
               onOpenTopic={handleOpenTopic}
               onOpenProjectHistory={openProjectHistory}
+              onCreateTopic={(scope, workspaceRoot) => openBlankSession(scope, scope === "project" ? workspaceRoot : "")}
               onTopicsChanged={refreshProjectsAndTabs}
               onRenameTopic={renameTopic}
               refreshSignal={projectRevision}

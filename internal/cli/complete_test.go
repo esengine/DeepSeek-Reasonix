@@ -162,6 +162,30 @@ func TestFileItemsOneLevel(t *testing.T) {
 	}
 }
 
+func TestFileItemsSubdirUsesWorkspaceRoot(t *testing.T) {
+	cwd := t.TempDir()
+	workspace := t.TempDir()
+	writeAt(t, cwd, "src/cwd.go", "wrong")
+	writeAt(t, workspace, "src/workspace.go", "right")
+
+	orig, _ := os.Getwd()
+	defer os.Chdir(orig)
+	if err := os.Chdir(cwd); err != nil {
+		t.Fatal(err)
+	}
+
+	m := newTestChatTUI()
+	m.ctrl = control.New(control.Options{SessionDir: t.TempDir(), WorkspaceRoot: workspace})
+	items := m.fileItems("src/")
+
+	if !hasLabel(items, "workspace.go") {
+		t.Fatalf("workspace file should be listed for @src/: %v", labels(items))
+	}
+	if hasLabel(items, "cwd.go") {
+		t.Fatalf("cwd file should not leak into workspace completion: %v", labels(items))
+	}
+}
+
 func TestFileItemsSearchesBasenameAtTopLevel(t *testing.T) {
 	orig, _ := os.Getwd()
 	defer os.Chdir(orig)

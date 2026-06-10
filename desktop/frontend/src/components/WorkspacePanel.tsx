@@ -2,10 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   CSSProperties,
   DragEvent as ReactDragEvent,
-  JSX,
   KeyboardEvent,
   MouseEvent as ReactMouseEvent,
   PointerEvent as ReactPointerEvent,
+  ReactElement,
 } from "react";
 import {
   ChevronDown,
@@ -115,7 +115,7 @@ function languageFor(path: string): string | undefined {
   return byExt[ext];
 }
 
-function renderMediaPreview(preview: FilePreview): JSX.Element | null {
+function renderMediaPreview(preview: FilePreview): ReactElement | null {
   if (!preview.url) return null;
   if (preview.kind === "image") {
     return (
@@ -650,7 +650,7 @@ export function WorkspacePanel({
     void app.RevealWorkspacePath(treeMenu.path);
   };
 
-  const renderRows = (dir: string, depth: number): JSX.Element[] => {
+  const renderRows = (dir: string, depth: number): ReactElement[] => {
     const entries = entriesByDir[dir] ?? [];
     return entries.flatMap((entry) => {
       const path = entryPath(dir, entry);

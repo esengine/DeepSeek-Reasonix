@@ -873,6 +873,15 @@ export function useController() {
     return meta;
   }, [loadSessionDataForTab]);
 
+  // Ensure a blank tab exists for the given scope — reuses an existing one
+  // or creates a new tab, then loads its session data.
+  const ensureBlankTab = useCallback(async (scope: string, workspaceRoot: string): Promise<TabMeta> => {
+    const meta = await app.EnsureBlankTab(scope, workspaceRoot);
+    setActiveTabId(meta.id);
+    await loadSessionDataForTab(meta.id, !statesRef.current.has(meta.id));
+    return meta;
+  }, [loadSessionDataForTab]);
+
   const closeTab = useCallback(async (tabId: string) => {
     try {
       await app.CloseTab(tabId);
@@ -895,7 +904,7 @@ export function useController() {
     newSession, clearSession, listSessions, listTrashedSessions, resumeSession, previewSession, deleteSession, restoreSession, purgeTrashedSession, renameSession,
     refreshMeta, pickWorkspace, switchWorkspace, compact, rewind, setModel, setEffort,
     fetchMemory, remember, forget, saveDoc,
-    switchTab, openProjectTab, openGlobalTab, closeTab, reorderTabs,
+    switchTab, openProjectTab, openGlobalTab, ensureBlankTab, closeTab, reorderTabs,
     syncActiveTab: syncActiveTabFromBackend,
   };
 }

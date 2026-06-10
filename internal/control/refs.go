@@ -110,7 +110,18 @@ func (c *Controller) detectRefs(line string) []ref {
 			known[n] = true
 		}
 	}
-	exists := func(p string) bool { _, err := os.Stat(p); return err == nil }
+	exists := func(p string) bool {
+		if c.cpRoot != "" {
+			absPath, _, ok := resolveAbsRef(p, c.cpRoot)
+			if !ok {
+				return false
+			}
+			_, err := os.Stat(absPath)
+			return err == nil
+		}
+		_, err := os.Stat(p)
+		return err == nil
+	}
 
 	var refs []ref
 	for _, tok := range parseRefTokens(line) {
@@ -131,7 +142,7 @@ func (c *Controller) HasRefs(line string) bool {
 // don't exist in cwd. It walks the working tree once and matches every
 // unresolved name against the set, stopping when all are found. This runs in
 // the async ResolveRefs path, never on the TUI event loop.
-func resolveBareNames(refs []ref) []ref {
+func resolveBareNames(refs []ref, workspaceRoot string) []ref {
 	need := map[string]*ref{}
 	var names []string
 	for i := range refs {
@@ -139,7 +150,15 @@ func resolveBareNames(refs []ref) []ref {
 		if r.kind != refFile || strings.ContainsAny(r.raw, "/\\") {
 			continue
 		}
-		if _, err := os.Stat(r.raw); err == nil {
+		statPath := r.raw
+		if workspaceRoot != "" {
+			absPath, _, ok := resolveAbsRef(r.raw, workspaceRoot)
+			if !ok {
+				continue
+			}
+			statPath = absPath
+		}
+		if _, err := os.Stat(statPath); err == nil {
 			continue
 		}
 		need[r.raw] = r
@@ -149,7 +168,10 @@ func resolveBareNames(refs []ref) []ref {
 		return refs
 	}
 	found := 0
-	cwd, _ := os.Getwd()
+	cwd := workspaceRoot
+	if cwd == "" {
+		cwd, _ = os.Getwd()
+	}
 	_ = filepath.WalkDir(cwd, func(p string, d os.DirEntry, wErr error) error {
 		if wErr != nil || found == len(names) {
 			return filepath.SkipAll
@@ -193,7 +215,7 @@ func FileRefLine(line string) (string, bool) {
 // Safe to call off a frontend's event loop; honours ctx for the resource reads.
 func (c *Controller) ResolveRefs(ctx context.Context, line string) (block string, errs []string) {
 	refs := c.detectRefs(line)
-	refs = resolveBareNames(refs)
+	refs = resolveBareNames(refs, c.cpRoot)
 	var b strings.Builder
 	for _, r := range refs {
 		switch r.kind {
@@ -205,7 +227,7 @@ func (c *Controller) ResolveRefs(ctx context.Context, line string) (block string
 			}
 			appendRefBlock(&b, "resource", `ref="@`+r.raw+`"`, text)
 		case refFile:
-			text, isDir, err := readFileRef(r.path)
+			text, isDir, err := readFileRef(r.path, c.cpRoot)
 			if err != nil {
 				errs = append(errs, "@"+r.raw+" — "+err.Error())
 				continue
@@ -237,7 +259,78 @@ const maxDirEntries = 100
 // recursive listing capped at maxDirEntries; a binary file (NUL in the first
 // 8 KiB) is noted rather than dumped; a large file is truncated to
 // maxFileRefBytes with a marker. isDir lets the caller pick the wrapping tag.
-func readFileRef(path string) (content string, isDir bool, err error) {
+// When baseDir is non-empty the read is sandboxed under it via os.Root so
+// user-supplied paths cannot escape the workspace; otherwise the path is
+// used as-is (CLI single-workspace compatibility).
+func readFileRef(path, baseDir string) (content string, isDir bool, err error) {
+	absPath, absBase, ok := resolveAbsRef(path, baseDir)
+	if !ok {
+		return "", false, os.ErrNotExist
+	}
+	if absBase == "" {
+		return readFileRefUnscoped(absPath)
+	}
+
+	root, rerr := os.OpenRoot(absBase)
+	if rerr != nil {
+		return "", false, rerr
+	}
+	defer root.Close()
+
+	rel, rerr := filepath.Rel(absBase, absPath)
+	if rerr != nil {
+		return "", false, rerr
+	}
+
+	info, err := root.Stat(rel)
+	if err != nil {
+		return "", false, err
+	}
+	if info.IsDir() {
+		var b strings.Builder
+		n := 0
+		err := walkRootDir(root, rel, &b, &n, 0)
+		if n >= maxDirEntries {
+			b.WriteString("\n…[truncated; directory has more entries]…")
+		}
+		if err != nil {
+			return "", true, err
+		}
+		return b.String(), true, nil
+	}
+
+	if strings.EqualFold(filepath.Ext(rel), ".pdf") {
+		return readPDFRef(absPath, info.Size()), false, nil
+	}
+
+	f, err := root.Open(rel)
+	if err != nil {
+		return "", false, err
+	}
+	defer f.Close()
+
+	buf := make([]byte, maxFileRefBytes+1)
+	n, rerr := io.ReadFull(f, buf)
+	if rerr != nil && rerr != io.ErrUnexpectedEOF && rerr != io.EOF {
+		return "", false, rerr
+	}
+	data := buf[:n]
+
+	if mime := imageMime(data, rel); mime != "" {
+		return fmt.Sprintf("[image file %s, mime=%s, %d bytes — image bytes are not inlined. Use an available MCP image/OCR/vision tool with this path when visual understanding is needed.]", rel, mime, info.Size()), false, nil
+	}
+	if bytes.IndexByte(data[:min(n, 8192)], 0) >= 0 {
+		return fmt.Sprintf("[binary file %s, %d bytes — not shown]", rel, info.Size()), false, nil
+	}
+	if n > maxFileRefBytes {
+		return string(data[:maxFileRefBytes]) + fmt.Sprintf("\n…[truncated; file is %d bytes]…", info.Size()), false, nil
+	}
+	return string(data), false, nil
+}
+
+// readFileRefUnscoped is the legacy readFileRef body kept for CLI single-workspace
+// compatibility, where no controller-scoped sandbox is in effect.
+func readFileRefUnscoped(path string) (content string, isDir bool, err error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		return "", false, err
@@ -310,6 +403,77 @@ func readFileRef(path string) (content string, isDir bool, err error) {
 		return string(data[:maxFileRefBytes]) + fmt.Sprintf("\n…[truncated; file is %d bytes]…", info.Size()), false, nil
 	}
 	return string(data), false, nil
+}
+
+// walkRootDir walks a directory under a sandboxed *os.Root and writes each
+// entry (skipping noisy ones like .git and node_modules) into b until n hits
+// maxDirEntries.
+func walkRootDir(root *os.Root, dir string, b *strings.Builder, n *int, depth int) error {
+	if depth > 16 || *n >= maxDirEntries {
+		return nil
+	}
+	f, err := root.Open(dir)
+	if err != nil {
+		return err
+	}
+	entries, err := f.ReadDir(-1)
+	f.Close()
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if *n >= maxDirEntries {
+			return nil
+		}
+		name := e.Name()
+		entry := name
+		if e.IsDir() {
+			switch name {
+			case ".git", "node_modules", ".DS_Store", "__pycache__", ".idea", ".vscode":
+				continue
+			}
+			entry += "/"
+		}
+		b.WriteString(entry)
+		b.WriteByte('\n')
+		*n++
+		if e.IsDir() {
+			child := filepath.ToSlash(filepath.Join(dir, name))
+			if err := walkRootDir(root, child, b, n, depth+1); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// resolveAbsRef resolves the user-supplied @-reference path against baseDir
+// and returns the absolute path plus the absolute base root to sandbox I/O
+// under. With a baseDir, the path is confined under it (a relative path that
+// escapes via ".." is rejected). With an empty baseDir, the path is returned
+// as-is and the caller falls back to plain os.Stat/os.Open so CLI usage
+// (where there is no controller-scoped workspace) keeps working.
+func resolveAbsRef(path, baseDir string) (absPath, absBase string, ok bool) {
+	if baseDir == "" {
+		return path, "", true
+	}
+	absBase = baseDir
+	if !filepath.IsAbs(absBase) {
+		var err error
+		absBase, err = filepath.Abs(absBase)
+		if err != nil {
+			return "", "", false
+		}
+	}
+	cleaned := filepath.Clean(path)
+	if !filepath.IsAbs(cleaned) {
+		cleaned = filepath.Join(absBase, cleaned)
+	}
+	rel, err := filepath.Rel(absBase, cleaned)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", "", false
+	}
+	return cleaned, absBase, true
 }
 
 func readPDFRef(path string, size int64) string {

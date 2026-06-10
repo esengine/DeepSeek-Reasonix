@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -322,8 +323,18 @@ func (m *chatTUI) atItems(token string) []compItem {
 // unless frag starts with '.'. Top-level tokens also surface MCP resources.
 func (m *chatTUI) fileItems(token string) []compItem {
 	dir, frag := splitPathToken(token)
+	workspaceRoot := ""
+	if m.ctrl != nil {
+		workspaceRoot = m.ctrl.WorkspaceRoot()
+	}
 	readDir := dir
-	if readDir == "" {
+	if workspaceRoot != "" {
+		if readDir == "" {
+			readDir = workspaceRoot
+		} else if !filepath.IsAbs(readDir) {
+			readDir = filepath.Join(workspaceRoot, filepath.FromSlash(readDir))
+		}
+	} else if readDir == "" {
 		readDir = "."
 	}
 	entries, err := os.ReadDir(readDir)
@@ -393,7 +404,13 @@ func (m *chatTUI) searchFileRefs(frag string) []string {
 	if r, ok := m.fileSearchCache[frag]; ok {
 		return r
 	}
-	r := fileref.Search(".", frag, maxFileSearchItems)
+	searchRoot := "."
+	if m.ctrl != nil {
+		if wr := m.ctrl.WorkspaceRoot(); wr != "" {
+			searchRoot = wr
+		}
+	}
+	r := fileref.Search(searchRoot, frag, maxFileSearchItems)
 	m.fileSearchCache[frag] = r
 	return r
 }

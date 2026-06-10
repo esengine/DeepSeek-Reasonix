@@ -1,6 +1,6 @@
 // Run: tsx src/__tests__/provider-model-refresh.test.ts
 
-import { mergedFetchedProviderModels, providerDefaultModel } from "../lib/providerModels";
+import { isLikelyChatModel, mergedFetchedProviderModels, providerDefaultModel, providerModelCandidates } from "../lib/providerModels";
 
 let passed = 0;
 let failed = 0;
@@ -39,6 +39,29 @@ eq(
   mergedFetchedProviderModels(["mimo-v2.5-pro"], ["mimo-v2-flash", "mimo-v2-omni", "mimo-v2.5-pro"], { preserveCurated: true }),
   ["mimo-v2.5-pro"],
   "manual access refresh preserves selected MiMo model instead of importing provider catalog",
+);
+
+eq(
+  providerModelCandidates(["mimo-v2.5-pro"], ["mimo-v2-flash", "mimo-v2-omni", "mimo-v2.5-pro"]),
+  ["mimo-v2.5-pro", "mimo-v2-flash", "mimo-v2-omni"],
+  "manual access refresh can show provider catalog as unsaved candidates",
+);
+
+eq(
+  providerModelCandidates(["mimo-v2.5-pro"], ["mimo-v2.5-asr", "mimo-v2.5-tts", "mimo-v2.5", "mimo-v2.5-pro"]),
+  ["mimo-v2.5-pro", "mimo-v2.5"],
+  "manual access refresh filters non-chat candidates before saving",
+);
+
+eq(
+  [
+    isLikelyChatModel("mimo-v2.5-pro"),
+    isLikelyChatModel("mimo-v2.5-asr"),
+    isLikelyChatModel("mimo-v2.5-tts"),
+    isLikelyChatModel("text-embedding-3-small"),
+  ],
+  [true, false, false, false],
+  "matches backend non-chat model heuristic",
 );
 
 eq(
