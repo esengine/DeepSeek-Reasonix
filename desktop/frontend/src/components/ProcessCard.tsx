@@ -142,6 +142,7 @@ export function ProcessCard({
         type="button"
         className="process-card__head"
         onClick={toggle}
+        onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); toggle(); } }}
         aria-expanded={hasBody ? actualOpen : undefined}
       >
         <span className="process-card__icon">{icon}</span>

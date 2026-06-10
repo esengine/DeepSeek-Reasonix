@@ -404,6 +404,15 @@ func (c *Controller) runGuarded(body func(ctx context.Context) error) {
 
 	go func() {
 		defer cancel()
+		defer func() {
+			if r := recover(); r != nil {
+				c.mu.Lock()
+				c.running = false
+				c.cancel = nil
+				c.mu.Unlock()
+				c.sink.Emit(event.Event{Kind: event.TurnDone, Err: fmt.Errorf("internal error: %v", r)})
+			}
+		}()
 		err := body(ctx)
 		c.mu.Lock()
 		c.running = false

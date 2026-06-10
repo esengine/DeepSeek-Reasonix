@@ -506,6 +506,7 @@ async function refreshMetaForTab(tabId: string, dispatchTo: (tabId: string, acti
 
 export function useController() {
   const statesRef = useRef<TabStates>(new Map());
+  const lastTokenAt = useRef(0);
   const [activeTabId, setActiveTabId] = useState<string | undefined>();
   const activeTabIdRef = useRef<string | undefined>(undefined);
   // A render-triggering counter so that mutations to a non-active tab's state still
@@ -628,6 +629,9 @@ export function useController() {
     const off = onEvent((e) => {
       const targetTabId = e.tabId || activeTabIdRef.current;
       if (!targetTabId) return;
+      if (e.kind === "turn_started" || e.kind === "text" || e.kind === "reasoning") {
+        lastTokenAt.current = Date.now();
+      }
       if (e.kind === "text" || e.kind === "reasoning") {
         textBatch.push({ tabId: targetTabId, e });
       } else {
@@ -667,6 +671,28 @@ export function useController() {
 
     return () => { textBatch.drain(); off(); offReady(); };
   }, [dispatchTo, loadSessionDataForTab, refreshCheckpoints, syncActiveTabFromBackend]);
+
+  // Stale-stream watchdog: if the frontend thinks the agent is running but
+  // no token events have arrived for 30 seconds, reconcile with the backend.
+  // This catches the case where the Wails event channel silently drops the
+  // turn_done event after a model-service interruption (#3746).
+  useEffect(() => {
+    if (!activeTabId) return;
+    const s = statesRef.current.get(activeTabId);
+    if (!s?.running || !s.live) return;
+    const since = Date.now() - lastTokenAt.current;
+    if (since >= 30_000) {
+      void reconcileTabRuntime(activeTabId);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      const cur = statesRef.current.get(activeTabId);
+      if (cur?.running && cur.live && Date.now() - lastTokenAt.current >= 30_000) {
+        void reconcileTabRuntime(activeTabId);
+      }
+    }, 30_000 - since);
+    return () => window.clearTimeout(timer);
+  }, [activeTabId, reconcileTabRuntime, activeState.running, activeState.live]);
 
   const send = useCallback((displayText: string, submitText = displayText) => {
     const submitForTab = (tabId: string) => {

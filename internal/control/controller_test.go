@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -488,5 +489,78 @@ func TestParseRewindEmptyCheckpoints(t *testing.T) {
 	_, _, err := parseRewind("", nil)
 	if err == nil {
 		t.Fatal("expected error when no checkpoints")
+	}
+}
+
+func TestRunGuardedPanicEmitsTurnDone(t *testing.T) {
+	sess := agent.NewSession("sys")
+	events := make(chan event.Event, 4)
+	c := New(Options{
+		Runner: appendingRunner{session: sess},
+		Sink:   event.FuncSink(func(e event.Event) { events <- e }),
+	})
+
+	go func() {
+		c.runGuarded(func(ctx context.Context) error {
+			panic("boom")
+		})
+	}()
+
+	select {
+	case e := <-events:
+		if e.Kind != event.TurnDone {
+			t.Fatalf("expected TurnDone after panic, got %v", e.Kind)
+		}
+		if e.Err == nil || !strings.Contains(e.Err.Error(), "boom") {
+			t.Fatalf("expected TurnDone.Err to contain panic message, got %v", e.Err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for TurnDone after panic")
+	}
+
+	c.mu.Lock()
+	running := c.running
+	c.mu.Unlock()
+	if running {
+		t.Fatal("c.running should be false after panic recovery")
+	}
+}
+
+func TestRunGuardedPanicDoesNotDoubleEmitTurnDone(t *testing.T) {
+	sess := agent.NewSession("sys")
+	var count int32
+	events := make(chan event.Event, 8)
+	c := New(Options{
+		Runner: appendingRunner{session: sess},
+		Sink: event.FuncSink(func(e event.Event) {
+			if e.Kind == event.TurnDone {
+				atomic.AddInt32(&count, 1)
+			}
+			events <- e
+		}),
+	})
+
+	go func() {
+		c.runGuarded(func(ctx context.Context) error {
+			panic("boom")
+		})
+	}()
+
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case <-events:
+			n := atomic.LoadInt32(&count)
+			if n >= 1 {
+				time.Sleep(50 * time.Millisecond)
+				n2 := atomic.LoadInt32(&count)
+				if n2 > 1 {
+					t.Fatalf("TurnDone emitted %d times, expected 1", n2)
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for TurnDone")
+		}
 	}
 }
