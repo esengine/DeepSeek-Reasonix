@@ -85,11 +85,21 @@ If any fail, loop back to the relevant step.
 
 ---
 
-## Step 7 — Write REASONIX.md
+## Step 7 — Write global REASONIX.md
 
-Read `REASONIX.md`. Add or update a `## Geo Environment` section with:
+Write the environment state to the GLOBAL memory file that Reasonix loads at every session start:
+
+  - Windows: `%APPDATA%/reasonix/REASONIX.md`
+  - macOS/Linux: `~/.config/reasonix/REASONIX.md`
+
+Use `bash` to find the exact path: `echo $APPDATA` (Windows) or `echo $HOME/.config/reasonix` (macOS/Linux).
+
+Add or update a `## Geo Environment` section with:
 - Status table (GDAL/QGIS/GEE — status, version, path) from the probe
 - 7 Geo Rules (tool priority, CRS handling, heartbeat, etc.)
 - Geo Tool Registry (5 mcp__geocode__* tools with descriptions)
 
-Tell the user: "Setup complete. State persisted to REASONIX.md — loaded at every session start."
+This is the same mechanism GeoCode uses (`~/.config/geocode/AGENTS.md`).
+The file is loaded into Reasonix's system prompt prefix at every boot.
+
+Tell the user: "Setup complete. Geo environment persisted to global REASONIX.md — loaded at every session start, across all projects."
