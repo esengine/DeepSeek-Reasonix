@@ -1,6 +1,7 @@
 ---
 name: set
 description: Probe and configure RS-Reasonix geo remote-sensing environment — GDAL, QGIS, GEE detection, geocode.json update, REASONIX.md persistence. Run this on first install or when geo tools aren't working.
+runAs: inline
 ---
 
 You are guiding the user through RS-Reasonix remote sensing environment setup.
