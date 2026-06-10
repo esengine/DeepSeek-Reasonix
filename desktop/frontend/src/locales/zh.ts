@@ -110,6 +110,7 @@ export const zh: Record<DictKey, string> = {
   "workspace.sourceSession": "会话",
   "workspace.sourceGit": "Git",
   "workspace.deleted": "已删除",
+  "workspace.revealInFileManager": "在文件管理器中显示",
 
   // MCP 与技能抽屉
   "caps.title": "MCP 与技能",
@@ -252,7 +253,7 @@ export const zh: Record<DictKey, string> = {
   "composer.modeYolo": "Yolo",
   "composer.modeFullAccess": "完全",
   "composer.modeFullAccessTitle": "完全访问会跳过所有工具权限审批；ask 问题和计划确认仍会等待",
-  "composer.intentMenuTitle": "更多动作",
+  "composer.intentMenuTitle": "协作方式",
   "composer.accessMenuTitle": "工具权限",
   "composer.accessAsk": "需要批准",
   "composer.accessAskTitle": "工具调用前请求批准",

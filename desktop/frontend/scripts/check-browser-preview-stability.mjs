@@ -26,6 +26,12 @@ function mustContain(rel, source, needle, reason) {
   }
 }
 
+function mustNotMatch(rel, source, pattern, reason) {
+  if (pattern.test(source)) {
+    fail(`${rel}: matched forbidden pattern ${pattern} (${reason})`);
+  }
+}
+
 const anchoredPopover = read("src/components/AnchoredPopover.tsx");
 mustNotContain(
   "src/components/AnchoredPopover.tsx",
@@ -97,6 +103,14 @@ mustContain(
   "composer-modebar--approval",
   "tool approval must use a direct segmented control",
 );
+for (const mode of ["ask", "auto", "yolo"]) {
+  mustNotMatch(
+    "src/components/Composer.tsx",
+    composer,
+    new RegExp(`composer-modebar__item--${mode}[\\s\\S]{0,320}disabled=\\{disabled \\|\\| running\\}`),
+    "approval mode must remain switchable while a model turn is running",
+  );
+}
 mustNotContain(
   "src/components/Composer.tsx",
   composer,

@@ -12,6 +12,7 @@ import {
   ChevronRight,
   FileText,
   Folder,
+  FolderOpen,
   FolderTree,
   FolderX,
   GitBranch,
@@ -23,7 +24,6 @@ import {
   X,
 } from "lucide-react";
 import { app } from "../lib/bridge";
-import { GeoMapViewer } from "./geo/GeoMapViewer";
 import { useT } from "../lib/i18n";
 import { loadLayoutSize, saveLayoutSize } from "../lib/layoutPreferences";
 import type { DirEntry, FilePreview, GitCommitView, GitCommitDetailView } from "../lib/types";
@@ -43,8 +43,9 @@ const WORKSPACE_PREVIEW_MIN_WIDTH = 360;
 const WORKSPACE_PREVIEW_TARGET_WIDTH = 360;
 const WORKSPACE_DUAL_PANEL_MIN_WIDTH = WORKSPACE_TREE_MIN_WIDTH + WORKSPACE_PREVIEW_MIN_WIDTH;
 const WORKSPACE_DUAL_PANEL_TARGET_WIDTH = WORKSPACE_TREE_DEFAULT_WIDTH + WORKSPACE_PREVIEW_TARGET_WIDTH;
-const WORKSPACE_CONTEXT_MENU_FILE_HEIGHT = 92;
-const WORKSPACE_CONTEXT_MENU_REF_HEIGHT = 48;
+const WORKSPACE_CONTEXT_MENU_FILE_HEIGHT = 136;
+const WORKSPACE_CONTEXT_MENU_REF_HEIGHT = 92;
+const WORKSPACE_CONTEXT_MENU_SELECTION_HEIGHT = 48;
 const WORKSPACE_MAX_PREVIEW_TABS = 5;
 
 function clampWorkspaceTreeWidth(width: number, panelWidth?: number): number {
@@ -173,11 +174,6 @@ function formatCommitDate(dateStr: string): string {
   const hours = String(d.getHours()).padStart(2, "0");
   const minutes = String(d.getMinutes()).padStart(2, "0");
   return `${day} ${month} ${year} ${hours}:${minutes}`;
-}
-
-/** Thin wrapper over GeoMapViewer for rendering geo file previews in WorkspacePanel. */
-function GeoFilePreview({ body, className }: { body: string; className?: string }) {
-  return <GeoMapViewer output={body} className={className} />;
 }
 
 export function WorkspacePanel({
@@ -648,44 +644,14 @@ export function WorkspacePanel({
     }
   };
 
-  // ── GIS sidecar filter ──────────────────────────────────
-  const gisSidecarExts = new Set([
-    ".shx", ".sbn", ".sbx", ".dbf", ".prj", ".cpg", ".qix", ".shp.xml",
-    ".tfw", ".tifw", ".ovr", ".msk", ".rrd", ".aux.xml",
-  ]);
-
-  const filteredEntries = useMemo(() => {
-    const byDir = entriesByDir;
-    const result: Record<string, DirEntry[]> = {};
-    for (const [dir, entries] of Object.entries(byDir)) {
-      // Build set of base names that have "parent" files
-      const bases = new Set<string>();
-      for (const e of entries) {
-        const ext = e.name.includes(".") ? e.name.slice(e.name.lastIndexOf(".")).toLowerCase() : "";
-        if (ext === ".shp" || ext === ".tif" || ext === ".tiff") {
-          const base = e.name.slice(0, e.name.lastIndexOf("."));
-          bases.add(base);
-        }
-      }
-      result[dir] = entries.filter((e) => {
-        const name = e.name;
-        const ext = name.includes(".") ? name.slice(name.lastIndexOf(".")) : "";
-        // Always show directories
-        if (e.isDir) return true;
-        // Filter GIS sidecars
-        if (gisSidecarExts.has(ext.toLowerCase())) {
-          for (const base of bases) {
-            if (name.startsWith(base)) return false;
-          }
-        }
-        return true;
-      });
-    }
-    return result;
-  }, [entriesByDir]);
+  const revealInFileManager = () => {
+    if (!treeMenu) return;
+    setTreeMenu(null);
+    void app.RevealWorkspacePath(treeMenu.path);
+  };
 
   const renderRows = (dir: string, depth: number): JSX.Element[] => {
-    const entries = filteredEntries[dir] ?? [];
+    const entries = entriesByDir[dir] ?? [];
     return entries.flatMap((entry) => {
       const path = entryPath(dir, entry);
       const isOpen = openDirs.has(path);
@@ -965,8 +931,6 @@ export function WorkspacePanel({
             <div className="workspace-empty">{t("workspace.loading")}</div>
           ) : preview?.err ? (
             <div className="workspace-empty workspace-empty--error">{preview.err}</div>
-          ) : preview?.kind === "geo_raster" || preview?.kind === "geo_vector" ? (
-            <GeoFilePreview body={preview.body} className="workspace-geo-preview" />
           ) : preview?.kind ? (
             renderMediaPreview(preview)
           ) : preview?.binary ? (
@@ -982,7 +946,7 @@ export function WorkspacePanel({
             </>
           ) : null}
           {selectionMenu && (
-            <FloatingMenu x={selectionMenu.x} y={selectionMenu.y} estimatedHeight={WORKSPACE_CONTEXT_MENU_REF_HEIGHT}>
+            <FloatingMenu x={selectionMenu.x} y={selectionMenu.y} estimatedHeight={WORKSPACE_CONTEXT_MENU_SELECTION_HEIGHT}>
               <FloatingMenuItems
                 items={[
                   {
@@ -1139,6 +1103,11 @@ export function WorkspacePanel({
                       onSelect: () => void addTreeFileToChat(),
                     },
                   ]),
+              {
+                icon: <FolderOpen size={14} />,
+                label: t("workspace.revealInFileManager"),
+                onSelect: revealInFileManager,
+              },
             ]}
           />
         </FloatingMenu>

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ClipboardEvent, DragEvent, KeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
-import { ArrowUp, Eye, FileText, Folder, List, MessageSquare, Plus, Search, Shield, ShieldAlert, ShieldCheck, Square, Target, Trash2, X } from "lucide-react";
+import { ArrowUp, Eye, FileText, Folder, List, MessageSquare, Search, Shield, ShieldAlert, ShieldCheck, SlidersHorizontal, Square, Target, Trash2, X } from "lucide-react";
 import { asArray } from "../lib/array";
 import { DedupIndex, sha256 } from "../lib/attachDedup";
 import { app, onFilesDropped } from "../lib/bridge";
@@ -1726,9 +1726,10 @@ export function Composer({
                   disabled={disabled || running}
                   aria-haspopup="menu"
                   aria-expanded={intentMenuOpen && !intentMenuClosing}
+                  aria-label={t("composer.intentMenuTitle")}
                   title={intentMenuOpen || intentMenuClosing ? undefined : t("composer.intentMenuTitle")}
                 >
-                  <Plus size={17} />
+                  <SlidersHorizontal size={17} />
                 </button>
               </Tooltip>
               {planModeOn && (
@@ -1779,7 +1780,7 @@ export function Composer({
                   type="button"
                   className={`composer-modebar__item composer-modebar__item--ask${toolApprovalMode === "ask" ? " composer-modebar__item--active" : ""}`}
                   onClick={() => chooseApprovalMode("ask")}
-                  disabled={disabled || running}
+                  disabled={disabled}
                   aria-pressed={toolApprovalMode === "ask"}
                   title={t("composer.accessAskTitle")}
                 >
@@ -1790,7 +1791,7 @@ export function Composer({
                   type="button"
                   className={`composer-modebar__item composer-modebar__item--auto${toolApprovalMode === "auto" ? " composer-modebar__item--active" : ""}`}
                   onClick={() => chooseApprovalMode("auto")}
-                  disabled={disabled || running}
+                  disabled={disabled}
                   aria-pressed={toolApprovalMode === "auto"}
                   title={t("composer.accessAutoTitle")}
                 >
@@ -1801,7 +1802,7 @@ export function Composer({
                   type="button"
                   className={`composer-modebar__item composer-modebar__item--yolo${toolApprovalMode === "yolo" ? " composer-modebar__item--active" : ""}`}
                   onClick={() => chooseApprovalMode("yolo")}
-                  disabled={disabled || running}
+                  disabled={disabled}
                   aria-pressed={toolApprovalMode === "yolo"}
                   title={t("composer.accessYoloTitle")}
                 >
