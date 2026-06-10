@@ -3,12 +3,13 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
+	cryptorand "crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	mathrand "math/rand"
 	"mime"
 	"net/http"
 	"net/url"
@@ -141,7 +142,7 @@ func (s *mediaTokenStore) create(absPath, filename, mime, kind string, size int6
 	s.cleanupLocked()
 
 	tok := make([]byte, 16)
-	if _, err := rand.Read(tok); err != nil {
+	if _, err := cryptorand.Read(tok); err != nil {
 		panic("crypto/rand.Read failed: " + err.Error())
 	}
 	token := hex.EncodeToString(tok)
@@ -3252,6 +3253,318 @@ func (a *App) SearchFileRefs(query string) []DirEntry {
 		out = append(out, DirEntry{Name: path, IsDir: false})
 	}
 	return out
+}
+
+// GenerateWelcomePrompts reads the active workspace and produces three Chinese
+// welcome prompts tailored to the project content. It asks the fast flash model
+// to generate context-aware prompts from the file listing; when the model is
+// unavailable it falls back to deterministic file-based generation.
+// Returns a JSON array of 3 strings, or empty string on error.
+func (a *App) GenerateWelcomePrompts() string {
+	base, err := a.activeWorkspaceBase()
+	if err != nil || base == "" {
+		return ""
+	}
+
+	var listNames, rawNames []string
+	if entries, rdErr := os.ReadDir(base); rdErr == nil {
+		for _, e := range entries {
+			n := e.Name()
+			rawNames = append(rawNames, n)
+			if e.IsDir() {
+				listNames = append(listNames, n+"/")
+			} else {
+				listNames = append(listNames, n)
+			}
+		}
+	}
+
+	// Primary path: ask the fast flash model to tailor three Chinese prompts.
+	// Handles code AND non-code (notes/docs/design) folders, varies each session.
+	summary := buildWorkspaceSummary(base, listNames)
+	if prompts := welcomeModelPrompts(context.Background(), summary); len(prompts) == 3 {
+		out, _ := json.Marshal(prompts)
+		return string(out)
+	}
+
+	// Fallback when the model is unavailable: deterministic generation from
+	// file listing.
+	if len(rawNames) == 0 {
+		return ""
+	}
+	prompts := generateChinesePromptsFromFiles(rawNames)
+	out, _ := json.Marshal(prompts)
+	return string(out)
+}
+
+// welcomeSystemPrompt instructs the flash model to turn a workspace summary into
+// three short, concrete Chinese opening prompts.
+const welcomeSystemPrompt = `你是一个智能助手。下面会给你用户当前工作区的信息（目录名、顶层文件列表，可能还有编程语言和符号名）。请据此生成 3 条简短、具体、口语化的中文开场问题，帮助用户开始探索这个工作区。
+
+要求：
+- 必须用中文
+- 每条不超过 25 个汉字
+- 要结合工作区里的真实内容（具体的文件名、语言、模块、类型等），具体而不空泛
+- 三条角度要不同：例如一条整体概览、一条针对某个具体文件或模块、一条关于可以做的下一步
+- 如果不是代码项目（比如笔记、文档、设计稿），就围绕这些内容本身提问，不要假设它是代码项目
+- 只输出一个 JSON 数组，包含 3 个字符串，不要任何额外说明，不要 markdown 代码块`
+
+// welcomeModelPrompts asks the lightweight flash model (deepseek-flash) to
+// produce three Chinese opening prompts tailored to the workspace summary. It
+// mirrors the title-provider setup in internal/serve. Returns nil on any
+// failure (no config, no key, network error, bad output) so the caller can fall
+// back to deterministic generation.
+func welcomeModelPrompts(ctx context.Context, summary string) []string {
+	if strings.TrimSpace(summary) == "" {
+		return nil
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return nil
+	}
+	entry, ok := cfg.ResolveModel("deepseek-flash")
+	if !ok {
+		return nil
+	}
+	prov, err := provider.New(entry.Kind, provider.Config{
+		Name:    entry.Name,
+		BaseURL: entry.BaseURL,
+		Model:   entry.Model,
+		APIKey:  entry.APIKey(),
+		Extra:   map[string]any{"effort": "off"},
+	})
+	if err != nil {
+		return nil
+	}
+	cctx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+	ch, err := prov.Stream(cctx, provider.Request{
+		Messages: []provider.Message{
+			{Role: provider.RoleSystem, Content: welcomeSystemPrompt},
+			{Role: provider.RoleUser, Content: summary},
+		},
+		Temperature: 0.9,
+		MaxTokens:   240,
+	})
+	if err != nil {
+		return nil
+	}
+	var sb strings.Builder
+	for chunk := range ch {
+		switch chunk.Type {
+		case provider.ChunkText:
+			sb.WriteString(chunk.Text)
+		case provider.ChunkError:
+			return nil
+		}
+	}
+	return parseModelPrompts(sb.String())
+}
+
+// parseModelPrompts extracts a JSON array of three non-empty strings from the
+// model's reply, tolerating surrounding prose or markdown code fences.
+func parseModelPrompts(raw string) []string {
+	s := strings.TrimSpace(raw)
+	if i := strings.Index(s, "["); i >= 0 {
+		if j := strings.LastIndex(s, "]"); j > i {
+			s = s[i : j+1]
+		}
+	}
+	var arr []string
+	if err := json.Unmarshal([]byte(s), &arr); err != nil {
+		return nil
+	}
+	var out []string
+	for _, p := range arr {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	if len(out) < 3 {
+		return nil
+	}
+	return out[:3]
+}
+
+// buildWorkspaceSummary renders a compact textual description of the workspace
+// for the flash model: directory name and top-level file/dir listing.
+func buildWorkspaceSummary(base string, listNames []string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "工作区目录名: %s\n", filepath.Base(base))
+	var shown []string
+	for _, n := range listNames {
+		switch strings.TrimSuffix(n, "/") {
+		case ".git", "node_modules", ".codegraph", ".DS_Store":
+			continue
+		}
+		shown = append(shown, n)
+		if len(shown) >= 40 {
+			break
+		}
+	}
+	if len(shown) > 0 {
+		fmt.Fprintf(&b, "顶层文件和目录: %s\n", strings.Join(shown, ", "))
+	}
+	return b.String()
+}
+
+// welcomeRand is seeded once per process for prompt randomization.
+var welcomeRand = mathrand.New(mathrand.NewSource(time.Now().UnixNano()))
+
+// pickRandom picks a random element from a non-empty slice.
+func pickRandom(ss []string) string {
+	return ss[welcomeRand.Intn(len(ss))]
+}
+
+// shuffle returns a shuffled copy of ss.
+func shuffle(ss []string) []string {
+	out := make([]string, len(ss))
+	copy(out, ss)
+	welcomeRand.Shuffle(len(out), func(i, j int) { out[i], out[j] = out[j], out[i] })
+	return out
+}
+
+// generateChinesePromptsFromFiles builds three Chinese welcome prompts by
+// inspecting root-level file and folder names. Used when no codegraph index
+// is available. Each call returns a different random combination.
+func generateChinesePromptsFromFiles(names []string) []string {
+	set := make(map[string]bool, len(names))
+	for _, n := range names {
+		set[n] = true
+	}
+	has := func(f string) bool { return set[f] }
+
+	isJS := has("package.json")
+	isGo := has("go.mod")
+	isRust := has("Cargo.toml")
+	isPython := has("pyproject.toml") || has("setup.py") || has("requirements.txt")
+	hasDocker := has("Dockerfile") || has("docker-compose.yml") || has("docker-compose.yaml")
+	hasCI := has(".github") || has(".gitlab-ci.yml") || has(".circleci")
+	hasTests := has("test") || has("tests") || has("__tests__") || has("spec")
+	hasDocs := has("docs") || has("doc") || has("README.md")
+	isCode := isJS || isGo || isRust || isPython
+
+	// Non-code workspace (notes, docs, designs): build prompts around the real
+	// document names instead of pretending it's a code project.
+	if !isCode {
+		return generateChineseDocPrompts(names)
+	}
+
+	// Collect candidates for each slot.
+	var slot1, slot2, slot3 []string
+
+	// Slot 1: architecture / overview.
+	if isGo {
+		slot1 = append(slot1, "帮我梳理一下这个 Go 项目的模块结构和依赖关系")
+		slot1 = append(slot1, "帮我分析一下这个 Go 项目的目录结构")
+	} else if isJS {
+		slot1 = append(slot1, "帮我梳理一下这个前端项目的组件结构和路由")
+		slot1 = append(slot1, "帮我分析一下这个项目的前端架构")
+	} else if isPython {
+		slot1 = append(slot1, "帮我梳理一下这个 Python 项目的包结构和入口点")
+	} else if isRust {
+		slot1 = append(slot1, "帮我梳理一下这个 Rust 项目的 crate 结构")
+	}
+
+	// Slot 2: most useful "second question".
+	if hasDocker {
+		slot2 = append(slot2, "帮我解释一下 Docker 的配置和服务连接方式")
+	}
+	if hasCI {
+		slot2 = append(slot2, "帮我梳理一下 CI/CD 流水线的配置")
+	}
+	if hasTests {
+		slot2 = append(slot2, "帮我分析一下测试套件的结构")
+	}
+	if isGo {
+		slot2 = append(slot2, "帮我分析一下 cmd/ 和 internal/ 的职责划分")
+	}
+	if hasDocs {
+		slot2 = append(slot2, "帮我总结一下 README 中的项目说明")
+	}
+
+	// Slot 3: dive into a specific area.
+	if isJS && has("src") {
+		slot3 = append(slot3, "帮我分析一下 src/ 下的组件结构和状态管理")
+	}
+	if isGo && (has("cmd") || has("internal")) {
+		slot3 = append(slot3, "帮我分析一下主要包之间的调用关系")
+	}
+	if isRust && has("src") {
+		slot3 = append(slot3, "帮我分析一下 src/ 下各模块的职责")
+	}
+	if isPython && has("src") {
+		slot3 = append(slot3, "帮我分析一下包的布局和主要入口")
+	}
+	if hasDocs {
+		slot3 = append(slot3, "帮我看看文档里关于项目架构的描述")
+	}
+
+	slot1 = fillEmpty(slot1, "帮我梳理一下这个项目的整体架构")
+	slot2 = fillEmpty(slot2, "帮我总结一下最近的 git 变更")
+	slot3 = fillEmpty(slot3, "帮我找一下项目的入口点和主要流程")
+	return []string{pickRandom(slot1), pickRandom(slot2), pickRandom(slot3)}
+}
+
+// docExtensions are the file types treated as readable documents/notes.
+var docExtensions = map[string]bool{
+	".md": true, ".markdown": true, ".txt": true, ".rtf": true,
+	".doc": true, ".docx": true, ".pdf": true, ".org": true,
+}
+
+// generateChineseDocPrompts builds prompts for a non-code workspace (notes,
+// docs, designs) by referencing the real document names found at the top level.
+func generateChineseDocPrompts(names []string) []string {
+	var docs []string
+	for _, n := range names {
+		if strings.HasPrefix(n, ".") {
+			continue
+		}
+		if docExtensions[strings.ToLower(filepath.Ext(n))] {
+			title := strings.TrimSuffix(n, filepath.Ext(n))
+			if title != "" {
+				docs = append(docs, title)
+			}
+		}
+	}
+	docs = shuffle(docs)
+
+	var slot1, slot2, slot3 []string
+
+	// Slot 1: overall structure of the folder's contents.
+	slot1 = append(slot1, "帮我梳理一下这个目录下文件的主题和分类")
+	slot1 = append(slot1, "帮我整理一下这些内容的整体脉络")
+
+	// Slot 2: dive into a specific real document, when one exists.
+	if len(docs) > 0 {
+		slot2 = append(slot2, fmt.Sprintf("帮我总结一下《%s》的主要内容", docs[0]))
+	}
+	if len(docs) > 1 {
+		slot2 = append(slot2, fmt.Sprintf("帮我提炼一下《%s》里的要点", docs[1]))
+	}
+
+	// Slot 3: a useful next step.
+	slot3 = append(slot3, "帮我把这些内容归纳成一份结构化大纲")
+	if len(docs) > 1 {
+		slot3 = append(slot3, fmt.Sprintf("帮我对比一下《%s》和《%s》的异同", docs[0], docs[1]))
+	}
+	slot3 = append(slot3, "帮我找出这些笔记里反复出现的主题")
+
+	slot1 = fillEmpty(slot1, "帮我梳理一下这个目录里的内容")
+	slot2 = fillEmpty(slot2, "帮我总结一下这些文档的核心内容")
+	slot3 = fillEmpty(slot3, "帮我把这些内容整理成一份大纲")
+	return []string{pickRandom(slot1), pickRandom(slot2), pickRandom(slot3)}
+}
+
+// fillEmpty returns ss, or a single-element slice with the fallback when ss is
+// empty. Keeps the generic prompt out of the random pool whenever a specific
+// candidate exists, so populated slots never show the generic default.
+func fillEmpty(ss []string, fallback string) []string {
+	if len(ss) == 0 {
+		return []string{fallback}
+	}
+	return ss
 }
 
 // ReadFile returns a small text preview for a file under the current workspace.
