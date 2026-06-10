@@ -87,6 +87,10 @@ func (w Workspace) Tools(enabled ...string) []tool.Tool {
 // (an explicit absolute path is honored verbatim — the write-confiner, not this,
 // enforces the workspace boundary). An empty p resolves to workDir itself, so a
 // defaulted "." (ls/grep) targets the workspace root.
+//
+// On Windows, filepath.Join does not reset when joining an absolute path from a
+// different drive. The IsAbs check here guards against that. New code should
+// prefer fileutil.SafeJoin for the same protection in a single call.
 func resolveIn(workDir, p string) string {
 	if workDir == "" {
 		return p

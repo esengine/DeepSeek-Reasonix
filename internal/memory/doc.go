@@ -247,6 +247,8 @@ func importTarget(line string) (string, bool) {
 
 // resolvePath turns an import token into a filesystem path: ~ expands to home,
 // absolute paths pass through, everything else is relative to baseDir.
+// Uses SafeJoin semantics (IsAbs check before filepath.Join) to handle Windows
+// cross-drive paths correctly.
 func resolvePath(p, baseDir string) string {
 	if strings.HasPrefix(p, "~") {
 		if home, err := os.UserHomeDir(); err == nil {

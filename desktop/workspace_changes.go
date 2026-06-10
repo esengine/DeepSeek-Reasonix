@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"reasonix/internal/fileutil"
 	"reasonix/internal/proc"
 )
 
@@ -176,7 +177,7 @@ func workspaceRelPathFromGitStatus(repoRoot, base, path string) string {
 		return ""
 	}
 	if !filepath.IsAbs(path) {
-		path = filepath.Join(repoRoot, filepath.FromSlash(path))
+		path = fileutil.SafeJoin(repoRoot, filepath.FromSlash(path))
 	}
 	return normalizeWorkspaceRelPath(base, path)
 }

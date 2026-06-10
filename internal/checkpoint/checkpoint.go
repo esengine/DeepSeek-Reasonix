@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"reasonix/internal/diff"
+	"reasonix/internal/fileutil"
 	fileenc "reasonix/internal/fileutil/encoding"
 )
 
@@ -300,7 +301,7 @@ func detectCurrentEncoding(path string) *fileenc.Kind {
 func safePath(root, p string) (string, error) {
 	abs := p
 	if !filepath.IsAbs(abs) {
-		abs = filepath.Join(root, p)
+		abs = fileutil.SafeJoin(root, p)
 	}
 	abs = filepath.Clean(abs)
 	if root != "" {
