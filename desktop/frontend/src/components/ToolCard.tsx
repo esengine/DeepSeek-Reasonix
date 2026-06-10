@@ -92,12 +92,11 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
     return shellExpand.register(item.id, () => setOpen((v) => !v));
   }, [item.isShell, item.id, shellExpand]);
 
-  // Read-only "research" calls (read/grep/ls/glob/web_fetch) are quieted to a
-  // slim, borderless, dim row so a long run of them doesn't bury the few calls
-  // that matter — writers, bash, sub-agents, and anything that failed keep the
-  // full card. Uses the readOnly flag, not a tool-name list.
-  const quiet =
-    item.readOnly && !hasNested && item.status !== "error" && item.status !== "stopped";
+  // Read-only "research" calls (read/grep/ls/glob/web_fetch) are hidden after
+  // completion so they don't clutter the transcript. During execution they still
+  // render so the user sees progress.
+  const quiet = item.readOnly && !hasNested;
+  if (quiet && item.status !== "running") return null;
 
   // Shell output: split into preview + "show all" toggle.
   const shellOutput = item.isShell && item.output ? item.output : null;
