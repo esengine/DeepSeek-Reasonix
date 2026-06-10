@@ -457,7 +457,7 @@ func (c *Controller) providerSwitchText(name string) string {
 			for _, m := range models {
 				fmt.Fprintf(&b, "  %s/%s\n", name, m)
 			}
-			b.WriteString(fmt.Sprintf("switch with /model %s/<model>", name))
+			fmt.Fprintf(&b, "switch with /model %s/<model>", name)
 			return strings.TrimRight(b.String(), "\n")
 		}
 	}
