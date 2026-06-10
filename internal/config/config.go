@@ -64,6 +64,7 @@ type UIConfig struct {
 	Theme         string `toml:"theme"`          // auto|dark|light; empty resolves to auto
 	ThemeStyle    string `toml:"theme_style"`    // graphite|ember|aurora|midnight|sandstone|porcelain|linen|glacier
 	CloseBehavior string `toml:"close_behavior"` // legacy desktop close behavior; prefer desktop.close_behavior
+	ShowThinking  bool   `toml:"show_thinking"`  // CLI: expand model thinking/reasoning text in the transcript (Ctrl+O / /verbose). Default false.
 }
 
 // DesktopConfig controls desktop-only UI preferences. It is intentionally

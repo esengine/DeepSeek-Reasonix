@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -2863,8 +2864,41 @@ func (m *chatTUI) cycleMode() {
 	}
 }
 
+// applyConfig seeds the TUI from a loaded config. Extracted from chatREPL so
+// the "load cfg → propagate to chatTUI" path is unit-testable without going
+// through the full bubbletea bootstrap. New chatTUI has already picked a
+// default for showReasoning (Termux native scrollback) — we use OR semantics
+// so the persisted preference never silently disables a Termux user's
+// always-on reasoning (issue #3312).
+func (m *chatTUI) applyConfig(cfg *config.Config) {
+	if cfg == nil {
+		return
+	}
+	m.outputStyle = cfg.Agent.OutputStyle
+	m.statuslineCmd = cfg.Statusline.Command
+	m.cfg = cfg
+	if cfg.UI.ShowThinking {
+		m.showReasoning = true
+	}
+}
+
 func (m *chatTUI) toggleVerboseReasoning(notify bool) {
 	m.showReasoning = !m.showReasoning
+	// Persist the new preference so a future CLI session opens with the same
+	// state (issue #3312). The save runs off the bubbletea event loop to avoid
+	// stalling the UI on slow disks. We capture `show` into a local before
+	// spawning the goroutine: passing it as a function argument establishes
+	// the happens-before edge the Go memory model requires, so the save
+	// goroutine reads a stable value rather than racing the Update goroutine
+	//'s write to m.showReasoning. A missed or racing write to disk is harmless
+	// — the atomic temp+rename in SaveTo() means we either persist the new
+	// value or the previous one, never a torn file.
+	show := m.showReasoning
+	go func() {
+		if err := m.persistShowThinking(show); err != nil {
+			slog.Warn("persist show_thinking", "err", err)
+		}
+	}()
 	if !notify {
 		return
 	}
@@ -2873,6 +2907,25 @@ func (m *chatTUI) toggleVerboseReasoning(notify bool) {
 	} else {
 		m.notice("verbose off — thinking text will stay collapsed")
 	}
+}
+
+// persistShowThinking writes the supplied show-thinking preference back to
+// the user-level config. The toggle always targets the user config (not the
+// project config) because show_thinking is a personal viewing preference —
+// writing it to a project-local reasonix.toml that may be git-committed would
+// leak the user's setting to every collaborator on the repo. The user config
+// is created on first use by writeConfigFile's MkdirAll.
+//
+// `show` is passed in rather than read off m.showReasoning so the save
+// goroutine doesn't race the Update goroutine's write. Tests may call this
+// synchronously to verify the round-trip without dealing with goroutine
+// timing.
+func (m *chatTUI) persistShowThinking(show bool) error {
+	if m.cfg == nil {
+		return nil
+	}
+	m.cfg.UI.ShowThinking = show
+	return m.cfg.SaveTo(config.UserConfigPath())
 }
 
 // startTurn commits the user bubble to scrollback, resets the turn accumulator,

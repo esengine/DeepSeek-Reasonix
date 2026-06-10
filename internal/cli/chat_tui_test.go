@@ -627,6 +627,105 @@ func TestEffortCommandWritesCurrentDeepSeekProvider(t *testing.T) {
 	}
 }
 
+// TestToggleVerboseReasoningPersistsShowThinking covers issue #3312 — the
+// /verbose (and Ctrl+O) toggle must round-trip through the on-disk config so
+// the next session opens with the same state. We exercise persistShowThinking
+// directly because the production toggle wraps it in a goroutine for non-
+// blocking I/O; the helper itself is the unit under test. The `show` arg is
+// passed explicitly (rather than read from m.showReasoning) to mirror how
+// toggleVerboseReasoning captures the value into a local before spawning the
+// save goroutine.
+func TestToggleVerboseReasoningPersistsShowThinking(t *testing.T) {
+	isolateUserConfig(t)
+
+	m := newTestChatTUI()
+	m.cfg = config.Default()
+	if m.cfg.UI.ShowThinking {
+		t.Fatal("precondition: default UI.ShowThinking must be false")
+	}
+
+	// First flip: on. Save and re-read the user config to confirm.
+	m.showReasoning = true
+	if err := m.persistShowThinking(m.showReasoning); err != nil {
+		t.Fatalf("persist show_thinking = on: %v", err)
+	}
+	loaded := config.LoadForEdit(config.UserConfigPath())
+	if !loaded.UI.ShowThinking {
+		t.Errorf("user config UI.ShowThinking = false, want true after toggle on")
+	}
+
+	// Second flip: off. Save and re-read — the new key must round-trip back.
+	m.showReasoning = false
+	if err := m.persistShowThinking(m.showReasoning); err != nil {
+		t.Fatalf("persist show_thinking = off: %v", err)
+	}
+	loaded = config.LoadForEdit(config.UserConfigPath())
+	if loaded.UI.ShowThinking {
+		t.Errorf("user config UI.ShowThinking = true, want false after toggle off")
+	}
+}
+
+// TestPersistShowThinkingNoConfigIsNoop proves the helper tolerates a nil cfg,
+// which is what happens in unit tests that build a chatTUI without going
+// through the full cli.go bootstrap. The production toggle relies on this
+// early-return to avoid nil-deref panics.
+func TestPersistShowThinkingNoConfigIsNoop(t *testing.T) {
+	m := newTestChatTUI()
+	if m.cfg != nil {
+		t.Fatal("newTestChatTUI must not seed cfg")
+	}
+	if err := m.persistShowThinking(true); err != nil {
+		t.Fatalf("persistShowThinking with nil cfg should be a no-op, got %v", err)
+	}
+}
+
+// TestApplyConfigRespectsShowThinking covers the boot-time half of issue
+// #3312: a user with show_thinking = true in their user config must open
+// the next session with the reasoning block already expanded. Without this
+// test, dropping the four `applyConfig` lines would leave the toggle
+// round-trip half-broken and all existing tests would still pass.
+func TestApplyConfigRespectsShowThinking(t *testing.T) {
+	m := newTestChatTUI()
+	if m.showReasoning {
+		t.Fatal("precondition: fresh chatTUI should start with showReasoning = false")
+	}
+
+	cfg := config.Default()
+	cfg.UI.ShowThinking = true
+	m.applyConfig(cfg)
+	if !m.showReasoning {
+		t.Errorf("applyConfig with cfg.UI.ShowThinking=true should turn showReasoning on")
+	}
+	if m.cfg != cfg {
+		t.Errorf("applyConfig should stash the cfg pointer for later persistence")
+	}
+}
+
+// TestApplyConfigKeepsTermuxVerboseOn is the OR-semantics check: if newChatTUI
+// already turned showReasoning on for Termux (because the live viewport
+// can't render reasoning in native scrollback), applyConfig must not stomp
+// it off when the user has no persisted preference.
+func TestApplyConfigKeepsTermuxVerboseOn(t *testing.T) {
+	m := newTestChatTUI()
+	m.showReasoning = true // simulate the newChatTUI default for Termux
+
+	m.applyConfig(config.Default()) // default cfg has ShowThinking = false
+	if !m.showReasoning {
+		t.Errorf("applyConfig with default cfg must not disable a Termux-forced showReasoning")
+	}
+}
+
+// TestApplyConfigNilIsNoop covers a defensive edge — chatREPL guards the
+// config.Load() error with an if-err-nil block, but applyConfig itself
+// should not panic if a future caller forgets.
+func TestApplyConfigNilIsNoop(t *testing.T) {
+	m := newTestChatTUI()
+	m.applyConfig(nil) // must not panic
+	if m.cfg != nil {
+		t.Errorf("applyConfig(nil) must not seed cfg")
+	}
+}
+
 func TestEffortCommandRejectsUnsupportedProvider(t *testing.T) {
 	isolateUserConfig(t)
 

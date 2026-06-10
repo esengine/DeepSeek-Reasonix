@@ -94,6 +94,23 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	if got.UI.ThemeStyle != "glacier" {
 		t.Errorf("ui.theme_style = %q, want glacier", got.UI.ThemeStyle)
 	}
+	// show_thinking defaults to false and must survive a round-trip. Setting
+	// it true below flips the rendered key from a comment to an active entry.
+	if got.UI.ShowThinking {
+		t.Errorf("ui.show_thinking = true, want default false (backward-compatible)")
+	}
+	orig.UI.ShowThinking = true
+	rendered2 := RenderTOML(orig)
+	if !strings.Contains(rendered2, "show_thinking = true") {
+		t.Errorf("rendered TOML missing show_thinking = true:\n%s", rendered2)
+	}
+	var got2 Config
+	if _, err := toml.Decode(rendered2, &got2); err != nil {
+		t.Fatalf("rendered TOML with show_thinking does not parse: %v", err)
+	}
+	if !got2.UI.ShowThinking {
+		t.Errorf("ui.show_thinking = false after round-trip, want true")
+	}
 	if got.Desktop.Language != "en" {
 		t.Errorf("desktop.language = %q, want en", got.Desktop.Language)
 	}
@@ -367,6 +384,33 @@ func TestScopedRenderSeparatesUserAndProjectConfig(t *testing.T) {
 	}
 	if !strings.Contains(project, "# system_prompt =") {
 		t.Fatalf("project render should leave a system prompt hint:\n%s", project)
+	}
+}
+
+// TestProjectRenderShowThinkingScoped covers the show_thinking render branch:
+// a default (false) config must NOT emit the key in project-scope writes
+// (avoiding noise), but a non-default (true) config must emit it so the
+// preference survives a future Load(). RenderTOMLForScope is called from
+// SaveToScope when rewriting either layer of config, so both branches need
+// explicit coverage.
+func TestProjectRenderShowThinkingScoped(t *testing.T) {
+	c := Default()
+	project := RenderTOMLForScope(c, RenderScopeProject)
+	if strings.Contains(project, "show_thinking") {
+		t.Errorf("project render with default show_thinking=false should not emit the key, got:\n%s", project)
+	}
+
+	c.UI.ShowThinking = true
+	project = RenderTOMLForScope(c, RenderScopeProject)
+	if !strings.Contains(project, "show_thinking = true") {
+		t.Errorf("project render with show_thinking=true should emit the key, got:\n%s", project)
+	}
+	var got Config
+	if _, err := toml.Decode(project, &got); err != nil {
+		t.Fatalf("project-scope TOML with show_thinking does not parse: %v", err)
+	}
+	if !got.UI.ShowThinking {
+		t.Errorf("project-scope round-trip lost show_thinking = true")
 	}
 }
 

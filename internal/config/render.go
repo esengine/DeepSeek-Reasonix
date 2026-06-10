@@ -63,6 +63,14 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		if strings.TrimSpace(c.UI.CloseBehavior) != "" && scope == RenderScopeProject {
 			fmt.Fprintf(&b, "close_behavior = %q   # legacy desktop close behavior; prefer [desktop].close_behavior in user config\n", c.DesktopCloseBehavior())
 		}
+		// show_thinking is only persisted when set so an unmodified config stays
+		// byte-identical; the default (false = reasoning collapsed) is the
+		// long-standing behaviour and a fresh file should not introduce a key.
+		if c.UI.ShowThinking {
+			b.WriteString("show_thinking = true   # CLI: expand model thinking/reasoning text by default; toggled at runtime with /verbose or Ctrl+O\n")
+		} else if scope == RenderScopeFull {
+			b.WriteString("# show_thinking = false   # CLI: expand model thinking/reasoning text by default; toggled at runtime with /verbose or Ctrl+O\n")
+		}
 		b.WriteString("\n")
 	}
 
