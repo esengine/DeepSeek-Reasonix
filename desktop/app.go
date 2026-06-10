@@ -274,9 +274,15 @@ func (a *App) startup(ctx context.Context) {
 	go func() {
 		dir, err := embedsDataDir()
 		if err != nil {
-			return // non-fatal: user can still point plugin at repo checkout
+			return
 		}
 		_ = extractGeoPython(dir)
+	}()
+
+	// Extract bundled skills & commands to ~/.reasonix/ so they're discovered
+	// by the skill store on next session start.
+	go func() {
+		_ = extractSkillsToHome()
 	}()
 
 	go a.restoreOrBuildTabs()

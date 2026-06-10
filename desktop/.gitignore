@@ -40,3 +40,4 @@
 # Wails dependency-change cache
 /frontend/package.json.md5
 .reasonix/
+reasonix_skills/
