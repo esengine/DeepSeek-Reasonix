@@ -268,7 +268,28 @@ func (a *App) startup(ctx context.Context) {
 	installSystemQuitHook()
 	a.startTray()
 
+	// Extract bundled Python MCP server sources so the geocode plugin can find
+	// internal.geo.mcp_server without a separate install step.
+	go func() {
+		dir, err := embedsDataDir()
+		if err != nil {
+			return // non-fatal: user can still point plugin at repo checkout
+		}
+		_ = extractGeoPython(dir)
+	}()
+
 	go a.restoreOrBuildTabs()
+}
+
+// embedsDataDir returns the directory where embedded assets (Python MCP server,
+// etc.) are extracted. Uses the same parent as the Reasonix config directory so
+// the geocode plugin's PYTHONPATH points to a predictable location.
+func embedsDataDir() (string, error) {
+	cfgDir, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(cfgDir, "reasonix", "embeds"), nil
 }
 
 func (a *App) beforeClose(ctx context.Context) bool {
