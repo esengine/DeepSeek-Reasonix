@@ -11,6 +11,12 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+// SetProcessGroupKill is a no-op on Windows: the Job Object that StartTracked
+// assigns reaps the whole tree on close, so Setpgid (which doesn't exist here)
+// is unnecessary. It exists so non-Windows callers can request group kill
+// uniformly.
+func SetProcessGroupKill(*exec.Cmd) {}
+
 // KillTree terminates cmd and every descendant it spawned. Process.Kill only
 // signals the direct child, so a launcher (cmd.exe → node.exe) leaves the
 // grandchild alive holding the inherited stdout/stderr pipes — which makes
