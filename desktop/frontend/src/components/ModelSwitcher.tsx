@@ -1,19 +1,45 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Brain, Check, ChevronsUpDown } from "lucide-react";
 import { asArray } from "../lib/array";
 import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
 import type { ModelInfo } from "../lib/types";
-import { AnchoredPopover } from "./AnchoredPopover";
+import { ANCHORED_POPOVER_CLOSE_MS, AnchoredPopover } from "./AnchoredPopover";
 
 // ModelSwitcher opens an upward popover listing configured providers. Selecting
 // one switches the active model while the current conversation continues.
 export function ModelSwitcher({ label, tabId, onPick }: { label: string; tabId?: string; onPick: (name: string) => void }) {
   const t = useT();
   const [open, setOpen] = useState(false);
+  const [closing, setClosing] = useState(false);
   const [models, setModels] = useState<ModelInfo[]>([]);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const closeTimerRef = useRef<number | null>(null);
   const triggerWidth = triggerRef.current?.getBoundingClientRect().width;
+
+  const clearCloseTimer = useCallback(() => {
+    if (closeTimerRef.current === null) return;
+    window.clearTimeout(closeTimerRef.current);
+    closeTimerRef.current = null;
+  }, []);
+
+  const openMenu = useCallback(() => {
+    clearCloseTimer();
+    setClosing(false);
+    setOpen(true);
+  }, [clearCloseTimer]);
+
+  const closeMenu = useCallback((afterClose?: () => void) => {
+    clearCloseTimer();
+    setClosing(true);
+    window.requestAnimationFrame(() => setOpen(false));
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    closeTimerRef.current = window.setTimeout(() => {
+      closeTimerRef.current = null;
+      setClosing(false);
+      afterClose?.();
+    }, reduceMotion ? 0 : ANCHORED_POPOVER_CLOSE_MS);
+  }, [clearCloseTimer]);
 
   useEffect(() => {
     if (open) {
@@ -21,9 +47,10 @@ export function ModelSwitcher({ label, tabId, onPick }: { label: string; tabId?:
     }
   }, [open, tabId]);
 
+  useEffect(() => () => clearCloseTimer(), [clearCloseTimer]);
+
   const pick = (name: string) => {
-    setOpen(false);
-    onPick(name);
+    closeMenu(() => onPick(name));
   };
 
   return (
@@ -32,8 +59,8 @@ export function ModelSwitcher({ label, tabId, onPick }: { label: string; tabId?:
         ref={triggerRef}
         type="button"
         className="modelsw__trigger"
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open && !closing}
+        onClick={() => (open || closing ? closeMenu() : openMenu())}
       >
         <Brain size={13} className="modelsw__kind" />
         <span className="modelsw__label">{label}</span>
@@ -41,10 +68,11 @@ export function ModelSwitcher({ label, tabId, onPick }: { label: string; tabId?:
       </button>
       <AnchoredPopover
         open={open}
+        closing={closing}
         anchorRef={triggerRef}
-        onClose={() => setOpen(false)}
+        onClose={() => closeMenu()}
         className="modelsw__menu modelsw__menu--portal"
-        style={{ width: triggerWidth, minWidth: triggerWidth }}
+        style={{ width: triggerWidth, minWidth: triggerWidth ? Math.max(triggerWidth, 160) : undefined }}
       >
         <div role="listbox">
           {models.length === 0 && <div className="modelsw__empty">{t("status.noModels")}</div>}

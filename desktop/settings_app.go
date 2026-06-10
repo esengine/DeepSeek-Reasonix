@@ -101,8 +101,11 @@ type SettingsView struct {
 	// registered (provider.Kinds()), so the editor's "kind" picker offers only
 	// kinds that resolve — selecting an unregistered one would fail the rebuild.
 	ProviderKinds []string `json:"providerKinds"`
-	// Bypass is the live YOLO state (runtime-only, not from config), so the panel's
-	// toggle reflects whether approvals are currently being skipped this session.
+	// AutoApproveTools is the live YOLO/full-access state (runtime-only, not from
+	// config), so the panel's toggle reflects whether tool approvals are currently
+	// being skipped this session.
+	AutoApproveTools bool `json:"autoApproveTools"`
+	// Bypass is the legacy JSON key for the same live state.
 	Bypass bool `json:"bypass"`
 }
 
@@ -265,7 +268,7 @@ func (a *App) Settings() SettingsView {
 			Sandbox:           SandboxView{Bash: "enforce", AllowWrite: []string{}},
 			Agent:             AgentView{PlannerMaxSteps: 12},
 			AutoPlan:          "off",
-			DesktopTheme:      "dark",
+			DesktopTheme:      "light",
 			DesktopThemeStyle: "graphite",
 			CloseBehavior:     "background",
 		}
@@ -312,7 +315,8 @@ func (a *App) Settings() SettingsView {
 		CloseBehavior:     cfg.DesktopCloseBehavior(),
 		ConfigPath:        cfgPath,
 		ProviderKinds:     nonNil(provider.Kinds()),
-		Bypass:            ctrl != nil && ctrl.Bypass(),
+		AutoApproveTools:  ctrl != nil && ctrl.AutoApproveTools(),
+		Bypass:            ctrl != nil && ctrl.AutoApproveTools(),
 	}
 	added := providerAccessSet(cfg.Desktop.ProviderAccess)
 	v.OfficialProviders = officialProviderViews(officialProviderAddedSet(cfg))

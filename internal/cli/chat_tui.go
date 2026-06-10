@@ -85,9 +85,9 @@ type chatTUI struct {
 	// Persists across turns until the work completes or a new session starts.
 	todoArgs string
 
-	// planMode mirrors the agent's read-only gate (Shift+Tab cycles it). The marker
-	// rides in outgoing user messages so the cache-stable prompt prefix is left
-	// untouched.
+	// planMode mirrors the agent's read-only gate (Shift+Tab toggles it). The
+	// marker rides in outgoing user messages so the cache-stable prompt prefix is
+	// left untouched.
 	planMode bool
 
 	// pendingInterject queues input typed while a turn runs; each TurnDone
@@ -2056,35 +2056,30 @@ func (m chatTUI) View() tea.View {
 	}
 
 	var modeTag string
-	switch {
-	case shellMode:
+	if shellMode {
 		modeTag = lipgloss.NewStyle().
 			Background(lipgloss.Color(statusShellColor.hex)).
 			Foreground(lipgloss.Color("#ffffff")).
 			Bold(true).
 			Padding(0, 1).
 			Render("Shell")
-	case m.ctrl.Bypass():
+	} else {
+		color := statusAutoColor
+		foreground := "#111827"
+		switch {
+		case m.ctrl.AutoApproveTools():
+			color = statusYoloColor
+			foreground = "#ffffff"
+		case m.planMode:
+			color = statusPlanColor
+			foreground = "#ffffff"
+		}
 		modeTag = lipgloss.NewStyle().
-			Background(lipgloss.Color(statusYoloColor.hex)).
-			Foreground(lipgloss.Color("#ffffff")).
+			Background(lipgloss.Color(color.hex)).
+			Foreground(lipgloss.Color(foreground)).
 			Bold(true).
 			Padding(0, 1).
-			Render("YOLO")
-	case m.planMode:
-		modeTag = lipgloss.NewStyle().
-			Background(lipgloss.Color(statusPlanColor.hex)).
-			Foreground(lipgloss.Color("#ffffff")).
-			Bold(true).
-			Padding(0, 1).
-			Render("Plan")
-	default:
-		modeTag = lipgloss.NewStyle().
-			Background(lipgloss.Color(statusAutoColor.hex)).
-			Foreground(lipgloss.Color("#111827")).
-			Bold(true).
-			Padding(0, 1).
-			Render("Auto")
+			Render(m.modeTagText())
 	}
 
 	ctxTag := m.contextTag()
@@ -2108,7 +2103,7 @@ func (m chatTUI) View() tea.View {
 		status = "  " + modeTag + " · " + i18n.M.ChatStatusToolApproval
 	case shellMode:
 		status = "  " + modeTag + " · " + i18n.M.ShellModeHint
-	case m.ctrl.Bypass():
+	case m.ctrl.AutoApproveTools():
 		status = "  " + modeTag + " · " + i18n.M.ChatStatusYoloIdle + " " + dim("("+i18n.M.ChatStatusCycleHint+")")
 	default:
 		status = "  " + modeTag + " · " + i18n.M.ChatStatusIdle + " " + dim("("+i18n.M.ChatStatusCycleHint+")")
@@ -2845,21 +2840,32 @@ func pastedFileRef(content string) (string, bool) {
 	return "@" + path, true
 }
 
-// cycleMode advances the input mode normal → plan → YOLO → normal (Shift+Tab),
-// mirroring the desktop composer. plan is read-only; YOLO
-// auto-approves every tool call for the session (deny rules still apply). The
-// status line's mode tag ([auto]/[plan]/[YOLO]) reflects the result.
+// cycleMode toggles plan mode (Shift+Tab), mirroring the desktop composer.
+// YOLO/full access is controlled explicitly by the startup flag/runtime binding
+// so the shortcut never crosses a permission boundary.
 func (m *chatTUI) cycleMode() {
+	m.planMode = !m.planMode
+	if m.planMode {
+		m.ctrl.ClearGoal()
+	}
+	m.ctrl.SetPlanMode(m.planMode)
+}
+
+func (m chatTUI) modeTagText() string {
+	goalMode := strings.TrimSpace(m.ctrl.Goal()) != "" && m.ctrl.GoalStatus() == control.GoalStatusRunning
 	switch {
-	case m.ctrl.Bypass():
-		m.ctrl.SetBypass(false) // YOLO → normal
+	case m.planMode && m.ctrl.AutoApproveTools():
+		return "Plan+YOLO"
+	case goalMode && m.ctrl.AutoApproveTools():
+		return "Goal+YOLO"
+	case m.ctrl.AutoApproveTools():
+		return "YOLO"
 	case m.planMode:
-		m.planMode = false
-		m.ctrl.SetPlanMode(false)
-		m.ctrl.SetBypass(true) // plan → YOLO
+		return "Plan"
+	case goalMode:
+		return "Goal"
 	default:
-		m.planMode = true
-		m.ctrl.SetPlanMode(true) // normal → plan
+		return "Auto"
 	}
 }
 
@@ -3245,6 +3251,8 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 	case "/memory":
 		m.echoLocalCommand(input)
 		m.showMemory()
+	case "/goal":
+		return m.runGoalSubcommand(input)
 	case "/remember":
 		note := strings.TrimSpace(strings.TrimPrefix(input, cmd))
 		if note == "" {
@@ -3267,6 +3275,36 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 			return m.startTurn(sent, input, input)
 		}
 		m.notice(fmt.Sprintf("%s: %s", i18n.M.SlashUnknown, cmd))
+	}
+	return nil
+}
+
+func (m *chatTUI) runGoalSubcommand(input string) tea.Cmd {
+	cmd, ok := control.ParseGoalCommand(input)
+	if !ok {
+		m.echoLocalCommand(input)
+		m.notice(i18n.M.GoalEmpty)
+		return nil
+	}
+	switch cmd.Action {
+	case control.GoalCommandSet:
+		m.planMode = false
+		m.ctrl.SetPlanMode(false)
+		m.ctrl.SetGoal(cmd.Text)
+		m.notice(fmt.Sprintf(i18n.M.GoalSetFmt, control.ShortGoalForNotice(cmd.Text)))
+		return m.startTurn("Start pursuing the active goal now.", input, input)
+	case control.GoalCommandClear:
+		m.echoLocalCommand(input)
+		m.ctrl.ClearGoal()
+		m.notice(i18n.M.GoalCleared)
+	default:
+		m.echoLocalCommand(input)
+		goal := m.ctrl.Goal()
+		if strings.TrimSpace(goal) == "" {
+			m.notice(i18n.M.GoalEmpty)
+		} else {
+			m.notice(fmt.Sprintf(i18n.M.GoalCurrentFmt, goal))
+		}
 	}
 	return nil
 }

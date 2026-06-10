@@ -71,7 +71,7 @@ type Messages struct {
 	ChatStatusRetryingFmt       string // "%s retrying (%d/%d)…" — %s = spinner, %d/%d = attempt/max
 	ChatStatusIdle              string // shortcuts hint when idle
 	ChatStatusYoloIdle          string // shortcuts hint when idle in YOLO/bypass mode
-	ChatStatusCycleHint         string // mode-cycle shortcut hint shown when no modal prompt owns the status row
+	ChatStatusCycleHint         string // plan-toggle shortcut hint shown when no modal prompt owns the status row
 	ChatStatusCacheNowFmt       string // cache status tag, "%s" = latest-turn hit rate with percent sign
 	ChatStatusCacheAvgFmt       string // cache status tag, "%s" = session-average hit rate with percent sign
 	ChatStatusPlanApproval      string // shortcuts hint while a plan is pending
@@ -149,6 +149,7 @@ type Messages struct {
 	CmdResume       string // /resume
 	CmdModel        string // /model
 	CmdMemory       string // /memory
+	CmdGoal         string // /goal
 	CmdRemember     string // /remember
 	CmdForget       string // /forget
 	CmdMcp          string // /mcp
@@ -209,6 +210,10 @@ type Messages struct {
 	ForgetDoneFmt          string
 	QuickRememberEmpty     string
 	QuickRememberDoneFmt   string
+	GoalEmpty              string
+	GoalCurrentFmt         string
+	GoalSetFmt             string
+	GoalCleared            string
 	ModelSwitchUnavailable string
 	ModelSwitchBusy        string
 	ModelAlreadyOnFmt      string

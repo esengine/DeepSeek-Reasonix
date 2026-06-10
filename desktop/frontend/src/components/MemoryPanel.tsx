@@ -1,10 +1,11 @@
-import { ChevronDown, ChevronRight, Search, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, FileText, Search, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
 import type { MemoryFact, MemoryView } from "../lib/types";
 import { ResizableDrawer } from "./ResizableDrawer";
 import { Tooltip } from "./Tooltip";
+import { ModalCloseButton } from "./ModalCloseButton";
 
 type LinkInfo = {
   name: string;
@@ -273,11 +274,7 @@ export function MemoryPanel({
               </div>
             )}
           </div>
-          <Tooltip label={t("common.close")}>
-            <button className="chip" onClick={onClose}>
-              ✕
-            </button>
-          </Tooltip>
+          <ModalCloseButton label={t("common.close")} onClick={onClose} />
         </header>
 
         {!view?.available ? (
@@ -349,6 +346,7 @@ export function MemoryPanel({
                     return (
                       <article
                         className={`mem-fact${highlight === f.name ? " mem-fact--hl" : ""}`}
+                        data-mem-type={f.type || "other"}
                         key={f.name}
                         ref={(el) => {
                           factRefs.current[f.name] = el;
@@ -366,7 +364,8 @@ export function MemoryPanel({
                           <span className="mem-fact__main">
                             <span className="mem-fact__title">{displayTitle(f)}</span>
                             <span className="mem-fact__meta">
-                              {f.name} · {f.type}
+                              {f.type && <span className="mem-fact__type" data-mem-type={f.type}>{f.type}</span>}
+                              <span className="mem-fact__slug">{f.name}</span>
                             </span>
                             <span className="mem-fact__desc">{f.description}</span>
                           </span>
@@ -508,8 +507,12 @@ export function MemoryPanel({
                 return (
                   <div className="mem-doc" key={d.path}>
                     <div className="mem-doc__head">
-                      <span className={`badge badge--${d.scope}`}>{d.scope}</span>
-                      <span className="mem-doc__path">{d.path}</span>
+                      <span className="mem-doc__icon"><FileText size={15} /></span>
+                      <span className="mem-doc__info">
+                        <span className="mem-doc__name">{memoryDocTitle(d.scope, t)}</span>
+                        <span className="mem-doc__path">{d.path}</span>
+                      </span>
+                      <span className={`mem-doc__tag badge--${d.scope}`}>{memoryScopeLabel(d.scope, t)}</span>
                       {!editing && (
                         <button
                           className="btn btn--small"
@@ -879,6 +882,7 @@ export function MemorySettingsPage() {
 							return (
 								<article
 									className={"mem-fact" + (highlight === f.name ? " mem-fact--hl" : "")}
+									data-mem-type={f.type || "other"}
 									key={f.name}
 									ref={(el) => {
 										factRefs.current[f.name] = el;
@@ -896,7 +900,8 @@ export function MemorySettingsPage() {
 										<span className="mem-fact__main">
 											<span className="mem-fact__title">{displayTitle(f)}</span>
 											<span className="mem-fact__meta">
-												{f.name} · {f.type}
+												{f.type && <span className="mem-fact__type" data-mem-type={f.type}>{f.type}</span>}
+												<span className="mem-fact__slug">{f.name}</span>
 											</span>
 											<span className="mem-fact__desc">{f.description}</span>
 										</span>
@@ -998,7 +1003,7 @@ export function MemorySettingsPage() {
 						<div className="mem-doc" key={d.path}>
 							<div className="mem-doc__head">
 								<div className="mem-doc__identity">
-									<span className={"badge badge--" + d.scope}>{memoryScopeLabel(d.scope, t)}</span>
+									<span className="mem-doc__icon"><FileText size={15} /></span>
 									<div>
 										<strong>{memoryDocTitle(d.scope, t)}</strong>
 										<span className="mem-doc__path">{d.path}</span>
@@ -1006,6 +1011,7 @@ export function MemorySettingsPage() {
 									</div>
 								</div>
 								<div className="mem-doc__head-actions">
+									<span className={"mem-doc__tag badge--" + d.scope}>{memoryScopeLabel(d.scope, t)}</span>
 									{!editing && (
 										<button
 											className="btn btn--small"

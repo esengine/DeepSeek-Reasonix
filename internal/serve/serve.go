@@ -204,6 +204,7 @@ func (s *Server) handler() http.Handler {
 	mux.HandleFunc("POST /rewind", s.rewind)
 	mux.HandleFunc("POST /fork", s.fork)
 	mux.HandleFunc("POST /summarize", s.summarize)
+	mux.HandleFunc("POST /auto-approve-tools", s.autoApproveTools)
 	mux.HandleFunc("POST /bypass", s.bypass)
 	mux.HandleFunc("POST /answer", s.answer)
 	mux.HandleFunc("POST /resume", s.resume)
@@ -640,8 +641,8 @@ func (s *Server) summarize(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// bypass toggles YOLO/bypass mode.
-func (s *Server) bypass(w http.ResponseWriter, r *http.Request) {
+// autoApproveTools toggles YOLO/full-access tool auto-approval.
+func (s *Server) autoApproveTools(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		On bool `json:"on"`
 	}
@@ -649,8 +650,13 @@ func (s *Server) bypass(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad body", http.StatusBadRequest)
 		return
 	}
-	s.ctl().SetBypass(body.On)
+	s.ctl().SetAutoApproveTools(body.On)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// bypass is the legacy HTTP endpoint for YOLO/full-access tool auto-approval.
+func (s *Server) bypass(w http.ResponseWriter, r *http.Request) {
+	s.autoApproveTools(w, r)
 }
 
 // answer responds to an ask_request.
@@ -736,15 +742,19 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	used, window := s.ctl().ContextSnapshot()
 	hit, miss := s.ctl().SessionCache()
 	sess := map[string]any{
-		"label":     s.ctl().Label(),
-		"running":   s.ctl().Running(),
-		"plan":      s.ctl().PlanMode(),
-		"bypass":    s.ctl().Bypass(),
-		"cwd":       s.ctl().SessionDir(),
-		"used":      used,
-		"window":    window,
-		"cacheHit":  hit,
-		"cacheMiss": miss,
+		"label":            s.ctl().Label(),
+		"running":          s.ctl().Running(),
+		"plan":             s.ctl().PlanMode(),
+		"autoApproveTools": s.ctl().AutoApproveTools(),
+		"bypass":           s.ctl().AutoApproveTools(),
+		"toolApprovalMode": s.ctl().ToolApprovalMode(),
+		"goal":             s.ctl().Goal(),
+		"goalStatus":       s.ctl().GoalStatus(),
+		"cwd":              s.ctl().SessionDir(),
+		"used":             used,
+		"window":           window,
+		"cacheHit":         hit,
+		"cacheMiss":        miss,
 	}
 	if u := s.ctl().LastUsage(); u != nil {
 		sess["lastUsage"] = u
