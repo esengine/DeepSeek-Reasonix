@@ -132,6 +132,7 @@ def run_script(script: str, args: list[str] | None = None, timeout: int = 60) ->
             cmd_line,
             capture_output=True, text=True, timeout=timeout,
             shell=True, env=env,
+            encoding="utf-8", errors="replace",
         )
     finally:
         try:
@@ -170,6 +171,7 @@ def run_script_stream(script: str, args: list[str] | None = None, timeout: int =
         cmd_line,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         text=True, shell=True, env=env,
+        encoding="utf-8", errors="replace",
     )
 
     try:

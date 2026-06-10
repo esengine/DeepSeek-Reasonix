@@ -342,6 +342,7 @@ print(json.dumps(info))
             [qgis_python, "-c", probe_script],
             capture_output=True, text=True, timeout=30,
             env=_build_qgis_env(qgis_root),
+            encoding="utf-8", errors="replace",
         )
         if proc.returncode == 0:
             # 解析最后一行 JSON
@@ -476,6 +477,7 @@ print(json.dumps(info))
             cmd_line,
             capture_output=True, text=True, timeout=30,
             shell=True, env=env,
+            encoding="utf-8", errors="replace",
         )
         if proc.returncode == 0:
             for line in reversed(proc.stdout.strip().split("\n")):
