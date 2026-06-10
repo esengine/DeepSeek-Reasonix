@@ -195,19 +195,13 @@ func workspaceRelPathFromGitStatus(repoRoot, base, path string) string {
 // at base, or an empty string when base is not inside a git repository or when
 // git is unavailable.
 func workspaceGitBranch(base string) string {
-	cmd := exec.Command("git", "-C", base, "branch", "--show-current")
-	proc.HideWindowDetached(cmd)
-	raw, err := cmd.Output()
-	if err != nil {
-		return ""
-	}
-	if branch := strings.TrimSpace(string(raw)); branch != "" {
+	if branch := workspaceGitCurrentBranch(base); branch != "" {
 		return branch
 	}
 
 	headCmd := exec.Command("git", "-C", base, "rev-parse", "--short", "HEAD")
 	proc.HideWindowDetached(headCmd)
-	raw, err = headCmd.Output()
+	raw, err := headCmd.Output()
 	if err != nil {
 		return ""
 	}
@@ -216,6 +210,16 @@ func workspaceGitBranch(base string) string {
 		return ""
 	}
 	return "@" + short
+}
+
+func workspaceGitCurrentBranch(base string) string {
+	cmd := exec.Command("git", "-C", base, "branch", "--show-current")
+	proc.HideWindowDetached(cmd)
+	raw, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(raw))
 }
 
 // GitBranches returns all local git branches for the active workspace's repo.
@@ -411,9 +415,10 @@ func (a *App) WorkspaceGitCommit(message string, push bool, branch string) error
 		return fmt.Errorf("commit message is required")
 	}
 	branch = strings.TrimSpace(branch)
-	if branch != "" && branch != workspaceGitBranch(base) {
-		if err := workspaceRunGit(base, "check-ref-format", "--branch", branch); err != nil {
-			return err
+	currentBranch := workspaceGitCurrentBranch(base)
+	if branch != "" && branch != currentBranch {
+		if err := workspaceRunGit(base, "check-ref-format", "refs/heads/"+branch); err != nil {
+			return fmt.Errorf("invalid branch name: %q", branch)
 		}
 		exists, err := workspaceGitLocalBranchExists(base, branch)
 		if err != nil {
@@ -431,8 +436,12 @@ func (a *App) WorkspaceGitCommit(message string, push bool, branch string) error
 		return err
 	}
 	if push {
-		if branch != "" {
-			return workspaceRunGit(base, "push", "-u", "origin", branch)
+		pushBranch := branch
+		if pushBranch == "" {
+			pushBranch = workspaceGitCurrentBranch(base)
+		}
+		if pushBranch != "" {
+			return workspaceRunGit(base, "push", "-u", "origin", pushBranch)
 		}
 		return workspaceRunGit(base, "push")
 	}
@@ -454,6 +463,10 @@ func workspaceGitLocalBranchExists(base string, branch string) (bool, error) {
 
 func workspaceRunGit(base string, args ...string) error {
 	cmd := exec.Command("git", append([]string{"-C", base}, args...)...)
+	cmd.Env = append(os.Environ(),
+		"GIT_TERMINAL_PROMPT=0",
+		"GIT_SSH_COMMAND=ssh -o BatchMode=yes",
+	)
 	proc.HideWindowDetached(cmd)
 	out, err := cmd.CombinedOutput()
 	if err == nil {

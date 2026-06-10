@@ -938,6 +938,43 @@ func TestWorkspaceGitCommitCreatesTargetBranch(t *testing.T) {
 	}
 }
 
+func TestWorkspaceGitCommitPushesCurrentBranchWithoutExplicitBranch(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	orig, _ := os.Getwd()
+	defer os.Chdir(orig)
+
+	root := t.TempDir()
+	remote := filepath.Join(root, "remote.git")
+	repo := filepath.Join(root, "repo")
+	if err := os.Mkdir(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, "init", "--bare", remote)
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, "init")
+	runGit(t, "checkout", "-b", "main")
+	runGit(t, "config", "user.email", "test@example.com")
+	runGit(t, "config", "user.name", "Test User")
+	runGit(t, "remote", "add", "origin", remote)
+	if err := os.WriteFile("pushed.txt", []byte("pushed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, "add", "pushed.txt")
+
+	if err := (&App{}).WorkspaceGitCommit("save and push", true, ""); err != nil {
+		t.Fatalf("WorkspaceGitCommit err = %v", err)
+	}
+	localHead := gitOutput(t, "rev-parse", "HEAD")
+	remoteHead := gitOutput(t, "-C", remote, "rev-parse", "refs/heads/main")
+	if remoteHead != localHead {
+		t.Fatalf("remote head = %q, want %q", remoteHead, localHead)
+	}
+}
+
 func TestWorkspaceGitHistory(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")

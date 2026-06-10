@@ -1493,17 +1493,20 @@ a[href] {
   grid-template-columns: var(--sidebar-expanded-width) minmax(0, 1fr);
 }
 .layout--workspace-open {
-  --chrome-right-toggle-offset: calc(var(--workspace-width) + var(--workspace-resizer-width));
-  min-width: calc(var(--sidebar-width) + var(--chat-docked-min-width) + var(--workspace-resizer-width) + var(--workspace-width));
-  grid-template-columns: var(--sidebar-width) minmax(var(--chat-docked-min-width), 1fr) var(--workspace-resizer-width) var(--workspace-width);
+  --actual-workspace-width: min(var(--workspace-width), max(0px, calc(100vw - var(--sidebar-width) - var(--chat-docked-min-width) - var(--workspace-resizer-width))));
+  --chrome-right-toggle-offset: calc(var(--actual-workspace-width) + var(--workspace-resizer-width));
+  min-width: 0;
+  grid-template-columns: var(--sidebar-width) minmax(var(--chat-docked-min-width), 1fr) var(--workspace-resizer-width) var(--actual-workspace-width);
 }
 .layout--workspace-open:not(.layout--sidebar-collapsed) {
-  min-width: calc(var(--sidebar-expanded-width) + var(--chat-docked-min-width) + var(--workspace-resizer-width) + var(--workspace-width));
-  grid-template-columns: var(--sidebar-expanded-width) minmax(var(--chat-docked-min-width), 1fr) var(--workspace-resizer-width) var(--workspace-width);
+  --actual-workspace-width: min(var(--workspace-width), max(0px, calc(100vw - var(--sidebar-expanded-width) - var(--chat-docked-min-width) - var(--workspace-resizer-width))));
+  min-width: 0;
+  grid-template-columns: var(--sidebar-expanded-width) minmax(var(--chat-docked-min-width), 1fr) var(--workspace-resizer-width) var(--actual-workspace-width);
 }
 .layout--workspace-open.layout--sidebar-collapsed {
-  min-width: calc(var(--chat-docked-min-width) + var(--workspace-resizer-width) + var(--workspace-width));
-  grid-template-columns: 0px minmax(var(--chat-docked-min-width), 1fr) var(--workspace-resizer-width) var(--workspace-width);
+  --actual-workspace-width: min(var(--workspace-width), max(0px, calc(100vw - var(--chat-docked-min-width) - var(--workspace-resizer-width))));
+  min-width: 0;
+  grid-template-columns: 0px minmax(var(--chat-docked-min-width), 1fr) var(--workspace-resizer-width) var(--actual-workspace-width);
 }
 .layout--workspace-maximized {
   min-width: 0;
