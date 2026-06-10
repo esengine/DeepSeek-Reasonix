@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -66,6 +67,11 @@ type TaskTool struct {
 	subagentModel     string
 	subagentEffort    string
 	resolveProvider   func(modelRef, effort string) (provider.Provider, *provider.Pricing, int, error)
+	transcripts       *SubagentStore
+	workspaceRoot     string
+	baseModel         string
+	baseEffort        string
+	identityProfile   func(modelRef, effort string) (string, string)
 }
 
 // NewTaskTool wires a task tool to the parent agent's environment so its
@@ -99,6 +105,22 @@ func NewTaskTool(prov provider.Provider, pricing *provider.Pricing, parentReg *t
 	}
 }
 
+// WithTranscripts enables persisted sub-agent transcript continuation for this
+// task tool. The base model/effort are the parent provider identity used when no
+// subagent override is configured.
+func (t *TaskTool) WithTranscripts(store *SubagentStore, workspaceRoot, baseModel, baseEffort string) *TaskTool {
+	t.transcripts = store
+	t.workspaceRoot = strings.TrimSpace(workspaceRoot)
+	t.baseModel = strings.TrimSpace(baseModel)
+	t.baseEffort = strings.TrimSpace(baseEffort)
+	return t
+}
+
+func (t *TaskTool) WithTranscriptIdentityResolver(resolve func(modelRef, effort string) (string, string)) *TaskTool {
+	t.identityProfile = resolve
+	return t
+}
+
 func (t *TaskTool) Name() string { return "task" }
 
 func (t *TaskTool) Description() string {
@@ -115,7 +137,9 @@ func (t *TaskTool) Schema() json.RawMessage {
   "max_steps":{"type":"integer","description":"Optional cap on tool-call rounds. Defaults to half the parent's cap (min 5).","minimum":1},
   "run_in_background":{"type":"boolean","description":"Run the sub-agent asynchronously: returns a job id immediately and keeps working across turns. Collect its final answer with wait, and you'll be notified when it finishes. Use for long, independent sub-tasks you don't need to block on right now."},
   "model":{"type":"string","description":"Optional model override for the sub-agent (a configured provider/model name)."},
-  "effort":{"type":"string","description":"Optional reasoning effort for the sub-agent (e.g. high, max)."}
+  "effort":{"type":"string","description":"Optional reasoning effort for the sub-agent (e.g. high, max)."},
+  "continue_from":{"type":"string","description":"Optional subagent transcript reference to continue in place. The current kind, prompt persona, tools, model, effort, and workspace must match the saved transcript."},
+  "fork_from":{"type":"string","description":"Optional subagent transcript reference to copy into a new transcript before running this task. Mutually exclusive with continue_from."}
 },
 "required":["prompt"]
 }`)
@@ -163,6 +187,8 @@ func (t *TaskTool) Execute(ctx context.Context, args json.RawMessage) (string, e
 		RunInBackground bool     `json:"run_in_background"`
 		Model           string   `json:"model"`
 		Effort          string   `json:"effort"`
+		ContinueFrom    string   `json:"continue_from"`
+		ForkFrom        string   `json:"fork_from"`
 	}
 	if err := json.Unmarshal(args, &p); err != nil {
 		return "", fmt.Errorf("invalid args: %w", err)
@@ -188,6 +214,16 @@ func (t *TaskTool) Execute(ctx context.Context, args json.RawMessage) (string, e
 
 	subReg := t.buildSubReg(p.Tools)
 	modelRef, effortRef := t.effectiveProfile(p.Model, p.Effort)
+	parentID, parent, _, _ := CallContext(ctx)
+	run, err := t.prepareTranscriptRun(subReg, modelRef, effortRef, ParentSession(ctx), parentID, p.ContinueFrom, p.ForkFrom)
+	if err != nil {
+		return "", err
+	}
+	prov, pricing, ctxWin, err := t.resolveSubSessionRuntime(modelRef, effortRef)
+	if err != nil {
+		run.Release()
+		return "", fmt.Errorf("sub-agent profile: %w", err)
+	}
 
 	// Background: register a job that runs the sub-agent under the manager's
 	// session context (so it survives this turn) and return immediately. The
@@ -196,22 +232,115 @@ func (t *TaskTool) Execute(ctx context.Context, args json.RawMessage) (string, e
 	if p.RunInBackground {
 		jm, ok := jobs.FromContext(ctx)
 		if !ok {
+			if run != nil {
+				run.Release()
+			}
 			return "", fmt.Errorf("background execution is not available in this context")
 		}
-		parentID, parent, _, _ := CallContext(ctx)
 		nested := subSinkFor(parentID, parent)
 		label := p.Description
 		if label == "" {
 			label = "task"
 		}
+		if t.transcripts != nil && run != nil && run.Ref != "" {
+			if err := t.transcripts.MarkRunning(run); err != nil {
+				run.Release()
+				return "", err
+			}
+		}
 		job := jm.Start("task", label, func(jobCtx context.Context, _ io.Writer) (string, error) {
-			return t.runSub(jobCtx, p.Prompt, subReg, nested, maxSteps, modelRef, effortRef)
+			defer run.Release()
+			answer, err := t.runSubSession(jobCtx, p.Prompt, subReg, nested, maxSteps, prov, pricing, ctxWin, run.Session)
+			if err != nil {
+				return FormatSubagentResult("", run.Ref, true), errors.Join(err, t.transcripts.SaveFailed(run))
+			}
+			if err := t.transcripts.SaveCompleted(run); err != nil {
+				return FormatSubagentResult("", run.Ref, true), errors.Join(err, t.transcripts.SaveFailed(run))
+			}
+			return FormatSubagentResult(answer, run.Ref, false), nil
 		})
+		if run != nil && run.Ref != "" {
+			return fmt.Sprintf("Started background task %q (%s).\nSubagent reference: %s\nIt runs across turns; collect its final answer with wait (or wait will return it once done), and you'll be notified when it finishes.", job.ID, label, run.Ref), nil
+		}
 		return fmt.Sprintf("Started background task %q (%s). It runs across turns; collect its final answer with wait (or wait will return it once done), and you'll be notified when it finishes.", job.ID, label), nil
 	}
 
 	// Foreground: run synchronously, nesting events under this call.
-	return t.runSub(ctx, p.Prompt, subReg, subSink(ctx), maxSteps, modelRef, effortRef)
+	defer run.Release()
+	answer, err := t.runSubSession(ctx, p.Prompt, subReg, subSink(ctx), maxSteps, prov, pricing, ctxWin, run.Session)
+	if err != nil {
+		return "", errors.Join(err, t.transcripts.SaveFailed(run))
+	}
+	if t.transcripts != nil && run.Ref != "" {
+		if err := t.transcripts.SaveCompleted(run); err != nil {
+			return "", errors.Join(err, t.transcripts.SaveFailed(run))
+		}
+		return FormatSubagentResult(answer, run.Ref, false), nil
+	}
+	return answer, nil
+}
+
+func (t *TaskTool) prepareTranscriptRun(subReg *tool.Registry, modelRef, effortRef, parentSession, parentID, continueFrom, forkFrom string) (*SubagentRun, error) {
+	continueFrom = strings.TrimSpace(continueFrom)
+	forkFrom = strings.TrimSpace(forkFrom)
+	parentSession = strings.TrimSpace(parentSession)
+	if continueFrom != "" && forkFrom != "" {
+		return nil, fmt.Errorf("continue_from and fork_from are mutually exclusive")
+	}
+	if t.transcripts == nil {
+		return nil, fmt.Errorf("subagent transcript store is required")
+	}
+	// Headless runs (e.g. `reasonix run`) never mint a session path, so there is
+	// no parent session to own a transcript. Run the sub-agent ephemerally —
+	// exactly as before persisted transcripts existed — instead of failing the
+	// call. Continuation/fork need a persisted owner, so they error here.
+	if parentSession == "" {
+		if continueFrom != "" || forkFrom != "" {
+			return nil, fmt.Errorf("continue_from/fork_from require a persisted session; none is active in this run")
+		}
+		return EphemeralSubagentRun(t.sysPrompt), nil
+	}
+	identityModel, identityEffort := t.effectiveIdentity(modelRef, effortRef)
+	spec := SubagentSpec{
+		Kind:             "task",
+		Name:             "task",
+		WorkspaceRoot:    t.workspaceRoot,
+		ParentSession:    parentSession,
+		ParentToolCallID: parentID,
+		SystemPrompt:     t.sysPrompt,
+		Registry:         subReg,
+		Model:            identityModel,
+		Effort:           identityEffort,
+	}
+	if continueFrom != "" || forkFrom != "" {
+		if continueFrom != "" {
+			return t.transcripts.PrepareContinue(continueFrom, spec)
+		}
+		return t.transcripts.PrepareFork(forkFrom, spec)
+	}
+	return t.transcripts.PrepareFresh(spec)
+}
+
+func (t *TaskTool) effectiveIdentity(modelRef, effort string) (string, string) {
+	if t.identityProfile != nil {
+		model, eff := t.identityProfile(modelRef, effort)
+		return strings.TrimSpace(model), strings.TrimSpace(eff)
+	}
+	return t.effectiveModelIdentity(modelRef), t.effectiveEffortIdentity(effort)
+}
+
+func (t *TaskTool) effectiveModelIdentity(modelRef string) string {
+	if strings.TrimSpace(modelRef) != "" {
+		return strings.TrimSpace(modelRef)
+	}
+	return strings.TrimSpace(t.baseModel)
+}
+
+func (t *TaskTool) effectiveEffortIdentity(effort string) string {
+	if strings.TrimSpace(effort) != "" {
+		return strings.TrimSpace(effort)
+	}
+	return strings.TrimSpace(t.baseEffort)
 }
 
 // buildSubReg returns the sub-agent's tool set: the named whitelist (minus
@@ -288,19 +417,20 @@ func FilterReadOnlyRegistry(parent *tool.Registry, exclude ...string) *tool.Regi
 	return sub
 }
 
-// runSub builds a sub-agent over subReg, runs prompt to completion emitting to
-// sink, and returns its final assistant answer. Shared by the foreground and
-// background paths. modelRef and effort override the parent defaults when non-empty.
-func (t *TaskTool) runSub(ctx context.Context, prompt string, subReg *tool.Registry, sink event.Sink, maxSteps int, modelRef, effort string) (string, error) {
+func (t *TaskTool) resolveSubSessionRuntime(modelRef, effort string) (provider.Provider, *provider.Pricing, int, error) {
 	prov, pricing, ctxWin := t.prov, t.pricing, t.contextWindow
 	if t.resolveProvider != nil && (modelRef != "" || effort != "") {
 		p, pr, cw, err := t.resolveProvider(modelRef, effort)
 		if err != nil {
-			return "", fmt.Errorf("sub-agent profile: %w", err)
+			return nil, nil, 0, err
 		}
 		prov, pricing, ctxWin = p, pr, cw
 	}
-	return RunSubAgent(ctx, prov, subReg, t.sysPrompt, prompt, Options{
+	return prov, pricing, ctxWin, nil
+}
+
+func (t *TaskTool) runSubSession(ctx context.Context, prompt string, subReg *tool.Registry, sink event.Sink, maxSteps int, prov provider.Provider, pricing *provider.Pricing, ctxWin int, sess *Session) (string, error) {
+	return RunSubAgentWithSession(ctx, prov, subReg, sess, prompt, Options{
 		MaxSteps:          maxSteps,
 		Temperature:       t.temperature,
 		Pricing:           pricing,
@@ -313,13 +443,26 @@ func (t *TaskTool) runSub(ctx context.Context, prompt string, subReg *tool.Regis
 	}, sink)
 }
 
-// RunSubAgent runs prompt to completion in a fresh sub-agent session over reg,
-// emitting tool activity to sink, and returns the sub-agent's final assistant
-// answer. It is the shared core behind the `task` tool and subagent skills: a
-// caller supplies the system prompt (the task persona or the skill body), the
-// tool registry (already filtered), and the run Options (model budget, gate).
-func RunSubAgent(ctx context.Context, prov provider.Provider, reg *tool.Registry, sysPrompt, prompt string, opts Options, sink event.Sink) (string, error) {
-	sess := NewSession(sysPrompt)
+func FormatSubagentResult(answer, ref string, failed bool) string {
+	if ref == "" {
+		return answer
+	}
+	if failed {
+		if answer == "" {
+			return "Subagent reference (failed): " + ref
+		}
+		return "Subagent reference (failed): " + ref + "\n\nFinal answer:\n" + answer
+	}
+	return "Subagent reference: " + ref + "\n\nFinal answer:\n" + answer
+}
+
+// RunSubAgentWithSession continues an existing sub-agent session with prompt and
+// returns the latest final assistant answer. Fresh sub-agents pass a newly-created
+// session; continued sub-agents pass a loaded transcript session.
+func RunSubAgentWithSession(ctx context.Context, prov provider.Provider, reg *tool.Registry, sess *Session, prompt string, opts Options, sink event.Sink) (string, error) {
+	if sess == nil {
+		return "", fmt.Errorf("sub-agent session is nil")
+	}
 	sub := New(prov, reg, sess, opts, sink)
 	if err := sub.Run(ctx, prompt); err != nil {
 		return "", fmt.Errorf("sub-agent: %w", err)

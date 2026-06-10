@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -13,9 +14,11 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"reasonix/internal/agent"
 	"reasonix/internal/config"
 	"reasonix/internal/event"
 	"reasonix/internal/netclient"
@@ -79,6 +82,288 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 	if mem := ctrl.Memory(); mem == nil || len(mem.Docs) == 0 {
 		t.Fatal("controller memory set is empty after discovering REASONIX.md")
 	}
+}
+
+func TestBuildSubagentSkillFailedContinuationPersistsTranscript(t *testing.T) {
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+
+	registerBootSubagentTestProvider()
+	prov := &bootSubagentTestProvider{}
+	setBootSubagentTestProvider(t, prov)
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "test-model"
+
+[codegraph]
+enabled = false
+
+[agent]
+system_prompt = "BASE"
+
+[[providers]]
+name = "test-model"
+kind = "boot-subagent-test"
+model = "x"
+`)
+
+	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer ctrl.Close()
+	sessionPath := agent.NewSessionPath(ctrl.SessionDir(), ctrl.Label())
+	ctrl.SetSessionPath(sessionPath)
+
+	if err := ctrl.Run(context.Background(), "first review"); err != nil {
+		t.Fatalf("first Run: %v", err)
+	}
+	ref := subagentRefFromHistory(t, ctrl.History())
+	prov.setContinueRef(ref)
+
+	if err := ctrl.Run(context.Background(), "continue review"); err != nil {
+		t.Fatalf("second Run: %v", err)
+	}
+	store := agent.NewSubagentStore(filepath.Join(config.SessionDir(), "subagents"))
+	meta, err := store.LoadMeta(ref)
+	if err != nil {
+		t.Fatalf("LoadMeta: %v", err)
+	}
+	if meta.Status != agent.SubagentFailed {
+		t.Fatalf("status = %q, want failed", meta.Status)
+	}
+	if meta.ParentSession != agent.BranchID(sessionPath) {
+		t.Fatalf("parent session = %q, want %q", meta.ParentSession, agent.BranchID(sessionPath))
+	}
+	sess, err := agent.LoadSession(filepath.Join(config.SessionDir(), "subagents", ref+".jsonl"))
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	msgs := sess.Snapshot()
+	if len(msgs) != 4 || msgs[1].Content != "first skill task" || msgs[2].Content != "first skill answer" || msgs[3].Content != "second skill task" {
+		t.Fatalf("failed skill transcript = %+v, want first task/answer plus second task", msgs)
+	}
+}
+
+const bootSubagentTestProviderKind = "boot-subagent-test"
+
+var (
+	bootSubagentTestProviderOnce    sync.Once
+	bootSubagentTestProviderCurrent *bootSubagentTestProvider
+	bootSubagentTestProviderMu      sync.Mutex
+)
+
+func registerBootSubagentTestProvider() {
+	bootSubagentTestProviderOnce.Do(func() {
+		provider.Register(bootSubagentTestProviderKind, func(provider.Config) (provider.Provider, error) {
+			bootSubagentTestProviderMu.Lock()
+			defer bootSubagentTestProviderMu.Unlock()
+			if bootSubagentTestProviderCurrent == nil {
+				return nil, errors.New("boot subagent test provider is not installed")
+			}
+			return bootSubagentTestProviderCurrent, nil
+		})
+	})
+}
+
+func setBootSubagentTestProvider(t *testing.T, p *bootSubagentTestProvider) {
+	t.Helper()
+	bootSubagentTestProviderMu.Lock()
+	bootSubagentTestProviderCurrent = p
+	bootSubagentTestProviderMu.Unlock()
+	t.Cleanup(func() {
+		bootSubagentTestProviderMu.Lock()
+		if bootSubagentTestProviderCurrent == p {
+			bootSubagentTestProviderCurrent = nil
+		}
+		bootSubagentTestProviderMu.Unlock()
+	})
+}
+
+type bootSubagentTestProvider struct {
+	mu          sync.Mutex
+	calls       int
+	continueRef string
+}
+
+func (p *bootSubagentTestProvider) Name() string { return "boot-subagent-test" }
+
+func (p *bootSubagentTestProvider) setContinueRef(ref string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.continueRef = ref
+}
+
+func (p *bootSubagentTestProvider) Stream(context.Context, provider.Request) (<-chan provider.Chunk, error) {
+	p.mu.Lock()
+	call := p.calls
+	p.calls++
+	ref := p.continueRef
+	p.mu.Unlock()
+
+	var chunks []provider.Chunk
+	switch call {
+	case 0:
+		chunks = []provider.Chunk{{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "review-1", Name: "review", Arguments: `{"task":"first skill task"}`}}}
+	case 1:
+		chunks = []provider.Chunk{{Type: provider.ChunkText, Text: "first skill answer"}, {Type: provider.ChunkDone}}
+	case 2:
+		chunks = []provider.Chunk{{Type: provider.ChunkText, Text: "parent first done"}, {Type: provider.ChunkDone}}
+	case 3:
+		args, _ := json.Marshal(map[string]string{"task": "second skill task", "continue_from": ref})
+		chunks = []provider.Chunk{{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "review-2", Name: "review", Arguments: string(args)}}}
+	case 4:
+		chunks = []provider.Chunk{{Type: provider.ChunkError, Err: errors.New("subagent skill failed")}}
+	case 5:
+		chunks = []provider.Chunk{{Type: provider.ChunkText, Text: "parent second done"}, {Type: provider.ChunkDone}}
+	default:
+		chunks = []provider.Chunk{{Type: provider.ChunkError, Err: fmt.Errorf("unexpected provider call %d", call)}}
+	}
+	ch := make(chan provider.Chunk, len(chunks))
+	for _, chunk := range chunks {
+		ch <- chunk
+	}
+	close(ch)
+	return ch, nil
+}
+
+func subagentRefFromHistory(t *testing.T, msgs []provider.Message) string {
+	t.Helper()
+	for _, msg := range msgs {
+		if msg.Role != provider.RoleTool {
+			continue
+		}
+		for _, line := range strings.Split(msg.Content, "\n") {
+			if strings.HasPrefix(line, "Subagent reference: ") {
+				return strings.TrimSpace(strings.TrimPrefix(line, "Subagent reference: "))
+			}
+		}
+	}
+	t.Fatalf("no subagent reference in history: %+v", msgs)
+	return ""
+}
+
+// TestBuildHeadlessRunRunsTaskSubagentWithoutSessionPath reproduces headless
+// `reasonix run`: a controller built via Build with NO SetSessionPath (exactly
+// what internal/cli.runAgent does) must still be able to run a `task` sub-agent.
+// Before the ephemeral fallback this failed with "parent session is required".
+func TestBuildHeadlessRunRunsTaskSubagentWithoutSessionPath(t *testing.T) {
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+
+	registerHeadlessTaskTestProvider()
+	prov := &headlessTaskTestProvider{}
+	setHeadlessTaskTestProvider(t, prov)
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "test-model"
+
+[codegraph]
+enabled = false
+
+[agent]
+system_prompt = "BASE"
+
+[[providers]]
+name = "test-model"
+kind = "boot-headless-test"
+model = "x"
+`)
+
+	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer ctrl.Close()
+
+	// Deliberately NOT calling SetSessionPath — this is the headless run path.
+	if err := ctrl.Run(context.Background(), "use a task subagent"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := ctrl.SessionPath(); got != "" {
+		t.Fatalf("headless run should keep an empty session path, got %q", got)
+	}
+
+	var toolContent string
+	for _, msg := range ctrl.History() {
+		if msg.Role == provider.RoleTool {
+			toolContent += "\n" + msg.Content
+		}
+	}
+	if strings.Contains(toolContent, "parent session is required") {
+		t.Fatalf("task subagent failed in headless run mode: %s", toolContent)
+	}
+	if !strings.Contains(toolContent, "subagent answer") {
+		t.Fatalf("task tool result = %q, want sub-agent answer", toolContent)
+	}
+	if strings.Contains(toolContent, "Subagent reference") {
+		t.Fatalf("ephemeral headless run should not persist a transcript reference: %s", toolContent)
+	}
+}
+
+const headlessTaskTestProviderKind = "boot-headless-test"
+
+var (
+	headlessTaskTestProviderOnce    sync.Once
+	headlessTaskTestProviderCurrent *headlessTaskTestProvider
+	headlessTaskTestProviderMu      sync.Mutex
+)
+
+func registerHeadlessTaskTestProvider() {
+	headlessTaskTestProviderOnce.Do(func() {
+		provider.Register(headlessTaskTestProviderKind, func(provider.Config) (provider.Provider, error) {
+			headlessTaskTestProviderMu.Lock()
+			defer headlessTaskTestProviderMu.Unlock()
+			if headlessTaskTestProviderCurrent == nil {
+				return nil, errors.New("headless task test provider is not installed")
+			}
+			return headlessTaskTestProviderCurrent, nil
+		})
+	})
+}
+
+func setHeadlessTaskTestProvider(t *testing.T, p *headlessTaskTestProvider) {
+	t.Helper()
+	headlessTaskTestProviderMu.Lock()
+	headlessTaskTestProviderCurrent = p
+	headlessTaskTestProviderMu.Unlock()
+	t.Cleanup(func() {
+		headlessTaskTestProviderMu.Lock()
+		if headlessTaskTestProviderCurrent == p {
+			headlessTaskTestProviderCurrent = nil
+		}
+		headlessTaskTestProviderMu.Unlock()
+	})
+}
+
+type headlessTaskTestProvider struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (p *headlessTaskTestProvider) Name() string { return "boot-headless-test" }
+
+func (p *headlessTaskTestProvider) Stream(context.Context, provider.Request) (<-chan provider.Chunk, error) {
+	p.mu.Lock()
+	call := p.calls
+	p.calls++
+	p.mu.Unlock()
+
+	var chunks []provider.Chunk
+	switch call {
+	case 0:
+		chunks = []provider.Chunk{{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "task-1", Name: "task", Arguments: `{"prompt":"find callers"}`}}}
+	case 1:
+		chunks = []provider.Chunk{{Type: provider.ChunkText, Text: "subagent answer"}, {Type: provider.ChunkDone}}
+	default:
+		chunks = []provider.Chunk{{Type: provider.ChunkText, Text: "parent done"}, {Type: provider.ChunkDone}}
+	}
+	ch := make(chan provider.Chunk, len(chunks))
+	for _, chunk := range chunks {
+		ch <- chunk
+	}
+	close(ch)
+	return ch, nil
 }
 
 func TestNewProviderAppliesConfiguredDefaultEffort(t *testing.T) {

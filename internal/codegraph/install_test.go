@@ -76,13 +76,16 @@ func TestSha256For(t *testing.T) {
 	}
 }
 
-func TestSafeJoinRejectsTraversal(t *testing.T) {
-	dir := t.TempDir()
-	if _, err := safeJoin(dir, "../escape"); err == nil {
-		t.Fatal("safeJoin should reject ../escape")
+func TestResolveWithinRejectsTraversal(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err := safeJoin(dir, "bin/codegraph"); err != nil {
-		t.Fatalf("safeJoin rejected a normal path: %v", err)
+	if _, err := resolveWithin(root, "../escape"); err == nil {
+		t.Fatal("resolveWithin should reject ../escape")
+	}
+	if _, err := resolveWithin(root, "bin/codegraph"); err != nil {
+		t.Fatalf("resolveWithin rejected a normal path: %v", err)
 	}
 }
 
