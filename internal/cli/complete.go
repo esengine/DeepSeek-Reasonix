@@ -62,7 +62,7 @@ func (m *chatTUI) slashItems() []compItem {
 	items := []compItem{
 		{label: "/compact", insert: "/compact ", hint: i18n.M.CmdCompact},
 		{label: "/new", insert: "/new ", hint: i18n.M.CmdNew},
-		{label: "/clear", insert: "/clear", hint: i18n.M.CmdNew},
+		{label: "/clear", insert: "/clear", hint: i18n.M.CmdClear},
 		{label: "/resume", insert: "/resume ", hint: i18n.M.CmdResume},
 		{label: "/rewind", insert: "/rewind", hint: i18n.M.CmdRewind},
 		{label: "/tree", insert: "/tree", hint: i18n.M.CmdTree},
@@ -82,6 +82,7 @@ func (m *chatTUI) slashItems() []compItem {
 		{label: "/language", insert: "/language ", hint: i18n.M.CmdLanguage, descend: true},
 		{label: "/help", insert: "/help ", hint: i18n.M.CmdHelp},
 		{label: "/memory", insert: "/memory ", hint: i18n.M.CmdMemory},
+		{label: "/goal", insert: "/goal ", hint: i18n.M.CmdGoal},
 		{label: "/remember", insert: "/remember ", hint: i18n.M.CmdRemember},
 		{label: "/forget", insert: "/forget ", hint: i18n.M.CmdForget},
 		{label: "/quit", insert: "/quit", hint: i18n.M.CmdQuit},

@@ -138,7 +138,12 @@ func New(mode string, allow, ask, deny []string) Policy {
 // for glob matching. Precedence: deny > ask > allow > fallback (Allow for
 // readers, Mode for writers).
 func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Decision {
-	subject := Subject(args)
+	return p.DecideSubject(toolName, readOnly, Subject(args))
+}
+
+// DecideSubject evaluates a tool call when the caller already extracted the
+// stable approval subject from args.
+func (p Policy) DecideSubject(toolName string, readOnly bool, subject string) Decision {
 	switch {
 	case matchAny(p.Deny, toolName, subject):
 		return Deny
@@ -340,6 +345,14 @@ func (g *Gate) Check(ctx context.Context, toolName string, args json.RawMessage,
 			// later subject (a different file / command) is allowed without
 			// re-prompting. Deny rules still take precedence on every call.
 			g.OnRemember(toolName)
+			// Also add the rule to the in-memory Policy immediately so it
+			// takes effect in the current session without requiring a restart.
+			// The session-level grant (controller.granted) already covers the
+			// Approver path, but any code path that consults Policy.Decide()
+			// directly would miss the rule until the next controller build.
+			if rule, ok := ParseRule(toolName); ok {
+				g.Policy.Allow = append(g.Policy.Allow, rule)
+			}
 		}
 		return true, "", nil
 	default:

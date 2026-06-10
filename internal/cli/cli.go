@@ -12,6 +12,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/url"
 	"os"
 	"os/signal"
@@ -96,6 +97,9 @@ func Run(args []string, version string) int {
 	case "review":
 		configureCLIThemeFromConfigNoProbe()
 		return reviewCommand(rest)
+	case "bot":
+		configureCLIThemeFromConfigNoProbe()
+		return botCommand(rest, version)
 	case "version", "--version", "-v":
 		fmt.Println("reasonix", version)
 		return 0
@@ -111,7 +115,7 @@ func Run(args []string, version string) int {
 
 func shouldMigrateLegacyConfigForCLI(cmd string) bool {
 	switch cmd {
-	case "", "run", "chat", "code", "serve", "setup", "config", "init", "acp", "mcp", "codegraph", "doctor":
+	case "", "run", "chat", "code", "serve", "setup", "config", "init", "acp", "mcp", "codegraph", "doctor", "bot":
 		return true
 	default:
 		return false
@@ -360,7 +364,7 @@ func chatREPL(args []string) int {
 	cont := fs.Bool("continue", false, "resume the most recent saved session")
 	fs.BoolVar(cont, "c", false, "shorthand for --continue")
 	resume := fs.Bool("resume", false, "list saved sessions and pick one to resume")
-	yolo := fs.Bool("dangerously-skip-permissions", false, "YOLO: auto-approve every tool call this session (deny rules still apply)")
+	yolo := fs.Bool("dangerously-skip-permissions", false, "YOLO: auto-approve approval-gated tool calls this session (deny rules still apply; ask questions and plan approvals still wait for you)")
 	fs.BoolVar(yolo, "yolo", false, "alias for --dangerously-skip-permissions")
 	dir := fs.String("dir", "", "change to this directory first (project root); config, sandbox and file tools resolve from here")
 	if err := fs.Parse(args); err != nil {
@@ -461,9 +465,10 @@ func chatREPL(args []string) int {
 	// event and blocks until the user answers via ctrl.Approve. Sub-agents (the
 	// task tool) keep their headless gate from setup — no UI to prompt through.
 	ctrl.EnableInteractiveApproval()
-	// YOLO: skip every approval prompt for the session (deny rules still apply).
+	// YOLO: skip every tool approval request for the session (deny rules still
+	// apply; ask questions and plan approvals still wait for the user).
 	if *yolo {
-		ctrl.SetBypass(true)
+		ctrl.SetAutoApproveTools(true)
 	}
 
 	m := newChatTUI(ctrl, missing, eventCh, termW)
@@ -492,7 +497,7 @@ func chatREPL(args []string) int {
 		}
 		c.EnableInteractiveApproval()
 		if *yolo {
-			c.SetBypass(true)
+			c.SetAutoApproveTools(true)
 		}
 		return c, nil
 	}
@@ -944,6 +949,42 @@ func fetchOrFallback(probe *config.ProviderEntry, famName string) []string {
 	return models
 }
 
+// fetchModelListCompat walks the full set of model-list URL candidates a given
+// base URL can resolve to (root, /v1, known OpenAI/Anthropic compat suffixes)
+// and returns the first successful fetch. This is the wizard-time probe for a
+// *user-supplied* custom provider — its baseURL is whatever the user pasted,
+// and "whatever they pasted" might be https://x.com (root, probe /v1/models)
+// or https://x.com/v1 (versioned, probe /v1/models directly). Previously the
+// wizard hardcoded `baseURL + "/models"`, which works for OpenAI-shape URLs
+// but silently fails for Anthropic-shape roots and the reverse — so the
+// wizard's idea of "what models exist" diverged from the chat client's actual
+// endpoint. Returning the empty slice (not an error) on full miss lets the
+// wizard fall through to a manual text input without an error message.
+func fetchModelListCompat(ctx context.Context, baseURL, apiKey string) ([]string, error) {
+	candidates, err := config.BuildModelFetchURLs(baseURL, "")
+	if err != nil {
+		return nil, err
+	}
+	var lastErr error
+	for _, u := range candidates {
+		models, err := openai.FetchModels(ctx, u, apiKey)
+		if err == nil {
+			return models, nil
+		}
+		lastErr = err
+		// An endpoint-miss is not a hard error — try the next candidate.
+		// Anything else (auth, 5xx, bad TLS) bubbles up immediately because
+		// retrying it on a sibling URL won't help.
+		if !openai.IsModelFetchEndpointMiss(err) {
+			return nil, err
+		}
+	}
+	if lastErr != nil {
+		slog.Debug("model-list probe: all candidates missed", "base_url", baseURL, "err", lastErr)
+	}
+	return nil, nil
+}
+
 // buildFamilyEntry returns a single ProviderEntry exposing the user's
 // selected models under one entry. It preserves the preset's API key env,
 // base URL, kind, context window, pricing, and effort — the things that
@@ -1159,7 +1200,7 @@ func promptCustomProviderFromURL() ([]config.ProviderEntry, error) {
 	fmt.Printf("  %s\n", dim(fmt.Sprintf(i18n.M.FetchingModelsFmt, "custom")))
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	models, err := openai.FetchModels(ctx, baseURL+"/models", apiKey)
+	models, err := fetchModelListCompat(ctx, baseURL, apiKey)
 	if err != nil || len(models) == 0 {
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "  %s\n", dim(fmt.Sprintf(i18n.M.FetchModelsFailedFmt, "custom", err)))
@@ -1265,7 +1306,7 @@ func promptAnthropicProviderFromURL() ([]config.ProviderEntry, error) {
 	fmt.Printf("  %s\n", dim(fmt.Sprintf(i18n.M.AnthropicFetchingModelsFmt, "anthropic")))
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	models, err := openai.FetchModels(ctx, baseURL+"/models", apiKey)
+	models, err := fetchModelListCompat(ctx, baseURL, apiKey)
 	if err != nil || len(models) == 0 {
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "  %s\n", dim(fmt.Sprintf(i18n.M.AnthropicFetchModelsFailedFmt, "anthropic", err)))

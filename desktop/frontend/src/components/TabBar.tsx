@@ -2,8 +2,8 @@
 // open project/global topic, so switching tabs switches the active conversation.
 import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, DragEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
-import { FileText, Plus, X } from "lucide-react";
-import type { TabMeta } from "../lib/types";
+import { FileText, Plus, Search, X } from "lucide-react";
+import { normalizeCollaborationMode, normalizeMode, normalizeToolApprovalMode, type Mode, type TabMeta } from "../lib/types";
 import { projectColorValue } from "../lib/projectColors";
 import { useT } from "../lib/i18n";
 import { Tooltip } from "./Tooltip";
@@ -17,6 +17,8 @@ interface TabBarProps {
   onTabsClose: (tabIds: string[], nextActiveTabId?: string) => void;
   onTabsReorder: (tabIds: string[]) => void;
   onNewTab: () => void;
+  onOpenPalette?: () => void;
+  commandCompact?: boolean;
   revealActiveSignal?: number;
 }
 
@@ -40,8 +42,8 @@ function tabFullTitle(tab: TabMeta): string {
   return `${workspaceName} / ${tabDisplayTitle(tab)}`;
 }
 
-function tabMode(tab: TabMeta): "normal" | "plan" | "yolo" {
-  return tab.mode === "plan" || tab.mode === "yolo" ? tab.mode : "normal";
+function tabMode(tab: TabMeta): Mode {
+  return normalizeMode(tab.mode);
 }
 
 function projectAccentStyle(color?: string): CSSProperties | undefined {
@@ -50,7 +52,7 @@ function projectAccentStyle(color?: string): CSSProperties | undefined {
   return { "--project-accent": value } as CSSProperties;
 }
 
-export function TabBar({ tabs, activeTabId, onTabChange, onTabClose, onTabsClose, onTabsReorder, onNewTab, revealActiveSignal = 0 }: TabBarProps) {
+export function TabBar({ tabs, activeTabId, onTabChange, onTabClose, onTabsClose, onTabsReorder, onNewTab, onOpenPalette, commandCompact = false, revealActiveSignal = 0 }: TabBarProps) {
   const t = useT();
   const [draggingTabId, setDraggingTabId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{ id: string; side: DropSide } | null>(null);
@@ -187,9 +189,16 @@ export function TabBar({ tabs, activeTabId, onTabChange, onTabClose, onTabsClose
           const displayTitle = tabDisplayTitle(tab);
           const fullTitle = tabFullTitle(tab);
           const mode = tabMode(tab);
+          const collaborationMode = normalizeCollaborationMode(tab.collaborationMode, tab.goal, mode);
+          const planMode = collaborationMode === "plan";
+          const goalMode = collaborationMode === "goal";
+          const toolApprovalMode = normalizeToolApprovalMode(tab.toolApprovalMode, mode);
           const stateTitle = [
             tab.running ? "Running" : "",
-            mode === "yolo" ? "YOLO" : mode === "plan" ? "Plan" : "",
+            planMode ? "Plan" : "",
+            goalMode ? "Goal" : "",
+            toolApprovalMode === "auto" ? "Auto approve" : "",
+            toolApprovalMode === "yolo" ? "YOLO approval" : "",
           ].filter(Boolean).join(" · ");
           const annotatedTitle = stateTitle ? `${stateTitle} · ${fullTitle}` : fullTitle;
           return (
@@ -206,7 +215,8 @@ export function TabBar({ tabs, activeTabId, onTabChange, onTabClose, onTabsClose
               className={[
                 "tabbar__tab",
                 tab.id === resolvedActiveTabId ? "tabbar__tab--active" : "",
-                mode === "yolo" ? "tabbar__tab--yolo" : "",
+                tab.running ? "tabbar__tab--running" : "",
+                toolApprovalMode === "yolo" ? "tabbar__tab--yolo" : "",
                 draggingTabId === tab.id ? "tabbar__tab--dragging" : "",
                 dropTarget?.id === tab.id ? `tabbar__tab--drop-${dropTarget.side}` : "",
               ].filter(Boolean).join(" ")}
@@ -236,7 +246,10 @@ export function TabBar({ tabs, activeTabId, onTabChange, onTabClose, onTabsClose
                 />
               )}
               <span className="tabbar__tab-label">{displayTitle}</span>
-              {mode === "yolo" && <span className="tabbar__mode-badge tabbar__mode-badge--yolo">yolo</span>}
+              {planMode && <span className="tabbar__mode-badge tabbar__mode-badge--plan">plan</span>}
+              {goalMode && <span className="tabbar__mode-badge tabbar__mode-badge--plan">goal</span>}
+              {toolApprovalMode === "auto" && <span className="tabbar__mode-badge tabbar__mode-badge--plan">auto</span>}
+              {toolApprovalMode === "yolo" && <span className="tabbar__mode-badge tabbar__mode-badge--yolo">yolo</span>}
               <span
                 className="tabbar__tab-close"
                 onClick={(e) => {
@@ -255,6 +268,20 @@ export function TabBar({ tabs, activeTabId, onTabChange, onTabClose, onTabsClose
           <Plus size={13} />
         </button>
       </Tooltip>
+      {onOpenPalette && <span className="tabbar__spacer" aria-hidden="true" />}
+      {onOpenPalette && (
+        <button
+          className={["tabbar__command", commandCompact ? "tabbar__command--compact" : ""].filter(Boolean).join(" ")}
+          type="button"
+          onClick={onOpenPalette}
+          aria-label={t("palette.placeholder")}
+        >
+          <Search size={13} className="tabbar__command-icon" />
+          <span className="tabbar__command-text tabbar__command-text--full">{t("tabBar.commandSearch")}</span>
+          <span className="tabbar__command-text tabbar__command-text--compact">{t("tabBar.commandSearchCompact")}</span>
+          <kbd className="tabbar__command-kbd">⌘K</kbd>
+        </button>
+      )}
       <ContextMenu
         open={Boolean(menuTabId)}
         point={menuPoint}

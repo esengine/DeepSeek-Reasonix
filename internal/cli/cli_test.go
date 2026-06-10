@@ -3,12 +3,16 @@ package cli
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"errors"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"reasonix/internal/config"
@@ -494,6 +498,87 @@ func TestFetchOrFallback(t *testing.T) {
 		got := fetchOrFallback(&probe, "Test")
 		if !reflect.DeepEqual(got, []string{"preset-a"}) {
 			t.Errorf("got %v, want preset-a", got)
+		}
+	})
+}
+
+// TestFetchModelListCompatWalksCandidates covers the wizard's custom-provider
+// model probe. Previously the probe was a single URL (baseURL+"/models"),
+// which worked for OpenAI vendors with a /v1 base URL but silently failed
+// for Anthropic-style root URLs (no /v1) and Anthropic-compatible proxies
+// (a /v1 base URL but a /v1/messages endpoint). The new helper walks
+// BuildModelFetchURLs's candidate list — root + /v1 + known compat
+// suffixes — so the same probe now succeeds for both shapes, matching
+// what the conversation-time client URL will actually be.
+func TestFetchModelListCompatWalksCandidates(t *testing.T) {
+	t.Run("anthropic root form resolves via v1 fallback", func(t *testing.T) {
+		var gotPath atomic.Value
+		gotPath.Store("")
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotPath.Store(r.URL.Path)
+			if r.URL.Path == "/v1/models" {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, `{"data":[{"id":"claude-test"}]}`)
+				return
+			}
+			w.WriteHeader(http.StatusNotFound)
+		}))
+		defer srv.Close()
+
+		models, err := fetchModelListCompat(context.Background(), srv.URL, "k")
+		if err != nil {
+			t.Fatalf("fetchModelListCompat: %v", err)
+		}
+		if !reflect.DeepEqual(models, []string{"claude-test"}) {
+			t.Errorf("models = %v, want [claude-test]", models)
+		}
+		if got := gotPath.Load().(string); got != "/v1/models" {
+			t.Errorf("probe path = %q, want /v1/models (root form should fall through to v1 candidate)", got)
+		}
+	})
+
+	t.Run("versioned v1 base URL hits models directly", func(t *testing.T) {
+		var gotPath atomic.Value
+		gotPath.Store("")
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotPath.Store(r.URL.Path)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"data":[{"id":"model-a"}]}`)
+		}))
+		defer srv.Close()
+
+		models, err := fetchModelListCompat(context.Background(), srv.URL+"/v1", "k")
+		if err != nil {
+			t.Fatalf("fetchModelListCompat: %v", err)
+		}
+		if !reflect.DeepEqual(models, []string{"model-a"}) {
+			t.Errorf("models = %v, want [model-a]", models)
+		}
+		if got := gotPath.Load().(string); got != "/v1/models" {
+			t.Errorf("probe path = %q, want /v1/models", got)
+		}
+	})
+
+	t.Run("endpoint-miss on every candidate returns empty (manual flow)", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+		}))
+		defer srv.Close()
+
+		models, err := fetchModelListCompat(context.Background(), srv.URL, "k")
+		if err != nil {
+			t.Fatalf("expected graceful empty result on all-miss, got err: %v", err)
+		}
+		if len(models) != 0 {
+			t.Errorf("expected empty models on all-miss, got %v", models)
+		}
+	})
+
+	t.Run("non-404 network error short-circuits with the real error", func(t *testing.T) {
+		// Point at a closed port — connection refused, not a 404.
+		models, err := fetchModelListCompat(context.Background(), "http://127.0.0.1:1", "k")
+		if err == nil {
+			t.Fatalf("expected error for unreachable host, got models=%v", models)
 		}
 	})
 }

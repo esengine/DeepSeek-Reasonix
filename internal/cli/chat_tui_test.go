@@ -257,6 +257,77 @@ func TestMCPManagerHidesComposerBox(t *testing.T) {
 	}
 }
 
+func TestClearCommandRequiresConfirmationAndDiscardsSession(t *testing.T) {
+	dir := t.TempDir()
+	sess := agent.NewSession("sys")
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "old context"})
+	exec := agent.New(nil, nil, sess, agent.Options{}, event.Discard)
+	path := filepath.Join(dir, "session.jsonl")
+	ctrl := control.New(control.Options{Executor: exec, SystemPrompt: "sys", SessionDir: dir, SessionPath: path, Label: "test"})
+	if err := ctrl.Snapshot(); err != nil {
+		t.Fatal(err)
+	}
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
+
+	if cmd := m.runSlashCommand("/clear"); cmd != nil {
+		t.Fatal("/clear should open a local confirmation without returning a command")
+	}
+	if m.clearConfirm == nil {
+		t.Fatal("/clear should open a confirmation prompt")
+	}
+	if m.clearConfirm.confirm != 1 {
+		t.Fatalf("/clear confirmation should default to cancel, got %d", m.clearConfirm.confirm)
+	}
+	m0, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = m0.(chatTUI)
+	footerRows := strings.Count(m.renderMainManagerFooter(), "\n") + 1
+	if got, want := m.bottomRows(), footerRows+2; got != want {
+		t.Fatalf("bottomRows with /clear confirmation = %d, want %d (footer + status rows; confirmation renders in main area)", got, want)
+	}
+	if !m.hideComposer() {
+		t.Fatal("/clear confirmation should hide the composer")
+	}
+	content := ansi.Strip(m.View().Content)
+	if !strings.Contains(content, "Clear current context without saving?") {
+		t.Fatalf("/clear confirmation prompt missing from view:\n%s", content)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("session should still exist before confirmation: %v", err)
+	}
+	if current := exec.Session().Snapshot(); len(current) != 2 {
+		t.Fatalf("context changed before confirmation: %+v", current)
+	}
+
+	next, _ := m.handleClearConfirmKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = next.(chatTUI)
+	if m.clearConfirm != nil {
+		t.Fatal("Enter on default cancel should close the confirmation")
+	}
+	if ctrl.SessionPath() != path {
+		t.Fatal("cancelled /clear should not rotate the session path")
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("cancelled /clear should keep the session file: %v", err)
+	}
+
+	m.runSlashCommand("/clear")
+	next, _ = m.handleClearConfirmKey(tea.KeyPressMsg{Code: 'y'})
+	m = next.(chatTUI)
+	if ctrl.SessionPath() == path {
+		t.Fatal("confirmed /clear should rotate to a fresh session path")
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("confirmed /clear should remove the old transcript, stat err=%v", err)
+	}
+	current := exec.Session().Snapshot()
+	if len(current) != 1 || current[0].Role != provider.RoleSystem || current[0].Content != "sys" {
+		t.Fatalf("cleared context = %+v, want only system prompt", current)
+	}
+	if len(m.transcript) == 0 || strings.Contains(strings.Join(m.transcript, "\n"), "old context") {
+		t.Fatalf("TUI transcript was not reset after /clear: %+v", m.transcript)
+	}
+}
+
 func TestMainManagerFollowsTranscriptWithoutTopPadding(t *testing.T) {
 	ctrl := control.New(control.Options{})
 	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
@@ -579,6 +650,37 @@ func TestInsertNewlineKeyBinding(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("newChatTUI InsertNewline should include shift+enter, got %v", keys)
+	}
+}
+
+func TestCtrlHomeEndScrollKeyBindings(t *testing.T) {
+	ctrl := control.New(control.Options{})
+	ch := make(chan event.Event, 1)
+	notice := agentEventMsg(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "line"})
+	adv := func(m chatTUI, msg tea.Msg) chatTUI {
+		n, _ := m.Update(msg)
+		return n.(chatTUI)
+	}
+
+	cur := adv(newChatTUI(ctrl, "", ch, 80), tea.WindowSizeMsg{Width: 80, Height: 8})
+	for i := 0; i < 12; i++ {
+		cur = adv(cur, notice)
+	}
+	// Viewport should be at the bottom after output.
+	if !cur.viewport.AtBottom() {
+		t.Fatal("viewport should start at the bottom after streaming output")
+	}
+
+	// Ctrl+Home should scroll to the top.
+	cur = adv(cur, tea.KeyPressMsg{Code: tea.KeyHome, Mod: tea.ModCtrl})
+	if !cur.viewport.AtTop() {
+		t.Fatalf("ctrl+home should scroll to top, AtTop=%v, YOffset=%d", cur.viewport.AtTop(), cur.viewport.YOffset())
+	}
+
+	// Ctrl+End should scroll back to the bottom.
+	cur = adv(cur, tea.KeyPressMsg{Code: tea.KeyEnd, Mod: tea.ModCtrl})
+	if !cur.viewport.AtBottom() {
+		t.Fatalf("ctrl+end should scroll to bottom, AtBottom=%v, YOffset=%d", cur.viewport.AtBottom(), cur.viewport.YOffset())
 	}
 }
 
@@ -1288,6 +1390,19 @@ func TestDoubleCtrlCQuit(t *testing.T) {
 	}
 }
 
+func TestCtrlZSendsSuspend(t *testing.T) {
+	m := newTestChatTUI()
+	ctrlZ := tea.KeyPressMsg{Code: 'z', Mod: tea.ModCtrl}
+
+	_, cmd := m.Update(ctrlZ)
+	if cmd == nil {
+		t.Fatal("expected Ctrl+Z to return a suspend command")
+	}
+	if msg := cmd(); msg != (tea.SuspendMsg{}) {
+		t.Fatalf("expected tea.SuspendMsg, got %T", msg)
+	}
+}
+
 // TestCtrlCClearsInput verifies that a single Ctrl+C while idle with non-empty
 // input clears the composer without arming the double-press quit gesture.
 func TestCtrlCClearsInput(t *testing.T) {
@@ -1455,5 +1570,64 @@ func TestTruncateSubject(t *testing.T) {
 				t.Errorf("truncateSubject(%q, %d) = %q (width %d), want visible width <= %d", tc.input, tc.width, got, w, wantMax)
 			}
 		})
+	}
+}
+
+// TestCtrlCCopyBeatsClearInput — regression for the bug where an active
+// selection AND a non-empty composer both existed: Ctrl+C used to wipe the
+// draft text and discard the selection. The fix hoists the selection-copy
+// branch above the clear-input branch so the user's draft survives. After
+// the copy the user can still press Ctrl+C again to clear the composer.
+func TestCtrlCCopyBeatsClearInput(t *testing.T) {
+	var copied string
+	clipboardWriteAll = func(text string) error { copied = text; return nil }
+	defer func() { clipboardWriteAll = clipboard.WriteAll }()
+
+	m := newTestChatTUI()
+	m.input.SetValue("draft I'm typing") // non-empty composer
+	m.transcript = []string{"selected text"}
+	m.wrappedLines = []string{"selected text"}
+	m.sel = selection{active: true, anchor: selPos{line: 0, col: 0}, head: selPos{line: 0, col: 8}}
+
+	ctrlC := tea.KeyPressMsg{Code: 'c', Mod: 4}
+	out, cmd := m.Update(ctrlC)
+	m2 := out.(chatTUI)
+
+	// Draft text must survive the selection copy.
+	if got := m2.input.Value(); got != "draft I'm typing" {
+		t.Errorf("composer draft wiped by Ctrl+C copy; got %q, want preserved", got)
+	}
+	if cmd == nil {
+		t.Fatal("expected clipboard cmd")
+	}
+	cmd()
+	if copied != "selected" {
+		t.Errorf("clipboard = %q, want %q", copied, "selected")
+	}
+
+	// Second Ctrl+C (no selection, non-empty composer) clears the draft.
+	out2, _ := m2.Update(ctrlC)
+	m3 := out2.(chatTUI)
+	if got := m3.input.Value(); got != "" {
+		t.Errorf("second Ctrl+C should clear composer; got %q", got)
+	}
+}
+
+// TestEscInPlanModeDoesNotExitPlan — regression for the part of PR #3051 that
+// was missed: Esc was still falling into the case m.planMode branch. The
+// Shift+Tab cycle is the only path that flips plan mode; Esc must only
+// rewind / clear input. PR #3051 already removed the equivalent YOLO branch;
+// the m.ctrl.SetBypass path is exercised end-to-end in control/yolo_test.go
+// and intentionally not duplicated here.
+func TestEscInPlanModeDoesNotExitPlan(t *testing.T) {
+	m := newTestChatTUI()
+	m.planMode = true
+
+	esc := tea.KeyPressMsg{Code: tea.KeyEsc}
+	out, _ := m.Update(esc)
+	m2 := out.(chatTUI)
+
+	if !m2.planMode {
+		t.Error("Esc must not exit plan mode; only Shift+Tab should")
 	}
 }

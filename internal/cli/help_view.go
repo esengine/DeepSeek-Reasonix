@@ -57,7 +57,7 @@ func builtinHelpItems() []compItem {
 	return []compItem{
 		{label: "/compact", hint: i18n.M.CmdCompact},
 		{label: "/new", hint: i18n.M.CmdNew},
-		{label: "/clear", hint: i18n.M.CmdNew},
+		{label: "/clear", hint: i18n.M.CmdClear},
 		{label: "/rewind", hint: i18n.M.CmdRewind},
 		{label: "/tree", hint: i18n.M.CmdTree},
 		{label: "/branch", hint: i18n.M.CmdBranch},

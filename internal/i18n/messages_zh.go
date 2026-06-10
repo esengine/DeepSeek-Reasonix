@@ -45,11 +45,11 @@ var Chinese = Messages{
 	ChatToolWorkingFmt:          "%s 运行中 · %d 秒",
 	ChatStatusRetryingFmt:       "%s 正在重试 (%d/%d)… (Esc 取消)",
 	ChatStatusIdle:              "就绪",
-	ChatStatusYoloIdle:          "已跳过批准",
-	ChatStatusCycleHint:         "shift+tab 循环切换",
+	ChatStatusYoloIdle:          "已跳过工具批准",
+	ChatStatusCycleHint:         "shift+tab 切换计划",
 	ChatStatusCacheNowFmt:       "本次命中 %s",
 	ChatStatusCacheAvgFmt:       "平均 %s",
-	ChatStatusPlanApproval:      "Enter/y 批准并执行 · n/Esc 继续规划 · PgUp/PgDn 滚动",
+	ChatStatusPlanApproval:      "Enter/y 批准并执行 · n/Esc 继续规划 · PgUp/PgDn/Ctrl+Home/End 滚动",
 	PlanApprovalPrompt:          "计划已生成（见上方）— Enter/y 批准执行,n/Esc 继续规划",
 	ChatStatusToolApproval:      "1 本次允许 · 2 本会话允许此范围 · 提供时 3/4 为前缀或保存 · n/Esc 拒绝 · Ctrl-C 取消本轮",
 	AskTypeSomething:            "自己输入",
@@ -90,12 +90,15 @@ var Chinese = Messages{
 
 	SlashCompactDone:   "已压缩 — 旧的中段换成一段摘要，最近几轮保留原样",
 	SlashCompactFailed: "压缩失败",
-	SlashNewDone:       "已开启新上下文 — 之前的对话已存档",
+	SlashNewDone:       "已开启新会话 — 之前的对话已存档",
 	SlashNewFailed:     "新建会话失败",
+	SlashClearPrompt:   "清空当前上下文且不保存？",
+	SlashClearDone:     "已清空当前上下文",
+	SlashClearFailed:   "清空当前上下文失败",
 	SlashUnavailable:   "当前构建不支持该命令",
 	SlashUnknown:       "未知命令",
 	SlashTodoCleared:   "已清除任务清单",
-	SlashHelp:          "命令：/compact · /new（/clear）· /resume · /rewind · /tree · /branch · /switch · /todo · /verbose · /model（切换模型）· /effort · /theme · /language · /mcp · /skills · /hooks · /paste-image · /memory · /remember · /quit · /help · 以及 skills（/init、/explore …）",
+	SlashHelp:          "命令：/compact · /new · /clear · /resume · /rewind · /tree · /branch · /switch · /todo · /verbose · /model（切换模型）· /effort · /theme · /language · /mcp · /skills · /hooks · /paste-image · /memory · /goal · /remember · /quit · /help · 以及 skills（/init、/explore …）",
 
 	SkillPickerTitle:             "Skills",
 	SkillPickerAvailableFmt:      "%d 个可用",
@@ -152,7 +155,8 @@ var Chinese = Messages{
 	ShellExecTimeoutFmt: "Shell 命令超时（>%s）",
 	ShellModeHint:       "Enter 执行 Shell · Esc 取消 · 点击输出展开",
 
-	CmdNew:          "清空上下文并保存历史",
+	CmdNew:          "开启新会话并保存历史",
+	CmdClear:        "丢弃当前上下文",
 	CmdCompact:      "压缩上下文",
 	CmdRewind:       "回滚到更早的一轮",
 	CmdTree:         "查看对话分支树",
@@ -161,6 +165,7 @@ var Chinese = Messages{
 	CmdResume:       "恢复已保存的会话",
 	CmdModel:        "切换模型",
 	CmdMemory:       "查看记忆文件",
+	CmdGoal:         "设置或清除当前目标",
 	CmdRemember:     "保存一条记忆",
 	CmdForget:       "删除一条已存记忆",
 	CmdMcp:          "MCP 服务器",
@@ -219,6 +224,10 @@ var Chinese = Messages{
 	ForgetDoneFmt:          "已删除记忆：%s",
 	QuickRememberEmpty:     "没有要记录的内容",
 	QuickRememberDoneFmt:   "已记住 → %s",
+	GoalEmpty:              "目标：无 — 用 /goal <目标> 设置",
+	GoalCurrentFmt:         "目标：%s",
+	GoalSetFmt:             "目标已设置 → %s",
+	GoalCleared:            "目标已清除",
 	ModelSwitchUnavailable: "本会话不支持切换模型",
 	ModelSwitchBusy:        "请先完成或取消当前这一轮再切换模型",
 	ModelAlreadyOnFmt:      "已经在使用 %s",
@@ -321,6 +330,7 @@ var Chinese = Messages{
   reasonix config auto-plan [off|on]                    配置自动计划模式
   reasonix mcp <add|remove|list>                        管理 reasonix.toml 里的 MCP 服务器
   reasonix doctor [--json]                              输出脱敏的本地诊断信息
+  reasonix bot start|doctor|weixin-login                多渠道 IM bot 网关
   reasonix version
   reasonix help
 

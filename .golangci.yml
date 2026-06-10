@@ -33,6 +33,15 @@ linters:
       - path: _test\.go
         linters:
           - errcheck
+      # The pinned golangci-lint binary's staticcheck reports SA5011 false
+      # positives on `if x == nil { t.Fatal(...) }`-guarded derefs in tests (it
+      # doesn't treat t.Fatal as terminating); the same code is clean under a
+      # locally-built golangci-lint. Scope the suppression to tests so SA5011
+      # still guards production code.
+      - path: _test\.go
+        linters:
+          - staticcheck
+        text: SA5011
 
 issues:
   max-issues-per-linter: 0

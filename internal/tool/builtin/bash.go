@@ -149,7 +149,9 @@ func (b bash) Execute(ctx context.Context, args json.RawMessage) (string, error)
 			cmd.WaitDelay = bashWaitDelay
 			cmd.Stdout = out
 			cmd.Stderr = out
-			return "", cmd.Run()
+			runErr := cmd.Run()
+			reapTree(cmd) // reap process-group stragglers the job left running (#3702)
+			return "", runErr
 		})
 		return fmt.Sprintf("Started background job %q. It keeps running across turns; read new output with bash_output(job_id=%q), wait for it with wait, or stop it with kill_shell(job_id=%q).", job.ID, job.ID, job.ID), nil
 	}
@@ -175,6 +177,11 @@ func (b bash) Execute(ctx context.Context, args json.RawMessage) (string, error)
 	cmd.Stdout = w
 	cmd.Stderr = w
 	err := cmd.Run()
+	// A foreground command that spawned a lingering child (e.g. `bazel run`'s
+	// server) leaves it in the process group; Wait only reaped the shell leader.
+	// Kill the group so those don't accumulate into an OOM (#3702). On cancel/
+	// timeout setKillTree's Cancel already did this; this covers normal exit.
+	reapTree(cmd)
 	out := buf.String()
 
 	if errors.Is(context.Cause(runCtx), errBashTimeout) {

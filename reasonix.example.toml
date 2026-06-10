@@ -153,3 +153,42 @@ bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local ca
 # command = "reasonix-plugin-example"
 # # Enabled MCP servers connect automatically in the background after session
 # # start. Use /mcp or the desktop MCP panel to refresh, reconnect, or disable.
+
+# Bot gateway: multi-channel IM bot for QQ, Feishu, and WeChat.
+# Start with `reasonix bot start --channels qq,feishu,weixin`.
+# All secrets are read from environment variables; never put keys here.
+# [bot]
+# enabled    = false
+# model      = ""        # 用于 bot 的模型，空则用 default_model
+# max_steps  = 25
+# debounce_ms = 1500      # 消息合并窗口（毫秒）
+#
+# [bot.allowlist]
+# enabled     = true
+# allow_all   = false     # true 会允许所有可触达用户远程触发 bot，仅限受控环境
+# qq_users    = []
+# feishu_users = []
+# weixin_users = []
+# qq_groups   = []
+# feishu_groups = []
+# weixin_groups = []
+#
+# [bot.qq]
+# enabled        = false
+# app_id         = ""
+# app_secret_env  = "QQ_BOT_APP_SECRET"
+#
+# [bot.feishu]
+# enabled             = false
+# app_id              = ""
+# app_secret_env       = "FEISHU_BOT_APP_SECRET"
+# verification_token   = ""
+# mode                = "webhook"   # webhook | websocket（websocket 需接官方 SDK 长连接）
+# webhook_port        = 8080
+# require_mention     = true
+#
+# [bot.weixin]
+# enabled   = false
+# account_id = "default"
+# token_env = "WEIXIN_BOT_TOKEN"
+# api_base  = "https://ilinkai.weixin.qq.com"   # Tencent iLink Bot API base URL

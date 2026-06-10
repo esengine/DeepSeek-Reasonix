@@ -16,6 +16,7 @@ interface ContextPanelProps {
   sessionCurrency?: string;
   scopeLabel?: string;
   refreshKey?: number;
+  onDetailModeChange?: (active: boolean) => void;
 }
 
 type ContextDetail = "read" | "changed";
@@ -92,7 +93,7 @@ function contextHealth(usagePct: number, cachePct: number, readCount: number): H
   };
 }
 
-export function ContextPanel({ tabId, context, usage, sessionCost, sessionCurrency, scopeLabel, refreshKey }: ContextPanelProps) {
+export function ContextPanel({ tabId, context, usage, sessionCost, sessionCurrency, scopeLabel, refreshKey, onDetailModeChange }: ContextPanelProps) {
   const t = useT();
   const [info, setInfo] = useState<ContextPanelInfo | null>(null);
   const [detailView, setDetailView] = useState<ContextDetail | null>(null);
@@ -116,19 +117,37 @@ export function ContextPanel({ tabId, context, usage, sessionCost, sessionCurren
     void refresh();
   }, [refresh, refreshKey]);
 
+  useEffect(() => {
+    onDetailModeChange?.(detailView !== null);
+  }, [detailView, onDetailModeChange]);
+
+  useEffect(() => {
+    return () => onDetailModeChange?.(false);
+  }, [onDetailModeChange]);
+
+  const hasPanelUsage = Boolean(
+    (info?.requestCount ?? 0) > 0 ||
+    (info?.promptTokens ?? 0) > 0 ||
+    (info?.completionTokens ?? 0) > 0 ||
+    (info?.reasoningTokens ?? 0) > 0 ||
+    (info?.cacheHitTokens ?? 0) > 0 ||
+    (info?.cacheMissTokens ?? 0) > 0
+  );
   const usedTokens = context?.used && context.used > 0 ? context.used : info?.usedTokens ?? 0;
   const windowTokens = context?.window && context.window > 0 ? context.window : info?.windowTokens ?? 0;
-  const promptTokens = usage?.promptTokens && usage.promptTokens > 0 ? usage.promptTokens : info?.promptTokens ?? 0;
-  const completionTokens = usage?.completionTokens && usage.completionTokens > 0 ? usage.completionTokens : info?.completionTokens ?? 0;
-  const reasoningTokens = usage?.reasoningTokens && usage.reasoningTokens > 0 ? usage.reasoningTokens : info?.reasoningTokens ?? 0;
-  const cacheHitTokens = usage?.cacheHitTokens && usage.cacheHitTokens > 0 ? usage.cacheHitTokens : info?.cacheHitTokens ?? 0;
-  const cacheMissTokens = usage?.cacheMissTokens && usage.cacheMissTokens > 0 ? usage.cacheMissTokens : info?.cacheMissTokens ?? 0;
-  const cost = sessionCost && sessionCost > 0 ? sessionCost : info?.sessionCost ?? info?.sessionCostUsd ?? 0;
+  const promptTokens = hasPanelUsage ? info?.promptTokens ?? 0 : usage?.promptTokens ?? 0;
+  const completionTokens = hasPanelUsage ? info?.completionTokens ?? 0 : usage?.completionTokens ?? 0;
+  const reasoningTokens = hasPanelUsage ? info?.reasoningTokens ?? 0 : usage?.reasoningTokens ?? 0;
+  const cacheHitTokens = hasPanelUsage ? info?.cacheHitTokens ?? 0 : usage?.cacheHitTokens ?? 0;
+  const cacheMissTokens = hasPanelUsage ? info?.cacheMissTokens ?? 0 : usage?.cacheMissTokens ?? 0;
+  const cost = info?.sessionCost && info.sessionCost > 0 ? info.sessionCost : sessionCost && sessionCost > 0 ? sessionCost : info?.sessionCostUsd ?? 0;
   const currency = sessionCurrency || info?.sessionCurrency || usage?.currency || "¥";
+  const isMock = info?.mock === true;
   const readFiles = asArray(info?.readFiles);
   const changedFiles = asArray(info?.changedFiles);
 
   const usagePct = windowTokens > 0 ? Math.round((usedTokens / windowTokens) * 100) : 0;
+  const compactPct = context?.compactRatio ? Math.round(context.compactRatio * 100) : 0;
   const cachePct = cacheHitTokens + cacheMissTokens > 0
     ? Math.round((cacheHitTokens / (cacheHitTokens + cacheMissTokens)) * 100)
     : 0;
@@ -145,8 +164,10 @@ export function ContextPanel({ tabId, context, usage, sessionCost, sessionCurren
     ...readFiles.map((file) => file.time),
     ...changedFiles.map((file) => file.latestTime ?? 0),
   ].filter((time) => time > 0);
-  const elapsed = eventTimes.length > 1 ? Math.max(...eventTimes) - Math.min(...eventTimes) : 0;
-  const requestCount = Math.max(readFiles.length + changedFiles.length, 0);
+  const derivedElapsed = eventTimes.length > 1 ? Math.max(...eventTimes) - Math.min(...eventTimes) : 0;
+  const elapsed = info?.elapsedMs && info.elapsedMs > 0 ? info.elapsedMs : derivedElapsed;
+  const derivedRequestCount = Math.max(readFiles.length + changedFiles.length, 0);
+  const requestCount = info?.requestCount && info.requestCount > 0 ? info.requestCount : derivedRequestCount;
   const readRows = readFiles.map((f, i) => ({
     key: `${f.path}-${i}`,
     path: f.path,
@@ -181,11 +202,13 @@ export function ContextPanel({ tabId, context, usage, sessionCost, sessionCurren
     : t("context.readNote", { count: detailCount });
 
   const openDetail = (next: ContextDetail) => {
+    onDetailModeChange?.(true);
     setDetailView(next);
     setQuery("");
   };
 
   const closeDetail = () => {
+    onDetailModeChange?.(false);
     setDetailView(null);
     setQuery("");
   };
@@ -196,6 +219,7 @@ export function ContextPanel({ tabId, context, usage, sessionCost, sessionCurren
         <div className="context-panel__heading-main">
           <span>{detailView ? detailTitle : t("context.overview")}</span>
           <strong>{scopeLabel || t("context.scopeGlobal")}</strong>
+          {isMock && <em>{t("context.mockData")}</em>}
         </div>
         {detailView && (
           <button className="context-panel__back" type="button" onClick={closeDetail}>
@@ -224,13 +248,16 @@ export function ContextPanel({ tabId, context, usage, sessionCost, sessionCurren
         ) : (
           <section className="context-panel__overview">
             <section className="context-panel__usage">
-              <div className="context-panel__donut" style={donutStyle}>
-                <div className="context-panel__donut-core">
-                  <strong>{fmtTokens(usedTokens)}</strong>
-                  <span>/ {fmtTokens(windowTokens)} tokens</span>
+              <SectionHeading title={t("context.windowTitle")} meta={t("context.windowSubtitle")} />
+              <div className="context-panel__usage-visual">
+                <div className="context-panel__donut" style={donutStyle}>
+                  <div className="context-panel__donut-core">
+                    <strong>{fmtTokens(usedTokens)}</strong>
+                    <span>/ {fmtTokens(windowTokens)} tokens</span>
+                  </div>
                 </div>
+                <div className="context-panel__percent">{usagePct}%</div>
               </div>
-              <div className="context-panel__percent">{usagePct}%</div>
               <div className="context-panel__breakdown">
                 <TokenLegend label={t("context.prompt")} value={promptTokens} color="prompt" />
                 <TokenLegend label={t("context.completion")} value={completionTokens} color="completion" />
@@ -241,18 +268,32 @@ export function ContextPanel({ tabId, context, usage, sessionCost, sessionCurren
                   <strong>{usedTokens.toLocaleString()} / {windowTokens.toLocaleString()}</strong>
                 </div>
               </div>
+            </section>
+            <section className="context-panel__section">
+              <SectionHeading title={t("context.runtimeMetrics")} />
               <div className="context-panel__stats">
-                <MetricCard label={t("context.cacheHit")} value={cachePct > 0 ? `${cachePct}%` : "-"} tone="accent" />
-                <MetricCard label={t("context.sessionCost")} value={fmtMoney(cost, currency)} />
                 <MetricCard label={t("context.requests")} value={requestCount > 0 ? String(requestCount) : "-"} />
                 <MetricCard label={t("context.time")} value={fmtDuration(elapsed, t)} />
               </div>
             </section>
-            <div className={`context-panel__health context-panel__health--${health.tone}`}>
-              <span>{t("context.health")}</span>
-              <strong>{t(health.labelKey, health.vars)}</strong>
-              <small>{t(health.bodyKey, health.vars)}</small>
-            </div>
+            <section className="context-panel__section">
+              <SectionHeading title={t("context.costMetrics")} />
+              <div className="context-panel__stats">
+                <MetricCard label={t("context.cacheHit")} value={cachePct > 0 ? `${cachePct}%` : "-"} tone="accent" />
+                <MetricCard label={t("context.sessionCost")} value={fmtMoney(cost, currency)} />
+              </div>
+            </section>
+            <section className="context-panel__section context-panel__section--status">
+              <SectionHeading title={t("context.sessionStatus")} />
+              <div className={`context-panel__health context-panel__health--${health.tone}`}>
+                <span>{t("context.health")}</span>
+                <strong>{t(health.labelKey, health.vars)}</strong>
+                <small>{t(health.bodyKey, health.vars)}</small>
+              </div>
+              <div className="context-panel__stats context-panel__stats--single">
+                <MetricCard label={t("context.compaction")} value={compactPct > 0 ? `${compactPct}%` : "-"} />
+              </div>
+            </section>
             <PreviewSection
               title={t("context.referencedFiles")}
               meta={t("context.readMeta", { count: readRows.length })}
@@ -278,6 +319,15 @@ export function ContextPanel({ tabId, context, usage, sessionCost, sessionCurren
         <span>{scopeLabel || t("context.scopeGlobal")}</span>
       </footer>
     </div>
+  );
+}
+
+function SectionHeading({ title, meta }: { title: string; meta?: string }) {
+  return (
+    <header className="context-panel__section-head">
+      <h3>{title}</h3>
+      {meta && <span>{meta}</span>}
+    </header>
   );
 }
 

@@ -74,13 +74,14 @@ func newStdioTransport(ctx context.Context, s Spec) (*stdioTransport, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := cmd.Start(); err != nil {
+	job, err := proc.StartTracked(cmd)
+	if err != nil {
 		return nil, err
 	}
 	t := &stdioTransport{
 		name:    s.Name,
 		cmd:     cmd,
-		job:     proc.TrackTree(cmd),
+		job:     job,
 		stdin:   stdin,
 		stdout:  bufio.NewReader(stdout),
 		stderr:  stderr,

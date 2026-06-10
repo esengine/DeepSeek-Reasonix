@@ -1,7 +1,7 @@
 import { memo, useEffect, useState } from "react";
 import { CodeViewer } from "./CodeViewer";
 import { DiffView } from "./DiffView";
-import { ProcessCard, ProcessStatusIcon, ProcessToolIcon, type ProcessState, type ProcessTone } from "./ProcessCard";
+import { ProcessCard, ProcessStatusIcon, type ProcessState, type ProcessTone } from "./ProcessCard";
 import { useT } from "../lib/i18n";
 import { diffsFor, subjectOf, summarize } from "../lib/tools";
 import { useShellExpand } from "../lib/shellExpand";
@@ -109,7 +109,7 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
   return (
     <ProcessCard
       tone={processTone(item.status)}
-      icon={<ProcessToolIcon size={12} />}
+      icon={<ProcessStatusIcon state={processState(item.status)} label={item.status} />}
       kind="tool"
       name={
         <>
@@ -120,7 +120,6 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
       }
       meta={
         <>
-          <ProcessStatusIcon state={processState(item.status)} label={item.status} />
           {duration && <span className="tool__duration">{duration}</span>}
         </>
       }

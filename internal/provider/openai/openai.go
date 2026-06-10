@@ -20,11 +20,21 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"reasonix/internal/netclient"
 	"reasonix/internal/provider"
 )
+
+// defaultStreamIdleTimeout caps how long a started SSE stream may go without any
+// bytes before it's treated as a dropped connection. A half-open TCP connection
+// (e.g. a proxy switched mid-stream) sends no RST, so scanner.Scan() would block
+// forever; this turns that hang into a recoverable error. Generous on purpose —
+// live streams emit tokens/keepalives far more often. Stored per-client
+// (client.idleTimeout) so a test can shorten it without a shared global that
+// would race other streams' watchdogs.
+const defaultStreamIdleTimeout = 120 * time.Second
 
 func init() {
 	provider.Register("openai", New)
@@ -93,15 +103,16 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		return nil, fmt.Errorf("openai: network: %w", err)
 	}
 	return &client{
-		name:     name,
-		apiKey:   cfg.APIKey,
-		keyEnv:   keyEnv,
-		baseURL:  strings.TrimRight(cfg.BaseURL, "/"),
-		model:    cfg.Model,
-		deepseek: deepseek,
-		minimax:  minimax,
-		effort:   effort,
-		http:     httpClient,
+		name:        name,
+		apiKey:      cfg.APIKey,
+		keyEnv:      keyEnv,
+		baseURL:     strings.TrimRight(cfg.BaseURL, "/"),
+		model:       cfg.Model,
+		deepseek:    deepseek,
+		minimax:     minimax,
+		effort:      effort,
+		http:        httpClient,
+		idleTimeout: defaultStreamIdleTimeout,
 	}, nil
 }
 
@@ -116,15 +127,16 @@ func newHTTPClient(cfg provider.Config) (*http.Client, error) {
 }
 
 type client struct {
-	name     string
-	apiKey   string
-	keyEnv   string // api_key_env name, surfaced in auth errors
-	baseURL  string
-	model    string
-	http     *http.Client
-	deepseek bool
-	minimax  bool   // true for api.minimaxi.com — emits MiniMax-M3's thinking knob instead of reasoning_effort
-	effort   string // reasoning_effort for OpenAI; thinking.type for MiniMax; "" = auto/provider default
+	name        string
+	apiKey      string
+	keyEnv      string // api_key_env name, surfaced in auth errors
+	baseURL     string
+	model       string
+	http        *http.Client
+	deepseek    bool
+	minimax     bool          // true for api.minimaxi.com — emits MiniMax-M3's thinking knob instead of reasoning_effort
+	effort      string        // reasoning_effort for OpenAI; thinking.type for MiniMax; "" = auto/provider default
+	idleTimeout time.Duration // SSE stall watchdog window; defaultStreamIdleTimeout unless a test overrides
 }
 
 func (c *client) Name() string { return c.name }
@@ -290,17 +302,43 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<- provider.Chunk) (emitted bool, _ error) {
 	defer resp.Body.Close()
 
-	// Close the response body when the context is canceled so scanner.Scan()
-	// unblocks instead of hanging on a stalled connection. done lets the goroutine
-	// exit when readStream returns normally — otherwise it outlives the call, and
-	// blocks forever on a non-cancellable context whose Done() is nil.
+	// Close the response body when the context is canceled (user interrupt) or the
+	// stream stalls past c.idleTimeout, so scanner.Scan() unblocks instead of
+	// hanging on a half-open connection. done lets the watchdog exit on a normal
+	// return — otherwise it outlives the call and blocks forever on a non-cancellable
+	// context whose Done() is nil. The watchdog owns the timer; the read loop only
+	// pings the buffered activity channel, so there's no Timer.Reset race.
+	idleTimeout := c.idleTimeout
+	if idleTimeout <= 0 { // zero-value client (constructed without New)
+		idleTimeout = defaultStreamIdleTimeout
+	}
 	done := make(chan struct{})
 	defer close(done)
+	activity := make(chan struct{}, 1)
+	var stalled atomic.Bool
 	go func() {
-		select {
-		case <-ctx.Done():
-			resp.Body.Close()
-		case <-done:
+		idle := time.NewTimer(idleTimeout)
+		defer idle.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				resp.Body.Close()
+				return
+			case <-idle.C:
+				stalled.Store(true)
+				resp.Body.Close()
+				return
+			case <-activity:
+				if !idle.Stop() {
+					select {
+					case <-idle.C:
+					default:
+					}
+				}
+				idle.Reset(idleTimeout)
+			case <-done:
+				return
+			}
 		}
 	}()
 
@@ -314,6 +352,10 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
 	for scanner.Scan() {
+		select { // ping the idle watchdog; non-blocking so a full buffer is fine
+		case activity <- struct{}{}:
+		default:
+		}
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || !strings.HasPrefix(line, "data:") {
 			continue
@@ -384,6 +426,9 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 		}
 	}
 
+	if stalled.Load() {
+		return emitted, fmt.Errorf("%s: stream stalled — no data for %s, connection likely dropped", c.name, idleTimeout)
+	}
 	if err := scanner.Err(); err != nil {
 		return emitted, fmt.Errorf("%s: read stream: %w", c.name, err)
 	}
