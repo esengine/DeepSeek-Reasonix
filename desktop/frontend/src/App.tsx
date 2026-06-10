@@ -450,6 +450,7 @@ export default function App() {
   const [clearContextPending, setClearContextPending] = useState(false);
   const topicRenameSkipCommitRef = useRef(false);
   const topicRenameCommitHandledRef = useRef(false);
+  const openingBlankSessionRef = useRef(false);
   const appRef = useRef<HTMLDivElement>(null);
   const sidebarTogglePressTimerRef = useRef<number | null>(null);
   const workspaceTogglePressTimerRef = useRef<number | null>(null);
@@ -969,6 +970,25 @@ export default function App() {
     return tabs;
   }, []);
 
+  const blankSessionTarget = useCallback(() => {
+    const activeWorkspaceRoot = activeTab?.scope === "project" ? activeTab.workspaceRoot || "" : "";
+    const scope = activeWorkspaceRoot ? "project" : "global";
+    return { scope, workspaceRoot: activeWorkspaceRoot };
+  }, [activeTab?.scope, activeTab?.workspaceRoot]);
+
+  const openBlankSession = useCallback(async (scope: string, workspaceRoot: string) => {
+    if (openingBlankSessionRef.current) return;
+    openingBlankSessionRef.current = true;
+    try {
+      await ensureBlankTab(scope, scope === "project" ? workspaceRoot : "");
+      setProjectRevision((value) => value + 1);
+      await refreshTabMetas();
+      setTabRevealSignal((signal) => signal + 1);
+    } finally {
+      openingBlankSessionRef.current = false;
+    }
+  }, [ensureBlankTab, refreshTabMetas]);
+
   useEffect(() => {
     void refreshTabMetas();
     const id = window.setInterval(() => void refreshTabMetas(), 2000);
@@ -1341,19 +1361,9 @@ export default function App() {
 
   const handleNewTab = useCallback(async () => {
     closeTransientOverlays();
-    const activeWorkspaceRoot = activeTab?.scope === "project" ? activeTab.workspaceRoot || "" : "";
-    const targetScope = activeWorkspaceRoot ? "project" : "global";
-    const workspaceRoot = activeWorkspaceRoot;
-    const topic = await app.CreateTopic(targetScope, workspaceRoot, "");
-    if (targetScope === "global" || !workspaceRoot) {
-      await openGlobalTab(topic.id);
-    } else {
-      await openProjectTab(workspaceRoot, topic.id);
-    }
-    setProjectRevision((value) => value + 1);
-    await refreshTabMetas();
-    setTabRevealSignal((signal) => signal + 1);
-  }, [activeTab?.scope, activeTab?.workspaceRoot, closeTransientOverlays, openGlobalTab, openProjectTab, refreshTabMetas]);
+    const target = blankSessionTarget();
+    await openBlankSession(target.scope, target.workspaceRoot);
+  }, [blankSessionTarget, closeTransientOverlays, openBlankSession]);
 
   const handleMessageAction = useCallback(async (turn: number, scope: string) => {
     await rewind(turn, scope);

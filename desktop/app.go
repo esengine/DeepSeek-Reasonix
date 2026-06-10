@@ -798,6 +798,15 @@ func (a *App) NewSession() error {
 	return nil
 }
 
+func messagesHaveConversationContent(messages []provider.Message) bool {
+	for _, msg := range messages {
+		if msg.Role != provider.RoleSystem {
+			return true
+		}
+	}
+	return false
+}
+
 // ClearSession discards the current conversation and rotates to a fresh unsaved one.
 func (a *App) ClearSession() error {
 	a.mu.RLock()

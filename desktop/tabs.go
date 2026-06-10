@@ -647,13 +647,14 @@ func (a *App) EnsureBlankTab(scope, workspaceRoot string) (TabMeta, error) {
 		actualRoot = globalRoot
 	}
 	created = &WorkspaceTab{
-		ID:            tabID,
-		Scope:         scope,
-		WorkspaceRoot: actualRoot,
-		TopicID:       topicID,
-		TopicTitle:    topicTitleForTab(scope, workspaceRoot, topicID),
-		mode:          "normal",
-		disabledMCP:   map[string]ServerView{},
+		ID:               tabID,
+		Scope:            scope,
+		WorkspaceRoot:    actualRoot,
+		TopicID:          topicID,
+		TopicTitle:       topicTitleForTab(scope, workspaceRoot, topicID),
+		mode:             "normal",
+		toolApprovalMode: control.ToolApprovalAsk,
+		disabledMCP:      map[string]ServerView{},
 	}
 	created.sink = &tabEventSink{tabID: tabID, app: a}
 	a.tabs[tabID] = created
