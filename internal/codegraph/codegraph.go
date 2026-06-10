@@ -138,6 +138,7 @@ func EnsureInit(ctx context.Context, bin, root string) error {
 	ctx, cancel := context.WithTimeout(ctx, initTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, bin, "init", root)
+	proc.SetProcessGroupKill(cmd) // own group so Cancel→KillTree reaps the tree off Windows (no-op on Windows)
 	cmd.Cancel = func() error { proc.KillTree(cmd); return nil }
 	cmd.WaitDelay = 3 * time.Second
 	proc.HideWindow(cmd)
