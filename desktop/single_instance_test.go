@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -13,8 +14,8 @@ func TestSingleInstanceLockRestoresExistingInstance(t *testing.T) {
 	if lock == nil {
 		t.Fatal("singleInstanceLock returned nil")
 	}
-	if lock.UniqueId != singleInstanceID {
-		t.Fatalf("UniqueId = %q, want %q", lock.UniqueId, singleInstanceID)
+	if !strings.HasPrefix(lock.UniqueId, singleInstanceID+".") {
+		t.Fatalf("UniqueId = %q, want prefix %q.", lock.UniqueId, singleInstanceID+".")
 	}
 	if lock.OnSecondInstanceLaunch == nil {
 		t.Fatal("OnSecondInstanceLaunch should restore the existing window")
