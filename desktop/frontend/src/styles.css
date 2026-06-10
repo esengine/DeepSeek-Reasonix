@@ -8872,9 +8872,16 @@ a[href] {
   white-space: nowrap;
 }
 
+.app-chrome__prefix {
+  font-weight: 700;
+  font-size: 13px;
+  color: #0153e5;
+  flex: 0 0 auto;
+}
+
 .app-chrome__logo {
   flex: 0 0 auto;
-  width: 116px;
+  width: 106px;
   height: auto;
   max-height: 27px;
   border-radius: 0;

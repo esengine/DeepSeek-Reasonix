@@ -1374,7 +1374,8 @@ export default function App() {
           >
             {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
           </button>
-          <div className="app-chrome__identity" aria-label="Reasonix">
+          <div className="app-chrome__identity" aria-label="RS-Reasonix">
+            <span className="app-chrome__prefix">RS-</span>
             <img src={logoWordmark} alt="" className="app-chrome__logo" draggable={false} />
             <span className="app-chrome__separator">/</span>
             <span className="app-chrome__scope">{appChromeScopeLabel(activeTab, state.meta)}</span>
