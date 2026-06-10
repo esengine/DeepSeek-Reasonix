@@ -16,10 +16,6 @@ import (
 // half-open connection sends the SSE head then goes silent without an RST, which
 // would hang scanner.Scan() forever. The idle watchdog must surface a stall error.
 func TestStreamStallTimesOut(t *testing.T) {
-	old := streamIdleTimeout
-	streamIdleTimeout = 150 * time.Millisecond
-	defer func() { streamIdleTimeout = old }()
-
 	release := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -40,6 +36,7 @@ func TestStreamStallTimesOut(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
+	p.(*client).idleTimeout = 150 * time.Millisecond
 	ch, err := p.Stream(context.Background(), provider.Request{
 		Messages:  []provider.Message{{Role: provider.RoleUser, Content: "hi"}},
 		MaxTokens: 16,

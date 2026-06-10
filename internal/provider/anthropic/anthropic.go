@@ -32,11 +32,12 @@ import (
 	"reasonix/internal/provider"
 )
 
-// streamIdleTimeout caps how long a started SSE stream may go silent before it's
-// treated as a dropped connection — a half-open TCP connection (proxy switched
+// defaultStreamIdleTimeout caps how long a started SSE stream may go silent before
+// it's treated as a dropped connection — a half-open TCP connection (proxy switched
 // mid-stream) sends no RST, so scanner.Scan() would block forever. Generous on
-// purpose; live streams emit far more often. A var so tests can override it.
-var streamIdleTimeout = 120 * time.Second
+// purpose; live streams emit far more often. Stored per-client (client.idleTimeout)
+// so a test can shorten it without a shared global that races other watchdogs.
+const defaultStreamIdleTimeout = 120 * time.Second
 
 const (
 	// anthropicVersion is the required API version header value.
@@ -91,14 +92,15 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		root = defaultBaseURL
 	}
 	return &client{
-		name:     name,
-		apiKey:   cfg.APIKey,
-		keyEnv:   keyEnv,
-		baseURL:  root,
-		model:    cfg.Model,
-		thinking: thinking,
-		effort:   effort,
-		http:     httpClient, // no overall timeout; lifecycle is ctx-driven
+		name:        name,
+		apiKey:      cfg.APIKey,
+		keyEnv:      keyEnv,
+		baseURL:     root,
+		model:       cfg.Model,
+		thinking:    thinking,
+		effort:      effort,
+		http:        httpClient, // no overall timeout; lifecycle is ctx-driven
+		idleTimeout: defaultStreamIdleTimeout,
 	}, nil
 }
 
@@ -108,14 +110,15 @@ func newHTTPClient(cfg provider.Config) (*http.Client, error) {
 }
 
 type client struct {
-	name     string
-	apiKey   string
-	keyEnv   string // api_key_env name, surfaced in auth errors
-	baseURL  string
-	model    string
-	thinking string // "adaptive" enables extended thinking; "" = off (config-driven)
-	effort   string // output_config.effort: low|medium|high|xhigh|max; "" = provider default
-	http     *http.Client
+	name        string
+	apiKey      string
+	keyEnv      string // api_key_env name, surfaced in auth errors
+	baseURL     string
+	model       string
+	thinking    string // "adaptive" enables extended thinking; "" = off (config-driven)
+	effort      string // output_config.effort: low|medium|high|xhigh|max; "" = provider default
+	http        *http.Client
+	idleTimeout time.Duration // SSE stall watchdog window; defaultStreamIdleTimeout unless a test overrides
 }
 
 func (c *client) Name() string { return c.name }
@@ -277,16 +280,20 @@ func (c *client) readStream(resp *http.Response, out chan<- provider.Chunk) {
 	defer resp.Body.Close()
 	defer close(out)
 
-	// Close the body if the stream stalls past streamIdleTimeout so scanner.Scan()
+	// Close the body if the stream stalls past c.idleTimeout so scanner.Scan()
 	// unblocks instead of hanging on a half-open connection. The watchdog owns the
 	// timer; the read loop only pings the buffered activity channel (no Timer.Reset
 	// race). A context cancel already unblocks the scan via the transport.
+	idleTimeout := c.idleTimeout
+	if idleTimeout <= 0 { // zero-value client (constructed without New)
+		idleTimeout = defaultStreamIdleTimeout
+	}
 	done := make(chan struct{})
 	defer close(done)
 	activity := make(chan struct{}, 1)
 	var stalled atomic.Bool
 	go func() {
-		idle := time.NewTimer(streamIdleTimeout)
+		idle := time.NewTimer(idleTimeout)
 		defer idle.Stop()
 		for {
 			select {
@@ -301,7 +308,7 @@ func (c *client) readStream(resp *http.Response, out chan<- provider.Chunk) {
 					default:
 					}
 				}
-				idle.Reset(streamIdleTimeout)
+				idle.Reset(idleTimeout)
 			case <-done:
 				return
 			}
@@ -400,7 +407,7 @@ func (c *client) readStream(resp *http.Response, out chan<- provider.Chunk) {
 	}
 
 	if stalled.Load() {
-		out <- provider.Chunk{Type: provider.ChunkError, Err: fmt.Errorf("%s: stream stalled — no data for %s, connection likely dropped", c.name, streamIdleTimeout)}
+		out <- provider.Chunk{Type: provider.ChunkError, Err: fmt.Errorf("%s: stream stalled — no data for %s, connection likely dropped", c.name, idleTimeout)}
 		return
 	}
 	if err := scanner.Err(); err != nil {

@@ -17,10 +17,6 @@ import (
 // scanner.Scan() would block forever and Ctrl+C-less sessions hang until kill -9.
 // The idle watchdog must surface a stall error instead of hanging.
 func TestStreamStallTimesOut(t *testing.T) {
-	old := streamIdleTimeout
-	streamIdleTimeout = 150 * time.Millisecond
-	defer func() { streamIdleTimeout = old }()
-
 	release := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -37,6 +33,7 @@ func TestStreamStallTimesOut(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
+	p.(*client).idleTimeout = 150 * time.Millisecond
 	ch, err := p.Stream(context.Background(), provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}}})
 	if err != nil {
 		t.Fatalf("Stream: %v", err)
