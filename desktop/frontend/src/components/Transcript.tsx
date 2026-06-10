@@ -422,11 +422,30 @@ export function Transcript({
 
     if (stepGroups) {
       // Compact/minimal mode: step-based rendering
+      // Collect consecutive completed non-final steps into batches
+      let collapseBatch: Item[] = [];
+      let collapseBatchStart: string | null = null;
+      const flushCollapseBatch = () => {
+        if (collapseBatch.length === 0) return;
+        const dur = collapseBatch.length * 1500;
+        out.push(
+          <TurnCollapse
+            key={`step-batch-${collapseBatchStart}`}
+            items={collapseBatch}
+            durationMs={dur}
+            mode={displayMode}
+          />,
+        );
+        collapseBatch = [];
+        collapseBatchStart = null;
+      };
+
       for (const group of stepGroups) {
         const first = group.items[0];
 
         // User message
         if (first.kind === "user") {
+          flushCollapseBatch();
           pushTurnActions();
           const tn = userTurn.get(first.id);
           activeTurn = tn;
@@ -436,22 +455,15 @@ export function Transcript({
           continue;
         }
 
-        // Completed non-final step → collapsed
+        // Completed non-final step → batch it
         if (group.isComplete && !group.isFinal && displayMode !== "standard") {
-          // Estimate duration from item count
-          const dur = group.items.length * 1500;
-          out.push(
-            <TurnCollapse
-              key={`step-${first.id}`}
-              items={group.items}
-              durationMs={dur}
-              mode={displayMode}
-            />,
-          );
+          if (!collapseBatchStart) collapseBatchStart = first.id;
+          collapseBatch.push(...group.items);
           continue;
         }
 
-        // Final answer or active step → render items normally
+        // Final answer or active step → flush any pending batch then render
+        flushCollapseBatch();
         for (const it of group.items) {
           switch (it.kind) {
             case "assistant":
@@ -473,6 +485,7 @@ export function Transcript({
           }
         }
       }
+      flushCollapseBatch();
       pushTurnActions();
     } else {
       // Standard mode: flat rendering
