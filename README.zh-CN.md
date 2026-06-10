@@ -200,8 +200,8 @@ headers = { Authorization = "Bearer ${STRIPE_KEY}" }
 
 ### 斜杠命令
 
-`reasonix chat` 里,内置命令(`/compact`、`/new`（`/clear`）、`/rewind`、`/tree`、`/branch`、`/switch`、`/todo`、`/model`、`/effort`、`/mcp`、`/help`)在本地执行。
-`/new` 会开启干净的模型上下文,同时保存之前的 transcript 供历史记录和恢复使用;`/clear` 是兼容 Claude Code 习惯的同义命令。
+`reasonix chat` 里,内置命令(`/compact`、`/new`、`/clear`、`/rewind`、`/tree`、`/branch`、`/switch`、`/todo`、`/model`、`/effort`、`/mcp`、`/help`)在本地执行。
+`/new` 会开启新会话,同时保存之前的 transcript 供历史记录和恢复使用;`/clear` 会二次确认,确认后丢弃当前上下文且不保存。
 `/tree` 查看已保存的对话分支,`/branch [name]` 从当前对话末端分支,`/branch <turn> [name]`
 从较早的 checkpoint 轮次分支,`/switch <id|name>` 切换到另一个分支。**自定义命令**
 是放在 `.reasonix/commands/`(项目)或 `~/.config/reasonix/commands/`(用户)下的 Markdown 文件——

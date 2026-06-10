@@ -144,6 +144,30 @@ type op struct {
 // rewrite whose line-by-line diff is unreadable anyway, so we fall back to tallies.
 const maxDiffEdits = 2000
 
+// myersMaxD returns min(n+m, maxDiffEdits) without adding the two input
+// lengths. The result feeds an allocation below, so every arithmetic step stays
+// inside the fixed maxDiffEdits budget.
+func myersMaxD(n, m int) int {
+	if n >= maxDiffEdits {
+		return maxDiffEdits
+	}
+	maxD := n
+	for i := 0; i < m && maxD < maxDiffEdits; i++ {
+		maxD++
+	}
+	return maxD
+}
+
+// myersVectorLen returns 2*maxD+1 without multiplying an input-derived value
+// that is later used as an allocation size.
+func myersVectorLen(maxD int) int {
+	width := 1
+	for i := 0; i < maxD; i++ {
+		width += 2
+	}
+	return width
+}
+
 // myers returns the shortest edit script transforming a into b, line by line, and
 // ok=true. It records the search trace, then backtracks it into an ordered op
 // list. ok is false when the edit distance exceeds maxDiffEdits — the caller then
@@ -153,12 +177,9 @@ func myers(a, b []string) ([]op, bool) {
 	if n == 0 && m == 0 {
 		return nil, true
 	}
-	maxD := n + m
-	if maxD > maxDiffEdits || maxD < 0 {
-		maxD = maxDiffEdits // bound the trace's O(D²) footprint (and any n+m overflow)
-	}
+	maxD := myersMaxD(n, m)
 	offset := maxD // shift negative k into a non-negative array index
-	v := make([]int, 2*maxD+1)
+	v := make([]int, myersVectorLen(maxD))
 	var trace [][]int
 
 	for d := 0; d <= maxD; d++ {

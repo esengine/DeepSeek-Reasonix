@@ -202,6 +202,77 @@ func TestReadFileRef(t *testing.T) {
 	}
 }
 
+func TestReadFileRefPDFExtraction(t *testing.T) {
+	dir := t.TempDir()
+	pdfPath := filepath.Join(dir, "report.pdf")
+	if err := os.WriteFile(pdfPath, []byte("%PDF-1.4 fake"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	oldExtract := extractPDFText
+	t.Cleanup(func() { extractPDFText = oldExtract })
+
+	extractPDFText = func(path string) (pdfExtractResult, error) {
+		if path != pdfPath {
+			t.Fatalf("extract path = %q, want %q", path, pdfPath)
+		}
+		return pdfExtractResult{text: "Quarterly results\nRevenue up", tool: "test-extractor"}, nil
+	}
+	got, isDir, err := readFileRef(pdfPath)
+	if err != nil || isDir {
+		t.Fatalf("pdf text = (isDir=%v, err=%v)", isDir, err)
+	}
+	if !strings.Contains(got, "PDF text extracted") || !strings.Contains(got, "Revenue up") {
+		t.Fatalf("pdf text extraction missing from output: %s", got)
+	}
+
+	extractPDFText = func(string) (pdfExtractResult, error) {
+		return pdfExtractResult{text: "   ", tool: "test-extractor"}, nil
+	}
+	got, _, err = readFileRef(pdfPath)
+	if err != nil {
+		t.Fatalf("empty pdf text err = %v", err)
+	}
+	if !strings.Contains(got, "no extractable text") || !strings.Contains(got, "OCR") {
+		t.Fatalf("empty pdf should ask for OCR, got: %s", got)
+	}
+
+	extractPDFText = func(string) (pdfExtractResult, error) {
+		return pdfExtractResult{}, os.ErrNotExist
+	}
+	got, _, err = readFileRef(pdfPath)
+	if err != nil {
+		t.Fatalf("failed pdf text err = %v", err)
+	}
+	if !strings.Contains(got, "text extraction unavailable") || !strings.Contains(got, "multimodal/vision") {
+		t.Fatalf("failed pdf should mention OCR/vision fallback, got: %s", got)
+	}
+}
+
+func TestRunPDFTextCommandCapsStderr(t *testing.T) {
+	t.Setenv("GO_WANT_PDF_STDERR_HELPER", "1")
+
+	_, _, err := runPDFTextCommand(os.Args[0], []string{"-test.run=TestPDFStderrHelperProcess", "--"})
+	if err == nil {
+		t.Fatal("expected helper command to fail")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "truncated") {
+		t.Fatalf("expected stderr truncation marker, got: %q", msg)
+	}
+	if len(msg) > maxFileRefBytes+1024 {
+		t.Fatalf("stderr error grew too large: len=%d", len(msg))
+	}
+}
+
+func TestPDFStderrHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_PDF_STDERR_HELPER") != "1" {
+		return
+	}
+	_, _ = os.Stderr.WriteString(strings.Repeat("x", maxFileRefBytes+4096))
+	os.Exit(7)
+}
+
 func TestResolveBareNamesDuplicates(t *testing.T) {
 	temp := t.TempDir()
 

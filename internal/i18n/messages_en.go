@@ -44,11 +44,11 @@ var English = Messages{
 	ChatToolWorkingFmt:          "%s working · %ds",
 	ChatStatusRetryingFmt:       "%s retrying (%d/%d)… (Esc cancels)",
 	ChatStatusIdle:              "ready",
-	ChatStatusYoloIdle:          "approvals skipped",
-	ChatStatusCycleHint:         "shift+tab to cycle",
+	ChatStatusYoloIdle:          "tool approvals skipped",
+	ChatStatusCycleHint:         "shift+tab toggles plan",
 	ChatStatusCacheNowFmt:       "turn hit %s",
 	ChatStatusCacheAvgFmt:       "avg %s",
-	ChatStatusPlanApproval:      "Enter/y approves & executes · n/Esc keeps planning · PgUp/PgDn scrolls",
+	ChatStatusPlanApproval:      "Enter/y approves & executes · n/Esc keeps planning · PgUp/PgDn/Ctrl+Home/End scrolls",
 	PlanApprovalPrompt:          "Plan ready above — Enter/y to approve & execute, n/Esc to keep planning",
 	ChatStatusToolApproval:      "1 approve once · 2 allow scope this session · 3/4 prefix or save when offered · n/Esc deny · Ctrl-C cancels turn",
 	AskTypeSomething:            "Type something else",
@@ -89,12 +89,15 @@ var English = Messages{
 
 	SlashCompactDone:   "session compacted — older middle replaced by a summary, recent turns kept",
 	SlashCompactFailed: "compaction failed",
-	SlashNewDone:       "fresh context started — previous transcript saved",
+	SlashNewDone:       "new session started — previous transcript saved",
 	SlashNewFailed:     "could not start a new session",
+	SlashClearPrompt:   "Clear current context without saving?",
+	SlashClearDone:     "current context cleared",
+	SlashClearFailed:   "could not clear current context",
 	SlashUnavailable:   "command unavailable in this build",
 	SlashUnknown:       "unknown command",
 	SlashTodoCleared:   "task list dismissed",
-	SlashHelp:          "commands: /compact · /new (/clear) · /resume · /rewind · /tree · /branch · /switch · /todo · /verbose · /model (switch model) · /effort · /theme · /language · /mcp · /skills · /hooks · /paste-image · /memory · /remember · /quit · /help · plus skills (/init, /explore, …)",
+	SlashHelp:          "commands: /compact · /new · /clear · /resume · /rewind · /tree · /branch · /switch · /todo · /verbose · /model (switch model) · /effort · /theme · /language · /mcp · /skills · /hooks · /paste-image · /memory · /goal · /remember · /quit · /help · plus skills (/init, /explore, …)",
 
 	SkillPickerTitle:             "Skills",
 	SkillPickerAvailableFmt:      "%d available",
@@ -151,7 +154,8 @@ var English = Messages{
 	ShellExecTimeoutFmt: "shell command timed out (> %s)",
 	ShellModeHint:       "Enter runs shell · Esc cancels · click output to expand",
 
-	CmdNew:          "start fresh context; save transcript",
+	CmdNew:          "start new session; save transcript",
+	CmdClear:        "discard current context",
 	CmdCompact:      "compact context",
 	CmdRewind:       "rewind to an earlier turn",
 	CmdTree:         "show conversation branches",
@@ -160,6 +164,7 @@ var English = Messages{
 	CmdResume:       "resume a saved session",
 	CmdModel:        "switch model",
 	CmdMemory:       "show memory files",
+	CmdGoal:         "set or clear the active goal",
 	CmdRemember:     "save a memory note",
 	CmdForget:       "delete a saved memory",
 	CmdMcp:          "MCP servers",
@@ -218,6 +223,10 @@ var English = Messages{
 	ForgetDoneFmt:          "forgot memory: %s",
 	QuickRememberEmpty:     "nothing to remember",
 	QuickRememberDoneFmt:   "remembered → %s",
+	GoalEmpty:              "goal: none — set one with /goal <objective>",
+	GoalCurrentFmt:         "goal: %s",
+	GoalSetFmt:             "goal set → %s",
+	GoalCleared:            "goal cleared",
 	ModelSwitchUnavailable: "model switching is unavailable in this session",
 	ModelSwitchBusy:        "finish or cancel the current turn before switching models",
 	ModelAlreadyOnFmt:      "already on %s",
@@ -320,6 +329,7 @@ Usage:
   reasonix config auto-plan [off|on]                    configure automatic plan mode
   reasonix mcp <add|remove|list>                        manage MCP servers in reasonix.toml
   reasonix doctor [--json]                              print redacted local diagnostics
+  reasonix bot start|doctor|weixin-login                multi-channel IM bot gateway
   reasonix version
   reasonix help
 

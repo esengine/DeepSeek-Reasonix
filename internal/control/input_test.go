@@ -98,6 +98,56 @@ func TestComposePlanModeMarker(t *testing.T) {
 	}
 }
 
+func TestComposeIncludesActiveGoal(t *testing.T) {
+	c := New(Options{})
+	c.SetGoal("ship the approval redesign")
+
+	got := c.Compose("next step?")
+	if !strings.Contains(got, "<active-goal>\nship the approval redesign") {
+		t.Fatalf("Compose should include active goal block, got %q", got)
+	}
+	if !strings.Contains(got, "[goal:complete]") || !strings.Contains(got, "[goal:blocked:<short reason>]") {
+		t.Fatalf("goal block should include autonomous status markers, got %q", got)
+	}
+	if !strings.HasSuffix(got, "next step?") {
+		t.Fatalf("user text should follow goal block: %q", got)
+	}
+
+	c.ClearGoal()
+	if got := c.Compose("plain"); got != "plain" {
+		t.Fatalf("cleared goal should stop injection, got %q", got)
+	}
+}
+
+func TestGoalCommandSetsReportsAndClears(t *testing.T) {
+	var notices []string
+	c := New(Options{Sink: event.FuncSink(func(e event.Event) {
+		if e.Kind == event.Notice {
+			notices = append(notices, e.Text)
+		}
+	})})
+	c.SetPlanMode(true)
+
+	c.Submit("/goal finish the mode redesign")
+	if got := c.Goal(); got != "finish the mode redesign" {
+		t.Fatalf("Goal() = %q", got)
+	}
+	if c.PlanMode() {
+		t.Fatal("/goal should leave plan mode")
+	}
+	c.Submit("/goal")
+	c.Submit("/goal clear")
+	if got := c.Goal(); got != "" {
+		t.Fatalf("goal should be cleared, got %q", got)
+	}
+	joined := strings.Join(notices, "\n")
+	for _, want := range []string{"goal set", "goal: finish the mode redesign", "goal cleared"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("notices missing %q: %v", want, notices)
+		}
+	}
+}
+
 func TestComposeDrainsQueuedMemory(t *testing.T) {
 	c := New(Options{}) // no executor/memory — QueueMemory still queues a turn-tail note
 

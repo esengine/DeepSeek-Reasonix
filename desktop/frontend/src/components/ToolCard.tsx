@@ -1,13 +1,11 @@
 import { memo, useEffect, useState } from "react";
 import { CodeViewer } from "./CodeViewer";
 import { DiffView } from "./DiffView";
-import { ProcessCard, ProcessStatusIcon, ProcessToolIcon, type ProcessState, type ProcessTone } from "./ProcessCard";
+import { ProcessCard, ProcessStatusIcon, type ProcessState, type ProcessTone } from "./ProcessCard";
 import { useT } from "../lib/i18n";
 import { diffsFor, subjectOf, summarize } from "../lib/tools";
 import { useShellExpand } from "../lib/shellExpand";
 import type { Item } from "../lib/useController";
-import { GeoResultCard, parsePreview } from "./geo/GeoResultCard";
-import { useGeoStatus, parseEnvStatus, GEO_TOOL_ICONS } from "./geo/GeoStatusDots";
 
 type ToolItem = Extract<Item, { kind: "tool" }>;
 
@@ -65,22 +63,6 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
       ? [item.profile.model, item.profile.effort ? `effort ${item.profile.effort}` : ""].filter(Boolean).join(" · ")
       : "";
 
-  // Geo tool detection
-  const { setStatus: setGeoStatus, setDetails: setGeoDetails } = useGeoStatus();
-  const isGeoRead = item.name === "mcp__geocode__read_geo_data";
-  const isGeoEnv = item.name === "mcp__geocode__geo_env_status";
-  const hasGeoPreview = isGeoRead && item.output && parsePreview(item.output) !== null;
-
-  // Update geo status context when env probe completes
-  useEffect(() => {
-    if (!isGeoEnv || !item.output || item.status !== "done") return;
-    const parsed = parseEnvStatus(item.output);
-    if (parsed) {
-      setGeoStatus(parsed.status);
-      setGeoDetails(parsed.details);
-    }
-  }, [isGeoEnv, item.output, item.status, setGeoStatus, setGeoDetails]);
-
   // A task's summary is its step count; everything else derives from the result.
   const summary =
     item.status === "running"
@@ -127,13 +109,7 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
   return (
     <ProcessCard
       tone={processTone(item.status)}
-      icon={
-        GEO_TOOL_ICONS[item.name] ? (
-          <img src={GEO_TOOL_ICONS[item.name]} alt="" width={14} height={14} style={{ flexShrink: 0 }} />
-        ) : (
-          <ProcessToolIcon size={12} />
-        )
-      }
+      icon={<ProcessStatusIcon state={processState(item.status)} label={item.status} />}
       kind="tool"
       name={
         <>
@@ -144,7 +120,6 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
       }
       meta={
         <>
-          <ProcessStatusIcon state={processState(item.status)} label={item.status} />
           {duration && <span className="tool__duration">{duration}</span>}
         </>
       }
@@ -184,15 +159,8 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
         </div>
       )}
 
-      {/* Geo preview: map/table for read_geo_data results */}
-      {hasGeoPreview && item.output && (
-        <div className="tool__body">
-          <GeoResultCard output={item.output} />
-        </div>
-      )}
-
       {/* Non-shell body: args + output, gated by open */}
-      {!hasGeoPreview && !shellPreview && hasArgsOrOutput && (
+      {!shellPreview && hasArgsOrOutput && (
         <div className="tool__body">
           {item.args && <CodeViewer value={pretty(item.args)} language="json" maxHeight={180} />}
           {item.output && (

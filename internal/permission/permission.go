@@ -138,7 +138,12 @@ func New(mode string, allow, ask, deny []string) Policy {
 // for glob matching. Precedence: deny > ask > allow > fallback (Allow for
 // readers, Mode for writers).
 func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Decision {
-	subject := Subject(args)
+	return p.DecideSubject(toolName, readOnly, Subject(args))
+}
+
+// DecideSubject evaluates a tool call when the caller already extracted the
+// stable approval subject from args.
+func (p Policy) DecideSubject(toolName string, readOnly bool, subject string) Decision {
 	switch {
 	case matchAny(p.Deny, toolName, subject):
 		return Deny

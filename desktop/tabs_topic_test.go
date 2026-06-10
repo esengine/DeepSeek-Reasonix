@@ -12,6 +12,7 @@ import (
 
 	"reasonix/internal/agent"
 	"reasonix/internal/config"
+	"reasonix/internal/control"
 )
 
 func waitForTabReady(t *testing.T, app *App, tabID string) *WorkspaceTab {
@@ -477,6 +478,42 @@ func TestReorderProjectsPersistsSidebarAndWorkspaceOrder(t *testing.T) {
 	}
 }
 
+func TestReorderProjectsPersistsGlobalSidebarOrder(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	first := t.TempDir()
+	second := t.TempDir()
+	if err := addProject(first, "First"); err != nil {
+		t.Fatalf("add first project: %v", err)
+	}
+	if err := addProject(second, "Second"); err != nil {
+		t.Fatalf("add second project: %v", err)
+	}
+
+	app := NewApp()
+	if _, err := app.CreateTopic("global", "", "Global note"); err != nil {
+		t.Fatalf("create global topic: %v", err)
+	}
+	if err := app.ReorderProjects([]string{second, desktopGlobalOrderToken, first}); err != nil {
+		t.Fatalf("ReorderProjects with global: %v", err)
+	}
+
+	nodes := app.ListProjectTree()
+	if len(nodes) != 3 {
+		t.Fatalf("project tree len = %d, want 3: %+v", len(nodes), nodes)
+	}
+	if got := []string{nodes[0].Root, nodes[1].Kind, nodes[2].Root}; got[0] != second || got[1] != "global_folder" || got[2] != first {
+		t.Fatalf("project tree order = %v, want [%s global_folder %s]", got, second, first)
+	}
+	workspaces := app.ListWorkspaces()
+	if len(workspaces) != 2 {
+		t.Fatalf("workspaces len = %d, want 2: %+v", len(workspaces), workspaces)
+	}
+	if got := []string{workspaces[0].Path, workspaces[1].Path}; got[0] != second || got[1] != first {
+		t.Fatalf("workspace order = %v, want %v", got, []string{second, first})
+	}
+}
+
 func TestReorderProjectsRejectsInvalidOrder(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
@@ -490,9 +527,10 @@ func TestReorderProjectsRejectsInvalidOrder(t *testing.T) {
 	}
 	app := NewApp()
 	for name, order := range map[string][]string{
-		"missing":   {first},
-		"unknown":   {first, filepath.Join(t.TempDir(), "missing")},
-		"duplicate": {first, first},
+		"missing":          {first},
+		"unknown":          {first, filepath.Join(t.TempDir(), "missing")},
+		"duplicate":        {first, first},
+		"duplicate-global": {desktopGlobalOrderToken, first, desktopGlobalOrderToken, second},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if err := app.ReorderProjects(order); err == nil {
@@ -526,8 +564,8 @@ func TestRemoveWorkspaceUsesSharedProjectRegistryForCurrentProject(t *testing.T)
 	if got := app.ListWorkspaces(); len(got) != 0 {
 		t.Fatalf("workspaces after remove = %+v, want empty", got)
 	}
-	if got := app.ListProjectTree(); len(got) != 0 {
-		t.Fatalf("project tree after remove = %+v, want empty", got)
+	if got := app.ListProjectTree(); len(got) != 1 || got[0].Kind != "global_folder" || len(got[0].Children) != 0 {
+		t.Fatalf("project tree after remove = %+v, want empty Global folder", got)
 	}
 }
 
@@ -603,7 +641,9 @@ func TestCreateTopicDefaultsToAutoNewSessionTitle(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
 	projectRoot := t.TempDir()
+	before := time.Now().UnixMilli()
 	topic, err := NewApp().CreateTopic("project", projectRoot, "")
+	after := time.Now().UnixMilli()
 	if err != nil {
 		t.Fatalf("create topic: %v", err)
 	}
@@ -615,6 +655,16 @@ func TestCreateTopicDefaultsToAutoNewSessionTitle(t *testing.T) {
 	}
 	if got := loadTopicTitleSource(projectRoot, topic.ID); got != topicTitleSourceAuto {
 		t.Fatalf("title source = %q, want auto", got)
+	}
+	if got := loadTopicCreatedAt(projectRoot, topic.ID); got < before || got > after {
+		t.Fatalf("createdAt = %d, want between %d and %d", got, before, after)
+	}
+	nodes := NewApp().ListProjectTree()
+	if len(nodes) != 1 || len(nodes[0].Children) != 1 {
+		t.Fatalf("project tree = %#v, want one project with one topic", nodes)
+	}
+	if got := nodes[0].Children[0].CreatedAt; got != topic.CreatedAt {
+		t.Fatalf("project tree createdAt = %d, want %d", got, topic.CreatedAt)
 	}
 }
 
@@ -666,6 +716,18 @@ func TestCreateGlobalTopicAppearsFirstInProjectTree(t *testing.T) {
 	}
 	if got := nodes[0].Children[1].TopicID; got != first.ID {
 		t.Fatalf("second visible global topic = %q, want older %q", got, first.ID)
+	}
+}
+
+func TestListProjectTreeShowsEmptyGlobalWhenNoProjects(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	nodes := NewApp().ListProjectTree()
+	if len(nodes) != 1 {
+		t.Fatalf("project tree = %#v, want one Global folder", nodes)
+	}
+	if nodes[0].Kind != "global_folder" || nodes[0].Label != "Global" || len(nodes[0].Children) != 0 {
+		t.Fatalf("project tree = %#v, want empty Global folder", nodes)
 	}
 }
 
@@ -950,8 +1012,8 @@ func TestRestoreGlobalTopicSessionReindexesProjectTree(t *testing.T) {
 	if _, err := os.Stat(trashPath); err != nil {
 		t.Fatalf("global session should be in trash: %v", err)
 	}
-	if got := app.ListProjectTree(); len(got) != 0 {
-		t.Fatalf("trashed global topic should leave project tree, got %#v", got)
+	if got := app.ListProjectTree(); len(got) != 1 || got[0].Kind != "global_folder" || len(got[0].Children) != 0 {
+		t.Fatalf("trashed global topic should leave empty Global folder, got %#v", got)
 	}
 
 	if err := app.RestoreSession(trashPath); err != nil {
@@ -1017,6 +1079,9 @@ func TestRestoreSessionWithoutTopicMetadataFallsBackToGlobal(t *testing.T) {
 	sessionPath := writeLegacySession(t, dir, "restore-orphan.jsonl", "restore orphan history", time.Now().Add(-time.Hour))
 	topicID := legacySessionTopicID(sessionPath)
 	app := NewApp()
+	ctrl := control.New(control.Options{SessionDir: dir, SessionPath: filepath.Join(dir, "active.jsonl"), Label: "test"})
+	app.setTestCtrl(ctrl, "")
+	defer ctrl.Close()
 	if err := app.DeleteSession(sessionPath); err != nil {
 		t.Fatalf("delete orphan session: %v", err)
 	}
@@ -1102,9 +1167,25 @@ func TestTrashTopicMovesOpenSessionToTrash(t *testing.T) {
 	if len(trashed) != 1 || trashed[0].Path != trashPath {
 		t.Fatalf("trashed sessions = %#v, want %q", trashed, trashPath)
 	}
+	preview, err := app.PreviewSession(trashPath)
+	if err != nil {
+		t.Fatalf("preview trashed session: %v", err)
+	}
+	if !hasHistoryContent(preview, "remember this turn") {
+		t.Fatalf("preview trashed session = %#v, want remembered turn", preview)
+	}
 	if got := loadTopicTitle(projectRoot, topicID); got != "" {
 		t.Fatalf("topic title should be removed, got %q", got)
 	}
+}
+
+func hasHistoryContent(messages []HistoryMessage, content string) bool {
+	for _, m := range messages {
+		if m.Content == content {
+			return true
+		}
+	}
+	return false
 }
 
 func TestLegacyMigrationSkipsProjectScopedSessions(t *testing.T) {

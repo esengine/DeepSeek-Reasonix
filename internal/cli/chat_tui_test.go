@@ -257,6 +257,77 @@ func TestMCPManagerHidesComposerBox(t *testing.T) {
 	}
 }
 
+func TestClearCommandRequiresConfirmationAndDiscardsSession(t *testing.T) {
+	dir := t.TempDir()
+	sess := agent.NewSession("sys")
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "old context"})
+	exec := agent.New(nil, nil, sess, agent.Options{}, event.Discard)
+	path := filepath.Join(dir, "session.jsonl")
+	ctrl := control.New(control.Options{Executor: exec, SystemPrompt: "sys", SessionDir: dir, SessionPath: path, Label: "test"})
+	if err := ctrl.Snapshot(); err != nil {
+		t.Fatal(err)
+	}
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
+
+	if cmd := m.runSlashCommand("/clear"); cmd != nil {
+		t.Fatal("/clear should open a local confirmation without returning a command")
+	}
+	if m.clearConfirm == nil {
+		t.Fatal("/clear should open a confirmation prompt")
+	}
+	if m.clearConfirm.confirm != 1 {
+		t.Fatalf("/clear confirmation should default to cancel, got %d", m.clearConfirm.confirm)
+	}
+	m0, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = m0.(chatTUI)
+	footerRows := strings.Count(m.renderMainManagerFooter(), "\n") + 1
+	if got, want := m.bottomRows(), footerRows+2; got != want {
+		t.Fatalf("bottomRows with /clear confirmation = %d, want %d (footer + status rows; confirmation renders in main area)", got, want)
+	}
+	if !m.hideComposer() {
+		t.Fatal("/clear confirmation should hide the composer")
+	}
+	content := ansi.Strip(m.View().Content)
+	if !strings.Contains(content, "Clear current context without saving?") {
+		t.Fatalf("/clear confirmation prompt missing from view:\n%s", content)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("session should still exist before confirmation: %v", err)
+	}
+	if current := exec.Session().Snapshot(); len(current) != 2 {
+		t.Fatalf("context changed before confirmation: %+v", current)
+	}
+
+	next, _ := m.handleClearConfirmKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = next.(chatTUI)
+	if m.clearConfirm != nil {
+		t.Fatal("Enter on default cancel should close the confirmation")
+	}
+	if ctrl.SessionPath() != path {
+		t.Fatal("cancelled /clear should not rotate the session path")
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("cancelled /clear should keep the session file: %v", err)
+	}
+
+	m.runSlashCommand("/clear")
+	next, _ = m.handleClearConfirmKey(tea.KeyPressMsg{Code: 'y'})
+	m = next.(chatTUI)
+	if ctrl.SessionPath() == path {
+		t.Fatal("confirmed /clear should rotate to a fresh session path")
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("confirmed /clear should remove the old transcript, stat err=%v", err)
+	}
+	current := exec.Session().Snapshot()
+	if len(current) != 1 || current[0].Role != provider.RoleSystem || current[0].Content != "sys" {
+		t.Fatalf("cleared context = %+v, want only system prompt", current)
+	}
+	if len(m.transcript) == 0 || strings.Contains(strings.Join(m.transcript, "\n"), "old context") {
+		t.Fatalf("TUI transcript was not reset after /clear: %+v", m.transcript)
+	}
+}
+
 func TestMainManagerFollowsTranscriptWithoutTopPadding(t *testing.T) {
 	ctrl := control.New(control.Options{})
 	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
@@ -579,6 +650,37 @@ func TestInsertNewlineKeyBinding(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("newChatTUI InsertNewline should include shift+enter, got %v", keys)
+	}
+}
+
+func TestCtrlHomeEndScrollKeyBindings(t *testing.T) {
+	ctrl := control.New(control.Options{})
+	ch := make(chan event.Event, 1)
+	notice := agentEventMsg(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "line"})
+	adv := func(m chatTUI, msg tea.Msg) chatTUI {
+		n, _ := m.Update(msg)
+		return n.(chatTUI)
+	}
+
+	cur := adv(newChatTUI(ctrl, "", ch, 80), tea.WindowSizeMsg{Width: 80, Height: 8})
+	for i := 0; i < 12; i++ {
+		cur = adv(cur, notice)
+	}
+	// Viewport should be at the bottom after output.
+	if !cur.viewport.AtBottom() {
+		t.Fatal("viewport should start at the bottom after streaming output")
+	}
+
+	// Ctrl+Home should scroll to the top.
+	cur = adv(cur, tea.KeyPressMsg{Code: tea.KeyHome, Mod: tea.ModCtrl})
+	if !cur.viewport.AtTop() {
+		t.Fatalf("ctrl+home should scroll to top, AtTop=%v, YOffset=%d", cur.viewport.AtTop(), cur.viewport.YOffset())
+	}
+
+	// Ctrl+End should scroll back to the bottom.
+	cur = adv(cur, tea.KeyPressMsg{Code: tea.KeyEnd, Mod: tea.ModCtrl})
+	if !cur.viewport.AtBottom() {
+		t.Fatalf("ctrl+end should scroll to bottom, AtBottom=%v, YOffset=%d", cur.viewport.AtBottom(), cur.viewport.YOffset())
 	}
 }
 

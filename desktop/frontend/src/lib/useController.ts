@@ -8,18 +8,22 @@ import { asArray } from "./array";
 import { app, onEvent, onReady } from "./bridge";
 import { createRafBatch } from "./rafBatch";
 import { t } from "./i18n";
+import { modeHasAutoApproveTools } from "./types";
 import type {
   BalanceInfo,
   CheckpointMeta,
+  CollaborationMode,
   ContextInfo,
   EffortInfo,
   HistoryMessage,
   JobView,
   MemoryView,
   Meta,
+  Mode,
   QuestionAnswer,
   SessionMeta,
   TabMeta,
+  ToolApprovalMode,
   WireApproval,
   WireAsk,
   WireEvent,
@@ -101,6 +105,23 @@ const initialState: State = {
   sessionCurrency: "¥",
   seq: 0,
 };
+
+function sameMeta(a?: Meta, b?: Meta): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return (
+    a.label === b.label &&
+    a.ready === b.ready &&
+    a.startupErr === b.startupErr &&
+    a.eventChannel === b.eventChannel &&
+    a.cwd === b.cwd &&
+    a.autoApproveTools === b.autoApproveTools &&
+    a.bypass === b.bypass &&
+    a.toolApprovalMode === b.toolApprovalMode &&
+    a.goal === b.goal &&
+    a.goalStatus === b.goalStatus
+  );
+}
 
 type Action =
   | { type: "event"; e: WireEvent }
@@ -391,7 +412,7 @@ function reducer(s: State, a: Action): State {
       });
       return { ...s, items: finalized, running: false, turnActive: false, live: undefined, currentAssistant: undefined, approval: undefined, ask: undefined };
     }
-    case "meta": return { ...s, meta: a.meta };
+    case "meta": return sameMeta(s.meta, a.meta) ? s : { ...s, meta: a.meta };
     case "context": return { ...s, context: a.context };
     case "balance": return { ...s, balance: a.balance };
     case "effort": return { ...s, effort: a.effort };
@@ -442,6 +463,16 @@ function errorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
   if (typeof err === "string") return err;
   return String(err || "");
+}
+
+async function refreshMetaForTab(tabId: string, dispatchTo: (tabId: string, action: Action) => void): Promise<void> {
+  try {
+    dispatchTo(tabId, { type: "meta", meta: await app.MetaForTab(tabId) });
+    dispatchTo(tabId, { type: "context", context: await app.ContextUsageForTab(tabId) });
+    dispatchTo(tabId, { type: "effort", effort: await app.EffortForTab(tabId) });
+  } catch {
+    /* ignore */
+  }
 }
 
 export function useController() {
@@ -575,6 +606,7 @@ export function useController() {
         dispatchTo(targetTabId, { type: "event", e });
       }
       if (e.kind === "turn_done") {
+        void refreshMetaForTab(targetTabId, dispatchTo);
         app
           .ContextUsageForTab(targetTabId)
           .then((context) => dispatchTo(targetTabId, { type: "context", context }))
@@ -603,12 +635,24 @@ export function useController() {
   }, [dispatchTo, loadSessionDataForTab, refreshCheckpoints, syncActiveTabFromBackend]);
 
   const send = useCallback((displayText: string, submitText = displayText) => {
-    if (!activeTabId) return;
-    const seq = getOrCreateState(statesRef.current, activeTabId).seq;
-    dispatchTo(activeTabId, { type: "user", text: displayText, seq });
-    const display = displayText.trim(); const submit = submitText.trim();
-    (display !== submit ? app.SubmitDisplayToTab(activeTabId, display, submit) : app.SubmitToTab(activeTabId, submit)).catch(() => {});
-  }, [activeTabId, dispatchTo]);
+    const submitForTab = (tabId: string) => {
+      const seq = getOrCreateState(statesRef.current, tabId).seq;
+      dispatchTo(tabId, { type: "user", text: displayText, seq });
+      const display = displayText.trim();
+      const submit = submitText.trim();
+      (display !== submit ? app.SubmitDisplayToTab(tabId, display, submit) : app.SubmitToTab(tabId, submit)).catch(() => {});
+    };
+    const tabId = activeTabIdRef.current ?? activeTabId;
+    if (tabId) {
+      submitForTab(tabId);
+      return;
+    }
+    void activeTabFromBackend().then((active) => {
+      if (!active?.id) return;
+      setActiveTabId(active.id);
+      submitForTab(active.id);
+    });
+  }, [activeTabFromBackend, activeTabId, dispatchTo]);
 
   const runShell = useCallback((command: string) => {
     if (!activeTabId) return;
@@ -648,17 +692,49 @@ export function useController() {
     app.AnswerQuestionForTab(activeTabId, id, answers).catch(() => {});
   }, [activeTabId, dispatchTo]);
 
-  const setControllerMode = useCallback((mode: "plan" | "yolo" | "normal"): Promise<void> => {
+  const setControllerMode = useCallback((mode: Mode): Promise<void> => {
     if (!activeTabId) return Promise.resolve();
     return app.SetModeForTab(activeTabId, mode).then(() => {
-      if (mode === "yolo" && activeTabId) dispatchTo(activeTabId, { type: "clearApproval" });
+      if (modeHasAutoApproveTools(mode) && activeTabId) dispatchTo(activeTabId, { type: "clearApproval" });
     }).catch(() => {});
+  }, [activeTabId, dispatchTo]);
+
+  const setCollaborationMode = useCallback(async (mode: CollaborationMode): Promise<void> => {
+    if (!activeTabId) return;
+    await app.SetCollaborationModeForTab(activeTabId, mode).catch(() => {});
+    await refreshMetaForTab(activeTabId, dispatchTo);
+  }, [activeTabId, dispatchTo]);
+
+  const setToolApprovalMode = useCallback(async (mode: ToolApprovalMode): Promise<void> => {
+    if (!activeTabId) return;
+    await app.SetToolApprovalModeForTab(activeTabId, mode).catch(() => {});
+    if (mode === "auto" || mode === "yolo") dispatchTo(activeTabId, { type: "clearApproval" });
+    await refreshMetaForTab(activeTabId, dispatchTo);
+  }, [activeTabId, dispatchTo]);
+
+  const setGoal = useCallback(async (goal: string): Promise<void> => {
+    if (!activeTabId) return;
+    await app.SetGoalForTab(activeTabId, goal).catch(() => {});
+    await refreshMetaForTab(activeTabId, dispatchTo);
+  }, [activeTabId, dispatchTo]);
+
+  const clearGoal = useCallback(async (): Promise<void> => {
+    if (!activeTabId) return;
+    await app.ClearGoalForTab(activeTabId).catch(() => {});
+    await refreshMetaForTab(activeTabId, dispatchTo);
   }, [activeTabId, dispatchTo]);
 
   const newSession = useCallback(async () => {
     const tabId = activeTabId;
     if (tabId) bumpCheckpointRefreshSeq(tabId);
     await app.NewSession().catch(() => {});
+    if (tabId) dispatchTo(tabId, { type: "reset" });
+  }, [activeTabId, bumpCheckpointRefreshSeq, dispatchTo]);
+
+  const clearSession = useCallback(async () => {
+    const tabId = activeTabId;
+    if (tabId) bumpCheckpointRefreshSeq(tabId);
+    await app.ClearSession();
     if (tabId) dispatchTo(tabId, { type: "reset" });
   }, [activeTabId, bumpCheckpointRefreshSeq, dispatchTo]);
 
@@ -815,8 +891,8 @@ export function useController() {
   return {
     state: activeState,
     activeTabId,
-    send, runShell, notice, cancel, approve, answerQuestion, setControllerMode,
-    newSession, listSessions, listTrashedSessions, resumeSession, previewSession, deleteSession, restoreSession, purgeTrashedSession, renameSession,
+    send, runShell, notice, cancel, approve, answerQuestion, setControllerMode, setCollaborationMode, setToolApprovalMode, setGoal, clearGoal,
+    newSession, clearSession, listSessions, listTrashedSessions, resumeSession, previewSession, deleteSession, restoreSession, purgeTrashedSession, renameSession,
     refreshMeta, pickWorkspace, switchWorkspace, compact, rewind, setModel, setEffort,
     fetchMemory, remember, forget, saveDoc,
     switchTab, openProjectTab, openGlobalTab, closeTab, reorderTabs,

@@ -131,6 +131,10 @@ export interface TabMeta {
   ready: boolean;
   running: boolean;
   mode: Mode;
+  collaborationMode?: CollaborationMode;
+  toolApprovalMode?: ToolApprovalMode;
+  goal?: string;
+  goalStatus?: GoalStatus;
   startupErr?: string;
   active: boolean;
   cwd: string;
@@ -144,11 +148,15 @@ export interface ProjectNode {
   topicId?: string;
   projectColor?: string;
   turns?: number;
+  createdAt?: number;
   lastActivityAt?: number;
   open?: boolean;
   running?: boolean;
+  status?: ProjectTopicStatus;
   children?: ProjectNode[];
 }
+
+export type ProjectTopicStatus = "thinking" | "streaming" | "waiting_confirmation" | "paused" | "error";
 
 export interface TopicMeta {
   id: string;
@@ -164,10 +172,13 @@ export interface ContextPanelInfo {
   reasoningTokens: number;
   cacheHitTokens: number;
   cacheMissTokens: number;
+  requestCount?: number;
+  elapsedMs?: number;
   sessionCost?: number;
   sessionCurrency?: string;
   // Deprecated compatibility alias. Prefer sessionCost + sessionCurrency.
   sessionCostUsd?: number;
+  mock?: boolean;
   readFiles: ReadFileRecord[];
   changedFiles: ChangedFileInfo[];
 }
@@ -269,12 +280,63 @@ export interface Meta {
   startupErr?: string;
   eventChannel: string;
   cwd: string;
-  bypass?: boolean; // YOLO mode on (auto-approve every tool call)
+  autoApproveTools?: boolean;
+  bypass?: boolean; // legacy JSON key for YOLO/full-access tool auto-approval
+  toolApprovalMode?: ToolApprovalMode;
+  goal?: string;
+  goalStatus?: GoalStatus;
 }
 
-// Mode is the input mode cycled by Shift+Tab: normal (shown as auto) → plan
-// (read-only) → yolo (auto-approve every tool call; deny rules still apply).
-export type Mode = "normal" | "plan" | "yolo";
+export type CollaborationMode = "normal" | "plan" | "goal";
+export type ToolApprovalMode = "ask" | "auto" | "yolo";
+export type GoalStatus = "running" | "complete" | "blocked" | "stopped";
+
+export function normalizeCollaborationMode(mode?: string, goal?: string, legacyMode?: Mode): CollaborationMode {
+  if (mode === "plan" || mode === "goal" || mode === "normal") return mode;
+  if (legacyMode && modeHasPlan(legacyMode)) return "plan";
+  if ((goal ?? "").trim()) return "goal";
+  return "normal";
+}
+
+export function normalizeToolApprovalMode(mode?: string, legacyMode?: Mode, legacyAutoApproveTools?: boolean): ToolApprovalMode {
+  if (mode === "auto" || mode === "yolo" || mode === "ask") return mode;
+  if (legacyAutoApproveTools || (legacyMode && modeHasAutoApproveTools(legacyMode))) return "yolo";
+  return "ask";
+}
+
+// Mode is the compatibility string for two independent composer axes:
+// plan (read-only/user-plan gate) and yolo/full access (tool auto-approval).
+export type Mode = "normal" | "plan" | "yolo" | "plan-yolo";
+
+export function normalizeMode(mode?: string): Mode {
+  if (mode === "plan" || mode === "yolo" || mode === "plan-yolo" || mode === "yolo-plan") {
+    return mode === "yolo-plan" ? "plan-yolo" : mode;
+  }
+  return "normal";
+}
+
+export function modeHasPlan(mode: Mode): boolean {
+  return mode === "plan" || mode === "plan-yolo";
+}
+
+export function modeHasAutoApproveTools(mode: Mode): boolean {
+  return mode === "yolo" || mode === "plan-yolo";
+}
+
+export function modeFromAxes(plan: boolean, autoApproveTools: boolean): Mode {
+  if (plan && autoApproveTools) return "plan-yolo";
+  if (plan) return "plan";
+  if (autoApproveTools) return "yolo";
+  return "normal";
+}
+
+export function modeWithPlan(mode: Mode, plan: boolean): Mode {
+  return modeFromAxes(plan, modeHasAutoApproveTools(mode));
+}
+
+export function modeWithAutoApproveTools(mode: Mode, autoApproveTools: boolean): Mode {
+  return modeFromAxes(modeHasPlan(mode), autoApproveTools);
+}
 
 export interface CommandInfo {
   name: string; // without the leading slash
@@ -462,7 +524,7 @@ export interface MemoryView {
 }
 
 // SettingsTab is the top-level navigation item in the Settings Centre modal.
-export type SettingsTab = "general" | "models" | "providers" | "mcp" | "skills" | "memory" | "permissions" | "sandbox" | "network" | "appearance" | "updates";
+export type SettingsTab = "general" | "models" | "providers" | "bots" | "mcp" | "skills" | "memory" | "permissions" | "sandbox" | "network" | "appearance" | "updates";
 
 // Settings panel payloads (desktop/settings_app.go).
 export interface ProviderView {
@@ -537,6 +599,113 @@ export interface AgentView {
   systemPrompt: string;
 }
 
+export interface BotAllowlistView {
+  enabled: boolean;
+  allowAll: boolean;
+  qqUsers: string[];
+  feishuUsers: string[];
+  weixinUsers: string[];
+  qqGroups: string[];
+  feishuGroups: string[];
+  weixinGroups: string[];
+}
+
+export interface QQBotView {
+  enabled: boolean;
+  appId: string;
+  appSecretEnv: string;
+  secretSet: boolean;
+}
+
+export interface FeishuBotView {
+  enabled: boolean;
+  domain: string;
+  appId: string;
+  appSecretEnv: string;
+  secretSet: boolean;
+  verificationToken: string;
+  mode: string;
+  webhookPort: number;
+  requireMention: boolean;
+}
+
+export interface WeixinBotView {
+  enabled: boolean;
+  accountId: string;
+  tokenEnv: string;
+  tokenSet: boolean;
+  apiBase: string;
+}
+
+export interface BotConnectionCredentialView {
+  appId: string;
+  appSecretEnv: string;
+  accountId: string;
+  tokenEnv: string;
+  secretSet: boolean;
+}
+
+export interface BotConnectionSessionMappingView {
+  remoteId: string;
+  sessionId: string;
+  updatedAt: string;
+}
+
+export interface BotConnectionView {
+  id: string;
+  provider: "qq" | "feishu" | "weixin" | string;
+  domain: "qq" | "feishu" | "lark" | "weixin" | string;
+  label: string;
+  enabled: boolean;
+  status: "disconnected" | "pending" | "connected" | "error" | string;
+  credential: BotConnectionCredentialView;
+  sessionMappings: BotConnectionSessionMappingView[];
+  lastError: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BotSettingsView {
+  enabled: boolean;
+  model: string;
+  maxSteps: number;
+  debounceMs: number;
+  allowlist: BotAllowlistView;
+  qq: QQBotView;
+  feishu: FeishuBotView;
+  weixin: WeixinBotView;
+  connections: BotConnectionView[];
+}
+
+export interface BotInstallStartResult {
+  ok: boolean;
+  provider: string;
+  domain: string;
+  installId: string;
+  url: string;
+  deviceCode: string;
+  userCode: string;
+  interval: number;
+  expireIn: number;
+  message: string;
+}
+
+export interface BotInstallPollResult {
+  done: boolean;
+  connection: BotConnectionView;
+  status: string;
+  message: string;
+  error: string;
+}
+
+export interface BotConnectionDiagnostic {
+  id: string;
+  label: string;
+  status: string;
+  message: string;
+  messageId: string;
+}
+
 export interface SettingsView {
   defaultModel: string;
   plannerModel: string;
@@ -549,13 +718,15 @@ export interface SettingsView {
   sandbox: SandboxView;
   network: NetworkView;
   agent: AgentView;
+  bot: BotSettingsView;
   desktopLanguage: string; // "" | "en" | "zh"; empty = auto
   desktopTheme: string; // "auto" | "dark" | "light"
   desktopThemeStyle: string;
   closeBehavior: string; // "background" | "quit"
   configPath: string;
   providerKinds: string[]; // provider implementations the kernel registered (for the kind picker)
-  bypass: boolean; // live YOLO state (runtime-only) — whether approvals are skipped this session
+  autoApproveTools: boolean;
+  bypass: boolean; // legacy JSON key for live YOLO/full-access tool auto-approval
 }
 
 // Auto-updater payloads (desktop/updater.go). UpdateInfo drives the update banner;

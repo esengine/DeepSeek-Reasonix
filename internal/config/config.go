@@ -56,13 +56,14 @@ type Config struct {
 	Codegraph     CodegraphConfig     `toml:"codegraph"`
 	Statusline    StatuslineConfig    `toml:"statusline"`
 	LSP           LSPConfig           `toml:"lsp"`
+	Bot           BotConfig           `toml:"bot"`
 }
 
 // UIConfig controls CLI presentation-only settings. Desktop appearance is kept in
 // DesktopConfig so desktop preferences cannot alter terminal output or prompts.
 type UIConfig struct {
 	Theme         string `toml:"theme"`          // auto|dark|light; empty resolves to auto
-	ThemeStyle    string `toml:"theme_style"`    // graphite|ember|aurora|midnight|sandstone|porcelain|linen|glacier
+	ThemeStyle    string `toml:"theme_style"`    // graphite|aurora|slate|carbon|nocturne|amber and legacy aliases
 	CloseBehavior string `toml:"close_behavior"` // legacy desktop close behavior; prefer desktop.close_behavior
 }
 
@@ -72,7 +73,7 @@ type UIConfig struct {
 type DesktopConfig struct {
 	Language       string   `toml:"language"`        // auto|en|zh; empty/auto = browser/OS auto-detect
 	Theme          string   `toml:"theme"`           // auto|dark|light; empty resolves to dark
-	ThemeStyle     string   `toml:"theme_style"`     // graphite|ember|aurora|midnight|sandstone|porcelain|linen|glacier
+	ThemeStyle     string   `toml:"theme_style"`     // graphite|aurora|slate|carbon|nocturne|amber and legacy aliases
 	CloseBehavior  string   `toml:"close_behavior"`  // quit|background; desktop window close behavior
 	ProviderAccess []string `toml:"provider_access"` // desktop-only list of provider entries shown in Settings > Model > Access
 }
@@ -105,7 +106,7 @@ func (c *Config) UIThemeStyle() string {
 
 func normalizeThemeStyle(style string) string {
 	switch strings.ToLower(strings.TrimSpace(style)) {
-	case "graphite", "ember", "aurora", "midnight", "sandstone", "porcelain", "linen", "glacier":
+	case "graphite", "aurora", "slate", "carbon", "nocturne", "amber", "ember", "midnight", "sandstone", "porcelain", "linen", "glacier":
 		return strings.ToLower(strings.TrimSpace(style))
 	default:
 		return ""
@@ -135,7 +136,7 @@ func (c *Config) DesktopLanguage() string {
 	}
 }
 
-// DesktopTheme normalizes desktop.theme. New desktop users default to the dark
+// DesktopTheme normalizes desktop.theme. New desktop users default to the light
 // graphite product look; an explicit auto/light/dark is preserved.
 func (c *Config) DesktopTheme() string {
 	switch strings.ToLower(strings.TrimSpace(c.Desktop.Theme)) {
@@ -146,7 +147,7 @@ func (c *Config) DesktopTheme() string {
 	case "dark":
 		return "dark"
 	default:
-		return "dark"
+		return "light"
 	}
 }
 
@@ -228,8 +229,93 @@ func (c CodegraphConfig) ResolvedTier() string {
 	return "background"
 }
 
-// NetworkConfig controls outbound HTTP proxy settings. web_fetch reuses these
-// proxy settings while keeping its own SSRF-guarded dialer.
+// BotConfig 控制多渠道 IM bot 消息网关。
+type BotConfig struct {
+	Enabled     bool                  `toml:"enabled"`
+	Model       string                `toml:"model"` // 用于 bot 的模型名，空则用 default_model
+	MaxSteps    int                   `toml:"max_steps"`
+	DebounceMs  int                   `toml:"debounce_ms"` // 消息合并窗口，毫秒
+	Allowlist   BotAllowlist          `toml:"allowlist"`
+	QQ          QQBotConfig           `toml:"qq"`
+	Feishu      FeishuBotConfig       `toml:"feishu"`
+	Weixin      WeixinBotConfig       `toml:"weixin"`
+	Connections []BotConnectionConfig `toml:"connections"`
+}
+
+// BotAllowlist 控制哪些用户可以使用 bot。
+type BotAllowlist struct {
+	Enabled      bool     `toml:"enabled"`
+	AllowAll     bool     `toml:"allow_all"`
+	QQUsers      []string `toml:"qq_users"`
+	FeishuUsers  []string `toml:"feishu_users"`
+	WeixinUsers  []string `toml:"weixin_users"`
+	QQGroups     []string `toml:"qq_groups"`
+	FeishuGroups []string `toml:"feishu_groups"`
+	WeixinGroups []string `toml:"weixin_groups"`
+}
+
+// QQBotConfig QQ 官方 Bot API v2 配置。
+type QQBotConfig struct {
+	Enabled      bool   `toml:"enabled"`
+	AppID        string `toml:"app_id"`
+	AppSecretEnv string `toml:"app_secret_env"` // 环境变量名，如 QQ_BOT_APP_SECRET
+}
+
+// FeishuBotConfig 飞书自建应用 Bot 配置。
+type FeishuBotConfig struct {
+	Enabled           bool   `toml:"enabled"`
+	Domain            string `toml:"domain"` // feishu（默认）| lark
+	AppID             string `toml:"app_id"`
+	AppSecretEnv      string `toml:"app_secret_env"`     // 如 FEISHU_BOT_APP_SECRET
+	VerificationToken string `toml:"verification_token"` // 事件订阅验证 token
+	Mode              string `toml:"mode"`               // webhook（默认）| websocket
+	WebhookPort       int    `toml:"webhook_port"`       // webhook 模式端口
+	RequireMention    bool   `toml:"require_mention"`
+}
+
+// WeixinBotConfig 微信 iLink Bot 配置。
+type WeixinBotConfig struct {
+	Enabled   bool   `toml:"enabled"`
+	AccountID string `toml:"account_id"`
+	TokenEnv  string `toml:"token_env"` // 环境变量名，如 WEIXIN_BOT_TOKEN
+	APIBase   string `toml:"api_base"`  // iLink API base URL
+}
+
+// BotConnectionConfig is the desktop-friendly connection record for IM bot
+// channels. It keeps install/runtime state separate from legacy per-provider
+// knobs so the UI can expose a simple "connect first" flow while old configs
+// keep working.
+type BotConnectionConfig struct {
+	ID              string                        `toml:"id"`
+	Provider        string                        `toml:"provider"` // qq|feishu|weixin
+	Domain          string                        `toml:"domain"`   // feishu|lark|weixin|qq
+	Label           string                        `toml:"label"`
+	Enabled         bool                          `toml:"enabled"`
+	Status          string                        `toml:"status"` // disconnected|pending|connected|error
+	Credential      BotConnectionCredential       `toml:"credential"`
+	SessionMappings []BotConnectionSessionMapping `toml:"session_mappings"`
+	LastError       string                        `toml:"last_error"`
+	CreatedAt       string                        `toml:"created_at"`
+	UpdatedAt       string                        `toml:"updated_at"`
+}
+
+type BotConnectionCredential struct {
+	AppID        string `toml:"app_id"`
+	AppSecretEnv string `toml:"app_secret_env"`
+	AccountID    string `toml:"account_id"`
+	TokenEnv     string `toml:"token_env"`
+}
+
+type BotConnectionSessionMapping struct {
+	RemoteID  string `toml:"remote_id"`
+	SessionID string `toml:"session_id"`
+	UpdatedAt string `toml:"updated_at"`
+}
+
+// NetworkConfig controls ordinary outbound HTTP traffic such as model providers,
+// wallet-balance lookups, updater checks, CodeGraph downloads, and web_fetch.
+// web_fetch reuses these proxy settings while keeping its own SSRF-guarded
+// dialer.
 type NetworkConfig struct {
 	// ProxyMode is "auto" (default; environment proxy for now), "env", "custom",
 	// or "off". auto leaves room for OS proxy detection later without changing the
@@ -748,7 +834,10 @@ guessing; keep changes minimal and correct; briefly summarize what you did.
 When the request leaves a real choice to the user — which approach or library,
 the scope, or a consequential or ambiguous decision — call the ask tool to offer
 2-4 concrete options rather than guessing or burying the question in prose. Skip
-it when there's an obvious default; don't ask just to confirm.
+it when there's an obvious default; don't ask just to confirm. Approval-bypass
+modes do not answer ask questions or approve plans for the user. If no
+interactive user is available, the ask tool returns a model-assumption fallback;
+state the assumption you made before proceeding.
 For multi-step work, track progress with the todo_write tool: lay out the steps,
 keep exactly one in_progress, and flip each to completed as you finish it — update
 the list as you go, not just at the end.
@@ -807,6 +896,14 @@ func Default() *Config {
 		// a missing server yields an install hint rather than an error.
 		LSP:     LSPConfig{Enabled: true},
 		Network: NetworkConfig{ProxyMode: netclient.ModeAuto},
+		Bot: BotConfig{
+			MaxSteps:   25,
+			DebounceMs: 1500,
+			Allowlist:  BotAllowlist{Enabled: true},
+			QQ:         QQBotConfig{AppSecretEnv: "QQ_BOT_APP_SECRET"},
+			Feishu:     FeishuBotConfig{Domain: "feishu", AppSecretEnv: "FEISHU_BOT_APP_SECRET", Mode: "webhook", WebhookPort: 8080, RequireMention: true},
+			Weixin:     WeixinBotConfig{AccountID: "default", TokenEnv: "WEIXIN_BOT_TOKEN", APIBase: "https://ilinkai.weixin.qq.com"},
+		},
 		Providers: []ProviderEntry{
 			{Name: "deepseek-flash", Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash", APIKeyEnv: "DEEPSEEK_API_KEY", BalanceURL: "https://api.deepseek.com/user/balance", ContextWindow: 1_000_000, Price: &provider.Pricing{CacheHit: 0.02, Input: 1, Output: 2, Currency: "¥"}},
 			{Name: "deepseek-pro", Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro", APIKeyEnv: "DEEPSEEK_API_KEY", BalanceURL: "https://api.deepseek.com/user/balance", ContextWindow: 1_000_000, Price: &provider.Pricing{CacheHit: 0.025, Input: 3, Output: 6, Currency: "¥"}},

@@ -15,6 +15,18 @@ var reComposeBlock = regexp.MustCompile(`(?s)^\s*<(?:memory-update|background-jo
 // prompt prefix is left untouched and the toggle costs nothing in cache hits.
 const PlanModeMarker = "[Plan mode — read-only. Explore the codebase first (read_file, ls, grep, glob, web_fetch, task are available; writers are refused by the harness), then present a LAYERED plan as your reply and stop — do not write files, edit, or run side-effecting bash. Structure the plan as a two-level markdown list so it becomes a layered task list: each PHASE is a top-level numbered list item (a coherent milestone, e.g. \"1. Add the config loader\"), and each phase's concrete, verifiable sub-steps are bullets indented beneath it (e.g. \"   - parse the TOML into Config\"). Use plain numbered list items for phases — do NOT write phases as markdown headings (##, ###) — so both levels parse. Keep phases few (about 2-6). The user will be asked to approve before any changes are made.]"
 
+const (
+	activeGoalOpen  = "<active-goal>"
+	activeGoalClose = "</active-goal>"
+)
+
+const (
+	GoalStatusRunning  = "running"
+	GoalStatusComplete = "complete"
+	GoalStatusBlocked  = "blocked"
+	GoalStatusStopped  = "stopped"
+)
+
 // StripComposePrefixes removes controller-injected prefixes from a composed
 // user message so that the display text matches what the user actually typed.
 // It strips the PlanModeMarker, <memory-update>…</memory-update>, and
@@ -76,10 +88,15 @@ var syntheticPrefixes = []string{
 func (c *Controller) Compose(text string) string {
 	c.mu.Lock()
 	plan := c.planMode
+	goal := c.goal
+	goalStatus := c.goalStatus
 	notes := c.pendingMemory
 	c.pendingMemory = nil
 	c.mu.Unlock()
 
+	if strings.TrimSpace(goal) != "" && goalStatus == GoalStatusRunning {
+		text = activeGoalBlock(goal) + "\n\n" + text
+	}
 	if plan {
 		text = PlanModeMarker + "\n\n" + text
 	}
@@ -109,6 +126,20 @@ func (c *Controller) Compose(text string) string {
 	return text
 }
 
+func activeGoalBlock(goal string) string {
+	goal = strings.TrimSpace(goal)
+	goal = strings.ReplaceAll(goal, activeGoalClose, "<\\/active-goal>")
+	var b strings.Builder
+	b.WriteString(activeGoalOpen)
+	b.WriteString("\n")
+	b.WriteString(goal)
+	b.WriteString("\n\n")
+	b.WriteString("Goal mode: pursue this goal autonomously. Keep working across turns until the goal is complete. Prefer sensible defaults over asking the user; use ask only when you are truly blocked on a user-owned decision. Do not stop after describing a plan; execute the next useful step. End every goal-mode assistant reply with exactly one status marker on its own line: [goal:continue], [goal:complete], or [goal:blocked:<short reason>].")
+	b.WriteString("\n")
+	b.WriteString(activeGoalClose)
+	return b.String()
+}
+
 // MemoryQuickAddNote parses the legacy "# <note>" memory shortcut. The space
 // after "#" is intentional: "#7", "#issue", and "#标题" are ordinary user
 // prompts, not memory writes.
@@ -130,6 +161,35 @@ func RememberCommandNote(input string) (note string, ok bool) {
 		return strings.TrimSpace(trimmed[len("/remember"):]), true
 	default:
 		return "", false
+	}
+}
+
+type GoalCommandAction int
+
+const (
+	GoalCommandStatus GoalCommandAction = iota + 1
+	GoalCommandSet
+	GoalCommandClear
+)
+
+type GoalCommand struct {
+	Action GoalCommandAction
+	Text   string
+}
+
+func ParseGoalCommand(input string) (GoalCommand, bool) {
+	trimmed := strings.TrimSpace(input)
+	if trimmed != "/goal" && !strings.HasPrefix(trimmed, "/goal ") && !strings.HasPrefix(trimmed, "/goal\t") {
+		return GoalCommand{}, false
+	}
+	args := strings.TrimSpace(trimmed[len("/goal"):])
+	switch strings.ToLower(args) {
+	case "", "status":
+		return GoalCommand{Action: GoalCommandStatus}, true
+	case "clear", "off", "stop", "done":
+		return GoalCommand{Action: GoalCommandClear}, true
+	default:
+		return GoalCommand{Action: GoalCommandSet, Text: args}, true
 	}
 }
 

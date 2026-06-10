@@ -97,6 +97,9 @@ func Run(args []string, version string) int {
 	case "review":
 		configureCLIThemeFromConfigNoProbe()
 		return reviewCommand(rest)
+	case "bot":
+		configureCLIThemeFromConfigNoProbe()
+		return botCommand(rest, version)
 	case "version", "--version", "-v":
 		fmt.Println("reasonix", version)
 		return 0
@@ -112,7 +115,7 @@ func Run(args []string, version string) int {
 
 func shouldMigrateLegacyConfigForCLI(cmd string) bool {
 	switch cmd {
-	case "", "run", "chat", "code", "serve", "setup", "config", "init", "acp", "mcp", "codegraph", "doctor":
+	case "", "run", "chat", "code", "serve", "setup", "config", "init", "acp", "mcp", "codegraph", "doctor", "bot":
 		return true
 	default:
 		return false
@@ -361,7 +364,7 @@ func chatREPL(args []string) int {
 	cont := fs.Bool("continue", false, "resume the most recent saved session")
 	fs.BoolVar(cont, "c", false, "shorthand for --continue")
 	resume := fs.Bool("resume", false, "list saved sessions and pick one to resume")
-	yolo := fs.Bool("dangerously-skip-permissions", false, "YOLO: auto-approve every tool call this session (deny rules still apply)")
+	yolo := fs.Bool("dangerously-skip-permissions", false, "YOLO: auto-approve approval-gated tool calls this session (deny rules still apply; ask questions and plan approvals still wait for you)")
 	fs.BoolVar(yolo, "yolo", false, "alias for --dangerously-skip-permissions")
 	dir := fs.String("dir", "", "change to this directory first (project root); config, sandbox and file tools resolve from here")
 	if err := fs.Parse(args); err != nil {
@@ -462,9 +465,10 @@ func chatREPL(args []string) int {
 	// event and blocks until the user answers via ctrl.Approve. Sub-agents (the
 	// task tool) keep their headless gate from setup — no UI to prompt through.
 	ctrl.EnableInteractiveApproval()
-	// YOLO: skip every approval prompt for the session (deny rules still apply).
+	// YOLO: skip every tool approval request for the session (deny rules still
+	// apply; ask questions and plan approvals still wait for the user).
 	if *yolo {
-		ctrl.SetBypass(true)
+		ctrl.SetAutoApproveTools(true)
 	}
 
 	m := newChatTUI(ctrl, missing, eventCh, termW)
@@ -493,7 +497,7 @@ func chatREPL(args []string) int {
 		}
 		c.EnableInteractiveApproval()
 		if *yolo {
-			c.SetBypass(true)
+			c.SetAutoApproveTools(true)
 		}
 		return c, nil
 	}
