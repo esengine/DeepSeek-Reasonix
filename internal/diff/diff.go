@@ -154,8 +154,8 @@ func myers(a, b []string) ([]op, bool) {
 		return nil, true
 	}
 	maxD := n + m
-	if maxD > maxDiffEdits {
-		maxD = maxDiffEdits // bound the trace's O(D²) footprint
+	if maxD > maxDiffEdits || maxD < 0 {
+		maxD = maxDiffEdits // bound the trace's O(D²) footprint (and any n+m overflow)
 	}
 	offset := maxD // shift negative k into a non-negative array index
 	v := make([]int, 2*maxD+1)
