@@ -90,6 +90,21 @@ function warmUserPreview(text: string): string {
   return cleaned.length <= 80 ? cleaned : cleaned.slice(0, 77) + "...";
 }
 
+// hasToolItemsAfter checks whether the items after the given group contain
+// tool items that belong to the same turn, meaning this group is not the
+// final assistant step.
+function hasToolItemsAfter(group: Item[], allItems: readonly Item[]): boolean {
+  const lastIdx = allItems.indexOf(group[group.length - 1]);
+  if (lastIdx < 0 || lastIdx >= allItems.length - 1) return false;
+  // Check following items up to the next user message
+  for (let i = lastIdx + 1; i < allItems.length; i++) {
+    const it = allItems[i];
+    if (it.kind === "user") break;
+    if (it.kind === "tool" && !it.parentId) return true;
+  }
+  return false;
+}
+
 // ── Turn grouping ─────────────────────────────────────────────────────────────
 // A turn is everything from one UserMessage up to (but not including) the next
 // UserMessage. This grouping is used only for warm-zone rendering; the hot zone
@@ -340,48 +355,40 @@ export function Transcript({
   // (added by upstream PR #3423) instead of per-call renderSegments.
   const empty = items.length === 0;
 
-  // In compact/minimal mode, pre-compute turn segments so intermediate items
-  // between user and final assistant can be collapsed.
-  const segments = useMemo(() => {
+  // In compact/minimal mode, break each turn into step groups.
+  // A step = one assistant + its tool results, from one assistant to the next.
+  // Each completed non-final step is folded into "Processed".
+  const stepGroups = useMemo(() => {
     if (displayMode === "standard") return null;
-    const segs: { userIdx: number; intermediate: number[]; finalAssistantIdx: number | null }[] = [];
-    let currentUser = -1;
-    let currentIntermediate: number[] = [];
-    let currentFinalAsst: number | null = null;
+    const groups: { items: Item[]; isFinal: boolean; isComplete: boolean }[] = [];
+    let current: Item[] = [];
     for (let i = hotStartIdx; i < items.length; i++) {
       const it = items[i];
       if (it.kind === "user") {
-        // Push previous segment if any
-        if (currentUser >= 0) {
-          segs.push({ userIdx: currentUser, intermediate: currentIntermediate, finalAssistantIdx: currentFinalAsst });
+        // Close any open group (shouldn't happen, but defensive)
+        if (current.length > 0) {
+          groups.push({ items: current, isFinal: false, isComplete: true });
+          current = [];
         }
-        currentUser = i;
-        currentIntermediate = [];
-        currentFinalAsst = null;
-      } else if (currentUser >= 0) {
-        if (it.kind === "assistant" && !it.streaming && it.text.trim() !== "") {
-          // Check if this is the last assistant in this turn (next item is user or end)
-          const next = items[i + 1];
-          if (!next || next.kind === "user") {
-            currentFinalAsst = i;
-            continue;
-          }
-        }
-        // Collect intermediate items (non-user items that aren't final assistant)
-        if (it.kind === "assistant" && it.streaming) {
-          currentIntermediate.push(i);
-        } else if (it.kind === "assistant" && it.text.trim() === "") {
-          currentIntermediate.push(i);
-        } else if (it.kind !== "assistant") {
-          currentIntermediate.push(i);
-        }
+        // Start a new group with just the user item
+        groups.push({ items: [it], isFinal: false, isComplete: true });
+        continue;
+      }
+      if (it.kind === "assistant" && current.length > 0) {
+        // Previous step ends here — it's complete (next item already exists)
+        groups.push({ items: current, isFinal: false, isComplete: true });
+        current = [it];
+      } else {
+        current.push(it);
       }
     }
-    // Push last segment
-    if (currentUser >= 0) {
-      segs.push({ userIdx: currentUser, intermediate: currentIntermediate, finalAssistantIdx: currentFinalAsst });
+    // Last group: still in progress (no next item), or final answer
+    if (current.length > 0) {
+      const lastIsAssistant = current[0]?.kind === "assistant";
+      const isFinal = lastIsAssistant && !hasToolItemsAfter(current, items);
+      groups.push({ items: current, isFinal, isComplete: false });
     }
-    return segs;
+    return groups;
   }, [displayMode, hotStartIdx, items]);
 
   const hotZoneNodes = useMemo<ReactNode[]>(() => {
@@ -413,73 +420,96 @@ export function Transcript({
       actionReady = false;
     };
 
-    // Build a set of indices that are wrapped in TurnCollapse (compact/minimal)
-    const collapsedIndices = new Set<number>();
-    if (segments) {
-      for (const seg of segments) {
-        if (seg.intermediate.length > 0) {
-          for (const idx of seg.intermediate) {
-            collapsedIndices.add(idx);
-          }
+    if (stepGroups) {
+      // Compact/minimal mode: step-based rendering
+      for (const group of stepGroups) {
+        const first = group.items[0];
+
+        // User message
+        if (first.kind === "user") {
+          pushTurnActions();
+          const tn = userTurn.get(first.id);
+          activeTurn = tn;
+          out.push(
+            <UserMessage key={first.id} text={first.text} turn={tn} anchorId={questionAnchorId(first.id)} />,
+          );
+          continue;
         }
-      }
-    }
 
-    for (let i = hotStartIdx; i < items.length; i++) {
-      const it = items[i];
-
-      // In compact/minimal mode, skip items that are collected in TurnCollapse
-      if (collapsedIndices.has(i)) continue;
-
-      // Render TurnCollapse before the final assistant if we passed through intermediate items
-      if (segments && it.kind === "assistant") {
-        const seg = segments.find((s) => s.finalAssistantIdx === i);
-        if (seg && seg.intermediate.length > 0) {
-          const midItems = seg.intermediate.map((idx) => items[idx]).filter(Boolean);
-          // Estimate duration as a function of intermediate items count
-          const dur = midItems.length * 1500;
+        // Completed non-final step → collapsed
+        if (group.isComplete && !group.isFinal && displayMode !== "standard") {
+          // Estimate duration from item count
+          const dur = group.items.length * 1500;
           out.push(
             <TurnCollapse
-              key={`collapse-${i}`}
-              items={midItems}
+              key={`step-${first.id}`}
+              items={group.items}
               durationMs={dur}
               mode={displayMode}
             />,
           );
+          continue;
         }
-      }
 
-      switch (it.kind) {
-        case "user": {
-          pushTurnActions();
-          const tn = userTurn.get(it.id);
-          activeTurn = tn;
-          out.push(
-            <UserMessage key={it.id} text={it.text} turn={tn} anchorId={questionAnchorId(it.id)} />,
-          );
-          break;
-        }
-        case "assistant":
-          out.push(<LiveAssistantMessage key={it.id} item={it as AssistantItem} />);
-          if (!it.streaming && it.text.trim() !== "") {
-            actionText = it.text;
-            actionReady = true;
+        // Final answer or active step → render items normally
+        for (const it of group.items) {
+          switch (it.kind) {
+            case "assistant":
+              out.push(<LiveAssistantMessage key={it.id} item={it as AssistantItem} />);
+              if (!it.streaming && it.text.trim() !== "") {
+                actionText = it.text;
+                actionReady = true;
+              }
+              break;
+            case "tool":
+              if (it.parentId) break;
+              if (it.name === "todo_write") break;
+              if (it.name === "exit_plan_mode") break;
+              out.push(<ToolCard key={it.id} item={it} subcalls={subcallsByParent.get(it.id)} />);
+              break;
+            case "phase": out.push(<PhaseCard key={it.id} text={it.text} />); break;
+            case "notice": out.push(<NoticeCard key={it.id} level={it.level} text={it.text} />); break;
+            case "compaction": out.push(<CompactionCard key={it.id} item={it} />); break;
           }
-          break;
-        case "tool":
-          if (it.parentId) break;
-          if (it.name === "todo_write") break;
-          if (it.name === "exit_plan_mode") break;
-          out.push(<ToolCard key={it.id} item={it} subcalls={subcallsByParent.get(it.id)} />);
-          break;
-        case "phase": out.push(<PhaseCard key={it.id} text={it.text} />); break;
-        case "notice": out.push(<NoticeCard key={it.id} level={it.level} text={it.text} />); break;
-        case "compaction": out.push(<CompactionCard key={it.id} item={it} />); break;
+        }
       }
+      pushTurnActions();
+    } else {
+      // Standard mode: flat rendering
+      for (let i = hotStartIdx; i < items.length; i++) {
+        const it = items[i];
+        switch (it.kind) {
+          case "user": {
+            pushTurnActions();
+            const tn = userTurn.get(it.id);
+            activeTurn = tn;
+            out.push(
+              <UserMessage key={it.id} text={it.text} turn={tn} anchorId={questionAnchorId(it.id)} />,
+            );
+            break;
+          }
+          case "assistant":
+            out.push(<LiveAssistantMessage key={it.id} item={it as AssistantItem} />);
+            if (!it.streaming && it.text.trim() !== "") {
+              actionText = it.text;
+              actionReady = true;
+            }
+            break;
+          case "tool":
+            if (it.parentId) break;
+            if (it.name === "todo_write") break;
+            if (it.name === "exit_plan_mode") break;
+            out.push(<ToolCard key={it.id} item={it} subcalls={subcallsByParent.get(it.id)} />);
+            break;
+          case "phase": out.push(<PhaseCard key={it.id} text={it.text} />); break;
+          case "notice": out.push(<NoticeCard key={it.id} level={it.level} text={it.text} />); break;
+          case "compaction": out.push(<CompactionCard key={it.id} item={it} />); break;
+        }
+      }
+      pushTurnActions();
     }
-    pushTurnActions();
     return out;
-  }, [hotStartIdx, items, openAction, actionPending, rewindDisabled, onRewind, subcallsByParent, userTurn, checkpointsByTurn, displayMode, segments]);
+  }, [hotStartIdx, items, openAction, actionPending, rewindDisabled, onRewind, subcallsByParent, userTurn, checkpointsByTurn, displayMode, stepGroups]);
 
   // ── Assemble rendered output ──────────────────────────────────────────────
   // Warm/cold zone is a separate memo'd WarmZone component so streaming tokens
@@ -831,7 +861,11 @@ function TurnCollapse({ items, durationMs, mode }: TurnCollapseProps) {
             switch (it.kind) {
               case "tool": return <ToolCard key={it.id} item={it as ToolItem} />;
               case "phase": return <PhaseCard key={it.id} text={it.text} />;
-              case "assistant": return <AssistantMessage key={it.id} item={it as AssistantItem} />;
+              case "assistant": {
+                // In minimal mode, strip reasoning from expanded assistant messages
+                const displayItem = mode === "minimal" ? { ...it, reasoning: "" } : it;
+                return <AssistantMessage key={it.id} item={displayItem as AssistantItem} />;
+              }
               default: return null;
             }
           })}
