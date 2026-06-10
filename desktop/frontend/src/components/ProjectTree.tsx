@@ -373,7 +373,6 @@ export function ProjectTree({
       return next;
     });
     try {
-      // CreateTopic
       if (onCreateTopic) {
         await onCreateTopic(scope, workspaceRoot);
         await refresh();

@@ -450,7 +450,6 @@ export default function App() {
   const [clearContextPending, setClearContextPending] = useState(false);
   const topicRenameSkipCommitRef = useRef(false);
   const topicRenameCommitHandledRef = useRef(false);
-  const openingBlankSessionRef = useRef(false);
   const appRef = useRef<HTMLDivElement>(null);
   const sidebarTogglePressTimerRef = useRef<number | null>(null);
   const workspaceTogglePressTimerRef = useRef<number | null>(null);
@@ -977,16 +976,10 @@ export default function App() {
   }, [activeTab?.scope, activeTab?.workspaceRoot]);
 
   const openBlankSession = useCallback(async (scope: string, workspaceRoot: string) => {
-    if (openingBlankSessionRef.current) return;
-    openingBlankSessionRef.current = true;
-    try {
-      await ensureBlankTab(scope, scope === "project" ? workspaceRoot : "");
-      setProjectRevision((value) => value + 1);
-      await refreshTabMetas();
-      setTabRevealSignal((signal) => signal + 1);
-    } finally {
-      openingBlankSessionRef.current = false;
-    }
+    await ensureBlankTab(scope, scope === "project" ? workspaceRoot : "");
+    setProjectRevision((value) => value + 1);
+    await refreshTabMetas();
+    setTabRevealSignal((signal) => signal + 1);
   }, [ensureBlankTab, refreshTabMetas]);
 
   useEffect(() => {
