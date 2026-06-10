@@ -90,21 +90,6 @@ function warmUserPreview(text: string): string {
   return cleaned.length <= 80 ? cleaned : cleaned.slice(0, 77) + "...";
 }
 
-// hasToolItemsAfter checks whether the items after the given group contain
-// tool items that belong to the same turn, meaning this group is not the
-// final assistant step.
-function hasToolItemsAfter(group: Item[], allItems: readonly Item[]): boolean {
-  const lastIdx = allItems.indexOf(group[group.length - 1]);
-  if (lastIdx < 0 || lastIdx >= allItems.length - 1) return false;
-  // Check following items up to the next user message
-  for (let i = lastIdx + 1; i < allItems.length; i++) {
-    const it = allItems[i];
-    if (it.kind === "user") break;
-    if (it.kind === "tool" && !it.parentId) return true;
-  }
-  return false;
-}
-
 // ── Turn grouping ─────────────────────────────────────────────────────────────
 // A turn is everything from one UserMessage up to (but not including) the next
 // UserMessage. This grouping is used only for warm-zone rendering; the hot zone
@@ -362,30 +347,33 @@ export function Transcript({
     if (displayMode === "standard") return null;
     const groups: { items: Item[]; isFinal: boolean; isComplete: boolean }[] = [];
     let current: Item[] = [];
+
     for (let i = hotStartIdx; i < items.length; i++) {
       const it = items[i];
       if (it.kind === "user") {
-        // Close any open group (shouldn't happen, but defensive)
+        // Close pending group, start new user group
         if (current.length > 0) {
           groups.push({ items: current, isFinal: false, isComplete: true });
           current = [];
         }
-        // Start a new group with just the user item
         groups.push({ items: [it], isFinal: false, isComplete: true });
         continue;
       }
-      if (it.kind === "assistant" && current.length > 0) {
-        // Previous step ends here — it's complete (next item already exists)
-        groups.push({ items: current, isFinal: false, isComplete: true });
-        current = [it];
+      if (it.kind === "assistant") {
+        if (current.length > 0) {
+          // Previous step is complete — a new assistant has appeared
+          groups.push({ items: current, isFinal: false, isComplete: true });
+          current = [];
+        }
+        current.push(it);
       } else {
         current.push(it);
       }
     }
-    // Last group: still in progress (no next item), or final answer
+    // Last group in progress; mark as final only if it's a non-streaming text assistant
     if (current.length > 0) {
-      const lastIsAssistant = current[0]?.kind === "assistant";
-      const isFinal = lastIsAssistant && !hasToolItemsAfter(current, items);
+      const first = current[0];
+      const isFinal = first.kind === "assistant" && !first.streaming && first.text.trim() !== "";
       groups.push({ items: current, isFinal, isComplete: false });
     }
     return groups;
