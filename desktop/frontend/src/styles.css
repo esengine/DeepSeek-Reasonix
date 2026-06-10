@@ -11166,7 +11166,7 @@ a[href] {
 .geodot__backdrop {
   position: fixed;
   inset: 0;
-  z-index: 99;
+  z-index: var(--z-local-backdrop);
 }
 
 .geodot__popover {
@@ -11179,7 +11179,7 @@ a[href] {
   border-radius: 8px;
   padding: 8px 12px;
   min-width: 220px;
-  z-index: 100;
+  z-index: var(--z-local-popover);
   box-shadow: 0 8px 24px rgba(0,0,0,0.4);
 }
 
