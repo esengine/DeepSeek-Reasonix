@@ -159,6 +159,24 @@ func Initialized(root string) bool {
 	return err == nil && fi.IsDir()
 }
 
+// IndexableRoot reports whether root is a real project directory CodeGraph can
+// safely be pinned to. A filesystem root (a Windows drive root like C:\, a UNC
+// share root, or the unix /) is rejected: serve --mcp walks its working
+// directory, so a root cwd makes it index the whole volume — C:\Windows,
+// C:\Program Files, everything — pinning gigabytes of RAM (#3747). An empty
+// root is rejected too: there is nothing to pin a cwd-aware server to.
+func IndexableRoot(root string) bool {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return false
+	}
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		return false
+	}
+	return filepath.Dir(abs) != abs // a filesystem root is its own parent
+}
+
 func expand(p string) string {
 	p = os.ExpandEnv(p)
 	if strings.HasPrefix(p, "~/") {

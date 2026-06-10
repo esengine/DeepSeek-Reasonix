@@ -245,6 +245,9 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	if cfg.Codegraph.Enabled {
 		bin, ok := codegraph.Resolve(cfg.Codegraph.Path)
 		switch {
+		case ok && !codegraph.IndexableRoot(root):
+			sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn,
+				Text: "codegraph: project root is a filesystem root — skipped to avoid indexing the whole volume"})
 		case ok:
 			spec := plugin.Spec{
 				Name:              "codegraph",

@@ -1728,6 +1728,9 @@ func (c *Controller) connectCodegraphMCPServer(cfg *config.Config) (int, error) 
 	if err != nil {
 		return 0, err
 	}
+	if !codegraph.IndexableRoot(cwd) {
+		return 0, fmt.Errorf("codegraph: refusing to index %q — a filesystem root would index the whole volume", cwd)
+	}
 	if err := codegraph.EnsureInit(c.pluginCtx, bin, cwd); err != nil {
 		return 0, fmt.Errorf("codegraph init: %w", err)
 	}
