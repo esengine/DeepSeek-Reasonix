@@ -1946,7 +1946,7 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
           });
           return;
         }
-        const models = mergedFetchedProviderModels(p.models, fetched);
+        const models = mergedFetchedProviderModels(p.models, fetched, { preserveCurated: true });
         const currentDefault = providerDefaultModel(p.default, models);
         await app.SaveProvider({ ...p, models, default: currentDefault });
         setGroupFetchResult(group.id, {

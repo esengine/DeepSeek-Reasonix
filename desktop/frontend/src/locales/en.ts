@@ -251,7 +251,7 @@ export const en = {
   "composer.modeYolo": "YOLO",
   "composer.modeFullAccess": "full",
   "composer.modeFullAccessTitle": "Full access skips all tool permission approvals; ask questions and plan confirmations still wait",
-  "composer.intentMenuTitle": "More actions",
+  "composer.intentMenuTitle": "Collaboration mode",
   "composer.accessMenuTitle": "Tool access",
   "composer.accessAsk": "Ask first",
   "composer.accessAskTitle": "Ask before approval-gated tool calls",

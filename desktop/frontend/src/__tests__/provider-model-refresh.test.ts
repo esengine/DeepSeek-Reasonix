@@ -36,6 +36,12 @@ eq(
 );
 
 eq(
+  mergedFetchedProviderModels(["mimo-v2.5-pro"], ["mimo-v2-flash", "mimo-v2-omni", "mimo-v2.5-pro"], { preserveCurated: true }),
+  ["mimo-v2.5-pro"],
+  "manual access refresh preserves selected MiMo model instead of importing provider catalog",
+);
+
+eq(
   mergedFetchedProviderModels([], ["coding-pro", "chat"], { preserveCurated: true }),
   ["coding-pro", "chat"],
   "background refresh can populate an empty model list",
