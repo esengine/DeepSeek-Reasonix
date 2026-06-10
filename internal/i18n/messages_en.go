@@ -306,8 +306,21 @@ var English = Messages{
 	ProviderErrServer:              "Server error (HTTP 500): the provider hit an internal fault. Retried with backoff; if it keeps failing, try again later.",
 	ProviderErrServerBusy:          "Server busy (HTTP 503): the provider is overloaded. Retried with backoff; please try again shortly.",
 
-	SelectOneHint:  "(↑/↓ · Enter · q to cancel)",
-	SelectManyHint: "(↑/↓ · Space · Enter · q)",
+	SelectOneHint:  "(↑/↓ · Enter · q to cancel; / to search)",
+	SelectManyHint: "(↑/↓ · Space · Enter · q; / to search)",
+
+	SelectMoreAboveFmt: "  ↑ %d more above",
+	SelectMoreBelowFmt: "  ↓ %d more below",
+	SelectSearchHint:   "/ to search · type to filter · Esc cancel search",
+
+	CmdProvider:          "switch provider",
+	ProviderListHeader:   "providers (/provider <name> to switch)",
+	ProviderSwitchingFmt: "switching to provider %s…",
+	ProviderSwitchedFmt:  "switched to provider %s",
+	ProviderAlreadyOnFmt: "already using provider %s",
+	ProviderUnknownFmt:   "unknown provider %q",
+	ProviderPickLabel:    "Select a model from %s",
+	ProviderNoModelsFmt:  "provider %s has no configured models",
 
 	UsageBody: `reasonix — a config- and plugin-driven coding agent (multi-model)
 

@@ -32,6 +32,8 @@ type ArgData struct {
 	DisconnectedMCP []string
 	ModelRefs       []string
 	CurrentModel    string
+	ProviderNames   []string
+	CurrentProvider string
 }
 
 // SlashArgItems completes the arguments of a management slash command
@@ -54,6 +56,8 @@ func SlashArgItems(line string, d ArgData) ([]SlashItem, int) {
 		raw = mcpArgItems(prior, cur, d)
 	case "/model":
 		raw = modelArgItems(prior, d)
+	case "/provider":
+		raw = providerArgItems(prior, d)
 	case "/skill", "/skills":
 		raw = skillArgItems(prior, d)
 	case "/hooks":
@@ -239,6 +243,21 @@ func modelArgItems(prior []string, d ArgData) []SlashItem {
 			hint = i18n.M.ArgModelCurrent
 		}
 		items = append(items, SlashItem{Label: ref, Insert: ref, Hint: hint})
+	}
+	return items
+}
+
+func providerArgItems(prior []string, d ArgData) []SlashItem {
+	if len(prior) != 1 { // the single name arg is already placed
+		return nil
+	}
+	var items []SlashItem
+	for _, name := range d.ProviderNames {
+		hint := ""
+		if name == d.CurrentProvider {
+			hint = i18n.M.ArgModelCurrent
+		}
+		items = append(items, SlashItem{Label: name, Insert: name, Hint: hint})
 	}
 	return items
 }

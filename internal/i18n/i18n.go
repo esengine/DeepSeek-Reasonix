@@ -347,8 +347,21 @@ type Messages struct {
 	ProviderErrServerBusy          string // 503
 
 	// selection menus
-	SelectOneHint  string // "(↑/↓ · Enter · q to cancel)"
-	SelectManyHint string // "(↑/↓ · Space · Enter · q)"
+	SelectOneHint      string // "(↑/↓ · Enter · q to cancel)"
+	SelectManyHint     string // "(↑/↓ · Space · Enter · q)"
+	SelectMoreAboveFmt string // "↑ %d more above"
+	SelectMoreBelowFmt string // "↓ %d more below"
+	SelectSearchHint   string // "/ to search · Esc to cancel"
+
+	// /provider command
+	CmdProvider          string // /provider
+	ProviderListHeader   string // header for /provider list
+	ProviderSwitchingFmt string // switching to provider
+	ProviderSwitchedFmt  string // switched to provider
+	ProviderAlreadyOnFmt string // already on provider
+	ProviderUnknownFmt   string // unknown provider
+	ProviderPickLabel    string // label for provider model picker
+	ProviderNoModelsFmt  string // provider has no models
 
 	// usage / help
 	UsageBody string // full multi-line help text
