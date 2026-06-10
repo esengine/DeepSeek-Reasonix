@@ -20,11 +20,19 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"reasonix/internal/netclient"
 	"reasonix/internal/provider"
 )
+
+// streamIdleTimeout caps how long a started SSE stream may go without any bytes
+// before it's treated as a dropped connection. A half-open TCP connection (e.g. a
+// proxy switched mid-stream) sends no RST, so scanner.Scan() would block forever;
+// this turns that hang into a recoverable error. Generous on purpose — live
+// streams emit tokens/keepalives far more often than this. A var so tests override it.
+var streamIdleTimeout = 120 * time.Second
 
 func init() {
 	provider.Register("openai", New)
@@ -290,17 +298,39 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<- provider.Chunk) (emitted bool, _ error) {
 	defer resp.Body.Close()
 
-	// Close the response body when the context is canceled so scanner.Scan()
-	// unblocks instead of hanging on a stalled connection. done lets the goroutine
-	// exit when readStream returns normally — otherwise it outlives the call, and
-	// blocks forever on a non-cancellable context whose Done() is nil.
+	// Close the response body when the context is canceled (user interrupt) or the
+	// stream stalls past streamIdleTimeout, so scanner.Scan() unblocks instead of
+	// hanging on a half-open connection. done lets the watchdog exit on a normal
+	// return — otherwise it outlives the call and blocks forever on a non-cancellable
+	// context whose Done() is nil. The watchdog owns the timer; the read loop only
+	// pings the buffered activity channel, so there's no Timer.Reset race.
 	done := make(chan struct{})
 	defer close(done)
+	activity := make(chan struct{}, 1)
+	var stalled atomic.Bool
 	go func() {
-		select {
-		case <-ctx.Done():
-			resp.Body.Close()
-		case <-done:
+		idle := time.NewTimer(streamIdleTimeout)
+		defer idle.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				resp.Body.Close()
+				return
+			case <-idle.C:
+				stalled.Store(true)
+				resp.Body.Close()
+				return
+			case <-activity:
+				if !idle.Stop() {
+					select {
+					case <-idle.C:
+					default:
+					}
+				}
+				idle.Reset(streamIdleTimeout)
+			case <-done:
+				return
+			}
 		}
 	}()
 
@@ -314,6 +344,10 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
 	for scanner.Scan() {
+		select { // ping the idle watchdog; non-blocking so a full buffer is fine
+		case activity <- struct{}{}:
+		default:
+		}
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || !strings.HasPrefix(line, "data:") {
 			continue
@@ -384,6 +418,9 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 		}
 	}
 
+	if stalled.Load() {
+		return emitted, fmt.Errorf("%s: stream stalled — no data for %s, connection likely dropped", c.name, streamIdleTimeout)
+	}
 	if err := scanner.Err(); err != nil {
 		return emitted, fmt.Errorf("%s: read stream: %w", c.name, err)
 	}

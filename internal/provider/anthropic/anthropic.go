@@ -25,10 +25,18 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"reasonix/internal/netclient"
 	"reasonix/internal/provider"
 )
+
+// streamIdleTimeout caps how long a started SSE stream may go silent before it's
+// treated as a dropped connection — a half-open TCP connection (proxy switched
+// mid-stream) sends no RST, so scanner.Scan() would block forever. Generous on
+// purpose; live streams emit far more often. A var so tests can override it.
+var streamIdleTimeout = 120 * time.Second
 
 const (
 	// anthropicVersion is the required API version header value.
@@ -269,6 +277,37 @@ func (c *client) readStream(resp *http.Response, out chan<- provider.Chunk) {
 	defer resp.Body.Close()
 	defer close(out)
 
+	// Close the body if the stream stalls past streamIdleTimeout so scanner.Scan()
+	// unblocks instead of hanging on a half-open connection. The watchdog owns the
+	// timer; the read loop only pings the buffered activity channel (no Timer.Reset
+	// race). A context cancel already unblocks the scan via the transport.
+	done := make(chan struct{})
+	defer close(done)
+	activity := make(chan struct{}, 1)
+	var stalled atomic.Bool
+	go func() {
+		idle := time.NewTimer(streamIdleTimeout)
+		defer idle.Stop()
+		for {
+			select {
+			case <-idle.C:
+				stalled.Store(true)
+				resp.Body.Close()
+				return
+			case <-activity:
+				if !idle.Stop() {
+					select {
+					case <-idle.C:
+					default:
+					}
+				}
+				idle.Reset(streamIdleTimeout)
+			case <-done:
+				return
+			}
+		}
+	}()
+
 	tools := map[int]*provider.ToolCall{} // tool_use blocks, keyed by content index
 	var inTok, outTok, cacheCreate, cacheRead int
 	var stopReason string
@@ -278,6 +317,10 @@ func (c *client) readStream(resp *http.Response, out chan<- provider.Chunk) {
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
 	for scanner.Scan() {
+		select { // ping the idle watchdog; non-blocking so a full buffer is fine
+		case activity <- struct{}{}:
+		default:
+		}
 		line := strings.TrimSpace(scanner.Text())
 		// SSE carries `event:` and `data:` lines; the data JSON's own `type` field
 		// is authoritative, so we only need the data payloads.
@@ -356,6 +399,10 @@ func (c *client) readStream(resp *http.Response, out chan<- provider.Chunk) {
 		}
 	}
 
+	if stalled.Load() {
+		out <- provider.Chunk{Type: provider.ChunkError, Err: fmt.Errorf("%s: stream stalled — no data for %s, connection likely dropped", c.name, streamIdleTimeout)}
+		return
+	}
 	if err := scanner.Err(); err != nil {
 		out <- provider.Chunk{Type: provider.ChunkError, Err: fmt.Errorf("%s: read stream: %w", c.name, err)}
 		return
