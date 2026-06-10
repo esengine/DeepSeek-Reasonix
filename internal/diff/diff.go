@@ -153,9 +153,10 @@ func myers(a, b []string) ([]op, bool) {
 	if n == 0 && m == 0 {
 		return nil, true
 	}
-	maxD := n + m
-	if maxD > maxDiffEdits || maxD < 0 {
-		maxD = maxDiffEdits // bound the trace's O(D²) footprint (and any n+m overflow)
+	// maxD = min(n+m, maxDiffEdits); take the sum only when it can't overflow int.
+	maxD := maxDiffEdits // bound the trace's O(D²) footprint
+	if n <= maxDiffEdits && m <= maxDiffEdits-n {
+		maxD = n + m
 	}
 	offset := maxD // shift negative k into a non-negative array index
 	v := make([]int, 2*maxD+1)
