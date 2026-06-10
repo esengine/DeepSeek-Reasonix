@@ -59,12 +59,20 @@ export function ContextMenu({
 
   useLayoutEffect(() => {
     if (!open || !point) return;
-    const rect = menuRef.current?.getBoundingClientRect();
-    if (!rect) {
-      setPosition(point);
-      return;
-    }
-    setPosition(clampMenuPoint(point.left, point.top, rect.width, rect.height));
+    let frame = 0;
+    setPosition(point);
+    const measure = () => {
+      const rect = menuRef.current?.getBoundingClientRect();
+      if (!rect) {
+        setPosition(point);
+        return;
+      }
+      setPosition(clampMenuPoint(point.left, point.top, rect.width, rect.height));
+    };
+    frame = window.requestAnimationFrame(measure);
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame);
+    };
   }, [open, point, items]);
 
   useEffect(() => {
@@ -117,7 +125,7 @@ export function ContextMenu({
             type="button"
             role="menuitem"
             disabled={item.disabled}
-            className={`context-menu__item${item.danger ? " context-menu__item--danger" : ""}`}
+            className={`context-menu__item${item.icon ? "" : " context-menu__item--text-only"}${item.danger ? " context-menu__item--danger" : ""}`}
             onClick={(event) => {
               event.stopPropagation();
               if (!item.disabled) item.onSelect();

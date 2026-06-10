@@ -508,11 +508,11 @@ func (c *Config) SetSkillEnabled(name string, enabled bool) error {
 func CanonicalSkillPath(path string) string {
 	path = ExpandVars(strings.TrimSpace(path))
 	if strings.HasPrefix(path, "~/") || strings.HasPrefix(path, `~\`) {
-		if home, err := os.UserHomeDir(); err == nil {
+		if home, ok := tildeHomeDir(); ok {
 			path = filepath.Join(home, path[2:])
 		}
 	} else if path == "~" {
-		if home, err := os.UserHomeDir(); err == nil {
+		if home, ok := tildeHomeDir(); ok {
 			path = home
 		}
 	}
@@ -524,6 +524,16 @@ func CanonicalSkillPath(path string) string {
 		return strings.ToLower(path)
 	}
 	return path
+}
+
+func tildeHomeDir() (string, bool) {
+	if home := strings.TrimSpace(os.Getenv("HOME")); home != "" {
+		return home, true
+	}
+	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+		return home, true
+	}
+	return "", false
 }
 
 // UpsertPlugin adds e, or replaces an MCP server with the same name (preserving

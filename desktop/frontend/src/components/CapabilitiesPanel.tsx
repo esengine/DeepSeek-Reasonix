@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { asArray } from "../lib/array";
 import { app, openExternal } from "../lib/bridge";
 import { useT } from "../lib/i18n";
@@ -364,12 +364,14 @@ function skillSourceSummary(active: number, missing: number, empty: number, t: R
 function SkillSources({
   roots,
   busy,
+  focusAddRequest = 0,
   onAdd,
   onRefresh,
   onRemove,
 }: {
   roots: SkillRootView[];
   busy: boolean;
+  focusAddRequest?: number;
   onAdd: () => void;
   onRefresh: () => void;
   onRemove: (path: string) => void;
@@ -379,6 +381,9 @@ function SkillSources({
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [expandedRootSkills, setExpandedRootSkills] = useState<Set<string>>(() => new Set());
   const [fullRootSkills, setFullRootSkills] = useState<Set<string>>(() => new Set());
+  const addButtonRef = useRef<HTMLButtonElement | null>(null);
+  const lastFocusRequestRef = useRef(0);
+  const pendingFocusRef = useRef(false);
   const primaryRoots = roots.filter(isPrimarySkillRoot);
   const diagnosticRoots = roots.filter((root) => !isPrimarySkillRoot(root));
   const diagnosticsVisible = expanded && showDiagnostics;
@@ -403,6 +408,20 @@ function SkillSources({
       return next;
     });
   };
+  useEffect(() => {
+    if (focusAddRequest <= 0 || focusAddRequest === lastFocusRequestRef.current) return;
+    lastFocusRequestRef.current = focusAddRequest;
+    pendingFocusRef.current = true;
+    setExpanded(true);
+  }, [focusAddRequest]);
+  useEffect(() => {
+    if (!expanded || !pendingFocusRef.current) return;
+    const frame = window.requestAnimationFrame(() => {
+      addButtonRef.current?.focus();
+      pendingFocusRef.current = false;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [expanded, focusAddRequest]);
   return (
     <div className={`cap-sources${expanded ? " cap-sources--expanded" : ""}`}>
       <div className="cap-sources__head">
@@ -425,7 +444,7 @@ function SkillSources({
               <button className="btn btn--small" disabled={busy} onClick={onRefresh}>
                 {t("caps.refreshSkills")}
               </button>
-              <button className="btn btn--small" disabled={busy} onClick={onAdd}>
+              <button ref={addButtonRef} className="btn btn--small" disabled={busy} onClick={onAdd}>
                 {t("caps.addSkillFolder")}
               </button>
             </div>
@@ -1434,7 +1453,7 @@ function AddServerForm({
 
 // MCPServersSettingsPage is a self-contained MCP servers management page
 // embedded inside the settings centre.
-export function MCPServersSettingsPage() {
+export function MCPServersSettingsPage({ addRequest = 0 }: { addRequest?: number } = {}) {
 	const t = useT();
 	const [view, setView] = useState<CapabilitiesView | null>(null);
 	const [busy, setBusy] = useState(false);
@@ -1488,6 +1507,10 @@ export function MCPServersSettingsPage() {
 	const toggleServerTools = useCallback((name: string) => {
 		setExpandedServerTools((prev) => { const next = new Set(prev); if (next.has(name)) next.delete(name); else next.add(name); return next; });
 	}, []);
+
+	useEffect(() => {
+		if (addRequest > 0) setAdding(true);
+	}, [addRequest]);
 
 	const summary = useMemo(() => {
 		if (!view) return "";
@@ -1559,8 +1582,8 @@ export function MCPServersSettingsPage() {
 }
 
 // SkillsSettingsPage is a self-contained skills management page embedded inside
-// the settings centre.
-export function SkillsSettingsPage() {
+// the plugin hub.
+export function SkillsSettingsPage({ focusAddRequest = 0 }: { focusAddRequest?: number } = {}) {
 	const t = useT();
 	const [view, setView] = useState<CapabilitiesView | null>(null);
 	const [busy, setBusy] = useState(false);
@@ -1625,6 +1648,7 @@ export function SkillsSettingsPage() {
 			<SkillSources
 				roots={view.skillRoots ?? []}
 				busy={busy}
+				focusAddRequest={focusAddRequest}
 				onAdd={() => mutate(async () => {
 					const path = await app.PickSkillFolder();
 					if (path) await app.AddSkillPath(path);

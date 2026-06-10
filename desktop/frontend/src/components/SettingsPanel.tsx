@@ -1,10 +1,39 @@
-import { useEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
-import { Check, ChevronDown } from "lucide-react";
+import {
+  memo,
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type ReactNode,
+  type SetStateAction,
+} from "react";
+import {
+  Archive,
+  ArrowLeft,
+  Check,
+  ChevronDown,
+  FolderGit2,
+  Globe,
+  Palette,
+  Search,
+  Server,
+  Settings as SettingsIcon,
+  ShieldCheck,
+  SlidersHorizontal,
+  Sparkles,
+  Trash2,
+  RotateCcw,
+  type LucideIcon,
+} from "lucide-react";
 import { asArray } from "../lib/array";
 import { useDeferredClose } from "../lib/useMountTransition";
 import { app } from "../lib/bridge";
 import { normalizeLangPref, useI18n, useT, type DictKey, type LangPref } from "../lib/i18n";
 import { mergedFetchedProviderModels, providerDefaultModel, providerModelCandidates } from "../lib/providerModels";
+import { sessionActivityTime } from "../lib/session";
 import { useUpdater } from "../lib/useUpdater";
 import {
   THEME_STYLES,
@@ -18,30 +47,52 @@ import {
 } from "../lib/theme";
 import { TEXT_SIZES, applyTextSize, getTextSize, type TextSize } from "../lib/textSize";
 import { FONT_FAMILIES, applyFontFamily, getFontFamily, type FontFamily } from "../lib/fontFamily";
-import type { BotConnectionView, BotInstallStartResult, BotSettingsView, NetworkView, ProviderView, SettingsTab, SettingsView } from "../lib/types";
+import type { BotConnectionView, BotInstallStartResult, BotSettingsView, NetworkView, ProviderView, SessionMeta, SettingsTab, SettingsView } from "../lib/types";
 import { InlineConfirmButton } from "./InlineConfirmButton";
 import { Tooltip } from "./Tooltip";
 import { AnchoredPopover } from "./AnchoredPopover";
-import { MCPServersSettingsPage, SkillsSettingsPage } from "./CapabilitiesPanel";
+import { MCPServersSettingsPage } from "./CapabilitiesPanel";
 import { MemorySettingsPage } from "./MemoryPanel";
 import { CopyButton } from "./CopyButton";
-import { ModalCloseButton } from "./ModalCloseButton";
+import { VirtualList } from "./VirtualList";
 
-const SETTINGS_TABS: SettingsTab[] = ["general", "models", "bots", "mcp", "skills", "memory", "permissions", "sandbox", "network", "appearance", "updates"];
+type SettingsPanelTab = SettingsTab | "archived";
 
-// SettingsPanel is the desktop settings centre — a centred modal with left
-// navigation and a right content area. It hosts all settings pages plus MCP,
-// Skills, and Memory management, replacing the old per-feature drawers.
-export function SettingsPanel({ onClose, onChanged, initialTab }: { onClose: () => void; onChanged: () => void; initialTab?: SettingsTab }) {
+type SettingsNavEntry = {
+  key: string;
+  label: string;
+  meta?: string;
+  tab?: SettingsPanelTab;
+  icon: LucideIcon;
+};
+
+type SettingsNavGroup = {
+  label: string;
+  entries: SettingsNavEntry[];
+};
+
+// SettingsPanel is the desktop settings centre. The shell mirrors Codex's
+// full-screen settings workspace while the pages keep their existing bridge
+// bindings to app.Settings() and the Set* desktop APIs.
+export function SettingsPanel({
+  onClose,
+  onChanged,
+  initialTab,
+}: {
+  onClose: () => void;
+  onChanged: () => void;
+  initialTab?: SettingsTab;
+}) {
   const t = useT();
   const [s, setS] = useState<SettingsView | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [settingsQuery, setSettingsQuery] = useState("");
   const [theme, setThemeState] = useState<Theme>(getTheme());
   const [themeStyle, setThemeStyleState] = useState<ThemeStyle>(() => getThemeStyle(getTheme()));
   const [textSize, setTextSizeState] = useState<TextSize>(getTextSize());
   const [fontFamily, setFontFamilyState] = useState<FontFamily>(getFontFamily());
-  const [tab, setTab] = useState<SettingsTab>(initialTab === "providers" ? "models" : initialTab ?? "general");
+  const [tab, setTab] = useState<SettingsPanelTab>(initialTab === "providers" ? "models" : initialTab ?? "general");
   // Play the modal exit animation, then let the parent unmount us.
   const { status, requestClose } = useDeferredClose(onClose, 240);
 
@@ -93,30 +144,61 @@ export function SettingsPanel({ onClose, onChanged, initialTab }: { onClose: () 
   }, [requestClose]);
 
   // The settings-reliant pages (general, models, network, permissions,
-  // sandbox, appearance, updates) need SettingsView loaded. MCP, Skills, and Memory
+  // sandbox, appearance, updates) need SettingsView loaded. MCP and Memory
   // load their own data and render regardless.
   const needsSettings = tab === "general" || tab === "models" || tab === "bots" || tab === "network" || tab === "permissions" || tab === "sandbox" || tab === "appearance" || tab === "updates";
+  const navGroups = useMemo(
+    () => filterSettingsNavGroups(settingsNavGroups(s, t), settingsQuery),
+    [s, settingsQuery, t],
+  );
 
   return (
-    <div className="management-modal-backdrop settings-modal-backdrop" data-state={status} onClick={(e) => { if (e.target === e.currentTarget) requestClose(); }}>
-      <div className="management-modal settings-modal" data-state={status}>
-        <header className="management-modal__head settings-modal__head">
-          <div className="management-modal__title settings-modal__title">{t("settings.title")}</div>
-          <ModalCloseButton label={t("common.close")} onClick={requestClose} />
-        </header>
-
+    <div className="settings-modal-backdrop" data-state={status} onClick={(e) => { if (e.target === e.currentTarget) requestClose(); }}>
+      <div className="settings-modal" data-state={status} role="dialog" aria-modal="true" aria-label={t("settings.title")}>
         <div className="settings-center">
           <nav className="settings-center__nav" aria-label={t("settings.title")}>
-            {SETTINGS_TABS.map((id) => (
-              <button
-                key={id}
-                className={`settings-center__navitem${tab === id ? " settings-center__navitem--active" : ""}`}
-                onClick={() => setTab(id)}
-              >
-                <span>{settingsTabLabel(id, t)}</span>
-                {s && <small>{settingsTabMeta(id, s, t)}</small>}
+            <Tooltip label={t("settings.backToApp")}>
+              <button className="settings-center__back" type="button" onClick={requestClose}>
+                <ArrowLeft size={18} />
+                <span>{t("settings.backToApp")}</span>
               </button>
-            ))}
+            </Tooltip>
+            <label className="settings-center__search">
+              <Search size={16} />
+              <input
+                value={settingsQuery}
+                onChange={(e) => setSettingsQuery(e.target.value)}
+                placeholder={t("settings.searchPlaceholder")}
+              />
+            </label>
+            <div className="settings-center__navgroups">
+              {navGroups.map((group) => (
+                <section className="settings-center__group" key={group.label}>
+                  <div className="settings-center__group-title">{group.label}</div>
+                  <div className="settings-center__group-items">
+                    {group.entries.map((entry) => {
+                      const Icon = entry.icon;
+                      const active = entry.tab !== undefined && tab === entry.tab;
+                      return (
+                        <button
+                          key={entry.key}
+                          type="button"
+                          className={`settings-center__navitem${active ? " settings-center__navitem--active" : ""}`}
+                          onClick={() => {
+                            if (entry.tab) setTab(entry.tab);
+                          }}
+                        >
+                          <Icon size={18} />
+                          <span>{entry.label}</span>
+                          {entry.meta && <small>{entry.meta}</small>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
+              ))}
+              {navGroups.length === 0 && <div className="settings-center__no-results">{t("settings.noNavResults")}</div>}
+            </div>
           </nav>
           <main className="settings-center__content">
             {needsSettings && err && <div className="banner banner--error">{err}</div>}
@@ -124,15 +206,20 @@ export function SettingsPanel({ onClose, onChanged, initialTab }: { onClose: () 
               <div className="empty">{t("settings.loading")}</div>
             ) : (
               <>
-                {tab === "general" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><GeneralSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
-                {tab === "models" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><ModelsSection s={s} busy={busy} apply={apply} backgroundApply={backgroundApply} /></SettingsPageShell>}
-                {tab === "bots" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><BotsSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
-                {tab === "mcp" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><MCPServersSettingsPage /></SettingsPageShell>}
-                {tab === "skills" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><SkillsSettingsPage /></SettingsPageShell>}
-                {tab === "memory" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><MemorySettingsPage /></SettingsPageShell>}
-                {tab === "permissions" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><PermissionsSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
-                {tab === "sandbox" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><SandboxSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
-                {tab === "network" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><NetworkSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
+                {tab === "general" && s && (
+                  <SettingsPageShell s={s} tab={tab} busy={busy} apply={apply}>
+                    <GeneralSection s={s} busy={busy} apply={apply} />
+                    <PermissionsSection s={s} busy={busy} apply={apply} />
+                  </SettingsPageShell>
+                )}
+                {tab === "models" && s && <SettingsPageShell s={s} tab={tab} busy={busy} apply={apply}><ModelsSection s={s} busy={busy} apply={apply} backgroundApply={backgroundApply} /></SettingsPageShell>}
+                {tab === "bots" && s && <SettingsPageShell s={s} tab={tab} busy={busy} apply={apply}><BotsSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
+                {tab === "mcp" && <SettingsPageShell s={s} tab={tab} busy={false} apply={apply}><MCPServersSettingsPage /></SettingsPageShell>}
+                {tab === "memory" && <SettingsPageShell s={s} tab={tab} busy={false} apply={apply}><MemorySettingsPage /></SettingsPageShell>}
+                {tab === "archived" && <SettingsPageShell s={s} tab={tab} busy={false} apply={apply}><ArchivedChatsSettingsPage onChanged={onChanged} /></SettingsPageShell>}
+                {tab === "permissions" && s && <SettingsPageShell s={s} tab={tab} busy={busy} apply={apply}><PermissionsSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
+                {tab === "sandbox" && s && <SettingsPageShell s={s} tab={tab} busy={busy} apply={apply}><SandboxSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
+                {tab === "network" && s && <SettingsPageShell s={s} tab={tab} busy={busy} apply={apply}><NetworkSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
                 {tab === "appearance" && s && (
                   <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}>
                     <AppearanceSection
@@ -171,7 +258,75 @@ export function SettingsPanel({ onClose, onChanged, initialTab }: { onClose: () 
   );
 }
 
-function SettingsPageShell({ s: _s, tab, children }: { s: SettingsView | null; tab: SettingsTab; busy: boolean; apply: (fn: () => Promise<void>) => Promise<void>; children: ReactNode }) {
+function settingsNavGroups(s: SettingsView | null, t: ReturnType<typeof useT>): SettingsNavGroup[] {
+  const entry = (tab: SettingsPanelTab, icon: LucideIcon): SettingsNavEntry => ({
+    key: tab,
+    tab,
+    icon,
+    label: settingsTabLabel(tab, t),
+    meta: tab === "archived" ? t("settings.tabSub.archived") : s ? settingsTabMeta(tab, s, t) : settingsTabFallbackMeta(tab, t),
+  });
+
+  return [
+    {
+      label: t("settings.nav.personal"),
+      entries: [
+        entry("general", SettingsIcon),
+        entry("appearance", Palette),
+        entry("models", SlidersHorizontal),
+        entry("memory", Sparkles),
+      ],
+    },
+    {
+      label: t("settings.nav.integrations"),
+      entries: [
+        entry("mcp", Server),
+      ],
+    },
+    {
+      label: t("settings.nav.coding"),
+      entries: [
+        entry("permissions", ShieldCheck),
+        entry("sandbox", FolderGit2),
+        entry("network", Globe),
+      ],
+    },
+    {
+      label: t("settings.nav.app"),
+      entries: [
+        entry("updates", SettingsIcon),
+      ],
+    },
+    {
+      label: t("settings.nav.archived"),
+      entries: [
+        entry("archived", Archive),
+      ],
+    },
+  ].filter((group) => group.entries.length > 0);
+}
+
+function filterSettingsNavGroups(groups: SettingsNavGroup[], query: string): SettingsNavGroup[] {
+  const q = query.trim().toLocaleLowerCase();
+  if (!q) return groups;
+  return groups
+    .map((group) => ({
+      ...group,
+      entries: group.entries.filter((entry) => {
+        const haystack = [group.label, entry.label, entry.meta].filter(Boolean).join(" ").toLocaleLowerCase();
+        return haystack.includes(q);
+      }),
+    }))
+    .filter((group) => group.entries.length > 0);
+}
+
+function settingsTabFallbackMeta(id: SettingsPanelTab, t: ReturnType<typeof useT>): string {
+  const key = `settings.tabSub.${id}` as DictKey;
+  const value = t(key);
+  return value === key ? "" : value;
+}
+
+function SettingsPageShell({ s: _s, tab, children }: { s: SettingsView | null; tab: SettingsPanelTab; busy: boolean; apply: (fn: () => Promise<void>) => Promise<void>; children: ReactNode }) {
   const t = useT();
   const descKey = `settings.pageDesc.${tab}` as keyof typeof import("../locales/en").en;
   const desc = t(descKey as any);
@@ -186,11 +341,10 @@ function SettingsPageShell({ s: _s, tab, children }: { s: SettingsView | null; t
   );
 }
 
-function settingsPageKind(tab: SettingsTab): "form" | "manager" {
+function settingsPageKind(tab: SettingsPanelTab): "form" | "manager" {
   switch (tab) {
     case "models":
     case "mcp":
-    case "skills":
     case "memory":
       return "manager";
     default:
@@ -245,10 +399,10 @@ function SettingsField({
   );
 }
 
-function settingsTabPageTitle(id: SettingsTab, t: ReturnType<typeof useT>): string {
+function settingsTabPageTitle(id: SettingsPanelTab, t: ReturnType<typeof useT>): string {
   switch (id) {
+    case "archived": return t("settings.archivedChats");
     case "mcp": return t("settings.tab.mcp");
-    case "skills": return t("settings.tab.skills");
     case "memory": return t("settings.tab.memory");
     default: return settingsTabLabel(id, t);
   }
@@ -264,8 +418,10 @@ type ModelsSectionProps = SectionProps & {
   backgroundApply: (fn: () => Promise<void>) => Promise<void>;
 };
 
-function settingsTabLabel(id: SettingsTab, t: ReturnType<typeof useT>): string {
+function settingsTabLabel(id: SettingsPanelTab, t: ReturnType<typeof useT>): string {
   switch (id) {
+    case "archived":
+      return t("settings.archivedChats");
     case "general":
       return t("settings.tab.general");
     case "models":
@@ -274,10 +430,10 @@ function settingsTabLabel(id: SettingsTab, t: ReturnType<typeof useT>): string {
       return t("settings.tab.providers");
     case "bots":
       return t("settings.tab.bots");
-    case "mcp":
-      return t("settings.tab.mcp");
     case "skills":
       return t("settings.tab.skills");
+    case "mcp":
+      return t("settings.tab.mcp");
     case "memory":
       return t("settings.tab.memory");
     case "network":
@@ -303,10 +459,10 @@ function settingsTabMeta(id: SettingsTab, s: SettingsView, t: ReturnType<typeof 
       return t("settings.providerCount", { n: s.providers.length });
     case "bots":
       return botSettingsMeta(s.bot, t);
+    case "skills":
+      return t("settings.tabSub.skills");
     case "mcp":
       return t("caps.connectorsTab");
-    case "skills":
-      return t("caps.skillsTab");
     case "memory":
       return t("settings.tabSub.memory");
     case "network":
@@ -320,6 +476,203 @@ function settingsTabMeta(id: SettingsTab, s: SettingsView, t: ReturnType<typeof 
     case "updates":
       return t("settings.updatesMeta");
   }
+}
+
+function ArchivedChatsSettingsPage({ onChanged }: { onChanged: () => void }) {
+  const t = useT();
+  const [sessions, setSessions] = useState<SessionMeta[]>([]);
+  const [query, setQuery] = useState("");
+  const deferredQuery = useDeferredValue(query);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+  const [busyPath, setBusyPath] = useState<string | null>(null);
+  const [confirmPurgePath, setConfirmPurgePath] = useState<string | null>(null);
+  const [confirmClear, setConfirmClear] = useState(false);
+  const listRef = useRef<HTMLDivElement>(null);
+
+  const loadArchived = useCallback(async () => {
+    setLoading(true);
+    setErr(null);
+    try {
+      setSessions(asArray<SessionMeta>(await app.ListTrashedSessions().catch(() => [])));
+    } catch (e) {
+      setErr(String((e as Error)?.message ?? e));
+      setSessions([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadArchived();
+  }, [loadArchived]);
+
+  const filtered = useMemo(() => {
+    const q = deferredQuery.trim().toLocaleLowerCase();
+    if (!q) return sessions;
+    return sessions.filter((session) =>
+      [session.title, session.preview, session.path, session.topicTitle, session.workspaceRoot]
+        .some((part) => (part ?? "").toLocaleLowerCase().includes(q)),
+    );
+  }, [deferredQuery, sessions]);
+
+  const restore = async (path: string) => {
+    setBusyPath(path);
+    setErr(null);
+    try {
+      await app.RestoreSession(path);
+      await loadArchived();
+      onChanged();
+    } catch (e) {
+      setErr(String((e as Error)?.message ?? e));
+    } finally {
+      setBusyPath(null);
+    }
+  };
+
+  const purge = async (path: string) => {
+    if (confirmPurgePath !== path) {
+      setConfirmPurgePath(path);
+      return;
+    }
+    setBusyPath(path);
+    setErr(null);
+    try {
+      await app.PurgeTrashedSession(path);
+      setConfirmPurgePath(null);
+      await loadArchived();
+      onChanged();
+    } catch (e) {
+      setErr(String((e as Error)?.message ?? e));
+    } finally {
+      setBusyPath(null);
+    }
+  };
+
+  const clearArchived = async () => {
+    if (!confirmClear) {
+      setConfirmClear(true);
+      return;
+    }
+    setBusyPath("__clear__");
+    setErr(null);
+    try {
+      for (const session of sessions) {
+        await app.PurgeTrashedSession(session.path);
+      }
+      setConfirmClear(false);
+      await loadArchived();
+      onChanged();
+    } catch (e) {
+      setErr(String((e as Error)?.message ?? e));
+    } finally {
+      setBusyPath(null);
+    }
+  };
+
+  return (
+    <div className="settings-archive">
+      {err && <div className="banner banner--error">{err}</div>}
+      {sessions.length > 0 && (
+        <div className="settings-archive__toolbar">
+          <label className="settings-archive__search">
+            <Search size={15} />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={t("settings.archivedSearchPlaceholder")}
+            />
+          </label>
+          <button
+            type="button"
+            className={`btn btn--small${confirmClear ? " btn--danger" : ""}`}
+            disabled={busyPath !== null}
+            onClick={() => void clearArchived()}
+          >
+            {confirmClear ? t("history.confirmClearTrash") : t("history.clearTrash")}
+          </button>
+        </div>
+      )}
+      {loading ? (
+        <div className="settings-archive__empty-card">{t("common.loading")}</div>
+      ) : sessions.length === 0 ? (
+        <div className="settings-archive__empty-card">{t("settings.archivedEmpty")}</div>
+      ) : filtered.length === 0 ? (
+        <div className="settings-archive__empty-card">{t("history.noResults")}</div>
+      ) : (
+        <div className="settings-archive__list" ref={listRef}>
+          <VirtualList
+            items={filtered}
+            scrollRef={listRef}
+            estimateSize={96}
+            getKey={(session) => session.path}
+            render={(session) => (
+              <ArchivedChatRow
+                session={session}
+                disabled={busyPath !== null}
+                confirming={confirmPurgePath === session.path}
+                onRestore={() => void restore(session.path)}
+                onPurge={() => void purge(session.path)}
+              />
+            )}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+const ArchivedChatRow = memo(function ArchivedChatRow({
+  session,
+  disabled,
+  confirming,
+  onRestore,
+  onPurge,
+}: {
+  session: SessionMeta;
+  disabled: boolean;
+  confirming: boolean;
+  onRestore: () => void;
+  onPurge: () => void;
+}) {
+  const t = useT();
+  return (
+    <div className="settings-archive__row">
+      <div className="settings-archive__copy">
+        <div className="settings-archive__title">{archivedSessionTitle(session, t("history.emptySession"))}</div>
+        <div className="settings-archive__meta">{archivedSessionMeta(session, t)}</div>
+        {session.preview && <div className="settings-archive__preview">{session.preview}</div>}
+      </div>
+      <div className="settings-archive__actions">
+        <button type="button" className="btn btn--small" disabled={disabled} onClick={onRestore}>
+          <RotateCcw size={13} />
+          {t("history.restore")}
+        </button>
+        <button type="button" className={`btn btn--small${confirming ? " btn--danger" : ""}`} disabled={disabled} onClick={onPurge}>
+          <Trash2 size={13} />
+          {confirming ? t("history.confirmPurge") : t("history.purge")}
+        </button>
+      </div>
+    </div>
+  );
+});
+
+function archivedSessionTitle(session: SessionMeta, fallback: string): string {
+  return session.title || session.topicTitle || session.preview || fallback;
+}
+
+function archivedSessionMeta(session: SessionMeta, t: ReturnType<typeof useT>): string {
+  const parts: string[] = [];
+  if (session.workspaceRoot) {
+    const pathParts = session.workspaceRoot.split(/[\\/]/).filter(Boolean);
+    parts.push(pathParts[pathParts.length - 1] || session.workspaceRoot);
+  } else {
+    parts.push(session.scope === "project" ? t("history.filterProject") : t("history.filterGlobal"));
+  }
+  parts.push(t(session.turns === 1 ? "history.turnOne" : "history.turnOther", { n: session.turns }));
+  const deletedOrActive = session.deletedAt || sessionActivityTime(session);
+  parts.push(new Date(deletedOrActive).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }));
+  return parts.join(" · ");
 }
 
 function settingsModelMeta(s: SettingsView, t: ReturnType<typeof useT>): string {
@@ -1653,9 +2006,9 @@ function ModelsSection({ s, busy, apply, backgroundApply }: ModelsSectionProps) 
                 <strong>{currentModelLabel}</strong>
               </div>
               <div className="settings-model-current__meta">
-                <span>{providerLabel}</span>
-                <span>{plannerLabel}</span>
-                <span>{keyStatusLabel}</span>
+                <span className="settings-model-current__chip settings-model-current__chip--provider">{providerLabel}</span>
+                <span className="settings-model-current__chip settings-model-current__chip--planner">{plannerLabel}</span>
+                <span className="settings-model-current__chip settings-model-current__chip--key">{keyStatusLabel}</span>
               </div>
             </div>
           </SettingsSection>
@@ -3365,6 +3718,8 @@ function textSizeName(size: TextSize, t: ReturnType<typeof useT>): string {
 
 function fontFamilyName(font: FontFamily, t: ReturnType<typeof useT>): string {
   switch (font) {
+    case "harmony":
+      return t("settings.fontFamilyHarmony");
     case "system":
       return t("settings.fontFamilySystem");
     case "yahei":

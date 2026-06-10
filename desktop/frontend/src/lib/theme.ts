@@ -1,8 +1,7 @@
-// theme.ts manages the appearance override. The stylesheet follows the OS via
-// prefers-color-scheme unless data-theme forces "dark" or "light". A separate
-// data-theme-style attribute selects a visual direction (graphite/aurora/slate/
-// carbon/nocturne/amber) — orthogonal to theme, so every direction supports both
-// light & dark.
+// theme.ts manages the appearance override. data-theme always stores the
+// resolved "dark" or "light" scheme so every CSS override reads the same theme.
+// data-theme-mode keeps the user's preference ("auto"/"dark"/"light"), and
+// data-theme-style changes only accent tokens.
 //
 // When running inside the Wails shell, applyTheme also syncs the native window
 // theme (title bar, traffic lights, etc.) so the OS chrome matches the webview.
@@ -46,6 +45,7 @@ const THEME_KEY = "reasonix-theme";
 const STYLE_KEY = "reasonix-theme-style";
 let currentTheme: Theme = DEFAULT_THEME;
 let currentThemeStyle: ThemeStyle = DEFAULT_THEME_STYLE;
+let systemThemeListenerInstalled = false;
 
 export function normalizeThemePreference(value: unknown): Theme {
   if (typeof value === "object" && value !== null) {
@@ -107,14 +107,14 @@ export function normalizeThemeStyleForTheme(style: string | undefined, _theme?: 
 export function applyTheme(theme: Theme, style: ThemeStyle = getThemeStyle(theme), options: { persist?: boolean } = {}): void {
   if (typeof document === "undefined") return;
   const root = document.documentElement;
-  root.removeAttribute("data-theme-mode");
-  root.removeAttribute("data-theme-scheme");
-  if (theme === "auto") root.removeAttribute("data-theme");
-  else root.setAttribute("data-theme", theme);
 
+  const resolved = getResolvedTheme(theme);
   const nextStyle: ThemeStyle = isThemeStyle(style) ? style : DEFAULT_THEME_STYLE;
   currentTheme = theme;
   currentThemeStyle = nextStyle;
+  root.setAttribute("data-theme", resolved);
+  root.setAttribute("data-theme-mode", theme);
+  root.setAttribute("data-theme-scheme", resolved);
   root.setAttribute("data-theme-style", nextStyle);
 
   // Sync the native window theme (title bar, traffic lights) to match.
@@ -125,6 +125,13 @@ export function applyTheme(theme: Theme, style: ThemeStyle = getThemeStyle(theme
       WindowSetLightTheme();
     } else if (theme === "dark") {
       WindowSetDarkTheme();
+    }
+    if (resolved === "light") {
+      // Light shell: matches :root[data-theme="light"] --bg (#f7f8fb).
+      WindowSetBackgroundColour(247, 248, 251, 255);
+    } else {
+      // Dark shell: matches :root[data-theme="dark"] --bg (#090a0c).
+      WindowSetBackgroundColour(9, 10, 12, 255);
     }
   }
 
@@ -163,21 +170,26 @@ export function clearLegacyThemePreference(): void {
   }
 }
 
+function installSystemThemeListener(): void {
+  if (systemThemeListenerInstalled || typeof window === "undefined" || !window.matchMedia) return;
+  systemThemeListenerInstalled = true;
+  const media = window.matchMedia("(prefers-color-scheme: light)");
+  const refreshAutoTheme = () => {
+    if (currentTheme !== "auto") return;
+    applyTheme("auto", getThemeStyle("auto"), { persist: false });
+  };
+  if (typeof media.addEventListener === "function") {
+    media.addEventListener("change", refreshAutoTheme);
+  } else {
+    media.addListener(refreshAutoTheme);
+  }
+}
+
 // initTheme runs before React mounts. It applies the saved theme to the DOM and
 // sets the native window background colour to match the resolved theme, avoiding
 // a white (or wrong-colour) flash while the webview paints its first frame.
 export function initTheme(): void {
   const theme = getTheme();
   applyTheme(theme, getThemeStyle(theme), { persist: false });
-
-  if (typeof window !== "undefined" && window.runtime) {
-    const resolved = getResolvedTheme(theme);
-    if (resolved === "light") {
-      // Light shell: matches graphite --bg (#f4f3ef).
-      WindowSetBackgroundColour(244, 243, 239, 255);
-    } else {
-      // Dark shell: matches :root --bg (#090a0c).
-      WindowSetBackgroundColour(9, 10, 12, 255);
-    }
-  }
+  installSystemThemeListener();
 }

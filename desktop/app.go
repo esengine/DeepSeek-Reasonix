@@ -76,6 +76,9 @@ type App struct {
 
 	mediaTokens *mediaTokenStore
 	botInstalls map[string]*botInstallSession
+
+	terminalMu sync.Mutex
+	terminal   *terminalSession
 }
 
 // mediaTokenEntry holds metadata for a workspace media file served via temporary URL.
@@ -2025,7 +2028,9 @@ type SkillView struct {
 	Description string `json:"description"`
 	Scope       string `json:"scope"`
 	RunAs       string `json:"runAs"`
+	Path        string `json:"path,omitempty"`
 	Enabled     bool   `json:"enabled"`
+	Removable   bool   `json:"removable"`
 }
 
 type SkillRootSkillView struct {
@@ -2173,7 +2178,9 @@ func (a *App) Capabilities() CapabilitiesView {
 		out.Skills = append(out.Skills, SkillView{
 			Name: s.Name, Description: s.Description,
 			Scope: string(s.Scope), RunAs: string(s.RunAs),
-			Enabled: ctrl.SkillEnabled(s.Name),
+			Path:      s.Path,
+			Enabled:   ctrl.SkillEnabled(s.Name),
+			Removable: desktopSkillRemovable(s),
 		})
 	}
 	out.SkillRoots = skillRootsView()
@@ -2354,6 +2361,73 @@ func (a *App) SetSkillEnabled(name string, enabled bool) error {
 	})
 }
 
+// RemoveSkill deletes a non-builtin skill from disk and rebuilds the active
+// controller so the prompt index and slash menu forget it immediately.
+func (a *App) RemoveSkill(name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("skill name is required")
+	}
+	tab := a.activeTab()
+	if tab == nil || tab.Ctrl == nil {
+		return fmt.Errorf("no active session")
+	}
+	var found *skill.Skill
+	for _, sk := range tab.Ctrl.AllSkills() {
+		if config.SkillNameKey(sk.Name) != config.SkillNameKey(name) {
+			continue
+		}
+		copy := sk
+		found = &copy
+		break
+	}
+	if found == nil {
+		return fmt.Errorf("no skill named %q", name)
+	}
+	target, ok, err := desktopSkillDeleteTarget(*found)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("built-in skills cannot be removed")
+	}
+	if err := os.RemoveAll(target); err != nil {
+		return err
+	}
+	return a.rebuild()
+}
+
+func desktopSkillDeleteTarget(s skill.Skill) (string, bool, error) {
+	if s.Scope == skill.ScopeBuiltin {
+		return "", false, nil
+	}
+	path := strings.TrimSpace(s.Path)
+	if path == "" || path == "(builtin)" {
+		return "", false, nil
+	}
+	clean := filepath.Clean(path)
+	info, err := os.Stat(clean)
+	if err != nil {
+		return "", false, err
+	}
+	if filepath.Base(clean) == skill.SkillFile {
+		dir := filepath.Dir(clean)
+		if dir == "." || dir == string(filepath.Separator) {
+			return "", false, fmt.Errorf("refusing to remove unsafe skill directory %q", dir)
+		}
+		return dir, true, nil
+	}
+	if info.Mode().IsRegular() {
+		return clean, true, nil
+	}
+	return "", false, fmt.Errorf("skill path is not removable: %s", clean)
+}
+
+func desktopSkillRemovable(s skill.Skill) bool {
+	_, ok, err := desktopSkillDeleteTarget(s)
+	return err == nil && ok
+}
+
 func normalizeSkillPath(path string) string {
 	path = strings.TrimSpace(path)
 	if path == "" {
@@ -2395,7 +2469,9 @@ func isConventionSkillRoot(path, workspaceRoot string) bool {
 		return false
 	}
 	bases := []string{workspaceRoot}
-	if home, err := os.UserHomeDir(); err == nil {
+	if home := strings.TrimSpace(os.Getenv("HOME")); home != "" {
+		bases = append(bases, home)
+	} else if home, err := os.UserHomeDir(); err == nil {
 		bases = append(bases, home)
 	}
 	for _, base := range bases {

@@ -42,6 +42,9 @@ import type {
   SkillView,
   SlashArgsResult,
   TabMeta,
+  TerminalEvent,
+  TerminalInfo,
+  TerminalStartRequest,
   TopicMeta,
   UpdateInfo,
   UpdateProgress,
@@ -92,6 +95,10 @@ export interface AppBindings {
   SubmitDisplayToTab(tabID: string, display: string, input: string): Promise<void>;
   RunShell(command: string): Promise<void>;
   RunShellForTab(tabID: string, command: string): Promise<void>;
+  TerminalStart(req: TerminalStartRequest): Promise<TerminalInfo>;
+  TerminalWrite(sessionID: string, data: string): Promise<void>;
+  TerminalResize(sessionID: string, cols: number, rows: number): Promise<void>;
+  TerminalStop(sessionID: string): Promise<void>;
   Cancel(): Promise<void>;
   CancelTab(tabID: string): Promise<void>;
   Approve(id: string, allow: boolean, session: boolean, persist: boolean): Promise<void>;
@@ -154,6 +161,7 @@ export interface AppBindings {
   PickSkillFolder(): Promise<string>;
   AddSkillPath(path: string): Promise<void>;
   RemoveSkillPath(path: string): Promise<void>;
+  RemoveSkill(name: string): Promise<void>;
   RefreshSkills(): Promise<void>;
   SetSkillEnabled(name: string, enabled: boolean): Promise<void>;
   SetMCPServerEnabled(name: string, enabled: boolean): Promise<void>;
@@ -238,6 +246,7 @@ export interface AppBindings {
   ListProjectTree(): Promise<ProjectNode[]>;
   RenameProject(workspaceRoot: string, title: string): Promise<void>;
   SetProjectColor(workspaceRoot: string, color: string): Promise<void>;
+  SetProjectPinned(workspaceRoot: string, pinned: boolean): Promise<void>;
   ReorderProjects(workspaceRoots: string[]): Promise<void>;
   CreateTopic(scope: string, workspaceRoot: string, title: string): Promise<TopicMeta>;
   RenameTopic(topicID: string, title: string): Promise<void>;
@@ -312,6 +321,16 @@ export function onUpdaterProgress(cb: (p: UpdateProgress) => void): () => void {
   updaterListeners.add(cb);
   return () => {
     updaterListeners.delete(cb);
+  };
+}
+
+export function onTerminalEvent(cb: (e: TerminalEvent) => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn("terminal:event", (payload) => cb(payload as TerminalEvent));
+  }
+  terminalListeners.add(cb);
+  return () => {
+    terminalListeners.delete(cb);
   };
 }
 
@@ -423,6 +442,12 @@ function emitUpdater(p: UpdateProgress) {
   updaterListeners.forEach((l) => l(p));
 }
 
+const terminalListeners = new Set<(e: TerminalEvent) => void>();
+
+function emitTerminal(e: TerminalEvent) {
+  terminalListeners.forEach((l) => l(e));
+}
+
 function delay(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
@@ -437,18 +462,33 @@ function browserPlatformOverride(): "darwin" | "windows" | "linux" | "" {
   return value === "darwin" || value === "windows" || value === "linux" ? value : "";
 }
 
-function mockScenario(): "demo" | "fresh" | "running" {
+function mockScenario(): "demo" | "fresh" | "running" | "thread" {
   if (typeof window === "undefined") return "demo";
   const value = new URLSearchParams(window.location.search).get("mock")?.trim().toLowerCase();
   if (value === "fresh" || value === "empty" || value === "first-run") return "fresh";
   if (value === "running" || value === "busy" || value === "streaming") return "running";
+  if (value === "thread" || value === "work") return "thread";
   return "demo";
+}
+
+function mockThemeOverride(): { theme: "auto" | "light" | "dark"; style: string } | null {
+  if (typeof window === "undefined" || window.runtime) return null;
+  const params = new URLSearchParams(window.location.search);
+  const theme = params.get("theme")?.trim().toLowerCase();
+  if (theme !== "auto" && theme !== "light" && theme !== "dark") return null;
+  const style = params.get("themeStyle")?.trim();
+  return {
+    theme,
+    style: style || (theme === "light" ? "glacier" : "graphite"),
+  };
 }
 
 function makeMockApp(): AppBindings {
   const scenario = mockScenario();
+  const themeOverride = mockThemeOverride();
   const freshMock = scenario === "fresh";
   const runningMock = scenario === "running";
+  const threadMock = scenario === "thread";
   let cancelled = false;
   let pendingAskPreview = false;
   let pendingApprovalPreview = false;
@@ -506,9 +546,9 @@ function makeMockApp(): AppBindings {
     { name: "figma", transport: "http", status: "failed", configured: true, autoStart: true, tier: "background", url: "https://mcp.figma.com/mcp", authStatus: "required", authUrl: "https://mcp.figma.com/mcp", tools: 0, prompts: 0, resources: 0, error: "connect: 401 unauthorized" },
   ];
   const capSkills: SkillView[] = [
-    { name: "explore", description: "Investigate the codebase in an isolated subagent", scope: "builtin", runAs: "subagent", enabled: true },
-    { name: "review", description: "Review the staged diff", scope: "project", runAs: "inline", enabled: false },
-    { name: "init", description: "Scaffold a REASONIX.md for this repo", scope: "builtin", runAs: "inline", enabled: true },
+    { name: "explore", description: "Investigate the codebase in an isolated subagent", scope: "builtin", runAs: "subagent", enabled: true, removable: false },
+    { name: "review", description: "Review the staged diff", scope: "project", runAs: "inline", path: "~/my-skills/review/SKILL.md", enabled: false, removable: true },
+    { name: "init", description: "Scaffold a REASONIX.md for this repo", scope: "builtin", runAs: "inline", enabled: true, removable: false },
   ];
   let capSkillRoots: SkillRootView[] = [
     { dir: "~/projects/reasonix/.reasonix/skills", scope: "project", priority: 1, status: "missing", configured: false, removable: true, skills: 0 },
@@ -672,8 +712,8 @@ function makeMockApp(): AppBindings {
       connections: [],
     },
     desktopLanguage: "",
-    desktopTheme: "light",
-    desktopThemeStyle: "graphite",
+    desktopTheme: themeOverride?.theme ?? "dark",
+    desktopThemeStyle: themeOverride?.style ?? "graphite",
     closeBehavior: "background",
     configPath: "~/projects/reasonix/reasonix.toml",
     providerKinds: ["openai"],
@@ -706,6 +746,7 @@ function makeMockApp(): AppBindings {
       label: t("mock.projectJoyquantSys"),
       root: "~/projects/joyquant-sys",
       projectColor: "purple",
+      pinned: true,
       children: [
         { key: "topic_p3b_pd", kind: "topic", label: `● ${t("mock.topicP3b")}`, root: "~/projects/joyquant-sys", topicId: "topic_p3b_pd", projectColor: "purple", turns: 11, lastActivityAt: mockNow - 3 * 24 * 60 * 60_000, status: runningMock ? "streaming" : undefined },
         { key: "topic_p3a_pd", kind: "topic", label: t("mock.topicP3a"), root: "~/projects/joyquant-sys", topicId: "topic_p3a_pd", projectColor: "purple", turns: 9, lastActivityAt: mockNow - 4 * 24 * 60 * 60_000, status: runningMock ? "thinking" : undefined },
@@ -1205,6 +1246,34 @@ function makeMockApp(): AppBindings {
         async RunShellForTab(_tabID, command) {
           await withMockTabScope(_tabID, () => this.RunShell(command));
         },
+        async TerminalStart(req) {
+          const info = {
+            sessionId: "browser-dev-terminal",
+            cwd: req.workspaceRoot || "~/projects/joyquant-db",
+            shell: "Browser dev mock",
+          };
+          queueMicrotask(() => {
+            emitTerminal({ sessionId: info.sessionId, kind: "started", cwd: info.cwd, shell: info.shell });
+            emitTerminal({
+              sessionId: info.sessionId,
+              kind: "output",
+              data: "Native terminal binding is available in the Wails desktop app. Browser dev mode cannot attach to a real local shell.\n",
+            });
+          });
+          return info;
+        },
+        async TerminalWrite(sessionID, data) {
+          emitTerminal({ sessionId: sessionID, kind: "output", data });
+          emitTerminal({
+            sessionId: sessionID,
+            kind: "output",
+            data: "Command not executed: browser dev mode has no native terminal process.\n",
+          });
+        },
+        async TerminalResize(_sessionID, _cols, _rows) {},
+        async TerminalStop(sessionID) {
+          emitTerminal({ sessionId: sessionID, kind: "exit" });
+        },
         async Cancel() {
           cancelled = true;
           emitMockTurnDone();
@@ -1356,7 +1425,29 @@ function makeMockApp(): AppBindings {
     async SummarizeFrom() {},
     async SummarizeUpTo() {},
         async History() {
-          return [];
+          if (!threadMock) return [];
+          return [
+            {
+              role: "user",
+              content: "请按照 Codex App 的工作界面，把 Reasonix 桌面端对话区、环境信息和底部输入区都重构一下。",
+            },
+            {
+              role: "phase",
+              content: "Inspecting desktop workspace UI",
+            },
+            {
+              role: "assistant",
+              content:
+                "已按 Codex App 的工作台结构重构 Reasonix 工作态：左侧保留项目与最近对话，主线程收敛到中间列，右侧展示环境信息卡，底部输入区保持随时可继续请求。\n\n验证重点：线程标题栏、消息正文、变更卡片、输入框和环境信息需要在桌面与窄屏下都不重叠。",
+              reasoning: "Work state uses the same thread shell as the real Wails app; this mock transcript exists only for browser visual QA.",
+            },
+            {
+              role: "tool",
+              name: "edit_file",
+              content: "updated desktop/frontend/src/App.tsx and desktop/frontend/src/styles.css",
+              status: "done",
+            },
+          ];
         },
         async HistoryForTab(tabID?: string) {
           const tab = mockTabs.find((item) => item.id === tabID) ?? mockTabs.find((item) => item.active);
@@ -1615,7 +1706,7 @@ function makeMockApp(): AppBindings {
         });
       }
       if (!capSkills.some((s) => s.name === "local-dev")) {
-        capSkills.push({ name: "local-dev", description: "Local custom development workflow", scope: "custom", runAs: "inline", enabled: true });
+        capSkills.push({ name: "local-dev", description: "Local custom development workflow", scope: "custom", runAs: "inline", path: `${dir}/local-dev/SKILL.md`, enabled: true, removable: true });
       }
     },
     async RemoveSkillPath(path: string) {
@@ -1624,6 +1715,18 @@ function makeMockApp(): AppBindings {
         const idx = capSkills.findIndex((s) => s.name === "local-dev");
         if (idx >= 0) capSkills.splice(idx, 1);
       }
+    },
+    async RemoveSkill(name: string) {
+      const idx = capSkills.findIndex((s) => s.name === name && s.removable !== false);
+      if (idx < 0) throw new Error("skill cannot be removed");
+      capSkills.splice(idx, 1);
+      capSkillRoots = capSkillRoots
+        .map((root) => {
+          const before = root.skillItems ?? [];
+          const skillItems = before.filter((s) => s.name !== name);
+          return { ...root, skillItems, skills: Math.max(0, root.skills - (before.length - skillItems.length)) };
+        })
+        .filter((root) => root.skills > 0 || root.configured || root.scope !== "custom");
     },
     async RefreshSkills() {},
     async SetSkillEnabled(name: string, enabled: boolean) {
@@ -2185,6 +2288,10 @@ function makeMockApp(): AppBindings {
           ? { ...tab, projectColor: node.projectColor }
           : tab,
       );
+    },
+    async SetProjectPinned(workspaceRoot: string, pinned: boolean) {
+      const node = mockProjectTree.find((item) => item.kind === "project" && item.root === workspaceRoot);
+      if (node) node.pinned = pinned || undefined;
     },
     async ReorderProjects(workspaceRoots: string[]) {
       const projects = mockProjectTree.filter((node) => node.kind === "project");

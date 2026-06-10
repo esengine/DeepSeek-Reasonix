@@ -172,6 +172,37 @@ func TestRenameProjectUpdatesSidebarTitle(t *testing.T) {
 	}
 }
 
+func TestSetProjectPinnedPersistsInProjectTree(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectRoot := t.TempDir()
+	if err := addProject(projectRoot, "Client API"); err != nil {
+		t.Fatalf("add project: %v", err)
+	}
+	app := NewApp()
+	if err := app.SetProjectPinned(projectRoot, true); err != nil {
+		t.Fatalf("pin project: %v", err)
+	}
+	nodes := NewApp().ListProjectTree()
+	if len(nodes) != 1 {
+		t.Fatalf("project tree len = %d, want 1: %+v", len(nodes), nodes)
+	}
+	if !nodes[0].Pinned {
+		t.Fatalf("project should be pinned: %+v", nodes[0])
+	}
+
+	if err := app.SetProjectPinned(projectRoot, false); err != nil {
+		t.Fatalf("unpin project: %v", err)
+	}
+	nodes = NewApp().ListProjectTree()
+	if len(nodes) != 1 {
+		t.Fatalf("project tree len after unpin = %d, want 1: %+v", len(nodes), nodes)
+	}
+	if nodes[0].Pinned {
+		t.Fatalf("project should not be pinned after unpin: %+v", nodes[0])
+	}
+}
+
 func TestListWorkspacesUsesProjectRegistryTitles(t *testing.T) {
 	isolateDesktopUserDirs(t)
 

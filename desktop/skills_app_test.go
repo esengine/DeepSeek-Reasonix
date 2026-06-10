@@ -191,6 +191,14 @@ func TestAddSkillPathRestoresConventionRootWithoutCustomPath(t *testing.T) {
 }
 
 func TestCapabilitiesIncludesDisabledSkills(t *testing.T) {
+	projectSkillDir := filepath.Join(t.TempDir(), "review")
+	if err := os.MkdirAll(projectSkillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	projectSkillPath := filepath.Join(projectSkillDir, skill.SkillFile)
+	if err := os.WriteFile(projectSkillPath, []byte("---\ndescription: disabled\n---\nbody"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	a := NewApp()
 	a.setTestCtrl(control.New(control.Options{
 		Skills: []skill.Skill{
@@ -198,7 +206,7 @@ func TestCapabilitiesIncludesDisabledSkills(t *testing.T) {
 		},
 		AllSkills: []skill.Skill{
 			{Name: "explore", Description: "enabled", Scope: skill.ScopeBuiltin, RunAs: skill.RunSubagent},
-			{Name: "review", Description: "disabled", Scope: skill.ScopeBuiltin, RunAs: skill.RunSubagent},
+			{Name: "review", Description: "disabled", Scope: skill.ScopeProject, RunAs: skill.RunSubagent, Path: projectSkillPath},
 		},
 	}), "")
 	defer a.activeCtrl().Close()
@@ -216,15 +224,23 @@ func TestCapabilitiesIncludesDisabledSkills(t *testing.T) {
 
 	view := a.Capabilities()
 	states := map[string]bool{}
+	removable := map[string]bool{}
 	for _, sk := range view.Skills {
 		states[sk.Name] = sk.Enabled
+		removable[sk.Name] = sk.Removable
 	}
 	if states["explore"] != true {
 		t.Fatalf("explore should be enabled in capabilities: %+v", view.Skills)
 	}
+	if removable["explore"] {
+		t.Fatalf("built-in explore should not be removable: %+v", view.Skills)
+	}
 	enabled, ok := states["review"]
 	if !ok || enabled {
 		t.Fatalf("review should be disabled but present in capabilities: %+v", view.Skills)
+	}
+	if !removable["review"] {
+		t.Fatalf("project review should be removable: %+v", view.Skills)
 	}
 }
 

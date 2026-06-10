@@ -9,6 +9,8 @@
     "preview": "vite preview",
     "check:css": "node scripts/check-css-syntax.mjs src/styles.css && node scripts/check-z-index-tokens.mjs src/styles.css",
     "test:todo-visibility": "node scripts/test-todo-visibility.mjs",
+    "perf:smoke": "node scripts/perf-smoke.mjs",
+    "perf:bundle": "node scripts/perf-bundle.mjs",
     "typecheck": "tsc --noEmit",
     "test": "tsx src/__tests__/math-golden.test.ts && tsx src/__tests__/text-size.test.ts && tsx src/__tests__/provider-model-refresh.test.ts && tsx src/__tests__/goal-draft-mode.test.ts",
     "test:typecheck": "tsc --noEmit -p tsconfig.test.json",

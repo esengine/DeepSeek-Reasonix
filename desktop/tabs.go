@@ -1242,6 +1242,7 @@ type desktopProject struct {
 	Root   string   `json:"root"`
 	Title  string   `json:"title,omitempty"`
 	Color  string   `json:"color,omitempty"`
+	Pinned bool     `json:"pinned,omitempty"`
 	Topics []string `json:"topics"` // ordered topic IDs
 }
 
@@ -1412,6 +1413,9 @@ func normalizeProjectsFile(f desktopProjectFile) desktopProjectFile {
 			}
 			if out.Projects[i].Color == "" && p.Color != "" {
 				out.Projects[i].Color = p.Color
+			}
+			if p.Pinned {
+				out.Projects[i].Pinned = true
 			}
 			out.Projects[i].Topics = uniqueStrings(append(out.Projects[i].Topics, p.Topics...))
 			continue
@@ -1653,6 +1657,25 @@ func setProjectColor(root, color string) error {
 		}
 	}
 	f.Projects = append(f.Projects, desktopProject{Root: root, Color: color})
+	return saveProjectsFile(f)
+}
+
+func setProjectPinned(root string, pinned bool) error {
+	root = normalizeProjectRoot(root)
+	if root == "" {
+		return fmt.Errorf("project root is required")
+	}
+	f := loadProjectsFile()
+	for i, p := range f.Projects {
+		if p.Root == root {
+			f.Projects[i].Pinned = pinned
+			return saveProjectsFile(f)
+		}
+	}
+	if !pinned {
+		return saveProjectsFile(f)
+	}
+	f.Projects = append(f.Projects, desktopProject{Root: root, Pinned: true})
 	return saveProjectsFile(f)
 }
 
@@ -2001,6 +2024,7 @@ type ProjectNode struct {
 	Open           bool          `json:"open,omitempty"`
 	Running        bool          `json:"running,omitempty"`
 	Status         string        `json:"status,omitempty"`
+	Pinned         bool          `json:"pinned,omitempty"`
 	Children       []ProjectNode `json:"children,omitempty"`
 }
 
@@ -2324,6 +2348,15 @@ func (a *App) RenameProject(workspaceRoot, title string) error {
 // in the sidebar and tabs. Empty color restores the default accent.
 func (a *App) SetProjectColor(workspaceRoot, color string) error {
 	if err := setProjectColor(workspaceRoot, color); err != nil {
+		return err
+	}
+	a.emitProjectTreeChanged()
+	return nil
+}
+
+// SetProjectPinned updates whether a project is shown in the pinned work section.
+func (a *App) SetProjectPinned(workspaceRoot string, pinned bool) error {
+	if err := setProjectPinned(workspaceRoot, pinned); err != nil {
 		return err
 	}
 	a.emitProjectTreeChanged()
@@ -2817,6 +2850,7 @@ func (a *App) ListProjectTree() []ProjectNode {
 		}
 		node.Label = title
 		node.ProjectColor = p.Color
+		node.Pinned = p.Pinned
 		node.Children = children
 		out = append(out, node)
 	}

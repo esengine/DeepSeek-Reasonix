@@ -1726,6 +1726,9 @@ args = ["-y", "@playwright/mcp"]
 	app := NewApp()
 	app.setTestCtrl(control.New(control.Options{Host: plugin.NewHost()}), "")
 	defer app.activeCtrl().Close()
+	if tab := app.activeTab(); tab != nil {
+		tab.disabledMCP = map[string]ServerView{"playwright": {Name: "playwright"}}
+	}
 
 	if err := app.UpdateMCPServer("playwright", MCPServerInput{
 		Name:      "playwright",

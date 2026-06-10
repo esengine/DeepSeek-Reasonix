@@ -81,6 +81,28 @@ export interface WireAskQuestion {
   multi?: boolean;
 }
 
+export interface TerminalStartRequest {
+  tabId?: string;
+  workspaceRoot?: string;
+  cols?: number;
+  rows?: number;
+}
+
+export interface TerminalInfo {
+  sessionId: string;
+  cwd: string;
+  shell: string;
+}
+
+export interface TerminalEvent {
+  sessionId: string;
+  kind: "started" | "output" | "exit";
+  data?: string;
+  cwd?: string;
+  shell?: string;
+  err?: string;
+}
+
 export interface WireAsk {
   id: string;
   questions: WireAskQuestion[];
@@ -153,6 +175,7 @@ export interface ProjectNode {
   open?: boolean;
   running?: boolean;
   status?: ProjectTopicStatus;
+  pinned?: boolean;
   children?: ProjectNode[];
 }
 
@@ -282,6 +305,7 @@ export interface Meta {
   cwd: string;
   autoApproveTools?: boolean;
   bypass?: boolean; // legacy JSON key for YOLO/full-access tool auto-approval
+  collaborationMode?: CollaborationMode;
   toolApprovalMode?: ToolApprovalMode;
   goal?: string;
   goalStatus?: GoalStatus;
@@ -435,7 +459,9 @@ export interface SkillView {
   description: string;
   scope: string;
   runAs: string;
+  path?: string;
   enabled: boolean;
+  removable?: boolean;
 }
 export interface SkillRootSkillView {
   name: string;

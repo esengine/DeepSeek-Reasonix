@@ -4,12 +4,12 @@
 // new topic.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
-import { Archive, ChevronRight, Pencil, Plus, Folder, FolderPlus, Search, BriefcaseBusiness, Copy, FolderOpen, XCircle, History, Check, ListCollapse, ListRestart } from "lucide-react";
+import { Archive, ChevronRight, Pencil, Plus, Folder, FolderPlus, Search, BriefcaseBusiness, FolderOpen, ListCollapse, ListRestart, X, Pin, PinOff } from "lucide-react";
 import { asArray } from "../lib/array";
 import { app } from "../lib/bridge";
 import type { ProjectNode, ProjectTopicStatus } from "../lib/types";
 import { getLocale, useT, type DictKey, type Translator } from "../lib/i18n";
-import { PROJECT_COLOR_OPTIONS, projectColorValue } from "../lib/projectColors";
+import { projectColorValue } from "../lib/projectColors";
 import { ContextMenu, contextMenuPointFromEvent, type ContextMenuItem, type ContextMenuPoint } from "./ContextMenu";
 import { Tooltip } from "./Tooltip";
 
@@ -23,6 +23,8 @@ interface ProjectTreeProps {
   onCreateTopic?: (scope: string, workspaceRoot: string) => Promise<void> | void;
   onRenameTopic?: (topicId: string, title: string) => Promise<void> | void;
   onTopicsChanged?: () => Promise<void> | void;
+  onTreeLoaded?: (nodes: ProjectNode[]) => void;
+  excludeProjectRoots?: string[];
   refreshSignal?: number;
 }
 
@@ -38,6 +40,11 @@ function topicIsActive(node: ProjectNode, activeScope?: string, activeWorkspaceR
     activeScope === scope &&
     (scope === "global" || activeWorkspaceRoot === node.root)
   );
+}
+
+function nodeContainsActiveTopic(node: ProjectNode, activeScope?: string, activeWorkspaceRoot?: string, activeTopicId?: string): boolean {
+  if (topicIsActive(node, activeScope, activeWorkspaceRoot, activeTopicId)) return true;
+  return asArray(node.children).some((child) => nodeContainsActiveTopic(child, activeScope, activeWorkspaceRoot, activeTopicId));
 }
 
 function topicMetaLine(node: ProjectNode, t: Translator): string {
@@ -152,39 +159,18 @@ function projectAccentStyle(color?: string, fallbackValue?: string): CSSProperti
   return { "--project-accent": value } as CSSProperties;
 }
 
-function colorMenuLabel(label: string, color?: string, active = false) {
-  const value = projectColorValue(color);
-  return (
-    <span className="project-tree__color-option">
-      <span
-        className="project-tree__color-swatch"
-        style={value ? ({ "--project-accent": value } as CSSProperties) : undefined}
-        aria-hidden="true"
-      />
-      <span>{label}</span>
-      {active && <Check className="project-tree__color-check" size={12} />}
-    </span>
-  );
-}
-
 function revealLabelKey(platform: string): "projectTree.revealInFinder" | "projectTree.revealInExplorer" | "projectTree.revealInFileManager" {
   if (platform === "darwin") return "projectTree.revealInFinder";
   if (platform === "windows") return "projectTree.revealInExplorer";
   return "projectTree.revealInFileManager";
 }
 
-function projectColorLabel(t: Translator, color?: string): string {
-  switch (color) {
-    case "red": return t("projectTree.colorRed");
-    case "orange": return t("projectTree.colorOrange");
-    case "amber": return t("projectTree.colorAmber");
-    case "green": return t("projectTree.colorGreen");
-    case "teal": return t("projectTree.colorTeal");
-    case "blue": return t("projectTree.colorBlue");
-    case "purple": return t("projectTree.colorPurple");
-    case "pink": return t("projectTree.colorPink");
-    default: return t("projectTree.colorDefault");
-  }
+function topicDeepLink(scope: string, workspaceRoot: string | undefined, topicId: string): string {
+  const params = new URLSearchParams();
+  params.set("scope", scope);
+  if (workspaceRoot) params.set("workspaceRoot", workspaceRoot);
+  params.set("topicId", topicId);
+  return `reasonix://topic?${params.toString()}`;
 }
 
 export function ProjectTree({
@@ -197,23 +183,27 @@ export function ProjectTree({
   onCreateTopic,
   onRenameTopic,
   onTopicsChanged,
+  onTreeLoaded,
+  excludeProjectRoots = [],
   refreshSignal,
 }: ProjectTreeProps) {
   const t = useT();
   const [tree, setTree] = useState<ProjectNode[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [revealedProjects, setRevealedProjects] = useState<Set<string>>(new Set());
   const [manuallyCollapsed, setManuallyCollapsed] = useState<Set<string>>(new Set());
   const [creatingProject, setCreatingProject] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [editingTopic, setEditingTopic] = useState<string | null>(null);
   const [topicDraft, setTopicDraft] = useState("");
   const [menuTopic, setMenuTopic] = useState<string | null>(null);
+  const [pinnedTopics, setPinnedTopics] = useState<Set<string>>(new Set());
+  const [unreadTopics, setUnreadTopics] = useState<Set<string>>(new Set());
   const [menuProject, setMenuProject] = useState<{ key: string; root: string; path: string; scope: "global" | "project"; label: string } | null>(null);
   const [menuPoint, setMenuPoint] = useState<ContextMenuPoint | null>(null);
   const [editingProject, setEditingProject] = useState<{ key: string; root: string } | null>(null);
   const [projectDraft, setProjectDraft] = useState("");
   const [addingProject, setAddingProject] = useState(false);
-  const [confirmAction, setConfirmAction] = useState<{ topicId: string; action: "trash" } | null>(null);
   const [confirmRemoveProject, setConfirmRemoveProject] = useState<string | null>(null);
   const [dragProjectRoot, setDragProjectRoot] = useState<string | null>(null);
   const [dropProject, setDropProject] = useState<{ root: string; position: ProjectDropPosition } | null>(null);
@@ -226,7 +216,6 @@ export function ProjectTree({
     setMenuTopic(null);
     setMenuProject(null);
     setMenuPoint(null);
-    setConfirmAction(null);
     setConfirmRemoveProject(null);
   }, []);
 
@@ -243,6 +232,7 @@ export function ProjectTree({
       const nodes = await app.ListProjectTree();
       const list = asArray(nodes);
       setTree(list);
+      onTreeLoaded?.(list);
       setExpanded((prev) => {
         const next = new Set(prev);
         const collapsed = manuallyCollapsedRef.current;
@@ -254,7 +244,7 @@ export function ProjectTree({
     } catch {
       /* bridge unavailable */
     }
-  }, []);
+  }, [onTreeLoaded]);
 
   useEffect(() => {
     manuallyCollapsedRef.current = manuallyCollapsed;
@@ -395,7 +385,6 @@ export function ProjectTree({
     setMenuTopic(null);
     setMenuProject(null);
     setMenuPoint(null);
-    setConfirmAction(null);
     setEditingTopic(node.topicId ?? null);
     setTopicDraft(label);
   };
@@ -440,18 +429,8 @@ export function ProjectTree({
       await app.TrashTopic(topicId);
       setMenuTopic(null);
       setMenuPoint(null);
-      setConfirmAction(null);
       await refresh();
       await onTopicsChanged?.();
-    } catch {
-      /* ignore */
-    }
-  };
-
-  const copyProjectPath = async (path: string) => {
-    if (!path) return;
-    try {
-      await navigator.clipboard?.writeText(path);
     } catch {
       /* ignore */
     }
@@ -470,9 +449,9 @@ export function ProjectTree({
     }
   };
 
-  const setProjectColor = async (path: string, color: string) => {
+  const setProjectPinned = async (path: string, pinned: boolean) => {
     try {
-      await app.SetProjectColor(path, color);
+      await app.SetProjectPinned(path, pinned);
       setMenuProject(null);
       setMenuPoint(null);
       await refresh();
@@ -482,9 +461,43 @@ export function ProjectTree({
     }
   };
 
+  const copyText = async (text: string) => {
+    try {
+      await navigator.clipboard?.writeText(text);
+    } catch {
+      /* clipboard may be unavailable in web preview */
+    } finally {
+      closeMenu();
+    }
+  };
+
+  const toggleTopicPinned = (topicId: string) => {
+    setPinnedTopics((current) => {
+      const next = new Set(current);
+      if (next.has(topicId)) next.delete(topicId);
+      else next.add(topicId);
+      return next;
+    });
+    closeMenu();
+  };
+
+  const toggleTopicUnread = (topicId: string) => {
+    setUnreadTopics((current) => {
+      const next = new Set(current);
+      if (next.has(topicId)) next.delete(topicId);
+      else next.add(topicId);
+      return next;
+    });
+    closeMenu();
+  };
+
   const visibleTree = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return tree;
+    const excluded = new Set(excludeProjectRoots.filter(Boolean));
+    const baseTree = excluded.size > 0
+      ? tree.filter((node) => node.kind !== "project" || !node.root || !excluded.has(node.root))
+      : tree;
+    if (!q) return baseTree;
     const matches = (node: ProjectNode) =>
       [node.label, node.root, node.topicId].some((value) => (value ?? "").toLowerCase().includes(q));
     const filterNode = (node: ProjectNode): ProjectNode | null => {
@@ -494,10 +507,10 @@ export function ProjectTree({
       if (matches(node) || children.length > 0) return { ...node, children };
       return null;
     };
-    return tree
+    return baseTree
       .map(filterNode)
       .filter((node): node is ProjectNode => node !== null);
-  }, [query, tree]);
+  }, [excludeProjectRoots, query, tree]);
 
   const projectDragEnabled = query.trim() === "";
 
@@ -581,6 +594,8 @@ export function ProjectTree({
       const title = [label, statusLabel, meta].filter(Boolean).join(" · ");
       const topicId = node.topicId ?? "";
       const topicMenuOpen = menuTopic === topicId;
+      const topicPinned = pinnedTopics.has(topicId);
+      const topicUnread = unreadTopics.has(topicId);
       const openTopicMenu = (event: ReactMouseEvent<HTMLElement> | ReactKeyboardEvent<HTMLElement>) => {
         event.preventDefault();
         event.stopPropagation();
@@ -588,23 +603,80 @@ export function ProjectTree({
         setConfirmRemoveProject(null);
         setMenuPoint(contextMenuPointFromEvent(event));
         setMenuTopic(topicId);
-        setConfirmAction(null);
       };
       const topicMenuItems: ContextMenuItem[] = [
         {
-          key: "rename",
-          icon: <Pencil size={13} />,
+          key: "pin-topic",
+          label: t(topicPinned ? "projectTree.unpinTopic" : "projectTree.pinTopic"),
+          onSelect: () => toggleTopicPinned(topicId),
+        },
+        {
+          key: "rename-topic",
           label: t("projectTree.renameTopic"),
           onSelect: () => startRenameTopic(node, label),
         },
         {
-          key: "trash",
-          icon: <Archive size={13} />,
-          label: confirmAction?.topicId === topicId && confirmAction.action === "trash" ? t("history.confirmMoveToTrash") : t("history.moveToTrash"),
-          danger: true,
+          key: "archive-topic",
+          label: t("projectTree.archiveChat"),
+          onSelect: () => void trashTopic(topicId),
+        },
+        {
+          key: "mark-unread",
+          label: t(topicUnread ? "projectTree.markRead" : "projectTree.markUnread"),
+          onSelect: () => toggleTopicUnread(topicId),
+        },
+        { type: "separator", key: "topic-file-separator" },
+        {
+          key: "reveal-workdir",
+          label: t(revealLabelKey(platform)),
+          disabled: scope !== "project" || !node.root,
           onSelect: () => {
-            if (confirmAction?.topicId === topicId && confirmAction.action === "trash") void trashTopic(topicId);
-            else setConfirmAction({ topicId, action: "trash" });
+            if (node.root) void app.RevealPath(node.root);
+            closeMenu();
+          },
+        },
+        {
+          key: "copy-workdir",
+          label: t("projectTree.copyWorkdir"),
+          disabled: !node.root,
+          onSelect: () => void copyText(node.root ?? ""),
+        },
+        {
+          key: "copy-topic-id",
+          label: t("projectTree.copyTopicId"),
+          disabled: !topicId,
+          onSelect: () => void copyText(topicId),
+        },
+        {
+          key: "copy-deep-link",
+          label: t("projectTree.copyDeepLink"),
+          disabled: !topicId,
+          onSelect: () => void copyText(topicDeepLink(scope, node.root, topicId)),
+        },
+        { type: "separator", key: "topic-derive-separator" },
+        {
+          key: "derive-local",
+          label: t("projectTree.deriveLocal"),
+          onSelect: () => {
+            closeMenu();
+            void handleCreateTopic(scope, node.root ?? "", key);
+          },
+        },
+        {
+          key: "derive-worktree",
+          label: t("projectTree.deriveWorktree"),
+          onSelect: () => {
+            closeMenu();
+            void handleCreateTopic(scope, node.root ?? "", key);
+          },
+        },
+        { type: "separator", key: "topic-window-separator" },
+        {
+          key: "open-new-window",
+          label: t("projectTree.openNewWindow"),
+          onSelect: () => {
+            closeMenu();
+            void onOpenTopic(scope, node.root ?? "", topicId);
           },
         },
       ];
@@ -632,7 +704,7 @@ export function ProjectTree({
       return (
         <div
           key={key}
-          className={`project-tree__topic${scopeClass}${active ? " project-tree__topic--active" : ""}${node.running ? " project-tree__topic--running" : ""}${status ? ` project-tree__topic--status-${status}` : ""}${topicMenuOpen ? " project-tree__topic--menu-open" : ""}${meta ? " project-tree__topic--has-meta" : ""}`}
+          className={`project-tree__topic${scopeClass}${active ? " project-tree__topic--active" : ""}${node.running ? " project-tree__topic--running" : ""}${status ? ` project-tree__topic--status-${status}` : ""}${topicMenuOpen ? " project-tree__topic--menu-open" : ""}${topicUnread ? " project-tree__topic--unread" : ""}${meta ? " project-tree__topic--has-meta" : ""}`}
           style={accentStyle}
           onContextMenu={openTopicMenu}
         >
@@ -664,7 +736,7 @@ export function ProjectTree({
             open={topicMenuOpen}
             point={menuPoint}
             items={topicMenuItems}
-            minWidth={178}
+            minWidth={222}
             ariaLabel={t("projectTree.topicActions")}
             onClose={closeMenu}
           />
@@ -678,12 +750,20 @@ export function ProjectTree({
     const projectRoot = scope === "global" ? "" : node.root ?? "";
     const projectDragKey = scope === "global" ? GLOBAL_PROJECT_ORDER_KEY : projectRoot;
     const projectPath = node.root ?? "";
-    const colorTargetRoot = scope === "global" ? "" : projectPath;
     const projectLabel = node.label || (scope === "global" ? "Global" : "Untitled");
     const projectActive = activeScope === scope && (scope === "global" || activeWorkspaceRoot === node.root);
     const draggableProject = projectDragEnabled && depth === 0 && Boolean(projectDragKey) && editingProject?.key !== key;
     const projectDropPosition = dropProject?.root === projectDragKey ? dropProject.position : null;
-    const handleProjectDragStart = (event: ReactDragEvent<HTMLElement>) => {
+    const childLimit = 4;
+    const showAllChildren = query.trim() || revealedProjects.has(key) || children.length <= childLimit;
+    const activeChildIndex = children.findIndex((child) => nodeContainsActiveTopic(child, activeScope, activeWorkspaceRoot, activeTopicId));
+    const visibleChildren = showAllChildren
+      ? children
+      : activeChildIndex >= childLimit
+      ? [...children.slice(0, Math.max(0, childLimit - 1)), children[activeChildIndex]]
+      : children.slice(0, childLimit);
+    const hiddenChildren = Math.max(0, children.length - visibleChildren.length);
+    const handleProjectDragStart = (event: ReactDragEvent<HTMLDivElement>) => {
       if (!draggableProject) return;
       const target = event.target;
       if (target instanceof Element && target.closest(".project-tree__action-slot")) {
@@ -718,75 +798,58 @@ export function ProjectTree({
       event.preventDefault();
       event.stopPropagation();
       setMenuTopic(null);
-      setConfirmAction(null);
       setMenuPoint(contextMenuPointFromEvent(event));
       setMenuProject({ key, root: projectRoot, path: projectPath, scope, label: projectLabel });
       setConfirmRemoveProject(null);
     };
     const projectMenuItems: ContextMenuItem[] = [
-      {
-        key: "new-session",
-        icon: <Plus size={13} />,
-        label: t("projectTree.newTopic"),
-        onSelect: () => {
-          void handleCreateTopic(scope, projectRoot, key);
-        },
-      },
       ...(scope === "project"
         ? [
             {
-              key: "project-history",
-              icon: <History size={13} />,
-              label: t("projectTree.projectHistory"),
+              key: node.pinned ? "unpin-project" : "pin-project",
+              icon: node.pinned ? <PinOff size={18} /> : <Pin size={18} />,
+              label: t(node.pinned ? "projectTree.unpinProject" : "projectTree.pinProject"),
               onSelect: () => {
+                void setProjectPinned(projectRoot, !node.pinned);
+              },
+            },
+          ]
+        : []),
+      ...(scope === "project"
+        ? [
+            {
+              key: "reveal",
+              icon: <FolderOpen size={18} />,
+              label: t(revealLabelKey(platform)),
+              disabled: !projectPath,
+              onSelect: () => {
+                void app.RevealPath(projectPath);
                 closeMenu();
-                void onOpenProjectHistory(scope, projectRoot);
               },
             },
           ]
         : []),
       {
         key: "rename",
-        icon: <Pencil size={13} />,
+        icon: <Pencil size={18} />,
         label: t("projectTree.renameProject"),
         onSelect: () => startRenameProject(key, projectRoot, projectLabel),
       },
-      { type: "separator" as const, key: "color-separator" },
-      ...PROJECT_COLOR_OPTIONS.map((option): ContextMenuItem => ({
-        key: `color-${option.key || "default"}`,
-        label: colorMenuLabel(projectColorLabel(t, option.key), option.key, (node.projectColor || "") === option.key),
-        onSelect: () => {
-          void setProjectColor(colorTargetRoot, option.key);
-        },
-      })),
-      { type: "separator" as const, key: "path-separator" },
       {
-        key: "reveal",
-        icon: <FolderOpen size={13} />,
-        label: t(revealLabelKey(platform)),
-        disabled: !projectPath,
+        key: "project-history",
+        icon: <Archive size={18} />,
+        label: t("projectTree.archiveChats"),
         onSelect: () => {
-          void app.RevealPath(projectPath);
           closeMenu();
-        },
-      },
-      {
-        key: "copy-path",
-        icon: <Copy size={13} />,
-        label: t("projectTree.copyPath"),
-        disabled: !projectPath,
-        onSelect: () => {
-          void copyProjectPath(projectPath);
-          closeMenu();
+          void onOpenProjectHistory(scope, projectRoot);
         },
       },
       ...(scope === "project"
         ? [
-            { type: "separator" as const, key: "remove-separator" },
             {
               key: "remove",
-              icon: <XCircle size={13} />,
-              label: confirmRemoveProject === key ? t("projectTree.confirmRemoveProject") : t("projectTree.removeProject"),
+              icon: <X size={18} />,
+              label: confirmRemoveProject === key ? t("projectTree.confirmRemoveProject") : t("projectTree.remove"),
               danger: true,
               onSelect: () => {
                 if (confirmRemoveProject === key) void removeProject(projectPath);
@@ -864,7 +927,7 @@ export function ProjectTree({
             ) : (
               <span style={{ width: 12 }} />
             )}
-            <Folder size={12} />
+            {isExpanded ? <FolderOpen size={16} /> : <Folder size={16} />}
             <span className="project-tree__folder-color" aria-hidden="true" />
             <span className="project-tree__folder-label">{projectLabel}</span>
           </button>
@@ -885,16 +948,30 @@ export function ProjectTree({
             open={menuProject?.key === key}
             point={menuPoint}
             items={projectMenuItems}
-            minWidth={212}
+            minWidth={244}
             ariaLabel={t("projectTree.projectActions")}
             onClose={closeMenu}
           />
         </div>
-        {hasChildren && (
-          <div className={`project-tree__children${isExpanded ? " project-tree__children--expanded" : ""}`}>
-            <div className="project-tree__children-inner">
-              {children.map((child) => renderNode(child, depth + 1))}
-            </div>
+        {isExpanded && hasChildren && (
+          <div className="project-tree__children">
+            {visibleChildren.map((child) => renderNode(child, depth + 1))}
+            {hiddenChildren > 0 && (
+              <button
+                type="button"
+                className="project-tree__show-more"
+                style={{ paddingLeft: 14 + (depth + 1) * 16 }}
+                onClick={() => {
+                  setRevealedProjects((prev) => {
+                    const next = new Set(prev);
+                    next.add(key);
+                    return next;
+                  });
+                }}
+              >
+                {t("sidebar.showMore")}
+              </button>
+            )}
           </div>
         )}
       </div>

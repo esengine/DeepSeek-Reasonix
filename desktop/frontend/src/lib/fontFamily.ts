@@ -1,10 +1,11 @@
-export const FONT_FAMILIES = ["system", "yahei", "pingfang", "noto"] as const;
+export const FONT_FAMILIES = ["harmony", "system", "yahei", "pingfang", "noto"] as const;
 
 export type FontFamily = (typeof FONT_FAMILIES)[number];
 
-export const DEFAULT_FONT_FAMILY: FontFamily = "system";
+export const DEFAULT_FONT_FAMILY: FontFamily = "harmony";
 
 const FONT_FAMILY_KEY = "reasonix-font-family";
+const FONT_FAMILY_MIGRATION_KEY = "reasonix-font-family-v2";
 
 export function isFontFamily(value: unknown): value is FontFamily {
   return typeof value === "string" && (FONT_FAMILIES as readonly string[]).includes(value);
@@ -12,6 +13,8 @@ export function isFontFamily(value: unknown): value is FontFamily {
 
 export function getFontFamily(): FontFamily {
   const stored = typeof localStorage !== "undefined" ? localStorage.getItem(FONT_FAMILY_KEY) : null;
+  const migrated = typeof localStorage !== "undefined" ? localStorage.getItem(FONT_FAMILY_MIGRATION_KEY) === "1" : true;
+  if (stored === "system" && !migrated) return DEFAULT_FONT_FAMILY;
   return isFontFamily(stored) ? stored : DEFAULT_FONT_FAMILY;
 }
 
@@ -22,6 +25,7 @@ export function applyFontFamily(font: FontFamily): void {
   else root.setAttribute("data-font-family", font);
   try {
     localStorage.setItem(FONT_FAMILY_KEY, font);
+    localStorage.setItem(FONT_FAMILY_MIGRATION_KEY, "1");
   } catch {
     /* private mode / no storage */
   }

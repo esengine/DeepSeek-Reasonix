@@ -35,6 +35,7 @@ import { FloatingMenu, FloatingMenuItems } from "./FloatingMenu";
 import { Markdown } from "./Markdown";
 import { Tooltip } from "./Tooltip";
 import { AnchoredPopover } from "./AnchoredPopover";
+import { VirtualList } from "./VirtualList";
 
 const WORKSPACE_TREE_MIN_WIDTH = 300;
 const WORKSPACE_TREE_DEFAULT_WIDTH = 300;
@@ -207,6 +208,7 @@ export function WorkspacePanel({
   const panelRef = useRef<HTMLElement>(null);
   const filterRef = useRef<HTMLInputElement>(null);
   const previewBodyRef = useRef<HTMLDivElement>(null);
+  const treeScrollRef = useRef<HTMLDivElement>(null);
   const [entriesByDir, setEntriesByDir] = useState<Record<string, DirEntry[]>>({});
   const [openDirs, setOpenDirs] = useState<Set<string>>(() => new Set([""]));
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
@@ -1042,41 +1044,44 @@ export function WorkspacePanel({
           <Search size={14} />
           <input ref={filterRef} value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={searchPlaceholder} />
         </div>
-        <div className="workspace-tree" onContextMenu={openTreeBlankMenu}>
-          {flattened
-            ? flattened.map(({ path, entry }) => {
-                const dir = parentPath(path);
-                return (
-                  <button
-                    key={path}
-                    className={`workspace-tree__row workspace-tree__row--search${selectedPath === path ? " workspace-tree__row--active" : ""}`}
-                    draggable
-                    onDragStart={(event) => startTreeDrag(event, path, entry.isDir)}
-                    onClick={() => {
-                      if (entry.isDir) {
-                        toggleDir(path);
-                      } else {
-                        if (selectedPath === path) {
-                          setSelectedPath(null);
-                        } else {
-                          selectFile(path);
-                        }
-                      }
-                    }}
-                    onContextMenu={(event) => openTreeMenu(event, path, entry.isDir)}
-                  >
-                    {entry.isDir ? (
-                      <Folder size={14} className="workspace-tree__icon workspace-tree__icon--dir" />
-                    ) : (
-                      <FileText size={14} className="workspace-tree__icon" />
-                    )}
-                    <span className="workspace-tree__result">
-                      <span className="workspace-tree__result-name">{basename(path)}</span>
-                      {dir && <span className="workspace-tree__result-dir">{dir}</span>}
-                    </span>
-                  </button>
-                );
-              })
+        <div className="workspace-tree" ref={treeScrollRef} onContextMenu={openTreeBlankMenu}>
+          {viewMode === "changed"
+            ? (
+              <div className="workspace-empty">
+                {loadingHistory ? t("workspace.loading") : t("workspace.changedTab")}
+              </div>
+            )
+            : flattened
+            ? (
+              <VirtualList
+                items={flattened}
+                scrollRef={treeScrollRef}
+                estimateSize={36}
+                getKey={({ path }) => path}
+                render={({ path, entry }) => {
+                  const dir = parentPath(path);
+                  return (
+                    <button
+                      className={`workspace-tree__row workspace-tree__row--search${selectedPath === path ? " workspace-tree__row--active" : ""}`}
+                      draggable
+                      onDragStart={(event) => startTreeDrag(event, path, entry.isDir)}
+                      onClick={() => (entry.isDir ? toggleDir(path) : selectFile(path))}
+                      onContextMenu={(event) => openTreeMenu(event, path, entry.isDir)}
+                    >
+                      {entry.isDir ? (
+                        <Folder size={14} className="workspace-tree__icon workspace-tree__icon--dir" />
+                      ) : (
+                        <FileText size={14} className="workspace-tree__icon" />
+                      )}
+                      <span className="workspace-tree__result">
+                        <span className="workspace-tree__result-name">{basename(path)}</span>
+                        {dir && <span className="workspace-tree__result-dir">{dir}</span>}
+                      </span>
+                    </button>
+                  );
+                }}
+              />
+            )
             : renderRows("", 0)}
         </div>
       </section>

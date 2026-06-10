@@ -1,4 +1,4 @@
-import type { ReactNode, RefObject } from "react";
+import type { ReactNode, Ref } from "react";
 import { ChevronDown, ChevronUp, PauseCircle } from "lucide-react";
 
 export function PromptShelf({
@@ -21,7 +21,7 @@ export function PromptShelf({
   children?: ReactNode;
   crumbs?: ReactNode;
   quickActions?: ReactNode;
-  barRef?: RefObject<HTMLDivElement | null>;
+  barRef?: Ref<HTMLDivElement>;
   actionsWrap?: boolean;
 }) {
   return (

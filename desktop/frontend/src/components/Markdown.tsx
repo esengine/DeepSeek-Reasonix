@@ -1,4 +1,4 @@
-import { memo, useDeferredValue } from "react";
+import { memo, useDeferredValue, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -50,16 +50,38 @@ const components: Components = {
   ),
 };
 
+const remarkPlugins = [remarkGfm, remarkMath];
+const rehypePlugins = [rehypeKatex];
+const normalizedCache = new Map<string, string>();
+const NORMALIZED_CACHE_LIMIT = 160;
+
+function normalizeCached(text: string): string {
+  const cached = normalizedCache.get(text);
+  if (cached !== undefined) {
+    normalizedCache.delete(text);
+    normalizedCache.set(text, cached);
+    return cached;
+  }
+  const normalized = normalizeMath(text);
+  normalizedCache.set(text, normalized);
+  if (normalizedCache.size > NORMALIZED_CACHE_LIMIT) {
+    const oldest = normalizedCache.keys().next().value;
+    if (oldest !== undefined) normalizedCache.delete(oldest);
+  }
+  return normalized;
+}
+
 export const Markdown = memo(function Markdown({ text }: { text: string }) {
   const deferred = useDeferredValue(text);
+  const normalized = useMemo(() => normalizeCached(deferred), [deferred]);
   return (
     <div className="md">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[rehypeKatex]}
+        remarkPlugins={remarkPlugins}
+        rehypePlugins={rehypePlugins}
         components={components}
       >
-        {normalizeMath(deferred)}
+        {normalized}
       </ReactMarkdown>
     </div>
   );

@@ -490,15 +490,16 @@ export function useController() {
   activeTabIdRef.current = activeTabId;
   stateRef.current = activeState;
 
-  // Dispatch to a specific tab's state. If the tab doesn't have state yet, it's
-  // created. Bumps the version so React re-renders when it becomes active.
+  // Dispatch to a specific tab's state. Background tabs keep their data hot in
+  // statesRef, but only the active tab bumps React; switching tabs already
+  // triggers a render, so background token streams no longer repaint the view.
   const dispatchTo = useCallback((tabId: string, action: Action) => {
     const states = statesRef.current;
     const prev = getOrCreateState(states, tabId);
     const next = reducer(prev, action);
     if (prev !== next) {
       states.set(tabId, next);
-      bump();
+      if (tabId === activeTabIdRef.current) bump();
     }
   }, [bump]);
 
