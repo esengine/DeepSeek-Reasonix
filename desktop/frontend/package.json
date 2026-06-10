@@ -20,6 +20,7 @@
     "highlight.js": "^11.10.0",
     "katex": "^0.17.0",
     "lucide-react": "^1.17.0",
+    "ol": "^10.4.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-markdown": "^10.1.0",

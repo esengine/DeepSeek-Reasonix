@@ -16953,3 +16953,147 @@ a[href] {
   from { opacity: 0; transform: translateY(-8px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+
+/* ── GeoStatusDots (titlebar branded icons + badge) ────────── */
+
+.geodots {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: 8px;
+}
+
+.geodot {
+  position: relative;
+  display: inline-flex;
+}
+
+.geodot__btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+
+.geodot__btn:hover {
+  background: var(--sidebar-hover);
+}
+
+.geodot__icon {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+
+.geodot__badge {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  border: 1px solid var(--bg);
+}
+
+.geodot__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-local-backdrop);
+}
+
+.geodot__popover {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  min-width: 220px;
+  z-index: var(--z-local-popover);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+}
+
+.geodot__pophead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.geodot__popicon { width: 14px; height: 14px; }
+.geodot__popstatus { margin-left: auto; font-weight: 400; }
+
+.geodot__popbody {
+  font-size: 11px;
+  color: var(--fg-dim);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.geodot__poprow {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.geodot__popkey { color: var(--fg-faint); }
+.geodot__popval {
+  color: var(--fg-dim);
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 140px;
+}
+
+/* ── GeoMapViewer ──────────────────────────────────────────── */
+
+.geomap {
+  display: flex;
+  flex-direction: column;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.geomap__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px;
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.geomap__basemap {
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 11px;
+}
+
+.geomap__canvas {
+  width: 100%;
+  height: 360px;
+  min-height: 200px;
+}
+
+.geomap__info {
+  padding: 2px 8px;
+  font-size: 11px;
+  color: var(--fg-faint);
+  background: var(--bg-elev);
+  border-top: 1px solid var(--border);
+}
