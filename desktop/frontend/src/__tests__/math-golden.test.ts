@@ -133,24 +133,13 @@ eq(normalizeMath("\\(x^2\\)"), "$x^2$", "\\(…\\) → $…$");
 eq(normalizeMath("\\[E=mc^2\\]"), "$$E=mc^2$$", "\\[…\\] → $$…$$");
 eq(normalizeMath("\\\\[4pt]"), "\\\\[4pt]", "\\\\[ line-break spacing protected");
 
-// ── normalizeMath — \\slashed conversion (regression) ─────────────────────────────
-// KaTeX doesn't support \\slashed (used in physics for Feynman slash notation),
-// so convert it to \\not which has a similar visual effect.
-check("\\\\slashed{p} is converted to \\not{p}", () => {
-  return normalizeMath("$\\\\slashed{p}$") === "$\\\\not{p}$";
-});
-check("\\\\slashed{\\\\partial} is converted to \\not{\\\\partial}", () => {
-  return normalizeMath("$\\\\slashed{\\\\partial}$") === "$\\\\not{\\\\partial}$";
-});
-check("\\\\slashed in prose context", () => {
-  return normalizeMath("The momentum $\\\\slashed{p}$ is conserved") === "The momentum $\\\\not{p}$ is conserved";
-});
-check("\\\\slashed\\\\epsilon(0) → \\not{\\epsilon(0)} (Greek + function)", () => {
-  return normalizeMath("$\\slashed\\epsilon(0)$") === "$\\not{\\epsilon(0)}$";
-});
-check("\\\\slashed a → \\not a (single letter)", () => {
-  return normalizeMath("$\\\\slashed a$") === "$\\\\not a$";
-});
+// ── normalizeMath — \slashed conversion (regression) ──────────────────────────
+// KaTeX has no \slashed (Feynman slash notation); it is rewritten to \not.
+eq(normalizeMath("$\\slashed{p}$"), "$\\not{p}$", "\\slashed{p} → \\not{p}");
+eq(normalizeMath("$\\slashed{\\partial}$"), "$\\not{\\partial}$", "\\slashed{\\partial} → \\not{\\partial}");
+eq(normalizeMath("The momentum $\\slashed{p}$ is conserved"), "The momentum $\\not{p}$ is conserved", "\\slashed in prose");
+eq(normalizeMath("$\\slashed\\epsilon(0)$"), "$\\not{\\epsilon(0)}$", "\\slashed\\epsilon(0) → \\not{\\epsilon(0)} (unbraced fn)");
+eq(normalizeMath("$\\slashed a$"), "$\\not a$", "\\slashed a → \\not a (unbraced letter)");
 
 console.log("\nnormalizeMath — non-math dollar filtering");
 eq(normalizeMath("costs $5$ today"), "costs &#36;5&#36; today", "$5$ not math");
