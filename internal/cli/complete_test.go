@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -466,4 +467,166 @@ func hasLabel(items []compItem, label string) bool {
 		}
 	}
 	return false
+}
+
+// --- fuzzy matching for / completion ---
+
+// TestFuzzyFilterSlashSubsequence proves the slash-menu fuzzy filter matches
+// command labels whose letters appear in order, even when they are not a
+// prefix: /mdl should surface /model (m-o-d-l) without also pulling in /mcp
+// (m-c-p is not a subsequence of m-d-l).
+func TestFuzzyFilterSlashSubsequence(t *testing.T) {
+	m := newTestChatTUI()
+	m.input.SetValue("/mdl")
+	m.updateCompletion()
+
+	if !m.completion.active {
+		t.Fatal("menu should open on a partial / token")
+	}
+	if !hasLabel(m.completion.items, "/model") {
+		t.Errorf("/model should match /mdl as a subsequence: %v", labels(m.completion.items))
+	}
+	if hasLabel(m.completion.items, "/mcp") {
+		t.Errorf("/mcp should NOT match /mdl (m-c-p is not a subsequence of m-d-l): %v", labels(m.completion.items))
+	}
+}
+
+// TestFuzzyFilterSlashPrefixFirst proves prefix hits rank ahead of
+// subsequence-only hits, matching the menu behavior we want: typing "/mo"
+// should put /model at the top, not buried after non-prefix matches.
+func TestFuzzyFilterSlashPrefixFirst(t *testing.T) {
+	m := newTestChatTUI()
+	m.input.SetValue("/mo")
+	m.updateCompletion()
+
+	if !m.completion.active {
+		t.Fatal("menu should open for /mo")
+	}
+	// /model is the only built-in whose label starts with /mo.
+	if len(m.completion.items) == 0 || m.completion.items[0].label != "/model" {
+		t.Fatalf("prefix hit /model should rank first, got %v", labels(m.completion.items))
+	}
+	// Any other built-ins in the list are subsequence-only matches and must
+	// therefore NOT be prefix hits of /mo.
+	for _, it := range m.completion.items[1:] {
+		if strings.HasPrefix(it.label, "/mo") {
+			t.Errorf("%q should not appear after /model (it is a prefix hit too)", it.label)
+		}
+	}
+}
+
+// TestFuzzyFilterSlashCaseInsensitive proves the subsequence match is
+// case-insensitive, since users routinely type commands in lowercase while
+// the menu labels are all lowercase already.
+func TestFuzzyFilterSlashCaseInsensitive(t *testing.T) {
+	m := newTestChatTUI()
+	m.input.SetValue("/COMP")
+	m.updateCompletion()
+
+	if !hasLabel(m.completion.items, "/compact") {
+		t.Fatalf("uppercase /COMP should still match /compact: %v", labels(m.completion.items))
+	}
+}
+
+// TestFuzzyFilterSlashEmptyQueryMatchesAll proves a bare "/" opens the menu
+// with every command -- the same behavior the old prefix filter had, since
+// every label trivially starts with "".
+func TestFuzzyFilterSlashEmptyQueryMatchesAll(t *testing.T) {
+	m := newTestChatTUI()
+	all := len(m.slashItems())
+
+	m.input.SetValue("/")
+	m.updateCompletion()
+
+	if !m.completion.active {
+		t.Fatal("menu should open on a bare /")
+	}
+	if got := len(m.completion.items); got != all {
+		t.Errorf("bare / should list every slash item, got %d want %d", got, all)
+	}
+}
+
+// TestFuzzyFilterSlashNoMatchClosesMenu proves the menu still closes when the
+// query matches nothing -- the contract the existing /zzz test relies on.
+func TestFuzzyFilterSlashNoMatchClosesMenu(t *testing.T) {
+	m := newTestChatTUI()
+	m.input.SetValue("/xzqzqz")
+	m.updateCompletion()
+
+	if m.completion.active {
+		t.Errorf("menu should close when no command matches: items=%v", labels(m.completion.items))
+	}
+}
+
+// TestFuzzyFilterSlashAppliesToCustomCommands proves the fuzzy filter also
+// covers custom slash commands (not just built-ins) -- the practical payoff,
+// since users tend to invent short names like /review and type them fast.
+func TestFuzzyFilterSlashAppliesToCustomCommands(t *testing.T) {
+	m := newTestChatTUI()
+	m.commands = []command.Command{
+		{Name: "review", Description: "review the diff"},
+		{Name: "release-notes", Description: "draft release notes"},
+	}
+	// /rle should match /release-notes (r-l-e in order) but NOT /review
+	// (r-e-v-i-e-w has no 'l' after the initial r).
+	m.input.SetValue("/rle")
+	m.updateCompletion()
+
+	if !hasLabel(m.completion.items, "/release-notes") {
+		t.Errorf("/release-notes should match /rle: %v", labels(m.completion.items))
+	}
+	if hasLabel(m.completion.items, "/review") {
+		t.Errorf("/review should NOT match /rle (r-e-v-i-e-w has no 'l' after r): %v", labels(m.completion.items))
+	}
+}
+
+// TestFuzzyFilterSlashAcceptFillsInput proves the end-to-end accept path still
+// works under the fuzzy filter: typing /compt then Tab should fill the input
+// with the top-ranked hit, which is /compact.
+func TestFuzzyFilterSlashAcceptFillsInput(t *testing.T) {
+	m := newTestChatTUI()
+	m.input.SetValue("/compt")
+	m.updateCompletion()
+
+	if !m.completion.active {
+		t.Fatal("menu should open for /compt")
+	}
+	if m.completion.items[0].label != "/compact" {
+		t.Fatalf("/compt should rank /compact first via subsequence match, got %v",
+			labels(m.completion.items))
+	}
+	m.acceptCompletion()
+	if got := m.input.Value(); got != "/compact " {
+		t.Errorf("accept should fill the input with /compact , got %q", got)
+	}
+}
+
+// TestSubsequenceMatchUnit covers the matcher directly so future tweaks to the
+// scoring policy (prefix-first vs. subsequence-only) don't have to re-derive
+// edge cases from end-to-end tests.
+func TestSubsequenceMatchUnit(t *testing.T) {
+	cases := []struct {
+		target, query string
+		want          bool
+	}{
+		{"", "", true},
+		{"", "a", false},
+		{"/model", "", true},
+		{"/model", "mod", true},
+		{"/model", "mdl", true}, // m-o-d-l in order
+		{"/model", "xz", false},
+		{"/compact", "compt", true},
+		{"/compact", "cmpt", true}, // c then m then p then t
+		{"/branch", "brh", true},
+		{"/branch", "brnch", true},
+		{"/paste-image", "pimg", true}, // p-a-s-t-e-...-i-m-g in order
+		{"/mcp", "mrl", false},         // m-c-p is not a subsequence of m-r-l
+		{"/review", "rle", false},      // r-e-v-i-e-w has no 'l'
+		{"/memory", "memr", true},      // m-e-m-r in order (skip o)
+	}
+	for _, c := range cases {
+		if got := subsequenceMatch(strings.ToLower(c.target), strings.ToLower(c.query)); got != c.want {
+			t.Errorf("subsequenceMatch(%q, %q) = %v, want %v", c.target, c.query, got, c.want)
+		}
+	}
 }

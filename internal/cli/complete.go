@@ -126,7 +126,7 @@ func (m *chatTUI) updateCompletion() {
 		}
 		if !strings.ContainsAny(val, " \t\n") {
 			// Still naming the command itself.
-			if items := filterByPrefix(m.slashItems(), val); len(items) > 0 {
+			if items := fuzzyFilterSlash(m.slashItems(), val); len(items) > 0 {
 				m.setCompletion(compSlash, items, 0)
 				return
 			}
@@ -276,16 +276,60 @@ func (m *chatTUI) setCompletion(kind compKind, items []compItem, replaceFrom int
 	m.completion = completion{active: true, kind: kind, items: items, sel: sel, replaceFrom: replaceFrom}
 }
 
-// filterByPrefix keeps items whose label starts with prefix (case-insensitive).
-func filterByPrefix(items []compItem, prefix string) []compItem {
-	lp := strings.ToLower(prefix)
-	var out []compItem
+// fuzzyFilterSlash returns the slash-menu items that match query as a
+// case-insensitive subsequence of their label, with prefix hits ranked first
+// (each group preserved in the input order from slashItems). An empty query
+// matches everything — the same behavior the old prefix filter had, since
+// every label trivially starts with "". A query that matches nothing returns
+// nil so the caller can fall through and close the menu.
+func fuzzyFilterSlash(items []compItem, query string) []compItem {
+	if query == "" {
+		out := make([]compItem, len(items))
+		copy(out, items)
+		return out
+	}
+	lq := strings.ToLower(query)
+	var prefix, rest []compItem
 	for _, it := range items {
-		if strings.HasPrefix(strings.ToLower(it.label), lp) {
-			out = append(out, it)
+		l := strings.ToLower(it.label)
+		switch {
+		case strings.HasPrefix(l, lq):
+			prefix = append(prefix, it)
+		case subsequenceMatch(l, lq):
+			rest = append(rest, it)
 		}
 	}
+	if len(prefix) == 0 && len(rest) == 0 {
+		return nil
+	}
+	out := make([]compItem, 0, len(prefix)+len(rest))
+	out = append(out, prefix...)
+	out = append(out, rest...)
 	return out
+}
+
+// subsequenceMatch reports whether query appears in target as a case-folded
+// subsequence (each rune of query in order, not necessarily contiguous). It is
+// the matcher behind the slash-menu fuzzy filter: typing "/modl" matches
+// "/model", "/memory", or any other label where m-o-d-l appear in that order.
+// Callers must pass already case-folded strings; an empty query matches
+// every target, so callers that want a "no match" signal on the empty input
+// should check that first.
+func subsequenceMatch(target, query string) bool {
+	if query == "" {
+		return true
+	}
+	qr := []rune(query)
+	ti := 0
+	for _, r := range target {
+		if r == qr[ti] {
+			ti++
+			if ti == len(qr) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // activeAtToken finds the @-reference token ending at the cursor (assumed at the
