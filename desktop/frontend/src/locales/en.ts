@@ -358,6 +358,15 @@ export const en = {
   "ask.customPlaceholder": "Type your own answer…",
   "ask.justChat": "Just chat",
 
+  // clear context confirmation
+  "clearContext.title": "Clear current context",
+  "clearContext.badge": "local only",
+  "clearContext.prompt": "Clear current context without saving?",
+  "clearContext.detail": "This deletes the current transcript from local history and keeps only the system prompt.",
+  "clearContext.clear": "Clear",
+  "clearContext.done": "Current context cleared",
+  "clearContext.failed": "Could not clear current context",
+
   // history drawer
   "history.title": "History",
   "history.trashTitle": "Trash",

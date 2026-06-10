@@ -694,7 +694,7 @@ func lastAssistantText(msgs []provider.Message) string {
 // composition — emitting all output as events. The HTTP/SSE server uses this so
 // a browser client only POSTs the typed line.
 //
-// Slash commands route to the matching primitive: /compact and /new (or /clear)
+// Slash commands route to the matching primitive: /compact, /new, and /clear
 // run their session op and emit a Notice; /mcp__server__prompt and custom /commands
 // resolve to a turn; an unknown slash emits a Notice. Anything else is a normal
 // turn with its @-references resolved first.
@@ -738,12 +738,20 @@ func (c *Controller) submit(input, display string) {
 				}
 			}
 		}()
-	case trimmed == "/new" || trimmed == "/clear":
+	case trimmed == "/new":
 		go func() {
 			if err := c.NewSession(); err != nil {
 				c.notice("new session failed: " + err.Error())
 			} else {
 				c.notice("new session")
+			}
+		}()
+	case trimmed == "/clear":
+		go func() {
+			if err := c.ClearSession(); err != nil {
+				c.notice("clear context failed: " + err.Error())
+			} else {
+				c.notice("context cleared")
 			}
 		}()
 	case strings.HasPrefix(trimmed, "/mcp__"):
@@ -1264,6 +1272,57 @@ func (c *Controller) NewSession() error {
 	c.startedOnce = true // NewSession fires SessionStart itself; don't re-fire on the next turn
 	c.mu.Unlock()
 	c.hooks.SessionStart(context.Background())
+	return nil
+}
+
+// ClearSession discards the current conversation without preserving it in
+// resume/history, then rotates to a clean session carrying the same system prompt.
+func (c *Controller) ClearSession() error {
+	if c.executor == nil {
+		return nil
+	}
+	c.mu.Lock()
+	running := c.running
+	oldPath := c.sessionPath
+	c.mu.Unlock()
+	if running {
+		return fmt.Errorf("cannot clear while a turn is running")
+	}
+	if err := removeSessionArtifacts(oldPath); err != nil {
+		return err
+	}
+	c.hooks.SessionEnd(context.Background())
+	if c.sessionDir != "" {
+		c.mu.Lock()
+		c.sessionPath = agent.NewSessionPath(c.sessionDir, c.label)
+		c.mu.Unlock()
+	}
+	c.executor.SetSession(agent.NewSession(c.systemPrompt))
+	c.rebindCheckpoints(c.SessionPath())
+	c.mu.Lock()
+	c.startedOnce = true
+	c.mu.Unlock()
+	c.hooks.SessionStart(context.Background())
+	return nil
+}
+
+func removeSessionArtifacts(path string) error {
+	if path == "" {
+		return nil
+	}
+	for _, p := range []string{path, agent.BranchMetaPath(path)} {
+		if p == "" {
+			continue
+		}
+		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	if dir := ckptDir(path); dir != "" {
+		if err := os.RemoveAll(dir); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
 	return nil
 }
 

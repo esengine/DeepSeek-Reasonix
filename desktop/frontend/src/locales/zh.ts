@@ -359,6 +359,15 @@ export const zh: Record<DictKey, string> = {
   "ask.customPlaceholder": "输入你自己的答案…",
   "ask.justChat": "只是聊聊",
 
+  // 清空上下文确认
+  "clearContext.title": "清空当前上下文",
+  "clearContext.badge": "仅本地",
+  "clearContext.prompt": "清空当前上下文且不保存？",
+  "clearContext.detail": "会从本地历史中删除当前 transcript，只保留 system prompt。",
+  "clearContext.clear": "清空",
+  "clearContext.done": "已清空当前上下文",
+  "clearContext.failed": "清空当前上下文失败",
+
   // 历史抽屉
   "history.title": "历史",
   "history.trashTitle": "回收站",

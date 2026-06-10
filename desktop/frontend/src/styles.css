@@ -4877,6 +4877,9 @@ a[href] {
   font-size: 12px;
   line-height: 1.35;
 }
+.clear-context-card__detail {
+  grid-template-columns: 1fr;
+}
 .ask-shelf__custom-row {
   display: flex;
   align-items: center;

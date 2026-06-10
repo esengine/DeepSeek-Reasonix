@@ -24,6 +24,7 @@ import { Composer } from "./components/Composer";
 import { TodoPanel } from "./components/TodoPanel";
 import { ApprovalModal } from "./components/ApprovalModal";
 import { AskCard } from "./components/AskCard";
+import { ClearContextCard } from "./components/ClearContextCard";
 import { StatusBar } from "./components/StatusBar";
 import { HistoryPanel } from "./components/HistoryPanel";
 import { CommandPalette, type PaletteItem } from "./components/CommandPalette";
@@ -383,6 +384,7 @@ export default function App() {
     setToolApprovalMode: setControllerToolApprovalMode,
     setGoal: setControllerGoal,
     clearGoal: clearControllerGoal,
+    clearSession,
     listSessions,
     listTrashedSessions,
     resumeSession,
@@ -444,6 +446,7 @@ export default function App() {
   const [sidebarTogglePressed, setSidebarTogglePressed] = useState(false);
   const [workspaceTogglePressed, setWorkspaceTogglePressed] = useState(false);
   const [savedTopicTurnCount, setSavedTopicTurnCount] = useState<number | undefined>(undefined);
+  const [clearContextPending, setClearContextPending] = useState(false);
   const topicRenameSkipCommitRef = useRef(false);
   const topicRenameCommitHandledRef = useRef(false);
   const appRef = useRef<HTMLDivElement>(null);
@@ -857,9 +860,28 @@ export default function App() {
     send(text);
   }, [pendingPlanRevision, send, state.running]);
 
-  // handleSend intercepts the slash commands that need a desktop-native action
-  // before they reach the backend: "/model <ref>" rebuilds on that model, and
-  // "/memory" opens the Memory tab in the settings centre. Everything else — skills (/init, …),
+  useEffect(() => {
+    setClearContextPending(false);
+  }, [activeTabId]);
+
+  const cancelClearContext = useCallback(() => {
+    setClearContextPending(false);
+  }, []);
+
+  const confirmClearContext = useCallback(async () => {
+    setClearContextPending(false);
+    try {
+      await clearSession();
+      notice(t("clearContext.done"));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      notice(msg || t("clearContext.failed"), "warn");
+    }
+  }, [clearSession, notice, t]);
+
+  // handleSend intercepts slash commands that need a desktop-native action before
+  // they reach the backend: "/model <ref>" rebuilds on that model, "/memory"
+  // opens Settings, and "/clear" shows an in-app confirmation card. Everything else — skills (/init, …),
   // custom commands, bare /model and the other read-only management verbs
   // (/skill, /hooks, /mcp) — goes straight to Submit, which the controller
   // resolves (a turn, or a listing Notice).
@@ -884,6 +906,10 @@ export default function App() {
       if (trimmed === "/memory") {
         closeTransientOverlays();
         setSettingsTarget("memory");
+        return;
+      }
+      if (trimmed === "/clear") {
+        setClearContextPending(true);
         return;
       }
       const goalCommand = /^\/goal(?:\s+(.*))?$/.exec(trimmed);
@@ -1834,7 +1860,7 @@ export default function App() {
                 onRewind={handleMessageAction}
                 checkpoints={state.checkpoints}
                 actionPending={state.messageAction != null}
-                rewindDisabled={state.running || state.messageAction != null || state.approval != null || state.ask != null}
+                rewindDisabled={state.running || state.messageAction != null || state.approval != null || state.ask != null || clearContextPending}
               />
             )}
           </main>
@@ -1867,6 +1893,14 @@ export default function App() {
                 onDismiss={() => answerQuestion(state.ask!.id, [])}
               />
             )}
+            {clearContextPending && (
+              <ClearContextCard
+                onCancel={cancelClearContext}
+                onConfirm={() => {
+                  void confirmClearContext();
+                }}
+              />
+            )}
             <Composer
               running={state.running}
               collaborationMode={collaborationMode}
@@ -1887,8 +1921,8 @@ export default function App() {
               onSwitchModel={switchModel}
               onSetEffort={setEffort}
               insertRequest={composerInsertRequest}
-              disabled={state.meta?.ready === false || state.messageAction != null || state.approval != null || state.ask != null}
-              decisionPending={state.messageAction != null || state.approval != null || state.ask != null}
+              disabled={state.meta?.ready === false || state.messageAction != null || state.approval != null || state.ask != null || clearContextPending}
+              decisionPending={state.messageAction != null || state.approval != null || state.ask != null || clearContextPending}
               ready={state.meta?.ready === true}
               turnStartAt={state.turnStartAt}
               turnTokens={state.turnTokens}

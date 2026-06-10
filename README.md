@@ -220,10 +220,11 @@ convenient.
 
 ### Slash commands
 
-In `reasonix chat`, built-in commands (`/compact`, `/new`/`/clear`, `/rewind`, `/tree`,
+In `reasonix chat`, built-in commands (`/compact`, `/new`, `/clear`, `/rewind`, `/tree`,
 `/branch`, `/switch`, `/todo`, `/model`, `/effort`, `/mcp`, `/memory`, `/help`) run locally.
-`/new` starts a fresh model context while saving the previous transcript for
-history/resume; `/clear` is the Claude Code-compatible alias.
+`/new` starts a new session while saving the previous transcript for
+history/resume; `/clear` asks for confirmation, then discards the current context
+without saving it.
 `/tree` shows saved conversation branches, `/branch [name]` forks the current
 conversation tip, `/branch <turn> [name]` forks from an earlier checkpointed turn,
 and `/switch <id|name>` loads another branch. **Custom commands** are Markdown files under

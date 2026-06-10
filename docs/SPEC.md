@@ -294,10 +294,11 @@ each writer/bash call. `deny` rules harden both modes.
 
 The chat TUI accepts `/command` input. Three kinds share one dispatch:
 
-- **Built-in actions** (`/compact`, `/new`/`/clear`, `/effort`, `/mcp`, `/help`) manipulate session
-  state locally and never reach the model. `/new` and its Claude Code-compatible
-  alias `/clear` start a fresh model context while saving the previous transcript
-  for resume/history; they do not delete persisted history or project memory.
+- **Built-in actions** (`/compact`, `/new`, `/clear`, `/effort`, `/mcp`, `/help`) manipulate session
+  state locally and never reach the model. `/new` starts a new session while
+  saving the previous transcript for resume/history. `/clear` requires
+  confirmation, then discards the current context without saving it; it does not
+  delete project memory.
 - **Custom commands** are Markdown files under `.reasonix/commands/` (project) and
   `~/.config/reasonix/commands/` (user); the project dir overrides the user dir on a
   name clash. A file `review.md` becomes `/review`; a subdirectory namespaces it

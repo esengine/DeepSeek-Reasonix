@@ -114,6 +114,7 @@ export interface AppBindings {
   ClearGoalForTab(tabID: string): Promise<void>;
   Compact(): Promise<void>;
   NewSession(): Promise<void>;
+  ClearSession(): Promise<void>;
   History(): Promise<HistoryMessage[]>;
   HistoryForTab(tabID: string): Promise<HistoryMessage[]>;
   Checkpoints(): Promise<CheckpointMeta[]>;
@@ -1327,6 +1328,7 @@ function makeMockApp(): AppBindings {
         },
         async Compact() {},
         async NewSession() {},
+        async ClearSession() {},
     async Checkpoints() {
       return [
         { turn: 0, prompt: "你好呀", files: ["src/App.tsx"], time: Date.now() - 30_000, canCode: true, canConversation: true },
@@ -1504,7 +1506,8 @@ function makeMockApp(): AppBindings {
         },
     async Commands() {
       return [
-        { name: "new", description: "Start a new session", kind: "builtin" as const },
+        { name: "new", description: "start new session; save transcript", kind: "builtin" as const },
+        { name: "clear", description: "discard current context", kind: "builtin" as const },
         { name: "compact", description: "Summarize older history to free up context", kind: "builtin" as const },
         { name: "model", description: "Switch model", kind: "builtin" as const },
         { name: "effort", description: "Set reasoning effort", kind: "builtin" as const },

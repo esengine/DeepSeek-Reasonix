@@ -792,6 +792,22 @@ func (a *App) NewSession() error {
 	return nil
 }
 
+// ClearSession discards the current conversation and rotates to a fresh unsaved one.
+func (a *App) ClearSession() error {
+	a.mu.RLock()
+	tab := a.activeTabLocked()
+	ctrl := a.activeCtrlLocked()
+	a.mu.RUnlock()
+	if ctrl == nil {
+		return nil
+	}
+	if err := ctrl.ClearSession(); err != nil {
+		return err
+	}
+	a.persistTabSessionPath(tab, ctrl.SessionPath())
+	return nil
+}
+
 // CheckpointMeta summarises one rewind point (a user turn) for the desktop.
 type CheckpointMeta struct {
 	Turn            int      `json:"turn"`
@@ -1789,6 +1805,7 @@ type CommandInfo struct {
 func (a *App) Commands() []CommandInfo {
 	out := []CommandInfo{
 		{Name: "new", Description: i18n.M.CmdNew, Kind: "builtin"},
+		{Name: "clear", Description: i18n.M.CmdClear, Kind: "builtin"},
 		{Name: "compact", Description: i18n.M.CmdCompact, Kind: "builtin"},
 		{Name: "model", Description: i18n.M.CmdModel, Kind: "builtin"},
 		{Name: "effort", Description: i18n.M.CmdEffort, Kind: "builtin"},
