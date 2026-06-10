@@ -1116,6 +1116,31 @@ export const en = {
   "mock.changedFile2Prompt": "Record project context",
   "mock.changedFile1Path": "docs/dev-standard.md",
   "mock.changedFile2Path": ".reasonix/project.md",
+
+  "rightDock.browserBack": "Back",
+  "rightDock.browserForward": "Forward",
+  "rightDock.browserRefresh": "Refresh",
+  "rightDock.browserUrlPlaceholder": "Enter URL…",
+  "rightDock.browserOpen": "Go",
+  "rightDock.browserGo": "Navigate",
+  "rightDock.browserOpenExternal": "Open in system browser",
+  "rightDock.browserEmpty": "Enter a URL to browse the web",
+  "rightDock.closeTab": "Close tab",
+  "rightDock.addTab": "New tab",
+
+  "memory.globalMemories": "Global memories",
+
+  "projectTree.emptyNoTimeFilterMatch": "No topics in this time range",
+  "projectTree.clearTimeFilter": "Clear filter",
+  "projectTree.timeFilter": "Filter by time",
+  "projectTree.timeFilterAll": "All time",
+  "projectTree.timeFilter10": "Latest 10",
+  "projectTree.timeFilter1h": "Last hour",
+  "projectTree.timeFilter3h": "Last 3 hours",
+  "projectTree.timeFilter5h": "Last 5 hours",
+  "projectTree.timeFilter1d": "Last day",
+  "projectTree.collapseAll": "Collapse all",
+  "projectTree.expandAll": "Expand all",
 };
 
 export type DictKey = keyof typeof en;

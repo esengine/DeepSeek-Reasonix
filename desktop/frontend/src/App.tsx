@@ -13,6 +13,8 @@ import {
   GitBranch,
   GitCommit,
   History,
+  PanelRightClose,
+  PanelRightOpen,
   Settings as SettingsIcon,
   Pencil,
   Trash2,
@@ -21,7 +23,7 @@ import { useToast } from "./lib/toast";
 import { asArray } from "./lib/array";
 import { clearLegacyLangPref, normalizeLangPref, readLegacyLangPref, t, useI18n, useT } from "./lib/i18n";
 import { useController, type Item, type LiveStream } from "./lib/useController";
-import { app, onProjectTreeChanged, onTurnDone, onEvent } from "./lib/bridge";
+import { app, onProjectTreeChanged, onEvent } from "./lib/bridge";
 import { playSuccessChime } from "./lib/sound";
 import { generativeMusic, isGenerativeMusicEnabled } from "./lib/generative-music";
 import { Transcript } from "./components/Transcript";
@@ -438,6 +440,8 @@ export default function App() {
     setModel,
     setEffort,
     switchTab,
+    closeTab,
+    reorderTabs,
     openProjectTab,
     openGlobalTab,
     syncActiveTab,
@@ -909,8 +913,10 @@ export default function App() {
 
   // Play a success chime when any turn finishes (agent:turn-done event).
   useEffect(() => {
-    const unsub = onTurnDone(() => {
-      playSuccessChime();
+    const unsub = onEvent((e) => {
+      if (e.kind === "turn_done") {
+        playSuccessChime();
+      }
     });
     return unsub;
   }, []);

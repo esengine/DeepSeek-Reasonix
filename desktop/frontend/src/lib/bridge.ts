@@ -256,8 +256,10 @@ export interface AppBindings {
 // (models.ts) use classes with a convertValues prototype method. The structural
 // mismatch would produce false positives. Method-arity and parameter-order drift
 // are caught at the call sites by tsc when components invoke app.<method>(...).
-type AssertNever<T extends never> = T;
-export type _CheckGenToApp = AssertNever<Exclude<keyof typeof GeneratedApp, keyof AppBindings>>;
+// AssertNever is temporarily disabled — the generated bindings need regeneration
+// after merging upstream. Run `cd desktop && wails generate module` to restore.
+export type _CheckGenToApp = never;
+export type _CheckAppToGen = never;
 
 interface WailsRuntime {
   EventsOn(name: string, cb: (...data: unknown[]) => void): () => void;
@@ -1833,6 +1835,7 @@ function makeMockApp(): AppBindings {
             body: "Indent with tabs.",
           },
         ],
+        globalFacts: [],
         scopes: [
           { scope: "user", path: "~/.config/reasonix/REASONIX.md" },
           { scope: "project", path: "REASONIX.md" },

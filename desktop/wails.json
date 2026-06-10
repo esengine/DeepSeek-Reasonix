@@ -4,7 +4,7 @@
   "outputfilename": "reasonix-desktop",
   "frontend:install": "pnpm install",
   "frontend:build": "pnpm build",
-  "frontend:dev:watcher": "pnpm dev",
+  "frontend:dev:watcher": "node scripts/dev-watcher.mjs",
   "frontend:dev:serverUrl": "auto",
   "author": {
     "name": "esengine"

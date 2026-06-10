@@ -148,6 +148,10 @@ export function StatusBar({
       : (elapsed / 1000).toFixed(1) + "s"
     : "";
 
+  const balanceLabel = balance?.available && balance.display ? balance.display : "-";
+  const planMode = collaborationMode === "plan";
+  const goalMode = collaborationMode === "goal";
+
   return (
     <div className="statusbar">
       <span className="stat stat--model">

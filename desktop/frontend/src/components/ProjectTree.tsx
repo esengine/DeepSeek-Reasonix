@@ -770,7 +770,7 @@ export function ProjectTree({
       const title = [label, statusLabel, meta].filter(Boolean).join(" · ");
       const topicId = node.topicId ?? "";
       const lastActivityAt = node.lastActivityAt;
-      const timeLabel = lastActivityAt != null && lastActivityAt > 0 ? topicActivityLabel(lastActivityAt).replace(/前$/, "") : null;
+      const timeLabel = lastActivityAt != null && lastActivityAt > 0 ? topicActivityLabel(lastActivityAt, t).replace(/前$/, "") : null;
       const topicMenuOpen = menuTopic === topicId;
       const openTopicMenu = (event: ReactMouseEvent<HTMLElement> | ReactKeyboardEvent<HTMLElement>) => {
         event.preventDefault();
