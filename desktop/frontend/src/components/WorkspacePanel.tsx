@@ -333,6 +333,11 @@ export function WorkspacePanel({
         await action();
         showToast(t(successKey));
         if (clearSelection) clearSelectedChange();
+        return true;
+      } catch (err) {
+        showToast(err instanceof Error ? err.message : String(err), "error");
+        return false;
+      } finally {
         await loadWorkspaceChanges();
         if (!clearSelection && selectedPath) {
           const kind = nextKind ?? selectedChangeKind;
@@ -340,9 +345,6 @@ export function WorkspacePanel({
           const result = await app.WorkspaceGitDiff(selectedPath, kind === "staged");
           setChangeDiff(result);
         }
-      } catch (err) {
-        showToast(err instanceof Error ? err.message : String(err), "error");
-      } finally {
         setGitBusy(false);
       }
     },
@@ -372,18 +374,20 @@ export function WorkspacePanel({
   }, [runGitAction, selectedPath]);
 
   const commitChanges = useCallback(
-    (push: boolean) => {
+    async (push: boolean) => {
       const message = commitMessage.trim();
       if (!message) return;
-      void runGitAction(
+      const success = await runGitAction(
         () => app.WorkspaceGitCommit(message, push, commitBranch),
         push ? "workspace.gitCommittedPushed" : "workspace.gitCommitted",
         true,
       );
-      setCommitOpen(false);
-      setCommitBranchOpen(false);
-      setCommitBranchFilter("");
-      setCommitMessage("");
+      if (success) {
+        setCommitOpen(false);
+        setCommitBranchOpen(false);
+        setCommitBranchFilter("");
+        setCommitMessage("");
+      }
     },
     [commitBranch, commitMessage, runGitAction],
   );
@@ -612,6 +616,16 @@ export function WorkspacePanel({
   const allChangedFiles = useMemo(() => workspaceChanges?.files ?? [], [workspaceChanges]);
   const stagedFiles = useMemo(() => stagedWorkspaceChanges(allChangedFiles), [allChangedFiles]);
   const unstagedFiles = useMemo(() => unstagedWorkspaceChanges(allChangedFiles), [allChangedFiles]);
+
+  useEffect(() => {
+    if (commitOpen && !gitBusy && stagedFiles.length === 0) {
+      setCommitOpen(false);
+      setCommitBranchOpen(false);
+      setCommitBranchFilter("");
+      setCommitMessage("");
+    }
+  }, [commitOpen, gitBusy, stagedFiles.length]);
+
   const filteredStagedFiles = useMemo(() => {
     const q = filter.trim().toLowerCase();
     if (!q) return stagedFiles;
@@ -656,10 +670,11 @@ export function WorkspacePanel({
   const selectedFileVisible = selectedPath !== null;
   const compactTreeSplit =
     treeVisible && selectedFileVisible && panelWidth !== undefined && panelWidth < WORKSPACE_DUAL_PANEL_MIN_WIDTH;
-  const actualTreeVisible = changedMode ? false : treeVisible;
-  const showTreeRail = previewVisible && !actualTreeVisible && !changedMode;
+  const actualTreeVisible = treeVisible;
+  const showTreeRail = previewVisible && !actualTreeVisible;
   const previewModeActive = open && previewVisible;
   const embeddedDockMode = !showViewTabs;
+  const showFilesTools = changedMode || showViewTabs;
 
   const panelStyle = useMemo(
     () =>
@@ -965,7 +980,7 @@ export function WorkspacePanel({
   return (
     <aside
       ref={panelRef}
-      className={`workspace-panel${embeddedDockMode ? " workspace-panel--embedded" : ""}${changedMode ? " workspace-panel--detail-only" : ""}${previewVisible && actualTreeVisible ? " workspace-panel--split-preview" : ""}${compactTreeSplit ? " workspace-panel--compact-split" : ""}${actualTreeVisible ? "" : " workspace-panel--tree-hidden"}${previewVisible ? "" : " workspace-panel--preview-hidden"}${treeResizing ? " workspace-panel--tree-resizing" : ""}`}
+      className={`workspace-panel${embeddedDockMode ? " workspace-panel--embedded" : ""}${previewVisible && actualTreeVisible ? " workspace-panel--split-preview" : ""}${compactTreeSplit ? " workspace-panel--compact-split" : ""}${actualTreeVisible ? "" : " workspace-panel--tree-hidden"}${previewVisible ? "" : " workspace-panel--preview-hidden"}${treeResizing ? " workspace-panel--tree-resizing" : ""}`}
       aria-label={t("workspace.title")}
       style={panelStyle}
     >
@@ -1168,66 +1183,68 @@ export function WorkspacePanel({
       )}
 
       <section className="workspace-files">
-        <div className={`workspace-files__tools${embeddedDockMode ? " workspace-files__tools--embedded" : ""}`}>
-          <div className="workspace-files__tool-group">
-            {previewVisible && (
-              <Tooltip label={previewVisible ? t("workspace.hideTree") : t("workspace.close")}>
-                <button
-                  className="workspace-iconbtn workspace-iconbtn--on"
-                  type="button"
-                  aria-label={previewVisible ? t("workspace.hideTree") : t("workspace.close")}
-                  onClick={hideTreeOrClosePanel}
-                >
-                  {previewVisible ? <FolderX size={15} /> : <X size={15} />}
-                </button>
-              </Tooltip>
+        {showFilesTools && (
+          <div className={`workspace-files__tools${embeddedDockMode ? " workspace-files__tools--embedded" : ""}`}>
+            {changedMode && (
+              <div className="workspace-files__tool-group">
+                {previewVisible && (
+                  <Tooltip label={previewVisible ? t("workspace.hideTree") : t("workspace.close")}>
+                    <button
+                      className="workspace-iconbtn workspace-iconbtn--on"
+                      type="button"
+                      aria-label={previewVisible ? t("workspace.hideTree") : t("workspace.close")}
+                      onClick={hideTreeOrClosePanel}
+                    >
+                      {previewVisible ? <FolderX size={15} /> : <X size={15} />}
+                    </button>
+                  </Tooltip>
+                )}
+                <Tooltip label={t("workspace.refreshChanges")}>
+                  <button className="workspace-iconbtn" type="button" onClick={refreshWorkspaceList}>
+                    <RefreshCw size={14} />
+                  </button>
+                </Tooltip>
+                <Tooltip label={t("workspace.commit")}>
+                  <button
+                    className="workspace-iconbtn"
+                    type="button"
+                    aria-label={t("workspace.commit")}
+                    disabled={gitBusy || stagedFiles.length === 0}
+                    onClick={() => setCommitOpen(true)}
+                  >
+                    <GitBranch size={14} />
+                  </button>
+                </Tooltip>
+              </div>
             )}
-            <Tooltip label={t(viewMode === "changed" ? "workspace.refreshChanges" : "workspace.refreshTree")}>
-              <button className="workspace-iconbtn" type="button" onClick={refreshWorkspaceList}>
-                <RefreshCw size={14} />
-              </button>
-            </Tooltip>
-            {viewMode === "changed" && (
-              <Tooltip label={t("workspace.commit")}>
+            {showViewTabs && (
+              <div className="workspace-files__tabs" role="tablist" aria-label={t("workspace.viewMode")}>
                 <button
-                  className="workspace-iconbtn"
-                  type="button"
-                  aria-label={t("workspace.commit")}
-                  disabled={gitBusy || stagedFiles.length === 0}
-                  onClick={() => setCommitOpen(true)}
+                  className={viewMode === "files" ? "workspace-files__tab workspace-files__tab--active" : "workspace-files__tab"}
+                  onClick={() => setViewMode("files")}
                 >
-                  <GitBranch size={14} />
+                  {t("workspace.filesTab")}
                 </button>
-              </Tooltip>
+                <button
+                  className={viewMode === "changed" ? "workspace-files__tab workspace-files__tab--active" : "workspace-files__tab"}
+                  onClick={() => {
+                    setViewMode("changed");
+                    setSelectedPath(null);
+                    setSelectedChangeKind("unstaged");
+                    setPreview(null);
+                    setChangeDiff(null);
+                    setRecentOpen(false);
+                    setFilter("");
+                    void loadWorkspaceChanges();
+                  }}
+                >
+                  <GitBranch size={13} />
+                  {t("workspace.changedTab")}
+                </button>
+              </div>
             )}
           </div>
-          {showViewTabs && (
-            <div className="workspace-files__tabs" role="tablist" aria-label={t("workspace.viewMode")}>
-              <button
-                className={viewMode === "files" ? "workspace-files__tab workspace-files__tab--active" : "workspace-files__tab"}
-                onClick={() => setViewMode("files")}
-              >
-                {t("workspace.filesTab")}
-              </button>
-              <button
-                className={viewMode === "changed" ? "workspace-files__tab workspace-files__tab--active" : "workspace-files__tab"}
-                onClick={() => {
-                  setViewMode("changed");
-                  setSelectedPath(null);
-                  setSelectedChangeKind("unstaged");
-                  setPreview(null);
-                  setChangeDiff(null);
-                  setRecentOpen(false);
-                  setFilter("");
-                  void loadWorkspaceChanges();
-                }}
-              >
-                <GitBranch size={13} />
-                {t("workspace.changedTab")}
-              </button>
-            </div>
-          )}
-        </div>
+        )}
 
         <div className="workspace-search">
           <Search size={14} />
@@ -1466,7 +1483,7 @@ export function WorkspacePanel({
               <button
                 type="button"
                 className="btn"
-                disabled={gitBusy || commitMessage.trim() === ""}
+                disabled={gitBusy || commitMessage.trim() === "" || stagedFiles.length === 0}
                 onClick={() => commitChanges(false)}
               >
                 <GitBranch size={14} />
@@ -1475,7 +1492,7 @@ export function WorkspacePanel({
               <button
                 type="button"
                 className="btn btn--primary workspace-git-primary"
-                disabled={gitBusy || commitMessage.trim() === ""}
+                disabled={gitBusy || commitMessage.trim() === "" || stagedFiles.length === 0}
                 onClick={() => commitChanges(true)}
               >
                 <Upload size={14} />
