@@ -3448,7 +3448,7 @@ func replaySectionsFor(history []provider.Message, width int, renderer *mdRender
 	for _, m := range history {
 		switch m.Role {
 		case provider.RoleUser:
-			content := strings.TrimPrefix(m.Content, control.PlanModeMarker+"\n\n")
+			content := control.StripComposePrefixes(m.Content)
 			out = append(out, renderUserBubble(content, width, false)+"\n\n")
 		case provider.RoleAssistant:
 			body := strings.TrimSpace(m.Content)
