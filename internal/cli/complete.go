@@ -523,7 +523,10 @@ func (m *chatTUI) acceptCompletion() {
 var compSelStyle lipgloss.Style
 
 // renderCompletion draws the menu above the input box: matching items, windowed
-// around the selection, the current row highlighted, hints dimmed.
+// around the selection, the current row highlighted, hints dimmed. Every line is
+// padded to m.width so bubbletea's delta renderer always writes exactly the same
+// column count — no trailing characters for \033[K to clear, and no ghost cells
+// on terminals (mintty) with unreliable erase-to-end-of-line.
 func (m chatTUI) renderCompletion() string {
 	if !m.completion.active || len(m.completion.items) == 0 {
 		return ""
@@ -547,14 +550,16 @@ func (m chatTUI) renderCompletion() string {
 	var b strings.Builder
 	for i := start; i < end; i++ {
 		it := items[i]
+		var line string
 		if i == m.completion.sel {
-			b.WriteString(accent("› ") + compSelStyle.Render(it.label))
+			line = accent("› ") + compSelStyle.Render(it.label)
 		} else {
-			b.WriteString("  " + it.label)
+			line = "  " + it.label
 		}
 		if it.hint != "" {
-			b.WriteString("  " + dim(it.hint))
+			line += "  " + dim(it.hint)
 		}
+		b.WriteString(padRight(line, m.width))
 		b.WriteByte('\n')
 	}
 	// A key-hint footer so users discover Tab — many won't know it accepts a
@@ -563,6 +568,6 @@ func (m chatTUI) renderCompletion() string {
 	if m.completion.kind == compAt {
 		hint = i18n.M.CompHintFile
 	}
-	b.WriteString(dim(hint))
+	b.WriteString(padRight(dim(hint), m.width))
 	return b.String()
 }

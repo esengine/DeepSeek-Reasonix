@@ -145,6 +145,34 @@ func TestTermuxNativeScrollbackDefaultsToExpandedReasoning(t *testing.T) {
 	}
 }
 
+// TestCompletionMenuFixedWidth verifies that the completion menu pads every
+// line (items + footer) to m.width so delta rendering always writes exactly the
+// same column count — no trailing characters for \033[K to leave behind.
+func TestCompletionMenuFixedWidth(t *testing.T) {
+	ctrl := control.New(control.Options{})
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
+	m.width = 80
+	m.completion.active = true
+	m.completion.items = []compItem{
+		{label: "review"},
+		{label: "clear", hint: "start fresh"},
+	}
+	m.completion.sel = 1
+	m.completion.kind = compSlash
+
+	out := m.renderCompletion()
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	// items + footer = 3 lines
+	if len(lines) != 3 {
+		t.Fatalf("completion menu should have 3 lines (2 items + footer), got %d:\n%s", len(lines), out)
+	}
+	for i, line := range lines {
+		if got := ansi.StringWidth(line); got != 80 {
+			t.Errorf("line %d visual width = %d, want 80: %q", i, got, line)
+		}
+	}
+}
+
 // TestTranscriptViewportSizing proves the viewport tracks the terminal size and
 // gets the rows left over after the pinned bottom region (input box + 2 status
 // rows = 5 with an empty 1-line composer), and is fed the committed transcript.
