@@ -89,6 +89,9 @@ type chatTUI struct {
 	// marker rides in outgoing user messages so the cache-stable prompt prefix is
 	// left untouched.
 	planMode bool
+	// yoloRestoreToolApprovalMode remembers the Ask/Auto base mode that Ctrl+Y
+	// should restore after a desktop-style YOLO toggle.
+	yoloRestoreToolApprovalMode string
 
 	// pendingInterject queues input typed while a turn runs; each TurnDone
 	// dequeues the front and submits it as the next turn.
@@ -1018,12 +1021,9 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			cmds = append(cmds, pasteClipboard())
 			return m, finalize(m, cmds)
-		case "ctrl+y":
-			if m.state == tuiRunning {
-				return m, nil
-			}
-			cmds = append(cmds, pasteClipboardImage())
-			return m, finalize(m, cmds)
+		case "ctrl+y", "super+y", "meta+y":
+			m.toggleYoloMode()
+			return m, nil
 		case "ctrl+o":
 			m.toggleVerboseReasoning(m.state != tuiRunning)
 			return m, finalize(m, cmds)
@@ -1031,8 +1031,8 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.toggleShellOutput()
 			return m, finalize(m, cmds)
 		case "shift+tab":
-			// Cycle auto → plan → YOLO; allowed mid-turn so the user can flip the
-			// gate while a run is in flight (the controller's mode is atomic).
+			// Shift+Tab toggles Plan only. Tool approval stays on its own axis:
+			// Ask/Auto are explicit choices, and YOLO is a separate Ctrl+Y toggle.
 			m.cycleMode()
 			return m, nil
 		case "enter":
@@ -2123,9 +2123,9 @@ func (m chatTUI) View() tea.View {
 	case shellMode:
 		status = "  " + modeTag + " · " + i18n.M.ShellModeHint
 	case m.ctrl.AutoApproveTools():
-		status = "  " + modeTag + " · " + i18n.M.ChatStatusYoloIdle + " " + dim("("+i18n.M.ChatStatusCycleHint+")")
+		status = "  " + modeTag + " · " + i18n.M.ChatStatusYoloIdle + " " + dim("("+m.cycleHint()+")")
 	default:
-		status = "  " + modeTag + " · " + i18n.M.ChatStatusIdle + " " + dim("("+i18n.M.ChatStatusCycleHint+")")
+		status = "  " + modeTag + " · " + i18n.M.ChatStatusIdle + " " + dim("("+m.cycleHint()+")")
 	}
 	if et := m.effortTag(); et != "" {
 		status += " · " + et
@@ -2859,9 +2859,8 @@ func pastedFileRef(content string) (string, bool) {
 	return "@" + path, true
 }
 
-// cycleMode toggles plan mode (Shift+Tab), mirroring the desktop composer.
-// YOLO/full access is controlled explicitly by the startup flag/runtime binding
-// so the shortcut never crosses a permission boundary.
+// cycleMode handles the Shift+Tab mode gesture. It toggles Plan only; tool
+// approval modes stay on their own axis.
 func (m *chatTUI) cycleMode() {
 	m.planMode = !m.planMode
 	if m.planMode {
@@ -2870,15 +2869,71 @@ func (m *chatTUI) cycleMode() {
 	m.ctrl.SetPlanMode(m.planMode)
 }
 
+func (m chatTUI) desktopShortcutLayout() bool {
+	return m.cfg != nil && m.cfg.UIShortcutLayout() == "desktop"
+}
+
+func (m chatTUI) cycleHint() string {
+	return i18n.M.ChatStatusCycleHint
+}
+
+func (m *chatTUI) toggleYoloMode() {
+	if m.ctrl == nil {
+		return
+	}
+	if m.ctrl.ToolApprovalMode() == control.ToolApprovalYolo {
+		restore := m.yoloRestoreToolApprovalMode
+		if restore != control.ToolApprovalAuto {
+			restore = control.ToolApprovalAsk
+		}
+		m.ctrl.SetToolApprovalMode(restore)
+		m.yoloRestoreToolApprovalMode = ""
+		return
+	}
+	restore := m.ctrl.ToolApprovalMode()
+	if restore != control.ToolApprovalAuto {
+		restore = control.ToolApprovalAsk
+	}
+	m.yoloRestoreToolApprovalMode = restore
+	m.ctrl.SetToolApprovalMode(control.ToolApprovalYolo)
+}
+
 func (m chatTUI) modeTagText() string {
 	goalMode := strings.TrimSpace(m.ctrl.Goal()) != "" && m.ctrl.GoalStatus() == control.GoalStatusRunning
+	toolApprovalMode := m.ctrl.ToolApprovalMode()
+	if m.desktopShortcutLayout() {
+		switch {
+		case m.planMode && toolApprovalMode == control.ToolApprovalYolo:
+			return "Plan+YOLO"
+		case goalMode && toolApprovalMode == control.ToolApprovalYolo:
+			return "Goal+YOLO"
+		case toolApprovalMode == control.ToolApprovalYolo:
+			return "YOLO"
+		case m.planMode:
+			return "Plan"
+		case goalMode && toolApprovalMode == control.ToolApprovalAuto:
+			return "Goal+Auto"
+		case goalMode:
+			return "Goal"
+		case toolApprovalMode == control.ToolApprovalAuto:
+			return "Auto"
+		default:
+			return "Ask"
+		}
+	}
 	switch {
-	case m.planMode && m.ctrl.AutoApproveTools():
+	case m.planMode && toolApprovalMode == control.ToolApprovalYolo:
 		return "Plan+YOLO"
-	case goalMode && m.ctrl.AutoApproveTools():
+	case m.planMode && toolApprovalMode == control.ToolApprovalAuto:
+		return "Plan+Approve"
+	case goalMode && toolApprovalMode == control.ToolApprovalYolo:
 		return "Goal+YOLO"
-	case m.ctrl.AutoApproveTools():
+	case goalMode && toolApprovalMode == control.ToolApprovalAuto:
+		return "Goal+Approve"
+	case toolApprovalMode == control.ToolApprovalYolo:
 		return "YOLO"
+	case toolApprovalMode == control.ToolApprovalAuto:
+		return "Auto+Approve"
 	case m.planMode:
 		return "Plan"
 	case goalMode:

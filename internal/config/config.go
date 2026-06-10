@@ -62,9 +62,10 @@ type Config struct {
 // UIConfig controls CLI presentation-only settings. Desktop appearance is kept in
 // DesktopConfig so desktop preferences cannot alter terminal output or prompts.
 type UIConfig struct {
-	Theme         string `toml:"theme"`          // auto|dark|light; empty resolves to auto
-	ThemeStyle    string `toml:"theme_style"`    // graphite|aurora|slate|carbon|nocturne|amber and legacy aliases
-	CloseBehavior string `toml:"close_behavior"` // legacy desktop close behavior; prefer desktop.close_behavior
+	Theme          string `toml:"theme"`           // auto|dark|light; empty resolves to auto
+	ThemeStyle     string `toml:"theme_style"`     // graphite|aurora|slate|carbon|nocturne|amber and legacy aliases
+	ShortcutLayout string `toml:"shortcut_layout"` // classic|desktop; accepted for compatibility
+	CloseBehavior  string `toml:"close_behavior"`  // legacy desktop close behavior; prefer desktop.close_behavior
 }
 
 // DesktopConfig controls desktop-only UI preferences. It is intentionally
@@ -102,6 +103,18 @@ func (c *Config) UITheme() string {
 // for the resolved light/dark shell".
 func (c *Config) UIThemeStyle() string {
 	return normalizeThemeStyle(c.UI.ThemeStyle)
+}
+
+// UIShortcutLayout normalizes the legacy CLI shortcut layout setting. It is kept
+// for compatibility; Shift+Tab toggles Plan and Ctrl+Y toggles YOLO in both
+// layouts.
+func (c *Config) UIShortcutLayout() string {
+	switch strings.ToLower(strings.TrimSpace(c.UI.ShortcutLayout)) {
+	case "desktop", "dual", "dual-axis", "dual_axis":
+		return "desktop"
+	default:
+		return "classic"
+	}
 }
 
 func normalizeThemeStyle(style string) string {

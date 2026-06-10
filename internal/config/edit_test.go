@@ -196,6 +196,34 @@ func TestSetAutoPlan(t *testing.T) {
 	}
 }
 
+func TestSetUIShortcutLayout(t *testing.T) {
+	c := Default()
+	if got := c.UIShortcutLayout(); got != "classic" {
+		t.Fatalf("default shortcut layout = %q, want classic", got)
+	}
+	if err := c.SetUIShortcutLayout("desktop"); err != nil {
+		t.Fatalf("SetUIShortcutLayout desktop: %v", err)
+	}
+	if got := c.UIShortcutLayout(); got != "desktop" {
+		t.Fatalf("shortcut layout = %q, want desktop", got)
+	}
+	if err := c.SetUIShortcutLayout("dual-axis"); err != nil {
+		t.Fatalf("SetUIShortcutLayout alias: %v", err)
+	}
+	if got := c.UIShortcutLayout(); got != "desktop" {
+		t.Fatalf("shortcut layout alias = %q, want desktop", got)
+	}
+	if err := c.SetUIShortcutLayout("classic"); err != nil {
+		t.Fatalf("SetUIShortcutLayout classic: %v", err)
+	}
+	if got := c.UIShortcutLayout(); got != "classic" {
+		t.Fatalf("shortcut layout = %q, want classic", got)
+	}
+	if err := c.SetUIShortcutLayout("surprise"); err == nil {
+		t.Fatal("expected error for invalid shortcut layout")
+	}
+}
+
 func TestUpsertProvider(t *testing.T) {
 	c := Default()
 	n := len(c.Providers)

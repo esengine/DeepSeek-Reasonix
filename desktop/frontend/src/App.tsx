@@ -62,6 +62,11 @@ import {
   metaSyncedCollaborationMode,
   tabListCollaborationMode,
 } from "./lib/goalDraftMode";
+import {
+  restorableToolApprovalMode,
+  toggleYoloToolApprovalMode,
+  type RestorableToolApprovalMode,
+} from "./lib/toolApprovalMode";
 import { loadLayoutSize, saveLayoutSize } from "./lib/layoutPreferences";
 import {
   applyTheme,
@@ -418,6 +423,7 @@ export default function App() {
   const [modesByTab, setModesByTab] = useState<Record<string, Mode>>({});
   const [collaborationModesByTab, setCollaborationModesByTab] = useState<Record<string, CollaborationMode>>({});
   const [toolApprovalModesByTab, setToolApprovalModesByTab] = useState<Record<string, ToolApprovalMode>>({});
+  const yoloRestoreToolApprovalModesRef = useRef<Record<string, RestorableToolApprovalMode>>({});
   const [goalsByTab, setGoalsByTab] = useState<Record<string, string>>({});
   const [goalDraftModesByTab, setGoalDraftModesByTab] = useState<Record<string, boolean>>({});
   const [tabMetas, setTabMetas] = useState<TabMeta[]>([]);
@@ -681,6 +687,9 @@ export default function App() {
 
   useEffect(() => {
     const ids = new Set(tabMetas.map((tab) => tab.id));
+    for (const id of Object.keys(yoloRestoreToolApprovalModesRef.current)) {
+      if (!ids.has(id)) delete yoloRestoreToolApprovalModesRef.current[id];
+    }
     setGoalDraftModesByTab((current) => {
       let changed = false;
       const next: Record<string, boolean> = {};
@@ -821,12 +830,30 @@ export default function App() {
   const applyToolApprovalMode = useCallback(
     (m: ToolApprovalMode) => {
       if (!activeTabId) return;
+      if (m === "yolo") {
+        if (toolApprovalMode !== "yolo") {
+          yoloRestoreToolApprovalModesRef.current[activeTabId] = restorableToolApprovalMode(toolApprovalMode);
+        }
+      } else {
+        yoloRestoreToolApprovalModesRef.current[activeTabId] = restorableToolApprovalMode(m);
+      }
       setToolApprovalModesByTab((current) => (current[activeTabId] === m ? current : { ...current, [activeTabId]: m }));
       setMode(modeFromAxes(collaborationMode === "plan", m === "yolo"));
       void setControllerToolApprovalMode(m);
     },
-    [activeTabId, collaborationMode, setControllerToolApprovalMode, setMode],
+    [activeTabId, collaborationMode, setControllerToolApprovalMode, setMode, toolApprovalMode],
   );
+  const toggleYoloApprovalMode = useCallback(() => {
+    if (!activeTabId) return;
+    const next = toggleYoloToolApprovalMode(
+      toolApprovalMode,
+      yoloRestoreToolApprovalModesRef.current[activeTabId],
+    );
+    if (next.restore) {
+      yoloRestoreToolApprovalModesRef.current[activeTabId] = next.restore;
+    }
+    applyToolApprovalMode(next.mode);
+  }, [activeTabId, applyToolApprovalMode, toolApprovalMode]);
   const applyGoal = useCallback(
     (nextGoal: string) => {
       if (!activeTabId) return;
@@ -851,7 +878,8 @@ export default function App() {
     },
     [applyGoal, send],
   );
-  // Shift+Tab toggles only the collaboration axis; tool permission stays independent.
+  // Shift+Tab toggles only the collaboration axis; Ctrl/Cmd+Y toggles YOLO on the
+  // tool-permission axis while preserving the Ask/Auto base mode.
   const cycleMode = useCallback(() => {
     applyCollaborationMode(collaborationMode === "plan" ? "normal" : "plan");
   }, [applyCollaborationMode, collaborationMode]);
@@ -1998,6 +2026,7 @@ export default function App() {
               onSetMode={applyMode}
               onSetCollaborationMode={applyCollaborationMode}
               onSetToolApprovalMode={applyToolApprovalMode}
+              onToggleYoloApprovalMode={toggleYoloApprovalMode}
               onSetGoal={startGoal}
               onClearGoal={() => applyGoal("")}
               onSwitchModel={switchModel}

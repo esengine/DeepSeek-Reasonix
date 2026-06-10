@@ -318,6 +318,7 @@ input,textarea{font:inherit;color:inherit}
       <div class="welcome__hints">
         <span><kbd>/</kbd> __('hint_commands')</span>
         <span><kbd>Shift+Tab</kbd> __('hint_mode')</span>
+        <span><kbd>Ctrl+Y</kbd> __('hint_yolo')</span>
         <span><kbd>Esc&times;2</kbd> __('hint_rewind')</span>
       </div>
       <div class="welcome__examples">
@@ -469,7 +470,7 @@ const __T = {
     'session_edit': 'Edits for session',
     'session_tool': 'Tool for session',
     'deny': 'Deny',
-    'auto_mode': 'Auto mode',
+    'auto_mode': 'Auto mode (auto-approve fallback approvals)',
     'plan_mode': 'Plan mode (read-only)',
     'yolo_mode': 'YOLO mode (auto-approve tool approvals; ask and plan still wait)',
     'auto': 'Auto',
@@ -492,7 +493,8 @@ const __T = {
     'delete_confirm': 'Delete this session?',
     'welcome_tag': 'AI coding agent',
     'hint_commands': '/ commands',
-    'hint_mode': 'Shift+Tab mode',
+    'hint_mode': 'Plan',
+    'hint_yolo': 'YOLO',
     'hint_rewind': 'Esc×2 rewind',
     'example_explain': 'Explain the project structure',
     'example_fix': 'Find and fix any bugs',
@@ -563,7 +565,7 @@ const __T = {
     'session_edit': '本会话允许编辑',
     'session_tool': '本会话允许此工具',
     'deny': '拒绝',
-    'auto_mode': '自动模式',
+    'auto_mode': '自动模式（自动批准兜底审批）',
     'plan_mode': '计划模式（只读）',
     'yolo_mode': 'YOLO 模式（自动批准工具权限；ask 和计划仍会等待）',
     'auto': '自动',
@@ -586,7 +588,8 @@ const __T = {
     'delete_confirm': '删除此会话？',
     'welcome_tag': 'AI 编码助手',
     'hint_commands': '/ 命令',
-    'hint_mode': 'Shift+Tab 模式',
+    'hint_mode': '计划',
+    'hint_yolo': 'YOLO',
     'hint_rewind': 'Esc×2 回退',
     'example_explain': '解释项目结构',
     'example_fix': '查找并修复错误',
@@ -650,7 +653,7 @@ const welcome = $('#welcome');
 const slashAnchor = $('#slash-menu-anchor');
 
 // ── state ──
-let running = false, planMode = false, bypassMode = false;
+let running = false, planMode = false, bypassMode = false, toolApprovalMode = 'ask', yoloRestoreMode = 'ask';
 let currentMsg = null, currentText = null, currentReasoning = null;
 let turnStartAt = 0, turnTokens = 0, tickTimer = null;
 let toolCards = {};
@@ -992,7 +995,10 @@ function fetchStatus(){
   fetch('/status').then(r=>r.json()).then(s=>{
     if(s.label)statusModel.textContent=s.label;
     // sync mode UI without triggering POST (server is source of truth)
-    planMode=!!s.plan; bypassMode=!!(s.autoApproveTools??s.bypass);
+    planMode=!!s.plan;
+    toolApprovalMode=s.toolApprovalMode || ((s.autoApproveTools??s.bypass)?'yolo':'ask');
+    bypassMode=toolApprovalMode==='yolo';
+    if(!bypassMode&&toolApprovalMode==='auto')yoloRestoreMode='auto';
     updateModeButtons();
     if(s.window){const pct=Math.min(100,Math.round(s.used/s.window*100));ctxFill.style.width=pct+'%';ctxFill.style.background=pct>85?'var(--warning)':pct>95?'var(--danger)':'var(--accent)';ctxUsed.textContent=fmtTok(s.used)+' tok';ctxWindow.textContent=fmtTok(s.window)+' tok';}
     // sidebar metrics
@@ -1065,7 +1071,7 @@ loadSessions();
 // ── input handling ──
 async function syncModeBeforeSubmit(){
   await post('/plan',{on:planMode});
-  await post('/auto-approve-tools',{on:bypassMode});
+    await post('/tool-approval-mode',{mode:bypassMode?'yolo':toolApprovalMode});
 }
 async function send(){ const v=input.value.trim(); if(!v)return; await syncModeBeforeSubmit(); addUserMsg(v); post('/submit',{input:v}).then(r=>{if(r.ok&&r.status===204){fetchStatus();loadSessions();}}); input.value='';input.style.height='';closeSlashMenu(); }
 
@@ -1090,28 +1096,29 @@ input.addEventListener('keydown',e=>{
 // shift+tab mode cycle
 document.addEventListener('keydown',e=>{
   if(e.target===input&&e.key==='Tab'&&e.shiftKey){e.preventDefault();cycleMode();return;}
+  if(e.target===input&&(e.key==='y'||e.key==='Y')&&(e.ctrlKey||e.metaKey)&&!e.altKey&&!e.shiftKey){e.preventDefault();toggleYolo();return;}
   if(e.key==='/'&&e.target!==input){e.preventDefault();input.focus();return;}
 });
 
-// mode helpers — plan is a user-decision gate; bypass/full access only skips
-// tool approvals, so they can be enabled together.
+// mode helpers — Shift+Tab toggles Plan; Ctrl+Y toggles YOLO separately.
 function updateModeButtons(){
-  const auto=!planMode&&!bypassMode;
+  const auto=!bypassMode&&toolApprovalMode==='auto';
   $('#btn-auto').classList.toggle('toolbar__btn--ok',auto);
   $('#btn-plan').classList.toggle('toolbar__btn--active',planMode);
   $('#btn-bypass').classList.toggle('toolbar__btn--danger',bypassMode);
 }
+async function setToolApprovalMode(mode){toolApprovalMode=mode;bypassMode=mode==='yolo';updateModeButtons();await post('/tool-approval-mode',{mode});}
 async function setPlan(on){planMode=on;updateModeButtons();await post('/plan',{on});}
-async function setBypass(on){bypassMode=on;updateModeButtons();await post('/auto-approve-tools',{on});}
-async function cycleMode(){if(!planMode&&!bypassMode)await setPlan(true);else if(planMode&&!bypassMode){await setPlan(false);await setBypass(true);}else if(!planMode&&bypassMode)await setPlan(true);else{await setPlan(false);await setBypass(false);}setTimeout(fetchStatus,200);}
-async function setMode(m){if(m==='auto'){if(planMode)await setPlan(false);if(bypassMode)await setBypass(false);}else if(m==='plan'){await setPlan(true);}else if(m==='yolo'){await setBypass(true);}}
+async function cycleMode(){await setPlan(!planMode);setTimeout(fetchStatus,200);}
+async function toggleYolo(){if(bypassMode){const restore=yoloRestoreMode==='auto'?'auto':'ask';await setToolApprovalMode(restore);}else{yoloRestoreMode=toolApprovalMode==='auto'?'auto':'ask';await setToolApprovalMode('yolo');}setTimeout(fetchStatus,200);}
+async function setMode(m){if(m==='auto')await setToolApprovalMode('auto');else if(m==='plan')await setPlan(!planMode);else if(m==='yolo')await toggleYolo();}
 
 // toolbar buttons
 btnSend.onclick=()=>void send();
 btnStop.onclick=()=>post('/cancel');
 $('#btn-auto').onclick=()=>void setMode('auto');
 $('#btn-plan').onclick=()=>void setPlan(!planMode);
-$('#btn-bypass').onclick=()=>void setBypass(!bypassMode);
+$('#btn-bypass').onclick=()=>void toggleYolo();
 $('#btn-new').onclick=()=>{if(running)return;post('/new').then(()=>{log.innerHTML='';log.appendChild(welcome);welcome.style.display='';loadSessions();});};
 $('#btn-compact').onclick=()=>{if(!running)post('/compact');};
 $('#btn-rewind').onclick=()=>openRewindPicker();

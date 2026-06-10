@@ -110,6 +110,10 @@ function isPasteShortcut(e: KeyboardEvent<HTMLTextAreaElement>): boolean {
   return e.key.toLowerCase() === "v" && (e.metaKey || e.ctrlKey) && !e.altKey;
 }
 
+function isYoloToggleShortcut(e: KeyboardEvent<HTMLTextAreaElement>): boolean {
+  return e.key.toLowerCase() === "y" && (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey;
+}
+
 async function dataURLHash(dataUrl: string): Promise<string> {
   try {
     const res = await fetch(dataUrl);
@@ -302,6 +306,7 @@ export function Composer({
   onSetMode,
   onSetCollaborationMode,
   onSetToolApprovalMode,
+  onToggleYoloApprovalMode,
   onSetGoal,
   onClearGoal,
   onSwitchModel,
@@ -331,6 +336,7 @@ export function Composer({
   onSetMode: (mode: Mode) => void;
   onSetCollaborationMode: (mode: CollaborationMode) => void;
   onSetToolApprovalMode: (mode: ToolApprovalMode) => void;
+  onToggleYoloApprovalMode: () => void;
   onSetGoal: (goal: string) => void;
   onClearGoal: () => void;
   onSwitchModel: (name: string) => void;
@@ -1305,6 +1311,12 @@ export function Composer({
     if (e.key === "Tab" && e.shiftKey && !composing) {
       e.preventDefault();
       onCycleMode();
+      return;
+    }
+
+    if (isYoloToggleShortcut(e) && !composing) {
+      e.preventDefault();
+      onToggleYoloApprovalMode();
       return;
     }
 

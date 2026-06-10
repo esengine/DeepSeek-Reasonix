@@ -45,7 +45,7 @@ var English = Messages{
 	ChatStatusRetryingFmt:       "%s retrying (%d/%d)… (Esc cancels)",
 	ChatStatusIdle:              "ready",
 	ChatStatusYoloIdle:          "tool approvals skipped",
-	ChatStatusCycleHint:         "shift+tab toggles plan",
+	ChatStatusCycleHint:         "shift+tab toggles plan · ctrl+y yolo",
 	ChatStatusCacheNowFmt:       "turn hit %s",
 	ChatStatusCacheAvgFmt:       "avg %s",
 	ChatStatusPlanApproval:      "Enter/y approves & executes · n/Esc keeps planning · PgUp/PgDn/Ctrl+Home/End scrolls",

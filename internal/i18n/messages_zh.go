@@ -46,7 +46,7 @@ var Chinese = Messages{
 	ChatStatusRetryingFmt:       "%s 正在重试 (%d/%d)… (Esc 取消)",
 	ChatStatusIdle:              "就绪",
 	ChatStatusYoloIdle:          "已跳过工具批准",
-	ChatStatusCycleHint:         "shift+tab 切换计划",
+	ChatStatusCycleHint:         "shift+tab 切换计划 · ctrl+y yolo",
 	ChatStatusCacheNowFmt:       "本次命中 %s",
 	ChatStatusCacheAvgFmt:       "平均 %s",
 	ChatStatusPlanApproval:      "Enter/y 批准并执行 · n/Esc 继续规划 · PgUp/PgDn/Ctrl+Home/End 滚动",
