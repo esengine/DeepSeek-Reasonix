@@ -1,0 +1,11 @@
+{
+  "schema": "geemu-keyword-knowledge-db-v1",
+  "package": "GEEMu compact full GitHub package",
+  "search": "keyword-jsonl",
+  "embedding_runtime_required": false,
+  "document_count": 1965,
+  "chunk_count": 15578,
+  "chunk_file": "chunks.jsonl",
+  "document_file": "documents.jsonl",
+  "notes": "Private local paths, public-facing source labels, and development-script chunks were removed. Search uses chunks.jsonl keyword scoring and does not require an embedding model."
+}

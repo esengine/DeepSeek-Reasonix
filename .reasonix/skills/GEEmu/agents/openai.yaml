@@ -1,0 +1,6 @@
+interface:
+  display_name: "GEEMu"
+  short_description: "Write GEE Python with local geemap knowledge"
+  default_prompt: "Use $geemu-skill to write Google Earth Engine Python code with geemap from the local knowledge base."
+policy:
+  allow_implicit_invocation: true

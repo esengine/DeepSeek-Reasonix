@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.models/
+
+# Local generated run artifacts.
+runs/
+
+# Optional local outputs from examples.
+examples/**/community_candidates.csv
+examples/**/out/
+examples/**/*.tif
+examples/**/*.tiff

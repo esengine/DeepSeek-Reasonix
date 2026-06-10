@@ -1,0 +1,3 @@
+earthengine-api
+geemap
+geopandas
