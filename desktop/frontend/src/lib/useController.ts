@@ -86,6 +86,7 @@ interface State {
   discardTurn?: boolean;
   turnStartAt: number;
   turnTokens: number;
+  sessionTokens: number;
   sessionCost: number;
   sessionCurrency: string;
   retry?: { attempt: number; max: number };
@@ -101,10 +102,18 @@ const initialState: State = {
   checkpoints: [],
   turnStartAt: 0,
   turnTokens: 0,
+  sessionTokens: 0,
   sessionCost: 0,
   sessionCurrency: "¥",
   seq: 0,
 };
+
+function usageTotalTokens(usage?: WireUsage): number {
+  if (!usage) return 0;
+  if (usage.totalTokens > 0) return usage.totalTokens;
+  const promptTokens = usage.promptTokens || usage.cacheHitTokens + usage.cacheMissTokens;
+  return Math.max(0, promptTokens + usage.completionTokens);
+}
 
 function sameMeta(a?: Meta, b?: Meta): boolean {
   if (a === b) return true;
@@ -345,10 +354,11 @@ function applyEvent(s: State, e: WireEvent): State {
     case "usage": {
       const used = e.usage && s.context.window ? e.usage.promptTokens : s.context.used;
       const turnTokens = s.turnTokens + (e.usage?.completionTokens ?? 0);
+      const sessionTokens = s.sessionTokens + usageTotalTokens(e.usage);
       const usageCost = e.usage?.cost ?? e.usage?.costUsd ?? 0;
       const sessionCost = s.sessionCost + usageCost;
       const sessionCurrency = e.usage?.currency || s.sessionCurrency || "¥";
-      return { ...s, usage: e.usage, context: { ...s.context, used }, turnTokens, sessionCost, sessionCurrency };
+      return { ...s, usage: e.usage, context: { ...s.context, used }, turnTokens, sessionTokens, sessionCost, sessionCurrency };
     }
     case "notice":
       return { ...s, running: s.turnActive ? s.running : false, seq: s.seq + 1, items: [...s.items, { kind: "notice", id: `n${s.seq}`, level: e.level ?? "info", text: e.text ?? "" }] };

@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import { useToast } from "./lib/toast";
 import { asArray } from "./lib/array";
-import { clearLegacyLangPref, normalizeLangPref, readLegacyLangPref, t, useI18n, useT } from "./lib/i18n";
+import { clearLegacyLangPref, normalizeLangPref, readLegacyLangPref, useI18n, useT } from "./lib/i18n";
 import { useController, type Item, type LiveStream } from "./lib/useController";
 import { app, onProjectTreeChanged } from "./lib/bridge";
 import { Transcript } from "./components/Transcript";
@@ -49,7 +49,6 @@ import {
   type CollaborationMode,
   type ComposerInsertRequest,
   type Mode,
-  type ProjectNode,
   type SessionMeta,
   type SettingsTab,
   type SettingsView,
@@ -106,6 +105,10 @@ const RIGHT_DOCK_MIN_RENDER_WIDTH = 280;
 const RIGHT_DOCK_MAX_WIDTH = 860;
 
 type RightDockMode = "context" | "files" | "changed";
+type WorkspaceRevealRequest = { id: number; path: string };
+type WorkspaceFileListRequest = { id: number; paths: string[] };
+type WorkspaceChangeListEntry = { key: string; path: string; meta: string; time: string; detail: string };
+type WorkspaceChangeListRequest = { id: number; changes: WorkspaceChangeListEntry[] };
 const SHOW_CONTEXT_DOCK = true;
 type HistoryScopeFilter = { scope: "global" | "project"; workspaceRoot: string };
 type DesktopPlatform = "darwin" | "windows" | "linux";
@@ -220,34 +223,11 @@ function topicDisplayTitle(tab?: TabMeta): string {
   return tab.topicTitle || (tab.scope === "global" ? tabWorkspaceTitle(tab) : "Untitled");
 }
 
-function topicScopeLabel(tab?: TabMeta): string {
-  if (!tab) return t("scope.global");
-  if (tab.scope === "global") return tab.workspaceName || t("scope.global");
-  return t("scope.project", { name: tab.workspaceName || tab.workspaceRoot || "Project" });
-}
-
 function sessionsForScope(sessions: SessionMeta[], filter: HistoryScopeFilter): SessionMeta[] {
   if (filter.scope === "project") {
     return sessions.filter((session) => session.scope === "project" && session.workspaceRoot === filter.workspaceRoot);
   }
   return sessions.filter((session) => (session.scope || "global") === "global");
-}
-
-function activeTopicTurnsFromTree(nodes: ProjectNode[], tab?: TabMeta): number | undefined {
-  if (!tab?.topicId) return undefined;
-  const activeScope = tab.scope === "global" ? "global" : "project";
-  const stack = [...nodes];
-  while (stack.length > 0) {
-    const node = stack.shift();
-    if (!node) continue;
-    if (node.kind === "topic" || node.kind === "global_topic") {
-      const nodeScope = node.kind === "global_topic" ? "global" : "project";
-      const sameRoot = nodeScope === "global" || node.root === tab.workspaceRoot;
-      if (node.topicId === tab.topicId && nodeScope === activeScope && sameRoot) return node.turns ?? 0;
-    }
-    if (node.children?.length) stack.push(...node.children);
-  }
-  return undefined;
 }
 
 function workspaceDisplayName(path?: string): string {
@@ -450,10 +430,13 @@ export default function App() {
   const [rightDockTreeWidth, setRightDockTreeWidth] = useState(loadRightDockTreeWidth);
   const [rightDockPreviewWidth, setRightDockPreviewWidth] = useState(loadRightDockPreviewWidth);
   const [workspacePreviewActive, setWorkspacePreviewActive] = useState(false);
-  const [contextDetailActive, setContextDetailActive] = useState(false);
   const [workspacePanelResizing, setWorkspacePanelResizing] = useState(false);
   const [workspacePanelMaximized, setWorkspacePanelMaximized] = useState(false);
   const [rightDockMode, setRightDockMode] = useState<RightDockMode>("context");
+  const [workspaceRevealRequest, setWorkspaceRevealRequest] = useState<WorkspaceRevealRequest | null>(null);
+  const [workspaceChangeRevealRequest, setWorkspaceChangeRevealRequest] = useState<WorkspaceRevealRequest | null>(null);
+  const [workspaceFileListRequest, setWorkspaceFileListRequest] = useState<WorkspaceFileListRequest | null>(null);
+  const [workspaceChangeListRequest, setWorkspaceChangeListRequest] = useState<WorkspaceChangeListRequest | null>(null);
   const [dockRefreshKey, setDockRefreshKey] = useState(0);
   const [projectRevision, setProjectRevision] = useState(0);
   const [composerInsertRequest, setComposerInsertRequest] = useState<ComposerInsertRequest | null>(null);
@@ -464,7 +447,6 @@ export default function App() {
   const [topicExportOpen, setTopicExportOpen] = useState(false);
   const [sidebarTogglePressed, setSidebarTogglePressed] = useState(false);
   const [workspaceTogglePressed, setWorkspaceTogglePressed] = useState(false);
-  const [savedTopicTurnCount, setSavedTopicTurnCount] = useState<number | undefined>(undefined);
   const [clearContextPending, setClearContextPending] = useState(false);
   const topicRenameSkipCommitRef = useRef(false);
   const topicRenameCommitHandledRef = useRef(false);
@@ -599,7 +581,7 @@ export default function App() {
   const [footerHeight, setFooterHeight] = useState(0);
   const footerHeightRef = useRef(0);
   const footerRef = useRef<HTMLElement>(null);
-  const rightDockDetailActive = rightDockMode === "context" ? contextDetailActive : workspacePreviewActive;
+  const rightDockDetailActive = rightDockMode !== "context" && workspacePreviewActive;
   const preferredWorkspacePanelWidth = rightDockDetailActive ? rightDockPreviewWidth : rightDockTreeWidth;
   const workspacePanelMinWidth = rightDockDetailActive ? RIGHT_DOCK_PREVIEW_MIN_WIDTH : RIGHT_DOCK_TREE_MIN_WIDTH;
   const chatReservedWidth = workspacePanelOpen && !workspacePanelMaximized ? CHAT_COMFORT_MIN_WIDTH : CHAT_MIN_WIDTH;
@@ -945,8 +927,6 @@ export default function App() {
 
   const sessionTitle = topicTitle(activeTab);
   const sessionHasContent = state.items.length > 0 || Boolean(state.live?.text || state.live?.reasoning);
-  const transcriptTurnCount = useMemo(() => state.items.reduce((count, item) => count + (item.kind === "user" ? 1 : 0), 0), [state.items]);
-  const currentTurnCount = Math.max(transcriptTurnCount, savedTopicTurnCount ?? 0);
   const getSessionMarkdown = useCallback(
     () => sessionItemsToMarkdown(sessionTitle, state.items, state.live),
     [sessionTitle, state.items, state.live],
@@ -1116,24 +1096,6 @@ export default function App() {
       void refreshTabMetas();
     });
   }, [refreshTabMetas]);
-
-  useEffect(() => {
-    let cancelled = false;
-    if (!activeTab?.topicId) {
-      setSavedTopicTurnCount(undefined);
-      return () => {
-        cancelled = true;
-      };
-    }
-    void app.ListProjectTree().then((nodes) => {
-      if (!cancelled) setSavedTopicTurnCount(activeTopicTurnsFromTree(asArray<ProjectNode>(nodes), activeTab));
-    }).catch(() => {
-      if (!cancelled) setSavedTopicTurnCount(undefined);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [activeTab?.scope, activeTab?.workspaceRoot, activeTab?.topicId, projectRevision]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1320,13 +1282,8 @@ export default function App() {
   const openWorkspacePanel = useCallback(
     (mode: RightDockMode = rightDockMode) => {
       closeTransientOverlays();
-      if (mode !== rightDockMode) {
+      if (mode === "context" || mode !== rightDockMode) {
         setWorkspacePreviewActive(false);
-        setContextDetailActive(false);
-      } else if (mode === "context") {
-        setWorkspacePreviewActive(false);
-      } else {
-        setContextDetailActive(false);
       }
       setRightDockMode(mode);
       let nextMaximized = workspacePanelMaximized;
@@ -1367,7 +1324,76 @@ export default function App() {
 
   const openRightDockMode = useCallback(
     (mode: RightDockMode) => {
+      setWorkspaceRevealRequest(null);
+      setWorkspaceChangeRevealRequest(null);
+      setWorkspaceFileListRequest(null);
+      setWorkspaceChangeListRequest(null);
       openWorkspacePanel(mode);
+    },
+    [openWorkspacePanel],
+  );
+
+  const openRightDockFile = useCallback(
+    (path: string) => {
+      const nextPath = path.trim();
+      if (!nextPath) return;
+      setWorkspaceFileListRequest(null);
+      setWorkspaceChangeListRequest(null);
+      setWorkspaceChangeRevealRequest(null);
+      setWorkspaceRevealRequest((current) => ({ id: (current?.id ?? 0) + 1, path: nextPath }));
+      openWorkspacePanel("files");
+    },
+    [openWorkspacePanel],
+  );
+
+  const openRightDockFileList = useCallback(
+    (paths: string[]) => {
+      const normalized = Array.from(new Set(paths.map((path) => path.trim()).filter(Boolean)));
+      setWorkspaceRevealRequest(null);
+      setWorkspaceChangeRevealRequest(null);
+      setWorkspaceChangeListRequest(null);
+      setWorkspaceFileListRequest((current) =>
+        normalized.length > 0
+          ? { id: (current?.id ?? 0) + 1, paths: normalized }
+          : null,
+      );
+      openWorkspacePanel("files");
+    },
+    [openWorkspacePanel],
+  );
+
+  const openRightDockChangeFile = useCallback(
+    (path: string) => {
+      const nextPath = path.trim();
+      if (!nextPath) return;
+      setWorkspaceRevealRequest(null);
+      setWorkspaceFileListRequest(null);
+      setWorkspaceChangeListRequest(null);
+      setWorkspaceChangeRevealRequest((current) => ({ id: (current?.id ?? 0) + 1, path: nextPath }));
+      openWorkspacePanel("changed");
+    },
+    [openWorkspacePanel],
+  );
+
+  const openRightDockChangeList = useCallback(
+    (changes: WorkspaceChangeListEntry[]) => {
+      const seen = new Set<string>();
+      const normalized = changes
+        .map((change) => ({ ...change, path: change.path.trim() }))
+        .filter((change) => {
+          if (!change.path || seen.has(change.path)) return false;
+          seen.add(change.path);
+          return true;
+      });
+      setWorkspaceRevealRequest(null);
+      setWorkspaceChangeRevealRequest(null);
+      setWorkspaceFileListRequest(null);
+      setWorkspaceChangeListRequest((current) =>
+        normalized.length > 0
+          ? { id: (current?.id ?? 0) + 1, changes: normalized }
+          : null,
+      );
+      openWorkspacePanel("changed");
     },
     [openWorkspacePanel],
   );
@@ -1379,15 +1405,6 @@ export default function App() {
       setWorkspacePreviewActive(active);
     },
     [closeTransientOverlays, workspacePreviewActive],
-  );
-
-  const handleContextDetailModeChange = useCallback(
-    (active: boolean) => {
-      if (contextDetailActive === active) return;
-      closeTransientOverlays();
-      setContextDetailActive(active);
-    },
-    [closeTransientOverlays, contextDetailActive],
   );
 
   const layoutStyle = useMemo(
@@ -2063,10 +2080,10 @@ export default function App() {
               running={state.running}
               collaborationMode={collaborationMode}
               toolApprovalMode={toolApprovalMode}
+              sessionTokens={state.sessionTokens}
               cost={state.sessionCost}
               currency={state.sessionCurrency}
               modelLabel={state.meta?.label}
-              currentTurnCount={currentTurnCount}
             />
           </footer>
           </>
@@ -2096,12 +2113,6 @@ export default function App() {
             ].join(" ")}
             aria-label={t("rightDock.workbench")}
           >
-            <div className="workbench-dock__head">
-              <div className="workbench-dock__heading">
-                <h2>{t("workspace.title")}</h2>
-              </div>
-              <span className="workbench-dock__head-spacer" />
-            </div>
             <div className="workbench-dock__tools">
               <div className="workbench-dock__tabs" role="tablist" aria-label={t("rightDock.views")}>
                 {SHOW_CONTEXT_DOCK && (
@@ -2144,11 +2155,15 @@ export default function App() {
                   tabId={activeTabId}
                   context={state.context}
                   usage={state.usage}
+                  sessionTokens={state.sessionTokens}
                   sessionCost={state.sessionCost}
                   sessionCurrency={state.sessionCurrency}
-                  scopeLabel={topicScopeLabel(activeTab)}
                   refreshKey={dockRefreshKey}
-                  onDetailModeChange={handleContextDetailModeChange}
+                  onOpenWorkspaceMode={openRightDockMode}
+                  onOpenWorkspaceFile={openRightDockFile}
+                  onOpenWorkspaceFileList={openRightDockFileList}
+                  onOpenWorkspaceChangeList={openRightDockChangeList}
+                  onOpenWorkspaceChangeFile={openRightDockChangeFile}
                 />
               ) : (
                 <WorkspacePanel
@@ -2166,6 +2181,10 @@ export default function App() {
                   onRequestPanelWidth={ensureWorkspacePanelWidth}
                   refreshKey={dockRefreshKey}
                   initialViewMode={rightDockMode === "changed" ? "changed" : "files"}
+                  revealPathRequest={workspaceRevealRequest}
+                  changeRevealRequest={workspaceChangeRevealRequest}
+                  fileListRequest={workspaceFileListRequest}
+                  changeListRequest={workspaceChangeListRequest}
                   showViewTabs={false}
                 />
               )}

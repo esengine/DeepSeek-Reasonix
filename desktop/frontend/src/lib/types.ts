@@ -169,6 +169,7 @@ export interface ContextPanelInfo {
   windowTokens: number;
   promptTokens: number;
   completionTokens: number;
+  totalTokens: number;
   reasoningTokens: number;
   cacheHitTokens: number;
   cacheMissTokens: number;

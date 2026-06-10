@@ -2259,6 +2259,7 @@ function makeMockApp(): AppBindings {
         windowTokens: 128000,
         promptTokens: 22134,
         completionTokens: 12345,
+        totalTokens: 34479,
         reasoningTokens: 7521,
         cacheHitTokens: 87000,
         cacheMissTokens: 13000,
@@ -2269,10 +2270,10 @@ function makeMockApp(): AppBindings {
         sessionCostUsd: 0.018,
         mock: true,
         readFiles: [
-          { path: "REASONIX.md", turn: 2, time: now - 34 * 60 * 1000 },
-          { path: "pyproject.toml", turn: 3, time: now - 30 * 60 * 1000 },
-          { path: "docs/dev-standard.md", turn: 5, time: now - 13 * 60 * 1000, offset: 0, limit: 180 },
-          { path: "scripts/db_migrate.sh", turn: 6, time: now - 4 * 60 * 1000, offset: 120, limit: 80, truncated: true },
+          { path: "README.md", turn: 2, time: now - 34 * 60 * 1000 },
+          { path: "go.mod", turn: 3, time: now - 30 * 60 * 1000 },
+          { path: "desktop/file.go", turn: 5, time: now - 13 * 60 * 1000, offset: 0, limit: 180 },
+          { path: "internal/event.go", turn: 6, time: now - 4 * 60 * 1000, offset: 120, limit: 80, truncated: true },
         ],
         changedFiles: [
           { path: t("mock.changedFile1Path"), sources: ["session"], gitStatus: "modified", turns: [5, 6], latestPrompt: t("mock.changedFile1Prompt"), latestTime: now - 2 * 60 * 1000 },
