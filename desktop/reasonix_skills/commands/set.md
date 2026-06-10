@@ -94,12 +94,43 @@ Write the environment state to the GLOBAL memory file that Reasonix loads at eve
 
 Use `bash` to find the exact path: `echo $APPDATA` (Windows) or `echo $HOME/.config/reasonix` (macOS/Linux).
 
-Add or update a `## Geo Environment` section with:
-- Status table (GDAL/QGIS/GEE — status, version, path) from the probe
-- 7 Geo Rules (tool priority, CRS handling, heartbeat, etc.)
-- Geo Tool Registry (5 mcp__geocode__* tools with descriptions)
+Add or update the following sections:
+
+### Geo Environment
+Status table (GDAL/QGIS/GEE — status, version, path) from the probe.
+
+### Geo Rules
+1. Prefer mcp__geocode__* tools for all geo tasks — do not fall back to raw GDAL/bash
+2. Always verify metadata with read_geo_data before processing (CRS/extent/nodata)
+3. Always consult qgis_doc for parameter schema before running QGIS algorithms
+4. Never assume WGS84 — explicitly handle CRS transforms per task
+5. Use heartbeat() during long-running GEE operations
+6. Clip/filter first, compute later — intermediate results to /vsimem/
+7. Validate every generated geo file with read_geo_data after processing
+
+### Geo Tool Registry
+| Tool | Purpose |
+|------|---------|
+| mcp__geocode__geo_env_status | Triple-probe GDAL / QGIS / GEE |
+| mcp__geocode__read_geo_data | Raster/vector metadata + preview |
+| mcp__geocode__run_qgis_algorithm | QGIS Processing algorithms |
+| mcp__geocode__qgis_doc | QGIS algorithm docs (422 algos) |
+| mcp__geocode__run_gee_script | GEE Python scripts |
+
+### Available Skills
+These are pre-installed. Use /skill-name to invoke, or the agent auto-selects based on the task.
+
+| Skill | Use when |
+|-------|---------|
+| /rsdata | Searching for remote sensing datasets |
+| /gee-scripting | Writing or debugging GEE Python scripts |
+| /projection-selection | Choosing a coordinate system / projection |
+| /thematic-map | Creating publication-quality maps (Cartopy + frykit) |
+| /multi-search-engine | Searching the web for technical information |
+| /patent-architect | Drafting Chinese patent applications |
+| /research-survey | Systematic technology/algorithm surveys |
+| /brainstorming | Refining ideas into structured designs |
 
 This is the same mechanism GeoCode uses (`~/.config/geocode/AGENTS.md`).
-The file is loaded into Reasonix's system prompt prefix at every boot.
 
-Tell the user: "Setup complete. Geo environment persisted to global REASONIX.md — loaded at every session start, across all projects."
+Tell the user: "Setup complete. Geo environment and skills index persisted to global REASONIX.md."
