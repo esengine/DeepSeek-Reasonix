@@ -351,9 +351,11 @@ export function Transcript({
     for (let i = hotStartIdx; i < items.length; i++) {
       const it = items[i];
       if (it.kind === "user") {
-        // Close pending group, start new user group
+        // Close pending group — if it's a non-streaming text assistant it's the final answer
         if (current.length > 0) {
-          groups.push({ items: current, isFinal: false, isComplete: true });
+          const first = current[0];
+          const isFinal = first.kind === "assistant" && !first.streaming && first.text.trim() !== "";
+          groups.push({ items: current, isFinal, isComplete: true });
           current = [];
         }
         groups.push({ items: [it], isFinal: false, isComplete: true });
@@ -370,7 +372,7 @@ export function Transcript({
         current.push(it);
       }
     }
-    // Last group in progress; mark as final only if it's a non-streaming text assistant
+    // Last group in progress
     if (current.length > 0) {
       const first = current[0];
       const isFinal = first.kind === "assistant" && !first.streaming && first.text.trim() !== "";
