@@ -10124,7 +10124,7 @@ a[href] {
   position: absolute;
   top: 4px;
   right: 4px;
-  z-index: 1;
+  z-index: var(--z-local-raised);
   line-height: 0;
 }
 .composer-context__item--image .composer-context__remove-trigger,
