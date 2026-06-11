@@ -286,10 +286,14 @@ func runShellPATHCommand(parent context.Context, shell string, args []string) []
 	ctx, cancel := context.WithTimeout(parent, 2*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, shell, args...)
-	proc.HideWindow(cmd)
+	prepareStdioShellPATHProbe(cmd)
 	cmd.Stdin = strings.NewReader("")
 	out, _ := cmd.CombinedOutput()
 	return out
+}
+
+func prepareStdioShellPATHProbe(cmd *exec.Cmd) {
+	proc.PrepareShellPATHProbe(cmd)
 }
 
 func parseShellPATH(out []byte, marker string) string {

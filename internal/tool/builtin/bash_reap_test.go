@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"reasonix/internal/proc"
 )
 
 // TestReapTreeKillsGroupStragglers covers #3702: a foreground command that
@@ -53,5 +55,17 @@ func TestReapTreeKillsGroupStragglers(t *testing.T) {
 	if !dead {
 		_ = syscall.Kill(pid, syscall.SIGKILL) // don't leak the sleep in CI
 		t.Fatalf("backgrounded child %d survived reapTree", pid)
+	}
+}
+
+func TestShellPATHProbeDetachesControllingTerminal(t *testing.T) {
+	cmd := exec.CommandContext(context.Background(), "sh", "-c", "true")
+	proc.PrepareShellPATHProbe(cmd)
+
+	if cmd.SysProcAttr == nil {
+		t.Fatal("SysProcAttr is nil")
+	}
+	if !cmd.SysProcAttr.Setsid {
+		t.Fatal("login shell PATH probe should run in a new session so an interactive shell cannot take the TUI foreground")
 	}
 }
