@@ -330,6 +330,25 @@ var Chinese = Messages{
 	ProviderPickLabel:    "选择 %s 的一个模型",
 	ProviderNoModelsFmt:  "供应商 %s 没有已配置的模型",
 
+	// 自更新
+	UpgradeChecking:            "正在检查更新…",
+	UpgradeDevBuild:            "开发版本无法自更新",
+	UpgradeFetchFailed:         "检查更新失败：%v",
+	UpgradeInvalidVersion:      "远程版本不是有效的 semver",
+	UpgradeAlreadyLatest:       "已是最新版本。",
+	UpgradeAvailableFmt:        "当前：%s → 最新：%s",
+	UpgradeNoAssetFmt:          "未找到 %s 的安装包",
+	UpgradeDownloadingFmt:      "正在下载 %s…",
+	UpgradeDownloadFailed:      "下载失败：%v",
+	UpgradeVerifying:           "正在校验 SHA256…",
+	UpgradeChecksumFailed:      "无法获取校验文件：%v",
+	UpgradeChecksumMismatchFmt: "SHA256 不匹配：得到 %s，期望 %s",
+	UpgradeChecksumNotFoundFmt: "SHA256SUMS 中未找到 %s",
+	UpgradeExtractFailed:       "解压二进制文件失败：%v",
+	UpgradeApplying:            "正在替换二进制文件…",
+	UpgradeApplyFailed:         "应用更新失败：%v",
+	UpgradeSuccessFmt:          "已更新 %s → %s",
+
 	UsageBody: `reasonix — 由配置和插件驱动的 coding agent（多模型）
 
 用法：
@@ -342,6 +361,7 @@ var Chinese = Messages{
   reasonix mcp <add|remove|list>                        管理 reasonix.toml 里的 MCP 服务器
   reasonix doctor [--json]                              输出脱敏的本地诊断信息
   reasonix bot start|doctor|weixin-login                多渠道 IM bot 网关
+  reasonix upgrade [--check]                            自更新到最新版本
   reasonix version
   reasonix help
 

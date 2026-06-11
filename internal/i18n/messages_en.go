@@ -329,6 +329,25 @@ var English = Messages{
 	ProviderPickLabel:    "Select a model from %s",
 	ProviderNoModelsFmt:  "provider %s has no configured models",
 
+	// self-update
+	UpgradeChecking:            "Checking for updates…",
+	UpgradeDevBuild:            "dev builds cannot self-update",
+	UpgradeFetchFailed:         "failed to check for updates: %v",
+	UpgradeInvalidVersion:      "remote version is not valid semver",
+	UpgradeAlreadyLatest:       "Already on the latest version.",
+	UpgradeAvailableFmt:        "Current: %s → Latest: %s",
+	UpgradeNoAssetFmt:          "no binary found for %s",
+	UpgradeDownloadingFmt:      "Downloading %s…",
+	UpgradeDownloadFailed:      "download failed: %v",
+	UpgradeVerifying:           "Verifying checksum…",
+	UpgradeChecksumFailed:      "could not fetch checksum file: %v",
+	UpgradeChecksumMismatchFmt: "SHA256 mismatch: got %s, want %s",
+	UpgradeChecksumNotFoundFmt: "%s not found in SHA256SUMS",
+	UpgradeExtractFailed:       "failed to extract binary: %v",
+	UpgradeApplying:            "Replacing binary…",
+	UpgradeApplyFailed:         "failed to apply update: %v",
+	UpgradeSuccessFmt:          "Updated %s → %s",
+
 	UsageBody: `reasonix — a config- and plugin-driven coding agent (multi-model)
 
 Usage:
@@ -341,6 +360,7 @@ Usage:
   reasonix mcp <add|remove|list>                        manage MCP servers in reasonix.toml
   reasonix doctor [--json]                              print redacted local diagnostics
   reasonix bot start|doctor|weixin-login                multi-channel IM bot gateway
+  reasonix upgrade [--check]                            self-update to the latest release
   reasonix version
   reasonix help
 

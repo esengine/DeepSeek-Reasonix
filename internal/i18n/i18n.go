@@ -370,6 +370,25 @@ type Messages struct {
 	ProviderPickLabel    string // label for provider model picker
 	ProviderNoModelsFmt  string // provider has no models
 
+	// `reasonix upgrade` / `reasonix update` — self-update
+	UpgradeChecking            string // "Checking for updates…"
+	UpgradeDevBuild            string // dev builds cannot self-update
+	UpgradeFetchFailed         string // "failed to check for updates: %v"
+	UpgradeInvalidVersion      string // remote version not valid semver
+	UpgradeAlreadyLatest       string // already on the latest version
+	UpgradeAvailableFmt        string // "Current: %s → Latest: %s"
+	UpgradeNoAssetFmt          string // "no binary found for %s"
+	UpgradeDownloadingFmt      string // "Downloading %s…"
+	UpgradeDownloadFailed      string // "download failed: %v"
+	UpgradeVerifying           string // "Verifying checksum…"
+	UpgradeChecksumFailed      string // "could not fetch checksum file: %v"
+	UpgradeChecksumMismatchFmt string // SHA256 mismatch detail
+	UpgradeChecksumNotFoundFmt string // asset not listed in SHA256SUMS
+	UpgradeExtractFailed       string // "failed to extract binary: %v"
+	UpgradeApplying            string // "Replacing binary…"
+	UpgradeApplyFailed         string // "failed to apply update: %v"
+	UpgradeSuccessFmt          string // "Updated %s → %s"
+
 	// usage / help
 	UsageBody string // full multi-line help text
 }
