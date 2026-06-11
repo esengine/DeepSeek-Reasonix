@@ -43,7 +43,7 @@ var validEvidenceKinds = map[string]bool{
 func (completeStep) Name() string { return "complete_step" }
 
 func (completeStep) Description() string {
-	return "Record the evidence-backed completion of ONE step of an approved plan. Call it as you finish each step instead of silently moving on: it signs the step off with PROOF it is done — the verification you ran (command + result), the diff/files you changed, or a manual check. A completion with no evidence is REJECTED, so don't claim a step is done until you can show why. Keep the task list moving with todo_write (set the next step in_progress); use complete_step for the formal, evidenced sign-off of the finished one. Fields: `step` (which step — its title or number, matching the task list), `result` (what is now true/changed), `evidence` (≥1 item, each with `kind` = verification|diff|files|manual and a `summary`, plus optional `command`/`paths`), and optional `notes`."
+	return "Record the evidence-backed completion of ONE step of an approved plan. Call it as you finish each step instead of silently moving on: it signs the step off with PROOF it is done — the verification you ran (command + result), the diff/files you changed, or a manual check. A completion with no evidence is REJECTED, so don't claim a step is done until you can show why. The host advances the task list for you when you sign off — it marks this step completed and moves the next to in_progress, so you don't need a separate todo_write to mark completions. Fields: `step` (which step — its title or number, matching the task list), `result` (what is now true/changed), `evidence` (≥1 item, each with `kind` = verification|diff|files|manual and a `summary`, plus optional `command`/`paths`), and optional `notes`."
 }
 
 func (completeStep) Schema() json.RawMessage {
@@ -131,7 +131,7 @@ func (completeStep) Execute(ctx context.Context, args json.RawMessage) (string, 
 	if projectVerified > 0 {
 		projectStatus = fmt.Sprintf(" Project checks: project checks %d.", projectVerified)
 	}
-	return fmt.Sprintf("Step %q signed off with %d evidence item(s) [%s].%s Move the next step to in_progress with todo_write.",
+	return fmt.Sprintf("Step %q signed off with %d evidence item(s) [%s].%s The host advanced the task list; continue with the next step.",
 		p.Step, len(p.Evidence), strings.Join(kinds, ", "), hostStatus+todoStatus+projectStatus), nil
 }
 
@@ -158,7 +158,7 @@ func verifyStepEvidence(ctx context.Context, items []stepEvidence) (hostVerified
 			if len(e.Paths) == 0 {
 				return 0, 0, fmt.Errorf("evidence %d: diff evidence requires paths for host verification — cite the files you changed", i+1)
 			}
-			if !ledger.HasSuccessfulWrite(e.Paths) {
+			if !ledger.HasSuccessfulWrite(e.Paths) && !verifyPathsFromSession(ctx, e.Paths, true) {
 				return 0, 0, fmt.Errorf("evidence %d: diff paths have no matching successful writer receipt in this turn%s", i+1, receiptHint("files written this turn", ledger.TouchedPaths(8, true)))
 			}
 			hostVerified++
@@ -166,7 +166,7 @@ func verifyStepEvidence(ctx context.Context, items []stepEvidence) (hostVerified
 			if len(e.Paths) == 0 {
 				return 0, 0, fmt.Errorf("evidence %d: files evidence requires paths for host verification — cite the files you touched", i+1)
 			}
-			if !ledger.HasSuccessfulReadOrWrite(e.Paths) && !ledger.HasSuccessfulBashMentioningPaths(e.Paths) {
+			if !ledger.HasSuccessfulReadOrWrite(e.Paths) && !ledger.HasSuccessfulBashMentioningPaths(e.Paths) && !verifyPathsFromSession(ctx, e.Paths, false) {
 				return 0, 0, fmt.Errorf("evidence %d: file paths have no matching successful read/write receipt in this turn%s", i+1, receiptHint("files touched this turn", ledger.TouchedPaths(8, false)))
 			}
 			hostVerified++
@@ -301,6 +301,17 @@ func verifyCommandFromSession(ctx context.Context, command string) bool {
 		}
 	}
 	return false
+}
+
+// verifyPathsFromSession is the diff/files analogue of verifyCommandFromSession:
+// it lets a completion cite a file written or read in an earlier turn (the
+// per-turn ledger only has this turn). wantWrite restricts to writer tools.
+func verifyPathsFromSession(ctx context.Context, paths []string, wantWrite bool) bool {
+	msgs, ok := evidence.SessionMessagesFromContext(ctx)
+	if !ok {
+		return false
+	}
+	return evidence.PathsProvenInSession(msgs, paths, wantWrite)
 }
 
 func failedCallIDs(msgs []provider.Message) map[string]bool {

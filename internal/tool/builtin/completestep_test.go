@@ -513,3 +513,37 @@ func TestCompleteStepFilesEvidenceAcceptsBashCreatedFile(t *testing.T) {
 		t.Fatal("a path no command mentions must still be rejected")
 	}
 }
+
+func TestCompleteStepSessionFallbackResolvesDiffPaths(t *testing.T) {
+	msgs := []provider.Message{
+		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{
+			ID: "w1", Name: "write_file", Arguments: `{"path":"internal/foo/bar.go"}`,
+		}}},
+		{Role: provider.RoleTool, ToolCallID: "w1", Name: "write_file", Content: "wrote 10 lines"},
+	}
+	ctx := evidence.WithLedger(context.Background(), evidence.NewLedger())
+	ctx = evidence.WithSessionMessages(ctx, msgs)
+
+	if _, err := (completeStep{}).Execute(ctx, json.RawMessage(`{
+		"step":"x","result":"y",
+		"evidence":[{"kind":"diff","summary":"added bar","paths":["internal/foo/bar.go"]}]}`)); err != nil {
+		t.Fatalf("cross-turn diff citation of a written file rejected: %v", err)
+	}
+}
+
+func TestCompleteStepSessionFallbackSkipsFailedWrite(t *testing.T) {
+	msgs := []provider.Message{
+		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{
+			ID: "w1", Name: "write_file", Arguments: `{"path":"internal/foo/bar.go"}`,
+		}}},
+		{Role: provider.RoleTool, ToolCallID: "w1", Name: "write_file", Content: "error: permission denied"},
+	}
+	ctx := evidence.WithLedger(context.Background(), evidence.NewLedger())
+	ctx = evidence.WithSessionMessages(ctx, msgs)
+
+	if _, err := (completeStep{}).Execute(ctx, json.RawMessage(`{
+		"step":"x","result":"y",
+		"evidence":[{"kind":"diff","summary":"added bar","paths":["internal/foo/bar.go"]}]}`)); err == nil {
+		t.Fatal("a failed write must not satisfy cross-turn diff evidence")
+	}
+}

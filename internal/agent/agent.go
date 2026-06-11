@@ -212,6 +212,14 @@ type Agent struct {
 	// complete_step validate that cited evidence happened before the claim.
 	evidence *evidence.Ledger
 
+	// todoState is the host's canonical task list: the latest successful
+	// todo_write with completions applied by complete_step. Unlike the per-turn
+	// ledger it survives turn boundaries and compaction (it never rides in the
+	// prompt), so the final-answer gate still sees an unfinished plan a later
+	// turn would otherwise hide. Rebuilt from the session in SetSession.
+	todoMu    sync.Mutex
+	todoState []evidence.TodoItem
+
 	// projectChecks are structured project instructions that complete_step can
 	// verify against same-turn bash receipts after a write-backed completion.
 	projectChecks []instruction.VerifyCheck
@@ -302,8 +310,11 @@ func (a *Agent) Session() *Session {
 // running turn (it only fires while idle); sessMu guards the pointer swap itself.
 func (a *Agent) SetSession(s *Session) {
 	a.sessMu.Lock()
-	defer a.sessMu.Unlock()
 	a.session = s
+	a.sessMu.Unlock()
+	if s != nil {
+		a.rebuildTodoState(s.Snapshot())
+	}
 }
 
 // LastUsage returns the most recent per-turn token telemetry the provider
@@ -647,7 +658,11 @@ func (a *Agent) finalReadinessCheck() finalReadinessCheck {
 	var missing []string
 	out := finalReadinessCheck{}
 	if !a.planMode.Load() {
-		if incomplete, hasTodos := a.evidence.IncompleteLatestTodos(); hasTodos && len(incomplete) > 0 {
+		incomplete, hasTodos := a.evidence.IncompleteLatestTodos()
+		if !hasTodos && a.evidence.HasAnySuccessfulReceipt() {
+			incomplete, hasTodos = a.incompleteCanonicalTodos()
+		}
+		if hasTodos && len(incomplete) > 0 {
 			out.applies = true
 			out.incompleteTodos = len(incomplete)
 			missing = append(missing, finalReadinessIncompleteTodos(incomplete))
@@ -694,6 +709,145 @@ func finalReadinessIncompleteTodos(items []evidence.TodoStepMatch) string {
 		parts = append(parts, fmt.Sprintf("%s: %s", label, item.Status))
 	}
 	return "latest successful todo_write still has incomplete items: " + strings.Join(parts, ", ")
+}
+
+func (a *Agent) setTodoState(todos []evidence.TodoItem) {
+	a.todoMu.Lock()
+	a.todoState = append([]evidence.TodoItem(nil), todos...)
+	a.todoMu.Unlock()
+}
+
+func (a *Agent) incompleteCanonicalTodos() ([]evidence.TodoStepMatch, bool) {
+	a.todoMu.Lock()
+	defer a.todoMu.Unlock()
+	if len(a.todoState) == 0 {
+		return nil, false
+	}
+	return evidence.IncompleteTodos(a.todoState), true
+}
+
+// advanceCanonicalTodo flips the canonical todo matching a signed-off step to
+// completed (promoting the next pending item to in_progress) and emits a
+// synthetic todo_write so the task panel reflects it without the model
+// re-sending the whole list. No-op when nothing matches or it is already done.
+func (a *Agent) advanceCanonicalTodo(step string) {
+	a.todoMu.Lock()
+	if len(a.todoState) == 0 {
+		a.todoMu.Unlock()
+		return
+	}
+	m, ok := evidence.MatchStep(step, a.todoState)
+	if !ok || canonicalTodoStatus(a.todoState[m.Index-1].Status) == "completed" {
+		a.todoMu.Unlock()
+		return
+	}
+	a.todoState[m.Index-1].Status = "completed"
+	promoteNextPendingTodo(a.todoState)
+	snapshot := append([]evidence.TodoItem(nil), a.todoState...)
+	a.todoMu.Unlock()
+	a.recordTodoState(snapshot)
+	a.emitTodoState(snapshot)
+}
+
+// recordTodoState logs the host-advanced list as a synthetic todo_write receipt
+// so the per-turn final gate (which reads the ledger's latest todo_write) sees
+// the advance — the model no longer has to re-send a todo_write to mark the
+// completion. It bypasses the todo_write tool, so the completion-transition
+// guard never runs on it.
+func (a *Agent) recordTodoState(todos []evidence.TodoItem) {
+	if a.evidence == nil {
+		return
+	}
+	args, err := json.Marshal(map[string]any{"todos": todos})
+	if err != nil {
+		return
+	}
+	a.evidence.Record(evidence.ReceiptFromToolCall("todo_write", json.RawMessage(args), true, true))
+}
+
+func promoteNextPendingTodo(todos []evidence.TodoItem) {
+	for _, t := range todos {
+		if canonicalTodoStatus(t.Status) == "in_progress" {
+			return
+		}
+	}
+	for i := range todos {
+		if canonicalTodoStatus(todos[i].Status) == "pending" {
+			todos[i].Status = "in_progress"
+			return
+		}
+	}
+}
+
+func canonicalTodoStatus(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "pending"
+	}
+	return s
+}
+
+func (a *Agent) emitTodoState(todos []evidence.TodoItem) {
+	args, err := json.Marshal(map[string]any{"todos": todos})
+	if err != nil {
+		return
+	}
+	t := event.Tool{ID: "host-advance", Name: "todo_write", Args: string(args), ReadOnly: true}
+	a.sink.Emit(event.Event{Kind: event.ToolDispatch, Tool: t})
+	t.Output = "task list advanced by complete_step"
+	a.sink.Emit(event.Event{Kind: event.ToolResult, Tool: t})
+}
+
+// rebuildTodoState reconstructs the canonical task list from a transcript: the
+// latest successful todo_write is the base, then every complete_step after it
+// advances an item. Deterministic from persisted messages, so it survives a
+// fresh load or a rewind (the truncated history yields the historical state).
+// Empty after compaction drops the todo_write — no worse than no canonical list.
+func (a *Agent) rebuildTodoState(msgs []provider.Message) {
+	failed := failedToolCallIDs(msgs)
+	var todos []evidence.TodoItem
+	baseIdx := -1
+	for i, msg := range msgs {
+		for _, tc := range msg.ToolCalls {
+			if tc.Name != "todo_write" || failed[tc.ID] {
+				continue
+			}
+			if rec := evidence.ReceiptFromToolCall(tc.Name, json.RawMessage(tc.Arguments), true, true); len(rec.Todos) > 0 {
+				todos = append([]evidence.TodoItem(nil), rec.Todos...)
+				baseIdx = i
+			}
+		}
+	}
+	if baseIdx < 0 {
+		a.setTodoState(nil)
+		return
+	}
+	for i := baseIdx; i < len(msgs); i++ {
+		for _, tc := range msgs[i].ToolCalls {
+			if tc.Name != "complete_step" || failed[tc.ID] {
+				continue
+			}
+			rec := evidence.ReceiptFromToolCall(tc.Name, json.RawMessage(tc.Arguments), true, true)
+			if m, ok := evidence.MatchStep(rec.Step, todos); ok && canonicalTodoStatus(todos[m.Index-1].Status) != "completed" {
+				todos[m.Index-1].Status = "completed"
+				promoteNextPendingTodo(todos)
+			}
+		}
+	}
+	a.setTodoState(todos)
+}
+
+func failedToolCallIDs(msgs []provider.Message) map[string]bool {
+	failed := map[string]bool{}
+	for _, msg := range msgs {
+		if msg.Role != provider.RoleTool || msg.ToolCallID == "" {
+			continue
+		}
+		if strings.HasPrefix(msg.Content, "error:") || strings.HasPrefix(msg.Content, "blocked:") {
+			failed[msg.ToolCallID] = true
+		}
+	}
+	return failed
 }
 
 func finalReadinessCheckSource(check instruction.VerifyCheck) string {
@@ -1157,10 +1311,16 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 	if a.evidence != nil {
 		if call.Name == "complete_step" {
 			if err == nil {
-				a.evidence.Record(evidence.ReceiptFromToolCall(call.Name, json.RawMessage(call.Arguments), true, t.ReadOnly()))
+				rec := evidence.ReceiptFromToolCall(call.Name, json.RawMessage(call.Arguments), true, t.ReadOnly())
+				a.evidence.Record(rec)
+				a.advanceCanonicalTodo(rec.Step)
 			}
 		} else {
-			a.evidence.Record(evidence.ReceiptFromToolCall(call.Name, json.RawMessage(call.Arguments), err == nil, t.ReadOnly()))
+			rec := evidence.ReceiptFromToolCall(call.Name, json.RawMessage(call.Arguments), err == nil, t.ReadOnly())
+			a.evidence.Record(rec)
+			if err == nil && call.Name == "todo_write" {
+				a.setTodoState(rec.Todos)
+			}
 		}
 	}
 	// PostToolUse hooks observe the result (they can't block); fired whether the

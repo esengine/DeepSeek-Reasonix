@@ -262,23 +262,51 @@ func (l *Ledger) IncompleteLatestTodos() ([]TodoStepMatch, bool) {
 		if !r.Success || r.ToolName != "todo_write" {
 			continue
 		}
-		incomplete := make([]TodoStepMatch, 0)
-		for j, t := range r.Todos {
-			status := todoStatus(t.Status)
-			if status == "completed" {
-				continue
-			}
-			incomplete = append(incomplete, TodoStepMatch{
-				Found:      true,
-				Index:      j + 1,
-				Content:    t.Content,
-				Status:     status,
-				ActiveForm: t.ActiveForm,
-			})
-		}
-		return incomplete, true
+		return IncompleteTodos(r.Todos), true
 	}
 	return nil, false
+}
+
+// IncompleteTodos returns the items of a todo list that are not completed.
+func IncompleteTodos(todos []TodoItem) []TodoStepMatch {
+	incomplete := make([]TodoStepMatch, 0)
+	for j, t := range todos {
+		status := todoStatus(t.Status)
+		if status == "completed" {
+			continue
+		}
+		incomplete = append(incomplete, TodoStepMatch{
+			Found:      true,
+			Index:      j + 1,
+			Content:    t.Content,
+			Status:     status,
+			ActiveForm: t.ActiveForm,
+		})
+	}
+	return incomplete
+}
+
+// MatchStep resolves a complete_step.step (number, title, or drift-tolerant
+// variant) against a todo list, returning the matched item.
+func MatchStep(step string, todos []TodoItem) (TodoStepMatch, bool) {
+	m := matchTodoStep(step, todos)
+	return m, m.Found
+}
+
+// HasAnySuccessfulReceipt reports whether any tool succeeded this turn — the
+// signal that the turn did real work, not pure conversation.
+func (l *Ledger) HasAnySuccessfulReceipt() bool {
+	if l == nil {
+		return false
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, r := range l.receipts {
+		if r.Success {
+			return true
+		}
+	}
+	return false
 }
 
 func (l *Ledger) HasSuccessfulWrite(paths []string) bool {
@@ -461,6 +489,53 @@ func WithSessionMessages(ctx context.Context, msgs []provider.Message) context.C
 func SessionMessagesFromContext(ctx context.Context) ([]provider.Message, bool) {
 	msgs, ok := ctx.Value(sessionMessagesKey{}).([]provider.Message)
 	return msgs, ok
+}
+
+// PathsProvenInSession reports whether every path is covered by a successful
+// (non-errored) tool call somewhere in msgs — the cross-turn fallback for diff
+// and files evidence, mirroring verifyCommandFromSession for the per-turn
+// ledger's path receipts (which reset each turn). wantWrite restricts to writer
+// tools (diff); false accepts a reader or writer (files).
+func PathsProvenInSession(msgs []provider.Message, paths []string, wantWrite bool) bool {
+	wanted := pathSet(normalizePaths(paths))
+	if len(wanted) == 0 {
+		return false
+	}
+	failed := failedSessionCallIDs(msgs)
+	found := map[string]bool{}
+	for _, msg := range msgs {
+		for _, tc := range msg.ToolCalls {
+			if failed[tc.ID] {
+				continue
+			}
+			r := ReceiptFromToolCall(tc.Name, json.RawMessage(tc.Arguments), true, false)
+			if wantWrite && !r.Write {
+				continue
+			}
+			if !wantWrite && !r.Read && !r.Write {
+				continue
+			}
+			for _, p := range normalizePaths(r.Paths) {
+				if _, ok := wanted[p]; ok {
+					found[p] = true
+				}
+			}
+		}
+	}
+	return len(found) == len(wanted)
+}
+
+func failedSessionCallIDs(msgs []provider.Message) map[string]bool {
+	failed := map[string]bool{}
+	for _, msg := range msgs {
+		if msg.Role != provider.RoleTool || msg.ToolCallID == "" {
+			continue
+		}
+		if strings.HasPrefix(msg.Content, "error:") || strings.HasPrefix(msg.Content, "blocked:") {
+			failed[msg.ToolCallID] = true
+		}
+	}
+	return failed
 }
 
 func ReceiptFromToolCall(toolName string, args json.RawMessage, success bool, readOnly bool) Receipt {
