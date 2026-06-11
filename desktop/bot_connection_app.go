@@ -82,6 +82,7 @@ type BotConnectionDiagnostic struct {
 type botInstallSession struct {
 	Provider   string
 	Domain     string
+	PollDomain string
 	DeviceCode string
 	UserCode   string
 	StartedAt  time.Time
@@ -250,11 +251,8 @@ func (a *App) TestBotConnection(id, target string) (BotConnectionDiagnostic, err
 }
 
 func (a *App) startFeishuConnectionInstall(domain string) (BotInstallStartResult, error) {
-	base := feishuAccountsBase(domain)
-	if _, err := postFeishuInstallForm(base, map[string]string{"action": "init"}); err != nil {
-		return BotInstallStartResult{OK: false, Provider: "feishu", Domain: domain, Message: err.Error()}, nil
-	}
-	data, err := postFeishuInstallForm(base, map[string]string{
+	beginDomain := "feishu"
+	data, err := postFeishuInstallForm(feishuAccountsBase(beginDomain), map[string]string{
 		"action": "begin", "archetype": "PersonalAgent", "auth_method": "client_secret", "request_user_info": "open_id",
 	})
 	if err != nil {
@@ -278,7 +276,7 @@ func (a *App) startFeishuConnectionInstall(domain string) (BotInstallStartResult
 		a.botInstalls = map[string]*botInstallSession{}
 	}
 	a.botInstalls[installID] = &botInstallSession{
-		Provider: "feishu", Domain: domain, DeviceCode: deviceCode, UserCode: userCode,
+		Provider: "feishu", Domain: domain, PollDomain: beginDomain, DeviceCode: deviceCode, UserCode: userCode,
 		StartedAt: time.Now(), ExpireAt: time.Now().Add(time.Duration(expireIn) * time.Second),
 	}
 	a.mu.Unlock()
@@ -286,7 +284,8 @@ func (a *App) startFeishuConnectionInstall(domain string) (BotInstallStartResult
 }
 
 func (a *App) pollFeishuConnectionInstall(installID string, session *botInstallSession) (BotInstallPollResult, error) {
-	data, statusCode, err := postFeishuInstallFormResult(feishuAccountsBase(session.Domain), map[string]string{"action": "poll", "device_code": session.DeviceCode})
+	pollDomain := firstNonEmptyBot(session.PollDomain, session.Domain, "feishu")
+	data, statusCode, err := postFeishuInstallFormResult(feishuAccountsBase(pollDomain), map[string]string{"action": "poll", "device_code": session.DeviceCode})
 	if err != nil {
 		return BotInstallPollResult{Status: "error", Error: err.Error()}, nil
 	}
@@ -301,13 +300,21 @@ func (a *App) pollFeishuConnectionInstall(installID string, session *botInstallS
 		a.deleteBotInstall(installID)
 		return BotInstallPollResult{Status: "error", Error: fmt.Sprintf("HTTP %d", statusCode)}, nil
 	}
+	if feishuInstallDomain(session.Domain, data) == "lark" && pollDomain != "lark" {
+		a.mu.Lock()
+		if current := a.botInstalls[installID]; current != nil {
+			current.PollDomain = "lark"
+		}
+		a.mu.Unlock()
+		return BotInstallPollResult{Status: "pending", Message: "已识别为 Lark 授权，继续等待授权完成。"}, nil
+	}
 	appID := stringValue(data["client_id"])
 	appSecret := stringValue(data["client_secret"])
 	if appID == "" || appSecret == "" {
 		return BotInstallPollResult{Status: "pending", Message: "等待授权完成。"}, nil
 	}
 	a.deleteBotInstall(installID)
-	domain := feishuInstallDomain(session.Domain, data)
+	domain := feishuInstallDomain(firstNonEmptyBot(pollDomain, session.Domain), data)
 	userID := feishuInstallUserID(data)
 	secretEnv := "FEISHU_BOT_APP_SECRET"
 	if domain == "lark" {

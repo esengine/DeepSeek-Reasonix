@@ -33,9 +33,13 @@ func TestNormalizeBotInstallTarget(t *testing.T) {
 	}
 }
 
-func TestFeishuInstallUsesReturnedTenantBrandAndStoresSecret(t *testing.T) {
+func TestFeishuInstallSwitchesToLarkDomainAndStoresSecret(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	t.Cleanup(func() { _ = os.Unsetenv("LARK_BOT_APP_SECRET") })
+	pollCount := 0
+	var beginHost string
+	var pollHosts []string
+	var actions []string
 	withRewrittenHTTP(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/oauth/v1/app/registration" {
 			http.NotFound(w, r)
@@ -46,9 +50,9 @@ func TestFeishuInstallUsesReturnedTenantBrandAndStoresSecret(t *testing.T) {
 			return
 		}
 		switch r.Form.Get("action") {
-		case "init":
-			writeJSON(t, w, map[string]any{"ok": true})
 		case "begin":
+			beginHost = r.Header.Get("X-Test-Original-Host")
+			actions = append(actions, "begin")
 			if r.Form.Get("archetype") != "PersonalAgent" || r.Form.Get("auth_method") != "client_secret" {
 				http.Error(w, "wrong begin form", http.StatusBadRequest)
 				return
@@ -61,8 +65,17 @@ func TestFeishuInstallUsesReturnedTenantBrandAndStoresSecret(t *testing.T) {
 				"expire_in":                 300,
 			})
 		case "poll":
+			pollHosts = append(pollHosts, r.Header.Get("X-Test-Original-Host"))
+			actions = append(actions, "poll")
 			if r.Form.Get("device_code") != "dev-feishu" {
 				http.Error(w, "wrong device code", http.StatusBadRequest)
+				return
+			}
+			pollCount++
+			if pollCount == 1 {
+				writeJSON(t, w, map[string]any{
+					"user_info": map[string]any{"tenant_brand": "lark"},
+				})
 				return
 			}
 			writeJSON(t, w, map[string]any{
@@ -76,11 +89,11 @@ func TestFeishuInstallUsesReturnedTenantBrandAndStoresSecret(t *testing.T) {
 	}))
 
 	app := NewApp()
-	start, err := app.StartBotConnectionInstall("feishu", "feishu")
+	start, err := app.StartBotConnectionInstall("lark", "")
 	if err != nil {
 		t.Fatalf("StartBotConnectionInstall: %v", err)
 	}
-	if !start.OK || start.InstallID == "" || start.URL == "" || start.DeviceCode != "dev-feishu" {
+	if !start.OK || start.Domain != "lark" || start.InstallID == "" || start.URL == "" || start.DeviceCode != "dev-feishu" {
 		t.Fatalf("start result = %+v, want ok lark-capable QR result", start)
 	}
 	qrURL, err := url.Parse(start.URL)
@@ -92,6 +105,20 @@ func TestFeishuInstallUsesReturnedTenantBrandAndStoresSecret(t *testing.T) {
 		t.Fatalf("start URL query = %v, want SDK registration QR metadata with user_code", query)
 	}
 
+	pending, err := app.PollBotConnectionInstall(start.InstallID)
+	if err != nil {
+		t.Fatalf("PollBotConnectionInstall pending: %v", err)
+	}
+	if pending.Done || pending.Status != "pending" {
+		t.Fatalf("pending poll result = %+v, want pending domain switch", pending)
+	}
+	app.mu.RLock()
+	session := app.botInstalls[start.InstallID]
+	app.mu.RUnlock()
+	if session == nil || session.PollDomain != "lark" {
+		t.Fatalf("install session = %+v, want switched Lark poll domain", session)
+	}
+
 	poll, err := app.PollBotConnectionInstall(start.InstallID)
 	if err != nil {
 		t.Fatalf("PollBotConnectionInstall: %v", err)
@@ -101,6 +128,15 @@ func TestFeishuInstallUsesReturnedTenantBrandAndStoresSecret(t *testing.T) {
 	}
 	if poll.Connection.Provider != "feishu" || poll.Connection.Domain != "lark" || poll.Connection.ID != "feishu-lark" {
 		t.Fatalf("connection = %+v, want feishu-lark from tenant_brand", poll.Connection)
+	}
+	if beginHost != "accounts.feishu.cn" {
+		t.Fatalf("begin host = %q, want SDK-compatible Feishu accounts host", beginHost)
+	}
+	if got := strings.Join(pollHosts, ","); got != "accounts.feishu.cn,accounts.larksuite.com" {
+		t.Fatalf("poll hosts = %q, want Feishu poll then Lark poll", got)
+	}
+	if got := strings.Join(actions, ","); got != "begin,poll,poll" {
+		t.Fatalf("registration actions = %q, want SDK-compatible begin then polls", got)
 	}
 	if poll.Connection.WorkspaceRoot != "" {
 		t.Fatalf("connection workspaceRoot = %q, want empty global default", poll.Connection.WorkspaceRoot)
@@ -289,6 +325,7 @@ type rewriteHTTPTransport struct {
 
 func (r rewriteHTTPTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	clone := req.Clone(req.Context())
+	clone.Header.Set("X-Test-Original-Host", req.URL.Host)
 	clone.URL.Scheme = r.target.Scheme
 	clone.URL.Host = r.target.Host
 	clone.Host = r.target.Host
