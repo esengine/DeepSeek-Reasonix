@@ -2,11 +2,13 @@ package orchestrator
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/config"
 	"reasonix/internal/control"
+	"reasonix/internal/event"
 	"reasonix/internal/provider"
 )
 
@@ -109,7 +111,17 @@ func (a *ManagedAgent) Run(ctx context.Context, task string) (string, error) {
 	a.setLastResult("")
 	a.setLastError("")
 
+	a.Sink.Emit(event.Event{
+		Kind: event.Notice,
+		Text: fmt.Sprintf("%s started: %s", a.Name, task),
+	})
+
 	err := a.Ctrl.RunTurn(ctx, task)
+
+	a.Sink.Emit(event.Event{
+		Kind: event.Notice,
+		Text: fmt.Sprintf("%s done", a.Name),
+	})
 
 	var result string
 	if err == nil {
