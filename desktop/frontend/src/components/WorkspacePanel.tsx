@@ -26,7 +26,7 @@ import {
 import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
 import { loadLayoutSize, saveLayoutSize } from "../lib/layoutPreferences";
-import type { DirEntry, FilePreview, GitCommitView, GitCommitDetailView } from "../lib/types";
+import type { DirEntry, FilePreview, GitCommitView, GitCommitDetailView, WorkspaceChangeView } from "../lib/types";
 import { formatWorkspaceReference, WORKSPACE_REF_DRAG_TYPE } from "../lib/workspaceDrag";
 import { cleanGitDiff } from "../lib/diff";
 import { CodeViewer } from "./CodeViewer";
@@ -229,6 +229,7 @@ export function WorkspacePanel({
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [viewMode, setViewMode] = useState<"files" | "changed">(initialViewMode);
   const [gitHistory, setGitHistory] = useState<GitCommitView[]>([]);
+  const [workspaceChanges, setWorkspaceChanges] = useState<WorkspaceChangeView[] | null>(null);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [expandedCommit, setExpandedCommit] = useState<string | null>(null);
   const [commitDetail, setCommitDetail] = useState<GitCommitDetailView | null>(null);
@@ -275,6 +276,15 @@ export function WorkspacePanel({
       setLoadingHistory(false);
     }
   }, [selectedPath]);
+
+  const loadWorkspaceChanges = useCallback(async () => {
+    try {
+      const result = await app.WorkspaceChanges();
+      setWorkspaceChanges(result.files && result.files.length > 0 ? result.files : null);
+    } catch {
+      setWorkspaceChanges(null);
+    }
+  }, []);
 
   const toggleCommit = useCallback((hash: string) => {
     setExpandedCommit((prev) => {
@@ -509,16 +519,18 @@ export function WorkspacePanel({
     if (!open) return;
     if (viewMode === "changed") {
       void loadGitHistory();
+      void loadWorkspaceChanges();
     }
-  }, [selectedPath, viewMode, loadGitHistory, open]);
+  }, [selectedPath, viewMode, loadGitHistory, loadWorkspaceChanges, open]);
 
   useEffect(() => {
     if (!open || !refreshKey) return;
     if (viewMode === "changed") {
       void loadGitHistory();
+      void loadWorkspaceChanges();
     }
     openDirsRef.current.forEach((dir) => void loadDir(dir));
-  }, [loadGitHistory, loadDir, open, refreshKey, viewMode]);
+  }, [loadGitHistory, loadWorkspaceChanges, loadDir, open, refreshKey, viewMode]);
 
   useEffect(() => {
     if (!selectionMenu && !treeMenu) return;
@@ -581,6 +593,8 @@ export function WorkspacePanel({
     };
   }, [selectedPath]);
 
+
+
   useEffect(() => {
     if (!open || !selectedPath) return;
     return refreshSelected();
@@ -628,6 +642,11 @@ export function WorkspacePanel({
 
   const breadcrumbDirs = selectedPath ? parentDirs(selectedPath) : [""];
   const pathParts = selectedPath?.split("/").filter(Boolean) ?? [];
+  const sessionChanges = useMemo(
+    () => workspaceChanges?.filter((c) => c.sources.includes("session")) ?? null,
+    [workspaceChanges],
+  );
+
   const changedMode = viewMode === "changed";
   const currentFileName = selectedPath ? basename(selectedPath) : t("workspace.noFile");
   const currentFileDir = selectedPath ? parentPath(selectedPath) : "";
@@ -1083,9 +1102,40 @@ export function WorkspacePanel({
             </div>
           ) : viewMode === "changed" && !selectedPath ? (
             <div className="workspace-git-history">
+              {sessionChanges && sessionChanges.length > 0 && (
+                <div className="workspace-change-scope">
+                  <div className="workspace-change-scope__head">
+                    <span className="workspace-change-scope__title">{t("workspace.changedTab")}</span>
+                    <span className="workspace-change-scope__meta">{t("context.changedMeta", { count: sessionChanges.length })}</span>
+                  </div>
+                  <div className="workspace-change-scope__list">
+                    {sessionChanges.map((change) => {
+                      const dir = parentPath(change.path);
+                      return (
+                        <button
+                          key={change.path}
+                          className="workspace-change"
+                          type="button"
+                          onClick={() => selectFile(change.path)}
+                        >
+                          <FileText size={14} />
+                          <span className="workspace-change__body">
+                            <span className="workspace-change__name">{basename(change.path)}</span>
+                            {dir && <span className="workspace-change__path">{dir}</span>}
+                            {change.latestPrompt && <span className="workspace-change__detail">{change.latestPrompt}</span>}
+                          </span>
+                          <span className="workspace-change__meta">
+                            {change.gitStatus && <span className="workspace-change__badge workspace-change__badge--git">{change.gitStatus}</span>}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
               {loadingHistory ? (
                 <div className="workspace-empty">{t("workspace.loading")}</div>
-              ) : gitHistory.length === 0 ? (
+              ) : gitHistory.length === 0 && !(sessionChanges && sessionChanges.length > 0) ? (
                 <div className="workspace-empty">{t("workspace.noChanges")}</div>
               ) : (
                 <div className="workspace-git-history__list">
