@@ -79,10 +79,11 @@ func TestLogPollHealthThrottlesEmptyPolls(t *testing.T) {
 	if !a.lastPollLog.Equal(first) {
 		t.Fatalf("second empty poll updated heartbeat timestamp: got %v want %v", a.lastPollLog, first)
 	}
-	a.lastPollLog = time.Now().Add(-6 * time.Minute)
+	stale := time.Now().Add(-6 * time.Minute)
+	a.lastPollLog = stale
 	a.logPollHealth(ilinkResponse{})
-	if !a.lastPollLog.After(first) {
-		t.Fatalf("stale empty poll did not refresh heartbeat timestamp: got %v after %v", a.lastPollLog, first)
+	if !a.lastPollLog.After(stale) {
+		t.Fatalf("stale empty poll did not refresh heartbeat timestamp: got %v after %v", a.lastPollLog, stale)
 	}
 }
 

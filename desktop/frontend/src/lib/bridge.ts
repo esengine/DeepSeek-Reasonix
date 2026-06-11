@@ -15,6 +15,7 @@ import type {
   BotConnectionDiagnostic,
   BotInstallPollResult,
   BotInstallStartResult,
+  BotRuntimeStatusView,
   BotSettingsView,
   CapabilitiesView,
   CheckpointMeta,
@@ -213,6 +214,7 @@ export interface AppBindings {
   ClearBotSecret(envName: string): Promise<void>;
   StartBotConnectionInstall(provider: string, domain: string): Promise<BotInstallStartResult>;
   PollBotConnectionInstall(installID: string): Promise<BotInstallPollResult>;
+  BotRuntimeStatus(): Promise<BotRuntimeStatusView>;
   DiagnoseBotConnection(id: string): Promise<BotConnectionDiagnostic>;
   TestBotConnection(id: string, target?: string): Promise<BotConnectionDiagnostic>;
   SetCloseBehavior(mode: string): Promise<void>;
@@ -2111,6 +2113,16 @@ function makeMockApp(): AppBindings {
               ? { ...connection.credential, secretSet: false }
               : connection.credential,
           }));
+        },
+        async BotRuntimeStatus() {
+          const runningConnections = settings.bot.connections.filter((connection) => connection.enabled && connection.status === "connected").length;
+          return {
+            running: settings.bot.enabled && runningConnections > 0,
+            status: settings.bot.enabled && runningConnections > 0 ? "running" : "stopped",
+            message: settings.bot.enabled && runningConnections > 0 ? `${runningConnections} bot connection(s) running` : "bot runtime is not started",
+            connections: runningConnections,
+            startedAt: settings.bot.enabled && runningConnections > 0 ? new Date(t0).toISOString() : "",
+          };
         },
         async StartBotConnectionInstall(provider: string, domain: string) {
           const normalizedProvider = provider === "weixin" ? "weixin" : "feishu";

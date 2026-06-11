@@ -684,6 +684,14 @@ export interface BotSettingsView {
   connections: BotConnectionView[];
 }
 
+export interface BotRuntimeStatusView {
+  running: boolean;
+  status: string;
+  message: string;
+  connections: number;
+  startedAt: string;
+}
+
 export interface BotInstallStartResult {
   ok: boolean;
   provider: string;
