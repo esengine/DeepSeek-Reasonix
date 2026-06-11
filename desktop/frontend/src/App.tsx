@@ -17,7 +17,6 @@ import {
   Settings as SettingsIcon,
   Pencil,
   Trash2,
-  X,
 } from "lucide-react";
 import { useToast } from "./lib/toast";
 import { asArray } from "./lib/array";
@@ -2675,7 +2674,6 @@ export default function App() {
             className={[
               "workbench-dock",
               `workbench-dock--${rightDockMode}`,
-              workspacePanelFloating ? "workbench-dock--floating" : "",
             ].join(" ")}
             aria-label={t("rightDock.workbench")}
           >
@@ -2714,19 +2712,6 @@ export default function App() {
                   <span className="workbench-dock__tab-label">{t("workspace.changedTab")}</span>
                 </button>
               </div>
-              {workspacePanelFloating && (
-                <>
-                  <span className="workbench-dock__tools-spacer" />
-                  <button
-                    className="workspace-iconbtn workbench-dock__close"
-                    type="button"
-                    aria-label={t("rightDock.collapse")}
-                    onClick={closeWorkspacePanel}
-                  >
-                    <X size={15} />
-                  </button>
-                </>
-              )}
             </div>
             <div className="workbench-dock__body">
               {rightDockMode === "context" ? (

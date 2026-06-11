@@ -14986,23 +14986,7 @@ a[href] {
 }
 
 .layout--workspace-floating .workbench-dock {
-  position: absolute;
-  top: calc(var(--app-chrome-height) + 8px);
-  right: 12px;
-  bottom: calc(12px + var(--statusbar-height));
-  width: min(var(--workspace-width), calc(100% - var(--sidebar-width) - 24px));
-  max-width: calc(100% - var(--sidebar-width) - 24px);
-  height: auto;
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  box-shadow: var(--shadow-2);
-  overflow: hidden;
-  z-index: var(--z-dock);
-}
-
-.layout--low-res.layout--workspace-floating .workbench-dock {
-  width: min(var(--workspace-width), calc(100% - 24px));
-  max-width: calc(100% - 24px);
+  min-width: 0;
 }
 
 .layout--workspace-maximized .workbench-dock {
@@ -15025,15 +15009,6 @@ a[href] {
   gap: 8px;
   padding: 7px 10px 3px;
   border-bottom: 1px solid transparent;
-}
-
-.workbench-dock__tools-spacer {
-  flex: 1 1 auto;
-  min-width: 8px;
-}
-
-.workbench-dock__close {
-  flex: 0 0 auto;
 }
 
 .workbench-dock__tabs {
