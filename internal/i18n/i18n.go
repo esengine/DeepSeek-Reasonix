@@ -376,9 +376,10 @@ type Messages struct {
 	UpgradeFetchFailed         string // "failed to check for updates: %v"
 	UpgradeInvalidVersion      string // remote version not valid semver
 	UpgradeAlreadyLatest       string // already on the latest version
+	UpgradeForcing             string // "Reinstalling the same version…"
 	UpgradeAvailableFmt        string // "Current: %s → Latest: %s"
 	UpgradeNoAssetFmt          string // "no binary found for %s"
-	UpgradeDownloadingFmt      string // "Downloading %s…"
+	UpgradeDownloadingFmt      string // "Downloading %s (%s)…"
 	UpgradeDownloadFailed      string // "download failed: %v"
 	UpgradeVerifying           string // "Verifying checksum…"
 	UpgradeChecksumFailed      string // "could not fetch checksum file: %v"

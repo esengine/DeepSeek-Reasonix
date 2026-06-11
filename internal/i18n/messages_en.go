@@ -335,9 +335,10 @@ var English = Messages{
 	UpgradeFetchFailed:         "failed to check for updates: %v",
 	UpgradeInvalidVersion:      "remote version is not valid semver",
 	UpgradeAlreadyLatest:       "Already on the latest version.",
+	UpgradeForcing:             "Reinstalling the same version…",
 	UpgradeAvailableFmt:        "Current: %s → Latest: %s",
 	UpgradeNoAssetFmt:          "no binary found for %s",
-	UpgradeDownloadingFmt:      "Downloading %s…",
+	UpgradeDownloadingFmt:      "Downloading %s (%s)…",
 	UpgradeDownloadFailed:      "download failed: %v",
 	UpgradeVerifying:           "Verifying checksum…",
 	UpgradeChecksumFailed:      "could not fetch checksum file: %v",
@@ -360,7 +361,7 @@ Usage:
   reasonix mcp <add|remove|list>                        manage MCP servers in reasonix.toml
   reasonix doctor [--json]                              print redacted local diagnostics
   reasonix bot start|doctor|weixin-login                multi-channel IM bot gateway
-  reasonix upgrade [--check]                            self-update to the latest release
+  reasonix upgrade [--check] [--force]                   self-update to the latest release
   reasonix version
   reasonix help
 

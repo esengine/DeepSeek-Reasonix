@@ -146,3 +146,63 @@ func TestExtractFromTarGz_NotFound(t *testing.T) {
 		t.Error("expected error for missing binary")
 	}
 }
+
+func TestIsCLITag(t *testing.T) {
+	tests := []struct {
+		tag  string
+		want bool
+	}{
+		{"v1.6.0", true},
+		{"v0.1.0", true},
+		{"v2.0.0-rc.1", true},
+		{"desktop-v1.5.0", false},
+		{"npm-v1.4.0", false},
+		{"", false},
+		{"v", false},
+	}
+	for _, tt := range tests {
+		if got := isCLITag(tt.tag); got != tt.want {
+			t.Errorf("isCLITag(%q) = %v, want %v", tt.tag, got, tt.want)
+		}
+	}
+}
+
+func TestHumanSize(t *testing.T) {
+	tests := []struct {
+		bytes int64
+		want  string
+	}{
+		{500, "500 B"},
+		{2048, "2.0 KiB"},
+		{19_000_000, "18.1 MiB"},
+	}
+	for _, tt := range tests {
+		if got := humanSize(tt.bytes); got != tt.want {
+			t.Errorf("humanSize(%d) = %q, want %q", tt.bytes, got, tt.want)
+		}
+	}
+}
+
+func TestFetchLatestRelease_FiltersTags(t *testing.T) {
+	// Simulate the GitHub /releases list with mixed namespaces.
+	// fetchLatestRelease is tested indirectly via isCLITag + the list logic.
+	rels := []ghRelease{
+		{TagName: "desktop-v1.5.0"},
+		{TagName: "npm-v1.4.0"},
+		{TagName: "v1.6.0"},
+	}
+	// Walk the same way fetchLatestRelease does.
+	var found *ghRelease
+	for i := range rels {
+		if isCLITag(rels[i].TagName) {
+			found = &rels[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("no CLI release found")
+	}
+	if found.TagName != "v1.6.0" {
+		t.Errorf("got %q, want v1.6.0", found.TagName)
+	}
+}

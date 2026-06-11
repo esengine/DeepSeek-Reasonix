@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"net/http"
@@ -25,27 +26,33 @@ import (
 )
 
 const (
-	ghAPIReleases  = "https://api.github.com/repos/esengine/DeepSeek-Reasonix/releases/latest"
-	ghDownloadBase = "https://github.com/esengine/DeepSeek-Reasonix/releases/download"
+	ghOwner        = "esengine"
+	ghRepo         = "DeepSeek-Reasonix"
+	ghAPIReleases  = "https://api.github.com/repos/" + ghOwner + "/" + ghRepo + "/releases"
+	ghDownloadBase = "https://github.com/" + ghOwner + "/" + ghRepo + "/releases/download"
 	upgradeTimeout = 60 * time.Second
 )
 
 // ghRelease is the subset of the GitHub release API response we need.
 type ghRelease struct {
 	TagName string `json:"tag_name"`
-	Assets  []struct {
-		Name               string `json:"name"`
-		BrowserDownloadURL string `json:"browser_download_url"`
-	} `json:"assets"`
+	Assets  []ghAsset
+}
+
+// ghAsset is a single release asset.
+type ghAsset struct {
+	Name               string `json:"name"`
+	BrowserDownloadURL string `json:"browser_download_url"`
+	Size               int64  `json:"size"`
 }
 
 // upgradeCommand handles `reasonix upgrade` (and `reasonix update`).
 func upgradeCommand(args []string, version string) int {
-	checkOnly := false
-	for _, a := range args {
-		if a == "--check" || a == "-c" {
-			checkOnly = true
-		}
+	fs := flag.NewFlagSet("upgrade", flag.ContinueOnError)
+	checkOnly := fs.Bool("check", false, "check for updates without installing")
+	force := fs.Bool("force", false, "reinstall even if already on the latest version")
+	if err := fs.Parse(args); err != nil {
+		return 2
 	}
 
 	// 1. Normalize running version.
@@ -84,27 +91,30 @@ func upgradeCommand(args []string, version string) int {
 		return 1
 	}
 	if semver.Compare(latest, cur) <= 0 {
-		fmt.Println(i18n.M.UpgradeAlreadyLatest)
-		return 0
+		if *force {
+			fmt.Println(i18n.M.UpgradeForcing)
+		} else {
+			fmt.Println(i18n.M.UpgradeAlreadyLatest)
+			return 0
+		}
+	} else {
+		fmt.Printf(i18n.M.UpgradeAvailableFmt+"\n", cur, latest)
 	}
 
-	fmt.Printf(i18n.M.UpgradeAvailableFmt+"\n", cur, latest)
-
-	if checkOnly {
+	if *checkOnly {
 		return 0
 	}
 
 	// 5. Find the asset for the current platform.
 	base := fmt.Sprintf("reasonix-%s-%s", normalizeOS(runtime.GOOS), runtime.GOARCH)
-	var assetURL, assetName string
-	for _, a := range rel.Assets {
-		if strings.HasPrefix(a.Name, base) {
-			assetURL = a.BrowserDownloadURL
-			assetName = a.Name
+	var asset *ghAsset
+	for i := range rel.Assets {
+		if strings.HasPrefix(rel.Assets[i].Name, base) {
+			asset = &rel.Assets[i]
 			break
 		}
 	}
-	if assetURL == "" {
+	if asset == nil {
 		fmt.Fprintf(os.Stderr, "%s "+i18n.M.UpgradeNoAssetFmt+"\n", i18n.M.ErrorPrefix, base)
 		return 1
 	}
@@ -113,21 +123,21 @@ func upgradeCommand(args []string, version string) int {
 	checksumURL := fmt.Sprintf("%s/%s/SHA256SUMS", ghDownloadBase, rel.TagName)
 
 	// 7. Download archive.
-	fmt.Printf(i18n.M.UpgradeDownloadingFmt+"\n", assetName)
-	archiveData, err := fetchBytes(c, assetURL)
+	fmt.Printf(i18n.M.UpgradeDownloadingFmt+"\n", asset.Name, humanSize(asset.Size))
+	archiveData, err := fetchBytes(c, asset.BrowserDownloadURL)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s "+i18n.M.UpgradeDownloadFailed+"\n", i18n.M.ErrorPrefix, err)
 		return 1
 	}
 
-	// 8. Verify SHA256 checksum.
+	// 8. Verify SHA256 checksum — fail closed: abort on any verification error.
 	fmt.Println(i18n.M.UpgradeVerifying)
 	checksumData, err := fetchBytes(c, checksumURL)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s "+i18n.M.UpgradeChecksumFailed+"\n", i18n.M.ErrorPrefix, err)
 		return 1
 	}
-	if err := verifyChecksum(archiveData, assetName, checksumData); err != nil {
+	if err := verifyChecksum(archiveData, asset.Name, checksumData); err != nil {
 		fmt.Fprintf(os.Stderr, "%s %v\n", i18n.M.ErrorPrefix, err)
 		return 1
 	}
@@ -137,7 +147,7 @@ func upgradeCommand(args []string, version string) int {
 	if runtime.GOOS == "windows" {
 		binName = "reasonix.exe"
 	}
-	binary, err := extractBinary(archiveData, assetName, binName)
+	binary, err := extractBinary(archiveData, asset.Name, binName)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s "+i18n.M.UpgradeExtractFailed+"\n", i18n.M.ErrorPrefix, err)
 		return 1
@@ -178,7 +188,16 @@ func normalizeOS(goos string) string {
 	return goos
 }
 
-// fetchLatestRelease calls the GitHub API for the latest release.
+// isCLITag reports whether a tag belongs to the CLI release namespace (v*).
+// Tags like "desktop-v1.5.0" or "npm-v1.4.0" are excluded.
+func isCLITag(tag string) bool {
+	tag = strings.TrimSpace(tag)
+	return len(tag) >= 2 && tag[0] == 'v' && tag[1] >= '0' && tag[1] <= '9'
+}
+
+// fetchLatestRelease queries the GitHub Releases API and returns the newest
+// release whose tag belongs to the CLI namespace (v*). Tags with a prefix
+// such as "desktop-v" or "npm-v" are skipped.
 func fetchLatestRelease(c *http.Client) (*ghRelease, error) {
 	req, err := http.NewRequest("GET", ghAPIReleases, nil)
 	if err != nil {
@@ -195,11 +214,20 @@ func fetchLatestRelease(c *http.Client) (*ghRelease, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("GitHub API: %s", resp.Status)
 	}
-	var rel ghRelease
-	if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil {
+
+	var rels []ghRelease
+	if err := json.NewDecoder(resp.Body).Decode(&rels); err != nil {
 		return nil, err
 	}
-	return &rel, nil
+
+	// The /releases endpoint returns releases in reverse chronological
+	// order; pick the first one whose tag is a CLI release (v*).
+	for i := range rels {
+		if isCLITag(rels[i].TagName) {
+			return &rels[i], nil
+		}
+	}
+	return nil, fmt.Errorf("no CLI release (v*) found in recent releases")
 }
 
 // fetchBytes GETs a URL fully into memory.
@@ -274,9 +302,12 @@ func extractFromZip(data []byte, name string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	want := name + ".exe"
 	for _, f := range r.File {
-		if f.Name == want || strings.HasSuffix(f.Name, "/"+want) {
+		if f.FileInfo().IsDir() {
+			continue
+		}
+		base := filepath.Base(f.Name)
+		if base == name {
 			rc, err := f.Open()
 			if err != nil {
 				return nil, err
@@ -285,11 +316,16 @@ func extractFromZip(data []byte, name string) ([]byte, error) {
 			return io.ReadAll(rc)
 		}
 	}
-	return nil, fmt.Errorf("%q not found in archive", want)
+	return nil, fmt.Errorf("%q not found in zip archive", name)
 }
 
-// replaceBinary writes newBin to the running executable's path atomically via
-// rename. The caller must have write permission to the directory.
+// replaceBinary writes newBin to the running executable's path atomically.
+//
+// On Unix this is a simple temp-file + rename. On Windows the running
+// executable is memory-mapped and cannot be overwritten directly, so we
+// rename it aside to .reasonix.old first, then place the new binary.
+// The .old file is cleaned up best-effort (Windows may still hold a lock
+// on it; we hide it in that case).
 func replaceBinary(newBin []byte) error {
 	exe, err := os.Executable()
 	if err != nil {
@@ -301,30 +337,56 @@ func replaceBinary(newBin []byte) error {
 	}
 
 	dir := filepath.Dir(resolved)
-	tmp, err := os.CreateTemp(dir, ".reasonix-update-*")
-	if err != nil {
-		return fmt.Errorf("create temp: %w", err)
-	}
-	tmpName := tmp.Name()
+	base := filepath.Base(resolved)
+	tmpPath := filepath.Join(dir, fmt.Sprintf(".%s.new", base))
 
-	// Write + chmod, then rename atomically.
-	if _, err := tmp.Write(newBin); err != nil {
-		tmp.Close()
-		os.Remove(tmpName)
-		return err
+	// Write new binary to .new temp file.
+	if err := os.WriteFile(tmpPath, newBin, 0o755); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("write temp: %w", err)
 	}
-	if err := tmp.Chmod(0o755); err != nil {
-		tmp.Close()
-		os.Remove(tmpName)
-		return err
+
+	if runtime.GOOS == "windows" {
+		return commitWindows(resolved, tmpPath, base, dir)
 	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(tmpName)
-		return err
-	}
-	if err := os.Rename(tmpName, resolved); err != nil {
-		os.Remove(tmpName)
+
+	// Unix: atomic rename .new → target.
+	if err := os.Rename(tmpPath, resolved); err != nil {
+		os.Remove(tmpPath)
 		return fmt.Errorf("rename: %w", err)
+	}
+	return nil
+}
+
+// commitWindows performs the two-phase rename on Windows:
+//  1. Rename running exe → .old (allowed while running)
+//  2. Rename .new → target
+//  3. Best-effort remove .old (hide if still locked)
+func commitWindows(target, newPath, base, dir string) error {
+	oldPath := filepath.Join(dir, fmt.Sprintf(".%s.old", base))
+
+	// Remove any leftover .old from a previous update.
+	_ = os.Remove(oldPath)
+
+	// Move the running executable aside.
+	if err := os.Rename(target, oldPath); err != nil {
+		os.Remove(newPath)
+		return fmt.Errorf("rename running exe aside: %w", err)
+	}
+
+	// Move the new binary into place.
+	if err := os.Rename(newPath, target); err != nil {
+		// Rollback: try to restore the old binary.
+		if rerr := os.Rename(oldPath, target); rerr != nil {
+			return fmt.Errorf("replace failed (%v); rollback also failed: %w", err, rerr)
+		}
+		return fmt.Errorf("rename new binary: %w", err)
+	}
+
+	// Best-effort cleanup of the old binary.
+	if err := os.Remove(oldPath); err != nil {
+		// Windows may hold a lock; hide the file so it doesn't clutter the dir.
+		hideFileWindows(oldPath)
 	}
 	return nil
 }
@@ -336,4 +398,20 @@ func resolveSymlinks(p string) (string, error) {
 		return p, nil
 	}
 	return r, nil
+}
+
+// humanSize returns a human-readable byte size.
+func humanSize(b int64) string {
+	const (
+		_KiB = 1024
+		_MiB = 1024 * _KiB
+	)
+	switch {
+	case b >= _MiB:
+		return fmt.Sprintf("%.1f MiB", float64(b)/float64(_MiB))
+	case b >= _KiB:
+		return fmt.Sprintf("%.1f KiB", float64(b)/float64(_KiB))
+	default:
+		return fmt.Sprintf("%d B", b)
+	}
 }

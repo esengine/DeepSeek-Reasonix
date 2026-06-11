@@ -336,9 +336,10 @@ var Chinese = Messages{
 	UpgradeFetchFailed:         "检查更新失败：%v",
 	UpgradeInvalidVersion:      "远程版本不是有效的 semver",
 	UpgradeAlreadyLatest:       "已是最新版本。",
+	UpgradeForcing:             "强制重新安装当前版本…",
 	UpgradeAvailableFmt:        "当前：%s → 最新：%s",
 	UpgradeNoAssetFmt:          "未找到 %s 的安装包",
-	UpgradeDownloadingFmt:      "正在下载 %s…",
+	UpgradeDownloadingFmt:      "正在下载 %s（%s）…",
 	UpgradeDownloadFailed:      "下载失败：%v",
 	UpgradeVerifying:           "正在校验 SHA256…",
 	UpgradeChecksumFailed:      "无法获取校验文件：%v",
@@ -361,7 +362,7 @@ var Chinese = Messages{
   reasonix mcp <add|remove|list>                        管理 reasonix.toml 里的 MCP 服务器
   reasonix doctor [--json]                              输出脱敏的本地诊断信息
   reasonix bot start|doctor|weixin-login                多渠道 IM bot 网关
-  reasonix upgrade [--check]                            自更新到最新版本
+  reasonix upgrade [--check] [--force]                   自更新到最新版本
   reasonix version
   reasonix help
 
