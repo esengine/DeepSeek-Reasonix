@@ -845,3 +845,33 @@ func captureStderr(t *testing.T, fn func()) string {
 	}
 	return string(data)
 }
+
+func TestProvidersWithMissingKeysOnlyReferenced(t *testing.T) {
+	t.Setenv("DEEPSEEK_API_KEY", "")
+	t.Setenv("MIMO_API_KEY", "")
+	cfg := config.Default()
+
+	got := providersWithMissingKeys(cfg)
+	envs := map[string]bool{}
+	for _, p := range got {
+		envs[p.APIKeyEnv] = true
+	}
+	if !envs["DEEPSEEK_API_KEY"] {
+		t.Errorf("the default model's missing key must be prompted, got %v", got)
+	}
+	if envs["MIMO_API_KEY"] {
+		t.Errorf("unreferenced preset keys must not be prompted, got %v", got)
+	}
+}
+
+func TestProvidersWithMissingKeysIncludesPlannerModel(t *testing.T) {
+	t.Setenv("DEEPSEEK_API_KEY", "set")
+	t.Setenv("MIMO_API_KEY", "")
+	cfg := config.Default()
+	cfg.Agent.PlannerModel = "mimo-pro"
+
+	got := providersWithMissingKeys(cfg)
+	if len(got) != 1 || got[0].APIKeyEnv != "MIMO_API_KEY" {
+		t.Errorf("planner model's missing key must be prompted, got %+v", got)
+	}
+}

@@ -1398,13 +1398,24 @@ func promptMissingKeys(cfg *config.Config) int {
 	return 0
 }
 
-// providersWithMissingKeys returns the subset of cfg.Providers whose api_key_env
-// is declared but not currently set in the environment. configureKeys dedupes
-// shared envs, so duplicates are fine to leave in.
+// providersWithMissingKeys returns the providers the active configuration
+// actually references (default/planner/subagent models) whose api_key_env is
+// declared but not set. Merely-available presets stay silent — a DeepSeek-only
+// user must not be prompted for MIMO_API_KEY (#3939); the chat banner still
+// warns if they later switch to a model whose key is missing. configureKeys
+// dedupes shared envs, so duplicates are fine to leave in.
 func providersWithMissingKeys(cfg *config.Config) []config.ProviderEntry {
+	referenced := map[string]bool{
+		cfg.DefaultModel:        true,
+		cfg.Agent.PlannerModel:  true,
+		cfg.Agent.SubagentModel: true,
+	}
+	for _, m := range cfg.Agent.SubagentModels {
+		referenced[m] = true
+	}
 	var out []config.ProviderEntry
 	for _, p := range cfg.Providers {
-		if p.APIKeyEnv != "" && os.Getenv(p.APIKeyEnv) == "" {
+		if referenced[p.Name] && p.APIKeyEnv != "" && os.Getenv(p.APIKeyEnv) == "" {
 			out = append(out, p)
 		}
 	}
