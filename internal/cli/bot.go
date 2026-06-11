@@ -56,7 +56,7 @@ func botStart(args []string, version string) int {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	cfg, err := config.Load()
+	cfg, err := loadBotCommandConfig()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: load config: %v\n", err)
 		return 1
@@ -161,7 +161,7 @@ func botDoctor(args []string) int {
 		return 2
 	}
 
-	cfg, err := config.Load()
+	cfg, err := loadBotCommandConfig()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: load config: %v\n", err)
 		return 1
@@ -313,7 +313,7 @@ func botWeixinLogin(args []string) int {
 		return 2
 	}
 
-	cfg, err := config.Load()
+	cfg, err := loadBotCommandConfig()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: load config: %v\n", err)
 		return 1
@@ -335,6 +335,35 @@ func botWeixinLogin(args []string) int {
 	fmt.Println("凭据已保存到 Reasonix 用户配置目录；也可以把 [bot.weixin] account_id 设置为该 account_id。")
 
 	return 0
+}
+
+func loadBotCommandConfig() (*config.Config, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	userPath := config.UserConfigPath()
+	if strings.TrimSpace(userPath) == "" {
+		return cfg, nil
+	}
+	if _, err := os.Stat(userPath); err != nil {
+		return cfg, nil
+	}
+	userCfg := config.LoadForEdit(userPath)
+	if botConfigIsUserOwned(userCfg.Bot) {
+		cfg.Bot = userCfg.Bot
+	}
+	return cfg, nil
+}
+
+func botConfigIsUserOwned(bc config.BotConfig) bool {
+	if bc.Enabled || len(bc.Connections) > 0 || bc.QQ.Enabled || bc.Feishu.Enabled || bc.Weixin.Enabled {
+		return true
+	}
+	if bc.Allowlist.AllowAll || botruntime.AllowlistUserCount(bc.Allowlist) > 0 {
+		return true
+	}
+	return len(bc.Allowlist.QQGroups)+len(bc.Allowlist.FeishuGroups)+len(bc.Allowlist.WeixinGroups) > 0
 }
 
 func botUsage() {

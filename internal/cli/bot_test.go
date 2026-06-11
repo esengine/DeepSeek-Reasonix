@@ -3,6 +3,7 @@ package cli
 import (
 	"io"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -155,6 +156,72 @@ func TestBotDoctorReportsSessionMappingCounts(t *testing.T) {
 		`"name":"bot.connections","status":"ok","detail":"enabled=2 total=2"`,
 		`"name":"bot.connection.feishu-feishu.session_mappings","status":"ok","detail":"provider=feishu mappings=1"`,
 		`"name":"bot.connection.weixin-weixin.session_mappings","status":"missing","detail":"provider=weixin mappings=0"`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("bot doctor output missing %s:\n%s", want, out)
+		}
+	}
+}
+
+func TestBotDoctorPrefersUserBotSettingsOverProjectBotConfig(t *testing.T) {
+	isolateBotUserConfig(t)
+	userCfg := config.Default()
+	userCfg.Bot.Enabled = true
+	userCfg.Bot.Allowlist.Enabled = true
+	userCfg.Bot.Allowlist.FeishuUsers = []string{"ou-user"}
+	userCfg.Bot.Connections = []config.BotConnectionConfig{
+		{ID: "feishu-lark", Provider: "feishu", Domain: "lark", Label: "Lark", Enabled: true, Status: "connected"},
+	}
+	if err := userCfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save user config: %v", err)
+	}
+
+	project := t.TempDir()
+	if err := os.WriteFile(filepath.Join(project, "reasonix.toml"), []byte(`
+[bot]
+enabled = false
+`), 0o644); err != nil {
+		t.Fatalf("write project config: %v", err)
+	}
+	t.Chdir(project)
+
+	out := captureStdout(t, func() {
+		if rc := botDoctor([]string{"--json"}); rc != 0 {
+			t.Fatalf("botDoctor rc = %d, want 0", rc)
+		}
+	})
+	for _, want := range []string{
+		`"name":"bot.enabled","status":"ok"`,
+		`"name":"bot.connections","status":"ok","detail":"enabled=1 total=1"`,
+		`"name":"bot.connection.feishu-lark.session_mappings","status":"missing","detail":"provider=feishu mappings=0"`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("bot doctor output missing %s:\n%s", want, out)
+		}
+	}
+}
+
+func TestBotDoctorUsesProjectBotConfigWhenUserBotIsUnconfigured(t *testing.T) {
+	isolateBotUserConfig(t)
+	projectCfg := config.Default()
+	projectCfg.Bot.Enabled = true
+	projectCfg.Bot.Allowlist.AllowAll = true
+	projectCfg.Bot.Connections = []config.BotConnectionConfig{
+		{ID: "weixin-weixin", Provider: "weixin", Domain: "weixin", Label: "微信", Enabled: true, Status: "connected"},
+	}
+	if err := projectCfg.SaveTo("reasonix.toml"); err != nil {
+		t.Fatalf("save project config: %v", err)
+	}
+
+	out := captureStdout(t, func() {
+		if rc := botDoctor([]string{"--json"}); rc != 0 {
+			t.Fatalf("botDoctor rc = %d, want 0", rc)
+		}
+	})
+	for _, want := range []string{
+		`"name":"bot.enabled","status":"ok"`,
+		`"name":"bot.connections","status":"ok","detail":"enabled=1 total=1"`,
+		`"name":"bot.allowlist","status":"open"`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("bot doctor output missing %s:\n%s", want, out)
