@@ -31,7 +31,7 @@ TARGET_DIR="$(dirname "${TARGET}")"
 
 # Build
 VERSION="$(git describe --tags --always 2>/dev/null || echo dev)-wkj"
-LDFLAGS="-s -w -X main.version=${VERSION}"
+LDFLAGS="-X main.version=${VERSION}"
 
 BUILD_DIR="$(mktemp -d)"
 trap 'rm -rf "${BUILD_DIR}"' EXIT
