@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Check, Copy } from "lucide-react";
 import { useT } from "../lib/i18n";
 import { Tooltip } from "./Tooltip";
@@ -20,6 +20,7 @@ export function CopyButton({
   showLabel?: boolean;
 }) {
   const t = useT();
+  const btnRef = useRef<HTMLButtonElement>(null);
   const [copied, setCopied] = useState(false);
   const actionLabel = label ?? t("msg.copy");
   const copy = async () => {
@@ -33,8 +34,9 @@ export function CopyButton({
     }
   };
   return (
-    <Tooltip label={copied ? t("msg.copied") : actionLabel}>
+    <Tooltip label={copied ? t("msg.copied") : actionLabel} triggerRef={btnRef}>
       <button
+        ref={btnRef}
         className={`copybtn ${className ?? ""}`}
         onClick={copy}
         aria-label={actionLabel}

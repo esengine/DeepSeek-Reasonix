@@ -41,6 +41,7 @@ export function Tooltip({
   block = false,
   disabled = false,
   className,
+  triggerRef: externalTriggerRef,
 }: {
   label?: ReactNode;
   children: ReactNode;
@@ -49,6 +50,7 @@ export function Tooltip({
   block?: boolean;
   disabled?: boolean;
   className?: string;
+  triggerRef?: React.RefObject<HTMLElement | null>;
 }) {
   const id = useId();
   const triggerRef = useRef<HTMLElement | null>(null);
@@ -76,7 +78,7 @@ export function Tooltip({
   };
 
   const updatePosition = () => {
-    const trigger = triggerRef.current;
+    const trigger = externalTriggerRef?.current ?? triggerRef.current;
     const tip = tooltipRef.current;
     if (!trigger || !tip) return;
     const rect = trigger.getBoundingClientRect();
