@@ -678,14 +678,14 @@ func hasSuccessfulCompleteStepForTodo(receipts []Receipt, index int, current []T
 			continue
 		}
 		if r.TodoStep != nil && r.TodoStep.Found {
-			if index >= 1 && index <= len(current) && sameTodoMatch(current[index-1], *r.TodoStep) {
+			if index < 1 || index > len(current) {
+				continue
+			}
+			if sameTodoMatch(current[index-1], *r.TodoStep) {
 				return true
 			}
-			// sameTodoMatch failed — the todo content changed.
-			// Allow the fallback (matchTodoStep by index or text) only
-			// when the old and new content are recognisably related
-			// (substring overlap); otherwise block a replaced todo
-			// from reusing an old numeric complete_step receipt.
+			// Content changed: allow the index/text fallback only when old and
+			// new overlap, so a replaced todo can't reuse an old receipt.
 			if !todoContentRelates(current[index-1], *r.TodoStep) {
 				continue
 			}
@@ -723,21 +723,7 @@ func todoContentRelates(todo TodoItem, match TodoStepMatch) bool {
 }
 
 func textOverlaps(a, b string) bool {
-	a = normalizeStepText(a)
-	b = normalizeStepText(b)
-	if a == "" || b == "" {
-		return false
-	}
-	// Require ≥6 runes on the shorter side to avoid false positives on
-	// short shared substrings (same guard as stepTextContains).
-	short := a
-	if utf8.RuneCountInString(b) < utf8.RuneCountInString(a) {
-		short = b
-	}
-	if utf8.RuneCountInString(short) < 6 {
-		return false
-	}
-	return strings.Contains(a, b) || strings.Contains(b, a)
+	return stepTextContains(normalizeStepText(a), normalizeStepText(b))
 }
 
 func matchTodoStep(step string, todos []TodoItem) TodoStepMatch {
