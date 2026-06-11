@@ -1624,16 +1624,32 @@ func (m *chatTUI) streamToolOutput(id, chunk string) {
 		return
 	}
 	if m.toolStreamID != id {
-		m.collapseToolOutput(m.toolStreamID)
-		m.toolStreamID = id
-		m.toolTail = m.toolTail[:0]
-		m.toolPartial = ""
-		m.toolLineCount = 0
-		if m.nativeScrollback {
-			m.toolStreamIdx = -1
+		// Switching to a different id means either:
+		//   (a) the previous tool finished and a new one is starting — collapse
+		//       the current id's live block, then append a fresh slot at the
+		//       end of the transcript.
+		//   (b) late ToolProgress for an earlier (already dispatched and
+		//       possibly collapsed) tool — reuse the slot beginToolRunning
+		//       already wrote for that id, so the live block stays directly
+		//       under the earlier tool's card rather than stacking at the end.
+		if existingIdx, ok := m.shellTranscriptIdx[id]; ok && existingIdx >= 0 && existingIdx < len(m.transcript) {
+			m.toolStreamID = id
+			m.toolStreamIdx = existingIdx
+			m.toolTail = m.toolTail[:0]
+			m.toolPartial = ""
+			m.toolLineCount = 0
 		} else {
-			m.toolStreamIdx = len(m.transcript)
-			m.commitLine("")
+			m.collapseToolOutput(m.toolStreamID)
+			m.toolStreamID = id
+			m.toolTail = m.toolTail[:0]
+			m.toolPartial = ""
+			m.toolLineCount = 0
+			if m.nativeScrollback {
+				m.toolStreamIdx = -1
+			} else {
+				m.toolStreamIdx = len(m.transcript)
+				m.commitLine("")
+			}
 		}
 	}
 	// Accumulate full output for shell commands so Ctrl+B can expand it.
@@ -1723,19 +1739,63 @@ func (m *chatTUI) collapseToolOutput(id string) {
 		return
 	}
 	if m.toolStreamIdx < 0 || id == "" || m.toolStreamID != id {
+		// The slot is no longer active (e.g. another tool has since taken
+		// over via beginToolRunning, or this id was never streamed). If we
+		// still have a transcript index for it — set by beginToolRunning
+		// when the dispatch landed — collapse in place so a late
+		// ToolResult for a back-to-back tool doesn't leave the previous
+		// tool's live block as raw streamed text.
+		if idx, ok := m.shellTranscriptIdx[id]; ok && idx >= 0 && idx < len(m.transcript) {
+			m.collapseShellSlot(id, idx)
+		}
 		return
 	}
-	n := m.toolLineCount
-	if m.toolPartial != "" {
-		n++
+	m.collapseShellSlot(id, m.toolStreamIdx)
+	m.transcriptDirty = true
+	m.toolStreamIdx = -1
+	m.toolStreamID = ""
+	m.toolTail = m.toolTail[:0]
+	m.toolPartial = ""
+	m.toolLineCount = 0
+}
+
+// collapseShellSlot finalises a tool's live block at idx. Used both by the
+// active-tool path (idx == toolStreamIdx, with the streaming state intact)
+// and the late-result path (idx was recorded in shellTranscriptIdx when the
+// tool was first dispatched). The active path uses the live streaming
+// state (m.toolLineCount + m.toolPartial) for the line count; the late
+// path derives it from the accumulated shellOutputs map (only populated
+// for "shell-" prefixed ids), since toolTail/toolLineCount are reset
+// whenever a new tool takes over via beginToolRunning.
+func (m *chatTUI) collapseShellSlot(id string, idx int) {
+	n := -1
+	if id == m.toolStreamID {
+		n = m.toolLineCount
+		if m.toolPartial != "" {
+			n++
+		}
+	}
+	if n < 0 {
+		// Late-result path. shellOutputs is the most reliable record of
+		// what the tool actually emitted, but it's only populated for
+		// shell-prefixed ids; for other tools we fall back to leaving
+		// the slot blank.
+		if full, ok := m.shellOutputs[id]; ok {
+			n = len(strings.Split(strings.TrimRight(full, "\n"), "\n"))
+		}
 	}
 	if n == 0 {
-		if m.toolStreamIdx == len(m.transcript)-1 {
-			m.transcript = m.transcript[:m.toolStreamIdx]
-		} else {
-			m.transcript[m.toolStreamIdx] = ""
-		}
-	} else if full, ok := m.shellOutputs[id]; ok {
+		// The live block was a "working…" placeholder for a tool that
+		// finished with no output. Clear the rendered text so "working"
+		// disappears from scrollback, but keep the slot in place: the
+		// transcript index is still recorded in shellTranscriptIdx so a
+		// late ToolProgress for this id can land here. If no late
+		// progress ever arrives, this slot becomes a blank line — visible
+		// but harmless.
+		m.transcript[idx] = ""
+		return
+	}
+	if full, ok := m.shellOutputs[id]; ok {
 		// Shell command: show first N lines + hint.
 		lines := strings.Split(strings.TrimRight(full, "\n"), "\n")
 		total := len(lines)
@@ -1745,24 +1805,18 @@ func (m *chatTUI) collapseToolOutput(id string) {
 				preview[i] = dim(clampPlain(lines[i], m.width-len([]rune(connector))))
 			}
 			preview[shellPreviewLines] = dim(fmt.Sprintf("… %d more lines (click/Ctrl+B)", total-shellPreviewLines))
-			m.transcript[m.toolStreamIdx] = connectorBlock(preview)
+			m.transcript[idx] = connectorBlock(preview)
 		} else {
 			rendered := make([]string, total)
 			for i, ln := range lines {
 				rendered[i] = dim(clampPlain(ln, m.width-len([]rune(connector))))
 			}
-			m.transcript[m.toolStreamIdx] = connectorBlock(rendered)
+			m.transcript[idx] = connectorBlock(rendered)
 		}
-		m.shellTranscriptIdx[id] = m.toolStreamIdx
 	} else {
-		m.transcript[m.toolStreamIdx] = connectorBlock([]string{dim(fmt.Sprintf("%d lines", n))})
+		m.transcript[idx] = connectorBlock([]string{dim(fmt.Sprintf("%d lines", n))})
 	}
-	m.transcriptDirty = true
-	m.toolStreamIdx = -1
-	m.toolStreamID = ""
-	m.toolTail = m.toolTail[:0]
-	m.toolPartial = ""
-	m.toolLineCount = 0
+	m.shellTranscriptIdx[id] = idx
 }
 
 // toggleShellOutput expands or collapses the output of the most recent shell
@@ -1849,6 +1903,12 @@ func (m *chatTUI) beginToolRunning(id string) {
 	}
 	m.toolStreamIdx = len(m.transcript)
 	m.commitLine(connectorBlock([]string{dim(fmt.Sprintf(i18n.M.ChatToolWorkingFmt, toolWorkingFrames[0], 0))}))
+	// Remember the transcript slot for this id so a late ToolProgress for a
+	// previously dispatched (and possibly already collapsed) tool can reuse
+	// it instead of appending a fresh slot at the end of the transcript. For
+	// back-to-back tool calls this keeps each tool's live block directly
+	// under its own card.
+	m.shellTranscriptIdx[id] = m.toolStreamIdx
 }
 
 // tickToolRunning re-renders the working line of a tool that's dispatched but
