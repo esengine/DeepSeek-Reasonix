@@ -1,8 +1,10 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"reasonix/internal/bot"
@@ -93,5 +95,24 @@ enabled = false
 	plan := desktopBotRuntimePlan(got)
 	if !plan.Start || !plan.Enabled[bot.PlatformFeishu] {
 		t.Fatalf("desktop runtime plan = %+v, want user-level Lark connection to start", plan)
+	}
+}
+
+func TestSummarizeBotRuntimeErrorsCapsOutput(t *testing.T) {
+	got := summarizeBotRuntimeErrors([]error{
+		errors.New("first"),
+		nil,
+		errors.New("second"),
+		errors.New("third"),
+		errors.New("fourth"),
+	})
+
+	for _, want := range []string{"first", "second", "third", "1 more"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("summary = %q, want %q", got, want)
+		}
+	}
+	if strings.Contains(got, "fourth") {
+		t.Fatalf("summary = %q, should cap extra errors", got)
 	}
 }

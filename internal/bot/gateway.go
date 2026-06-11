@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
@@ -57,6 +58,7 @@ type BotGateway struct {
 	cfg      GatewayConfig
 	adapters []AdapterBinding
 	sessions *SessionManager
+	startErr []error
 
 	mu             sync.Mutex
 	controllers    map[string]*sessionState // session key -> active state
@@ -167,6 +169,8 @@ func (gw *BotGateway) buildAllowlist() {
 
 // Start 启动所有已启用的平台适配器并开始处理消息。
 func (gw *BotGateway) Start(ctx context.Context) error {
+	started := make([]AdapterBinding, 0, len(gw.adapters))
+	var startErr []error
 	for _, binding := range gw.adapters {
 		if !gw.cfg.Enabled[binding.Platform] {
 			gw.logger.Info("platform disabled, skipping", "platform", binding.Platform, "connection", binding.ID)
@@ -174,19 +178,35 @@ func (gw *BotGateway) Start(ctx context.Context) error {
 		}
 		gw.logger.Info("starting adapter", "platform", binding.Platform, "connection", binding.ID, "domain", binding.Domain)
 		if err := binding.Adapter.Start(ctx); err != nil {
-			return fmt.Errorf("start adapter %s: %w", binding.ID, err)
+			wrapped := fmt.Errorf("start adapter %s: %w", binding.ID, err)
+			startErr = append(startErr, wrapped)
+			gw.logger.Warn("adapter start failed", "platform", binding.Platform, "connection", binding.ID, "domain", binding.Domain, "err", err)
+			continue
 		}
+		started = append(started, binding)
+	}
+	gw.adapters = started
+	gw.startErr = startErr
+	if len(started) == 0 && len(startErr) > 0 {
+		return errors.Join(startErr...)
 	}
 
 	// 合并所有适配器的消息通道
 	for _, binding := range gw.adapters {
-		if !gw.cfg.Enabled[binding.Platform] {
-			continue
-		}
 		go gw.dispatchLoop(ctx, binding)
 	}
 
 	return nil
+}
+
+func (gw *BotGateway) AdapterCount() int {
+	return len(gw.adapters)
+}
+
+func (gw *BotGateway) StartErrors() []error {
+	out := make([]error, len(gw.startErr))
+	copy(out, gw.startErr)
+	return out
 }
 
 // Stop 停止所有适配器并关闭所有 session。

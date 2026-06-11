@@ -126,19 +126,45 @@ func (r *desktopBotRuntime) apply(parent context.Context, cfg *config.Config, wo
 	if err := gw.Start(ctx); err != nil {
 		cancel()
 		gw.Stop()
-		r.status = BotRuntimeStatusView{Status: "error", Message: err.Error(), Connections: len(bindings)}
+		r.status = BotRuntimeStatusView{Status: "error", Message: err.Error(), Connections: gw.AdapterCount()}
 		return err
+	}
+	runningConnections := gw.AdapterCount()
+	startErrors := gw.StartErrors()
+	status := "running"
+	message := fmt.Sprintf("%d bot connection(s) running", runningConnections)
+	if len(startErrors) > 0 {
+		status = "degraded"
+		message = fmt.Sprintf("%d bot connection(s) running; %d failed to start: %s", runningConnections, len(startErrors), summarizeBotRuntimeErrors(startErrors))
 	}
 	r.cancel = cancel
 	r.gw = gw
 	r.status = BotRuntimeStatusView{
 		Running:     true,
-		Status:      "running",
-		Message:     fmt.Sprintf("%d bot connection(s) running", len(bindings)),
-		Connections: len(bindings),
+		Status:      status,
+		Message:     message,
+		Connections: runningConnections,
 		StartedAt:   time.Now().UTC().Format(time.RFC3339),
 	}
 	return nil
+}
+
+func summarizeBotRuntimeErrors(errs []error) string {
+	parts := make([]string, 0, len(errs))
+	for _, err := range errs {
+		if err == nil {
+			continue
+		}
+		parts = append(parts, err.Error())
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	if len(parts) > 3 {
+		hidden := len(parts) - 3
+		parts = append(parts[:3], fmt.Sprintf("%d more", hidden))
+	}
+	return strings.Join(parts, "; ")
 }
 
 type botRuntimePlan struct {

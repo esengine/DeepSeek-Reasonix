@@ -2,8 +2,10 @@ package bot
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -16,6 +18,7 @@ type fakeAdapter struct {
 	msgCh    chan InboundMessage
 	sent     []OutboundMessage
 	started  bool
+	startErr error
 }
 
 func newFakeAdapter(platform Platform, name string) *fakeAdapter {
@@ -31,6 +34,9 @@ func (f *fakeAdapter) Name() string                    { return f.name }
 func (f *fakeAdapter) Messages() <-chan InboundMessage { return f.msgCh }
 
 func (f *fakeAdapter) Start(ctx context.Context) error {
+	if f.startErr != nil {
+		return f.startErr
+	}
 	f.mu.Lock()
 	f.started = true
 	f.mu.Unlock()
@@ -131,6 +137,65 @@ func TestGatewayConstructAndStop(t *testing.T) {
 		t.Fatal("gateway should not be nil")
 	}
 	gw.Stop()
+}
+
+func TestGatewayStartsHealthyAdaptersWhenOneFails(t *testing.T) {
+	cfg := GatewayConfig{
+		Enabled:   map[Platform]bool{PlatformFeishu: true, PlatformWeixin: true},
+		Allowlist: AllowlistConfig{AllowAll: true},
+	}
+	good := newFakeAdapter(PlatformFeishu, "good-feishu")
+	bad := newFakeAdapter(PlatformWeixin, "bad-weixin")
+	bad.startErr = errors.New("missing token")
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	gw := NewGatewayWithAdapterBindings(cfg, []AdapterBinding{
+		{ID: "feishu-lark", Platform: PlatformFeishu, Adapter: good},
+		{ID: "weixin-weixin", Platform: PlatformWeixin, Adapter: bad},
+	}, logger)
+
+	if err := gw.Start(context.Background()); err != nil {
+		t.Fatalf("start should keep healthy adapters running: %v", err)
+	}
+	if got := gw.AdapterCount(); got != 1 {
+		t.Fatalf("adapter count = %d, want 1", got)
+	}
+	if !good.started {
+		t.Fatal("healthy adapter was not started")
+	}
+	if bad.started {
+		t.Fatal("failing adapter should not be marked started")
+	}
+	startErr := gw.StartErrors()
+	if len(startErr) != 1 || !strings.Contains(startErr[0].Error(), "weixin-weixin") {
+		t.Fatalf("start errors = %#v, want wrapped connection error", startErr)
+	}
+}
+
+func TestGatewayReturnsErrorWhenAllAdaptersFail(t *testing.T) {
+	cfg := GatewayConfig{
+		Enabled:   map[Platform]bool{PlatformWeixin: true},
+		Allowlist: AllowlistConfig{AllowAll: true},
+	}
+	bad := newFakeAdapter(PlatformWeixin, "bad-weixin")
+	bad.startErr = errors.New("missing token")
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	gw := NewGatewayWithAdapterBindings(cfg, []AdapterBinding{
+		{ID: "weixin-weixin", Platform: PlatformWeixin, Adapter: bad},
+	}, logger)
+
+	err := gw.Start(context.Background())
+	if err == nil {
+		t.Fatal("start should fail when every adapter fails")
+	}
+	if !strings.Contains(err.Error(), "weixin-weixin") {
+		t.Fatalf("error = %v, want connection id", err)
+	}
+	if got := gw.AdapterCount(); got != 0 {
+		t.Fatalf("adapter count = %d, want 0", got)
+	}
+	if len(gw.StartErrors()) != 1 {
+		t.Fatalf("start errors = %#v, want one", gw.StartErrors())
+	}
 }
 
 func TestGatewayAllowlistCheck(t *testing.T) {
