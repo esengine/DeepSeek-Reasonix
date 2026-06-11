@@ -620,6 +620,26 @@ func TestIsSyntheticUserMessage(t *testing.T) {
 			input: "The previous assistant response was interrupted by my VPN, can you retry?",
 			want:  false,
 		},
+		{
+			name:  "compaction fold summary",
+			input: "<compaction-summary>\nSummary of earlier conversation (older messages were compacted to save context):\nDid things with tools.\n</compaction-summary>",
+			want:  true,
+		},
+		{
+			name:  "summarize-from fold",
+			input: "Summary of the later conversation (compacted from here on):\nDid more things.",
+			want:  true,
+		},
+		{
+			name:  "summarize-upto fold",
+			input: "Summary of earlier conversation (compacted up to here):\nDid earlier things.",
+			want:  true,
+		},
+		{
+			name:  "user mentioning a summary is not synthetic",
+			input: "Summary of what I want: fix the login bug first.",
+			want:  false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -69,9 +69,11 @@ func IsSyntheticUserMessage(content string) bool {
 }
 
 // syntheticPrefixes must be kept in sync with the synthetic user messages
-// injected by the controller (planApprovedMessage) and agent loop
+// injected by the controller (planApprovedMessage), agent loop
 // (streamRecoveryMessage, finalReadinessRetryMessage, emptyFinalRetryMessage,
-// executorHandoffRetryMessage in internal/agent/agent.go).
+// executorHandoffRetryMessage in internal/agent/agent.go), and compaction
+// folds (internal/agent/compact.go), which store summaries as user-role
+// messages the chat UI must never render as user bubbles (#3653).
 var syntheticPrefixes = []string{
 	"Plan approved — plan mode is off",
 	"Host final-answer readiness check failed",
@@ -80,6 +82,9 @@ var syntheticPrefixes = []string{
 	"The previous assistant response was interrupted during streaming",
 	"The previous assistant response was interrupted before visible",
 	"The previous assistant response finished without any visible answer",
+	"<compaction-summary>",
+	"Summary of the later conversation (compacted from here on):",
+	"Summary of earlier conversation (compacted up to here):",
 }
 
 // Compose applies the plan-mode marker to a turn's text when plan mode is on,
