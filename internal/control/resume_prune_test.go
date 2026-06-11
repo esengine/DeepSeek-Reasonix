@@ -30,6 +30,9 @@ func coldResumeFixture(t *testing.T, threshold time.Duration) (*agent.Session, s
 	if err := loaded.Save(path); err != nil {
 		t.Fatalf("save: %v", err)
 	}
+	if _, err := agent.EnsureBranchMeta(path); err != nil {
+		t.Fatalf("meta: %v", err)
+	}
 
 	exec := agent.New(nil, nil, agent.NewSession("sys"), agent.Options{ContextWindow: 1000, RecentKeep: 2, ArchiveDir: dir}, event.Discard)
 	c := New(Options{Executor: exec, SessionDir: dir, Label: "test"})

@@ -1784,13 +1784,15 @@ func (c *Controller) maybeColdResumePrune(path string) {
 	if c.executor == nil || path == "" {
 		return
 	}
-	var last time.Time
-	if m, ok, err := agent.LoadBranchMeta(path); err == nil && ok && !m.UpdatedAt.IsZero() {
-		last = m.UpdatedAt
-	} else if info, err := os.Stat(path); err == nil {
-		last = info.ModTime()
+	// Idle time comes from branch meta only — every session the controller has
+	// ever snapshotted carries one. A meta-less transcript (e.g. a legacy import
+	// not yet saved) skips the prune until its first snapshot creates the meta.
+	m, ok, err := agent.LoadBranchMeta(path)
+	if err != nil || !ok || m.UpdatedAt.IsZero() {
+		return
 	}
-	if last.IsZero() || time.Since(last) < cacheColdAfter {
+	last := m.UpdatedAt
+	if time.Since(last) < cacheColdAfter {
 		return
 	}
 	st, err := c.executor.PruneStaleToolResults()
