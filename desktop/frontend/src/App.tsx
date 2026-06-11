@@ -17,6 +17,7 @@ import {
   Settings as SettingsIcon,
   Pencil,
   Trash2,
+  X,
 } from "lucide-react";
 import { useToast } from "./lib/toast";
 import { asArray } from "./lib/array";
@@ -101,6 +102,11 @@ const SIDEBAR_VIEWPORT_RATIO = 0.18;
 const CHAT_MIN_WIDTH = 400;
 const CHAT_COMFORT_MIN_WIDTH = 560;
 const WORKSPACE_RESIZER_WIDTH = 8;
+const WORKSPACE_FLOATING_MARGIN = 12;
+const CHAT_FLOATING_VISIBLE_MIN_WIDTH = 280;
+const WORKSPACE_FLOATING_MIN_WIDTH = 260;
+const LOW_RES_WIDTH_BREAKPOINT = 620;
+const LOW_RES_HEIGHT_BREAKPOINT = 640;
 
 function isThemeMode(value: string): value is Theme {
   return value === "auto" || value === "light" || value === "dark";
@@ -694,6 +700,7 @@ export default function App() {
   const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidth);
   const [sidebarResizing, setSidebarResizing] = useState(false);
   const [viewportWidth, setViewportWidth] = useState(() => (typeof window === "undefined" ? 1440 : window.innerWidth));
+  const [viewportHeight, setViewportHeight] = useState(() => (typeof window === "undefined" ? 900 : window.innerHeight));
   const [workspacePanelOpen, setWorkspacePanelOpen] = useState(true);
   const [rightDockTreeWidth, setRightDockTreeWidth] = useState(loadRightDockTreeWidth);
   const [rightDockPreviewWidth, setRightDockPreviewWidth] = useState(loadRightDockPreviewWidth);
@@ -892,7 +899,10 @@ export default function App() {
   }, [closeTransientOverlays]);
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const onResize = () => setViewportWidth(window.innerWidth);
+    const onResize = () => {
+      setViewportWidth(window.innerWidth);
+      setViewportHeight(window.innerHeight);
+    };
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
@@ -904,10 +914,12 @@ export default function App() {
   const rightDockDetailActive = rightDockMode !== "context" && workspacePreviewActive;
   const preferredWorkspacePanelWidth = rightDockDetailActive ? rightDockPreviewWidth : rightDockTreeWidth;
   const workspacePanelMinWidth = rightDockDetailActive ? RIGHT_DOCK_PREVIEW_MIN_WIDTH : RIGHT_DOCK_TREE_MIN_WIDTH;
+  const lowResolutionWindow = viewportWidth <= LOW_RES_WIDTH_BREAKPOINT || viewportHeight <= LOW_RES_HEIGHT_BREAKPOINT;
+  const sidebarSuppressed = lowResolutionWindow || sidebarCollapsed;
   const chatReservedWidth = workspacePanelOpen && !workspacePanelMaximized ? CHAT_COMFORT_MIN_WIDTH : CHAT_MIN_WIDTH;
   const workspacePanelAvailableWidth = availableWorkspacePanelWidth({
     viewportWidth,
-    sidebarCollapsed,
+    sidebarCollapsed: sidebarSuppressed,
     sidebarWidth,
     chatMinWidth: chatReservedWidth,
     resizerWidth: WORKSPACE_RESIZER_WIDTH,
@@ -921,10 +933,26 @@ export default function App() {
     availableWidth: workspacePanelAvailableWidth,
   });
 
+  const sidebarRenderWidth = sidebarSuppressed ? 0 : sidebarWidth;
+  const workspacePanelFloating =
+    workspacePanelOpen
+    && !workspacePanelMaximized
+    && (lowResolutionWindow || resolvedWorkspacePanelWidth < RIGHT_DOCK_MIN_RENDER_WIDTH);
+  const floatingWorkspacePanelWidth = Math.min(
+    preferredWorkspacePanelWidth,
+    Math.max(
+      WORKSPACE_FLOATING_MIN_WIDTH,
+      viewportWidth - sidebarRenderWidth - WORKSPACE_FLOATING_MARGIN * 2 - CHAT_FLOATING_VISIBLE_MIN_WIDTH,
+    ),
+  );
   const workspacePanelRenderable =
-    workspacePanelOpen && (workspacePanelMaximized || resolvedWorkspacePanelWidth >= RIGHT_DOCK_MIN_RENDER_WIDTH);
-  const workspacePanelGridOpen = workspacePanelRenderable && !workspacePanelMaximized;
-  const workspacePanelRenderWidth = workspacePanelMaximized ? preferredWorkspacePanelWidth : resolvedWorkspacePanelWidth;
+    workspacePanelOpen && (workspacePanelMaximized || workspacePanelFloating || resolvedWorkspacePanelWidth >= RIGHT_DOCK_MIN_RENDER_WIDTH);
+  const workspacePanelGridOpen = workspacePanelRenderable && !workspacePanelMaximized && !workspacePanelFloating;
+  const workspacePanelRenderWidth = workspacePanelMaximized
+    ? preferredWorkspacePanelWidth
+    : workspacePanelFloating
+      ? floatingWorkspacePanelWidth
+      : resolvedWorkspacePanelWidth;
   const activeTab = useMemo(
     () => tabMetas.find((tab) => tab.id === activeTabId) ?? tabMetas.find((tab) => tab.active),
     [activeTabId, tabMetas],
@@ -2193,8 +2221,10 @@ export default function App() {
         className={[
           "layout",
           sidebarCollapsed ? "layout--sidebar-collapsed" : "",
+          lowResolutionWindow ? "layout--low-res" : "",
           sidebarResizing ? "layout--resizing layout--sidebar-resizing" : "",
           workspacePanelGridOpen ? "layout--workspace-open" : "",
+          workspacePanelRenderable && workspacePanelFloating ? "layout--workspace-floating" : "",
           workspacePanelOpen && workspacePanelMaximized ? "layout--workspace-maximized" : "",
           workspacePanelResizing ? "layout--resizing layout--workspace-resizing" : "",
         ]
@@ -2645,6 +2675,7 @@ export default function App() {
             className={[
               "workbench-dock",
               `workbench-dock--${rightDockMode}`,
+              workspacePanelFloating ? "workbench-dock--floating" : "",
             ].join(" ")}
             aria-label={t("rightDock.workbench")}
           >
@@ -2683,6 +2714,19 @@ export default function App() {
                   <span className="workbench-dock__tab-label">{t("workspace.changedTab")}</span>
                 </button>
               </div>
+              {workspacePanelFloating && (
+                <>
+                  <span className="workbench-dock__tools-spacer" />
+                  <button
+                    className="workspace-iconbtn workbench-dock__close"
+                    type="button"
+                    aria-label={t("rightDock.collapse")}
+                    onClick={closeWorkspacePanel}
+                  >
+                    <X size={15} />
+                  </button>
+                </>
+              )}
             </div>
             <div className="workbench-dock__body">
               {rightDockMode === "context" ? (
