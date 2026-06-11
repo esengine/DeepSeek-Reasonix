@@ -164,6 +164,37 @@ func (l *Ledger) TouchedPaths(limit int, writtenOnly bool) []string {
 	return out
 }
 
+// HasSuccessfulBashMentioningPaths reports whether every path appears in some
+// successful bash command this turn — files created or edited through shell
+// redirection (`seq … > file`) leave no reader/writer receipt, so the command
+// text naming the path is the receipt.
+func (l *Ledger) HasSuccessfulBashMentioningPaths(paths []string) bool {
+	wanted := normalizePaths(paths)
+	if l == nil || len(wanted) == 0 {
+		return false
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, p := range wanted {
+		needle := strings.ToLower(filepath.ToSlash(p))
+		found := false
+		for _, r := range l.receipts {
+			if !r.Success || r.ToolName != "bash" {
+				continue
+			}
+			command := strings.ToLower(strings.ReplaceAll(r.Command, `\`, `/`))
+			if strings.Contains(command, needle) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
 func (l *Ledger) HasSuccessfulCommandAfter(command string, after int) bool {
 	command = strings.TrimSpace(command)
 	if l == nil || command == "" {

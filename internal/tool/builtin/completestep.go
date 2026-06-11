@@ -166,7 +166,7 @@ func verifyStepEvidence(ctx context.Context, items []stepEvidence) (hostVerified
 			if len(e.Paths) == 0 {
 				return 0, 0, fmt.Errorf("evidence %d: files evidence requires paths for host verification — cite the files you touched", i+1)
 			}
-			if !ledger.HasSuccessfulReadOrWrite(e.Paths) {
+			if !ledger.HasSuccessfulReadOrWrite(e.Paths) && !ledger.HasSuccessfulBashMentioningPaths(e.Paths) {
 				return 0, 0, fmt.Errorf("evidence %d: file paths have no matching successful read/write receipt in this turn%s", i+1, receiptHint("files touched this turn", ledger.TouchedPaths(8, false)))
 			}
 			hostVerified++

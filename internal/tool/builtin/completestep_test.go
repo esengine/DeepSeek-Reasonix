@@ -473,3 +473,27 @@ func TestCompleteStepSessionFallbackSkipsFailedCalls(t *testing.T) {
 		t.Fatal("a call whose recorded result is an error must not count as verification")
 	}
 }
+
+// Replay from the 2026-06-11 e2e run: a file created via bash redirection has
+// no reader/writer receipt, but the command text names the path.
+func TestCompleteStepFilesEvidenceAcceptsBashCreatedFile(t *testing.T) {
+	ledger := evidence.NewLedger()
+	ledger.Record(evidence.Receipt{
+		ToolName: "bash",
+		Success:  true,
+		Command:  `mkdir -p scripts && seq -w 1 20 | while read i; do echo "line $i"; done > scripts/test_lines.txt && cat scripts/test_lines.txt`,
+	})
+	ctx := evidence.WithLedger(context.Background(), ledger)
+
+	if _, err := (completeStep{}).Execute(ctx, json.RawMessage(`{
+		"step":"x","result":"y",
+		"evidence":[{"kind":"files","paths":["scripts/test_lines.txt"],"summary":"file created with 20 lines"}]}`)); err != nil {
+		t.Fatalf("bash-created file should count as a files receipt: %v", err)
+	}
+
+	if _, err := (completeStep{}).Execute(ctx, json.RawMessage(`{
+		"step":"x","result":"y",
+		"evidence":[{"kind":"files","paths":["scripts/never_touched.txt"],"summary":"claimed"}]}`)); err == nil {
+		t.Fatal("a path no command mentions must still be rejected")
+	}
+}
