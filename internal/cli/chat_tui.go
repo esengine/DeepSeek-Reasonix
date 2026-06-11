@@ -266,8 +266,8 @@ type chatTUI struct {
 	// shown as the current entry in the /output-style listing. "" = default.
 	outputStyle string
 
-	// diffMaxLines controls the max lines shown in a diff view. 0 = show all
-	// (default); non-zero = fold at that many lines. Toggled by /diff-fold.
+	// diffMaxLines controls the max lines shown in a diff view. 0 = show all;
+	// non-zero = fold at that many lines. Toggled by /diff-fold.
 	diffMaxLines int
 
 	// statuslineCmd is the user's custom status-line command (config
@@ -473,6 +473,7 @@ func newChatTUI(ctrl *control.Controller, missing string, eventCh chan event.Eve
 		pending:              &strings.Builder{},
 		pendingCommit:        &commitBuf,
 		renderer:             newMarkdownRenderer(termW),
+		diffMaxLines:         diffFoldLimit,
 		showReasoning:        nativeScrollback,
 		shellOutputs:         make(map[string]string),
 		shellExpanded:        make(map[string]bool),
