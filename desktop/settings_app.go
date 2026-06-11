@@ -510,11 +510,14 @@ func (a *App) loadDesktopUserConfigForEdit() (*config.Config, string, error) {
 	legacyCfg := config.LoadForEdit(legacyPath)
 	normalizeLegacyDesktopProviderAccessForSettings(legacyCfg, legacyPath)
 	legacyCfg.ConfigVersion = config.Default().ConfigVersion
+	if err := migrateLegacyBotConfigToUser(cfg, legacyCfg, userPath); err != nil {
+		return nil, "", err
+	}
 	return legacyCfg, userPath, nil
 }
 
 func (a *App) migrateLegacyBotConfigToUser(userCfg *config.Config, userPath string) error {
-	if userCfg == nil || desktopBotConfigConfigured(userCfg.Bot) {
+	if userCfg == nil {
 		return nil
 	}
 	legacyPath := config.SourcePathForRoot(a.activeWorkspaceRoot())
@@ -522,6 +525,13 @@ func (a *App) migrateLegacyBotConfigToUser(userCfg *config.Config, userPath stri
 		return nil
 	}
 	legacyCfg := config.LoadForEdit(legacyPath)
+	return migrateLegacyBotConfigToUser(userCfg, legacyCfg, userPath)
+}
+
+func migrateLegacyBotConfigToUser(userCfg, legacyCfg *config.Config, userPath string) error {
+	if userCfg == nil || legacyCfg == nil || desktopBotConfigConfigured(userCfg.Bot) {
+		return nil
+	}
 	if !desktopBotConfigConfigured(legacyCfg.Bot) {
 		return nil
 	}

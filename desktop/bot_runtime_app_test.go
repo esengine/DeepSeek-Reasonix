@@ -152,6 +152,55 @@ status = "connected"
 	}
 }
 
+func TestDesktopBotRuntimePersistsLegacyProjectBotWhenUserConfigMissing(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	project := robustTempDir(t)
+	if err := os.WriteFile(filepath.Join(project, "reasonix.toml"), []byte(`
+[desktop]
+theme = "dark"
+
+[bot]
+enabled = true
+
+[bot.allowlist]
+enabled = true
+feishu_users = ["ou-legacy"]
+
+[[bot.connections]]
+id = "feishu-lark"
+provider = "feishu"
+domain = "lark"
+label = "Lark"
+enabled = true
+status = "connected"
+`), 0o644); err != nil {
+		t.Fatalf("write project config: %v", err)
+	}
+
+	orig, _ := os.Getwd()
+	defer func() { _ = os.Chdir(orig) }()
+	if err := os.Chdir(project); err != nil {
+		t.Fatalf("chdir project: %v", err)
+	}
+
+	got, err := NewApp().loadDesktopBotConfig()
+	if err != nil {
+		t.Fatalf("load desktop bot config: %v", err)
+	}
+	if !got.Bot.Enabled || len(got.Bot.Connections) != 1 || got.Bot.Connections[0].ID != "feishu-lark" {
+		t.Fatalf("desktop bot config = %+v, want migrated legacy Lark connection", got.Bot)
+	}
+
+	persisted := config.LoadForEdit(config.UserConfigPath())
+	if !persisted.Bot.Enabled || len(persisted.Bot.Connections) != 1 || persisted.Bot.Connections[0].ID != "feishu-lark" {
+		t.Fatalf("persisted bot config = %+v, want migrated legacy Lark connection", persisted.Bot)
+	}
+	if persisted.DesktopTheme() == "dark" {
+		t.Fatal("legacy project desktop theme should not be persisted during bot-only migration")
+	}
+}
+
 func TestDesktopBotRuntimeMigrationDoesNotOverwriteUserBotSettings(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
