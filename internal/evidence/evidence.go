@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"reasonix/internal/provider"
 )
@@ -344,6 +345,22 @@ func (l *Ledger) MatchLatestTodoStep(step string) (TodoStepMatch, bool) {
 	return TodoStepMatch{}, false
 }
 
+// LatestTodos returns the todo list from this turn's latest successful todo_write.
+func (l *Ledger) LatestTodos() ([]TodoItem, bool) {
+	if l == nil {
+		return nil, false
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for i := len(l.receipts) - 1; i >= 0; i-- {
+		r := l.receipts[i]
+		if r.Success && r.ToolName == "todo_write" {
+			return append([]TodoItem(nil), r.Todos...), true
+		}
+	}
+	return nil, false
+}
+
 // UnverifiedCompletedTodos reports current completed todos that transitioned
 // from the latest prior successful todo_write receipt without a matching
 // successful complete_step receipt earlier in the same turn. If this turn has no
@@ -615,7 +632,7 @@ func sameTodoMatch(todo TodoItem, match TodoStepMatch) bool {
 }
 
 func matchTodoStep(step string, todos []TodoItem) TodoStepMatch {
-	if n, ok := parseStepIndex(step); ok && n >= 1 && n <= len(todos) {
+	if n, ok := parseStepIndex(normalizeStepText(step)); ok && n >= 1 && n <= len(todos) {
 		t := todos[n-1]
 		return TodoStepMatch{Found: true, Index: n, Content: t.Content, Status: t.Status, ActiveForm: t.ActiveForm}
 	}
@@ -624,19 +641,64 @@ func matchTodoStep(step string, todos []TodoItem) TodoStepMatch {
 			return TodoStepMatch{Found: true, Index: i + 1, Content: t.Content, Status: t.Status, ActiveForm: t.ActiveForm}
 		}
 	}
+	// Containment fallback for wording drift; an ambiguous citation (containing
+	// or contained by two different todos) stays unmatched rather than guessing.
+	norm := normalizeStepText(step)
+	found := -1
+	for i, t := range todos {
+		if stepTextContains(norm, normalizeStepText(t.Content)) || stepTextContains(norm, normalizeStepText(t.ActiveForm)) {
+			if found >= 0 && found != i {
+				return TodoStepMatch{}
+			}
+			found = i
+		}
+	}
+	if found >= 0 {
+		t := todos[found]
+		return TodoStepMatch{Found: true, Index: found + 1, Content: t.Content, Status: t.Status, ActiveForm: t.ActiveForm}
+	}
 	return TodoStepMatch{}
 }
 
 func parseStepIndex(step string) (int, bool) {
-	step = strings.TrimSpace(strings.TrimSuffix(step, "."))
+	step = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(step), "."))
 	n, err := strconv.Atoi(step)
 	return n, err == nil
 }
 
+// normalizeStepText folds the drift models introduce when citing a todo:
+// fullwidth ASCII forms → halfwidth (："５ → :"5), all whitespace dropped,
+// case-insensitive.
+func normalizeStepText(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if r >= 0xFF01 && r <= 0xFF5E {
+			r -= 0xFEE0
+		}
+		b.WriteRune(r)
+	}
+	return strings.ToLower(strings.Join(strings.Fields(b.String()), ""))
+}
+
 func sameStepText(a, b string) bool {
-	a = strings.TrimSpace(a)
-	b = strings.TrimSpace(b)
-	return a != "" && b != "" && strings.EqualFold(a, b)
+	na, nb := normalizeStepText(a), normalizeStepText(b)
+	return na != "" && na == nb
+}
+
+// stepTextContains: substring match between normalized texts, but only when the
+// shorter side is substantial enough (≥6 runes) to not match by accident.
+func stepTextContains(a, b string) bool {
+	if a == "" || b == "" {
+		return false
+	}
+	short := a
+	if utf8.RuneCountInString(b) < utf8.RuneCountInString(a) {
+		short = b
+	}
+	if utf8.RuneCountInString(short) < 6 {
+		return false
+	}
+	return strings.Contains(a, b) || strings.Contains(b, a)
 }
 
 func pathSet(paths []string) map[string]bool {

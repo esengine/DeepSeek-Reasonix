@@ -236,7 +236,7 @@ func verifyTodoStep(ctx context.Context, step string) (evidence.TodoStepMatch, b
 		return evidence.TodoStepMatch{}, false, nil
 	}
 	if !match.Found {
-		return evidence.TodoStepMatch{}, true, fmt.Errorf("step %q has no matching todo_write item in this turn", step)
+		return evidence.TodoStepMatch{}, true, fmt.Errorf("step %q has no matching todo_write item in this turn; cite a todo verbatim or by number: %s", step, todoInventory(ledger))
 	}
 	switch match.Status {
 	case "", "pending", "in_progress", "completed":
@@ -244,6 +244,26 @@ func verifyTodoStep(ctx context.Context, step string) (evidence.TodoStepMatch, b
 	default:
 		return evidence.TodoStepMatch{}, true, fmt.Errorf("step %q matches todo %d (%q) but its status is %q; complete_step requires pending, in_progress, or completed", step, match.Index, match.Content, match.Status)
 	}
+}
+
+func todoInventory(ledger *evidence.Ledger) string {
+	todos, ok := ledger.LatestTodos()
+	if !ok || len(todos) == 0 {
+		return "(no todos recorded this turn)"
+	}
+	parts := make([]string, 0, len(todos))
+	for i, t := range todos {
+		content := t.Content
+		if r := []rune(content); len(r) > 60 {
+			content = string(r[:60]) + "…"
+		}
+		parts = append(parts, fmt.Sprintf("%d) %q", i+1, content))
+		if len(parts) == 12 && len(todos) > 12 {
+			parts = append(parts, fmt.Sprintf("… %d more", len(todos)-12))
+			break
+		}
+	}
+	return strings.Join(parts, ", ")
 }
 
 // verifyCommandFromSession scans the full conversation history (not just the

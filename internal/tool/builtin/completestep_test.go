@@ -11,6 +11,22 @@ import (
 	"reasonix/internal/provider"
 )
 
+func TestTodoInventoryListsTurnTodos(t *testing.T) {
+	ledger := evidence.NewLedger()
+	ledger.Record(evidence.Receipt{
+		ToolName: "todo_write",
+		Success:  true,
+		Todos:    []evidence.TodoItem{{Content: "Phase 5：脚本编辑与执行代码"}, {Content: "Review notes"}},
+	})
+	got := todoInventory(ledger)
+	if !strings.Contains(got, `1) "Phase 5：脚本编辑与执行代码"`) || !strings.Contains(got, `2) "Review notes"`) {
+		t.Fatalf("inventory should list both todos, got %s", got)
+	}
+	if got := todoInventory(evidence.NewLedger()); !strings.Contains(got, "no todos") {
+		t.Fatalf("empty ledger inventory = %s", got)
+	}
+}
+
 func TestCompleteStepRejectsMissingEvidence(t *testing.T) {
 	_, err := completeStep{}.Execute(context.Background(),
 		json.RawMessage(`{"step":"Add the parser","result":"parser added","evidence":[]}`))
