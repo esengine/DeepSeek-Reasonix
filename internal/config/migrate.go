@@ -18,6 +18,7 @@ type legacyConfig struct {
 	APIKey      string                       `json:"apiKey"`
 	BaseURL     string                       `json:"baseUrl"`
 	Lang        string                       `json:"lang"`
+	MCP         []string                     `json:"mcp"` // pre-mcpServers `--mcp`-format strings
 	MCPServers  map[string]legacyMCPServer   `json:"mcpServers"`
 	MCPEnv      map[string]map[string]string `json:"mcpEnv"`
 	MCPDisabled []string                     `json:"mcpDisabled"`
@@ -172,19 +173,42 @@ func migrateLegacyBaseURL(cfg *Config, baseURL string) {
 }
 
 func legacyPlugins(legacy legacyConfig) []PluginEntry {
-	if len(legacy.MCPServers) == 0 {
-		return nil
-	}
 	disabled := make(map[string]bool, len(legacy.MCPDisabled))
 	for _, n := range legacy.MCPDisabled {
 		disabled[n] = true
+	}
+	var out []PluginEntry
+	index := make(map[string]int)
+	add := func(pe PluginEntry, off bool) {
+		if off {
+			v := false
+			pe.AutoStart = &v
+		}
+		pe, _ = NormalizePluginCommandLine(pe)
+		if j, dup := index[pe.Name]; dup {
+			out[j] = pe // mcpServers overrides the `mcp` list on a name collision, matching v0.x
+			return
+		}
+		index[pe.Name] = len(out)
+		out = append(out, pe)
+	}
+	for i, raw := range legacy.MCP {
+		pe, ok := parseLegacyMCPSpec(raw)
+		if !ok {
+			continue
+		}
+		if pe.Name == "" {
+			pe.Name = anonymousMCPName(i)
+		} else if pe.Command != "" {
+			pe.Env = mergeEnv(nil, legacy.MCPEnv[pe.Name])
+		}
+		add(pe, disabled[pe.Name])
 	}
 	names := make([]string, 0, len(legacy.MCPServers))
 	for n := range legacy.MCPServers {
 		names = append(names, n)
 	}
 	sort.Strings(names)
-	out := make([]PluginEntry, 0, len(names))
 	for _, name := range names {
 		s := legacy.MCPServers[name]
 		pe := PluginEntry{
@@ -196,12 +220,7 @@ func legacyPlugins(legacy legacyConfig) []PluginEntry {
 			URL:     s.URL,
 			Headers: s.Headers,
 		}
-		if s.Disabled || disabled[name] {
-			off := false
-			pe.AutoStart = &off
-		}
-		pe, _ = NormalizePluginCommandLine(pe)
-		out = append(out, pe)
+		add(pe, s.Disabled || disabled[name])
 	}
 	return out
 }

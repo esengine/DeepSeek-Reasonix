@@ -78,6 +78,59 @@ func TestMigrateImportsKeyPluginsAndLang(t *testing.T) {
 	}
 }
 
+// TestMigrateImportsLegacyMCPStringList covers the pre-mcpServers `mcp` format
+// (#3949): `--mcp`-style strings, with mcpEnv/mcpDisabled keyed by name and
+// mcpServers winning a name collision.
+func TestMigrateImportsLegacyMCPStringList(t *testing.T) {
+	src, _, _ := legacyHome(t)
+	writeLegacy(t, src, `{
+		"mcp": [
+			"memory=npx -y @modelcontextprotocol/server-memory",
+			"search=https://mcp.example.com/sse",
+			"stream=streamable+https://mcp.example.com/http",
+			"fs=node old-fs.js",
+			"off=npx -y server-off"
+		],
+		"mcpServers": {"fs": {"command": "npx", "args": ["-y", "server-fs"]}},
+		"mcpEnv": {"memory": {"MEMORY_PATH": "/tmp/mem"}},
+		"mcpDisabled": ["off"]
+	}`)
+
+	if _, err := MigrateLegacyIfNeeded(); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	byName := map[string]PluginEntry{}
+	for _, p := range cfg.Plugins {
+		byName[p.Name] = p
+	}
+	mem := byName["memory"]
+	if mem.Command != "npx" || len(mem.Args) != 2 || mem.Args[1] != "@modelcontextprotocol/server-memory" {
+		t.Errorf("memory spec not parsed: %+v", mem)
+	}
+	if mem.Env["MEMORY_PATH"] != "/tmp/mem" {
+		t.Errorf("mcpEnv not applied to memory: %+v", mem.Env)
+	}
+	if s := byName["search"]; s.Type != "sse" || s.URL != "https://mcp.example.com/sse" {
+		t.Errorf("plain URL should migrate as SSE: %+v", s)
+	}
+	if s := byName["stream"]; s.Type != "http" || s.URL != "https://mcp.example.com/http" {
+		t.Errorf("streamable+ URL should migrate as http: %+v", s)
+	}
+	if fs := byName["fs"]; len(fs.Args) != 2 || fs.Args[1] != "server-fs" {
+		t.Errorf("mcpServers should win the fs name collision: %+v", fs)
+	}
+	if off := byName["off"]; off.AutoStart == nil || *off.AutoStart {
+		t.Errorf("mcpDisabled entry should migrate with auto_start=false: %+v", off)
+	}
+	if len(cfg.Plugins) != 5 {
+		t.Errorf("got %d plugins, want 5: %+v", len(cfg.Plugins), cfg.Plugins)
+	}
+}
+
 func TestMigrateRoundTripsThroughLoad(t *testing.T) {
 	src, _, _ := legacyHome(t)
 	writeLegacy(t, src, `{"apiKey":"sk-x","mcpServers":{"fs":{"command":"npx","env":{"A":"1"}}}}`)
