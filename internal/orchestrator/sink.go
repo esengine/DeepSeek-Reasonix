@@ -43,6 +43,9 @@ func (m *SinkMultiplexer) Emit(e event.Event) {
 		}
 		m.parentSink.Emit(e)
 
+	case event.Text:
+		m.parentSink.Emit(e)
+
 	case event.Usage:
 		m.parentSink.Emit(e)
 
