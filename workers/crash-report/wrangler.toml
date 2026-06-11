@@ -8,7 +8,7 @@ routes = [{ pattern = "crash.reasonix.io", custom_domain = true }]
 [[d1_databases]]
 binding = "DB"
 database_name = "reasonix-crash"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "54825184-366f-4877-80fc-924efab0239b"
 
 [[unsafe.bindings]]
 name = "RATE_LIMITER"
