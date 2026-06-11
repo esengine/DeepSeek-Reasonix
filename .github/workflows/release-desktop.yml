@@ -238,6 +238,9 @@ jobs:
     name: mirror to R2
     needs: publish
     runs-on: ubuntu-latest
+    permissions:
+      contents: read # gh release download
+      actions: write # dispatch pages.yml to re-bake the site version
     # Skip cleanly when R2 isn't configured; GitHub release still works as fallback.
     if: ${{ github.repository_owner == 'esengine' }}
     env:
@@ -316,3 +319,11 @@ jobs:
           else
             aws s3 cp assets/ "s3://${R2_BUCKET}/latest/" --recursive --endpoint-url "$ENDPOINT"
           fi
+
+      # Stable release moved R2 latest/ — rebuild the site so its build-time baked
+      # version + JSON-LD follow (site.js's runtime .rxv refresh can't touch first paint / SEO).
+      - name: Refresh site to the new version
+        if: env.HAS_R2 == 'true' && steps.ver.outputs.channel != 'canary' && steps.ver.outputs.prerelease != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run pages.yml --ref main-v2
