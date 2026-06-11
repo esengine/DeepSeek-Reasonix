@@ -1766,6 +1766,41 @@ func (c *Controller) Resume(s *agent.Session, path string) {
 	c.sessionPath = path
 	c.mu.Unlock()
 	c.rebindCheckpoints(path)
+	c.maybeColdResumePrune(path)
+}
+
+// cacheColdAfter approximates how long the provider keeps a prompt prefix
+// cached. A session idle longer than this resumes against a cold cache, so a
+// history rewrite at that moment costs no extra cache misses — it only shrinks
+// the full-price first request. Calibrated against benchmarks/cache-ttl-probe.
+var cacheColdAfter = 4 * time.Hour
+
+// maybeColdResumePrune elides stale tool results when a resumed session has
+// been idle past the provider's cache retention, then persists the pruned
+// transcript so the saved file and the prompt stay in sync.
+func (c *Controller) maybeColdResumePrune(path string) {
+	if c.executor == nil || path == "" {
+		return
+	}
+	var last time.Time
+	if m, ok, err := agent.LoadBranchMeta(path); err == nil && ok && !m.UpdatedAt.IsZero() {
+		last = m.UpdatedAt
+	} else if info, err := os.Stat(path); err == nil {
+		last = info.ModTime()
+	}
+	if last.IsZero() || time.Since(last) < cacheColdAfter {
+		return
+	}
+	st, err := c.executor.PruneStaleToolResults()
+	if err != nil || st.Results == 0 {
+		return
+	}
+	c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: fmt.Sprintf(
+		"resumed after %s idle (provider cache expired) — elided %d stale tool results to cheapen the cold restart",
+		time.Since(last).Round(time.Minute), st.Results)})
+	if err := c.Snapshot(); err != nil {
+		slog.Warn("controller: post-prune snapshot", "err", err)
+	}
 }
 
 // Snapshot writes the executor's conversation to the active session file. No-op
