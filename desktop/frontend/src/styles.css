@@ -1440,7 +1440,7 @@ a[href] {
 .app {
   height: 100%;
   min-height: 0;
-  overflow-x: hidden;
+  overflow-x: auto;
   overflow-y: hidden;
 }
 
@@ -1493,15 +1493,15 @@ a[href] {
 }
 .layout--workspace-open {
   --chrome-right-toggle-offset: calc(var(--workspace-width) + var(--workspace-resizer-width));
-  min-width: 0;
+  min-width: min(780px, 100vw);
   grid-template-columns: var(--sidebar-width) minmax(0, 1fr) var(--workspace-resizer-width) minmax(0, var(--workspace-width));
 }
 .layout--workspace-open:not(.layout--sidebar-collapsed) {
-  min-width: 0;
+  min-width: min(780px, 100vw);
   grid-template-columns: var(--sidebar-expanded-width) minmax(0, 1fr) var(--workspace-resizer-width) minmax(0, var(--workspace-width));
 }
 .layout--workspace-open.layout--sidebar-collapsed {
-  min-width: 0;
+  min-width: min(560px, 100vw);
   grid-template-columns: 0px minmax(0, 1fr) var(--workspace-resizer-width) minmax(0, var(--workspace-width));
 }
 .layout--workspace-maximized {
