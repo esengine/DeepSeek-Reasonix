@@ -440,7 +440,7 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 			prevPrefixShape = prefixShape
 		}
 
-		text, reasoning, signature, calls, usage, interrupted, partialToolStarted, err := a.stream(ctx, step+1)
+		text, reasoning, signature, calls, usage, interrupted, partialToolStarted, err := a.stream(ctx, step+1, schemas)
 		if err != nil {
 			if interrupted && streamRecoveries < maxStreamRecoveries {
 				streamRecoveries++
@@ -671,13 +671,13 @@ func streamRecoveryMessage(hasPartialText, hadPartialTool bool) string {
 // stream so a sink can re-render the streamed raw text as styled markdown. The
 // accumulated text and reasoning are also returned so the caller can round-trip
 // reasoning on the next turn.
-func (a *Agent) stream(ctx context.Context, turn int) (string, string, string, []provider.ToolCall, *provider.Usage, bool, bool, error) {
+func (a *Agent) stream(ctx context.Context, turn int, schemas []provider.ToolSchema) (string, string, string, []provider.ToolCall, *provider.Usage, bool, bool, error) {
 	ctx = provider.WithRetryNotify(ctx, func(info provider.RetryInfo) {
 		a.sink.Emit(event.Event{Kind: event.Retrying, RetryAttempt: info.Attempt, RetryMax: info.Max})
 	})
 	ch, err := a.prov.Stream(ctx, provider.Request{
 		Messages:    a.session.Messages,
-		Tools:       a.tools.Schemas(),
+		Tools:       schemas,
 		Temperature: a.temperature,
 	})
 	if err != nil {
