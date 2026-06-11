@@ -177,6 +177,12 @@ func TestMemoryQuickAddNoteRequiresWhitespace(t *testing.T) {
 		{in: "#issue needs work", ok: false},
 		{in: "# Heading", note: "Heading", ok: true},
 		{in: "#", ok: false},
+		// Multi-line input is NOT a quick-add — it's a Markdown heading (# Context)
+		// followed by structured content. Desktop users pasting COSTAR-style prompts
+		// hit this when the first line starts with "# ".
+		{in: "# Context\n\n- file.go\n", ok: false},
+		{in: "# Heading\nmore text", ok: false},
+		{in: "  # Context\n  - file.go  ", ok: false},
 	}
 	for _, tt := range tests {
 		got, ok := MemoryQuickAddNote(tt.in)
