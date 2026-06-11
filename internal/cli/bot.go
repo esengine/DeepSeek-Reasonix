@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -122,6 +123,7 @@ func botStart(args []string, version string) int {
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	rememberInboundRemote := newBotRemoteRememberer(logger)
 
 	// 构建网关配置
 	gwCfg := bot.GatewayConfig{
@@ -144,7 +146,8 @@ func botStart(args []string, version string) int {
 				bot.PlatformWeixin: cfg.Bot.Allowlist.WeixinGroups,
 			},
 		},
-		Debounce: time.Duration(cfg.Bot.DebounceMs) * time.Millisecond,
+		Debounce:  time.Duration(cfg.Bot.DebounceMs) * time.Millisecond,
+		OnInbound: rememberInboundRemote,
 	}
 
 	// 创建适配器
@@ -215,6 +218,138 @@ func botChannelConfigs(connections []config.BotConnectionConfig, includeModel bo
 		return nil
 	}
 	return out
+}
+
+func newBotRemoteRememberer(logger *slog.Logger) func(bot.InboundMessage) {
+	var mu sync.Mutex
+	seen := make(map[string]bool)
+	return func(msg bot.InboundMessage) {
+		remoteID := strings.TrimSpace(msg.ChatID)
+		if remoteID == "" {
+			return
+		}
+		key := string(msg.Platform) + "\x00" + remoteID
+		mu.Lock()
+		if seen[key] {
+			mu.Unlock()
+			return
+		}
+		seen[key] = true
+		mu.Unlock()
+
+		if err := rememberBotInbound(msg); err != nil {
+			logger.Warn("remember bot remote failed", "platform", msg.Platform, "err", err)
+		}
+	}
+}
+
+func rememberBotInbound(msg bot.InboundMessage) error {
+	return rememberBotRemote(msg.Platform, msg.ChatID, msg.UserID, msg.ChatType)
+}
+
+func rememberBotRemote(platform bot.Platform, remoteID string, userID string, chatType bot.ChatType) error {
+	userPath := config.UserConfigPath()
+	if userPath == "" || strings.TrimSpace(remoteID) == "" {
+		return nil
+	}
+	cfg := config.LoadForEdit(userPath)
+	now := time.Now().UTC().Format(time.RFC3339)
+	changed := false
+	for i := range cfg.Bot.Connections {
+		conn := &cfg.Bot.Connections[i]
+		if strings.TrimSpace(conn.Provider) != string(platform) || !conn.Enabled {
+			continue
+		}
+		exists := false
+		for _, mapping := range conn.SessionMappings {
+			if strings.TrimSpace(mapping.RemoteID) == remoteID {
+				exists = true
+				break
+			}
+		}
+		if exists {
+			continue
+		}
+		scope := "global"
+		workspaceRoot := ""
+		if strings.TrimSpace(conn.WorkspaceRoot) != "" {
+			scope = "project"
+			workspaceRoot = strings.TrimSpace(conn.WorkspaceRoot)
+		}
+		conn.SessionMappings = append(conn.SessionMappings, config.BotConnectionSessionMapping{
+			RemoteID:      remoteID,
+			SessionID:     "",
+			Scope:         scope,
+			WorkspaceRoot: workspaceRoot,
+			UpdatedAt:     now,
+		})
+		conn.UpdatedAt = now
+		changed = true
+	}
+	if rememberBotAllowlist(&cfg.Bot.Allowlist, platform, userID, remoteID, chatType) {
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
+	return cfg.SaveTo(userPath)
+}
+
+func rememberBotAllowlist(allowlist *config.BotAllowlist, platform bot.Platform, userID string, chatID string, chatType bot.ChatType) bool {
+	if allowlist == nil {
+		return false
+	}
+	changed := false
+	userID = strings.TrimSpace(userID)
+	if userID != "" {
+		switch platform {
+		case bot.PlatformQQ:
+			allowlist.QQUsers, changed = appendUniqueString(allowlist.QQUsers, userID)
+		case bot.PlatformFeishu:
+			allowlist.FeishuUsers, changed = appendUniqueString(allowlist.FeishuUsers, userID)
+		case bot.PlatformWeixin:
+			allowlist.WeixinUsers, changed = appendUniqueString(allowlist.WeixinUsers, userID)
+		}
+	}
+	if !chatUsesGroupAllowlist(chatType) {
+		return changed
+	}
+	groupID := strings.TrimSpace(chatID)
+	if groupID == "" {
+		return changed
+	}
+	groupChanged := false
+	switch platform {
+	case bot.PlatformQQ:
+		allowlist.QQGroups, groupChanged = appendUniqueString(allowlist.QQGroups, groupID)
+	case bot.PlatformFeishu:
+		allowlist.FeishuGroups, groupChanged = appendUniqueString(allowlist.FeishuGroups, groupID)
+	case bot.PlatformWeixin:
+		allowlist.WeixinGroups, groupChanged = appendUniqueString(allowlist.WeixinGroups, groupID)
+	}
+	return changed || groupChanged
+}
+
+func appendUniqueString(values []string, next string) ([]string, bool) {
+	next = strings.TrimSpace(next)
+	if next == "" {
+		return values, false
+	}
+	for _, value := range values {
+		if strings.TrimSpace(value) == next {
+			return values, false
+		}
+	}
+	return append(values, next), true
+}
+
+func chatUsesGroupAllowlist(chatType bot.ChatType) bool {
+	switch chatType {
+	case bot.ChatGroup, bot.ChatGuild, bot.ChatThread:
+		return true
+	default:
+		return false
+	}
 }
 
 func botDoctor(args []string) int {
@@ -306,6 +441,28 @@ func botDoctor(args []string) int {
 		}
 	} else {
 		addCheck("bot.weixin", "disabled", "")
+	}
+
+	enabledConnections := 0
+	for _, conn := range bc.Connections {
+		if conn.Enabled {
+			enabledConnections++
+		}
+	}
+	addCheck("bot.connections", "ok", fmt.Sprintf("enabled=%d total=%d", enabledConnections, len(bc.Connections)))
+	for _, conn := range bc.Connections {
+		id := strings.TrimSpace(conn.ID)
+		if id == "" {
+			id = strings.TrimSpace(conn.Provider)
+		}
+		status := "ok"
+		if !conn.Enabled {
+			status = "disabled"
+		} else if len(conn.SessionMappings) == 0 && (conn.Provider == string(bot.PlatformFeishu) || conn.Provider == string(bot.PlatformWeixin)) {
+			status = "missing"
+		}
+		addCheck("bot.connection."+id+".session_mappings", status,
+			fmt.Sprintf("provider=%s mappings=%d", conn.Provider, len(conn.SessionMappings)))
 	}
 
 	// Allowlist 检查

@@ -9,6 +9,8 @@ package feishu
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -171,6 +173,12 @@ func (a *adapter) runWebSocket(ctx context.Context) {
 		}).
 		OnP2MessageReadV1(func(ctx context.Context, event *larkim.P2MessageReadV1) error {
 			return nil
+		}).
+		OnP2MessageReactionCreatedV1(func(ctx context.Context, event *larkim.P2MessageReactionCreatedV1) error {
+			return nil
+		}).
+		OnP2MessageReactionDeletedV1(func(ctx context.Context, event *larkim.P2MessageReactionDeletedV1) error {
+			return nil
 		})
 	opts := []larkws.ClientOption{
 		larkws.WithEventHandler(eventHandler),
@@ -213,16 +221,19 @@ func (a *adapter) handleSDKMessage(event *larkim.P2MessageReceiveV1) {
 	}
 	msg := event.Event.Message
 	if stringPtrValue(msg.MessageType) != "text" {
+		a.logger.Info("feishu message ignored", "reason", "non_text", "msg_type", stringPtrValue(msg.MessageType), "chat_type", stringPtrValue(msg.ChatType), "message", logHash(stringPtrValue(msg.MessageId)))
 		return
 	}
 	var content textContent
 	if err := json.Unmarshal([]byte(stringPtrValue(msg.Content)), &content); err != nil {
+		a.logger.Warn("feishu message ignored", "reason", "bad_content", "message", logHash(stringPtrValue(msg.MessageId)), "err", err)
 		return
 	}
 	chatType := bot.ChatDM
 	if stringPtrValue(msg.ChatType) == "group" || stringPtrValue(msg.ChatType) == "topic_group" {
 		chatType = bot.ChatGroup
 		if a.cfg.RequireMention && len(msg.Mentions) == 0 {
+			a.logger.Info("feishu message ignored", "reason", "missing_mention", "chat", logHash(stringPtrValue(msg.ChatId)), "message", logHash(stringPtrValue(msg.MessageId)))
 			return
 		}
 	}
@@ -247,6 +258,7 @@ func (a *adapter) handleSDKMessage(event *larkim.P2MessageReceiveV1) {
 	}
 	select {
 	case a.msgCh <- ib:
+		a.logger.Info("feishu inbound queued", "chat_type", chatType, "chat", logHash(ib.ChatID), "user", logHash(ib.UserID), "message", logHash(ib.MessageID), "text_chars", len([]rune(ib.Text)))
 	default:
 		a.logger.Warn("feishu message channel full")
 	}
@@ -360,14 +372,24 @@ func firstNonEmpty(vals ...string) string {
 	return ""
 }
 
+func logHash(id string) string {
+	if id == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(id))
+	return hex.EncodeToString(sum[:])[:12]
+}
+
 func (a *adapter) handleMessage(msg feishuMsgEvent) {
 	if msg.MsgType != "text" {
+		a.logger.Info("feishu message ignored", "reason", "non_text", "msg_type", msg.MsgType, "chat_type", msg.ChatType, "message", logHash(msg.MessageID))
 		return
 	}
 
 	// 解析文本内容
 	var content textContent
 	if err := json.Unmarshal([]byte(msg.Content), &content); err != nil {
+		a.logger.Warn("feishu message ignored", "reason", "bad_content", "message", logHash(msg.MessageID), "err", err)
 		return
 	}
 
@@ -376,6 +398,7 @@ func (a *adapter) handleMessage(msg feishuMsgEvent) {
 	if msg.ChatType == "group" {
 		chatType = bot.ChatGroup
 		if a.cfg.RequireMention && len(msg.Mentions) == 0 {
+			a.logger.Info("feishu message ignored", "reason", "missing_mention", "chat", logHash(msg.ChatID), "message", logHash(msg.MessageID))
 			return
 		}
 	}
@@ -397,6 +420,7 @@ func (a *adapter) handleMessage(msg feishuMsgEvent) {
 
 	select {
 	case a.msgCh <- ib:
+		a.logger.Info("feishu inbound queued", "chat_type", chatType, "chat", logHash(ib.ChatID), "user", logHash(ib.UserID), "message", logHash(ib.MessageID), "text_chars", len([]rune(ib.Text)))
 	default:
 		a.logger.Warn("feishu message channel full")
 	}

@@ -35,7 +35,7 @@ import { ClearContextCard } from "./components/ClearContextCard";
 import { StatusBar } from "./components/StatusBar";
 import { HistoryPanel } from "./components/HistoryPanel";
 import { CommandPalette, type PaletteItem } from "./components/CommandPalette";
-import { SettingsPanel } from "./components/SettingsPanel";
+import { SettingsPanel, type SettingsInitialFocus } from "./components/SettingsPanel";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { ContextPanel } from "./components/ContextPanel";
 import { WorkspacePanel } from "./components/WorkspacePanel";
@@ -143,6 +143,10 @@ type SidebarImConnection = {
   sessionId: string;
   scope: "global" | "project";
   workspaceRoot: string;
+  allowAll: boolean;
+  allowlistEnabled: boolean;
+  allowlistUsers: string[];
+  allowlistMatched: boolean;
 };
 type SidebarImTopicSource = {
   platform: SidebarImPlatform;
@@ -156,6 +160,7 @@ type SidebarImConnectionDetailProps = {
   onClose: () => void;
   onOpenSession: () => void;
   onOpenSettings: () => void;
+  onManageAllowlist: () => void;
 };
 
 function isSidebarImConnection(connection: BotConnectionView): boolean {
@@ -224,6 +229,15 @@ function sidebarImStatusLabel(status: SidebarImStatus, translate: Translator): s
   }
 }
 
+function uniqueTrimmedValues(values: string[]): string[] {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
+}
+
+function sidebarImAllowlistUsers(bot: BotSettingsView, platform: SidebarImPlatform): string[] {
+  if (platform === "weixin") return uniqueTrimmedValues(asArray(bot.allowlist.weixinUsers));
+  return uniqueTrimmedValues(asArray(bot.allowlist.feishuUsers));
+}
+
 function sidebarImConnectionsFromBot(bot: BotSettingsView | null | undefined, translate: Translator): SidebarImConnection[] {
   if (!bot?.connections?.length) return [];
   return bot.connections
@@ -238,6 +252,7 @@ function sidebarImConnectionsFromBot(bot: BotSettingsView | null | undefined, tr
       const workspaceRoot = botMappingWorkspaceRoot(mapping, connection.workspaceRoot);
       const status = sidebarImStatus(connection, bot.enabled);
       const title = connection.label.trim() || platformLabel;
+      const allowlistUsers = sidebarImAllowlistUsers(bot, platform);
       const subtitleParts = [
         remoteId ? compactRemoteId(remoteId) : platformLabel,
         connection.model.trim() || "",
@@ -255,6 +270,10 @@ function sidebarImConnectionsFromBot(bot: BotSettingsView | null | undefined, tr
         sessionId,
         scope,
         workspaceRoot,
+        allowAll: bot.allowlist.allowAll,
+        allowlistEnabled: bot.allowlist.enabled,
+        allowlistUsers,
+        allowlistMatched: remoteId ? allowlistUsers.includes(remoteId) : false,
       };
     });
 }
@@ -315,9 +334,28 @@ function sidebarImSessionLabel(connection: SidebarImConnection, translate: Trans
   return target.value;
 }
 
-function SidebarImConnectionDetail({ connection, onClose, onOpenSession, onOpenSettings }: SidebarImConnectionDetailProps) {
+function sidebarImAccessModeLabel(connection: SidebarImConnection, translate: Translator): string {
+  if (connection.allowAll) return translate("botDetail.accessAllowAll");
+  if (connection.allowlistEnabled) return translate("botDetail.accessWhitelist");
+  return translate("botDetail.accessDisabled");
+}
+
+function sidebarImAccessStatusLabel(connection: SidebarImConnection, translate: Translator): string {
+  if (connection.allowAll) return translate("botDetail.accessOpen");
+  if (!connection.remoteId) return translate("botDetail.accessUnknown");
+  return connection.allowlistMatched ? translate("botDetail.accessMatched") : translate("botDetail.accessMissing");
+}
+
+function sidebarImAccessStatusClass(connection: SidebarImConnection): string {
+  if (connection.allowAll || connection.allowlistMatched) return "ok";
+  if (!connection.remoteId) return "muted";
+  return "warn";
+}
+
+function SidebarImConnectionDetail({ connection, onClose, onOpenSession, onOpenSettings, onManageAllowlist }: SidebarImConnectionDetailProps) {
   const translate = useT();
   const target = mappedSessionTarget(connection.sessionId);
+  const accessStatusClass = sidebarImAccessStatusClass(connection);
   return (
     <div className="bot-detail">
       <section className="bot-detail__summary">
@@ -345,6 +383,54 @@ function SidebarImConnectionDetail({ connection, onClose, onOpenSession, onOpenS
           <button type="button" className="btn btn--secondary btn--small" onClick={onClose}>
             {translate("botDetail.close")}
           </button>
+        </div>
+      </section>
+
+      <section className="bot-detail__panel bot-detail__panel--access" aria-label={translate("botDetail.access")}>
+        <div className="bot-detail__section-head">
+          <span>{translate("botDetail.access")}</span>
+          <div className="bot-detail__section-actions">
+            {connection.remoteId ? (
+              <CopyButton text={connection.remoteId} label={translate("botDetail.copyRemoteId")} />
+            ) : null}
+            <button type="button" className="btn btn--secondary btn--small" onClick={onManageAllowlist}>
+              {translate("botDetail.manageAllowlist")}
+            </button>
+          </div>
+        </div>
+        <div className="bot-detail__access-grid">
+          <div>
+            <span>{translate("botDetail.accessMode")}</span>
+            <strong>{sidebarImAccessModeLabel(connection, translate)}</strong>
+          </div>
+          <div>
+            <span>{translate("botDetail.accessCurrentUser")}</span>
+            <code title={connection.remoteId || undefined}>{connection.remoteId || "—"}</code>
+          </div>
+          <div>
+            <span>{translate("botDetail.accessStatus")}</span>
+            <strong className={`bot-detail__access-status bot-detail__access-status--${accessStatusClass}`}>
+              {sidebarImAccessStatusLabel(connection, translate)}
+            </strong>
+          </div>
+        </div>
+        <div className="bot-detail__allowlist">
+          <span>{translate("botDetail.channelAllowlistUsers")}</span>
+          <div className="bot-detail__id-list">
+            {connection.allowlistUsers.length > 0 ? (
+              connection.allowlistUsers.map((id) => (
+                <code
+                  key={id}
+                  className={id === connection.remoteId ? "bot-detail__id-list-item--active" : ""}
+                  title={id}
+                >
+                  {id}
+                </code>
+              ))
+            ) : (
+              <em>{translate("botDetail.emptyAllowlistUsers")}</em>
+            )}
+          </div>
         </div>
       </section>
 
@@ -683,6 +769,7 @@ export default function App() {
   // clearing the key mid-session is the Settings panel's job, not the gate's.
   const [needsOnboarding, setNeedsOnboarding] = useState<boolean | null>(null);
   const [settingsTarget, setSettingsTarget] = useState<SettingsTab | null>(null);
+  const [settingsFocus, setSettingsFocus] = useState<SettingsInitialFocus | null>(null);
   const [startupUpdateChecksEnabled, setStartupUpdateChecksEnabled] = useState<boolean | null>(null);
   const [histView, setHistView] = useState<HistoryViewState | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -693,7 +780,6 @@ export default function App() {
   const [activeSidebarImConnectionId, setActiveSidebarImConnectionId] = useState("");
   const [sidebarImDetailConnectionId, setSidebarImDetailConnectionId] = useState("");
   const [sidebarImExpanded, setSidebarImExpanded] = useState(false);
-  const [isDevBuild, setIsDevBuild] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(loadSidebarCollapsed);
   const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidth);
   const [sidebarResizing, setSidebarResizing] = useState(false);
@@ -743,10 +829,6 @@ export default function App() {
   // Persist window geometry across launches.
   useWindowStatePersistence();
 
-  useEffect(() => {
-    void app.Version().then((v) => setIsDevBuild(v === "dev"));
-  }, []);
-
   const closeTransientOverlays = useCallback(() => {
     setTransientOverlayDismissSignal((signal) => signal + 1);
   }, []);
@@ -773,6 +855,15 @@ export default function App() {
     closeTransientOverlays();
     setSidebarImExpanded(false);
     setSidebarImDetailConnectionId("");
+    setSettingsFocus(null);
+    setSettingsTarget("bots");
+  }, [closeTransientOverlays]);
+
+  const openBotAllowlistSettings = useCallback((connectionId: string) => {
+    closeTransientOverlays();
+    setSidebarImExpanded(false);
+    setSidebarImDetailConnectionId("");
+    setSettingsFocus({ target: "bot-allowlist", connectionId });
     setSettingsTarget("bots");
   }, [closeTransientOverlays]);
 
@@ -2206,7 +2297,7 @@ export default function App() {
       : t("sidebar.imConnectionCount", { n: sidebarImConnections.length });
   const sidebarImToggleLabel = sidebarImConnections.length === 0
     ? t("sidebar.imEmpty")
-    : t(sidebarImExpanded ? "common.collapse" : "common.expand");
+    : t(sidebarImExpanded ? "sidebar.imCollapse" : "sidebar.imExpand");
 
   return (
     <ShellExpandProvider>
@@ -2285,7 +2376,6 @@ export default function App() {
           </section>
 
           <nav className="sidebar__nav">
-          {isDevBuild && (
           <div className={`sidebar-im${sidebarImExpanded ? " sidebar-im--expanded" : ""}`} aria-label={t("sidebar.im")}>
             <button
               className="sidebar-im__summary"
@@ -2356,7 +2446,6 @@ export default function App() {
               </div>
             )}
           </div>
-          )}
             <Tooltip label={t("sidebar.allHistory")} fill side="right" disabled={sidebarNavTooltipDisabled}>
               <button
                 className="sidebar__navitem"
@@ -2540,6 +2629,7 @@ export default function App() {
                 connection={sidebarImDetailConnection}
                 onClose={() => setSidebarImDetailConnectionId("")}
                 onOpenSettings={openBotSettings}
+                onManageAllowlist={() => openBotAllowlistSettings(sidebarImDetailConnection.id)}
                 onOpenSession={() => void openSidebarImConnectionSession(sidebarImDetailConnection)}
               />
             ) : state.meta?.ready === false && !state.meta?.startupErr ? (
@@ -2771,8 +2861,11 @@ export default function App() {
       {settingsTarget !== null && (
         <SettingsPanel
           initialTab={settingsTarget}
-          isDevBuild={isDevBuild}
-          onClose={() => setSettingsTarget(null)}
+          initialFocus={settingsFocus ?? undefined}
+          onClose={() => {
+            setSettingsFocus(null);
+            setSettingsTarget(null);
+          }}
           onChanged={() => {
             void refreshMeta();
             void reloadSidebarImConnections().catch((e) => console.warn("bot sidebar refresh failed", e));

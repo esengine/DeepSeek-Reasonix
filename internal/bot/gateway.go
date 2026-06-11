@@ -23,6 +23,7 @@ type GatewayConfig struct {
 	Allowlist     AllowlistConfig
 	Enabled       map[Platform]bool
 	Debounce      time.Duration
+	OnInbound     func(InboundMessage)
 }
 
 // ChannelConfig overrides gateway defaults for one IM channel.
@@ -183,6 +184,19 @@ func (gw *BotGateway) dispatchLoop(ctx context.Context, plat Platform, adapter A
 
 func (gw *BotGateway) handleMessage(ctx context.Context, plat Platform, adapter Adapter, msg InboundMessage) {
 	msg.Platform = plat
+	src := msg.Session()
+	key := BuildSessionKey(src)
+	logFields := []any{
+		"platform", plat,
+		"chat_type", msg.ChatType,
+		"chat", hashID(msg.ChatID),
+		"user", hashID(msg.UserID),
+		"thread", hashID(msg.ThreadID),
+		"message", hashID(msg.MessageID),
+		"text_chars", len([]rune(msg.Text)),
+		"session", key[:8],
+	}
+	gw.logger.Info("bot inbound message", logFields...)
 
 	// allowlist 检查
 	if !gw.checkAllowlist(plat, msg) {
@@ -190,12 +204,13 @@ func (gw *BotGateway) handleMessage(ctx context.Context, plat Platform, adapter 
 		_ = gw.sendText(ctx, adapter, msg, "抱歉，您没有使用此 bot 的权限。")
 		return
 	}
-
-	src := msg.Session()
-	key := BuildSessionKey(src)
+	if gw.cfg.OnInbound != nil {
+		gw.cfg.OnInbound(msg)
+	}
 
 	// 斜杠命令处理
 	if IsSlashBypass(msg.Text) {
+		gw.logger.Info("bot slash command", logFields...)
 		gw.handleSlashCommand(ctx, adapter, key, msg)
 		return
 	}
@@ -358,10 +373,12 @@ func (gw *BotGateway) handleSlashCommand(ctx context.Context, adapter Adapter, k
 }
 
 func (gw *BotGateway) runTurn(ctx context.Context, adapter Adapter, key string, msg InboundMessage) {
+	gw.logger.Info("bot turn started", "platform", msg.Platform, "chat_type", msg.ChatType, "chat", hashID(msg.ChatID), "session", key[:8])
 	defer func() {
 		// 检查是否有等待队列中的消息
 		next := gw.sessions.Release(key)
 		if next != nil {
+			gw.logger.Info("bot pending message released", "platform", next.Platform, "chat_type", next.ChatType, "chat", hashID(next.ChatID), "session", key[:8])
 			gw.runTurn(ctx, adapter, key, *next)
 			return
 		}
@@ -410,7 +427,9 @@ func (gw *BotGateway) runTurn(ctx context.Context, adapter Adapter, key string, 
 	sink.Emit(event.Event{Kind: event.TurnDone, Err: err})
 	if err != nil {
 		gw.logger.Warn("turn error", "session", key[:8], "err", err)
+		return
 	}
+	gw.logger.Info("bot turn completed", "platform", msg.Platform, "chat_type", msg.ChatType, "chat", hashID(msg.ChatID), "session", key[:8])
 }
 
 func (gw *BotGateway) getOrCreateSession(ctx context.Context, key string, msg InboundMessage) *sessionState {
@@ -418,6 +437,7 @@ func (gw *BotGateway) getOrCreateSession(ctx context.Context, key string, msg In
 	if state, ok := gw.controllers[key]; ok {
 		state.lastActive = time.Now()
 		gw.mu.Unlock()
+		gw.logger.Info("bot session reused", "platform", msg.Platform, "chat_type", msg.ChatType, "chat", hashID(msg.ChatID), "session", key[:8])
 		return state
 	}
 	gw.mu.Unlock()
@@ -425,6 +445,7 @@ func (gw *BotGateway) getOrCreateSession(ctx context.Context, key string, msg In
 	// 创建新 Controller
 	sessionSink := &sessionEventSink{}
 	model, workspaceRoot := gw.sessionOptionsForPlatform(msg.Platform)
+	gw.logger.Info("bot session creating", "platform", msg.Platform, "chat_type", msg.ChatType, "chat", hashID(msg.ChatID), "session", key[:8], "model", model, "workspace_set", strings.TrimSpace(workspaceRoot) != "")
 	ctrl, err := boot.Build(ctx, boot.Options{
 		Model:         model,
 		MaxSteps:      gw.cfg.MaxSteps,
@@ -449,6 +470,7 @@ func (gw *BotGateway) getOrCreateSession(ctx context.Context, key string, msg In
 	state := gw.controllers[key]
 	gw.mu.Unlock()
 
+	gw.logger.Info("bot session created", "platform", msg.Platform, "chat_type", msg.ChatType, "chat", hashID(msg.ChatID), "session", key[:8])
 	return state
 }
 
@@ -472,12 +494,17 @@ func (gw *BotGateway) sessionOptionsForPlatform(plat Platform) (model string, wo
 }
 
 func (gw *BotGateway) sendText(ctx context.Context, adapter Adapter, msg InboundMessage, text string) error {
-	_, err := adapter.Send(ctx, OutboundMessage{
+	result, err := adapter.Send(ctx, OutboundMessage{
 		ChatID:       msg.ChatID,
 		ChatType:     msg.ChatType,
 		Text:         text,
 		ReplyToMsgID: msg.MessageID,
 	})
+	if err != nil {
+		gw.logger.Warn("bot send failed", "platform", msg.Platform, "chat_type", msg.ChatType, "chat", hashID(msg.ChatID), "reply_to", hashID(msg.MessageID), "err", err)
+		return err
+	}
+	gw.logger.Info("bot send completed", "platform", msg.Platform, "chat_type", msg.ChatType, "chat", hashID(msg.ChatID), "reply_to", hashID(msg.MessageID), "message", hashID(result.MessageID))
 	return err
 }
 

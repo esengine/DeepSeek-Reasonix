@@ -3,10 +3,13 @@ package weixin
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
+	"reasonix/internal/bot"
 	"reasonix/internal/config"
 )
 
@@ -62,5 +65,85 @@ func TestSendTextPostsIlinkMessage(t *testing.T) {
 	textItem, ok := item["text_item"].(map[string]any)
 	if !ok || textItem["text"] != "hello weixin" {
 		t.Fatalf("text item = %#v, want hello weixin", item["text_item"])
+	}
+}
+
+func TestLogPollHealthThrottlesEmptyPolls(t *testing.T) {
+	a := &adapter{logger: slog.Default().With("platform", "weixin")}
+	a.logPollHealth(ilinkResponse{})
+	first := a.lastPollLog
+	if first.IsZero() {
+		t.Fatal("first empty poll should update heartbeat timestamp")
+	}
+	a.logPollHealth(ilinkResponse{})
+	if !a.lastPollLog.Equal(first) {
+		t.Fatalf("second empty poll updated heartbeat timestamp: got %v want %v", a.lastPollLog, first)
+	}
+	a.lastPollLog = time.Now().Add(-6 * time.Minute)
+	a.logPollHealth(ilinkResponse{})
+	if !a.lastPollLog.After(first) {
+		t.Fatalf("stale empty poll did not refresh heartbeat timestamp: got %v after %v", a.lastPollLog, first)
+	}
+}
+
+func TestLogPollHealthLogsNonEmptyPolls(t *testing.T) {
+	a := &adapter{logger: slog.Default().With("platform", "weixin")}
+	a.logPollHealth(ilinkResponse{Msgs: []ilinkMessage{{MessageID: "msg-1"}}})
+	if a.lastPollLog.IsZero() {
+		t.Fatal("non-empty poll should update heartbeat timestamp")
+	}
+}
+
+func TestGetUpdatesAcceptsNumericIlinkMessageID(t *testing.T) {
+	t.Setenv("WEIXIN_TEST_TOKEN", "token-1")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != getUpdatesPath {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ret":     0,
+			"errcode": 0,
+			"msgs": []map[string]any{
+				{
+					"message_id":   123456789,
+					"from_user_id": "wx-user-1",
+					"to_user_id":   "bot-account",
+					"msg_type":     1,
+					"item_list": []map[string]any{
+						{"type": weixinItemText, "text_item": map[string]string{"text": "hello"}},
+					},
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	a := &adapter{
+		cfg: config.WeixinBotConfig{
+			TokenEnv:  "WEIXIN_TEST_TOKEN",
+			APIBase:   server.URL,
+			AccountID: "bot-account",
+		},
+		logger:        slog.Default().With("platform", "weixin"),
+		msgCh:         make(chan bot.InboundMessage, 1),
+		contextTokens: make(map[string]string),
+	}
+	updates, err := a.getUpdates(context.Background())
+	if err != nil {
+		t.Fatalf("getUpdates: %v", err)
+	}
+	if len(updates) != 0 {
+		t.Fatalf("updates = %d, want 0", len(updates))
+	}
+	select {
+	case msg := <-a.msgCh:
+		if msg.MessageID != "123456789" || msg.UserID != "wx-user-1" || msg.Text != "hello" {
+			t.Fatalf("message = %+v, want numeric id converted and text preserved", msg)
+		}
+	case <-context.Background().Done():
+		t.Fatal("unreachable")
+	default:
+		t.Fatal("expected queued inbound message")
 	}
 }

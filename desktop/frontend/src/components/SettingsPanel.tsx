@@ -20,7 +20,7 @@ import {
 import { TEXT_SIZES, applyTextSize, getTextSize, type TextSize } from "../lib/textSize";
 import { FONT_FAMILIES, applyFontFamily, getFontFamily, type FontFamily } from "../lib/fontFamily";
 import { getDisplayMode, onDisplayModeChange, setDisplayMode as setLocalDisplayMode } from "../lib/displayMode";
-import type { BotConnectionView, BotInstallStartResult, BotSettingsView, NetworkView, ProviderView, SettingsTab, SettingsView } from "../lib/types";
+import type { BotAllowlistView, BotConnectionView, BotInstallStartResult, BotSettingsView, NetworkView, ProviderView, SettingsTab, SettingsView } from "../lib/types";
 import { InlineConfirmButton } from "./InlineConfirmButton";
 import { Tooltip } from "./Tooltip";
 import { AnchoredPopover } from "./AnchoredPopover";
@@ -29,11 +29,12 @@ import { MemorySettingsPage } from "./MemoryPanel";
 import { ModalCloseButton } from "./ModalCloseButton";
 
 const SETTINGS_TABS: SettingsTab[] = ["general", "models", "bots", "mcp", "skills", "memory", "permissions", "sandbox", "network", "appearance", "updates"];
+export type SettingsInitialFocus = { target: "bot-allowlist"; connectionId?: string };
 
 // SettingsPanel is the desktop settings centre — a centred modal with left
 // navigation and a right content area. It hosts all settings pages plus MCP,
 // Skills, and Memory management, replacing the old per-feature drawers.
-export function SettingsPanel({ onClose, onChanged, initialTab, isDevBuild }: { onClose: () => void; onChanged: () => void; initialTab?: SettingsTab; isDevBuild?: boolean }) {
+export function SettingsPanel({ onClose, onChanged, initialTab, initialFocus }: { onClose: () => void; onChanged: () => void; initialTab?: SettingsTab; initialFocus?: SettingsInitialFocus }) {
   const t = useT();
   const [s, setS] = useState<SettingsView | null>(null);
   const [busy, setBusy] = useState(false);
@@ -108,7 +109,7 @@ export function SettingsPanel({ onClose, onChanged, initialTab, isDevBuild }: { 
 
         <div className="settings-center">
           <nav className="settings-center__nav" aria-label={t("settings.title")}>
-            {SETTINGS_TABS.filter((id) => id !== "bots" || isDevBuild).map((id) => (
+            {SETTINGS_TABS.map((id) => (
               <button
                 key={id}
                 className={`settings-center__navitem${tab === id ? " settings-center__navitem--active" : ""}`}
@@ -127,7 +128,7 @@ export function SettingsPanel({ onClose, onChanged, initialTab, isDevBuild }: { 
               <>
                 {tab === "general" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><GeneralSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
                 {tab === "models" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><ModelsSection s={s} busy={busy} apply={apply} backgroundApply={backgroundApply} /></SettingsPageShell>}
-                {tab === "bots" && isDevBuild && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><BotsSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
+                {tab === "bots" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><BotsSection s={s} busy={busy} apply={apply} initialFocus={initialFocus} /></SettingsPageShell>}
                 {tab === "mcp" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><MCPServersSettingsPage /></SettingsPageShell>}
                 {tab === "skills" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><SkillsSettingsPage /></SettingsPageShell>}
                 {tab === "memory" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><MemorySettingsPage /></SettingsPageShell>}
@@ -216,20 +217,23 @@ function SettingsSection({
   actions,
   children,
 }: {
-  title: ReactNode;
+  title?: ReactNode;
   description?: ReactNode;
   actions?: ReactNode;
   children: ReactNode;
 }) {
+  const hasHead = Boolean(title || description || actions);
   return (
     <section className="settings-section">
-      <div className="settings-section__head">
-        <div>
-          <div className="settings-section__title">{title}</div>
-          {description && <div className="settings-section__desc">{description}</div>}
+      {hasHead && (
+        <div className="settings-section__head">
+          <div>
+            {title && <div className="settings-section__title">{title}</div>}
+            {description && <div className="settings-section__desc">{description}</div>}
+          </div>
+          {actions && <div className="settings-section__actions">{actions}</div>}
         </div>
-        {actions && <div className="settings-section__actions">{actions}</div>}
-      </div>
+      )}
       <div className="settings-section__body">{children}</div>
     </section>
   );
@@ -913,6 +917,8 @@ function NetworkSection({ s, busy, apply }: SectionProps) {
 
 type BotInstallTarget = "qq" | "feishu" | "lark" | "weixin";
 type BotOfficialInstallTarget = Exclude<BotInstallTarget, "qq">;
+const BOT_ALLOWLIST_TEXT_KEYS = ["feishuUsers", "weixinUsers", "feishuGroups", "weixinGroups"] as const;
+type BotAllowlistTextKey = typeof BOT_ALLOWLIST_TEXT_KEYS[number];
 type BotInstallState = {
   target: BotInstallTarget | "";
   result: BotInstallStartResult | null;
@@ -924,10 +930,15 @@ const BOT_INSTALL_TARGETS: BotOfficialInstallTarget[] = ["feishu", "lark", "weix
 const BOT_INSTALL_DEFAULT_TIMEOUT_SECONDS = 300;
 const BOT_INSTALL_MIN_POLL_SECONDS = 3;
 
-function BotsSection({ s, busy, apply }: SectionProps) {
+type BotsSectionProps = SectionProps & { initialFocus?: SettingsInitialFocus };
+
+function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
   const t = useT();
   const savedBot = normalizeBotSettings(s.bot);
   const [draft, setDraft] = useState<BotSettingsView>(savedBot);
+  const [allowlistText, setAllowlistText] = useState<Record<BotAllowlistTextKey, string>>(() => botAllowlistTextValues(savedBot.allowlist));
+  const [allowlistFocused, setAllowlistFocused] = useState(false);
+  const [allowlistOpen, setAllowlistOpen] = useState(false);
   const [installTarget, setInstallTarget] = useState<BotOfficialInstallTarget>("feishu");
   const [install, setInstall] = useState<BotInstallState>({ target: "feishu", result: null, status: "idle", timeLeft: 0, message: "" });
   const [diagnostics, setDiagnostics] = useState<Record<string, string>>({});
@@ -939,13 +950,34 @@ function BotsSection({ s, busy, apply }: SectionProps) {
   const installCountdownTimerRef = useRef<number | null>(null);
   const installRequestInFlightRef = useRef(false);
   const installAttemptRef = useRef(0);
+  const allowlistRef = useRef<HTMLDetailsElement | null>(null);
+  const initialFocusHandledRef = useRef("");
+  const pendingAllowlistFocusRef = useRef(false);
   const refs = allRefs(s);
 
   useEffect(() => {
-    setDraft(normalizeBotSettings(s.bot));
+    const nextBot = normalizeBotSettings(s.bot);
+    setDraft(nextBot);
+    setAllowlistText(botAllowlistTextValues(nextBot.allowlist));
     setConnectionSecrets({});
     setTestTargets({});
   }, [s.bot]);
+  useEffect(() => {
+    if (initialFocus?.target !== "bot-allowlist") return;
+    const focusKey = `${initialFocus.target}:${initialFocus.connectionId ?? ""}`;
+    if (initialFocusHandledRef.current === focusKey) return;
+    const focusConnectionId = initialFocus.connectionId && draft.connections.some((connection) => connection.id === initialFocus.connectionId)
+      ? initialFocus.connectionId
+      : draft.connections[0]?.id ?? "";
+    if (!focusConnectionId) return;
+    initialFocusHandledRef.current = focusKey;
+    pendingAllowlistFocusRef.current = true;
+    setExpandedConnectionId(focusConnectionId);
+    setAllowlistOpen(false);
+  }, [draft.connections, initialFocus]);
+  useEffect(() => {
+    setAllowlistOpen(false);
+  }, [expandedConnectionId]);
   useEffect(() => {
     installRef.current = install;
   }, [install]);
@@ -960,15 +992,36 @@ function BotsSection({ s, busy, apply }: SectionProps) {
     clearInstallTimers();
   }, []);
 
-  const dirty = JSON.stringify(sanitizeBotDraft(draft)) !== JSON.stringify(sanitizeBotDraft(savedBot));
   const setConnections = (mapper: (connections: BotConnectionView[]) => BotConnectionView[]) =>
     setDraft((prev) => ({ ...prev, connections: mapper(prev.connections) }));
+  const persistBotDraft = async (nextDraft: BotSettingsView) => {
+    const nextBot = botDraftWithDerivedGatewayState(nextDraft);
+    setDraft(nextBot);
+    await apply(async () => {
+      await app.SetBotSettings(nextBot);
+    });
+  };
+  const persistConnections = (mapper: (connections: BotConnectionView[]) => BotConnectionView[]) =>
+    persistBotDraft({ ...draft, connections: mapper(draft.connections) });
   const updateConnection = (id: string, patch: Partial<BotConnectionView>) =>
     setConnections((items) => items.map((item) => item.id === id ? { ...item, ...patch } : item));
+  const persistConnection = (id: string, patch: Partial<BotConnectionView>) =>
+    persistConnections((items) => items.map((item) => item.id === id ? { ...item, ...patch } : item));
   const updateConnectionCredential = (id: string, patch: Partial<BotConnectionView["credential"]>) =>
     setConnections((items) => items.map((item) => item.id === id ? { ...item, credential: { ...item.credential, ...patch } } : item));
+  const persistConnectionCredential = (id: string, patch: Partial<BotConnectionView["credential"]>) =>
+    persistConnections((items) => items.map((item) => item.id === id ? { ...item, credential: { ...item.credential, ...patch } } : item));
+  const updateAllowlist = (patch: Partial<BotAllowlistView>) =>
+    setDraft((prev) => ({ ...prev, allowlist: { ...prev.allowlist, ...patch } }));
+  const persistAllowlist = (patch: Partial<BotAllowlistView>) =>
+    persistBotDraft({ ...draft, allowlist: { ...draft.allowlist, ...patch } });
+  const persistAllowlistText = (key: BotAllowlistTextKey, value: string) => {
+    const entries = parseBotListInput(value);
+    setAllowlistText((prev) => ({ ...prev, [key]: entries.join("\n") }));
+    void persistAllowlist({ [key]: entries } as Partial<BotAllowlistView>);
+  };
   const removeConnection = async (connection: BotConnectionView) => {
-    const nextDraft = sanitizeBotDraft({
+    const nextDraft = botDraftWithDerivedGatewayState({
       ...draft,
       connections: draft.connections.filter((item) => item.id !== connection.id),
     });
@@ -982,7 +1035,7 @@ function BotsSection({ s, busy, apply }: SectionProps) {
   const selectedInstallLabel = botTargetLabel(installTarget, t);
   const installUserCode = install.result?.userCode && installTarget !== "weixin" ? formatInstallUserCode(install.result.userCode) : "";
 
-  const saveBot = () => app.SetBotSettings(sanitizeBotDraft(draft));
+  const saveBot = () => app.SetBotSettings(botDraftWithDerivedGatewayState(draft));
   function clearInstallTimers() {
     if (installPollTimerRef.current !== null) {
       window.clearTimeout(installPollTimerRef.current);
@@ -1086,7 +1139,7 @@ function BotsSection({ s, busy, apply }: SectionProps) {
     setDiagnostics((prev) => ({ ...prev, [connection.id]: diag.message || diag.status }));
     if (diag.messageId && target) {
       const updatedAt = new Date().toISOString();
-      setConnections((items) => items.map((item) => {
+      await persistConnections((items) => items.map((item) => {
         if (item.id !== connection.id) return item;
         const scope = connection.workspaceRoot ? "project" : "global";
         const sessionMappings = [
@@ -1115,40 +1168,32 @@ function BotsSection({ s, busy, apply }: SectionProps) {
       await app.ClearBotSecret(env);
     });
   };
+  const onlineConnections = draft.connections.filter((connection) => connection.enabled && connection.status === "connected").length;
+  const selectedConnection = draft.connections.find((connection) => connection.id === expandedConnectionId) ?? null;
+  const selectedConnectionRemote = selectedConnection ? firstConnectionRemote(selectedConnection) : "";
+  useEffect(() => {
+    if (!pendingAllowlistFocusRef.current || !selectedConnection) return;
+    const scrollTimer = window.setTimeout(() => {
+      if (!allowlistRef.current) return;
+      pendingAllowlistFocusRef.current = false;
+      allowlistRef.current.scrollIntoView({ block: "center", behavior: "smooth" });
+      setAllowlistFocused(true);
+    }, 80);
+    const clearTimer = window.setTimeout(() => setAllowlistFocused(false), 2100);
+    return () => {
+      window.clearTimeout(scrollTimer);
+      window.clearTimeout(clearTimer);
+    };
+  }, [selectedConnection]);
 
   return (
-    <SettingsSection
-      title={t("settings.botGateway")}
-      description={t("settings.botGatewayHint")}
-    >
-      <div className="bot-phone-connect">
-        <div className="bot-gateway-card">
-          <div className="bot-gateway-card__copy">
-            <strong>{t("settings.botGateway")}</strong>
-            <span>{t("settings.botGatewayHint")}</span>
-          </div>
-          <div className="bot-gateway-card__actions">
-            <div className="bot-phone-connect__switch">
-              <span>{t("settings.botEnableBot")}</span>
-              <ToggleSegment
-                value={draft.enabled}
-                disabled={busy}
-                onChange={(enabled) => setDraft((prev) => ({ ...prev, enabled }))}
-              />
-            </div>
-            <button
-              className="btn btn--primary btn--small"
-              disabled={busy || !dirty}
-              onClick={() => void apply(saveBot)}
-            >
-              {t("settings.saveBotSettings")}
-            </button>
-          </div>
-        </div>
-
-        <div className="bot-connection-list bot-connection-list--simple">
+    <div className="bot-phone-connect">
+        <div className="bot-connection-list">
           <div className="bot-connection-list__head">
-            <strong>{t("settings.botConnectedBots")}</strong>
+            <div className="bot-connection-list__title">
+              <strong>{t("settings.botConnectedBots")}</strong>
+              <span>{t("settings.botConnectedBotsSummary", { online: onlineConnections, total: draft.connections.length })}</span>
+            </div>
           </div>
           {draft.connections.length === 0 ? (
             <div className="bot-connection-empty">{t("settings.botConnectionsEmpty")}</div>
@@ -1162,137 +1207,262 @@ function BotsSection({ s, busy, apply }: SectionProps) {
                 <span>{t("settings.botConnectionColumnStatus")}</span>
                 <span>{t("settings.botConnectionColumnActions")}</span>
               </div>
-              {draft.connections.map((connection) => (
-                <div key={connection.id} className="bot-connection-row" role="rowgroup">
-                  <div className="bot-connection-row__grid" role="row">
-                    <div className="bot-connection-row__channel" role="cell">
-                      <span className={`bot-connection-row__badge bot-connection-row__badge--${connection.provider === "weixin" ? "weixin" : connection.domain === "lark" ? "lark" : "feishu"}`}>
-                        {connection.provider === "weixin" ? "微" : connection.domain === "lark" ? "L" : "飞"}
-                      </span>
-                      <span>{botConnectionLabel(connection, t)}</span>
+              {draft.connections.map((connection) => {
+                const sessionID = firstConnectionRemote(connection);
+                return (
+                  <div key={connection.id} className="bot-connection-row" role="rowgroup">
+                    <div className="bot-connection-row__grid" role="row">
+                      <div className="bot-connection-row__channel" role="cell">
+                        <span>{botConnectionLabel(connection, t)}</span>
+                      </div>
+                      <strong role="cell">{connection.label || botConnectionLabel(connection, t)}</strong>
+                      <code role="cell" title={sessionID || undefined}>{sessionID || "—"}</code>
+                      <span role="cell">{botConnectionScopeLabel(connection, t)}</span>
+                      <div className="bot-connection-row__state" role="cell">
+                        <span className={`bot-connection-row__status bot-connection-row__status--${connection.status === "connected" ? "connected" : "disconnected"}`}>
+                          {connection.status === "connected" ? t("settings.botConnectionConnected") : connection.status || t("settings.botConnectionDisconnected")}
+                        </span>
+                        <ToggleSegment
+                          value={connection.enabled}
+                          disabled={busy}
+                          onChange={(enabled) => void persistConnection(connection.id, { enabled })}
+                        />
+                      </div>
+                      <div className="bot-connection-row__actions" role="cell">
+                        <button
+                          type="button"
+                          className={`btn btn--small${expandedConnectionId === connection.id ? " btn--primary" : " btn--secondary"}`}
+                          disabled={busy}
+                          onClick={() => setExpandedConnectionId((current) => current === connection.id ? "" : connection.id)}
+                        >
+                          {t("settings.botManage")}
+                        </button>
+                      </div>
                     </div>
-                    <strong role="cell">{connection.label || botConnectionLabel(connection, t)}</strong>
-                    <code role="cell">{botConnectionRemoteLabel(connection)}</code>
-                    <span role="cell">{botConnectionScopeLabel(connection, t)}</span>
-                    <span className={`bot-connection-row__status bot-connection-row__status--${connection.status === "connected" ? "connected" : "disconnected"}`} role="cell">
-                      {connection.status === "connected" ? t("settings.botConnectionConnected") : connection.status || t("settings.botConnectionDisconnected")}
-                    </span>
-                    <div className="bot-connection-row__actions" role="cell">
-                      <ToggleSegment
-                        value={connection.enabled}
-                        disabled={busy}
-                        onChange={(enabled) => updateConnection(connection.id, { enabled })}
-                      />
-                      <button
-                        type="button"
-                        className="btn btn--secondary btn--small"
-                        disabled={busy}
-                        onClick={() => setExpandedConnectionId((current) => current === connection.id ? "" : connection.id)}
-                      >
-                        {t("settings.botManage")}
-                      </button>
-                    </div>
+                    {diagnostics[connection.id] ? <em className="bot-connection-row__diag">{diagnostics[connection.id]}</em> : null}
                   </div>
-                  {diagnostics[connection.id] ? <em className="bot-connection-row__diag">{diagnostics[connection.id]}</em> : null}
-                  {expandedConnectionId === connection.id ? (
-                    <div className="bot-connection-manage">
-                      <SettingsField label={t("settings.botConnectionActions")}>
-                        <div className="bot-connection-manage__actions">
-                          <button type="button" className="btn btn--secondary btn--small" disabled={busy} onClick={() => void diagnoseConnection(connection.id)}>
-                            {t("settings.botDiagnose")}
-                          </button>
-                          {(connection.provider === "feishu" || connection.provider === "weixin") ? (
-                            <button type="button" className="btn btn--secondary btn--small" disabled={busy} onClick={() => void testConnection(connection)}>
-                              {t("settings.botTest")}
-                            </button>
-                          ) : null}
-                        </div>
-                      </SettingsField>
-                      {(connection.provider === "feishu" || connection.provider === "weixin") ? (
-                        <SettingsField label={t("settings.botTestChatId")}>
-                          <input
-                            className="mem-input"
-                            value={testTargets[connection.id] ?? firstConnectionRemote(connection)}
-                            disabled={busy}
-                            placeholder={t("settings.botTestChatId")}
-                            spellCheck={false}
-                            onChange={(event) => setTestTargets((prev) => ({ ...prev, [connection.id]: event.target.value }))}
-                          />
-                        </SettingsField>
-                      ) : null}
-                      <SettingsField label={t("settings.botChannelModel")} hint={t("settings.botChannelModelHint")}>
-                        <ModelPicker
-                          s={s}
-                          refs={refs}
-                          value={toRef(connection.model, s)}
-                          disabled={busy}
-                          emptyOptionLabel={t("settings.botChannelModelAuto")}
-                          emptyOptionHint={settingsModelMeta(s, t)}
-                          onPick={(model) => updateConnection(connection.id, { model })}
-                        />
-                      </SettingsField>
-                      <SettingsField label={t("settings.botWorkspaceRoot")} hint={t("settings.botWorkspaceRootHint")}>
-                        <input
-                          className="mem-input"
-                          value={connection.workspaceRoot}
-                          disabled={busy}
-                          placeholder={t("settings.botWorkspaceRootPlaceholder")}
-                          spellCheck={false}
-                          onChange={(event) => updateConnection(connection.id, { workspaceRoot: event.target.value })}
-                        />
-                      </SettingsField>
-                      <SettingsField label={t("settings.botCredential")}>
-                        <div className="bot-credential-stack">
-                          <div className="bot-credential-line">
-                            <span>{botConnectionCredentialSummary(connection, t)}</span>
-                            <strong>{connection.credential.secretSet ? t("settings.botSecretSet") : t("settings.botSecretMissing")}</strong>
-                          </div>
-                          {botConnectionSecretEnv(connection) ? (
-                            <div className="bot-secret-row">
-                              <input
-                                className="mem-input"
-                                value={botConnectionSecretEnv(connection)}
-                                disabled={busy}
-                                spellCheck={false}
-                                onChange={(event) => updateConnectionCredential(connection.id, botConnectionSecretPatch(connection, event.target.value))}
-                              />
-                              <input
-                                className="mem-input"
-                                type="password"
-                                value={connectionSecrets[connection.id] ?? ""}
-                                disabled={busy}
-                                placeholder={connection.credential.secretSet ? t("settings.botSecretReplace") : t("settings.botSecretPaste")}
-                                onChange={(event) => setConnectionSecrets((prev) => ({ ...prev, [connection.id]: event.target.value }))}
-                              />
-                              <button type="button" className="btn btn--secondary btn--small" disabled={busy || !(connectionSecrets[connection.id] ?? "").trim()} onClick={() => void saveConnectionSecret(connection)}>
-                                {t("settings.saveKey")}
-                              </button>
-                              <button type="button" className="btn btn--secondary btn--small" disabled={busy || !connection.credential.secretSet} onClick={() => void clearConnectionSecret(connection)}>
-                                {t("settings.clearKey")}
-                              </button>
-                            </div>
-                          ) : null}
-                        </div>
-                      </SettingsField>
-                      <SettingsField label={t("settings.deleteBot")} hint={t("settings.deleteBotHint")}>
-                        <div className="bot-connection-danger">
-                          <InlineConfirmButton
-                            label={t("settings.deleteBot")}
-                            confirmLabel={t("settings.confirmDeleteBot")}
-                            cancelLabel={t("common.cancel")}
-                            disabled={busy}
-                            danger
-                            onConfirm={() => removeConnection(connection)}
-                          />
-                        </div>
-                      </SettingsField>
-                    </div>
-                  ) : null}
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
+
+        {selectedConnection ? (
+          <article className="bot-detail-card" aria-labelledby="bot-detail-title">
+            <div className="bot-detail-card__head">
+              <div className="bot-detail-card__identity">
+                <div className="bot-detail-card__title" id="bot-detail-title">
+                  {selectedConnection.label || botConnectionLabel(selectedConnection, t)}
+                  <span className="badge badge--neutral">{botConnectionLabel(selectedConnection, t)}</span>
+                  <span className={`badge ${selectedConnection.status === "connected" ? "badge--project" : "badge--feedback"}`}>
+                    {selectedConnection.status === "connected" ? t("settings.botConnectionConnected") : selectedConnection.status || t("settings.botConnectionDisconnected")}
+                  </span>
+                </div>
+                <div className="bot-detail-card__desc">{t("settings.botAutoSaveHint")}</div>
+              </div>
+              <div className="bot-detail-card__actions">
+                <button type="button" className="btn btn--small" disabled={busy} onClick={() => void diagnoseConnection(selectedConnection.id)}>
+                  {t("settings.botDiagnose")}
+                </button>
+                {(selectedConnection.provider === "feishu" || selectedConnection.provider === "weixin") ? (
+                  <button type="button" className="btn btn--small" disabled={busy || !selectedConnectionRemote} onClick={() => void testConnection(selectedConnection)}>
+                    {t("settings.botTest")}
+                  </button>
+                ) : null}
+                <button type="button" className="btn btn--small" onClick={() => setExpandedConnectionId("")}>
+                  {t("common.collapse")}
+                </button>
+              </div>
+            </div>
+
+              {diagnostics[selectedConnection.id] ? <div className="bot-detail-notice">{diagnostics[selectedConnection.id]}</div> : null}
+
+              <section className="bot-detail-section">
+                <div className="bot-detail-section__head">{t("settings.botConnectionSummary")}</div>
+                <div className="bot-detail-summary">
+                  <div>
+                    <span>{t("settings.botConnectionColumnChannel")}</span>
+                    <strong>{botConnectionLabel(selectedConnection, t)}</strong>
+                  </div>
+                  <div>
+                    <span>{t("settings.botConnectionColumnRemote")}</span>
+                    <code title={selectedConnectionRemote || undefined}>{selectedConnectionRemote || "—"}</code>
+                  </div>
+                  <div>
+                    <span>{t("settings.botConnectionColumnScope")}</span>
+                    <strong>{botConnectionScopeLabel(selectedConnection, t)}</strong>
+                  </div>
+                  <div>
+                    <span>{t("settings.botConnectionColumnStatus")}</span>
+                    <strong>{selectedConnection.status === "connected" ? t("settings.botConnectionConnected") : selectedConnection.status || t("settings.botConnectionDisconnected")}</strong>
+                  </div>
+                </div>
+              </section>
+
+              <details
+                ref={allowlistRef}
+                className={`bot-access-panel${allowlistFocused ? " bot-access-panel--focused" : ""}`}
+                data-focus-target="bot-allowlist"
+                open={allowlistOpen}
+                onToggle={(event) => setAllowlistOpen(event.currentTarget.open)}
+              >
+                <summary className="bot-access-panel__summary">
+                  <span>
+                    <strong>{t("settings.botAccessControl")}</strong>
+                    <small>{t("settings.botAllowlistHint")}</small>
+                  </span>
+                  <ChevronDown className="bot-access-panel__chevron" size={16} aria-hidden="true" />
+                </summary>
+                {allowlistOpen ? (
+                  <div className="bot-access-panel__body">
+                    <SettingsField label={t("settings.botAccessMode")} hint={t("settings.botAccessControlHint")}>
+                      <ToggleSegment
+                        value={!draft.allowlist.allowAll}
+                        disabled={busy}
+                        onLabel={t("settings.botAccessWhitelist")}
+                        offLabel={t("settings.botAccessAll")}
+                        onChange={(whitelistOnly) => {
+                          const patch = { enabled: whitelistOnly, allowAll: !whitelistOnly };
+                          updateAllowlist(patch);
+                          void persistAllowlist(patch);
+                        }}
+                      />
+                    </SettingsField>
+                    {draft.allowlist.allowAll ? <div className="bot-access-panel__warning">{t("settings.botAllowAllWarn")}</div> : null}
+                    <SettingsField label={t("settings.botAllowlistEntries")} hint={t("settings.botListPlaceholder")}>
+                      <div className="bot-list-grid">
+                        <label className="bot-list-input">
+                          <span>{t("settings.botFeishuLarkUsers")}</span>
+                          <textarea
+                            className="mem-input bot-list-input__textarea"
+                            value={allowlistText.feishuUsers}
+                            disabled={busy || draft.allowlist.allowAll}
+                            placeholder={t("settings.botListPlaceholder")}
+                            spellCheck={false}
+                            onChange={(event) => setAllowlistText((prev) => ({ ...prev, feishuUsers: event.target.value }))}
+                            onBlur={(event) => persistAllowlistText("feishuUsers", event.currentTarget.value)}
+                          />
+                        </label>
+                        <label className="bot-list-input">
+                          <span>{t("settings.botWeixinUsers")}</span>
+                          <textarea
+                            className="mem-input bot-list-input__textarea"
+                            value={allowlistText.weixinUsers}
+                            disabled={busy || draft.allowlist.allowAll}
+                            placeholder={t("settings.botListPlaceholder")}
+                            spellCheck={false}
+                            onChange={(event) => setAllowlistText((prev) => ({ ...prev, weixinUsers: event.target.value }))}
+                            onBlur={(event) => persistAllowlistText("weixinUsers", event.currentTarget.value)}
+                          />
+                        </label>
+                        <label className="bot-list-input">
+                          <span>{t("settings.botFeishuLarkGroups")}</span>
+                          <textarea
+                            className="mem-input bot-list-input__textarea"
+                            value={allowlistText.feishuGroups}
+                            disabled={busy || draft.allowlist.allowAll}
+                            placeholder={t("settings.botListPlaceholder")}
+                            spellCheck={false}
+                            onChange={(event) => setAllowlistText((prev) => ({ ...prev, feishuGroups: event.target.value }))}
+                            onBlur={(event) => persistAllowlistText("feishuGroups", event.currentTarget.value)}
+                          />
+                        </label>
+                        <label className="bot-list-input">
+                          <span>{t("settings.botWeixinGroups")}</span>
+                          <textarea
+                            className="mem-input bot-list-input__textarea"
+                            value={allowlistText.weixinGroups}
+                            disabled={busy || draft.allowlist.allowAll}
+                            placeholder={t("settings.botListPlaceholder")}
+                            spellCheck={false}
+                            onChange={(event) => setAllowlistText((prev) => ({ ...prev, weixinGroups: event.target.value }))}
+                            onBlur={(event) => persistAllowlistText("weixinGroups", event.currentTarget.value)}
+                          />
+                        </label>
+                      </div>
+                    </SettingsField>
+                  </div>
+                ) : null}
+              </details>
+
+              <section className="bot-detail-section">
+                <div className="bot-detail-section__head">{t("settings.botRuntimeSettings")}</div>
+                <SettingsField label={t("settings.botChannelModel")} hint={t("settings.botChannelModelHint")}>
+                  <ModelPicker
+                    s={s}
+                    refs={refs}
+                    value={toRef(selectedConnection.model, s)}
+                    disabled={busy}
+                    emptyOptionLabel={t("settings.botChannelModelAuto")}
+                    emptyOptionHint={settingsModelMeta(s, t)}
+                    onPick={(model) => void persistConnection(selectedConnection.id, { model })}
+                  />
+                </SettingsField>
+                <SettingsField label={t("settings.botWorkspaceRoot")} hint={t("settings.botWorkspaceRootHint")}>
+                  <input
+                    className="mem-input"
+                    value={selectedConnection.workspaceRoot}
+                    disabled={busy}
+                    placeholder={t("settings.botWorkspaceRootPlaceholder")}
+                    spellCheck={false}
+                    onChange={(event) => updateConnection(selectedConnection.id, { workspaceRoot: event.target.value })}
+                    onBlur={(event) => void persistConnection(selectedConnection.id, { workspaceRoot: event.currentTarget.value })}
+                  />
+                </SettingsField>
+              </section>
+
+              <section className="bot-detail-section">
+                <div className="bot-detail-section__head">{t("settings.botCredential")}</div>
+                <div className="bot-credential-stack">
+                  <div className="bot-credential-line">
+                    <span>{botConnectionCredentialSummary(selectedConnection, t)}</span>
+                    <strong>{selectedConnection.credential.secretSet ? t("settings.botSecretSet") : t("settings.botSecretMissing")}</strong>
+                  </div>
+                  {botConnectionSecretEnv(selectedConnection) ? (
+                    <div className="bot-secret-row">
+                      <input
+                        className="mem-input"
+                        value={botConnectionSecretEnv(selectedConnection)}
+                        disabled={busy}
+                        spellCheck={false}
+                        onChange={(event) => updateConnectionCredential(selectedConnection.id, botConnectionSecretPatch(selectedConnection, event.target.value))}
+                        onBlur={(event) => void persistConnectionCredential(selectedConnection.id, botConnectionSecretPatch(selectedConnection, event.currentTarget.value))}
+                      />
+                      <input
+                        className="mem-input"
+                        type="password"
+                        value={connectionSecrets[selectedConnection.id] ?? ""}
+                        disabled={busy}
+                        placeholder={selectedConnection.credential.secretSet ? t("settings.botSecretReplace") : t("settings.botSecretPaste")}
+                        onChange={(event) => setConnectionSecrets((prev) => ({ ...prev, [selectedConnection.id]: event.target.value }))}
+                      />
+                      <button type="button" className="btn btn--secondary btn--small" disabled={busy || !(connectionSecrets[selectedConnection.id] ?? "").trim()} onClick={() => void saveConnectionSecret(selectedConnection)}>
+                        {t("settings.saveKey")}
+                      </button>
+                      <button type="button" className="btn btn--secondary btn--small" disabled={busy || !selectedConnection.credential.secretSet} onClick={() => void clearConnectionSecret(selectedConnection)}>
+                        {t("settings.clearKey")}
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              </section>
+
+              <section className="bot-detail-section bot-detail-section--danger">
+                <div>
+                  <div className="bot-detail-section__head">{t("settings.botDangerZone")}</div>
+                  <p>{t("settings.deleteBotHint")}</p>
+                </div>
+                <InlineConfirmButton
+                  label={t("settings.deleteBot")}
+                  confirmLabel={t("settings.confirmDeleteBot")}
+                  cancelLabel={t("common.cancel")}
+                  disabled={busy}
+                  danger
+                  onConfirm={() => removeConnection(selectedConnection)}
+                />
+              </section>
+          </article>
+        ) : null}
 
         <div className="bot-add-panel">
           <div className="bot-phone-connect__top">
@@ -1378,8 +1548,7 @@ function BotsSection({ s, busy, apply }: SectionProps) {
             </div>
           </div>
         </div>
-      </div>
-    </SettingsSection>
+    </div>
   );
 }
 
@@ -1429,10 +1598,6 @@ function botConnectionLabel(connection: BotConnectionView, t: ReturnType<typeof 
 
 function firstConnectionRemote(connection: BotConnectionView): string {
   return connection.sessionMappings.find((mapping) => mapping.remoteId.trim())?.remoteId ?? "";
-}
-
-function botConnectionRemoteLabel(connection: BotConnectionView): string {
-  return firstConnectionRemote(connection) || "—";
 }
 
 function botConnectionScopeLabel(connection: BotConnectionView, t: ReturnType<typeof useT>): string {
@@ -1532,6 +1697,14 @@ function sanitizeBotDraft(draft: BotSettingsView): BotSettingsView {
       apiBase: bot.weixin.apiBase.trim().replace(/\/+$/, ""),
     },
     connections: bot.connections.map(normalizeBotConnection).filter((conn) => conn.id && conn.provider),
+  };
+}
+
+function botDraftWithDerivedGatewayState(draft: BotSettingsView): BotSettingsView {
+  const bot = sanitizeBotDraft(draft);
+  return {
+    ...bot,
+    enabled: bot.connections.some((connection) => connection.enabled),
   };
 }
 
@@ -2659,6 +2832,22 @@ function uniqueStrings(values: string[]): string[] {
     if (value && !out.includes(value)) out.push(value);
   }
   return out;
+}
+
+function botAllowlistTextValues(allowlist: BotAllowlistView): Record<BotAllowlistTextKey, string> {
+  return {
+    feishuUsers: allowlist.feishuUsers.join("\n"),
+    weixinUsers: allowlist.weixinUsers.join("\n"),
+    feishuGroups: allowlist.feishuGroups.join("\n"),
+    weixinGroups: allowlist.weixinGroups.join("\n"),
+  };
+}
+
+function parseBotListInput(value: string): string[] {
+  return uniqueStrings(value
+    .split(/[\n,，]+/)
+    .map((entry) => entry.trim())
+    .filter(Boolean));
 }
 
 function apiKeyEnvFromProviderName(name: string): string {
