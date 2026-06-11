@@ -85,6 +85,7 @@ var syntheticPrefixes = []string{
 	"<compaction-summary>",
 	"Summary of the later conversation (compacted from here on):",
 	"Summary of earlier conversation (compacted up to here):",
+	"[Mid-turn steer queued by the user.",
 }
 
 // Compose applies the plan-mode marker to a turn's text when plan mode is on,

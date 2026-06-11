@@ -724,11 +724,11 @@ export function useController() {
 
   const steer = useCallback((text: string) => {
     if (!activeTabId) return;
-    // Steer is queued to the agent and persisted to session for history
-    dispatchTo(activeTabId, { type: "user", text, seq: getOrCreateState(statesRef.current, activeTabId).seq });
-    // Steer event drives a compact guidance notice in the transcript,
+    // No optimistic user bubble: rewind/fork map turns by counting user items,
+    // and a steer is not a backend turn — the Steer event's ↪ notice is the
+    // visible confirmation (#3660).
     app.SteerForTab(activeTabId, text).catch(() => {});
-  }, [activeTabId, dispatchTo]);
+  }, [activeTabId]);
 
   const notice = useCallback((text: string, level: "info" | "warn" = "info") => {
     if (!activeTabId) return;

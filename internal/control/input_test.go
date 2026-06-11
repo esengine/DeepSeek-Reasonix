@@ -640,6 +640,11 @@ func TestIsSyntheticUserMessage(t *testing.T) {
 			input: "Summary of what I want: fix the login bug first.",
 			want:  false,
 		},
+		{
+			name:  "mid-turn steer wrapper",
+			input: "[Mid-turn steer queued by the user. Do not treat this as a new task; use it only as additional guidance for the current task after completing the current step.]\nplease use smaller diffs",
+			want:  true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
