@@ -465,7 +465,14 @@ export function Transcript({
           readOnlyBatch.length = 0;
         };
         for (const it of group.items) {
+          // Running read-only tools render individually (visible in progress);
+          // only completed read-only tools go into the batch (hidden after done)
           if (it.kind === "tool" && it.readOnly && !it.parentId && it.name !== "todo_write" && it.name !== "exit_plan_mode") {
+            if (it.status === "running") {
+              flushReadOnlyBatch();
+              out.push(<ToolCard key={it.id} item={it} subcalls={subcallsByParent.get(it.id)} />);
+              continue;
+            }
             readOnlyBatch.push(it as ToolItem);
             continue;
           }
@@ -759,8 +766,24 @@ function WarmTurnItems({
     actionReady = false;
   };
 
+  // Group consecutive completed read-only tools into ReadOnlyBatch
+  const roBatch: ToolItem[] = [];
+  const flushRO = () => {
+    if (roBatch.length === 0) return;
+    nodes.push(<ReadOnlyBatch key={`rob-${roBatch[0].id}`} items={roBatch} subcalls={subcalls} />);
+    roBatch.length = 0;
+  };
+
   for (let i = startIdx; i < endIdx && i < items.length; i++) {
     const it = items[i];
+
+    // Completed read-only tools → batch into ReadOnlyBatch
+    if (it.kind === "tool" && it.readOnly && !it.parentId && it.name !== "todo_write" && it.name !== "exit_plan_mode") {
+      roBatch.push(it as ToolItem);
+      continue;
+    }
+    flushRO();
+
     switch (it.kind) {
       case "user": {
         pushTurnActions();
@@ -791,6 +814,7 @@ function WarmTurnItems({
       case "compaction": nodes.push(<CompactionCard key={it.id} item={it} />); break;
     }
   }
+  flushRO();
   pushTurnActions();
   return nodes;
 }
@@ -909,6 +933,37 @@ function TurnCollapse({ items, durationMs, mode, subcalls }: TurnCollapseProps) 
 
   if (displayItems.length === 0) return null;
 
+  // Pre-compute body: group consecutive completed read-only tools into ReadOnlyBatch
+  const body: ReactNode[] = [];
+  const roBatch: ToolItem[] = [];
+  const flushRO = () => {
+    if (roBatch.length === 0) return;
+    body.push(<ReadOnlyBatch key={`rob-${roBatch[0].id}`} items={roBatch} subcalls={subcalls} />);
+    roBatch.length = 0;
+  };
+  for (const it of displayItems) {
+    if (it.kind === "tool" && it.readOnly && !it.parentId && it.name !== "todo_write" && it.name !== "exit_plan_mode" && it.status !== "running") {
+      roBatch.push(it as ToolItem);
+      continue;
+    }
+    flushRO();
+    switch (it.kind) {
+      case "tool":
+        if (it.parentId) break;
+        if (it.name === "todo_write") break;
+        if (it.name === "exit_plan_mode") break;
+        body.push(<ToolCard key={it.id} item={it as ToolItem} subcalls={subcalls.get(it.id)} />);
+        break;
+      case "phase": body.push(<PhaseCard key={it.id} text={it.text} />); break;
+      case "assistant": {
+        const displayItem = mode === "minimal" ? { ...it, reasoning: "" } : it;
+        body.push(<AssistantMessage key={it.id} item={displayItem as AssistantItem} />);
+        break;
+      }
+    }
+  }
+  flushRO();
+
   return (
     <div className={`turn-collapse${open ? " turn-collapse--open" : ""}`}>
       <button
@@ -921,23 +976,11 @@ function TurnCollapse({ items, durationMs, mode, subcalls }: TurnCollapseProps) 
         <span className="turn-collapse__label">{label}</span>
       </button>
       {open && (
-        <div className="turn-collapse__body">
-          {displayItems.map((it) => {
-            switch (it.kind) {
-              case "tool": return <ToolCard key={it.id} item={it as ToolItem} subcalls={subcalls.get(it.id)} />;
-              case "phase": return <PhaseCard key={it.id} text={it.text} />;
-              case "assistant": {
-                // In minimal mode, strip reasoning from expanded assistant messages
-                const displayItem = mode === "minimal" ? { ...it, reasoning: "" } : it;
-                return <AssistantMessage key={it.id} item={displayItem as AssistantItem} />;
-              }
-              default: return null;
-            }
-          })}
-        </div>
+        <div className="turn-collapse__body">{body}</div>
       )}
     </div>
   );
+
 }
 
 // ── JumpBar, PhaseCard, NoticeCard, CompactionCard ────────────────────────────
