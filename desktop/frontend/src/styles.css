@@ -8273,8 +8273,10 @@ a[href] {
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.32);
   overflow: hidden;
   transform-origin: 50% 48%;
-  will-change: transform, opacity;
-  animation: modal-in 280ms var(--ease-out) both;
+  /* No will-change / fill-mode: anything that keeps a transform applied after
+     entry pins a compositor layer rasterized at the entrance scale, leaving
+     text blurry on Windows fractional DPI until the next repaint (#3838). */
+  animation: modal-in 280ms var(--ease-out);
 }
 .history-modal {
   width: min(1360px, calc(100vw - 96px));
@@ -8318,7 +8320,7 @@ a[href] {
     opacity: 1;
   }
   100% {
-    transform: translate3d(0, 0, 0) scale(1);
+    transform: none;
     opacity: 1;
   }
 }
