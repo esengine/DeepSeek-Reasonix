@@ -3,15 +3,32 @@ package weixin
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"reasonix/internal/bot"
 	"reasonix/internal/config"
 )
+
+func TestStartReturnsMissingToken(t *testing.T) {
+	isolateWeixinUserConfig(t)
+	t.Setenv("WEIXIN_TEST_TOKEN", "")
+	a := New(config.WeixinBotConfig{
+		TokenEnv:  "WEIXIN_TEST_TOKEN",
+		AccountID: "missing-account",
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	err := a.Start(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "WEIXIN_TEST_TOKEN") {
+		t.Fatalf("Start error = %v, want missing token env", err)
+	}
+}
 
 func TestSendTextPostsIlinkMessage(t *testing.T) {
 	t.Setenv("WEIXIN_TEST_TOKEN", "token-1")
@@ -66,6 +83,15 @@ func TestSendTextPostsIlinkMessage(t *testing.T) {
 	if !ok || textItem["text"] != "hello weixin" {
 		t.Fatalf("text item = %#v, want hello weixin", item["text_item"])
 	}
+}
+
+func isolateWeixinUserConfig(t *testing.T) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
 }
 
 func TestLogPollHealthThrottlesEmptyPolls(t *testing.T) {

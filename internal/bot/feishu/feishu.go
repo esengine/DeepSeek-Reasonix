@@ -124,6 +124,9 @@ func (a *adapter) Start(ctx context.Context) error {
 		}
 		go a.runWebhook(ctx)
 	default:
+		if _, err := a.appSecret(); err != nil {
+			return err
+		}
 		go a.runWebSocket(ctx)
 	}
 	return nil

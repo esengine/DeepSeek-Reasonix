@@ -142,6 +142,9 @@ func (a *adapter) Start(ctx context.Context) error {
 	a.msgCh = make(chan bot.InboundMessage, 64)
 	ctx, a.cancel = context.WithCancel(ctx)
 	a.loadContextTokens()
+	if a.token() == "" {
+		return a.tokenMissingError()
+	}
 
 	a.logger.Info("weixin polling started", "account", logHash(a.accountID()), "api_base", a.apiBase())
 	go a.pollLoop(ctx)
@@ -188,6 +191,13 @@ func (a *adapter) token() string {
 		return account.Token
 	}
 	return ""
+}
+
+func (a *adapter) tokenMissingError() error {
+	if strings.TrimSpace(a.cfg.TokenEnv) == "" {
+		return fmt.Errorf("weixin token is not configured and no saved weixin account is available")
+	}
+	return fmt.Errorf("%s not set and no saved weixin account is available", a.cfg.TokenEnv)
 }
 
 // apiBase 返回 API base URL。
@@ -337,7 +347,7 @@ func (a *adapter) pollLoop(ctx context.Context) {
 func (a *adapter) getUpdates(ctx context.Context) ([]ilinkUpdate, error) {
 	tok := a.token()
 	if tok == "" {
-		return nil, fmt.Errorf("%s not set and no saved weixin account is available", a.cfg.TokenEnv)
+		return nil, a.tokenMissingError()
 	}
 
 	url := a.apiBase() + getUpdatesPath
@@ -545,7 +555,7 @@ func firstNonEmptyString(vals ...string) string {
 func (a *adapter) sendMessage(ctx context.Context, msg bot.OutboundMessage) (bot.SendResult, error) {
 	tok := a.token()
 	if tok == "" {
-		return bot.SendResult{}, fmt.Errorf("%s not set and no saved weixin account is available", a.cfg.TokenEnv)
+		return bot.SendResult{}, a.tokenMissingError()
 	}
 
 	url := a.apiBase() + sendMessagePath
@@ -607,7 +617,7 @@ func (a *adapter) sendMessage(ctx context.Context, msg bot.OutboundMessage) (bot
 func (a *adapter) sendTyping(ctx context.Context, chatID string) error {
 	tok := a.token()
 	if tok == "" {
-		return fmt.Errorf("%s not set and no saved weixin account is available", a.cfg.TokenEnv)
+		return a.tokenMissingError()
 	}
 
 	url := a.apiBase() + sendTypingPath

@@ -1,16 +1,32 @@
 package feishu
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 
 	"reasonix/internal/bot"
 	"reasonix/internal/config"
 )
+
+func TestStartReturnsMissingWebSocketSecret(t *testing.T) {
+	t.Setenv("FEISHU_TEST_SECRET", "")
+	a := New(config.FeishuBotConfig{
+		AppID:        "cli-test",
+		AppSecretEnv: "FEISHU_TEST_SECRET",
+		Mode:         "websocket",
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	err := a.Start(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "FEISHU_TEST_SECRET") {
+		t.Fatalf("Start error = %v, want missing secret env", err)
+	}
+}
 
 func TestVerificationTokenValidRequiresConfiguredToken(t *testing.T) {
 	a := &adapter{cfg: config.FeishuBotConfig{VerificationToken: "expected"}}
