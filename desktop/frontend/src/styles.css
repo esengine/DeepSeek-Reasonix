@@ -6454,6 +6454,10 @@ a[href] {
 .palette__item--on {
   background: var(--accent-soft);
 }
+.palette__item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
 .palette__item-icon {
   width: 30px;
   height: 30px;
