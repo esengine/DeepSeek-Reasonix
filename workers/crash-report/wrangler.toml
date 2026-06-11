@@ -22,3 +22,11 @@ name = "PING_LIMITER"
 type = "ratelimit"
 namespace_id = "1002"
 simple = { limit = 30, period = 60 }
+
+# Opt-in metrics flush fires once per launch like the ping; its own bucket so it
+# never eats the ping budget on a shared NAT IP.
+[[unsafe.bindings]]
+name = "METRICS_LIMITER"
+type = "ratelimit"
+namespace_id = "1003"
+simple = { limit = 30, period = 60 }

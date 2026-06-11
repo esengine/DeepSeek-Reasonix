@@ -48,7 +48,9 @@ a.fp:hover{text-decoration:underline}
 .report .meta b{color:var(--ink);font-weight:500}
 pre{background:var(--term-bg);color:#e6e8f0;border-radius:12px;padding:16px 18px;font-family:var(--mono);
 font-size:12.5px;line-height:1.55;overflow:auto;white-space:pre-wrap;word-break:break-word}
-@media(max-width:760px){.grid{grid-template-columns:1fr}.wrap{padding:0 16px 48px}}
+.metrics{display:grid;grid-template-columns:1fr 1fr;gap:8px 28px}
+.metric-block h3{font-family:var(--mono);font-size:12.5px;font-weight:600;color:var(--ink-2);margin:6px 0 4px}
+@media(max-width:760px){.grid{grid-template-columns:1fr}.metrics{grid-template-columns:1fr}.wrap{padding:0 16px 48px}}
 `;
 
 function page(title: string, crumb: string, body: string): string {
@@ -104,11 +106,26 @@ function listBars(rows: { label: string; users: number }[]): string {
     .join("");
 }
 
+function metricsCards(rows: { signal: string; bucket: string; total: number }[]): string {
+  if (!rows.length)
+    return `<div class="empty">No metrics yet — flows in once an opt-in build ships · 等 opt-in 版本发布后有数据</div>`;
+  const bySignal = new Map<string, { label: string; users: number }[]>();
+  for (const r of rows) {
+    const list = bySignal.get(r.signal) ?? [];
+    list.push({ label: r.bucket, users: r.total });
+    bySignal.set(r.signal, list);
+  }
+  return `<div class="metrics">${[...bySignal.entries()]
+    .map(([signal, list]) => `<div class="metric-block"><h3>${esc(signal)}</h3>${listBars(list)}</div>`)
+    .join("")}</div>`;
+}
+
 export function renderStats(data: {
   daily: Daily[];
   versions: { label: string; users: number }[];
   platforms: { label: string; users: number }[];
   crashes: { fingerprint: string; kind: string; count: number; last_version: string; seen: string }[];
+  metrics: { signal: string; bucket: string; total: number }[];
 }): string {
   const days = last30Days(data.daily);
   const totalUsers = days.at(-1)?.users ?? 0;
@@ -131,6 +148,7 @@ export function renderStats(data: {
 ${anyPing ? dailyChart(days) : `<div class="empty">No pings yet — data starts flowing once a telemetry-enabled build ships · 等带统计的版本发布后这里开始有数据</div>`}</div>
 <div class="card"><h2>Versions · 版本分布 <b>— 7 days</b></h2>${listBars(data.versions)}</div>
 <div class="card"><h2>Platforms · 平台分布 <b>— 7 days</b></h2>${listBars(data.platforms)}</div>
+<div class="card full"><h2>Agent signals · 运行指标 <b>— 7 days, opt-in aggregate</b></h2>${metricsCards(data.metrics)}</div>
 <div class="card full"><h2>Crash groups · 崩溃分组 <b>— click a fingerprint for stacks</b></h2>${crashRows}</div>
 </div>`,
   );

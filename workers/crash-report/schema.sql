@@ -32,3 +32,15 @@ CREATE TABLE IF NOT EXISTS pings (
   opens INTEGER NOT NULL DEFAULT 1,
   PRIMARY KEY (date, install_id)
 );
+
+-- Opt-in aggregate agent metrics: anonymous per-day (signal, bucket) counters,
+-- no install id and no content. Generic shape so a new signal is just new rows.
+CREATE TABLE IF NOT EXISTS metrics (
+  date TEXT NOT NULL,
+  version TEXT NOT NULL,
+  os TEXT NOT NULL,
+  signal TEXT NOT NULL,
+  bucket TEXT NOT NULL,
+  count INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (date, version, os, signal, bucket)
+);

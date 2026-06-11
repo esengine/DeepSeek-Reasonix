@@ -11,6 +11,7 @@ interface Env {
   DB: D1Database;
   RATE_LIMITER: RateLimiter;
   PING_LIMITER: RateLimiter;
+  METRICS_LIMITER: RateLimiter;
   STATS_PASSWORD?: string;
 }
 
@@ -41,6 +42,38 @@ const Ping = z.object({
   os: z.string().min(1).max(32),
   arch: z.string().min(1).max(32),
   osVersion: z.string().max(128).optional(),
+});
+
+// Opt-in aggregate agent metrics: a per-launch snapshot of (signal, bucket)
+// counters. No install id, no content — just enumerated signals so the worker
+// table can never be polluted with arbitrary keys.
+const METRIC_SIGNALS = [
+  "finish_reason",
+  "empty_final",
+  "provider_error",
+  "cache_hit",
+  "tool_error",
+  "compaction",
+  "turns",
+] as const;
+
+const Metrics = z.object({
+  version: z.string().min(1).max(64),
+  os: z.string().min(1).max(32),
+  counters: z
+    .array(
+      z.object({
+        signal: z.enum(METRIC_SIGNALS),
+        bucket: z
+          .string()
+          .min(1)
+          .max(32)
+          .regex(/^[a-z0-9_]+$/),
+        count: z.number().int().min(1).max(1_000_000),
+      }),
+    )
+    .min(1)
+    .max(64),
 });
 
 export function normalizeForFingerprint(kind: string, message: string): string {
@@ -132,6 +165,28 @@ async function handlePing(request: Request, env: Env): Promise<Response> {
   return new Response("ok", { status: 202 });
 }
 
+async function handleMetrics(request: Request, env: Env): Promise<Response> {
+  const ip = request.headers.get("cf-connecting-ip") ?? "unknown";
+  const { success } = await env.METRICS_LIMITER.limit({ key: ip });
+  if (!success) return new Response("rate limited", { status: 429 });
+
+  const raw = await readJSON(request);
+  if (raw instanceof Response) return raw;
+  const parsed = Metrics.safeParse(raw);
+  if (!parsed.success) return new Response("bad request", { status: 400 });
+  const m = parsed.data;
+
+  const upsert = env.DB.prepare(
+    `INSERT INTO metrics (date, version, os, signal, bucket, count)
+     VALUES (date('now'), ?1, ?2, ?3, ?4, ?5)
+     ON CONFLICT (date, version, os, signal, bucket) DO UPDATE SET
+       count = count + ?5`,
+  );
+  await env.DB.batch(m.counters.map((c) => upsert.bind(m.version, m.os, c.signal, c.bucket, c.count)));
+
+  return new Response("ok", { status: 202 });
+}
+
 function statsAuthorized(request: Request, env: Env): boolean {
   // trim: secrets piped in via PowerShell arrive with a trailing newline.
   const want = (env.STATS_PASSWORD ?? "").trim();
@@ -155,7 +210,7 @@ function html(body: string): Response {
 }
 
 async function handleStats(env: Env): Promise<Response> {
-  const [daily, versions, platforms, crashes] = await Promise.all([
+  const [daily, versions, platforms, crashes, metrics] = await Promise.all([
     env.DB.prepare(
       "SELECT date, COUNT(*) AS users, SUM(opens) AS opens FROM pings WHERE date >= date('now', '-29 day') GROUP BY date",
     ).all<{ date: string; users: number; opens: number }>(),
@@ -168,6 +223,9 @@ async function handleStats(env: Env): Promise<Response> {
     env.DB.prepare(
       "SELECT fingerprint, kind, count, last_version, substr(last_seen, 1, 10) AS seen FROM groups ORDER BY last_seen DESC LIMIT 25",
     ).all<{ fingerprint: string; kind: string; count: number; last_version: string; seen: string }>(),
+    env.DB.prepare(
+      "SELECT signal, bucket, SUM(count) AS total FROM metrics WHERE date >= date('now', '-6 day') GROUP BY signal, bucket ORDER BY signal, total DESC",
+    ).all<{ signal: string; bucket: string; total: number }>(),
   ]);
   return html(
     renderStats({
@@ -175,6 +233,7 @@ async function handleStats(env: Env): Promise<Response> {
       versions: versions.results,
       platforms: platforms.results,
       crashes: crashes.results,
+      metrics: metrics.results,
     }),
   );
 }
@@ -197,6 +256,7 @@ export default {
     const url = new URL(request.url);
     if (url.pathname === "/v1/report" && request.method === "POST") return handleReport(request, env);
     if (url.pathname === "/v1/ping" && request.method === "POST") return handlePing(request, env);
+    if (url.pathname === "/v1/metrics" && request.method === "POST") return handleMetrics(request, env);
 
     const group = url.pathname.match(/^\/stats\/group\/([0-9a-f]{64})$/);
     if ((url.pathname === "/stats" || group) && request.method === "GET") {
@@ -208,7 +268,12 @@ export default {
       }
       return group ? handleGroup(env, group[1]) : handleStats(env);
     }
-    if (url.pathname === "/v1/report" || url.pathname === "/v1/ping" || url.pathname.startsWith("/stats")) {
+    if (
+      url.pathname === "/v1/report" ||
+      url.pathname === "/v1/ping" ||
+      url.pathname === "/v1/metrics" ||
+      url.pathname.startsWith("/stats")
+    ) {
       return new Response("method not allowed", { status: 405 });
     }
     return new Response("not found", { status: 404 });
