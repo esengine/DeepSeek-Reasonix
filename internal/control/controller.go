@@ -1772,8 +1772,10 @@ func (c *Controller) Resume(s *agent.Session, path string) {
 // cacheColdAfter approximates how long the provider keeps a prompt prefix
 // cached. A session idle longer than this resumes against a cold cache, so a
 // history rewrite at that moment costs no extra cache misses — it only shrinks
-// the full-price first request. Calibrated against benchmarks/cache-ttl-probe.
-var cacheColdAfter = 4 * time.Hour
+// the full-price first request. Deliberately conservative: too small burns a
+// live cache (~4× the miss tokens, measured), too large only forgoes a prune.
+// Tighten from benchmarks/cache-ttl-probe data, never below measured retention.
+var cacheColdAfter = 24 * time.Hour
 
 // maybeColdResumePrune elides stale tool results when a resumed session has
 // been idle past the provider's cache retention, then persists the pruned
