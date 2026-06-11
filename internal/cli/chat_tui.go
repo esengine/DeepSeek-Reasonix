@@ -3371,6 +3371,36 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 		} else {
 			m.notice("remembered → " + path)
 		}
+	case "/agent_clear":
+		m.echoLocalCommand(input)
+		if m.orc == nil {
+			m.notice("no orchestrator configured")
+			break
+		}
+		name := strings.TrimSpace(strings.TrimPrefix(input, cmd))
+		if name == "" {
+			m.notice("usage: /agent_clear <name>")
+			break
+		}
+		a, ok := m.orc.Agent(name)
+		if !ok {
+			m.notice(fmt.Sprintf("agent %q not found", name))
+			break
+		}
+		oldPath := a.Ctrl.SessionPath()
+		if err := a.Ctrl.NewSession(); err != nil {
+			m.notice(fmt.Sprintf("agent_clear: %s: %v", name, err))
+			break
+		}
+		if oldPath != "" {
+			os.Remove(oldPath)
+			os.Remove(oldPath + ".meta")
+		}
+		dir := m.orc.SessionDir()
+		if dir != "" {
+			a.Ctrl.SetSessionPath(filepath.Join(dir, "orchestrator_"+name+".jsonl"))
+		}
+		m.notice(fmt.Sprintf("%s cleared", name))
 	case "/agent_spawn":
 		m.echoLocalCommand(input)
 		if m.orc == nil {

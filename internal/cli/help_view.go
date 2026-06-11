@@ -78,6 +78,7 @@ func builtinHelpItems() []compItem {
 		{label: "/agent_send", hint: "send a message to a managed agent"},
 		{label: "/agent_status", hint: "show agent statuses"},
 		{label: "/agent_stats", hint: "show per-agent token/cost stats"},
+		{label: "/agent_clear", hint: "clear a managed agent's session"},
 		{label: "/help", hint: i18n.M.CmdHelp},
 	}
 }
