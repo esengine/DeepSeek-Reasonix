@@ -19,7 +19,9 @@ func renderMemory(width int, set *memory.Set) string {
 		}
 	}
 	facts := set.Store.List()
-	if len(facts) > 0 || strings.TrimSpace(set.Index) != "" {
+	archived := set.Store.ListArchived()
+	hasSaved := len(facts) > 0 || strings.TrimSpace(set.Index) != ""
+	if hasSaved {
 		if len(set.Docs) > 0 {
 			b.WriteByte('\n')
 		}
@@ -36,9 +38,24 @@ func renderMemory(width int, set *memory.Set) string {
 			}
 			fmt.Fprintf(&b, "  %s%s\n", viewCompactText(f.Name, viewBudget(width, 2+visibleWidth(meta))), meta)
 		}
-		if set.Store.Dir != "" {
-			fmt.Fprintf(&b, "  %s\n", viewCompactText(strings.TrimSpace(fmt.Sprintf(i18n.M.MemoryStoredUnderFmt, set.Store.Dir)), viewBudget(width, 2)))
+	}
+	if len(archived) > 0 {
+		if len(set.Docs) > 0 || hasSaved {
+			b.WriteByte('\n')
 		}
+		b.WriteString(viewSubhead(viewCompactText(i18n.M.ListMemoryArchived, viewBudget(width, 2))) + "\n")
+		for _, f := range archived {
+			meta := string(f.Type)
+			if !f.ArchivedAt.IsZero() {
+				meta += " · " + f.ArchivedAt.Format("2006-01-02 15:04:05Z")
+			}
+			name := viewCompactText(f.Name, viewBudget(width, 2))
+			fmt.Fprintf(&b, "  %s  %s\n", name, viewMeta(viewCompactText(meta, min(48, viewBudget(width, 2+visibleWidth(name)+2)))))
+			fmt.Fprintf(&b, "    %s\n", viewCompactPath(f.Path, viewBudget(width, 4)))
+		}
+	}
+	if (hasSaved || len(archived) > 0) && set.Store.Dir != "" {
+		fmt.Fprintf(&b, "  %s\n", viewCompactText(strings.TrimSpace(fmt.Sprintf(i18n.M.MemoryStoredUnderFmt, set.Store.Dir)), viewBudget(width, 2)))
 	}
 	b.WriteString("\n")
 	b.WriteString(viewHint(viewCompactText(i18n.M.MemoryEditHint, viewBudget(width, 2))))

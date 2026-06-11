@@ -513,6 +513,11 @@ export interface MemoryFact {
   body: string;
 }
 
+export interface MemoryArchive extends MemoryFact {
+  path: string;
+  archivedAt?: string;
+}
+
 export interface MemoryScope {
   scope: string; // "user" | "project" | "local"
   path: string;
@@ -521,6 +526,7 @@ export interface MemoryScope {
 export interface MemoryView {
   docs: MemoryDoc[];
   facts: MemoryFact[];
+  archives: MemoryArchive[];
   scopes: MemoryScope[];
   storeDir: string;
   available: boolean;

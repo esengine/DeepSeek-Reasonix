@@ -894,7 +894,7 @@ export function useController() {
   }, [activeTabId, dispatchTo]);
 
   const fetchMemory = useCallback((): Promise<MemoryView> =>
-    app.Memory().catch(() => ({ docs: [], facts: [], scopes: [], storeDir: "", available: false })), []);
+    app.Memory().catch(() => ({ docs: [], facts: [], archives: [], scopes: [], storeDir: "", available: false })), []);
   const remember = useCallback(async (scope: string, note: string) => { await app.Remember(scope, note).catch(() => {}); }, []);
   const forget = useCallback(async (name: string) => { await app.Forget(name).catch(() => {}); }, []);
   const saveDoc = useCallback(async (path: string, body: string) => { await app.SaveDoc(path, body).catch(() => {}); }, []);

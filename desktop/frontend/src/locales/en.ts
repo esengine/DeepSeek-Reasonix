@@ -526,7 +526,7 @@ export const en = {
 
   // memory drawer
   "memory.title": "Memory",
-  "memory.summary": "{facts} saved · {docs} files",
+  "memory.summary": "{facts} saved · {archives} archived · {docs} files",
   "memory.unavailable": "Memory unavailable.",
   "memory.quickAdd": "Quick add",
   "memory.whereToSave": "Where to save",
@@ -561,14 +561,18 @@ export const en = {
   "memory.noMatches": "No memories match the current filters.",
   "memory.clearFilters": "Clear filters",
   "memory.noFacts": "Nothing saved yet. The agent writes these with the remember tool.",
+  "memory.archivedMemories": "Archived memories",
+  "memory.archivedHint": "Kept for traceability. Archived memories are not loaded or retrieved as active memory.",
+  "memory.archivedAt": "archived {time}",
+  "memory.noArchivedMatches": "No archived memories match the current filters.",
   "memory.links": "Memory links",
   "memory.noBody": "No body saved for this memory.",
   "memory.missingLinks": "{n} missing linked memory",
   "memory.appliesNow": "Changes apply in this session.",
   "memory.storedUnder": "stored under {dir}",
 
-  "memory.forget": "Forget",
-  "memory.confirmForget": "Confirm forget",
+  "memory.forget": "Archive",
+  "memory.confirmForget": "Confirm archive",
   "memory.deadLink": "No memory named “{name}”",
 
   "memory.filterPlaceholder": "Filter docs and facts…",

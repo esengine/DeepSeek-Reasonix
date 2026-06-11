@@ -193,6 +193,28 @@ Long tasks eventually fill the model's context window. Reasonix manages this wit
   summarized away.
 - The dropped originals are archived to `~/.config/reasonix/archive/<timestamp>.jsonl`
   (one message per line), so the full history stays traceable.
+- The read-only `history` tool gives the agent on-demand BM25 retrieval over
+  saved session JSONL files. `scope="project"` searches the current controller's
+  session directory; `scope="global"` also searches the user-global session
+  directory and compacted-history archives. `operation="around"` can then read a
+  bounded transcript window around a returned hit. Search keeps the best hit and
+  trims trailing common-word-only noise with a relative score floor; a 0-result
+  response tells the agent how to retry with rarer terms or widen scope.
+- The read-only `memory` tool gives the agent on-demand search/list/read access
+  to saved auto-memory files. It complements the writer tools: `memory` checks
+  what already exists, `remember` saves or updates a fact, and `forget` removes
+  a stale one from the active index while archiving the file for traceability.
+  Archived memory files are visible in local management surfaces (`/memory`,
+  TUI, desktop panel) but are excluded from active-memory retrieval. Memory
+  search uses the same relative BM25 floor and guides the agent to fall back to
+  history when exact original wording or tool output matters.
+- Agent-initiated `remember` and `forget` calls require a fresh human approval
+  each time, even when tool auto-approval or YOLO/full-access mode is enabled.
+  The approval request includes a compact preview of the memory being saved or
+  archived, while external notification hooks only receive the tool name.
+  User-initiated memory edits in the local UI are already explicit user actions.
+  See [`SESSION_MEMORY_RETRIEVAL.md`](SESSION_MEMORY_RETRIEVAL.md) for the
+  detailed implementation contract.
 
 This is the **only** point where the prompt prefix changes — a deliberate, rare
 "cache-reset point". Between compactions the session grows prepend-only and

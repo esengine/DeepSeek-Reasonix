@@ -1989,6 +1989,16 @@ function makeMockApp(): AppBindings {
             body: "Indent with tabs.",
           },
         ],
+        archives: [
+          {
+            name: "old-plan",
+            description: "Superseded planning note",
+            type: "project",
+            body: "This plan was archived after the implementation changed.",
+            path: "~/.config/reasonix/projects/-mock/memory/.archive/20260612-021500.000-old-plan.md",
+            archivedAt: "2026-06-12T02:15:00Z",
+          },
+        ],
         scopes: [
           { scope: "user", path: "~/.config/reasonix/REASONIX.md" },
           { scope: "project", path: "REASONIX.md" },

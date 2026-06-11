@@ -19,8 +19,10 @@ import (
 	"time"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/agent/testutil"
 	"reasonix/internal/config"
 	"reasonix/internal/event"
+	"reasonix/internal/memory"
 	"reasonix/internal/netclient"
 	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
@@ -82,6 +84,143 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 	if mem := ctrl.Memory(); mem == nil || len(mem.Docs) == 0 {
 		t.Fatal("controller memory set is empty after discovering REASONIX.md")
 	}
+}
+
+func TestBuildRegistersUsableHistoryAndMemoryRetrievalTools(t *testing.T) {
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "test-model"
+
+[codegraph]
+enabled = false
+
+[agent]
+system_prompt = "BASE"
+
+[[providers]]
+name = "test-model"
+kind = "boot-retrieval-tool-test"
+model = "x"
+`)
+
+	sessionDir := filepath.Join(t.TempDir(), "sessions")
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	past := agent.NewSession("")
+	past.Add(provider.Message{Role: provider.RoleUser, Content: "Should the history layer use vector embeddings?"})
+	past.Add(provider.Message{Role: provider.RoleAssistant, Content: "Decision: port lightweight BM25 history retrieval without a vector database."})
+	if err := past.Save(filepath.Join(sessionDir, "past.jsonl")); err != nil {
+		t.Fatalf("save past session: %v", err)
+	}
+
+	store := memory.StoreFor(config.MemoryUserDir(), dir)
+	if _, err := store.Save(memory.Memory{
+		Name:        "synthesis-cache-policy",
+		Description: "Stable conclusions should be reused from memory",
+		Type:        memory.TypeFeedback,
+		Body:        "Use a synthesis cache document when expensive retrieval produced a stable conclusion.",
+	}); err != nil {
+		t.Fatalf("save memory: %v", err)
+	}
+
+	registerBootRetrievalToolTestProvider()
+	prov := testutil.NewMock("boot-retrieval-tool-test",
+		testutil.Turn{ToolCalls: []provider.ToolCall{
+			{ID: "history-1", Name: "history", Arguments: `{"operation":"search","query":"BM25 vector database","scope":"project","limit":5}`},
+			{ID: "memory-1", Name: "memory", Arguments: `{"operation":"search","query":"synthesis cache stable conclusion","limit":5}`},
+		}},
+		testutil.Turn{Text: "done"},
+	)
+	setBootRetrievalToolTestProvider(t, prov)
+
+	ctrl, err := Build(context.Background(), Options{Sink: event.Discard, SessionDir: sessionDir})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer ctrl.Close()
+
+	if err := ctrl.Run(context.Background(), "recover past context"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	reqs := prov.Requests()
+	if len(reqs) == 0 {
+		t.Fatal("provider received no requests")
+	}
+	for _, want := range []string{"history", "memory", "remember", "forget"} {
+		if !requestHasTool(reqs[0], want) {
+			t.Fatalf("first request missing tool %q; tools=%v", want, toolSchemaNames(reqs[0].Tools))
+		}
+	}
+
+	toolResults := map[string]string{}
+	for _, msg := range ctrl.History() {
+		if msg.Role == provider.RoleTool {
+			toolResults[msg.Name] += "\n" + msg.Content
+		}
+	}
+	if !strings.Contains(toolResults["history"], "port lightweight BM25 history retrieval") {
+		t.Fatalf("history tool result did not include saved session decision:\n%s", toolResults["history"])
+	}
+	if !strings.Contains(toolResults["memory"], "synthesis-cache-policy") ||
+		!strings.Contains(toolResults["memory"], "stable conclusion") {
+		t.Fatalf("memory tool result did not include saved memory:\n%s", toolResults["memory"])
+	}
+}
+
+const bootRetrievalToolTestProviderKind = "boot-retrieval-tool-test"
+
+var (
+	bootRetrievalToolTestProviderOnce    sync.Once
+	bootRetrievalToolTestProviderCurrent *testutil.MockProvider
+	bootRetrievalToolTestProviderMu      sync.Mutex
+)
+
+func registerBootRetrievalToolTestProvider() {
+	bootRetrievalToolTestProviderOnce.Do(func() {
+		provider.Register(bootRetrievalToolTestProviderKind, func(provider.Config) (provider.Provider, error) {
+			bootRetrievalToolTestProviderMu.Lock()
+			defer bootRetrievalToolTestProviderMu.Unlock()
+			if bootRetrievalToolTestProviderCurrent == nil {
+				return nil, errors.New("boot retrieval tool test provider is not installed")
+			}
+			return bootRetrievalToolTestProviderCurrent, nil
+		})
+	})
+}
+
+func setBootRetrievalToolTestProvider(t *testing.T, p *testutil.MockProvider) {
+	t.Helper()
+	bootRetrievalToolTestProviderMu.Lock()
+	bootRetrievalToolTestProviderCurrent = p
+	bootRetrievalToolTestProviderMu.Unlock()
+	t.Cleanup(func() {
+		bootRetrievalToolTestProviderMu.Lock()
+		if bootRetrievalToolTestProviderCurrent == p {
+			bootRetrievalToolTestProviderCurrent = nil
+		}
+		bootRetrievalToolTestProviderMu.Unlock()
+	})
+}
+
+func requestHasTool(req provider.Request, name string) bool {
+	for _, schema := range req.Tools {
+		if schema.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func toolSchemaNames(tools []provider.ToolSchema) []string {
+	names := make([]string, 0, len(tools))
+	for _, schema := range tools {
+		names = append(names, schema.Name)
+	}
+	return names
 }
 
 func TestBuildSubagentSkillFailedContinuationPersistsTranscript(t *testing.T) {

@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"reasonix/internal/frontmatter"
 )
@@ -52,6 +53,14 @@ type Memory struct {
 	Description string // one-line summary used for the index and recall
 	Type        Type
 	Body        string // the fact itself (Markdown)
+}
+
+// ArchivedMemory is a saved fact that has been removed from active memory but
+// kept on disk for traceability.
+type ArchivedMemory struct {
+	Memory
+	Path       string
+	ArchivedAt time.Time
 }
 
 // StoreFor resolves the auto-memory directory for a project working dir under
@@ -119,25 +128,72 @@ func (s Store) Save(m Memory) (string, error) {
 	return path, nil
 }
 
-// Delete removes a memory file and its MEMORY.md line — the model's `forget`
-// path and the user's way to prune a stale fact. A missing file is not an error;
-// the goal state (gone) holds either way.
-func (s Store) Delete(name string) error {
+// Archive removes a memory from the active store and moves its file under
+// .archive/ for traceability. A missing file is not an error; the goal state
+// (not active) already holds. It returns the archive path, or "" when no file
+// existed to archive.
+func (s Store) Archive(name string) (string, error) {
 	if s.Dir == "" {
-		return fmt.Errorf("memory store unavailable (no user config dir)")
+		return "", fmt.Errorf("memory store unavailable (no user config dir)")
 	}
 	name = slug(name)
 	if name == "" {
-		return fmt.Errorf("memory needs a name")
+		return "", fmt.Errorf("memory needs a name")
 	}
-	if err := removeMemoryFile(filepath.Join(s.Dir, name+".md")); err != nil {
-		return err
+	path, err := s.archiveMemoryFile(filepath.Join(s.Dir, name+".md"), name)
+	if err != nil {
+		return "", err
 	}
-	return s.flushIndex(s.indexLinesExcept(name))
+	return path, s.flushIndex(s.indexLinesExcept(name))
 }
 
-func removeMemoryFile(path string) error {
-	err := os.Remove(path)
+// Delete removes a memory from the active store and its MEMORY.md line — the
+// model's `forget` path and the user's way to prune a stale fact. It archives
+// the file instead of permanently deleting it so wrong memories remain
+// traceable. A missing file is not an error; the goal state (gone) holds either
+// way.
+func (s Store) Delete(name string) error {
+	_, err := s.Archive(name)
+	return err
+}
+
+func (s Store) archiveMemoryFile(path, name string) (string, error) {
+	if s.Dir == "" {
+		return "", fmt.Errorf("memory store unavailable (no user config dir)")
+	}
+	if _, err := os.Stat(path); err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", err
+	}
+	dir := filepath.Join(s.Dir, ".archive")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	dest := archivePath(dir, name, time.Now().UTC())
+	if err := renameMemoryFile(path, dest); err != nil {
+		return "", err
+	}
+	return dest, nil
+}
+
+func archivePath(dir, name string, when time.Time) string {
+	stem := when.Format("20060102-150405.000") + "-" + name
+	path := filepath.Join(dir, stem+".md")
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return path
+	}
+	for i := 1; ; i++ {
+		path = filepath.Join(dir, fmt.Sprintf("%s-%d.md", stem, i))
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			return path
+		}
+	}
+}
+
+func renameMemoryFile(path, dest string) error {
+	err := os.Rename(path, dest)
 	if err == nil || os.IsNotExist(err) {
 		return nil
 	}
@@ -146,7 +202,8 @@ func removeMemoryFile(path string) error {
 	}
 	repairOwnerWrite(path, false)
 	repairOwnerWrite(filepath.Dir(path), true)
-	err = os.Remove(path)
+	repairOwnerWrite(filepath.Dir(dest), true)
+	err = os.Rename(path, dest)
 	if err == nil || os.IsNotExist(err) {
 		return nil
 	}
@@ -250,6 +307,60 @@ func (s Store) List() []Memory {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
+}
+
+// ListArchived returns archived memories parsed from .archive/, newest first.
+// Archived files stay out of List() and the prompt index, so stale facts remain
+// inspectable without being reused as active truth.
+func (s Store) ListArchived() []ArchivedMemory {
+	if s.Dir == "" {
+		return nil
+	}
+	dir := filepath.Join(s.Dir, ".archive")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var out []ArchivedMemory
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		path := filepath.Join(dir, e.Name())
+		m, ok := loadMemory(path)
+		if !ok {
+			continue
+		}
+		when := archiveTimeFromName(e.Name())
+		if when.IsZero() {
+			if info, err := e.Info(); err == nil {
+				when = info.ModTime()
+			}
+		}
+		out = append(out, ArchivedMemory{Memory: m, Path: path, ArchivedAt: when})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].ArchivedAt.Equal(out[j].ArchivedAt) {
+			return out[i].ArchivedAt.After(out[j].ArchivedAt)
+		}
+		if out[i].Name != out[j].Name {
+			return out[i].Name < out[j].Name
+		}
+		return out[i].Path < out[j].Path
+	})
+	return out
+}
+
+func archiveTimeFromName(name string) time.Time {
+	const stampLen = len("20060102-150405.000")
+	if len(name) <= stampLen || name[stampLen] != '-' {
+		return time.Time{}
+	}
+	when, err := time.ParseInLocation("20060102-150405.000", name[:stampLen], time.UTC)
+	if err != nil {
+		return time.Time{}
+	}
+	return when
 }
 
 // loadMemory parses one fact file back into a Memory. It tolerates the minimal

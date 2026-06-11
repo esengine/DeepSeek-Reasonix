@@ -2,7 +2,7 @@ import { ChevronDown, ChevronRight, FileText, Search, Trash2 } from "lucide-reac
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
-import type { MemoryFact, MemoryView } from "../lib/types";
+import type { MemoryArchive, MemoryFact, MemoryView } from "../lib/types";
 import { ResizableDrawer } from "./ResizableDrawer";
 import { Tooltip } from "./Tooltip";
 import { ModalCloseButton } from "./ModalCloseButton";
@@ -14,6 +14,99 @@ type LinkInfo = {
 
 function displayTitle(fact: MemoryFact): string {
   return fact.title || fact.name.replaceAll("-", " ");
+}
+
+function memoryMatches(fact: MemoryFact, normalizedQuery: string, typeFilter: string): boolean {
+  if (typeFilter !== "all" && fact.type !== typeFilter) return false;
+  if (!normalizedQuery) return true;
+  return [displayTitle(fact), fact.name, fact.description, fact.type, fact.body]
+    .join(" ")
+    .toLowerCase()
+    .includes(normalizedQuery);
+}
+
+function archiveKey(fact: MemoryArchive): string {
+  return `${fact.path || fact.name}:${fact.archivedAt || ""}`;
+}
+
+function formatArchivedAt(value?: string): string {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString();
+}
+
+function ArchivedMemoryList({
+  archives,
+  totalArchives,
+  expanded,
+  setExpanded,
+  renderWithLinks,
+  t,
+}: {
+  archives: MemoryArchive[];
+  totalArchives: number;
+  expanded: string | null;
+  setExpanded: (key: string | null) => void;
+  renderWithLinks: (text: string) => ReactNode[];
+  t: ReturnType<typeof useT>;
+}) {
+  if (totalArchives === 0) return null;
+  return (
+    <div className="mem-archive-block">
+      <div className="mem-section__row">
+        <div>
+          <div className="mem-section__title">{t("memory.archivedMemories")}</div>
+          <div className="mem-note">{t("memory.archivedHint")}</div>
+        </div>
+        <span className="mem-count">{totalArchives}</span>
+      </div>
+      {archives.length === 0 ? (
+        <div className="mem-empty">{t("memory.noArchivedMatches")}</div>
+      ) : (
+        <div className="mem-facts mem-facts--archive">
+          {archives.map((f) => {
+            const key = archiveKey(f);
+            const isOpen = expanded === key;
+            return (
+              <article className="mem-fact mem-fact--archived" data-mem-type={f.type || "other"} key={key}>
+                <button
+                  className="mem-fact__summary"
+                  onClick={() => setExpanded(isOpen ? null : key)}
+                  type="button"
+                >
+                  {isOpen ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+                  <span className="mem-fact__main">
+                    <span className="mem-fact__title">{displayTitle(f)}</span>
+                    <span className="mem-fact__meta">
+                      {f.type && <span className="mem-fact__type" data-mem-type={f.type}>{f.type}</span>}
+                      <span className="mem-fact__slug">{f.name}</span>
+                      {f.archivedAt && (
+                        <span className="mem-fact__archived">
+                          {t("memory.archivedAt", { time: formatArchivedAt(f.archivedAt) })}
+                        </span>
+                      )}
+                    </span>
+                    <span className="mem-fact__desc">{f.description}</span>
+                  </span>
+                </button>
+                {isOpen && (
+                  <div className="mem-fact__detail">
+                    {f.body ? (
+                      <div className="mem-fact__body">{renderWithLinks(f.body)}</div>
+                    ) : (
+                      <div className="mem-empty">{t("memory.noBody")}</div>
+                    )}
+                    <div className="mem-archive__path">{f.path}</div>
+                  </div>
+                )}
+              </article>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function uniqueLinks(body: string, names: Set<string>): LinkInfo[] {
@@ -116,6 +209,7 @@ export function MemoryPanel({
   const [query, setQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [expandedArchive, setExpandedArchive] = useState<string | null>(null);
   const [confirmForget, setConfirmForget] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const factRefs = useRef<Record<string, HTMLElement | null>>({});
@@ -127,28 +221,35 @@ export function MemoryPanel({
   const [filter, setFilter] = useState("");
 
   const facts = view?.facts ?? [];
+  const archives = view?.archives ?? [];
   const factNames = useMemo(() => new Set(facts.map((f) => f.name)), [facts]);
   const factTypes = useMemo(
-    () => Array.from(new Set(facts.map((f) => f.type).filter(Boolean))).sort(),
-    [facts],
+    () => Array.from(new Set([...facts, ...archives].map((f) => f.type).filter(Boolean))).sort(),
+    [facts, archives],
   );
   const normalizedQuery = query.trim().toLowerCase();
   const normalizedFilter = filter.trim().toLowerCase();
   const filteredFacts = useMemo(
     () =>
       facts.filter((f) => {
-        if (typeFilter !== "all" && f.type !== typeFilter) return false;
         if (normalizedFilter) {
           const hay = [f.name, f.description, f.body].join(" ").toLowerCase();
           if (!hay.includes(normalizedFilter)) return false;
         }
-        if (!normalizedQuery) return true;
-        return [displayTitle(f), f.name, f.description, f.type, f.body]
-          .join(" ")
-          .toLowerCase()
-          .includes(normalizedQuery);
+        return memoryMatches(f, normalizedQuery, typeFilter);
       }),
     [facts, normalizedQuery, normalizedFilter, typeFilter],
+  );
+  const filteredArchives = useMemo(
+    () =>
+      archives.filter((f) => {
+        if (normalizedFilter) {
+          const hay = [f.name, f.description, f.body, f.path].join(" ").toLowerCase();
+          if (!hay.includes(normalizedFilter)) return false;
+        }
+        return memoryMatches(f, normalizedQuery, typeFilter);
+      }),
+    [archives, normalizedQuery, normalizedFilter, typeFilter],
   );
 
   const scrollToFact = (name: string) => {
@@ -270,7 +371,7 @@ export function MemoryPanel({
             <div className="drawer__title">{t("memory.title")}</div>
             {view?.available && (
               <div className="drawer__summary">
-                {t("memory.summary", { facts: facts.length, docs: view.docs.length })}
+                {t("memory.summary", { facts: facts.length, archives: archives.length, docs: view.docs.length })}
               </div>
             )}
           </div>
@@ -449,6 +550,17 @@ export function MemoryPanel({
               )}
             </section>
 
+            {archives.length > 0 && <section className="mem-section">
+              <ArchivedMemoryList
+                archives={filteredArchives}
+                totalArchives={archives.length}
+                expanded={expandedArchive}
+                setExpanded={setExpandedArchive}
+                renderWithLinks={renderWithLinks}
+                t={t}
+              />
+            </section>}
+
             {/* Quick-add: scope selector + note, mirroring the "#" shortcut. */}
             <section className="mem-section">
               <div className="mem-section__title">{t("memory.quickAdd")}</div>
@@ -599,6 +711,7 @@ export function MemorySettingsPage() {
 	const [query, setQuery] = useState("");
 	const [typeFilter, setTypeFilter] = useState("all");
 	const [expanded, setExpanded] = useState<string | null>(null);
+	const [expandedArchive, setExpandedArchive] = useState<string | null>(null);
 	const [expandedDoc, setExpandedDoc] = useState<string | null>(null);
 	const [confirmForget, setConfirmForget] = useState<string | null>(null);
 	const [error, setError] = useState<string | null>(null);
@@ -612,23 +725,26 @@ export function MemorySettingsPage() {
 	useEffect(() => { void reload(); }, [reload]);
 
 	const facts = view?.facts ?? [];
+	const archives = view?.archives ?? [];
 	const factNames = useMemo(() => new Set(facts.map((f) => f.name)), [facts]);
 	const factTypes = useMemo(
-		() => Array.from(new Set(facts.map((f) => f.type).filter(Boolean))).sort(),
-		[facts],
+		() => Array.from(new Set([...facts, ...archives].map((f) => f.type).filter(Boolean))).sort(),
+		[facts, archives],
 	);
 	const normalizedQuery = query.trim().toLowerCase();
 	const filteredFacts = useMemo(
 		() =>
-			facts.filter((f) => {
+			facts.filter((f) => memoryMatches(f, normalizedQuery, typeFilter)),
+		[facts, normalizedQuery, typeFilter],
+	);
+	const filteredArchives = useMemo(
+		() =>
+			archives.filter((f) => {
 				if (typeFilter !== "all" && f.type !== typeFilter) return false;
 				if (!normalizedQuery) return true;
-				return [displayTitle(f), f.name, f.description, f.type, f.body]
-					.join(" ")
-					.toLowerCase()
-					.includes(normalizedQuery);
+				return memoryMatches(f, normalizedQuery, "all") || [f.path, f.archivedAt].join(" ").toLowerCase().includes(normalizedQuery);
 			}),
-		[facts, normalizedQuery, typeFilter],
+		[archives, normalizedQuery, typeFilter],
 	);
 
 	const scrollToFact = useCallback((name: string) => {
@@ -980,6 +1096,14 @@ export function MemorySettingsPage() {
 						})}
 					</div>
 				)}
+				<ArchivedMemoryList
+					archives={filteredArchives}
+					totalArchives={archives.length}
+					expanded={expandedArchive}
+					setExpanded={setExpandedArchive}
+					renderWithLinks={renderWithLinks}
+					t={t}
+				/>
 				{view.storeDir && (
 					<div className="mem-hint">{t("memory.storedUnder", { dir: view.storeDir })}</div>
 				)}

@@ -7120,6 +7120,8 @@ a[href] {
   align-items: baseline;
   gap: 8px;
   overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-family: var(--mono);
   font-size: 11.5px;
   line-height: 1.35;
@@ -7600,6 +7602,14 @@ a[href] {
   flex-direction: column;
   gap: 8px;
 }
+.mem-archive-block {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-soft);
+}
+.mem-facts--archive {
+  gap: 6px;
+}
 .mem-fact {
   position: relative;
   border: 1px solid var(--border-soft);
@@ -7613,6 +7623,14 @@ a[href] {
   transform: translateY(-1px);
   box-shadow: 0 4px 14px -8px rgba(0, 0, 0, 0.5);
 }
+.mem-fact--archived {
+  --mem-type-color: var(--fg-faint);
+  background: color-mix(in srgb, var(--bg-elev) 52%, var(--bg) 48%);
+  opacity: 0.86;
+}
+.mem-fact--archived:hover {
+  opacity: 1;
+}
 /* M2: per-type accent stripe down the card's left edge. */
 .mem-fact::before {
   content: "";
@@ -7623,6 +7641,10 @@ a[href] {
   width: 3px;
   background: var(--mem-type-color, var(--fg-faint));
   opacity: 0.85;
+}
+.mem-fact--archived::before {
+  background: var(--fg-faint);
+  opacity: 0.55;
 }
 /* M1: type-keyed accent colors, shared by the stripe and the chip. */
 .mem-fact[data-mem-type="user"] { --mem-type-color: #3b82f6; }
@@ -7695,6 +7717,10 @@ a[href] {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.mem-fact__archived {
+  flex: none;
+  color: var(--fg-faint);
+}
 .mem-fact__desc {
   min-width: 0;
   font-size: 12px;
@@ -7745,6 +7771,16 @@ a[href] {
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
+}
+.mem-archive__path {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-soft);
+  color: var(--fg-faint);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.45;
+  word-break: break-all;
 }
 .mem-fact__forget {
   display: inline-flex;

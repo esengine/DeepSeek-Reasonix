@@ -308,6 +308,82 @@ func TestApprovalAllowOnce(t *testing.T) {
 	}
 }
 
+func TestMemoryApprovalRequestShowsRememberPayload(t *testing.T) {
+	approvals := make(chan event.Approval, 1)
+	c := New(Options{Sink: event.FuncSink(func(e event.Event) {
+		if e.Kind == event.ApprovalRequest {
+			approvals <- e.Approval
+		}
+	})})
+
+	args := json.RawMessage(`{
+		"name": "stable-retrieval-conclusion",
+		"description": "History retrieval should reuse stable synthesized conclusions.",
+		"type": "feedback",
+		"body": "**Why:** repeated history scans are expensive.\n\n**How to apply:** save the stable summary as a memory document."
+	}`)
+	result := make(chan string, 1)
+	go func() {
+		allow, _, err := gateApprover{c}.Approve(context.Background(), "remember", "", args)
+		if err != nil {
+			result <- err.Error()
+			return
+		}
+		if !allow {
+			result <- "memory approval denied"
+			return
+		}
+		result <- ""
+	}()
+
+	var approval event.Approval
+	select {
+	case approval = <-approvals:
+	case <-time.After(2 * time.Second):
+		t.Fatal("memory approval request was not emitted")
+	}
+	for _, want := range []string{
+		`Save/update memory "stable-retrieval-conclusion"`,
+		"[feedback]",
+		"History retrieval should reuse stable synthesized conclusions.",
+		"repeated history scans are expensive",
+		"save the stable summary",
+	} {
+		if !strings.Contains(approval.Subject, want) {
+			t.Fatalf("approval subject %q does not contain %q", approval.Subject, want)
+		}
+	}
+	if strings.Contains(approval.Subject, "\n") {
+		t.Fatalf("approval subject should be compact for TUI rendering, got %q", approval.Subject)
+	}
+
+	c.Approve(approval.ID, true, true, true)
+	select {
+	case msg := <-result:
+		if msg != "" {
+			t.Fatalf("Approve returned %s", msg)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("memory approval stayed blocked after Approve")
+	}
+}
+
+func TestMemoryApprovalSubjectsAndNotifications(t *testing.T) {
+	forgetSubject := approvalDisplaySubject("forget", "", json.RawMessage(`{"name":"wrong-memory"}`))
+	if forgetSubject != `Archive memory "wrong-memory"` {
+		t.Fatalf("forget approval subject = %q", forgetSubject)
+	}
+	if got := approvalNotificationText("remember", "Save/update memory with private details"); got != "approval needed: remember" {
+		t.Fatalf("remember notification = %q", got)
+	}
+	if got := approvalNotificationText("forget", `Archive memory "wrong-memory"`); got != "approval needed: forget" {
+		t.Fatalf("forget notification = %q", got)
+	}
+	if got := approvalNotificationText("bash", "go test ./..."); got != "approval needed: bash go test ./..." {
+		t.Fatalf("bash notification = %q", got)
+	}
+}
+
 // TestApprovalDeny confirms a declined call returns allow=false.
 func TestApprovalDeny(t *testing.T) {
 	c, ids, _ := approvalIDs()

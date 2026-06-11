@@ -527,7 +527,7 @@ export const zh: Record<DictKey, string> = {
 
   // 记忆抽屉
   "memory.title": "记忆",
-  "memory.summary": "{facts} 条已保存 · {docs} 个文件",
+  "memory.summary": "{facts} 条已保存 · {archives} 条归档 · {docs} 个文件",
   "memory.unavailable": "记忆功能不可用。",
   "memory.quickAdd": "快速添加",
   "memory.whereToSave": "保存到哪里",
@@ -562,14 +562,18 @@ export const zh: Record<DictKey, string> = {
   "memory.noMatches": "没有符合当前筛选的记忆。",
   "memory.clearFilters": "清空筛选",
   "memory.noFacts": "还没有保存任何内容。智能体会通过 remember 工具写入这些。",
+  "memory.archivedMemories": "归档的记忆",
+  "memory.archivedHint": "仅用于追溯来源。归档记忆不会作为 active memory 被加载或检索。",
+  "memory.archivedAt": "归档于 {time}",
+  "memory.noArchivedMatches": "没有符合当前筛选的归档记忆。",
   "memory.links": "记忆互链",
   "memory.noBody": "这条记忆没有正文。",
   "memory.missingLinks": "{n} 条互链目标不存在",
   "memory.appliesNow": "变更会在当前会话生效。",
   "memory.storedUnder": "存放于 {dir}",
 
-  "memory.forget": "删除",
-  "memory.confirmForget": "确认删除",
+  "memory.forget": "归档",
+  "memory.confirmForget": "确认归档",
   "memory.deadLink": "没有名为「{name}」的记忆",
 
   "memory.filterPlaceholder": "筛选指令文件与记忆…",

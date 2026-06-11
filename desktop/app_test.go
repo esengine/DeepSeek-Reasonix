@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -16,6 +17,7 @@ import (
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
+	"reasonix/internal/memory"
 	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
 )
@@ -89,6 +91,77 @@ func TestEffortDefaultsBeforeStartup(t *testing.T) {
 	got := NewApp().Effort()
 	if !got.Supported || got.Current != "auto" || got.Default != "high" || !hasLevel(got.Levels, "auto") {
 		t.Fatalf("pre-startup Effort() = %+v, want auto with DeepSeek default high", got)
+	}
+}
+
+func TestMemoryViewReturnsNonNilArraysBeforeStartup(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	view := NewApp().Memory()
+	if view.Docs == nil || view.Facts == nil || view.Archives == nil || view.Scopes == nil {
+		t.Fatalf("Memory() arrays must be non-nil before startup: %+v", view)
+	}
+	raw, err := json.Marshal(view)
+	if err != nil {
+		t.Fatalf("marshal Memory(): %v", err)
+	}
+	for _, bad := range []string{`"docs":null`, `"facts":null`, `"archives":null`, `"scopes":null`} {
+		if strings.Contains(string(raw), bad) {
+			t.Fatalf("Memory() JSON contains %s; frontend expects []: %s", bad, raw)
+		}
+	}
+}
+
+func TestMemoryViewIncludesActiveAndArchivedFacts(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	userDir := t.TempDir()
+	cwd := t.TempDir()
+	store := memory.Store{Dir: filepath.Join(userDir, "projects", "test", "memory")}
+	if _, err := store.Save(memory.Memory{
+		Name:        "active-fact",
+		Title:       "Active fact",
+		Description: "Still applies",
+		Type:        memory.TypeProject,
+		Body:        "Active body",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Save(memory.Memory{
+		Name:        "archived-fact",
+		Description: "No longer applies",
+		Type:        memory.TypeFeedback,
+		Body:        "Archived body",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Archive("archived-fact"); err != nil {
+		t.Fatalf("Archive: %v", err)
+	}
+
+	app := NewApp()
+	app.setTestCtrl(control.New(control.Options{Memory: &memory.Set{
+		Docs:    []memory.Source{{Path: filepath.Join(cwd, "AGENTS.md"), Scope: memory.ScopeProject, Body: "Project instructions"}},
+		Store:   store,
+		CWD:     cwd,
+		UserDir: userDir,
+	}}), "test-model")
+
+	view := app.Memory()
+	if !view.Available || view.StoreDir != store.Dir {
+		t.Fatalf("Memory() availability/store = %v/%q, want true/%q", view.Available, view.StoreDir, store.Dir)
+	}
+	if len(view.Docs) != 1 || view.Docs[0].Scope != "project" || !strings.Contains(view.Docs[0].Body, "Project instructions") {
+		t.Fatalf("Memory() docs = %+v", view.Docs)
+	}
+	if len(view.Facts) != 1 || view.Facts[0].Name != "active-fact" || view.Facts[0].Type != "project" {
+		t.Fatalf("Memory() active facts = %+v", view.Facts)
+	}
+	if len(view.Archives) != 1 || view.Archives[0].Name != "archived-fact" || view.Archives[0].Type != "feedback" ||
+		view.Archives[0].Path == "" || view.Archives[0].ArchivedAt == "" {
+		t.Fatalf("Memory() archived facts = %+v", view.Archives)
+	}
+	if len(view.Scopes) != 3 {
+		t.Fatalf("Memory() scopes = %+v, want user/project/local", view.Scopes)
 	}
 }
 

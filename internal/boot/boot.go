@@ -25,6 +25,7 @@ import (
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
+	"reasonix/internal/history"
 	"reasonix/internal/hook"
 	"reasonix/internal/installsource"
 	"reasonix/internal/instruction"
@@ -191,6 +192,11 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	allSkillStore := skill.New(skill.Options{ProjectRoot: root, CustomPaths: cfg.SkillCustomPaths(), ExcludedPaths: cfg.SkillExcludedPaths(), MaxDepth: cfg.SkillMaxDepth(), Stderr: io.Discard})
 	allSkills := allSkillStore.List()
 	sysPrompt = skill.ApplyIndex(sysPrompt, skills)
+
+	sessionDir := opts.SessionDir
+	if sessionDir == "" {
+		sessionDir = config.SessionDir()
+	}
 
 	reg := tool.NewRegistry()
 	bashSpec := sandbox.Spec{Mode: cfg.BashMode(), WriteRoots: cfg.WriteRootsForRoot(root), Network: cfg.Sandbox.Network}
@@ -453,9 +459,11 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		WithTranscripts(subagentStore, root, modelName, entry.Effort).
 		WithTranscriptIdentityResolver(subagentIdentity))
 
-	// The `remember` tool lets the model persist durable facts to the project's
-	// auto-memory store; `forget` prunes ones that turn out wrong. The saved index
-	// loads into the prefix on the next session.
+	// The `memory` tool searches/reads saved facts on demand; `remember` persists
+	// durable facts to the project's auto-memory store; `forget` prunes ones that
+	// turn out wrong. The saved index loads into the prefix on the next session.
+	reg.Add(history.NewTool(history.Options{SessionDir: sessionDir, GlobalSessionDir: config.SessionDir(), ArchiveDir: config.ArchiveDir()}))
+	reg.Add(memory.NewRecallTool(mem.Store))
 	reg.Add(memory.NewRememberTool(mem.Store))
 	reg.Add(memory.NewForgetTool(mem.Store))
 
@@ -695,11 +703,6 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			return nil, fmt.Errorf("auto_plan_classifier %q: %w", cm, err)
 		}
 		classifier = control.NewProviderAutoPlanClassifier(classifierProv)
-	}
-
-	sessionDir := opts.SessionDir
-	if sessionDir == "" {
-		sessionDir = config.SessionDir()
 	}
 
 	ctrlOpts := control.Options{

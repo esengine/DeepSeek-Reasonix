@@ -4050,32 +4050,44 @@ type MemoryFact struct {
 	Body        string `json:"body"`
 }
 
+// MemoryArchive is one archived auto-memory kept only for inspection.
+type MemoryArchive struct {
+	Name        string `json:"name"`
+	Title       string `json:"title,omitempty"`
+	Description string `json:"description"`
+	Type        string `json:"type"`
+	Body        string `json:"body"`
+	Path        string `json:"path"`
+	ArchivedAt  string `json:"archivedAt,omitempty"`
+}
+
 // MemoryScope is one writable quick-add target (scope id + the file it writes to).
 type MemoryScope struct {
 	Scope string `json:"scope"`
 	Path  string `json:"path"`
 }
 
-// MemoryView is the whole memory panel payload: hierarchical docs, saved facts,
-// and the writable scopes for the quick-add selector.
+// MemoryView is the whole memory panel payload: hierarchical docs, active saved
+// facts, archived facts, and the writable scopes for the quick-add selector.
 type MemoryView struct {
-	Docs      []MemoryDoc   `json:"docs"`
-	Facts     []MemoryFact  `json:"facts"`
-	Scopes    []MemoryScope `json:"scopes"`
-	StoreDir  string        `json:"storeDir"`
-	Available bool          `json:"available"`
+	Docs      []MemoryDoc     `json:"docs"`
+	Facts     []MemoryFact    `json:"facts"`
+	Archives  []MemoryArchive `json:"archives"`
+	Scopes    []MemoryScope   `json:"scopes"`
+	StoreDir  string          `json:"storeDir"`
+	Available bool            `json:"available"`
 }
 
 // writableScopes are the quick-add targets the panel offers, broad → specific.
 var writableScopes = []memory.Scope{memory.ScopeUser, memory.ScopeProject, memory.ScopeLocal}
 
-// Memory returns the loaded memory for the panel: the REASONIX.md hierarchy, the
-// saved auto-memories, and the writable scopes. Read-only; mutations go through
-// Remember / SaveDoc.
+// Memory returns the loaded memory for the panel: the REASONIX.md hierarchy,
+// active/archived auto-memories, and the writable scopes. Read-only; mutations
+// go through Remember / SaveDoc.
 func (a *App) Memory() MemoryView {
 	// Always return non-nil slices: a nil Go slice marshals to JSON `null`, which
 	// would crash the panel's `view.facts.length` / `.map`.
-	view := MemoryView{Docs: []MemoryDoc{}, Facts: []MemoryFact{}, Scopes: []MemoryScope{}}
+	view := MemoryView{Docs: []MemoryDoc{}, Facts: []MemoryFact{}, Archives: []MemoryArchive{}, Scopes: []MemoryScope{}}
 	a.mu.RLock()
 	ctrl := a.activeCtrlLocked()
 	a.mu.RUnlock()
@@ -4094,6 +4106,16 @@ func (a *App) Memory() MemoryView {
 	for _, f := range set.Store.List() {
 		view.Facts = append(view.Facts, MemoryFact{
 			Name: f.Name, Title: f.Title, Description: f.Description, Type: string(f.Type), Body: f.Body,
+		})
+	}
+	for _, f := range set.Store.ListArchived() {
+		archivedAt := ""
+		if !f.ArchivedAt.IsZero() {
+			archivedAt = f.ArchivedAt.Format(time.RFC3339)
+		}
+		view.Archives = append(view.Archives, MemoryArchive{
+			Name: f.Name, Title: f.Title, Description: f.Description, Type: string(f.Type), Body: f.Body,
+			Path: f.Path, ArchivedAt: archivedAt,
 		})
 	}
 	for _, sc := range writableScopes {

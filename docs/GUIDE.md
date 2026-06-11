@@ -206,6 +206,20 @@ another branch. **Custom commands** are Markdown files under `.reasonix/commands
 `/review`, a subdirectory namespaces it (`git/commit.md` → `/git:commit`). The
 body is a prompt template; invoking the command sends it as a turn.
 
+`/memory` lists both memory documents (`REASONIX.md` / `AGENTS.md`) and saved
+auto-memory facts. During agent turns, the read-only `history` and `memory`
+tools let the model retrieve prior session decisions, compacted-history
+archives, and saved facts on demand instead of injecting that dynamic state into
+the stable system prompt. `/forget <name>` archives a saved fact rather than
+deleting it permanently; the CLI/TUI and desktop memory panel can show those
+archived files for traceability, but they are not searched as active memory.
+Agent-initiated `remember` and `forget` calls always ask for fresh approval and
+show a compact preview of the saved or archived memory before they run.
+Retrieval keeps the top BM25 result while trimming weak common-word matches, and
+0-result responses suggest narrower, more distinctive follow-up searches.
+For implementation details, see
+[`SESSION_MEMORY_RETRIEVAL.md`](SESSION_MEMORY_RETRIEVAL.md).
+
 ```markdown
 ---
 description: Review the staged diff
