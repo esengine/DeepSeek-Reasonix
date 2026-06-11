@@ -311,6 +311,27 @@ func TestConsecutiveToolCallsKeepMarkersUnderOwnCard(t *testing.T) {
 	}
 }
 
+// TestRepeatedShellCommandDoesNotAccumulateOutput is the regression test for a
+// re-run of the same "!" command (e.g. !pwd three times). RunShell derives a
+// stable id from the command text ("shell-pwd"), so streamToolOutput kept
+// appending each run's output onto the previous run's in m.shellOutputs[id];
+// beginToolRunning now clears the entry so each run starts from a clean slate.
+func TestRepeatedShellCommandDoesNotAccumulateOutput(t *testing.T) {
+	m := newTestChatTUI()
+	const id = "shell-pwd"
+	const out = "/home/user/project\n"
+
+	for range 3 {
+		m.ingestEvent(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{ID: id, Name: "bash", Args: `{"command":"pwd"}`}})
+		m.ingestEvent(event.Event{Kind: event.ToolProgress, Tool: event.Tool{ID: id, Output: out}})
+		m.ingestEvent(event.Event{Kind: event.ToolResult, Tool: event.Tool{ID: id, Name: "bash", Output: out}})
+	}
+
+	if got := m.shellOutputs[id]; got != out {
+		t.Fatalf("a re-run must not accumulate prior output: shellOutputs[%q] = %q, want %q", id, got, out)
+	}
+}
+
 // TestConsecutiveNonShellToolsDoNotRenderNegativeLineCount is the regression
 // test for the review-blocking case. The original fix to back-to-back shell
 // tools records every dispatched id in shellTranscriptIdx so a late
