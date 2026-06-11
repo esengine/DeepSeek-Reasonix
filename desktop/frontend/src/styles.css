@@ -3604,6 +3604,7 @@ a[href] {
 
 /* ── code (editor seam fallback) ─────────────────────────────────────────── */
 .code {
+  position: relative;
   margin: 10px 0;
   padding: 11px 13px;
   background: var(--bg-soft);
@@ -3632,29 +3633,39 @@ a[href] {
   padding: 3px 7px;
   font: inherit;
   font-size: 11px;
-  transition: color 0.12s, border-color 0.12s;
+  transition: color 0.12s, border-color 0.12s, gap 0.12s;
 }
 .copybtn:hover {
   color: var(--fg);
   border-color: var(--fg-faint);
+  gap: 6px;
 }
-.copybtn__label {
-  line-height: 1.25;
+/* Show the "Copy" text only on hover, inside the button — no overflow risk */
+.copybtn__label-inline {
+  max-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  transition: max-width 0.12s;
 }
-.code-block {
-  position: relative;
+.copybtn:hover .copybtn__label-inline {
+  max-width: 60px;
 }
+
 .code-block__copy {
   position: absolute;
-  top: 7px;
-  right: 7px;
+  top: 6px;
+  right: 6px;
   z-index: var(--z-local-raised);
   opacity: 0;
   padding: 3px 5px;
   transition: opacity 0.12s;
 }
-.code-block:hover .code-block__copy {
+.code-block__copy:hover,
+.code:hover .code-block__copy {
   opacity: 1;
+}
+.code-block__wrap {
+  position: relative;
 }
 .msg--assistant .msg__body {
   line-height: 1.68;
