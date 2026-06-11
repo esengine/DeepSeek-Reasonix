@@ -947,6 +947,7 @@ export const en = {
   "msg.thinkingDone": "done",
   "msg.copy": "Copy",
   "msg.attachments": "Attachments",
+  "msg.sendFailed": "Send failed — message was not delivered",
   "msg.fileAttachment": "File",
   "msg.imageAttachment": "Image",
   "msg.workspaceReference": "Workspace reference",

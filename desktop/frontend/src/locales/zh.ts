@@ -949,6 +949,7 @@ export const zh: Record<DictKey, string> = {
   "msg.thinkingDone": "已完成",
   "msg.copy": "复制",
   "msg.attachments": "附件",
+  "msg.sendFailed": "发送失败 — 消息未送达",
   "msg.fileAttachment": "文件",
   "msg.imageAttachment": "图片",
   "msg.workspaceReference": "工作区引用",

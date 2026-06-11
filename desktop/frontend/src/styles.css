@@ -2620,6 +2620,15 @@ a[href] {
   font-weight: 450;
   line-height: 1.65;
 }
+.msg--user-failed .msg__body {
+  opacity: 0.7;
+  border-color: color-mix(in srgb, var(--danger) 35%, transparent);
+}
+.msg__send-failed {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--danger);
+}
 .msg-attachments {
   display: flex;
   flex-direction: column;

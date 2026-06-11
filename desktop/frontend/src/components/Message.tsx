@@ -19,19 +19,22 @@ function attachmentIcon(kind: "image" | "file" | "folder") {
 
 export function UserMessage({
   text,
+  failed,
   turn,
   anchorId,
 }: {
   text: string;
+  failed?: boolean;
   turn?: number;
   anchorId?: string;
 }) {
   const t = useT();
   const { text: displayText, attachments } = parseAttachmentRefsForDisplay(text);
   return (
-    <div className="msg msg--user" id={anchorId} data-question-anchor={anchorId} data-turn={turn}>
+    <div className={`msg msg--user${failed ? " msg--user-failed" : ""}`} id={anchorId} data-question-anchor={anchorId} data-turn={turn}>
       <div className="msg__body">
         {displayText && <div className="msg__text">{displayText}</div>}
+        {failed && <div className="msg__send-failed">{t("msg.sendFailed")}</div>}
         {attachments.length > 0 && (
           <div className="msg-attachments" aria-label={t("msg.attachments")}>
             {attachments.map((attachment, index) => (

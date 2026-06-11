@@ -37,7 +37,7 @@ export type MessageActionScope = "fork" | "summ-from" | "summ-upto" | "conversat
 export type MessageActionState = { turn: number; scope: MessageActionScope };
 
 export type Item =
-  | { kind: "user"; id: string; text: string }
+  | { kind: "user"; id: string; text: string; failed?: boolean }
   | { kind: "assistant"; id: string; text: string; reasoning: string; streaming: boolean }
   | { kind: "phase"; id: string; text: string }
   | { kind: "notice"; id: string; level: "info" | "warn"; text: string }
@@ -92,7 +92,7 @@ interface State {
   seq: number;
 }
 
-const initialState: State = {
+export const initialState: State = {
   items: [],
   running: false,
   turnActive: false,
@@ -127,6 +127,7 @@ type Action =
   | { type: "event"; e: WireEvent }
   | { type: "user"; text: string; seq: number }
   | { type: "unsend" }
+  | { type: "send_failed"; error: string }
   | { type: "backend_status"; running: boolean }
   | { type: "meta"; meta: Meta }
   | { type: "context"; context: ContextInfo }
@@ -385,7 +386,7 @@ function applyEvent(s: State, e: WireEvent): State {
   }
 }
 
-function reducer(s: State, a: Action): State {
+export function reducer(s: State, a: Action): State {
   switch (a.type) {
     case "user": {
       const seq = a.seq !== undefined ? a.seq : s.seq;
@@ -401,6 +402,17 @@ function reducer(s: State, a: Action): State {
       };
     }
     case "unsend": return { ...s, pendingUser: undefined, discardTurn: true, running: false, live: undefined };
+    case "send_failed": {
+      if (s.pendingUser === undefined) return s;
+      let idx = -1;
+      for (let i = s.items.length - 1; i >= 0; i--) {
+        const it = s.items[i];
+        if (it.kind === "user" && it.text === s.pendingUser) { idx = i; break; }
+      }
+      const items = idx >= 0 ? s.items.map((it, i) => (i === idx ? { ...it, failed: true } : it)) : s.items;
+      const notice: Item = { kind: "notice", id: `n${s.seq}`, level: "warn", text: a.error };
+      return { ...s, pendingUser: undefined, running: false, turnActive: false, live: undefined, seq: s.seq + 1, items: [...items, notice] };
+    }
     case "backend_status": {
       if (a.running === s.running) return s;
       if (a.running) return { ...s, running: true, turnActive: true, turnStartAt: s.turnStartAt || Date.now() };
@@ -645,7 +657,9 @@ export function useController() {
       dispatchTo(tabId, { type: "user", text: displayText, seq });
       const display = displayText.trim();
       const submit = submitText.trim();
-      (display !== submit ? app.SubmitDisplayToTab(tabId, display, submit) : app.SubmitToTab(tabId, submit)).catch(() => {});
+      (display !== submit ? app.SubmitDisplayToTab(tabId, display, submit) : app.SubmitToTab(tabId, submit)).catch((error) => {
+        dispatchTo(tabId, { type: "send_failed", error: `Send failed: ${error instanceof Error ? error.message : String(error)}` });
+      });
     };
     const tabId = activeTabIdRef.current ?? activeTabId;
     if (tabId) {
