@@ -192,6 +192,21 @@ func (c *Config) SetDesktopCloseBehavior(mode string) error {
 	return nil
 }
 
+// SetDesktopDisplayMode sets the transcript display mode. UI-only.
+func (c *Config) SetDesktopDisplayMode(mode string) error {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "compact":
+		c.Desktop.DisplayMode = "compact"
+	case "minimal":
+		c.Desktop.DisplayMode = "minimal"
+	case "", "standard":
+		c.Desktop.DisplayMode = "standard"
+	default:
+		return fmt.Errorf("display mode %q: must be standard|compact|minimal", mode)
+	}
+	return nil
+}
+
 // SetDesktopCheckUpdates sets whether the desktop app checks for updates on
 // startup. Manual checks remain available in Settings regardless of this value.
 func (c *Config) SetDesktopCheckUpdates(enabled bool) error {

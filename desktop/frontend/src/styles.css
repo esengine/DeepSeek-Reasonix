@@ -2221,6 +2221,60 @@ a[href] {
   margin-right: auto;
 }
 
+/* ── Notice line (replaces full ProcessCard for notices) ─────────── */
+.notice-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 6px 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--fg-faint);
+  border-radius: 6px;
+}
+.notice-line--warn {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.notice-line__icon {
+  flex: 0 0 auto;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.notice-line__text {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+}
+
+/* ── TurnCollapse (compact/minimal mode) ─────────────────────────── */
+.turn-collapse {
+  margin: 4px 0;
+}
+.turn-collapse__label {
+  white-space: nowrap;
+}
+.turn-collapse__body {
+  margin-top: 6px;
+  padding-left: 12px;
+  border-left: 2px solid var(--border);
+}
+.turn-collapse__body > * {
+  margin-bottom: 6px;
+}
+
+/* ── ReadOnly batch (parent fold for read/search tools) ────────────── */
+.readonly-batch {
+  margin: 2px 0;
+}
+.readonly-batch__body {
+  display: flex;
+  flex-direction: column;
+}
+.readonly-batch__body > .tool--quiet {
+  padding-left: 20px;
+}
+
 .transcript > .jump-bar {
   max-width: none;
   margin-left: auto;
@@ -2745,14 +2799,8 @@ a[href] {
   --process-tone: var(--fg-dim);
   --process-tone-soft: color-mix(in srgb, var(--fg-dim) 12%, transparent);
   box-sizing: border-box;
-  position: relative;
-  width: 100%;
   margin: 6px auto;
-  border: 1px solid var(--border-soft);
-  border-radius: 12px;
-  background: var(--bg-elev);
   overflow: hidden;
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.02);
 }
 /* T1: a tone-colored sweep bar along the bottom while the card is running
    (running cards render a .process-card__spin status icon). */
@@ -2775,6 +2823,72 @@ a[href] {
   from { background-position: -40% 0; }
   to { background-position: 140% 0; }
 }
+.reasoning__head {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--fg-faint);
+  border-radius: 4px;
+  -webkit-app-region: no-drag;
+}
+.reasoning__head:hover {
+  color: var(--fg);
+}
+.reasoning__chevron {
+  flex: 0 0 auto;
+  transition: transform 0.15s;
+}
+.reasoning__chevron--open {
+  transform: rotate(90deg);
+}
+
+/* ── Shimmer sweep for running items ──────────────────────────────── */
+.tool__head[data-running],
+.reasoning__head[data-running] {
+  background: linear-gradient(
+    105deg,
+    var(--fg-faint) 0%,
+    var(--fg-faint) 38%,
+    var(--fg) 46%,
+    var(--fg) 54%,
+    var(--fg-faint) 62%,
+    var(--fg-faint) 100%
+  );
+  background-size: 220% 100%;
+  background-position: 100% 0;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  animation: shimmer-sweep 5s linear infinite;
+}
+.tool__head[data-running] .tool__chevron,
+.tool__head[data-running] .tool__duration,
+.reasoning__head[data-running] svg,
+.reasoning__head[data-running] .reasoning__meta {
+  color: var(--fg-faint);
+}
+.tool__head[data-running]:hover,
+.reasoning__head[data-running]:hover {
+  animation-play-state: paused;
+  background: none;
+  color: var(--fg);
+}
+.tool__head[data-running]:hover .tool__chevron,
+.tool__head[data-running]:hover .tool__duration,
+.reasoning__head[data-running]:hover svg,
+.reasoning__head[data-running]:hover .reasoning__meta {
+  color: var(--fg);
+}
+@keyframes shimmer-sweep {
+  0% { background-position: 220% 0; }
+  100% { background-position: -220% 0; }
+}
+
 .process-card[data-tone="success"] {
   --process-tone: var(--ok);
   --process-tone-soft: color-mix(in srgb, var(--ok) 16%, transparent);
@@ -2797,29 +2911,28 @@ a[href] {
 }
 .process-card__head {
   box-sizing: border-box;
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 9px;
-  width: 100%;
-  min-height: 44px;
+  gap: 4px;
+  padding: 3px 8px;
   background: none;
   border: none;
-  color: inherit;
+  color: var(--fg-faint);
   font: inherit;
   font-size: 13px;
-  padding: 8px 14px;
   text-align: left;
   cursor: pointer;
-  user-select: none;
+  border-radius: 4px;
+  -webkit-app-region: no-drag;
 }
 .process-card__head:hover {
-  background: var(--bg-elev-2);
+  color: var(--fg);
 }
 .process-card[data-has-body="false"] .process-card__head {
   cursor: default;
 }
 .process-card[data-has-body="false"] .process-card__head:hover {
-  background: none;
+  color: var(--fg-faint);
 }
 .process-card__icon {
   display: inline-flex;
@@ -3202,9 +3315,32 @@ a[href] {
 /* ── process cards: reasoning and tool calls share the same shell ─────────── */
 .tool {
   margin: 6px auto;
-  border: 1px solid var(--border-soft);
-  border-radius: 12px;
-  background: var(--bg-elev);
+  overflow: hidden;
+}
+.tool__head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  background: none;
+  border: none;
+  color: var(--fg-faint);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 4px;
+  -webkit-app-region: no-drag;
+  overflow: hidden;
+}
+.tool__head:hover {
+  color: var(--fg);
+}
+.tool__label-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 70%;
   overflow: hidden;
 }
 .tool--running {
@@ -3270,30 +3406,29 @@ a[href] {
   font-family: var(--mono);
   font-size: var(--font-code);
   font-weight: 600;
-  color: var(--accent);
+  color: inherit;
   flex-shrink: 0;
 }
 .process-card__name .tool__name {
   color: var(--fg);
 }
 .tool__duration {
-  color: var(--fg-faint);
+  color: inherit;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 .tool__subject {
-  font-family: var(--mono);
-  font-size: var(--font-code);
-  color: var(--fg-dim);
+  flex: 1 1 auto;
+  min-width: 0;
+  color: inherit;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  min-width: 0;
 }
 .tool__profile {
   font-family: var(--mono);
   font-size: var(--font-caption);
-  color: var(--fg-faint);
+  color: inherit;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

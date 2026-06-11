@@ -77,6 +77,7 @@ type DesktopConfig struct {
 	Theme          string   `toml:"theme"`           // auto|dark|light; empty resolves to dark
 	ThemeStyle     string   `toml:"theme_style"`     // graphite|aurora|slate|carbon|nocturne|amber and legacy aliases
 	CloseBehavior  string   `toml:"close_behavior"`  // quit|background; desktop window close behavior
+	DisplayMode    string   `toml:"display_mode"`    // standard|compact|minimal; transcript display mode
 	CheckUpdates   *bool    `toml:"check_updates"`   // startup update checks; nil keeps the default enabled
 	ProviderAccess []string `toml:"provider_access"` // desktop-only list of provider entries shown in Settings > Model > Access
 	ExpandThinking bool     `toml:"expand_thinking"` // true = show reasoning text expanded by default; false = collapsed
@@ -186,6 +187,21 @@ func (c *Config) DesktopCloseBehavior() string {
 // UICloseBehavior is the legacy name for DesktopCloseBehavior.
 func (c *Config) UICloseBehavior() string {
 	return c.DesktopCloseBehavior()
+}
+
+// DesktopDisplayMode normalizes the transcript display mode. Default is
+// "minimal" (collapsed model-generated intermediate items).
+func (c *Config) DesktopDisplayMode() string {
+	switch strings.ToLower(strings.TrimSpace(c.Desktop.DisplayMode)) {
+	case "standard":
+		return "standard"
+	case "compact":
+		return "compact"
+	case "minimal":
+		return "minimal"
+	default:
+		return "minimal"
+	}
 }
 
 // DesktopCheckUpdates reports whether the desktop should check for updates on

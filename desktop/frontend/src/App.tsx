@@ -70,6 +70,7 @@ import {
   type RestorableToolApprovalMode,
 } from "./lib/toolApprovalMode";
 import { loadLayoutSize, saveLayoutSize } from "./lib/layoutPreferences";
+import { hydrateDisplayMode } from "./lib/displayMode";
 import { blobToBase64, renderSessionImageBlob, renderSessionPdfBlob } from "./lib/sessionExport";
 import {
   applyTheme,
@@ -546,6 +547,7 @@ export default function App() {
       if (cancelled) return;
       applyDesktopPreferences(settings);
       setExpandThinking(settings.expandThinking);
+      hydrateDisplayMode(settings.displayMode);
     };
     void syncDesktopPreferences().catch((e) => {
       console.warn("desktop preferences sync failed", e);

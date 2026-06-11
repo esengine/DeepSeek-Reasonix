@@ -726,6 +726,7 @@ export interface SettingsView {
   desktopTheme: string; // "auto" | "dark" | "light"
   desktopThemeStyle: string;
   closeBehavior: string; // "background" | "quit"
+  displayMode: string;   // "standard" | "compact" | "minimal"
   checkUpdates: boolean; // check for new versions on startup
   expandThinking: boolean; // show reasoning text expanded by default
   configPath: string;
