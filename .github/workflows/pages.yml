@@ -27,6 +27,8 @@ jobs:
           cache-dependency-path: site/package-lock.json
       - name: Build
         working-directory: site
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           npm ci
           npm run build
