@@ -166,6 +166,86 @@ func TestFeishuInstallSwitchesToLarkDomainAndStoresSecret(t *testing.T) {
 	}
 }
 
+func TestFeishuInstallStoresFeishuSecretAndSurvivesReload(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	t.Cleanup(func() { _ = os.Unsetenv("FEISHU_BOT_APP_SECRET") })
+	var hosts []string
+	withRewrittenHTTP(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/oauth/v1/app/registration" {
+			http.NotFound(w, r)
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		hosts = append(hosts, r.Form.Get("action")+":"+r.Header.Get("X-Test-Original-Host"))
+		switch r.Form.Get("action") {
+		case "begin":
+			writeJSON(t, w, map[string]any{
+				"device_code":               "dev-feishu",
+				"verification_uri_complete": "https://accounts.example/verify?user_code=CODE",
+				"user_code":                 "CODE",
+				"interval":                  3,
+				"expire_in":                 300,
+			})
+		case "poll":
+			writeJSON(t, w, map[string]any{
+				"client_id":     "cli-feishu",
+				"client_secret": "secret-feishu",
+				"user_info":     map[string]any{"tenant_brand": "feishu", "open_id": "ou-feishu-installer"},
+			})
+		default:
+			http.Error(w, "unknown action", http.StatusBadRequest)
+		}
+	}))
+
+	app := NewApp()
+	start, err := app.StartBotConnectionInstall("feishu", "")
+	if err != nil {
+		t.Fatalf("StartBotConnectionInstall: %v", err)
+	}
+	if !start.OK || start.Domain != "feishu" || start.InstallID == "" {
+		t.Fatalf("start result = %+v, want ok Feishu QR result", start)
+	}
+	poll, err := app.PollBotConnectionInstall(start.InstallID)
+	if err != nil {
+		t.Fatalf("PollBotConnectionInstall: %v", err)
+	}
+	if !poll.Done {
+		t.Fatalf("poll result = %+v, want done", poll)
+	}
+	if poll.Connection.Provider != "feishu" || poll.Connection.Domain != "feishu" || poll.Connection.ID != "feishu-feishu" {
+		t.Fatalf("connection = %+v, want feishu-feishu", poll.Connection)
+	}
+	if poll.Connection.Credential.AppID != "cli-feishu" || poll.Connection.Credential.AppSecretEnv != "FEISHU_BOT_APP_SECRET" || !poll.Connection.Credential.SecretSet {
+		t.Fatalf("credential = %+v, want stored Feishu secret", poll.Connection.Credential)
+	}
+	if got := strings.Join(hosts, ","); got != "begin:accounts.feishu.cn,poll:accounts.feishu.cn" {
+		t.Fatalf("registration hosts = %q, want Feishu begin and poll", got)
+	}
+	cfg := config.LoadForEdit(config.UserConfigPath())
+	if !cfg.Bot.Enabled || !cfg.Bot.Feishu.Enabled || cfg.Bot.Feishu.Domain != "feishu" || cfg.Bot.Feishu.AppID != "cli-feishu" {
+		t.Fatalf("saved feishu config = %+v, want enabled Feishu websocket config", cfg.Bot.Feishu)
+	}
+	if len(cfg.Bot.Allowlist.FeishuUsers) != 1 || cfg.Bot.Allowlist.FeishuUsers[0] != "ou-feishu-installer" {
+		t.Fatalf("feishu allowlist = %+v, want installer open_id", cfg.Bot.Allowlist.FeishuUsers)
+	}
+	if err := os.Unsetenv("FEISHU_BOT_APP_SECRET"); err != nil {
+		t.Fatalf("unset feishu secret env: %v", err)
+	}
+	reloaded, err := config.Load()
+	if err != nil {
+		t.Fatalf("reload config: %v", err)
+	}
+	if got := os.Getenv("FEISHU_BOT_APP_SECRET"); got != "secret-feishu" {
+		t.Fatalf("reloaded FEISHU_BOT_APP_SECRET = %q, want persisted secret", got)
+	}
+	if len(reloaded.Bot.Connections) != 1 || !botConnectionView(reloaded.Bot.Connections[0]).Credential.SecretSet {
+		t.Fatalf("reloaded connections = %+v, want secret to survive restart", reloaded.Bot.Connections)
+	}
+}
+
 func TestWeixinInstallStoresSavedAccountAndConnection(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	withRewrittenHTTP(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
