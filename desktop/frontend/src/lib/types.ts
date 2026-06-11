@@ -272,6 +272,7 @@ export interface WorkspaceView {
 export interface ContextInfo {
   used: number;
   window: number;
+  sessionTokens: number;
   compactRatio?: number;
 }
 

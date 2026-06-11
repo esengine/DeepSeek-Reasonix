@@ -97,7 +97,7 @@ const initialState: State = {
   items: [],
   running: false,
   turnActive: false,
-  context: { used: 0, window: 0 },
+  context: { used: 0, window: 0, sessionTokens: 0 },
   jobs: [],
   checkpoints: [],
   turnStartAt: 0,
@@ -358,7 +358,7 @@ function applyEvent(s: State, e: WireEvent): State {
       const usageCost = e.usage?.cost ?? e.usage?.costUsd ?? 0;
       const sessionCost = s.sessionCost + usageCost;
       const sessionCurrency = e.usage?.currency || s.sessionCurrency || "¥";
-      return { ...s, usage: e.usage, context: { ...s.context, used }, turnTokens, sessionTokens, sessionCost, sessionCurrency };
+      return { ...s, usage: e.usage, context: { ...s.context, used, sessionTokens }, turnTokens, sessionTokens, sessionCost, sessionCurrency };
     }
     case "notice":
       return { ...s, running: s.turnActive ? s.running : false, seq: s.seq + 1, items: [...s.items, { kind: "notice", id: `n${s.seq}`, level: e.level ?? "info", text: e.text ?? "" }] };
@@ -423,7 +423,12 @@ function reducer(s: State, a: Action): State {
       return { ...s, items: finalized, running: false, turnActive: false, live: undefined, currentAssistant: undefined, approval: undefined, ask: undefined };
     }
     case "meta": return sameMeta(s.meta, a.meta) ? s : { ...s, meta: a.meta };
-    case "context": return { ...s, context: a.context };
+    case "context": {
+      const sessionTokens = typeof a.context.sessionTokens === "number"
+        ? Math.max(0, a.context.sessionTokens)
+        : s.sessionTokens;
+      return { ...s, context: a.context, sessionTokens };
+    }
     case "balance": return { ...s, balance: a.balance };
     case "effort": return { ...s, effort: a.effort };
     case "jobs": return { ...s, jobs: a.jobs };
@@ -437,7 +442,7 @@ function reducer(s: State, a: Action): State {
     case "local_notice": return { ...s, running: false, turnActive: false, seq: s.seq + 1, items: [...s.items, { kind: "notice", id: `n${s.seq}`, level: a.level, text: a.text }] };
     case "clearApproval": return { ...s, approval: undefined };
     case "clearAsk": return { ...s, ask: undefined };
-    case "reset": return { ...initialState, meta: s.meta, context: { ...s.context, used: 0 }, balance: s.balance, effort: s.effort, jobs: s.jobs };
+    case "reset": return { ...initialState, meta: s.meta, context: { ...s.context, used: 0, sessionTokens: 0 }, balance: s.balance, effort: s.effort, jobs: s.jobs };
     case "event": return applyEvent(s, a.e);
     default: return s;
   }

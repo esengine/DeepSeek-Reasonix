@@ -1449,7 +1449,7 @@ function makeMockApp(): AppBindings {
       if (index >= 0) mockProjectTree.splice(index, 1);
     },
         async ContextUsage() {
-          return { used: 42124, window: 128000, compactRatio: 0.8 };
+          return { used: 42124, window: 128000, sessionTokens: 34479, compactRatio: 0.8 };
         },
         async ContextUsageForTab() {
           return this.ContextUsage();
