@@ -11838,6 +11838,13 @@ a[href] {
   --wails-draggable: no-drag;
 }
 
+/* The empty strip between the last tab and the search button must drag the
+   window like a native titlebar — the 10px top rail alone is unusable (#3853). */
+.app--darwin .app-chrome--tabs .tabbar__spacer {
+  --wails-draggable: drag;
+  align-self: stretch;
+}
+
 .app--darwin .app-chrome--tabs .app-chrome__drag-rail {
   display: block;
   position: absolute;
