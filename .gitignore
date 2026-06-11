@@ -55,3 +55,5 @@ Thumbs.db
 .idea/
 .vscode/
 /site/public/av/
+
+benchmarks/context-maintenance-e2e/run/
