@@ -16,7 +16,7 @@ import (
 type AgentStatus string
 
 const (
-	StatusIdle    AgentStatus = "idle"
+	StatusIdle    AgentStatus = "ready"
 	StatusRunning AgentStatus = "running"
 	StatusDone    AgentStatus = "done"
 )
