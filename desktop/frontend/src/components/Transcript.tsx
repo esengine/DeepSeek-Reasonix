@@ -778,7 +778,7 @@ function WarmTurnItems({
     const it = items[i];
 
     // Completed read-only tools → batch into ReadOnlyBatch
-    if (it.kind === "tool" && it.readOnly && !it.parentId && it.name !== "todo_write" && it.name !== "exit_plan_mode") {
+    if (it.kind === "tool" && it.readOnly && !it.parentId && it.name !== "todo_write" && it.name !== "exit_plan_mode" && it.status !== "running") {
       roBatch.push(it as ToolItem);
       continue;
     }
@@ -980,7 +980,6 @@ function TurnCollapse({ items, durationMs, mode, subcalls }: TurnCollapseProps) 
       )}
     </div>
   );
-
 }
 
 // ── JumpBar, PhaseCard, NoticeCard, CompactionCard ────────────────────────────
