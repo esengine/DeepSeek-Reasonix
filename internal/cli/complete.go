@@ -71,6 +71,7 @@ func (m *chatTUI) slashItems() []compItem {
 		{label: "/switch", insert: "/switch ", hint: i18n.M.CmdSwitchBranch},
 		{label: "/mcp", insert: "/mcp", hint: i18n.M.CmdMcp},
 		{label: "/model", insert: "/model ", hint: i18n.M.CmdModel, descend: true},
+		{label: "/provider", insert: "/provider ", hint: i18n.M.CmdProvider, descend: true},
 		{label: "/skills", insert: "/skills", hint: i18n.M.CmdSkill},
 		{label: "/hooks", insert: "/hooks ", hint: i18n.M.CmdHooks, descend: true},
 		{label: "/paste-image", insert: "/paste-image", hint: i18n.M.CmdPasteImage},
@@ -171,10 +172,16 @@ func (m *chatTUI) slashArgItems(val string) ([]compItem, int, bool) {
 }
 
 func (m *chatTUI) slashArgData() control.ArgData {
+	curProvider := ""
+	if parts := strings.SplitN(m.modelRef, "/", 2); len(parts) == 2 {
+		curProvider = parts[0]
+	}
 	data := control.ArgData{
-		Skills:       m.skills,
-		ModelRefs:    modelRefs(),
-		CurrentModel: m.modelRef,
+		Skills:          m.skills,
+		ModelRefs:       modelRefs(),
+		CurrentModel:    m.modelRef,
+		ProviderNames:   providerNames(),
+		CurrentProvider: curProvider,
 	}
 	if m.ctrl != nil {
 		data.DisabledSkills = m.ctrl.DisabledSkills()

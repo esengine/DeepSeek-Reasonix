@@ -62,9 +62,10 @@ type Config struct {
 // UIConfig controls CLI presentation-only settings. Desktop appearance is kept in
 // DesktopConfig so desktop preferences cannot alter terminal output or prompts.
 type UIConfig struct {
-	Theme         string `toml:"theme"`          // auto|dark|light; empty resolves to auto
-	ThemeStyle    string `toml:"theme_style"`    // graphite|aurora|slate|carbon|nocturne|amber and legacy aliases
-	CloseBehavior string `toml:"close_behavior"` // legacy desktop close behavior; prefer desktop.close_behavior
+	Theme          string `toml:"theme"`           // auto|dark|light; empty resolves to auto
+	ThemeStyle     string `toml:"theme_style"`     // graphite|aurora|slate|carbon|nocturne|amber and legacy aliases
+	ShortcutLayout string `toml:"shortcut_layout"` // classic|desktop; accepted for compatibility
+	CloseBehavior  string `toml:"close_behavior"`  // legacy desktop close behavior; prefer desktop.close_behavior
 }
 
 // DesktopConfig controls desktop-only UI preferences. It is intentionally
@@ -76,6 +77,7 @@ type DesktopConfig struct {
 	ThemeStyle     string   `toml:"theme_style"`     // graphite|aurora|slate|carbon|nocturne|amber and legacy aliases
 	CloseBehavior  string   `toml:"close_behavior"`  // quit|background; desktop window close behavior
 	DisplayMode    string   `toml:"display_mode"`    // standard|compact|minimal; transcript display mode
+	CheckUpdates   *bool    `toml:"check_updates"`   // startup update checks; nil keeps the default enabled
 	ProviderAccess []string `toml:"provider_access"` // desktop-only list of provider entries shown in Settings > Model > Access
 }
 
@@ -103,6 +105,18 @@ func (c *Config) UITheme() string {
 // for the resolved light/dark shell".
 func (c *Config) UIThemeStyle() string {
 	return normalizeThemeStyle(c.UI.ThemeStyle)
+}
+
+// UIShortcutLayout normalizes the legacy CLI shortcut layout setting. It is kept
+// for compatibility; Shift+Tab toggles Plan and Ctrl+Y toggles YOLO in both
+// layouts.
+func (c *Config) UIShortcutLayout() string {
+	switch strings.ToLower(strings.TrimSpace(c.UI.ShortcutLayout)) {
+	case "desktop", "dual", "dual-axis", "dual_axis":
+		return "desktop"
+	default:
+		return "classic"
+	}
 }
 
 func normalizeThemeStyle(style string) string {
@@ -186,6 +200,15 @@ func (c *Config) DesktopDisplayMode() string {
 	default:
 		return "minimal"
 	}
+}
+
+// DesktopCheckUpdates reports whether the desktop should check for updates on
+// startup. Missing configs default to true so existing users keep update notices.
+func (c *Config) DesktopCheckUpdates() bool {
+	if c == nil || c.Desktop.CheckUpdates == nil {
+		return true
+	}
+	return *c.Desktop.CheckUpdates
 }
 
 // LSPConfig governs the optional Language Server Protocol tools (lsp_definition,

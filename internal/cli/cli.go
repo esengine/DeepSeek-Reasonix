@@ -364,7 +364,7 @@ func chatREPL(args []string) int {
 	cont := fs.Bool("continue", false, "resume the most recent saved session")
 	fs.BoolVar(cont, "c", false, "shorthand for --continue")
 	resume := fs.Bool("resume", false, "list saved sessions and pick one to resume")
-	yolo := fs.Bool("dangerously-skip-permissions", false, "YOLO: auto-approve approval-gated tool calls this session (deny rules still apply; ask questions and plan approvals still wait for you)")
+	yolo := fs.Bool("dangerously-skip-permissions", false, "YOLO: auto-approve approval-gated tool calls this session; same runtime mode as Ctrl+Y")
 	fs.BoolVar(yolo, "yolo", false, "alias for --dangerously-skip-permissions")
 	dir := fs.String("dir", "", "change to this directory first (project root); config, sandbox and file tools resolve from here")
 	if err := fs.Parse(args); err != nil {

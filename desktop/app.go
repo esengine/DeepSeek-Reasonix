@@ -608,6 +608,25 @@ func (a *App) ApproveTabWithScope(tabID, id string, allow, session, persist bool
 	}
 }
 
+// ReplayPendingPrompts asks every tab's controller to re-emit any approval/ask
+// prompt that is currently blocking its run loop. The frontend calls this once
+// its event subscription is live (on load/reconnect) so a session that was
+// already awaiting confirmation rebuilds its modal instead of showing a
+// "waiting" status with no way to answer — and no way to stop.
+func (a *App) ReplayPendingPrompts() {
+	a.mu.RLock()
+	tabs := make([]*WorkspaceTab, 0, len(a.tabs))
+	for _, t := range a.tabs {
+		tabs = append(tabs, t)
+	}
+	a.mu.RUnlock()
+	for _, t := range tabs {
+		if t.Ctrl != nil {
+			t.Ctrl.ReplayPendingPrompts()
+		}
+	}
+}
+
 // SetPlanMode toggles the read-only plan axis while preserving the current
 // tool-auto-approval axis.
 func (a *App) SetPlanMode(on bool) {
@@ -1893,6 +1912,7 @@ func (a *App) Commands() []CommandInfo {
 		{Name: "clear", Description: i18n.M.CmdClear, Kind: "builtin"},
 		{Name: "compact", Description: i18n.M.CmdCompact, Kind: "builtin"},
 		{Name: "model", Description: i18n.M.CmdModel, Kind: "builtin"},
+		{Name: "provider", Description: i18n.M.CmdProvider, Kind: "builtin"},
 		{Name: "effort", Description: i18n.M.CmdEffort, Kind: "builtin"},
 		{Name: "memory", Description: i18n.M.CmdMemory, Kind: "builtin"},
 		{Name: "goal", Description: i18n.M.CmdGoal, Kind: "builtin"},
@@ -1964,8 +1984,16 @@ func (a *App) SlashArgs(input string) SlashArgsResult {
 		DisconnectedMCP: ctrl.DisconnectedMCPNames(),
 		CurrentModel:    model,
 	}
+	seen := map[string]bool{}
 	for _, m := range a.Models() {
 		data.ModelRefs = append(data.ModelRefs, m.Ref)
+		if m.Provider != "" && !seen[m.Provider] {
+			seen[m.Provider] = true
+			data.ProviderNames = append(data.ProviderNames, m.Provider)
+		}
+		if m.Current {
+			data.CurrentProvider = m.Provider
+		}
 	}
 	if h := ctrl.Host(); h != nil {
 		data.ServerNames = h.ServerNames()

@@ -89,6 +89,26 @@ func TestServeEndpoints(t *testing.T) {
 		t.Error("/plan {on:true} should have enabled plan mode (Compose would prepend the marker)")
 	}
 
+	resp, err = http.Post(srv.URL+"/tool-approval-mode", "application/json", strings.NewReader(`{"mode":"auto"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("tool approval mode auto status = %d, want 204", resp.StatusCode)
+	}
+	resp.Body.Close()
+	if got := ctrl.ToolApprovalMode(); got != control.ToolApprovalAuto {
+		t.Fatalf("tool approval mode = %q, want auto", got)
+	}
+	resp, err = http.Post(srv.URL+"/tool-approval-mode", "application/json", strings.NewReader(`{"mode":"surprise"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("invalid tool approval mode status = %d, want 400", resp.StatusCode)
+	}
+
 	if resp, _ := http.Post(srv.URL+"/submit", "application/json", strings.NewReader(`{}`)); resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("empty submit should be 400, got %d", resp.StatusCode)
 	}

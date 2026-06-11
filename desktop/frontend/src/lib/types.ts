@@ -724,6 +724,7 @@ export interface SettingsView {
   desktopThemeStyle: string;
   closeBehavior: string; // "background" | "quit"
   displayMode: string;   // "standard" | "compact" | "minimal"
+  checkUpdates: boolean; // check for new versions on startup
   configPath: string;
   providerKinds: string[]; // provider implementations the kernel registered (for the kind picker)
   autoApproveTools: boolean;

@@ -16,10 +16,12 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	orig.Language = "zh"
 	orig.UI.Theme = "light"
 	orig.UI.ThemeStyle = "glacier"
+	orig.UI.ShortcutLayout = "desktop"
 	orig.Desktop.Language = "en"
 	orig.Desktop.Theme = "dark"
 	orig.Desktop.ThemeStyle = "graphite"
 	orig.Desktop.CloseBehavior = "background"
+	orig.Desktop.CheckUpdates = boolPtr(false)
 	orig.Notifications.Enabled = true
 	orig.Notifications.TurnDone = true
 	orig.Notifications.ApprovalRequest = true
@@ -94,6 +96,9 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	if got.UI.ThemeStyle != "glacier" {
 		t.Errorf("ui.theme_style = %q, want glacier", got.UI.ThemeStyle)
 	}
+	if got.UI.ShortcutLayout != "desktop" {
+		t.Errorf("ui.shortcut_layout = %q, want desktop", got.UI.ShortcutLayout)
+	}
 	if got.Desktop.Language != "en" {
 		t.Errorf("desktop.language = %q, want en", got.Desktop.Language)
 	}
@@ -105,6 +110,9 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	}
 	if got.Desktop.CloseBehavior != "background" {
 		t.Errorf("desktop.close_behavior = %q, want background", got.Desktop.CloseBehavior)
+	}
+	if got.Desktop.CheckUpdates == nil || *got.Desktop.CheckUpdates {
+		t.Errorf("desktop.check_updates = %+v, want false", got.Desktop.CheckUpdates)
 	}
 	if !got.Notifications.Enabled || !got.Notifications.TurnDone || !got.Notifications.ApprovalRequest || !got.Notifications.AskRequest {
 		t.Errorf("notifications not preserved: %+v", got.Notifications)
@@ -348,16 +356,17 @@ func TestScopedRenderSeparatesUserAndProjectConfig(t *testing.T) {
 	c.Desktop.Theme = "dark"
 	c.Desktop.ThemeStyle = "graphite"
 	c.Desktop.CloseBehavior = "background"
+	c.Desktop.CheckUpdates = boolPtr(false)
 
 	user := RenderTOMLForScope(c, RenderScopeUser)
-	for _, want := range []string{"config_version = 2", "[desktop]", `theme = "dark"`, `close_behavior = "background"`, "[notifications]"} {
+	for _, want := range []string{"config_version = 2", "[desktop]", `theme = "dark"`, `close_behavior = "background"`, `check_updates = false`, "[notifications]"} {
 		if !strings.Contains(user, want) {
 			t.Fatalf("user render missing %q:\n%s", want, user)
 		}
 	}
 
 	project := RenderTOMLForScope(c, RenderScopeProject)
-	for _, forbidden := range []string{"[desktop]", "[notifications]", "close_behavior ="} {
+	for _, forbidden := range []string{"[desktop]", "[notifications]", "close_behavior =", "check_updates ="} {
 		if strings.Contains(project, forbidden) {
 			t.Fatalf("project render should not contain %q:\n%s", forbidden, project)
 		}

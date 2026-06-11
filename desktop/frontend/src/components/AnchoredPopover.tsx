@@ -97,16 +97,35 @@ export function AnchoredPopover({
       setPosition(null);
       return;
     }
+    let frame: number | null = null;
     const updatePosition = () => {
+      frame = null;
       const anchor = anchorRef.current?.getBoundingClientRect();
       const menu = popoverRef.current?.getBoundingClientRect();
       if (!anchor || !menu) return;
       const next = calculatePosition(anchor, menu, align, offset, placement);
       setPosition((current) => (samePosition(current, next) ? current : next));
     };
+    const scheduleUpdate = () => {
+      if (frame !== null) return;
+      frame = window.requestAnimationFrame(updatePosition);
+    };
     updatePosition();
-    const frame = window.requestAnimationFrame(updatePosition);
-    return () => window.cancelAnimationFrame(frame);
+    scheduleUpdate();
+
+    const anchor = anchorRef.current;
+    const menu = popoverRef.current;
+    let observer: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== "undefined") {
+      observer = new ResizeObserver(scheduleUpdate);
+      if (anchor) observer.observe(anchor);
+      if (menu) observer.observe(menu);
+    }
+
+    return () => {
+      if (frame !== null) window.cancelAnimationFrame(frame);
+      observer?.disconnect();
+    };
   }, [rendered, anchorRef, align, offset, placement]);
 
   useEffect(() => {

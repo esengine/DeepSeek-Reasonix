@@ -46,7 +46,7 @@ var Chinese = Messages{
 	ChatStatusRetryingFmt:       "%s 正在重试 (%d/%d)… (Esc 取消)",
 	ChatStatusIdle:              "就绪",
 	ChatStatusYoloIdle:          "已跳过工具批准",
-	ChatStatusCycleHint:         "shift+tab 切换计划",
+	ChatStatusCycleHint:         "shift+tab 切换计划 · ctrl+y yolo",
 	ChatStatusCacheNowFmt:       "本次命中 %s",
 	ChatStatusCacheAvgFmt:       "平均 %s",
 	ChatStatusPlanApproval:      "Enter/y 批准并执行 · n/Esc 继续规划 · PgUp/PgDn/Ctrl+Home/End 滚动",
@@ -316,8 +316,19 @@ var Chinese = Messages{
 	ProviderErrServer:              "服务器故障 (HTTP 500)：服务端内部错误。已退避重试；若持续失败请稍后再试。",
 	ProviderErrServerBusy:          "服务器繁忙 (HTTP 503)：服务端负载过高。已退避重试，请稍后再试。",
 
-	SelectOneHint:  "(↑/↓ · Enter · q 取消)",
-	SelectManyHint: "(↑/↓ · Space · Enter · q)",
+	SelectOneHint:  "(↑/↓ · Enter · q 取消；/ 搜索)",
+	SelectManyHint: "(↑/↓ · Space · Enter · q；/ 搜索)",
+
+	SelectMoreAboveFmt: "  ↑ 上方还有 %d 个",
+	SelectMoreBelowFmt: "  ↓ 下方还有 %d 个",
+	SelectSearchHint:   "/ 搜索 · 输入关键词过滤 · Esc 取消搜索",
+
+	CmdProvider:          "切换供应商",
+	ProviderListHeader:   "供应商（/provider <名称> 切换）",
+	ProviderAlreadyOnFmt: "已经在使用供应商 %s",
+	ProviderUnknownFmt:   "未知供应商 %q",
+	ProviderPickLabel:    "选择 %s 的一个模型",
+	ProviderNoModelsFmt:  "供应商 %s 没有已配置的模型",
 
 	UsageBody: `reasonix — 由配置和插件驱动的 coding agent（多模型）
 

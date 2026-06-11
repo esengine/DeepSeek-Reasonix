@@ -630,6 +630,11 @@ export function useController() {
     });
 
     void syncActiveTabFromBackend();
+    // The event subscription is live now, so ask the backend to re-emit any
+    // approval/ask prompt that was already blocking a tab before this load —
+    // otherwise a session left mid-confirmation shows "waiting" with no modal
+    // and no way to stop (#3844).
+    void app.ReplayPendingPrompts().catch(() => {});
 
     return () => { textBatch.drain(); off(); offReady(); };
   }, [dispatchTo, loadSessionDataForTab, refreshCheckpoints, syncActiveTabFromBackend]);

@@ -12,6 +12,7 @@
 ## 目录
 
 - [配置](#配置)
+- [模式快捷键速查](#模式快捷键速查)
 - [权限与沙盒](#权限与沙盒)
 - [插件（MCP）](#插件mcp)
 - [斜杠命令](#斜杠命令)
@@ -26,6 +27,9 @@
 ```toml
 default_model = "deepseek-flash"   # 执行器；设 [agent].planner_model 可加规划器
 # language    = "zh"               # 界面语言；为空则按 $LANG / $REASONIX_LANG 自动检测
+
+[ui]
+# shortcut_layout = "desktop"      # classic|desktop；兼容旧配置
 
 [agent]
 max_steps = 0                    # 执行器工具调用轮数；0 表示不限
@@ -68,6 +72,46 @@ command = "reasonix-plugin-example"
 ```
 
 完整 schema 与每个字段的契约见 [`SPEC.md` §5](./SPEC.md#5-configuration-toml)。
+
+## 模式快捷键速查
+
+这里按使用端来写，因为用户通常是先知道“我现在在桌面端/CLI”，再找对应按键。
+核心规则很小：`Shift+Tab` 只管 Plan，`Ctrl/Cmd+Y` 只管 YOLO，粘贴继续走系统粘贴快捷键。
+
+### 桌面端 GUI
+
+| 按键或控件 | 作用 | 说明 |
+| --- | --- | --- |
+| `Shift+Tab` | 切换 Plan 开/关 | 输入框快捷键。Plan 是只读规划，不会循环 Ask/Auto/YOLO。 |
+| `Ctrl+Y` / `Cmd+Y` | 切换 YOLO 开/关 | 输入框快捷键。关闭 YOLO 时会尽量恢复之前的 Ask/Auto 基底。 |
+| Ask / Auto / YOLO 审批控件 | 直接选择工具审批姿态 | 点击操作不受快捷键规则影响。 |
+| Plan 控件 | 切换 Plan 开/关 | 和 `Shift+Tab` 是同一个模式。 |
+| 协作菜单里的 Goal | 启动、查看或清除 Goal | Goal 不进入任何快捷键循环。 |
+| macOS `Cmd+V`，Windows/Linux `Ctrl+V` | 粘贴剪贴板内容 | 图片也可以直接拖进输入框。 |
+
+### CLI / TUI
+
+| 按键或命令 | 作用 | 说明 |
+| --- | --- | --- |
+| `Shift+Tab` | 切换 Plan 开/关 | Plan 是只读规划，不会循环 Ask/Auto/YOLO。 |
+| `Ctrl+Y` | 切换 YOLO 开/关 | 关闭 YOLO 时会尽量恢复之前的 Ask/Auto 基底。终端若能转发 Command/Super，也可能识别 `Cmd+Y`，但稳定可用的是 `Ctrl+Y`。 |
+| `--yolo`、`--dangerously-skip-permissions` | 启动时进入 YOLO | 和 `Ctrl+Y` 是同一个运行时模式。 |
+| Ask / Auto | 没有键盘循环 | Ask 是默认交互基底；Auto 不通过 `Shift+Tab` 进入，需要由暴露工具审批姿态的客户端或 API 直接设置。 |
+| `Ctrl+V` | 粘贴剪贴板内容 | CLI 会先尝试剪贴板图片，失败后再按文本粘贴。 |
+| `/paste-image` | 粘贴剪贴板图片 | 适合只想贴图片，或终端应用自己接管文本粘贴的场景。 |
+| `/goal <目标>`、`/goal status`、`/goal clear` | 启动、查看或清除 Goal | Goal 不进入任何快捷键循环。 |
+
+`[ui].shortcut_layout` 仍被接受以兼容旧配置，但上面的快捷键行为已经跨布局统一。
+
+模式含义：
+
+| 模式 | 含义 |
+| --- | --- |
+| Ask | writer 兜底审批时询问。 |
+| Auto | 自动放行兜底审批；显式 `ask` / `deny` 规则仍生效。 |
+| YOLO | 跳过普通工具审批；`deny`、用户 `ask` 问题、计划批准提示仍会等待。 |
+| Plan | 下一轮保持只读规划，直到计划被批准或关闭 Plan。 |
+| Goal | 持续追一个已保存目标，直到完成、阻塞或清除。 |
 
 ## 权限与沙盒
 

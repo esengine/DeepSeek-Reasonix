@@ -12,6 +12,7 @@
 ## Contents
 
 - [Configuration](#configuration)
+- [Mode shortcuts quick map](#mode-shortcuts-quick-map)
 - [Permissions & sandbox](#permissions--sandbox)
 - [Plugins (MCP)](#plugins-mcp)
 - [Slash commands](#slash-commands)
@@ -27,6 +28,9 @@ never stored in config files.
 ```toml
 default_model = "deepseek-flash"   # executor; set [agent].planner_model to add a planner
 # language    = "zh"               # ui language; empty = auto-detect from $LANG / $REASONIX_LANG
+
+[ui]
+# shortcut_layout = "desktop"      # classic|desktop; compatibility setting
 
 [agent]
 max_steps = 0                    # executor tool-call rounds; 0 = no limit
@@ -69,6 +73,48 @@ command = "reasonix-plugin-example"
 ```
 
 For the full schema and every field's contract, see [`SPEC.md` §5](./SPEC.md#5-configuration-toml).
+
+## Mode shortcuts quick map
+
+Shortcuts are documented by client because users usually look for the keys that
+work in the surface they are using. The small rule is: `Shift+Tab` only controls
+Plan, `Ctrl/Cmd+Y` only controls YOLO, and paste stays on the platform paste key.
+
+### Desktop GUI
+
+| Key or control | What it does | Notes |
+| --- | --- | --- |
+| `Shift+Tab` | Toggles Plan on/off | Composer shortcut. Plan is read-only planning and does not cycle Ask/Auto/YOLO. |
+| `Ctrl+Y` / `Cmd+Y` | Toggles YOLO on/off | Composer shortcut. Turning YOLO off restores the previous Ask/Auto base when known. |
+| Ask / Auto / YOLO approval controls | Picks the tool approval posture directly | Clicking these controls is unchanged by the keyboard shortcuts. |
+| Plan control | Toggles Plan on/off | Same mode as `Shift+Tab`. |
+| Goal item in the collaboration menu | Starts, views, or clears Goal | Goal is not in any keyboard cycle. |
+| `Cmd+V` on macOS, `Ctrl+V` on Windows/Linux | Pastes clipboard content | Images can also be dropped into the composer. |
+
+### CLI / TUI
+
+| Key or command | What it does | Notes |
+| --- | --- | --- |
+| `Shift+Tab` | Toggles Plan on/off | Plan is read-only planning and does not cycle Ask/Auto/YOLO. |
+| `Ctrl+Y` | Toggles YOLO on/off | Turning YOLO off restores the previous Ask/Auto base when known. Terminals that forward Command/Super may also send `Cmd+Y`, but `Ctrl+Y` is the reliable terminal shortcut. |
+| `--yolo`, `--dangerously-skip-permissions` | Starts chat in YOLO | Same runtime mode as `Ctrl+Y`. |
+| Ask / Auto | No keyboard cycle | Ask is the default interactive base. Auto is not entered through `Shift+Tab`; use clients or APIs that expose the tool approval posture directly. |
+| `Ctrl+V` | Pastes clipboard content | The CLI tries a clipboard image first, then falls back to text paste. |
+| `/paste-image` | Pastes a clipboard image | Use it when you want image-only paste or the terminal handles text paste itself. |
+| `/goal <objective>`, `/goal status`, `/goal clear` | Starts, checks, or clears Goal | Goal is not in any keyboard cycle. |
+
+`[ui].shortcut_layout` is still accepted for old configs, but the shortcut
+behavior above is unified across layouts.
+
+Mode meanings:
+
+| Mode | Meaning |
+| --- | --- |
+| Ask | Prompts for fallback writer approvals. |
+| Auto | Auto-allows fallback approvals; explicit `ask` / `deny` rules still apply. |
+| YOLO | Skips ordinary tool approval prompts; `deny`, user `ask` questions, and plan approval prompts still wait. |
+| Plan | Keeps the next work read-only until a plan is approved or Plan is turned off. |
+| Goal | Pursues a saved objective until complete, blocked, or cleared. |
 
 ## Permissions & sandbox
 

@@ -1440,14 +1440,13 @@ a[href] {
 .app {
   height: 100%;
   min-height: 0;
-  overflow-x: auto;
+  overflow-x: hidden;
   overflow-y: hidden;
 }
 
 .layout {
   --sidebar-width: var(--sidebar-expanded-width, clamp(264px, 18vw, 300px));
   --chat-min-width: 760px;
-  --chat-docked-min-width: 640px;
   --workspace-width: 420px;
   --workspace-resizer-width: 8px;
   --app-chrome-height: 38px;
@@ -1494,16 +1493,16 @@ a[href] {
 }
 .layout--workspace-open {
   --chrome-right-toggle-offset: calc(var(--workspace-width) + var(--workspace-resizer-width));
-  min-width: calc(var(--sidebar-width) + var(--chat-docked-min-width) + var(--workspace-resizer-width) + var(--workspace-width));
-  grid-template-columns: var(--sidebar-width) minmax(var(--chat-docked-min-width), 1fr) var(--workspace-resizer-width) var(--workspace-width);
+  min-width: 0;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr) var(--workspace-resizer-width) minmax(0, var(--workspace-width));
 }
 .layout--workspace-open:not(.layout--sidebar-collapsed) {
-  min-width: calc(var(--sidebar-expanded-width) + var(--chat-docked-min-width) + var(--workspace-resizer-width) + var(--workspace-width));
-  grid-template-columns: var(--sidebar-expanded-width) minmax(var(--chat-docked-min-width), 1fr) var(--workspace-resizer-width) var(--workspace-width);
+  min-width: 0;
+  grid-template-columns: var(--sidebar-expanded-width) minmax(0, 1fr) var(--workspace-resizer-width) minmax(0, var(--workspace-width));
 }
 .layout--workspace-open.layout--sidebar-collapsed {
-  min-width: calc(var(--chat-docked-min-width) + var(--workspace-resizer-width) + var(--workspace-width));
-  grid-template-columns: 0px minmax(var(--chat-docked-min-width), 1fr) var(--workspace-resizer-width) var(--workspace-width);
+  min-width: 0;
+  grid-template-columns: 0px minmax(0, 1fr) var(--workspace-resizer-width) minmax(0, var(--workspace-width));
 }
 .layout--workspace-maximized {
   min-width: 0;
@@ -1940,8 +1939,24 @@ a[href] {
   color: var(--fg);
   border-bottom: 1px solid var(--border-soft);
 }
+.banner--update.banner--error {
+  background: var(--del-bg);
+  color: var(--err);
+  border-bottom-color: color-mix(in srgb, var(--err) 24%, var(--border-soft));
+}
+.banner--actionable {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
 .banner__msg {
+  min-width: 0;
   font-weight: 500;
+}
+.banner--actionable .banner__msg {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .banner__hint {
   color: var(--fg-dim);
@@ -1949,6 +1964,9 @@ a[href] {
 }
 .banner__spacer {
   flex: 1 1 auto;
+}
+.banner--actionable .btn {
+  flex: 0 0 auto;
 }
 .banner__progress {
   width: 180px;
@@ -3230,6 +3248,7 @@ a[href] {
   gap: 8px;
   padding: 0 12px;
   white-space: pre;
+  min-width: min-content;
 }
 .diff__row--add {
   background: var(--add-bg);
@@ -3739,7 +3758,7 @@ a[href] {
 .composer-meta {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 12px;
   min-width: 0;
   min-height: 40px;
@@ -3757,7 +3776,7 @@ a[href] {
   gap: 8px;
   min-width: 0;
   flex: 1 1 auto;
-  margin-left: auto;
+  margin-left: 0;
 }
 
 .composer-meta--has-intent-chip .composer-meta__params {
@@ -3788,6 +3807,11 @@ a[href] {
   flex: 0 0 92px;
   width: 92px;
   max-width: 92px;
+}
+
+.composer-meta__control--more {
+  display: none;
+  flex: 0 0 auto;
 }
 
 .composer-meta__control--intent {
@@ -3961,6 +3985,52 @@ a[href] {
   transform: none;
 }
 
+.composer-more-trigger {
+  --wails-draggable: no-drag;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-2);
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 620;
+  transition: border-color 0.14s, background 0.14s, color 0.14s, transform 0.14s var(--ease-out);
+}
+
+.composer-more-trigger span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-more-trigger svg {
+  flex: 0 0 auto;
+}
+
+.composer-more-trigger:hover:not(:disabled),
+.composer-more-trigger:focus-visible,
+.composer-more-trigger--open {
+  outline: none;
+  color: var(--fg);
+  border-color: var(--border-soft);
+  background: var(--bg-soft);
+}
+
+.composer-more-trigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  transform: none;
+}
+
 .composer-mode-chip {
   --wails-draggable: no-drag;
   position: relative;
@@ -4095,7 +4165,7 @@ a[href] {
   .composer-meta__control--model {
     flex: 1 1 132px;
     width: auto;
-    max-width: 29vw;
+    max-width: 148px;
   }
 
   .composer-meta__control--intent {
@@ -4103,9 +4173,9 @@ a[href] {
   }
 
   .composer-meta__control--approval {
-    flex-basis: 184px;
-    min-width: 172px;
-    max-width: 184px;
+    flex-basis: 178px;
+    min-width: 164px;
+    max-width: 178px;
   }
 
   .composer-mode-chip {
@@ -4119,10 +4189,15 @@ a[href] {
     font-size: 11.5px;
   }
 
-.composer-meta__control--effort {
-    flex-basis: 76px;
-    width: 76px;
-    max-width: 76px;
+  .composer-meta__control--effort {
+    display: none;
+  }
+
+  .composer-meta__control--more {
+    display: inline-flex;
+    flex: 0 0 78px;
+    width: 78px;
+    max-width: 78px;
   }
 }
 
@@ -4135,7 +4210,7 @@ a[href] {
   .composer-meta__control--model {
     flex: 1 1 112px;
     width: auto;
-    max-width: 32vw;
+    max-width: 126px;
   }
 
   .composer-meta__control--intent {
@@ -4149,9 +4224,21 @@ a[href] {
   }
 
   .composer-meta__control--effort {
-    flex-basis: 58px;
-    width: 58px;
-    max-width: 58px;
+    display: none;
+  }
+
+  .composer-meta__control--more {
+    flex-basis: 38px;
+    width: 38px;
+    max-width: 38px;
+  }
+
+  .composer-more-trigger {
+    padding-inline: 0;
+  }
+
+  .composer-more-trigger span {
+    display: none;
   }
 
   .composer-modebar__item {
@@ -4279,6 +4366,61 @@ a[href] {
   height: 54px;
   min-height: 54px;
   padding-right: 10px;
+}
+
+.composer-more-menu {
+  width: min(190px, calc(100vw - 16px));
+}
+
+.composer-more-menu__items {
+  display: grid;
+  gap: 3px;
+}
+
+.composer-more-menu__item {
+  --wails-draggable: no-drag;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 34px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 620;
+  text-align: left;
+}
+
+.composer-more-menu__item span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-more-menu__item > svg {
+  flex: 0 0 auto;
+}
+
+.composer-more-menu__item > svg:last-child {
+  margin-left: auto;
+  color: var(--accent);
+}
+
+.composer-more-menu__item:hover,
+.composer-more-menu__item:focus-visible {
+  outline: none;
+  background: var(--bg-elev-2);
+  color: var(--fg);
+}
+
+.composer-more-menu__item--active {
+  color: var(--fg);
+  background: var(--bg-elev-2);
 }
 
 .composer-intent-switch {
@@ -4560,6 +4702,8 @@ a[href] {
   top: auto;
   bottom: auto;
   z-index: var(--z-popover);
+  max-height: min(calc(100vh - 16px), 50vh);
+  overflow-y: auto;
 }
 .modelsw__item {
   display: flex;
@@ -8650,6 +8794,10 @@ a[href] {
   align-items: start;
 }
 
+.settings-field--wide-copy {
+  grid-template-columns: minmax(0, 1fr) max-content;
+}
+
 .settings-field__copy {
   min-width: 0;
 }
@@ -8666,6 +8814,18 @@ a[href] {
   color: var(--fg-dim);
   font-size: var(--text-2xs);
   line-height: 1.45;
+}
+
+.settings-field__hint-tooltip {
+  max-width: 100%;
+}
+
+.settings-field__hint-line {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .settings-field__control {
@@ -11243,6 +11403,7 @@ a[href] {
   display: flex;
   gap: 6px;
   padding: 0 8px;
+  min-width: min-content;
 }
 .inline-diff__row--add {
   background: var(--add-bg);
@@ -11542,6 +11703,45 @@ a[href] {
 .app--darwin .app-chrome--tabs .tabbar,
 .app--darwin .app-chrome--tabs .tabbar * {
   --wails-draggable: no-drag;
+}
+
+.app--darwin .app-chrome--tabs .app-chrome__drag-rail {
+  display: block;
+  position: absolute;
+  top: 0;
+  left: calc(var(--chrome-left-toggle-offset) + var(--chrome-toggle-size) + 12px);
+  right: calc(var(--chrome-right-toggle-offset) + var(--chrome-toggle-size) + 12px);
+  z-index: var(--z-local-handle);
+  height: 10px;
+  --wails-draggable: drag;
+}
+
+.app--darwin .app-chrome--tabs .app-chrome__drag-rail::before {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 50%;
+  width: calc(100% - 24px);
+  height: 3px;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg-faint) 40%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--border) 76%, transparent);
+  opacity: 0;
+  transition:
+    background 0.12s ease,
+    box-shadow 0.12s ease,
+    opacity 0.12s ease;
+}
+
+.app--darwin .app-chrome--tabs .app-chrome__drag-rail:hover::before {
+  opacity: 0.72;
+}
+
+.app--darwin .app-chrome--tabs .app-chrome__drag-rail:active::before {
+  background: var(--accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 68%, transparent);
+  opacity: 0.95;
 }
 
 .app--darwin .app-chrome--tabs .app-chrome__panel-toggle {
@@ -12579,6 +12779,10 @@ a[href] {
 .tabbar__spacer {
   flex: 1 1 auto;
   min-width: 12px;
+}
+
+.app-chrome__drag-rail {
+  display: none;
 }
 
 .tabbar__tab-close {
@@ -15801,6 +16005,11 @@ a[href] {
   animation: graphite-drop-in var(--dur-slow) var(--ease-out) both;
 }
 
+:root[data-theme-style="graphite"] .banner--update.banner--error {
+  border-color: color-mix(in srgb, var(--err) 28%, var(--app-graphite-hairline-strong));
+  background: linear-gradient(120deg, color-mix(in srgb, var(--err) 10%, var(--chat-bg)), color-mix(in srgb, var(--chat-bg) 94%, var(--bg-elev)));
+}
+
 :root[data-theme-style="graphite"] .banner--update .btn--primary {
   border: 0;
   border-radius: 7px;
@@ -15810,9 +16019,17 @@ a[href] {
 }
 
 :root[data-theme-style="graphite"] .banner--update .btn:not(.btn--primary) {
-  border: 0;
+  border: 1px solid color-mix(in srgb, var(--fg-faint) 28%, var(--border));
+  border-radius: 7px;
   color: var(--fg-dim);
-  background: transparent;
+  background: color-mix(in srgb, var(--bg-elev) 74%, transparent);
+}
+
+:root[data-theme-style="graphite"] .banner--update .btn:not(.btn--primary):hover:not(:disabled),
+:root[data-theme-style="graphite"] .banner--update .btn:not(.btn--primary):focus-visible:not(:disabled) {
+  color: var(--fg);
+  border-color: color-mix(in srgb, var(--fg-faint) 40%, var(--border));
+  background: var(--bg-elev-2);
 }
 
 :root[data-theme-style="graphite"] .transcript {
@@ -16149,6 +16366,7 @@ a[href] {
 :root[data-theme-style="graphite"] .composer-modebar,
 :root[data-theme-style="graphite"] .composer-mode-chip,
 :root[data-theme-style="graphite"] .meta-chip,
+:root[data-theme-style="graphite"] .composer-more-trigger,
 :root[data-theme-style="graphite"] .composer-meta .modelsw__trigger,
 :root[data-theme-style="graphite"] .composer-context__item {
   border-radius: 7px;
@@ -16163,6 +16381,9 @@ a[href] {
 :root[data-theme-style="graphite"] .composer-mode-chip:active:not(:disabled),
 :root[data-theme-style="graphite"] .tooltip-trigger:hover > .composer-mode-chip:not(:disabled),
 :root[data-theme-style="graphite"] .tooltip-trigger:focus-within > .composer-mode-chip:not(:disabled),
+:root[data-theme-style="graphite"] .composer-more-trigger:hover:not(:disabled),
+:root[data-theme-style="graphite"] .composer-more-trigger:focus-visible,
+:root[data-theme-style="graphite"] .composer-more-trigger--open,
 :root[data-theme-style="graphite"] .composer-meta .modelsw__trigger:hover {
   color: var(--fg);
   border-color: var(--app-graphite-hairline-strong);

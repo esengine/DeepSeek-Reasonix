@@ -77,6 +77,20 @@ func (c *Config) SetAutoPlan(mode string) error {
 	return nil
 }
 
+// SetUIShortcutLayout selects the CLI keyboard shortcut layout. "classic" keeps
+// historical behavior; "desktop" enables the two-axis desktop-style shortcuts.
+func (c *Config) SetUIShortcutLayout(layout string) error {
+	switch strings.ToLower(strings.TrimSpace(layout)) {
+	case "", "classic", "default", "legacy", "off":
+		c.UI.ShortcutLayout = "classic"
+	case "desktop", "dual", "dual-axis", "dual_axis":
+		c.UI.ShortcutLayout = "desktop"
+	default:
+		return fmt.Errorf("shortcut_layout %q: must be classic|desktop", layout)
+	}
+	return nil
+}
+
 // UpsertProvider adds e, or replaces an existing provider with the same name
 // (preserving its position). Required fields (name, kind, base_url, model/models)
 // are validated; whether the kind is actually registered and the key resolves is
@@ -190,6 +204,13 @@ func (c *Config) SetDesktopDisplayMode(mode string) error {
 	default:
 		return fmt.Errorf("display mode %q: must be standard|compact|minimal", mode)
 	}
+	return nil
+}
+
+// SetDesktopCheckUpdates sets whether the desktop app checks for updates on
+// startup. Manual checks remain available in Settings regardless of this value.
+func (c *Config) SetDesktopCheckUpdates(enabled bool) error {
+	c.Desktop.CheckUpdates = &enabled
 	return nil
 }
 
