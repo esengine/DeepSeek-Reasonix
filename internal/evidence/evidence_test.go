@@ -207,10 +207,10 @@ func TestMatchTodoStepToleratesCitationDrift(t *testing.T) {
 	})
 
 	matches := map[string]int{
-		"Phase 5: 脚本编辑与执行代码":   2,
+		"Phase 5: 脚本编辑与执行代码":  2,
 		"phase 5：脚本编辑与执行代码":   2,
 		"  Phase　5：脚本编辑与执行代码": 2,
-		"脚本编辑与执行代码":          2,
+		"脚本编辑与执行代码":           2,
 		"Phase 4：环境":          1,
 		"REVIEW NOTES":        3,
 		"２":                   2,
