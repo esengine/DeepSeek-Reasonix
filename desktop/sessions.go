@@ -36,10 +36,6 @@ func sessionDisplayPath(dir string) string { return filepath.Join(dir, sessionDi
 func sessionTrashPath(dir string) string   { return filepath.Join(dir, sessionTrashDir) }
 
 func desktopSessionDir(root string) string {
-	base := config.MemoryUserDir()
-	if base == "" {
-		return config.SessionDir()
-	}
 	root = strings.TrimSpace(root)
 	if root == "" {
 		cwd, err := os.Getwd()
@@ -48,14 +44,10 @@ func desktopSessionDir(root string) string {
 		}
 		root = cwd
 	}
-	if abs, err := filepath.Abs(root); err == nil {
-		root = abs
+	if dir := config.ProjectSessionDir(root); dir != "" {
+		return dir
 	}
-	return filepath.Join(base, "projects", desktopWorkspaceSlug(root), "sessions")
-}
-
-func desktopWorkspaceSlug(absPath string) string {
-	return strings.NewReplacer(string(os.PathSeparator), "-", "/", "-", "\\", "-", ":", "-").Replace(absPath)
+	return config.SessionDir()
 }
 
 // loadSessionTitles reads the basename→title map (missing/corrupt → empty).

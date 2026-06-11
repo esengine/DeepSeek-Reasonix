@@ -742,7 +742,7 @@ func migrateLegacySessionSources(sink event.Sink) {
 	type legacySource struct {
 		dir     string
 		label   string
-		migrate func(srcDir, destDir string) (int, error)
+		migrate func(srcDir, globalDest string, projectDir func(string) string) (int, error)
 	}
 	var sources []legacySource
 	if home, herr := os.UserHomeDir(); herr == nil {
@@ -771,7 +771,7 @@ func migrateLegacySessionSources(sink event.Sink) {
 			continue
 		}
 		seen[key] = true
-		if n, serr := src.migrate(src.dir, dest); serr == nil && n > 0 {
+		if n, serr := src.migrate(src.dir, dest, config.ProjectSessionDir); serr == nil && n > 0 {
 			sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: fmt.Sprintf("imported %d past session(s) from %s — resume them with --resume or the history panel", n, src.label)})
 		}
 	}

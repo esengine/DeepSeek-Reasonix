@@ -1581,6 +1581,27 @@ func SessionDir() string {
 	return filepath.Join(dir, "reasonix", "sessions")
 }
 
+// ProjectSessionDir is the per-workspace session directory the desktop sidebar
+// lists: <config root>/projects/<slug>/sessions. Empty when either the config
+// root or workspaceRoot doesn't resolve.
+func ProjectSessionDir(workspaceRoot string) string {
+	base := MemoryUserDir()
+	root := strings.TrimSpace(workspaceRoot)
+	if base == "" || root == "" {
+		return ""
+	}
+	if abs, err := filepath.Abs(root); err == nil {
+		root = abs
+	}
+	return filepath.Join(base, "projects", WorkspaceSlug(root), "sessions")
+}
+
+// WorkspaceSlug flattens an absolute workspace path into the directory name
+// used under <config root>/projects.
+func WorkspaceSlug(absPath string) string {
+	return strings.NewReplacer(string(os.PathSeparator), "-", "/", "-", "\\", "-", ":", "-").Replace(absPath)
+}
+
 // CacheDir is the per-user cache root for derived/regenerable artefacts: MCP
 // handshake snapshots, plugin startup-latency telemetry. Lives beside the
 // existing dirs (UserConfigDir/reasonix/...) so the whole reasonix state tree

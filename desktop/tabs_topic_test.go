@@ -256,7 +256,7 @@ func TestV05LegacyEventSessionsImportIntoGlobalTopic(t *testing.T) {
 	destDir := config.SessionDir()
 	writeLegacyEventSession(t, legacyDir, "v053-chat.events.jsonl", "hello from v0.53", "hi from v0.53", time.Now().Add(-time.Hour))
 
-	imported, err := agent.MigrateLegacySessions(legacyDir, destDir)
+	imported, err := agent.MigrateLegacySessions(legacyDir, destDir, config.ProjectSessionDir)
 	if err != nil {
 		t.Fatalf("migrate legacy sessions: %v", err)
 	}
