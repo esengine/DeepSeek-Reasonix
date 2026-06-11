@@ -117,7 +117,10 @@ func seed(dir string) {
 		fmt.Printf("seeded %-7s prompt=%d hit=%d miss=%d\n", arm, u.PromptTokens, u.CacheHitTokens, u.CacheMissTokens)
 	}
 	b, _ := json.MarshalIndent(m, "", "  ")
-	os.WriteFile(filepath.Join(dir, "meta.json"), b, 0o644)
+	if err := os.WriteFile(filepath.Join(dir, "meta.json"), b, 0o644); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 }
 
 func resume(dir string) {
@@ -128,7 +131,10 @@ func resume(dir string) {
 		os.Exit(1)
 	}
 	var m meta
-	json.Unmarshal(raw, &m)
+	if err := json.Unmarshal(raw, &m); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 	idle := time.Since(m.SeededAt).Round(time.Minute)
 
 	out := map[string]provider.Usage{}
@@ -157,7 +163,10 @@ func resume(dir string) {
 		fmt.Printf("resume %-7s idle=%s pruned=%d prompt=%d hit=%d miss=%d\n", arm, idle, prunes, u.PromptTokens, u.CacheHitTokens, u.CacheMissTokens)
 	}
 	b, _ := json.MarshalIndent(map[string]any{"idle": idle.String(), "resume_usage": out}, "", "  ")
-	os.WriteFile(filepath.Join(dir, fmt.Sprintf("resume-%d.json", time.Now().Unix())), b, 0o644)
+	if err := os.WriteFile(filepath.Join(dir, fmt.Sprintf("resume-%d.json", time.Now().Unix())), b, 0o644); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 
 	c, pr := out["control"], out["pruned"]
 	if c.CacheMissTokens > 0 {
@@ -179,7 +188,10 @@ func comprehension(trials int) {
 		}
 		secret := fmt.Sprintf("%d", 1000+time.Now().UnixNano()%9000)
 		content := "package cfg\n\n// retention floor, milliseconds\nconst cacheRetentionFloor = " + secret + "\n" + strings.Repeat("// padding line filler for prune eligibility\n", 400)
-		os.WriteFile(filepath.Join(dir, "config.go"), []byte(content), 0o644)
+		if err := os.WriteFile(filepath.Join(dir, "config.go"), []byte(content), 0o644); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 
 		s := agent.NewSession("You are a terse coding agent. Use tools when you need file contents.")
 		s.Add(provider.Message{Role: provider.RoleUser, Content: "Read config.go and note its constants."})
