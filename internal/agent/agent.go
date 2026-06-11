@@ -576,7 +576,7 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 				if emptyFinalBlocks >= maxEmptyFinalBlocks {
 					return fmt.Errorf("model finished without a visible final answer %d times", emptyFinalBlocks)
 				}
-				a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "empty final answer blocked: model returned no visible answer text; retrying"})
+				a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: emptyFinalNotice(a.prov.Name(), usage, len(reasoning))})
 				a.session.Add(provider.Message{Role: provider.RoleUser, Content: emptyFinalRetryMessage()})
 				a.maybeCompact(ctx, usage)
 				continue
@@ -724,6 +724,14 @@ func hasVisibleFinalAnswer(text string) bool {
 
 func emptyFinalRetryMessage() string {
 	return "The previous assistant response finished without any visible answer text. Continue the same task now and provide a concise visible answer to the user. Do not send reasoning only."
+}
+
+func emptyFinalNotice(prov string, u *provider.Usage, reasoningLen int) string {
+	finish := "unknown"
+	if u != nil && u.FinishReason != "" {
+		finish = u.FinishReason
+	}
+	return fmt.Sprintf("empty final answer blocked: %s returned no visible answer text (finish=%s, reasoning=%d chars); retrying", prov, finish, reasoningLen)
 }
 
 func streamRecoveryMessage(hasPartialText, hadPartialTool bool) string {
