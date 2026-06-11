@@ -8638,6 +8638,10 @@ a[href] {
   display: flex;
   gap: 6px;
 }
+.mem-add--doc {
+  align-items: stretch;
+  flex-direction: column;
+}
 .mem-select,
 .mem-input {
   background: var(--bg);
@@ -8897,6 +8901,9 @@ a[href] {
   font-size: 12px;
   padding: 8px;
   box-sizing: border-box;
+}
+.mem-textarea--new-doc {
+  min-height: 120px;
 }
 .mem-doc__actions {
   display: flex;
@@ -11849,6 +11856,17 @@ a[href] {
   grid-template-columns: minmax(120px, 160px) minmax(0, 1fr) auto;
   gap: 8px;
   align-items: center;
+}
+
+.settings-page--manager .mem-add--doc {
+  display: flex;
+  align-items: stretch;
+  flex-direction: column;
+}
+
+.settings-page--manager .mem-add--doc .mem-select,
+.settings-page--manager .mem-add--doc .btn {
+  align-self: flex-start;
 }
 
 .settings-page--manager .mem-doc + .mem-doc {

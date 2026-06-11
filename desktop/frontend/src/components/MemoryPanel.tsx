@@ -2,7 +2,7 @@ import { Check, ChevronDown, ChevronRight, FileText, Pencil, Plus, RefreshCw, Se
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
-import type { MemoryArchive, MemoryFact, MemorySuggestion, MemorySuggestionsView, MemoryView, SkillSuggestion, TabMeta } from "../lib/types";
+import type { MemoryArchive, MemoryDoc, MemoryFact, MemoryScope, MemorySuggestion, MemorySuggestionsView, MemoryView, SkillSuggestion, TabMeta } from "../lib/types";
 import { AnchoredPopover } from "./AnchoredPopover";
 import { ResizableDrawer } from "./ResizableDrawer";
 import { Tooltip } from "./Tooltip";
@@ -35,6 +35,19 @@ function formatArchivedAt(value?: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleString();
+}
+
+function docPathKey(path: string): string {
+  return path.trim().replaceAll("\\", "/").toLowerCase();
+}
+
+export function instructionDocCreateTargets(scopes: MemoryScope[], docs: MemoryDoc[]): MemoryScope[] {
+  const occupiedScopes = new Set(docs.map((d) => d.scope).filter(Boolean));
+  const occupiedPaths = new Set(docs.map((d) => docPathKey(d.path)).filter(Boolean));
+  return scopes.filter((s) => {
+    if (!s.path) return false;
+    return !occupiedScopes.has(s.scope) && !occupiedPaths.has(docPathKey(s.path));
+  });
 }
 
 function ArchivedMemoryList({
@@ -753,6 +766,8 @@ export function MemorySettingsPage() {
 	const [selectedTabId, setSelectedTabId] = useState<string | null>(null);
 	const [note, setNote] = useState("");
 	const [scope, setScope] = useState("");
+	const [docScope, setDocScope] = useState("");
+	const [docDraft, setDocDraft] = useState("");
 	const [editingPath, setEditingPath] = useState<string | null>(null);
 	const [draft, setDraft] = useState("");
 	const [busy, setBusy] = useState(false);
@@ -766,6 +781,7 @@ export function MemorySettingsPage() {
 	const [error, setError] = useState<string | null>(null);
 	const [tab, setTab] = useState<"saved" | "archived" | "docs" | "suggestions">("saved");
 	const [showAdd, setShowAdd] = useState(false);
+	const [showDocAdd, setShowDocAdd] = useState(false);
 	const [showStorage, setShowStorage] = useState(false);
 	const [suggestions, setSuggestions] = useState<MemorySuggestionsView | null>(null);
 	const [suggestionBusy, setSuggestionBusy] = useState(false);
@@ -997,6 +1013,20 @@ export function MemorySettingsPage() {
 	const scopes = view?.scopes ?? [];
 	const activeScope =
 		scope || scopes.find((s) => s.scope === "project")?.scope || scopes[0]?.scope || "project";
+	const docCreateTargets = useMemo(
+		() => instructionDocCreateTargets(scopes, view?.docs ?? []),
+		[scopes, view?.docs],
+	);
+	const activeDocTarget =
+		docCreateTargets.find((s) => s.scope === docScope) ??
+		docCreateTargets.find((s) => s.scope === "project") ??
+		docCreateTargets[0] ??
+		null;
+	const activeDocScope = activeDocTarget?.scope ?? "";
+
+	useEffect(() => {
+		if (showDocAdd && docCreateTargets.length === 0) setShowDocAdd(false);
+	}, [docCreateTargets.length, showDocAdd]);
 
 	const submitNote = useCallback(async () => {
 		const trimmed = note.trim();
@@ -1020,6 +1050,25 @@ export function MemorySettingsPage() {
 		setEditingPath(path);
 		setDraft(body);
 	}, []);
+
+	const submitDoc = useCallback(async () => {
+		const trimmed = docDraft.trim();
+		if (!trimmed || busy || !activeDocTarget) return;
+		setBusy(true);
+		setError(null);
+		try {
+			const written = await app.SaveDoc(activeDocTarget.path, trimmed);
+			await reload();
+			setExpandedDoc(written || activeDocTarget.path);
+			setDocDraft("");
+			setDocScope("");
+			setShowDocAdd(false);
+		} catch (err) {
+			setError(errorMessage(err));
+		} finally {
+			setBusy(false);
+		}
+	}, [activeDocTarget, busy, docDraft, reload]);
 
 	const saveEdit = useCallback(async () => {
 		if (editingPath === null || busy) return;
@@ -1129,7 +1178,10 @@ export function MemorySettingsPage() {
 						role="tab"
 						aria-selected={tab === "docs"}
 						type="button"
-						onClick={() => setTab("docs")}
+						onClick={() => {
+							setTab("docs");
+							setShowAdd(false);
+						}}
 					>
 						<span>{t("memory.instructionFiles")}</span>
 					</button>
@@ -1621,9 +1673,76 @@ export function MemorySettingsPage() {
 						<div className="mem-section__title">{t("memory.instructionFiles")}</div>
 						<div className="mem-note">{t("memory.instructionFilesHint")}</div>
 					</div>
+					<div className="mem-section__actions">
+						<span className="mem-count">{view.docs.length}</span>
+						{docCreateTargets.length > 0 && (
+							<button
+								className="btn btn--small"
+								type="button"
+								disabled={busy}
+								onClick={() => setShowDocAdd((v) => !v)}
+							>
+								{showDocAdd ? <ChevronDown size={13} /> : <Plus size={13} />}
+								{showDocAdd ? t("common.collapse") : t("memory.addInstructionFile")}
+							</button>
+						)}
+					</div>
 				</div>
+				{showDocAdd && activeDocTarget && (
+					<div className="mem-add-card">
+						<div className="mem-add-card__head">
+							<div>
+								<strong>{t("memory.addInstructionFile")}</strong>
+								<span>{t("memory.addInstructionFileHint")}</span>
+							</div>
+						</div>
+						<div className="mem-add mem-add--doc">
+							<Tooltip label={t("memory.whereToSave")}>
+								<select
+									className="mem-select"
+									value={activeDocScope}
+									onChange={(e) => setDocScope(e.target.value)}
+								>
+									{docCreateTargets.map((s) => (
+										<option key={s.scope} value={s.scope}>
+											{memoryScopeLabel(s.scope, t)}
+										</option>
+									))}
+								</select>
+							</Tooltip>
+							<textarea
+								className="mem-textarea mem-textarea--new-doc"
+								placeholder={t("memory.instructionPlaceholder")}
+								value={docDraft}
+								onChange={(e) => setDocDraft(e.target.value)}
+								spellCheck={false}
+							/>
+							<button
+								className="btn btn--primary btn--small"
+								onClick={() => void submitDoc()}
+								disabled={busy || !docDraft.trim()}
+								type="button"
+							>
+								{t("memory.saveInstructionFile")}
+							</button>
+						</div>
+						<div className="mem-hint">{activeDocTarget.path}</div>
+					</div>
+				)}
 				{view.docs.length === 0 && (
-					<div className="mem-empty">{t("memory.noDocs")}</div>
+					<div className="mem-empty">
+						{t("memory.noDocs")}
+						{!showDocAdd && docCreateTargets.length > 0 && (
+							<button
+								className="mem-empty__action"
+								type="button"
+								disabled={busy}
+								onClick={() => setShowDocAdd(true)}
+							>
+								{t("memory.addInstructionFile")}
+							</button>
+						)}
+					</div>
 				)}
 				{view.docs.map((d) => {
 					const editing = editingPath === d.path;
@@ -1653,13 +1772,13 @@ export function MemorySettingsPage() {
 								<div className="mem-doc__head-actions">
 									<span className={"mem-doc__tag badge--" + d.scope}>{memoryScopeLabel(d.scope, t)}</span>
 									{!editing && (
-									<button
-										className="btn btn--small"
-										onClick={() => startEdit(d.path, d.body)}
-									>
-										<Pencil size={13} />
-										{t("common.edit")}
-									</button>
+										<button
+											className="btn btn--small"
+											onClick={() => startEdit(d.path, d.body)}
+										>
+											<Pencil size={13} />
+											{t("common.edit")}
+										</button>
 									)}
 								</div>
 							</div>
