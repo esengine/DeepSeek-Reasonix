@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"reasonix/internal/nilutil"
 )
@@ -264,7 +266,7 @@ type Usage struct {
 }
 
 // Pricing is a provider's per-1M-token rates, used to estimate spend. Currency
-// is just a display symbol (default "¥"). toml tags let config decode it.
+// is a display symbol or ISO-like code (default "¥"). toml tags let config decode it.
 type Pricing struct {
 	CacheHit float64 `toml:"cache_hit"` // per 1M cached prompt tokens
 	Input    float64 `toml:"input"`     // per 1M uncached prompt tokens
@@ -287,7 +289,51 @@ func (p *Pricing) Symbol() string {
 	if p == nil || p.Currency == "" {
 		return "¥"
 	}
-	return p.Currency
+	return currencySymbol(p.Currency)
+}
+
+func currencySymbol(currency string) string {
+	value := strings.TrimSpace(currency)
+	if value == "" {
+		return "¥"
+	}
+	switch strings.ToLower(value) {
+	case "cny", "rmb", "yuan", "renminbi", "cnh":
+		return "¥"
+	case "usd", "dollar", "dollars", "us dollar", "us dollars", "us$":
+		return "$"
+	case "eur", "euro", "euros":
+		return "€"
+	case "gbp", "pound", "pounds", "sterling":
+		return "£"
+	case "jpy", "yen":
+		return "¥"
+	}
+	switch value {
+	case "￥", "¥":
+		return "¥"
+	case "$", "€", "£":
+		return value
+	}
+	if r, size := utf8.DecodeRuneInString(value); size == len(value) && r != utf8.RuneError && unicode.Is(unicode.Sc, r) {
+		return value
+	}
+	if isThreeLetterCurrencyCode(value) {
+		return strings.ToUpper(value) + " "
+	}
+	return "¥"
+}
+
+func isThreeLetterCurrencyCode(value string) bool {
+	if len(value) != 3 {
+		return false
+	}
+	for _, r := range value {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') {
+			return false
+		}
+	}
+	return true
 }
 
 // Chunk is a single streamed event. Read the field matching Type.
