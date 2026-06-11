@@ -289,8 +289,8 @@ func TestNormaliseUsageMiMoShape(t *testing.T) {
 // back in the outgoing request. DeepSeek otherwise counts it as paid prompt
 // input (~500 tok/turn on a reasoner chain). The session keeps it for
 // display/archive; the wire request must not carry it.
-func TestBuildRequestDropsReasoningContent(t *testing.T) {
-	c := &client{model: "deepseek-reasoner"}
+func TestBuildRequestDropsReasoningOnPlainAssistantTurn(t *testing.T) {
+	c := &client{model: "deepseek-reasoner", deepseek: true}
 	req := c.buildRequest(provider.Request{
 		Messages: []provider.Message{
 			{Role: provider.RoleUser, Content: "explain"},
@@ -303,14 +303,37 @@ func TestBuildRequestDropsReasoningContent(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 	if strings.Contains(string(b), "reasoning_content") {
-		t.Errorf("outgoing request must not carry a reasoning_content field: %s", b)
+		t.Errorf("a no-tool-calls assistant turn must not carry reasoning_content: %s", b)
 	}
 	if strings.Contains(string(b), "SECRET-CHAIN-OF-THOUGHT") {
 		t.Errorf("the assistant chain-of-thought leaked into the request: %s", b)
 	}
-	// The visible answer must survive — we only drop reasoning, not content.
 	if !strings.Contains(string(b), "the answer") {
 		t.Errorf("assistant content was dropped along with reasoning: %s", b)
+	}
+}
+
+// DeepSeek thinking mode 400s a tool_calls turn whose reasoning_content was
+// dropped on a cache-miss replay, so it must be round-tripped — but only on the
+// turn that carries tool calls, and only for the DeepSeek protocol.
+func TestBuildRequestRoundTripsReasoningOnDeepSeekToolCalls(t *testing.T) {
+	msgs := []provider.Message{
+		{Role: provider.RoleUser, Content: "count the go files"},
+		{
+			Role:             provider.RoleAssistant,
+			ReasoningContent: "CHAIN-OF-THOUGHT",
+			ToolCalls:        []provider.ToolCall{{ID: "c1", Name: "bash", Arguments: `{"command":"ls"}`}},
+		},
+		{Role: provider.RoleTool, Content: "14", ToolCallID: "c1", Name: "bash"},
+	}
+	deepseek, _ := json.Marshal((&client{model: "deepseek-v4", deepseek: true}).buildRequest(provider.Request{Messages: msgs}).Messages)
+	if !strings.Contains(string(deepseek), "reasoning_content") || !strings.Contains(string(deepseek), "CHAIN-OF-THOUGHT") {
+		t.Errorf("DeepSeek tool_calls turn must round-trip reasoning_content: %s", deepseek)
+	}
+
+	other, _ := json.Marshal((&client{model: "mimo-v2"}).buildRequest(provider.Request{Messages: msgs}).Messages)
+	if strings.Contains(string(other), "CHAIN-OF-THOUGHT") {
+		t.Errorf("non-DeepSeek backends must not re-upload reasoning_content: %s", other)
 	}
 }
 
