@@ -264,6 +264,10 @@ func (a *App) startFeishuConnectionInstall(domain string) (BotInstallStartResult
 	if deviceCode == "" || verifyURL == "" {
 		return BotInstallStartResult{OK: false, Provider: "feishu", Domain: domain, Message: "飞书/Lark 授权响应缺少 device_code 或二维码 URL。"}, nil
 	}
+	qrURL, err := feishuRegistrationQRCodeURL(verifyURL)
+	if err != nil {
+		return BotInstallStartResult{OK: false, Provider: "feishu", Domain: domain, Message: err.Error()}, nil
+	}
 	installID := randomInstallID()
 	interval := intValue(data["interval"], 5)
 	expireIn := intValue(firstAny(data["expire_in"], data["expires_in"]), 300)
@@ -276,7 +280,7 @@ func (a *App) startFeishuConnectionInstall(domain string) (BotInstallStartResult
 		StartedAt: time.Now(), ExpireAt: time.Now().Add(time.Duration(expireIn) * time.Second),
 	}
 	a.mu.Unlock()
-	return BotInstallStartResult{OK: true, Provider: "feishu", Domain: domain, InstallID: installID, URL: verifyURL, DeviceCode: deviceCode, UserCode: userCode, Interval: interval, ExpireIn: expireIn}, nil
+	return BotInstallStartResult{OK: true, Provider: "feishu", Domain: domain, InstallID: installID, URL: qrURL, DeviceCode: deviceCode, UserCode: userCode, Interval: interval, ExpireIn: expireIn}, nil
 }
 
 func (a *App) pollFeishuConnectionInstall(installID string, session *botInstallSession) (BotInstallPollResult, error) {
@@ -443,6 +447,19 @@ func feishuAccountsBase(domain string) string {
 		return "https://accounts.larksuite.com"
 	}
 	return "https://accounts.feishu.cn"
+}
+
+func feishuRegistrationQRCodeURL(rawURL string) (string, error) {
+	parsedURL, err := url.Parse(rawURL)
+	if err != nil {
+		return "", err
+	}
+	query := parsedURL.Query()
+	query.Set("from", "sdk")
+	query.Set("tp", "sdk")
+	query.Set("source", "go-sdk")
+	parsedURL.RawQuery = query.Encode()
+	return parsedURL.String(), nil
 }
 
 func postFeishuInstallForm(base string, body map[string]string) (map[string]any, error) {

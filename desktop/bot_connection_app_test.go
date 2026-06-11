@@ -53,7 +53,7 @@ func TestFeishuInstallUsesReturnedTenantBrandAndStoresSecret(t *testing.T) {
 			}
 			writeJSON(t, w, map[string]any{
 				"device_code":               "dev-feishu",
-				"verification_uri_complete": "https://accounts.example/verify",
+				"verification_uri_complete": "https://accounts.example/verify?user_code=CODE",
 				"user_code":                 "CODE",
 				"interval":                  3,
 				"expire_in":                 300,
@@ -80,6 +80,14 @@ func TestFeishuInstallUsesReturnedTenantBrandAndStoresSecret(t *testing.T) {
 	}
 	if !start.OK || start.InstallID == "" || start.URL == "" || start.DeviceCode != "dev-feishu" {
 		t.Fatalf("start result = %+v, want ok lark-capable QR result", start)
+	}
+	qrURL, err := url.Parse(start.URL)
+	if err != nil {
+		t.Fatalf("start URL = %q, want valid QR URL: %v", start.URL, err)
+	}
+	query := qrURL.Query()
+	if query.Get("user_code") != "CODE" || query.Get("from") != "sdk" || query.Get("tp") != "sdk" || query.Get("source") != "go-sdk" {
+		t.Fatalf("start URL query = %v, want SDK registration QR metadata with user_code", query)
 	}
 
 	poll, err := app.PollBotConnectionInstall(start.InstallID)
@@ -162,6 +170,24 @@ func TestWeixinInstallStoresSavedAccountAndConnection(t *testing.T) {
 	cfg := config.LoadForEdit(config.UserConfigPath())
 	if !cfg.Bot.Enabled || !cfg.Bot.Weixin.Enabled || cfg.Bot.Weixin.AccountID != "weixin-account" || cfg.Bot.Weixin.TokenEnv != "WEIXIN_BOT_TOKEN" {
 		t.Fatalf("saved weixin config = %+v, want enabled saved account", cfg.Bot.Weixin)
+	}
+}
+
+func TestFeishuRegistrationQRCodeURLAddsSDKMetadata(t *testing.T) {
+	qrURL, err := feishuRegistrationQRCodeURL("https://open.larksuite.com/page/launcher?user_code=ABCD-1234&source=old")
+	if err != nil {
+		t.Fatalf("feishuRegistrationQRCodeURL: %v", err)
+	}
+	parsed, err := url.Parse(qrURL)
+	if err != nil {
+		t.Fatalf("parse QR URL: %v", err)
+	}
+	query := parsed.Query()
+	if query.Get("user_code") != "ABCD-1234" {
+		t.Fatalf("user_code = %q, want preserved code", query.Get("user_code"))
+	}
+	if query.Get("from") != "sdk" || query.Get("tp") != "sdk" || query.Get("source") != "go-sdk" {
+		t.Fatalf("query = %v, want SDK registration metadata", query)
 	}
 }
 
