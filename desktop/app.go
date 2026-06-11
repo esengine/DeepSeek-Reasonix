@@ -1680,11 +1680,13 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-// ContextInfo is the prompt-vs-window gauge payload. Both zero means no data yet.
+// ContextInfo is the prompt-vs-window gauge payload plus session totals. Used
+// and Window both zero means no context-window data yet.
 type ContextInfo struct {
-	Used         int     `json:"used"`
-	Window       int     `json:"window"`
-	CompactRatio float64 `json:"compactRatio,omitempty"`
+	Used          int     `json:"used"`
+	Window        int     `json:"window"`
+	SessionTokens int     `json:"sessionTokens"`
+	CompactRatio  float64 `json:"compactRatio,omitempty"`
 }
 
 // ContextUsage returns the latest context-window gauge numbers.
@@ -1693,12 +1695,23 @@ func (a *App) ContextUsage() ContextInfo {
 }
 
 func (a *App) ContextUsageForTab(tabID string) ContextInfo {
-	ctrl := a.ctrlByTabID(tabID)
+	a.mu.RLock()
+	tab := a.tabByIDLocked(tabID)
+	var ctrl *control.Controller
+	if tab != nil {
+		ctrl = tab.Ctrl
+	}
+	a.mu.RUnlock()
+
+	var sessionTokens int
+	if tab != nil {
+		sessionTokens = tab.telemetrySnapshot().Usage.TotalTokens
+	}
 	if ctrl == nil {
-		return ContextInfo{}
+		return ContextInfo{SessionTokens: sessionTokens}
 	}
 	used, window := ctrl.ContextSnapshot()
-	return ContextInfo{Used: used, Window: window, CompactRatio: ctrl.CompactRatio()}
+	return ContextInfo{Used: used, Window: window, SessionTokens: sessionTokens, CompactRatio: ctrl.CompactRatio()}
 }
 
 // BalanceInfo is the wallet-balance readout for the status bar. Available is true

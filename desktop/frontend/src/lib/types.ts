@@ -170,6 +170,7 @@ export interface ContextPanelInfo {
   windowTokens: number;
   promptTokens: number;
   completionTokens: number;
+  totalTokens: number;
   reasoningTokens: number;
   cacheHitTokens: number;
   cacheMissTokens: number;
@@ -272,6 +273,7 @@ export interface WorkspaceView {
 export interface ContextInfo {
   used: number;
   window: number;
+  sessionTokens: number;
   compactRatio?: number;
 }
 

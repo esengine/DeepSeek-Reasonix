@@ -48,6 +48,11 @@ const WORKSPACE_CONTEXT_MENU_REF_HEIGHT = 92;
 const WORKSPACE_CONTEXT_MENU_SELECTION_HEIGHT = 48;
 const WORKSPACE_MAX_PREVIEW_TABS = 5;
 
+type WorkspaceRevealRequest = { id: number; path: string };
+type WorkspaceFileListRequest = { id: number; paths: string[] };
+type WorkspaceChangeListEntry = { key: string; path: string; meta: string; time: string; detail: string };
+type WorkspaceChangeListRequest = { id: number; changes: WorkspaceChangeListEntry[] };
+
 function clampWorkspaceTreeWidth(width: number, panelWidth?: number): number {
   const maxForPanel =
     typeof panelWidth === "number" && Number.isFinite(panelWidth)
@@ -188,6 +193,10 @@ export function WorkspacePanel({
   onRequestPanelWidth,
   refreshKey,
   initialViewMode = "files",
+  revealPathRequest,
+  changeRevealRequest,
+  fileListRequest,
+  changeListRequest,
   showViewTabs = true,
 }: {
   open: boolean;
@@ -201,10 +210,15 @@ export function WorkspacePanel({
   onRequestPanelWidth?: (width: number) => void;
   refreshKey?: number;
   initialViewMode?: "files" | "changed";
+  revealPathRequest?: WorkspaceRevealRequest | null;
+  changeRevealRequest?: WorkspaceRevealRequest | null;
+  fileListRequest?: WorkspaceFileListRequest | null;
+  changeListRequest?: WorkspaceChangeListRequest | null;
   showViewTabs?: boolean;
 }) {
   const t = useT();
   const panelRef = useRef<HTMLElement>(null);
+  const treeRef = useRef<HTMLDivElement>(null);
   const filterRef = useRef<HTMLInputElement>(null);
   const previewBodyRef = useRef<HTMLDivElement>(null);
   const [entriesByDir, setEntriesByDir] = useState<Record<string, DirEntry[]>>({});
@@ -223,11 +237,21 @@ export function WorkspacePanel({
   const [treeMenu, setTreeMenu] = useState<{ x: number; y: number; path: string; isDir: boolean } | null>(null);
   const [treeBlankMenuPoint, setTreeBlankMenuPoint] = useState<ContextMenuPoint | null>(null);
   const [filter, setFilter] = useState("");
+  const [scopedFilePaths, setScopedFilePaths] = useState<string[] | null>(null);
+  const [scopedChangeRows, setScopedChangeRows] = useState<WorkspaceChangeListEntry[] | null>(null);
   const [treeVisible, setTreeVisible] = useState(true);
   const [treeWidth, setTreeWidth] = useState(loadWorkspaceTreeWidth);
   const [treeResizing, setTreeResizing] = useState(false);
   const [recentOpen, setRecentOpen] = useState(false);
   const lastPreviewModeActiveRef = useRef<boolean | null>(null);
+  const lastRevealRequestIdRef = useRef<number | null>(null);
+  const dismissedRevealRequestIdRef = useRef<number | null>(null);
+  const lastChangeRevealRequestIdRef = useRef<number | null>(null);
+  const dismissedChangeRevealRequestIdRef = useRef<number | null>(null);
+  const lastFileListRequestIdRef = useRef<number | null>(null);
+  const dismissedFileListRequestIdRef = useRef<number | null>(null);
+  const lastChangeListRequestIdRef = useRef<number | null>(null);
+  const dismissedChangeListRequestIdRef = useRef<number | null>(null);
   const recentAnchorRef = useRef<HTMLButtonElement>(null);
   const openDirsRef = useRef(openDirs);
 
@@ -288,6 +312,14 @@ export function WorkspacePanel({
     (path: string) => {
       onRequestPanelWidth?.(WORKSPACE_DUAL_PANEL_TARGET_WIDTH);
       setSelectedPath(path);
+      setScopedFilePaths((current) => {
+        if (current) dismissedFileListRequestIdRef.current = lastFileListRequestIdRef.current;
+        return null;
+      });
+      setScopedChangeRows((current) => {
+        if (current) dismissedChangeListRequestIdRef.current = lastChangeListRequestIdRef.current;
+        return null;
+      });
       setFilter("");
       setOpenTabs((tabs) => [...tabs.filter((tab) => tab !== path), path].slice(-WORKSPACE_MAX_PREVIEW_TABS));
       const dirs = parentDirs(path);
@@ -312,6 +344,8 @@ export function WorkspacePanel({
     setSelectionMenu(null);
     setTreeMenu(null);
     setFilter("");
+    setScopedFilePaths(null);
+    setScopedChangeRows(null);
     setTreeVisible(true);
     void loadDir("");
   }, [cwd, loadDir, open]);
@@ -325,13 +359,151 @@ export function WorkspacePanel({
     setTreeMenu(null);
     setRecentOpen(false);
     if (initialViewMode === "changed") {
+      setScopedFilePaths(null);
       setSelectedPath(null);
       setOpenTabs([]);
       setPreview(null);
       return;
     }
+    setScopedChangeRows(null);
     setTreeVisible(true);
   }, [initialViewMode, open]);
+
+  useEffect(() => {
+    if (!open || fileListRequest) return;
+    lastFileListRequestIdRef.current = null;
+    dismissedFileListRequestIdRef.current = null;
+    setScopedFilePaths(null);
+  }, [fileListRequest, open]);
+
+  useEffect(() => {
+    if (!open || !fileListRequest) return;
+    const paths = Array.from(new Set(fileListRequest.paths.map((path) => path.trim()).filter(Boolean)));
+    const scopedPathsSettled =
+      scopedFilePaths !== null &&
+      scopedFilePaths.length === paths.length &&
+      scopedFilePaths.every((path, index) => path === paths[index]);
+    if (dismissedFileListRequestIdRef.current === fileListRequest.id) return;
+    if (lastFileListRequestIdRef.current === fileListRequest.id && viewMode === "files" && scopedPathsSettled) return;
+    lastFileListRequestIdRef.current = fileListRequest.id;
+    dismissedFileListRequestIdRef.current = null;
+    if (paths.length === 0) {
+      setScopedFilePaths(null);
+      return;
+    }
+    setViewMode("files");
+    setTreeVisible(true);
+    setScopedFilePaths(paths);
+    setSelectedPath(null);
+    setOpenTabs([]);
+    setPreview(null);
+    setFilter("");
+    setExpandedCommit(null);
+    setCommitDetail(null);
+    setSelectionMenu(null);
+    setTreeMenu(null);
+    const dirs = Array.from(new Set(paths.flatMap(parentDirs)));
+    setOpenDirs((prev) => new Set([...Array.from(prev), ...dirs]));
+    dirs.forEach((dir) => {
+      if (!entriesByDir[dir]) void loadDir(dir);
+    });
+  }, [entriesByDir, fileListRequest, loadDir, open, scopedFilePaths, viewMode]);
+
+  useEffect(() => {
+    if (!open || changeListRequest) return;
+    lastChangeListRequestIdRef.current = null;
+    dismissedChangeListRequestIdRef.current = null;
+    setScopedChangeRows(null);
+  }, [changeListRequest, open]);
+
+  useEffect(() => {
+    if (!open || !changeListRequest) return;
+    const changes = changeListRequest.changes
+      .map((change) => ({ ...change, path: change.path.trim() }))
+      .filter((change) => change.path.length > 0);
+    const scopedChangesSettled =
+      scopedChangeRows !== null &&
+      scopedChangeRows.length === changes.length &&
+      scopedChangeRows.every((change, index) => change.path === changes[index]?.path);
+    if (dismissedChangeListRequestIdRef.current === changeListRequest.id) return;
+    if (lastChangeListRequestIdRef.current === changeListRequest.id && viewMode === "changed" && scopedChangesSettled) return;
+    lastChangeListRequestIdRef.current = changeListRequest.id;
+    dismissedChangeListRequestIdRef.current = null;
+    if (changes.length === 0) {
+      setScopedChangeRows(null);
+      return;
+    }
+    setViewMode("changed");
+    setScopedChangeRows(changes);
+    setScopedFilePaths(null);
+    setSelectedPath(null);
+    setOpenTabs([]);
+    setPreview(null);
+    setFilter("");
+    setExpandedCommit(null);
+    setCommitDetail(null);
+    setSelectionMenu(null);
+    setTreeMenu(null);
+    void loadGitHistory();
+  }, [changeListRequest, loadGitHistory, open, scopedChangeRows, viewMode]);
+
+  useEffect(() => {
+    if (!open || revealPathRequest) return;
+    lastRevealRequestIdRef.current = null;
+    dismissedRevealRequestIdRef.current = null;
+  }, [open, revealPathRequest]);
+
+  useEffect(() => {
+    if (!open || !revealPathRequest) return;
+    if (dismissedRevealRequestIdRef.current === revealPathRequest.id) return;
+    if (
+      lastRevealRequestIdRef.current === revealPathRequest.id &&
+      selectedPath === revealPathRequest.path &&
+      viewMode === "files"
+    ) {
+      return;
+    }
+    lastRevealRequestIdRef.current = revealPathRequest.id;
+    dismissedRevealRequestIdRef.current = null;
+    setViewMode("files");
+    setTreeVisible(true);
+    setScopedFilePaths(null);
+    setScopedChangeRows(null);
+    setExpandedCommit(null);
+    setCommitDetail(null);
+    selectFile(revealPathRequest.path);
+  }, [open, revealPathRequest, selectFile, selectedPath, viewMode]);
+
+  useEffect(() => {
+    if (!open || changeRevealRequest) return;
+    lastChangeRevealRequestIdRef.current = null;
+    dismissedChangeRevealRequestIdRef.current = null;
+  }, [changeRevealRequest, open]);
+
+  useEffect(() => {
+    if (!open || !changeRevealRequest) return;
+    if (dismissedChangeRevealRequestIdRef.current === changeRevealRequest.id) return;
+    if (
+      lastChangeRevealRequestIdRef.current === changeRevealRequest.id &&
+      selectedPath === changeRevealRequest.path &&
+      viewMode === "changed"
+    ) {
+      return;
+    }
+    lastChangeRevealRequestIdRef.current = changeRevealRequest.id;
+    dismissedChangeRevealRequestIdRef.current = null;
+    setViewMode("changed");
+    setScopedFilePaths(null);
+    setScopedChangeRows(null);
+    setSelectedPath(changeRevealRequest.path);
+    setOpenTabs([]);
+    setPreview(null);
+    setFilter("");
+    setExpandedCommit(null);
+    setCommitDetail(null);
+    setSelectionMenu(null);
+    setTreeMenu(null);
+  }, [changeRevealRequest, open, selectedPath, viewMode]);
 
   useEffect(() => {
     if (!open) return;
@@ -431,6 +603,12 @@ export function WorkspacePanel({
   );
 
   const closeTab = (path: string) => {
+    if (lastRevealRequestIdRef.current === revealPathRequest?.id && revealPathRequest.path === path) {
+      dismissedRevealRequestIdRef.current = revealPathRequest.id;
+    }
+    if (lastChangeRevealRequestIdRef.current === changeRevealRequest?.id && changeRevealRequest.path === path) {
+      dismissedChangeRevealRequestIdRef.current = changeRevealRequest.id;
+    }
     setOpenTabs((tabs) => {
       const next = tabs.filter((tab) => tab !== path);
       if (selectedPath === path) {
@@ -453,24 +631,34 @@ export function WorkspacePanel({
   const changedMode = viewMode === "changed";
   const currentFileName = selectedPath ? basename(selectedPath) : t("workspace.noFile");
   const currentFileDir = selectedPath ? parentPath(selectedPath) : "";
-  const previewTitle = changedMode && !selectedPath ? t("workspace.changedTab") : currentFileName;
-  const previewSubtitle = changedMode && !selectedPath ? shortCwd(cwd) || t("workspace.title") : currentFileDir;
+  const previewTitle = changedMode && !selectedPath
+    ? scopedChangeRows ? t("context.sessionChanges") : t("workspace.changedTab")
+    : currentFileName;
+  const previewSubtitle = changedMode && !selectedPath
+    ? scopedChangeRows ? t("context.changedMeta", { count: scopedChangeRows.length }) : shortCwd(cwd) || t("workspace.title")
+    : currentFileDir;
   const recentFiles = useMemo(() => [...openTabs].reverse(), [openTabs]);
   const flattened = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    if (scopedFilePaths) {
+      return scopedFilePaths
+        .map((path) => ({ path, entry: { name: basename(path), isDir: false } }))
+        .filter((row) => !q || row.path.toLowerCase().includes(q))
+        .sort((a, b) => a.path.localeCompare(b.path));
+    }
     const rows: { path: string; entry: DirEntry }[] = [];
     for (const [dir, entries] of Object.entries(entriesByDir)) {
       for (const entry of entries) {
         rows.push({ path: entryPath(dir, entry), entry });
       }
     }
-    const q = filter.trim().toLowerCase();
     if (!q) return null;
     return rows
       .filter((row) => row.path.toLowerCase().includes(q))
       .sort((a, b) => a.path.localeCompare(b.path));
-  }, [entriesByDir, filter]);
+  }, [entriesByDir, filter, scopedFilePaths]);
 
-  const searchPlaceholder = t("workspace.filter");
+  const searchPlaceholder = t(scopedFilePaths ? "workspace.filterReferencedFiles" : changedMode ? "workspace.filterChanges" : "workspace.filter");
 
   const effectiveTreeWidth = useMemo(() => clampWorkspaceTreeWidth(treeWidth, panelWidth), [panelWidth, treeWidth]);
   const filePreviewActive = openTabs.length > 0 || selectedPath !== null;
@@ -484,6 +672,16 @@ export function WorkspacePanel({
   const previewModeActive = open && (filePreviewActive || changeDetailActive);
   const embeddedDockMode = !showViewTabs;
   const showFileTools = showViewTabs || filePreviewActive;
+
+  useEffect(() => {
+    if (!selectedPath || !actualTreeVisible) return;
+    const frame = window.requestAnimationFrame(() => {
+      const row = Array.from(treeRef.current?.querySelectorAll<HTMLElement>("[data-workspace-path]") ?? [])
+        .find((element) => element.dataset.workspacePath === selectedPath);
+      row?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [actualTreeVisible, entriesByDir, filter, selectedPath]);
 
   const panelStyle = useMemo(
     () =>
@@ -660,6 +858,7 @@ export function WorkspacePanel({
         <button
           key={path}
           className={`workspace-tree__row${active ? " workspace-tree__row--active" : ""}`}
+          data-workspace-path={path}
           draggable
           onDragStart={(event) => startTreeDrag(event, path, entry.isDir)}
           onClick={() => {
@@ -831,7 +1030,58 @@ export function WorkspacePanel({
         </div>
 
         <div className="workspace-preview__body" ref={previewBodyRef} onContextMenu={openSelectionMenu}>
-          {viewMode === "changed" && !selectedPath ? (
+          {viewMode === "changed" && scopedChangeRows ? (
+            <div className="workspace-change-scope">
+              <div className="workspace-change-scope__head">
+                <span className="workspace-change-scope__title">{t("context.sessionChanges")}</span>
+                <span className="workspace-change-scope__meta">{t("context.changedMeta", { count: scopedChangeRows.length })}</span>
+                <Tooltip label={t("workspace.clearChangeScope")}>
+                  <button
+                    type="button"
+                    aria-label={t("workspace.clearChangeScope")}
+                    onClick={() => {
+                      dismissedChangeListRequestIdRef.current = lastChangeListRequestIdRef.current;
+                      setScopedChangeRows(null);
+                      setSelectedPath(null);
+                      setExpandedCommit(null);
+                      setCommitDetail(null);
+                      void loadGitHistory();
+                    }}
+                  >
+                    <X size={12} />
+                  </button>
+                </Tooltip>
+              </div>
+              <div className="workspace-change-scope__list">
+                {scopedChangeRows.map((change) => {
+                  const dir = parentPath(change.path);
+                  return (
+                    <button
+                      key={change.key}
+                      className="workspace-change"
+                      type="button"
+                      onClick={() => {
+                        dismissedChangeListRequestIdRef.current = lastChangeListRequestIdRef.current;
+                        setScopedChangeRows(null);
+                        selectFile(change.path);
+                      }}
+                    >
+                      <FileText size={14} />
+                      <span className="workspace-change__body">
+                        <span className="workspace-change__name">{basename(change.path)}</span>
+                        {dir && <span className="workspace-change__path">{dir}</span>}
+                        {change.detail && <span className="workspace-change__detail">{change.detail}</span>}
+                      </span>
+                      <span className="workspace-change__meta">
+                        <span className="workspace-change__badge workspace-change__badge--git">{change.meta}</span>
+                        {change.time && <span className="workspace-change__badge">{change.time}</span>}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : viewMode === "changed" && !selectedPath ? (
             <div className="workspace-git-history">
               {loadingHistory ? (
                 <div className="workspace-empty">{t("workspace.loading")}</div>
@@ -1042,7 +1292,26 @@ export function WorkspacePanel({
           <Search size={14} />
           <input ref={filterRef} value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={searchPlaceholder} />
         </div>
-        <div className="workspace-tree" onContextMenu={openTreeBlankMenu}>
+        {scopedFilePaths && (
+          <div className="workspace-files__scope">
+            <span className="workspace-files__scope-title">{t("context.referencedFiles")}</span>
+            <span className="workspace-files__scope-meta">{t("context.readMeta", { count: scopedFilePaths.length })}</span>
+            <Tooltip label={t("workspace.clearFileScope")}>
+              <button
+                type="button"
+                aria-label={t("workspace.clearFileScope")}
+                onClick={() => {
+                  dismissedFileListRequestIdRef.current = lastFileListRequestIdRef.current;
+                  setScopedFilePaths(null);
+                  setFilter("");
+                }}
+              >
+                <X size={12} />
+              </button>
+            </Tooltip>
+          </div>
+        )}
+        <div className="workspace-tree" ref={treeRef} onContextMenu={openTreeBlankMenu}>
           {flattened
             ? flattened.map(({ path, entry }) => {
                 const dir = parentPath(path);
@@ -1050,6 +1319,7 @@ export function WorkspacePanel({
                   <button
                     key={path}
                     className={`workspace-tree__row workspace-tree__row--search${selectedPath === path ? " workspace-tree__row--active" : ""}`}
+                    data-workspace-path={path}
                     draggable
                     onDragStart={(event) => startTreeDrag(event, path, entry.isDir)}
                     onClick={() => {
