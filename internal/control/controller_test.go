@@ -564,3 +564,42 @@ func TestRunGuardedPanicDoesNotDoubleEmitTurnDone(t *testing.T) {
 		}
 	}
 }
+
+type blockingRunner struct {
+	session *agent.Session
+	release chan struct{}
+}
+
+func (r blockingRunner) Run(_ context.Context, input string) error {
+	r.session.Add(provider.Message{Role: provider.RoleUser, Content: input})
+	<-r.release
+	return nil
+}
+
+func TestMidTurnAutosavePersistsDuringLongTurn(t *testing.T) {
+	old := midTurnSnapshotInterval.Load()
+	midTurnSnapshotInterval.Store(int64(10 * time.Millisecond))
+	defer midTurnSnapshotInterval.Store(old)
+
+	dir := t.TempDir()
+	sess := agent.NewSession("sys")
+	exec := agent.New(nil, nil, sess, agent.Options{}, event.Discard)
+	path := filepath.Join(dir, "session.jsonl")
+	release := make(chan struct{})
+	c := New(Options{Runner: blockingRunner{session: sess, release: release}, Executor: exec, SessionDir: dir, SessionPath: path, Label: "test"})
+	// Unblock the turn and wait for the autosaver to exit before TempDir
+	// cleanup, which fails on Windows while a snapshot tmp write is in flight.
+	defer c.autosaveWG.Wait()
+	defer close(release)
+
+	c.Send("hello mid-turn persistence")
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if b, err := os.ReadFile(path); err == nil && strings.Contains(string(b), "hello mid-turn persistence") {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("session file was not written while the turn was still running")
+}

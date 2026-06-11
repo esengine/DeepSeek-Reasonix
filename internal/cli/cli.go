@@ -18,6 +18,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/boot"
@@ -230,7 +231,7 @@ func runAgent(args []string) int {
 		return 2
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
 
 	// Live run: render the agent's event stream to stdout. Markdown post-stream
@@ -345,7 +346,7 @@ func runServe(args []string) int {
 
 	fmt.Printf("reasonix serve — %s on http://%s\n", ctrl.Label(), *addr)
 	// Use graceful shutdown so SIGINT/SIGTERM drain active connections.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err := serve.New(ctrl, bc).RunGraceful(ctx, *addr); err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
@@ -521,7 +522,19 @@ func chatREPL(args []string) int {
 	// in the normal buffer so native touch scrollback and soft-keyboard focus
 	// keep working; finalized transcript lines are emitted via tea.Println.
 	p := tea.NewProgram(m)
+	// SSH drop (SIGHUP) or service stop (SIGTERM): persist the conversation
+	// before the terminal goes away, then unwind through the normal close path
+	// so resume picks up the interrupted session (#3772).
+	hangup := make(chan os.Signal, 1)
+	signal.Notify(hangup, syscall.SIGHUP, syscall.SIGTERM)
+	go func() {
+		for range hangup {
+			_ = ctrl.Snapshot()
+			p.Quit()
+		}
+	}()
 	final, runErr := p.Run()
+	signal.Stop(hangup)
 	// Close the active controller plus any retired ones from /model switches.
 	// Retired controllers were stashed rather than closed at switch time
 	// because Controller.Close() runs SessionEnd hooks and kills plugin
