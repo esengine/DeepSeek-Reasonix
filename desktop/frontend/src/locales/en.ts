@@ -1116,6 +1116,8 @@ export const en = {
   "updater.autoCheckHint": "When off, Reasonix won't check automatically when it opens. You can still check manually here.",
   "settings.telemetryLabel": "Anonymous usage ping",
   "settings.telemetryHint": "On launch, send a random install id plus version and OS to count active installs. Never includes conversations, keys, or file contents.",
+  "settings.metricsLabel": "Share aggregate quality metrics",
+  "settings.metricsHint": "Off by default. When on, send anonymous counts of how turns end (finish reason, cache-hit rate, error and tool-failure categories) so issues can be spotted across versions. Only enumerated counters — never conversations, prompts, keys, paths, or any text.",
   "updater.currentVersion": "Current version: {v}",
   "updater.checkButton": "Check for updates",
   "updater.checking": "Checking for updates…",

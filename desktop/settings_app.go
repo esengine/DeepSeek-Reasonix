@@ -150,6 +150,7 @@ type SettingsView struct {
 	DisplayMode       string          `json:"displayMode"`
 	CheckUpdates      bool            `json:"checkUpdates"`
 	Telemetry         bool            `json:"telemetry"`
+	Metrics           bool            `json:"metrics"`
 	ExpandThinking    bool            `json:"expandThinking"`
 	ConfigPath        string          `json:"configPath"`
 	// ProviderKinds lists the provider implementations the kernel actually
@@ -330,6 +331,7 @@ func (a *App) Settings() SettingsView {
 			DisplayMode:       "minimal",
 			CheckUpdates:      true,
 			Telemetry:         true,
+			Metrics:           false,
 			ExpandThinking:    false,
 		}
 	}
@@ -377,6 +379,7 @@ func (a *App) Settings() SettingsView {
 		DisplayMode:       cfg.DesktopDisplayMode(),
 		CheckUpdates:      cfg.DesktopCheckUpdates(),
 		Telemetry:         cfg.DesktopTelemetry(),
+		Metrics:           cfg.DesktopMetrics(),
 		ExpandThinking:    cfg.Desktop.ExpandThinking,
 		ConfigPath:        cfgPath,
 		ProviderKinds:     nonNil(provider.Kinds()),
@@ -1315,6 +1318,21 @@ func (a *App) SetDesktopCheckUpdates(enabled bool) error {
 // SetDesktopTelemetry sets whether the desktop sends the anonymous launch ping.
 func (a *App) SetDesktopTelemetry(enabled bool) error {
 	return a.applyConfigOnly(func(c *config.Config) error { return c.SetDesktopTelemetry(enabled) })
+}
+
+// SetDesktopMetrics sets whether the desktop sends opt-in aggregate agent metrics,
+// starting or stopping the live aggregator so the toggle takes effect immediately.
+func (a *App) SetDesktopMetrics(enabled bool) error {
+	if err := a.applyConfigOnly(func(c *config.Config) error { return c.SetDesktopMetrics(enabled) }); err != nil {
+		return err
+	}
+	switch {
+	case enabled && a.metrics.Load() == nil && version != "dev":
+		a.metrics.Store(newMetricsAggregator(filepath.Dir(config.UserConfigPath())))
+	case !enabled:
+		a.metrics.Store(nil)
+	}
+	return nil
 }
 
 // SetExpandThinking sets whether reasoning text is expanded by default on

@@ -733,6 +733,7 @@ export interface SettingsView {
   displayMode: string;   // "standard" | "compact" | "minimal"
   checkUpdates: boolean; // check for new versions on startup
   telemetry: boolean; // anonymous launch ping (install id + version + OS)
+  metrics: boolean; // opt-in aggregate agent metrics (anonymous signal/bucket counts)
   expandThinking: boolean; // show reasoning text expanded by default
   configPath: string;
   providerKinds: string[]; // provider implementations the kernel registered (for the kind picker)
