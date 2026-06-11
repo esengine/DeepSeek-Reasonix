@@ -7,21 +7,10 @@ import (
 	"reasonix/internal/event"
 )
 
-// TestParallelBashMarkersKeepOwnLineCount reproduces the DeepSeek-scheduled
-// parallel bash case: 3 Bash(ls) dispatched in one turn, each tool id is
-// "call_<n>" (no "shell-" prefix), each streams its own 22-line output, each
-// finishes with a ToolResult. The transcript must show three cards, each
-// followed by its own "⎿ 22 lines" marker — not "⎿ -1 lines" or a blank
-// line, and not all three markers stacked under the last card.
-//
-// Root cause: streamToolOutput reset the active id's toolLineCount on every
-// switch, and collapseShellSlot's late path only had shellOutputs[id] to
-// recover it from (and shellOutputs is only populated for "shell-" prefixed
-// ids). For call_N-style ids n fell through to -1 and the final else branch
-// rendered "⎿ -1 lines" (or, with a defensive n<0=0 guard, the slot was
-// blanked). Fix: streamToolOutput now stashes the per-id line count before
-// resetting, and collapseShellSlot also accepts the ToolResult's final
-// output as a last-resort source.
+// 3 parallel Bash(ls) in one turn, ids "call_<n>" (no "shell-" prefix), each
+// streams 22 lines then finishes. Every card must keep its own "⎿ 22 lines"
+// marker. Regression: collapseShellSlot's late path recovered the count only
+// from shellOutputs ("shell-" ids), so call_N ids fell through to "-1 lines".
 func TestParallelBashMarkersKeepOwnLineCount(t *testing.T) {
 	m := newTestChatTUI()
 	ids := []string{"call_1", "call_2", "call_3"}
@@ -79,11 +68,9 @@ func TestParallelBashMarkersKeepOwnLineCount(t *testing.T) {
 	}
 }
 
-// TestNonShellToolLateResultShowsCorrectCount is the no-streaming variant
-// of the parallel-tool regression: a second Bash dispatches before the
-// first has produced any ToolProgress, and the first's ToolResult arrives
-// last. The slot must still end with a "⎿ N lines" marker (driven by the
-// ToolResult's own Output) — not "-1 lines" and not blank.
+// No-streaming variant: a second Bash dispatches before the first emits any
+// ToolProgress, and the first's result lands last. The slot must still show
+// "⎿ N lines" driven by the ToolResult's own Output, not "-1 lines" or blank.
 func TestNonShellToolLateResultShowsCorrectCount(t *testing.T) {
 	m := newTestChatTUI()
 	m.ingestEvent(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{ID: "call_a", Name: "bash", Args: `{"command":"echo a"}`}})

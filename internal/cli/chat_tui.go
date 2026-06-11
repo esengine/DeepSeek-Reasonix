@@ -161,21 +161,14 @@ type chatTUI struct {
 	// shellTranscriptIdx maps a shell tool ID to the transcript index of its
 	// collapsed output block, so Ctrl+B can rewrite it in place.
 	shellTranscriptIdx map[string]int
-	// toolLineCountByID records the last line count a streamed tool emitted
-	// (toolLineCount + (toolPartial != "")), keyed by the tool's call id. When
-	// streamToolOutput switches to a new id the old one's live tail/lineCount
-	// get reset; this map keeps the old count so collapseShellSlot's late
-	// path can still render the correct "⎿ N lines" summary for a non-
-	// streaming-prefixed tool (e.g. DeepSeek-scheduled bash with id "call_N")
-	// whose ToolResult arrives after another tool has taken over. Without
-	// it, late collapse would fall through to "⎿ -1 lines" because the
-	// shellOutputs accumulator is restricted to "shell-" ids.
+	// toolLineCountByID keeps a switched-away tool's last line count so a late
+	// ToolResult can still render "⎿ N lines" (shellOutputs only tracks "shell-" ids).
+	toolLineCountByID map[string]int
 	// toolStreamStart / toolStreamFrame drive the "⎿ working · Ns" line shown
 	// under a dispatched tool that hasn't produced output yet, so a slow tool
 	// (e.g. codegraph_context) reads as making progress rather than frozen.
-	toolLineCountByID map[string]int
-	toolStreamStart   time.Time
-	toolStreamFrame   int
+	toolStreamStart time.Time
+	toolStreamFrame int
 	transcriptDirty bool
 	eventCh         chan event.Event
 	started         bool // banner + resumed history committed once
@@ -1670,13 +1663,8 @@ func (m *chatTUI) streamToolOutput(id, chunk string) {
 		//       already wrote for that id, so the live block stays directly
 		//       under the earlier tool's card rather than stacking at the end.
 		if existingIdx, ok := m.shellTranscriptIdx[id]; ok && existingIdx >= 0 && existingIdx < len(m.transcript) {
-			// Preserve the previous id's line count before we reset the
-			// streaming state. The transcript slot is still on screen
-			// with the old tail; when its ToolResult eventually arrives,
-			// collapseShellSlot's late path will use this count to render
-			// the correct "⎿ N lines" summary — the same value the active
-			// path would have computed had the result landed before
-			// another tool's progress pre-empted the stream.
+			// Stash the switched-away id's live count before resetting it;
+			// its late ToolResult reads it back via toolLineCountByID.
 			if m.toolStreamID != "" && m.toolStreamID != id {
 				n := m.toolLineCount
 				if m.toolPartial != "" {
@@ -1692,10 +1680,7 @@ func (m *chatTUI) streamToolOutput(id, chunk string) {
 			m.toolPartial = ""
 			m.toolLineCount = 0
 		} else {
-			// Unknown id (not in shellTranscriptIdx). Collapse the
-			// currently-active stream with no result output — the
-			// active path still has the live line count, so this is
-			// only ever reached when a tool never produced output.
+			// Unknown id: collapse the active stream (its live count is intact).
 			m.collapseToolOutput(m.toolStreamID, "")
 			m.toolStreamID = id
 			m.toolTail = m.toolTail[:0]
@@ -1755,12 +1740,8 @@ func (m *chatTUI) pushToolLine(line string) {
 // "⎿ N lines" summary, so the scrollback keeps a marker of the run without the
 // full output (which the model already received). For shell commands ("shell-"
 // prefix), it shows the first shellPreviewLines with a Ctrl+B hint instead.
-// No-op when id isn't streaming. resultOutput is the tool's final output
-// (from the ToolResult event) and is the last-resort source of truth for
-// the line count when neither the live streaming state nor shellOutputs
-// have anything — e.g. a back-to-back bash tool whose progress arrived
-// after the slot was already overtaken by another tool, or one that
-// never streamed at all and the result is the only signal.
+// No-op when id isn't streaming. resultOutput (the ToolResult's final output)
+// is the last-resort line-count source when the live state was already reset.
 func (m *chatTUI) collapseToolOutput(id, resultOutput string) {
 	if m.nativeScrollback {
 		if id == "" || m.toolStreamID != id {
@@ -1801,15 +1782,9 @@ func (m *chatTUI) collapseToolOutput(id, resultOutput string) {
 		return
 	}
 	if m.toolStreamIdx < 0 || id == "" || m.toolStreamID != id {
-		// The slot is no longer active (e.g. another tool has since taken
-		// over via beginToolRunning, or this id was never streamed). If we
-		// still have a transcript index for it — set by beginToolRunning
-		// when the dispatch landed — collapse in place so a late
-		// ToolResult for a back-to-back tool doesn't leave the previous
-		// tool's live block as raw streamed text. Pass resultOutput so
-		// collapseShellSlot has the tool's final output as a last-resort
-		// source for the line count when neither the live state nor
-		// shellOutputs know about this id.
+		// Slot no longer active (another tool took over, or this id never
+		// streamed). If beginToolRunning recorded a transcript index, collapse
+		// in place so a late ToolResult doesn't leave raw streamed text behind.
 		if idx, ok := m.shellTranscriptIdx[id]; ok && idx >= 0 && idx < len(m.transcript) {
 			m.collapseShellSlot(id, idx, resultOutput)
 		}
@@ -1824,31 +1799,16 @@ func (m *chatTUI) collapseToolOutput(id, resultOutput string) {
 }
 
 // collapseShellSlot finalises a tool's live block at idx. Used both by the
-// active-tool path (idx == toolStreamIdx, with the streaming state intact)
-// and the late-result path (idx was recorded in shellTranscriptIdx when the
-// tool was first dispatched). The active path uses the live streaming
-// state (m.toolLineCount + m.toolPartial) for the line count; the late
-// path derives it from the accumulated shellOutputs map (only populated
-// for "shell-" prefixed ids), then the per-id line count captured by
-// streamToolOutput (call_N-style ids that stream but aren't "shell-"),
-// then the final output carried by the ToolResult event itself — the
-// tool-tail line count is reset whenever a new tool takes over via
-// beginToolRunning, so without these fallbacks a late collapse would
-// either render "⎿ -1 lines" or blank the slot. Sets transcriptDirty
-// so the rewritten slot paints immediately, not on the next unrelated
-// event.
+// active-tool path (idx == toolStreamIdx, streaming state intact) and the
+// late-result path (idx recorded in shellTranscriptIdx at dispatch). Line-count
+// sources, in order: live streaming state, shellOutputs ("shell-" ids only),
+// the per-id count stashed by streamToolOutput, then the ToolResult's output.
 func (m *chatTUI) collapseShellSlot(id string, idx int, resultOutput string) {
 	m.transcriptDirty = true
 	n := -1
 	if id == m.toolStreamID {
-		// Active path. The live streaming line count reflects the chunks
-		// already rendered into the working block. When the ToolResult
-		// also carries a final output (e.g. the last chunk of a slow
-		// tool arrived in the same call as the result, or the result is
-		// the only signal we ever get for a tool that never streamed
-		// its progress) prefer the larger of the two: resultOutput is
-		// the authoritative end-state. toolLineCount + toolPartial is
-		// the live state and may be lower.
+		// Prefer the larger of the live count and resultOutput: resultOutput
+		// is the authoritative end-state, the live state may lag behind it.
 		n = m.toolLineCount
 		if m.toolPartial != "" {
 			n++
@@ -1870,26 +1830,13 @@ func (m *chatTUI) collapseShellSlot(id string, idx int, resultOutput string) {
 		}
 	}
 	if n < 0 {
-		// No shellOutputs and the live state doesn't apply — e.g. a
-		// late ToolResult for a back-to-back read_file (no shellOutputs
-		// ever populated because the id lacks the "shell-" prefix), or
-		// a shell- tool whose result arrived with no prior
-		// ToolProgress chunks. Without this guard the n == 0 branch
-		// below would miss and the final else would render
-		// "⎿ -1 lines". Treat the unknown as zero output: clear the
-		// slot rather than fabricate a count. The id is still recorded
-		// in shellTranscriptIdx (set by beginToolRunning), so a late
-		// ToolProgress could still land here if one ever arrives.
+		// Nothing applies (e.g. a late result for a non-"shell-" id that never
+		// streamed): treat as zero rather than fabricate a "-1 lines" count.
 		n = 0
 	}
 	if n == 0 {
-		// The live block was a "working…" placeholder for a tool that
-		// finished with no output. Clear the rendered text so "working"
-		// disappears from scrollback, but keep the slot in place: the
-		// transcript index is still recorded in shellTranscriptIdx so a
-		// late ToolProgress for this id can land here. If no late
-		// progress ever arrives, this slot becomes a blank line — visible
-		// but harmless.
+		// Tool finished with no output: clear the "working…" placeholder but
+		// keep the slot (shellTranscriptIdx still points here for late progress).
 		m.transcript[idx] = ""
 		return
 	}
