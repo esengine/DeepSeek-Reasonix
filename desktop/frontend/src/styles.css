@@ -6787,6 +6787,10 @@ a[href] {
 .palette__item--on {
   background: var(--accent-soft);
 }
+.palette__item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
 .palette__item-icon {
   width: 30px;
   height: 30px;
@@ -8606,8 +8610,10 @@ a[href] {
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.32);
   overflow: hidden;
   transform-origin: 50% 48%;
-  will-change: transform, opacity;
-  animation: modal-in 280ms var(--ease-out) both;
+  /* No will-change / fill-mode: anything that keeps a transform applied after
+     entry pins a compositor layer rasterized at the entrance scale, leaving
+     text blurry on Windows fractional DPI until the next repaint (#3838). */
+  animation: modal-in 280ms var(--ease-out);
 }
 .history-modal {
   width: min(1360px, calc(100vw - 96px));
@@ -8651,7 +8657,7 @@ a[href] {
     opacity: 1;
   }
   100% {
-    transform: translate3d(0, 0, 0) scale(1);
+    transform: none;
     opacity: 1;
   }
 }
@@ -11609,13 +11615,24 @@ a[href] {
   white-space: pre-wrap;
   word-break: break-word;
 }
-.crash-overlay__copy {
-  align-self: flex-start;
+.crash-overlay__actions {
+  display: flex;
+  gap: 8px;
+}
+.crash-overlay__copy,
+.crash-overlay__send {
   padding: 6px 12px;
   border: 1px solid #444;
   border-radius: 6px;
   background: #2a2a40;
   color: inherit;
+}
+.crash-overlay__send[disabled] {
+  opacity: 0.65;
+}
+.crash-overlay__note {
+  color: #8a8aa3;
+  font-size: 12px;
 }
 
 /* onboarding — first-run gate covering the whole window. Sits above every
@@ -12169,6 +12186,13 @@ a[href] {
 .app--darwin .app-chrome--tabs .tabbar,
 .app--darwin .app-chrome--tabs .tabbar * {
   --wails-draggable: no-drag;
+}
+
+/* The empty strip between the last tab and the search button must drag the
+   window like a native titlebar — the 10px top rail alone is unusable (#3853). */
+.app--darwin .app-chrome--tabs .tabbar__spacer {
+  --wails-draggable: drag;
+  align-self: stretch;
 }
 
 .app--darwin .app-chrome--tabs .app-chrome__drag-rail {
@@ -14750,141 +14774,6 @@ a[href] {
 .workspace-branch-menu__item:disabled {
   opacity: 0.4;
   cursor: default;
-}
-
-/* ── Command palette (⌘K) ─────────────────────────────────────────── */
-.drawer-backdrop:has(.palette) {
-  justify-content: center;
-  align-items: flex-start;
-  padding-top: 12vh;
-}
-
-.palette {
-  position: relative;
-  width: min(520px, 90vw);
-  max-height: 60vh;
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.36);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  animation: palette-in 0.1s ease;
-}
-
-@keyframes palette-in {
-  from { opacity: 0; transform: translateY(-12px) scale(0.97); }
-  to   { opacity: 1; transform: translateY(0) scale(1); }
-}
-
-.palette__inputrow {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--border);
-}
-
-.palette__input {
-  flex: 1;
-  border: none;
-  outline: none;
-  background: transparent;
-  color: var(--fg);
-  font-size: 14px;
-  line-height: 1.4;
-}
-
-.palette__input::placeholder {
-  color: var(--fg-muted);
-}
-
-.palette__esc {
-  font-size: 11px;
-  padding: 2px 6px;
-  border-radius: 4px;
-  border: 1px solid var(--border);
-  color: var(--fg-muted);
-  background: var(--bg-base);
-  font-family: inherit;
-  line-height: 1.3;
-}
-
-.palette__list {
-  flex: 1;
-  overflow-y: auto;
-  padding: 6px 0;
-}
-
-.palette__empty {
-  padding: 24px 14px;
-  color: var(--fg-muted);
-  text-align: center;
-  font-size: 13px;
-}
-
-.palette__group-title {
-  padding: 8px 14px 4px;
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--fg-muted);
-}
-
-.palette__item {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  width: 100%;
-  padding: 8px 14px;
-  border: none;
-  background: transparent;
-  color: var(--fg);
-  cursor: pointer;
-  text-align: left;
-  font-family: inherit;
-  font-size: 13px;
-  line-height: 1.3;
-}
-
-.palette__item--on {
-  background: var(--accent-bg, rgba(77, 151, 255, 0.12));
-}
-
-.palette__item:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
-}
-
-.palette__title {
-  font-weight: 500;
-}
-
-.palette__hint {
-  font-size: 11px;
-  color: var(--fg-muted);
-}
-
-.palette__foot {
-  display: flex;
-  gap: 12px;
-  padding: 7px 14px;
-  border-top: 1px solid var(--border);
-  font-size: 11px;
-  color: var(--fg-muted);
-}
-
-.palette__foot kbd {
-  padding: 1px 4px;
-  border-radius: 3px;
-  border: 1px solid var(--border);
-  background: var(--bg-base);
-  font-family: inherit;
-  font-size: 10px;
-  line-height: 1.3;
-  margin-right: 2px;
 }
 
 /* Respect the OS reduced-motion preference: squash all animations and force

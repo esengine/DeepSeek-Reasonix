@@ -28,10 +28,13 @@ func (f fatTool) Execute(context.Context, json.RawMessage) (string, error) {
 
 // loopMock emits exactly one tool call per user turn (a tool call when the last
 // message is the user's, a final answer when it is the tool result), so each Run
-// does one tool round — the step that triggers maybeCompact.
+// does one tool round — the step that triggers maybeCompact. finalText overrides
+// the per-turn closing answer so a test can grow the session with assistant text
+// (which pruning never touches) instead of tool output.
 type loopMock struct {
-	t      *testing.T
-	rounds int
+	t         *testing.T
+	rounds    int
+	finalText string
 }
 
 func lastRole(msgs []json.RawMessage) string {
@@ -59,8 +62,12 @@ func (m *loopMock) handler(w http.ResponseWriter, r *http.Request) {
 	promptTok := charsOf(msgs) / 4
 
 	if lastRole(msgs) == "tool" {
+		text := m.finalText
+		if text == "" {
+			text = "Done with this step."
+		}
 		writeSSE(w, m.t,
-			streamChunk(deltaText("Done with this step.")),
+			streamChunk(deltaText(text)),
 			finishChunk("stop"),
 			usageChunk(promptTok, 20, 0, promptTok))
 		return
@@ -76,9 +83,9 @@ func (m *loopMock) handler(w http.ResponseWriter, r *http.Request) {
 // compactionsPerTurn drives `turns` user messages through a fresh agent wired to
 // loopMock and reports, per turn, how many compactions started and whether an
 // auto-compaction-paused notice was seen.
-func compactionsPerTurn(t *testing.T, windowTok int, blob string, turns int) (perTurn []int, paused bool) {
+func compactionsPerTurn(t *testing.T, windowTok int, blob, finalText string, turns int) (perTurn []int, paused bool, prunes int) {
 	t.Helper()
-	mock := &loopMock{t: t}
+	mock := &loopMock{t: t, finalText: finalText}
 	srv := httptest.NewServer(http.HandlerFunc(mock.handler))
 	defer srv.Close()
 
@@ -95,6 +102,9 @@ func compactionsPerTurn(t *testing.T, windowTok int, blob string, turns int) (pe
 			if strings.Contains(e.Text, "Auto-compaction paused") {
 				paused = true
 			}
+			if strings.Contains(e.Text, "pruned") {
+				prunes++
+			}
 		}
 	})
 
@@ -106,7 +116,7 @@ func compactionsPerTurn(t *testing.T, windowTok int, blob string, turns int) (pe
 		}
 		perTurn[i] = started - before
 	}
-	return perTurn, paused
+	return perTurn, paused, prunes
 }
 
 func consecutiveCompactingTurns(perTurn []int) int {
@@ -130,7 +140,7 @@ func consecutiveCompactingTurns(perTurn []int) int {
 // notice — instead of looping turn after turn.
 func TestCompactionPausesWhenWindowTooSmall(t *testing.T) {
 	// One fat_read result (~1750 tok) exceeds the 0.8×1600 trigger on its own.
-	perTurn, paused := compactionsPerTurn(t, 1600, strings.Repeat("LARGE FILE CONTENTS. ", 350), 8)
+	perTurn, paused, _ := compactionsPerTurn(t, 1600, strings.Repeat("LARGE FILE CONTENTS. ", 350), "", 8)
 
 	total := 0
 	for _, n := range perTurn {
@@ -146,12 +156,12 @@ func TestCompactionPausesWhenWindowTooSmall(t *testing.T) {
 	}
 }
 
-// TestCompactionHealthyWindowNeverLoops is the companion: with a window big
-// enough to summarize a turn under, compaction still fires as the session grows
-// but reclaims enough headroom that it never fires on consecutive turns and never
-// trips the stuck guard.
+// TestCompactionHealthyWindowNeverLoops is the companion: when growth comes from
+// assistant text (which pruning never touches), compaction still fires as the
+// session grows but reclaims enough headroom that it never fires on consecutive
+// turns and never trips the stuck guard.
 func TestCompactionHealthyWindowNeverLoops(t *testing.T) {
-	perTurn, paused := compactionsPerTurn(t, 40000, strings.Repeat("file line. ", 1100), 20)
+	perTurn, paused, _ := compactionsPerTurn(t, 40000, "small tool output", strings.Repeat("analysis paragraph. ", 600), 20)
 
 	total := 0
 	for _, n := range perTurn {
@@ -167,5 +177,29 @@ func TestCompactionHealthyWindowNeverLoops(t *testing.T) {
 	}
 	if c := consecutiveCompactingTurns(perTurn); c > 1 {
 		t.Errorf("compaction fired on %d consecutive turns; a healthy compaction should leave breathing room", c)
+	}
+}
+
+// TestPruneKeepsToolHeavySessionBounded: when growth comes from tool results,
+// pruning alone keeps the prompt under the trigger for the whole session — the
+// paid summarize call never happens and the stuck guard never trips. 20 turns of
+// ~3k-token blobs would otherwise cross 0.8×40000 around turn 11.
+func TestPruneKeepsToolHeavySessionBounded(t *testing.T) {
+	perTurn, paused, prunes := compactionsPerTurn(t, 40000, strings.Repeat("file line. ", 1100), "", 20)
+
+	total := 0
+	for _, n := range perTurn {
+		total += n
+	}
+	t.Logf("compactions per turn: %v (total %d), paused=%v, prunes=%d", perTurn, total, paused, prunes)
+
+	if total != 0 {
+		t.Errorf("compaction fired %d times; pruning should keep a tool-heavy session bounded without folding", total)
+	}
+	if paused {
+		t.Errorf("auto-compaction paused; pruning should have prevented the stuck loop entirely")
+	}
+	if prunes == 0 {
+		t.Errorf("expected at least one prune pass over a tool-heavy session")
 	}
 }

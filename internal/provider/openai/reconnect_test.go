@@ -79,6 +79,118 @@ func TestStreamReconnectsOnEarlyConnReset(t *testing.T) {
 	}
 }
 
+// TestStreamTreatsCleanEOFWithoutDoneAsCut reproduces issue #3953: a proxy that
+// idle-closes the SSE connection with a clean FIN ends the scan with no error,
+// which used to commit the turn as complete — including half-streamed tool-call
+// arguments that then 400 on every replay. Before output, the cut must be
+// replayed; the caller sees one clean stream with the full tool call.
+func TestStreamTreatsCleanEOFWithoutDoneAsCut(t *testing.T) {
+	var reqs int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reqs++
+		w.Header().Set("Content-Type", "text/event-stream")
+		if reqs == 1 {
+			_, _ = io.WriteString(w, ": keep-alive\n\n") // clean close, no [DONE], no finish_reason
+			return
+		}
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",\"function\":{\"name\":\"bash\",\"arguments\":\"{\\\"cmd\\\": \\\"ls\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+
+	p, err := New(provider.Config{Name: "deepseek", BaseURL: srv.URL, Model: "deepseek-v4", APIKey: "k"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ch, err := p.Stream(context.Background(), provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}}})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+
+	var call *provider.ToolCall
+	for chunk := range ch {
+		switch chunk.Type {
+		case provider.ChunkError:
+			t.Fatalf("clean EOF before output should be replayed, not surfaced: %v", chunk.Err)
+		case provider.ChunkToolCall:
+			call = chunk.ToolCall
+		}
+	}
+	if call == nil || call.Arguments != `{"cmd": "ls"}` {
+		t.Errorf("tool call = %+v, want complete arguments from the replay", call)
+	}
+	if reqs != 2 {
+		t.Errorf("server saw %d requests, want 2 (one cut + one replay)", reqs)
+	}
+}
+
+// TestStreamDropsPartialToolCallOnCleanEOF is the post-output half of #3953: the
+// connection dies mid-tool-call after the call's start was forwarded. The partial
+// arguments must never surface as a ChunkToolCall; the cut surfaces as a stream
+// interruption so the agent's recovery path takes over.
+func TestStreamDropsPartialToolCallOnCleanEOF(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",\"function\":{\"name\":\"bash\",\"arguments\":\"{\"}}]}}]}\n\n")
+	}))
+	defer srv.Close()
+
+	p, err := New(provider.Config{Name: "deepseek", BaseURL: srv.URL, Model: "deepseek-v4", APIKey: "k"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ch, err := p.Stream(context.Background(), provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}}})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+
+	var gotInterrupted bool
+	for chunk := range ch {
+		switch chunk.Type {
+		case provider.ChunkToolCall:
+			t.Fatalf("partial tool call surfaced: %+v", chunk.ToolCall)
+		case provider.ChunkError:
+			var interrupted *provider.StreamInterruptedError
+			gotInterrupted = errors.As(chunk.Err, &interrupted)
+		}
+	}
+	if !gotInterrupted {
+		t.Error("a cut after the tool-call start should surface as a stream interruption")
+	}
+}
+
+// TestStreamAcceptsFinishReasonWithoutDone keeps gateways that omit the [DONE]
+// sentinel working: a finish_reason marks the turn complete on its own.
+func TestStreamAcceptsFinishReasonWithoutDone(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"hello\"},\"finish_reason\":\"stop\"}]}\n\n")
+	}))
+	defer srv.Close()
+
+	p, err := New(provider.Config{Name: "deepseek", BaseURL: srv.URL, Model: "deepseek-v4", APIKey: "k"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ch, err := p.Stream(context.Background(), provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}}})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+
+	var text strings.Builder
+	for chunk := range ch {
+		if chunk.Type == provider.ChunkError {
+			t.Fatalf("finish_reason without [DONE] should complete cleanly: %v", chunk.Err)
+		}
+		if chunk.Type == provider.ChunkText {
+			text.WriteString(chunk.Text)
+		}
+	}
+	if text.String() != "hello" {
+		t.Errorf("text = %q, want %q", text.String(), "hello")
+	}
+}
+
 // TestStreamDoesNotReplayAfterOutput guards against duplicated output: once a
 // token has streamed, a mid-stream reset must surface as an error rather than
 // replaying the request (which would re-emit the already-shown text).

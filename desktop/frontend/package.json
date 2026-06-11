@@ -10,9 +10,9 @@
     "check:css": "node scripts/check-css-syntax.mjs src/styles.css && node scripts/check-z-index-tokens.mjs src/styles.css",
     "test:todo-visibility": "node scripts/test-todo-visibility.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "tsx src/__tests__/math-golden.test.ts && tsx src/__tests__/text-size.test.ts && tsx src/__tests__/provider-model-refresh.test.ts && tsx src/__tests__/goal-draft-mode.test.ts && tsx src/__tests__/workspace-layout.test.ts && tsx src/__tests__/tool-approval-mode.test.ts && tsx src/__tests__/send-failed.test.ts && tsx src/__tests__/message-selection-copy.test.ts && tsx src/__tests__/attachment-display.test.ts",
+    "test": "tsx src/__tests__/math-golden.test.ts && tsx src/__tests__/text-size.test.ts && tsx src/__tests__/provider-model-refresh.test.ts && tsx src/__tests__/goal-draft-mode.test.ts && tsx src/__tests__/workspace-layout.test.ts && tsx src/__tests__/tool-approval-mode.test.ts && tsx src/__tests__/send-failed.test.ts && tsx src/__tests__/message-selection-copy.test.ts && tsx src/__tests__/attachment-display.test.ts && tsx src/__tests__/command-palette-css.test.ts",
     "test:typecheck": "tsc --noEmit -p tsconfig.test.json",
-    "test:all": "tsc --noEmit -p tsconfig.test.json && tsx src/__tests__/math-golden.test.ts && tsx src/__tests__/text-size.test.ts && tsx src/__tests__/provider-model-refresh.test.ts && tsx src/__tests__/goal-draft-mode.test.ts && tsx src/__tests__/workspace-layout.test.ts && tsx src/__tests__/tool-approval-mode.test.ts && tsx src/__tests__/send-failed.test.ts && tsx src/__tests__/message-selection-copy.test.ts && tsx src/__tests__/attachment-display.test.ts"
+    "test:all": "tsc --noEmit -p tsconfig.test.json && tsx src/__tests__/math-golden.test.ts && tsx src/__tests__/text-size.test.ts && tsx src/__tests__/provider-model-refresh.test.ts && tsx src/__tests__/goal-draft-mode.test.ts && tsx src/__tests__/workspace-layout.test.ts && tsx src/__tests__/tool-approval-mode.test.ts && tsx src/__tests__/send-failed.test.ts && tsx src/__tests__/message-selection-copy.test.ts && tsx src/__tests__/attachment-display.test.ts && tsx src/__tests__/command-palette-css.test.ts"
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.14.2",

@@ -134,7 +134,7 @@ export function AppChrome({
                 <Search size={13} className="tabbar__command-icon" />
                 <span className="tabbar__command-text tabbar__command-text--full">{t("tabBar.commandSearch")}</span>
                 <span className="tabbar__command-text tabbar__command-text--compact">{t("tabBar.commandSearchCompact")}</span>
-                <kbd className="tabbar__command-kbd">⌘K</kbd>
+                <kbd className="tabbar__command-kbd">Ctrl+K</kbd>
               </button>
             </div>
           )}

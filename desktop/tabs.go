@@ -1206,7 +1206,7 @@ func topicTitleFromSession(path string) string {
 			return ""
 		}
 		if msg.Role == "user" {
-			return topicTitleFromText(msg.Content)
+			return topicTitleFromText(agent.HandoffTask(msg.Content))
 		}
 	}
 }

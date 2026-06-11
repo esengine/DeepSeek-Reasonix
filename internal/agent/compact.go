@@ -96,6 +96,17 @@ func (a *Agent) maybeCompact(ctx context.Context, u *provider.Usage) {
 		return
 	}
 	force := u.PromptTokens >= int(float64(a.contextWindow)*a.compactForceRatio)
+	// Prune before folding: when eliding stale tool results alone clears the
+	// trigger, this turn's (paid) summarize call is skipped entirely.
+	ratio := a.tokPerChar()
+	if st, err := a.PruneStaleToolResults(); err == nil && st.Results > 0 {
+		saved := int(float64(st.SavedChars) * ratio)
+		a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: fmt.Sprintf(
+			"pruned %d stale tool results (~%d tokens est.) before compaction", st.Results, saved)})
+		if !force && u.PromptTokens-saved < high {
+			return
+		}
+	}
 	if err := a.compact(ctx, "auto", "", force); err != nil {
 		a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: fmt.Sprintf("compaction skipped: %v", err)})
 		return

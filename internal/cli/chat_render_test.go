@@ -16,6 +16,9 @@ func newTestChatTUI() chatTUI {
 	ti := textarea.New()
 	configureChatTextarea(&ti)
 	ti.SetWidth(80)
+	shellIdx := map[string]int{}
+	shellOut := map[string]string{}
+	shellExp := map[string]bool{}
 	return chatTUI{
 		input:                ti,
 		width:                80,
@@ -31,6 +34,9 @@ func newTestChatTUI() chatTUI {
 		pending:              &strings.Builder{},
 		pendingCommit:        &commit,
 		renderer:             newMarkdownRenderer(80),
+		shellOutputs:         shellOut,
+		shellExpanded:        shellExp,
+		shellTranscriptIdx:   shellIdx,
 	}
 }
 
@@ -225,6 +231,121 @@ func TestToolWorkingLineThenClears(t *testing.T) {
 	}
 	if m.toolStreamIdx != -1 {
 		t.Fatalf("tool block should be closed after the result, idx=%d", m.toolStreamIdx)
+	}
+}
+
+// TestConsecutiveToolCallsKeepMarkersUnderOwnCard is a regression test for
+// back-to-back Bash tool calls. Before the fix, the late ToolProgress for
+// the first tool (already superseded in the controller by a second
+// ToolDispatch) appended a fresh live block at the end of the transcript
+// under the *second* tool's card. Both "⎿" markers then stacked at the
+// end, hiding which run produced which output. The fix threads the
+// transcript slot through shellTranscriptIdx so each tool's live block
+// stays directly under its own card regardless of the dispatch/progress
+// arrival order.
+func TestConsecutiveToolCallsKeepMarkersUnderOwnCard(t *testing.T) {
+	m := newTestChatTUI()
+	// First bash: dispatched and gets one progress chunk before the second
+	// bash is dispatched, mirroring the model's parallel-tool-call pattern.
+	// The "shell-" prefix ensures streamToolOutput accumulates into
+	// shellOutputs, which collapseShellSlot uses to recover the line count
+	// after the live state has been reset by the second beginToolRunning.
+	m.ingestEvent(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{ID: "shell-1", Name: "bash", Args: `{"command":"git status"}`}})
+	m.ingestEvent(event.Event{Kind: event.ToolProgress, Tool: event.Tool{ID: "shell-1", Output: "On branch main-v2\n"}})
+	// Second bash dispatched before the first finishes; this switches
+	// m.toolStreamID to "shell-2" and resets the live streaming state.
+	m.ingestEvent(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{ID: "shell-2", Name: "bash", Args: `{"command":"git branch -a"}`}})
+	// The second bash also streams one chunk of output so its collapse
+	// produces a real ⎿ marker (not the zero-output blank fallback).
+	m.ingestEvent(event.Event{Kind: event.ToolProgress, Tool: event.Tool{ID: "shell-2", Output: "* main-v2\n"}})
+	// Late progress for the FIRST bash — the path that previously stacked
+	// its marker under the second card.
+	m.ingestEvent(event.Event{Kind: event.ToolProgress, Tool: event.Tool{ID: "shell-1", Output: "nothing to commit\n"}})
+	// Now finish both; each should collapse in place under its own card.
+	m.ingestEvent(event.Event{Kind: event.ToolResult, Tool: event.Tool{ID: "shell-1", Name: "bash", Output: "On branch main-v2\nnothing to commit\n"}})
+	m.ingestEvent(event.Event{Kind: event.ToolResult, Tool: event.Tool{ID: "shell-2", Name: "bash", Output: "* main-v2\n"}})
+
+	// Locate each tool's card. With the fix the transcript is exactly
+	// [card1, marker1, "", card2, marker2] — 5 lines, one marker per
+	// card. Without the fix the late progress overwrites the last slot
+	// in place (or appends), so the first card's slot is left holding
+	// only the first live chunk, and both markers end up at the tail.
+	transcript := m.transcript
+	idx1, idx2 := -1, -1
+	for i, ln := range transcript {
+		if idx1 == -1 && strings.Contains(ln, "git status") {
+			idx1 = i
+		}
+		if idx2 == -1 && strings.Contains(ln, "git branch -a") {
+			idx2 = i
+		}
+	}
+	if idx1 < 0 || idx2 < 0 || idx2 <= idx1 {
+		t.Fatalf("expected two bash cards in dispatch order, got idx1=%d idx2=%d\n%s", idx1, idx2, strings.Join(transcript, "\n"))
+	}
+
+	// Each card must be followed by its own ⎿-prefixed marker slot —
+	// not just "some marker somewhere after the second card".
+	for _, pair := range []struct {
+		card string
+		idx  int
+	}{
+		{card: "git status", idx: idx1},
+		{card: "git branch -a", idx: idx2},
+	} {
+		next := transcript[pair.idx+1]
+		if !strings.Contains(next, "⎿") {
+			t.Fatalf("%q's marker should be at transcript[%d] with the ⎿ connector, got %q\nfull transcript:\n%s",
+				pair.card, pair.idx+1, next, strings.Join(transcript, "\n"))
+		}
+	}
+
+	// The first card's marker must reflect the full output of the first
+	// run ("On branch main-v2" AND "nothing to commit"), not just the
+	// first chunk. The bug left only the pre-late-progress chunk in
+	// transcript[idx1+1], so the second line would be missing.
+	marker1 := transcript[idx1+1]
+	if !strings.Contains(marker1, "On branch main-v2") || !strings.Contains(marker1, "nothing to commit") {
+		t.Fatalf("first card's marker should preview the full output of shell-1, got %q", marker1)
+	}
+}
+
+// TestConsecutiveNonShellToolsDoNotRenderNegativeLineCount is the regression
+// test for the review-blocking case. The original fix to back-to-back shell
+// tools records every dispatched id in shellTranscriptIdx so a late
+// ToolProgress/Result can land in the correct slot. But for non-shell-
+// prefixed tools (e.g. read_file) the streaming state belongs to whichever
+// id is current and the accumulator (shellOutputs) is never populated, so
+// the late path's "n" stayed at -1 and the final else branch rendered
+// "⎿ -1 lines". The fix in collapseShellSlot guards n < 0 by clearing the
+// slot — a deliberate blank-line fallback rather than a misleading
+// negative count.
+func TestConsecutiveNonShellToolsDoNotRenderNegativeLineCount(t *testing.T) {
+	m := newTestChatTUI()
+	// Two back-to-back read_file tools; the first result lands AFTER
+	// the second dispatch (the model dispatched them in parallel and
+	// the first one finished last). This is the path the PR reviewer
+	// identified as the blocker.
+	m.ingestEvent(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{ID: "read_file-1", Name: "read_file", Args: `{"path":"a.txt"}`}})
+	m.ingestEvent(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{ID: "read_file-2", Name: "read_file", Args: `{"path":"b.txt"}`}})
+	// Late ToolResult for the FIRST tool — this used to render "-1 lines"
+	// under the first card.
+	m.ingestEvent(event.Event{Kind: event.ToolResult, Tool: event.Tool{ID: "read_file-1", Name: "read_file", Output: "a.txt contents"}})
+	m.ingestEvent(event.Event{Kind: event.ToolResult, Tool: event.Tool{ID: "read_file-2", Name: "read_file", Output: "b.txt contents"}})
+
+	transcript := m.transcript
+	// The "-1 lines" bug surfaced literally as that text, so assert its
+	// absence first as a clear regression marker.
+	if joined := strings.Join(transcript, "\n"); strings.Contains(joined, "-1 lines") {
+		t.Fatalf("transcript must not contain a negative line count:\n%s", joined)
+	}
+	// And the more general contract: no slot under a card should claim
+	// a non-positive line count either.
+	for _, line := range transcript {
+		if strings.Contains(line, "0 lines") || strings.Contains(line, "-1 lines") {
+			t.Fatalf("non-shell tool marker should be blank, got %q\nfull transcript:\n%s",
+				line, strings.Join(transcript, "\n"))
+		}
 	}
 }
 

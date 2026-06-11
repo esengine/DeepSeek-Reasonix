@@ -193,3 +193,27 @@ Executor instructions:
 
 Carry out the task, adapting the plan as needed.`, executorHandoffMarker, task, plan)
 }
+
+// HandoffTask returns the original user task embedded in an executor handoff
+// message, or s unchanged when it is not one. Session previews and auto-titles
+// use it so dual-model sessions surface the user's words, not the handoff
+// boilerplate (#3860).
+func HandoffTask(s string) string {
+	trimmed := strings.TrimSpace(s)
+	if !strings.HasPrefix(trimmed, "# "+executorHandoffMarker) {
+		return s
+	}
+	const header = "Original task:\n"
+	i := strings.Index(trimmed, header)
+	if i < 0 {
+		return s
+	}
+	rest := trimmed[i+len(header):]
+	if j := strings.Index(rest, "\n\nPlanner output:"); j >= 0 {
+		rest = rest[:j]
+	}
+	if task := strings.TrimSpace(rest); task != "" {
+		return task
+	}
+	return s
+}
