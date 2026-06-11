@@ -48,5 +48,22 @@ eq(
 );
 eq(Math.round(oversized.otherPct * 10) / 10, 6.1, "oversized provider breakdown does not fill the ring");
 
+const unknownWindow = contextBreakdown(42_124, 0, 22_134, 12_345, 7_521);
+eq(
+  {
+    promptPct: unknownWindow.promptPct,
+    completionPct: unknownWindow.completionPct,
+    reasoningPct: unknownWindow.reasoningPct,
+    otherPct: unknownWindow.otherPct,
+  },
+  {
+    promptPct: 0,
+    completionPct: 0,
+    reasoningPct: 0,
+    otherPct: 0,
+  },
+  "unknown context window keeps donut segments empty",
+);
+
 console.log(`\n${passed} passed, ${failed} failed, ${passed + failed} total`);
 if (failed > 0) process.exit(1);

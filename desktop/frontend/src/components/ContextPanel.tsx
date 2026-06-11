@@ -101,11 +101,11 @@ export function contextBreakdown(
 
   const normalizedKnown = Math.min(used, prompt + completion + reasoning);
   const other = Math.max(0, used - normalizedKnown);
-  const pctDenom = Math.max(window, 1);
-  const promptPct = Math.min(100, (prompt / pctDenom) * 100);
-  const completionPct = Math.min(100, ((prompt + completion) / pctDenom) * 100);
-  const reasoningPct = Math.min(100, ((prompt + completion + reasoning) / pctDenom) * 100);
-  const otherPct = Math.min(100, (used / pctDenom) * 100);
+  const hasWindow = window > 0;
+  const promptPct = hasWindow ? Math.min(100, (prompt / window) * 100) : 0;
+  const completionPct = hasWindow ? Math.min(100, ((prompt + completion) / window) * 100) : 0;
+  const reasoningPct = hasWindow ? Math.min(100, ((prompt + completion + reasoning) / window) * 100) : 0;
+  const otherPct = hasWindow ? Math.min(100, (used / window) * 100) : 0;
 
   return {
     promptTokens: Math.round(prompt),

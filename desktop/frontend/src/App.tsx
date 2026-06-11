@@ -652,8 +652,8 @@ export default function App() {
   }, [activeTab?.scope, activeTab?.topicId, activeTab?.workspaceRoot, projectRevision]);
   const sessionTurns = useMemo(() => {
     const visibleUserTurns = state.items.reduce((count, item) => (item.kind === "user" ? count + 1 : count), 0);
-    const fallbackTurns = Math.max(state.checkpoints.length, visibleUserTurns);
-    return Math.max(activeTopicTurns ?? 0, fallbackTurns);
+    const currentTabTurns = Math.max(state.checkpoints.length, visibleUserTurns);
+    return currentTabTurns > 0 ? currentTabTurns : activeTopicTurns ?? 0;
   }, [activeTopicTurns, state.checkpoints.length, state.items]);
   const startupSplashHold = state.meta?.ready !== true && !state.meta?.startupErr;
   const legacyMode = activeTabId ? modesByTab[activeTabId] ?? "normal" : "normal";
