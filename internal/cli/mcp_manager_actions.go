@@ -171,7 +171,7 @@ func (m chatTUI) applyMCPMode(tier string) (tea.Model, tea.Cmd) {
 	}
 	if v.BuiltIn && v.Name == "codegraph" {
 		cfg.Codegraph.Enabled = true
-		cfg.Codegraph.Tier = normalizeMCPTierForCLI(tier)
+		cfg.Codegraph.Tier = ""
 		if err := cfg.Save(); err != nil {
 			m.notice("mcp mode: " + err.Error())
 			return m, nil
@@ -179,7 +179,7 @@ func (m chatTUI) applyMCPMode(tier string) (tea.Model, tea.Cmd) {
 		if m.mcpDisabled != nil {
 			delete(m.mcpDisabled, v.Name)
 		}
-		if tier != "lazy" && m.ctrl != nil && !mcpConnected(m.ctrl, v.Name) {
+		if m.ctrl != nil && !mcpConnected(m.ctrl, v.Name) {
 			if _, err := m.ctrl.ConnectConfiguredMCPServer(v.Name); err != nil {
 				recordMCPModeCodegraphFailure(m.ctrl, cfg.Codegraph, err)
 				m.notice("saved connection mode, but connect failed: " + err.Error())

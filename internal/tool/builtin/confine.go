@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"reasonix/internal/netclient"
 	"reasonix/internal/sandbox"
 	"reasonix/internal/tool"
 )
@@ -19,6 +20,12 @@ func ConfineBash(spec sandbox.Spec, timeout ...time.Duration) tool.Tool {
 		b.timeout = timeout[0]
 	}
 	return b
+}
+
+// ConfineWebFetch returns the web_fetch built-in bound to Reasonix proxy
+// settings while preserving its SSRF-guarded dialer.
+func ConfineWebFetch(proxySpec netclient.ProxySpec) tool.Tool {
+	return webFetch{proxySpec: proxySpec}
 }
 
 // ConfineWriters returns the file-writing built-ins (write_file, edit_file,

@@ -8,6 +8,8 @@ package main
 
 import (
 	"embed"
+	"os"
+	"strings"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -40,6 +42,20 @@ var version = "dev"
 // `-X main.channel=canary`. Default "stable" tracks the public release; "canary"
 // tracks the opt-in pre-release line and never crosses over to stable.
 var channel = "stable"
+
+const disableWebview2GPUEnv = "REASONIX_DESKTOP_DISABLE_WEBVIEW2_GPU"
+
+func windowsWebview2GPUDisabled() bool {
+	if raw, ok := os.LookupEnv(disableWebview2GPUEnv); ok {
+		switch strings.ToLower(strings.TrimSpace(raw)) {
+		case "1", "true", "yes", "on":
+			return true
+		case "0", "false", "no", "off", "":
+			return false
+		}
+	}
+	return channel == "canary"
+}
 
 func main() {
 	app := NewApp()
@@ -96,7 +112,8 @@ func main() {
 		Windows: &windows.Options{
 			// Follow the OS theme so the title bar matches light/dark system
 			// preference instead of being locked to dark.
-			Theme: windows.SystemDefault,
+			Theme:                windows.SystemDefault,
+			WebviewGpuIsDisabled: windowsWebview2GPUDisabled(),
 		},
 		Linux: &linux.Options{
 			ProgramName: "Reasonix",

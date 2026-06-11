@@ -229,6 +229,49 @@ func TestUpdateSinkApprovalAllowAlways(t *testing.T) {
 	}
 }
 
+func TestUpdateSinkApprovalBashPrefix(t *testing.T) {
+	fn := &fakeNotifier{onReq: func(_ string, params any) (json.RawMessage, error) {
+		raw, _ := json.Marshal(params)
+		var p PermissionRequestParams
+		if err := json.Unmarshal(raw, &p); err != nil {
+			t.Fatalf("permission params: %v", err)
+		}
+		// Bash with a safe prefix now uses the same standard options as any
+		// other tool (allow_always / allow_persistent); the old prefix-specific
+		// OptAllowPrefix/OptPersistPrefix are gone.
+		var hasSession, hasPersistent bool
+		for _, opt := range p.Options {
+			hasSession = hasSession || opt.OptionID == string(OptAllowAlways)
+			hasPersistent = hasPersistent || opt.OptionID == string(OptAllowPersistent)
+		}
+		if !hasSession || !hasPersistent {
+			t.Fatalf("options = %+v, want standard session and persistent choices", p.Options)
+		}
+		if len(p.Options) != 4 {
+			t.Fatalf("options = %+v, want allow once, session, persistent, reject", p.Options)
+		}
+		res, _ := json.Marshal(PermissionRequestResult{
+			Outcome: PermissionOutcome{Outcome: "selected", OptionID: string(OptAllowPersistent)},
+		})
+		return res, nil
+	}}
+	sink := newUpdateSink(fn, "sess-1")
+	got := make(chan approveCall, 1)
+	sink.bindApprove(func(id string, allow, session, persist bool) { got <- approveCall{id, allow, session, persist} })
+
+	sink.Emit(event.Event{Kind: event.ApprovalRequest, Approval: event.Approval{ID: "10", Tool: "bash", Subject: "go test ./..."}})
+
+	select {
+	case c := <-got:
+		want := approveCall{id: "10", allow: true, session: true, persist: true}
+		if c != want {
+			t.Errorf("approve = %+v, want %+v", c, want)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("approve was never called")
+	}
+}
+
 func TestUpdateSinkApprovalDenied(t *testing.T) {
 	// Both a "cancelled" outcome and a transport error must deny the call.
 	for _, tc := range []struct {

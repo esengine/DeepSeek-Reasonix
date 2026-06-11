@@ -917,6 +917,9 @@ func deleteSessionFiles(sessionPath string) error {
 			return err
 		}
 	}
+	if err := agent.DeleteSubagentsByParent(filepath.Dir(sessionPath), agent.BranchID(sessionPath)); err != nil {
+		return err
+	}
 	return nil
 }
 

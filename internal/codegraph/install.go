@@ -7,7 +7,6 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
@@ -23,6 +22,10 @@ const (
 	// with CODEGRAPH_VERSION in the Makefile and .github/workflows.
 	Version = "v0.9.7"
 	cgRepo  = "colbymchenry/codegraph"
+
+	officialMirrorBase         = "https://dl.reasonix.io/codegraph"
+	officialMainlandMirrorBase = ""
+	perSourceDownloadTimeout   = 15 * time.Second
 
 	renameAttempts = 5
 	renameBackoff  = 200 * time.Millisecond
@@ -79,7 +82,8 @@ func assetName() string {
 }
 
 // Install downloads and unpacks the CodeGraph bundle into CacheDir on first use,
-// verifying it against the release's SHA256SUMS, then returns the launcher path.
+// verifying it against the checksum baked into the reasonix binary, then returns
+// the launcher path.
 // It is idempotent: a present cache is returned untouched. log, if non-nil,
 // receives a couple of progress lines. The extraction is staged in a temp dir and
 // atomically renamed into place, so a cancelled or failed run leaves no partial
@@ -104,21 +108,9 @@ func InstallWithClient(ctx context.Context, client *http.Client, log func(string
 	asset := assetName()
 	logf(log, "codegraph: downloading %s (%s, one-time)…", asset, Version)
 
-	base := fmt.Sprintf("https://github.com/%s/releases/download/%s", cgRepo, Version)
-	sums, err := httpGet(ctx, client, base+"/SHA256SUMS")
-	if err != nil {
-		return "", fmt.Errorf("codegraph: fetch checksums: %w", err)
-	}
-	want, err := sha256For(string(sums), asset)
+	data, err := downloadAsset(ctx, client, asset, log)
 	if err != nil {
 		return "", err
-	}
-	data, err := httpGet(ctx, client, base+"/"+asset)
-	if err != nil {
-		return "", fmt.Errorf("codegraph: download %s: %w", asset, err)
-	}
-	if got := sha256.Sum256(data); hex.EncodeToString(got[:]) != want {
-		return "", fmt.Errorf("codegraph: checksum mismatch for %s", asset)
 	}
 
 	parent := filepath.Dir(dir)
@@ -160,6 +152,65 @@ func InstallWithClient(ctx context.Context, client *http.Client, log func(string
 	}
 	logf(log, "codegraph: installed to %s", dir)
 	return p, nil
+}
+
+func downloadAsset(ctx context.Context, client *http.Client, asset string, log func(string)) ([]byte, error) {
+	want := expectedAssetSHA256(asset)
+	if want == "" {
+		return nil, fmt.Errorf("codegraph: no embedded checksum for %s (%s)", asset, Version)
+	}
+	return downloadAssetFromBases(ctx, client, asset, want, downloadBases(), log)
+}
+
+func downloadAssetFromBases(ctx context.Context, client *http.Client, asset, want string, bases []string, log func(string)) ([]byte, error) {
+	var errs []string
+	for _, base := range bases {
+		url := strings.TrimRight(base, "/") + "/" + asset
+		getCtx := ctx
+		cancel := func() {}
+		if perSourceDownloadTimeout > 0 {
+			getCtx, cancel = context.WithTimeout(ctx, perSourceDownloadTimeout)
+		}
+		data, err := httpGet(getCtx, client, url)
+		cancel()
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", base, err))
+			continue
+		}
+		got := fmt.Sprintf("%x", sha256.Sum256(data))
+		if got != want {
+			errs = append(errs, fmt.Sprintf("%s: checksum mismatch for %s", base, asset))
+			continue
+		}
+		logf(log, "codegraph: downloaded from %s", base)
+		return data, nil
+	}
+	return nil, fmt.Errorf("codegraph: download %s failed (%s)", asset, strings.Join(errs, "; "))
+}
+
+func expectedAssetSHA256(asset string) string {
+	return releaseAssetSHA256[asset]
+}
+
+func downloadBases() []string {
+	bases := []string{officialMirrorBase + "/" + Version}
+	if strings.TrimSpace(officialMainlandMirrorBase) != "" {
+		bases = append(bases, strings.TrimRight(officialMainlandMirrorBase, "/")+"/"+Version)
+	}
+	bases = append(bases, fmt.Sprintf("https://github.com/%s/releases/download/%s", cgRepo, Version))
+	return dedupeStrings(bases)
+}
+
+func dedupeStrings(values []string) []string {
+	var out []string
+	seen := make(map[string]bool, len(values))
+	for _, v := range values {
+		if !seen[v] {
+			seen[v] = true
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 // promote moves the freshly extracted bundle (root) into its versioned home
@@ -207,27 +258,42 @@ func sha256For(sums, name string) (string, error) {
 	return "", fmt.Errorf("codegraph: %s not listed in SHA256SUMS", name)
 }
 
-// safeJoin joins dir and a (possibly hostile) archive entry name, rejecting any
-// path that would escape dir — the zip-slip / tar-slip guard.
-func safeJoin(dir, name string) (string, error) {
-	p := filepath.Join(dir, name)
-	if p != dir && !strings.HasPrefix(p, dir+string(os.PathSeparator)) {
+// resolveWithin returns the real path to write archive entry name under root
+// (parents created), rejecting escapes. EvalSymlinks on the parent also catches
+// the symlink-redirect variant a lexical "../" check misses: a parent component
+// an earlier entry turned into a symlink, written *through* to land outside root.
+func resolveWithin(root, name string) (string, error) {
+	target := filepath.Join(root, name)
+	if target != root && !strings.HasPrefix(target, root+string(os.PathSeparator)) {
 		return "", fmt.Errorf("unsafe path %q in archive", name)
 	}
-	return p, nil
+	if target == root {
+		return root, nil
+	}
+	parent := filepath.Dir(target)
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		return "", err
+	}
+	realParent, err := filepath.EvalSymlinks(parent)
+	if err != nil {
+		return "", err
+	}
+	if realParent != root && !strings.HasPrefix(realParent, root+string(os.PathSeparator)) {
+		return "", fmt.Errorf("unsafe path %q in archive: escapes via symlink", name)
+	}
+	return filepath.Join(realParent, filepath.Base(target)), nil
 }
 
-// safeSymlink rejects a symlink whose destination escapes dir. linkPath is the
-// symlink's own (already safeJoin'd) location; linkname is its raw target. Without
-// this a symlink to ../../etc lets a later archive entry written "through" it land
-// outside dir — the tar-slip-via-symlink the path check alone misses.
-func safeSymlink(dir, linkPath, linkname string) error {
+// symlinkWithin rejects a symlink whose target escapes root. linkPath is the
+// symlink's already-resolved real location (from resolveWithin), so a relative
+// target is judged from where the link truly lands, not its lexical archive path.
+func symlinkWithin(root, linkPath, linkname string) error {
 	dest := linkname
 	if !filepath.IsAbs(dest) {
 		dest = filepath.Join(filepath.Dir(linkPath), linkname)
 	}
 	dest = filepath.Clean(dest)
-	if dest != dir && !strings.HasPrefix(dest, dir+string(os.PathSeparator)) {
+	if dest != root && !strings.HasPrefix(dest, root+string(os.PathSeparator)) {
 		return fmt.Errorf("unsafe symlink %q -> %q in archive", linkPath, linkname)
 	}
 	return nil
@@ -239,6 +305,10 @@ func extractTarGz(data []byte, dir string) error {
 		return err
 	}
 	defer gz.Close()
+	root, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return err
+	}
 	tr := tar.NewReader(gz)
 	for {
 		hdr, err := tr.Next()
@@ -248,7 +318,7 @@ func extractTarGz(data []byte, dir string) error {
 		if err != nil {
 			return err
 		}
-		target, err := safeJoin(dir, hdr.Name)
+		target, err := resolveWithin(root, hdr.Name)
 		if err != nil {
 			return err
 		}
@@ -258,10 +328,7 @@ func extractTarGz(data []byte, dir string) error {
 				return err
 			}
 		case tar.TypeSymlink:
-			if err := safeSymlink(dir, target, hdr.Linkname); err != nil {
-				return err
-			}
-			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			if err := symlinkWithin(root, target, hdr.Linkname); err != nil {
 				return err
 			}
 			_ = os.Remove(target)
@@ -281,8 +348,12 @@ func extractZip(data []byte, dir string) error {
 	if err != nil {
 		return err
 	}
+	root, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return err
+	}
 	for _, f := range zr.File {
-		target, err := safeJoin(dir, f.Name)
+		target, err := resolveWithin(root, f.Name)
 		if err != nil {
 			return err
 		}
@@ -306,9 +377,6 @@ func extractZip(data []byte, dir string) error {
 }
 
 func writeFileFromReader(target string, r io.Reader, mode os.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-		return err
-	}
 	f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode.Perm())
 	if err != nil {
 		return err

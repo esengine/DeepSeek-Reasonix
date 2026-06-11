@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"reasonix/internal/event"
+	"reasonix/internal/permission"
 	"reasonix/internal/provider"
 )
 
@@ -57,6 +58,10 @@ func newUpdateSink(conn notifier, sessionID string) *updateSink {
 // bindApprove installs the controller's Approve callback, called by the service
 // once the controller exists (the sink is built first, to hand to the Factory).
 func (s *updateSink) bindApprove(fn func(id string, allow, session, persist bool)) {
+	if fn == nil {
+		s.approve = nil
+		return
+	}
 	s.approve = fn
 }
 
@@ -211,6 +216,7 @@ func (s *updateSink) requestPermission(ctx context.Context, a event.Approval) {
 	if a.Subject != "" {
 		title = a.Tool + " " + a.Subject
 	}
+	options := approvalOptions(a.Tool, a.Subject)
 	params := PermissionRequestParams{
 		SessionID: s.sessionID,
 		ToolCall: PermissionToolCall{
@@ -219,12 +225,7 @@ func (s *updateSink) requestPermission(ctx context.Context, a event.Approval) {
 			Kind:       toolKindFor(a.Tool),
 			Status:     "pending",
 		},
-		Options: []PermissionOption{
-			{OptionID: string(OptAllowOnce), Name: "Allow", Kind: OptAllowOnce},
-			{OptionID: string(OptAllowAlways), Name: "Allow for this session", Kind: OptAllowAlways},
-			{OptionID: string(OptAllowPersistent), Name: "Always allow (save to config)", Kind: OptAllowPersistent},
-			{OptionID: string(OptRejectOnce), Name: "Reject", Kind: OptRejectOnce},
-		},
+		Options: options,
 	}
 
 	allow, session, persist := false, false, false
@@ -242,6 +243,23 @@ func (s *updateSink) requestPermission(ctx context.Context, a event.Approval) {
 		}
 	}
 	s.approve(a.ID, allow, session, persist)
+}
+
+func approvalOptionNames(tool, subject string) (session, persistent string) {
+	sessionRule := permission.SessionGrantRuleForScope(tool, subject)
+	persistentRule := permission.RememberRuleForScope(tool, subject)
+	return "Allow " + sessionRule + " for this session", "Always allow " + persistentRule + " (save to config)"
+}
+
+func approvalOptions(tool, subject string) []PermissionOption {
+	allowSessionName, allowPersistentName := approvalOptionNames(tool, subject)
+	options := []PermissionOption{
+		{OptionID: string(OptAllowOnce), Name: "Allow", Kind: OptAllowOnce},
+		{OptionID: string(OptAllowAlways), Name: allowSessionName, Kind: OptAllowAlways},
+		{OptionID: string(OptAllowPersistent), Name: allowPersistentName, Kind: OptAllowPersistent},
+		{OptionID: string(OptRejectOnce), Name: "Reject", Kind: OptRejectOnce},
+	}
+	return options
 }
 
 // textBlock builds a text content block.

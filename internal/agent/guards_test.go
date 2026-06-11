@@ -83,6 +83,21 @@ func TestFinishReasonMessage(t *testing.T) {
 	}
 }
 
+// TestEmptyFinalNotice carries the diagnostics that tell the three empty-answer
+// causes apart in reports: which provider, how it stopped, and whether the model
+// produced reasoning-only output.
+func TestEmptyFinalNotice(t *testing.T) {
+	msg := emptyFinalNotice("deepseek-flash", &provider.Usage{FinishReason: "stop"}, 512)
+	for _, want := range []string{"deepseek-flash", "finish=stop", "reasoning=512"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("notice %q missing %q", msg, want)
+		}
+	}
+	if got := emptyFinalNotice("p", nil, 0); !strings.Contains(got, "finish=unknown") {
+		t.Errorf("nil usage should report finish=unknown, got %q", got)
+	}
+}
+
 // --- parallel-dispatch tests ---
 
 // fakeTool is a minimal Tool stand-in for dispatch tests; ReadOnly is

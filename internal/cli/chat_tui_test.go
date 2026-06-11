@@ -24,6 +24,14 @@ import (
 
 type blockingTurnRunner struct{ started chan struct{} }
 
+func TestMain(m *testing.M) {
+	old := detectTermuxTerminal
+	detectTermuxTerminal = func() bool { return false }
+	code := m.Run()
+	detectTermuxTerminal = old
+	os.Exit(code)
+}
+
 func (r *blockingTurnRunner) Run(ctx context.Context, _ string) error {
 	close(r.started)
 	<-ctx.Done()
@@ -98,6 +106,45 @@ func TestTranscriptMirrorsCommits(t *testing.T) {
 	}
 }
 
+func TestTermuxNativeScrollbackCommitsFinalAnswer(t *testing.T) {
+	m := newTestChatTUI()
+	m.nativeScrollback = true
+	m.pending.WriteString("first paragraph\n\nsecond paragraph")
+
+	m.streamAnswer()
+	if len(*m.pendingCommit) != 0 {
+		t.Fatalf("Termux native scrollback should not commit rewritten streaming blocks, got %v", *m.pendingCommit)
+	}
+
+	m.commitPending()
+	if got := strings.Join(*m.pendingCommit, "\n"); !strings.Contains(got, "first paragraph") || !strings.Contains(got, "second paragraph") {
+		t.Fatalf("final answer was not committed to native scrollback: %v", *m.pendingCommit)
+	}
+}
+
+func TestTermuxNativeScrollbackDefaultsToExpandedReasoning(t *testing.T) {
+	old := detectTermuxTerminal
+	detectTermuxTerminal = func() bool { return true }
+	t.Cleanup(func() { detectTermuxTerminal = old })
+
+	ctrl := control.New(control.Options{})
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
+	if !m.nativeScrollback {
+		t.Fatal("Termux should use native scrollback")
+	}
+	if !m.showReasoning {
+		t.Fatal("Termux should expand reasoning by default because live viewport reasoning is unavailable")
+	}
+	m.width = 80
+
+	m.ingestEvent(event.Event{Kind: event.Reasoning, Text: "reasoning details"})
+	m.ingestEvent(event.Event{Kind: event.Text, Text: "answer"})
+	got := strings.Join(*m.pendingCommit, "\n")
+	if !strings.Contains(got, "reasoning details") {
+		t.Fatalf("Termux reasoning was not expanded into native scrollback: %q", got)
+	}
+}
+
 // TestTranscriptViewportSizing proves the viewport tracks the terminal size and
 // gets the rows left over after the pinned bottom region (input box + 2 status
 // rows = 5 with an empty 1-line composer), and is fed the committed transcript.
@@ -119,6 +166,111 @@ func TestTranscriptViewportSizing(t *testing.T) {
 	}
 	if m.viewport.TotalLineCount() == 0 {
 		t.Errorf("viewport should hold the committed banner after the first resize")
+	}
+}
+
+// TestStatusLineWrapAccounting proves that computeStatusLineCount correctly
+// predicts the rendered row count of the status block (working + mode/state line
+// + data line) when wrapping is triggered on a narrow terminal, and that
+// bottomRows reserves the right height so the viewport fills the screen without
+// overlap.
+func TestStatusLineWrapAccounting(t *testing.T) {
+	ctrl := control.New(control.Options{})
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 30)
+
+	// Narrow terminal: mode+state line and data line will both wrap.
+	m0, _ := m.Update(tea.WindowSizeMsg{Width: 30, Height: 12})
+	m = m0.(chatTUI)
+
+	// At width 30 the status block should be detectably wrapped.
+	if m.statusLineCount <= 2 {
+		t.Fatalf("statusLineCount on a narrow terminal (30 cols) = %d, want > 2 (wrapping should be detected)", m.statusLineCount)
+	}
+
+	// Verify the height budget covers the full screen.
+	if got := m.transcriptHeight() + m.bottomRows(); got != m.height {
+		t.Fatalf("transcriptHeight(%d) + bottomRows(%d) = %d, want %d (full screen height)",
+			m.transcriptHeight(), m.bottomRows(), got, m.height)
+	}
+
+	// When running, the working line should increase statusLineCount.
+	idleCount := m.statusLineCount
+	m.state = tuiRunning
+	m.elapsed = 5
+	m.turnTokens = 100
+	// Push an interject so the working line is longer.
+	m.pendingInterject = []string{"feedback"}
+	m.statusLineCount = m.computeStatusLineCount(m.width)
+	runCount := m.statusLineCount
+	if runCount <= idleCount {
+		t.Fatalf("statusLineCount when running (%d) should be > idle (%d)", runCount, idleCount)
+	}
+
+	// Reset and test that a custom statusline command is also counted.
+	m.state = tuiIdle
+	m.pendingInterject = nil
+	m.statuslineCmd = "custom"
+	m.statuslineOut = "model: claude-3 · ctx: 45% · tokens: 128K · cache: 87% · rate: 1.2s · jobs: 3 running · balance: ¥152.30"
+	m0, _ = m.Update(tea.WindowSizeMsg{Width: 35, Height: 12})
+	m = m0.(chatTUI)
+	if m.statusLineCount <= 2 {
+		t.Fatalf("statusLineCount with custom statusline on 35 cols = %d, want > 2 (custom output should wrap)", m.statusLineCount)
+	}
+	if got := m.transcriptHeight() + m.bottomRows(); got != m.height {
+		t.Fatalf("with custom statusline: transcriptHeight(%d) + bottomRows(%d) = %d, want %d",
+			m.transcriptHeight(), m.bottomRows(), got, m.height)
+	}
+}
+
+// TestStatusLineRenderedHeightMatchesBudget proves that the actual rendered
+// line count of View()'s bottom area matches what bottomRows() predicts,
+// specifically at the CJK 2-char-overflow boundary where an off-by-one would
+// hide the bottom row of the viewport.
+func TestStatusLineRenderedHeightMatchesBudget(t *testing.T) {
+	ctrl := control.New(control.Options{})
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 46)
+
+	// Manually set a long git repo/branch so the status line contains CJK.
+	m.missing = ""
+	m.gitStatus = gitStatus{Repo: "我的项目名字", Branch: "我的分支"}
+
+	m0, _ := m.Update(tea.WindowSizeMsg{Width: 46, Height: 12})
+	m = m0.(chatTUI)
+
+	if m.statusLineCount <= 2 {
+		t.Fatalf("statusLineCount at width 46 with CJK = %d, want > 2", m.statusLineCount)
+	}
+
+	// Verify that computeStatusLineCount matches the actual rendered line count.
+	// Strip ANSI from the full view, then reconstruct what bottomRows expects.
+	viewStr := ansi.Strip(m.View().Content)
+	allLines := strings.Split(viewStr, "\n")
+	totalLines := len(allLines)
+
+	// The total should be m.height (full terminal height).
+	if totalLines != m.height {
+		t.Fatalf("View() total lines = %d, want %d (terminal height)", totalLines, m.height)
+	}
+
+	// transcriptHeight() lines should be the viewport, the rest is bottom rows.
+	if got, want := m.transcriptHeight()+m.bottomRows(), m.height; got != want {
+		t.Fatalf("transcriptHeight(%d) + bottomRows(%d) = %d, want %d",
+			m.transcriptHeight(), m.bottomRows(), got, want)
+	}
+
+	// Also verify the invariant holds at narrower widths.
+	for _, w := range []int{44, 42, 40, 35, 30, 25, 20} {
+		m0, _ = m.Update(tea.WindowSizeMsg{Width: w, Height: 12})
+		m = m0.(chatTUI)
+		viewStr2 := ansi.Strip(m.View().Content)
+		allLines2 := strings.Split(viewStr2, "\n")
+		if len(allLines2) != m.height {
+			t.Errorf("width=%d: View() total lines = %d, want %d", w, len(allLines2), m.height)
+		}
+		if got, want := m.transcriptHeight()+m.bottomRows(), m.height; got != want {
+			t.Errorf("width=%d: transcriptHeight(%d) + bottomRows(%d) = %d, want %d",
+				w, m.transcriptHeight(), m.bottomRows(), got, want)
+		}
 	}
 }
 
@@ -192,7 +344,7 @@ func TestMCPManagerHidesComposerBox(t *testing.T) {
 	m = m0.(chatTUI)
 
 	footerRows := strings.Count(m.renderMainManagerFooter(), "\n") + 1
-	if got, want := m.bottomRows(), footerRows+2; got != want {
+	if got, want := m.bottomRows(), footerRows+m.statusLineCount; got != want {
 		t.Fatalf("bottomRows with MCP manager = %d, want %d (footer + status rows; manager content renders in main area)", got, want)
 	}
 	if !m.hideComposer() {
@@ -207,6 +359,77 @@ func TestMCPManagerHidesComposerBox(t *testing.T) {
 	}
 	if !strings.Contains(content, "· MCP") {
 		t.Fatalf("MCP status line missing from view:\n%s", content)
+	}
+}
+
+func TestClearCommandRequiresConfirmationAndDiscardsSession(t *testing.T) {
+	dir := t.TempDir()
+	sess := agent.NewSession("sys")
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "old context"})
+	exec := agent.New(nil, nil, sess, agent.Options{}, event.Discard)
+	path := filepath.Join(dir, "session.jsonl")
+	ctrl := control.New(control.Options{Executor: exec, SystemPrompt: "sys", SessionDir: dir, SessionPath: path, Label: "test"})
+	if err := ctrl.Snapshot(); err != nil {
+		t.Fatal(err)
+	}
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
+
+	if cmd := m.runSlashCommand("/clear"); cmd != nil {
+		t.Fatal("/clear should open a local confirmation without returning a command")
+	}
+	if m.clearConfirm == nil {
+		t.Fatal("/clear should open a confirmation prompt")
+	}
+	if m.clearConfirm.confirm != 1 {
+		t.Fatalf("/clear confirmation should default to cancel, got %d", m.clearConfirm.confirm)
+	}
+	m0, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = m0.(chatTUI)
+	footerRows := strings.Count(m.renderMainManagerFooter(), "\n") + 1
+	if got, want := m.bottomRows(), footerRows+m.statusLineCount; got != want {
+		t.Fatalf("bottomRows with /clear confirmation = %d, want %d (footer + status rows; confirmation renders in main area)", got, want)
+	}
+	if !m.hideComposer() {
+		t.Fatal("/clear confirmation should hide the composer")
+	}
+	content := ansi.Strip(m.View().Content)
+	if !strings.Contains(content, "Clear current context without saving?") {
+		t.Fatalf("/clear confirmation prompt missing from view:\n%s", content)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("session should still exist before confirmation: %v", err)
+	}
+	if current := exec.Session().Snapshot(); len(current) != 2 {
+		t.Fatalf("context changed before confirmation: %+v", current)
+	}
+
+	next, _ := m.handleClearConfirmKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = next.(chatTUI)
+	if m.clearConfirm != nil {
+		t.Fatal("Enter on default cancel should close the confirmation")
+	}
+	if ctrl.SessionPath() != path {
+		t.Fatal("cancelled /clear should not rotate the session path")
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("cancelled /clear should keep the session file: %v", err)
+	}
+
+	m.runSlashCommand("/clear")
+	next, _ = m.handleClearConfirmKey(tea.KeyPressMsg{Code: 'y'})
+	m = next.(chatTUI)
+	if ctrl.SessionPath() == path {
+		t.Fatal("confirmed /clear should rotate to a fresh session path")
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("confirmed /clear should remove the old transcript, stat err=%v", err)
+	}
+	current := exec.Session().Snapshot()
+	if len(current) != 1 || current[0].Role != provider.RoleSystem || current[0].Content != "sys" {
+		t.Fatalf("cleared context = %+v, want only system prompt", current)
+	}
+	if len(m.transcript) == 0 || strings.Contains(strings.Join(m.transcript, "\n"), "old context") {
+		t.Fatalf("TUI transcript was not reset after /clear: %+v", m.transcript)
 	}
 }
 
@@ -300,7 +523,7 @@ func TestModalPanelsHideComposerBox(t *testing.T) {
 				t.Fatalf("%s panel did not render", tt.name)
 			}
 			cardRows := strings.Count(card, "\n") + 1
-			if got, want := m.bottomRows(), cardRows+2; got != want {
+			if got, want := m.bottomRows(), cardRows+m.statusLineCount; got != want {
 				t.Fatalf("bottomRows with %s = %d, want %d (panel + status rows, no composer box)", tt.name, got, want)
 			}
 		})
@@ -358,7 +581,7 @@ func TestInputOwnedOverlaysKeepComposerBox(t *testing.T) {
 				t.Fatalf("%s panel did not render", tt.name)
 			}
 			panelRows := strings.Count(panel, "\n") + 1
-			if got, want := m.bottomRows(), panelRows+m.input.Height()+2+2; got != want {
+			if got, want := m.bottomRows(), panelRows+m.input.Height()+2+m.statusLineCount; got != want {
 				t.Fatalf("bottomRows with %s = %d, want %d (panel + composer box + status rows)", tt.name, got, want)
 			}
 		})
@@ -532,6 +755,37 @@ func TestInsertNewlineKeyBinding(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("newChatTUI InsertNewline should include shift+enter, got %v", keys)
+	}
+}
+
+func TestCtrlHomeEndScrollKeyBindings(t *testing.T) {
+	ctrl := control.New(control.Options{})
+	ch := make(chan event.Event, 1)
+	notice := agentEventMsg(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "line"})
+	adv := func(m chatTUI, msg tea.Msg) chatTUI {
+		n, _ := m.Update(msg)
+		return n.(chatTUI)
+	}
+
+	cur := adv(newChatTUI(ctrl, "", ch, 80), tea.WindowSizeMsg{Width: 80, Height: 8})
+	for i := 0; i < 12; i++ {
+		cur = adv(cur, notice)
+	}
+	// Viewport should be at the bottom after output.
+	if !cur.viewport.AtBottom() {
+		t.Fatal("viewport should start at the bottom after streaming output")
+	}
+
+	// Ctrl+Home should scroll to the top.
+	cur = adv(cur, tea.KeyPressMsg{Code: tea.KeyHome, Mod: tea.ModCtrl})
+	if !cur.viewport.AtTop() {
+		t.Fatalf("ctrl+home should scroll to top, AtTop=%v, YOffset=%d", cur.viewport.AtTop(), cur.viewport.YOffset())
+	}
+
+	// Ctrl+End should scroll back to the bottom.
+	cur = adv(cur, tea.KeyPressMsg{Code: tea.KeyEnd, Mod: tea.ModCtrl})
+	if !cur.viewport.AtBottom() {
+		t.Fatalf("ctrl+end should scroll to bottom, AtBottom=%v, YOffset=%d", cur.viewport.AtBottom(), cur.viewport.YOffset())
 	}
 }
 
@@ -992,6 +1246,7 @@ func TestQueueIndicatorHiddenWhenIdle(t *testing.T) {
 func TestViewAltScreenFillsHeight(t *testing.T) {
 	ctrl := control.New(control.Options{})
 	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
+	m.nativeScrollback = false
 	m0, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	v := m0.(chatTUI).View()
 
@@ -1003,6 +1258,24 @@ func TestViewAltScreenFillsHeight(t *testing.T) {
 	}
 	if lines := strings.Count(v.Content, "\n") + 1; lines != 24 {
 		t.Errorf("alt-screen frame = %d lines, want 24 (full terminal height)", lines)
+	}
+}
+
+func TestViewTermuxUsesNativeScrollback(t *testing.T) {
+	ctrl := control.New(control.Options{})
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
+	m.nativeScrollback = true
+	m0, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	v := m0.(chatTUI).View()
+
+	if v.AltScreen {
+		t.Error("Termux view must stay in the normal screen so native touch scrollback works")
+	}
+	if v.MouseMode != tea.MouseModeNone {
+		t.Error("Termux view must not enable mouse mode because it prevents soft-keyboard focus")
+	}
+	if lines := strings.Count(v.Content, "\n") + 1; lines >= 24 {
+		t.Errorf("Termux view should render only the pinned bottom frame, got %d full-screen lines", lines)
 	}
 }
 
@@ -1033,6 +1306,54 @@ func TestTranscriptTailFollow(t *testing.T) {
 	if cur.viewport.AtBottom() {
 		t.Error("new output while scrolled up must preserve the reading position")
 	}
+}
+
+// TestEmptyEnterScrollsToBottom proves that pressing Enter with an empty composer
+// scrolls the viewport to the bottom in both idle and running states, so the user
+// can quickly tail-follow after scrolling up to read history.
+func TestEmptyEnterScrollsToBottom(t *testing.T) {
+	ctrl := control.New(control.Options{})
+	ch := make(chan event.Event, 1)
+	notice := agentEventMsg(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "line"})
+	adv := func(m chatTUI, msg tea.Msg) chatTUI {
+		n, _ := m.Update(msg)
+		return n.(chatTUI)
+	}
+
+	// --- idle state ---
+	t.Run("idle", func(t *testing.T) {
+		cur := adv(newChatTUI(ctrl, "", ch, 80), tea.WindowSizeMsg{Width: 80, Height: 8})
+		for i := 0; i < 12; i++ {
+			cur = adv(cur, notice)
+		}
+		// Scroll up to leave the bottom.
+		cur = adv(cur, tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+		if cur.viewport.AtBottom() {
+			t.Fatal("wheel-up should break the bottom pin")
+		}
+		// Empty enter → should snap back to bottom.
+		cur = adv(cur, tea.KeyPressMsg{Code: tea.KeyEnter})
+		if !cur.viewport.AtBottom() {
+			t.Error("empty enter while idle should scroll viewport to bottom")
+		}
+	})
+
+	// --- running state ---
+	t.Run("running", func(t *testing.T) {
+		cur := adv(newChatTUI(ctrl, "", ch, 80), tea.WindowSizeMsg{Width: 80, Height: 8})
+		for i := 0; i < 12; i++ {
+			cur = adv(cur, notice)
+		}
+		cur.state = tuiRunning
+		cur = adv(cur, tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+		if cur.viewport.AtBottom() {
+			t.Fatal("wheel-up should break the bottom pin")
+		}
+		cur = adv(cur, tea.KeyPressMsg{Code: tea.KeyEnter})
+		if !cur.viewport.AtBottom() {
+			t.Error("empty enter while running should scroll viewport to bottom")
+		}
+	})
 }
 
 func TestFoldedPasteUsesPlaceholderAndExpandsOnSend(t *testing.T) {
@@ -1171,6 +1492,19 @@ func TestDoubleCtrlCQuit(t *testing.T) {
 	// lastCtrlCAt should be refreshed to now.
 	if time.Since(m4.lastCtrlCAt) > time.Second {
 		t.Error("expired Ctrl+C should refresh lastCtrlCAt")
+	}
+}
+
+func TestCtrlZSendsSuspend(t *testing.T) {
+	m := newTestChatTUI()
+	ctrlZ := tea.KeyPressMsg{Code: 'z', Mod: tea.ModCtrl}
+
+	_, cmd := m.Update(ctrlZ)
+	if cmd == nil {
+		t.Fatal("expected Ctrl+Z to return a suspend command")
+	}
+	if msg := cmd(); msg != (tea.SuspendMsg{}) {
+		t.Fatalf("expected tea.SuspendMsg, got %T", msg)
 	}
 }
 
@@ -1341,5 +1675,248 @@ func TestTruncateSubject(t *testing.T) {
 				t.Errorf("truncateSubject(%q, %d) = %q (width %d), want visible width <= %d", tc.input, tc.width, got, w, wantMax)
 			}
 		})
+	}
+}
+
+// TestCtrlCCopyBeatsClearInput — regression for the bug where an active
+// selection AND a non-empty composer both existed: Ctrl+C used to wipe the
+// draft text and discard the selection. The fix hoists the selection-copy
+// branch above the clear-input branch so the user's draft survives. After
+// the copy the user can still press Ctrl+C again to clear the composer.
+func TestCtrlCCopyBeatsClearInput(t *testing.T) {
+	var copied string
+	clipboardWriteAll = func(text string) error { copied = text; return nil }
+	defer func() { clipboardWriteAll = clipboard.WriteAll }()
+
+	m := newTestChatTUI()
+	m.input.SetValue("draft I'm typing") // non-empty composer
+	m.transcript = []string{"selected text"}
+	m.wrappedLines = []string{"selected text"}
+	m.sel = selection{active: true, anchor: selPos{line: 0, col: 0}, head: selPos{line: 0, col: 8}}
+
+	ctrlC := tea.KeyPressMsg{Code: 'c', Mod: 4}
+	out, cmd := m.Update(ctrlC)
+	m2 := out.(chatTUI)
+
+	// Draft text must survive the selection copy.
+	if got := m2.input.Value(); got != "draft I'm typing" {
+		t.Errorf("composer draft wiped by Ctrl+C copy; got %q, want preserved", got)
+	}
+	if cmd == nil {
+		t.Fatal("expected clipboard cmd")
+	}
+	cmd()
+	if copied != "selected" {
+		t.Errorf("clipboard = %q, want %q", copied, "selected")
+	}
+
+	// Second Ctrl+C (no selection, non-empty composer) clears the draft.
+	out2, _ := m2.Update(ctrlC)
+	m3 := out2.(chatTUI)
+	if got := m3.input.Value(); got != "" {
+		t.Errorf("second Ctrl+C should clear composer; got %q", got)
+	}
+}
+
+// TestEscInPlanModeDoesNotExitPlan — regression for the part of PR #3051 that
+// was missed: Esc was still falling into the case m.planMode branch. The
+// Shift+Tab cycle is the only path that flips plan mode; Esc must only
+// rewind / clear input. PR #3051 already removed the equivalent YOLO branch;
+// the m.ctrl.SetBypass path is exercised end-to-end in control/yolo_test.go
+// and intentionally not duplicated here.
+func TestEscInPlanModeDoesNotExitPlan(t *testing.T) {
+	m := newTestChatTUI()
+	m.planMode = true
+
+	esc := tea.KeyPressMsg{Code: tea.KeyEsc}
+	out, _ := m.Update(esc)
+	m2 := out.(chatTUI)
+
+	if !m2.planMode {
+		t.Error("Esc must not exit plan mode; only Shift+Tab should")
+	}
+}
+
+func TestDesktopShortcutLayoutShiftTabTogglesPlanOnly(t *testing.T) {
+	m := newTestChatTUI()
+	m.ctrl = control.New(control.Options{})
+	m.ctrl.SetToolApprovalMode(control.ToolApprovalAuto)
+	m.cfg = config.Default()
+	if err := m.cfg.SetUIShortcutLayout("desktop"); err != nil {
+		t.Fatal(err)
+	}
+
+	shiftTab := tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift}
+	out, _ := m.Update(shiftTab)
+	m = out.(chatTUI)
+	if !m.planMode || !m.ctrl.PlanMode() {
+		t.Fatalf("first Shift+Tab should enter plan mode, tui=%v controller=%v", m.planMode, m.ctrl.PlanMode())
+	}
+	if got := m.ctrl.ToolApprovalMode(); got != control.ToolApprovalAuto {
+		t.Fatalf("Shift+Tab changed approval mode to %q, want auto", got)
+	}
+
+	out, _ = m.Update(shiftTab)
+	m = out.(chatTUI)
+	if m.planMode || m.ctrl.PlanMode() {
+		t.Fatalf("second Shift+Tab should leave plan mode, tui=%v controller=%v", m.planMode, m.ctrl.PlanMode())
+	}
+	if got := m.ctrl.ToolApprovalMode(); got != control.ToolApprovalAuto {
+		t.Fatalf("second Shift+Tab changed approval mode to %q, want auto", got)
+	}
+}
+
+func TestDesktopShortcutLayoutShiftTabClearsGoalWhenEnteringPlan(t *testing.T) {
+	m := newTestChatTUI()
+	m.ctrl = control.New(control.Options{})
+	m.ctrl.SetGoal("ship the shortcut redesign")
+	m.cfg = config.Default()
+	if err := m.cfg.SetUIShortcutLayout("desktop"); err != nil {
+		t.Fatal(err)
+	}
+
+	out, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
+	m = out.(chatTUI)
+	if !m.planMode || !m.ctrl.PlanMode() {
+		t.Fatalf("Shift+Tab should enter plan mode, tui=%v controller=%v", m.planMode, m.ctrl.PlanMode())
+	}
+	if got := m.ctrl.Goal(); got != "" {
+		t.Fatalf("Shift+Tab entering plan should clear goal, got %q", got)
+	}
+}
+
+func TestDesktopShortcutLayoutCtrlYTogglesYolo(t *testing.T) {
+	m := newTestChatTUI()
+	m.ctrl = control.New(control.Options{})
+	m.cfg = config.Default()
+	if err := m.cfg.SetUIShortcutLayout("desktop"); err != nil {
+		t.Fatal(err)
+	}
+
+	ctrlY := tea.KeyPressMsg{Code: 'y', Mod: tea.ModCtrl}
+	out, _ := m.Update(ctrlY)
+	m = out.(chatTUI)
+	if got := m.ctrl.ToolApprovalMode(); got != control.ToolApprovalYolo {
+		t.Fatalf("Ctrl+Y approval mode = %q, want yolo", got)
+	}
+
+	out, _ = m.Update(ctrlY)
+	m = out.(chatTUI)
+	if got := m.ctrl.ToolApprovalMode(); got != control.ToolApprovalAsk {
+		t.Fatalf("second Ctrl+Y approval mode = %q, want ask", got)
+	}
+}
+
+func TestDesktopShortcutLayoutCtrlYRestoresAutoAfterYolo(t *testing.T) {
+	m := newTestChatTUI()
+	m.ctrl = control.New(control.Options{})
+	m.ctrl.SetToolApprovalMode(control.ToolApprovalAuto)
+	m.cfg = config.Default()
+	if err := m.cfg.SetUIShortcutLayout("desktop"); err != nil {
+		t.Fatal(err)
+	}
+
+	ctrlY := tea.KeyPressMsg{Code: 'y', Mod: tea.ModCtrl}
+	out, _ := m.Update(ctrlY)
+	m = out.(chatTUI)
+	if got := m.ctrl.ToolApprovalMode(); got != control.ToolApprovalYolo {
+		t.Fatalf("Ctrl+Y approval mode = %q, want yolo", got)
+	}
+
+	out, _ = m.Update(ctrlY)
+	m = out.(chatTUI)
+	if got := m.ctrl.ToolApprovalMode(); got != control.ToolApprovalAuto {
+		t.Fatalf("second Ctrl+Y approval mode = %q, want restored auto", got)
+	}
+}
+
+func TestClassicShortcutLayoutCtrlYTogglesYolo(t *testing.T) {
+	m := newTestChatTUI()
+	m.ctrl = control.New(control.Options{})
+	m.cfg = config.Default()
+	if err := m.cfg.SetUIShortcutLayout("classic"); err != nil {
+		t.Fatal(err)
+	}
+
+	ctrlY := tea.KeyPressMsg{Code: 'y', Mod: tea.ModCtrl}
+	out, cmd := m.Update(ctrlY)
+	if cmd != nil {
+		t.Fatal("Ctrl+Y should toggle YOLO directly, not return a paste command")
+	}
+	m = out.(chatTUI)
+	if got := m.ctrl.ToolApprovalMode(); got != control.ToolApprovalYolo {
+		t.Fatalf("Ctrl+Y approval mode = %q, want yolo", got)
+	}
+
+	out, _ = m.Update(ctrlY)
+	m = out.(chatTUI)
+	if got := m.ctrl.ToolApprovalMode(); got != control.ToolApprovalAsk {
+		t.Fatalf("second Ctrl+Y approval mode = %q, want ask", got)
+	}
+}
+
+func TestPrimaryYShortcutRestoresAutoUnderClassicShortcutLayout(t *testing.T) {
+	m := newTestChatTUI()
+	m.ctrl = control.New(control.Options{})
+	m.ctrl.SetToolApprovalMode(control.ToolApprovalAuto)
+	m.cfg = config.Default()
+	if err := m.cfg.SetUIShortcutLayout("classic"); err != nil {
+		t.Fatal(err)
+	}
+
+	cmdY := tea.KeyPressMsg{Code: 'y', Mod: tea.ModSuper}
+	out, _ := m.Update(cmdY)
+	m = out.(chatTUI)
+	if got := m.ctrl.ToolApprovalMode(); got != control.ToolApprovalYolo {
+		t.Fatalf("Cmd/Super+Y approval mode = %q, want yolo", got)
+	}
+
+	out, _ = m.Update(cmdY)
+	m = out.(chatTUI)
+	if got := m.ctrl.ToolApprovalMode(); got != control.ToolApprovalAuto {
+		t.Fatalf("second Cmd/Super+Y approval mode = %q, want restored auto", got)
+	}
+}
+
+func TestDesktopShortcutLayoutDoesNotStealCompletionTab(t *testing.T) {
+	m := newTestChatTUI()
+	m.ctrl = control.New(control.Options{})
+	m.cfg = config.Default()
+	if err := m.cfg.SetUIShortcutLayout("desktop"); err != nil {
+		t.Fatal(err)
+	}
+	m.input.SetValue("/")
+	m.completion = completion{
+		active:      true,
+		kind:        compSlash,
+		items:       []compItem{{label: "/mcp", insert: "/mcp ", descend: true}},
+		replaceFrom: 0,
+	}
+
+	out, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	m = out.(chatTUI)
+	if got := m.ctrl.ToolApprovalMode(); got != control.ToolApprovalAsk {
+		t.Fatalf("completion Tab changed approval mode to %q", got)
+	}
+	if got := m.input.Value(); got != "/mcp " {
+		t.Fatalf("completion Tab input = %q, want /mcp ", got)
+	}
+}
+
+func TestShiftTabStillTogglesPlanUnderClassicShortcutLayout(t *testing.T) {
+	m := newTestChatTUI()
+	m.ctrl = control.New(control.Options{})
+	m.cfg = config.Default()
+	if err := m.cfg.SetUIShortcutLayout("classic"); err != nil {
+		t.Fatal(err)
+	}
+
+	out, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
+	m = out.(chatTUI)
+	if !m.planMode || !m.ctrl.PlanMode() {
+		t.Fatalf("Shift+Tab should toggle plan mode, tui=%v controller=%v", m.planMode, m.ctrl.PlanMode())
+	}
+	if got := m.ctrl.ToolApprovalMode(); got != control.ToolApprovalAsk {
+		t.Fatalf("Shift+Tab changed approval mode to %q", got)
 	}
 }

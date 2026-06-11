@@ -441,8 +441,8 @@ func TestFinalReadinessAuditRecordsTerminalError(t *testing.T) {
 		t.Fatalf("readiness audit events = %d, want 3: %+v", len(sink.events), sink.events)
 	}
 	last := sink.events[len(sink.events)-1]
-	if last.Result != evidence.ReadinessErrored || !last.MissingCompleteStep {
-		t.Fatalf("terminal audit = %+v, want errored missing complete_step", last)
+	if last.Result != evidence.ReadinessErrored || last.IncompleteTodos == 0 {
+		t.Fatalf("terminal audit = %+v, want errored with incomplete todos", last)
 	}
 }
 
@@ -604,6 +604,68 @@ func TestEvidenceFlowRejectsTodoCompletionWithoutCompleteStep(t *testing.T) {
 	got := results[1]
 	if !strings.Contains(got, "complete_step") {
 		t.Fatalf("todo_write result = %q, want completion rejected until complete_step", got)
+	}
+}
+
+func TestEvidenceFlowRecoversAfterBatchTodoCompletionRejection(t *testing.T) {
+	todoWrite, ok := tool.LookupBuiltin("todo_write")
+	if !ok {
+		t.Fatal("todo_write builtin not registered")
+	}
+	completeStep, ok := tool.LookupBuiltin("complete_step")
+	if !ok {
+		t.Fatal("complete_step builtin not registered")
+	}
+	reg := tool.NewRegistry()
+	reg.Add(todoWrite)
+	reg.Add(completeStep)
+
+	prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{
+		{
+			toolCallChunk("c1", "todo_write", `{"todos":[
+				{"content":"Port entity imports","status":"in_progress"},
+				{"content":"Run build and tests","status":"pending"}
+			]}`),
+			toolCallChunk("c2", "todo_write", `{"todos":[
+				{"content":"Port entity imports","status":"completed"},
+				{"content":"Run build and tests","status":"completed"}
+			]}`),
+			{Type: provider.ChunkDone},
+		},
+		{
+			toolCallChunk("c3", "complete_step", `{
+				"step":"Port entity imports",
+				"result":"entity imports ported",
+				"evidence":[{"kind":"manual","summary":"checked manually"}]
+			}`),
+			toolCallChunk("c4", "complete_step", `{
+				"step":"Run build and tests",
+				"result":"build and tests ran",
+				"evidence":[{"kind":"manual","summary":"checked manually"}]
+			}`),
+			toolCallChunk("c5", "todo_write", `{"todos":[
+				{"content":"Port entity imports","status":"completed"},
+				{"content":"Run build and tests","status":"completed"}
+			]}`),
+			{Type: provider.ChunkDone},
+		},
+		{{Type: provider.ChunkText, Text: "done"}, {Type: provider.ChunkDone}},
+	}}
+
+	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
+	if err := a.Run(context.Background(), "recover from a rejected batch todo update"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	stepResults := toolResults(a.session, "complete_step")
+	if len(stepResults) < 2 {
+		t.Fatalf("complete_step results = %v, want two sign-offs", stepResults)
+	}
+	if got := stepResults[1]; !strings.Contains(got, "signed off") {
+		t.Fatalf("pending todo complete_step result = %q, want successful sign-off", got)
+	}
+	if got := lastToolResult(a.session, "todo_write"); !strings.Contains(got, "2 completed") {
+		t.Fatalf("final todo_write result = %q, want all todos completed", got)
 	}
 }
 

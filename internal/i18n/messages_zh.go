@@ -39,32 +39,37 @@ var Chinese = Messages{
 	ResumePickTitle:     "选择要恢复的会话",
 	ResumePickHint:      "↑/↓ 移动 · Enter 恢复 · Esc 取消",
 
-	ChatThinking:           "思考中…",
-	ChatThoughtForFmt:      "思考了 %d 秒",
-	ChatStatusThinkingFmt:  "%s 思考中… (%d 秒 · Esc 取消)",
-	ChatToolWorkingFmt:     "%s 运行中 · %d 秒",
-	ChatStatusRetryingFmt:  "%s 正在重试 (%d/%d)… (Esc 取消)",
-	ChatStatusIdle:         "就绪",
-	ChatStatusYoloIdle:     "已跳过批准",
-	ChatStatusCycleHint:    "shift+tab 循环切换",
-	ChatStatusCacheNowFmt:  "本次命中 %s",
-	ChatStatusCacheAvgFmt:  "平均 %s",
-	ChatStatusPlanApproval: "Enter/y 批准并执行 · n/Esc 继续规划 · PgUp/PgDn 滚动",
-	PlanApprovalPrompt:     "计划已生成（见上方）— Enter/y 批准执行,n/Esc 继续规划",
-	ChatStatusToolApproval: "1 本次允许 · 2 本会话允许 · 3 总是允许（保存） · 4 拒绝 · y/a/p/n 兼容 · Ctrl-C 取消本轮",
-	AskTypeSomething:       "自己输入",
-	AskTypingHint:          "输入后按 Enter 确认",
-	AskChatInstead:         "先不选择，直接回复",
-	ChatStatusQuestion:     "↑/↓ 选 · 数字快选 · 空格多选 · Enter 确认 · ←/→ 切换问题 · Esc 取消",
-	StatusResumePicker:     "↑/↓ 移动 · Enter 恢复 · Esc 取消",
-	AskSubmitTitle:         "提交答案",
-	AskUnanswered:          "(未答)",
-	AskSubmitHint:          "Enter 提交 · ← 返回修改",
-	ToolApprovalPromptFmt:  "需要你的许可\n\n将调用工具 %s%s。\n%s\n1. 本次允许\n2. 本会话允许同类调用\n3. 总是允许（保存到配置）\n4. 拒绝\n选择 [1/2/3/4]（兼容 y/a/p/n）",
-	ToolApprovalSourceFmt:  "来源: %s",
-	ToolApprovalBuiltIn:    "内置工具",
-	ToolApprovalImageUse:   "将读取提供的图片用于图像理解。",
-	DiffFoldedFmt:          "… 还有 %d 行",
+	ChatThinking:                "思考中…",
+	ChatThoughtForFmt:           "思考了 %d 秒",
+	ChatStatusThinkingFmt:       "%s 思考中… (%d 秒 · Esc 取消)",
+	ChatToolWorkingFmt:          "%s 运行中 · %d 秒",
+	ChatStatusRetryingFmt:       "%s 正在重试 (%d/%d)… (Esc 取消)",
+	ChatStatusIdle:              "就绪",
+	ChatStatusYoloIdle:          "已跳过工具批准",
+	ChatStatusCycleHint:         "shift+tab 切换计划 · ctrl+y yolo",
+	ChatStatusCacheNowFmt:       "本次命中 %s",
+	ChatStatusCacheAvgFmt:       "平均 %s",
+	ChatStatusPlanApproval:      "Enter/y 批准并执行 · n/Esc 继续规划 · PgUp/PgDn/Ctrl+Home/End 滚动",
+	PlanApprovalPrompt:          "计划已生成（见上方）— Enter/y 批准执行,n/Esc 继续规划",
+	ChatStatusToolApproval:      "1 本次允许 · 2 本会话允许此范围 · 提供时 3/4 为前缀或保存 · n/Esc 拒绝 · Ctrl-C 取消本轮",
+	AskTypeSomething:            "自己输入",
+	AskTypingHint:               "输入后按 Enter 确认",
+	AskChatInstead:              "先不选择，直接回复",
+	ChatStatusQuestion:          "↑/↓ 选 · 数字快选 · 空格多选 · Enter 确认 · ←/→ 切换问题 · Esc 取消",
+	StatusResumePicker:          "↑/↓ 移动 · Enter 恢复 · Esc 取消",
+	AskSubmitTitle:              "提交答案",
+	AskUnanswered:               "(未答)",
+	AskSubmitHint:               "Enter 提交 · ← 返回修改",
+	ToolApprovalPromptFmt:       "需要你的许可\n\n将调用工具 %s%s。\n%s\n%s",
+	ToolApprovalChoices:         "1. 本次允许\n2. 本会话允许 %s\n3. 总是允许 %s（保存到配置）\n4. 拒绝\n选择 [1/2/3/4]（兼容 y/a/p/n）",
+	BashPrefixChoices:           "1. 本次允许\n2. 本会话允许 %s\n3. 总是允许 %s（保存到配置）\n4. 拒绝\n选择 [1/2/3/4]（兼容 y/a/p/n）",
+	ToolApprovalSourceFmt:       "来源: %s",
+	ToolApprovalBuiltIn:         "内置工具",
+	ToolApprovalImageUse:        "将读取提供的图片用于图像理解。",
+	PermissionSavedFmt:          "授权已保存到 %s：%s",
+	PermissionAlreadyAllowedFmt: "授权已由 %s 中的规则覆盖：%s",
+	PermissionSaveFailedFmt:     "保存授权 %s 失败：%v",
+	DiffFoldedFmt:               "… 还有 %d 行",
 
 	OutputStyleNone:    "没有可用的输出风格",
 	OutputStyleHeader:  "输出风格：",
@@ -85,12 +90,15 @@ var Chinese = Messages{
 
 	SlashCompactDone:   "已压缩 — 旧的中段换成一段摘要，最近几轮保留原样",
 	SlashCompactFailed: "压缩失败",
-	SlashNewDone:       "已新建会话 — 之前的对话已存档",
+	SlashNewDone:       "已开启新会话 — 之前的对话已存档",
 	SlashNewFailed:     "新建会话失败",
+	SlashClearPrompt:   "清空当前上下文且不保存？",
+	SlashClearDone:     "已清空当前上下文",
+	SlashClearFailed:   "清空当前上下文失败",
 	SlashUnavailable:   "当前构建不支持该命令",
 	SlashUnknown:       "未知命令",
 	SlashTodoCleared:   "已清除任务清单",
-	SlashHelp:          "命令：/compact · /new · /resume · /rewind · /tree · /branch · /switch · /todo · /verbose · /model（切换模型）· /effort · /theme · /language · /mcp · /skills · /hooks · /paste-image · /memory · /remember · /quit · /help · 以及 skills（/init、/explore …）",
+	SlashHelp:          "命令：/compact · /new · /clear · /resume · /rewind · /tree · /branch · /switch · /todo · /verbose · /model（切换模型）· /effort · /theme · /language · /mcp · /skills · /hooks · /paste-image · /memory · /goal · /remember · /quit · /help · 以及 skills（/init、/explore …）",
 
 	SkillPickerTitle:             "Skills",
 	SkillPickerAvailableFmt:      "%d 个可用",
@@ -147,7 +155,8 @@ var Chinese = Messages{
 	ShellExecTimeoutFmt: "Shell 命令超时（>%s）",
 	ShellModeHint:       "Enter 执行 Shell · Esc 取消 · 点击输出展开",
 
-	CmdNew:          "开启新会话",
+	CmdNew:          "开启新会话并保存历史",
+	CmdClear:        "丢弃当前上下文",
 	CmdCompact:      "压缩上下文",
 	CmdRewind:       "回滚到更早的一轮",
 	CmdTree:         "查看对话分支树",
@@ -156,6 +165,7 @@ var Chinese = Messages{
 	CmdResume:       "恢复已保存的会话",
 	CmdModel:        "切换模型",
 	CmdMemory:       "查看记忆文件",
+	CmdGoal:         "设置或清除当前目标",
 	CmdRemember:     "保存一条记忆",
 	CmdForget:       "删除一条已存记忆",
 	CmdMcp:          "MCP 服务器",
@@ -166,6 +176,7 @@ var Chinese = Messages{
 	CmdLanguage:     "切换 CLI 语言",
 	CmdSkill:        "管理 skills",
 	CmdVerbose:      "切换 thinking 原文显示",
+	CmdSandbox:      "查看沙箱状态",
 	CmdEffort:       "设置推理强度",
 	CmdAutoPlan:     "配置自动计划模式",
 	CmdHelp:         "查看命令列表",
@@ -214,6 +225,10 @@ var Chinese = Messages{
 	ForgetDoneFmt:          "已删除记忆：%s",
 	QuickRememberEmpty:     "没有要记录的内容",
 	QuickRememberDoneFmt:   "已记住 → %s",
+	GoalEmpty:              "目标：无 — 用 /goal <目标> 设置",
+	GoalCurrentFmt:         "目标：%s",
+	GoalSetFmt:             "目标已设置 → %s",
+	GoalCleared:            "目标已清除",
 	ModelSwitchUnavailable: "本会话不支持切换模型",
 	ModelSwitchBusy:        "请先完成或取消当前这一轮再切换模型",
 	ModelAlreadyOnFmt:      "已经在使用 %s",
@@ -302,20 +317,32 @@ var Chinese = Messages{
 	ProviderErrServer:              "服务器故障 (HTTP 500)：服务端内部错误。已退避重试；若持续失败请稍后再试。",
 	ProviderErrServerBusy:          "服务器繁忙 (HTTP 503)：服务端负载过高。已退避重试，请稍后再试。",
 
-	SelectOneHint:  "(↑/↓ · Enter · q 取消)",
-	SelectManyHint: "(↑/↓ · Space · Enter · q)",
+	SelectOneHint:  "(↑/↓ · Enter · q 取消；/ 搜索)",
+	SelectManyHint: "(↑/↓ · Space · Enter · q；/ 搜索)",
+
+	SelectMoreAboveFmt: "  ↑ 上方还有 %d 个",
+	SelectMoreBelowFmt: "  ↓ 下方还有 %d 个",
+	SelectSearchHint:   "/ 搜索 · 输入关键词过滤 · Esc 取消搜索",
+
+	CmdProvider:          "切换供应商",
+	ProviderListHeader:   "供应商（/provider <名称> 切换）",
+	ProviderAlreadyOnFmt: "已经在使用供应商 %s",
+	ProviderUnknownFmt:   "未知供应商 %q",
+	ProviderPickLabel:    "选择 %s 的一个模型",
+	ProviderNoModelsFmt:  "供应商 %s 没有已配置的模型",
 
 	UsageBody: `reasonix — 由配置和插件驱动的 coding agent（多模型）
 
 用法：
   reasonix chat [--model NAME] [-c|--continue] [--resume]   交互式会话（多轮；-c 恢复最近一次，--resume 选择一个）
-  reasonix run  [--model NAME] [--max-steps N] <task>   执行单次任务后退出
+  reasonix run  [--model NAME] [--max-steps N] [-c|--continue] [--resume PATH] <task>   执行单次任务后退出
   reasonix serve [--model NAME] [--addr HOST:PORT]      通过 HTTP+SSE 提供会话（浏览器客户端在 /）
   reasonix acp [--model NAME]                           通过 stdio 提供 Agent Client Protocol（也可用：reasonix --acp）
   reasonix setup [path]                                 交互式配置向导；生成 reasonix.toml（及 .env）
   reasonix config auto-plan [off|on]                    配置自动计划模式
   reasonix mcp <add|remove|list>                        管理 reasonix.toml 里的 MCP 服务器
   reasonix doctor [--json]                              输出脱敏的本地诊断信息
+  reasonix bot start|doctor|weixin-login                多渠道 IM bot 网关
   reasonix version
   reasonix help
 

@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"reasonix/internal/agent"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 )
@@ -373,6 +376,50 @@ func TestServeRejectsPathLikeSessionID(t *testing.T) {
 	}
 	if resp.Error.Code != ErrInvalidParams || !strings.Contains(resp.Error.Message, "invalid sessionId") {
 		t.Fatalf("session/delete error = %+v, want invalid sessionId", resp.Error)
+	}
+}
+
+func TestDeleteSessionFilesDeletesOwnedSubagents(t *testing.T) {
+	dir := t.TempDir()
+	sessionPath := filepath.Join(dir, "session.jsonl")
+	if err := os.WriteFile(sessionPath, []byte(`{"role":"user","content":"hi"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ref := "sa_20260102_030405_000000000_aabbccddeeff"
+	writeACPSubagentArtifact(t, dir, ref, agent.BranchID(sessionPath))
+
+	if err := deleteSessionFiles(sessionPath); err != nil {
+		t.Fatalf("deleteSessionFiles: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "subagents", ref+".jsonl")); !os.IsNotExist(err) {
+		t.Fatalf("subagent jsonl should be deleted, stat err = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "subagents", ref+".meta.json")); !os.IsNotExist(err) {
+		t.Fatalf("subagent meta should be deleted, stat err = %v", err)
+	}
+}
+
+func writeACPSubagentArtifact(t *testing.T, dir, ref, parentSession string) {
+	t.Helper()
+	subagentDir := filepath.Join(dir, "subagents")
+	if err := os.MkdirAll(subagentDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(subagentDir, ref+".jsonl"), []byte(`{"role":"user","content":"sub"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(agent.SubagentMeta{
+		Ref:           ref,
+		Status:        agent.SubagentCompleted,
+		Kind:          "task",
+		Name:          "task",
+		ParentSession: parentSession,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(subagentDir, ref+".meta.json"), data, 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -62,12 +62,13 @@ type Rule struct {
 	Literal bool
 }
 
-// ParseRule parses "ToolName", "ToolName(glob)", or "ToolName=literal".
-// Surrounding whitespace is trimmed. The "=literal" form (taken when the '='
-// precedes any '(') matches the rest of the string verbatim — no globbing —
-// which is how remembered approvals are stored so a command's punctuation can't
-// widen the rule. ok is false for a malformed entry (empty tool name) so the
-// caller can warn rather than silently install a rule that matches nothing.
+// ParseRule parses "ToolName", "ToolName(glob)", or the legacy
+// "ToolName=literal" form. Surrounding whitespace is trimmed. The "=literal"
+// form (taken when the '=' precedes any '(') matches the rest of the string
+// verbatim — no globbing — and is kept for existing configs that were written
+// before the Claude Code-style Tool(specifier) approval rules. ok is false for
+// a malformed entry (empty tool name) so the caller can warn rather than
+// silently install a rule that matches nothing.
 func ParseRule(s string) (Rule, bool) {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -129,7 +130,12 @@ func New(mode string, allow, ask, deny []string) Policy {
 // for glob matching. Precedence: deny > ask > allow > fallback (Allow for
 // readers, Mode for writers).
 func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Decision {
-	subject := Subject(args)
+	return p.DecideSubject(toolName, readOnly, Subject(args))
+}
+
+// DecideSubject evaluates a tool call when the caller already extracted the
+// stable approval subject from args.
+func (p Policy) DecideSubject(toolName string, readOnly bool, subject string) Decision {
 	switch {
 	case matchAny(p.Deny, toolName, subject):
 		return Deny
@@ -148,7 +154,7 @@ func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Dec
 // subject-specific rule cannot match a call that exposes no subject.
 func matchAny(rules []Rule, toolName, subject string) bool {
 	for _, r := range rules {
-		if r.Tool != toolName {
+		if !ruleToolMatches(r.Tool, toolName) {
 			continue
 		}
 		if r.Subject == "" {
@@ -157,17 +163,66 @@ func matchAny(rules []Rule, toolName, subject string) bool {
 		if subject == "" {
 			continue
 		}
-		if r.Literal {
-			if r.Subject == subject {
-				return true
-			}
-			continue
-		}
-		if matchGlob(r.Subject, subject) {
+		if ruleSubjectMatches(r, subject) {
 			return true
 		}
 	}
 	return false
+}
+
+// RuleMatchesString reports whether one config-style rule string matches the
+// given tool subject. It is used for session grants as well as persisted config
+// rules so both paths share identical matching semantics.
+func RuleMatchesString(rule, toolName, subject string) bool {
+	r, ok := ParseRule(rule)
+	return ok && matchAny([]Rule{r}, toolName, subject)
+}
+
+// RuleCoversString reports whether every call represented by candidate is
+// already covered by existing. It intentionally proves only the cases Reasonix
+// creates automatically: exact rules covered by broader globs or bare tool
+// rules, exact duplicate globs, and bare tool rules covering subject rules.
+func RuleCoversString(existing, candidate string) bool {
+	a, ok := ParseRule(existing)
+	if !ok {
+		return false
+	}
+	b, ok := ParseRule(candidate)
+	if !ok {
+		return false
+	}
+	if !ruleToolCompatible(a.Tool, b.Tool) {
+		return false
+	}
+	if a.Subject == "" {
+		return true
+	}
+	if b.Subject == "" {
+		return false
+	}
+	if bashRulePrefixBaseMatches(a, b) {
+		return true
+	}
+	if b.Literal || !hasGlobMeta(b.Subject) {
+		return ruleSubjectMatches(a, b.Subject)
+	}
+	return !a.Literal && a.Subject == b.Subject
+}
+
+func hasGlobMeta(s string) bool {
+	return strings.ContainsAny(s, "*?")
+}
+
+func bashRulePrefixBaseMatches(existing, candidate Rule) bool {
+	if canonicalRuleTool(existing.Tool) != "bash" || canonicalRuleTool(candidate.Tool) != "bash" {
+		return false
+	}
+	existingBase, ok := bashPrefixBase(existing.Subject)
+	if !ok {
+		return false
+	}
+	candidateBase, ok := bashPrefixBase(candidate.Subject)
+	return ok && existingBase == candidateBase
 }
 
 // subjectKeys are the JSON argument keys, in priority order, that carry a tool
@@ -245,7 +300,7 @@ type Gate struct {
 	Approver Approver
 
 	// OnRemember, when set, is invoked with a new allow rule the user chose to
-	// remember (e.g. "bash=go build"), so the front-end can persist it.
+	// remember (e.g. "Bash(go build)"), so the front-end can persist it.
 	OnRemember func(rule string)
 }
 
@@ -282,9 +337,186 @@ func (g *Gate) Check(ctx context.Context, toolName string, args json.RawMessage,
 			// later subject (a different file / command) is allowed without
 			// re-prompting. Deny rules still take precedence on every call.
 			g.OnRemember(toolName)
+			// Also add the rule to the in-memory Policy immediately so it
+			// takes effect in the current session without requiring a restart.
+			// The session-level grant (controller.granted) already covers the
+			// Approver path, but any code path that consults Policy.Decide()
+			// directly would miss the rule until the next controller build.
+			if rule, ok := ParseRule(toolName); ok {
+				g.Policy.Allow = append(g.Policy.Allow, rule)
+			}
 		}
 		return true, "", nil
 	default:
 		return true, "", nil
 	}
+}
+
+// rememberRule builds the rule string persisted when the user picks "always
+// allow". Bash commands prefer a safe command prefix (e.g. go test:*) so
+// "always allow" covers similar invocations with different arguments. File
+// mutation tools are remembered tool-wide ("Edit") so approving one file edit
+// covers all files. Other tools are remembered by tool name. Deny and ask rules keep their higher precedence.
+func rememberRule(toolName, subject string) string {
+	return RememberRuleForScope(toolName, subject)
+}
+
+// RememberRuleForScope builds the rule string persisted when the user chooses
+// an always-allow option. Bash commands prefer a safe prefix (go test:*) so
+// similar invocations (different search terms, different test packages) match;
+// when no safe prefix can be extracted the exact command is used. File
+// mutation tools are always remembered tool-wide (Edit). Other tools use their
+// bare tool name. Deny rules still take precedence on every call.
+func RememberRuleForScope(toolName, subject string) string {
+	subject = strings.TrimSpace(subject)
+	if subject != "" && toolName == "bash" {
+		if pattern := BashCommandPrefix(subject); pattern != "" {
+			return "Bash(" + pattern + ")"
+		}
+		return "Bash(" + subject + ")"
+	}
+	if IsFileMutationTool(toolName) {
+		return "Edit"
+	}
+	return toolName
+}
+
+// SessionGrantKey returns the in-memory rule for "allow this session". Bash
+// prefers a command prefix when one is available, falling back to the exact
+// command when unsafe. File mutation tools share a single Edit grant.
+func SessionGrantKey(toolName, subject string) string {
+	return SessionGrantRuleForScope(toolName, subject)
+}
+
+// SessionGrantRuleForScope returns the in-memory rule for a session grant.
+// Bash prefers a command prefix when one is available; file mutation tools
+// share a single Edit grant; all other tools return the bare tool name.
+func SessionGrantRuleForScope(toolName, subject string) string {
+	subject = strings.TrimSpace(subject)
+	if toolName == "bash" && subject != "" {
+		if pattern := BashCommandPrefix(subject); pattern != "" {
+			return "Bash(" + pattern + ")"
+		}
+		return "Bash(" + subject + ")"
+	}
+	if IsFileMutationTool(toolName) {
+		return "Edit"
+	}
+	return toolName
+}
+
+// BashCommandPrefix returns a conservative prefix rule for "similar command"
+// approvals. It avoids shell syntax and keeps the prefix at command-word
+// boundaries, so approving "go test ./..." grants "go test:*" rather than a
+// broader "go *".
+func BashCommandPrefix(subject string) string {
+	cmd := strings.TrimSpace(subject)
+	if cmd == "" || containsShellSyntax(cmd) {
+		return ""
+	}
+	if BashDangerWarning(cmd) != "" {
+		return ""
+	}
+	fields := strings.Fields(cmd)
+	if len(fields) < 2 {
+		return ""
+	}
+	base := strings.ToLower(fields[0])
+	if isPackageManagerRun(base) && len(fields) >= 3 && strings.ToLower(fields[1]) == "run" {
+		return fields[0] + " " + fields[1] + " " + fields[2] + ":*"
+	}
+	return fields[0] + " " + fields[1] + ":*"
+}
+
+func isPackageManagerRun(base string) bool {
+	switch base {
+	case "npm", "pnpm", "yarn", "bun":
+		return true
+	default:
+		return false
+	}
+}
+
+// IsFileMutationTool reports whether a built-in tool mutates workspace files.
+func IsFileMutationTool(toolName string) bool {
+	switch toolName {
+	case "write_file", "edit_file", "multi_edit", "notebook_edit", "delete_range", "delete_symbol":
+		return true
+	default:
+		return false
+	}
+}
+
+func ruleToolMatches(ruleTool, toolName string) bool {
+	ruleTool = canonicalRuleTool(ruleTool)
+	return ruleTool == toolName || (ruleTool == "file_mutation" && IsFileMutationTool(toolName))
+}
+
+func ruleToolCompatible(existingTool, candidateTool string) bool {
+	existingTool = canonicalRuleTool(existingTool)
+	candidateTool = canonicalRuleTool(candidateTool)
+	return existingTool == candidateTool ||
+		(existingTool == "file_mutation" && (candidateTool == "file_mutation" || IsFileMutationTool(candidateTool)))
+}
+
+func canonicalRuleTool(toolName string) string {
+	switch strings.TrimSpace(toolName) {
+	case "Bash", "bash":
+		return "bash"
+	case "Edit", "edit", "file_mutation":
+		return "file_mutation"
+	default:
+		return toolName
+	}
+}
+
+func ruleSubjectMatches(rule Rule, subject string) bool {
+	if rule.Subject == "" {
+		return true
+	}
+	if subject == "" {
+		return false
+	}
+	if rule.Literal {
+		return rule.Subject == subject
+	}
+	if canonicalRuleTool(rule.Tool) == "bash" {
+		if base, ok := bashColonPrefixBase(rule.Subject); ok {
+			return bashPrefixMatches(base, subject)
+		}
+		if base, ok := legacyBashSpaceStarPrefixBase(rule.Subject); ok {
+			return bashPrefixMatches(base, subject)
+		}
+	}
+	return matchGlob(rule.Subject, subject)
+}
+
+func bashColonPrefixBase(pattern string) (string, bool) {
+	if !strings.HasSuffix(pattern, ":*") {
+		return "", false
+	}
+	base := strings.TrimSuffix(pattern, ":*")
+	return base, base != ""
+}
+
+func legacyBashSpaceStarPrefixBase(pattern string) (string, bool) {
+	if !strings.HasSuffix(pattern, " *") {
+		return "", false
+	}
+	base := strings.TrimSuffix(pattern, " *")
+	return base, base != ""
+}
+
+func bashPrefixBase(pattern string) (string, bool) {
+	if base, ok := bashColonPrefixBase(pattern); ok {
+		return base, true
+	}
+	return legacyBashSpaceStarPrefixBase(pattern)
+}
+
+func bashPrefixMatches(base, subject string) bool {
+	if containsShellSyntax(subject) {
+		return false
+	}
+	return subject == base || strings.HasPrefix(subject, base+" ")
 }

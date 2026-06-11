@@ -91,3 +91,25 @@ func TestEnsureInitPropagatesFailure(t *testing.T) {
 		t.Fatal("EnsureInit should return the init failure")
 	}
 }
+
+func TestIndexableRootRejectsFilesystemRoots(t *testing.T) {
+	if got := IndexableRoot(t.TempDir()); !got {
+		t.Fatal("a real project dir must be indexable")
+	}
+	for _, root := range []string{"", "   "} {
+		if IndexableRoot(root) {
+			t.Fatalf("IndexableRoot(%q) = true; want false", root)
+		}
+	}
+	var roots []string
+	if runtime.GOOS == "windows" {
+		roots = []string{`C:\`, `c:\`, `\\server\share`}
+	} else {
+		roots = []string{"/"}
+	}
+	for _, root := range roots {
+		if IndexableRoot(root) {
+			t.Fatalf("IndexableRoot(%q) = true; want false (filesystem root)", root)
+		}
+	}
+}

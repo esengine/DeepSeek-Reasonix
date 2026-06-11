@@ -204,6 +204,8 @@ func (s *Server) handler() http.Handler {
 	mux.HandleFunc("POST /rewind", s.rewind)
 	mux.HandleFunc("POST /fork", s.fork)
 	mux.HandleFunc("POST /summarize", s.summarize)
+	mux.HandleFunc("POST /tool-approval-mode", s.toolApprovalMode)
+	mux.HandleFunc("POST /auto-approve-tools", s.autoApproveTools)
 	mux.HandleFunc("POST /bypass", s.bypass)
 	mux.HandleFunc("POST /answer", s.answer)
 	mux.HandleFunc("POST /resume", s.resume)
@@ -639,8 +641,8 @@ func (s *Server) summarize(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// bypass toggles YOLO/bypass mode.
-func (s *Server) bypass(w http.ResponseWriter, r *http.Request) {
+// autoApproveTools toggles YOLO/full-access tool auto-approval.
+func (s *Server) autoApproveTools(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		On bool `json:"on"`
 	}
@@ -648,8 +650,33 @@ func (s *Server) bypass(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad body", http.StatusBadRequest)
 		return
 	}
-	s.ctl().SetBypass(body.On)
+	s.ctl().SetAutoApproveTools(body.On)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// toolApprovalMode selects ask, auto, or yolo approval behavior for interactive
+// frontends. Plan remains a separate read-only gate.
+func (s *Server) toolApprovalMode(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Mode string `json:"mode"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "bad body", http.StatusBadRequest)
+		return
+	}
+	switch strings.ToLower(strings.TrimSpace(body.Mode)) {
+	case control.ToolApprovalAsk, control.ToolApprovalAuto, control.ToolApprovalYolo:
+		s.ctl().SetToolApprovalMode(body.Mode)
+	default:
+		http.Error(w, "mode must be ask, auto, or yolo", http.StatusBadRequest)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// bypass is the legacy HTTP endpoint for YOLO/full-access tool auto-approval.
+func (s *Server) bypass(w http.ResponseWriter, r *http.Request) {
+	s.autoApproveTools(w, r)
 }
 
 // answer responds to an ask_request.
@@ -735,15 +762,19 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	used, window := s.ctl().ContextSnapshot()
 	hit, miss := s.ctl().SessionCache()
 	sess := map[string]any{
-		"label":     s.ctl().Label(),
-		"running":   s.ctl().Running(),
-		"plan":      s.ctl().PlanMode(),
-		"bypass":    s.ctl().Bypass(),
-		"cwd":       s.ctl().SessionDir(),
-		"used":      used,
-		"window":    window,
-		"cacheHit":  hit,
-		"cacheMiss": miss,
+		"label":            s.ctl().Label(),
+		"running":          s.ctl().Running(),
+		"plan":             s.ctl().PlanMode(),
+		"autoApproveTools": s.ctl().AutoApproveTools(),
+		"bypass":           s.ctl().AutoApproveTools(),
+		"toolApprovalMode": s.ctl().ToolApprovalMode(),
+		"goal":             s.ctl().Goal(),
+		"goalStatus":       s.ctl().GoalStatus(),
+		"cwd":              s.ctl().SessionDir(),
+		"used":             used,
+		"window":           window,
+		"cacheHit":         hit,
+		"cacheMiss":        miss,
 	}
 	if u := s.ctl().LastUsage(); u != nil {
 		sess["lastUsage"] = u
@@ -887,6 +918,10 @@ func (s *Server) deleteSession(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	if err := agent.DeleteSubagentsByParent(dir, agent.BranchID(abs)); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -940,7 +975,7 @@ func previewSessionFile(path string) (string, int) {
 		if m.Role == "user" {
 			turns++
 			if first == "" {
-				first = strings.TrimSpace(m.Content)
+				first = strings.TrimSpace(agent.HandoffTask(m.Content))
 			}
 		}
 	}

@@ -54,8 +54,10 @@ node_modules/
 Thumbs.db
 .idea/
 .vscode/
+/site/public/av/
 
 # Scratch / agent working dirs (never committed)
 /tmp/
 /.codex/
 /.gshare
+benchmarks/context-maintenance-e2e/run/

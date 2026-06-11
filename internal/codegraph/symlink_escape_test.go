@@ -35,6 +35,46 @@ func TestExtractRejectsEscapingSymlink(t *testing.T) {
 	}
 }
 
+// tarGz builds a tar.gz from the given headers in order, each with no body.
+func tarGz(hdrs ...*tar.Header) []byte {
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	for _, h := range hdrs {
+		_ = tw.WriteHeader(h)
+	}
+	tw.Close()
+	gz.Close()
+	return buf.Bytes()
+}
+
+// TestExtractRejectsSymlinkRedirectEscape covers the variant a lexical path check
+// misses: an in-bounds symlink ("real/up" -> "..", which lands on root) is made a
+// parent of a second symlink, so the second link's real location is root/escape
+// even though its archive path is real/up/escape. Resolving the parent before
+// validating the target is what catches it (go/unsafe-unzip-symlink).
+func TestExtractRejectsSymlinkRedirectEscape(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Symlink("probe-target", filepath.Join(dir, "probe-link")); err != nil {
+		t.Skipf("symlink creation is not available in this environment: %v", err)
+	}
+	_ = os.Remove(filepath.Join(dir, "probe-link"))
+	data := tarGz(
+		&tar.Header{Name: "real/", Typeflag: tar.TypeDir, Mode: 0o755},
+		&tar.Header{Name: "real/up", Typeflag: tar.TypeSymlink, Linkname: "..", Mode: 0o777},
+		&tar.Header{Name: "real/up/escape", Typeflag: tar.TypeSymlink, Linkname: "..", Mode: 0o777},
+	)
+	err := extractTarGz(data, dir)
+	if err == nil || !strings.Contains(err.Error(), "unsafe symlink") {
+		t.Fatalf("symlink-redirect escape should be rejected, got %v", err)
+	}
+	if _, err := os.Lstat(filepath.Dir(dir)); err == nil {
+		if _, err := os.Lstat(filepath.Join(filepath.Dir(dir), "escape")); err == nil {
+			t.Fatal("escape symlink was planted outside the extraction dir")
+		}
+	}
+}
+
 // TestExtractAllowsInternalSymlink keeps legitimate in-bundle symlinks working.
 func TestExtractAllowsInternalSymlink(t *testing.T) {
 	dir := t.TempDir()

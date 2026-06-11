@@ -318,6 +318,7 @@ input,textarea{font:inherit;color:inherit}
       <div class="welcome__hints">
         <span><kbd>/</kbd> __('hint_commands')</span>
         <span><kbd>Shift+Tab</kbd> __('hint_mode')</span>
+        <span><kbd>Ctrl+Y</kbd> __('hint_yolo')</span>
         <span><kbd>Esc&times;2</kbd> __('hint_rewind')</span>
       </div>
       <div class="welcome__examples">
@@ -459,11 +460,19 @@ const __T = {
     'submit': 'Submit',
     'approval_title': 'Approval Required',
     'allow': 'Allow',
-    'session': 'Session',
+    'session': 'Allow for session',
+    'session_command': 'Command for session',
+    'session_prefix': 'Command prefix for session',
+    'persist_command': 'Always allow command (save)',
+    'persist_prefix': 'Always allow command prefix (save)',
+    'persist_edit': 'Always allow edits (save)',
+    'persist_tool': 'Always allow (save)',
+    'session_edit': 'Edits for session',
+    'session_tool': 'Tool for session',
     'deny': 'Deny',
-    'auto_mode': 'Auto mode',
+    'auto_mode': 'Auto mode (auto-approve fallback approvals)',
     'plan_mode': 'Plan mode (read-only)',
-    'yolo_mode': 'YOLO mode (auto-approve)',
+    'yolo_mode': 'YOLO mode (auto-approve tool approvals; ask and plan still wait)',
     'auto': 'Auto',
     'plan': 'Plan',
     'yolo': 'YOLO',
@@ -484,7 +493,8 @@ const __T = {
     'delete_confirm': 'Delete this session?',
     'welcome_tag': 'AI coding agent',
     'hint_commands': '/ commands',
-    'hint_mode': 'Shift+Tab mode',
+    'hint_mode': 'Plan',
+    'hint_yolo': 'YOLO',
     'hint_rewind': 'Esc×2 rewind',
     'example_explain': 'Explain the project structure',
     'example_fix': 'Find and fix any bugs',
@@ -545,11 +555,19 @@ const __T = {
     'submit': '提交',
     'approval_title': '需要批准',
     'allow': '允许',
-    'session': '会话期',
+    'session': '本会话允许',
+    'session_command': '本会话允许此命令',
+    'session_prefix': '本会话允许命令前缀',
+    'persist_command': '总是允许此命令（保存）',
+    'persist_prefix': '总是允许命令前缀（保存）',
+    'persist_edit': '总是允许编辑（保存）',
+    'persist_tool': '总是允许（保存）',
+    'session_edit': '本会话允许编辑',
+    'session_tool': '本会话允许此工具',
     'deny': '拒绝',
-    'auto_mode': '自动模式',
+    'auto_mode': '自动模式（自动批准兜底审批）',
     'plan_mode': '计划模式（只读）',
-    'yolo_mode': 'YOLO 模式（自动批准）',
+    'yolo_mode': 'YOLO 模式（自动批准工具权限；ask 和计划仍会等待）',
     'auto': '自动',
     'plan': '计划',
     'yolo': 'YOLO',
@@ -570,7 +588,8 @@ const __T = {
     'delete_confirm': '删除此会话？',
     'welcome_tag': 'AI 编码助手',
     'hint_commands': '/ 命令',
-    'hint_mode': 'Shift+Tab 模式',
+    'hint_mode': '计划',
+    'hint_yolo': 'YOLO',
     'hint_rewind': 'Esc×2 回退',
     'example_explain': '解释项目结构',
     'example_fix': '查找并修复错误',
@@ -623,6 +642,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
 
+const $ = s => document.querySelector(s);
 const $$ = s => document.querySelectorAll(s);
 const log = $('#log'), input = $('#in'), btnSend = $('#btn-send'), btnStop = $('#btn-stop');
 const statusDot = $('#status-dot-footer'), statusText = $('#status-text');
@@ -633,7 +653,7 @@ const welcome = $('#welcome');
 const slashAnchor = $('#slash-menu-anchor');
 
 // ── state ──
-let running = false, planMode = false, bypassMode = false;
+let running = false, planMode = false, bypassMode = false, toolApprovalMode = 'ask', yoloRestoreMode = 'ask';
 let currentMsg = null, currentText = null, currentReasoning = null;
 let turnStartAt = 0, turnTokens = 0, tickTimer = null;
 let toolCards = {};
@@ -733,12 +753,66 @@ function renderToolProgress(tool) {
 }
 
 // ── approval ──
+function approvalSessionLabel(a) {
+  return __('session')+' '+approvalSessionRule(a);
+}
+function approvalPersistentLabel(a) {
+  return __('persist_tool')+' '+approvalPersistentRule(a);
+}
+function approvalSessionRule(a) {
+  if (a.tool === 'bash' && a.subject) return 'Bash('+String(a.subject).trim()+')';
+  if (['write_file','edit_file','multi_edit','notebook_edit','delete_range','delete_symbol'].includes(a.tool)) return 'Edit';
+  return a.tool;
+}
+function approvalPersistentRule(a) {
+  if (a.tool === 'bash' && a.subject) return 'Bash('+String(a.subject).trim()+')';
+  if (['write_file','edit_file','multi_edit','notebook_edit','delete_range','delete_symbol'].includes(a.tool)) return a.subject ? 'Edit('+String(a.subject).trim()+')' : 'Edit';
+  return a.tool;
+}
+function bashCommandPrefix(subject) {
+  const command = String(subject || '').trim();
+  if (!command || command.includes('`') || command.includes('$(') || /[;|&<>\n]/.test(command)) return '';
+  const fields = command.split(/\s+/).filter(Boolean);
+  if (fields.length < 2) return '';
+  if (dangerousBashCommand(command)) return '';
+  const base = fields[0].toLowerCase();
+  if (['npm','pnpm','yarn','bun'].includes(base) && fields[1] && fields[1].toLowerCase() === 'run') return fields.length >= 3 ? fields[0]+' '+fields[1]+' '+fields[2]+':*' : '';
+  return fields[0]+' '+fields[1]+':*';
+}
+function dangerousBashCommand(command) {
+  return /^rm\s+-[^\s]*[rf][^\s]*\b/.test(command)
+    || /^git\s+push\b.*\s--force\b/.test(command)
+    || /^git\s+push\b.*\s-f\b/.test(command)
+    || /^git\s+reset\s+--hard\b/.test(command)
+    || /^git\s+clean\s+-f\b/.test(command)
+    || /^chmod\s+(?:-R\s+)?777\b/.test(command)
+    || /^chown\b/.test(command)
+    || /^sudo\b/.test(command)
+    || /^mkfs\b/.test(command)
+    || /^dd\s+if=/.test(command)
+    || /^fdisk\b/.test(command);
+}
 function showApproval(a) {
   const d=el('div','approval');
-  d.innerHTML='<div class="approval__header"><svg class="approval__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg><span class="approval__title">'+__('approval_title')+'</span></div><div class="approval__subject">'+escHtml(a.tool)+(a.subject?' — '+escHtml(a.subject):'')+'</div><div class="approval__actions"><button class="approval__btn approval__btn--allow" data-allow="true" data-session="false"><span class="approval__key">Y</span> '+__('allow')+'</button><button class="approval__btn approval__btn--allow" data-allow="true" data-session="true"><span class="approval__key">A</span> '+__('session')+'</button><button class="approval__btn approval__btn--deny" data-allow="false"><span class="approval__key">N</span> '+__('deny')+'</button></div>';
+  const prefix = a.tool === 'bash' ? bashCommandPrefix(a.subject) : '';
+  const hasPrefix = prefix !== '';
+  const prefixRule = hasPrefix ? 'Bash('+prefix+')' : '';
+  const actions = [
+    '<button class="approval__btn approval__btn--allow" data-allow="true" data-session="false"><span class="approval__key">Y</span> '+__('allow')+'</button>',
+  ];
+  if (hasPrefix) {
+    actions.push('<button class="approval__btn approval__btn--allow" data-allow="true" data-session="true" data-scope="prefix"><span class="approval__key">A</span> '+escHtml(__('session')+' '+prefixRule)+'</button>');
+    actions.push('<button class="approval__btn approval__btn--allow" data-allow="true" data-session="true" data-persist="true" data-scope="prefix"><span class="approval__key">P</span> '+escHtml(__('persist_tool')+' '+prefixRule)+'</button>');
+  } else {
+    actions.push('<button class="approval__btn approval__btn--allow" data-allow="true" data-session="true"><span class="approval__key">A</span> '+escHtml(approvalSessionLabel(a))+'</button>');
+    actions.push('<button class="approval__btn approval__btn--allow" data-allow="true" data-session="true" data-persist="true"><span class="approval__key">P</span> '+escHtml(approvalPersistentLabel(a))+'</button>');
+  }
+  actions.push('<button class="approval__btn approval__btn--deny" data-allow="false"><span class="approval__key">N</span> '+__('deny')+'</button>');
+  d.innerHTML='<div class="approval__header"><svg class="approval__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg><span class="approval__title">'+__('approval_title')+'</span></div><div class="approval__subject">'+escHtml(a.tool)+(a.subject?' — '+escHtml(a.subject):'')+'</div><div class="approval__actions">'+actions.join('')+'</div>';
   log.appendChild(d);scrollDown();
-  d.querySelectorAll('.approval__btn').forEach(btn=>{btn.onclick=()=>{post('/approve',{id:a.id,allow:btn.dataset.allow==='true',session:btn.dataset.session==='true'});d.remove();};});
-  const onkey=e=>{if(e.key==='y'||e.key==='1'){post('/approve',{id:a.id,allow:true,session:false});d.remove();document.removeEventListener('keydown',onkey);}else if(e.key==='a'||e.key==='2'){post('/approve',{id:a.id,allow:true,session:true});d.remove();document.removeEventListener('keydown',onkey);}else if(e.key==='n'||e.key==='3'){post('/approve',{id:a.id,allow:false,session:false});d.remove();document.removeEventListener('keydown',onkey);}};
+  const resolve=payload=>{post('/approve',Object.assign({id:a.id},payload));d.remove();document.removeEventListener('keydown',onkey);};
+  d.querySelectorAll('.approval__btn').forEach(btn=>{btn.onclick=()=>resolve({allow:btn.dataset.allow==='true',session:btn.dataset.session==='true',persist:btn.dataset.persist==='true',scope:btn.dataset.scope||''});});
+  const onkey=e=>{const k=e.key.toLowerCase();if(k==='y'||k==='1'){resolve({allow:true,session:false});}else if(k==='a'||k==='2'){resolve({allow:true,session:true});}else if(hasPrefix&&k==='3'){resolve({allow:true,session:true,scope:'prefix'});}else if(k==='p'||(!hasPrefix&&k==='3')||(hasPrefix&&k==='4')){resolve({allow:true,session:true,persist:true,scope:hasPrefix?'prefix':''});}else if(k==='n'||k==='escape'||(!hasPrefix&&k==='4')||(hasPrefix&&k==='5')){resolve({allow:false,session:false});}};
   document.addEventListener('keydown',onkey);
 }
 
@@ -921,7 +995,10 @@ function fetchStatus(){
   fetch('/status').then(r=>r.json()).then(s=>{
     if(s.label)statusModel.textContent=s.label;
     // sync mode UI without triggering POST (server is source of truth)
-    planMode=!!s.plan; bypassMode=!!s.bypass;
+    planMode=!!s.plan;
+    toolApprovalMode=s.toolApprovalMode || ((s.autoApproveTools??s.bypass)?'yolo':'ask');
+    bypassMode=toolApprovalMode==='yolo';
+    if(!bypassMode&&toolApprovalMode==='auto')yoloRestoreMode='auto';
     updateModeButtons();
     if(s.window){const pct=Math.min(100,Math.round(s.used/s.window*100));ctxFill.style.width=pct+'%';ctxFill.style.background=pct>85?'var(--warning)':pct>95?'var(--danger)':'var(--accent)';ctxUsed.textContent=fmtTok(s.used)+' tok';ctxWindow.textContent=fmtTok(s.window)+' tok';}
     // sidebar metrics
@@ -993,8 +1070,8 @@ loadSessions();
 
 // ── input handling ──
 async function syncModeBeforeSubmit(){
-  if(planMode){ await post('/bypass',{on:false}); await post('/plan',{on:true}); }
-  else if(bypassMode){ await post('/plan',{on:false}); await post('/bypass',{on:true}); }
+  await post('/plan',{on:planMode});
+    await post('/tool-approval-mode',{mode:bypassMode?'yolo':toolApprovalMode});
 }
 async function send(){ const v=input.value.trim(); if(!v)return; await syncModeBeforeSubmit(); addUserMsg(v); post('/submit',{input:v}).then(r=>{if(r.ok&&r.status===204){fetchStatus();loadSessions();}}); input.value='';input.style.height='';closeSlashMenu(); }
 
@@ -1019,27 +1096,29 @@ input.addEventListener('keydown',e=>{
 // shift+tab mode cycle
 document.addEventListener('keydown',e=>{
   if(e.target===input&&e.key==='Tab'&&e.shiftKey){e.preventDefault();cycleMode();return;}
+  if(e.target===input&&(e.key==='y'||e.key==='Y')&&(e.ctrlKey||e.metaKey)&&!e.altKey&&!e.shiftKey){e.preventDefault();toggleYolo();return;}
   if(e.key==='/'&&e.target!==input){e.preventDefault();input.focus();return;}
 });
 
-// mode helpers — plan and bypass are mutually exclusive
+// mode helpers — Shift+Tab toggles Plan; Ctrl+Y toggles YOLO separately.
 function updateModeButtons(){
-  const auto=!planMode&&!bypassMode;
+  const auto=!bypassMode&&toolApprovalMode==='auto';
   $('#btn-auto').classList.toggle('toolbar__btn--ok',auto);
   $('#btn-plan').classList.toggle('toolbar__btn--active',planMode);
   $('#btn-bypass').classList.toggle('toolbar__btn--danger',bypassMode);
 }
-async function setPlan(on){planMode=on;if(on){bypassMode=false;}updateModeButtons();if(on){await post('/bypass',{on:false});}await post('/plan',{on});}
-async function setBypass(on){bypassMode=on;if(on){planMode=false;}updateModeButtons();if(on){await post('/plan',{on:false});}await post('/bypass',{on});}
-async function cycleMode(){if(!planMode&&!bypassMode)await setPlan(true);else if(planMode){await setPlan(false);await setBypass(true);}else await setBypass(false);setTimeout(fetchStatus,200);}
-async function setMode(m){if(m==='auto'){if(planMode)await setPlan(false);if(bypassMode)await setBypass(false);}else if(m==='plan'){await setPlan(true);}else if(m==='yolo'){await setBypass(true);}}
+async function setToolApprovalMode(mode){toolApprovalMode=mode;bypassMode=mode==='yolo';updateModeButtons();await post('/tool-approval-mode',{mode});}
+async function setPlan(on){planMode=on;updateModeButtons();await post('/plan',{on});}
+async function cycleMode(){await setPlan(!planMode);setTimeout(fetchStatus,200);}
+async function toggleYolo(){if(bypassMode){const restore=yoloRestoreMode==='auto'?'auto':'ask';await setToolApprovalMode(restore);}else{yoloRestoreMode=toolApprovalMode==='auto'?'auto':'ask';await setToolApprovalMode('yolo');}setTimeout(fetchStatus,200);}
+async function setMode(m){if(m==='auto')await setToolApprovalMode('auto');else if(m==='plan')await setPlan(!planMode);else if(m==='yolo')await toggleYolo();}
 
 // toolbar buttons
 btnSend.onclick=()=>void send();
 btnStop.onclick=()=>post('/cancel');
 $('#btn-auto').onclick=()=>void setMode('auto');
 $('#btn-plan').onclick=()=>void setPlan(!planMode);
-$('#btn-bypass').onclick=()=>void setBypass(!bypassMode);
+$('#btn-bypass').onclick=()=>void toggleYolo();
 $('#btn-new').onclick=()=>{if(running)return;post('/new').then(()=>{log.innerHTML='';log.appendChild(welcome);welcome.style.display='';loadSessions();});};
 $('#btn-compact').onclick=()=>{if(!running)post('/compact');};
 $('#btn-rewind').onclick=()=>openRewindPicker();

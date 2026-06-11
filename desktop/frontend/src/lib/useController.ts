@@ -8,18 +8,22 @@ import { asArray } from "./array";
 import { app, onEvent, onReady } from "./bridge";
 import { createRafBatch } from "./rafBatch";
 import { t } from "./i18n";
+import { modeHasAutoApproveTools } from "./types";
 import type {
   BalanceInfo,
   CheckpointMeta,
+  CollaborationMode,
   ContextInfo,
   EffortInfo,
   HistoryMessage,
   JobView,
   MemoryView,
   Meta,
+  Mode,
   QuestionAnswer,
   SessionMeta,
   TabMeta,
+  ToolApprovalMode,
   WireApproval,
   WireAsk,
   WireEvent,
@@ -33,7 +37,7 @@ export type MessageActionScope = "fork" | "summ-from" | "summ-upto" | "conversat
 export type MessageActionState = { turn: number; scope: MessageActionScope };
 
 export type Item =
-  | { kind: "user"; id: string; text: string }
+  | { kind: "user"; id: string; text: string; failed?: boolean }
   | { kind: "assistant"; id: string; text: string; reasoning: string; streaming: boolean }
   | { kind: "phase"; id: string; text: string }
   | { kind: "notice"; id: string; level: "info" | "warn"; text: string }
@@ -82,30 +86,59 @@ interface State {
   discardTurn?: boolean;
   turnStartAt: number;
   turnTokens: number;
+  turnTotalTokens: number;
+  sessionTokens: number;
   sessionCost: number;
   sessionCurrency: string;
   retry?: { attempt: number; max: number };
   seq: number;
 }
 
-const initialState: State = {
+export const initialState: State = {
   items: [],
   running: false,
   turnActive: false,
-  context: { used: 0, window: 0 },
+  context: { used: 0, window: 0, sessionTokens: 0 },
   jobs: [],
   checkpoints: [],
   turnStartAt: 0,
   turnTokens: 0,
+  turnTotalTokens: 0,
+  sessionTokens: 0,
   sessionCost: 0,
   sessionCurrency: "¥",
   seq: 0,
 };
 
+function usageTotalTokens(usage?: WireUsage): number {
+  if (!usage) return 0;
+  if (usage.totalTokens > 0) return usage.totalTokens;
+  const promptTokens = usage.promptTokens || usage.cacheHitTokens + usage.cacheMissTokens;
+  return Math.max(0, promptTokens + usage.completionTokens);
+}
+
+function sameMeta(a?: Meta, b?: Meta): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return (
+    a.label === b.label &&
+    a.ready === b.ready &&
+    a.startupErr === b.startupErr &&
+    a.eventChannel === b.eventChannel &&
+    a.cwd === b.cwd &&
+    a.autoApproveTools === b.autoApproveTools &&
+    a.bypass === b.bypass &&
+    a.toolApprovalMode === b.toolApprovalMode &&
+    a.goal === b.goal &&
+    a.goalStatus === b.goalStatus
+  );
+}
+
 type Action =
   | { type: "event"; e: WireEvent }
   | { type: "user"; text: string; seq: number }
   | { type: "unsend" }
+  | { type: "send_failed"; error: string }
   | { type: "backend_status"; running: boolean }
   | { type: "meta"; meta: Meta }
   | { type: "context"; context: ContextInfo }
@@ -262,7 +295,7 @@ function applyEvent(s: State, e: WireEvent): State {
       let cur: State = s;
       if (cur.pendingUser !== undefined) cur = flushPendingUser(cur);
       const { items, id, seq } = ensureAssistant(cur);
-      return { ...cur, items, currentAssistant: id, seq, live: { id, text: "", reasoning: "" }, running: true, turnActive: true, turnStartAt: Date.now(), turnTokens: 0 };
+      return { ...cur, items, currentAssistant: id, seq, live: { id, text: "", reasoning: "" }, running: true, turnActive: true, turnStartAt: Date.now(), turnTokens: 0, turnTotalTokens: 0 };
     }
     case "text":
     case "reasoning": {
@@ -324,10 +357,13 @@ function applyEvent(s: State, e: WireEvent): State {
     case "usage": {
       const used = e.usage && s.context.window ? e.usage.promptTokens : s.context.used;
       const turnTokens = s.turnTokens + (e.usage?.completionTokens ?? 0);
+      const usageTokens = usageTotalTokens(e.usage);
+      const turnTotalTokens = s.turnTotalTokens + usageTokens;
+      const sessionTokens = s.sessionTokens + usageTokens;
       const usageCost = e.usage?.cost ?? e.usage?.costUsd ?? 0;
       const sessionCost = s.sessionCost + usageCost;
       const sessionCurrency = e.usage?.currency || s.sessionCurrency || "¥";
-      return { ...s, usage: e.usage, context: { ...s.context, used }, turnTokens, sessionCost, sessionCurrency };
+      return { ...s, usage: e.usage, context: { ...s.context, used, sessionTokens }, turnTokens, turnTotalTokens, sessionTokens, sessionCost, sessionCurrency };
     }
     case "notice":
       return { ...s, running: s.turnActive ? s.running : false, seq: s.seq + 1, items: [...s.items, { kind: "notice", id: `n${s.seq}`, level: e.level ?? "info", text: e.text ?? "" }] };
@@ -347,6 +383,8 @@ function applyEvent(s: State, e: WireEvent): State {
       const items = at < 0 ? [...s.items, filled] : s.items.map((it, i) => (i === at ? filled : it));
       return { ...s, running: s.turnActive ? s.running : false, seq: s.seq + 1, items };
     }
+    case "steer":
+      return { ...s, seq: s.seq + 1, items: [...s.items, { kind: "notice", id: `s${s.seq}`, level: "info", text: `↪ ${e.text ?? ""}` }] };
     case "approval_request": return { ...s, approval: e.approval };
     case "ask_request": return { ...s, ask: e.ask };
     case "turn_done": {
@@ -364,7 +402,7 @@ function applyEvent(s: State, e: WireEvent): State {
   }
 }
 
-function reducer(s: State, a: Action): State {
+export function reducer(s: State, a: Action): State {
   switch (a.type) {
     case "user": {
       const seq = a.seq !== undefined ? a.seq : s.seq;
@@ -375,11 +413,23 @@ function reducer(s: State, a: Action): State {
         running: true,
         turnStartAt: Date.now(),
         turnTokens: 0,
+        turnTotalTokens: 0,
         pendingUser: a.text,
         discardTurn: false,
       };
     }
     case "unsend": return { ...s, pendingUser: undefined, discardTurn: true, running: false, live: undefined };
+    case "send_failed": {
+      if (s.pendingUser === undefined) return s;
+      let idx = -1;
+      for (let i = s.items.length - 1; i >= 0; i--) {
+        const it = s.items[i];
+        if (it.kind === "user" && it.text === s.pendingUser) { idx = i; break; }
+      }
+      const items = idx >= 0 ? s.items.map((it, i) => (i === idx ? { ...it, failed: true } : it)) : s.items;
+      const notice: Item = { kind: "notice", id: `n${s.seq}`, level: "warn", text: a.error };
+      return { ...s, pendingUser: undefined, running: false, turnActive: false, live: undefined, seq: s.seq + 1, items: [...items, notice] };
+    }
     case "backend_status": {
       if (a.running === s.running) return s;
       if (a.running) return { ...s, running: true, turnActive: true, turnStartAt: s.turnStartAt || Date.now() };
@@ -391,8 +441,13 @@ function reducer(s: State, a: Action): State {
       });
       return { ...s, items: finalized, running: false, turnActive: false, live: undefined, currentAssistant: undefined, approval: undefined, ask: undefined };
     }
-    case "meta": return { ...s, meta: a.meta };
-    case "context": return { ...s, context: a.context };
+    case "meta": return sameMeta(s.meta, a.meta) ? s : { ...s, meta: a.meta };
+    case "context": {
+      const sessionTokens = typeof a.context.sessionTokens === "number"
+        ? Math.max(0, a.context.sessionTokens)
+        : s.sessionTokens;
+      return { ...s, context: a.context, sessionTokens };
+    }
     case "balance": return { ...s, balance: a.balance };
     case "effort": return { ...s, effort: a.effort };
     case "jobs": return { ...s, jobs: a.jobs };
@@ -406,7 +461,7 @@ function reducer(s: State, a: Action): State {
     case "local_notice": return { ...s, running: false, turnActive: false, seq: s.seq + 1, items: [...s.items, { kind: "notice", id: `n${s.seq}`, level: a.level, text: a.text }] };
     case "clearApproval": return { ...s, approval: undefined };
     case "clearAsk": return { ...s, ask: undefined };
-    case "reset": return { ...initialState, meta: s.meta, context: { ...s.context, used: 0 }, balance: s.balance, effort: s.effort, jobs: s.jobs };
+    case "reset": return { ...initialState, meta: s.meta, context: { ...s.context, used: 0, sessionTokens: 0 }, balance: s.balance, effort: s.effort, jobs: s.jobs };
     case "event": return applyEvent(s, a.e);
     default: return s;
   }
@@ -444,8 +499,19 @@ function errorMessage(err: unknown): string {
   return String(err || "");
 }
 
+async function refreshMetaForTab(tabId: string, dispatchTo: (tabId: string, action: Action) => void): Promise<void> {
+  try {
+    dispatchTo(tabId, { type: "meta", meta: await app.MetaForTab(tabId) });
+    dispatchTo(tabId, { type: "context", context: await app.ContextUsageForTab(tabId) });
+    dispatchTo(tabId, { type: "effort", effort: await app.EffortForTab(tabId) });
+  } catch {
+    /* ignore */
+  }
+}
+
 export function useController() {
   const statesRef = useRef<TabStates>(new Map());
+  const lastTokenAt = useRef(0);
   const [activeTabId, setActiveTabId] = useState<string | undefined>();
   const activeTabIdRef = useRef<string | undefined>(undefined);
   // A render-triggering counter so that mutations to a non-active tab's state still
@@ -568,6 +634,9 @@ export function useController() {
     const off = onEvent((e) => {
       const targetTabId = e.tabId || activeTabIdRef.current;
       if (!targetTabId) return;
+      if (e.kind === "turn_started" || e.kind === "text" || e.kind === "reasoning") {
+        lastTokenAt.current = Date.now();
+      }
       if (e.kind === "text" || e.kind === "reasoning") {
         textBatch.push({ tabId: targetTabId, e });
       } else {
@@ -575,6 +644,7 @@ export function useController() {
         dispatchTo(targetTabId, { type: "event", e });
       }
       if (e.kind === "turn_done") {
+        void refreshMetaForTab(targetTabId, dispatchTo);
         app
           .ContextUsageForTab(targetTabId)
           .then((context) => dispatchTo(targetTabId, { type: "context", context }))
@@ -598,23 +668,72 @@ export function useController() {
     });
 
     void syncActiveTabFromBackend();
+    // The event subscription is live now, so ask the backend to re-emit any
+    // approval/ask prompt that was already blocking a tab before this load —
+    // otherwise a session left mid-confirmation shows "waiting" with no modal
+    // and no way to stop (#3844).
+    void app.ReplayPendingPrompts().catch(() => {});
 
     return () => { textBatch.drain(); off(); offReady(); };
   }, [dispatchTo, loadSessionDataForTab, refreshCheckpoints, syncActiveTabFromBackend]);
 
-  const send = useCallback((displayText: string, submitText = displayText) => {
+  // Stale-stream watchdog: if the frontend thinks the agent is running but
+  // no token events have arrived for 30 seconds, reconcile with the backend.
+  // This catches the case where the Wails event channel silently drops the
+  // turn_done event after a model-service interruption (#3746).
+  useEffect(() => {
     if (!activeTabId) return;
-    const seq = getOrCreateState(statesRef.current, activeTabId).seq;
-    dispatchTo(activeTabId, { type: "user", text: displayText, seq });
-    const display = displayText.trim(); const submit = submitText.trim();
-    (display !== submit ? app.SubmitDisplayToTab(activeTabId, display, submit) : app.SubmitToTab(activeTabId, submit)).catch(() => {});
-  }, [activeTabId, dispatchTo]);
+    const s = statesRef.current.get(activeTabId);
+    if (!s?.running || !s.live) return;
+    const since = Date.now() - lastTokenAt.current;
+    if (since >= 30_000) {
+      void reconcileTabRuntime(activeTabId);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      const cur = statesRef.current.get(activeTabId);
+      if (cur?.running && cur.live && Date.now() - lastTokenAt.current >= 30_000) {
+        void reconcileTabRuntime(activeTabId);
+      }
+    }, 30_000 - since);
+    return () => window.clearTimeout(timer);
+  }, [activeTabId, reconcileTabRuntime, activeState.running, activeState.live]);
+
+  const send = useCallback((displayText: string, submitText = displayText) => {
+    const submitForTab = (tabId: string) => {
+      const seq = getOrCreateState(statesRef.current, tabId).seq;
+      dispatchTo(tabId, { type: "user", text: displayText, seq });
+      const display = displayText.trim();
+      const submit = submitText.trim();
+      (display !== submit ? app.SubmitDisplayToTab(tabId, display, submit) : app.SubmitToTab(tabId, submit)).catch((error) => {
+        dispatchTo(tabId, { type: "send_failed", error: `Send failed: ${error instanceof Error ? error.message : String(error)}` });
+      });
+    };
+    const tabId = activeTabIdRef.current ?? activeTabId;
+    if (tabId) {
+      submitForTab(tabId);
+      return;
+    }
+    void activeTabFromBackend().then((active) => {
+      if (!active?.id) return;
+      setActiveTabId(active.id);
+      submitForTab(active.id);
+    });
+  }, [activeTabFromBackend, activeTabId, dispatchTo]);
 
   const runShell = useCallback((command: string) => {
     if (!activeTabId) return;
     dispatchTo(activeTabId, { type: "user", text: `!${command}`, seq: getOrCreateState(statesRef.current, activeTabId).seq });
     app.RunShellForTab(activeTabId, command).catch(() => {});
   }, [activeTabId, dispatchTo]);
+
+  const steer = useCallback((text: string) => {
+    if (!activeTabId) return;
+    // No optimistic user bubble: rewind/fork map turns by counting user items,
+    // and a steer is not a backend turn — the Steer event's ↪ notice is the
+    // visible confirmation (#3660).
+    app.SteerForTab(activeTabId, text).catch(() => {});
+  }, [activeTabId]);
 
   const notice = useCallback((text: string, level: "info" | "warn" = "info") => {
     if (!activeTabId) return;
@@ -648,17 +767,57 @@ export function useController() {
     app.AnswerQuestionForTab(activeTabId, id, answers).catch(() => {});
   }, [activeTabId, dispatchTo]);
 
-  const setControllerMode = useCallback((mode: "plan" | "yolo" | "normal"): Promise<void> => {
+  const setControllerMode = useCallback((mode: Mode): Promise<void> => {
     if (!activeTabId) return Promise.resolve();
     return app.SetModeForTab(activeTabId, mode).then(() => {
-      if (mode === "yolo" && activeTabId) dispatchTo(activeTabId, { type: "clearApproval" });
+      if (modeHasAutoApproveTools(mode) && activeTabId) dispatchTo(activeTabId, { type: "clearApproval" });
     }).catch(() => {});
+  }, [activeTabId, dispatchTo]);
+
+  const setCollaborationMode = useCallback(async (mode: CollaborationMode): Promise<void> => {
+    if (!activeTabId) return;
+    await app.SetCollaborationModeForTab(activeTabId, mode).catch(() => {});
+    await refreshMetaForTab(activeTabId, dispatchTo);
+  }, [activeTabId, dispatchTo]);
+
+  const setToolApprovalMode = useCallback(async (mode: ToolApprovalMode): Promise<void> => {
+    if (!activeTabId) return;
+    await app.SetToolApprovalModeForTab(activeTabId, mode).catch(() => {});
+    if (mode === "auto" || mode === "yolo") dispatchTo(activeTabId, { type: "clearApproval" });
+    await refreshMetaForTab(activeTabId, dispatchTo);
+  }, [activeTabId, dispatchTo]);
+
+  const setGoal = useCallback(async (goal: string): Promise<void> => {
+    if (!activeTabId) return;
+    await app.SetGoalForTab(activeTabId, goal).catch(() => {});
+    await refreshMetaForTab(activeTabId, dispatchTo);
+  }, [activeTabId, dispatchTo]);
+
+  const clearGoal = useCallback(async (): Promise<void> => {
+    if (!activeTabId) return;
+    await app.ClearGoalForTab(activeTabId).catch(() => {});
+    await refreshMetaForTab(activeTabId, dispatchTo);
   }, [activeTabId, dispatchTo]);
 
   const newSession = useCallback(async () => {
     const tabId = activeTabId;
     if (tabId) bumpCheckpointRefreshSeq(tabId);
-    await app.NewSession().catch(() => {});
+    try {
+      await app.NewSession();
+    } catch {
+      return; // backend refused (workspace starting / failed) — keep the transcript
+    }
+    if (tabId) dispatchTo(tabId, { type: "reset" });
+  }, [activeTabId, bumpCheckpointRefreshSeq, dispatchTo]);
+
+  const clearSession = useCallback(async () => {
+    const tabId = activeTabId;
+    if (tabId) bumpCheckpointRefreshSeq(tabId);
+    try {
+      await app.ClearSession();
+    } catch {
+      return;
+    }
     if (tabId) dispatchTo(tabId, { type: "reset" });
   }, [activeTabId, bumpCheckpointRefreshSeq, dispatchTo]);
 
@@ -671,8 +830,9 @@ export function useController() {
     const messages = asArray(
       await (tabId ? app.ResumeSessionForTab(tabId, path) : app.ResumeSession(path)).catch(() => [] as HistoryMessage[]),
     );
+    if (messages.length === 0) return;
     dispatchTo(targetTabId, { type: "reset" });
-    if (messages.length) dispatchTo(targetTabId, { type: "history", messages });
+    dispatchTo(targetTabId, { type: "history", messages });
     app.ContextUsageForTab(targetTabId).then((context) => dispatchTo(targetTabId, { type: "context", context })).catch(() => {});
     void refreshCheckpoints(targetTabId);
   }, [activeTabId, dispatchTo, refreshCheckpoints, waitForTabReady]);
@@ -750,6 +910,10 @@ export function useController() {
         const tab = await app.Fork(turn);
         if (tab?.id) {
           setActiveTabId(tab.id);
+          // The fork's controller builds in a background goroutine: an immediate
+          // load reads empty history, and the ready-event fallback can still
+          // target the source tab, leaving the fork blank (#3742).
+          await waitForTabReady(tab.id);
           await loadSessionDataForTab(tab.id, true);
         } else {
           await syncActiveTabFromBackend(true);
@@ -771,7 +935,7 @@ export function useController() {
     } finally {
       dispatchTo(sourceTabId, { type: "message_action_done" });
     }
-  }, [activeTabId, dispatchTo, loadSessionDataForTab, syncActiveTabFromBackend]);
+  }, [activeTabId, dispatchTo, loadSessionDataForTab, syncActiveTabFromBackend, waitForTabReady]);
 
   // Tab management: switch preserves per-tab state; open creates it.
   const switchTab = useCallback(async (tabId: string) => {
@@ -782,22 +946,27 @@ export function useController() {
     } catch { /* ignore */ }
   }, [reconcileTabRuntime]);
 
-  const openProjectTab = useCallback(async (workspaceRoot: string, topicId: string): Promise<TabMeta | undefined> => {
-    try {
-      const meta = await app.OpenProjectTab(workspaceRoot, topicId);
-      setActiveTabId(meta.id);
-      await loadSessionDataForTab(meta.id, !statesRef.current.has(meta.id));
-      return meta;
-    } catch { return undefined; }
+  const openProjectTab = useCallback(async (workspaceRoot: string, topicId: string): Promise<TabMeta> => {
+    const meta = await app.OpenProjectTab(workspaceRoot, topicId);
+    setActiveTabId(meta.id);
+    await loadSessionDataForTab(meta.id, !statesRef.current.has(meta.id));
+    return meta;
   }, [loadSessionDataForTab]);
 
-  const openGlobalTab = useCallback(async (topicId: string): Promise<TabMeta | undefined> => {
-    try {
-      const meta = await app.OpenGlobalTab(topicId);
-      setActiveTabId(meta.id);
-      await loadSessionDataForTab(meta.id, !statesRef.current.has(meta.id));
-      return meta;
-    } catch { return undefined; }
+  const openGlobalTab = useCallback(async (topicId: string): Promise<TabMeta> => {
+    const meta = await app.OpenGlobalTab(topicId);
+    setActiveTabId(meta.id);
+    await loadSessionDataForTab(meta.id, !statesRef.current.has(meta.id));
+    return meta;
+  }, [loadSessionDataForTab]);
+
+  // Ensure a blank tab exists for the given scope — reuses an existing one
+  // or creates a new tab, then loads its session data.
+  const ensureBlankTab = useCallback(async (scope: string, workspaceRoot: string): Promise<TabMeta> => {
+    const meta = await app.EnsureBlankTab(scope, workspaceRoot);
+    setActiveTabId(meta.id);
+    await loadSessionDataForTab(meta.id, !statesRef.current.has(meta.id));
+    return meta;
   }, [loadSessionDataForTab]);
 
   const closeTab = useCallback(async (tabId: string) => {
@@ -818,11 +987,11 @@ export function useController() {
   return {
     state: activeState,
     activeTabId,
-    send, runShell, notice, cancel, approve, answerQuestion, setControllerMode,
-    newSession, listSessions, listTrashedSessions, resumeSession, previewSession, deleteSession, restoreSession, purgeTrashedSession, renameSession,
+    send, runShell, steer, notice, cancel, approve, answerQuestion, setControllerMode, setCollaborationMode, setToolApprovalMode, setGoal, clearGoal,
+    newSession, clearSession, listSessions, listTrashedSessions, resumeSession, previewSession, deleteSession, restoreSession, purgeTrashedSession, renameSession,
     refreshMeta, pickWorkspace, switchWorkspace, compact, rewind, setModel, setEffort,
     fetchMemory, remember, forget, saveDoc,
-    switchTab, openProjectTab, openGlobalTab, closeTab, reorderTabs,
+    switchTab, openProjectTab, openGlobalTab, ensureBlankTab, closeTab, reorderTabs,
     syncActiveTab: syncActiveTabFromBackend,
   };
 }

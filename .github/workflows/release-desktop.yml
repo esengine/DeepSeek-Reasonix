@@ -42,9 +42,9 @@ jobs:
     name: cache hit guard
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
@@ -69,18 +69,18 @@ jobs:
       run:
         shell: bash # desktop-build.sh is bash; windows runners default to pwsh otherwise
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: desktop/go.mod
           cache: true
           cache-dependency-path: desktop/go.sum
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: "22"
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 10
 
@@ -91,6 +91,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc libgtk-3-dev libwebkit2gtk-4.1-dev
+
+      # Linux: nfpm builds the .deb in desktop-build.sh's linux branch. go install
+      # drops it in ~/go/bin, already on PATH (same place the wails CLI lands below).
+      - name: Install nfpm
+        if: runner.os == 'Linux'
+        run: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.46.3
 
       # Windows: NSIS provides makensis for `wails build -nsis`.
       - name: Install NSIS
@@ -103,6 +109,33 @@ jobs:
       - name: Install create-dmg
         if: runner.os == 'macOS'
         run: brew install create-dmg
+
+      # macOS signing: import the Developer ID cert into a throwaway keychain and
+      # stage the notarization key. No-ops (and the build ad-hoc signs) when the
+      # APPLE_* secrets aren't set, so forks still build.
+      - name: Import Apple signing certificate
+        if: runner.os == 'macOS'
+        env:
+          APPLE_CERT_P12: ${{ secrets.APPLE_CERT_P12 }}
+          APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          if [ -z "$APPLE_CERT_P12" ]; then
+            echo "APPLE_CERT_P12 unset — desktop build will ad-hoc sign (un-notarized)"
+            exit 0
+          fi
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASS="$(uuidgen)"
+          security create-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN"
+          echo "$APPLE_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$APPLE_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASS" "$KEYCHAIN" >/dev/null
+          # Prepend the signing keychain to the search list so codesign / find-identity see it.
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          echo "$APPLE_API_KEY_P8" | base64 --decode > "$RUNNER_TEMP/notary.p8"
+          rm -f "$RUNNER_TEMP/cert.p12"
 
       - name: Install Wails CLI
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
@@ -119,6 +152,14 @@ jobs:
           RUN_NUMBER: ${{ github.run_number }}
 
       - name: Build and package
+        env:
+          # macOS Developer ID + notarization path turns on only when all five
+          # APPLE_* secrets are present; otherwise desktop-build.sh ad-hoc signs.
+          # Harmless on Windows/Linux runners (only the darwin branch reads these).
+          HAS_APPLE_CERT: ${{ secrets.APPLE_CERT_P12 != '' && secrets.APPLE_CERT_PASSWORD != '' && secrets.APPLE_API_KEY_P8 != '' && secrets.APPLE_API_KEY_ID != '' && secrets.APPLE_API_ISSUER_ID != '' }}
+          APPLE_API_KEY_PATH: ${{ runner.temp }}/notary.p8
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
         run: scripts/desktop-build.sh "${{ matrix.platform }}" "${{ steps.ver.outputs.version }}" "${{ steps.ver.outputs.channel }}"
 
       - name: Sign artifacts (minisign)
@@ -128,7 +169,7 @@ jobs:
           MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
         run: go run ./cmd/sign sign ../dist/*
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dist-${{ matrix.name }}
           path: dist/*
@@ -142,15 +183,15 @@ jobs:
     # approve); canary uses the open `canary` environment so maintainers self-serve.
     environment: ${{ (github.event_name == 'workflow_dispatch' && inputs.channel == 'canary') && 'canary' || 'release' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: desktop/go.mod
           cache: true
           cache-dependency-path: desktop/go.sum
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           pattern: dist-*
@@ -187,7 +228,7 @@ jobs:
 
       - name: Upload canary dist for mirror
         if: steps.ver.outputs.channel == 'canary'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: canary-dist
           path: dist/*
@@ -197,12 +238,15 @@ jobs:
     name: mirror to R2
     needs: publish
     runs-on: ubuntu-latest
+    permissions:
+      contents: read # gh release download
+      actions: write # dispatch pages.yml to re-bake the site version
     # Skip cleanly when R2 isn't configured; GitHub release still works as fallback.
     if: ${{ github.repository_owner == 'esengine' }}
     env:
       HAS_R2: ${{ secrets.R2_ACCESS_KEY_ID != '' && secrets.R2_SECRET_ACCESS_KEY != '' && secrets.R2_ACCOUNT_ID != '' && secrets.R2_BUCKET != '' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Resolve version
         id: ver
@@ -219,7 +263,7 @@ jobs:
       # artifact. Stable pulls from the published release.
       - name: Download canary dist
         if: env.HAS_R2 == 'true' && steps.ver.outputs.channel == 'canary'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: canary-dist
           path: assets
@@ -237,7 +281,7 @@ jobs:
       - name: Rewrite latest.json URLs to R2
         if: env.HAS_R2 == 'true'
         env:
-          R2_PUBLIC_BASE: https://pub-147fb53b9c1e4bbf891a257968619ea7.r2.dev
+          R2_PUBLIC_BASE: https://dl.reasonix.io
           TAG: ${{ steps.ver.outputs.tag }}
         run: |
           f=assets/latest.json
@@ -275,3 +319,11 @@ jobs:
           else
             aws s3 cp assets/ "s3://${R2_BUCKET}/latest/" --recursive --endpoint-url "$ENDPOINT"
           fi
+
+      # Stable release moved R2 latest/ — rebuild the site so its build-time baked
+      # version + JSON-LD follow (site.js's runtime .rxv refresh can't touch first paint / SEO).
+      - name: Refresh site to the new version
+        if: env.HAS_R2 == 'true' && steps.ver.outputs.channel != 'canary' && steps.ver.outputs.prerelease != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run pages.yml --ref main-v2

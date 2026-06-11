@@ -1,6 +1,6 @@
-// Package netclient builds HTTP clients that share Reasonix's user-facing proxy
-// settings. It is intentionally not used by web_fetch, whose dial-time SSRF guard
-// has a different security boundary from ordinary provider/update traffic.
+// Package netclient builds HTTP clients and proxy resolvers that share Reasonix's
+// user-facing proxy settings. web_fetch reuses the resolver while keeping its own
+// dial-time SSRF guard.
 package netclient
 
 import (
@@ -69,6 +69,11 @@ func NormalizeMode(mode string) string {
 func Validate(spec ProxySpec) error {
 	_, err := proxyFunc(spec)
 	return err
+}
+
+// ProxyFunc returns the per-request proxy resolver for spec.
+func ProxyFunc(spec ProxySpec) (func(*http.Request) (*url.URL, error), error) {
+	return proxyFunc(spec)
 }
 
 // NewHTTPClient returns an HTTP client with Reasonix proxy settings applied.

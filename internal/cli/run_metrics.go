@@ -25,7 +25,6 @@ type RunMetrics struct {
 	ReadinessRecoveries           int     `json:"readiness_recoveries"`
 	ReadinessErrors               int     `json:"readiness_errors"`
 	ReadinessMissingProjectChecks int     `json:"readiness_missing_project_checks"`
-	ReadinessMissingCompleteSteps int     `json:"readiness_missing_complete_steps"`
 	ReadinessIncompleteTodos      int     `json:"readiness_incomplete_todos"`
 	ReadinessCommandMismatches    int     `json:"readiness_command_mismatches"`
 }
@@ -76,9 +75,6 @@ func (s *metricsSink) RecordReadinessAudit(a evidence.ReadinessAudit) {
 		s.m.ReadinessRecoveries++
 	}
 	s.m.ReadinessMissingProjectChecks += a.MissingProjectChecks
-	if a.MissingCompleteStep {
-		s.m.ReadinessMissingCompleteSteps++
-	}
 	s.m.ReadinessIncompleteTodos += a.IncompleteTodos
 	s.m.ReadinessCommandMismatches += a.CommandMismatchMissing
 }

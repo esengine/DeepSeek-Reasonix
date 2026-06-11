@@ -76,6 +76,9 @@ type Options struct {
 	// (for example ACP session/new). They are connected eagerly for this
 	// controller but are not persisted to reasonix.toml.
 	ExtraPlugins []plugin.Spec
+	// SessionDir overrides where persisted chat transcripts are written. When
+	// empty, the shared CLI/global session directory is used.
+	SessionDir string
 }
 
 // Build loads config, resolves the model(s), and returns a Controller wrapping a
@@ -87,12 +90,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	if stderr == nil {
 		stderr = os.Stderr
 	}
-	root := opts.WorkspaceRoot
-	if root == "" {
-		if wd, err := os.Getwd(); err == nil {
-			root = wd
-		}
-	}
+	root := resolveWorkspaceRoot(opts.WorkspaceRoot)
 	// One-time import of v1/v0.5 legacy config — runs before Load so the freshly
 	// written config + ~/.env are picked up this same boot. CLI Run also calls this
 	// before config-only commands; this call stays as the shared frontend fallback.
@@ -204,7 +202,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	}
 	searchSpec := builtin.ResolveSearch(cfg.Tools.Search.Engine, cfg.Tools.Search.RgPath, stderr)
 	bashTimeout := time.Duration(cfg.BashTimeoutSeconds()) * time.Second
-	addBuiltins(reg, cfg.Tools.Enabled, cfg.WriteRootsForRoot(root), bashSpec, bashTimeout, searchSpec, stderr, root)
+	addBuiltins(reg, cfg.Tools.Enabled, cfg.WriteRootsForRoot(root), bashSpec, bashTimeout, searchSpec, stderr, root, proxySpec)
 	// Always construct a host, even with no plugins configured, so the controller's
 	// host pointer is stable for the session and `/mcp add` can hot-add into it.
 	pluginHost := plugin.NewHost()
@@ -245,14 +243,14 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// tools come online next session — otherwise point the user at the explicit
 	// install command. A failed init or fetch is a notice, not fatal.
 	//
-	// CodeGraph follows the same user-selectable tier model as ordinary MCP
-	// servers when a tier is set. EnsureInit only creates .codegraph/ (fast,
-	// size-independent). With no explicit tier — an upgraded config that predates
-	// the setting — it keeps the historical startup: warm projects eager so
-	// symbol tools are ready on the first turn, cold projects in the background.
+	// CodeGraph is fixed to background startup. Legacy tier values are ignored so
+	// enabling it never blocks chat startup.
 	if cfg.Codegraph.Enabled {
 		bin, ok := codegraph.Resolve(cfg.Codegraph.Path)
 		switch {
+		case ok && !codegraph.IndexableRoot(root):
+			sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn,
+				Text: "codegraph: project root is a filesystem root — skipped to avoid indexing the whole volume"})
 		case ok:
 			spec := plugin.Spec{
 				Name:              "codegraph",
@@ -261,6 +259,9 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 				Args:              []string{"serve", "--mcp"},
 				Dir:               root,
 				ReadOnlyToolNames: codegraph.ReadOnlyToolNames(),
+				// The daemon walks and indexes the whole tree; below-normal
+				// priority keeps it from starving the user's machine (#3797).
+				LowPriority: true,
 			}
 			warm := codegraph.Initialized(root)
 			if err := codegraph.EnsureInit(ctx, bin, root); err != nil {
@@ -274,24 +275,8 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 						Text: "codegraph: preparing code-intelligence tools in the background — tools will appear when ready"})
 				}
 			}
-			if strings.TrimSpace(cfg.Codegraph.Tier) == "" {
-				if warm {
-					eagerSpecs = append(eagerSpecs, spec)
-				} else {
-					bgSpecs = append(bgSpecs, spec)
-					bgNotice()
-				}
-				break
-			}
-			switch cfg.Codegraph.ResolvedTier() {
-			case "eager":
-				eagerSpecs = append(eagerSpecs, spec)
-			case "background":
-				bgSpecs = append(bgSpecs, spec)
-				bgNotice()
-			default:
-				lazySpecs = append(lazySpecs, spec)
-			}
+			bgSpecs = append(bgSpecs, spec)
+			bgNotice()
 		case cfg.Codegraph.AutoInstall:
 			notify := func(msg string) { sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: msg}) }
 			notify("codegraph: fetching code-intelligence runtime in the background (one-time) — symbol-graph tools available next session")
@@ -399,6 +384,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	if opts.MaxSteps > 0 {
 		maxSteps = opts.MaxSteps
 	}
+	subagentStore := newSubagentStore(config.SessionDir())
 
 	// Permission policy gates every tool call. The headless gate (no Approver)
 	// resolves "ask" to allow — preserving `reasonix run` autonomy — while deny
@@ -455,12 +441,17 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		}
 		return p, me.Price, me.ContextWindow, nil
 	}
+	subagentIdentity := func(modelRef, effort string) (string, string) {
+		return subagentEffectiveIdentity(cfg, modelName, entry, modelRef, effort)
+	}
 	taskModel := firstNonEmpty(cfg.Agent.SubagentModels["task"], cfg.Agent.SubagentModel)
 	taskEffort := firstNonEmpty(cfg.Agent.SubagentEfforts["task"], cfg.Agent.SubagentEffort)
 	reg.Add(agent.NewTaskTool(execProv, entry.Price, reg, maxSteps,
 		entry.ContextWindow, cfg.Agent.SoftCompactRatio, cfg.Agent.CompactRatio, cfg.Agent.CompactForceRatio,
 		cfg.Agent.Temperature, config.ArchiveDir(), "", headlessGate,
-		taskModel, taskEffort, resolveSubagentProvider))
+		taskModel, taskEffort, resolveSubagentProvider).
+		WithTranscripts(subagentStore, root, modelName, entry.Effort).
+		WithTranscriptIdentityResolver(subagentIdentity))
 
 	// The `remember` tool lets the model persist durable facts to the project's
 	// auto-memory store; `forget` prunes ones that turn out wrong. The saved index
@@ -480,7 +471,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// as system prompt, a tool set scoped to the skill's allowed-tools (minus the
 	// task/skill meta-tools, to bar recursion), and an optional per-skill model.
 	// Its tool activity nests under the invoking call, like `task`.
-	skillRunner := func(sctx context.Context, sk skill.Skill, task string) (string, error) {
+	skillRunner := func(sctx context.Context, sk skill.Skill, task string, runOpts skill.SubagentRunOptions) (string, error) {
 		prov, price, ctxWin := execProv, entry.Price, entry.ContextWindow
 		modelRef := subagentModelRef(cfg, sk)
 		effortRef := subagentEffortRef(cfg, sk)
@@ -492,13 +483,56 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			prov, price, ctxWin = p, pr, cw
 		}
 		subReg := agent.FilterRegistry(reg, sk.AllowedTools, agent.SubagentMetaTools()...)
+		continueFrom, forkFrom := strings.TrimSpace(runOpts.ContinueFrom), strings.TrimSpace(runOpts.ForkFrom)
+		if continueFrom != "" && forkFrom != "" {
+			return "", fmt.Errorf("continue_from and fork_from are mutually exclusive")
+		}
+		parentID, _, _, _ := agent.CallContext(sctx)
+		parentSession := agent.ParentSession(sctx)
+		var run *agent.SubagentRun
+		if subagentStore == nil || parentSession == "" {
+			// Headless runs (e.g. `reasonix run`) have no persistent session to
+			// own a transcript. Run the skill sub-agent ephemerally, as before
+			// persisted transcripts existed, instead of failing. Continuation and
+			// fork need a persisted owner, so they error here.
+			if continueFrom != "" || forkFrom != "" {
+				return "", fmt.Errorf("continue_from/fork_from require a persisted session; none is active in this run")
+			}
+			run = agent.EphemeralSubagentRun(sk.Body)
+		} else {
+			identityModel, identityEffort := subagentIdentity(modelRef, effortRef)
+			spec := agent.SubagentSpec{
+				Kind:             "skill",
+				Name:             sk.Name,
+				WorkspaceRoot:    root,
+				ParentSession:    parentSession,
+				ParentToolCallID: parentID,
+				SystemPrompt:     sk.Body,
+				Registry:         subReg,
+				Model:            identityModel,
+				Effort:           identityEffort,
+			}
+			var prepErr error
+			switch {
+			case continueFrom != "":
+				run, prepErr = subagentStore.PrepareContinue(continueFrom, spec)
+			case forkFrom != "":
+				run, prepErr = subagentStore.PrepareFork(forkFrom, spec)
+			default:
+				run, prepErr = subagentStore.PrepareFresh(spec)
+			}
+			if prepErr != nil {
+				return "", prepErr
+			}
+		}
+		defer run.Release()
 		steps := maxSteps
 		if steps > 0 {
 			if steps /= 2; steps < 5 {
 				steps = 5
 			}
 		}
-		return agent.RunSubAgent(sctx, prov, subReg, sk.Body, task, agent.Options{
+		answer, err := agent.RunSubAgentWithSession(sctx, prov, subReg, run.Session, task, agent.Options{
 			MaxSteps:      steps,
 			Temperature:   cfg.Agent.Temperature,
 			Pricing:       price,
@@ -506,6 +540,13 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			ContextWindow: ctxWin,
 			ArchiveDir:    config.ArchiveDir(),
 		}, agent.NestedSink(sctx, event.Discard))
+		if err != nil {
+			return "", errors.Join(err, subagentStore.SaveFailed(run))
+		}
+		if err := subagentStore.SaveCompleted(run); err != nil {
+			return "", errors.Join(err, subagentStore.SaveFailed(run))
+		}
+		return agent.FormatSubagentResult(answer, run.Ref, false), nil
 	}
 	skillProfile := func(sk skill.Skill) *event.Profile {
 		model, effort := subagentModelRef(cfg, sk), subagentEffortRef(cfg, sk)
@@ -515,6 +556,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		return &event.Profile{Model: model, Effort: effort}
 	}
 	reg.Add(skill.NewRunSkillTool(skillStore, skillRunner, skillProfile))
+	reg.Add(skill.NewReadSkillTool(skillStore))
 	reg.Add(skill.NewInstallSkillTool(skillStore, nil))
 	reg.Add(installsource.NewTool(installsource.Options{
 		ProjectRoot: root,
@@ -655,6 +697,11 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		classifier = control.NewProviderAutoPlanClassifier(classifierProv)
 	}
 
+	sessionDir := opts.SessionDir
+	if sessionDir == "" {
+		sessionDir = config.SessionDir()
+	}
+
 	ctrlOpts := control.Options{
 		Runner:        runner,
 		Executor:      executor,
@@ -662,7 +709,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		Policy:        policy,
 		Label:         label,
 		SystemPrompt:  sysPrompt,
-		SessionDir:    config.SessionDir(),
+		SessionDir:    sessionDir,
 		Host:          pluginHost,
 		Commands:      cmds,
 		Skills:        skills,
@@ -680,8 +727,8 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		PluginCtx:     ctx,
 		WorkspaceRoot: root,
 		AutoPlan:      cfg.Agent.AutoPlan,
-		OnRemember: func(rule string) {
-			rememberPermissionRule(opts.WorkspaceRoot, rule)
+		OnRemember: func(rule string) control.RememberResult {
+			return rememberPermissionRule(root, rule)
 		},
 	}
 	if classifier != nil {
@@ -698,7 +745,7 @@ func migrateLegacySessionSources(sink event.Sink) {
 	type legacySource struct {
 		dir     string
 		label   string
-		migrate func(srcDir, destDir string) (int, error)
+		migrate func(srcDir, globalDest string, projectDir func(string) string) (int, error)
 	}
 	var sources []legacySource
 	if home, herr := os.UserHomeDir(); herr == nil {
@@ -727,22 +774,33 @@ func migrateLegacySessionSources(sink event.Sink) {
 			continue
 		}
 		seen[key] = true
-		if n, serr := src.migrate(src.dir, dest); serr == nil && n > 0 {
+		if n, serr := src.migrate(src.dir, dest, config.ProjectSessionDir); serr == nil && n > 0 {
 			sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: fmt.Sprintf("imported %d past session(s) from %s — resume them with --resume or the history panel", n, src.label)})
 		}
 	}
 }
 
-func rememberPermissionRule(workspaceRoot, rule string) {
+func rememberPermissionRule(workspaceRoot, rule string) control.RememberResult {
 	path := rememberPermissionConfigPath(workspaceRoot)
 	edit := config.LoadForEdit(path)
+	result := control.RememberResult{Rule: strings.TrimSpace(rule), Path: path}
+	if coveredBy := coveredPermissionRule(edit.Permissions.Allow, result.Rule); coveredBy != "" {
+		result.CoveredBy = coveredBy
+		return result
+	}
+	edit.Permissions.Allow = pruneCoveredPermissionRules(edit.Permissions.Allow, result.Rule)
 	if err := edit.AddPermissionRule("allow", rule); err != nil {
 		slog.Warn("persist permission rule", "rule", rule, "err", err)
-		return
+		result.Err = err
+		return result
 	}
 	if err := edit.SaveTo(path); err != nil {
 		slog.Warn("save config after permission rule", "err", err)
+		result.Err = err
+		return result
 	}
+	result.Saved = true
+	return result
 }
 
 func rememberPermissionConfigPath(workspaceRoot string) string {
@@ -755,6 +813,26 @@ func rememberPermissionConfigPath(workspaceRoot string) string {
 		path = "reasonix.toml" // match Config.Save() fallback
 	}
 	return path
+}
+
+func coveredPermissionRule(rules []string, rule string) string {
+	for _, existing := range rules {
+		if permission.RuleCoversString(existing, rule) {
+			return strings.TrimSpace(existing)
+		}
+	}
+	return ""
+}
+
+func pruneCoveredPermissionRules(rules []string, rule string) []string {
+	out := rules[:0]
+	for _, existing := range rules {
+		if strings.TrimSpace(existing) == "" || permission.RuleCoversString(rule, existing) {
+			continue
+		}
+		out = append(out, existing)
+	}
+	return out
 }
 
 func firstNonEmpty(vals ...string) string {
@@ -827,6 +905,87 @@ func subagentModelKeys(name string) []string {
 	return keys
 }
 
+func resolveWorkspaceRoot(explicit string) string {
+	if explicit != "" {
+		return explicit
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	if root, ok := nearestGitRoot(wd); ok {
+		return root
+	}
+	return wd
+}
+
+func nearestGitRoot(start string) (string, bool) {
+	dir, err := filepath.Abs(start)
+	if err != nil {
+		dir = filepath.Clean(start)
+	}
+	for {
+		if isGitMarker(filepath.Join(dir, ".git")) {
+			return dir, true
+		}
+		next := filepath.Dir(dir)
+		if next == dir {
+			return "", false
+		}
+		dir = next
+	}
+}
+
+func isGitMarker(path string) bool {
+	fi, err := os.Stat(path)
+	return err == nil && (fi.IsDir() || fi.Mode().IsRegular())
+}
+
+func newSubagentStore(sessionDir string) *agent.SubagentStore {
+	sessionDir = strings.TrimSpace(sessionDir)
+	if sessionDir == "" {
+		return nil
+	}
+	return agent.NewSubagentStore(filepath.Join(sessionDir, "subagents"))
+}
+
+func subagentEffectiveIdentity(cfg *config.Config, baseModelRef string, base *config.ProviderEntry, modelRef, effort string) (string, string) {
+	var entry config.ProviderEntry
+	if base != nil {
+		entry = *base
+	}
+	ref := strings.TrimSpace(modelRef)
+	if ref == "" {
+		ref = strings.TrimSpace(baseModelRef)
+	}
+	if cfg != nil && ref != "" {
+		if resolved, ok := cfg.ResolveModel(ref); ok {
+			entry = *resolved
+		} else if strings.TrimSpace(modelRef) != "" {
+			entry.Model = ref
+		}
+	} else if strings.TrimSpace(modelRef) != "" {
+		entry.Model = strings.TrimSpace(modelRef)
+	}
+	if rawEffort := strings.TrimSpace(effort); rawEffort != "" {
+		if normalized, err := config.NormalizeEffort(&entry, rawEffort); err == nil {
+			entry.Effort = normalized
+		} else {
+			entry.Effort = rawEffort
+		}
+	}
+	modelID := strings.TrimSpace(entry.Name)
+	model := strings.TrimSpace(entry.Model)
+	if modelID != "" && model != "" {
+		modelID += "/" + model
+	} else if model != "" {
+		modelID = model
+	} else if modelID == "" {
+		modelID = ref
+	}
+	return modelID, strings.TrimSpace(config.EffectiveEffort(&entry))
+}
+
 // NewProvider builds a provider.Provider from a configured entry. Exported so
 // custom assemblers (e.g. the ACP per-session factory) can reuse it without
 // going through the full Build.
@@ -861,12 +1020,12 @@ func NewProviderWithProxy(e *config.ProviderEntry, proxy netclient.ProxySpec) (p
 // instance bound to writeRoots (preserving registry order).
 // When workDir is non-empty, tools resolve relative paths against it instead of
 // the process cwd, enabling concurrent multi-project sessions.
-func addBuiltins(reg *tool.Registry, enabled, writeRoots []string, bashSpec sandbox.Spec, bashTimeout time.Duration, searchSpec builtin.SearchSpec, stderr io.Writer, workDir string) {
+func addBuiltins(reg *tool.Registry, enabled, writeRoots []string, bashSpec sandbox.Spec, bashTimeout time.Duration, searchSpec builtin.SearchSpec, stderr io.Writer, workDir string, proxySpec netclient.ProxySpec) {
 	// If a workspace directory is set, use workspace-bound tools that resolve
 	// paths relative to that directory. Otherwise fall back to the process-cwd
 	// compile-time builtins.
 	if workDir != "" {
-		ws := builtin.Workspace{Dir: workDir, WriteRoots: writeRoots, Bash: bashSpec, BashTimeout: bashTimeout, Search: searchSpec}
+		ws := builtin.Workspace{Dir: workDir, WriteRoots: writeRoots, Bash: bashSpec, BashTimeout: bashTimeout, Search: searchSpec, ProxySpec: proxySpec}
 		for _, t := range ws.Tools(enabled...) {
 			reg.Add(t)
 		}
@@ -888,8 +1047,8 @@ func addBuiltins(reg *tool.Registry, enabled, writeRoots []string, bashSpec sand
 	}
 	// Replace the unconfined defaults with confined instances (registry order is
 	// preserved on replace): file-writers bound to the workspace, bash to the OS
-	// sandbox. Only replace tools actually enabled/present.
-	confined := append(builtin.ConfineWriters(writeRoots), builtin.ConfineBash(bashSpec, bashTimeout), builtin.ConfineSearch(searchSpec))
+	// sandbox, web_fetch to the proxy. Only replace tools actually enabled/present.
+	confined := append(builtin.ConfineWriters(writeRoots), builtin.ConfineBash(bashSpec, bashTimeout), builtin.ConfineSearch(searchSpec), builtin.ConfineWebFetch(proxySpec))
 	for _, t := range confined {
 		if _, ok := reg.Get(t.Name()); ok {
 			reg.Add(t)

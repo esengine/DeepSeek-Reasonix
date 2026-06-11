@@ -68,6 +68,45 @@ func TestResolveModelWithFallbackSkipsKeylessProvider(t *testing.T) {
 	}
 }
 
+// TestResolveModelWithFallbackHonorsDefaultModel verifies that when the ref is
+// stale or empty, the function tries c.DefaultModel before iterating providers
+// in order. Without this, the first provider (deepseek, by default) always wins
+// even when the user has configured a different default_model (#3801).
+func TestResolveModelWithFallbackHonorsDefaultModel(t *testing.T) {
+	c := testModelFallbackConfig(t)
+	// Set DefaultModel to prov-b (not the first provider). An empty/stale ref
+	// should fall back to prov-b, not prov-a.
+	c.DefaultModel = "prov-b"
+
+	// Empty ref → must use DefaultModel = prov-b
+	got, fallback, ok := c.ResolveModelWithFallback("")
+	if !ok || !fallback {
+		t.Fatalf("ResolveModelWithFallback(\"\") = (%q, %v, %v), want fallback to prov-b", got, fallback, ok)
+	}
+	if got != "prov-b/model-b1" {
+		t.Errorf("empty ref fallback = %q, want prov-b/model-b1 (DefaultModel)", got)
+	}
+
+	// Stale ref → same: must use DefaultModel
+	got, fallback, ok = c.ResolveModelWithFallback("deleted/model")
+	if !ok || !fallback {
+		t.Fatalf("ResolveModelWithFallback(\"deleted/model\") = (%q, %v, %v), want fallback", got, fallback, ok)
+	}
+	if got != "prov-b/model-b1" {
+		t.Errorf("stale ref fallback = %q, want prov-b/model-b1 (DefaultModel)", got)
+	}
+
+	// DefaultModel pointing to a keyless provider must be skipped
+	c.Providers[1].APIKeyEnv = "REASONIX_TEST_EMPTY" // prov-b, the DefaultModel
+	got, fallback, ok = c.ResolveModelWithFallback("stale/ref")
+	if !ok || !fallback {
+		t.Fatalf("keyless DefaultModel fallback = (%q, %v, %v), want next configured", got, fallback, ok)
+	}
+	if got != "prov-a/model-a1" {
+		t.Errorf("keyless DefaultModel fallback = %q, want prov-a/model-a1 (only configured left)", got)
+	}
+}
+
 func TestModelRefsProvider(t *testing.T) {
 	if !ModelRefsProvider("deepseek-flash", "deepseek-flash") {
 		t.Fatal("bare provider ref should match provider")

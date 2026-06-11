@@ -216,18 +216,34 @@ type Policy struct { Mode Decision; Allow, Ask, Deny []Rule }
 func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Decision
 ```
 
-- **Rule syntax.** A rule is `ToolName` (matches any call to that tool) or
-  `ToolName(glob)` (matches when the call's *subject* matches the glob, via
-  `path.Match`). The subject is extracted generically from the call's JSON args
-  by a small set of known keys — `command` (bash), `path` / `file_path`
-  (file tools), `pattern` (grep/glob) — so tools need not change. A rule whose
-  subject the args don't expose only matches in its bare `ToolName` form.
+- **Rule syntax.** A rule is `Tool` (matches any call in that tool family) or
+  `Tool(specifier)` (matches when the call's *subject* matches the specifier).
+  Bash and file mutation approvals use Claude Code-style families such as
+  `Bash(npm run build)`, `Bash(npm run test:*)`, and `Edit(docs/**)`. Legacy
+  lowercase tool IDs and `tool=literal` rules still load for compatibility. The
+  `:*` suffix marks a Bash command-prefix approval; generated prefix rules also
+  reject later commands that introduce shell operators, so `Bash(go test:*)`
+  does not cover `go test ./... && rm -rf tmp`.
+  Legacy `Bash(go test *)` prefix rules still load, but new rules are saved as
+  `Bash(go test:*)`. The subject is extracted generically from the call's JSON
+  args by a small set of
+  known keys — `command` (bash), `path` / `file_path` (file tools), `pattern`
+  (grep/glob) — so tools need not change. A rule whose subject the args don't
+  expose only matches in its bare `Tool` form.
 - **Precedence.** `deny` > `ask` > `allow` > fallback. Fallback is `Allow` for
   read-only tools and `Mode` (default `Ask`) for writers. `deny` always wins, so
-  a broad `allow = ["bash"]` can still be carved by `deny = ["bash(rm -rf*)"]`;
+  a broad `allow = ["Bash"]` can still be carved by `deny = ["Bash(rm -rf*)"]`;
   conversely `ask` overrides a broad `allow` to force a prompt on a risky subset.
 - **Resolving `Ask`.** The interactive front-end (the chat TUI) prompts the user
-  — allow once / always allow / deny — via an `Approver`. A non-interactive run
+  — allow once / allow this approval scope for the session / always allow this
+  approval scope / deny — via an `Approver`. For Bash, the default scope is the
+  concrete command subject, and the user may choose a conservative command-prefix
+  scope when available (for example `Bash(go test:*)`) so similar invocations in
+  the same session or saved config do not prompt again. For file-mutation tools,
+  a session grant covers editing for the rest of the session while a persisted
+  grant is path-scoped when a path is available, stored as `Edit(<path>)` so all
+  built-in file-mutating tools share it. A
+  non-interactive run
   (`reasonix run`, a sub-agent, anything with no TTY / no approver) cannot prompt, so
   it resolves `Ask` to **allow** — preserving autonomous behaviour. A `Deny` is a
   hard block in *every* mode: the tool never executes and the model receives a
@@ -235,6 +251,40 @@ func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Dec
 - **Relationship to plan mode.** Plan mode (§3.4) is an orthogonal, coarser gate
   that refuses *all* writers regardless of policy; it is checked first. The
   permission layer is the fine-grained, always-on gate underneath it.
+- **User decisions are separate from tool approvals.** Runtime tool approval has
+  three user-facing postures: `ask` ("需要批准"), `auto` ("自动批准"), and
+  `yolo` ("Yolo批准"). `auto` lets the permission policy auto-approve the writer
+  fallback while preserving explicit ask/deny rules; `yolo` skips all tool
+  permission approvals for approval-gated tools such as writers and Bash.
+  Neither posture answers `ask` questions or approves `exit_plan_mode` plans for
+  the user.
+  Auto-plan is also a separate feature flag: when enabled, a complex task may
+  still enter plan mode in any tool approval posture. After a user approves a
+  plan, the controller opens a short `approvedPlanAutoApproveTools` execution
+  window so the model can perform the approved writes without re-prompting; that
+  transient window still does not auto-approve future plans. In headless `ask`
+  execution, any fallback answer is labelled as a model assumption, not as a
+  user decision.
+
+- **Collaboration mode is separate from tool approval.** The desktop composer
+  presents collaboration as `normal` ("正常模式"), `plan` ("计划模式"), and
+  `goal` ("目标模式"). `/goal <objective>` starts an autonomous, session-scoped
+  active goal: the controller prepends goal context to user turns outside the
+  cache-stable system prompt and keeps issuing continuation turns until the
+  model reports completion, repeats the same blocked state three times, the user
+  stops it, or the safety continuation limit is reached. Blocked-state matching
+  is normalized for casing, whitespace, and punctuation so minor wording drift
+  does not reset the audit; restarting a goal begins a fresh blocked audit.
+  `/goal clear` removes it. Switching into plan/normal mode clears the active
+  goal in the desktop UI so the collaboration mode remains one of the three
+  choices, while the underlying tool approval posture is preserved.
+
+| Tool approval posture | Tool approvals | Plan approval | `ask` questions |
+| --- | --- | --- | --- |
+| Need approval / `ask` | Follow permission policy (`Ask` prompts interactively) | Waits for user | Waits for user |
+| Auto approve / `auto` | Writer fallback auto-allowed; explicit ask/deny rules still apply | Waits for user | Waits for user |
+| YOLO approval / `yolo` | Approval prompts auto-allowed unless denied | Waits for user | Waits for user |
+| Approved-plan execution window | Approved plan's tool calls auto-allowed unless denied | Future plans still wait | Waits for user |
 
 Out of the box (`mode = "ask"`, no rules) `reasonix run` behaves exactly as before
 (writers resolve `Ask`→allow with no TTY), while `reasonix chat` now prompts before
@@ -244,8 +294,11 @@ each writer/bash call. `deny` rules harden both modes.
 
 The chat TUI accepts `/command` input. Three kinds share one dispatch:
 
-- **Built-in actions** (`/compact`, `/new`, `/effort`, `/mcp`, `/help`) manipulate session
-  state locally and never reach the model.
+- **Built-in actions** (`/compact`, `/new`, `/clear`, `/effort`, `/mcp`, `/help`) manipulate session
+  state locally and never reach the model. `/new` starts a new session while
+  saving the previous transcript for resume/history. `/clear` requires
+  confirmation, then discards the current context without saving it; it does not
+  delete project memory.
 - **Custom commands** are Markdown files under `.reasonix/commands/` (project) and
   `~/.config/reasonix/commands/` (user); the project dir overrides the user dir on a
   name clash. A file `review.md` becomes `/review`; a subdirectory namespaces it
@@ -376,15 +429,15 @@ context_window = 1000000   # tokens; harness compacts older history near this li
 [[providers]]
 name        = "mimo-pro"
 kind        = "openai"
-base_url    = "https://api.xiaomimimo.com/v1"
+base_url    = "https://token-plan-cn.xiaomimimo.com/v1"
 model       = "mimo-v2.5-pro"
 api_key_env = "MIMO_API_KEY"
 
 [[providers]]
 name        = "mimo-flash"
 kind        = "openai"
-base_url    = "https://api.xiaomimimo.com/v1"
-model       = "mimo-v2-flash"
+base_url    = "https://token-plan-cn.xiaomimimo.com/v1"
+model       = "mimo-v2.5"
 api_key_env = "MIMO_API_KEY"
 
 [tools]
@@ -398,8 +451,8 @@ bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local ca
 
 [permissions]
 mode  = "ask"                              # writer fallback when no rule matches: ask|allow|deny
-deny  = ["bash(rm -rf*)", "bash(git push*)"]   # hard-blocked in every mode
-allow = ["bash(go test*)", "bash(git status*)"]  # never prompted
+deny  = ["Bash(rm -rf*)", "Bash(git push*)"]   # hard-blocked in every mode
+allow = ["Bash(go test:*)", "Bash(git status:*)"]  # never prompted
 ask   = []                                 # force a prompt even if otherwise allowed
 
 [sandbox]

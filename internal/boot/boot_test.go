@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -13,11 +14,14 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"reasonix/internal/agent"
 	"reasonix/internal/config"
 	"reasonix/internal/event"
+	"reasonix/internal/netclient"
 	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
 	"reasonix/internal/sandbox"
@@ -78,6 +82,288 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 	if mem := ctrl.Memory(); mem == nil || len(mem.Docs) == 0 {
 		t.Fatal("controller memory set is empty after discovering REASONIX.md")
 	}
+}
+
+func TestBuildSubagentSkillFailedContinuationPersistsTranscript(t *testing.T) {
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+
+	registerBootSubagentTestProvider()
+	prov := &bootSubagentTestProvider{}
+	setBootSubagentTestProvider(t, prov)
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "test-model"
+
+[codegraph]
+enabled = false
+
+[agent]
+system_prompt = "BASE"
+
+[[providers]]
+name = "test-model"
+kind = "boot-subagent-test"
+model = "x"
+`)
+
+	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer ctrl.Close()
+	sessionPath := agent.NewSessionPath(ctrl.SessionDir(), ctrl.Label())
+	ctrl.SetSessionPath(sessionPath)
+
+	if err := ctrl.Run(context.Background(), "first review"); err != nil {
+		t.Fatalf("first Run: %v", err)
+	}
+	ref := subagentRefFromHistory(t, ctrl.History())
+	prov.setContinueRef(ref)
+
+	if err := ctrl.Run(context.Background(), "continue review"); err != nil {
+		t.Fatalf("second Run: %v", err)
+	}
+	store := agent.NewSubagentStore(filepath.Join(config.SessionDir(), "subagents"))
+	meta, err := store.LoadMeta(ref)
+	if err != nil {
+		t.Fatalf("LoadMeta: %v", err)
+	}
+	if meta.Status != agent.SubagentFailed {
+		t.Fatalf("status = %q, want failed", meta.Status)
+	}
+	if meta.ParentSession != agent.BranchID(sessionPath) {
+		t.Fatalf("parent session = %q, want %q", meta.ParentSession, agent.BranchID(sessionPath))
+	}
+	sess, err := agent.LoadSession(filepath.Join(config.SessionDir(), "subagents", ref+".jsonl"))
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	msgs := sess.Snapshot()
+	if len(msgs) != 4 || msgs[1].Content != "first skill task" || msgs[2].Content != "first skill answer" || msgs[3].Content != "second skill task" {
+		t.Fatalf("failed skill transcript = %+v, want first task/answer plus second task", msgs)
+	}
+}
+
+const bootSubagentTestProviderKind = "boot-subagent-test"
+
+var (
+	bootSubagentTestProviderOnce    sync.Once
+	bootSubagentTestProviderCurrent *bootSubagentTestProvider
+	bootSubagentTestProviderMu      sync.Mutex
+)
+
+func registerBootSubagentTestProvider() {
+	bootSubagentTestProviderOnce.Do(func() {
+		provider.Register(bootSubagentTestProviderKind, func(provider.Config) (provider.Provider, error) {
+			bootSubagentTestProviderMu.Lock()
+			defer bootSubagentTestProviderMu.Unlock()
+			if bootSubagentTestProviderCurrent == nil {
+				return nil, errors.New("boot subagent test provider is not installed")
+			}
+			return bootSubagentTestProviderCurrent, nil
+		})
+	})
+}
+
+func setBootSubagentTestProvider(t *testing.T, p *bootSubagentTestProvider) {
+	t.Helper()
+	bootSubagentTestProviderMu.Lock()
+	bootSubagentTestProviderCurrent = p
+	bootSubagentTestProviderMu.Unlock()
+	t.Cleanup(func() {
+		bootSubagentTestProviderMu.Lock()
+		if bootSubagentTestProviderCurrent == p {
+			bootSubagentTestProviderCurrent = nil
+		}
+		bootSubagentTestProviderMu.Unlock()
+	})
+}
+
+type bootSubagentTestProvider struct {
+	mu          sync.Mutex
+	calls       int
+	continueRef string
+}
+
+func (p *bootSubagentTestProvider) Name() string { return "boot-subagent-test" }
+
+func (p *bootSubagentTestProvider) setContinueRef(ref string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.continueRef = ref
+}
+
+func (p *bootSubagentTestProvider) Stream(context.Context, provider.Request) (<-chan provider.Chunk, error) {
+	p.mu.Lock()
+	call := p.calls
+	p.calls++
+	ref := p.continueRef
+	p.mu.Unlock()
+
+	var chunks []provider.Chunk
+	switch call {
+	case 0:
+		chunks = []provider.Chunk{{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "review-1", Name: "review", Arguments: `{"task":"first skill task"}`}}}
+	case 1:
+		chunks = []provider.Chunk{{Type: provider.ChunkText, Text: "first skill answer"}, {Type: provider.ChunkDone}}
+	case 2:
+		chunks = []provider.Chunk{{Type: provider.ChunkText, Text: "parent first done"}, {Type: provider.ChunkDone}}
+	case 3:
+		args, _ := json.Marshal(map[string]string{"task": "second skill task", "continue_from": ref})
+		chunks = []provider.Chunk{{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "review-2", Name: "review", Arguments: string(args)}}}
+	case 4:
+		chunks = []provider.Chunk{{Type: provider.ChunkError, Err: errors.New("subagent skill failed")}}
+	case 5:
+		chunks = []provider.Chunk{{Type: provider.ChunkText, Text: "parent second done"}, {Type: provider.ChunkDone}}
+	default:
+		chunks = []provider.Chunk{{Type: provider.ChunkError, Err: fmt.Errorf("unexpected provider call %d", call)}}
+	}
+	ch := make(chan provider.Chunk, len(chunks))
+	for _, chunk := range chunks {
+		ch <- chunk
+	}
+	close(ch)
+	return ch, nil
+}
+
+func subagentRefFromHistory(t *testing.T, msgs []provider.Message) string {
+	t.Helper()
+	for _, msg := range msgs {
+		if msg.Role != provider.RoleTool {
+			continue
+		}
+		for _, line := range strings.Split(msg.Content, "\n") {
+			if strings.HasPrefix(line, "Subagent reference: ") {
+				return strings.TrimSpace(strings.TrimPrefix(line, "Subagent reference: "))
+			}
+		}
+	}
+	t.Fatalf("no subagent reference in history: %+v", msgs)
+	return ""
+}
+
+// TestBuildHeadlessRunRunsTaskSubagentWithoutSessionPath reproduces headless
+// `reasonix run`: a controller built via Build with NO SetSessionPath (exactly
+// what internal/cli.runAgent does) must still be able to run a `task` sub-agent.
+// Before the ephemeral fallback this failed with "parent session is required".
+func TestBuildHeadlessRunRunsTaskSubagentWithoutSessionPath(t *testing.T) {
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+
+	registerHeadlessTaskTestProvider()
+	prov := &headlessTaskTestProvider{}
+	setHeadlessTaskTestProvider(t, prov)
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "test-model"
+
+[codegraph]
+enabled = false
+
+[agent]
+system_prompt = "BASE"
+
+[[providers]]
+name = "test-model"
+kind = "boot-headless-test"
+model = "x"
+`)
+
+	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer ctrl.Close()
+
+	// Deliberately NOT calling SetSessionPath — this is the headless run path.
+	if err := ctrl.Run(context.Background(), "use a task subagent"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := ctrl.SessionPath(); got != "" {
+		t.Fatalf("headless run should keep an empty session path, got %q", got)
+	}
+
+	var toolContent string
+	for _, msg := range ctrl.History() {
+		if msg.Role == provider.RoleTool {
+			toolContent += "\n" + msg.Content
+		}
+	}
+	if strings.Contains(toolContent, "parent session is required") {
+		t.Fatalf("task subagent failed in headless run mode: %s", toolContent)
+	}
+	if !strings.Contains(toolContent, "subagent answer") {
+		t.Fatalf("task tool result = %q, want sub-agent answer", toolContent)
+	}
+	if strings.Contains(toolContent, "Subagent reference") {
+		t.Fatalf("ephemeral headless run should not persist a transcript reference: %s", toolContent)
+	}
+}
+
+const headlessTaskTestProviderKind = "boot-headless-test"
+
+var (
+	headlessTaskTestProviderOnce    sync.Once
+	headlessTaskTestProviderCurrent *headlessTaskTestProvider
+	headlessTaskTestProviderMu      sync.Mutex
+)
+
+func registerHeadlessTaskTestProvider() {
+	headlessTaskTestProviderOnce.Do(func() {
+		provider.Register(headlessTaskTestProviderKind, func(provider.Config) (provider.Provider, error) {
+			headlessTaskTestProviderMu.Lock()
+			defer headlessTaskTestProviderMu.Unlock()
+			if headlessTaskTestProviderCurrent == nil {
+				return nil, errors.New("headless task test provider is not installed")
+			}
+			return headlessTaskTestProviderCurrent, nil
+		})
+	})
+}
+
+func setHeadlessTaskTestProvider(t *testing.T, p *headlessTaskTestProvider) {
+	t.Helper()
+	headlessTaskTestProviderMu.Lock()
+	headlessTaskTestProviderCurrent = p
+	headlessTaskTestProviderMu.Unlock()
+	t.Cleanup(func() {
+		headlessTaskTestProviderMu.Lock()
+		if headlessTaskTestProviderCurrent == p {
+			headlessTaskTestProviderCurrent = nil
+		}
+		headlessTaskTestProviderMu.Unlock()
+	})
+}
+
+type headlessTaskTestProvider struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (p *headlessTaskTestProvider) Name() string { return "boot-headless-test" }
+
+func (p *headlessTaskTestProvider) Stream(context.Context, provider.Request) (<-chan provider.Chunk, error) {
+	p.mu.Lock()
+	call := p.calls
+	p.calls++
+	p.mu.Unlock()
+
+	var chunks []provider.Chunk
+	switch call {
+	case 0:
+		chunks = []provider.Chunk{{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "task-1", Name: "task", Arguments: `{"prompt":"find callers"}`}}}
+	case 1:
+		chunks = []provider.Chunk{{Type: provider.ChunkText, Text: "subagent answer"}, {Type: provider.ChunkDone}}
+	default:
+		chunks = []provider.Chunk{{Type: provider.ChunkText, Text: "parent done"}, {Type: provider.ChunkDone}}
+	}
+	ch := make(chan provider.Chunk, len(chunks))
+	for _, chunk := range chunks {
+		ch <- chunk
+	}
+	close(ch)
+	return ch, nil
 }
 
 func TestNewProviderAppliesConfiguredDefaultEffort(t *testing.T) {
@@ -158,6 +444,40 @@ func TestNewProviderAppliesModelReasoningProtocol(t *testing.T) {
 	}
 }
 
+func TestBuildHonorsSessionDirOverride(t *testing.T) {
+	dir := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
+	t.Chdir(dir)
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "test-model"
+
+[codegraph]
+enabled = false
+
+[[providers]]
+name = "test-model"
+kind = "openai"
+base_url = "https://example.invalid"
+model = "x"
+api_key_env = "REASONIX_TEST_KEY_UNSET"
+`)
+
+	sessionDir := filepath.Join(t.TempDir(), "desktop-workspace-sessions")
+	ctrl, err := Build(context.Background(), Options{SessionDir: sessionDir})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer ctrl.Close()
+
+	if got := ctrl.SessionDir(); got != sessionDir {
+		t.Fatalf("SessionDir() = %q, want override %q", got, sessionDir)
+	}
+}
+
 // TestBuildDiscoversSkills proves the skill wiring end-to-end: a project skill
 // is discovered at boot, surfaced via Controller.Skills(), and its name folds
 // into the cache-stable system prompt's "# Skills" index alongside a built-in.
@@ -216,7 +536,7 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 func TestAddBuiltinsWithWorkspaceRootKeepsSessionTools(t *testing.T) {
 	reg := tool.NewRegistry()
 	var stderr bytes.Buffer
-	addBuiltins(reg, nil, []string{robustTempDir(t)}, sandbox.Spec{}, 120*time.Second, builtin.SearchSpec{}, &stderr, robustTempDir(t))
+	addBuiltins(reg, nil, []string{robustTempDir(t)}, sandbox.Spec{}, 120*time.Second, builtin.SearchSpec{}, &stderr, robustTempDir(t), netclient.ProxySpec{})
 	for _, name := range []string{
 		"todo_write",
 		"complete_step",
@@ -450,14 +770,14 @@ func TestRememberPermissionRuleUsesWorkspaceRoot(t *testing.T) {
 	t.Chdir(cwd)
 	writeFile(t, cwd, "reasonix.toml", `
 [permissions]
-allow = ["bash(cwd*)"]
+allow = ["Bash(cwd*)"]
 `)
 	writeFile(t, workspace, "reasonix.toml", `
 [permissions]
-allow = ["bash(workspace*)"]
+allow = ["Bash(workspace*)"]
 `)
 
-	const rule = "bash=go test ./..."
+	const rule = "Bash(go test ./...)"
 	rememberPermissionRule(workspace, rule)
 
 	cwdCfg := config.LoadForEdit(filepath.Join(cwd, "reasonix.toml"))
@@ -467,6 +787,36 @@ allow = ["bash(workspace*)"]
 	workspaceCfg := config.LoadForEdit(filepath.Join(workspace, "reasonix.toml"))
 	if !hasPermissionRule(workspaceCfg.Permissions.Allow, rule) {
 		t.Fatalf("remembered rule missing from workspace config: %v", workspaceCfg.Permissions.Allow)
+	}
+}
+
+func TestRememberPermissionRuleCreatesWorkspaceConfigOverUserConfig(t *testing.T) {
+	home := robustTempDir(t)
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
+
+	workspace := robustTempDir(t)
+	userConfig := config.UserConfigPath()
+	writeFile(t, filepath.Dir(userConfig), filepath.Base(userConfig), `
+[permissions]
+allow = ["Bash(user)"]
+`)
+
+	const rule = "Edit(src/app.go)"
+	res := rememberPermissionRule(workspace, rule)
+	if !res.Saved || res.Path != filepath.Join(workspace, "reasonix.toml") {
+		t.Fatalf("remember result = %+v, want saved to workspace config", res)
+	}
+
+	userCfg := config.LoadForEdit(userConfig)
+	if hasPermissionRule(userCfg.Permissions.Allow, rule) {
+		t.Fatalf("workspace rule was written to user config: %v", userCfg.Permissions.Allow)
+	}
+	workspaceCfg := config.LoadForEdit(filepath.Join(workspace, "reasonix.toml"))
+	if !hasPermissionRule(workspaceCfg.Permissions.Allow, rule) {
+		t.Fatalf("workspace rule missing from project config: %v", workspaceCfg.Permissions.Allow)
 	}
 }
 
@@ -482,11 +832,14 @@ func TestRememberPermissionRuleEmptyRootUsesSourcePath(t *testing.T) {
 	userConfig := config.UserConfigPath()
 	writeFile(t, filepath.Dir(userConfig), filepath.Base(userConfig), `
 [permissions]
-allow = ["bash(user*)"]
+allow = ["Bash(user*)"]
 `)
 
-	const rule = "bash=go env"
-	rememberPermissionRule("", rule)
+	const rule = "Bash(go env)"
+	res := rememberPermissionRule("", rule)
+	if !res.Saved || res.Path != userConfig {
+		t.Fatalf("remember result = %+v, want saved to user source config", res)
+	}
 
 	userCfg := config.LoadForEdit(userConfig)
 	if !hasPermissionRule(userCfg.Permissions.Allow, rule) {
@@ -494,6 +847,43 @@ allow = ["bash(user*)"]
 	}
 	if _, err := os.Stat(filepath.Join(cwd, "reasonix.toml")); !os.IsNotExist(err) {
 		t.Fatalf("empty root should not create cwd config when SourcePath exists, err=%v", err)
+	}
+}
+
+func TestRememberPermissionRuleSkipsRuleCoveredByExistingAllow(t *testing.T) {
+	workspace := robustTempDir(t)
+	writeFile(t, workspace, "reasonix.toml", `
+[permissions]
+allow = ["Bash(go test:*)"]
+`)
+
+	res := rememberPermissionRule(workspace, "Bash(go test ./...)")
+	if res.Saved || res.CoveredBy != "Bash(go test:*)" {
+		t.Fatalf("remember result = %+v, want already covered", res)
+	}
+	cfg := config.LoadForEdit(filepath.Join(workspace, "reasonix.toml"))
+	if len(cfg.Permissions.Allow) != 1 || cfg.Permissions.Allow[0] != "Bash(go test:*)" {
+		t.Fatalf("allow rules = %v, want only existing prefix", cfg.Permissions.Allow)
+	}
+}
+
+func TestRememberPermissionRulePrunesNarrowRulesWhenSavingBroaderRule(t *testing.T) {
+	workspace := robustTempDir(t)
+	writeFile(t, workspace, "reasonix.toml", `
+[permissions]
+allow = ["Bash(go test ./...)", "Bash(go build ./...)"]
+`)
+
+	res := rememberPermissionRule(workspace, "Bash(go test:*)")
+	if !res.Saved || res.CoveredBy != "" {
+		t.Fatalf("remember result = %+v, want saved broader rule", res)
+	}
+	cfg := config.LoadForEdit(filepath.Join(workspace, "reasonix.toml"))
+	if hasPermissionRule(cfg.Permissions.Allow, "Bash(go test ./...)") {
+		t.Fatalf("narrow go test rule should be pruned: %v", cfg.Permissions.Allow)
+	}
+	if !hasPermissionRule(cfg.Permissions.Allow, "Bash(go build ./...)") || !hasPermissionRule(cfg.Permissions.Allow, "Bash(go test:*)") {
+		t.Fatalf("allow rules = %v, want unrelated exact plus prefix", cfg.Permissions.Allow)
 	}
 }
 
@@ -841,6 +1231,85 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 	if !foundNotice {
 		t.Fatalf("missing background warmup notice; got %+v", notices)
 	}
+}
+
+func TestBuildWarmCodegraphIgnoresLegacyEagerTier(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake launcher is a POSIX-sh script")
+	}
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+	if err := os.Mkdir(filepath.Join(dir, ".codegraph"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	launcher := filepath.Join(dir, "slow-codegraph")
+	writeFile(t, dir, "slow-codegraph", "#!/bin/sh\nif [ \"$1\" = serve ]; then sleep 5; fi\n")
+	if err := os.Chmod(launcher, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	writeFile(t, dir, "reasonix.toml", fmt.Sprintf(`
+default_model = "test-model"
+
+[codegraph]
+enabled = true
+path = %q
+tier = "eager"
+
+[agent]
+system_prompt = "BASE"
+
+[[providers]]
+name = "test-model"
+kind = "openai"
+base_url = "https://example.invalid"
+model = "x"
+api_key_env = "REASONIX_TEST_KEY_UNSET"
+`, launcher))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	ctrl, err := Build(ctx, Options{})
+	if err != nil {
+		t.Fatalf("Build should not block on warm codegraph with legacy eager tier: %v", err)
+	}
+	defer ctrl.Close()
+}
+
+func TestBuildDefaultsToNearestGitRoot(t *testing.T) {
+	isolateConfigHome(t)
+	root := robustTempDir(t)
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	subdir := filepath.Join(root, "cmd", "tool")
+	if err := os.MkdirAll(subdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, root, "reasonix.toml", `
+default_model = "root-model"
+
+[codegraph]
+enabled = false
+
+[agent]
+system_prompt = "BASE"
+
+[[providers]]
+name = "root-model"
+kind = "openai"
+base_url = "https://example.invalid"
+model = "x"
+api_key_env = "REASONIX_TEST_KEY_UNSET"
+`)
+	t.Chdir(subdir)
+
+	ctrl, err := Build(context.Background(), Options{Model: "root-model"})
+	if err != nil {
+		t.Fatalf("Build should load config from nearest git root: %v", err)
+	}
+	defer ctrl.Close()
 }
 
 func TestBuildMigratesLegacyEagerBeforeStatsDemotion(t *testing.T) {

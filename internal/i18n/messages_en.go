@@ -38,32 +38,37 @@ var English = Messages{
 	ResumePickTitle:     "Resume a saved session",
 	ResumePickHint:      "↑/↓ move · Enter resume · Esc cancel",
 
-	ChatThinking:           "thinking…",
-	ChatThoughtForFmt:      "thought for %ds",
-	ChatStatusThinkingFmt:  "%s thinking… (%ds · Esc cancels)",
-	ChatToolWorkingFmt:     "%s working · %ds",
-	ChatStatusRetryingFmt:  "%s retrying (%d/%d)… (Esc cancels)",
-	ChatStatusIdle:         "ready",
-	ChatStatusYoloIdle:     "approvals skipped",
-	ChatStatusCycleHint:    "shift+tab to cycle",
-	ChatStatusCacheNowFmt:  "turn hit %s",
-	ChatStatusCacheAvgFmt:  "avg %s",
-	ChatStatusPlanApproval: "Enter/y approves & executes · n/Esc keeps planning · PgUp/PgDn scrolls",
-	PlanApprovalPrompt:     "Plan ready above — Enter/y to approve & execute, n/Esc to keep planning",
-	ChatStatusToolApproval: "1 approve once · 2 allow this session · 3 always allow (save) · 4 deny · y/a/p/n also work · Ctrl-C cancels turn",
-	AskTypeSomething:       "Type something else",
-	AskTypingHint:          "type below, Enter to confirm",
-	AskChatInstead:         "None — just chat",
-	ChatStatusQuestion:     "↑/↓ move · number to pick · space multi · Enter confirm · ←/→ switch · Esc cancel",
-	StatusResumePicker:     "↑/↓ move · Enter resume · Esc cancel",
-	AskSubmitTitle:         "Submit answers",
-	AskUnanswered:          "(unanswered)",
-	AskSubmitHint:          "Enter submits · ← returns to edit",
-	ToolApprovalPromptFmt:  "Permission required\n\nWill call tool %s%s.\n%s\n1. Allow once\n2. Allow similar calls this session\n3. Always allow (save to config)\n4. Deny\nChoose [1/2/3/4] (y/a/p/n also work)",
-	ToolApprovalSourceFmt:  "Source: %s",
-	ToolApprovalBuiltIn:    "built-in tool",
-	ToolApprovalImageUse:   "It will read provided image input for image understanding.",
-	DiffFoldedFmt:          "… +%d more lines",
+	ChatThinking:                "thinking…",
+	ChatThoughtForFmt:           "thought for %ds",
+	ChatStatusThinkingFmt:       "%s thinking… (%ds · Esc cancels)",
+	ChatToolWorkingFmt:          "%s working · %ds",
+	ChatStatusRetryingFmt:       "%s retrying (%d/%d)… (Esc cancels)",
+	ChatStatusIdle:              "ready",
+	ChatStatusYoloIdle:          "tool approvals skipped",
+	ChatStatusCycleHint:         "shift+tab toggles plan · ctrl+y yolo",
+	ChatStatusCacheNowFmt:       "turn hit %s",
+	ChatStatusCacheAvgFmt:       "avg %s",
+	ChatStatusPlanApproval:      "Enter/y approves & executes · n/Esc keeps planning · PgUp/PgDn/Ctrl+Home/End scrolls",
+	PlanApprovalPrompt:          "Plan ready above — Enter/y to approve & execute, n/Esc to keep planning",
+	ChatStatusToolApproval:      "1 approve once · 2 allow scope this session · 3/4 prefix or save when offered · n/Esc deny · Ctrl-C cancels turn",
+	AskTypeSomething:            "Type something else",
+	AskTypingHint:               "type below, Enter to confirm",
+	AskChatInstead:              "None — just chat",
+	ChatStatusQuestion:          "↑/↓ move · number to pick · space multi · Enter confirm · ←/→ switch · Esc cancel",
+	StatusResumePicker:          "↑/↓ move · Enter resume · Esc cancel",
+	AskSubmitTitle:              "Submit answers",
+	AskUnanswered:               "(unanswered)",
+	AskSubmitHint:               "Enter submits · ← returns to edit",
+	ToolApprovalPromptFmt:       "Permission required\n\nWill call tool %s%s.\n%s\n%s",
+	ToolApprovalChoices:         "1. Allow once\n2. Allow %s for this session\n3. Always allow %s (save to config)\n4. Deny\nChoose [1/2/3/4] (y/a/p/n also work)",
+	BashPrefixChoices:           "1. Allow once\n2. Allow %s for this session\n3. Always allow %s (save to config)\n4. Deny\nChoose [1/2/3/4] (y/a/p/n also work)",
+	ToolApprovalSourceFmt:       "Source: %s",
+	ToolApprovalBuiltIn:         "built-in tool",
+	ToolApprovalImageUse:        "It will read provided image input for image understanding.",
+	PermissionSavedFmt:          "permission saved to %s: %s",
+	PermissionAlreadyAllowedFmt: "permission already covered in %s: %s",
+	PermissionSaveFailedFmt:     "permission save failed for %s: %v",
+	DiffFoldedFmt:               "… +%d more lines",
 
 	OutputStyleNone:    "no output styles available",
 	OutputStyleHeader:  "output styles:",
@@ -84,12 +89,15 @@ var English = Messages{
 
 	SlashCompactDone:   "session compacted — older middle replaced by a summary, recent turns kept",
 	SlashCompactFailed: "compaction failed",
-	SlashNewDone:       "fresh session started — previous transcript saved",
+	SlashNewDone:       "new session started — previous transcript saved",
 	SlashNewFailed:     "could not start a new session",
+	SlashClearPrompt:   "Clear current context without saving?",
+	SlashClearDone:     "current context cleared",
+	SlashClearFailed:   "could not clear current context",
 	SlashUnavailable:   "command unavailable in this build",
 	SlashUnknown:       "unknown command",
 	SlashTodoCleared:   "task list dismissed",
-	SlashHelp:          "commands: /compact · /new · /resume · /rewind · /tree · /branch · /switch · /todo · /verbose · /model (switch model) · /effort · /theme · /language · /mcp · /skills · /hooks · /paste-image · /memory · /remember · /quit · /help · plus skills (/init, /explore, …)",
+	SlashHelp:          "commands: /compact · /new · /clear · /resume · /rewind · /tree · /branch · /switch · /todo · /verbose · /model (switch model) · /effort · /theme · /language · /mcp · /skills · /hooks · /paste-image · /memory · /goal · /remember · /quit · /help · plus skills (/init, /explore, …)",
 
 	SkillPickerTitle:             "Skills",
 	SkillPickerAvailableFmt:      "%d available",
@@ -146,7 +154,8 @@ var English = Messages{
 	ShellExecTimeoutFmt: "shell command timed out (> %s)",
 	ShellModeHint:       "Enter runs shell · Esc cancels · click output to expand",
 
-	CmdNew:          "fork a fresh session",
+	CmdNew:          "start new session; save transcript",
+	CmdClear:        "discard current context",
 	CmdCompact:      "compact context",
 	CmdRewind:       "rewind to an earlier turn",
 	CmdTree:         "show conversation branches",
@@ -155,6 +164,7 @@ var English = Messages{
 	CmdResume:       "resume a saved session",
 	CmdModel:        "switch model",
 	CmdMemory:       "show memory files",
+	CmdGoal:         "set or clear the active goal",
 	CmdRemember:     "save a memory note",
 	CmdForget:       "delete a saved memory",
 	CmdMcp:          "MCP servers",
@@ -165,6 +175,7 @@ var English = Messages{
 	CmdLanguage:     "switch CLI language",
 	CmdSkill:        "manage skills",
 	CmdVerbose:      "toggle thinking text",
+	CmdSandbox:      "show sandbox status",
 	CmdEffort:       "set reasoning effort",
 	CmdAutoPlan:     "configure automatic plan mode",
 	CmdHelp:         "list commands",
@@ -213,6 +224,10 @@ var English = Messages{
 	ForgetDoneFmt:          "forgot memory: %s",
 	QuickRememberEmpty:     "nothing to remember",
 	QuickRememberDoneFmt:   "remembered → %s",
+	GoalEmpty:              "goal: none — set one with /goal <objective>",
+	GoalCurrentFmt:         "goal: %s",
+	GoalSetFmt:             "goal set → %s",
+	GoalCleared:            "goal cleared",
 	ModelSwitchUnavailable: "model switching is unavailable in this session",
 	ModelSwitchBusy:        "finish or cancel the current turn before switching models",
 	ModelAlreadyOnFmt:      "already on %s",
@@ -301,20 +316,32 @@ var English = Messages{
 	ProviderErrServer:              "Server error (HTTP 500): the provider hit an internal fault. Retried with backoff; if it keeps failing, try again later.",
 	ProviderErrServerBusy:          "Server busy (HTTP 503): the provider is overloaded. Retried with backoff; please try again shortly.",
 
-	SelectOneHint:  "(↑/↓ · Enter · q to cancel)",
-	SelectManyHint: "(↑/↓ · Space · Enter · q)",
+	SelectOneHint:  "(↑/↓ · Enter · q to cancel; / to search)",
+	SelectManyHint: "(↑/↓ · Space · Enter · q; / to search)",
+
+	SelectMoreAboveFmt: "  ↑ %d more above",
+	SelectMoreBelowFmt: "  ↓ %d more below",
+	SelectSearchHint:   "/ to search · type to filter · Esc cancel search",
+
+	CmdProvider:          "switch provider",
+	ProviderListHeader:   "providers (/provider <name> to switch)",
+	ProviderAlreadyOnFmt: "already using provider %s",
+	ProviderUnknownFmt:   "unknown provider %q",
+	ProviderPickLabel:    "Select a model from %s",
+	ProviderNoModelsFmt:  "provider %s has no configured models",
 
 	UsageBody: `reasonix — a config- and plugin-driven coding agent (multi-model)
 
 Usage:
   reasonix chat [--model NAME] [-c|--continue] [--resume]   interactive session (multi-turn; -c resumes the latest, --resume picks one)
-  reasonix run  [--model NAME] [--max-steps N] <task>   run one task and exit
+  reasonix run  [--model NAME] [--max-steps N] [-c|--continue] [--resume PATH] <task>   run one task and exit
   reasonix serve [--model NAME] [--addr HOST:PORT]      serve the session over HTTP+SSE (browser client at /)
   reasonix acp [--model NAME]                           serve Agent Client Protocol over stdio (also: reasonix --acp)
   reasonix setup [path]                                 interactive config wizard; writes reasonix.toml (+ .env)
   reasonix config auto-plan [off|on]                    configure automatic plan mode
   reasonix mcp <add|remove|list>                        manage MCP servers in reasonix.toml
   reasonix doctor [--json]                              print redacted local diagnostics
+  reasonix bot start|doctor|weixin-login                multi-channel IM bot gateway
   reasonix version
   reasonix help
 

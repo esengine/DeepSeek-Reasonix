@@ -192,6 +192,64 @@ func TestLedgerMatchesLatestSuccessfulTodoStep(t *testing.T) {
 	}
 }
 
+func TestMatchTodoStepToleratesCitationDrift(t *testing.T) {
+	// Verbatim shape from discussion #3970: todo authored with a fullwidth
+	// colon, cited back with a halfwidth one — and stuck forever.
+	ledger := NewLedger()
+	ledger.Record(Receipt{
+		ToolName: "todo_write",
+		Success:  true,
+		Todos: []TodoItem{
+			{Content: "Phase 4：环境准备", Status: "completed"},
+			{Content: "Phase 5：脚本编辑与执行代码", Status: "in_progress"},
+			{Content: "Review notes", Status: "pending"},
+		},
+	})
+
+	matches := map[string]int{
+		"Phase 5: 脚本编辑与执行代码":  2,
+		"phase 5：脚本编辑与执行代码":   2,
+		"  Phase　5：脚本编辑与执行代码": 2,
+		"脚本编辑与执行代码":           2,
+		"Phase 4：环境":          1,
+		"REVIEW NOTES":        3,
+		"２":                   2,
+	}
+	for step, want := range matches {
+		match, ok := ledger.MatchLatestTodoStep(step)
+		if !ok || !match.Found {
+			t.Fatalf("step %q should match todo %d, got found=%v", step, want, match.Found)
+		}
+		if match.Index != want {
+			t.Errorf("step %q matched todo %d, want %d", step, match.Index, want)
+		}
+	}
+
+	for _, step := range []string{"deploy backend", "代码", "Phase 9：不存在的阶段"} {
+		if match, _ := ledger.MatchLatestTodoStep(step); match.Found {
+			t.Errorf("step %q should not match, got todo %d (%q)", step, match.Index, match.Content)
+		}
+	}
+}
+
+func TestMatchTodoStepAmbiguousContainmentStaysUnmatched(t *testing.T) {
+	ledger := NewLedger()
+	ledger.Record(Receipt{
+		ToolName: "todo_write",
+		Success:  true,
+		Todos: []TodoItem{
+			{Content: "Deploy backend service", Status: "in_progress"},
+			{Content: "Deploy backend worker", Status: "pending"},
+		},
+	})
+	if match, _ := ledger.MatchLatestTodoStep("Deploy backend"); match.Found {
+		t.Fatalf("ambiguous citation should stay unmatched, got todo %d (%q)", match.Index, match.Content)
+	}
+	if match, _ := ledger.MatchLatestTodoStep("Deploy backend worker"); !match.Found || match.Index != 2 {
+		t.Fatal("exact citation must still resolve despite shared prefix")
+	}
+}
+
 func TestLedgerRequiresCompleteStepForNewCompletedTodos(t *testing.T) {
 	ledger := NewLedger()
 	ledger.Record(Receipt{
@@ -327,5 +385,44 @@ func TestLedgerNoBaselineDoesNotConstrainCompletedTodos(t *testing.T) {
 	}
 	if len(missing) != 0 {
 		t.Fatalf("no baseline should not report missing completions, got %+v", missing)
+	}
+}
+
+func TestLedgerNumericCompleteStepAuthorizesRephrasedTodo(t *testing.T) {
+	ledger := NewLedger()
+	ledger.Record(Receipt{
+		ToolName: "todo_write",
+		Success:  true,
+		Todos: []TodoItem{
+			{Content: "Add parser", Status: "in_progress"},
+			{Content: "Write tests", Status: "pending"},
+		},
+	})
+	ledger.Record(Receipt{ToolName: "complete_step", Success: true, Step: "1"})
+
+	// The model rephrased item 1 (added detail) but it's the same task.
+	missing, hasBaseline := ledger.UnverifiedCompletedTodos([]TodoItem{
+		{Content: "Add parser with streaming support", Status: "completed"},
+		{Content: "Write tests", Status: "pending"},
+	})
+	if !hasBaseline {
+		t.Fatal("expected prior todo_write baseline")
+	}
+	if len(missing) != 0 {
+		t.Fatalf("rephrased todo at same index should be authorized by content overlap, missing = %+v", missing)
+	}
+
+	// The model also rephrased item 2; still ok because the new text contains the old.
+	missing, hasBaseline = ledger.UnverifiedCompletedTodos([]TodoItem{
+		{Content: "Add parser with streaming support", Status: "completed"},
+		{Content: "Write tests and benchmarks", Status: "completed"},
+	})
+	if !hasBaseline {
+		t.Fatal("expected prior todo_write baseline for second rephrase")
+	}
+	// Item 1 is already authorized; item 2 is also rephrased but lacks a
+	// complete_step — so it should still be flagged.
+	if len(missing) != 1 || missing[0].Content != "Write tests and benchmarks" {
+		t.Fatalf("rephrased todo without complete_step should still be missing, got %+v", missing)
 	}
 }

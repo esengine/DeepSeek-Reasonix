@@ -60,8 +60,18 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		} else {
 			b.WriteString("# theme_style = \"graphite\"   # graphite|ember|aurora|midnight|sandstone|porcelain|linen|glacier\n")
 		}
+		if layout := c.UIShortcutLayout(); layout != "classic" {
+			fmt.Fprintf(&b, "shortcut_layout = %q   # classic|desktop; compatibility setting; Shift+Tab toggles Plan, Ctrl+Y toggles YOLO\n", layout)
+		} else {
+			b.WriteString("# shortcut_layout = \"desktop\"   # classic|desktop; compatibility setting; Shift+Tab toggles Plan, Ctrl+Y toggles YOLO\n")
+		}
 		if strings.TrimSpace(c.UI.CloseBehavior) != "" && scope == RenderScopeProject {
 			fmt.Fprintf(&b, "close_behavior = %q   # legacy desktop close behavior; prefer [desktop].close_behavior in user config\n", c.DesktopCloseBehavior())
+		}
+		if c.UI.ShowReasoning {
+			b.WriteString("show_reasoning = true   # CLI: show thinking text by default; false = collapsed (toggle with Ctrl+O)\n")
+		} else {
+			b.WriteString("# show_reasoning = true   # CLI: show thinking text by default; false = collapsed (toggle with Ctrl+O)\n")
 		}
 		b.WriteString("\n")
 	}
@@ -80,9 +90,13 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 			b.WriteString("# theme_style = \"graphite\"   # graphite|ember|aurora|midnight|sandstone|porcelain|linen|glacier\n")
 		}
 		fmt.Fprintf(&b, "close_behavior = %q   # desktop: quit|background when the window close button is clicked\n", c.DesktopCloseBehavior())
+		fmt.Fprintf(&b, "check_updates = %v   # desktop: check for new versions on startup\n", c.DesktopCheckUpdates())
+		fmt.Fprintf(&b, "telemetry = %v   # desktop: anonymous launch ping (install id + version + OS); never content\n", c.DesktopTelemetry())
+		fmt.Fprintf(&b, "metrics = %v   # desktop: opt-in aggregate agent metrics (anonymous signal/bucket counts); never content\n", c.DesktopMetrics())
 		if len(c.Desktop.ProviderAccess) > 0 {
 			fmt.Fprintf(&b, "provider_access = %s   # desktop settings: providers shown on Settings > Model > Access\n", renderStringArray(c.Desktop.ProviderAccess))
 		}
+		fmt.Fprintf(&b, "expand_thinking = %v   # desktop: show reasoning text expanded by default; false = collapsed\n", c.Desktop.ExpandThinking)
 		b.WriteString("\n")
 
 		b.WriteString("[notifications]\n")
@@ -301,15 +315,15 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	b.WriteString("[permissions]\n")
 	b.WriteString("# Per-call gating. mode = writer fallback when no rule matches: ask|allow|deny.\n")
 	b.WriteString("# Readers always default to allow. Precedence: deny > ask > allow > fallback.\n")
-	b.WriteString("# Rules are \"ToolName\" or \"ToolName(glob)\"; '*' matches any run, '?' one char.\n")
+	b.WriteString("# Rules are \"Tool\" or \"Tool(specifier)\"; e.g. Bash(go test:*), Edit(src/**).\n")
 	mode := c.Permissions.Mode
 	if mode == "" {
 		mode = "ask"
 	}
 	fmt.Fprintf(&b, "mode  = %q\n", mode)
-	b.WriteString(renderRuleList("deny", c.Permissions.Deny, `["bash(rm -rf*)", "bash(git push*)"]   # hard-blocked in every mode`))
-	b.WriteString(renderRuleList("allow", c.Permissions.Allow, `["bash(go test*)", "bash(git status*)"]   # never prompted`))
-	b.WriteString(renderRuleList("ask", c.Permissions.Ask, `["write_file"]   # force a prompt even if otherwise allowed`))
+	b.WriteString(renderRuleList("deny", c.Permissions.Deny, `["Bash(rm -rf*)", "Bash(git push*)"]   # hard-blocked in every mode`))
+	b.WriteString(renderRuleList("allow", c.Permissions.Allow, `["Bash(go test:*)", "Bash(git status:*)"]   # never prompted`))
+	b.WriteString(renderRuleList("ask", c.Permissions.Ask, `["Edit(src/**)"]   # force a prompt even if otherwise allowed`))
 	b.WriteString("\n")
 
 	b.WriteString("[sandbox]\n")
@@ -340,6 +354,77 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		b.WriteString("# command = \"my-statusline.sh\"\n")
 	}
 	b.WriteString("\n")
+
+	if shouldRenderBot(c, defaults, scope) {
+		b.WriteString("# Bot gateway: multi-channel IM bot for QQ, Feishu/Lark, and WeChat.\n")
+		b.WriteString("[bot]\n")
+		fmt.Fprintf(&b, "enabled = %v\n", c.Bot.Enabled)
+		if c.Bot.Model != "" {
+			fmt.Fprintf(&b, "model = %q\n", c.Bot.Model)
+		} else {
+			b.WriteString("# model = \"\"   # empty = default_model\n")
+		}
+		fmt.Fprintf(&b, "max_steps = %d\n", c.Bot.MaxSteps)
+		fmt.Fprintf(&b, "debounce_ms = %d\n", c.Bot.DebounceMs)
+		b.WriteString("\n[bot.allowlist]\n")
+		fmt.Fprintf(&b, "enabled = %v\n", c.Bot.Allowlist.Enabled)
+		fmt.Fprintf(&b, "allow_all = %v\n", c.Bot.Allowlist.AllowAll)
+		fmt.Fprintf(&b, "qq_users = %s\n", renderStringArray(c.Bot.Allowlist.QQUsers))
+		fmt.Fprintf(&b, "feishu_users = %s\n", renderStringArray(c.Bot.Allowlist.FeishuUsers))
+		fmt.Fprintf(&b, "weixin_users = %s\n", renderStringArray(c.Bot.Allowlist.WeixinUsers))
+		fmt.Fprintf(&b, "qq_groups = %s\n", renderStringArray(c.Bot.Allowlist.QQGroups))
+		fmt.Fprintf(&b, "feishu_groups = %s\n", renderStringArray(c.Bot.Allowlist.FeishuGroups))
+		fmt.Fprintf(&b, "weixin_groups = %s\n", renderStringArray(c.Bot.Allowlist.WeixinGroups))
+		b.WriteString("\n[bot.qq]\n")
+		fmt.Fprintf(&b, "enabled = %v\n", c.Bot.QQ.Enabled)
+		fmt.Fprintf(&b, "app_id = %q\n", c.Bot.QQ.AppID)
+		fmt.Fprintf(&b, "app_secret_env = %q\n", c.Bot.QQ.AppSecretEnv)
+		b.WriteString("\n[bot.feishu]\n")
+		fmt.Fprintf(&b, "enabled = %v\n", c.Bot.Feishu.Enabled)
+		fmt.Fprintf(&b, "app_id = %q\n", c.Bot.Feishu.AppID)
+		fmt.Fprintf(&b, "domain = %q\n", c.Bot.Feishu.Domain)
+		fmt.Fprintf(&b, "app_secret_env = %q\n", c.Bot.Feishu.AppSecretEnv)
+		fmt.Fprintf(&b, "verification_token = %q\n", c.Bot.Feishu.VerificationToken)
+		fmt.Fprintf(&b, "mode = %q\n", c.Bot.Feishu.Mode)
+		fmt.Fprintf(&b, "webhook_port = %d\n", c.Bot.Feishu.WebhookPort)
+		fmt.Fprintf(&b, "require_mention = %v\n", c.Bot.Feishu.RequireMention)
+		b.WriteString("\n[bot.weixin]\n")
+		fmt.Fprintf(&b, "enabled = %v\n", c.Bot.Weixin.Enabled)
+		fmt.Fprintf(&b, "account_id = %q\n", c.Bot.Weixin.AccountID)
+		fmt.Fprintf(&b, "token_env = %q\n", c.Bot.Weixin.TokenEnv)
+		fmt.Fprintf(&b, "api_base = %q\n", c.Bot.Weixin.APIBase)
+		for _, conn := range c.Bot.Connections {
+			b.WriteString("\n[[bot.connections]]\n")
+			fmt.Fprintf(&b, "id = %q\n", conn.ID)
+			fmt.Fprintf(&b, "provider = %q\n", conn.Provider)
+			fmt.Fprintf(&b, "domain = %q\n", conn.Domain)
+			fmt.Fprintf(&b, "label = %q\n", conn.Label)
+			fmt.Fprintf(&b, "enabled = %v\n", conn.Enabled)
+			fmt.Fprintf(&b, "status = %q\n", conn.Status)
+			if conn.Model != "" {
+				fmt.Fprintf(&b, "model = %q\n", conn.Model)
+			}
+			if conn.WorkspaceRoot != "" {
+				fmt.Fprintf(&b, "workspace_root = %q\n", conn.WorkspaceRoot)
+			}
+			if conn.LastError != "" {
+				fmt.Fprintf(&b, "last_error = %q\n", conn.LastError)
+			}
+			if conn.CreatedAt != "" {
+				fmt.Fprintf(&b, "created_at = %q\n", conn.CreatedAt)
+			}
+			if conn.UpdatedAt != "" {
+				fmt.Fprintf(&b, "updated_at = %q\n", conn.UpdatedAt)
+			}
+			if parts := renderBotCredential(conn.Credential); parts != "" {
+				fmt.Fprintf(&b, "credential = %s\n", parts)
+			}
+			if len(conn.SessionMappings) > 0 {
+				fmt.Fprintf(&b, "session_mappings = %s\n", renderBotSessionMappings(conn.SessionMappings))
+			}
+		}
+		b.WriteString("\n")
+	}
 
 	b.WriteString("# External MCP servers. type: \"stdio\" (default, a subprocess) | \"http\" | \"sse\".\n")
 	b.WriteString("# ${VAR} / ${VAR:-default} are expanded from the environment in command/args/env/url/headers.\n")
@@ -409,6 +494,13 @@ func shouldRenderProviders(c, defaults *Config, scope RenderScope) bool {
 		return true
 	}
 	return !reflect.DeepEqual(c.Providers, defaults.Providers)
+}
+
+func shouldRenderBot(c, defaults *Config, scope RenderScope) bool {
+	if scope != RenderScopeProject {
+		return true
+	}
+	return !reflect.DeepEqual(c.Bot, defaults.Bot)
 }
 
 func shouldRenderSystemPrompt(c, defaults *Config, scope RenderScope) bool {
@@ -511,6 +603,52 @@ func renderStringMap(m map[string]string) string {
 		fmt.Fprintf(&b, "%s = %q", k, m[k])
 	}
 	b.WriteString(" }")
+	return b.String()
+}
+
+func renderBotCredential(cred BotConnectionCredential) string {
+	parts := make(map[string]string)
+	if cred.AppID != "" {
+		parts["app_id"] = cred.AppID
+	}
+	if cred.AppSecretEnv != "" {
+		parts["app_secret_env"] = cred.AppSecretEnv
+	}
+	if cred.AccountID != "" {
+		parts["account_id"] = cred.AccountID
+	}
+	if cred.TokenEnv != "" {
+		parts["token_env"] = cred.TokenEnv
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return renderStringMap(parts)
+}
+
+func renderBotSessionMappings(mappings []BotConnectionSessionMapping) string {
+	var b strings.Builder
+	b.WriteByte('[')
+	for i, mapping := range mappings {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		parts := map[string]string{
+			"remote_id":  mapping.RemoteID,
+			"session_id": mapping.SessionID,
+		}
+		if mapping.Scope != "" {
+			parts["scope"] = mapping.Scope
+		}
+		if mapping.WorkspaceRoot != "" {
+			parts["workspace_root"] = mapping.WorkspaceRoot
+		}
+		if mapping.UpdatedAt != "" {
+			parts["updated_at"] = mapping.UpdatedAt
+		}
+		b.WriteString(renderStringMap(parts))
+	}
+	b.WriteByte(']')
 	return b.String()
 }
 

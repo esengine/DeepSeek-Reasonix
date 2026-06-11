@@ -56,6 +56,9 @@ func newStdioTransport(ctx context.Context, s Spec) (*stdioTransport, error) {
 	}
 	cmd := exec.CommandContext(ctx, exe, s.Args...)
 	proc.HideWindow(cmd)
+	if s.LowPriority {
+		proc.LowPriority(cmd)
+	}
 	cmd.Env = env
 	if s.Dir != "" {
 		cmd.Dir = s.Dir // pin cwd-aware servers (e.g. CodeGraph) to the project root
@@ -74,13 +77,17 @@ func newStdioTransport(ctx context.Context, s Spec) (*stdioTransport, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := cmd.Start(); err != nil {
+	job, err := proc.StartTracked(cmd)
+	if err != nil {
 		return nil, err
+	}
+	if s.LowPriority {
+		proc.LowPriorityStarted(cmd)
 	}
 	t := &stdioTransport{
 		name:    s.Name,
 		cmd:     cmd,
-		job:     proc.TrackTree(cmd),
+		job:     job,
 		stdin:   stdin,
 		stdout:  bufio.NewReader(stdout),
 		stderr:  stderr,

@@ -1,0 +1,217 @@
+#!/usr/bin/env bash
+# Build a local production-style Reasonix desktop package from this checkout.
+#
+# This is intentionally worktree-relative: run ./prod_test from any clone or
+# git worktree and it will package that exact tree, including dirty local changes.
+set -euo pipefail
+
+usage() {
+	cat <<'EOF'
+Usage:
+  ./prod_test [platform] [version] [channel]
+
+Examples:
+  ./prod_test
+  ./prod_test darwin/arm64
+  ./prod_test darwin/universal v1.5.0-prodtest stable
+
+Defaults:
+  platform  auto-detected from this machine; macOS defaults to darwin/universal
+  version   v0.0.0-prodtest.<branch-or-detached>.<short-sha>[.dirty]
+  channel   stable
+
+Environment overrides:
+  PROD_TEST_PLATFORM       Same as first argument.
+  PROD_TEST_VERSION        Same as second argument.
+  PROD_TEST_CHANNEL        Same as third argument.
+  PROD_TEST_INSTALL_TOOLS  1 installs missing Wails/create-dmg/nfpm when possible.
+                           Set to 0 to only check and print missing deps.
+  PROD_TEST_OPEN_DIST      1 opens dist/ after a successful build when supported.
+EOF
+}
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+	usage
+	exit 0
+fi
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$SCRIPT_DIR"
+cd "$ROOT"
+
+fail() {
+	echo "prod_test: $*" >&2
+	exit 1
+}
+
+need_cmd() {
+	command -v "$1" >/dev/null 2>&1 || fail "missing required command: $1"
+}
+
+go_bin_dir() {
+	local gobin
+	gobin="$(go env GOBIN)"
+	if [[ -z "$gobin" ]]; then
+		gobin="$(go env GOPATH)/bin"
+	fi
+	printf '%s' "$gobin"
+}
+
+sanitize_semver_id() {
+	local value="$1"
+	value="$(printf '%s' "$value" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^0-9A-Za-z]+/-/g; s/^-+//; s/-+$//; s/-+/-/g')"
+	printf '%s' "${value:-local}"
+}
+
+detect_platform() {
+	local os arch machine
+	case "$(uname -s)" in
+	Darwin) os="darwin" ;;
+	Linux) os="linux" ;;
+	MINGW*|MSYS*|CYGWIN*) os="windows" ;;
+	*) fail "unsupported host OS: $(uname -s)" ;;
+	esac
+
+	machine="$(uname -m)"
+	case "$machine" in
+	arm64|aarch64) arch="arm64" ;;
+	x86_64|amd64) arch="amd64" ;;
+	*) fail "unsupported host architecture: $machine" ;;
+	esac
+
+	if [[ "$os" == "darwin" ]]; then
+		# Match the release workflow's single macOS artifact by default.
+		printf 'darwin/universal'
+	else
+		printf '%s/%s' "$os" "$arch"
+	fi
+}
+
+default_version() {
+	local ref sha dirty
+	ref="$(git branch --show-current 2>/dev/null || true)"
+	if [[ -z "$ref" ]]; then
+		ref="$(git describe --tags --exact-match 2>/dev/null || true)"
+	fi
+	ref="${ref:-detached}"
+	sha="$(git rev-parse --short=8 HEAD 2>/dev/null || echo unknown)"
+	dirty=""
+	if [[ -n "$(git status --porcelain 2>/dev/null)" ]]; then
+		dirty=".dirty"
+	fi
+	printf 'v0.0.0-prodtest.%s.%s%s' "$(sanitize_semver_id "$ref")" "$sha" "$dirty"
+}
+
+install_or_check_tools() {
+	local os install_tools
+	os="${1%/*}"
+	install_tools="${PROD_TEST_INSTALL_TOOLS:-1}"
+
+	need_cmd git
+	need_cmd go
+	need_cmd node
+	export PATH="$(go_bin_dir):$PATH"
+
+	if ! command -v pnpm >/dev/null 2>&1; then
+		if [[ "$install_tools" == "1" ]]; then
+			echo "==> installing pnpm"
+			if command -v corepack >/dev/null 2>&1; then
+				corepack enable
+				corepack prepare pnpm@10 --activate
+			else
+				need_cmd npm
+				npm install -g pnpm@10
+			fi
+		else
+			fail "pnpm not found. Install with: corepack enable && corepack prepare pnpm@10 --activate"
+		fi
+	fi
+
+	if ! command -v wails >/dev/null 2>&1; then
+		if [[ "$install_tools" == "1" ]]; then
+			echo "==> installing Wails CLI"
+			go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+		else
+			fail "wails not found. Install with: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0"
+		fi
+	fi
+
+	case "$os" in
+	darwin)
+		if ! command -v create-dmg >/dev/null 2>&1; then
+			if [[ "$install_tools" == "1" && -x "$(command -v brew 2>/dev/null || true)" ]]; then
+				echo "==> installing create-dmg"
+				brew install create-dmg
+			else
+				fail "create-dmg not found. Install with: brew install create-dmg"
+			fi
+		fi
+		;;
+	linux)
+		if ! command -v nfpm >/dev/null 2>&1; then
+			if [[ "$install_tools" == "1" ]]; then
+				echo "==> installing nfpm"
+				go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.46.3
+			else
+				fail "nfpm not found. Install with: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.46.3"
+			fi
+		fi
+		;;
+	windows)
+		command -v makensis >/dev/null 2>&1 || fail "makensis not found. Install NSIS first."
+		;;
+	esac
+}
+
+PLATFORM="${1:-${PROD_TEST_PLATFORM:-$(detect_platform)}}"
+VERSION="${2:-${PROD_TEST_VERSION:-$(default_version)}}"
+CHANNEL="${3:-${PROD_TEST_CHANNEL:-stable}}"
+OPEN_DIST="${PROD_TEST_OPEN_DIST:-1}"
+
+case "$PLATFORM" in
+darwin/*|linux/*|windows/*) ;;
+*) fail "platform must look like os/arch, got: $PLATFORM" ;;
+esac
+
+case "$CHANNEL" in
+stable|canary) ;;
+*) fail "channel must be stable or canary, got: $CHANNEL" ;;
+esac
+
+install_or_check_tools "$PLATFORM"
+
+if [[ -n "$(git status --porcelain)" ]]; then
+	echo "==> worktree has uncommitted changes; this build will include them"
+	git status --short
+fi
+
+wails_json="desktop/wails.json"
+tmp_wails="$(mktemp)"
+cp "$wails_json" "$tmp_wails"
+restore_wails() {
+	if [[ -f "$tmp_wails" ]]; then
+		cp "$tmp_wails" "$wails_json"
+		rm -f "$tmp_wails"
+	fi
+}
+trap restore_wails EXIT
+
+echo "==> root: ."
+echo "==> branch: $(git branch --show-current 2>/dev/null || echo detached)"
+echo "==> commit: $(git rev-parse --short=8 HEAD 2>/dev/null || echo unknown)"
+echo "==> platform: $PLATFORM"
+echo "==> version: $VERSION"
+echo "==> channel: $CHANNEL"
+
+bash scripts/desktop-build.sh "$PLATFORM" "$VERSION" "$CHANNEL"
+
+echo "==> restored desktop/wails.json"
+echo "==> production-style artifacts are in dist/"
+
+if [[ "$OPEN_DIST" == "1" ]]; then
+	case "$(uname -s)" in
+	Darwin) open dist ;;
+	Linux) command -v xdg-open >/dev/null 2>&1 && xdg-open dist >/dev/null 2>&1 || true ;;
+	MINGW*|MSYS*|CYGWIN*) explorer.exe dist 2>/dev/null || true ;;
+	esac
+fi

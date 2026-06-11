@@ -1,0 +1,32 @@
+# Deploy: wrangler d1 create reasonix-crash → paste database_id → wrangler deploy.
+name = "reasonix-crash-report"
+main = "src/index.ts"
+compatibility_date = "2026-06-01"
+
+routes = [{ pattern = "crash.reasonix.io", custom_domain = true }]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "reasonix-crash"
+database_id = "54825184-366f-4877-80fc-924efab0239b"
+
+[[unsafe.bindings]]
+name = "RATE_LIMITER"
+type = "ratelimit"
+namespace_id = "1001"
+simple = { limit = 5, period = 60 }
+
+# Looser than RATE_LIMITER: many installs can share one office/campus NAT IP.
+[[unsafe.bindings]]
+name = "PING_LIMITER"
+type = "ratelimit"
+namespace_id = "1002"
+simple = { limit = 30, period = 60 }
+
+# Opt-in metrics flush fires once per launch like the ping; its own bucket so it
+# never eats the ping budget on a shared NAT IP.
+[[unsafe.bindings]]
+name = "METRICS_LIMITER"
+type = "ratelimit"
+namespace_id = "1003"
+simple = { limit = 30, period = 60 }

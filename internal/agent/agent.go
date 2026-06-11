@@ -53,6 +53,7 @@ type Asker interface {
 
 // callContextKey carries the executing tool call's identity into Execute.
 type callContextKey struct{}
+type parentSessionContextKey struct{}
 
 // callContext is the per-call context a tool can read. parentID is the call being
 // executed and sink is the agent's event sink (the `task` tool uses both to nest
@@ -79,6 +80,18 @@ func CallContext(ctx context.Context) (parentID string, sink event.Sink, asker A
 		return "", nil, nil, false
 	}
 	return cc.parentID, cc.sink, cc.asker, true
+}
+
+// WithParentSession stamps the active parent session ID onto a turn context so
+// persisted sub-agents can record and enforce their owning conversation.
+func WithParentSession(ctx context.Context, parentSession string) context.Context {
+	return context.WithValue(ctx, parentSessionContextKey{}, strings.TrimSpace(parentSession))
+}
+
+// ParentSession returns the active parent session ID carried by a turn context.
+func ParentSession(ctx context.Context) string {
+	parentSession, _ := ctx.Value(parentSessionContextKey{}).(string)
+	return strings.TrimSpace(parentSession)
 }
 
 // Gate decides, per tool call, whether it may run. The agent consults it at
@@ -186,9 +199,26 @@ type Agent struct {
 	// reach it. nil leaves those tools to degrade gracefully.
 	jobs *jobs.Manager
 
+	// steerQueue holds mid-turn user messages queued while the agent is
+	// running. Each is consumed once per loop iteration, persisted to the
+	// session for history replay, and sent to the model as guidance (not a
+	// new task). Cache miss for the next API call is unavoidable but limited
+	// to one call — the prefix stays stable otherwise.
+	steerMu       sync.Mutex
+	steerQueue    []string
+	steerConsumed bool
+
 	// evidence is a per-user-turn ledger of host-observed tool receipts. It lets
 	// complete_step validate that cited evidence happened before the claim.
 	evidence *evidence.Ledger
+
+	// todoState is the host's canonical task list: the latest successful
+	// todo_write with completions applied by complete_step. Unlike the per-turn
+	// ledger it survives turn boundaries and compaction (it never rides in the
+	// prompt), so the final-answer gate still sees an unfinished plan a later
+	// turn would otherwise hide. Rebuilt from the session in SetSession.
+	todoMu    sync.Mutex
+	todoState []evidence.TodoItem
 
 	// projectChecks are structured project instructions that complete_step can
 	// verify against same-turn bash receipts after a write-backed completion.
@@ -280,8 +310,11 @@ func (a *Agent) Session() *Session {
 // running turn (it only fires while idle); sessMu guards the pointer swap itself.
 func (a *Agent) SetSession(s *Session) {
 	a.sessMu.Lock()
-	defer a.sessMu.Unlock()
 	a.session = s
+	a.sessMu.Unlock()
+	if s != nil {
+		a.rebuildTodoState(s.Snapshot())
+	}
 }
 
 // LastUsage returns the most recent per-turn token telemetry the provider
@@ -299,6 +332,53 @@ func (a *Agent) SessionCache() (hit, miss int) {
 // ContextWindow returns the configured context-window size in tokens. 0
 // means compaction is disabled for this agent.
 func (a *Agent) ContextWindow() int { return a.contextWindow }
+
+// mid-turn steer marker.
+const midTurnSteerPrefix = "[Mid-turn steer queued by the user. Do not treat this as a new task; use it only as additional guidance for the current task after completing the current step.]"
+
+func midTurnSteerMessage(text string) string {
+	return midTurnSteerPrefix + "\n" + text
+}
+
+// Steer queues a message for mid-turn injection.
+func (a *Agent) Steer(text string) {
+	a.steerMu.Lock()
+	defer a.steerMu.Unlock()
+	a.steerQueue = append(a.steerQueue, text)
+	a.steerConsumed = false
+}
+
+// SteerConsumed returns true when the steer queue became empty after the last consume.
+func (a *Agent) SteerConsumed() bool {
+	a.steerMu.Lock()
+	defer a.steerMu.Unlock()
+	return a.steerConsumed
+}
+
+func (a *Agent) consumeSteer() (string, bool) {
+	a.steerMu.Lock()
+	defer a.steerMu.Unlock()
+	if len(a.steerQueue) == 0 {
+		return "", false
+	}
+	t := a.steerQueue[0]
+	a.steerQueue = a.steerQueue[1:]
+	a.steerConsumed = len(a.steerQueue) == 0
+	return t, true
+}
+
+func (a *Agent) clearSteerQueue() {
+	a.steerMu.Lock()
+	defer a.steerMu.Unlock()
+	a.steerQueue = nil
+	a.steerConsumed = false
+}
+
+func (a *Agent) steerQueueLen() int {
+	a.steerMu.Lock()
+	defer a.steerMu.Unlock()
+	return len(a.steerQueue)
+}
 
 // CompactRatio returns the fraction of the window at which auto-compaction
 // fires (e.g. 0.8). The status line uses it to show headroom to the next compact.
@@ -406,6 +486,10 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 // a round count. A positive maxSteps imposes an optional hard guard, surfaced as
 // a resumable notice when hit.
 func (a *Agent) Run(ctx context.Context, input string) error {
+	defer a.clearSteerQueue()
+	a.steerMu.Lock()
+	a.steerConsumed = false
+	a.steerMu.Unlock()
 	if a.evidence != nil {
 		a.evidence.Reset()
 	}
@@ -420,6 +504,14 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 	streamRecoveries := 0
 	executorHandoff := a.executorHandoffGuard && strings.Contains(input, executorHandoffMarker)
 	for step := 0; a.maxSteps <= 0 || step < a.maxSteps; step++ {
+		// Consume a queued steer and persist it to the session so it
+		// survives tab switches and history replay. The model sees it as
+		// guidance (with a prefix), not a new task. One cache miss per
+		// steer is unavoidable — the model must see the new instruction.
+		if text, ok := a.consumeSteer(); ok {
+			a.session.Add(provider.Message{Role: provider.RoleUser, Content: midTurnSteerMessage(text)})
+			a.sink.Emit(event.Event{Kind: event.Steer, Text: text})
+		}
 		schemas := a.tools.Schemas()
 		prefixShape := a.capturePrefixShape(schemas)
 		prevPrefixShape := a.lastPrefixShape
@@ -495,7 +587,7 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 				if emptyFinalBlocks >= maxEmptyFinalBlocks {
 					return fmt.Errorf("model finished without a visible final answer %d times", emptyFinalBlocks)
 				}
-				a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "empty final answer blocked: model returned no visible answer text; retrying"})
+				a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: emptyFinalNotice(a.prov.Name(), usage, len(reasoning))})
 				a.session.Add(provider.Message{Role: provider.RoleUser, Content: emptyFinalRetryMessage()})
 				a.maybeCompact(ctx, usage)
 				continue
@@ -509,6 +601,9 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 			}
 			if readiness.applies {
 				event.RecordReadinessAudit(a.sink, readiness.audit(evidence.ReadinessAllowed, finalReadinessBlocks > 0))
+			}
+			if a.steerQueueLen() > 0 {
+				continue
 			}
 			return nil // model gave a final answer
 		}
@@ -543,7 +638,6 @@ type finalReadinessCheck struct {
 	applies              bool
 	reason               string
 	missingProjectChecks int
-	missingCompleteStep  bool
 	incompleteTodos      int
 }
 
@@ -552,7 +646,6 @@ func (c finalReadinessCheck) audit(result evidence.ReadinessAuditResult, recover
 		Result:                 result,
 		Recovered:              recovered,
 		MissingProjectChecks:   c.missingProjectChecks,
-		MissingCompleteStep:    c.missingCompleteStep,
 		IncompleteTodos:        c.incompleteTodos,
 		CommandMismatchMissing: c.missingProjectChecks,
 	}
@@ -565,7 +658,11 @@ func (a *Agent) finalReadinessCheck() finalReadinessCheck {
 	var missing []string
 	out := finalReadinessCheck{}
 	if !a.planMode.Load() {
-		if incomplete, hasTodos := a.evidence.IncompleteLatestTodos(); hasTodos && len(incomplete) > 0 {
+		incomplete, hasTodos := a.evidence.IncompleteLatestTodos()
+		if !hasTodos && a.evidence.HasAnySuccessfulReceipt() {
+			incomplete, hasTodos = a.incompleteCanonicalTodos()
+		}
+		if hasTodos && len(incomplete) > 0 {
 			out.applies = true
 			out.incompleteTodos = len(incomplete)
 			missing = append(missing, finalReadinessIncompleteTodos(incomplete))
@@ -594,10 +691,7 @@ func (a *Agent) finalReadinessCheck() finalReadinessCheck {
 			missing = append(missing, fmt.Sprintf("run %q from %s after the latest write", command, finalReadinessCheckSource(check)))
 		}
 	}
-	if hasTodoReceipt && !a.evidence.HasSuccessfulCompleteStepAfter(writer) {
-		out.missingCompleteStep = true
-		missing = append(missing, "call complete_step after the latest write")
-	}
+
 	if len(missing) == 0 {
 		return out
 	}
@@ -615,6 +709,145 @@ func finalReadinessIncompleteTodos(items []evidence.TodoStepMatch) string {
 		parts = append(parts, fmt.Sprintf("%s: %s", label, item.Status))
 	}
 	return "latest successful todo_write still has incomplete items: " + strings.Join(parts, ", ")
+}
+
+func (a *Agent) setTodoState(todos []evidence.TodoItem) {
+	a.todoMu.Lock()
+	a.todoState = append([]evidence.TodoItem(nil), todos...)
+	a.todoMu.Unlock()
+}
+
+func (a *Agent) incompleteCanonicalTodos() ([]evidence.TodoStepMatch, bool) {
+	a.todoMu.Lock()
+	defer a.todoMu.Unlock()
+	if len(a.todoState) == 0 {
+		return nil, false
+	}
+	return evidence.IncompleteTodos(a.todoState), true
+}
+
+// advanceCanonicalTodo flips the canonical todo matching a signed-off step to
+// completed (promoting the next pending item to in_progress) and emits a
+// synthetic todo_write so the task panel reflects it without the model
+// re-sending the whole list. No-op when nothing matches or it is already done.
+func (a *Agent) advanceCanonicalTodo(step string) {
+	a.todoMu.Lock()
+	if len(a.todoState) == 0 {
+		a.todoMu.Unlock()
+		return
+	}
+	m, ok := evidence.MatchStep(step, a.todoState)
+	if !ok || canonicalTodoStatus(a.todoState[m.Index-1].Status) == "completed" {
+		a.todoMu.Unlock()
+		return
+	}
+	a.todoState[m.Index-1].Status = "completed"
+	promoteNextPendingTodo(a.todoState)
+	snapshot := append([]evidence.TodoItem(nil), a.todoState...)
+	a.todoMu.Unlock()
+	a.recordTodoState(snapshot)
+	a.emitTodoState(snapshot)
+}
+
+// recordTodoState logs the host-advanced list as a synthetic todo_write receipt
+// so the per-turn final gate (which reads the ledger's latest todo_write) sees
+// the advance — the model no longer has to re-send a todo_write to mark the
+// completion. It bypasses the todo_write tool, so the completion-transition
+// guard never runs on it.
+func (a *Agent) recordTodoState(todos []evidence.TodoItem) {
+	if a.evidence == nil {
+		return
+	}
+	args, err := json.Marshal(map[string]any{"todos": todos})
+	if err != nil {
+		return
+	}
+	a.evidence.Record(evidence.ReceiptFromToolCall("todo_write", json.RawMessage(args), true, true))
+}
+
+func promoteNextPendingTodo(todos []evidence.TodoItem) {
+	for _, t := range todos {
+		if canonicalTodoStatus(t.Status) == "in_progress" {
+			return
+		}
+	}
+	for i := range todos {
+		if canonicalTodoStatus(todos[i].Status) == "pending" {
+			todos[i].Status = "in_progress"
+			return
+		}
+	}
+}
+
+func canonicalTodoStatus(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "pending"
+	}
+	return s
+}
+
+func (a *Agent) emitTodoState(todos []evidence.TodoItem) {
+	args, err := json.Marshal(map[string]any{"todos": todos})
+	if err != nil {
+		return
+	}
+	t := event.Tool{ID: "host-advance", Name: "todo_write", Args: string(args), ReadOnly: true}
+	a.sink.Emit(event.Event{Kind: event.ToolDispatch, Tool: t})
+	t.Output = "task list advanced by complete_step"
+	a.sink.Emit(event.Event{Kind: event.ToolResult, Tool: t})
+}
+
+// rebuildTodoState reconstructs the canonical task list from a transcript: the
+// latest successful todo_write is the base, then every complete_step after it
+// advances an item. Deterministic from persisted messages, so it survives a
+// fresh load or a rewind (the truncated history yields the historical state).
+// Empty after compaction drops the todo_write — no worse than no canonical list.
+func (a *Agent) rebuildTodoState(msgs []provider.Message) {
+	failed := failedToolCallIDs(msgs)
+	var todos []evidence.TodoItem
+	baseIdx := -1
+	for i, msg := range msgs {
+		for _, tc := range msg.ToolCalls {
+			if tc.Name != "todo_write" || failed[tc.ID] {
+				continue
+			}
+			if rec := evidence.ReceiptFromToolCall(tc.Name, json.RawMessage(tc.Arguments), true, true); len(rec.Todos) > 0 {
+				todos = append([]evidence.TodoItem(nil), rec.Todos...)
+				baseIdx = i
+			}
+		}
+	}
+	if baseIdx < 0 {
+		a.setTodoState(nil)
+		return
+	}
+	for i := baseIdx; i < len(msgs); i++ {
+		for _, tc := range msgs[i].ToolCalls {
+			if tc.Name != "complete_step" || failed[tc.ID] {
+				continue
+			}
+			rec := evidence.ReceiptFromToolCall(tc.Name, json.RawMessage(tc.Arguments), true, true)
+			if m, ok := evidence.MatchStep(rec.Step, todos); ok && canonicalTodoStatus(todos[m.Index-1].Status) != "completed" {
+				todos[m.Index-1].Status = "completed"
+				promoteNextPendingTodo(todos)
+			}
+		}
+	}
+	a.setTodoState(todos)
+}
+
+func failedToolCallIDs(msgs []provider.Message) map[string]bool {
+	failed := map[string]bool{}
+	for _, msg := range msgs {
+		if msg.Role != provider.RoleTool || msg.ToolCallID == "" {
+			continue
+		}
+		if strings.HasPrefix(msg.Content, "error:") || strings.HasPrefix(msg.Content, "blocked:") {
+			failed[msg.ToolCallID] = true
+		}
+	}
+	return failed
 }
 
 func finalReadinessCheckSource(check instruction.VerifyCheck) string {
@@ -645,6 +878,14 @@ func hasVisibleFinalAnswer(text string) bool {
 
 func emptyFinalRetryMessage() string {
 	return "The previous assistant response finished without any visible answer text. Continue the same task now and provide a concise visible answer to the user. Do not send reasoning only."
+}
+
+func emptyFinalNotice(prov string, u *provider.Usage, reasoningLen int) string {
+	finish := "unknown"
+	if u != nil && u.FinishReason != "" {
+		finish = u.FinishReason
+	}
+	return fmt.Sprintf("empty final answer blocked: %s returned no visible answer text (finish=%s, reasoning=%d chars); retrying", prov, finish, reasoningLen)
 }
 
 func streamRecoveryMessage(hasPartialText, hadPartialTool bool) string {
@@ -1059,6 +1300,7 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 	cctx := withCallContext(ctx, call.ID, a.sink, a.asker)
 	if a.evidence != nil {
 		cctx = evidence.WithLedger(cctx, a.evidence)
+		cctx = evidence.WithSessionMessages(cctx, a.session.Snapshot())
 	}
 	if len(a.projectChecks) > 0 {
 		cctx = instruction.WithChecks(cctx, a.projectChecks)
@@ -1077,10 +1319,16 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 	if a.evidence != nil {
 		if call.Name == "complete_step" {
 			if err == nil {
-				a.evidence.Record(evidence.ReceiptFromToolCall(call.Name, json.RawMessage(call.Arguments), true, t.ReadOnly()))
+				rec := evidence.ReceiptFromToolCall(call.Name, json.RawMessage(call.Arguments), true, t.ReadOnly())
+				a.evidence.Record(rec)
+				a.advanceCanonicalTodo(rec.Step)
 			}
 		} else {
-			a.evidence.Record(evidence.ReceiptFromToolCall(call.Name, json.RawMessage(call.Arguments), err == nil, t.ReadOnly()))
+			rec := evidence.ReceiptFromToolCall(call.Name, json.RawMessage(call.Arguments), err == nil, t.ReadOnly())
+			a.evidence.Record(rec)
+			if err == nil && call.Name == "todo_write" {
+				a.setTodoState(rec.Todos)
+			}
 		}
 	}
 	// PostToolUse hooks observe the result (they can't block); fired whether the

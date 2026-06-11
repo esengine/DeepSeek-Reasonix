@@ -29,12 +29,20 @@ const (
 	listDeny  = "deny"
 )
 
-// SetDefaultModel points default_model at an existing provider. It errors if no
-// provider by that name is configured, so a UI can't strand the config on a
-// model that doesn't exist.
+// SetDefaultModel points default_model at an existing model. It accepts both
+// forms used by the runtime resolver:
+//   - "provider"          — the provider's own default model;
+//   - "provider/model"    — that specific model under that provider.
+//
+// Either is rejected when the target does not exist, so a UI can't strand
+// the config on a model that doesn't exist.
 func (c *Config) SetDefaultModel(name string) error {
-	if _, ok := c.Provider(name); !ok {
-		return fmt.Errorf("set default: no provider %q (configured: %s)", name, c.providerNames())
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("set default: empty name")
+	}
+	if _, ok := c.ResolveModel(name); !ok {
+		return fmt.Errorf("set default: no such model %q (configured: %s)", name, c.providerNames())
 	}
 	c.DefaultModel = name
 	return nil
@@ -69,6 +77,20 @@ func (c *Config) SetAutoPlan(mode string) error {
 	return nil
 }
 
+// SetUIShortcutLayout selects the CLI keyboard shortcut layout. "classic" keeps
+// historical behavior; "desktop" enables the two-axis desktop-style shortcuts.
+func (c *Config) SetUIShortcutLayout(layout string) error {
+	switch strings.ToLower(strings.TrimSpace(layout)) {
+	case "", "classic", "default", "legacy", "off":
+		c.UI.ShortcutLayout = "classic"
+	case "desktop", "dual", "dual-axis", "dual_axis":
+		c.UI.ShortcutLayout = "desktop"
+	default:
+		return fmt.Errorf("shortcut_layout %q: must be classic|desktop", layout)
+	}
+	return nil
+}
+
 // UpsertProvider adds e, or replaces an existing provider with the same name
 // (preserving its position). Required fields (name, kind, base_url, model/models)
 // are validated; whether the kind is actually registered and the key resolves is
@@ -92,7 +114,7 @@ func (c *Config) UpsertProvider(e ProviderEntry) error {
 func (c *Config) SetProviderEffort(name, effort string) error {
 	for i := range c.Providers {
 		if c.Providers[i].Name == name {
-			c.Providers[i].Effort = strings.ToLower(strings.TrimSpace(effort))
+			c.Providers[i].Effort = normalizeStoredEffort(effort)
 			return nil
 		}
 	}
@@ -149,7 +171,7 @@ func (c *Config) SetDesktopAppearance(theme, style string) error {
 	}
 	normalized := normalizeThemeStyle(style)
 	if normalized == "" {
-		return fmt.Errorf("desktop theme style %q: must be graphite|ember|aurora|midnight|sandstone|porcelain|linen|glacier", style)
+		return fmt.Errorf("desktop theme style %q: must be graphite|aurora|slate|carbon|nocturne|amber", style)
 	}
 	c.Desktop.ThemeStyle = normalized
 	return nil
@@ -170,9 +192,60 @@ func (c *Config) SetDesktopCloseBehavior(mode string) error {
 	return nil
 }
 
+// SetDesktopDisplayMode sets the transcript display mode. UI-only.
+func (c *Config) SetDesktopDisplayMode(mode string) error {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "compact":
+		c.Desktop.DisplayMode = "compact"
+	case "minimal":
+		c.Desktop.DisplayMode = "minimal"
+	case "", "standard":
+		c.Desktop.DisplayMode = "standard"
+	default:
+		return fmt.Errorf("display mode %q: must be standard|compact|minimal", mode)
+	}
+	return nil
+}
+
+// SetDesktopCheckUpdates sets whether the desktop app checks for updates on
+// startup. Manual checks remain available in Settings regardless of this value.
+func (c *Config) SetDesktopCheckUpdates(enabled bool) error {
+	c.Desktop.CheckUpdates = &enabled
+	return nil
+}
+
+// SetDesktopTelemetry sets whether the desktop sends the anonymous launch ping.
+func (c *Config) SetDesktopTelemetry(enabled bool) error {
+	c.Desktop.Telemetry = &enabled
+	return nil
+}
+
+// SetDesktopMetrics sets whether the desktop sends opt-in aggregate agent metrics.
+func (c *Config) SetDesktopMetrics(enabled bool) error {
+	c.Desktop.Metrics = &enabled
+	return nil
+}
+
 // SetUICloseBehavior is kept for callers compiled against the old edit API.
 func (c *Config) SetUICloseBehavior(mode string) error {
 	return c.SetDesktopCloseBehavior(mode)
+}
+
+// SetExpandThinking sets whether the desktop reasoning/thinking section is
+// expanded by default. It is desktop-only and must not affect CLI output or
+// provider-visible request data.
+func (c *Config) SetExpandThinking(on bool) error {
+	c.Desktop.ExpandThinking = on
+	return nil
+}
+
+// SetShowReasoning sets the CLI's default verbose-reasoning preference. When
+// true, thinking text is shown in the chat TUI on startup; when false (the
+// default), it stays collapsed until the user toggles it with Ctrl+O or
+// /verbose.
+func (c *Config) SetShowReasoning(on bool) error {
+	c.UI.ShowReasoning = on
+	return nil
 }
 
 // SetProviderThinking updates a provider's provider-specific thinking mode knob.

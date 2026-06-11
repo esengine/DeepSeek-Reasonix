@@ -1,0 +1,198 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1900" viewBox="0 0 1600 1900" role="img" aria-labelledby="title desc">
+  <title id="title">Reasonix approval authorization mock states</title>
+  <desc id="desc">Mock UI states for exact command approval, command-prefix approval, file mutation approval, dangerous command approval, and persisted permission notices.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#101113"/>
+      <stop offset="1" stop-color="#171a1d"/>
+    </linearGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#202327"/>
+      <stop offset="1" stop-color="#1a1d20"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#000000" flood-opacity="0.36"/>
+    </filter>
+    <style>
+      .page-title{font:700 42px Inter,Arial,sans-serif;fill:#f5f7fa}
+      .page-sub{font:400 20px Inter,Arial,sans-serif;fill:#a8b0ba}
+      .section-title{font:700 24px Inter,Arial,sans-serif;fill:#f4f6f8}
+      .muted{font:400 16px Inter,Arial,sans-serif;fill:#a5adb7}
+      .tiny{font:500 13px Inter,Arial,sans-serif;fill:#8d96a2}
+      .mono{font:500 15px "SFMono-Regular",Menlo,Consolas,monospace;fill:#dbe3ea}
+      .mono-small{font:500 13px "SFMono-Regular",Menlo,Consolas,monospace;fill:#cdd6df}
+      .label{font:600 15px Inter,Arial,sans-serif;fill:#f0f3f5}
+      .btn-text{font:600 15px Inter,Arial,sans-serif;fill:#f6f8fa}
+      .btn-rule{font:500 13px "SFMono-Regular",Menlo,Consolas,monospace;fill:#ffffff}
+      .key{font:800 13px "SFMono-Regular",Menlo,Consolas,monospace;fill:#141516}
+      .notice{font:600 17px Inter,Arial,sans-serif;fill:#eaf2ee}
+      .notice-rule{font:600 15px "SFMono-Regular",Menlo,Consolas,monospace;fill:#ffffff}
+    </style>
+  </defs>
+
+  <rect width="1600" height="1900" fill="url(#bg)"/>
+  <text x="80" y="88" class="page-title">Reasonix 授权交互 Mock</text>
+  <text x="80" y="126" class="page-sub">展示规则可见化、命令前缀授权、文件编辑共享授权、危险命令降级、持久化 Notice 与去重覆盖提示。</text>
+
+  <!-- Mock 1 -->
+  <g transform="translate(80 180)" filter="url(#shadow)">
+    <rect width="720" height="480" rx="18" fill="url(#card)" stroke="#3b424b"/>
+    <rect x="0" y="0" width="720" height="72" rx="18" fill="#252a30"/>
+    <text x="28" y="44" class="section-title">1. Bash：精简为前缀授权</text>
+    <text x="28" y="104" class="muted">Allow tool call</text>
+    <rect x="28" y="124" width="664" height="58" rx="10" fill="#15181b" stroke="#333942"/>
+    <text x="44" y="158" class="mono">bash — go test ./...</text>
+
+    <g transform="translate(28 210)">
+      <rect width="142" height="54" rx="9" fill="#5f4630" stroke="#ca8b45"/>
+      <circle cx="27" cy="27" r="13" fill="#f4a84b"/>
+      <text x="23" y="32" class="key">1</text>
+      <text x="52" y="32" class="btn-text">允许一次</text>
+    </g>
+    <g transform="translate(188 210)">
+      <rect width="230" height="74" rx="9" fill="#263328" stroke="#62a66e"/>
+      <circle cx="27" cy="28" r="13" fill="#76d083"/>
+      <text x="23" y="33" class="key">2</text>
+      <text x="52" y="26" class="btn-text">本会话允许</text>
+      <text x="52" y="52" class="btn-rule">Bash(go test:*)</text>
+    </g>
+    <g transform="translate(438 210)">
+      <rect width="264" height="74" rx="9" fill="#263328" stroke="#62a66e"/>
+      <circle cx="27" cy="28" r="13" fill="#76d083"/>
+      <text x="23" y="33" class="key">3</text>
+      <text x="52" y="26" class="btn-text">总是允许（保存）</text>
+      <text x="52" y="52" class="btn-rule">Bash(go test:*)</text>
+    </g>
+    <g transform="translate(28 312)">
+      <rect width="118" height="54" rx="9" fill="#302328" stroke="#8a4c58"/>
+      <circle cx="27" cy="27" r="13" fill="#ef6b7c"/>
+      <text x="23" y="32" class="key">4</text>
+      <text x="52" y="32" class="btn-text">拒绝</text>
+    </g>
+    <text x="28" y="438" class="tiny">效果：选择 2/3 后，后续 go test ./internal/control 不再重复弹审批。</text>
+  </g>
+
+  <!-- Mock 2 -->
+  <g transform="translate(840 180)" filter="url(#shadow)">
+    <rect width="720" height="480" rx="18" fill="url(#card)" stroke="#3b424b"/>
+    <rect x="0" y="0" width="720" height="72" rx="18" fill="#252a30"/>
+    <text x="28" y="44" class="section-title">2. CLI：同样展示具体规则</text>
+    <rect x="28" y="104" width="664" height="324" rx="12" fill="#0f1215" stroke="#343a42"/>
+    <text x="50" y="140" class="mono-small">⏸ 需要你的许可</text>
+    <text x="50" y="174" class="mono-small">将调用工具 bash go test ./...</text>
+    <text x="50" y="216" class="mono-small">1. 本次允许</text>
+    <text x="50" y="244" class="mono-small">2. 本会话允许 Bash(go test:*)</text>
+    <text x="50" y="272" class="mono-small">3. 总是允许 Bash(go test:*)（保存到配置）</text>
+    <text x="50" y="300" class="mono-small">4. 拒绝</text>
+    <text x="50" y="342" class="mono-small">选择 [1/2/3/4]（兼容 y/a/p/n）</text>
+    <text x="28" y="456" class="tiny">效果：终端用户不需要猜“授权范围”到底是什么。</text>
+  </g>
+
+  <!-- Mock 3 -->
+  <g transform="translate(80 720)" filter="url(#shadow)">
+    <rect width="720" height="480" rx="18" fill="url(#card)" stroke="#3b424b"/>
+    <rect x="0" y="0" width="720" height="72" rx="18" fill="#252a30"/>
+    <text x="28" y="44" class="section-title">3. 文件修改：session 共享，持久化按路径</text>
+    <text x="28" y="104" class="muted">Allow tool call</text>
+    <rect x="28" y="124" width="664" height="58" rx="10" fill="#15181b" stroke="#333942"/>
+    <text x="44" y="158" class="mono">edit_file — src/app.go</text>
+    <g transform="translate(28 218)">
+      <rect width="142" height="54" rx="9" fill="#5f4630" stroke="#ca8b45"/>
+      <circle cx="27" cy="27" r="13" fill="#f4a84b"/>
+      <text x="23" y="32" class="key">1</text>
+      <text x="52" y="32" class="btn-text">允许一次</text>
+    </g>
+    <g transform="translate(188 208)">
+      <rect width="238" height="74" rx="9" fill="#20252b" stroke="#4a5360"/>
+      <circle cx="27" cy="28" r="13" fill="#aeb7c2"/>
+      <text x="23" y="33" class="key">2</text>
+      <text x="52" y="26" class="btn-text">本会话允许</text>
+      <text x="52" y="52" class="btn-rule">Edit</text>
+    </g>
+    <g transform="translate(448 208)">
+      <rect width="244" height="74" rx="9" fill="#263328" stroke="#62a66e"/>
+      <circle cx="27" cy="28" r="13" fill="#76d083"/>
+      <text x="23" y="33" class="key">3</text>
+      <text x="52" y="26" class="btn-text">总是允许（保存）</text>
+      <text x="52" y="52" class="btn-rule">Edit(src/app.go)</text>
+    </g>
+    <g transform="translate(28 324)">
+      <rect width="118" height="54" rx="9" fill="#302328" stroke="#8a4c58"/>
+      <circle cx="27" cy="27" r="13" fill="#ef6b7c"/>
+      <text x="23" y="32" class="key">4</text>
+      <text x="52" y="32" class="btn-text">拒绝</text>
+    </g>
+    <text x="28" y="438" class="tiny">效果：本会话允许 edit/write/multi_edit 共享；保存时只允许这个路径。</text>
+  </g>
+
+  <!-- Mock 4 -->
+  <g transform="translate(840 720)" filter="url(#shadow)">
+    <rect width="720" height="480" rx="18" fill="url(#card)" stroke="#3b424b"/>
+    <rect x="0" y="0" width="720" height="72" rx="18" fill="#252a30"/>
+    <text x="28" y="44" class="section-title">4. 危险 Bash：不提供前缀授权</text>
+    <text x="28" y="104" class="muted">Allow tool call</text>
+    <rect x="28" y="124" width="664" height="58" rx="10" fill="#15181b" stroke="#63363f"/>
+    <text x="44" y="158" class="mono">bash — rm -rf /tmp/build</text>
+    <g transform="translate(28 218)">
+      <rect width="142" height="54" rx="9" fill="#5f4630" stroke="#ca8b45"/>
+      <circle cx="27" cy="27" r="13" fill="#f4a84b"/>
+      <text x="23" y="32" class="key">1</text>
+      <text x="52" y="32" class="btn-text">允许一次</text>
+    </g>
+    <g transform="translate(188 208)">
+      <rect width="258" height="74" rx="9" fill="#20252b" stroke="#4a5360"/>
+      <circle cx="27" cy="28" r="13" fill="#aeb7c2"/>
+      <text x="23" y="33" class="key">2</text>
+      <text x="52" y="26" class="btn-text">本会话允许</text>
+      <text x="52" y="52" class="btn-rule">Bash(rm -rf /tmp/build)</text>
+    </g>
+    <g transform="translate(468 208)">
+      <rect width="224" height="74" rx="9" fill="#263328" stroke="#62a66e"/>
+      <circle cx="27" cy="28" r="13" fill="#76d083"/>
+      <text x="23" y="33" class="key">3</text>
+      <text x="52" y="26" class="btn-text">总是允许（保存）</text>
+      <text x="52" y="52" class="btn-rule">Bash(rm -rf /tmp/build)</text>
+    </g>
+    <g transform="translate(28 324)">
+      <rect width="118" height="54" rx="9" fill="#302328" stroke="#8a4c58"/>
+      <circle cx="27" cy="27" r="13" fill="#ef6b7c"/>
+      <text x="23" y="32" class="key">4</text>
+      <text x="52" y="32" class="btn-text">拒绝</text>
+    </g>
+    <text x="28" y="438" class="tiny">效果：危险命令不会出现 Bash(rm -rf:*) 这种宽授权。</text>
+  </g>
+
+  <!-- Mock 5 -->
+  <g transform="translate(80 1260)" filter="url(#shadow)">
+    <rect width="720" height="420" rx="18" fill="url(#card)" stroke="#3b424b"/>
+    <rect x="0" y="0" width="720" height="72" rx="18" fill="#252a30"/>
+    <text x="28" y="44" class="section-title">5. 保存成功 Notice</text>
+    <rect x="28" y="112" width="664" height="92" rx="12" fill="#15251b" stroke="#4a9860"/>
+    <circle cx="60" cy="158" r="18" fill="#76d083"/>
+    <text x="54" y="165" class="key">i</text>
+    <text x="88" y="150" class="notice">授权已保存到 /workspace/reasonix.toml</text>
+    <text x="88" y="178" class="notice-rule">Bash(go test:*)</text>
+    <rect x="28" y="246" width="664" height="84" rx="12" fill="#101316" stroke="#333942"/>
+    <text x="48" y="280" class="mono-small">[permissions]</text>
+    <text x="48" y="308" class="mono-small">allow = ["Bash(go test:*)"]</text>
+    <text x="28" y="374" class="tiny">效果：用户知道写入的是项目配置，而不是用户全局配置。</text>
+  </g>
+
+  <!-- Mock 6 -->
+  <g transform="translate(840 1260)" filter="url(#shadow)">
+    <rect width="720" height="420" rx="18" fill="url(#card)" stroke="#3b424b"/>
+    <rect x="0" y="0" width="720" height="72" rx="18" fill="#252a30"/>
+    <text x="28" y="44" class="section-title">6. 已覆盖 / 去重 Notice</text>
+    <rect x="28" y="112" width="664" height="92" rx="12" fill="#17212a" stroke="#4b708f"/>
+    <circle cx="60" cy="158" r="18" fill="#80b7e8"/>
+    <text x="54" y="165" class="key">i</text>
+    <text x="88" y="150" class="notice">授权已由 /workspace/reasonix.toml 中的规则覆盖</text>
+    <text x="88" y="178" class="notice-rule">Bash(go test:*)</text>
+    <rect x="28" y="246" width="664" height="84" rx="12" fill="#101316" stroke="#333942"/>
+    <text x="48" y="280" class="mono-small">新请求：Bash(go test ./internal/control)</text>
+    <text x="48" y="308" class="mono-small">已有规则：Bash(go test:*)  → 不重复写入</text>
+    <text x="28" y="374" class="tiny">效果：配置不会因为多次“总是允许”越来越乱。</text>
+  </g>
+
+  <text x="80" y="1774" class="page-sub">这些 mock 对应当前实现：按钮显示具体 rule；prefix scope 只在安全可推导时出现；持久化后通过 Notice 显示保存路径或覆盖规则。</text>
+</svg>

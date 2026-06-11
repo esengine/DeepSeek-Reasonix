@@ -5,7 +5,9 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -74,13 +76,16 @@ func TestSha256For(t *testing.T) {
 	}
 }
 
-func TestSafeJoinRejectsTraversal(t *testing.T) {
-	dir := t.TempDir()
-	if _, err := safeJoin(dir, "../escape"); err == nil {
-		t.Fatal("safeJoin should reject ../escape")
+func TestResolveWithinRejectsTraversal(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err := safeJoin(dir, "bin/codegraph"); err != nil {
-		t.Fatalf("safeJoin rejected a normal path: %v", err)
+	if _, err := resolveWithin(root, "../escape"); err == nil {
+		t.Fatal("resolveWithin should reject ../escape")
+	}
+	if _, err := resolveWithin(root, "bin/codegraph"); err != nil {
+		t.Fatalf("resolveWithin rejected a normal path: %v", err)
 	}
 }
 
@@ -166,6 +171,79 @@ func TestInstallReturnsCachedWithoutNetwork(t *testing.T) {
 	// Resolve should also find it (no override, cache wins).
 	if p, ok := Resolve(""); !ok || p != launcher {
 		t.Fatalf("Resolve = %q, %v; want %q", p, ok, launcher)
+	}
+}
+
+func TestDownloadAssetUsesEmbeddedChecksumAndMirrorFallback(t *testing.T) {
+	asset := assetName()
+	body := []byte("verified codegraph payload")
+	sum := sha256.Sum256(body)
+	prev, hadPrev := releaseAssetSHA256[asset]
+	releaseAssetSHA256[asset] = fmt.Sprintf("%x", sum)
+	t.Cleanup(func() {
+		if hadPrev {
+			releaseAssetSHA256[asset] = prev
+		} else {
+			delete(releaseAssetSHA256, asset)
+		}
+	})
+
+	bad := httptest.NewServer(http.NotFoundHandler())
+	defer bad.Close()
+	good := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/"+asset) {
+			t.Fatalf("download path = %q, want asset suffix", r.URL.Path)
+		}
+		w.Write(body)
+	}))
+	defer good.Close()
+
+	got, err := downloadAssetFromBases(context.Background(), http.DefaultClient, asset, fmt.Sprintf("%x", sum), []string{bad.URL, good.URL}, nil)
+	if err != nil {
+		t.Fatalf("downloadAsset: %v", err)
+	}
+	if string(got) != string(body) {
+		t.Fatalf("downloadAsset body = %q, want %q", got, body)
+	}
+}
+
+func TestDownloadAssetRejectsMirrorChecksumMismatch(t *testing.T) {
+	asset := assetName()
+	prev, hadPrev := releaseAssetSHA256[asset]
+	releaseAssetSHA256[asset] = strings.Repeat("0", 64)
+	t.Cleanup(func() {
+		if hadPrev {
+			releaseAssetSHA256[asset] = prev
+		} else {
+			delete(releaseAssetSHA256, asset)
+		}
+	})
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("tampered"))
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if _, err := downloadAssetFromBases(ctx, http.DefaultClient, asset, strings.Repeat("0", 64), []string{srv.URL}, nil); err == nil {
+		t.Fatal("downloadAsset accepted a checksum mismatch")
+	}
+}
+
+func TestDownloadBasesUseOfficialSourcesBeforeGitHub(t *testing.T) {
+	got := downloadBases()
+	want := []string{
+		officialMirrorBase + "/" + Version,
+		fmt.Sprintf("https://github.com/%s/releases/download/%s", cgRepo, Version),
+	}
+	if len(got) != len(want) {
+		t.Fatalf("downloadBases = %#v, want %#v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("downloadBases[%d] = %q, want %q (all=%#v)", i, got[i], want[i], got)
+		}
 	}
 }
 

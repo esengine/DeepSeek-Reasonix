@@ -1,4 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
+import { Command, Search } from "lucide-react";
+import { useMountTransition } from "../lib/useMountTransition";
 
 // CommandPalette is a ⌘K / Ctrl+K modal that surfaces the desktop app's
 // long-tail navigation surface. Tabs through sessions, slash-commands, and
@@ -25,6 +28,14 @@ export interface PaletteItem {
   title: string;
   // hint is the secondary line (a path, a command's source, etc.).
   hint?: string;
+  // meta is right-aligned secondary text (e.g. a timestamp).
+  meta?: string;
+  // badge is a right-aligned counter or label (e.g. turn count).
+  badge?: string;
+  // icon overrides the default Command icon shown on the left.
+  icon?: ReactNode;
+  // compact renders the item as a grid chip (icon + title, no hint/meta).
+  compact?: boolean;
   // group is the section header this item belongs to.
   group: string;
   // keywords add to the searchable text (e.g. slash-command aliases).
@@ -49,6 +60,9 @@ export function CommandPalette({
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  // Keep the palette mounted through its exit animation after `open` flips
+  // false; `status` drives the enter/exit keyframes via data-state.
+  const { mounted, status } = useMountTransition(open, 200);
 
   // Re-init whenever the palette opens: clear the query, reset the
   // highlight, and steal focus. Doing it on the open edge (not on every
@@ -158,16 +172,22 @@ export function CommandPalette({
     return () => document.removeEventListener("keydown", onKey);
   }, [open, flat, active, onClose]);
 
-  if (!open) return null;
+  if (!mounted) return null;
 
   // The running counter maps a flat-index back to its group header so we
   // can render the section dividers in order.
   let running = 0;
 
   return (
-    <div className="drawer-backdrop" onClick={onClose} role="presentation">
-      <div className="palette" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label={placeholder}>
+    <div
+      className="drawer-backdrop"
+      data-state={status}
+      onClick={onClose}
+      role="presentation"
+    >
+      <div className="palette" data-state={status} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label={placeholder}>
         <div className="palette__inputrow">
+          <Search className="palette__search-icon" size={18} aria-hidden="true" />
           <input
             ref={inputRef}
             className="palette__input"
@@ -183,32 +203,74 @@ export function CommandPalette({
           {flat.length === 0 ? (
             <div className="palette__empty">{emptyText}</div>
           ) : (
-            grouped.map((g) => (
-              <div className="palette__group" key={g.group}>
+            grouped.map((g) => {
+              const isCompact = g.items[0]?.compact;
+              return (
+              <div className={`palette__group ${isCompact ? "palette__group--grid" : ""}`} key={g.group}>
                 <div className="palette__group-title">{g.group}</div>
-                {g.items.map((it) => {
-                  const idx = running++;
-                  const on = idx === active;
-                  return (
-                    <button
-                      type="button"
-                      role="option"
-                      aria-selected={on}
-                      key={it.id}
-                      className={`palette__item ${on ? "palette__item--on" : ""}`}
-                      onMouseEnter={() => setActive(idx)}
-                      onClick={() => {
-                        void it.run();
-                        onClose();
-                      }}
-                    >
-                      <span className="palette__title">{it.title}</span>
-                      {it.hint && <span className="palette__hint">{it.hint}</span>}
-                    </button>
-                  );
-                })}
+                {isCompact ? (
+                  <div className="palette__grid">
+                  {g.items.map((it) => {
+                    const idx = running++;
+                    const on = idx === active;
+                    return (
+                      <button
+                        type="button"
+                        role="option"
+                        aria-selected={on}
+                        key={it.id}
+                        className={`palette__chip ${on ? "palette__chip--on" : ""}`}
+                        onMouseEnter={() => setActive(idx)}
+                        onClick={() => {
+                          void it.run();
+                          onClose();
+                        }}
+                      >
+                        <span className="palette__chip-icon" aria-hidden="true">
+                          {it.icon ?? <Command size={15} />}
+                        </span>
+                        <span className="palette__chip-label">{it.title}</span>
+                      </button>
+                    );
+                  })}
+                  </div>
+                ) : (
+                  g.items.map((it) => {
+                    const idx = running++;
+                    const on = idx === active;
+                    return (
+                      <button
+                        type="button"
+                        role="option"
+                        aria-selected={on}
+                        key={it.id}
+                        className={`palette__item ${on ? "palette__item--on" : ""}`}
+                        onMouseEnter={() => setActive(idx)}
+                        onClick={() => {
+                          void it.run();
+                          onClose();
+                        }}
+                      >
+                        <span className="palette__item-icon" aria-hidden="true">
+                          {it.icon ?? <Command size={15} />}
+                        </span>
+                        <span className="palette__body">
+                          <span className="palette__title">{it.title}</span>
+                          {(it.hint || it.meta || it.badge) && (
+                            <span className="palette__hint">
+                              {it.hint && <span className="palette__hint-text">{it.hint}</span>}
+                              {it.meta && <span className="palette__meta">{it.meta}</span>}
+                              {it.badge && <span className="palette__badge">{it.badge}</span>}
+                            </span>
+                          )}
+                        </span>
+                      </button>
+                    );
+                  })
+                )}
               </div>
-            ))
+              );
+            })
           )}
         </div>
         <div className="palette__foot">

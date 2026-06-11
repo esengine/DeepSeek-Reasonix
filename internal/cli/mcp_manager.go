@@ -364,8 +364,6 @@ func (m chatTUI) buildMCPSnapshot() mcpSnapshot {
 		status := "initializing"
 		if m.mcpDisabled["codegraph"] || !loadedCfg.Codegraph.Enabled {
 			status = "disabled"
-		} else if loadedCfg.Codegraph.ResolvedTier() == "lazy" {
-			status = "deferred"
 		}
 		snap.servers = append(snap.servers, withMCPCodegraphConfig(mcpServerView{
 			Name: "codegraph", Status: status,
