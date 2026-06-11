@@ -496,6 +496,9 @@ func (a *App) loadDesktopUserConfigForEdit() (*config.Config, string, error) {
 	if _, err := os.Stat(userPath); err == nil {
 		cfg := config.LoadForEdit(userPath)
 		normalizeLegacyDesktopProviderAccessForSettings(cfg, userPath)
+		if err := a.migrateLegacyBotConfigToUser(cfg, userPath); err != nil {
+			return nil, "", err
+		}
 		return cfg, userPath, nil
 	}
 	cfg := config.LoadForEdit(userPath)
@@ -508,6 +511,60 @@ func (a *App) loadDesktopUserConfigForEdit() (*config.Config, string, error) {
 	normalizeLegacyDesktopProviderAccessForSettings(legacyCfg, legacyPath)
 	legacyCfg.ConfigVersion = config.Default().ConfigVersion
 	return legacyCfg, userPath, nil
+}
+
+func (a *App) migrateLegacyBotConfigToUser(userCfg *config.Config, userPath string) error {
+	if userCfg == nil || desktopBotConfigConfigured(userCfg.Bot) {
+		return nil
+	}
+	legacyPath := config.SourcePathForRoot(a.activeWorkspaceRoot())
+	if legacyPath == "" || sameConfigPath(legacyPath, userPath) {
+		return nil
+	}
+	legacyCfg := config.LoadForEdit(legacyPath)
+	if !desktopBotConfigConfigured(legacyCfg.Bot) {
+		return nil
+	}
+	userCfg.Bot = legacyCfg.Bot
+	if err := userCfg.SaveTo(userPath); err != nil {
+		return fmt.Errorf("migrate legacy bot config: %w", err)
+	}
+	return nil
+}
+
+func desktopBotConfigConfigured(bot config.BotConfig) bool {
+	defaults := config.Default().Bot
+	if bot.Enabled || strings.TrimSpace(bot.Model) != "" || len(bot.Connections) > 0 {
+		return true
+	}
+	if (bot.MaxSteps != 0 && bot.MaxSteps != defaults.MaxSteps) || (bot.DebounceMs != 0 && bot.DebounceMs != defaults.DebounceMs) {
+		return true
+	}
+	if bot.Allowlist.AllowAll ||
+		len(bot.Allowlist.QQUsers)+len(bot.Allowlist.FeishuUsers)+len(bot.Allowlist.WeixinUsers) > 0 ||
+		len(bot.Allowlist.QQGroups)+len(bot.Allowlist.FeishuGroups)+len(bot.Allowlist.WeixinGroups) > 0 {
+		return true
+	}
+	if bot.QQ.Enabled || strings.TrimSpace(bot.QQ.AppID) != "" || bot.QQ.AppSecretEnv != defaults.QQ.AppSecretEnv {
+		return true
+	}
+	if bot.Feishu.Enabled ||
+		strings.TrimSpace(bot.Feishu.AppID) != "" ||
+		bot.Feishu.Domain != defaults.Feishu.Domain ||
+		bot.Feishu.AppSecretEnv != defaults.Feishu.AppSecretEnv ||
+		strings.TrimSpace(bot.Feishu.VerificationToken) != "" ||
+		bot.Feishu.Mode != defaults.Feishu.Mode ||
+		bot.Feishu.WebhookPort != defaults.Feishu.WebhookPort ||
+		bot.Feishu.RequireMention != defaults.Feishu.RequireMention {
+		return true
+	}
+	if bot.Weixin.Enabled ||
+		bot.Weixin.AccountID != defaults.Weixin.AccountID ||
+		bot.Weixin.TokenEnv != defaults.Weixin.TokenEnv ||
+		bot.Weixin.APIBase != defaults.Weixin.APIBase {
+		return true
+	}
+	return false
 }
 
 func normalizeLegacyDesktopProviderAccessForSettings(cfg *config.Config, path string) {

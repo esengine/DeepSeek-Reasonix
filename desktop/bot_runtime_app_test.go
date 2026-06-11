@@ -98,6 +98,108 @@ enabled = false
 	}
 }
 
+func TestDesktopBotRuntimeMigratesLegacyProjectBotSettings(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	userCfg := config.Default()
+	if err := userCfg.SetDesktopAppearance("dark", "graphite"); err != nil {
+		t.Fatalf("set desktop appearance: %v", err)
+	}
+	if err := userCfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save user config: %v", err)
+	}
+
+	project := robustTempDir(t)
+	if err := os.WriteFile(filepath.Join(project, "reasonix.toml"), []byte(`
+[bot]
+enabled = true
+
+[bot.allowlist]
+enabled = true
+feishu_users = ["ou-legacy"]
+
+[[bot.connections]]
+id = "feishu-lark"
+provider = "feishu"
+domain = "lark"
+label = "Lark"
+enabled = true
+status = "connected"
+`), 0o644); err != nil {
+		t.Fatalf("write project config: %v", err)
+	}
+
+	orig, _ := os.Getwd()
+	defer func() { _ = os.Chdir(orig) }()
+	if err := os.Chdir(project); err != nil {
+		t.Fatalf("chdir project: %v", err)
+	}
+
+	got, err := NewApp().loadDesktopBotConfig()
+	if err != nil {
+		t.Fatalf("load desktop bot config: %v", err)
+	}
+	if !got.Bot.Enabled || len(got.Bot.Connections) != 1 || got.Bot.Connections[0].ID != "feishu-lark" {
+		t.Fatalf("desktop bot config = %+v, want migrated legacy Lark connection", got.Bot)
+	}
+
+	persisted := config.LoadForEdit(config.UserConfigPath())
+	if !persisted.Bot.Enabled || len(persisted.Bot.Connections) != 1 || persisted.Bot.Connections[0].ID != "feishu-lark" {
+		t.Fatalf("persisted bot config = %+v, want migrated legacy Lark connection", persisted.Bot)
+	}
+	if persisted.DesktopTheme() != "dark" {
+		t.Fatalf("desktop theme = %q, want preserved user preference", persisted.DesktopTheme())
+	}
+}
+
+func TestDesktopBotRuntimeMigrationDoesNotOverwriteUserBotSettings(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	userCfg := config.Default()
+	userCfg.Bot.Enabled = true
+	userCfg.Bot.Allowlist.Enabled = true
+	userCfg.Bot.Allowlist.WeixinUsers = []string{"wx-user"}
+	userCfg.Bot.Connections = []config.BotConnectionConfig{
+		{ID: "weixin-weixin", Provider: "weixin", Domain: "weixin", Enabled: true, Status: "connected"},
+	}
+	if err := userCfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save user config: %v", err)
+	}
+
+	project := robustTempDir(t)
+	if err := os.WriteFile(filepath.Join(project, "reasonix.toml"), []byte(`
+[bot]
+enabled = true
+
+[bot.allowlist]
+enabled = true
+feishu_users = ["ou-legacy"]
+
+[[bot.connections]]
+id = "feishu-lark"
+provider = "feishu"
+domain = "lark"
+enabled = true
+status = "connected"
+`), 0o644); err != nil {
+		t.Fatalf("write project config: %v", err)
+	}
+
+	orig, _ := os.Getwd()
+	defer func() { _ = os.Chdir(orig) }()
+	if err := os.Chdir(project); err != nil {
+		t.Fatalf("chdir project: %v", err)
+	}
+
+	got, err := NewApp().loadDesktopBotConfig()
+	if err != nil {
+		t.Fatalf("load desktop bot config: %v", err)
+	}
+	if len(got.Bot.Connections) != 1 || got.Bot.Connections[0].ID != "weixin-weixin" {
+		t.Fatalf("desktop bot config = %+v, want existing user WeChat connection", got.Bot)
+	}
+}
+
 func TestSummarizeBotRuntimeErrorsCapsOutput(t *testing.T) {
 	got := summarizeBotRuntimeErrors([]error{
 		errors.New("first"),
