@@ -3406,9 +3406,25 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 			break
 		}
 		for _, a := range m.orc.Agents() {
-			usage := a.SessionUsage()
-			m.commitLine(fmt.Sprintf("  %s: prompt=%d completion=%d total=%d cost=%.4f",
-				a.Name, usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens, usage.Cost))
+			u := a.SessionUsage()
+			if u.TotalTokens == 0 {
+				m.commitLine(fmt.Sprintf("  %s: no usage yet", a.Name))
+				continue
+			}
+			cacheCol := ""
+			if u.CacheHitTokens+u.CacheMissTokens > 0 {
+				cacheCol = fmt.Sprintf(" (%d cached / %d new)", u.CacheHitTokens, u.CacheMissTokens)
+			}
+			reasoning := ""
+			if u.ReasoningTokens > 0 {
+				reasoning = fmt.Sprintf(" (%d reasoning)", u.ReasoningTokens)
+			}
+			cost := ""
+			if u.Cost > 0 {
+				cost = fmt.Sprintf(" · %s%.4f", u.Currency, u.Cost)
+			}
+			m.commitLine(fmt.Sprintf("  %s: %d tok · in %d%s · out %d%s%s",
+				a.Name, u.TotalTokens, u.PromptTokens, cacheCol, u.CompletionTokens, reasoning, cost))
 		}
 	case "/quit", "/exit":
 		return tea.Quit
