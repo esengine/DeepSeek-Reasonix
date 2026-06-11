@@ -83,6 +83,11 @@ const (
 	// event — or TurnDone — clears. Appended last to keep the Kind values before
 	// it wire-stable.
 	Retrying
+	// Steer fires when a mid-turn steer message is consumed from the queue and
+	// injected as a user message. Text carries the raw steer content (without the
+	// wrapper prefix), so a frontend can display it to the user as confirmation.
+	// Frontends use Steer to know a queued message has been delivered.
+	Steer
 )
 
 // Level classifies a Notice so sinks can style or filter it.

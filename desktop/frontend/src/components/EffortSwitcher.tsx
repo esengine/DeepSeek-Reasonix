@@ -1,9 +1,8 @@
-import { useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, ChevronsUpDown, Gauge } from "lucide-react";
 import { asArray } from "../lib/array";
-import { useT } from "../lib/i18n";
 import type { EffortInfo } from "../lib/types";
-import { AnchoredPopover } from "./AnchoredPopover";
+import { ANCHORED_POPOVER_CLOSE_MS, AnchoredPopover } from "./AnchoredPopover";
 
 export function EffortSwitcher({
   effort,
@@ -14,17 +13,46 @@ export function EffortSwitcher({
   disabled: boolean;
   onPick: (level: string) => void;
 }) {
-  const t = useT();
   const [open, setOpen] = useState(false);
+  const [closing, setClosing] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const closeTimerRef = useRef<number | null>(null);
   const levels = asArray(effort?.levels);
-  if (!effort?.supported || levels.length === 0) return null;
+  const current = effort?.current || "auto";
 
-  const current = effort.current || "auto";
+  const clearCloseTimer = useCallback(() => {
+    if (closeTimerRef.current === null) return;
+    window.clearTimeout(closeTimerRef.current);
+    closeTimerRef.current = null;
+  }, []);
+
+  const openMenu = useCallback(() => {
+    clearCloseTimer();
+    setClosing(false);
+    setOpen(true);
+  }, [clearCloseTimer]);
+
+  const closeMenu = useCallback((afterClose?: () => void) => {
+    clearCloseTimer();
+    setClosing(true);
+    window.requestAnimationFrame(() => setOpen(false));
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    closeTimerRef.current = window.setTimeout(() => {
+      closeTimerRef.current = null;
+      setClosing(false);
+      afterClose?.();
+    }, reduceMotion ? 0 : ANCHORED_POPOVER_CLOSE_MS);
+  }, [clearCloseTimer]);
+
+  useEffect(() => () => clearCloseTimer(), [clearCloseTimer]);
+
   const pick = (level: string) => {
-    setOpen(false);
-    if (level !== current) onPick(level);
+    closeMenu(() => {
+      if (level !== current) onPick(level);
+    });
   };
+
+  if (!effort?.supported || levels.length === 0) return null;
 
   return (
     <div className="modelsw effortsw">
@@ -33,17 +61,18 @@ export function EffortSwitcher({
         type="button"
         className={`modelsw__trigger effortsw__trigger ${current !== "auto" ? "effortsw__trigger--explicit" : ""}`}
         disabled={disabled}
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open && !closing}
+        onClick={() => (open || closing ? closeMenu() : openMenu())}
       >
         <Gauge size={13} className="modelsw__kind" />
-        <span className="modelsw__label">{t("status.effort", { level: current })}</span>
+        <span className="modelsw__label">{current}</span>
         <ChevronsUpDown size={11} />
       </button>
       <AnchoredPopover
         open={open && !disabled}
+        closing={closing}
         anchorRef={triggerRef}
-        onClose={() => setOpen(false)}
+        onClose={() => closeMenu()}
         className="modelsw__menu modelsw__menu--portal effortsw__menu"
         align="end"
       >

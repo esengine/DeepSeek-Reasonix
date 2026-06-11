@@ -56,14 +56,17 @@ type Config struct {
 	Codegraph     CodegraphConfig     `toml:"codegraph"`
 	Statusline    StatuslineConfig    `toml:"statusline"`
 	LSP           LSPConfig           `toml:"lsp"`
+	Bot           BotConfig           `toml:"bot"`
 }
 
 // UIConfig controls CLI presentation-only settings. Desktop appearance is kept in
 // DesktopConfig so desktop preferences cannot alter terminal output or prompts.
 type UIConfig struct {
-	Theme         string `toml:"theme"`          // auto|dark|light; empty resolves to auto
-	ThemeStyle    string `toml:"theme_style"`    // graphite|ember|aurora|midnight|sandstone|porcelain|linen|glacier
-	CloseBehavior string `toml:"close_behavior"` // legacy desktop close behavior; prefer desktop.close_behavior
+	Theme          string `toml:"theme"`           // auto|dark|light; empty resolves to auto
+	ThemeStyle     string `toml:"theme_style"`     // graphite|aurora|slate|carbon|nocturne|amber and legacy aliases
+	ShortcutLayout string `toml:"shortcut_layout"` // classic|desktop; accepted for compatibility
+	CloseBehavior  string `toml:"close_behavior"`  // legacy desktop close behavior; prefer desktop.close_behavior
+	ShowReasoning  bool   `toml:"show_reasoning"`  // Ctrl+O / /verbose: show thinking text in CLI; false = collapsed
 }
 
 // DesktopConfig controls desktop-only UI preferences. It is intentionally
@@ -72,9 +75,13 @@ type UIConfig struct {
 type DesktopConfig struct {
 	Language       string   `toml:"language"`        // auto|en|zh; empty/auto = browser/OS auto-detect
 	Theme          string   `toml:"theme"`           // auto|dark|light; empty resolves to dark
-	ThemeStyle     string   `toml:"theme_style"`     // graphite|ember|aurora|midnight|sandstone|porcelain|linen|glacier
+	ThemeStyle     string   `toml:"theme_style"`     // graphite|aurora|slate|carbon|nocturne|amber and legacy aliases
 	CloseBehavior  string   `toml:"close_behavior"`  // quit|background; desktop window close behavior
+	DisplayMode    string   `toml:"display_mode"`    // standard|compact|minimal; transcript display mode
+	CheckUpdates   *bool    `toml:"check_updates"`   // startup update checks; nil keeps the default enabled
+	Telemetry      *bool    `toml:"telemetry"`       // anonymous launch ping (install id + version + OS); nil keeps the default enabled
 	ProviderAccess []string `toml:"provider_access"` // desktop-only list of provider entries shown in Settings > Model > Access
+	ExpandThinking bool     `toml:"expand_thinking"` // true = show reasoning text expanded by default; false = collapsed
 }
 
 // NotificationsConfig controls optional system notifications for CLI chat/run.
@@ -103,9 +110,21 @@ func (c *Config) UIThemeStyle() string {
 	return normalizeThemeStyle(c.UI.ThemeStyle)
 }
 
+// UIShortcutLayout normalizes the legacy CLI shortcut layout setting. It is kept
+// for compatibility; Shift+Tab toggles Plan and Ctrl+Y toggles YOLO in both
+// layouts.
+func (c *Config) UIShortcutLayout() string {
+	switch strings.ToLower(strings.TrimSpace(c.UI.ShortcutLayout)) {
+	case "desktop", "dual", "dual-axis", "dual_axis":
+		return "desktop"
+	default:
+		return "classic"
+	}
+}
+
 func normalizeThemeStyle(style string) string {
 	switch strings.ToLower(strings.TrimSpace(style)) {
-	case "graphite", "ember", "aurora", "midnight", "sandstone", "porcelain", "linen", "glacier":
+	case "graphite", "aurora", "slate", "carbon", "nocturne", "amber", "ember", "midnight", "sandstone", "porcelain", "linen", "glacier":
 		return strings.ToLower(strings.TrimSpace(style))
 	default:
 		return ""
@@ -135,7 +154,7 @@ func (c *Config) DesktopLanguage() string {
 	}
 }
 
-// DesktopTheme normalizes desktop.theme. New desktop users default to the dark
+// DesktopTheme normalizes desktop.theme. New desktop users default to the light
 // graphite product look; an explicit auto/light/dark is preserved.
 func (c *Config) DesktopTheme() string {
 	switch strings.ToLower(strings.TrimSpace(c.Desktop.Theme)) {
@@ -146,7 +165,7 @@ func (c *Config) DesktopTheme() string {
 	case "dark":
 		return "dark"
 	default:
-		return "dark"
+		return "light"
 	}
 }
 
@@ -169,6 +188,39 @@ func (c *Config) DesktopCloseBehavior() string {
 // UICloseBehavior is the legacy name for DesktopCloseBehavior.
 func (c *Config) UICloseBehavior() string {
 	return c.DesktopCloseBehavior()
+}
+
+// DesktopDisplayMode normalizes the transcript display mode. Default is
+// "minimal" (collapsed model-generated intermediate items).
+func (c *Config) DesktopDisplayMode() string {
+	switch strings.ToLower(strings.TrimSpace(c.Desktop.DisplayMode)) {
+	case "standard":
+		return "standard"
+	case "compact":
+		return "compact"
+	case "minimal":
+		return "minimal"
+	default:
+		return "minimal"
+	}
+}
+
+// DesktopCheckUpdates reports whether the desktop should check for updates on
+// startup. Missing configs default to true so existing users keep update notices.
+func (c *Config) DesktopCheckUpdates() bool {
+	if c == nil || c.Desktop.CheckUpdates == nil {
+		return true
+	}
+	return *c.Desktop.CheckUpdates
+}
+
+// DesktopTelemetry reports whether the desktop sends the anonymous launch ping.
+// It carries no conversation, key, or file data — see desktop/README.md.
+func (c *Config) DesktopTelemetry() bool {
+	if c == nil || c.Desktop.Telemetry == nil {
+		return true
+	}
+	return *c.Desktop.Telemetry
 }
 
 // LSPConfig governs the optional Language Server Protocol tools (lsp_definition,
@@ -228,8 +280,93 @@ func (c CodegraphConfig) ResolvedTier() string {
 	return "background"
 }
 
-// NetworkConfig controls outbound HTTP proxy settings. web_fetch reuses these
-// proxy settings while keeping its own SSRF-guarded dialer.
+// BotConfig 控制多渠道 IM bot 消息网关。
+type BotConfig struct {
+	Enabled     bool                  `toml:"enabled"`
+	Model       string                `toml:"model"` // 用于 bot 的模型名，空则用 default_model
+	MaxSteps    int                   `toml:"max_steps"`
+	DebounceMs  int                   `toml:"debounce_ms"` // 消息合并窗口，毫秒
+	Allowlist   BotAllowlist          `toml:"allowlist"`
+	QQ          QQBotConfig           `toml:"qq"`
+	Feishu      FeishuBotConfig       `toml:"feishu"`
+	Weixin      WeixinBotConfig       `toml:"weixin"`
+	Connections []BotConnectionConfig `toml:"connections"`
+}
+
+// BotAllowlist 控制哪些用户可以使用 bot。
+type BotAllowlist struct {
+	Enabled      bool     `toml:"enabled"`
+	AllowAll     bool     `toml:"allow_all"`
+	QQUsers      []string `toml:"qq_users"`
+	FeishuUsers  []string `toml:"feishu_users"`
+	WeixinUsers  []string `toml:"weixin_users"`
+	QQGroups     []string `toml:"qq_groups"`
+	FeishuGroups []string `toml:"feishu_groups"`
+	WeixinGroups []string `toml:"weixin_groups"`
+}
+
+// QQBotConfig QQ 官方 Bot API v2 配置。
+type QQBotConfig struct {
+	Enabled      bool   `toml:"enabled"`
+	AppID        string `toml:"app_id"`
+	AppSecretEnv string `toml:"app_secret_env"` // 环境变量名，如 QQ_BOT_APP_SECRET
+}
+
+// FeishuBotConfig 飞书自建应用 Bot 配置。
+type FeishuBotConfig struct {
+	Enabled           bool   `toml:"enabled"`
+	Domain            string `toml:"domain"` // feishu（默认）| lark
+	AppID             string `toml:"app_id"`
+	AppSecretEnv      string `toml:"app_secret_env"`     // 如 FEISHU_BOT_APP_SECRET
+	VerificationToken string `toml:"verification_token"` // 事件订阅验证 token
+	Mode              string `toml:"mode"`               // webhook（默认）| websocket
+	WebhookPort       int    `toml:"webhook_port"`       // webhook 模式端口
+	RequireMention    bool   `toml:"require_mention"`
+}
+
+// WeixinBotConfig 微信 iLink Bot 配置。
+type WeixinBotConfig struct {
+	Enabled   bool   `toml:"enabled"`
+	AccountID string `toml:"account_id"`
+	TokenEnv  string `toml:"token_env"` // 环境变量名，如 WEIXIN_BOT_TOKEN
+	APIBase   string `toml:"api_base"`  // iLink API base URL
+}
+
+// BotConnectionConfig is the desktop-friendly connection record for IM bot
+// channels. It keeps install/runtime state separate from legacy per-provider
+// knobs so the UI can expose a simple "connect first" flow while old configs
+// keep working.
+type BotConnectionConfig struct {
+	ID              string                        `toml:"id"`
+	Provider        string                        `toml:"provider"` // qq|feishu|weixin
+	Domain          string                        `toml:"domain"`   // feishu|lark|weixin|qq
+	Label           string                        `toml:"label"`
+	Enabled         bool                          `toml:"enabled"`
+	Status          string                        `toml:"status"` // disconnected|pending|connected|error
+	Credential      BotConnectionCredential       `toml:"credential"`
+	SessionMappings []BotConnectionSessionMapping `toml:"session_mappings"`
+	LastError       string                        `toml:"last_error"`
+	CreatedAt       string                        `toml:"created_at"`
+	UpdatedAt       string                        `toml:"updated_at"`
+}
+
+type BotConnectionCredential struct {
+	AppID        string `toml:"app_id"`
+	AppSecretEnv string `toml:"app_secret_env"`
+	AccountID    string `toml:"account_id"`
+	TokenEnv     string `toml:"token_env"`
+}
+
+type BotConnectionSessionMapping struct {
+	RemoteID  string `toml:"remote_id"`
+	SessionID string `toml:"session_id"`
+	UpdatedAt string `toml:"updated_at"`
+}
+
+// NetworkConfig controls ordinary outbound HTTP traffic such as model providers,
+// wallet-balance lookups, updater checks, CodeGraph downloads, and web_fetch.
+// web_fetch reuses these proxy settings while keeping its own SSRF-guarded
+// dialer.
 type NetworkConfig struct {
 	// ProxyMode is "auto" (default; environment proxy for now), "env", "custom",
 	// or "off". auto leaves room for OS proxy detection later without changing the
@@ -271,7 +408,17 @@ func (c *Config) NetworkProxySpec() netclient.ProxySpec {
 
 // directProxyHosts collects the base_url hosts of providers marked no_proxy, so
 // netclient bypasses the proxy for them without knowing any provider by name.
+//
+// Only for an auto-detected proxy (auto/env): that proxy is typically a
+// GFW-circumvention one not meant for domestic endpoints (e.g. mimo), so keep
+// them direct. An explicit proxy_mode = "custom" is the user saying "route
+// everything through this" — e.g. a mandatory corporate proxy — so honor it for
+// every provider; a custom-proxy user who wants a host direct uses
+// network.no_proxy instead (#3635).
 func (c *Config) directProxyHosts() []string {
+	if c.NetworkProxyMode() == netclient.ModeCustom {
+		return nil
+	}
 	seen := map[string]bool{}
 	var out []string
 	for _, p := range c.Providers {
@@ -738,7 +885,10 @@ guessing; keep changes minimal and correct; briefly summarize what you did.
 When the request leaves a real choice to the user — which approach or library,
 the scope, or a consequential or ambiguous decision — call the ask tool to offer
 2-4 concrete options rather than guessing or burying the question in prose. Skip
-it when there's an obvious default; don't ask just to confirm.
+it when there's an obvious default; don't ask just to confirm. Approval-bypass
+modes do not answer ask questions or approve plans for the user. If no
+interactive user is available, the ask tool returns a model-assumption fallback;
+state the assumption you made before proceeding.
 For multi-step work, track progress with the todo_write tool: lay out the steps,
 keep exactly one in_progress, and flip each to completed as you finish it — update
 the list as you go, not just at the end.
@@ -797,6 +947,14 @@ func Default() *Config {
 		// a missing server yields an install hint rather than an error.
 		LSP:     LSPConfig{Enabled: true},
 		Network: NetworkConfig{ProxyMode: netclient.ModeAuto},
+		Bot: BotConfig{
+			MaxSteps:   25,
+			DebounceMs: 1500,
+			Allowlist:  BotAllowlist{Enabled: true},
+			QQ:         QQBotConfig{AppSecretEnv: "QQ_BOT_APP_SECRET"},
+			Feishu:     FeishuBotConfig{Domain: "feishu", AppSecretEnv: "FEISHU_BOT_APP_SECRET", Mode: "webhook", WebhookPort: 8080, RequireMention: true},
+			Weixin:     WeixinBotConfig{AccountID: "default", TokenEnv: "WEIXIN_BOT_TOKEN", APIBase: "https://ilinkai.weixin.qq.com"},
+		},
 		Providers: []ProviderEntry{
 			{Name: "deepseek-flash", Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash", APIKeyEnv: "DEEPSEEK_API_KEY", BalanceURL: "https://api.deepseek.com/user/balance", ContextWindow: 1_000_000, Price: &provider.Pricing{CacheHit: 0.02, Input: 1, Output: 2, Currency: "¥"}},
 			{Name: "deepseek-pro", Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro", APIKeyEnv: "DEEPSEEK_API_KEY", BalanceURL: "https://api.deepseek.com/user/balance", ContextWindow: 1_000_000, Price: &provider.Pricing{CacheHit: 0.025, Input: 3, Output: 6, Currency: "¥"}},
@@ -1447,6 +1605,27 @@ func SessionDir() string {
 		return ""
 	}
 	return filepath.Join(dir, "reasonix", "sessions")
+}
+
+// ProjectSessionDir is the per-workspace session directory the desktop sidebar
+// lists: <config root>/projects/<slug>/sessions. Empty when either the config
+// root or workspaceRoot doesn't resolve.
+func ProjectSessionDir(workspaceRoot string) string {
+	base := MemoryUserDir()
+	root := strings.TrimSpace(workspaceRoot)
+	if base == "" || root == "" {
+		return ""
+	}
+	if abs, err := filepath.Abs(root); err == nil {
+		root = abs
+	}
+	return filepath.Join(base, "projects", WorkspaceSlug(root), "sessions")
+}
+
+// WorkspaceSlug flattens an absolute workspace path into the directory name
+// used under <config root>/projects.
+func WorkspaceSlug(absPath string) string {
+	return strings.NewReplacer(string(os.PathSeparator), "-", "/", "-", "\\", "-", ":", "-").Replace(absPath)
 }
 
 // CacheDir is the per-user cache root for derived/regenerable artefacts: MCP

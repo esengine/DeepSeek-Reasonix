@@ -192,6 +192,64 @@ func TestLedgerMatchesLatestSuccessfulTodoStep(t *testing.T) {
 	}
 }
 
+func TestMatchTodoStepToleratesCitationDrift(t *testing.T) {
+	// Verbatim shape from discussion #3970: todo authored with a fullwidth
+	// colon, cited back with a halfwidth one — and stuck forever.
+	ledger := NewLedger()
+	ledger.Record(Receipt{
+		ToolName: "todo_write",
+		Success:  true,
+		Todos: []TodoItem{
+			{Content: "Phase 4：环境准备", Status: "completed"},
+			{Content: "Phase 5：脚本编辑与执行代码", Status: "in_progress"},
+			{Content: "Review notes", Status: "pending"},
+		},
+	})
+
+	matches := map[string]int{
+		"Phase 5: 脚本编辑与执行代码":  2,
+		"phase 5：脚本编辑与执行代码":   2,
+		"  Phase　5：脚本编辑与执行代码": 2,
+		"脚本编辑与执行代码":           2,
+		"Phase 4：环境":          1,
+		"REVIEW NOTES":        3,
+		"２":                   2,
+	}
+	for step, want := range matches {
+		match, ok := ledger.MatchLatestTodoStep(step)
+		if !ok || !match.Found {
+			t.Fatalf("step %q should match todo %d, got found=%v", step, want, match.Found)
+		}
+		if match.Index != want {
+			t.Errorf("step %q matched todo %d, want %d", step, match.Index, want)
+		}
+	}
+
+	for _, step := range []string{"deploy backend", "代码", "Phase 9：不存在的阶段"} {
+		if match, _ := ledger.MatchLatestTodoStep(step); match.Found {
+			t.Errorf("step %q should not match, got todo %d (%q)", step, match.Index, match.Content)
+		}
+	}
+}
+
+func TestMatchTodoStepAmbiguousContainmentStaysUnmatched(t *testing.T) {
+	ledger := NewLedger()
+	ledger.Record(Receipt{
+		ToolName: "todo_write",
+		Success:  true,
+		Todos: []TodoItem{
+			{Content: "Deploy backend service", Status: "in_progress"},
+			{Content: "Deploy backend worker", Status: "pending"},
+		},
+	})
+	if match, _ := ledger.MatchLatestTodoStep("Deploy backend"); match.Found {
+		t.Fatalf("ambiguous citation should stay unmatched, got todo %d (%q)", match.Index, match.Content)
+	}
+	if match, _ := ledger.MatchLatestTodoStep("Deploy backend worker"); !match.Found || match.Index != 2 {
+		t.Fatal("exact citation must still resolve despite shared prefix")
+	}
+}
+
 func TestLedgerRequiresCompleteStepForNewCompletedTodos(t *testing.T) {
 	ledger := NewLedger()
 	ledger.Record(Receipt{

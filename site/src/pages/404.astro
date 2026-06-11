@@ -1,0 +1,35 @@
+---
+import Base from '../layouts/Base.astro';
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+---
+<Base
+  title="Page not found — Reasonix"
+  titleEn="Page not found — Reasonix"
+  titleZh="页面不存在 — Reasonix"
+  description="The page you are looking for does not exist.">
+
+  <Fragment slot="head"><meta name="robots" content="noindex" /></Fragment>
+
+  <header class="nav scrolled">
+    <div class="nav-inner">
+      <a class="brand" href={`${base}/`}><img src={`${base}/logo.svg`} alt="Reasonix logo" /><span>Reasonix</span></a>
+      <div class="lang-switch" role="group" aria-label="Language">
+        <button type="button" data-lang="en" class="active">EN</button>
+        <button type="button" data-lang="zh">中文</button>
+      </div>
+      <a class="btn btn-dark" href={`${base}/#start`}><span class="l-en">Install</span><span class="l-zh">安装</span></a>
+    </div>
+  </header>
+
+  <main class="hero" style="padding-bottom:150px">
+    <div class="wrap">
+      <div class="eyebrow">404</div>
+      <h1><span class="l-en">This page went <span class="grad">cold.</span></span><span class="l-zh">这一页<span class="grad">冷掉了</span>。</span></h1>
+      <p class="sub"><span class="l-en">The page you're looking for doesn't exist — but the session is still warm.</span><span class="l-zh">你找的页面不存在——但会话还热着。</span></p>
+      <div class="hero-cta">
+        <a class="btn btn-dark" href={`${base}/`}><span class="l-en">Back to home</span><span class="l-zh">回到首页</span></a>
+        <a class="btn btn-ghost" href={`${base}/docs/`}><span class="l-en">Read the docs</span><span class="l-zh">查看文档</span></a>
+      </div>
+    </div>
+  </main>
+</Base>

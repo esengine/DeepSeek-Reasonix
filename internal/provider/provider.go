@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 
 	"reasonix/internal/nilutil"
 )
@@ -73,9 +74,10 @@ const interruptedToolResult = "[no result: the previous turn was interrupted bef
 // OpenAI-compatible and Anthropic APIs enforce: every assistant tool_calls entry
 // must be answered by a following tool message for its id, and a tool message must
 // follow such a call. It backfills a placeholder result for any unanswered call
-// (so the turn stays intact) and drops orphan tool messages. Well-formed histories
-// pass through unchanged (results stay in call order). Callers send the result;
-// the stored session keeps the original.
+// (so the turn stays intact), drops orphan tool messages, and closes truncated
+// call-argument JSON (DeepSeek 400s on replayed half-streamed args, #3953).
+// Well-formed histories pass through unchanged (results stay in call order).
+// Callers send the result; the stored session keeps the original.
 func SanitizeToolPairing(msgs []Message) []Message {
 	out := make([]Message, 0, len(msgs))
 	for i := 0; i < len(msgs); {
@@ -85,7 +87,7 @@ func SanitizeToolPairing(msgs []Message) []Message {
 			for j < len(msgs) && msgs[j].Role == RoleTool {
 				j++
 			}
-			out = append(out, m)
+			out = append(out, repairToolCallArgs(m))
 			out = append(out, pairToolResults(m.ToolCalls, msgs[i+1:j])...)
 			i = j // tool messages consumed here; any non-matching ones are orphans, dropped
 			continue
@@ -96,6 +98,87 @@ func SanitizeToolPairing(msgs []Message) []Message {
 		}
 		out = append(out, m)
 		i++
+	}
+	return out
+}
+
+// repairToolCallArgs returns m with any undecodable tool-call Arguments closed
+// into valid JSON (copy-on-write; the caller's history is never mutated). Empty
+// arguments pass through — some gateways send "" for no-arg tools.
+func repairToolCallArgs(m Message) Message {
+	broken := false
+	for _, tc := range m.ToolCalls {
+		if tc.Arguments != "" && !json.Valid([]byte(tc.Arguments)) {
+			broken = true
+			break
+		}
+	}
+	if !broken {
+		return m
+	}
+	calls := make([]ToolCall, len(m.ToolCalls))
+	copy(calls, m.ToolCalls)
+	for i := range calls {
+		if calls[i].Arguments == "" || json.Valid([]byte(calls[i].Arguments)) {
+			continue
+		}
+		calls[i].Arguments = closeTruncatedJSON(calls[i].Arguments)
+	}
+	m.ToolCalls = calls
+	return m
+}
+
+// closeTruncatedJSON best-effort completes a JSON document cut off mid-stream
+// (unterminated string, open braces, dangling comma/colon); anything still
+// invalid after closing degrades to "{}".
+func closeTruncatedJSON(s string) string {
+	var stack []byte
+	inStr, esc := false, false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if inStr {
+			switch {
+			case esc:
+				esc = false
+			case c == '\\':
+				esc = true
+			case c == '"':
+				inStr = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inStr = true
+		case '{':
+			stack = append(stack, '}')
+		case '[':
+			stack = append(stack, ']')
+		case '}', ']':
+			if len(stack) > 0 {
+				stack = stack[:len(stack)-1]
+			}
+		}
+	}
+	out := s
+	if esc {
+		out = out[:len(out)-1]
+	}
+	if inStr {
+		out += `"`
+	}
+	trimmed := strings.TrimRight(out, " \t\r\n")
+	switch {
+	case strings.HasSuffix(trimmed, ","):
+		out = trimmed[:len(trimmed)-1]
+	case strings.HasSuffix(trimmed, ":"):
+		out = trimmed + "null"
+	}
+	for i := len(stack) - 1; i >= 0; i-- {
+		out += string(stack[i])
+	}
+	if !json.Valid([]byte(out)) {
+		return "{}"
 	}
 	return out
 }

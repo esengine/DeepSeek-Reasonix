@@ -12,11 +12,14 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strings"
+	"syscall"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/boot"
@@ -96,6 +99,9 @@ func Run(args []string, version string) int {
 	case "review":
 		configureCLIThemeFromConfigNoProbe()
 		return reviewCommand(rest)
+	case "bot":
+		configureCLIThemeFromConfigNoProbe()
+		return botCommand(rest, version)
 	case "version", "--version", "-v":
 		fmt.Println("reasonix", version)
 		return 0
@@ -111,7 +117,7 @@ func Run(args []string, version string) int {
 
 func shouldMigrateLegacyConfigForCLI(cmd string) bool {
 	switch cmd {
-	case "", "run", "chat", "code", "serve", "setup", "config", "init", "acp", "mcp", "codegraph", "doctor":
+	case "", "run", "chat", "code", "serve", "setup", "config", "init", "acp", "mcp", "codegraph", "doctor", "bot":
 		return true
 	default:
 		return false
@@ -226,7 +232,7 @@ func runAgent(args []string) int {
 		return 2
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
 
 	// Live run: render the agent's event stream to stdout. Markdown post-stream
@@ -341,7 +347,7 @@ func runServe(args []string) int {
 
 	fmt.Printf("reasonix serve — %s on http://%s\n", ctrl.Label(), *addr)
 	// Use graceful shutdown so SIGINT/SIGTERM drain active connections.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err := serve.New(ctrl, bc).RunGraceful(ctx, *addr); err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
@@ -360,7 +366,7 @@ func chatREPL(args []string) int {
 	cont := fs.Bool("continue", false, "resume the most recent saved session")
 	fs.BoolVar(cont, "c", false, "shorthand for --continue")
 	resume := fs.Bool("resume", false, "list saved sessions and pick one to resume")
-	yolo := fs.Bool("dangerously-skip-permissions", false, "YOLO: auto-approve every tool call this session (deny rules still apply)")
+	yolo := fs.Bool("dangerously-skip-permissions", false, "YOLO: auto-approve approval-gated tool calls this session; same runtime mode as Ctrl+Y")
 	fs.BoolVar(yolo, "yolo", false, "alias for --dangerously-skip-permissions")
 	dir := fs.String("dir", "", "change to this directory first (project root); config, sandbox and file tools resolve from here")
 	if err := fs.Parse(args); err != nil {
@@ -461,15 +467,17 @@ func chatREPL(args []string) int {
 	// event and blocks until the user answers via ctrl.Approve. Sub-agents (the
 	// task tool) keep their headless gate from setup — no UI to prompt through.
 	ctrl.EnableInteractiveApproval()
-	// YOLO: skip every approval prompt for the session (deny rules still apply).
+	// YOLO: skip every tool approval request for the session (deny rules still
+	// apply; ask questions and plan approvals still wait for the user).
 	if *yolo {
-		ctrl.SetBypass(true)
+		ctrl.SetAutoApproveTools(true)
 	}
 
 	m := newChatTUI(ctrl, missing, eventCh, termW)
 	if cfg, err := config.Load(); err == nil {
 		m.outputStyle = cfg.Agent.OutputStyle    // shown as the active entry in /output-style
 		m.statuslineCmd = cfg.Statusline.Command // custom status-line command, "" = built-in row
+		m.showReasoning = cfg.UI.ShowReasoning   // /verbose persistence: start with config default
 		m.cfg = cfg
 	}
 
@@ -492,7 +500,7 @@ func chatREPL(args []string) int {
 		}
 		c.EnableInteractiveApproval()
 		if *yolo {
-			c.SetBypass(true)
+			c.SetAutoApproveTools(true)
 		}
 		return c, nil
 	}
@@ -515,7 +523,19 @@ func chatREPL(args []string) int {
 	// in the normal buffer so native touch scrollback and soft-keyboard focus
 	// keep working; finalized transcript lines are emitted via tea.Println.
 	p := tea.NewProgram(m)
+	// SSH drop (SIGHUP) or service stop (SIGTERM): persist the conversation
+	// before the terminal goes away, then unwind through the normal close path
+	// so resume picks up the interrupted session (#3772).
+	hangup := make(chan os.Signal, 1)
+	signal.Notify(hangup, syscall.SIGHUP, syscall.SIGTERM)
+	go func() {
+		for range hangup {
+			_ = ctrl.Snapshot()
+			p.Quit()
+		}
+	}()
 	final, runErr := p.Run()
+	signal.Stop(hangup)
 	// Close the active controller plus any retired ones from /model switches.
 	// Retired controllers were stashed rather than closed at switch time
 	// because Controller.Close() runs SessionEnd hooks and kills plugin
@@ -944,6 +964,42 @@ func fetchOrFallback(probe *config.ProviderEntry, famName string) []string {
 	return models
 }
 
+// fetchModelListCompat walks the full set of model-list URL candidates a given
+// base URL can resolve to (root, /v1, known OpenAI/Anthropic compat suffixes)
+// and returns the first successful fetch. This is the wizard-time probe for a
+// *user-supplied* custom provider — its baseURL is whatever the user pasted,
+// and "whatever they pasted" might be https://x.com (root, probe /v1/models)
+// or https://x.com/v1 (versioned, probe /v1/models directly). Previously the
+// wizard hardcoded `baseURL + "/models"`, which works for OpenAI-shape URLs
+// but silently fails for Anthropic-shape roots and the reverse — so the
+// wizard's idea of "what models exist" diverged from the chat client's actual
+// endpoint. Returning the empty slice (not an error) on full miss lets the
+// wizard fall through to a manual text input without an error message.
+func fetchModelListCompat(ctx context.Context, baseURL, apiKey string) ([]string, error) {
+	candidates, err := config.BuildModelFetchURLs(baseURL, "")
+	if err != nil {
+		return nil, err
+	}
+	var lastErr error
+	for _, u := range candidates {
+		models, err := openai.FetchModels(ctx, u, apiKey)
+		if err == nil {
+			return models, nil
+		}
+		lastErr = err
+		// An endpoint-miss is not a hard error — try the next candidate.
+		// Anything else (auth, 5xx, bad TLS) bubbles up immediately because
+		// retrying it on a sibling URL won't help.
+		if !openai.IsModelFetchEndpointMiss(err) {
+			return nil, err
+		}
+	}
+	if lastErr != nil {
+		slog.Debug("model-list probe: all candidates missed", "base_url", baseURL, "err", lastErr)
+	}
+	return nil, nil
+}
+
 // buildFamilyEntry returns a single ProviderEntry exposing the user's
 // selected models under one entry. It preserves the preset's API key env,
 // base URL, kind, context window, pricing, and effort — the things that
@@ -1159,7 +1215,7 @@ func promptCustomProviderFromURL() ([]config.ProviderEntry, error) {
 	fmt.Printf("  %s\n", dim(fmt.Sprintf(i18n.M.FetchingModelsFmt, "custom")))
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	models, err := openai.FetchModels(ctx, baseURL+"/models", apiKey)
+	models, err := fetchModelListCompat(ctx, baseURL, apiKey)
 	if err != nil || len(models) == 0 {
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "  %s\n", dim(fmt.Sprintf(i18n.M.FetchModelsFailedFmt, "custom", err)))
@@ -1265,7 +1321,7 @@ func promptAnthropicProviderFromURL() ([]config.ProviderEntry, error) {
 	fmt.Printf("  %s\n", dim(fmt.Sprintf(i18n.M.AnthropicFetchingModelsFmt, "anthropic")))
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	models, err := openai.FetchModels(ctx, baseURL+"/models", apiKey)
+	models, err := fetchModelListCompat(ctx, baseURL, apiKey)
 	if err != nil || len(models) == 0 {
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "  %s\n", dim(fmt.Sprintf(i18n.M.AnthropicFetchModelsFailedFmt, "anthropic", err)))
@@ -1330,12 +1386,12 @@ func withBuiltinFamilies(providers []config.ProviderEntry) []config.ProviderEntr
 	return providers
 }
 
-// promptMissingKeys re-runs the wizard's key-entry step for any enabled
-// provider whose api_key_env is unset. Newly entered values are appended to the
-// reasonix-owned global .env so the chat session that follows picks them up via
-// config.Load. The user can hit Enter to skip — the chat banner falls back to a
-// one-line warning so they still see what's missing. Returns a non-zero exit
-// code only when writing the env file fails.
+// promptMissingKeys re-runs the wizard's key-entry step for model refs that are
+// actually active and whose api_key_env is unset. Newly entered values are
+// appended to the reasonix-owned global .env so the chat session that follows
+// picks them up via config.Load. The user can hit Enter to skip — the chat
+// banner falls back to a one-line warning so they still see what's missing.
+// Returns a non-zero exit code only when writing the env file fails.
 func promptMissingKeys(cfg *config.Config) int {
 	missing := providersWithMissingKeys(cfg)
 	if len(missing) == 0 {
@@ -1356,15 +1412,48 @@ func promptMissingKeys(cfg *config.Config) int {
 	return 0
 }
 
-// providersWithMissingKeys returns the subset of cfg.Providers whose api_key_env
-// is declared but not currently set in the environment. configureKeys dedupes
-// shared envs, so duplicates are fine to leave in.
+// providersWithMissingKeys returns the providers the active configuration
+// actually references (default/planner/subagent models) whose api_key_env is
+// declared but not set. Merely-available presets stay silent — a DeepSeek-only
+// user must not be prompted for MIMO_API_KEY (#3939); the chat banner still
+// warns if they later switch to a model whose key is missing. configureKeys
+// dedupes shared envs, so duplicates are fine to leave in.
 func providersWithMissingKeys(cfg *config.Config) []config.ProviderEntry {
-	var out []config.ProviderEntry
-	for _, p := range cfg.Providers {
-		if p.APIKeyEnv != "" && os.Getenv(p.APIKeyEnv) == "" {
-			out = append(out, p)
+	if cfg == nil {
+		return nil
+	}
+	refs := []string{
+		cfg.DefaultModel,
+		cfg.Agent.PlannerModel,
+		cfg.Agent.SubagentModel,
+	}
+	if !strings.EqualFold(strings.TrimSpace(cfg.Agent.AutoPlan), "off") {
+		refs = append(refs, cfg.Agent.AutoPlanClassifier)
+	}
+	if len(cfg.Agent.SubagentModels) > 0 {
+		keys := make([]string, 0, len(cfg.Agent.SubagentModels))
+		for key := range cfg.Agent.SubagentModels {
+			keys = append(keys, key)
 		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			refs = append(refs, cfg.Agent.SubagentModels[key])
+		}
+	}
+
+	var out []config.ProviderEntry
+	seen := map[string]bool{}
+	for _, ref := range refs {
+		ref = strings.TrimSpace(ref)
+		if ref == "" {
+			continue
+		}
+		p, ok := cfg.ResolveModel(ref)
+		if !ok || p.APIKeyEnv == "" || os.Getenv(p.APIKeyEnv) != "" || seen[p.APIKeyEnv] {
+			continue
+		}
+		seen[p.APIKeyEnv] = true
+		out = append(out, *p)
 	}
 	return out
 }

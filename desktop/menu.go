@@ -27,6 +27,11 @@ func (a *App) createAppMenu() *menu.Menu {
 			runtime.EventsEmit(a.ctx, "app:open-settings")
 		}
 	})
+	fileMenu.AddText("Toggle Developer Tools", keys.CmdOrCtrl("i"), func(_ *menu.CallbackData) {
+		if a.ctx != nil {
+			runtime.WindowExecJS(a.ctx, `window.webkit.messageHandlers.external.postMessage("wails:openInspector");`)
+		}
+	})
 	fileMenu.AddText("Show Reasonix", nil, func(_ *menu.CallbackData) {
 		a.showMainWindow()
 	})

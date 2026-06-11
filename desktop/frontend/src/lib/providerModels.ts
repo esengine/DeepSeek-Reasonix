@@ -4,8 +4,32 @@ export function mergedFetchedProviderModels(current: string[], fetched: string[]
   return uniqueStrings([...saved, ...fetched]);
 }
 
+export function providerModelCandidates(current: string[], fetched: string[]): string[] {
+  return uniqueStrings([...current, ...fetched]).filter(isLikelyChatModel);
+}
+
 export function providerDefaultModel(currentDefault: string, models: string[]): string {
   return currentDefault && models.includes(currentDefault) ? currentDefault : models[0] ?? "";
+}
+
+export function isLikelyChatModel(model: string): boolean {
+  const lower = model.trim().toLowerCase();
+  if (!lower) return false;
+  for (const term of ["text-embedding", "text-to-speech", "speech-to-text"]) {
+    if (lower.includes(term)) return false;
+  }
+  const nonChatTokens = new Set([
+    "asr",
+    "stt",
+    "tts",
+    "whisper",
+    "embedding",
+    "moderation",
+    "rerank",
+    "dall",
+    "transcription",
+  ]);
+  return !lower.split(/[-_./:]+/).some((token) => nonChatTokens.has(token));
 }
 
 function uniqueStrings(values: string[]): string[] {

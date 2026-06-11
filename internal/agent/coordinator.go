@@ -189,6 +189,31 @@ Executor instructions:
 - Do not ask the user how to trigger the executor. You are already in the executor phase.
 - If the task requires changes, call the appropriate tools (for example write/edit/bash) instead of only restating the plan.
 - If a target path is outside the writable workspace or otherwise blocked, explain that specific blocker and ask for the needed path/approval.
+- **Serial workflow**: after finishing EACH sub-task, immediately call complete_step with evidence, then call todo_write to mark it completed and advance the next sub-task. Never batch-complete multiple sub-tasks at once.
 
 Carry out the task, adapting the plan as needed.`, executorHandoffMarker, task, plan)
+}
+
+// HandoffTask returns the original user task embedded in an executor handoff
+// message, or s unchanged when it is not one. Session previews and auto-titles
+// use it so dual-model sessions surface the user's words, not the handoff
+// boilerplate (#3860).
+func HandoffTask(s string) string {
+	trimmed := strings.TrimSpace(s)
+	if !strings.HasPrefix(trimmed, "# "+executorHandoffMarker) {
+		return s
+	}
+	const header = "Original task:\n"
+	i := strings.Index(trimmed, header)
+	if i < 0 {
+		return s
+	}
+	rest := trimmed[i+len(header):]
+	if j := strings.Index(rest, "\n\nPlanner output:"); j >= 0 {
+		rest = rest[:j]
+	}
+	if task := strings.TrimSpace(rest); task != "" {
+		return task
+	}
+	return s
 }

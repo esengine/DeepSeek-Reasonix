@@ -32,6 +32,8 @@ func TestSlashArgItems(t *testing.T) {
 		DisconnectedMCP: []string{"optional"},
 		ModelRefs:       []string{"deepseek-flash/deepseek-v4-flash", "deepseek-pro/deepseek-v4-pro"},
 		CurrentModel:    "deepseek-flash/deepseek-v4-flash",
+		ProviderNames:   []string{"deepseek-flash", "deepseek-pro", "custom"},
+		CurrentProvider: "deepseek-flash",
 	}
 
 	// /skills subcommands
@@ -105,6 +107,21 @@ func TestSlashArgItems(t *testing.T) {
 		if it.Label == data.CurrentModel && it.Hint != "current" {
 			t.Errorf("active model should be hinted 'current', got %q", it.Hint)
 		}
+	}
+	// /provider → provider names, current marked
+	items, _ = SlashArgItems("/provider ", data)
+	if !has(items, "deepseek-pro") || !has(items, "custom") {
+		t.Errorf("/provider should list provider names; got %v", labelsOf(items))
+	}
+	for _, it := range items {
+		if it.Label == data.CurrentProvider && it.Hint != "current" {
+			t.Errorf("active provider should be hinted 'current', got %q", it.Hint)
+		}
+	}
+	// /provider de → filter to deepseek-*
+	items, _ = SlashArgItems("/provider de", data)
+	if len(items) != 2 {
+		t.Errorf("/provider de should filter to 2 deepseek providers; got %v", labelsOf(items))
 	}
 	// /hooks
 	items, _ = SlashArgItems("/hooks ", data)

@@ -61,8 +61,11 @@ On first launch v2 runs a one-time, **non-destructive** import: it reads a v0.x
 `~/.reasonix/config.json` (API key, base URL, language, MCP servers) and imports
 past sessions from `~/.reasonix/sessions` and legacy event logs already located
 in the current user config session directory, leaves the old files untouched, and
-prints a boot notice when it does. Imported sessions resume with `--resume` or the
-history panel. The config import only runs when no v2 config exists yet — if v2
+prints a boot notice when it does. Each session lands in the workspace it
+belonged to (read from its v0.x sidecar meta, summary carried over as the title),
+so the desktop sidebar lists it under the right project; sessions whose workspace
+no longer exists land in the global session dir. Imported sessions resume with
+`--resume` or the history panel. The config import only runs when no v2 config exists yet — if v2
 wrote its config before your `0.x` data was in place nothing is overwritten, so
 copy any missing values across by hand.
 

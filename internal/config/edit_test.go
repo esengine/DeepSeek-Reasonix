@@ -20,6 +20,21 @@ func TestSetDefaultModel(t *testing.T) {
 	if err := c.SetDefaultModel("nope"); err == nil {
 		t.Error("expected error for unknown provider")
 	}
+	// "provider/model" form is also accepted: the /model picker stores the
+	// full ref so a user can land on a non-default model under the same
+	// provider across restarts.
+	if err := c.SetDefaultModel("mimo-pro/mimo-v2.5-pro"); err != nil {
+		t.Fatalf("set provider/model default: %v", err)
+	}
+	if c.DefaultModel != "mimo-pro/mimo-v2.5-pro" {
+		t.Errorf("default = %q, want mimo-pro/mimo-v2.5-pro", c.DefaultModel)
+	}
+	if err := c.SetDefaultModel("mimo-pro/missing"); err == nil {
+		t.Error("expected error for unknown model under known provider")
+	}
+	if err := c.SetDefaultModel(""); err == nil {
+		t.Error("expected error for empty name")
+	}
 }
 
 func TestUIThemeNormalizes(t *testing.T) {
@@ -49,6 +64,7 @@ func TestUIThemeStyleNormalizes(t *testing.T) {
 	}{
 		{"", ""},
 		{"AURORA", "aurora"},
+		{" nocturne ", "nocturne"},
 		{" glacier ", "glacier"},
 		{"unknown", ""},
 	} {
@@ -177,6 +193,34 @@ func TestSetAutoPlan(t *testing.T) {
 	}
 	if err := c.SetAutoPlan("auto"); err == nil {
 		t.Fatal("expected error for invalid auto_plan mode")
+	}
+}
+
+func TestSetUIShortcutLayout(t *testing.T) {
+	c := Default()
+	if got := c.UIShortcutLayout(); got != "classic" {
+		t.Fatalf("default shortcut layout = %q, want classic", got)
+	}
+	if err := c.SetUIShortcutLayout("desktop"); err != nil {
+		t.Fatalf("SetUIShortcutLayout desktop: %v", err)
+	}
+	if got := c.UIShortcutLayout(); got != "desktop" {
+		t.Fatalf("shortcut layout = %q, want desktop", got)
+	}
+	if err := c.SetUIShortcutLayout("dual-axis"); err != nil {
+		t.Fatalf("SetUIShortcutLayout alias: %v", err)
+	}
+	if got := c.UIShortcutLayout(); got != "desktop" {
+		t.Fatalf("shortcut layout alias = %q, want desktop", got)
+	}
+	if err := c.SetUIShortcutLayout("classic"); err != nil {
+		t.Fatalf("SetUIShortcutLayout classic: %v", err)
+	}
+	if got := c.UIShortcutLayout(); got != "classic" {
+		t.Fatalf("shortcut layout = %q, want classic", got)
+	}
+	if err := c.SetUIShortcutLayout("surprise"); err == nil {
+		t.Fatal("expected error for invalid shortcut layout")
 	}
 }
 

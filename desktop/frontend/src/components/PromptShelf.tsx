@@ -21,7 +21,7 @@ export function PromptShelf({
   children?: ReactNode;
   crumbs?: ReactNode;
   quickActions?: ReactNode;
-  barRef?: RefObject<HTMLDivElement>;
+  barRef?: RefObject<HTMLDivElement | null>;
   actionsWrap?: boolean;
 }) {
   return (

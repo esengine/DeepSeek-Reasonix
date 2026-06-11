@@ -183,7 +183,7 @@ func previewSession(path string) (string, int) {
 		if m.Role == provider.RoleUser {
 			turns++
 			if first == "" {
-				s := strings.TrimSpace(m.Content)
+				s := strings.TrimSpace(HandoffTask(m.Content))
 				if r := []rune(s); len(r) > 80 {
 					s = string(r[:77]) + "…"
 				}

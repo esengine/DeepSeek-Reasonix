@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -170,7 +171,7 @@ func TestSnapshotActivityRefreshesSessionActivity(t *testing.T) {
 	}
 }
 
-func TestSubmitClearAliasStartsFreshContextAndSavesTranscript(t *testing.T) {
+func TestNewSessionStartsFreshContextAndSavesTranscript(t *testing.T) {
 	dir := t.TempDir()
 	sess := agent.NewSession("sys")
 	sess.Add(provider.Message{Role: provider.RoleUser, Content: "old context"})
@@ -178,13 +179,11 @@ func TestSubmitClearAliasStartsFreshContextAndSavesTranscript(t *testing.T) {
 	path := filepath.Join(dir, "session.jsonl")
 	c := New(Options{Executor: exec, SystemPrompt: "sys", SessionDir: dir, SessionPath: path, Label: "test"})
 
-	c.submit("/clear", "")
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) && c.SessionPath() == path {
-		time.Sleep(time.Millisecond)
+	if err := c.NewSession(); err != nil {
+		t.Fatal(err)
 	}
 	if c.SessionPath() == path {
-		t.Fatal("/clear did not rotate to a fresh session path")
+		t.Fatal("/new did not rotate to a fresh session path")
 	}
 	loaded, err := agent.LoadSession(path)
 	if err != nil {
@@ -196,6 +195,46 @@ func TestSubmitClearAliasStartsFreshContextAndSavesTranscript(t *testing.T) {
 	current := exec.Session().Snapshot()
 	if len(current) != 1 || current[0].Role != provider.RoleSystem || current[0].Content != "sys" {
 		t.Fatalf("fresh context = %+v, want only system prompt", current)
+	}
+}
+
+func TestSubmitClearDiscardsCurrentContextWithoutSavingTranscript(t *testing.T) {
+	dir := t.TempDir()
+	sess := agent.NewSession("sys")
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "old context"})
+	exec := agent.New(nil, nil, sess, agent.Options{}, event.Discard)
+	path := filepath.Join(dir, "session.jsonl")
+	c := New(Options{Executor: exec, SystemPrompt: "sys", SessionDir: dir, SessionPath: path, Label: "test"})
+	if err := c.Snapshot(); err != nil {
+		t.Fatal(err)
+	}
+	ckpt := ckptDir(path)
+	if err := os.MkdirAll(ckpt, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ckpt, "turn-0.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	c.submit("/clear", "")
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) && c.SessionPath() == path {
+		time.Sleep(time.Millisecond)
+	}
+	if c.SessionPath() == path {
+		t.Fatal("/clear did not rotate to a fresh session path")
+	}
+	for _, p := range []string{path, agent.BranchMetaPath(path), ckpt} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Fatalf("discarded artifact %s still exists or stat failed with %v", p, err)
+		}
+	}
+	if _, err := os.Stat(c.SessionPath()); !os.IsNotExist(err) {
+		t.Fatalf("fresh empty session should not be saved yet; stat err=%v", err)
+	}
+	current := exec.Session().Snapshot()
+	if len(current) != 1 || current[0].Role != provider.RoleSystem || current[0].Content != "sys" {
+		t.Fatalf("cleared context = %+v, want only system prompt", current)
 	}
 }
 
@@ -304,7 +343,7 @@ func TestApprovalSessionGrantScopesBashToCommand(t *testing.T) {
 func TestApprovalSessionGrantCanScopeBashToCommandPrefix(t *testing.T) {
 	c, ids, prompts := approvalIDs()
 	go func() {
-		c.ApproveWithScope(<-ids, true, true, false, permission.ApprovalScopePrefix) // grant go test:* for this session
+		c.Approve(<-ids, true, true, false) // grant bash session (prefix preferred)
 		c.Approve(<-ids, true, false, false)
 	}()
 
@@ -338,7 +377,7 @@ func TestApprovalPersistentBashPrefixRememberRule(t *testing.T) {
 		},
 	})
 	go func() {
-		c.ApproveWithScope(<-ids, true, true, true, permission.ApprovalScopePrefix)
+		c.Approve(<-ids, true, true, true)
 	}()
 
 	allow, remember, err := gateApprover{c}.Approve(context.Background(), "bash", "go test ./...", nil)
@@ -451,4 +490,116 @@ func TestParseRewindEmptyCheckpoints(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when no checkpoints")
 	}
+}
+
+func TestRunGuardedPanicEmitsTurnDone(t *testing.T) {
+	sess := agent.NewSession("sys")
+	events := make(chan event.Event, 4)
+	c := New(Options{
+		Runner: appendingRunner{session: sess},
+		Sink:   event.FuncSink(func(e event.Event) { events <- e }),
+	})
+
+	go func() {
+		c.runGuarded(func(ctx context.Context) error {
+			panic("boom")
+		})
+	}()
+
+	select {
+	case e := <-events:
+		if e.Kind != event.TurnDone {
+			t.Fatalf("expected TurnDone after panic, got %v", e.Kind)
+		}
+		if e.Err == nil || !strings.Contains(e.Err.Error(), "boom") {
+			t.Fatalf("expected TurnDone.Err to contain panic message, got %v", e.Err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for TurnDone after panic")
+	}
+
+	c.mu.Lock()
+	running := c.running
+	c.mu.Unlock()
+	if running {
+		t.Fatal("c.running should be false after panic recovery")
+	}
+}
+
+func TestRunGuardedPanicDoesNotDoubleEmitTurnDone(t *testing.T) {
+	sess := agent.NewSession("sys")
+	var count int32
+	events := make(chan event.Event, 8)
+	c := New(Options{
+		Runner: appendingRunner{session: sess},
+		Sink: event.FuncSink(func(e event.Event) {
+			if e.Kind == event.TurnDone {
+				atomic.AddInt32(&count, 1)
+			}
+			events <- e
+		}),
+	})
+
+	go func() {
+		c.runGuarded(func(ctx context.Context) error {
+			panic("boom")
+		})
+	}()
+
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case <-events:
+			n := atomic.LoadInt32(&count)
+			if n >= 1 {
+				time.Sleep(50 * time.Millisecond)
+				n2 := atomic.LoadInt32(&count)
+				if n2 > 1 {
+					t.Fatalf("TurnDone emitted %d times, expected 1", n2)
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for TurnDone")
+		}
+	}
+}
+
+type blockingRunner struct {
+	session *agent.Session
+	release chan struct{}
+}
+
+func (r blockingRunner) Run(_ context.Context, input string) error {
+	r.session.Add(provider.Message{Role: provider.RoleUser, Content: input})
+	<-r.release
+	return nil
+}
+
+func TestMidTurnAutosavePersistsDuringLongTurn(t *testing.T) {
+	old := midTurnSnapshotInterval.Load()
+	midTurnSnapshotInterval.Store(int64(10 * time.Millisecond))
+	defer midTurnSnapshotInterval.Store(old)
+
+	dir := t.TempDir()
+	sess := agent.NewSession("sys")
+	exec := agent.New(nil, nil, sess, agent.Options{}, event.Discard)
+	path := filepath.Join(dir, "session.jsonl")
+	release := make(chan struct{})
+	c := New(Options{Runner: blockingRunner{session: sess, release: release}, Executor: exec, SessionDir: dir, SessionPath: path, Label: "test"})
+	// Unblock the turn and wait for the autosaver to exit before TempDir
+	// cleanup, which fails on Windows while a snapshot tmp write is in flight.
+	defer c.autosaveWG.Wait()
+	defer close(release)
+
+	c.Send("hello mid-turn persistence")
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if b, err := os.ReadFile(path); err == nil && strings.Contains(string(b), "hello mid-turn persistence") {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("session file was not written while the turn was still running")
 }

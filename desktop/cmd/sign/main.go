@@ -207,6 +207,11 @@ func genManifest(dir, version, tag string) error {
 
 // matchPlatform returns the platform key embedded in a file name, or "" if none.
 func matchPlatform(name string) string {
+	// The .deb is a human-download package (like the macOS .dmg); the Linux updater
+	// channel is the .tar.gz. Skip it so it doesn't shadow the tarball's linux-amd64 key.
+	if strings.HasSuffix(name, ".deb") {
+		return ""
+	}
 	if strings.Contains(name, "windows-amd64") && !strings.HasSuffix(name, "-installer.exe") {
 		return ""
 	}

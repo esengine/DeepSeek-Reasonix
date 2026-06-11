@@ -1,9 +1,10 @@
-import { memo, useState } from "react";
-import { ChevronDown, FileText, Folder, GitBranch, Image, RotateCcw, ScrollText } from "lucide-react";
+import { memo, useEffect, useState } from "react";
+import { ChevronDown, ChevronRight, FileText, Folder, GitBranch, Image, RotateCcw, ScrollText } from "lucide-react";
 import { Markdown } from "./Markdown";
 import { CopyButton } from "./CopyButton";
-import { ProcessBrainIcon, ProcessCard, ProcessStatusIcon } from "./ProcessCard";
-import { parseAttachmentRefsForDisplay } from "../lib/attachmentDisplay";
+import { ProcessBrainIcon } from "./ProcessCard";
+import { parseAttachmentRefsForDisplay, sortDisplayAttachments } from "../lib/attachmentDisplay";
+import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
 import type { Item, MessageActionScope } from "../lib/useController";
 import type { CheckpointMeta } from "../lib/types";
@@ -19,25 +20,52 @@ function attachmentIcon(kind: "image" | "file" | "folder") {
 
 export function UserMessage({
   text,
+  failed,
   turn,
   anchorId,
 }: {
   text: string;
+  failed?: boolean;
   turn?: number;
   anchorId?: string;
 }) {
   const t = useT();
   const { text: displayText, attachments } = parseAttachmentRefsForDisplay(text);
+  const orderedAttachments = sortDisplayAttachments(attachments);
+  const [imagePreviews, setImagePreviews] = useState<Record<string, string>>({});
+  const imagePreviewKey = orderedAttachments
+    .filter((attachment) => attachment.kind === "image" && attachment.source === "attachment")
+    .map((attachment) => attachment.path)
+    .join("\n");
+
+  useEffect(() => {
+    const paths = imagePreviewKey ? imagePreviewKey.split("\n") : [];
+    if (paths.length === 0) return;
+    let cancelled = false;
+    for (const path of paths) {
+      if (imagePreviews[path]) continue;
+      app.AttachmentDataURL(path)
+        .then((url) => {
+          if (cancelled) return;
+          setImagePreviews((prev) => (prev[path] ? prev : { ...prev, [path]: url }));
+        })
+        .catch(() => {});
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [imagePreviewKey]);
   return (
-    <div className="msg msg--user" id={anchorId} data-question-anchor={anchorId} data-turn={turn}>
+    <div className={`msg msg--user${failed ? " msg--user-failed" : ""}`} id={anchorId} data-question-anchor={anchorId} data-turn={turn}>
       <div className="msg__body">
         {displayText && <div className="msg__text">{displayText}</div>}
-        {attachments.length > 0 && (
+        {failed && <div className="msg__send-failed">{t("msg.sendFailed")}</div>}
+        {orderedAttachments.length > 0 && (
           <div className="msg-attachments" aria-label={t("msg.attachments")}>
-            {attachments.map((attachment, index) => (
-              <div className="msg-attachment" key={`${attachment.path}:${index}`} title={attachment.path}>
+            {orderedAttachments.map((attachment, index) => (
+              <div className={`msg-attachment msg-attachment--${attachment.kind}`} key={`${attachment.path}:${index}`} title={attachment.path}>
                 <span className={`msg-attachment__icon msg-attachment__icon--${attachment.kind}`} aria-hidden="true">
-                  {attachmentIcon(attachment.kind)}
+                  {attachment.kind === "image" && imagePreviews[attachment.path] ? <img src={imagePreviews[attachment.path]} alt="" draggable={false} /> : attachmentIcon(attachment.kind)}
                 </span>
                 <span className="msg-attachment__main">
                   <span className="msg-attachment__name">{attachment.name}</span>
@@ -238,46 +266,43 @@ export function TurnActions({
 
 export const AssistantMessage = memo(function AssistantMessage({
   item,
+  defaultExpanded = false,
+  expandWhileStreaming = true,
 }: {
   item: AssistantItem;
+  defaultExpanded?: boolean;
+  /** false in compact/minimal: completed steps fold away, so auto-open + fold reads as flicker. */
+  expandWhileStreaming?: boolean;
 }) {
   const t = useT();
+  const [reasoningOpen, setReasoningOpen] = useState((expandWhileStreaming && item.streaming) || defaultExpanded);
   const hasText = item.streaming || item.text.trim() !== "";
   const processOnly = Boolean(item.reasoning) && !hasText;
   const processWithText = Boolean(item.reasoning) && hasText;
   return (
     <div className={`msg msg--assistant${processOnly ? " msg--process-only" : ""}${processWithText ? " msg--process-with-text" : ""}`}>
       {item.reasoning && (
-        <ProcessCard
-          tone="violet"
-          icon={<ProcessBrainIcon size={12} />}
-          kind="reasoning"
-          name={t("msg.thinking")}
-          meta={
-            <>
-              <ProcessStatusIcon state={item.streaming ? "running" : "done"} label={item.streaming ? t("msg.thinkingRunning") : t("msg.thinkingDone")} />
-              <span>{item.streaming ? t("msg.thinkingRunning") : t("msg.thinkingDone")}</span>
-            </>
-          }
-          defaultOpen={item.streaming}
-        >
-          <div className="reasoning__body">{item.reasoning}</div>
-        </ProcessCard>
+        <div className="reasoning">
+          <button
+            type="button"
+            className="reasoning__head"
+            data-running={item.streaming ? "" : undefined}
+            onClick={() => setReasoningOpen((v) => !v)}
+            aria-expanded={reasoningOpen}
+          >
+            <ProcessBrainIcon size={12} />
+            <span>{t("msg.thinking")}</span>
+            <span className="reasoning__meta">{item.streaming ? t("msg.thinkingRunning") : t("msg.thinkingDone")}</span>
+            <ChevronRight className={`reasoning__chevron${reasoningOpen ? " reasoning__chevron--open" : ""}`} size={12} />
+          </button>
+          {reasoningOpen && (
+            <div className="reasoning__body">{item.reasoning}</div>
+          )}
+        </div>
       )}
       {hasText && (
         <div className="msg__body">
-          {item.streaming ? (
-            // Render markdown in real time while streaming.  useDeferredValue
-            // inside <Markdown> lets React prioritise the cursor + layout frame
-            // over the expensive markdown parse — new tokens paint immediately,
-            // the formatted catch-up runs in idle frames.
-            <div className="msg__stream">
-              <Markdown text={item.text} />
-              <span className="msg__cursor" />
-            </div>
-          ) : (
-            <Markdown text={item.text} />
-          )}
+          <Markdown text={item.text} showCursor={item.streaming} />
         </div>
       )}
     </div>

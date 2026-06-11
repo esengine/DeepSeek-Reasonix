@@ -1,4 +1,5 @@
 const attachmentRefRe = /@(\.reasonix\/attachments\/[^\s]+)/g;
+const namedAttachmentRefRe = /(^|\s)@\[([^\]\r\n]+)\]\(([^)\s]+)\)/g;
 const referenceRefRe = /(^|\s)@([^\s]+)/g;
 const trailingPunctuationRe = /[.,;!?)\]}，。；！？）】]+$/;
 
@@ -16,9 +17,11 @@ function splitTrailingPunctuation(token: string): { core: string; suffix: string
   return { core: token.slice(0, m.index), suffix: m[0] };
 }
 
-function baseName(path: string): string {
-  const clean = path.replace(/\/+$/, "");
-  const idx = clean.lastIndexOf("/");
+export function baseName(path: string): string {
+  const clean = path.replace(/[\\/]+$/, "");
+  const slash = clean.lastIndexOf("/");
+  const backslash = clean.lastIndexOf("\\");
+  const idx = Math.max(slash, backslash);
   return idx >= 0 ? clean.slice(idx + 1) : clean;
 }
 
@@ -46,19 +49,37 @@ function attachmentExt(path: string): string {
   return dot >= 0 ? name.slice(dot) : "";
 }
 
+function cleanDisplayName(name: string): string {
+  return name.replace(/\\([\[\]])/g, "$1").replace(/\s+/g, " ").trim();
+}
+
 export function replaceAttachmentRefsForDisplay(text: string): string {
-  return text.replace(attachmentRefRe, (_full, token: string) => {
-    const { core, suffix } = splitTrailingPunctuation(token);
-    if (!core) return _full;
-    if (isImageAttachmentRef(core)) return `[image]${suffix}`;
-    const name = baseName(core) || "attachment";
-    return `[file:${name}]${suffix}`;
-  });
+  return text
+    .replace(namedAttachmentRefRe, (_full, lead: string, label: string, token: string) => {
+      const { core, suffix } = splitTrailingPunctuation(token);
+      if (!core || !isDisplayReference(core)) return _full;
+      const name = cleanDisplayName(label) || baseName(core) || "attachment";
+      return `${lead}${isImageAttachmentRef(core) ? "[image]" : `[file:${name}]`}${suffix}`;
+    })
+    .replace(attachmentRefRe, (_full, token: string) => {
+      const { core, suffix } = splitTrailingPunctuation(token);
+      if (!core) return _full;
+      if (isImageAttachmentRef(core)) return `[image]${suffix}`;
+      const name = baseName(core) || "attachment";
+      return `[file:${name}]${suffix}`;
+    });
 }
 
 export function parseAttachmentRefsForDisplay(text: string): { text: string; attachments: DisplayAttachment[] } {
   const attachments: DisplayAttachment[] = [];
   const cleaned = text
+    .replace(namedAttachmentRefRe, (_full, lead: string, label: string, token: string) => {
+      const { core, suffix } = splitTrailingPunctuation(token);
+      if (!core || !isDisplayReference(core)) return _full;
+      const name = cleanDisplayName(label) || baseName(core) || "attachment";
+      attachments.push(displayAttachment(core, name));
+      return lead + suffix;
+    })
     .replace(referenceRefRe, (_full, lead: string, token: string) => {
       const { core, suffix } = splitTrailingPunctuation(token);
       if (!core || !isDisplayReference(core)) return _full;
@@ -71,6 +92,15 @@ export function parseAttachmentRefsForDisplay(text: string): { text: string; att
     .replace(/[ \t]{2,}/g, " ")
     .trim();
   return { text: cleaned, attachments };
+}
+
+export function sortDisplayAttachments<T extends { kind: "image" | "file" | "folder" }>(attachments: T[]): T[] {
+  return [...attachments].sort((a, b) => {
+    if (a.kind === b.kind) return 0;
+    if (a.kind === "image") return -1;
+    if (b.kind === "image") return 1;
+    return 0;
+  });
 }
 
 function isDisplayReference(path: string): boolean {

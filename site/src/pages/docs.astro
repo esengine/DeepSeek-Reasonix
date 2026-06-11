@@ -1,0 +1,166 @@
+---
+import Base from '../layouts/Base.astro';
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+const R2 = 'https://dl.reasonix.io/latest';
+const repo = 'https://github.com/esengine/DeepSeek-Reasonix';
+
+let goVer = '1.1.0';
+try {
+  const r = await fetch(`${R2}/latest.json`);
+  if (r.ok) { const d = await r.json(); goVer = String(d.version || '').replace(/^v/, '') || goVer; }
+} catch {}
+---
+<Base
+  title="Docs — Reasonix"
+  titleEn="Docs — Reasonix"
+  titleZh="文档 — Reasonix"
+  description="Install Reasonix, start your first session, configure DeepSeek, and understand the prefix-cache loop. CLI commands, slash commands, MCP plugins, permissions and sandbox.">
+
+  <header class="nav scrolled">
+    <div class="nav-inner">
+      <a class="brand" href={`${base}/`}><img src={`${base}/logo.svg`} alt="Reasonix logo" /><span>Reasonix</span></a>
+      <nav class="nav-links">
+        <a href={`${base}/#features`}><span class="l-en">Features</span><span class="l-zh">特性</span></a>
+        <a href={`${base}/#how`}><span class="l-en">How it works</span><span class="l-zh">工作原理</span></a>
+        <a href={`${base}/#community`}><span class="l-en">Community</span><span class="l-zh">社区</span></a>
+        <a href={`${base}/docs/`} class="here"><span class="l-en">Docs</span><span class="l-zh">文档</span></a>
+        <a href={`${base}/#start`}><span class="l-en">Get started</span><span class="l-zh">快速开始</span></a>
+      </nav>
+      <div class="lang-switch" role="group" aria-label="Language">
+        <button type="button" data-lang="en" class="active">EN</button>
+        <button type="button" data-lang="zh">中文</button>
+      </div>
+      <a class="btn btn-dark" href={`${base}/#start`}><span class="l-en">Install</span><span class="l-zh">安装</span></a>
+    </div>
+  </header>
+
+  <main class="docs-layout">
+    <aside class="docs-side">
+      <div class="side-group">
+        <span class="gh"><span class="l-en">Getting started</span><span class="l-zh">快速开始</span></span>
+        <a href="#install"><span class="l-en">Installation</span><span class="l-zh">安装</span></a>
+        <a href="#quickstart"><span class="l-en">Quick start</span><span class="l-zh">快速上手</span></a>
+        <a href="#config"><span class="l-en">Configuration</span><span class="l-zh">配置</span></a>
+      </div>
+      <div class="side-group">
+        <span class="gh"><span class="l-en">Concepts</span><span class="l-zh">核心概念</span></span>
+        <a href="#cache"><span class="l-en">Prefix cache</span><span class="l-zh">前缀缓存</span></a>
+        <a href="#permissions"><span class="l-en">Permissions &amp; sandbox</span><span class="l-zh">权限与沙箱</span></a>
+        <a href="#mcp"><span class="l-en">Plugins (MCP)</span><span class="l-zh">插件(MCP)</span></a>
+      </div>
+      <div class="side-group">
+        <span class="gh"><span class="l-en">Reference</span><span class="l-zh">参考</span></span>
+        <a href="#cli"><span class="l-en">CLI &amp; slash commands</span><span class="l-zh">命令行与斜杠命令</span></a>
+        <a href="#configfile"><span class="l-en">Config file</span><span class="l-zh">配置文件</span></a>
+      </div>
+    </aside>
+
+    <article class="docs-main">
+      <h1><span class="l-en">Documentation</span><span class="l-zh">文档</span></h1>
+      <p class="lede"><span class="l-en">Everything you need to install Reasonix, start your first session, and understand why long sessions stay cheap. For the full engineering contract, see the <a href={`${repo}/blob/main-v2/docs/SPEC.md`}>Spec</a> and <a href={`${repo}/blob/main-v2/docs/GUIDE.md`}>Guide</a> on GitHub.</span><span class="l-zh">从安装到第一次会话,以及理解为什么长会话依然便宜——你需要的都在这里。完整工程契约见 GitHub 上的 <a href={`${repo}/blob/main-v2/docs/SPEC.md`}>Spec</a> 与 <a href={`${repo}/blob/main-v2/docs/GUIDE.md`}>Guide</a>。</span></p>
+
+      <h2 id="install"><span class="l-en">Installation</span><span class="l-zh">安装</span></h2>
+      <p><span class="l-en">One command on macOS, Linux, Windows, or WSL.</span><span class="l-zh">一条命令,支持 macOS、Linux、Windows 或 WSL。</span></p>
+      <div class="codeblock"><button data-copy="npm i -g reasonix@next">Copy</button><span class="c"># npm (recommended · 推荐)</span>
+npm i -g reasonix@next
+
+<span class="c"># Homebrew</span>
+brew install esengine/reasonix/reasonix</div>
+      <div class="callout"><span class="ico">!</span><span><span class="l-en">The npm <code>latest</code> tag is pinned at <strong>v0.53</strong> — a deprecated line that no longer receives updates. All 1.x releases (currently <strong>v{goVer}</strong>, a single Go binary with no Node runtime) ship on <code>@next</code>.</span><span class="l-zh">npm 的 <code>latest</code> 标签固定在 <strong>v0.53</strong>——该线已废弃、不再更新。所有 1.x 版本(当前 <strong>v{goVer}</strong>,单 Go 二进制、无需 Node)均发布在 <code>@next</code> 渠道。</span></span></div>
+      <p><span class="l-en">Prefer a GUI? Desktop apps for macOS, Windows, and Linux are on the <a href={`${base}/#start`}>download page</a>.</span><span class="l-zh">想用图形界面?macOS、Windows、Linux 桌面端请前往<a href={`${base}/#start`}>下载页</a>。</span></p>
+
+      <h2 id="quickstart"><span class="l-en">Quick start</span><span class="l-zh">快速上手</span></h2>
+      <p><span class="l-en">First run is minimal — <code>reasonix setup</code> walks you through picking a provider and keys. Then point Reasonix at a repo and start a session:</span><span class="l-zh">首次运行很简单——<code>reasonix setup</code> 引导你选择 provider 与密钥。然后指向仓库、开始会话:</span></p>
+      <div class="codeblock"><button data-copy="cd your-project && reasonix code">Copy</button>cd your-project
+reasonix code</div>
+      <p><span class="l-en">Then just describe the task:</span><span class="l-zh">然后直接描述任务:</span></p>
+      <div class="codeblock"><span class="a">›</span> add retry with backoff to the http client
+<span class="a">›</span> refactor the auth flow, keep the public API stable
+<span class="a">›</span> why is the worker leaking memory?</div>
+      <p><span class="l-en">Leave the session running — context is append-only, so every new turn starts from a cache hit instead of a cold start.</span><span class="l-zh">让会话一直跑着——上下文只追加,每一轮都从缓存命中开始,而不是冷启动。</span></p>
+
+      <h2 id="config"><span class="l-en">Configuration</span><span class="l-zh">配置</span></h2>
+      <p><span class="l-en">Reasonix talks directly to DeepSeek with your own API key. Secrets come from the environment via <code>api_key_env</code> and are never written to config files:</span><span class="l-zh">Reasonix 使用你自己的 API Key 直连 DeepSeek。密钥通过 <code>api_key_env</code> 从环境读取,绝不写入配置文件:</span></p>
+      <div class="codeblock"><button data-copy="export DEEPSEEK_API_KEY=sk-...">Copy</button>export DEEPSEEK_API_KEY=sk-...</div>
+      <p><span class="l-en">Your code goes to your machine and the model — nowhere else. Persistent options live in the <a href="#configfile">config file</a>.</span><span class="l-zh">你的代码只会经过你的机器与模型,不去任何别处。持久化选项见<a href="#configfile">配置文件</a>。</span></p>
+
+      <h2 id="cache"><span class="l-en">Prefix cache</span><span class="l-zh">前缀缓存</span></h2>
+      <p><span class="l-en">DeepSeek bills cached prefix tokens at a fraction of fresh computation. Most agents waste this: they reorder messages, rewrite summaries mid-session, or inject volatile timestamps — every change invalidates the cache from that point on.</span><span class="l-zh">DeepSeek 对缓存前缀 token 的计费远低于新计算。多数智能体浪费了这一点:重排消息、会话中改写摘要、注入易变的时间戳——任何改动都会让其后的缓存全部失效。</span></p>
+      <p><span class="l-en">Reasonix serializes context deterministically and only ever appends. The practical effect: hours-long sessions where 90%+ of every request replays from cache, and input-token cost collapses to ~1/5. See the <a href={`${base}/#how`}>animated walkthrough</a> on the home page.</span><span class="l-zh">Reasonix 以确定性方式序列化上下文,并且永远只追加。实际效果:数小时的会话中每次请求 90% 以上从缓存重放,输入 token 成本降到约 1/5。可在首页查看<a href={`${base}/#how`}>动态演示</a>。</span></p>
+
+      <h2 id="permissions"><span class="l-en">Permissions &amp; sandbox</span><span class="l-zh">权限与沙箱</span></h2>
+      <p><span class="l-en">Permissions gate each tool call: <code>deny</code> &gt; <code>ask</code> &gt; <code>allow</code> &gt; fallback. Readers always allow; writers fall back to <code>[permissions] mode</code>. <code>reasonix chat</code> prompts before each writer; <code>reasonix run</code> stays autonomous but still honours <code>deny</code>.</span><span class="l-zh">权限逐个把关工具调用:<code>deny</code> &gt; <code>ask</code> &gt; <code>allow</code> &gt; 兜底。读工具始终放行;写工具回退到 <code>[permissions] mode</code>。<code>reasonix chat</code> 在每次写操作前询问;<code>reasonix run</code> 自主运行,但仍遵守 <code>deny</code>。</span></p>
+      <p><span class="l-en">The sandbox is enforcement: file-writers refuse any path outside <code>[sandbox] workspace_root</code> (default: the current dir), resolving symlinks and <code>..</code> so a link can't tunnel out. Reads are unrestricted.</span><span class="l-zh">沙箱负责强制执行:写文件工具拒绝 <code>[sandbox] workspace_root</code>(默认当前目录)之外的任何路径,并解析符号链接与 <code>..</code>,防止借链接逃逸。读取不受限。</span></p>
+
+      <h2 id="mcp"><span class="l-en">Plugins (MCP)</span><span class="l-zh">插件(MCP)</span></h2>
+      <p><span class="l-en">Reasonix is an MCP client. A <code>[[plugins]]</code> entry's <code>type</code> selects the transport — <code>stdio</code> (default) launches a local subprocess, <code>http</code> connects to a remote <code>url</code>. Tools surface to the model as <code>mcp__&lt;server&gt;__&lt;tool&gt;</code>. Already have an <code>.mcp.json</code>? Drop it in the project root and Reasonix reads it as-is.</span><span class="l-zh">Reasonix 是一个 MCP 客户端。<code>[[plugins]]</code> 条目的 <code>type</code> 选择传输方式——<code>stdio</code>(默认)启动本地子进程,<code>http</code> 连接远程 <code>url</code>。工具以 <code>mcp__&lt;server&gt;__&lt;tool&gt;</code> 呈现给模型。已有 <code>.mcp.json</code>?放到项目根目录,Reasonix 会原样读取。</span></p>
+      <div class="codeblock"><span class="c"># reasonix.toml</span>
+[[plugins]]                       <span class="c"># local stdio server</span>
+name    = "example"
+command = "reasonix-plugin-example"
+
+[[plugins]]                       <span class="c"># remote server over Streamable HTTP</span>
+name    = "stripe"
+type    = "http"
+url     = "https://mcp.stripe.com"
+headers = &#123; Authorization = "Bearer $&#123;STRIPE_KEY&#125;" &#125;</div>
+
+      <h2 id="cli"><span class="l-en">CLI &amp; slash commands</span><span class="l-zh">命令行与斜杠命令</span></h2>
+      <div class="codeblock">reasonix setup            <span class="c"># first-run: pick provider + keys</span>
+reasonix code             <span class="c"># start an interactive session in the current repo</span>
+reasonix chat             <span class="c"># interactive session, prompts before writes</span>
+reasonix run "&lt;task&gt;"     <span class="c"># autonomous run, honours deny rules</span></div>
+      <p><span class="l-en">Inside a session, slash commands run locally — <code>/help</code> lists them all:</span><span class="l-zh">会话中,斜杠命令在本地运行——<code>/help</code> 列出全部:</span></p>
+      <div class="codeblock">/compact   /new      /rewind   /tree     /branch
+/switch    /todo     /model    /mcp      /skills
+/hooks     /memory   /language /output-style       /help</div>
+      <p><span class="l-en"><code>/branch [name]</code> forks the current conversation tip, <code>/switch &lt;id|name&gt;</code> loads another branch. Custom commands are Markdown files under <code>.reasonix/commands/</code>.</span><span class="l-zh"><code>/branch [name]</code> 从当前会话尖端分叉,<code>/switch &lt;id|name&gt;</code> 加载另一条分支。自定义命令是 <code>.reasonix/commands/</code> 下的 Markdown 文件。</span></p>
+
+      <h2 id="configfile"><span class="l-en">Config file</span><span class="l-zh">配置文件</span></h2>
+      <p><span class="l-en">Resolution order: flag &gt; <code>./reasonix.toml</code> &gt; <code>~/.config/reasonix/config.toml</code> &gt; built-in defaults.</span><span class="l-zh">解析顺序:flag &gt; <code>./reasonix.toml</code> &gt; <code>~/.config/reasonix/config.toml</code> &gt; 内置默认值。</span></p>
+      <div class="codeblock"><span class="c"># ~/.config/reasonix/config.toml</span>
+default_model = "deepseek-flash"
+
+[agent]
+auto_plan = "ask"                  <span class="c"># off|ask|on</span>
+
+[[providers]]
+name        = "deepseek-flash"
+kind        = "openai"
+base_url    = "https://api.deepseek.com"
+model       = "deepseek-v4-flash"
+api_key_env = "DEEPSEEK_API_KEY"
+
+[permissions]
+mode  = "ask"                                <span class="c"># ask|allow|deny</span>
+deny  = ["bash(rm -rf*)", "bash(git push*)"]
+allow = ["bash(go test*)"]</div>
+      <p><span class="l-en">For the full schema and every field's contract, see <a href={`${repo}/blob/main-v2/docs/SPEC.md`}>SPEC.md §5</a>.</span><span class="l-zh">完整 schema 与每个字段的契约见 <a href={`${repo}/blob/main-v2/docs/SPEC.md`}>SPEC.md §5</a>。</span></p>
+
+      <div class="doc-cards">
+        <a class="doc-card" href={`${base}/#how`}>
+          <h3><span class="l-en">See the cache in action →</span><span class="l-zh">看缓存如何工作 →</span></h3>
+          <p><span class="l-en">Scroll-driven walkthrough of prefix replay on the home page.</span><span class="l-zh">首页的滚动演示:前缀重放的每一轮。</span></p>
+        </a>
+        <a class="doc-card" href={repo}>
+          <h3><span class="l-en">Contribute →</span><span class="l-zh">参与贡献 →</span></h3>
+          <p><span class="l-en">Reasonix is MIT-licensed and open source — good first issues are waiting.</span><span class="l-zh">Reasonix 采用 MIT 许可、开源——新手友好任务等着你。</span></p>
+        </a>
+      </div>
+    </article>
+  </main>
+
+  <footer>
+    <div class="foot-inner">
+      <a class="brand" href={`${base}/`}><img src={`${base}/logo.svg`} alt="Reasonix logo" /><span>Reasonix</span></a>
+      <span><span class="l-en">© 2026 Reasonix · MIT licensed · built to be left running.</span><span class="l-zh">© 2026 Reasonix · MIT 许可 · 为常驻运行而生。</span></span>
+      <nav class="foot-links">
+        <a href={repo}>GitHub</a>
+        <a href={`${base}/docs/`}><span class="l-en">Docs</span><span class="l-zh">文档</span></a>
+        <a href={`${base}/#start`}><span class="l-en">Install</span><span class="l-zh">安装</span></a>
+        <a href="https://crash.reasonix.io/stats" rel="nofollow"><span class="l-en">Stats</span><span class="l-zh">统计</span></a>
+      </nav>
+    </div>
+  </footer>
+</Base>

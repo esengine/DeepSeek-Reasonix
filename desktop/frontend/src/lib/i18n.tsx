@@ -10,7 +10,7 @@
 // the user-level [desktop] config; localStorage is only read once for legacy
 // migration from older desktop builds.
 
-import { createContext, useCallback, useContext, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { en, type DictKey } from "../locales/en";
 import { zh } from "../locales/zh";
@@ -103,6 +103,11 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
   const [pref, setPrefState] = useState<LangPref>(() => readPref());
   const locale = detectLocale(pref);
   currentLocale = locale; // keep the mirror fresh for non-React callers
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    document.documentElement.lang = locale === "zh" ? "zh-CN" : "en";
+  }, [locale]);
 
   // setPref updates only the live UI; persistence is handled by desktop config.
   const setPref = useCallback((next: LangPref) => {
