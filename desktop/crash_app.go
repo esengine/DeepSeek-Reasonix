@@ -24,11 +24,12 @@ func scrubUserPaths(s string) string {
 }
 
 type crashReport struct {
-	Kind    string `json:"kind"`
-	Version string `json:"version"`
-	OS      string `json:"os"`
-	Arch    string `json:"arch"`
-	Message string `json:"message"`
+	Kind    string     `json:"kind"`
+	Version string     `json:"version"`
+	OS      string     `json:"os"`
+	Arch    string     `json:"arch"`
+	Message string     `json:"message"`
+	Device  deviceInfo `json:"device"`
 }
 
 func (a *App) ReportCrash(kind, detail string) error {
@@ -51,6 +52,7 @@ func (a *App) ReportCrash(kind, detail string) error {
 		OS:      runtime.GOOS,
 		Arch:    runtime.GOARCH,
 		Message: scrubUserPaths(detail),
+		Device:  collectDeviceInfo(),
 	})
 }
 

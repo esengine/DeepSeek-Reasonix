@@ -210,3 +210,15 @@ desktop/
         Markdown, CodeViewer, DiffView
         editors/  PlainCode, PlainDiff   ← editor seam impls (swap targets)
 ```
+
+## Telemetry
+
+The desktop app sends one anonymous ping per launch to `crash.reasonix.io`:
+a random install id (generated locally, tied to nothing), app version, OS,
+arch, and OS version. It exists solely to count active installs. It never
+includes conversations, API keys, file contents, or paths.
+
+Opt out any time: Settings > Updates > "Anonymous usage ping", or set
+`telemetry = false` under `[desktop]` in the global config. Dev builds
+never ping. Crash reports are separate and only ever sent when the user
+clicks "Send report" on the crash screen.

@@ -219,6 +219,7 @@ export interface AppBindings {
   SetDesktopLanguage(lang: string): Promise<void>;
   SetDesktopAppearance(theme: string, style: string): Promise<void>;
   SetDesktopCheckUpdates(enabled: boolean): Promise<void>;
+  SetDesktopTelemetry(enabled: boolean): Promise<void>;
   SetExpandThinking(on: boolean): Promise<void>;
   MigrateDesktopPreferences(language: string, theme: string, style: string): Promise<void>;
   SetAgentParams(temperature: number, maxSteps: number, plannerMaxSteps: number, systemPrompt: string): Promise<void>;
@@ -684,6 +685,7 @@ function makeMockApp(): AppBindings {
     desktopThemeStyle: "graphite",
     closeBehavior: "background",
     checkUpdates: true,
+    telemetry: true,
     expandThinking: false,
     configPath: "~/projects/reasonix/reasonix.toml",
     providerKinds: ["openai"],
@@ -2043,6 +2045,9 @@ function makeMockApp(): AppBindings {
         },
         async SetDesktopCheckUpdates(enabled: boolean) {
           settings.checkUpdates = enabled;
+        },
+        async SetDesktopTelemetry(enabled: boolean) {
+          settings.telemetry = enabled;
         },
         async SetExpandThinking(on: boolean) {
           settings.expandThinking = on;

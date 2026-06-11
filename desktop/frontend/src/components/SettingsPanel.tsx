@@ -166,6 +166,7 @@ export function SettingsPanel({ onClose, onChanged, initialTab }: { onClose: () 
                     <UpdatesSection
                       configPath={s.configPath}
                       checkUpdates={s.checkUpdates}
+                      telemetry={s.telemetry !== false}
                       settingsBusy={busy}
                       applySettings={apply}
                     />
@@ -3428,11 +3429,13 @@ const mb = (n: number) => (n / MB).toFixed(1);
 function UpdatesSection({
   configPath,
   checkUpdates,
+  telemetry,
   settingsBusy,
   applySettings,
 }: {
   configPath: string;
   checkUpdates: boolean;
+  telemetry: boolean;
   settingsBusy: boolean;
   applySettings: (fn: () => Promise<void>) => Promise<void>;
 }) {
@@ -3457,6 +3460,17 @@ function UpdatesSection({
           value={checkUpdates}
           disabled={settingsBusy}
           onChange={(enabled) => void applySettings(() => app.SetDesktopCheckUpdates(enabled))}
+        />
+      </SettingsField>
+      <SettingsField
+        className="settings-field--wide-copy"
+        label={t("settings.telemetryLabel")}
+        hint={t("settings.telemetryHint")}
+      >
+        <ToggleSegment
+          value={telemetry}
+          disabled={settingsBusy}
+          onChange={(enabled) => void applySettings(() => app.SetDesktopTelemetry(enabled))}
         />
       </SettingsField>
       <SettingsField label={t("updater.currentVersion", { v: version || "…" })}>

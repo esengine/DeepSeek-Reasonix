@@ -78,6 +78,7 @@ type DesktopConfig struct {
 	ThemeStyle     string   `toml:"theme_style"`     // graphite|aurora|slate|carbon|nocturne|amber and legacy aliases
 	CloseBehavior  string   `toml:"close_behavior"`  // quit|background; desktop window close behavior
 	CheckUpdates   *bool    `toml:"check_updates"`   // startup update checks; nil keeps the default enabled
+	Telemetry      *bool    `toml:"telemetry"`       // anonymous launch ping (install id + version + OS); nil keeps the default enabled
 	ProviderAccess []string `toml:"provider_access"` // desktop-only list of provider entries shown in Settings > Model > Access
 	ExpandThinking bool     `toml:"expand_thinking"` // true = show reasoning text expanded by default; false = collapsed
 }
@@ -195,6 +196,15 @@ func (c *Config) DesktopCheckUpdates() bool {
 		return true
 	}
 	return *c.Desktop.CheckUpdates
+}
+
+// DesktopTelemetry reports whether the desktop sends the anonymous launch ping.
+// It carries no conversation, key, or file data — see desktop/README.md.
+func (c *Config) DesktopTelemetry() bool {
+	if c == nil || c.Desktop.Telemetry == nil {
+		return true
+	}
+	return *c.Desktop.Telemetry
 }
 
 // LSPConfig governs the optional Language Server Protocol tools (lsp_definition,

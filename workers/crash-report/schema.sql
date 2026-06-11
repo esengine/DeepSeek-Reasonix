@@ -16,7 +16,19 @@ CREATE TABLE IF NOT EXISTS reports (
   os TEXT NOT NULL,
   arch TEXT NOT NULL,
   message TEXT NOT NULL,
+  device TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS reports_fingerprint ON reports (fingerprint);
+
+CREATE TABLE IF NOT EXISTS pings (
+  date TEXT NOT NULL,
+  install_id TEXT NOT NULL,
+  version TEXT NOT NULL,
+  os TEXT NOT NULL,
+  arch TEXT NOT NULL,
+  os_version TEXT NOT NULL DEFAULT '',
+  opens INTEGER NOT NULL DEFAULT 1,
+  PRIMARY KEY (date, install_id)
+);

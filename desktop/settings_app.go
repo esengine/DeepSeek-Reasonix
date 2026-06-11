@@ -148,6 +148,7 @@ type SettingsView struct {
 	DesktopThemeStyle string          `json:"desktopThemeStyle"`
 	CloseBehavior     string          `json:"closeBehavior"`
 	CheckUpdates      bool            `json:"checkUpdates"`
+	Telemetry         bool            `json:"telemetry"`
 	ExpandThinking    bool            `json:"expandThinking"`
 	ConfigPath        string          `json:"configPath"`
 	// ProviderKinds lists the provider implementations the kernel actually
@@ -326,6 +327,7 @@ func (a *App) Settings() SettingsView {
 			DesktopThemeStyle: "graphite",
 			CloseBehavior:     "background",
 			CheckUpdates:      true,
+			Telemetry:         true,
 			ExpandThinking:    false,
 		}
 	}
@@ -371,6 +373,7 @@ func (a *App) Settings() SettingsView {
 		DesktopThemeStyle: cfg.DesktopThemeStyle(),
 		CloseBehavior:     cfg.DesktopCloseBehavior(),
 		CheckUpdates:      cfg.DesktopCheckUpdates(),
+		Telemetry:         cfg.DesktopTelemetry(),
 		ExpandThinking:    cfg.Desktop.ExpandThinking,
 		ConfigPath:        cfgPath,
 		ProviderKinds:     nonNil(provider.Kinds()),
@@ -1299,6 +1302,11 @@ func (a *App) SetDesktopAppearance(theme, style string) error {
 // preference. Manual checks in Settings are unaffected.
 func (a *App) SetDesktopCheckUpdates(enabled bool) error {
 	return a.applyConfigOnly(func(c *config.Config) error { return c.SetDesktopCheckUpdates(enabled) })
+}
+
+// SetDesktopTelemetry sets whether the desktop sends the anonymous launch ping.
+func (a *App) SetDesktopTelemetry(enabled bool) error {
+	return a.applyConfigOnly(func(c *config.Config) error { return c.SetDesktopTelemetry(enabled) })
 }
 
 // SetExpandThinking sets whether reasoning text is expanded by default on

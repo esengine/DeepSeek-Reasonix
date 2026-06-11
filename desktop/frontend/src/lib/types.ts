@@ -727,6 +727,7 @@ export interface SettingsView {
   desktopThemeStyle: string;
   closeBehavior: string; // "background" | "quit"
   checkUpdates: boolean; // check for new versions on startup
+  telemetry: boolean; // anonymous launch ping (install id + version + OS)
   expandThinking: boolean; // show reasoning text expanded by default
   configPath: string;
   providerKinds: string[]; // provider implementations the kernel registered (for the kind picker)

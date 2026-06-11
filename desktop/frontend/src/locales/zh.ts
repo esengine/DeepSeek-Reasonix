@@ -1033,6 +1033,8 @@ export const zh: Record<DictKey, string> = {
   "updater.title": "软件更新",
   "updater.autoCheckLabel": "启动时检测新版本",
   "updater.autoCheckHint": "关闭后，Reasonix 打开时不会自动检查更新；你仍可在此页手动检查。",
+  "settings.telemetryLabel": "匿名启动统计",
+  "settings.telemetryHint": "启动时发送随机安装 ID、版本号和操作系统用于统计活跃安装量；绝不包含对话、密钥或文件内容。",
   "updater.currentVersion": "当前版本：{v}",
   "updater.checkButton": "检查更新",
   "updater.checking": "正在检查更新…",

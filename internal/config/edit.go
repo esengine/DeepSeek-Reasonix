@@ -199,6 +199,12 @@ func (c *Config) SetDesktopCheckUpdates(enabled bool) error {
 	return nil
 }
 
+// SetDesktopTelemetry sets whether the desktop sends the anonymous launch ping.
+func (c *Config) SetDesktopTelemetry(enabled bool) error {
+	c.Desktop.Telemetry = &enabled
+	return nil
+}
+
 // SetUICloseBehavior is kept for callers compiled against the old edit API.
 func (c *Config) SetUICloseBehavior(mode string) error {
 	return c.SetDesktopCloseBehavior(mode)

@@ -270,6 +270,7 @@ func (a *App) startup(ctx context.Context) {
 	a.startTray()
 
 	go a.restoreOrBuildTabs()
+	go a.sendStartupPing()
 }
 
 func (a *App) beforeClose(ctx context.Context) bool {

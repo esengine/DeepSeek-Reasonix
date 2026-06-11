@@ -22,6 +22,7 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	orig.Desktop.ThemeStyle = "graphite"
 	orig.Desktop.CloseBehavior = "background"
 	orig.Desktop.CheckUpdates = boolPtr(false)
+	orig.Desktop.Telemetry = boolPtr(false)
 	orig.Notifications.Enabled = true
 	orig.Notifications.TurnDone = true
 	orig.Notifications.ApprovalRequest = true
