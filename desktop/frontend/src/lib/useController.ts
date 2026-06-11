@@ -897,6 +897,10 @@ export function useController() {
         const tab = await app.Fork(turn);
         if (tab?.id) {
           setActiveTabId(tab.id);
+          // The fork's controller builds in a background goroutine: an immediate
+          // load reads empty history, and the ready-event fallback can still
+          // target the source tab, leaving the fork blank (#3742).
+          await waitForTabReady(tab.id);
           await loadSessionDataForTab(tab.id, true);
         } else {
           await syncActiveTabFromBackend(true);
@@ -918,7 +922,7 @@ export function useController() {
     } finally {
       dispatchTo(sourceTabId, { type: "message_action_done" });
     }
-  }, [activeTabId, dispatchTo, loadSessionDataForTab, syncActiveTabFromBackend]);
+  }, [activeTabId, dispatchTo, loadSessionDataForTab, syncActiveTabFromBackend, waitForTabReady]);
 
   // Tab management: switch preserves per-tab state; open creates it.
   const switchTab = useCallback(async (tabId: string) => {
