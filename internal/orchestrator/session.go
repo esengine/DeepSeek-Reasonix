@@ -53,11 +53,11 @@ func (o *Orchestrator) LoadSessions(dir string) error {
 			continue
 		}
 		path := sessionPath(dir, a.Name)
+		a.Ctrl.SetSessionPath(path)
 		if _, err := os.Stat(path); os.IsNotExist(err) {
 			continue
 		}
 		a.Ctrl.Resume(nil, path)
-		a.Ctrl.SetSessionPath(path)
 	}
 	return nil
 }
