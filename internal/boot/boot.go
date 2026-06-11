@@ -80,6 +80,10 @@ type Options struct {
 	// plugins, and skills are registered. Used to prevent managed agents from
 	// exposing orchestrator meta-tools or other unwanted capabilities.
 	ToolDenylist []string
+	// SkipCodegraph disables codegraph installation and plugin loading for this
+	// controller. Used for orchestrator child agents to avoid N concurrent
+	// downloads/installs when the main controller already handles it.
+	SkipCodegraph bool
 }
 
 // Build loads config, resolves the model(s), and returns a Controller wrapping a
@@ -246,7 +250,8 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	//
 	// CodeGraph is fixed to background startup. Legacy tier values are ignored so
 	// enabling it never blocks chat startup.
-	if cfg.Codegraph.Enabled {
+	// Orchestrator child agents skip codegraph — the main controller handles it.
+	if cfg.Codegraph.Enabled && !opts.SkipCodegraph {
 		bin, ok := codegraph.Resolve(cfg.Codegraph.Path)
 		switch {
 		case ok:

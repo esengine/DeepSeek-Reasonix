@@ -441,6 +441,7 @@ func chatREPL(args []string) int {
 				MaxSteps:     *maxSteps,
 				Sink:         agentSink,
 				ToolDenylist: denylist,
+				SkipCodegraph: true,
 			})
 			if cerr != nil {
 				fmt.Fprintln(os.Stderr, "orchestrator: failed to start agent", entry.Name+":", cerr)
