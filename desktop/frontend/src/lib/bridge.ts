@@ -52,6 +52,7 @@ import type {
   UpdateProgress,
   WireEvent,
   WorkspaceChangesView,
+  WorkspaceGitDiffView,
   GitCommitView,
   GitCommitDetailView,
   WorkspaceView,
@@ -173,6 +174,12 @@ export interface AppBindings {
   GitCheckout(branch: string): Promise<void>;
   WorkspaceGitHistory(path: string): Promise<GitCommitView[]>;
   WorkspaceGitCommitDetail(hash: string, path: string): Promise<GitCommitDetailView>;
+  WorkspaceGitDiff(path: string, staged: boolean): Promise<WorkspaceGitDiffView>;
+  WorkspaceGitStage(path: string): Promise<void>;
+  WorkspaceGitUnstage(path: string): Promise<void>;
+  WorkspaceGitStageAll(): Promise<void>;
+  WorkspaceGitUnstageAll(): Promise<void>;
+  WorkspaceGitCommit(message: string, push: boolean, branch: string): Promise<void>;
   OpenWorkspacePath(rel: string): Promise<void>;
   RevealWorkspacePath(rel: string): Promise<void>;
   RevealPath(path: string): Promise<void>;
@@ -1967,6 +1974,24 @@ function makeMockApp(): AppBindings {
         return { diff: "--- a/mock\n+++ b/mock\n@@ -1,1 +1,1 @@\n-mock\n+mock diff" };
       }
       return { files: ["mock_file_1.ts", "mock_file_2.ts"] };
+    },
+    async WorkspaceGitDiff(path: string, _staged: boolean) {
+      return { path, diff: "--- a/" + path + "\n+++ b/" + path + "\n@@ -1,1 +1,1 @@\n-mock\n+mock change" };
+    },
+    async WorkspaceGitStage(_path: string) {
+      console.info("mock WorkspaceGitStage", _path);
+    },
+    async WorkspaceGitUnstage(_path: string) {
+      console.info("mock WorkspaceGitUnstage", _path);
+    },
+    async WorkspaceGitStageAll() {
+      console.info("mock WorkspaceGitStageAll");
+    },
+    async WorkspaceGitUnstageAll() {
+      console.info("mock WorkspaceGitUnstageAll");
+    },
+    async WorkspaceGitCommit(_message: string, _push: boolean, _branch: string) {
+      console.info("mock WorkspaceGitCommit", _message, _push, _branch);
     },
     async OpenWorkspacePath(rel: string) {
       console.info("mock OpenWorkspacePath", rel);

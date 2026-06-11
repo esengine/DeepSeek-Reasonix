@@ -386,6 +386,8 @@ export interface WorkspaceChangeView {
   oldPath?: string;
   sources: string[];
   gitStatus?: string;
+  gitIndexStatus?: string;
+  gitWorktreeStatus?: string;
   turns?: number[];
   latestPrompt?: string;
   latestTime?: number;
@@ -408,6 +410,12 @@ export interface GitCommitView {
 export interface GitCommitDetailView {
   diff?: string;
   files?: string[];
+}
+
+export interface WorkspaceGitDiffView {
+  path: string;
+  diff: string;
+  err?: string;
 }
 
 export interface ComposerInsertRequest {
