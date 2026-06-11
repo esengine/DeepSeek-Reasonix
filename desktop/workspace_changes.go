@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
@@ -12,9 +13,11 @@ import (
 )
 
 type gitStatusEntry struct {
-	Path    string
-	OldPath string
-	Status  string
+	Path           string
+	OldPath        string
+	Status         string
+	IndexStatus    string
+	WorktreeStatus string
 }
 
 type workspaceChangeAccumulator struct {
@@ -80,6 +83,8 @@ func (a *App) WorkspaceChanges() WorkspaceChangesView {
 		}
 		acc.hasGit = true
 		acc.view.GitStatus = entry.Status
+		acc.view.GitIndexStatus = entry.IndexStatus
+		acc.view.GitWorktreeStatus = entry.WorktreeStatus
 		acc.view.OldPath = normalizeWorkspaceRelPath(base, entry.OldPath)
 	}
 
@@ -150,7 +155,12 @@ func parseGitStatusPorcelainZ(raw []byte) []gitStatusEntry {
 		}
 		status := string(part[:2])
 		path := string(part[3:])
-		entry := gitStatusEntry{Path: path, Status: strings.TrimSpace(status)}
+		entry := gitStatusEntry{
+			Path:           path,
+			Status:         strings.TrimSpace(status),
+			IndexStatus:    strings.TrimSpace(status[:1]),
+			WorktreeStatus: strings.TrimSpace(status[1:2]),
+		}
 		if strings.ContainsAny(status, "RC") && i+1 < len(parts) {
 			i++
 			entry.OldPath = string(parts[i])
@@ -192,17 +202,13 @@ func workspaceRelPathFromGitStatus(repoRoot, base, path string) string {
 // at base, or an empty string when base is not inside a git repository or when
 // git is unavailable.
 func workspaceGitBranch(base string) string {
-	cmd := workspaceGit("-C", base, "branch", "--show-current")
-	raw, err := cmd.Output()
-	if err != nil {
-		return ""
-	}
-	if branch := strings.TrimSpace(string(raw)); branch != "" {
+	if branch := workspaceGitCurrentBranch(base); branch != "" {
 		return branch
 	}
 
-	headCmd := workspaceGit("-C", base, "rev-parse", "--short", "HEAD")
-	raw, err = headCmd.Output()
+	headCmd := exec.Command("git", "-C", base, "rev-parse", "--short", "HEAD")
+	proc.HideWindowDetached(headCmd)
+	raw, err := headCmd.Output()
 	if err != nil {
 		return ""
 	}
@@ -211,6 +217,16 @@ func workspaceGitBranch(base string) string {
 		return ""
 	}
 	return "@" + short
+}
+
+func workspaceGitCurrentBranch(base string) string {
+	cmd := exec.Command("git", "-C", base, "branch", "--show-current")
+	proc.HideWindowDetached(cmd)
+	raw, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(raw))
 }
 
 // GitBranches returns all local git branches for the active workspace's repo.
@@ -256,6 +272,215 @@ type GitCommitView struct {
 type GitCommitDetailView struct {
 	Diff  *string  `json:"diff,omitempty"`
 	Files []string `json:"files,omitempty"`
+}
+
+type WorkspaceGitDiffView struct {
+	Path string `json:"path"`
+	Diff string `json:"diff"`
+	Err  string `json:"err,omitempty"`
+}
+
+func (a *App) WorkspaceGitDiff(path string, staged bool) WorkspaceGitDiffView {
+	out := WorkspaceGitDiffView{Path: path}
+	base, err := a.activeWorkspaceBase()
+	if err != nil {
+		out.Err = err.Error()
+		return out
+	}
+	rel := normalizeWorkspaceRelPath(base, path)
+	if rel == "" {
+		out.Err = "invalid path"
+		return out
+	}
+	out.Path = rel
+
+	if !staged && workspaceGitPathIsUntracked(base, rel) {
+		abs, ok, err := a.workspacePath(rel)
+		if err != nil || !ok {
+			out.Err = "invalid path"
+			return out
+		}
+		data, err := os.ReadFile(abs)
+		if err != nil {
+			out.Err = err.Error()
+			return out
+		}
+		out.Diff = workspaceNewFileDiff(rel, data)
+		return out
+	}
+
+	args := []string{"-C", base, "diff", "--no-ext-diff", "--no-color", "--relative"}
+	if staged {
+		args = append(args, "--cached")
+	}
+	args = append(args, "--", rel)
+	cmd := exec.Command("git", args...)
+	proc.HideWindowDetached(cmd)
+	raw, err := cmd.CombinedOutput()
+	if err != nil {
+		out.Err = strings.TrimSpace(string(raw))
+		if out.Err == "" {
+			out.Err = err.Error()
+		}
+		return out
+	}
+	out.Diff = strings.TrimSpace(string(raw))
+	return out
+}
+
+func workspaceGitPathIsUntracked(base string, path string) bool {
+	cmd := exec.Command("git", "-C", base, "ls-files", "--others", "--exclude-standard", "--", path)
+	proc.HideWindowDetached(cmd)
+	raw, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		if filepath.ToSlash(strings.TrimSpace(line)) == path {
+			return true
+		}
+	}
+	return false
+}
+
+func workspaceNewFileDiff(path string, data []byte) string {
+	if bytes.Contains(data, []byte{0}) {
+		return fmt.Sprintf("diff --git a/%s b/%s\nnew file mode 100644\n--- /dev/null\n+++ b/%s\nBinary files /dev/null and b/%s differ", path, path, path, path)
+	}
+	body := strings.ReplaceAll(strings.ReplaceAll(string(data), "\r\n", "\n"), "\r", "\n")
+	hasTrailingNewline := strings.HasSuffix(body, "\n")
+	lines := strings.Split(body, "\n")
+	if body == "" {
+		lines = nil
+	}
+	if hasTrailingNewline && len(lines) > 0 {
+		lines = lines[:len(lines)-1]
+	}
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("diff --git a/%s b/%s\nnew file mode 100644\n--- /dev/null\n+++ b/%s\n", path, path, path))
+	b.WriteString(fmt.Sprintf("@@ -0,0 +1,%d @@\n", len(lines)))
+	for _, line := range lines {
+		b.WriteString("+")
+		b.WriteString(line)
+		b.WriteString("\n")
+	}
+	if !hasTrailingNewline && len(lines) > 0 {
+		b.WriteString("\\ No newline at end of file\n")
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func (a *App) WorkspaceGitStage(path string) error {
+	base, err := a.activeWorkspaceBase()
+	if err != nil {
+		return err
+	}
+	rel := normalizeWorkspaceRelPath(base, path)
+	if rel == "" {
+		return fmt.Errorf("invalid path")
+	}
+	return workspaceRunGit(base, "add", "--", rel)
+}
+
+func (a *App) WorkspaceGitUnstage(path string) error {
+	base, err := a.activeWorkspaceBase()
+	if err != nil {
+		return err
+	}
+	rel := normalizeWorkspaceRelPath(base, path)
+	if rel == "" {
+		return fmt.Errorf("invalid path")
+	}
+	return workspaceRunGit(base, "reset", "HEAD", "--", rel)
+}
+
+func (a *App) WorkspaceGitStageAll() error {
+	base, err := a.activeWorkspaceBase()
+	if err != nil {
+		return err
+	}
+	return workspaceRunGit(base, "add", "-A")
+}
+
+func (a *App) WorkspaceGitUnstageAll() error {
+	base, err := a.activeWorkspaceBase()
+	if err != nil {
+		return err
+	}
+	return workspaceRunGit(base, "reset", "HEAD", "--")
+}
+
+func (a *App) WorkspaceGitCommit(message string, push bool, branch string) error {
+	base, err := a.activeWorkspaceBase()
+	if err != nil {
+		return err
+	}
+	message = strings.TrimSpace(message)
+	if message == "" {
+		return fmt.Errorf("commit message is required")
+	}
+	branch = strings.TrimSpace(branch)
+	currentBranch := workspaceGitCurrentBranch(base)
+	if branch != "" && branch != currentBranch {
+		if err := workspaceRunGit(base, "check-ref-format", "refs/heads/"+branch); err != nil {
+			return fmt.Errorf("invalid branch name: %q", branch)
+		}
+		exists, err := workspaceGitLocalBranchExists(base, branch)
+		if err != nil {
+			return err
+		}
+		if exists {
+			if err := workspaceRunGit(base, "checkout", branch); err != nil {
+				return err
+			}
+		} else if err := workspaceRunGit(base, "checkout", "-b", branch); err != nil {
+			return err
+		}
+	}
+	if err := workspaceRunGit(base, "commit", "-m", message); err != nil {
+		return err
+	}
+	if push {
+		pushBranch := branch
+		if pushBranch == "" {
+			pushBranch = workspaceGitCurrentBranch(base)
+		}
+		if pushBranch != "" {
+			return workspaceRunGit(base, "push", "-u", "origin", pushBranch)
+		}
+		return workspaceRunGit(base, "push")
+	}
+	return nil
+}
+
+func workspaceGitLocalBranchExists(base string, branch string) (bool, error) {
+	cmd := exec.Command("git", "-C", base, "show-ref", "--verify", "--quiet", "refs/heads/"+branch)
+	proc.HideWindowDetached(cmd)
+	err := cmd.Run()
+	if err == nil {
+		return true, nil
+	}
+	if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+		return false, nil
+	}
+	return false, err
+}
+
+func workspaceRunGit(base string, args ...string) error {
+	cmd := exec.Command("git", append([]string{"-C", base}, args...)...)
+	cmd.Env = append(os.Environ(),
+		"GIT_TERMINAL_PROMPT=0",
+		"GIT_SSH_COMMAND=ssh -o BatchMode=yes",
+	)
+	proc.HideWindowDetached(cmd)
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		return nil
+	}
+	if msg := strings.TrimSpace(string(out)); msg != "" {
+		return fmt.Errorf("%s", msg)
+	}
+	return err
 }
 
 func (a *App) WorkspaceGitHistory(path string) ([]GitCommitView, error) {

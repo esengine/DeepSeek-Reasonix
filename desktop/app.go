@@ -3402,13 +3402,15 @@ type FilePreview struct {
 }
 
 type WorkspaceChangeView struct {
-	Path         string   `json:"path"`
-	OldPath      string   `json:"oldPath,omitempty"`
-	Sources      []string `json:"sources"`
-	GitStatus    string   `json:"gitStatus,omitempty"`
-	Turns        []int    `json:"turns,omitempty"`
-	LatestPrompt string   `json:"latestPrompt,omitempty"`
-	LatestTime   int64    `json:"latestTime,omitempty"`
+	Path              string   `json:"path"`
+	OldPath           string   `json:"oldPath,omitempty"`
+	Sources           []string `json:"sources"`
+	GitStatus         string   `json:"gitStatus,omitempty"`
+	GitIndexStatus    string   `json:"gitIndexStatus,omitempty"`
+	GitWorktreeStatus string   `json:"gitWorktreeStatus,omitempty"`
+	Turns             []int    `json:"turns,omitempty"`
+	LatestPrompt      string   `json:"latestPrompt,omitempty"`
+	LatestTime        int64    `json:"latestTime,omitempty"`
 }
 
 type WorkspaceChangesView struct {
