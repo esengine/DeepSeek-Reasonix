@@ -2,7 +2,7 @@ export const TEXT_SIZES = ["small", "default", "large", "xlarge"] as const;
 
 export type TextSize = (typeof TEXT_SIZES)[number];
 
-export const DEFAULT_TEXT_SIZE: TextSize = "default";
+export const DEFAULT_TEXT_SIZE: TextSize = "small";
 
 const TEXT_SIZE_KEY = "reasonix-text-size";
 
