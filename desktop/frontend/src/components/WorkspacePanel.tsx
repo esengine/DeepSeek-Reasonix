@@ -477,10 +477,10 @@ export function WorkspacePanel({
   const changeDetailActive = changedMode && expandedCommit !== null;
   const previewVisible = changedMode || filePreviewActive;
   const selectedFileVisible = selectedPath !== null;
-  const compactTreeSplit =
+  const compactTreeRail =
     treeVisible && selectedFileVisible && panelWidth !== undefined && panelWidth < WORKSPACE_DUAL_PANEL_MIN_WIDTH;
-  const actualTreeVisible = changedMode ? false : treeVisible;
-  const showTreeRail = previewVisible && !actualTreeVisible && !changedMode;
+  const actualTreeVisible = changedMode ? false : treeVisible && !compactTreeRail;
+  const showTreeRail = previewVisible && (!actualTreeVisible || compactTreeRail) && !changedMode;
   const previewModeActive = open && (filePreviewActive || changeDetailActive);
   const embeddedDockMode = !showViewTabs;
   const showFileTools = showViewTabs || filePreviewActive;
@@ -489,9 +489,9 @@ export function WorkspacePanel({
     () =>
       ({
         "--workspace-tree-width": `${effectiveTreeWidth}px`,
-        "--workspace-preview-min-width": compactTreeSplit ? "0px" : `${WORKSPACE_PREVIEW_MIN_WIDTH}px`,
+        "--workspace-preview-min-width": compactTreeRail ? "0px" : `${WORKSPACE_PREVIEW_MIN_WIDTH}px`,
       }) as CSSProperties,
-    [compactTreeSplit, effectiveTreeWidth],
+    [compactTreeRail, effectiveTreeWidth],
   );
 
   useEffect(() => {
@@ -711,7 +711,7 @@ export function WorkspacePanel({
   return (
     <aside
       ref={panelRef}
-      className={`workspace-panel${embeddedDockMode ? " workspace-panel--embedded" : ""}${changedMode ? " workspace-panel--detail-only" : ""}${previewVisible && actualTreeVisible ? " workspace-panel--split-preview" : ""}${compactTreeSplit ? " workspace-panel--compact-split" : ""}${actualTreeVisible ? "" : " workspace-panel--tree-hidden"}${previewVisible ? "" : " workspace-panel--preview-hidden"}${treeResizing ? " workspace-panel--tree-resizing" : ""}`}
+      className={`workspace-panel${embeddedDockMode ? " workspace-panel--embedded" : ""}${changedMode ? " workspace-panel--detail-only" : ""}${previewVisible && actualTreeVisible ? " workspace-panel--split-preview" : ""}${compactTreeRail ? " workspace-panel--compact-rail" : ""}${actualTreeVisible ? "" : " workspace-panel--tree-hidden"}${previewVisible ? "" : " workspace-panel--preview-hidden"}${treeResizing ? " workspace-panel--tree-resizing" : ""}`}
       aria-label={t("workspace.title")}
       style={panelStyle}
     >

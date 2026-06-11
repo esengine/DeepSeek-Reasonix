@@ -63,6 +63,19 @@ eq(latexNormalizeForKatex("\\tfrac{a}{b}"), "\\tfrac{a}{b}", "nested braces in c
 eq(latexNormalizeForKatex("\\|x\\|"), "\\|x\\|", "\\| is left alone (readCommand handles \\|, not | branch)");
 eq(latexNormalizeForKatex("\\\\|x|"), "\\\\\\vert x\\vert", "\\\\| line break + pipe: both | → \\vert");
 
+// ── latexNormalizeForKatex — \tag → align conversion (regression for KaTeX "Multiple \tag") ──
+eq(latexNormalizeForKatex("a = b \\tag{10}"), "a = b \\tag{10}", "\\tag without aligned passes through");
+eq(latexNormalizeForKatex("\\begin{aligned} a &= b \\\\ \\end{aligned}"),
+  "\\begin{aligned} a &= b \\\\ \\end{aligned}", "aligned without \\tag unchanged");
+eq(latexNormalizeForKatex("\\begin{aligned} a &= b \\tag{10}\\\\ c &= d \\end{aligned}"),
+  "\\begin{align} a &= b \\tag{10}\\\\ c &= d \\end{align}", "aligned with \\tag → align");
+eq(latexNormalizeForKatex("\\begin{aligned} a &= b \\tag{10}\\\\ c &= d \\tag{11} \\end{aligned}"),
+  "\\begin{align} a &= b \\tag{10}\\\\ c &= d \\tag{11} \\end{align}", "aligned with multiple \\tag → align");
+eq(latexNormalizeForKatex("\\boxed{\\begin{aligned} a &= b \\tag{10}\\\\ c &= d \\end{aligned}}"),
+  "\\boxed{\\begin{align} a &= b \\tag{10}\\\\ c &= d \\end{align}}", "boxed aligned with \\tag → boxed align");
+eq(latexNormalizeForKatex("\\begin{gathered} a = b \\tag{10}\\\\ c = d \\end{gathered}"),
+  "\\begin{gather} a = b \\tag{10}\\\\ c = d \\end{gather}", "gathered with \\tag → gather");
+
 // ── isLikelyInlineMath (mathClassify) ──────────────────────────────────────────
 
 console.log("\nisLikelyInlineMath — math");
@@ -238,6 +251,9 @@ const e2e: Array<[string, string]> = [
   ["\\(\\alpha\\)", "LLM-native inline delimiter"],
   ["\\[\\sum_{i=1}^n i\\]", "LLM-native display delimiter"],
   ["$$ |a| = |b| $$", "display with absolute values"],
+  ["$$\\boxed{\\begin{aligned}\nr_A E_\\pi(k;0) &= B(k^2) \\\\\nF_R(k;0) + 2r_A F_\\pi(k;0) &= A(k^2)\n\\end{aligned}}$$", "boxed aligned (no \\tag)"],
+  ["$$\\boxed{\\begin{aligned}\nr_A E_\\pi(k;0) &= B(k^2) \\tag{10}\\\\\nF_R(k;0) + 2r_A F_\\pi(k;0) &= A(k^2) \\tag{11}\n\\end{aligned}}$$", "boxed aligned with \\tag → align (no error)"],
+  ["\\[\\boxed{\\begin{aligned}\nx &= 1 \\\\\ny &= 2\n\\end{aligned}}\\]", "LLM-native boxed aligned"],
 ];
 for (const [src, label] of e2e) {
   check(`${label}: ${src}`, () => katexOf(normalizeMath(src), false));

@@ -10,6 +10,10 @@ import { initTextSize } from "./lib/textSize";
 import { initTheme } from "./lib/theme";
 import "./styles.css";
 
+// Install first so startup/runtime failures paint a useful error instead of a
+// featureless webview background.
+installGlobalCrashHandlers();
+
 // Apply the saved appearance (auto/light/dark) before the first paint.
 initTheme();
 initTextSize();
@@ -33,8 +37,6 @@ function prewarmFontFallbacks() {
   });
 }
 prewarmFontFallbacks();
-
-installGlobalCrashHandlers();
 
 // Inside the Wails shell, suppress the webview's default right-click menu — its
 // Reload / Back / Inspect entries are easy to hit by accident and can reset or

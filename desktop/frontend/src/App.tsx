@@ -52,6 +52,7 @@ import {
   type ProjectNode,
   type SessionMeta,
   type SettingsTab,
+  type SettingsView,
   type TabMeta,
   type ToolApprovalMode,
 } from "./lib/types";
@@ -62,6 +63,11 @@ import {
   metaSyncedCollaborationMode,
   tabListCollaborationMode,
 } from "./lib/goalDraftMode";
+import {
+  restorableToolApprovalMode,
+  toggleYoloToolApprovalMode,
+  type RestorableToolApprovalMode,
+} from "./lib/toolApprovalMode";
 import { loadLayoutSize, saveLayoutSize } from "./lib/layoutPreferences";
 import {
   applyTheme,
@@ -76,6 +82,7 @@ import {
 } from "./lib/theme";
 import { applyTextSize, DEFAULT_TEXT_SIZE, getTextSize, nextTextSize } from "./lib/textSize";
 import { useWindowStatePersistence } from "./lib/windowState";
+import { availableWorkspacePanelWidth, resolveWorkspacePanelWidth, workspacePanelAriaMinWidth } from "./lib/workspaceLayout";
 import logoWordmark from "./assets/logo-wordmark.svg";
 
 const SIDEBAR_COLLAPSED_KEY = "reasonix.sidebar.collapsed";
@@ -84,7 +91,7 @@ const SIDEBAR_MIN_WIDTH = 264;
 const SIDEBAR_MAX_WIDTH = 300;
 const SIDEBAR_VIEWPORT_RATIO = 0.18;
 const CHAT_MIN_WIDTH = 400;
-const CHAT_DOCKED_MIN_WIDTH = 640;
+const CHAT_COMFORT_MIN_WIDTH = 560;
 const WORKSPACE_RESIZER_WIDTH = 8;
 
 function isThemeMode(value: string): value is Theme {
@@ -94,7 +101,8 @@ const RIGHT_DOCK_TREE_DEFAULT_WIDTH = 300;
 const RIGHT_DOCK_TREE_MIN_WIDTH = 300;
 const RIGHT_DOCK_TREE_MAX_WIDTH = 560;
 const RIGHT_DOCK_PREVIEW_DEFAULT_WIDTH = 660;
-const RIGHT_DOCK_PREVIEW_MIN_WIDTH = RIGHT_DOCK_PREVIEW_DEFAULT_WIDTH;
+const RIGHT_DOCK_PREVIEW_MIN_WIDTH = 420;
+const RIGHT_DOCK_MIN_RENDER_WIDTH = 280;
 const RIGHT_DOCK_MAX_WIDTH = 860;
 
 type RightDockMode = "context" | "files" | "changed";
@@ -418,6 +426,7 @@ export default function App() {
   const [modesByTab, setModesByTab] = useState<Record<string, Mode>>({});
   const [collaborationModesByTab, setCollaborationModesByTab] = useState<Record<string, CollaborationMode>>({});
   const [toolApprovalModesByTab, setToolApprovalModesByTab] = useState<Record<string, ToolApprovalMode>>({});
+  const yoloRestoreToolApprovalModesRef = useRef<Record<string, RestorableToolApprovalMode>>({});
   const [goalsByTab, setGoalsByTab] = useState<Record<string, string>>({});
   const [goalDraftModesByTab, setGoalDraftModesByTab] = useState<Record<string, boolean>>({});
   const [tabMetas, setTabMetas] = useState<TabMeta[]>([]);
@@ -428,6 +437,7 @@ export default function App() {
   // clearing the key mid-session is the Settings panel's job, not the gate's.
   const [needsOnboarding, setNeedsOnboarding] = useState<boolean | null>(null);
   const [settingsTarget, setSettingsTarget] = useState<SettingsTab | null>(null);
+  const [startupUpdateChecksEnabled, setStartupUpdateChecksEnabled] = useState<boolean | null>(null);
   const [histView, setHistView] = useState<HistoryViewState | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteSessions, setPaletteSessions] = useState<SessionMeta[]>([]);
@@ -435,6 +445,7 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(loadSidebarCollapsed);
   const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidth);
   const [sidebarResizing, setSidebarResizing] = useState(false);
+  const [viewportWidth, setViewportWidth] = useState(() => (typeof window === "undefined" ? 1440 : window.innerWidth));
   const [workspacePanelOpen, setWorkspacePanelOpen] = useState(true);
   const [rightDockTreeWidth, setRightDockTreeWidth] = useState(loadRightDockTreeWidth);
   const [rightDockPreviewWidth, setRightDockPreviewWidth] = useState(loadRightDockPreviewWidth);
@@ -536,6 +547,17 @@ export default function App() {
     };
   }, []);
 
+  const applyDesktopPreferences = useCallback(
+    (settings: Pick<SettingsView, "desktopTheme" | "desktopThemeStyle" | "desktopLanguage" | "checkUpdates">) => {
+      const nextTheme = normalizeThemePreference(settings.desktopTheme);
+      const nextStyle = normalizeThemeStyleForTheme(settings.desktopThemeStyle, nextTheme);
+      applyTheme(nextTheme, nextStyle, { persist: false });
+      setLocalePref(normalizeLangPref(settings.desktopLanguage));
+      setStartupUpdateChecksEnabled(settings.checkUpdates !== false);
+    },
+    [setLocalePref],
+  );
+
   useEffect(() => {
     let cancelled = false;
     const syncDesktopPreferences = async () => {
@@ -548,18 +570,16 @@ export default function App() {
       }
       const settings = await app.Settings();
       if (cancelled) return;
-      const nextTheme = normalizeThemePreference(settings.desktopTheme);
-      const nextStyle = normalizeThemeStyleForTheme(settings.desktopThemeStyle, nextTheme);
-      applyTheme(nextTheme, nextStyle, { persist: false });
-      setLocalePref(normalizeLangPref(settings.desktopLanguage));
+      applyDesktopPreferences(settings);
     };
     void syncDesktopPreferences().catch((e) => {
       console.warn("desktop preferences sync failed", e);
+      setStartupUpdateChecksEnabled(true);
     });
     return () => {
       cancelled = true;
     };
-  }, [setLocalePref]);
+  }, [applyDesktopPreferences]);
 
   // Open settings when the native menu item (CmdOrCtrl+,) is activated.
   useEffect(() => {
@@ -569,6 +589,12 @@ export default function App() {
       setSettingsTarget("general");
     });
   }, [closeTransientOverlays]);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onResize = () => setViewportWidth(window.innerWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
   const [pendingPlanRevision, setPendingPlanRevision] = useState<string | null>(null);
   const [footerHeight, setFooterHeight] = useState(0);
   const footerHeightRef = useRef(0);
@@ -576,12 +602,25 @@ export default function App() {
   const rightDockDetailActive = rightDockMode === "context" ? contextDetailActive : workspacePreviewActive;
   const preferredWorkspacePanelWidth = rightDockDetailActive ? rightDockPreviewWidth : rightDockTreeWidth;
   const workspacePanelMinWidth = rightDockDetailActive ? RIGHT_DOCK_PREVIEW_MIN_WIDTH : RIGHT_DOCK_TREE_MIN_WIDTH;
+  const chatReservedWidth = workspacePanelOpen && !workspacePanelMaximized ? CHAT_COMFORT_MIN_WIDTH : CHAT_MIN_WIDTH;
+  const workspacePanelAvailableWidth = availableWorkspacePanelWidth({
+    viewportWidth,
+    sidebarCollapsed,
+    sidebarWidth,
+    chatMinWidth: chatReservedWidth,
+    resizerWidth: WORKSPACE_RESIZER_WIDTH,
+  });
 
-  const resolvedWorkspacePanelWidth = workspacePanelOpen && !workspacePanelMaximized
-    ? Math.max(workspacePanelMinWidth, preferredWorkspacePanelWidth)
-    : preferredWorkspacePanelWidth;
+  const resolvedWorkspacePanelWidth = resolveWorkspacePanelWidth({
+    open: workspacePanelOpen,
+    maximized: workspacePanelMaximized,
+    preferredWidth: preferredWorkspacePanelWidth,
+    minWidth: workspacePanelMinWidth,
+    availableWidth: workspacePanelAvailableWidth,
+  });
 
-  const workspacePanelRenderable = workspacePanelOpen && (workspacePanelMaximized || resolvedWorkspacePanelWidth > 0);
+  const workspacePanelRenderable =
+    workspacePanelOpen && (workspacePanelMaximized || resolvedWorkspacePanelWidth >= RIGHT_DOCK_MIN_RENDER_WIDTH);
   const workspacePanelGridOpen = workspacePanelRenderable && !workspacePanelMaximized;
   const workspacePanelRenderWidth = workspacePanelMaximized ? preferredWorkspacePanelWidth : resolvedWorkspacePanelWidth;
   const activeTab = useMemo(
@@ -663,6 +702,9 @@ export default function App() {
 
   useEffect(() => {
     const ids = new Set(tabMetas.map((tab) => tab.id));
+    for (const id of Object.keys(yoloRestoreToolApprovalModesRef.current)) {
+      if (!ids.has(id)) delete yoloRestoreToolApprovalModesRef.current[id];
+    }
     setGoalDraftModesByTab((current) => {
       let changed = false;
       const next: Record<string, boolean> = {};
@@ -803,12 +845,30 @@ export default function App() {
   const applyToolApprovalMode = useCallback(
     (m: ToolApprovalMode) => {
       if (!activeTabId) return;
+      if (m === "yolo") {
+        if (toolApprovalMode !== "yolo") {
+          yoloRestoreToolApprovalModesRef.current[activeTabId] = restorableToolApprovalMode(toolApprovalMode);
+        }
+      } else {
+        yoloRestoreToolApprovalModesRef.current[activeTabId] = restorableToolApprovalMode(m);
+      }
       setToolApprovalModesByTab((current) => (current[activeTabId] === m ? current : { ...current, [activeTabId]: m }));
       setMode(modeFromAxes(collaborationMode === "plan", m === "yolo"));
       void setControllerToolApprovalMode(m);
     },
-    [activeTabId, collaborationMode, setControllerToolApprovalMode, setMode],
+    [activeTabId, collaborationMode, setControllerToolApprovalMode, setMode, toolApprovalMode],
   );
+  const toggleYoloApprovalMode = useCallback(() => {
+    if (!activeTabId) return;
+    const next = toggleYoloToolApprovalMode(
+      toolApprovalMode,
+      yoloRestoreToolApprovalModesRef.current[activeTabId],
+    );
+    if (next.restore) {
+      yoloRestoreToolApprovalModesRef.current[activeTabId] = next.restore;
+    }
+    applyToolApprovalMode(next.mode);
+  }, [activeTabId, applyToolApprovalMode, toolApprovalMode]);
   const applyGoal = useCallback(
     (nextGoal: string) => {
       if (!activeTabId) return;
@@ -833,7 +893,8 @@ export default function App() {
     },
     [applyGoal, send],
   );
-  // Shift+Tab toggles only the collaboration axis; tool permission stays independent.
+  // Shift+Tab toggles only the collaboration axis; Ctrl/Cmd+Y toggles YOLO on the
+  // tool-permission axis while preserving the Ask/Auto base mode.
   const cycleMode = useCallback(() => {
     applyCollaborationMode(collaborationMode === "plan" ? "normal" : "plan");
   }, [applyCollaborationMode, collaborationMode]);
@@ -1211,7 +1272,7 @@ export default function App() {
       closeTransientOverlays();
       setWorkspacePanelResizing(true);
       const startX = event.clientX;
-      const startDockWidth = preferredWorkspacePanelWidth;
+      const startDockWidth = workspacePanelRenderWidth;
       let nextDockWidth = startDockWidth;
       const onMove = (moveEvent: PointerEvent) => {
         const delta = moveEvent.clientX - startX;
@@ -1237,14 +1298,14 @@ export default function App() {
       window.addEventListener("pointerup", onDone);
       window.addEventListener("pointercancel", onDone);
     },
-    [closeTransientOverlays, preferredWorkspacePanelWidth, rightDockDetailActive, setSavedWorkspacePanelWidth, workspacePanelOpen],
+    [closeTransientOverlays, rightDockDetailActive, setSavedWorkspacePanelWidth, workspacePanelOpen, workspacePanelRenderWidth],
   );
 
   const resizeWorkspacePanelWithKeyboard = useCallback(
     (event: KeyboardEvent<HTMLButtonElement>) => {
       if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
         event.preventDefault();
-        setSavedWorkspacePanelWidth(preferredWorkspacePanelWidth + (event.key === "ArrowLeft" ? 16 : -16));
+        setSavedWorkspacePanelWidth(workspacePanelRenderWidth + (event.key === "ArrowLeft" ? 16 : -16));
       } else if (event.key === "Home") {
         event.preventDefault();
         setSavedWorkspacePanelWidth(rightDockDetailActive ? RIGHT_DOCK_PREVIEW_MIN_WIDTH : RIGHT_DOCK_TREE_MIN_WIDTH);
@@ -1253,7 +1314,7 @@ export default function App() {
         setSavedWorkspacePanelWidth(rightDockDetailActive ? RIGHT_DOCK_MAX_WIDTH : RIGHT_DOCK_TREE_MAX_WIDTH);
       }
     },
-    [preferredWorkspacePanelWidth, rightDockDetailActive, setSavedWorkspacePanelWidth],
+    [rightDockDetailActive, setSavedWorkspacePanelWidth, workspacePanelRenderWidth],
   );
 
   const openWorkspacePanel = useCallback(
@@ -1273,10 +1334,8 @@ export default function App() {
         nextMaximized = false;
         setWorkspacePanelMaximized(false);
       } else {
-        // When user explicitly opens the panel, we do NOT force maximize.
-        // If there's not enough room, the panel will open in floating mode
-        // over the chat area, preserving the chat area's minimum width
-        // and keeping the panel's close button accessible.
+        // Keep file/change views docked; the rendered dock width is clamped to
+        // the viewport so opening it reflows instead of forcing maximize.
         nextMaximized = false;
         setWorkspacePanelMaximized(false);
       }
@@ -1335,12 +1394,11 @@ export default function App() {
     () =>
       ({
         "--sidebar-expanded-width": `${sidebarWidth}px`,
-        "--chat-min-width": `${CHAT_MIN_WIDTH}px`,
-        "--chat-docked-min-width": `${CHAT_DOCKED_MIN_WIDTH}px`,
+        "--chat-min-width": `${chatReservedWidth}px`,
         "--workspace-width": `${workspacePanelRenderWidth}px`,
         "--workspace-resizer-width": `${WORKSPACE_RESIZER_WIDTH}px`,
       }) as CSSProperties,
-    [sidebarWidth, workspacePanelRenderWidth],
+    [chatReservedWidth, sidebarWidth, workspacePanelRenderWidth],
   );
 
   const setWorkspacePanel = useCallback((open: boolean) => {
@@ -1668,6 +1726,7 @@ export default function App() {
   const workspacePanelResetWidth = rightDockDetailActive
     ? RIGHT_DOCK_PREVIEW_DEFAULT_WIDTH
     : defaultRightDockTreeWidth();
+  const workspacePanelResizeMinWidth = workspacePanelAriaMinWidth(workspacePanelMinWidth, workspacePanelRenderWidth);
   const workspacePanelMaxWidth = rightDockDetailActive ? RIGHT_DOCK_MAX_WIDTH : RIGHT_DOCK_TREE_MAX_WIDTH;
   const topicbarTitle = topicDisplayTitle(activeTab);
   const topicbarWorkspaceLabel = activeTab ? tabWorkspaceTitle(activeTab) : "";
@@ -1909,7 +1968,7 @@ export default function App() {
             <div className="banner banner--error">{t("topbar.startupError", { msg: state.meta.startupErr })}</div>
           )}
 
-          <UpdateBanner />
+          <UpdateBanner enabled={startupUpdateChecksEnabled === true} />
 
           <main className="main">
             {state.meta?.ready === false && !state.meta?.startupErr ? (
@@ -1982,6 +2041,7 @@ export default function App() {
               onSetMode={applyMode}
               onSetCollaborationMode={applyCollaborationMode}
               onSetToolApprovalMode={applyToolApprovalMode}
+              onToggleYoloApprovalMode={toggleYoloApprovalMode}
               onSetGoal={startGoal}
               onClearGoal={() => applyGoal("")}
               onSwitchModel={switchModel}
@@ -2019,7 +2079,7 @@ export default function App() {
             role="separator"
             aria-orientation="vertical"
             aria-label={t("rightDock.resize")}
-            aria-valuemin={workspacePanelMinWidth}
+            aria-valuemin={workspacePanelResizeMinWidth}
             aria-valuemax={Math.max(workspacePanelMaxWidth, workspacePanelRenderWidth)}
             aria-valuenow={workspacePanelRenderWidth}
             onPointerDown={startWorkspacePanelResize}
@@ -2134,7 +2194,12 @@ export default function App() {
         <SettingsPanel
           initialTab={settingsTarget}
           onClose={() => setSettingsTarget(null)}
-          onChanged={() => void refreshMeta()}
+          onChanged={() => {
+            void refreshMeta();
+            void app.Settings()
+              .then(applyDesktopPreferences)
+              .catch((e) => console.warn("desktop preferences refresh failed", e));
+          }}
         />
       )}
 

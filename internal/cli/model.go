@@ -141,3 +141,20 @@ func modelRefs() []string {
 	}
 	return out
 }
+
+// providerNames returns the names of configured providers for slash completion.
+func providerNames() []string {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for i := range cfg.Providers {
+		p := &cfg.Providers[i]
+		if !p.Configured() {
+			continue
+		}
+		out = append(out, p.Name)
+	}
+	return out
+}

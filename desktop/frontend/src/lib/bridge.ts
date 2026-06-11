@@ -100,6 +100,7 @@ export interface AppBindings {
   ApproveTabWithScope(tabID: string, id: string, allow: boolean, session: boolean, persist: boolean, scope: string): Promise<void>;
   AnswerQuestion(id: string, answers: QuestionAnswer[]): Promise<void>;
   AnswerQuestionForTab(tabID: string, id: string, answers: QuestionAnswer[]): Promise<void>;
+  ReplayPendingPrompts(): Promise<void>;
   SetPlanMode(on: boolean): Promise<void>;
   SetMode(mode: string): Promise<void>;
   SetModeForTab(tabID: string, mode: string): Promise<void>;
@@ -216,6 +217,7 @@ export interface AppBindings {
   SetDisplayMode(mode: string): Promise<void>;
   SetDesktopLanguage(lang: string): Promise<void>;
   SetDesktopAppearance(theme: string, style: string): Promise<void>;
+  SetDesktopCheckUpdates(enabled: boolean): Promise<void>;
   MigrateDesktopPreferences(language: string, theme: string, style: string): Promise<void>;
   SetAgentParams(temperature: number, maxSteps: number, plannerMaxSteps: number, systemPrompt: string): Promise<void>;
   SetTrayLocale(locale: "en" | "zh"): Promise<void>;
@@ -677,6 +679,7 @@ function makeMockApp(): AppBindings {
     desktopThemeStyle: "graphite",
     closeBehavior: "background",
     displayMode: "minimal",
+    checkUpdates: true,
     configPath: "~/projects/reasonix/reasonix.toml",
     providerKinds: ["openai"],
     autoApproveTools: false,
@@ -1246,6 +1249,7 @@ function makeMockApp(): AppBindings {
         async AnswerQuestionForTab(_tabID, id, answers) {
           await withMockTabScope(_tabID, () => this.AnswerQuestion(id, answers));
         },
+        async ReplayPendingPrompts() {},
         async ConfirmAction(req) {
           void req;
           return false;
@@ -2016,6 +2020,9 @@ function makeMockApp(): AppBindings {
         async SetDesktopAppearance(theme: string, style: string) {
           settings.desktopTheme = theme === "auto" || theme === "light" ? theme : "dark";
           settings.desktopThemeStyle = style;
+        },
+        async SetDesktopCheckUpdates(enabled: boolean) {
+          settings.checkUpdates = enabled;
         },
         async MigrateDesktopPreferences(language: string, theme: string, style: string) {
           if (!settings.desktopLanguage) settings.desktopLanguage = language === "en" || language === "zh" ? language : "";

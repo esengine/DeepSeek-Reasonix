@@ -149,3 +149,26 @@ func TestSetAgentParamsPersistsStepLimitsToUserConfig(t *testing.T) {
 		t.Fatalf("saved config did not preserve other agent params: %+v", cfg.Agent)
 	}
 }
+
+func TestSetDesktopCheckUpdatesPersistsToUserConfig(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	app := NewApp()
+	if !app.Settings().CheckUpdates {
+		t.Fatal("Settings().CheckUpdates default = false, want true")
+	}
+	if err := app.SetDesktopCheckUpdates(false); err != nil {
+		t.Fatalf("SetDesktopCheckUpdates: %v", err)
+	}
+	view := app.Settings()
+	if view.CheckUpdates {
+		t.Fatal("Settings().CheckUpdates = true, want false")
+	}
+	cfg := config.LoadForEdit(config.UserConfigPath())
+	if cfg.Desktop.CheckUpdates == nil || *cfg.Desktop.CheckUpdates {
+		t.Fatalf("desktop.check_updates = %+v, want false", cfg.Desktop.CheckUpdates)
+	}
+	if cfg.DesktopCheckUpdates() {
+		t.Fatal("DesktopCheckUpdates() = true, want false")
+	}
+}

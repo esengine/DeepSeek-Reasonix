@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ClipboardEvent, DragEvent, KeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
-import { ArrowUp, Eye, FileText, Folder, List, MessageSquare, Search, Shield, ShieldAlert, ShieldCheck, SlidersHorizontal, Square, Target, Trash2, X } from "lucide-react";
+import { ArrowUp, Check, Eye, FileText, Folder, Gauge, List, MessageSquare, MoreHorizontal, Search, Shield, ShieldAlert, ShieldCheck, SlidersHorizontal, Square, Target, Trash2, X } from "lucide-react";
 import { asArray } from "../lib/array";
 import { DedupIndex, sha256 } from "../lib/attachDedup";
 import { app, onFilesDropped } from "../lib/bridge";
@@ -108,6 +108,10 @@ function clipboardHasImageHint(data: DataTransfer): boolean {
 
 function isPasteShortcut(e: KeyboardEvent<HTMLTextAreaElement>): boolean {
   return e.key.toLowerCase() === "v" && (e.metaKey || e.ctrlKey) && !e.altKey;
+}
+
+function isYoloToggleShortcut(e: KeyboardEvent<HTMLTextAreaElement>): boolean {
+  return e.key.toLowerCase() === "y" && (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey;
 }
 
 async function dataURLHash(dataUrl: string): Promise<string> {
@@ -302,6 +306,7 @@ export function Composer({
   onSetMode,
   onSetCollaborationMode,
   onSetToolApprovalMode,
+  onToggleYoloApprovalMode,
   onSetGoal,
   onClearGoal,
   onSwitchModel,
@@ -331,6 +336,7 @@ export function Composer({
   onSetMode: (mode: Mode) => void;
   onSetCollaborationMode: (mode: CollaborationMode) => void;
   onSetToolApprovalMode: (mode: ToolApprovalMode) => void;
+  onToggleYoloApprovalMode: () => void;
   onSetGoal: (goal: string) => void;
   onClearGoal: () => void;
   onSwitchModel: (name: string) => void;
@@ -368,6 +374,8 @@ export function Composer({
   const [textareaAutoOverflow, setTextareaAutoOverflow] = useState(false);
   const [intentMenuOpen, setIntentMenuOpen] = useState(false);
   const [intentMenuClosing, setIntentMenuClosing] = useState(false);
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const [moreMenuClosing, setMoreMenuClosing] = useState(false);
   const [showPastChats, setShowPastChats] = useState(false);
   const [pastChats, setPastChats] = useState<SessionMeta[]>([]);
   const [pastChatQuery, setPastChatQuery] = useState("");
@@ -378,7 +386,9 @@ export function Composer({
   const taRef = useRef<HTMLTextAreaElement>(null);
   const composerCardRef = useRef<HTMLDivElement>(null);
   const intentMenuAnchorRef = useRef<HTMLButtonElement>(null);
+  const moreMenuAnchorRef = useRef<HTMLButtonElement>(null);
   const intentCloseTimerRef = useRef<number | null>(null);
+  const moreCloseTimerRef = useRef<number | null>(null);
   const wasRunning = useRef(running);
   const composingRef = useRef(false);
   const lastCompositionEndAt = useRef(0);
@@ -747,6 +757,32 @@ export function Composer({
   }, [clearIntentCloseTimer]);
 
   useEffect(() => () => clearIntentCloseTimer(), [clearIntentCloseTimer]);
+
+  const clearMoreCloseTimer = useCallback(() => {
+    if (moreCloseTimerRef.current === null) return;
+    window.clearTimeout(moreCloseTimerRef.current);
+    moreCloseTimerRef.current = null;
+  }, []);
+
+  const openMoreMenu = useCallback(() => {
+    clearMoreCloseTimer();
+    setMoreMenuClosing(false);
+    setMoreMenuOpen(true);
+  }, [clearMoreCloseTimer]);
+
+  const closeMoreMenu = useCallback((afterClose?: () => void) => {
+    clearMoreCloseTimer();
+    setMoreMenuClosing(true);
+    window.requestAnimationFrame(() => setMoreMenuOpen(false));
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    moreCloseTimerRef.current = window.setTimeout(() => {
+      moreCloseTimerRef.current = null;
+      setMoreMenuClosing(false);
+      afterClose?.();
+    }, reduceMotion ? 0 : ANCHORED_POPOVER_CLOSE_MS);
+  }, [clearMoreCloseTimer]);
+
+  useEffect(() => () => clearMoreCloseTimer(), [clearMoreCloseTimer]);
 
   const fileDedupKey = async (file: File): Promise<AttachmentDedupKey> => ({
     hash: await sha256(file),
@@ -1308,6 +1344,12 @@ export function Composer({
       return;
     }
 
+    if (isYoloToggleShortcut(e) && !composing) {
+      e.preventDefault();
+      onToggleYoloApprovalMode();
+      return;
+    }
+
     if (menuMode && !composing) {
       if (e.key === "ArrowDown" && count > 0) {
         e.preventDefault();
@@ -1411,6 +1453,15 @@ export function Composer({
       requestAnimationFrame(() => taRef.current?.focus());
     });
   };
+  const effortLevels = asArray(effort?.levels);
+  const currentEffort = effort?.current || "auto";
+  const hasEffort = Boolean(effort?.supported && effortLevels.length > 0);
+  const chooseEffortLevel = (level: string) => {
+    closeMoreMenu(() => {
+      if (level !== currentEffort) onSetEffort(level);
+      requestAnimationFrame(() => taRef.current?.focus());
+    });
+  };
   const runActivity = retry
     ? t("status.retrying", { attempt: retry.attempt, max: retry.max })
     : running && turnStartAt
@@ -1422,7 +1473,6 @@ export function Composer({
           return `${word}… ${fmtElapsed(elapsedMs)}${tok}`;
         })()
       : null;
-  const hasEffort = Boolean(effort?.supported);
   const composerMetaClass = [
     "composer-meta",
     hasEffort ? "composer-meta--has-effort" : "composer-meta--no-effort",
@@ -1478,6 +1528,37 @@ export function Composer({
             </span>
           </button>
         </div>
+      </AnchoredPopover>
+      <AnchoredPopover
+        open={moreMenuOpen && !disabled && !running}
+        closing={moreMenuClosing}
+        anchorRef={moreMenuAnchorRef}
+        onClose={() => closeMoreMenu()}
+        className="composer-access-menu composer-more-menu"
+        align="end"
+      >
+        {hasEffort && (
+          <div className="composer-access-menu__section">
+            <div className="composer-access-menu__label">{t("status.effortTitle")}</div>
+            <div className="composer-more-menu__items" role="listbox" aria-label={t("status.effortTitle")}>
+              {effortLevels.map((level) => (
+                <button
+                  key={level}
+                  type="button"
+                  role="option"
+                  aria-selected={level === currentEffort}
+                  className={`composer-more-menu__item${level === currentEffort ? " composer-more-menu__item--active" : ""}`}
+                  onClick={() => chooseEffortLevel(level)}
+                  disabled={running}
+                >
+                  <Gauge size={14} />
+                  <span>{level}</span>
+                  {level === currentEffort && <Check size={13} />}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </AnchoredPopover>
       {menuMode === "slash" && (
         <SlashMenu items={slashMatches} activeIndex={active} onPick={pickCommand} onHover={setActive} />
@@ -1899,9 +1980,29 @@ export function Composer({
             <div className="composer-meta__control composer-meta__control--model">
               <ModelSwitcher label={modelLabel} tabId={tabId} onPick={onSwitchModel} />
             </div>
-            {effort?.supported && (
+            {hasEffort && (
               <div className="composer-meta__control composer-meta__control--effort">
                 <EffortSwitcher effort={effort} disabled={running} onPick={onSetEffort} />
+              </div>
+            )}
+            {hasEffort && (
+              <div className="composer-meta__control composer-meta__control--more">
+                <Tooltip label={t("composer.moreControls")} disabled={moreMenuOpen || moreMenuClosing}>
+                  <button
+                    ref={moreMenuAnchorRef}
+                    type="button"
+                    className={`composer-more-trigger${moreMenuOpen || moreMenuClosing ? " composer-more-trigger--open" : ""}`}
+                    onClick={() => (moreMenuOpen || moreMenuClosing ? closeMoreMenu() : openMoreMenu())}
+                    disabled={disabled || running}
+                    aria-haspopup="menu"
+                    aria-expanded={moreMenuOpen && !moreMenuClosing}
+                    aria-label={t("composer.moreControls")}
+                    title={moreMenuOpen || moreMenuClosing ? undefined : t("composer.moreControls")}
+                  >
+                    <MoreHorizontal size={16} />
+                    <span>{t("topicBar.more")}</span>
+                  </button>
+                </Tooltip>
               </div>
             )}
           </div>

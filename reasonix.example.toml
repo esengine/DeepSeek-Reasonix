@@ -8,6 +8,7 @@ default_model = "deepseek"   # a provider name (→ its default model) or "provi
 [ui]
 theme = "auto"   # auto|dark|light; controls CLI colors only; REASONIX_THEME can override per run
 # theme_style = "graphite"   # graphite|ember|aurora|midnight|sandstone|porcelain|linen|glacier
+# shortcut_layout = "desktop"   # classic|desktop; compatibility setting; Shift+Tab toggles Plan, Ctrl+Y toggles YOLO
 
 [notifications]
 enabled = false   # system notifications for CLI chat/run; default off
