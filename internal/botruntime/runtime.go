@@ -13,6 +13,8 @@ import (
 	"reasonix/internal/config"
 )
 
+var rememberPersistMu sync.Mutex
+
 // EnabledPlatforms resolves the requested channel list against the saved config.
 // "lark" is a domain alias for the Feishu adapter platform.
 func EnabledPlatforms(cfg *config.Config, channels []string) (map[bot.Platform]bool, []string) {
@@ -233,7 +235,14 @@ func NewRemoteRememberer(logger *slog.Logger) func(bot.InboundMessage) {
 		if remoteID == "" {
 			return
 		}
-		key := strings.Join([]string{string(msg.Platform), strings.TrimSpace(msg.ConnectionID), strings.TrimSpace(msg.Domain), remoteID}, "\x00")
+		key := strings.Join([]string{
+			string(msg.Platform),
+			strings.TrimSpace(msg.ConnectionID),
+			strings.TrimSpace(msg.Domain),
+			string(msg.ChatType),
+			remoteID,
+			strings.TrimSpace(msg.UserID),
+		}, "\x00")
 		mu.Lock()
 		if seen[key] {
 			mu.Unlock()
@@ -255,6 +264,9 @@ func RememberInbound(msg bot.InboundMessage) error {
 	if userPath == "" || remoteID == "" {
 		return nil
 	}
+	rememberPersistMu.Lock()
+	defer rememberPersistMu.Unlock()
+
 	cfg := config.LoadForEdit(userPath)
 	now := time.Now().UTC().Format(time.RFC3339)
 	changed := false
