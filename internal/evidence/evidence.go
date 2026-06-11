@@ -97,11 +97,71 @@ func (l *Ledger) HasSuccessfulCommand(command string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	for _, r := range l.receipts {
-		if r.Success && r.ToolName == "bash" && r.Command == command {
+		if r.Success && r.ToolName == "bash" && CommandMatches(command, r.Command) {
 			return true
 		}
 	}
 	return false
+}
+
+// HasFailedCommand reports whether the cited command ran this turn but exited
+// non-zero — so callers can distinguish "ran and failed" from "never ran".
+func (l *Ledger) HasFailedCommand(command string) bool {
+	command = strings.TrimSpace(command)
+	if l == nil || command == "" {
+		return false
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, r := range l.receipts {
+		if !r.Success && r.ToolName == "bash" && CommandMatches(command, r.Command) {
+			return true
+		}
+	}
+	return false
+}
+
+// SuccessfulCommands returns up to limit successful bash commands from this
+// turn, most recent first, for self-correction hints in rejection errors.
+func (l *Ledger) SuccessfulCommands(limit int) []string {
+	if l == nil || limit <= 0 {
+		return nil
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	var out []string
+	for i := len(l.receipts) - 1; i >= 0 && len(out) < limit; i-- {
+		r := l.receipts[i]
+		if r.Success && r.ToolName == "bash" && r.Command != "" {
+			out = append(out, r.Command)
+		}
+	}
+	return out
+}
+
+// TouchedPaths returns up to limit distinct paths from this turn's successful
+// receipts, most recent first; writtenOnly restricts it to writer receipts.
+func (l *Ledger) TouchedPaths(limit int, writtenOnly bool) []string {
+	if l == nil || limit <= 0 {
+		return nil
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	seen := map[string]bool{}
+	var out []string
+	for i := len(l.receipts) - 1; i >= 0 && len(out) < limit; i-- {
+		r := l.receipts[i]
+		if !r.Success || (writtenOnly && !r.Write) || (!writtenOnly && !r.Read && !r.Write) {
+			continue
+		}
+		for _, p := range r.Paths {
+			if !seen[p] && len(out) < limit {
+				seen[p] = true
+				out = append(out, p)
+			}
+		}
+	}
+	return out
 }
 
 func (l *Ledger) HasSuccessfulCommandAfter(command string, after int) bool {
@@ -118,7 +178,7 @@ func (l *Ledger) HasSuccessfulCommandAfter(command string, after int) bool {
 	defer l.mu.Unlock()
 	for i := start; i < len(l.receipts); i++ {
 		r := l.receipts[i]
-		if r.Success && r.ToolName == "bash" && r.Command == command {
+		if r.Success && r.ToolName == "bash" && CommandMatches(command, r.Command) {
 			return true
 		}
 	}

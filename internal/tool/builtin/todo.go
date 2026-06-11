@@ -101,11 +101,12 @@ func verifyTodoCompletionTransitions(ctx context.Context, todos []todoItem) erro
 	if !hasBaseline || len(missing) == 0 {
 		return nil
 	}
+	const hint = "; sign each finished item off with complete_step first, then re-send this todo_write"
 	if len(missing) == 1 {
 		m := missing[0]
-		return fmt.Errorf("todo %d %q is newly completed but has no matching successful complete_step receipt in this turn", m.Index, m.Content)
+		return fmt.Errorf("todo %d %q is newly completed but has no matching successful complete_step receipt in this turn%s", m.Index, m.Content, hint)
 	}
-	return fmt.Errorf("%d todos are newly completed but have no matching successful complete_step receipts in this turn", len(missing))
+	return fmt.Errorf("%d todos are newly completed but have no matching successful complete_step receipts in this turn%s", len(missing), hint)
 }
 
 func toEvidenceTodos(todos []todoItem) []evidence.TodoItem {

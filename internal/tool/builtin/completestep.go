@@ -8,6 +8,7 @@ import (
 
 	"reasonix/internal/evidence"
 	"reasonix/internal/instruction"
+	"reasonix/internal/provider"
 	"reasonix/internal/tool"
 )
 
@@ -58,10 +59,10 @@ func (completeStep) Schema() json.RawMessage {
     "items":{
       "type":"object",
       "properties":{
-        "kind":{"type":"string","enum":["verification","diff","files","manual"],"description":"verification = a command/test was run; diff = a concrete code change; files = files created/edited/inspected; manual = a manual check."},
+        "kind":{"type":"string","enum":["verification","diff","files","manual"],"description":"verification = a command/test was run (command REQUIRED); diff = a concrete code change (paths REQUIRED); files = files created/edited/inspected (paths REQUIRED); manual = a manual check."},
         "summary":{"type":"string","description":"The evidence itself: the test result, what the diff does, or what was confirmed."},
-        "command":{"type":"string","description":"The command run, for verification evidence (e.g. \"go test ./...\")."},
-        "paths":{"type":"array","items":{"type":"string"},"description":"Files this evidence refers to."}
+        "command":{"type":"string","description":"REQUIRED for verification evidence: the command as it actually ran (e.g. \"go test ./...\") — it is checked against this session's real command history."},
+        "paths":{"type":"array","items":{"type":"string"},"description":"REQUIRED for diff/files evidence: the files this evidence refers to, as the paths were passed to the tools that touched them."}
       },
       "required":["kind","summary"]
     }
@@ -144,26 +145,29 @@ func verifyStepEvidence(ctx context.Context, items []stepEvidence) (hostVerified
 		case "verification":
 			command := strings.TrimSpace(e.Command)
 			if command == "" {
-				return 0, 0, fmt.Errorf("evidence %d: verification command is required for host verification", i+1)
+				return 0, 0, fmt.Errorf("evidence %d: verification command is required for host verification — cite the command you ran, or use kind \"manual\"", i+1)
 			}
 			if !ledger.HasSuccessfulCommand(command) && !verifyCommandFromSession(ctx, command) {
-				return 0, 0, fmt.Errorf("evidence %d: verification command %q has no matching successful bash receipt in this turn", i+1, command)
+				if ledger.HasFailedCommand(command) {
+					return 0, 0, fmt.Errorf("evidence %d: verification command %q ran but exited non-zero, so it can't prove the step; if the non-zero exit is itself the expected proof (e.g. a file is gone), re-run it so it succeeds (append \"|| true\") and sign off again", i+1, command)
+				}
+				return 0, 0, fmt.Errorf("evidence %d: verification command %q has no matching successful bash receipt in this turn%s", i+1, command, receiptHint("commands run this turn", ledger.SuccessfulCommands(5)))
 			}
 			hostVerified++
 		case "diff":
 			if len(e.Paths) == 0 {
-				return 0, 0, fmt.Errorf("evidence %d: diff evidence requires paths for host verification", i+1)
+				return 0, 0, fmt.Errorf("evidence %d: diff evidence requires paths for host verification — cite the files you changed", i+1)
 			}
 			if !ledger.HasSuccessfulWrite(e.Paths) {
-				return 0, 0, fmt.Errorf("evidence %d: diff paths have no matching successful writer receipt in this turn", i+1)
+				return 0, 0, fmt.Errorf("evidence %d: diff paths have no matching successful writer receipt in this turn%s", i+1, receiptHint("files written this turn", ledger.TouchedPaths(8, true)))
 			}
 			hostVerified++
 		case "files":
 			if len(e.Paths) == 0 {
-				return 0, 0, fmt.Errorf("evidence %d: files evidence requires paths for host verification", i+1)
+				return 0, 0, fmt.Errorf("evidence %d: files evidence requires paths for host verification — cite the files you touched", i+1)
 			}
 			if !ledger.HasSuccessfulReadOrWrite(e.Paths) {
-				return 0, 0, fmt.Errorf("evidence %d: file paths have no matching successful read/write receipt in this turn", i+1)
+				return 0, 0, fmt.Errorf("evidence %d: file paths have no matching successful read/write receipt in this turn%s", i+1, receiptHint("files touched this turn", ledger.TouchedPaths(8, false)))
 			}
 			hostVerified++
 		case "manual":
@@ -243,52 +247,34 @@ func verifyTodoStep(ctx context.Context, step string) (evidence.TodoStepMatch, b
 }
 
 // verifyCommandFromSession scans the full conversation history (not just the
-// per-turn ledger) so that a complete_step can cite commands that ran in an
-// earlier turn, that used a named tool instead of bash, or that were cited
-// with a slightly different string (trailing …,
-// truncation).
-//
-// Three scenarios this covers:
-//  1. Cross-turn: command ran in a prior turn, ledger was reset — scan the
-//     session transcript for the exact bash command.
-//  2. Non-bash tool: the model used the `ls` reader tool rather than
-//     bash "ls .", but complete_step cites command="ls ." — match by tool
-//     name (the first word of the command).
-//  3. Truncated string: the actual command was
-//     `find . -type f -not -path '*/node_modules/*'` but the model wrote
-//     command="find . -type f ..." — normalize both sides (strip …,
-//     trim, collapse whitespace) and fall back to prefix matching.
+// per-turn ledger) so a complete_step can cite a command that ran in an
+// earlier turn (the ledger resets per turn) or via a named tool instead of
+// bash. Calls whose recorded result is an error or a block are skipped — they
+// prove the command was attempted, not that it succeeded.
 func verifyCommandFromSession(ctx context.Context, command string) bool {
 	msgs, ok := evidence.SessionMessagesFromContext(ctx)
 	if !ok {
 		return false
 	}
-	lookup := normalizeVerifyCommand(command)
+	lookup := strings.TrimSuffix(strings.TrimSuffix(strings.TrimSpace(command), "..."), "…")
 	if lookup == "" {
 		return false
 	}
 	toolName := firstWord(lookup)
+	failed := failedCallIDs(msgs)
 
 	for _, msg := range msgs {
 		for _, tc := range msg.ToolCalls {
+			if failed[tc.ID] {
+				continue
+			}
 			cmd := extractCommandFromCall(tc.Name, tc.Arguments)
 			if cmd == "" {
 				continue
 			}
-			norm := normalizeVerifyCommand(cmd)
-			if norm == lookup {
+			if evidence.CommandMatches(lookup, cmd) {
 				return true
 			}
-			// Prefix match for truncated commands (scenario 3). Require the
-			// shorter side to be at least 8 chars to prevent false positives
-			// on very short fragments like "find" or "ls".
-			if len(norm) >= 8 && len(lookup) >= 8 {
-				if strings.HasPrefix(norm, lookup) || strings.HasPrefix(lookup, norm) {
-					return true
-				}
-			}
-			// Non-bash tool name match (scenario 2): the first word of the
-			// command matches a tool call name that isn't bash.
 			if toolName != "" && toolName != "bash" && tc.Name == toolName {
 				return true
 			}
@@ -297,14 +283,29 @@ func verifyCommandFromSession(ctx context.Context, command string) bool {
 	return false
 }
 
-// normalizeVerifyCommand strips trailing ellipsis,
-// trims whitespace, and collapses internal whitespace into single spaces.
-func normalizeVerifyCommand(s string) string {
-	s = strings.TrimSpace(s)
-	s = strings.TrimSuffix(s, "...")
-	s = strings.TrimSuffix(s, "…")
-	s = strings.TrimSpace(s)
-	return strings.Join(strings.Fields(s), " ")
+func failedCallIDs(msgs []provider.Message) map[string]bool {
+	failed := map[string]bool{}
+	for _, msg := range msgs {
+		if msg.Role != provider.RoleTool || msg.ToolCallID == "" {
+			continue
+		}
+		if strings.HasPrefix(msg.Content, "error:") || strings.HasPrefix(msg.Content, "blocked:") {
+			failed[msg.ToolCallID] = true
+		}
+	}
+	return failed
+}
+
+func receiptHint(label string, items []string) string {
+	if len(items) == 0 {
+		return ""
+	}
+	for i, item := range items {
+		if len(item) > 80 {
+			items[i] = item[:80] + "…"
+		}
+	}
+	return fmt.Sprintf("; %s: %q — cite one as it actually ran, or run the check now", label, items)
 }
 
 func firstWord(s string) string {

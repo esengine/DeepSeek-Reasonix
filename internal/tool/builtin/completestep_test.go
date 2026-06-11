@@ -8,6 +8,7 @@ import (
 
 	"reasonix/internal/evidence"
 	"reasonix/internal/instruction"
+	"reasonix/internal/provider"
 )
 
 func TestCompleteStepRejectsMissingEvidence(t *testing.T) {
@@ -118,7 +119,7 @@ func TestCompleteStepRejectsUnverifiedHostEvidence(t *testing.T) {
 		{
 			name: "failed verification command",
 			body: `{"step":"x","result":"y","evidence":[{"kind":"verification","summary":"claimed tests","command":"go test ./..."}]}`,
-			want: "successful bash receipt",
+			want: "exited non-zero",
 		},
 		{
 			name: "missing diff writer",
@@ -351,5 +352,124 @@ func TestCompleteStepIgnoresFailedTodoReceipt(t *testing.T) {
 func TestCompleteStepReadOnly(t *testing.T) {
 	if !(completeStep{}).ReadOnly() {
 		t.Fatal("complete_step must be ReadOnly so it stays available and needs no approval")
+	}
+}
+
+// Replays of real complete_step rejections captured from local sessions (2026-06-02) and issue #2917.
+func TestCompleteStepMatchesParaphrasedCommands(t *testing.T) {
+	cases := []struct {
+		name  string
+		ran   string
+		cited string
+	}{
+		{
+			name:  "cd prefix dropped",
+			ran:   "cd /repo && git merge upstream/main-v2 --ff-only",
+			cited: "git merge upstream/main-v2 --ff-only",
+		},
+		{
+			name:  "flag drift inside compound",
+			ran:   "rm -v scripts/test_lines.txt && ls -la scripts/test_lines.txt 2>&1 || true",
+			cited: "rm -v scripts/test_lines.txt && ls scripts/test_lines.txt 2>&1",
+		},
+		{
+			name:  "quote style drift",
+			ran:   `test -f test-tools.md && echo "still exists" || echo "deleted"`,
+			cited: `test -f test-tools.md && echo 'still exists' || echo 'deleted'`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ledger := evidence.NewLedger()
+			ledger.Record(evidence.Receipt{ToolName: "bash", Success: true, Command: tc.ran})
+			ctx := evidence.WithLedger(context.Background(), ledger)
+
+			body, _ := json.Marshal(map[string]any{
+				"step": "x", "result": "y",
+				"evidence": []map[string]any{{"kind": "verification", "summary": "verified", "command": tc.cited}},
+			})
+			if _, err := (completeStep{}).Execute(ctx, body); err != nil {
+				t.Fatalf("paraphrased citation of a ran command rejected: %v", err)
+			}
+		})
+	}
+}
+
+func TestCompleteStepExplainsFailedCommandReceipt(t *testing.T) {
+	ledger := evidence.NewLedger()
+	ledger.Record(evidence.Receipt{ToolName: "bash", Success: false, Command: "ls scripts/test_lines.txt 2>&1"})
+	ctx := evidence.WithLedger(context.Background(), ledger)
+
+	_, err := completeStep{}.Execute(ctx, json.RawMessage(`{
+		"step":"x","result":"y",
+		"evidence":[{"kind":"verification","summary":"ls confirms the file is gone","command":"ls scripts/test_lines.txt 2>&1"}]}`))
+	if err == nil {
+		t.Fatal("failed command citation should be rejected")
+	}
+	for _, want := range []string{"exited non-zero", "|| true"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error should carry the recovery hint %q, got %v", want, err)
+		}
+	}
+}
+
+func TestCompleteStepRejectionListsRanCommands(t *testing.T) {
+	ledger := evidence.NewLedger()
+	ledger.Record(evidence.Receipt{ToolName: "bash", Success: true, Command: "wc -l scripts/test_lines.txt"})
+	ctx := evidence.WithLedger(context.Background(), ledger)
+
+	_, err := completeStep{}.Execute(ctx, json.RawMessage(`{
+		"step":"x","result":"y",
+		"evidence":[{"kind":"verification","summary":"claimed","command":"go test ./internal/nilutil/... ./internal/fileutil/..."}]}`))
+	if err == nil || !strings.Contains(err.Error(), "wc -l scripts/test_lines.txt") {
+		t.Fatalf("rejection should list the commands that actually ran, got %v", err)
+	}
+}
+
+func TestCompleteStepRejectionListsTouchedPaths(t *testing.T) {
+	ledger := evidence.NewLedger()
+	ledger.Record(evidence.Receipt{ToolName: "write_file", Success: true, Paths: []string{"changed.go"}, Write: true})
+	ctx := evidence.WithLedger(context.Background(), ledger)
+
+	_, err := completeStep{}.Execute(ctx, json.RawMessage(`{
+		"step":"x","result":"y",
+		"evidence":[{"kind":"diff","summary":"claimed","paths":["other.go"]}]}`))
+	if err == nil || !strings.Contains(err.Error(), "changed.go") {
+		t.Fatalf("rejection should list the files actually written, got %v", err)
+	}
+}
+
+func TestCompleteStepSessionFallbackUsesNormalizedMatching(t *testing.T) {
+	msgs := []provider.Message{
+		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{
+			ID: "c1", Name: "bash",
+			Arguments: `{"command":"go test ./internal/tool/... -count=1 -timeout 60s 2>&1 | tail -10"}`,
+		}}},
+		{Role: provider.RoleTool, ToolCallID: "c1", Name: "bash", Content: "ok\nPASS"},
+	}
+	ctx := evidence.WithLedger(context.Background(), evidence.NewLedger())
+	ctx = evidence.WithSessionMessages(ctx, msgs)
+
+	if _, err := (completeStep{}).Execute(ctx, json.RawMessage(`{
+		"step":"x","result":"y",
+		"evidence":[{"kind":"verification","summary":"tool tests pass","command":"go test ./internal/tool/... -count=1 -timeout 60s"}]}`)); err != nil {
+		t.Fatalf("cross-turn citation of a ran command rejected: %v", err)
+	}
+}
+
+func TestCompleteStepSessionFallbackSkipsFailedCalls(t *testing.T) {
+	msgs := []provider.Message{
+		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{
+			ID: "c1", Name: "bash", Arguments: `{"command":"go test ./broken/..."}`,
+		}}},
+		{Role: provider.RoleTool, ToolCallID: "c1", Name: "bash", Content: "error: command exited: exit status 1\nFAIL"},
+	}
+	ctx := evidence.WithLedger(context.Background(), evidence.NewLedger())
+	ctx = evidence.WithSessionMessages(ctx, msgs)
+
+	if _, err := (completeStep{}).Execute(ctx, json.RawMessage(`{
+		"step":"x","result":"y",
+		"evidence":[{"kind":"verification","summary":"tests pass","command":"go test ./broken/..."}]}`)); err == nil {
+		t.Fatal("a call whose recorded result is an error must not count as verification")
 	}
 }
