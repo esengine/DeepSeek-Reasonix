@@ -74,6 +74,10 @@ func builtinHelpItems() []compItem {
 		{label: "/auto-plan", hint: i18n.M.CmdAutoPlan},
 		{label: "/context", hint: i18n.M.CmdContext},
 		{label: "/stats", hint: i18n.M.CmdStats},
+		{label: "/agent_spawn", hint: "run a task on a managed agent"},
+		{label: "/agent_send", hint: "send a message to a managed agent"},
+		{label: "/agent_status", hint: "show agent statuses"},
+		{label: "/agent_stats", hint: "show per-agent token/cost stats"},
 		{label: "/help", hint: i18n.M.CmdHelp},
 	}
 }

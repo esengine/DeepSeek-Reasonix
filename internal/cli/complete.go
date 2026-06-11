@@ -98,6 +98,14 @@ func (m *chatTUI) slashItems() []compItem {
 		}
 		items = append(items, compItem{label: "/" + s.Name, insert: "/" + s.Name + " ", hint: hint})
 	}
+	if m.orc != nil {
+		items = append(items,
+			compItem{label: "/agent_spawn", insert: "/agent_spawn ", hint: "run a task on a managed agent"},
+			compItem{label: "/agent_send", insert: "/agent_send ", hint: "send a message to a managed agent"},
+			compItem{label: "/agent_status", insert: "/agent_status", hint: "show agent statuses"},
+			compItem{label: "/agent_stats", insert: "/agent_stats", hint: "show per-agent token/cost stats"},
+		)
+	}
 	for _, p := range m.prompts() {
 		items = append(items, compItem{label: "/" + p.Name, insert: "/" + p.Name + " ", hint: p.Description})
 	}

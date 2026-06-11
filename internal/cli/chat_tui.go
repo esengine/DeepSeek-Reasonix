@@ -30,6 +30,7 @@ import (
 	"reasonix/internal/hook"
 	"reasonix/internal/i18n"
 	"reasonix/internal/memory"
+	"reasonix/internal/orchestrator"
 	"reasonix/internal/outputstyle"
 	"reasonix/internal/permission"
 	"reasonix/internal/plugin"
@@ -121,6 +122,7 @@ type chatTUI struct {
 	renderer      *mdRenderer
 	showReasoning bool // Ctrl+O / /verbose: show raw thinking text in the CLI
 	cfg           *config.Config
+	orc           *orchestrator.Orchestrator
 	// reasoningLineIdx is the transcript index of the live "▎ thinking…" marker
 	// while a reasoning block streams; it's rewritten to "▎ thought for Ns" when
 	// the block closes. -1 when no block is open. transcriptDirty forces a
@@ -321,6 +323,18 @@ type statuslineMsg struct{ out string }
 // status line. Empty means "not a git worktree" or "git unavailable".
 type gitStatusMsg struct{ status gitStatus }
 
+type agentSpawnMsg struct {
+	name   string
+	result string
+	err    error
+}
+
+type agentSendMsg struct {
+	name    string
+	message string
+	err     error
+}
+
 // runStatusline runs the user's custom status-line command off the event loop,
 // feeding it a small JSON context on stdin and returning its first stdout line.
 // A no-op (nil) when no command is configured. Tight timeout so a slow script
@@ -429,7 +443,7 @@ type clipboardPasteMsg struct {
 // with an event sink that feeds eventCh; the TUI issues commands to it and
 // renders the events it emits. Label, history, host, and commands are read from
 // the controller, so a resumed session pre-populates scrollback.
-func newChatTUI(ctrl *control.Controller, missing string, eventCh chan event.Event, termW int) chatTUI {
+func newChatTUI(ctrl *control.Controller, missing string, eventCh chan event.Event, termW int, orc *orchestrator.Orchestrator) chatTUI {
 	ti := textarea.New()
 	configureChatTextarea(&ti)
 
@@ -466,6 +480,7 @@ func newChatTUI(ctrl *control.Controller, missing string, eventCh chan event.Eve
 		host:                 ctrl.Host(),
 		commands:             ctrl.Commands(),
 		skills:               ctrl.Skills(),
+		orc:                  orc,
 		viewport:             viewport.New(viewport.WithWidth(termW)),
 	}
 }
@@ -1192,6 +1207,19 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case gitStatusMsg:
 		m.gitStatus = msg.status
+
+	case agentSpawnMsg:
+		if msg.err != nil {
+			m.notice(fmt.Sprintf("agent_spawn: %s failed: %v", msg.name, msg.err))
+		} else {
+			m.notice(fmt.Sprintf("agent_spawn: %s done", msg.name))
+		}
+	case agentSendMsg:
+		if msg.err != nil {
+			m.notice(fmt.Sprintf("agent_send: %s failed: %v", msg.name, msg.err))
+		} else {
+			m.notice(fmt.Sprintf("agent_send: sent to %s", msg.name))
+		}
 
 	case compactDoneMsg:
 		if msg.err != nil {
@@ -3321,6 +3349,66 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 			m.notice("memory: " + err.Error())
 		} else {
 			m.notice("remembered → " + path)
+		}
+	case "/agent_spawn":
+		m.echoLocalCommand(input)
+		if m.orc == nil {
+			m.notice("no orchestrator configured")
+			break
+		}
+		rest := strings.TrimSpace(strings.TrimPrefix(input, cmd))
+		parts := strings.SplitN(rest, " ", 2)
+		if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
+			m.notice("usage: /agent_spawn <name> <task>")
+			break
+		}
+		name, task := parts[0], parts[1]
+		orc := m.orc
+		return func() tea.Msg {
+			result, err := orc.SendMessage(context.Background(), name, task)
+			return agentSpawnMsg{name: name, result: result, err: err}
+		}
+	case "/agent_send":
+		m.echoLocalCommand(input)
+		if m.orc == nil {
+			m.notice("no orchestrator configured")
+			break
+		}
+		rest := strings.TrimSpace(strings.TrimPrefix(input, cmd))
+		parts := strings.SplitN(rest, " ", 2)
+		if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
+			m.notice("usage: /agent_send <name> <message>")
+			break
+		}
+		name, msg := parts[0], parts[1]
+		orc := m.orc
+		return func() tea.Msg {
+			_, err := orc.SendMessage(context.Background(), name, msg)
+			return agentSendMsg{name: name, message: msg, err: err}
+		}
+	case "/agent_status":
+		m.echoLocalCommand(input)
+		if m.orc == nil {
+			m.notice("no orchestrator configured")
+			break
+		}
+		for _, a := range m.orc.Agents() {
+			line := fmt.Sprintf("  %s: %s", a.Name, a.Status())
+			if t := a.LastTask(); t != "" {
+				line += fmt.Sprintf(" (last: %q)", t)
+			}
+			m.commitLine(line)
+		}
+	case "/agent_stats":
+		m.echoLocalCommand(input)
+		if m.orc == nil {
+			m.notice("no orchestrator configured")
+			break
+		}
+		for _, a := range m.orc.Agents() {
+			usage := a.SessionUsage()
+			m.commitLine(fmt.Sprintf("  %s: prompt=%d completion=%d total=%d cost=%.4f",
+				a.Name, usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens, usage.Cost))
 		}
 	case "/quit", "/exit":
 		return tea.Quit

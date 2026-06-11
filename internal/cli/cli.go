@@ -501,7 +501,7 @@ func chatREPL(args []string) int {
 		ctrl.SetBypass(true)
 	}
 
-	m := newChatTUI(ctrl, missing, eventCh, termW)
+	m := newChatTUI(ctrl, missing, eventCh, termW, orc)
 	if cfg, err := config.Load(); err == nil {
 		m.outputStyle = cfg.Agent.OutputStyle    // shown as the active entry in /output-style
 		m.statuslineCmd = cfg.Statusline.Command // custom status-line command, "" = built-in row

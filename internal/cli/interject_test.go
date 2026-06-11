@@ -37,7 +37,7 @@ func TestInterjectQueuesWhileRunningWithoutOverwrite(t *testing.T) {
 func TestInterjectDequeuesFrontOnTurnDone(t *testing.T) {
 	r := &blockingTurnRunner{started: make(chan struct{})}
 	ctrl := control.New(control.Options{Runner: r, Sink: event.Discard, SessionDir: t.TempDir(), Label: "test"})
-	m := newChatTUI(ctrl, "", make(chan event.Event, 8), 80)
+	m := newChatTUI(ctrl, "", make(chan event.Event, 8), 80, nil)
 	m.state = tuiRunning
 	m.pendingInterject = []string{"first", "second"}
 

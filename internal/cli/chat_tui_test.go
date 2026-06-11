@@ -129,7 +129,7 @@ func TestTermuxNativeScrollbackDefaultsToExpandedReasoning(t *testing.T) {
 	t.Cleanup(func() { detectTermuxTerminal = old })
 
 	ctrl := control.New(control.Options{})
-	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80, nil)
 	if !m.nativeScrollback {
 		t.Fatal("Termux should use native scrollback")
 	}
@@ -151,7 +151,7 @@ func TestTermuxNativeScrollbackDefaultsToExpandedReasoning(t *testing.T) {
 // rows = 5 with an empty 1-line composer), and is fed the committed transcript.
 func TestTranscriptViewportSizing(t *testing.T) {
 	ctrl := control.New(control.Options{})
-	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80, nil)
 
 	m0, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = m0.(chatTUI)
@@ -172,7 +172,7 @@ func TestTranscriptViewportSizing(t *testing.T) {
 
 func TestManualNewlineGrowsComposerWithoutHidingFirstLine(t *testing.T) {
 	ctrl := control.New(control.Options{})
-	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 40)
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 40, nil)
 
 	m0, _ := m.Update(tea.WindowSizeMsg{Width: 40, Height: 12})
 	m = m0.(chatTUI)
@@ -191,7 +191,7 @@ func TestManualNewlineGrowsComposerWithoutHidingFirstLine(t *testing.T) {
 
 func TestManualNewlineCanExceedVisibleComposerRows(t *testing.T) {
 	ctrl := control.New(control.Options{})
-	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 40)
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 40, nil)
 
 	m0, _ := m.Update(tea.WindowSizeMsg{Width: 40, Height: 12})
 	m = m0.(chatTUI)
@@ -212,7 +212,7 @@ func TestManualNewlineCanExceedVisibleComposerRows(t *testing.T) {
 
 func TestSoftWrappedInputGrowsComposerAndShrinksTranscript(t *testing.T) {
 	ctrl := control.New(control.Options{})
-	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 24)
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 24, nil)
 
 	m0, _ := m.Update(tea.WindowSizeMsg{Width: 24, Height: 12})
 	m = m0.(chatTUI)
@@ -231,7 +231,7 @@ func TestSoftWrappedInputGrowsComposerAndShrinksTranscript(t *testing.T) {
 
 func TestMCPManagerHidesComposerBox(t *testing.T) {
 	ctrl := control.New(control.Options{})
-	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80, nil)
 	m.mcp = &mcpManager{stage: mcpStageList, snapshot: mcpSnapshot{servers: []mcpServerView{
 		{Name: "github", Transport: "stdio", Status: "deferred", Configured: true, Tier: "lazy"},
 	}}}
@@ -260,7 +260,7 @@ func TestMCPManagerHidesComposerBox(t *testing.T) {
 
 func TestMainManagerFollowsTranscriptWithoutTopPadding(t *testing.T) {
 	ctrl := control.New(control.Options{})
-	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80, nil)
 	m0, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
 	m = m0.(chatTUI)
 	m.wrappedLines = []string{"reasonix chat", "› /mcp"}
@@ -337,7 +337,7 @@ func TestModalPanelsHideComposerBox(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctrl := control.New(control.Options{})
-			m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
+			m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80, nil)
 			tt.setup(&m)
 
 			m0, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
@@ -392,7 +392,7 @@ func TestInputOwnedOverlaysKeepComposerBox(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctrl := control.New(control.Options{})
-			m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
+			m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80, nil)
 			tt.setup(&m)
 
 			m0, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
@@ -569,7 +569,7 @@ func TestAnswerTextStartingWithBracketStaysInAnswer(t *testing.T) {
 // needs a modifier). It exercises the real constructor, not a hand-built binding.
 func TestInsertNewlineKeyBinding(t *testing.T) {
 	ctrl := control.New(control.Options{})
-	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80, nil)
 	keys := m.input.KeyMap.InsertNewline.Keys()
 	found := false
 	for _, k := range keys {
@@ -1039,7 +1039,7 @@ func TestQueueIndicatorHiddenWhenIdle(t *testing.T) {
 // transcript viewport pads to fill above the pinned bottom region).
 func TestViewAltScreenFillsHeight(t *testing.T) {
 	ctrl := control.New(control.Options{})
-	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80, nil)
 	m.nativeScrollback = false
 	m0, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	v := m0.(chatTUI).View()
@@ -1057,7 +1057,7 @@ func TestViewAltScreenFillsHeight(t *testing.T) {
 
 func TestViewTermuxUsesNativeScrollback(t *testing.T) {
 	ctrl := control.New(control.Options{})
-	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80, nil)
 	m.nativeScrollback = true
 	m0, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	v := m0.(chatTUI).View()
@@ -1083,7 +1083,7 @@ func TestTranscriptTailFollow(t *testing.T) {
 	}
 	notice := agentEventMsg(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "line"})
 
-	cur := adv(newChatTUI(ctrl, "", make(chan event.Event, 1), 80), tea.WindowSizeMsg{Width: 80, Height: 8})
+	cur := adv(newChatTUI(ctrl, "", make(chan event.Event, 1), 80, nil), tea.WindowSizeMsg{Width: 80, Height: 8})
 	for i := 0; i < 12; i++ { // overflow the short viewport so there's room to scroll
 		cur = adv(cur, notice)
 	}
@@ -1116,7 +1116,7 @@ func TestEmptyEnterScrollsToBottom(t *testing.T) {
 
 	// --- idle state ---
 	t.Run("idle", func(t *testing.T) {
-		cur := adv(newChatTUI(ctrl, "", ch, 80), tea.WindowSizeMsg{Width: 80, Height: 8})
+		cur := adv(newChatTUI(ctrl, "", ch, 80, nil), tea.WindowSizeMsg{Width: 80, Height: 8})
 		for i := 0; i < 12; i++ {
 			cur = adv(cur, notice)
 		}
@@ -1134,7 +1134,7 @@ func TestEmptyEnterScrollsToBottom(t *testing.T) {
 
 	// --- running state ---
 	t.Run("running", func(t *testing.T) {
-		cur := adv(newChatTUI(ctrl, "", ch, 80), tea.WindowSizeMsg{Width: 80, Height: 8})
+		cur := adv(newChatTUI(ctrl, "", ch, 80, nil), tea.WindowSizeMsg{Width: 80, Height: 8})
 		for i := 0; i < 12; i++ {
 			cur = adv(cur, notice)
 		}
@@ -1249,7 +1249,7 @@ func TestSlashQuitExit(t *testing.T) {
 // second press within the window returns tea.Quit.
 func TestDoubleCtrlCQuit(t *testing.T) {
 	ctrl := control.New(control.Options{})
-	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80, nil)
 	ctrlC := tea.KeyPressMsg{Code: 'c', Mod: 4} // 4 = ModCtrl
 
 	// First Ctrl+C while idle: arms quit, flushes hint via finalize cmd.
