@@ -20,10 +20,12 @@ function attachmentIcon(kind: "image" | "file" | "folder") {
 
 export function UserMessage({
   text,
+  failed,
   turn,
   anchorId,
 }: {
   text: string;
+  failed?: boolean;
   turn?: number;
   anchorId?: string;
 }) {
@@ -54,9 +56,10 @@ export function UserMessage({
     };
   }, [imagePreviewKey]);
   return (
-    <div className="msg msg--user" id={anchorId} data-question-anchor={anchorId} data-turn={turn}>
+    <div className={`msg msg--user${failed ? " msg--user-failed" : ""}`} id={anchorId} data-question-anchor={anchorId} data-turn={turn}>
       <div className="msg__body">
         {displayText && <div className="msg__text">{displayText}</div>}
+        {failed && <div className="msg__send-failed">{t("msg.sendFailed")}</div>}
         {orderedAttachments.length > 0 && (
           <div className="msg-attachments" aria-label={t("msg.attachments")}>
             {orderedAttachments.map((attachment, index) => (
@@ -263,13 +266,16 @@ export function TurnActions({
 
 export const AssistantMessage = memo(function AssistantMessage({
   item,
+  defaultExpanded = false,
 }: {
   item: AssistantItem;
+  defaultExpanded?: boolean;
 }) {
   const t = useT();
   const hasText = item.streaming || item.text.trim() !== "";
   const processOnly = Boolean(item.reasoning) && !hasText;
   const processWithText = Boolean(item.reasoning) && hasText;
+  const [reasoningOpen, setReasoningOpen] = useState(item.streaming || defaultExpanded);
   return (
     <div className={`msg msg--assistant${processOnly ? " msg--process-only" : ""}${processWithText ? " msg--process-with-text" : ""}`}>
       {item.reasoning && (
@@ -284,25 +290,15 @@ export const AssistantMessage = memo(function AssistantMessage({
               <span>{item.streaming ? t("msg.thinkingRunning") : t("msg.thinkingDone")}</span>
             </>
           }
-          defaultOpen={item.streaming}
+          open={reasoningOpen}
+          onOpenChange={setReasoningOpen}
         >
           <div className="reasoning__body">{item.reasoning}</div>
         </ProcessCard>
       )}
       {hasText && (
         <div className="msg__body">
-          {item.streaming ? (
-            // Render markdown in real time while streaming.  useDeferredValue
-            // inside <Markdown> lets React prioritise the cursor + layout frame
-            // over the expensive markdown parse — new tokens paint immediately,
-            // the formatted catch-up runs in idle frames.
-            <div className="msg__stream">
-              <Markdown text={item.text} />
-              <span className="msg__cursor" />
-            </div>
-          ) : (
-            <Markdown text={item.text} />
-          )}
+          <Markdown text={item.text} showCursor={item.streaming} />
         </div>
       )}
     </div>

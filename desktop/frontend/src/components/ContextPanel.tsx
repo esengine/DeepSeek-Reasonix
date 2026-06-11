@@ -1,7 +1,7 @@
 // ContextPanel shows the active tab's context gauge, token usage, read files,
 // and workspace changes. All visible text is routed through the i18n dictionary.
 import { useCallback, useEffect, useState } from "react";
-import { ArrowLeft, FileText, Search } from "lucide-react";
+import { FileText } from "lucide-react";
 import { asArray } from "../lib/array";
 import { app } from "../lib/bridge";
 import { useT, type Translator } from "../lib/i18n";
@@ -12,14 +12,16 @@ interface ContextPanelProps {
   tabId?: string;
   context?: ContextInfo;
   usage?: WireUsage;
+  sessionTokens?: number;
   sessionCost?: number;
   sessionCurrency?: string;
-  scopeLabel?: string;
   refreshKey?: number;
-  onDetailModeChange?: (active: boolean) => void;
+  onOpenWorkspaceMode?: (mode: "files" | "changed") => void;
+  onOpenWorkspaceFile?: (path: string) => void;
+  onOpenWorkspaceFileList?: (paths: string[]) => void;
+  onOpenWorkspaceChangeList?: (changes: ContextFileRow[]) => void;
+  onOpenWorkspaceChangeFile?: (path: string) => void;
 }
-
-type ContextDetail = "read" | "changed";
 
 function fmtTokens(n: number): string {
   if (n >= 1000) return `${Math.round(n / 1000)}k`;
@@ -55,49 +57,57 @@ function fmtMoney(amount: number, currency?: string): string {
 
 interface HealthResult {
   tone: "good" | "notice" | "warn";
-  labelKey: DictKey;
-  bodyKey: DictKey;
+  shortKey: DictKey;
   vars: Record<string, string | number>;
 }
+
+type ContextFileRow = { key: string; path: string; meta: string; time: string; detail: string };
 
 function contextHealth(usagePct: number, cachePct: number, readCount: number): HealthResult {
   if (usagePct >= 85) {
     return {
       tone: "warn",
-      labelKey: "context.healthNearLimit",
-      bodyKey: "context.healthNearLimitBody",
+      shortKey: "context.healthNearLimitShort",
       vars: { pct: usagePct },
     };
   }
   if (readCount >= 8) {
     return {
       tone: "notice",
-      labelKey: "context.healthManyFiles",
-      bodyKey: "context.healthManyFilesBody",
+      shortKey: "context.healthManyFilesShort",
       vars: { count: readCount },
     };
   }
   if (cachePct > 0 && cachePct < 50) {
     return {
       tone: "notice",
-      labelKey: "context.healthLowCache",
-      bodyKey: "context.healthLowCacheBody",
+      shortKey: "context.healthLowCacheShort",
       vars: { pct: cachePct },
     };
   }
   return {
     tone: "good",
-    labelKey: "context.healthGood",
-    bodyKey: "context.healthGoodBody",
+    shortKey: "context.healthGoodShort",
     vars: {},
   };
 }
 
-export function ContextPanel({ tabId, context, usage, sessionCost, sessionCurrency, scopeLabel, refreshKey, onDetailModeChange }: ContextPanelProps) {
+export function ContextPanel({
+  tabId,
+  context,
+  usage,
+  sessionTokens,
+  sessionCost,
+  sessionCurrency,
+  refreshKey,
+  onOpenWorkspaceMode,
+  onOpenWorkspaceFile,
+  onOpenWorkspaceFileList,
+  onOpenWorkspaceChangeList,
+  onOpenWorkspaceChangeFile,
+}: ContextPanelProps) {
   const t = useT();
   const [info, setInfo] = useState<ContextPanelInfo | null>(null);
-  const [detailView, setDetailView] = useState<ContextDetail | null>(null);
-  const [query, setQuery] = useState("");
 
   const refresh = useCallback(async () => {
     if (!tabId) return;
@@ -117,18 +127,11 @@ export function ContextPanel({ tabId, context, usage, sessionCost, sessionCurren
     void refresh();
   }, [refresh, refreshKey]);
 
-  useEffect(() => {
-    onDetailModeChange?.(detailView !== null);
-  }, [detailView, onDetailModeChange]);
-
-  useEffect(() => {
-    return () => onDetailModeChange?.(false);
-  }, [onDetailModeChange]);
-
   const hasPanelUsage = Boolean(
     (info?.requestCount ?? 0) > 0 ||
     (info?.promptTokens ?? 0) > 0 ||
     (info?.completionTokens ?? 0) > 0 ||
+    (info?.totalTokens ?? 0) > 0 ||
     (info?.reasoningTokens ?? 0) > 0 ||
     (info?.cacheHitTokens ?? 0) > 0 ||
     (info?.cacheMissTokens ?? 0) > 0
@@ -137,12 +140,18 @@ export function ContextPanel({ tabId, context, usage, sessionCost, sessionCurren
   const windowTokens = context?.window && context.window > 0 ? context.window : info?.windowTokens ?? 0;
   const promptTokens = hasPanelUsage ? info?.promptTokens ?? 0 : usage?.promptTokens ?? 0;
   const completionTokens = hasPanelUsage ? info?.completionTokens ?? 0 : usage?.completionTokens ?? 0;
+  const totalTokens = info?.totalTokens && info.totalTokens > 0
+    ? info.totalTokens
+    : sessionTokens && sessionTokens > 0
+      ? sessionTokens
+      : usage?.totalTokens && usage.totalTokens > 0
+        ? usage.totalTokens
+        : promptTokens + completionTokens;
   const reasoningTokens = hasPanelUsage ? info?.reasoningTokens ?? 0 : usage?.reasoningTokens ?? 0;
   const cacheHitTokens = hasPanelUsage ? info?.cacheHitTokens ?? 0 : usage?.cacheHitTokens ?? 0;
   const cacheMissTokens = hasPanelUsage ? info?.cacheMissTokens ?? 0 : usage?.cacheMissTokens ?? 0;
   const cost = info?.sessionCost && info.sessionCost > 0 ? info.sessionCost : sessionCost && sessionCost > 0 ? sessionCost : info?.sessionCostUsd ?? 0;
   const currency = sessionCurrency || info?.sessionCurrency || usage?.currency || "¥";
-  const isMock = info?.mock === true;
   const readFiles = asArray(info?.readFiles);
   const changedFiles = asArray(info?.changedFiles);
 
@@ -182,142 +191,89 @@ export function ContextPanel({ tabId, context, usage, sessionCost, sessionCurren
     time: fmtTime(f.latestTime),
     detail: asArray(f.turns).length > 0 ? `T${asArray(f.turns).join(",")}` : "",
   }));
-  const normalizedQuery = query.trim().toLowerCase();
-  const filterRows = (rows: typeof readRows) => {
-    if (!normalizedQuery) return rows;
-    return rows.filter((row) =>
-      `${row.path} ${row.meta} ${row.time} ${row.detail}`.toLowerCase().includes(normalizedQuery)
-    );
-  };
-  const filteredReadRows = filterRows(readRows);
-  const filteredChangedRows = filterRows(changedRows);
   const health = contextHealth(usagePct, cachePct, readRows.length);
-  const detailRows = detailView === "changed" ? filteredChangedRows : filteredReadRows;
-  const detailTitle = detailView === "changed" ? t("context.sessionChanges") : t("context.referencedFiles");
-  const detailCount = detailView === "changed" ? changedRows.length : readRows.length;
-  const detailEmpty = detailView === "changed" ? t("context.noChanges") : t("context.noReads");
-  const detailPlaceholder = detailView === "changed" ? t("context.filterChanges") : t("context.filterReads");
-  const detailNote = detailView === "changed"
-    ? t("context.changedNote", { count: detailCount })
-    : t("context.readNote", { count: detailCount });
-
-  const openDetail = (next: ContextDetail) => {
-    onDetailModeChange?.(true);
-    setDetailView(next);
-    setQuery("");
-  };
-
-  const closeDetail = () => {
-    onDetailModeChange?.(false);
-    setDetailView(null);
-    setQuery("");
-  };
 
   return (
     <div className="context-panel">
-      <div className="context-panel__summary-head">
-        <div className="context-panel__heading-main">
-          <span>{detailView ? detailTitle : t("context.overview")}</span>
-          <strong>{scopeLabel || t("context.scopeGlobal")}</strong>
-          {isMock && <em>{t("context.mockData")}</em>}
-        </div>
-        {detailView && (
-          <button className="context-panel__back" type="button" onClick={closeDetail}>
-            <ArrowLeft size={13} />
-            {t("rightDock.overview")}
-          </button>
-        )}
-      </div>
-
-      {detailView && (
-        <label className="context-panel__search">
-          <Search size={14} />
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={detailPlaceholder} />
-        </label>
-      )}
-
       <div className="context-panel__body">
-        {detailView ? (
-          <section className="context-panel__detail">
-            <div className="context-panel__detail-note">{detailNote}</div>
-            <FileTable
-              empty={detailEmpty}
-              rows={detailRows}
-            />
-          </section>
-        ) : (
-          <section className="context-panel__overview">
-            <section className="context-panel__usage">
-              <SectionHeading title={t("context.windowTitle")} meta={t("context.windowSubtitle")} />
-              <div className="context-panel__usage-visual">
-                <div className="context-panel__donut" style={donutStyle}>
-                  <div className="context-panel__donut-core">
-                    <strong>{fmtTokens(usedTokens)}</strong>
-                    <span>/ {fmtTokens(windowTokens)} tokens</span>
-                  </div>
-                </div>
-                <div className="context-panel__percent">{usagePct}%</div>
-              </div>
-              <div className="context-panel__breakdown">
-                <TokenLegend label={t("context.prompt")} value={promptTokens} color="prompt" />
-                <TokenLegend label={t("context.completion")} value={completionTokens} color="completion" />
-                <TokenLegend label={t("context.reasoning")} value={reasoningTokens} color="reasoning" />
-                <TokenLegend label={t("context.other")} value={otherTokens} color="other" />
-                <div className="context-panel__total">
-                  <span>{t("context.total")}</span>
-                  <strong>{usedTokens.toLocaleString()} / {windowTokens.toLocaleString()}</strong>
+        <section className="context-panel__overview">
+          <section className="context-panel__usage">
+            <SectionHeading title={t("context.windowTitle")} meta={t("context.windowSubtitle")} />
+            <div className="context-panel__usage-visual">
+              <div className="context-panel__donut" style={donutStyle}>
+                <div className="context-panel__donut-core">
+                  <strong>{fmtTokens(usedTokens)}</strong>
+                  <span>/ {fmtTokens(windowTokens)} tokens</span>
                 </div>
               </div>
-            </section>
-            <section className="context-panel__section">
-              <SectionHeading title={t("context.runtimeMetrics")} />
-              <div className="context-panel__stats">
-                <MetricCard label={t("context.requests")} value={requestCount > 0 ? String(requestCount) : "-"} />
-                <MetricCard label={t("context.time")} value={fmtDuration(elapsed, t)} />
+              <div className="context-panel__percent">{usagePct}%</div>
+            </div>
+            <div className="context-panel__breakdown">
+              <TokenLegend label={t("context.prompt")} value={promptTokens} color="prompt" />
+              <TokenLegend label={t("context.completion")} value={completionTokens} color="completion" />
+              <TokenLegend label={t("context.reasoning")} value={reasoningTokens} color="reasoning" />
+              <TokenLegend label={t("context.other")} value={otherTokens} color="other" />
+              <div className="context-panel__total">
+                <span>{t("context.total")}</span>
+                <strong>{usedTokens.toLocaleString()} / {windowTokens.toLocaleString()}</strong>
               </div>
-            </section>
-            <section className="context-panel__section">
-              <SectionHeading title={t("context.costMetrics")} />
-              <div className="context-panel__stats">
-                <MetricCard label={t("context.cacheHit")} value={cachePct > 0 ? `${cachePct}%` : "-"} tone="accent" />
-                <MetricCard label={t("context.sessionCost")} value={fmtMoney(cost, currency)} />
-              </div>
-            </section>
-            <section className="context-panel__section context-panel__section--status">
-              <SectionHeading title={t("context.sessionStatus")} />
-              <div className={`context-panel__health context-panel__health--${health.tone}`}>
-                <span>{t("context.health")}</span>
-                <strong>{t(health.labelKey, health.vars)}</strong>
-                <small>{t(health.bodyKey, health.vars)}</small>
-              </div>
-              <div className="context-panel__stats context-panel__stats--single">
-                <MetricCard label={t("context.compaction")} value={compactPct > 0 ? `${compactPct}%` : "-"} />
-              </div>
-            </section>
-            <PreviewSection
-              title={t("context.referencedFiles")}
-              meta={t("context.readMeta", { count: readRows.length })}
-              action={t("context.viewAll")}
-              onAction={() => openDetail("read")}
-              rows={readRows.slice(0, 3)}
-              empty={t("context.noReads")}
-            />
-            <PreviewSection
-              title={t("context.sessionChanges")}
-              meta={t("context.changedMeta", { count: changedRows.length })}
-              action={t("context.viewAll")}
-              onAction={() => openDetail("changed")}
-              rows={changedRows.slice(0, 3)}
-              empty={t("context.noChanges")}
-            />
+            </div>
           </section>
-        )}
+          <section className="context-panel__section">
+            <SectionHeading title={t("context.runtimeMetrics")} />
+            <div className="context-panel__stats">
+              <MetricCard label={t("context.sessionTokens")} value={totalTokens > 0 ? totalTokens.toLocaleString() : "-"} />
+              <MetricCard label={t("context.requests")} value={requestCount > 0 ? String(requestCount) : "-"} />
+              <MetricCard label={t("context.time")} value={fmtDuration(elapsed, t)} />
+            </div>
+          </section>
+          <section className="context-panel__section">
+            <SectionHeading title={t("context.costMetrics")} />
+            <div className="context-panel__stats">
+              <MetricCard label={t("context.cacheHit")} value={cachePct > 0 ? `${cachePct}%` : "-"} tone="accent" />
+              <MetricCard label={t("context.sessionCost")} value={fmtMoney(cost, currency)} />
+            </div>
+          </section>
+          <section className="context-panel__section context-panel__section--status">
+            <SectionHeading title={t("context.sessionStatus")} />
+            <div className="context-panel__stats">
+              <MetricCard label={t("context.health")} value={t(health.shortKey, health.vars)} tone={health.tone} />
+              <MetricCard label={t("context.compaction")} value={compactPct > 0 ? `${compactPct}%` : "-"} />
+            </div>
+          </section>
+          <PreviewSection
+            title={t("context.referencedFiles")}
+            meta={t("context.readMeta", { count: readRows.length })}
+            action={t("context.viewAll")}
+            onAction={() => {
+              if (onOpenWorkspaceFileList) {
+                onOpenWorkspaceFileList(readRows.map((row) => row.path));
+                return;
+              }
+              onOpenWorkspaceMode?.("files");
+            }}
+            onRowAction={onOpenWorkspaceFile}
+            rows={readRows.slice(0, 3)}
+            empty={t("context.noReads")}
+          />
+          <PreviewSection
+            title={t("context.sessionChanges")}
+            meta={t("context.changedMeta", { count: changedRows.length })}
+            action={t("context.viewAll")}
+            onAction={() => {
+              if (onOpenWorkspaceChangeList) {
+                onOpenWorkspaceChangeList(changedRows);
+                return;
+              }
+              onOpenWorkspaceMode?.("changed");
+            }}
+            onRowAction={onOpenWorkspaceChangeFile}
+            rows={changedRows.slice(0, 3)}
+            empty={t("context.noChanges")}
+          />
+        </section>
       </div>
 
-      <footer className="context-panel__scope">
-        <FileText size={14} />
-        <span>{scopeLabel || t("context.scopeGlobal")}</span>
-      </footer>
     </div>
   );
 }
@@ -336,6 +292,7 @@ function PreviewSection({
   meta,
   action,
   onAction,
+  onRowAction,
   rows,
   empty,
 }: {
@@ -343,7 +300,8 @@ function PreviewSection({
   meta?: string;
   action: string;
   onAction: () => void;
-  rows: Array<{ key: string; path: string; meta: string; time: string; detail: string }>;
+  onRowAction?: (path: string) => void;
+  rows: ContextFileRow[];
   empty: string;
 }) {
   return (
@@ -353,7 +311,7 @@ function PreviewSection({
         {meta && <span>{meta}</span>}
         {rows.length > 0 && <button type="button" onClick={onAction}>{action}</button>}
       </header>
-      <FileTable rows={rows} empty={empty} compact />
+      <FileTable rows={rows} empty={empty} compact onRowAction={onRowAction} />
     </section>
   );
 }
@@ -368,11 +326,12 @@ function TokenLegend({ label, value, color }: { label: string; value: number; co
   );
 }
 
-function MetricCard({ label, value, tone }: { label: string; value: string; tone?: "accent" }) {
+function MetricCard({ label, value, tone }: { label: string; value: string; tone?: "accent" | "good" | "notice" | "warn" }) {
+  const toneClass = tone ? ` context-panel__metric--${tone}` : "";
   return (
-    <div className="context-panel__metric">
+    <div className={`context-panel__metric${toneClass}`}>
       <span>{label}</span>
-      <strong className={tone === "accent" ? "context-panel__metric-accent" : ""}>{value}</strong>
+      <strong>{value}</strong>
     </div>
   );
 }
@@ -381,29 +340,51 @@ function FileTable({
   rows,
   empty,
   compact = false,
+  onRowAction,
 }: {
-  rows: Array<{ key: string; path: string; meta: string; time: string; detail: string }>;
+  rows: ContextFileRow[];
   empty: string;
   compact?: boolean;
+  onRowAction?: (path: string) => void;
 }) {
   if (rows.length === 0) return <div className="context-panel__empty">{empty}</div>;
   return (
     <div className={`context-panel__file-list${compact ? " context-panel__file-list--compact" : ""}`}>
-      {rows.map((row) => (
-        <div className="context-panel__file-row" key={row.key}>
-          <span className="context-panel__file-main">
-            <FileText size={14} />
-            <span className="context-panel__file-copy">
-              <span>{row.path}</span>
-              {row.detail && <small>{row.detail}</small>}
+      {rows.map((row) => {
+        const content = (
+          <>
+            <span className="context-panel__file-main">
+              <FileText size={14} />
+              <span className="context-panel__file-copy">
+                <span>{row.path}</span>
+                {row.detail && <small>{row.detail}</small>}
+              </span>
             </span>
-          </span>
-          <span className="context-panel__file-meta">
-            <span className="context-panel__file-turn">{row.meta}</span>
-            {row.time && <span>{row.time}</span>}
-          </span>
-        </div>
-      ))}
+            <span className="context-panel__file-meta">
+              <span className="context-panel__file-turn">{row.meta}</span>
+              {row.time && <span>{row.time}</span>}
+            </span>
+          </>
+        );
+        if (onRowAction) {
+          return (
+            <button
+              className="context-panel__file-row context-panel__file-row--button"
+              key={row.key}
+              type="button"
+              title={row.path}
+              onClick={() => onRowAction(row.path)}
+            >
+              {content}
+            </button>
+          );
+        }
+        return (
+          <div className="context-panel__file-row" key={row.key} title={row.path}>
+            {content}
+          </div>
+        );
+      })}
     </div>
   );
 }

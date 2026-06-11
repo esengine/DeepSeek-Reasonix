@@ -294,10 +294,11 @@ each writer/bash call. `deny` rules harden both modes.
 
 The chat TUI accepts `/command` input. Three kinds share one dispatch:
 
-- **Built-in actions** (`/compact`, `/new`/`/clear`, `/effort`, `/mcp`, `/help`) manipulate session
-  state locally and never reach the model. `/new` and its Claude Code-compatible
-  alias `/clear` start a fresh model context while saving the previous transcript
-  for resume/history; they do not delete persisted history or project memory.
+- **Built-in actions** (`/compact`, `/new`, `/clear`, `/effort`, `/mcp`, `/help`) manipulate session
+  state locally and never reach the model. `/new` starts a new session while
+  saving the previous transcript for resume/history. `/clear` requires
+  confirmation, then discards the current context without saving it; it does not
+  delete project memory.
 - **Custom commands** are Markdown files under `.reasonix/commands/` (project) and
   `~/.config/reasonix/commands/` (user); the project dir overrides the user dir on a
   name clash. A file `review.md` becomes `/review`; a subdirectory namespaces it
@@ -428,15 +429,15 @@ context_window = 1000000   # tokens; harness compacts older history near this li
 [[providers]]
 name        = "mimo-pro"
 kind        = "openai"
-base_url    = "https://api.xiaomimimo.com/v1"
+base_url    = "https://token-plan-cn.xiaomimimo.com/v1"
 model       = "mimo-v2.5-pro"
 api_key_env = "MIMO_API_KEY"
 
 [[providers]]
 name        = "mimo-flash"
 kind        = "openai"
-base_url    = "https://api.xiaomimimo.com/v1"
-model       = "mimo-v2-flash"
+base_url    = "https://token-plan-cn.xiaomimimo.com/v1"
+model       = "mimo-v2.5"
 api_key_env = "MIMO_API_KEY"
 
 [tools]

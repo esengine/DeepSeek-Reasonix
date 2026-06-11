@@ -46,7 +46,7 @@ const maxResultChars = 8000
 type updateSink struct {
 	conn      notifier
 	sessionID string
-	approve   func(id string, allow, session, persist bool, scope string)
+	approve   func(id string, allow, session, persist bool)
 	mu        sync.Mutex
 	turnCtx   context.Context
 }
@@ -62,12 +62,6 @@ func (s *updateSink) bindApprove(fn func(id string, allow, session, persist bool
 		s.approve = nil
 		return
 	}
-	s.approve = func(id string, allow, session, persist bool, _ string) {
-		fn(id, allow, session, persist)
-	}
-}
-
-func (s *updateSink) bindApproveWithScope(fn func(id string, allow, session, persist bool, scope string)) {
 	s.approve = fn
 }
 
@@ -235,7 +229,6 @@ func (s *updateSink) requestPermission(ctx context.Context, a event.Approval) {
 	}
 
 	allow, session, persist := false, false, false
-	scope := permission.ApprovalScopeExact
 	if raw, err := s.conn.Request(ctx, "session/request_permission", params); err == nil {
 		var res PermissionRequestResult
 		if json.Unmarshal(raw, &res) == nil && res.Outcome.Outcome == "selected" {
@@ -246,52 +239,26 @@ func (s *updateSink) requestPermission(ctx context.Context, a event.Approval) {
 				allow, session = true, true
 			case OptAllowPersistent:
 				allow, session, persist = true, true, true
-			case OptAllowPrefix:
-				allow, session = true, true
-				scope = permission.ApprovalScopePrefix
-			case OptPersistPrefix:
-				allow, session, persist = true, true, true
-				scope = permission.ApprovalScopePrefix
 			}
 		}
 	}
-	s.approve(a.ID, allow, session, persist, scope)
+	s.approve(a.ID, allow, session, persist)
 }
 
 func approvalOptionNames(tool, subject string) (session, persistent string) {
-	sessionRule := permission.SessionGrantRuleForScope(tool, subject, permission.ApprovalScopeExact)
-	persistentRule := permission.RememberRuleForScope(tool, subject, permission.ApprovalScopeExact)
-	switch {
-	case tool == "bash" && strings.TrimSpace(subject) != "":
-		return "Allow " + sessionRule + " for this session", "Always allow " + persistentRule + " (save to config)"
-	case permission.IsFileMutationTool(tool):
-		if strings.TrimSpace(subject) != "" {
-			return "Allow " + sessionRule + " for this session", "Always allow " + persistentRule + " (save to config)"
-		}
-		return "Allow " + sessionRule + " for this session", "Always allow " + persistentRule + " (save to config)"
-	default:
-		return "Allow " + sessionRule + " for this session", "Always allow " + persistentRule + " (save to config)"
-	}
+	sessionRule := permission.SessionGrantRuleForScope(tool, subject)
+	persistentRule := permission.RememberRuleForScope(tool, subject)
+	return "Allow " + sessionRule + " for this session", "Always allow " + persistentRule + " (save to config)"
 }
 
 func approvalOptions(tool, subject string) []PermissionOption {
 	allowSessionName, allowPersistentName := approvalOptionNames(tool, subject)
 	options := []PermissionOption{
 		{OptionID: string(OptAllowOnce), Name: "Allow", Kind: OptAllowOnce},
+		{OptionID: string(OptAllowAlways), Name: allowSessionName, Kind: OptAllowAlways},
+		{OptionID: string(OptAllowPersistent), Name: allowPersistentName, Kind: OptAllowPersistent},
+		{OptionID: string(OptRejectOnce), Name: "Reject", Kind: OptRejectOnce},
 	}
-	if tool == "bash" && permission.BashCommandPrefix(subject) != "" {
-		prefixRule := permission.RememberRuleForScope(tool, subject, permission.ApprovalScopePrefix)
-		options = append(options,
-			PermissionOption{OptionID: string(OptAllowPrefix), Name: "Allow " + prefixRule + " for this session", Kind: OptAllowAlways},
-			PermissionOption{OptionID: string(OptPersistPrefix), Name: "Always allow " + prefixRule + " (save to config)", Kind: OptAllowPersistent},
-		)
-	} else {
-		options = append(options,
-			PermissionOption{OptionID: string(OptAllowAlways), Name: allowSessionName, Kind: OptAllowAlways},
-			PermissionOption{OptionID: string(OptAllowPersistent), Name: allowPersistentName, Kind: OptAllowPersistent},
-		)
-	}
-	options = append(options, PermissionOption{OptionID: string(OptRejectOnce), Name: "Reject", Kind: OptRejectOnce})
 	return options
 }
 

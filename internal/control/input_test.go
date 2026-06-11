@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -221,6 +222,90 @@ func TestSubmitHashNumberStartsTurn(t *testing.T) {
 
 	if len(runner.inputs) != 1 || runner.inputs[0] != input {
 		t.Fatalf("#number prompt should start a model turn, inputs=%q", runner.inputs)
+	}
+}
+
+func TestSubmitSlashPathDiagnosticStartsTurnWithFileContext(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX absolute file path context is covered on POSIX runners")
+	}
+	dir := t.TempDir()
+	file := filepath.Join(dir, "app", "src", "main", "Foo.kt")
+	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, []byte("fun broken() = missingSymbol\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runner := &fakeTurnRunner{}
+	events := make(chan event.Event, 4)
+	c := New(Options{
+		AutoPlan: "off",
+		Runner:   runner,
+		Sink: event.FuncSink(func(e event.Event) {
+			events <- e
+		}),
+	})
+
+	input := file + ":12:13: error: unresolved reference: missingSymbol"
+	c.Submit(input)
+	waitForTurnDone(t, events)
+
+	if len(runner.inputs) != 1 {
+		t.Fatalf("slash path diagnostic should start a model turn, inputs=%q", runner.inputs)
+	}
+	got := runner.inputs[0]
+	if !strings.Contains(got, "Referenced context:") || !strings.Contains(got, "fun broken() = missingSymbol") {
+		t.Fatalf("slash path diagnostic should attach file context, got %q", got)
+	}
+	if !strings.Contains(got, input) {
+		t.Fatalf("slash path diagnostic should preserve original error text, got %q", got)
+	}
+}
+
+func TestSubmitMissingSlashPathDiagnosticStartsTurn(t *testing.T) {
+	runner := &fakeTurnRunner{}
+	events := make(chan event.Event, 4)
+	c := New(Options{
+		AutoPlan: "off",
+		Runner:   runner,
+		Sink: event.FuncSink(func(e event.Event) {
+			events <- e
+		}),
+	})
+
+	input := "/missing/Foo.kt:12: error: file no longer exists"
+	c.Submit(input)
+	waitForTurnDone(t, events)
+
+	if len(runner.inputs) != 1 || runner.inputs[0] != input {
+		t.Fatalf("missing slash path diagnostic should start a raw model turn, inputs=%q", runner.inputs)
+	}
+}
+
+func TestSubmitUnknownSlashCommandStillReportsNotice(t *testing.T) {
+	runner := &fakeTurnRunner{}
+	events := make(chan event.Event, 4)
+	c := New(Options{
+		AutoPlan: "off",
+		Runner:   runner,
+		Sink: event.FuncSink(func(e event.Event) {
+			events <- e
+		}),
+	})
+
+	c.Submit("/definitely-not-a-command")
+
+	if len(runner.inputs) != 0 {
+		t.Fatalf("unknown slash command should not start a model turn, inputs=%q", runner.inputs)
+	}
+	select {
+	case e := <-events:
+		if e.Kind != event.Notice || !strings.Contains(e.Text, "unknown command: /definitely-not-a-command") {
+			t.Fatalf("event = %+v, want unknown-command notice", e)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for unknown-command notice")
 	}
 }
 
@@ -534,6 +619,31 @@ func TestIsSyntheticUserMessage(t *testing.T) {
 			name:  "user quoting interrupted response not synthetic",
 			input: "The previous assistant response was interrupted by my VPN, can you retry?",
 			want:  false,
+		},
+		{
+			name:  "compaction fold summary",
+			input: "<compaction-summary>\nSummary of earlier conversation (older messages were compacted to save context):\nDid things with tools.\n</compaction-summary>",
+			want:  true,
+		},
+		{
+			name:  "summarize-from fold",
+			input: "Summary of the later conversation (compacted from here on):\nDid more things.",
+			want:  true,
+		},
+		{
+			name:  "summarize-upto fold",
+			input: "Summary of earlier conversation (compacted up to here):\nDid earlier things.",
+			want:  true,
+		},
+		{
+			name:  "user mentioning a summary is not synthetic",
+			input: "Summary of what I want: fix the login bug first.",
+			want:  false,
+		},
+		{
+			name:  "mid-turn steer wrapper",
+			input: "[Mid-turn steer queued by the user. Do not treat this as a new task; use it only as additional guidance for the current task after completing the current step.]\nplease use smaller diffs",
+			want:  true,
 		},
 	}
 	for _, tt := range tests {

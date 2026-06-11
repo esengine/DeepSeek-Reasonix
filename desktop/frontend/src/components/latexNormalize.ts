@@ -41,6 +41,22 @@ export function latexNormalizeForKatex(source: string): string {
     return inner.includes("(") ? `\\not{${inner}}` : `\\not ${inner}`;
   });
 
+  // When \tag is present, convert aligned/gathered/alignedat environments
+  // to align/gather/alignat.  KaTeX's aligned/gathered treat the entire
+  // block as one equation and only permit a single \tag (parse error
+  // "Multiple \tag" on older versions), while align/gather support \tag
+  // on every row natively.  We only convert when \tag exists so that
+  // plain aligned blocks keep their un-numbered behaviour.
+  if (/\\tag\*?\s*\{/.test(source)) {
+    source = source
+      .replace(/\\begin\{alignedat\}\{(\d+)\}/g, "\\begin{alignat}{$1}")
+      .replace(/\\end\{alignedat\}/g, "\\end{alignat}")
+      .replace(/\\begin\{aligned\}/g, "\\begin{align}")
+      .replace(/\\end\{aligned\}/g, "\\end{align}")
+      .replace(/\\begin\{gathered\}/g, "\\begin{gather}")
+      .replace(/\\end\{gathered\}/g, "\\end{gather}");
+  }
+
   let out = "";
   let i = 0;
 

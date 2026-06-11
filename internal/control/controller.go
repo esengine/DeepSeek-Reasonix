@@ -129,7 +129,7 @@ type Controller struct {
 	goalBlock   string
 	sessionPath string
 	approvals   map[string]pendingApproval
-	asks        map[string]chan []event.AskAnswer
+	asks        map[string]pendingAsk
 	granted     map[string]bool
 	nextID      int
 	// turn counts model turns this session, passed to hooks in their payload.
@@ -170,7 +170,6 @@ type approvalReply struct {
 	allow   bool
 	session bool
 	persist bool // true = write "always allow" rule to config
-	scope   string
 }
 
 type pendingApproval struct {
@@ -178,6 +177,14 @@ type pendingApproval struct {
 	subject   string
 	autoDrain bool
 	reply     chan approvalReply
+}
+
+// pendingAsk is an in-flight ask question batch. questions is retained so the
+// AskRequest can be re-emitted to a frontend that reconnected after the original
+// event (see ReplayPendingPrompts).
+type pendingAsk struct {
+	questions []event.AskQuestion
+	reply     chan []event.AskAnswer
 }
 
 const (
@@ -287,7 +294,7 @@ func New(opts Options) *Controller {
 		cpRoot:           opts.WorkspaceRoot,
 		toolApprovalMode: ToolApprovalAsk,
 		approvals:        map[string]pendingApproval{},
-		asks:             map[string]chan []event.AskAnswer{},
+		asks:             map[string]pendingAsk{},
 		granted:          map[string]bool{},
 	}
 	// Checkpoints: bind a store to the session and route writer pre-edits into it.
@@ -397,6 +404,15 @@ func (c *Controller) runGuarded(body func(ctx context.Context) error) {
 
 	go func() {
 		defer cancel()
+		defer func() {
+			if r := recover(); r != nil {
+				c.mu.Lock()
+				c.running = false
+				c.cancel = nil
+				c.mu.Unlock()
+				c.sink.Emit(event.Event{Kind: event.TurnDone, Err: fmt.Errorf("internal error: %v", r)})
+			}
+		}()
 		err := body(ctx)
 		c.mu.Lock()
 		c.running = false
@@ -428,7 +444,7 @@ const planApprovalTool = "exit_plan_mode"
 
 // planApprovedMessage is the follow-up turn sent once the user approves a plan —
 // the in-context nudge to execute and keep the (already-seeded) task list honest.
-const planApprovedMessage = "Plan approved — plan mode is off; you're cleared to make the changes without asking again. Implement the plan now. Keep the task list current with todo_write, preserving its two-level shape (phases at level 0, their sub-steps at level 1): mark the sub-step you start as in_progress, one in_progress at a time. Sign off each finished sub-step with complete_step, attaching the evidence it's done — the verification you ran, the diff/files you changed, or a manual check. Don't claim a step is done without evidence."
+const planApprovedMessage = "Plan approved — plan mode is off; you’re cleared to make the changes without asking again. Implement the plan now. Use this serial workflow: 1) mark the first sub-step in_progress with todo_write; 2) execute it; 3) call complete_step with evidence; 4) call todo_write to mark it completed and set the next sub-step in_progress; 5) repeat until done. Never batch-complete multiple sub-steps at once — each sub-step must have its own complete_step before it is marked completed in todo_write."
 
 // runTurn runs one model turn, then applies the plan-approval gate. This is the
 // single, frontend-agnostic plan flow: in plan mode the model just researches
@@ -694,7 +710,7 @@ func lastAssistantText(msgs []provider.Message) string {
 // composition — emitting all output as events. The HTTP/SSE server uses this so
 // a browser client only POSTs the typed line.
 //
-// Slash commands route to the matching primitive: /compact and /new (or /clear)
+// Slash commands route to the matching primitive: /compact, /new, and /clear
 // run their session op and emit a Notice; /mcp__server__prompt and custom /commands
 // resolve to a turn; an unknown slash emits a Notice. Anything else is a normal
 // turn with its @-references resolved first.
@@ -738,12 +754,20 @@ func (c *Controller) submit(input, display string) {
 				}
 			}
 		}()
-	case trimmed == "/new" || trimmed == "/clear":
+	case trimmed == "/new":
 		go func() {
 			if err := c.NewSession(); err != nil {
 				c.notice("new session failed: " + err.Error())
 			} else {
 				c.notice("new session")
+			}
+		}()
+	case trimmed == "/clear":
+		go func() {
+			if err := c.ClearSession(); err != nil {
+				c.notice("clear context failed: " + err.Error())
+			} else {
+				c.notice("context cleared")
 			}
 		}()
 	case strings.HasPrefix(trimmed, "/mcp__"):
@@ -765,6 +789,14 @@ func (c *Controller) submit(input, display string) {
 	case strings.HasPrefix(trimmed, "/"):
 		if ref, ok := FileRefLine(trimmed); ok {
 			c.runRefTurn(ref, display)
+			return
+		}
+		if ref, ok := SlashPathLineRef(trimmed, c.cpRoot); ok {
+			c.runRefTurnWithRefs(input, ref, display)
+			return
+		}
+		if SlashPathLikeLine(trimmed) {
+			c.runRefTurn(input, display)
 			return
 		}
 		// Read-only management verbs (/model /memory /skills /hooks /mcp) emit a
@@ -974,8 +1006,15 @@ func (c *Controller) RunShell(command string) {
 // runRefTurn resolves a line's @references into a context block and starts a
 // turn with it prepended (or the raw line when nothing resolved).
 func (c *Controller) runRefTurn(input, display string) {
+	c.runRefTurnWithRefs(input, input, display)
+}
+
+// runRefTurnWithRefs resolves references from refLine while preserving input as
+// the user's actual prompt text. This lets compiler diagnostics such as
+// "/path/File.kt:12: error" attach @/path/File.kt without rewriting the error.
+func (c *Controller) runRefTurnWithRefs(input, refLine, display string) {
 	c.runGuarded(func(ctx context.Context) error {
-		block, errs := c.ResolveRefs(ctx, input)
+		block, errs := c.ResolveRefs(ctx, refLine)
 		for _, e := range errs {
 			c.notice(e)
 		}
@@ -1039,18 +1078,12 @@ func (c *Controller) Turn() int {
 // also remembers a grant for the rest of the session so the same approval scope
 // is not re-prompted. Unknown/expired IDs are ignored.
 func (c *Controller) Approve(id string, allow, session, persist bool) {
-	c.ApproveWithScope(id, allow, session, persist, permission.ApprovalScopeExact)
-}
-
-// ApproveWithScope answers a pending ApprovalRequest with an explicit approval
-// scope. Unknown/expired IDs are ignored.
-func (c *Controller) ApproveWithScope(id string, allow, session, persist bool, scope string) {
 	c.mu.Lock()
 	pending := c.approvals[id]
 	delete(c.approvals, id)
 	c.mu.Unlock()
 	if pending.reply != nil {
-		pending.reply <- approvalReply{allow: allow, session: session, persist: persist, scope: scope} // buffered, never blocks
+		pending.reply <- approvalReply{allow: allow, session: session, persist: persist} // buffered, never blocks
 	}
 }
 
@@ -1103,6 +1136,35 @@ func (c *Controller) refreshInteractiveGate() {
 	}
 }
 
+// Steer queues mid-turn guidance without interrupting the in-flight request.
+func (c *Controller) Steer(text string) {
+	c.mu.Lock()
+	exec := c.executor
+	running := c.running
+	c.mu.Unlock()
+	if exec == nil {
+		return
+	}
+	if running {
+		exec.Steer(text)
+		return
+	}
+	// Agent not running — frontend's runningRef was stale.
+	// Convert to a new turn so the user gets a response.
+	go func() { c.SubmitDisplay(text, text) }()
+}
+
+// SteerConsumed returns true when the steer queue is empty after the last consume.
+func (c *Controller) SteerConsumed() bool {
+	c.mu.Lock()
+	exec := c.executor
+	c.mu.Unlock()
+	if exec != nil {
+		return exec.SteerConsumed()
+	}
+	return true
+}
+
 // Ask implements agent.Asker: it emits an AskRequest and blocks until
 // AnswerQuestion(ID, …) answers or ctx is cancelled. promptMu serialises it
 // against tool-approval prompts so at most one user prompt is outstanding.
@@ -1117,7 +1179,7 @@ func (c *Controller) Ask(ctx context.Context, questions []event.AskQuestion) ([]
 	c.nextID++
 	id := strconv.Itoa(c.nextID)
 	reply := make(chan []event.AskAnswer, 1)
-	c.asks[id] = reply
+	c.asks[id] = pendingAsk{questions: questions, reply: reply}
 	c.mu.Unlock()
 
 	c.sink.Emit(event.Event{Kind: event.AskRequest, Ask: event.Ask{ID: id, Questions: questions}})
@@ -1137,11 +1199,37 @@ func (c *Controller) Ask(ctx context.Context, questions []event.AskQuestion) ([]
 // Unknown/expired IDs are ignored.
 func (c *Controller) AnswerQuestion(id string, answers []event.AskAnswer) {
 	c.mu.Lock()
-	reply := c.asks[id]
+	pending, ok := c.asks[id]
 	delete(c.asks, id)
 	c.mu.Unlock()
-	if reply != nil {
-		reply <- answers // buffered, never blocks
+	if ok {
+		pending.reply <- answers // buffered, never blocks
+	}
+}
+
+// ReplayPendingPrompts re-emits the ApprovalRequest / AskRequest event for every
+// prompt currently blocking the run loop. A frontend that reconnected or reloaded
+// after the original event has no way to rebuild its approval/ask modal otherwise,
+// so the blocked gate goroutine stays stuck forever while the session shows a
+// "waiting" status with no actionable prompt. promptMu serialises Ask and
+// requestApproval, so in practice at most one prompt is outstanding; the loops
+// stay general so a future concurrent prompt would still replay correctly.
+func (c *Controller) ReplayPendingPrompts() {
+	c.mu.Lock()
+	approvals := make([]event.Approval, 0, len(c.approvals))
+	for id, p := range c.approvals {
+		approvals = append(approvals, event.Approval{ID: id, Tool: p.tool, Subject: p.subject})
+	}
+	asks := make([]event.Ask, 0, len(c.asks))
+	for id, p := range c.asks {
+		asks = append(asks, event.Ask{ID: id, Questions: p.questions})
+	}
+	c.mu.Unlock()
+	for _, a := range approvals {
+		c.sink.Emit(event.Event{Kind: event.ApprovalRequest, Approval: a})
+	}
+	for _, a := range asks {
+		c.sink.Emit(event.Event{Kind: event.AskRequest, Ask: a})
 	}
 }
 
@@ -1264,6 +1352,57 @@ func (c *Controller) NewSession() error {
 	c.startedOnce = true // NewSession fires SessionStart itself; don't re-fire on the next turn
 	c.mu.Unlock()
 	c.hooks.SessionStart(context.Background())
+	return nil
+}
+
+// ClearSession discards the current conversation without preserving it in
+// resume/history, then rotates to a clean session carrying the same system prompt.
+func (c *Controller) ClearSession() error {
+	if c.executor == nil {
+		return nil
+	}
+	c.mu.Lock()
+	running := c.running
+	oldPath := c.sessionPath
+	c.mu.Unlock()
+	if running {
+		return fmt.Errorf("cannot clear while a turn is running")
+	}
+	if err := removeSessionArtifacts(oldPath); err != nil {
+		return err
+	}
+	c.hooks.SessionEnd(context.Background())
+	if c.sessionDir != "" {
+		c.mu.Lock()
+		c.sessionPath = agent.NewSessionPath(c.sessionDir, c.label)
+		c.mu.Unlock()
+	}
+	c.executor.SetSession(agent.NewSession(c.systemPrompt))
+	c.rebindCheckpoints(c.SessionPath())
+	c.mu.Lock()
+	c.startedOnce = true
+	c.mu.Unlock()
+	c.hooks.SessionStart(context.Background())
+	return nil
+}
+
+func removeSessionArtifacts(path string) error {
+	if path == "" {
+		return nil
+	}
+	for _, p := range []string{path, agent.BranchMetaPath(path)} {
+		if p == "" {
+			continue
+		}
+		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	if dir := ckptDir(path); dir != "" {
+		if err := os.RemoveAll(dir); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -2093,6 +2232,11 @@ func (c *Controller) DisconnectMCPServer(name string) bool {
 // Label returns the human-readable model label, e.g. "deepseek-flash".
 func (c *Controller) Label() string { return c.label }
 
+// WorkspaceRoot returns the workspace root for this controller's session
+// (the directory that file-writers and @-references are scoped to).
+// Empty means no scoping is in effect.
+func (c *Controller) WorkspaceRoot() string { return c.cpRoot }
+
 // Close stops plugin subprocesses and releases resources. A session that ever
 // started fires SessionEnd so a teardown hook runs.
 func (c *Controller) Close() {
@@ -2567,13 +2711,13 @@ func (c *Controller) requestApproval(ctx context.Context, tool, subject string) 
 		// Plan approvals are one-shot — never persist a session grant for them, or
 		// every future plan would auto-approve.
 		if r.allow && r.session && tool != planApprovalTool {
-			rule := permission.SessionGrantRuleForScope(tool, subject, r.scope)
+			rule := permission.SessionGrantRuleForScope(tool, subject)
 			c.mu.Lock()
 			c.granted[rule] = true
 			c.mu.Unlock()
 		}
 		if r.allow && r.persist && tool != planApprovalTool && c.onRemember != nil {
-			c.emitRememberResult(c.onRemember(permission.RememberRuleForScope(tool, subject, r.scope)))
+			c.emitRememberResult(c.onRemember(permission.RememberRuleForScope(tool, subject)))
 		}
 		return r.allow, false, nil
 	case <-ctx.Done():

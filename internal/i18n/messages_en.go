@@ -45,10 +45,10 @@ var English = Messages{
 	ChatStatusRetryingFmt:       "%s retrying (%d/%d)… (Esc cancels)",
 	ChatStatusIdle:              "ready",
 	ChatStatusYoloIdle:          "tool approvals skipped",
-	ChatStatusCycleHint:         "shift+tab toggles plan",
+	ChatStatusCycleHint:         "shift+tab toggles plan · ctrl+y yolo",
 	ChatStatusCacheNowFmt:       "turn hit %s",
 	ChatStatusCacheAvgFmt:       "avg %s",
-	ChatStatusPlanApproval:      "Enter/y approves & executes · n/Esc keeps planning · PgUp/PgDn scrolls",
+	ChatStatusPlanApproval:      "Enter/y approves & executes · n/Esc keeps planning · PgUp/PgDn/Ctrl+Home/End scrolls",
 	PlanApprovalPrompt:          "Plan ready above — Enter/y to approve & execute, n/Esc to keep planning",
 	ChatStatusToolApproval:      "1 approve once · 2 allow scope this session · 3/4 prefix or save when offered · n/Esc deny · Ctrl-C cancels turn",
 	AskTypeSomething:            "Type something else",
@@ -89,12 +89,15 @@ var English = Messages{
 
 	SlashCompactDone:   "session compacted — older middle replaced by a summary, recent turns kept",
 	SlashCompactFailed: "compaction failed",
-	SlashNewDone:       "fresh context started — previous transcript saved",
+	SlashNewDone:       "new session started — previous transcript saved",
 	SlashNewFailed:     "could not start a new session",
+	SlashClearPrompt:   "Clear current context without saving?",
+	SlashClearDone:     "current context cleared",
+	SlashClearFailed:   "could not clear current context",
 	SlashUnavailable:   "command unavailable in this build",
 	SlashUnknown:       "unknown command",
 	SlashTodoCleared:   "task list dismissed",
-	SlashHelp:          "commands: /compact · /new (/clear) · /resume · /rewind · /tree · /branch · /switch · /todo · /verbose · /model (switch model) · /effort · /theme · /language · /mcp · /skills · /hooks · /paste-image · /memory · /goal · /remember · /quit · /help · plus skills (/init, /explore, …)",
+	SlashHelp:          "commands: /compact · /new · /clear · /resume · /rewind · /tree · /branch · /switch · /todo · /verbose · /model (switch model) · /effort · /theme · /language · /mcp · /skills · /hooks · /paste-image · /memory · /goal · /remember · /quit · /help · plus skills (/init, /explore, …)",
 
 	SkillPickerTitle:             "Skills",
 	SkillPickerAvailableFmt:      "%d available",
@@ -151,7 +154,8 @@ var English = Messages{
 	ShellExecTimeoutFmt: "shell command timed out (> %s)",
 	ShellModeHint:       "Enter runs shell · Esc cancels · click output to expand",
 
-	CmdNew:          "start fresh context; save transcript",
+	CmdNew:          "start new session; save transcript",
+	CmdClear:        "discard current context",
 	CmdCompact:      "compact context",
 	CmdRewind:       "rewind to an earlier turn",
 	CmdTree:         "show conversation branches",
@@ -311,8 +315,19 @@ var English = Messages{
 	ProviderErrServer:              "Server error (HTTP 500): the provider hit an internal fault. Retried with backoff; if it keeps failing, try again later.",
 	ProviderErrServerBusy:          "Server busy (HTTP 503): the provider is overloaded. Retried with backoff; please try again shortly.",
 
-	SelectOneHint:  "(↑/↓ · Enter · q to cancel)",
-	SelectManyHint: "(↑/↓ · Space · Enter · q)",
+	SelectOneHint:  "(↑/↓ · Enter · q to cancel; / to search)",
+	SelectManyHint: "(↑/↓ · Space · Enter · q; / to search)",
+
+	SelectMoreAboveFmt: "  ↑ %d more above",
+	SelectMoreBelowFmt: "  ↓ %d more below",
+	SelectSearchHint:   "/ to search · type to filter · Esc cancel search",
+
+	CmdProvider:          "switch provider",
+	ProviderListHeader:   "providers (/provider <name> to switch)",
+	ProviderAlreadyOnFmt: "already using provider %s",
+	ProviderUnknownFmt:   "unknown provider %q",
+	ProviderPickLabel:    "Select a model from %s",
+	ProviderNoModelsFmt:  "provider %s has no configured models",
 
 	UsageBody: `reasonix — a config- and plugin-driven coding agent (multi-model)
 
@@ -325,6 +340,7 @@ Usage:
   reasonix config auto-plan [off|on]                    configure automatic plan mode
   reasonix mcp <add|remove|list>                        manage MCP servers in reasonix.toml
   reasonix doctor [--json]                              print redacted local diagnostics
+  reasonix bot start|doctor|weixin-login                multi-channel IM bot gateway
   reasonix version
   reasonix help
 

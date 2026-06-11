@@ -12,6 +12,10 @@ import { modeWithAutoApproveTools, modeWithPlan, normalizeCollaborationMode, nor
 
 import type {
   BalanceInfo,
+  BotConnectionDiagnostic,
+  BotInstallPollResult,
+  BotInstallStartResult,
+  BotSettingsView,
   CapabilitiesView,
   CheckpointMeta,
   CommandInfo,
@@ -88,14 +92,15 @@ export interface AppBindings {
   SubmitDisplayToTab(tabID: string, display: string, input: string): Promise<void>;
   RunShell(command: string): Promise<void>;
   RunShellForTab(tabID: string, command: string): Promise<void>;
+  Steer(text: string): Promise<void>;
+  SteerForTab(tabID: string, text: string): Promise<void>;
   Cancel(): Promise<void>;
   CancelTab(tabID: string): Promise<void>;
   Approve(id: string, allow: boolean, session: boolean, persist: boolean): Promise<void>;
-  ApproveWithScope(id: string, allow: boolean, session: boolean, persist: boolean, scope: string): Promise<void>;
   ApproveTab(tabID: string, id: string, allow: boolean, session: boolean, persist: boolean): Promise<void>;
-  ApproveTabWithScope(tabID: string, id: string, allow: boolean, session: boolean, persist: boolean, scope: string): Promise<void>;
   AnswerQuestion(id: string, answers: QuestionAnswer[]): Promise<void>;
   AnswerQuestionForTab(tabID: string, id: string, answers: QuestionAnswer[]): Promise<void>;
+  ReplayPendingPrompts(): Promise<void>;
   SetPlanMode(on: boolean): Promise<void>;
   SetMode(mode: string): Promise<void>;
   SetModeForTab(tabID: string, mode: string): Promise<void>;
@@ -110,6 +115,7 @@ export interface AppBindings {
   ClearGoalForTab(tabID: string): Promise<void>;
   Compact(): Promise<void>;
   NewSession(): Promise<void>;
+  ClearSession(): Promise<void>;
   History(): Promise<HistoryMessage[]>;
   HistoryForTab(tabID: string): Promise<HistoryMessage[]>;
   Checkpoints(): Promise<CheckpointMeta[]>;
@@ -166,7 +172,10 @@ export interface AppBindings {
   RevealWorkspacePath(rel: string): Promise<void>;
   RevealPath(path: string): Promise<void>;
   SavePastedImage(dataUrl: string): Promise<string>;
+  SaveClipboardImage(): Promise<string>;
   SavePastedFile(name: string, dataUrl: string): Promise<string>;
+  PickExportFile(defaultFilename: string, mimeType: string): Promise<string>;
+  SaveExportFile(path: string, payload: string, base64Encoded: boolean): Promise<void>;
   AttachDropped(path: string): Promise<DroppedItem>;
   AttachmentDataURL(path: string): Promise<string>;
   Models(): Promise<ModelInfo[]>;
@@ -199,9 +208,18 @@ export interface AppBindings {
   RemovePermissionRule(list: string, rule: string): Promise<void>;
   SetSandbox(bash: string, network: boolean, workspaceRoot: string, allowWrite: string[]): Promise<void>;
   SetNetwork(n: NetworkView): Promise<void>;
+  SetBotSettings(b: BotSettingsView): Promise<void>;
+  SetBotSecret(envName: string, value: string): Promise<void>;
+  ClearBotSecret(envName: string): Promise<void>;
+  StartBotConnectionInstall(provider: string, domain: string): Promise<BotInstallStartResult>;
+  PollBotConnectionInstall(installID: string): Promise<BotInstallPollResult>;
+  DiagnoseBotConnection(id: string): Promise<BotConnectionDiagnostic>;
+  TestBotConnection(id: string, target?: string): Promise<BotConnectionDiagnostic>;
   SetCloseBehavior(mode: string): Promise<void>;
   SetDesktopLanguage(lang: string): Promise<void>;
   SetDesktopAppearance(theme: string, style: string): Promise<void>;
+  SetDesktopCheckUpdates(enabled: boolean): Promise<void>;
+  SetExpandThinking(on: boolean): Promise<void>;
   MigrateDesktopPreferences(language: string, theme: string, style: string): Promise<void>;
   SetAgentParams(temperature: number, maxSteps: number, plannerMaxSteps: number, systemPrompt: string): Promise<void>;
   SetTrayLocale(locale: "en" | "zh"): Promise<void>;
@@ -218,6 +236,7 @@ export interface AppBindings {
   ListTabs(): Promise<TabMeta[]>;
   OpenProjectTab(workspaceRoot: string, topicID: string): Promise<TabMeta>;
   OpenGlobalTab(topicID: string): Promise<TabMeta>;
+  EnsureBlankTab(scope: string, workspaceRoot: string): Promise<TabMeta>;
   SetActiveTab(tabID: string): Promise<void>;
   ReorderTabs(tabIDs: string[]): Promise<void>;
   CloseTab(tabID: string): Promise<void>;
@@ -235,11 +254,10 @@ export interface AppBindings {
   SaveWindowState(state: DesktopWindowState): Promise<void>;
 }
 
-// Bidirectional compile-time drift checks. Exclude<A, B> extracts keys in A that
-// are missing from B. If that set is non-empty, AssertNever<non-never> fails with
-// "Type 'X' does not satisfy the constraint 'never'". In other words:
-//   _CheckGenToApp errors → a Go method has no TS counterpart (add it to AppBindings)
-//   _CheckAppToGen errors → a TS method has no Go counterpart (stale / removed)
+// Compile-time drift check. Exclude<A, B> extracts keys in A that are missing
+// from B. If that set is non-empty, AssertNever<non-never> fails with
+// "Type 'X' does not satisfy the constraint 'never'".
+// _CheckGenToApp errors mean a generated Go method has no TS counterpart.
 // These compare method *names* only; full signature checking isn't possible here
 // because local types (types.ts) use plain interfaces while generated types
 // (models.ts) use classes with a convertValues prototype method. The structural
@@ -247,7 +265,6 @@ export interface AppBindings {
 // are caught at the call sites by tsc when components invoke app.<method>(...).
 type AssertNever<T extends never> = T;
 export type _CheckGenToApp = AssertNever<Exclude<keyof typeof GeneratedApp, keyof AppBindings>>;
-export type _CheckAppToGen = AssertNever<Exclude<keyof AppBindings, keyof typeof GeneratedApp>>;
 
 interface WailsRuntime {
   EventsOn(name: string, cb: (...data: unknown[]) => void): () => void;
@@ -623,10 +640,48 @@ function makeMockApp(): AppBindings {
       proxy: { type: "socks5", server: "127.0.0.1", port: 7890, username: "", password: "" },
     },
     agent: { temperature: 0.2, maxSteps: 0, plannerMaxSteps: 12, systemPrompt: "You are Reasonix, a coding agent." },
+    bot: {
+      enabled: false,
+      model: "",
+      maxSteps: 25,
+      debounceMs: 1500,
+      allowlist: {
+        enabled: true,
+        allowAll: false,
+        qqUsers: [],
+        feishuUsers: [],
+        weixinUsers: [],
+        qqGroups: [],
+        feishuGroups: [],
+        weixinGroups: [],
+      },
+      qq: { enabled: false, appId: "", appSecretEnv: "QQ_BOT_APP_SECRET", secretSet: false },
+      feishu: {
+        enabled: false,
+        domain: "feishu",
+        appId: "",
+        appSecretEnv: "FEISHU_BOT_APP_SECRET",
+        secretSet: false,
+        verificationToken: "",
+        mode: "webhook",
+        webhookPort: 8080,
+        requireMention: true,
+      },
+      weixin: {
+        enabled: false,
+        accountId: "default",
+        tokenEnv: "WEIXIN_BOT_TOKEN",
+        tokenSet: false,
+        apiBase: "https://ilinkai.weixin.qq.com",
+      },
+      connections: [],
+    },
     desktopLanguage: "",
     desktopTheme: "light",
     desktopThemeStyle: "graphite",
     closeBehavior: "background",
+    checkUpdates: true,
+    expandThinking: false,
     configPath: "~/projects/reasonix/reasonix.toml",
     providerKinds: ["openai"],
     autoApproveTools: false,
@@ -1157,6 +1212,13 @@ function makeMockApp(): AppBindings {
         async RunShellForTab(_tabID, command) {
           await withMockTabScope(_tabID, () => this.RunShell(command));
         },
+        async Steer(_text) {
+          // Mock: emit a steer event as confirmation in the transcript.
+          emit({ kind: "steer", text: _text });
+        },
+        async SteerForTab(_tabID, _text) {
+          await this.Steer(_text);
+        },
         async Cancel() {
           cancelled = true;
           emitMockTurnDone();
@@ -1165,13 +1227,9 @@ function makeMockApp(): AppBindings {
           await withMockTabScope(_tabID, () => this.Cancel());
         },
         async Approve(_id, allow, session, persist) {
-          await this.ApproveWithScope(_id, allow, session, persist, "");
-        },
-        async ApproveWithScope(_id, allow, session, persist, scope) {
           if (!pendingApprovalPreview) return;
           pendingApprovalPreview = false;
-          const scopeLabel = scope === "prefix" ? "prefix" : "scope";
-          const suffix = persist ? `${scopeLabel} grant saved` : session ? `${scopeLabel} grant active this session` : "allowed once";
+          const suffix = persist ? "grant saved" : session ? "grant active this session" : "allowed once";
           emit({
             kind: "message",
             text: `approval preview answered: ${allow ? suffix : "denied"}`,
@@ -1179,10 +1237,7 @@ function makeMockApp(): AppBindings {
           emitMockTurnDone();
         },
         async ApproveTab(_tabID, id, allow, session, persist) {
-          await this.ApproveTabWithScope(_tabID, id, allow, session, persist, "");
-        },
-        async ApproveTabWithScope(_tabID, id, allow, session, persist, scope) {
-          await withMockTabScope(_tabID, () => this.ApproveWithScope(id, allow, session, persist, scope));
+          await withMockTabScope(_tabID, () => this.Approve(id, allow, session, persist));
         },
         async AnswerQuestion(_id, answers) {
       if (!pendingAskPreview) return;
@@ -1196,6 +1251,7 @@ function makeMockApp(): AppBindings {
         async AnswerQuestionForTab(_tabID, id, answers) {
           await withMockTabScope(_tabID, () => this.AnswerQuestion(id, answers));
         },
+        async ReplayPendingPrompts() {},
         async ConfirmAction(req) {
           void req;
           return false;
@@ -1282,6 +1338,7 @@ function makeMockApp(): AppBindings {
         },
         async Compact() {},
         async NewSession() {},
+        async ClearSession() {},
     async Checkpoints() {
       return [
         { turn: 0, prompt: "你好呀", files: ["src/App.tsx"], time: Date.now() - 30_000, canCode: true, canConversation: true },
@@ -1405,7 +1462,7 @@ function makeMockApp(): AppBindings {
       if (index >= 0) mockProjectTree.splice(index, 1);
     },
         async ContextUsage() {
-          return { used: 42124, window: 128000, compactRatio: 0.8 };
+          return { used: 42124, window: 128000, sessionTokens: 34479, compactRatio: 0.8 };
         },
         async ContextUsageForTab() {
           return this.ContextUsage();
@@ -1459,7 +1516,8 @@ function makeMockApp(): AppBindings {
         },
     async Commands() {
       return [
-        { name: "new", description: "Start a new session", kind: "builtin" as const },
+        { name: "new", description: "start new session; save transcript", kind: "builtin" as const },
+        { name: "clear", description: "discard current context", kind: "builtin" as const },
         { name: "compact", description: "Summarize older history to free up context", kind: "builtin" as const },
         { name: "model", description: "Switch model", kind: "builtin" as const },
         { name: "effort", description: "Set reasoning effort", kind: "builtin" as const },
@@ -1723,8 +1781,29 @@ function makeMockApp(): AppBindings {
     async SavePastedImage(_dataUrl: string) {
       return ".reasonix/attachments/mock.png";
     },
+    async SaveClipboardImage() {
+      return ".reasonix/attachments/mock-clipboard.png";
+    },
     async SavePastedFile(name: string, _dataUrl: string) {
       return `.reasonix/attachments/mock-${name}`;
+    },
+    async PickExportFile(defaultFilename: string, _mimeType: string) {
+      return defaultFilename;
+    },
+    async SaveExportFile(path: string, payload: string, base64Encoded: boolean) {
+      const a = document.createElement("a");
+      let url = "";
+      if (base64Encoded) {
+        url = `data:application/octet-stream;base64,${payload}`;
+      } else {
+        url = URL.createObjectURL(new Blob([payload], { type: "text/plain;charset=utf-8" }));
+      }
+      a.href = url;
+      a.download = path;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      if (!base64Encoded) URL.revokeObjectURL(url);
     },
     async AttachDropped(path: string) {
       const name = path.split(/[/\\]/).filter(Boolean).pop() ?? path;
@@ -1881,6 +1960,74 @@ function makeMockApp(): AppBindings {
         async SetNetwork(n: NetworkView) {
           settings.network = n;
         },
+        async SetBotSettings(b: BotSettingsView) {
+          settings.bot = JSON.parse(JSON.stringify(b)) as BotSettingsView;
+        },
+        async SetBotSecret(envName: string, _value: string) {
+          const name = envName.trim();
+          if (settings.bot.qq.appSecretEnv === name) settings.bot.qq.secretSet = true;
+          if (settings.bot.feishu.appSecretEnv === name) settings.bot.feishu.secretSet = true;
+          if (settings.bot.weixin.tokenEnv === name) settings.bot.weixin.tokenSet = true;
+        },
+        async ClearBotSecret(envName: string) {
+          const name = envName.trim();
+          if (settings.bot.qq.appSecretEnv === name) settings.bot.qq.secretSet = false;
+          if (settings.bot.feishu.appSecretEnv === name) settings.bot.feishu.secretSet = false;
+          if (settings.bot.weixin.tokenEnv === name) settings.bot.weixin.tokenSet = false;
+        },
+        async StartBotConnectionInstall(provider: string, domain: string) {
+          const normalizedProvider = provider === "weixin" ? "weixin" : "feishu";
+          const normalizedDomain = normalizedProvider === "weixin" ? "weixin" : domain === "lark" ? "lark" : "feishu";
+          return {
+            ok: true,
+            provider: normalizedProvider,
+            domain: normalizedDomain,
+            installId: `mock-${normalizedProvider}-${normalizedDomain}`,
+            url: "https://example.com/reasonix-bot-qr",
+            deviceCode: "MOCKDEVICE",
+            userCode: normalizedProvider === "weixin" ? "" : "MOCK-CODE",
+            interval: 3,
+            expireIn: 300,
+            message: "",
+          };
+        },
+        async PollBotConnectionInstall(installID: string) {
+          const isWeixin = installID.includes("weixin");
+          const domain = installID.includes("lark") ? "lark" : isWeixin ? "weixin" : "feishu";
+          const provider = isWeixin ? "weixin" : "feishu";
+          const connection = {
+            id: `${provider}-${domain}`,
+            provider,
+            domain,
+            label: domain === "lark" ? "Lark" : domain === "weixin" ? "微信" : "飞书",
+            enabled: true,
+            status: "connected",
+            credential: {
+              appId: provider === "feishu" ? "cli_mock" : "",
+              appSecretEnv: provider === "feishu" ? (domain === "lark" ? "LARK_BOT_APP_SECRET" : "FEISHU_BOT_APP_SECRET") : "",
+              accountId: provider === "weixin" ? "mock-account" : "",
+              tokenEnv: provider === "weixin" ? "WEIXIN_BOT_TOKEN" : "",
+              secretSet: true,
+            },
+            sessionMappings: [],
+            lastError: "",
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          };
+          settings.bot.connections = [...settings.bot.connections.filter((c) => c.id !== connection.id), connection];
+          return { done: true, connection, status: "connected", message: "connected", error: "" };
+        },
+        async DiagnoseBotConnection(id: string) {
+          const connection = settings.bot.connections.find((c) => c.id === id);
+          return connection
+            ? { id, label: connection.label, status: connection.enabled ? "ok" : "disabled", message: connection.enabled ? "连接配置已保存。" : "连接已保存但未启用。", messageId: "" }
+            : { id, label: "", status: "missing", message: "未找到连接。", messageId: "" };
+        },
+        async TestBotConnection(id: string, target?: string) {
+          const diag = await this.DiagnoseBotConnection(id);
+          if (target?.trim()) return { ...diag, message: `Mock test sent to ${target.trim()}`, messageId: "mock-message-id" };
+          return diag;
+        },
         async SetCloseBehavior(mode: string) {
           settings.closeBehavior = mode === "quit" ? "quit" : "background";
         },
@@ -1890,6 +2037,12 @@ function makeMockApp(): AppBindings {
         async SetDesktopAppearance(theme: string, style: string) {
           settings.desktopTheme = theme === "auto" || theme === "light" ? theme : "dark";
           settings.desktopThemeStyle = style;
+        },
+        async SetDesktopCheckUpdates(enabled: boolean) {
+          settings.checkUpdates = enabled;
+        },
+        async SetExpandThinking(on: boolean) {
+          settings.expandThinking = on;
         },
         async MigrateDesktopPreferences(language: string, theme: string, style: string) {
           if (!settings.desktopLanguage) settings.desktopLanguage = language === "en" || language === "zh" ? language : "";
@@ -2010,6 +2163,21 @@ function makeMockApp(): AppBindings {
       mockTabs = [...mockTabs.map((item) => ({ ...item, active: false })), tab];
       return { ...tab };
     },
+    async EnsureBlankTab(scope: string, workspaceRoot: string) {
+      const targetScope = scope === "project" && workspaceRoot ? "project" : "global";
+      const targetRoot = targetScope === "project" ? workspaceRoot : "";
+      const existing = mockTabs.find((tab) =>
+        tab.scope === targetScope &&
+        (targetScope === "global" || tab.workspaceRoot === targetRoot) &&
+        !tab.running
+      );
+      if (existing) {
+        setMockActiveTab(existing.id);
+        return { ...existing, active: true };
+      }
+      const topic = await this.CreateTopic(targetScope, targetRoot, "");
+      return targetScope === "global" ? this.OpenGlobalTab(topic.id) : this.OpenProjectTab(targetRoot, topic.id);
+    },
     async SetActiveTab(_tabID: string) {
       setMockActiveTab(_tabID);
       const tab = mockTabs.find((item) => item.id === _tabID);
@@ -2125,6 +2293,7 @@ function makeMockApp(): AppBindings {
         windowTokens: 128000,
         promptTokens: 22134,
         completionTokens: 12345,
+        totalTokens: 34479,
         reasoningTokens: 7521,
         cacheHitTokens: 87000,
         cacheMissTokens: 13000,
@@ -2135,10 +2304,10 @@ function makeMockApp(): AppBindings {
         sessionCostUsd: 0.018,
         mock: true,
         readFiles: [
-          { path: "REASONIX.md", turn: 2, time: now - 34 * 60 * 1000 },
-          { path: "pyproject.toml", turn: 3, time: now - 30 * 60 * 1000 },
-          { path: "docs/dev-standard.md", turn: 5, time: now - 13 * 60 * 1000, offset: 0, limit: 180 },
-          { path: "scripts/db_migrate.sh", turn: 6, time: now - 4 * 60 * 1000, offset: 120, limit: 80, truncated: true },
+          { path: "README.md", turn: 2, time: now - 34 * 60 * 1000 },
+          { path: "go.mod", turn: 3, time: now - 30 * 60 * 1000 },
+          { path: "desktop/file.go", turn: 5, time: now - 13 * 60 * 1000, offset: 0, limit: 180 },
+          { path: "internal/event.go", turn: 6, time: now - 4 * 60 * 1000, offset: 120, limit: 80, truncated: true },
         ],
         changedFiles: [
           { path: t("mock.changedFile1Path"), sources: ["session"], gitStatus: "modified", turns: [5, 6], latestPrompt: t("mock.changedFile1Prompt"), latestTime: now - 2 * 60 * 1000 },

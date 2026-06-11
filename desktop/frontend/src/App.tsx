@@ -6,6 +6,8 @@ import {
   Command,
   Download,
   SquarePen,
+  FileDown,
+  FileImage,
   FileText,
   FileJson,
   GitBranch,
@@ -16,7 +18,7 @@ import {
 } from "lucide-react";
 import { useToast } from "./lib/toast";
 import { asArray } from "./lib/array";
-import { clearLegacyLangPref, normalizeLangPref, readLegacyLangPref, t, useI18n, useT } from "./lib/i18n";
+import { clearLegacyLangPref, normalizeLangPref, readLegacyLangPref, useI18n, useT } from "./lib/i18n";
 import { useController, type Item, type LiveStream } from "./lib/useController";
 import { app, onProjectTreeChanged } from "./lib/bridge";
 import { Transcript } from "./components/Transcript";
@@ -24,6 +26,7 @@ import { Composer } from "./components/Composer";
 import { TodoPanel } from "./components/TodoPanel";
 import { ApprovalModal } from "./components/ApprovalModal";
 import { AskCard } from "./components/AskCard";
+import { ClearContextCard } from "./components/ClearContextCard";
 import { StatusBar } from "./components/StatusBar";
 import { HistoryPanel } from "./components/HistoryPanel";
 import { CommandPalette, type PaletteItem } from "./components/CommandPalette";
@@ -43,19 +46,31 @@ import {
   modeHasAutoApproveTools,
   modeHasPlan,
   modeFromAxes,
-  normalizeCollaborationMode,
   normalizeMode,
   normalizeToolApprovalMode,
   type CollaborationMode,
   type ComposerInsertRequest,
   type Mode,
-  type ProjectNode,
   type SessionMeta,
   type SettingsTab,
+  type SettingsView,
   type TabMeta,
   type ToolApprovalMode,
 } from "./lib/types";
+import {
+  controllerCollaborationMode,
+  displayedCollaborationMode,
+  keepGoalDraftMode,
+  metaSyncedCollaborationMode,
+  tabListCollaborationMode,
+} from "./lib/goalDraftMode";
+import {
+  restorableToolApprovalMode,
+  toggleYoloToolApprovalMode,
+  type RestorableToolApprovalMode,
+} from "./lib/toolApprovalMode";
 import { loadLayoutSize, saveLayoutSize } from "./lib/layoutPreferences";
+import { blobToBase64, renderSessionImageBlob, renderSessionPdfBlob } from "./lib/sessionExport";
 import {
   applyTheme,
   clearLegacyThemePreference,
@@ -69,15 +84,16 @@ import {
 } from "./lib/theme";
 import { applyTextSize, DEFAULT_TEXT_SIZE, getTextSize, nextTextSize } from "./lib/textSize";
 import { useWindowStatePersistence } from "./lib/windowState";
+import { availableWorkspacePanelWidth, resolveWorkspacePanelWidth, workspacePanelAriaMinWidth } from "./lib/workspaceLayout";
 import logoWordmark from "./assets/logo-wordmark.svg";
 
 const SIDEBAR_COLLAPSED_KEY = "reasonix.sidebar.collapsed";
 const SIDEBAR_DEFAULT_WIDTH = 264;
-const SIDEBAR_MIN_WIDTH = 248;
+const SIDEBAR_MIN_WIDTH = 264;
 const SIDEBAR_MAX_WIDTH = 300;
 const SIDEBAR_VIEWPORT_RATIO = 0.18;
 const CHAT_MIN_WIDTH = 400;
-const CHAT_DOCKED_MIN_WIDTH = 640;
+const CHAT_COMFORT_MIN_WIDTH = 560;
 const WORKSPACE_RESIZER_WIDTH = 8;
 
 function isThemeMode(value: string): value is Theme {
@@ -87,10 +103,15 @@ const RIGHT_DOCK_TREE_DEFAULT_WIDTH = 300;
 const RIGHT_DOCK_TREE_MIN_WIDTH = 300;
 const RIGHT_DOCK_TREE_MAX_WIDTH = 560;
 const RIGHT_DOCK_PREVIEW_DEFAULT_WIDTH = 660;
-const RIGHT_DOCK_PREVIEW_MIN_WIDTH = RIGHT_DOCK_PREVIEW_DEFAULT_WIDTH;
+const RIGHT_DOCK_PREVIEW_MIN_WIDTH = 420;
+const RIGHT_DOCK_MIN_RENDER_WIDTH = 280;
 const RIGHT_DOCK_MAX_WIDTH = 860;
 
 type RightDockMode = "context" | "files" | "changed";
+type WorkspaceRevealRequest = { id: number; path: string };
+type WorkspaceFileListRequest = { id: number; paths: string[] };
+type WorkspaceChangeListEntry = { key: string; path: string; meta: string; time: string; detail: string };
+type WorkspaceChangeListRequest = { id: number; changes: WorkspaceChangeListEntry[] };
 const SHOW_CONTEXT_DOCK = true;
 type HistoryScopeFilter = { scope: "global" | "project"; workspaceRoot: string };
 type DesktopPlatform = "darwin" | "windows" | "linux";
@@ -205,34 +226,11 @@ function topicDisplayTitle(tab?: TabMeta): string {
   return tab.topicTitle || (tab.scope === "global" ? tabWorkspaceTitle(tab) : "Untitled");
 }
 
-function topicScopeLabel(tab?: TabMeta): string {
-  if (!tab) return t("scope.global");
-  if (tab.scope === "global") return tab.workspaceName || t("scope.global");
-  return t("scope.project", { name: tab.workspaceName || tab.workspaceRoot || "Project" });
-}
-
 function sessionsForScope(sessions: SessionMeta[], filter: HistoryScopeFilter): SessionMeta[] {
   if (filter.scope === "project") {
     return sessions.filter((session) => session.scope === "project" && session.workspaceRoot === filter.workspaceRoot);
   }
   return sessions.filter((session) => (session.scope || "global") === "global");
-}
-
-function activeTopicTurnsFromTree(nodes: ProjectNode[], tab?: TabMeta): number | undefined {
-  if (!tab?.topicId) return undefined;
-  const activeScope = tab.scope === "global" ? "global" : "project";
-  const stack = [...nodes];
-  while (stack.length > 0) {
-    const node = stack.shift();
-    if (!node) continue;
-    if (node.kind === "topic" || node.kind === "global_topic") {
-      const nodeScope = node.kind === "global_topic" ? "global" : "project";
-      const sameRoot = nodeScope === "global" || node.root === tab.workspaceRoot;
-      if (node.topicId === tab.topicId && nodeScope === activeScope && sameRoot) return node.turns ?? 0;
-    }
-    if (node.children?.length) stack.push(...node.children);
-  }
-  return undefined;
 }
 
 function workspaceDisplayName(path?: string): string {
@@ -318,19 +316,6 @@ function safeFilename(name: string): string {
   return cleaned || "reasonix-session";
 }
 
-function downloadTextFile(filename: string, text: string, mime: string): void {
-  const blob = new Blob([text], { type: `${mime};charset=utf-8` });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-}
-
-
 /** Global hotkey handler for shell-expand toggle (Ctrl/Cmd+B). */
 function ShellHotkeys() {
   const shellExpand = useShellExpand();
@@ -374,6 +359,7 @@ export default function App() {
     activeTabId,
     send,
     runShell,
+    steer,
     notice,
     cancel,
     approve,
@@ -383,6 +369,7 @@ export default function App() {
     setToolApprovalMode: setControllerToolApprovalMode,
     setGoal: setControllerGoal,
     clearGoal: clearControllerGoal,
+    clearSession,
     listSessions,
     listTrashedSessions,
     resumeSession,
@@ -403,13 +390,16 @@ export default function App() {
     closeTab,
     reorderTabs,
     syncActiveTab,
+    ensureBlankTab,
   } = useController();
   const { locale, setPref: setLocalePref } = useI18n();
   const t = useT();
   const [modesByTab, setModesByTab] = useState<Record<string, Mode>>({});
   const [collaborationModesByTab, setCollaborationModesByTab] = useState<Record<string, CollaborationMode>>({});
   const [toolApprovalModesByTab, setToolApprovalModesByTab] = useState<Record<string, ToolApprovalMode>>({});
+  const yoloRestoreToolApprovalModesRef = useRef<Record<string, RestorableToolApprovalMode>>({});
   const [goalsByTab, setGoalsByTab] = useState<Record<string, string>>({});
+  const [goalDraftModesByTab, setGoalDraftModesByTab] = useState<Record<string, boolean>>({});
   const [tabMetas, setTabMetas] = useState<TabMeta[]>([]);
   const [tabOrderIds, setTabOrderIds] = useState<string[]>([]);
   const [tabRevealSignal, setTabRevealSignal] = useState(0);
@@ -418,6 +408,7 @@ export default function App() {
   // clearing the key mid-session is the Settings panel's job, not the gate's.
   const [needsOnboarding, setNeedsOnboarding] = useState<boolean | null>(null);
   const [settingsTarget, setSettingsTarget] = useState<SettingsTab | null>(null);
+  const [startupUpdateChecksEnabled, setStartupUpdateChecksEnabled] = useState<boolean | null>(null);
   const [histView, setHistView] = useState<HistoryViewState | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteSessions, setPaletteSessions] = useState<SessionMeta[]>([]);
@@ -425,25 +416,30 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(loadSidebarCollapsed);
   const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidth);
   const [sidebarResizing, setSidebarResizing] = useState(false);
+  const [viewportWidth, setViewportWidth] = useState(() => (typeof window === "undefined" ? 1440 : window.innerWidth));
   const [workspacePanelOpen, setWorkspacePanelOpen] = useState(true);
   const [rightDockTreeWidth, setRightDockTreeWidth] = useState(loadRightDockTreeWidth);
   const [rightDockPreviewWidth, setRightDockPreviewWidth] = useState(loadRightDockPreviewWidth);
   const [workspacePreviewActive, setWorkspacePreviewActive] = useState(false);
-  const [contextDetailActive, setContextDetailActive] = useState(false);
   const [workspacePanelResizing, setWorkspacePanelResizing] = useState(false);
   const [workspacePanelMaximized, setWorkspacePanelMaximized] = useState(false);
   const [rightDockMode, setRightDockMode] = useState<RightDockMode>("context");
+  const [workspaceRevealRequest, setWorkspaceRevealRequest] = useState<WorkspaceRevealRequest | null>(null);
+  const [workspaceChangeRevealRequest, setWorkspaceChangeRevealRequest] = useState<WorkspaceRevealRequest | null>(null);
+  const [workspaceFileListRequest, setWorkspaceFileListRequest] = useState<WorkspaceFileListRequest | null>(null);
+  const [workspaceChangeListRequest, setWorkspaceChangeListRequest] = useState<WorkspaceChangeListRequest | null>(null);
   const [dockRefreshKey, setDockRefreshKey] = useState(0);
   const [projectRevision, setProjectRevision] = useState(0);
   const [composerInsertRequest, setComposerInsertRequest] = useState<ComposerInsertRequest | null>(null);
   const [transientOverlayDismissSignal, setTransientOverlayDismissSignal] = useState(0);
   const [desktopPlatform, setDesktopPlatform] = useState<DesktopPlatform>(detectBrowserPlatform);
+  const [expandThinking, setExpandThinking] = useState(false);
   const [renamingTopicId, setRenamingTopicId] = useState<string | null>(null);
   const [topicTitleDraft, setTopicTitleDraft] = useState("");
   const [topicExportOpen, setTopicExportOpen] = useState(false);
   const [sidebarTogglePressed, setSidebarTogglePressed] = useState(false);
   const [workspaceTogglePressed, setWorkspaceTogglePressed] = useState(false);
-  const [savedTopicTurnCount, setSavedTopicTurnCount] = useState<number | undefined>(undefined);
+  const [clearContextPending, setClearContextPending] = useState(false);
   const topicRenameSkipCommitRef = useRef(false);
   const topicRenameCommitHandledRef = useRef(false);
   const appRef = useRef<HTMLDivElement>(null);
@@ -525,6 +521,17 @@ export default function App() {
     };
   }, []);
 
+  const applyDesktopPreferences = useCallback(
+    (settings: Pick<SettingsView, "desktopTheme" | "desktopThemeStyle" | "desktopLanguage" | "checkUpdates">) => {
+      const nextTheme = normalizeThemePreference(settings.desktopTheme);
+      const nextStyle = normalizeThemeStyleForTheme(settings.desktopThemeStyle, nextTheme);
+      applyTheme(nextTheme, nextStyle, { persist: false });
+      setLocalePref(normalizeLangPref(settings.desktopLanguage));
+      setStartupUpdateChecksEnabled(settings.checkUpdates !== false);
+    },
+    [setLocalePref],
+  );
+
   useEffect(() => {
     let cancelled = false;
     const syncDesktopPreferences = async () => {
@@ -537,18 +544,17 @@ export default function App() {
       }
       const settings = await app.Settings();
       if (cancelled) return;
-      const nextTheme = normalizeThemePreference(settings.desktopTheme);
-      const nextStyle = normalizeThemeStyleForTheme(settings.desktopThemeStyle, nextTheme);
-      applyTheme(nextTheme, nextStyle, { persist: false });
-      setLocalePref(normalizeLangPref(settings.desktopLanguage));
+      applyDesktopPreferences(settings);
+      setExpandThinking(settings.expandThinking);
     };
     void syncDesktopPreferences().catch((e) => {
       console.warn("desktop preferences sync failed", e);
+      setStartupUpdateChecksEnabled(true);
     });
     return () => {
       cancelled = true;
     };
-  }, [setLocalePref]);
+  }, [applyDesktopPreferences]);
 
   // Open settings when the native menu item (CmdOrCtrl+,) is activated.
   useEffect(() => {
@@ -558,19 +564,39 @@ export default function App() {
       setSettingsTarget("general");
     });
   }, [closeTransientOverlays]);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onResize = () => setViewportWidth(window.innerWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
   const [pendingPlanRevision, setPendingPlanRevision] = useState<string | null>(null);
   const [footerHeight, setFooterHeight] = useState(0);
   const footerHeightRef = useRef(0);
   const footerRef = useRef<HTMLElement>(null);
-  const rightDockDetailActive = rightDockMode === "context" ? contextDetailActive : workspacePreviewActive;
+  const runningRef = useRef(state.running);
+  const rightDockDetailActive = rightDockMode !== "context" && workspacePreviewActive;
   const preferredWorkspacePanelWidth = rightDockDetailActive ? rightDockPreviewWidth : rightDockTreeWidth;
   const workspacePanelMinWidth = rightDockDetailActive ? RIGHT_DOCK_PREVIEW_MIN_WIDTH : RIGHT_DOCK_TREE_MIN_WIDTH;
+  const chatReservedWidth = workspacePanelOpen && !workspacePanelMaximized ? CHAT_COMFORT_MIN_WIDTH : CHAT_MIN_WIDTH;
+  const workspacePanelAvailableWidth = availableWorkspacePanelWidth({
+    viewportWidth,
+    sidebarCollapsed,
+    sidebarWidth,
+    chatMinWidth: chatReservedWidth,
+    resizerWidth: WORKSPACE_RESIZER_WIDTH,
+  });
 
-  const resolvedWorkspacePanelWidth = workspacePanelOpen && !workspacePanelMaximized
-    ? Math.max(workspacePanelMinWidth, preferredWorkspacePanelWidth)
-    : preferredWorkspacePanelWidth;
+  const resolvedWorkspacePanelWidth = resolveWorkspacePanelWidth({
+    open: workspacePanelOpen,
+    maximized: workspacePanelMaximized,
+    preferredWidth: preferredWorkspacePanelWidth,
+    minWidth: workspacePanelMinWidth,
+    availableWidth: workspacePanelAvailableWidth,
+  });
 
-  const workspacePanelRenderable = workspacePanelOpen && (workspacePanelMaximized || resolvedWorkspacePanelWidth > 0);
+  const workspacePanelRenderable =
+    workspacePanelOpen && (workspacePanelMaximized || resolvedWorkspacePanelWidth >= RIGHT_DOCK_MIN_RENDER_WIDTH);
   const workspacePanelGridOpen = workspacePanelRenderable && !workspacePanelMaximized;
   const workspacePanelRenderWidth = workspacePanelMaximized ? preferredWorkspacePanelWidth : resolvedWorkspacePanelWidth;
   const activeTab = useMemo(
@@ -580,8 +606,16 @@ export default function App() {
   const startupSplashHold = state.meta?.ready !== true && !state.meta?.startupErr;
   const legacyMode = activeTabId ? modesByTab[activeTabId] ?? "normal" : "normal";
   const goal = activeTabId ? goalsByTab[activeTabId] ?? state.meta?.goal ?? activeTab?.goal ?? "" : "";
+  const goalDraftMode = activeTabId ? Boolean(goalDraftModesByTab[activeTabId]) : false;
   const collaborationMode = activeTabId
-    ? collaborationModesByTab[activeTabId] ?? normalizeCollaborationMode(state.meta?.goal ? "goal" : activeTab?.collaborationMode, goal, legacyMode)
+    ? displayedCollaborationMode({
+        goalDraftMode,
+        localMode: collaborationModesByTab[activeTabId],
+        metaGoal: state.meta?.goal,
+        tabMode: activeTab?.collaborationMode,
+        goal,
+        legacyMode,
+      })
     : "normal";
   const toolApprovalMode = activeTabId
     ? toolApprovalModesByTab[activeTabId] ?? normalizeToolApprovalMode(state.meta?.toolApprovalMode ?? activeTab?.toolApprovalMode, legacyMode, state.meta?.autoApproveTools ?? state.meta?.bypass)
@@ -599,6 +633,15 @@ export default function App() {
     },
     [activeTabId],
   );
+  const setGoalDraftModeForTab = useCallback((tabId: string, enabled: boolean) => {
+    setGoalDraftModesByTab((current) => {
+      if (Boolean(current[tabId]) === enabled) return current;
+      if (enabled) return { ...current, [tabId]: true };
+      const next = { ...current };
+      delete next[tabId];
+      return next;
+    });
+  }, []);
   const topicbarEditing = Boolean(activeTab?.topicId && activeTab.topicId === renamingTopicId);
   const visibleTabId = activeTabId;
   const visibleTabs = useMemo(() => {
@@ -609,12 +652,18 @@ export default function App() {
       ...tab,
       running: tab.id === visibleTabId ? tab.running || state.running : tab.running,
       mode: modesByTab[tab.id] ?? normalizeMode(tab.mode),
-      collaborationMode: collaborationModesByTab[tab.id] ?? normalizeCollaborationMode(tab.collaborationMode, goalsByTab[tab.id] ?? tab.goal, normalizeMode(tab.mode)),
+      collaborationMode: tabListCollaborationMode({
+        goalDraftMode: Boolean(goalDraftModesByTab[tab.id]),
+        localMode: collaborationModesByTab[tab.id],
+        tabMode: tab.collaborationMode,
+        tabGoal: goalsByTab[tab.id] ?? tab.goal,
+        legacyMode: normalizeMode(tab.mode),
+      }),
       toolApprovalMode: toolApprovalModesByTab[tab.id] ?? normalizeToolApprovalMode(tab.toolApprovalMode, normalizeMode(tab.mode), tab.toolApprovalMode === "yolo"),
       goal: goalsByTab[tab.id] ?? tab.goal ?? "",
       active: tab.id === visibleTabId,
     }));
-  }, [collaborationModesByTab, goalsByTab, modesByTab, state.running, tabMetas, tabOrderIds, toolApprovalModesByTab, visibleTabId]);
+  }, [collaborationModesByTab, goalDraftModesByTab, goalsByTab, modesByTab, state.running, tabMetas, tabOrderIds, toolApprovalModesByTab, visibleTabId]);
 
   useEffect(() => {
     const ids = tabMetas.map((tab) => tab.id);
@@ -629,6 +678,24 @@ export default function App() {
 
   useEffect(() => {
     const ids = new Set(tabMetas.map((tab) => tab.id));
+    for (const id of Object.keys(yoloRestoreToolApprovalModesRef.current)) {
+      if (!ids.has(id)) delete yoloRestoreToolApprovalModesRef.current[id];
+    }
+    setGoalDraftModesByTab((current) => {
+      let changed = false;
+      const next: Record<string, boolean> = {};
+      for (const tab of tabMetas) {
+        if (keepGoalDraftMode(Boolean(current[tab.id]), tab.goal)) {
+          next[tab.id] = true;
+        } else if (current[tab.id]) {
+          changed = true;
+        }
+      }
+      for (const id of Object.keys(current)) {
+        if (!ids.has(id)) changed = true;
+      }
+      return changed ? next : current;
+    });
     setModesByTab((current) => {
       let changed = false;
       const next: Record<string, Mode> = {};
@@ -646,7 +713,12 @@ export default function App() {
       let changed = false;
       const next: Record<string, CollaborationMode> = {};
       for (const tab of tabMetas) {
-        const value = normalizeCollaborationMode(tab.collaborationMode, tab.goal, normalizeMode(tab.mode));
+        const value = tabListCollaborationMode({
+          goalDraftMode: keepGoalDraftMode(Boolean(goalDraftModesByTab[tab.id]), tab.goal),
+          tabMode: tab.collaborationMode,
+          tabGoal: tab.goal,
+          legacyMode: normalizeMode(tab.mode),
+        });
         next[tab.id] = value;
         if (current[tab.id] !== value) changed = true;
       }
@@ -681,7 +753,7 @@ export default function App() {
       }
       return changed ? next : current;
     });
-  }, [tabMetas]);
+  }, [goalDraftModesByTab, tabMetas]);
 
   useEffect(() => {
     if (!renamingTopicId || activeTab?.topicId === renamingTopicId) return;
@@ -694,12 +766,13 @@ export default function App() {
   useEffect(() => {
     if (!activeTabId || !state.meta) return;
     const nextGoal = state.meta.goalStatus === "running" ? state.meta.goal ?? "" : "";
+    if (nextGoal) setGoalDraftModeForTab(activeTabId, false);
     setGoalsByTab((current) => (current[activeTabId] === nextGoal ? current : { ...current, [activeTabId]: nextGoal }));
     setCollaborationModesByTab((current) => {
-      const nextMode = nextGoal ? "goal" : normalizeCollaborationMode(undefined, "", legacyMode);
+      const nextMode = metaSyncedCollaborationMode({ nextGoal, goalDraftMode, legacyMode });
       return current[activeTabId] === nextMode ? current : { ...current, [activeTabId]: nextMode };
     });
-  }, [activeTabId, legacyMode, state.meta]);
+  }, [activeTabId, goalDraftMode, legacyMode, setGoalDraftModeForTab, state.meta]);
 
   const syncModeToController = useCallback((m: Mode) => setControllerMode(m), [setControllerMode]);
 
@@ -716,17 +789,26 @@ export default function App() {
       if (!activeTabId) return;
       const nextCollaborationMode: CollaborationMode = modeHasPlan(m) ? "plan" : "normal";
       const nextToolApprovalMode: ToolApprovalMode = modeHasAutoApproveTools(m) ? "yolo" : "ask";
+      setGoalDraftModeForTab(activeTabId, false);
       setMode(m);
       setCollaborationModesByTab((current) => (current[activeTabId] === nextCollaborationMode ? current : { ...current, [activeTabId]: nextCollaborationMode }));
       setToolApprovalModesByTab((current) => (current[activeTabId] === nextToolApprovalMode ? current : { ...current, [activeTabId]: nextToolApprovalMode }));
       setGoalsByTab((current) => (current[activeTabId] ? { ...current, [activeTabId]: "" } : current));
       void syncModeToController(m);
     },
-    [activeTabId, setMode, syncModeToController],
+    [activeTabId, setGoalDraftModeForTab, setMode, syncModeToController],
   );
   const applyCollaborationMode = useCallback(
     (m: CollaborationMode) => {
       if (!activeTabId) return;
+      if (m === "goal") {
+        setGoalDraftModeForTab(activeTabId, true);
+        setCollaborationModesByTab((current) => (current[activeTabId] === "goal" ? current : { ...current, [activeTabId]: "goal" }));
+        setMode(modeFromAxes(false, toolApprovalMode === "yolo"));
+        void setControllerCollaborationMode("normal");
+        return;
+      }
+      setGoalDraftModeForTab(activeTabId, false);
       setCollaborationModesByTab((current) => (current[activeTabId] === m ? current : { ...current, [activeTabId]: m }));
       if (m === "normal" || m === "plan") {
         setGoalsByTab((current) => (current[activeTabId] ? { ...current, [activeTabId]: "" } : current));
@@ -734,21 +816,40 @@ export default function App() {
       setMode(modeFromAxes(m === "plan", toolApprovalMode === "yolo"));
       void setControllerCollaborationMode(m);
     },
-    [activeTabId, setControllerCollaborationMode, setMode, toolApprovalMode],
+    [activeTabId, setControllerCollaborationMode, setGoalDraftModeForTab, setMode, toolApprovalMode],
   );
   const applyToolApprovalMode = useCallback(
     (m: ToolApprovalMode) => {
       if (!activeTabId) return;
+      if (m === "yolo") {
+        if (toolApprovalMode !== "yolo") {
+          yoloRestoreToolApprovalModesRef.current[activeTabId] = restorableToolApprovalMode(toolApprovalMode);
+        }
+      } else {
+        yoloRestoreToolApprovalModesRef.current[activeTabId] = restorableToolApprovalMode(m);
+      }
       setToolApprovalModesByTab((current) => (current[activeTabId] === m ? current : { ...current, [activeTabId]: m }));
       setMode(modeFromAxes(collaborationMode === "plan", m === "yolo"));
       void setControllerToolApprovalMode(m);
     },
-    [activeTabId, collaborationMode, setControllerToolApprovalMode, setMode],
+    [activeTabId, collaborationMode, setControllerToolApprovalMode, setMode, toolApprovalMode],
   );
+  const toggleYoloApprovalMode = useCallback(() => {
+    if (!activeTabId) return;
+    const next = toggleYoloToolApprovalMode(
+      toolApprovalMode,
+      yoloRestoreToolApprovalModesRef.current[activeTabId],
+    );
+    if (next.restore) {
+      yoloRestoreToolApprovalModesRef.current[activeTabId] = next.restore;
+    }
+    applyToolApprovalMode(next.mode);
+  }, [activeTabId, applyToolApprovalMode, toolApprovalMode]);
   const applyGoal = useCallback(
     (nextGoal: string) => {
       if (!activeTabId) return;
       const trimmed = nextGoal.trim();
+      setGoalDraftModeForTab(activeTabId, false);
       setGoalsByTab((current) => (current[activeTabId] === trimmed ? current : { ...current, [activeTabId]: trimmed }));
       setCollaborationModesByTab((current) => {
         const nextMode = trimmed ? "goal" : "normal";
@@ -757,7 +858,7 @@ export default function App() {
       setMode(modeFromAxes(false, toolApprovalMode === "yolo"));
       void (trimmed ? setControllerGoal(trimmed) : clearControllerGoal());
     },
-    [activeTabId, clearControllerGoal, setControllerGoal, setMode, toolApprovalMode],
+    [activeTabId, clearControllerGoal, setControllerGoal, setGoalDraftModeForTab, setMode, toolApprovalMode],
   );
   const startGoal = useCallback(
     (nextGoal: string) => {
@@ -768,7 +869,8 @@ export default function App() {
     },
     [applyGoal, send],
   );
-  // Shift+Tab toggles only the collaboration axis; tool permission stays independent.
+  // Shift+Tab toggles only the collaboration axis; Ctrl/Cmd+Y toggles YOLO on the
+  // tool-permission axis while preserving the Ask/Auto base mode.
   const cycleMode = useCallback(() => {
     applyCollaborationMode(collaborationMode === "plan" ? "normal" : "plan");
   }, [applyCollaborationMode, collaborationMode]);
@@ -779,7 +881,7 @@ export default function App() {
   const switchModel = useCallback(
     async (name: string) => {
       await setModel(name);
-      await setControllerCollaborationMode(collaborationMode);
+      await setControllerCollaborationMode(controllerCollaborationMode({ collaborationMode, goal }));
       await setControllerToolApprovalMode(toolApprovalMode);
       if (goal.trim()) await setControllerGoal(goal);
     },
@@ -792,7 +894,7 @@ export default function App() {
   // SetBypass binding was a harmless no-op.
   useEffect(() => {
     if (!controllerReady) return;
-    void setControllerCollaborationMode(collaborationMode);
+    void setControllerCollaborationMode(controllerCollaborationMode({ collaborationMode, goal }));
     void setControllerToolApprovalMode(toolApprovalMode);
     if (goal.trim()) void setControllerGoal(goal);
   }, [collaborationMode, controllerReady, goal, setControllerCollaborationMode, setControllerGoal, setControllerToolApprovalMode, toolApprovalMode]);
@@ -819,8 +921,6 @@ export default function App() {
 
   const sessionTitle = topicTitle(activeTab);
   const sessionHasContent = state.items.length > 0 || Boolean(state.live?.text || state.live?.reasoning);
-  const transcriptTurnCount = useMemo(() => state.items.reduce((count, item) => count + (item.kind === "user" ? 1 : 0), 0), [state.items]);
-  const currentTurnCount = Math.max(transcriptTurnCount, savedTopicTurnCount ?? 0);
   const getSessionMarkdown = useCallback(
     () => sessionItemsToMarkdown(sessionTitle, state.items, state.live),
     [sessionTitle, state.items, state.live],
@@ -841,11 +941,30 @@ export default function App() {
   }, [topicExportOpen]);
 
   const exportSession = useCallback(
-    (format: "markdown" | "json") => {
+    async (format: "markdown" | "json" | "pdf" | "image") => {
       const base = safeFilename(sessionTitle);
-      if (format === "json") downloadTextFile(`${base}.json`, getSessionJson(), "application/json");
-      else downloadTextFile(`${base}.md`, getSessionMarkdown(), "text/markdown");
       setTopicExportOpen(false);
+      try {
+        if (format === "json") {
+          const path = await app.PickExportFile(`${base}.json`, "application/json");
+          if (path) await app.SaveExportFile(path, getSessionJson(), false);
+        } else if (format === "pdf") {
+          const path = await app.PickExportFile(`${base}.pdf`, "application/pdf");
+          if (!path) return;
+          const blob = await renderSessionPdfBlob(getSessionMarkdown(), sessionTitle);
+          await app.SaveExportFile(path, await blobToBase64(blob), true);
+        } else if (format === "image") {
+          const path = await app.PickExportFile(`${base}.png`, "image/png");
+          if (!path) return;
+          const blob = await renderSessionImageBlob(getSessionMarkdown());
+          await app.SaveExportFile(path, await blobToBase64(blob), true);
+        } else {
+          const path = await app.PickExportFile(`${base}.md`, "text/markdown");
+          if (path) await app.SaveExportFile(path, getSessionMarkdown(), false);
+        }
+      } catch (err) {
+        console.error("Failed to export session", err);
+      }
     },
     [getSessionJson, getSessionMarkdown, sessionTitle],
   );
@@ -857,9 +976,34 @@ export default function App() {
     send(text);
   }, [pendingPlanRevision, send, state.running]);
 
-  // handleSend intercepts the slash commands that need a desktop-native action
-  // before they reach the backend: "/model <ref>" rebuilds on that model, and
-  // "/memory" opens the Memory tab in the settings centre. Everything else — skills (/init, …),
+  useEffect(() => {
+    setClearContextPending(false);
+  }, [activeTabId]);
+
+  const cancelClearContext = useCallback(() => {
+    setClearContextPending(false);
+  }, []);
+
+  const confirmClearContext = useCallback(async () => {
+    setClearContextPending(false);
+    try {
+      await clearSession();
+      notice(t("clearContext.done"));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      notice(msg || t("clearContext.failed"), "warn");
+    }
+  }, [clearSession, notice, t]);
+
+  // Keep runningRef in sync so handleSend sees the latest running value
+  // even inside a stale closure.
+  useEffect(() => {
+    runningRef.current = state.running;
+  }, [state.running]);
+
+  // handleSend intercepts slash commands that need a desktop-native action before
+  // they reach the backend: "/model <ref>" rebuilds on that model, "/memory"
+  // opens Settings, and "/clear" shows an in-app confirmation card. Everything else — skills (/init, …),
   // custom commands, bare /model and the other read-only management verbs
   // (/skill, /hooks, /mcp) — goes straight to Submit, which the controller
   // resolves (a turn, or a listing Notice).
@@ -884,6 +1028,10 @@ export default function App() {
       if (trimmed === "/memory") {
         closeTransientOverlays();
         setSettingsTarget("memory");
+        return;
+      }
+      if (trimmed === "/clear") {
+        setClearContextPending(true);
         return;
       }
       const goalCommand = /^\/goal(?:\s+(.*))?$/.exec(trimmed);
@@ -928,12 +1076,13 @@ export default function App() {
         notice(t("settings.themeUnknown", { name: arg }), "warn");
         return;
       }
+      if (runningRef.current) { steer(submitText.trim()); return; }
       await setControllerCollaborationMode(collaborationMode);
       await setControllerToolApprovalMode(toolApprovalMode);
       if (goal.trim()) await setControllerGoal(goal);
       send(trimmed, submitText.trim());
     },
-    [applyGoal, closeTransientOverlays, collaborationMode, goal, send, runShell, notice, setControllerCollaborationMode, setControllerGoal, setControllerToolApprovalMode, switchModel, t, toolApprovalMode],
+    [applyGoal, closeTransientOverlays, collaborationMode, goal, send, runShell, notice, setControllerCollaborationMode, setControllerGoal, setControllerToolApprovalMode, steer, switchModel, t, toolApprovalMode],
   );
 
   const refreshTabMetas = useCallback(async (): Promise<TabMeta[]> => {
@@ -941,6 +1090,19 @@ export default function App() {
     setTabMetas(tabs);
     return tabs;
   }, []);
+
+  const blankSessionTarget = useCallback(() => {
+    const activeWorkspaceRoot = activeTab?.scope === "project" ? activeTab.workspaceRoot || "" : "";
+    const scope = activeWorkspaceRoot ? "project" : "global";
+    return { scope, workspaceRoot: activeWorkspaceRoot };
+  }, [activeTab?.scope, activeTab?.workspaceRoot]);
+
+  const openBlankSession = useCallback(async (scope: string, workspaceRoot: string) => {
+    await ensureBlankTab(scope, scope === "project" ? workspaceRoot : "");
+    setProjectRevision((value) => value + 1);
+    await refreshTabMetas();
+    setTabRevealSignal((signal) => signal + 1);
+  }, [ensureBlankTab, refreshTabMetas]);
 
   useEffect(() => {
     void refreshTabMetas();
@@ -954,24 +1116,6 @@ export default function App() {
       void refreshTabMetas();
     });
   }, [refreshTabMetas]);
-
-  useEffect(() => {
-    let cancelled = false;
-    if (!activeTab?.topicId) {
-      setSavedTopicTurnCount(undefined);
-      return () => {
-        cancelled = true;
-      };
-    }
-    void app.ListProjectTree().then((nodes) => {
-      if (!cancelled) setSavedTopicTurnCount(activeTopicTurnsFromTree(asArray<ProjectNode>(nodes), activeTab));
-    }).catch(() => {
-      if (!cancelled) setSavedTopicTurnCount(undefined);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [activeTab?.scope, activeTab?.workspaceRoot, activeTab?.topicId, projectRevision]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1110,7 +1254,7 @@ export default function App() {
       closeTransientOverlays();
       setWorkspacePanelResizing(true);
       const startX = event.clientX;
-      const startDockWidth = preferredWorkspacePanelWidth;
+      const startDockWidth = workspacePanelRenderWidth;
       let nextDockWidth = startDockWidth;
       const onMove = (moveEvent: PointerEvent) => {
         const delta = moveEvent.clientX - startX;
@@ -1136,14 +1280,14 @@ export default function App() {
       window.addEventListener("pointerup", onDone);
       window.addEventListener("pointercancel", onDone);
     },
-    [closeTransientOverlays, preferredWorkspacePanelWidth, rightDockDetailActive, setSavedWorkspacePanelWidth, workspacePanelOpen],
+    [closeTransientOverlays, rightDockDetailActive, setSavedWorkspacePanelWidth, workspacePanelOpen, workspacePanelRenderWidth],
   );
 
   const resizeWorkspacePanelWithKeyboard = useCallback(
     (event: KeyboardEvent<HTMLButtonElement>) => {
       if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
         event.preventDefault();
-        setSavedWorkspacePanelWidth(preferredWorkspacePanelWidth + (event.key === "ArrowLeft" ? 16 : -16));
+        setSavedWorkspacePanelWidth(workspacePanelRenderWidth + (event.key === "ArrowLeft" ? 16 : -16));
       } else if (event.key === "Home") {
         event.preventDefault();
         setSavedWorkspacePanelWidth(rightDockDetailActive ? RIGHT_DOCK_PREVIEW_MIN_WIDTH : RIGHT_DOCK_TREE_MIN_WIDTH);
@@ -1152,19 +1296,14 @@ export default function App() {
         setSavedWorkspacePanelWidth(rightDockDetailActive ? RIGHT_DOCK_MAX_WIDTH : RIGHT_DOCK_TREE_MAX_WIDTH);
       }
     },
-    [preferredWorkspacePanelWidth, rightDockDetailActive, setSavedWorkspacePanelWidth],
+    [rightDockDetailActive, setSavedWorkspacePanelWidth, workspacePanelRenderWidth],
   );
 
   const openWorkspacePanel = useCallback(
     (mode: RightDockMode = rightDockMode) => {
       closeTransientOverlays();
-      if (mode !== rightDockMode) {
+      if (mode === "context" || mode !== rightDockMode) {
         setWorkspacePreviewActive(false);
-        setContextDetailActive(false);
-      } else if (mode === "context") {
-        setWorkspacePreviewActive(false);
-      } else {
-        setContextDetailActive(false);
       }
       setRightDockMode(mode);
       let nextMaximized = workspacePanelMaximized;
@@ -1172,10 +1311,8 @@ export default function App() {
         nextMaximized = false;
         setWorkspacePanelMaximized(false);
       } else {
-        // When user explicitly opens the panel, we do NOT force maximize.
-        // If there's not enough room, the panel will open in floating mode
-        // over the chat area, preserving the chat area's minimum width
-        // and keeping the panel's close button accessible.
+        // Keep file/change views docked; the rendered dock width is clamped to
+        // the viewport so opening it reflows instead of forcing maximize.
         nextMaximized = false;
         setWorkspacePanelMaximized(false);
       }
@@ -1207,7 +1344,76 @@ export default function App() {
 
   const openRightDockMode = useCallback(
     (mode: RightDockMode) => {
+      setWorkspaceRevealRequest(null);
+      setWorkspaceChangeRevealRequest(null);
+      setWorkspaceFileListRequest(null);
+      setWorkspaceChangeListRequest(null);
       openWorkspacePanel(mode);
+    },
+    [openWorkspacePanel],
+  );
+
+  const openRightDockFile = useCallback(
+    (path: string) => {
+      const nextPath = path.trim();
+      if (!nextPath) return;
+      setWorkspaceFileListRequest(null);
+      setWorkspaceChangeListRequest(null);
+      setWorkspaceChangeRevealRequest(null);
+      setWorkspaceRevealRequest((current) => ({ id: (current?.id ?? 0) + 1, path: nextPath }));
+      openWorkspacePanel("files");
+    },
+    [openWorkspacePanel],
+  );
+
+  const openRightDockFileList = useCallback(
+    (paths: string[]) => {
+      const normalized = Array.from(new Set(paths.map((path) => path.trim()).filter(Boolean)));
+      setWorkspaceRevealRequest(null);
+      setWorkspaceChangeRevealRequest(null);
+      setWorkspaceChangeListRequest(null);
+      setWorkspaceFileListRequest((current) =>
+        normalized.length > 0
+          ? { id: (current?.id ?? 0) + 1, paths: normalized }
+          : null,
+      );
+      openWorkspacePanel("files");
+    },
+    [openWorkspacePanel],
+  );
+
+  const openRightDockChangeFile = useCallback(
+    (path: string) => {
+      const nextPath = path.trim();
+      if (!nextPath) return;
+      setWorkspaceRevealRequest(null);
+      setWorkspaceFileListRequest(null);
+      setWorkspaceChangeListRequest(null);
+      setWorkspaceChangeRevealRequest((current) => ({ id: (current?.id ?? 0) + 1, path: nextPath }));
+      openWorkspacePanel("changed");
+    },
+    [openWorkspacePanel],
+  );
+
+  const openRightDockChangeList = useCallback(
+    (changes: WorkspaceChangeListEntry[]) => {
+      const seen = new Set<string>();
+      const normalized = changes
+        .map((change) => ({ ...change, path: change.path.trim() }))
+        .filter((change) => {
+          if (!change.path || seen.has(change.path)) return false;
+          seen.add(change.path);
+          return true;
+      });
+      setWorkspaceRevealRequest(null);
+      setWorkspaceChangeRevealRequest(null);
+      setWorkspaceFileListRequest(null);
+      setWorkspaceChangeListRequest((current) =>
+        normalized.length > 0
+          ? { id: (current?.id ?? 0) + 1, changes: normalized }
+          : null,
+      );
+      openWorkspacePanel("changed");
     },
     [openWorkspacePanel],
   );
@@ -1221,25 +1427,15 @@ export default function App() {
     [closeTransientOverlays, workspacePreviewActive],
   );
 
-  const handleContextDetailModeChange = useCallback(
-    (active: boolean) => {
-      if (contextDetailActive === active) return;
-      closeTransientOverlays();
-      setContextDetailActive(active);
-    },
-    [closeTransientOverlays, contextDetailActive],
-  );
-
   const layoutStyle = useMemo(
     () =>
       ({
         "--sidebar-expanded-width": `${sidebarWidth}px`,
-        "--chat-min-width": `${CHAT_MIN_WIDTH}px`,
-        "--chat-docked-min-width": `${CHAT_DOCKED_MIN_WIDTH}px`,
+        "--chat-min-width": `${chatReservedWidth}px`,
         "--workspace-width": `${workspacePanelRenderWidth}px`,
         "--workspace-resizer-width": `${WORKSPACE_RESIZER_WIDTH}px`,
       }) as CSSProperties,
-    [sidebarWidth, workspacePanelRenderWidth],
+    [chatReservedWidth, sidebarWidth, workspacePanelRenderWidth],
   );
 
   const setWorkspacePanel = useCallback((open: boolean) => {
@@ -1314,19 +1510,9 @@ export default function App() {
 
   const handleNewTab = useCallback(async () => {
     closeTransientOverlays();
-    const activeWorkspaceRoot = activeTab?.scope === "project" ? activeTab.workspaceRoot || "" : "";
-    const targetScope = activeWorkspaceRoot ? "project" : "global";
-    const workspaceRoot = activeWorkspaceRoot;
-    const topic = await app.CreateTopic(targetScope, workspaceRoot, "");
-    if (targetScope === "global" || !workspaceRoot) {
-      await openGlobalTab(topic.id);
-    } else {
-      await openProjectTab(workspaceRoot, topic.id);
-    }
-    setProjectRevision((value) => value + 1);
-    await refreshTabMetas();
-    setTabRevealSignal((signal) => signal + 1);
-  }, [activeTab?.scope, activeTab?.workspaceRoot, closeTransientOverlays, openGlobalTab, openProjectTab, refreshTabMetas]);
+    const target = blankSessionTarget();
+    await openBlankSession(target.scope, target.workspaceRoot);
+  }, [blankSessionTarget, closeTransientOverlays, openBlankSession]);
 
   const handleMessageAction = useCallback(async (turn: number, scope: string) => {
     await rewind(turn, scope);
@@ -1577,6 +1763,7 @@ export default function App() {
   const workspacePanelResetWidth = rightDockDetailActive
     ? RIGHT_DOCK_PREVIEW_DEFAULT_WIDTH
     : defaultRightDockTreeWidth();
+  const workspacePanelResizeMinWidth = workspacePanelAriaMinWidth(workspacePanelMinWidth, workspacePanelRenderWidth);
   const workspacePanelMaxWidth = rightDockDetailActive ? RIGHT_DOCK_MAX_WIDTH : RIGHT_DOCK_TREE_MAX_WIDTH;
   const topicbarTitle = topicDisplayTitle(activeTab);
   const topicbarWorkspaceLabel = activeTab ? tabWorkspaceTitle(activeTab) : "";
@@ -1649,6 +1836,7 @@ export default function App() {
               activeTopicId={activeTab?.topicId}
               onOpenTopic={handleOpenTopic}
               onOpenProjectHistory={openProjectHistory}
+              onCreateTopic={(scope, workspaceRoot) => openBlankSession(scope, scope === "project" ? workspaceRoot : "")}
               onTopicsChanged={refreshProjectsAndTabs}
               onRenameTopic={renameTopic}
               refreshSignal={projectRevision}
@@ -1776,13 +1964,21 @@ export default function App() {
                 </Tooltip>
                 {topicExportOpen && (
                   <div className="topicbar__export-menu" role="menu">
-                    <button type="button" role="menuitem" onClick={() => exportSession("markdown")}>
+                    <button type="button" role="menuitem" onClick={() => void exportSession("markdown")}>
                       <FileText size={13} />
                       <span>{t("topicBar.exportMarkdown")}</span>
                     </button>
-                    <button type="button" role="menuitem" onClick={() => exportSession("json")}>
+                    <button type="button" role="menuitem" onClick={() => void exportSession("json")}>
                       <FileJson size={13} />
                       <span>{t("topicBar.exportJson")}</span>
+                    </button>
+                    <button type="button" role="menuitem" onClick={() => void exportSession("pdf")}>
+                      <FileDown size={13} />
+                      <span>{t("topicBar.exportPdf")}</span>
+                    </button>
+                    <button type="button" role="menuitem" onClick={() => void exportSession("image")}>
+                      <FileImage size={13} />
+                      <span>{t("topicBar.exportImage")}</span>
                     </button>
                   </div>
                 )}
@@ -1817,7 +2013,7 @@ export default function App() {
             <div className="banner banner--error">{t("topbar.startupError", { msg: state.meta.startupErr })}</div>
           )}
 
-          <UpdateBanner />
+          <UpdateBanner enabled={startupUpdateChecksEnabled === true} />
 
           <main className="main">
             {state.meta?.ready === false && !state.meta?.startupErr ? (
@@ -1834,7 +2030,8 @@ export default function App() {
                 onRewind={handleMessageAction}
                 checkpoints={state.checkpoints}
                 actionPending={state.messageAction != null}
-                rewindDisabled={state.running || state.messageAction != null || state.approval != null || state.ask != null}
+                rewindDisabled={state.running || state.messageAction != null || state.approval != null || state.ask != null || clearContextPending}
+                defaultExpandThinking={expandThinking}
               />
             )}
           </main>
@@ -1844,11 +2041,11 @@ export default function App() {
             {state.approval && (
               <ApprovalModal
                 approval={state.approval}
-                onAnswer={(allow, session, persist, scope) => {
+                onAnswer={(allow, session, persist) => {
                   // Approving an exit_plan_mode plan leaves plan mode; sync the
                   // tab-local indicator and persisted safe mode immediately.
                   if (state.approval!.tool === "exit_plan_mode" && allow) applyCollaborationMode("normal");
-                  approve(state.approval!.id, allow, session, persist, scope);
+                  approve(state.approval!.id, allow, session, persist);
                 }}
                 onRevisePlan={(text) => {
                   setPendingPlanRevision(text);
@@ -1867,6 +2064,14 @@ export default function App() {
                 onDismiss={() => answerQuestion(state.ask!.id, [])}
               />
             )}
+            {clearContextPending && (
+              <ClearContextCard
+                onCancel={cancelClearContext}
+                onConfirm={() => {
+                  void confirmClearContext();
+                }}
+              />
+            )}
             <Composer
               running={state.running}
               collaborationMode={collaborationMode}
@@ -1882,13 +2087,14 @@ export default function App() {
               onSetMode={applyMode}
               onSetCollaborationMode={applyCollaborationMode}
               onSetToolApprovalMode={applyToolApprovalMode}
+              onToggleYoloApprovalMode={toggleYoloApprovalMode}
               onSetGoal={startGoal}
               onClearGoal={() => applyGoal("")}
               onSwitchModel={switchModel}
               onSetEffort={setEffort}
               insertRequest={composerInsertRequest}
-              disabled={state.meta?.ready === false || state.messageAction != null || state.approval != null || state.ask != null}
-              decisionPending={state.messageAction != null || state.approval != null || state.ask != null}
+              disabled={state.meta?.ready === false || state.messageAction != null || state.approval != null || state.ask != null || clearContextPending}
+              decisionPending={state.messageAction != null || state.approval != null || state.ask != null || clearContextPending}
               ready={state.meta?.ready === true}
               turnStartAt={state.turnStartAt}
               turnTokens={state.turnTokens}
@@ -1903,10 +2109,10 @@ export default function App() {
               running={state.running}
               collaborationMode={collaborationMode}
               toolApprovalMode={toolApprovalMode}
+              sessionTokens={state.sessionTokens}
               cost={state.sessionCost}
               currency={state.sessionCurrency}
               modelLabel={state.meta?.label}
-              currentTurnCount={currentTurnCount}
             />
           </footer>
           </>
@@ -1919,7 +2125,7 @@ export default function App() {
             role="separator"
             aria-orientation="vertical"
             aria-label={t("rightDock.resize")}
-            aria-valuemin={workspacePanelMinWidth}
+            aria-valuemin={workspacePanelResizeMinWidth}
             aria-valuemax={Math.max(workspacePanelMaxWidth, workspacePanelRenderWidth)}
             aria-valuenow={workspacePanelRenderWidth}
             onPointerDown={startWorkspacePanelResize}
@@ -1936,12 +2142,6 @@ export default function App() {
             ].join(" ")}
             aria-label={t("rightDock.workbench")}
           >
-            <div className="workbench-dock__head">
-              <div className="workbench-dock__heading">
-                <h2>{t("workspace.title")}</h2>
-              </div>
-              <span className="workbench-dock__head-spacer" />
-            </div>
             <div className="workbench-dock__tools">
               <div className="workbench-dock__tabs" role="tablist" aria-label={t("rightDock.views")}>
                 {SHOW_CONTEXT_DOCK && (
@@ -1984,11 +2184,15 @@ export default function App() {
                   tabId={activeTabId}
                   context={state.context}
                   usage={state.usage}
+                  sessionTokens={state.sessionTokens}
                   sessionCost={state.sessionCost}
                   sessionCurrency={state.sessionCurrency}
-                  scopeLabel={topicScopeLabel(activeTab)}
                   refreshKey={dockRefreshKey}
-                  onDetailModeChange={handleContextDetailModeChange}
+                  onOpenWorkspaceMode={openRightDockMode}
+                  onOpenWorkspaceFile={openRightDockFile}
+                  onOpenWorkspaceFileList={openRightDockFileList}
+                  onOpenWorkspaceChangeList={openRightDockChangeList}
+                  onOpenWorkspaceChangeFile={openRightDockChangeFile}
                 />
               ) : (
                 <WorkspacePanel
@@ -2006,6 +2210,10 @@ export default function App() {
                   onRequestPanelWidth={ensureWorkspacePanelWidth}
                   refreshKey={dockRefreshKey}
                   initialViewMode={rightDockMode === "changed" ? "changed" : "files"}
+                  revealPathRequest={workspaceRevealRequest}
+                  changeRevealRequest={workspaceChangeRevealRequest}
+                  fileListRequest={workspaceFileListRequest}
+                  changeListRequest={workspaceChangeListRequest}
                   showViewTabs={false}
                 />
               )}
@@ -2034,7 +2242,12 @@ export default function App() {
         <SettingsPanel
           initialTab={settingsTarget}
           onClose={() => setSettingsTarget(null)}
-          onChanged={() => void refreshMeta()}
+          onChanged={() => {
+            void refreshMeta();
+            void app.Settings()
+              .then(applyDesktopPreferences)
+              .catch((e) => console.warn("desktop preferences refresh failed", e));
+          }}
         />
       )}
 

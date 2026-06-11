@@ -54,7 +54,4 @@ node_modules/
 Thumbs.db
 .idea/
 .vscode/
-
-# Scratch / agent working dirs (never committed)
-/tmp/
-/.codex/
+/site/public/av/

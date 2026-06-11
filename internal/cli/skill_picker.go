@@ -336,7 +336,7 @@ func (m chatTUI) deleteSkillPick(sk skill.Skill) (tea.Model, tea.Cmd) {
 	m.notice(fmt.Sprintf(i18n.M.SkillPickerDeletedFmt, sk.Name))
 	m.refreshSkillPickerData()
 	m.scheduleSkillSessionRefresh("skill delete", "deleted skill "+sk.Name+" — refreshing session")
-	return m, nil
+	return m, m.pendingModelSwitch
 }
 
 func (m *chatTUI) rescanSkills() {

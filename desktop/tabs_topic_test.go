@@ -12,6 +12,7 @@ import (
 
 	"reasonix/internal/agent"
 	"reasonix/internal/config"
+	"reasonix/internal/control"
 )
 
 func waitForTabReady(t *testing.T, app *App, tabID string) *WorkspaceTab {
@@ -1078,6 +1079,9 @@ func TestRestoreSessionWithoutTopicMetadataFallsBackToGlobal(t *testing.T) {
 	sessionPath := writeLegacySession(t, dir, "restore-orphan.jsonl", "restore orphan history", time.Now().Add(-time.Hour))
 	topicID := legacySessionTopicID(sessionPath)
 	app := NewApp()
+	ctrl := control.New(control.Options{SessionDir: dir, SessionPath: filepath.Join(dir, "active.jsonl"), Label: "test"})
+	app.setTestCtrl(ctrl, "")
+	defer ctrl.Close()
 	if err := app.DeleteSession(sessionPath); err != nil {
 		t.Fatalf("delete orphan session: %v", err)
 	}
@@ -1163,9 +1167,25 @@ func TestTrashTopicMovesOpenSessionToTrash(t *testing.T) {
 	if len(trashed) != 1 || trashed[0].Path != trashPath {
 		t.Fatalf("trashed sessions = %#v, want %q", trashed, trashPath)
 	}
+	preview, err := app.PreviewSession(trashPath)
+	if err != nil {
+		t.Fatalf("preview trashed session: %v", err)
+	}
+	if !hasHistoryContent(preview, "remember this turn") {
+		t.Fatalf("preview trashed session = %#v, want remembered turn", preview)
+	}
 	if got := loadTopicTitle(projectRoot, topicID); got != "" {
 		t.Fatalf("topic title should be removed, got %q", got)
 	}
+}
+
+func hasHistoryContent(messages []HistoryMessage, content string) bool {
+	for _, m := range messages {
+		if m.Content == content {
+			return true
+		}
+	}
+	return false
 }
 
 func TestLegacyMigrationSkipsProjectScopedSessions(t *testing.T) {

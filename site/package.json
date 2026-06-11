@@ -4,11 +4,14 @@
   "private": true,
   "scripts": {
     "dev": "astro dev",
+    "prebuild": "node scripts/fetch-community.mjs",
     "build": "astro build",
     "preview": "astro preview"
   },
   "dependencies": {
-    "astro": "^6.4.4",
-    "@fontsource-variable/inter": "^5.1.0"
+    "@astrojs/sitemap": "^3.7.3",
+    "@fontsource-variable/jetbrains-mono": "^5.1.0",
+    "@fontsource-variable/outfit": "^5.1.0",
+    "astro": "^6.4.4"
   }
 }

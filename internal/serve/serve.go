@@ -204,6 +204,7 @@ func (s *Server) handler() http.Handler {
 	mux.HandleFunc("POST /rewind", s.rewind)
 	mux.HandleFunc("POST /fork", s.fork)
 	mux.HandleFunc("POST /summarize", s.summarize)
+	mux.HandleFunc("POST /tool-approval-mode", s.toolApprovalMode)
 	mux.HandleFunc("POST /auto-approve-tools", s.autoApproveTools)
 	mux.HandleFunc("POST /bypass", s.bypass)
 	mux.HandleFunc("POST /answer", s.answer)
@@ -395,13 +396,12 @@ func (s *Server) approve(w http.ResponseWriter, r *http.Request) {
 		Allow   bool   `json:"allow"`
 		Session bool   `json:"session"`
 		Persist bool   `json:"persist"`
-		Scope   string `json:"scope"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.ID == "" {
 		http.Error(w, "missing id", http.StatusBadRequest)
 		return
 	}
-	s.ctl().ApproveWithScope(body.ID, body.Allow, body.Session, body.Persist, body.Scope)
+	s.ctl().Approve(body.ID, body.Allow, body.Session, body.Persist)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -651,6 +651,26 @@ func (s *Server) autoApproveTools(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.ctl().SetAutoApproveTools(body.On)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// toolApprovalMode selects ask, auto, or yolo approval behavior for interactive
+// frontends. Plan remains a separate read-only gate.
+func (s *Server) toolApprovalMode(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Mode string `json:"mode"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "bad body", http.StatusBadRequest)
+		return
+	}
+	switch strings.ToLower(strings.TrimSpace(body.Mode)) {
+	case control.ToolApprovalAsk, control.ToolApprovalAuto, control.ToolApprovalYolo:
+		s.ctl().SetToolApprovalMode(body.Mode)
+	default:
+		http.Error(w, "mode must be ask, auto, or yolo", http.StatusBadRequest)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 

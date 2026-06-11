@@ -5,8 +5,8 @@ import { type BalanceInfo, type CollaborationMode, type ContextInfo, type JobVie
 
 // JobsChip is the status-bar background-jobs indicator: a count that opens an
 // upward popover listing the running jobs (id · label · status), mirroring the
-// ModelSwitcher's click-to-open pattern. With no jobs it still reserves a stable
-// "任务 0" slot so the IDE-style status order does not jump.
+// ModelSwitcher's click-to-open pattern. With no jobs it stays hidden so the
+// high-priority status metrics keep the compact left-to-right scan.
 function JobsChip({ jobs }: { jobs: JobView[] }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
@@ -23,12 +23,7 @@ function JobsChip({ jobs }: { jobs: JobView[] }) {
     return () => document.removeEventListener("click", closeOnOutsideClick);
   }, [open]);
   if (jobs.length === 0) {
-    return (
-      <span className="stat stat--jobs">
-        <span className="stat__label">{t("status.jobsLabel")}</span>
-        <b>-</b>
-      </span>
-    );
+    return null;
   }
   return (
     <div className="statusbar__jobswrap" ref={wrapRef}>
@@ -78,6 +73,15 @@ function avgRate(u?: WireUsage): string | null {
   return formatRate(u.sessionCacheHitTokens, denom);
 }
 
+function rateValueClass(rate: string | null): string {
+  if (rate === null) return "stat__value--empty";
+  const pct = Number.parseFloat(rate);
+  if (!Number.isFinite(pct)) return "";
+  if (pct >= 80) return "statusbar__rate-value--good";
+  if (pct >= 50) return "statusbar__rate-value--notice";
+  return "statusbar__rate-value--critical";
+}
+
 function currencySymbol(currency?: string): string {
   const value = (currency || "¥").trim();
   if (/^(cny|rmb|yuan)$/i.test(value)) return "¥";
@@ -91,6 +95,11 @@ function formatMoney(amount?: number, currency?: string): string {
   return `${symbol}${amount < 1 ? amount.toFixed(4) : amount.toFixed(2)}`;
 }
 
+function formatTokenCount(tokens?: number): string {
+  if (typeof tokens !== "number" || tokens <= 0) return "-";
+  return tokens.toLocaleString();
+}
+
 export function StatusBar({
   context,
   usage,
@@ -99,10 +108,10 @@ export function StatusBar({
   running,
   collaborationMode,
   toolApprovalMode,
+  sessionTokens,
   cost,
   currency,
   modelLabel,
-  currentTurnCount,
 }: {
   context: ContextInfo;
   usage?: WireUsage;
@@ -111,75 +120,106 @@ export function StatusBar({
   running: boolean;
   collaborationMode: CollaborationMode;
   toolApprovalMode: ToolApprovalMode;
+  sessionTokens?: number;
   cost?: number;
   currency?: string;
   modelLabel?: string;
-  currentTurnCount?: number;
 }) {
   const { t } = useI18n();
   const pct = context.window ? Math.min(100, Math.round((context.used / context.window) * 100)) : null;
   const compactPct = context.compactRatio ? Math.round(context.compactRatio * 100) : null;
+  const compactNear = pct !== null && compactPct !== null && pct >= Math.max(0, compactPct - 10);
+  const compactReached = pct !== null && compactPct !== null && pct >= compactPct;
   const nowPct = nowRate(usage);
   const avgPct = avgRate(usage);
   const jobsList = jobs ?? [];
   const costLabel = formatMoney(cost, currency);
+  const tokenLabel = formatTokenCount(sessionTokens);
   const balanceLabel = balance?.available && balance.display ? balance.display : "-";
   const planMode = collaborationMode === "plan";
   const goalMode = collaborationMode === "goal";
 
   return (
     <div className="statusbar">
-      <span className="stat stat--model">
-        <span className={`statusbar__dot ${running ? "statusbar__dot--busy" : ""}`} />
-        {modelLabel && <span className="statusbar__model">{modelLabel}</span>}
-      </span>
-      {typeof currentTurnCount === "number" && currentTurnCount > 0 && (
-        <span className="stat statusbar__turns" title={t("status.sessionTurnsTitle")}>
-          <span className="stat__label">{t("status.sessionTurnsLabel")}</span>
-          <b>{t(currentTurnCount === 1 ? "history.turnOne" : "history.turnOther", { n: currentTurnCount })}</b>
-        </span>
-      )}
-      <span className="stat statusbar__ctx">
-        <span className="stat__label">{t("status.ctxLabel")}</span>
-        <b>{pct !== null ? `${pct}%` : "-"}</b>
-      </span>
-      <span className="stat statusbar__compact">
-        <span className="stat__label">{t("status.compactLabel")}</span>
-        <b>{compactPct !== null ? `${compactPct}%` : "-"}</b>
-      </span>
-      <span className="stat statusbar__cache">
-        <span className="stat__label">{t("status.cacheLabel")}</span>
-        <b>{nowPct !== null ? `${nowPct}%` : "-"}</b>
-      </span>
-      <span className="stat statusbar__avg">
-        <span className="stat__label">{t("status.cacheAvgLabel")}</span>
-        <b>{avgPct !== null ? `${avgPct}%` : "-"}</b>
-      </span>
-      <span className="statusbar__spacer" />
-      <JobsChip jobs={jobsList} />
-      <Tooltip label={t("status.spendTitle")}>
-        <span className="stat statusbar__cost">
-          <span className="stat__label">{t("status.costLabel")}</span>
-          <b>{costLabel}</b>
-        </span>
-      </Tooltip>
-      <Tooltip label={t("status.balanceTitle")}>
-        <span className="stat stat--balance statusbar__balance">
-          <span className="stat__label">{t("status.balanceLabel")}</span>
-          <b>{balanceLabel}</b>
-        </span>
-      </Tooltip>
-      {planMode && <span className="statusbar__plan">{t("status.plan")}</span>}
-      {goalMode && <span className="statusbar__plan">{t("composer.goalMode")}</span>}
-      {toolApprovalMode === "auto" && (
-        <Tooltip label={t("composer.accessAutoTitle")}>
-          <span className="statusbar__yolo">{t("composer.accessAuto")}</span>
+      <div className="statusbar__group statusbar__group--model">
+        <Tooltip label={t("status.modelTitle")}>
+          <span className="stat stat--model">
+            <span className={`statusbar__dot ${running ? "statusbar__dot--busy" : ""}`} />
+            {modelLabel && <span className="statusbar__model">{modelLabel}</span>}
+          </span>
         </Tooltip>
-      )}
-      {toolApprovalMode === "yolo" && (
-        <Tooltip label={t("status.yoloTitle")}>
-          <span className="statusbar__yolo">{t("composer.accessYolo")}</span>
+      </div>
+      <div className="statusbar__group statusbar__group--primary">
+        <Tooltip label={t("status.cacheTitle")}>
+          <span className="stat statusbar__cache">
+            <span className="stat__label">{t("status.cacheLabel")}</span>
+            <b className={rateValueClass(nowPct) || undefined}>{nowPct !== null ? `${nowPct}%` : "-"}</b>
+          </span>
         </Tooltip>
+        <Tooltip label={t("status.cacheAvgTitle")}>
+          <span className="stat statusbar__avg">
+            <span className="stat__label">{t("status.cacheAvgLabel")}</span>
+            <b className={rateValueClass(avgPct) || undefined}>{avgPct !== null ? `${avgPct}%` : "-"}</b>
+          </span>
+        </Tooltip>
+        <Tooltip label={t("status.sessionTokensTitle")}>
+          <span className="stat statusbar__tokens">
+            <span className="stat__label">{t("status.sessionTokensLabel")}</span>
+            <b className={tokenLabel === "-" ? "stat__value--empty" : undefined}>{tokenLabel}</b>
+          </span>
+        </Tooltip>
+      </div>
+      <div className="statusbar__group statusbar__group--context">
+        <Tooltip label={t("status.ctxTitle")}>
+          <span className="stat statusbar__ctx">
+            <span className="stat__label">{t("status.ctxLabel")}</span>
+            <b className={pct === null ? "stat__value--empty" : undefined}>{pct !== null ? `${pct}%` : "-"}</b>
+          </span>
+        </Tooltip>
+        <Tooltip label={t("status.compactTitle")}>
+          <span className="stat statusbar__compact">
+            <span className="stat__label">{t("status.compactLabel")}</span>
+            <b
+              className={[
+                compactPct === null ? "stat__value--empty" : undefined,
+                compactReached ? "statusbar__compact-value--critical" : compactNear ? "statusbar__compact-value--warn" : undefined,
+              ].filter(Boolean).join(" ") || undefined}
+            >
+              {compactPct !== null ? `${compactPct}%` : "-"}
+            </b>
+          </span>
+        </Tooltip>
+      </div>
+      <div className="statusbar__group statusbar__group--account">
+        <Tooltip label={t("status.spendTitle")}>
+          <span className="stat statusbar__cost">
+            <span className="stat__label">{t("status.costLabel")}</span>
+            <b>{costLabel}</b>
+          </span>
+        </Tooltip>
+        <Tooltip label={t("status.balanceTitle")}>
+          <span className="stat stat--balance statusbar__balance">
+            <span className="stat__label">{t("status.balanceLabel")}</span>
+            <b className={balanceLabel === "-" ? "stat__value--empty" : undefined}>{balanceLabel}</b>
+          </span>
+        </Tooltip>
+        {planMode && <span className="statusbar__plan">{t("status.plan")}</span>}
+        {goalMode && <span className="statusbar__plan">{t("composer.goalMode")}</span>}
+        {toolApprovalMode === "auto" && (
+          <Tooltip label={t("composer.accessAutoTitle")}>
+            <span className="statusbar__yolo">{t("composer.accessAuto")}</span>
+          </Tooltip>
+        )}
+        {toolApprovalMode === "yolo" && (
+          <Tooltip label={t("status.yoloTitle")}>
+            <span className="statusbar__yolo">{t("composer.accessYolo")}</span>
+          </Tooltip>
+        )}
+      </div>
+      {jobsList.length > 0 && (
+        <div className="statusbar__group statusbar__group--jobs">
+          <JobsChip jobs={jobsList} />
+        </div>
       )}
     </div>
   );

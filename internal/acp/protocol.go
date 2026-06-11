@@ -358,8 +358,6 @@ const (
 	OptAllowOnce       PermissionOptionKind = "allow_once"
 	OptAllowAlways     PermissionOptionKind = "allow_always"
 	OptAllowPersistent PermissionOptionKind = "allow_persistent"
-	OptAllowPrefix     PermissionOptionKind = "allow_prefix"
-	OptPersistPrefix   PermissionOptionKind = "allow_prefix_persistent"
 	OptRejectOnce      PermissionOptionKind = "reject_once"
 	OptRejectAlways    PermissionOptionKind = "reject_always"
 )

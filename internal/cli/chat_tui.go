@@ -89,6 +89,9 @@ type chatTUI struct {
 	// marker rides in outgoing user messages so the cache-stable prompt prefix is
 	// left untouched.
 	planMode bool
+	// yoloRestoreToolApprovalMode remembers the Ask/Auto base mode that Ctrl+Y
+	// should restore after a desktop-style YOLO toggle.
+	yoloRestoreToolApprovalMode string
 
 	// pendingInterject queues input typed while a turn runs; each TurnDone
 	// dequeues the front and submits it as the next turn.
@@ -215,6 +218,10 @@ type chatTUI struct {
 	// toggle's non-persistent semantics.
 	mcp         *mcpManager
 	mcpDisabled map[string]bool
+
+	// clearConfirm is the destructive "/clear" confirmation overlay. It is separate
+	// from /new because /clear discards the current transcript instead of saving it.
+	clearConfirm *clearConfirm
 
 	// lastCtrlCAt records when Ctrl+C was pressed while idle on an empty
 	// composer, enabling a "press again to quit" confirmation pattern (1.5s
@@ -786,7 +793,7 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.updateCompletion()
 			return m, finalize(m, cmds)
 		}
-		if !m.chooserTyping() && m.pendingApproval == nil && m.rewind == nil && m.resumePick == nil && m.mcp == nil && m.mcpImport == nil && m.skillPick == nil && m.shouldFoldPaste(msg.Content) {
+		if !m.chooserTyping() && m.pendingApproval == nil && m.rewind == nil && m.resumePick == nil && m.mcp == nil && m.clearConfirm == nil && m.mcpImport == nil && m.skillPick == nil && m.shouldFoldPaste(msg.Content) {
 			m.insertFoldedPaste(msg.Content)
 			m.growInputToFit()
 			m.updateCompletion()
@@ -805,6 +812,12 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, finalize(m, cmds)
 		case "pgdown":
 			m.viewport.PageDown()
+			return m, finalize(m, cmds)
+		case "ctrl+home":
+			m.viewport.GotoTop()
+			return m, finalize(m, cmds)
+		case "ctrl+end":
+			m.viewport.GotoBottom()
 			return m, finalize(m, cmds)
 		case "ctrl+z":
 			return m, tea.Suspend
@@ -853,6 +866,10 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// The MCP manager is modal while open: keys navigate it.
 		if m.mcp != nil {
 			return m.handleMCPManagerKey(msg)
+		}
+		// The destructive /clear confirmation is modal while open.
+		if m.clearConfirm != nil {
+			return m.handleClearConfirmKey(msg)
 		}
 		// The skill picker is modal while open: keys navigate it.
 		if m.skillPick != nil {
@@ -1004,12 +1021,9 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			cmds = append(cmds, pasteClipboard())
 			return m, finalize(m, cmds)
-		case "ctrl+y":
-			if m.state == tuiRunning {
-				return m, nil
-			}
-			cmds = append(cmds, pasteClipboardImage())
-			return m, finalize(m, cmds)
+		case "ctrl+y", "super+y", "meta+y":
+			m.toggleYoloMode()
+			return m, nil
 		case "ctrl+o":
 			m.toggleVerboseReasoning(m.state != tuiRunning)
 			return m, finalize(m, cmds)
@@ -1017,8 +1031,8 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.toggleShellOutput()
 			return m, finalize(m, cmds)
 		case "shift+tab":
-			// Cycle auto → plan → YOLO; allowed mid-turn so the user can flip the
-			// gate while a run is in flight (the controller's mode is atomic).
+			// Shift+Tab toggles Plan only. Tool approval stays on its own axis:
+			// Ask/Auto are explicit choices, and YOLO is a separate Ctrl+Y toggle.
 			m.cycleMode()
 			return m, nil
 		case "enter":
@@ -1447,7 +1461,7 @@ func (m chatTUI) bottomRows() int {
 // reserve rows for a composer that cannot receive input, leaving a confusing
 // blank/bordered area at the bottom of the TUI.
 func (m chatTUI) hideComposer() bool {
-	if m.mcp != nil || m.mcpImport != nil || m.skillPick != nil || m.resumePick != nil || m.rewind != nil || m.pendingApproval != nil {
+	if m.mcp != nil || m.clearConfirm != nil || m.mcpImport != nil || m.skillPick != nil || m.resumePick != nil || m.rewind != nil || m.pendingApproval != nil {
 		return true
 	}
 	return m.chooser != nil && !m.chooser.typing
@@ -1464,6 +1478,9 @@ func (m chatTUI) transcriptHeight() int {
 
 func (m chatTUI) renderMainManager() string {
 	if card := m.renderMCPManager(); card != "" {
+		return card
+	}
+	if card := m.renderClearConfirm(); card != "" {
 		return card
 	}
 	return m.renderSkillPicker()
@@ -1486,6 +1503,8 @@ func (m chatTUI) renderMainManagerFooter() string {
 	switch {
 	case m.mcp != nil:
 		hint = m.mcp.footerHint()
+	case m.clearConfirm != nil:
+		hint = "Enter confirm · y clear · n/Esc cancel"
 	case m.skillPick != nil:
 		hint = m.skillPickerFooterHint()
 	}
@@ -1974,59 +1993,40 @@ func flushableMarkdownPrefix(buf string) string {
 const planApprovalTool = "exit_plan_mode"
 
 // handleApprovalKey resolves a pending approval from a keystroke and re-arms the
-// listener. 1/y/Enter allows once, 2/a allows for the rest of the session, and
-// n/Esc denies. Bash approvals with a safe prefix use 2/a for the prefix
-// session grant and 3/p for the persisted prefix. For standard approvals, 3/p
-// writes an "always allow" rule to the config file.
+// listener. 1/y/Enter allows once, 2/a allows for the rest of the session,
+// 3/p writes an "always allow" rule to the config file, and n/Esc denies.
 // Ctrl-C cancels the whole turn via the run context. For a plan approval
 // (planApprovalTool), allowing also drops the local [plan] tag — the
 // controller turns plan mode off on its side.
 func (m chatTUI) handleApprovalKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	answer := func(allow, session, persist bool, scope string) (tea.Model, tea.Cmd) {
+	answer := func(allow, session, persist bool) (tea.Model, tea.Cmd) {
 		if allow && m.pendingApproval.Tool == planApprovalTool {
 			m.planMode = false
 		}
-		m.ctrl.ApproveWithScope(m.pendingApproval.ID, allow, session, persist, scope)
+		m.ctrl.Approve(m.pendingApproval.ID, allow, session, persist)
 		m.pendingApproval = nil
-		return m, nil // the next ApprovalRequest / event arrives on eventCh
+		return m, nil
 	}
-	hasBashPrefix := m.pendingApproval.Tool == "bash" && permission.BashCommandPrefix(m.pendingApproval.Subject) != ""
 	switch msg.String() {
 	case "ctrl+c":
-		m.ctrl.Cancel() // cancels the run; the approver unblocks via ctx.Done()
-		return answer(false, false, false, permission.ApprovalScopeExact)
+		m.ctrl.Cancel()
+		return answer(false, false, false)
 	case "enter":
-		return answer(true, false, false, permission.ApprovalScopeExact)
+		return answer(true, false, false)
 	case "esc":
-		return answer(false, false, false, permission.ApprovalScopeExact)
+		return answer(false, false, false)
 	}
 	switch strings.ToLower(msg.String()) {
 	case "y", "1":
-		return answer(true, false, false, permission.ApprovalScopeExact)
+		return answer(true, false, false)
 	case "a", "2":
-		if hasBashPrefix {
-			return answer(true, true, false, permission.ApprovalScopePrefix) // prefix session grant
-		}
-		return answer(true, true, false, permission.ApprovalScopeExact) // session grant
-	case "3":
-		if hasBashPrefix {
-			return answer(true, true, true, permission.ApprovalScopePrefix) // persist prefix to config
-		}
-		return answer(true, true, true, permission.ApprovalScopeExact) // persist to config
-	case "p":
-		if hasBashPrefix {
-			return answer(true, true, true, permission.ApprovalScopePrefix) // persist prefix to config
-		}
-		return answer(true, true, true, permission.ApprovalScopeExact) // persist to config
-	case "4":
-		if hasBashPrefix {
-			return answer(false, false, false, permission.ApprovalScopeExact)
-		}
-		return answer(false, false, false, permission.ApprovalScopeExact)
-	case "n", "5":
-		return answer(false, false, false, permission.ApprovalScopeExact)
+		return answer(true, true, false)
+	case "3", "p":
+		return answer(true, true, true)
+	case "4", "n":
+		return answer(false, false, false)
 	}
-	return m, nil // ignore anything else while awaiting a decision
+	return m, nil
 }
 
 var (
@@ -2104,9 +2104,9 @@ func (m chatTUI) View() tea.View {
 	case shellMode:
 		status = "  " + modeTag + " · " + i18n.M.ShellModeHint
 	case m.ctrl.AutoApproveTools():
-		status = "  " + modeTag + " · " + i18n.M.ChatStatusYoloIdle + " " + dim("("+i18n.M.ChatStatusCycleHint+")")
+		status = "  " + modeTag + " · " + i18n.M.ChatStatusYoloIdle + " " + dim("("+m.cycleHint()+")")
 	default:
-		status = "  " + modeTag + " · " + i18n.M.ChatStatusIdle + " " + dim("("+i18n.M.ChatStatusCycleHint+")")
+		status = "  " + modeTag + " · " + i18n.M.ChatStatusIdle + " " + dim("("+m.cycleHint()+")")
 	}
 	if et := m.effortTag(); et != "" {
 		status += " · " + et
@@ -2416,11 +2416,11 @@ func (m chatTUI) renderApprovalBanner() string {
 	if subj != "" {
 		subj = " " + truncateSubject(subj, w)
 	}
-	exactSessionRule := permission.SessionGrantRuleForScope(m.pendingApproval.Tool, m.pendingApproval.Subject, permission.ApprovalScopeExact)
-	exactPersistentRule := permission.RememberRuleForScope(m.pendingApproval.Tool, m.pendingApproval.Subject, permission.ApprovalScopeExact)
+	exactSessionRule := permission.SessionGrantRuleForScope(m.pendingApproval.Tool, m.pendingApproval.Subject)
+	exactPersistentRule := permission.RememberRuleForScope(m.pendingApproval.Tool, m.pendingApproval.Subject)
 	choices := fmt.Sprintf(i18n.M.ToolApprovalChoices, exactSessionRule, exactPersistentRule)
 	if m.pendingApproval.Tool == "bash" && permission.BashCommandPrefix(m.pendingApproval.Subject) != "" {
-		prefixRule := permission.RememberRuleForScope(m.pendingApproval.Tool, m.pendingApproval.Subject, permission.ApprovalScopePrefix)
+		prefixRule := permission.RememberRuleForScope(m.pendingApproval.Tool, m.pendingApproval.Subject)
 		choices = fmt.Sprintf(i18n.M.BashPrefixChoices, prefixRule, prefixRule)
 	}
 	text := fmt.Sprintf(i18n.M.ToolApprovalPromptFmt, name, subj, detail, choices)
@@ -2840,9 +2840,8 @@ func pastedFileRef(content string) (string, bool) {
 	return "@" + path, true
 }
 
-// cycleMode toggles plan mode (Shift+Tab), mirroring the desktop composer.
-// YOLO/full access is controlled explicitly by the startup flag/runtime binding
-// so the shortcut never crosses a permission boundary.
+// cycleMode handles the Shift+Tab mode gesture. It toggles Plan only; tool
+// approval modes stay on their own axis.
 func (m *chatTUI) cycleMode() {
 	m.planMode = !m.planMode
 	if m.planMode {
@@ -2851,15 +2850,71 @@ func (m *chatTUI) cycleMode() {
 	m.ctrl.SetPlanMode(m.planMode)
 }
 
+func (m chatTUI) desktopShortcutLayout() bool {
+	return m.cfg != nil && m.cfg.UIShortcutLayout() == "desktop"
+}
+
+func (m chatTUI) cycleHint() string {
+	return i18n.M.ChatStatusCycleHint
+}
+
+func (m *chatTUI) toggleYoloMode() {
+	if m.ctrl == nil {
+		return
+	}
+	if m.ctrl.ToolApprovalMode() == control.ToolApprovalYolo {
+		restore := m.yoloRestoreToolApprovalMode
+		if restore != control.ToolApprovalAuto {
+			restore = control.ToolApprovalAsk
+		}
+		m.ctrl.SetToolApprovalMode(restore)
+		m.yoloRestoreToolApprovalMode = ""
+		return
+	}
+	restore := m.ctrl.ToolApprovalMode()
+	if restore != control.ToolApprovalAuto {
+		restore = control.ToolApprovalAsk
+	}
+	m.yoloRestoreToolApprovalMode = restore
+	m.ctrl.SetToolApprovalMode(control.ToolApprovalYolo)
+}
+
 func (m chatTUI) modeTagText() string {
 	goalMode := strings.TrimSpace(m.ctrl.Goal()) != "" && m.ctrl.GoalStatus() == control.GoalStatusRunning
+	toolApprovalMode := m.ctrl.ToolApprovalMode()
+	if m.desktopShortcutLayout() {
+		switch {
+		case m.planMode && toolApprovalMode == control.ToolApprovalYolo:
+			return "Plan+YOLO"
+		case goalMode && toolApprovalMode == control.ToolApprovalYolo:
+			return "Goal+YOLO"
+		case toolApprovalMode == control.ToolApprovalYolo:
+			return "YOLO"
+		case m.planMode:
+			return "Plan"
+		case goalMode && toolApprovalMode == control.ToolApprovalAuto:
+			return "Goal+Auto"
+		case goalMode:
+			return "Goal"
+		case toolApprovalMode == control.ToolApprovalAuto:
+			return "Auto"
+		default:
+			return "Ask"
+		}
+	}
 	switch {
-	case m.planMode && m.ctrl.AutoApproveTools():
+	case m.planMode && toolApprovalMode == control.ToolApprovalYolo:
 		return "Plan+YOLO"
-	case goalMode && m.ctrl.AutoApproveTools():
+	case m.planMode && toolApprovalMode == control.ToolApprovalAuto:
+		return "Plan+Approve"
+	case goalMode && toolApprovalMode == control.ToolApprovalYolo:
 		return "Goal+YOLO"
-	case m.ctrl.AutoApproveTools():
+	case goalMode && toolApprovalMode == control.ToolApprovalAuto:
+		return "Goal+Approve"
+	case toolApprovalMode == control.ToolApprovalYolo:
 		return "YOLO"
+	case toolApprovalMode == control.ToolApprovalAuto:
+		return "Auto+Approve"
 	case m.planMode:
 		return "Plan"
 	case goalMode:
@@ -2871,6 +2926,10 @@ func (m chatTUI) modeTagText() string {
 
 func (m *chatTUI) toggleVerboseReasoning(notify bool) {
 	m.showReasoning = !m.showReasoning
+	if m.cfg != nil {
+		_ = m.cfg.SetShowReasoning(m.showReasoning)
+		_ = m.cfg.Save()
+	}
 	if !notify {
 		return
 	}
@@ -3167,21 +3226,18 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 		// guidance steering what the summary keeps.
 		focus := strings.TrimSpace(strings.TrimPrefix(input, cmd))
 		return func() tea.Msg { return compactDoneMsg{err: m.ctrl.Compact(context.Background(), focus)} }
-	case "/new", "/clear":
+	case "/new":
 		m.echoLocalCommand(input)
 		if err := m.ctrl.NewSession(); err != nil {
 			m.notice(fmt.Sprintf("%s: %v", i18n.M.SlashNewFailed, err))
 			return nil
 		}
-		// Native scrollback keeps the old transcript; mark the fork with a fresh
-		// banner and reset live state.
-		m.pending.Reset()
-		m.reasoning.Reset()
-		m.todoArgs = ""
-		m.chooser = nil
-		m.commitLine("")
-		m.commitLine(strings.TrimRight(renderTUIBanner(m.label, "", m.width), "\n"))
+		// Native scrollback keeps the old transcript; mark the fork with a fresh banner.
+		m.resetFreshContextView(false)
 		m.notice(i18n.M.SlashNewDone)
+	case "/clear":
+		m.echoLocalCommand(input)
+		m.clearConfirm = &clearConfirm{confirm: 1}
 	case "/resume":
 		m.runResumeCommand(input)
 	case "/todo":
@@ -3217,6 +3273,12 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 	case "/model":
 		m.echoLocalCommand(input)
 		m.runModelSubcommand(input)
+		if m.pendingModelSwitch != nil {
+			return m.pendingModelSwitch
+		}
+	case "/provider":
+		m.echoLocalCommand(input)
+		m.runProviderCommand(input)
 		if m.pendingModelSwitch != nil {
 			return m.pendingModelSwitch
 		}

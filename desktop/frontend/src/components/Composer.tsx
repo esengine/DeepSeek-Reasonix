@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ClipboardEvent, DragEvent, KeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
-import { ArrowUp, Eye, FileText, Folder, List, MessageSquare, Plus, Search, Shield, ShieldAlert, ShieldCheck, Square, Target, Trash2, X } from "lucide-react";
+import { ArrowUp, Check, Eye, FileText, Folder, Gauge, List, MessageSquare, MoreHorizontal, Search, Shield, ShieldAlert, ShieldCheck, SlidersHorizontal, Square, Target, Trash2, X } from "lucide-react";
 import { asArray } from "../lib/array";
+import { filterAtMatches } from "../lib/atMatches";
 import { DedupIndex, sha256 } from "../lib/attachDedup";
 import { app, onFilesDropped } from "../lib/bridge";
 import { SPINNER_WORDS, useI18n } from "../lib/i18n";
 import { clearLayoutSize, loadOptionalLayoutSize, saveLayoutSize } from "../lib/layoutPreferences";
+import { useToast } from "../lib/toast";
 import { type CollaborationMode, type CommandInfo, type ComposerInsertRequest, type DirEntry, type EffortInfo, type HistoryMessage, type Mode, type SessionMeta, type SessionReference, type SlashArgItem, type SlashArgsResult, type ToolApprovalMode } from "../lib/types";
 import {
   formatWorkspaceReference,
@@ -102,6 +104,50 @@ function sortComposerAttachments(items: Attachment[]): Attachment[] {
 
 function workspaceReferenceKey(ref: WorkspaceReference): string {
   return `${ref.isDir ? "dir" : "file"}:${ref.path}`;
+}
+
+function fileKey(file: File): string {
+  return `${file.name}:${file.type}:${file.size}:${file.lastModified}`;
+}
+
+function clipboardFiles(data: DataTransfer): File[] {
+  const files = Array.from(data.files);
+  const seen = new Set(files.map(fileKey));
+  for (const item of Array.from(data.items)) {
+    if (item.kind !== "file") continue;
+    const file = item.getAsFile();
+    if (!file) continue;
+    const key = fileKey(file);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    files.push(file);
+  }
+  return files;
+}
+
+function clipboardHasImageHint(data: DataTransfer): boolean {
+  const imageType = (value: string) => {
+    const type = value.toLowerCase();
+    return type.startsWith("image/") || type.includes("png") || type.includes("jpeg") || type.includes("jpg") || type.includes("tiff");
+  };
+  return Array.from(data.items).some((item) => imageType(item.type)) || Array.from(data.types).some(imageType);
+}
+
+function isPasteShortcut(e: KeyboardEvent<HTMLTextAreaElement>): boolean {
+  return e.key.toLowerCase() === "v" && (e.metaKey || e.ctrlKey) && !e.altKey;
+}
+
+function isYoloToggleShortcut(e: KeyboardEvent<HTMLTextAreaElement>): boolean {
+  return e.key.toLowerCase() === "y" && (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey;
+}
+
+async function dataURLHash(dataUrl: string): Promise<string> {
+  try {
+    const res = await fetch(dataUrl);
+    return sha256(await res.blob());
+  } catch {
+    return "";
+  }
 }
 
 function composerMaxHeight(): number {
@@ -287,6 +333,7 @@ export function Composer({
   onSetMode,
   onSetCollaborationMode,
   onSetToolApprovalMode,
+  onToggleYoloApprovalMode,
   onSetGoal,
   onClearGoal,
   onSwitchModel,
@@ -316,6 +363,7 @@ export function Composer({
   onSetMode: (mode: Mode) => void;
   onSetCollaborationMode: (mode: CollaborationMode) => void;
   onSetToolApprovalMode: (mode: ToolApprovalMode) => void;
+  onToggleYoloApprovalMode: () => void;
   onSetGoal: (goal: string) => void;
   onClearGoal: () => void;
   onSwitchModel: (name: string) => void;
@@ -334,6 +382,7 @@ export function Composer({
   transientDismissSignal?: number;
 }) {
   const { t, locale } = useI18n();
+  const { showToast } = useToast();
   const now = useTick(running);
   const [text, setText] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -352,6 +401,8 @@ export function Composer({
   const [textareaAutoOverflow, setTextareaAutoOverflow] = useState(false);
   const [intentMenuOpen, setIntentMenuOpen] = useState(false);
   const [intentMenuClosing, setIntentMenuClosing] = useState(false);
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const [moreMenuClosing, setMoreMenuClosing] = useState(false);
   const [showPastChats, setShowPastChats] = useState(false);
   const [pastChats, setPastChats] = useState<SessionMeta[]>([]);
   const [pastChatQuery, setPastChatQuery] = useState("");
@@ -362,7 +413,9 @@ export function Composer({
   const taRef = useRef<HTMLTextAreaElement>(null);
   const composerCardRef = useRef<HTMLDivElement>(null);
   const intentMenuAnchorRef = useRef<HTMLButtonElement>(null);
+  const moreMenuAnchorRef = useRef<HTMLButtonElement>(null);
   const intentCloseTimerRef = useRef<number | null>(null);
+  const moreCloseTimerRef = useRef<number | null>(null);
   const wasRunning = useRef(running);
   const composingRef = useRef(false);
   const lastCompositionEndAt = useRef(0);
@@ -370,12 +423,21 @@ export function Composer({
   const consumedInsertIdRef = useRef(0);
   const lastTransientDismissSignal = useRef(transientDismissSignal);
   const submittingRef = useRef(false);
+  const nativeClipboardPasteTimerRef = useRef<number | null>(null);
   // Snapshot of the current cwd so async callbacks (openPastChats) can detect
   // workspace switches and discard stale responses (issue #3601).
   const cwdRef = useRef(cwd);
   cwdRef.current = cwd;
   const attachmentDedupRef = useRef(new DedupIndex());
   const attachmentDedupKeysRef = useRef<Record<string, AttachmentDedupKey>>({});
+
+  const clearNativeClipboardPasteTimer = () => {
+    if (nativeClipboardPasteTimerRef.current === null) return;
+    window.clearTimeout(nativeClipboardPasteTimerRef.current);
+    nativeClipboardPasteTimerRef.current = null;
+  };
+
+  useEffect(() => () => clearNativeClipboardPasteTimer(), []);
 
   useEffect(() => {
     if (wasRunning.current && !running && text.trim() === "") {
@@ -407,7 +469,7 @@ export function Composer({
   // by 120ms so rapid typing doesn't flood the backend with IPC calls — the
   // menu only updates after the user pauses.
   const [argRes, setArgRes] = useState<SlashArgsResult | null>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => {
     if (!text.startsWith("/") || !/\s/.test(text)) {
       setArgRes(null);
@@ -533,13 +595,7 @@ export function Composer({
   const atMatches = useMemo(
     () => {
       if (atRaw === null) return [];
-      const local = entries.filter((e) => e.name.toLowerCase().includes(atFrag));
-      const seen = new Set(local.map((e) => e.name));
-      const searched = searchEntries.filter((e) => {
-        const basename = e.name.split("/").pop()?.toLowerCase() ?? "";
-        return basename.includes(atFrag) && !seen.has(e.name);
-      });
-      return [...local, ...searched];
+      return filterAtMatches(entries, searchEntries, atFrag);
     },
     [atRaw, atFrag, entries, searchEntries],
   );
@@ -723,6 +779,32 @@ export function Composer({
 
   useEffect(() => () => clearIntentCloseTimer(), [clearIntentCloseTimer]);
 
+  const clearMoreCloseTimer = useCallback(() => {
+    if (moreCloseTimerRef.current === null) return;
+    window.clearTimeout(moreCloseTimerRef.current);
+    moreCloseTimerRef.current = null;
+  }, []);
+
+  const openMoreMenu = useCallback(() => {
+    clearMoreCloseTimer();
+    setMoreMenuClosing(false);
+    setMoreMenuOpen(true);
+  }, [clearMoreCloseTimer]);
+
+  const closeMoreMenu = useCallback((afterClose?: () => void) => {
+    clearMoreCloseTimer();
+    setMoreMenuClosing(true);
+    window.requestAnimationFrame(() => setMoreMenuOpen(false));
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    moreCloseTimerRef.current = window.setTimeout(() => {
+      moreCloseTimerRef.current = null;
+      setMoreMenuClosing(false);
+      afterClose?.();
+    }, reduceMotion ? 0 : ANCHORED_POPOVER_CLOSE_MS);
+  }, [clearMoreCloseTimer]);
+
+  useEffect(() => () => clearMoreCloseTimer(), [clearMoreCloseTimer]);
+
   const fileDedupKey = async (file: File): Promise<AttachmentDedupKey> => ({
     hash: await sha256(file),
     source: `file:${file.name}:${file.size}:${file.lastModified}`,
@@ -796,7 +878,9 @@ export function Composer({
         const previewUrl = await app.AttachmentDataURL(path);
         rememberAttachment(path, key);
         setAttachments((prev) => [...prev, { path, previewUrl, displayName: file.name }]);
-      } catch {
+      } catch (error) {
+        console.warn("[composer] failed to attach pasted image", error);
+        showToast(t("composer.attachImageFailed"), "warn");
         // non-fatal: a failed image attach must not block normal text input
       } finally {
         setPendingPaste((n) => Math.max(0, n - 1));
@@ -831,6 +915,23 @@ export function Composer({
     void attachOtherFiles(files);
   };
 
+  const attachNativeClipboardImage = async (notifyOnError: boolean) => {
+    setPendingPaste((n) => n + 1);
+    try {
+      const path = await app.SaveClipboardImage();
+      const previewUrl = await app.AttachmentDataURL(path);
+      const key = { hash: await dataURLHash(previewUrl), source: `native-clipboard:${path}` };
+      if (attachmentDedupRef.current.seen(key.hash, key.source)) return;
+      rememberAttachment(path, key);
+      setAttachments((prev) => [...prev, { path, previewUrl }]);
+    } catch (error) {
+      console.warn("[composer] failed to read native clipboard image", error);
+      if (notifyOnError) showToast(t("composer.pasteImageFailed"), "warn");
+    } finally {
+      setPendingPaste((n) => Math.max(0, n - 1));
+    }
+  };
+
   // OS file drops arrive as absolute paths through the native bridge (the webview
   // withholds them from the HTML drop event); the kernel resolves each into a
   // workspace @reference or a stored attachment.
@@ -861,7 +962,8 @@ export function Composer({
   }, []);
 
   const onPaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
-    const files = Array.from(e.clipboardData.files);
+    clearNativeClipboardPasteTimer();
+    const files = clipboardFiles(e.clipboardData);
     if (files.length > 0) {
       e.preventDefault();
       attachFiles(files);
@@ -869,6 +971,12 @@ export function Composer({
     }
 
     const pasted = e.clipboardData.getData("text");
+    const hasImageHint = clipboardHasImageHint(e.clipboardData);
+    if (hasImageHint || pasted === "") {
+      e.preventDefault();
+      void attachNativeClipboardImage(hasImageHint);
+      return;
+    }
     if (!shouldFoldPaste(pasted)) return;
 
     e.preventDefault();
@@ -1246,11 +1354,25 @@ export function Composer({
     const composing = isImeKeyEvent(e, composingRef.current, lastCompositionEndAt.current);
     if (e.key === "Enter" && composing) return;
 
+    if (isPasteShortcut(e) && !composing) {
+      clearNativeClipboardPasteTimer();
+      nativeClipboardPasteTimerRef.current = window.setTimeout(() => {
+        nativeClipboardPasteTimerRef.current = null;
+        void attachNativeClipboardImage(false);
+      }, 160);
+    }
+
     // Shift+Tab toggles plan mode only. Tool access is deliberately changed via
     // the access menu so keyboard cycling never crosses a permission boundary.
     if (e.key === "Tab" && e.shiftKey && !composing) {
       e.preventDefault();
       onCycleMode();
+      return;
+    }
+
+    if (isYoloToggleShortcut(e) && !composing) {
+      e.preventDefault();
+      onToggleYoloApprovalMode();
       return;
     }
 
@@ -1357,6 +1479,15 @@ export function Composer({
       requestAnimationFrame(() => taRef.current?.focus());
     });
   };
+  const effortLevels = asArray(effort?.levels);
+  const currentEffort = effort?.current || "auto";
+  const hasEffort = Boolean(effort?.supported && effortLevels.length > 0);
+  const chooseEffortLevel = (level: string) => {
+    closeMoreMenu(() => {
+      if (level !== currentEffort) onSetEffort(level);
+      requestAnimationFrame(() => taRef.current?.focus());
+    });
+  };
   const runActivity = retry
     ? t("status.retrying", { attempt: retry.attempt, max: retry.max })
     : running && turnStartAt
@@ -1368,7 +1499,6 @@ export function Composer({
           return `${word}… ${fmtElapsed(elapsedMs)}${tok}`;
         })()
       : null;
-  const hasEffort = Boolean(effort?.supported);
   const composerMetaClass = [
     "composer-meta",
     hasEffort ? "composer-meta--has-effort" : "composer-meta--no-effort",
@@ -1424,6 +1554,37 @@ export function Composer({
             </span>
           </button>
         </div>
+      </AnchoredPopover>
+      <AnchoredPopover
+        open={moreMenuOpen && !disabled && !running}
+        closing={moreMenuClosing}
+        anchorRef={moreMenuAnchorRef}
+        onClose={() => closeMoreMenu()}
+        className="composer-access-menu composer-more-menu"
+        align="end"
+      >
+        {hasEffort && (
+          <div className="composer-access-menu__section">
+            <div className="composer-access-menu__label">{t("status.effortTitle")}</div>
+            <div className="composer-more-menu__items" role="listbox" aria-label={t("status.effortTitle")}>
+              {effortLevels.map((level) => (
+                <button
+                  key={level}
+                  type="button"
+                  role="option"
+                  aria-selected={level === currentEffort}
+                  className={`composer-more-menu__item${level === currentEffort ? " composer-more-menu__item--active" : ""}`}
+                  onClick={() => chooseEffortLevel(level)}
+                  disabled={running}
+                >
+                  <Gauge size={14} />
+                  <span>{level}</span>
+                  {level === currentEffort && <Check size={13} />}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </AnchoredPopover>
       {menuMode === "slash" && (
         <SlashMenu items={slashMatches} activeIndex={active} onPick={pickCommand} onHover={setActive} />
@@ -1775,9 +1936,10 @@ export function Composer({
                   disabled={disabled || running}
                   aria-haspopup="menu"
                   aria-expanded={intentMenuOpen && !intentMenuClosing}
+                  aria-label={t("composer.intentMenuTitle")}
                   title={intentMenuOpen || intentMenuClosing ? undefined : t("composer.intentMenuTitle")}
                 >
-                  <Plus size={17} />
+                  <SlidersHorizontal size={17} />
                 </button>
               </Tooltip>
               {planModeOn && (
@@ -1828,7 +1990,7 @@ export function Composer({
                   type="button"
                   className={`composer-modebar__item composer-modebar__item--ask${toolApprovalMode === "ask" ? " composer-modebar__item--active" : ""}`}
                   onClick={() => chooseApprovalMode("ask")}
-                  disabled={disabled || running}
+                  disabled={disabled}
                   aria-pressed={toolApprovalMode === "ask"}
                   title={t("composer.accessAskTitle")}
                 >
@@ -1839,7 +2001,7 @@ export function Composer({
                   type="button"
                   className={`composer-modebar__item composer-modebar__item--auto${toolApprovalMode === "auto" ? " composer-modebar__item--active" : ""}`}
                   onClick={() => chooseApprovalMode("auto")}
-                  disabled={disabled || running}
+                  disabled={disabled}
                   aria-pressed={toolApprovalMode === "auto"}
                   title={t("composer.accessAutoTitle")}
                 >
@@ -1850,7 +2012,7 @@ export function Composer({
                   type="button"
                   className={`composer-modebar__item composer-modebar__item--yolo${toolApprovalMode === "yolo" ? " composer-modebar__item--active" : ""}`}
                   onClick={() => chooseApprovalMode("yolo")}
-                  disabled={disabled || running}
+                  disabled={disabled}
                   aria-pressed={toolApprovalMode === "yolo"}
                   title={t("composer.accessYoloTitle")}
                 >
@@ -1862,9 +2024,29 @@ export function Composer({
             <div className="composer-meta__control composer-meta__control--model">
               <ModelSwitcher label={modelLabel} tabId={tabId} onPick={onSwitchModel} />
             </div>
-            {effort?.supported && (
+            {hasEffort && (
               <div className="composer-meta__control composer-meta__control--effort">
                 <EffortSwitcher effort={effort} disabled={running} onPick={onSetEffort} />
+              </div>
+            )}
+            {hasEffort && (
+              <div className="composer-meta__control composer-meta__control--more">
+                <Tooltip label={t("composer.moreControls")} disabled={moreMenuOpen || moreMenuClosing}>
+                  <button
+                    ref={moreMenuAnchorRef}
+                    type="button"
+                    className={`composer-more-trigger${moreMenuOpen || moreMenuClosing ? " composer-more-trigger--open" : ""}`}
+                    onClick={() => (moreMenuOpen || moreMenuClosing ? closeMoreMenu() : openMoreMenu())}
+                    disabled={disabled || running}
+                    aria-haspopup="menu"
+                    aria-expanded={moreMenuOpen && !moreMenuClosing}
+                    aria-label={t("composer.moreControls")}
+                    title={moreMenuOpen || moreMenuClosing ? undefined : t("composer.moreControls")}
+                  >
+                    <MoreHorizontal size={16} />
+                    <span>{t("topicBar.more")}</span>
+                  </button>
+                </Tooltip>
               </div>
             )}
           </div>
