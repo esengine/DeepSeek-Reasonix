@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "astro dev",
+    "prebuild": "node scripts/fetch-community.mjs",
     "build": "astro build",
     "preview": "astro preview"
   },

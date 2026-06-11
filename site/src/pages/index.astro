@@ -1,41 +1,15 @@
 ---
 import Base from '../layouts/Base.astro';
-import fallback from '../data/contributors.json';
+import community from '../data/community.json';
 
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
-const R2BASE = 'https://pub-147fb53b9c1e4bbf891a257968619ea7.r2.dev';
-const R2 = `${R2BASE}/latest`;
+const R2 = 'https://dl.reasonix.io/latest';
 const repo = 'https://github.com/esengine/DeepSeek-Reasonix';
-const api = 'https://api.github.com/repos/esengine/DeepSeek-Reasonix';
 
 let goVer = '1.1.0';
 try {
   const r = await fetch(`${R2}/latest.json`);
   if (r.ok) { const d = await r.json(); goVer = String(d.version || '').replace(/^v/, '') || goVer; }
-} catch {}
-
-const headers = { 'User-Agent': 'reasonix-site', 'Accept': 'application/vnd.github+json' };
-const token = process.env.GITHUB_TOKEN;
-if (token) headers.Authorization = `Bearer ${token}`;
-
-let community = fallback;
-try {
-  const cr = await fetch(`${api}/contributors?per_page=100`, { headers });
-  if (cr.ok) {
-    const list = await cr.json();
-    const humans = list
-      .filter((c) => c.type === 'User')
-      .map((c) => ({ login: c.login, avatar: String(c.avatar_url).split('?')[0], url: c.html_url, c: c.contributions }));
-    if (humans.length) community = { ...community, contributors: humans.length, list: humans };
-  }
-} catch {}
-try {
-  const rr = await fetch(api, { headers });
-  if (rr.ok) { const d = await rr.json(); if (typeof d.stargazers_count === 'number') community = { ...community, stars: d.stargazers_count }; }
-} catch {}
-try {
-  const pr = await fetch('https://api.github.com/search/issues?q=repo:esengine/DeepSeek-Reasonix+is:pr+is:merged&per_page=1', { headers });
-  if (pr.ok) { const d = await pr.json(); if (typeof d.total_count === 'number') community = { ...community, mergedPrs: d.total_count }; }
 } catch {}
 
 const fmtN = (n) => Number(n).toLocaleString('en-US');
@@ -239,7 +213,7 @@ const ld = {
         <span class="crew-set">
           {rowA.map((c, i) => (
             <a class={avClass(i)} data-h={`@${c.login}`} href={c.url} target="_blank" rel="noreferrer" aria-label={c.login}>
-              <img src={`${c.avatar}?s=120`} alt={c.login} loading="lazy" width="60" height="60" />
+              <img src={c.avatar} alt={c.login} loading="lazy" width="60" height="60" />
             </a>
           ))}
         </span>
@@ -248,7 +222,7 @@ const ld = {
         <span class="crew-set">
           {rowB.map((c, i) => (
             <a class={avClass(i + 3)} data-h={`@${c.login}`} href={c.url} target="_blank" rel="noreferrer" aria-label={c.login}>
-              <img src={`${c.avatar}?s=120`} alt={c.login} loading="lazy" width="60" height="60" />
+              <img src={c.avatar} alt={c.login} loading="lazy" width="60" height="60" />
             </a>
           ))}
           <a class="av you" data-h="this could be you · 虚位以待" href={`${repo}/issues`} target="_blank" rel="noreferrer">+</a>
