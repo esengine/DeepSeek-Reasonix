@@ -3453,7 +3453,13 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 		m.notice(i18n.M.SlashNewDone)
 	case "/clear":
 		m.echoLocalCommand(input)
-		m.clearConfirm = &clearConfirm{confirm: 1}
+		if err := m.ctrl.ClearSession(); err != nil {
+			m.notice(fmt.Sprintf("%s: %v", i18n.M.SlashClearFailed, err))
+			return nil
+		}
+		m.resetFreshContextView(true)
+		m.notice(i18n.M.SlashClearDone)
+		return tea.ClearScreen
 	case "/resume":
 		m.runResumeCommand(input)
 	case "/todo":
