@@ -259,6 +259,9 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 				Args:              []string{"serve", "--mcp"},
 				Dir:               root,
 				ReadOnlyToolNames: codegraph.ReadOnlyToolNames(),
+				// The daemon walks and indexes the whole tree; below-normal
+				// priority keeps it from starving the user's machine (#3797).
+				LowPriority: true,
 			}
 			warm := codegraph.Initialized(root)
 			if err := codegraph.EnsureInit(ctx, bin, root); err != nil {

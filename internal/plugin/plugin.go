@@ -56,6 +56,9 @@ type Spec struct {
 	// instead of the redundant "mcp__codegraph__codegraph_context". The original
 	// raw name is preserved for MCP protocol calls.
 	StripRawPrefix string
+	// LowPriority runs a stdio subprocess below normal scheduling priority, for
+	// background indexers (CodeGraph) that must not starve the user's machine.
+	LowPriority bool
 }
 
 // transport carries JSON-RPC messages to and from one MCP server. call sends a
