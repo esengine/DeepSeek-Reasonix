@@ -99,6 +99,37 @@ func TestTailStartSmallSession(t *testing.T) {
 	}
 }
 
+func TestPinnedPrefixLen(t *testing.T) {
+	sys := provider.Message{Role: provider.RoleSystem}
+	small := provider.Message{Role: provider.RoleUser, Content: "do X with token T"}
+	big := provider.Message{Role: provider.RoleUser, Content: strings.Repeat("x", 100000)}
+	sum := provider.Message{Role: provider.RoleUser, Content: summaryTagOpen + "\ndigest\n" + summaryTagClose}
+	as := provider.Message{Role: provider.RoleAssistant, Content: "a"}
+
+	newA := func(win int) *Agent {
+		return New(&fakeProvider{}, tool.NewRegistry(), &Session{}, Options{ContextWindow: win}, event.Discard)
+	}
+	cases := []struct {
+		name string
+		win  int
+		msgs []provider.Message
+		want int
+	}{
+		{"pins-system-and-small-task", 0, []provider.Message{sys, small, as, as}, 2},
+		{"also-pins-prior-summaries", 0, []provider.Message{sys, small, sum, sum, as}, 4},
+		{"large-first-turn-stays-foldable", 0, []provider.Message{sys, big, as, as}, 1},
+		{"tiny-window-wont-pin", 10, []provider.Message{sys, small, as, as}, 1},
+		{"summary-is-not-the-task-turn", 0, []provider.Message{sys, sum, as}, 2},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := newA(tc.win).pinnedPrefixLen(tc.msgs); got != tc.want {
+				t.Errorf("pinnedPrefixLen = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestCompactReplacesHistory(t *testing.T) {
 	prov := &fakeProvider{reply: "- goal: do X\n- changed file Y"}
 	bigStep := strings.Repeat("important implementation detail ", 80)
@@ -121,22 +152,26 @@ func TestCompactReplacesHistory(t *testing.T) {
 		t.Fatalf("rewrite version = %d, want 1", got)
 	}
 
-	// system + summary + last 2 verbatim.
-	if got := len(sess.Messages); got != 4 {
-		t.Fatalf("len = %d, want 4: %+v", got, sess.Messages)
+	// system + pinned first user turn + summary + last 2 verbatim.
+	if got := len(sess.Messages); got != 5 {
+		t.Fatalf("len = %d, want 5: %+v", got, sess.Messages)
 	}
 	if sess.Messages[0].Role != provider.RoleSystem {
 		t.Errorf("message 0 = %s, want system", sess.Messages[0].Role)
 	}
-	summary := sess.Messages[1]
+	if task := sess.Messages[1]; task.Role != provider.RoleUser || !strings.HasPrefix(task.Content, "task ") {
+		t.Errorf("first user turn not pinned verbatim: %+v", task)
+	}
+	summary := sess.Messages[2]
 	if summary.Role != provider.RoleUser || !strings.Contains(summary.Content, "Summary of earlier") || !strings.Contains(summary.Content, "do X") {
 		t.Errorf("summary message = %+v", summary)
 	}
-	if sess.Messages[2].Content != "next" || sess.Messages[3].Content != "ok" {
-		t.Errorf("recent tail not preserved: %+v", sess.Messages[2:])
+	if sess.Messages[3].Content != "next" || sess.Messages[4].Content != "ok" {
+		t.Errorf("recent tail not preserved: %+v", sess.Messages[3:])
 	}
 
-	// The 4 dropped originals were archived, one JSON object per line.
+	// The 3 dropped originals were archived, one JSON object per line (the task
+	// turn is pinned, not folded, so it is not among them).
 	entries, err := os.ReadDir(dir)
 	if err != nil || len(entries) != 1 {
 		t.Fatalf("archive dir: entries=%d err=%v", len(entries), err)
@@ -145,8 +180,8 @@ func TestCompactReplacesHistory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read archive: %v", err)
 	}
-	if lines := strings.Count(strings.TrimSpace(string(data)), "\n") + 1; lines != 4 {
-		t.Errorf("archived %d lines, want 4:\n%s", lines, data)
+	if lines := strings.Count(strings.TrimSpace(string(data)), "\n") + 1; lines != 3 {
+		t.Errorf("archived %d lines, want 3:\n%s", lines, data)
 	}
 	if !strings.HasSuffix(entries[0].Name(), ".jsonl") {
 		t.Errorf("archive name = %q, want .jsonl", entries[0].Name())
@@ -384,13 +419,16 @@ func TestMaybeCompactForceCeilingBypassesEconomics(t *testing.T) {
 	a := New(prov, tool.NewRegistry(), sess, Options{ContextWindow: 100, RecentKeep: 2, ArchiveDir: t.TempDir()}, event.Discard)
 
 	a.maybeCompact(context.Background(), &provider.Usage{PromptTokens: 90})
-	// The token-budgeted tail keeps "small old answer", next, ok, so only the
-	// single early message folds — force bypasses the economics skip and installs
-	// a summary at index 1, leaving the count at 5.
+	// The first user turn is pinned (index 1) and the token-budgeted tail keeps
+	// next, ok, so only "small old answer" folds — force bypasses the economics
+	// skip and installs a summary at index 2, leaving the count at 5.
 	if got := len(sess.Messages); got != 5 {
 		t.Fatalf("len = %d, want 5 after forced single-message fold: %+v", got, sess.Messages)
 	}
-	if !strings.Contains(sess.Messages[1].Content, "forced summary") {
+	if sess.Messages[1].Content != "small old request" {
+		t.Fatalf("first user turn not pinned verbatim: %+v", sess.Messages[1])
+	}
+	if !strings.Contains(sess.Messages[2].Content, "forced summary") {
 		t.Fatalf("forced compact did not install summary: %+v", sess.Messages)
 	}
 	if len(prov.got) == 0 {

@@ -121,13 +121,28 @@ func TestMaybeCompactPruneAvoidsFold(t *testing.T) {
 
 func TestMaybeCompactForceRatioStillFolds(t *testing.T) {
 	prov := &fakeProvider{reply: "summary"}
-	sess := pruneFixture(strings.Repeat("x", 5000))
+	// A big assistant turn in the foldable region (after the pinned task, before the
+	// recent tail) survives pruning — only tool results prune — so the forced fold
+	// has real content to compact while the task turn stays pinned verbatim.
+	sess := &Session{Messages: []provider.Message{
+		{Role: provider.RoleSystem, Content: "sys"},
+		{Role: provider.RoleUser, Content: "task"},
+		{Role: provider.RoleAssistant, Content: strings.Repeat("y", 5000)},
+		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "1", Name: "read_file", Arguments: "{}"}}},
+		{Role: provider.RoleTool, ToolCallID: "1", Name: "read_file", Content: strings.Repeat("x", 5000)},
+		{Role: provider.RoleAssistant, Content: "step done"},
+		{Role: provider.RoleUser, Content: "next"},
+		{Role: provider.RoleAssistant, Content: "ok"},
+	}}
 	a := New(prov, tool.NewRegistry(), sess, Options{ContextWindow: 1000, RecentKeep: 2, ArchiveDir: t.TempDir()}, event.Discard)
 
 	a.maybeCompact(context.Background(), &provider.Usage{PromptTokens: 950})
 
 	if prov.got == nil {
 		t.Fatal("force ratio crossed but summarizer never called")
+	}
+	if got := sess.Snapshot()[1].Content; got != "task" {
+		t.Errorf("first user turn not pinned verbatim: %.40q", got)
 	}
 	found := false
 	for _, m := range sess.Snapshot() {

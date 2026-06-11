@@ -20,14 +20,16 @@ import (
 // fraction of the window, so a huge window still compacts rarely while a small
 // one still lands below the trigger (which is what stops the re-compaction loop).
 const (
-	defaultSoftCompactRatio  = 0.5   // report growing context here, but keep the cache-stable prefix intact
-	defaultCompactRatio      = 0.8   // trigger: prompt at this fraction of the window compacts
-	defaultCompactForceRatio = 0.9   // force compaction at this high-water mark even for low-value folds
-	defaultCompactTarget     = 0.5   // safety cap: the kept tail never exceeds this fraction of the window
-	defaultTailTokens        = 16384 // verbatim recent-tail budget, in tokens
-	minRecentKeep            = 2     // never keep fewer recent messages than this
-	minCompactMessages       = 2     // skip compaction below this many compactable messages
-	fallbackTokPerChar       = 0.25  // ~4 chars/token, used before any usage is available to calibrate
+	defaultSoftCompactRatio   = 0.5   // report growing context here, but keep the cache-stable prefix intact
+	defaultCompactRatio       = 0.8   // trigger: prompt at this fraction of the window compacts
+	defaultCompactForceRatio  = 0.9   // force compaction at this high-water mark even for low-value folds
+	defaultCompactTarget      = 0.5   // safety cap: the kept tail never exceeds this fraction of the window
+	defaultTailTokens         = 16384 // verbatim recent-tail budget, in tokens
+	minRecentKeep             = 2     // never keep fewer recent messages than this
+	minCompactMessages        = 2     // skip compaction below this many compactable messages
+	fallbackTokPerChar        = 0.25  // ~4 chars/token, used before any usage is available to calibrate
+	maxPinnedFirstUserTokens  = 1500  // ceiling on pinning the first user turn verbatim; larger first turns (pasted content) stay foldable
+	pinnedFirstUserWindowFrac = 0.15  // and never pin a first turn worth more than this fraction of the window
 )
 
 // summaryTag wraps the compaction summary so the model can distinguish it from
@@ -315,16 +317,51 @@ func (a *Agent) SummarizeUpTo(ctx context.Context, toIdx int) error {
 	return nil
 }
 
-// planCompaction locates the region to summarize. head is the count of leading
-// messages preserved verbatim (the system prompt, if any); start is where the
-// preserved recent tail begins, so msgs[head:start] is compacted. The tail is
-// bounded by a token budget (not a message count), so a few large tool outputs
-// can't keep it above the trigger and re-fire compaction every turn. ok is false
-// when there is too little to compact.
-func (a *Agent) planCompaction(msgs []provider.Message, min int) (head, start int, ok bool) {
-	if len(msgs) > 0 && msgs[0].Role == provider.RoleSystem {
-		head = 1
+// isCompactionSummary reports whether m is a rolling summary from a prior fold.
+func isCompactionSummary(m provider.Message) bool {
+	return m.Role == provider.RoleUser &&
+		strings.HasPrefix(strings.TrimLeft(m.Content, "\n "), summaryTagOpen)
+}
+
+// pinnedPrefixLen counts the leading messages a fold keeps verbatim: the system
+// prompt, the first user turn (its task + stated facts/constraints) when it is
+// small enough to be a brief, and any prior summaries — so a fold never
+// summarizes the user's facts away, and a later fold never re-summarizes an
+// earlier summary into nothing (the drift that silently dropped user-stated facts
+// after the second compaction). A large first turn (pasted content) stays
+// foldable so pinning never starves the window.
+func (a *Agent) pinnedPrefixLen(msgs []provider.Message) int {
+	i := 0
+	if i < len(msgs) && msgs[i].Role == provider.RoleSystem {
+		i++
 	}
+	if i < len(msgs) && msgs[i].Role == provider.RoleUser && !isCompactionSummary(msgs[i]) && a.pinnableFirstUser(msgs[i]) {
+		i++
+	}
+	for i < len(msgs) && isCompactionSummary(msgs[i]) {
+		i++
+	}
+	return i
+}
+
+func (a *Agent) pinnableFirstUser(m provider.Message) bool {
+	budget := maxPinnedFirstUserTokens
+	if a.contextWindow > 0 {
+		if f := int(float64(a.contextWindow) * pinnedFirstUserWindowFrac); f < budget {
+			budget = f
+		}
+	}
+	return int(float64(msgChars(m))*a.tokPerChar()) <= budget
+}
+
+// planCompaction locates the region to summarize. head is the count of leading
+// messages preserved verbatim (see pinnedPrefixLen); start is where the preserved
+// recent tail begins, so msgs[head:start] is compacted. The tail is bounded by a
+// token budget (not a message count), so a few large tool outputs can't keep it
+// above the trigger and re-fire compaction every turn. ok is false when there is
+// too little to compact.
+func (a *Agent) planCompaction(msgs []provider.Message, min int) (head, start int, ok bool) {
+	head = a.pinnedPrefixLen(msgs)
 	if a.contextWindow > 0 {
 		budget := defaultTailTokens
 		if maxByWin := int(float64(a.contextWindow) * defaultCompactTarget); maxByWin < budget {
