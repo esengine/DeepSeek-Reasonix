@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
+import { Activity, CircleDollarSign, CircleGauge, Database, Layers, Percent, RefreshCw, Wallet, Zap } from "lucide-react";
 import { Tooltip } from "./Tooltip";
-import { useI18n } from "../lib/i18n";
+import { useI18n, type Translator } from "../lib/i18n";
 import { type BalanceInfo, type CollaborationMode, type ContextInfo, type JobView, type ToolApprovalMode, type WireUsage } from "../lib/types";
 
 // JobsChip is the status-bar background-jobs indicator: a count that opens an
@@ -100,6 +101,11 @@ function formatTokenCount(tokens?: number): string {
   return tokens.toLocaleString();
 }
 
+function formatTurnCount(turns: number | undefined, t: Translator): string {
+  if (typeof turns !== "number" || turns < 0) return "-";
+  return t(turns === 1 ? "history.turnOne" : "history.turnOther", { n: turns });
+}
+
 export function StatusBar({
   context,
   usage,
@@ -108,7 +114,9 @@ export function StatusBar({
   running,
   collaborationMode,
   toolApprovalMode,
+  sessionTurns,
   sessionTokens,
+  turnTokens,
   cost,
   currency,
   modelLabel,
@@ -120,7 +128,9 @@ export function StatusBar({
   running: boolean;
   collaborationMode: CollaborationMode;
   toolApprovalMode: ToolApprovalMode;
+  sessionTurns?: number;
   sessionTokens?: number;
+  turnTokens?: number;
   cost?: number;
   currency?: string;
   modelLabel?: string;
@@ -134,7 +144,9 @@ export function StatusBar({
   const avgPct = avgRate(usage);
   const jobsList = jobs ?? [];
   const costLabel = formatMoney(cost, currency);
+  const turnLabel = formatTurnCount(sessionTurns, t);
   const tokenLabel = formatTokenCount(sessionTokens);
+  const turnTokenLabel = formatTokenCount(turnTokens);
   const balanceLabel = balance?.available && balance.display ? balance.display : "-";
   const planMode = collaborationMode === "plan";
   const goalMode = collaborationMode === "goal";
@@ -150,35 +162,47 @@ export function StatusBar({
         </Tooltip>
       </div>
       <div className="statusbar__group statusbar__group--primary">
-        <Tooltip label={t("status.cacheTitle")}>
+        <Tooltip label={t("status.cacheTitle")} className="statusbar__metric statusbar__metric--cache">
           <span className="stat statusbar__cache">
-            <span className="stat__label">{t("status.cacheLabel")}</span>
+            <span className="stat__label stat__label--icon" aria-hidden="true"><Percent size={12} /></span>
             <b className={rateValueClass(nowPct) || undefined}>{nowPct !== null ? `${nowPct}%` : "-"}</b>
           </span>
         </Tooltip>
-        <Tooltip label={t("status.cacheAvgTitle")}>
+        <Tooltip label={t("status.cacheAvgTitle")} className="statusbar__metric statusbar__metric--avg">
           <span className="stat statusbar__avg">
-            <span className="stat__label">{t("status.cacheAvgLabel")}</span>
+            <span className="stat__label stat__label--icon" aria-hidden="true"><Activity size={12} /></span>
             <b className={rateValueClass(avgPct) || undefined}>{avgPct !== null ? `${avgPct}%` : "-"}</b>
           </span>
         </Tooltip>
-        <Tooltip label={t("status.sessionTokensTitle")}>
+        <Tooltip label={t("status.sessionTokensTitle")} className="statusbar__metric statusbar__metric--tokens">
           <span className="stat statusbar__tokens">
-            <span className="stat__label">{t("status.sessionTokensLabel")}</span>
+            <span className="stat__label stat__label--icon" aria-hidden="true"><Database size={12} /></span>
             <b className={tokenLabel === "-" ? "stat__value--empty" : undefined}>{tokenLabel}</b>
+          </span>
+        </Tooltip>
+        <Tooltip label={t("status.turnTokensTitle")} className="statusbar__metric statusbar__metric--turn-tokens">
+          <span className="stat statusbar__turn-tokens">
+            <span className="stat__label stat__label--icon" aria-hidden="true"><Zap size={12} /></span>
+            <b className={turnTokenLabel === "-" ? "stat__value--empty" : undefined}>{turnTokenLabel}</b>
+          </span>
+        </Tooltip>
+        <Tooltip label={t("status.sessionTurnsTitle")} className="statusbar__metric statusbar__metric--turns">
+          <span className="stat statusbar__turns">
+            <span className="stat__label stat__label--icon" aria-hidden="true"><RefreshCw size={12} /></span>
+            <b className={turnLabel === "-" ? "stat__value--empty" : undefined}>{turnLabel}</b>
           </span>
         </Tooltip>
       </div>
       <div className="statusbar__group statusbar__group--context">
-        <Tooltip label={t("status.ctxTitle")}>
+        <Tooltip label={t("status.ctxTitle")} className="statusbar__metric statusbar__metric--ctx">
           <span className="stat statusbar__ctx">
-            <span className="stat__label">{t("status.ctxLabel")}</span>
+            <span className="stat__label stat__label--icon" aria-hidden="true"><CircleGauge size={12} /></span>
             <b className={pct === null ? "stat__value--empty" : undefined}>{pct !== null ? `${pct}%` : "-"}</b>
           </span>
         </Tooltip>
-        <Tooltip label={t("status.compactTitle")}>
+        <Tooltip label={t("status.compactTitle")} className="statusbar__metric statusbar__metric--compact">
           <span className="stat statusbar__compact">
-            <span className="stat__label">{t("status.compactLabel")}</span>
+            <span className="stat__label stat__label--icon" aria-hidden="true"><Layers size={12} /></span>
             <b
               className={[
                 compactPct === null ? "stat__value--empty" : undefined,
@@ -191,15 +215,15 @@ export function StatusBar({
         </Tooltip>
       </div>
       <div className="statusbar__group statusbar__group--account">
-        <Tooltip label={t("status.spendTitle")}>
+        <Tooltip label={t("status.spendTitle")} className="statusbar__metric statusbar__metric--cost">
           <span className="stat statusbar__cost">
-            <span className="stat__label">{t("status.costLabel")}</span>
+            <span className="stat__label stat__label--icon" aria-hidden="true"><CircleDollarSign size={12} /></span>
             <b>{costLabel}</b>
           </span>
         </Tooltip>
-        <Tooltip label={t("status.balanceTitle")}>
+        <Tooltip label={t("status.balanceTitle")} className="statusbar__metric statusbar__metric--balance">
           <span className="stat stat--balance statusbar__balance">
-            <span className="stat__label">{t("status.balanceLabel")}</span>
+            <span className="stat__label stat__label--icon" aria-hidden="true"><Wallet size={12} /></span>
             <b className={balanceLabel === "-" ? "stat__value--empty" : undefined}>{balanceLabel}</b>
           </span>
         </Tooltip>

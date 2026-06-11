@@ -86,6 +86,7 @@ interface State {
   discardTurn?: boolean;
   turnStartAt: number;
   turnTokens: number;
+  turnTotalTokens: number;
   sessionTokens: number;
   sessionCost: number;
   sessionCurrency: string;
@@ -102,6 +103,7 @@ export const initialState: State = {
   checkpoints: [],
   turnStartAt: 0,
   turnTokens: 0,
+  turnTotalTokens: 0,
   sessionTokens: 0,
   sessionCost: 0,
   sessionCurrency: "¥",
@@ -293,7 +295,7 @@ function applyEvent(s: State, e: WireEvent): State {
       let cur: State = s;
       if (cur.pendingUser !== undefined) cur = flushPendingUser(cur);
       const { items, id, seq } = ensureAssistant(cur);
-      return { ...cur, items, currentAssistant: id, seq, live: { id, text: "", reasoning: "" }, running: true, turnActive: true, turnStartAt: Date.now(), turnTokens: 0 };
+      return { ...cur, items, currentAssistant: id, seq, live: { id, text: "", reasoning: "" }, running: true, turnActive: true, turnStartAt: Date.now(), turnTokens: 0, turnTotalTokens: 0 };
     }
     case "text":
     case "reasoning": {
@@ -355,11 +357,13 @@ function applyEvent(s: State, e: WireEvent): State {
     case "usage": {
       const used = e.usage && s.context.window ? e.usage.promptTokens : s.context.used;
       const turnTokens = s.turnTokens + (e.usage?.completionTokens ?? 0);
-      const sessionTokens = s.sessionTokens + usageTotalTokens(e.usage);
+      const usageTokens = usageTotalTokens(e.usage);
+      const turnTotalTokens = s.turnTotalTokens + usageTokens;
+      const sessionTokens = s.sessionTokens + usageTokens;
       const usageCost = e.usage?.cost ?? e.usage?.costUsd ?? 0;
       const sessionCost = s.sessionCost + usageCost;
       const sessionCurrency = e.usage?.currency || s.sessionCurrency || "¥";
-      return { ...s, usage: e.usage, context: { ...s.context, used, sessionTokens }, turnTokens, sessionTokens, sessionCost, sessionCurrency };
+      return { ...s, usage: e.usage, context: { ...s.context, used, sessionTokens }, turnTokens, turnTotalTokens, sessionTokens, sessionCost, sessionCurrency };
     }
     case "notice":
       return { ...s, running: s.turnActive ? s.running : false, seq: s.seq + 1, items: [...s.items, { kind: "notice", id: `n${s.seq}`, level: e.level ?? "info", text: e.text ?? "" }] };
@@ -409,6 +413,7 @@ export function reducer(s: State, a: Action): State {
         running: true,
         turnStartAt: Date.now(),
         turnTokens: 0,
+        turnTotalTokens: 0,
         pendingUser: a.text,
         discardTurn: false,
       };

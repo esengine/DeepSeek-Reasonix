@@ -51,6 +51,7 @@ import {
   type CollaborationMode,
   type ComposerInsertRequest,
   type Mode,
+  type ProjectNode,
   type SessionMeta,
   type SettingsTab,
   type SettingsView,
@@ -120,6 +121,30 @@ type HistoryViewState =
   | { kind: "history"; source: "scope"; filter: HistoryScopeFilter; sessions: SessionMeta[] }
   | { kind: "history"; source: "all"; sessions: SessionMeta[] }
   | { kind: "trash"; sessions: SessionMeta[] };
+
+function activeTopicTurnsFromTree(tree: ProjectNode[], tab?: TabMeta): number | undefined {
+  if (!tab?.topicId) return undefined;
+  const targetScope = tab.scope === "global" ? "global" : "project";
+  const walk = (nodes: ProjectNode[]): number | undefined => {
+    for (const node of nodes) {
+      if (!node) continue;
+      if (node.kind === "topic" || node.kind === "global_topic") {
+        const scope = node.kind === "global_topic" ? "global" : "project";
+        if (
+          scope === targetScope &&
+          node.topicId === tab.topicId &&
+          (scope === "global" || node.root === tab.workspaceRoot)
+        ) {
+          return node.turns;
+        }
+      }
+      const found = walk(asArray(node.children));
+      if (found !== undefined) return found;
+    }
+    return undefined;
+  };
+  return walk(tree);
+}
 
 function clampSidebarWidth(width: number): number {
   return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(width)));
@@ -431,6 +456,7 @@ export default function App() {
   const [workspaceChangeListRequest, setWorkspaceChangeListRequest] = useState<WorkspaceChangeListRequest | null>(null);
   const [dockRefreshKey, setDockRefreshKey] = useState(0);
   const [projectRevision, setProjectRevision] = useState(0);
+  const [activeTopicTurns, setActiveTopicTurns] = useState<number | undefined>(undefined);
   const [composerInsertRequest, setComposerInsertRequest] = useState<ComposerInsertRequest | null>(null);
   const [transientOverlayDismissSignal, setTransientOverlayDismissSignal] = useState(0);
   const [desktopPlatform, setDesktopPlatform] = useState<DesktopPlatform>(detectBrowserPlatform);
@@ -605,6 +631,30 @@ export default function App() {
     () => tabMetas.find((tab) => tab.id === activeTabId) ?? tabMetas.find((tab) => tab.active),
     [activeTabId, tabMetas],
   );
+  useEffect(() => {
+    let cancelled = false;
+    if (!activeTab?.topicId) {
+      setActiveTopicTurns(undefined);
+      return () => {
+        cancelled = true;
+      };
+    }
+    void app.ListProjectTree()
+      .then((tree) => {
+        if (!cancelled) setActiveTopicTurns(activeTopicTurnsFromTree(asArray(tree), activeTab));
+      })
+      .catch(() => {
+        if (!cancelled) setActiveTopicTurns(undefined);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab?.scope, activeTab?.topicId, activeTab?.workspaceRoot, projectRevision]);
+  const sessionTurns = useMemo(() => {
+    const visibleUserTurns = state.items.reduce((count, item) => (item.kind === "user" ? count + 1 : count), 0);
+    const fallbackTurns = Math.max(state.checkpoints.length, visibleUserTurns);
+    return Math.max(activeTopicTurns ?? 0, fallbackTurns);
+  }, [activeTopicTurns, state.checkpoints.length, state.items]);
   const startupSplashHold = state.meta?.ready !== true && !state.meta?.startupErr;
   const legacyMode = activeTabId ? modesByTab[activeTabId] ?? "normal" : "normal";
   const goal = activeTabId ? goalsByTab[activeTabId] ?? state.meta?.goal ?? activeTab?.goal ?? "" : "";
@@ -2111,7 +2161,9 @@ export default function App() {
               running={state.running}
               collaborationMode={collaborationMode}
               toolApprovalMode={toolApprovalMode}
+              sessionTurns={sessionTurns}
               sessionTokens={state.sessionTokens}
+              turnTokens={state.turnTotalTokens}
               cost={state.sessionCost}
               currency={state.sessionCurrency}
               modelLabel={state.meta?.label}

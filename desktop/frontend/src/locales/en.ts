@@ -326,6 +326,8 @@ export const en = {
   "status.sessionTurnsTitle": "Current session turns",
   "status.sessionTokensLabel": "session tokens",
   "status.sessionTokensTitle": "Model tokens spent in this session; not the current context-window usage.",
+  "status.turnTokensLabel": "turn tokens",
+  "status.turnTokensTitle": "Model tokens spent in the current or most recent turn.",
   "status.compactLabel": "compact at",
   "status.compactTitle": "Auto-compact is attempted when context reaches this share of the window",
   "status.cacheLabel": "turn hit",

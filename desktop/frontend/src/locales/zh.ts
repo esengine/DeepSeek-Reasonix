@@ -327,6 +327,8 @@ export const zh: Record<DictKey, string> = {
   "status.sessionTurnsTitle": "当前会话轮数",
   "status.sessionTokensLabel": "会话 tokens",
   "status.sessionTokensTitle": "本会话累计消耗的模型 tokens，不等于当前上下文窗口占用。",
+  "status.turnTokensLabel": "本次 tokens",
+  "status.turnTokensTitle": "当前或最近一轮交流累计消耗的模型 tokens。",
   "status.compactLabel": "压缩阈值",
   "status.compactTitle": "上下文达到该比例时会尝试自动压缩",
   "status.cacheLabel": "本次命中",

@@ -4585,6 +4585,18 @@ a[href] {
 .stat__label {
   color: var(--fg-faint);
 }
+.stat__label--icon {
+  display: inline-flex;
+  width: 13px;
+  height: 13px;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 13px;
+}
+.stat__label--icon svg {
+  display: block;
+  stroke-width: 2.15;
+}
 .statusbar .stat b.stat__value--empty {
   color: var(--fg-faint);
   font-weight: 500;
@@ -15652,8 +15664,8 @@ a[href] {
 
 @media (max-width: 820px) {
   .statusbar__group--account,
-  .statusbar__avg,
-  .statusbar__compact {
+  .statusbar__group > .statusbar__metric--avg,
+  .statusbar__group > .statusbar__metric--compact {
     display: none;
   }
 
@@ -15694,13 +15706,13 @@ a[href] {
 }
 
 @media (max-width: 1040px) {
-  .statusbar__avg {
+  .statusbar__group > .statusbar__metric--avg {
     display: none;
   }
 }
 
 @media (max-width: 940px) {
-  .statusbar__compact {
+  .statusbar__group > .statusbar__metric--compact {
     display: none;
   }
 }
@@ -15708,7 +15720,9 @@ a[href] {
 @media (max-width: 760px) {
   .statusbar__group--context,
   .statusbar__group--jobs,
-  .statusbar__tokens,
+  .statusbar__group > .statusbar__metric--tokens,
+  .statusbar__group > .statusbar__metric--turn-tokens,
+  .statusbar__group > .statusbar__metric--turns,
   .statusbar__jobswrap {
     display: none;
   }

@@ -63,6 +63,62 @@ interface HealthResult {
 
 type ContextFileRow = { key: string; path: string; meta: string; time: string; detail: string };
 
+interface ContextBreakdown {
+  promptTokens: number;
+  completionTokens: number;
+  reasoningTokens: number;
+  otherTokens: number;
+  promptPct: number;
+  completionPct: number;
+  reasoningPct: number;
+  otherPct: number;
+}
+
+function nonNegativeTokenCount(value: number): number {
+  return Number.isFinite(value) ? Math.max(0, value) : 0;
+}
+
+export function contextBreakdown(
+  usedTokens: number,
+  windowTokens: number,
+  promptTokens: number,
+  completionTokens: number,
+  reasoningTokens: number,
+): ContextBreakdown {
+  const used = nonNegativeTokenCount(usedTokens);
+  const window = nonNegativeTokenCount(windowTokens);
+  let prompt = nonNegativeTokenCount(promptTokens);
+  let reasoning = Math.min(nonNegativeTokenCount(reasoningTokens), nonNegativeTokenCount(completionTokens));
+  let completion = Math.max(0, nonNegativeTokenCount(completionTokens) - reasoning);
+  const known = prompt + completion + reasoning;
+
+  if (known > used && known > 0) {
+    const scale = used / known;
+    prompt *= scale;
+    completion *= scale;
+    reasoning *= scale;
+  }
+
+  const normalizedKnown = Math.min(used, prompt + completion + reasoning);
+  const other = Math.max(0, used - normalizedKnown);
+  const pctDenom = Math.max(window, 1);
+  const promptPct = Math.min(100, (prompt / pctDenom) * 100);
+  const completionPct = Math.min(100, ((prompt + completion) / pctDenom) * 100);
+  const reasoningPct = Math.min(100, ((prompt + completion + reasoning) / pctDenom) * 100);
+  const otherPct = Math.min(100, (used / pctDenom) * 100);
+
+  return {
+    promptTokens: Math.round(prompt),
+    completionTokens: Math.round(completion),
+    reasoningTokens: Math.round(reasoning),
+    otherTokens: Math.round(other),
+    promptPct,
+    completionPct,
+    reasoningPct,
+    otherPct,
+  };
+}
+
 function contextHealth(usagePct: number, cachePct: number, readCount: number): HealthResult {
   if (usagePct >= 85) {
     return {
@@ -155,19 +211,14 @@ export function ContextPanel({
   const readFiles = asArray(info?.readFiles);
   const changedFiles = asArray(info?.changedFiles);
 
-  const usagePct = windowTokens > 0 ? Math.round((usedTokens / windowTokens) * 100) : 0;
+  const usagePct = windowTokens > 0 ? Math.min(100, Math.round((usedTokens / windowTokens) * 100)) : 0;
   const compactPct = context?.compactRatio ? Math.round(context.compactRatio * 100) : 0;
   const cachePct = cacheHitTokens + cacheMissTokens > 0
     ? Math.round((cacheHitTokens / (cacheHitTokens + cacheMissTokens)) * 100)
     : 0;
-  const otherTokens = Math.max(0, usedTokens - promptTokens - completionTokens - reasoningTokens);
-  const safeUsed = Math.max(usedTokens, 1);
-  const promptPct = Math.min(100, (promptTokens / safeUsed) * usagePct);
-  const completionPct = Math.min(100, promptPct + (completionTokens / safeUsed) * usagePct);
-  const reasoningPct = Math.min(100, completionPct + (reasoningTokens / safeUsed) * usagePct);
-  const otherPct = Math.min(100, reasoningPct + (otherTokens / safeUsed) * usagePct);
+  const breakdown = contextBreakdown(usedTokens, windowTokens, promptTokens, completionTokens, reasoningTokens);
   const donutStyle = {
-    background: `conic-gradient(#13a7a5 0 ${promptPct}%, #2f6df6 ${promptPct}% ${completionPct}%, #f97316 ${completionPct}% ${reasoningPct}%, var(--border) ${reasoningPct}% ${otherPct}%, var(--border-soft) ${otherPct}% 100%)`,
+    background: `conic-gradient(#13a7a5 0 ${breakdown.promptPct}%, #2f6df6 ${breakdown.promptPct}% ${breakdown.completionPct}%, #f97316 ${breakdown.completionPct}% ${breakdown.reasoningPct}%, var(--border) ${breakdown.reasoningPct}% ${breakdown.otherPct}%, var(--border-soft) ${breakdown.otherPct}% 100%)`,
   };
   const eventTimes = [
     ...readFiles.map((file) => file.time),
@@ -209,10 +260,10 @@ export function ContextPanel({
               <div className="context-panel__percent">{usagePct}%</div>
             </div>
             <div className="context-panel__breakdown">
-              <TokenLegend label={t("context.prompt")} value={promptTokens} color="prompt" />
-              <TokenLegend label={t("context.completion")} value={completionTokens} color="completion" />
-              <TokenLegend label={t("context.reasoning")} value={reasoningTokens} color="reasoning" />
-              <TokenLegend label={t("context.other")} value={otherTokens} color="other" />
+              <TokenLegend label={t("context.prompt")} value={breakdown.promptTokens} color="prompt" />
+              <TokenLegend label={t("context.completion")} value={breakdown.completionTokens} color="completion" />
+              <TokenLegend label={t("context.reasoning")} value={breakdown.reasoningTokens} color="reasoning" />
+              <TokenLegend label={t("context.other")} value={breakdown.otherTokens} color="other" />
               <div className="context-panel__total">
                 <span>{t("context.total")}</span>
                 <strong>{usedTokens.toLocaleString()} / {windowTokens.toLocaleString()}</strong>
