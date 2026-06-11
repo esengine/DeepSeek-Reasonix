@@ -1380,7 +1380,7 @@ func (c *Controller) snapshot(markActivity bool) error {
 		return nil
 	}
 	s := c.executor.Session()
-	if !s.HasContent() {
+	if s == nil || !s.HasContent() {
 		return nil
 	}
 	meta, err := agent.EnsureBranchMeta(path)
