@@ -44,12 +44,20 @@ func (a *App) refreshBotRuntime() {
 	if a.botRuntime == nil {
 		a.botRuntime = newDesktopBotRuntime()
 	}
-	cfg, err := config.Load()
+	cfg, err := a.loadDesktopBotConfig()
 	if err != nil {
 		a.botRuntime.stop("error", err.Error())
 		return
 	}
 	_ = a.botRuntime.apply(a.bootContext(), cfg, globalTabWorkspaceRoot())
+}
+
+func (a *App) loadDesktopBotConfig() (*config.Config, error) {
+	cfg, _, err := a.loadDesktopUserConfigForEdit()
+	if err != nil {
+		return nil, err
+	}
+	return cfg, nil
 }
 
 func (a *App) stopBotRuntime() {

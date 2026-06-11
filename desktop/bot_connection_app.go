@@ -174,7 +174,7 @@ func (a *App) PollBotConnectionInstall(installID string) (BotInstallPollResult, 
 }
 
 func (a *App) DiagnoseBotConnection(id string) (BotConnectionDiagnostic, error) {
-	cfg, err := config.Load()
+	cfg, err := a.loadDesktopBotConfig()
 	if err != nil {
 		return BotConnectionDiagnostic{ID: id, Status: "error", Message: err.Error()}, nil
 	}
@@ -199,7 +199,7 @@ func (a *App) DiagnoseBotConnection(id string) (BotConnectionDiagnostic, error) 
 }
 
 func (a *App) TestBotConnection(id, target string) (BotConnectionDiagnostic, error) {
-	cfg, err := config.Load()
+	cfg, err := a.loadDesktopBotConfig()
 	if err != nil {
 		return BotConnectionDiagnostic{ID: id, Status: "error", Message: err.Error()}, nil
 	}

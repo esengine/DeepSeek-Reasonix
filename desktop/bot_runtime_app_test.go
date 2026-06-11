@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"reasonix/internal/bot"
@@ -53,5 +55,43 @@ func TestDesktopBotRuntimePlanStopsWhenBotDisabled(t *testing.T) {
 	plan := desktopBotRuntimePlan(cfg)
 	if plan.Start || plan.Status != "stopped" {
 		t.Fatalf("plan = %+v, want stopped when disabled", plan)
+	}
+}
+
+func TestDesktopBotRuntimeConfigUsesUserBotSettings(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	userCfg := config.LoadForEdit(config.UserConfigPath())
+	userCfg.Bot.Enabled = true
+	userCfg.Bot.Allowlist.Enabled = true
+	userCfg.Bot.Allowlist.FeishuUsers = []string{"ou-installer"}
+	userCfg.Bot.Connections = []config.BotConnectionConfig{
+		{ID: "feishu-lark", Provider: "feishu", Domain: "lark", Enabled: true, Status: "connected"},
+	}
+	if err := userCfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save user config: %v", err)
+	}
+
+	project := robustTempDir(t)
+	if err := os.WriteFile(filepath.Join(project, "reasonix.toml"), []byte(`
+[bot]
+enabled = false
+`), 0o644); err != nil {
+		t.Fatalf("write project config: %v", err)
+	}
+
+	orig, _ := os.Getwd()
+	defer func() { _ = os.Chdir(orig) }()
+	if err := os.Chdir(project); err != nil {
+		t.Fatalf("chdir project: %v", err)
+	}
+
+	got, err := NewApp().loadDesktopBotConfig()
+	if err != nil {
+		t.Fatalf("load desktop bot config: %v", err)
+	}
+	plan := desktopBotRuntimePlan(got)
+	if !plan.Start || !plan.Enabled[bot.PlatformFeishu] {
+		t.Fatalf("desktop runtime plan = %+v, want user-level Lark connection to start", plan)
 	}
 }
