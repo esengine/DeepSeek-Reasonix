@@ -10514,6 +10514,28 @@ a[href] {
 .history-list--trash {
   min-height: 0;
 }
+.virtual-list {
+  position: relative;
+  width: 100%;
+}
+.virtual-list__row {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+}
+.history-list .virtual-list {
+  min-height: 100%;
+}
+.history-virtual-row {
+  padding-bottom: 6px;
+}
+.history-virtual-row .hist-item {
+  margin-bottom: 0;
+}
+.history-virtual-group {
+  margin-bottom: 6px;
+}
 .history-search {
   flex: 1 1 360px;
   max-width: 520px;

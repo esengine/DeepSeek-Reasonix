@@ -9,10 +9,14 @@ import { Transcript } from "./Transcript";
 import { ContextMenu, contextMenuPointFromEvent, type ContextMenuItem, type ContextMenuPoint } from "./ContextMenu";
 import { useDeferredClose } from "../lib/useMountTransition";
 import { ModalCloseButton } from "./ModalCloseButton";
+import { VirtualList } from "./VirtualList";
 
 type HistoryScopeFilter = "all" | "project" | "global";
 type HistoryStatusFilter = "all" | "current" | "open";
 type HistoryDateFilter = "all" | "today" | "yesterday" | "older";
+type HistoryListRow =
+  | { kind: "group"; key: string; label: string; count: number }
+  | { kind: "session"; key: string; session: SessionMeta };
 
 // HistoryPanel lists saved sessions newest-first. In the wide management modal,
 // a single click selects a read-only preview; explicit actions resume, restore,
@@ -46,6 +50,7 @@ export function HistoryPanel({
   const isTrash = kind === "trash";
   // Play the modal exit animation, then let the parent unmount us.
   const { status, requestClose } = useDeferredClose(onClose, 240);
+  const historyListRef = useRef<HTMLDivElement>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [query, setQuery] = useState("");
@@ -145,15 +150,25 @@ export function HistoryPanel({
     });
   }, [dateFilter, isTrash, query, scopeFilter, sessions, statusFilter]);
 
-  // Sessions arrive newest-first; bucket consecutive ones under a day heading
-  // (Today / Yesterday / a date) while preserving that order.
-  const groups: { label: string; items: SessionMeta[] }[] = [];
-  for (const s of filteredSessions) {
-    const label = dayLabel(sessionTimeForGrouping(s, isTrash));
-    const last = groups[groups.length - 1];
-    if (last && last.label === label) last.items.push(s);
-    else groups.push({ label, items: [s] });
-  }
+  const historyRows = useMemo<HistoryListRow[]>(() => {
+    const rows: HistoryListRow[] = [];
+    let currentGroup: Extract<HistoryListRow, { kind: "group" }> | null = null;
+    for (const session of filteredSessions) {
+      const label = dayLabel(sessionTimeForGrouping(session, isTrash));
+      if (!currentGroup || currentGroup.label !== label) {
+        currentGroup = {
+          kind: "group",
+          key: `group:${label}:${rows.length}`,
+          label,
+          count: 0,
+        };
+        rows.push(currentGroup);
+      }
+      currentGroup.count += 1;
+      rows.push({ kind: "session", key: `session:${session.path}`, session });
+    }
+    return rows;
+  }, [filteredSessions, isTrash]);
 
   useEffect(() => {
     setMenuSession(null);
@@ -182,6 +197,11 @@ export function HistoryPanel({
     () => (preview ? filteredSessions.find((s) => s.path === preview.path) ?? null : null),
     [filteredSessions, preview],
   );
+  const selectedRowIndex = useMemo(() => {
+    if (!preview) return undefined;
+    const index = historyRows.findIndex((row) => row.kind === "session" && row.session.path === preview.path);
+    return index >= 0 ? index : undefined;
+  }, [historyRows, preview]);
   const openSessionMenu = (event: ReactMouseEvent<HTMLElement>, s: SessionMeta) => {
     event.preventDefault();
     event.stopPropagation();
@@ -341,6 +361,72 @@ export function HistoryPanel({
     if (actionConfirmPurge) purgeTrashSession(selectedSession);
     else setMenuConfirmTarget({ kind: "purge", path: selectedSession.path });
   };
+  const renderHistoryRow = (row: HistoryListRow) => {
+    if (row.kind === "group") {
+      return (
+        <div className="mem-section__title hist-group__title history-virtual-group">
+          <span>{row.label}</span>
+          <span className="hist-group__count">{row.count}</span>
+        </div>
+      );
+    }
+    const s = row.session;
+    const selected = preview?.path === s.path;
+    return (
+      <div className="history-virtual-row">
+        <div
+          className={`hist-item${s.current ? " hist-item--current" : ""}${selected ? " hist-item--selected" : ""}`}
+          onContextMenu={(event) => openSessionMenu(event, s)}
+        >
+          {editing === s.path ? (
+            <input
+              className="hist-item__rename"
+              autoFocus
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") commitRename(s.path);
+                if (e.key === "Escape") setEditing(null);
+              }}
+              onBlur={() => commitRename(s.path)}
+              placeholder={tr("history.namePlaceholder")}
+            />
+          ) : (
+            <button
+              className="hist-item__main"
+              aria-pressed={selected}
+              onClick={() => {
+                setMenuConfirmTarget(null);
+                void loadPreview(s);
+              }}
+              onDoubleClick={() => {
+                if (!isTrash && !running) onResume(s);
+              }}
+            >
+              <div className="hist-item__preview">{sessionDisplayTitle(s, tr("history.emptySession"))}</div>
+              <div className="hist-item__meta">
+                {!isTrash && isChannelSession(s) && <span className="hist-item__badge hist-item__badge--open">{tr("history.channel")}</span>}
+                {!isTrash && s.current && <span className="hist-item__badge hist-item__badge--current">{tr("history.current")}</span>}
+                {!isTrash && !s.current && s.open && <span className="hist-item__badge hist-item__badge--open">{tr("history.open")}</span>}
+                {isTrash && <span className="hist-item__badge hist-item__badge--deleted">{tr("history.deleted")}</span>}
+                {sessionLocation(s, tr) && <span className="hist-item__scope">{sessionLocation(s, tr)}</span>}
+                <span className="hist-item__metaspacer" />
+                <span className="hist-item__stat">{tr(s.turns === 1 ? "history.turnOne" : "history.turnOther", { n: s.turns })}</span>
+                <span className="hist-item__dot">·</span>
+                <span className="hist-item__stat">{timeLabel(isTrash ? s.deletedAt || sessionActivityTime(s) : sessionActivityTime(s))}</span>
+                {!isTrash && running && (
+                  <>
+                    <span className="hist-item__dot">·</span>
+                    <span className="hist-item__stat">{tr("history.preview")}</span>
+                  </>
+                )}
+              </div>
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="management-modal-backdrop history-modal-backdrop" data-state={status} onClick={(e) => { if (e.target === e.currentTarget) requestClose(); }}>
@@ -416,7 +502,7 @@ export function HistoryPanel({
         </div>
 
         <div className="history-content">
-          <div className={`history-list${isTrash ? " history-list--trash" : ""}`}>
+          <div className={`history-list${isTrash ? " history-list--trash" : ""}`} ref={historyListRef}>
             {sessions.length === 0 ? (
               <div className={`mem-empty${isTrash ? " mem-empty--trash" : ""}`}>
                 {isTrash && <Trash2 size={22} />}
@@ -425,71 +511,15 @@ export function HistoryPanel({
             ) : filteredSessions.length === 0 ? (
               <div className="mem-empty">{tr("history.noResults")}</div>
             ) : (
-              groups.map((g) => (
-                <section className="mem-section" key={g.label}>
-                  <div className="mem-section__title hist-group__title">
-                    <span>{g.label}</span>
-                    <span className="hist-group__count">{g.items.length}</span>
-                  </div>
-                  {g.items.map((s) => {
-                    const selected = preview?.path === s.path;
-                    return (
-                      <div
-                        className={`hist-item${s.current ? " hist-item--current" : ""}${selected ? " hist-item--selected" : ""}`}
-                        key={s.path}
-                        onContextMenu={(event) => openSessionMenu(event, s)}
-                      >
-                        {editing === s.path ? (
-                          <input
-                            className="hist-item__rename"
-                            autoFocus
-                            value={draft}
-                            onChange={(e) => setDraft(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter") commitRename(s.path);
-                              if (e.key === "Escape") setEditing(null);
-                            }}
-                            onBlur={() => commitRename(s.path)}
-                            placeholder={tr("history.namePlaceholder")}
-                          />
-                        ) : (
-                          <button
-                            className="hist-item__main"
-                            aria-pressed={selected}
-                            onClick={() => {
-                              setMenuConfirmTarget(null);
-                              void loadPreview(s);
-                            }}
-                            onDoubleClick={() => {
-                              if (!isTrash && !running) onResume(s);
-                            }}
-                          >
-                            <div className="hist-item__preview">{sessionDisplayTitle(s, tr("history.emptySession"))}</div>
-                            <div className="hist-item__meta">
-                              {!isTrash && isChannelSession(s) && <span className="hist-item__badge hist-item__badge--open">{tr("history.channel")}</span>}
-                              {!isTrash && s.current && <span className="hist-item__badge hist-item__badge--current">{tr("history.current")}</span>}
-                              {!isTrash && !s.current && s.open && <span className="hist-item__badge hist-item__badge--open">{tr("history.open")}</span>}
-                              {isTrash && <span className="hist-item__badge hist-item__badge--deleted">{tr("history.deleted")}</span>}
-                              {sessionLocation(s, tr) && <span className="hist-item__scope">{sessionLocation(s, tr)}</span>}
-                              <span className="hist-item__metaspacer" />
-                              <span className="hist-item__stat">{tr(s.turns === 1 ? "history.turnOne" : "history.turnOther", { n: s.turns })}</span>
-                              <span className="hist-item__dot">·</span>
-                              <span className="hist-item__stat">{timeLabel(isTrash ? s.deletedAt || sessionActivityTime(s) : sessionActivityTime(s))}</span>
-                              {!isTrash && running && (
-                                <>
-                                  <span className="hist-item__dot">·</span>
-                                  <span className="hist-item__stat">{tr("history.preview")}</span>
-                                </>
-                              )}
-                            </div>
-                          </button>
-                        )}
-
-                      </div>
-                    );
-                  })}
-                </section>
-              ))
+              <VirtualList
+                items={historyRows}
+                scrollRef={historyListRef}
+                estimateSize={(row) => (row.kind === "group" ? 28 : 72)}
+                overscan={10}
+                scrollToIndex={selectedRowIndex}
+                getKey={(row) => row.key}
+                render={renderHistoryRow}
+              />
             )}
           </div>
 
