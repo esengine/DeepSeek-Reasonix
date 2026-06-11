@@ -15,6 +15,8 @@ import (
 type renderSink struct {
 	ctx      context.Context
 	adapter  Adapter
+	connID   string
+	domain   string
 	chatID   string
 	chatType ChatType
 	replyTo  string
@@ -30,10 +32,12 @@ type renderSink struct {
 	lastFlush  time.Time
 }
 
-func newRenderSink(ctx context.Context, adapter Adapter, chatID string, chatType ChatType, replyTo string, logger *slog.Logger, onAsk func(event.Ask)) *renderSink {
+func newRenderSink(ctx context.Context, adapter Adapter, connID, domain, chatID string, chatType ChatType, replyTo string, logger *slog.Logger, onAsk func(event.Ask)) *renderSink {
 	return &renderSink{
 		ctx:       ctx,
 		adapter:   adapter,
+		connID:    connID,
+		domain:    domain,
 		chatID:    chatID,
 		chatType:  chatType,
 		replyTo:   replyTo,
@@ -106,6 +110,8 @@ func (s *renderSink) Emit(e event.Event) {
 		approvalText := fmt.Sprintf("⚠️ 需要批准操作:\n工具: %s\n操作: %s\n\nID: `%s`\n用 /approve %s 批准，/deny %s 拒绝。",
 			e.Approval.Tool, e.Approval.Subject, e.Approval.ID, e.Approval.ID, e.Approval.ID)
 		msg := OutboundMessage{
+			ConnectionID: s.connID,
+			Domain:       s.domain,
 			ChatID:       s.chatID,
 			ChatType:     s.chatType,
 			Text:         approvalText,
@@ -142,6 +148,8 @@ func (s *renderSink) Emit(e event.Event) {
 		fmt.Fprintf(&qb, "\nID: `%s`", e.Ask.ID)
 		fmt.Fprintf(&qb, "\n用 /answer %s <选项编号或文本> 回答。", e.Ask.ID)
 		msg := OutboundMessage{
+			ConnectionID: s.connID,
+			Domain:       s.domain,
 			ChatID:       s.chatID,
 			ChatType:     s.chatType,
 			Text:         qb.String(),
@@ -158,6 +166,8 @@ func (s *renderSink) Emit(e event.Event) {
 		if e.Err != nil {
 			if !strings.Contains(e.Err.Error(), "context canceled") {
 				_ = s.send(OutboundMessage{
+					ConnectionID: s.connID,
+					Domain:       s.domain,
 					ChatID:       s.chatID,
 					ChatType:     s.chatType,
 					Text:         fmt.Sprintf("❌ 执行出错: %v", e.Err),
@@ -169,6 +179,8 @@ func (s *renderSink) Emit(e event.Event) {
 	case event.Notice:
 		if e.Level == event.LevelWarn {
 			_ = s.send(OutboundMessage{
+				ConnectionID: s.connID,
+				Domain:       s.domain,
 				ChatID:       s.chatID,
 				ChatType:     s.chatType,
 				Text:         fmt.Sprintf("⚠️ %s", e.Text),
@@ -178,6 +190,8 @@ func (s *renderSink) Emit(e event.Event) {
 
 	case event.CompactionStarted:
 		_ = s.send(OutboundMessage{
+			ConnectionID: s.connID,
+			Domain:       s.domain,
 			ChatID:       s.chatID,
 			ChatType:     s.chatType,
 			Text:         "🔄 正在压缩上下文...",
@@ -198,6 +212,8 @@ func (s *renderSink) flush() {
 		return
 	}
 	_ = s.send(OutboundMessage{
+		ConnectionID: s.connID,
+		Domain:       s.domain,
 		ChatID:       s.chatID,
 		ChatType:     s.chatType,
 		Text:         text,

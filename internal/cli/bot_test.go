@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"io"
+	"log/slog"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -156,6 +158,84 @@ func TestBotDoctorReportsSessionMappingCounts(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("bot doctor output missing %s:\n%s", want, out)
 		}
+	}
+}
+
+func TestBotConnectionChannelConfigsKeepFeishuAndLarkSeparate(t *testing.T) {
+	connections := []config.BotConnectionConfig{
+		{ID: "feishu-feishu", Provider: "feishu", Domain: "feishu", Enabled: true, Model: "feishu-model", WorkspaceRoot: "/feishu"},
+		{ID: "feishu-lark", Provider: "feishu", Domain: "lark", Enabled: true, Model: "lark-model", WorkspaceRoot: "/lark"},
+	}
+	channels := botConnectionChannelConfigs(connections, true, true)
+	if channels["feishu-feishu"].Model != "feishu-model" || channels["feishu-feishu"].WorkspaceRoot != "/feishu" {
+		t.Fatalf("feishu channel = %+v, want feishu override", channels["feishu-feishu"])
+	}
+	if channels["feishu-lark"].Model != "lark-model" || channels["feishu-lark"].WorkspaceRoot != "/lark" {
+		t.Fatalf("lark channel = %+v, want lark override", channels["feishu-lark"])
+	}
+}
+
+func TestBotAdapterBindingsCreateSeparateFeishuAndLarkInstances(t *testing.T) {
+	cfg := config.Default()
+	cfg.Bot.Connections = []config.BotConnectionConfig{
+		{ID: "feishu-feishu", Provider: "feishu", Domain: "feishu", Enabled: true, Credential: config.BotConnectionCredential{AppID: "cli-feishu", AppSecretEnv: "FEISHU_BOT_APP_SECRET"}},
+		{ID: "feishu-lark", Provider: "feishu", Domain: "lark", Enabled: true, Credential: config.BotConnectionCredential{AppID: "cli-lark", AppSecretEnv: "LARK_BOT_APP_SECRET"}},
+		{ID: "weixin-weixin", Provider: "weixin", Domain: "weixin", Enabled: true, Credential: config.BotConnectionCredential{AccountID: "wx-account", TokenEnv: "WEIXIN_BOT_TOKEN"}},
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	bindings := botAdapterBindings(cfg, map[bot.Platform]bool{bot.PlatformFeishu: true, bot.PlatformWeixin: true}, logger)
+
+	got := map[string]bot.AdapterBinding{}
+	for _, binding := range bindings {
+		got[binding.ID] = binding
+	}
+	for _, id := range []string{"feishu-feishu", "feishu-lark", "weixin-weixin"} {
+		if got[id].Adapter == nil {
+			t.Fatalf("binding %s missing from %+v", id, bindings)
+		}
+	}
+	if got["feishu-feishu"].Domain != "feishu" || got["feishu-lark"].Domain != "lark" {
+		t.Fatalf("domains = feishu:%q lark:%q, want separate domains", got["feishu-feishu"].Domain, got["feishu-lark"].Domain)
+	}
+}
+
+func TestRememberBotInboundUsesConnectionID(t *testing.T) {
+	isolateBotUserConfig(t)
+	cfg := config.Default()
+	cfg.Bot.Connections = []config.BotConnectionConfig{
+		{ID: "feishu-feishu", Provider: "feishu", Domain: "feishu", Label: "飞书", Enabled: true, Status: "connected"},
+		{ID: "feishu-lark", Provider: "feishu", Domain: "lark", Label: "Lark", Enabled: true, Status: "connected"},
+	}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	if err := rememberBotInbound(bot.InboundMessage{
+		Platform:     bot.PlatformFeishu,
+		ConnectionID: "feishu-lark",
+		Domain:       "lark",
+		ChatType:     bot.ChatDM,
+		ChatID:       "oc-lark-chat",
+		UserID:       "ou-lark-user",
+	}); err != nil {
+		t.Fatalf("rememberBotInbound: %v", err)
+	}
+
+	got := config.LoadForEdit(config.UserConfigPath())
+	var feishuConn, larkConn config.BotConnectionConfig
+	for _, conn := range got.Bot.Connections {
+		switch conn.ID {
+		case "feishu-feishu":
+			feishuConn = conn
+		case "feishu-lark":
+			larkConn = conn
+		}
+	}
+	if len(feishuConn.SessionMappings) != 0 {
+		t.Fatalf("feishu mappings = %+v, want none", feishuConn.SessionMappings)
+	}
+	if len(larkConn.SessionMappings) != 1 || larkConn.SessionMappings[0].RemoteID != "oc-lark-chat" {
+		t.Fatalf("lark mappings = %+v, want lark chat only", larkConn.SessionMappings)
 	}
 }
 

@@ -229,18 +229,37 @@ func TestGatewaySessionOptionsUseChannelOverride(t *testing.T) {
 		},
 	}, nil, logger)
 
-	model, root := gw.sessionOptionsForPlatform(PlatformFeishu)
+	model, root := gw.sessionOptionsForMessage(InboundMessage{Platform: PlatformFeishu})
 	if model != "feishu-model" || root != "/feishu" {
 		t.Fatalf("feishu options = %q,%q; want channel override", model, root)
 	}
 
-	model, root = gw.sessionOptionsForPlatform(PlatformWeixin)
+	model, root = gw.sessionOptionsForMessage(InboundMessage{Platform: PlatformWeixin})
 	if model != "global-model" || root != "/weixin" {
 		t.Fatalf("weixin options = %q,%q; want global model and channel root", model, root)
 	}
 
-	model, root = gw.sessionOptionsForPlatform(PlatformQQ)
+	model, root = gw.sessionOptionsForMessage(InboundMessage{Platform: PlatformQQ})
 	if model != "global-model" || root != "/global" {
 		t.Fatalf("qq options = %q,%q; want global defaults", model, root)
+	}
+}
+
+func TestGatewaySessionOptionsPreferConnectionOverride(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	gw := NewGateway(GatewayConfig{
+		Model:         "global-model",
+		WorkspaceRoot: "/global",
+		Channels: map[Platform]ChannelConfig{
+			PlatformFeishu: {Model: "feishu-model", WorkspaceRoot: "/feishu"},
+		},
+		ConnectionChannels: map[string]ChannelConfig{
+			"feishu-lark": {Model: "lark-model", WorkspaceRoot: "/lark"},
+		},
+	}, nil, logger)
+
+	model, root := gw.sessionOptionsForMessage(InboundMessage{Platform: PlatformFeishu, ConnectionID: "feishu-lark"})
+	if model != "lark-model" || root != "/lark" {
+		t.Fatalf("lark options = %q,%q; want connection override", model, root)
 	}
 }

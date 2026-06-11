@@ -47,7 +47,7 @@ func botCommand(args []string, version string) int {
 
 func botStart(args []string, version string) int {
 	fs := flag.NewFlagSet("bot start", flag.ContinueOnError)
-	channels := fs.String("channels", "", "启用的平台，逗号分隔：qq,feishu,weixin")
+	channels := fs.String("channels", "", "启用的平台，逗号分隔：qq,feishu,lark,weixin")
 	dir := fs.String("dir", "", "工作目录")
 	model := fs.String("model", "", "模型名（空则用 default_model）")
 
@@ -87,19 +87,23 @@ func botStart(args []string, version string) int {
 			ch = strings.TrimSpace(ch)
 			switch bot.Platform(ch) {
 			case bot.PlatformQQ:
-				enabledPlatforms[bot.PlatformQQ] = cfg.Bot.QQ.Enabled
+				enabledPlatforms[bot.PlatformQQ] = botPlatformConfigured(cfg, bot.PlatformQQ)
 			case bot.PlatformFeishu:
-				enabledPlatforms[bot.PlatformFeishu] = cfg.Bot.Feishu.Enabled
+				enabledPlatforms[bot.PlatformFeishu] = botPlatformConfigured(cfg, bot.PlatformFeishu)
 			case bot.PlatformWeixin:
-				enabledPlatforms[bot.PlatformWeixin] = cfg.Bot.Weixin.Enabled
+				enabledPlatforms[bot.PlatformWeixin] = botPlatformConfigured(cfg, bot.PlatformWeixin)
 			default:
-				fmt.Fprintf(os.Stderr, "warning: unknown channel %q\n", ch)
+				if strings.EqualFold(ch, "lark") {
+					enabledPlatforms[bot.PlatformFeishu] = botPlatformConfigured(cfg, bot.PlatformFeishu)
+				} else {
+					fmt.Fprintf(os.Stderr, "warning: unknown channel %q\n", ch)
+				}
 			}
 		}
 	} else {
-		enabledPlatforms[bot.PlatformQQ] = cfg.Bot.QQ.Enabled
-		enabledPlatforms[bot.PlatformFeishu] = cfg.Bot.Feishu.Enabled
-		enabledPlatforms[bot.PlatformWeixin] = cfg.Bot.Weixin.Enabled
+		enabledPlatforms[bot.PlatformQQ] = botPlatformConfigured(cfg, bot.PlatformQQ)
+		enabledPlatforms[bot.PlatformFeishu] = botPlatformConfigured(cfg, bot.PlatformFeishu)
+		enabledPlatforms[bot.PlatformWeixin] = botPlatformConfigured(cfg, bot.PlatformWeixin)
 	}
 
 	hasEnabled := false
@@ -127,11 +131,12 @@ func botStart(args []string, version string) int {
 
 	// 构建网关配置
 	gwCfg := bot.GatewayConfig{
-		Model:         modelName,
-		MaxSteps:      cfg.Bot.MaxSteps,
-		WorkspaceRoot: workspaceRoot,
-		Channels:      botChannelConfigs(cfg.Bot.Connections, *model == "", *dir == ""),
-		Enabled:       enabledPlatforms,
+		Model:              modelName,
+		MaxSteps:           cfg.Bot.MaxSteps,
+		WorkspaceRoot:      workspaceRoot,
+		Channels:           botChannelConfigs(cfg.Bot.Connections, *model == "", *dir == ""),
+		ConnectionChannels: botConnectionChannelConfigs(cfg.Bot.Connections, *model == "", *dir == ""),
+		Enabled:            enabledPlatforms,
 		Allowlist: bot.AllowlistConfig{
 			Enabled:  cfg.Bot.Allowlist.Enabled,
 			AllowAll: cfg.Bot.Allowlist.AllowAll,
@@ -150,19 +155,7 @@ func botStart(args []string, version string) int {
 		OnInbound: rememberInboundRemote,
 	}
 
-	// 创建适配器
-	adapters := make(map[bot.Platform]bot.Adapter)
-	if enabledPlatforms[bot.PlatformQQ] {
-		adapters[bot.PlatformQQ] = qq.New(cfg.Bot.QQ, logger)
-	}
-	if enabledPlatforms[bot.PlatformFeishu] {
-		adapters[bot.PlatformFeishu] = feishu.New(cfg.Bot.Feishu, logger)
-	}
-	if enabledPlatforms[bot.PlatformWeixin] {
-		adapters[bot.PlatformWeixin] = weixin.New(cfg.Bot.Weixin, logger)
-	}
-
-	gw := bot.NewGateway(gwCfg, adapters, logger)
+	gw := bot.NewGatewayWithAdapterBindings(gwCfg, botAdapterBindings(cfg, enabledPlatforms, logger), logger)
 
 	// 信号处理
 	sigCh := make(chan os.Signal, 1)
@@ -220,6 +213,138 @@ func botChannelConfigs(connections []config.BotConnectionConfig, includeModel bo
 	return out
 }
 
+func botConnectionChannelConfigs(connections []config.BotConnectionConfig, includeModel bool, includeWorkspaceRoot bool) map[string]bot.ChannelConfig {
+	if len(connections) == 0 {
+		return nil
+	}
+	out := make(map[string]bot.ChannelConfig)
+	for _, conn := range connections {
+		if !conn.Enabled {
+			continue
+		}
+		id := botConnectionRuntimeID(conn)
+		if id == "" {
+			continue
+		}
+		var channel bot.ChannelConfig
+		if includeModel {
+			channel.Model = strings.TrimSpace(conn.Model)
+		}
+		if includeWorkspaceRoot {
+			channel.WorkspaceRoot = strings.TrimSpace(conn.WorkspaceRoot)
+		}
+		if channel.Model != "" || channel.WorkspaceRoot != "" {
+			out[id] = channel
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func botPlatformConfigured(cfg *config.Config, platform bot.Platform) bool {
+	if cfg == nil {
+		return false
+	}
+	switch platform {
+	case bot.PlatformQQ:
+		if cfg.Bot.QQ.Enabled {
+			return true
+		}
+	case bot.PlatformFeishu:
+		if cfg.Bot.Feishu.Enabled {
+			return true
+		}
+	case bot.PlatformWeixin:
+		if cfg.Bot.Weixin.Enabled {
+			return true
+		}
+	}
+	for _, conn := range cfg.Bot.Connections {
+		if conn.Enabled && bot.Platform(strings.TrimSpace(conn.Provider)) == platform {
+			return true
+		}
+	}
+	return false
+}
+
+func botAdapterBindings(cfg *config.Config, enabled map[bot.Platform]bool, logger *slog.Logger) []bot.AdapterBinding {
+	if cfg == nil {
+		return nil
+	}
+	var bindings []bot.AdapterBinding
+	hasConnection := make(map[bot.Platform]bool)
+	for _, conn := range cfg.Bot.Connections {
+		if !conn.Enabled {
+			continue
+		}
+		platform := bot.Platform(strings.TrimSpace(conn.Provider))
+		if !enabled[platform] {
+			continue
+		}
+		id := botConnectionRuntimeID(conn)
+		switch platform {
+		case bot.PlatformQQ:
+			qqCfg := cfg.Bot.QQ
+			qqCfg.Enabled = true
+			qqCfg.AppID = firstNonEmptyString(strings.TrimSpace(conn.Credential.AppID), qqCfg.AppID)
+			qqCfg.AppSecretEnv = firstNonEmptyString(strings.TrimSpace(conn.Credential.AppSecretEnv), qqCfg.AppSecretEnv)
+			bindings = append(bindings, bot.AdapterBinding{ID: id, Domain: strings.TrimSpace(conn.Domain), Platform: platform, Adapter: qq.New(qqCfg, logger)})
+			hasConnection[platform] = true
+		case bot.PlatformFeishu:
+			feishuCfg := cfg.Bot.Feishu
+			feishuCfg.Enabled = true
+			feishuCfg.Domain = firstNonEmptyString(strings.TrimSpace(conn.Domain), feishuCfg.Domain)
+			feishuCfg.AppID = firstNonEmptyString(strings.TrimSpace(conn.Credential.AppID), feishuCfg.AppID)
+			feishuCfg.AppSecretEnv = firstNonEmptyString(strings.TrimSpace(conn.Credential.AppSecretEnv), feishuCfg.AppSecretEnv)
+			bindings = append(bindings, bot.AdapterBinding{ID: id, Domain: feishuCfg.Domain, Platform: platform, Adapter: feishu.New(feishuCfg, logger)})
+			hasConnection[platform] = true
+		case bot.PlatformWeixin:
+			weixinCfg := cfg.Bot.Weixin
+			weixinCfg.Enabled = true
+			weixinCfg.AccountID = firstNonEmptyString(strings.TrimSpace(conn.Credential.AccountID), weixinCfg.AccountID)
+			weixinCfg.TokenEnv = firstNonEmptyString(strings.TrimSpace(conn.Credential.TokenEnv), weixinCfg.TokenEnv)
+			bindings = append(bindings, bot.AdapterBinding{ID: id, Domain: strings.TrimSpace(conn.Domain), Platform: platform, Adapter: weixin.New(weixinCfg, logger)})
+			hasConnection[platform] = true
+		}
+	}
+	if enabled[bot.PlatformQQ] && !hasConnection[bot.PlatformQQ] {
+		bindings = append(bindings, bot.AdapterBinding{ID: string(bot.PlatformQQ), Platform: bot.PlatformQQ, Adapter: qq.New(cfg.Bot.QQ, logger)})
+	}
+	if enabled[bot.PlatformFeishu] && !hasConnection[bot.PlatformFeishu] {
+		bindings = append(bindings, bot.AdapterBinding{ID: string(bot.PlatformFeishu), Domain: cfg.Bot.Feishu.Domain, Platform: bot.PlatformFeishu, Adapter: feishu.New(cfg.Bot.Feishu, logger)})
+	}
+	if enabled[bot.PlatformWeixin] && !hasConnection[bot.PlatformWeixin] {
+		bindings = append(bindings, bot.AdapterBinding{ID: string(bot.PlatformWeixin), Domain: "weixin", Platform: bot.PlatformWeixin, Adapter: weixin.New(cfg.Bot.Weixin, logger)})
+	}
+	return bindings
+}
+
+func botConnectionRuntimeID(conn config.BotConnectionConfig) string {
+	if id := strings.TrimSpace(conn.ID); id != "" {
+		return id
+	}
+	provider := strings.TrimSpace(conn.Provider)
+	domain := strings.TrimSpace(conn.Domain)
+	if provider == "" {
+		return ""
+	}
+	if domain == "" {
+		return provider
+	}
+	return provider + "-" + domain
+}
+
+func firstNonEmptyString(vals ...string) string {
+	for _, val := range vals {
+		if strings.TrimSpace(val) != "" {
+			return val
+		}
+	}
+	return ""
+}
+
 func newBotRemoteRememberer(logger *slog.Logger) func(bot.InboundMessage) {
 	var mu sync.Mutex
 	seen := make(map[string]bool)
@@ -228,7 +353,7 @@ func newBotRemoteRememberer(logger *slog.Logger) func(bot.InboundMessage) {
 		if remoteID == "" {
 			return
 		}
-		key := string(msg.Platform) + "\x00" + remoteID
+		key := strings.Join([]string{string(msg.Platform), strings.TrimSpace(msg.ConnectionID), strings.TrimSpace(msg.Domain), remoteID}, "\x00")
 		mu.Lock()
 		if seen[key] {
 			mu.Unlock()
@@ -244,11 +369,13 @@ func newBotRemoteRememberer(logger *slog.Logger) func(bot.InboundMessage) {
 }
 
 func rememberBotInbound(msg bot.InboundMessage) error {
-	return rememberBotRemote(msg.Platform, msg.ChatID, msg.UserID, msg.ChatType)
+	return rememberBotRemote(msg)
 }
 
-func rememberBotRemote(platform bot.Platform, remoteID string, userID string, chatType bot.ChatType) error {
+func rememberBotRemote(msg bot.InboundMessage) error {
 	userPath := config.UserConfigPath()
+	platform := msg.Platform
+	remoteID := strings.TrimSpace(msg.ChatID)
 	if userPath == "" || strings.TrimSpace(remoteID) == "" {
 		return nil
 	}
@@ -257,7 +384,7 @@ func rememberBotRemote(platform bot.Platform, remoteID string, userID string, ch
 	changed := false
 	for i := range cfg.Bot.Connections {
 		conn := &cfg.Bot.Connections[i]
-		if strings.TrimSpace(conn.Provider) != string(platform) || !conn.Enabled {
+		if strings.TrimSpace(conn.Provider) != string(platform) || !conn.Enabled || !botConnectionMatchesInbound(*conn, msg) {
 			continue
 		}
 		exists := false
@@ -286,13 +413,23 @@ func rememberBotRemote(platform bot.Platform, remoteID string, userID string, ch
 		conn.UpdatedAt = now
 		changed = true
 	}
-	if rememberBotAllowlist(&cfg.Bot.Allowlist, platform, userID, remoteID, chatType) {
+	if rememberBotAllowlist(&cfg.Bot.Allowlist, platform, msg.UserID, remoteID, msg.ChatType) {
 		changed = true
 	}
 	if !changed {
 		return nil
 	}
 	return cfg.SaveTo(userPath)
+}
+
+func botConnectionMatchesInbound(conn config.BotConnectionConfig, msg bot.InboundMessage) bool {
+	if msg.ConnectionID != "" {
+		return botConnectionRuntimeID(conn) == strings.TrimSpace(msg.ConnectionID)
+	}
+	if msg.Domain != "" && strings.TrimSpace(conn.Domain) != "" {
+		return strings.EqualFold(strings.TrimSpace(conn.Domain), strings.TrimSpace(msg.Domain))
+	}
+	return true
 }
 
 func rememberBotAllowlist(allowlist *config.BotAllowlist, platform bot.Platform, userID string, chatID string, chatType bot.ChatType) bool {

@@ -16,20 +16,31 @@ import (
 
 // GatewayConfig 是 BotGateway 的配置。
 type GatewayConfig struct {
-	Model         string
-	MaxSteps      int
-	WorkspaceRoot string
-	Channels      map[Platform]ChannelConfig
-	Allowlist     AllowlistConfig
-	Enabled       map[Platform]bool
-	Debounce      time.Duration
-	OnInbound     func(InboundMessage)
+	Model              string
+	MaxSteps           int
+	WorkspaceRoot      string
+	Channels           map[Platform]ChannelConfig
+	ConnectionChannels map[string]ChannelConfig
+	Allowlist          AllowlistConfig
+	Enabled            map[Platform]bool
+	Debounce           time.Duration
+	OnInbound          func(InboundMessage)
 }
 
 // ChannelConfig overrides gateway defaults for one IM channel.
 type ChannelConfig struct {
 	Model         string
 	WorkspaceRoot string
+}
+
+// AdapterBinding attaches an adapter instance to one saved bot connection.
+// Feishu and Lark share PlatformFeishu, so ID/Domain keep their sessions,
+// replies, and per-connection settings separated at runtime.
+type AdapterBinding struct {
+	ID       string
+	Domain   string
+	Platform Platform
+	Adapter  Adapter
 }
 
 // AllowlistConfig 控制哪些用户/群可以使用 bot。
@@ -44,7 +55,7 @@ type AllowlistConfig struct {
 // 事件渲染和平台适配器。
 type BotGateway struct {
 	cfg      GatewayConfig
-	adapters map[Platform]Adapter
+	adapters []AdapterBinding
 	sessions *SessionManager
 
 	mu             sync.Mutex
@@ -90,6 +101,16 @@ func (s *sessionEventSink) Emit(e event.Event) {
 
 // NewGateway 创建一个新的 BotGateway。
 func NewGateway(cfg GatewayConfig, adapters map[Platform]Adapter, logger *slog.Logger) *BotGateway {
+	bindings := make([]AdapterBinding, 0, len(adapters))
+	for plat, adapter := range adapters {
+		bindings = append(bindings, AdapterBinding{ID: string(plat), Platform: plat, Adapter: adapter})
+	}
+	return NewGatewayWithAdapterBindings(cfg, bindings, logger)
+}
+
+// NewGatewayWithAdapterBindings creates a gateway with one or more adapter
+// instances per platform.
+func NewGatewayWithAdapterBindings(cfg GatewayConfig, adapters []AdapterBinding, logger *slog.Logger) *BotGateway {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -98,7 +119,7 @@ func NewGateway(cfg GatewayConfig, adapters map[Platform]Adapter, logger *slog.L
 	}
 	gw := &BotGateway{
 		cfg:            cfg,
-		adapters:       adapters,
+		adapters:       normalizeAdapterBindings(adapters),
 		sessions:       NewSessionManager(cfg.Debounce),
 		controllers:    make(map[string]*sessionState),
 		allowlist:      make(map[Platform]map[string]bool),
@@ -107,6 +128,25 @@ func NewGateway(cfg GatewayConfig, adapters map[Platform]Adapter, logger *slog.L
 	}
 	gw.buildAllowlist()
 	return gw
+}
+
+func normalizeAdapterBindings(adapters []AdapterBinding) []AdapterBinding {
+	out := make([]AdapterBinding, 0, len(adapters))
+	for _, binding := range adapters {
+		if binding.Adapter == nil {
+			continue
+		}
+		if binding.Platform == "" {
+			binding.Platform = binding.Adapter.Platform()
+		}
+		if strings.TrimSpace(binding.ID) == "" {
+			binding.ID = string(binding.Platform)
+		}
+		binding.ID = strings.TrimSpace(binding.ID)
+		binding.Domain = strings.TrimSpace(binding.Domain)
+		out = append(out, binding)
+	}
+	return out
 }
 
 func (gw *BotGateway) buildAllowlist() {
@@ -127,23 +167,23 @@ func (gw *BotGateway) buildAllowlist() {
 
 // Start 启动所有已启用的平台适配器并开始处理消息。
 func (gw *BotGateway) Start(ctx context.Context) error {
-	for plat, adapter := range gw.adapters {
-		if !gw.cfg.Enabled[plat] {
-			gw.logger.Info("platform disabled, skipping", "platform", plat)
+	for _, binding := range gw.adapters {
+		if !gw.cfg.Enabled[binding.Platform] {
+			gw.logger.Info("platform disabled, skipping", "platform", binding.Platform, "connection", binding.ID)
 			continue
 		}
-		gw.logger.Info("starting adapter", "platform", plat)
-		if err := adapter.Start(ctx); err != nil {
-			return fmt.Errorf("start adapter %s: %w", plat, err)
+		gw.logger.Info("starting adapter", "platform", binding.Platform, "connection", binding.ID, "domain", binding.Domain)
+		if err := binding.Adapter.Start(ctx); err != nil {
+			return fmt.Errorf("start adapter %s: %w", binding.ID, err)
 		}
 	}
 
 	// 合并所有适配器的消息通道
-	for plat, adapter := range gw.adapters {
-		if !gw.cfg.Enabled[plat] {
+	for _, binding := range gw.adapters {
+		if !gw.cfg.Enabled[binding.Platform] {
 			continue
 		}
-		go gw.dispatchLoop(ctx, plat, adapter)
+		go gw.dispatchLoop(ctx, binding)
 	}
 
 	return nil
@@ -161,33 +201,41 @@ func (gw *BotGateway) Stop() {
 	}
 	gw.mu.Unlock()
 
-	for _, adapter := range gw.adapters {
-		if err := adapter.Stop(); err != nil {
-			gw.logger.Warn("error stopping adapter", "err", err)
+	for _, binding := range gw.adapters {
+		if err := binding.Adapter.Stop(); err != nil {
+			gw.logger.Warn("error stopping adapter", "platform", binding.Platform, "connection", binding.ID, "err", err)
 		}
 	}
 }
 
-func (gw *BotGateway) dispatchLoop(ctx context.Context, plat Platform, adapter Adapter) {
+func (gw *BotGateway) dispatchLoop(ctx context.Context, binding AdapterBinding) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case msg, ok := <-adapter.Messages():
+		case msg, ok := <-binding.Adapter.Messages():
 			if !ok {
 				return
 			}
-			gw.handleMessage(ctx, plat, adapter, msg)
+			gw.handleMessage(ctx, binding, msg)
 		}
 	}
 }
 
-func (gw *BotGateway) handleMessage(ctx context.Context, plat Platform, adapter Adapter, msg InboundMessage) {
-	msg.Platform = plat
+func (gw *BotGateway) handleMessage(ctx context.Context, binding AdapterBinding, msg InboundMessage) {
+	msg.Platform = binding.Platform
+	if msg.ConnectionID == "" {
+		msg.ConnectionID = binding.ID
+	}
+	if msg.Domain == "" {
+		msg.Domain = binding.Domain
+	}
 	src := msg.Session()
 	key := BuildSessionKey(src)
 	logFields := []any{
-		"platform", plat,
+		"platform", binding.Platform,
+		"connection", msg.ConnectionID,
+		"domain", msg.Domain,
 		"chat_type", msg.ChatType,
 		"chat", hashID(msg.ChatID),
 		"user", hashID(msg.UserID),
@@ -199,9 +247,9 @@ func (gw *BotGateway) handleMessage(ctx context.Context, plat Platform, adapter 
 	gw.logger.Info("bot inbound message", logFields...)
 
 	// allowlist 检查
-	if !gw.checkAllowlist(plat, msg) {
-		gw.logger.Info("user not in allowlist", "platform", plat, "user", hashID(msg.UserID))
-		_ = gw.sendText(ctx, adapter, msg, "抱歉，您没有使用此 bot 的权限。")
+	if !gw.checkAllowlist(binding.Platform, msg) {
+		gw.logger.Info("user not in allowlist", "platform", binding.Platform, "connection", msg.ConnectionID, "user", hashID(msg.UserID))
+		_ = gw.sendText(ctx, binding.Adapter, msg, "抱歉，您没有使用此 bot 的权限。")
 		return
 	}
 	if gw.cfg.OnInbound != nil {
@@ -211,11 +259,11 @@ func (gw *BotGateway) handleMessage(ctx context.Context, plat Platform, adapter 
 	// 斜杠命令处理
 	if IsSlashBypass(msg.Text) {
 		gw.logger.Info("bot slash command", logFields...)
-		gw.handleSlashCommand(ctx, adapter, key, msg)
+		gw.handleSlashCommand(ctx, binding.Adapter, key, msg)
 		return
 	}
 
-	gw.addPendingReaction(ctx, plat, adapter, msg)
+	gw.addPendingReaction(ctx, binding.Platform, binding.Adapter, msg)
 
 	// session 并发控制
 	acquired, merged := gw.sessions.TryAcquire(key, msg)
@@ -229,7 +277,7 @@ func (gw *BotGateway) handleMessage(ctx context.Context, plat Platform, adapter 
 		return
 	}
 
-	gw.runTurn(ctx, adapter, key, msg)
+	gw.runTurn(ctx, binding.Adapter, key, msg)
 }
 
 func (gw *BotGateway) addPendingReaction(ctx context.Context, plat Platform, adapter Adapter, msg InboundMessage) {
@@ -401,7 +449,7 @@ func (gw *BotGateway) runTurn(ctx context.Context, adapter Adapter, key string, 
 	_ = adapter.SendTyping(ctx, msg.ChatID)
 
 	// 创建事件渲染 sink
-	sink := newRenderSink(ctx, adapter, msg.ChatID, msg.ChatType, msg.MessageID, gw.logger, func(ask event.Ask) {
+	sink := newRenderSink(ctx, adapter, msg.ConnectionID, msg.Domain, msg.ChatID, msg.ChatType, msg.MessageID, gw.logger, func(ask event.Ask) {
 		gw.mu.Lock()
 		if state.pendingAsks == nil {
 			state.pendingAsks = make(map[string][]event.AskQuestion)
@@ -444,7 +492,7 @@ func (gw *BotGateway) getOrCreateSession(ctx context.Context, key string, msg In
 
 	// 创建新 Controller
 	sessionSink := &sessionEventSink{}
-	model, workspaceRoot := gw.sessionOptionsForPlatform(msg.Platform)
+	model, workspaceRoot := gw.sessionOptionsForMessage(msg)
 	gw.logger.Info("bot session creating", "platform", msg.Platform, "chat_type", msg.ChatType, "chat", hashID(msg.ChatID), "session", key[:8], "model", model, "workspace_set", strings.TrimSpace(workspaceRoot) != "")
 	ctrl, err := boot.Build(ctx, boot.Options{
 		Model:         model,
@@ -474,13 +522,24 @@ func (gw *BotGateway) getOrCreateSession(ctx context.Context, key string, msg In
 	return state
 }
 
-func (gw *BotGateway) sessionOptionsForPlatform(plat Platform) (model string, workspaceRoot string) {
+func (gw *BotGateway) sessionOptionsForMessage(msg InboundMessage) (model string, workspaceRoot string) {
 	model = gw.cfg.Model
 	workspaceRoot = gw.cfg.WorkspaceRoot
+	if gw.cfg.ConnectionChannels != nil && msg.ConnectionID != "" {
+		if channel, ok := gw.cfg.ConnectionChannels[msg.ConnectionID]; ok {
+			if value := strings.TrimSpace(channel.Model); value != "" {
+				model = value
+			}
+			if value := strings.TrimSpace(channel.WorkspaceRoot); value != "" {
+				workspaceRoot = value
+			}
+			return model, workspaceRoot
+		}
+	}
 	if gw.cfg.Channels == nil {
 		return model, workspaceRoot
 	}
-	channel, ok := gw.cfg.Channels[plat]
+	channel, ok := gw.cfg.Channels[msg.Platform]
 	if !ok {
 		return model, workspaceRoot
 	}
@@ -495,6 +554,8 @@ func (gw *BotGateway) sessionOptionsForPlatform(plat Platform) (model string, wo
 
 func (gw *BotGateway) sendText(ctx context.Context, adapter Adapter, msg InboundMessage, text string) error {
 	result, err := adapter.Send(ctx, OutboundMessage{
+		ConnectionID: msg.ConnectionID,
+		Domain:       msg.Domain,
 		ChatID:       msg.ChatID,
 		ChatType:     msg.ChatType,
 		Text:         text,

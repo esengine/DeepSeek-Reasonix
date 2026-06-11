@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 
@@ -34,6 +35,7 @@ func TestNormalizeBotInstallTarget(t *testing.T) {
 
 func TestFeishuInstallUsesReturnedTenantBrandAndStoresSecret(t *testing.T) {
 	isolateDesktopUserDirs(t)
+	t.Cleanup(func() { _ = os.Unsetenv("LARK_BOT_APP_SECRET") })
 	withRewrittenHTTP(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/oauth/v1/app/registration" {
 			http.NotFound(w, r)
@@ -109,6 +111,19 @@ func TestFeishuInstallUsesReturnedTenantBrandAndStoresSecret(t *testing.T) {
 	cfg := config.LoadForEdit(config.UserConfigPath())
 	if !cfg.Bot.Enabled || !cfg.Bot.Feishu.Enabled || cfg.Bot.Feishu.Domain != "lark" || cfg.Bot.Feishu.Mode != "websocket" || !cfg.Bot.Feishu.RequireMention {
 		t.Fatalf("saved feishu config = %+v, want enabled websocket lark with mention gating", cfg.Bot.Feishu)
+	}
+	if err := os.Unsetenv("LARK_BOT_APP_SECRET"); err != nil {
+		t.Fatalf("unset lark secret env: %v", err)
+	}
+	reloaded, err := config.Load()
+	if err != nil {
+		t.Fatalf("reload config: %v", err)
+	}
+	if got := os.Getenv("LARK_BOT_APP_SECRET"); got != "secret-1" {
+		t.Fatalf("reloaded LARK_BOT_APP_SECRET = %q, want persisted secret", got)
+	}
+	if len(reloaded.Bot.Connections) != 1 || !botConnectionView(reloaded.Bot.Connections[0]).Credential.SecretSet {
+		t.Fatalf("reloaded connections = %+v, want secret to survive restart", reloaded.Bot.Connections)
 	}
 }
 
