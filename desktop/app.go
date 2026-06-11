@@ -4326,12 +4326,13 @@ type MemoryScope struct {
 // MemoryView is the whole memory panel payload: hierarchical docs, active saved
 // facts, archived facts, and the writable scopes for the quick-add selector.
 type MemoryView struct {
-	Docs      []MemoryDoc     `json:"docs"`
-	Facts     []MemoryFact    `json:"facts"`
-	Archives  []MemoryArchive `json:"archives"`
-	Scopes    []MemoryScope   `json:"scopes"`
-	StoreDir  string          `json:"storeDir"`
-	Available bool            `json:"available"`
+	Docs           []MemoryDoc     `json:"docs"`
+	Facts          []MemoryFact    `json:"facts"`
+	Archives       []MemoryArchive `json:"archives"`
+	Scopes         []MemoryScope   `json:"scopes"`
+	StoreDir       string          `json:"storeDir"`
+	StoreGlobalDir string          `json:"storeGlobalDir,omitempty"`
+	Available      bool            `json:"available"`
 }
 
 // writableScopes are the quick-add targets the panel offers, broad → specific.
@@ -4341,20 +4342,41 @@ var writableScopes = []memory.Scope{memory.ScopeUser, memory.ScopeProject, memor
 // active/archived auto-memories, and the writable scopes. Read-only; mutations
 // go through Remember / SaveDoc.
 func (a *App) Memory() MemoryView {
-	// Always return non-nil slices: a nil Go slice marshals to JSON `null`, which
-	// would crash the panel's `view.facts.length` / `.map`.
+	return a.memoryForCtrl(nil, true)
+}
+
+// MemoryForTab returns the loaded memory for a specific tab's controller,
+// so the panel can show memory for any open project, not just the active tab.
+// If the tab does not exist or has no controller, returns an empty view
+// instead of falling back to the active tab (which would show the wrong data).
+// An empty tabID is treated as "no tab specified" and falls back to the
+// active tab for backward compatibility.
+func (a *App) MemoryForTab(tabID string) MemoryView {
+	if tabID == "" {
+		return a.memoryForCtrl(nil, true)
+	}
+	return a.memoryForCtrl(a.ctrlByTabID(tabID), false)
+}
+
+func (a *App) memoryForCtrl(ctrl *control.Controller, fallback bool) MemoryView {
 	view := MemoryView{Docs: []MemoryDoc{}, Facts: []MemoryFact{}, Archives: []MemoryArchive{}, Scopes: []MemoryScope{}}
-	a.mu.RLock()
-	ctrl := a.activeCtrlLocked()
-	a.mu.RUnlock()
 	if ctrl == nil {
-		return view
+		if !fallback {
+			return view
+		}
+		a.mu.RLock()
+		ctrl = a.activeCtrlLocked()
+		a.mu.RUnlock()
+		if ctrl == nil {
+			return view
+		}
 	}
 	set := ctrl.Memory()
 	if set == nil {
 		return view
 	}
 	view.StoreDir = set.Store.Dir
+	view.StoreGlobalDir = set.Store.GlobalDir
 	view.Available = true
 	for _, d := range set.Docs {
 		view.Docs = append(view.Docs, MemoryDoc{Path: d.Path, Scope: string(d.Scope), Body: d.Body})
@@ -4375,7 +4397,7 @@ func (a *App) Memory() MemoryView {
 		})
 	}
 	for _, sc := range writableScopes {
-		if p := set.DocPath(sc); p != "" { // user scope yields "" when no config dir
+		if p := set.DocPath(sc); p != "" {
 			view.Scopes = append(view.Scopes, MemoryScope{Scope: string(sc), Path: p})
 		}
 	}
@@ -4386,11 +4408,27 @@ func (a *App) Memory() MemoryView {
 // panel's explicit "remember" action, equivalent to typing "/remember <note>".
 // An unknown scope falls back to project. Returns the file written.
 func (a *App) Remember(scope, note string) (string, error) {
-	a.mu.RLock()
-	ctrl := a.activeCtrlLocked()
-	a.mu.RUnlock()
+	return a.rememberForCtrl(nil, scope, note, true)
+}
+
+func (a *App) RememberForTab(tabID, scope, note string) (string, error) {
+	if tabID == "" {
+		return a.rememberForCtrl(nil, scope, note, true)
+	}
+	return a.rememberForCtrl(a.ctrlByTabID(tabID), scope, note, false)
+}
+
+func (a *App) rememberForCtrl(ctrl *control.Controller, scope, note string, fallback bool) (string, error) {
 	if ctrl == nil {
-		return "", nil
+		if !fallback {
+			return "", nil
+		}
+		a.mu.RLock()
+		ctrl = a.activeCtrlLocked()
+		a.mu.RUnlock()
+		if ctrl == nil {
+			return "", nil
+		}
 	}
 	return ctrl.QuickAdd(parseScope(scope), note)
 }
@@ -4398,11 +4436,27 @@ func (a *App) Remember(scope, note string) (string, error) {
 // Forget deletes a saved auto-memory by name — the panel's delete action for a
 // fact the model owns. A no-op when no controller is attached.
 func (a *App) Forget(name string) error {
-	a.mu.RLock()
-	ctrl := a.activeCtrlLocked()
-	a.mu.RUnlock()
+	return a.forgetForCtrl(nil, name, true)
+}
+
+func (a *App) ForgetForTab(tabID, name string) error {
+	if tabID == "" {
+		return a.forgetForCtrl(nil, name, true)
+	}
+	return a.forgetForCtrl(a.ctrlByTabID(tabID), name, false)
+}
+
+func (a *App) forgetForCtrl(ctrl *control.Controller, name string, fallback bool) error {
 	if ctrl == nil {
-		return nil
+		if !fallback {
+			return nil
+		}
+		a.mu.RLock()
+		ctrl = a.activeCtrlLocked()
+		a.mu.RUnlock()
+		if ctrl == nil {
+			return nil
+		}
 	}
 	return ctrl.ForgetMemory(name)
 }
@@ -4410,11 +4464,27 @@ func (a *App) Forget(name string) error {
 // SaveDoc overwrites a memory doc with the panel editor's contents. The controller
 // validates path against the recognized memory files. Returns the file written.
 func (a *App) SaveDoc(path, body string) (string, error) {
-	a.mu.RLock()
-	ctrl := a.activeCtrlLocked()
-	a.mu.RUnlock()
+	return a.saveDocForCtrl(nil, path, body, true)
+}
+
+func (a *App) SaveDocForTab(tabID, path, body string) (string, error) {
+	if tabID == "" {
+		return a.saveDocForCtrl(nil, path, body, true)
+	}
+	return a.saveDocForCtrl(a.ctrlByTabID(tabID), path, body, false)
+}
+
+func (a *App) saveDocForCtrl(ctrl *control.Controller, path, body string, fallback bool) (string, error) {
 	if ctrl == nil {
-		return "", nil
+		if !fallback {
+			return "", nil
+		}
+		a.mu.RLock()
+		ctrl = a.activeCtrlLocked()
+		a.mu.RUnlock()
+		if ctrl == nil {
+			return "", nil
+		}
 	}
 	return ctrl.SaveDoc(path, body)
 }

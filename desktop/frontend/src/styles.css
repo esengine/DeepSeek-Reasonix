@@ -7398,6 +7398,18 @@ a[href] {
   flex-direction: column;
   gap: 22px;
 }
+.mem-tab-selector {
+  margin-bottom: 8px;
+}
+.mem-tab-select {
+  width: 100%;
+  padding: 6px 8px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+}
 .mem-section {
   min-width: 0;
 }

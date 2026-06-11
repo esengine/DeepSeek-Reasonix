@@ -567,6 +567,7 @@ export interface MemoryView {
   archives: MemoryArchive[];
   scopes: MemoryScope[];
   storeDir: string;
+  storeGlobalDir?: string;
   available: boolean;
 }
 
