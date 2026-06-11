@@ -23,9 +23,9 @@ const (
 	Version = "v0.9.7"
 	cgRepo  = "colbymchenry/codegraph"
 
-	officialMirrorBase         = "https://pub-147fb53b9c1e4bbf891a257968619ea7.r2.dev/codegraph"
+	officialMirrorBase         = "https://dl.reasonix.io/codegraph"
 	officialMainlandMirrorBase = ""
-	perSourceDownloadTimeout   = 15 * time.Second
+	perSourceDownloadTimeout   = 60 * time.Second
 
 	renameAttempts = 5
 	renameBackoff  = 200 * time.Millisecond
