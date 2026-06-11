@@ -3,6 +3,27 @@
 
 import { t } from "./i18n";
 
+function sendButton(text: string): HTMLButtonElement | null {
+  // Resolved at click time via window.go, not the bridge module: this overlay must
+  // stay usable even when the rest of the app (and its imports) is broken.
+  const report = window.go?.main?.App?.ReportCrash;
+  if (!report) return null;
+  const send = document.createElement("button");
+  send.className = "crash-overlay__send";
+  send.textContent = t("crash.send");
+  send.onclick = async () => {
+    send.disabled = true;
+    send.textContent = t("crash.sending");
+    try {
+      await report("crash", text);
+      send.textContent = t("crash.sent");
+    } catch {
+      send.textContent = t("crash.sendFailed");
+    }
+  };
+  return send;
+}
+
 function paint(text: string) {
   let host = document.getElementById("crash-overlay");
   if (!host) {
@@ -20,7 +41,15 @@ function paint(text: string) {
   copy.className = "crash-overlay__copy";
   copy.textContent = t("crash.copy");
   copy.onclick = () => void navigator.clipboard?.writeText(text);
-  host.replaceChildren(title, body, copy);
+  const actions = document.createElement("div");
+  actions.className = "crash-overlay__actions";
+  const send = sendButton(text);
+  if (send) actions.append(send);
+  actions.append(copy);
+  const note = document.createElement("div");
+  note.className = "crash-overlay__note";
+  note.textContent = t("crash.privacyNote");
+  host.replaceChildren(title, body, actions, ...(send ? [note] : []));
 }
 
 function format(label: string, err: unknown, extra?: string): string {

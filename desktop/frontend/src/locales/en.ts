@@ -1107,8 +1107,13 @@ export const en = {
   "context.durationMinutesSeconds": "{minutes}m {seconds}s",
 
   // crash page
-  "crash.title": "Reasonix hit an error — screenshot this and send it over",
+  "crash.title": "Reasonix hit an error — send us the report, or copy it",
   "crash.copy": "Copy",
+  "crash.send": "Send report",
+  "crash.sending": "Sending…",
+  "crash.sent": "Sent — thanks!",
+  "crash.sendFailed": "Send failed — use Copy instead",
+  "crash.privacyNote": "The report contains only the error text above (user names in paths removed) plus app version and OS.",
 
   // mock / demo seed data (browser dev only)
   "mock.sessionFixLogin": "fix the login bug in auth.go",

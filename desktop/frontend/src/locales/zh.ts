@@ -1109,8 +1109,13 @@ export const zh: Record<DictKey, string> = {
   "context.durationMinutesSeconds": "{minutes}分{seconds}秒",
 
   // 崩溃兜底页
-  "crash.title": "Reasonix 遇到错误 —— 请截图发送",
+  "crash.title": "Reasonix 遇到错误 —— 可以一键发送报告，或复制后反馈",
   "crash.copy": "复制",
+  "crash.send": "发送报告",
+  "crash.sending": "发送中…",
+  "crash.sent": "已发送，谢谢！",
+  "crash.sendFailed": "发送失败 —— 请改用复制",
+  "crash.privacyNote": "报告仅包含上方错误文本（路径中的用户名已移除）以及应用版本和操作系统。",
 
   // 模拟/演示种子数据（仅浏览器开发模式）
   "mock.sessionFixLogin": "fix the login bug in auth.go",
