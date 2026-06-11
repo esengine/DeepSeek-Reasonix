@@ -222,10 +222,6 @@ type chatTUI struct {
 	mcp         *mcpManager
 	mcpDisabled map[string]bool
 
-	// clearConfirm is the destructive "/clear" confirmation overlay. It is separate
-	// from /new because /clear discards the current transcript instead of saving it.
-	clearConfirm *clearConfirm
-
 	// lastCtrlCAt records when Ctrl+C was pressed while idle on an empty
 	// composer, enabling a "press again to quit" confirmation pattern (1.5s
 	// window). Reset when Ctrl+C clears non-empty input instead.
@@ -812,7 +808,7 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.updateCompletion()
 			return m, finalize(m, cmds)
 		}
-		if !m.chooserTyping() && m.pendingApproval == nil && m.rewind == nil && m.resumePick == nil && m.mcp == nil && m.clearConfirm == nil && m.mcpImport == nil && m.skillPick == nil && m.shouldFoldPaste(msg.Content) {
+		if !m.chooserTyping() && m.pendingApproval == nil && m.rewind == nil && m.resumePick == nil && m.mcp == nil && m.mcpImport == nil && m.skillPick == nil && m.shouldFoldPaste(msg.Content) {
 			m.insertFoldedPaste(msg.Content)
 			m.growInputToFit()
 			m.updateCompletion()
@@ -885,10 +881,6 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// The MCP manager is modal while open: keys navigate it.
 		if m.mcp != nil {
 			return m.handleMCPManagerKey(msg)
-		}
-		// The destructive /clear confirmation is modal while open.
-		if m.clearConfirm != nil {
-			return m.handleClearConfirmKey(msg)
 		}
 		// The skill picker is modal while open: keys navigate it.
 		if m.skillPick != nil {
@@ -1491,7 +1483,7 @@ func (m chatTUI) bottomRows() int {
 // reserve rows for a composer that cannot receive input, leaving a confusing
 // blank/bordered area at the bottom of the TUI.
 func (m chatTUI) hideComposer() bool {
-	if m.mcp != nil || m.clearConfirm != nil || m.mcpImport != nil || m.skillPick != nil || m.resumePick != nil || m.rewind != nil || m.pendingApproval != nil {
+	if m.mcp != nil || m.mcpImport != nil || m.skillPick != nil || m.resumePick != nil || m.rewind != nil || m.pendingApproval != nil {
 		return true
 	}
 	return m.chooser != nil && !m.chooser.typing
@@ -1508,9 +1500,6 @@ func (m chatTUI) transcriptHeight() int {
 
 func (m chatTUI) renderMainManager() string {
 	if card := m.renderMCPManager(); card != "" {
-		return card
-	}
-	if card := m.renderClearConfirm(); card != "" {
 		return card
 	}
 	return m.renderSkillPicker()
@@ -1533,8 +1522,6 @@ func (m chatTUI) renderMainManagerFooter() string {
 	switch {
 	case m.mcp != nil:
 		hint = m.mcp.footerHint()
-	case m.clearConfirm != nil:
-		hint = "Enter confirm · y clear · n/Esc cancel"
 	case m.skillPick != nil:
 		hint = m.skillPickerFooterHint()
 	}

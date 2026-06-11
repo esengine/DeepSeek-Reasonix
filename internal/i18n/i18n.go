@@ -122,7 +122,6 @@ type Messages struct {
 	SlashCompactFailed string // "/compact" errored, prefixed before the underlying error
 	SlashNewDone       string // "/new" succeeded
 	SlashNewFailed     string // "/new" errored
-	SlashClearPrompt   string // "/clear" destructive confirmation prompt
 	SlashClearDone     string // "/clear" succeeded
 	SlashClearFailed   string // "/clear" errored
 	SlashTodoCleared   string // "/todo" dismissed the pinned task list

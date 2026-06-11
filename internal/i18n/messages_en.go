@@ -91,7 +91,6 @@ var English = Messages{
 	SlashCompactFailed: "compaction failed",
 	SlashNewDone:       "new session started — previous transcript saved",
 	SlashNewFailed:     "could not start a new session",
-	SlashClearPrompt:   "Clear current context without saving?",
 	SlashClearDone:     "current context cleared",
 	SlashClearFailed:   "could not clear current context",
 	SlashUnavailable:   "command unavailable in this build",

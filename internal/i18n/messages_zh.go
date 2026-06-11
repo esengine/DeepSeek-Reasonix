@@ -92,7 +92,6 @@ var Chinese = Messages{
 	SlashCompactFailed: "压缩失败",
 	SlashNewDone:       "已开启新会话 — 之前的对话已存档",
 	SlashNewFailed:     "新建会话失败",
-	SlashClearPrompt:   "清空当前上下文且不保存？",
 	SlashClearDone:     "已清空当前上下文",
 	SlashClearFailed:   "清空当前上下文失败",
 	SlashUnavailable:   "当前构建不支持该命令",
