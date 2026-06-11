@@ -2497,7 +2497,10 @@ a[href] {
 
 /* ── messages ────────────────────────────────────────────────────────────── */
 .msg {
+  --wails-draggable: no-drag;
   margin: 18px auto;
+  user-select: text;
+  -webkit-user-select: text;
 }
 .msg--user {
   display: flex;
@@ -3084,6 +3087,8 @@ a[href] {
 }
 .msg--assistant .msg__body {
   line-height: 1.68;
+  user-select: text;
+  -webkit-user-select: text;
 }
 .turn-actions {
   display: flex;
