@@ -245,7 +245,9 @@ export function WorkspacePanel({
   const [recentOpen, setRecentOpen] = useState(false);
   const lastPreviewModeActiveRef = useRef<boolean | null>(null);
   const lastRevealRequestIdRef = useRef<number | null>(null);
+  const dismissedRevealRequestIdRef = useRef<number | null>(null);
   const lastChangeRevealRequestIdRef = useRef<number | null>(null);
+  const dismissedChangeRevealRequestIdRef = useRef<number | null>(null);
   const lastFileListRequestIdRef = useRef<number | null>(null);
   const dismissedFileListRequestIdRef = useRef<number | null>(null);
   const lastChangeListRequestIdRef = useRef<number | null>(null);
@@ -446,7 +448,14 @@ export function WorkspacePanel({
   }, [changeListRequest, loadGitHistory, open, scopedChangeRows, viewMode]);
 
   useEffect(() => {
+    if (!open || revealPathRequest) return;
+    lastRevealRequestIdRef.current = null;
+    dismissedRevealRequestIdRef.current = null;
+  }, [open, revealPathRequest]);
+
+  useEffect(() => {
     if (!open || !revealPathRequest) return;
+    if (dismissedRevealRequestIdRef.current === revealPathRequest.id) return;
     if (
       lastRevealRequestIdRef.current === revealPathRequest.id &&
       selectedPath === revealPathRequest.path &&
@@ -455,6 +464,7 @@ export function WorkspacePanel({
       return;
     }
     lastRevealRequestIdRef.current = revealPathRequest.id;
+    dismissedRevealRequestIdRef.current = null;
     setViewMode("files");
     setTreeVisible(true);
     setScopedFilePaths(null);
@@ -465,7 +475,14 @@ export function WorkspacePanel({
   }, [open, revealPathRequest, selectFile, selectedPath, viewMode]);
 
   useEffect(() => {
+    if (!open || changeRevealRequest) return;
+    lastChangeRevealRequestIdRef.current = null;
+    dismissedChangeRevealRequestIdRef.current = null;
+  }, [changeRevealRequest, open]);
+
+  useEffect(() => {
     if (!open || !changeRevealRequest) return;
+    if (dismissedChangeRevealRequestIdRef.current === changeRevealRequest.id) return;
     if (
       lastChangeRevealRequestIdRef.current === changeRevealRequest.id &&
       selectedPath === changeRevealRequest.path &&
@@ -474,6 +491,7 @@ export function WorkspacePanel({
       return;
     }
     lastChangeRevealRequestIdRef.current = changeRevealRequest.id;
+    dismissedChangeRevealRequestIdRef.current = null;
     setViewMode("changed");
     setScopedFilePaths(null);
     setScopedChangeRows(null);
@@ -585,6 +603,12 @@ export function WorkspacePanel({
   );
 
   const closeTab = (path: string) => {
+    if (lastRevealRequestIdRef.current === revealPathRequest?.id && revealPathRequest.path === path) {
+      dismissedRevealRequestIdRef.current = revealPathRequest.id;
+    }
+    if (lastChangeRevealRequestIdRef.current === changeRevealRequest?.id && changeRevealRequest.path === path) {
+      dismissedChangeRevealRequestIdRef.current = changeRevealRequest.id;
+    }
     setOpenTabs((tabs) => {
       const next = tabs.filter((tab) => tab !== path);
       if (selectedPath === path) {
