@@ -359,9 +359,9 @@ func (a *App) restoreOrBuildTabs() {
 	// Prefer DesktopLanguage (desktop UI setting) over Language (CLI setting),
 	// so the user's language choice in desktop settings takes effect.
 	if cfg, err := config.Load(); err == nil {
-		lang := cfg.Language
+		lang := cfg.DesktopLanguage()
 		if lang == "" {
-			lang = cfg.DesktopLanguage()
+			lang = cfg.Language
 		}
 		i18n.DetectLanguage(lang)
 	}
