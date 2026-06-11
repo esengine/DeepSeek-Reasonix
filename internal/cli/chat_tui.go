@@ -1777,7 +1777,6 @@ func (m *chatTUI) collapseToolOutput(id string) {
 		return
 	}
 	m.collapseShellSlot(id, m.toolStreamIdx)
-	m.transcriptDirty = true
 	m.toolStreamIdx = -1
 	m.toolStreamID = ""
 	m.toolTail = m.toolTail[:0]
@@ -1794,6 +1793,7 @@ func (m *chatTUI) collapseToolOutput(id string) {
 // for "shell-" prefixed ids), since toolTail/toolLineCount are reset
 // whenever a new tool takes over via beginToolRunning.
 func (m *chatTUI) collapseShellSlot(id string, idx int) {
+	m.transcriptDirty = true
 	n := -1
 	if id == m.toolStreamID {
 		n = m.toolLineCount
