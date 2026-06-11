@@ -1467,7 +1467,6 @@ export default function App() {
               onTabClose={(id) => void handleTabClose(id)}
               onTabsClose={(ids, nextActiveTabId) => void handleTabsClose(ids, nextActiveTabId)}
               onTabsReorder={(ids) => void handleTabsReorder(ids)}
-              onNewTab={() => void handleNewTab()}
             />
             {!workspacePanelMaximized && (
               <Tooltip

@@ -9478,25 +9478,6 @@ a[href] {
   color: var(--fg);
 }
 
-.tabbar__new {
-  flex: 0 0 auto;
-  width: 30px;
-  height: 30px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-left: 1px;
-  border: none;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--fg-dim);
-}
-
-.tabbar__new:hover {
-  background: var(--button-bg);
-  color: var(--fg);
-}
-
 .project-tree {
   --project-tree-action-column: 36px;
   --project-tree-edge-gap: 6px;

@@ -34,7 +34,7 @@ export const zh: Record<DictKey, string> = {
   "tabBar.closeTab": "关闭标签页",
   "tabBar.closeOtherTabs": "关闭其他标签页",
   "tabBar.closeTabsToRight": "关闭右侧标签页",
-  "tabBar.newSession": "新建会话",
+
   "tabBar.tabActions": "标签页操作",
 
   // 侧边栏

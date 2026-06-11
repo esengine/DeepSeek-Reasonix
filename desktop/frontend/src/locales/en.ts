@@ -33,7 +33,7 @@ export const en = {
   "tabBar.closeTab": "Close tab",
   "tabBar.closeOtherTabs": "Close other tabs",
   "tabBar.closeTabsToRight": "Close tabs to right",
-  "tabBar.newSession": "New session",
+
   "tabBar.tabActions": "Tab actions",
 
   // sidebar
