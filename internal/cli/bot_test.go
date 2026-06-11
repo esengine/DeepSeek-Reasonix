@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"reasonix/internal/bot"
+	"reasonix/internal/botruntime"
 	"reasonix/internal/config"
 )
 
@@ -28,10 +29,10 @@ func TestRememberBotRemoteStoresIncomingChatID(t *testing.T) {
 		ChatID:   "wx-chat-1",
 		UserID:   "wx-user-1",
 	}
-	if err := rememberBotInbound(msg); err != nil {
+	if err := botruntime.RememberInbound(msg); err != nil {
 		t.Fatalf("rememberBotInbound: %v", err)
 	}
-	if err := rememberBotInbound(msg); err != nil {
+	if err := botruntime.RememberInbound(msg); err != nil {
 		t.Fatalf("rememberBotRemote duplicate: %v", err)
 	}
 
@@ -80,7 +81,7 @@ func TestRememberBotRemoteKeepsProjectScopedConnection(t *testing.T) {
 		t.Fatalf("save config: %v", err)
 	}
 
-	if err := rememberBotInbound(bot.InboundMessage{
+	if err := botruntime.RememberInbound(bot.InboundMessage{
 		Platform: bot.PlatformFeishu,
 		ChatType: bot.ChatDM,
 		ChatID:   "oc-chat-1",
@@ -117,10 +118,10 @@ func TestRememberBotInboundStoresGroupAllowlist(t *testing.T) {
 		ChatID:   "oc-group-1",
 		UserID:   "ou-user-1",
 	}
-	if err := rememberBotInbound(msg); err != nil {
+	if err := botruntime.RememberInbound(msg); err != nil {
 		t.Fatalf("rememberBotInbound: %v", err)
 	}
-	if err := rememberBotInbound(msg); err != nil {
+	if err := botruntime.RememberInbound(msg); err != nil {
 		t.Fatalf("rememberBotInbound duplicate: %v", err)
 	}
 
@@ -166,7 +167,7 @@ func TestBotConnectionChannelConfigsKeepFeishuAndLarkSeparate(t *testing.T) {
 		{ID: "feishu-feishu", Provider: "feishu", Domain: "feishu", Enabled: true, Model: "feishu-model", WorkspaceRoot: "/feishu"},
 		{ID: "feishu-lark", Provider: "feishu", Domain: "lark", Enabled: true, Model: "lark-model", WorkspaceRoot: "/lark"},
 	}
-	channels := botConnectionChannelConfigs(connections, true, true)
+	channels := botruntime.ConnectionChannelConfigs(connections, true, true)
 	if channels["feishu-feishu"].Model != "feishu-model" || channels["feishu-feishu"].WorkspaceRoot != "/feishu" {
 		t.Fatalf("feishu channel = %+v, want feishu override", channels["feishu-feishu"])
 	}
@@ -183,7 +184,7 @@ func TestBotAdapterBindingsCreateSeparateFeishuAndLarkInstances(t *testing.T) {
 		{ID: "weixin-weixin", Provider: "weixin", Domain: "weixin", Enabled: true, Credential: config.BotConnectionCredential{AccountID: "wx-account", TokenEnv: "WEIXIN_BOT_TOKEN"}},
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	bindings := botAdapterBindings(cfg, map[bot.Platform]bool{bot.PlatformFeishu: true, bot.PlatformWeixin: true}, logger)
+	bindings := botruntime.AdapterBindings(cfg, map[bot.Platform]bool{bot.PlatformFeishu: true, bot.PlatformWeixin: true}, logger)
 
 	got := map[string]bot.AdapterBinding{}
 	for _, binding := range bindings {
@@ -210,7 +211,7 @@ func TestRememberBotInboundUsesConnectionID(t *testing.T) {
 		t.Fatalf("save config: %v", err)
 	}
 
-	if err := rememberBotInbound(bot.InboundMessage{
+	if err := botruntime.RememberInbound(bot.InboundMessage{
 		Platform:     bot.PlatformFeishu,
 		ConnectionID: "feishu-lark",
 		Domain:       "lark",

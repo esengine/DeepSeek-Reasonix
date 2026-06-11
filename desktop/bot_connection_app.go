@@ -162,10 +162,12 @@ func (a *App) PollBotConnectionInstall(installID string) (BotInstallPollResult, 
 			if c.Bot.Weixin.TokenEnv == "" {
 				c.Bot.Weixin.TokenEnv = "WEIXIN_BOT_TOKEN"
 			}
+			c.Bot.Allowlist.WeixinUsers = appendUniqueBotString(c.Bot.Allowlist.WeixinUsers, result.UserID)
 		})
 		if err != nil {
 			return BotInstallPollResult{Status: "error", Error: err.Error()}, nil
 		}
+		a.refreshBotRuntimeAsync()
 		return BotInstallPollResult{Done: true, Status: "connected", Connection: conn, Message: "微信已连接。"}, nil
 	}
 	return a.pollFeishuConnectionInstall(installID, session)
@@ -306,6 +308,7 @@ func (a *App) pollFeishuConnectionInstall(installID string, session *botInstallS
 	}
 	a.deleteBotInstall(installID)
 	domain := feishuInstallDomain(session.Domain, data)
+	userID := feishuInstallUserID(data)
 	secretEnv := "FEISHU_BOT_APP_SECRET"
 	if domain == "lark" {
 		secretEnv = "LARK_BOT_APP_SECRET"
@@ -333,10 +336,12 @@ func (a *App) pollFeishuConnectionInstall(installID string, session *botInstallS
 		c.Bot.Feishu.AppSecretEnv = secretEnv
 		c.Bot.Feishu.Mode = "websocket"
 		c.Bot.Feishu.RequireMention = true
+		c.Bot.Allowlist.FeishuUsers = appendUniqueBotString(c.Bot.Allowlist.FeishuUsers, userID)
 	})
 	if err != nil {
 		return BotInstallPollResult{Status: "error", Error: err.Error()}, nil
 	}
+	a.refreshBotRuntimeAsync()
 	return BotInstallPollResult{Done: true, Status: "connected", Connection: conn, Message: label + " 已连接。"}, nil
 }
 
@@ -536,6 +541,17 @@ func feishuInstallDomain(fallback string, data map[string]any) string {
 	return "feishu"
 }
 
+func feishuInstallUserID(data map[string]any) string {
+	if userInfo, ok := data["user_info"].(map[string]any); ok {
+		return firstNonEmptyBot(
+			stringValue(userInfo["open_id"]),
+			stringValue(userInfo["union_id"]),
+			stringValue(userInfo["user_id"]),
+		)
+	}
+	return ""
+}
+
 func botConnectionViews(connections []config.BotConnectionConfig) []BotConnectionView {
 	if connections == nil {
 		return []BotConnectionView{}
@@ -672,6 +688,19 @@ func firstNonEmptyBot(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func appendUniqueBotString(values []string, next string) []string {
+	next = strings.TrimSpace(next)
+	if next == "" {
+		return values
+	}
+	for _, value := range values {
+		if strings.TrimSpace(value) == next {
+			return values
+		}
+	}
+	return append(values, next)
 }
 
 func stringValue(value any) string {

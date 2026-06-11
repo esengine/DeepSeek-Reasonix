@@ -1212,7 +1212,7 @@ func (a *App) SetNetwork(n NetworkView) error {
 }
 
 func (a *App) SetBotSettings(b BotSettingsView) error {
-	return a.applyConfigOnly(func(c *config.Config) error {
+	err := a.applyConfigOnly(func(c *config.Config) error {
 		c.Bot.Enabled = b.Enabled
 		c.Bot.Model = strings.TrimSpace(b.Model)
 		c.Bot.MaxSteps = b.MaxSteps
@@ -1251,6 +1251,10 @@ func (a *App) SetBotSettings(b BotSettingsView) error {
 		c.Bot.Connections = botConnectionConfigs(b.Connections)
 		return nil
 	})
+	if err == nil {
+		a.refreshBotRuntimeAsync()
+	}
+	return err
 }
 
 func (a *App) SetBotSecret(envName, value string) error {
@@ -1261,6 +1265,7 @@ func (a *App) SetBotSecret(envName, value string) error {
 	if err := upsertDotEnv(envName, value); err != nil {
 		return err
 	}
+	a.refreshBotRuntimeAsync()
 	return nil
 }
 
@@ -1269,7 +1274,11 @@ func (a *App) ClearBotSecret(envName string) error {
 	if envName == "" {
 		return fmt.Errorf("bot secret env name is empty")
 	}
-	return removeDotEnv(envName)
+	if err := removeDotEnv(envName); err != nil {
+		return err
+	}
+	a.refreshBotRuntimeAsync()
+	return nil
 }
 
 // SetCloseBehavior updates desktop-only window close behavior without rebuilding

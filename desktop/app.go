@@ -77,6 +77,7 @@ type App struct {
 
 	mediaTokens *mediaTokenStore
 	botInstalls map[string]*botInstallSession
+	botRuntime  *desktopBotRuntime
 
 	metrics atomic.Pointer[metricsAggregator] // non-nil only when desktop.metrics is opted in; swapped live by SetDesktopMetrics
 }
@@ -247,7 +248,7 @@ func (a *App) workspaceMediaMiddleware() func(http.Handler) http.Handler {
 // NewApp constructs the bound object. Tabs are restored in startup from the
 // last session's desktop-tabs.json.
 func NewApp() *App {
-	return &App{tabs: map[string]*WorkspaceTab{}, mediaTokens: newMediaTokenStore(), botInstalls: map[string]*botInstallSession{}}
+	return &App{tabs: map[string]*WorkspaceTab{}, mediaTokens: newMediaTokenStore(), botInstalls: map[string]*botInstallSession{}, botRuntime: newDesktopBotRuntime()}
 }
 
 func (a *App) bootContext() context.Context {
@@ -276,6 +277,7 @@ func (a *App) startup(ctx context.Context) {
 	}
 
 	go a.restoreOrBuildTabs()
+	go a.refreshBotRuntime()
 	go a.sendStartupPing()
 	go a.flushMetrics()
 }
@@ -466,6 +468,7 @@ func (a *App) snapshotAllTabs() {
 
 // shutdown snapshots all tabs, saves the final window geometry, and closes tabs.
 func (a *App) shutdown(context.Context) {
+	a.stopBotRuntime()
 	a.stopTray()
 	// Save window geometry synchronously from Go so it's persisted even if the
 	// frontend's beforeunload promise hasn't resolved yet.

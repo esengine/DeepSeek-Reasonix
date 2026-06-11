@@ -68,7 +68,7 @@ func TestFeishuInstallUsesReturnedTenantBrandAndStoresSecret(t *testing.T) {
 			writeJSON(t, w, map[string]any{
 				"client_id":     "cli-1",
 				"client_secret": "secret-1",
-				"user_info":     map[string]any{"tenant_brand": "lark"},
+				"user_info":     map[string]any{"tenant_brand": "lark", "open_id": "ou-installer"},
 			})
 		default:
 			http.Error(w, "unknown action", http.StatusBadRequest)
@@ -111,6 +111,9 @@ func TestFeishuInstallUsesReturnedTenantBrandAndStoresSecret(t *testing.T) {
 	cfg := config.LoadForEdit(config.UserConfigPath())
 	if !cfg.Bot.Enabled || !cfg.Bot.Feishu.Enabled || cfg.Bot.Feishu.Domain != "lark" || cfg.Bot.Feishu.Mode != "websocket" || !cfg.Bot.Feishu.RequireMention {
 		t.Fatalf("saved feishu config = %+v, want enabled websocket lark with mention gating", cfg.Bot.Feishu)
+	}
+	if len(cfg.Bot.Allowlist.FeishuUsers) != 1 || cfg.Bot.Allowlist.FeishuUsers[0] != "ou-installer" {
+		t.Fatalf("feishu allowlist = %+v, want installer open_id", cfg.Bot.Allowlist.FeishuUsers)
 	}
 	if err := os.Unsetenv("LARK_BOT_APP_SECRET"); err != nil {
 		t.Fatalf("unset lark secret env: %v", err)
@@ -185,6 +188,9 @@ func TestWeixinInstallStoresSavedAccountAndConnection(t *testing.T) {
 	cfg := config.LoadForEdit(config.UserConfigPath())
 	if !cfg.Bot.Enabled || !cfg.Bot.Weixin.Enabled || cfg.Bot.Weixin.AccountID != "weixin-account" || cfg.Bot.Weixin.TokenEnv != "WEIXIN_BOT_TOKEN" {
 		t.Fatalf("saved weixin config = %+v, want enabled saved account", cfg.Bot.Weixin)
+	}
+	if len(cfg.Bot.Allowlist.WeixinUsers) != 1 || cfg.Bot.Allowlist.WeixinUsers[0] != "user-1" {
+		t.Fatalf("weixin allowlist = %+v, want installer user id", cfg.Bot.Allowlist.WeixinUsers)
 	}
 }
 
