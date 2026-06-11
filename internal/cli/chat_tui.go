@@ -3264,6 +3264,27 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 		}
 	case "/context":
 		m.echoLocalCommand(input)
+		rest := strings.TrimSpace(strings.TrimPrefix(input, cmd))
+		if rest != "" {
+			if m.orc == nil {
+				m.notice("no orchestrator configured")
+				break
+			}
+			a, ok := m.orc.Agent(rest)
+			if !ok {
+				m.notice(fmt.Sprintf("agent %q not found", rest))
+				break
+			}
+			bk := a.Ctrl.ContextBreakdown()
+			if bk == nil || bk.TotalEstimated == 0 && bk.Usage.TotalTokens == 0 {
+				m.notice(fmt.Sprintf("%s: no session data yet", a.Name))
+				break
+			}
+			for _, ln := range strings.Split(bk.FormatBreakdown(), "\n") {
+				m.commitLine(ln)
+			}
+			break
+		}
 		bk := m.ctrl.ContextBreakdown()
 		if bk == nil || bk.TotalEstimated == 0 && bk.Usage.TotalTokens == 0 {
 			m.notice("no session data yet")
