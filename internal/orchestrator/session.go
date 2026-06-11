@@ -6,6 +6,10 @@ import (
 	"path/filepath"
 )
 
+func sessionPath(dir, name string) string {
+	return filepath.Join(dir, "orchestrator_"+name+".jsonl")
+}
+
 func (o *Orchestrator) SaveSessions(dir string) error {
 	if dir == "" {
 		return nil
@@ -48,11 +52,16 @@ func (o *Orchestrator) LoadSessions(dir string) error {
 		if !a.Config.Persist {
 			continue
 		}
-		path := filepath.Join(dir, a.Name+".jsonl")
+		path := sessionPath(dir, a.Name)
 		if _, err := os.Stat(path); os.IsNotExist(err) {
 			continue
 		}
 		a.Ctrl.Resume(nil, path)
+		a.Ctrl.SetSessionPath(path)
 	}
 	return nil
+}
+
+func (o *Orchestrator) SessionPath(dir, name string) string {
+	return sessionPath(dir, name)
 }

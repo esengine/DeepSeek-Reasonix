@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sync"
 
 	"reasonix/internal/agent"
@@ -122,6 +123,12 @@ func (a *ManagedAgent) Run(ctx context.Context, task string) (string, error) {
 		Kind: event.Notice,
 		Text: fmt.Sprintf("%s done", a.Name),
 	})
+
+	if a.Config.Persist && a.Ctrl.SessionPath() != "" {
+		if snapErr := a.Ctrl.Snapshot(); snapErr != nil {
+			slog.Warn("orchestrator: snapshot failed", "agent", a.Name, "error", snapErr)
+		}
+	}
 
 	var result string
 	if err == nil {

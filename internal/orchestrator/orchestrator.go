@@ -13,10 +13,11 @@ import (
 )
 
 type Orchestrator struct {
-	mainCtrl *control.Controller
-	agents   map[string]*ManagedAgent
-	mainSink event.Sink
-	mu       sync.Mutex
+	mainCtrl   *control.Controller
+	agents     map[string]*ManagedAgent
+	mainSink   event.Sink
+	sessionDir string
+	mu         sync.Mutex
 }
 
 func New(mainSink event.Sink) *Orchestrator {
@@ -36,6 +37,14 @@ func (o *Orchestrator) MainCtrl() *control.Controller {
 
 func (o *Orchestrator) MainSink() event.Sink {
 	return o.mainSink
+}
+
+func (o *Orchestrator) SetSessionDir(dir string) {
+	o.sessionDir = dir
+}
+
+func (o *Orchestrator) SessionDir() string {
+	return o.sessionDir
 }
 
 func (o *Orchestrator) AddAgent(name string, ctrl *control.Controller, cfg config.OrchestratorAgentEntry) {

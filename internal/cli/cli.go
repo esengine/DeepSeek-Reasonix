@@ -449,6 +449,10 @@ func chatREPL(args []string) int {
 			}
 			orc.AddAgent(entry.Name, childCtrl, entry)
 		}
+		orc.SetSessionDir(config.SessionDir())
+		if err := orc.LoadSessions(config.SessionDir()); err != nil {
+			fmt.Fprintln(os.Stderr, "orchestrator: load sessions:", err)
+		}
 
 		for _, t := range orchestrator.OrchestratorTools(orc) {
 			ctrl.Registry().Add(t)
@@ -570,6 +574,9 @@ func chatREPL(args []string) int {
 		ctrl.Close()
 	}
 	if orc != nil {
+		if err := orc.SaveSessions(config.SessionDir()); err != nil {
+			fmt.Fprintln(os.Stderr, "orchestrator: save sessions:", err)
+		}
 		orc.Close()
 	}
 	if runErr != nil {
