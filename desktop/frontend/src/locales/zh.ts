@@ -1099,6 +1099,7 @@ export const zh: Record<DictKey, string> = {
   "tool.showAllLines": "显示全部 {n} 行",
   "tool.readCount": "已读 {n} 个文件",
   "tool.searchCount": "搜索 {n} 个文件",
+  "tool.otherReadCount": "{n} 个只读调用",
   "tool.lineOne": "{n} 行",
   "tool.lineOther": "{n} 行",
   "tool.matchOne": "{n} 处匹配",

@@ -1097,6 +1097,7 @@ export const en = {
   "tool.showAllLines": "show all {n} lines",
   "tool.readCount": "Read {n} files",
   "tool.searchCount": "Search {n} files",
+  "tool.otherReadCount": "{n} read calls",
   "tool.lineOne": "{n} line",
   "tool.lineOther": "{n} lines",
   "tool.matchOne": "{n} match",
