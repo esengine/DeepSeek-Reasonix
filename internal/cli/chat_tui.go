@@ -1784,6 +1784,19 @@ func (m *chatTUI) collapseShellSlot(id string, idx int) {
 			n = len(strings.Split(strings.TrimRight(full, "\n"), "\n"))
 		}
 	}
+	if n < 0 {
+		// No shellOutputs and the live state doesn't apply — e.g. a
+		// late ToolResult for a back-to-back read_file (no shellOutputs
+		// ever populated because the id lacks the "shell-" prefix), or
+		// a shell- tool whose result arrived with no prior
+		// ToolProgress chunks. Without this guard the n == 0 branch
+		// below would miss and the final else would render
+		// "⎿ -1 lines". Treat the unknown as zero output: clear the
+		// slot rather than fabricate a count. The id is still recorded
+		// in shellTranscriptIdx (set by beginToolRunning), so a late
+		// ToolProgress could still land here if one ever arrives.
+		n = 0
+	}
 	if n == 0 {
 		// The live block was a "working…" placeholder for a tool that
 		// finished with no output. Clear the rendered text so "working"
