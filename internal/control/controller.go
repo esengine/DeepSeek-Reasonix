@@ -1441,6 +1441,10 @@ func (c *Controller) SessionPath() string {
 
 // History returns the executor's current message log (for repopulating a
 // resumed frontend's view).
+func (c *Controller) Registry() *tool.Registry {
+	return c.reg
+}
+
 func (c *Controller) History() []provider.Message {
 	if c.executor == nil {
 		return nil

@@ -76,6 +76,10 @@ type Options struct {
 	// (for example ACP session/new). They are connected eagerly for this
 	// controller but are not persisted to reasonix.toml.
 	ExtraPlugins []plugin.Spec
+	// ToolDenylist removes named tools from the registry after all built-ins,
+	// plugins, and skills are registered. Used to prevent managed agents from
+	// exposing orchestrator meta-tools or other unwanted capabilities.
+	ToolDenylist []string
 }
 
 // Build loads config, resolves the model(s), and returns a Controller wrapping a
@@ -629,6 +633,10 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			return nil, fmt.Errorf("auto_plan_classifier %q: %w", cm, err)
 		}
 		classifier = control.NewProviderAutoPlanClassifier(classifierProv)
+	}
+
+	for _, name := range opts.ToolDenylist {
+		reg.Remove(name)
 	}
 
 	ctrlOpts := control.Options{

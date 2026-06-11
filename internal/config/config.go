@@ -53,6 +53,7 @@ type Config struct {
 	Network       NetworkConfig       `toml:"network"`
 	Plugins       []PluginEntry       `toml:"plugins"`
 	Skills        SkillsConfig        `toml:"skills"`
+	Orchestrator  OrchestratorConfig  `toml:"orchestrator"`
 	Codegraph     CodegraphConfig     `toml:"codegraph"`
 	Statusline    StatuslineConfig    `toml:"statusline"`
 	LSP           LSPConfig           `toml:"lsp"`
@@ -384,6 +385,25 @@ func (c *Config) IsSkillDisabled(name string) bool {
 		}
 	}
 	return false
+}
+
+// OrchestratorConfig configures multi-agent orchestration. Each agent entry
+// spawns an independent controller with its own model, tool registry, and session.
+type OrchestratorConfig struct {
+	Agents []OrchestratorAgentEntry `toml:"agents"`
+}
+
+// OrchestratorAgentEntry defines one managed agent in the orchestrator team.
+type OrchestratorAgentEntry struct {
+	Name      string   `toml:"name"`
+	Model     string   `toml:"model"`
+	Ref       string   `toml:"ref"`
+	Skills    []string `toml:"skills"`
+	SkipSkills []string `toml:"skip_skills"`
+	Paths     []string `toml:"paths"`
+	Persist   bool     `toml:"persist"`
+	Ephemeral bool     `toml:"ephemeral"`
+	Tools     []string `toml:"tools"`
 }
 
 // SandboxConfig bounds the blast radius of tool calls (Phase 0: file-writer

@@ -25,6 +25,7 @@ import (
 	"reasonix/internal/event"
 	"reasonix/internal/i18n"
 	"reasonix/internal/notify"
+	"reasonix/internal/orchestrator"
 	"reasonix/internal/provider"
 	"reasonix/internal/provider/openai"
 	"reasonix/internal/serve"
@@ -423,6 +424,40 @@ func chatREPL(args []string) int {
 		return 1
 	}
 
+	var orc *orchestrator.Orchestrator
+	if cfg != nil && len(cfg.Orchestrator.Agents) > 0 {
+		orc = orchestrator.New(sink)
+		orc.SetMainCtrl(ctrl)
+
+		for _, entry := range cfg.Orchestrator.Agents {
+			modelName := entry.Model
+			if modelName == "" {
+				modelName = cfg.DefaultModel
+			}
+			agentSink := orchestrator.NewSinkMultiplexer(sink, entry.Name)
+			denylist := orchestrator.OrchestratorToolNames()
+			childCtrl, cerr := boot.Build(ctx, boot.Options{
+				Model:        modelName,
+				MaxSteps:     *maxSteps,
+				Sink:         agentSink,
+				ToolDenylist: denylist,
+			})
+			if cerr != nil {
+				fmt.Fprintln(os.Stderr, "orchestrator: failed to start agent", entry.Name+":", cerr)
+				continue
+			}
+			orc.AddAgent(entry.Name, childCtrl, entry)
+		}
+
+		for _, t := range orchestrator.OrchestratorTools(orc) {
+			ctrl.Registry().Add(t)
+		}
+
+		if names := orc.AgentNames(); len(names) > 0 {
+			fmt.Fprintf(os.Stderr, "orchestrator: %d managed agent(s) — %s\n", len(names), strings.Join(names, ", "))
+		}
+	}
+
 	// Decide where this conversation's auto-save lands. A resume reuses the
 	// file so closing/reopening keeps appending to the same history; a fresh
 	// session lands in a new file stamped with the model name.
@@ -532,6 +567,9 @@ func chatREPL(args []string) int {
 		}
 	} else {
 		ctrl.Close()
+	}
+	if orc != nil {
+		orc.Close()
 	}
 	if runErr != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, runErr)
