@@ -189,6 +189,7 @@ Executor instructions:
 - Do not ask the user how to trigger the executor. You are already in the executor phase.
 - If the task requires changes, call the appropriate tools (for example write/edit/bash) instead of only restating the plan.
 - If a target path is outside the writable workspace or otherwise blocked, explain that specific blocker and ask for the needed path/approval.
+- **Serial workflow**: after finishing EACH sub-task, immediately call complete_step with evidence, then call todo_write to mark it completed and advance the next sub-task. Never batch-complete multiple sub-tasks at once.
 
 Carry out the task, adapting the plan as needed.`, executorHandoffMarker, task, plan)
 }
