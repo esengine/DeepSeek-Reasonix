@@ -1,6 +1,7 @@
 // Ingest + stats for desktop crash/feedback reports and the anonymous launch
 // ping. Reports are user-initiated; pings are opt-out (desktop.telemetry).
 import { z } from "zod";
+import { renderGroup, renderStats } from "./stats";
 
 interface RateLimiter {
   limit(opts: { key: string }): Promise<{ success: boolean }>;
@@ -149,67 +150,46 @@ function statsAuthorized(request: Request, env: Env): boolean {
   return a.byteLength === b.byteLength && crypto.subtle.timingSafeEqual(a, b);
 }
 
-function esc(s: unknown): string {
-  return String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
-}
-
-function barTable(rows: Record<string, unknown>[], labelKey: string, valueKey: string, extraKeys: string[] = []): string {
-  const max = Math.max(1, ...rows.map((r) => Number(r[valueKey]) || 0));
-  const tr = rows
-    .map((r) => {
-      const v = Number(r[valueKey]) || 0;
-      const extras = extraKeys.map((k) => `<td>${esc(r[k])}</td>`).join("");
-      return `<tr><td>${esc(r[labelKey])}</td><td class="num">${v}</td>${extras}<td class="bar"><div style="width:${Math.round((v / max) * 100)}%"></div></td></tr>`;
-    })
-    .join("");
-  return `<table><tbody>${tr}</tbody></table>`;
+function html(body: string): Response {
+  return new Response(body, { headers: { "content-type": "text/html; charset=utf-8" } });
 }
 
 async function handleStats(env: Env): Promise<Response> {
-  const [daily, versions, oses, crashes] = await Promise.all([
+  const [daily, versions, platforms, crashes] = await Promise.all([
     env.DB.prepare(
-      "SELECT date, COUNT(*) AS users, SUM(opens) AS opens FROM pings WHERE date >= date('now', '-29 day') GROUP BY date ORDER BY date DESC",
-    ).all(),
+      "SELECT date, COUNT(*) AS users, SUM(opens) AS opens FROM pings WHERE date >= date('now', '-29 day') GROUP BY date",
+    ).all<{ date: string; users: number; opens: number }>(),
     env.DB.prepare(
-      "SELECT version, COUNT(DISTINCT install_id) AS users FROM pings WHERE date >= date('now', '-6 day') GROUP BY version ORDER BY users DESC LIMIT 15",
-    ).all(),
+      "SELECT version AS label, COUNT(DISTINCT install_id) AS users FROM pings WHERE date >= date('now', '-6 day') GROUP BY label ORDER BY users DESC LIMIT 15",
+    ).all<{ label: string; users: number }>(),
     env.DB.prepare(
-      "SELECT os || ' ' || arch AS platform, COUNT(DISTINCT install_id) AS users FROM pings WHERE date >= date('now', '-6 day') GROUP BY platform ORDER BY users DESC",
-    ).all(),
+      "SELECT os || ' ' || arch AS label, COUNT(DISTINCT install_id) AS users FROM pings WHERE date >= date('now', '-6 day') GROUP BY label ORDER BY users DESC",
+    ).all<{ label: string; users: number }>(),
     env.DB.prepare(
-      "SELECT substr(fingerprint, 1, 8) AS fp, kind, count, last_version, substr(last_seen, 1, 10) AS seen FROM groups ORDER BY last_seen DESC LIMIT 20",
-    ).all(),
+      "SELECT fingerprint, kind, count, last_version, substr(last_seen, 1, 10) AS seen FROM groups ORDER BY last_seen DESC LIMIT 25",
+    ).all<{ fingerprint: string; kind: string; count: number; last_version: string; seen: string }>(),
   ]);
+  return html(
+    renderStats({
+      daily: daily.results,
+      versions: versions.results,
+      platforms: platforms.results,
+      crashes: crashes.results,
+    }),
+  );
+}
 
-  const crashRows = (crashes.results as Record<string, unknown>[])
-    .map(
-      (r) =>
-        `<tr><td><code>${esc(r.fp)}</code></td><td>${esc(r.kind)}</td><td class="num">${esc(r.count)}</td><td>${esc(r.last_version)}</td><td>${esc(r.seen)}</td></tr>`,
-    )
-    .join("");
-
-  const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Reasonix stats</title><style>
-body{font:14px/1.5 system-ui,sans-serif;background:#1a1a2e;color:#e6e6f0;max-width:880px;margin:24px auto;padding:0 16px}
-h1{font-size:18px}h2{font-size:15px;margin-top:28px;color:#9f9fc0}
-table{border-collapse:collapse;width:100%}td,th{padding:4px 10px 4px 0;text-align:left;border-bottom:1px solid #2a2a40}
-td.num{text-align:right;font-variant-numeric:tabular-nums}
-td.bar{width:45%}td.bar div{background:#5b8cff;height:10px;border-radius:3px;min-width:2px}
-code{color:#9f9fc0}.hint{color:#8a8aa3;font-size:12px}
-</style></head><body>
-<h1>Reasonix desktop stats</h1>
-<h2>Daily active installs (30 days) — users / opens</h2>
-${barTable(daily.results as Record<string, unknown>[], "date", "users", ["opens"])}
-<h2>Versions (last 7 days, distinct installs)</h2>
-${barTable(versions.results as Record<string, unknown>[], "version", "users")}
-<h2>Platforms (last 7 days, distinct installs)</h2>
-${barTable(oses.results as Record<string, unknown>[], "platform", "users")}
-<h2>Recent crash groups</h2>
-<table><thead><tr><th>fingerprint</th><th>kind</th><th>count</th><th>last version</th><th>last seen</th></tr></thead>
-<tbody>${crashRows}</tbody></table>
-<p class="hint">Crash stacks: wrangler d1 execute reasonix-crash --remote --command "SELECT message FROM reports WHERE fingerprint LIKE '&lt;fp&gt;%'"</p>
-</body></html>`;
-  return new Response(html, { headers: { "content-type": "text/html; charset=utf-8" } });
+async function handleGroup(env: Env, fingerprint: string): Promise<Response> {
+  const group = await env.DB.prepare("SELECT * FROM groups WHERE fingerprint = ?1")
+    .bind(fingerprint)
+    .first<{ fingerprint: string; kind: string; count: number; first_seen: string; last_seen: string; last_version: string }>();
+  if (!group) return new Response("not found", { status: 404 });
+  const reports = await env.DB.prepare(
+    "SELECT version, os, arch, message, device, created_at FROM reports WHERE fingerprint = ?1 ORDER BY id DESC",
+  )
+    .bind(fingerprint)
+    .all<{ version: string; os: string; arch: string; message: string; device: string; created_at: string }>();
+  return html(renderGroup(group, reports.results));
 }
 
 export default {
@@ -217,16 +197,18 @@ export default {
     const url = new URL(request.url);
     if (url.pathname === "/v1/report" && request.method === "POST") return handleReport(request, env);
     if (url.pathname === "/v1/ping" && request.method === "POST") return handlePing(request, env);
-    if (url.pathname === "/stats" && request.method === "GET") {
+
+    const group = url.pathname.match(/^\/stats\/group\/([0-9a-f]{64})$/);
+    if ((url.pathname === "/stats" || group) && request.method === "GET") {
       if (!statsAuthorized(request, env)) {
         return new Response("auth required", {
           status: 401,
           headers: { "www-authenticate": 'Basic realm="reasonix-stats"' },
         });
       }
-      return handleStats(env);
+      return group ? handleGroup(env, group[1]) : handleStats(env);
     }
-    if (url.pathname === "/v1/report" || url.pathname === "/v1/ping" || url.pathname === "/stats") {
+    if (url.pathname === "/v1/report" || url.pathname === "/v1/ping" || url.pathname.startsWith("/stats")) {
       return new Response("method not allowed", { status: 405 });
     }
     return new Response("not found", { status: 404 });
