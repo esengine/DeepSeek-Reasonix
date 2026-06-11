@@ -46,11 +46,14 @@ const (
 // next step — so the post-compaction turn doesn't lose the thread or re-derive
 // decisions already made.
 const summarySystemPrompt = `You are compacting the earlier part of a coding agent's conversation to save context.
-The agent will keep ONLY your summary (the original messages are dropped), so it must be able to resume the task from it alone.
-Write a briefing under these exact headings, omitting a heading only if it has no content:
+The agent keeps your summary alongside the user's own turns (kept verbatim) and the recent tail; your job is to fold the assistant/tool work into a briefing it can resume from.
+Write under these exact headings, omitting a heading only if it has no content:
+
+## Standing facts & constraints
+Everything the user stated that still governs the work — names, paths, IDs, versions, tokens, preferences, and hard "never do X" rules — in their own words. Be exhaustive; this is the durable contract, so prefer over- to under-including.
 
 ## Goal
-The user's request and intent, kept close to their own words. Include explicit requirements, constraints, and preferences.
+The user's request and intent.
 
 ## Decisions & rationale
 Key choices made so far and why — so they are not re-litigated or reversed.
@@ -193,9 +196,17 @@ func (a *Agent) compact(ctx context.Context, trigger, instructions string, force
 	}
 	region := msgs[head:start]
 
-	// Economic check: skip if the region is too small to justify the summarizer
-	// call, unless force (manual /compact or the force-ratio ceiling) demands it.
-	if !force && !foldEconomics(region) {
+	// Base layer: every small user turn in the region is kept verbatim (the
+	// deterministic floor — a fact the user stated is never summarized away,
+	// wherever in the session they said it); only the rest folds into the digest.
+	kept, fold := a.partitionFold(region)
+	if len(fold) == 0 {
+		return nil // nothing but kept user turns — a fold would save nothing
+	}
+
+	// Economic check on the foldable part (kept user turns don't count toward the
+	// savings): skip if too small to justify the call, unless force demands it.
+	if !force && !foldEconomics(fold) {
 		return nil
 	}
 
@@ -214,7 +225,7 @@ func (a *Agent) compact(ctx context.Context, trigger, instructions string, force
 
 	archived := ""
 	if a.archiveDir != "" {
-		path, err := archiveMessages(a.archiveDir, region)
+		path, err := archiveMessages(a.archiveDir, fold)
 		if err != nil {
 			a.emitCompactionAborted(trigger)
 			return fmt.Errorf("archive: %w", err)
@@ -222,14 +233,19 @@ func (a *Agent) compact(ctx context.Context, trigger, instructions string, force
 		archived = path
 	}
 
+	// Upper layer: the digest is built from the whole region (kept turns included),
+	// so its structured "user facts & constraints" section consolidates what the
+	// user said into one tidy view — redundant with the verbatim turns by design,
+	// so a weak summarizer dropping a fact here loses nothing.
 	summary, err := a.summarize(ctx, region, instructions)
 	if err != nil {
 		a.emitCompactionAborted(trigger)
 		return err
 	}
 
-	compacted := make([]provider.Message, 0, head+1+len(msgs)-start)
+	compacted := make([]provider.Message, 0, head+len(kept)+1+len(msgs)-start)
 	compacted = append(compacted, msgs[:head]...)
+	compacted = append(compacted, kept...)
 	compacted = append(compacted, provider.Message{
 		Role: provider.RoleUser,
 		Content: summaryTagOpen + "\n" +
@@ -242,7 +258,7 @@ func (a *Agent) compact(ctx context.Context, trigger, instructions string, force
 	a.session.IncrementRewrite()
 
 	a.sink.Emit(event.Event{Kind: event.CompactionDone, Compaction: event.Compaction{
-		Trigger: trigger, Messages: len(region), Summary: summary, Archive: archived,
+		Trigger: trigger, Messages: len(fold), Summary: summary, Archive: archived,
 	}})
 	return nil
 }
@@ -335,7 +351,7 @@ func (a *Agent) pinnedPrefixLen(msgs []provider.Message) int {
 	if i < len(msgs) && msgs[i].Role == provider.RoleSystem {
 		i++
 	}
-	if i < len(msgs) && msgs[i].Role == provider.RoleUser && !isCompactionSummary(msgs[i]) && a.pinnableFirstUser(msgs[i]) {
+	if i < len(msgs) && msgs[i].Role == provider.RoleUser && !isCompactionSummary(msgs[i]) && a.pinnableUserTurn(msgs[i]) {
 		i++
 	}
 	for i < len(msgs) && isCompactionSummary(msgs[i]) {
@@ -344,7 +360,10 @@ func (a *Agent) pinnedPrefixLen(msgs []provider.Message) int {
 	return i
 }
 
-func (a *Agent) pinnableFirstUser(m provider.Message) bool {
+// pinnableUserTurn reports whether a user turn is small enough to keep verbatim. A
+// turn larger than a brief (pasted content) folds like any other message so the
+// kept-verbatim floor never starves the window.
+func (a *Agent) pinnableUserTurn(m provider.Message) bool {
 	budget := maxPinnedFirstUserTokens
 	if a.contextWindow > 0 {
 		if f := int(float64(a.contextWindow) * pinnedFirstUserWindowFrac); f < budget {
@@ -352,6 +371,20 @@ func (a *Agent) pinnableFirstUser(m provider.Message) bool {
 		}
 	}
 	return int(float64(msgChars(m))*a.tokPerChar()) <= budget
+}
+
+// partitionFold splits a compaction region into the small user turns kept verbatim
+// (the deterministic floor — a fact the user stated is never summarized away) and
+// the rest, which folds into the digest. Order within each group is preserved.
+func (a *Agent) partitionFold(region []provider.Message) (kept, fold []provider.Message) {
+	for _, m := range region {
+		if m.Role == provider.RoleUser && !isCompactionSummary(m) && a.pinnableUserTurn(m) {
+			kept = append(kept, m)
+		} else {
+			fold = append(fold, m)
+		}
+	}
+	return kept, fold
 }
 
 // planCompaction locates the region to summarize. head is the count of leading

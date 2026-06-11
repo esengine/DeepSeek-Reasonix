@@ -130,6 +130,57 @@ func TestPinnedPrefixLen(t *testing.T) {
 	}
 }
 
+func TestCompactKeepsMidSessionUserTurns(t *testing.T) {
+	big := strings.Repeat("work output ", 100)
+	sess := &Session{Messages: []provider.Message{
+		{Role: provider.RoleSystem, Content: "sys"},
+		{Role: provider.RoleUser, Content: "first task"},
+		{Role: provider.RoleAssistant, Content: big},
+		{Role: provider.RoleTool, ToolCallID: "1", Name: "read_file", Content: big},
+		{Role: provider.RoleUser, Content: "by the way, always use pnpm not npm"},
+		{Role: provider.RoleAssistant, Content: big},
+		{Role: provider.RoleTool, ToolCallID: "2", Name: "read_file", Content: big},
+		{Role: provider.RoleUser, Content: "next"},
+		{Role: provider.RoleAssistant, Content: "ok"},
+	}}
+	a := New(&fakeProvider{reply: "digest"}, tool.NewRegistry(), sess,
+		Options{RecentKeep: 2, ArchiveDir: t.TempDir()}, event.Discard)
+
+	if err := a.compact(context.Background(), "manual", "", true); err != nil {
+		t.Fatalf("compact: %v", err)
+	}
+
+	// Both the pinned first turn and the mid-session fact survive verbatim — not as
+	// summary text — while the assistant/tool work between them is folded.
+	var pinnedFirst, keptMid bool
+	for _, m := range sess.Snapshot() {
+		if isCompactionSummary(m) {
+			continue
+		}
+		if m.Role == provider.RoleUser && m.Content == "first task" {
+			pinnedFirst = true
+		}
+		if m.Role == provider.RoleUser && strings.Contains(m.Content, "always use pnpm not npm") {
+			keptMid = true
+		}
+	}
+	if !pinnedFirst || !keptMid {
+		t.Fatalf("user turns not kept verbatim (first=%v mid=%v): %+v", pinnedFirst, keptMid, sess.Snapshot())
+	}
+	if strings.Contains(strings.Join(snapshotContents(sess), " "), big) {
+		t.Errorf("assistant/tool work was not folded")
+	}
+}
+
+func snapshotContents(s *Session) []string {
+	msgs := s.Snapshot()
+	out := make([]string, len(msgs))
+	for i, m := range msgs {
+		out[i] = m.Content
+	}
+	return out
+}
+
 func TestCompactReplacesHistory(t *testing.T) {
 	prov := &fakeProvider{reply: "- goal: do X\n- changed file Y"}
 	bigStep := strings.Repeat("important implementation detail ", 80)
