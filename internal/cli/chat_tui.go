@@ -1940,6 +1940,9 @@ func (m *chatTUI) beginToolRunning(id string) {
 	m.toolTail = m.toolTail[:0]
 	m.toolPartial = ""
 	m.toolLineCount = 0
+	// Clear accumulated output for this tool ID so a re-run (e.g. repeated
+	// !pwd with the same "shell-pwd" id) doesn't append to old output.
+	delete(m.shellOutputs, id)
 	m.toolStreamStart = time.Now()
 	m.toolStreamFrame = 0
 	if m.nativeScrollback {
