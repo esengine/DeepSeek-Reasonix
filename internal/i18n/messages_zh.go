@@ -70,6 +70,8 @@ var Chinese = Messages{
 	PermissionAlreadyAllowedFmt: "授权已由 %s 中的规则覆盖：%s",
 	PermissionSaveFailedFmt:     "保存授权 %s 失败：%v",
 	DiffFoldedFmt:               "… 还有 %d 行",
+	DiffFoldEnabledFmt:          "diff 已折叠至 %d 行（/diff-fold 展开）",
+	DiffFoldDisabled:            "diff 已展开 — 显示全部行（/diff-fold 折叠）",
 
 	OutputStyleNone:    "没有可用的输出风格",
 	OutputStyleHeader:  "输出风格：",
@@ -176,6 +178,7 @@ var Chinese = Messages{
 	CmdLanguage:     "切换 CLI 语言",
 	CmdSkill:        "管理 skills",
 	CmdVerbose:      "切换 thinking 原文显示",
+	CmdDiffFold:     "切换 diff 折叠/展开",
 	CmdSandbox:      "查看沙箱状态",
 	CmdEffort:       "设置推理强度",
 	CmdAutoPlan:     "配置自动计划模式",

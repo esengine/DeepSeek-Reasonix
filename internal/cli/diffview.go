@@ -21,7 +21,9 @@ import (
 const tabWidth = 4
 
 const (
-	diffScrollbackMaxLines = 40
+	// diffFoldLimit is the max lines to show in a diff when folding is enabled
+	// (/diff-fold toggle). 0 means show all lines.
+	diffFoldLimit = 40
 
 	bgDiffAdd = "\033[48;5;22m"
 	bgDiffDel = "\033[48;5;52m"

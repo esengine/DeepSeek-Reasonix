@@ -87,6 +87,8 @@ type Messages struct {
 	PermissionAlreadyAllowedFmt string // permission rule already covered notice: path, rule
 	PermissionSaveFailedFmt     string // permission rule save failure notice: rule, error
 	DiffFoldedFmt               string // "… +%d more lines" footer when a writer diff is folded
+	DiffFoldEnabledFmt          string // notice when /diff-fold enables folding, %d = line limit
+	DiffFoldDisabled            string // notice when /diff-fold disables folding (shows all lines)
 
 	// `ask` tool question card.
 	AskTypeSomething   string // the "type your own answer" option label
@@ -164,6 +166,7 @@ type Messages struct {
 	CmdLanguage     string // /language
 	CmdSkill        string // /skills
 	CmdVerbose      string // /verbose
+	CmdDiffFold     string // /diff-fold
 	CmdSandbox      string // /sandbox
 	CmdEffort       string // /effort
 	CmdAutoPlan     string // /auto-plan

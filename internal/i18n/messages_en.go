@@ -69,6 +69,8 @@ var English = Messages{
 	PermissionAlreadyAllowedFmt: "permission already covered in %s: %s",
 	PermissionSaveFailedFmt:     "permission save failed for %s: %v",
 	DiffFoldedFmt:               "… +%d more lines",
+	DiffFoldEnabledFmt:          "diff folded to %d lines (/diff-fold to expand)",
+	DiffFoldDisabled:            "diff expanded — showing all lines (/diff-fold to fold)",
 
 	OutputStyleNone:    "no output styles available",
 	OutputStyleHeader:  "output styles:",
@@ -175,6 +177,7 @@ var English = Messages{
 	CmdLanguage:     "switch CLI language",
 	CmdSkill:        "manage skills",
 	CmdVerbose:      "toggle thinking text",
+	CmdDiffFold:     "toggle diff fold/expand",
 	CmdSandbox:      "show sandbox status",
 	CmdEffort:       "set reasoning effort",
 	CmdAutoPlan:     "configure automatic plan mode",
