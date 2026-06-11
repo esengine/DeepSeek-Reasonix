@@ -810,6 +810,16 @@ func (a *App) Compact() error {
 	return ctrl.Compact(a.ctx, "")
 }
 
+// workspaceNotReadyErr names why a session action arrived before the tab's
+// controller existed: still starting, or failed to start. Silently returning
+// nil here swallowed the click with no feedback (#3938).
+func workspaceNotReadyErr(tab *WorkspaceTab) error {
+	if tab != nil && strings.TrimSpace(tab.StartupErr) != "" {
+		return fmt.Errorf("workspace failed to start: %s", tab.StartupErr)
+	}
+	return fmt.Errorf("workspace is still starting")
+}
+
 // NewSession snapshots the current conversation and rotates to a fresh one.
 func (a *App) NewSession() error {
 	a.mu.RLock()
@@ -817,7 +827,7 @@ func (a *App) NewSession() error {
 	ctrl := a.activeCtrlLocked()
 	a.mu.RUnlock()
 	if ctrl == nil {
-		return nil
+		return workspaceNotReadyErr(tab)
 	}
 	// Tab is already blank — just persist and skip the new-session dance.
 	if !ctrl.Running() && !messagesHaveConversationContent(ctrl.History()) {
@@ -848,7 +858,7 @@ func (a *App) ClearSession() error {
 	ctrl := a.activeCtrlLocked()
 	a.mu.RUnlock()
 	if ctrl == nil {
-		return nil
+		return workspaceNotReadyErr(tab)
 	}
 	if err := ctrl.ClearSession(); err != nil {
 		return err

@@ -797,14 +797,22 @@ export function useController() {
   const newSession = useCallback(async () => {
     const tabId = activeTabId;
     if (tabId) bumpCheckpointRefreshSeq(tabId);
-    await app.NewSession().catch(() => {});
+    try {
+      await app.NewSession();
+    } catch {
+      return; // backend refused (workspace starting / failed) — keep the transcript
+    }
     if (tabId) dispatchTo(tabId, { type: "reset" });
   }, [activeTabId, bumpCheckpointRefreshSeq, dispatchTo]);
 
   const clearSession = useCallback(async () => {
     const tabId = activeTabId;
     if (tabId) bumpCheckpointRefreshSeq(tabId);
-    await app.ClearSession();
+    try {
+      await app.ClearSession();
+    } catch {
+      return;
+    }
     if (tabId) dispatchTo(tabId, { type: "reset" });
   }, [activeTabId, bumpCheckpointRefreshSeq, dispatchTo]);
 

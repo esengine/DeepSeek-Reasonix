@@ -2108,3 +2108,22 @@ func hasDirEntry(entries []DirEntry, name string) bool {
 	}
 	return false
 }
+
+func TestSessionActionsWithoutControllerReturnError(t *testing.T) {
+	app := &App{tabs: map[string]*WorkspaceTab{}}
+	if err := app.NewSession(); err == nil {
+		t.Error("NewSession with no controller must surface an error, not silently no-op")
+	}
+	if err := app.ClearSession(); err == nil {
+		t.Error("ClearSession with no controller must surface an error")
+	}
+
+	app = &App{
+		tabs:        map[string]*WorkspaceTab{"t1": {ID: "t1", StartupErr: "boot exploded"}},
+		activeTabID: "t1",
+	}
+	err := app.NewSession()
+	if err == nil || !strings.Contains(err.Error(), "boot exploded") {
+		t.Errorf("error should carry the tab's startup failure, got %v", err)
+	}
+}
