@@ -18,10 +18,10 @@ type QuestionAnchor = { id: string; text: string; turn: number };
 const QUESTION_NAV_MIN_COUNT = 2;
 const LiveStreamContext = createContext<LiveStream | undefined>(undefined);
 
-const LiveAssistantMessage = memo(function LiveAssistantMessage({ item, defaultExpanded = false }: { item: AssistantItem; defaultExpanded?: boolean }) {
+const LiveAssistantMessage = memo(function LiveAssistantMessage({ item, defaultExpanded = false, expandWhileStreaming = true }: { item: AssistantItem; defaultExpanded?: boolean; expandWhileStreaming?: boolean }) {
   const live = useContext(LiveStreamContext);
   const shown = live && live.id === item.id ? { ...item, text: live.text, reasoning: live.reasoning, streaming: true } : item;
-  return <AssistantMessage item={shown} defaultExpanded={defaultExpanded} />;
+  return <AssistantMessage item={shown} defaultExpanded={defaultExpanded} expandWhileStreaming={expandWhileStreaming} />;
 });
 
 // ── Layer budgets ─────────────────────────────────────────────────────────────
@@ -426,6 +426,7 @@ export function Transcript({
             items={collapseBatch}
             durationMs={dur}
             mode={displayMode}
+            subcalls={subcallsByParent}
           />,
         );
         collapseBatch = [];
@@ -471,7 +472,7 @@ export function Transcript({
           flushReadOnlyBatch();
           switch (it.kind) {
             case "assistant":
-              out.push(<LiveAssistantMessage key={it.id} item={it as AssistantItem} defaultExpanded={defaultExpandThinking} />);
+              out.push(<LiveAssistantMessage key={it.id} item={it as AssistantItem} defaultExpanded={defaultExpandThinking} expandWhileStreaming={false} />);
               if (!it.streaming && it.text.trim() !== "") {
                 actionText = it.text;
                 actionReady = true;
@@ -879,30 +880,34 @@ type TurnCollapseProps = {
   items: Item[];       // intermediate items (tools, reasoning, phase)
   durationMs: number;  // summed tool execution time across the batch; 0 when unknown
   mode: DisplayMode;
+  subcalls: Map<string, ToolItem[]>;
 };
 
-function TurnCollapse({ items, durationMs, mode }: TurnCollapseProps) {
+function TurnCollapse({ items, durationMs, mode, subcalls }: TurnCollapseProps) {
   const t = useT();
   const [open, setOpen] = useState(false);
 
-  // In minimal mode, filter to only writer tools + intermediate assistant messages
+  // Keep only items the body will actually render — an expandable fold over
+  // nothing is worse than no fold. Minimal mode strips reasoning, so a
+  // reasoning-only assistant counts as empty there.
   const displayItems = useMemo(() => {
-    if (mode === "minimal") {
-      return items.filter((it) => {
-        if (it.kind === "assistant") return true; // intermediate model replies
-        if (it.kind !== "tool") return false;
-        if (it.name === "bash") return false;       // shell
-        if (it.readOnly) return false;              // read-only tools
-        return true;                                 // writer tools
-      });
-    }
-    return items; // compact mode: show all
+    return items.filter((it) => {
+      if (it.kind === "assistant") {
+        if (it.text.trim() !== "") return true;
+        return mode !== "minimal" && Boolean(it.reasoning);
+      }
+      if (it.kind === "phase") return mode !== "minimal";
+      if (it.kind !== "tool") return false;
+      if (it.parentId || it.name === "todo_write" || it.name === "exit_plan_mode") return false;
+      if (mode === "minimal") return !it.readOnly && it.name !== "bash";
+      return true;
+    });
   }, [items, mode]);
 
-  const hasProcessedBody = displayItems.length > 0;
-  const label = durationMs > 0 ? t("transcript.processedDuration", { s: Math.round(durationMs / 1000) }) : t("transcript.processed");
+  const seconds = Math.round(durationMs / 1000);
+  const label = seconds > 0 ? t("transcript.processedDuration", { s: seconds }) : t("transcript.processed");
 
-  if (!hasProcessedBody) return null;
+  if (displayItems.length === 0) return null;
 
   return (
     <div className={`turn-collapse${open ? " turn-collapse--open" : ""}`}>
@@ -919,7 +924,7 @@ function TurnCollapse({ items, durationMs, mode }: TurnCollapseProps) {
         <div className="turn-collapse__body">
           {displayItems.map((it) => {
             switch (it.kind) {
-              case "tool": return <ToolCard key={it.id} item={it as ToolItem} />;
+              case "tool": return <ToolCard key={it.id} item={it as ToolItem} subcalls={subcalls.get(it.id)} />;
               case "phase": return <PhaseCard key={it.id} text={it.text} />;
               case "assistant": {
                 // In minimal mode, strip reasoning from expanded assistant messages

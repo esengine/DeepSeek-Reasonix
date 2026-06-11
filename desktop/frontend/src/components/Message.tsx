@@ -267,12 +267,15 @@ export function TurnActions({
 export const AssistantMessage = memo(function AssistantMessage({
   item,
   defaultExpanded = false,
+  expandWhileStreaming = true,
 }: {
   item: AssistantItem;
   defaultExpanded?: boolean;
+  /** false in compact/minimal: completed steps fold away, so auto-open + fold reads as flicker. */
+  expandWhileStreaming?: boolean;
 }) {
   const t = useT();
-  const [reasoningOpen, setReasoningOpen] = useState(item.streaming || defaultExpanded);
+  const [reasoningOpen, setReasoningOpen] = useState((expandWhileStreaming && item.streaming) || defaultExpanded);
   const hasText = item.streaming || item.text.trim() !== "";
   const processOnly = Boolean(item.reasoning) && !hasText;
   const processWithText = Boolean(item.reasoning) && hasText;
