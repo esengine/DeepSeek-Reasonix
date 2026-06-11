@@ -2249,7 +2249,8 @@ a[href] {
 
 /* ── TurnCollapse (compact/minimal mode) ─────────────────────────── */
 .turn-collapse {
-  margin: 4px 0;
+  /* horizontal auto keeps the .transcript > * centered column; 0 would override it */
+  margin: 4px auto;
 }
 .turn-collapse__label {
   white-space: nowrap;
@@ -2265,7 +2266,7 @@ a[href] {
 
 /* ── ReadOnly batch (parent fold for read/search tools) ────────────── */
 .readonly-batch {
-  margin: 2px 0;
+  margin: 2px auto;
 }
 .readonly-batch__body {
   display: flex;
