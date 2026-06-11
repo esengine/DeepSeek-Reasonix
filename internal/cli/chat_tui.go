@@ -978,6 +978,13 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "ctrl+c", "super+c", "meta+c":
 			if m.state == tuiRunning {
+				// Selection takes precedence: copy instead of cancel, same as idle.
+				if sel.active && !sel.empty() {
+					m.sel = sel
+					text := m.selectedText()
+					m.sel = selection{}
+					return m, tea.Batch(copyToClipboard(text), finalize(m, cmds))
+				}
 				if m.bubblePending {
 					m.unsendPending() // server not yet replied — restore text, leave no trace
 				} else {
