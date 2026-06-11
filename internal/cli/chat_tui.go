@@ -161,11 +161,21 @@ type chatTUI struct {
 	// shellTranscriptIdx maps a shell tool ID to the transcript index of its
 	// collapsed output block, so Ctrl+B can rewrite it in place.
 	shellTranscriptIdx map[string]int
+	// toolLineCountByID records the last line count a streamed tool emitted
+	// (toolLineCount + (toolPartial != "")), keyed by the tool's call id. When
+	// streamToolOutput switches to a new id the old one's live tail/lineCount
+	// get reset; this map keeps the old count so collapseShellSlot's late
+	// path can still render the correct "⎿ N lines" summary for a non-
+	// streaming-prefixed tool (e.g. DeepSeek-scheduled bash with id "call_N")
+	// whose ToolResult arrives after another tool has taken over. Without
+	// it, late collapse would fall through to "⎿ -1 lines" because the
+	// shellOutputs accumulator is restricted to "shell-" ids.
 	// toolStreamStart / toolStreamFrame drive the "⎿ working · Ns" line shown
 	// under a dispatched tool that hasn't produced output yet, so a slow tool
 	// (e.g. codegraph_context) reads as making progress rather than frozen.
-	toolStreamStart time.Time
-	toolStreamFrame int
+	toolLineCountByID map[string]int
+	toolStreamStart   time.Time
+	toolStreamFrame   int
 	transcriptDirty bool
 	eventCh         chan event.Event
 	started         bool // banner + resumed history committed once
@@ -470,6 +480,7 @@ func newChatTUI(ctrl *control.Controller, missing string, eventCh chan event.Eve
 		shellOutputs:         make(map[string]string),
 		shellExpanded:        make(map[string]bool),
 		shellTranscriptIdx:   make(map[string]int),
+		toolLineCountByID:    make(map[string]int),
 		eventCh:              eventCh,
 		history:              ctrl.History(),
 		host:                 ctrl.Host(),
@@ -1659,13 +1670,33 @@ func (m *chatTUI) streamToolOutput(id, chunk string) {
 		//       already wrote for that id, so the live block stays directly
 		//       under the earlier tool's card rather than stacking at the end.
 		if existingIdx, ok := m.shellTranscriptIdx[id]; ok && existingIdx >= 0 && existingIdx < len(m.transcript) {
+			// Preserve the previous id's line count before we reset the
+			// streaming state. The transcript slot is still on screen
+			// with the old tail; when its ToolResult eventually arrives,
+			// collapseShellSlot's late path will use this count to render
+			// the correct "⎿ N lines" summary — the same value the active
+			// path would have computed had the result landed before
+			// another tool's progress pre-empted the stream.
+			if m.toolStreamID != "" && m.toolStreamID != id {
+				n := m.toolLineCount
+				if m.toolPartial != "" {
+					n++
+				}
+				if n > 0 {
+					m.toolLineCountByID[m.toolStreamID] = n
+				}
+			}
 			m.toolStreamID = id
 			m.toolStreamIdx = existingIdx
 			m.toolTail = m.toolTail[:0]
 			m.toolPartial = ""
 			m.toolLineCount = 0
 		} else {
-			m.collapseToolOutput(m.toolStreamID)
+			// Unknown id (not in shellTranscriptIdx). Collapse the
+			// currently-active stream with no result output — the
+			// active path still has the live line count, so this is
+			// only ever reached when a tool never produced output.
+			m.collapseToolOutput(m.toolStreamID, "")
 			m.toolStreamID = id
 			m.toolTail = m.toolTail[:0]
 			m.toolPartial = ""
@@ -1724,8 +1755,13 @@ func (m *chatTUI) pushToolLine(line string) {
 // "⎿ N lines" summary, so the scrollback keeps a marker of the run without the
 // full output (which the model already received). For shell commands ("shell-"
 // prefix), it shows the first shellPreviewLines with a Ctrl+B hint instead.
-// No-op when id isn't streaming.
-func (m *chatTUI) collapseToolOutput(id string) {
+// No-op when id isn't streaming. resultOutput is the tool's final output
+// (from the ToolResult event) and is the last-resort source of truth for
+// the line count when neither the live streaming state nor shellOutputs
+// have anything — e.g. a back-to-back bash tool whose progress arrived
+// after the slot was already overtaken by another tool, or one that
+// never streamed at all and the result is the only signal.
+func (m *chatTUI) collapseToolOutput(id, resultOutput string) {
 	if m.nativeScrollback {
 		if id == "" || m.toolStreamID != id {
 			return
@@ -1770,13 +1806,16 @@ func (m *chatTUI) collapseToolOutput(id string) {
 		// still have a transcript index for it — set by beginToolRunning
 		// when the dispatch landed — collapse in place so a late
 		// ToolResult for a back-to-back tool doesn't leave the previous
-		// tool's live block as raw streamed text.
+		// tool's live block as raw streamed text. Pass resultOutput so
+		// collapseShellSlot has the tool's final output as a last-resort
+		// source for the line count when neither the live state nor
+		// shellOutputs know about this id.
 		if idx, ok := m.shellTranscriptIdx[id]; ok && idx >= 0 && idx < len(m.transcript) {
-			m.collapseShellSlot(id, idx)
+			m.collapseShellSlot(id, idx, resultOutput)
 		}
 		return
 	}
-	m.collapseShellSlot(id, m.toolStreamIdx)
+	m.collapseShellSlot(id, m.toolStreamIdx, resultOutput)
 	m.toolStreamIdx = -1
 	m.toolStreamID = ""
 	m.toolTail = m.toolTail[:0]
@@ -1790,24 +1829,44 @@ func (m *chatTUI) collapseToolOutput(id string) {
 // tool was first dispatched). The active path uses the live streaming
 // state (m.toolLineCount + m.toolPartial) for the line count; the late
 // path derives it from the accumulated shellOutputs map (only populated
-// for "shell-" prefixed ids), since toolTail/toolLineCount are reset
-// whenever a new tool takes over via beginToolRunning.
-func (m *chatTUI) collapseShellSlot(id string, idx int) {
+// for "shell-" prefixed ids), then the per-id line count captured by
+// streamToolOutput (call_N-style ids that stream but aren't "shell-"),
+// then the final output carried by the ToolResult event itself — the
+// tool-tail line count is reset whenever a new tool takes over via
+// beginToolRunning, so without these fallbacks a late collapse would
+// either render "⎿ -1 lines" or blank the slot. Sets transcriptDirty
+// so the rewritten slot paints immediately, not on the next unrelated
+// event.
+func (m *chatTUI) collapseShellSlot(id string, idx int, resultOutput string) {
 	m.transcriptDirty = true
 	n := -1
 	if id == m.toolStreamID {
+		// Active path. The live streaming line count reflects the chunks
+		// already rendered into the working block. When the ToolResult
+		// also carries a final output (e.g. the last chunk of a slow
+		// tool arrived in the same call as the result, or the result is
+		// the only signal we ever get for a tool that never streamed
+		// its progress) prefer the larger of the two: resultOutput is
+		// the authoritative end-state. toolLineCount + toolPartial is
+		// the live state and may be lower.
 		n = m.toolLineCount
 		if m.toolPartial != "" {
 			n++
 		}
+		if resultOutput != "" {
+			fromResult := len(strings.Split(strings.TrimRight(resultOutput, "\n"), "\n"))
+			if fromResult > n {
+				n = fromResult
+			}
+		}
 	}
 	if n < 0 {
-		// Late-result path. shellOutputs is the most reliable record of
-		// what the tool actually emitted, but it's only populated for
-		// shell-prefixed ids; for other tools we fall back to leaving
-		// the slot blank.
 		if full, ok := m.shellOutputs[id]; ok {
 			n = len(strings.Split(strings.TrimRight(full, "\n"), "\n"))
+		} else if c, ok := m.toolLineCountByID[id]; ok {
+			n = c
+		} else if resultOutput != "" {
+			n = len(strings.Split(strings.TrimRight(resultOutput, "\n"), "\n"))
 		}
 	}
 	if n < 0 {
@@ -3306,8 +3365,10 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 	case event.ToolResult:
 		// A successful result is silent (it only feeds the model); a blocked/failed
 		// call surfaces a red "⏺ Verb ⊘ <reason>" card. A live-output block (bash)
-		// collapses to a one-line "⎿ N lines" summary first.
-		m.collapseToolOutput(e.Tool.ID)
+		// collapses to a one-line "⎿ N lines" summary first. Pass the final
+		// output so collapseToolOutput has a last-resort source for the line
+		// count when the live state was already reset by a back-to-back tool.
+		m.collapseToolOutput(e.Tool.ID, e.Tool.Output)
 		if e.Tool.Name == "todo_write" && e.Tool.Err == "" {
 			m.todoArgs = e.Tool.Args
 		}
@@ -3399,7 +3460,7 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 // finalizeStreamed freezes any in-progress reasoning + answer into scrollback so
 // a following event line lands after them, preserving chronological order.
 func (m *chatTUI) finalizeStreamed() {
-	m.collapseToolOutput(m.toolStreamID)
+	m.collapseToolOutput(m.toolStreamID, "")
 	m.commitReasoning()
 	m.commitPending()
 }
