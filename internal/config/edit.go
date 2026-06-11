@@ -220,6 +220,12 @@ func (c *Config) SetDesktopTelemetry(enabled bool) error {
 	return nil
 }
 
+// SetDesktopMetrics sets whether the desktop sends opt-in aggregate agent metrics.
+func (c *Config) SetDesktopMetrics(enabled bool) error {
+	c.Desktop.Metrics = &enabled
+	return nil
+}
+
 // SetUICloseBehavior is kept for callers compiled against the old edit API.
 func (c *Config) SetUICloseBehavior(mode string) error {
 	return c.SetDesktopCloseBehavior(mode)

@@ -77,6 +77,8 @@ type App struct {
 
 	mediaTokens *mediaTokenStore
 	botInstalls map[string]*botInstallSession
+
+	metrics *metricsAggregator // non-nil only when desktop.metrics is opted in
 }
 
 // mediaTokenEntry holds metadata for a workspace media file served via temporary URL.
@@ -269,8 +271,13 @@ func (a *App) startup(ctx context.Context) {
 	installSystemQuitHook()
 	a.startTray()
 
+	if cfg, err := config.Load(); err == nil && cfg.DesktopMetrics() && version != "dev" {
+		a.metrics = newMetricsAggregator(filepath.Dir(config.UserConfigPath()))
+	}
+
 	go a.restoreOrBuildTabs()
 	go a.sendStartupPing()
+	go a.flushMetrics()
 }
 
 func (a *App) beforeClose(ctx context.Context) bool {

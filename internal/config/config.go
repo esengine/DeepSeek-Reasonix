@@ -80,6 +80,7 @@ type DesktopConfig struct {
 	DisplayMode    string   `toml:"display_mode"`    // standard|compact|minimal; transcript display mode
 	CheckUpdates   *bool    `toml:"check_updates"`   // startup update checks; nil keeps the default enabled
 	Telemetry      *bool    `toml:"telemetry"`       // anonymous launch ping (install id + version + OS); nil keeps the default enabled
+	Metrics        *bool    `toml:"metrics"`         // opt-in aggregate agent metrics (anonymous signal/bucket counts; no content); nil = disabled
 	ProviderAccess []string `toml:"provider_access"` // desktop-only list of provider entries shown in Settings > Model > Access
 	ExpandThinking bool     `toml:"expand_thinking"` // true = show reasoning text expanded by default; false = collapsed
 }
@@ -221,6 +222,15 @@ func (c *Config) DesktopTelemetry() bool {
 		return true
 	}
 	return *c.Desktop.Telemetry
+}
+
+// DesktopMetrics reports whether the desktop sends opt-in aggregate agent
+// metrics — anonymous (signal, bucket) counters, never content. Default off.
+func (c *Config) DesktopMetrics() bool {
+	if c == nil || c.Desktop.Metrics == nil {
+		return false
+	}
+	return *c.Desktop.Metrics
 }
 
 // LSPConfig governs the optional Language Server Protocol tools (lsp_definition,
