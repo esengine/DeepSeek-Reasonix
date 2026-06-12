@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent, type ReactNode } from "react";
 import { QRCodeSVG } from "qrcode.react";
-import { Check, CheckCircle2, ChevronDown, ChevronUp, GripVertical, Loader2, QrCode, RefreshCw } from "lucide-react";
+import { Check, CheckCircle2, ChevronDown, ChevronUp, GripVertical, Loader2, QrCode, RefreshCw, RotateCcw } from "lucide-react";
 import { asArray } from "../lib/array";
 import { useDeferredClose } from "../lib/useMountTransition";
 import { app } from "../lib/bridge";
@@ -4424,12 +4424,16 @@ function ShortcutsSection() {
   const isDefault = Object.keys(customKeys).length === 0;
 
   return (
-    <SettingsSection title={t("settings.tab.shortcuts")}>
-      {!isDefault && (
-        <div className="shortcuts-toolbar">
-          <button className="chip chip--danger" onClick={resetKeys}>{t("shortcuts.resetAll")}</button>
-        </div>
-      )}
+    <SettingsSection
+      title={t("settings.tab.shortcuts")}
+      actions={!isDefault ? (
+        <Tooltip label={t("shortcuts.resetAll")}>
+          <button className="chip" onClick={resetKeys} aria-label={t("shortcuts.resetAll")}>
+            <RotateCcw size={14} />
+          </button>
+        </Tooltip>
+      ) : undefined}
+    >
       <div className="shortcuts-list">
         {DEFAULT_SHORTCUTS.map((sc) => {
           const editing = editingKey === sc.labelKey;

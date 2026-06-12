@@ -19571,9 +19571,6 @@ a[href] {
 }
 
 /* ── settings: shortcuts panel ──────────────────────────────────────────── */
-.shortcuts-toolbar {
-  margin-bottom: 12px;
-}
 .shortcuts-list {
   display: flex;
   flex-direction: column;
