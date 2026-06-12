@@ -69,12 +69,14 @@ type BotGateway struct {
 }
 
 type sessionState struct {
-	ctrl        *control.Controller
-	sink        *sessionEventSink
-	cancel      context.CancelFunc
-	pendingAsks map[string][]event.AskQuestion
-	createdAt   time.Time
-	lastActive  time.Time
+	ctrl             *control.Controller
+	sink             *sessionEventSink
+	cancel           context.CancelFunc
+	pendingAsks      map[string][]event.AskQuestion
+	pendingApprovals map[string]event.Approval
+	lastApprovalID   string
+	createdAt        time.Time
+	lastActive       time.Time
 }
 
 type sessionEventSink struct {
@@ -276,6 +278,10 @@ func (gw *BotGateway) handleMessage(ctx context.Context, binding AdapterBinding,
 		gw.cfg.OnInbound(msg)
 	}
 
+	if normalized, ok := gw.normalizeApprovalShortcut(key, msg.Text); ok {
+		msg.Text = normalized
+	}
+
 	// 斜杠命令处理
 	if IsSlashBypass(msg.Text) {
 		gw.logger.Info("bot slash command", logFields...)
@@ -339,6 +345,58 @@ func chatUsesGroupAllowlist(chatType ChatType) bool {
 	}
 }
 
+func (gw *BotGateway) normalizeApprovalShortcut(key, text string) (string, bool) {
+	var command string
+	switch strings.ToLower(strings.TrimSpace(text)) {
+	case "1", "y", "yes", "ok", "同意", "批准", "允许", "允许一次":
+		command = "/approve"
+	case "2", "0", "n", "no", "deny", "拒绝":
+		command = "/deny"
+	default:
+		return "", false
+	}
+	approvalID := gw.currentPendingApprovalID(key)
+	if approvalID == "" {
+		return "", false
+	}
+	return command + " " + approvalID, true
+}
+
+func (gw *BotGateway) currentPendingApprovalID(key string) string {
+	gw.mu.Lock()
+	defer gw.mu.Unlock()
+	state, ok := gw.controllers[key]
+	if !ok || len(state.pendingApprovals) == 0 {
+		return ""
+	}
+	if state.lastApprovalID != "" {
+		if _, ok := state.pendingApprovals[state.lastApprovalID]; ok {
+			return state.lastApprovalID
+		}
+	}
+	for id := range state.pendingApprovals {
+		return id
+	}
+	return ""
+}
+
+func (gw *BotGateway) forgetPendingApproval(key, id string) {
+	gw.mu.Lock()
+	defer gw.mu.Unlock()
+	state, ok := gw.controllers[key]
+	if !ok || state.pendingApprovals == nil {
+		return
+	}
+	delete(state.pendingApprovals, id)
+	if state.lastApprovalID == id {
+		state.lastApprovalID = ""
+		for nextID := range state.pendingApprovals {
+			state.lastApprovalID = nextID
+			break
+		}
+	}
+}
+
 func (gw *BotGateway) handleSlashCommand(ctx context.Context, adapter Adapter, key string, msg InboundMessage) {
 	switch {
 	case strings.HasPrefix(msg.Text, "/stop"):
@@ -378,6 +436,7 @@ func (gw *BotGateway) handleSlashCommand(ctx context.Context, adapter Adapter, k
 		gw.mu.Unlock()
 		if ok {
 			state.ctrl.Approve(parts[1], true, false, false)
+			gw.forgetPendingApproval(key, parts[1])
 			_ = gw.sendText(ctx, adapter, msg, "已批准。")
 		}
 
@@ -392,6 +451,7 @@ func (gw *BotGateway) handleSlashCommand(ctx context.Context, adapter Adapter, k
 		gw.mu.Unlock()
 		if ok {
 			state.ctrl.Approve(parts[1], false, false, false)
+			gw.forgetPendingApproval(key, parts[1])
 			_ = gw.sendText(ctx, adapter, msg, "已拒绝。")
 		}
 
@@ -469,14 +529,34 @@ func (gw *BotGateway) runTurn(ctx context.Context, adapter Adapter, key string, 
 	_ = adapter.SendTyping(ctx, msg.ChatID)
 
 	// 创建事件渲染 sink
-	sink := newRenderSink(ctx, adapter, msg.ConnectionID, msg.Domain, msg.ChatID, msg.ChatType, msg.UserID, msg.MessageID, gw.logger, func(ask event.Ask) {
-		gw.mu.Lock()
-		if state.pendingAsks == nil {
-			state.pendingAsks = make(map[string][]event.AskQuestion)
-		}
-		state.pendingAsks[ask.ID] = ask.Questions
-		gw.mu.Unlock()
-	})
+	sink := newRenderSink(
+		ctx,
+		adapter,
+		msg.ConnectionID,
+		msg.Domain,
+		msg.ChatID,
+		msg.ChatType,
+		msg.UserID,
+		msg.MessageID,
+		gw.logger,
+		func(approval event.Approval) {
+			gw.mu.Lock()
+			if state.pendingApprovals == nil {
+				state.pendingApprovals = make(map[string]event.Approval)
+			}
+			state.pendingApprovals[approval.ID] = approval
+			state.lastApprovalID = approval.ID
+			gw.mu.Unlock()
+		},
+		func(ask event.Ask) {
+			gw.mu.Lock()
+			if state.pendingAsks == nil {
+				state.pendingAsks = make(map[string][]event.AskQuestion)
+			}
+			state.pendingAsks[ask.ID] = ask.Questions
+			gw.mu.Unlock()
+		},
+	)
 	state.sink.setTarget(sink)
 	defer state.sink.setTarget(nil)
 

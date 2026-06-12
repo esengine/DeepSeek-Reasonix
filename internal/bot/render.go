@@ -13,17 +13,18 @@ import (
 
 // renderSink 将 Reasonix 事件流渲染为平台消息。
 type renderSink struct {
-	ctx      context.Context
-	adapter  Adapter
-	connID   string
-	domain   string
-	chatID   string
-	chatType ChatType
-	userID   string
-	replyTo  string
-	logger   *slog.Logger
-	ctrl     *control.Controller
-	onAsk    func(event.Ask)
+	ctx        context.Context
+	adapter    Adapter
+	connID     string
+	domain     string
+	chatID     string
+	chatType   ChatType
+	userID     string
+	replyTo    string
+	logger     *slog.Logger
+	ctrl       *control.Controller
+	onApproval func(event.Approval)
+	onAsk      func(event.Ask)
 
 	// 渲染缓冲
 	buf        strings.Builder
@@ -33,20 +34,21 @@ type renderSink struct {
 	lastFlush  time.Time
 }
 
-func newRenderSink(ctx context.Context, adapter Adapter, connID, domain, chatID string, chatType ChatType, userID string, replyTo string, logger *slog.Logger, onAsk func(event.Ask)) *renderSink {
+func newRenderSink(ctx context.Context, adapter Adapter, connID, domain, chatID string, chatType ChatType, userID string, replyTo string, logger *slog.Logger, onApproval func(event.Approval), onAsk func(event.Ask)) *renderSink {
 	return &renderSink{
-		ctx:       ctx,
-		adapter:   adapter,
-		connID:    connID,
-		domain:    domain,
-		chatID:    chatID,
-		chatType:  chatType,
-		userID:    userID,
-		replyTo:   replyTo,
-		logger:    logger,
-		onAsk:     onAsk,
-		toolNames: make(map[string]string),
-		lastFlush: time.Now(),
+		ctx:        ctx,
+		adapter:    adapter,
+		connID:     connID,
+		domain:     domain,
+		chatID:     chatID,
+		chatType:   chatType,
+		userID:     userID,
+		replyTo:    replyTo,
+		logger:     logger,
+		onApproval: onApproval,
+		onAsk:      onAsk,
+		toolNames:  make(map[string]string),
+		lastFlush:  time.Now(),
 	}
 }
 
@@ -109,7 +111,10 @@ func (s *renderSink) Emit(e event.Event) {
 
 	case event.ApprovalRequest:
 		// 发送审批请求
-		approvalText := fmt.Sprintf("⚠️ 需要批准操作:\n工具: %s\n操作: %s\n\nID: `%s`\n用 /approve %s 批准，/deny %s 拒绝。",
+		if s.onApproval != nil {
+			s.onApproval(e.Approval)
+		}
+		approvalText := fmt.Sprintf("⚠️ 需要批准操作:\n工具: %s\n操作: %s\n\nID: `%s`\n回复 1 批准，回复 2 拒绝；也可用 /approve %s 或 /deny %s。",
 			e.Approval.Tool, e.Approval.Subject, e.Approval.ID, e.Approval.ID, e.Approval.ID)
 		msg := OutboundMessage{
 			ConnectionID: s.connID,

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"reasonix/internal/event"
 )
 
 // fakeAdapter 是一个内存中的假适配器，用于测试 BotGateway。
@@ -268,6 +270,36 @@ func TestGatewayAllowAll(t *testing.T) {
 
 	if !gw.checkAllowlist(PlatformQQ, InboundMessage{Platform: PlatformQQ, ChatType: ChatDM, UserID: "any_user"}) {
 		t.Error("allow_all should allow everyone")
+	}
+}
+
+func TestGatewayNormalizesNumericApprovalShortcutsOnlyWhenPending(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	gw := NewGateway(GatewayConfig{}, nil, logger)
+	key := "session-key"
+
+	if _, ok := gw.normalizeApprovalShortcut(key, "1"); ok {
+		t.Fatal("numeric text without a pending approval should stay a normal message")
+	}
+
+	gw.controllers[key] = &sessionState{
+		pendingApprovals: map[string]event.Approval{
+			"42": {ID: "42", Tool: "explore"},
+		},
+		lastApprovalID: "42",
+	}
+
+	got, ok := gw.normalizeApprovalShortcut(key, "1")
+	if !ok || got != "/approve 42" {
+		t.Fatalf("normalize 1 = %q,%v; want /approve 42,true", got, ok)
+	}
+	got, ok = gw.normalizeApprovalShortcut(key, "2")
+	if !ok || got != "/deny 42" {
+		t.Fatalf("normalize 2 = %q,%v; want /deny 42,true", got, ok)
+	}
+	gw.forgetPendingApproval(key, "42")
+	if _, ok := gw.normalizeApprovalShortcut(key, "1"); ok {
+		t.Fatal("numeric text after approval is forgotten should stay a normal message")
 	}
 }
 
