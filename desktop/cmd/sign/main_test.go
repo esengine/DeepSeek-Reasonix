@@ -57,6 +57,8 @@ func TestGenManifest(t *testing.T) {
 		"Reasonix-darwin-amd64.zip",
 		"Reasonix-windows-amd64-installer.exe",
 		"Reasonix-windows-amd64.zip", // portable download, not the updater channel
+		"Reasonix-windows-arm64-installer.exe",
+		"Reasonix-windows-arm64.zip", // portable download, not the updater channel
 		"Reasonix-linux-amd64.tar.gz",
 		"Reasonix-linux-amd64.deb",            // human download, not the updater channel
 		"Reasonix-linux-amd64.tar.gz.minisig", // must be skipped
@@ -83,8 +85,8 @@ func TestGenManifest(t *testing.T) {
 	if m.Version != "v1.2.0" {
 		t.Fatalf("version = %q, want v1.2.0", m.Version)
 	}
-	if len(m.Platforms) != 4 {
-		t.Fatalf("want 4 platforms, got %d: %v", len(m.Platforms), m.Platforms)
+	if len(m.Platforms) != 5 {
+		t.Fatalf("want 5 platforms, got %d: %v", len(m.Platforms), m.Platforms)
 	}
 	win, ok := m.Platforms["windows-amd64"]
 	if !ok {
@@ -99,6 +101,15 @@ func TestGenManifest(t *testing.T) {
 	}
 	if win.SHA256 == "" || win.Size == 0 {
 		t.Fatalf("windows asset missing digest/size: %+v", win)
+	}
+	// The Windows updater channel is the per-arch -installer.exe; the portable .zip
+	// must not shadow the windows-arm64 key.
+	arm, ok := m.Platforms["windows-arm64"]
+	if !ok {
+		t.Fatal("windows-arm64 missing")
+	}
+	if !strings.HasSuffix(arm.URL, "/Reasonix-windows-arm64-installer.exe") {
+		t.Fatalf("windows-arm64 url = %q, want the installer, not the portable zip", arm.URL)
 	}
 	// The Linux updater channel must stay the .tar.gz; the co-located .deb is a
 	// human download and must not shadow the linux-amd64 key.
