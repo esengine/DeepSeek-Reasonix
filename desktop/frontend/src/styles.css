@@ -15331,7 +15331,9 @@ a[href] {
 .project-tree__time-filter-menu {
   position: absolute;
   top: calc(100% + 4px);
-  left: 0;
+  /* Right-aligned: the trigger sits in the right-aligned header inside the
+     overflow:hidden sidebar, so opening leftward keeps the menu unclipped. */
+  right: 0;
   z-index: var(--z-menu);
   min-width: 84px;
   padding: 4px;

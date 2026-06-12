@@ -518,31 +518,21 @@ export function ProjectTree({
       : timeFilter === "5h" ? 5 * 60 * 60 * 1000
       : timeFilter === "1d" ? 24 * 60 * 60 * 1000
       : 0;
+    const nthLatestActivity = (n: number): number | null => {
+      const times = new Set<number>();
+      const collect = (nodes: ProjectNode[]) => {
+        for (const node of nodes) {
+          if (node.kind === "topic" || node.kind === "global_topic") times.add(topicActivityTime(node));
+          collect(asArray(node.children));
+        }
+      };
+      collect(tree);
+      const sorted = [...times].sort((a, b) => b - a);
+      return sorted.length === 0 ? null : sorted[Math.min(n, sorted.length) - 1];
+    };
     const cutoff: number | null = timeFilter === "all" ? null
-      : timeFilter === "10" ? (() => {
-          const times = new Set<number>();
-          const collect = (nodes: ProjectNode[]) => {
-            for (const n of nodes) {
-              if (n.kind === "topic" || n.kind === "global_topic") times.add(topicActivityTime(n));
-              collect(asArray(n.children));
-            }
-          };
-          collect(tree);
-          const sorted = [...times].sort((a, b) => b - a);
-          return sorted.length >= 10 ? sorted[9] : (sorted.length > 0 ? sorted[sorted.length - 1] : null);
-        })()
-      : timeFilter === "20" ? (() => {
-          const times = new Set<number>();
-          const collect = (nodes: ProjectNode[]) => {
-            for (const n of nodes) {
-              if (n.kind === "topic" || n.kind === "global_topic") times.add(topicActivityTime(n));
-              collect(asArray(n.children));
-            }
-          };
-          collect(tree);
-          const sorted = [...times].sort((a, b) => b - a);
-          return sorted.length >= 20 ? sorted[19] : (sorted.length > 0 ? sorted[sorted.length - 1] : null);
-        })()
+      : timeFilter === "10" ? nthLatestActivity(10)
+      : timeFilter === "20" ? nthLatestActivity(20)
       : Date.now() - diff;
     const topicMatchesTime = (node: ProjectNode) => {
       if (cutoff === null) return true;
