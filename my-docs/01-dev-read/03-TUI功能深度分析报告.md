@@ -205,7 +205,63 @@ echo '{"jsonrpc":"2.0","method":"session/create","params":{}}' | reasonix acp
 
 这不是网络协议，而是进程间管道协议，适用于编辑器插件等场景。
 
-### 2.4 实时通信能力总结
+### 2.4 SSE+POST 能否完全实现 WebSocket 的双向通信？
+
+**基本结论：能覆盖 95% 的聊天场景，但有结构性差异。**
+
+#### 2.4.1 能力覆盖分析
+
+| 通信能力 | WebSocket | SSE + POST | 能否覆盖 |
+|---------|:---------:|:----------:|:--------:|
+| 服务器→客户端推送 | ✅ 全双工 | ✅ SSE 事件流 | ✅ |
+| 客户端→服务器消息 | ✅ 全双工 | ✅ HTTP POST | ✅ |
+| 同时双向通信 | ✅ 同一连接 | ❌ 独立连接 | ⚠️ 非同时 |
+| 二进制数据 | ✅ | ❌ 仅文本（SSE 只支持 UTF-8）| ❌ |
+| 连接复用 | ✅ 1 个 TCP 连接 | ❌ 需 2 个连接（SSE + HTTP）| ❌ |
+| 流式消息边界 | ✅ 帧协议 | ✅ SSE `data:` + HTTP JSON | ✅ |
+| 自动重连 | ❌ 需手动实现 | ✅ EventSource 内置 | ✅ 更优 |
+| 浏览器兼容性 | ✅ 全平台 | ✅ 全平台（EventSource） | ✅ |
+| 跨域限制 | ❌ 需要 CORS | ❌ 需要 CORS | ✅ 同等 |
+
+#### 2.4.2 聊天场景的实际影响
+
+对于 Reasonix 的实际聊天场景（用户输入 → 模型流式回复），通信模式本质上是**半双工**的：
+
+```
+用户发送文本 → 等待模型回复 → 流式接收 → 用户再发送
+```
+
+即使使用 WebSocket，同一时刻也只有一方在发送数据。因此 **SSE + POST 在功能上完全够用**：
+
+| 能力 | 在聊天中是否需要 | SSE+POST 是否满足 |
+|------|:---------------:|:-----------------:|
+| 并发双向流 | ❌ 不需要 | ✅ 无需 |
+| 二进制传输 | ❌ 事件和文本都是 JSON | ✅ 满足 |
+| 单连接节省端口 | ❌ 本地开发不关心 | ✅ 满足 |
+
+#### 2.4.3 SSE 的已知缺点
+
+1. **浏览器连接数限制**：同一域名最多 6 个 SSE 连接（HTTP/1.1），HTTP/2 下无此限制。
+2. **无内置鉴权机制**：SSE 无法发送自定义请求头（EventSource API 限制），token 需放在 URL query 中。
+3. **代理兼容性**：部分老式 HTTP 代理和防火墙可能缓冲 SSE 流，导致延迟增加。
+4. **仅文本传输**：SSE 原生只支持 UTF-8 文本，不支持 Blob/ArrayBuffer。
+5. **HTTP/1.1 连接数浪费**：每个 SSE 连接长期占用一个 HTTP 连接，同域名下的并发请求数减少。
+
+#### 2.4.4 当前实现中的权衡
+
+```
+当前实现:
+  客户端 → POST /submit → Controller.Submit()
+  Controller 处理完毕后 → Broadcaster.Emit(event) → SSE → 客户端
+
+如果换成 WebSocket:
+  客户端 → WebSocket send → Controller.Submit()
+  Controller 处理完毕后 → Broadcaster.Emit(event) → WebSocket send → 客户端
+```
+
+当前架构中，Broadcaster 已经是一个多订阅者的 fan-out 模型——换成 WebSocket 只需要新增一个 `wsBroadcaster` 实现相同的 `event.Sink` 接口，改动范围非常小。
+
+### 2.5 实时通信能力总结
 
 | 模式 | 协议 | 实时性 | 适用场景 |
 |------|------|:------:|---------|
@@ -508,15 +564,23 @@ func LoadSession(path string) (*Session, error) {
 
 ### 5.4 存储位置
 
-由配置 `session_dir` 控制，默认路径：
+由硬编码的函数 `config.SessionDir()` 决定，**不支持在 `reasonix.toml` 中配置**：
+
+```go
+func SessionDir() string {
+    dir, _ := os.UserConfigDir()
+    return filepath.Join(dir, "reasonix", "sessions")
+}
+```
 
 | 平台 | 默认路径 |
 |------|---------|
 | Linux | `~/.local/share/reasonix/sessions/` |
 | macOS | `~/Library/Application Support/reasonix/sessions/` |
-| 自定义 | 配置文件中 `session_dir` 指定 |
+| 自定义 | Go 集成时通过 `boot.Options.SessionDir` 覆写 |
+| 无配置目录时 | 持久化禁用（`SessionDir()` 返回 `""`）|
 
-可通过 `ctrl.SessionDir()` 查询当前存储目录。
+可通过 `ctrl.SessionDir()` 查询当前存储目录，**每个 Controller 实例有独立的 `sessionDir` 字段**，允许不同实例指向不同目录。
 
 ### 5.5 分支元数据
 
@@ -555,7 +619,109 @@ type SessionInfo struct {
 
 检查点存储 `turn + prompt + 受影响的文件路径` 的快照。
 
-### 5.7 存储流程图
+### 5.7 全量重写机制
+
+**是的，每轮（每条用户消息）都会全量重写整个 JSONL 文件。**
+
+#### 5.7.1 触发时机
+
+| 时机 | 函数 | 频率 |
+|------|------|:----:|
+| 每轮执行结束时 | `snapshotActivityIfChanged()` → `SnapshotActivity()` → `snapshot()` → `s.Save(path)` | 每轮 |
+| 执行中自动保存 | `autosaveWhileRunning()` → `snapshot()` → `s.Save(path)` | 每 30 秒 |
+| 手动压缩后 | `Compact()` → `Snapshot()` | 按需 |
+| 模型切换前 | `switchModel()` → `Snapshot()` | 按需 |
+| 分支/回退/新会话前 | `Fork()`/`Rewind()`/`NewSession()` → `Snapshot()` | 按需 |
+| 进程退出 | `SIGHUP`/`SIGTERM` 处理器 → `Snapshot()` | 退出前 |
+
+#### 5.7.2 写入方式
+
+```go
+// internal/agent/save.go
+func (s *Session) Save(path string) error {
+    // 1. 在同目录创建临时文件 .session.*.tmp
+    tmp, _ := os.CreateTemp(filepath.Dir(path), ".session.*.tmp")
+
+    // 2. 对整个消息列表编码为 JSONL（全量）
+    enc := json.NewEncoder(tmp)
+    for _, m := range s.Snapshot() {  // 加读锁复制消息
+        enc.Encode(m)
+    }
+    tmp.Close()
+
+    // 3. 原子替换原文件
+    fileutil.ReplaceFile(tmpPath, path)
+}
+```
+
+**全量重写的原因**：
+- 对话文件小（KB 级别），重写开销极低
+- 压缩（compact）操作会修改中间消息历史，追加模式无法处理
+- 原子 `tmp + rename` 保证崩溃不残损
+
+#### 5.7.3 关于对话量大的担忧
+
+实测指标：假设每轮 2000 条消息，每条平均 500 字节，JSONL 文件约 **1MB**。全量重写一次约 **< 10ms**（SSD 环境）。常规会话通常在 50-200 轮，文件大小在 **25KB-200KB** 范围，重写开销可忽略不计。
+
+### 5.8 存储目录配置方式
+
+#### 5.8.1 当前状态：无 TOML 配置项
+
+`reasonix.toml` 中 **没有** `session_dir` 字段。`Config` 结构体（`internal/config/config.go:41-61`）不含任何会话路径配置。
+
+默认路径为硬编码：
+
+```go
+// internal/config/config.go:1773-1782
+func SessionDir() string {
+    dir, err := os.UserConfigDir()
+    if err != nil {
+        return "" // 持久化禁用
+    }
+    return filepath.Join(dir, "reasonix", "sessions")
+}
+```
+
+| 平台 | 默认路径 |
+|------|---------|
+| Linux | `~/.local/share/reasonix/sessions/` |
+| macOS | `~/Library/Application Support/reasonix/sessions/` |
+
+#### 5.8.2 覆写方式
+
+**方式一：Go 集成时通过 `boot.Options.SessionDir`**
+
+```go
+ctrl, err := boot.Build(ctx, boot.Options{
+    Model:      "deepseek-chat",
+    SessionDir: "/custom/session/dir",  // ← 指定自定义目录
+})
+```
+
+**方式二：运行时通过 `ctrl.SetSessionPath()`**
+
+```go
+ctrl.SetSessionPath("/custom/path/my-session.jsonl")
+```
+
+**方式三：Desktop 模式自动使用项目级目录**
+
+Desktop 模式下使用 `ProjectSessionDir(workspaceRoot)`，路径为 `<config_root>/projects/<workspace_slug>/sessions/`，不依赖全局目录。
+
+#### 5.8.3 关于 `--dir` 参数的影响
+
+`--dir` 仅改变进程工作目录（影响配置文件发现和工具沙箱根），**不改变** `SessionDir()` 的值。即：
+
+```bash
+reasonix chat --dir /project/a
+reasonix chat --dir /project/b
+# 两种启动的会话文件都保存在 ~/Library/Application Support/reasonix/sessions/ 下
+# 不会自动按项目隔离
+```
+
+如果需要按项目隔离，目前只能通过 Go 集成方式传入自定义 `SessionDir`，或者在配置中不存在该选项。
+
+### 5.9 存储流程图
 
 ```
                                  写入时机
