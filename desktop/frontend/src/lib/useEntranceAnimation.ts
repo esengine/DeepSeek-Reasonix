@@ -26,33 +26,30 @@ export function useEntranceAnimation<T extends HTMLElement>(
   const ref = useRef<T | null>(null);
   const seen = useRef(new Set<string>());
   const timerRef = useRef<number | null>(null);
-  const ready = useRef(false);
+  const firstRun = useRef(true);
 
-  // Pre-seed: on first mount, record all existing data-entrance IDs so they
-  // never get an entrance animation.  Only newly added DOM nodes animate.
+  // Single effect: on first mount, pre-seed the seen set (no animation).
+  // On subsequent deps changes, animate only newly-added elements.
+  // This avoids the double querySelectorAll that two separate effects cause.
   useEffect(() => {
     const container = ref.current;
     if (!container) return;
-    container.querySelectorAll(selector).forEach((el) => {
-      const id = el.getAttribute("data-entrance");
-      if (id) seen.current.add(id);
-    });
-    ready.current = true;
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Subsequent renders: scan for elements NOT in the seen set.
-  useEffect(() => {
-    const container = ref.current;
-    if (!container || !ready.current) return;
 
     const entries: HTMLElement[] = [];
     container.querySelectorAll(selector).forEach((el) => {
       const id = el.getAttribute("data-entrance");
       if (id && !seen.current.has(id)) {
         seen.current.add(id);
+        // First run: just record IDs, don't animate history items.
+        if (firstRun.current) return;
         entries.push(el as HTMLElement);
       }
     });
+
+    if (firstRun.current) {
+      firstRun.current = false;
+      return; // Pre-seeded — no entrance animation for history items.
+    }
 
     if (entries.length === 0) return;
 
@@ -62,7 +59,7 @@ export function useEntranceAnimation<T extends HTMLElement>(
       return;
     }
 
-    // Batch: if multiple items arrive in the same tick, animate them together.
+    // Batch: if multiple items arrive in the same tick, animate together.
     if (timerRef.current !== null) clearTimeout(timerRef.current);
     timerRef.current = window.setTimeout(() => {
       timerRef.current = null;
@@ -83,8 +80,7 @@ export function useEntranceAnimation<T extends HTMLElement>(
     return () => {
       if (timerRef.current !== null) clearTimeout(timerRef.current);
     };
-    // Only re-scan when deps change — NOT on every render (streaming updates
-    // text in place without adding new elements, so scanning is wasted work).
+    // Only re-scan when deps change — NOT on every render.
   }, [deps]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return ref;

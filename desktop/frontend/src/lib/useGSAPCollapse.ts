@@ -38,12 +38,12 @@ export function useGSAPCollapse(
     if (!el) return;
 
     // Skip the very first render — we don't want to animate from 0→auto
-    // on mount.
+    // on mount.  Use a direct style write (no GSAP overhead) for the
+    // initial state so 400+ collapsed items don't each go through
+    // gsap.set property resolution.
     if (prevOpen.current === null) {
       prevOpen.current = open;
-      // Set the initial height inline so the element respects the starting
-      // state without a visible jump.
-      gsap.set(el, { height: open ? "auto" : 0 });
+      el.style.height = open ? "auto" : "0px";
       return;
     }
 
