@@ -434,13 +434,19 @@ func chatREPL(args []string) int {
 			if modelName == "" {
 				modelName = cfg.DefaultModel
 			}
+			entryPrompt, pErr := entry.ResolveSystemPrompt()
+			if pErr != nil {
+				fmt.Fprintln(os.Stderr, "orchestrator: agent", entry.Name+":", pErr)
+				continue
+			}
 			agentSink := orchestrator.NewSinkMultiplexer(sink, entry.Name)
 			denylist := orchestrator.OrchestratorToolNames()
 			childCtrl, cerr := boot.Build(ctx, boot.Options{
-				Model:        modelName,
-				MaxSteps:     *maxSteps,
-				Sink:         agentSink,
-				ToolDenylist: denylist,
+				Model:         modelName,
+				MaxSteps:      *maxSteps,
+				Sink:          agentSink,
+				SystemPrompt:  entryPrompt,
+				ToolDenylist:  denylist,
 				SkipCodegraph: true,
 			})
 			if cerr != nil {

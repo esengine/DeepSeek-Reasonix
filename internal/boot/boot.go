@@ -76,6 +76,12 @@ type Options struct {
 	// (for example ACP session/new). They are connected eagerly for this
 	// controller but are not persisted to reasonix.toml.
 	ExtraPlugins []plugin.Spec
+	// SystemPrompt overrides the default base system prompt for this controller.
+	// When non-empty, it replaces cfg.ResolveSystemPrompt() before output style,
+	// language policy, memory, and skills are composed on top (Option 1 semantics).
+	// Designed for orchestrator child agents that need a different role/behavior
+	// while still inheriting REASONIX.md, skills index, etc.
+	SystemPrompt string
 	// ToolDenylist removes named tools from the registry after all built-ins,
 	// plugins, and skills are registered. Used to prevent managed agents from
 	// exposing orchestrator meta-tools or other unwanted capabilities.
@@ -159,9 +165,14 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		return nil, err
 	}
 
-	sysPrompt, err := cfg.ResolveSystemPrompt()
-	if err != nil {
-		return nil, err
+	var sysPrompt string
+	if opts.SystemPrompt != "" {
+		sysPrompt = opts.SystemPrompt
+	} else {
+		sysPrompt, err = cfg.ResolveSystemPrompt()
+		if err != nil {
+			return nil, err
+		}
 	}
 	// Output style: fold the selected persona/tone block into the base prompt
 	// before language/memory/skills append, so a "replace" style (keep-coding

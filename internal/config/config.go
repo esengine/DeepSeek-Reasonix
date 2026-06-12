@@ -395,15 +395,30 @@ type OrchestratorConfig struct {
 
 // OrchestratorAgentEntry defines one managed agent in the orchestrator team.
 type OrchestratorAgentEntry struct {
-	Name      string   `toml:"name"`
-	Model     string   `toml:"model"`
-	Ref       string   `toml:"ref"`
-	Skills    []string `toml:"skills"`
-	SkipSkills []string `toml:"skip_skills"`
-	Paths     []string `toml:"paths"`
-	Persist   bool     `toml:"persist"`
-	Ephemeral bool     `toml:"ephemeral"`
-	Tools     []string `toml:"tools"`
+	Name            string   `toml:"name"`
+	Model           string   `toml:"model"`
+	Ref             string   `toml:"ref"`
+	Skills          []string `toml:"skills"`
+	SkipSkills      []string `toml:"skip_skills"`
+	Paths           []string `toml:"paths"`
+	SystemPrompt    string   `toml:"system_prompt"`
+	SystemPromptFile string  `toml:"system_prompt_file"`
+	Persist         bool     `toml:"persist"`
+	Ephemeral       bool     `toml:"ephemeral"`
+	Tools           []string `toml:"tools"`
+}
+
+// ResolveSystemPrompt returns the entry's system prompt, reading system_prompt_file if set.
+// Returns empty string when neither is set — the caller falls back to the global prompt.
+func (e *OrchestratorAgentEntry) ResolveSystemPrompt() (string, error) {
+	if e.SystemPromptFile != "" {
+		b, err := os.ReadFile(e.SystemPromptFile)
+		if err != nil {
+			return "", fmt.Errorf("orchestrator agent %q system_prompt_file: %w", e.Name, err)
+		}
+		return strings.TrimSpace(string(b)), nil
+	}
+	return strings.TrimSpace(e.SystemPrompt), nil
 }
 
 // SandboxConfig bounds the blast radius of tool calls (Phase 0: file-writer

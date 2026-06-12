@@ -2,8 +2,11 @@ package orchestrator
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
+
+	"reasonix/internal/agent"
 )
 
 func sessionPath(dir, name string) string {
@@ -57,7 +60,12 @@ func (o *Orchestrator) LoadSessions(dir string) error {
 		if _, err := os.Stat(path); os.IsNotExist(err) {
 			continue
 		}
-		a.Ctrl.Resume(nil, path)
+		loaded, loadErr := agent.LoadSession(path)
+		if loadErr != nil {
+			slog.Warn("orchestrator: failed to load session for agent", "agent", a.Name, "path", path, "err", loadErr)
+			continue
+		}
+		a.Ctrl.Resume(loaded, path)
 	}
 	return nil
 }
