@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/builtinmcp"
 	"reasonix/internal/codegraph"
 	"reasonix/internal/command"
 	"reasonix/internal/config"
@@ -210,7 +211,8 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// Partition configured plugins by tier so eager/lazy/background can each
 	// take the path that fits them. User entries default to background: the
 	// session starts immediately while enabled MCP servers warm up.
-	eagerEntries, lazyEntries, bgEntries := partitionByTier(cfg.AutoStartPlugins())
+	autoStartEntries := builtinmcp.AppendMissing(cfg.AutoStartPlugins(), cfg.Plugins)
+	eagerEntries, lazyEntries, bgEntries := partitionByTier(autoStartEntries)
 
 	// Auto-demote: any eager plugin that has been chronically slow (recent
 	// samples repeatedly hit the blocking startup budget) drops to lazy

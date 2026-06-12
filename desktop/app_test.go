@@ -1468,6 +1468,75 @@ func TestCapabilitiesShowsDefaultCodegraphDisabled(t *testing.T) {
 	t.Fatalf("codegraph missing from Capabilities: %+v", view.Servers)
 }
 
+func TestCapabilitiesShowsBuiltInMCPDefaults(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+
+	app := NewApp()
+	app.setTestCtrl(control.New(control.Options{Host: plugin.NewHost()}), "")
+	defer app.activeCtrl().Close()
+
+	view := app.Capabilities()
+	want := map[string][]string{
+		"time":     []string{"-y", "@modelcontextprotocol/server-time"},
+		"context7": []string{"-y", "@upstash/context7-mcp"},
+	}
+	found := map[string]bool{}
+	for _, s := range view.Servers {
+		args, ok := want[s.Name]
+		if !ok {
+			continue
+		}
+		found[s.Name] = true
+		if s.Status != "deferred" {
+			t.Fatalf("%s status = %q, want deferred; server = %+v", s.Name, s.Status, s)
+		}
+		if !s.BuiltIn || !s.Configured || !s.AutoStart {
+			t.Fatalf("%s builtIn/configured/autoStart = %v/%v/%v, want true/true/true; server = %+v", s.Name, s.BuiltIn, s.Configured, s.AutoStart, s)
+		}
+		if s.Tier != "lazy" || s.Transport != "stdio" || s.Command != "npx" {
+			t.Fatalf("%s transport/tier/command = %q/%q/%q, want stdio/lazy/npx; server = %+v", s.Name, s.Transport, s.Tier, s.Command, s)
+		}
+		if !reflect.DeepEqual(s.Args, args) {
+			t.Fatalf("%s args = %+v, want %+v", s.Name, s.Args, args)
+		}
+	}
+	for name := range want {
+		if !found[name] {
+			t.Fatalf("built-in MCP %s missing from Capabilities: %+v", name, view.Servers)
+		}
+	}
+}
+
+func TestSetBuiltInMCPDisabledDoesNotWriteUserConfig(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+
+	app := NewApp()
+	app.setTestCtrl(control.New(control.Options{Host: plugin.NewHost()}), "")
+	defer app.activeCtrl().Close()
+
+	if err := app.SetMCPServerEnabled("time", false); err != nil {
+		t.Fatalf("SetMCPServerEnabled(time,false): %v", err)
+	}
+	view := app.Capabilities()
+	for _, s := range view.Servers {
+		if s.Name == "time" {
+			if s.Status != "disabled" || !s.BuiltIn || !s.Configured {
+				t.Fatalf("time disabled view = %+v, want disabled built-in configured", s)
+			}
+			cfg := config.LoadForEdit(config.UserConfigPath())
+			if _, ok := findPluginEntry(cfg.Plugins, "time"); ok {
+				t.Fatalf("time built-in disable wrote a user plugin: %+v", cfg.Plugins)
+			}
+			return
+		}
+	}
+	t.Fatalf("time missing from Capabilities after disable: %+v", view.Servers)
+}
+
 func TestCapabilitiesMarksBackgroundRemoteMCPAuthPossible(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	dir := robustTempDir(t)
