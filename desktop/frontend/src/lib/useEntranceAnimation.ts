@@ -12,14 +12,15 @@ import { DUR_SLOW, EASE_OUT, prefersReducedMotion } from "./gsapAnimations";
  *  - The scan only runs when `deps` changes (pass items.length or similar).
  *  - During streaming (text changes within same elements) the scanner is
  *    completely skipped, avoiding expensive querySelectorAll calls.
+ *  - When `resetKey` changes (session switch), seen set + firstRun are
+ *    cleared so the new session's first paint is also pre-seeded (no
+ *    entrance animation for restored history).
  *
  * Usage:
- *   const entranceRef = useEntranceAnimation(items.length);
- *   <div ref={entranceRef}>
- *     {items.map((it) => <div key={it.id} data-entrance={it.id} />)}
- *   </div>
+ *   const entranceRef = useEntranceAnimation(items.length, sessionKey);
  */
 export function useEntranceAnimation<T extends HTMLElement>(
+  resetKey?: unknown,
   deps?: unknown,
   selector = "[data-entrance]",
 ) {
@@ -27,6 +28,18 @@ export function useEntranceAnimation<T extends HTMLElement>(
   const seen = useRef(new Set<string>());
   const timerRef = useRef<number | null>(null);
   const firstRun = useRef(true);
+  const prevResetKey = useRef(resetKey);
+
+  // Reset on session switch.
+  if (prevResetKey.current !== resetKey) {
+    prevResetKey.current = resetKey;
+    seen.current = new Set();
+    firstRun.current = true;
+    if (timerRef.current !== null) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  }
 
   // Single effect: on first mount, pre-seed the seen set (no animation).
   // On subsequent deps changes, animate only newly-added elements.

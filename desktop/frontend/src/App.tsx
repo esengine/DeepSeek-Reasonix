@@ -2602,6 +2602,7 @@ export default function App() {
             {showTodos && <TodoPanel todos={todos} onDismiss={() => setDismissedTodo(todoItem!.id)} />}
             {state.approval && (
               <ApprovalModal
+                key={state.approval.id}
                 approval={state.approval}
                 onAnswer={(allow, session, persist) => {
                   // Approving an exit_plan_mode plan leaves plan mode; sync the

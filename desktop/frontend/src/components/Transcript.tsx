@@ -159,14 +159,14 @@ export function Transcript({
     stick,
     onScroll,
     smoothScrollTo,
-    scrollToBottom,
     trackQuestions,
     repinIfWasPinned,
     resizeFrame,
     lastClientHeight,
     lastFooterHeight,
   } = useScrollManager();
-  const entranceRef = useEntranceAnimation<HTMLDivElement>(items.length);
+  const sessionKey = useMemo(() => `${items[0]?.id ?? ""}|${items[items.length - 1]?.id ?? ""}`, [items]);
+  const entranceRef = useEntranceAnimation<HTMLDivElement>(sessionKey, items.length);
 
   const [displayMode, setDisplayMode] = useState<DisplayMode>(() => getDisplayMode());
   useEffect(() => onDisplayModeChange((mode) => setDisplayMode(mode)), []);
@@ -186,10 +186,15 @@ export function Transcript({
   // Track question count and auto-scroll on new messages.
   useEffect(() => { trackQuestions(questions.length); }, [questions.length, trackQuestions]);
 
-  // Auto-scroll to bottom during streaming.
+  // Auto-scroll to bottom during streaming — instant, no GSAP tween.
+  // A 120ms tween during fast streaming is perpetually killed/restarted
+  // before reaching the target, causing visible jitter.  Direct scrollTop
+  // assignment is synchronous and always hits the exact bottom.
   const contentVersion = useMemo(() => scrollVersion(items), [items]);
   useEffect(() => {
-    scrollToBottom();
+    if (!stick.current) return;
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
   }, [contentVersion, live?.text?.length ?? 0, live?.reasoning?.length ?? 0]);
 
   // ResizeObserver for container height changes.
