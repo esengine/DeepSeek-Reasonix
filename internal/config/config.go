@@ -195,7 +195,7 @@ func (c *Config) UICloseBehavior() string {
 }
 
 // DesktopDisplayMode normalizes the transcript display mode. Default is
-// "minimal" (collapsed model-generated intermediate items).
+// "standard" (flat rendering, no folding).
 func (c *Config) DesktopDisplayMode() string {
 	switch strings.ToLower(strings.TrimSpace(c.Desktop.DisplayMode)) {
 	case "standard":
@@ -205,7 +205,7 @@ func (c *Config) DesktopDisplayMode() string {
 	case "minimal":
 		return "minimal"
 	default:
-		return "minimal"
+		return "standard"
 	}
 }
 

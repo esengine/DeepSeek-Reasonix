@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronRight } from "lucide-react";
 import { CodeViewer } from "./CodeViewer";
 import { DiffView } from "./DiffView";
@@ -6,6 +6,8 @@ import { useT } from "../lib/i18n";
 import { diffsFor, subjectOf } from "../lib/tools";
 import { useShellExpand } from "../lib/shellExpand";
 import type { Item } from "../lib/useController";
+import { isReadOnlyTool } from "../lib/useController";
+import { ReadOnlyBatch } from "./ReadOnlyBatch";
 
 type ToolItem = Extract<Item, { kind: "tool" }>;
 
@@ -59,12 +61,10 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
   const shellOutput = item.isShell && item.output ? item.output : null;
   const shellPreview = shellOutput ? splitPreview(shellOutput, SHELL_PREVIEW_LINES) : null;
   const hasBody = Boolean(diffs.length || hasNested || shellPreview || (!shellPreview && hasArgsOrOutput) || item.error);
-  // Writers keep their output/diff visible by default (don't make the user expand
-  // to see what a command produced); read-only research folds away. Sub-agents open
-  // while running so nested calls are visible. A click (or Ctrl/Cmd+B) overrides.
-  const defaultOpen = hasNested
-    ? item.status === "running"
-    : Boolean(item.error) || (!item.readOnly && (diffs.length > 0 || !!item.output));
+  // All tools default to collapsed. Sub-agent tools open while running so the
+  // user sees nested calls; they collapse when done. Reasoning (AssistantMessage)
+  // also opens while streaming and closes on finish.
+  const defaultOpen = hasNested ? item.status === "running" : false;
   const [userOpen, setUserOpen] = useState<boolean | null>(null);
   const open = userOpen ?? defaultOpen;
   const openRef = useRef(open);
@@ -98,9 +98,12 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
         aria-expanded={hasBody ? open : undefined}
       >
         <span className="tool__label-group">
+          {hasNested && <span className="tool__nested-count">⊞{nested.length}</span>}
+          {item.status === "error" && <span className="tool__status-icon tool__status-icon--err">✗</span>}
+          {item.status === "done" && <span className="tool__status-icon tool__status-icon--ok">✓</span>}
+          {item.status === "stopped" && <span className="tool__status-icon tool__status-icon--stopped">—</span>}
           <span className="tool__name">{item.name}</span>
           {subject && <span className="tool__subject">{subject}</span>}
-          {hasNested && <span className="tool__nested-count">⊞{nested.length}</span>}
         </span>
         {profileText && <span className="tool__profile">{profileText}</span>}
         {duration && <span className="tool__duration">{duration}</span>}
@@ -123,9 +126,25 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
 
         {hasNested && (
           <div className="tool__nested">
-            {nested.map((c) => (
-              <ToolCard key={c.id} item={c} />
-            ))}
+            {(() => {
+              const out: ReactNode[] = [];
+              const roBatch: typeof nested = [];
+              const flush = () => {
+                if (roBatch.length === 0) return;
+                out.push(<ReadOnlyBatch key={`rob-${roBatch[0].id}`} items={[...roBatch]} subcalls={new Map()} />);
+                roBatch.length = 0;
+              };
+              for (const c of nested) {
+                if (isReadOnlyTool(c.name) && c.name !== "todo_write") {
+                  roBatch.push(c);
+                  continue;
+                }
+                flush();
+                out.push(<ToolCard key={c.id} item={c} />);
+              }
+              flush();
+              return out;
+            })()}
           </div>
         )}
 

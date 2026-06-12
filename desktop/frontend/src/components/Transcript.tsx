@@ -10,21 +10,7 @@ import { ChevronRight } from "lucide-react";
 import { Welcome } from "./Welcome";
 import { ReadOnlyBatch } from "./ReadOnlyBatch";
 import { getDisplayMode, onDisplayModeChange, type DisplayMode } from "../lib/displayMode";
-
-/** Matches Go backend's ReadOnly() + codegraph ReadOnlyToolNames(). */
-function isReadOnlyTool(name: string): boolean {
-  switch (name) {
-    case "read_file": case "ls": case "grep": case "glob": case "web_fetch":
-    case "bash_output": case "waitJob": case "todo_write": case "read_skill":
-    case "codegraph_callees": case "codegraph_callers": case "codegraph_context":
-    case "codegraph_explore": case "codegraph_files": case "codegraph_impact":
-    case "codegraph_node": case "codegraph_search": case "codegraph_status":
-    case "codegraph_trace":
-      return true;
-    default:
-      return false;
-  }
-}
+import { isReadOnlyTool } from "../lib/useController";
 
 type ToolItem = Extract<Item, { kind: "tool" }>;
 type AssistantItem = Extract<Item, { kind: "assistant" }>;
@@ -358,6 +344,44 @@ export function Transcript({
   // (added by upstream PR #3423) instead of per-call renderSegments.
   const empty = items.length === 0;
 
+  // In compact/minimal mode, break each turn into step groups.
+  // A step = one assistant + its tool results, from one assistant to the next.
+  // Each completed non-final step is folded into "Processed".
+  const stepGroups = useMemo(() => {
+    if (displayMode === "standard") return null;
+    const groups: { items: Item[]; isFinal: boolean; isComplete: boolean }[] = [];
+    let current: Item[] = [];
+
+    for (let i = hotStartIdx; i < items.length; i++) {
+      const it = items[i];
+      if (it.kind === "user") {
+        if (current.length > 0) {
+          const first = current[0];
+          const isFinal = first.kind === "assistant" && !first.streaming && first.text.trim() !== "";
+          groups.push({ items: current, isFinal, isComplete: true });
+          current = [];
+        }
+        groups.push({ items: [it], isFinal: false, isComplete: true });
+        continue;
+      }
+      if (it.kind === "assistant") {
+        if (current.length > 0) {
+          groups.push({ items: current, isFinal: false, isComplete: true });
+          current = [];
+        }
+        current.push(it);
+      } else {
+        current.push(it);
+      }
+    }
+    if (current.length > 0) {
+      const first = current[0];
+      const isFinal = first.kind === "assistant" && !first.streaming && first.text.trim() !== "";
+      groups.push({ items: current, isFinal, isComplete: false });
+    }
+    return groups;
+  }, [displayMode, hotStartIdx, items]);
+
   const hotZoneNodes = useMemo<ReactNode[]>(() => {
     const out: ReactNode[] = [];
     let actionText = "";
@@ -387,65 +411,143 @@ export function Transcript({
       actionReady = false;
     };
 
-    // Compact/minimal: completed read-only research folds into a slim batch so a
-    // long run of reads stays quiet; running reads, writers, and the model's own
-    // text + thinking render directly so the turn's substance stays visible.
-    // Standard: flat, no batching. The warm zone (WarmTurnItems) renders the same way.
-    const batchReadOnly = displayMode !== "standard";
-    const roBatch: ToolItem[] = [];
-    const flushRO = () => {
-      if (roBatch.length === 0) return;
-      out.push(<ReadOnlyBatch key={`rob-${roBatch[0].id}`} items={[...roBatch]} subcalls={subcallsByParent} />);
-      roBatch.length = 0;
-    };
+    // Compact/minimal mode: step-based rendering
+    // Standard mode: flat rendering (no step groups)
+    if (stepGroups) {
+      // Collect consecutive completed non-final steps into batches
+      let collapseBatch: Item[] = [];
+      let collapseBatchStart: string | null = null;
+      const flushCollapseBatch = () => {
+        if (collapseBatch.length === 0) return;
+        const dur = collapseBatch.reduce((ms, it) => ms + (it.kind === "tool" ? it.durationMs ?? 0 : 0), 0);
+        out.push(
+          <TurnCollapse
+            key={`step-batch-${collapseBatchStart}`}
+            items={collapseBatch}
+            durationMs={dur}
+            mode={displayMode}
+            subcalls={subcallsByParent}
+          />,
+        );
+        collapseBatch = [];
+        collapseBatchStart = null;
+      };
 
-    for (let i = hotStartIdx; i < items.length; i++) {
-      const it = items[i];
-      if (
-        batchReadOnly &&
-        it.kind === "tool" &&
-        !it.parentId &&
-        it.status !== "running" &&
-        it.name !== "todo_write" &&
-        it.name !== "exit_plan_mode" &&
-        isReadOnlyTool(it.name)
-      ) {
-        roBatch.push(it as ToolItem);
-        continue;
-      }
-      flushRO();
-      switch (it.kind) {
-        case "user": {
+      for (const group of stepGroups) {
+        const first = group.items[0];
+
+        if (first.kind === "user") {
+          flushCollapseBatch();
           pushTurnActions();
-          const tn = userTurn.get(it.id);
+          const tn = userTurn.get(first.id);
           activeTurn = tn;
           out.push(
-            <UserMessage key={it.id} id={it.id} text={it.text} failed={it.failed} turn={tn} anchorId={questionAnchorId(it.id)} />,
+            <UserMessage key={first.id} id={first.id} text={first.text} failed={first.failed} turn={tn} anchorId={questionAnchorId(first.id)} />,
           );
-          break;
+          continue;
         }
-        case "assistant":
+
+        // Completed non-final step → batch it
+        if (group.isComplete && !group.isFinal) {
+          if (!collapseBatchStart) collapseBatchStart = first.id;
+          collapseBatch.push(...group.items);
+          continue;
+        }
+
+        // Final answer or active step → flush any pending batch then render
+        flushCollapseBatch();
+        const nonAssistantItems = group.items.filter(
+          (it) => it.kind !== "assistant" || (it.streaming && !it.text.trim())
+        );
+        const hasRunning = nonAssistantItems.some((it) => it.kind === "tool" && it.status === "running");
+        if (nonAssistantItems.length > 0 && !hasRunning) {
+          const dur = nonAssistantItems.reduce((ms, it) => ms + (it.kind === "tool" ? ((it as ToolItem).durationMs ?? 0) : 0), 0);
+          out.push(
+            <TurnCollapse
+              key={`step-${first.id}`}
+              items={nonAssistantItems}
+              durationMs={dur}
+              mode={displayMode}
+              subcalls={subcallsByParent}
+            />,
+          );
+        } else if (nonAssistantItems.length > 0) {
+          for (const it of nonAssistantItems) {
+            if (it.kind === "tool") {
+              if (it.parentId) continue;
+              if (it.name === "todo_write" || it.name === "exit_plan_mode") continue;
+              out.push(<ToolCard key={it.id} item={it as ToolItem} subcalls={subcallsByParent.get(it.id)} />);
+            }
+            if (it.kind === "phase") out.push(<PhaseCard key={it.id} text={it.text} />);
+          }
+        }
+        // Render the final assistant message (if any) directly
+        for (const it of group.items) {
+          if (it.kind !== "assistant") continue;
           out.push(<LiveAssistantMessage key={it.id} item={it as AssistantItem} defaultExpanded={defaultExpandThinking} />);
           if (!it.streaming && it.text.trim() !== "") {
             actionText = it.text;
             actionReady = true;
           }
-          break;
-        case "tool":
-          if (it.parentId) break;
-          if (it.name === "todo_write") break;
-          if (it.name === "exit_plan_mode") break;
-          out.push(<ToolCard key={it.id} item={it} subcalls={subcallsByParent.get(it.id)} />);
-          break;
-        case "phase": out.push(<PhaseCard key={it.id} text={it.text} />); break;
-        case "notice": out.push(<NoticeCard key={it.id} level={it.level} text={it.text} />); break;
-        case "compaction": out.push(<CompactionCard key={it.id} item={it} />); break;
+        }
       }
+      flushCollapseBatch();
+      pushTurnActions();
+    } else {
+      // Standard mode: flat rendering
+      const roBatch: ToolItem[] = [];
+      const flushRO = () => {
+        if (roBatch.length === 0) return;
+        out.push(<ReadOnlyBatch key={`rob-${roBatch[0].id}`} items={[...roBatch]} subcalls={subcallsByParent} />);
+        roBatch.length = 0;
+      };
+      for (let i = hotStartIdx; i < items.length; i++) {
+        const it = items[i];
+        if (
+          it.kind === "tool" &&
+          !it.parentId &&
+          it.status !== "running" &&
+          it.name !== "todo_write" &&
+          it.name !== "exit_plan_mode" &&
+          isReadOnlyTool(it.name)
+        ) {
+          roBatch.push(it as ToolItem);
+          continue;
+        }
+        flushRO();
+        switch (it.kind) {
+          case "user": {
+            pushTurnActions();
+            const tn = userTurn.get(it.id);
+            activeTurn = tn;
+            out.push(
+              <UserMessage key={it.id} id={it.id} text={it.text} failed={it.failed} turn={tn} anchorId={questionAnchorId(it.id)} />,
+            );
+            break;
+          }
+          case "assistant":
+            out.push(<LiveAssistantMessage key={it.id} item={it as AssistantItem} defaultExpanded={defaultExpandThinking} />);
+            if (!it.streaming && it.text.trim() !== "") {
+              actionText = it.text;
+              actionReady = true;
+            }
+            break;
+          case "tool":
+            if (it.parentId) break;
+            if (it.name === "todo_write") break;
+            if (it.name === "exit_plan_mode") break;
+            out.push(<ToolCard key={it.id} item={it} subcalls={subcallsByParent.get(it.id)} />);
+            break;
+          case "phase": out.push(<PhaseCard key={it.id} text={it.text} />); break;
+          case "notice": out.push(<NoticeCard key={it.id} level={it.level} text={it.text} />); break;
+          case "compaction": out.push(<CompactionCard key={it.id} item={it} />); break;
+        }
+      }
+      flushRO();
+      pushTurnActions();
     }
-    flushRO();
-    pushTurnActions();
     return out;
-  }, [hotStartIdx, items, openAction, actionPending, rewindDisabled, onRewind, subcallsByParent, userTurn, checkpointsByTurn, displayMode, defaultExpandThinking]);
+  }, [hotStartIdx, items, openAction, actionPending, rewindDisabled, onRewind, subcallsByParent, userTurn, checkpointsByTurn, displayMode, stepGroups, defaultExpandThinking]);
 
   // ── Assemble rendered output ──────────────────────────────────────────────
   // Warm/cold zone is a separate memo'd WarmZone component so streaming tokens
@@ -767,6 +869,90 @@ function WarmTurnCard({
         <div className="warm-turn__body">{children}</div>
       ) : (
         assistantPreview && <div className="warm-turn__assistant">{assistantPreview}</div>
+      )}
+    </div>
+  );
+}
+
+// ── TurnCollapse: compact/minimal mode grouping ──────────────────────────────
+
+type TurnCollapseProps = {
+  items: Item[];       // intermediate items (tools, reasoning, phase)
+  durationMs: number;  // summed tool execution time across the batch; 0 when unknown
+  mode: DisplayMode;
+  subcalls: Map<string, ToolItem[]>;
+};
+
+function TurnCollapse({ items, durationMs, mode, subcalls }: TurnCollapseProps) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+
+  // Keep only items the body will actually render — an expandable fold over
+  // nothing is worse than no fold. Minimal mode strips reasoning, so a
+  // reasoning-only assistant counts as empty there.
+  const displayItems = useMemo(() => {
+    return items.filter((it) => {
+      if (it.kind === "assistant") {
+        if (it.text.trim() !== "") return true;
+        return mode !== "minimal" && Boolean(it.reasoning);
+      }
+      if (it.kind === "phase") return mode !== "minimal";
+      if (it.kind !== "tool") return false;
+      if (it.parentId || it.name === "todo_write" || it.name === "exit_plan_mode") return false;
+      if (mode === "minimal") return it.name !== "bash";
+      return true;
+    });
+  }, [items, mode]);
+
+  const seconds = Math.round(durationMs / 1000);
+  const label = seconds > 0 ? t("transcript.processedDuration", { s: seconds }) : t("transcript.processed");
+
+  if (displayItems.length === 0) return null;
+
+  // Pre-compute body: group consecutive completed read-only tools into ReadOnlyBatch
+  const body: ReactNode[] = [];
+  const roBatch: ToolItem[] = [];
+  const flushRO = () => {
+    if (roBatch.length === 0) return;
+    body.push(<ReadOnlyBatch key={`rob-${roBatch[0].id}`} items={[...roBatch]} subcalls={subcalls} />);
+    roBatch.length = 0;
+  };
+  for (const it of displayItems) {
+    if (it.kind === "tool" && !it.parentId && it.name !== "todo_write" && it.name !== "exit_plan_mode" && it.status !== "running" && isReadOnlyTool(it.name)) {
+      roBatch.push(it as ToolItem);
+      continue;
+    }
+    flushRO();
+    switch (it.kind) {
+      case "tool":
+        if (it.parentId) break;
+        if (it.name === "todo_write") break;
+        if (it.name === "exit_plan_mode") break;
+        body.push(<ToolCard key={it.id} item={it as ToolItem} subcalls={subcalls.get(it.id)} />);
+        break;
+      case "phase": body.push(<PhaseCard key={it.id} text={it.text} />); break;
+      case "assistant": {
+        const displayItem = mode === "minimal" ? { ...it, reasoning: "" } : it;
+        body.push(<AssistantMessage key={it.id} item={displayItem as AssistantItem} />);
+        break;
+      }
+    }
+  }
+  flushRO();
+
+  return (
+    <div className={`turn-collapse${open ? " turn-collapse--open" : ""}`}>
+      <button
+        type="button"
+        className="reasoning__head"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+      >
+        <ChevronRight className={`reasoning__chevron${open ? " reasoning__chevron--open" : ""}`} size={12} />
+        <span className="turn-collapse__label">{label}</span>
+      </button>
+      {open && (
+        <div className="turn-collapse__body">{body}</div>
       )}
     </div>
   );

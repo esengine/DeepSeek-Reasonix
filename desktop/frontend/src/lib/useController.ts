@@ -152,10 +152,8 @@ export function shouldReconcileStaleTurn(
   return Math.max(0, now - lastTurnActivityAt) >= timeoutMs;
 }
 
-/** Known read-only tool names. Session restore hardcodes readOnly=false for all
- *  tools, so we derive it from the name to enable correct batching.
- *  Mirrors Go backend ReadOnly() + codegraph ReadOnlyToolNames(). */
-function isReadOnlyTool(name: string): boolean {
+/** Mirrors Go backend's ReadOnly() + codegraph ReadOnlyToolNames(). */
+export function isReadOnlyTool(name: string): boolean {
   switch (name) {
     case "read_file":
     case "ls":

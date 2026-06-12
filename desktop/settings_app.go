@@ -332,7 +332,7 @@ func (a *App) Settings() SettingsView {
 			DesktopTheme:      "light",
 			DesktopThemeStyle: "graphite",
 			CloseBehavior:     "background",
-			DisplayMode:       "minimal",
+			DisplayMode:       "standard",
 			StatusBarStyle:    "text",
 			StatusBarItems:    config.DefaultDesktopStatusBarItems(),
 			CheckUpdates:      true,
