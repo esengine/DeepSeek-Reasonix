@@ -312,6 +312,7 @@ func New(opts Options) *Controller {
 	}
 	// Checkpoints: bind a store to the session and route writer pre-edits into it.
 	c.rebindCheckpoints(opts.SessionPath)
+	c.setActiveJobSession(opts.SessionPath)
 	if c.executor != nil {
 		c.executor.SetPreEditHook(func(ch diff.Change) {
 			if c.cp != nil {
@@ -524,7 +525,9 @@ func (c *Controller) runGoalLoopWithRawDisplay(ctx context.Context, input, raw, 
 func (c *Controller) runTurnWithRawDisplay(ctx context.Context, input, raw, display string) error {
 	c.maybeSessionStart(ctx)
 	c.maybeAutoPlan(ctx, raw)
-	ctx = agent.WithParentSession(ctx, c.parentSessionID())
+	parentSession := c.parentSessionID()
+	ctx = agent.WithParentSession(ctx, parentSession)
+	ctx = jobs.WithSession(ctx, parentSession)
 	ctx = agent.WithUserImages(ctx, c.inputImages(input))
 	input = c.Compose(input)
 	startMessages := c.messageCount()
@@ -1373,6 +1376,7 @@ func (c *Controller) NewSession() error {
 		c.sessionPath = agent.NewSessionPath(c.sessionDir, c.label)
 		c.mu.Unlock()
 	}
+	c.setActiveJobSession(c.SessionPath())
 	c.executor.SetSession(agent.NewSession(c.systemPrompt))
 	c.rebindCheckpoints(c.SessionPath())
 	c.mu.Lock()
@@ -1404,6 +1408,7 @@ func (c *Controller) ClearSession() error {
 		c.sessionPath = agent.NewSessionPath(c.sessionDir, c.label)
 		c.mu.Unlock()
 	}
+	c.setActiveJobSession(c.SessionPath())
 	c.executor.SetSession(agent.NewSession(c.systemPrompt))
 	c.rebindCheckpoints(c.SessionPath())
 	c.mu.Lock()
@@ -1583,6 +1588,7 @@ func (c *Controller) forkNamed(turn int, name string, switchToFork bool) (string
 		c.mu.Lock()
 		c.sessionPath = newPath
 		c.mu.Unlock()
+		c.setActiveJobSession(newPath)
 		c.rebindCheckpoints(newPath)
 	}
 	c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
@@ -1641,6 +1647,7 @@ func (c *Controller) Branch(name string) (string, error) {
 	c.mu.Lock()
 	c.sessionPath = newPath
 	c.mu.Unlock()
+	c.setActiveJobSession(newPath)
 	c.rebindCheckpoints(newPath)
 	c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
 		Text: fmt.Sprintf("created branch %s", agent.BranchID(newPath))})
@@ -1687,6 +1694,7 @@ func (c *Controller) SwitchBranch(ref string) (agent.BranchInfo, error) {
 	c.mu.Lock()
 	c.sessionPath = match.Path
 	c.mu.Unlock()
+	c.setActiveJobSession(match.Path)
 	c.rebindCheckpoints(match.Path)
 	c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
 		Text: fmt.Sprintf("switched to branch %s", branchDisplayName(match))})
@@ -1785,6 +1793,7 @@ func (c *Controller) Resume(s *agent.Session, path string) {
 	c.mu.Lock()
 	c.sessionPath = path
 	c.mu.Unlock()
+	c.setActiveJobSession(path)
 	c.rebindCheckpoints(path)
 	c.maybeColdResumePrune(path)
 }
@@ -1915,7 +1924,14 @@ func (c *Controller) SetSessionPath(p string) {
 	c.mu.Lock()
 	c.sessionPath = p
 	c.mu.Unlock()
+	c.setActiveJobSession(p)
 	c.rebindCheckpoints(p)
+}
+
+func (c *Controller) setActiveJobSession(sessionPath string) {
+	if c.jobs != nil {
+		c.jobs.SetActiveSession(agent.BranchID(sessionPath))
+	}
 }
 
 // SessionDir reports the directory new session files land in ("" disables
@@ -2354,7 +2370,7 @@ func (c *Controller) Jobs() []jobs.View {
 	if c.jobs == nil {
 		return nil
 	}
-	return c.jobs.Running()
+	return c.jobs.RunningForSession(c.parentSessionID())
 }
 
 // SetToolApprovalMode changes the runtime approval posture for permission-gated

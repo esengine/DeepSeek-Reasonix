@@ -55,7 +55,7 @@ func (bashOutput) Execute(ctx context.Context, args json.RawMessage) (string, er
 	if !ok {
 		return "", fmt.Errorf("background jobs are not available in this context")
 	}
-	text, status, found := jm.Output(p.JobID)
+	text, status, found := jm.OutputForSession(jobs.SessionFromContext(ctx), p.JobID)
 	if !found {
 		return "", fmt.Errorf("no background job %q", p.JobID)
 	}
@@ -118,7 +118,7 @@ func (killShell) Execute(ctx context.Context, args json.RawMessage) (string, err
 	if !ok {
 		return "", fmt.Errorf("background jobs are not available in this context")
 	}
-	if jm.Kill(p.JobID) {
+	if jm.KillForSession(jobs.SessionFromContext(ctx), p.JobID) {
 		return fmt.Sprintf("Killed background job %q.", p.JobID), nil
 	}
 	return fmt.Sprintf("Background job %q was not running (already finished or unknown).", p.JobID), nil
@@ -154,7 +154,7 @@ func (waitJob) Execute(ctx context.Context, args json.RawMessage) (string, error
 	if !ok {
 		return "", fmt.Errorf("background jobs are not available in this context")
 	}
-	results := jm.Wait(ctx, p.JobIDs, p.TimeoutSeconds)
+	results := jm.WaitForSession(ctx, jobs.SessionFromContext(ctx), p.JobIDs, p.TimeoutSeconds)
 	if len(results) == 0 {
 		return "No background jobs to wait for.", nil
 	}
