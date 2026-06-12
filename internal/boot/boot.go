@@ -233,14 +233,23 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// session starts immediately while enabled MCP servers warm up.
 	eagerEntries, lazyEntries, bgEntries := partitionByTier(cfg.AutoStartPlugins())
 
-	// Agent-scoped plugins: when the controller is being built for a specific
-	// orchestrator child (opts.AgentName != ""), only load plugins whose Agents
-	// list is empty or contains the agent name. The main controller (AgentName "")
-	// only loads plugins with an empty Agents list — this is how you keep an MCP
-	// server away from the main agent and reserve it for one or more children.
-	eagerEntries = filterPluginsForAgent(eagerEntries, opts.AgentName)
-	lazyEntries = filterPluginsForAgent(lazyEntries, opts.AgentName)
-	bgEntries = filterPluginsForAgent(bgEntries, opts.AgentName)
+	// Agent-scoped plugins: build a visibility map so all plugins are started
+	// on the host but their tools are only registered for matching agents.
+	// The main controller (AgentName "") never sees agent-scoped plugin tools.
+	// Plugins with an empty Agents list are visible to all agents.
+	agentAllowedPlugins := make(map[string]bool)
+	for _, e := range cfg.AutoStartPlugins() {
+		if len(e.Agents) == 0 {
+			agentAllowedPlugins[e.Name] = true
+		} else if opts.AgentName != "" {
+			for _, a := range e.Agents {
+				if a == opts.AgentName {
+					agentAllowedPlugins[e.Name] = true
+					break
+				}
+			}
+		}
+	}
 
 	// Auto-demote: any eager plugin that has been chronically slow (recent
 	// samples repeatedly hit the blocking startup budget) drops to lazy
@@ -342,7 +351,9 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		host, ptools := plugin.StartAvailable(ctx, eagerSpecs)
 		pluginHost = host
 		for _, t := range ptools {
-			reg.Add(t)
+			if pluginToolAllowed(t.Name(), agentAllowedPlugins) {
+				reg.Add(t)
+			}
 		}
 		// PhaseB (prompts + resources) runs on the boot ctx — which is the
 		// controller's session-scoped PluginCtx — so the auxiliary surfaces
@@ -359,6 +370,16 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// and Close see one cohesive set of servers regardless of tier.
 	registerDeferred := func(specs []plugin.Spec, kick bool) {
 		for _, s := range specs {
+			if !agentAllowedPlugins[s.Name] {
+				if kick {
+					go func(spec plugin.Spec) {
+						if _, err := pluginHost.Add(context.WithoutCancel(ctx), spec); err != nil {
+							pluginHost.RecordFailure(spec, err)
+						}
+					}(s)
+				}
+				continue
+			}
 			cs, _ := plugin.LoadCachedSchema(s.Name, plugin.SpecFingerprint(s))
 			for _, t := range plugin.LazyToolset(s, cs, pluginHost, reg, ctx, kick) {
 				reg.Add(t)
@@ -978,28 +999,17 @@ func addBuiltins(reg *tool.Registry, enabled, writeRoots []string, bashSpec sand
 	}
 }
 
-// filterPluginsForAgent removes entries whose Agents list is non-empty and
-// does not include the given agent name. When agentName is "" (main agent),
-// only entries with an empty Agents list pass through — this excludes plugins
-// that are reserved for specific orchestrator children.
-func filterPluginsForAgent(entries []config.PluginEntry, agentName string) []config.PluginEntry {
-	out := make([]config.PluginEntry, 0, len(entries))
-	for _, e := range entries {
-		if len(e.Agents) == 0 {
-			out = append(out, e)
-			continue
-		}
-		if agentName == "" {
-			continue
-		}
-		for _, a := range e.Agents {
-			if a == agentName {
-				out = append(out, e)
-				break
-			}
+// pluginToolAllowed checks whether a namespaced MCP tool name belongs to an
+// allowed plugin. It matches the tool's "mcp__<server>__<tool>" prefix against
+// each plugin's ToolPrefix. The caller supplies the set of plugin names that are
+// visible to the current agent.
+func pluginToolAllowed(toolName string, allowedPlugins map[string]bool) bool {
+	for name := range allowedPlugins {
+		if strings.HasPrefix(toolName, plugin.ToolPrefix(name)) {
+			return true
 		}
 	}
-	return out
+	return false
 }
 
 // partitionByTier splits configured plugin entries into the three startup
