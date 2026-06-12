@@ -1,4 +1,4 @@
-import { memo, useEffect, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { CodeViewer } from "./CodeViewer";
 import { DiffView } from "./DiffView";
@@ -59,15 +59,25 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
   const shellOutput = item.isShell && item.output ? item.output : null;
   const shellPreview = shellOutput ? splitPreview(shellOutput, SHELL_PREVIEW_LINES) : null;
   const hasBody = Boolean(diffs.length || hasNested || shellPreview || (!shellPreview && hasArgsOrOutput) || item.error);
-  const [open, setOpen] = useState(hasNested ? item.status === "running" : false);
+  // Writers keep their output/diff visible by default (don't make the user expand
+  // to see what a command produced); read-only research folds away. Sub-agents open
+  // while running so nested calls are visible. A click (or Ctrl/Cmd+B) overrides.
+  const defaultOpen = hasNested
+    ? item.status === "running"
+    : Boolean(item.error) || (!item.readOnly && (diffs.length > 0 || !!item.output));
+  const [userOpen, setUserOpen] = useState<boolean | null>(null);
+  const open = userOpen ?? defaultOpen;
+  const openRef = useRef(open);
+  openRef.current = open;
   const [showAll, setShowAll] = useState(false);
 
   // Register this shell card's toggle with the global ShellExpand context so
-  // Ctrl/Cmd+B can expand/collapse the most recent shell output.
+  // Ctrl/Cmd+B can expand/collapse the most recent shell output. openRef keeps the
+  // registered closure flipping the current state, not a stale one.
   const shellExpand = useShellExpand();
   useEffect(() => {
     if (!item.isShell || !shellExpand) return;
-    return shellExpand.register(item.id, () => setOpen((v) => !v));
+    return shellExpand.register(item.id, () => setUserOpen(!openRef.current));
   }, [item.isShell, item.id, shellExpand]);
 
   // Read-only "research" calls (read/grep/ls/glob/web_fetch) are hidden after
@@ -84,7 +94,7 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
         type="button"
         className="tool__head"
         data-running={item.status === "running" ? "" : undefined}
-        onClick={() => hasBody && setOpen((v) => !v)}
+        onClick={() => hasBody && setUserOpen(!open)}
         aria-expanded={hasBody ? open : undefined}
       >
         <span className="tool__label-group">

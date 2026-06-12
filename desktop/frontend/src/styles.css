@@ -2632,23 +2632,6 @@ a[href] {
   word-break: break-word;
 }
 
-/* ── TurnCollapse (compact/minimal mode) ─────────────────────────── */
-.turn-collapse {
-  /* horizontal auto keeps the .transcript > * centered column; 0 would override it */
-  margin: 4px auto;
-}
-.turn-collapse__label {
-  white-space: nowrap;
-}
-.turn-collapse__body {
-  margin-top: 6px;
-  padding-left: 12px;
-  border-left: 2px solid var(--border);
-}
-.turn-collapse__body > * {
-  margin-bottom: 6px;
-}
-
 /* ── ReadOnly batch (parent fold for read/search tools) ────────────── */
 .readonly-batch {
   margin: 2px auto;
