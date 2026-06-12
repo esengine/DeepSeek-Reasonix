@@ -43,6 +43,27 @@ func TestRecallToolSearchesSavedMemories(t *testing.T) {
 	}
 }
 
+func TestRecallToolSchemaIsCacheStable(t *testing.T) {
+	tl := NewRecallTool(Store{Dir: t.TempDir()})
+	if got, want := tl.Description(), "Search, list, and read saved project memories. Use this before saving a new memory to avoid duplicates, and when a saved memory from the index looks relevant but needs its full body. This tool is read-only; use remember to save or update a memory, and forget to delete one."; got != want {
+		t.Fatalf("memory description changed; this is provider-visible and affects prompt-cache shape.\nwant: %q\n got: %q", want, got)
+	}
+	const wantSchema = `{
+		"type": "object",
+		"properties": {
+			"operation": {"type": "string", "enum": ["search", "read", "list"], "description": "search ranks saved memories; read returns one full memory by name; list returns the saved-memory index."},
+			"query": {"type": "string", "description": "Search query for operation=search."},
+			"name": {"type": "string", "description": "Memory slug for operation=read, e.g. the name in [Label](name.md)."},
+			"type": {"type": "string", "enum": ["user", "feedback", "project", "reference"], "description": "Optional memory type filter for search or list."},
+			"limit": {"type": "integer", "description": "Maximum search/list results to return, default 8, max 20."}
+		},
+		"required": ["operation"]
+	}`
+	if got := string(tl.Schema()); got != wantSchema {
+		t.Fatalf("memory schema changed; this is provider-visible and affects prompt-cache shape.\nwant:\n%s\n got:\n%s", wantSchema, got)
+	}
+}
+
 func TestRecallToolDropsCommonWordNoise(t *testing.T) {
 	store := Store{Dir: t.TempDir()}
 	saveMemory(t, store, Memory{

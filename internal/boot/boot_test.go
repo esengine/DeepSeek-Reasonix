@@ -144,6 +144,16 @@ model = "x"
 	}
 	defer ctrl.Close()
 
+	sys := systemMessage(ctrl.History())
+	for _, forbidden := range []string{
+		"Decision: port lightweight BM25 history retrieval without a vector database.",
+		"Use a synthesis cache document when expensive retrieval produced a stable conclusion.",
+	} {
+		if strings.Contains(sys, forbidden) {
+			t.Fatalf("retrieval content should stay behind on-demand tools, not enter the cache-stable system prompt:\n%s", sys)
+		}
+	}
+
 	if err := ctrl.Run(context.Background(), "recover past context"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -156,6 +166,7 @@ model = "x"
 			t.Fatalf("first request missing tool %q; tools=%v", want, toolSchemaNames(reqs[0].Tools))
 		}
 	}
+	assertToolOrder(t, reqs[0].Tools, []string{"forget", "history", "memory", "remember"})
 
 	toolResults := map[string]string{}
 	for _, msg := range ctrl.History() {
@@ -222,6 +233,20 @@ func toolSchemaNames(tools []provider.ToolSchema) []string {
 		names = append(names, schema.Name)
 	}
 	return names
+}
+
+func assertToolOrder(t *testing.T, tools []provider.ToolSchema, want []string) {
+	t.Helper()
+	names := toolSchemaNames(tools)
+	next := 0
+	for _, name := range names {
+		if next < len(want) && name == want[next] {
+			next++
+		}
+	}
+	if next != len(want) {
+		t.Fatalf("tool order changed; provider-visible tool schema order affects prompt-cache shape.\nwant subsequence: %v\n got: %v", want, names)
+	}
 }
 
 func TestBuildSubagentSkillFailedContinuationPersistsTranscript(t *testing.T) {
