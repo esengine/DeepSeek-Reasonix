@@ -149,6 +149,8 @@ type SettingsView struct {
 	DesktopThemeStyle string          `json:"desktopThemeStyle"`
 	CloseBehavior     string          `json:"closeBehavior"`
 	DisplayMode       string          `json:"displayMode"`
+	StatusBarStyle    string          `json:"statusBarStyle"`
+	StatusBarItems    []string        `json:"statusBarItems"`
 	CheckUpdates      bool            `json:"checkUpdates"`
 	Telemetry         bool            `json:"telemetry"`
 	Metrics           bool            `json:"metrics"`
@@ -330,6 +332,8 @@ func (a *App) Settings() SettingsView {
 			DesktopThemeStyle: "graphite",
 			CloseBehavior:     "background",
 			DisplayMode:       "minimal",
+			StatusBarStyle:    "text",
+			StatusBarItems:    config.DefaultDesktopStatusBarItems(),
 			CheckUpdates:      true,
 			Telemetry:         true,
 			Metrics:           false,
@@ -383,6 +387,8 @@ func (a *App) Settings() SettingsView {
 		DesktopThemeStyle: cfg.DesktopThemeStyle(),
 		CloseBehavior:     cfg.DesktopCloseBehavior(),
 		DisplayMode:       cfg.DesktopDisplayMode(),
+		StatusBarStyle:    cfg.DesktopStatusBarStyle(),
+		StatusBarItems:    cfg.DesktopStatusBarItems(),
 		CheckUpdates:      cfg.DesktopCheckUpdates(),
 		Telemetry:         cfg.DesktopTelemetry(),
 		Metrics:           cfg.DesktopMetrics(),
@@ -1289,6 +1295,18 @@ func (a *App) SetCloseBehavior(mode string) error {
 // SetDisplayMode updates the transcript display mode. UI-only, no rebuild needed.
 func (a *App) SetDisplayMode(mode string) error {
 	return a.applyConfigOnly(func(c *config.Config) error { return c.SetDesktopDisplayMode(mode) })
+}
+
+// SetStatusBarStyle updates the desktop status bar metric label style. UI-only,
+// no rebuild needed.
+func (a *App) SetStatusBarStyle(style string) error {
+	return a.applyConfigOnly(func(c *config.Config) error { return c.SetDesktopStatusBarStyle(style) })
+}
+
+// SetStatusBarItems updates the ordered visible desktop status bar items.
+// UI-only, no rebuild needed.
+func (a *App) SetStatusBarItems(items []string) error {
+	return a.applyConfigOnly(func(c *config.Config) error { return c.SetDesktopStatusBarItems(items) })
 }
 
 // SetDesktopLanguage updates only the desktop UI language. It deliberately does

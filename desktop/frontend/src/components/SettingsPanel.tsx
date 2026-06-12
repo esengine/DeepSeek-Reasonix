@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent, type ReactNode } from "react";
 import { QRCodeSVG } from "qrcode.react";
-import { Check, CheckCircle2, ChevronDown, Loader2, QrCode, RefreshCw } from "lucide-react";
+import { Check, CheckCircle2, ChevronDown, ChevronUp, GripVertical, Loader2, QrCode, RefreshCw } from "lucide-react";
 import { asArray } from "../lib/array";
 import { useDeferredClose } from "../lib/useMountTransition";
 import { app } from "../lib/bridge";
@@ -20,6 +20,7 @@ import {
 import { TEXT_SIZES, applyTextSize, getTextSize, type TextSize } from "../lib/textSize";
 import { FONT_FAMILIES, applyFontFamily, getFontFamily, type FontFamily } from "../lib/fontFamily";
 import { getDisplayMode, onDisplayModeChange, setDisplayMode as setLocalDisplayMode } from "../lib/displayMode";
+import { DEFAULT_STATUS_BAR_ITEMS, normalizeStatusBarItems, type StatusBarItemId } from "../lib/statusBarItems";
 import type { BotConnectionView, BotInstallStartResult, BotSettingsView, HookConfigView, HooksSettingsView, NetworkView, ProviderView, SettingsTab, SettingsView } from "../lib/types";
 import { InlineConfirmButton } from "./InlineConfirmButton";
 import { Tooltip } from "./Tooltip";
@@ -590,6 +591,8 @@ function normalizeSettingsView(view: SettingsView | null | undefined): SettingsV
     desktopThemeStyle: normalizeThemeStyleForTheme(view.desktopThemeStyle, normalizeThemePreference(view.desktopTheme)),
     closeBehavior: normalizeCloseBehavior(view.closeBehavior),
     displayMode: normalizeDisplayMode(view.displayMode),
+    statusBarStyle: normalizeStatusBarStyle(view.statusBarStyle),
+    statusBarItems: normalizeStatusBarItems(view.statusBarItems),
     checkUpdates: view.checkUpdates !== false,
   };
 }
@@ -604,6 +607,44 @@ type DisplayMode = "standard" | "compact" | "minimal";
 
 function normalizeDisplayMode(mode: string | undefined): DisplayMode {
   return mode === "standard" || mode === "compact" || mode === "minimal" ? mode : "minimal";
+}
+
+type StatusBarStyle = "icon" | "text";
+type StatusBarDropPlacement = "before" | "after";
+type StatusBarDragTarget = {
+  id: StatusBarItemId;
+  placement: StatusBarDropPlacement;
+};
+
+function normalizeStatusBarStyle(style: string | undefined): StatusBarStyle {
+  return style === "icon" ? "icon" : "text";
+}
+
+function statusBarItemLabel(id: StatusBarItemId, t: ReturnType<typeof useT>): string {
+  switch (id) {
+    case "model":
+      return t("settings.statusBarItem.model");
+    case "cache":
+      return t("status.cacheLabel");
+    case "cache_avg":
+      return t("status.cacheAvgLabel");
+    case "session_tokens":
+      return t("status.sessionTokensLabel");
+    case "turn_tokens":
+      return t("status.turnTokensLabel");
+    case "turn_cost":
+      return t("status.turnCostLabel");
+    case "session_turns":
+      return t("status.sessionTurnsLabel");
+    case "context":
+      return t("status.ctxLabel");
+    case "compact":
+      return t("status.compactLabel");
+    case "cost":
+      return t("status.costLabel");
+    case "balance":
+      return t("status.balanceLabel");
+  }
 }
 
 function closeBehaviorLabel(mode: CloseBehavior, t: ReturnType<typeof useT>): string {
@@ -642,11 +683,164 @@ function GeneralSection({ s, busy, apply }: SectionProps) {
   const { t, setPref } = useI18n();
   const closeBehavior = normalizeCloseBehavior(s.closeBehavior);
   const [displayMode, setDisplayMode] = useState<DisplayMode>(() => normalizeDisplayMode(getDisplayMode()));
+  const [statusBarItemsExpanded, setStatusBarItemsExpanded] = useState(false);
+  const [draggingStatusBarItem, setDraggingStatusBarItem] = useState<StatusBarItemId | null>(null);
+  const [statusBarDragTarget, setStatusBarDragTargetState] = useState<StatusBarDragTarget | null>(null);
+  const draggingStatusBarItemRef = useRef<StatusBarItemId | null>(null);
+  const statusBarDragTargetRef = useRef<StatusBarDragTarget | null>(null);
+  const mouseDragCleanupRef = useRef<(() => void) | null>(null);
+  const statusBarItemsPanelId = useId();
   useEffect(() => onDisplayModeChange((mode) => setDisplayMode(mode)), []);
+  useEffect(() => () => mouseDragCleanupRef.current?.(), []);
   const autoPlan = normalizeAutoPlan(s.autoPlan);
   const languagePref = normalizeLangPref(s.desktopLanguage);
   const [soundPref, setSoundPref] = useState<SoundWavPref>(getSuccessPreference());
   const [attentionPref, setAttentionPref] = useState<SoundWavPref>(getAttentionPreference());
+  const statusBarStyle = normalizeStatusBarStyle(s.statusBarStyle);
+  const statusBarItems = normalizeStatusBarItems(s.statusBarItems);
+  const visibleStatusItems = new Set<StatusBarItemId>(statusBarItems);
+  const orderedStatusItems = [
+    ...statusBarItems,
+    ...DEFAULT_STATUS_BAR_ITEMS.filter((id) => !visibleStatusItems.has(id)),
+  ];
+  const applyStatusBarItems = (items: StatusBarItemId[]) => {
+    const contentScrollTop = document.querySelector<HTMLElement>(".settings-center__content")?.scrollTop ?? 0;
+    const navScrollTop = document.querySelector<HTMLElement>(".settings-center__nav")?.scrollTop ?? 0;
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && active.closest(".status-bar-items-editor")) active.blur();
+    void apply(() => app.SetStatusBarItems(items)).finally(() => {
+      window.scrollTo(0, 0);
+      requestAnimationFrame(() => {
+        window.scrollTo(0, 0);
+        const content = document.querySelector<HTMLElement>(".settings-center__content");
+        const nav = document.querySelector<HTMLElement>(".settings-center__nav");
+        if (content) content.scrollTop = Math.min(contentScrollTop, Math.max(0, content.scrollHeight - content.clientHeight));
+        if (nav) nav.scrollTop = navScrollTop;
+      });
+    });
+  };
+  const toggleStatusBarItem = (id: StatusBarItemId) => {
+    if (visibleStatusItems.has(id)) {
+      if (statusBarItems.length <= 1) return;
+      applyStatusBarItems(statusBarItems.filter((item) => item !== id));
+      return;
+    }
+    applyStatusBarItems([...statusBarItems, id]);
+  };
+  const moveStatusBarItem = (id: StatusBarItemId, direction: -1 | 1) => {
+    const idx = statusBarItems.indexOf(id);
+    const nextIdx = idx + direction;
+    if (idx < 0 || nextIdx < 0 || nextIdx >= statusBarItems.length) return;
+    const next = [...statusBarItems];
+    [next[idx], next[nextIdx]] = [next[nextIdx], next[idx]];
+    applyStatusBarItems(next);
+  };
+  const reorderStatusBarItem = (fromId: StatusBarItemId, toId: StatusBarItemId, placement: StatusBarDropPlacement) => {
+    const fromIdx = statusBarItems.indexOf(fromId);
+    const toIdx = statusBarItems.indexOf(toId);
+    if (fromIdx < 0 || toIdx < 0 || fromIdx === toIdx) return;
+    const next = statusBarItems.filter((item) => item !== fromId);
+    const insertAt = next.indexOf(toId);
+    if (insertAt < 0) return;
+    next.splice(placement === "after" ? insertAt + 1 : insertAt, 0, fromId);
+    if (next.every((item, index) => item === statusBarItems[index])) return;
+    applyStatusBarItems(next);
+  };
+  const statusBarItemFromPoint = (x: number, y: number): StatusBarDragTarget | null => {
+    const row = document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-statusbar-setting-item]");
+    const id = row?.dataset.statusbarSettingItem as StatusBarItemId | undefined;
+    if (!row || !id || !statusBarItems.includes(id)) return null;
+    const rect = row.getBoundingClientRect();
+    return { id, placement: y < rect.top + rect.height / 2 ? "before" : "after" };
+  };
+  const setStatusBarDragTarget = (target: StatusBarDragTarget | null) => {
+    const current = statusBarDragTargetRef.current;
+    if (current?.id === target?.id && current?.placement === target?.placement) return;
+    statusBarDragTargetRef.current = target;
+    setStatusBarDragTargetState(target);
+  };
+  const beginStatusBarDrag = (id: StatusBarItemId, visible: boolean): boolean => {
+    if (busy || !visible) return false;
+    mouseDragCleanupRef.current?.();
+    mouseDragCleanupRef.current = null;
+    draggingStatusBarItemRef.current = id;
+    statusBarDragTargetRef.current = null;
+    setDraggingStatusBarItem(id);
+    setStatusBarDragTargetState(null);
+    return true;
+  };
+  const updateStatusBarDrag = (clientX: number, clientY: number) => {
+    const draggingId = draggingStatusBarItemRef.current;
+    if (!draggingId) return;
+    const target = statusBarItemFromPoint(clientX, clientY);
+    setStatusBarDragTarget(target && target.id !== draggingId ? target : null);
+  };
+  const finishStatusBarDrag = (clientX?: number, clientY?: number) => {
+    const draggingId = draggingStatusBarItemRef.current;
+    let target = statusBarDragTargetRef.current;
+    if (draggingId && clientX !== undefined && clientY !== undefined) {
+      const pointerTarget = statusBarItemFromPoint(clientX, clientY);
+      if (pointerTarget && pointerTarget.id !== draggingId) target = pointerTarget;
+    }
+    if (draggingId && target) reorderStatusBarItem(draggingId, target.id, target.placement);
+    draggingStatusBarItemRef.current = null;
+    statusBarDragTargetRef.current = null;
+    setDraggingStatusBarItem(null);
+    setStatusBarDragTargetState(null);
+  };
+  const cancelStatusBarDrag = () => {
+    mouseDragCleanupRef.current?.();
+    mouseDragCleanupRef.current = null;
+    draggingStatusBarItemRef.current = null;
+    statusBarDragTargetRef.current = null;
+    setDraggingStatusBarItem(null);
+    setStatusBarDragTargetState(null);
+  };
+  const startStatusBarPointerDrag = (event: PointerEvent<HTMLElement>, id: StatusBarItemId, visible: boolean) => {
+    if (event.button !== 0 || !beginStatusBarDrag(id, visible)) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+  const moveStatusBarPointerDrag = (event: PointerEvent<HTMLElement>) => {
+    if (!draggingStatusBarItemRef.current) return;
+    event.preventDefault();
+    updateStatusBarDrag(event.clientX, event.clientY);
+  };
+  const endStatusBarPointerDrag = (event: PointerEvent<HTMLElement>) => {
+    if (!draggingStatusBarItemRef.current) return;
+    event.preventDefault();
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch {
+      // Pointer capture may already be released by the browser.
+    }
+    finishStatusBarDrag(event.clientX, event.clientY);
+  };
+  const cancelStatusBarPointerDrag = (event: PointerEvent<HTMLElement>) => {
+    event.preventDefault();
+    cancelStatusBarDrag();
+  };
+  const startStatusBarMouseDrag = (event: ReactMouseEvent<HTMLElement>, id: StatusBarItemId, visible: boolean) => {
+    if (event.button !== 0 || !beginStatusBarDrag(id, visible)) return;
+    event.preventDefault();
+    const handleMove = (moveEvent: MouseEvent) => {
+      moveEvent.preventDefault();
+      updateStatusBarDrag(moveEvent.clientX, moveEvent.clientY);
+    };
+    const cleanup = () => {
+      window.removeEventListener("mousemove", handleMove);
+      window.removeEventListener("mouseup", handleUp);
+    };
+    const handleUp = (upEvent: MouseEvent) => {
+      upEvent.preventDefault();
+      cleanup();
+      mouseDragCleanupRef.current = null;
+      finishStatusBarDrag(upEvent.clientX, upEvent.clientY);
+    };
+    window.addEventListener("mousemove", handleMove);
+    window.addEventListener("mouseup", handleUp);
+    mouseDragCleanupRef.current = cleanup;
+  };
   const setLanguage = (next: LangPref) => {
     setPref(next);
     void apply(() => app.SetDesktopLanguage(next));
@@ -752,6 +946,122 @@ function GeneralSection({ s, busy, apply }: SectionProps) {
             onPreview={playAttentionChime}
             previewDisabled={attentionPref === "off"}
           />
+        </div>
+      </SettingsField>
+      <SettingsField label={t("settings.statusBarStyle")}>
+        <div className="set-seg">
+          {(["icon", "text"] as const).map((style) => (
+            <button
+              key={style}
+              className={`set-seg__btn${statusBarStyle === style ? " set-seg__btn--on" : ""}`}
+              disabled={busy}
+              onClick={() => void apply(() => app.SetStatusBarStyle(style))}
+            >
+              {t(`settings.statusBarStyle.${style}`)}
+            </button>
+          ))}
+        </div>
+      </SettingsField>
+      <SettingsField label={t("settings.statusBarItems")} hint={t("settings.statusBarItemsHint")} stacked>
+        <div className={`status-bar-items-editor${statusBarItemsExpanded ? " status-bar-items-editor--expanded" : ""}`}>
+          <div className="status-bar-items-editor__summary">
+            <span className="status-bar-items-editor__summary-text">
+              {t("settings.statusBarItemsSummary", { visible: statusBarItems.length, total: DEFAULT_STATUS_BAR_ITEMS.length })}
+            </span>
+            <Tooltip label={t(statusBarItemsExpanded ? "settings.statusBarItemsCollapse" : "settings.statusBarItemsExpand")}>
+              <button
+                type="button"
+                className="status-bar-items-editor__toggle"
+                aria-expanded={statusBarItemsExpanded}
+                aria-controls={statusBarItemsPanelId}
+                aria-label={t(statusBarItemsExpanded ? "settings.statusBarItemsCollapse" : "settings.statusBarItemsExpand")}
+                onClick={() => setStatusBarItemsExpanded((open) => !open)}
+              >
+                {statusBarItemsExpanded ? <ChevronUp size={15} aria-hidden="true" /> : <ChevronDown size={15} aria-hidden="true" />}
+              </button>
+            </Tooltip>
+          </div>
+          {statusBarItemsExpanded && (
+            <div className="status-bar-items-editor__list" id={statusBarItemsPanelId}>
+              {orderedStatusItems.map((id) => {
+                const label = statusBarItemLabel(id, t);
+                const visible = visibleStatusItems.has(id);
+                const visibleIndex = statusBarItems.indexOf(id);
+                const disableHide = visible && statusBarItems.length <= 1;
+                const dragLabel = t("settings.statusBarItem.drag", { label });
+                const moveUpLabel = t("settings.statusBarItem.moveUp", { label });
+                const moveDownLabel = t("settings.statusBarItem.moveDown", { label });
+                const dropPlacement = statusBarDragTarget?.id === id ? statusBarDragTarget.placement : null;
+                return (
+                  <div
+                    className={[
+                      "status-bar-item-row",
+                      visible ? "" : "status-bar-item-row--hidden",
+                      draggingStatusBarItem === id ? "status-bar-item-row--dragging" : "",
+                      dropPlacement ? "status-bar-item-row--drag-over" : "",
+                      dropPlacement === "before" ? "status-bar-item-row--drop-before" : "",
+                      dropPlacement === "after" ? "status-bar-item-row--drop-after" : "",
+                    ].filter(Boolean).join(" ")}
+                    data-statusbar-setting-item={id}
+                    key={id}
+                  >
+                    <Tooltip label={dragLabel}>
+                      <button
+                        type="button"
+                        className="status-bar-item-row__drag"
+                        disabled={!visible || busy}
+                        aria-label={dragLabel}
+                        title={dragLabel}
+                        onPointerDown={(event) => startStatusBarPointerDrag(event, id, visible)}
+                        onPointerMove={moveStatusBarPointerDrag}
+                        onPointerUp={endStatusBarPointerDrag}
+                        onPointerCancel={cancelStatusBarPointerDrag}
+                        onMouseDown={(event) => startStatusBarMouseDrag(event, id, visible)}
+                      >
+                        <GripVertical size={14} aria-hidden="true" />
+                      </button>
+                    </Tooltip>
+                    <label className="status-bar-item-row__toggle">
+                      <input
+                        type="checkbox"
+                        checked={visible}
+                        disabled={busy || disableHide}
+                        onChange={() => toggleStatusBarItem(id)}
+                      />
+                      <span className="status-bar-item-row__check" aria-hidden="true">
+                        {visible && <Check size={12} />}
+                      </span>
+                      <span className="status-bar-item-row__label">{label}</span>
+                    </label>
+                    <div className="status-bar-item-row__actions">
+                      <Tooltip label={moveUpLabel}>
+                        <button
+                          type="button"
+                          className="status-bar-item-row__order"
+                          disabled={busy || !visible || visibleIndex <= 0}
+                          onClick={() => moveStatusBarItem(id, -1)}
+                          aria-label={moveUpLabel}
+                        >
+                          <ChevronUp size={14} aria-hidden="true" />
+                        </button>
+                      </Tooltip>
+                      <Tooltip label={moveDownLabel}>
+                        <button
+                          type="button"
+                          className="status-bar-item-row__order"
+                          disabled={busy || !visible || visibleIndex < 0 || visibleIndex >= statusBarItems.length - 1}
+                          onClick={() => moveStatusBarItem(id, 1)}
+                          aria-label={moveDownLabel}
+                        >
+                          <ChevronDown size={14} aria-hidden="true" />
+                        </button>
+                      </Tooltip>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </SettingsField>
     </SettingsSection>
