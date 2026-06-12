@@ -109,6 +109,46 @@ func TestHandleCardActionUsesChatType(t *testing.T) {
 	}
 }
 
+func TestHandleCardActionEnqueuesAskAnswerCommand(t *testing.T) {
+	a := &adapter{
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		msgCh:  make(chan bot.InboundMessage, 1),
+	}
+	raw := []byte(`{
+		"event": {
+			"operator": {
+				"operator_id": {"open_id": "open-user"}
+			},
+			"context": {
+				"open_message_id": "msg-ask",
+				"open_chat_id": "chat-ask"
+			},
+			"action": {
+				"value": {
+					"command": "/answer ask-1 2",
+					"chat_type": "dm",
+					"user_id": "allowed-user"
+				}
+			}
+		}
+	}`)
+
+	if !a.handleCardAction(raw) {
+		t.Fatal("handleCardAction returned false")
+	}
+
+	msg := <-a.msgCh
+	if msg.Text != "/answer ask-1 2" {
+		t.Fatalf("text = %q, want /answer ask-1 2", msg.Text)
+	}
+	if msg.UserID != "allowed-user" {
+		t.Fatalf("user id = %q, want allowed-user", msg.UserID)
+	}
+	if msg.ChatID != "chat-ask" || msg.MessageID != "msg-ask" {
+		t.Fatalf("message routing = chat %q msg %q, want chat-ask/msg-ask", msg.ChatID, msg.MessageID)
+	}
+}
+
 func TestHandleCardActionAcceptsDirectOperatorID(t *testing.T) {
 	a := &adapter{
 		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
