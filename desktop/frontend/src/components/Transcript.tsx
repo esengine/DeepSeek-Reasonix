@@ -11,6 +11,9 @@ import { Welcome } from "./Welcome";
 import { ReadOnlyBatch } from "./ReadOnlyBatch";
 import { getDisplayMode, onDisplayModeChange, type DisplayMode } from "../lib/displayMode";
 import { isReadOnlyTool } from "../lib/useController";
+import { useGSAPCollapse } from "../lib/useGSAPCollapse";
+import { useEntranceAnimation } from "../lib/useEntranceAnimation";
+import { useScrollManager } from "../lib/useScrollManager";
 
 type ToolItem = Extract<Item, { kind: "tool" }>;
 type AssistantItem = Extract<Item, { kind: "assistant" }>;
@@ -68,22 +71,6 @@ function scrollVersion(items: Item[]): string {
       }
     })
     .join("|");
-}
-
-function repinIfWasPinned(
-  el: HTMLDivElement,
-  stick: { current: boolean },
-  frame: { current: number | null },
-  containerHeightDelta: number,
-) {
-  const bottomDistance = el.scrollHeight - el.scrollTop - el.clientHeight;
-  if (!stick.current && bottomDistance + containerHeightDelta >= 80) return;
-  stick.current = true;
-  if (frame.current !== null) cancelAnimationFrame(frame.current);
-  frame.current = requestAnimationFrame(() => {
-    if (stick.current) el.scrollTop = el.scrollHeight;
-    frame.current = null;
-  });
 }
 
 // Summarise a warm turn for its compact card.
@@ -167,11 +154,19 @@ export function Transcript({
   questionNavigator?: boolean;
   defaultExpandThinking?: boolean;
 }) {
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const stick = useRef(true);
-  const resizeFrame = useRef<number | null>(null);
-  const lastClientHeight = useRef<number | null>(null);
-  const lastFooterHeight = useRef<number | null>(null);
+  const {
+    scrollRef,
+    stick,
+    onScroll,
+    smoothScrollTo,
+    scrollToBottom,
+    trackQuestions,
+    repinIfWasPinned,
+    resizeFrame,
+    lastClientHeight,
+    lastFooterHeight,
+  } = useScrollManager();
+  const entranceRef = useEntranceAnimation<HTMLDivElement>();
 
   const [displayMode, setDisplayMode] = useState<DisplayMode>(() => getDisplayMode());
   useEffect(() => onDisplayModeChange((mode) => setDisplayMode(mode)), []);
@@ -188,40 +183,16 @@ export function Transcript({
   }, [items]);
   const showQuestionNav = questionNavigator && questions.length >= QUESTION_NAV_MIN_COUNT;
 
-  const onScroll = () => {
-    const el = scrollRef.current;
-    if (el) stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-  };
+  // Track question count and auto-scroll on new messages.
+  useEffect(() => { trackQuestions(questions.length); }, [questions.length, trackQuestions]);
 
-  // Track question count so we can detect when the user sends a new message.
-  const prevQuestionsLen = useRef(0);
-
-  // When the user submits a new message (questions array grows), force-scroll
-  // to the bottom regardless of the current stick state.
-  useEffect(() => {
-    if (questions.length > prevQuestionsLen.current) {
-      stick.current = true;
-      const el = scrollRef.current;
-      if (el) {
-        requestAnimationFrame(() => {
-          el.scrollTop = el.scrollHeight;
-        });
-      }
-    }
-    prevQuestionsLen.current = questions.length;
-  }, [questions]);
-
+  // Auto-scroll to bottom during streaming.
   const contentVersion = useMemo(() => scrollVersion(items), [items]);
   useEffect(() => {
-    if (!stick.current) return;
-    const el = scrollRef.current;
-    if (!el) return;
-    const id = requestAnimationFrame(() => {
-      el.scrollTop = el.scrollHeight;
-    });
-    return () => cancelAnimationFrame(id);
+    scrollToBottom();
   }, [contentVersion, live?.text?.length ?? 0, live?.reasoning?.length ?? 0]);
 
+  // ResizeObserver for container height changes.
   useEffect(() => {
     const el = scrollRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;
@@ -229,7 +200,7 @@ export function Transcript({
     const observer = new ResizeObserver(() => {
       const previous = lastClientHeight.current ?? el.clientHeight;
       lastClientHeight.current = el.clientHeight;
-      repinIfWasPinned(el, stick, resizeFrame, el.clientHeight - previous);
+      repinIfWasPinned(el.clientHeight - previous);
     });
     observer.observe(el);
     return () => {
@@ -241,18 +212,24 @@ export function Transcript({
     };
   }, []);
 
+  // Footer height changes → smooth scroll repin with GSAP.
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     const previous = lastFooterHeight.current ?? footerHeight;
     lastFooterHeight.current = footerHeight;
-    repinIfWasPinned(el, stick, resizeFrame, previous - footerHeight);
-    return () => {
-      if (resizeFrame.current !== null) {
-        cancelAnimationFrame(resizeFrame.current);
-        resizeFrame.current = null;
-      }
-    };
+    repinIfWasPinned(previous - footerHeight);
+  }, [footerHeight]);
+
+  // Smooth transition when footer height changes.
+  const prevFooterRef = useRef(footerHeight);
+  useEffect(() => {
+    const prev = prevFooterRef.current;
+    if (prev !== footerHeight && scrollRef.current) {
+      // GSAP will handle scroll repositioning via repinIfWasPinned above.
+      // The composer and status bar transitions are handled by CSS.
+    }
+    prevFooterRef.current = footerHeight;
   }, [footerHeight]);
 
   // Sub-agent calls carry a parentId; collect them under their parent `task`
@@ -312,18 +289,10 @@ export function Transcript({
 
   // ── JumpBar integration ───────────────────────────────────────────────────
   const jumpToQuestion = (question: QuestionAnchor) => {
-    const el = scrollRef.current;
     const node = document.getElementById(questionAnchorId(question.id));
-    if (!el || !node) return;
+    if (!node) return;
     stick.current = false;
-    if (resizeFrame.current !== null) {
-      cancelAnimationFrame(resizeFrame.current);
-      resizeFrame.current = null;
-    }
-    const scrollerRect = el.getBoundingClientRect();
-    const nodeRect = node.getBoundingClientRect();
-    const top = el.scrollTop + nodeRect.top - scrollerRect.top - 12;
-    el.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+    smoothScrollTo(node, 12);
   };
 
   const handleJumpToQuestion = useCallback((question: QuestionAnchor) => {
@@ -593,7 +562,9 @@ export function Transcript({
             }}
           />
         )}
-        {hotZoneNodes}
+        <div ref={entranceRef}>
+          {hotZoneNodes}
+        </div>
       </LiveStreamContext.Provider>
     </div>
   );
@@ -849,6 +820,8 @@ function WarmTurnCard({
   children?: React.ReactNode;
 }) {
   const t = useT();
+  const contentRef = useRef<HTMLDivElement>(null);
+  useGSAPCollapse(contentRef, expanded);
   return (
     <div className={`warm-turn${expanded ? " warm-turn--expanded" : ""}`}>
       <button
@@ -865,11 +838,13 @@ function WarmTurnCard({
           {toolCount > 0 && <span>{t("transcript.toolCount", { n: toolCount })}</span>}
         </span>
       </button>
-      {expanded ? (
-        <div className="warm-turn__body">{children}</div>
-      ) : (
-        assistantPreview && <div className="warm-turn__assistant">{assistantPreview}</div>
-      )}
+      <div ref={contentRef} className="warm-turn__content">
+        {expanded ? (
+          <div className="warm-turn__body">{children}</div>
+        ) : (
+          assistantPreview && <div className="warm-turn__assistant">{assistantPreview}</div>
+        )}
+      </div>
     </div>
   );
 }
@@ -886,6 +861,8 @@ type TurnCollapseProps = {
 function TurnCollapse({ items, durationMs, mode, subcalls }: TurnCollapseProps) {
   const t = useT();
   const [open, setOpen] = useState(false);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  useGSAPCollapse(bodyRef, open);
 
   // Keep only items the body will actually render — an expandable fold over
   // nothing is worse than no fold. Minimal mode strips reasoning, so a
@@ -894,12 +871,11 @@ function TurnCollapse({ items, durationMs, mode, subcalls }: TurnCollapseProps) 
     return items.filter((it) => {
       if (it.kind === "assistant") {
         if (it.text.trim() !== "") return true;
-        return mode !== "minimal" && Boolean(it.reasoning);
+        return Boolean(it.reasoning);
       }
-      if (it.kind === "phase") return mode !== "minimal";
+      if (it.kind === "phase") return true;
       if (it.kind !== "tool") return false;
       if (it.parentId || it.name === "todo_write" || it.name === "exit_plan_mode") return false;
-      if (mode === "minimal") return it.name !== "bash";
       return true;
     });
   }, [items, mode]);
@@ -932,7 +908,7 @@ function TurnCollapse({ items, durationMs, mode, subcalls }: TurnCollapseProps) 
         break;
       case "phase": body.push(<PhaseCard key={it.id} text={it.text} />); break;
       case "assistant": {
-        const displayItem = mode === "minimal" ? { ...it, reasoning: "" } : it;
+        const displayItem = it;
         body.push(<AssistantMessage key={it.id} item={displayItem as AssistantItem} />);
         break;
       }
@@ -941,7 +917,7 @@ function TurnCollapse({ items, durationMs, mode, subcalls }: TurnCollapseProps) 
   flushRO();
 
   return (
-    <div className={`turn-collapse${open ? " turn-collapse--open" : ""}`}>
+    <div className={`turn-collapse${open ? " turn-collapse--open" : ""}`} data-entrance={displayItems[0]?.id || undefined}>
       <button
         type="button"
         className="reasoning__head"
@@ -951,9 +927,7 @@ function TurnCollapse({ items, durationMs, mode, subcalls }: TurnCollapseProps) 
         <ChevronRight className={`reasoning__chevron${open ? " reasoning__chevron--open" : ""}`} size={12} />
         <span className="turn-collapse__label">{label}</span>
       </button>
-      {open && (
-        <div className="turn-collapse__body">{body}</div>
-      )}
+      <div ref={bodyRef} className="turn-collapse__body">{body}</div>
     </div>
   );
 }
@@ -1092,12 +1066,12 @@ type CompactionItem = Extract<Item, { kind: "compaction" }>;
 type NoticeItem = Extract<Item, { kind: "notice" }>;
 
 function PhaseCard({ text }: { text: string }) {
-  return <div className="phase"><ProcessPhaseIcon size={12} /><span>{text}</span></div>;
+  return <div className="phase" data-entrance="true"><ProcessPhaseIcon size={12} /><span>{text}</span></div>;
 }
 
 function NoticeCard({ level, text }: { level: NoticeItem["level"]; text: string }) {
   return (
-    <div className={`notice-line notice-line--${level}`}>
+    <div className={`notice-line notice-line--${level}`} data-entrance="true">
       <span className="notice-line__icon">{level === "warn" ? "⚠ " : "ℹ "}</span>
       <span className="notice-line__text">{text}</span>
     </div>
@@ -1108,10 +1082,10 @@ function CompactionCard({ item }: { item: CompactionItem }) {
   const t = useT();
   const [open, setOpen] = useState(false);
   if (item.pending) {
-    return <div className="compaction compaction--pending"><ProcessCompactIcon size={12} /><span>{t("compaction.working")}</span></div>;
+    return <div className="compaction compaction--pending" data-entrance={item.id}><ProcessCompactIcon size={12} /><span>{t("compaction.working")}</span></div>;
   }
   return (
-    <div className="compaction">
+    <div className="compaction" data-entrance={item.id}>
       <button type="button" className="compaction__head" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
         <ProcessCompactIcon size={12} />
         <span>{t("compaction.title")}</span>

@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import { ShellExpandProvider, useShellExpand } from "./lib/shellExpand";
+import gsap from "gsap";
+import { useGSAP } from "@gsap/react";
+import { Flip } from "gsap/Flip";
+import { ScrollToPlugin } from "gsap/ScrollToPlugin";
+gsap.registerPlugin(useGSAP, Flip, ScrollToPlugin);
 import {
   Activity,
   Command,
@@ -1020,6 +1025,13 @@ export default function App() {
     const onResize = () => setViewportWidth(window.innerWidth);
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  // Live update expandThinking when changed in settings panel
+  useEffect(() => {
+    const handler = (e: Event) => setExpandThinking((e as CustomEvent).detail as boolean);
+    window.addEventListener("reasonix:expand-thinking", handler);
+    return () => window.removeEventListener("reasonix:expand-thinking", handler);
   }, []);
   const [pendingPlanRevision, setPendingPlanRevision] = useState<string | null>(null);
   const [footerHeight, setFooterHeight] = useState(0);

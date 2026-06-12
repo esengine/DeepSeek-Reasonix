@@ -2577,6 +2577,7 @@ a[href] {
   padding: 24px 32px 32px;
   scrollbar-width: thin;
   scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+  scroll-behavior: smooth;
 }
 .transcript > * {
   max-width: var(--maxw);
@@ -2682,6 +2683,9 @@ a[href] {
 .warm-turn__body {
   padding: 4px 0;
 }
+.warm-turn__content {
+  overflow: hidden;
+}
 .warm-turn__body > * {
   max-width: var(--maxw);
   margin-left: auto;
@@ -2718,9 +2722,18 @@ a[href] {
 .readonly-batch {
   margin: 2px auto;
 }
+
+/* expanded padding — parent --open class drives it while GSAP handles height */
+.readonly-batch--open .readonly-batch__body,
+.turn-collapse--open .turn-collapse__body {
+  padding: 0 11px 10px 30px;
+  margin-top: 6px;
+}
+
+/* shared body border-left for fold containers */
 .readonly-batch__body,
 .turn-collapse__body {
-  margin-top: 6px;
+  overflow: hidden;
   padding-left: 12px;
   border-left: 2px solid var(--border);
 }
@@ -3359,7 +3372,7 @@ a[href] {
 }
 .reasoning__chevron {
   flex: 0 0 auto;
-  transition: transform 0.15s;
+  transition: transform 0.2s;
 }
 .reasoning__chevron--open {
   transform: rotate(90deg);
@@ -3555,8 +3568,7 @@ a[href] {
   background: var(--fg-faint);
 }
 .reasoning__body {
-  margin: 8px 0;
-  padding: 0 11px 10px 30px;
+  overflow: hidden;
   border-left: 2px solid var(--border);
   color: var(--fg-dim);
   font-size: 13px;
@@ -3564,7 +3576,6 @@ a[href] {
   line-height: 1.7;
   white-space: pre-wrap;
 }
-
 /* live bubble while the answer streams — markdown renders in real time */
 .msg__stream {
   display: flex;
@@ -3913,7 +3924,7 @@ a[href] {
 .tool__chevron {
   flex-shrink: 0;
   color: var(--fg-faint);
-  transition: transform 0.15s;
+  transition: transform 0.2s;
 }
 .tool__chevron--open {
   transform: rotate(90deg);
@@ -3988,7 +3999,7 @@ a[href] {
   flex-shrink: 0;
 }
 .tool__body {
-  padding: 0 11px 10px 30px;
+  overflow: hidden;
 }
 .tool__note {
   font-size: var(--font-caption);

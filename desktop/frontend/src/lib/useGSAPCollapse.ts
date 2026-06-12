@@ -1,0 +1,96 @@
+import { useEffect, useRef } from "react";
+import gsap from "gsap";
+import { DUR_BASE, EASE_OUT, prefersReducedMotion } from "./gsapAnimations";
+
+/**
+ * useGSAPCollapse — animate a container's height between 0 and its
+ * scrollHeight whenever `open` flips.  Replaces the old CSS max-height
+ * hack with a precise pixel-level GSAP tween.
+ *
+ * Usage:
+ *   const ref = useRef<HTMLDivElement>(null);
+ *   useGSAPCollapse(ref, open);
+ *   return <div ref={ref}>{children}</div>;
+ *
+ * The container should have `overflow: hidden` in CSS.  No extra wrapper
+ * elements needed.
+ */
+export function useGSAPCollapse(
+  ref: React.RefObject<HTMLElement | null>,
+  open: boolean,
+  opts?: {
+    duration?: number;
+    ease?: string;
+    /** Called after the open animation completes. */
+    onOpenComplete?: () => void;
+    /** Called after the close animation completes. */
+    onCloseComplete?: () => void;
+  },
+) {
+  const prevOpen = useRef<boolean | null>(null);
+  const onOpenRef = useRef(opts?.onOpenComplete);
+  const onCloseRef = useRef(opts?.onCloseComplete);
+  onOpenRef.current = opts?.onOpenComplete;
+  onCloseRef.current = opts?.onCloseComplete;
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+
+    // Skip the very first render — we don't want to animate from 0→auto
+    // on mount.
+    if (prevOpen.current === null) {
+      prevOpen.current = open;
+      // Set the initial height inline so the element respects the starting
+      // state without a visible jump.
+      gsap.set(el, { height: open ? "auto" : 0 });
+      return;
+    }
+
+    // No change — nothing to do.
+    if (prevOpen.current === open) return;
+    prevOpen.current = open;
+
+    const reduced = prefersReducedMotion();
+    const dur = reduced ? 0.001 : (opts?.duration ?? DUR_BASE);
+    const ease = opts?.ease ?? EASE_OUT;
+
+    // Kill any in-flight GSAP animations on this element so we always
+    // start from the current rendered height.
+    gsap.killTweensOf(el);
+
+    if (open) {
+      // Phase 1 — measure the target (auto) height without visible change.
+      gsap.set(el, { height: "auto" });
+      const targetHeight = el.scrollHeight;
+      // Phase 2 — animate from current (which is 0 or whatever the kill
+      // left us at) to the measured target height; then clear the inline
+      // style so the element returns to `height: auto` / CSS-driven flow.
+      gsap.fromTo(
+        el,
+        { height: 0 },
+        {
+          height: targetHeight,
+          duration: dur,
+          ease,
+          clearProps: "height",
+          onComplete: () => onOpenRef.current?.(),
+        },
+      );
+    } else {
+      // Close: measure the current auto height so we know where to start.
+      gsap.set(el, { height: "auto" });
+      const startHeight = el.scrollHeight;
+      gsap.fromTo(
+        el,
+        { height: startHeight },
+        {
+          height: 0,
+          duration: dur,
+          ease,
+          onComplete: () => onCloseRef.current?.(),
+        },
+      );
+    }
+  }, [open, ref]);
+}
