@@ -25,6 +25,10 @@ export function useGSAPCollapse(
     onOpenComplete?: () => void;
     /** Called after the close animation completes. */
     onCloseComplete?: () => void;
+    /** When closing, use this height as the starting point instead of
+     *  measuring scrollHeight (which may have already shrunk due to
+     *  content being conditionally removed). */
+    prevHeight?: number;
   },
 ) {
   const prevOpen = useRef<boolean | null>(null);
@@ -78,9 +82,11 @@ export function useGSAPCollapse(
         },
       );
     } else {
-      // Close: measure the current auto height so we know where to start.
-      gsap.set(el, { height: "auto" });
-      const startHeight = el.scrollHeight;
+      // Close: if caller provided a pre-swap height use it as the start,
+      // otherwise measure the current (already-swapped) scrollHeight.
+      const startHeight = opts?.prevHeight && opts.prevHeight > 0
+        ? opts.prevHeight
+        : (gsap.set(el, { height: "auto" }), el.scrollHeight);
       gsap.fromTo(
         el,
         { height: startHeight },

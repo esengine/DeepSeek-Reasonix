@@ -818,13 +818,25 @@ function WarmTurnCard({
 }) {
   const t = useT();
   const contentRef = useRef<HTMLDivElement>(null);
-  useGSAPCollapse(contentRef, expanded);
+  const prevHeightRef = useRef(0);
+  useGSAPCollapse(contentRef, expanded, { prevHeight: prevHeightRef.current });
+  // Always render both children so the container's scrollHeight reflects
+  // the correct content at all times.  The inactive one is display:none.
   return (
     <div className={`warm-turn${expanded ? " warm-turn--expanded" : ""}`}>
       <button
         type="button"
         className="warm-turn__head"
-        onClick={onToggle}
+        onClick={() => {
+          // Capture height before DOM swap so the collapse animation
+          // starts from the correct (expanded) height.
+          const el = contentRef.current;
+          if (el) {
+            el.style.height = "auto";
+            prevHeightRef.current = el.scrollHeight;
+          }
+          onToggle();
+        }}
         aria-expanded={expanded}
       >
         <span className="warm-turn__chevron">
@@ -836,10 +848,9 @@ function WarmTurnCard({
         </span>
       </button>
       <div ref={contentRef} className="warm-turn__content">
-        {expanded ? (
-          <div className="warm-turn__body">{children}</div>
-        ) : (
-          assistantPreview && <div className="warm-turn__assistant">{assistantPreview}</div>
+        <div className="warm-turn__body" style={{ display: expanded ? undefined : "none" }}>{children}</div>
+        {assistantPreview && (
+          <div className="warm-turn__assistant" style={{ display: expanded ? "none" : undefined }}>{assistantPreview}</div>
         )}
       </div>
     </div>
