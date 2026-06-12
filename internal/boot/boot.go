@@ -210,11 +210,6 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		sysPrompt = skill.ApplyIndex(sysPrompt, skills)
 	}
 
-	sessionDir := opts.SessionDir
-	if sessionDir == "" {
-		sessionDir = config.SessionDir()
-	}
-
 	reg := tool.NewRegistry()
 	bashSpec := sandbox.Spec{Mode: cfg.BashMode(), WriteRoots: cfg.WriteRootsForRoot(root), Network: cfg.Sandbox.Network}
 	shell := sandbox.ResolveShell(cfg.Tools.Shell.Prefer, cfg.Tools.Shell.Path, stderr)
