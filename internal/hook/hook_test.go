@@ -43,6 +43,19 @@ func TestLoadTrustGating(t *testing.T) {
 	}
 }
 
+func TestLoadPermissionRequestHook(t *testing.T) {
+	home := t.TempDir()
+	writeSettings(t, home, `{"hooks":{"PermissionRequest":[{"match":"bash","command":"notify"}]}}`)
+
+	got := Load(LoadOptions{HomeDir: home})
+	if len(got) != 1 {
+		t.Fatalf("hooks count = %d, want 1", len(got))
+	}
+	if got[0].Event != PermissionRequest || got[0].Match != "bash" || got[0].Command != "notify" {
+		t.Fatalf("loaded hook = %+v, want PermissionRequest/bash/notify", got[0])
+	}
+}
+
 func TestProjectDefinesHooks(t *testing.T) {
 	proj := t.TempDir()
 	if ProjectDefinesHooks(proj) {
@@ -81,6 +94,18 @@ func TestMatchesTool(t *testing.T) {
 	if MatchesTool(pre("["), "bash") {
 		t.Error("malformed regex should not fire")
 	}
+	perm := func(match string) ResolvedHook {
+		return ResolvedHook{HookConfig: HookConfig{Match: match}, Event: PermissionRequest}
+	}
+	if !MatchesTool(perm("bash"), "bash") {
+		t.Error(`PermissionRequest "bash" should match "bash"`)
+	}
+	if MatchesTool(perm("bash"), "read_file") {
+		t.Error(`PermissionRequest "bash" must not match "read_file"`)
+	}
+	if MatchesTool(perm("["), "bash") {
+		t.Error("malformed PermissionRequest regex should not fire")
+	}
 	// Non-tool events always match regardless of the match field.
 	prompt := ResolvedHook{HookConfig: HookConfig{Match: "bash"}, Event: UserPromptSubmit}
 	if !MatchesTool(prompt, "") {
@@ -98,8 +123,10 @@ func TestDecideOutcome(t *testing.T) {
 		{"pass", PreToolUse, SpawnResult{ExitCode: 0}, DecisionPass},
 		{"block-exit2", PreToolUse, SpawnResult{ExitCode: 2}, DecisionBlock},
 		{"exit2-nonblocking-warns", PostToolUse, SpawnResult{ExitCode: 2}, DecisionWarn},
+		{"permission-exit2-warns", PermissionRequest, SpawnResult{ExitCode: 2}, DecisionWarn},
 		{"other-nonzero-warns", PreToolUse, SpawnResult{ExitCode: 1}, DecisionWarn},
 		{"timeout-blocking", UserPromptSubmit, SpawnResult{TimedOut: true}, DecisionBlock},
+		{"permission-timeout-warns", PermissionRequest, SpawnResult{TimedOut: true}, DecisionWarn},
 		{"timeout-nonblocking", Stop, SpawnResult{TimedOut: true}, DecisionWarn},
 		{"spawn-error", PreToolUse, SpawnResult{SpawnErr: os.ErrNotExist}, DecisionError},
 	}
@@ -143,6 +170,23 @@ func TestRunFiltersByEventAndTool(t *testing.T) {
 	Run(context.Background(), Payload{Event: PreToolUse, ToolName: "bash"}, hooks, spawner)
 	if len(ran) != 1 || ran[0] != "a" {
 		t.Errorf("only the matching PreToolUse hook should run, got %v", ran)
+	}
+}
+
+func TestRunFiltersPermissionRequestByTool(t *testing.T) {
+	hooks := []ResolvedHook{
+		{HookConfig: HookConfig{Command: "a", Match: "bash"}, Event: PermissionRequest},
+		{HookConfig: HookConfig{Command: "b", Match: "read_file"}, Event: PermissionRequest},
+		{HookConfig: HookConfig{Command: "c"}, Event: Notification},
+	}
+	var ran []string
+	spawner := func(_ context.Context, in SpawnInput) SpawnResult {
+		ran = append(ran, in.Command)
+		return SpawnResult{ExitCode: 0}
+	}
+	Run(context.Background(), Payload{Event: PermissionRequest, ToolName: "bash"}, hooks, spawner)
+	if len(ran) != 1 || ran[0] != "a" {
+		t.Errorf("only the matching PermissionRequest hook should run, got %v", ran)
 	}
 }
 

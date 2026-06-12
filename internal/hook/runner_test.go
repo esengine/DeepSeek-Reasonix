@@ -109,6 +109,52 @@ func TestRunnerPostToolUseWarn(t *testing.T) {
 	}
 }
 
+// --- Runner.PermissionRequest ---
+
+func TestRunnerPermissionRequestPayload(t *testing.T) {
+	hooks := []ResolvedHook{
+		{HookConfig: HookConfig{Command: "notify", Match: "bash"}, Event: PermissionRequest},
+	}
+	var got Payload
+	spawner := func(_ context.Context, in SpawnInput) SpawnResult {
+		if err := json.Unmarshal([]byte(in.Stdin), &got); err != nil {
+			t.Fatalf("payload json: %v", err)
+		}
+		return SpawnResult{ExitCode: 0}
+	}
+	args := json.RawMessage(`{"command":"go test ./..."}`)
+	r := NewRunner(hooks, "/tmp", spawner, nil)
+	r.PermissionRequest(context.Background(), "bash", "go test ./...", args)
+
+	if got.Event != PermissionRequest {
+		t.Errorf("Event = %q, want PermissionRequest", got.Event)
+	}
+	if got.ToolName != "bash" {
+		t.Errorf("ToolName = %q, want bash", got.ToolName)
+	}
+	if got.Subject != "go test ./..." {
+		t.Errorf("Subject = %q, want command subject", got.Subject)
+	}
+	if string(got.ToolArgs) != string(args) {
+		t.Errorf("ToolArgs = %s, want %s", got.ToolArgs, args)
+	}
+}
+
+func TestRunnerPermissionRequestWarnOnly(t *testing.T) {
+	hooks := []ResolvedHook{
+		{HookConfig: HookConfig{Command: "warn"}, Event: PermissionRequest},
+	}
+	spawner := func(_ context.Context, in SpawnInput) SpawnResult {
+		return SpawnResult{ExitCode: 2, Stderr: "notification failed"}
+	}
+	var notified string
+	r := NewRunner(hooks, "/tmp", spawner, func(msg string) { notified = msg })
+	r.PermissionRequest(context.Background(), "bash", "go test", nil)
+	if notified == "" {
+		t.Error("PermissionRequest warn should notify")
+	}
+}
+
 // --- Runner.PromptSubmit ---
 
 func TestRunnerPromptSubmitBlock(t *testing.T) {
@@ -319,6 +365,9 @@ func TestIsBlocking(t *testing.T) {
 func TestDefaultTimeout(t *testing.T) {
 	if defaultTimeout(PreToolUse) != 5*time.Second {
 		t.Errorf("PreToolUse timeout = %v", defaultTimeout(PreToolUse))
+	}
+	if defaultTimeout(PermissionRequest) != 5*time.Second {
+		t.Errorf("PermissionRequest timeout = %v", defaultTimeout(PermissionRequest))
 	}
 	if defaultTimeout(PostToolUse) != 30*time.Second {
 		t.Errorf("PostToolUse timeout = %v", defaultTimeout(PostToolUse))

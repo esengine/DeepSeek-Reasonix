@@ -12,7 +12,7 @@ func renderHooks(width int, hooks []hook.ResolvedHook, trusted bool, projectDefi
 	fmt.Fprintf(&b, "%s\n", viewHeader("hooks (%d active)", len(hooks)))
 	for _, h := range hooks {
 		match := h.Match
-		if h.Event == hook.PreToolUse || h.Event == hook.PostToolUse {
+		if h.Event == hook.PreToolUse || h.Event == hook.PostToolUse || h.Event == hook.PermissionRequest {
 			if match == "" {
 				match = "*"
 			}
