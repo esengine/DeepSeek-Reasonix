@@ -2725,7 +2725,8 @@ a[href] {
 
 /* expanded padding — parent --open class drives it while GSAP handles height */
 .readonly-batch--open .readonly-batch__body,
-.turn-collapse--open .turn-collapse__body {
+.turn-collapse--open .turn-collapse__body,
+.tool--open .tool__body {
   padding: 0 11px 10px 30px;
   margin-top: 6px;
 }
@@ -3570,6 +3571,7 @@ a[href] {
 .reasoning__body {
   overflow: hidden;
   border-left: 2px solid var(--border);
+  padding-left: 12px;
   color: var(--fg-dim);
   font-size: 13px;
   font-style: italic;
@@ -4000,6 +4002,8 @@ a[href] {
 }
 .tool__body {
   overflow: hidden;
+  border-left: 2px solid var(--border);
+  padding-left: 12px;
 }
 .tool__note {
   font-size: var(--font-caption);
@@ -13054,10 +13058,12 @@ a[href] {
 .tool__body + .tool__body .tool__difflabel {
   margin-top: 2px;
 }
-/* sub-agent calls render indented under their parent task card */
+/* sub-agent calls render indented under their parent task card — the base
+   tool__body already provides border-left + 12px padding, so subagent just
+   needs left indent for hierarchy.  Expanded padding is handled by
+   .tool--open .tool__body. */
 .tool--subagent .tool__body {
-  padding-left: 16px;
-  border-left: 2px solid var(--border);
+  padding-left: 24px;
 }
 .tool__nested {
   margin: 8px 0;

@@ -6,32 +6,45 @@ import { DUR_SLOW, EASE_OUT, prefersReducedMotion } from "./gsapAnimations";
  * useEntranceAnimation — animates newly-mounted elements as they appear in
  * the DOM. Tracks seen item IDs so each element animates in only once.
  *
- * Usage in a rendering loop:
- *   const entrance = useEntranceAnimation<HTMLDivElement>();
- *   // ... in JSX:
- *   <div ref={entrance.ref}>
- *     {items.map((it) => (
- *       <div key={it.id} data-entrance={it.id}>
- *         ...
- *       </div>
- *     ))}
- *   </div>
+ * Key performance properties:
+ *  - On first mount, ALL existing data-entrance IDs are pre-seeded into the
+ *    "seen" set so no entrance animation runs for history items.
+ *  - The scan only runs when `deps` changes (pass items.length or similar).
+ *  - During streaming (text changes within same elements) the scanner is
+ *    completely skipped, avoiding expensive querySelectorAll calls.
  *
- * When a new element with data-entrance appears, it fades+slides in.
- * */
+ * Usage:
+ *   const entranceRef = useEntranceAnimation(items.length);
+ *   <div ref={entranceRef}>
+ *     {items.map((it) => <div key={it.id} data-entrance={it.id} />)}
+ *   </div>
+ */
 export function useEntranceAnimation<T extends HTMLElement>(
+  deps?: unknown,
   selector = "[data-entrance]",
 ) {
   const ref = useRef<T | null>(null);
   const seen = useRef(new Set<string>());
   const timerRef = useRef<number | null>(null);
+  const ready = useRef(false);
 
+  // Pre-seed: on first mount, record all existing data-entrance IDs so they
+  // never get an entrance animation.  Only newly added DOM nodes animate.
   useEffect(() => {
     const container = ref.current;
     if (!container) return;
+    container.querySelectorAll(selector).forEach((el) => {
+      const id = el.getAttribute("data-entrance");
+      if (id) seen.current.add(id);
+    });
+    ready.current = true;
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-    // Walk the container for elements with data-entrance that we haven't
-    // seen yet.
+  // Subsequent renders: scan for elements NOT in the seen set.
+  useEffect(() => {
+    const container = ref.current;
+    if (!container || !ready.current) return;
+
     const entries: HTMLElement[] = [];
     container.querySelectorAll(selector).forEach((el) => {
       const id = el.getAttribute("data-entrance");
@@ -45,13 +58,11 @@ export function useEntranceAnimation<T extends HTMLElement>(
 
     const reduced = prefersReducedMotion();
     if (reduced) {
-      // Reduced motion: just show instantly.
       gsap.set(entries, { opacity: 1, clearProps: "transform" });
       return;
     }
 
-    // Debounce: if items arrive in a batch (e.g. initial load or multiple
-    // tool calls in the same turn), collect them and animate together.
+    // Batch: if multiple items arrive in the same tick, animate them together.
     if (timerRef.current !== null) clearTimeout(timerRef.current);
     timerRef.current = window.setTimeout(() => {
       timerRef.current = null;
@@ -68,15 +79,17 @@ export function useEntranceAnimation<T extends HTMLElement>(
         },
       );
     }, 16);
+
     return () => {
       if (timerRef.current !== null) clearTimeout(timerRef.current);
     };
-  });
+    // Only re-scan when deps change — NOT on every render (streaming updates
+    // text in place without adding new elements, so scanning is wasted work).
+  }, [deps]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return ref;
 }
 
-/** Choose a stagger delay based on how many elements arrived together. */
 function itemsStagger(count: number): number {
   if (count <= 1) return 0;
   if (count <= 3) return 0.06;

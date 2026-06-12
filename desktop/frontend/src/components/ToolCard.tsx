@@ -94,7 +94,7 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
   useGSAPCollapse(toolBodyRef, open);
 
   return (
-    <div className={`tool${quiet ? " tool--quiet" : ""}${isSubagent ? " tool--subagent" : ""}`} data-entrance={item.id}>
+    <div className={`tool${quiet ? " tool--quiet" : ""}${isSubagent ? " tool--subagent" : ""}${open && hasBody ? " tool--open" : ""}`} data-entrance={item.id}>
       <button
         type="button"
         className="tool__head"

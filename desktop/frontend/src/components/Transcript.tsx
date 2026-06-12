@@ -166,7 +166,7 @@ export function Transcript({
     lastClientHeight,
     lastFooterHeight,
   } = useScrollManager();
-  const entranceRef = useEntranceAnimation<HTMLDivElement>();
+  const entranceRef = useEntranceAnimation<HTMLDivElement>(items.length);
 
   const [displayMode, setDisplayMode] = useState<DisplayMode>(() => getDisplayMode());
   useEffect(() => onDisplayModeChange((mode) => setDisplayMode(mode)), []);
