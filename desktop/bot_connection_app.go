@@ -251,7 +251,10 @@ func (a *App) TestBotConnection(id, target string) (BotConnectionDiagnostic, err
 }
 
 func (a *App) startFeishuConnectionInstall(domain string) (BotInstallStartResult, error) {
-	beginDomain := "feishu"
+	beginDomain := domain
+	if beginDomain != "lark" {
+		beginDomain = "feishu"
+	}
 	data, err := postFeishuInstallForm(feishuAccountsBase(beginDomain), map[string]string{
 		"action": "begin", "archetype": "PersonalAgent", "auth_method": "client_secret", "request_user_info": "open_id",
 	})

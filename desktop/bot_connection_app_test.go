@@ -33,10 +33,9 @@ func TestNormalizeBotInstallTarget(t *testing.T) {
 	}
 }
 
-func TestFeishuInstallSwitchesToLarkDomainAndStoresSecret(t *testing.T) {
+func TestLarkInstallBeginsOnLarkDomainAndStoresSecret(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	t.Cleanup(func() { _ = os.Unsetenv("LARK_BOT_APP_SECRET") })
-	pollCount := 0
 	var beginHost string
 	var pollHosts []string
 	var actions []string
@@ -58,7 +57,7 @@ func TestFeishuInstallSwitchesToLarkDomainAndStoresSecret(t *testing.T) {
 				return
 			}
 			writeJSON(t, w, map[string]any{
-				"device_code":               "dev-feishu",
+				"device_code":               "dev-lark",
 				"verification_uri_complete": "https://accounts.example/verify?user_code=CODE",
 				"user_code":                 "CODE",
 				"interval":                  3,
@@ -67,15 +66,8 @@ func TestFeishuInstallSwitchesToLarkDomainAndStoresSecret(t *testing.T) {
 		case "poll":
 			pollHosts = append(pollHosts, r.Header.Get("X-Test-Original-Host"))
 			actions = append(actions, "poll")
-			if r.Form.Get("device_code") != "dev-feishu" {
+			if r.Form.Get("device_code") != "dev-lark" {
 				http.Error(w, "wrong device code", http.StatusBadRequest)
-				return
-			}
-			pollCount++
-			if pollCount == 1 {
-				writeJSON(t, w, map[string]any{
-					"user_info": map[string]any{"tenant_brand": "lark"},
-				})
 				return
 			}
 			writeJSON(t, w, map[string]any{
@@ -93,7 +85,7 @@ func TestFeishuInstallSwitchesToLarkDomainAndStoresSecret(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartBotConnectionInstall: %v", err)
 	}
-	if !start.OK || start.Domain != "lark" || start.InstallID == "" || start.URL == "" || start.DeviceCode != "dev-feishu" {
+	if !start.OK || start.Domain != "lark" || start.InstallID == "" || start.URL == "" || start.DeviceCode != "dev-lark" {
 		t.Fatalf("start result = %+v, want ok lark-capable QR result", start)
 	}
 	qrURL, err := url.Parse(start.URL)
@@ -103,20 +95,6 @@ func TestFeishuInstallSwitchesToLarkDomainAndStoresSecret(t *testing.T) {
 	query := qrURL.Query()
 	if query.Get("user_code") != "CODE" || query.Get("from") != "sdk" || query.Get("tp") != "sdk" || query.Get("source") != "go-sdk" {
 		t.Fatalf("start URL query = %v, want SDK registration QR metadata with user_code", query)
-	}
-
-	pending, err := app.PollBotConnectionInstall(start.InstallID)
-	if err != nil {
-		t.Fatalf("PollBotConnectionInstall pending: %v", err)
-	}
-	if pending.Done || pending.Status != "pending" {
-		t.Fatalf("pending poll result = %+v, want pending domain switch", pending)
-	}
-	app.mu.RLock()
-	session := app.botInstalls[start.InstallID]
-	app.mu.RUnlock()
-	if session == nil || session.PollDomain != "lark" {
-		t.Fatalf("install session = %+v, want switched Lark poll domain", session)
 	}
 
 	poll, err := app.PollBotConnectionInstall(start.InstallID)
@@ -129,14 +107,14 @@ func TestFeishuInstallSwitchesToLarkDomainAndStoresSecret(t *testing.T) {
 	if poll.Connection.Provider != "feishu" || poll.Connection.Domain != "lark" || poll.Connection.ID != "feishu-lark" {
 		t.Fatalf("connection = %+v, want feishu-lark from tenant_brand", poll.Connection)
 	}
-	if beginHost != "accounts.feishu.cn" {
-		t.Fatalf("begin host = %q, want SDK-compatible Feishu accounts host", beginHost)
+	if beginHost != "accounts.larksuite.com" {
+		t.Fatalf("begin host = %q, want Lark accounts host", beginHost)
 	}
-	if got := strings.Join(pollHosts, ","); got != "accounts.feishu.cn,accounts.larksuite.com" {
-		t.Fatalf("poll hosts = %q, want Feishu poll then Lark poll", got)
+	if got := strings.Join(pollHosts, ","); got != "accounts.larksuite.com" {
+		t.Fatalf("poll hosts = %q, want Lark poll host", got)
 	}
-	if got := strings.Join(actions, ","); got != "begin,poll,poll" {
-		t.Fatalf("registration actions = %q, want SDK-compatible begin then polls", got)
+	if got := strings.Join(actions, ","); got != "begin,poll" {
+		t.Fatalf("registration actions = %q, want Lark begin then poll", got)
 	}
 	if poll.Connection.WorkspaceRoot != "" {
 		t.Fatalf("connection workspaceRoot = %q, want empty global default", poll.Connection.WorkspaceRoot)
@@ -163,6 +141,82 @@ func TestFeishuInstallSwitchesToLarkDomainAndStoresSecret(t *testing.T) {
 	}
 	if len(reloaded.Bot.Connections) != 1 || !botConnectionView(reloaded.Bot.Connections[0]).Credential.SecretSet {
 		t.Fatalf("reloaded connections = %+v, want secret to survive restart", reloaded.Bot.Connections)
+	}
+}
+
+func TestFeishuInstallSwitchesToLarkDomainWhenTenantBrandIsLark(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	t.Cleanup(func() { _ = os.Unsetenv("LARK_BOT_APP_SECRET") })
+	pollCount := 0
+	var beginHost string
+	var pollHosts []string
+	withRewrittenHTTP(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/oauth/v1/app/registration" {
+			http.NotFound(w, r)
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		switch r.Form.Get("action") {
+		case "begin":
+			beginHost = r.Header.Get("X-Test-Original-Host")
+			writeJSON(t, w, map[string]any{
+				"device_code":               "dev-feishu",
+				"verification_uri_complete": "https://accounts.example/verify?user_code=CODE",
+				"user_code":                 "CODE",
+				"interval":                  3,
+				"expire_in":                 300,
+			})
+		case "poll":
+			pollHosts = append(pollHosts, r.Header.Get("X-Test-Original-Host"))
+			if r.Form.Get("device_code") != "dev-feishu" {
+				http.Error(w, "wrong device code", http.StatusBadRequest)
+				return
+			}
+			pollCount++
+			if pollCount == 1 {
+				writeJSON(t, w, map[string]any{"user_info": map[string]any{"tenant_brand": "lark"}})
+				return
+			}
+			writeJSON(t, w, map[string]any{
+				"client_id":     "cli-lark",
+				"client_secret": "secret-lark",
+				"user_info":     map[string]any{"tenant_brand": "lark", "open_id": "ou-lark-installer"},
+			})
+		default:
+			http.Error(w, "unknown action", http.StatusBadRequest)
+		}
+	}))
+
+	app := NewApp()
+	start, err := app.StartBotConnectionInstall("feishu", "")
+	if err != nil {
+		t.Fatalf("StartBotConnectionInstall: %v", err)
+	}
+	if !start.OK || start.Domain != "feishu" || start.DeviceCode != "dev-feishu" {
+		t.Fatalf("start result = %+v, want Feishu QR result", start)
+	}
+	pending, err := app.PollBotConnectionInstall(start.InstallID)
+	if err != nil {
+		t.Fatalf("PollBotConnectionInstall pending: %v", err)
+	}
+	if pending.Done || pending.Status != "pending" {
+		t.Fatalf("pending poll result = %+v, want pending domain switch", pending)
+	}
+	poll, err := app.PollBotConnectionInstall(start.InstallID)
+	if err != nil {
+		t.Fatalf("PollBotConnectionInstall: %v", err)
+	}
+	if !poll.Done || poll.Connection.Domain != "lark" || poll.Connection.Credential.AppSecretEnv != "LARK_BOT_APP_SECRET" {
+		t.Fatalf("poll result = %+v, want stored Lark connection after domain switch", poll)
+	}
+	if beginHost != "accounts.feishu.cn" {
+		t.Fatalf("begin host = %q, want Feishu accounts host", beginHost)
+	}
+	if got := strings.Join(pollHosts, ","); got != "accounts.feishu.cn,accounts.larksuite.com" {
+		t.Fatalf("poll hosts = %q, want Feishu poll then Lark poll", got)
 	}
 }
 
