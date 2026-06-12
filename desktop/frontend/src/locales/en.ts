@@ -1367,8 +1367,6 @@ export const en = {
   "shortcuts.yoloToggleDesc": "Switch between ask/auto-approve and YOLO mode.",
   "shortcuts.cycleMode": "Cycle composer mode",
   "shortcuts.cycleModeDesc": "Switch between normal, plan, auto-approve, and goal modes.",
-  "shortcuts.nextUnread": "Jump to next unread topic",
-  "shortcuts.nextUnreadDesc": "Skip to the next topic with unread activity.",
   "shortcuts.textSizeIncrease": "Increase text size",
   "shortcuts.textSizeIncreaseDesc": "Increase the UI text size.",
   "shortcuts.textSizeDecrease": "Decrease text size",

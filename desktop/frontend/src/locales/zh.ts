@@ -1369,8 +1369,6 @@ export const zh: Record<DictKey, string> = {
   "shortcuts.yoloToggleDesc": "在询问/自动批准和 YOLO 模式之间切换。",
   "shortcuts.cycleMode": "切换 Composer 模式",
   "shortcuts.cycleModeDesc": "在普通、计划、自动批准和目标模式之间切换。",
-  "shortcuts.nextUnread": "跳转至下一个未读话题",
-  "shortcuts.nextUnreadDesc": "跳转到下一个有未读消息的话题。",
   "shortcuts.textSizeIncrease": "增大文字大小",
   "shortcuts.textSizeIncreaseDesc": "增大界面文字的大小。",
   "shortcuts.textSizeDecrease": "减小文字大小",

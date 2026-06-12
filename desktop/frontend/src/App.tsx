@@ -2012,19 +2012,6 @@ export default function App() {
     return () => document.removeEventListener("keydown", onKey);
   }, [openPalette]);
 
-  // Jump to next unread topic with Cmd+G.
-  useEffect(() => {
-    const platform: "darwin" | "win" = navigator.platform.startsWith("Mac") ? "darwin" : "win";
-    const onKey = (e: globalThis.KeyboardEvent) => {
-      if (!matchesShortcut(e, "shortcuts.nextUnread", platform)) return;
-      e.preventDefault();
-      const idx = tabMetas.findIndex((m) => m.unread);
-      if (idx >= 0 && tabOrderIds[idx]) switchTab(tabOrderIds[idx], "user");
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [tabMetas, tabOrder, switchTab]);
-
   const paletteItems = useMemo<PaletteItem[]>(() => {
     const cmds: PaletteItem[] = [
       { id: "cmd-new", group: t("palette.group.commands"), title: t("palette.cmd.newSession"), icon: <SquarePen size={15} />, compact: true, keywords: ["new", "新建"], run: () => void handleNewTab() },

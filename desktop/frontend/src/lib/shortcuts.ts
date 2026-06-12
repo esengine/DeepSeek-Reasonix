@@ -8,7 +8,6 @@ export type ShortcutAction =
   | "shortcuts.newSession"
   | "shortcuts.settings"
   | "shortcuts.shellExpand"
-  | "shortcuts.nextUnread"
   | "shortcuts.yoloToggle"
   | "shortcuts.textSizeIncrease"
   | "shortcuts.textSizeDecrease"
@@ -84,7 +83,6 @@ export const SHORTCUT_DEFAULTS: Record<ShortcutAction, { mac: string; win: strin
   "shortcuts.settings": { mac: "⌘,", win: "Ctrl+," },
   "shortcuts.shellExpand": { mac: "⌘B", win: "Ctrl+B" },
   "shortcuts.yoloToggle": { mac: "⌘Y", win: "Ctrl+Y" },
-  "shortcuts.nextUnread": { mac: "⌘G", win: "Ctrl+G" },
   "shortcuts.textSizeIncrease": { mac: "⌘=", win: "Ctrl+=" },
   "shortcuts.textSizeDecrease": { mac: "⌘-", win: "Ctrl+-" },
   "shortcuts.textSizeReset": { mac: "⌘0", win: "Ctrl+0" },
