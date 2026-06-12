@@ -1079,10 +1079,10 @@ func TestBuiltInMCPsYieldToExtraPluginNames(t *testing.T) {
 	}
 }
 
-func TestBuiltInMCPsDefaultToDisabled(t *testing.T) {
-	got := builtinmcp.AppendEnabled(nil, nil, nil)
-	if len(got) != 0 {
-		t.Fatalf("default built-in MCP entries = %+v, want none until enabled", got)
+func TestBuiltInMCPDefaultsEnableOnlyTime(t *testing.T) {
+	got := builtinmcp.AppendEnabled(nil, nil, config.Default().BuiltInMCP.EnabledNames())
+	if len(got) != 1 || got[0].Name != "time" {
+		t.Fatalf("default built-in MCP entries = %+v, want only time", got)
 	}
 }
 

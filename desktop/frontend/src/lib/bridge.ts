@@ -492,10 +492,10 @@ function makeMockApp(): AppBindings {
     {
       name: "time",
       transport: "stdio",
-      status: "disabled",
+      status: "deferred",
       builtIn: true,
       configured: true,
-      autoStart: false,
+      autoStart: true,
       tier: "lazy",
       command: "reasonix",
       args: ["builtin-mcp", "time"],

@@ -1468,7 +1468,7 @@ func TestCapabilitiesShowsDefaultCodegraphDisabled(t *testing.T) {
 	t.Fatalf("codegraph missing from Capabilities: %+v", view.Servers)
 }
 
-func TestCapabilitiesShowsBuiltInMCPDefaultsDisabled(t *testing.T) {
+func TestCapabilitiesShowsBuiltInMCPDefaults(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	dir := robustTempDir(t)
 	t.Chdir(dir)
@@ -1487,11 +1487,13 @@ func TestCapabilitiesShowsBuiltInMCPDefaultsDisabled(t *testing.T) {
 			continue
 		}
 		found[s.Name] = true
-		if s.Status != "disabled" {
-			t.Fatalf("%s status = %q, want disabled; server = %+v", s.Name, s.Status, s)
+		wantStatus := map[string]string{"time": "deferred", "context7": "disabled"}[s.Name]
+		wantAutoStart := s.Name == "time"
+		if s.Status != wantStatus {
+			t.Fatalf("%s status = %q, want %s; server = %+v", s.Name, s.Status, wantStatus, s)
 		}
-		if !s.BuiltIn || !s.Configured || s.AutoStart {
-			t.Fatalf("%s builtIn/configured/autoStart = %v/%v/%v, want true/true/false; server = %+v", s.Name, s.BuiltIn, s.Configured, s.AutoStart, s)
+		if !s.BuiltIn || !s.Configured || s.AutoStart != wantAutoStart {
+			t.Fatalf("%s builtIn/configured/autoStart = %v/%v/%v, want true/true/%v; server = %+v", s.Name, s.BuiltIn, s.Configured, s.AutoStart, wantAutoStart, s)
 		}
 		if s.Tier != "lazy" || s.Transport != "stdio" || strings.TrimSpace(s.Command) == "" {
 			t.Fatalf("%s transport/tier/command = %q/%q/%q, want stdio/lazy/non-empty; server = %+v", s.Name, s.Transport, s.Tier, s.Command, s)
@@ -1510,7 +1512,7 @@ func TestCapabilitiesShowsBuiltInMCPDefaultsDisabled(t *testing.T) {
 	}
 }
 
-func TestCapabilitiesShowsEnabledBuiltInMCPDeferred(t *testing.T) {
+func TestCapabilitiesShowsManuallyEnabledContext7Deferred(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	dir := robustTempDir(t)
 	t.Chdir(dir)
@@ -1519,7 +1521,7 @@ func TestCapabilitiesShowsEnabledBuiltInMCPDeferred(t *testing.T) {
 enabled = false
 
 [builtin_mcp]
-time_enabled = true
+context7_enabled = true
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -1530,14 +1532,14 @@ time_enabled = true
 
 	view := app.Capabilities()
 	for _, s := range view.Servers {
-		if s.Name == "time" {
+		if s.Name == "context7" {
 			if s.Status != "deferred" || !s.AutoStart || !s.BuiltIn || !s.Configured {
-				t.Fatalf("enabled time view = %+v, want deferred built-in configured autoStart", s)
+				t.Fatalf("enabled context7 view = %+v, want deferred built-in configured autoStart", s)
 			}
 			return
 		}
 	}
-	t.Fatalf("time missing from Capabilities: %+v", view.Servers)
+	t.Fatalf("context7 missing from Capabilities: %+v", view.Servers)
 }
 
 func validContext7Runner(command string, args []string) bool {

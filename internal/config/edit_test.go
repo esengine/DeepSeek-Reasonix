@@ -587,10 +587,10 @@ func TestCodegraphDefaultEnabledForUpgrades(t *testing.T) {
 	}
 }
 
-func TestBuiltInMCPDefaultsDisabled(t *testing.T) {
+func TestBuiltInMCPDefaultsEnableOnlyTime(t *testing.T) {
 	c := Default()
-	if c.BuiltInMCP.TimeEnabled || c.BuiltInMCP.Context7Enabled {
-		t.Fatalf("built-in MCP defaults = %+v, want both disabled", c.BuiltInMCP)
+	if !c.BuiltInMCP.TimeEnabled || c.BuiltInMCP.Context7Enabled {
+		t.Fatalf("built-in MCP defaults = %+v, want time enabled and context7 disabled", c.BuiltInMCP)
 	}
 }
 

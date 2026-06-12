@@ -1001,6 +1001,9 @@ func Default() *Config {
 		// write enabled = false instead, so only brand-new users start without it.
 		// AutoInstall fetches the runtime into the cache when enabled and missing.
 		Codegraph: CodegraphConfig{Enabled: true, AutoInstall: true},
+		// Time is dependency-free and bundled, so expose it by default. Context7
+		// can invoke a package runner and remains opt-in.
+		BuiltInMCP: BuiltInMCPConfig{TimeEnabled: true},
 		// LSP tools on by default, but dormant until a language server is on PATH;
 		// a missing server yields an install hint rather than an error.
 		LSP:     LSPConfig{Enabled: true},
