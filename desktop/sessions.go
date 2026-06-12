@@ -36,10 +36,6 @@ func sessionDisplayPath(dir string) string { return filepath.Join(dir, sessionDi
 func sessionTrashPath(dir string) string   { return filepath.Join(dir, sessionTrashDir) }
 
 func desktopSessionDir(root string) string {
-	// Global tab → 全局目录，与 TUI 共用
-	if root == globalWorkspaceRoot() {
-		return config.SessionDir()
-	}
 	root = strings.TrimSpace(root)
 	if root == "" {
 		cwd, err := os.Getwd()
