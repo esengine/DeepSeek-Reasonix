@@ -1014,6 +1014,39 @@ func TestSetTokenModeRebuildsController(t *testing.T) {
 	}
 }
 
+func TestSetTokenModeKeepsControllerWhenRebuildFails(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	app := NewApp()
+	app.ctx = context.Background()
+	app.readyHook = func() {}
+	old := control.New(control.Options{Label: "old-controller"})
+	app.setTestCtrl(old, "missing-token-mode-model")
+	defer func() {
+		if c := app.activeCtrl(); c != nil {
+			c.Close()
+		}
+	}()
+
+	err := app.SetTokenMode("economy")
+	if err == nil {
+		t.Fatal("SetTokenMode(economy) with an unknown model should fail")
+	}
+	if c := app.activeCtrl(); c != old {
+		t.Fatalf("SetTokenMode failure replaced controller: got %p want %p", c, old)
+	}
+	tab := app.activeTab()
+	if tab == nil {
+		t.Fatal("active tab missing")
+	}
+	if got := currentTabTokenMode(tab); got != "full" {
+		t.Fatalf("token mode after failed rebuild = %q, want full", got)
+	}
+	if got := app.Meta().TokenMode; got != "full" {
+		t.Fatalf("Meta token mode after failed rebuild = %q, want full", got)
+	}
+}
+
 func TestSetEffortRejectsRunningTurn(t *testing.T) {
 	isolateDesktopUserDirs(t)
 

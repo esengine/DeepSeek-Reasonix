@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"reasonix/internal/agent"
 	"reasonix/internal/tool"
 )
 
@@ -83,7 +84,7 @@ func (*toolSourceConnector) Description() string {
 	return "Token economy mode only: enable an optional tool source when the task needs it. Sources: skills, mcp, codegraph, lsp, web_fetch, install_source, task. For mcp, pass the configured server name; omit name to list servers. Newly enabled tools are available on the next model request."
 }
 
-func (*toolSourceConnector) ReadOnly() bool { return false }
+func (*toolSourceConnector) ReadOnly() bool { return true }
 
 func (*toolSourceConnector) Schema() json.RawMessage {
 	return json.RawMessage(`{
@@ -116,8 +117,14 @@ func (t *toolSourceConnector) Execute(ctx context.Context, args json.RawMessage)
 	case "skills":
 		return runSourceInstaller(ctx, "skills", t.skills)
 	case "task":
+		if agent.PlanModeFromContext(ctx) {
+			return "task is unavailable in plan mode because it exposes a writer-capable sub-agent tool.", nil
+		}
 		return runSourceInstaller(ctx, "task", t.task)
 	case "install_source":
+		if agent.PlanModeFromContext(ctx) {
+			return "install_source is unavailable in plan mode because it can install or remove tools.", nil
+		}
 		return runSourceInstaller(ctx, "install_source", t.install)
 	case "web_fetch":
 		return runSourceInstaller(ctx, "web_fetch", t.webFetch)

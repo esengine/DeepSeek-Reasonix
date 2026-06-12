@@ -738,6 +738,9 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 				return addInstallSourceTool(), nil
 			},
 			webFetch: func(context.Context) (string, error) {
+				if !builtinToolEnabled(cfg.Tools.Enabled, "web_fetch") {
+					return "web_fetch is disabled by [tools].enabled.", nil
+				}
 				names := addTools(reg, builtin.Workspace{
 					Dir:         root,
 					WriteRoots:  cfg.WriteRootsForRoot(root),
@@ -1233,6 +1236,19 @@ func addBuiltins(reg *tool.Registry, enabled, writeRoots []string, bashSpec sand
 			reg.Add(t)
 		}
 	}
+}
+
+func builtinToolEnabled(enabled []string, name string) bool {
+	if len(enabled) == 0 {
+		return true
+	}
+	name = strings.TrimSpace(name)
+	for _, candidate := range enabled {
+		if strings.TrimSpace(candidate) == name {
+			return true
+		}
+	}
+	return false
 }
 
 // partitionByTier splits configured plugin entries into the three startup

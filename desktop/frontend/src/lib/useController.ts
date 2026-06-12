@@ -118,7 +118,7 @@ function usageTotalTokens(usage?: WireUsage): number {
   return Math.max(0, promptTokens + usage.completionTokens);
 }
 
-function sameMeta(a?: Meta, b?: Meta): boolean {
+export function sameMeta(a?: Meta, b?: Meta): boolean {
   if (a === b) return true;
   if (!a || !b) return false;
   return (
@@ -129,6 +129,7 @@ function sameMeta(a?: Meta, b?: Meta): boolean {
     a.cwd === b.cwd &&
     a.autoApproveTools === b.autoApproveTools &&
     a.bypass === b.bypass &&
+    a.collaborationMode === b.collaborationMode &&
     a.toolApprovalMode === b.toolApprovalMode &&
     a.tokenMode === b.tokenMode &&
     a.goal === b.goal &&

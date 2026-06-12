@@ -3532,11 +3532,11 @@ func (a *App) SetTokenModeForTab(tabID, mode string) error {
 
 	var carried []provider.Message
 	prevPath := ""
-	if tab.Ctrl != nil {
-		prevPath = tab.Ctrl.SessionPath()
-		_ = tab.Ctrl.Snapshot()
-		carried = tab.Ctrl.History()
-		tab.Ctrl.Close()
+	oldCtrl := tab.Ctrl
+	if oldCtrl != nil {
+		prevPath = oldCtrl.SessionPath()
+		_ = oldCtrl.Snapshot()
+		carried = oldCtrl.History()
 	}
 	newCtrl, err := boot.Build(a.bootContext(), boot.Options{
 		Model:          tab.model,
@@ -3551,6 +3551,9 @@ func (a *App) SetTokenModeForTab(tabID, mode string) error {
 		return err
 	}
 	a.bindControllerDisplayRecorder(newCtrl)
+	if oldCtrl != nil {
+		oldCtrl.Close()
+	}
 	a.mu.Lock()
 	tab.Ctrl = newCtrl
 	tab.tokenMode = mode
