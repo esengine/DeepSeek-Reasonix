@@ -130,11 +130,23 @@ func (*AskTool) Execute(ctx context.Context, args json.RawMessage) (string, erro
 }
 
 // formatAnswers renders the user's selections as a compact, model-facing summary,
-// keyed by question header so the model can tell which answer is which.
+// keyed by question header so the model can tell which answer is which. When the
+// user picked nothing at all (the "just chat" / dismiss path), it returns an
+// explicit stop signal instead of a per-question "(no answer)" — otherwise the
+// model reads the empty result as license to proceed and acts unasked.
 func formatAnswers(qs []event.AskQuestion, answers []event.AskAnswer) string {
 	pick := make(map[string][]string, len(answers))
 	for _, a := range answers {
 		pick[a.QuestionID] = a.Selected
+	}
+	answered := 0
+	for _, q := range qs {
+		if len(pick[q.ID]) > 0 {
+			answered++
+		}
+	}
+	if answered == 0 {
+		return "The user dismissed the question without choosing — read this as \"don't decide for me, let's just talk.\" Do not pick an option, run a tool, or take any further action toward this; stop and wait for the user's next message."
 	}
 	var b strings.Builder
 	b.WriteString("The user answered:\n")
@@ -145,7 +157,7 @@ func formatAnswers(qs []event.AskQuestion, answers []event.AskAnswer) string {
 			label = q.Prompt
 		}
 		if len(sel) == 0 {
-			fmt.Fprintf(&b, "- %s: (no answer)\n", label)
+			fmt.Fprintf(&b, "- %s: (left unanswered — don't assume a choice)\n", label)
 			continue
 		}
 		fmt.Fprintf(&b, "- %s: %s\n", label, strings.Join(sel, ", "))
