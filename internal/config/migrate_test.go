@@ -73,7 +73,7 @@ func TestMigrateImportsKeyPluginsAndLang(t *testing.T) {
 			t.Errorf("dest config missing %q:\n%s", want, toml)
 		}
 	}
-	if !strings.Contains(toml, `default_model = "deepseek-v4-pro"`) {
+	if !strings.Contains(toml, `default_model = "deepseek-pro/deepseek-v4-pro"`) {
 		t.Errorf("dest config missing imported model:\n%s", toml)
 	}
 
@@ -81,8 +81,8 @@ func TestMigrateImportsKeyPluginsAndLang(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if loaded.DefaultModel != "deepseek-v4-pro" {
-		t.Errorf("DefaultModel = %q, want deepseek-v4-pro", loaded.DefaultModel)
+	if loaded.DefaultModel != "deepseek-pro/deepseek-v4-pro" {
+		t.Errorf("DefaultModel = %q, want deepseek-pro/deepseek-v4-pro", loaded.DefaultModel)
 	}
 
 	if _, err := os.Stat(src); err != nil {

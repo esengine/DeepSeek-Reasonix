@@ -99,7 +99,11 @@ func MigrateLegacyIfNeeded() (*MigrationResult, error) {
 		_ = cfg.SetDesktopLanguage(legacy.Lang)
 	}
 	if legacy.Model != "" {
-		cfg.DefaultModel = legacy.Model
+		if entry, ok := cfg.ResolveModel(legacy.Model); ok {
+			cfg.DefaultModel = entry.Name + "/" + entry.Model
+		} else {
+			cfg.DefaultModel = legacy.Model
+		}
 	}
 	migrateLegacyBaseURL(cfg, legacy.BaseURL)
 	cfg.Plugins = legacyPlugins(legacy)
