@@ -26,6 +26,7 @@ import { asArray } from "./lib/array";
 import { clearLegacyLangPref, normalizeLangPref, readLegacyLangPref, useI18n, useT, type Translator } from "./lib/i18n";
 import { useController, type Item, type LiveStream } from "./lib/useController";
 import { app, onEvent, onProjectTreeChanged } from "./lib/bridge";
+import { generativeMusic, isGenerativeMusicEnabled } from "./lib/generative-music";
 import { Transcript } from "./components/Transcript";
 import { Composer } from "./components/Composer";
 import { TodoPanel } from "./components/TodoPanel";
@@ -1416,6 +1417,28 @@ export default function App() {
       if (frame) window.cancelAnimationFrame(frame);
       observer.disconnect();
     };
+  }, []);
+
+  // Play generative ambient music while the agent is generating.
+  // Start/stop the AudioContext engine based on running state.
+  useEffect(() => {
+    if (state.running && isGenerativeMusicEnabled()) {
+      generativeMusic.start();
+    } else {
+      generativeMusic.stop();
+    }
+    return () => generativeMusic.stop();
+  }, [state.running]);
+
+  // Per-token: play a note every time a text/reasoning chunk arrives.
+  // playTokenNote() is a no-op when the engine isn't running.
+  useEffect(() => {
+    const unsub = onEvent((e) => {
+      if (e.kind === "text" || e.kind === "reasoning" || e.kind === "tool_dispatch") {
+        generativeMusic.playTokenNote();
+      }
+    });
+    return unsub;
   }, []);
 
   const toggleSidebar = useCallback(() => {
