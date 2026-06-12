@@ -3869,9 +3869,8 @@ a[href] {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  max-width: 70%;
   min-width: 0;
-  overflow: hidden;
+  flex: 0 1 auto;
 }
 .tool--running {
   border-color: var(--accent-soft);
@@ -3942,6 +3941,7 @@ a[href] {
   color: inherit;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+  flex-shrink: 0;
 }
 .tool__subject {
   flex: 1 1 auto;
