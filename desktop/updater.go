@@ -164,8 +164,44 @@ func evaluate(current string, m *update.Manifest) UpdateInfo {
 	return info
 }
 
-// fetchBytes GETs a URL fully into memory.
+// downloadAttempts caps how many times a transient transport failure (connection
+// reset, read timeout, gateway 5xx) is retried before the update gives up. CN IPv6
+// routes to Cloudflare reset mid-transfer often enough that a retry or two usually
+// completes the download instead of surfacing a "forcibly closed" error.
+const downloadAttempts = 3
+
+// retryBackoff is the pause before the Nth retry; a package var so tests shrink it.
+var retryBackoff = func(attempt int) time.Duration { return time.Duration(attempt) * 500 * time.Millisecond }
+
+// retryTransient runs fetch up to downloadAttempts times, pausing between tries, and
+// returns the first success. It stops early when ctx is cancelled (window closed /
+// user cancelled). Only the transport is retried; the signature and sha256 checks
+// run downstream in downloadVerify and are not retried.
+func retryTransient(ctx context.Context, fetch func() ([]byte, error)) ([]byte, error) {
+	var data []byte
+	var err error
+	for attempt := 1; attempt <= downloadAttempts; attempt++ {
+		if data, err = fetch(); err == nil {
+			return data, nil
+		}
+		if ctx.Err() != nil || attempt == downloadAttempts {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(retryBackoff(attempt)):
+		}
+	}
+	return data, err
+}
+
+// fetchBytes GETs a URL fully into memory, retrying transient transport failures.
 func fetchBytes(ctx context.Context, c *http.Client, url string) ([]byte, error) {
+	return retryTransient(ctx, func() ([]byte, error) { return fetchBytesOnce(ctx, c, url) })
+}
+
+func fetchBytesOnce(ctx context.Context, c *http.Client, url string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -181,9 +217,14 @@ func fetchBytes(ctx context.Context, c *http.Client, url string) ([]byte, error)
 	return io.ReadAll(resp.Body)
 }
 
-// download fetches url into memory, invoking onProgress as bytes arrive. total is
-// the expected size for the progress denominator (overridden by Content-Length).
+// download fetches url into memory, invoking onProgress as bytes arrive, retrying
+// transient transport failures (a retry restarts the byte count from zero). total
+// is the expected size for the progress denominator (overridden by Content-Length).
 func download(ctx context.Context, c *http.Client, url string, total int64, onProgress func(received, total int64)) ([]byte, error) {
+	return retryTransient(ctx, func() ([]byte, error) { return downloadOnce(ctx, c, url, total, onProgress) })
+}
+
+func downloadOnce(ctx context.Context, c *http.Client, url string, total int64, onProgress func(received, total int64)) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err

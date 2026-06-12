@@ -4,9 +4,15 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"context"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"reasonix/desktop/internal/update"
 )
@@ -142,5 +148,84 @@ func TestExtractBinary(t *testing.T) {
 	}
 	if _, err := extractBinary(buf.Bytes(), "missing"); err == nil {
 		t.Error("missing entry should error")
+	}
+}
+
+func fastRetry(t *testing.T) {
+	t.Helper()
+	restore := retryBackoff
+	retryBackoff = func(int) time.Duration { return time.Millisecond }
+	t.Cleanup(func() { retryBackoff = restore })
+}
+
+func TestDownloadRecoversFromMidStreamReset(t *testing.T) {
+	fastRetry(t)
+	const body = "complete-installer-bytes"
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if atomic.AddInt32(&calls, 1) < int32(downloadAttempts) {
+			// Mid-stream reset: promise 100 bytes, send a few, drop the socket —
+			// the client's body read fails with unexpected EOF, exactly the CN-IPv6
+			// "forcibly closed" case the retry exists for.
+			conn, bw, err := w.(http.Hijacker).Hijack()
+			if err != nil {
+				t.Errorf("hijack: %v", err)
+				return
+			}
+			bw.WriteString("HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\npartial")
+			bw.Flush()
+			conn.Close()
+			return
+		}
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+
+	data, err := download(context.Background(), srv.Client(), srv.URL, 0, nil)
+	if err != nil {
+		t.Fatalf("download should recover after %d resets: %v", downloadAttempts-1, err)
+	}
+	if string(data) != body {
+		t.Fatalf("got %q, want %q", data, body)
+	}
+	if n := atomic.LoadInt32(&calls); n != int32(downloadAttempts) {
+		t.Fatalf("made %d attempts, want %d", n, downloadAttempts)
+	}
+}
+
+func TestDownloadGivesUpAfterCap(t *testing.T) {
+	fastRetry(t)
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		conn, _, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			t.Errorf("hijack: %v", err)
+			return
+		}
+		conn.Close()
+	}))
+	defer srv.Close()
+
+	if _, err := download(context.Background(), srv.Client(), srv.URL, 0, nil); err == nil {
+		t.Fatal("download should fail after exhausting retries")
+	}
+	if n := atomic.LoadInt32(&calls); n != int32(downloadAttempts) {
+		t.Fatalf("made %d attempts, want %d", n, downloadAttempts)
+	}
+}
+
+func TestRetryTransientStopsWhenCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	calls := 0
+	if _, err := retryTransient(ctx, func() ([]byte, error) {
+		calls++
+		return nil, errors.New("boom")
+	}); err == nil {
+		t.Fatal("cancelled retry should return the error")
+	}
+	if calls != 1 {
+		t.Fatalf("cancelled retry made %d calls, want 1", calls)
 	}
 }
