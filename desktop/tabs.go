@@ -949,24 +949,26 @@ func (a *App) buildTabController(tab *WorkspaceTab) {
 
 	sessionDir := desktopSessionDir(root)
 	topicID := strings.TrimSpace(tab.TopicID)
-	if tab.Scope == "global" {
-		migratedTopics := migrateLegacySessionsIntoGlobalTopics(config.SessionDir())
-		if len(migratedTopics) > 0 {
-			a.emitProjectTreeChanged()
+
+	// Assign Global topics to legacy sessions in the global session dir so
+	// imported history appears in the project tree regardless of which tab
+	// triggered the build (the migration now sends everything to global).
+	migratedGlobalTopics := migrateLegacySessionsIntoGlobalTopics(config.SessionDir())
+	if len(migratedGlobalTopics) > 0 {
+		a.emitProjectTreeChanged()
+	}
+	if tab.Scope == "global" && topicID == "" && len(migratedGlobalTopics) > 0 {
+		topicID = migratedGlobalTopics[0]
+		topicTitle := topicTitleForTab("global", "", topicID)
+		a.mu.Lock()
+		if strings.TrimSpace(tab.TopicID) == "" {
+			tab.TopicID = topicID
+			tab.TopicTitle = topicTitle
+			a.saveTabsLocked()
+		} else {
+			topicID = strings.TrimSpace(tab.TopicID)
 		}
-		if topicID == "" && len(migratedTopics) > 0 {
-			topicID = migratedTopics[0]
-			topicTitle := topicTitleForTab("global", "", topicID)
-			a.mu.Lock()
-			if strings.TrimSpace(tab.TopicID) == "" {
-				tab.TopicID = topicID
-				tab.TopicTitle = topicTitle
-				a.saveTabsLocked()
-			} else {
-				topicID = strings.TrimSpace(tab.TopicID)
-			}
-			a.mu.Unlock()
-		}
+		a.mu.Unlock()
 	}
 	if topicID != "" {
 		if _, dir := a.findKnownTopicSession(topicID); dir != "" {
@@ -2138,6 +2140,26 @@ func migrateLegacySessionsIntoGlobalTopics(dir string) []string {
 	if strings.TrimSpace(dir) == "" {
 		return nil
 	}
+	// Determine scope from the directory. The global session dir gets Global
+	// topics; a project session dir gets project-scoped topics under the
+	// matching workspace.
+	scope := "global"
+	workspaceRoot := ""
+	topicTitleRoot := "" // workspace root for topic-title persistence
+	if dir != config.SessionDir() {
+		f := loadProjectsFile()
+		for _, p := range f.Projects {
+			if config.ProjectSessionDir(p.Root) == dir {
+				scope = "project"
+				workspaceRoot = p.Root
+				topicTitleRoot = p.Root
+				break
+			}
+		}
+		if scope != "project" {
+			return nil // not a recognized project dir; skip
+		}
+	}
 	legacyMigrationMu.Lock()
 	defer legacyMigrationMu.Unlock()
 	infos, err := agent.ListSessions(dir)
@@ -2145,8 +2167,8 @@ func migrateLegacySessionsIntoGlobalTopics(dir string) []string {
 		return nil
 	}
 	titles := loadSessionTitles(dir)
-	topicTitles := loadTopicTitles("")
-	topicSources := loadTopicTitleSources("")
+	topicTitles := loadTopicTitles(topicTitleRoot)
+	topicSources := loadTopicTitleSources(topicTitleRoot)
 	f := loadProjectsFile()
 
 	var migratedTopicIDs []string
@@ -2180,14 +2202,13 @@ func migrateLegacySessionsIntoGlobalTopics(dir string) []string {
 		if err != nil {
 			continue
 		}
-		// Only adopt genuinely-global, unscoped legacy sessions. A session that
-		// already carries a project scope or workspace root is not legacy — never
-		// strip its binding into Global.
-		if meta.Scope == "project" || strings.TrimSpace(meta.WorkspaceRoot) != "" {
+		// Skip sessions that already have a scope or workspace — they were
+		// already assigned by a previous run or by the user.
+		if meta.Scope != "" || strings.TrimSpace(meta.WorkspaceRoot) != "" {
 			continue
 		}
-		meta.Scope = "global"
-		meta.WorkspaceRoot = ""
+		meta.Scope = scope
+		meta.WorkspaceRoot = workspaceRoot
 		meta.TopicID = topicID
 		meta.TopicTitle = title
 		if err := agent.SaveBranchMetaPreserveUpdated(info.Path, meta); err != nil {
@@ -2202,10 +2223,20 @@ func migrateLegacySessionsIntoGlobalTopics(dir string) []string {
 	if len(migratedTopicIDs) == 0 {
 		return nil
 	}
-	f.GlobalTopics = uniqueStrings(append(migratedTopicIDs, f.GlobalTopics...))
+	if scope == "global" {
+		f.GlobalTopics = uniqueStrings(append(migratedTopicIDs, f.GlobalTopics...))
+	} else {
+		// Find the project entry and add topics.
+		for i, p := range f.Projects {
+			if p.Root == workspaceRoot {
+				f.Projects[i].Topics = uniqueStrings(append(migratedTopicIDs, f.Projects[i].Topics...))
+				break
+			}
+		}
+	}
 	_ = saveProjectsFile(f)
-	_ = saveTopicTitles("", topicTitles)
-	_ = saveTopicTitleSources("", topicSources)
+	_ = saveTopicTitles(topicTitleRoot, topicTitles)
+	_ = saveTopicTitleSources(topicTitleRoot, topicSources)
 	return migratedTopicIDs
 }
 

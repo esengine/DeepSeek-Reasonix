@@ -171,7 +171,22 @@ func setup(ctx context.Context, modelName string, maxStepsOverride int, requireK
 		MaxSteps:   maxStepsOverride,
 		RequireKey: requireKey,
 		Sink:       sink,
+		SessionDir: resolveCLISessionDir(),
 	})
+}
+
+// resolveCLISessionDir returns the session dir for CLI invocations. When the
+// current working directory maps to a project session dir, the project dir is
+// used so /resume shows project history. Falls back to the global session dir.
+func resolveCLISessionDir() string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return config.SessionDir()
+	}
+	if projDir := config.ProjectSessionDir(cwd); projDir != "" && projDir != config.SessionDir() {
+		return projDir
+	}
+	return config.SessionDir()
 }
 
 // setupQuiet is like setup but suppresses plugin subprocess stderr output.
@@ -281,12 +296,8 @@ func runAgent(args []string) int {
 		}
 		ctrl.Resume(loaded, *resume)
 	} else if *cont {
-		sessions, err := agent.ListSessions(config.SessionDir())
-		if err != nil {
-			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
-			return 1
-		}
-		if len(sessions) == 0 {
+		sessions, err := agent.ListSessions(ctrl.SessionDir())
+		if err != nil || len(sessions) == 0 {
 			fmt.Fprintln(os.Stderr, i18n.M.NoSessionToResume)
 			return 1
 		}
@@ -398,12 +409,8 @@ func chatREPL(args []string) int {
 		}
 		resumePath = path
 	case *cont:
-		sessions, err := agent.ListSessions(config.SessionDir())
-		if err != nil {
-			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
-			return 1
-		}
-		if len(sessions) == 0 {
+		sessions, err := agent.ListSessions(resolveCLISessionDir())
+		if err != nil || len(sessions) == 0 {
 			fmt.Fprintln(os.Stderr, i18n.M.NoSessionToResume)
 			return 1
 		}
@@ -764,12 +771,8 @@ func interactiveSetup(configPath, envPath string) int {
 // message so the user can pick one. Returns the chosen path and a process
 // exit code (non-zero when there's nothing to pick or the user cancelled).
 func pickSessionToResume() (string, int) {
-	sessions, err := agent.ListSessions(config.SessionDir())
-	if err != nil {
-		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
-		return "", 1
-	}
-	if len(sessions) == 0 {
+	sessions, err := agent.ListSessions(resolveCLISessionDir())
+	if err != nil || len(sessions) == 0 {
 		fmt.Fprintln(os.Stderr, i18n.M.NoSessionToResume)
 		return "", 1
 	}
