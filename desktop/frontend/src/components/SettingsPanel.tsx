@@ -727,15 +727,14 @@ function GeneralSection({ s, busy, apply }: SectionProps) {
       <SettingsField label={t("settings.generativeMusic")} hint={t("settings.generativeMusicHint")} stacked>
         <div className="settings-notification-sound-row">
           <span>{t("settings.generativeMusicPreset")}</span>
-          <select className="mem-select" value={genMusicPreset}
-            onChange={(e) => {
-              const next = e.target.value as GenerativePreset;
+          <GenMusicSelect
+            value={genMusicPreset}
+            onChange={(next) => {
               setGenMusicPreset(next);
               setGenerativePreset(next);
               if (next === "off") {
                 generativeMusic.stop();
               } else {
-                // 即时同步引擎：运行中则换 preset，未运行但可能在生成中则启动
                 if (generativeMusic.isRunning) {
                   generativeMusic.setPreset(next);
                 } else {
@@ -744,23 +743,83 @@ function GeneralSection({ s, busy, apply }: SectionProps) {
                 generativeMusic.playPreview(next);
               }
             }}
-          >
-            <option value="off">{t("settings.generativeMusic.off")}</option>
-            <option value="classic">{t("settings.generativeMusic.presets.classic")}</option>
-            <option value="ethereal">{t("settings.generativeMusic.presets.ethereal")}</option>
-            <option value="digital">{t("settings.generativeMusic.presets.digital")}</option>
-            <option value="retro">{t("settings.generativeMusic.presets.retro")}</option>
-          </select>
-          <button className="chip"
-            type="button"
-            onClick={() => { if (genMusicPreset !== "off") generativeMusic.playPreview(genMusicPreset); }}
-            title={t("settings.generativeMusicPreview")}
-          >
-            &#x25B6;
-          </button>
+            onPreview={() => { if (genMusicPreset !== "off") generativeMusic.playPreview(genMusicPreset); }}
+            previewDisabled={genMusicPreset === "off"}
+          />
         </div>
       </SettingsField>
     </SettingsSection>
+  );
+}
+
+const GENRE_OPTIONS: { value: GenerativePreset; labelKey: DictKey }[] = [
+  { value: "off", labelKey: "settings.generativeMusic.off" },
+  { value: "ethereal", labelKey: "settings.generativeMusic.presets.ethereal" },
+  { value: "classic", labelKey: "settings.generativeMusic.presets.classic" },
+  { value: "digital", labelKey: "settings.generativeMusic.presets.digital" },
+  { value: "retro", labelKey: "settings.generativeMusic.presets.retro" },
+];
+
+function GenMusicSelect({
+  value,
+  onChange,
+  onPreview,
+  previewDisabled,
+}: {
+  value: GenerativePreset;
+  onChange: (v: GenerativePreset) => void;
+  onPreview: () => void;
+  previewDisabled?: boolean;
+}) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const selected = GENRE_OPTIONS.find((o) => o.value === value) ?? GENRE_OPTIONS[0];
+
+  return (
+    <div className="sound-select">
+      <button
+        ref={triggerRef}
+        className="sound-select__trigger"
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className="sound-select__label">{t(selected.labelKey)}</span>
+        <ChevronDown
+          size={16}
+          className={`sound-select__chev${open ? " sound-select__chev--open" : ""}`}
+        />
+      </button>
+      <button className="chip" type="button" title={t("settings.generativeMusicPreview")} onClick={onPreview} disabled={previewDisabled}>
+        &#x25B6;
+      </button>
+      <AnchoredPopover
+        open={open}
+        anchorRef={triggerRef}
+        onClose={() => setOpen(false)}
+        className="sound-select__menu"
+        placement="bottom"
+      >
+        <div className="sound-select__list" role="listbox">
+          {GENRE_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              className={`sound-select__option${opt.value === value ? " sound-select__option--selected" : ""}`}
+              role="option"
+              aria-selected={opt.value === value}
+              type="button"
+              onClick={() => {
+                onChange(opt.value);
+                setOpen(false);
+              }}
+            >
+              <span>{t(opt.labelKey)}</span>
+              {opt.value === value && <Check size={14} className="sound-select__check" />}
+            </button>
+          ))}
+        </div>
+      </AnchoredPopover>
+    </div>
   );
 }
 
