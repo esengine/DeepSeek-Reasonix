@@ -18,7 +18,7 @@ import {
   type ThemeStyle,
 } from "../lib/theme";
 import { TEXT_SIZES, applyTextSize, getTextSize, type TextSize } from "../lib/textSize";
-import { FONT_FAMILIES, applyFontFamily, getFontFamily, type FontFamily } from "../lib/fontFamily";
+import { FONT_FAMILIES, applyFontFamily, getFontFamily, getCustomFontName, setCustomFontName, type FontFamily } from "../lib/fontFamily";
 import { getDisplayMode, onDisplayModeChange, setDisplayMode as setLocalDisplayMode } from "../lib/displayMode";
 import type { BotConnectionView, BotInstallStartResult, BotSettingsView, HookConfigView, HooksSettingsView, NetworkView, ProviderView, SettingsTab, SettingsView } from "../lib/types";
 import { InlineConfirmButton } from "./InlineConfirmButton";
@@ -42,6 +42,7 @@ export function SettingsPanel({ onClose, onChanged, initialTab, isDevBuild }: { 
   const [themeStyle, setThemeStyleState] = useState<ThemeStyle>(() => getThemeStyle(getTheme()));
   const [textSize, setTextSizeState] = useState<TextSize>(getTextSize());
   const [fontFamily, setFontFamilyState] = useState<FontFamily>(getFontFamily());
+  const [customFontName, setCustomFontNameState] = useState<string>(getCustomFontName());
   const [tab, setTab] = useState<SettingsTab>(initialTab === "providers" ? "models" : initialTab ?? "general");
   // Play the modal exit animation, then let the parent unmount us.
   const { status, requestClose } = useDeferredClose(onClose, 240);
@@ -142,6 +143,7 @@ export function SettingsPanel({ onClose, onChanged, initialTab, isDevBuild }: { 
                       themeStyle={themeStyle}
                       textSize={textSize}
                       fontFamily={fontFamily}
+                      customFontName={customFontName}
                       onTheme={(nextTheme) => {
                         applyTheme(nextTheme, themeStyle, { persist: false });
                         setThemeState(nextTheme);
@@ -159,6 +161,15 @@ export function SettingsPanel({ onClose, onChanged, initialTab, isDevBuild }: { 
                       onFontFamily={(font) => {
                         applyFontFamily(font);
                         setFontFamilyState(font);
+                        if (font === "custom" && customFontName) {
+                          setCustomFontName(customFontName);
+                          applyFontFamily(font);
+                        }
+                      }}
+                      onCustomFontNameChange={(name) => {
+                        setCustomFontNameState(name);
+                        setCustomFontName(name);
+                        applyFontFamily("custom");
                       }}
                     />
                   </SettingsPageShell>
@@ -3581,19 +3592,23 @@ function AppearanceSection({
   themeStyle,
   textSize,
   fontFamily,
+  customFontName,
   onTheme,
   onThemeStyle,
   onTextSize,
   onFontFamily,
+  onCustomFontNameChange,
 }: {
   theme: Theme;
   themeStyle: ThemeStyle;
   textSize: TextSize;
   fontFamily: FontFamily;
+  customFontName: string;
   onTheme: (t: Theme) => void;
   onThemeStyle: (style: ThemeStyle) => void;
   onTextSize: (size: TextSize) => void;
   onFontFamily: (font: FontFamily) => void;
+  onCustomFontNameChange: (name: string) => void;
 }) {
   const t = useT();
   const themeOptions: Theme[] = ["auto", "light", "dark"];
@@ -3672,6 +3687,18 @@ function AppearanceSection({
           ))}
         </div>
       </SettingsField>
+      {fontFamily === "custom" && (
+        <SettingsField label={t("settings.fontFamilyCustomName")}>
+          <textarea
+            className="mem-input"
+            style={{ width: "100%", resize: "vertical" }}
+            rows={2}
+            placeholder={t("settings.fontFamilyCustomPlaceholder")}
+            value={customFontName}
+            onChange={(e) => onCustomFontNameChange(e.target.value)}
+          />
+        </SettingsField>
+      )}
     </SettingsSection>
   );
 }
@@ -3710,6 +3737,8 @@ function fontFamilyName(font: FontFamily, t: ReturnType<typeof useT>): string {
       return t("settings.fontFamilyPingFang");
     case "noto":
       return t("settings.fontFamilyNoto");
+    case "custom":
+      return t("settings.fontFamilyCustom");
   }
 }
 
