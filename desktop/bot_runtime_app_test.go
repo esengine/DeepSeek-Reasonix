@@ -201,6 +201,53 @@ status = "connected"
 	}
 }
 
+func TestDesktopSettingsBotMigrationPersistsOnlyBotBeforeFirstEdit(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	project := robustTempDir(t)
+	if err := os.WriteFile(filepath.Join(project, "reasonix.toml"), []byte(`
+[desktop]
+theme = "dark"
+close_behavior = "quit"
+
+[bot]
+enabled = true
+
+[bot.allowlist]
+enabled = true
+feishu_users = ["ou-legacy"]
+
+[[bot.connections]]
+id = "feishu-lark"
+provider = "feishu"
+domain = "lark"
+label = "Lark"
+enabled = true
+status = "connected"
+`), 0o644); err != nil {
+		t.Fatalf("write project config: %v", err)
+	}
+
+	orig, _ := os.Getwd()
+	defer func() { _ = os.Chdir(orig) }()
+	if err := os.Chdir(project); err != nil {
+		t.Fatalf("chdir project: %v", err)
+	}
+
+	settings := NewApp().Settings()
+	if !settings.Bot.Enabled || len(settings.Bot.Connections) != 1 || settings.Bot.Connections[0].ID != "feishu-lark" {
+		t.Fatalf("settings bot = %+v, want migrated legacy Lark connection", settings.Bot)
+	}
+	if settings.DesktopTheme != "dark" || settings.CloseBehavior != "quit" {
+		t.Fatalf("settings desktop prefs = theme:%q close:%q, want legacy seed visible before first edit", settings.DesktopTheme, settings.CloseBehavior)
+	}
+
+	persisted := config.LoadForEdit(config.UserConfigPath())
+	if persisted.DesktopTheme() == "dark" || persisted.DesktopCloseBehavior() == "quit" {
+		t.Fatalf("persisted desktop prefs = theme:%q close:%q, want bot-only migration", persisted.DesktopTheme(), persisted.DesktopCloseBehavior())
+	}
+}
+
 func TestDesktopBotRuntimeMigrationDoesNotOverwriteUserBotSettings(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
