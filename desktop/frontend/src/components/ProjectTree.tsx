@@ -234,6 +234,7 @@ export function ProjectTree({
   const [collapseSnapshot, setCollapseSnapshot] = useState<CollapseSnapshot | null>(null);
   const [platform, setPlatform] = useState("");
   const filterRef = useRef<HTMLDivElement>(null);
+  const filterTriggerRef = useRef<HTMLButtonElement>(null);
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   const creatingRef = useRef(false);
   const manuallyCollapsedRef = useRef(manuallyCollapsed);
@@ -290,17 +291,42 @@ export function ProjectTree({
     };
   }, []);
 
-  // Close time-filter menu when clicking outside.
+  // Close the time-filter menu on outside click or Escape; move focus into the
+  // menu on open and back to the trigger on Escape so it is keyboard-operable.
   useEffect(() => {
     if (!filterMenuOpen) return;
-    const handler = (e: MouseEvent) => {
-      if (filterRef.current && !filterRef.current.contains(e.target as Node)) {
+    const onMouseDown = (e: MouseEvent) => {
+      if (filterRef.current && !filterRef.current.contains(e.target as Node)) setFilterMenuOpen(false);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
         setFilterMenuOpen(false);
+        filterTriggerRef.current?.focus();
       }
     };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
+    document.addEventListener("mousedown", onMouseDown);
+    document.addEventListener("keydown", onKeyDown);
+    const menu = filterRef.current?.querySelector<HTMLElement>(".project-tree__time-filter-menu");
+    (menu?.querySelector<HTMLButtonElement>(".project-tree__time-filter-opt--on") ??
+      menu?.querySelector<HTMLButtonElement>('[role="menuitem"]'))?.focus();
+    return () => {
+      document.removeEventListener("mousedown", onMouseDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
   }, [filterMenuOpen]);
+
+  const moveMenuFocus = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Home" && e.key !== "End") return;
+    e.preventDefault();
+    const items = Array.from(e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'));
+    if (items.length === 0) return;
+    const current = items.indexOf(document.activeElement as HTMLButtonElement);
+    const next = e.key === "Home" ? 0
+      : e.key === "End" ? items.length - 1
+      : e.key === "ArrowDown" ? (current + 1 + items.length) % items.length
+      : (current - 1 + items.length) % items.length;
+    items[next]?.focus();
+  };
 
   const toggleExpand = (key: string) => {
     const willCollapse = expanded.has(key);
@@ -999,9 +1025,12 @@ export function ProjectTree({
           <Tooltip label={t("projectTree.timeFilter")} className="project-tree__action-slot project-tree__header-action-slot project-tree__header-action-slot--filter">
             <div ref={filterRef} className="project-tree__time-filter">
               <button
+                ref={filterTriggerRef}
                 type="button"
                 className={`project-tree__header-action-btn${timeFilter !== "all" ? " project-tree__header-action-btn--active" : ""}`}
                 aria-label={t("projectTree.timeFilter")}
+                aria-haspopup="menu"
+                aria-expanded={filterMenuOpen}
                 onClick={() => setFilterMenuOpen(!filterMenuOpen)}
               >
                 <Clock size={14} />
@@ -1012,7 +1041,7 @@ export function ProjectTree({
                 )}
               </button>
               {filterMenuOpen && (
-                <div className="project-tree__time-filter-menu" role="menu" aria-label={t("projectTree.timeFilter")}>
+                <div className="project-tree__time-filter-menu" role="menu" aria-label={t("projectTree.timeFilter")} onKeyDown={moveMenuFocus}>
                   <button
                     type="button"
                     className={`project-tree__time-filter-opt${timeFilter === "all" ? " project-tree__time-filter-opt--on" : ""}`}
