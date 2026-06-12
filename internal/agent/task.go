@@ -139,7 +139,7 @@ func (t *TaskTool) Schema() json.RawMessage {
   "model":{"type":"string","description":"Optional model override for the sub-agent (a configured provider/model name)."},
   "effort":{"type":"string","description":"Optional reasoning effort for the sub-agent (e.g. high, max)."},
   "continue_from":{"type":"string","description":"Resume a prior subagent run in place: the subagent retains its context from the previous run; use in iterative loops (e.g. review -> fix -> review again) by passing only the 'sa_...' value from the prior result's 'Subagent reference: ...' line. Requires a compatible subagent identity, including tools, model, effort, and workspace."},
-  "fork_from":{"type":"string","description":"Fork a prior subagent run: copies its transcript, leaves the source unchanged, and continues independently. Use only when you need an independent branch; for iterative continuation on the same thread, use continue_from. Pass the 'sa_...' value from the prior result's 'Subagent reference: ...' line. Mutually exclusive with continue_from."}
+  "fork_from":{"type":"string","description":"Fork a prior subagent run: copies its transcript, leaves the source unchanged, and continues independently. Use only when you need an independent branch; for iterative continuation on the same thread, use continue_from. Pass the 'sa_...' value from the prior result's 'Subagent reference: ...' line. Requires a compatible subagent identity, including tools, model, effort, and workspace. Mutually exclusive with continue_from."}
 },
 "required":["prompt"]
 }`)
