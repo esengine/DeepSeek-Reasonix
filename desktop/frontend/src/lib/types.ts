@@ -578,6 +578,7 @@ export interface SandboxView {
   network: boolean;
   workspaceRoot: string;
   allowWrite: string[];
+  shell: string; // "auto" | "bash" | "powershell" | "pwsh"
 }
 
 export interface NetworkProxyView {

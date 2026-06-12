@@ -542,7 +542,7 @@ function normalizeBotMappingScope(scope: unknown, workspaceRoot: unknown): "glob
 function normalizeSettingsView(view: SettingsView | null | undefined): SettingsView | null {
   if (!view) return null;
   const permissions = view.permissions ?? { mode: "ask", allow: [], ask: [], deny: [] };
-  const sandbox = view.sandbox ?? { bash: "enforce", network: false, workspaceRoot: "", allowWrite: [] };
+  const sandbox = view.sandbox ?? { bash: "enforce", network: false, workspaceRoot: "", allowWrite: [], shell: "auto" };
   const network = view.network ?? {
     proxyMode: "auto",
     proxyUrl: "",
@@ -3519,10 +3519,18 @@ function SandboxSection({ s, busy, apply }: SectionProps) {
   const sb = s.sandbox;
   const [root, setRoot] = useState(sb.workspaceRoot);
   const set = (next: Partial<typeof sb>) =>
-    apply(() => app.SetSandbox(next.bash ?? sb.bash, next.network ?? sb.network, next.workspaceRoot ?? sb.workspaceRoot, next.allowWrite ?? sb.allowWrite));
+    apply(() => app.SetSandbox(next.bash ?? sb.bash, next.network ?? sb.network, next.workspaceRoot ?? sb.workspaceRoot, next.allowWrite ?? sb.allowWrite, next.shell ?? sb.shell));
 
   return (
     <SettingsSection title={t("settings.sandboxTitle")}>
+      <SettingsField label={t("settings.shellInterpreter")}>
+        <select className="mem-select set-grow" value={sb.shell || "auto"} disabled={busy} onChange={(e) => void set({ shell: e.target.value })}>
+          <option value="auto">{t("settings.shellAuto")}</option>
+          <option value="bash">{t("settings.shellBash")}</option>
+          <option value="powershell">{t("settings.shellPowershell")}</option>
+          <option value="pwsh">{t("settings.shellPwsh")}</option>
+        </select>
+      </SettingsField>
       <SettingsField label={t("settings.bashSandbox")}>
         <select className="mem-select set-grow" value={sb.bash} disabled={busy} onChange={(e) => void set({ bash: e.target.value })}>
           <option value="enforce">{t("settings.bashEnforce")}</option>

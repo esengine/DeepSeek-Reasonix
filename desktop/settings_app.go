@@ -55,6 +55,7 @@ type SandboxView struct {
 	Network       bool     `json:"network"`
 	WorkspaceRoot string   `json:"workspaceRoot"`
 	AllowWrite    []string `json:"allowWrite"`
+	Shell         string   `json:"shell"` // [tools.shell] prefer: auto|bash|powershell|pwsh
 }
 
 type NetworkProxyView struct {
@@ -321,7 +322,7 @@ func (a *App) Settings() SettingsView {
 				Ask:   []string{},
 				Deny:  []string{},
 			},
-			Sandbox:           SandboxView{Bash: "enforce", AllowWrite: []string{}},
+			Sandbox:           SandboxView{Bash: "enforce", AllowWrite: []string{}, Shell: "auto"},
 			Agent:             AgentView{PlannerMaxSteps: 12},
 			Bot:               botSettingsView(config.BotConfig{}),
 			AutoPlan:          "off",
@@ -340,6 +341,10 @@ func (a *App) Settings() SettingsView {
 	if bash == "" {
 		bash = "enforce"
 	}
+	shell := cfg.Tools.Shell.Prefer
+	if shell == "" {
+		shell = "auto"
+	}
 	v := SettingsView{
 		DefaultModel:      cfg.DefaultModel,
 		PlannerModel:      cfg.Agent.PlannerModel,
@@ -357,6 +362,7 @@ func (a *App) Settings() SettingsView {
 		Sandbox: SandboxView{
 			Bash: bash, Network: cfg.Sandbox.Network,
 			WorkspaceRoot: cfg.Sandbox.WorkspaceRoot, AllowWrite: nonNil(cfg.Sandbox.AllowWrite),
+			Shell: shell,
 		},
 		Network: NetworkView{
 			ProxyMode: cfg.NetworkProxyMode(),
@@ -1183,12 +1189,13 @@ func (a *App) RemovePermissionRule(list, rule string) error {
 }
 
 // SetSandbox updates the bash sandbox mode, network egress, and write roots.
-func (a *App) SetSandbox(bash string, network bool, workspaceRoot string, allowWrite []string) error {
+func (a *App) SetSandbox(bash string, network bool, workspaceRoot string, allowWrite []string, shell string) error {
 	return a.applyConfigChange(func(c *config.Config) error {
 		c.Sandbox.Bash = bash
 		c.Sandbox.Network = network
 		c.Sandbox.WorkspaceRoot = strings.TrimSpace(workspaceRoot)
 		c.Sandbox.AllowWrite = trimList(allowWrite)
+		c.Tools.Shell.Prefer = strings.TrimSpace(shell)
 		return nil
 	})
 }

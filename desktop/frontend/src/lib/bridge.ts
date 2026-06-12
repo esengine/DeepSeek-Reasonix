@@ -213,7 +213,7 @@ export interface AppBindings {
   SetPermissionMode(mode: string): Promise<void>;
   AddPermissionRule(list: string, rule: string): Promise<void>;
   RemovePermissionRule(list: string, rule: string): Promise<void>;
-  SetSandbox(bash: string, network: boolean, workspaceRoot: string, allowWrite: string[]): Promise<void>;
+  SetSandbox(bash: string, network: boolean, workspaceRoot: string, allowWrite: string[], shell: string): Promise<void>;
   SetNetwork(n: NetworkView): Promise<void>;
   SetBotSettings(b: BotSettingsView): Promise<void>;
   SetBotSecret(envName: string, value: string): Promise<void>;
@@ -673,7 +673,7 @@ function makeMockApp(): AppBindings {
       { name: "mimo-token-plan", builtIn: true, added: false, kind: "openai", baseUrl: "https://token-plan-cn.xiaomimimo.com/v1", modelsUrl: "", models: ["mimo-v2.5-pro"], default: "mimo-v2.5-pro", apiKeyEnv: "MIMO_API_KEY", keySet: false, balanceUrl: "", contextWindow: 1_048_576, reasoningProtocol: "", supportedEfforts: [], defaultEffort: "" },
     ],
     permissions: { mode: "ask", allow: ["ls", "read_file"], ask: [], deny: ["Bash(rm:*)"] },
-    sandbox: { bash: "enforce", network: true, workspaceRoot: "", allowWrite: [] },
+    sandbox: { bash: "enforce", network: true, workspaceRoot: "", allowWrite: [], shell: "auto" },
     network: {
       proxyMode: "auto",
       proxyUrl: "",
@@ -2155,8 +2155,8 @@ function makeMockApp(): AppBindings {
       const k = list as "allow" | "ask" | "deny";
       settings.permissions[k] = settings.permissions[k].filter((r) => r !== rule);
     },
-        async SetSandbox(bash: string, network: boolean, workspaceRoot: string, allowWrite: string[]) {
-          settings.sandbox = { bash, network, workspaceRoot, allowWrite };
+        async SetSandbox(bash: string, network: boolean, workspaceRoot: string, allowWrite: string[], shell: string) {
+          settings.sandbox = { bash, network, workspaceRoot, allowWrite, shell };
         },
         async SetNetwork(n: NetworkView) {
           settings.network = n;
