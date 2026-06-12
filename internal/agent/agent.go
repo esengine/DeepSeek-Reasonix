@@ -605,6 +605,10 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 			if a.steerQueueLen() > 0 {
 				continue
 			}
+			// A final-answer turn otherwise skips compaction, so a large context
+			// carries into the next turn un-folded and can overflow the model window.
+			// No-op below the trigger, so normal turns keep their warm cache.
+			a.maybeCompact(ctx, usage)
 			return nil // model gave a final answer
 		}
 		emptyFinalBlocks = 0

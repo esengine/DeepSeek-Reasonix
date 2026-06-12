@@ -15,16 +15,20 @@ import (
 // fakeProvider returns a fixed reply and records the messages it was asked to
 // complete, so tests can drive summarization without a network call.
 type fakeProvider struct {
-	reply string
-	got   []provider.Message
+	reply        string
+	promptTokens int
+	got          []provider.Message
 }
 
 func (f *fakeProvider) Name() string { return "fake" }
 
 func (f *fakeProvider) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
 	f.got = req.Messages
-	ch := make(chan provider.Chunk, 2)
+	ch := make(chan provider.Chunk, 3)
 	ch <- provider.Chunk{Type: provider.ChunkText, Text: f.reply}
+	if f.promptTokens > 0 {
+		ch <- provider.Chunk{Type: provider.ChunkUsage, Usage: &provider.Usage{PromptTokens: f.promptTokens, TotalTokens: f.promptTokens}}
+	}
 	ch <- provider.Chunk{Type: provider.ChunkDone}
 	close(ch)
 	return ch, nil
@@ -179,6 +183,28 @@ func snapshotContents(s *Session) []string {
 		out[i] = m.Content
 	}
 	return out
+}
+
+func TestRunCompactsAfterFinalAnswer(t *testing.T) {
+	// A turn that ends with a final answer (no trailing tool batch) must still
+	// compact when the context is over the trigger; otherwise a large context
+	// carries into the next turn un-folded and overflows the model window.
+	big := strings.Repeat("old work ", 200)
+	sess := &Session{Messages: []provider.Message{
+		{Role: provider.RoleSystem, Content: "sys"},
+		{Role: provider.RoleUser, Content: "task"},
+		{Role: provider.RoleAssistant, Content: big},
+		{Role: provider.RoleAssistant, Content: big},
+	}}
+	a := New(&fakeProvider{reply: "done", promptTokens: 95}, tool.NewRegistry(), sess,
+		Options{ContextWindow: 100, RecentKeep: 2, ArchiveDir: t.TempDir()}, event.Discard)
+
+	if err := a.Run(context.Background(), "what's the status?"); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if got := sess.RewriteVersion(); got != 1 {
+		t.Fatalf("final-answer turn over the trigger did not compact: rewrite version = %d, want 1", got)
+	}
 }
 
 func TestCompactReplacesHistory(t *testing.T) {
