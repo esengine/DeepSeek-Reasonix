@@ -17,6 +17,7 @@ import (
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
+	"reasonix/internal/jobs"
 	"reasonix/internal/memory"
 	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
@@ -1335,6 +1336,47 @@ func TestDeleteSessionRejectsInactiveOpenTab(t *testing.T) {
 	}
 	if open[filepath.Base(otherPath)] {
 		t.Fatalf("ListSessions marked unopened session open, got %#v", open)
+	}
+}
+
+func TestRestoreSessionRejectsDestroyingSession(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir session dir: %v", err)
+	}
+	sessionPath := filepath.Join(dir, "trash-me.jsonl")
+	if err := os.WriteFile(sessionPath, []byte(`{"role":"user","content":"hello"}`+"\n"), 0o644); err != nil {
+		t.Fatalf("write session: %v", err)
+	}
+	if err := deleteSessionFile(dir, sessionPath); err != nil {
+		t.Fatalf("deleteSessionFile: %v", err)
+	}
+	trashPath := filepath.Join(dir, sessionTrashDir, filepath.Base(sessionPath), filepath.Base(sessionPath))
+
+	jm := jobs.NewManager(event.Discard)
+	defer jm.Close()
+	ctrl := control.New(control.Options{SessionDir: dir, SessionPath: filepath.Join(dir, "active.jsonl"), Label: "active", Jobs: jm})
+	defer ctrl.Close()
+	destroy := ctrl.BeginDestroySession(sessionPath)
+	defer destroy.Finish()
+
+	app := NewApp()
+	app.setTestCtrl(ctrl, "")
+	if err := app.RestoreSession(trashPath); err == nil || !strings.Contains(err.Error(), "cleanup is still in progress") {
+		t.Fatalf("RestoreSession while destroying error = %v, want cleanup-in-progress", err)
+	}
+	if _, err := os.Stat(trashPath); err != nil {
+		t.Fatalf("trashed session should remain after rejected restore: %v", err)
+	}
+
+	destroy.Finish()
+	if err := app.RestoreSession(trashPath); err != nil {
+		t.Fatalf("RestoreSession after finish: %v", err)
+	}
+	if _, err := os.Stat(sessionPath); err != nil {
+		t.Fatalf("session should be restored: %v", err)
 	}
 }
 

@@ -1973,6 +1973,15 @@ func (c *Controller) BeginDestroySession(sessionPath string) SessionDestroyHandl
 	}
 }
 
+// IsDestroyingSession reports whether sessionPath is currently in the destroy
+// window for this controller's job manager.
+func (c *Controller) IsDestroyingSession(sessionPath string) bool {
+	if c.jobs == nil {
+		return false
+	}
+	return c.jobs.IsDestroying(agent.BranchID(sessionPath))
+}
+
 func (c *Controller) setActiveJobSession(sessionPath string) {
 	if c.jobs != nil {
 		c.jobs.SetActiveSession(agent.BranchID(sessionPath))

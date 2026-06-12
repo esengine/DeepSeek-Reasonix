@@ -1285,14 +1285,32 @@ func (a *App) RestoreSession(path string) error {
 	if err != nil {
 		return err
 	}
+	target := filepath.Join(dir, key)
+	if a.sessionDestroying(dir, target) {
+		return fmt.Errorf("session cleanup is still in progress: %s", key)
+	}
 	if err := restoreTrashedSessionFile(dir, path); err != nil {
 		return err
 	}
-	if err := restoreSessionTopicIndex(dir, filepath.Join(dir, key)); err != nil {
+	if err := restoreSessionTopicIndex(dir, target); err != nil {
 		return err
 	}
 	a.emitProjectTreeChanged()
 	return nil
+}
+
+func (a *App) sessionDestroying(dir, sessionPath string) bool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	for _, tab := range a.tabs {
+		if tab == nil || tab.Ctrl == nil || tabSessionDir(tab) != dir {
+			continue
+		}
+		if tab.Ctrl.IsDestroyingSession(sessionPath) {
+			return true
+		}
+	}
+	return false
 }
 
 // PurgeTrashedSession permanently removes a trashed session and its title/display
