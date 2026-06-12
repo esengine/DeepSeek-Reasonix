@@ -401,7 +401,11 @@ ctrl.Send("分析这个项目的架构")
 
 ## 四、持续对话与一次性对话分析
 
-### 4.1 一次性对话模式：`reasonix run`
+### 4.1 Desktop 模式的分析说明
+
+Desktop 模式（`reasonix-desktop`）不是简单的"套壳 Web"。**它的功能与 Web serve 模式部分重叠但不完全一致**。两者的详细异同见 [第六节](#六-desktop-与-web-serve-的对比分析)。
+
+### 4.2 一次性对话模式：`reasonix run`
 
 **执行流程**：
 
@@ -433,7 +437,7 @@ cat prompt.txt | reasonix run --model gpt-4
 reasonix run --continue "继续上面的工作"
 ```
 
-### 4.2 持续对话模式：`reasonix chat`
+### 4.3 持续对话模式：`reasonix chat`
 
 **执行流程**：
 
@@ -458,7 +462,7 @@ reasonix chat
 - 支持回退（`/rewind`）
 - 退出时自动保存会话到 `.jsonl` 文件
 
-### 4.3 对比总结
+### 4.4 对比总结
 
 | 维度 | `reasonix run` | `reasonix chat` |
 |------|:--------------:|:---------------:|
@@ -472,7 +476,7 @@ reasonix chat
 | 分支/回退 | ❌ | ✅ |
 | 第三方集成 | ✅ 进程等待/捕获输出 | ❌ TTY 限制 |
 
-### 4.4 `serve` 模式的对话能力
+### 4.5 `serve` 模式的对话能力
 
 `reasonix serve` 同时支持两种对话模式：
 
@@ -491,9 +495,125 @@ POST /new → POST /submit {"input": "新会话的第一轮"}
 
 ---
 
-## 五、对话明细记录存储方式
+## 五、Desktop 与 Web (serve) 的对比分析
 
-### 5.1 存储格式：JSONL
+> Desktop 模式（`reasonix-desktop`）**不是**简单的"套壳 Web"。它直接绑定 Go controller 到 WebView（Wails），无 HTTP 跳转。与 `reasonix serve` 共享同一个 `control.Controller` 内核，但前端实现和平台能力不同。两者关系：**同一引擎，不同车身**。
+
+### 5.1 架构对比
+
+```
+Web (serve) 模式:
+┌───────────────────────────────────────────────────────┐
+│  浏览器 (React + 内嵌 index.html)                       │
+│    EventSource('/events')  ← SSE 流                    │
+│    fetch POST /submit       → HTTP                     │
+└────────────────────▲─────────────────────┬─────────────┘
+                     │ SSE                 │ HTTP
+┌────────────────────┴─────────────────────▼─────────────┐
+│  reasonix serve (:8787)                                 │
+│    Broadcaster (event.Sink, fan-out to SSE clients)    │
+│    POST handler → Controller.Submit()                   │
+└──────────────────────────┬──────────────────────────────┘
+                           │ 同进程直接调用
+┌──────────────────────────▼──────────────────────────────┐
+│  control.Controller (内核)                               │
+│  boot.Build → Ctrl.Send/Cancel/Approve/Snapshot/…      │
+└─────────────────────────────────────────────────────────┘
+
+Desktop 模式:
+┌───────────────────────────────────────────────────────┐
+│  WebView (React + TS, Vite build, 独立前端)            │
+│    window.runtime.EventsOn("agent:event")  ← Wails 事件 │
+│    window.go.main.App.Submit() → 直接 Go 方法调用      │
+└────────────────────▲─────────────────────┬─────────────┘
+                     │ Wails                │ Wails
+                     │ runtime.EventsEmit   │ Bind()
+┌────────────────────┴─────────────────────▼─────────────┐
+│  desktop App (Go)                                       │
+│    tabEventSink → 多 Tab 管理 → 每个 Tab 有自己的 Ctrl  │
+│    App.Submit/Cancel/Approve 绑定方法                    │
+│    系统托盘 / 文件拖放 / 自动更新 / 崩溃恢复               │
+└──────────────────────────┬──────────────────────────────┘
+                           │ 同进程直接调用
+┌──────────────────────────▼──────────────────────────────┐
+│  control.Controller (内核，完全相同的实现)                │
+│  boot.Build → Ctrl.Send/Cancel/Approve/Snapshot/…      │
+└─────────────────────────────────────────────────────────┘
+```
+
+**核心差异**：
+- Web 模式：事件通过 HTTP SSE 序列化/反序列化，客户端→服务器通过 HTTP POST
+- Desktop 模式：事件通过 Wails `runtime.EventsEmit` 进程内传递，方法调用通过 Wails `Bind()` 直接绑定 Go 方法到 JS——**无网络跳转，无序列化开销**
+
+### 5.2 通信协议对比
+
+| 维度 | Web (serve) | Desktop (Wails) |
+|------|:-----------:|:---------------:|
+| Go→前端事件传递 | SSE `data:` JSON 帧 → `EventSource` | `runtime.EventsEmit("agent:event")` → `EventsOn` 回调 |
+| 前端→Go 命令 | `POST /submit` (`Content-Type: application/json`) | `window.go.main.App.Submit(input)` 直接方法调用 |
+| 序列化开销 | JSON 序列化 + HTTP 解析 | JSON 序列化（`wireEvent`）→ 进程内传递 |
+| 网络依赖 | 需要本地 TCP 端口（:8787） | 无（WebView 内嵌） |
+| 延迟 | 微秒级（localhost） | 纳秒级（进程内） |
+
+### 5.3 功能覆盖对比
+
+| 功能 | Web (serve) | Desktop | 说明 |
+|------|:-----------:|:-------:|------|
+| **核心对话** | ✅ | ✅ | 同一 `control.Controller` 内核 |
+| **多会话管理** | ❌ 单 Tab | ✅ 多 WorkspaceTab | Desktop 支持项目级多 Tab，每 Tab 独立 Controller |
+| **跨项目并发** | ❌ 一个工作目录 | ✅ 每个 Tab 不同 `WorkspaceRoot` | Desktop 可同时打开多个项目 |
+| **系统托盘** | ❌ | ✅ `desktop/tray.go` | 驻留系统托盘（macOS/Linux/Windows）|
+| **自动更新** | ❌ | ✅ `desktop/updater.go` | GitHub Release 自动检查和安装 |
+| **崩溃恢复** | ❌ | ✅ `desktop/crash_app.go` | 异常退出后恢复会话 |
+| **文件拖放** | ❌ | ✅ `desktop/app.go` 拖放上传 | 拖拽文件到窗口自动上传 |
+| **原生菜单** | ❌ | ✅ `desktop/menu.go` | macOS 菜单栏 |
+| **文件系统监控** | ❌ | ✅ `desktop/tabs.go` (ActivityStatus) | 项目文件变更感知 |
+| **MCP 服务器管理** | ❌ 命令行 | ✅ UI 管理 | Desktop 有 MCP 可视化管理面板 |
+| **技能可视化** | ❌ | ✅ UI 管理 | Desktop 有技能启用/禁用界面 |
+| **会话历史面板** | ✅ 列表 | ✅ 侧边栏 | 两者都有但 Desktop 更丰富 |
+| **内嵌前端** | `internal/serve/index.html` (单文件) | `desktop/frontend/` (完整 React 项目) | Desktop 前端功能更完整 |
+| **单实例锁** | ❌ | ✅ `SingleInstanceLock` | 防止重复启动 |
+| **窗口状态恢复** | ❌ (浏览器) | ✅ `desktop/window_state.go` | 保存/恢复窗口位置和大小 |
+| **媒体文件预览** | ❌ | ✅ `mediaTokenStore` 临时 URL | 工作区文件预览 |
+
+### 5.4 功能一致的部分
+
+以下能力两者完全相同（因为共享 `control.Controller` 内核）：
+
+| 能力 | 100% 一致 |
+|------|:---------:|
+| LLM 对话流程 | ✅ `Send→Run→Cancel→Approve→Snapshot` |
+| 工具调用 | ✅ 同一套 tool registry |
+| MCP 服务器 | ✅ 同一 `plugin.Host` |
+| 会话持久化 | ✅ JSONL 格式，同一 `Session.Save()` |
+| 审批策略 | ✅ `SetAutoApproveTools/SetPlanMode/SetToolApprovalMode` |
+| Goal loop | ✅ `SetGoal/ClearGoal/Goal/GoalStatus` |
+| 检查点/分支/回退 | ✅ `Checkpoints/Rewind/Fork/Branch/SwitchBranch` |
+| 自动压缩 | ✅ `Compact` |
+| 切换模型 | ✅ 重建 Controller 携带历史 |
+| 推理上下文 | ✅ `boot.Build` 相同的 model/profile resolution |
+
+### 5.5 总结
+
+**Desktop 不是套壳 Web**。虽然两者共用同一 Go 内核，但 Desktop 有独立的：
+
+1. **通信通道**：Wails 绑定方法 + runtime events（非 HTTP/SSE）
+2. **前端实现**：完整 React 应用（`desktop/frontend/`），功能远多于内嵌 `index.html`
+3. **多 Tab 架构**：`WorkspaceTab` 支持并发多项目会话
+4. **平台原生能力**：托盘/菜单/更新/崩溃恢复/文件拖放/窗口状态
+
+Web `serve` 模式的优势在于：
+- 无需安装，浏览器打开即可使用
+- 支持多客户端同时连接（一个 serve 进程 → 多个浏览器 Tab）
+- 可被第三方程序通过 HTTP API 集成
+
+两者是**互补关系**，而非替代关系。
+
+---
+
+## 六、对话明细记录存储方式
+
+### 6.1 存储格式：JSONL
 
 所有对话历史以 **JSONL**（JSON Lines）格式存储，每行一个 JSON 对象表示一条消息。
 
@@ -508,7 +628,7 @@ reasonix run "你好" → 保存到 ~/.reasonix/sessions/20260607-123456.0000000
 示例: 20260607-123456.000000000-deepseek-chat.jsonl
 ```
 
-### 5.2 单条消息格式
+### 6.2 单条消息格式
 
 ```jsonl
 {"role":"system","content":"你是 Reasonix..."}
@@ -535,7 +655,7 @@ type Message struct {
 - `assistant` — 模型回复（含 thinking 内容）
 - `tool` — 工具调用结果
 
-### 5.3 读写实现
+### 6.3 读写实现
 
 **写入（`internal/agent/save.go:23-50`）**：
 
@@ -562,7 +682,7 @@ func LoadSession(path string) (*Session, error) {
 - 对话文件小（KB 级别）
 - 压缩（compact）操作会修改中间消息，追加模式无法处理
 
-### 5.4 存储位置
+### 6.4 存储位置
 
 由硬编码的函数 `config.SessionDir()` 决定，**不支持在 `reasonix.toml` 中配置**：
 
@@ -582,7 +702,7 @@ func SessionDir() string {
 
 可通过 `ctrl.SessionDir()` 查询当前存储目录，**每个 Controller 实例有独立的 `sessionDir` 字段**，允许不同实例指向不同目录。
 
-### 5.5 分支元数据
+### 6.5 分支元数据
 
 分支信息存储在会话文件同目录下的元数据文件中：
 
@@ -606,7 +726,7 @@ type SessionInfo struct {
 }
 ```
 
-### 5.6 检查点（Checkpoint）
+### 6.6 检查点（Checkpoint）
 
 除了完整的 `{id}.jsonl` 会话文件，每轮执行还会生成检查点目录 `{id}.ckpt/`，用于支持 `/rewind` 回退：
 
@@ -619,7 +739,7 @@ type SessionInfo struct {
 
 检查点存储 `turn + prompt + 受影响的文件路径` 的快照。
 
-### 5.7 全量重写机制
+### 6.7 全量重写机制
 
 **是的，每轮（每条用户消息）都会全量重写整个 JSONL 文件。**
 
@@ -663,7 +783,7 @@ func (s *Session) Save(path string) error {
 
 实测指标：假设每轮 2000 条消息，每条平均 500 字节，JSONL 文件约 **1MB**。全量重写一次约 **< 10ms**（SSD 环境）。常规会话通常在 50-200 轮，文件大小在 **25KB-200KB** 范围，重写开销可忽略不计。
 
-### 5.8 存储目录配置方式
+### 6.8 存储目录配置方式
 
 #### 5.8.1 当前状态：无 TOML 配置项
 
@@ -721,7 +841,7 @@ reasonix chat --dir /project/b
 
 如果需要按项目隔离，目前只能通过 Go 集成方式传入自定义 `SessionDir`，或者在配置中不存在该选项。
 
-### 5.9 存储流程图
+### 6.9 存储流程图
 
 ```
                                  写入时机
@@ -748,7 +868,7 @@ reasonix chat --dir /project/b
          └── {id}.branch.json   ← 分支信息
 ```
 
-### 5.8 存储安全性
+### 6.10 存储安全性
 
 | 机制 | 说明 |
 |------|------|
@@ -760,7 +880,7 @@ reasonix chat --dir /project/b
 
 ---
 
-## 六、综合架构图
+## 七、综合架构图
 
 ```
 第三方 Web 程序
