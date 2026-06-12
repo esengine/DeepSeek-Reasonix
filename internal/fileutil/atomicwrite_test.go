@@ -4,7 +4,46 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
+
+func TestReplaceFileNoRetryWhenTmpMissing(t *testing.T) {
+	oldBase := replaceRetryBase
+	replaceRetryBase = 10 * time.Second
+	t.Cleanup(func() { replaceRetryBase = oldBase })
+
+	dir := t.TempDir()
+	start := time.Now()
+	err := ReplaceFile(filepath.Join(dir, "missing.tmp"), filepath.Join(dir, "x.txt"))
+	if err == nil {
+		t.Fatal("want error when tmp source is missing")
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Errorf("missing tmp should fail fast, took %v — it retried", elapsed)
+	}
+}
+
+func TestReplaceFileRetriesThenReturnsError(t *testing.T) {
+	oldBase, oldMax := replaceRetryBase, maxReplaceRetries
+	replaceRetryBase, maxReplaceRetries = 0, 3
+	t.Cleanup(func() { replaceRetryBase, maxReplaceRetries = oldBase, oldMax })
+
+	dir := t.TempDir()
+	tmp := filepath.Join(dir, "x.tmp")
+	if err := os.WriteFile(tmp, []byte("payload"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(dir, "blocked")
+	if err := os.Mkdir(dest, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := ReplaceFile(tmp, dest); err == nil {
+		t.Fatal("want error when dest can never be replaced")
+	}
+	if !fileExists(tmp) {
+		t.Error("tmp should survive a failed replace so the next launch can retry")
+	}
+}
 
 func TestReplaceFileRenamesInPlace(t *testing.T) {
 	dir := t.TempDir()

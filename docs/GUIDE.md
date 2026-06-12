@@ -21,8 +21,10 @@
 
 ## Configuration
 
-Resolution order: **flag > `./reasonix.toml` > `~/.config/reasonix/config.toml` >
-built-in defaults**. Secrets come from the environment via `api_key_env` and are
+Resolution order: **flag > `./reasonix.toml` > the user config file >
+built-in defaults**. The user config lives in your OS config dir: `~/.config/reasonix/`
+on Linux, `~/Library/Application Support/reasonix/` on macOS, `%AppData%\reasonix\` on
+Windows. Secrets come from the environment via `api_key_env` and are
 never stored in config files.
 
 ```toml

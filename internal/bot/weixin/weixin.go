@@ -11,7 +11,9 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -49,9 +51,9 @@ type ilinkUpdate struct {
 	UpdateID   int64  `json:"update_id"`
 	UpdateType string `json:"update_type"`
 	Message    struct {
-		MessageID string `json:"message_id"`
-		ChatID    string `json:"chat_id"`
-		ChatType  string `json:"chat_type"`
+		MessageID ilinkString `json:"message_id"`
+		ChatID    string      `json:"chat_id"`
+		ChatType  string      `json:"chat_type"`
 		From      struct {
 			UserID   string `json:"user_id"`
 			UserName string `json:"user_name"`
@@ -62,13 +64,13 @@ type ilinkUpdate struct {
 }
 
 type ilinkMessage struct {
-	MessageID    string `json:"message_id"`
-	FromUserID   string `json:"from_user_id"`
-	ToUserID     string `json:"to_user_id"`
-	RoomID       string `json:"room_id"`
-	ChatRoomID   string `json:"chat_room_id"`
-	ContextToken string `json:"context_token"`
-	MsgType      int    `json:"msg_type"`
+	MessageID    ilinkString `json:"message_id"`
+	FromUserID   string      `json:"from_user_id"`
+	ToUserID     string      `json:"to_user_id"`
+	RoomID       string      `json:"room_id"`
+	ChatRoomID   string      `json:"chat_room_id"`
+	ContextToken string      `json:"context_token"`
+	MsgType      int         `json:"msg_type"`
 	ItemList     []struct {
 		Type     int `json:"type"`
 		TextItem struct {
@@ -89,6 +91,26 @@ type ilinkResponse struct {
 	LongpollingTimeoutMs int            `json:"longpolling_timeout_ms"`
 }
 
+type ilinkString string
+
+func (s *ilinkString) UnmarshalJSON(data []byte) error {
+	if string(data) == "null" {
+		*s = ""
+		return nil
+	}
+	var str string
+	if err := json.Unmarshal(data, &str); err == nil {
+		*s = ilinkString(str)
+		return nil
+	}
+	var num json.Number
+	if err := json.Unmarshal(data, &num); err == nil {
+		*s = ilinkString(num.String())
+		return nil
+	}
+	return fmt.Errorf("ilink string: expected string or number, got %s", string(data))
+}
+
 // adapter 微信适配器实现。
 type adapter struct {
 	cfg    config.WeixinBotConfig
@@ -100,6 +122,8 @@ type adapter struct {
 	contextTokens map[string]string
 	syncBuf       string
 	lastUpdateID  int64
+	pollReadyOnce sync.Once
+	lastPollLog   time.Time
 }
 
 // New 创建微信 Bot 适配器。
@@ -118,7 +142,11 @@ func (a *adapter) Start(ctx context.Context) error {
 	a.msgCh = make(chan bot.InboundMessage, 64)
 	ctx, a.cancel = context.WithCancel(ctx)
 	a.loadContextTokens()
+	if a.token() == "" {
+		return a.tokenMissingError()
+	}
 
+	a.logger.Info("weixin polling started", "account", logHash(a.accountID()), "api_base", a.apiBase())
 	go a.pollLoop(ctx)
 	return nil
 }
@@ -163,6 +191,13 @@ func (a *adapter) token() string {
 		return account.Token
 	}
 	return ""
+}
+
+func (a *adapter) tokenMissingError() error {
+	if strings.TrimSpace(a.cfg.TokenEnv) == "" {
+		return fmt.Errorf("weixin token is not configured and no saved weixin account is available")
+	}
+	return fmt.Errorf("%s not set and no saved weixin account is available", a.cfg.TokenEnv)
 }
 
 // apiBase 返回 API base URL。
@@ -312,7 +347,7 @@ func (a *adapter) pollLoop(ctx context.Context) {
 func (a *adapter) getUpdates(ctx context.Context) ([]ilinkUpdate, error) {
 	tok := a.token()
 	if tok == "" {
-		return nil, fmt.Errorf("%s not set and no saved weixin account is available", a.cfg.TokenEnv)
+		return nil, a.tokenMissingError()
 	}
 
 	url := a.apiBase() + getUpdatesPath
@@ -346,6 +381,10 @@ func (a *adapter) getUpdates(ctx context.Context) ([]ilinkUpdate, error) {
 	if result.Ret != 0 || result.Errcode != 0 {
 		return nil, fmt.Errorf("getupdates error ret=%d errcode=%d: %s", result.Ret, result.Errcode, result.Errmsg)
 	}
+	a.pollReadyOnce.Do(func() {
+		a.logger.Info("weixin getupdates ready", "account", logHash(a.accountID()), "api_base", a.apiBase())
+	})
+	a.logPollHealth(result)
 
 	a.mu.Lock()
 	if result.GetUpdatesBuf != "" {
@@ -365,9 +404,30 @@ func (a *adapter) getUpdates(ctx context.Context) ([]ilinkUpdate, error) {
 	return result.Updates, nil
 }
 
+func (a *adapter) logPollHealth(result ilinkResponse) {
+	shouldLog := len(result.Updates) > 0 || len(result.Msgs) > 0
+	a.mu.Lock()
+	if !shouldLog && time.Since(a.lastPollLog) >= 5*time.Minute {
+		shouldLog = true
+	}
+	if shouldLog {
+		a.lastPollLog = time.Now()
+	}
+	a.mu.Unlock()
+	if !shouldLog {
+		return
+	}
+	a.logger.Info("weixin getupdates heartbeat",
+		"updates", len(result.Updates),
+		"msgs", len(result.Msgs),
+		"has_more", result.HasMore,
+		"timeout_ms", result.LongpollingTimeoutMs)
+}
+
 // handleUpdate 处理单条微信更新消息。
 func (a *adapter) handleUpdate(upd ilinkUpdate) {
 	if upd.UpdateType != "message" {
+		a.logger.Info("weixin update ignored", "reason", "non_message", "update_type", upd.UpdateType)
 		return
 	}
 
@@ -384,11 +444,12 @@ func (a *adapter) handleUpdate(upd ilinkUpdate) {
 		UserID:    m.From.UserID,
 		UserName:  m.From.UserName,
 		Text:      m.Text,
-		MessageID: m.MessageID,
+		MessageID: string(m.MessageID),
 	}
 
 	select {
 	case a.msgCh <- ib:
+		a.logger.Info("weixin inbound queued", "source", "update", "chat_type", chatType, "chat", logHash(ib.ChatID), "user", logHash(ib.UserID), "message", logHash(ib.MessageID), "text_chars", len([]rune(ib.Text)))
 	default:
 		a.logger.Warn("weixin message channel full")
 	}
@@ -396,14 +457,17 @@ func (a *adapter) handleUpdate(upd ilinkUpdate) {
 
 func (a *adapter) handleIlinkMessage(m ilinkMessage) {
 	if m.FromUserID == "" || m.FromUserID == a.accountID() {
+		a.logger.Info("weixin message ignored", "reason", "self_or_missing_sender", "from", logHash(m.FromUserID), "message", logHash(string(m.MessageID)))
 		return
 	}
 	text := extractIlinkText(m.ItemList)
 	if text == "" {
+		a.logger.Info("weixin message ignored", "reason", "empty_text", "from", logHash(m.FromUserID), "message", logHash(string(m.MessageID)))
 		return
 	}
 	chatType, chatID := guessIlinkChat(m, a.accountID())
 	if chatID == "" {
+		a.logger.Info("weixin message ignored", "reason", "missing_chat", "from", logHash(m.FromUserID), "message", logHash(string(m.MessageID)))
 		return
 	}
 	if m.ContextToken != "" {
@@ -416,13 +480,22 @@ func (a *adapter) handleIlinkMessage(m ilinkMessage) {
 		UserID:    m.FromUserID,
 		UserName:  m.FromUserID,
 		Text:      text,
-		MessageID: m.MessageID,
+		MessageID: string(m.MessageID),
 	}
 	select {
 	case a.msgCh <- ib:
+		a.logger.Info("weixin inbound queued", "source", "message", "chat_type", chatType, "chat", logHash(ib.ChatID), "user", logHash(ib.UserID), "message", logHash(ib.MessageID), "text_chars", len([]rune(ib.Text)))
 	default:
 		a.logger.Warn("weixin message channel full")
 	}
+}
+
+func logHash(id string) string {
+	if id == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(id))
+	return hex.EncodeToString(sum[:])[:12]
 }
 
 func extractIlinkText(items []struct {
@@ -482,7 +555,7 @@ func firstNonEmptyString(vals ...string) string {
 func (a *adapter) sendMessage(ctx context.Context, msg bot.OutboundMessage) (bot.SendResult, error) {
 	tok := a.token()
 	if tok == "" {
-		return bot.SendResult{}, fmt.Errorf("%s not set and no saved weixin account is available", a.cfg.TokenEnv)
+		return bot.SendResult{}, a.tokenMissingError()
 	}
 
 	url := a.apiBase() + sendMessagePath
@@ -520,10 +593,10 @@ func (a *adapter) sendMessage(ctx context.Context, msg bot.OutboundMessage) (bot
 	defer resp.Body.Close()
 
 	var result struct {
-		Ret       int    `json:"ret"`
-		Errcode   int    `json:"errcode"`
-		Errmsg    string `json:"errmsg"`
-		MessageID string `json:"message_id"`
+		Ret       int         `json:"ret"`
+		Errcode   int         `json:"errcode"`
+		Errmsg    string      `json:"errmsg"`
+		MessageID ilinkString `json:"message_id"`
 	}
 	respBody, _ := io.ReadAll(resp.Body)
 	if err := json.Unmarshal(respBody, &result); err != nil {
@@ -537,14 +610,14 @@ func (a *adapter) sendMessage(ctx context.Context, msg bot.OutboundMessage) (bot
 		return bot.SendResult{}, fmt.Errorf("sendmessage error ret=%d errcode=%d: %s", result.Ret, result.Errcode, result.Errmsg)
 	}
 
-	return bot.SendResult{MessageID: result.MessageID}, nil
+	return bot.SendResult{MessageID: string(result.MessageID)}, nil
 }
 
 // sendTyping 发送"正在输入"状态。
 func (a *adapter) sendTyping(ctx context.Context, chatID string) error {
 	tok := a.token()
 	if tok == "" {
-		return fmt.Errorf("%s not set and no saved weixin account is available", a.cfg.TokenEnv)
+		return a.tokenMissingError()
 	}
 
 	url := a.apiBase() + sendTypingPath

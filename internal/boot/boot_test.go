@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
@@ -218,9 +219,53 @@ func setBootRetrievalToolTestProvider(t *testing.T, p *testutil.MockProvider) {
 	})
 }
 
+const bootTokenProfileTestProviderKind = "boot-token-profile-test"
+
+var (
+	bootTokenProfileTestProviderOnce    sync.Once
+	bootTokenProfileTestProviderCurrent *testutil.MockProvider
+	bootTokenProfileTestProviderMu      sync.Mutex
+)
+
+func registerBootTokenProfileTestProvider() {
+	bootTokenProfileTestProviderOnce.Do(func() {
+		provider.Register(bootTokenProfileTestProviderKind, func(provider.Config) (provider.Provider, error) {
+			bootTokenProfileTestProviderMu.Lock()
+			defer bootTokenProfileTestProviderMu.Unlock()
+			if bootTokenProfileTestProviderCurrent == nil {
+				return nil, errors.New("boot token profile test provider is not installed")
+			}
+			return bootTokenProfileTestProviderCurrent, nil
+		})
+	})
+}
+
+func setBootTokenProfileTestProvider(t *testing.T, p *testutil.MockProvider) {
+	t.Helper()
+	bootTokenProfileTestProviderMu.Lock()
+	bootTokenProfileTestProviderCurrent = p
+	bootTokenProfileTestProviderMu.Unlock()
+	t.Cleanup(func() {
+		bootTokenProfileTestProviderMu.Lock()
+		if bootTokenProfileTestProviderCurrent == p {
+			bootTokenProfileTestProviderCurrent = nil
+		}
+		bootTokenProfileTestProviderMu.Unlock()
+	})
+}
+
 func requestHasTool(req provider.Request, name string) bool {
 	for _, schema := range req.Tools {
 		if schema.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func requestHasToolPrefix(req provider.Request, prefix string) bool {
+	for _, schema := range req.Tools {
+		if strings.HasPrefix(schema.Name, prefix) {
 			return true
 		}
 	}
@@ -247,6 +292,31 @@ func assertToolOrder(t *testing.T, tools []provider.ToolSchema, want []string) {
 	if next != len(want) {
 		t.Fatalf("tool order changed; provider-visible tool schema order affects prompt-cache shape.\nwant subsequence: %v\n got: %v", want, names)
 	}
+}
+
+func firstTokenProfileRequest(t *testing.T, tokenMode string) provider.Request {
+	t.Helper()
+	registerBootTokenProfileTestProvider()
+	prov := testutil.NewMock("token-profile", testutil.Turn{Text: "done"})
+	setBootTokenProfileTestProvider(t, prov)
+
+	opts := Options{Sink: event.Discard}
+	if tokenMode != "" {
+		opts.TokenMode = tokenMode
+	}
+	ctrl, err := Build(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("Build(%q): %v", tokenMode, err)
+	}
+	defer ctrl.Close()
+	if err := ctrl.Run(context.Background(), "capture request prefix"); err != nil {
+		t.Fatalf("Run(%q): %v", tokenMode, err)
+	}
+	reqs := prov.Requests()
+	if len(reqs) != 1 {
+		t.Fatalf("requests(%q) = %d, want 1", tokenMode, len(reqs))
+	}
+	return reqs[0]
 }
 
 func TestBuildSubagentSkillFailedContinuationPersistsTranscript(t *testing.T) {
@@ -695,6 +765,358 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 	}
 	if !strings.Contains(sys, "projskill") || !strings.Contains(sys, "explore") {
 		t.Fatalf("skill names missing from index:\n%s", sys)
+	}
+}
+
+func TestBuildTokenFullMatchesDefaultRequestPrefix(t *testing.T) {
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "test-model"
+
+[codegraph]
+enabled = false
+
+[agent]
+system_prompt = "BASE"
+
+[[providers]]
+name = "test-model"
+kind = "boot-token-profile-test"
+model = "x"
+`)
+	writeFile(t, dir, ".reasonix/skills/projskill.md", "---\ndescription: a project skill\n---\nplaybook")
+
+	defaultReq := firstTokenProfileRequest(t, "")
+	fullReq := firstTokenProfileRequest(t, TokenModeFull)
+
+	if got, want := systemMessage(defaultReq.Messages), systemMessage(fullReq.Messages); got != want {
+		t.Fatalf("explicit full mode changed the system prompt\n--- default ---\n%s\n--- full ---\n%s", got, want)
+	}
+	if strings.Contains(systemMessage(fullReq.Messages), tokenEconomyPrompt) {
+		t.Fatalf("full mode system prompt should not include token economy prompt:\n%s", systemMessage(fullReq.Messages))
+	}
+	if !strings.Contains(systemMessage(fullReq.Messages), "# Skills") || !strings.Contains(systemMessage(fullReq.Messages), "projskill") {
+		t.Fatalf("full mode should preserve the skills index in the system prompt:\n%s", systemMessage(fullReq.Messages))
+	}
+	if got, want := toolSchemaNames(fullReq.Tools), toolSchemaNames(defaultReq.Tools); !reflect.DeepEqual(got, want) {
+		t.Fatalf("explicit full mode changed tool schema order\nfull=%v\ndefault=%v", got, want)
+	}
+	if !reflect.DeepEqual(fullReq.Tools, defaultReq.Tools) {
+		t.Fatalf("explicit full mode changed provider-visible tool schemas; names=%v", toolSchemaNames(fullReq.Tools))
+	}
+	if requestHasTool(fullReq, "connect_tool_source") {
+		t.Fatalf("full mode should not expose economy connector; tools=%v", toolSchemaNames(fullReq.Tools))
+	}
+}
+
+func TestBuildTokenEconomyStartsWithLeanToolSurface(t *testing.T) {
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+
+	registerBootTokenProfileTestProvider()
+	prov := testutil.NewMock("token-economy", testutil.Turn{Text: "done"})
+	setBootTokenProfileTestProvider(t, prov)
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "test-model"
+
+[codegraph]
+enabled = false
+
+[agent]
+system_prompt = "BASE"
+
+[[providers]]
+name = "test-model"
+kind = "boot-token-profile-test"
+model = "x"
+
+[[plugins]]
+name = "mockmcp"
+command = "reasonix-missing-mockmcp"
+`)
+	writeFile(t, dir, ".reasonix/skills/projskill.md", "---\ndescription: a project skill\n---\nplaybook")
+
+	ctrl, err := Build(context.Background(), Options{Sink: event.Discard, TokenMode: TokenModeEconomy})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer ctrl.Close()
+	if err := ctrl.Run(context.Background(), "use the lean surface"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	reqs := prov.Requests()
+	if len(reqs) != 1 {
+		t.Fatalf("requests = %d, want 1", len(reqs))
+	}
+	req := reqs[0]
+	wantTools := []string{
+		"ask",
+		"bash",
+		"bash_output",
+		"complete_step",
+		"connect_tool_source",
+		"edit_file",
+		"forget",
+		"glob",
+		"grep",
+		"history",
+		"kill_shell",
+		"ls",
+		"memory",
+		"multi_edit",
+		"read_file",
+		"remember",
+		"slash_command",
+		"todo_write",
+		"wait",
+		"write_file",
+	}
+	if got := toolSchemaNames(req.Tools); !reflect.DeepEqual(got, wantTools) {
+		t.Fatalf("economy first request tool order changed\ngot  %v\nwant %v", got, wantTools)
+	}
+	for _, want := range []string{"connect_tool_source", "read_file", "grep", "edit_file", "bash", "slash_command", "ask"} {
+		if !requestHasTool(req, want) {
+			t.Fatalf("economy first request missing tool %q; tools=%v", want, toolSchemaNames(req.Tools))
+		}
+	}
+	for _, forbidden := range []string{
+		"web_fetch", "task", "run_skill", "read_skill", "install_skill", "install_source",
+		"explore", "research", "review", "security_review",
+		"lsp_definition", "lsp_references", "lsp_hover", "lsp_diagnostics",
+	} {
+		if requestHasTool(req, forbidden) {
+			t.Fatalf("economy first request should hide %q; tools=%v", forbidden, toolSchemaNames(req.Tools))
+		}
+	}
+	if requestHasToolPrefix(req, "mcp__mockmcp") {
+		t.Fatalf("economy first request should not expose MCP placeholders; tools=%v", toolSchemaNames(req.Tools))
+	}
+	sys := systemMessage(req.Messages)
+	if !strings.Contains(sys, tokenEconomyPrompt) {
+		t.Fatalf("token economy prompt missing from system message:\n%s", sys)
+	}
+	if strings.Contains(sys, "# Skills") || strings.Contains(sys, "projskill") {
+		t.Fatalf("skills index should not be in economy system prompt:\n%s", sys)
+	}
+}
+
+func TestBuildTokenEconomyConnectsWebFetchOnDemand(t *testing.T) {
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+
+	registerBootTokenProfileTestProvider()
+	prov := testutil.NewMock("token-economy",
+		testutil.Turn{ToolCalls: []provider.ToolCall{
+			{ID: "source-1", Name: "connect_tool_source", Arguments: `{"source":"web_fetch"}`},
+		}},
+		testutil.Turn{Text: "done"},
+	)
+	setBootTokenProfileTestProvider(t, prov)
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "test-model"
+
+[codegraph]
+enabled = false
+
+[agent]
+system_prompt = "BASE"
+
+[[providers]]
+name = "test-model"
+kind = "boot-token-profile-test"
+model = "x"
+`)
+
+	ctrl, err := Build(context.Background(), Options{Sink: event.Discard, TokenMode: TokenModeEconomy})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer ctrl.Close()
+	if err := ctrl.Run(context.Background(), "fetch later"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	reqs := prov.Requests()
+	if len(reqs) != 2 {
+		t.Fatalf("requests = %d, want 2", len(reqs))
+	}
+	if requestHasTool(reqs[0], "web_fetch") {
+		t.Fatalf("first request should hide web_fetch; tools=%v", toolSchemaNames(reqs[0].Tools))
+	}
+	if !requestHasTool(reqs[1], "web_fetch") {
+		t.Fatalf("second request should expose web_fetch after connect_tool_source; tools=%v", toolSchemaNames(reqs[1].Tools))
+	}
+}
+
+func TestBuildTokenEconomyPlanModeCanConnectWebFetch(t *testing.T) {
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+
+	registerBootTokenProfileTestProvider()
+	prov := testutil.NewMock("token-economy",
+		testutil.Turn{ToolCalls: []provider.ToolCall{
+			{ID: "source-1", Name: "connect_tool_source", Arguments: `{"source":"web_fetch"}`},
+		}},
+		testutil.Turn{Text: "done"},
+	)
+	setBootTokenProfileTestProvider(t, prov)
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "test-model"
+
+[codegraph]
+enabled = false
+
+[agent]
+system_prompt = "BASE"
+
+[[providers]]
+name = "test-model"
+kind = "boot-token-profile-test"
+model = "x"
+`)
+
+	ctrl, err := Build(context.Background(), Options{Sink: event.Discard, TokenMode: TokenModeEconomy})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer ctrl.Close()
+	ctrl.SetPlanMode(true)
+	if err := ctrl.Run(context.Background(), "fetch later while planning"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	reqs := prov.Requests()
+	if len(reqs) != 2 {
+		t.Fatalf("requests = %d, want 2", len(reqs))
+	}
+	if !requestHasTool(reqs[1], "web_fetch") {
+		t.Fatalf("second request should expose web_fetch in plan economy mode; tools=%v", toolSchemaNames(reqs[1].Tools))
+	}
+	for _, msg := range ctrl.History() {
+		if msg.Role == provider.RoleTool && msg.Name == "connect_tool_source" && strings.Contains(msg.Content, "blocked:") {
+			t.Fatalf("connect_tool_source should not be blocked in plan mode, got:\n%s", msg.Content)
+		}
+	}
+}
+
+func TestBuildTokenEconomyWebFetchConnectorHonorsDisabledBuiltin(t *testing.T) {
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+
+	registerBootTokenProfileTestProvider()
+	prov := testutil.NewMock("token-economy",
+		testutil.Turn{ToolCalls: []provider.ToolCall{
+			{ID: "source-1", Name: "connect_tool_source", Arguments: `{"source":"web_fetch"}`},
+		}},
+		testutil.Turn{Text: "done"},
+	)
+	setBootTokenProfileTestProvider(t, prov)
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "test-model"
+
+[tools]
+enabled = ["read_file", "grep"]
+
+[codegraph]
+enabled = false
+
+[agent]
+system_prompt = "BASE"
+
+[[providers]]
+name = "test-model"
+kind = "boot-token-profile-test"
+model = "x"
+`)
+
+	ctrl, err := Build(context.Background(), Options{Sink: event.Discard, TokenMode: TokenModeEconomy})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer ctrl.Close()
+	if err := ctrl.Run(context.Background(), "fetch later"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	reqs := prov.Requests()
+	if len(reqs) != 2 {
+		t.Fatalf("requests = %d, want 2", len(reqs))
+	}
+	if requestHasTool(reqs[1], "web_fetch") {
+		t.Fatalf("disabled web_fetch should not be exposed after connect_tool_source; tools=%v", toolSchemaNames(reqs[1].Tools))
+	}
+	var toolOutput string
+	for _, msg := range ctrl.History() {
+		if msg.Role == provider.RoleTool && msg.Name == "connect_tool_source" {
+			toolOutput += msg.Content
+		}
+	}
+	if !strings.Contains(toolOutput, "web_fetch is disabled by [tools].enabled") {
+		t.Fatalf("connector should explain disabled web_fetch, got:\n%s", toolOutput)
+	}
+}
+
+func TestBuildTokenEconomyConnectsSkillsOnDemand(t *testing.T) {
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+
+	registerBootTokenProfileTestProvider()
+	prov := testutil.NewMock("token-economy",
+		testutil.Turn{ToolCalls: []provider.ToolCall{
+			{ID: "source-1", Name: "connect_tool_source", Arguments: `{"source":"skills"}`},
+		}},
+		testutil.Turn{Text: "done"},
+	)
+	setBootTokenProfileTestProvider(t, prov)
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "test-model"
+
+[codegraph]
+enabled = false
+
+[agent]
+system_prompt = "BASE"
+
+[[providers]]
+name = "test-model"
+kind = "boot-token-profile-test"
+model = "x"
+`)
+	writeFile(t, dir, ".reasonix/skills/projskill.md", "---\ndescription: a project skill\n---\nplaybook")
+
+	ctrl, err := Build(context.Background(), Options{Sink: event.Discard, TokenMode: TokenModeEconomy})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer ctrl.Close()
+	if err := ctrl.Run(context.Background(), "use skills later"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	reqs := prov.Requests()
+	if len(reqs) != 2 {
+		t.Fatalf("requests = %d, want 2", len(reqs))
+	}
+	for _, name := range []string{"run_skill", "read_skill", "explore"} {
+		if requestHasTool(reqs[0], name) {
+			t.Fatalf("first request should hide %q; tools=%v", name, toolSchemaNames(reqs[0].Tools))
+		}
+		if !requestHasTool(reqs[1], name) {
+			t.Fatalf("second request should expose %q after connect_tool_source; tools=%v", name, toolSchemaNames(reqs[1].Tools))
+		}
+	}
+	var toolOutput string
+	for _, msg := range ctrl.History() {
+		if msg.Role == provider.RoleTool && msg.Name == "connect_tool_source" {
+			toolOutput += msg.Content
+		}
+	}
+	if !strings.Contains(toolOutput, "projskill") || !strings.Contains(toolOutput, "# Skills") {
+		t.Fatalf("skills source result should include the skill index, got:\n%s", toolOutput)
 	}
 }
 

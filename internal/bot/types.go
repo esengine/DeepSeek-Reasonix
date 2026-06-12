@@ -26,40 +26,50 @@ const (
 
 // SessionSource 是会话的复合标识，用于生成稳定的 session key。
 type SessionSource struct {
-	Platform Platform `json:"platform"`
-	ChatType ChatType `json:"chat_type"`
-	ChatID   string   `json:"chat_id"`
-	UserID   string   `json:"user_id"`
-	ThreadID string   `json:"thread_id,omitempty"`
+	Platform     Platform `json:"platform"`
+	ConnectionID string   `json:"connection_id,omitempty"`
+	Domain       string   `json:"domain,omitempty"`
+	ChatType     ChatType `json:"chat_type"`
+	ChatID       string   `json:"chat_id"`
+	UserID       string   `json:"user_id"`
+	ThreadID     string   `json:"thread_id,omitempty"`
 }
 
 // InboundMessage 是从任一平台收到的入站消息。
 type InboundMessage struct {
-	Platform  Platform `json:"platform"`
-	ChatType  ChatType `json:"chat_type"`
-	ChatID    string   `json:"chat_id"`
-	UserID    string   `json:"user_id"`
-	UserName  string   `json:"user_name"`
-	Text      string   `json:"text"`
-	MessageID string   `json:"message_id"`
-	ThreadID  string   `json:"thread_id,omitempty"`
-	MediaURLs []string `json:"media_urls,omitempty"`
-	Raw       any      `json:"-"`
+	Platform     Platform `json:"platform"`
+	ConnectionID string   `json:"connection_id,omitempty"`
+	Domain       string   `json:"domain,omitempty"`
+	ChatType     ChatType `json:"chat_type"`
+	ChatID       string   `json:"chat_id"`
+	UserID       string   `json:"user_id"`
+	UserName     string   `json:"user_name"`
+	// OperatorID, when set, is the authenticated actor gated by the allowlist; UserID stays routing-only.
+	OperatorID string   `json:"operator_id,omitempty"`
+	Text       string   `json:"text"`
+	MessageID  string   `json:"message_id"`
+	ThreadID   string   `json:"thread_id,omitempty"`
+	MediaURLs  []string `json:"media_urls,omitempty"`
+	Raw        any      `json:"-"`
 }
 
 // Session derives the SessionSource from this message.
 func (m InboundMessage) Session() SessionSource {
 	return SessionSource{
-		Platform: m.Platform,
-		ChatType: m.ChatType,
-		ChatID:   m.ChatID,
-		UserID:   m.UserID,
-		ThreadID: m.ThreadID,
+		Platform:     m.Platform,
+		ConnectionID: m.ConnectionID,
+		Domain:       m.Domain,
+		ChatType:     m.ChatType,
+		ChatID:       m.ChatID,
+		UserID:       m.UserID,
+		ThreadID:     m.ThreadID,
 	}
 }
 
 // OutboundMessage 是发送到平台的消息。
 type OutboundMessage struct {
+	ConnectionID string           `json:"connection_id,omitempty"`
+	Domain       string           `json:"domain,omitempty"`
 	ChatID       string           `json:"chat_id"`
 	ChatType     ChatType         `json:"chat_type,omitempty"`
 	Text         string           `json:"text,omitempty"`

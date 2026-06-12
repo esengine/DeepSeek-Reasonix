@@ -8,13 +8,15 @@
 import type * as GeneratedApp from "../../wailsjs/go/main/App";
 
 import { t } from "./i18n";
-import { modeWithAutoApproveTools, modeWithPlan, normalizeCollaborationMode, normalizeMode, normalizeToolApprovalMode } from "./types";
+import { DEFAULT_STATUS_BAR_ITEMS, normalizeStatusBarItems } from "./statusBarItems";
+import { modeWithAutoApproveTools, modeWithPlan, normalizeCollaborationMode, normalizeMode, normalizeTokenMode, normalizeToolApprovalMode } from "./types";
 
 import type {
   BalanceInfo,
   BotConnectionDiagnostic,
   BotInstallPollResult,
   BotInstallStartResult,
+  BotRuntimeStatusView,
   BotSettingsView,
   CapabilitiesView,
   CheckpointMeta,
@@ -198,6 +200,8 @@ export interface AppBindings {
   SetEffort(level: string): Promise<void>;
   EffortForTab(tabID: string): Promise<EffortInfo>;
   SetEffortForTab(tabID: string, level: string): Promise<void>;
+  SetTokenMode(mode: string): Promise<void>;
+  SetTokenModeForTab(tabID: string, mode: string): Promise<void>;
   Memory(): Promise<MemoryView>;
   MemorySuggestions(): Promise<MemorySuggestionsView>;
   AcceptMemorySuggestion(suggestion: MemorySuggestion): Promise<string>;
@@ -233,10 +237,13 @@ export interface AppBindings {
   ClearBotSecret(envName: string): Promise<void>;
   StartBotConnectionInstall(provider: string, domain: string): Promise<BotInstallStartResult>;
   PollBotConnectionInstall(installID: string): Promise<BotInstallPollResult>;
+  BotRuntimeStatus(): Promise<BotRuntimeStatusView>;
   DiagnoseBotConnection(id: string): Promise<BotConnectionDiagnostic>;
   TestBotConnection(id: string, target?: string): Promise<BotConnectionDiagnostic>;
   SetCloseBehavior(mode: string): Promise<void>;
   SetDisplayMode(mode: string): Promise<void>;
+  SetStatusBarStyle(style: string): Promise<void>;
+  SetStatusBarItems(items: string[]): Promise<void>;
   SetDesktopLanguage(lang: string): Promise<void>;
   SetDesktopAppearance(theme: string, style: string): Promise<void>;
   SetDesktopCheckUpdates(enabled: boolean): Promise<void>;
@@ -245,7 +252,7 @@ export interface AppBindings {
   SetExpandThinking(on: boolean): Promise<void>;
   MigrateDesktopPreferences(language: string, theme: string, style: string): Promise<void>;
   SetAgentParams(temperature: number, maxSteps: number, plannerMaxSteps: number, systemPrompt: string): Promise<void>;
-  SetTrayLocale(locale: "en" | "zh"): Promise<void>;
+  SetTrayLocale(locale: "en" | "zh" | "zh-TW"): Promise<void>;
   // SetBypass is the legacy Wails name for YOLO/full-access tool auto-approval
   // (ask questions and plan approvals still wait; deny rules still apply).
   // Runtime-only.
@@ -697,14 +704,15 @@ function makeMockApp(): AppBindings {
     bot: {
       enabled: !freshMock,
       model: "",
+      toolApprovalMode: "ask",
       maxSteps: 25,
       debounceMs: 1500,
       allowlist: {
         enabled: true,
         allowAll: false,
         qqUsers: [],
-        feishuUsers: [],
-        weixinUsers: [],
+        feishuUsers: freshMock ? [] : ["ou_mock_user_001"],
+        weixinUsers: freshMock ? [] : ["wxid_mock_user_001"],
         qqGroups: [],
         feishuGroups: [],
         weixinGroups: [],
@@ -737,6 +745,7 @@ function makeMockApp(): AppBindings {
           enabled: true,
           status: "connected",
           model: "",
+          toolApprovalMode: "",
           workspaceRoot: "",
           credential: {
             appId: "cli_mock_lark",
@@ -747,7 +756,7 @@ function makeMockApp(): AppBindings {
           },
           sessionMappings: [
             {
-              remoteId: "ou_3a2bdd60640aaa95518186677b1f6d8c",
+              remoteId: "ou_mock_user_001",
               sessionId: "topic:topic_product",
               scope: "global",
               workspaceRoot: "",
@@ -766,6 +775,7 @@ function makeMockApp(): AppBindings {
           enabled: true,
           status: "connected",
           model: "",
+          toolApprovalMode: "",
           workspaceRoot: "",
           credential: {
             appId: "",
@@ -776,7 +786,7 @@ function makeMockApp(): AppBindings {
           },
           sessionMappings: [
             {
-              remoteId: "wxid_kun_auto",
+              remoteId: "wxid_mock_user_001",
               sessionId: "topic:topic_ai",
               scope: "global",
               workspaceRoot: "",
@@ -794,6 +804,8 @@ function makeMockApp(): AppBindings {
     desktopThemeStyle: "graphite",
     closeBehavior: "background",
     displayMode: "minimal",
+    statusBarStyle: "text",
+    statusBarItems: [...DEFAULT_STATUS_BAR_ITEMS],
     checkUpdates: true,
     telemetry: true,
     metrics: false,
@@ -919,7 +931,7 @@ function makeMockApp(): AppBindings {
               "[[reasonix-im]]",
               "provider=lark",
               "label=Feishu / Lark",
-              "sender=ou_3a2bdd60640aaa95518186677b1f6d8c",
+              "sender=ou_mock_user_001",
               "chat=p2p 会话",
               "[[/reasonix-im]]",
               "你可以做什么",
@@ -938,7 +950,7 @@ function makeMockApp(): AppBindings {
               "[[reasonix-im]]",
               "provider=weixin",
               "label=微信",
-              "sender=wxid_kun_auto",
+              "sender=wxid_mock_user_001",
               "chat=单聊",
               "[[/reasonix-im]]",
               "帮我整理一下今天要做的事",
@@ -957,7 +969,7 @@ function makeMockApp(): AppBindings {
               "[[reasonix-im]]",
               "provider=lark",
               "label=Feishu / Lark",
-              "sender=ou_3a2bdd60640aaa95518186677b1f6d8c",
+              "sender=ou_mock_user_001",
               "chat=p2p 会话",
               "[[/reasonix-im]]",
               "你可以做什么",
@@ -1082,6 +1094,7 @@ function makeMockApp(): AppBindings {
       mode: "normal",
       collaborationMode: "normal",
       toolApprovalMode: "ask",
+      tokenMode: "full",
       active: true,
       cwd: globalWorkspaceRoot,
     },
@@ -1100,6 +1113,7 @@ function makeMockApp(): AppBindings {
       mode: "normal",
       collaborationMode: "normal",
       toolApprovalMode: "ask",
+      tokenMode: "full",
       active: true,
       cwd: "~/projects/joyquant-db",
     },
@@ -1117,6 +1131,7 @@ function makeMockApp(): AppBindings {
       mode: "normal",
       collaborationMode: "normal",
       toolApprovalMode: "ask",
+      tokenMode: "full",
       active: false,
       cwd: "~/projects/joyquant-sys",
     },
@@ -1133,6 +1148,7 @@ function makeMockApp(): AppBindings {
       mode: "normal",
       collaborationMode: "normal",
       toolApprovalMode: "ask",
+      tokenMode: "full",
       active: false,
       cwd: "~/projects/joyquant-db",
     },
@@ -1680,6 +1696,7 @@ function makeMockApp(): AppBindings {
           const active = mockTabs.find((tab) => tab.active) ?? mockTabs[0];
           const toolApprovalMode = normalizeToolApprovalMode(active?.toolApprovalMode, active ? normalizeMode(active.mode) : "normal", settings.autoApproveTools);
           const autoApproveTools = toolApprovalMode === "yolo";
+          const collaborationMode = normalizeCollaborationMode(active?.collaborationMode, active?.goal, active ? normalizeMode(active.mode) : "normal");
           return {
             label: active?.label ?? "DeepSeek-R1",
             ready: active?.ready ?? true,
@@ -1687,7 +1704,9 @@ function makeMockApp(): AppBindings {
             cwd: active?.cwd || cwd,
             autoApproveTools,
             bypass: autoApproveTools,
+            collaborationMode,
             toolApprovalMode,
+            tokenMode: normalizeTokenMode(active?.tokenMode),
             goal: active?.goal ?? "",
             goalStatus: active?.goalStatus ?? (active?.goal ? "running" : "stopped"),
           };
@@ -1696,6 +1715,7 @@ function makeMockApp(): AppBindings {
           const tab = mockTabs.find((item) => item.id === tabID) ?? mockTabs.find((item) => item.active) ?? mockTabs[0];
           const toolApprovalMode = normalizeToolApprovalMode(tab?.toolApprovalMode, tab ? normalizeMode(tab.mode) : "normal", settings.autoApproveTools);
           const autoApproveTools = toolApprovalMode === "yolo";
+          const collaborationMode = normalizeCollaborationMode(tab?.collaborationMode, tab?.goal, tab ? normalizeMode(tab.mode) : "normal");
           return {
             label: tab?.label ?? "DeepSeek-R1",
             ready: tab?.ready ?? true,
@@ -1703,7 +1723,9 @@ function makeMockApp(): AppBindings {
             cwd: tab?.cwd || cwd,
             autoApproveTools,
             bypass: autoApproveTools,
+            collaborationMode,
             toolApprovalMode,
+            tokenMode: normalizeTokenMode(tab?.tokenMode),
             goal: tab?.goal ?? "",
             goalStatus: tab?.goalStatus ?? (tab?.goal ? "running" : "stopped"),
           };
@@ -2074,6 +2096,14 @@ function makeMockApp(): AppBindings {
         async SetEffortForTab(_tabID, level) {
           await this.SetEffort(level);
         },
+        async SetTokenMode(mode: string) {
+          const active = mockTabs.find((tab) => tab.active);
+          if (active) await this.SetTokenModeForTab(active.id, mode);
+        },
+        async SetTokenModeForTab(tabID, mode) {
+          const tokenMode = normalizeTokenMode(mode);
+          mockTabs = mockTabs.map((tab) => (tab.id === tabID ? { ...tab, tokenMode } : tab));
+        },
     async Memory() {
       return {
         available: true,
@@ -2289,6 +2319,16 @@ function makeMockApp(): AppBindings {
               : connection.credential,
           }));
         },
+        async BotRuntimeStatus() {
+          const runningConnections = settings.bot.connections.filter((connection) => connection.enabled && connection.status === "connected").length;
+          return {
+            running: settings.bot.enabled && runningConnections > 0,
+            status: settings.bot.enabled && runningConnections > 0 ? "running" : "stopped",
+            message: settings.bot.enabled && runningConnections > 0 ? `${runningConnections} bot connection(s) running` : "bot runtime is not started",
+            connections: runningConnections,
+            startedAt: settings.bot.enabled && runningConnections > 0 ? new Date(t0).toISOString() : "",
+          };
+        },
         async StartBotConnectionInstall(provider: string, domain: string) {
           const normalizedProvider = provider === "weixin" ? "weixin" : "feishu";
           const normalizedDomain = normalizedProvider === "weixin" ? "weixin" : domain === "lark" ? "lark" : "feishu";
@@ -2317,6 +2357,7 @@ function makeMockApp(): AppBindings {
             enabled: true,
             status: "connected",
             model: "",
+            toolApprovalMode: "",
             workspaceRoot: "",
             credential: {
               appId: provider === "feishu" ? "cli_mock" : "",
@@ -2350,6 +2391,12 @@ function makeMockApp(): AppBindings {
         async SetDisplayMode(mode: string) {
           settings.displayMode = mode;
         },
+        async SetStatusBarStyle(style: string) {
+          settings.statusBarStyle = style === "text" ? "text" : "icon";
+        },
+        async SetStatusBarItems(items: string[]) {
+          settings.statusBarItems = normalizeStatusBarItems(items);
+        },
         async SetDesktopLanguage(lang: string) {
           settings.desktopLanguage = lang === "en" || lang === "zh" ? lang : "";
         },
@@ -2370,7 +2417,7 @@ function makeMockApp(): AppBindings {
           settings.expandThinking = on;
         },
         async MigrateDesktopPreferences(language: string, theme: string, style: string) {
-          if (!settings.desktopLanguage) settings.desktopLanguage = language === "en" || language === "zh" ? language : "";
+          if (!settings.desktopLanguage) settings.desktopLanguage = language === "en" || language === "zh" || language === "zh-TW" ? language : "";
           if (!settings.desktopTheme && !settings.desktopThemeStyle) {
             settings.desktopTheme = theme === "auto" || theme === "light" ? theme : "dark";
             settings.desktopThemeStyle = style;
@@ -2379,7 +2426,7 @@ function makeMockApp(): AppBindings {
     async SetAgentParams(temperature: number, maxSteps: number, plannerMaxSteps: number, systemPrompt: string) {
       settings.agent = { temperature, maxSteps, plannerMaxSteps, systemPrompt };
     },
-    async SetTrayLocale(_locale: "en" | "zh") {},
+    async SetTrayLocale(_locale: "en" | "zh" | "zh-TW") {},
     async SetAutoApproveTools(on: boolean) {
       await this.SetToolApprovalMode(on ? "yolo" : "ask");
     },
@@ -2460,6 +2507,7 @@ function makeMockApp(): AppBindings {
         mode: "normal",
         collaborationMode: "normal",
         toolApprovalMode: "ask",
+        tokenMode: "full",
         active: true,
         cwd: workspaceRoot,
       };
@@ -2485,6 +2533,7 @@ function makeMockApp(): AppBindings {
         mode: "normal",
         collaborationMode: "normal",
         toolApprovalMode: "ask",
+        tokenMode: "full",
         active: true,
         cwd: "",
       };

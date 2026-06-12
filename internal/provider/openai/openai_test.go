@@ -530,8 +530,10 @@ func TestBuildRequestPreservesEmptyIDToolResults(t *testing.T) {
 	})
 	var toolContents []string
 	for _, m := range req.Messages {
-		if m.Role == string(provider.RoleTool) && m.Content != nil {
-			toolContents = append(toolContents, *m.Content)
+		if m.Role == string(provider.RoleTool) {
+			if s, ok := m.Content.(string); ok {
+				toolContents = append(toolContents, s)
+			}
 		}
 	}
 	if len(toolContents) != 2 {

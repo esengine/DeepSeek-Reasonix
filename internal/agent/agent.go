@@ -54,6 +54,7 @@ type Asker interface {
 // callContextKey carries the executing tool call's identity into Execute.
 type callContextKey struct{}
 type parentSessionContextKey struct{}
+type userImagesContextKey struct{}
 
 // callContext is the per-call context a tool can read. parentID is the call being
 // executed and sink is the agent's event sink (the `task` tool uses both to nest
@@ -62,13 +63,14 @@ type callContext struct {
 	parentID string
 	sink     event.Sink
 	asker    Asker
+	planMode bool
 }
 
 // withCallContext stamps ctx with the executing call's ID, the agent's sink, and
 // the asker. executeOne sets this before every Execute; `task` reads it (via
 // CallContext) to nest sub-agent events, and `ask` reads the asker to prompt.
-func withCallContext(ctx context.Context, parentID string, sink event.Sink, asker Asker) context.Context {
-	return context.WithValue(ctx, callContextKey{}, callContext{parentID: parentID, sink: sink, asker: asker})
+func withCallContext(ctx context.Context, parentID string, sink event.Sink, asker Asker, planMode bool) context.Context {
+	return context.WithValue(ctx, callContextKey{}, callContext{parentID: parentID, sink: sink, asker: asker, planMode: planMode})
 }
 
 // CallContext returns the executing call's ID, the agent's sink, and the asker,
@@ -82,6 +84,14 @@ func CallContext(ctx context.Context) (parentID string, sink event.Sink, asker A
 	return cc.parentID, cc.sink, cc.asker, true
 }
 
+// PlanModeFromContext reports whether the tool call is executing under the
+// agent's read-only planning gate. Tools that are themselves ReadOnly may use
+// this to avoid enabling follow-up writer-only surfaces during planning.
+func PlanModeFromContext(ctx context.Context) bool {
+	cc, ok := ctx.Value(callContextKey{}).(callContext)
+	return ok && cc.planMode
+}
+
 // WithParentSession stamps the active parent session ID onto a turn context so
 // persisted sub-agents can record and enforce their owning conversation.
 func WithParentSession(ctx context.Context, parentSession string) context.Context {
@@ -92,6 +102,19 @@ func WithParentSession(ctx context.Context, parentSession string) context.Contex
 func ParentSession(ctx context.Context) string {
 	parentSession, _ := ctx.Value(parentSessionContextKey{}).(string)
 	return strings.TrimSpace(parentSession)
+}
+
+// WithUserImages carries the data URLs of images the user attached to this turn,
+// resolved by the controller (which owns attachments) since the agent must not
+// depend on it. Run embeds them on the user message; the provider sends them only
+// when the model is vision-capable.
+func WithUserImages(ctx context.Context, images []string) context.Context {
+	return context.WithValue(ctx, userImagesContextKey{}, images)
+}
+
+func userImages(ctx context.Context) []string {
+	images, _ := ctx.Value(userImagesContextKey{}).([]string)
+	return images
 }
 
 // Gate decides, per tool call, whether it may run. The agent consults it at
@@ -519,7 +542,7 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 	}
 	a.repeatSuccessCounts = nil
 	a.sink.Emit(event.Event{Kind: event.TurnStarted})
-	a.session.Add(provider.Message{Role: provider.RoleUser, Content: input})
+	a.session.Add(provider.Message{Role: provider.RoleUser, Content: input, Images: userImages(ctx)})
 
 	finalReadinessBlocks := 0
 	emptyFinalBlocks := 0
@@ -1329,7 +1352,7 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 			}
 		}
 	}
-	cctx := withCallContext(ctx, call.ID, a.sink, a.asker)
+	cctx := withCallContext(ctx, call.ID, a.sink, a.asker, a.planMode.Load())
 	if a.evidence != nil {
 		cctx = evidence.WithLedger(cctx, a.evidence)
 		cctx = evidence.WithSessionMessages(cctx, a.session.Snapshot())

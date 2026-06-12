@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useT } from "../lib/i18n";
 import type { WireApproval } from "../lib/types";
 import { PromptAction, PromptDetailToggle, PromptShelf } from "./PromptShelf";
+import { playAttentionChime } from "../lib/sound";
 
 export function ApprovalModal({
   approval,
@@ -43,6 +44,7 @@ export function ApprovalModal({
     setRevisionOpen(false);
     setRevisionText("");
     setDetailsOpen(false);
+    playAttentionChime();
   }, [approval.id]);
 
   useEffect(() => {

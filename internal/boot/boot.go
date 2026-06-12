@@ -78,6 +78,11 @@ type Options struct {
 	// (for example ACP session/new). They are connected eagerly for this
 	// controller but are not persisted to reasonix.toml.
 	ExtraPlugins []plugin.Spec
+	// TokenMode selects how much optional context/tool surface this session exposes
+	// at boot. Empty/full preserves the normal capability surface. "economy" keeps
+	// the core coding tools visible and moves skills, MCP, CodeGraph, LSP, web_fetch,
+	// install_source, and task behind connect_tool_source.
+	TokenMode string
 	// SessionDir overrides where persisted chat transcripts are written. When
 	// empty, the shared CLI/global session directory is used.
 	SessionDir string
@@ -105,6 +110,8 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	if modelName == "" {
 		modelName = cfg.DefaultModel
 	}
+	tokenMode := NormalizeTokenMode(opts.TokenMode)
+	tokenEconomy := tokenMode == TokenModeEconomy
 	entry, ok := cfg.ResolveModel(modelName)
 	if !ok {
 		return nil, fmt.Errorf("%w %q (configured: %s); note: defining [[providers]] replaces the built-in presets, so add a [[providers]] entry for it or use a configured name, or run `reasonix setup` to reconfigure", ErrUnknownModel, modelName, providerNames(cfg))
@@ -167,6 +174,9 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		sysPrompt = outputstyle.Apply(sysPrompt, st)
 	}
 	sysPrompt += "\n\n" + config.LanguagePolicy
+	if tokenEconomy {
+		sysPrompt += "\n\n" + tokenEconomyPrompt
+	}
 
 	// Persistent memory (REASONIX.md / AGENTS.md hierarchy + auto-memory index)
 	// folds into the system prompt exactly here, once: it becomes part of the
@@ -192,7 +202,9 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	skills := skillStore.List()
 	allSkillStore := skill.New(skill.Options{ProjectRoot: root, CustomPaths: cfg.SkillCustomPaths(), ExcludedPaths: cfg.SkillExcludedPaths(), MaxDepth: cfg.SkillMaxDepth(), Stderr: io.Discard})
 	allSkills := allSkillStore.List()
-	sysPrompt = skill.ApplyIndex(sysPrompt, skills)
+	if !tokenEconomy {
+		sysPrompt = skill.ApplyIndex(sysPrompt, skills)
+	}
 
 	sessionDir := opts.SessionDir
 	if sessionDir == "" {
@@ -211,7 +223,11 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	}
 	searchSpec := builtin.ResolveSearch(cfg.Tools.Search.Engine, cfg.Tools.Search.RgPath, stderr)
 	bashTimeout := time.Duration(cfg.BashTimeoutSeconds()) * time.Second
-	addBuiltins(reg, cfg.Tools.Enabled, cfg.WriteRootsForRoot(root), bashSpec, bashTimeout, searchSpec, stderr, root, proxySpec)
+	enabledBuiltins := cfg.Tools.Enabled
+	if tokenEconomy {
+		enabledBuiltins = tokenEconomyBuiltins(enabledBuiltins)
+	}
+	addBuiltins(reg, enabledBuiltins, cfg.WriteRootsForRoot(root), bashSpec, bashTimeout, searchSpec, stderr, root, proxySpec)
 	// Always construct a host, even with no plugins configured, so the controller's
 	// host pointer is stable for the session and `/mcp add` can hot-add into it.
 	pluginHost := plugin.NewHost()
@@ -221,6 +237,21 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// session starts immediately while enabled MCP servers warm up.
 	autoStartEntries := builtinmcp.AppendEnabled(cfg.AutoStartPlugins(), cfg.Plugins, cfg.BuiltInMCP.EnabledNames(), pluginSpecNames(opts.ExtraPlugins)...)
 	eagerEntries, lazyEntries, bgEntries := partitionByTier(autoStartEntries)
+	onDemandMCPSpecs := map[string]plugin.Spec{}
+	onDemandMCPNames := []string{}
+	if tokenEconomy {
+		for _, spec := range append(PluginSpecs(autoStartEntries), opts.ExtraPlugins...) {
+			name := strings.TrimSpace(spec.Name)
+			if name == "" {
+				continue
+			}
+			if _, exists := onDemandMCPSpecs[name]; !exists {
+				onDemandMCPNames = append(onDemandMCPNames, name)
+			}
+			onDemandMCPSpecs[name] = spec
+		}
+		eagerEntries, lazyEntries, bgEntries = nil, nil, nil
+	}
 
 	// Auto-demote: any eager plugin that has been chronically slow (recent
 	// samples repeatedly hit the blocking startup budget) drops to lazy
@@ -255,7 +286,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	//
 	// CodeGraph is fixed to background startup. Legacy tier values are ignored so
 	// enabling it never blocks chat startup.
-	if cfg.Codegraph.Enabled {
+	if cfg.Codegraph.Enabled && !tokenEconomy {
 		bin, ok := codegraph.Resolve(cfg.Codegraph.Path)
 		switch {
 		case ok && !codegraph.IndexableRoot(root):
@@ -307,7 +338,9 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 				Text: "codegraph: not installed — run `reasonix codegraph install` to enable symbol-graph tools"})
 		}
 	}
-	eagerSpecs = append(eagerSpecs, opts.ExtraPlugins...)
+	if !tokenEconomy {
+		eagerSpecs = append(eagerSpecs, opts.ExtraPlugins...)
+	}
 
 	// Apply caller-supplied stderr override to every spec across tiers.
 	if opts.Stderr != nil {
@@ -368,7 +401,11 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		if len(cgTools) > 0 {
 			sysPrompt += "\n\n" + codegraph.SteerText
 			skill.SetExtraReadTools(cgTools)
+		} else {
+			skill.SetExtraReadTools(nil)
 		}
+	} else {
+		skill.SetExtraReadTools(nil)
 	}
 
 	for _, msg := range demoteMessages {
@@ -381,10 +418,19 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// registering them is cheap even when no server is installed (a query then
 	// returns an install hint). The manager is session-scoped; chain its shutdown
 	// into the controller's cleanup so servers stop with the session, not the turn.
+	var lspMgr *lsp.Manager
+	lspToolsAdded := false
+	addLSPTools := func() []string {
+		if lspMgr == nil || lspToolsAdded {
+			return nil
+		}
+		lspToolsAdded = true
+		return addTools(reg, lsp.Tools(lspMgr))
+	}
 	if cfg.LSP.Enabled {
-		lspMgr := lsp.NewManager(root, LSPSpecs(cfg.LSP))
-		for _, t := range lsp.Tools(lspMgr) {
-			reg.Add(t)
+		lspMgr = lsp.NewManager(root, LSPSpecs(cfg.LSP))
+		if !tokenEconomy {
+			addLSPTools()
 		}
 		prev := cleanup
 		cleanup = func() { prev(); lspMgr.Close() }
@@ -456,12 +502,23 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	}
 	taskModel := firstNonEmpty(cfg.Agent.SubagentModels["task"], cfg.Agent.SubagentModel)
 	taskEffort := firstNonEmpty(cfg.Agent.SubagentEfforts["task"], cfg.Agent.SubagentEffort)
-	reg.Add(agent.NewTaskTool(execProv, entry.Price, reg, maxSteps,
-		entry.ContextWindow, cfg.Agent.SoftCompactRatio, cfg.Agent.CompactRatio, cfg.Agent.CompactForceRatio,
-		cfg.Agent.Temperature, config.ArchiveDir(), "", headlessGate,
-		taskModel, taskEffort, resolveSubagentProvider).
-		WithTranscripts(subagentStore, root, modelName, entry.Effort).
-		WithTranscriptIdentityResolver(subagentIdentity))
+	taskToolAdded := false
+	addTaskTool := func() string {
+		if taskToolAdded {
+			return "task tool is already enabled."
+		}
+		taskToolAdded = true
+		reg.Add(agent.NewTaskTool(execProv, entry.Price, reg, maxSteps,
+			entry.ContextWindow, cfg.Agent.SoftCompactRatio, cfg.Agent.CompactRatio, cfg.Agent.CompactForceRatio,
+			cfg.Agent.Temperature, config.ArchiveDir(), "", headlessGate,
+			taskModel, taskEffort, resolveSubagentProvider).
+			WithTranscripts(subagentStore, root, modelName, entry.Effort).
+			WithTranscriptIdentityResolver(subagentIdentity))
+		return "enabled task."
+	}
+	if !tokenEconomy {
+		addTaskTool()
+	}
 
 	// The `memory` tool searches/reads saved facts on demand; `remember` persists
 	// durable facts to the project's auto-memory store; `forget` prunes ones that
@@ -567,56 +624,201 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		}
 		return &event.Profile{Model: model, Effort: effort}
 	}
-	reg.Add(skill.NewRunSkillTool(skillStore, skillRunner, skillProfile))
-	reg.Add(skill.NewReadSkillTool(skillStore))
-	reg.Add(skill.NewInstallSkillTool(skillStore, nil))
-	reg.Add(installsource.NewTool(installsource.Options{
-		ProjectRoot: root,
-		HTTPClient:  balanceClient,
-		ConnectMCP: func(e config.PluginEntry) (installsource.MCPConnectResult, error) {
-			exp := e.ExpandedPlugin()
-			spec := plugin.Spec{
-				Name:    exp.Name,
-				Type:    exp.Type,
-				Command: exp.Command,
-				Args:    exp.Args,
-				Env:     exp.Env,
-				URL:     exp.URL,
-				Headers: exp.Headers,
+	// Custom slash commands (.reasonix/commands + user dir). Best-effort: a malformed
+	// file is skipped, and a load error never blocks the session.
+	cmds, _ := command.Load(config.CommandDirsForRoot(root)...)
+	addSlashCommandTool := func(includeSkills bool) {
+		// Expose loaded slash commands to the model via slash_command. In economy
+		// mode skills join this list only after the skills source is enabled.
+		var slashEntries []command.SlashEntry
+		if includeSkills {
+			for _, sk := range skills {
+				sk := sk
+				slashEntries = append(slashEntries, command.SlashEntry{
+					Name:        sk.Name,
+					Description: sk.Description,
+					Render:      func(args []string) string { return skill.Render(sk, strings.Join(args, " ")) },
+				})
 			}
-			if opts.Stderr != nil {
-				spec.Stderr = opts.Stderr
-			}
-			tools, err := pluginHost.Add(ctx, spec)
-			if err != nil {
-				return installsource.MCPConnectResult{}, err
-			}
-			reg.RemovePrefix(plugin.ToolPrefix(spec.Name))
-			for _, t := range tools {
-				reg.Add(t)
-			}
-			// Disconnect closes the server and drops its namespaced tools.
-			// Used by the install_source rollback path when SaveTo fails.
-			disconnect := func() {
-				if prefix, ok := pluginHost.Remove(spec.Name); ok {
-					reg.RemovePrefix(prefix)
+		}
+		for _, cmd := range cmds {
+			cmd := cmd
+			slashEntries = append(slashEntries, command.SlashEntry{
+				Name:        cmd.Name,
+				Description: cmd.Description,
+				ArgHint:     cmd.ArgHint,
+				Render:      func(args []string) string { return cmd.Render(args) },
+			})
+		}
+		reg.Add(command.NewSlashCommandTool(slashEntries))
+	}
+	installSourceAdded := false
+	addInstallSourceTool := func() string {
+		if installSourceAdded {
+			return "install_source is already enabled."
+		}
+		installSourceAdded = true
+		reg.Add(installsource.NewTool(installsource.Options{
+			ProjectRoot: root,
+			HTTPClient:  balanceClient,
+			ConnectMCP: func(e config.PluginEntry) (installsource.MCPConnectResult, error) {
+				exp := e.ExpandedPlugin()
+				spec := plugin.Spec{
+					Name:    exp.Name,
+					Type:    exp.Type,
+					Command: exp.Command,
+					Args:    exp.Args,
+					Env:     exp.Env,
+					URL:     exp.URL,
+					Headers: exp.Headers,
 				}
-			}
-			return installsource.MCPConnectResult{
-				ToolCount:  len(tools),
-				Disconnect: disconnect,
-			}, nil
-		},
-		OnDisconnect: func(serverName string) bool {
-			if prefix, ok := pluginHost.Remove(serverName); ok {
-				reg.RemovePrefix(prefix)
-				return true
-			}
-			return false
-		},
-	}))
-	for _, t := range skill.BuiltinSubagentTools(skillStore, skillRunner, skillProfile) {
-		reg.Add(t)
+				if opts.Stderr != nil {
+					spec.Stderr = opts.Stderr
+				}
+				tools, err := pluginHost.Add(ctx, spec)
+				if err != nil {
+					return installsource.MCPConnectResult{}, err
+				}
+				reg.RemovePrefix(plugin.ToolPrefix(spec.Name))
+				for _, t := range tools {
+					reg.Add(t)
+				}
+				// Disconnect closes the server and drops its namespaced tools.
+				// Used by the install_source rollback path when SaveTo fails.
+				disconnect := func() {
+					if prefix, ok := pluginHost.Remove(spec.Name); ok {
+						reg.RemovePrefix(prefix)
+					}
+				}
+				return installsource.MCPConnectResult{
+					ToolCount:  len(tools),
+					Disconnect: disconnect,
+				}, nil
+			},
+			OnDisconnect: func(serverName string) bool {
+				if prefix, ok := pluginHost.Remove(serverName); ok {
+					reg.RemovePrefix(prefix)
+					return true
+				}
+				return false
+			},
+		}))
+		return "enabled install_source."
+	}
+	skillToolsAdded := false
+	addSkillTools := func() string {
+		if skillToolsAdded {
+			return "skills are already enabled.\n\n" + skill.IndexBlock(skills)
+		}
+		skillToolsAdded = true
+		reg.Add(skill.NewRunSkillTool(skillStore, skillRunner, skillProfile))
+		reg.Add(skill.NewReadSkillTool(skillStore))
+		reg.Add(skill.NewInstallSkillTool(skillStore, nil))
+		for _, t := range skill.BuiltinSubagentTools(skillStore, skillRunner, skillProfile) {
+			reg.Add(t)
+		}
+		addSlashCommandTool(true)
+		return "enabled skills. Use run_skill/read_skill or the dedicated skill tools on the next model request.\n\n" + skill.IndexBlock(skills)
+	}
+	if tokenEconomy {
+		addSlashCommandTool(false)
+	} else {
+		addInstallSourceTool()
+		addSkillTools()
+	}
+	if tokenEconomy {
+		reg.Add(&toolSourceConnector{
+			skills: func(context.Context) (string, error) {
+				return addSkillTools(), nil
+			},
+			task: func(context.Context) (string, error) {
+				return addTaskTool(), nil
+			},
+			install: func(context.Context) (string, error) {
+				return addInstallSourceTool(), nil
+			},
+			webFetch: func(context.Context) (string, error) {
+				if !builtinToolEnabled(cfg.Tools.Enabled, "web_fetch") {
+					return "web_fetch is disabled by [tools].enabled.", nil
+				}
+				names := addTools(reg, builtin.Workspace{
+					Dir:         root,
+					WriteRoots:  cfg.WriteRootsForRoot(root),
+					Bash:        bashSpec,
+					BashTimeout: bashTimeout,
+					Search:      searchSpec,
+					ProxySpec:   proxySpec,
+				}.Tools("web_fetch"))
+				if len(names) == 0 {
+					return "web_fetch is already enabled or unavailable.", nil
+				}
+				return "enabled " + strings.Join(names, ", ") + ".", nil
+			},
+			lsp: func(context.Context) (string, error) {
+				if lspMgr == nil {
+					return "", fmt.Errorf("LSP is disabled in config")
+				}
+				names := addLSPTools()
+				if len(names) == 0 {
+					return "LSP tools are already enabled.", nil
+				}
+				return "enabled " + strings.Join(names, ", ") + ".", nil
+			},
+			codegraph: func(context.Context) (string, error) {
+				if !cfg.Codegraph.Enabled {
+					return "", fmt.Errorf("codegraph is disabled in config")
+				}
+				bin, ok := codegraph.Resolve(cfg.Codegraph.Path)
+				if !ok {
+					return "", fmt.Errorf("codegraph is not installed")
+				}
+				if !codegraph.IndexableRoot(root) {
+					return "", fmt.Errorf("codegraph: project root is a filesystem root — skipped to avoid indexing the whole volume")
+				}
+				if err := codegraph.EnsureInit(ctx, bin, root); err != nil {
+					return "", fmt.Errorf("codegraph init: %w", err)
+				}
+				spec := plugin.Spec{
+					Name:              "codegraph",
+					StripRawPrefix:    "codegraph_",
+					Command:           bin,
+					Args:              []string{"serve", "--mcp"},
+					Dir:               root,
+					ReadOnlyToolNames: codegraph.ReadOnlyToolNames(),
+					LowPriority:       true,
+				}
+				if opts.Stderr != nil {
+					spec.Stderr = opts.Stderr
+				}
+				tools, err := pluginHost.Add(ctx, spec)
+				if err != nil {
+					return "", err
+				}
+				reg.RemovePrefix(plugin.ToolPrefix(spec.Name))
+				names := addTools(reg, tools)
+				return "enabled codegraph tools: " + strings.Join(names, ", ") + ".", nil
+			},
+			mcp: func(_ context.Context, name string) (string, error) {
+				spec, ok := onDemandMCPSpecs[name]
+				if !ok {
+					return "", fmt.Errorf("no configured MCP server named %q", name)
+				}
+				if opts.Stderr != nil {
+					spec.Stderr = opts.Stderr
+				}
+				tools, err := pluginHost.Add(ctx, spec)
+				if err != nil {
+					return "", err
+				}
+				reg.RemovePrefix(plugin.ToolPrefix(spec.Name))
+				names := addTools(reg, tools)
+				if len(names) == 0 {
+					return fmt.Sprintf("MCP server %q connected but exposed no tools.", spec.Name), nil
+				}
+				return fmt.Sprintf("enabled MCP server %q tools: %s.", spec.Name, strings.Join(names, ", ")), nil
+			},
+			mcpNames: onDemandMCPNames,
+		})
 	}
 
 	execSess := agent.NewSession(sysPrompt)
@@ -635,34 +837,6 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		ArchiveDir:        config.ArchiveDir(),
 	}, sink)
 
-	// Custom slash commands (.reasonix/commands + user dir). Best-effort: a malformed
-	// file is skipped, and a load error never blocks the session.
-	cmds, _ := command.Load(config.CommandDirsForRoot(root)...)
-
-	// Expose the loaded slash commands (skills + custom commands) to the model via
-	// the slash_command tool, so it can invoke a project playbook by name the way a
-	// user types "/name". Skills are added first, then commands, so a command wins
-	// a name clash — matching the prompt's command-over-skill precedence.
-	var slashEntries []command.SlashEntry
-	for _, sk := range skills {
-		sk := sk
-		slashEntries = append(slashEntries, command.SlashEntry{
-			Name:        sk.Name,
-			Description: sk.Description,
-			Render:      func(args []string) string { return skill.Render(sk, strings.Join(args, " ")) },
-		})
-	}
-	for _, cmd := range cmds {
-		cmd := cmd
-		slashEntries = append(slashEntries, command.SlashEntry{
-			Name:        cmd.Name,
-			Description: cmd.Description,
-			ArgHint:     cmd.ArgHint,
-			Render:      func(args []string) string { return cmd.Render(args) },
-		})
-	}
-	reg.Add(command.NewSlashCommandTool(slashEntries))
-
 	var runner agent.Runner = executor
 	label := entry.Model
 	var classifier *control.ProviderAutoPlanClassifier
@@ -671,7 +845,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// Coordinator with its own session, kept separate for cache stability. The
 	// planner gets the same standing memory context and a filtered read-only
 	// research tool set, so it can inspect rules/code without side effects.
-	if pm := cfg.Agent.PlannerModel; pm != "" {
+	if pm := cfg.Agent.PlannerModel; pm != "" && !tokenEconomy {
 		pe, ok := cfg.ResolveModel(pm)
 		if !ok {
 			return nil, fmt.Errorf("planner_model %q is not a configured provider", pm)
@@ -696,7 +870,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			label = entry.Model + " + planner " + pe.Model
 		}
 	}
-	if !strings.EqualFold(strings.TrimSpace(cfg.Agent.AutoPlan), "off") && cfg.Agent.AutoPlanClassifier != "" {
+	if !tokenEconomy && !strings.EqualFold(strings.TrimSpace(cfg.Agent.AutoPlan), "off") && cfg.Agent.AutoPlanClassifier != "" {
 		cm := cfg.Agent.AutoPlanClassifier
 		ce, ok := cfg.ResolveModel(cm)
 		if !ok {
@@ -1018,6 +1192,7 @@ func NewProviderWithProxy(e *config.ProviderEntry, proxy netclient.ProxySpec) (p
 			"effort":             config.EffectiveEffort(e),
 			"reasoning_protocol": config.ReasoningProtocolForEntry(e),
 			"proxy_spec":         proxy,
+			"vision":             e.Vision,
 		},
 	})
 }
@@ -1062,6 +1237,19 @@ func addBuiltins(reg *tool.Registry, enabled, writeRoots []string, bashSpec sand
 			reg.Add(t)
 		}
 	}
+}
+
+func builtinToolEnabled(enabled []string, name string) bool {
+	if len(enabled) == 0 {
+		return true
+	}
+	name = strings.TrimSpace(name)
+	for _, candidate := range enabled {
+		if strings.TrimSpace(candidate) == name {
+			return true
+		}
+	}
+	return false
 }
 
 // partitionByTier splits configured plugin entries into the three startup

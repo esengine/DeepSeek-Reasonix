@@ -112,8 +112,10 @@ model       = "deepseek-v4-flash"
 api_key_env = "DEEPSEEK_API_KEY"
 ```
 
-Resolution order is **flag > `./reasonix.toml` > `~/.config/reasonix/config.toml` >
-built-in defaults**; secrets come from the environment via `api_key_env` and are
+Resolution order is **flag > `./reasonix.toml` > the user config file >
+built-in defaults**; the user file lives in your OS config dir — `~/.config/reasonix/`
+on Linux, `~/Library/Application Support/reasonix/` on macOS, `%AppData%\reasonix\` on
+Windows. Secrets come from the environment via `api_key_env` and are
 never written to config files. Permissions, the sandbox, plugins (MCP), slash
 commands, `@` references, and two-model setup are all in the
 **[Guide](./docs/GUIDE.md)**.
@@ -122,6 +124,8 @@ commands, `@` references, and two-model setup are all in the
 
 - **[Guide](./docs/GUIDE.md)** — configuration, permissions & sandbox, plugins
   (MCP), slash commands, `@` references, two-model collaboration.
+- **[Bot guide](./docs/BOT_GUIDE.md)** — connect Feishu, Lark, and WeChat bots
+  from the desktop app, then use approvals, YOLO, and commands from IM.
 - **[Spec](./docs/SPEC.md)** — engineering contract: architecture, registries,
   data types, and roadmap.
 - **[Migrating from 0.x](./docs/MIGRATING.md)** — moving from the legacy

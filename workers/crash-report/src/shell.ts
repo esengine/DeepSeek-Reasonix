@@ -46,6 +46,9 @@ table{border-collapse:collapse;width:100%;font-size:14px}
 th{text-align:left;color:var(--ink-3);font-weight:500;font-size:12.5px;padding:0 14px 8px 0}
 td{padding:8px 14px 8px 0;border-top:1px solid var(--line);vertical-align:middle}
 td.n{font-family:var(--mono);font-size:13px}
+td.summary{max-width:480px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:var(--mono);font-size:12.5px}
+.muted{color:var(--ink-3)}
+p.summary{font-family:var(--mono);font-size:14px;margin:2px 0 6px;word-break:break-word}
 a.fp{font-family:var(--mono);font-size:13px;color:var(--accent);text-decoration:none}
 a.fp:hover{text-decoration:underline}
 .pill{display:inline-block;font-size:12px;font-weight:500;padding:2px 10px;border-radius:999px;background:var(--accent-soft);color:var(--accent)}

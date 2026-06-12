@@ -108,7 +108,8 @@ model       = "deepseek-v4-flash"
 api_key_env = "DEEPSEEK_API_KEY"
 ```
 
-优先级为 **flag > `./reasonix.toml` > `~/.config/reasonix/config.toml` > 内置默认值**;
+优先级为 **flag > `./reasonix.toml` > 用户配置文件 > 内置默认值**;用户配置位于操作系统的配置目录——
+Linux 为 `~/.config/reasonix/`,macOS 为 `~/Library/Application Support/reasonix/`,Windows 为 `%AppData%\reasonix\`。
 密钥经环境变量通过 `api_key_env` 注入,绝不写入配置文件。权限、沙盒、插件(MCP)、
 斜杠命令、`@` 引用与双模型设置,全部在 **[指南](./docs/GUIDE.zh-CN.md)** 里。
 
@@ -116,6 +117,8 @@ api_key_env = "DEEPSEEK_API_KEY"
 
 - **[指南](./docs/GUIDE.zh-CN.md)** —— 配置、权限与沙盒、插件(MCP)、斜杠命令、
   `@` 引用、双模型协同。
+- **[机器人使用指南](./docs/BOT_GUIDE.zh-CN.md)** —— 桌面端连接飞书、Lark、微信
+  Bot，以及 IM 里的审批、YOLO 和命令交互。
 - **[规格](./docs/SPEC.md)** —— 工程契约:架构、registry、数据类型与路线图。
 - **[从 0.x 迁移](./docs/MIGRATING.md)** —— 从 legacy TypeScript 版本迁到 1.0 Go 重写版。
 - **[Checkpoints 与 rewind](./docs/CHECKPOINTS.md)** —— 基于快照的编辑安全网

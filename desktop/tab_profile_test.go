@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/boot"
 	"reasonix/internal/control"
 )
 
@@ -162,6 +163,39 @@ func TestSaveTabsPersistsModelAndEffort(t *testing.T) {
 	}
 	if got.Tabs[0].Mode != "plan" {
 		t.Fatalf("saved mode = %q, want plan", got.Tabs[0].Mode)
+	}
+}
+
+func TestSaveTabsPersistsTokenModeOnlyWhenEconomy(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	app := NewApp()
+	tab := testTab("a", t.TempDir())
+	tab.tokenMode = "economy"
+	app.tabs = map[string]*WorkspaceTab{tab.ID: tab}
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+
+	app.mu.Lock()
+	app.saveTabsLocked()
+	app.mu.Unlock()
+
+	got := loadTabsFile()
+	if len(got.Tabs) != 1 {
+		t.Fatalf("tabs len = %d, want 1", len(got.Tabs))
+	}
+	if got.Tabs[0].TokenMode != "economy" {
+		t.Fatalf("saved token mode = %q, want economy", got.Tabs[0].TokenMode)
+	}
+
+	tab.tokenMode = "full"
+	app.mu.Lock()
+	app.saveTabsLocked()
+	app.mu.Unlock()
+
+	got = loadTabsFile()
+	if got.Tabs[0].TokenMode != "" {
+		t.Fatalf("full token mode should be omitted from persistence, got %q", got.Tabs[0].TokenMode)
 	}
 }
 
@@ -340,17 +374,27 @@ func TestMetaReportsGoalStatus(t *testing.T) {
 	if meta.GoalStatus != control.GoalStatusStopped {
 		t.Fatalf("initial goal status = %q, want stopped", meta.GoalStatus)
 	}
+	if meta.CollaborationMode != "normal" {
+		t.Fatalf("initial collaboration mode = %q, want normal", meta.CollaborationMode)
+	}
 
 	app.SetGoalForTab(tab.ID, "finish the goal runner")
 	meta = app.MetaForTab(tab.ID)
-	if meta.Goal != "finish the goal runner" || meta.GoalStatus != control.GoalStatusRunning {
+	if meta.Goal != "finish the goal runner" || meta.GoalStatus != control.GoalStatusRunning || meta.CollaborationMode != "goal" {
 		t.Fatalf("goal meta = %+v, want running goal", meta)
 	}
 
 	app.ClearGoalForTab(tab.ID)
 	meta = app.MetaForTab(tab.ID)
-	if meta.Goal != "" || meta.GoalStatus != control.GoalStatusStopped {
+	if meta.Goal != "" || meta.GoalStatus != control.GoalStatusStopped || meta.CollaborationMode != "normal" {
 		t.Fatalf("cleared goal meta = %+v, want stopped empty goal", meta)
+	}
+
+	app.SetCollaborationModeForTab(tab.ID, "plan")
+	tab.tokenMode = boot.TokenModeEconomy
+	meta = app.MetaForTab(tab.ID)
+	if meta.CollaborationMode != "plan" || meta.TokenMode != boot.TokenModeEconomy {
+		t.Fatalf("profile meta = %+v, want plan + economy", meta)
 	}
 }
 

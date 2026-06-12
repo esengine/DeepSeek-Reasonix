@@ -525,6 +525,7 @@ func (c *Controller) runTurnWithRawDisplay(ctx context.Context, input, raw, disp
 	c.maybeSessionStart(ctx)
 	c.maybeAutoPlan(ctx, raw)
 	ctx = agent.WithParentSession(ctx, c.parentSessionID())
+	ctx = agent.WithUserImages(ctx, c.inputImages(input))
 	input = c.Compose(input)
 	startMessages := c.messageCount()
 	defer c.snapshotActivityIfChanged(startMessages)
@@ -1058,6 +1059,7 @@ func (c *Controller) notice(text string) {
 func (c *Controller) Run(ctx context.Context, input string) error {
 	c.maybeSessionStart(ctx)
 	ctx = agent.WithParentSession(ctx, c.parentSessionID())
+	ctx = agent.WithUserImages(ctx, c.inputImages(input))
 	startMessages := c.messageCount()
 	defer c.snapshotActivityIfChanged(startMessages)
 	if c.hooks.Enabled() {

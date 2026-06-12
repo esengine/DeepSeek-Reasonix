@@ -5,6 +5,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { asArray } from "./array";
+import { addBreadcrumb } from "./breadcrumbs";
 import { app, onEvent, onReady } from "./bridge";
 import { createRafBatch } from "./rafBatch";
 import { t } from "./i18n";
@@ -23,6 +24,7 @@ import type {
   QuestionAnswer,
   SessionMeta,
   TabMeta,
+  TokenMode,
   ToolApprovalMode,
   WireApproval,
   WireAsk,
@@ -87,6 +89,7 @@ interface State {
   turnStartAt: number;
   turnTokens: number;
   turnTotalTokens: number;
+  turnCost: number;
   sessionTokens: number;
   sessionCost: number;
   sessionCurrency: string;
@@ -104,6 +107,7 @@ export const initialState: State = {
   turnStartAt: 0,
   turnTokens: 0,
   turnTotalTokens: 0,
+  turnCost: 0,
   sessionTokens: 0,
   sessionCost: 0,
   sessionCurrency: "¥",
@@ -117,7 +121,7 @@ function usageTotalTokens(usage?: WireUsage): number {
   return Math.max(0, promptTokens + usage.completionTokens);
 }
 
-function sameMeta(a?: Meta, b?: Meta): boolean {
+export function sameMeta(a?: Meta, b?: Meta): boolean {
   if (a === b) return true;
   if (!a || !b) return false;
   return (
@@ -128,16 +132,28 @@ function sameMeta(a?: Meta, b?: Meta): boolean {
     a.cwd === b.cwd &&
     a.autoApproveTools === b.autoApproveTools &&
     a.bypass === b.bypass &&
+    a.collaborationMode === b.collaborationMode &&
     a.toolApprovalMode === b.toolApprovalMode &&
+    a.tokenMode === b.tokenMode &&
     a.goal === b.goal &&
     a.goalStatus === b.goalStatus
   );
 }
 
-/** Known read-only tool names. Session restore hardcodes readOnly=false for all
- *  tools, so we derive it from the name to enable correct batching.
- *  Mirrors Go backend ReadOnly() + codegraph ReadOnlyToolNames(). */
-function isReadOnlyTool(name: string): boolean {
+const STALE_TURN_RECONCILE_MS = 30_000;
+
+export function shouldReconcileStaleTurn(
+  state: Pick<State, "running" | "turnActive"> | undefined,
+  lastTurnActivityAt: number,
+  now = Date.now(),
+  timeoutMs = STALE_TURN_RECONCILE_MS,
+): boolean {
+  if (!state?.running || !state.turnActive || lastTurnActivityAt <= 0) return false;
+  return Math.max(0, now - lastTurnActivityAt) >= timeoutMs;
+}
+
+/** Mirrors Go backend's ReadOnly() + codegraph ReadOnlyToolNames(). */
+export function isReadOnlyTool(name: string): boolean {
   switch (name) {
     case "read_file":
     case "ls":
@@ -325,7 +341,7 @@ function applyEvent(s: State, e: WireEvent): State {
       let cur: State = s;
       if (cur.pendingUser !== undefined) cur = flushPendingUser(cur);
       const { items, id, seq } = ensureAssistant(cur);
-      return { ...cur, items, currentAssistant: id, seq, live: { id, text: "", reasoning: "" }, running: true, turnActive: true, turnStartAt: Date.now(), turnTokens: 0, turnTotalTokens: 0 };
+      return { ...cur, items, currentAssistant: id, seq, live: { id, text: "", reasoning: "" }, running: true, turnActive: true, turnStartAt: Date.now(), turnTokens: 0, turnTotalTokens: 0, turnCost: 0 };
     }
     case "text":
     case "reasoning": {
@@ -396,9 +412,10 @@ function applyEvent(s: State, e: WireEvent): State {
       const turnTotalTokens = s.turnTotalTokens + usageTokens;
       const sessionTokens = s.sessionTokens + usageTokens;
       const usageCost = e.usage?.cost ?? e.usage?.costUsd ?? 0;
+      const turnCost = s.turnCost + usageCost;
       const sessionCost = s.sessionCost + usageCost;
       const sessionCurrency = e.usage?.currency || s.sessionCurrency || "¥";
-      return { ...s, usage: e.usage, context: { ...s.context, used, sessionTokens }, turnTokens, turnTotalTokens, sessionTokens, sessionCost, sessionCurrency };
+      return { ...s, usage: e.usage, context: { ...s.context, used, sessionTokens }, turnTokens, turnTotalTokens, turnCost, sessionTokens, sessionCost, sessionCurrency };
     }
     case "notice":
       return { ...s, running: s.turnActive ? s.running : false, seq: s.seq + 1, items: [...s.items, { kind: "notice", id: `n${s.seq}`, level: e.level ?? "info", text: e.text ?? "" }] };
@@ -449,6 +466,7 @@ export function reducer(s: State, a: Action): State {
         turnStartAt: Date.now(),
         turnTokens: 0,
         turnTotalTokens: 0,
+        turnCost: 0,
         pendingUser: a.text,
         discardTurn: false,
       };
@@ -546,7 +564,7 @@ async function refreshMetaForTab(tabId: string, dispatchTo: (tabId: string, acti
 
 export function useController() {
   const statesRef = useRef<TabStates>(new Map());
-  const lastTokenAt = useRef(0);
+  const lastTurnActivityAtByTab = useRef(new Map<string, number>());
   const [activeTabId, setActiveTabId] = useState<string | undefined>();
   const activeTabIdRef = useRef<string | undefined>(undefined);
   // A render-triggering counter so that mutations to a non-active tab's state still
@@ -669,8 +687,16 @@ export function useController() {
     const off = onEvent((e) => {
       const targetTabId = e.tabId || activeTabIdRef.current;
       if (!targetTabId) return;
-      if (e.kind === "turn_started" || e.kind === "text" || e.kind === "reasoning") {
-        lastTokenAt.current = Date.now();
+      if (
+        e.kind === "turn_started" ||
+        e.kind === "text" ||
+        e.kind === "reasoning" ||
+        e.kind === "message" ||
+        e.kind === "tool_dispatch" ||
+        e.kind === "tool_progress" ||
+        e.kind === "tool_result"
+      ) {
+        lastTurnActivityAtByTab.current.set(targetTabId, Date.now());
       }
       if (e.kind === "text" || e.kind === "reasoning") {
         textBatch.push({ tabId: targetTabId, e });
@@ -712,27 +738,30 @@ export function useController() {
     return () => { textBatch.drain(); off(); offReady(); };
   }, [dispatchTo, loadSessionDataForTab, refreshCheckpoints, syncActiveTabFromBackend]);
 
-  // Stale-stream watchdog: if the frontend thinks the agent is running but
-  // no token events have arrived for 30 seconds, reconcile with the backend.
-  // This catches the case where the Wails event channel silently drops the
-  // turn_done event after a model-service interruption (#3746).
+  // Stale-turn watchdog: if the frontend thinks the agent is running but the
+  // turn stream has gone quiet, reconcile with the backend. This catches cases
+  // where the Wails event channel silently drops turn_done after the final
+  // message or synthetic todo update has already closed the live stream.
   useEffect(() => {
     if (!activeTabId) return;
     const s = statesRef.current.get(activeTabId);
-    if (!s?.running || !s.live) return;
-    const since = Date.now() - lastTokenAt.current;
-    if (since >= 30_000) {
+    const now = Date.now();
+    const lastTurnActivityAt = lastTurnActivityAtByTab.current.get(activeTabId) ?? 0;
+    if (!s?.running || !s.turnActive || lastTurnActivityAt <= 0) return;
+    const since = Math.max(0, now - lastTurnActivityAt);
+    if (shouldReconcileStaleTurn(s, lastTurnActivityAt, now)) {
       void reconcileTabRuntime(activeTabId);
       return;
     }
     const timer = window.setTimeout(() => {
       const cur = statesRef.current.get(activeTabId);
-      if (cur?.running && cur.live && Date.now() - lastTokenAt.current >= 30_000) {
+      const lastActivity = lastTurnActivityAtByTab.current.get(activeTabId) ?? 0;
+      if (shouldReconcileStaleTurn(cur, lastActivity)) {
         void reconcileTabRuntime(activeTabId);
       }
-    }, 30_000 - since);
+    }, STALE_TURN_RECONCILE_MS - since);
     return () => window.clearTimeout(timer);
-  }, [activeTabId, reconcileTabRuntime, activeState.running, activeState.live]);
+  }, [activeTabId, reconcileTabRuntime, activeState.running, activeState.turnActive]);
 
   const send = useCallback((displayText: string, submitText = displayText) => {
     const submitForTab = (tabId: string) => {
@@ -928,6 +957,21 @@ export function useController() {
     } catch { /* ignore */ }
   }, [activeTabId, dispatchTo]);
 
+  const setTokenMode = useCallback(async (mode: TokenMode) => {
+    if (!activeTabId) return;
+    try {
+      await app.SetTokenModeForTab(activeTabId, mode);
+    } catch (err) {
+      dispatchTo(activeTabId, { type: "local_notice", level: "warn", text: t("status.tokenModeSwitchFailed", { err: errorMessage(err) }) });
+      return;
+    }
+    try {
+      dispatchTo(activeTabId, { type: "meta", meta: await app.MetaForTab(activeTabId) });
+      dispatchTo(activeTabId, { type: "context", context: await app.ContextUsageForTab(activeTabId) });
+      dispatchTo(activeTabId, { type: "effort", effort: await app.EffortForTab(activeTabId) });
+    } catch { /* ignore */ }
+  }, [activeTabId, dispatchTo]);
+
   const fetchMemory = useCallback((): Promise<MemoryView> =>
     app.Memory().catch(() => ({ docs: [], facts: [], archives: [], scopes: [], storeDir: "", available: false })), []);
   const remember = useCallback(async (scope: string, note: string) => { await app.Remember(scope, note).catch(() => {}); }, []);
@@ -974,6 +1018,7 @@ export function useController() {
 
   // Tab management: switch preserves per-tab state; open creates it.
   const switchTab = useCallback(async (tabId: string) => {
+    addBreadcrumb("nav", `switch tab ${tabId}`);
     setActiveTabId(tabId);
     try {
       await app.SetActiveTab(tabId);
@@ -1024,7 +1069,7 @@ export function useController() {
     activeTabId,
     send, runShell, steer, notice, cancel, approve, answerQuestion, setControllerMode, setCollaborationMode, setToolApprovalMode, setGoal, clearGoal,
     newSession, clearSession, listSessions, listTrashedSessions, resumeSession, previewSession, deleteSession, restoreSession, purgeTrashedSession, renameSession,
-    refreshMeta, pickWorkspace, switchWorkspace, compact, rewind, setModel, setEffort,
+    refreshMeta, pickWorkspace, switchWorkspace, compact, rewind, setModel, setEffort, setTokenMode,
     fetchMemory, remember, forget, saveDoc,
     switchTab, openProjectTab, openGlobalTab, ensureBlankTab, closeTab, reorderTabs,
     syncActiveTab: syncActiveTabFromBackend,

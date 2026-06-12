@@ -207,6 +207,43 @@ func (c *Config) SetDesktopDisplayMode(mode string) error {
 	return nil
 }
 
+// SetDesktopStatusBarStyle sets the desktop status bar metric label style.
+// UI-only; it must not affect CLI output or provider-visible request data.
+func (c *Config) SetDesktopStatusBarStyle(style string) error {
+	switch strings.ToLower(strings.TrimSpace(style)) {
+	case "icon", "icons":
+		c.Desktop.StatusBarStyle = "icon"
+	case "", "text", "label", "labels":
+		c.Desktop.StatusBarStyle = "text"
+	default:
+		return fmt.Errorf("status bar style %q: must be icon|text", style)
+	}
+	return nil
+}
+
+// SetDesktopStatusBarItems sets the ordered visible desktop status bar items.
+// UI-only; it must not affect CLI output or provider-visible request data.
+func (c *Config) SetDesktopStatusBarItems(items []string) error {
+	out := make([]string, 0, len(items))
+	seen := map[string]bool{}
+	for _, raw := range items {
+		id := strings.TrimSpace(raw)
+		if id == "" || seen[id] {
+			continue
+		}
+		if !knownDesktopStatusBarItems[id] {
+			return fmt.Errorf("status bar item %q: unknown item", id)
+		}
+		out = append(out, id)
+		seen[id] = true
+	}
+	if len(out) == 0 {
+		out = DefaultDesktopStatusBarItems()
+	}
+	c.Desktop.StatusBarItems = out
+	return nil
+}
+
 // SetDesktopCheckUpdates sets whether the desktop app checks for updates on
 // startup. Manual checks remain available in Settings regardless of this value.
 func (c *Config) SetDesktopCheckUpdates(enabled bool) error {

@@ -190,8 +190,9 @@ Long tasks eventually fill the model's context window. Reasonix manages this wit
   remainder is summarized — using the executor's own provider, no tools — in
   place. The boundary is aligned backward off any tool result so the recent tail
   never begins with an orphan tool message whose `tool_calls` were summarized away.
-- The dropped originals are archived to `~/.config/reasonix/archive/<timestamp>.jsonl`
-  (one message per line), so the full history stays traceable.
+- The dropped originals are archived under the user config dir
+  (`reasonix/archive/<timestamp>.jsonl`; see §5 for its per-OS location), one
+  message per line, so the full history stays traceable.
 - The read-only `history` tool gives the agent on-demand BM25 retrieval over
   saved session JSONL files. `scope="project"` searches the current controller's
   session directory; `scope="global"` also searches the user-global session
@@ -332,7 +333,7 @@ The chat TUI accepts `/command` input. Three kinds share one dispatch:
   confirmation, then discards the current context without saving it; it does not
   delete project memory.
 - **Custom commands** are Markdown files under `.reasonix/commands/` (project) and
-  `~/.config/reasonix/commands/` (user); the project dir overrides the user dir on a
+  `reasonix/commands/` in your OS config dir (user; see §5); the project dir overrides the user dir on a
   name clash. A file `review.md` becomes `/review`; a subdirectory namespaces it
   (`git/commit.md` → `/git:commit`). Invoking one renders its body and sends the
   result as the next user turn.
@@ -427,8 +428,10 @@ type Chunk struct {
 
 ## 5. Configuration (TOML)
 
-Resolution order: **flag > project `./reasonix.toml` > user `~/.config/reasonix/config.toml`
-> built-in defaults**. Secrets come from the environment via `api_key_env` and
+Resolution order: **flag > project `./reasonix.toml` > the user config file
+> built-in defaults**. The user config lives in your OS config dir — `~/.config/reasonix/`
+on Linux, `~/Library/Application Support/reasonix/` on macOS, `%AppData%\reasonix\` on
+Windows. Secrets come from the environment via `api_key_env` and
 are never stored in config files. A `.env` in the working directory is loaded if
 present. Step-limit preferences usually belong in the user config; project
 `reasonix.toml` should override them only when the repository needs shared

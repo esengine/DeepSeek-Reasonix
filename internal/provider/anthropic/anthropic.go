@@ -72,6 +72,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	keyEnv, _ := cfg.Extra["api_key_env"].(string) // for actionable auth errors
 	thinking, _ := cfg.Extra["thinking"].(string)
 	effort, _ := cfg.Extra["effort"].(string)
+	vision, _ := cfg.Extra["vision"].(bool)
 	httpClient, err := newHTTPClient(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("anthropic: network: %w", err)
@@ -99,6 +100,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		model:       cfg.Model,
 		thinking:    thinking,
 		effort:      effort,
+		vision:      vision,
 		http:        httpClient, // no overall timeout; lifecycle is ctx-driven
 		idleTimeout: defaultStreamIdleTimeout,
 	}, nil
@@ -117,6 +119,7 @@ type client struct {
 	model       string
 	thinking    string // "adaptive" enables extended thinking; "" = off (config-driven)
 	effort      string // output_config.effort: low|medium|high|xhigh|max; "" = provider default
+	vision      bool   // model accepts image input — embed attached images as base64 image blocks
 	http        *http.Client
 	idleTimeout time.Duration // SSE stall watchdog window; defaultStreamIdleTimeout unless a test overrides
 	authed      atomic.Bool   // a request has succeeded — gate transient-401 retry
@@ -203,6 +206,13 @@ func (c *client) buildRequest(req provider.Request) anthRequest {
 		case provider.RoleUser:
 			if m.Content != "" {
 				appendBlocks("user", contentBlock{Type: "text", Text: m.Content})
+			}
+			if c.vision {
+				for _, url := range m.Images {
+					if mt, data, ok := provider.ParseImageDataURL(url); ok {
+						appendBlocks("user", contentBlock{Type: "image", Source: &imageSource{Type: "base64", MediaType: mt, Data: data}})
+					}
+				}
 			}
 		case provider.RoleTool:
 			content := m.Content
@@ -506,7 +516,14 @@ type contentBlock struct {
 	Input        json.RawMessage `json:"input,omitempty"`       // tool_use
 	ToolUseID    string          `json:"tool_use_id,omitempty"` // tool_result
 	Content      string          `json:"content,omitempty"`     // tool_result
+	Source       *imageSource    `json:"source,omitempty"`      // image
 	CacheControl *cacheControl   `json:"cache_control,omitempty"`
+}
+
+type imageSource struct {
+	Type      string `json:"type"` // "base64"
+	MediaType string `json:"media_type"`
+	Data      string `json:"data"`
 }
 
 type anthTool struct {

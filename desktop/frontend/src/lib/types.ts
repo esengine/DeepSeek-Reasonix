@@ -134,6 +134,7 @@ export interface TabMeta {
   mode: Mode;
   collaborationMode?: CollaborationMode;
   toolApprovalMode?: ToolApprovalMode;
+  tokenMode?: TokenMode;
   goal?: string;
   goalStatus?: GoalStatus;
   startupErr?: string;
@@ -285,13 +286,16 @@ export interface Meta {
   cwd: string;
   autoApproveTools?: boolean;
   bypass?: boolean; // legacy JSON key for YOLO/full-access tool auto-approval
+  collaborationMode?: CollaborationMode;
   toolApprovalMode?: ToolApprovalMode;
+  tokenMode?: TokenMode;
   goal?: string;
   goalStatus?: GoalStatus;
 }
 
 export type CollaborationMode = "normal" | "plan" | "goal";
 export type ToolApprovalMode = "ask" | "auto" | "yolo";
+export type TokenMode = "full" | "economy";
 export type GoalStatus = "running" | "complete" | "blocked" | "stopped";
 
 export function normalizeCollaborationMode(mode?: string, goal?: string, legacyMode?: Mode): CollaborationMode {
@@ -305,6 +309,11 @@ export function normalizeToolApprovalMode(mode?: string, legacyMode?: Mode, lega
   if (mode === "auto" || mode === "yolo" || mode === "ask") return mode;
   if (legacyAutoApproveTools || (legacyMode && modeHasAutoApproveTools(legacyMode))) return "yolo";
   return "ask";
+}
+
+export function normalizeTokenMode(mode?: string): TokenMode {
+  if (mode === "economy") return "economy";
+  return "full";
 }
 
 // Mode is the compatibility string for two independent composer axes:
@@ -700,6 +709,7 @@ export interface BotConnectionView {
   enabled: boolean;
   status: "disconnected" | "pending" | "connected" | "error" | string;
   model: string;
+  toolApprovalMode: ToolApprovalMode | "" | string;
   workspaceRoot: string;
   credential: BotConnectionCredentialView;
   sessionMappings: BotConnectionSessionMappingView[];
@@ -711,6 +721,7 @@ export interface BotConnectionView {
 export interface BotSettingsView {
   enabled: boolean;
   model: string;
+  toolApprovalMode: ToolApprovalMode | "" | string;
   maxSteps: number;
   debounceMs: number;
   allowlist: BotAllowlistView;
@@ -718,6 +729,14 @@ export interface BotSettingsView {
   feishu: FeishuBotView;
   weixin: WeixinBotView;
   connections: BotConnectionView[];
+}
+
+export interface BotRuntimeStatusView {
+  running: boolean;
+  status: string;
+  message: string;
+  connections: number;
+  startedAt: string;
 }
 
 export interface BotInstallStartResult {
@@ -785,6 +804,8 @@ export interface SettingsView {
   desktopThemeStyle: string;
   closeBehavior: string; // "background" | "quit"
   displayMode: string;   // "standard" | "compact" | "minimal"
+  statusBarStyle: string; // "icon" | "text"
+  statusBarItems: string[]; // ordered visible status bar item ids
   checkUpdates: boolean; // check for new versions on startup
   telemetry: boolean; // anonymous launch ping (install id + version + OS)
   metrics: boolean; // opt-in aggregate agent metrics (anonymous signal/bucket counts)

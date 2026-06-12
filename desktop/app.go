@@ -79,6 +79,7 @@ type App struct {
 	mediaTokens *mediaTokenStore
 	botInstalls map[string]*botInstallSession
 	terms       *terminalSessions
+	botRuntime  *desktopBotRuntime
 
 	metrics atomic.Pointer[metricsAggregator] // non-nil only when desktop.metrics is opted in; swapped live by SetDesktopMetrics
 }
@@ -250,6 +251,7 @@ func (a *App) workspaceMediaMiddleware() func(http.Handler) http.Handler {
 // last session's desktop-tabs.json.
 func NewApp() *App {
 	return &App{tabs: map[string]*WorkspaceTab{}, mediaTokens: newMediaTokenStore(), botInstalls: map[string]*botInstallSession{}, terms: newTerminalSessions()}
+	return &App{tabs: map[string]*WorkspaceTab{}, mediaTokens: newMediaTokenStore(), botInstalls: map[string]*botInstallSession{}, botRuntime: newDesktopBotRuntime()}
 }
 
 func (a *App) bootContext() context.Context {
@@ -278,8 +280,10 @@ func (a *App) startup(ctx context.Context) {
 	}
 
 	go a.restoreOrBuildTabs()
+	go a.refreshBotRuntime()
 	go a.sendStartupPing()
 	go a.flushMetrics()
+	go a.flushPendingCrash()
 }
 
 func (a *App) beforeClose(ctx context.Context) bool {
@@ -363,6 +367,7 @@ func backgroundRestoreShouldMaximise(goos string, wasMaximised bool) bool {
 // restoreOrBuildTabs restores the tabs from the last session, or creates a
 // default Global tab on first launch.
 func (a *App) restoreOrBuildTabs() {
+	defer a.recoverToPending("restoreOrBuildTabs")
 	ctx := a.ctx
 	ensureWorkspace()
 
@@ -393,6 +398,7 @@ func (a *App) restoreOrBuildTabs() {
 			}
 			tab.model = entry.Model
 			tab.effort = cloneStringPtr(entry.Effort)
+			tab.tokenMode = boot.NormalizeTokenMode(entry.TokenMode)
 			tab.mode = persistedTabMode(entry.Mode)
 			tab.goal = strings.TrimSpace(entry.Goal)
 			tab.toolApprovalMode = normalizeToolApprovalMode(entry.ToolApprovalMode)
@@ -446,6 +452,7 @@ func (a *App) createTabEntryWithID(scope, workspaceRoot, topicID, id string) *Wo
 		WorkspaceRoot:    workspaceRoot,
 		TopicID:          topicID,
 		TopicTitle:       topicTitleForTab(scope, workspaceRoot, topicID),
+		tokenMode:        boot.TokenModeFull,
 		mode:             "normal",
 		toolApprovalMode: control.ToolApprovalAsk,
 		disabledMCP:      map[string]ServerView{},
@@ -468,6 +475,7 @@ func (a *App) snapshotAllTabs() {
 
 // shutdown snapshots all tabs, saves the final window geometry, and closes tabs.
 func (a *App) shutdown(context.Context) {
+	a.stopBotRuntime()
 	a.stopTray()
 	// Save window geometry synchronously from Go so it's persisted even if the
 	// frontend's beforeunload promise hasn't resolved yet.
@@ -1821,16 +1829,18 @@ func (a *App) jobsForCtrl(ctrl *control.Controller, out []JobView) []JobView {
 
 // Meta describes the session for the frontend's header and status line.
 type Meta struct {
-	Label            string `json:"label"`
-	Ready            bool   `json:"ready"`
-	StartupErr       string `json:"startupErr,omitempty"`
-	EventChannel     string `json:"eventChannel"`
-	Cwd              string `json:"cwd"`
-	AutoApproveTools bool   `json:"autoApproveTools"`
-	Bypass           bool   `json:"bypass"` // legacy JSON key for YOLO/full-access tool auto-approval
-	ToolApprovalMode string `json:"toolApprovalMode"`
-	Goal             string `json:"goal,omitempty"`
-	GoalStatus       string `json:"goalStatus,omitempty"`
+	Label             string `json:"label"`
+	Ready             bool   `json:"ready"`
+	StartupErr        string `json:"startupErr,omitempty"`
+	EventChannel      string `json:"eventChannel"`
+	Cwd               string `json:"cwd"`
+	AutoApproveTools  bool   `json:"autoApproveTools"`
+	Bypass            bool   `json:"bypass"` // legacy JSON key for YOLO/full-access tool auto-approval
+	CollaborationMode string `json:"collaborationMode"`
+	ToolApprovalMode  string `json:"toolApprovalMode"`
+	TokenMode         string `json:"tokenMode"`
+	Goal              string `json:"goal,omitempty"`
+	GoalStatus        string `json:"goalStatus,omitempty"`
 }
 
 // Meta reports the model label, readiness, any startup error, the working
@@ -1850,20 +1860,24 @@ func (a *App) MetaForTab(tabID string) Meta {
 		cwd, _ = os.Getwd()
 	}
 	autoApproveTools := tab.Ctrl != nil && tab.Ctrl.AutoApproveTools()
+	collaborationMode := currentTabCollaborationMode(tab)
 	toolApprovalMode := currentTabToolApprovalMode(tab)
+	tokenMode := currentTabTokenMode(tab)
 	goal := currentTabGoal(tab)
 	goalStatus := currentTabGoalStatus(tab)
 	return Meta{
-		Label:            tab.Label,
-		Ready:            tab.Ready,
-		StartupErr:       tab.StartupErr,
-		EventChannel:     eventChannel,
-		Cwd:              cwd,
-		AutoApproveTools: autoApproveTools,
-		Bypass:           autoApproveTools,
-		ToolApprovalMode: toolApprovalMode,
-		Goal:             goal,
-		GoalStatus:       goalStatus,
+		Label:             tab.Label,
+		Ready:             tab.Ready,
+		StartupErr:        tab.StartupErr,
+		EventChannel:      eventChannel,
+		Cwd:               cwd,
+		AutoApproveTools:  autoApproveTools,
+		Bypass:            autoApproveTools,
+		CollaborationMode: collaborationMode,
+		ToolApprovalMode:  toolApprovalMode,
+		TokenMode:         tokenMode,
+		Goal:              goal,
+		GoalStatus:        goalStatus,
 	}
 }
 
@@ -3379,6 +3393,7 @@ func (a *App) SetModelForTab(tabID, name string) error {
 		WorkspaceRoot:  tab.WorkspaceRoot,
 		SessionDir:     tabSessionDir(tab),
 		EffortOverride: cloneStringPtr(effortOverride),
+		TokenMode:      currentTabTokenMode(tab),
 	})
 	if err != nil {
 		return err
@@ -3473,6 +3488,7 @@ func (a *App) SetEffortForTab(tabID, level string) error {
 		WorkspaceRoot:  tab.WorkspaceRoot,
 		SessionDir:     tabSessionDir(tab),
 		EffortOverride: &effort,
+		TokenMode:      currentTabTokenMode(tab),
 	})
 	if err != nil {
 		return err
@@ -3481,6 +3497,73 @@ func (a *App) SetEffortForTab(tabID, level string) error {
 	a.mu.Lock()
 	tab.Ctrl = newCtrl
 	tab.effort = &effort
+	tab.Label = newCtrl.Label()
+	tab.StartupErr = ""
+	tab.Ready = true
+	a.saveTabsLocked()
+	a.mu.Unlock()
+	newCtrl.EnableInteractiveApproval()
+	applyTabModeToController(newCtrl, tab.mode)
+	applyTabToolApprovalModeToController(newCtrl, tab.toolApprovalMode)
+	newCtrl.SetGoal(tab.goal)
+	path := agent.ContinueSessionPath(prevPath, newCtrl.SessionDir(), newCtrl.Label())
+	if len(carried) > 0 {
+		newCtrl.Resume(&agent.Session{Messages: carried}, path)
+	} else if path != "" {
+		newCtrl.SetSessionPath(path)
+	}
+	a.persistTabSessionPath(tab, path)
+	return nil
+}
+
+func (a *App) SetTokenMode(mode string) error {
+	return a.SetTokenModeForTab("", mode)
+}
+
+func (a *App) SetTokenModeForTab(tabID, mode string) error {
+	mode = boot.NormalizeTokenMode(mode)
+	tab := a.tabByID(tabID)
+	if tab == nil {
+		if strings.TrimSpace(tabID) == "" {
+			return nil
+		}
+		return fmt.Errorf("tab %q not found", tabID)
+	}
+	if mode == currentTabTokenMode(tab) {
+		return nil
+	}
+	ctrl := tab.Ctrl
+	if ctrl != nil && ctrl.Running() {
+		return fmt.Errorf("finish or cancel the current turn before changing token mode")
+	}
+
+	var carried []provider.Message
+	prevPath := ""
+	oldCtrl := tab.Ctrl
+	if oldCtrl != nil {
+		prevPath = oldCtrl.SessionPath()
+		_ = oldCtrl.Snapshot()
+		carried = oldCtrl.History()
+	}
+	newCtrl, err := boot.Build(a.bootContext(), boot.Options{
+		Model:          tab.model,
+		RequireKey:     false,
+		Sink:           tab.sink,
+		WorkspaceRoot:  tab.WorkspaceRoot,
+		SessionDir:     tabSessionDir(tab),
+		EffortOverride: cloneStringPtr(tab.effort),
+		TokenMode:      mode,
+	})
+	if err != nil {
+		return err
+	}
+	a.bindControllerDisplayRecorder(newCtrl)
+	if oldCtrl != nil {
+		oldCtrl.Close()
+	}
+	a.mu.Lock()
+	tab.Ctrl = newCtrl
+	tab.tokenMode = mode
 	tab.Label = newCtrl.Label()
 	tab.StartupErr = ""
 	tab.Ready = true

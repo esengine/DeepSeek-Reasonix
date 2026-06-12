@@ -14,13 +14,14 @@ import { createContext, useCallback, useContext, useEffect, useState } from "rea
 import type { ReactNode } from "react";
 import { en, type DictKey } from "../locales/en";
 import { zh } from "../locales/zh";
+import { zhTW } from "../locales/zh-TW";
 
-export type Locale = "en" | "zh";
+export type Locale = "en" | "zh" | "zh-TW";
 export type { DictKey };
 // LangPref is the stored preference: "" means auto-detect from the OS.
-export type LangPref = "" | "en" | "zh";
+export type LangPref = "" | "en" | "zh" | "zh-TW";
 
-const DICTS: Record<Locale, Record<DictKey, string>> = { en, zh };
+const DICTS: Record<Locale, Record<DictKey, string>> = { en, zh, "zh-TW": zhTW };
 const STORAGE_KEY = "reasonix-lang";
 
 // currentLocale mirrors the active locale for callers outside React (lib/tools.ts).
@@ -41,11 +42,18 @@ export const SPINNER_WORDS: Record<Locale, string[]> = {
     "腌制入味", "嘎吱运算", "孵化中", "盘算中", "嗡嗡运转", "锻造中",
     "探洞中", "摆弄中", "来感觉了",
   ],
+  "zh-TW": [
+    "嬉遊中", "沉思中", "鼓搗中", "醞釀中", "施法中", "苦思中",
+    "滲濾中", "反芻中", "文火慢燉", "合成中", "修補中",
+    "醃製入味", "嘎吱運算", "孵化中", "盤算中", "嗡嗡運轉", "鍛造中",
+    "探洞中", "擺弄中", "來感覺了",
+  ],
 };
 
 export function detectLocale(pref: LangPref): Locale {
-  if (pref === "en" || pref === "zh") return pref;
+  if (pref === "en" || pref === "zh" || pref === "zh-TW") return pref;
   const nav = typeof navigator !== "undefined" ? navigator.language.toLowerCase() : "en";
+  if (nav.startsWith("zh-tw") || nav.startsWith("zh-hant") || nav === "zh-hk" || nav === "zh-mo") return "zh-TW";
   return nav.startsWith("zh") ? "zh" : "en";
 }
 
@@ -54,7 +62,7 @@ function readPref(): LangPref {
 }
 
 export function normalizeLangPref(v: unknown): LangPref {
-  return v === "en" || v === "zh" ? v : "";
+  return v === "en" || v === "zh" || v === "zh-TW" ? v : "";
 }
 
 export function readLegacyLangPref(): LangPref {
