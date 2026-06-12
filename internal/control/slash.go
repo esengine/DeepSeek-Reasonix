@@ -2,9 +2,11 @@ package control
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"reasonix/internal/config"
+	"reasonix/internal/hook"
 	"reasonix/internal/i18n"
 	"reasonix/internal/skill"
 )
@@ -366,7 +368,26 @@ func (c *Controller) managementNotice(trimmed string) bool {
 		}
 		c.notice(c.skillListText())
 	case "/hooks":
-		c.notice(c.hookListText())
+		sub := ""
+		if len(fields) >= 2 {
+			sub = strings.ToLower(fields[1])
+		}
+		switch sub {
+		case "", "list", "ls":
+			c.notice(c.hookListText())
+		case "trust":
+			root := c.cpRoot
+			if root == "" {
+				root, _ = os.Getwd()
+			}
+			if err := hook.Trust(root, ""); err != nil {
+				c.notice("hooks trust: " + err.Error())
+			} else {
+				c.notice("trusted this project's hooks — they load on the next /new or restart")
+			}
+		default:
+			c.notice("unknown /hooks subcommand " + fields[1] + " — try: /hooks, /hooks trust")
+		}
 	case "/mcp":
 		if len(fields) >= 3 && fields[1] == "connect" {
 			n, err := c.ConnectConfiguredMCPServer(fields[2])

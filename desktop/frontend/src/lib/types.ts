@@ -527,7 +527,7 @@ export interface MemoryView {
 }
 
 // SettingsTab is the top-level navigation item in the Settings Centre modal.
-export type SettingsTab = "general" | "models" | "providers" | "bots" | "mcp" | "skills" | "memory" | "permissions" | "sandbox" | "network" | "appearance" | "updates";
+export type SettingsTab = "general" | "models" | "providers" | "bots" | "mcp" | "skills" | "memory" | "hooks" | "permissions" | "sandbox" | "network" | "appearance" | "updates";
 
 // Settings panel payloads (desktop/settings_app.go).
 export interface ProviderView {
@@ -703,6 +703,24 @@ export interface BotInstallPollResult {
   status: string;
   message: string;
   error: string;
+}
+
+export interface HookConfigView {
+  event: string;
+  match?: string;
+  command: string;
+  description?: string;
+  timeout?: number;
+  cwd?: string;
+}
+
+export interface HooksSettingsView {
+  scope: string;
+  path: string;
+  projectRoot: string;
+  trusted: boolean;
+  hooks: HookConfigView[];
+  events: string[];
 }
 
 export interface BotConnectionDiagnostic {

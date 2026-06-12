@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { Check, CheckCircle2, ChevronDown, Loader2, QrCode, RefreshCw } from "lucide-react";
 import { asArray } from "../lib/array";
@@ -20,7 +20,7 @@ import {
 import { TEXT_SIZES, applyTextSize, getTextSize, type TextSize } from "../lib/textSize";
 import { FONT_FAMILIES, applyFontFamily, getFontFamily, type FontFamily } from "../lib/fontFamily";
 import { getDisplayMode, onDisplayModeChange, setDisplayMode as setLocalDisplayMode } from "../lib/displayMode";
-import type { BotConnectionView, BotInstallStartResult, BotSettingsView, NetworkView, ProviderView, SettingsTab, SettingsView } from "../lib/types";
+import type { BotConnectionView, BotInstallStartResult, BotSettingsView, HookConfigView, HooksSettingsView, NetworkView, ProviderView, SettingsTab, SettingsView } from "../lib/types";
 import { InlineConfirmButton } from "./InlineConfirmButton";
 import { Tooltip } from "./Tooltip";
 import { AnchoredPopover } from "./AnchoredPopover";
@@ -28,7 +28,7 @@ import { MCPServersSettingsPage, SkillsSettingsPage } from "./CapabilitiesPanel"
 import { MemorySettingsPage } from "./MemoryPanel";
 import { ModalCloseButton } from "./ModalCloseButton";
 
-const SETTINGS_TABS: SettingsTab[] = ["general", "models", "bots", "mcp", "skills", "memory", "permissions", "sandbox", "network", "appearance", "updates"];
+const SETTINGS_TABS: SettingsTab[] = ["general", "models", "bots", "mcp", "skills", "memory", "hooks", "permissions", "sandbox", "network", "appearance", "updates"];
 
 // SettingsPanel is the desktop settings centre — a centred modal with left
 // navigation and a right content area. It hosts all settings pages plus MCP,
@@ -131,6 +131,7 @@ export function SettingsPanel({ onClose, onChanged, initialTab, isDevBuild }: { 
                 {tab === "mcp" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><MCPServersSettingsPage /></SettingsPageShell>}
                 {tab === "skills" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><SkillsSettingsPage /></SettingsPageShell>}
                 {tab === "memory" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><MemorySettingsPage /></SettingsPageShell>}
+                {tab === "hooks" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><HooksSection onChanged={onChanged} /></SettingsPageShell>}
                 {tab === "permissions" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><PermissionsSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
                 {tab === "sandbox" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><SandboxSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
                 {tab === "network" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><NetworkSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
@@ -188,7 +189,7 @@ function SettingsPageShell({ s: _s, tab, children }: { s: SettingsView | null; t
   const descKey = `settings.pageDesc.${tab}` as keyof typeof import("../locales/en").en;
   const desc = t(descKey as any);
   return (
-    <div className={`settings-page settings-page--${settingsPageKind(tab)}`}>
+    <div className={`settings-page settings-page--${settingsPageKind(tab)} settings-page--${tab}`}>
       <div className="settings-page__header">
         <h2 className="settings-page__title">{settingsTabPageTitle(tab, t)}</h2>
         {typeof desc === "string" && desc !== `settings.pageDesc.${tab}` && <p className="settings-page__desc">{desc}</p>}
@@ -310,6 +311,8 @@ function settingsTabLabel(id: SettingsTab, t: ReturnType<typeof useT>): string {
       return t("settings.tab.skills");
     case "memory":
       return t("settings.tab.memory");
+    case "hooks":
+      return t("settings.tab.hooks");
     case "network":
       return t("settings.tab.network");
     case "permissions":
@@ -339,6 +342,8 @@ function settingsTabMeta(id: SettingsTab, s: SettingsView, t: ReturnType<typeof 
       return t("caps.skillsTab");
     case "memory":
       return t("settings.tabSub.memory");
+    case "hooks":
+      return t("settings.tabSub.hooks");
     case "network":
       return proxyModeLabel(normalizeProxyMode(s.network.proxyMode), t);
     case "permissions":
@@ -3197,6 +3202,316 @@ function ruleListHint(list: string, t: ReturnType<typeof useT>): string {
     default:
       return "";
   }
+}
+
+type HookScope = "global" | "project";
+
+function HooksSection({ onChanged }: { onChanged: () => void }) {
+  const t = useT();
+  const [scope, setScope] = useState<HookScope>("global");
+  const [view, setView] = useState<HooksSettingsView | null>(null);
+  const [jsonText, setJsonText] = useState("");
+  const [jsonMessage, setJsonMessage] = useState<string | null>(null);
+  const [jsonError, setJsonError] = useState<string | null>(null);
+  const [pathMessage, setPathMessage] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const load = useCallback(async (nextScope: HookScope) => {
+    setBusy(true);
+    setErr(null);
+    try {
+      const next = normalizeHooksSettingsView(await app.HooksSettings(nextScope), nextScope);
+      setView(next);
+      setJsonText(formatHooksJSON(next.hooks, next.events));
+      setJsonMessage(null);
+      setJsonError(null);
+      setPathMessage(null);
+    } catch (e) {
+      setErr(String((e as Error)?.message ?? e));
+      setView(null);
+      setJsonText("");
+      setJsonMessage(null);
+      setJsonError(null);
+      setPathMessage(null);
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load(scope);
+  }, [load, scope]);
+
+  const parseHooksEditorJSON = (raw = jsonText): { hooks: HookConfigView[]; text: string } | null => {
+    try {
+      const hooks = parseHooksJSON(raw, view?.events ?? []);
+      const text = formatHooksJSON(hooks, view?.events ?? []);
+      setJsonText(text);
+      setJsonError(null);
+      return { hooks, text };
+    } catch (e) {
+      setJsonError(t("settings.hooksJsonInvalid", { error: String((e as Error)?.message ?? e) }));
+      setJsonMessage(null);
+      return null;
+    }
+  };
+  const copyHooksJSON = async () => {
+    const parsed = parseHooksEditorJSON();
+    if (!parsed) return;
+    try {
+      await navigator.clipboard?.writeText(parsed.text);
+      setJsonMessage(t("settings.hooksJsonCopied"));
+    } catch {
+      setJsonMessage(t("settings.hooksJsonClipboardUnavailable"));
+    }
+  };
+  const formatHooksEditorJSON = (raw = jsonText) => {
+    const parsed = parseHooksEditorJSON(raw);
+    if (parsed) setJsonMessage(t("settings.hooksJsonFormatted"));
+  };
+  const pasteHooksJSON = async () => {
+    try {
+      const raw = await navigator.clipboard?.readText();
+      if (!raw) throw new Error(t("settings.hooksJsonClipboardEmpty"));
+      setJsonText(raw);
+      formatHooksEditorJSON(raw);
+    } catch (e) {
+      setJsonError(t("settings.hooksJsonPasteFailed", { error: String((e as Error)?.message ?? e) }));
+      setJsonMessage(null);
+    }
+  };
+  const copyHooksPath = async () => {
+    const path = view?.path?.trim();
+    if (!path) {
+      setPathMessage(t("settings.hooksPathUnavailable"));
+      return;
+    }
+    try {
+      await navigator.clipboard?.writeText(path);
+      setPathMessage(t("settings.hooksPathCopied"));
+    } catch {
+      setPathMessage(t("settings.hooksJsonClipboardUnavailable"));
+    }
+  };
+  const save = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      const parsed = parseHooksEditorJSON();
+      if (!parsed) return;
+      await app.SaveHooksSettings(scope, parsed.hooks);
+      await load(scope);
+      onChanged();
+    } catch (e) {
+      setErr(String((e as Error)?.message ?? e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const trustProject = async () => {
+    const projectRoot = view?.projectRoot?.trim() ?? "";
+    if (!projectRoot) {
+      setErr(t("settings.hooksProjectRootUnavailable"));
+      return;
+    }
+    setBusy(true);
+    setErr(null);
+    try {
+      await app.TrustProjectHooksForRoot(projectRoot);
+      await load("project");
+      onChanged();
+    } catch (e) {
+      setErr(String((e as Error)?.message ?? e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      {err && <div className="banner banner--error">{err}</div>}
+      <SettingsSection title={t("settings.hooksScopeSection")} description={t("settings.hooksScopeHint")}>
+        <SettingsField label={t("settings.hooksScopeField")}>
+          <select className="mem-select set-grow" value={scope} disabled={busy} onChange={(e) => setScope(e.target.value === "project" ? "project" : "global")}>
+            <option value="global">{t("settings.hooksGlobal")}</option>
+            <option value="project">{t("settings.hooksProject")}</option>
+          </select>
+        </SettingsField>
+        <SettingsField label={t("settings.hooksPath")} hint={scope === "project" ? t("settings.hooksPathProjectHint") : t("settings.hooksPathGlobalHint")}>
+          <div className="hooks-path-stack">
+            <div className={`hooks-path-display${view?.path ? "" : " hooks-path-display--empty"}`}>
+              <code className="hooks-path-display__value" title={view?.path || t("settings.hooksPathUnavailable")}>
+                {view?.path || t("settings.hooksPathUnavailable")}
+              </code>
+              <button className="btn btn--small" disabled={busy || !view?.path} onClick={() => void copyHooksPath()}>{t("settings.hooksPathCopy")}</button>
+            </div>
+            {pathMessage && <div className="hooks-path-display__message">{pathMessage}</div>}
+          </div>
+        </SettingsField>
+        {scope === "project" && (
+          <SettingsField label={t("settings.hooksTrust")} hint={t("settings.hooksTrustHint")}>
+            <div className="hooks-trust-stack">
+              <div className="hooks-trust-row">
+                <span className={`set-rule${view?.trusted ? "" : " set-rule--warn"}`}>{view?.trusted ? t("settings.hooksTrusted") : t("settings.hooksUntrusted")}</span>
+                <button className="btn btn--small" disabled={busy || view?.trusted || !view?.projectRoot} onClick={() => void trustProject()}>{t("settings.hooksTrustProject")}</button>
+              </div>
+              <code className={`hooks-trust-root${view?.projectRoot ? "" : " hooks-trust-root--empty"}`} title={view?.projectRoot || t("settings.hooksProjectRootUnavailable")}>
+                {view?.projectRoot || t("settings.hooksProjectRootUnavailable")}
+              </code>
+            </div>
+          </SettingsField>
+        )}
+      </SettingsSection>
+
+      <SettingsSection
+        title={t("settings.hooks")}
+        description={scope === "project" ? t("settings.hooksProjectHint") : t("settings.hooksGlobalHint")}
+        actions={(
+          <button className="btn btn--small btn--primary" disabled={busy} onClick={() => void save()}>{t("common.save")}</button>
+        )}
+      >
+        {view && (
+          <div className="hooks-json-panel">
+            <div className="hooks-json-panel__head">
+              <div>
+                <div className="set-rules__label">{t("settings.hooksJsonTitle")}</div>
+                <div className="set-rules__hint">{t("settings.hooksJsonHint")}</div>
+              </div>
+              <div className="hooks-json-panel__actions">
+                <button className="btn btn--small" disabled={busy} onClick={() => void copyHooksJSON()}>{t("settings.hooksJsonCopy")}</button>
+                <button className="btn btn--small" disabled={busy} onClick={() => void pasteHooksJSON()}>{t("settings.hooksJsonPaste")}</button>
+                <button className="btn btn--small" disabled={busy || !jsonText.trim()} onClick={() => formatHooksEditorJSON()}>{t("settings.hooksJsonApply")}</button>
+              </div>
+            </div>
+            <textarea
+              className="mem-textarea hooks-json-panel__textarea"
+              value={jsonText}
+              disabled={busy}
+              spellCheck={false}
+              onChange={(e) => {
+                setJsonText(e.target.value);
+                setJsonMessage(null);
+                setJsonError(null);
+              }}
+            />
+            {jsonError && <div className="hooks-json-panel__message hooks-json-panel__message--error">{jsonError}</div>}
+            {jsonMessage && <div className="hooks-json-panel__message">{jsonMessage}</div>}
+          </div>
+        )}
+        {!view && <div className="empty">{t("settings.loading")}</div>}
+      </SettingsSection>
+    </>
+  );
+}
+
+function normalizeHooksSettingsView(view: HooksSettingsView, scope: HookScope): HooksSettingsView {
+  const events = asArray(view?.events).filter(Boolean);
+  return {
+    scope: view?.scope === "project" ? "project" : scope,
+    path: view?.path ?? "",
+    projectRoot: view?.projectRoot ?? "",
+    trusted: !!view?.trusted,
+    events,
+    hooks: asArray(view?.hooks).map(normalizeHookConfig).filter((h) => h.event),
+  };
+}
+
+function formatHooksJSON(hooks: HookConfigView[], eventOrder: string[]): string {
+  const grouped: Record<string, Array<Record<string, string | number>>> = {};
+  const events = new Set(eventOrder);
+  for (const hook of hooks.map(normalizeHookConfig).filter((h) => h.event)) {
+    events.add(hook.event);
+    const entry: Record<string, string | number> = { command: hook.command };
+    if (hook.match) entry.match = hook.match;
+    if (hook.description) entry.description = hook.description;
+    if ((hook.timeout ?? 0) > 0) entry.timeout = hook.timeout ?? 0;
+    if (hook.cwd) entry.cwd = hook.cwd;
+    (grouped[hook.event] ||= []).push(entry);
+  }
+  const ordered: typeof grouped = {};
+  for (const event of [...eventOrder, ...Array.from(events).sort()]) {
+    if (grouped[event]?.length && !ordered[event]) ordered[event] = grouped[event];
+  }
+  return JSON.stringify({ hooks: ordered }, null, 2);
+}
+
+function parseHooksJSON(raw: string, validEvents: string[]): HookConfigView[] {
+  const trimmed = raw.trim();
+  if (!trimmed) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch (e) {
+    throw new Error(String((e as Error)?.message ?? e));
+  }
+  if (Array.isArray(parsed)) {
+    return parsed.map((item) => normalizeHookConfig(parseHookArrayItem(item, validEvents))).filter((h) => h.event);
+  }
+  if (!parsed || typeof parsed !== "object") {
+    throw new Error("expected an object or array");
+  }
+  const obj = parsed as Record<string, unknown>;
+  const hooksValue = obj.hooks && typeof obj.hooks === "object" && !Array.isArray(obj.hooks) ? obj.hooks : obj;
+  return flattenHooksMap(hooksValue as Record<string, unknown>, validEvents);
+}
+
+function parseHookArrayItem(item: unknown, validEvents: string[]): HookConfigView {
+  if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error("hook item must be an object");
+  const obj = item as Record<string, unknown>;
+  const event = stringField(obj, "event") || "PreToolUse";
+  if (validEvents.length > 0 && !validEvents.includes(event)) throw new Error(`unknown hook event ${event}`);
+  return {
+    event,
+    match: stringField(obj, "match"),
+    command: stringField(obj, "command"),
+    description: stringField(obj, "description"),
+    timeout: numberField(obj, "timeout"),
+    cwd: stringField(obj, "cwd"),
+  };
+}
+
+function flattenHooksMap(hooks: Record<string, unknown>, validEvents: string[]): HookConfigView[] {
+  const valid = new Set(validEvents);
+  const out: HookConfigView[] = [];
+  for (const [event, value] of Object.entries(hooks)) {
+    if (valid.size > 0 && !valid.has(event)) throw new Error(`unknown hook event ${event}`);
+    const items = Array.isArray(value) ? value : [value];
+    for (const item of items) {
+      if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error(`hook ${event} item must be an object`);
+      const obj = item as Record<string, unknown>;
+      out.push(normalizeHookConfig({
+        event,
+        match: stringField(obj, "match"),
+        command: stringField(obj, "command"),
+        description: stringField(obj, "description"),
+        timeout: numberField(obj, "timeout"),
+        cwd: stringField(obj, "cwd"),
+      }));
+    }
+  }
+  return out.filter((h) => h.event);
+}
+
+function stringField(obj: Record<string, unknown>, key: string): string {
+  const value = obj[key];
+  return typeof value === "string" ? value : "";
+}
+
+function numberField(obj: Record<string, unknown>, key: string): number {
+  const value = obj[key];
+  return typeof value === "number" && Number.isFinite(value) ? Math.floor(value) : 0;
+}
+
+function normalizeHookConfig(h: HookConfigView): HookConfigView {
+  return {
+    event: h.event || "PreToolUse",
+    match: h.match ?? "",
+    command: h.command ?? "",
+    description: h.description ?? "",
+    timeout: h.timeout && h.timeout > 0 ? Math.floor(h.timeout) : 0,
+    cwd: h.cwd ?? "",
+  };
 }
 
 function SandboxSection({ s, busy, apply }: SectionProps) {

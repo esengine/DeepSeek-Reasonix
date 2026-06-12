@@ -26,6 +26,8 @@ import type {
   EffortInfo,
   FilePreview,
   HistoryMessage,
+  HookConfigView,
+  HooksSettingsView,
   JobView,
   MCPServerInput,
   MemoryView,
@@ -191,6 +193,10 @@ export interface AppBindings {
   Forget(name: string): Promise<void>;
   SaveDoc(path: string, body: string): Promise<string>;
   Settings(): Promise<SettingsView>;
+  HooksSettings(scope: string): Promise<HooksSettingsView>;
+  SaveHooksSettings(scope: string, hooks: HookConfigView[]): Promise<void>;
+  TrustProjectHooks(): Promise<void>;
+  TrustProjectHooksForRoot(projectRoot: string): Promise<void>;
   SetDefaultModel(ref: string): Promise<void>;
   SetPlannerModel(ref: string): Promise<void>;
   SetSubagentModel(ref: string): Promise<void>;
@@ -754,6 +760,27 @@ function makeMockApp(): AppBindings {
     providerKinds: ["openai"],
     autoApproveTools: false,
     bypass: false,
+  };
+  const hookEvents = ["PreToolUse", "PostToolUse", "UserPromptSubmit", "Stop", "PostLLMCall", "SessionStart", "SessionEnd", "SubagentStop", "Notification", "PreCompact"];
+  const hookSettings: Record<string, HooksSettingsView> = {
+    global: {
+      scope: "global",
+      path: "~/.reasonix/settings.json",
+      projectRoot: "",
+      trusted: true,
+      events: hookEvents,
+      hooks: [
+        { event: "Stop", command: "echo turn done", description: "Notify after each turn" },
+      ],
+    },
+    project: {
+      scope: "project",
+      path: "./.reasonix/settings.json",
+      projectRoot: "/mock/project",
+      trusted: false,
+      events: hookEvents,
+      hooks: [],
+    },
   };
   settings.providers = settings.providers.map((provider) =>
     provider.apiKeyEnv === "DEEPSEEK_API_KEY" ? { ...provider, keySet: !freshMock } : provider,
@@ -2009,6 +2036,22 @@ function makeMockApp(): AppBindings {
     },
     async Settings() {
       return JSON.parse(JSON.stringify(settings)) as SettingsView;
+    },
+    async HooksSettings(scope: string) {
+      const key = scope === "project" ? "project" : "global";
+      return JSON.parse(JSON.stringify(hookSettings[key])) as HooksSettingsView;
+    },
+    async SaveHooksSettings(scope: string, hooks: HookConfigView[]) {
+      const key = scope === "project" ? "project" : "global";
+      hookSettings[key].hooks = JSON.parse(JSON.stringify(hooks)) as HookConfigView[];
+    },
+    async TrustProjectHooks() {
+      hookSettings.project.trusted = true;
+    },
+    async TrustProjectHooksForRoot(projectRoot: string) {
+      if (projectRoot && projectRoot === hookSettings.project.projectRoot) {
+        hookSettings.project.trusted = true;
+      }
     },
     async SetDefaultModel(ref: string) {
       settings.defaultModel = ref;
