@@ -1414,13 +1414,18 @@ func (c *Controller) ClearSession() error {
 	c.startedOnce = true
 	c.mu.Unlock()
 	c.hooks.SessionStart(context.Background())
-	go func() {
+	cleanup := func() {
 		destroy.Wait()
 		if err := removeSessionArtifacts(oldPath); err != nil {
 			c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "clear session cleanup failed: " + err.Error()})
 		}
 		destroy.Finish()
-	}()
+	}
+	if destroy.Async {
+		go cleanup()
+	} else {
+		cleanup()
+	}
 	return nil
 }
 
@@ -1942,6 +1947,7 @@ func (c *Controller) SetSessionPath(p string) {
 type SessionDestroyHandle struct {
 	Wait   func()
 	Finish func()
+	Async  bool
 }
 
 // BeginDestroySession marks a session as leaving active use and cancels its
@@ -1963,6 +1969,7 @@ func (c *Controller) BeginDestroySession(sessionPath string) SessionDestroyHandl
 		Finish: func() {
 			c.jobs.FinishDestroySession(parentSession)
 		},
+		Async: len(done) > 0,
 	}
 }
 
