@@ -78,10 +78,10 @@ const OCTAVE_FREQS = [130.81, 146.83, 174.61, 196.0, 220.0, 261.63, 293.66]; // 
 const PRESET_KEY = "generativeMusicPreset";
 
 function readPresetPref(): GenerativePreset {
-  if (typeof localStorage === "undefined") return "ethereal";
+  if (typeof localStorage === "undefined") return "off";
   const val = localStorage.getItem(PRESET_KEY);
   if (val === "off" || val === "classic" || val === "ethereal" || val === "digital" || val === "retro") return val;
-  return "ethereal";
+  return "off";
 }
 
 function writePresetPref(pref: GenerativePreset): void {

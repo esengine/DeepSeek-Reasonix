@@ -732,7 +732,17 @@ function GeneralSection({ s, busy, apply }: SectionProps) {
               const next = e.target.value as GenerativePreset;
               setGenMusicPreset(next);
               setGenerativePreset(next);
-              if (next !== "off") generativeMusic.playPreview(next);
+              if (next === "off") {
+                generativeMusic.stop();
+              } else {
+                // 即时同步引擎：运行中则换 preset，未运行但可能在生成中则启动
+                if (generativeMusic.isRunning) {
+                  generativeMusic.setPreset(next);
+                } else {
+                  generativeMusic.start(next);
+                }
+                generativeMusic.playPreview(next);
+              }
             }}
           >
             <option value="off">{t("settings.generativeMusic.off")}</option>
