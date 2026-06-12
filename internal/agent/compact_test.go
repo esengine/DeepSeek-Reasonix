@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reasonix/internal/event"
@@ -18,13 +19,23 @@ type fakeProvider struct {
 	reply        string
 	promptTokens int
 	got          []provider.Message
+	streamErr    error // when set, Stream emits a ChunkError instead of the reply
+	hang         bool  // when true, Stream returns a channel that never sends or closes
 }
 
 func (f *fakeProvider) Name() string { return "fake" }
 
 func (f *fakeProvider) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
 	f.got = req.Messages
+	if f.hang {
+		return make(chan provider.Chunk), nil
+	}
 	ch := make(chan provider.Chunk, 3)
+	if f.streamErr != nil {
+		ch <- provider.Chunk{Type: provider.ChunkError, Err: f.streamErr}
+		close(ch)
+		return ch, nil
+	}
 	ch <- provider.Chunk{Type: provider.ChunkText, Text: f.reply}
 	if f.promptTokens > 0 {
 		ch <- provider.Chunk{Type: provider.ChunkUsage, Usage: &provider.Usage{PromptTokens: f.promptTokens, TotalTokens: f.promptTokens}}
@@ -296,6 +307,53 @@ func TestCompactReplacesHistory(t *testing.T) {
 	}
 	if !strings.HasSuffix(entries[0].Name(), ".jsonl") {
 		t.Errorf("archive name = %q, want .jsonl", entries[0].Name())
+	}
+}
+
+// TestCompactFallsBackToMechanicalFoldWhenSummaryFails: when the summarizer is
+// unreachable, /compact must still free context (fold mechanically) and surface a
+// card, not hang or abort leaving a full window.
+func TestCompactFallsBackToMechanicalFoldWhenSummaryFails(t *testing.T) {
+	prov := &fakeProvider{streamErr: errors.New("provider down")}
+	sess := &Session{Messages: []provider.Message{
+		{Role: provider.RoleSystem, Content: "sys"},
+		{Role: provider.RoleUser, Content: "task"},
+		{Role: provider.RoleAssistant, Content: "step one"},
+		{Role: provider.RoleUser, Content: "more"},
+		{Role: provider.RoleAssistant, Content: "step two"},
+		{Role: provider.RoleUser, Content: "next"},
+		{Role: provider.RoleAssistant, Content: "ok"},
+	}}
+	var got []event.Event
+	sink := event.FuncSink(func(e event.Event) { got = append(got, e) })
+	a := New(prov, tool.NewRegistry(), sess, Options{RecentKeep: 2, ArchiveDir: t.TempDir()}, sink)
+
+	before := len(sess.Messages)
+	if err := a.compact(context.Background(), "manual", "", true); err != nil {
+		t.Fatalf("compact should fall back, not error: %v", err)
+	}
+	if len(sess.Messages) >= before {
+		t.Fatalf("session not compacted on summarizer failure: %d -> %d", before, len(sess.Messages))
+	}
+	var done *event.Compaction
+	for i := range got {
+		if got[i].Kind == event.CompactionDone {
+			done = &got[i].Compaction
+		}
+	}
+	if done == nil || !strings.Contains(done.Summary, "summary was unavailable") {
+		t.Fatalf("CompactionDone = %+v, want a mechanical-fold summary", done)
+	}
+}
+
+// TestSummarizeRespectsContextCancel: a stalled stream (open but never closing)
+// must unblock on context cancellation instead of pinning compaction forever.
+func TestSummarizeRespectsContextCancel(t *testing.T) {
+	a := New(&fakeProvider{hang: true}, tool.NewRegistry(), &Session{}, Options{}, event.Discard)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := a.summarize(ctx, []provider.Message{{Role: provider.RoleUser, Content: "x"}}, ""); err == nil {
+		t.Fatal("summarize must return when ctx is cancelled, not hang")
 	}
 }
 
