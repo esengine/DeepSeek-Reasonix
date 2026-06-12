@@ -87,6 +87,11 @@ func IsBuiltIn(name string) bool {
 // session-scoped entry with the same name exists. Explicit user and host config
 // wins, including auto_start=false.
 func AppendMissing(out []config.PluginEntry, configured []config.PluginEntry, reservedNames ...string) []config.PluginEntry {
+	return AppendEnabled(out, configured, []string{TimeName, Context7Name}, reservedNames...)
+}
+
+// AppendEnabled is like AppendMissing but only appends enabled built-in names.
+func AppendEnabled(out []config.PluginEntry, configured []config.PluginEntry, enabledNames []string, reservedNames ...string) []config.PluginEntry {
 	seen := make(map[string]bool, len(configured))
 	for _, e := range configured {
 		seen[e.Name] = true
@@ -94,8 +99,12 @@ func AppendMissing(out []config.PluginEntry, configured []config.PluginEntry, re
 	for _, name := range reservedNames {
 		seen[name] = true
 	}
+	enabled := make(map[string]bool, len(enabledNames))
+	for _, name := range enabledNames {
+		enabled[name] = true
+	}
 	for _, e := range Entries() {
-		if !seen[e.Name] {
+		if enabled[e.Name] && !seen[e.Name] {
 			out = append(out, e)
 		}
 	}

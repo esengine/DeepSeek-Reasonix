@@ -1073,9 +1073,16 @@ func TestPartitionByTier(t *testing.T) {
 }
 
 func TestBuiltInMCPsYieldToExtraPluginNames(t *testing.T) {
-	got := builtinmcp.AppendMissing(nil, nil, pluginSpecNames([]plugin.Spec{{Name: "time"}})...)
+	got := builtinmcp.AppendEnabled(nil, nil, []string{"time", "context7"}, pluginSpecNames([]plugin.Spec{{Name: "time"}})...)
 	if len(got) != 1 || got[0].Name != "context7" {
 		t.Fatalf("built-in MCP entries with extra time = %+v, want only context7", got)
+	}
+}
+
+func TestBuiltInMCPsDefaultToDisabled(t *testing.T) {
+	got := builtinmcp.AppendEnabled(nil, nil, nil)
+	if len(got) != 0 {
+		t.Fatalf("default built-in MCP entries = %+v, want none until enabled", got)
 	}
 }
 

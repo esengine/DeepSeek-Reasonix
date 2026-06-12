@@ -2171,7 +2171,7 @@ func (a *App) Capabilities() CapabilitiesView {
 			} else if s.Name == "codegraph" && loadedCfg != nil {
 				view = withCodegraphConfig(view, loadedCfg.Codegraph)
 			} else if p, ok := builtinmcp.Entry(s.Name); ok {
-				view = withBuiltInMCPConfig(view, p)
+				view = withBuiltInMCPConfig(view, p, builtInMCPEnabled(loadedCfg, p.Name))
 			}
 			out.Servers = append(out.Servers, view)
 		}
@@ -2185,7 +2185,7 @@ func (a *App) Capabilities() CapabilitiesView {
 			} else if f.Name == "codegraph" && loadedCfg != nil {
 				view = withCodegraphConfig(view, loadedCfg.Codegraph)
 			} else if p, ok := builtinmcp.Entry(f.Name); ok {
-				view = withBuiltInMCPConfig(view, p)
+				view = withBuiltInMCPConfig(view, p, builtInMCPEnabled(loadedCfg, p.Name))
 			}
 			out.Servers = append(out.Servers, view)
 		}
@@ -2242,15 +2242,18 @@ func (a *App) Capabilities() CapabilitiesView {
 			if configured[p.Name].Name != "" || seen[p.Name] {
 				continue
 			}
+			enabled := builtInMCPEnabled(loadedCfg, p.Name)
 			if s, ok := disabled[p.Name]; ok {
 				s.Status = "disabled"
-				s = withBuiltInMCPConfig(s, p)
+				s = withBuiltInMCPConfig(s, p, enabled)
 				s.Error = ""
 				out.Servers = append(out.Servers, s)
 				retainedDisabled[p.Name] = s
 				delete(disabled, p.Name)
+			} else if enabled {
+				out.Servers = append(out.Servers, withBuiltInMCPConfig(ServerView{Name: p.Name, Status: "deferred"}, p, true))
 			} else {
-				out.Servers = append(out.Servers, withBuiltInMCPConfig(ServerView{Name: p.Name, Status: "deferred"}, p))
+				out.Servers = append(out.Servers, withBuiltInMCPConfig(ServerView{Name: p.Name, Status: "disabled"}, p, false))
 			}
 			seen[p.Name] = true
 		}
@@ -2313,14 +2316,19 @@ func withCodegraphConfig(v ServerView, c config.CodegraphConfig) ServerView {
 	return v
 }
 
-func withBuiltInMCPConfig(v ServerView, p config.PluginEntry) ServerView {
+func withBuiltInMCPConfig(v ServerView, p config.PluginEntry, enabled bool) ServerView {
 	v = withPluginConfig(v, p)
 	v.Name = p.Name
 	v.BuiltIn = true
 	v.Configured = true
+	v.AutoStart = enabled
 	v.AuthStatus = mcpdiag.AuthNone
 	v.AuthURL = ""
 	return v
+}
+
+func builtInMCPEnabled(cfg *config.Config, name string) bool {
+	return cfg != nil && cfg.BuiltInMCP.Enabled(name)
 }
 
 func skillRootsView() []SkillRootView {
@@ -2843,9 +2851,22 @@ func (a *App) setBuiltInMCPEnabled(name string, enabled bool) error {
 	if !ok {
 		return fmt.Errorf("no built-in MCP server named %q", name)
 	}
+	cfg, path, err := a.loadDesktopUserConfigForEdit()
+	if err != nil {
+		return err
+	}
+	if !cfg.BuiltInMCP.SetEnabled(name, enabled) {
+		return fmt.Errorf("no built-in MCP server named %q", name)
+	}
 	tab := a.activeTab()
 	if tab == nil || tab.Ctrl == nil {
 		return fmt.Errorf("no active session")
+	}
+	if err := cfg.SaveTo(path); err != nil {
+		return err
+	}
+	if err := a.syncProjectBuiltInMCPOverride(cfg.BuiltInMCP); err != nil {
+		return err
 	}
 	if enabled {
 		a.mu.Lock()
@@ -2862,7 +2883,7 @@ func (a *App) setBuiltInMCPEnabled(name string, enabled bool) error {
 		h.ClearFailure(name)
 	}
 	tab.Ctrl.DisconnectMCPServer(name)
-	s := withBuiltInMCPConfig(ServerView{Name: name, Status: "disabled"}, entry)
+	s := withBuiltInMCPConfig(ServerView{Name: name, Status: "disabled"}, entry, false)
 	a.mu.Lock()
 	if tab.disabledMCP == nil {
 		tab.disabledMCP = map[string]ServerView{}
@@ -3029,6 +3050,23 @@ func (a *App) syncProjectCodegraphOverride(c config.CodegraphConfig) error {
 	}
 	cfg := config.LoadForEdit(path)
 	cfg.Codegraph = c
+	return cfg.SaveTo(path)
+}
+
+func (a *App) syncProjectBuiltInMCPOverride(c config.BuiltInMCPConfig) error {
+	path := projectConfigPathForRoot(a.activeWorkspaceRoot())
+	userPath := config.UserConfigPath()
+	if path == "" || sameConfigPath(path, userPath) {
+		return nil
+	}
+	if _, err := os.Stat(path); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	cfg := config.LoadForEdit(path)
+	cfg.BuiltInMCP = c
 	return cfg.SaveTo(path)
 }
 

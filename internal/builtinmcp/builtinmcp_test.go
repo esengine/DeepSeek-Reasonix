@@ -67,6 +67,16 @@ func TestAppendMissingLetsReservedNamesWin(t *testing.T) {
 	}
 }
 
+func TestAppendEnabledOnlyAddsEnabledBuiltIns(t *testing.T) {
+	got := AppendEnabled(nil, nil, []string{TimeName})
+	if len(got) != 1 || got[0].Name != TimeName {
+		t.Fatalf("AppendEnabled(time) = %+v, want only time", got)
+	}
+	if got := AppendEnabled(nil, nil, nil); len(got) != 0 {
+		t.Fatalf("AppendEnabled(nil) = %+v, want none", got)
+	}
+}
+
 func TestContext7CommandFallsBackThroughJSRunners(t *testing.T) {
 	lookPath = func(file string) (string, error) {
 		if file == "pnpm" {

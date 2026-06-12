@@ -1468,7 +1468,7 @@ func TestCapabilitiesShowsDefaultCodegraphDisabled(t *testing.T) {
 	t.Fatalf("codegraph missing from Capabilities: %+v", view.Servers)
 }
 
-func TestCapabilitiesShowsBuiltInMCPDefaults(t *testing.T) {
+func TestCapabilitiesShowsBuiltInMCPDefaultsDisabled(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	dir := robustTempDir(t)
 	t.Chdir(dir)
@@ -1487,11 +1487,11 @@ func TestCapabilitiesShowsBuiltInMCPDefaults(t *testing.T) {
 			continue
 		}
 		found[s.Name] = true
-		if s.Status != "deferred" {
-			t.Fatalf("%s status = %q, want deferred; server = %+v", s.Name, s.Status, s)
+		if s.Status != "disabled" {
+			t.Fatalf("%s status = %q, want disabled; server = %+v", s.Name, s.Status, s)
 		}
-		if !s.BuiltIn || !s.Configured || !s.AutoStart {
-			t.Fatalf("%s builtIn/configured/autoStart = %v/%v/%v, want true/true/true; server = %+v", s.Name, s.BuiltIn, s.Configured, s.AutoStart, s)
+		if !s.BuiltIn || !s.Configured || s.AutoStart {
+			t.Fatalf("%s builtIn/configured/autoStart = %v/%v/%v, want true/true/false; server = %+v", s.Name, s.BuiltIn, s.Configured, s.AutoStart, s)
 		}
 		if s.Tier != "lazy" || s.Transport != "stdio" || strings.TrimSpace(s.Command) == "" {
 			t.Fatalf("%s transport/tier/command = %q/%q/%q, want stdio/lazy/non-empty; server = %+v", s.Name, s.Transport, s.Tier, s.Command, s)
@@ -1508,6 +1508,36 @@ func TestCapabilitiesShowsBuiltInMCPDefaults(t *testing.T) {
 			t.Fatalf("built-in MCP %s missing from Capabilities: %+v", name, view.Servers)
 		}
 	}
+}
+
+func TestCapabilitiesShowsEnabledBuiltInMCPDeferred(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(`
+[codegraph]
+enabled = false
+
+[builtin_mcp]
+time_enabled = true
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp()
+	app.setTestCtrl(control.New(control.Options{Host: plugin.NewHost()}), "")
+	defer app.activeCtrl().Close()
+
+	view := app.Capabilities()
+	for _, s := range view.Servers {
+		if s.Name == "time" {
+			if s.Status != "deferred" || !s.AutoStart || !s.BuiltIn || !s.Configured {
+				t.Fatalf("enabled time view = %+v, want deferred built-in configured autoStart", s)
+			}
+			return
+		}
+	}
+	t.Fatalf("time missing from Capabilities: %+v", view.Servers)
 }
 
 func validContext7Runner(command string, args []string) bool {
@@ -1623,7 +1653,7 @@ args = ["serve"]
 	}
 }
 
-func TestSetBuiltInMCPDisabledDoesNotWriteUserConfig(t *testing.T) {
+func TestSetBuiltInMCPDisabledWritesBuiltInConfigOnly(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	dir := robustTempDir(t)
 	t.Chdir(dir)
@@ -1644,6 +1674,9 @@ func TestSetBuiltInMCPDisabledDoesNotWriteUserConfig(t *testing.T) {
 			cfg := config.LoadForEdit(config.UserConfigPath())
 			if _, ok := findPluginEntry(cfg.Plugins, "time"); ok {
 				t.Fatalf("time built-in disable wrote a user plugin: %+v", cfg.Plugins)
+			}
+			if cfg.BuiltInMCP.TimeEnabled {
+				t.Fatalf("time built-in disable left time_enabled true: %+v", cfg.BuiltInMCP)
 			}
 			return
 		}

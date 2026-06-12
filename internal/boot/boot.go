@@ -211,7 +211,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// Partition configured plugins by tier so eager/lazy/background can each
 	// take the path that fits them. User entries default to background: the
 	// session starts immediately while enabled MCP servers warm up.
-	autoStartEntries := builtinmcp.AppendMissing(cfg.AutoStartPlugins(), cfg.Plugins, pluginSpecNames(opts.ExtraPlugins)...)
+	autoStartEntries := builtinmcp.AppendEnabled(cfg.AutoStartPlugins(), cfg.Plugins, cfg.BuiltInMCP.EnabledNames(), pluginSpecNames(opts.ExtraPlugins)...)
 	eagerEntries, lazyEntries, bgEntries := partitionByTier(autoStartEntries)
 
 	// Auto-demote: any eager plugin that has been chronically slow (recent
