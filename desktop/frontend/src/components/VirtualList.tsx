@@ -26,6 +26,10 @@ export function VirtualList<T>({
   const virtualizer = useVirtualizer({
     count: items.length,
     getScrollElement: () => scrollRef.current,
+    getItemKey: (index) => {
+      const item = items[index];
+      return item === undefined ? index : getKey(item, index);
+    },
     estimateSize: (index) => {
       const item = items[index];
       if (typeof estimateSize === "function") {

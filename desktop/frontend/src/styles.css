@@ -21121,6 +21121,10 @@ a[href] {
   box-shadow: var(--app-graphite-shadow);
 }
 
+:root[data-theme-style] .history-virtual-row .hist-item {
+  margin-bottom: 0;
+}
+
 :root[data-theme-style] .hist-item:hover {
   border-color: color-mix(in srgb, var(--fg-faint) 28%, var(--border));
   background: var(--bg-soft);
