@@ -443,14 +443,14 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		if err != nil {
 			return nil, nil, 0, err
 		}
-		return p, me.Price, me.ContextWindow, nil
+		return p, resolvePricing(&me), me.ContextWindow, nil
 	}
 	subagentIdentity := func(modelRef, effort string) (string, string) {
 		return subagentEffectiveIdentity(cfg, modelName, entry, modelRef, effort)
 	}
 	taskModel := firstNonEmpty(cfg.Agent.SubagentModels["task"], cfg.Agent.SubagentModel)
 	taskEffort := firstNonEmpty(cfg.Agent.SubagentEfforts["task"], cfg.Agent.SubagentEffort)
-	reg.Add(agent.NewTaskTool(execProv, entry.Price, reg, maxSteps,
+	reg.Add(agent.NewTaskTool(execProv, resolvePricing(entry), reg, maxSteps,
 		entry.ContextWindow, cfg.Agent.SoftCompactRatio, cfg.Agent.CompactRatio, cfg.Agent.CompactForceRatio,
 		cfg.Agent.Temperature, config.ArchiveDir(), "", headlessGate,
 		taskModel, taskEffort, resolveSubagentProvider).
@@ -476,7 +476,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// task/skill meta-tools, to bar recursion), and an optional per-skill model.
 	// Its tool activity nests under the invoking call, like `task`.
 	skillRunner := func(sctx context.Context, sk skill.Skill, task string, runOpts skill.SubagentRunOptions) (string, error) {
-		prov, price, ctxWin := execProv, entry.Price, entry.ContextWindow
+		prov, price, ctxWin := execProv, resolvePricing(entry), entry.ContextWindow
 		modelRef := subagentModelRef(cfg, sk)
 		effortRef := subagentEffortRef(cfg, sk)
 		if modelRef != "" || effortRef != "" {
@@ -615,7 +615,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	executor := agent.New(execProv, reg, execSess, agent.Options{
 		MaxSteps:          maxSteps,
 		Temperature:       cfg.Agent.Temperature,
-		Pricing:           entry.Price,
+		Pricing:           resolvePricing(entry),
 		Gate:              headlessGate,
 		Hooks:             hookRunner,
 		Jobs:              jm,
@@ -675,7 +675,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			}
 			plannerSess := agent.NewSession(agent.PlannerPromptWithContext(mem.Block()))
 			plannerTools := agent.PlannerToolRegistry(reg)
-			runner = agent.NewCoordinator(plannerProv, plannerSess, pe.Price, plannerTools, agent.Options{
+			runner = agent.NewCoordinator(plannerProv, plannerSess, resolvePricing(pe), plannerTools, agent.Options{
 				MaxSteps:          cfg.Agent.PlannerMaxSteps,
 				MaxStepsKey:       "agent.planner_max_steps",
 				Gate:              headlessGate,
@@ -952,6 +952,27 @@ func newSubagentStore(sessionDir string) *agent.SubagentStore {
 		return nil
 	}
 	return agent.NewSubagentStore(filepath.Join(sessionDir, "subagents"))
+}
+
+// resolvePricing returns an explicit provider price or the matching built-in
+// provider price. Matching includes provider identity so a third-party endpoint
+// serving a same-named model does not inherit the wrong price table.
+func resolvePricing(entry *config.ProviderEntry) *provider.Pricing {
+	if entry == nil {
+		return nil
+	}
+	if entry.Price != nil {
+		return entry.Price
+	}
+	for _, builtIn := range config.Default().Providers {
+		if entry.Name == builtIn.Name &&
+			entry.Kind == builtIn.Kind &&
+			entry.BaseURL == builtIn.BaseURL &&
+			builtIn.HasModel(entry.Model) {
+			return builtIn.Price
+		}
+	}
+	return nil
 }
 
 func subagentEffectiveIdentity(cfg *config.Config, baseModelRef string, base *config.ProviderEntry, modelRef, effort string) (string, string) {
