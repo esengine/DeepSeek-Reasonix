@@ -28,6 +28,7 @@ import { useController, type Item, type LiveStream } from "./lib/useController";
 import { app, onEvent, onProjectTreeChanged } from "./lib/bridge";
 import { generativeMusic, isGenerativeMusicEnabled } from "./lib/generative-music";
 import { playSuccessChime } from "./lib/sound";
+import { matchesShortcut, useGlobalHotkey } from "./lib/shortcuts";
 import { Transcript } from "./components/Transcript";
 import { Composer } from "./components/Composer";
 import { TodoPanel } from "./components/TodoPanel";
@@ -600,36 +601,101 @@ function safeFilename(name: string): string {
 /** Global hotkey handler for shell-expand toggle (Ctrl/Cmd+B). */
 function ShellHotkeys() {
   const shellExpand = useShellExpand();
-  useEffect(() => {
+  useGlobalHotkey("shortcuts.shellExpand", (e) => {
     if (!shellExpand) return;
-    const onKey = (e: globalThis.KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === "b") {
-        e.preventDefault();
-        shellExpand.toggleLast();
-      }
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [shellExpand]);
+    e.preventDefault();
+    shellExpand.toggleLast();
+  }, [shellExpand], !!shellExpand);
   return null;
 }
 
 /** Global hotkey handler for text-size shortcuts (Ctrl/Cmd + Plus/Minus/0). */
 function TextSizeHotkeys() {
-  useEffect(() => {
-    const onKey = (e: globalThis.KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey)) return;
-      if (e.key !== "+" && e.key !== "=" && e.key !== "-" && e.key !== "0") return;
+  useGlobalHotkey("shortcuts.textSizeIncrease", (e) => {
+    e.preventDefault();
+    applyTextSize(nextTextSize(getTextSize(), 1));
+  });
+  useGlobalHotkey("shortcuts.textSizeDecrease", (e) => {
+    e.preventDefault();
+    applyTextSize(nextTextSize(getTextSize(), -1));
+  });
+  useGlobalHotkey("shortcuts.textSizeReset", (e) => {
+    e.preventDefault();
+    applyTextSize(DEFAULT_TEXT_SIZE);
+  });
+  return null;
+}
 
-      e.preventDefault();
-      if (e.key === "0") {
-        applyTextSize(DEFAULT_TEXT_SIZE);
-        return;
+/** New session with Cmd+N. */
+function NewSessionHotkeys({ onNewTab }: { onNewTab: () => void }) {
+  useGlobalHotkey("shortcuts.newSession", (e) => {
+    e.preventDefault();
+    onNewTab();
+  }, [onNewTab]);
+  return null;
+}
+
+/** Close current tab with Cmd+W when the tab bar is visible. */
+function TabHotkeys({
+  tabBarHidden,
+  activeTabId,
+  onCloseTab,
+}: {
+  tabBarHidden: boolean;
+  activeTabId?: string;
+  onCloseTab: (id: string) => void;
+}) {
+  const tabBarHiddenRef = useRef(tabBarHidden);
+  tabBarHiddenRef.current = tabBarHidden;
+  const activeTabIdRef = useRef(activeTabId);
+  activeTabIdRef.current = activeTabId;
+  const onCloseTabRef = useRef(onCloseTab);
+  onCloseTabRef.current = onCloseTab;
+
+  // Wails event – macOS menu sends app:close-tab.
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.runtime) return;
+    return window.runtime.EventsOn("app:close-tab", () => {
+      if (!tabBarHiddenRef.current && activeTabIdRef.current) {
+        onCloseTabRef.current(activeTabIdRef.current);
       }
-      applyTextSize(nextTextSize(getTextSize(), e.key === "-" ? -1 : 1));
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
+    });
+  }, []);
+
+  // JS keydown – respects user-configured shortcut.
+  useGlobalHotkey("shortcuts.closeTab", (e) => {
+    e.preventDefault();
+    if (activeTabId) onCloseTab(activeTabId);
+  }, [activeTabId, onCloseTab], !tabBarHidden);
+  return null;
+}
+
+/** Toggle YOLO tool-approval mode with Cmd+Y / Ctrl+Y. */
+function YoloToggleHotkeys({
+  mode,
+  autoApproveTools,
+  onApply,
+}: {
+  mode: string;
+  autoApproveTools?: boolean | null;
+  onApply: (m: ToolApprovalMode) => void;
+}) {
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
+  const autoRef = useRef(autoApproveTools);
+  autoRef.current = autoApproveTools;
+  const onApplyRef = useRef(onApply);
+  onApplyRef.current = onApply;
+
+  useGlobalHotkey("shortcuts.yoloToggle", (e) => {
+    e.preventDefault();
+    const current: ToolApprovalMode = modeRef.current.includes("yolo")
+      ? "yolo"
+      : autoRef.current
+        ? "auto"
+        : "ask";
+    const { mode: nextMode } = toggleYoloToolApprovalMode(current);
+    onApplyRef.current(nextMode);
   }, []);
   return null;
 }
@@ -1944,7 +2010,7 @@ export default function App() {
   }, [closeTransientOverlays, listSessions]);
   useEffect(() => {
     const onKey = (e: globalThis.KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+      if (matchesShortcut(e, "shortcuts.palette", navigator.platform.startsWith("Mac") ? "darwin" : "win")) {
         e.preventDefault();
         setPaletteOpen((cur) => {
           if (!cur) void openPalette();
@@ -1957,6 +2023,20 @@ export default function App() {
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [openPalette]);
+
+  // Jump to next unread topic with Cmd+G.
+  useEffect(() => {
+    const platform: "darwin" | "win" = navigator.platform.startsWith("Mac") ? "darwin" : "win";
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (!matchesShortcut(e, "shortcuts.nextUnread", platform)) return;
+      e.preventDefault();
+      const idx = tabMetas.findIndex((m) => m.unread);
+      if (idx >= 0 && tabOrderIds[idx]) switchTab(tabOrderIds[idx], "user");
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [tabMetas, tabOrder, switchTab]);
+
   const paletteItems = useMemo<PaletteItem[]>(() => {
     const cmds: PaletteItem[] = [
       { id: "cmd-new", group: t("palette.group.commands"), title: t("palette.cmd.newSession"), icon: <SquarePen size={15} />, compact: true, keywords: ["new", "新建"], run: () => void handleNewTab() },
@@ -2143,6 +2223,17 @@ export default function App() {
     <ShellExpandProvider>
     <ShellHotkeys />
     <TextSizeHotkeys />
+    <NewSessionHotkeys onNewTab={handleNewTab} />
+    <TabHotkeys
+      tabBarHidden={false}
+      activeTabId={activeTabId}
+      onCloseTab={(id) => void closeTab(id)}
+    />
+    <YoloToggleHotkeys
+      mode={tabComposerProfile?.mode ?? "normal"}
+      autoApproveTools={tabComposerProfile?.autoApproveTools}
+      onApply={(m) => void setControllerToolApprovalMode(m)}
+    />
     <div ref={appRef} className={["app", `app--${desktopPlatform}`, browserPreviewChrome ? "app--browser-preview" : ""].filter(Boolean).join(" ")}>
       <div
         className={[
