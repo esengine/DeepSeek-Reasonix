@@ -120,7 +120,8 @@ func botStart(args []string, version string) int {
 		OnInbound: rememberInboundRemote,
 	}
 
-	gw := bot.NewGatewayWithAdapterBindings(gwCfg, botruntime.AdapterBindings(cfg, enabledPlatforms, logger), logger)
+	feishuDomains := botruntime.RequestedFeishuDomains(requestedChannels)
+	gw := bot.NewGatewayWithAdapterBindings(gwCfg, botruntime.AdapterBindings(cfg, enabledPlatforms, feishuDomains, logger), logger)
 
 	// 信号处理
 	sigCh := make(chan os.Signal, 1)

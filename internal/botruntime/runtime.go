@@ -46,6 +46,31 @@ func EnabledPlatforms(cfg *config.Config, channels []string) (map[bot.Platform]b
 	return enabled, warnings
 }
 
+// RequestedFeishuDomains returns the Feishu-family domains the caller explicitly
+// named ("feishu"/"lark"), or nil when neither was requested (no restriction).
+func RequestedFeishuDomains(channels []string) map[string]bool {
+	domains := make(map[string]bool)
+	for _, ch := range channels {
+		switch {
+		case strings.EqualFold(strings.TrimSpace(ch), string(bot.PlatformFeishu)):
+			domains["feishu"] = true
+		case strings.EqualFold(strings.TrimSpace(ch), "lark"):
+			domains["lark"] = true
+		}
+	}
+	if len(domains) == 0 {
+		return nil
+	}
+	return domains
+}
+
+func feishuDomainKey(domain string) string {
+	if strings.EqualFold(strings.TrimSpace(domain), "lark") {
+		return "lark"
+	}
+	return "feishu"
+}
+
 func HasEnabledPlatform(enabled map[bot.Platform]bool) bool {
 	for _, value := range enabled {
 		if value {
@@ -162,7 +187,7 @@ func normalizeToolApprovalMode(mode string) string {
 	}
 }
 
-func AdapterBindings(cfg *config.Config, enabled map[bot.Platform]bool, logger *slog.Logger) []bot.AdapterBinding {
+func AdapterBindings(cfg *config.Config, enabled map[bot.Platform]bool, feishuDomains map[string]bool, logger *slog.Logger) []bot.AdapterBinding {
 	if cfg == nil {
 		return nil
 	}
@@ -189,6 +214,9 @@ func AdapterBindings(cfg *config.Config, enabled map[bot.Platform]bool, logger *
 			feishuCfg := cfg.Bot.Feishu
 			feishuCfg.Enabled = true
 			feishuCfg.Domain = firstNonEmptyString(strings.TrimSpace(conn.Domain), feishuCfg.Domain)
+			if feishuDomains != nil && !feishuDomains[feishuDomainKey(feishuCfg.Domain)] {
+				continue
+			}
 			feishuCfg.AppID = firstNonEmptyString(strings.TrimSpace(conn.Credential.AppID), feishuCfg.AppID)
 			feishuCfg.AppSecretEnv = firstNonEmptyString(strings.TrimSpace(conn.Credential.AppSecretEnv), feishuCfg.AppSecretEnv)
 			bindings = append(bindings, bot.AdapterBinding{ID: id, Domain: feishuCfg.Domain, Platform: platform, Adapter: feishu.New(feishuCfg, logger)})
@@ -206,7 +234,9 @@ func AdapterBindings(cfg *config.Config, enabled map[bot.Platform]bool, logger *
 		bindings = append(bindings, bot.AdapterBinding{ID: string(bot.PlatformQQ), Platform: bot.PlatformQQ, Adapter: qq.New(cfg.Bot.QQ, logger)})
 	}
 	if enabled[bot.PlatformFeishu] && !hasConnection[bot.PlatformFeishu] {
-		bindings = append(bindings, bot.AdapterBinding{ID: string(bot.PlatformFeishu), Domain: cfg.Bot.Feishu.Domain, Platform: bot.PlatformFeishu, Adapter: feishu.New(cfg.Bot.Feishu, logger)})
+		if feishuDomains == nil || feishuDomains[feishuDomainKey(cfg.Bot.Feishu.Domain)] {
+			bindings = append(bindings, bot.AdapterBinding{ID: string(bot.PlatformFeishu), Domain: cfg.Bot.Feishu.Domain, Platform: bot.PlatformFeishu, Adapter: feishu.New(cfg.Bot.Feishu, logger)})
+		}
 	}
 	if enabled[bot.PlatformWeixin] && !hasConnection[bot.PlatformWeixin] {
 		bindings = append(bindings, bot.AdapterBinding{ID: string(bot.PlatformWeixin), Domain: "weixin", Platform: bot.PlatformWeixin, Adapter: weixin.New(cfg.Bot.Weixin, logger)})

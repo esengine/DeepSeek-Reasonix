@@ -251,7 +251,7 @@ func TestBotAdapterBindingsCreateSeparateFeishuAndLarkInstances(t *testing.T) {
 		{ID: "weixin-weixin", Provider: "weixin", Domain: "weixin", Enabled: true, Credential: config.BotConnectionCredential{AccountID: "wx-account", TokenEnv: "WEIXIN_BOT_TOKEN"}},
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	bindings := botruntime.AdapterBindings(cfg, map[bot.Platform]bool{bot.PlatformFeishu: true, bot.PlatformWeixin: true}, logger)
+	bindings := botruntime.AdapterBindings(cfg, map[bot.Platform]bool{bot.PlatformFeishu: true, bot.PlatformWeixin: true}, nil, logger)
 
 	got := map[string]bot.AdapterBinding{}
 	for _, binding := range bindings {
@@ -264,6 +264,26 @@ func TestBotAdapterBindingsCreateSeparateFeishuAndLarkInstances(t *testing.T) {
 	}
 	if got["feishu-feishu"].Domain != "feishu" || got["feishu-lark"].Domain != "lark" {
 		t.Fatalf("domains = feishu:%q lark:%q, want separate domains", got["feishu-feishu"].Domain, got["feishu-lark"].Domain)
+	}
+}
+
+func TestBotAdapterBindingsIsolateRequestedFeishuDomain(t *testing.T) {
+	cfg := config.Default()
+	cfg.Bot.Connections = []config.BotConnectionConfig{
+		{ID: "feishu-feishu", Provider: "feishu", Domain: "feishu", Enabled: true, Credential: config.BotConnectionCredential{AppID: "cli-feishu", AppSecretEnv: "FEISHU_BOT_APP_SECRET"}},
+		{ID: "feishu-lark", Provider: "feishu", Domain: "lark", Enabled: true, Credential: config.BotConnectionCredential{AppID: "cli-lark", AppSecretEnv: "LARK_BOT_APP_SECRET"}},
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	enabled := map[bot.Platform]bool{bot.PlatformFeishu: true}
+
+	larkOnly := botruntime.AdapterBindings(cfg, enabled, botruntime.RequestedFeishuDomains([]string{"lark"}), logger)
+	if len(larkOnly) != 1 || larkOnly[0].ID != "feishu-lark" {
+		t.Fatalf("--channels lark bindings = %+v, want only feishu-lark", larkOnly)
+	}
+
+	feishuOnly := botruntime.AdapterBindings(cfg, enabled, botruntime.RequestedFeishuDomains([]string{"feishu"}), logger)
+	if len(feishuOnly) != 1 || feishuOnly[0].ID != "feishu-feishu" {
+		t.Fatalf("--channels feishu bindings = %+v, want only feishu-feishu", feishuOnly)
 	}
 }
 

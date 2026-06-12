@@ -189,7 +189,7 @@ func TestDesktopBotRuntimeConfigLoadsAllSavedCredentialsAfterRestart(t *testing.
 		t.Fatalf("desktop runtime plan = %+v, want saved Feishu/Lark/Weixin connections to start", plan)
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	bindings := botruntime.AdapterBindings(got, plan.Enabled, logger)
+	bindings := botruntime.AdapterBindings(got, plan.Enabled, nil, logger)
 	if len(bindings) != 3 {
 		t.Fatalf("adapter bindings = %+v, want one per saved connection", bindings)
 	}

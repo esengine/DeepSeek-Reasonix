@@ -118,7 +118,7 @@ func (r *desktopBotRuntime) apply(parent context.Context, cfg *config.Config, wo
 		OnInbound:                botruntime.NewRemoteRememberer(logger),
 		OnToolApprovalModeChange: onToolApprovalModeChange,
 	}
-	bindings := botruntime.AdapterBindings(cfg, plan.Enabled, logger)
+	bindings := botruntime.AdapterBindings(cfg, plan.Enabled, nil, logger)
 	if len(bindings) == 0 {
 		cancel()
 		r.status = BotRuntimeStatusView{Status: "stopped", Message: "no bot adapters configured"}
