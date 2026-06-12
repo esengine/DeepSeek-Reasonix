@@ -737,8 +737,6 @@ function GeneralSection({ s, busy, apply }: SectionProps) {
               } else {
                 if (generativeMusic.isRunning) {
                   generativeMusic.setPreset(next);
-                } else {
-                  generativeMusic.start(next);
                 }
                 generativeMusic.playPreview(next);
               }
