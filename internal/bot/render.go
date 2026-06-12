@@ -19,6 +19,7 @@ type renderSink struct {
 	domain   string
 	chatID   string
 	chatType ChatType
+	userID   string
 	replyTo  string
 	logger   *slog.Logger
 	ctrl     *control.Controller
@@ -32,7 +33,7 @@ type renderSink struct {
 	lastFlush  time.Time
 }
 
-func newRenderSink(ctx context.Context, adapter Adapter, connID, domain, chatID string, chatType ChatType, replyTo string, logger *slog.Logger, onAsk func(event.Ask)) *renderSink {
+func newRenderSink(ctx context.Context, adapter Adapter, connID, domain, chatID string, chatType ChatType, userID string, replyTo string, logger *slog.Logger, onAsk func(event.Ask)) *renderSink {
 	return &renderSink{
 		ctx:       ctx,
 		adapter:   adapter,
@@ -40,6 +41,7 @@ func newRenderSink(ctx context.Context, adapter Adapter, connID, domain, chatID 
 		domain:    domain,
 		chatID:    chatID,
 		chatType:  chatType,
+		userID:    userID,
 		replyTo:   replyTo,
 		logger:    logger,
 		onAsk:     onAsk,
@@ -121,7 +123,7 @@ func (s *renderSink) Emit(e event.Event) {
 		case PlatformQQ:
 			msg.Keyboard = approvalKeyboard(e.Approval.ID)
 		case PlatformFeishu:
-			msg.Card = approvalCard(e.Approval, s.chatType)
+			msg.Card = approvalCard(e.Approval, s.chatType, s.userID)
 		}
 		_ = s.send(msg)
 
@@ -237,26 +239,30 @@ func approvalKeyboard(id string) *InlineKeyboard {
 	}}}
 }
 
-func approvalCard(a event.Approval, chatType ChatType) *InteractiveCard {
+func approvalCard(a event.Approval, chatType ChatType, userID string) *InteractiveCard {
 	return &InteractiveCard{
 		Header: "需要批准操作",
 		Elements: []InteractiveCardElement{
 			{Tag: "markdown", Content: fmt.Sprintf("**工具**: %s\n\n**操作**: %s\n\nID: `%s`", a.Tool, a.Subject, a.ID)},
 			{Tag: "action", Extra: map[string]any{
 				"actions": []map[string]any{
-					{"tag": "button", "text": map[string]string{"tag": "plain_text", "content": "允许一次"}, "type": "primary", "value": cardActionValue("/approve "+a.ID, chatType)},
-					{"tag": "button", "text": map[string]string{"tag": "plain_text", "content": "拒绝"}, "type": "danger", "value": cardActionValue("/deny "+a.ID, chatType)},
+					{"tag": "button", "text": map[string]string{"tag": "plain_text", "content": "允许一次"}, "type": "primary", "value": cardActionValue("/approve "+a.ID, chatType, userID)},
+					{"tag": "button", "text": map[string]string{"tag": "plain_text", "content": "拒绝"}, "type": "danger", "value": cardActionValue("/deny "+a.ID, chatType, userID)},
 				},
 			}},
 		},
 	}
 }
 
-func cardActionValue(command string, chatType ChatType) map[string]string {
-	return map[string]string{
+func cardActionValue(command string, chatType ChatType, userID string) map[string]string {
+	value := map[string]string{
 		"command":   command,
 		"chat_type": string(chatType),
 	}
+	if strings.TrimSpace(userID) != "" {
+		value["user_id"] = strings.TrimSpace(userID)
+	}
+	return value
 }
 
 func askCard(ask event.Ask, fallback string) *InteractiveCard {

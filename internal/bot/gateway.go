@@ -469,7 +469,7 @@ func (gw *BotGateway) runTurn(ctx context.Context, adapter Adapter, key string, 
 	_ = adapter.SendTyping(ctx, msg.ChatID)
 
 	// 创建事件渲染 sink
-	sink := newRenderSink(ctx, adapter, msg.ConnectionID, msg.Domain, msg.ChatID, msg.ChatType, msg.MessageID, gw.logger, func(ask event.Ask) {
+	sink := newRenderSink(ctx, adapter, msg.ConnectionID, msg.Domain, msg.ChatID, msg.ChatType, msg.UserID, msg.MessageID, gw.logger, func(ask event.Ask) {
 		gw.mu.Lock()
 		if state.pendingAsks == nil {
 			state.pendingAsks = make(map[string][]event.AskQuestion)

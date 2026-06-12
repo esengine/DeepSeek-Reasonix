@@ -28,6 +28,7 @@ import (
 	larknormalize "github.com/larksuite/oapi-sdk-go/v3/channel/normalize"
 	larkcore "github.com/larksuite/oapi-sdk-go/v3/core"
 	"github.com/larksuite/oapi-sdk-go/v3/event/dispatcher"
+	"github.com/larksuite/oapi-sdk-go/v3/event/dispatcher/callback"
 	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
 	larkws "github.com/larksuite/oapi-sdk-go/v3/ws"
 )
@@ -169,20 +170,7 @@ func (a *adapter) runWebSocket(ctx context.Context) {
 		a.logger.Error("feishu websocket config error", "err", err)
 		return
 	}
-	eventHandler := dispatcher.NewEventDispatcher(a.cfg.VerificationToken, "").
-		OnP2MessageReceiveV1(func(ctx context.Context, event *larkim.P2MessageReceiveV1) error {
-			a.handleSDKMessage(event)
-			return nil
-		}).
-		OnP2MessageReadV1(func(ctx context.Context, event *larkim.P2MessageReadV1) error {
-			return nil
-		}).
-		OnP2MessageReactionCreatedV1(func(ctx context.Context, event *larkim.P2MessageReactionCreatedV1) error {
-			return nil
-		}).
-		OnP2MessageReactionDeletedV1(func(ctx context.Context, event *larkim.P2MessageReactionDeletedV1) error {
-			return nil
-		})
+	eventHandler := a.newEventDispatcher()
 	opts := []larkws.ClientOption{
 		larkws.WithEventHandler(eventHandler),
 		larkws.WithLogLevel(larkcore.LogLevelError),
@@ -207,6 +195,30 @@ func (a *adapter) runWebSocket(ctx context.Context) {
 			a.logger.Error("feishu sdk websocket stopped", "err", err)
 		}
 	}
+}
+
+func (a *adapter) newEventDispatcher() *dispatcher.EventDispatcher {
+	return dispatcher.NewEventDispatcher(a.cfg.VerificationToken, "").
+		OnP2MessageReceiveV1(func(ctx context.Context, event *larkim.P2MessageReceiveV1) error {
+			a.handleSDKMessage(event)
+			return nil
+		}).
+		OnP2MessageReadV1(func(ctx context.Context, event *larkim.P2MessageReadV1) error {
+			return nil
+		}).
+		OnP2MessageReactionCreatedV1(func(ctx context.Context, event *larkim.P2MessageReactionCreatedV1) error {
+			return nil
+		}).
+		OnP2MessageReactionDeletedV1(func(ctx context.Context, event *larkim.P2MessageReactionDeletedV1) error {
+			return nil
+		}).
+		OnP2CardActionTrigger(func(ctx context.Context, event *callback.CardActionTriggerEvent) (*callback.CardActionTriggerResponse, error) {
+			if event == nil || event.EventReq == nil || !a.handleCardAction(event.EventReq.Body) {
+				a.logger.Warn("feishu card action ignored", "reason", "invalid_payload")
+				return cardActionToast("warning", "操作无效或已过期"), nil
+			}
+			return cardActionToast("success", "操作已提交"), nil
+		})
 }
 
 func (a *adapter) handleSDKMessage(event *larkim.P2MessageReceiveV1) {
@@ -292,6 +304,9 @@ func (a *adapter) handleCardAction(raw []byte) bool {
 		Header feishuHeader `json:"header"`
 		Event  struct {
 			Operator struct {
+				UserID     string `json:"user_id"`
+				OpenID     string `json:"open_id"`
+				UnionID    string `json:"union_id"`
 				OperatorID struct {
 					UserID  string `json:"user_id"`
 					OpenID  string `json:"open_id"`
@@ -314,8 +329,19 @@ func (a *adapter) handleCardAction(raw []byte) bool {
 	if command == "" || payload.Event.Context.OpenChatID == "" {
 		return false
 	}
+	if a.markSeen(payload.Header.EventID) {
+		return true
+	}
 	chatType := cardActionChatType(payload.Event.Action.Value["chat_type"])
-	userID := firstNonEmpty(payload.Event.Operator.OperatorID.UnionID, payload.Event.Operator.OperatorID.OpenID, payload.Event.Operator.OperatorID.UserID)
+	userID := firstNonEmpty(
+		payload.Event.Action.Value["user_id"],
+		payload.Event.Operator.OperatorID.UnionID,
+		payload.Event.Operator.OperatorID.OpenID,
+		payload.Event.Operator.OperatorID.UserID,
+		payload.Event.Operator.UnionID,
+		payload.Event.Operator.OpenID,
+		payload.Event.Operator.UserID,
+	)
 	ib := bot.InboundMessage{
 		Platform:  bot.PlatformFeishu,
 		ChatType:  chatType,
@@ -359,6 +385,15 @@ func cardActionChatType(raw string) bot.ChatType {
 		return bot.ChatType(raw)
 	default:
 		return bot.ChatGroup
+	}
+}
+
+func cardActionToast(toastType, content string) *callback.CardActionTriggerResponse {
+	return &callback.CardActionTriggerResponse{
+		Toast: &callback.Toast{
+			Type:    toastType,
+			Content: content,
+		},
 	}
 }
 

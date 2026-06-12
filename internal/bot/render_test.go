@@ -7,7 +7,7 @@ import (
 )
 
 func TestApprovalCardCarriesChatType(t *testing.T) {
-	card := approvalCard(event.Approval{ID: "approval-1"}, ChatDM)
+	card := approvalCard(event.Approval{ID: "approval-1"}, ChatDM, "allowed-user")
 	if len(card.Elements) < 2 {
 		t.Fatalf("approval card elements = %d, want at least 2", len(card.Elements))
 	}
@@ -24,5 +24,8 @@ func TestApprovalCardCarriesChatType(t *testing.T) {
 	}
 	if value["chat_type"] != string(ChatDM) {
 		t.Fatalf("chat_type = %q, want %q", value["chat_type"], ChatDM)
+	}
+	if value["user_id"] != "allowed-user" {
+		t.Fatalf("user_id = %q, want allowed-user", value["user_id"])
 	}
 }
