@@ -195,11 +195,13 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 
 	reg := tool.NewRegistry()
 	bashSpec := sandbox.Spec{Mode: cfg.BashMode(), WriteRoots: cfg.WriteRootsForRoot(root), Network: cfg.Sandbox.Network}
+	shell := sandbox.ResolveShell(cfg.Tools.Shell.Prefer, cfg.Tools.Shell.Path, stderr)
+	bashSpec.Shell = shell
 	if bashSpec.Mode == "enforce" && !sandbox.Available() {
 		fmt.Fprintln(stderr, "warning: bash sandbox requested but unavailable on this platform; running bash unconfined")
 	}
-	if sandbox.ResolveShell().Kind == sandbox.ShellPowerShell {
-		fmt.Fprintln(stderr, "warning: bash not found on PATH; the shell tool will run commands under Windows PowerShell. Install Git for Windows or WSL to use bash.")
+	if autoShellPrefer(cfg.Tools.Shell.Prefer) && shell.Kind == sandbox.ShellPowerShell {
+		fmt.Fprintln(stderr, "warning: bash not found on PATH; the shell tool will run commands under Windows PowerShell. Install Git for Windows or WSL to use bash, or set [tools.shell] prefer=\"powershell\" to silence this.")
 	}
 	searchSpec := builtin.ResolveSearch(cfg.Tools.Search.Engine, cfg.Tools.Search.RgPath, stderr)
 	bashTimeout := time.Duration(cfg.BashTimeoutSeconds()) * time.Second
@@ -729,6 +731,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		PluginCtx:     ctx,
 		WorkspaceRoot: root,
 		AutoPlan:      cfg.Agent.AutoPlan,
+		Shell:         shell,
 		OnRemember: func(rule string) control.RememberResult {
 			return rememberPermissionRule(root, rule)
 		},
@@ -1103,6 +1106,14 @@ func pluginSpecNames(specs []plugin.Spec) []string {
 		names = append(names, s.Name)
 	}
 	return names
+}
+
+// autoShellPrefer reports whether [tools.shell] left the interpreter to
+// auto-detection, so the "fell back to PowerShell" hint is suppressed once the
+// user has explicitly chosen a shell.
+func autoShellPrefer(prefer string) bool {
+	p := strings.ToLower(strings.TrimSpace(prefer))
+	return p == "" || p == "auto"
 }
 
 // MCPStartupNotice formats the warning shown when configured MCP servers failed

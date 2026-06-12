@@ -18,7 +18,7 @@ func TestBashCancelReturnsPromptly(t *testing.T) {
 		t.Fatal("bash not registered")
 	}
 	cmd := "sleep 120"
-	if sandbox.ResolveShell().Kind == sandbox.ShellPowerShell {
+	if sandbox.ResolveShell("", "", nil).Kind == sandbox.ShellPowerShell {
 		cmd = "Start-Sleep -Seconds 120"
 	}
 	args, _ := json.Marshal(map[string]any{"command": cmd})

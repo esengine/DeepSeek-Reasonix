@@ -454,6 +454,10 @@ api_key_env = "MIMO_API_KEY"
 enabled = []   # omit/empty = all built-ins
 bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local cap
 
+[tools.shell]
+prefer = "auto"   # auto (default) | bash | powershell | pwsh — force the shell tool's interpreter
+# path = "C:\\Program Files\\PowerShell\\7\\pwsh.exe"   # explicit executable for the chosen shell
+
 [skills]
 # paths = ["~/my-skills", "../shared/skills"]   # extra custom skill roots
 # excluded_paths = ["~/.agents/skills"]         # hide convention roots without deleting folders

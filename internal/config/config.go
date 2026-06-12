@@ -834,6 +834,7 @@ type ToolsConfig struct {
 	Enabled            []string     `toml:"enabled"`
 	BashTimeoutSeconds *int         `toml:"bash_timeout_seconds"`
 	Search             SearchConfig `toml:"search"`
+	Shell              ShellConfig  `toml:"shell"`
 }
 
 const defaultBashTimeoutSeconds = 120
@@ -856,6 +857,15 @@ func (c *Config) BashTimeoutSeconds() int {
 type SearchConfig struct {
 	Engine string `toml:"engine"`
 	RgPath string `toml:"rg_path"`
+}
+
+// ShellConfig chooses the interpreter the bash tool runs commands under. Prefer
+// is "auto" (default — real bash when present, else PowerShell on Windows),
+// "bash", or "powershell"/"pwsh" (force it; warn at startup and fall back to
+// auto if absent). Path optionally points at a specific shell executable.
+type ShellConfig struct {
+	Prefer string `toml:"prefer"`
+	Path   string `toml:"path"`
 }
 
 // PermissionsConfig declares the per-call permission policy (see

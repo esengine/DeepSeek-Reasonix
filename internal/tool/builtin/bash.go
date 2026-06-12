@@ -99,7 +99,10 @@ func (b bash) resolved() sandbox.Shell {
 	if b.shell.Path != "" {
 		return b.shell
 	}
-	return sandbox.ResolveShell()
+	if b.sb.Shell.Path != "" {
+		return b.sb.Shell
+	}
+	return sandbox.ResolveShell("", "", nil)
 }
 
 func (bash) Schema() json.RawMessage {
