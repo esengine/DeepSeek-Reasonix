@@ -4,7 +4,7 @@ import { Check, CheckCircle2, ChevronDown, ChevronUp, GripVertical, Loader2, QrC
 import { asArray } from "../lib/array";
 import { useDeferredClose } from "../lib/useMountTransition";
 import { app } from "../lib/bridge";
-import { formatKeyCombo, notifyShortcutsChanged, SHORTCUT_DEFAULTS } from "../lib/shortcuts";
+import { formatKeyCombo, loadCustomShortcuts, notifyShortcutsChanged, SHORTCUT_DEFAULTS } from "../lib/shortcuts";
 import { normalizeLangPref, useI18n, useT, type DictKey, type LangPref } from "../lib/i18n";
 import { mergedFetchedProviderModels, providerDefaultModel, providerModelCandidates } from "../lib/providerModels";
 import { useUpdater } from "../lib/useUpdater";
@@ -4316,28 +4316,18 @@ const DEFAULT_SHORTCUTS: ShortcutEntry[] = (Object.keys(SHORTCUT_DEFAULTS) as Ar
   defaultWin: SHORTCUT_DEFAULTS[action].win,
 }));
 
-const SHORTCUTS_STORAGE_KEY = "reasonix.customShortcuts";
-
-function loadCustomShortcuts(): Record<string, string> {
-  try {
-    const raw = localStorage.getItem(SHORTCUTS_STORAGE_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch {
-    return {};
-  }
-}
-
-function saveCustomShortcuts(map: Record<string, string>) {
-  try {
-    localStorage.setItem(SHORTCUTS_STORAGE_KEY, JSON.stringify(map));
-  } catch {}
-  notifyShortcutsChanged();
-}
 
 function resolveShortcutKeys(entry: ShortcutEntry, custom: Record<string, string>, platform: string): string {
   const customKey = custom[entry.labelKey];
   if (customKey) return customKey;
   return platform === "darwin" ? entry.defaultMac : entry.defaultWin;
+}
+
+function saveCustomShortcuts(map: Record<string, string>) {
+  try {
+    localStorage.setItem("reasonix.customShortcuts", JSON.stringify(map));
+  } catch {}
+  notifyShortcutsChanged();
 }
 
 function ShortcutsSection() {

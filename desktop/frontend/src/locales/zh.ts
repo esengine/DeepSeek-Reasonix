@@ -1367,8 +1367,6 @@ export const zh: Record<DictKey, string> = {
   "shortcuts.shellExpandDesc": "在对话中展开或收起 Shell 命令的输出。",
   "shortcuts.yoloToggle": "切换 YOLO 模式",
   "shortcuts.yoloToggleDesc": "在询问/自动批准和 YOLO 模式之间切换。",
-  "shortcuts.cycleMode": "切换 Composer 模式",
-  "shortcuts.cycleModeDesc": "在普通、计划、自动批准和目标模式之间切换。",
   "shortcuts.textSizeIncrease": "增大文字大小",
   "shortcuts.textSizeIncreaseDesc": "增大界面文字的大小。",
   "shortcuts.textSizeDecrease": "减小文字大小",

@@ -2208,7 +2208,7 @@ export default function App() {
       onCloseTab={(id) => void closeTab(id)}
     />
     <YoloToggleHotkeys onToggle={toggleYoloApprovalMode} />
-    <PaletteHotkeys onOpen={() => void openPalette()} />
+    <PaletteHotkeys onOpen={() => { if (!paletteOpen) void openPalette(); }} />
     <div ref={appRef} className={["app", `app--${desktopPlatform}`, browserPreviewChrome ? "app--browser-preview" : ""].filter(Boolean).join(" ")}>
       <div
         className={[

@@ -110,8 +110,8 @@ export function matchesShortcut(e: { metaKey: boolean; ctrlKey: boolean; altKey:
  * key bindings configured in the settings panel. Pass `enabled=false` to
  * temporarily suppress the handler (e.g. when the tab bar is hidden).
  *
- * The handler is mounted on `document` without capture; for `window` + capture
- * semantics call `matchesShortcut` manually inside your own `useEffect`.
+ * The handler is mounted on `document` with capture to survive
+ * stopPropagation in child components.
  */
 export function useGlobalHotkey(
   action: ShortcutAction,
@@ -127,8 +127,8 @@ export function useGlobalHotkey(
         handler(e);
       }
     };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
+    document.addEventListener("keydown", onKey, { capture: true });
+    return () => document.removeEventListener("keydown", onKey, { capture: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [action, handler, enabled, ...deps]);
 }

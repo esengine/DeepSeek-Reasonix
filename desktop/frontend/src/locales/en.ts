@@ -1365,8 +1365,6 @@ export const en = {
   "shortcuts.shellExpandDesc": "Expand or collapse shell command output in the transcript.",
   "shortcuts.yoloToggle": "Toggle YOLO mode",
   "shortcuts.yoloToggleDesc": "Switch between ask/auto-approve and YOLO mode.",
-  "shortcuts.cycleMode": "Cycle composer mode",
-  "shortcuts.cycleModeDesc": "Switch between normal, plan, auto-approve, and goal modes.",
   "shortcuts.textSizeIncrease": "Increase text size",
   "shortcuts.textSizeIncreaseDesc": "Increase the UI text size.",
   "shortcuts.textSizeDecrease": "Decrease text size",
