@@ -22,6 +22,7 @@ import (
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
+	"reasonix/internal/fileutil"
 	"reasonix/internal/provider"
 )
 
@@ -1372,7 +1373,7 @@ func (a *App) saveTabsLocked() {
 	path := filepath.Join(dir, tabsFileName)
 	tmp := path + ".tmp"
 	os.WriteFile(tmp, b, 0o644)
-	os.Rename(tmp, path)
+	_ = fileutil.ReplaceFile(tmp, path)
 }
 
 func (a *App) orderedTabIDsLocked() []string {
@@ -1443,7 +1444,7 @@ func saveProjectsFile(f desktopProjectFile) error {
 	if err := os.WriteFile(tmp, b, 0o644); err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	return fileutil.ReplaceFile(tmp, path)
 }
 
 func normalizeProjectRoot(root string) string {
@@ -1821,7 +1822,7 @@ func saveTopicTitles(workspaceRoot string, m map[string]string) error {
 	if err := os.WriteFile(tmp, b, 0o644); err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	return fileutil.ReplaceFile(tmp, path)
 }
 
 func saveTopicTitleSources(workspaceRoot string, m map[string]string) error {
@@ -1837,7 +1838,7 @@ func saveTopicTitleSources(workspaceRoot string, m map[string]string) error {
 	if err := os.WriteFile(tmp, b, 0o644); err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	return fileutil.ReplaceFile(tmp, path)
 }
 
 func saveTopicCreatedAts(workspaceRoot string, m map[string]int64) error {
@@ -1853,7 +1854,7 @@ func saveTopicCreatedAts(workspaceRoot string, m map[string]int64) error {
 	if err := os.WriteFile(tmp, b, 0o644); err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	return fileutil.ReplaceFile(tmp, path)
 }
 
 func loadTopicTitle(workspaceRoot, topicID string) string {
@@ -2026,7 +2027,7 @@ func saveTelemetry(path string, snapshot tabTelemetrySnapshot) error {
 	if err := os.WriteFile(tmp, b, 0o644); err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	return fileutil.ReplaceFile(tmp, path)
 }
 
 func loadTelemetry(path string) tabTelemetrySnapshot {
