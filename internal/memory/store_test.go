@@ -151,6 +151,34 @@ func TestStoreDeleteMissingIsNoError(t *testing.T) {
 	}
 }
 
+func TestSafeJoinRejectsStoreEscape(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := safeJoin(dir, filepath.Join("..", "outside.md")); err == nil {
+		t.Fatal("safeJoin should reject paths outside the store")
+	}
+	if _, err := safeJoin(dir, filepath.Join(t.TempDir(), "outside.md")); err == nil {
+		t.Fatal("safeJoin should reject absolute paths outside the store")
+	}
+}
+
+func TestStoreArchiveSanitizesNameBeforePathUse(t *testing.T) {
+	root := t.TempDir()
+	s := Store{Dir: filepath.Join(root, "memory")}
+	if err := os.MkdirAll(s.Dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(root, "outside.md")
+	if err := os.WriteFile(outside, []byte("do not move"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Archive("../outside"); err != nil {
+		t.Fatalf("Archive with path-like name should be treated as a slug, not a path: %v", err)
+	}
+	if _, err := os.Stat(outside); err != nil {
+		t.Fatalf("outside file should remain untouched: %v", err)
+	}
+}
+
 func TestStoreDeleteRepairsReadOnlyMemoryFile(t *testing.T) {
 	s := Store{Dir: t.TempDir()}
 	if _, err := s.Save(Memory{Name: "locked", Description: "d", Type: TypeProject, Body: "b"}); err != nil {

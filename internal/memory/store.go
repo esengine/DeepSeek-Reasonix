@@ -100,7 +100,8 @@ func (s Store) Index() string {
 
 // Path returns the absolute file path a memory with the given name lives at.
 func (s Store) Path(name string) string {
-	return filepath.Join(s.Dir, slug(name)+".md")
+	path, _ := safeJoin(s.Dir, slug(name)+".md")
+	return path
 }
 
 // Save writes (or overwrites) a memory file and refreshes its MEMORY.md index
@@ -140,7 +141,7 @@ func (s Store) Archive(name string) (string, error) {
 	if name == "" {
 		return "", fmt.Errorf("memory needs a name")
 	}
-	path, err := s.archiveMemoryFile(filepath.Join(s.Dir, name+".md"), name)
+	path, err := s.archiveMemoryFile(name)
 	if err != nil {
 		return "", err
 	}
@@ -157,9 +158,13 @@ func (s Store) Delete(name string) error {
 	return err
 }
 
-func (s Store) archiveMemoryFile(path, name string) (string, error) {
+func (s Store) archiveMemoryFile(name string) (string, error) {
 	if s.Dir == "" {
 		return "", fmt.Errorf("memory store unavailable (no user config dir)")
+	}
+	path, err := safeJoin(s.Dir, name+".md")
+	if err != nil {
+		return "", err
 	}
 	if _, err := os.Stat(path); err != nil {
 		if os.IsNotExist(err) {
@@ -167,29 +172,67 @@ func (s Store) archiveMemoryFile(path, name string) (string, error) {
 		}
 		return "", err
 	}
-	dir := filepath.Join(s.Dir, ".archive")
+	dir, err := safeJoin(s.Dir, ".archive")
+	if err != nil {
+		return "", err
+	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
-	dest := archivePath(dir, name, time.Now().UTC())
+	dest, err := archivePath(dir, name, time.Now().UTC())
+	if err != nil {
+		return "", err
+	}
 	if err := renameMemoryFile(path, dest); err != nil {
 		return "", err
 	}
 	return dest, nil
 }
 
-func archivePath(dir, name string, when time.Time) string {
+func archivePath(dir, name string, when time.Time) (string, error) {
 	stem := when.Format("20060102-150405.000") + "-" + name
-	path := filepath.Join(dir, stem+".md")
+	path, err := safeJoin(dir, stem+".md")
+	if err != nil {
+		return "", err
+	}
 	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return path
+		return path, nil
 	}
 	for i := 1; ; i++ {
-		path = filepath.Join(dir, fmt.Sprintf("%s-%d.md", stem, i))
+		path, err = safeJoin(dir, fmt.Sprintf("%s-%d.md", stem, i))
+		if err != nil {
+			return "", err
+		}
 		if _, err := os.Stat(path); os.IsNotExist(err) {
-			return path
+			return path, nil
 		}
 	}
+}
+
+func safeJoin(base, name string) (string, error) {
+	if base == "" {
+		return "", fmt.Errorf("memory store unavailable (no user config dir)")
+	}
+	if !filepath.IsLocal(name) {
+		return "", fmt.Errorf("memory path escapes store: %s", name)
+	}
+	baseAbs, err := filepath.Abs(base)
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(baseAbs, name)
+	pathAbs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	rel, err := filepath.Rel(baseAbs, pathAbs)
+	if err != nil {
+		return "", err
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) || filepath.IsAbs(rel) {
+		return "", fmt.Errorf("memory path escapes store: %s", name)
+	}
+	return pathAbs, nil
 }
 
 func renameMemoryFile(path, dest string) error {
