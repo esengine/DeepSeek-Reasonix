@@ -546,7 +546,6 @@ export function ProjectTree({
       : Date.now() - diff;
     const topicMatchesTime = (node: ProjectNode) => {
       if (cutoff === null) return true;
-      if (timeFilter === "10" || timeFilter === "20") return topicActivityTime(node) >= cutoff;
       return topicActivityTime(node) >= cutoff;
     };
     const matchesQuery = (node: ProjectNode) =>

@@ -14495,7 +14495,8 @@ a[href] {
 }
 
 .project-tree__header-actions .project-tree__add-project:focus-visible,
-.project-tree__header-actions .project-tree__collapse-all:focus-visible {
+.project-tree__header-actions .project-tree__collapse-all:focus-visible,
+.project-tree__header-actions .project-tree__header-action-btn:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
 }
