@@ -1,12 +1,46 @@
 package config
 
 import (
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/BurntSushi/toml"
 )
+
+func isolateUserConfigHome(t *testing.T) string {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("AppData", filepath.Join(home, "AppData", "Roaming"))
+	return home
+}
+
+func TestUserConfigDisplayPathCollapsesHome(t *testing.T) {
+	home := isolateUserConfigHome(t)
+	got := userConfigDisplayPath()
+	if !strings.HasPrefix(got, "~/") {
+		t.Fatalf("display path = %q, want ~/ prefix", got)
+	}
+	if !strings.HasSuffix(got, "reasonix/config.toml") {
+		t.Fatalf("display path = %q, want reasonix/config.toml suffix", got)
+	}
+	if strings.Contains(got, home) {
+		t.Fatalf("display path %q must not embed the absolute home", got)
+	}
+}
+
+func TestRenderTOMLHeaderShowsResolvedConfigPath(t *testing.T) {
+	isolateUserConfigHome(t)
+	out := RenderTOML(Default())
+	want := "> " + userConfigDisplayPath() + " > built-in defaults."
+	if !strings.Contains(out, want) {
+		t.Fatalf("rendered header missing resolved config path %q", want)
+	}
+}
 
 // TestRenderTOMLRoundTrips ensures the annotated TOML we emit parses back into
 // an equivalent config — i.e. the wizard never writes a file it can't read.

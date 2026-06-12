@@ -1,5 +1,5 @@
 // Package config loads Reasonix's runtime configuration from TOML. Resolution order:
-// flag > project ./reasonix.toml > user ~/.config/reasonix/config.toml > built-in defaults.
+// flag > project ./reasonix.toml > user config.toml (in the OS user-config dir) > built-in defaults.
 // Secrets come from the environment via api_key_env and are never stored in
 // config files.
 package config
@@ -1637,12 +1637,29 @@ func userConfigPath() string {
 	return filepath.Join(dir, "reasonix", "config.toml")
 }
 
-// UserConfigPath is the user-global config file (~/.config/reasonix/config.toml),
-// or "" when the user config dir can't be resolved.
+// userConfigDisplayPath is userConfigPath collapsed to a ~-relative form for
+// comments rendered into the user's own config.toml, so macOS/Windows users see
+// the real location instead of a hardcoded ~/.config path.
+func userConfigDisplayPath() string {
+	p := userConfigPath()
+	if p == "" {
+		return "<os-config-dir>/reasonix/config.toml"
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		if rel, err := filepath.Rel(home, p); err == nil && !strings.HasPrefix(rel, "..") {
+			return "~/" + filepath.ToSlash(rel)
+		}
+	}
+	return p
+}
+
+// UserConfigPath is the user-global config.toml under os.UserConfigDir(): ~/.config
+// on Linux, ~/Library/Application Support on macOS, %AppData% on Windows. "" when
+// the user config dir can't be resolved.
 func UserConfigPath() string { return userConfigPath() }
 
 // UserCredentialsPath is the reasonix-owned global secrets file, beside
-// config.toml in the user config dir (e.g. ~/.config/reasonix/credentials). It
+// config.toml in the user config dir (os.UserConfigDir()/reasonix/credentials). It
 // holds KEY=value lines loaded into the environment by loadDotEnv. The setup
 // wizard writes API keys here, deliberately NOT named .env: keys never land in a
 // project's own .env (which can't be selectively gitignored), never get

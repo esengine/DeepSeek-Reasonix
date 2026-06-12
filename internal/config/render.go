@@ -40,7 +40,7 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	var b strings.Builder
 
 	b.WriteString("# Reasonix configuration.\n")
-	b.WriteString("# Resolution order: flag > ./reasonix.toml > ~/.config/reasonix/config.toml > built-in defaults.\n")
+	fmt.Fprintf(&b, "# Resolution order: flag > ./reasonix.toml > %s > built-in defaults.\n", userConfigDisplayPath())
 	b.WriteString("# Secrets come from the environment via api_key_env; never put keys here.\n\n")
 
 	fmt.Fprintf(&b, "config_version = %d   # schema marker for diagnostics; old versions may ignore it\n", configVersion(c))

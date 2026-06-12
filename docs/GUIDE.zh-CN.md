@@ -21,7 +21,8 @@
 
 ## 配置
 
-优先级：**flag > `./reasonix.toml` > `~/.config/reasonix/config.toml` > 内置默认值**。
+优先级：**flag > `./reasonix.toml` > 用户配置文件 > 内置默认值**。用户配置位于操作系统配置目录：
+Linux 为 `~/.config/reasonix/`，macOS 为 `~/Library/Application Support/reasonix/`，Windows 为 `%AppData%\reasonix\`。
 密钥经环境变量通过 `api_key_env` 注入，绝不写入配置文件。
 
 ```toml
