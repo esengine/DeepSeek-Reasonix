@@ -65,11 +65,13 @@ export function UserMessage({
   failed,
   turn,
   anchorId,
+  id,
 }: {
   text: string;
   failed?: boolean;
   turn?: number;
   anchorId?: string;
+  id?: string;
 }) {
   const t = useT();
   const imSource = parseImSourceMessage(text);
@@ -106,6 +108,7 @@ export function UserMessage({
       data-question-anchor={anchorId}
       data-turn={turn}
       data-im-source={imSource?.provider || undefined}
+      data-history-restore={id && id.startsWith("h") ? "" : undefined}
     >
       <div className="msg__body">
         {imSource ? (
@@ -345,7 +348,7 @@ export const AssistantMessage = memo(function AssistantMessage({
   const processOnly = Boolean(item.reasoning) && !hasText;
   const processWithText = Boolean(item.reasoning) && hasText;
   return (
-    <div className={`msg msg--assistant${processOnly ? " msg--process-only" : ""}${processWithText ? " msg--process-with-text" : ""}`}>
+    <div className={`msg msg--assistant${processOnly ? " msg--process-only" : ""}${processWithText ? " msg--process-with-text" : ""}`} data-history-restore={item.id.startsWith("h") ? "" : undefined}>
       {item.reasoning && (
         <div className="reasoning">
           <button

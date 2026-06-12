@@ -17221,6 +17221,10 @@ a[href] {
   animation: graphite-message-in var(--dur-slow) var(--ease-out) both;
 }
 
+:root[data-theme-style] .msg[data-history-restore] {
+  animation: none;
+}
+
 :root[data-theme-style="graphite"] .msg--user .msg__body {
   max-width: min(80%, 650px);
   padding: 11px 15px;
