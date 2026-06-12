@@ -7891,6 +7891,34 @@ a[href] {
   color: var(--fg-faint);
   font-size: var(--font-caption);
 }
+.mem-suggestion-settings {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 12px;
+  padding: 10px 11px;
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--bg-elev) 58%, transparent);
+}
+.mem-suggestion-settings > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+.mem-suggestion-settings strong {
+  color: var(--fg);
+  font-size: var(--font-control-small);
+  font-weight: 700;
+  line-height: 1.35;
+}
+.mem-suggestion-settings span {
+  color: var(--fg-dim);
+  font-size: var(--font-caption);
+  line-height: 1.45;
+}
 .mem-suggestion-group {
   display: flex;
   flex-direction: column;

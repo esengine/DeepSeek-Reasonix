@@ -126,7 +126,8 @@ candidates:
 
 This is intentionally a suggestion layer, not an automatic writer:
 
-- scanning is user-initiated from the Memory page;
+- scanning can be run manually from the Memory page. Users may also enable a
+  desktop UI preference that scans automatically when the Suggestions tab opens;
 - candidates show their proposed body plus short evidence snippets before any
   write;
 - accepting a memory candidate writes through the controller's active memory

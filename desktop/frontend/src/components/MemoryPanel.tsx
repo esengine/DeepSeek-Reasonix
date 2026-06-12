@@ -201,6 +201,30 @@ function suggestionStamp(value?: string): string {
   return date.toLocaleString();
 }
 
+const AUTO_MEMORY_SUGGESTIONS_KEY = "reasonix.memory.autoSuggestions";
+
+function readAutoSuggestionsPreference(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(AUTO_MEMORY_SUGGESTIONS_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeAutoSuggestionsPreference(enabled: boolean) {
+  if (typeof window === "undefined") return;
+  try {
+    if (enabled) {
+      window.localStorage.setItem(AUTO_MEMORY_SUGGESTIONS_KEY, "1");
+    } else {
+      window.localStorage.removeItem(AUTO_MEMORY_SUGGESTIONS_KEY);
+    }
+  } catch {
+    // Ignore storage failures; the toggle still works for this render.
+  }
+}
+
 // MemoryPanel is the desktop memory manager: a right-side drawer over the loaded
 // REASONIX.md hierarchy and saved auto-memories. Unlike Claude Code's /memory
 // (which shells out to $EDITOR) it edits docs in place, and unlike Codex (no UI
@@ -744,6 +768,8 @@ export function MemorySettingsPage() {
 	const [suggestionBusy, setSuggestionBusy] = useState(false);
 	const [expandedSuggestion, setExpandedSuggestion] = useState<string | null>(null);
 	const [acceptedSuggestions, setAcceptedSuggestions] = useState<Record<string, string>>({});
+	const [autoSuggestions, setAutoSuggestions] = useState(readAutoSuggestionsPreference);
+	const autoSuggestionsRequested = useRef(false);
 	const factRefs = useRef<Record<string, HTMLElement | null>>({});
 
 	const reload = useCallback(async () => {
@@ -771,6 +797,18 @@ export function MemorySettingsPage() {
 			setSuggestionBusy(false);
 		}
 	}, [suggestionBusy]);
+
+	const setAutoSuggestionsPreference = useCallback((enabled: boolean) => {
+		autoSuggestionsRequested.current = false;
+		setAutoSuggestions(enabled);
+		writeAutoSuggestionsPreference(enabled);
+	}, []);
+
+	useEffect(() => {
+		if (tab !== "suggestions" || !autoSuggestions || suggestions || suggestionBusy || autoSuggestionsRequested.current) return;
+		autoSuggestionsRequested.current = true;
+		void refreshSuggestions();
+	}, [autoSuggestions, refreshSuggestions, suggestionBusy, suggestions, tab]);
 
 	const facts = view?.facts ?? [];
 	const archives = view?.archives ?? [];
@@ -1243,6 +1281,23 @@ export function MemorySettingsPage() {
 							{suggestions ? t("memory.refreshSuggestions") : t("memory.scanSuggestions")}
 						</button>
 					</div>
+				</div>
+				<div className="mem-suggestion-settings">
+					<div>
+						<strong>{t("memory.autoSuggestions")}</strong>
+						<span>{t("memory.autoSuggestionsHint")}</span>
+					</div>
+					<Tooltip label={autoSuggestions ? t("memory.disableAutoSuggestions") : t("memory.enableAutoSuggestions")}>
+						<label className="cap-switch">
+							<input
+								type="checkbox"
+								checked={autoSuggestions}
+								onChange={(e) => setAutoSuggestionsPreference(e.target.checked)}
+								aria-label={t("memory.autoSuggestions")}
+							/>
+							<span className="cap-switch__track" />
+						</label>
+					</Tooltip>
 				</div>
 				{error && <div className="mem-error" role="alert">{error}</div>}
 				{!suggestions ? (
