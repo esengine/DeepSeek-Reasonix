@@ -54,11 +54,6 @@ func (m *SinkMultiplexer) Emit(e event.Event) {
 	case event.Usage:
 		m.parentSink.Emit(e)
 
-	case event.Text:
-		if verbose {
-			m.parentSink.Emit(e)
-		}
-
 	case event.Message:
 		if verbose {
 			e.Text = fmt.Sprintf("[%s] %s", m.agentName, e.Text)

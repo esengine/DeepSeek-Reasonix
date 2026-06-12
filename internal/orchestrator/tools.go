@@ -15,7 +15,7 @@ type agentSpawnTool struct {
 }
 
 func (t *agentSpawnTool) Name() string        { return "agent_spawn" }
-func (t *agentSpawnTool) Description() string  { return "Delegate a task to a named managed agent and wait for its result. The agent runs with its own model, tools, and context." }
+func (t *agentSpawnTool) Description() string  { return "Delegate a complete task to a named managed agent. The agent runs independently with its own model, tools, and context. When you receive the result, the agent has finished the work — integrate the outcome and move on. Do not repeat the delegated work." }
 func (t *agentSpawnTool) ReadOnly() bool       { return false }
 
 func (t *agentSpawnTool) Schema() json.RawMessage {
@@ -57,9 +57,9 @@ func (t *agentSpawnTool) Execute(ctx context.Context, args json.RawMessage) (str
 
 	result, err := a.Run(ctx, p.Task)
 	if err != nil {
-		return fmt.Sprintf("agent %q returned an error: %v\n\nPartial result: %s", p.Name, err, result), nil
+		return fmt.Sprintf("[Agent %q completed with error] %v\n\nPartial result: %s", p.Name, err, result), nil
 	}
-	return result, nil
+	return fmt.Sprintf("[Agent %q completed]\n\n%s", p.Name, result), nil
 }
 
 type agentSendTool struct {
@@ -67,7 +67,7 @@ type agentSendTool struct {
 }
 
 func (t *agentSendTool) Name() string        { return "agent_send" }
-func (t *agentSendTool) Description() string  { return "Send a message to a managed agent and wait for its response. Unlike agent_spawn, this continues the agent's existing conversation context." }
+func (t *agentSendTool) Description() string  { return "Send a message to a managed agent and wait for its response. Unlike agent_spawn, this continues the agent's existing conversation context. When you receive the result, the agent has finished responding — integrate the outcome and move on. Do not repeat the delegated work." }
 func (t *agentSendTool) ReadOnly() bool       { return false }
 
 func (t *agentSendTool) Schema() json.RawMessage {
@@ -105,9 +105,9 @@ func (t *agentSendTool) Execute(ctx context.Context, args json.RawMessage) (stri
 
 	result, err := t.orc.SendMessage(ctx, p.Name, p.Message)
 	if err != nil {
-		return fmt.Sprintf("agent %q error: %v", p.Name, err), nil
+		return fmt.Sprintf("[Agent %q completed with error] %v", p.Name, err), nil
 	}
-	return result, nil
+	return fmt.Sprintf("[Agent %q completed]\n\n%s", p.Name, result), nil
 }
 
 type agentStatusTool struct {
