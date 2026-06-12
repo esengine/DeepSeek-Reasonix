@@ -405,6 +405,7 @@ type OrchestratorAgentEntry struct {
 	SystemPromptFile string  `toml:"system_prompt_file"`
 	Persist         bool     `toml:"persist"`
 	Ephemeral       bool     `toml:"ephemeral"`
+	Verbose         bool     `toml:"verbose"`
 	Tools           []string `toml:"tools"`
 }
 

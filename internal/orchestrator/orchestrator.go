@@ -49,6 +49,7 @@ func (o *Orchestrator) SessionDir() string {
 
 func (o *Orchestrator) AddAgent(name string, ctrl *control.Controller, cfg config.OrchestratorAgentEntry) {
 	sink := NewSinkMultiplexer(o.mainSink, name)
+	sink.SetVerbose(cfg.Verbose)
 	agent := NewManagedAgent(name, ctrl, sink, cfg)
 	o.mu.Lock()
 	o.agents[name] = agent

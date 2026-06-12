@@ -440,6 +440,7 @@ func chatREPL(args []string) int {
 				continue
 			}
 			agentSink := orchestrator.NewSinkMultiplexer(sink, entry.Name)
+			agentSink.SetVerbose(entry.Verbose)
 			denylist := orchestrator.OrchestratorToolNames()
 			childCtrl, cerr := boot.Build(ctx, boot.Options{
 				Model:         modelName,

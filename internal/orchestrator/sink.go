@@ -12,6 +12,7 @@ type SinkMultiplexer struct {
 	mu         sync.Mutex
 	parentID   string
 	agentName  string
+	verbose    bool
 }
 
 func NewSinkMultiplexer(parent event.Sink, name string) *SinkMultiplexer {
@@ -30,9 +31,16 @@ func (m *SinkMultiplexer) ParentID() string {
 	return m.parentID
 }
 
+func (m *SinkMultiplexer) SetVerbose(v bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.verbose = v
+}
+
 func (m *SinkMultiplexer) Emit(e event.Event) {
 	m.mu.Lock()
 	pid := m.parentID
+	verbose := m.verbose
 	m.mu.Unlock()
 
 	switch e.Kind {
@@ -45,6 +53,22 @@ func (m *SinkMultiplexer) Emit(e event.Event) {
 
 	case event.Usage:
 		m.parentSink.Emit(e)
+
+	case event.Text:
+		if verbose {
+			m.parentSink.Emit(e)
+		}
+
+	case event.Message:
+		if verbose {
+			e.Text = fmt.Sprintf("[%s] %s", m.agentName, e.Text)
+			m.parentSink.Emit(e)
+		}
+
+	case event.Reasoning:
+		if verbose {
+			m.parentSink.Emit(e)
+		}
 
 	case event.Notice:
 		e.Text = fmt.Sprintf("[%s] %s", m.agentName, e.Text)
