@@ -730,6 +730,13 @@ type PluginEntry struct {
 	// Empty defaults to "background" so enabled MCPs connect automatically
 	// without blocking chat. Unknown non-empty values fall back to "lazy".
 	Tier string `toml:"tier"`
+	// Agents constrains this MCP server to only the named orchestrator agents.
+	// When empty (nil or []), the plugin is loaded for every controller (main
+	// agent + all orchestrator children). When non-empty, it loads only for
+	// controllers whose AgentName matches one of these entries. The main
+	// controller's AgentName is "" so it never matches a non-empty list — this
+	// is how you keep an MCP server away from the main agent.
+	Agents []string `toml:"agents"`
 }
 
 func (e PluginEntry) ShouldAutoStart() bool {

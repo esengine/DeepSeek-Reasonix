@@ -444,6 +444,7 @@ func chatREPL(args []string) int {
 			denylist := orchestrator.OrchestratorToolNames()
 			childCtrl, cerr := boot.Build(ctx, boot.Options{
 				Model:         modelName,
+				AgentName:     entry.Name,
 				MaxSteps:      *maxSteps,
 				Sink:          agentSink,
 				SystemPrompt:  entryPrompt,

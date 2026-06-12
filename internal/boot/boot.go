@@ -86,6 +86,11 @@ type Options struct {
 	// plugins, and skills are registered. Used to prevent managed agents from
 	// exposing orchestrator meta-tools or other unwanted capabilities.
 	ToolDenylist []string
+	// AgentName identifies the controller being built. Empty means the main
+	// agent; non-empty means an orchestrator child agent. When set, plugins
+	// with a non-empty Agents list are loaded only if this name appears in it.
+	// Plugins with an empty Agents list are always loaded (backward compatible).
+	AgentName string
 	// SkipCodegraph disables codegraph installation and plugin loading for this
 	// controller. Used for orchestrator child agents to avoid N concurrent
 	// downloads/installs when the main controller already handles it.
@@ -227,6 +232,15 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// take the path that fits them. User entries default to background: the
 	// session starts immediately while enabled MCP servers warm up.
 	eagerEntries, lazyEntries, bgEntries := partitionByTier(cfg.AutoStartPlugins())
+
+	// Agent-scoped plugins: when the controller is being built for a specific
+	// orchestrator child (opts.AgentName != ""), only load plugins whose Agents
+	// list is empty or contains the agent name. The main controller (AgentName "")
+	// only loads plugins with an empty Agents list — this is how you keep an MCP
+	// server away from the main agent and reserve it for one or more children.
+	eagerEntries = filterPluginsForAgent(eagerEntries, opts.AgentName)
+	lazyEntries = filterPluginsForAgent(lazyEntries, opts.AgentName)
+	bgEntries = filterPluginsForAgent(bgEntries, opts.AgentName)
 
 	// Auto-demote: any eager plugin that has been chronically slow (recent
 	// samples repeatedly hit the blocking startup budget) drops to lazy
@@ -962,6 +976,30 @@ func addBuiltins(reg *tool.Registry, enabled, writeRoots []string, bashSpec sand
 			reg.Add(t)
 		}
 	}
+}
+
+// filterPluginsForAgent removes entries whose Agents list is non-empty and
+// does not include the given agent name. When agentName is "" (main agent),
+// only entries with an empty Agents list pass through — this excludes plugins
+// that are reserved for specific orchestrator children.
+func filterPluginsForAgent(entries []config.PluginEntry, agentName string) []config.PluginEntry {
+	out := make([]config.PluginEntry, 0, len(entries))
+	for _, e := range entries {
+		if len(e.Agents) == 0 {
+			out = append(out, e)
+			continue
+		}
+		if agentName == "" {
+			continue
+		}
+		for _, a := range e.Agents {
+			if a == agentName {
+				out = append(out, e)
+				break
+			}
+		}
+	}
+	return out
 }
 
 // partitionByTier splits configured plugin entries into the three startup
