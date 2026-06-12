@@ -141,7 +141,6 @@ export function Transcript({
   actionPending = false,
   rewindDisabled = false,
   questionNavigator = true,
-  defaultExpandThinking = false,
 }: {
   items: Item[];
   live?: LiveStream;
@@ -152,7 +151,6 @@ export function Transcript({
   actionPending?: boolean;
   rewindDisabled?: boolean;
   questionNavigator?: boolean;
-  defaultExpandThinking?: boolean;
 }) {
   const {
     scrollRef,
@@ -458,7 +456,7 @@ export function Transcript({
         // Render the final assistant message (if any) directly
         for (const it of group.items) {
           if (it.kind !== "assistant") continue;
-          out.push(<LiveAssistantMessage key={it.id} item={it as AssistantItem} defaultExpanded={defaultExpandThinking} />);
+          out.push(<LiveAssistantMessage key={it.id} item={it as AssistantItem} defaultExpanded={false} />);
           if (!it.streaming && it.text.trim() !== "") {
             actionText = it.text;
             actionReady = true;
@@ -500,7 +498,7 @@ export function Transcript({
             break;
           }
           case "assistant":
-            out.push(<LiveAssistantMessage key={it.id} item={it as AssistantItem} defaultExpanded={defaultExpandThinking} />);
+            out.push(<LiveAssistantMessage key={it.id} item={it as AssistantItem} defaultExpanded={false} />);
             if (!it.streaming && it.text.trim() !== "") {
               actionText = it.text;
               actionReady = true;
@@ -521,7 +519,7 @@ export function Transcript({
       pushTurnActions();
     }
     return out;
-  }, [hotStartIdx, items, openAction, actionPending, rewindDisabled, onRewind, subcallsByParent, userTurn, checkpointsByTurn, displayMode, stepGroups, defaultExpandThinking]);
+  }, [hotStartIdx, items, openAction, actionPending, rewindDisabled, onRewind, subcallsByParent, userTurn, checkpointsByTurn, displayMode, stepGroups, false]);
 
   // ── Assemble rendered output ──────────────────────────────────────────────
   // Warm/cold zone is a separate memo'd WarmZone component so streaming tokens
@@ -556,7 +554,6 @@ export function Transcript({
             warmRewindDisabled={rewindDisabled}
             warmOnRewind={onRewind}
             warmSetOpenAction={setOpenAction}
-            defaultExpandThinking={defaultExpandThinking}
             onToggleColdPage={() => setColdPage((p) => p + 1)}
             onToggleWarmTurn={(g, expand) => {
               setExpandedWarmTurns((prev) => {
@@ -594,7 +591,6 @@ const WarmZone = memo(function WarmZone({
   warmRewindDisabled,
   warmOnRewind,
   warmSetOpenAction,
-  defaultExpandThinking = false,
   onToggleColdPage,
   onToggleWarmTurn,
 }: {
@@ -612,7 +608,6 @@ const WarmZone = memo(function WarmZone({
   warmRewindDisabled: boolean;
   warmOnRewind: ((turn: number, scope: string) => void) | undefined;
   warmSetOpenAction: (action: OpenTurnAction | null) => void;
-  defaultExpandThinking?: boolean;
   onToggleColdPage: () => void;
   onToggleWarmTurn: (g: number, expand: boolean) => void;
 }) {
@@ -667,7 +662,6 @@ const WarmZone = memo(function WarmZone({
               rewindDisabled={warmRewindDisabled}
               onRewind={warmOnRewind}
               setOpenAction={warmSetOpenAction}
-              defaultExpandThinking={defaultExpandThinking}
             />
           </WarmTurnCard>,
         );
@@ -711,7 +705,6 @@ function WarmTurnItems({
   rewindDisabled,
   onRewind,
   setOpenAction,
-  defaultExpandThinking = false,
 }: {
   startIdx: number;
   endIdx: number;
@@ -724,7 +717,6 @@ function WarmTurnItems({
   rewindDisabled: boolean;
   onRewind: ((turn: number, scope: string) => void) | undefined;
   setOpenAction: (action: OpenTurnAction | null) => void;
-  defaultExpandThinking?: boolean;
 }) {
   const nodes: React.ReactNode[] = [];
   let actionText = "";
@@ -783,7 +775,7 @@ function WarmTurnItems({
         break;
       }
       case "assistant": {
-        nodes.push(<AssistantMessage key={it.id} item={it} defaultExpanded={defaultExpandThinking} />);
+        nodes.push(<AssistantMessage key={it.id} item={it} defaultExpanded={false} />);
         if (!it.streaming && it.text.trim() !== "") {
           actionText = it.text;
           actionReady = true;

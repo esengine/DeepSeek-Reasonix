@@ -1,4 +1,4 @@
-export type DisplayMode = "standard" | "compact" | "minimal";
+export type DisplayMode = "standard" | "compact";
 
 const DISPLAY_MODE_KEY = "reasonix-display-mode";
 const DISPLAY_MODE_EVENT = "reasonix:display-mode";
@@ -6,7 +6,7 @@ const DISPLAY_MODE_EVENT = "reasonix:display-mode";
 export function getDisplayMode(): DisplayMode {
   if (typeof localStorage === "undefined") return "standard";
   const stored = localStorage.getItem(DISPLAY_MODE_KEY);
-  if (stored === "standard" || stored === "compact" || stored === "minimal") return stored;
+  if (stored === "standard" || stored === "compact") return stored;
   return "standard";
 }
 
@@ -17,7 +17,7 @@ export function setDisplayMode(mode: DisplayMode): void {
 
 /** Adopts the toml-persisted mode at boot so config is the source of truth across machines. */
 export function hydrateDisplayMode(mode: string | undefined): void {
-  if (mode !== "standard" && mode !== "compact" && mode !== "minimal") return;
+  if (mode !== "standard" && mode !== "compact") return;
   if (mode === getDisplayMode()) return;
   setDisplayMode(mode);
 }
