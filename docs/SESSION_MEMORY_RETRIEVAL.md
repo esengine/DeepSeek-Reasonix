@@ -115,6 +115,30 @@ The intended workflow is:
 This avoids repeatedly paying retrieval cost for the same stable conclusion,
 while keeping the saved set small and auditable.
 
+## Desktop Candidate Suggestions
+
+The desktop Memory page can scan recent local sessions and produce draft
+candidates:
+
+- memory candidates from explicit long-lived preferences, rules, or project
+  conventions in recent user turns;
+- skill candidates from repeated workflow categories across recent sessions.
+
+This is intentionally a suggestion layer, not an automatic writer:
+
+- scanning is user-initiated from the Memory page;
+- candidates show their proposed body plus short evidence snippets before any
+  write;
+- accepting a memory candidate writes through the controller's active memory
+  path, so the current session gets the same transient turn-tail update as a
+  `remember` write;
+- accepting a skill candidate writes through the normal skill store, preserving
+  skill name validation, scope handling, and no-overwrite behavior.
+
+No candidate scan changes the stable system prompt or provider-visible tool
+schema. Saved memories and created skills become part of the stable prefix only
+through the existing next-session discovery path.
+
 ## Archive-on-Forget
 
 `forget` no longer permanently deletes the memory file. It removes the memory
@@ -180,6 +204,7 @@ Local management surfaces distinguish active and archived memory:
 
 - Active memories can be searched, read, and used by the agent.
 - Archived memories are read-only audit entries.
+- Candidate suggestions are drafts until the user confirms them.
 
 The desktop `Memory()` payload always returns non-nil arrays for docs, facts,
 archives, and scopes. This is a Wails JSON contract: nil Go slices encode as
@@ -200,6 +225,8 @@ The change is covered across layers:
   approval-preview visibility;
 - boot-level tool registration and real model tool-call execution;
 - desktop `Memory()` payload shape for active and archived facts;
+- desktop memory/skill candidate generation, confirmation writes, and non-nil
+  suggestion arrays;
 - frontend CSS and TypeScript checks with generated Wails bindings.
 
 ## Operational Notes

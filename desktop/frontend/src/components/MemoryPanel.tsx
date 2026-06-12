@@ -1,8 +1,8 @@
-import { ChevronDown, ChevronRight, FileText, Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, FileText, Pencil, Plus, RefreshCw, Search, Sparkles, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
-import type { MemoryArchive, MemoryFact, MemoryView } from "../lib/types";
+import type { MemoryArchive, MemoryFact, MemorySuggestion, MemorySuggestionsView, MemoryView, SkillSuggestion } from "../lib/types";
 import { ResizableDrawer } from "./ResizableDrawer";
 import { Tooltip } from "./Tooltip";
 import { ModalCloseButton } from "./ModalCloseButton";
@@ -188,6 +188,17 @@ function memoryDocHint(scope: string, t: ReturnType<typeof useT>): string {
 function errorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
   return String(err || "Unknown error");
+}
+
+function suggestionTotal(view: MemorySuggestionsView | null): number {
+  return (view?.memories?.length ?? 0) + (view?.skills?.length ?? 0);
+}
+
+function suggestionStamp(value?: string): string {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString();
 }
 
 // MemoryPanel is the desktop memory manager: a right-side drawer over the loaded
@@ -726,15 +737,40 @@ export function MemorySettingsPage() {
 	const [expandedDoc, setExpandedDoc] = useState<string | null>(null);
 	const [confirmForget, setConfirmForget] = useState<string | null>(null);
 	const [error, setError] = useState<string | null>(null);
-	const [tab, setTab] = useState<"saved" | "archived" | "docs">("saved");
+	const [tab, setTab] = useState<"saved" | "archived" | "docs" | "suggestions">("saved");
 	const [showAdd, setShowAdd] = useState(false);
 	const [showStorage, setShowStorage] = useState(false);
+	const [suggestions, setSuggestions] = useState<MemorySuggestionsView | null>(null);
+	const [suggestionBusy, setSuggestionBusy] = useState(false);
+	const [expandedSuggestion, setExpandedSuggestion] = useState<string | null>(null);
+	const [acceptedSuggestions, setAcceptedSuggestions] = useState<Record<string, string>>({});
 	const factRefs = useRef<Record<string, HTMLElement | null>>({});
 
 	const reload = useCallback(async () => {
 		setView(await app.Memory().catch(() => null));
 	}, []);
 	useEffect(() => { void reload(); }, [reload]);
+
+	const refreshSuggestions = useCallback(async () => {
+		if (suggestionBusy) return;
+		setSuggestionBusy(true);
+		setError(null);
+		try {
+			const next = await app.MemorySuggestions();
+			setSuggestions({
+				memories: next.memories ?? [],
+				skills: next.skills ?? [],
+				generatedAt: next.generatedAt || "",
+				available: !!next.available,
+				source: next.source || "",
+			});
+			setAcceptedSuggestions({});
+		} catch (err) {
+			setError(errorMessage(err));
+		} finally {
+			setSuggestionBusy(false);
+		}
+	}, [suggestionBusy]);
 
 	const facts = view?.facts ?? [];
 	const archives = view?.archives ?? [];
@@ -864,6 +900,35 @@ export function MemorySettingsPage() {
 		}
 	}, [editingPath, busy, draft, reload]);
 
+	const acceptMemorySuggestion = useCallback(async (candidate: MemorySuggestion) => {
+		if (busy) return;
+		setBusy(true);
+		setError(null);
+		try {
+			const path = await app.AcceptMemorySuggestion(candidate);
+			setAcceptedSuggestions((prev) => ({ ...prev, [candidate.id]: path || candidate.name }));
+			await reload();
+		} catch (err) {
+			setError(errorMessage(err));
+		} finally {
+			setBusy(false);
+		}
+	}, [busy, reload]);
+
+	const acceptSkillSuggestion = useCallback(async (candidate: SkillSuggestion) => {
+		if (busy) return;
+		setBusy(true);
+		setError(null);
+		try {
+			const path = await app.AcceptSkillSuggestion(candidate);
+			setAcceptedSuggestions((prev) => ({ ...prev, [candidate.id]: path || candidate.name }));
+		} catch (err) {
+			setError(errorMessage(err));
+		} finally {
+			setBusy(false);
+		}
+	}, [busy]);
+
 	if (!view?.available) {
 		return <div className="empty">{t("memory.unavailable")}</div>;
 	}
@@ -902,6 +967,16 @@ export function MemorySettingsPage() {
 					onClick={() => setTab("saved")}
 				>
 					<span>{t("memory.savedMemories")}</span>
+				</button>
+				<button
+					className={"settings-subtab" + (tab === "suggestions" ? " settings-subtab--active" : "")}
+					role="tab"
+					aria-selected={tab === "suggestions"}
+					type="button"
+					onClick={() => setTab("suggestions")}
+				>
+					<span>{t("memory.suggestions")}</span>
+					{suggestionTotal(suggestions) > 0 && <span className="settings-subtab__count">{suggestionTotal(suggestions)}</span>}
 				</button>
 				<button
 					className={"settings-subtab" + (tab === "archived" ? " settings-subtab--active" : "")}
@@ -1147,6 +1222,170 @@ export function MemorySettingsPage() {
 								</article>
 							);
 						})}
+					</div>
+				)}
+			</section>}
+
+			{tab === "suggestions" && <section className="mem-section">
+				<div className="mem-section__head">
+					<div>
+						<div className="mem-section__title">{t("memory.suggestions")}</div>
+						<div className="mem-note">{t("memory.suggestionsHint")}</div>
+					</div>
+					<div className="mem-section__actions">
+						<button
+							className="btn btn--small"
+							type="button"
+							disabled={suggestionBusy || busy}
+							onClick={() => void refreshSuggestions()}
+						>
+							<RefreshCw size={13} />
+							{suggestions ? t("memory.refreshSuggestions") : t("memory.scanSuggestions")}
+						</button>
+					</div>
+				</div>
+				{error && <div className="mem-error" role="alert">{error}</div>}
+				{!suggestions ? (
+					<div className="mem-empty mem-empty--cta">
+						<strong>{t("memory.suggestionsEmptyTitle")}</strong>
+						<span>{t("memory.suggestionsEmptyBody")}</span>
+						<button
+							className="btn btn--primary btn--small"
+							type="button"
+							disabled={suggestionBusy || busy}
+							onClick={() => void refreshSuggestions()}
+						>
+							<Sparkles size={13} />
+							{t("memory.scanSuggestions")}
+						</button>
+					</div>
+				) : suggestionTotal(suggestions) === 0 ? (
+					<div className="mem-empty mem-empty--cta">
+						<strong>{t("memory.noSuggestionsTitle")}</strong>
+						<span>{t("memory.noSuggestionsBody")}</span>
+					</div>
+				) : (
+					<div className="mem-suggestions">
+						{suggestions.generatedAt && (
+							<div className="mem-suggestions__stamp">
+								{t("memory.suggestionsGenerated", { time: suggestionStamp(suggestions.generatedAt) })}
+							</div>
+						)}
+						{suggestions.memories.length > 0 && (
+							<div className="mem-suggestion-group">
+								<div className="mem-suggestion-group__title">{t("memory.memoryCandidates")}</div>
+								<div className="mem-facts">
+									{suggestions.memories.map((candidate) => {
+										const open = expandedSuggestion === candidate.id;
+										const accepted = acceptedSuggestions[candidate.id];
+										return (
+											<article className="mem-fact mem-suggestion" data-mem-type={candidate.type || "other"} key={candidate.id}>
+												<button
+													className="mem-fact__summary"
+													type="button"
+													onClick={() => setExpandedSuggestion(open ? null : candidate.id)}
+												>
+													{open ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+													<span className="mem-fact__main">
+														<span className="mem-fact__title">{candidate.title || candidate.name}</span>
+														<span className="mem-fact__meta">
+															<span className="mem-fact__type" data-mem-type={candidate.type}>{memoryTypeLabel(candidate.type, t)}</span>
+															<span className="mem-fact__slug">{candidate.name}</span>
+														</span>
+														<span className="mem-fact__desc">{candidate.description}</span>
+													</span>
+												</button>
+												{open && (
+													<div className="mem-fact__detail">
+														<div className="mem-suggestion__body">{candidate.body}</div>
+														{candidate.reason && <div className="mem-suggestion__reason">{candidate.reason}</div>}
+														{candidate.evidence.length > 0 && (
+															<ul className="mem-suggestion__evidence">
+																{candidate.evidence.map((item) => <li key={item}>{item}</li>)}
+															</ul>
+														)}
+														<div className="mem-fact__actions">
+															<span className="mem-hint mem-hint--inline">{t("memory.confirmBeforeApply")}</span>
+															{accepted ? (
+																<span className="mem-suggestion__accepted"><Check size={13} />{t("memory.savedSuggestion")}</span>
+															) : (
+																<button
+																	className="btn btn--primary btn--small"
+																	type="button"
+																	disabled={busy}
+																	onClick={() => void acceptMemorySuggestion(candidate)}
+																>
+																	<Check size={13} />
+																	{t("memory.saveAsMemory")}
+																</button>
+															)}
+														</div>
+													</div>
+												)}
+											</article>
+										);
+									})}
+								</div>
+							</div>
+						)}
+						{suggestions.skills.length > 0 && (
+							<div className="mem-suggestion-group">
+								<div className="mem-suggestion-group__title">{t("memory.skillCandidates")}</div>
+								<div className="mem-facts">
+									{suggestions.skills.map((candidate) => {
+										const open = expandedSuggestion === candidate.id;
+										const accepted = acceptedSuggestions[candidate.id];
+										return (
+											<article className="mem-fact mem-suggestion mem-suggestion--skill" data-mem-type="reference" key={candidate.id}>
+												<button
+													className="mem-fact__summary"
+													type="button"
+													onClick={() => setExpandedSuggestion(open ? null : candidate.id)}
+												>
+													{open ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+													<span className="mem-doc__icon"><FileText size={15} /></span>
+													<span className="mem-fact__main">
+														<span className="mem-fact__title">{candidate.name}</span>
+														<span className="mem-fact__meta">
+															<span className="mem-fact__type">{t("memory.skillCandidate")}</span>
+															<span className="mem-fact__slug">{memoryScopeLabel(candidate.scope, t)}</span>
+														</span>
+														<span className="mem-fact__desc">{candidate.description}</span>
+													</span>
+												</button>
+												{open && (
+													<div className="mem-fact__detail">
+														<pre className="mem-suggestion__body mem-suggestion__body--code">{candidate.body}</pre>
+														{candidate.reason && <div className="mem-suggestion__reason">{candidate.reason}</div>}
+														{candidate.evidence.length > 0 && (
+															<ul className="mem-suggestion__evidence">
+																{candidate.evidence.map((item) => <li key={item}>{item}</li>)}
+															</ul>
+														)}
+														<div className="mem-fact__actions">
+															<span className="mem-hint mem-hint--inline">{t("memory.confirmBeforeApply")}</span>
+															{accepted ? (
+																<span className="mem-suggestion__accepted"><Check size={13} />{t("memory.createdSkillSuggestion")}</span>
+															) : (
+																<button
+																	className="btn btn--primary btn--small"
+																	type="button"
+																	disabled={busy}
+																	onClick={() => void acceptSkillSuggestion(candidate)}
+																>
+																	<Check size={13} />
+																	{t("memory.createSkill")}
+																</button>
+															)}
+														</div>
+													</div>
+												)}
+											</article>
+										);
+									})}
+								</div>
+							</div>
+						)}
 					</div>
 				)}
 			</section>}

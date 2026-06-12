@@ -2487,6 +2487,25 @@ func (c *Controller) SaveDoc(path, body string) (string, error) {
 	return written, nil
 }
 
+// SaveMemory writes an active auto-memory fact and refreshes the in-session
+// snapshot. It is the explicit user-confirmed counterpart to the model-owned
+// remember tool, used by management surfaces that preview a candidate first.
+func (c *Controller) SaveMemory(m memory.Memory) (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.mem == nil {
+		return "", nil
+	}
+	path, err := c.mem.Store.Save(m)
+	if err != nil {
+		return "", err
+	}
+	c.pendingMemory = append(c.pendingMemory,
+		"Saved memory \""+m.Name+"\": "+strings.Join(strings.Fields(m.Description), " "))
+	c.refreshMemoryLocked()
+	return path, nil
+}
+
 // ForgetMemory removes a saved auto-memory by name — the panel/TUI forget action,
 // the manual counterpart to the model's `forget` tool. It queues a turn-tail note
 // so the removal applies this session (the cached prefix still lists the fact
