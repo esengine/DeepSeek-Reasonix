@@ -14,6 +14,7 @@ require reasonix v0.0.0
 require (
 	aead.dev/minisign v0.3.0
 	fyne.io/systray v1.12.2
+	github.com/creack/pty v1.1.24
 	github.com/godbus/dbus/v5 v5.2.2
 	github.com/minio/selfupdate v0.6.0
 	github.com/wailsapp/wails/v2 v2.12.0

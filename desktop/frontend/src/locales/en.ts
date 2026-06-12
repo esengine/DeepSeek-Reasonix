@@ -151,6 +151,9 @@ export const en = {
   "workspace.sourceGit": "Git",
   "workspace.deleted": "Deleted",
   "workspace.revealInFileManager": "Show in file manager",
+  "workspace.openInTerminal": "Open in terminal",
+  "workspace.terminal": "Terminal",
+  "workspace.openTerminal": "Open terminal",
 
   // mcp & skills drawer
   "caps.title": "MCP & Skills",

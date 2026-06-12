@@ -21,6 +21,7 @@ import {
   Minimize2,
   RefreshCw,
   Search,
+  Terminal,
   X,
 } from "lucide-react";
 import { app } from "../lib/bridge";
@@ -43,8 +44,8 @@ const WORKSPACE_PREVIEW_MIN_WIDTH = 360;
 const WORKSPACE_PREVIEW_TARGET_WIDTH = 360;
 const WORKSPACE_DUAL_PANEL_MIN_WIDTH = WORKSPACE_TREE_MIN_WIDTH + WORKSPACE_PREVIEW_MIN_WIDTH;
 const WORKSPACE_DUAL_PANEL_TARGET_WIDTH = WORKSPACE_TREE_DEFAULT_WIDTH + WORKSPACE_PREVIEW_TARGET_WIDTH;
-const WORKSPACE_CONTEXT_MENU_FILE_HEIGHT = 136;
-const WORKSPACE_CONTEXT_MENU_REF_HEIGHT = 92;
+const WORKSPACE_CONTEXT_MENU_FILE_HEIGHT = 170;
+const WORKSPACE_CONTEXT_MENU_REF_HEIGHT = 126;
 const WORKSPACE_CONTEXT_MENU_SELECTION_HEIGHT = 48;
 const WORKSPACE_MAX_PREVIEW_TABS = 5;
 
@@ -198,6 +199,7 @@ export function WorkspacePanel({
   fileListRequest,
   changeListRequest,
   showViewTabs = true,
+  onOpenTerminalAt,
 }: {
   open: boolean;
   cwd?: string;
@@ -215,6 +217,7 @@ export function WorkspacePanel({
   fileListRequest?: WorkspaceFileListRequest | null;
   changeListRequest?: WorkspaceChangeListRequest | null;
   showViewTabs?: boolean;
+  onOpenTerminalAt?: (path: string) => void;
 }) {
   const t = useT();
   const panelRef = useRef<HTMLElement>(null);
@@ -867,6 +870,17 @@ export function WorkspacePanel({
     void app.RevealWorkspacePath(treeMenu.path).catch(() => {});
   };
 
+  const openTreeTerminal = () => {
+    if (!treeMenu) return;
+    const p = treeMenu.path;
+    setTreeMenu(null);
+    if (onOpenTerminalAt) {
+      onOpenTerminalAt(p);
+    } else {
+      void app.OpenTerminalAt(p).catch(() => {});
+    }
+  };
+
   const renderRows = (dir: string, depth: number): ReactElement[] => {
     const entries = entriesByDir[dir] ?? [];
     return entries.flatMap((entry) => {
@@ -923,6 +937,12 @@ export function WorkspacePanel({
       icon: <RefreshCw size={13} />,
       label: t(viewMode === "changed" ? "workspace.refreshChanges" : "workspace.refreshTree"),
       onSelect: refreshWorkspaceList,
+    },
+    {
+      key: "open-terminal",
+      icon: <Terminal size={13} />,
+      label: t("workspace.openTerminal"),
+      onSelect: () => void app.OpenTerminal().catch(() => {}),
     },
   ];
 
@@ -1423,6 +1443,11 @@ export function WorkspacePanel({
                       onSelect: () => void addTreeFileToChat(),
                     },
                   ]),
+              {
+                icon: <Terminal size={14} />,
+                label: t("workspace.openInTerminal"),
+                onSelect: openTreeTerminal,
+              },
               {
                 icon: <FolderOpen size={14} />,
                 label: t("workspace.revealInFileManager"),

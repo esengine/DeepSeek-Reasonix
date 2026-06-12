@@ -78,6 +78,7 @@ type App struct {
 
 	mediaTokens *mediaTokenStore
 	botInstalls map[string]*botInstallSession
+	terms       *terminalSessions
 
 	metrics atomic.Pointer[metricsAggregator] // non-nil only when desktop.metrics is opted in; swapped live by SetDesktopMetrics
 }
@@ -248,7 +249,7 @@ func (a *App) workspaceMediaMiddleware() func(http.Handler) http.Handler {
 // NewApp constructs the bound object. Tabs are restored in startup from the
 // last session's desktop-tabs.json.
 func NewApp() *App {
-	return &App{tabs: map[string]*WorkspaceTab{}, mediaTokens: newMediaTokenStore(), botInstalls: map[string]*botInstallSession{}}
+	return &App{tabs: map[string]*WorkspaceTab{}, mediaTokens: newMediaTokenStore(), botInstalls: map[string]*botInstallSession{}, terms: newTerminalSessions()}
 }
 
 func (a *App) bootContext() context.Context {
@@ -3860,6 +3861,36 @@ func (a *App) ReadFile(rel string) FilePreview {
 	}
 	out.Body = string(fileenc.Decode(data, enc))
 	return out
+}
+
+// OpenTerminal opens the system terminal at the active workspace directory.
+func (a *App) OpenTerminal() error {
+	base, err := a.activeWorkspaceBase()
+	if err != nil {
+		return err
+	}
+	return openTerminal(base)
+}
+
+// OpenTerminalAt opens the system terminal at a workspace-relative path.
+// When rel is empty it behaves like OpenTerminal.
+func (a *App) OpenTerminalAt(rel string) error {
+	base, err := a.activeWorkspaceBase()
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(rel) == "" {
+		return openTerminal(base)
+	}
+	path, ok, err := workspacePathForBase(base, rel)
+	if err != nil || !ok {
+		return os.ErrInvalid
+	}
+	// If it's a file, open terminal at its parent directory.
+	if info, err := os.Stat(path); err == nil && !info.IsDir() {
+		path = filepath.Dir(path)
+	}
+	return openTerminal(path)
 }
 
 // OpenWorkspacePath opens a file or folder from the workspace in the OS default app.

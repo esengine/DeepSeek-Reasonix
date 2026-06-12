@@ -20,6 +20,7 @@ import {
   Brain,
   Cpu,
   Palette,
+  Terminal,
 } from "lucide-react";
 import { useToast } from "./lib/toast";
 import { asArray } from "./lib/array";
@@ -39,6 +40,7 @@ import { SettingsPanel } from "./components/SettingsPanel";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { ContextPanel } from "./components/ContextPanel";
 import { WorkspacePanel } from "./components/WorkspacePanel";
+import { TerminalPanel } from "./components/TerminalPanel";
 import { Tooltip } from "./components/Tooltip";
 import { StartupSplash, shouldShowStartupSplash } from "./components/StartupSplash";
 import { OnboardingOverlay } from "./components/OnboardingOverlay";
@@ -117,7 +119,8 @@ const RIGHT_DOCK_PREVIEW_MIN_WIDTH = 420;
 const RIGHT_DOCK_MIN_RENDER_WIDTH = 280;
 const RIGHT_DOCK_MAX_WIDTH = 860;
 
-type RightDockMode = "context" | "files" | "changed";
+type RightDockMode = "context" | "files" | "changed" | "terminal";
+type TerminalOpenRequest = { id: number; path: string };
 type WorkspaceRevealRequest = { id: number; path: string };
 type WorkspaceFileListRequest = { id: number; paths: string[] };
 type WorkspaceChangeListEntry = { key: string; path: string; meta: string; time: string; detail: string };
@@ -717,6 +720,7 @@ export default function App() {
   const [workspacePanelMaximized, setWorkspacePanelMaximized] = useState(false);
   const [rightDockMode, setRightDockMode] = useState<RightDockMode>("context");
   const [workspaceRevealRequest, setWorkspaceRevealRequest] = useState<WorkspaceRevealRequest | null>(null);
+  const [terminalOpenRequest, setTerminalOpenRequest] = useState<TerminalOpenRequest | null>(null);
   const [workspaceChangeRevealRequest, setWorkspaceChangeRevealRequest] = useState<WorkspaceRevealRequest | null>(null);
   const [workspaceFileListRequest, setWorkspaceFileListRequest] = useState<WorkspaceFileListRequest | null>(null);
   const [workspaceChangeListRequest, setWorkspaceChangeListRequest] = useState<WorkspaceChangeListRequest | null>(null);
@@ -2705,10 +2709,20 @@ export default function App() {
                   <GitBranch size={13} />
                   <span className="workbench-dock__tab-label">{t("workspace.changedTab")}</span>
                 </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={rightDockMode === "terminal"}
+                  className={`workbench-dock__tab${rightDockMode === "terminal" ? " workbench-dock__tab--active" : ""}`}
+                  onClick={() => openRightDockMode("terminal")}
+                >
+                  <Terminal size={13} />
+                  <span className="workbench-dock__tab-label">{t("workspace.terminal")}</span>
+                </button>
               </div>
             </div>
             <div className="workbench-dock__body">
-              {rightDockMode === "context" ? (
+              <div style={{ display: rightDockMode === "context" ? undefined : "none" }}>
                 <ContextPanel
                   tabId={activeTabId}
                   context={state.context}
@@ -2723,7 +2737,11 @@ export default function App() {
                   onOpenWorkspaceChangeList={openRightDockChangeList}
                   onOpenWorkspaceChangeFile={openRightDockChangeFile}
                 />
-              ) : (
+              </div>
+              <div style={{ display: rightDockMode === "terminal" ? undefined : "none" }}>
+                <TerminalPanel active={rightDockMode === "terminal"} openPathRequest={terminalOpenRequest} />
+              </div>
+              <div style={{ display: rightDockMode !== "context" && rightDockMode !== "terminal" ? undefined : "none" }}>
                 <WorkspacePanel
                   open={workspacePanelRenderable}
                   cwd={state.meta?.cwd}
@@ -2744,8 +2762,12 @@ export default function App() {
                   fileListRequest={workspaceFileListRequest}
                   changeListRequest={workspaceChangeListRequest}
                   showViewTabs={false}
+                  onOpenTerminalAt={(path) => {
+                    openRightDockMode("terminal");
+                    setTerminalOpenRequest({ id: Date.now(), path });
+                  }}
                 />
-              )}
+              </div>
             </div>
           </aside>
         )}
