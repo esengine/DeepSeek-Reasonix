@@ -332,6 +332,7 @@ type agentSpawnMsg struct {
 type agentSendMsg struct {
 	name    string
 	message string
+	result  string
 	err     error
 }
 
@@ -1213,12 +1214,14 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.notice(fmt.Sprintf("agent_spawn: %s failed: %v", msg.name, msg.err))
 		} else {
 			m.notice(fmt.Sprintf("agent_spawn: %s done", msg.name))
+			m.commitAgentResult(msg.result)
 		}
 	case agentSendMsg:
 		if msg.err != nil {
 			m.notice(fmt.Sprintf("agent_send: %s failed: %v", msg.name, msg.err))
 		} else {
 			m.notice(fmt.Sprintf("agent_send: sent to %s", msg.name))
+			m.commitAgentResult(msg.result)
 		}
 
 	case compactDoneMsg:
@@ -3434,8 +3437,8 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 		name, msg := parts[0], parts[1]
 		orc := m.orc
 		return func() tea.Msg {
-			_, err := orc.SendMessage(context.Background(), name, msg)
-			return agentSendMsg{name: name, message: msg, err: err}
+			result, err := orc.SendMessage(context.Background(), name, msg)
+			return agentSendMsg{name: name, message: msg, result: result, err: err}
 		}
 	case "/agent_status":
 		m.echoLocalCommand(input)
@@ -3639,6 +3642,20 @@ func (m *chatTUI) showMCPStatus() {
 // notice queues a dim informational line to scrollback.
 func (m *chatTUI) notice(note string) {
 	m.commitLine(dim("  · " + note))
+}
+
+// commitAgentResult renders and commits a child agent's response as a
+// markdown block in the transcript.
+func (m *chatTUI) commitAgentResult(result string) {
+	if result == "" {
+		return
+	}
+	m.commitSpacer()
+	rendered := m.renderer.Render(result)
+	if rendered == "" {
+		rendered = result
+	}
+	m.commitLine(strings.TrimRight(rendered, "\n"))
 }
 
 // resolveRefs resolves a line's @references off the event loop via the
