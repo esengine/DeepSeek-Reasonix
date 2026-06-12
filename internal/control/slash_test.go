@@ -164,6 +164,7 @@ func TestManagementHooksTrustUsesWorkspaceRoot(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 
 	c := New(Options{WorkspaceRoot: project})
 	if !c.managementNotice("/hooks trust") {
