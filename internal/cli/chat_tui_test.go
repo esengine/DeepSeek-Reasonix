@@ -778,14 +778,29 @@ func TestUserBubbleCommitPathIncludesSeparators(t *testing.T) {
 	if !strings.Contains(strings.Join(got, "\n"), "hello world") {
 		t.Fatalf("bubble line should still contain the prompt, got %v", got)
 	}
-	// No standalone empty line should be emitted between the previous turn and
-	// the new top separator.
-	for _, ln := range m.transcript[:m.bubbleStartIdx] {
-		if ln == "" {
-			// allowed, but no *new* empty line should be added by the submit
-			// path itself — this loop just confirms the leading entries are
-			// untouched.
-		}
+}
+
+func TestNativeScrollbackOutputExpandsUserSeparatorTokens(t *testing.T) {
+	prevColor := colorEnabled
+	colorEnabled = false
+	defer func() { colorEnabled = prevColor }()
+
+	top, bubble, bottom := renderUserBubbleBlock("hello", false)
+	out := nativeScrollbackOutput([]string{top, bubble, bottom}, 24)
+
+	if strings.Contains(out, userSeparatorToken) || strings.Contains(out, "\x00") || strings.Contains(out, "\uE000") {
+		t.Fatalf("native scrollback output should not contain separator tokens: %q", out)
+	}
+	lines := strings.Split(out, "\n")
+	if len(lines) != 3 {
+		t.Fatalf("native scrollback output should be three lines, got %d:\n%s", len(lines), out)
+	}
+	wantRule := strings.Repeat("-", 24)
+	if lines[0] != wantRule || lines[2] != wantRule {
+		t.Fatalf("native scrollback separators should expand to width-24 rules, got top=%q bottom=%q", lines[0], lines[2])
+	}
+	if !strings.Contains(lines[1], "› hello") {
+		t.Fatalf("native scrollback bubble should keep prompt text, got %q", lines[1])
 	}
 }
 

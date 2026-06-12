@@ -1363,7 +1363,7 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // finalized lines are also emitted into the terminal's native scrollback.
 func finalize(m chatTUI, cmds []tea.Cmd) tea.Cmd {
 	if m.nativeScrollback && len(*m.pendingCommit) > 0 {
-		out := strings.TrimRight(clampWidth(strings.Join(*m.pendingCommit, "\n"), m.width), "\n")
+		out := nativeScrollbackOutput(*m.pendingCommit, m.width)
 		*m.pendingCommit = (*m.pendingCommit)[:0]
 		var prints []tea.Cmd
 		for _, chunk := range chunkLines(out, m.scrollChunkHeight()) {
@@ -1374,6 +1374,11 @@ func finalize(m chatTUI, cmds []tea.Cmd) tea.Cmd {
 	}
 	*m.pendingCommit = (*m.pendingCommit)[:0]
 	return tea.Batch(cmds...)
+}
+
+func nativeScrollbackOutput(lines []string, width int) string {
+	expanded := expandSeparatorTokens(lines, width)
+	return strings.TrimRight(clampWidth(strings.Join(expanded, "\n"), width), "\n")
 }
 
 // scrollChunkHeight is the largest block (in lines) finalize prints at once in
