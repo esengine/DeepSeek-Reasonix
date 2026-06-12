@@ -14488,6 +14488,12 @@ a[href] {
   font-weight: 400;
 }
 
+.project-tree__time-filter-sep {
+  height: 1px;
+  margin: 4px 8px;
+  background: var(--border-soft);
+}
+
 .project-tree__header-actions .project-tree__add-project:focus-visible,
 .project-tree__header-actions .project-tree__collapse-all:focus-visible {
   outline: none;

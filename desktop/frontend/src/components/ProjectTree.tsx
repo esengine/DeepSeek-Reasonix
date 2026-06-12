@@ -1032,6 +1032,7 @@ export function ProjectTree({
                   >
                     {t("projectTree.timeFilterAll")}
                   </button>
+                  <div className="project-tree__time-filter-sep" role="separator" />
                   <button
                     type="button"
                     className={`project-tree__time-filter-opt${timeFilter === "10" ? " project-tree__time-filter-opt--on" : ""}`}
@@ -1048,6 +1049,7 @@ export function ProjectTree({
                   >
                     {t("projectTree.timeFilter20")}
                   </button>
+                  <div className="project-tree__time-filter-sep" role="separator" />
                   <button
                     type="button"
                     className={`project-tree__time-filter-opt${timeFilter === "1h" ? " project-tree__time-filter-opt--on" : ""}`}
