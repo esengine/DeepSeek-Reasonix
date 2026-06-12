@@ -313,41 +313,6 @@ export function Transcript({
   // (added by upstream PR #3423) instead of per-call renderSegments.
   const empty = items.length === 0;
 
-  // ── Progressive render phases ──────────────────────────────────────────
-  // On first mount with a long session we break rendering into frames so the
-  // UI stays responsive.  Phase 0: only the latest 5 turns (instant paint).
-  // Phase 1: the full hot zone (up to HOT_TURNS).  Phase 2: warm zone cards.
-  const [renderPhase, setRenderPhase] = useState(0);
-  useEffect(() => {
-    const raf = requestAnimationFrame(() => {
-      // Phase 0 → 1 after first paint.
-      setRenderPhase(1);
-    });
-    return () => cancelAnimationFrame(raf);
-  }, []);
-  useEffect(() => {
-    if (renderPhase < 1) return;
-    const id = setTimeout(() => setRenderPhase(2), 80);
-    return () => clearTimeout(id);
-  }, [renderPhase]);
-  // During phase 0 shrink hotStartIdx to render fewer items on the very
-  // first frame.  Phase 1+ uses the full budget.
-  const effectiveHotStart = useMemo(() => {
-    if (renderPhase > 0) return hotStartIdx;
-    // Only render the latest 5 turns on first paint.
-    let needed = 5;
-    for (let i = items.length - 1; i >= 0; i--) {
-      if (items[i].kind === "user") {
-        needed--;
-        if (needed <= 0) return i;
-      }
-    }
-    return 0;
-  }, [items, renderPhase, hotStartIdx]);
-  // Warm zone rendering is deferred to phase 2 so that hot-zone hooks
-  // settle first.
-  const showWarmZone = renderPhase >= 2;
-
   // In compact/minimal mode, break each turn into step groups.
   // A step = one assistant + its tool results, from one assistant to the next.
   // Each completed non-final step is folded into "Processed".
@@ -356,7 +321,7 @@ export function Transcript({
     const groups: { items: Item[]; isFinal: boolean; isComplete: boolean }[] = [];
     let current: Item[] = [];
 
-    for (let i = effectiveHotStart; i < items.length; i++) {
+    for (let i = hotStartIdx; i < items.length; i++) {
       const it = items[i];
       if (it.kind === "user") {
         if (current.length > 0) {
@@ -384,7 +349,7 @@ export function Transcript({
       groups.push({ items: current, isFinal, isComplete: false });
     }
     return groups;
-  }, [displayMode, effectiveHotStart, items]);
+  }, [displayMode, hotStartIdx, items]);
 
   const hotZoneNodes = useMemo<ReactNode[]>(() => {
     const out: ReactNode[] = [];
@@ -520,7 +485,7 @@ export function Transcript({
         out.push(<ReadOnlyBatch key={`rob-${roBatch[0].id}`} items={[...roBatch]} subcalls={subcallsByParent} />);
         roBatch.length = 0;
       };
-      for (let i = effectiveHotStart; i < items.length; i++) {
+      for (let i = hotStartIdx; i < items.length; i++) {
         const it = items[i];
         if (
           it.kind === "tool" &&
@@ -566,7 +531,7 @@ export function Transcript({
       pushTurnActions();
     }
     return out;
-  }, [effectiveHotStart, items, openAction, actionPending, rewindDisabled, onRewind, subcallsByParent, userTurn, checkpointsByTurn, displayMode, stepGroups, defaultExpandThinking]);
+  }, [hotStartIdx, items, openAction, actionPending, rewindDisabled, onRewind, subcallsByParent, userTurn, checkpointsByTurn, displayMode, stepGroups, defaultExpandThinking]);
 
   // ── Assemble rendered output ──────────────────────────────────────────────
   // Warm/cold zone is a separate memo'd WarmZone component so streaming tokens
@@ -585,7 +550,7 @@ export function Transcript({
       )}
 
       <LiveStreamContext.Provider value={live}>
-        {turnGroups.length > HOT_TURNS && showWarmZone && (
+        {turnGroups.length > HOT_TURNS && (
           <WarmZone
             turnGroups={turnGroups}
             expandedWarmTurns={expandedWarmTurns}
