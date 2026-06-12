@@ -27,6 +27,7 @@ import { Tooltip } from "./Tooltip";
 import { AnchoredPopover } from "./AnchoredPopover";
 import { MCPServersSettingsPage, SkillsSettingsPage } from "./CapabilitiesPanel";
 import { MemorySettingsPage } from "./MemoryPanel";
+import { getGenerativePreset, setGenerativePreset, generativeMusic, type GenerativePreset } from "../lib/generative-music";
 import { SoundSelect } from "./SoundSelect";
 import { getSuccessPreference, setSuccessPreference, getAttentionPreference, setAttentionPreference, playSuccessChime, playAttentionChime, type SoundWavPref } from "../lib/sound";
 import { ModalCloseButton } from "./ModalCloseButton";
@@ -36,7 +37,19 @@ const SETTINGS_TABS: SettingsTab[] = ["general", "models", "bots", "mcp", "skill
 // SettingsPanel is the desktop settings centre — a centred modal with left
 // navigation and a right content area. It hosts all settings pages plus MCP,
 // Skills, and Memory management, replacing the old per-feature drawers.
-export function SettingsPanel({ onClose, onChanged, initialTab, isDevBuild }: { onClose: () => void; onChanged: () => void; initialTab?: SettingsTab; isDevBuild?: boolean }) {
+export function SettingsPanel({
+  onClose,
+  onChanged,
+  initialTab,
+  isDevBuild,
+  agentRunning = false,
+}: {
+  onClose: () => void;
+  onChanged: () => void;
+  initialTab?: SettingsTab;
+  isDevBuild?: boolean;
+  agentRunning?: boolean;
+}) {
   const t = useT();
   const [s, setS] = useState<SettingsView | null>(null);
   const [busy, setBusy] = useState(false);
@@ -128,7 +141,7 @@ export function SettingsPanel({ onClose, onChanged, initialTab, isDevBuild }: { 
               <div className="empty">{t("settings.loading")}</div>
             ) : (
               <>
-                {tab === "general" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><GeneralSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
+                {tab === "general" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><GeneralSection s={s} busy={busy} apply={apply} agentRunning={agentRunning} /></SettingsPageShell>}
                 {tab === "models" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><ModelsSection s={s} busy={busy} apply={apply} backgroundApply={backgroundApply} /></SettingsPageShell>}
                 {tab === "bots" && isDevBuild && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><BotsSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
                 {tab === "mcp" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><MCPServersSettingsPage /></SettingsPageShell>}
@@ -679,7 +692,7 @@ function reasoningProtocolLabel(protocol: string, t: ReturnType<typeof useT>): s
   }
 }
 
-function GeneralSection({ s, busy, apply }: SectionProps) {
+function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agentRunning: boolean }) {
   const { t, setPref } = useI18n();
   const closeBehavior = normalizeCloseBehavior(s.closeBehavior);
   const [displayMode, setDisplayMode] = useState<DisplayMode>(() => normalizeDisplayMode(getDisplayMode()));
@@ -694,6 +707,7 @@ function GeneralSection({ s, busy, apply }: SectionProps) {
   useEffect(() => () => mouseDragCleanupRef.current?.(), []);
   const autoPlan = normalizeAutoPlan(s.autoPlan);
   const languagePref = normalizeLangPref(s.desktopLanguage);
+  const [genMusicPreset, setGenMusicPreset] = useState<GenerativePreset>(getGenerativePreset());
   const [soundPref, setSoundPref] = useState<SoundWavPref>(getSuccessPreference());
   const [attentionPref, setAttentionPref] = useState<SoundWavPref>(getAttentionPreference());
   const statusBarStyle = normalizeStatusBarStyle(s.statusBarStyle);
@@ -920,6 +934,30 @@ function GeneralSection({ s, busy, apply }: SectionProps) {
           ))}
         </div>
       </SettingsField>
+      <SettingsField label={t("settings.generativeMusic")} hint={t("settings.generativeMusicHint")} stacked>
+        <div className="settings-notification-sound-row">
+          <span>{t("settings.generativeMusicPreset")}</span>
+          <GenMusicSelect
+            value={genMusicPreset}
+            onChange={(next) => {
+              setGenMusicPreset(next);
+              setGenerativePreset(next);
+              if (next === "off") {
+                generativeMusic.stop();
+              } else {
+                if (generativeMusic.isRunning) {
+                  generativeMusic.setPreset(next);
+                } else if (agentRunning) {
+                  generativeMusic.start(next);
+                }
+                generativeMusic.playPreview(next);
+              }
+            }}
+            onPreview={() => { if (genMusicPreset !== "off") generativeMusic.playPreview(genMusicPreset); }}
+            previewDisabled={genMusicPreset === "off"}
+          />
+        </div>
+      </SettingsField>
       <SettingsField label={t("settings.notificationSound")} hint={t("settings.notificationSoundHint")} stacked>
         <div className="settings-notification-sound-row">
           <span>{t("settings.notificationSoundSuccess")}</span>
@@ -1065,6 +1103,77 @@ function GeneralSection({ s, busy, apply }: SectionProps) {
         </div>
       </SettingsField>
     </SettingsSection>
+  );
+}
+
+const GENRE_OPTIONS: { value: GenerativePreset; labelKey: DictKey }[] = [
+  { value: "off", labelKey: "settings.generativeMusic.off" },
+  { value: "ethereal", labelKey: "settings.generativeMusic.presets.ethereal" },
+  { value: "classic", labelKey: "settings.generativeMusic.presets.classic" },
+  { value: "digital", labelKey: "settings.generativeMusic.presets.digital" },
+  { value: "retro", labelKey: "settings.generativeMusic.presets.retro" },
+];
+
+function GenMusicSelect({
+  value,
+  onChange,
+  onPreview,
+  previewDisabled,
+}: {
+  value: GenerativePreset;
+  onChange: (v: GenerativePreset) => void;
+  onPreview: () => void;
+  previewDisabled?: boolean;
+}) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const selected = GENRE_OPTIONS.find((o) => o.value === value) ?? GENRE_OPTIONS[0];
+
+  return (
+    <div className="sound-select">
+      <button
+        ref={triggerRef}
+        className="sound-select__trigger"
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className="sound-select__label">{t(selected.labelKey)}</span>
+        <ChevronDown
+          size={16}
+          className={`sound-select__chev${open ? " sound-select__chev--open" : ""}`}
+        />
+      </button>
+      <button className="chip" type="button" title={t("settings.generativeMusicPreview")} onClick={onPreview} disabled={previewDisabled}>
+        &#x25B6;
+      </button>
+      <AnchoredPopover
+        open={open}
+        anchorRef={triggerRef}
+        onClose={() => setOpen(false)}
+        className="sound-select__menu"
+        placement="bottom"
+      >
+        <div className="sound-select__list" role="listbox">
+          {GENRE_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              className={`sound-select__option${opt.value === value ? " sound-select__option--selected" : ""}`}
+              role="option"
+              aria-selected={opt.value === value}
+              type="button"
+              onClick={() => {
+                onChange(opt.value);
+                setOpen(false);
+              }}
+            >
+              <span>{t(opt.labelKey)}</span>
+              {opt.value === value && <Check size={14} className="sound-select__check" />}
+            </button>
+          ))}
+        </div>
+      </AnchoredPopover>
+    </div>
   );
 }
 

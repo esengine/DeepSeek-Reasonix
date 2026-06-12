@@ -1151,6 +1151,15 @@ export const zh: Record<DictKey, string> = {
   "settings.language": "语言",
   "settings.langAuto": "自动（跟随系统）",
   "settings.config": "配置文件：{path}",
+  "settings.generativeMusic": "生成式背景音乐",
+  "settings.generativeMusicHint": "对话生成过程中播放背景音乐",
+  "settings.generativeMusicPreset": "音乐预设",
+  "settings.generativeMusic.presets.classic": "经典",
+  "settings.generativeMusic.presets.ethereal": "空灵",
+  "settings.generativeMusic.off": "关闭",
+  "settings.generativeMusic.presets.digital": "数字",
+  "settings.generativeMusic.presets.retro": "复古",
+  "settings.generativeMusicPreview": "试听",
 
   // 待办栏
   "todo.title": "待办",

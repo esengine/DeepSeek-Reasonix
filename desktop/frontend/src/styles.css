@@ -10046,11 +10046,15 @@ a[href] {
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
+  width: 100%;
+  max-width: 640px;
+  min-width: 0;
 }
 
 .settings-notification-sound-row > span {
   flex: 0 0 auto;
   font-size: 13px;
+  color: var(--fg);
   min-width: 110px;
 }
 

@@ -26,6 +26,7 @@ import { asArray } from "./lib/array";
 import { clearLegacyLangPref, normalizeLangPref, readLegacyLangPref, useI18n, useT, type Translator } from "./lib/i18n";
 import { useController, type Item, type LiveStream } from "./lib/useController";
 import { app, onEvent, onProjectTreeChanged } from "./lib/bridge";
+import { generativeMusic, isGenerativeMusicEnabled } from "./lib/generative-music";
 import { playSuccessChime } from "./lib/sound";
 import { Transcript } from "./components/Transcript";
 import { Composer } from "./components/Composer";
@@ -1425,6 +1426,26 @@ export default function App() {
     };
   }, []);
 
+  // Run the ambient engine only while the agent is generating.
+  useEffect(() => {
+    if (state.running && isGenerativeMusicEnabled()) {
+      generativeMusic.start();
+    } else {
+      generativeMusic.stop();
+    }
+    return () => generativeMusic.stop();
+  }, [state.running]);
+
+  // playTokenNote no-ops unless the engine is running, so subscribe unconditionally.
+  useEffect(() => {
+    const unsub = onEvent((e) => {
+      if (e.kind === "text" || e.kind === "reasoning" || e.kind === "tool_dispatch") {
+        generativeMusic.playTokenNote();
+      }
+    });
+    return unsub;
+  }, []);
+
   const toggleSidebar = useCallback(() => {
     closeTransientOverlays();
     pulseSidebarToggle();
@@ -2675,6 +2696,7 @@ export default function App() {
         <SettingsPanel
           initialTab={settingsTarget}
           isDevBuild={isDevBuild}
+          agentRunning={state.running}
           onClose={() => setSettingsTarget(null)}
           onChanged={() => {
             void refreshMeta();

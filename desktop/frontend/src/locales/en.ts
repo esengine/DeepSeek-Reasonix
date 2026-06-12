@@ -1149,6 +1149,15 @@ export const en = {
   "settings.language": "Language",
   "settings.langAuto": "Auto (system)",
   "settings.config": "config: {path}",
+  "settings.generativeMusic": "Generative background music",
+  "settings.generativeMusicHint": "Ambient music that loops during AI generation",
+  "settings.generativeMusicPreset": "Sound preset",
+  "settings.generativeMusic.presets.classic": "Classic (Triangle)",
+  "settings.generativeMusic.presets.ethereal": "Ethereal (Sine) ★",
+  "settings.generativeMusic.off": "Off",
+  "settings.generativeMusic.presets.digital": "Digital (Square)",
+  "settings.generativeMusic.presets.retro": "Retro (Sawtooth)",
+  "settings.generativeMusicPreview": "Preview",
 
   // todo bar
   "todo.title": "To-dos",
