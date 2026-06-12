@@ -2230,8 +2230,8 @@ export default function App() {
       onCloseTab={(id) => void closeTab(id)}
     />
     <YoloToggleHotkeys
-      mode={tabComposerProfile?.mode ?? "normal"}
-      autoApproveTools={tabComposerProfile?.autoApproveTools}
+      mode={composerProfile.mode}
+      autoApproveTools={toolApprovalMode === "auto" || toolApprovalMode === "yolo" ? true : toolApprovalMode === "ask" ? false : undefined}
       onApply={(m) => void setControllerToolApprovalMode(m)}
     />
     <div ref={appRef} className={["app", `app--${desktopPlatform}`, browserPreviewChrome ? "app--browser-preview" : ""].filter(Boolean).join(" ")}>
