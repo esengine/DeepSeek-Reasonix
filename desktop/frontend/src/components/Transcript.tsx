@@ -169,6 +169,7 @@ export function Transcript({
   rewindDisabled = false,
   questionNavigator = true,
   defaultExpandThinking = false,
+  showToolCalls = true,
 }: {
   items: Item[];
   live?: LiveStream;
@@ -180,6 +181,7 @@ export function Transcript({
   rewindDisabled?: boolean;
   questionNavigator?: boolean;
   defaultExpandThinking?: boolean;
+  showToolCalls?: boolean;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
@@ -435,6 +437,7 @@ export function Transcript({
           if (it.parentId) break;
           if (it.name === "todo_write") break;
           if (it.name === "exit_plan_mode") break;
+          if (!showToolCalls) break;
           out.push(<ToolCard key={it.id} item={it} subcalls={subcallsByParent.get(it.id)} />);
           break;
         case "phase": out.push(<PhaseCard key={it.id} text={it.text} />); break;
@@ -489,6 +492,7 @@ export function Transcript({
                 return next;
               });
             }}
+            showToolCalls={showToolCalls}
           />
         )}
         {hotZoneNodes}
@@ -519,6 +523,7 @@ const WarmZone = memo(function WarmZone({
   defaultExpandThinking = false,
   onToggleColdPage,
   onToggleWarmTurn,
+  showToolCalls = true,
 }: {
   turnGroups: TurnGroup[];
   expandedWarmTurns: ReadonlySet<number>;
@@ -532,11 +537,12 @@ const WarmZone = memo(function WarmZone({
   warmOpenAction: OpenTurnAction | null;
   warmActionPending: boolean;
   warmRewindDisabled: boolean;
-  warmOnRewind: ((turn: number, scope: string) => void) | undefined;
+  warmOnRewind?: (turn: number, scope: string) => void;
   warmSetOpenAction: (action: OpenTurnAction | null) => void;
   defaultExpandThinking?: boolean;
   onToggleColdPage: () => void;
   onToggleWarmTurn: (g: number, expand: boolean) => void;
+  showToolCalls?: boolean;
 }) {
   const t = useT();
   const out: React.ReactNode[] = [];
@@ -590,6 +596,7 @@ const WarmZone = memo(function WarmZone({
               onRewind={warmOnRewind}
               setOpenAction={warmSetOpenAction}
               defaultExpandThinking={defaultExpandThinking}
+              showToolCalls={showToolCalls}
             />
           </WarmTurnCard>,
         );
@@ -634,6 +641,7 @@ function WarmTurnItems({
   onRewind,
   setOpenAction,
   defaultExpandThinking = false,
+  showToolCalls = true,
 }: {
   startIdx: number;
   endIdx: number;
@@ -644,9 +652,10 @@ function WarmTurnItems({
   openAction: OpenTurnAction | null;
   actionPending: boolean;
   rewindDisabled: boolean;
-  onRewind: ((turn: number, scope: string) => void) | undefined;
+  onRewind?: (turn: number, scope: string) => void;
   setOpenAction: (action: OpenTurnAction | null) => void;
   defaultExpandThinking?: boolean;
+  showToolCalls?: boolean;
 }) {
   const nodes: React.ReactNode[] = [];
   let actionText = "";
@@ -716,6 +725,7 @@ function WarmTurnItems({
         if (it.parentId) break;
         if (it.name === "todo_write") break;
         if (it.name === "exit_plan_mode") break;
+        if (!showToolCalls) break;
         nodes.push(<ToolCard key={it.id} item={it} subcalls={subcalls.get(it.id)} />);
         break;
       }
