@@ -355,7 +355,7 @@ export function Composer({
   modelLabel: string;
   tabId?: string;
   effort?: EffortInfo;
-  onSend: (displayText: string, submitText?: string) => void;
+  onSend: (displayText: string, submitText?: string, references?: SessionReference[]) => void;
   // Returns the un-sent text when cancelling before the server replied (so it can
   // be restored to the input); undefined for a normal cancel.
   onCancel: () => string | undefined;
@@ -818,7 +818,7 @@ export function Composer({
     if (disabled || submittingRef.current) return;
     const trimmedText = text.trim();
     if (pendingPaste > 0) return;
-    if (!trimmedText && attachments.length === 0 && workspaceRefs.length === 0) {
+    if (!trimmedText && attachments.length === 0 && workspaceRefs.length === 0 && sessionRefs.length === 0) {
       if (goalModeOn && !activeGoal) {
         setComposerPrompt(t("composer.goalInputRequired"));
         requestAnimationFrame(() => taRef.current?.focus());
@@ -846,7 +846,12 @@ export function Composer({
     const sessionContext = sessionRefs.length === 0 ? "" : await buildSessionContext(sessionRefs);
     const baseSubmitText = [expandPastedBlocks(trimmedText), refs].filter(Boolean).join(trimmedText && refs ? " " : "");
     const submitText = sessionContext ? `${sessionContext}${baseSubmitText}` : baseSubmitText;
-    onSend(displayText, submitText);
+    // Snapshot sessionRefs for UI display in the user message bubble. Pass
+    // separately from submitText (which is model-facing context). After the
+    // snapshot, clear sessionRefs as before — the snapshot is what the bubble
+    // will render.
+    const references = sessionRefs.length > 0 ? sessionRefs.slice() : undefined;
+    onSend(displayText, submitText, references);
     setText("");
     clearAttachments();
     setWorkspaceRefs([]);
@@ -1917,7 +1922,7 @@ export function Composer({
               <button
                 className="composer__btn composer__btn--send"
                 onClick={submit}
-                disabled={submitting || pendingPaste > 0 || ((!text.trim() && attachments.length === 0 && workspaceRefs.length === 0) && !(goalModeOn && !activeGoal)) || disabled}
+                disabled={submitting || pendingPaste > 0 || ((!text.trim() && attachments.length === 0 && workspaceRefs.length === 0 && sessionRefs.length === 0) && !(goalModeOn && !activeGoal)) || disabled}
               >
                 <ArrowUp size={16} />
               </button>

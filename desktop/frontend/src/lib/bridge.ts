@@ -92,6 +92,7 @@ export interface AppBindings {
   SubmitToTab(tabID: string, input: string): Promise<void>;
   SubmitDisplay(display: string, input: string): Promise<void>;
   SubmitDisplayToTab(tabID: string, display: string, input: string): Promise<void>;
+  SubmitDisplayToTabWithRefs(tabID: string, display: string, input: string, references: string): Promise<void>;
   RunShell(command: string): Promise<void>;
   RunShellForTab(tabID: string, command: string): Promise<void>;
   Steer(text: string): Promise<void>;
@@ -1374,6 +1375,9 @@ function makeMockApp(): AppBindings {
         },
         async SubmitDisplayToTab(_tabID, display, input) {
           await withMockTabScope(_tabID, () => this.SubmitDisplay(display, input));
+        },
+        async SubmitDisplayToTabWithRefs(_tabID, display, input, _references) {
+          await this.SubmitDisplay(display, input);
         },
         async RunShell(command) {
           cancelled = false;

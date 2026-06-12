@@ -1139,6 +1139,9 @@ export const en = {
   "rewind.busyCode": "Rewinding code…",
   "rewind.busyBoth": "Rewinding code and conversation…",
   "msg.copied": "Copied",
+  "msg.referencedSessions": "Referenced sessions",
+  "msg.referencedSessionsLabel": "Referenced sessions:",
+  "msg.referenceTurns": "· {count} turns",
 
   // tool card summaries
   "tool.stepOne": "{n} step",

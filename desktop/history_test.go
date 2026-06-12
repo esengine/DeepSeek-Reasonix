@@ -28,7 +28,7 @@ func TestHistoryMessagesIncludeAssistantReasoning(t *testing.T) {
 			t.Fatalf("unexpected user content passed to resolver: %q", content)
 		}
 		return "display prompt"
-	})
+	}, nil)
 
 	if len(got) != len(msgs) {
 		t.Fatalf("history length = %d, want %d", len(got), len(msgs))

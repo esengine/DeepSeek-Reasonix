@@ -579,6 +579,21 @@ func (a *App) SubmitDisplayToTab(tabID, display, input string) {
 	ctrl.SubmitDisplay(display, input)
 }
 
+// SubmitDisplayToTabWithRefs submits a message with display text and persists
+// the user's past:chat references into the sidecar so they survive reload.
+func (a *App) SubmitDisplayToTabWithRefs(tabID, display, input string, references json.RawMessage) {
+	ctrl := a.ctrlByTabID(tabID)
+	if ctrl == nil {
+		return
+	}
+	ctrl.SubmitDisplay(display, input)
+	dir := ctrl.SessionDir()
+	if dir == "" {
+		dir = config.SessionDir()
+	}
+	_ = recordSessionReferences(dir, ctrl.SessionPath(), input, references)
+}
+
 func (a *App) bindControllerDisplayRecorder(ctrl *control.Controller) {
 	if ctrl == nil {
 		return
@@ -1505,6 +1520,7 @@ type HistoryMessage struct {
 	Messages   int               `json:"messages,omitempty"`
 	Summary    string            `json:"summary,omitempty"`
 	Archive    string            `json:"archive,omitempty"`
+	References json.RawMessage   `json:"references,omitempty"`
 }
 
 type HistoryToolCall struct {
@@ -1524,10 +1540,14 @@ func (a *App) HistoryForTab(tabID string) []HistoryMessage {
 		return []HistoryMessage{}
 	}
 	msgs := ctrl.History()
-	return historyMessages(msgs, sessionDisplayResolver(controllerSessionDir(ctrl), ctrl.SessionPath()))
+	dir := ctrl.SessionDir()
+	if dir == "" {
+		dir = config.SessionDir()
+	}
+	return historyMessages(msgs, sessionDisplayResolver(dir, ctrl.SessionPath()), sessionReferencesResolver(dir, ctrl.SessionPath()))
 }
 
-func historyMessages(msgs []provider.Message, resolveUserContent func(string) string) []HistoryMessage {
+func historyMessages(msgs []provider.Message, resolveUserContent func(string) string, resolveUserRefs func(string) json.RawMessage) []HistoryMessage {
 	out := make([]HistoryMessage, 0, len(msgs))
 	for _, m := range msgs {
 		content := m.Content
@@ -1552,6 +1572,11 @@ func historyMessages(msgs []provider.Message, resolveUserContent func(string) st
 			reasoning = m.ReasoningContent
 		}
 		hm := HistoryMessage{Role: string(m.Role), Content: content, Reasoning: reasoning}
+		if m.Role == provider.RoleUser && resolveUserRefs != nil {
+			if refs := resolveUserRefs(m.Content); len(refs) > 0 {
+				hm.References = refs
+			}
+		}
 		if m.Role == provider.RoleAssistant && len(m.ToolCalls) > 0 {
 			hm.ToolCalls = make([]HistoryToolCall, len(m.ToolCalls))
 			for i, tc := range m.ToolCalls {
@@ -1579,7 +1604,7 @@ func previewSessionMessages(sessionDir, path string) ([]HistoryMessage, error) {
 	if err != nil {
 		return nil, err
 	}
-	return historyMessages(loaded.Snapshot(), sessionDisplayResolver(sessionDir, sessionPath)), nil
+	return historyMessages(loaded.Snapshot(), sessionDisplayResolver(sessionDir, sessionPath), sessionReferencesResolver(sessionDir, path)), nil
 }
 
 type previewEventRecord struct {

@@ -60,6 +60,7 @@ import {
   type Mode,
   type ProjectNode,
   type SessionMeta,
+  type SessionReference,
   type SettingsTab,
   type SettingsView,
   type TabMeta,
@@ -1377,7 +1378,7 @@ export default function App() {
   // (/skill, /hooks, /mcp) — goes straight to Submit, which the controller
   // resolves (a turn, or a listing Notice).
   const handleSend = useCallback(
-    async (displayText: string, submitText = displayText) => {
+    async (displayText: string, submitText = displayText, references?: SessionReference[]) => {
       const trimmed = displayText.trim();
       // "!<cmd>" runs a shell command directly, bypassing the model.
       if (trimmed.startsWith("!")) {
@@ -1449,7 +1450,7 @@ export default function App() {
       await setControllerCollaborationMode(collaborationMode);
       await setControllerToolApprovalMode(toolApprovalMode);
       if (goal.trim()) await setControllerGoal(goal);
-      send(trimmed, submitText.trim());
+      send(trimmed, submitText.trim(), references);
     },
     [applyGoal, closeTransientOverlays, collaborationMode, goal, send, runShell, notice, setControllerCollaborationMode, setControllerGoal, setControllerToolApprovalMode, steer, switchModel, t, toolApprovalMode],
   );

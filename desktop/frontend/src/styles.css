@@ -2925,7 +2925,13 @@ a[href] {
   user-select: text;
   -webkit-user-select: text;
 }
-.msg--user {
+/* User message row: a thin flex container that pins the right-aligned shell
+   to the right edge of the transcript. The selector is intentionally more
+   specific than `.transcript > *` (which centres every direct child) so the
+   user bubble always wins the cascade, regardless of file ordering or CSS
+   tool re-ordering. `max-width: var(--maxw)` matches the transcript cap;
+   the actual bubble is then constrained by `.msg__user-shell`. */
+.transcript > .msg.msg--user {
   display: flex;
   justify-content: flex-end;
   color: var(--fg);
@@ -2936,7 +2942,6 @@ a[href] {
   border: 1px solid var(--border-soft);
   border-radius: 14px;
   padding: 10px 16px;
-  position: relative;
 }
 .rewind {
   position: absolute;
@@ -3045,6 +3050,57 @@ a[href] {
   word-break: break-word;
   font-weight: 450;
   line-height: 1.65;
+  text-align: left;
+}
+/* past-chat reference cards rendered below the user message text
+   inside the bubble. The bubble is a flex column with the text and
+   references stacking vertically. */
+.msg__references {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 2px;
+}
+.msg__references-label {
+  color: var(--fg-dim);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+.msg__reference-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border));
+  background: color-mix(in srgb, var(--accent) 7%, var(--panel));
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--fg);
+}
+.msg__reference-icon {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.msg__reference-title {
+  font-weight: 500;
+  color: var(--fg);
+  word-break: break-word;
+}
+.msg__reference-turns {
+  color: var(--fg-faint);
+  font-size: 11px;
+  flex-shrink: 0;
+}
+.msg__reference-path {
+  color: var(--fg-faint);
+  font-size: 11px;
+  font-family: var(--mono);
+  margin-left: auto;
+  word-break: break-all;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .msg--im-source .msg__body {
   min-width: min(520px, 82%);
