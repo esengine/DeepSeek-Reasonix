@@ -213,7 +213,7 @@ func (a *adapter) newEventDispatcher() *dispatcher.EventDispatcher {
 			return nil
 		}).
 		OnP2CardActionTrigger(func(ctx context.Context, event *callback.CardActionTriggerEvent) (*callback.CardActionTriggerResponse, error) {
-			if event == nil || event.EventReq == nil || !a.handleCardAction(event.EventReq.Body) {
+			if event == nil || event.EventReq == nil || !a.handleCardAction(event.Body) {
 				a.logger.Warn("feishu card action ignored", "reason", "invalid_payload")
 				return cardActionToast("warning", "操作无效或已过期"), nil
 			}
