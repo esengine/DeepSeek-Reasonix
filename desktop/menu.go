@@ -22,7 +22,7 @@ func (a *App) createAppMenu() *menu.Menu {
 	m.Append(menu.AppMenu())
 
 	fileMenu := m.AddSubmenu("File")
-	fileMenu.AddText("Settings", keys.CmdOrCtrl(","), func(_ *menu.CallbackData) {
+	fileMenu.AddText("Settings", nil, func(_ *menu.CallbackData) {
 		if a.ctx != nil {
 			runtime.EventsEmit(a.ctx, "app:open-settings")
 		}

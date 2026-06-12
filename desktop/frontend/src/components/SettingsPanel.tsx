@@ -4335,7 +4335,7 @@ function ShortcutsSection() {
   const [platform, setPlatform] = useState<"darwin" | "win">("win");
   const [customKeys, setCustomKeys] = useState<Record<string, string>>({});
   const [editingKey, setEditingKey] = useState<string | null>(null);
-  const [conflict, setConflict] = useState<{ combo: string; existing: string; pendingLabel: string } | null>(null);
+  const [conflict, setConflict] = useState<{ combo: string; existing: string; pendingLabel: string; conflictKey?: string } | null>(null);
   const committedRef = useRef(false);
   const recordingRef = useRef<HTMLElement | null>(null);
 
@@ -4368,14 +4368,15 @@ function ShortcutsSection() {
     )?.labelKey;
     if (conflictKey || defaultConflict) {
       const existing = conflictKey || defaultConflict || "";
-      setConflict({ combo, existing: comboLabel(existing), pendingLabel: labelKey });
+      setConflict({ combo, existing: comboLabel(existing), pendingLabel: labelKey, conflictKey });
       return;
     }
     doCommit(labelKey, combo);
   };
 
-  const doCommit = (labelKey: string, combo: string) => {
+  const doCommit = (labelKey: string, combo: string, clearKey?: string) => {
     const next = { ...customKeys, [labelKey]: combo };
+    if (clearKey) delete next[clearKey];
     setCustomKeys(next);
     saveCustomShortcuts(next);
     setEditingKey(null);
@@ -4383,7 +4384,7 @@ function ShortcutsSection() {
 
   const confirmConflict = () => {
     if (!conflict) return;
-    doCommit(conflict.pendingLabel, conflict.combo);
+    doCommit(conflict.pendingLabel, conflict.combo, conflict.conflictKey);
     setConflict(null);
   };
 
@@ -4397,6 +4398,8 @@ function ShortcutsSection() {
     e.stopPropagation();
     if (e.key === "Escape") { setEditingKey(null); return; }
     if (["Meta", "Control", "Alt", "Shift"].includes(e.key)) return;
+    // Require at least one modifier to avoid saving bare character keys
+    if (!e.metaKey && !e.ctrlKey && !e.altKey) return;
     const combo = formatKeyCombo(e, platform as "darwin" | "win");
     if (!combo) return;
     commitCombo(labelKey, combo);

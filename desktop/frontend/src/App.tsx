@@ -615,6 +615,17 @@ function TextSizeHotkeys() {
     e.preventDefault();
     applyTextSize(nextTextSize(getTextSize(), 1));
   });
+  // Fallback: match Ctrl+⇧+= / ⌘⇧+= for ++ on non-numpad keyboards
+  useEffect(() => {
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === "=") {
+        e.preventDefault();
+        applyTextSize(nextTextSize(getTextSize(), 1));
+      }
+    };
+    document.addEventListener("keydown", onKey, { capture: true });
+    return () => document.removeEventListener("keydown", onKey, { capture: true });
+  }, []);
   useGlobalHotkey("shortcuts.textSizeDecrease", (e) => {
     e.preventDefault();
     applyTextSize(nextTextSize(getTextSize(), -1));
@@ -682,6 +693,9 @@ function TabHotkeys({
 /** Toggle YOLO tool-approval mode with Cmd+Y / Ctrl+Y. */
 function YoloToggleHotkeys({ onToggle }: { onToggle: () => void }) {
   useGlobalHotkey("shortcuts.yoloToggle", (e) => {
+    // Don't steal Ctrl+Y redo in text fields
+    const tag = (e.target as HTMLElement)?.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || (e.target as HTMLElement)?.isContentEditable) return;
     e.preventDefault();
     onToggle();
   }, [onToggle]);
@@ -2205,7 +2219,7 @@ export default function App() {
     <TabHotkeys
       tabBarHidden={false}
       activeTabId={activeTabId}
-      onCloseTab={(id) => void closeTab(id)}
+      onCloseTab={(id) => void handleTabClose(id)}
     />
     <YoloToggleHotkeys onToggle={toggleYoloApprovalMode} />
     <PaletteHotkeys onOpen={() => { if (!paletteOpen) void openPalette(); }} />
