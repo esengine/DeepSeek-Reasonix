@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useLayoutEffect, useRef } from "react";
 import gsap from "gsap";
 import { DUR_BASE, EASE_OUT, prefersReducedMotion } from "./gsapAnimations";
 
@@ -33,7 +33,7 @@ export function useGSAPCollapse(
   onOpenRef.current = opts?.onOpenComplete;
   onCloseRef.current = opts?.onCloseComplete;
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
 
