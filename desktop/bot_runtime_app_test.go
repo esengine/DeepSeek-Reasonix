@@ -98,6 +98,72 @@ enabled = false
 	}
 }
 
+func TestDesktopBotRuntimeConfigLoadsSavedCredentialsAfterRestart(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	t.Cleanup(func() {
+		_ = os.Unsetenv("FEISHU_BOT_APP_SECRET")
+		_ = os.Unsetenv("LARK_BOT_APP_SECRET")
+	})
+
+	userCfg := config.Default()
+	userCfg.Bot.Enabled = true
+	userCfg.Bot.Allowlist.Enabled = true
+	userCfg.Bot.Allowlist.FeishuUsers = []string{"ou-installer"}
+	userCfg.Bot.Connections = []config.BotConnectionConfig{
+		{
+			ID:       "feishu-feishu",
+			Provider: "feishu",
+			Domain:   "feishu",
+			Enabled:  true,
+			Status:   "connected",
+			Credential: config.BotConnectionCredential{
+				AppID:        "cli-feishu",
+				AppSecretEnv: "FEISHU_BOT_APP_SECRET",
+			},
+		},
+		{
+			ID:       "feishu-lark",
+			Provider: "feishu",
+			Domain:   "lark",
+			Enabled:  true,
+			Status:   "connected",
+			Credential: config.BotConnectionCredential{
+				AppID:        "cli-lark",
+				AppSecretEnv: "LARK_BOT_APP_SECRET",
+			},
+		},
+	}
+	if err := userCfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save user config: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(config.UserCredentialsPath()), 0o755); err != nil {
+		t.Fatalf("create credentials dir: %v", err)
+	}
+	if err := os.WriteFile(config.UserCredentialsPath(), []byte("FEISHU_BOT_APP_SECRET=feishu-secret\nLARK_BOT_APP_SECRET=lark-secret\n"), 0o600); err != nil {
+		t.Fatalf("write credentials: %v", err)
+	}
+	_ = os.Unsetenv("FEISHU_BOT_APP_SECRET")
+	_ = os.Unsetenv("LARK_BOT_APP_SECRET")
+
+	got, err := NewApp().loadDesktopBotConfig()
+	if err != nil {
+		t.Fatalf("load desktop bot config: %v", err)
+	}
+	views := botConnectionViews(got.Bot.Connections)
+	if len(views) != 2 {
+		t.Fatalf("connection views = %+v, want Feishu and Lark", views)
+	}
+	for _, view := range views {
+		if !view.Credential.SecretSet {
+			t.Fatalf("connection %s credential = %+v, want saved credential loaded after restart", view.ID, view.Credential)
+		}
+	}
+	plan := desktopBotRuntimePlan(got)
+	if !plan.Start || !plan.Enabled[bot.PlatformFeishu] {
+		t.Fatalf("desktop runtime plan = %+v, want saved Feishu/Lark connections to start", plan)
+	}
+}
+
 func TestDesktopBotRuntimeMigratesLegacyProjectBotSettings(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
