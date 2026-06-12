@@ -118,15 +118,16 @@ type WeixinBotView struct {
 }
 
 type BotSettingsView struct {
-	Enabled     bool                `json:"enabled"`
-	Model       string              `json:"model"`
-	MaxSteps    int                 `json:"maxSteps"`
-	DebounceMs  int                 `json:"debounceMs"`
-	Allowlist   BotAllowlistView    `json:"allowlist"`
-	QQ          QQBotView           `json:"qq"`
-	Feishu      FeishuBotView       `json:"feishu"`
-	Weixin      WeixinBotView       `json:"weixin"`
-	Connections []BotConnectionView `json:"connections"`
+	Enabled          bool                `json:"enabled"`
+	Model            string              `json:"model"`
+	ToolApprovalMode string              `json:"toolApprovalMode"`
+	MaxSteps         int                 `json:"maxSteps"`
+	DebounceMs       int                 `json:"debounceMs"`
+	Allowlist        BotAllowlistView    `json:"allowlist"`
+	QQ               QQBotView           `json:"qq"`
+	Feishu           FeishuBotView       `json:"feishu"`
+	Weixin           WeixinBotView       `json:"weixin"`
+	Connections      []BotConnectionView `json:"connections"`
 }
 
 // SettingsView is the whole Settings panel payload.
@@ -401,10 +402,11 @@ func botSettingsView(b config.BotConfig) BotSettingsView {
 		mode = "webhook"
 	}
 	return BotSettingsView{
-		Enabled:    b.Enabled,
-		Model:      b.Model,
-		MaxSteps:   b.MaxSteps,
-		DebounceMs: b.DebounceMs,
+		Enabled:          b.Enabled,
+		Model:            b.Model,
+		ToolApprovalMode: normalizeBotConnectionToolApprovalMode(b.ToolApprovalMode),
+		MaxSteps:         b.MaxSteps,
+		DebounceMs:       b.DebounceMs,
 		Allowlist: BotAllowlistView{
 			Enabled:      b.Allowlist.Enabled,
 			AllowAll:     b.Allowlist.AllowAll,
@@ -1282,6 +1284,7 @@ func (a *App) SetBotSettings(b BotSettingsView) error {
 	err := a.applyConfigOnly(func(c *config.Config) error {
 		c.Bot.Enabled = b.Enabled
 		c.Bot.Model = strings.TrimSpace(b.Model)
+		c.Bot.ToolApprovalMode = normalizeBotConnectionToolApprovalMode(b.ToolApprovalMode)
 		c.Bot.MaxSteps = b.MaxSteps
 		c.Bot.DebounceMs = b.DebounceMs
 		c.Bot.Allowlist = config.BotAllowlist{

@@ -137,33 +137,17 @@ func (s *renderSink) Emit(e event.Event) {
 			s.onAsk(e.Ask)
 		}
 		// 发送问答请求
-		var qb strings.Builder
-		qb.WriteString("❓ 请回答以下问题:\n")
-		for i, q := range e.Ask.Questions {
-			fmt.Fprintf(&qb, "\n**%d. %s**\n", i+1, q.Prompt)
-			for j, opt := range q.Options {
-				fmt.Fprintf(&qb, "  %d. %s", j+1, opt.Label)
-				if opt.Description != "" {
-					fmt.Fprintf(&qb, " — %s", opt.Description)
-				}
-				qb.WriteString("\n")
-			}
-			if q.Multi {
-				qb.WriteString("  (可多选)\n")
-			}
-		}
-		fmt.Fprintf(&qb, "\nID: `%s`", e.Ask.ID)
-		fmt.Fprintf(&qb, "\n用 /answer %s <选项编号或文本> 回答。", e.Ask.ID)
+		askText := renderAskText(e.Ask)
 		msg := OutboundMessage{
 			ConnectionID: s.connID,
 			Domain:       s.domain,
 			ChatID:       s.chatID,
 			ChatType:     s.chatType,
-			Text:         qb.String(),
+			Text:         askText,
 			ReplyToMsgID: s.replyTo,
 		}
 		if s.adapter.Platform() == PlatformFeishu {
-			msg.Card = askCard(e.Ask, qb.String())
+			msg.Card = askCard(e.Ask, askText, s.chatType, s.userID)
 		}
 		_ = s.send(msg)
 
@@ -270,11 +254,61 @@ func cardActionValue(command string, chatType ChatType, userID string) map[strin
 	return value
 }
 
-func askCard(ask event.Ask, fallback string) *InteractiveCard {
-	return &InteractiveCard{
+func renderAskText(ask event.Ask) string {
+	var qb strings.Builder
+	qb.WriteString("❓ 请回答以下问题:\n")
+	for i, q := range ask.Questions {
+		fmt.Fprintf(&qb, "\n**%d. %s**\n", i+1, q.Prompt)
+		for j, opt := range q.Options {
+			fmt.Fprintf(&qb, "  %d. %s", j+1, opt.Label)
+			if opt.Description != "" {
+				fmt.Fprintf(&qb, " — %s", opt.Description)
+			}
+			qb.WriteString("\n")
+		}
+		if q.Multi {
+			qb.WriteString("  (可多选)\n")
+		}
+	}
+	fmt.Fprintf(&qb, "\nID: `%s`", ask.ID)
+	if askSupportsNumericShortcut(ask) {
+		fmt.Fprintf(&qb, "\n直接回复选项编号即可回答；也可用 /answer %s <选项编号或文本>。", ask.ID)
+	} else {
+		fmt.Fprintf(&qb, "\n用 /answer %s <选项编号或文本> 回答；多题可用 q1=1;q2=2。", ask.ID)
+	}
+	return qb.String()
+}
+
+func askCard(ask event.Ask, fallback string, chatType ChatType, userID string) *InteractiveCard {
+	card := &InteractiveCard{
 		Header: "需要回答问题",
 		Elements: []InteractiveCardElement{
 			{Tag: "markdown", Content: fallback},
 		},
 	}
+	if !askSupportsNumericShortcut(ask) {
+		return card
+	}
+	question := ask.Questions[0]
+	actions := make([]map[string]any, 0, len(question.Options))
+	for i, opt := range question.Options {
+		label := strings.TrimSpace(opt.Label)
+		if label == "" {
+			label = fmt.Sprintf("选项 %d", i+1)
+		}
+		actions = append(actions, map[string]any{
+			"tag":   "button",
+			"text":  map[string]string{"tag": "plain_text", "content": label},
+			"type":  "primary",
+			"value": cardActionValue(fmt.Sprintf("/answer %s %d", ask.ID, i+1), chatType, userID),
+		})
+	}
+	if len(actions) > 0 {
+		card.Elements = append(card.Elements, InteractiveCardElement{Tag: "action", Extra: map[string]any{"actions": actions}})
+	}
+	return card
+}
+
+func askSupportsNumericShortcut(ask event.Ask) bool {
+	return len(ask.Questions) == 1 && len(ask.Questions[0].Options) > 0
 }

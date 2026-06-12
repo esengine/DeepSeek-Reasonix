@@ -18,6 +18,7 @@ import (
 // GatewayConfig 是 BotGateway 的配置。
 type GatewayConfig struct {
 	Model              string
+	ToolApprovalMode   string
 	MaxSteps           int
 	WorkspaceRoot      string
 	Channels           map[Platform]ChannelConfig
@@ -30,8 +31,9 @@ type GatewayConfig struct {
 
 // ChannelConfig overrides gateway defaults for one IM channel.
 type ChannelConfig struct {
-	Model         string
-	WorkspaceRoot string
+	Model            string
+	ToolApprovalMode string
+	WorkspaceRoot    string
 }
 
 // AdapterBinding attaches an adapter instance to one saved bot connection.
@@ -75,6 +77,7 @@ type sessionState struct {
 	pendingAsks      map[string][]event.AskQuestion
 	pendingApprovals map[string]event.Approval
 	lastApprovalID   string
+	lastAskID        string
 	createdAt        time.Time
 	lastActive       time.Time
 }
@@ -280,8 +283,10 @@ func (gw *BotGateway) handleMessage(ctx context.Context, binding AdapterBinding,
 
 	if normalized, ok := gw.normalizeApprovalShortcut(key, msg.Text); ok {
 		msg.Text = normalized
-	} else if _, ok := approvalShortcutCommand(msg.Text); ok && gw.sessions.IsActive(key) {
-		_ = gw.sendText(ctx, binding.Adapter, msg, "没有找到可匹配的待审批操作。请重新触发一次操作后回复 1/2，或按审批消息中的 ID 使用 /approve <id> 或 /deny <id>。")
+	} else if normalized, ok := gw.normalizeAskShortcut(key, msg.Text); ok {
+		msg.Text = normalized
+	} else if _, ok := decisionShortcutCommand(msg.Text); ok && gw.sessions.IsActive(key) {
+		_ = gw.sendText(ctx, binding.Adapter, msg, "没有找到可匹配的待处理操作。请重新触发一次操作后回复编号，或按消息中的 ID 使用 /approve、/deny 或 /answer。")
 		return
 	}
 
@@ -371,6 +376,16 @@ func approvalShortcutCommand(text string) (string, bool) {
 	}
 }
 
+func decisionShortcutCommand(text string) (string, bool) {
+	if command, ok := approvalShortcutCommand(text); ok {
+		return command, true
+	}
+	if _, ok := askShortcutAnswer(text); ok {
+		return "/answer", true
+	}
+	return "", false
+}
+
 func (gw *BotGateway) currentPendingApprovalID(key string) string {
 	gw.mu.Lock()
 	defer gw.mu.Unlock()
@@ -404,6 +419,63 @@ func (gw *BotGateway) forgetPendingApproval(key, id string) {
 			break
 		}
 	}
+}
+
+func (gw *BotGateway) normalizeAskShortcut(key, text string) (string, bool) {
+	answer, ok := askShortcutAnswer(text)
+	if !ok {
+		return "", false
+	}
+	askID := gw.currentPendingAskID(key)
+	if askID == "" {
+		return "", false
+	}
+	return "/answer " + askID + " " + answer, true
+}
+
+func askShortcutAnswer(text string) (string, bool) {
+	raw := strings.TrimSpace(text)
+	if raw == "" {
+		return "", false
+	}
+	if strings.ContainsAny(raw, " \t\n;=") {
+		return "", false
+	}
+	if _, err := strconv.Atoi(raw); err == nil {
+		return raw, true
+	}
+	return "", false
+}
+
+func (gw *BotGateway) currentPendingAskID(key string) string {
+	gw.mu.Lock()
+	defer gw.mu.Unlock()
+	state, ok := gw.controllers[key]
+	if !ok || len(state.pendingAsks) == 0 {
+		return ""
+	}
+	if state.lastAskID != "" {
+		if questions, ok := state.pendingAsks[state.lastAskID]; ok {
+			if askQuestionsSupportNumericShortcut(questions) {
+				return state.lastAskID
+			}
+			return ""
+		}
+	}
+	var singleID string
+	for id, questions := range state.pendingAsks {
+		if askQuestionsSupportNumericShortcut(questions) {
+			if singleID != "" {
+				return ""
+			}
+			singleID = id
+		}
+	}
+	return singleID
+}
+
+func askQuestionsSupportNumericShortcut(questions []event.AskQuestion) bool {
+	return len(questions) == 1 && len(questions[0].Options) > 0
 }
 
 func (gw *BotGateway) handleSlashCommand(ctx context.Context, adapter Adapter, key string, msg InboundMessage) {
@@ -482,6 +554,13 @@ func (gw *BotGateway) handleSlashCommand(ctx context.Context, adapter Adapter, k
 		if ok {
 			questions = state.pendingAsks[askID]
 			delete(state.pendingAsks, askID)
+			if state.lastAskID == askID {
+				state.lastAskID = ""
+				for nextID := range state.pendingAsks {
+					state.lastAskID = nextID
+					break
+				}
+			}
 		}
 		gw.mu.Unlock()
 		if !ok || state.ctrl == nil {
@@ -567,6 +646,7 @@ func (gw *BotGateway) runTurn(ctx context.Context, adapter Adapter, key string, 
 				state.pendingAsks = make(map[string][]event.AskQuestion)
 			}
 			state.pendingAsks[ask.ID] = ask.Questions
+			state.lastAskID = ask.ID
 			gw.mu.Unlock()
 		},
 	)
@@ -605,8 +685,8 @@ func (gw *BotGateway) getOrCreateSession(ctx context.Context, key string, msg In
 
 	// 创建新 Controller
 	sessionSink := &sessionEventSink{}
-	model, workspaceRoot := gw.sessionOptionsForMessage(msg)
-	gw.logger.Info("bot session creating", "platform", msg.Platform, "chat_type", msg.ChatType, "chat", hashID(msg.ChatID), "session", key[:8], "model", model, "workspace_set", strings.TrimSpace(workspaceRoot) != "")
+	model, workspaceRoot, toolApprovalMode := gw.sessionOptionsForMessage(msg)
+	gw.logger.Info("bot session creating", "platform", msg.Platform, "chat_type", msg.ChatType, "chat", hashID(msg.ChatID), "session", key[:8], "model", model, "workspace_set", strings.TrimSpace(workspaceRoot) != "", "tool_approval_mode", normalizeBotToolApprovalMode(toolApprovalMode))
 	ctrl, err := boot.Build(ctx, boot.Options{
 		Model:         model,
 		MaxSteps:      gw.cfg.MaxSteps,
@@ -619,6 +699,7 @@ func (gw *BotGateway) getOrCreateSession(ctx context.Context, key string, msg In
 		return nil
 	}
 	ctrl.EnableInteractiveApproval()
+	ctrl.SetToolApprovalMode(toolApprovalMode)
 
 	gw.mu.Lock()
 	gw.controllers[key] = &sessionState{
@@ -635,9 +716,10 @@ func (gw *BotGateway) getOrCreateSession(ctx context.Context, key string, msg In
 	return state
 }
 
-func (gw *BotGateway) sessionOptionsForMessage(msg InboundMessage) (model string, workspaceRoot string) {
+func (gw *BotGateway) sessionOptionsForMessage(msg InboundMessage) (model string, workspaceRoot string, toolApprovalMode string) {
 	model = gw.cfg.Model
 	workspaceRoot = gw.cfg.WorkspaceRoot
+	toolApprovalMode = normalizeBotToolApprovalMode(gw.cfg.ToolApprovalMode)
 	if gw.cfg.ConnectionChannels != nil && msg.ConnectionID != "" {
 		if channel, ok := gw.cfg.ConnectionChannels[msg.ConnectionID]; ok {
 			if value := strings.TrimSpace(channel.Model); value != "" {
@@ -646,15 +728,18 @@ func (gw *BotGateway) sessionOptionsForMessage(msg InboundMessage) (model string
 			if value := strings.TrimSpace(channel.WorkspaceRoot); value != "" {
 				workspaceRoot = value
 			}
-			return model, workspaceRoot
+			if value := normalizeOptionalBotToolApprovalMode(channel.ToolApprovalMode); value != "" {
+				toolApprovalMode = value
+			}
+			return model, workspaceRoot, toolApprovalMode
 		}
 	}
 	if gw.cfg.Channels == nil {
-		return model, workspaceRoot
+		return model, workspaceRoot, toolApprovalMode
 	}
 	channel, ok := gw.cfg.Channels[msg.Platform]
 	if !ok {
-		return model, workspaceRoot
+		return model, workspaceRoot, toolApprovalMode
 	}
 	if value := strings.TrimSpace(channel.Model); value != "" {
 		model = value
@@ -662,7 +747,30 @@ func (gw *BotGateway) sessionOptionsForMessage(msg InboundMessage) (model string
 	if value := strings.TrimSpace(channel.WorkspaceRoot); value != "" {
 		workspaceRoot = value
 	}
-	return model, workspaceRoot
+	if value := normalizeOptionalBotToolApprovalMode(channel.ToolApprovalMode); value != "" {
+		toolApprovalMode = value
+	}
+	return model, workspaceRoot, toolApprovalMode
+}
+
+func normalizeBotToolApprovalMode(mode string) string {
+	if value := normalizeOptionalBotToolApprovalMode(mode); value != "" {
+		return value
+	}
+	return control.ToolApprovalAsk
+}
+
+func normalizeOptionalBotToolApprovalMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case control.ToolApprovalAsk:
+		return control.ToolApprovalAsk
+	case control.ToolApprovalAuto:
+		return control.ToolApprovalAuto
+	case control.ToolApprovalYolo, "full", "full-access", "bypass":
+		return control.ToolApprovalYolo
+	default:
+		return ""
+	}
 }
 
 func (gw *BotGateway) sendText(ctx context.Context, adapter Adapter, msg InboundMessage, text string) error {

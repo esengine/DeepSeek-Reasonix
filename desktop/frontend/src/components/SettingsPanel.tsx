@@ -407,9 +407,11 @@ const REASONING_PROTOCOLS: readonly string[] = ["", "deepseek", "openai", "none"
 const PROXY_TYPES = ["http", "https", "socks5", "socks5h"] as const;
 const LANGUAGE_PREFS: LangPref[] = ["", "zh", "en"];
 const AUTO_PLAN_MODES = ["off", "on"] as const;
+const BOT_TOOL_APPROVAL_MODES = ["", "ask", "auto", "yolo"] as const;
 
 type ProxyMode = (typeof PROXY_MODES)[number];
 type AutoPlanMode = (typeof AUTO_PLAN_MODES)[number];
+type BotConnectionToolApprovalMode = (typeof BOT_TOOL_APPROVAL_MODES)[number];
 
 function normalizeProxyMode(mode: string): ProxyMode {
   switch (mode) {
@@ -438,6 +440,7 @@ function defaultBotSettings(): BotSettingsView {
   return {
     enabled: false,
     model: "",
+    toolApprovalMode: "ask",
     maxSteps: 0,
     debounceMs: 1500,
     allowlist: {
@@ -480,6 +483,7 @@ function normalizeBotSettings(bot: BotSettingsView | null | undefined): BotSetti
   return {
     ...fallback,
     ...bot,
+    toolApprovalMode: normalizeBotToolApprovalMode(bot?.toolApprovalMode),
     maxSteps: Math.max(0, Number(bot?.maxSteps ?? fallback.maxSteps) || 0),
     debounceMs: Number(bot?.debounceMs) || fallback.debounceMs,
     allowlist: {
@@ -510,6 +514,7 @@ function normalizeBotConnection(raw: any) {
     enabled: raw?.enabled !== false,
     status: String(raw?.status ?? "disconnected").trim(),
     model: String(raw?.model ?? "").trim(),
+    toolApprovalMode: normalizeBotToolApprovalMode(raw?.toolApprovalMode, true),
     workspaceRoot,
     credential: {
       appId: String(credential.appId ?? "").trim(),
@@ -531,6 +536,15 @@ function normalizeBotConnection(raw: any) {
     createdAt: String(raw?.createdAt ?? "").trim(),
     updatedAt: String(raw?.updatedAt ?? "").trim(),
   };
+}
+
+function normalizeBotToolApprovalMode(mode: unknown, allowEmpty = false): "ask" | "auto" | "yolo" | "" {
+  const raw = String(mode ?? "").trim().toLowerCase();
+  if (raw === "") return allowEmpty ? "" : "ask";
+  if (raw === "ask") return "ask";
+  if (raw === "auto") return "auto";
+  if (raw === "yolo" || raw === "full" || raw === "full-access" || raw === "bypass") return "yolo";
+  return allowEmpty ? "" : "ask";
 }
 
 function normalizeBotMappingScope(scope: unknown, workspaceRoot: unknown): "global" | "project" {
@@ -1171,6 +1185,7 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
   const onlineConnections = draft.connections.filter((connection) => connection.enabled && connection.status === "connected").length;
   const selectedConnection = draft.connections.find((connection) => connection.id === expandedConnectionId) ?? null;
   const selectedConnectionRemote = selectedConnection ? firstConnectionRemote(selectedConnection) : "";
+  const selectedConnectionToolApprovalMode = selectedConnection ? normalizeBotToolApprovalMode(selectedConnection.toolApprovalMode, true) : "";
   useEffect(() => {
     if (!pendingAllowlistFocusRef.current || !selectedConnection) return;
     const scrollTimer = window.setTimeout(() => {
@@ -1387,6 +1402,21 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
 
               <section className="bot-detail-section">
                 <div className="bot-detail-section__head">{t("settings.botRuntimeSettings")}</div>
+                <SettingsField label={t("settings.botToolApprovalMode")} hint={t("settings.botToolApprovalModeHint")}>
+                  <div className="provider-add-segmented" role="group" aria-label={t("settings.botToolApprovalMode")}>
+                    {BOT_TOOL_APPROVAL_MODES.map((mode) => (
+                      <button
+                        key={mode || "inherit"}
+                        type="button"
+                        className={selectedConnectionToolApprovalMode === mode ? "provider-add-segmented__item provider-add-segmented__item--active" : "provider-add-segmented__item"}
+                        disabled={busy}
+                        onClick={() => void persistConnection(selectedConnection.id, { toolApprovalMode: mode as BotConnectionToolApprovalMode })}
+                      >
+                        {t(`settings.botToolApprovalMode.${mode || "inherit"}` as DictKey)}
+                      </button>
+                    ))}
+                  </div>
+                </SettingsField>
                 <SettingsField label={t("settings.botChannelModel")} hint={t("settings.botChannelModelHint")}>
                   <ModelPicker
                     s={s}
@@ -1665,6 +1695,7 @@ function sanitizeBotDraft(draft: BotSettingsView): BotSettingsView {
   return {
     ...bot,
     model: bot.model.trim(),
+    toolApprovalMode: normalizeBotToolApprovalMode(bot.toolApprovalMode),
     maxSteps: Math.max(0, Math.floor(bot.maxSteps || 0)),
     debounceMs: Math.max(0, Math.floor(bot.debounceMs || 0)),
     allowlist: {

@@ -303,6 +303,74 @@ func TestGatewayNormalizesNumericApprovalShortcutsOnlyWhenPending(t *testing.T) 
 	}
 }
 
+func TestGatewayNormalizesNumericAskShortcutOnlyForSingleChoicePendingAsk(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	gw := NewGateway(GatewayConfig{}, nil, logger)
+	key := "session-key"
+
+	if _, ok := gw.normalizeAskShortcut(key, "1"); ok {
+		t.Fatal("numeric text without a pending ask should stay a normal message")
+	}
+
+	gw.controllers[key] = &sessionState{
+		pendingAsks: map[string][]event.AskQuestion{
+			"ask-1": {{
+				ID:     "q1",
+				Prompt: "Choose one",
+				Options: []event.AskOption{
+					{Label: "Allow once"},
+					{Label: "Deny"},
+				},
+			}},
+		},
+		lastAskID: "ask-1",
+	}
+
+	got, ok := gw.normalizeAskShortcut(key, "2")
+	if !ok || got != "/answer ask-1 2" {
+		t.Fatalf("normalize 2 = %q,%v; want /answer ask-1 2,true", got, ok)
+	}
+	if _, ok := gw.normalizeAskShortcut(key, "1;2"); ok {
+		t.Fatal("compound numeric text should stay a normal message")
+	}
+
+	gw.controllers[key].pendingAsks["ask-2"] = []event.AskQuestion{
+		{ID: "q1", Prompt: "First", Options: []event.AskOption{{Label: "A"}}},
+		{ID: "q2", Prompt: "Second", Options: []event.AskOption{{Label: "B"}}},
+	}
+	gw.controllers[key].lastAskID = "ask-2"
+	if _, ok := gw.normalizeAskShortcut(key, "1"); ok {
+		t.Fatal("numeric shortcut should not answer multi-question asks")
+	}
+}
+
+func TestGatewaySessionOptionsUseConnectionToolApprovalOverride(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	gw := NewGateway(GatewayConfig{
+		Model:            "default-model",
+		ToolApprovalMode: "auto",
+		Channels: map[Platform]ChannelConfig{
+			PlatformFeishu: {Model: "platform-model", ToolApprovalMode: "ask"},
+		},
+		ConnectionChannels: map[string]ChannelConfig{
+			"feishu-lark": {Model: "lark-model", ToolApprovalMode: "yolo"},
+		},
+	}, nil, logger)
+
+	model, _, mode := gw.sessionOptionsForMessage(InboundMessage{
+		Platform:     PlatformFeishu,
+		ConnectionID: "feishu-lark",
+	})
+	if model != "lark-model" || mode != "yolo" {
+		t.Fatalf("lark session options = model %q mode %q, want lark-model/yolo", model, mode)
+	}
+
+	model, _, mode = gw.sessionOptionsForMessage(InboundMessage{Platform: PlatformFeishu})
+	if model != "platform-model" || mode != "ask" {
+		t.Fatalf("platform session options = model %q mode %q, want platform-model/ask", model, mode)
+	}
+}
+
 func TestGatewayNumericApprovalShortcutActiveWithoutPendingSendsGuidance(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	gw := NewGateway(GatewayConfig{Allowlist: AllowlistConfig{AllowAll: true}}, nil, logger)
@@ -329,8 +397,8 @@ func TestGatewayNumericApprovalShortcutActiveWithoutPendingSendsGuidance(t *test
 	if len(sent) != 1 {
 		t.Fatalf("sent count = %d, want 1", len(sent))
 	}
-	if !strings.Contains(sent[0].Text, "没有找到可匹配的待审批操作") {
-		t.Fatalf("sent text = %q, want pending approval guidance", sent[0].Text)
+	if !strings.Contains(sent[0].Text, "没有找到可匹配的待处理操作") {
+		t.Fatalf("sent text = %q, want pending operation guidance", sent[0].Text)
 	}
 }
 
@@ -374,19 +442,28 @@ func TestGatewaySessionOptionsUseChannelOverride(t *testing.T) {
 		},
 	}, nil, logger)
 
-	model, root := gw.sessionOptionsForMessage(InboundMessage{Platform: PlatformFeishu})
+	model, root, mode := gw.sessionOptionsForMessage(InboundMessage{Platform: PlatformFeishu})
 	if model != "feishu-model" || root != "/feishu" {
 		t.Fatalf("feishu options = %q,%q; want channel override", model, root)
 	}
+	if mode != "ask" {
+		t.Fatalf("feishu tool approval mode = %q, want ask", mode)
+	}
 
-	model, root = gw.sessionOptionsForMessage(InboundMessage{Platform: PlatformWeixin})
+	model, root, mode = gw.sessionOptionsForMessage(InboundMessage{Platform: PlatformWeixin})
 	if model != "global-model" || root != "/weixin" {
 		t.Fatalf("weixin options = %q,%q; want global model and channel root", model, root)
 	}
+	if mode != "ask" {
+		t.Fatalf("weixin tool approval mode = %q, want ask", mode)
+	}
 
-	model, root = gw.sessionOptionsForMessage(InboundMessage{Platform: PlatformQQ})
+	model, root, mode = gw.sessionOptionsForMessage(InboundMessage{Platform: PlatformQQ})
 	if model != "global-model" || root != "/global" {
 		t.Fatalf("qq options = %q,%q; want global defaults", model, root)
+	}
+	if mode != "ask" {
+		t.Fatalf("qq tool approval mode = %q, want ask", mode)
 	}
 }
 
@@ -403,8 +480,11 @@ func TestGatewaySessionOptionsPreferConnectionOverride(t *testing.T) {
 		},
 	}, nil, logger)
 
-	model, root := gw.sessionOptionsForMessage(InboundMessage{Platform: PlatformFeishu, ConnectionID: "feishu-lark"})
+	model, root, mode := gw.sessionOptionsForMessage(InboundMessage{Platform: PlatformFeishu, ConnectionID: "feishu-lark"})
 	if model != "lark-model" || root != "/lark" {
 		t.Fatalf("lark options = %q,%q; want connection override", model, root)
+	}
+	if mode != "ask" {
+		t.Fatalf("lark tool approval mode = %q, want ask", mode)
 	}
 }

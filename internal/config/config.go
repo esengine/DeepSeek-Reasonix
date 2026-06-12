@@ -292,15 +292,16 @@ func (c CodegraphConfig) ResolvedTier() string {
 
 // BotConfig 控制多渠道 IM bot 消息网关。
 type BotConfig struct {
-	Enabled     bool                  `toml:"enabled"`
-	Model       string                `toml:"model"` // 用于 bot 的模型名，空则用 default_model
-	MaxSteps    int                   `toml:"max_steps"`
-	DebounceMs  int                   `toml:"debounce_ms"` // 消息合并窗口，毫秒
-	Allowlist   BotAllowlist          `toml:"allowlist"`
-	QQ          QQBotConfig           `toml:"qq"`
-	Feishu      FeishuBotConfig       `toml:"feishu"`
-	Weixin      WeixinBotConfig       `toml:"weixin"`
-	Connections []BotConnectionConfig `toml:"connections"`
+	Enabled          bool                  `toml:"enabled"`
+	Model            string                `toml:"model"` // 用于 bot 的模型名，空则用 default_model
+	ToolApprovalMode string                `toml:"tool_approval_mode"`
+	MaxSteps         int                   `toml:"max_steps"`
+	DebounceMs       int                   `toml:"debounce_ms"` // 消息合并窗口，毫秒
+	Allowlist        BotAllowlist          `toml:"allowlist"`
+	QQ               QQBotConfig           `toml:"qq"`
+	Feishu           FeishuBotConfig       `toml:"feishu"`
+	Weixin           WeixinBotConfig       `toml:"weixin"`
+	Connections      []BotConnectionConfig `toml:"connections"`
 }
 
 // BotAllowlist 控制哪些用户可以使用 bot。
@@ -347,19 +348,20 @@ type WeixinBotConfig struct {
 // knobs so the UI can expose a simple "connect first" flow while old configs
 // keep working.
 type BotConnectionConfig struct {
-	ID              string                        `toml:"id"`
-	Provider        string                        `toml:"provider"` // qq|feishu|weixin
-	Domain          string                        `toml:"domain"`   // feishu|lark|weixin|qq
-	Label           string                        `toml:"label"`
-	Enabled         bool                          `toml:"enabled"`
-	Status          string                        `toml:"status"` // disconnected|pending|connected|error
-	Model           string                        `toml:"model"`
-	WorkspaceRoot   string                        `toml:"workspace_root"`
-	Credential      BotConnectionCredential       `toml:"credential"`
-	SessionMappings []BotConnectionSessionMapping `toml:"session_mappings"`
-	LastError       string                        `toml:"last_error"`
-	CreatedAt       string                        `toml:"created_at"`
-	UpdatedAt       string                        `toml:"updated_at"`
+	ID               string                        `toml:"id"`
+	Provider         string                        `toml:"provider"` // qq|feishu|weixin
+	Domain           string                        `toml:"domain"`   // feishu|lark|weixin|qq
+	Label            string                        `toml:"label"`
+	Enabled          bool                          `toml:"enabled"`
+	Status           string                        `toml:"status"` // disconnected|pending|connected|error
+	Model            string                        `toml:"model"`
+	ToolApprovalMode string                        `toml:"tool_approval_mode"`
+	WorkspaceRoot    string                        `toml:"workspace_root"`
+	Credential       BotConnectionCredential       `toml:"credential"`
+	SessionMappings  []BotConnectionSessionMapping `toml:"session_mappings"`
+	LastError        string                        `toml:"last_error"`
+	CreatedAt        string                        `toml:"created_at"`
+	UpdatedAt        string                        `toml:"updated_at"`
 }
 
 type BotConnectionCredential struct {
@@ -962,12 +964,13 @@ func Default() *Config {
 		LSP:     LSPConfig{Enabled: true},
 		Network: NetworkConfig{ProxyMode: netclient.ModeAuto},
 		Bot: BotConfig{
-			MaxSteps:   25,
-			DebounceMs: 1500,
-			Allowlist:  BotAllowlist{Enabled: true},
-			QQ:         QQBotConfig{AppSecretEnv: "QQ_BOT_APP_SECRET"},
-			Feishu:     FeishuBotConfig{Domain: "feishu", AppSecretEnv: "FEISHU_BOT_APP_SECRET", Mode: "webhook", WebhookPort: 8080, RequireMention: true},
-			Weixin:     WeixinBotConfig{AccountID: "default", TokenEnv: "WEIXIN_BOT_TOKEN", APIBase: "https://ilinkai.weixin.qq.com"},
+			ToolApprovalMode: "ask",
+			MaxSteps:         25,
+			DebounceMs:       1500,
+			Allowlist:        BotAllowlist{Enabled: true},
+			QQ:               QQBotConfig{AppSecretEnv: "QQ_BOT_APP_SECRET"},
+			Feishu:           FeishuBotConfig{Domain: "feishu", AppSecretEnv: "FEISHU_BOT_APP_SECRET", Mode: "webhook", WebhookPort: 8080, RequireMention: true},
+			Weixin:           WeixinBotConfig{AccountID: "default", TokenEnv: "WEIXIN_BOT_TOKEN", APIBase: "https://ilinkai.weixin.qq.com"},
 		},
 		Providers: []ProviderEntry{
 			{Name: "deepseek-flash", Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash", APIKeyEnv: "DEEPSEEK_API_KEY", BalanceURL: "https://api.deepseek.com/user/balance", ContextWindow: 1_000_000, Price: &provider.Pricing{CacheHit: 0.02, Input: 1, Output: 2, Currency: "¥"}},

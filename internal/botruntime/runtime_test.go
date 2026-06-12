@@ -50,6 +50,30 @@ func TestRemoteRemembererKeepsDistinctGroupUsers(t *testing.T) {
 	}
 }
 
+func TestConnectionChannelConfigsPreserveToolApprovalMode(t *testing.T) {
+	connections := []config.BotConnectionConfig{
+		{ID: "feishu-feishu", Provider: "feishu", Domain: "feishu", Enabled: true, ToolApprovalMode: "auto"},
+		{ID: "feishu-lark", Provider: "feishu", Domain: "lark", Enabled: true, ToolApprovalMode: "yolo"},
+		{ID: "weixin-weixin", Provider: "weixin", Domain: "weixin", Enabled: true, ToolApprovalMode: "ask"},
+	}
+
+	byConnection := ConnectionChannelConfigs(connections, true, true)
+	if got := byConnection["feishu-feishu"].ToolApprovalMode; got != "auto" {
+		t.Fatalf("feishu tool approval mode = %q, want auto", got)
+	}
+	if got := byConnection["feishu-lark"].ToolApprovalMode; got != "yolo" {
+		t.Fatalf("lark tool approval mode = %q, want yolo", got)
+	}
+	if got := byConnection["weixin-weixin"].ToolApprovalMode; got != "ask" {
+		t.Fatalf("weixin tool approval mode = %q, want explicit ask override", got)
+	}
+
+	byPlatform := ChannelConfigs(connections, true, true)
+	if got := byPlatform[bot.PlatformFeishu].ToolApprovalMode; got != "yolo" {
+		t.Fatalf("platform feishu tool approval mode = %q, want last enabled Feishu/Lark override", got)
+	}
+}
+
 func isolateUserConfig(t *testing.T) {
 	t.Helper()
 	home := t.TempDir()

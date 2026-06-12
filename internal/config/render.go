@@ -364,6 +364,11 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		} else {
 			b.WriteString("# model = \"\"   # empty = default_model\n")
 		}
+		if c.Bot.ToolApprovalMode != "" {
+			fmt.Fprintf(&b, "tool_approval_mode = %q   # ask|auto|yolo; yolo skips tool approvals only\n", c.Bot.ToolApprovalMode)
+		} else {
+			b.WriteString("# tool_approval_mode = \"ask\"   # ask|auto|yolo; ask and plan decisions still wait\n")
+		}
 		fmt.Fprintf(&b, "max_steps = %d\n", c.Bot.MaxSteps)
 		fmt.Fprintf(&b, "debounce_ms = %d\n", c.Bot.DebounceMs)
 		b.WriteString("\n[bot.allowlist]\n")
@@ -403,6 +408,9 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 			fmt.Fprintf(&b, "status = %q\n", conn.Status)
 			if conn.Model != "" {
 				fmt.Fprintf(&b, "model = %q\n", conn.Model)
+			}
+			if conn.ToolApprovalMode != "" {
+				fmt.Fprintf(&b, "tool_approval_mode = %q\n", conn.ToolApprovalMode)
 			}
 			if conn.WorkspaceRoot != "" {
 				fmt.Fprintf(&b, "workspace_root = %q\n", conn.WorkspaceRoot)

@@ -7195,6 +7195,8 @@ a[href] {
   align-items: baseline;
   gap: 8px;
   overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-family: var(--mono);
   font-size: 11.5px;
   line-height: 1.35;

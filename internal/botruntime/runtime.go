@@ -103,7 +103,10 @@ func ChannelConfigs(connections []config.BotConnectionConfig, includeModel bool,
 		if includeWorkspaceRoot {
 			channel.WorkspaceRoot = strings.TrimSpace(conn.WorkspaceRoot)
 		}
-		if channel.Model != "" || channel.WorkspaceRoot != "" {
+		if value := normalizeToolApprovalMode(conn.ToolApprovalMode); value != "" {
+			channel.ToolApprovalMode = value
+		}
+		if channel.Model != "" || channel.WorkspaceRoot != "" || channel.ToolApprovalMode != "" {
 			out[plat] = channel
 		}
 	}
@@ -133,7 +136,10 @@ func ConnectionChannelConfigs(connections []config.BotConnectionConfig, includeM
 		if includeWorkspaceRoot {
 			channel.WorkspaceRoot = strings.TrimSpace(conn.WorkspaceRoot)
 		}
-		if channel.Model != "" || channel.WorkspaceRoot != "" {
+		if value := normalizeToolApprovalMode(conn.ToolApprovalMode); value != "" {
+			channel.ToolApprovalMode = value
+		}
+		if channel.Model != "" || channel.WorkspaceRoot != "" || channel.ToolApprovalMode != "" {
 			out[id] = channel
 		}
 	}
@@ -141,6 +147,19 @@ func ConnectionChannelConfigs(connections []config.BotConnectionConfig, includeM
 		return nil
 	}
 	return out
+}
+
+func normalizeToolApprovalMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "ask":
+		return "ask"
+	case "auto":
+		return "auto"
+	case "yolo", "full", "full-access", "bypass":
+		return "yolo"
+	default:
+		return ""
+	}
 }
 
 func AdapterBindings(cfg *config.Config, enabled map[bot.Platform]bool, logger *slog.Logger) []bot.AdapterBinding {

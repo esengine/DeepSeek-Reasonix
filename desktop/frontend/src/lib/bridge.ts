@@ -651,6 +651,7 @@ function makeMockApp(): AppBindings {
     bot: {
       enabled: !freshMock,
       model: "",
+      toolApprovalMode: "ask",
       maxSteps: 25,
       debounceMs: 1500,
       allowlist: {
@@ -691,6 +692,7 @@ function makeMockApp(): AppBindings {
           enabled: true,
           status: "connected",
           model: "",
+          toolApprovalMode: "",
           workspaceRoot: "",
           credential: {
             appId: "cli_mock_lark",
@@ -720,6 +722,7 @@ function makeMockApp(): AppBindings {
           enabled: true,
           status: "connected",
           model: "",
+          toolApprovalMode: "",
           workspaceRoot: "",
           credential: {
             appId: "",
@@ -2152,6 +2155,7 @@ function makeMockApp(): AppBindings {
             enabled: true,
             status: "connected",
             model: "",
+            toolApprovalMode: "",
             workspaceRoot: "",
             credential: {
               appId: provider === "feishu" ? "cli_mock" : "",

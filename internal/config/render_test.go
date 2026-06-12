@@ -52,16 +52,18 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	orig.Skills.DisabledSkills = []string{"review", "explore"}
 	orig.Skills.MaxDepth = 2
 	orig.Codegraph = CodegraphConfig{Enabled: true, AutoInstall: false, Path: "/opt/codegraph", Tier: "background"}
+	orig.Bot.ToolApprovalMode = "auto"
 	orig.Bot.Connections = []BotConnectionConfig{{
-		ID:            "feishu-lark",
-		Provider:      "feishu",
-		Domain:        "lark",
-		Label:         "Lark",
-		Enabled:       true,
-		Status:        "connected",
-		Model:         "deepseek-pro",
-		WorkspaceRoot: "/tmp/reasonix-bot",
-		Credential:    BotConnectionCredential{AppID: "cli_lark", AppSecretEnv: "LARK_BOT_APP_SECRET"},
+		ID:               "feishu-lark",
+		Provider:         "feishu",
+		Domain:           "lark",
+		Label:            "Lark",
+		Enabled:          true,
+		Status:           "connected",
+		Model:            "deepseek-pro",
+		ToolApprovalMode: "yolo",
+		WorkspaceRoot:    "/tmp/reasonix-bot",
+		Credential:       BotConnectionCredential{AppID: "cli_lark", AppSecretEnv: "LARK_BOT_APP_SECRET"},
 		SessionMappings: []BotConnectionSessionMapping{{
 			RemoteID:      "ou_123",
 			SessionID:     "topic:topic_bot",
@@ -144,6 +146,9 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	}
 	if len(got.Bot.Connections) != 1 || got.Bot.Connections[0].Model != "deepseek-pro" || got.Bot.Connections[0].WorkspaceRoot != "/tmp/reasonix-bot" {
 		t.Errorf("bot connection not preserved: %+v", got.Bot.Connections)
+	}
+	if got.Bot.ToolApprovalMode != "auto" || got.Bot.Connections[0].ToolApprovalMode != "yolo" {
+		t.Errorf("bot tool approval mode not preserved: bot=%q connection=%q", got.Bot.ToolApprovalMode, got.Bot.Connections[0].ToolApprovalMode)
 	}
 	if len(got.Bot.Connections[0].SessionMappings) != 1 || got.Bot.Connections[0].SessionMappings[0].Scope != "project" || got.Bot.Connections[0].SessionMappings[0].WorkspaceRoot != "/tmp/reasonix-bot" {
 		t.Errorf("bot session mapping scope not preserved: %+v", got.Bot.Connections[0].SessionMappings)

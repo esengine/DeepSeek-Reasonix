@@ -35,19 +35,20 @@ type BotConnectionSessionMappingView struct {
 }
 
 type BotConnectionView struct {
-	ID              string                            `json:"id"`
-	Provider        string                            `json:"provider"`
-	Domain          string                            `json:"domain"`
-	Label           string                            `json:"label"`
-	Enabled         bool                              `json:"enabled"`
-	Status          string                            `json:"status"`
-	Model           string                            `json:"model"`
-	WorkspaceRoot   string                            `json:"workspaceRoot"`
-	Credential      BotConnectionCredentialView       `json:"credential"`
-	SessionMappings []BotConnectionSessionMappingView `json:"sessionMappings"`
-	LastError       string                            `json:"lastError"`
-	CreatedAt       string                            `json:"createdAt"`
-	UpdatedAt       string                            `json:"updatedAt"`
+	ID               string                            `json:"id"`
+	Provider         string                            `json:"provider"`
+	Domain           string                            `json:"domain"`
+	Label            string                            `json:"label"`
+	Enabled          bool                              `json:"enabled"`
+	Status           string                            `json:"status"`
+	Model            string                            `json:"model"`
+	ToolApprovalMode string                            `json:"toolApprovalMode"`
+	WorkspaceRoot    string                            `json:"workspaceRoot"`
+	Credential       BotConnectionCredentialView       `json:"credential"`
+	SessionMappings  []BotConnectionSessionMappingView `json:"sessionMappings"`
+	LastError        string                            `json:"lastError"`
+	CreatedAt        string                            `json:"createdAt"`
+	UpdatedAt        string                            `json:"updatedAt"`
 }
 
 type BotInstallStartResult struct {
@@ -515,7 +516,7 @@ func postFeishuInstallFormResult(base string, body map[string]string) (map[strin
 func botConnectionView(conn config.BotConnectionConfig) BotConnectionView {
 	return BotConnectionView{
 		ID: conn.ID, Provider: conn.Provider, Domain: conn.Domain, Label: conn.Label, Enabled: conn.Enabled, Status: conn.Status,
-		Model: conn.Model, WorkspaceRoot: conn.WorkspaceRoot,
+		Model: conn.Model, ToolApprovalMode: normalizeBotConnectionToolApprovalMode(conn.ToolApprovalMode), WorkspaceRoot: conn.WorkspaceRoot,
 		Credential: BotConnectionCredentialView{
 			AppID: conn.Credential.AppID, AppSecretEnv: conn.Credential.AppSecretEnv, AccountID: conn.Credential.AccountID, TokenEnv: conn.Credential.TokenEnv,
 			SecretSet: botCredentialSecretSet(conn),
@@ -575,14 +576,15 @@ func botConnectionViews(connections []config.BotConnectionConfig) []BotConnectio
 
 func botConnectionConfig(view BotConnectionView) config.BotConnectionConfig {
 	return config.BotConnectionConfig{
-		ID:            strings.TrimSpace(view.ID),
-		Provider:      strings.TrimSpace(view.Provider),
-		Domain:        strings.TrimSpace(view.Domain),
-		Label:         strings.TrimSpace(view.Label),
-		Enabled:       view.Enabled,
-		Status:        strings.TrimSpace(view.Status),
-		Model:         strings.TrimSpace(view.Model),
-		WorkspaceRoot: strings.TrimSpace(view.WorkspaceRoot),
+		ID:               strings.TrimSpace(view.ID),
+		Provider:         strings.TrimSpace(view.Provider),
+		Domain:           strings.TrimSpace(view.Domain),
+		Label:            strings.TrimSpace(view.Label),
+		Enabled:          view.Enabled,
+		Status:           strings.TrimSpace(view.Status),
+		Model:            strings.TrimSpace(view.Model),
+		ToolApprovalMode: normalizeBotConnectionToolApprovalMode(view.ToolApprovalMode),
+		WorkspaceRoot:    strings.TrimSpace(view.WorkspaceRoot),
 		Credential: config.BotConnectionCredential{
 			AppID:        strings.TrimSpace(view.Credential.AppID),
 			AppSecretEnv: strings.TrimSpace(view.Credential.AppSecretEnv),
@@ -593,6 +595,19 @@ func botConnectionConfig(view BotConnectionView) config.BotConnectionConfig {
 		LastError:       strings.TrimSpace(view.LastError),
 		CreatedAt:       strings.TrimSpace(view.CreatedAt),
 		UpdatedAt:       strings.TrimSpace(view.UpdatedAt),
+	}
+}
+
+func normalizeBotConnectionToolApprovalMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "ask":
+		return "ask"
+	case "auto":
+		return "auto"
+	case "yolo", "full", "full-access", "bypass":
+		return "yolo"
+	default:
+		return ""
 	}
 }
 

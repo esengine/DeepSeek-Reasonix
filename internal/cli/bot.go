@@ -96,6 +96,7 @@ func botStart(args []string, version string) int {
 	// 构建网关配置
 	gwCfg := bot.GatewayConfig{
 		Model:              modelName,
+		ToolApprovalMode:   cfg.Bot.ToolApprovalMode,
 		MaxSteps:           cfg.Bot.MaxSteps,
 		WorkspaceRoot:      workspaceRoot,
 		Channels:           botruntime.ChannelConfigs(cfg.Bot.Connections, *model == "", *dir == ""),
