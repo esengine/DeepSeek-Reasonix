@@ -1843,8 +1843,19 @@ func (e *ProviderEntry) Configured() bool {
 
 // ResolveSystemPrompt returns the system prompt, reading system_prompt_file if set.
 func (c *Config) ResolveSystemPrompt() (string, error) {
+	return c.ResolveSystemPromptForRoot(".")
+}
+
+// ResolveSystemPromptForRoot is like ResolveSystemPrompt but resolves a relative
+// system_prompt_file against root. Desktop tabs pass their workspace root here so
+// prompt files are project-scoped even when the process cwd is elsewhere.
+func (c *Config) ResolveSystemPromptForRoot(root string) (string, error) {
 	if c.Agent.SystemPromptFile != "" {
-		b, err := os.ReadFile(c.Agent.SystemPromptFile)
+		path := c.Agent.SystemPromptFile
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(resolveRoot(root), path)
+		}
+		b, err := os.ReadFile(path)
 		if err != nil {
 			return "", fmt.Errorf("system_prompt_file: %w", err)
 		}
