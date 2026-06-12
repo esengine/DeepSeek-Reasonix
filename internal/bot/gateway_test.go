@@ -303,6 +303,54 @@ func TestGatewayNormalizesNumericApprovalShortcutsOnlyWhenPending(t *testing.T) 
 	}
 }
 
+func TestGatewayNumericApprovalShortcutActiveWithoutPendingSendsGuidance(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	gw := NewGateway(GatewayConfig{Allowlist: AllowlistConfig{AllowAll: true}}, nil, logger)
+	adapter := newFakeAdapter(PlatformWeixin, "fake-weixin")
+	binding := AdapterBinding{ID: "weixin-weixin", Domain: "weixin", Platform: PlatformWeixin, Adapter: adapter}
+	msg := InboundMessage{
+		Platform:     PlatformWeixin,
+		ConnectionID: "weixin-weixin",
+		Domain:       "weixin",
+		ChatType:     ChatDM,
+		ChatID:       "chat",
+		UserID:       "user",
+		Text:         "seed",
+	}
+	key := BuildSessionKey(msg.Session())
+	if acquired, _ := gw.sessions.TryAcquire(key, msg); !acquired {
+		t.Fatal("failed to mark session active")
+	}
+
+	msg.Text = "1"
+	gw.handleMessage(context.Background(), binding, msg)
+
+	sent := adapter.sentMessages()
+	if len(sent) != 1 {
+		t.Fatalf("sent count = %d, want 1", len(sent))
+	}
+	if !strings.Contains(sent[0].Text, "没有找到可匹配的待审批操作") {
+		t.Fatalf("sent text = %q, want pending approval guidance", sent[0].Text)
+	}
+}
+
+func TestGatewayApproveWithoutSessionSendsGuidance(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	gw := NewGateway(GatewayConfig{}, nil, logger)
+	adapter := newFakeAdapter(PlatformWeixin, "fake-weixin")
+	msg := InboundMessage{ChatType: ChatDM, ChatID: "chat", UserID: "user", Text: "/approve 1"}
+
+	gw.handleSlashCommand(context.Background(), adapter, "missing-session", msg)
+
+	sent := adapter.sentMessages()
+	if len(sent) != 1 {
+		t.Fatalf("sent count = %d, want 1", len(sent))
+	}
+	if !strings.Contains(sent[0].Text, "没有找到当前会话中的待审批操作") {
+		t.Fatalf("sent text = %q, want missing approval guidance", sent[0].Text)
+	}
+}
+
 func TestGatewayAddsPendingReactionWhenAdapterSupportsIt(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	gw := NewGateway(GatewayConfig{}, nil, logger)

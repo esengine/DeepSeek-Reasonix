@@ -280,6 +280,9 @@ func (gw *BotGateway) handleMessage(ctx context.Context, binding AdapterBinding,
 
 	if normalized, ok := gw.normalizeApprovalShortcut(key, msg.Text); ok {
 		msg.Text = normalized
+	} else if _, ok := approvalShortcutCommand(msg.Text); ok && gw.sessions.IsActive(key) {
+		_ = gw.sendText(ctx, binding.Adapter, msg, "没有找到可匹配的待审批操作。请重新触发一次操作后回复 1/2，或按审批消息中的 ID 使用 /approve <id> 或 /deny <id>。")
+		return
 	}
 
 	// 斜杠命令处理
@@ -346,13 +349,8 @@ func chatUsesGroupAllowlist(chatType ChatType) bool {
 }
 
 func (gw *BotGateway) normalizeApprovalShortcut(key, text string) (string, bool) {
-	var command string
-	switch strings.ToLower(strings.TrimSpace(text)) {
-	case "1", "y", "yes", "ok", "同意", "批准", "允许", "允许一次":
-		command = "/approve"
-	case "2", "0", "n", "no", "deny", "拒绝":
-		command = "/deny"
-	default:
+	command, ok := approvalShortcutCommand(text)
+	if !ok {
 		return "", false
 	}
 	approvalID := gw.currentPendingApprovalID(key)
@@ -360,6 +358,17 @@ func (gw *BotGateway) normalizeApprovalShortcut(key, text string) (string, bool)
 		return "", false
 	}
 	return command + " " + approvalID, true
+}
+
+func approvalShortcutCommand(text string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(text)) {
+	case "1", "y", "yes", "ok", "同意", "批准", "允许", "允许一次":
+		return "/approve", true
+	case "2", "0", "n", "no", "deny", "拒绝":
+		return "/deny", true
+	default:
+		return "", false
+	}
 }
 
 func (gw *BotGateway) currentPendingApprovalID(key string) string {
@@ -434,10 +443,12 @@ func (gw *BotGateway) handleSlashCommand(ctx context.Context, adapter Adapter, k
 		gw.mu.Lock()
 		state, ok := gw.controllers[key]
 		gw.mu.Unlock()
-		if ok {
+		if ok && state.ctrl != nil {
 			state.ctrl.Approve(parts[1], true, false, false)
 			gw.forgetPendingApproval(key, parts[1])
 			_ = gw.sendText(ctx, adapter, msg, "已批准。")
+		} else {
+			_ = gw.sendText(ctx, adapter, msg, "没有找到当前会话中的待审批操作，请重新触发一次操作。")
 		}
 
 	case strings.HasPrefix(msg.Text, "/deny"):
@@ -449,10 +460,12 @@ func (gw *BotGateway) handleSlashCommand(ctx context.Context, adapter Adapter, k
 		gw.mu.Lock()
 		state, ok := gw.controllers[key]
 		gw.mu.Unlock()
-		if ok {
+		if ok && state.ctrl != nil {
 			state.ctrl.Approve(parts[1], false, false, false)
 			gw.forgetPendingApproval(key, parts[1])
 			_ = gw.sendText(ctx, adapter, msg, "已拒绝。")
+		} else {
+			_ = gw.sendText(ctx, adapter, msg, "没有找到当前会话中的待审批操作，请重新触发一次操作。")
 		}
 
 	case strings.HasPrefix(msg.Text, "/answer"):
