@@ -680,32 +680,11 @@ function TabHotkeys({
 }
 
 /** Toggle YOLO tool-approval mode with Cmd+Y / Ctrl+Y. */
-function YoloToggleHotkeys({
-  mode,
-  autoApproveTools,
-  onApply,
-}: {
-  mode: string;
-  autoApproveTools?: boolean | null;
-  onApply: (m: ToolApprovalMode) => void;
-}) {
-  const modeRef = useRef(mode);
-  modeRef.current = mode;
-  const autoRef = useRef(autoApproveTools);
-  autoRef.current = autoApproveTools;
-  const onApplyRef = useRef(onApply);
-  onApplyRef.current = onApply;
-
+function YoloToggleHotkeys({ onToggle }: { onToggle: () => void }) {
   useGlobalHotkey("shortcuts.yoloToggle", (e) => {
     e.preventDefault();
-    const current: ToolApprovalMode = modeRef.current.includes("yolo")
-      ? "yolo"
-      : autoRef.current
-        ? "auto"
-        : "ask";
-    const { mode: nextMode } = toggleYoloToolApprovalMode(current);
-    onApplyRef.current(nextMode);
-  }, []);
+    onToggle();
+  }, [onToggle]);
   return null;
 }
 
@@ -2239,11 +2218,7 @@ export default function App() {
       activeTabId={activeTabId}
       onCloseTab={(id) => void closeTab(id)}
     />
-    <YoloToggleHotkeys
-      mode={composerProfile.mode}
-      autoApproveTools={toolApprovalMode === "auto" || toolApprovalMode === "yolo" ? true : toolApprovalMode === "ask" ? false : undefined}
-      onApply={(m) => void setControllerToolApprovalMode(m)}
-    />
+    <YoloToggleHotkeys onToggle={toggleYoloApprovalMode} />
     <div ref={appRef} className={["app", `app--${desktopPlatform}`, browserPreviewChrome ? "app--browser-preview" : ""].filter(Boolean).join(" ")}>
       <div
         className={[
