@@ -19577,18 +19577,18 @@ a[href] {
 .shortcuts-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
 }
 .shortcuts-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 10px 14px;
-  border-radius: var(--radius);
-  background: var(--bg-elev-2);
-  border: 1px solid var(--border);
+  padding: 12px 0;
   min-height: 44px;
+  border-bottom: 1px solid var(--border);
+}
+.shortcuts-row:last-child {
+  border-bottom: none;
 }
 .shortcuts-info {
   display: flex;
