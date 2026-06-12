@@ -61,6 +61,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	}
 	protocol, _ := cfg.Extra["reasoning_protocol"].(string)
 	protocol = normalizeReasoningProtocol(protocol)
+	vision, _ := cfg.Extra["vision"].(bool)
 	deepseek := protocol == "deepseek" || (protocol == "" && IsDeepSeek(cfg.BaseURL))
 	minimax := protocol == "" && IsMiniMax(cfg.BaseURL)
 	switch {
@@ -111,6 +112,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		model:       cfg.Model,
 		deepseek:    deepseek,
 		minimax:     minimax,
+		vision:      vision,
 		effort:      effort,
 		http:        httpClient,
 		idleTimeout: defaultStreamIdleTimeout,
@@ -136,6 +138,7 @@ type client struct {
 	http        *http.Client
 	deepseek    bool
 	minimax     bool          // true for api.minimaxi.com — emits MiniMax-M3's thinking knob instead of reasoning_effort
+	vision      bool          // model accepts image input — embed attached images as image_url parts
 	effort      string        // reasoning_effort for OpenAI; thinking.type for MiniMax; "" = auto/provider default
 	idleTimeout time.Duration // SSE stall watchdog window; defaultStreamIdleTimeout unless a test overrides
 	authed      atomic.Bool   // a request has succeeded — gate transient-401 retry
@@ -262,9 +265,11 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 			wire.Function.Arguments = tc.Arguments
 			cm.ToolCalls = append(cm.ToolCalls, wire)
 		}
-		if m.Role != provider.RoleAssistant || len(cm.ToolCalls) == 0 || m.Content != "" {
-			content := m.Content
-			cm.Content = &content
+		switch {
+		case c.vision && m.Role == provider.RoleUser && len(m.Images) > 0:
+			cm.Content = imageContentParts(m.Content, m.Images)
+		case m.Role != provider.RoleAssistant || len(cm.ToolCalls) == 0 || m.Content != "":
+			cm.Content = m.Content
 		}
 		msgs[i] = cm
 	}
@@ -531,14 +536,35 @@ type chatMessage struct {
 	Role string `json:"role"`
 	// content is always present (never omitted): DeepSeek's strict deserializer
 	// rejects a message missing the field. A pure tool_calls assistant turn
-	// serializes as null (OpenAI-spec, and what strict clones expect); every
-	// other role/message serializes as a string, empty included — null is
-	// rejected by some backends for a tool message.
-	Content          *string        `json:"content"`
+	// serializes as null (nil here); a string for every other text message
+	// (empty included — null is rejected by some backends for a tool message);
+	// and a []chatContentPart array for a vision user turn carrying images.
+	Content          any            `json:"content"`
 	ReasoningContent string         `json:"reasoning_content,omitempty"`
 	ToolCalls        []chatToolCall `json:"tool_calls,omitempty"`
 	ToolCallID       string         `json:"tool_call_id,omitempty"`
 	Name             string         `json:"name,omitempty"`
+}
+
+type chatContentPart struct {
+	Type     string        `json:"type"`
+	Text     string        `json:"text,omitempty"`
+	ImageURL *chatImageURL `json:"image_url,omitempty"`
+}
+
+type chatImageURL struct {
+	URL string `json:"url"`
+}
+
+func imageContentParts(text string, images []string) []chatContentPart {
+	parts := make([]chatContentPart, 0, len(images)+1)
+	if text != "" {
+		parts = append(parts, chatContentPart{Type: "text", Text: text})
+	}
+	for _, url := range images {
+		parts = append(parts, chatContentPart{Type: "image_url", ImageURL: &chatImageURL{URL: url}})
+	}
+	return parts
 }
 
 type chatTool struct {
