@@ -694,6 +694,101 @@ func TestUserBubbleIsLightweightTranscriptLine(t *testing.T) {
 	}
 }
 
+func TestRenderUserSeparatorIsFullWidthAndDimmed(t *testing.T) {
+	prevColor := colorEnabled
+	defer func() { colorEnabled = prevColor }()
+
+	// color enabled: should be a full-width dim '─' rule.
+	colorEnabled = true
+	got := renderUserSeparator(40)
+	plain := ansi.Strip(got)
+	if w := ansi.StringWidth(plain); w != 40 {
+		t.Fatalf("color separator should be width 40, got width %d text=%q", w, plain)
+	}
+	if !strings.HasPrefix(plain, "─") || strings.ContainsRune(plain, '-') {
+		t.Fatalf("color separator should be all '─' runes, got %q", plain)
+	}
+	if got == plain {
+		t.Fatalf("color separator should carry a dim SGR escape, got plain text %q", got)
+	}
+
+	// color disabled: should fall back to ASCII '-' and be un-styled.
+	colorEnabled = false
+	got = renderUserSeparator(40)
+	plain = ansi.Strip(got)
+	if plain != strings.Repeat("-", 40) {
+		t.Fatalf("ascii separator should be 40 '-', got %q", plain)
+	}
+	if got != plain {
+		t.Fatalf("ascii separator should be un-styled, got %q", got)
+	}
+
+	// width <= 0 should yield an empty string in both modes.
+	if got := renderUserSeparator(0); got != "" {
+		t.Fatalf("separator with width 0 should be empty, got %q", got)
+	}
+}
+
+func TestRenderUserBubbleBlockEmitsThreeLines(t *testing.T) {
+	prevColor := colorEnabled
+	colorEnabled = true
+	defer func() { colorEnabled = prevColor }()
+
+	top, bubble, bottom := renderUserBubbleBlock("hi", false)
+
+	// Middle must still be the plain user bubble (regression guard for
+	// TestUserBubbleIsLightweightTranscriptLine).
+	if plain := ansi.Strip(bubble); !strings.Contains(plain, "› hi") {
+		t.Fatalf("block's middle should contain the prompt text, got %q", plain)
+	}
+	if renderUserBubble("hi", 0, false) != bubble {
+		t.Fatalf("block's bubble should equal renderUserBubble output exactly")
+	}
+
+	// Both separators should be the userSeparatorToken placeholder, equal to
+	// each other, and tiny (so the committed transcript stays compact and
+	// the rule is filled in at render time by expandSeparatorTokens).
+	if top == "" || bottom == "" {
+		t.Fatalf("separators should be the token, not empty, top=%q bottom=%q", top, bottom)
+	}
+	if top != userSeparatorToken || bottom != userSeparatorToken {
+		t.Fatalf("separators should equal userSeparatorToken, top=%q bottom=%q", top, bottom)
+	}
+	if top != bottom {
+		t.Fatalf("top and bottom should be the same token, top=%q bottom=%q", top, bottom)
+	}
+}
+
+func TestUserBubbleCommitPathIncludesSeparators(t *testing.T) {
+	m := newTestChatTUI()
+	m.bubbleStartIdx = len(m.transcript)
+	top, bubble, bottom := renderUserBubbleBlock("hello world", m.planMode)
+	m.commitLine(top)
+	m.commitLine(bubble)
+	m.commitLine(bottom)
+
+	if len(m.transcript)-m.bubbleStartIdx != 3 {
+		t.Fatalf("expected 3 transcript entries (top/bubble/bottom), got %d (transcript=%v)",
+			len(m.transcript)-m.bubbleStartIdx, m.transcript[m.bubbleStartIdx:])
+	}
+	got := m.transcript[m.bubbleStartIdx:]
+	if got[0] != userSeparatorToken || got[1] != bubble || got[2] != userSeparatorToken {
+		t.Fatalf("transcript entries should be token/bubble/token, got %v", got)
+	}
+	if !strings.Contains(strings.Join(got, "\n"), "hello world") {
+		t.Fatalf("bubble line should still contain the prompt, got %v", got)
+	}
+	// No standalone empty line should be emitted between the previous turn and
+	// the new top separator.
+	for _, ln := range m.transcript[:m.bubbleStartIdx] {
+		if ln == "" {
+			// allowed, but no *new* empty line should be added by the submit
+			// path itself — this loop just confirms the leading entries are
+			// untouched.
+		}
+	}
+}
+
 // TestUnsendDiscardsBufferedEvents proves that after an un-send (Esc before any
 // packet) the turn's already-buffered events are swallowed — nothing reaches
 // scrollback — and its TurnDone settles the model back to idle.

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"charm.land/bubbles/v2/textarea"
+	"github.com/charmbracelet/x/ansi"
 
 	"reasonix/internal/event"
 )
@@ -418,5 +419,100 @@ func TestReasoningViewBounded(t *testing.T) {
 	}
 	if c := strings.Count(m.transcript[m.reasoningTextIdx], "\n") + 1; c > reasoningTailLines {
 		t.Fatalf("live reasoning block kept %d lines, want <= %d", c, reasoningTailLines)
+	}
+}
+
+// TestUserBubbleBlockScrollsAsThreeLines proves the user-bubble separator
+// token above and below a user bubble is committed as its own transcript
+// entry, expanded by expandSeparatorTokens to a real rule at the *current*
+// content width, and then wrapped by wrapTranscript into the viewport. The
+// resulting top/bottom lines must be exactly content-width cells wide (not
+// the snapshot width at commit time), and the middle line must contain the
+// user prompt.
+func TestUserBubbleBlockScrollsAsThreeLines(t *testing.T) {
+	prevColor := colorEnabled
+	colorEnabled = true
+	defer func() { colorEnabled = prevColor }()
+
+	const cw = 60
+	top, bubble, bottom := renderUserBubbleBlock("hi", false)
+	if top == "" || bottom == "" {
+		t.Fatalf("separators should be the non-empty token, got top=%q bottom=%q", top, bottom)
+	}
+
+	// Simulate the same pipeline the viewport runs: expand tokens to current
+	// content width, then wrap the joined transcript to that width.
+	expanded := expandSeparatorTokens([]string{top, bubble, bottom}, cw)
+	joined := strings.Join(expanded, "\n")
+	wrapped := wrapTranscript(joined, cw)
+	lines := strings.Split(wrapped, "\n")
+
+	if len(lines) < 3 {
+		t.Fatalf("expected at least 3 wrapped lines, got %d:\n%s", len(lines), wrapped)
+	}
+	// Strip ANSI and trailing spaces before width checks.
+	strip := func(s string) string { return strings.TrimRight(ansi.Strip(s), " ") }
+	if w := ansi.StringWidth(strip(lines[0])); w != cw {
+		t.Fatalf("top separator should be width %d, got %d (line=%q)", cw, w, strip(lines[0]))
+	}
+	if w := ansi.StringWidth(strip(lines[len(lines)-1])); w != cw {
+		t.Fatalf("bottom separator should be width %d, got %d (line=%q)", cw, w, strip(lines[len(lines)-1]))
+	}
+	// Middle line must contain the user prompt text.
+	if !strings.Contains(strip(lines[1]), "› hi") {
+		t.Fatalf("middle line should contain the prompt, got %q", strip(lines[1]))
+	}
+}
+
+// TestSeparatorTokenAdaptsToResize proves the user-bubble separator rule is
+// expanded to the *current* viewport width on every wrap. The same token in
+// the same transcript entry must render as a 60-cell rule at width 60 and
+// as a 100-cell rule at width 100 — no re-commit required when the terminal
+// is resized.
+func TestSeparatorTokenAdaptsToResize(t *testing.T) {
+	prevColor := colorEnabled
+	colorEnabled = true
+	defer func() { colorEnabled = prevColor }()
+
+	top, bubble, bottom := renderUserBubbleBlock("hi", false)
+
+	strip := func(s string) string { return strings.TrimRight(ansi.Strip(s), " ") }
+	renderAt := func(width int) (topLine, midLine, botLine string) {
+		expanded := expandSeparatorTokens([]string{top, bubble, bottom}, width)
+		wrapped := wrapTranscript(strings.Join(expanded, "\n"), width)
+		lines := strings.Split(wrapped, "\n")
+		return lines[0], lines[1], lines[len(lines)-1]
+	}
+
+	t60, mid, b60 := renderAt(60)
+	if w := ansi.StringWidth(strip(t60)); w != 60 {
+		t.Fatalf("top separator at width 60 should be 60 cells, got %d (%q)", w, strip(t60))
+	}
+	if w := ansi.StringWidth(strip(b60)); w != 60 {
+		t.Fatalf("bottom separator at width 60 should be 60 cells, got %d (%q)", w, strip(b60))
+	}
+	if !strings.Contains(strip(mid), "› hi") {
+		t.Fatalf("middle line should keep the prompt at width 60, got %q", strip(mid))
+	}
+
+	t100, _, b100 := renderAt(100)
+	if w := ansi.StringWidth(strip(t100)); w != 100 {
+		t.Fatalf("top separator at width 100 should be 100 cells, got %d (%q)", w, strip(t100))
+	}
+	if w := ansi.StringWidth(strip(b100)); w != 100 {
+		t.Fatalf("bottom separator at width 100 should be 100 cells, got %d (%q)", w, strip(b100))
+	}
+	// Sanity: the wider render should actually contain more '─' runes than
+	// the narrow one — guards against a regression where the expander
+	// accidentally caches the rule.
+	if cnt60, cnt100 := strings.Count(strip(t60), "─"), strings.Count(strip(t100), "─"); cnt100 <= cnt60 {
+		t.Fatalf("resized rule should be longer: at width 60 got %d '─', at width 100 got %d", cnt60, cnt100)
+	}
+
+	// And width<=0 should collapse the token to nothing — the rule should
+	// not appear at all in the rendered output.
+	expanded := expandSeparatorTokens([]string{top, bubble, bottom}, 0)
+	if strings.Contains(strings.Join(expanded, "\n"), "─") {
+		t.Fatalf("width<=0 should collapse the token to empty, got %q", strings.Join(expanded, "\n"))
 	}
 }

@@ -22,6 +22,62 @@ func wrapTranscript(s string, width int) string {
 	return lipgloss.NewStyle().Width(width).Render(s)
 }
 
+// renderUserSeparator returns a full-width dim horizontal rule used as a
+// scroll anchor above and below a committed user bubble. The rule is rendered
+// as a real transcript line (not a viewport background) so it scrolls with
+// the content, participates in wrapTranscript, and re-appears in resumed
+// sessions via the replay path. ASCII '-' is the no-color fallback so the
+// rule remains visible when the terminal is monochrome — matching the
+// conventions in md.go (markdown hr) and chooser.go (picker separator).
+func renderUserSeparator(width int) string {
+	if width <= 0 {
+		return ""
+	}
+	ch := "─"
+	if !colorEnabled {
+		ch = "-"
+	}
+	line := strings.Repeat(ch, width)
+	if colorEnabled {
+		line = dim(line)
+	}
+	return line
+}
+
+// userSeparatorToken is a tiny placeholder committed to the transcript in
+// place of an actual user-bubble separator. It is replaced by a real
+// renderUserSeparator(width) call at render time, so the rule always spans
+// the *current* viewport width — surviving terminal resizes, replays at a
+// different width, and any code path that reads back historical transcript
+// entries. The NUL-byte framing + a Private-Use-Area code point keeps the
+// token visually invisible and extremely unlikely to appear in real content.
+const userSeparatorToken = "\x00\uE000"
+
+// renderUserSeparatorToken returns the placeholder that should be committed
+// to the transcript in place of a real separator. Pair with
+// expandSeparatorTokens at render time.
+func renderUserSeparatorToken() string { return userSeparatorToken }
+
+// expandSeparatorTokens walks transcript entries and replaces every
+// occurrence of userSeparatorToken with a freshly rendered renderUserSeparator
+// of the given width. width <= 0 collapses the token to an empty string,
+// matching renderUserSeparator's own degradation. Entries with no token are
+// returned untouched, so non-separator lines pay no per-frame cost.
+func expandSeparatorTokens(lines []string, width int) []string {
+	if len(lines) == 0 {
+		return lines
+	}
+	out := make([]string, len(lines))
+	sep := renderUserSeparator(width)
+	for i, ln := range lines {
+		for strings.Contains(ln, userSeparatorToken) {
+			ln = strings.Replace(ln, userSeparatorToken, sep, 1)
+		}
+		out[i] = ln
+	}
+	return out
+}
+
 // clipboardWriteAll is the platform clipboard writer; a var so tests can force
 // the failure path (the tmux / SSH scenario) without a real display server.
 var clipboardWriteAll = clipboard.WriteAll

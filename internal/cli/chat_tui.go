@@ -675,7 +675,12 @@ func (m chatTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Re-feed only when the content grew or the width changed (re-wrapping is
 	// the expensive part); a bare scroll or spinner tick keeps the offset.
 	if len(cm.transcript) != prevLines || cm.width != prevWidth || cm.transcriptDirty {
-		wrapped := wrapTranscript(strings.Join(cm.transcript, "\n"), contentW)
+		// Expand any user-bubble separator tokens to a freshly rendered rule
+		// of the *current* content width before wrapping. That way the rule
+		// always spans the visible area — terminal resizes, replays at a
+		// different width, and backfill all pick up the new width for free.
+		expanded := expandSeparatorTokens(cm.transcript, contentW)
+		wrapped := wrapTranscript(strings.Join(expanded, "\n"), contentW)
 		cm.viewport.SetContent(wrapped)
 		cm.wrappedLines = strings.Split(wrapped, "\n")
 		if wasAtBottom {
@@ -3177,8 +3182,14 @@ func (m *chatTUI) startTurnWithRaw(sent, displayed, restore, raw string) tea.Cmd
 	m.pendingRestore = restore
 	m.pendingPastes = m.pasteLabelsIn(restore)
 	m.bubbleStartIdx = len(m.transcript)
-	m.commitLine("") // blank line separating turns
-	m.commitLine(renderUserBubble(displayed, m.width, m.planMode))
+	// Commit the user bubble wrapped in a user-bubble separator token above
+	// and below (renderUserBubbleBlock). The token is expanded to a
+	// viewport-width dim rule by expandSeparatorTokens at render time, so
+	// the rule follows terminal resizes without re-committing.
+	top, bubble, bottom := renderUserBubbleBlock(displayed, m.planMode)
+	m.commitLine(top)
+	m.commitLine(bubble)
+	m.commitLine(bottom)
 	m.bubblePending = true
 	m.turnDiscarded = false
 
@@ -3765,7 +3776,8 @@ func replaySectionsFor(history []provider.Message, width int, renderer *mdRender
 		switch m.Role {
 		case provider.RoleUser:
 			content := control.StripComposePrefixes(m.Content)
-			out = append(out, renderUserBubble(content, width, false)+"\n\n")
+			top, bubble, bottom := renderUserBubbleBlock(content, false)
+			out = append(out, top+"\n", bubble+"\n", bottom+"\n")
 		case provider.RoleAssistant:
 			body := strings.TrimSpace(m.Content)
 			if body == "" {
@@ -3814,6 +3826,24 @@ func renderUserBubble(line string, width int, planMode bool) string {
 		return "│ " + prefix + line
 	}
 	return "  " + accent(prefix+line)
+}
+
+// renderUserBubbleBlock wraps renderUserBubble with a user-bubble separator
+// token above and below the bubble. The separators are committed as
+// userSeparatorToken (NOT pre-rendered rules) so they get expanded to the
+// current viewport width at render time by expandSeparatorTokens — that
+// keeps the rule aligned with the terminal on resize, replay, and any other
+// rewrap. The three strings are returned separately (not joined with \n) so
+// the caller can commitLine each one — that way the rule becomes its own
+// transcript entry and scrolls with the content rather than being painted
+// into the viewport background. renderUserBubble is reused unchanged to
+// preserve its existing contract (see TestUserBubbleIsLightweightTranscriptLine
+// in chat_tui_test.go).
+func renderUserBubbleBlock(line string, planMode bool) (top, bubble, bottom string) {
+	bubble = renderUserBubble(line, 0, planMode)
+	top = renderUserSeparatorToken()
+	bottom = renderUserSeparatorToken()
+	return top, bubble, bottom
 }
 
 var cliImageRefRe = regexp.MustCompile(`(?:^|\s)@\.reasonix/attachments/clipboard-\d{8}-\d{6}\.\d+(?:-(?:\d{6}|[a-f0-9]{8}))?\.(?:png|jpg|jpeg|gif|webp)`)
