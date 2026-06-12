@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import App from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { installGlobalCrashHandlers } from "./lib/crash";
+import { installBreadcrumbConsoleHook } from "./lib/breadcrumbs";
 import { installMessageSelectionCopy } from "./lib/messageSelectionCopy";
 import { LocaleProvider } from "./lib/i18n";
 import { ToastProvider } from "./lib/toast";
@@ -12,8 +13,9 @@ import { initTheme } from "./lib/theme";
 import "./styles.css";
 
 // Install first so startup/runtime failures paint a useful error instead of a
-// featureless webview background.
+// featureless webview background, with the recent console trail attached.
 installGlobalCrashHandlers();
+installBreadcrumbConsoleHook();
 
 // Apply the saved appearance (auto/light/dark) before the first paint.
 initTheme();

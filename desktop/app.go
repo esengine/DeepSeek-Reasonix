@@ -279,6 +279,7 @@ func (a *App) startup(ctx context.Context) {
 	go a.restoreOrBuildTabs()
 	go a.sendStartupPing()
 	go a.flushMetrics()
+	go a.flushPendingCrash()
 }
 
 func (a *App) beforeClose(ctx context.Context) bool {
@@ -362,6 +363,7 @@ func backgroundRestoreShouldMaximise(goos string, wasMaximised bool) bool {
 // restoreOrBuildTabs restores the tabs from the last session, or creates a
 // default Global tab on first launch.
 func (a *App) restoreOrBuildTabs() {
+	defer a.recoverToPending("restoreOrBuildTabs")
 	ctx := a.ctx
 	ensureWorkspace()
 

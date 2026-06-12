@@ -898,6 +898,7 @@ func (a *App) startTabControllerBuild(tab *WorkspaceTab) {
 }
 
 func (a *App) buildTabController(tab *WorkspaceTab) {
+	defer a.recoverToPending("buildTabController")
 	wailsCtx := a.ctx
 	buildCtx := a.bootContext()
 
@@ -1191,6 +1192,7 @@ func (a *App) scheduleTabSnapshot(tabID string) {
 }
 
 func (a *App) tabSnapshotLoop(tab *WorkspaceTab) {
+	defer a.recoverToPending("tabSnapshotLoop")
 	for {
 		a.mu.RLock()
 		ctrl := tab.Ctrl
