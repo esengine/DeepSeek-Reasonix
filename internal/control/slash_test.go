@@ -1,9 +1,11 @@
 package control
 
 import (
+	"strings"
 	"testing"
 
 	"reasonix/internal/hook"
+	"reasonix/internal/memory"
 	"reasonix/internal/skill"
 )
 
@@ -157,6 +159,53 @@ func TestSlashArgItems(t *testing.T) {
 	// handled by runSkillSubcommand.
 	if items, _ := SlashArgItems("/skills li", data); len(items) != 0 {
 		t.Errorf("/skills li should not offer hidden list suggestion; got %v", labelsOf(items))
+	}
+}
+
+func TestMemoryListTextIncludesSavedMemories(t *testing.T) {
+	store := memory.Store{Dir: t.TempDir()}
+	if _, err := store.Save(memory.Memory{
+		Name:        "cache-first",
+		Title:       "Cache first",
+		Description: "Preserve prompt cache stability",
+		Type:        memory.TypeProject,
+		Body:        "Use retrieval tools instead of dynamic prefix injection.",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	c := New(Options{Memory: &memory.Set{Store: store}})
+	out := c.memoryListText()
+	for _, want := range []string{"saved memories", "[Cache first](cache-first.md)", "Preserve prompt cache stability"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("/memory output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestMemoryListTextIncludesArchivedMemories(t *testing.T) {
+	store := memory.Store{Dir: t.TempDir()}
+	if _, err := store.Save(memory.Memory{
+		Name:        "stale-plan",
+		Title:       "Stale plan",
+		Description: "Superseded by the new retrieval design",
+		Type:        memory.TypeProject,
+		Body:        "Old plan body.",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	archive, err := store.Archive("stale-plan")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := New(Options{Memory: &memory.Set{Store: store}})
+	out := c.memoryListText()
+	for _, want := range []string{"archived memories", "[Stale plan](" + archive + ")", "Superseded by the new retrieval design"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("/memory output missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "saved memories\n  [Stale plan]") {
+		t.Fatalf("archived memory should not appear as active saved memory:\n%s", out)
 	}
 }
 

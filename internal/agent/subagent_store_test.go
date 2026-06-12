@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -83,9 +85,11 @@ func TestSubagentStoreRejectsContinueFromDifferentParentSession(t *testing.T) {
 	}
 }
 
-func TestSubagentStoreForkFromDifferentParentSessionCreatesCurrentOwner(t *testing.T) {
-	store := NewSubagentStore(t.TempDir())
+func TestSubagentStoreForkFromAncestorSessionCreatesCurrentOwner(t *testing.T) {
+	sessionDir := t.TempDir()
+	store := NewSubagentStore(filepath.Join(sessionDir, "subagents"))
 	spec := testSubagentSpec(t, "review")
+	spec.ParentSession = "root"
 	run, err := store.PrepareFresh(spec)
 	if err != nil {
 		t.Fatalf("PrepareFresh: %v", err)
@@ -96,8 +100,10 @@ func TestSubagentStoreForkFromDifferentParentSessionCreatesCurrentOwner(t *testi
 	}
 	run.Release()
 
+	saveTestBranchMeta(t, sessionDir, "root", "")
+	saveTestBranchMeta(t, sessionDir, "child", "root")
 	other := spec
-	other.ParentSession = "other-parent"
+	other.ParentSession = "child"
 	forked, err := store.PrepareFork(run.Ref, other)
 	if err != nil {
 		t.Fatalf("PrepareFork: %v", err)
@@ -106,8 +112,8 @@ func TestSubagentStoreForkFromDifferentParentSessionCreatesCurrentOwner(t *testi
 	if forked.Ref == run.Ref {
 		t.Fatalf("fork ref should be new, got %q", forked.Ref)
 	}
-	if forked.Meta.ParentSession != "other-parent" {
-		t.Fatalf("fork parent session = %q, want other-parent", forked.Meta.ParentSession)
+	if forked.Meta.ParentSession != "child" {
+		t.Fatalf("fork parent session = %q, want child", forked.Meta.ParentSession)
 	}
 	sourceMeta, err := store.LoadMeta(run.Ref)
 	if err != nil {
@@ -115,6 +121,113 @@ func TestSubagentStoreForkFromDifferentParentSessionCreatesCurrentOwner(t *testi
 	}
 	if sourceMeta.ParentSession != spec.ParentSession {
 		t.Fatalf("source parent session = %q, want %q", sourceMeta.ParentSession, spec.ParentSession)
+	}
+}
+
+func TestSubagentStoreRejectsForkWhenSourceOwnerMetaMissing(t *testing.T) {
+	sessionDir, store, ref, spec := prepareCompletedSubagentForLineageTest(t, "root")
+	saveTestBranchMeta(t, sessionDir, "child", "root")
+
+	other := spec
+	other.ParentSession = "child"
+	if _, err := store.PrepareFork(ref, other); err == nil || !strings.Contains(err.Error(), "lineage could not be verified") {
+		t.Fatalf("PrepareFork error = %v, want unverified lineage rejection", err)
+	}
+}
+
+func TestSubagentStoreRejectsForkWhenSourceOwnerMetaCorrupt(t *testing.T) {
+	sessionDir, store, ref, spec := prepareCompletedSubagentForLineageTest(t, "root")
+	saveTestBranchMeta(t, sessionDir, "child", "root")
+	if err := os.WriteFile(filepath.Join(sessionDir, "root.jsonl.meta"), []byte("{"), 0o644); err != nil {
+		t.Fatalf("write corrupt branch meta: %v", err)
+	}
+
+	other := spec
+	other.ParentSession = "child"
+	if _, err := store.PrepareFork(ref, other); err == nil || !strings.Contains(err.Error(), "lineage could not be verified") {
+		t.Fatalf("PrepareFork error = %v, want unverified lineage rejection", err)
+	}
+}
+
+func TestSubagentStoreRejectsForkWhenSourceOwnerMetaIDDiffers(t *testing.T) {
+	sessionDir, store, ref, spec := prepareCompletedSubagentForLineageTest(t, "root")
+	saveTestBranchMeta(t, sessionDir, "child", "root")
+	if err := SaveBranchMeta(filepath.Join(sessionDir, "root.jsonl"), BranchMeta{ID: "other-root"}); err != nil {
+		t.Fatalf("SaveBranchMeta(root): %v", err)
+	}
+
+	other := spec
+	other.ParentSession = "child"
+	if _, err := store.PrepareFork(ref, other); err == nil || !strings.Contains(err.Error(), "lineage could not be verified") {
+		t.Fatalf("PrepareFork error = %v, want unverified lineage rejection", err)
+	}
+}
+
+func TestSubagentStoreRejectsForkFromSiblingSession(t *testing.T) {
+	sessionDir := t.TempDir()
+	store := NewSubagentStore(filepath.Join(sessionDir, "subagents"))
+	spec := testSubagentSpec(t, "review")
+	spec.ParentSession = "left"
+	run, err := store.PrepareFresh(spec)
+	if err != nil {
+		t.Fatalf("PrepareFresh: %v", err)
+	}
+	if err := store.SaveCompleted(run); err != nil {
+		t.Fatalf("SaveCompleted: %v", err)
+	}
+	run.Release()
+
+	saveTestBranchMeta(t, sessionDir, "root", "")
+	saveTestBranchMeta(t, sessionDir, "left", "root")
+	saveTestBranchMeta(t, sessionDir, "right", "root")
+	other := spec
+	other.ParentSession = "right"
+	if _, err := store.PrepareFork(run.Ref, other); err == nil || !strings.Contains(err.Error(), "not in current parent session") {
+		t.Fatalf("PrepareFork error = %v, want lineage rejection", err)
+	}
+}
+
+func TestSubagentStoreRejectsForkFromUnrelatedSession(t *testing.T) {
+	sessionDir := t.TempDir()
+	store := NewSubagentStore(filepath.Join(sessionDir, "subagents"))
+	spec := testSubagentSpec(t, "review")
+	spec.ParentSession = "source"
+	run, err := store.PrepareFresh(spec)
+	if err != nil {
+		t.Fatalf("PrepareFresh: %v", err)
+	}
+	if err := store.SaveCompleted(run); err != nil {
+		t.Fatalf("SaveCompleted: %v", err)
+	}
+	run.Release()
+
+	saveTestBranchMeta(t, sessionDir, "root", "")
+	saveTestBranchMeta(t, sessionDir, "current", "root")
+	other := spec
+	other.ParentSession = "current"
+	if _, err := store.PrepareFork(run.Ref, other); err == nil || !strings.Contains(err.Error(), "not in current parent session") {
+		t.Fatalf("PrepareFork error = %v, want unrelated session rejection", err)
+	}
+}
+
+func TestSubagentStoreRejectsForkWhenLineageCannotBeProven(t *testing.T) {
+	sessionDir := t.TempDir()
+	store := NewSubagentStore(filepath.Join(sessionDir, "subagents"))
+	spec := testSubagentSpec(t, "review")
+	spec.ParentSession = "root"
+	run, err := store.PrepareFresh(spec)
+	if err != nil {
+		t.Fatalf("PrepareFresh: %v", err)
+	}
+	if err := store.SaveCompleted(run); err != nil {
+		t.Fatalf("SaveCompleted: %v", err)
+	}
+	run.Release()
+
+	other := spec
+	other.ParentSession = "child"
+	if _, err := store.PrepareFork(run.Ref, other); err == nil || !strings.Contains(err.Error(), "lineage could not be verified") {
+		t.Fatalf("PrepareFork error = %v, want unverified lineage rejection", err)
 	}
 }
 
@@ -233,4 +346,28 @@ func testSubagentSpec(t *testing.T, name string) SubagentSpec {
 		Model:         "deepseek",
 		Effort:        "max",
 	}
+}
+
+func saveTestBranchMeta(t *testing.T, sessionDir, id, parent string) {
+	t.Helper()
+	if err := SaveBranchMeta(filepath.Join(sessionDir, id+".jsonl"), BranchMeta{ParentID: parent}); err != nil {
+		t.Fatalf("SaveBranchMeta(%s): %v", id, err)
+	}
+}
+
+func prepareCompletedSubagentForLineageTest(t *testing.T, parentSession string) (string, *SubagentStore, string, SubagentSpec) {
+	t.Helper()
+	sessionDir := t.TempDir()
+	store := NewSubagentStore(filepath.Join(sessionDir, "subagents"))
+	spec := testSubagentSpec(t, "review")
+	spec.ParentSession = parentSession
+	run, err := store.PrepareFresh(spec)
+	if err != nil {
+		t.Fatalf("PrepareFresh: %v", err)
+	}
+	if err := store.SaveCompleted(run); err != nil {
+		t.Fatalf("SaveCompleted: %v", err)
+	}
+	run.Release()
+	return sessionDir, store, run.Ref, spec
 }

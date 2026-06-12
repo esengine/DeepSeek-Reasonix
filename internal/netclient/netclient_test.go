@@ -559,3 +559,31 @@ func mustURL(s string) *url.URL {
 	}
 	return u
 }
+
+func TestForceIPv4Dials(t *testing.T) {
+	tr, err := NewTransport(ProxySpec{Mode: ModeOff}, TransportOptions{ForceIPv4: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tr.DialContext == nil {
+		t.Fatal("ForceIPv4 should install a DialContext")
+	}
+	ln, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+
+	conn, err := tr.DialContext(context.Background(), "tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatalf("forced-IPv4 dial to a v4 listener failed: %v", err)
+	}
+	conn.Close()
+
+	// A tcp4 dialer rejects an IPv6 literal outright (address-family mismatch),
+	// which is exactly the IPv6 route the fallback is meant to skip.
+	if c, err := tr.DialContext(context.Background(), "tcp", "[::1]:9"); err == nil {
+		c.Close()
+		t.Error("forced-IPv4 dial should reject an IPv6 address")
+	}
+}

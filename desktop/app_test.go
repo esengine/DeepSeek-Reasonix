@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -16,6 +17,7 @@ import (
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
+	"reasonix/internal/memory"
 	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
 )
@@ -89,6 +91,77 @@ func TestEffortDefaultsBeforeStartup(t *testing.T) {
 	got := NewApp().Effort()
 	if !got.Supported || got.Current != "auto" || got.Default != "high" || !hasLevel(got.Levels, "auto") {
 		t.Fatalf("pre-startup Effort() = %+v, want auto with DeepSeek default high", got)
+	}
+}
+
+func TestMemoryViewReturnsNonNilArraysBeforeStartup(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	view := NewApp().Memory()
+	if view.Docs == nil || view.Facts == nil || view.Archives == nil || view.Scopes == nil {
+		t.Fatalf("Memory() arrays must be non-nil before startup: %+v", view)
+	}
+	raw, err := json.Marshal(view)
+	if err != nil {
+		t.Fatalf("marshal Memory(): %v", err)
+	}
+	for _, bad := range []string{`"docs":null`, `"facts":null`, `"archives":null`, `"scopes":null`} {
+		if strings.Contains(string(raw), bad) {
+			t.Fatalf("Memory() JSON contains %s; frontend expects []: %s", bad, raw)
+		}
+	}
+}
+
+func TestMemoryViewIncludesActiveAndArchivedFacts(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	userDir := t.TempDir()
+	cwd := t.TempDir()
+	store := memory.Store{Dir: filepath.Join(userDir, "projects", "test", "memory")}
+	if _, err := store.Save(memory.Memory{
+		Name:        "active-fact",
+		Title:       "Active fact",
+		Description: "Still applies",
+		Type:        memory.TypeProject,
+		Body:        "Active body",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Save(memory.Memory{
+		Name:        "archived-fact",
+		Description: "No longer applies",
+		Type:        memory.TypeFeedback,
+		Body:        "Archived body",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Archive("archived-fact"); err != nil {
+		t.Fatalf("Archive: %v", err)
+	}
+
+	app := NewApp()
+	app.setTestCtrl(control.New(control.Options{Memory: &memory.Set{
+		Docs:    []memory.Source{{Path: filepath.Join(cwd, "AGENTS.md"), Scope: memory.ScopeProject, Body: "Project instructions"}},
+		Store:   store,
+		CWD:     cwd,
+		UserDir: userDir,
+	}}), "test-model")
+
+	view := app.Memory()
+	if !view.Available || view.StoreDir != store.Dir {
+		t.Fatalf("Memory() availability/store = %v/%q, want true/%q", view.Available, view.StoreDir, store.Dir)
+	}
+	if len(view.Docs) != 1 || view.Docs[0].Scope != "project" || !strings.Contains(view.Docs[0].Body, "Project instructions") {
+		t.Fatalf("Memory() docs = %+v", view.Docs)
+	}
+	if len(view.Facts) != 1 || view.Facts[0].Name != "active-fact" || view.Facts[0].Type != "project" {
+		t.Fatalf("Memory() active facts = %+v", view.Facts)
+	}
+	if len(view.Archives) != 1 || view.Archives[0].Name != "archived-fact" || view.Archives[0].Type != "feedback" ||
+		view.Archives[0].Path == "" || view.Archives[0].ArchivedAt == "" {
+		t.Fatalf("Memory() archived facts = %+v", view.Archives)
+	}
+	if len(view.Scopes) != 3 {
+		t.Fatalf("Memory() scopes = %+v, want user/project/local", view.Scopes)
 	}
 }
 
@@ -228,6 +301,8 @@ language = "zh"
 theme = "light"
 theme_style = "glacier"
 close_behavior = "quit"
+status_bar_style = "icon"
+status_bar_items = ["cost", "balance"]
 `), 0o644); err != nil {
 		t.Fatalf("write project config: %v", err)
 	}
@@ -242,6 +317,12 @@ close_behavior = "quit"
 	if err := userCfg.SetDesktopCloseBehavior("background"); err != nil {
 		t.Fatalf("set desktop close behavior: %v", err)
 	}
+	if err := userCfg.SetDesktopStatusBarStyle("text"); err != nil {
+		t.Fatalf("set desktop status bar style: %v", err)
+	}
+	if err := userCfg.SetDesktopStatusBarItems([]string{"model", "balance", "cache"}); err != nil {
+		t.Fatalf("set desktop status bar items: %v", err)
+	}
 	if err := userCfg.SaveTo(config.UserConfigPath()); err != nil {
 		t.Fatalf("save user config: %v", err)
 	}
@@ -253,8 +334,11 @@ close_behavior = "quit"
 	}
 
 	got := NewApp().Settings()
-	if got.DesktopLanguage != "en" || got.DesktopTheme != "dark" || got.DesktopThemeStyle != "graphite" || got.CloseBehavior != "background" {
-		t.Fatalf("desktop settings = lang:%q theme:%q style:%q close:%q, want user-level desktop prefs", got.DesktopLanguage, got.DesktopTheme, got.DesktopThemeStyle, got.CloseBehavior)
+	if got.DesktopLanguage != "en" || got.DesktopTheme != "dark" || got.DesktopThemeStyle != "graphite" || got.CloseBehavior != "background" || got.StatusBarStyle != "text" {
+		t.Fatalf("desktop settings = lang:%q theme:%q style:%q close:%q status:%q, want user-level desktop prefs", got.DesktopLanguage, got.DesktopTheme, got.DesktopThemeStyle, got.CloseBehavior, got.StatusBarStyle)
+	}
+	if want := []string{"model", "balance", "cache"}; !reflect.DeepEqual(got.StatusBarItems, want) {
+		t.Fatalf("desktop status bar items = %v, want user-level %v", got.StatusBarItems, want)
 	}
 }
 
@@ -270,6 +354,8 @@ language = "zh"
 theme = "light"
 theme_style = "glacier"
 close_behavior = "quit"
+status_bar_style = "text"
+status_bar_items = ["model", "cache", "balance"]
 `), 0o644); err != nil {
 		t.Fatalf("write project config: %v", err)
 	}
@@ -285,8 +371,11 @@ close_behavior = "quit"
 	if got.ConfigPath != config.UserConfigPath() {
 		t.Fatalf("Settings configPath = %q, want user config %q", got.ConfigPath, config.UserConfigPath())
 	}
-	if got.DefaultModel != "legacy-provider/legacy-model" || got.DesktopLanguage != "zh" || got.DesktopTheme != "light" || got.DesktopThemeStyle != "glacier" || got.CloseBehavior != "quit" {
+	if got.DefaultModel != "legacy-provider/legacy-model" || got.DesktopLanguage != "zh" || got.DesktopTheme != "light" || got.DesktopThemeStyle != "glacier" || got.CloseBehavior != "quit" || got.StatusBarStyle != "text" {
 		t.Fatalf("Settings did not seed from legacy project config: %+v", got)
+	}
+	if want := []string{"model", "cache", "balance"}; !reflect.DeepEqual(got.StatusBarItems, want) {
+		t.Fatalf("Settings did not seed status bar items from legacy project config: got %v want %v", got.StatusBarItems, want)
 	}
 	if _, err := os.Stat(config.UserConfigPath()); !os.IsNotExist(err) {
 		t.Fatalf("Settings() should not write user config before an edit, stat err = %v", err)
@@ -295,8 +384,11 @@ close_behavior = "quit"
 		t.Fatalf("SetDesktopLanguage: %v", err)
 	}
 	userCfg := config.LoadForEdit(config.UserConfigPath())
-	if userCfg.DesktopLanguage() != "en" || userCfg.DesktopTheme() != "light" || userCfg.DesktopThemeStyle() != "glacier" || userCfg.DesktopCloseBehavior() != "quit" {
-		t.Fatalf("saved user config did not preserve seeded desktop prefs: lang:%q theme:%q style:%q close:%q", userCfg.DesktopLanguage(), userCfg.DesktopTheme(), userCfg.DesktopThemeStyle(), userCfg.DesktopCloseBehavior())
+	if userCfg.DesktopLanguage() != "en" || userCfg.DesktopTheme() != "light" || userCfg.DesktopThemeStyle() != "glacier" || userCfg.DesktopCloseBehavior() != "quit" || userCfg.DesktopStatusBarStyle() != "text" {
+		t.Fatalf("saved user config did not preserve seeded desktop prefs: lang:%q theme:%q style:%q close:%q status:%q", userCfg.DesktopLanguage(), userCfg.DesktopTheme(), userCfg.DesktopThemeStyle(), userCfg.DesktopCloseBehavior(), userCfg.DesktopStatusBarStyle())
+	}
+	if want := []string{"model", "cache", "balance"}; !reflect.DeepEqual(userCfg.DesktopStatusBarItems(), want) {
+		t.Fatalf("saved user config did not preserve seeded status bar items: got %v want %v", userCfg.DesktopStatusBarItems(), want)
 	}
 }
 
@@ -902,6 +994,78 @@ func TestSetEffortRebuildsController(t *testing.T) {
 	}
 }
 
+func TestSetTokenModeRebuildsController(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	app := NewApp()
+	app.ctx = context.Background()
+	app.readyHook = func() {}
+	old := control.New(control.Options{Label: "old-controller"})
+	app.setTestCtrl(old, "deepseek-flash/deepseek-v4-flash")
+	defer func() {
+		if c := app.activeCtrl(); c != nil {
+			c.Close()
+		}
+	}()
+
+	if err := app.SetTokenMode("economy"); err != nil {
+		t.Fatalf("SetTokenMode(economy): %v", err)
+	}
+	if c := app.activeCtrl(); c == nil {
+		t.Fatal("SetTokenMode should leave a rebuilt controller")
+	}
+	if c := app.activeCtrl(); c == old {
+		t.Fatal("SetTokenMode should rebuild the active controller so the provider sees the new tool profile")
+	}
+	tab := app.activeTab()
+	if tab == nil {
+		t.Fatal("active tab missing")
+	}
+	if got := currentTabTokenMode(tab); got != "economy" {
+		t.Fatalf("token mode = %q, want economy", got)
+	}
+	if got := app.Meta().TokenMode; got != "economy" {
+		t.Fatalf("Meta token mode = %q, want economy", got)
+	}
+	saved := loadTabsFile()
+	if len(saved.Tabs) != 1 || saved.Tabs[0].TokenMode != "economy" {
+		t.Fatalf("saved tabs = %+v, want economy token mode", saved.Tabs)
+	}
+}
+
+func TestSetTokenModeKeepsControllerWhenRebuildFails(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	app := NewApp()
+	app.ctx = context.Background()
+	app.readyHook = func() {}
+	old := control.New(control.Options{Label: "old-controller"})
+	app.setTestCtrl(old, "missing-token-mode-model")
+	defer func() {
+		if c := app.activeCtrl(); c != nil {
+			c.Close()
+		}
+	}()
+
+	err := app.SetTokenMode("economy")
+	if err == nil {
+		t.Fatal("SetTokenMode(economy) with an unknown model should fail")
+	}
+	if c := app.activeCtrl(); c != old {
+		t.Fatalf("SetTokenMode failure replaced controller: got %p want %p", c, old)
+	}
+	tab := app.activeTab()
+	if tab == nil {
+		t.Fatal("active tab missing")
+	}
+	if got := currentTabTokenMode(tab); got != "full" {
+		t.Fatalf("token mode after failed rebuild = %q, want full", got)
+	}
+	if got := app.Meta().TokenMode; got != "full" {
+		t.Fatalf("Meta token mode after failed rebuild = %q, want full", got)
+	}
+}
+
 func TestSetEffortRejectsRunningTurn(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
@@ -914,6 +1078,24 @@ func TestSetEffortRejectsRunningTurn(t *testing.T) {
 	err := app.SetEffort("max")
 	if err == nil || !strings.Contains(err.Error(), "finish or cancel") {
 		t.Fatalf("SetEffort while running error = %v, want finish/cancel guard", err)
+	}
+
+	close(runner.release)
+	waitNotRunning(t, app.activeCtrl())
+}
+
+func TestSetTokenModeRejectsRunningTurn(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	runner := &blockingRunner{started: make(chan struct{}), release: make(chan struct{})}
+	app := NewApp()
+	app.setTestCtrl(control.New(control.Options{Runner: runner}), "")
+	app.activeCtrl().Submit("work")
+	<-runner.started
+
+	err := app.SetTokenMode("economy")
+	if err == nil || !strings.Contains(err.Error(), "finish or cancel") {
+		t.Fatalf("SetTokenMode while running error = %v, want finish/cancel guard", err)
 	}
 
 	close(runner.release)

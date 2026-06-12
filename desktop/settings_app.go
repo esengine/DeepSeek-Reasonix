@@ -55,6 +55,7 @@ type SandboxView struct {
 	Network       bool     `json:"network"`
 	WorkspaceRoot string   `json:"workspaceRoot"`
 	AllowWrite    []string `json:"allowWrite"`
+	Shell         string   `json:"shell"` // [tools.shell] prefer: auto|bash|powershell|pwsh
 }
 
 type NetworkProxyView struct {
@@ -149,6 +150,8 @@ type SettingsView struct {
 	DesktopThemeStyle string          `json:"desktopThemeStyle"`
 	CloseBehavior     string          `json:"closeBehavior"`
 	DisplayMode       string          `json:"displayMode"`
+	StatusBarStyle    string          `json:"statusBarStyle"`
+	StatusBarItems    []string        `json:"statusBarItems"`
 	CheckUpdates      bool            `json:"checkUpdates"`
 	Telemetry         bool            `json:"telemetry"`
 	Metrics           bool            `json:"metrics"`
@@ -322,7 +325,7 @@ func (a *App) Settings() SettingsView {
 				Ask:   []string{},
 				Deny:  []string{},
 			},
-			Sandbox:           SandboxView{Bash: "enforce", AllowWrite: []string{}},
+			Sandbox:           SandboxView{Bash: "enforce", AllowWrite: []string{}, Shell: "auto"},
 			Agent:             AgentView{PlannerMaxSteps: 12},
 			Bot:               botSettingsView(config.BotConfig{}),
 			AutoPlan:          "off",
@@ -330,6 +333,8 @@ func (a *App) Settings() SettingsView {
 			DesktopThemeStyle: "graphite",
 			CloseBehavior:     "background",
 			DisplayMode:       "minimal",
+			StatusBarStyle:    "text",
+			StatusBarItems:    config.DefaultDesktopStatusBarItems(),
 			CheckUpdates:      true,
 			Telemetry:         true,
 			Metrics:           false,
@@ -340,6 +345,10 @@ func (a *App) Settings() SettingsView {
 	bash := cfg.Sandbox.Bash
 	if bash == "" {
 		bash = "enforce"
+	}
+	shell := cfg.Tools.Shell.Prefer
+	if shell == "" {
+		shell = "auto"
 	}
 	v := SettingsView{
 		DefaultModel:      cfg.DefaultModel,
@@ -358,6 +367,7 @@ func (a *App) Settings() SettingsView {
 		Sandbox: SandboxView{
 			Bash: bash, Network: cfg.Sandbox.Network,
 			WorkspaceRoot: cfg.Sandbox.WorkspaceRoot, AllowWrite: nonNil(cfg.Sandbox.AllowWrite),
+			Shell: shell,
 		},
 		Network: NetworkView{
 			ProxyMode: cfg.NetworkProxyMode(),
@@ -378,6 +388,8 @@ func (a *App) Settings() SettingsView {
 		DesktopThemeStyle: cfg.DesktopThemeStyle(),
 		CloseBehavior:     cfg.DesktopCloseBehavior(),
 		DisplayMode:       cfg.DesktopDisplayMode(),
+		StatusBarStyle:    cfg.DesktopStatusBarStyle(),
+		StatusBarItems:    cfg.DesktopStatusBarItems(),
 		CheckUpdates:      cfg.DesktopCheckUpdates(),
 		Telemetry:         cfg.DesktopTelemetry(),
 		Metrics:           cfg.DesktopMetrics(),
@@ -671,6 +683,7 @@ func (a *App) rebuild() error {
 		WorkspaceRoot:  tab.WorkspaceRoot,
 		SessionDir:     tabSessionDir(tab),
 		EffortOverride: cloneStringPtr(tab.effort),
+		TokenMode:      currentTabTokenMode(tab),
 	})
 	if err != nil {
 		a.mu.Lock()
@@ -1252,12 +1265,13 @@ func (a *App) RemovePermissionRule(list, rule string) error {
 }
 
 // SetSandbox updates the bash sandbox mode, network egress, and write roots.
-func (a *App) SetSandbox(bash string, network bool, workspaceRoot string, allowWrite []string) error {
+func (a *App) SetSandbox(bash string, network bool, workspaceRoot string, allowWrite []string, shell string) error {
 	return a.applyConfigChange(func(c *config.Config) error {
 		c.Sandbox.Bash = bash
 		c.Sandbox.Network = network
 		c.Sandbox.WorkspaceRoot = strings.TrimSpace(workspaceRoot)
 		c.Sandbox.AllowWrite = trimList(allowWrite)
+		c.Tools.Shell.Prefer = strings.TrimSpace(shell)
 		return nil
 	})
 }
@@ -1360,6 +1374,18 @@ func (a *App) SetCloseBehavior(mode string) error {
 // SetDisplayMode updates the transcript display mode. UI-only, no rebuild needed.
 func (a *App) SetDisplayMode(mode string) error {
 	return a.applyConfigOnly(func(c *config.Config) error { return c.SetDesktopDisplayMode(mode) })
+}
+
+// SetStatusBarStyle updates the desktop status bar metric label style. UI-only,
+// no rebuild needed.
+func (a *App) SetStatusBarStyle(style string) error {
+	return a.applyConfigOnly(func(c *config.Config) error { return c.SetDesktopStatusBarStyle(style) })
+}
+
+// SetStatusBarItems updates the ordered visible desktop status bar items.
+// UI-only, no rebuild needed.
+func (a *App) SetStatusBarItems(items []string) error {
+	return a.applyConfigOnly(func(c *config.Config) error { return c.SetDesktopStatusBarItems(items) })
 }
 
 // SetDesktopLanguage updates only the desktop UI language. It deliberately does

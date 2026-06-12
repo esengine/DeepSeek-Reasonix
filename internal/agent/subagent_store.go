@@ -260,6 +260,10 @@ func (s *SubagentStore) PrepareFork(ref string, spec SubagentSpec) (*SubagentRun
 		sourceRelease()
 		return nil, err
 	}
+	if err := s.validateForkOwner(meta, spec); err != nil {
+		sourceRelease()
+		return nil, err
+	}
 	sess, err := LoadSession(s.sessionPath(sourceRef))
 	if err != nil {
 		sourceRelease()
@@ -397,6 +401,57 @@ func validateContinueOwner(meta SubagentMeta, spec SubagentSpec) error {
 		return fmt.Errorf("subagent reference %q has no parent session; run a fresh subagent instead", meta.Ref)
 	}
 	return fmt.Errorf("subagent reference %q belongs to parent session %q, current parent session is %q; use fork_from to copy it into this session", meta.Ref, owner, current)
+}
+
+func (s *SubagentStore) validateForkOwner(meta SubagentMeta, spec SubagentSpec) error {
+	current := strings.TrimSpace(spec.ParentSession)
+	owner := strings.TrimSpace(meta.ParentSession)
+	if owner == current {
+		return nil
+	}
+	if owner == "" {
+		return fmt.Errorf("subagent reference %q has no parent session; run a fresh subagent instead", meta.Ref)
+	}
+	ok, err := s.isAncestorSession(owner, current)
+	if err != nil {
+		return fmt.Errorf("subagent reference %q belongs to parent session %q, but current parent session %q lineage could not be verified: %w", meta.Ref, owner, current, err)
+	}
+	if ok {
+		return nil
+	}
+	return fmt.Errorf("subagent reference %q belongs to parent session %q, which is not in current parent session %q lineage", meta.Ref, owner, current)
+}
+
+func (s *SubagentStore) isAncestorSession(ancestor, current string) (bool, error) {
+	ancestor = strings.TrimSpace(ancestor)
+	current = strings.TrimSpace(current)
+	if ancestor == "" || current == "" {
+		return false, nil
+	}
+	sessionDir := filepath.Dir(s.dir)
+	seen := map[string]bool{}
+	for cursor := current; cursor != ""; {
+		if seen[cursor] {
+			return false, fmt.Errorf("cycle at session %q", cursor)
+		}
+		seen[cursor] = true
+		meta, ok, err := LoadBranchMeta(filepath.Join(sessionDir, cursor+".jsonl"))
+		if err != nil {
+			return false, err
+		}
+		if !ok {
+			return false, fmt.Errorf("missing branch metadata for session %q", cursor)
+		}
+		if strings.TrimSpace(meta.ID) != cursor {
+			return false, fmt.Errorf("branch metadata for session %q declares id %q", cursor, meta.ID)
+		}
+		if cursor == ancestor {
+			return true, nil
+		}
+		parent := strings.TrimSpace(meta.ParentID)
+		cursor = parent
+	}
+	return false, nil
 }
 
 func (s *SubagentStore) lock(ref string) (func(), error) {

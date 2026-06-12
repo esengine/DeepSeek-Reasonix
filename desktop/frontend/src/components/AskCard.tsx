@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useT } from "../lib/i18n";
 import type { QuestionAnswer, WireAsk, WireAskQuestion } from "../lib/types";
 import { PromptAction, PromptBadge, PromptDetailToggle, PromptShelf } from "./PromptShelf";
+import { playAttentionChime } from "../lib/sound";
 
 // AskCard renders the `ask` tool as a compact prompt shelf near the composer. It
 // walks multi-question asks one at a time; single-select answers advance
@@ -37,6 +38,7 @@ export function AskCard({
     setActive(0);
     setDetailsOpen(false);
     if (advanceTimer.current != null) window.clearTimeout(advanceTimer.current);
+    playAttentionChime();
   }, [ask.id]);
 
   useEffect(() => {

@@ -486,15 +486,55 @@ func (c *Controller) providerSwitchText(name string) string {
 }
 
 func (c *Controller) memoryListText() string {
-	if c.mem == nil || len(c.mem.Docs) == 0 {
+	if c.mem == nil {
+		return i18n.M.ListMemoryNone
+	}
+	saved := c.mem.Store.List()
+	archived := c.mem.Store.ListArchived()
+	if len(c.mem.Docs) == 0 && len(saved) == 0 && len(archived) == 0 {
 		return i18n.M.ListMemoryNone
 	}
 	var b strings.Builder
-	b.WriteString(i18n.M.ListMemoryHeader + "\n")
-	for _, d := range c.mem.Docs {
-		fmt.Fprintf(&b, "  (%s) %s\n", d.Scope, d.Path)
+	if len(c.mem.Docs) > 0 {
+		b.WriteString(i18n.M.ListMemoryHeader + "\n")
+		for _, d := range c.mem.Docs {
+			fmt.Fprintf(&b, "  (%s) %s\n", d.Scope, d.Path)
+		}
+	}
+	if len(saved) > 0 {
+		if b.Len() > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(i18n.M.ListMemorySaved + "\n")
+		for _, m := range saved {
+			fmt.Fprintf(&b, "  [%s](%s.md) (%s) %s\n", memoryDisplayTitle(m.Title, m.Name), m.Name, m.Type, memoryOneLine(m.Description))
+		}
+	}
+	if len(archived) > 0 {
+		if b.Len() > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(i18n.M.ListMemoryArchived + "\n")
+		for _, m := range archived {
+			when := ""
+			if !m.ArchivedAt.IsZero() {
+				when = " — " + m.ArchivedAt.Format("2006-01-02 15:04:05Z")
+			}
+			fmt.Fprintf(&b, "  [%s](%s) (%s)%s %s\n", memoryDisplayTitle(m.Title, m.Name), m.Path, m.Type, when, memoryOneLine(m.Description))
+		}
 	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+func memoryDisplayTitle(title, name string) string {
+	if t := memoryOneLine(title); t != "" {
+		return t
+	}
+	return strings.ReplaceAll(name, "-", " ")
+}
+
+func memoryOneLine(s string) string {
+	return strings.Join(strings.Fields(s), " ")
 }
 
 func (c *Controller) skillListText() string {

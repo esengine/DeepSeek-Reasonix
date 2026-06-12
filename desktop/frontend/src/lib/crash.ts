@@ -1,7 +1,10 @@
 // Last-resort crash surface: a React render error with no boundary unmounts the
 // whole tree (blank window), and global errors/rejections leave no trace either.
 
+import { dumpBreadcrumbs } from "./breadcrumbs";
 import { t } from "./i18n";
+
+declare const __BUILD_COMMIT__: string;
 
 function sendButton(text: string): HTMLButtonElement | null {
   // Resolved at click time via window.go, not the bridge module: this overlay must
@@ -55,7 +58,10 @@ function paint(text: string) {
 function format(label: string, err: unknown, extra?: string): string {
   const e = err as { message?: string; stack?: string } | null;
   const detail = e?.stack || e?.message || String(err);
-  return [`[${label}]`, detail, extra?.trim()].filter(Boolean).join("\n\n");
+  const crumbs = dumpBreadcrumbs();
+  return [`[${label}]`, detail, extra?.trim(), crumbs && `--- breadcrumbs ---\n${crumbs}`, `build ${__BUILD_COMMIT__}`]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 export function reportCrash(label: string, err: unknown, extra?: string) {

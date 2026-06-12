@@ -12,7 +12,7 @@ import (
 // doesn't shell out to an editor.
 func (m *chatTUI) showMemory() {
 	set := m.ctrl.Memory()
-	if set == nil || set.Empty() {
+	if set == nil || (set.Empty() && len(set.Store.ListArchived()) == 0) {
 		m.notice(i18n.M.MemoryNone)
 		return
 	}

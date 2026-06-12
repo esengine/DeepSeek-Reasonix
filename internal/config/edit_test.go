@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -107,6 +108,12 @@ func TestDesktopPreferencesAreSeparateFromCLI(t *testing.T) {
 	if err := c.SetDesktopAppearance("dark", "graphite"); err != nil {
 		t.Fatalf("SetDesktopAppearance: %v", err)
 	}
+	if err := c.SetDesktopStatusBarStyle("text"); err != nil {
+		t.Fatalf("SetDesktopStatusBarStyle: %v", err)
+	}
+	if err := c.SetDesktopStatusBarItems([]string{"model", "balance", "cache"}); err != nil {
+		t.Fatalf("SetDesktopStatusBarItems: %v", err)
+	}
 
 	if c.Language != "zh" {
 		t.Fatalf("CLI language changed to %q", c.Language)
@@ -125,6 +132,69 @@ func TestDesktopPreferencesAreSeparateFromCLI(t *testing.T) {
 	}
 	if got := c.DesktopThemeStyle(); got != "graphite" {
 		t.Fatalf("desktop theme style = %q, want graphite", got)
+	}
+	if got := c.DesktopStatusBarStyle(); got != "text" {
+		t.Fatalf("desktop status bar style = %q, want text", got)
+	}
+	if got, want := c.DesktopStatusBarItems(), []string{"model", "balance", "cache"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("desktop status bar items = %v, want %v", got, want)
+	}
+}
+
+func TestDesktopStatusBarStyleNormalizes(t *testing.T) {
+	if got := Default().DesktopStatusBarStyle(); got != "text" {
+		t.Fatalf("default desktop status bar style = %q, want text", got)
+	}
+	for _, tt := range []struct {
+		in      string
+		want    string
+		wantErr bool
+	}{
+		{"", "text", false},
+		{"icon", "icon", false},
+		{"icons", "icon", false},
+		{"text", "text", false},
+		{"labels", "text", false},
+		{"later", "text", true},
+	} {
+		c := Default()
+		if err := c.SetDesktopStatusBarStyle(tt.in); (err != nil) != tt.wantErr {
+			t.Fatalf("SetDesktopStatusBarStyle(%q) err = %v, wantErr %v", tt.in, err, tt.wantErr)
+		}
+		if got := c.DesktopStatusBarStyle(); got != tt.want {
+			t.Fatalf("DesktopStatusBarStyle(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestDesktopStatusBarItemsNormalizeAndValidate(t *testing.T) {
+	if got, want := Default().DesktopStatusBarItems(), DefaultDesktopStatusBarItems(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("default desktop status bar items = %v, want %v", got, want)
+	}
+
+	c := Default()
+	c.Desktop.StatusBarItems = []string{" balance ", "cache", "cache", "unknown", "model"}
+	if got, want := c.DesktopStatusBarItems(), []string{"balance", "cache", "model"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("normalized desktop status bar items = %v, want %v", got, want)
+	}
+
+	c = Default()
+	if err := c.SetDesktopStatusBarItems([]string{"balance", "cache", "balance", "model"}); err != nil {
+		t.Fatalf("SetDesktopStatusBarItems subset: %v", err)
+	}
+	if got, want := c.DesktopStatusBarItems(), []string{"balance", "cache", "model"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("saved desktop status bar items = %v, want %v", got, want)
+	}
+
+	if err := c.SetDesktopStatusBarItems(nil); err != nil {
+		t.Fatalf("SetDesktopStatusBarItems nil: %v", err)
+	}
+	if got, want := c.DesktopStatusBarItems(), DefaultDesktopStatusBarItems(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("nil desktop status bar items = %v, want default %v", got, want)
+	}
+
+	if err := c.SetDesktopStatusBarItems([]string{"ghost"}); err == nil {
+		t.Fatal("expected error for unknown status bar item")
 	}
 }
 

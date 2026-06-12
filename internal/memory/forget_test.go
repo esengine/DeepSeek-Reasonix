@@ -27,7 +27,7 @@ func TestForgetToolDeletes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if !strings.Contains(out, "Forgot memory") {
+	if !strings.Contains(out, "Forgot memory") || !strings.Contains(out, "archived to") {
 		t.Fatalf("unexpected tool output: %q", out)
 	}
 	if len(store.List()) != 0 {

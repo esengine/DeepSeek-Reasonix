@@ -204,6 +204,8 @@ type Messages struct {
 	ListModelsHeaderFmt string // "models (active: %s)"
 	ListModelsHint      string // how to switch
 	ListMemoryHeader    string // "memory files"
+	ListMemorySaved     string // "saved memories"
+	ListMemoryArchived  string // "archived memories"
 	ListMemoryNone      string // no memory docs
 	ListSkillsHeaderFmt string // "skills (%d)"
 	ListSkillsNone      string // no skills

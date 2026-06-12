@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent, type ReactNode } from "react";
 import { QRCodeSVG } from "qrcode.react";
-import { Check, CheckCircle2, ChevronDown, Loader2, QrCode, RefreshCw } from "lucide-react";
+import { Check, CheckCircle2, ChevronDown, ChevronUp, GripVertical, Loader2, QrCode, RefreshCw } from "lucide-react";
 import { asArray } from "../lib/array";
 import { useDeferredClose } from "../lib/useMountTransition";
 import { app } from "../lib/bridge";
@@ -18,14 +18,18 @@ import {
   type ThemeStyle,
 } from "../lib/theme";
 import { TEXT_SIZES, applyTextSize, getTextSize, type TextSize } from "../lib/textSize";
-import { FONT_FAMILIES, applyFontFamily, getFontFamily, type FontFamily } from "../lib/fontFamily";
+import { FONT_FAMILIES, applyFontFamily, getFontFamily, getCustomFontName, setCustomFontName, type FontFamily } from "../lib/fontFamily";
 import { getDisplayMode, onDisplayModeChange, setDisplayMode as setLocalDisplayMode } from "../lib/displayMode";
+import { DEFAULT_STATUS_BAR_ITEMS, normalizeStatusBarItems, type StatusBarItemId } from "../lib/statusBarItems";
 import type { BotAllowlistView, BotConnectionView, BotInstallStartResult, BotSettingsView, HookConfigView, HooksSettingsView, NetworkView, ProviderView, SettingsTab, SettingsView } from "../lib/types";
 import { InlineConfirmButton } from "./InlineConfirmButton";
 import { Tooltip } from "./Tooltip";
 import { AnchoredPopover } from "./AnchoredPopover";
 import { MCPServersSettingsPage, SkillsSettingsPage } from "./CapabilitiesPanel";
 import { MemorySettingsPage } from "./MemoryPanel";
+import { getGenerativePreset, setGenerativePreset, generativeMusic, type GenerativePreset } from "../lib/generative-music";
+import { SoundSelect } from "./SoundSelect";
+import { getSuccessPreference, setSuccessPreference, getAttentionPreference, setAttentionPreference, playSuccessChime, playAttentionChime, type SoundWavPref } from "../lib/sound";
 import { ModalCloseButton } from "./ModalCloseButton";
 
 const SETTINGS_TABS: SettingsTab[] = ["general", "models", "bots", "mcp", "skills", "memory", "hooks", "permissions", "sandbox", "network", "appearance", "updates"];
@@ -34,7 +38,19 @@ export type SettingsInitialFocus = { target: "bot-allowlist"; connectionId?: str
 // SettingsPanel is the desktop settings centre — a centred modal with left
 // navigation and a right content area. It hosts all settings pages plus MCP,
 // Skills, and Memory management, replacing the old per-feature drawers.
-export function SettingsPanel({ onClose, onChanged, initialTab, initialFocus }: { onClose: () => void; onChanged: () => void; initialTab?: SettingsTab; initialFocus?: SettingsInitialFocus }) {
+export function SettingsPanel({
+  onClose,
+  onChanged,
+  initialTab,
+  initialFocus,
+  agentRunning = false,
+}: {
+  onClose: () => void;
+  onChanged: () => void;
+  initialTab?: SettingsTab;
+  initialFocus?: SettingsInitialFocus;
+  agentRunning?: boolean;
+}) {
   const t = useT();
   const [s, setS] = useState<SettingsView | null>(null);
   const [busy, setBusy] = useState(false);
@@ -43,6 +59,7 @@ export function SettingsPanel({ onClose, onChanged, initialTab, initialFocus }: 
   const [themeStyle, setThemeStyleState] = useState<ThemeStyle>(() => getThemeStyle(getTheme()));
   const [textSize, setTextSizeState] = useState<TextSize>(getTextSize());
   const [fontFamily, setFontFamilyState] = useState<FontFamily>(getFontFamily());
+  const [customFontName, setCustomFontNameState] = useState<string>(getCustomFontName());
   const [tab, setTab] = useState<SettingsTab>(initialTab === "providers" ? "models" : initialTab ?? "general");
   // Play the modal exit animation, then let the parent unmount us.
   const { status, requestClose } = useDeferredClose(onClose, 240);
@@ -126,7 +143,7 @@ export function SettingsPanel({ onClose, onChanged, initialTab, initialFocus }: 
               <div className="empty">{t("settings.loading")}</div>
             ) : (
               <>
-                {tab === "general" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><GeneralSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
+                {tab === "general" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><GeneralSection s={s} busy={busy} apply={apply} agentRunning={agentRunning} /></SettingsPageShell>}
                 {tab === "models" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><ModelsSection s={s} busy={busy} apply={apply} backgroundApply={backgroundApply} /></SettingsPageShell>}
                 {tab === "bots" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><BotsSection s={s} busy={busy} apply={apply} initialFocus={initialFocus} /></SettingsPageShell>}
                 {tab === "mcp" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><MCPServersSettingsPage /></SettingsPageShell>}
@@ -143,6 +160,7 @@ export function SettingsPanel({ onClose, onChanged, initialTab, initialFocus }: 
                       themeStyle={themeStyle}
                       textSize={textSize}
                       fontFamily={fontFamily}
+                      customFontName={customFontName}
                       onTheme={(nextTheme) => {
                         applyTheme(nextTheme, themeStyle, { persist: false });
                         setThemeState(nextTheme);
@@ -160,6 +178,11 @@ export function SettingsPanel({ onClose, onChanged, initialTab, initialFocus }: 
                       onFontFamily={(font) => {
                         applyFontFamily(font);
                         setFontFamilyState(font);
+                      }}
+                      onCustomFontNameChange={(name) => {
+                        setCustomFontNameState(name);
+                        setCustomFontName(name);
+                        applyFontFamily("custom");
                       }}
                     />
                   </SettingsPageShell>
@@ -560,7 +583,7 @@ function normalizeBotMappingScope(scope: unknown, workspaceRoot: unknown): "glob
 function normalizeSettingsView(view: SettingsView | null | undefined): SettingsView | null {
   if (!view) return null;
   const permissions = view.permissions ?? { mode: "ask", allow: [], ask: [], deny: [] };
-  const sandbox = view.sandbox ?? { bash: "enforce", network: false, workspaceRoot: "", allowWrite: [] };
+  const sandbox = view.sandbox ?? { bash: "enforce", network: false, workspaceRoot: "", allowWrite: [], shell: "auto" };
   const network = view.network ?? {
     proxyMode: "auto",
     proxyUrl: "",
@@ -606,6 +629,8 @@ function normalizeSettingsView(view: SettingsView | null | undefined): SettingsV
     desktopThemeStyle: normalizeThemeStyleForTheme(view.desktopThemeStyle, normalizeThemePreference(view.desktopTheme)),
     closeBehavior: normalizeCloseBehavior(view.closeBehavior),
     displayMode: normalizeDisplayMode(view.displayMode),
+    statusBarStyle: normalizeStatusBarStyle(view.statusBarStyle),
+    statusBarItems: normalizeStatusBarItems(view.statusBarItems),
     checkUpdates: view.checkUpdates !== false,
   };
 }
@@ -620,6 +645,44 @@ type DisplayMode = "standard" | "compact" | "minimal";
 
 function normalizeDisplayMode(mode: string | undefined): DisplayMode {
   return mode === "standard" || mode === "compact" || mode === "minimal" ? mode : "minimal";
+}
+
+type StatusBarStyle = "icon" | "text";
+type StatusBarDropPlacement = "before" | "after";
+type StatusBarDragTarget = {
+  id: StatusBarItemId;
+  placement: StatusBarDropPlacement;
+};
+
+function normalizeStatusBarStyle(style: string | undefined): StatusBarStyle {
+  return style === "icon" ? "icon" : "text";
+}
+
+function statusBarItemLabel(id: StatusBarItemId, t: ReturnType<typeof useT>): string {
+  switch (id) {
+    case "model":
+      return t("settings.statusBarItem.model");
+    case "cache":
+      return t("status.cacheLabel");
+    case "cache_avg":
+      return t("status.cacheAvgLabel");
+    case "session_tokens":
+      return t("status.sessionTokensLabel");
+    case "turn_tokens":
+      return t("status.turnTokensLabel");
+    case "turn_cost":
+      return t("status.turnCostLabel");
+    case "session_turns":
+      return t("status.sessionTurnsLabel");
+    case "context":
+      return t("status.ctxLabel");
+    case "compact":
+      return t("status.compactLabel");
+    case "cost":
+      return t("status.costLabel");
+    case "balance":
+      return t("status.balanceLabel");
+  }
 }
 
 function closeBehaviorLabel(mode: CloseBehavior, t: ReturnType<typeof useT>): string {
@@ -654,13 +717,169 @@ function reasoningProtocolLabel(protocol: string, t: ReturnType<typeof useT>): s
   }
 }
 
-function GeneralSection({ s, busy, apply }: SectionProps) {
+function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agentRunning: boolean }) {
   const { t, setPref } = useI18n();
   const closeBehavior = normalizeCloseBehavior(s.closeBehavior);
   const [displayMode, setDisplayMode] = useState<DisplayMode>(() => normalizeDisplayMode(getDisplayMode()));
+  const [statusBarItemsExpanded, setStatusBarItemsExpanded] = useState(false);
+  const [draggingStatusBarItem, setDraggingStatusBarItem] = useState<StatusBarItemId | null>(null);
+  const [statusBarDragTarget, setStatusBarDragTargetState] = useState<StatusBarDragTarget | null>(null);
+  const draggingStatusBarItemRef = useRef<StatusBarItemId | null>(null);
+  const statusBarDragTargetRef = useRef<StatusBarDragTarget | null>(null);
+  const mouseDragCleanupRef = useRef<(() => void) | null>(null);
+  const statusBarItemsPanelId = useId();
   useEffect(() => onDisplayModeChange((mode) => setDisplayMode(mode)), []);
+  useEffect(() => () => mouseDragCleanupRef.current?.(), []);
   const autoPlan = normalizeAutoPlan(s.autoPlan);
   const languagePref = normalizeLangPref(s.desktopLanguage);
+  const [genMusicPreset, setGenMusicPreset] = useState<GenerativePreset>(getGenerativePreset());
+  const [soundPref, setSoundPref] = useState<SoundWavPref>(getSuccessPreference());
+  const [attentionPref, setAttentionPref] = useState<SoundWavPref>(getAttentionPreference());
+  const statusBarStyle = normalizeStatusBarStyle(s.statusBarStyle);
+  const statusBarItems = normalizeStatusBarItems(s.statusBarItems);
+  const visibleStatusItems = new Set<StatusBarItemId>(statusBarItems);
+  const orderedStatusItems = [
+    ...statusBarItems,
+    ...DEFAULT_STATUS_BAR_ITEMS.filter((id) => !visibleStatusItems.has(id)),
+  ];
+  const applyStatusBarItems = (items: StatusBarItemId[]) => {
+    const contentScrollTop = document.querySelector<HTMLElement>(".settings-center__content")?.scrollTop ?? 0;
+    const navScrollTop = document.querySelector<HTMLElement>(".settings-center__nav")?.scrollTop ?? 0;
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && active.closest(".status-bar-items-editor")) active.blur();
+    void apply(() => app.SetStatusBarItems(items)).finally(() => {
+      window.scrollTo(0, 0);
+      requestAnimationFrame(() => {
+        window.scrollTo(0, 0);
+        const content = document.querySelector<HTMLElement>(".settings-center__content");
+        const nav = document.querySelector<HTMLElement>(".settings-center__nav");
+        if (content) content.scrollTop = Math.min(contentScrollTop, Math.max(0, content.scrollHeight - content.clientHeight));
+        if (nav) nav.scrollTop = navScrollTop;
+      });
+    });
+  };
+  const toggleStatusBarItem = (id: StatusBarItemId) => {
+    if (visibleStatusItems.has(id)) {
+      if (statusBarItems.length <= 1) return;
+      applyStatusBarItems(statusBarItems.filter((item) => item !== id));
+      return;
+    }
+    applyStatusBarItems([...statusBarItems, id]);
+  };
+  const moveStatusBarItem = (id: StatusBarItemId, direction: -1 | 1) => {
+    const idx = statusBarItems.indexOf(id);
+    const nextIdx = idx + direction;
+    if (idx < 0 || nextIdx < 0 || nextIdx >= statusBarItems.length) return;
+    const next = [...statusBarItems];
+    [next[idx], next[nextIdx]] = [next[nextIdx], next[idx]];
+    applyStatusBarItems(next);
+  };
+  const reorderStatusBarItem = (fromId: StatusBarItemId, toId: StatusBarItemId, placement: StatusBarDropPlacement) => {
+    const fromIdx = statusBarItems.indexOf(fromId);
+    const toIdx = statusBarItems.indexOf(toId);
+    if (fromIdx < 0 || toIdx < 0 || fromIdx === toIdx) return;
+    const next = statusBarItems.filter((item) => item !== fromId);
+    const insertAt = next.indexOf(toId);
+    if (insertAt < 0) return;
+    next.splice(placement === "after" ? insertAt + 1 : insertAt, 0, fromId);
+    if (next.every((item, index) => item === statusBarItems[index])) return;
+    applyStatusBarItems(next);
+  };
+  const statusBarItemFromPoint = (x: number, y: number): StatusBarDragTarget | null => {
+    const row = document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-statusbar-setting-item]");
+    const id = row?.dataset.statusbarSettingItem as StatusBarItemId | undefined;
+    if (!row || !id || !statusBarItems.includes(id)) return null;
+    const rect = row.getBoundingClientRect();
+    return { id, placement: y < rect.top + rect.height / 2 ? "before" : "after" };
+  };
+  const setStatusBarDragTarget = (target: StatusBarDragTarget | null) => {
+    const current = statusBarDragTargetRef.current;
+    if (current?.id === target?.id && current?.placement === target?.placement) return;
+    statusBarDragTargetRef.current = target;
+    setStatusBarDragTargetState(target);
+  };
+  const beginStatusBarDrag = (id: StatusBarItemId, visible: boolean): boolean => {
+    if (busy || !visible) return false;
+    mouseDragCleanupRef.current?.();
+    mouseDragCleanupRef.current = null;
+    draggingStatusBarItemRef.current = id;
+    statusBarDragTargetRef.current = null;
+    setDraggingStatusBarItem(id);
+    setStatusBarDragTargetState(null);
+    return true;
+  };
+  const updateStatusBarDrag = (clientX: number, clientY: number) => {
+    const draggingId = draggingStatusBarItemRef.current;
+    if (!draggingId) return;
+    const target = statusBarItemFromPoint(clientX, clientY);
+    setStatusBarDragTarget(target && target.id !== draggingId ? target : null);
+  };
+  const finishStatusBarDrag = (clientX?: number, clientY?: number) => {
+    const draggingId = draggingStatusBarItemRef.current;
+    let target = statusBarDragTargetRef.current;
+    if (draggingId && clientX !== undefined && clientY !== undefined) {
+      const pointerTarget = statusBarItemFromPoint(clientX, clientY);
+      if (pointerTarget && pointerTarget.id !== draggingId) target = pointerTarget;
+    }
+    if (draggingId && target) reorderStatusBarItem(draggingId, target.id, target.placement);
+    draggingStatusBarItemRef.current = null;
+    statusBarDragTargetRef.current = null;
+    setDraggingStatusBarItem(null);
+    setStatusBarDragTargetState(null);
+  };
+  const cancelStatusBarDrag = () => {
+    mouseDragCleanupRef.current?.();
+    mouseDragCleanupRef.current = null;
+    draggingStatusBarItemRef.current = null;
+    statusBarDragTargetRef.current = null;
+    setDraggingStatusBarItem(null);
+    setStatusBarDragTargetState(null);
+  };
+  const startStatusBarPointerDrag = (event: PointerEvent<HTMLElement>, id: StatusBarItemId, visible: boolean) => {
+    if (event.button !== 0 || !beginStatusBarDrag(id, visible)) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+  const moveStatusBarPointerDrag = (event: PointerEvent<HTMLElement>) => {
+    if (!draggingStatusBarItemRef.current) return;
+    event.preventDefault();
+    updateStatusBarDrag(event.clientX, event.clientY);
+  };
+  const endStatusBarPointerDrag = (event: PointerEvent<HTMLElement>) => {
+    if (!draggingStatusBarItemRef.current) return;
+    event.preventDefault();
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch {
+      // Pointer capture may already be released by the browser.
+    }
+    finishStatusBarDrag(event.clientX, event.clientY);
+  };
+  const cancelStatusBarPointerDrag = (event: PointerEvent<HTMLElement>) => {
+    event.preventDefault();
+    cancelStatusBarDrag();
+  };
+  const startStatusBarMouseDrag = (event: ReactMouseEvent<HTMLElement>, id: StatusBarItemId, visible: boolean) => {
+    if (event.button !== 0 || !beginStatusBarDrag(id, visible)) return;
+    event.preventDefault();
+    const handleMove = (moveEvent: MouseEvent) => {
+      moveEvent.preventDefault();
+      updateStatusBarDrag(moveEvent.clientX, moveEvent.clientY);
+    };
+    const cleanup = () => {
+      window.removeEventListener("mousemove", handleMove);
+      window.removeEventListener("mouseup", handleUp);
+    };
+    const handleUp = (upEvent: MouseEvent) => {
+      upEvent.preventDefault();
+      cleanup();
+      mouseDragCleanupRef.current = null;
+      finishStatusBarDrag(upEvent.clientX, upEvent.clientY);
+    };
+    window.addEventListener("mousemove", handleMove);
+    window.addEventListener("mouseup", handleUp);
+    mouseDragCleanupRef.current = cleanup;
+  };
   const setLanguage = (next: LangPref) => {
     setPref(next);
     void apply(() => app.SetDesktopLanguage(next));
@@ -740,7 +959,246 @@ function GeneralSection({ s, busy, apply }: SectionProps) {
           ))}
         </div>
       </SettingsField>
+      <SettingsField label={t("settings.generativeMusic")} hint={t("settings.generativeMusicHint")} stacked>
+        <div className="settings-notification-sound-row">
+          <span>{t("settings.generativeMusicPreset")}</span>
+          <GenMusicSelect
+            value={genMusicPreset}
+            onChange={(next) => {
+              setGenMusicPreset(next);
+              setGenerativePreset(next);
+              if (next === "off") {
+                generativeMusic.stop();
+              } else {
+                if (generativeMusic.isRunning) {
+                  generativeMusic.setPreset(next);
+                } else if (agentRunning) {
+                  generativeMusic.start(next);
+                }
+                generativeMusic.playPreview(next);
+              }
+            }}
+            onPreview={() => { if (genMusicPreset !== "off") generativeMusic.playPreview(genMusicPreset); }}
+            previewDisabled={genMusicPreset === "off"}
+          />
+        </div>
+      </SettingsField>
+      <SettingsField label={t("settings.notificationSound")} hint={t("settings.notificationSoundHint")} stacked>
+        <div className="settings-notification-sound-row">
+          <span>{t("settings.notificationSoundSuccess")}</span>
+          <SoundSelect
+            value={soundPref}
+            onChange={(next) => {
+              setSoundPref(next);
+              setSuccessPreference(next);
+              playSuccessChime();
+            }}
+            onPreview={playSuccessChime}
+            previewDisabled={soundPref === "off"}
+          />
+        </div>
+        <div className="settings-notification-sound-row" style={{ marginTop: 6 }}>
+          <span>{t("settings.notificationSoundAttention")}</span>
+          <SoundSelect
+            value={attentionPref}
+            onChange={(next) => {
+              setAttentionPref(next);
+              setAttentionPreference(next);
+              playAttentionChime();
+            }}
+            onPreview={playAttentionChime}
+            previewDisabled={attentionPref === "off"}
+          />
+        </div>
+      </SettingsField>
+      <SettingsField label={t("settings.statusBarStyle")}>
+        <div className="set-seg">
+          {(["icon", "text"] as const).map((style) => (
+            <button
+              key={style}
+              className={`set-seg__btn${statusBarStyle === style ? " set-seg__btn--on" : ""}`}
+              disabled={busy}
+              onClick={() => void apply(() => app.SetStatusBarStyle(style))}
+            >
+              {t(`settings.statusBarStyle.${style}`)}
+            </button>
+          ))}
+        </div>
+      </SettingsField>
+      <SettingsField label={t("settings.statusBarItems")} hint={t("settings.statusBarItemsHint")} stacked>
+        <div className={`status-bar-items-editor${statusBarItemsExpanded ? " status-bar-items-editor--expanded" : ""}`}>
+          <div className="status-bar-items-editor__summary">
+            <span className="status-bar-items-editor__summary-text">
+              {t("settings.statusBarItemsSummary", { visible: statusBarItems.length, total: DEFAULT_STATUS_BAR_ITEMS.length })}
+            </span>
+            <Tooltip label={t(statusBarItemsExpanded ? "settings.statusBarItemsCollapse" : "settings.statusBarItemsExpand")}>
+              <button
+                type="button"
+                className="status-bar-items-editor__toggle"
+                aria-expanded={statusBarItemsExpanded}
+                aria-controls={statusBarItemsPanelId}
+                aria-label={t(statusBarItemsExpanded ? "settings.statusBarItemsCollapse" : "settings.statusBarItemsExpand")}
+                onClick={() => setStatusBarItemsExpanded((open) => !open)}
+              >
+                {statusBarItemsExpanded ? <ChevronUp size={15} aria-hidden="true" /> : <ChevronDown size={15} aria-hidden="true" />}
+              </button>
+            </Tooltip>
+          </div>
+          {statusBarItemsExpanded && (
+            <div className="status-bar-items-editor__list" id={statusBarItemsPanelId}>
+              {orderedStatusItems.map((id) => {
+                const label = statusBarItemLabel(id, t);
+                const visible = visibleStatusItems.has(id);
+                const visibleIndex = statusBarItems.indexOf(id);
+                const disableHide = visible && statusBarItems.length <= 1;
+                const dragLabel = t("settings.statusBarItem.drag", { label });
+                const moveUpLabel = t("settings.statusBarItem.moveUp", { label });
+                const moveDownLabel = t("settings.statusBarItem.moveDown", { label });
+                const dropPlacement = statusBarDragTarget?.id === id ? statusBarDragTarget.placement : null;
+                return (
+                  <div
+                    className={[
+                      "status-bar-item-row",
+                      visible ? "" : "status-bar-item-row--hidden",
+                      draggingStatusBarItem === id ? "status-bar-item-row--dragging" : "",
+                      dropPlacement ? "status-bar-item-row--drag-over" : "",
+                      dropPlacement === "before" ? "status-bar-item-row--drop-before" : "",
+                      dropPlacement === "after" ? "status-bar-item-row--drop-after" : "",
+                    ].filter(Boolean).join(" ")}
+                    data-statusbar-setting-item={id}
+                    key={id}
+                  >
+                    <Tooltip label={dragLabel}>
+                      <button
+                        type="button"
+                        className="status-bar-item-row__drag"
+                        disabled={!visible || busy}
+                        aria-label={dragLabel}
+                        title={dragLabel}
+                        onPointerDown={(event) => startStatusBarPointerDrag(event, id, visible)}
+                        onPointerMove={moveStatusBarPointerDrag}
+                        onPointerUp={endStatusBarPointerDrag}
+                        onPointerCancel={cancelStatusBarPointerDrag}
+                        onMouseDown={(event) => startStatusBarMouseDrag(event, id, visible)}
+                      >
+                        <GripVertical size={14} aria-hidden="true" />
+                      </button>
+                    </Tooltip>
+                    <label className="status-bar-item-row__toggle">
+                      <input
+                        type="checkbox"
+                        checked={visible}
+                        disabled={busy || disableHide}
+                        onChange={() => toggleStatusBarItem(id)}
+                      />
+                      <span className="status-bar-item-row__check" aria-hidden="true">
+                        {visible && <Check size={12} />}
+                      </span>
+                      <span className="status-bar-item-row__label">{label}</span>
+                    </label>
+                    <div className="status-bar-item-row__actions">
+                      <Tooltip label={moveUpLabel}>
+                        <button
+                          type="button"
+                          className="status-bar-item-row__order"
+                          disabled={busy || !visible || visibleIndex <= 0}
+                          onClick={() => moveStatusBarItem(id, -1)}
+                          aria-label={moveUpLabel}
+                        >
+                          <ChevronUp size={14} aria-hidden="true" />
+                        </button>
+                      </Tooltip>
+                      <Tooltip label={moveDownLabel}>
+                        <button
+                          type="button"
+                          className="status-bar-item-row__order"
+                          disabled={busy || !visible || visibleIndex < 0 || visibleIndex >= statusBarItems.length - 1}
+                          onClick={() => moveStatusBarItem(id, 1)}
+                          aria-label={moveDownLabel}
+                        >
+                          <ChevronDown size={14} aria-hidden="true" />
+                        </button>
+                      </Tooltip>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </SettingsField>
     </SettingsSection>
+  );
+}
+
+const GENRE_OPTIONS: { value: GenerativePreset; labelKey: DictKey }[] = [
+  { value: "off", labelKey: "settings.generativeMusic.off" },
+  { value: "ethereal", labelKey: "settings.generativeMusic.presets.ethereal" },
+  { value: "classic", labelKey: "settings.generativeMusic.presets.classic" },
+  { value: "digital", labelKey: "settings.generativeMusic.presets.digital" },
+  { value: "retro", labelKey: "settings.generativeMusic.presets.retro" },
+];
+
+function GenMusicSelect({
+  value,
+  onChange,
+  onPreview,
+  previewDisabled,
+}: {
+  value: GenerativePreset;
+  onChange: (v: GenerativePreset) => void;
+  onPreview: () => void;
+  previewDisabled?: boolean;
+}) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const selected = GENRE_OPTIONS.find((o) => o.value === value) ?? GENRE_OPTIONS[0];
+
+  return (
+    <div className="sound-select">
+      <button
+        ref={triggerRef}
+        className="sound-select__trigger"
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className="sound-select__label">{t(selected.labelKey)}</span>
+        <ChevronDown
+          size={16}
+          className={`sound-select__chev${open ? " sound-select__chev--open" : ""}`}
+        />
+      </button>
+      <button className="chip" type="button" title={t("settings.generativeMusicPreview")} onClick={onPreview} disabled={previewDisabled}>
+        &#x25B6;
+      </button>
+      <AnchoredPopover
+        open={open}
+        anchorRef={triggerRef}
+        onClose={() => setOpen(false)}
+        className="sound-select__menu"
+        placement="bottom"
+      >
+        <div className="sound-select__list" role="listbox">
+          {GENRE_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              className={`sound-select__option${opt.value === value ? " sound-select__option--selected" : ""}`}
+              role="option"
+              aria-selected={opt.value === value}
+              type="button"
+              onClick={() => {
+                onChange(opt.value);
+                setOpen(false);
+              }}
+            >
+              <span>{t(opt.labelKey)}</span>
+              {opt.value === value && <Check size={14} className="sound-select__check" />}
+            </button>
+          ))}
+        </div>
+      </AnchoredPopover>
+    </div>
   );
 }
 
@@ -3739,10 +4197,18 @@ function SandboxSection({ s, busy, apply }: SectionProps) {
   const sb = s.sandbox;
   const [root, setRoot] = useState(sb.workspaceRoot);
   const set = (next: Partial<typeof sb>) =>
-    apply(() => app.SetSandbox(next.bash ?? sb.bash, next.network ?? sb.network, next.workspaceRoot ?? sb.workspaceRoot, next.allowWrite ?? sb.allowWrite));
+    apply(() => app.SetSandbox(next.bash ?? sb.bash, next.network ?? sb.network, next.workspaceRoot ?? sb.workspaceRoot, next.allowWrite ?? sb.allowWrite, next.shell ?? sb.shell));
 
   return (
     <SettingsSection title={t("settings.sandboxTitle")}>
+      <SettingsField label={t("settings.shellInterpreter")}>
+        <select className="mem-select set-grow" value={sb.shell || "auto"} disabled={busy} onChange={(e) => void set({ shell: e.target.value })}>
+          <option value="auto">{t("settings.shellAuto")}</option>
+          <option value="bash">{t("settings.shellBash")}</option>
+          <option value="powershell">{t("settings.shellPowershell")}</option>
+          <option value="pwsh">{t("settings.shellPwsh")}</option>
+        </select>
+      </SettingsField>
       <SettingsField label={t("settings.bashSandbox")}>
         <select className="mem-select set-grow" value={sb.bash} disabled={busy} onChange={(e) => void set({ bash: e.target.value })}>
           <option value="enforce">{t("settings.bashEnforce")}</option>
@@ -3793,19 +4259,23 @@ function AppearanceSection({
   themeStyle,
   textSize,
   fontFamily,
+  customFontName,
   onTheme,
   onThemeStyle,
   onTextSize,
   onFontFamily,
+  onCustomFontNameChange,
 }: {
   theme: Theme;
   themeStyle: ThemeStyle;
   textSize: TextSize;
   fontFamily: FontFamily;
+  customFontName: string;
   onTheme: (t: Theme) => void;
   onThemeStyle: (style: ThemeStyle) => void;
   onTextSize: (size: TextSize) => void;
   onFontFamily: (font: FontFamily) => void;
+  onCustomFontNameChange: (name: string) => void;
 }) {
   const t = useT();
   const themeOptions: Theme[] = ["auto", "light", "dark"];
@@ -3884,6 +4354,18 @@ function AppearanceSection({
           ))}
         </div>
       </SettingsField>
+      {fontFamily === "custom" && (
+        <SettingsField label={t("settings.fontFamilyCustomName")}>
+          <textarea
+            className="mem-input"
+            style={{ width: "100%", resize: "vertical" }}
+            rows={2}
+            placeholder={t("settings.fontFamilyCustomPlaceholder")}
+            value={customFontName}
+            onChange={(e) => onCustomFontNameChange(e.target.value)}
+          />
+        </SettingsField>
+      )}
     </SettingsSection>
   );
 }
@@ -3922,6 +4404,8 @@ function fontFamilyName(font: FontFamily, t: ReturnType<typeof useT>): string {
       return t("settings.fontFamilyPingFang");
     case "noto":
       return t("settings.fontFamilyNoto");
+    case "custom":
+      return t("settings.fontFamilyCustom");
   }
 }
 

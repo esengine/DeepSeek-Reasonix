@@ -281,6 +281,7 @@ func (a *App) startup(ctx context.Context) {
 	go a.refreshBotRuntime()
 	go a.sendStartupPing()
 	go a.flushMetrics()
+	go a.flushPendingCrash()
 }
 
 func (a *App) beforeClose(ctx context.Context) bool {
@@ -364,6 +365,7 @@ func backgroundRestoreShouldMaximise(goos string, wasMaximised bool) bool {
 // restoreOrBuildTabs restores the tabs from the last session, or creates a
 // default Global tab on first launch.
 func (a *App) restoreOrBuildTabs() {
+	defer a.recoverToPending("restoreOrBuildTabs")
 	ctx := a.ctx
 	ensureWorkspace()
 
@@ -394,6 +396,7 @@ func (a *App) restoreOrBuildTabs() {
 			}
 			tab.model = entry.Model
 			tab.effort = cloneStringPtr(entry.Effort)
+			tab.tokenMode = boot.NormalizeTokenMode(entry.TokenMode)
 			tab.mode = persistedTabMode(entry.Mode)
 			tab.goal = strings.TrimSpace(entry.Goal)
 			tab.toolApprovalMode = normalizeToolApprovalMode(entry.ToolApprovalMode)
@@ -447,6 +450,7 @@ func (a *App) createTabEntryWithID(scope, workspaceRoot, topicID, id string) *Wo
 		WorkspaceRoot:    workspaceRoot,
 		TopicID:          topicID,
 		TopicTitle:       topicTitleForTab(scope, workspaceRoot, topicID),
+		tokenMode:        boot.TokenModeFull,
 		mode:             "normal",
 		toolApprovalMode: control.ToolApprovalAsk,
 		disabledMCP:      map[string]ServerView{},
@@ -1823,16 +1827,18 @@ func (a *App) jobsForCtrl(ctrl *control.Controller, out []JobView) []JobView {
 
 // Meta describes the session for the frontend's header and status line.
 type Meta struct {
-	Label            string `json:"label"`
-	Ready            bool   `json:"ready"`
-	StartupErr       string `json:"startupErr,omitempty"`
-	EventChannel     string `json:"eventChannel"`
-	Cwd              string `json:"cwd"`
-	AutoApproveTools bool   `json:"autoApproveTools"`
-	Bypass           bool   `json:"bypass"` // legacy JSON key for YOLO/full-access tool auto-approval
-	ToolApprovalMode string `json:"toolApprovalMode"`
-	Goal             string `json:"goal,omitempty"`
-	GoalStatus       string `json:"goalStatus,omitempty"`
+	Label             string `json:"label"`
+	Ready             bool   `json:"ready"`
+	StartupErr        string `json:"startupErr,omitempty"`
+	EventChannel      string `json:"eventChannel"`
+	Cwd               string `json:"cwd"`
+	AutoApproveTools  bool   `json:"autoApproveTools"`
+	Bypass            bool   `json:"bypass"` // legacy JSON key for YOLO/full-access tool auto-approval
+	CollaborationMode string `json:"collaborationMode"`
+	ToolApprovalMode  string `json:"toolApprovalMode"`
+	TokenMode         string `json:"tokenMode"`
+	Goal              string `json:"goal,omitempty"`
+	GoalStatus        string `json:"goalStatus,omitempty"`
 }
 
 // Meta reports the model label, readiness, any startup error, the working
@@ -1852,20 +1858,24 @@ func (a *App) MetaForTab(tabID string) Meta {
 		cwd, _ = os.Getwd()
 	}
 	autoApproveTools := tab.Ctrl != nil && tab.Ctrl.AutoApproveTools()
+	collaborationMode := currentTabCollaborationMode(tab)
 	toolApprovalMode := currentTabToolApprovalMode(tab)
+	tokenMode := currentTabTokenMode(tab)
 	goal := currentTabGoal(tab)
 	goalStatus := currentTabGoalStatus(tab)
 	return Meta{
-		Label:            tab.Label,
-		Ready:            tab.Ready,
-		StartupErr:       tab.StartupErr,
-		EventChannel:     eventChannel,
-		Cwd:              cwd,
-		AutoApproveTools: autoApproveTools,
-		Bypass:           autoApproveTools,
-		ToolApprovalMode: toolApprovalMode,
-		Goal:             goal,
-		GoalStatus:       goalStatus,
+		Label:             tab.Label,
+		Ready:             tab.Ready,
+		StartupErr:        tab.StartupErr,
+		EventChannel:      eventChannel,
+		Cwd:               cwd,
+		AutoApproveTools:  autoApproveTools,
+		Bypass:            autoApproveTools,
+		CollaborationMode: collaborationMode,
+		ToolApprovalMode:  toolApprovalMode,
+		TokenMode:         tokenMode,
+		Goal:              goal,
+		GoalStatus:        goalStatus,
 	}
 }
 
@@ -3381,6 +3391,7 @@ func (a *App) SetModelForTab(tabID, name string) error {
 		WorkspaceRoot:  tab.WorkspaceRoot,
 		SessionDir:     tabSessionDir(tab),
 		EffortOverride: cloneStringPtr(effortOverride),
+		TokenMode:      currentTabTokenMode(tab),
 	})
 	if err != nil {
 		return err
@@ -3475,6 +3486,7 @@ func (a *App) SetEffortForTab(tabID, level string) error {
 		WorkspaceRoot:  tab.WorkspaceRoot,
 		SessionDir:     tabSessionDir(tab),
 		EffortOverride: &effort,
+		TokenMode:      currentTabTokenMode(tab),
 	})
 	if err != nil {
 		return err
@@ -3483,6 +3495,73 @@ func (a *App) SetEffortForTab(tabID, level string) error {
 	a.mu.Lock()
 	tab.Ctrl = newCtrl
 	tab.effort = &effort
+	tab.Label = newCtrl.Label()
+	tab.StartupErr = ""
+	tab.Ready = true
+	a.saveTabsLocked()
+	a.mu.Unlock()
+	newCtrl.EnableInteractiveApproval()
+	applyTabModeToController(newCtrl, tab.mode)
+	applyTabToolApprovalModeToController(newCtrl, tab.toolApprovalMode)
+	newCtrl.SetGoal(tab.goal)
+	path := agent.ContinueSessionPath(prevPath, newCtrl.SessionDir(), newCtrl.Label())
+	if len(carried) > 0 {
+		newCtrl.Resume(&agent.Session{Messages: carried}, path)
+	} else if path != "" {
+		newCtrl.SetSessionPath(path)
+	}
+	a.persistTabSessionPath(tab, path)
+	return nil
+}
+
+func (a *App) SetTokenMode(mode string) error {
+	return a.SetTokenModeForTab("", mode)
+}
+
+func (a *App) SetTokenModeForTab(tabID, mode string) error {
+	mode = boot.NormalizeTokenMode(mode)
+	tab := a.tabByID(tabID)
+	if tab == nil {
+		if strings.TrimSpace(tabID) == "" {
+			return nil
+		}
+		return fmt.Errorf("tab %q not found", tabID)
+	}
+	if mode == currentTabTokenMode(tab) {
+		return nil
+	}
+	ctrl := tab.Ctrl
+	if ctrl != nil && ctrl.Running() {
+		return fmt.Errorf("finish or cancel the current turn before changing token mode")
+	}
+
+	var carried []provider.Message
+	prevPath := ""
+	oldCtrl := tab.Ctrl
+	if oldCtrl != nil {
+		prevPath = oldCtrl.SessionPath()
+		_ = oldCtrl.Snapshot()
+		carried = oldCtrl.History()
+	}
+	newCtrl, err := boot.Build(a.bootContext(), boot.Options{
+		Model:          tab.model,
+		RequireKey:     false,
+		Sink:           tab.sink,
+		WorkspaceRoot:  tab.WorkspaceRoot,
+		SessionDir:     tabSessionDir(tab),
+		EffortOverride: cloneStringPtr(tab.effort),
+		TokenMode:      mode,
+	})
+	if err != nil {
+		return err
+	}
+	a.bindControllerDisplayRecorder(newCtrl)
+	if oldCtrl != nil {
+		oldCtrl.Close()
+	}
+	a.mu.Lock()
+	tab.Ctrl = newCtrl
+	tab.tokenMode = mode
 	tab.Label = newCtrl.Label()
 	tab.StartupErr = ""
 	tab.Ready = true
@@ -3900,7 +3979,18 @@ func revealPath(path string) error {
 	case "darwin":
 		return exec.Command("open", "-R", path).Start()
 	case "windows":
-		return exec.Command("explorer", "/select,", path).Start()
+		// explorer.exe lives in %SystemRoot%, which isn't always on PATH (the
+		// launch environment can strip it), so resolve it directly rather than
+		// relying on a PATH lookup.
+		explorer := "explorer.exe"
+		root := os.Getenv("SystemRoot")
+		if root == "" {
+			root = os.Getenv("windir")
+		}
+		if root != "" {
+			explorer = filepath.Join(root, "explorer.exe")
+		}
+		return exec.Command(explorer, "/select,", path).Start()
 	default:
 		dir := path
 		if info, err := os.Stat(path); err == nil && !info.IsDir() {
@@ -4216,32 +4306,44 @@ type MemoryFact struct {
 	Body        string `json:"body"`
 }
 
+// MemoryArchive is one archived auto-memory kept only for inspection.
+type MemoryArchive struct {
+	Name        string `json:"name"`
+	Title       string `json:"title,omitempty"`
+	Description string `json:"description"`
+	Type        string `json:"type"`
+	Body        string `json:"body"`
+	Path        string `json:"path"`
+	ArchivedAt  string `json:"archivedAt,omitempty"`
+}
+
 // MemoryScope is one writable quick-add target (scope id + the file it writes to).
 type MemoryScope struct {
 	Scope string `json:"scope"`
 	Path  string `json:"path"`
 }
 
-// MemoryView is the whole memory panel payload: hierarchical docs, saved facts,
-// and the writable scopes for the quick-add selector.
+// MemoryView is the whole memory panel payload: hierarchical docs, active saved
+// facts, archived facts, and the writable scopes for the quick-add selector.
 type MemoryView struct {
-	Docs      []MemoryDoc   `json:"docs"`
-	Facts     []MemoryFact  `json:"facts"`
-	Scopes    []MemoryScope `json:"scopes"`
-	StoreDir  string        `json:"storeDir"`
-	Available bool          `json:"available"`
+	Docs      []MemoryDoc     `json:"docs"`
+	Facts     []MemoryFact    `json:"facts"`
+	Archives  []MemoryArchive `json:"archives"`
+	Scopes    []MemoryScope   `json:"scopes"`
+	StoreDir  string          `json:"storeDir"`
+	Available bool            `json:"available"`
 }
 
 // writableScopes are the quick-add targets the panel offers, broad → specific.
 var writableScopes = []memory.Scope{memory.ScopeUser, memory.ScopeProject, memory.ScopeLocal}
 
-// Memory returns the loaded memory for the panel: the REASONIX.md hierarchy, the
-// saved auto-memories, and the writable scopes. Read-only; mutations go through
-// Remember / SaveDoc.
+// Memory returns the loaded memory for the panel: the REASONIX.md hierarchy,
+// active/archived auto-memories, and the writable scopes. Read-only; mutations
+// go through Remember / SaveDoc.
 func (a *App) Memory() MemoryView {
 	// Always return non-nil slices: a nil Go slice marshals to JSON `null`, which
 	// would crash the panel's `view.facts.length` / `.map`.
-	view := MemoryView{Docs: []MemoryDoc{}, Facts: []MemoryFact{}, Scopes: []MemoryScope{}}
+	view := MemoryView{Docs: []MemoryDoc{}, Facts: []MemoryFact{}, Archives: []MemoryArchive{}, Scopes: []MemoryScope{}}
 	a.mu.RLock()
 	ctrl := a.activeCtrlLocked()
 	a.mu.RUnlock()
@@ -4260,6 +4362,16 @@ func (a *App) Memory() MemoryView {
 	for _, f := range set.Store.List() {
 		view.Facts = append(view.Facts, MemoryFact{
 			Name: f.Name, Title: f.Title, Description: f.Description, Type: string(f.Type), Body: f.Body,
+		})
+	}
+	for _, f := range set.Store.ListArchived() {
+		archivedAt := ""
+		if !f.ArchivedAt.IsZero() {
+			archivedAt = f.ArchivedAt.Format(time.RFC3339)
+		}
+		view.Archives = append(view.Archives, MemoryArchive{
+			Name: f.Name, Title: f.Title, Description: f.Description, Type: string(f.Type), Body: f.Body,
+			Path: f.Path, ArchivedAt: archivedAt,
 		})
 	}
 	for _, sc := range writableScopes {

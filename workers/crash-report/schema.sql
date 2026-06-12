@@ -7,7 +7,8 @@ CREATE TABLE IF NOT EXISTS groups (
   last_seen TEXT NOT NULL,
   last_version TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'open',
-  note TEXT NOT NULL DEFAULT ''
+  note TEXT NOT NULL DEFAULT '',
+  title TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS reports (

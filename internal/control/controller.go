@@ -75,6 +75,7 @@ type Controller struct {
 	mem           *memory.Set
 	cleanup       func()
 	autoPlan      string
+	shell         sandbox.Shell // interpreter for user-invoked "!" commands; zero = auto
 	classifier    autoPlanClassifier
 	startedOnce   bool                             // guards the one-shot SessionStart hook on first turn
 	onRemember    func(rule string) RememberResult // set via Options; invoked when user picks "always allow"
@@ -197,6 +198,11 @@ const (
 )
 
 const (
+	memoryRememberTool = "remember"
+	memoryForgetTool   = "forget"
+)
+
+const (
 	maxGoalAutoTurns = 50
 	goalContinueTurn = "Continue pursuing the active goal. If it is complete, provide the concise final result and end with [goal:complete]. If it is truly blocked on a user-owned decision after trying sensible defaults, end with [goal:blocked:<short reason>]. Otherwise do the next useful work and end with [goal:continue]."
 )
@@ -246,7 +252,10 @@ type Options struct {
 	// no confinement). Frontends pass the cwd they launched the session in.
 	WorkspaceRoot string
 	AutoPlan      string
-	Classifier    autoPlanClassifier
+	// Shell is the interpreter user-invoked "!" commands run under, so /shell
+	// matches the agent's configured [tools.shell] choice. Zero value = auto.
+	Shell      sandbox.Shell
+	Classifier autoPlanClassifier
 	// OnRemember, when set, is invoked with a new allow rule the user chose to
 	// persist to disk (e.g. "Bash(go test:*)"). The callback is wired into the
 	// permission Gate on EnableInteractiveApproval.
@@ -286,6 +295,7 @@ func New(opts Options) *Controller {
 		mem:              opts.Memory,
 		cleanup:          opts.Cleanup,
 		autoPlan:         normalizeAutoPlan(opts.AutoPlan),
+		shell:            opts.Shell,
 		classifier:       classifier,
 		onRemember:       opts.OnRemember,
 		balanceURL:       opts.BalanceURL,
@@ -950,7 +960,10 @@ func (c *Controller) RunShell(command string) {
 		return
 	}
 	c.runGuarded(func(ctx context.Context) error {
-		sh := sandbox.ResolveShell()
+		sh := c.shell
+		if sh.Path == "" {
+			sh = sandbox.ResolveShell("", "", nil)
+		}
 		argv, _ := sandbox.Command(sandbox.Spec{}, sh, command) // false = unsandboxed (user invoked)
 
 		preview := []rune(command)
@@ -1129,6 +1142,10 @@ func (c *Controller) newInteractiveGate() *permission.Gate {
 	default:
 		policy.Mode = permission.Ask
 	}
+	policy.Ask = append(policy.Ask,
+		permission.Rule{Tool: memoryRememberTool},
+		permission.Rule{Tool: memoryForgetTool},
+	)
 	gate := permission.NewGate(policy, gateApprover{c})
 	gate.OnRemember = func(rule string) {
 		if c.onRemember != nil {
@@ -2408,7 +2425,7 @@ func (c *Controller) SetMode(plan, autoApproveTools bool) {
 func (c *Controller) drainApprovalsLocked(includeExplicitAsk bool) []chan approvalReply {
 	pending := make([]chan approvalReply, 0, len(c.approvals))
 	for id, approval := range c.approvals {
-		if approval.tool == planApprovalTool {
+		if requiresFreshApprovalTool(approval.tool) {
 			continue
 		}
 		if !includeExplicitAsk && !approval.autoDrain {
@@ -2482,10 +2499,30 @@ func (c *Controller) SaveDoc(path, body string) (string, error) {
 	return written, nil
 }
 
-// ForgetMemory deletes a saved auto-memory by name — the panel/TUI delete action,
+// SaveMemory writes an active auto-memory fact and refreshes the in-session
+// snapshot. It is the explicit user-confirmed counterpart to the model-owned
+// remember tool, used by management surfaces that preview a candidate first.
+func (c *Controller) SaveMemory(m memory.Memory) (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.mem == nil {
+		return "", nil
+	}
+	path, err := c.mem.Store.Save(m)
+	if err != nil {
+		return "", err
+	}
+	c.pendingMemory = append(c.pendingMemory,
+		"Saved memory \""+m.Name+"\": "+strings.Join(strings.Fields(m.Description), " "))
+	c.refreshMemoryLocked()
+	return path, nil
+}
+
+// ForgetMemory removes a saved auto-memory by name — the panel/TUI forget action,
 // the manual counterpart to the model's `forget` tool. It queues a turn-tail note
-// so the deletion applies this session (the cached prefix still lists the fact
-// until the next session re-folds the index).
+// so the removal applies this session (the cached prefix still lists the fact
+// until the next session re-folds the index). The file is archived for
+// traceability by Store.Delete.
 func (c *Controller) ForgetMemory(name string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -2496,7 +2533,7 @@ func (c *Controller) ForgetMemory(name string) error {
 		return err
 	}
 	c.pendingMemory = append(c.pendingMemory,
-		"Deleted memory \""+name+"\" — disregard its line still shown in the saved-memories index until next session.")
+		"Forgot memory \""+name+"\" — disregard its line still shown in the saved-memories index until next session.")
 	c.refreshMemoryLocked()
 	return nil
 }
@@ -2537,6 +2574,7 @@ func (c *Controller) refreshMemoryLocked() {
 type gateApprover struct{ c *Controller }
 
 func (g gateApprover) Approve(ctx context.Context, tool, subject string, args json.RawMessage) (bool, bool, error) {
+	subject = approvalDisplaySubject(tool, subject, args)
 	// Auto-allow without prompting while executing a just-approved plan (the plan
 	// was the approval) or while YOLO/full-access tool auto-approval is on. Deny
 	// rules already bit before this point, so they still block.
@@ -2547,6 +2585,104 @@ func (g gateApprover) Approve(ctx context.Context, tool, subject string, args js
 		return true, false, nil
 	}
 	return g.c.requestApproval(ctx, tool, subject)
+}
+
+func approvalDisplaySubject(tool, subject string, args json.RawMessage) string {
+	switch tool {
+	case memoryRememberTool:
+		return rememberApprovalSubject(subject, args)
+	case memoryForgetTool:
+		return forgetApprovalSubject(subject, args)
+	default:
+		return subject
+	}
+}
+
+func rememberApprovalSubject(fallback string, args json.RawMessage) string {
+	if len(args) == 0 {
+		return fallback
+	}
+	var in struct {
+		Name        string `json:"name"`
+		Title       string `json:"title"`
+		Description string `json:"description"`
+		Type        string `json:"type"`
+		Body        string `json:"body"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return fallback
+	}
+	name := approvalCompactText(firstNonEmpty(in.Name, in.Title))
+	desc := approvalTruncate(approvalCompactText(in.Description), 180)
+	body := approvalTruncate(approvalCompactText(in.Body), 240)
+	typ := string(memory.NormalizeType(in.Type))
+
+	var b strings.Builder
+	b.WriteString("Save/update memory")
+	if name != "" {
+		fmt.Fprintf(&b, " %q", name)
+	}
+	if typ != "" {
+		fmt.Fprintf(&b, " [%s]", typ)
+	}
+	if desc != "" {
+		b.WriteString(": ")
+		b.WriteString(desc)
+	}
+	if body != "" {
+		if desc == "" {
+			b.WriteString(": ")
+		} else {
+			b.WriteString(" | ")
+		}
+		b.WriteString("body: ")
+		b.WriteString(body)
+	}
+	if b.Len() == len("Save/update memory") && fallback != "" {
+		return fallback
+	}
+	return b.String()
+}
+
+func forgetApprovalSubject(fallback string, args json.RawMessage) string {
+	if len(args) == 0 {
+		return fallback
+	}
+	var in struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return fallback
+	}
+	name := approvalCompactText(in.Name)
+	if name == "" {
+		return fallback
+	}
+	return fmt.Sprintf("Archive memory %q", name)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func approvalCompactText(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
+
+func approvalTruncate(s string, maxRunes int) string {
+	if maxRunes <= 0 {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) <= maxRunes {
+		return s
+	}
+	return string(runes[:maxRunes]) + "..."
 }
 
 type seedTodo struct {
@@ -2775,23 +2911,19 @@ func (c *Controller) requestApproval(ctx context.Context, tool, subject string) 
 	c.sink.Emit(event.Event{Kind: event.ApprovalRequest, Approval: event.Approval{ID: id, Tool: tool, Subject: subject}})
 	// The agent now needs the user's attention; a Notification hook can ping an
 	// external channel (desktop notice, phone) while the run blocks on the reply.
-	if subject != "" {
-		go c.hooks.Notification(ctx, "approval needed: "+tool+" "+subject)
-	} else {
-		go c.hooks.Notification(ctx, "approval needed: "+tool)
-	}
+	go c.hooks.Notification(ctx, approvalNotificationText(tool, subject))
 
 	select {
 	case r := <-reply:
 		// Plan approvals are one-shot — never persist a session grant for them, or
 		// every future plan would auto-approve.
-		if r.allow && r.session && tool != planApprovalTool {
+		if r.allow && r.session && !requiresFreshApprovalTool(tool) {
 			rule := permission.SessionGrantRuleForScope(tool, subject)
 			c.mu.Lock()
 			c.granted[rule] = true
 			c.mu.Unlock()
 		}
-		if r.allow && r.persist && tool != planApprovalTool && c.onRemember != nil {
+		if r.allow && r.persist && !requiresFreshApprovalTool(tool) && c.onRemember != nil {
 			c.emitRememberResult(c.onRemember(permission.RememberRuleForScope(tool, subject)))
 		}
 		return r.allow, false, nil
@@ -2803,12 +2935,22 @@ func (c *Controller) requestApproval(ctx context.Context, tool, subject string) 
 	}
 }
 
+func approvalNotificationText(tool, subject string) string {
+	if requiresFreshApprovalTool(tool) {
+		return "approval needed: " + tool
+	}
+	if subject == "" {
+		return "approval needed: " + tool
+	}
+	return "approval needed: " + tool + " " + subject
+}
+
 func (c *Controller) approvalBypassAllowsLocked(tool string) bool {
-	return tool != planApprovalTool && (c.toolApprovalMode == ToolApprovalYolo || c.approvedPlanAutoApproveTools)
+	return !requiresFreshApprovalTool(tool) && (c.toolApprovalMode == ToolApprovalYolo || c.approvedPlanAutoApproveTools)
 }
 
 func (c *Controller) autoApprovalWouldAllowLocked(tool, subject string) bool {
-	if tool == planApprovalTool {
+	if requiresFreshApprovalTool(tool) {
 		return false
 	}
 	policy := c.policy
@@ -2817,12 +2959,24 @@ func (c *Controller) autoApprovalWouldAllowLocked(tool, subject string) bool {
 }
 
 func (c *Controller) sessionGrantAllowsLocked(tool, subject string) bool {
+	if requiresFreshApprovalTool(tool) {
+		return false
+	}
 	for rule := range c.granted {
 		if permission.RuleMatchesString(rule, tool, subject) {
 			return true
 		}
 	}
 	return false
+}
+
+func requiresFreshApprovalTool(tool string) bool {
+	switch tool {
+	case planApprovalTool, memoryRememberTool, memoryForgetTool:
+		return true
+	default:
+		return false
+	}
 }
 
 func (c *Controller) emitRememberResult(r RememberResult) {

@@ -15,7 +15,11 @@ import (
 // the unconfined instance registered at init. When the spec enforces, bash runs
 // each command through the sandbox (see package sandbox).
 func ConfineBash(spec sandbox.Spec, timeout ...time.Duration) tool.Tool {
-	b := bash{sb: spec, shell: sandbox.ResolveShell()}
+	shell := spec.Shell
+	if shell.Path == "" {
+		shell = sandbox.ResolveShell("", "", nil)
+	}
+	b := bash{sb: spec, shell: shell}
 	if len(timeout) > 0 {
 		b.timeout = timeout[0]
 	}
