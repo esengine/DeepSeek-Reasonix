@@ -162,49 +162,53 @@ func (s Store) archiveMemoryFile(name string) (string, error) {
 	if s.Dir == "" {
 		return "", fmt.Errorf("memory store unavailable (no user config dir)")
 	}
-	path, err := safeJoin(s.Dir, name+".md")
+	root, err := os.OpenRoot(s.Dir)
+	if os.IsNotExist(err) {
+		return "", nil
+	}
 	if err != nil {
 		return "", err
 	}
-	if _, err := os.Stat(path); err != nil {
+	defer root.Close()
+
+	file := name + ".md"
+	if _, err := root.Stat(file); err != nil {
 		if os.IsNotExist(err) {
 			return "", nil
 		}
 		return "", err
 	}
-	dir, err := safeJoin(s.Dir, ".archive")
+	if err := root.MkdirAll(".archive", 0o755); err != nil {
+		return "", err
+	}
+	dest, err := archivePath(root, name, time.Now().UTC())
 	if err != nil {
 		return "", err
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := renameMemoryFile(root, file, dest); err != nil {
 		return "", err
 	}
-	dest, err := archivePath(dir, name, time.Now().UTC())
+	out, err := safeJoin(s.Dir, dest)
 	if err != nil {
 		return "", err
 	}
-	if err := renameMemoryFile(path, dest); err != nil {
-		return "", err
-	}
-	return dest, nil
+	return out, nil
 }
 
-func archivePath(dir, name string, when time.Time) (string, error) {
+func archivePath(root *os.Root, name string, when time.Time) (string, error) {
 	stem := when.Format("20060102-150405.000") + "-" + name
-	path, err := safeJoin(dir, stem+".md")
-	if err != nil {
+	path := filepath.Join(".archive", stem+".md")
+	if _, err := root.Stat(path); os.IsNotExist(err) {
+		return path, nil
+	} else if err != nil {
 		return "", err
 	}
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return path, nil
-	}
 	for i := 1; ; i++ {
-		path, err = safeJoin(dir, fmt.Sprintf("%s-%d.md", stem, i))
-		if err != nil {
-			return "", err
-		}
-		if _, err := os.Stat(path); os.IsNotExist(err) {
+		path = filepath.Join(".archive", fmt.Sprintf("%s-%d.md", stem, i))
+		if _, err := root.Stat(path); os.IsNotExist(err) {
 			return path, nil
+		} else if err != nil {
+			return "", err
 		}
 	}
 }
@@ -235,26 +239,26 @@ func safeJoin(base, name string) (string, error) {
 	return pathAbs, nil
 }
 
-func renameMemoryFile(path, dest string) error {
-	err := os.Rename(path, dest)
+func renameMemoryFile(root *os.Root, path, dest string) error {
+	err := root.Rename(path, dest)
 	if err == nil || os.IsNotExist(err) {
 		return nil
 	}
 	if !os.IsPermission(err) {
 		return err
 	}
-	repairOwnerWrite(path, false)
-	repairOwnerWrite(filepath.Dir(path), true)
-	repairOwnerWrite(filepath.Dir(dest), true)
-	err = os.Rename(path, dest)
+	repairOwnerWrite(root, path, false)
+	repairOwnerWrite(root, filepath.Dir(path), true)
+	repairOwnerWrite(root, filepath.Dir(dest), true)
+	err = root.Rename(path, dest)
 	if err == nil || os.IsNotExist(err) {
 		return nil
 	}
 	return err
 }
 
-func repairOwnerWrite(path string, dir bool) {
-	info, err := os.Stat(path)
+func repairOwnerWrite(root *os.Root, path string, dir bool) {
+	info, err := root.Stat(path)
 	if err != nil {
 		return
 	}
@@ -262,7 +266,7 @@ func repairOwnerWrite(path string, dir bool) {
 	if dir {
 		need = 0o700
 	}
-	_ = os.Chmod(path, info.Mode().Perm()|need)
+	_ = root.Chmod(path, info.Mode().Perm()|need)
 }
 
 // render serializes a memory to frontmatter + body. The frontmatter mirrors the
