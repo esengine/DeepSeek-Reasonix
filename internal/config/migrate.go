@@ -17,6 +17,7 @@ import (
 type legacyConfig struct {
 	APIKey      string                       `json:"apiKey"`
 	BaseURL     string                       `json:"baseUrl"`
+	Model       string                       `json:"model"`
 	Lang        string                       `json:"lang"`
 	MCP         []string                     `json:"mcp"` // pre-mcpServers `--mcp`-format strings
 	MCPServers  map[string]legacyMCPServer   `json:"mcpServers"`
@@ -96,6 +97,9 @@ func MigrateLegacyIfNeeded() (*MigrationResult, error) {
 	if legacy.Lang != "" {
 		cfg.Language = legacy.Lang
 		_ = cfg.SetDesktopLanguage(legacy.Lang)
+	}
+	if legacy.Model != "" {
+		cfg.DefaultModel = legacy.Model
 	}
 	migrateLegacyBaseURL(cfg, legacy.BaseURL)
 	cfg.Plugins = legacyPlugins(legacy)
