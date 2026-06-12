@@ -370,7 +370,7 @@ function settingsTabMeta(id: SettingsTab, s: SettingsView, t: ReturnType<typeof 
     case "memory":
       return t("settings.tabSub.memory");
     case "shortcuts":
-      return "";
+      return t("settings.pageDesc.shortcuts");
     case "hooks":
       return t("settings.tabSub.hooks");
     case "network":
