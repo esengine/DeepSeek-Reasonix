@@ -362,6 +362,17 @@ func TestWeixinInstallStoresSavedAccountAndConnection(t *testing.T) {
 	if len(cfg.Bot.Allowlist.WeixinUsers) != 1 || cfg.Bot.Allowlist.WeixinUsers[0] != "user-1" {
 		t.Fatalf("weixin allowlist = %+v, want installer user id", cfg.Bot.Allowlist.WeixinUsers)
 	}
+	reloaded, err := config.Load()
+	if err != nil {
+		t.Fatalf("reload config: %v", err)
+	}
+	if len(reloaded.Bot.Connections) != 1 {
+		t.Fatalf("reloaded connections = %+v, want saved weixin connection", reloaded.Bot.Connections)
+	}
+	reloadedConnection := botConnectionView(reloaded.Bot.Connections[0])
+	if reloadedConnection.Credential.AccountID != "weixin-account" || !reloadedConnection.Credential.SecretSet {
+		t.Fatalf("reloaded credential = %+v, want saved weixin account to survive restart", reloadedConnection.Credential)
+	}
 }
 
 func TestFeishuRegistrationQRCodeURLAddsSDKMetadata(t *testing.T) {
