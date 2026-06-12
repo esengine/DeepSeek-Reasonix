@@ -1088,6 +1088,169 @@ func TestWorkspaceGitCommitDetail(t *testing.T) {
 	}
 }
 
+func TestWorkspaceGitScopesToSubdirectory(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	orig, _ := os.Getwd()
+	defer os.Chdir(orig)
+
+	repo := t.TempDir()
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, "init")
+	runGit(t, "config", "user.email", "test@example.com")
+	runGit(t, "config", "user.name", "Test User")
+
+	// Create files inside and outside the sub/ workspace.
+	if err := os.MkdirAll("sub", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll("other", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join("sub", "a.txt"), []byte("sub v1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join("other", "b.txt"), []byte("other v1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Stage and commit both files so they are tracked, then modify both.
+	runGit(t, "add", "sub/a.txt", "other/b.txt")
+	runGit(t, "commit", "-m", "init both")
+	if err := os.WriteFile(filepath.Join("sub", "a.txt"), []byte("sub v2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join("other", "b.txt"), []byte("other v2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Stage both so the index contains changes for both directories.
+	runGit(t, "add", "sub/a.txt", "other/b.txt")
+
+	// Open workspace as sub/.
+	subDir := filepath.Join(repo, "sub")
+	if err := os.Chdir(subDir); err != nil {
+		t.Fatal(err)
+	}
+
+	// ---- StageAll must only affect workspace files ----
+
+	// Unstage everything first to get a clean baseline for StageAll.
+	runGit(t, "-C", repo, "reset", "HEAD", "--", ".")
+	// Verify both are unstaged.
+	status := gitOutput(t, "-C", repo, "status", "--porcelain", "--", "sub/a.txt", "other/b.txt")
+	if !strings.Contains(status, "sub/a.txt") || !strings.Contains(status, "other/b.txt") {
+		t.Fatalf("both files should be unstaged, got %q", status)
+	}
+
+	// Stage all from the workspace (sub/).
+	if err := (&App{}).WorkspaceGitStageAll(); err != nil {
+		t.Fatalf("WorkspaceGitStageAll: %v", err)
+	}
+
+	// sub/a.txt must be staged, other/b.txt must still be unstaged.
+	staged := gitOutput(t, "-C", repo, "diff", "--cached", "--name-only")
+	if !strings.Contains(staged, "sub/a.txt") {
+		t.Fatalf("StageAll should stage sub/a.txt, cached diff = %q", staged)
+	}
+	if strings.Contains(staged, "other/b.txt") {
+		t.Fatalf("StageAll leaked to other/b.txt outside workspace, cached diff = %q", staged)
+	}
+	unstaged := gitOutput(t, "-C", repo, "diff", "--name-only")
+	if !strings.Contains(unstaged, "other/b.txt") {
+		t.Fatalf("other/b.txt should remain unstaged, got %q", unstaged)
+	}
+
+	// ---- UnstageAll must only affect workspace files ----
+
+	// Stage both again from repo root so we can test UnstageAll.
+	runGit(t, "-C", repo, "add", "sub/a.txt", "other/b.txt")
+
+	// Unstage all from the workspace (sub/).
+	if err := (&App{}).WorkspaceGitUnstageAll(); err != nil {
+		t.Fatalf("WorkspaceGitUnstageAll: %v", err)
+	}
+
+	// sub/a.txt must be unstaged, other/b.txt must remain staged.
+	staged = gitOutput(t, "-C", repo, "diff", "--cached", "--name-only")
+	if strings.Contains(staged, "sub/a.txt") {
+		t.Fatalf("UnstageAll should unstage sub/a.txt, cached diff = %q", staged)
+	}
+	if !strings.Contains(staged, "other/b.txt") {
+		t.Fatalf("UnstageAll should not touch other/b.txt outside workspace, cached diff = %q", staged)
+	}
+
+	// ---- Commit must only commit workspace files ----
+
+	// Stage both from repo root again.
+	runGit(t, "-C", repo, "add", "sub/a.txt", "other/b.txt")
+
+	// Commit from the workspace (sub/).
+	if err := (&App{}).WorkspaceGitCommit("sub change only", false, ""); err != nil {
+		t.Fatalf("WorkspaceGitCommit: %v", err)
+	}
+
+	// Only sub/a.txt should be part of the commit.
+	logFiles := gitOutput(t, "-C", repo, "log", "-1", "--name-only", "--pretty=")
+	if !strings.Contains(logFiles, "sub/a.txt") {
+		t.Fatalf("commit should include sub/a.txt, got %q", logFiles)
+	}
+	if strings.Contains(logFiles, "other/b.txt") {
+		t.Fatalf("commit leaked other/b.txt outside workspace, got %q", logFiles)
+	}
+	// other/b.txt must still be staged.
+	staged = gitOutput(t, "-C", repo, "diff", "--cached", "--name-only")
+	if !strings.Contains(staged, "other/b.txt") {
+		t.Fatalf("other/b.txt should still be staged after workspace commit, got %q", staged)
+	}
+
+	// ---- UnstageAll unborn-HEAD fallback path (rm --cached) ----
+	// Create a fresh bare repo so HEAD is unborn.
+	repo2 := t.TempDir()
+	if err := os.Chdir(repo2); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, "init")
+	runGit(t, "config", "user.email", "test@example.com")
+	runGit(t, "config", "user.name", "Test User")
+
+	if err := os.MkdirAll("sub", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll("other", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join("sub", "c.txt"), []byte("c\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join("other", "d.txt"), []byte("d\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Stage both so they are in the index on an unborn HEAD.
+	runGit(t, "add", "sub/c.txt", "other/d.txt")
+
+	// Open workspace as sub/.
+	subDir2 := filepath.Join(repo2, "sub")
+	if err := os.Chdir(subDir2); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := (&App{}).WorkspaceGitUnstageAll(); err != nil {
+		t.Fatalf("WorkspaceGitUnstageAll (unborn HEAD): %v", err)
+	}
+
+	// sub/c.txt must be unstaged, other/d.txt must still be staged.
+	cached := gitOutput(t, "-C", repo2, "diff", "--cached", "--name-only")
+	if strings.Contains(cached, "sub/c.txt") {
+		t.Fatalf("UnstageAll should unstage sub/c.txt on unborn HEAD, cached diff = %q", cached)
+	}
+	if !strings.Contains(cached, "other/d.txt") {
+		t.Fatalf("UnstageAll should not unstage other/d.txt outside workspace, cached diff = %q", cached)
+	}
+}
+
 func runGit(t *testing.T, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", args...)

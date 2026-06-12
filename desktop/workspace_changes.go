@@ -383,7 +383,7 @@ func (a *App) WorkspaceGitStageAll() error {
 	if err != nil {
 		return err
 	}
-	return workspaceRunGit(base, "add", "-A")
+	return workspaceRunGit(base, "add", "-A", "--", ".")
 }
 
 func (a *App) WorkspaceGitUnstageAll() error {
@@ -391,10 +391,10 @@ func (a *App) WorkspaceGitUnstageAll() error {
 	if err != nil {
 		return err
 	}
-	// Prefer git reset HEAD --, but on an unborn HEAD (no commits yet)
+	// Prefer git reset HEAD -- ., but on an unborn HEAD (no commits yet)
 	// git reset fails; fall back to git rm --cached.
-	if err := workspaceRunGit(base, "reset", "HEAD", "--"); err != nil {
-		return workspaceRunGit(base, "rm", "--cached", "-r", "--")
+	if err := workspaceRunGit(base, "reset", "HEAD", "--", "."); err != nil {
+		return workspaceRunGit(base, "rm", "--cached", "-r", "--", ".")
 	}
 	return nil
 }
@@ -426,7 +426,7 @@ func (a *App) WorkspaceGitCommit(message string, push bool, branch string) error
 			return err
 		}
 	}
-	if err := workspaceRunGit(base, "commit", "-m", message); err != nil {
+	if err := workspaceRunGit(base, "commit", "-m", message, "--", "."); err != nil {
 		return err
 	}
 	if push {
