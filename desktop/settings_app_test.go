@@ -267,3 +267,28 @@ func TestTrustProjectHooksForRootUsesDisplayedProjectRoot(t *testing.T) {
 		t.Fatal("active project root was trusted instead of displayed project root")
 	}
 }
+
+func TestSaveHooksSettingsForRootUsesDisplayedProjectRoot(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	projectA := t.TempDir()
+	projectB := t.TempDir()
+	app := NewApp()
+	app.tabs = map[string]*WorkspaceTab{
+		"a": {ID: "a", Scope: "project", WorkspaceRoot: projectA, Ready: true},
+		"b": {ID: "b", Scope: "project", WorkspaceRoot: projectB, Ready: true},
+	}
+	app.activeTabID = "b"
+
+	if err := app.SaveHooksSettingsForRoot("project", projectA, []HookConfigView{{
+		Event:   string(hook.Stop),
+		Command: "echo done",
+	}}); err != nil {
+		t.Fatalf("SaveHooksSettingsForRoot: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(projectA, ".reasonix", "settings.json")); err != nil {
+		t.Fatalf("displayed project root settings missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(projectB, ".reasonix", "settings.json")); err == nil {
+		t.Fatal("active project root was written instead of displayed project root")
+	}
+}

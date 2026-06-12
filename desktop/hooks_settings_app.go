@@ -54,7 +54,11 @@ func (a *App) HooksSettings(scope string) HooksSettingsView {
 }
 
 func (a *App) SaveHooksSettings(scope string, hooks []HookConfigView) error {
-	s, path, _ := normalizeHooksScope(scope, a.activeHookProjectRoot())
+	return a.SaveHooksSettingsForRoot(scope, a.activeHookProjectRoot(), hooks)
+}
+
+func (a *App) SaveHooksSettingsForRoot(scope, projectRoot string, hooks []HookConfigView) error {
+	s, path, _ := normalizeHooksScope(scope, projectRoot)
 	settings := hook.Settings{Hooks: map[hook.Event][]hook.HookConfig{}}
 	for _, h := range hooks {
 		event := hook.Event(strings.TrimSpace(h.Event))

@@ -3300,7 +3300,7 @@ function HooksSection({ onChanged }: { onChanged: () => void }) {
     try {
       const parsed = parseHooksEditorJSON();
       if (!parsed) return;
-      await app.SaveHooksSettings(scope, parsed.hooks);
+      await app.SaveHooksSettingsForRoot(scope, view?.projectRoot?.trim() ?? "", parsed.hooks);
       await load(scope);
       onChanged();
     } catch (e) {
