@@ -524,6 +524,15 @@ export const zh: Record<DictKey, string> = {
   "projectTree.addProjectTooltip": "添加新项目",
   "projectTree.collapseAllTooltip": "收起所有项目",
   "projectTree.restoreCollapsedTooltip": "恢复上次展开",
+  "projectTree.timeFilter": "按时间筛选",
+  "projectTree.timeFilterAll": "全部时间",
+  "projectTree.timeFilter10": "最新 10 条",
+  "projectTree.timeFilter1h": "最近 1 小时",
+  "projectTree.timeFilter3h": "最近 3 小时",
+  "projectTree.timeFilter5h": "最近 5 小时",
+  "projectTree.timeFilter1d": "最近 1 天",
+  "projectTree.emptyNoTimeFilterMatch": "没有话题符合时间筛选条件",
+  "projectTree.clearTimeFilter": "清除筛选",
 
   // 记忆抽屉
   "memory.title": "记忆",
