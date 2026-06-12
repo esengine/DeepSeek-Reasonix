@@ -85,7 +85,6 @@ var syntheticPrefixes = []string{
 	"<compaction-summary>",
 	"Summary of the later conversation (compacted from here on):",
 	"Summary of earlier conversation (compacted up to here):",
-	"[Mid-turn steer queued by the user.",
 }
 
 // Compose applies the plan-mode marker to a turn's text when plan mode is on,
@@ -146,11 +145,17 @@ func activeGoalBlock(goal string) string {
 	return b.String()
 }
 
-// MemoryQuickAddNote parses the legacy "# <note>" memory shortcut. The space
-// after "#" is intentional: "#7", "#issue", and "#标题" are ordinary user
-// prompts, not memory writes.
+// MemoryQuickAddNote parses the "# <note>" memory shortcut. The space after
+// "#" is intentional: "#7", "#issue", and "#标题" are ordinary user prompts,
+// not memory writes. Multi-line input starting with "# " is NOT treated as a
+// quick-add note — it is almost certainly a Markdown heading in a structured
+// prompt (e.g. "# Context\n\n- file.go\n# Objective"). Only single-line input
+// may be a quick-add note.
 func MemoryQuickAddNote(input string) (note string, ok bool) {
 	trimmed := strings.TrimSpace(input)
+	if strings.Contains(trimmed, "\n") {
+		return "", false
+	}
 	if strings.HasPrefix(trimmed, "# ") || strings.HasPrefix(trimmed, "#\t") {
 		return strings.TrimSpace(trimmed[1:]), true
 	}

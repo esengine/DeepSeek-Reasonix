@@ -3,6 +3,7 @@ package control
 import (
 	"testing"
 
+	"reasonix/internal/hook"
 	"reasonix/internal/skill"
 )
 
@@ -156,5 +157,20 @@ func TestSlashArgItems(t *testing.T) {
 	// handled by runSkillSubcommand.
 	if items, _ := SlashArgItems("/skills li", data); len(items) != 0 {
 		t.Errorf("/skills li should not offer hidden list suggestion; got %v", labelsOf(items))
+	}
+}
+
+func TestManagementHooksTrustUsesWorkspaceRoot(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	c := New(Options{WorkspaceRoot: project})
+	if !c.managementNotice("/hooks trust") {
+		t.Fatal("/hooks trust was not handled")
+	}
+	if !hook.IsTrusted(project, home) {
+		t.Fatal("/hooks trust did not trust the controller workspace root")
 	}
 }

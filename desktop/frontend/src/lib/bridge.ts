@@ -27,6 +27,8 @@ import type {
   EffortInfo,
   FilePreview,
   HistoryMessage,
+  HookConfigView,
+  HooksSettingsView,
   JobView,
   MCPServerInput,
   MemoryView,
@@ -192,6 +194,11 @@ export interface AppBindings {
   Forget(name: string): Promise<void>;
   SaveDoc(path: string, body: string): Promise<string>;
   Settings(): Promise<SettingsView>;
+  HooksSettings(scope: string): Promise<HooksSettingsView>;
+  SaveHooksSettings(scope: string, hooks: HookConfigView[]): Promise<void>;
+  SaveHooksSettingsForRoot(scope: string, projectRoot: string, hooks: HookConfigView[]): Promise<void>;
+  TrustProjectHooks(): Promise<void>;
+  TrustProjectHooksForRoot(projectRoot: string): Promise<void>;
   SetDefaultModel(ref: string): Promise<void>;
   SetPlannerModel(ref: string): Promise<void>;
   SetSubagentModel(ref: string): Promise<void>;
@@ -491,6 +498,34 @@ function makeMockApp(): AppBindings {
         { name: "node", description: "Inspect a specific graph node." },
       ],
     },
+    {
+      name: "time",
+      transport: "stdio",
+      status: "deferred",
+      builtIn: true,
+      configured: true,
+      autoStart: true,
+      tier: "lazy",
+      command: "reasonix",
+      args: ["builtin-mcp", "time"],
+      tools: 0,
+      prompts: 0,
+      resources: 0,
+    },
+    {
+      name: "context7",
+      transport: "stdio",
+      status: "disabled",
+      builtIn: true,
+      configured: true,
+      autoStart: false,
+      tier: "lazy",
+      command: "npx",
+      args: ["-y", "@upstash/context7-mcp"],
+      tools: 0,
+      prompts: 0,
+      resources: 0,
+    },
     { name: "github", transport: "stdio", status: "connected", configured: true, autoStart: true, tier: "background", command: "npx", args: ["-y", "@modelcontextprotocol/server-github"], tools: 12, prompts: 2, resources: 0 },
     {
       name: "linear",
@@ -759,6 +794,27 @@ function makeMockApp(): AppBindings {
     providerKinds: ["openai"],
     autoApproveTools: false,
     bypass: false,
+  };
+  const hookEvents = ["PreToolUse", "PostToolUse", "UserPromptSubmit", "Stop", "PostLLMCall", "SessionStart", "SessionEnd", "SubagentStop", "Notification", "PreCompact"];
+  const hookSettings: Record<string, HooksSettingsView> = {
+    global: {
+      scope: "global",
+      path: "~/.reasonix/settings.json",
+      projectRoot: "",
+      trusted: true,
+      events: hookEvents,
+      hooks: [
+        { event: "Stop", command: "echo turn done", description: "Notify after each turn" },
+      ],
+    },
+    project: {
+      scope: "project",
+      path: "./.reasonix/settings.json",
+      projectRoot: "/mock/project",
+      trusted: false,
+      events: hookEvents,
+      hooks: [],
+    },
   };
   settings.providers = settings.providers.map((provider) =>
     provider.apiKeyEnv === "DEEPSEEK_API_KEY" ? { ...provider, keySet: !freshMock } : provider,
@@ -2014,6 +2070,26 @@ function makeMockApp(): AppBindings {
     },
     async Settings() {
       return JSON.parse(JSON.stringify(settings)) as SettingsView;
+    },
+    async HooksSettings(scope: string) {
+      const key = scope === "project" ? "project" : "global";
+      return JSON.parse(JSON.stringify(hookSettings[key])) as HooksSettingsView;
+    },
+    async SaveHooksSettings(scope: string, hooks: HookConfigView[]) {
+      const key = scope === "project" ? "project" : "global";
+      hookSettings[key].hooks = JSON.parse(JSON.stringify(hooks)) as HookConfigView[];
+    },
+    async SaveHooksSettingsForRoot(scope: string, _projectRoot: string, hooks: HookConfigView[]) {
+      const key = scope === "project" ? "project" : "global";
+      hookSettings[key].hooks = JSON.parse(JSON.stringify(hooks)) as HookConfigView[];
+    },
+    async TrustProjectHooks() {
+      hookSettings.project.trusted = true;
+    },
+    async TrustProjectHooksForRoot(projectRoot: string) {
+      if (projectRoot && projectRoot === hookSettings.project.projectRoot) {
+        hookSettings.project.trusted = true;
+      }
     },
     async SetDefaultModel(ref: string) {
       settings.defaultModel = ref;

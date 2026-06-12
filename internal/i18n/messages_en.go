@@ -35,8 +35,12 @@ var English = Messages{
 	ResumeBadIndexFmt:   "pick a session 1–%d (run /resume to list)",
 	ResumeAlreadyActive: "already in that session",
 	ResumedTitle:        "resumed session",
-	ResumePickTitle:     "Resume a saved session",
-	ResumePickHint:      "↑/↓ move · Enter resume · Esc cancel",
+
+	RenameUsage:     "usage: /rename <new title>  or  /rename <n> <new title>",
+	RenameNoSession: "no active session to rename",
+	RenameDoneFmt:   "session renamed to %q",
+	ResumePickTitle: "Resume a saved session",
+	ResumePickHint:  "↑/↓ move · Enter resume · Esc cancel",
 
 	ChatThinking:                "thinking…",
 	ChatThoughtForFmt:           "thought for %ds",
@@ -69,6 +73,8 @@ var English = Messages{
 	PermissionAlreadyAllowedFmt: "permission already covered in %s: %s",
 	PermissionSaveFailedFmt:     "permission save failed for %s: %v",
 	DiffFoldedFmt:               "… +%d more lines",
+	DiffFoldEnabledFmt:          "diff folded to %d lines (/diff-fold to expand)",
+	DiffFoldDisabled:            "diff expanded — showing all lines (/diff-fold to fold)",
 
 	OutputStyleNone:    "no output styles available",
 	OutputStyleHeader:  "output styles:",
@@ -162,6 +168,7 @@ var English = Messages{
 	CmdBranch:       "create a conversation branch",
 	CmdSwitchBranch: "switch conversation branch",
 	CmdResume:       "resume a saved session",
+	CmdRename:       "rename a session",
 	CmdModel:        "switch model",
 	CmdMemory:       "show memory files",
 	CmdGoal:         "set or clear the active goal",
@@ -175,6 +182,7 @@ var English = Messages{
 	CmdLanguage:     "switch CLI language",
 	CmdSkill:        "manage skills",
 	CmdVerbose:      "toggle thinking text",
+	CmdDiffFold:     "toggle diff fold/expand",
 	CmdSandbox:      "show sandbox status",
 	CmdEffort:       "set reasoning effort",
 	CmdAutoPlan:     "configure automatic plan mode",
@@ -308,7 +316,8 @@ var English = Messages{
 	WriteEnvErr:               "write .env:",
 
 	ProviderErrBadRequest:          "Malformed request (HTTP 400): the request body was rejected. This is likely a bug — please report it if it persists.",
-	ProviderErrAuth:                "Authentication failed (HTTP 401): your API key is missing, wrong, or expired. Check the key in .env or run `reasonix setup`.",
+	ProviderErrAuth:                "Authentication failed (HTTP 401): your API key is missing or unset. Add it to .env or run `reasonix setup`.",
+	ProviderErrAuthRejected:        "Authentication failed (HTTP 401): the server rejected your API key. It may be wrong or expired, or the provider hit a transient auth/quota issue — retried with backoff and still failed. Try again shortly, or check the key in .env / run `reasonix setup`.",
 	ProviderErrInsufficientBalance: "Insufficient balance (HTTP 402): your account is out of credit. Top up your account, then retry.",
 	ProviderErrUnprocessable:       "Invalid parameters (HTTP 422): a request parameter was rejected. This is likely a bug — please report it if it persists.",
 	ProviderErrRateLimited:         "Rate limit reached (HTTP 429): too many requests (TPM/RPM). Retried with backoff — slow down or try again shortly.",
@@ -329,6 +338,26 @@ var English = Messages{
 	ProviderPickLabel:    "Select a model from %s",
 	ProviderNoModelsFmt:  "provider %s has no configured models",
 
+	// self-update
+	UpgradeChecking:            "Checking for updates…",
+	UpgradeDevBuild:            "dev builds cannot self-update",
+	UpgradeFetchFailed:         "failed to check for updates: %v",
+	UpgradeInvalidVersion:      "remote version is not valid semver",
+	UpgradeAlreadyLatest:       "Already on the latest version.",
+	UpgradeForcing:             "Reinstalling the same version…",
+	UpgradeAvailableFmt:        "Current: %s → Latest: %s",
+	UpgradeNoAssetFmt:          "no binary found for %s",
+	UpgradeDownloadingFmt:      "Downloading %s (%s)…",
+	UpgradeDownloadFailed:      "download failed: %v",
+	UpgradeVerifying:           "Verifying checksum…",
+	UpgradeChecksumFailed:      "could not fetch checksum file: %v",
+	UpgradeChecksumMismatchFmt: "SHA256 mismatch: got %s, want %s",
+	UpgradeChecksumNotFoundFmt: "%s not found in SHA256SUMS",
+	UpgradeExtractFailed:       "failed to extract binary: %v",
+	UpgradeApplying:            "Replacing binary…",
+	UpgradeApplyFailed:         "failed to apply update: %v",
+	UpgradeSuccessFmt:          "Updated %s → %s",
+
 	UsageBody: `reasonix — a config- and plugin-driven coding agent (multi-model)
 
 Usage:
@@ -341,6 +370,7 @@ Usage:
   reasonix mcp <add|remove|list>                        manage MCP servers in reasonix.toml
   reasonix doctor [--json]                              print redacted local diagnostics
   reasonix bot start|doctor|weixin-login                multi-channel IM bot gateway
+  reasonix upgrade [--check] [--force]                   self-update to the latest release
   reasonix version
   reasonix help
 

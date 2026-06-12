@@ -1048,6 +1048,7 @@ function renderHistoryMessages(ms){
 fetch('/history').then(r=>r.json()).then(renderHistoryMessages).catch(()=>{});
 
 // ── session list ──
+let sessionCount=0;
 function loadSessions(){
   sessionCount=0;
   fetch('/sessions').then(r=>r.json()).then(ss=>{
@@ -1126,7 +1127,7 @@ $('#btn-tree').onclick=()=>{post('/submit',{input:'/tree'});};
 $('#btn-stats').onclick=()=>openStats();
 
 // ── cumulative stats ──
-let cumulativeTokens=0, cumulativeCost=0, cumulativeCacheHit=0, cumulativeCacheMiss=0, sessionCount=0;
+let cumulativeTokens=0, cumulativeCost=0, cumulativeCacheHit=0, cumulativeCacheMiss=0;
 function openStats(){
   const modal=$('#stats-modal');
   if(!modal)return;

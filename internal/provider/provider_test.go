@@ -199,6 +199,30 @@ func TestPricingSymbolCustom(t *testing.T) {
 	}
 }
 
+func TestPricingSymbolNormalizesCurrencyCodes(t *testing.T) {
+	cases := []struct {
+		currency string
+		want     string
+	}{
+		{currency: "USD", want: "$"},
+		{currency: "dollars", want: "$"},
+		{currency: "CNY", want: "¥"},
+		{currency: "￥", want: "¥"},
+		{currency: "EUR", want: "€"},
+		{currency: "₹", want: "₹"},
+		{currency: "aud", want: "AUD "},
+		{currency: "A$", want: "A$"},
+		{currency: "HK$", want: "HK$"},
+		{currency: "楼", want: "¥"},
+	}
+	for _, tc := range cases {
+		p := &Pricing{Currency: tc.currency}
+		if got := p.Symbol(); got != tc.want {
+			t.Errorf("Currency %q Symbol() = %q, want %q", tc.currency, got, tc.want)
+		}
+	}
+}
+
 // --- AuthError ---
 
 func TestAuthErrorWithKeyEnv(t *testing.T) {

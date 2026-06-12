@@ -5,6 +5,7 @@ import { FileText } from "lucide-react";
 import { asArray } from "../lib/array";
 import { app } from "../lib/bridge";
 import { useT, type Translator } from "../lib/i18n";
+import { formatMoney } from "../lib/money";
 import type { DictKey } from "../locales/en";
 import type { ContextInfo, ContextPanelInfo, WireUsage } from "../lib/types";
 
@@ -42,19 +43,6 @@ function fmtDuration(ms: number, t: Translator): string {
   return t("context.durationMinutesSeconds", { minutes, seconds });
 }
 
-function currencySymbol(currency?: string): string {
-  const value = (currency || "¥").trim();
-  if (/^(cny|rmb|yuan)$/i.test(value)) return "¥";
-  if (/^(usd|dollar)$/i.test(value)) return "$";
-  return value || "¥";
-}
-
-function fmtMoney(amount: number, currency?: string): string {
-  if (amount <= 0) return "-";
-  const symbol = currencySymbol(currency);
-  return `${symbol}${amount < 1 ? amount.toFixed(4) : amount.toFixed(2)}`;
-}
-
 interface HealthResult {
   tone: "good" | "notice" | "warn";
   shortKey: DictKey;
@@ -62,6 +50,35 @@ interface HealthResult {
 }
 
 type ContextFileRow = { key: string; path: string; meta: string; time: string; detail: string };
+
+export function contextCostDisplay({
+  info,
+  sessionCost,
+  sessionCurrency,
+  usage,
+}: {
+  info?: Pick<ContextPanelInfo, "sessionCost" | "sessionCurrency" | "sessionCostUsd"> | null;
+  sessionCost?: number;
+  sessionCurrency?: string;
+  usage?: Pick<WireUsage, "cost" | "costUsd" | "currency">;
+}): { amount: number; currency?: string } {
+  if (info?.sessionCost && info.sessionCost > 0) {
+    return { amount: info.sessionCost, currency: info.sessionCurrency || sessionCurrency || usage?.currency };
+  }
+  if (sessionCost && sessionCost > 0) {
+    return { amount: sessionCost, currency: sessionCurrency || info?.sessionCurrency || usage?.currency };
+  }
+  if (usage?.cost && usage.cost > 0) {
+    return { amount: usage.cost, currency: usage.currency || sessionCurrency || info?.sessionCurrency };
+  }
+  if (info?.sessionCostUsd && info.sessionCostUsd > 0) {
+    return { amount: info.sessionCostUsd, currency: info.sessionCurrency || sessionCurrency || usage?.currency };
+  }
+  if (usage?.costUsd && usage.costUsd > 0) {
+    return { amount: usage.costUsd, currency: usage.currency || sessionCurrency || info?.sessionCurrency };
+  }
+  return { amount: 0, currency: info?.sessionCurrency || sessionCurrency || usage?.currency };
+}
 
 interface ContextBreakdown {
   promptTokens: number;
@@ -206,8 +223,7 @@ export function ContextPanel({
   const reasoningTokens = hasPanelUsage ? info?.reasoningTokens ?? 0 : usage?.reasoningTokens ?? 0;
   const cacheHitTokens = hasPanelUsage ? info?.cacheHitTokens ?? 0 : usage?.cacheHitTokens ?? 0;
   const cacheMissTokens = hasPanelUsage ? info?.cacheMissTokens ?? 0 : usage?.cacheMissTokens ?? 0;
-  const cost = info?.sessionCost && info.sessionCost > 0 ? info.sessionCost : sessionCost && sessionCost > 0 ? sessionCost : info?.sessionCostUsd ?? 0;
-  const currency = sessionCurrency || info?.sessionCurrency || usage?.currency || "¥";
+  const cost = contextCostDisplay({ info, sessionCost, sessionCurrency, usage });
   const readFiles = asArray(info?.readFiles);
   const changedFiles = asArray(info?.changedFiles);
 
@@ -282,7 +298,7 @@ export function ContextPanel({
             <SectionHeading title={t("context.costMetrics")} />
             <div className="context-panel__stats">
               <MetricCard label={t("context.cacheHit")} value={cachePct > 0 ? `${cachePct}%` : "-"} tone="accent" />
-              <MetricCard label={t("context.sessionCost")} value={fmtMoney(cost, currency)} />
+              <MetricCard label={t("context.sessionCost")} value={formatMoney(cost.amount, cost.currency, "dash")} />
             </div>
           </section>
           <section className="context-panel__section context-panel__section--status">

@@ -288,6 +288,11 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	}
 	b.WriteString("\n")
 
+	b.WriteString("[builtin_mcp]\n")
+	fmt.Fprintf(&b, "time_enabled = %v   # built-in Time MCP; off until manually enabled\n", c.BuiltInMCP.TimeEnabled)
+	fmt.Fprintf(&b, "context7_enabled = %v   # built-in Context7 MCP; off until manually enabled\n", c.BuiltInMCP.Context7Enabled)
+	b.WriteString("\n")
+
 	renderLSPConfig(&b, c.LSP)
 
 	b.WriteString("[skills]\n")

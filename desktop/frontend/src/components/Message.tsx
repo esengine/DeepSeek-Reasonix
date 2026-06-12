@@ -65,11 +65,13 @@ export function UserMessage({
   failed,
   turn,
   anchorId,
+  id,
 }: {
   text: string;
   failed?: boolean;
   turn?: number;
   anchorId?: string;
+  id?: string;
 }) {
   const t = useT();
   const imSource = parseImSourceMessage(text);
@@ -106,6 +108,7 @@ export function UserMessage({
       data-question-anchor={anchorId}
       data-turn={turn}
       data-im-source={imSource?.provider || undefined}
+      data-history-restore={id && id.startsWith("h") ? "" : undefined}
     >
       <div className="msg__body">
         {imSource ? (
@@ -333,20 +336,19 @@ export function TurnActions({
 export const AssistantMessage = memo(function AssistantMessage({
   item,
   defaultExpanded = false,
-  expandWhileStreaming = true,
 }: {
   item: AssistantItem;
   defaultExpanded?: boolean;
-  /** false in compact/minimal: completed steps fold away, so auto-open + fold reads as flicker. */
-  expandWhileStreaming?: boolean;
 }) {
   const t = useT();
-  const [reasoningOpen, setReasoningOpen] = useState((expandWhileStreaming && item.streaming) || defaultExpanded);
+  // Thinking streams in before the answer — show it live while the model is still
+  // working, then it stays available behind the toggle once the answer arrives.
+  const [reasoningOpen, setReasoningOpen] = useState(item.streaming || defaultExpanded);
   const hasText = item.streaming || item.text.trim() !== "";
   const processOnly = Boolean(item.reasoning) && !hasText;
   const processWithText = Boolean(item.reasoning) && hasText;
   return (
-    <div className={`msg msg--assistant${processOnly ? " msg--process-only" : ""}${processWithText ? " msg--process-with-text" : ""}`}>
+    <div className={`msg msg--assistant${processOnly ? " msg--process-only" : ""}${processWithText ? " msg--process-with-text" : ""}`} data-history-restore={item.id.startsWith("h") ? "" : undefined}>
       {item.reasoning && (
         <div className="reasoning">
           <button

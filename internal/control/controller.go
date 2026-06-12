@@ -30,6 +30,7 @@ import (
 
 	"reasonix/internal/agent"
 	"reasonix/internal/billing"
+	"reasonix/internal/builtinmcp"
 	"reasonix/internal/checkpoint"
 	"reasonix/internal/codegraph"
 	"reasonix/internal/command"
@@ -2208,6 +2209,9 @@ func (c *Controller) ConnectConfiguredMCPServer(name string) (int, error) {
 	}
 	if name == "codegraph" {
 		return c.connectCodegraphMCPServer(cfg)
+	}
+	if p, ok := builtinmcp.Entry(name); ok {
+		return c.connectMCPServer(p)
 	}
 	return 0, fmt.Errorf("no configured MCP server named %q", name)
 }
