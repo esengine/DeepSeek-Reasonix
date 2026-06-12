@@ -211,7 +211,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// Partition configured plugins by tier so eager/lazy/background can each
 	// take the path that fits them. User entries default to background: the
 	// session starts immediately while enabled MCP servers warm up.
-	autoStartEntries := builtinmcp.AppendMissing(cfg.AutoStartPlugins(), cfg.Plugins)
+	autoStartEntries := builtinmcp.AppendMissing(cfg.AutoStartPlugins(), cfg.Plugins, pluginSpecNames(opts.ExtraPlugins)...)
 	eagerEntries, lazyEntries, bgEntries := partitionByTier(autoStartEntries)
 
 	// Auto-demote: any eager plugin that has been chronically slow (recent
@@ -1095,6 +1095,14 @@ func PluginSpecs(entries []config.PluginEntry) []plugin.Spec {
 		}
 	}
 	return specs
+}
+
+func pluginSpecNames(specs []plugin.Spec) []string {
+	names := make([]string, 0, len(specs))
+	for _, s := range specs {
+		names = append(names, s.Name)
+	}
+	return names
 }
 
 // MCPStartupNotice formats the warning shown when configured MCP servers failed

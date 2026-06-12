@@ -2582,9 +2582,6 @@ func (a *App) UpdateMCPServer(name string, in MCPServerInput) error {
 	if name == "codegraph" {
 		return fmt.Errorf("codegraph is built in; configure it with [codegraph]")
 	}
-	if builtinmcp.IsBuiltIn(name) {
-		return fmt.Errorf("%s is built in; it cannot be edited", name)
-	}
 	ctrl := a.activeCtrl()
 	if ctrl == nil {
 		return fmt.Errorf("no active session")
@@ -2597,6 +2594,9 @@ func (a *App) UpdateMCPServer(name string, in MCPServerInput) error {
 		return err
 	}
 	if !found {
+		if builtinmcp.IsBuiltIn(name) {
+			return fmt.Errorf("%s is built in; it cannot be edited", name)
+		}
 		return fmt.Errorf("no configured MCP server named %q", name)
 	}
 	updated.Type = normalizeMCPTransport(in.Transport)
@@ -2645,7 +2645,11 @@ func (a *App) RemoveMCPServer(name string) error {
 		return fmt.Errorf("codegraph is built in; it cannot be removed")
 	}
 	if builtinmcp.IsBuiltIn(name) {
-		return fmt.Errorf("%s is built in; it cannot be removed", name)
+		if _, found, err := a.desktopMCPServerForEdit(name); err != nil {
+			return err
+		} else if !found {
+			return fmt.Errorf("%s is built in; it cannot be removed", name)
+		}
 	}
 	tab := a.activeTab()
 	if tab == nil || tab.Ctrl == nil {
@@ -2680,7 +2684,9 @@ func (a *App) ReconnectMCPServer(name string) error {
 	_, err := a.connectConfiguredMCPServerForTab(tab, name)
 	if err != nil {
 		entry := config.PluginEntry{Name: name}
-		if p, ok := builtinmcp.Entry(name); ok {
+		if p, found, cfgErr := a.desktopMCPServerForEdit(name); cfgErr == nil && found {
+			entry = p
+		} else if p, ok := builtinmcp.Entry(name); ok {
 			entry = p
 		}
 		recordMCPFailure(tab.Ctrl, entry, err)
@@ -2700,7 +2706,11 @@ func (a *App) ClearMCPServerAuthentication(name string) error {
 		return fmt.Errorf("codegraph is built in; it has no stored MCP authentication")
 	}
 	if builtinmcp.IsBuiltIn(name) {
-		return fmt.Errorf("%s is built in; it has no stored MCP authentication", name)
+		if _, found, err := a.desktopMCPServerForEdit(name); err != nil {
+			return err
+		} else if !found {
+			return fmt.Errorf("%s is built in; it has no stored MCP authentication", name)
+		}
 	}
 	ctrl := a.activeCtrl()
 	if ctrl == nil {
@@ -2727,7 +2737,11 @@ func (a *App) SetMCPServerEnabled(name string, enabled bool) error {
 	if name == "codegraph" {
 		return a.setCodegraphEnabled(enabled)
 	}
-	if builtinmcp.IsBuiltIn(name) {
+	configuredEntry, hasConfiguredEntry, err := a.desktopMCPServerForEdit(name)
+	if err != nil {
+		return err
+	}
+	if builtinmcp.IsBuiltIn(name) && !hasConfiguredEntry {
 		return a.setBuiltInMCPEnabled(name, enabled)
 	}
 	if enabled {
@@ -2742,6 +2756,15 @@ func (a *App) SetMCPServerEnabled(name string, enabled bool) error {
 	if s, ok := findMCPServerView(tab.Ctrl, name); ok {
 		s.Status = "disabled"
 		s.Error = ""
+		a.mu.Lock()
+		if tab.disabledMCP == nil {
+			tab.disabledMCP = map[string]ServerView{}
+		}
+		tab.disabledMCP[name] = s
+		tab.mcpOrder = mergeServerOrder(tab.mcpOrder, []ServerView{s})
+		a.mu.Unlock()
+	} else if hasConfiguredEntry {
+		s := withPluginConfig(ServerView{Name: name, Status: "disabled"}, configuredEntry)
 		a.mu.Lock()
 		if tab.disabledMCP == nil {
 			tab.disabledMCP = map[string]ServerView{}
@@ -2783,15 +2806,15 @@ func (a *App) SetMCPServerTier(name, tier string) error {
 	if name == "codegraph" {
 		return a.setCodegraphTier(tier)
 	}
-	if builtinmcp.IsBuiltIn(name) {
-		return fmt.Errorf("%s is built in; it always uses lazy startup", name)
-	}
 	tier = normalizeMCPTier(tier)
 	updated, found, err := a.desktopMCPServerForEdit(name)
 	if err != nil {
 		return err
 	}
 	if !found {
+		if builtinmcp.IsBuiltIn(name) {
+			return fmt.Errorf("%s is built in; it always uses lazy startup", name)
+		}
 		return fmt.Errorf("no configured MCP server named %q", name)
 	}
 	updated.Tier = tier

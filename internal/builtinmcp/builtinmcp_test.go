@@ -11,7 +11,7 @@ func TestEntries(t *testing.T) {
 		t.Fatalf("Entries() length = %d, want 2", len(entries))
 	}
 	want := map[string][]string{
-		TimeName:     []string{"-y", "@modelcontextprotocol/server-time"},
+		TimeName:     []string{"mcp-server-time"},
 		Context7Name: []string{"-y", "@upstash/context7-mcp"},
 	}
 	for _, e := range entries {
@@ -19,8 +19,12 @@ func TestEntries(t *testing.T) {
 		if !ok {
 			t.Fatalf("unexpected built-in MCP entry: %+v", e)
 		}
-		if e.Type != "stdio" || e.Command != "npx" || e.Tier != "lazy" {
-			t.Fatalf("%s type/command/tier = %q/%q/%q, want stdio/npx/lazy", e.Name, e.Type, e.Command, e.Tier)
+		wantCommand := map[string]string{
+			TimeName:     "uvx",
+			Context7Name: "npx",
+		}[e.Name]
+		if e.Type != "stdio" || e.Command != wantCommand || e.Tier != "lazy" {
+			t.Fatalf("%s type/command/tier = %q/%q/%q, want stdio/%s/lazy", e.Name, e.Type, e.Command, e.Tier, wantCommand)
 		}
 		if !reflect.DeepEqual(e.Args, args) {
 			t.Fatalf("%s args = %+v, want %+v", e.Name, e.Args, args)
@@ -37,5 +41,12 @@ func TestAppendMissingLetsUserConfigWin(t *testing.T) {
 	got := AppendMissing(nil, base)
 	if len(got) != 1 || got[0].Name != Context7Name {
 		t.Fatalf("AppendMissing with configured time = %+v, want only context7", got)
+	}
+}
+
+func TestAppendMissingLetsReservedNamesWin(t *testing.T) {
+	got := AppendMissing(nil, nil, TimeName)
+	if len(got) != 1 || got[0].Name != Context7Name {
+		t.Fatalf("AppendMissing with reserved time = %+v, want only context7", got)
 	}
 }

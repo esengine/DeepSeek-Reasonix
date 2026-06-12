@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/builtinmcp"
 	"reasonix/internal/config"
 	"reasonix/internal/event"
 	"reasonix/internal/netclient"
@@ -1068,6 +1069,13 @@ func TestPartitionByTier(t *testing.T) {
 	}
 	if len(lazy) != 1 || lazy[0].Name != "l1" {
 		t.Fatalf("lazy bucket = %+v, want [l1]", lazy)
+	}
+}
+
+func TestBuiltInMCPsYieldToExtraPluginNames(t *testing.T) {
+	got := builtinmcp.AppendMissing(nil, nil, pluginSpecNames([]plugin.Spec{{Name: "time"}})...)
+	if len(got) != 1 || got[0].Name != "context7" {
+		t.Fatalf("built-in MCP entries with extra time = %+v, want only context7", got)
 	}
 }
 

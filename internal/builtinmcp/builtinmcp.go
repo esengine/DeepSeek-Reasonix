@@ -16,8 +16,8 @@ func Entries() []config.PluginEntry {
 		{
 			Name:    TimeName,
 			Type:    "stdio",
-			Command: "npx",
-			Args:    []string{"-y", "@modelcontextprotocol/server-time"},
+			Command: "uvx",
+			Args:    []string{"mcp-server-time"},
 			Tier:    "lazy",
 		},
 		{
@@ -46,12 +46,16 @@ func IsBuiltIn(name string) bool {
 	return ok
 }
 
-// AppendMissing appends built-in MCP entries unless a user-configured entry with
-// the same name exists. Explicit user config wins, including auto_start=false.
-func AppendMissing(out []config.PluginEntry, configured []config.PluginEntry) []config.PluginEntry {
+// AppendMissing appends built-in MCP entries unless a configured or
+// session-scoped entry with the same name exists. Explicit user and host config
+// wins, including auto_start=false.
+func AppendMissing(out []config.PluginEntry, configured []config.PluginEntry, reservedNames ...string) []config.PluginEntry {
 	seen := make(map[string]bool, len(configured))
 	for _, e := range configured {
 		seen[e.Name] = true
+	}
+	for _, name := range reservedNames {
+		seen[name] = true
 	}
 	for _, e := range Entries() {
 		if !seen[e.Name] {
