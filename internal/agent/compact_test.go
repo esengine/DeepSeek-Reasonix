@@ -207,6 +207,40 @@ func TestRunCompactsAfterFinalAnswer(t *testing.T) {
 	}
 }
 
+func TestCompactKeepsPriorDigests(t *testing.T) {
+	// A prior digest anywhere in the folded region is kept verbatim, not
+	// re-summarized — so a fact it already captured is not lost to re-fold drift.
+	priorDigest := summaryTagOpen + "\n## Standing facts\n- db is orion_prod_42\n" + summaryTagClose
+	big := strings.Repeat("work output ", 200)
+	sess := &Session{Messages: []provider.Message{
+		{Role: provider.RoleSystem, Content: "sys"},
+		{Role: provider.RoleUser, Content: "task"},
+		{Role: provider.RoleAssistant, Content: big}, // breaks leading-summary contiguity
+		{Role: provider.RoleUser, Content: priorDigest},
+		{Role: provider.RoleAssistant, Content: big},
+		{Role: provider.RoleUser, Content: "next"},
+		{Role: provider.RoleAssistant, Content: "ok"},
+	}}
+	a := New(&fakeProvider{reply: "new digest"}, tool.NewRegistry(), sess,
+		Options{RecentKeep: 2, ArchiveDir: t.TempDir()}, event.Discard)
+
+	if err := a.compact(context.Background(), "manual", "", true); err != nil {
+		t.Fatalf("compact: %v", err)
+	}
+
+	// The fake summarizer returns "new digest" (no fact); the prior fact survives
+	// only because the prior digest was kept verbatim rather than re-folded.
+	var kept bool
+	for _, m := range sess.Snapshot() {
+		if strings.Contains(m.Content, "orion_prod_42") {
+			kept = true
+		}
+	}
+	if !kept {
+		t.Fatalf("prior digest re-summarized away: %+v", sess.Snapshot())
+	}
+}
+
 func TestCompactReplacesHistory(t *testing.T) {
 	prov := &fakeProvider{reply: "- goal: do X\n- changed file Y"}
 	bigStep := strings.Repeat("important implementation detail ", 80)
