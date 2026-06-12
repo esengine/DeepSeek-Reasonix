@@ -995,18 +995,6 @@ export function ProjectTree({
           {t("projectTree.workspaceTitle")}
         </span>
         <span className="project-tree__header-actions">
-          <Tooltip label={collapseToggleLabel} className="project-tree__action-slot project-tree__header-action-slot project-tree__action-slot--collapse">
-            <button
-              type="button"
-              className={`project-tree__collapse-all${canRestoreCollapsedView ? " project-tree__collapse-all--restore" : ""}`}
-              aria-label={collapseToggleLabel}
-              aria-pressed={canRestoreCollapsedView}
-              disabled={!canToggleCollapsedView}
-              onClick={toggleCollapsedView}
-            >
-              {canRestoreCollapsedView ? <ListRestart size={14} /> : <ListCollapse size={14} />}
-            </button>
-          </Tooltip>
           <Tooltip label={t("projectTree.timeFilter")} className="project-tree__action-slot project-tree__header-action-slot">
             <div ref={filterRef} className="project-tree__time-filter">
               <button
@@ -1075,6 +1063,18 @@ export function ProjectTree({
                 </div>
               )}
             </div>
+          </Tooltip>
+          <Tooltip label={collapseToggleLabel} className="project-tree__action-slot project-tree__header-action-slot project-tree__action-slot--collapse">
+            <button
+              type="button"
+              className={`project-tree__collapse-all${canRestoreCollapsedView ? " project-tree__collapse-all--restore" : ""}`}
+              aria-label={collapseToggleLabel}
+              aria-pressed={canRestoreCollapsedView}
+              disabled={!canToggleCollapsedView}
+              onClick={toggleCollapsedView}
+            >
+              {canRestoreCollapsedView ? <ListRestart size={14} /> : <ListCollapse size={14} />}
+            </button>
           </Tooltip>
           <Tooltip label={t("projectTree.addProjectTooltip")} className="project-tree__action-slot project-tree__header-action-slot project-tree__action-slot--add">
             <button

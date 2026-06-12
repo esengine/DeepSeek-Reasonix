@@ -14365,6 +14365,7 @@ a[href] {
 
 .project-tree__add-project,
 .project-tree__collapse-all,
+.project-tree__header-action-btn,
 .project-tree__new-topic {
   --wails-draggable: no-drag;
   width: 24px;
@@ -14381,7 +14382,8 @@ a[href] {
 }
 
 .project-tree__header-actions .project-tree__add-project,
-.project-tree__header-actions .project-tree__collapse-all {
+.project-tree__header-actions .project-tree__collapse-all,
+.project-tree__header-actions .project-tree__header-action-btn {
   width: 22px;
   height: 22px;
   border-radius: 7px;
@@ -14390,7 +14392,8 @@ a[href] {
 }
 
 .project-tree__add-project:hover:not(:disabled),
-.project-tree__collapse-all:hover:not(:disabled) {
+.project-tree__collapse-all:hover:not(:disabled),
+.project-tree__header-action-btn:hover {
   background: var(--button-bg);
   border-color: color-mix(in srgb, var(--accent) 28%, var(--border-soft));
   color: var(--fg);
@@ -14398,7 +14401,8 @@ a[href] {
 }
 
 .project-tree__add-project:disabled,
-.project-tree__collapse-all:disabled {
+.project-tree__collapse-all:disabled,
+.project-tree__header-action-btn:disabled {
   cursor: default;
   opacity: 0.34;
 }
@@ -14410,29 +14414,13 @@ a[href] {
   opacity: 0.96;
 }
 
-/* Time filter button in the project tree header — same size/shape as collapse/add buttons. */
-.project-tree__header-action-btn {
-  --wails-draggable: no-drag;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 7px;
-  border: 0.5px solid transparent;
-  background: var(--bg-elev);
-  box-shadow: 0 1px 2px color-mix(in srgb, var(--shadow) 9%, transparent);
-  color: var(--fg-muted);
-  cursor: pointer;
+/* Header-action-btn in the header-actions row uses min-width so it can
+   expand when a time-filter label is shown alongside the clock icon. */
+.project-tree__header-actions .project-tree__header-action-btn {
+  min-width: 22px;
   transition: background 0.15s, color 0.15s, border-color 0.15s, opacity 0.15s;
-  gap: 1px;
 }
-.project-tree__header-action-btn:hover {
-  background: var(--button-bg);
-  border-color: color-mix(in srgb, var(--accent) 28%, var(--border-soft));
-  color: var(--fg);
-  opacity: 1;
-}
+
 .project-tree__header-action-btn--active {
   border-color: color-mix(in srgb, var(--accent) 24%, var(--border-soft));
   background: color-mix(in srgb, var(--accent) 9%, var(--bg-elev));
