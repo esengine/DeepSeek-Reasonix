@@ -743,6 +743,8 @@ export const zhTW: Record<DictKey, string> = {
   "turnActions.rewind": "回溯",
   "transcript.showEarlierHistory": "展開前 {n} 輪對話",
   "transcript.toolCount": "{n} 個工具",
+  "transcript.processed": "已處理",
+  "transcript.processedDuration": "已處理 {s}s",
   "notice.info": "提示",
   "notice.warning": "警告",
   "questionNav.label": "問題導航",

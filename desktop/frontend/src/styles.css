@@ -2718,12 +2718,26 @@ a[href] {
 .readonly-batch {
   margin: 2px auto;
 }
-.readonly-batch__body {
-  display: flex;
-  flex-direction: column;
+.readonly-batch__body,
+.turn-collapse__body {
+  margin-top: 6px;
+  padding-left: 12px;
+  border-left: 2px solid var(--border);
 }
-.readonly-batch__body > .tool--quiet {
-  padding-left: 20px;
+.readonly-batch__body > *,
+.turn-collapse__body > * {
+  max-width: var(--maxw);
+  margin-left: auto;
+  margin-right: auto;
+  margin-bottom: 6px;
+}
+
+/* ── TurnCollapse: fold line for completed steps ──────────────────── */
+.turn-collapse {
+  margin: 4px auto;
+}
+.turn-collapse__label {
+  white-space: nowrap;
 }
 
 .transcript > .jump-bar {
@@ -3856,6 +3870,7 @@ a[href] {
   align-items: center;
   gap: 4px;
   max-width: 70%;
+  min-width: 0;
   overflow: hidden;
 }
 .tool--running {
@@ -3870,7 +3885,6 @@ a[href] {
   color: var(--fg-dim);
 }
 .tool--quiet .tool__name {
-  color: var(--fg-dim);
   font-weight: 500;
 }
 .tool--quiet .tool__icon {
@@ -3951,6 +3965,20 @@ a[href] {
   font-size: 11px;
   color: var(--accent);
   flex-shrink: 0;
+}
+.tool__status-icon {
+  font-size: 13px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.tool__status-icon--ok {
+  color: var(--ok);
+}
+.tool__status-icon--err {
+  color: var(--err);
+}
+.tool__status-icon--stopped {
+  color: var(--fg-faint);
 }
 .tool__meta {
   margin-left: auto;
