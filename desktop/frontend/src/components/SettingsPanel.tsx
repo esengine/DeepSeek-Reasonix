@@ -4,6 +4,7 @@ import { Check, CheckCircle2, ChevronDown, ChevronUp, GripVertical, Loader2, QrC
 import { asArray } from "../lib/array";
 import { useDeferredClose } from "../lib/useMountTransition";
 import { app } from "../lib/bridge";
+import { formatKeyCombo, notifyShortcutsChanged, SHORTCUT_DEFAULTS } from "../lib/shortcuts";
 import { normalizeLangPref, useI18n, useT, type DictKey, type LangPref } from "../lib/i18n";
 import { mergedFetchedProviderModels, providerDefaultModel, providerModelCandidates } from "../lib/providerModels";
 import { useUpdater } from "../lib/useUpdater";
@@ -32,7 +33,7 @@ import { SoundSelect } from "./SoundSelect";
 import { getSuccessPreference, setSuccessPreference, getAttentionPreference, setAttentionPreference, playSuccessChime, playAttentionChime, type SoundWavPref } from "../lib/sound";
 import { ModalCloseButton } from "./ModalCloseButton";
 
-const SETTINGS_TABS: SettingsTab[] = ["general", "models", "bots", "mcp", "skills", "memory", "hooks", "permissions", "sandbox", "network", "appearance", "updates"];
+const SETTINGS_TABS: SettingsTab[] = ["general", "models", "bots", "mcp", "skills", "memory", "hooks", "permissions", "sandbox", "network", "appearance", "shortcuts", "updates"];
 
 // SettingsPanel is the desktop settings centre — a centred modal with left
 // navigation and a right content area. It hosts all settings pages plus MCP,
@@ -148,6 +149,7 @@ export function SettingsPanel({
                 {tab === "mcp" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><MCPServersSettingsPage /></SettingsPageShell>}
                 {tab === "skills" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><SkillsSettingsPage /></SettingsPageShell>}
                 {tab === "memory" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><MemorySettingsPage /></SettingsPageShell>}
+                {tab === "shortcuts" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><ShortcutsSection /></SettingsPageShell>}
                 {tab === "hooks" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><HooksSection onChanged={onChanged} /></SettingsPageShell>}
                 {tab === "permissions" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><PermissionsSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
                 {tab === "sandbox" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><SandboxSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
@@ -334,6 +336,8 @@ function settingsTabLabel(id: SettingsTab, t: ReturnType<typeof useT>): string {
       return t("settings.tab.skills");
     case "memory":
       return t("settings.tab.memory");
+    case "shortcuts":
+      return t("settings.tab.shortcuts");
     case "hooks":
       return t("settings.tab.hooks");
     case "network":
@@ -365,6 +369,8 @@ function settingsTabMeta(id: SettingsTab, s: SettingsView, t: ReturnType<typeof 
       return t("caps.skillsTab");
     case "memory":
       return t("settings.tabSub.memory");
+    case "shortcuts":
+      return "";
     case "hooks":
       return t("settings.tabSub.hooks");
     case "network":
@@ -4289,6 +4295,193 @@ function UpdatesSection({
         <Tooltip label={configPath} fill block className="mem-hint settings-config-path">
           {t("settings.config", { path: configPath })}
         </Tooltip>
+      )}
+    </SettingsSection>
+  );
+}
+
+// ── Shortcuts Section ────────────────────────────────────────────────────────
+
+type ShortcutEntry = {
+  labelKey: string;
+  descKey: string;
+  defaultMac: string;
+  defaultWin: string;
+};
+
+const DEFAULT_SHORTCUTS: ShortcutEntry[] = (Object.keys(SHORTCUT_DEFAULTS) as Array<keyof typeof SHORTCUT_DEFAULTS>).map((action) => ({
+  labelKey: action,
+  descKey: `${action}Desc`,
+  defaultMac: SHORTCUT_DEFAULTS[action].mac,
+  defaultWin: SHORTCUT_DEFAULTS[action].win,
+}));
+
+const SHORTCUTS_STORAGE_KEY = "reasonix.customShortcuts";
+
+function loadCustomShortcuts(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem(SHORTCUTS_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveCustomShortcuts(map: Record<string, string>) {
+  try {
+    localStorage.setItem(SHORTCUTS_STORAGE_KEY, JSON.stringify(map));
+  } catch {}
+  notifyShortcutsChanged();
+}
+
+function resolveShortcutKeys(entry: ShortcutEntry, custom: Record<string, string>, platform: string): string {
+  const customKey = custom[entry.labelKey];
+  if (customKey) return customKey;
+  return platform === "darwin" ? entry.defaultMac : entry.defaultWin;
+}
+
+function ShortcutsSection() {
+  const t = useT();
+  const [platform, setPlatform] = useState<"darwin" | "win">("win");
+  const [customKeys, setCustomKeys] = useState<Record<string, string>>({});
+  const [editingKey, setEditingKey] = useState<string | null>(null);
+  const [conflict, setConflict] = useState<{ combo: string; existing: string; pendingLabel: string } | null>(null);
+  const committedRef = useRef(false);
+  const recordingRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (editingKey) {
+      requestAnimationFrame(() => recordingRef.current?.focus());
+    }
+  }, [editingKey]);
+
+  useEffect(() => {
+    setPlatform(navigator.platform.toLowerCase().includes("mac") ? "darwin" : "win");
+    setCustomKeys(loadCustomShortcuts());
+  }, []);
+
+  const startEdit = (labelKey: string) => {
+    committedRef.current = false;
+    setEditingKey(labelKey);
+  };
+
+  const comboLabel = (labelKey: string) => {
+    const entry = DEFAULT_SHORTCUTS.find((s) => s.labelKey === labelKey);
+    return entry ? t(entry.labelKey as DictKey) : labelKey;
+  };
+
+  const commitCombo = (labelKey: string, combo: string) => {
+    committedRef.current = true;
+    const conflictKey = Object.entries(customKeys).find(([k, v]) => v === combo && k !== labelKey)?.[0];
+    const defaultConflict = !conflictKey && DEFAULT_SHORTCUTS.find(
+      (s) => s.labelKey !== labelKey && resolveShortcutKeys(s, customKeys, platform) === combo,
+    )?.labelKey;
+    if (conflictKey || defaultConflict) {
+      const existing = conflictKey || defaultConflict || "";
+      setConflict({ combo, existing: comboLabel(existing), pendingLabel: labelKey });
+      return;
+    }
+    doCommit(labelKey, combo);
+  };
+
+  const doCommit = (labelKey: string, combo: string) => {
+    const next = { ...customKeys, [labelKey]: combo };
+    setCustomKeys(next);
+    saveCustomShortcuts(next);
+    setEditingKey(null);
+  };
+
+  const confirmConflict = () => {
+    if (!conflict) return;
+    doCommit(conflict.pendingLabel, conflict.combo);
+    setConflict(null);
+  };
+
+  const dismissConflict = () => {
+    setConflict(null);
+    setEditingKey(null);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent, labelKey: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.key === "Escape") { setEditingKey(null); return; }
+    if (["Meta", "Control", "Alt", "Shift"].includes(e.key)) return;
+    const combo = formatKeyCombo(e, platform as "darwin" | "win");
+    if (!combo) return;
+    commitCombo(labelKey, combo);
+  };
+
+  const handleBlur = () => {
+    if (!committedRef.current) setEditingKey(null);
+  };
+
+  const resetKeys = () => {
+    setCustomKeys({});
+    saveCustomShortcuts({});
+  };
+
+  const isDefault = Object.keys(customKeys).length === 0;
+
+  return (
+    <SettingsSection title={t("settings.tab.shortcuts")}>
+      {!isDefault && (
+        <div className="shortcuts-toolbar">
+          <button className="chip chip--danger" onClick={resetKeys}>{t("shortcuts.resetAll")}</button>
+        </div>
+      )}
+      <div className="shortcuts-list">
+        {DEFAULT_SHORTCUTS.map((sc) => {
+          const editing = editingKey === sc.labelKey;
+          const displayKeys = resolveShortcutKeys(sc, customKeys, platform);
+          return (
+            <div key={sc.labelKey} className="shortcuts-row">
+              <div className="shortcuts-info">
+                <span className="shortcuts-label">{t(sc.labelKey as DictKey)}</span>
+                <span className="shortcuts-desc">{t(sc.descKey as DictKey)}</span>
+              </div>
+              {editing ? (
+                <kbd
+                  className="shortcuts-keys shortcuts-keys--recording"
+                  tabIndex={0}
+                  ref={recordingRef}
+                  onKeyDown={(e) => handleKeyDown(e, sc.labelKey)}
+                  onBlur={handleBlur}
+                >
+                  {t("shortcuts.pressKeys")}
+                </kbd>
+              ) : (
+                <button
+                  type="button"
+                  className="shortcuts-keys"
+                  aria-label={t("shortcuts.clickToEdit")}
+                  onClick={() => startEdit(sc.labelKey)}
+                >
+                  {displayKeys}
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {conflict && (
+        <div className="shortcuts-conflict-overlay" onClick={dismissConflict}>
+          <div className="shortcuts-conflict-dialog" onClick={(e) => e.stopPropagation()}>
+            <h3 className="shortcuts-conflict-title">{t("shortcuts.conflictTitle")}</h3>
+            <p className="shortcuts-conflict-text">
+              {t("shortcuts.conflictText", { combo: conflict.combo, existing: conflict.existing })}
+            </p>
+            <div className="shortcuts-conflict-actions">
+              <button className="chip chip--danger" onClick={confirmConflict}>
+                {t("shortcuts.confirmReassign")}
+              </button>
+              <button className="chip" onClick={dismissConflict}>
+                {t("shortcuts.cancel")}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </SettingsSection>
   );
