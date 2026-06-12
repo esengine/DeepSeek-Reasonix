@@ -62,6 +62,11 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	protocol, _ := cfg.Extra["reasoning_protocol"].(string)
 	protocol = normalizeReasoningProtocol(protocol)
 	vision, _ := cfg.Extra["vision"].(bool)
+	visionDetail, _ := cfg.Extra["vision_detail"].(string)
+	visionDetail = strings.ToLower(strings.TrimSpace(visionDetail))
+	if visionDetail != "low" && visionDetail != "high" {
+		visionDetail = "" // auto — omit the field
+	}
 	deepseek := protocol == "deepseek" || (protocol == "" && IsDeepSeek(cfg.BaseURL))
 	minimax := protocol == "" && IsMiniMax(cfg.BaseURL)
 	switch {
@@ -105,17 +110,18 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		return nil, fmt.Errorf("openai: network: %w", err)
 	}
 	return &client{
-		name:        name,
-		apiKey:      cfg.APIKey,
-		keyEnv:      keyEnv,
-		baseURL:     strings.TrimRight(cfg.BaseURL, "/"),
-		model:       cfg.Model,
-		deepseek:    deepseek,
-		minimax:     minimax,
-		vision:      vision,
-		effort:      effort,
-		http:        httpClient,
-		idleTimeout: defaultStreamIdleTimeout,
+		name:         name,
+		apiKey:       cfg.APIKey,
+		keyEnv:       keyEnv,
+		baseURL:      strings.TrimRight(cfg.BaseURL, "/"),
+		model:        cfg.Model,
+		deepseek:     deepseek,
+		minimax:      minimax,
+		vision:       vision,
+		visionDetail: visionDetail,
+		effort:       effort,
+		http:         httpClient,
+		idleTimeout:  defaultStreamIdleTimeout,
 	}, nil
 }
 
@@ -130,18 +136,19 @@ func newHTTPClient(cfg provider.Config) (*http.Client, error) {
 }
 
 type client struct {
-	name        string
-	apiKey      string
-	keyEnv      string // api_key_env name, surfaced in auth errors
-	baseURL     string
-	model       string
-	http        *http.Client
-	deepseek    bool
-	minimax     bool          // true for api.minimaxi.com — emits MiniMax-M3's thinking knob instead of reasoning_effort
-	vision      bool          // model accepts image input — embed attached images as image_url parts
-	effort      string        // reasoning_effort for OpenAI; thinking.type for MiniMax; "" = auto/provider default
-	idleTimeout time.Duration // SSE stall watchdog window; defaultStreamIdleTimeout unless a test overrides
-	authed      atomic.Bool   // a request has succeeded — gate transient-401 retry
+	name         string
+	apiKey       string
+	keyEnv       string // api_key_env name, surfaced in auth errors
+	baseURL      string
+	model        string
+	http         *http.Client
+	deepseek     bool
+	minimax      bool          // true for api.minimaxi.com — emits MiniMax-M3's thinking knob instead of reasoning_effort
+	vision       bool          // model accepts image input — embed attached images as image_url parts
+	visionDetail string        // image_url detail hint (low|high); "" = auto/omit
+	effort       string        // reasoning_effort for OpenAI; thinking.type for MiniMax; "" = auto/provider default
+	idleTimeout  time.Duration // SSE stall watchdog window; defaultStreamIdleTimeout unless a test overrides
+	authed       atomic.Bool   // a request has succeeded — gate transient-401 retry
 }
 
 func (c *client) Name() string { return c.name }
@@ -267,7 +274,7 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 		}
 		switch {
 		case c.vision && m.Role == provider.RoleUser && len(m.Images) > 0:
-			cm.Content = imageContentParts(m.Content, m.Images)
+			cm.Content = imageContentParts(m.Content, m.Images, c.visionDetail)
 		case m.Role != provider.RoleAssistant || len(cm.ToolCalls) == 0 || m.Content != "":
 			cm.Content = m.Content
 		}
@@ -553,16 +560,17 @@ type chatContentPart struct {
 }
 
 type chatImageURL struct {
-	URL string `json:"url"`
+	URL    string `json:"url"`
+	Detail string `json:"detail,omitempty"`
 }
 
-func imageContentParts(text string, images []string) []chatContentPart {
+func imageContentParts(text string, images []string, detail string) []chatContentPart {
 	parts := make([]chatContentPart, 0, len(images)+1)
 	if text != "" {
 		parts = append(parts, chatContentPart{Type: "text", Text: text})
 	}
 	for _, url := range images {
-		parts = append(parts, chatContentPart{Type: "image_url", ImageURL: &chatImageURL{URL: url}})
+		parts = append(parts, chatContentPart{Type: "image_url", ImageURL: &chatImageURL{URL: url, Detail: detail}})
 	}
 	return parts
 }

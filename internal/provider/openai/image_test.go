@@ -42,3 +42,29 @@ func TestBuildRequestSkipsImagesWithoutVision(t *testing.T) {
 		t.Fatalf("non-vision content = %#v, want plain string", req.Messages[0].Content)
 	}
 }
+
+func TestImageURLDetailFromConfig(t *testing.T) {
+	c := &client{model: "gpt-4o", vision: true, visionDetail: "low"}
+	req := c.buildRequest(provider.Request{
+		Messages: []provider.Message{
+			{Role: provider.RoleUser, Content: "x", Images: []string{"data:image/png;base64,AAAA"}},
+		},
+	})
+	parts := req.Messages[0].Content.([]chatContentPart)
+	if parts[1].ImageURL.Detail != "low" {
+		t.Fatalf("detail = %q, want low", parts[1].ImageURL.Detail)
+	}
+}
+
+func TestImageURLDetailOmittedByDefault(t *testing.T) {
+	c := &client{model: "gpt-4o", vision: true}
+	req := c.buildRequest(provider.Request{
+		Messages: []provider.Message{
+			{Role: provider.RoleUser, Content: "x", Images: []string{"data:image/png;base64,AAAA"}},
+		},
+	})
+	body, _ := json.Marshal(req.Messages[0].Content.([]chatContentPart)[1])
+	if strings.Contains(string(body), "detail") {
+		t.Errorf("detail must be omitted when unset: %s", body)
+	}
+}

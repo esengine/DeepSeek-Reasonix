@@ -148,7 +148,7 @@ func (c *Controller) inputImages(line string) []string {
 		if r.kind != refImage {
 			continue
 		}
-		if url, err := ImageDataURL(r.path); err == nil {
+		if url, err := visionImageDataURL(r.path); err == nil {
 			urls = append(urls, url)
 		}
 	}

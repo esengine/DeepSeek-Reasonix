@@ -787,8 +787,13 @@ type ProviderEntry struct {
 	// Vision marks the model as accepting image input. When set, images the user
 	// attaches are embedded in the request (image_url for openai-kind, base64
 	// blocks for anthropic). Off by default: text-only models 400 on image input,
-	// and embedding base64 would bloat the prompt and break prefix-cache stability.
+	// and image tokens are heavy — gating keeps text-only flows cheap (the prompt
+	// prefix is byte-identical with no image, so the cache is unaffected either way).
 	Vision bool `toml:"vision"`
+	// VisionDetail sets the openai image_url detail hint (low|high); empty = auto
+	// (the field is omitted). "low" caps an image to a fixed ~85 tokens for cheap
+	// coarse reads; ignored by providers without the knob (e.g. anthropic).
+	VisionDetail string `toml:"vision_detail"`
 	// ReasoningProtocol selects the request shape for OpenAI-compatible reasoning
 	// models. Empty/auto uses the model capability registry plus endpoint
 	// heuristics; none disables automatic reasoning controls for this provider.
