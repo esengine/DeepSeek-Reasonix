@@ -97,7 +97,7 @@ func TestSendWithRetryFailsFastOnClientErrors(t *testing.T) {
 			calls++
 			return statusResp(status, nil), nil
 		})}
-		_, err := SendWithRetry(context.Background(), cl, "p", "KEY", newDummyReq)
+		_, err := SendWithRetry(context.Background(), cl, SendOptions{Provider: "p", KeyEnv: "KEY"}, newDummyReq)
 		if calls != 1 {
 			t.Errorf("status %d retried (%d calls), should fail fast", status, calls)
 		}
@@ -114,13 +114,49 @@ func TestSendWithRetryAuthError(t *testing.T) {
 		calls++
 		return statusResp(401, nil), nil
 	})}
-	_, err := SendWithRetry(context.Background(), cl, "deepseek", "DEEPSEEK_API_KEY", newDummyReq)
+	_, err := SendWithRetry(context.Background(), cl, SendOptions{Provider: "deepseek", KeyEnv: "DEEPSEEK_API_KEY", KeyPresent: true}, newDummyReq)
 	if calls != 1 {
-		t.Errorf("401 retried (%d calls), should fail fast", calls)
+		t.Errorf("401 retried (%d calls), should fail fast for a never-authed key", calls)
 	}
 	var authErr *AuthError
 	if !errors.As(err, &authErr) || authErr.KeyEnv != "DEEPSEEK_API_KEY" {
 		t.Errorf("want *AuthError naming the key env, got %v", err)
+	}
+}
+
+func TestSendWithRetryRetriesTransientAuthForKnownKey(t *testing.T) {
+	calls := 0
+	cl := &http.Client{Transport: rtFunc(func(r *http.Request) (*http.Response, error) {
+		calls++
+		if calls <= 2 {
+			return statusResp(401, nil), nil
+		}
+		return statusResp(200, nil), nil
+	})}
+	resp, err := SendWithRetry(context.Background(), cl,
+		SendOptions{Provider: "mimo", KeyEnv: "MIMO_API_KEY", KeyPresent: true, RetryAuth: true}, newDummyReq)
+	if err != nil {
+		t.Fatalf("a previously-good key should recover from a transient 401: %v", err)
+	}
+	if resp.StatusCode != 200 || calls != 3 {
+		t.Fatalf("status=%d calls=%d, want 200 after 3 calls", resp.StatusCode, calls)
+	}
+}
+
+func TestSendWithRetryAuthGivesUpAfterMaxAuthRetries(t *testing.T) {
+	calls := 0
+	cl := &http.Client{Transport: rtFunc(func(r *http.Request) (*http.Response, error) {
+		calls++
+		return statusResp(401, nil), nil
+	})}
+	_, err := SendWithRetry(context.Background(), cl,
+		SendOptions{Provider: "mimo", KeyEnv: "MIMO_API_KEY", KeyPresent: true, RetryAuth: true}, newDummyReq)
+	if calls != 1+maxAuthRetries {
+		t.Errorf("persistent 401 made %d calls, want %d (initial + maxAuthRetries)", calls, 1+maxAuthRetries)
+	}
+	var authErr *AuthError
+	if !errors.As(err, &authErr) || !authErr.HasKey {
+		t.Fatalf("want *AuthError with HasKey=true, got %v", err)
 	}
 }
 
@@ -136,7 +172,7 @@ func TestSendWithRetryRecoversAndNotifies(t *testing.T) {
 	var infos []RetryInfo
 	ctx := WithRetryNotify(context.Background(), func(i RetryInfo) { infos = append(infos, i) })
 
-	resp, err := SendWithRetry(ctx, cl, "p", "KEY", newDummyReq)
+	resp, err := SendWithRetry(ctx, cl, SendOptions{Provider: "p", KeyEnv: "KEY"}, newDummyReq)
 	if err != nil {
 		t.Fatalf("should recover after one retry: %v", err)
 	}

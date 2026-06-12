@@ -1,6 +1,7 @@
 // Run: tsx src/__tests__/context-panel-breakdown.test.ts
 
-import { contextBreakdown } from "../components/ContextPanel";
+import { contextBreakdown, contextCostDisplay } from "../components/ContextPanel";
+import { currencySymbol, formatMoney } from "../lib/money";
 
 let passed = 0;
 let failed = 0;
@@ -64,6 +65,20 @@ eq(
   },
   "unknown context window keeps donut segments empty",
 );
+
+console.log("\ncontext panel cost");
+
+const infoCost = contextCostDisplay({
+  info: { sessionCost: 0.1759, sessionCurrency: "$", sessionCostUsd: 0.1759 },
+  sessionCost: 0,
+  sessionCurrency: "¥",
+  usage: { cost: 0, costUsd: 0, currency: "¥" },
+});
+eq(infoCost, { amount: 0.1759, currency: "$" }, "panel cost keeps the panel currency instead of state default");
+eq(formatMoney(infoCost.amount, infoCost.currency, "dash"), "$0.1759", "USD panel cost renders with dollar sign");
+eq(currencySymbol("楼"), "¥", "unexpected currency text does not leak into money values");
+eq(currencySymbol("aud"), "AUD ", "unknown ISO currency codes stay readable");
+eq(currencySymbol("A$"), "A$", "compact multi-character currency symbols are preserved");
 
 console.log(`\n${passed} passed, ${failed} failed, ${passed + failed} total`);
 if (failed > 0) process.exit(1);

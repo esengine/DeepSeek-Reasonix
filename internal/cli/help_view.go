@@ -57,6 +57,7 @@ func builtinHelpItems() []compItem {
 	return []compItem{
 		{label: "/compact", hint: i18n.M.CmdCompact},
 		{label: "/new", hint: i18n.M.CmdNew},
+		{label: "/rename", hint: i18n.M.CmdRename},
 		{label: "/clear", hint: i18n.M.CmdClear},
 		{label: "/rewind", hint: i18n.M.CmdRewind},
 		{label: "/tree", hint: i18n.M.CmdTree},
@@ -70,6 +71,7 @@ func builtinHelpItems() []compItem {
 		{label: "/hooks", hint: i18n.M.CmdHooks},
 		{label: "/memory", hint: i18n.M.CmdMemory},
 		{label: "/output-style", hint: i18n.M.CmdOutputStyle},
+		{label: "/diff-fold", hint: i18n.M.CmdDiffFold},
 		{label: "/sandbox", hint: i18n.M.CmdSandbox},
 		{label: "/verbose", hint: i18n.M.CmdVerbose},
 		{label: "/language", hint: i18n.M.CmdLanguage},

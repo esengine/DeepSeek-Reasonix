@@ -216,3 +216,18 @@ func ListBranches(dir string) ([]BranchInfo, error) {
 	})
 	return out, nil
 }
+
+// RenameSession updates the TopicTitle in the session's .jsonl.meta sidecar
+// file. If no meta file exists yet, one is created. This is used by the
+// /rename CLI command and desktop UI to give sessions human-readable names.
+func RenameSession(sessionPath string, title string) error {
+	if sessionPath == "" {
+		return fmt.Errorf("empty session path")
+	}
+	m, err := EnsureBranchMeta(sessionPath)
+	if err != nil {
+		return err
+	}
+	m.TopicTitle = title
+	return SaveBranchMeta(sessionPath, m)
+}

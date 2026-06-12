@@ -29,9 +29,9 @@ func explainError(err error) error {
 	}
 	var authErr *provider.AuthError
 	if errors.As(err, &authErr) {
-		msg := i18n.M.ProviderStatusMessage(authErr.Status)
-		if msg == "" {
-			return err
+		msg := i18n.M.ProviderErrAuth
+		if authErr.HasKey {
+			msg = i18n.M.ProviderErrAuthRejected
 		}
 		if authErr.KeyEnv != "" {
 			return fmt.Errorf("%s (%s)", msg, authErr.KeyEnv)

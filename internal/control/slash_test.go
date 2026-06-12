@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/hook"
 	"reasonix/internal/memory"
 	"reasonix/internal/skill"
 )
@@ -205,5 +206,20 @@ func TestMemoryListTextIncludesArchivedMemories(t *testing.T) {
 	}
 	if strings.Contains(out, "saved memories\n  [Stale plan]") {
 		t.Fatalf("archived memory should not appear as active saved memory:\n%s", out)
+	}
+}
+
+func TestManagementHooksTrustUsesWorkspaceRoot(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	c := New(Options{WorkspaceRoot: project})
+	if !c.managementNotice("/hooks trust") {
+		t.Fatal("/hooks trust was not handled")
+	}
+	if !hook.IsTrusted(project, home) {
+		t.Fatal("/hooks trust did not trust the controller workspace root")
 	}
 }

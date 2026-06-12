@@ -603,6 +603,13 @@ func (a *App) EnsureBlankTab(scope, workspaceRoot string) (TabMeta, error) {
 	}
 
 	var created *WorkspaceTab
+	// Compute actual root early — both the indexed-topic fallback and the
+	// new-topic path need it when constructing the tab below.
+	actualRoot := workspaceRoot
+	if scope == "global" {
+		actualRoot = globalRoot
+	}
+
 	a.mu.Lock()
 	for _, id := range a.orderedTabIDsLocked() {
 		tab := a.tabs[id]
@@ -615,12 +622,53 @@ func (a *App) EnsureBlankTab(scope, workspaceRoot string) (TabMeta, error) {
 		}
 	}
 
+	// Inherit model, effort, mode, tool-approval, and MCP state from the
+	// active tab so a new blank session keeps the same settings (#4019).
+	var inheritedModel string
+	var inheritedEffort *string
+	inheritedMode := "normal"
+	inheritedToolApprovalMode := control.ToolApprovalAsk
+	inheritedDisabledMCP := map[string]ServerView{}
+	var inheritedMCPOrder []string
+	if active := a.activeTabLocked(); active != nil {
+		inheritedModel = active.model
+		inheritedEffort = cloneStringPtr(active.effort)
+		inheritedMode = currentTabMode(active)
+		inheritedToolApprovalMode = currentTabToolApprovalMode(active)
+		inheritedDisabledMCP = cloneServerViewMap(active.disabledMCP)
+		inheritedMCPOrder = append([]string(nil), active.mcpOrder...)
+	}
+
 	if topicID := a.indexedBlankTopicIDLocked(scope, workspaceRoot); topicID != "" {
-		a.mu.Unlock()
-		if scope == "global" {
-			return a.OpenGlobalTab(topicID)
+		// Reuse a previously-indexed but unused blank topic instead of
+		// creating a new one.  Build it inline (not via OpenProjectTab /
+		// OpenGlobalTab) so it inherits settings from the active tab.
+		tabID := a.newUniqueTabIDLocked()
+		topicTitle := topicTitleForTab(scope, workspaceRoot, topicID)
+		created = &WorkspaceTab{
+			ID:               tabID,
+			Scope:            scope,
+			WorkspaceRoot:    actualRoot,
+			TopicID:          topicID,
+			TopicTitle:       topicTitle,
+			model:            inheritedModel,
+			effort:           inheritedEffort,
+			mode:             inheritedMode,
+			toolApprovalMode: inheritedToolApprovalMode,
+			disabledMCP:      inheritedDisabledMCP,
+			mcpOrder:         inheritedMCPOrder,
 		}
-		return a.OpenProjectTab(workspaceRoot, topicID)
+		created.sink = &tabEventSink{tabID: tabID, app: a}
+		a.tabs[tabID] = created
+		a.tabOrder = append(a.tabOrder, tabID)
+		a.activeTabID = tabID
+		a.saveTabsLocked()
+		meta := a.tabMeta(created, true)
+		a.mu.Unlock()
+
+		a.startTabControllerBuild(created)
+		a.emitProjectTreeChanged()
+		return meta, nil
 	}
 
 	topicID := newTopicID()
@@ -644,19 +692,18 @@ func (a *App) EnsureBlankTab(scope, workspaceRoot string) (TabMeta, error) {
 	}
 
 	tabID := a.newUniqueTabIDLocked()
-	actualRoot := workspaceRoot
-	if scope == "global" {
-		actualRoot = globalRoot
-	}
 	created = &WorkspaceTab{
 		ID:               tabID,
 		Scope:            scope,
 		WorkspaceRoot:    actualRoot,
 		TopicID:          topicID,
 		TopicTitle:       topicTitleForTab(scope, workspaceRoot, topicID),
-		mode:             "normal",
-		toolApprovalMode: control.ToolApprovalAsk,
-		disabledMCP:      map[string]ServerView{},
+		model:            inheritedModel,
+		effort:           inheritedEffort,
+		mode:             inheritedMode,
+		toolApprovalMode: inheritedToolApprovalMode,
+		disabledMCP:      inheritedDisabledMCP,
+		mcpOrder:         inheritedMCPOrder,
 	}
 	created.sink = &tabEventSink{tabID: tabID, app: a}
 	a.tabs[tabID] = created

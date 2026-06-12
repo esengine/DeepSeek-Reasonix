@@ -13,7 +13,7 @@ var reComposeBlock = regexp.MustCompile(`(?s)^\s*<(?:memory-update|background-jo
 // PlanModeMarker is prepended to every user turn while plan mode is on. It rides
 // in the user message (not the system prompt or tools), so the cache-stable
 // prompt prefix is left untouched and the toggle costs nothing in cache hits.
-const PlanModeMarker = "[Plan mode — read-only. Explore the codebase first (read_file, ls, grep, glob, web_fetch, task are available; writers are refused by the harness), then present a LAYERED plan as your reply and stop — do not write files, edit, or run side-effecting bash. Structure the plan as a two-level markdown list so it becomes a layered task list: each PHASE is a top-level numbered list item (a coherent milestone, e.g. \"1. Add the config loader\"), and each phase's concrete, verifiable sub-steps are bullets indented beneath it (e.g. \"   - parse the TOML into Config\"). Use plain numbered list items for phases — do NOT write phases as markdown headings (##, ###) — so both levels parse. Keep phases few (about 2-6). The user will be asked to approve before any changes are made.]"
+const PlanModeMarker = "[Plan mode — read-only. Explore the codebase first (read_file, ls, grep, glob, web_fetch, task, ask are available; writers are refused by the harness). Before planning, if a decision that is genuinely the user's — tech stack, an ambiguous requirement, scope, an irreversible choice — would materially shape the plan and you can't settle it from the codebase or a sensible default, use the ask tool to clarify it first; otherwise pick the obvious default and state the assumption in the plan instead of asking. Then present a LAYERED plan as your reply and stop — do not write files, edit, or run side-effecting bash. Structure the plan as a two-level markdown list so it becomes a layered task list: each PHASE is a top-level numbered list item (a coherent milestone, e.g. \"1. Add the config loader\"), and each phase's concrete, verifiable sub-steps are bullets indented beneath it (e.g. \"   - parse the TOML into Config\"). Use plain numbered list items for phases — do NOT write phases as markdown headings (##, ###) — so both levels parse. Keep phases few (about 2-6). The user will be asked to approve before any changes are made.]"
 
 const (
 	activeGoalOpen  = "<active-goal>"
@@ -85,7 +85,6 @@ var syntheticPrefixes = []string{
 	"<compaction-summary>",
 	"Summary of the later conversation (compacted from here on):",
 	"Summary of earlier conversation (compacted up to here):",
-	"[Mid-turn steer queued by the user.",
 }
 
 // Compose applies the plan-mode marker to a turn's text when plan mode is on,
@@ -146,11 +145,17 @@ func activeGoalBlock(goal string) string {
 	return b.String()
 }
 
-// MemoryQuickAddNote parses the legacy "# <note>" memory shortcut. The space
-// after "#" is intentional: "#7", "#issue", and "#标题" are ordinary user
-// prompts, not memory writes.
+// MemoryQuickAddNote parses the "# <note>" memory shortcut. The space after
+// "#" is intentional: "#7", "#issue", and "#标题" are ordinary user prompts,
+// not memory writes. Multi-line input starting with "# " is NOT treated as a
+// quick-add note — it is almost certainly a Markdown heading in a structured
+// prompt (e.g. "# Context\n\n- file.go\n# Objective"). Only single-line input
+// may be a quick-add note.
 func MemoryQuickAddNote(input string) (note string, ok bool) {
 	trimmed := strings.TrimSpace(input)
+	if strings.Contains(trimmed, "\n") {
+		return "", false
+	}
 	if strings.HasPrefix(trimmed, "# ") || strings.HasPrefix(trimmed, "#\t") {
 		return strings.TrimSpace(trimmed[1:]), true
 	}

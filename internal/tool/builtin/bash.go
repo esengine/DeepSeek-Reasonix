@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"reasonix/internal/jobs"
+	"reasonix/internal/proc"
 	"reasonix/internal/sandbox"
 	"reasonix/internal/tool"
 )
@@ -98,7 +99,10 @@ func (b bash) resolved() sandbox.Shell {
 	if b.shell.Path != "" {
 		return b.shell
 	}
-	return sandbox.ResolveShell()
+	if b.sb.Shell.Path != "" {
+		return b.sb.Shell
+	}
+	return sandbox.ResolveShell("", "", nil)
 }
 
 func (bash) Schema() json.RawMessage {
@@ -307,6 +311,7 @@ func runShellPATHCommand(parent context.Context, shell string, args []string) []
 	ctx, cancel := context.WithTimeout(parent, 2*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, shell, args...)
+	proc.PrepareShellPATHProbe(cmd)
 	cmd.Stdin = strings.NewReader("")
 	out, _ := cmd.CombinedOutput()
 	return out

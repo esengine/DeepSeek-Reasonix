@@ -185,12 +185,11 @@ Long tasks eventually fill the model's context window. Reasonix manages this wit
 - Each provider declares its `context_window` (tokens). When a turn's reported
   `prompt_tokens` reach `compactRatio` (default `0.8`) of that window, the
   executor compacts **once** before the next turn.
-- Compaction summarizes the older middle of the session into a single briefing —
-  using the executor's own provider, no tools — and replaces it in place: the
-  session becomes `system + summary + recentKeep` (default `8`) verbatim
-  messages. The boundary is aligned backward off any tool result so the recent
-  tail never begins with an orphan tool message whose `tool_calls` were
-  summarized away.
+- Compaction folds only the assistant/tool work. Every **user turn** small
+  enough to be a brief and every **prior digest** is kept verbatim; the foldable
+  remainder is summarized — using the executor's own provider, no tools — in
+  place. The boundary is aligned backward off any tool result so the recent tail
+  never begins with an orphan tool message whose `tool_calls` were summarized away.
 - The dropped originals are archived to `~/.config/reasonix/archive/<timestamp>.jsonl`
   (one message per line), so the full history stays traceable.
 - The read-only `history` tool gives the agent on-demand BM25 retrieval over
@@ -215,6 +214,17 @@ Long tasks eventually fill the model's context window. Reasonix manages this wit
   User-initiated memory edits in the local UI are already explicit user actions.
   See [`SESSION_MEMORY_RETRIEVAL.md`](SESSION_MEMORY_RETRIEVAL.md) for the
   detailed implementation contract.
+
+**What survives a fold.** A fact the user states in a normal-sized turn is kept
+verbatim and is never summarized away — at any point in the session, across any
+number of compactions. A digest, once written, is likewise kept verbatim rather
+than re-summarized, so facts it captured are not lost to drift. The one
+**best-effort** boundary: a fact buried inside a single oversized message (a
+large paste, over the per-turn pin budget) folds with the rest, so its survival
+depends on the summarizer catching it while compressing bulk. There is no
+reliable way to auto-detect an arbitrary fact in bulk, so durable facts belong in
+their own turn rather than buried in a large paste; the raw oversized content is
+still archived and recoverable either way.
 
 This is the **only** point where the prompt prefix changes — a deliberate, rare
 "cache-reset point". Between compactions the session grows prepend-only and
@@ -465,6 +475,10 @@ api_key_env = "MIMO_API_KEY"
 [tools]
 enabled = []   # omit/empty = all built-ins
 bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local cap
+
+[tools.shell]
+prefer = "auto"   # auto (default) | bash | powershell | pwsh — force the shell tool's interpreter
+# path = "C:\\Program Files\\PowerShell\\7\\pwsh.exe"   # explicit executable for the chosen shell
 
 [skills]
 # paths = ["~/my-skills", "../shared/skills"]   # extra custom skill roots

@@ -119,9 +119,19 @@ type client struct {
 	effort      string // output_config.effort: low|medium|high|xhigh|max; "" = provider default
 	http        *http.Client
 	idleTimeout time.Duration // SSE stall watchdog window; defaultStreamIdleTimeout unless a test overrides
+	authed      atomic.Bool   // a request has succeeded — gate transient-401 retry
 }
 
 func (c *client) Name() string { return c.name }
+
+func (c *client) sendOpts() provider.SendOptions {
+	return provider.SendOptions{
+		Provider:   c.name,
+		KeyEnv:     c.keyEnv,
+		KeyPresent: c.apiKey != "",
+		RetryAuth:  c.authed.Load(),
+	}
+}
 
 // bufPool reuses byte buffers for JSON-marshalled request bodies, reducing GC
 // churn from repeated alloc/free of ~10-100KB buffers per turn.
@@ -151,10 +161,11 @@ func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provi
 		httpReq.Header.Set("anthropic-version", anthropicVersion)
 		return httpReq, nil
 	}
-	resp, err := provider.SendWithRetry(ctx, c.http, c.name, c.keyEnv, newReq)
+	resp, err := provider.SendWithRetry(ctx, c.http, c.sendOpts(), newReq)
 	if err != nil {
 		return nil, err
 	}
+	c.authed.Store(true)
 
 	out := make(chan provider.Chunk)
 	go c.readStream(resp, out)

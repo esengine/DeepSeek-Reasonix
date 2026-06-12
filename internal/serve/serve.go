@@ -455,6 +455,13 @@ type historyMessage struct {
 func historyMessages(msgs []provider.Message) []historyMessage {
 	out := make([]historyMessage, 0, len(msgs))
 	for _, m := range msgs {
+		// Steer messages are surfaced as a notice, not a user message.
+		if m.Role == provider.RoleUser {
+			if steerText, isSteer := agent.SteerText(m.Content); isSteer {
+				out = append(out, historyMessage{Role: "notice", Content: "↪ " + steerText})
+				continue
+			}
+		}
 		hm := historyMessage{Role: string(m.Role), Content: m.Content}
 		if m.Role == provider.RoleAssistant {
 			hm.Reasoning = m.ReasoningContent

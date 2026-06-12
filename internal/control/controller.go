@@ -30,6 +30,7 @@ import (
 
 	"reasonix/internal/agent"
 	"reasonix/internal/billing"
+	"reasonix/internal/builtinmcp"
 	"reasonix/internal/checkpoint"
 	"reasonix/internal/codegraph"
 	"reasonix/internal/command"
@@ -74,6 +75,7 @@ type Controller struct {
 	mem           *memory.Set
 	cleanup       func()
 	autoPlan      string
+	shell         sandbox.Shell // interpreter for user-invoked "!" commands; zero = auto
 	classifier    autoPlanClassifier
 	startedOnce   bool                             // guards the one-shot SessionStart hook on first turn
 	onRemember    func(rule string) RememberResult // set via Options; invoked when user picks "always allow"
@@ -250,7 +252,10 @@ type Options struct {
 	// no confinement). Frontends pass the cwd they launched the session in.
 	WorkspaceRoot string
 	AutoPlan      string
-	Classifier    autoPlanClassifier
+	// Shell is the interpreter user-invoked "!" commands run under, so /shell
+	// matches the agent's configured [tools.shell] choice. Zero value = auto.
+	Shell      sandbox.Shell
+	Classifier autoPlanClassifier
 	// OnRemember, when set, is invoked with a new allow rule the user chose to
 	// persist to disk (e.g. "Bash(go test:*)"). The callback is wired into the
 	// permission Gate on EnableInteractiveApproval.
@@ -290,6 +295,7 @@ func New(opts Options) *Controller {
 		mem:              opts.Memory,
 		cleanup:          opts.Cleanup,
 		autoPlan:         normalizeAutoPlan(opts.AutoPlan),
+		shell:            opts.Shell,
 		classifier:       classifier,
 		onRemember:       opts.OnRemember,
 		balanceURL:       opts.BalanceURL,
@@ -954,7 +960,10 @@ func (c *Controller) RunShell(command string) {
 		return
 	}
 	c.runGuarded(func(ctx context.Context) error {
-		sh := sandbox.ResolveShell()
+		sh := c.shell
+		if sh.Path == "" {
+			sh = sandbox.ResolveShell("", "", nil)
+		}
 		argv, _ := sandbox.Command(sandbox.Spec{}, sh, command) // false = unsandboxed (user invoked)
 
 		preview := []rune(command)
@@ -2217,6 +2226,9 @@ func (c *Controller) ConnectConfiguredMCPServer(name string) (int, error) {
 	}
 	if name == "codegraph" {
 		return c.connectCodegraphMCPServer(cfg)
+	}
+	if p, ok := builtinmcp.Entry(name); ok {
+		return c.connectMCPServer(p)
 	}
 	return 0, fmt.Errorf("no configured MCP server named %q", name)
 }

@@ -2462,7 +2462,6 @@ export default function App() {
               <CopyButton
                 getText={getSessionMarkdown}
                 label={t("topicBar.copyAll")}
-                showLabel={false}
                 className="topicbar__action-btn topicbar__action-btn--icon topicbar__action-btn--utility"
               />
               <div className={`topicbar__export${topicExportOpen ? " topicbar__export--open" : ""}`}>

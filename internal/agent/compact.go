@@ -233,11 +233,11 @@ func (a *Agent) compact(ctx context.Context, trigger, instructions string, force
 		archived = path
 	}
 
-	// Upper layer: the digest is built from the whole region (kept turns included),
-	// so its structured "user facts & constraints" section consolidates what the
-	// user said into one tidy view — redundant with the verbatim turns by design,
-	// so a weak summarizer dropping a fact here loses nothing.
-	summary, err := a.summarize(ctx, region, instructions)
+	// The digest covers only the foldable work; kept user turns and prior digests
+	// are spliced back verbatim, so a fact that reached a digest once is never
+	// re-summarized away and the user's own words are never touched. Digests
+	// accumulate (small) rather than collapsing into one lossy rolling summary.
+	summary, err := a.summarize(ctx, fold, instructions)
 	if err != nil {
 		a.emitCompactionAborted(trigger)
 		return err
@@ -373,12 +373,13 @@ func (a *Agent) pinnableUserTurn(m provider.Message) bool {
 	return int(float64(msgChars(m))*a.tokPerChar()) <= budget
 }
 
-// partitionFold splits a compaction region into the small user turns kept verbatim
-// (the deterministic floor — a fact the user stated is never summarized away) and
-// the rest, which folds into the digest. Order within each group is preserved.
+// partitionFold splits a compaction region into what is kept verbatim — small user
+// turns (a fact the user stated is never summarized away) and prior digests (so a
+// later fold never re-summarizes an earlier digest and drops the facts it already
+// captured) — and the rest, which folds. Order within each group is preserved.
 func (a *Agent) partitionFold(region []provider.Message) (kept, fold []provider.Message) {
 	for _, m := range region {
-		if m.Role == provider.RoleUser && !isCompactionSummary(m) && a.pinnableUserTurn(m) {
+		if isCompactionSummary(m) || (m.Role == provider.RoleUser && a.pinnableUserTurn(m)) {
 			kept = append(kept, m)
 		} else {
 			fold = append(fold, m)

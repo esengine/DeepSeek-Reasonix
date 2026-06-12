@@ -134,6 +134,36 @@ function sameMeta(a?: Meta, b?: Meta): boolean {
   );
 }
 
+/** Known read-only tool names. Session restore hardcodes readOnly=false for all
+ *  tools, so we derive it from the name to enable correct batching.
+ *  Mirrors Go backend ReadOnly() + codegraph ReadOnlyToolNames(). */
+function isReadOnlyTool(name: string): boolean {
+  switch (name) {
+    case "read_file":
+    case "ls":
+    case "grep":
+    case "glob":
+    case "web_fetch":
+    case "bash_output":
+    case "waitJob":
+    case "todo_write":
+    case "read_skill":
+    case "codegraph_callees":
+    case "codegraph_callers":
+    case "codegraph_context":
+    case "codegraph_explore":
+    case "codegraph_files":
+    case "codegraph_impact":
+    case "codegraph_node":
+    case "codegraph_search":
+    case "codegraph_status":
+    case "codegraph_trace":
+      return true;
+    default:
+      return false;
+  }
+}
+
 type Action =
   | { type: "event"; e: WireEvent }
   | { type: "user"; text: string; seq: number }
@@ -218,7 +248,7 @@ export function historyMessagesToItems(messages: HistoryMessage[], idPrefix: str
           id: tc.id || `${idPrefix}tool${seq}`,
           name: tc.name,
           args: tc.arguments ?? "",
-          readOnly: false,
+          readOnly: isReadOnlyTool(tc.name),
           status: error ? "error" : "done",
           output,
           error,
@@ -237,7 +267,7 @@ export function historyMessagesToItems(messages: HistoryMessage[], idPrefix: str
         id: m.toolCallId || `${idPrefix}tool${seq}`,
         name: m.toolName || "tool",
         args: "",
-        readOnly: false,
+        readOnly: isReadOnlyTool(m.toolName || "tool"),
         status: error ? "error" : "done",
         output,
         error,
@@ -317,6 +347,11 @@ function applyEvent(s: State, e: WireEvent): State {
     case "tool_dispatch": {
       const t = e.tool;
       if (!t) return s;
+      // Skip partial dispatches (name-only, no args yet) — the full dispatch
+      // with complete args follows from executeBatch. Waiting for the full
+      // dispatch means the tool card appears with name + subject at once,
+      // avoiding a "name → command" visual jump.
+      if (t.partial) return s;
       const id = t.id || `tool${s.seq}`;
       const idx = s.items.findIndex((it) => it.kind === "tool" && it.id === id);
       if (idx >= 0) {

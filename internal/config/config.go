@@ -54,6 +54,7 @@ type Config struct {
 	Plugins       []PluginEntry       `toml:"plugins"`
 	Skills        SkillsConfig        `toml:"skills"`
 	Codegraph     CodegraphConfig     `toml:"codegraph"`
+	BuiltInMCP    BuiltInMCPConfig    `toml:"builtin_mcp"`
 	Statusline    StatuslineConfig    `toml:"statusline"`
 	LSP           LSPConfig           `toml:"lsp"`
 	Bot           BotConfig           `toml:"bot"`
@@ -288,6 +289,49 @@ func (c CodegraphConfig) ShouldAutoStart() bool {
 
 func (c CodegraphConfig) ResolvedTier() string {
 	return "background"
+}
+
+// BuiltInMCPConfig controls Reasonix-shipped MCP servers that require no user
+// server definition. They are off by default and become provider-visible only
+// after the user enables them.
+type BuiltInMCPConfig struct {
+	TimeEnabled     bool `toml:"time_enabled"`
+	Context7Enabled bool `toml:"context7_enabled"`
+}
+
+func (c BuiltInMCPConfig) Enabled(name string) bool {
+	switch name {
+	case "time":
+		return c.TimeEnabled
+	case "context7":
+		return c.Context7Enabled
+	default:
+		return false
+	}
+}
+
+func (c *BuiltInMCPConfig) SetEnabled(name string, enabled bool) bool {
+	switch name {
+	case "time":
+		c.TimeEnabled = enabled
+		return true
+	case "context7":
+		c.Context7Enabled = enabled
+		return true
+	default:
+		return false
+	}
+}
+
+func (c BuiltInMCPConfig) EnabledNames() []string {
+	var out []string
+	if c.TimeEnabled {
+		out = append(out, "time")
+	}
+	if c.Context7Enabled {
+		out = append(out, "context7")
+	}
+	return out
 }
 
 // BotConfig 控制多渠道 IM bot 消息网关。
@@ -790,6 +834,7 @@ type ToolsConfig struct {
 	Enabled            []string     `toml:"enabled"`
 	BashTimeoutSeconds *int         `toml:"bash_timeout_seconds"`
 	Search             SearchConfig `toml:"search"`
+	Shell              ShellConfig  `toml:"shell"`
 }
 
 const defaultBashTimeoutSeconds = 120
@@ -812,6 +857,15 @@ func (c *Config) BashTimeoutSeconds() int {
 type SearchConfig struct {
 	Engine string `toml:"engine"`
 	RgPath string `toml:"rg_path"`
+}
+
+// ShellConfig chooses the interpreter the bash tool runs commands under. Prefer
+// is "auto" (default — real bash when present, else PowerShell on Windows),
+// "bash", or "powershell"/"pwsh" (force it; warn at startup and fall back to
+// auto if absent). Path optionally points at a specific shell executable.
+type ShellConfig struct {
+	Prefer string `toml:"prefer"`
+	Path   string `toml:"path"`
 }
 
 // PermissionsConfig declares the per-call permission policy (see
@@ -957,6 +1011,9 @@ func Default() *Config {
 		// write enabled = false instead, so only brand-new users start without it.
 		// AutoInstall fetches the runtime into the cache when enabled and missing.
 		Codegraph: CodegraphConfig{Enabled: true, AutoInstall: true},
+		// Time is dependency-free and bundled, so expose it by default. Context7
+		// can invoke a package runner and remains opt-in.
+		BuiltInMCP: BuiltInMCPConfig{TimeEnabled: true},
 		// LSP tools on by default, but dormant until a language server is on PATH;
 		// a missing server yields an install hint rather than an error.
 		LSP:     LSPConfig{Enabled: true},
@@ -1843,8 +1900,19 @@ func (e *ProviderEntry) Configured() bool {
 
 // ResolveSystemPrompt returns the system prompt, reading system_prompt_file if set.
 func (c *Config) ResolveSystemPrompt() (string, error) {
+	return c.ResolveSystemPromptForRoot(".")
+}
+
+// ResolveSystemPromptForRoot is like ResolveSystemPrompt but resolves a relative
+// system_prompt_file against root. Desktop tabs pass their workspace root here so
+// prompt files are project-scoped even when the process cwd is elsewhere.
+func (c *Config) ResolveSystemPromptForRoot(root string) (string, error) {
 	if c.Agent.SystemPromptFile != "" {
-		b, err := os.ReadFile(c.Agent.SystemPromptFile)
+		path := c.Agent.SystemPromptFile
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(resolveRoot(root), path)
+		}
+		b, err := os.ReadFile(path)
 		if err != nil {
 			return "", fmt.Errorf("system_prompt_file: %w", err)
 		}

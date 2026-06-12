@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Activity, CircleDollarSign, CircleGauge, Database, Layers, Percent, RefreshCw, Wallet, Zap } from "lucide-react";
 import { Tooltip } from "./Tooltip";
 import { useI18n, type Translator } from "../lib/i18n";
+import { formatMoney } from "../lib/money";
 import { type BalanceInfo, type CollaborationMode, type ContextInfo, type JobView, type ToolApprovalMode, type WireUsage } from "../lib/types";
 
 // JobsChip is the status-bar background-jobs indicator: a count that opens an
@@ -81,19 +82,6 @@ function rateValueClass(rate: string | null): string {
   if (pct >= 80) return "statusbar__rate-value--good";
   if (pct >= 50) return "statusbar__rate-value--notice";
   return "statusbar__rate-value--critical";
-}
-
-function currencySymbol(currency?: string): string {
-  const value = (currency || "¥").trim();
-  if (/^(cny|rmb|yuan)$/i.test(value)) return "¥";
-  if (/^(usd|dollar)$/i.test(value)) return "$";
-  return value || "¥";
-}
-
-function formatMoney(amount?: number, currency?: string): string {
-  const symbol = currencySymbol(currency);
-  if (typeof amount !== "number" || amount <= 0) return `${symbol}0.0000`;
-  return `${symbol}${amount < 1 ? amount.toFixed(4) : amount.toFixed(2)}`;
 }
 
 function formatTokenCount(tokens?: number): string {

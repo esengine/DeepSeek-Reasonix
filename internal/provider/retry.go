@@ -20,6 +20,21 @@ const MaxRetries = 10
 
 const maxBackoff = 15 * time.Second
 
+// maxAuthRetries bounds how many times a 401/403 is retried for a key that has
+// authenticated before: a transient server-side rejection (quota/gateway/rate)
+// usually clears in a couple of attempts, whereas a key that never worked is a
+// real config error and fails fast.
+const maxAuthRetries = 2
+
+// SendOptions carries the per-request context SendWithRetry needs to label
+// errors and decide whether a 401 is worth retrying.
+type SendOptions struct {
+	Provider   string // provider instance name, surfaced in errors
+	KeyEnv     string // api_key_env the key is read from, when known
+	KeyPresent bool   // a non-empty key is being sent — separates "rejected" from "missing"
+	RetryAuth  bool   // the key has authenticated before — retry transient 401s instead of failing fast
+}
+
 // RetryInfo describes a backoff about to happen: Attempt is the 1-based retry
 // number (of Max) and Delay is how long SendWithRetry will wait before it.
 type RetryInfo struct {
@@ -129,14 +144,18 @@ func parseRetryAfter(resp *http.Response) time.Duration {
 // SendWithRetry POSTs a streaming request built by newReq and returns the OK
 // response. It retries the connection+header phase up to MaxRetries times on
 // transient network errors and retryable statuses with capped exponential
-// backoff + jitter, honoring Retry-After. 401/403 become *AuthError; other
-// non-OK statuses become *APIError. A RetryNotify in ctx fires before each
-// sleep. Retries cover only the header phase — once the body streams, mid-stream
+// backoff + jitter, honoring Retry-After. A 401/403 becomes *AuthError: it
+// fails fast for a key that has never authenticated (opts.RetryAuth false), but
+// for a previously-good key it backs off and retries up to maxAuthRetries —
+// MiMo and similar gateways return a transient 401 under load. Other non-OK
+// statuses become *APIError. A RetryNotify in ctx fires before each sleep.
+// Retries cover only the header phase — once the body streams, mid-stream
 // failures are not retried (the model has already emitted tokens).
-func SendWithRetry(ctx context.Context, httpClient *http.Client, provName, keyEnv string, newReq func(context.Context) (*http.Request, error)) (*http.Response, error) {
+func SendWithRetry(ctx context.Context, httpClient *http.Client, opts SendOptions, newReq func(context.Context) (*http.Request, error)) (*http.Response, error) {
 	notify := retryNotifyFromContext(ctx)
 	var lastErr error
 	var retryAfter time.Duration
+	authRetries := 0
 
 	for attempt := 0; attempt <= MaxRetries; attempt++ {
 		if attempt > 0 {
@@ -154,14 +173,14 @@ func SendWithRetry(ctx context.Context, httpClient *http.Client, provName, keyEn
 
 		req, err := newReq(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("%s: build request: %w", provName, err)
+			return nil, fmt.Errorf("%s: build request: %w", opts.Provider, err)
 		}
 		resp, err := httpClient.Do(req)
 		if err != nil {
 			if !transientErr(err) {
-				return nil, fmt.Errorf("%s: request failed: %w", provName, err)
+				return nil, fmt.Errorf("%s: request failed: %w", opts.Provider, err)
 			}
-			lastErr = fmt.Errorf("%s: request failed: %w", provName, err)
+			lastErr = fmt.Errorf("%s: request failed: %w", opts.Provider, err)
 			continue
 		}
 		if resp.StatusCode == http.StatusOK {
@@ -174,9 +193,15 @@ func SendWithRetry(ctx context.Context, httpClient *http.Client, provName, keyEn
 		resp.Body.Close()
 
 		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-			return nil, &AuthError{Provider: provName, KeyEnv: keyEnv, Status: resp.StatusCode}
+			authErr := &AuthError{Provider: opts.Provider, KeyEnv: opts.KeyEnv, Status: resp.StatusCode, HasKey: opts.KeyPresent}
+			if opts.RetryAuth && authRetries < maxAuthRetries {
+				authRetries++
+				lastErr = authErr
+				continue
+			}
+			return nil, authErr
 		}
-		apiErr := &APIError{Provider: provName, Status: resp.StatusCode, Body: strings.TrimSpace(string(msg))}
+		apiErr := &APIError{Provider: opts.Provider, Status: resp.StatusCode, Body: strings.TrimSpace(string(msg))}
 		if !RetryableStatus(resp.StatusCode) {
 			return nil, apiErr
 		}

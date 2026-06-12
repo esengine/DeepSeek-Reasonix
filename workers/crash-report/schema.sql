@@ -5,7 +5,9 @@ CREATE TABLE IF NOT EXISTS groups (
   count INTEGER NOT NULL,
   first_seen TEXT NOT NULL,
   last_seen TEXT NOT NULL,
-  last_version TEXT NOT NULL
+  last_version TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open',
+  note TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS reports (
@@ -43,4 +45,33 @@ CREATE TABLE IF NOT EXISTS metrics (
   bucket TEXT NOT NULL,
   count INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (date, version, os, signal, bucket)
+);
+
+CREATE TABLE IF NOT EXISTS users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  email TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'pending',
+  created_at TEXT NOT NULL,
+  approved_at TEXT,
+  approved_by INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+  token TEXT PRIMARY KEY,
+  user_id INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS sessions_user ON sessions (user_id);
+
+CREATE TABLE IF NOT EXISTS audit_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  at TEXT NOT NULL,
+  actor_id INTEGER,
+  actor_email TEXT NOT NULL,
+  action TEXT NOT NULL,
+  target TEXT NOT NULL DEFAULT '',
+  detail TEXT NOT NULL DEFAULT ''
 );

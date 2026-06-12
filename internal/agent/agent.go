@@ -220,6 +220,11 @@ type Agent struct {
 	todoMu    sync.Mutex
 	todoState []evidence.TodoItem
 
+	// hostAdvanceSeq guarantees unique tool IDs across turns: every
+	// emitTodoState call increments it so the frontend always sees a fresh
+	// dispatch even when the same panel index is signed off in different turns.
+	hostAdvanceSeq atomic.Int64
+
 	// projectChecks are structured project instructions that complete_step can
 	// verify against same-turn bash receipts after a write-backed completion.
 	projectChecks []instruction.VerifyCheck
@@ -334,10 +339,29 @@ func (a *Agent) SessionCache() (hit, miss int) {
 func (a *Agent) ContextWindow() int { return a.contextWindow }
 
 // mid-turn steer marker.
-const midTurnSteerPrefix = "[Mid-turn steer queued by the user. Do not treat this as a new task; use it only as additional guidance for the current task after completing the current step.]"
+// MidTurnSteerPrefix marks user messages that were injected mid-turn as
+// guidance (via Steer). The model sees them as instructions; frontends
+// display them as a notice, not a regular user bubble.
+const MidTurnSteerPrefix = "[Mid-turn steer queued by the user. Do not treat this as a new task; use it only as additional guidance for the current task after completing the current step.]"
 
 func midTurnSteerMessage(text string) string {
-	return midTurnSteerPrefix + "\n" + text
+	return MidTurnSteerPrefix + "\n" + text
+}
+
+// SteerText checks whether content is a mid-turn steer message and, if so,
+// returns the original user text without the wrapper prefix. The returned
+// text preserves the user's exact input — it only strips the prefix and the
+// "\n" separator that midTurnSteerMessage inserts between the prefix and the
+// user text; it does not trim spaces so the history replay matches the live
+// Steer event rendering character-for-character.
+func SteerText(content string) (string, bool) {
+	after, found := strings.CutPrefix(content, MidTurnSteerPrefix)
+	if !found {
+		return "", false
+	}
+	// Strip only the "\n" separator, preserving the user's original text.
+	after = strings.TrimPrefix(after, "\n")
+	return after, true
 }
 
 // Steer queues a message for mid-turn injection.
@@ -605,6 +629,10 @@ func (a *Agent) Run(ctx context.Context, input string) error {
 			if a.steerQueueLen() > 0 {
 				continue
 			}
+			// A final-answer turn otherwise skips compaction, so a large context
+			// carries into the next turn un-folded and can overflow the model window.
+			// No-op below the trigger, so normal turns keep their warm cache.
+			a.maybeCompact(ctx, usage)
 			return nil // model gave a final answer
 		}
 		emptyFinalBlocks = 0
@@ -746,7 +774,7 @@ func (a *Agent) advanceCanonicalTodo(step string) {
 	snapshot := append([]evidence.TodoItem(nil), a.todoState...)
 	a.todoMu.Unlock()
 	a.recordTodoState(snapshot)
-	a.emitTodoState(snapshot)
+	a.emitTodoState(snapshot, m.Index)
 }
 
 // recordTodoState logs the host-advanced list as a synthetic todo_write receipt
@@ -787,12 +815,16 @@ func canonicalTodoStatus(s string) string {
 	return s
 }
 
-func (a *Agent) emitTodoState(todos []evidence.TodoItem) {
+// emitTodoState emits a synthetic todo_write event so the frontend task panel
+// reflects a host-advanced completion without the model re-sending the list.
+// itemIndex is the 1-based position of the completed todo in the panel.
+func (a *Agent) emitTodoState(todos []evidence.TodoItem, itemIndex int) {
 	args, err := json.Marshal(map[string]any{"todos": todos})
 	if err != nil {
 		return
 	}
-	t := event.Tool{ID: "host-advance", Name: "todo_write", Args: string(args), ReadOnly: true}
+	id := fmt.Sprintf("host-advance-%d-%d", a.hostAdvanceSeq.Add(1), itemIndex)
+	t := event.Tool{ID: id, Name: "todo_write", Args: string(args), ReadOnly: true}
 	a.sink.Emit(event.Event{Kind: event.ToolDispatch, Tool: t})
 	t.Output = "task list advanced by complete_step"
 	a.sink.Emit(event.Event{Kind: event.ToolResult, Tool: t})
