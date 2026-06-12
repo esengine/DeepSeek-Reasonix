@@ -177,18 +177,23 @@ func (m *Manager) StartForSession(parentSession, kind, label string, run func(ct
 // recordCompletion queues the finished-job summary for DrainCompletedNote and
 // emits a closing Notice (warn for a failure, info otherwise).
 func (m *Manager) recordCompletion(parentSession, id, kind, label string, st Status, err error) {
-	if m.IsDestroying(parentSession) {
-		return
-	}
 	tag := id
 	if label != "" {
 		tag = fmt.Sprintf("%s (%s)", id, label)
 	}
+	parentSession = strings.TrimSpace(parentSession)
+	shouldEmit := false
 	m.mu.Lock()
+	if parentSession != "" && m.destroying[parentSession] {
+		m.mu.Unlock()
+		return
+	}
 	m.completed = append(m.completed, completion{
 		sessionID: parentSession,
 		text:      fmt.Sprintf("%s — %s", tag, st),
 	})
+	active := m.active
+	shouldEmit = active == "" || parentSession == "" || active == parentSession
 	m.mu.Unlock()
 
 	level, text := event.LevelInfo, fmt.Sprintf("background %s finished: %s", kind, id)
@@ -198,7 +203,9 @@ func (m *Manager) recordCompletion(parentSession, id, kind, label string, st Sta
 	case Killed:
 		text = fmt.Sprintf("background %s killed: %s", kind, id)
 	}
-	m.emitIfActive(parentSession, event.Event{Kind: event.Notice, Level: level, Text: text})
+	if shouldEmit {
+		m.sink.Emit(event.Event{Kind: event.Notice, Level: level, Text: text})
+	}
 }
 
 func (m *Manager) get(id string) *Job {
