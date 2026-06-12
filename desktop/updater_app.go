@@ -127,7 +127,8 @@ func (a *App) downloadVerify(asset update.Asset) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	data, err := download(a.reqCtx(), c, asset.URL, asset.Size, func(rcv, total int64) {
+	v4, _ := httpClientIPv4() // best-effort IPv4 fallback; nil just means retries reuse c
+	data, err := download(a.reqCtx(), c, v4, asset.URL, asset.Size, func(rcv, total int64) {
 		a.emitProgress("downloading", rcv, total, "")
 	})
 	if err != nil {

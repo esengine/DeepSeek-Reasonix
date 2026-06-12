@@ -6,6 +6,8 @@ import (
 	"compress/gzip"
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"runtime"
@@ -181,7 +183,7 @@ func TestDownloadRecoversFromMidStreamReset(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	data, err := download(context.Background(), srv.Client(), srv.URL, 0, nil)
+	data, err := download(context.Background(), srv.Client(), nil, srv.URL, 0, nil)
 	if err != nil {
 		t.Fatalf("download should recover after %d resets: %v", downloadAttempts-1, err)
 	}
@@ -207,7 +209,7 @@ func TestDownloadGivesUpAfterCap(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	if _, err := download(context.Background(), srv.Client(), srv.URL, 0, nil); err == nil {
+	if _, err := download(context.Background(), srv.Client(), nil, srv.URL, 0, nil); err == nil {
 		t.Fatal("download should fail after exhausting retries")
 	}
 	if n := atomic.LoadInt32(&calls); n != int32(downloadAttempts) {
@@ -219,9 +221,9 @@ func TestRetryTransientStopsWhenCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	calls := 0
-	if _, err := retryTransient(ctx, func() ([]byte, error) {
+	if err := retryTransient(ctx, func(int) error {
 		calls++
-		return nil, errors.New("boom")
+		return errors.New("boom")
 	}); err == nil {
 		t.Fatal("cancelled retry should return the error")
 	}
@@ -229,3 +231,84 @@ func TestRetryTransientStopsWhenCancelled(t *testing.T) {
 		t.Fatalf("cancelled retry made %d calls, want 1", calls)
 	}
 }
+
+func TestDownloadResumesWithRange(t *testing.T) {
+	fastRetry(t)
+	full := bytes.Repeat([]byte("0123456789"), 50) // 500 bytes
+	const cut = 200
+	var calls int32
+	rangeCh := make(chan string, 4)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if atomic.AddInt32(&calls, 1) == 1 {
+			// First attempt: promise the whole file, send a prefix, drop the socket.
+			conn, bw, err := w.(http.Hijacker).Hijack()
+			if err != nil {
+				t.Errorf("hijack: %v", err)
+				return
+			}
+			fmt.Fprintf(bw, "HTTP/1.1 200 OK\r\nContent-Length: %d\r\n\r\n", len(full))
+			bw.Write(full[:cut])
+			bw.Flush()
+			conn.Close()
+			return
+		}
+		// Resume attempt: honor the Range header with a 206 + Content-Range.
+		rng := r.Header.Get("Range")
+		rangeCh <- rng
+		start := 0
+		fmt.Sscanf(rng, "bytes=%d-", &start)
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, len(full)-1, len(full)))
+		w.WriteHeader(http.StatusPartialContent)
+		w.Write(full[start:])
+	}))
+	defer srv.Close()
+
+	data, err := download(context.Background(), srv.Client(), nil, srv.URL, 0, nil)
+	if err != nil {
+		t.Fatalf("download: %v", err)
+	}
+	if !bytes.Equal(data, full) {
+		t.Fatalf("assembled %d bytes, want %d (equal=%v)", len(data), len(full), bytes.Equal(data, full))
+	}
+	select {
+	case rng := <-rangeCh:
+		if rng != fmt.Sprintf("bytes=%d-", cut) {
+			t.Fatalf("resume Range = %q, want bytes=%d-", rng, cut)
+		}
+	default:
+		t.Fatal("resume attempt sent no Range header")
+	}
+}
+
+func TestDownloadFallsBackToSecondClient(t *testing.T) {
+	fastRetry(t)
+	const body = "served-over-ipv4"
+	primary := &http.Client{Transport: rtFunc(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("connection reset (ipv6)")
+	})}
+	var fbCalls int32
+	fallback := &http.Client{Transport: rtFunc(func(*http.Request) (*http.Response, error) {
+		atomic.AddInt32(&fbCalls, 1)
+		return &http.Response{
+			StatusCode:    http.StatusOK,
+			Body:          io.NopCloser(strings.NewReader(body)),
+			ContentLength: int64(len(body)),
+			Header:        make(http.Header),
+		}, nil
+	})}
+
+	data, err := download(context.Background(), primary, fallback, "http://example.invalid/x", 0, nil)
+	if err != nil {
+		t.Fatalf("download: %v", err)
+	}
+	if string(data) != body {
+		t.Fatalf("got %q, want %q", data, body)
+	}
+	if atomic.LoadInt32(&fbCalls) == 0 {
+		t.Fatal("fallback client was never used after the primary failed")
+	}
+}
+
+type rtFunc func(*http.Request) (*http.Response, error)
+
+func (f rtFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
