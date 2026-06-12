@@ -33,9 +33,10 @@ func TestNormalizeBotInstallTarget(t *testing.T) {
 	}
 }
 
-func TestLarkInstallBeginsOnLarkDomainAndStoresSecret(t *testing.T) {
+func TestLarkInstallFollowsSDKDomainSwitchAndStoresSecret(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	t.Cleanup(func() { _ = os.Unsetenv("LARK_BOT_APP_SECRET") })
+	pollCount := 0
 	var beginHost string
 	var pollHosts []string
 	var actions []string
@@ -58,7 +59,7 @@ func TestLarkInstallBeginsOnLarkDomainAndStoresSecret(t *testing.T) {
 			}
 			writeJSON(t, w, map[string]any{
 				"device_code":               "dev-lark",
-				"verification_uri_complete": "https://accounts.example/verify?user_code=CODE",
+				"verification_uri_complete": "https://open.feishu.cn/page/launcher?user_code=CODE",
 				"user_code":                 "CODE",
 				"interval":                  3,
 				"expire_in":                 300,
@@ -68,6 +69,11 @@ func TestLarkInstallBeginsOnLarkDomainAndStoresSecret(t *testing.T) {
 			actions = append(actions, "poll")
 			if r.Form.Get("device_code") != "dev-lark" {
 				http.Error(w, "wrong device code", http.StatusBadRequest)
+				return
+			}
+			pollCount++
+			if pollCount == 1 {
+				writeJSON(t, w, map[string]any{"user_info": map[string]any{"tenant_brand": "lark"}})
 				return
 			}
 			writeJSON(t, w, map[string]any{
@@ -96,7 +102,17 @@ func TestLarkInstallBeginsOnLarkDomainAndStoresSecret(t *testing.T) {
 	if query.Get("user_code") != "CODE" || query.Get("from") != "sdk" || query.Get("tp") != "sdk" || query.Get("source") != "go-sdk" {
 		t.Fatalf("start URL query = %v, want SDK registration QR metadata with user_code", query)
 	}
+	if qrURL.Host != "open.feishu.cn" {
+		t.Fatalf("start URL host = %q, want SDK Feishu launcher host", qrURL.Host)
+	}
 
+	pending, err := app.PollBotConnectionInstall(start.InstallID)
+	if err != nil {
+		t.Fatalf("PollBotConnectionInstall pending: %v", err)
+	}
+	if pending.Done || pending.Status != "pending" {
+		t.Fatalf("pending poll result = %+v, want pending domain switch", pending)
+	}
 	poll, err := app.PollBotConnectionInstall(start.InstallID)
 	if err != nil {
 		t.Fatalf("PollBotConnectionInstall: %v", err)
@@ -107,14 +123,14 @@ func TestLarkInstallBeginsOnLarkDomainAndStoresSecret(t *testing.T) {
 	if poll.Connection.Provider != "feishu" || poll.Connection.Domain != "lark" || poll.Connection.ID != "feishu-lark" {
 		t.Fatalf("connection = %+v, want feishu-lark from tenant_brand", poll.Connection)
 	}
-	if beginHost != "accounts.larksuite.com" {
-		t.Fatalf("begin host = %q, want Lark accounts host", beginHost)
+	if beginHost != "accounts.feishu.cn" {
+		t.Fatalf("begin host = %q, want SDK Feishu accounts host", beginHost)
 	}
-	if got := strings.Join(pollHosts, ","); got != "accounts.larksuite.com" {
-		t.Fatalf("poll hosts = %q, want Lark poll host", got)
+	if got := strings.Join(pollHosts, ","); got != "accounts.feishu.cn,accounts.larksuite.com" {
+		t.Fatalf("poll hosts = %q, want Feishu poll then Lark poll", got)
 	}
-	if got := strings.Join(actions, ","); got != "begin,poll" {
-		t.Fatalf("registration actions = %q, want Lark begin then poll", got)
+	if got := strings.Join(actions, ","); got != "begin,poll,poll" {
+		t.Fatalf("registration actions = %q, want SDK begin, domain switch, final poll", got)
 	}
 	if poll.Connection.WorkspaceRoot != "" {
 		t.Fatalf("connection workspaceRoot = %q, want empty global default", poll.Connection.WorkspaceRoot)

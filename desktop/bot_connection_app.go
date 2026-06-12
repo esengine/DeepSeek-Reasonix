@@ -251,10 +251,10 @@ func (a *App) TestBotConnection(id, target string) (BotConnectionDiagnostic, err
 }
 
 func (a *App) startFeishuConnectionInstall(domain string) (BotInstallStartResult, error) {
-	beginDomain := domain
-	if beginDomain != "lark" {
-		beginDomain = "feishu"
-	}
+	// The official registration SDK always begins on the Feishu accounts domain.
+	// Lark tenants are detected from the first poll response, then polling moves
+	// to the Lark accounts domain for the final credential exchange.
+	beginDomain := "feishu"
 	data, err := postFeishuInstallForm(feishuAccountsBase(beginDomain), map[string]string{
 		"action": "begin", "archetype": "PersonalAgent", "auth_method": "client_secret", "request_user_info": "open_id",
 	})

@@ -2,12 +2,15 @@ package main
 
 import (
 	"errors"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"reasonix/internal/bot"
+	"reasonix/internal/botruntime"
 	"reasonix/internal/config"
 )
 
@@ -98,7 +101,7 @@ enabled = false
 	}
 }
 
-func TestDesktopBotRuntimeConfigLoadsSavedCredentialsAfterRestart(t *testing.T) {
+func TestDesktopBotRuntimeConfigLoadsAllSavedCredentialsAfterRestart(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	t.Cleanup(func() {
 		_ = os.Unsetenv("FEISHU_BOT_APP_SECRET")
@@ -108,7 +111,12 @@ func TestDesktopBotRuntimeConfigLoadsSavedCredentialsAfterRestart(t *testing.T) 
 	userCfg := config.Default()
 	userCfg.Bot.Enabled = true
 	userCfg.Bot.Allowlist.Enabled = true
-	userCfg.Bot.Allowlist.FeishuUsers = []string{"ou-installer"}
+	userCfg.Bot.Allowlist.FeishuUsers = []string{"ou-feishu-installer", "ou-lark-installer"}
+	userCfg.Bot.Allowlist.WeixinUsers = []string{"wx-installer"}
+	userCfg.Bot.Feishu.Enabled = true
+	userCfg.Bot.Weixin.Enabled = true
+	userCfg.Bot.Weixin.AccountID = "weixin-account"
+	userCfg.Bot.Weixin.TokenEnv = "WEIXIN_BOT_TOKEN"
 	userCfg.Bot.Connections = []config.BotConnectionConfig{
 		{
 			ID:       "feishu-feishu",
@@ -132,6 +140,17 @@ func TestDesktopBotRuntimeConfigLoadsSavedCredentialsAfterRestart(t *testing.T) 
 				AppSecretEnv: "LARK_BOT_APP_SECRET",
 			},
 		},
+		{
+			ID:       "weixin-weixin",
+			Provider: "weixin",
+			Domain:   "weixin",
+			Enabled:  true,
+			Status:   "connected",
+			Credential: config.BotConnectionCredential{
+				AccountID: "weixin-account",
+				TokenEnv:  "WEIXIN_BOT_TOKEN",
+			},
+		},
 	}
 	if err := userCfg.SaveTo(config.UserConfigPath()); err != nil {
 		t.Fatalf("save user config: %v", err)
@@ -142,6 +161,13 @@ func TestDesktopBotRuntimeConfigLoadsSavedCredentialsAfterRestart(t *testing.T) 
 	if err := os.WriteFile(config.UserCredentialsPath(), []byte("FEISHU_BOT_APP_SECRET=feishu-secret\nLARK_BOT_APP_SECRET=lark-secret\n"), 0o600); err != nil {
 		t.Fatalf("write credentials: %v", err)
 	}
+	weixinAccountPath := filepath.Join(config.MemoryUserDir(), "weixin", "accounts", "weixin-account.json")
+	if err := os.MkdirAll(filepath.Dir(weixinAccountPath), 0o700); err != nil {
+		t.Fatalf("create weixin account dir: %v", err)
+	}
+	if err := os.WriteFile(weixinAccountPath, []byte(`{"token":"weixin-token","base_url":"https://ilinkai.weixin.qq.com","user_id":"wx-installer"}`), 0o600); err != nil {
+		t.Fatalf("write weixin account: %v", err)
+	}
 	_ = os.Unsetenv("FEISHU_BOT_APP_SECRET")
 	_ = os.Unsetenv("LARK_BOT_APP_SECRET")
 
@@ -150,8 +176,8 @@ func TestDesktopBotRuntimeConfigLoadsSavedCredentialsAfterRestart(t *testing.T) 
 		t.Fatalf("load desktop bot config: %v", err)
 	}
 	views := botConnectionViews(got.Bot.Connections)
-	if len(views) != 2 {
-		t.Fatalf("connection views = %+v, want Feishu and Lark", views)
+	if len(views) != 3 {
+		t.Fatalf("connection views = %+v, want Feishu, Lark, and Weixin", views)
 	}
 	for _, view := range views {
 		if !view.Credential.SecretSet {
@@ -159,8 +185,13 @@ func TestDesktopBotRuntimeConfigLoadsSavedCredentialsAfterRestart(t *testing.T) 
 		}
 	}
 	plan := desktopBotRuntimePlan(got)
-	if !plan.Start || !plan.Enabled[bot.PlatformFeishu] {
-		t.Fatalf("desktop runtime plan = %+v, want saved Feishu/Lark connections to start", plan)
+	if !plan.Start || !plan.Enabled[bot.PlatformFeishu] || !plan.Enabled[bot.PlatformWeixin] {
+		t.Fatalf("desktop runtime plan = %+v, want saved Feishu/Lark/Weixin connections to start", plan)
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	bindings := botruntime.AdapterBindings(got, plan.Enabled, logger)
+	if len(bindings) != 3 {
+		t.Fatalf("adapter bindings = %+v, want one per saved connection", bindings)
 	}
 }
 
