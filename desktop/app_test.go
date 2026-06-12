@@ -1479,17 +1479,11 @@ func TestCapabilitiesShowsBuiltInMCPDefaults(t *testing.T) {
 
 	view := app.Capabilities()
 	want := map[string][]string{
-		"time":     []string{"mcp-server-time"},
-		"context7": []string{"-y", "@upstash/context7-mcp"},
-	}
-	wantCommand := map[string]string{
-		"time":     "uvx",
-		"context7": "npx",
+		"time": []string{"builtin-mcp", "time"},
 	}
 	found := map[string]bool{}
 	for _, s := range view.Servers {
-		args, ok := want[s.Name]
-		if !ok {
+		if s.Name != "time" && s.Name != "context7" {
 			continue
 		}
 		found[s.Name] = true
@@ -1499,17 +1493,33 @@ func TestCapabilitiesShowsBuiltInMCPDefaults(t *testing.T) {
 		if !s.BuiltIn || !s.Configured || !s.AutoStart {
 			t.Fatalf("%s builtIn/configured/autoStart = %v/%v/%v, want true/true/true; server = %+v", s.Name, s.BuiltIn, s.Configured, s.AutoStart, s)
 		}
-		if s.Tier != "lazy" || s.Transport != "stdio" || s.Command != wantCommand[s.Name] {
-			t.Fatalf("%s transport/tier/command = %q/%q/%q, want stdio/lazy/%s; server = %+v", s.Name, s.Transport, s.Tier, s.Command, wantCommand[s.Name], s)
+		if s.Tier != "lazy" || s.Transport != "stdio" || strings.TrimSpace(s.Command) == "" {
+			t.Fatalf("%s transport/tier/command = %q/%q/%q, want stdio/lazy/non-empty; server = %+v", s.Name, s.Transport, s.Tier, s.Command, s)
 		}
-		if !reflect.DeepEqual(s.Args, args) {
-			t.Fatalf("%s args = %+v, want %+v", s.Name, s.Args, args)
+		if s.Name == "time" && !reflect.DeepEqual(s.Args, want["time"]) {
+			t.Fatalf("time args = %+v, want %+v", s.Args, want["time"])
+		}
+		if s.Name == "context7" && !validContext7Runner(s.Command, s.Args) {
+			t.Fatalf("context7 runner = %q %+v, want npx/pnpm/bunx for @upstash/context7-mcp", s.Command, s.Args)
 		}
 	}
-	for name := range want {
+	for _, name := range []string{"time", "context7"} {
 		if !found[name] {
 			t.Fatalf("built-in MCP %s missing from Capabilities: %+v", name, view.Servers)
 		}
+	}
+}
+
+func validContext7Runner(command string, args []string) bool {
+	switch command {
+	case "npx":
+		return reflect.DeepEqual(args, []string{"-y", "@upstash/context7-mcp"})
+	case "pnpm":
+		return reflect.DeepEqual(args, []string{"dlx", "@upstash/context7-mcp"})
+	case "bunx":
+		return reflect.DeepEqual(args, []string{"@upstash/context7-mcp"})
+	default:
+		return false
 	}
 }
 

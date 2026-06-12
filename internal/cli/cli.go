@@ -23,6 +23,7 @@ import (
 
 	"reasonix/internal/agent"
 	"reasonix/internal/boot"
+	"reasonix/internal/builtinmcp"
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
@@ -49,6 +50,9 @@ func Run(args []string, version string) int {
 	}
 	if cmd == "--acp" {
 		cmd = "acp"
+	}
+	if cmd == "builtin-mcp" {
+		return builtinmcp.RunCommand(args[1:], os.Stdin, os.Stdout, os.Stderr, version)
 	}
 	if shouldMigrateLegacyConfigForCLI(cmd) {
 		migrateLegacyConfigForCLI()

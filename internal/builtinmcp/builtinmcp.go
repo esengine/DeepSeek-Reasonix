@@ -2,11 +2,23 @@
 // requiring user configuration.
 package builtinmcp
 
-import "reasonix/internal/config"
+import (
+	"os"
+	"os/exec"
+
+	"reasonix/internal/config"
+)
 
 const (
 	TimeName     = "time"
 	Context7Name = "context7"
+)
+
+var (
+	executablePathDefault = os.Executable
+	lookPathDefault       = exec.LookPath
+	currentExecutable     = executablePathDefault
+	lookPath              = lookPathDefault
 )
 
 // Entries returns the built-in MCP servers that are always available. They use
@@ -16,18 +28,43 @@ func Entries() []config.PluginEntry {
 		{
 			Name:    TimeName,
 			Type:    "stdio",
-			Command: "uvx",
-			Args:    []string{"mcp-server-time"},
+			Command: executablePath(),
+			Args:    []string{"builtin-mcp", TimeName},
 			Tier:    "lazy",
 		},
-		{
-			Name:    Context7Name,
-			Type:    "stdio",
-			Command: "npx",
-			Args:    []string{"-y", "@upstash/context7-mcp"},
-			Tier:    "lazy",
-		},
+		context7Entry(),
 	}
+}
+
+func executablePath() string {
+	if path, err := currentExecutable(); err == nil && path != "" {
+		return path
+	}
+	return "reasonix"
+}
+
+func context7Entry() config.PluginEntry {
+	command, args := context7Command()
+	return config.PluginEntry{
+		Name:    Context7Name,
+		Type:    "stdio",
+		Command: command,
+		Args:    args,
+		Tier:    "lazy",
+	}
+}
+
+func context7Command() (string, []string) {
+	if _, err := lookPath("npx"); err == nil {
+		return "npx", []string{"-y", "@upstash/context7-mcp"}
+	}
+	if _, err := lookPath("pnpm"); err == nil {
+		return "pnpm", []string{"dlx", "@upstash/context7-mcp"}
+	}
+	if _, err := lookPath("bunx"); err == nil {
+		return "bunx", []string{"@upstash/context7-mcp"}
+	}
+	return "npx", []string{"-y", "@upstash/context7-mcp"}
 }
 
 // Entry returns one built-in MCP entry by name.
