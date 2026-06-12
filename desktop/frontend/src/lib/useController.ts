@@ -137,6 +137,18 @@ export function sameMeta(a?: Meta, b?: Meta): boolean {
   );
 }
 
+const STALE_TURN_RECONCILE_MS = 30_000;
+
+export function shouldReconcileStaleTurn(
+  state: Pick<State, "running" | "turnActive"> | undefined,
+  lastTurnActivityAt: number,
+  now = Date.now(),
+  timeoutMs = STALE_TURN_RECONCILE_MS,
+): boolean {
+  if (!state?.running || !state.turnActive || lastTurnActivityAt <= 0) return false;
+  return Math.max(0, now - lastTurnActivityAt) >= timeoutMs;
+}
+
 /** Known read-only tool names. Session restore hardcodes readOnly=false for all
  *  tools, so we derive it from the name to enable correct batching.
  *  Mirrors Go backend ReadOnly() + codegraph ReadOnlyToolNames(). */
@@ -549,7 +561,7 @@ async function refreshMetaForTab(tabId: string, dispatchTo: (tabId: string, acti
 
 export function useController() {
   const statesRef = useRef<TabStates>(new Map());
-  const lastTokenAt = useRef(0);
+  const lastTurnActivityAtByTab = useRef(new Map<string, number>());
   const [activeTabId, setActiveTabId] = useState<string | undefined>();
   const activeTabIdRef = useRef<string | undefined>(undefined);
   // A render-triggering counter so that mutations to a non-active tab's state still
@@ -672,8 +684,16 @@ export function useController() {
     const off = onEvent((e) => {
       const targetTabId = e.tabId || activeTabIdRef.current;
       if (!targetTabId) return;
-      if (e.kind === "turn_started" || e.kind === "text" || e.kind === "reasoning") {
-        lastTokenAt.current = Date.now();
+      if (
+        e.kind === "turn_started" ||
+        e.kind === "text" ||
+        e.kind === "reasoning" ||
+        e.kind === "message" ||
+        e.kind === "tool_dispatch" ||
+        e.kind === "tool_progress" ||
+        e.kind === "tool_result"
+      ) {
+        lastTurnActivityAtByTab.current.set(targetTabId, Date.now());
       }
       if (e.kind === "text" || e.kind === "reasoning") {
         textBatch.push({ tabId: targetTabId, e });
@@ -715,27 +735,30 @@ export function useController() {
     return () => { textBatch.drain(); off(); offReady(); };
   }, [dispatchTo, loadSessionDataForTab, refreshCheckpoints, syncActiveTabFromBackend]);
 
-  // Stale-stream watchdog: if the frontend thinks the agent is running but
-  // no token events have arrived for 30 seconds, reconcile with the backend.
-  // This catches the case where the Wails event channel silently drops the
-  // turn_done event after a model-service interruption (#3746).
+  // Stale-turn watchdog: if the frontend thinks the agent is running but the
+  // turn stream has gone quiet, reconcile with the backend. This catches cases
+  // where the Wails event channel silently drops turn_done after the final
+  // message or synthetic todo update has already closed the live stream.
   useEffect(() => {
     if (!activeTabId) return;
     const s = statesRef.current.get(activeTabId);
-    if (!s?.running || !s.live) return;
-    const since = Date.now() - lastTokenAt.current;
-    if (since >= 30_000) {
+    const now = Date.now();
+    const lastTurnActivityAt = lastTurnActivityAtByTab.current.get(activeTabId) ?? 0;
+    if (!s?.running || !s.turnActive || lastTurnActivityAt <= 0) return;
+    const since = Math.max(0, now - lastTurnActivityAt);
+    if (shouldReconcileStaleTurn(s, lastTurnActivityAt, now)) {
       void reconcileTabRuntime(activeTabId);
       return;
     }
     const timer = window.setTimeout(() => {
       const cur = statesRef.current.get(activeTabId);
-      if (cur?.running && cur.live && Date.now() - lastTokenAt.current >= 30_000) {
+      const lastActivity = lastTurnActivityAtByTab.current.get(activeTabId) ?? 0;
+      if (shouldReconcileStaleTurn(cur, lastActivity)) {
         void reconcileTabRuntime(activeTabId);
       }
-    }, 30_000 - since);
+    }, STALE_TURN_RECONCILE_MS - since);
     return () => window.clearTimeout(timer);
-  }, [activeTabId, reconcileTabRuntime, activeState.running, activeState.live]);
+  }, [activeTabId, reconcileTabRuntime, activeState.running, activeState.turnActive]);
 
   const send = useCallback((displayText: string, submitText = displayText) => {
     const submitForTab = (tabId: string) => {
