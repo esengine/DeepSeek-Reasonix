@@ -8,7 +8,9 @@ import { ProcessCompactIcon, ProcessPhaseIcon } from "./ProcessCard";
 import { ToolCard } from "./ToolCard";
 import { ChevronRight } from "lucide-react";
 import { Welcome } from "./Welcome";
+import { ReadOnlyBatch } from "./ReadOnlyBatch";
 import { getDisplayMode, onDisplayModeChange, type DisplayMode } from "../lib/displayMode";
+import { isReadOnlyTool } from "../lib/useController";
 
 type ToolItem = Extract<Item, { kind: "tool" }>;
 type AssistantItem = Extract<Item, { kind: "assistant" }>;
@@ -18,10 +20,10 @@ type QuestionAnchor = { id: string; text: string; turn: number };
 const QUESTION_NAV_MIN_COUNT = 2;
 const LiveStreamContext = createContext<LiveStream | undefined>(undefined);
 
-const LiveAssistantMessage = memo(function LiveAssistantMessage({ item, defaultExpanded = false, expandWhileStreaming = true }: { item: AssistantItem; defaultExpanded?: boolean; expandWhileStreaming?: boolean }) {
+const LiveAssistantMessage = memo(function LiveAssistantMessage({ item, defaultExpanded = false }: { item: AssistantItem; defaultExpanded?: boolean }) {
   const live = useContext(LiveStreamContext);
   const shown = live && live.id === item.id ? { ...item, text: live.text, reasoning: live.reasoning, streaming: true } : item;
-  return <AssistantMessage item={shown} defaultExpanded={defaultExpanded} expandWhileStreaming={expandWhileStreaming} />;
+  return <AssistantMessage item={shown} defaultExpanded={defaultExpanded} />;
 });
 
 // ── Layer budgets ─────────────────────────────────────────────────────────────
@@ -353,7 +355,6 @@ export function Transcript({
     for (let i = hotStartIdx; i < items.length; i++) {
       const it = items[i];
       if (it.kind === "user") {
-        // Close pending group — if it's a non-streaming text assistant it's the final answer
         if (current.length > 0) {
           const first = current[0];
           const isFinal = first.kind === "assistant" && !first.streaming && first.text.trim() !== "";
@@ -365,7 +366,6 @@ export function Transcript({
       }
       if (it.kind === "assistant") {
         if (current.length > 0) {
-          // Previous step is complete — a new assistant has appeared
           groups.push({ items: current, isFinal: false, isComplete: true });
           current = [];
         }
@@ -374,7 +374,6 @@ export function Transcript({
         current.push(it);
       }
     }
-    // Last group in progress
     if (current.length > 0) {
       const first = current[0];
       const isFinal = first.kind === "assistant" && !first.streaming && first.text.trim() !== "";
@@ -412,8 +411,9 @@ export function Transcript({
       actionReady = false;
     };
 
+    // Compact/minimal mode: step-based rendering
+    // Standard mode: flat rendering (no step groups)
     if (stepGroups) {
-      // Compact/minimal mode: step-based rendering
       // Collect consecutive completed non-final steps into batches
       let collapseBatch: Item[] = [];
       let collapseBatchStart: string | null = null;
@@ -436,20 +436,19 @@ export function Transcript({
       for (const group of stepGroups) {
         const first = group.items[0];
 
-        // User message
         if (first.kind === "user") {
           flushCollapseBatch();
           pushTurnActions();
           const tn = userTurn.get(first.id);
           activeTurn = tn;
           out.push(
-            <UserMessage key={first.id} text={first.text} failed={first.failed} turn={tn} anchorId={questionAnchorId(first.id)} />,
+            <UserMessage key={first.id} id={first.id} text={first.text} failed={first.failed} turn={tn} anchorId={questionAnchorId(first.id)} />,
           );
           continue;
         }
 
         // Completed non-final step → batch it
-        if (group.isComplete && !group.isFinal && displayMode !== "standard") {
+        if (group.isComplete && !group.isFinal) {
           if (!collapseBatchStart) collapseBatchStart = first.id;
           collapseBatch.push(...group.items);
           continue;
@@ -457,60 +456,72 @@ export function Transcript({
 
         // Final answer or active step → flush any pending batch then render
         flushCollapseBatch();
-        // Group consecutive readOnly tools into a batch
-        const readOnlyBatch: ToolItem[] = [];
-        const flushReadOnlyBatch = () => {
-          if (readOnlyBatch.length === 0) return;
-          out.push(<ReadOnlyBatch key={`rob-${readOnlyBatch[0].id}`} items={readOnlyBatch} subcalls={subcallsByParent} />);
-          readOnlyBatch.length = 0;
-        };
-        for (const it of group.items) {
-          // Running read-only tools render individually (visible in progress);
-          // only completed read-only tools go into the batch (hidden after done)
-          if (it.kind === "tool" && it.readOnly && !it.parentId && it.name !== "todo_write" && it.name !== "exit_plan_mode") {
-            if (it.status === "running") {
-              flushReadOnlyBatch();
-              out.push(<ToolCard key={it.id} item={it} subcalls={subcallsByParent.get(it.id)} />);
-              continue;
+        const nonAssistantItems = group.items.filter(
+          (it) => it.kind !== "assistant" || (it.streaming && !it.text.trim())
+        );
+        const hasRunning = nonAssistantItems.some((it) => it.kind === "tool" && it.status === "running");
+        if (nonAssistantItems.length > 0 && !hasRunning) {
+          const dur = nonAssistantItems.reduce((ms, it) => ms + (it.kind === "tool" ? ((it as ToolItem).durationMs ?? 0) : 0), 0);
+          out.push(
+            <TurnCollapse
+              key={`step-${first.id}`}
+              items={nonAssistantItems}
+              durationMs={dur}
+              mode={displayMode}
+              subcalls={subcallsByParent}
+            />,
+          );
+        } else if (nonAssistantItems.length > 0) {
+          for (const it of nonAssistantItems) {
+            if (it.kind === "tool") {
+              if (it.parentId) continue;
+              if (it.name === "todo_write" || it.name === "exit_plan_mode") continue;
+              out.push(<ToolCard key={it.id} item={it as ToolItem} subcalls={subcallsByParent.get(it.id)} />);
             }
-            readOnlyBatch.push(it as ToolItem);
-            continue;
-          }
-          flushReadOnlyBatch();
-          switch (it.kind) {
-            case "assistant":
-              out.push(<LiveAssistantMessage key={it.id} item={it as AssistantItem} defaultExpanded={defaultExpandThinking} expandWhileStreaming={false} />);
-              if (!it.streaming && it.text.trim() !== "") {
-                actionText = it.text;
-                actionReady = true;
-              }
-              break;
-            case "tool":
-              if (it.parentId) break;
-              if (it.name === "todo_write") break;
-              if (it.name === "exit_plan_mode") break;
-              out.push(<ToolCard key={it.id} item={it} subcalls={subcallsByParent.get(it.id)} />);
-              break;
-            case "phase": out.push(<PhaseCard key={it.id} text={it.text} />); break;
-            case "notice": out.push(<NoticeCard key={it.id} level={it.level} text={it.text} />); break;
-            case "compaction": out.push(<CompactionCard key={it.id} item={it} />); break;
+            if (it.kind === "phase") out.push(<PhaseCard key={it.id} text={it.text} />);
           }
         }
-        flushReadOnlyBatch();
+        // Render the final assistant message (if any) directly
+        for (const it of group.items) {
+          if (it.kind !== "assistant") continue;
+          out.push(<LiveAssistantMessage key={it.id} item={it as AssistantItem} defaultExpanded={defaultExpandThinking} />);
+          if (!it.streaming && it.text.trim() !== "") {
+            actionText = it.text;
+            actionReady = true;
+          }
+        }
       }
       flushCollapseBatch();
       pushTurnActions();
     } else {
       // Standard mode: flat rendering
+      const roBatch: ToolItem[] = [];
+      const flushRO = () => {
+        if (roBatch.length === 0) return;
+        out.push(<ReadOnlyBatch key={`rob-${roBatch[0].id}`} items={[...roBatch]} subcalls={subcallsByParent} />);
+        roBatch.length = 0;
+      };
       for (let i = hotStartIdx; i < items.length; i++) {
         const it = items[i];
+        if (
+          it.kind === "tool" &&
+          !it.parentId &&
+          it.status !== "running" &&
+          it.name !== "todo_write" &&
+          it.name !== "exit_plan_mode" &&
+          isReadOnlyTool(it.name)
+        ) {
+          roBatch.push(it as ToolItem);
+          continue;
+        }
+        flushRO();
         switch (it.kind) {
           case "user": {
             pushTurnActions();
             const tn = userTurn.get(it.id);
             activeTurn = tn;
             out.push(
-              <UserMessage key={it.id} text={it.text} failed={it.failed} turn={tn} anchorId={questionAnchorId(it.id)} />,
+              <UserMessage key={it.id} id={it.id} text={it.text} failed={it.failed} turn={tn} anchorId={questionAnchorId(it.id)} />,
             );
             break;
           }
@@ -532,10 +543,11 @@ export function Transcript({
           case "compaction": out.push(<CompactionCard key={it.id} item={it} />); break;
         }
       }
+      flushRO();
       pushTurnActions();
     }
     return out;
-  }, [hotStartIdx, items, openAction, actionPending, rewindDisabled, onRewind, subcallsByParent, userTurn, checkpointsByTurn, displayMode, stepGroups]);
+  }, [hotStartIdx, items, openAction, actionPending, rewindDisabled, onRewind, subcallsByParent, userTurn, checkpointsByTurn, displayMode, stepGroups, defaultExpandThinking]);
 
   // ── Assemble rendered output ──────────────────────────────────────────────
   // Warm/cold zone is a separate memo'd WarmZone component so streaming tokens
@@ -770,7 +782,7 @@ function WarmTurnItems({
   const roBatch: ToolItem[] = [];
   const flushRO = () => {
     if (roBatch.length === 0) return;
-    nodes.push(<ReadOnlyBatch key={`rob-${roBatch[0].id}`} items={roBatch} subcalls={subcalls} />);
+    nodes.push(<ReadOnlyBatch key={`rob-${roBatch[0].id}`} items={[...roBatch]} subcalls={subcalls} />);
     roBatch.length = 0;
   };
 
@@ -778,7 +790,7 @@ function WarmTurnItems({
     const it = items[i];
 
     // Completed read-only tools → batch into ReadOnlyBatch
-    if (it.kind === "tool" && it.readOnly && !it.parentId && it.name !== "todo_write" && it.name !== "exit_plan_mode" && it.status !== "running") {
+    if (it.kind === "tool" && !it.parentId && it.name !== "todo_write" && it.name !== "exit_plan_mode" && isReadOnlyTool(it.name)) {
       roBatch.push(it as ToolItem);
       continue;
     }
@@ -862,42 +874,6 @@ function WarmTurnCard({
   );
 }
 
-// ── ReadOnlyBatch ─────────────────────────────────────────────────────
-
-type ReadOnlyBatchProps = {
-  items: ToolItem[];
-  subcalls: ReadonlyMap<string, ToolItem[]>;
-};
-
-function ReadOnlyBatch({ items, subcalls }: ReadOnlyBatchProps) {
-  const t = useT();
-  const [open, setOpen] = useState(false);
-
-  const readCount = items.filter((it) => it.name === "read_file" || it.name === "ls").length;
-  const searchCount = items.filter((it) => it.name === "grep" || it.name === "glob" || it.name === "web_fetch").length;
-
-  const parts: string[] = [];
-  if (readCount > 0) parts.push(t("tool.readCount", { n: readCount }));
-  if (searchCount > 0) parts.push(t("tool.searchCount", { n: searchCount }));
-  const label = parts.join(" · ");
-
-  return (
-    <div className={`readonly-batch${open ? " readonly-batch--open" : ""}`}>
-      <button type="button" className="reasoning__head" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
-        <ChevronRight className={`reasoning__chevron${open ? " reasoning__chevron--open" : ""}`} size={12} />
-        <span className="readonly-batch__label">{label}</span>
-      </button>
-      {open && (
-        <div className="readonly-batch__body">
-          {items.map((it) => (
-            <ToolCard key={it.id} item={it} subcalls={subcalls.get(it.id)} />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ── TurnCollapse: compact/minimal mode grouping ──────────────────────────────
 
 type TurnCollapseProps = {
@@ -923,7 +899,7 @@ function TurnCollapse({ items, durationMs, mode, subcalls }: TurnCollapseProps) 
       if (it.kind === "phase") return mode !== "minimal";
       if (it.kind !== "tool") return false;
       if (it.parentId || it.name === "todo_write" || it.name === "exit_plan_mode") return false;
-      if (mode === "minimal") return !it.readOnly && it.name !== "bash";
+      if (mode === "minimal") return it.name !== "bash";
       return true;
     });
   }, [items, mode]);
@@ -938,11 +914,11 @@ function TurnCollapse({ items, durationMs, mode, subcalls }: TurnCollapseProps) 
   const roBatch: ToolItem[] = [];
   const flushRO = () => {
     if (roBatch.length === 0) return;
-    body.push(<ReadOnlyBatch key={`rob-${roBatch[0].id}`} items={roBatch} subcalls={subcalls} />);
+    body.push(<ReadOnlyBatch key={`rob-${roBatch[0].id}`} items={[...roBatch]} subcalls={subcalls} />);
     roBatch.length = 0;
   };
   for (const it of displayItems) {
-    if (it.kind === "tool" && it.readOnly && !it.parentId && it.name !== "todo_write" && it.name !== "exit_plan_mode" && it.status !== "running") {
+    if (it.kind === "tool" && !it.parentId && it.name !== "todo_write" && it.name !== "exit_plan_mode" && it.status !== "running" && isReadOnlyTool(it.name)) {
       roBatch.push(it as ToolItem);
       continue;
     }

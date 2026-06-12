@@ -139,6 +139,22 @@ func (c *Controller) HasRefs(line string) bool {
 	return len(c.detectRefs(line)) > 0
 }
 
+// inputImages resolves image @-attachments in the turn input to data URLs so the
+// turn can carry them to a vision-capable model. Best-effort: an unreadable
+// attachment is skipped — the @image ref still lands as text via ResolveRefs.
+func (c *Controller) inputImages(line string) []string {
+	var urls []string
+	for _, r := range c.detectRefs(line) {
+		if r.kind != refImage {
+			continue
+		}
+		if url, err := visionImageDataURL(r.path); err == nil {
+			urls = append(urls, url)
+		}
+	}
+	return urls
+}
+
 // resolveBareNames batch-resolves simple filenames (no path separator) that
 // don't exist in cwd. It walks the working tree once and matches every
 // unresolved name against the set, stopping when all are found. This runs in

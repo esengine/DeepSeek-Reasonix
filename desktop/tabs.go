@@ -22,6 +22,7 @@ import (
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
+	"reasonix/internal/fileutil"
 	"reasonix/internal/provider"
 )
 
@@ -58,6 +59,7 @@ type WorkspaceTab struct {
 
 	model            string // active model ref (for meta)
 	effort           *string
+	tokenMode        string
 	mode             string // "normal" | "plan" | "yolo" | "plan-yolo"; yolo/full access is runtime-only
 	goal             string
 	toolApprovalMode string
@@ -430,6 +432,7 @@ type TabMeta struct {
 	Mode              string `json:"mode"`
 	CollaborationMode string `json:"collaborationMode"`
 	ToolApprovalMode  string `json:"toolApprovalMode"`
+	TokenMode         string `json:"tokenMode"`
 	Goal              string `json:"goal,omitempty"`
 	GoalStatus        string `json:"goalStatus,omitempty"`
 	StartupErr        string `json:"startupErr,omitempty"`
@@ -450,6 +453,7 @@ func (a *App) tabMeta(tab *WorkspaceTab, active bool) TabMeta {
 		Mode:              currentTabMode(tab),
 		CollaborationMode: currentTabCollaborationMode(tab),
 		ToolApprovalMode:  currentTabToolApprovalMode(tab),
+		TokenMode:         currentTabTokenMode(tab),
 		Goal:              currentTabGoal(tab),
 		GoalStatus:        currentTabGoalStatus(tab),
 		StartupErr:        tab.StartupErr,
@@ -514,6 +518,7 @@ func (a *App) OpenProjectTab(workspaceRoot, topicID string) (TabMeta, error) {
 		WorkspaceRoot:    workspaceRoot,
 		TopicID:          topicID,
 		TopicTitle:       topicTitle,
+		tokenMode:        boot.TokenModeFull,
 		mode:             "normal",
 		toolApprovalMode: control.ToolApprovalAsk,
 		disabledMCP:      map[string]ServerView{},
@@ -558,6 +563,7 @@ func (a *App) OpenGlobalTab(topicID string) (TabMeta, error) {
 		WorkspaceRoot:    globalRoot,
 		TopicID:          topicID,
 		TopicTitle:       topicTitle,
+		tokenMode:        boot.TokenModeFull,
 		mode:             "normal",
 		toolApprovalMode: control.ToolApprovalAsk,
 		disabledMCP:      map[string]ServerView{},
@@ -603,6 +609,13 @@ func (a *App) EnsureBlankTab(scope, workspaceRoot string) (TabMeta, error) {
 	}
 
 	var created *WorkspaceTab
+	// Compute actual root early — both the indexed-topic fallback and the
+	// new-topic path need it when constructing the tab below.
+	actualRoot := workspaceRoot
+	if scope == "global" {
+		actualRoot = globalRoot
+	}
+
 	a.mu.Lock()
 	for _, id := range a.orderedTabIDsLocked() {
 		tab := a.tabs[id]
@@ -615,12 +628,56 @@ func (a *App) EnsureBlankTab(scope, workspaceRoot string) (TabMeta, error) {
 		}
 	}
 
+	// Inherit model, effort, token mode, mode, tool-approval, and MCP state from the
+	// active tab so a new blank session keeps the same settings (#4019).
+	var inheritedModel string
+	var inheritedEffort *string
+	inheritedTokenMode := boot.TokenModeFull
+	inheritedMode := "normal"
+	inheritedToolApprovalMode := control.ToolApprovalAsk
+	inheritedDisabledMCP := map[string]ServerView{}
+	var inheritedMCPOrder []string
+	if active := a.activeTabLocked(); active != nil {
+		inheritedModel = active.model
+		inheritedEffort = cloneStringPtr(active.effort)
+		inheritedTokenMode = currentTabTokenMode(active)
+		inheritedMode = currentTabMode(active)
+		inheritedToolApprovalMode = currentTabToolApprovalMode(active)
+		inheritedDisabledMCP = cloneServerViewMap(active.disabledMCP)
+		inheritedMCPOrder = append([]string(nil), active.mcpOrder...)
+	}
+
 	if topicID := a.indexedBlankTopicIDLocked(scope, workspaceRoot); topicID != "" {
-		a.mu.Unlock()
-		if scope == "global" {
-			return a.OpenGlobalTab(topicID)
+		// Reuse a previously-indexed but unused blank topic instead of
+		// creating a new one.  Build it inline (not via OpenProjectTab /
+		// OpenGlobalTab) so it inherits settings from the active tab.
+		tabID := a.newUniqueTabIDLocked()
+		topicTitle := topicTitleForTab(scope, workspaceRoot, topicID)
+		created = &WorkspaceTab{
+			ID:               tabID,
+			Scope:            scope,
+			WorkspaceRoot:    actualRoot,
+			TopicID:          topicID,
+			TopicTitle:       topicTitle,
+			model:            inheritedModel,
+			effort:           inheritedEffort,
+			tokenMode:        inheritedTokenMode,
+			mode:             inheritedMode,
+			toolApprovalMode: inheritedToolApprovalMode,
+			disabledMCP:      inheritedDisabledMCP,
+			mcpOrder:         inheritedMCPOrder,
 		}
-		return a.OpenProjectTab(workspaceRoot, topicID)
+		created.sink = &tabEventSink{tabID: tabID, app: a}
+		a.tabs[tabID] = created
+		a.tabOrder = append(a.tabOrder, tabID)
+		a.activeTabID = tabID
+		a.saveTabsLocked()
+		meta := a.tabMeta(created, true)
+		a.mu.Unlock()
+
+		a.startTabControllerBuild(created)
+		a.emitProjectTreeChanged()
+		return meta, nil
 	}
 
 	topicID := newTopicID()
@@ -644,19 +701,19 @@ func (a *App) EnsureBlankTab(scope, workspaceRoot string) (TabMeta, error) {
 	}
 
 	tabID := a.newUniqueTabIDLocked()
-	actualRoot := workspaceRoot
-	if scope == "global" {
-		actualRoot = globalRoot
-	}
 	created = &WorkspaceTab{
 		ID:               tabID,
 		Scope:            scope,
 		WorkspaceRoot:    actualRoot,
 		TopicID:          topicID,
 		TopicTitle:       topicTitleForTab(scope, workspaceRoot, topicID),
-		mode:             "normal",
-		toolApprovalMode: control.ToolApprovalAsk,
-		disabledMCP:      map[string]ServerView{},
+		model:            inheritedModel,
+		effort:           inheritedEffort,
+		tokenMode:        inheritedTokenMode,
+		mode:             inheritedMode,
+		toolApprovalMode: inheritedToolApprovalMode,
+		disabledMCP:      inheritedDisabledMCP,
+		mcpOrder:         inheritedMCPOrder,
 	}
 	created.sink = &tabEventSink{tabID: tabID, app: a}
 	a.tabs[tabID] = created
@@ -842,6 +899,7 @@ func (a *App) startTabControllerBuild(tab *WorkspaceTab) {
 }
 
 func (a *App) buildTabController(tab *WorkspaceTab) {
+	defer a.recoverToPending("buildTabController")
 	wailsCtx := a.ctx
 	buildCtx := a.bootContext()
 
@@ -923,6 +981,7 @@ func (a *App) buildTabController(tab *WorkspaceTab) {
 		WorkspaceRoot:  root,
 		SessionDir:     sessionDir,
 		EffortOverride: cloneStringPtr(tab.effort),
+		TokenMode:      currentTabTokenMode(tab),
 	})
 	if err != nil {
 		a.mu.Lock()
@@ -1134,6 +1193,7 @@ func (a *App) scheduleTabSnapshot(tabID string) {
 }
 
 func (a *App) tabSnapshotLoop(tab *WorkspaceTab) {
+	defer a.recoverToPending("tabSnapshotLoop")
 	for {
 		a.mu.RLock()
 		ctrl := tab.Ctrl
@@ -1267,6 +1327,7 @@ type desktopTabEntry struct {
 	SessionPath      string  `json:"sessionPath,omitempty"`
 	Model            string  `json:"model,omitempty"`
 	Effort           *string `json:"effort,omitempty"`
+	TokenMode        string  `json:"tokenMode,omitempty"`
 	Mode             string  `json:"mode,omitempty"`
 	Goal             string  `json:"goal,omitempty"`
 	ToolApprovalMode string  `json:"toolApprovalMode,omitempty"`
@@ -1300,6 +1361,7 @@ func (a *App) saveTabsLocked() {
 				SessionPath:      tab.currentSessionPath(),
 				Model:            tab.model,
 				Effort:           cloneStringPtr(tab.effort),
+				TokenMode:        persistedTabTokenMode(currentTabTokenMode(tab)),
 				Mode:             persistedTabMode(currentTabMode(tab)),
 				Goal:             strings.TrimSpace(currentTabGoal(tab)),
 				ToolApprovalMode: persistedToolApprovalMode(currentTabToolApprovalMode(tab)),
@@ -1311,7 +1373,7 @@ func (a *App) saveTabsLocked() {
 	path := filepath.Join(dir, tabsFileName)
 	tmp := path + ".tmp"
 	os.WriteFile(tmp, b, 0o644)
-	os.Rename(tmp, path)
+	_ = fileutil.ReplaceFile(tmp, path)
 }
 
 func (a *App) orderedTabIDsLocked() []string {
@@ -1382,7 +1444,7 @@ func saveProjectsFile(f desktopProjectFile) error {
 	if err := os.WriteFile(tmp, b, 0o644); err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	return fileutil.ReplaceFile(tmp, path)
 }
 
 func normalizeProjectRoot(root string) string {
@@ -1760,7 +1822,7 @@ func saveTopicTitles(workspaceRoot string, m map[string]string) error {
 	if err := os.WriteFile(tmp, b, 0o644); err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	return fileutil.ReplaceFile(tmp, path)
 }
 
 func saveTopicTitleSources(workspaceRoot string, m map[string]string) error {
@@ -1776,7 +1838,7 @@ func saveTopicTitleSources(workspaceRoot string, m map[string]string) error {
 	if err := os.WriteFile(tmp, b, 0o644); err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	return fileutil.ReplaceFile(tmp, path)
 }
 
 func saveTopicCreatedAts(workspaceRoot string, m map[string]int64) error {
@@ -1792,7 +1854,7 @@ func saveTopicCreatedAts(workspaceRoot string, m map[string]int64) error {
 	if err := os.WriteFile(tmp, b, 0o644); err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	return fileutil.ReplaceFile(tmp, path)
 }
 
 func loadTopicTitle(workspaceRoot, topicID string) string {
@@ -1965,7 +2027,7 @@ func saveTelemetry(path string, snapshot tabTelemetrySnapshot) error {
 	if err := os.WriteFile(tmp, b, 0o644); err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	return fileutil.ReplaceFile(tmp, path)
 }
 
 func loadTelemetry(path string) tabTelemetrySnapshot {
@@ -3047,6 +3109,21 @@ func currentTabToolApprovalMode(tab *WorkspaceTab) string {
 		return tab.Ctrl.ToolApprovalMode()
 	}
 	return normalizeToolApprovalMode(tab.toolApprovalMode)
+}
+
+func currentTabTokenMode(tab *WorkspaceTab) string {
+	if tab == nil {
+		return boot.TokenModeFull
+	}
+	return boot.NormalizeTokenMode(tab.tokenMode)
+}
+
+func persistedTabTokenMode(mode string) string {
+	mode = boot.NormalizeTokenMode(mode)
+	if mode == boot.TokenModeEconomy {
+		return mode
+	}
+	return ""
 }
 
 func normalizeToolApprovalMode(mode string) string {

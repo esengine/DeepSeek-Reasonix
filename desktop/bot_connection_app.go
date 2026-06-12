@@ -35,19 +35,20 @@ type BotConnectionSessionMappingView struct {
 }
 
 type BotConnectionView struct {
-	ID              string                            `json:"id"`
-	Provider        string                            `json:"provider"`
-	Domain          string                            `json:"domain"`
-	Label           string                            `json:"label"`
-	Enabled         bool                              `json:"enabled"`
-	Status          string                            `json:"status"`
-	Model           string                            `json:"model"`
-	WorkspaceRoot   string                            `json:"workspaceRoot"`
-	Credential      BotConnectionCredentialView       `json:"credential"`
-	SessionMappings []BotConnectionSessionMappingView `json:"sessionMappings"`
-	LastError       string                            `json:"lastError"`
-	CreatedAt       string                            `json:"createdAt"`
-	UpdatedAt       string                            `json:"updatedAt"`
+	ID               string                            `json:"id"`
+	Provider         string                            `json:"provider"`
+	Domain           string                            `json:"domain"`
+	Label            string                            `json:"label"`
+	Enabled          bool                              `json:"enabled"`
+	Status           string                            `json:"status"`
+	Model            string                            `json:"model"`
+	ToolApprovalMode string                            `json:"toolApprovalMode"`
+	WorkspaceRoot    string                            `json:"workspaceRoot"`
+	Credential       BotConnectionCredentialView       `json:"credential"`
+	SessionMappings  []BotConnectionSessionMappingView `json:"sessionMappings"`
+	LastError        string                            `json:"lastError"`
+	CreatedAt        string                            `json:"createdAt"`
+	UpdatedAt        string                            `json:"updatedAt"`
 }
 
 type BotInstallStartResult struct {
@@ -82,6 +83,7 @@ type BotConnectionDiagnostic struct {
 type botInstallSession struct {
 	Provider   string
 	Domain     string
+	PollDomain string
 	DeviceCode string
 	UserCode   string
 	StartedAt  time.Time
@@ -162,17 +164,19 @@ func (a *App) PollBotConnectionInstall(installID string) (BotInstallPollResult, 
 			if c.Bot.Weixin.TokenEnv == "" {
 				c.Bot.Weixin.TokenEnv = "WEIXIN_BOT_TOKEN"
 			}
+			c.Bot.Allowlist.WeixinUsers = appendUniqueBotString(c.Bot.Allowlist.WeixinUsers, result.UserID)
 		})
 		if err != nil {
 			return BotInstallPollResult{Status: "error", Error: err.Error()}, nil
 		}
+		a.refreshBotRuntimeAsync()
 		return BotInstallPollResult{Done: true, Status: "connected", Connection: conn, Message: "微信已连接。"}, nil
 	}
 	return a.pollFeishuConnectionInstall(installID, session)
 }
 
 func (a *App) DiagnoseBotConnection(id string) (BotConnectionDiagnostic, error) {
-	cfg, err := config.Load()
+	cfg, err := a.loadDesktopBotConfig()
 	if err != nil {
 		return BotConnectionDiagnostic{ID: id, Status: "error", Message: err.Error()}, nil
 	}
@@ -197,7 +201,7 @@ func (a *App) DiagnoseBotConnection(id string) (BotConnectionDiagnostic, error) 
 }
 
 func (a *App) TestBotConnection(id, target string) (BotConnectionDiagnostic, error) {
-	cfg, err := config.Load()
+	cfg, err := a.loadDesktopBotConfig()
 	if err != nil {
 		return BotConnectionDiagnostic{ID: id, Status: "error", Message: err.Error()}, nil
 	}
@@ -248,11 +252,11 @@ func (a *App) TestBotConnection(id, target string) (BotConnectionDiagnostic, err
 }
 
 func (a *App) startFeishuConnectionInstall(domain string) (BotInstallStartResult, error) {
-	base := feishuAccountsBase(domain)
-	if _, err := postFeishuInstallForm(base, map[string]string{"action": "init"}); err != nil {
-		return BotInstallStartResult{OK: false, Provider: "feishu", Domain: domain, Message: err.Error()}, nil
-	}
-	data, err := postFeishuInstallForm(base, map[string]string{
+	// The official registration SDK always begins on the Feishu accounts domain.
+	// Lark tenants are detected from the first poll response, then polling moves
+	// to the Lark accounts domain for the final credential exchange.
+	beginDomain := "feishu"
+	data, err := postFeishuInstallForm(feishuAccountsBase(beginDomain), map[string]string{
 		"action": "begin", "archetype": "PersonalAgent", "auth_method": "client_secret", "request_user_info": "open_id",
 	})
 	if err != nil {
@@ -264,6 +268,10 @@ func (a *App) startFeishuConnectionInstall(domain string) (BotInstallStartResult
 	if deviceCode == "" || verifyURL == "" {
 		return BotInstallStartResult{OK: false, Provider: "feishu", Domain: domain, Message: "飞书/Lark 授权响应缺少 device_code 或二维码 URL。"}, nil
 	}
+	qrURL, err := feishuRegistrationQRCodeURL(verifyURL)
+	if err != nil {
+		return BotInstallStartResult{OK: false, Provider: "feishu", Domain: domain, Message: err.Error()}, nil
+	}
 	installID := randomInstallID()
 	interval := intValue(data["interval"], 5)
 	expireIn := intValue(firstAny(data["expire_in"], data["expires_in"]), 300)
@@ -272,15 +280,16 @@ func (a *App) startFeishuConnectionInstall(domain string) (BotInstallStartResult
 		a.botInstalls = map[string]*botInstallSession{}
 	}
 	a.botInstalls[installID] = &botInstallSession{
-		Provider: "feishu", Domain: domain, DeviceCode: deviceCode, UserCode: userCode,
+		Provider: "feishu", Domain: domain, PollDomain: beginDomain, DeviceCode: deviceCode, UserCode: userCode,
 		StartedAt: time.Now(), ExpireAt: time.Now().Add(time.Duration(expireIn) * time.Second),
 	}
 	a.mu.Unlock()
-	return BotInstallStartResult{OK: true, Provider: "feishu", Domain: domain, InstallID: installID, URL: verifyURL, DeviceCode: deviceCode, UserCode: userCode, Interval: interval, ExpireIn: expireIn}, nil
+	return BotInstallStartResult{OK: true, Provider: "feishu", Domain: domain, InstallID: installID, URL: qrURL, DeviceCode: deviceCode, UserCode: userCode, Interval: interval, ExpireIn: expireIn}, nil
 }
 
 func (a *App) pollFeishuConnectionInstall(installID string, session *botInstallSession) (BotInstallPollResult, error) {
-	data, statusCode, err := postFeishuInstallFormResult(feishuAccountsBase(session.Domain), map[string]string{"action": "poll", "device_code": session.DeviceCode})
+	pollDomain := firstNonEmptyBot(session.PollDomain, session.Domain, "feishu")
+	data, statusCode, err := postFeishuInstallFormResult(feishuAccountsBase(pollDomain), map[string]string{"action": "poll", "device_code": session.DeviceCode})
 	if err != nil {
 		return BotInstallPollResult{Status: "error", Error: err.Error()}, nil
 	}
@@ -295,13 +304,22 @@ func (a *App) pollFeishuConnectionInstall(installID string, session *botInstallS
 		a.deleteBotInstall(installID)
 		return BotInstallPollResult{Status: "error", Error: fmt.Sprintf("HTTP %d", statusCode)}, nil
 	}
+	if feishuInstallDomain(session.Domain, data) == "lark" && pollDomain != "lark" {
+		a.mu.Lock()
+		if current := a.botInstalls[installID]; current != nil {
+			current.PollDomain = "lark"
+		}
+		a.mu.Unlock()
+		return BotInstallPollResult{Status: "pending", Message: "已识别为 Lark 授权，继续等待授权完成。"}, nil
+	}
 	appID := stringValue(data["client_id"])
 	appSecret := stringValue(data["client_secret"])
 	if appID == "" || appSecret == "" {
 		return BotInstallPollResult{Status: "pending", Message: "等待授权完成。"}, nil
 	}
 	a.deleteBotInstall(installID)
-	domain := feishuInstallDomain(session.Domain, data)
+	domain := feishuInstallDomain(firstNonEmptyBot(pollDomain, session.Domain), data)
+	userID := feishuInstallUserID(data)
 	secretEnv := "FEISHU_BOT_APP_SECRET"
 	if domain == "lark" {
 		secretEnv = "LARK_BOT_APP_SECRET"
@@ -329,10 +347,12 @@ func (a *App) pollFeishuConnectionInstall(installID string, session *botInstallS
 		c.Bot.Feishu.AppSecretEnv = secretEnv
 		c.Bot.Feishu.Mode = "websocket"
 		c.Bot.Feishu.RequireMention = true
+		c.Bot.Allowlist.FeishuUsers = appendUniqueBotString(c.Bot.Allowlist.FeishuUsers, userID)
 	})
 	if err != nil {
 		return BotInstallPollResult{Status: "error", Error: err.Error()}, nil
 	}
+	a.refreshBotRuntimeAsync()
 	return BotInstallPollResult{Done: true, Status: "connected", Connection: conn, Message: label + " 已连接。"}, nil
 }
 
@@ -445,6 +465,19 @@ func feishuAccountsBase(domain string) string {
 	return "https://accounts.feishu.cn"
 }
 
+func feishuRegistrationQRCodeURL(rawURL string) (string, error) {
+	parsedURL, err := url.Parse(rawURL)
+	if err != nil {
+		return "", err
+	}
+	query := parsedURL.Query()
+	query.Set("from", "sdk")
+	query.Set("tp", "sdk")
+	query.Set("source", "go-sdk")
+	parsedURL.RawQuery = query.Encode()
+	return parsedURL.String(), nil
+}
+
 func postFeishuInstallForm(base string, body map[string]string) (map[string]any, error) {
 	data, status, err := postFeishuInstallFormResult(base, body)
 	if err != nil {
@@ -483,7 +516,7 @@ func postFeishuInstallFormResult(base string, body map[string]string) (map[strin
 func botConnectionView(conn config.BotConnectionConfig) BotConnectionView {
 	return BotConnectionView{
 		ID: conn.ID, Provider: conn.Provider, Domain: conn.Domain, Label: conn.Label, Enabled: conn.Enabled, Status: conn.Status,
-		Model: conn.Model, WorkspaceRoot: conn.WorkspaceRoot,
+		Model: conn.Model, ToolApprovalMode: normalizeBotConnectionToolApprovalMode(conn.ToolApprovalMode), WorkspaceRoot: conn.WorkspaceRoot,
 		Credential: BotConnectionCredentialView{
 			AppID: conn.Credential.AppID, AppSecretEnv: conn.Credential.AppSecretEnv, AccountID: conn.Credential.AccountID, TokenEnv: conn.Credential.TokenEnv,
 			SecretSet: botCredentialSecretSet(conn),
@@ -519,6 +552,17 @@ func feishuInstallDomain(fallback string, data map[string]any) string {
 	return "feishu"
 }
 
+func feishuInstallUserID(data map[string]any) string {
+	if userInfo, ok := data["user_info"].(map[string]any); ok {
+		return firstNonEmptyBot(
+			stringValue(userInfo["open_id"]),
+			stringValue(userInfo["union_id"]),
+			stringValue(userInfo["user_id"]),
+		)
+	}
+	return ""
+}
+
 func botConnectionViews(connections []config.BotConnectionConfig) []BotConnectionView {
 	if connections == nil {
 		return []BotConnectionView{}
@@ -532,14 +576,15 @@ func botConnectionViews(connections []config.BotConnectionConfig) []BotConnectio
 
 func botConnectionConfig(view BotConnectionView) config.BotConnectionConfig {
 	return config.BotConnectionConfig{
-		ID:            strings.TrimSpace(view.ID),
-		Provider:      strings.TrimSpace(view.Provider),
-		Domain:        strings.TrimSpace(view.Domain),
-		Label:         strings.TrimSpace(view.Label),
-		Enabled:       view.Enabled,
-		Status:        strings.TrimSpace(view.Status),
-		Model:         strings.TrimSpace(view.Model),
-		WorkspaceRoot: strings.TrimSpace(view.WorkspaceRoot),
+		ID:               strings.TrimSpace(view.ID),
+		Provider:         strings.TrimSpace(view.Provider),
+		Domain:           strings.TrimSpace(view.Domain),
+		Label:            strings.TrimSpace(view.Label),
+		Enabled:          view.Enabled,
+		Status:           strings.TrimSpace(view.Status),
+		Model:            strings.TrimSpace(view.Model),
+		ToolApprovalMode: normalizeBotConnectionToolApprovalMode(view.ToolApprovalMode),
+		WorkspaceRoot:    strings.TrimSpace(view.WorkspaceRoot),
 		Credential: config.BotConnectionCredential{
 			AppID:        strings.TrimSpace(view.Credential.AppID),
 			AppSecretEnv: strings.TrimSpace(view.Credential.AppSecretEnv),
@@ -550,6 +595,19 @@ func botConnectionConfig(view BotConnectionView) config.BotConnectionConfig {
 		LastError:       strings.TrimSpace(view.LastError),
 		CreatedAt:       strings.TrimSpace(view.CreatedAt),
 		UpdatedAt:       strings.TrimSpace(view.UpdatedAt),
+	}
+}
+
+func normalizeBotConnectionToolApprovalMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "ask":
+		return "ask"
+	case "auto":
+		return "auto"
+	case "yolo", "full", "full-access", "bypass":
+		return "yolo"
+	default:
+		return ""
 	}
 }
 
@@ -655,6 +713,19 @@ func firstNonEmptyBot(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func appendUniqueBotString(values []string, next string) []string {
+	next = strings.TrimSpace(next)
+	if next == "" {
+		return values
+	}
+	for _, value := range values {
+		if strings.TrimSpace(value) == next {
+			return values
+		}
+	}
+	return append(values, next)
 }
 
 func stringValue(value any) string {

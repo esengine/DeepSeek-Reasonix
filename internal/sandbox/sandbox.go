@@ -24,6 +24,10 @@ type Spec struct {
 	// command cannot exfiltrate or fetch; many dev commands (module/package
 	// downloads) need it, so it defaults on at the config layer.
 	Network bool
+	// Shell is the interpreter the bash tool runs under. A zero value (empty
+	// Path) means the tool resolves one itself; the composition root sets it from
+	// [tools.shell] so the configured choice rides along with the spec.
+	Shell Shell
 }
 
 // enforce reports whether the spec asks for confinement.

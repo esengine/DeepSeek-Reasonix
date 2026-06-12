@@ -145,6 +145,64 @@ func TestTermuxNativeScrollbackDefaultsToExpandedReasoning(t *testing.T) {
 	}
 }
 
+// TestCompletionMenuFixedWidth verifies that the completion menu pads every
+// line (items + footer) to m.width so delta rendering always writes exactly the
+// same column count — no trailing characters for \033[K to leave behind.
+func TestCompletionMenuFixedWidth(t *testing.T) {
+	ctrl := control.New(control.Options{})
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
+	m.width = 80
+	m.completion.active = true
+	m.completion.items = []compItem{
+		{label: "review"},
+		{label: "clear", hint: "start fresh"},
+	}
+	m.completion.sel = 1
+	m.completion.kind = compSlash
+
+	out := m.renderCompletion()
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	// items + footer = 3 lines
+	if len(lines) != 3 {
+		t.Fatalf("completion menu should have 3 lines (2 items + footer), got %d:\n%s", len(lines), out)
+	}
+	for i, line := range lines {
+		if got := ansi.StringWidth(line); got != 80 {
+			t.Errorf("line %d visual width = %d, want 80: %q", i, got, line)
+		}
+	}
+}
+
+// TestCompletionMenuPadsWithNonBreakingSpaces verifies the fixed-width padding
+// is not ordinary ASCII space. Ultraviolet treats trailing ASCII spaces as
+// clearable cells and may emit EL/ECH erase sequences; mintty can leave stale
+// halves of CJK glyphs when those sequences clear Chinese skill descriptions.
+func TestCompletionMenuPadsWithNonBreakingSpaces(t *testing.T) {
+	ctrl := control.New(control.Options{})
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
+	m.width = 80
+	m.completion.active = true
+	m.completion.items = []compItem{
+		{label: "/土壤", hint: "分析土壤墒情"},
+		{label: "/巡田", hint: "识别病虫害"},
+	}
+	m.completion.sel = 0
+	m.completion.kind = compSlash
+
+	out := m.renderCompletion()
+	for i, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+		if got := ansi.StringWidth(line); got != 80 {
+			t.Fatalf("line %d visual width = %d, want 80: %q", i, got, line)
+		}
+		if !strings.HasSuffix(line, "\u00a0") {
+			t.Fatalf("line %d should end with non-breaking padding, got %q", i, line)
+		}
+		if strings.HasSuffix(line, " ") {
+			t.Fatalf("line %d should not end with clearable ASCII space, got %q", i, line)
+		}
+	}
+}
+
 // TestTranscriptViewportSizing proves the viewport tracks the terminal size and
 // gets the rows left over after the pinned bottom region (input box + 2 status
 // rows = 5 with an empty 1-line composer), and is fed the committed transcript.

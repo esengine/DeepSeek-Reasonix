@@ -14,26 +14,37 @@ import (
 //   - thread：共享（thread 内所有人共享上下文）
 func BuildSessionKey(src SessionSource) string {
 	var scope string
+	source := sessionSourceID(src)
 	switch src.ChatType {
 	case ChatDM:
-		scope = fmt.Sprintf("%s:dm:%s", src.Platform, src.ChatID)
+		scope = fmt.Sprintf("%s:dm:%s", source, src.ChatID)
 	case ChatGroup:
-		scope = fmt.Sprintf("%s:group:%s:%s", src.Platform, src.ChatID, src.UserID)
+		scope = fmt.Sprintf("%s:group:%s:%s", source, src.ChatID, src.UserID)
 	case ChatGuild:
-		scope = fmt.Sprintf("%s:guild:%s:%s", src.Platform, src.ChatID, src.UserID)
+		scope = fmt.Sprintf("%s:guild:%s:%s", source, src.ChatID, src.UserID)
 	case ChatDirect:
-		scope = fmt.Sprintf("%s:direct:%s", src.Platform, src.ChatID)
+		scope = fmt.Sprintf("%s:direct:%s", source, src.ChatID)
 	case ChatThread:
 		threadID := src.ThreadID
 		if threadID == "" {
 			threadID = src.ChatID
 		}
-		scope = fmt.Sprintf("%s:thread:%s", src.Platform, threadID)
+		scope = fmt.Sprintf("%s:thread:%s", source, threadID)
 	default:
-		scope = fmt.Sprintf("%s:%s:%s:%s", src.Platform, src.ChatType, src.ChatID, src.UserID)
+		scope = fmt.Sprintf("%s:%s:%s:%s", source, src.ChatType, src.ChatID, src.UserID)
 	}
 	h := sha256.Sum256([]byte(scope))
 	return hex.EncodeToString(h[:])[:16]
+}
+
+func sessionSourceID(src SessionSource) string {
+	if src.ConnectionID != "" {
+		return src.ConnectionID
+	}
+	if src.Domain != "" {
+		return fmt.Sprintf("%s:%s", src.Platform, src.Domain)
+	}
+	return string(src.Platform)
 }
 
 // slashCommands 是绕过忙碌队列的命令集合。
@@ -44,6 +55,8 @@ var slashCommands = map[string]bool{
 	"/approve": true,
 	"/deny":    true,
 	"/answer":  true,
+	"/yolo":    true,
+	"/mode":    true,
 	"/status":  true,
 	"/help":    true,
 }

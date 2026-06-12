@@ -4,10 +4,10 @@ const DISPLAY_MODE_KEY = "reasonix-display-mode";
 const DISPLAY_MODE_EVENT = "reasonix:display-mode";
 
 export function getDisplayMode(): DisplayMode {
-  if (typeof localStorage === "undefined") return "minimal";
+  if (typeof localStorage === "undefined") return "standard";
   const stored = localStorage.getItem(DISPLAY_MODE_KEY);
   if (stored === "standard" || stored === "compact" || stored === "minimal") return stored;
-  return "minimal";
+  return "standard";
 }
 
 export function setDisplayMode(mode: DisplayMode): void {

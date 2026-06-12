@@ -111,7 +111,8 @@ func TestStoreIndexLabelFallsBackToDeKebabbedName(t *testing.T) {
 	}
 }
 
-// TestStoreDelete removes a fact's file and its index line while leaving others.
+// TestStoreDelete archives a fact's file and removes its index line while
+// leaving others.
 func TestStoreDelete(t *testing.T) {
 	s := Store{Dir: t.TempDir()}
 	for _, n := range []string{"alpha", "beta"} {
@@ -124,6 +125,10 @@ func TestStoreDelete(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(s.Dir, "alpha.md")); !os.IsNotExist(err) {
 		t.Fatalf("alpha.md should be gone, stat err = %v", err)
+	}
+	archived := archivedFiles(t, s.Dir)
+	if len(archived) != 1 || !strings.HasSuffix(archived[0], "-alpha.md") {
+		t.Fatalf("archive files = %v, want one alpha archive", archived)
 	}
 	idx := s.Index()
 	if strings.Contains(idx, "alpha.md") {
@@ -146,6 +151,34 @@ func TestStoreDeleteMissingIsNoError(t *testing.T) {
 	}
 }
 
+func TestSafeJoinRejectsStoreEscape(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := safeJoin(dir, filepath.Join("..", "outside.md")); err == nil {
+		t.Fatal("safeJoin should reject paths outside the store")
+	}
+	if _, err := safeJoin(dir, filepath.Join(t.TempDir(), "outside.md")); err == nil {
+		t.Fatal("safeJoin should reject absolute paths outside the store")
+	}
+}
+
+func TestStoreArchiveSanitizesNameBeforePathUse(t *testing.T) {
+	root := t.TempDir()
+	s := Store{Dir: filepath.Join(root, "memory")}
+	if err := os.MkdirAll(s.Dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(root, "outside.md")
+	if err := os.WriteFile(outside, []byte("do not move"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Archive("../outside"); err != nil {
+		t.Fatalf("Archive with path-like name should be treated as a slug, not a path: %v", err)
+	}
+	if _, err := os.Stat(outside); err != nil {
+		t.Fatalf("outside file should remain untouched: %v", err)
+	}
+}
+
 func TestStoreDeleteRepairsReadOnlyMemoryFile(t *testing.T) {
 	s := Store{Dir: t.TempDir()}
 	if _, err := s.Save(Memory{Name: "locked", Description: "d", Type: TypeProject, Body: "b"}); err != nil {
@@ -161,9 +194,93 @@ func TestStoreDeleteRepairsReadOnlyMemoryFile(t *testing.T) {
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("locked.md should be gone, stat err = %v", err)
 	}
+	archived := archivedFiles(t, s.Dir)
+	if len(archived) != 1 || !strings.HasSuffix(archived[0], "-locked.md") {
+		t.Fatalf("archive files = %v, want one locked archive", archived)
+	}
 	if strings.Contains(s.Index(), "locked.md") {
 		t.Fatalf("deleted read-only entry still in index:\n%s", s.Index())
 	}
+}
+
+func TestStoreArchiveReturnsArchivePath(t *testing.T) {
+	s := Store{Dir: t.TempDir()}
+	if _, err := s.Save(Memory{Name: "old-fact", Description: "d", Type: TypeProject, Body: "body"}); err != nil {
+		t.Fatal(err)
+	}
+	archive, err := s.Archive("old-fact")
+	if err != nil {
+		t.Fatalf("Archive: %v", err)
+	}
+	if archive == "" {
+		t.Fatal("Archive returned empty path for existing memory")
+	}
+	body, err := os.ReadFile(archive)
+	if err != nil {
+		t.Fatalf("read archive: %v", err)
+	}
+	if !strings.Contains(string(body), "body") {
+		t.Fatalf("archive missing memory body:\n%s", body)
+	}
+	if strings.Contains(s.Index(), "old-fact.md") {
+		t.Fatalf("archived memory still in index:\n%s", s.Index())
+	}
+	archived := s.ListArchived()
+	if len(archived) != 1 {
+		t.Fatalf("ListArchived = %+v, want one entry", archived)
+	}
+	if archived[0].Name != "old-fact" || archived[0].Path != archive {
+		t.Fatalf("archived entry mismatch: %+v, path %q", archived[0], archive)
+	}
+	if archived[0].ArchivedAt.IsZero() {
+		t.Fatalf("archived entry missing timestamp: %+v", archived[0])
+	}
+	if len(s.List()) != 0 {
+		t.Fatalf("active List should exclude archived memories: %+v", s.List())
+	}
+}
+
+func TestStoreListArchivedNewestFirst(t *testing.T) {
+	s := Store{Dir: t.TempDir()}
+	dir := filepath.Join(s.Dir, ".archive")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	files := []struct {
+		name string
+		body string
+	}{
+		{"20260101-010000.000-old.md", render(Memory{Name: "old", Description: "old d", Type: TypeProject, Body: "old body"}, "old")},
+		{"20260102-010000.000-new.md", render(Memory{Name: "new", Description: "new d", Type: TypeFeedback, Body: "new body"}, "new")},
+	}
+	for _, f := range files {
+		if err := os.WriteFile(filepath.Join(dir, f.name), []byte(f.body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	archived := s.ListArchived()
+	if len(archived) != 2 {
+		t.Fatalf("ListArchived len = %d, want 2: %+v", len(archived), archived)
+	}
+	if archived[0].Name != "new" || archived[1].Name != "old" {
+		t.Fatalf("ListArchived order = %+v, want newest first", archived)
+	}
+	if archived[0].Type != TypeFeedback || !strings.Contains(archived[1].Body, "old body") {
+		t.Fatalf("archived memory did not round-trip metadata/body: %+v", archived)
+	}
+}
+
+func archivedFiles(t *testing.T, dir string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(filepath.Join(dir, ".archive"))
+	if err != nil {
+		t.Fatalf("read archive dir: %v", err)
+	}
+	var out []string
+	for _, entry := range entries {
+		out = append(out, entry.Name())
+	}
+	return out
 }
 
 // TestNormalizeType maps unknown types to project and keeps known ones.

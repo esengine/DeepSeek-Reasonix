@@ -273,6 +273,10 @@ type chatTUI struct {
 	// shown as the current entry in the /output-style listing. "" = default.
 	outputStyle string
 
+	// diffMaxLines controls the max lines shown in a diff view. 0 = show all;
+	// non-zero = fold at that many lines. Toggled by /diff-fold.
+	diffMaxLines int
+
 	// statuslineCmd is the user's custom status-line command (config
 	// [statusline].command); "" disables it. statuslineOut caches its latest
 	// one-line stdout, refreshed at startup and after each turn and rendered in
@@ -480,6 +484,7 @@ func newChatTUI(ctrl *control.Controller, missing string, eventCh chan event.Eve
 		pending:              &strings.Builder{},
 		pendingCommit:        &commitBuf,
 		renderer:             newMarkdownRenderer(termW),
+		diffMaxLines:         diffFoldLimit,
 		showReasoning:        nativeScrollback,
 		shellOutputs:         make(map[string]string),
 		shellExpanded:        make(map[string]bool),
@@ -3335,7 +3340,7 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 			// No longer a tool, but guard anyway: the plan is the assistant's reply.
 		default:
 			m.commitSpacer()
-			if block := diffBlock(e.Tool.Name, e.Tool.Args, e.Tool.FileDiff, m.width, diffScrollbackMaxLines); block != nil {
+			if block := diffBlock(e.Tool.Name, e.Tool.Args, e.Tool.FileDiff, m.width, m.diffMaxLines); block != nil {
 				for _, ln := range block {
 					m.commitLine(ln)
 				}
@@ -3492,6 +3497,8 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 		m.clearConfirm = &clearConfirm{confirm: 1}
 	case "/resume":
 		m.runResumeCommand(input)
+	case "/rename":
+		m.runRenameCommand(input)
 	case "/todo":
 		m.echoLocalCommand(input)
 		// Dismiss the pinned task list; a later todo_write brings it back.
@@ -3552,6 +3559,15 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 			m.notice(i18n.M.OutputStyleNone)
 		} else {
 			m.commitLine(renderOutputStyles(m.width, styles, m.outputStyle))
+		}
+	case "/diff-fold":
+		m.echoLocalCommand(input)
+		if m.diffMaxLines == 0 {
+			m.diffMaxLines = diffFoldLimit
+			m.notice(fmt.Sprintf(i18n.M.DiffFoldEnabledFmt, diffFoldLimit))
+		} else {
+			m.diffMaxLines = 0
+			m.notice(i18n.M.DiffFoldDisabled)
 		}
 	case "/theme":
 		m.echoLocalCommand(input)
@@ -3803,6 +3819,11 @@ func replaySectionsFor(history []provider.Message, width int, renderer *mdRender
 	for _, m := range history {
 		switch m.Role {
 		case provider.RoleUser:
+			// Steer messages are surfaced as a notice line, not a user bubble.
+			if steerText, isSteer := agent.SteerText(m.Content); isSteer {
+				out = append(out, fmt.Sprintf("  ↪ %s\n\n", steerText))
+				continue
+			}
 			content := control.StripComposePrefixes(m.Content)
 			out = append(out, renderUserBubble(content, width, false)+"\n\n")
 		case provider.RoleAssistant:

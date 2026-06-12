@@ -44,11 +44,15 @@ func (t forgetTool) Execute(ctx context.Context, args json.RawMessage) (string, 
 	if in.Name == "" {
 		return "", fmt.Errorf("name is required")
 	}
-	if err := t.store.Delete(in.Name); err != nil {
+	archive, err := t.store.Archive(in.Name)
+	if err != nil {
 		return "", err
 	}
 	if q, ok := QueueFromContext(ctx); ok {
-		q.QueueMemory("Deleted memory \"" + slug(in.Name) + "\" — disregard its line still shown in the saved-memories index until next session.")
+		q.QueueMemory("Forgot memory \"" + slug(in.Name) + "\" — disregard its line still shown in the saved-memories index until next session.")
+	}
+	if archive != "" {
+		return fmt.Sprintf("Forgot memory %q (it no longer applies and will not load in future sessions; archived to %s).", in.Name, archive), nil
 	}
 	return fmt.Sprintf("Forgot memory %q (it no longer applies and will not load in future sessions).", in.Name), nil
 }

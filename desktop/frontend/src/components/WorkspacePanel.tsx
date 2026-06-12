@@ -864,7 +864,7 @@ export function WorkspacePanel({
   const revealInFileManager = () => {
     if (!treeMenu) return;
     setTreeMenu(null);
-    void app.RevealWorkspacePath(treeMenu.path);
+    void app.RevealWorkspacePath(treeMenu.path).catch(() => {});
   };
 
   const renderRows = (dir: string, depth: number): ReactElement[] => {

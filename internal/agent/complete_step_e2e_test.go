@@ -53,7 +53,7 @@ func evidenceRegistry() *tool.Registry {
 func hostAdvances(sink *recordSink) int {
 	n := 0
 	for _, e := range sink.kinds(event.ToolResult) {
-		if e.Tool.ID == "host-advance" {
+		if strings.HasPrefix(e.Tool.ID, "host-advance-") {
 			n++
 		}
 	}

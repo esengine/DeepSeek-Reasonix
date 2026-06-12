@@ -150,7 +150,7 @@ func TestRunShell_CancelStopsCommand(t *testing.T) {
 	ctrl := &Controller{sink: sink}
 
 	command := "sleep 30"
-	if sandbox.ResolveShell().Kind == sandbox.ShellPowerShell {
+	if sandbox.ResolveShell("", "", nil).Kind == sandbox.ShellPowerShell {
 		command = "Start-Sleep -Seconds 30"
 	}
 	ctrl.RunShell(command)

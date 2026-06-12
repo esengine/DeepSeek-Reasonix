@@ -138,8 +138,8 @@ func (t *TaskTool) Schema() json.RawMessage {
   "run_in_background":{"type":"boolean","description":"Run the sub-agent asynchronously: returns a job id immediately and keeps working across turns. Collect its final answer with wait, and you'll be notified when it finishes. Use for long, independent sub-tasks you don't need to block on right now."},
   "model":{"type":"string","description":"Optional model override for the sub-agent (a configured provider/model name)."},
   "effort":{"type":"string","description":"Optional reasoning effort for the sub-agent (e.g. high, max)."},
-  "continue_from":{"type":"string","description":"Resume a prior subagent run in place: the subagent retains its context from the previous run; use in iterative loops (e.g. review -> fix -> review again) by passing only the 'sa_...' value from the prior result's 'Subagent reference: ...' line. Requires kind, system prompt, tools, model, effort, and workspace to match."},
-  "fork_from":{"type":"string","description":"Optional subagent transcript reference to copy into a new transcript before running this task. Mutually exclusive with continue_from."}
+  "continue_from":{"type":"string","description":"Resume a prior subagent run in place: the subagent retains its context from the previous run; use in iterative loops (e.g. review -> fix -> review again) by passing only the 'sa_...' value from the prior result's 'Subagent reference: ...' line. Requires a compatible subagent identity, including tools, model, effort, and workspace."},
+  "fork_from":{"type":"string","description":"Fork a prior subagent run: copies its transcript, leaves the source unchanged, and continues independently. Use only when you need an independent branch; for iterative continuation on the same thread, use continue_from. Pass the 'sa_...' value from the prior result's 'Subagent reference: ...' line. Requires a compatible subagent identity, including tools, model, effort, and workspace. Mutually exclusive with continue_from."}
 },
 "required":["prompt"]
 }`)

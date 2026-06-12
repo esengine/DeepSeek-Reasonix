@@ -67,8 +67,8 @@ func (*runSkillTool) Schema() json.RawMessage {
 "properties":{
   "name":{"type":"string","description":"Skill identifier as it appears in the pinned Skills index (e.g. 'explore', 'review'). Case-sensitive. Just the identifier, not the [🧬 subagent] tag."},
   "arguments":{"type":"string","description":"Free-form arguments. For inline skills: appended as an 'Arguments:' line; the skill's own instructions decide how to use them. For subagent skills: REQUIRED — becomes the entire task the subagent receives."},
-  "continue_from":{"type":"string","description":"Resume a prior subagent run in place: the subagent retains its context; use in iterative loops (e.g. review -> fix -> review again) by passing only the 'sa_...' value from the prior result's 'Subagent reference: ...' line. Only valid for runAs=subagent skills."},
-  "fork_from":{"type":"string","description":"Optional subagent transcript reference to copy before running. Only valid for runAs=subagent skills; mutually exclusive with continue_from."}
+  "continue_from":{"type":"string","description":"Resume a prior subagent run in place: the subagent retains its context from the previous run; use in iterative loops (e.g. review -> fix -> review again) by passing only the 'sa_...' value from the prior result's 'Subagent reference: ...' line. Only valid for runAs=subagent skills."},
+  "fork_from":{"type":"string","description":"Fork a prior subagent run: copies its transcript, leaves the source unchanged, and continues independently. Use only when you need an independent branch; for iterative continuation, use continue_from. Only valid for runAs=subagent skills. Pass the 'sa_...' value from the prior result's 'Subagent reference: ...' line. Mutually exclusive with continue_from."}
 },
 "required":["name"]
 }`)
@@ -211,7 +211,7 @@ func (t *subagentSkillTool) Description() string { return t.description }
 
 func (t *subagentSkillTool) Schema() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{"task":{"type":"string","description":` +
-		strconv.Quote(t.taskDesc) + `},"continue_from":{"type":"string","description":"Resume a prior subagent run in place: the subagent retains its context from the previous run. Use in iterative loops (e.g. review -> fix -> review again): pass only the 'sa_...' value from the prior result's 'Subagent reference: ...' line."},"fork_from":{"type":"string","description":"Optional subagent transcript reference to copy before running. Mutually exclusive with continue_from."}},"required":["task"]}`)
+		strconv.Quote(t.taskDesc) + `},"continue_from":{"type":"string","description":"Resume a prior subagent run in place: the subagent retains its context from the previous run. Use in iterative loops (e.g. review -> fix -> review again): pass only the 'sa_...' value from the prior result's 'Subagent reference: ...' line."},"fork_from":{"type":"string","description":"Fork a prior subagent run: copies its transcript, leaves the source unchanged, and continues independently. Use only when you need an independent branch; for iterative continuation, use continue_from. Pass the 'sa_...' value from the prior result's 'Subagent reference: ...' line. Mutually exclusive with continue_from."}},"required":["task"]}`)
 }
 
 func (t *subagentSkillTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {

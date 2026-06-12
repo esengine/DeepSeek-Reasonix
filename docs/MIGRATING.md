@@ -52,7 +52,7 @@ cd DeepSeek-Reasonix && make build                        # -> bin/reasonix(.exe
 
 | Legacy | Reasonix 1.0 |
 |---|---|
-| TS config files | `reasonix.toml` (project) / `~/.config/reasonix/config.toml` (user) — see `reasonix.example.toml` |
+| TS config files | `reasonix.toml` (project) / `config.toml` in your OS config dir (user; `~/.config/reasonix/` on Linux, `~/Library/Application Support/reasonix/` on macOS, `%AppData%\reasonix\` on Windows) — see `reasonix.example.toml` |
 | env / API keys | `.env` or the environment (`DEEPSEEK_API_KEY`, `MIMO_API_KEY`, …) via `api_key_env` |
 | project memory | `REASONIX.md` (+ auto-memory), Claude-Code-compatible |
 | MCP servers | `[[plugins]]` in `reasonix.toml`, or a Claude-Code `.mcp.json` (read as-is) |

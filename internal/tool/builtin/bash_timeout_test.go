@@ -10,7 +10,7 @@ import (
 )
 
 func TestBashForegroundTimeoutConfig(t *testing.T) {
-	sh := sandbox.ResolveShell()
+	sh := sandbox.ResolveShell("", "", nil)
 	b := bash{shell: sh, timeout: 150 * time.Millisecond}
 
 	start := time.Now()
@@ -28,7 +28,7 @@ func TestBashForegroundTimeoutConfig(t *testing.T) {
 }
 
 func TestBashExplicitZeroTimeoutDoesNotCapForeground(t *testing.T) {
-	sh := sandbox.ResolveShell()
+	sh := sandbox.ResolveShell("", "", nil)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -47,7 +47,7 @@ func TestBashExplicitZeroTimeoutDoesNotCapForeground(t *testing.T) {
 }
 
 func TestWorkspacePassesBashTimeout(t *testing.T) {
-	sh := sandbox.ResolveShell()
+	sh := sandbox.ResolveShell("", "", nil)
 	b := byName(Workspace{Dir: t.TempDir(), BashTimeout: 150 * time.Millisecond}.Tools())["bash"]
 
 	out, err := b.Execute(context.Background(), argsJSON(t, map[string]any{"command": longSleepCommand(sh)}))
