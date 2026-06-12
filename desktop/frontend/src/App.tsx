@@ -28,7 +28,7 @@ import { useController, type Item, type LiveStream } from "./lib/useController";
 import { app, onEvent, onProjectTreeChanged } from "./lib/bridge";
 import { generativeMusic, isGenerativeMusicEnabled } from "./lib/generative-music";
 import { playSuccessChime } from "./lib/sound";
-import { matchesShortcut, useGlobalHotkey } from "./lib/shortcuts";
+import { useGlobalHotkey } from "./lib/shortcuts";
 import { Transcript } from "./components/Transcript";
 import { Composer } from "./components/Composer";
 import { TodoPanel } from "./components/TodoPanel";
@@ -685,6 +685,15 @@ function YoloToggleHotkeys({ onToggle }: { onToggle: () => void }) {
     e.preventDefault();
     onToggle();
   }, [onToggle]);
+  return null;
+}
+
+/** Open command palette with Cmd+K / Ctrl+K. */
+function PaletteHotkeys({ onOpen }: { onOpen: () => void }) {
+  useGlobalHotkey("shortcuts.palette", (e) => {
+    e.preventDefault();
+    onOpen();
+  }, [onOpen]);
   return null;
 }
 
@@ -1996,21 +2005,14 @@ export default function App() {
     setPaletteOpen(true);
     setPaletteSessions(await listSessions().catch(() => []));
   }, [closeTransientOverlays, listSessions]);
+  // Close palette on Escape.
   useEffect(() => {
     const onKey = (e: globalThis.KeyboardEvent) => {
-      if (matchesShortcut(e, "shortcuts.palette", navigator.platform.startsWith("Mac") ? "darwin" : "win")) {
-        e.preventDefault();
-        setPaletteOpen((cur) => {
-          if (!cur) void openPalette();
-          return cur;
-        });
-      } else if (e.key === "Escape") {
-        setPaletteOpen(false);
-      }
+      if (e.key === "Escape") setPaletteOpen(false);
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [openPalette]);
+  }, []);
 
   const paletteItems = useMemo<PaletteItem[]>(() => {
     const cmds: PaletteItem[] = [
@@ -2206,6 +2208,7 @@ export default function App() {
       onCloseTab={(id) => void closeTab(id)}
     />
     <YoloToggleHotkeys onToggle={toggleYoloApprovalMode} />
+    <PaletteHotkeys onOpen={() => void openPalette()} />
     <div ref={appRef} className={["app", `app--${desktopPlatform}`, browserPreviewChrome ? "app--browser-preview" : ""].filter(Boolean).join(" ")}>
       <div
         className={[
