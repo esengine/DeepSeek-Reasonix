@@ -134,6 +134,7 @@ export interface TabMeta {
   mode: Mode;
   collaborationMode?: CollaborationMode;
   toolApprovalMode?: ToolApprovalMode;
+  tokenMode?: TokenMode;
   goal?: string;
   goalStatus?: GoalStatus;
   startupErr?: string;
@@ -285,13 +286,16 @@ export interface Meta {
   cwd: string;
   autoApproveTools?: boolean;
   bypass?: boolean; // legacy JSON key for YOLO/full-access tool auto-approval
+  collaborationMode?: CollaborationMode;
   toolApprovalMode?: ToolApprovalMode;
+  tokenMode?: TokenMode;
   goal?: string;
   goalStatus?: GoalStatus;
 }
 
 export type CollaborationMode = "normal" | "plan" | "goal";
 export type ToolApprovalMode = "ask" | "auto" | "yolo";
+export type TokenMode = "full" | "economy";
 export type GoalStatus = "running" | "complete" | "blocked" | "stopped";
 
 export function normalizeCollaborationMode(mode?: string, goal?: string, legacyMode?: Mode): CollaborationMode {
@@ -305,6 +309,11 @@ export function normalizeToolApprovalMode(mode?: string, legacyMode?: Mode, lega
   if (mode === "auto" || mode === "yolo" || mode === "ask") return mode;
   if (legacyAutoApproveTools || (legacyMode && modeHasAutoApproveTools(legacyMode))) return "yolo";
   return "ask";
+}
+
+export function normalizeTokenMode(mode?: string): TokenMode {
+  if (mode === "economy") return "economy";
+  return "full";
 }
 
 // Mode is the compatibility string for two independent composer axes:

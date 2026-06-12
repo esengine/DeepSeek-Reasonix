@@ -58,6 +58,7 @@ type WorkspaceTab struct {
 
 	model            string // active model ref (for meta)
 	effort           *string
+	tokenMode        string
 	mode             string // "normal" | "plan" | "yolo" | "plan-yolo"; yolo/full access is runtime-only
 	goal             string
 	toolApprovalMode string
@@ -430,6 +431,7 @@ type TabMeta struct {
 	Mode              string `json:"mode"`
 	CollaborationMode string `json:"collaborationMode"`
 	ToolApprovalMode  string `json:"toolApprovalMode"`
+	TokenMode         string `json:"tokenMode"`
 	Goal              string `json:"goal,omitempty"`
 	GoalStatus        string `json:"goalStatus,omitempty"`
 	StartupErr        string `json:"startupErr,omitempty"`
@@ -450,6 +452,7 @@ func (a *App) tabMeta(tab *WorkspaceTab, active bool) TabMeta {
 		Mode:              currentTabMode(tab),
 		CollaborationMode: currentTabCollaborationMode(tab),
 		ToolApprovalMode:  currentTabToolApprovalMode(tab),
+		TokenMode:         currentTabTokenMode(tab),
 		Goal:              currentTabGoal(tab),
 		GoalStatus:        currentTabGoalStatus(tab),
 		StartupErr:        tab.StartupErr,
@@ -514,6 +517,7 @@ func (a *App) OpenProjectTab(workspaceRoot, topicID string) (TabMeta, error) {
 		WorkspaceRoot:    workspaceRoot,
 		TopicID:          topicID,
 		TopicTitle:       topicTitle,
+		tokenMode:        boot.TokenModeFull,
 		mode:             "normal",
 		toolApprovalMode: control.ToolApprovalAsk,
 		disabledMCP:      map[string]ServerView{},
@@ -558,6 +562,7 @@ func (a *App) OpenGlobalTab(topicID string) (TabMeta, error) {
 		WorkspaceRoot:    globalRoot,
 		TopicID:          topicID,
 		TopicTitle:       topicTitle,
+		tokenMode:        boot.TokenModeFull,
 		mode:             "normal",
 		toolApprovalMode: control.ToolApprovalAsk,
 		disabledMCP:      map[string]ServerView{},
@@ -622,10 +627,11 @@ func (a *App) EnsureBlankTab(scope, workspaceRoot string) (TabMeta, error) {
 		}
 	}
 
-	// Inherit model, effort, mode, tool-approval, and MCP state from the
+	// Inherit model, effort, token mode, mode, tool-approval, and MCP state from the
 	// active tab so a new blank session keeps the same settings (#4019).
 	var inheritedModel string
 	var inheritedEffort *string
+	inheritedTokenMode := boot.TokenModeFull
 	inheritedMode := "normal"
 	inheritedToolApprovalMode := control.ToolApprovalAsk
 	inheritedDisabledMCP := map[string]ServerView{}
@@ -633,6 +639,7 @@ func (a *App) EnsureBlankTab(scope, workspaceRoot string) (TabMeta, error) {
 	if active := a.activeTabLocked(); active != nil {
 		inheritedModel = active.model
 		inheritedEffort = cloneStringPtr(active.effort)
+		inheritedTokenMode = currentTabTokenMode(active)
 		inheritedMode = currentTabMode(active)
 		inheritedToolApprovalMode = currentTabToolApprovalMode(active)
 		inheritedDisabledMCP = cloneServerViewMap(active.disabledMCP)
@@ -653,6 +660,7 @@ func (a *App) EnsureBlankTab(scope, workspaceRoot string) (TabMeta, error) {
 			TopicTitle:       topicTitle,
 			model:            inheritedModel,
 			effort:           inheritedEffort,
+			tokenMode:        inheritedTokenMode,
 			mode:             inheritedMode,
 			toolApprovalMode: inheritedToolApprovalMode,
 			disabledMCP:      inheritedDisabledMCP,
@@ -700,6 +708,7 @@ func (a *App) EnsureBlankTab(scope, workspaceRoot string) (TabMeta, error) {
 		TopicTitle:       topicTitleForTab(scope, workspaceRoot, topicID),
 		model:            inheritedModel,
 		effort:           inheritedEffort,
+		tokenMode:        inheritedTokenMode,
 		mode:             inheritedMode,
 		toolApprovalMode: inheritedToolApprovalMode,
 		disabledMCP:      inheritedDisabledMCP,
@@ -970,6 +979,7 @@ func (a *App) buildTabController(tab *WorkspaceTab) {
 		WorkspaceRoot:  root,
 		SessionDir:     sessionDir,
 		EffortOverride: cloneStringPtr(tab.effort),
+		TokenMode:      currentTabTokenMode(tab),
 	})
 	if err != nil {
 		a.mu.Lock()
@@ -1314,6 +1324,7 @@ type desktopTabEntry struct {
 	SessionPath      string  `json:"sessionPath,omitempty"`
 	Model            string  `json:"model,omitempty"`
 	Effort           *string `json:"effort,omitempty"`
+	TokenMode        string  `json:"tokenMode,omitempty"`
 	Mode             string  `json:"mode,omitempty"`
 	Goal             string  `json:"goal,omitempty"`
 	ToolApprovalMode string  `json:"toolApprovalMode,omitempty"`
@@ -1347,6 +1358,7 @@ func (a *App) saveTabsLocked() {
 				SessionPath:      tab.currentSessionPath(),
 				Model:            tab.model,
 				Effort:           cloneStringPtr(tab.effort),
+				TokenMode:        persistedTabTokenMode(currentTabTokenMode(tab)),
 				Mode:             persistedTabMode(currentTabMode(tab)),
 				Goal:             strings.TrimSpace(currentTabGoal(tab)),
 				ToolApprovalMode: persistedToolApprovalMode(currentTabToolApprovalMode(tab)),
@@ -3094,6 +3106,21 @@ func currentTabToolApprovalMode(tab *WorkspaceTab) string {
 		return tab.Ctrl.ToolApprovalMode()
 	}
 	return normalizeToolApprovalMode(tab.toolApprovalMode)
+}
+
+func currentTabTokenMode(tab *WorkspaceTab) string {
+	if tab == nil {
+		return boot.TokenModeFull
+	}
+	return boot.NormalizeTokenMode(tab.tokenMode)
+}
+
+func persistedTabTokenMode(mode string) string {
+	mode = boot.NormalizeTokenMode(mode)
+	if mode == boot.TokenModeEconomy {
+		return mode
+	}
+	return ""
 }
 
 func normalizeToolApprovalMode(mode string) string {

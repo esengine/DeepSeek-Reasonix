@@ -608,6 +608,7 @@ func (a *App) rebuild() error {
 		WorkspaceRoot:  tab.WorkspaceRoot,
 		SessionDir:     tabSessionDir(tab),
 		EffortOverride: cloneStringPtr(tab.effort),
+		TokenMode:      currentTabTokenMode(tab),
 	})
 	if err != nil {
 		a.mu.Lock()

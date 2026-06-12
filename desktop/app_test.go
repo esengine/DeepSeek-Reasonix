@@ -975,6 +975,45 @@ func TestSetEffortRebuildsController(t *testing.T) {
 	}
 }
 
+func TestSetTokenModeRebuildsController(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	app := NewApp()
+	app.ctx = context.Background()
+	app.readyHook = func() {}
+	old := control.New(control.Options{Label: "old-controller"})
+	app.setTestCtrl(old, "deepseek-flash/deepseek-v4-flash")
+	defer func() {
+		if c := app.activeCtrl(); c != nil {
+			c.Close()
+		}
+	}()
+
+	if err := app.SetTokenMode("economy"); err != nil {
+		t.Fatalf("SetTokenMode(economy): %v", err)
+	}
+	if c := app.activeCtrl(); c == nil {
+		t.Fatal("SetTokenMode should leave a rebuilt controller")
+	}
+	if c := app.activeCtrl(); c == old {
+		t.Fatal("SetTokenMode should rebuild the active controller so the provider sees the new tool profile")
+	}
+	tab := app.activeTab()
+	if tab == nil {
+		t.Fatal("active tab missing")
+	}
+	if got := currentTabTokenMode(tab); got != "economy" {
+		t.Fatalf("token mode = %q, want economy", got)
+	}
+	if got := app.Meta().TokenMode; got != "economy" {
+		t.Fatalf("Meta token mode = %q, want economy", got)
+	}
+	saved := loadTabsFile()
+	if len(saved.Tabs) != 1 || saved.Tabs[0].TokenMode != "economy" {
+		t.Fatalf("saved tabs = %+v, want economy token mode", saved.Tabs)
+	}
+}
+
 func TestSetEffortRejectsRunningTurn(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
@@ -987,6 +1026,24 @@ func TestSetEffortRejectsRunningTurn(t *testing.T) {
 	err := app.SetEffort("max")
 	if err == nil || !strings.Contains(err.Error(), "finish or cancel") {
 		t.Fatalf("SetEffort while running error = %v, want finish/cancel guard", err)
+	}
+
+	close(runner.release)
+	waitNotRunning(t, app.activeCtrl())
+}
+
+func TestSetTokenModeRejectsRunningTurn(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	runner := &blockingRunner{started: make(chan struct{}), release: make(chan struct{})}
+	app := NewApp()
+	app.setTestCtrl(control.New(control.Options{Runner: runner}), "")
+	app.activeCtrl().Submit("work")
+	<-runner.started
+
+	err := app.SetTokenMode("economy")
+	if err == nil || !strings.Contains(err.Error(), "finish or cancel") {
+		t.Fatalf("SetTokenMode while running error = %v, want finish/cancel guard", err)
 	}
 
 	close(runner.release)

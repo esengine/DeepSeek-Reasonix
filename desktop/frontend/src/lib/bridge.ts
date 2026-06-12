@@ -8,7 +8,7 @@
 import type * as GeneratedApp from "../../wailsjs/go/main/App";
 
 import { t } from "./i18n";
-import { modeWithAutoApproveTools, modeWithPlan, normalizeCollaborationMode, normalizeMode, normalizeToolApprovalMode } from "./types";
+import { modeWithAutoApproveTools, modeWithPlan, normalizeCollaborationMode, normalizeMode, normalizeTokenMode, normalizeToolApprovalMode } from "./types";
 
 import type {
   BalanceInfo,
@@ -191,6 +191,8 @@ export interface AppBindings {
   SetEffort(level: string): Promise<void>;
   EffortForTab(tabID: string): Promise<EffortInfo>;
   SetEffortForTab(tabID: string, level: string): Promise<void>;
+  SetTokenMode(mode: string): Promise<void>;
+  SetTokenModeForTab(tabID: string, mode: string): Promise<void>;
   Memory(): Promise<MemoryView>;
   MemorySuggestions(): Promise<MemorySuggestionsView>;
   AcceptMemorySuggestion(suggestion: MemorySuggestion): Promise<string>;
@@ -1075,6 +1077,7 @@ function makeMockApp(): AppBindings {
       mode: "normal",
       collaborationMode: "normal",
       toolApprovalMode: "ask",
+      tokenMode: "full",
       active: true,
       cwd: globalWorkspaceRoot,
     },
@@ -1093,6 +1096,7 @@ function makeMockApp(): AppBindings {
       mode: "normal",
       collaborationMode: "normal",
       toolApprovalMode: "ask",
+      tokenMode: "full",
       active: true,
       cwd: "~/projects/joyquant-db",
     },
@@ -1110,6 +1114,7 @@ function makeMockApp(): AppBindings {
       mode: "normal",
       collaborationMode: "normal",
       toolApprovalMode: "ask",
+      tokenMode: "full",
       active: false,
       cwd: "~/projects/joyquant-sys",
     },
@@ -1126,6 +1131,7 @@ function makeMockApp(): AppBindings {
       mode: "normal",
       collaborationMode: "normal",
       toolApprovalMode: "ask",
+      tokenMode: "full",
       active: false,
       cwd: "~/projects/joyquant-db",
     },
@@ -1673,6 +1679,7 @@ function makeMockApp(): AppBindings {
           const active = mockTabs.find((tab) => tab.active) ?? mockTabs[0];
           const toolApprovalMode = normalizeToolApprovalMode(active?.toolApprovalMode, active ? normalizeMode(active.mode) : "normal", settings.autoApproveTools);
           const autoApproveTools = toolApprovalMode === "yolo";
+          const collaborationMode = normalizeCollaborationMode(active?.collaborationMode, active?.goal, active ? normalizeMode(active.mode) : "normal");
           return {
             label: active?.label ?? "DeepSeek-R1",
             ready: active?.ready ?? true,
@@ -1680,7 +1687,9 @@ function makeMockApp(): AppBindings {
             cwd: active?.cwd || cwd,
             autoApproveTools,
             bypass: autoApproveTools,
+            collaborationMode,
             toolApprovalMode,
+            tokenMode: normalizeTokenMode(active?.tokenMode),
             goal: active?.goal ?? "",
             goalStatus: active?.goalStatus ?? (active?.goal ? "running" : "stopped"),
           };
@@ -1689,6 +1698,7 @@ function makeMockApp(): AppBindings {
           const tab = mockTabs.find((item) => item.id === tabID) ?? mockTabs.find((item) => item.active) ?? mockTabs[0];
           const toolApprovalMode = normalizeToolApprovalMode(tab?.toolApprovalMode, tab ? normalizeMode(tab.mode) : "normal", settings.autoApproveTools);
           const autoApproveTools = toolApprovalMode === "yolo";
+          const collaborationMode = normalizeCollaborationMode(tab?.collaborationMode, tab?.goal, tab ? normalizeMode(tab.mode) : "normal");
           return {
             label: tab?.label ?? "DeepSeek-R1",
             ready: tab?.ready ?? true,
@@ -1696,7 +1706,9 @@ function makeMockApp(): AppBindings {
             cwd: tab?.cwd || cwd,
             autoApproveTools,
             bypass: autoApproveTools,
+            collaborationMode,
             toolApprovalMode,
+            tokenMode: normalizeTokenMode(tab?.tokenMode),
             goal: tab?.goal ?? "",
             goalStatus: tab?.goalStatus ?? (tab?.goal ? "running" : "stopped"),
           };
@@ -2026,6 +2038,14 @@ function makeMockApp(): AppBindings {
         },
         async SetEffortForTab(_tabID, level) {
           await this.SetEffort(level);
+        },
+        async SetTokenMode(mode: string) {
+          const active = mockTabs.find((tab) => tab.active);
+          if (active) await this.SetTokenModeForTab(active.id, mode);
+        },
+        async SetTokenModeForTab(tabID, mode) {
+          const tokenMode = normalizeTokenMode(mode);
+          mockTabs = mockTabs.map((tab) => (tab.id === tabID ? { ...tab, tokenMode } : tab));
         },
     async Memory() {
       return {
@@ -2413,6 +2433,7 @@ function makeMockApp(): AppBindings {
         mode: "normal",
         collaborationMode: "normal",
         toolApprovalMode: "ask",
+        tokenMode: "full",
         active: true,
         cwd: workspaceRoot,
       };
@@ -2438,6 +2459,7 @@ function makeMockApp(): AppBindings {
         mode: "normal",
         collaborationMode: "normal",
         toolApprovalMode: "ask",
+        tokenMode: "full",
         active: true,
         cwd: "",
       };

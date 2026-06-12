@@ -8,7 +8,7 @@ import { app, onFilesDropped } from "../lib/bridge";
 import { SPINNER_WORDS, useI18n } from "../lib/i18n";
 import { clearLayoutSize, loadOptionalLayoutSize, saveLayoutSize } from "../lib/layoutPreferences";
 import { useToast } from "../lib/toast";
-import { type CollaborationMode, type CommandInfo, type ComposerInsertRequest, type DirEntry, type EffortInfo, type HistoryMessage, type Mode, type SessionMeta, type SessionReference, type SlashArgItem, type SlashArgsResult, type ToolApprovalMode } from "../lib/types";
+import { type CollaborationMode, type CommandInfo, type ComposerInsertRequest, type DirEntry, type EffortInfo, type HistoryMessage, type Mode, type SessionMeta, type SessionReference, type SlashArgItem, type SlashArgsResult, type TokenMode, type ToolApprovalMode } from "../lib/types";
 import {
   formatWorkspaceReference,
   parseWorkspaceReference,
@@ -322,6 +322,7 @@ export function Composer({
   running,
   collaborationMode,
   toolApprovalMode,
+  tokenMode,
   goal,
   cwd,
   modelLabel,
@@ -338,6 +339,7 @@ export function Composer({
   onClearGoal,
   onSwitchModel,
   onSetEffort,
+  onSetTokenMode,
   insertRequest,
   disabled,
   decisionPending = false,
@@ -350,6 +352,7 @@ export function Composer({
   running: boolean;
   collaborationMode: CollaborationMode;
   toolApprovalMode: ToolApprovalMode;
+  tokenMode: TokenMode;
   goal?: string;
   cwd?: string;
   modelLabel: string;
@@ -368,6 +371,7 @@ export function Composer({
   onClearGoal: () => void;
   onSwitchModel: (name: string) => void;
   onSetEffort: (level: string) => void;
+  onSetTokenMode: (mode: TokenMode) => void;
   insertRequest?: ComposerInsertRequest | null;
   disabled?: boolean;
   decisionPending?: boolean;
@@ -813,6 +817,7 @@ export function Composer({
   const planModeOn = collaborationMode === "plan";
   const activeGoal = (goal ?? "").trim();
   const goalModeOn = collaborationMode === "goal";
+  const tokenModeOn = tokenMode === "economy";
 
   const submit = async () => {
     if (disabled || submittingRef.current) return;
@@ -1479,6 +1484,12 @@ export function Composer({
       requestAnimationFrame(() => taRef.current?.focus());
     });
   };
+  const chooseTokenMode = () => {
+    closeIntentMenu(() => {
+      onSetTokenMode(tokenModeOn ? "full" : "economy");
+      requestAnimationFrame(() => taRef.current?.focus());
+    });
+  };
   const effortLevels = asArray(effort?.levels);
   const currentEffort = effort?.current || "auto";
   const hasEffort = Boolean(effort?.supported && effortLevels.length > 0);
@@ -1502,7 +1513,7 @@ export function Composer({
   const composerMetaClass = [
     "composer-meta",
     hasEffort ? "composer-meta--has-effort" : "composer-meta--no-effort",
-    planModeOn || goalModeOn ? "composer-meta--has-intent-chip" : "composer-meta--no-intent-chip",
+    planModeOn || goalModeOn || tokenModeOn ? "composer-meta--has-intent-chip" : "composer-meta--no-intent-chip",
   ].join(" ");
 
   return (
@@ -1550,6 +1561,22 @@ export function Composer({
               <span className="composer-access-menu__desc">{goalModeOn ? activeGoal || t("composer.goalModeActiveDesc") : t("composer.goalModeDesc")}</span>
             </span>
             <span className={`composer-intent-switch${goalModeOn ? " composer-intent-switch--on" : ""}`} aria-hidden="true">
+              <span />
+            </span>
+          </button>
+          <button
+            type="button"
+            className={`composer-access-menu__item composer-intent-menu__item${tokenModeOn ? " composer-access-menu__item--active" : ""}`}
+            onClick={chooseTokenMode}
+            disabled={disabled || running}
+            title={tokenModeOn ? t("composer.tokenEconomyOnDesc") : t("composer.tokenEconomyDesc")}
+          >
+            <Gauge size={16} />
+            <span className="composer-access-menu__copy">
+              <span className="composer-access-menu__title">{t("composer.tokenEconomy")}</span>
+              <span className="composer-access-menu__desc">{tokenModeOn ? t("composer.tokenEconomyOnDesc") : t("composer.tokenEconomyDesc")}</span>
+            </span>
+            <span className={`composer-intent-switch${tokenModeOn ? " composer-intent-switch--on" : ""}`} aria-hidden="true">
               <span />
             </span>
           </button>
@@ -1979,6 +2006,26 @@ export function Composer({
                       <X size={11} />
                     </span>
                     <span className="composer-mode-chip__label">{t("composer.modeGoal")}</span>
+                  </button>
+                </Tooltip>
+              )}
+              {tokenModeOn && (
+                <Tooltip label={t("composer.tokenEconomyOnDesc")}>
+                  <button
+                    type="button"
+                    className="composer-mode-chip composer-mode-chip--token"
+                    onClick={chooseTokenMode}
+                    disabled={disabled || running}
+                    title={t("composer.tokenEconomyExitTitle")}
+                    aria-label={t("composer.tokenEconomyExitTitle")}
+                  >
+                    <span className="composer-mode-chip__icon composer-mode-chip__icon--mode" aria-hidden="true">
+                      <Gauge size={14} />
+                    </span>
+                    <span className="composer-mode-chip__icon composer-mode-chip__icon--dismiss" aria-hidden="true">
+                      <X size={11} />
+                    </span>
+                    <span className="composer-mode-chip__label">{t("composer.tokenEconomyShort")}</span>
                   </button>
                 </Tooltip>
               )}

@@ -4316,6 +4316,10 @@ a[href] {
   max-width: min(132px, 24vw);
 }
 
+.composer-meta--has-intent-chip .composer-meta__control--intent {
+  max-width: none;
+}
+
 .composer-meta__control--approval {
   flex: 0 0 232px;
   min-width: 216px;
@@ -4616,6 +4620,38 @@ a[href] {
   transform: none;
 }
 
+.composer-mode-chip--plan,
+.composer-mode-chip--goal {
+  flex: 0 0 72px;
+  min-width: 72px;
+  max-width: 72px;
+}
+
+.composer-mode-chip--plan .composer-mode-chip__label,
+.composer-mode-chip--goal .composer-mode-chip__label {
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.composer-mode-chip--token {
+  flex: 0 0 62px;
+  min-width: 62px;
+  max-width: 62px;
+  gap: 4px;
+  padding: 0 8px 0 7px;
+  border-color: color-mix(in srgb, #10b981 34%, var(--border));
+  background: color-mix(in srgb, var(--surface-2) 82%, #10b981 10%);
+}
+
+.composer-mode-chip--token .composer-mode-chip__icon--mode {
+  color: #10b981;
+}
+
+.composer-mode-chip--token .composer-mode-chip__label {
+  overflow: visible;
+  text-overflow: clip;
+}
+
 .composer-meta .modelsw {
   width: 100%;
   max-width: 100%;
@@ -4663,10 +4699,6 @@ a[href] {
     max-width: 148px;
   }
 
-  .composer-meta__control--intent {
-    max-width: 118px;
-  }
-
   .composer-meta__control--approval {
     flex-basis: 178px;
     min-width: 164px;
@@ -4706,10 +4738,6 @@ a[href] {
     flex: 1 1 112px;
     width: auto;
     max-width: 126px;
-  }
-
-  .composer-meta__control--intent {
-    max-width: 106px;
   }
 
   .composer-meta__control--approval {
@@ -17993,6 +18021,11 @@ a[href] {
 :root[data-theme-style] .composer-mode-chip {
   border-radius: 999px;
   box-shadow: none;
+}
+
+:root[data-theme-style] .composer-mode-chip--token {
+  border-color: color-mix(in srgb, #10b981 32%, var(--border));
+  background: color-mix(in srgb, var(--bg-elev-2) 82%, #10b981 10%);
 }
 
 :root[data-theme-style] .composer-modebar__thumb,

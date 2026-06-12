@@ -48,11 +48,6 @@ import { CopyButton } from "./components/CopyButton";
 import { parseTodos } from "./lib/tools";
 import { shouldShowTodoPanel } from "./lib/todoVisibility";
 import {
-  modeHasAutoApproveTools,
-  modeHasPlan,
-  modeFromAxes,
-  normalizeMode,
-  normalizeToolApprovalMode,
   type BotConnectionView,
   type BotSettingsView,
   type CollaborationMode,
@@ -63,15 +58,23 @@ import {
   type SettingsTab,
   type SettingsView,
   type TabMeta,
+  type TokenMode,
   type ToolApprovalMode,
 } from "./lib/types";
 import {
-  controllerCollaborationMode,
-  displayedCollaborationMode,
-  keepGoalDraftMode,
-  metaSyncedCollaborationMode,
-  tabListCollaborationMode,
-} from "./lib/goalDraftMode";
+  composerProfileFromMeta,
+  composerProfileFromTab,
+  composerProfileMode,
+  composerProfileWithMode,
+  controllerComposerProfileCollaborationMode,
+  defaultComposerProfile,
+  displayedComposerProfileCollaborationMode,
+  hydrateComposerProfileFromMeta,
+  hydrateComposerProfilesFromTabs,
+  patchComposerProfile,
+  type ComposerProfile,
+  type ComposerProfileField,
+} from "./lib/composerProfile";
 import {
   restorableToolApprovalMode,
   toggleYoloToolApprovalMode,
@@ -659,6 +662,7 @@ export default function App() {
     rewind,
     setModel,
     setEffort,
+    setTokenMode,
     switchTab,
     openProjectTab,
     openGlobalTab,
@@ -669,12 +673,8 @@ export default function App() {
   } = useController();
   const { locale, setPref: setLocalePref } = useI18n();
   const t = useT();
-  const [modesByTab, setModesByTab] = useState<Record<string, Mode>>({});
-  const [collaborationModesByTab, setCollaborationModesByTab] = useState<Record<string, CollaborationMode>>({});
-  const [toolApprovalModesByTab, setToolApprovalModesByTab] = useState<Record<string, ToolApprovalMode>>({});
+  const [composerProfilesByTab, setComposerProfilesByTab] = useState<Record<string, ComposerProfile>>({});
   const yoloRestoreToolApprovalModesRef = useRef<Record<string, RestorableToolApprovalMode>>({});
-  const [goalsByTab, setGoalsByTab] = useState<Record<string, string>>({});
-  const [goalDraftModesByTab, setGoalDraftModesByTab] = useState<Record<string, boolean>>({});
   const [tabMetas, setTabMetas] = useState<TabMeta[]>([]);
   const [tabOrderIds, setTabOrderIds] = useState<string[]>([]);
   const [tabRevealSignal, setTabRevealSignal] = useState(0);
@@ -973,66 +973,47 @@ export default function App() {
     return currentTabTurns > 0 ? currentTabTurns : activeTopicTurns ?? 0;
   }, [activeTopicTurns, state.checkpoints.length, state.items]);
   const startupSplashHold = state.meta?.ready !== true && !state.meta?.startupErr;
-  const legacyMode = activeTabId ? modesByTab[activeTabId] ?? "normal" : "normal";
-  const goal = activeTabId ? goalsByTab[activeTabId] ?? state.meta?.goal ?? activeTab?.goal ?? "" : "";
-  const goalDraftMode = activeTabId ? Boolean(goalDraftModesByTab[activeTabId]) : false;
-  const collaborationMode = activeTabId
-    ? displayedCollaborationMode({
-        goalDraftMode,
-        localMode: collaborationModesByTab[activeTabId],
-        metaGoal: state.meta?.goal,
-        tabMode: activeTab?.collaborationMode,
-        goal,
-        legacyMode,
-      })
-    : "normal";
-  const toolApprovalMode = activeTabId
-    ? toolApprovalModesByTab[activeTabId] ?? normalizeToolApprovalMode(state.meta?.toolApprovalMode ?? activeTab?.toolApprovalMode, legacyMode, state.meta?.autoApproveTools ?? state.meta?.bypass)
-    : "ask";
+  const backendActiveComposerProfile = useMemo(() => {
+    if (state.meta) {
+      return composerProfileFromMeta(state.meta, activeTab ? composerProfileMode(composerProfileFromTab(activeTab)) : undefined);
+    }
+    return composerProfileFromTab(activeTab);
+  }, [activeTab, state.meta]);
+  const composerProfile = activeTabId
+    ? composerProfilesByTab[activeTabId] ?? backendActiveComposerProfile
+    : defaultComposerProfile;
+  const goal = composerProfile.goal;
+  const collaborationMode = displayedComposerProfileCollaborationMode(composerProfile);
+  const toolApprovalMode = composerProfile.toolApprovalMode;
+  const tokenMode: TokenMode = composerProfile.tokenMode;
   const controllerReady = state.meta?.ready === true;
-  const setMode = useCallback(
-    (next: Mode | ((prev: Mode) => Mode)) => {
+  const patchActiveComposerProfile = useCallback(
+    (patch: Partial<Omit<ComposerProfile, "pending">>, pendingFields: ComposerProfileField[]) => {
       if (!activeTabId) return;
-      setModesByTab((current) => {
-        const prev = current[activeTabId] ?? "normal";
-        const value = typeof next === "function" ? next(prev) : next;
-        if (value === prev) return current;
-        return { ...current, [activeTabId]: value };
-      });
+      setComposerProfilesByTab((current) => patchComposerProfile(current, activeTabId, composerProfile, patch, pendingFields));
     },
-    [activeTabId],
+    [activeTabId, composerProfile],
   );
-  const setGoalDraftModeForTab = useCallback((tabId: string, enabled: boolean) => {
-    setGoalDraftModesByTab((current) => {
-      if (Boolean(current[tabId]) === enabled) return current;
-      if (enabled) return { ...current, [tabId]: true };
-      const next = { ...current };
-      delete next[tabId];
-      return next;
-    });
-  }, []);
   const topicbarEditing = Boolean(activeTab?.topicId && activeTab.topicId === renamingTopicId);
   const visibleTabId = activeTabId;
   const visibleTabs = useMemo(() => {
     const byId = new Map(tabMetas.map((tab) => [tab.id, tab]));
     const ordered = tabOrderIds.map((id) => byId.get(id)).filter((tab): tab is TabMeta => Boolean(tab));
     const missing = tabMetas.filter((tab) => !tabOrderIds.includes(tab.id));
-    return [...ordered, ...missing].map((tab) => ({
-      ...tab,
-      running: tab.id === visibleTabId ? tab.running || state.running : tab.running,
-      mode: modesByTab[tab.id] ?? normalizeMode(tab.mode),
-      collaborationMode: tabListCollaborationMode({
-        goalDraftMode: Boolean(goalDraftModesByTab[tab.id]),
-        localMode: collaborationModesByTab[tab.id],
-        tabMode: tab.collaborationMode,
-        tabGoal: goalsByTab[tab.id] ?? tab.goal,
-        legacyMode: normalizeMode(tab.mode),
-      }),
-      toolApprovalMode: toolApprovalModesByTab[tab.id] ?? normalizeToolApprovalMode(tab.toolApprovalMode, normalizeMode(tab.mode), tab.toolApprovalMode === "yolo"),
-      goal: goalsByTab[tab.id] ?? tab.goal ?? "",
-      active: tab.id === visibleTabId,
-    }));
-  }, [collaborationModesByTab, goalDraftModesByTab, goalsByTab, modesByTab, state.running, tabMetas, tabOrderIds, toolApprovalModesByTab, visibleTabId]);
+    return [...ordered, ...missing].map((tab) => {
+      const profile = composerProfilesByTab[tab.id] ?? composerProfileFromTab(tab);
+      return {
+        ...tab,
+        running: tab.id === visibleTabId ? tab.running || state.running : tab.running,
+        mode: composerProfileMode(profile),
+        collaborationMode: displayedComposerProfileCollaborationMode(profile),
+        toolApprovalMode: profile.toolApprovalMode,
+        tokenMode: profile.tokenMode,
+        goal: profile.goal,
+        active: tab.id === visibleTabId,
+      };
+    });
+  }, [composerProfilesByTab, state.running, tabMetas, tabOrderIds, visibleTabId]);
 
   useEffect(() => {
     const ids = tabMetas.map((tab) => tab.id);
@@ -1050,79 +1031,8 @@ export default function App() {
     for (const id of Object.keys(yoloRestoreToolApprovalModesRef.current)) {
       if (!ids.has(id)) delete yoloRestoreToolApprovalModesRef.current[id];
     }
-    setGoalDraftModesByTab((current) => {
-      let changed = false;
-      const next: Record<string, boolean> = {};
-      for (const tab of tabMetas) {
-        if (keepGoalDraftMode(Boolean(current[tab.id]), tab.goal)) {
-          next[tab.id] = true;
-        } else if (current[tab.id]) {
-          changed = true;
-        }
-      }
-      for (const id of Object.keys(current)) {
-        if (!ids.has(id)) changed = true;
-      }
-      return changed ? next : current;
-    });
-    setModesByTab((current) => {
-      let changed = false;
-      const next: Record<string, Mode> = {};
-      for (const tab of tabMetas) {
-        const mode = normalizeMode(tab.mode);
-        next[tab.id] = mode;
-        if (current[tab.id] !== mode) changed = true;
-      }
-      for (const id of Object.keys(current)) {
-        if (!ids.has(id)) changed = true;
-      }
-      return changed ? next : current;
-    });
-    setCollaborationModesByTab((current) => {
-      let changed = false;
-      const next: Record<string, CollaborationMode> = {};
-      for (const tab of tabMetas) {
-        const value = tabListCollaborationMode({
-          goalDraftMode: keepGoalDraftMode(Boolean(goalDraftModesByTab[tab.id]), tab.goal),
-          tabMode: tab.collaborationMode,
-          tabGoal: tab.goal,
-          legacyMode: normalizeMode(tab.mode),
-        });
-        next[tab.id] = value;
-        if (current[tab.id] !== value) changed = true;
-      }
-      for (const id of Object.keys(current)) {
-        if (!ids.has(id)) changed = true;
-      }
-      return changed ? next : current;
-    });
-    setToolApprovalModesByTab((current) => {
-      let changed = false;
-      const next: Record<string, ToolApprovalMode> = {};
-      for (const tab of tabMetas) {
-        const value = normalizeToolApprovalMode(tab.toolApprovalMode, normalizeMode(tab.mode));
-        next[tab.id] = value;
-        if (current[tab.id] !== value) changed = true;
-      }
-      for (const id of Object.keys(current)) {
-        if (!ids.has(id)) changed = true;
-      }
-      return changed ? next : current;
-    });
-    setGoalsByTab((current) => {
-      let changed = false;
-      const next: Record<string, string> = {};
-      for (const tab of tabMetas) {
-        const value = tab.goal ?? "";
-        next[tab.id] = value;
-        if (current[tab.id] !== value) changed = true;
-      }
-      for (const id of Object.keys(current)) {
-        if (!ids.has(id)) changed = true;
-      }
-      return changed ? next : current;
-    });
-  }, [goalDraftModesByTab, tabMetas]);
+    setComposerProfilesByTab((current) => hydrateComposerProfilesFromTabs(current, tabMetas));
+  }, [tabMetas]);
 
   useEffect(() => {
     if (!renamingTopicId || activeTab?.topicId === renamingTopicId) return;
@@ -1134,14 +1044,8 @@ export default function App() {
 
   useEffect(() => {
     if (!activeTabId || !state.meta) return;
-    const nextGoal = state.meta.goalStatus === "running" ? state.meta.goal ?? "" : "";
-    if (nextGoal) setGoalDraftModeForTab(activeTabId, false);
-    setGoalsByTab((current) => (current[activeTabId] === nextGoal ? current : { ...current, [activeTabId]: nextGoal }));
-    setCollaborationModesByTab((current) => {
-      const nextMode = metaSyncedCollaborationMode({ nextGoal, goalDraftMode, legacyMode });
-      return current[activeTabId] === nextMode ? current : { ...current, [activeTabId]: nextMode };
-    });
-  }, [activeTabId, goalDraftMode, legacyMode, setGoalDraftModeForTab, state.meta]);
+    setComposerProfilesByTab((current) => hydrateComposerProfileFromMeta(current, activeTabId, state.meta!));
+  }, [activeTabId, state.meta]);
 
   const syncModeToController = useCallback((m: Mode) => setControllerMode(m), [setControllerMode]);
 
@@ -1155,37 +1059,22 @@ export default function App() {
   // normal clears both.
   const applyMode = useCallback(
     (m: Mode) => {
-      if (!activeTabId) return;
-      const nextCollaborationMode: CollaborationMode = modeHasPlan(m) ? "plan" : "normal";
-      const nextToolApprovalMode: ToolApprovalMode = modeHasAutoApproveTools(m) ? "yolo" : "ask";
-      setGoalDraftModeForTab(activeTabId, false);
-      setMode(m);
-      setCollaborationModesByTab((current) => (current[activeTabId] === nextCollaborationMode ? current : { ...current, [activeTabId]: nextCollaborationMode }));
-      setToolApprovalModesByTab((current) => (current[activeTabId] === nextToolApprovalMode ? current : { ...current, [activeTabId]: nextToolApprovalMode }));
-      setGoalsByTab((current) => (current[activeTabId] ? { ...current, [activeTabId]: "" } : current));
+      patchActiveComposerProfile(composerProfileWithMode(m), ["collaborationMode", "toolApprovalMode", "goal"]);
       void syncModeToController(m);
     },
-    [activeTabId, setGoalDraftModeForTab, setMode, syncModeToController],
+    [patchActiveComposerProfile, syncModeToController],
   );
   const applyCollaborationMode = useCallback(
     (m: CollaborationMode) => {
-      if (!activeTabId) return;
       if (m === "goal") {
-        setGoalDraftModeForTab(activeTabId, true);
-        setCollaborationModesByTab((current) => (current[activeTabId] === "goal" ? current : { ...current, [activeTabId]: "goal" }));
-        setMode(modeFromAxes(false, toolApprovalMode === "yolo"));
+        patchActiveComposerProfile({ collaborationMode: "normal", goalDraftMode: true, goal: "" }, ["collaborationMode", "goal"]);
         void setControllerCollaborationMode("normal");
         return;
       }
-      setGoalDraftModeForTab(activeTabId, false);
-      setCollaborationModesByTab((current) => (current[activeTabId] === m ? current : { ...current, [activeTabId]: m }));
-      if (m === "normal" || m === "plan") {
-        setGoalsByTab((current) => (current[activeTabId] ? { ...current, [activeTabId]: "" } : current));
-      }
-      setMode(modeFromAxes(m === "plan", toolApprovalMode === "yolo"));
+      patchActiveComposerProfile({ collaborationMode: m, goalDraftMode: false, goal: "" }, ["collaborationMode", "goal"]);
       void setControllerCollaborationMode(m);
     },
-    [activeTabId, setControllerCollaborationMode, setGoalDraftModeForTab, setMode, toolApprovalMode],
+    [patchActiveComposerProfile, setControllerCollaborationMode],
   );
   const applyToolApprovalMode = useCallback(
     (m: ToolApprovalMode) => {
@@ -1197,11 +1086,10 @@ export default function App() {
       } else {
         yoloRestoreToolApprovalModesRef.current[activeTabId] = restorableToolApprovalMode(m);
       }
-      setToolApprovalModesByTab((current) => (current[activeTabId] === m ? current : { ...current, [activeTabId]: m }));
-      setMode(modeFromAxes(collaborationMode === "plan", m === "yolo"));
+      patchActiveComposerProfile({ toolApprovalMode: m }, ["toolApprovalMode"]);
       void setControllerToolApprovalMode(m);
     },
-    [activeTabId, collaborationMode, setControllerToolApprovalMode, setMode, toolApprovalMode],
+    [activeTabId, patchActiveComposerProfile, setControllerToolApprovalMode, toolApprovalMode],
   );
   const toggleYoloApprovalMode = useCallback(() => {
     if (!activeTabId) return;
@@ -1216,18 +1104,22 @@ export default function App() {
   }, [activeTabId, applyToolApprovalMode, toolApprovalMode]);
   const applyGoal = useCallback(
     (nextGoal: string) => {
-      if (!activeTabId) return;
       const trimmed = nextGoal.trim();
-      setGoalDraftModeForTab(activeTabId, false);
-      setGoalsByTab((current) => (current[activeTabId] === trimmed ? current : { ...current, [activeTabId]: trimmed }));
-      setCollaborationModesByTab((current) => {
-        const nextMode = trimmed ? "goal" : "normal";
-        return current[activeTabId] === nextMode ? current : { ...current, [activeTabId]: nextMode };
-      });
-      setMode(modeFromAxes(false, toolApprovalMode === "yolo"));
+      patchActiveComposerProfile({
+        collaborationMode: trimmed ? "goal" : "normal",
+        goalDraftMode: false,
+        goal: trimmed,
+      }, ["collaborationMode", "goal"]);
       void (trimmed ? setControllerGoal(trimmed) : clearControllerGoal());
     },
-    [activeTabId, clearControllerGoal, setControllerGoal, setGoalDraftModeForTab, setMode, toolApprovalMode],
+    [clearControllerGoal, patchActiveComposerProfile, setControllerGoal],
+  );
+  const applyTokenMode = useCallback(
+    (m: TokenMode) => {
+      patchActiveComposerProfile({ tokenMode: m }, ["tokenMode"]);
+      void setTokenMode(m);
+    },
+    [patchActiveComposerProfile, setTokenMode],
   );
   const startGoal = useCallback(
     (nextGoal: string) => {
@@ -1250,11 +1142,11 @@ export default function App() {
   const switchModel = useCallback(
     async (name: string) => {
       await setModel(name);
-      await setControllerCollaborationMode(controllerCollaborationMode({ collaborationMode, goal }));
+      await setControllerCollaborationMode(controllerComposerProfileCollaborationMode(composerProfile));
       await setControllerToolApprovalMode(toolApprovalMode);
       if (goal.trim()) await setControllerGoal(goal);
     },
-    [collaborationMode, goal, setControllerCollaborationMode, setControllerGoal, setControllerToolApprovalMode, setModel, toolApprovalMode],
+    [composerProfile, goal, setControllerCollaborationMode, setControllerGoal, setControllerToolApprovalMode, setModel, toolApprovalMode],
   );
 
   // Startup and workspace/model rebuilds create a fresh controller in normal
@@ -1263,10 +1155,10 @@ export default function App() {
   // SetBypass binding was a harmless no-op.
   useEffect(() => {
     if (!controllerReady) return;
-    void setControllerCollaborationMode(controllerCollaborationMode({ collaborationMode, goal }));
+    void setControllerCollaborationMode(controllerComposerProfileCollaborationMode(composerProfile));
     void setControllerToolApprovalMode(toolApprovalMode);
     if (goal.trim()) void setControllerGoal(goal);
-  }, [collaborationMode, controllerReady, goal, setControllerCollaborationMode, setControllerGoal, setControllerToolApprovalMode, toolApprovalMode]);
+  }, [composerProfile, controllerReady, goal, setControllerCollaborationMode, setControllerGoal, setControllerToolApprovalMode, toolApprovalMode]);
 
   // The live task list pinned above the composer comes from the most recent
   // successful top-level todo_write result; failed or still-running attempts do
@@ -1446,12 +1338,12 @@ export default function App() {
         return;
       }
       if (runningRef.current) { steer(submitText.trim()); return; }
-      await setControllerCollaborationMode(collaborationMode);
+      await setControllerCollaborationMode(controllerComposerProfileCollaborationMode(composerProfile));
       await setControllerToolApprovalMode(toolApprovalMode);
       if (goal.trim()) await setControllerGoal(goal);
       send(trimmed, submitText.trim());
     },
-    [applyGoal, closeTransientOverlays, collaborationMode, goal, send, runShell, notice, setControllerCollaborationMode, setControllerGoal, setControllerToolApprovalMode, steer, switchModel, t, toolApprovalMode],
+    [applyGoal, closeTransientOverlays, collaborationMode, composerProfile, goal, send, runShell, notice, setControllerCollaborationMode, setControllerGoal, setControllerToolApprovalMode, steer, switchModel, t, toolApprovalMode],
   );
 
   const refreshTabMetas = useCallback(async (): Promise<TabMeta[]> => {
@@ -1828,7 +1720,7 @@ export default function App() {
 
   const handleTabClose = useCallback(async (id: string) => {
     closeTransientOverlays();
-    setModesByTab((current) => {
+    setComposerProfilesByTab((current) => {
       if (!(id in current)) return current;
       const next = { ...current };
       delete next[id];
@@ -2602,6 +2494,7 @@ export default function App() {
               running={state.running}
               collaborationMode={collaborationMode}
               toolApprovalMode={toolApprovalMode}
+              tokenMode={tokenMode}
               goal={goal}
               cwd={state.meta?.cwd}
               modelLabel={state.meta?.label ?? t("status.connecting")}
@@ -2618,6 +2511,7 @@ export default function App() {
               onClearGoal={() => applyGoal("")}
               onSwitchModel={switchModel}
               onSetEffort={setEffort}
+              onSetTokenMode={applyTokenMode}
               insertRequest={composerInsertRequest}
               disabled={state.meta?.ready === false || state.messageAction != null || state.approval != null || state.ask != null || clearContextPending}
               decisionPending={state.messageAction != null || state.approval != null || state.ask != null || clearContextPending}

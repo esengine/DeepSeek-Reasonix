@@ -243,5 +243,11 @@ Subagent skills 默认继承执行器模型。设置 `subagent_model` 可让它�
 `reasonix config auto-plan off|on`。只有明确想写项目级覆盖时，才给 shell 命令加
 `--local`。
 
+桌面端“协作方式”菜单里的计划模式、目标模式和省 token 模式的使用方法与注意事项，
+见 [`COLLABORATION_MODES.zh-CN.md`](./COLLABORATION_MODES.zh-CN.md)。
+
+桌面端“工具权限”里的询问、自动和 Yolo 模式的区别与使用场景，
+见 [`TOOL_APPROVAL_MODES.zh-CN.md`](./TOOL_APPROVAL_MODES.zh-CN.md)。
+
 分离 session（让各模型前缀缓存稳定）背后的取舍见
 [`SPEC.md` §3.5](./SPEC.md#35-two-model-collaboration-coordinator)。
