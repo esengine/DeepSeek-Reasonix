@@ -445,10 +445,10 @@ func (s *SubagentStore) isAncestorSession(ancestor, current string) (bool, error
 		if strings.TrimSpace(meta.ID) != cursor {
 			return false, fmt.Errorf("branch metadata for session %q declares id %q", cursor, meta.ID)
 		}
-		parent := strings.TrimSpace(meta.ParentID)
-		if parent == ancestor {
+		if cursor == ancestor {
 			return true, nil
 		}
+		parent := strings.TrimSpace(meta.ParentID)
 		cursor = parent
 	}
 	return false, nil
