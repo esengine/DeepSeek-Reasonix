@@ -389,30 +389,15 @@ export function Transcript({
       const flushCollapseBatch = () => {
         if (collapseBatch.length === 0) return;
         const dur = collapseBatch.reduce((ms, it) => ms + (it.kind === "tool" ? it.durationMs ?? 0 : 0), 0);
-        // Sub-second batches aren't worth folding — render inline.
-        if (dur < MIN_COLLAPSE_MS) {
-          for (const it of collapseBatch) {
-            if (it.kind === "tool") {
-              if (it.parentId) continue;
-              if (it.name === "todo_write" || it.name === "exit_plan_mode") continue;
-              out.push(<ToolCard key={it.id} item={it as ToolItem} subcalls={subcallsByParent.get(it.id)} />);
-            }
-            if (it.kind === "phase") out.push(<PhaseCard key={it.id} text={it.text} />);
-            if (it.kind === "assistant") {
-              out.push(<LiveAssistantMessage key={it.id} item={it as AssistantItem} defaultExpanded={defaultExpandThinking} />);
-            }
-          }
-        } else {
-          out.push(
-            <TurnCollapse
-              key={`step-batch-${collapseBatchStart}`}
-              items={collapseBatch}
-              durationMs={dur}
-              mode={displayMode}
-              subcalls={subcallsByParent}
-            />,
-          );
-        }
+        out.push(
+          <TurnCollapse
+            key={`step-batch-${collapseBatchStart}`}
+            items={collapseBatch}
+            durationMs={dur}
+            mode={displayMode}
+            subcalls={subcallsByParent}
+          />,
+        );
         collapseBatch = [];
         collapseBatchStart = null;
       };
@@ -865,9 +850,6 @@ function WarmTurnCard({
 }
 
 // ── TurnCollapse: compact/minimal mode grouping ──────────────────────────────
-
-/** Minimum total duration (ms) before a step batch is worth folding. */
-const MIN_COLLAPSE_MS = 500;
 
 type TurnCollapseProps = {
   items: Item[];       // intermediate items (tools, reasoning, phase)
