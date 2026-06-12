@@ -332,6 +332,34 @@ func TestSubagentStoreSaveFailedPersistsTranscriptAndRejectsReuse(t *testing.T) 
 	}
 }
 
+func TestSubagentStoreSkipsSaveForDestroyedParent(t *testing.T) {
+	store := NewSubagentStore(t.TempDir()).WithDestroyedChecker(func(parentSession string) bool {
+		return parentSession == "parent-session"
+	})
+	spec := testSubagentSpec(t, "review")
+	run, err := store.PrepareFresh(spec)
+	if err != nil {
+		t.Fatalf("PrepareFresh: %v", err)
+	}
+	run.Session.Add(provider.Message{Role: provider.RoleUser, Content: "answer after destroy"})
+	if err := store.SaveCompleted(run); err != nil {
+		t.Fatalf("SaveCompleted: %v", err)
+	}
+	if _, err := os.Stat(store.sessionPath(run.Ref)); !os.IsNotExist(err) {
+		t.Fatalf("destroyed parent should not save session, stat err = %v", err)
+	}
+	if _, err := os.Stat(store.metaPath(run.Ref)); !os.IsNotExist(err) {
+		t.Fatalf("destroyed parent should not save meta, stat err = %v", err)
+	}
+	if err := store.SaveFailed(run); err != nil {
+		t.Fatalf("SaveFailed: %v", err)
+	}
+	if _, err := os.Stat(store.sessionPath(run.Ref)); !os.IsNotExist(err) {
+		t.Fatalf("destroyed parent should still not save session, stat err = %v", err)
+	}
+	run.Release()
+}
+
 func testSubagentSpec(t *testing.T, name string) SubagentSpec {
 	t.Helper()
 	reg := tool.NewRegistry()

@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -1399,9 +1400,7 @@ func (c *Controller) ClearSession() error {
 	if running {
 		return fmt.Errorf("cannot clear while a turn is running")
 	}
-	if err := removeSessionArtifacts(oldPath); err != nil {
-		return err
-	}
+	destroy := c.BeginDestroySession(oldPath)
 	c.hooks.SessionEnd(context.Background())
 	if c.sessionDir != "" {
 		c.mu.Lock()
@@ -1415,6 +1414,13 @@ func (c *Controller) ClearSession() error {
 	c.startedOnce = true
 	c.mu.Unlock()
 	c.hooks.SessionStart(context.Background())
+	go func() {
+		destroy.Wait()
+		if err := removeSessionArtifacts(oldPath); err != nil {
+			c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "clear session cleanup failed: " + err.Error()})
+		}
+		destroy.Finish()
+	}()
 	return nil
 }
 
@@ -1434,6 +1440,9 @@ func removeSessionArtifacts(path string) error {
 		if err := os.RemoveAll(dir); err != nil && !os.IsNotExist(err) {
 			return err
 		}
+	}
+	if err := agent.DeleteSubagentsByParent(filepath.Dir(path), agent.BranchID(path)); err != nil {
+		return err
 	}
 	return nil
 }
@@ -1926,6 +1935,35 @@ func (c *Controller) SetSessionPath(p string) {
 	c.mu.Unlock()
 	c.setActiveJobSession(p)
 	c.rebindCheckpoints(p)
+}
+
+// SessionDestroyHandle separates waiting for cancelled jobs from ending the
+// destroy window, so callers can move/delete persistent artifacts in between.
+type SessionDestroyHandle struct {
+	Wait   func()
+	Finish func()
+}
+
+// BeginDestroySession marks a session as leaving active use and cancels its
+// background jobs. Call Wait before moving/deleting artifacts, then Finish after
+// persistent cleanup/move work is complete.
+func (c *Controller) BeginDestroySession(sessionPath string) SessionDestroyHandle {
+	parentSession := agent.BranchID(sessionPath)
+	if c.jobs == nil || parentSession == "" {
+		noop := func() {}
+		return SessionDestroyHandle{Wait: noop, Finish: noop}
+	}
+	done := c.jobs.DestroySession(parentSession)
+	return SessionDestroyHandle{
+		Wait: func() {
+			for _, ch := range done {
+				<-ch
+			}
+		},
+		Finish: func() {
+			c.jobs.FinishDestroySession(parentSession)
+		},
+	}
 }
 
 func (c *Controller) setActiveJobSession(sessionPath string) {

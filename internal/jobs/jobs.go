@@ -85,6 +85,7 @@ type Manager struct {
 	order     []string
 	completed []completion // finished-job summaries awaiting drain into the next turn
 	active    string
+	destroying map[string]bool
 }
 
 type completion struct {
@@ -100,7 +101,7 @@ func NewManager(sink event.Sink) *Manager {
 		sink = event.Discard
 	}
 	root, cancel := context.WithCancel(context.Background())
-	return &Manager{sink: sink, root: root, cancel: cancel, jobs: map[string]*Job{}}
+	return &Manager{sink: sink, root: root, cancel: cancel, jobs: map[string]*Job{}, destroying: map[string]bool{}}
 }
 
 // jobWriter appends a job's streamed output under its lock so a concurrent
@@ -176,6 +177,9 @@ func (m *Manager) StartForSession(parentSession, kind, label string, run func(ct
 // recordCompletion queues the finished-job summary for DrainCompletedNote and
 // emits a closing Notice (warn for a failure, info otherwise).
 func (m *Manager) recordCompletion(parentSession, id, kind, label string, st Status, err error) {
+	if m.IsDestroying(parentSession) {
+		return
+	}
 	tag := id
 	if label != "" {
 		tag = fmt.Sprintf("%s (%s)", id, label)
@@ -405,6 +409,69 @@ func (m *Manager) DrainCompletedNoteForSession(parentSession string) string {
 func (m *Manager) SetActiveSession(parentSession string) {
 	m.mu.Lock()
 	m.active = strings.TrimSpace(parentSession)
+	m.mu.Unlock()
+}
+
+// DestroySession marks a parent session as being removed from active use and
+// cancels its running jobs. The returned channels close when each cancelled job
+// has fully unwound.
+func (m *Manager) DestroySession(parentSession string) []<-chan struct{} {
+	parentSession = strings.TrimSpace(parentSession)
+	if parentSession == "" {
+		return nil
+	}
+	var cancels []context.CancelFunc
+	var done []<-chan struct{}
+	m.mu.Lock()
+	m.destroying[parentSession] = true
+	remaining := m.completed[:0]
+	for _, item := range m.completed {
+		if item.sessionID != parentSession {
+			remaining = append(remaining, item)
+		}
+	}
+	m.completed = remaining
+	for _, id := range m.order {
+		j := m.jobs[id]
+		if !sessionMatches(parentSession, j.SessionID) {
+			continue
+		}
+		j.mu.Lock()
+		if j.status == Running {
+			j.status = Killed
+			cancels = append(cancels, j.cancel)
+			done = append(done, j.done)
+		}
+		j.mu.Unlock()
+	}
+	m.mu.Unlock()
+	for _, cancel := range cancels {
+		cancel()
+	}
+	return done
+}
+
+// IsDestroying reports whether parentSession is in the destroy window. Empty
+// parent sessions are never considered destroyed.
+func (m *Manager) IsDestroying(parentSession string) bool {
+	parentSession = strings.TrimSpace(parentSession)
+	if parentSession == "" {
+		return false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.destroying[parentSession]
+}
+
+// FinishDestroySession ends the destroy window after all owned jobs have unwound
+// and persistent cleanup/move work has completed.
+func (m *Manager) FinishDestroySession(parentSession string) {
+	parentSession = strings.TrimSpace(parentSession)
+	if parentSession == "" {
+		return
+	}
+	m.mu.Lock()
+	delete(m.destroying, parentSession)
 	m.mu.Unlock()
 }
 

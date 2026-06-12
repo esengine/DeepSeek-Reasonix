@@ -1200,11 +1200,45 @@ func (a *App) DeleteSession(path string) error {
 	if _, ok := a.openSessionPaths(dir)[sessionPath]; ok {
 		return errActiveSession
 	}
-	if err := trashSessionArtifacts(dir, sessionPath, key); err != nil {
+	var destroys []control.SessionDestroyHandle
+	err = trashSessionArtifactsBeforeMove(dir, sessionPath, key, func() {
+		destroys = a.beginDestroySessionJobs(dir, sessionPath)
+	})
+	if err != nil {
+		if len(destroys) > 0 {
+			go runDestroyHandles(destroys)
+		}
 		return err
+	}
+	if len(destroys) > 0 {
+		go runDestroyHandles(destroys)
 	}
 	a.emitProjectTreeChanged()
 	return nil
+}
+
+func (a *App) beginDestroySessionJobs(dir, sessionPath string) []control.SessionDestroyHandle {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	var destroys []control.SessionDestroyHandle
+	for _, tab := range a.tabs {
+		if tab == nil || tab.Ctrl == nil || tabSessionDir(tab) != dir {
+			continue
+		}
+		destroys = append(destroys, tab.Ctrl.BeginDestroySession(sessionPath))
+	}
+	return destroys
+}
+
+func runDestroyHandles(destroys []control.SessionDestroyHandle) {
+	for _, destroy := range destroys {
+		if destroy.Wait != nil {
+			destroy.Wait()
+		}
+		if destroy.Finish != nil {
+			destroy.Finish()
+		}
+	}
 }
 
 func (a *App) openSessionPaths(dir string) map[string]struct{} {

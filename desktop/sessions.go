@@ -120,6 +120,10 @@ type trashedSessionMeta struct {
 }
 
 func trashSessionArtifacts(dir, sessionPath, key string) error {
+	return trashSessionArtifactsBeforeMove(dir, sessionPath, key, nil)
+}
+
+func trashSessionArtifactsBeforeMove(dir, sessionPath, key string, beforeMove func()) error {
 	if _, err := os.Stat(sessionPath); os.IsNotExist(err) {
 		return nil
 	} else if err != nil {
@@ -133,6 +137,9 @@ func trashSessionArtifacts(dir, sessionPath, key string) error {
 	}
 	if err := os.MkdirAll(itemDir, 0o755); err != nil {
 		return err
+	}
+	if beforeMove != nil {
+		beforeMove()
 	}
 	if err := movePathIfExists(sessionPath, filepath.Join(itemDir, key)); err != nil {
 		return err

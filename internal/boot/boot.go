@@ -445,6 +445,9 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		maxSteps = opts.MaxSteps
 	}
 	subagentStore := newSubagentStore(sessionDir)
+	if subagentStore != nil {
+		subagentStore.WithDestroyedChecker(jm.IsDestroying)
+	}
 
 	// Permission policy gates every tool call. The headless gate (no Approver)
 	// resolves "ask" to allow — preserving `reasonix run` autonomy — while deny

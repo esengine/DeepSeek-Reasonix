@@ -99,6 +99,7 @@ func EphemeralSubagentRun(systemPrompt string) *SubagentRun {
 // Its locks are process-local; cross-process mutation is intentionally out of v1.
 type SubagentStore struct {
 	dir string
+	destroyed func(parentSession string) bool
 
 	mu     sync.Mutex
 	locked map[string]bool
@@ -109,6 +110,16 @@ func NewSubagentStore(dir string) *SubagentStore {
 		return nil
 	}
 	return &SubagentStore{dir: dir, locked: map[string]bool{}}
+}
+
+// WithDestroyedChecker makes saves for destroyed parent sessions no-op. This is
+// used when a background sub-agent is cancelled because its parent session was
+// cleared or moved out of active history.
+func (s *SubagentStore) WithDestroyedChecker(fn func(parentSession string) bool) *SubagentStore {
+	if s != nil {
+		s.destroyed = fn
+	}
+	return s
 }
 
 // ListSubagentsByParent returns persisted sub-agent artifacts whose metadata
@@ -287,6 +298,9 @@ func (s *SubagentStore) MarkRunning(run *SubagentRun) error {
 	if s == nil || run == nil || run.Ref == "" {
 		return nil
 	}
+	if s.parentDestroyed(run) {
+		return nil
+	}
 	meta := run.Meta
 	meta.Status = SubagentRunning
 	meta.UpdatedAt = time.Now().UTC()
@@ -295,6 +309,9 @@ func (s *SubagentStore) MarkRunning(run *SubagentRun) error {
 
 func (s *SubagentStore) SaveCompleted(run *SubagentRun) error {
 	if s == nil || run == nil || run.Ref == "" {
+		return nil
+	}
+	if s.parentDestroyed(run) {
 		return nil
 	}
 	if err := run.Session.Save(s.sessionPath(run.Ref)); err != nil {
@@ -309,6 +326,9 @@ func (s *SubagentStore) SaveCompleted(run *SubagentRun) error {
 
 func (s *SubagentStore) SaveFailed(run *SubagentRun) error {
 	if s == nil || run == nil || run.Ref == "" {
+		return nil
+	}
+	if s.parentDestroyed(run) {
 		return nil
 	}
 	var sessionErr error
@@ -506,6 +526,13 @@ func (s *SubagentStore) saveMeta(meta SubagentMeta) error {
 		return err
 	}
 	return fileutil.ReplaceFile(tmpPath, s.metaPath(meta.Ref))
+}
+
+func (s *SubagentStore) parentDestroyed(run *SubagentRun) bool {
+	if s == nil || s.destroyed == nil || run == nil {
+		return false
+	}
+	return s.destroyed(run.Meta.ParentSession)
 }
 
 func validSubagentRef(ref string) bool {
