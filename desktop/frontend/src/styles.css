@@ -9574,6 +9574,7 @@ a[href] {
 .settings-center__content {
   min-width: 0;
   overflow-y: auto;
+  scrollbar-gutter: stable;
   padding: 24px 32px;
   background: var(--bg-elev);
 }
@@ -9877,18 +9878,21 @@ a[href] {
 .memory-tabs-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 12px;
   max-width: 100%;
   margin: 0 0 14px;
 }
 
 .memory-tabs-row__primary {
+  flex: 0 1 auto;
   margin: 0;
 }
 
 .memory-suggestion-tab {
   --wails-draggable: no-drag;
+  flex: 0 0 auto;
+  margin-left: auto;
   display: inline-flex;
   align-items: center;
   justify-content: center;
