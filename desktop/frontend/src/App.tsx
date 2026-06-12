@@ -2688,6 +2688,7 @@ export default function App() {
         <SettingsPanel
           initialTab={settingsTarget}
           isDevBuild={isDevBuild}
+          agentRunning={state.running}
           onClose={() => setSettingsTarget(null)}
           onChanged={() => {
             void refreshMeta();
