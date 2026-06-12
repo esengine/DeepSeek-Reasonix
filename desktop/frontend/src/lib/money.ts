@@ -10,7 +10,8 @@ export function currencySymbol(currency?: string): string {
   if (/^(gbp|pound|pounds|sterling)$/.test(lower)) return "\u00A3";
   if (/^(jpy|yen)$/.test(lower)) return DEFAULT_CURRENCY_SYMBOL;
   if (value === "\uFFE5" || value === "\u00A5") return DEFAULT_CURRENCY_SYMBOL;
-  if (/^\p{Sc}$/u.test(value)) return value;
+  // contains, not equals \u2014 keep multi-char symbols (A$, HK$) off the \u00A5 default.
+  if (/\p{Sc}/u.test(value)) return value;
   if (/^[a-z]{3}$/i.test(value)) return `${value.toUpperCase()} `;
 
   return DEFAULT_CURRENCY_SYMBOL;

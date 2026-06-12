@@ -211,6 +211,8 @@ func TestPricingSymbolNormalizesCurrencyCodes(t *testing.T) {
 		{currency: "EUR", want: "€"},
 		{currency: "₹", want: "₹"},
 		{currency: "aud", want: "AUD "},
+		{currency: "A$", want: "A$"},
+		{currency: "HK$", want: "HK$"},
 		{currency: "楼", want: "¥"},
 	}
 	for _, tc := range cases {

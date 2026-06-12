@@ -12,7 +12,6 @@ import (
 	"sort"
 	"strings"
 	"unicode"
-	"unicode/utf8"
 
 	"reasonix/internal/nilutil"
 )
@@ -315,8 +314,11 @@ func currencySymbol(currency string) string {
 	case "$", "€", "£":
 		return value
 	}
-	if r, size := utf8.DecodeRuneInString(value); size == len(value) && r != utf8.RuneError && unicode.Is(unicode.Sc, r) {
-		return value
+	// any embedded currency sign → keep as-is (compact symbols like A$, HK$).
+	for _, r := range value {
+		if unicode.Is(unicode.Sc, r) {
+			return value
+		}
 	}
 	if isThreeLetterCurrencyCode(value) {
 		return strings.ToUpper(value) + " "

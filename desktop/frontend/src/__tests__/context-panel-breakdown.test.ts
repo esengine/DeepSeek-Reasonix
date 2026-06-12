@@ -78,6 +78,7 @@ eq(infoCost, { amount: 0.1759, currency: "$" }, "panel cost keeps the panel curr
 eq(formatMoney(infoCost.amount, infoCost.currency, "dash"), "$0.1759", "USD panel cost renders with dollar sign");
 eq(currencySymbol("楼"), "¥", "unexpected currency text does not leak into money values");
 eq(currencySymbol("aud"), "AUD ", "unknown ISO currency codes stay readable");
+eq(currencySymbol("A$"), "A$", "compact multi-character currency symbols are preserved");
 
 console.log(`\n${passed} passed, ${failed} failed, ${passed + failed} total`);
 if (failed > 0) process.exit(1);
