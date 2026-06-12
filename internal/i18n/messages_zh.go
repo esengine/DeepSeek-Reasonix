@@ -36,6 +36,10 @@ var Chinese = Messages{
 	ResumeBadIndexFmt:   "请选择 1–%d 的会话（用 /resume 查看列表）",
 	ResumeAlreadyActive: "已在该会话中",
 	ResumedTitle:        "已恢复会话",
+
+	RenameUsage:     "用法：/rename <新名称>  或  /rename <序号> <新名称>",
+	RenameNoSession: "当前没有活跃会话可重命名",
+	RenameDoneFmt:   "会话已重命名为 %q",
 	ResumePickTitle:     "选择要恢复的会话",
 	ResumePickHint:      "↑/↓ 移动 · Enter 恢复 · Esc 取消",
 
@@ -163,6 +167,7 @@ var Chinese = Messages{
 	CmdBranch:       "创建对话分支",
 	CmdSwitchBranch: "切换对话分支",
 	CmdResume:       "恢复已保存的会话",
+	CmdRename:       "重命名会话",
 	CmdModel:        "切换模型",
 	CmdMemory:       "查看记忆文件",
 	CmdGoal:         "设置或清除当前目标",

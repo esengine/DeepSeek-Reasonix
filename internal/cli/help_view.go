@@ -57,6 +57,7 @@ func builtinHelpItems() []compItem {
 	return []compItem{
 		{label: "/compact", hint: i18n.M.CmdCompact},
 		{label: "/new", hint: i18n.M.CmdNew},
+		{label: "/rename", hint: i18n.M.CmdRename},
 		{label: "/clear", hint: i18n.M.CmdClear},
 		{label: "/rewind", hint: i18n.M.CmdRewind},
 		{label: "/tree", hint: i18n.M.CmdTree},
@@ -91,7 +92,7 @@ func skillHelpItems(skills []skill.Skill) []compItem {
 	for _, s := range skills {
 		hint := s.Description
 		if s.RunAs == skill.RunSubagent {
-			hint = "subagent · " + hint
+			hint = "subagent 璺?" + hint
 		}
 		items = append(items, compItem{label: "/" + s.Name, hint: hint})
 	}

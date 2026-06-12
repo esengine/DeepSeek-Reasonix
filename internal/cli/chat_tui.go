@@ -3456,6 +3456,8 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 		m.clearConfirm = &clearConfirm{confirm: 1}
 	case "/resume":
 		m.runResumeCommand(input)
+	case "/rename":
+		m.runRenameCommand(input)
 	case "/todo":
 		m.echoLocalCommand(input)
 		// Dismiss the pinned task list; a later todo_write brings it back.
