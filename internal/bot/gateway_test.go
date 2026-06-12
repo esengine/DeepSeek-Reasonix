@@ -9,6 +9,7 @@ import (
 	"sync"
 	"testing"
 
+	"reasonix/internal/control"
 	"reasonix/internal/event"
 )
 
@@ -416,6 +417,111 @@ func TestGatewayApproveWithoutSessionSendsGuidance(t *testing.T) {
 	}
 	if !strings.Contains(sent[0].Text, "没有找到当前会话中的待审批操作") {
 		t.Fatalf("sent text = %q, want missing approval guidance", sent[0].Text)
+	}
+}
+
+func TestGatewayYoloCommandUpdatesCurrentSessionAndConnectionDefault(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	var persistedMode string
+	var persistedConnection string
+	gw := NewGateway(GatewayConfig{
+		ToolApprovalMode: "ask",
+		ConnectionChannels: map[string]ChannelConfig{
+			"feishu-lark": {ToolApprovalMode: "ask"},
+		},
+		OnToolApprovalModeChange: func(msg InboundMessage, mode string) error {
+			persistedConnection = msg.ConnectionID
+			persistedMode = mode
+			return nil
+		},
+	}, nil, logger)
+	adapter := newFakeAdapter(PlatformFeishu, "fake-lark")
+	msg := InboundMessage{
+		Platform:     PlatformFeishu,
+		ConnectionID: "feishu-lark",
+		Domain:       "lark",
+		ChatType:     ChatDM,
+		ChatID:       "chat",
+		UserID:       "user",
+		Text:         "/yolo on",
+	}
+	key := BuildSessionKey(msg.Session())
+	ctrl := control.New(control.Options{})
+	ctrl.SetToolApprovalMode(control.ToolApprovalAsk)
+	gw.controllers[key] = &sessionState{ctrl: ctrl}
+
+	gw.handleSlashCommand(context.Background(), adapter, key, msg)
+
+	if got := ctrl.ToolApprovalMode(); got != control.ToolApprovalYolo {
+		t.Fatalf("current session mode = %q, want yolo", got)
+	}
+	if got := gw.cfg.ConnectionChannels["feishu-lark"].ToolApprovalMode; got != control.ToolApprovalYolo {
+		t.Fatalf("connection default mode = %q, want yolo", got)
+	}
+	if persistedConnection != "feishu-lark" || persistedMode != control.ToolApprovalYolo {
+		t.Fatalf("persisted = %q/%q, want feishu-lark/yolo", persistedConnection, persistedMode)
+	}
+	sent := adapter.sentMessages()
+	if len(sent) != 1 || !strings.Contains(sent[0].Text, "已开启 YOLO") {
+		t.Fatalf("sent = %#v, want yolo confirmation", sent)
+	}
+}
+
+func TestGatewayModeCommandSupportsAskAutoAndStatus(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	gw := NewGateway(GatewayConfig{
+		ConnectionChannels: map[string]ChannelConfig{
+			"weixin-weixin": {ToolApprovalMode: "ask"},
+		},
+	}, nil, logger)
+	adapter := newFakeAdapter(PlatformWeixin, "fake-weixin")
+	msg := InboundMessage{
+		Platform:     PlatformWeixin,
+		ConnectionID: "weixin-weixin",
+		Domain:       "weixin",
+		ChatType:     ChatDM,
+		ChatID:       "chat",
+		UserID:       "user",
+	}
+	key := BuildSessionKey(msg.Session())
+
+	msg.Text = "/mode auto"
+	gw.handleSlashCommand(context.Background(), adapter, key, msg)
+	if got := gw.cfg.ConnectionChannels["weixin-weixin"].ToolApprovalMode; got != control.ToolApprovalAuto {
+		t.Fatalf("/mode auto default = %q, want auto", got)
+	}
+
+	msg.Text = "/yolo off"
+	gw.handleSlashCommand(context.Background(), adapter, key, msg)
+	if got := gw.cfg.ConnectionChannels["weixin-weixin"].ToolApprovalMode; got != control.ToolApprovalAsk {
+		t.Fatalf("/yolo off default = %q, want ask", got)
+	}
+
+	msg.Text = "/mode"
+	gw.handleSlashCommand(context.Background(), adapter, key, msg)
+	sent := adapter.sentMessages()
+	if len(sent) != 3 {
+		t.Fatalf("sent count = %d, want 3", len(sent))
+	}
+	if !strings.Contains(sent[2].Text, "当前工具审批模式：询问") {
+		t.Fatalf("status = %q, want ask status", sent[2].Text)
+	}
+}
+
+func TestGatewayHelpMentionsYoloCommands(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	gw := NewGateway(GatewayConfig{}, nil, logger)
+	adapter := newFakeAdapter(PlatformFeishu, "fake-feishu")
+	msg := InboundMessage{ChatType: ChatDM, ChatID: "chat", UserID: "user", Text: "/help"}
+
+	gw.handleSlashCommand(context.Background(), adapter, "session-key", msg)
+
+	sent := adapter.sentMessages()
+	if len(sent) != 1 {
+		t.Fatalf("sent count = %d, want 1", len(sent))
+	}
+	if !strings.Contains(sent[0].Text, "/yolo on|off|auto|status") || !strings.Contains(sent[0].Text, "/mode yolo|ask|auto") {
+		t.Fatalf("help = %q, want yolo commands", sent[0].Text)
 	}
 }
 

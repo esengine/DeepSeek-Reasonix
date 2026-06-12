@@ -27,6 +27,10 @@ type GatewayConfig struct {
 	Enabled            map[Platform]bool
 	Debounce           time.Duration
 	OnInbound          func(InboundMessage)
+	// OnToolApprovalModeChange persists a remote IM request such as /yolo on.
+	// The gateway updates the live session and in-memory defaults first; this
+	// callback lets desktop save the chosen connection mode to user config.
+	OnToolApprovalModeChange func(InboundMessage, string) error
 }
 
 // ChannelConfig overrides gateway defaults for one IM channel.
@@ -571,12 +575,30 @@ func (gw *BotGateway) handleSlashCommand(ctx context.Context, adapter Adapter, k
 		state.ctrl.AnswerQuestion(askID, answers)
 		_ = gw.sendText(ctx, adapter, msg, "已提交回答。")
 
+	case strings.HasPrefix(msg.Text, "/yolo") || strings.HasPrefix(msg.Text, "/mode"):
+		mode, statusOnly, ok := parseToolApprovalModeCommand(msg.Text)
+		if !ok {
+			_ = gw.sendText(ctx, adapter, msg, "用法: /yolo on|off|auto|status，或 /mode yolo|ask|auto")
+			return
+		}
+		if statusOnly {
+			_ = gw.sendText(ctx, adapter, msg, gw.toolApprovalModeStatusText(key, msg))
+			return
+		}
+		persistErr := gw.setToolApprovalModeForMessage(key, msg, mode)
+		text := toolApprovalModeChangedText(mode)
+		if persistErr != nil {
+			text += "\n当前会话已生效，但保存到设置失败：" + persistErr.Error()
+		}
+		_ = gw.sendText(ctx, adapter, msg, text)
+
 	case strings.HasPrefix(msg.Text, "/status"):
 		active := gw.sessions.ActiveCount()
 		gw.mu.Lock()
 		sessions := len(gw.controllers)
 		gw.mu.Unlock()
-		_ = gw.sendText(ctx, adapter, msg, fmt.Sprintf("活跃任务数: %d\n保留会话数: %d", active, sessions))
+		mode := gw.currentToolApprovalMode(key, msg)
+		_ = gw.sendText(ctx, adapter, msg, fmt.Sprintf("活跃任务数: %d\n保留会话数: %d\n工具审批模式: %s", active, sessions, toolApprovalModeLabel(mode)))
 
 	case strings.HasPrefix(msg.Text, "/help"):
 		help := "可用命令:\n" +
@@ -586,9 +608,131 @@ func (gw *BotGateway) handleSlashCommand(ctx context.Context, adapter Adapter, k
 			"/approve <id> - 批准操作\n" +
 			"/deny <id> - 拒绝操作\n" +
 			"/answer <id> <选项> - 回答 ask 问题\n" +
+			"/yolo on|off|auto|status - 切换或查看工具审批模式\n" +
+			"/mode yolo|ask|auto - 切换工具审批模式\n" +
 			"/status - 查看状态\n" +
 			"/help - 显示帮助"
 		_ = gw.sendText(ctx, adapter, msg, help)
+	}
+}
+
+func parseToolApprovalModeCommand(text string) (mode string, statusOnly bool, ok bool) {
+	parts := strings.Fields(text)
+	if len(parts) == 0 {
+		return "", false, false
+	}
+	cmd := strings.ToLower(strings.TrimSpace(parts[0]))
+	switch cmd {
+	case "/yolo":
+		if len(parts) == 1 {
+			return control.ToolApprovalYolo, false, true
+		}
+		return parseToolApprovalModeArg(parts[1])
+	case "/mode":
+		if len(parts) == 1 {
+			return "", true, true
+		}
+		return parseToolApprovalModeArg(parts[1])
+	default:
+		return "", false, false
+	}
+}
+
+func parseToolApprovalModeArg(arg string) (mode string, statusOnly bool, ok bool) {
+	switch strings.ToLower(strings.TrimSpace(arg)) {
+	case "status", "state", "show", "状态", "查看":
+		return "", true, true
+	case "on", "enable", "enabled", "true", "1", "yolo", "full", "full-access", "bypass", "开启", "打开":
+		return control.ToolApprovalYolo, false, true
+	case "off", "disable", "disabled", "false", "0", "ask", "询问", "关闭":
+		return control.ToolApprovalAsk, false, true
+	case "auto", "自动":
+		return control.ToolApprovalAuto, false, true
+	default:
+		return "", false, false
+	}
+}
+
+func (gw *BotGateway) setToolApprovalModeForMessage(key string, msg InboundMessage, mode string) error {
+	mode = normalizeBotToolApprovalMode(mode)
+	var ctrl *control.Controller
+
+	gw.mu.Lock()
+	if state, ok := gw.controllers[key]; ok {
+		ctrl = state.ctrl
+	}
+	gw.updateToolApprovalModeDefaultLocked(msg, mode)
+	gw.mu.Unlock()
+
+	if ctrl != nil {
+		ctrl.SetToolApprovalMode(mode)
+	}
+	if gw.cfg.OnToolApprovalModeChange != nil {
+		return gw.cfg.OnToolApprovalModeChange(msg, mode)
+	}
+	return nil
+}
+
+func (gw *BotGateway) updateToolApprovalModeDefaultLocked(msg InboundMessage, mode string) {
+	if id := strings.TrimSpace(msg.ConnectionID); id != "" {
+		if gw.cfg.ConnectionChannels == nil {
+			gw.cfg.ConnectionChannels = make(map[string]ChannelConfig)
+		}
+		channel := gw.cfg.ConnectionChannels[id]
+		channel.ToolApprovalMode = mode
+		gw.cfg.ConnectionChannels[id] = channel
+		return
+	}
+	if msg.Platform != "" {
+		if gw.cfg.Channels == nil {
+			gw.cfg.Channels = make(map[Platform]ChannelConfig)
+		}
+		channel := gw.cfg.Channels[msg.Platform]
+		channel.ToolApprovalMode = mode
+		gw.cfg.Channels[msg.Platform] = channel
+		return
+	}
+	gw.cfg.ToolApprovalMode = mode
+}
+
+func (gw *BotGateway) currentToolApprovalMode(key string, msg InboundMessage) string {
+	var ctrl *control.Controller
+	gw.mu.Lock()
+	if state, ok := gw.controllers[key]; ok {
+		ctrl = state.ctrl
+	}
+	gw.mu.Unlock()
+	if ctrl != nil {
+		return ctrl.ToolApprovalMode()
+	}
+	_, _, mode := gw.sessionOptionsForMessage(msg)
+	return mode
+}
+
+func (gw *BotGateway) toolApprovalModeStatusText(key string, msg InboundMessage) string {
+	mode := gw.currentToolApprovalMode(key, msg)
+	return fmt.Sprintf("当前工具审批模式：%s\n用法：/yolo on|off|auto|status，或 /mode yolo|ask|auto", toolApprovalModeLabel(mode))
+}
+
+func toolApprovalModeChangedText(mode string) string {
+	switch normalizeBotToolApprovalMode(mode) {
+	case control.ToolApprovalYolo:
+		return "已开启 YOLO：普通工具审批将自动放行；Ask 问题和计划批准仍会等待确认。"
+	case control.ToolApprovalAuto:
+		return "已切换为自动模式：策略允许的工具会自动放行，仍保留需要询问或拒绝的规则。"
+	default:
+		return "已切回询问模式：工具执行前会请求确认。"
+	}
+}
+
+func toolApprovalModeLabel(mode string) string {
+	switch normalizeBotToolApprovalMode(mode) {
+	case control.ToolApprovalYolo:
+		return "YOLO"
+	case control.ToolApprovalAuto:
+		return "自动"
+	default:
+		return "询问"
 	}
 }
 

@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" role="img" aria-labelledby="title desc">
+  <title id="title">WeChat bot text command interaction</title>
+  <desc id="desc">A synthetic WeChat conversation showing Reasonix approval through numeric replies and slash commands.</desc>
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#111827" flood-opacity="0.14"/>
+    </filter>
+  </defs>
+  <rect width="1280" height="720" fill="#f6f4ef"/>
+  <text x="72" y="82" fill="#15171a" font-family="Inter, Arial, sans-serif" font-size="34" font-weight="750">WeChat text commands</text>
+  <text x="72" y="118" fill="#69707d" font-family="Inter, Arial, sans-serif" font-size="18">WeChat uses text replies: reply 1 or 2 for pending approvals, or send slash commands.</text>
+
+  <rect x="88" y="152" width="488" height="512" rx="34" fill="#ffffff" filter="url(#shadow)"/>
+  <rect x="88" y="152" width="488" height="70" rx="34" fill="#f7f8fa"/>
+  <text x="132" y="196" fill="#20242b" font-family="Inter, Arial, sans-serif" font-size="24" font-weight="750">Bot Assistant</text>
+  <rect x="130" y="268" width="360" height="132" rx="18" fill="#f0f1f4"/>
+  <text x="158" y="306" fill="#101418" font-family="Inter, Arial, sans-serif" font-size="21" font-weight="750">Approval required</text>
+  <text x="158" y="340" fill="#4f5663" font-family="Inter, Arial, sans-serif" font-size="17">Tool: explore</text>
+  <text x="158" y="370" fill="#4f5663" font-family="Inter, Arial, sans-serif" font-size="17">ID: 7  Reply 1 approve, 2 deny</text>
+
+  <rect x="420" y="438" width="72" height="54" rx="18" fill="#95ec69"/>
+  <text x="452" y="472" fill="#0f2912" font-family="Inter, Arial, sans-serif" font-size="24" font-weight="760">1</text>
+  <rect x="130" y="532" width="250" height="62" rx="18" fill="#f0f1f4"/>
+  <text x="158" y="570" fill="#101418" font-family="Inter, Arial, sans-serif" font-size="20">Approved. Continuing.</text>
+
+  <rect x="642" y="202" width="566" height="398" rx="24" fill="#15171a"/>
+  <text x="684" y="258" fill="#ffffff" font-family="Inter, Arial, sans-serif" font-size="26" font-weight="750">Text fallback works everywhere</text>
+  <circle cx="698" cy="314" r="6" fill="#52c41a"/>
+  <text x="718" y="322" fill="#e9eef8" font-family="Inter, Arial, sans-serif" font-size="18">Approval: reply 1 or send /approve 7.</text>
+  <circle cx="698" cy="374" r="6" fill="#ff4d4f"/>
+  <text x="718" y="382" fill="#e9eef8" font-family="Inter, Arial, sans-serif" font-size="18">Deny: reply 2 or send /deny 7.</text>
+  <circle cx="698" cy="434" r="6" fill="#ffaa33"/>
+  <text x="718" y="442" fill="#e9eef8" font-family="Inter, Arial, sans-serif" font-size="18">Ask: send /answer ask-1 2.</text>
+  <rect x="684" y="494" width="418" height="52" rx="14" fill="#242933"/>
+  <text x="710" y="527" fill="#ffffff" font-family="Menlo, Consolas, monospace" font-size="18">/yolo status</text>
+</svg>

@@ -49,7 +49,7 @@ func (a *App) refreshBotRuntime() {
 		a.botRuntime.stop("error", err.Error())
 		return
 	}
-	_ = a.botRuntime.apply(a.bootContext(), cfg, globalTabWorkspaceRoot())
+	_ = a.botRuntime.apply(a.bootContext(), cfg, globalTabWorkspaceRoot(), a.persistRemoteBotToolApprovalMode)
 }
 
 func (a *App) loadDesktopBotConfig() (*config.Config, error) {
@@ -73,7 +73,7 @@ func (a *App) BotRuntimeStatus() BotRuntimeStatusView {
 	return a.botRuntime.snapshot()
 }
 
-func (r *desktopBotRuntime) apply(parent context.Context, cfg *config.Config, workspaceRoot string) error {
+func (r *desktopBotRuntime) apply(parent context.Context, cfg *config.Config, workspaceRoot string, onToolApprovalModeChange func(bot.InboundMessage, string) error) error {
 	if r == nil {
 		return nil
 	}
@@ -114,8 +114,9 @@ func (r *desktopBotRuntime) apply(parent context.Context, cfg *config.Config, wo
 				bot.PlatformWeixin: cfg.Bot.Allowlist.WeixinGroups,
 			},
 		},
-		Debounce:  time.Duration(cfg.Bot.DebounceMs) * time.Millisecond,
-		OnInbound: botruntime.NewRemoteRememberer(logger),
+		Debounce:                 time.Duration(cfg.Bot.DebounceMs) * time.Millisecond,
+		OnInbound:                botruntime.NewRemoteRememberer(logger),
+		OnToolApprovalModeChange: onToolApprovalModeChange,
 	}
 	bindings := botruntime.AdapterBindings(cfg, plan.Enabled, logger)
 	if len(bindings) == 0 {
@@ -148,6 +149,28 @@ func (r *desktopBotRuntime) apply(parent context.Context, cfg *config.Config, wo
 		StartedAt:   time.Now().UTC().Format(time.RFC3339),
 	}
 	return nil
+}
+
+func (a *App) persistRemoteBotToolApprovalMode(msg bot.InboundMessage, mode string) error {
+	mode = normalizeBotConnectionToolApprovalMode(mode)
+	if mode == "" {
+		return nil
+	}
+	return a.applyConfigOnly(func(c *config.Config) error {
+		id := strings.TrimSpace(msg.ConnectionID)
+		now := time.Now().UTC().Format(time.RFC3339)
+		if id != "" {
+			for i := range c.Bot.Connections {
+				if c.Bot.Connections[i].ID == id || botruntime.ConnectionRuntimeID(c.Bot.Connections[i]) == id {
+					c.Bot.Connections[i].ToolApprovalMode = mode
+					c.Bot.Connections[i].UpdatedAt = now
+					return nil
+				}
+			}
+		}
+		c.Bot.ToolApprovalMode = mode
+		return nil
+	})
 }
 
 func summarizeBotRuntimeErrors(errs []error) string {

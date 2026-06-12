@@ -2290,13 +2290,14 @@ export default function App() {
     ? [topicbarWorkspaceLabel, topicbarImSourceLabel, sidebarImScopeLabel(sidebarImDetailConnection, t)].filter(Boolean).join(" · ")
     : [topicbarWorkspacePath || topicbarWorkspaceLabel, topicbarImSourceLabel].filter(Boolean).join(" · ");
   const sidebarImConnectedCount = sidebarImConnections.filter((connection) => connection.status === "connected").length;
-  const sidebarImSummaryText = sidebarImConnections.length === 0
-    ? t("sidebar.imEmpty")
-    : sidebarImConnectedCount > 0
+  const sidebarImHasConnections = sidebarImConnections.length > 0;
+  const sidebarImSummaryText = sidebarImHasConnections
+    ? sidebarImConnectedCount > 0
       ? t("sidebar.imOnlineCount", { n: sidebarImConnectedCount })
-      : t("sidebar.imConnectionCount", { n: sidebarImConnections.length });
-  const sidebarImToggleLabel = sidebarImConnections.length === 0
-    ? t("sidebar.imEmpty")
+      : t("sidebar.imConnectionCount", { n: sidebarImConnections.length })
+    : "";
+  const sidebarImToggleLabel = !sidebarImHasConnections
+    ? t("sidebar.im")
     : t(sidebarImExpanded ? "sidebar.imCollapse" : "sidebar.imExpand");
 
   return (
@@ -2396,7 +2397,7 @@ export default function App() {
             >
               <MessageSquare size={15} />
               <span className="sidebar-im__summary-label">{t("sidebar.im")}</span>
-              <span className="sidebar-im__summary-status">{sidebarImSummaryText}</span>
+              {sidebarImSummaryText ? <span className="sidebar-im__summary-status">{sidebarImSummaryText}</span> : null}
             </button>
             {sidebarImExpanded && sidebarImConnections.length > 0 && (
               <div className="sidebar-im__panel" role="dialog" aria-label={t("sidebar.imManage")}>
