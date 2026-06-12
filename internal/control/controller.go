@@ -1403,6 +1403,13 @@ func (c *Controller) ClearSession() error {
 		return fmt.Errorf("cannot clear while a turn is running")
 	}
 	destroy := c.BeginDestroySession(oldPath)
+	if !destroy.Async {
+		if err := removeSessionArtifacts(oldPath); err != nil {
+			destroy.Finish()
+			return err
+		}
+		destroy.Finish()
+	}
 	c.hooks.SessionEnd(context.Background())
 	if c.sessionDir != "" {
 		c.mu.Lock()
@@ -1416,17 +1423,14 @@ func (c *Controller) ClearSession() error {
 	c.startedOnce = true
 	c.mu.Unlock()
 	c.hooks.SessionStart(context.Background())
-	cleanup := func() {
-		destroy.Wait()
-		if err := removeSessionArtifacts(oldPath); err != nil {
-			c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "clear session cleanup failed: " + err.Error()})
-		}
-		destroy.Finish()
-	}
 	if destroy.Async {
-		go cleanup()
-	} else {
-		cleanup()
+		go func() {
+			destroy.Wait()
+			if err := removeSessionArtifacts(oldPath); err != nil {
+				c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "clear session cleanup failed: " + err.Error()})
+			}
+			destroy.Finish()
+		}()
 	}
 	return nil
 }
