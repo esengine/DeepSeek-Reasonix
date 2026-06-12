@@ -79,12 +79,12 @@ type Manager struct {
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 
-	mu        sync.Mutex
-	seq       int
-	jobs      map[string]*Job
-	order     []string
-	completed []completion // finished-job summaries awaiting drain into the next turn
-	active    string
+	mu         sync.Mutex
+	seq        int
+	jobs       map[string]*Job
+	order      []string
+	completed  []completion // finished-job summaries awaiting drain into the next turn
+	active     string
 	destroying map[string]bool
 }
 

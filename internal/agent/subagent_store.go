@@ -98,7 +98,7 @@ func EphemeralSubagentRun(systemPrompt string) *SubagentRun {
 // SubagentStore persists sub-agent transcripts under config.SessionDir()/subagents.
 // Its locks are process-local; cross-process mutation is intentionally out of v1.
 type SubagentStore struct {
-	dir string
+	dir       string
 	destroyed func(parentSession string) bool
 
 	mu     sync.Mutex
