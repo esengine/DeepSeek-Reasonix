@@ -789,7 +789,7 @@ export function ProjectTree({
         label: t(revealLabelKey(platform)),
         disabled: !projectPath,
         onSelect: () => {
-          void app.RevealPath(projectPath);
+          void app.RevealPath(projectPath).catch(() => {});
           closeMenu();
         },
       },

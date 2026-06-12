@@ -3897,7 +3897,18 @@ func revealPath(path string) error {
 	case "darwin":
 		return exec.Command("open", "-R", path).Start()
 	case "windows":
-		return exec.Command("explorer", "/select,", path).Start()
+		// explorer.exe lives in %SystemRoot%, which isn't always on PATH (the
+		// launch environment can strip it), so resolve it directly rather than
+		// relying on a PATH lookup.
+		explorer := "explorer.exe"
+		root := os.Getenv("SystemRoot")
+		if root == "" {
+			root = os.Getenv("windir")
+		}
+		if root != "" {
+			explorer = filepath.Join(root, "explorer.exe")
+		}
+		return exec.Command(explorer, "/select,", path).Start()
 	default:
 		dir := path
 		if info, err := os.Stat(path); err == nil && !info.IsDir() {
