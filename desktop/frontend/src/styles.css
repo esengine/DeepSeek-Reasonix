@@ -9874,6 +9874,52 @@ a[href] {
   background: var(--bg);
 }
 
+.memory-tabs-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  max-width: 100%;
+  margin: 0 0 14px;
+}
+
+.memory-tabs-row__primary {
+  margin: 0;
+}
+
+.memory-suggestion-tab {
+  --wails-draggable: no-drag;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: var(--font-control-small);
+  white-space: nowrap;
+}
+
+.memory-suggestion-tab svg {
+  color: var(--accent);
+}
+
+.memory-suggestion-tab:hover {
+  color: var(--fg);
+  background: var(--button-bg-hover);
+}
+
+.memory-suggestion-tab--active {
+  color: var(--accent);
+  background: var(--bg-elev-2);
+  box-shadow: inset 0 0 0 1px var(--border-soft);
+  font-weight: 650;
+}
+
 .settings-subtab {
   --wails-draggable: no-drag;
   display: inline-flex;
@@ -10081,6 +10127,15 @@ a[href] {
     display: flex;
     width: 100%;
     overflow-x: auto;
+  }
+
+  .memory-tabs-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .memory-suggestion-tab {
+    align-self: flex-start;
   }
 
   .settings-subtab {
@@ -18098,6 +18153,7 @@ a[href] {
 }
 
 :root[data-theme-style] .settings-subtabs,
+:root[data-theme-style] .memory-suggestion-tab,
 :root[data-theme-style] .set-seg,
 :root[data-theme-style] .provider-add-segmented,
 :root[data-theme-style] .cap-tabs {
@@ -18107,6 +18163,7 @@ a[href] {
 }
 
 :root[data-theme-style] .settings-subtab--active,
+:root[data-theme-style] .memory-suggestion-tab--active,
 :root[data-theme-style] .set-seg__btn--on,
 :root[data-theme-style] .provider-add-segmented__item--active,
 :root[data-theme-style] .cap-tab--active {

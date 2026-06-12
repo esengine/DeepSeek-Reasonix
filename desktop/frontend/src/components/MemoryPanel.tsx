@@ -996,43 +996,46 @@ export function MemorySettingsPage() {
 					<code>{view.storeDir}</code>
 				</div>
 			)}
-			<div className="settings-subtabs" role="tablist" aria-label={t("settings.tab.memory")}>
+			<div className="memory-tabs-row" role="tablist" aria-label={t("settings.tab.memory")}>
+				<div className="settings-subtabs memory-tabs-row__primary" role="presentation">
+					<button
+						className={"settings-subtab" + (tab === "saved" ? " settings-subtab--active" : "")}
+						role="tab"
+						aria-selected={tab === "saved"}
+						type="button"
+						onClick={() => setTab("saved")}
+					>
+						<span>{t("memory.savedMemories")}</span>
+					</button>
+					<button
+						className={"settings-subtab" + (tab === "archived" ? " settings-subtab--active" : "")}
+						role="tab"
+						aria-selected={tab === "archived"}
+						type="button"
+						onClick={() => setTab("archived")}
+					>
+						<span>{t("memory.archivedMemories")}</span>
+					</button>
+					<button
+						className={"settings-subtab" + (tab === "docs" ? " settings-subtab--active" : "")}
+						role="tab"
+						aria-selected={tab === "docs"}
+						type="button"
+						onClick={() => setTab("docs")}
+					>
+						<span>{t("memory.instructionFiles")}</span>
+					</button>
+				</div>
 				<button
-					className={"settings-subtab" + (tab === "saved" ? " settings-subtab--active" : "")}
-					role="tab"
-					aria-selected={tab === "saved"}
-					type="button"
-					onClick={() => setTab("saved")}
-				>
-					<span>{t("memory.savedMemories")}</span>
-				</button>
-				<button
-					className={"settings-subtab" + (tab === "suggestions" ? " settings-subtab--active" : "")}
+					className={"memory-suggestion-tab" + (tab === "suggestions" ? " memory-suggestion-tab--active" : "")}
 					role="tab"
 					aria-selected={tab === "suggestions"}
 					type="button"
 					onClick={() => setTab("suggestions")}
 				>
+					<Sparkles size={14} aria-hidden="true" />
 					<span>{t("memory.suggestions")}</span>
 					{suggestionTotal(suggestions) > 0 && <span className="settings-subtab__count">{suggestionTotal(suggestions)}</span>}
-				</button>
-				<button
-					className={"settings-subtab" + (tab === "archived" ? " settings-subtab--active" : "")}
-					role="tab"
-					aria-selected={tab === "archived"}
-					type="button"
-					onClick={() => setTab("archived")}
-				>
-					<span>{t("memory.archivedMemories")}</span>
-				</button>
-				<button
-					className={"settings-subtab" + (tab === "docs" ? " settings-subtab--active" : "")}
-					role="tab"
-					aria-selected={tab === "docs"}
-					type="button"
-					onClick={() => setTab("docs")}
-				>
-					<span>{t("memory.instructionFiles")}</span>
 				</button>
 			</div>
 

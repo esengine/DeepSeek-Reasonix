@@ -572,7 +572,7 @@ export const en = {
   "memory.noFacts": "Nothing saved yet. The agent writes these with the remember tool.",
   "memory.emptySavedTitle": "No saved memories yet",
   "memory.emptySavedBody": "Save durable background only when it should help future Reasonix sessions in this project.",
-  "memory.suggestions": "Suggestions",
+  "memory.suggestions": "Candidate suggestions",
   "memory.suggestionsHint": "Drafted from recent local history; nothing is written until you confirm.",
   "memory.scanSuggestions": "Scan history manually",
   "memory.refreshSuggestions": "Rescan history",
