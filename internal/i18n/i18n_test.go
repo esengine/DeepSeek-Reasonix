@@ -13,7 +13,7 @@ import (
 func TestCatalogsComplete(t *testing.T) {
 	en := reflect.ValueOf(English)
 	typ := en.Type()
-	catalogs := map[string]reflect.Value{"zh": reflect.ValueOf(Chinese)}
+	catalogs := map[string]reflect.Value{"zh": reflect.ValueOf(Chinese), "zh-TW": reflect.ValueOf(ChineseTraditional)}
 	for tag, cat := range catalogs {
 		for i := 0; i < typ.NumField(); i++ {
 			name := typ.Field(i).Name
@@ -40,6 +40,10 @@ func TestCatalogsAgreeOnPlaceholders(t *testing.T) {
 		got := countVerbs(reflect.ValueOf(Chinese).Field(i).String())
 		if want != got {
 			t.Errorf("%s: en has %d verbs, zh has %d", name, want, got)
+		}
+		gotTW := countVerbs(reflect.ValueOf(ChineseTraditional).Field(i).String())
+		if want != gotTW {
+			t.Errorf("%s: en has %d verbs, zh-TW has %d", name, want, gotTW)
 		}
 	}
 }
@@ -74,8 +78,14 @@ func TestNormalize(t *testing.T) {
 		"zh-Hans-CN":      "zh",
 		"Chinese (China)": "zh",
 		"中文":              "zh",
+		"zh-TW":           "zh-TW",
+		"zh_TW.UTF-8":     "zh-TW",
+		"zh-Hant-TW":      "zh-TW",
+		"zh-Hant":         "zh-TW",
+		"Chinese Traditional": "zh-TW",
+		"繁體":              "zh-TW",
 		"fr_FR.UTF-8":     "",
-		"  ZH_TW  ":       "zh",
+		"  ZH_TW  ":       "zh-TW",
 	}
 	for in, want := range cases {
 		if got := normalize(in); got != want {

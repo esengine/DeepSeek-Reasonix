@@ -192,7 +192,7 @@ export interface AppBindings {
   SetDesktopAppearance(theme: string, style: string): Promise<void>;
   MigrateDesktopPreferences(language: string, theme: string, style: string): Promise<void>;
   SetAgentParams(temperature: number, maxSteps: number, plannerMaxSteps: number, systemPrompt: string): Promise<void>;
-  SetTrayLocale(locale: "en" | "zh"): Promise<void>;
+  SetTrayLocale(locale: "en" | "zh" | "zh-TW"): Promise<void>;
   // SetBypass toggles YOLO mode (auto-approve every tool call this session; deny
   // rules still apply). Runtime-only — not written to config.
   SetBypass(on: boolean): Promise<void>;
@@ -1575,7 +1575,7 @@ function makeMockApp(): AppBindings {
           settings.desktopThemeStyle = style;
         },
         async MigrateDesktopPreferences(language: string, theme: string, style: string) {
-          if (!settings.desktopLanguage) settings.desktopLanguage = language === "en" || language === "zh" ? language : "";
+          if (!settings.desktopLanguage) settings.desktopLanguage = language === "en" || language === "zh" || language === "zh-TW" ? language : "";
           if (!settings.desktopTheme && !settings.desktopThemeStyle) {
             settings.desktopTheme = theme === "auto" || theme === "light" ? theme : "dark";
             settings.desktopThemeStyle = style;
@@ -1584,7 +1584,7 @@ function makeMockApp(): AppBindings {
     async SetAgentParams(temperature: number, maxSteps: number, plannerMaxSteps: number, systemPrompt: string) {
       settings.agent = { temperature, maxSteps, plannerMaxSteps, systemPrompt };
     },
-    async SetTrayLocale(_locale: "en" | "zh") {},
+    async SetTrayLocale(_locale: "en" | "zh" | "zh-TW") {},
     async SetBypass(on: boolean) {
       settings.bypass = on;
     },
