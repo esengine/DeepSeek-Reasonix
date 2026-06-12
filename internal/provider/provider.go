@@ -355,6 +355,7 @@ type AuthError struct {
 	Provider string // the provider instance name, e.g. "deepseek"
 	KeyEnv   string // the api_key_env the key is read from, when known
 	Status   int    // the HTTP status (401 or 403)
+	HasKey   bool   // a non-empty key was sent — the server rejected it, vs. no key configured at all
 }
 
 func (e *AuthError) Error() string {
