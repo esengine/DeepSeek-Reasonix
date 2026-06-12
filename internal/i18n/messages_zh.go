@@ -40,8 +40,8 @@ var Chinese = Messages{
 	RenameUsage:     "用法：/rename <新名称>  或  /rename <序号> <新名称>",
 	RenameNoSession: "当前没有活跃会话可重命名",
 	RenameDoneFmt:   "会话已重命名为 %q",
-	ResumePickTitle:     "选择要恢复的会话",
-	ResumePickHint:      "↑/↓ 移动 · Enter 恢复 · Esc 取消",
+	ResumePickTitle: "选择要恢复的会话",
+	ResumePickHint:  "↑/↓ 移动 · Enter 恢复 · Esc 取消",
 
 	ChatThinking:                "思考中…",
 	ChatThoughtForFmt:           "思考了 %d 秒",

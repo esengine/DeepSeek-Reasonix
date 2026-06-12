@@ -92,7 +92,7 @@ func skillHelpItems(skills []skill.Skill) []compItem {
 	for _, s := range skills {
 		hint := s.Description
 		if s.RunAs == skill.RunSubagent {
-			hint = "subagent 璺?" + hint
+			hint = "subagent · " + hint
 		}
 		items = append(items, compItem{label: "/" + s.Name, hint: hint})
 	}

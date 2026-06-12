@@ -1,4 +1,4 @@
-﻿package cli
+package cli
 
 import (
 	"encoding/json"
@@ -12,7 +12,7 @@ import (
 func TestRenameSessionUpdatesTopicTitle(t *testing.T) {
 	dir := t.TempDir()
 	sessionPath := filepath.Join(dir, "test-session.jsonl")
-	if err := os.WriteFile(sessionPath, []byte("{}\n"), 0644); err != nil {
+	if err := os.WriteFile(sessionPath, []byte("{}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := agent.RenameSession(sessionPath, "My Test Title"); err != nil {
@@ -55,7 +55,10 @@ func TestSessionPickerLabelShowsTopicTitle(t *testing.T) {
 	}
 	found := false
 	for _, ch := range got {
-		if ch == 'M' { found = true; break }
+		if ch == 'M' {
+			found = true
+			break
+		}
 	}
 	if !found {
 		t.Errorf("label %q should contain topic title", got)

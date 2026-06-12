@@ -39,8 +39,8 @@ var English = Messages{
 	RenameUsage:     "usage: /rename <new title>  or  /rename <n> <new title>",
 	RenameNoSession: "no active session to rename",
 	RenameDoneFmt:   "session renamed to %q",
-	ResumePickTitle:     "Resume a saved session",
-	ResumePickHint:      "↑/↓ move · Enter resume · Esc cancel",
+	ResumePickTitle: "Resume a saved session",
+	ResumePickHint:  "↑/↓ move · Enter resume · Esc cancel",
 
 	ChatThinking:                "thinking…",
 	ChatThoughtForFmt:           "thought for %ds",
