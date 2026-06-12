@@ -183,26 +183,35 @@ func TestHumanSize(t *testing.T) {
 	}
 }
 
-func TestFetchLatestRelease_FiltersTags(t *testing.T) {
-	// Simulate the GitHub /releases list with mixed namespaces.
-	// fetchLatestRelease is tested indirectly via isCLITag + the list logic.
-	rels := []ghRelease{
-		{TagName: "desktop-v1.5.0"},
+func TestPickCLIRelease(t *testing.T) {
+	pick := func(rels []ghRelease) string {
+		if r := pickCLIRelease(rels); r != nil {
+			return r.TagName
+		}
+		return ""
+	}
+
+	// Skips foreign namespaces (GitHub's "latest" can be a desktop-v release).
+	mixed := []ghRelease{
+		{TagName: "desktop-v1.6.0"},
 		{TagName: "npm-v1.4.0"},
 		{TagName: "v1.6.0"},
 	}
-	// Walk the same way fetchLatestRelease does.
-	var found *ghRelease
-	for i := range rels {
-		if isCLITag(rels[i].TagName) {
-			found = &rels[i]
-			break
-		}
+	if got := pick(mixed); got != "v1.6.0" {
+		t.Errorf("foreign namespaces: got %q, want v1.6.0", got)
 	}
-	if found == nil {
-		t.Fatal("no CLI release found")
+
+	// The 1.x line ships as rc on npm @next, so a newer prerelease must be
+	// selected, not skipped — `reasonix upgrade` always moves to the newest 1.x.
+	withRC := []ghRelease{
+		{TagName: "v1.7.0-rc.1"},
+		{TagName: "v1.6.0"},
 	}
-	if found.TagName != "v1.6.0" {
-		t.Errorf("got %q, want v1.6.0", found.TagName)
+	if got := pick(withRC); got != "v1.7.0-rc.1" {
+		t.Errorf("newest 1.x (incl. rc) must win: got %q, want v1.7.0-rc.1", got)
+	}
+
+	if got := pick([]ghRelease{{TagName: "desktop-v1.0.0"}}); got != "" {
+		t.Errorf("no CLI release should return nil, got %q", got)
 	}
 }

@@ -106,7 +106,7 @@ func upgradeCommand(args []string, version string) int {
 	}
 
 	// 5. Find the asset for the current platform.
-	base := fmt.Sprintf("reasonix-%s-%s", normalizeOS(runtime.GOOS), runtime.GOARCH)
+	base := fmt.Sprintf("reasonix-%s-%s", runtime.GOOS, runtime.GOARCH)
 	var asset *ghAsset
 	for i := range rel.Assets {
 		if strings.HasPrefix(rel.Assets[i].Name, base) {
@@ -179,15 +179,6 @@ func normalizeVersion(v string) (string, bool) {
 	return semver.Canonical(v), true
 }
 
-// normalizeOS maps Go's runtime.GOOS to the goreleaser archive naming.
-func normalizeOS(goos string) string {
-	// Goreleaser uses "darwin" for macOS and "windows"/"linux" as-is.
-	// runtime.GOOS already matches except for "darwin" vs "macos" in
-	// some naming conventions — but goreleaser templates use Os directly,
-	// which for GOOS=darwin outputs "Darwin". Our archives use lowercase.
-	return goos
-}
-
 // isCLITag reports whether a tag belongs to the CLI release namespace (v*).
 // Tags like "desktop-v1.5.0" or "npm-v1.4.0" are excluded.
 func isCLITag(tag string) bool {
@@ -195,9 +186,22 @@ func isCLITag(tag string) bool {
 	return len(tag) >= 2 && tag[0] == 'v' && tag[1] >= '0' && tag[1] <= '9'
 }
 
+// pickCLIRelease returns the newest CLI-namespace (v*) release from a
+// reverse-chronological list, skipping foreign namespaces ("desktop-v",
+// "npm-v"). Prereleases are kept: only 1.x carries `reasonix upgrade`, and the
+// 1.x line ships as rc on npm @next, so there is no stable user to hold back —
+// the command should always move to the newest 1.x.
+func pickCLIRelease(rels []ghRelease) *ghRelease {
+	for i := range rels {
+		if isCLITag(rels[i].TagName) {
+			return &rels[i]
+		}
+	}
+	return nil
+}
+
 // fetchLatestRelease queries the GitHub Releases API and returns the newest
-// release whose tag belongs to the CLI namespace (v*). Tags with a prefix
-// such as "desktop-v" or "npm-v" are skipped.
+// CLI-namespace (v*) release.
 func fetchLatestRelease(c *http.Client) (*ghRelease, error) {
 	req, err := http.NewRequest("GET", ghAPIReleases, nil)
 	if err != nil {
@@ -220,12 +224,8 @@ func fetchLatestRelease(c *http.Client) (*ghRelease, error) {
 		return nil, err
 	}
 
-	// The /releases endpoint returns releases in reverse chronological
-	// order; pick the first one whose tag is a CLI release (v*).
-	for i := range rels {
-		if isCLITag(rels[i].TagName) {
-			return &rels[i], nil
-		}
+	if rel := pickCLIRelease(rels); rel != nil {
+		return rel, nil
 	}
 	return nil, fmt.Errorf("no CLI release (v*) found in recent releases")
 }
