@@ -635,6 +635,15 @@ function NewSessionHotkeys({ onNewTab }: { onNewTab: () => void }) {
   return null;
 }
 
+/** Open settings with Cmd+, / Ctrl+, */
+function SettingsHotkeys({ onOpen }: { onOpen: () => void }) {
+  useGlobalHotkey("shortcuts.settings", (e) => {
+    e.preventDefault();
+    onOpen();
+  }, [onOpen]);
+  return null;
+}
+
 /** Close current tab with Cmd+W when the tab bar is visible. */
 function TabHotkeys({
   tabBarHidden,
@@ -2224,6 +2233,7 @@ export default function App() {
     <ShellHotkeys />
     <TextSizeHotkeys />
     <NewSessionHotkeys onNewTab={handleNewTab} />
+    <SettingsHotkeys onOpen={() => setSettingsTarget("general")} />
     <TabHotkeys
       tabBarHidden={false}
       activeTabId={activeTabId}
