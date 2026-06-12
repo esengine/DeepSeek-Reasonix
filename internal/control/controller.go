@@ -1062,7 +1062,9 @@ func (c *Controller) notice(text string) {
 // just needs the exit status — no TurnDone event, no cancel bookkeeping.
 func (c *Controller) Run(ctx context.Context, input string) error {
 	c.maybeSessionStart(ctx)
-	ctx = agent.WithParentSession(ctx, c.parentSessionID())
+	parentSession := c.parentSessionID()
+	ctx = agent.WithParentSession(ctx, parentSession)
+	ctx = jobs.WithSession(ctx, parentSession)
 	ctx = agent.WithUserImages(ctx, c.inputImages(input))
 	startMessages := c.messageCount()
 	defer c.snapshotActivityIfChanged(startMessages)

@@ -13,6 +13,7 @@ import (
 	"reasonix/internal/agent"
 	"reasonix/internal/checkpoint"
 	"reasonix/internal/event"
+	"reasonix/internal/jobs"
 	"reasonix/internal/permission"
 	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
@@ -38,6 +39,17 @@ type handoffRunner struct {
 
 func (r handoffRunner) Run(_ context.Context, input string) error {
 	r.session.Add(provider.Message{Role: provider.RoleUser, Content: "handoff: " + input})
+	return nil
+}
+
+type sessionContextRunner struct {
+	parentSession string
+	jobSession    string
+}
+
+func (r *sessionContextRunner) Run(ctx context.Context, input string) error {
+	r.parentSession = agent.ParentSession(ctx)
+	r.jobSession = jobs.SessionFromContext(ctx)
 	return nil
 }
 
@@ -86,6 +98,26 @@ func TestRunTurnSnapshotsActivityWhenTranscriptChanges(t *testing.T) {
 	}
 	if meta.UpdatedAt.IsZero() {
 		t.Fatal("activity meta should be marked")
+	}
+}
+
+func TestRunInjectsParentSessionForJobs(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	runner := &sessionContextRunner{}
+	sess := agent.NewSession("sys")
+	exec := agent.New(nil, nil, sess, agent.Options{}, event.Discard)
+	c := New(Options{Runner: runner, Executor: exec, SessionDir: dir, SessionPath: path, Label: "test"})
+
+	if err := c.Run(context.Background(), "hello"); err != nil {
+		t.Fatal(err)
+	}
+	want := agent.BranchID(path)
+	if runner.parentSession != want {
+		t.Fatalf("ParentSession = %q, want %q", runner.parentSession, want)
+	}
+	if runner.jobSession != want {
+		t.Fatalf("jobs session = %q, want %q", runner.jobSession, want)
 	}
 }
 
