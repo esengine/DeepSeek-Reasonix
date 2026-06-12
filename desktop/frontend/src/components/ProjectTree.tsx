@@ -26,8 +26,8 @@ interface ProjectTreeProps {
   onRenameTopic?: (topicId: string, title: string) => Promise<void> | void;
   onTopicsChanged?: () => Promise<void> | void;
   refreshSignal?: number;
-  timeFilter: "all" | "10" | "1h" | "3h" | "5h" | "1d";
-  onTimeFilterChange: (filter: "all" | "10" | "1h" | "3h" | "5h" | "1d") => void;
+  timeFilter: "all" | "10" | "20" | "1h" | "3h" | "5h" | "1d";
+  onTimeFilterChange: (filter: "all" | "10" | "20" | "1h" | "3h" | "5h" | "1d") => void;
 }
 
 type ProjectTreeImTopicSource = {
@@ -531,10 +531,22 @@ export function ProjectTree({
           const sorted = [...times].sort((a, b) => b - a);
           return sorted.length >= 10 ? sorted[9] : (sorted.length > 0 ? sorted[sorted.length - 1] : null);
         })()
+      : timeFilter === "20" ? (() => {
+          const times = new Set<number>();
+          const collect = (nodes: ProjectNode[]) => {
+            for (const n of nodes) {
+              if (n.kind === "topic" || n.kind === "global_topic") times.add(topicActivityTime(n));
+              collect(asArray(n.children));
+            }
+          };
+          collect(tree);
+          const sorted = [...times].sort((a, b) => b - a);
+          return sorted.length >= 20 ? sorted[19] : (sorted.length > 0 ? sorted[sorted.length - 1] : null);
+        })()
       : Date.now() - diff;
     const topicMatchesTime = (node: ProjectNode) => {
       if (cutoff === null) return true;
-      if (timeFilter === "10") return topicActivityTime(node) >= cutoff;
+      if (timeFilter === "10" || timeFilter === "20") return topicActivityTime(node) >= cutoff;
       return topicActivityTime(node) >= cutoff;
     };
     const matchesQuery = (node: ProjectNode) =>
@@ -995,7 +1007,7 @@ export function ProjectTree({
           {t("projectTree.workspaceTitle")}
         </span>
         <span className="project-tree__header-actions">
-          <Tooltip label={t("projectTree.timeFilter")} className="project-tree__action-slot project-tree__header-action-slot">
+          <Tooltip label={t("projectTree.timeFilter")} className="project-tree__action-slot project-tree__header-action-slot project-tree__header-action-slot--filter">
             <div ref={filterRef} className="project-tree__time-filter">
               <button
                 type="button"
@@ -1027,6 +1039,14 @@ export function ProjectTree({
                     role="menuitem"
                   >
                     {t("projectTree.timeFilter10")}
+                  </button>
+                  <button
+                    type="button"
+                    className={`project-tree__time-filter-opt${timeFilter === "20" ? " project-tree__time-filter-opt--on" : ""}`}
+                    onClick={() => { onTimeFilterChange("20"); setFilterMenuOpen(false); }}
+                    role="menuitem"
+                  >
+                    {t("projectTree.timeFilter20")}
                   </button>
                   <button
                     type="button"

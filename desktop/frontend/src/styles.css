@@ -14417,8 +14417,15 @@ a[href] {
 /* Header-action-btn in the header-actions row uses min-width so it can
    expand when a time-filter label is shown alongside the clock icon. */
 .project-tree__header-actions .project-tree__header-action-btn {
+  width: auto;
   min-width: 22px;
-  transition: background 0.15s, color 0.15s, border-color 0.15s, opacity 0.15s;
+  padding: 0 4px;
+}
+
+/* Time-filter action slot: no fixed width so the button can grow when label shown. */
+.project-tree__header-action-slot--filter {
+  flex-basis: auto !important;
+  width: auto !important;
 }
 
 .project-tree__header-action-btn--active {
@@ -14436,7 +14443,7 @@ a[href] {
 .project-tree__time-filter-label {
   font-size: 9px;
   line-height: 1;
-  margin-left: 1px;
+  margin-left: 3px;
   font-weight: 500;
 }
 

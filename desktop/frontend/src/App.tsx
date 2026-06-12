@@ -695,11 +695,11 @@ export default function App() {
   const [sidebarImExpanded, setSidebarImExpanded] = useState(false);
   const [isDevBuild, setIsDevBuild] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(loadSidebarCollapsed);
-  type TimeFilter = "all" | "10" | "1h" | "3h" | "5h" | "1d";
+  type TimeFilter = "all" | "10" | "20" | "1h" | "3h" | "5h" | "1d";
   const [topicTimeFilter, setTopicTimeFilter] = useState<TimeFilter>(() => {
     try {
       const saved = localStorage.getItem("projectTree:timeFilter");
-      if (saved === "all" || saved === "10" || saved === "1h" || saved === "3h" || saved === "5h" || saved === "1d") return saved;
+      if (saved === "all" || saved === "10" || saved === "20" || saved === "1h" || saved === "3h" || saved === "5h" || saved === "1d") return saved;
     } catch { /* localStorage unavailable */ }
     return "all";
   });
