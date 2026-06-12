@@ -144,6 +144,9 @@ func TestHandleCardActionEnqueuesAskAnswerCommand(t *testing.T) {
 	if msg.UserID != "allowed-user" {
 		t.Fatalf("user id = %q, want allowed-user", msg.UserID)
 	}
+	if msg.OperatorID != "open-user" {
+		t.Fatalf("operator id = %q, want open-user (the actual clicker, not the card requester)", msg.OperatorID)
+	}
 	if msg.ChatID != "chat-ask" || msg.MessageID != "msg-ask" {
 		t.Fatalf("message routing = chat %q msg %q, want chat-ask/msg-ask", msg.ChatID, msg.MessageID)
 	}
@@ -179,6 +182,46 @@ func TestHandleCardActionAcceptsDirectOperatorID(t *testing.T) {
 	msg := <-a.msgCh
 	if msg.UserID != "open-user-direct" {
 		t.Fatalf("user id = %q, want open-user-direct", msg.UserID)
+	}
+	if msg.OperatorID != "open-user-direct" {
+		t.Fatalf("operator id = %q, want open-user-direct", msg.OperatorID)
+	}
+}
+
+func TestHandleCardActionDoesNotTrustCardRequesterAsOperator(t *testing.T) {
+	a := &adapter{
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		msgCh:  make(chan bot.InboundMessage, 1),
+	}
+	raw := []byte(`{
+		"event": {
+			"operator": {
+				"operator_id": {"open_id": "clicker"}
+			},
+			"context": {
+				"open_message_id": "msg-1",
+				"open_chat_id": "chat-1"
+			},
+			"action": {
+				"value": {
+					"command": "/approve approval-1",
+					"chat_type": "group",
+					"user_id": "requester"
+				}
+			}
+		}
+	}`)
+
+	if !a.handleCardAction(raw) {
+		t.Fatal("handleCardAction returned false")
+	}
+
+	msg := <-a.msgCh
+	if msg.UserID != "requester" {
+		t.Fatalf("user id = %q, want requester (routing follows the card value)", msg.UserID)
+	}
+	if msg.OperatorID != "clicker" {
+		t.Fatalf("operator id = %q, want clicker (gate follows the real button presser)", msg.OperatorID)
 	}
 }
 

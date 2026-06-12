@@ -250,6 +250,29 @@ func TestGatewayAllowlistDoesNotApplyGroupsToDirectMessages(t *testing.T) {
 	}
 }
 
+func TestGatewayAllowlistGatesOnOperatorNotCardRequester(t *testing.T) {
+	cfg := GatewayConfig{
+		Allowlist: AllowlistConfig{
+			Enabled: true,
+			Users: map[Platform][]string{
+				PlatformFeishu: {"requester"},
+			},
+		},
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	gw := NewGateway(cfg, nil, logger)
+
+	stranger := InboundMessage{Platform: PlatformFeishu, ChatType: ChatGroup, ChatID: "chat", UserID: "requester", OperatorID: "stranger"}
+	if gw.checkAllowlist(PlatformFeishu, stranger) {
+		t.Error("a non-allowlisted operator must be rejected even when the card carries an allowlisted requester id")
+	}
+
+	allowed := InboundMessage{Platform: PlatformFeishu, ChatType: ChatGroup, ChatID: "chat", UserID: "requester", OperatorID: "requester"}
+	if !gw.checkAllowlist(PlatformFeishu, allowed) {
+		t.Error("an allowlisted operator should pass")
+	}
+}
+
 func TestGatewayAllowlistDisabledRejectsByDefault(t *testing.T) {
 	cfg := GatewayConfig{
 		Allowlist: AllowlistConfig{Enabled: false},

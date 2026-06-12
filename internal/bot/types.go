@@ -44,11 +44,13 @@ type InboundMessage struct {
 	ChatID       string   `json:"chat_id"`
 	UserID       string   `json:"user_id"`
 	UserName     string   `json:"user_name"`
-	Text         string   `json:"text"`
-	MessageID    string   `json:"message_id"`
-	ThreadID     string   `json:"thread_id,omitempty"`
-	MediaURLs    []string `json:"media_urls,omitempty"`
-	Raw          any      `json:"-"`
+	// OperatorID, when set, is the authenticated actor gated by the allowlist; UserID stays routing-only.
+	OperatorID string   `json:"operator_id,omitempty"`
+	Text       string   `json:"text"`
+	MessageID  string   `json:"message_id"`
+	ThreadID   string   `json:"thread_id,omitempty"`
+	MediaURLs  []string `json:"media_urls,omitempty"`
+	Raw        any      `json:"-"`
 }
 
 // Session derives the SessionSource from this message.

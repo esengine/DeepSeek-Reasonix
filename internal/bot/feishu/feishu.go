@@ -333,8 +333,7 @@ func (a *adapter) handleCardAction(raw []byte) bool {
 		return true
 	}
 	chatType := cardActionChatType(payload.Event.Action.Value["chat_type"])
-	userID := firstNonEmpty(
-		payload.Event.Action.Value["user_id"],
+	operatorID := firstNonEmpty(
 		payload.Event.Operator.OperatorID.UnionID,
 		payload.Event.Operator.OperatorID.OpenID,
 		payload.Event.Operator.OperatorID.UserID,
@@ -342,14 +341,16 @@ func (a *adapter) handleCardAction(raw []byte) bool {
 		payload.Event.Operator.OpenID,
 		payload.Event.Operator.UserID,
 	)
+	routeUserID := firstNonEmpty(payload.Event.Action.Value["user_id"], operatorID)
 	ib := bot.InboundMessage{
-		Platform:  bot.PlatformFeishu,
-		ChatType:  chatType,
-		ChatID:    payload.Event.Context.OpenChatID,
-		UserID:    userID,
-		UserName:  userID,
-		Text:      command,
-		MessageID: payload.Event.Context.OpenMessageID,
+		Platform:   bot.PlatformFeishu,
+		ChatType:   chatType,
+		ChatID:     payload.Event.Context.OpenChatID,
+		UserID:     routeUserID,
+		UserName:   routeUserID,
+		OperatorID: operatorID,
+		Text:       command,
+		MessageID:  payload.Event.Context.OpenMessageID,
 	}
 	select {
 	case a.msgCh <- ib:

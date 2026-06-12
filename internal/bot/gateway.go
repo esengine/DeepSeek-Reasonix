@@ -268,6 +268,7 @@ func (gw *BotGateway) handleMessage(ctx context.Context, binding AdapterBinding,
 		"chat_type", msg.ChatType,
 		"chat", hashID(msg.ChatID),
 		"user", hashID(msg.UserID),
+		"operator", hashID(msg.OperatorID),
 		"thread", hashID(msg.ThreadID),
 		"message", hashID(msg.MessageID),
 		"text_chars", len([]rune(msg.Text)),
@@ -338,7 +339,11 @@ func (gw *BotGateway) checkAllowlist(plat Platform, msg InboundMessage) bool {
 	if !gw.cfg.Allowlist.Enabled {
 		return false
 	}
-	if !gw.allowlist[plat][msg.UserID] {
+	actor := msg.UserID
+	if msg.OperatorID != "" {
+		actor = msg.OperatorID
+	}
+	if !gw.allowlist[plat][actor] {
 		return false
 	}
 	groups := gw.groupAllowlist[plat]
