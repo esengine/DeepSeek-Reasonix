@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/event"
 	"reasonix/internal/provider"
 	"reasonix/internal/tool"
 )
@@ -326,6 +327,21 @@ func subagentRefFromOutput(t *testing.T, out string) string {
 	}
 	t.Fatalf("no subagent reference in output:\n%s", out)
 	return ""
+}
+
+func TestSubSinkForwardsUsageToParent(t *testing.T) {
+	var got []event.Event
+	parent := event.FuncSink(func(e event.Event) {
+		got = append(got, e)
+	})
+	subSinkFor("task_1", parent).Emit(event.Event{
+		Kind:        event.Usage,
+		Usage:       &provider.Usage{PromptTokens: 10, CompletionTokens: 2, TotalTokens: 12},
+		UsageSource: event.UsageSourceSubagent,
+	})
+	if len(got) != 1 || got[0].Usage == nil || got[0].UsageSource != event.UsageSourceSubagent {
+		t.Fatalf("forwarded events = %+v, want subagent usage", got)
+	}
 }
 
 func newTestTaskTool(t *testing.T, prov provider.Provider, reg *tool.Registry, sysPrompt, subagentModel, subagentEffort string, resolve func(string, string) (provider.Provider, *provider.Pricing, int, error)) *TaskTool {

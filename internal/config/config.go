@@ -804,17 +804,18 @@ type AgentConfig struct {
 // token budget; the harness compacts older history as a turn's prompt approaches
 // it (see agent compaction). 0 disables compaction for the instance.
 type ProviderEntry struct {
-	Name          string            `toml:"name"`
-	Kind          string            `toml:"kind"`
-	BaseURL       string            `toml:"base_url"`
-	Model         string            `toml:"model"`      // a single model (back-compat)
-	Models        []string          `toml:"models"`     // a vendor's model list (one base_url/key, many models)
-	ModelsURL     string            `toml:"models_url"` // auto-fetch models from this URL on startup
-	Default       string            `toml:"default"`    // default model when Models is set (else Models[0])
-	APIKeyEnv     string            `toml:"api_key_env"`
-	BalanceURL    string            `toml:"balance_url"` // optional; a provider-specific wallet-balance endpoint (DeepSeek: https://api.deepseek.com/user/balance). Empty = no balance readout.
-	ContextWindow int               `toml:"context_window"`
-	Price         *provider.Pricing `toml:"price"`
+	Name          string                       `toml:"name"`
+	Kind          string                       `toml:"kind"`
+	BaseURL       string                       `toml:"base_url"`
+	Model         string                       `toml:"model"`      // a single model (back-compat)
+	Models        []string                     `toml:"models"`     // a vendor's model list (one base_url/key, many models)
+	ModelsURL     string                       `toml:"models_url"` // auto-fetch models from this URL on startup
+	Default       string                       `toml:"default"`    // default model when Models is set (else Models[0])
+	APIKeyEnv     string                       `toml:"api_key_env"`
+	BalanceURL    string                       `toml:"balance_url"` // optional; a provider-specific wallet-balance endpoint (DeepSeek: https://api.deepseek.com/user/balance). Empty = no balance readout.
+	ContextWindow int                          `toml:"context_window"`
+	Price         *provider.Pricing            `toml:"price"`  // legacy/provider-wide fallback
+	Prices        map[string]*provider.Pricing `toml:"prices"` // optional per-model prices; keys are model ids
 	// Thinking / Effort are provider-kind-specific knobs forwarded to the provider
 	// via Config.Extra. The anthropic provider reads Thinking="adaptive" to enable
 	// extended thinking and Effort ("low".."max") to tune depth. The
@@ -951,6 +952,35 @@ func (e *ProviderEntry) HasModel(m string) bool {
 		}
 	}
 	return false
+}
+
+// PriceForModel returns the configured per-1M-token price for model. Per-model
+// prices win; the legacy provider-wide price is a fallback for older configs.
+func (e *ProviderEntry) PriceForModel(model string) *provider.Pricing {
+	if e == nil {
+		return nil
+	}
+	if e.Prices != nil {
+		if p := e.Prices[strings.TrimSpace(model)]; p != nil {
+			return clonePricing(p)
+		}
+	}
+	return clonePricing(e.Price)
+}
+
+func (e *ProviderEntry) applyModelPrice() {
+	if e == nil {
+		return
+	}
+	e.Price = e.PriceForModel(e.Model)
+}
+
+func clonePricing(p *provider.Pricing) *provider.Pricing {
+	if p == nil {
+		return nil
+	}
+	cp := *p
+	return &cp
 }
 
 // ToolsConfig selects which built-in tools are enabled. Empty means all of them.
@@ -1152,11 +1182,26 @@ func Default() *Config {
 			Weixin:           WeixinBotConfig{AccountID: "default", TokenEnv: "WEIXIN_BOT_TOKEN", APIBase: "https://ilinkai.weixin.qq.com"},
 		},
 		Providers: []ProviderEntry{
-			{Name: "deepseek-flash", Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash", APIKeyEnv: "DEEPSEEK_API_KEY", BalanceURL: "https://api.deepseek.com/user/balance", ContextWindow: 1_000_000, Price: &provider.Pricing{CacheHit: 0.02, Input: 1, Output: 2, Currency: "¥"}},
-			{Name: "deepseek-pro", Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro", APIKeyEnv: "DEEPSEEK_API_KEY", BalanceURL: "https://api.deepseek.com/user/balance", ContextWindow: 1_000_000, Price: &provider.Pricing{CacheHit: 0.025, Input: 3, Output: 6, Currency: "¥"}},
+			{Name: "deepseek-flash", Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash", APIKeyEnv: "DEEPSEEK_API_KEY", BalanceURL: "https://api.deepseek.com/user/balance", ContextWindow: 1_000_000, Price: deepSeekV4FlashPrice()},
+			{Name: "deepseek-pro", Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro", APIKeyEnv: "DEEPSEEK_API_KEY", BalanceURL: "https://api.deepseek.com/user/balance", ContextWindow: 1_000_000, Price: deepSeekV4ProPrice()},
 			{Name: "mimo-pro", Kind: "openai", BaseURL: "https://token-plan-cn.xiaomimimo.com/v1", Model: "mimo-v2.5-pro", APIKeyEnv: "MIMO_API_KEY", ContextWindow: 1_000_000, Price: &provider.Pricing{CacheHit: 0.025, Input: 3, Output: 6, Currency: "¥"}, NoProxy: true},
 			{Name: "mimo-flash", Kind: "openai", BaseURL: "https://token-plan-cn.xiaomimimo.com/v1", Model: "mimo-v2.5", APIKeyEnv: "MIMO_API_KEY", ContextWindow: 1_000_000, Price: &provider.Pricing{CacheHit: 0.02, Input: 1, Output: 2, Currency: "¥"}, NoProxy: true},
 		},
+	}
+}
+
+func deepSeekV4FlashPrice() *provider.Pricing {
+	return &provider.Pricing{CacheHit: 0.0028, Input: 0.14, Output: 0.28, Currency: "$"}
+}
+
+func deepSeekV4ProPrice() *provider.Pricing {
+	return &provider.Pricing{CacheHit: 0.003625, Input: 0.435, Output: 0.87, Currency: "$"}
+}
+
+func deepSeekV4Prices() map[string]*provider.Pricing {
+	return map[string]*provider.Pricing{
+		"deepseek-v4-flash": deepSeekV4FlashPrice(),
+		"deepseek-v4-pro":   deepSeekV4ProPrice(),
 	}
 }
 
@@ -1231,6 +1276,7 @@ func LoadForRoot(root string) (*Config, error) {
 	normalizeLegacyMCPTiers(cfg)
 	normalizeLegacyProviderModels(cfg)
 	normalizeDesktopOfficialProviderAccess(cfg)
+	backfillDeepSeekOfficialPrices(cfg)
 	normalizeEffortConfig(cfg)
 	backfillDeepSeekPro(cfg)
 	// First run (no config file anywhere): keep CodeGraph off until the user opts
@@ -1276,6 +1322,41 @@ func backfillDeepSeekPro(c *Config) {
 			return
 		}
 	}
+}
+
+func backfillDeepSeekOfficialPrices(c *Config) {
+	if c == nil {
+		return
+	}
+	defaults := deepSeekV4Prices()
+	for i := range c.Providers {
+		p := &c.Providers[i]
+		if officialProviderKind(p) != "deepseek" {
+			continue
+		}
+		if p.Prices == nil {
+			p.Prices = map[string]*provider.Pricing{}
+		}
+		for model, price := range defaults {
+			if p.HasModel(model) && p.Prices[model] == nil {
+				p.Prices[model] = clonePricing(price)
+			}
+		}
+	}
+}
+
+func officialProviderKind(p *ProviderEntry) string {
+	if p == nil {
+		return ""
+	}
+	u, err := url.Parse(strings.TrimSpace(p.BaseURL))
+	if err != nil {
+		return ""
+	}
+	if strings.EqualFold(u.Hostname(), "api.deepseek.com") {
+		return "deepseek"
+	}
+	return ""
 }
 
 func resolveRoot(root string) string {
@@ -1343,6 +1424,7 @@ func LoadForEdit(path string) *Config {
 	normalizeLegacyMCPTiers(cfg)
 	normalizeLegacyProviderModels(cfg)
 	normalizeDesktopOfficialProviderAccess(cfg)
+	backfillDeepSeekOfficialPrices(cfg)
 	normalizeEffortConfig(cfg)
 	return cfg
 }
@@ -1587,9 +1669,11 @@ func ensureDeepSeekOfficialProvider(c *Config) {
 		APIKeyEnv:     "DEEPSEEK_API_KEY",
 		BalanceURL:    "https://api.deepseek.com/user/balance",
 		ContextWindow: 1_000_000,
+		Prices:        deepSeekV4Prices(),
 	}
 	if old, ok := c.Provider("deepseek-flash"); ok {
 		entry = officialProviderFromLegacy(entry, old)
+		entry.Prices = deepSeekV4Prices()
 		entry.Models = mergeModelLists([]string{"deepseek-v4-flash", "deepseek-v4-pro"}, old.ModelList())
 		entry.Default = firstKnownModel(entry.Default, entry.Models, "deepseek-v4-flash")
 	}
@@ -1973,6 +2057,7 @@ func (c *Config) ResolveModel(ref string) (*ProviderEntry, bool) {
 		if e, found := c.Provider(prov); found && e.HasModel(model) {
 			cp := *e
 			cp.Model = model
+			cp.applyModelPrice()
 			return &cp, true
 		}
 	}
@@ -1980,6 +2065,7 @@ func (c *Config) ResolveModel(ref string) (*ProviderEntry, bool) {
 	if e, found := c.Provider(ref); found {
 		cp := *e
 		cp.Model = e.DefaultModel()
+		cp.applyModelPrice()
 		return &cp, true
 	}
 	// a bare model name → the provider that lists it
@@ -1987,6 +2073,7 @@ func (c *Config) ResolveModel(ref string) (*ProviderEntry, bool) {
 		if c.Providers[i].HasModel(ref) {
 			cp := c.Providers[i]
 			cp.Model = ref
+			cp.applyModelPrice()
 			return &cp, true
 		}
 	}

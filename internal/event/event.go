@@ -202,6 +202,15 @@ type CacheDiagnostics struct {
 	CacheHitTokens      int
 }
 
+const (
+	UsageSourceExecutor   = "executor"
+	UsageSourcePlanner    = "planner"
+	UsageSourceSubagent   = "subagent"
+	UsageSourceCompaction = "compaction"
+	UsageSourceClassifier = "classifier"
+	UsageSourceTitle      = "title"
+)
+
 // Event is one increment in a turn's event stream. Read the field(s) documented
 // for Kind; the others are zero.
 type Event struct {
@@ -211,6 +220,7 @@ type Event struct {
 	Tool             Tool              // ToolDispatch / ToolResult
 	Usage            *provider.Usage   // Usage
 	Pricing          *provider.Pricing // Usage: for cost display (nil = omit cost)
+	UsageSource      string            // Usage: billable call source; empty means executor for compatibility
 	CacheDiagnostics *CacheDiagnostics // Usage: cache-churn attribution (nil = N/A)
 	// SessionHit/SessionMiss carry cumulative cache tokens across the whole
 	// session (Usage events only), so a frontend can show the aggregate hit-rate

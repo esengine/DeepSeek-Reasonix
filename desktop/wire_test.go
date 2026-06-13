@@ -98,12 +98,16 @@ func TestToWireUsage(t *testing.T) {
 	e := event.Event{
 		Kind:        event.Usage,
 		Usage:       &provider.Usage{PromptTokens: 100, CompletionTokens: 50, TotalTokens: 150, CacheHitTokens: 80, CacheMissTokens: 20},
+		UsageSource: event.UsageSourceSubagent,
 		SessionHit:  800,
 		SessionMiss: 200,
 	}
 	w := toWire(e)
 	if w.Usage == nil || w.Usage.PromptTokens != 100 || w.Usage.TotalTokens != 150 {
 		t.Errorf("usage = %+v", w.Usage)
+	}
+	if w.Usage.Source != event.UsageSourceSubagent {
+		t.Errorf("usage source = %q, want subagent", w.Usage.Source)
 	}
 	if w.Usage.SessionCacheHitTokens != 800 || w.Usage.SessionCacheMissTokens != 200 {
 		t.Errorf("session cache = hit:%d miss:%d", w.Usage.SessionCacheHitTokens, w.Usage.SessionCacheMissTokens)

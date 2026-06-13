@@ -16747,6 +16747,45 @@ a[href] {
   color: var(--err);
 }
 
+.context-panel__source-list {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.context-panel__source-row {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  color: var(--fg-dim);
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.context-panel__source-row span,
+.context-panel__source-row strong,
+.context-panel__source-row em {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-panel__source-row strong {
+  color: var(--fg);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.context-panel__source-row em {
+  color: var(--fg-muted);
+  font-style: normal;
+}
+
 .context-panel__preview {
   display: flex;
   flex-direction: column;

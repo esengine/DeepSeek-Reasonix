@@ -607,6 +607,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			MaxSteps:      steps,
 			Temperature:   cfg.Agent.Temperature,
 			Pricing:       price,
+			UsageSource:   event.UsageSourceSubagent,
 			Gate:          headlessGate,
 			ContextWindow: ctxWin,
 			ArchiveDir:    config.ArchiveDir(),
@@ -882,7 +883,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		if err != nil {
 			return nil, fmt.Errorf("auto_plan_classifier %q: %w", cm, err)
 		}
-		classifier = control.NewProviderAutoPlanClassifier(classifierProv)
+		classifier = control.NewBillableProviderAutoPlanClassifier(classifierProv, ce.Price, sink)
 	}
 
 	ctrlOpts := control.Options{

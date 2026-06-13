@@ -85,6 +85,23 @@ type readFileRecord struct {
 }
 
 type sessionUsageStats struct {
+	PromptTokens     int                         `json:"promptTokens"`
+	CompletionTokens int                         `json:"completionTokens"`
+	TotalTokens      int                         `json:"totalTokens"`
+	ReasoningTokens  int                         `json:"reasoningTokens"`
+	CacheHitTokens   int                         `json:"cacheHitTokens"`
+	CacheMissTokens  int                         `json:"cacheMissTokens"`
+	RequestCount     int                         `json:"requestCount"`
+	ElapsedMs        int64                       `json:"elapsedMs"`
+	SessionCost      float64                     `json:"sessionCost,omitempty"`
+	SessionCurrency  string                      `json:"sessionCurrency,omitempty"`
+	SessionCostUsd   float64                     `json:"sessionCostUsd,omitempty"`
+	Sources          map[string]usageSourceStats `json:"sources,omitempty"`
+
+	activeTurnStartedAt int64
+}
+
+type usageSourceStats struct {
 	PromptTokens     int     `json:"promptTokens"`
 	CompletionTokens int     `json:"completionTokens"`
 	TotalTokens      int     `json:"totalTokens"`
@@ -92,12 +109,9 @@ type sessionUsageStats struct {
 	CacheHitTokens   int     `json:"cacheHitTokens"`
 	CacheMissTokens  int     `json:"cacheMissTokens"`
 	RequestCount     int     `json:"requestCount"`
-	ElapsedMs        int64   `json:"elapsedMs"`
 	SessionCost      float64 `json:"sessionCost,omitempty"`
 	SessionCurrency  string  `json:"sessionCurrency,omitempty"`
 	SessionCostUsd   float64 `json:"sessionCostUsd,omitempty"`
-
-	activeTurnStartedAt int64
 }
 
 type tabTelemetrySnapshot struct {
@@ -162,12 +176,16 @@ func (t *WorkspaceTab) recordUsage(e event.Event) {
 		return
 	}
 	u := e.Usage
+	source := strings.TrimSpace(e.UsageSource)
+	if source == "" {
+		source = event.UsageSourceExecutor
+	}
 	t.telemMu.Lock()
 	t.usageTelemetry.PromptTokens += u.PromptTokens
 	t.usageTelemetry.CompletionTokens += u.CompletionTokens
 	t.usageTelemetry.TotalTokens += u.TotalTokens
 	t.usageTelemetry.ReasoningTokens += u.ReasoningTokens
-	if e.SessionHit+e.SessionMiss > 0 {
+	if source == event.UsageSourceExecutor && e.SessionHit+e.SessionMiss > 0 {
 		t.usageTelemetry.CacheHitTokens = e.SessionHit
 		t.usageTelemetry.CacheMissTokens = e.SessionMiss
 	} else {
@@ -175,12 +193,27 @@ func (t *WorkspaceTab) recordUsage(e event.Event) {
 		t.usageTelemetry.CacheMissTokens += u.CacheMissTokens
 	}
 	t.usageTelemetry.RequestCount++
+	if t.usageTelemetry.Sources == nil {
+		t.usageTelemetry.Sources = map[string]usageSourceStats{}
+	}
+	src := t.usageTelemetry.Sources[source]
+	src.PromptTokens += u.PromptTokens
+	src.CompletionTokens += u.CompletionTokens
+	src.TotalTokens += u.TotalTokens
+	src.ReasoningTokens += u.ReasoningTokens
+	src.CacheHitTokens += u.CacheHitTokens
+	src.CacheMissTokens += u.CacheMissTokens
+	src.RequestCount++
 	if e.Pricing != nil {
 		cost := e.Pricing.Cost(u)
 		t.usageTelemetry.SessionCost += cost
 		t.usageTelemetry.SessionCostUsd = t.usageTelemetry.SessionCost
 		t.usageTelemetry.SessionCurrency = e.Pricing.Symbol()
+		src.SessionCost += cost
+		src.SessionCostUsd = src.SessionCost
+		src.SessionCurrency = e.Pricing.Symbol()
 	}
+	t.usageTelemetry.Sources[source] = src
 	t.telemMu.Unlock()
 }
 
@@ -194,6 +227,12 @@ func (t *WorkspaceTab) telemetrySnapshot() tabTelemetrySnapshot {
 		now := time.Now().UnixMilli()
 		if now >= started {
 			usage.ElapsedMs += now - started
+		}
+	}
+	if len(t.usageTelemetry.Sources) > 0 {
+		usage.Sources = make(map[string]usageSourceStats, len(t.usageTelemetry.Sources))
+		for source, stats := range t.usageTelemetry.Sources {
+			usage.Sources[source] = stats
 		}
 	}
 	usage.activeTurnStartedAt = 0
@@ -2853,22 +2892,23 @@ func topicSummaryKey(scope, workspaceRoot, topicID string) string {
 
 // ContextPanelInfo is the right-side panel's data for one tab.
 type ContextPanelInfo struct {
-	UsedTokens       int               `json:"usedTokens"`
-	WindowTokens     int               `json:"windowTokens"`
-	PromptTokens     int               `json:"promptTokens"`
-	CompletionTokens int               `json:"completionTokens"`
-	TotalTokens      int               `json:"totalTokens"`
-	ReasoningTokens  int               `json:"reasoningTokens"`
-	CacheHitTokens   int               `json:"cacheHitTokens"`
-	CacheMissTokens  int               `json:"cacheMissTokens"`
-	RequestCount     int               `json:"requestCount"`
-	ElapsedMs        int64             `json:"elapsedMs"`
-	SessionCost      float64           `json:"sessionCost"`
-	SessionCurrency  string            `json:"sessionCurrency,omitempty"`
-	SessionCostUsd   float64           `json:"sessionCostUsd,omitempty"`
-	Mock             bool              `json:"mock,omitempty"`
-	ReadFiles        []readFileRecord  `json:"readFiles"`
-	ChangedFiles     []ChangedFileInfo `json:"changedFiles"`
+	UsedTokens       int                         `json:"usedTokens"`
+	WindowTokens     int                         `json:"windowTokens"`
+	PromptTokens     int                         `json:"promptTokens"`
+	CompletionTokens int                         `json:"completionTokens"`
+	TotalTokens      int                         `json:"totalTokens"`
+	ReasoningTokens  int                         `json:"reasoningTokens"`
+	CacheHitTokens   int                         `json:"cacheHitTokens"`
+	CacheMissTokens  int                         `json:"cacheMissTokens"`
+	RequestCount     int                         `json:"requestCount"`
+	ElapsedMs        int64                       `json:"elapsedMs"`
+	SessionCost      float64                     `json:"sessionCost"`
+	SessionCurrency  string                      `json:"sessionCurrency,omitempty"`
+	SessionCostUsd   float64                     `json:"sessionCostUsd,omitempty"`
+	Sources          map[string]usageSourceStats `json:"sources,omitempty"`
+	Mock             bool                        `json:"mock,omitempty"`
+	ReadFiles        []readFileRecord            `json:"readFiles"`
+	ChangedFiles     []ChangedFileInfo           `json:"changedFiles"`
 }
 
 type ChangedFileInfo struct {
@@ -2923,6 +2963,7 @@ func (a *App) ContextPanel(tabID string) ContextPanelInfo {
 	info.SessionCost = usage.SessionCost
 	info.SessionCurrency = usage.SessionCurrency
 	info.SessionCostUsd = usage.SessionCostUsd
+	info.Sources = usage.Sources
 
 	// Gather workspace changes for this tab's root.
 	if ctrl != nil && tab.WorkspaceRoot != "" {

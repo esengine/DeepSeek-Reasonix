@@ -168,6 +168,14 @@ func TestPricingCostCalculation(t *testing.T) {
 	}
 }
 
+func TestPricingCostFallsBackToPromptTokensAsMiss(t *testing.T) {
+	p := &Pricing{Input: 2.0, Output: 10.0}
+	u := &Usage{PromptTokens: 500_000, CompletionTokens: 100_000}
+	if got := p.Cost(u); got != 2.0 {
+		t.Errorf("Cost = %f, want 2.0", got)
+	}
+}
+
 func TestPricingCostZeroTokens(t *testing.T) {
 	p := &Pricing{Input: 2.0, Output: 10.0}
 	u := &Usage{}

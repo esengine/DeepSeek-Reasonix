@@ -434,6 +434,7 @@ func (t *TaskTool) runSubSession(ctx context.Context, prompt string, subReg *too
 		MaxSteps:          maxSteps,
 		Temperature:       t.temperature,
 		Pricing:           pricing,
+		UsageSource:       event.UsageSourceSubagent,
 		Gate:              t.gate,
 		ContextWindow:     ctxWin,
 		SoftCompactRatio:  t.softCompactRatio,
@@ -491,14 +492,22 @@ func NestedSink(ctx context.Context, fallback event.Sink) event.Sink {
 	return subSinkFor(parentID, parent)
 }
 
-// subSink forwards a sub-agent's tool dispatch/result events to the parent's
-// event stream, tagged with the parent task call's ID so a frontend nests them
-// under it. The sub-agent's own turn/usage/text/reasoning events are dropped —
-// only its tool activity (the part worth seeing live) and its final answer
-// (returned by Execute) reach the parent. The forwarded call IDs are namespaced
-// with the parent ID so a sub-agent call can never collide with a parent call in
-// the frontend's dispatch→result matching. Falls back to Discard when there's no
-// parent stream (the headless run loop, or a direct Execute in tests).
+// subSink forwards a sub-agent's tool dispatch/result events and billable usage
+// to the parent's event stream. Only tool activity is nested visually; the
+// sub-agent's text/reasoning stays isolated and only its final answer is returned.
+//
+// The sub-agent's own turn/text/reasoning events are dropped — forwarding them
+// would make the parent transcript noisy and could imply they belong to the
+// parent model context, which they do not.
+//
+// Usage events are observability only, so forwarding them preserves billing
+// totals without polluting the parent provider-visible prefix.
+//
+// Tool events are tagged with the parent task call's ID so a frontend nests them
+// under it. The forwarded call IDs are namespaced with the parent ID so a
+// sub-agent call can never collide with a parent call in the frontend's
+// dispatch→result matching. Falls back to Discard when there's no parent stream
+// (the headless run loop, or a direct Execute in tests).
 func subSink(ctx context.Context) event.Sink {
 	parentID, parent, _, ok := CallContext(ctx)
 	if !ok || parent == nil {
@@ -519,6 +528,11 @@ func subSinkFor(parentID string, parent event.Sink) event.Sink {
 		case event.ToolDispatch, event.ToolResult:
 			e.Tool.ParentID = parentID
 			e.Tool.ID = parentID + "/" + e.Tool.ID
+			parent.Emit(e)
+		case event.Usage:
+			if e.UsageSource == "" {
+				e.UsageSource = event.UsageSourceSubagent
+			}
 			parent.Emit(e)
 		}
 	})

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"reasonix/internal/event"
 	"reasonix/internal/nilutil"
 	"reasonix/internal/provider"
 )
@@ -16,7 +17,9 @@ Use true for multi-step implementation, refactors, migrations, unclear cross-fil
 Use false for explanations, simple questions, single obvious edits, direct commands, or requests that should be answered without changing files.`
 
 type ProviderAutoPlanClassifier struct {
-	prov provider.Provider
+	prov    provider.Provider
+	pricing *provider.Pricing
+	sink    event.Sink
 }
 
 func NewProviderAutoPlanClassifier(prov provider.Provider) *ProviderAutoPlanClassifier {
@@ -24,6 +27,16 @@ func NewProviderAutoPlanClassifier(prov provider.Provider) *ProviderAutoPlanClas
 		return nil
 	}
 	return &ProviderAutoPlanClassifier{prov: prov}
+}
+
+func NewBillableProviderAutoPlanClassifier(prov provider.Provider, pricing *provider.Pricing, sink event.Sink) *ProviderAutoPlanClassifier {
+	if nilutil.IsNil(prov) {
+		return nil
+	}
+	if nilutil.IsNil(sink) {
+		sink = event.Discard
+	}
+	return &ProviderAutoPlanClassifier{prov: prov, pricing: pricing, sink: sink}
 }
 
 func (c *ProviderAutoPlanClassifier) NeedsPlan(ctx context.Context, input string, score int) (bool, string, error) {
@@ -43,13 +56,19 @@ func (c *ProviderAutoPlanClassifier) NeedsPlan(ctx context.Context, input string
 	}
 
 	var text strings.Builder
+	var usage *provider.Usage
 	for chunk := range ch {
 		switch chunk.Type {
 		case provider.ChunkText:
 			text.WriteString(chunk.Text)
+		case provider.ChunkUsage:
+			usage = chunk.Usage
 		case provider.ChunkError:
 			return false, "", chunk.Err
 		}
+	}
+	if usage != nil && usage.TotalTokens > 0 && !nilutil.IsNil(c.sink) {
+		c.sink.Emit(event.Event{Kind: event.Usage, Usage: usage, Pricing: c.pricing, UsageSource: event.UsageSourceClassifier})
 	}
 
 	var out struct {

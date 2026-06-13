@@ -35,9 +35,10 @@ func TestToWire(t *testing.T) {
 
 	t.Run("usage with cost", func(t *testing.T) {
 		w := toWire(event.Event{
-			Kind:    event.Usage,
-			Usage:   &provider.Usage{PromptTokens: 1000, CompletionTokens: 200, TotalTokens: 1200, CacheHitTokens: 900, CacheMissTokens: 100},
-			Pricing: &provider.Pricing{CacheHit: 0.02, Input: 1, Output: 2},
+			Kind:        event.Usage,
+			Usage:       &provider.Usage{PromptTokens: 1000, CompletionTokens: 200, TotalTokens: 1200, CacheHitTokens: 900, CacheMissTokens: 100},
+			Pricing:     &provider.Pricing{CacheHit: 0.02, Input: 1, Output: 2},
+			UsageSource: event.UsageSourceTitle,
 			CacheDiagnostics: &event.CacheDiagnostics{
 				PrefixChanged:       true,
 				PrefixChangeReasons: []string{"log_rewrite"},
@@ -46,6 +47,9 @@ func TestToWire(t *testing.T) {
 		})
 		if w.Usage == nil || w.Usage.TotalTokens != 1200 || w.Usage.Cost <= 0 || w.Usage.CostUSD <= 0 || w.Usage.Currency != "¥" {
 			t.Errorf("usage = %+v", w.Usage)
+		}
+		if w.Usage.Source != event.UsageSourceTitle {
+			t.Errorf("usage source = %q, want title", w.Usage.Source)
 		}
 		if w.Usage.CacheDiagnostics == nil || w.Usage.CacheDiagnostics.PrefixChangeReasons[0] != "log_rewrite" {
 			t.Errorf("cache diagnostics = %+v", w.Usage.CacheDiagnostics)

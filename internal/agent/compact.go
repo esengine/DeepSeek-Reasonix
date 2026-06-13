@@ -518,12 +518,19 @@ func (a *Agent) summarize(ctx context.Context, region []provider.Message, instru
 	// select on ctx.Done so a stalled stream (open but never delivering or closing)
 	// unblocks on timeout instead of pinning the "compacting…" placeholder forever.
 	var b strings.Builder
+	var usage *provider.Usage
+	emitUsage := func() {
+		if usage != nil && usage.TotalTokens > 0 {
+			a.sink.Emit(event.Event{Kind: event.Usage, Usage: usage, Pricing: a.pricing, UsageSource: event.UsageSourceCompaction})
+		}
+	}
 	for {
 		select {
 		case <-ctx.Done():
 			return "", ctx.Err()
 		case chunk, ok := <-ch:
 			if !ok {
+				emitUsage()
 				s := strings.TrimSpace(b.String())
 				if s == "" {
 					return "", fmt.Errorf("summarizer returned empty output")
@@ -533,6 +540,8 @@ func (a *Agent) summarize(ctx context.Context, region []provider.Message, instru
 			switch chunk.Type {
 			case provider.ChunkText:
 				b.WriteString(chunk.Text)
+			case provider.ChunkUsage:
+				usage = chunk.Usage
 			case provider.ChunkError:
 				return "", chunk.Err
 			}

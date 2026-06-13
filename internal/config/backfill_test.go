@@ -1,6 +1,10 @@
 package config
 
-import "testing"
+import (
+	"testing"
+
+	"reasonix/internal/provider"
+)
 
 func hasModel(c *Config, model string) *ProviderEntry {
 	for i := range c.Providers {
@@ -21,7 +25,7 @@ func TestBackfillDeepSeekProRestoresPro(t *testing.T) {
 	pro := hasModel(c, "deepseek-v4-pro")
 	if pro == nil {
 		t.Fatal("deepseek-v4-pro not restored")
-	} else if pro.Price == nil || pro.Price.Output != 6 {
+	} else if pro.Price == nil || pro.Price.Output != 0.87 || pro.Price.Currency != "$" {
 		t.Errorf("pro price not the preset: %+v", pro.Price)
 	}
 }
@@ -121,5 +125,52 @@ func TestNormalizeDesktopOfficialProviderAccessEnsuresMimoAPI(t *testing.T) {
 	}
 	if got := c.Desktop.ProviderAccess; len(got) != 1 || got[0] != "mimo-api" {
 		t.Fatalf("provider_access = %+v, want mimo-api", got)
+	}
+}
+
+func TestBackfillDeepSeekOfficialPrices(t *testing.T) {
+	c := &Config{Providers: []ProviderEntry{{
+		Name:    "deepseek",
+		Kind:    "openai",
+		BaseURL: "https://api.deepseek.com",
+		Models:  []string{"deepseek-v4-flash", "deepseek-v4-pro"},
+		Default: "deepseek-v4-flash",
+	}}}
+	backfillDeepSeekOfficialPrices(c)
+	p, ok := c.Provider("deepseek")
+	if !ok {
+		t.Fatal("deepseek provider missing")
+	}
+	if p.Prices["deepseek-v4-flash"].Output != 0.28 || p.Prices["deepseek-v4-pro"].Output != 0.87 {
+		t.Fatalf("deepseek prices = %+v, want current V4 flash/pro prices", p.Prices)
+	}
+}
+
+func TestResolveModelUsesPerModelPricing(t *testing.T) {
+	c := &Config{Providers: []ProviderEntry{{
+		Name:    "deepseek",
+		Kind:    "openai",
+		BaseURL: "https://api.deepseek.com",
+		Models:  []string{"deepseek-v4-flash", "deepseek-v4-pro"},
+		Default: "deepseek-v4-flash",
+		Price:   &provider.Pricing{CacheHit: 9, Input: 9, Output: 9, Currency: "$"},
+		Prices: map[string]*provider.Pricing{
+			"deepseek-v4-flash": &provider.Pricing{CacheHit: 0.0028, Input: 0.14, Output: 0.28, Currency: "$"},
+			"deepseek-v4-pro":   &provider.Pricing{CacheHit: 0.003625, Input: 0.435, Output: 0.87, Currency: "$"},
+		},
+	}}}
+	pro, ok := c.ResolveModel("deepseek/deepseek-v4-pro")
+	if !ok {
+		t.Fatal("deepseek pro did not resolve")
+	}
+	if pro.Price == nil || pro.Price.Output != 0.87 {
+		t.Fatalf("pro price = %+v, want model-specific pro price", pro.Price)
+	}
+	flash, ok := c.ResolveModel("deepseek")
+	if !ok {
+		t.Fatal("deepseek default did not resolve")
+	}
+	if flash.Price == nil || flash.Price.Output != 0.28 {
+		t.Fatalf("flash price = %+v, want model-specific flash price", flash.Price)
 	}
 }

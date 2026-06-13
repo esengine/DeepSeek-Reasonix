@@ -473,6 +473,31 @@ func TestProjectRenderPreservesNonDefaultLegacySections(t *testing.T) {
 	}
 }
 
+func TestRenderTOMLRoundTripsPerModelPrices(t *testing.T) {
+	orig := Default()
+	orig.Providers = []ProviderEntry{{
+		Name:      "deepseek",
+		Kind:      "openai",
+		BaseURL:   "https://api.deepseek.com",
+		Models:    []string{"deepseek-v4-flash", "deepseek-v4-pro"},
+		Default:   "deepseek-v4-flash",
+		APIKeyEnv: "DEEPSEEK_API_KEY",
+		Prices:    deepSeekV4Prices(),
+	}}
+
+	var got Config
+	if _, err := toml.Decode(RenderTOML(orig), &got); err != nil {
+		t.Fatalf("rendered TOML does not parse: %v", err)
+	}
+	p, ok := got.Provider("deepseek")
+	if !ok {
+		t.Fatal("deepseek provider missing after round trip")
+	}
+	if p.Prices["deepseek-v4-flash"].Input != 0.14 || p.Prices["deepseek-v4-pro"].Output != 0.87 {
+		t.Fatalf("prices after round trip = %+v", p.Prices)
+	}
+}
+
 func boolPtr(v bool) *bool { return &v }
 
 func intPtr(v int) *int { return &v }

@@ -70,6 +70,7 @@ func NewCoordinator(planner provider.Provider, plannerSession *Session, plannerP
 	if plannerTools != nil {
 		plannerOptions.Temperature = temperature
 		plannerOptions.Pricing = plannerPricing
+		plannerOptions.UsageSource = event.UsageSourcePlanner
 		plannerAgent = New(planner, plannerTools, plannerSession, plannerOptions, plannerSink(sink))
 	}
 	if executor != nil {
@@ -134,7 +135,7 @@ func (c *Coordinator) plan(ctx context.Context, input string) (string, error) {
 	}
 	// Closes the planner's raw text block (no markdown redraw) and prints its
 	// usage line, mirroring the old Fprintln + printUsage tail.
-	c.sink.Emit(event.Event{Kind: event.Usage, Usage: usage, Pricing: c.plannerPricing})
+	c.sink.Emit(event.Event{Kind: event.Usage, Usage: usage, Pricing: c.plannerPricing, UsageSource: event.UsageSourcePlanner})
 
 	plan := text.String()
 	c.plannerSess.Add(provider.Message{Role: provider.RoleAssistant, Content: plan})
