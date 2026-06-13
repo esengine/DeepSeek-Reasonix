@@ -1631,8 +1631,14 @@ func (c *Controller) forkNamed(turn int, name string, switchToFork bool) (string
 func (c *Controller) CheckpointHasBoundary(turn int) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	_, ok := c.cpBound[turn]
-	return ok
+	boundary, ok := c.cpBound[turn]
+	if !ok {
+		return false
+	}
+	// After compaction the key may still exist but the boundary value is
+	// stale (it points past the truncated message log).  Treat those
+	// turns the same as "no boundary" so the UI can disable the button.
+	return boundary <= len(c.executor.Session().Messages)
 }
 
 // Branch copies the current conversation into a child branch and switches to it.
