@@ -3968,8 +3968,8 @@ func (a *App) OpenTerminalAt(rel string) error {
 	if err != nil || !ok {
 		return os.ErrInvalid
 	}
-	// If it's a file, open terminal at its parent directory.
-	if info, err := os.Stat(path); err == nil && !info.IsDir() {
+	// If rel looks like a file (has extension), cd to parent directory.
+	if ext := filepath.Ext(path); ext != "" {
 		path = filepath.Dir(path)
 	}
 	return openTerminal(path)
