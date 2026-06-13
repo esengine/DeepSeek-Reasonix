@@ -90,6 +90,11 @@ func (a *App) startTerminalAt(dir string) (string, error) {
 		shell = "/bin/bash"
 	}
 
+	// Verify directory before starting PTY.
+	if _, err := os.Stat(dir); err != nil {
+		return "", fmt.Errorf("directory not accessible: %w", err)
+	}
+
 	ctx, cancel := context.WithCancel(a.bootContext())
 	cmd := exec.CommandContext(ctx, shell, "-i")
 	cmd.Dir = dir
