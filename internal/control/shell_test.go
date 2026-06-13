@@ -26,10 +26,15 @@ func collectSink() (event.Sink, chan event.Event, *[]event.Event) {
 
 func waitForDone(t *testing.T, done chan event.Event) event.Event {
 	t.Helper()
+	return waitForDoneWithin(t, done, 5*time.Second)
+}
+
+func waitForDoneWithin(t *testing.T, done chan event.Event, d time.Duration) event.Event {
+	t.Helper()
 	select {
 	case e := <-done:
 		return e
-	case <-time.After(5 * time.Second):
+	case <-time.After(d):
 		t.Fatal("timed out waiting for TurnDone")
 		return event.Event{}
 	}
@@ -135,8 +140,7 @@ func TestRunShell_FailingCommand(t *testing.T) {
 	}
 	if result == nil {
 		t.Fatal("expected a ToolResult event")
-	}
-	if result.Tool.Err == "" {
+	} else if result.Tool.Err == "" {
 		t.Error("failing command should produce an error string")
 	}
 }
@@ -146,14 +150,19 @@ func TestRunShell_CancelStopsCommand(t *testing.T) {
 	ctrl := &Controller{sink: sink}
 
 	command := "sleep 30"
-	if sandbox.ResolveShell().Kind == sandbox.ShellPowerShell {
+	if sandbox.ResolveShell("", "", nil).Kind == sandbox.ShellPowerShell {
 		command = "Start-Sleep -Seconds 30"
 	}
 	ctrl.RunShell(command)
 	time.Sleep(100 * time.Millisecond)
 	ctrl.Cancel()
 
-	e := waitForDone(t, done)
+	// Cancel kills the shell via the run context, but cmd.Wait honours
+	// shellWaitDelay (and on Windows cmd.Cancel spawns taskkill /F /T), so
+	// TurnDone can arrive almost a full shellWaitDelay after Cancel. Wait
+	// comfortably longer than that grace — a flat 5s budget equalled
+	// shellWaitDelay and lost the race on a loaded windows runner.
+	e := waitForDoneWithin(t, done, shellWaitDelay+10*time.Second)
 	if e.Kind != event.TurnDone {
 		t.Fatalf("done event kind = %v, want TurnDone", e.Kind)
 	}

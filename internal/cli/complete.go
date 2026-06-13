@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -62,28 +63,33 @@ func (m *chatTUI) slashItems() []compItem {
 	items := []compItem{
 		{label: "/compact", insert: "/compact ", hint: i18n.M.CmdCompact},
 		{label: "/new", insert: "/new ", hint: i18n.M.CmdNew},
-		{label: "/clear", insert: "/clear", hint: i18n.M.CmdNew},
+		{label: "/clear", insert: "/clear", hint: i18n.M.CmdClear},
 		{label: "/resume", insert: "/resume ", hint: i18n.M.CmdResume},
+		{label: "/rename", insert: "/rename ", hint: i18n.M.CmdRename},
 		{label: "/rewind", insert: "/rewind", hint: i18n.M.CmdRewind},
 		{label: "/tree", insert: "/tree", hint: i18n.M.CmdTree},
 		{label: "/branch", insert: "/branch ", hint: i18n.M.CmdBranch},
 		{label: "/switch", insert: "/switch ", hint: i18n.M.CmdSwitchBranch},
 		{label: "/mcp", insert: "/mcp", hint: i18n.M.CmdMcp},
 		{label: "/model", insert: "/model ", hint: i18n.M.CmdModel, descend: true},
+		{label: "/provider", insert: "/provider ", hint: i18n.M.CmdProvider, descend: true},
 		{label: "/skills", insert: "/skills", hint: i18n.M.CmdSkill},
 		{label: "/hooks", insert: "/hooks ", hint: i18n.M.CmdHooks, descend: true},
 		{label: "/paste-image", insert: "/paste-image", hint: i18n.M.CmdPasteImage},
 		{label: "/output-style", insert: "/output-style", hint: i18n.M.CmdOutputStyle},
 		{label: "/verbose", insert: "/verbose", hint: i18n.M.CmdVerbose},
+		{label: "/diff-fold", insert: "/diff-fold", hint: i18n.M.CmdDiffFold},
 		{label: "/sandbox", insert: "/sandbox", hint: i18n.M.CmdSandbox},
 		{label: "/effort", insert: "/effort ", hint: i18n.M.CmdEffort, descend: true},
 		{label: "/auto-plan", insert: "/auto-plan ", hint: i18n.M.CmdAutoPlan, descend: true},
+		{label: "/reasoning-language", insert: "/reasoning-language ", hint: i18n.M.CmdReasonLang, descend: true},
 		{label: "/theme", insert: "/theme ", hint: i18n.M.CmdTheme, descend: true},
 		{label: "/language", insert: "/language ", hint: i18n.M.CmdLanguage, descend: true},
 		{label: "/context", insert: "/context", hint: i18n.M.CmdContext},
 		{label: "/stats", insert: "/stats ", hint: i18n.M.CmdStats},
 		{label: "/help", insert: "/help ", hint: i18n.M.CmdHelp},
 		{label: "/memory", insert: "/memory ", hint: i18n.M.CmdMemory},
+		{label: "/goal", insert: "/goal ", hint: i18n.M.CmdGoal},
 		{label: "/remember", insert: "/remember ", hint: i18n.M.CmdRemember},
 		{label: "/forget", insert: "/forget ", hint: i18n.M.CmdForget},
 		{label: "/quit", insert: "/quit", hint: i18n.M.CmdQuit},
@@ -135,7 +141,7 @@ func (m *chatTUI) updateCompletion() {
 		}
 		if !strings.ContainsAny(val, " \t\n") {
 			// Still naming the command itself.
-			if items := filterByPrefix(m.slashItems(), val); len(items) > 0 {
+			if items := fuzzyFilterSlash(m.slashItems(), val); len(items) > 0 {
 				m.setCompletion(compSlash, items, 0)
 				return
 			}
@@ -180,10 +186,16 @@ func (m *chatTUI) slashArgItems(val string) ([]compItem, int, bool) {
 }
 
 func (m *chatTUI) slashArgData() control.ArgData {
+	curProvider := ""
+	if parts := strings.SplitN(m.modelRef, "/", 2); len(parts) == 2 {
+		curProvider = parts[0]
+	}
 	data := control.ArgData{
-		Skills:       m.skills,
-		ModelRefs:    modelRefs(),
-		CurrentModel: m.modelRef,
+		Skills:          m.skills,
+		ModelRefs:       modelRefs(),
+		CurrentModel:    m.modelRef,
+		ProviderNames:   providerNames(),
+		CurrentProvider: curProvider,
 	}
 	if m.ctrl != nil {
 		data.DisabledSkills = m.ctrl.DisabledSkills()
@@ -285,16 +297,60 @@ func (m *chatTUI) setCompletion(kind compKind, items []compItem, replaceFrom int
 	m.completion = completion{active: true, kind: kind, items: items, sel: sel, replaceFrom: replaceFrom}
 }
 
-// filterByPrefix keeps items whose label starts with prefix (case-insensitive).
-func filterByPrefix(items []compItem, prefix string) []compItem {
-	lp := strings.ToLower(prefix)
-	var out []compItem
+// fuzzyFilterSlash returns the slash-menu items that match query as a
+// case-insensitive subsequence of their label, with prefix hits ranked first
+// (each group preserved in the input order from slashItems). An empty query
+// matches everything — the same behavior the old prefix filter had, since
+// every label trivially starts with "". A query that matches nothing returns
+// nil so the caller can fall through and close the menu.
+func fuzzyFilterSlash(items []compItem, query string) []compItem {
+	if query == "" {
+		out := make([]compItem, len(items))
+		copy(out, items)
+		return out
+	}
+	lq := strings.ToLower(query)
+	var prefix, rest []compItem
 	for _, it := range items {
-		if strings.HasPrefix(strings.ToLower(it.label), lp) {
-			out = append(out, it)
+		l := strings.ToLower(it.label)
+		switch {
+		case strings.HasPrefix(l, lq):
+			prefix = append(prefix, it)
+		case subsequenceMatch(l, lq):
+			rest = append(rest, it)
 		}
 	}
+	if len(prefix) == 0 && len(rest) == 0 {
+		return nil
+	}
+	out := make([]compItem, 0, len(prefix)+len(rest))
+	out = append(out, prefix...)
+	out = append(out, rest...)
 	return out
+}
+
+// subsequenceMatch reports whether query appears in target as a case-folded
+// subsequence (each rune of query in order, not necessarily contiguous). It is
+// the matcher behind the slash-menu fuzzy filter: typing "/modl" matches
+// "/model", "/memory", or any other label where m-o-d-l appear in that order.
+// Callers must pass already case-folded strings; an empty query matches
+// every target, so callers that want a "no match" signal on the empty input
+// should check that first.
+func subsequenceMatch(target, query string) bool {
+	if query == "" {
+		return true
+	}
+	qr := []rune(query)
+	ti := 0
+	for _, r := range target {
+		if r == qr[ti] {
+			ti++
+			if ti == len(qr) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // activeAtToken finds the @-reference token ending at the cursor (assumed at the
@@ -332,8 +388,18 @@ func (m *chatTUI) atItems(token string) []compItem {
 // unless frag starts with '.'. Top-level tokens also surface MCP resources.
 func (m *chatTUI) fileItems(token string) []compItem {
 	dir, frag := splitPathToken(token)
+	workspaceRoot := ""
+	if m.ctrl != nil {
+		workspaceRoot = m.ctrl.WorkspaceRoot()
+	}
 	readDir := dir
-	if readDir == "" {
+	if workspaceRoot != "" {
+		if readDir == "" {
+			readDir = workspaceRoot
+		} else if !filepath.IsAbs(readDir) {
+			readDir = filepath.Join(workspaceRoot, filepath.FromSlash(readDir))
+		}
+	} else if readDir == "" {
 		readDir = "."
 	}
 	entries, err := os.ReadDir(readDir)
@@ -403,9 +469,19 @@ func (m *chatTUI) searchFileRefs(frag string) []string {
 	if r, ok := m.fileSearchCache[frag]; ok {
 		return r
 	}
-	r := fileref.Search(".", frag, maxFileSearchItems)
-	m.fileSearchCache[frag] = r
-	return r
+	searchRoot := "."
+	if m.ctrl != nil {
+		if wr := m.ctrl.WorkspaceRoot(); wr != "" {
+			searchRoot = wr
+		}
+	}
+	results := fileref.Search(searchRoot, frag, maxFileSearchItems)
+	paths := make([]string, 0, len(results))
+	for _, r := range results {
+		paths = append(paths, r.Path)
+	}
+	m.fileSearchCache[frag] = paths
+	return paths
 }
 
 // splitPathToken splits a path token into (dir, frag): dir keeps its trailing
@@ -532,8 +608,26 @@ func (m *chatTUI) acceptCompletion() {
 
 var compSelStyle lipgloss.Style
 
+const completionPadCell = "\u00a0"
+
+// padCompletionLine pads completion rows with NBSPs instead of ASCII spaces.
+// Ultraviolet treats trailing ASCII spaces as clearable cells and may emit EL
+// or ECH erase sequences; mintty can leave stale CJK glyph cells after those
+// erases. NBSP is visually blank but forces the renderer to overwrite cells.
+func padCompletionLine(s string, w int) string {
+	pad := w - visibleWidth(s)
+	if pad <= 0 {
+		return s
+	}
+	return s + strings.Repeat(completionPadCell, pad)
+}
+
 // renderCompletion draws the menu above the input box: matching items, windowed
-// around the selection, the current row highlighted, hints dimmed.
+// around the selection, the current row highlighted, hints dimmed. Every line is
+// padded to m.width with non-clearable blank cells so bubbletea's delta renderer
+// has no ordinary trailing-space run to collapse into EL/ECH erase sequences.
+// That avoids ghost cells on terminals (mintty) with unreliable erases after
+// wide CJK glyphs.
 func (m chatTUI) renderCompletion() string {
 	if !m.completion.active || len(m.completion.items) == 0 {
 		return ""
@@ -557,14 +651,16 @@ func (m chatTUI) renderCompletion() string {
 	var b strings.Builder
 	for i := start; i < end; i++ {
 		it := items[i]
+		var line string
 		if i == m.completion.sel {
-			b.WriteString(accent("› ") + compSelStyle.Render(it.label))
+			line = accent("› ") + compSelStyle.Render(it.label)
 		} else {
-			b.WriteString("  " + it.label)
+			line = "  " + it.label
 		}
 		if it.hint != "" {
-			b.WriteString("  " + dim(it.hint))
+			line += "  " + dim(it.hint)
 		}
+		b.WriteString(padCompletionLine(line, m.width))
 		b.WriteByte('\n')
 	}
 	// A key-hint footer so users discover Tab — many won't know it accepts a
@@ -573,6 +669,6 @@ func (m chatTUI) renderCompletion() string {
 	if m.completion.kind == compAt {
 		hint = i18n.M.CompHintFile
 	}
-	b.WriteString(dim(hint))
+	b.WriteString(padCompletionLine(dim(hint), m.width))
 	return b.String()
 }

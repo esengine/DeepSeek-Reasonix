@@ -16,15 +16,26 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"reasonix/internal/netclient"
 	"reasonix/internal/provider"
 )
+
+// defaultStreamIdleTimeout caps how long a started SSE stream may go without any
+// bytes before it's treated as a dropped connection. A half-open TCP connection
+// (e.g. a proxy switched mid-stream) sends no RST, so scanner.Scan() would block
+// forever; this turns that hang into a recoverable error. Generous on purpose —
+// live streams emit tokens/keepalives far more often. Stored per-client
+// (client.idleTimeout) so a test can shorten it without a shared global that
+// would race other streams' watchdogs.
+const defaultStreamIdleTimeout = 120 * time.Second
 
 func init() {
 	provider.Register("openai", New)
@@ -50,6 +61,12 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	}
 	protocol, _ := cfg.Extra["reasoning_protocol"].(string)
 	protocol = normalizeReasoningProtocol(protocol)
+	vision, _ := cfg.Extra["vision"].(bool)
+	visionDetail, _ := cfg.Extra["vision_detail"].(string)
+	visionDetail = strings.ToLower(strings.TrimSpace(visionDetail))
+	if visionDetail != "low" && visionDetail != "high" {
+		visionDetail = "" // auto — omit the field
+	}
 	deepseek := protocol == "deepseek" || (protocol == "" && IsDeepSeek(cfg.BaseURL))
 	minimax := protocol == "" && IsMiniMax(cfg.BaseURL)
 	switch {
@@ -93,15 +110,18 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		return nil, fmt.Errorf("openai: network: %w", err)
 	}
 	return &client{
-		name:     name,
-		apiKey:   cfg.APIKey,
-		keyEnv:   keyEnv,
-		baseURL:  strings.TrimRight(cfg.BaseURL, "/"),
-		model:    cfg.Model,
-		deepseek: deepseek,
-		minimax:  minimax,
-		effort:   effort,
-		http:     httpClient,
+		name:         name,
+		apiKey:       cfg.APIKey,
+		keyEnv:       keyEnv,
+		baseURL:      strings.TrimRight(cfg.BaseURL, "/"),
+		model:        cfg.Model,
+		deepseek:     deepseek,
+		minimax:      minimax,
+		vision:       vision,
+		visionDetail: visionDetail,
+		effort:       effort,
+		http:         httpClient,
+		idleTimeout:  defaultStreamIdleTimeout,
 	}, nil
 }
 
@@ -116,18 +136,31 @@ func newHTTPClient(cfg provider.Config) (*http.Client, error) {
 }
 
 type client struct {
-	name     string
-	apiKey   string
-	keyEnv   string // api_key_env name, surfaced in auth errors
-	baseURL  string
-	model    string
-	http     *http.Client
-	deepseek bool
-	minimax  bool   // true for api.minimaxi.com — emits MiniMax-M3's thinking knob instead of reasoning_effort
-	effort   string // reasoning_effort for OpenAI; thinking.type for MiniMax; "" = auto/provider default
+	name         string
+	apiKey       string
+	keyEnv       string // api_key_env name, surfaced in auth errors
+	baseURL      string
+	model        string
+	http         *http.Client
+	deepseek     bool
+	minimax      bool          // true for api.minimaxi.com — emits MiniMax-M3's thinking knob instead of reasoning_effort
+	vision       bool          // model accepts image input — embed attached images as image_url parts
+	visionDetail string        // image_url detail hint (low|high); "" = auto/omit
+	effort       string        // reasoning_effort for OpenAI; thinking.type for MiniMax; "" = auto/provider default
+	idleTimeout  time.Duration // SSE stall watchdog window; defaultStreamIdleTimeout unless a test overrides
+	authed       atomic.Bool   // a request has succeeded — gate transient-401 retry
 }
 
 func (c *client) Name() string { return c.name }
+
+func (c *client) sendOpts() provider.SendOptions {
+	return provider.SendOptions{
+		Provider:   c.name,
+		KeyEnv:     c.keyEnv,
+		KeyPresent: c.apiKey != "",
+		RetryAuth:  c.authed.Load(),
+	}
+}
 
 func normalizeReasoningProtocol(raw string) string {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
@@ -167,10 +200,11 @@ func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provi
 		httpReq.Header.Set("Accept", "text/event-stream")
 		return httpReq, nil
 	}
-	resp, err := provider.SendWithRetry(ctx, c.http, c.name, c.keyEnv, newReq)
+	resp, err := provider.SendWithRetry(ctx, c.http, c.sendOpts(), newReq)
 	if err != nil {
 		return nil, err
 	}
+	c.authed.Store(true)
 
 	out := make(chan provider.Chunk)
 	go c.streamWithReconnect(ctx, resp, newReq, out)
@@ -205,7 +239,7 @@ func (c *client) streamWithReconnect(ctx context.Context, resp *http.Response, n
 			out <- provider.Chunk{Type: provider.ChunkError, Err: err}
 			return
 		}
-		next, rerr := provider.SendWithRetry(ctx, c.http, c.name, c.keyEnv, newReq)
+		next, rerr := provider.SendWithRetry(ctx, c.http, c.sendOpts(), newReq)
 		if rerr != nil {
 			out <- provider.Chunk{Type: provider.ChunkError, Err: rerr}
 			return
@@ -221,16 +255,16 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 	src := provider.SanitizeToolPairing(req.Messages)
 	msgs := make([]chatMessage, len(src))
 	for i, m := range src {
-		// reasoning_content is deliberately NOT sent back: it's a response-only
-		// field. DeepSeek counts re-sent reasoning as billable prompt input
-		// (measured ~500 extra tokens per turn on a reasoner chain); MiMo accepts
-		// it but does not require it (verified empirically: multi-turn tool-call
-		// sessions work fine without it, saving ~18 tokens/turn). The session
-		// still keeps it (for display/archive); we just don't pay to re-upload it.
 		cm := chatMessage{
 			Role:       string(m.Role),
 			ToolCallID: m.ToolCallID,
 			Name:       m.Name,
+		}
+		// DeepSeek thinking mode 400s a tool_calls turn whose reasoning_content was
+		// dropped on a cache-miss replay ("reasoning_content … must be passed back"),
+		// so round it back — but only on the turn that carries the tool calls.
+		if c.deepseek && m.Role == provider.RoleAssistant && len(m.ToolCalls) > 0 {
+			cm.ReasoningContent = m.ReasoningContent
 		}
 		for _, tc := range m.ToolCalls {
 			wire := chatToolCall{ID: tc.ID, Type: "function"}
@@ -238,9 +272,11 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 			wire.Function.Arguments = tc.Arguments
 			cm.ToolCalls = append(cm.ToolCalls, wire)
 		}
-		if m.Role != provider.RoleAssistant || len(cm.ToolCalls) == 0 || m.Content != "" {
-			content := m.Content
-			cm.Content = &content
+		switch {
+		case c.vision && m.Role == provider.RoleUser && len(m.Images) > 0:
+			cm.Content = imageContentParts(m.Content, m.Images, c.visionDetail)
+		case m.Role != provider.RoleAssistant || len(cm.ToolCalls) == 0 || m.Content != "":
+			cm.Content = m.Content
 		}
 		msgs[i] = cm
 	}
@@ -290,17 +326,43 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<- provider.Chunk) (emitted bool, _ error) {
 	defer resp.Body.Close()
 
-	// Close the response body when the context is canceled so scanner.Scan()
-	// unblocks instead of hanging on a stalled connection. done lets the goroutine
-	// exit when readStream returns normally — otherwise it outlives the call, and
-	// blocks forever on a non-cancellable context whose Done() is nil.
+	// Close the response body when the context is canceled (user interrupt) or the
+	// stream stalls past c.idleTimeout, so scanner.Scan() unblocks instead of
+	// hanging on a half-open connection. done lets the watchdog exit on a normal
+	// return — otherwise it outlives the call and blocks forever on a non-cancellable
+	// context whose Done() is nil. The watchdog owns the timer; the read loop only
+	// pings the buffered activity channel, so there's no Timer.Reset race.
+	idleTimeout := c.idleTimeout
+	if idleTimeout <= 0 { // zero-value client (constructed without New)
+		idleTimeout = defaultStreamIdleTimeout
+	}
 	done := make(chan struct{})
 	defer close(done)
+	activity := make(chan struct{}, 1)
+	var stalled atomic.Bool
 	go func() {
-		select {
-		case <-ctx.Done():
-			resp.Body.Close()
-		case <-done:
+		idle := time.NewTimer(idleTimeout)
+		defer idle.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				resp.Body.Close()
+				return
+			case <-idle.C:
+				stalled.Store(true)
+				resp.Body.Close()
+				return
+			case <-activity:
+				if !idle.Stop() {
+					select {
+					case <-idle.C:
+					default:
+					}
+				}
+				idle.Reset(idleTimeout)
+			case <-done:
+				return
+			}
 		}
 	}()
 
@@ -308,18 +370,24 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 	started := map[int]bool{}
 	var order []int
 	var lastFinishReason string
+	var sawDone bool
 	var think thinkSplitter
 
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
 	for scanner.Scan() {
+		select { // ping the idle watchdog; non-blocking so a full buffer is fine
+		case activity <- struct{}{}:
+		default:
+		}
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || !strings.HasPrefix(line, "data:") {
 			continue
 		}
 		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 		if data == "[DONE]" {
+			sawDone = true
 			break
 		}
 
@@ -384,8 +452,17 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 		}
 	}
 
+	if stalled.Load() {
+		return emitted, fmt.Errorf("%s: stream stalled — no data for %s, connection likely dropped", c.name, idleTimeout)
+	}
 	if err := scanner.Err(); err != nil {
 		return emitted, fmt.Errorf("%s: read stream: %w", c.name, err)
+	}
+	// A proxy that idle-closes with a clean FIN ends the scan with no error. Without
+	// this check the turn would be committed as complete — including half-streamed
+	// tool-call arguments, which then 400 on every replay (#3953).
+	if !sawDone && lastFinishReason == "" {
+		return emitted, fmt.Errorf("%s: stream ended before completion: %w", c.name, io.ErrUnexpectedEOF)
 	}
 
 	if r, txt := think.flush(); r != "" || txt != "" {
@@ -466,15 +543,36 @@ type chatMessage struct {
 	Role string `json:"role"`
 	// content is always present (never omitted): DeepSeek's strict deserializer
 	// rejects a message missing the field. A pure tool_calls assistant turn
-	// serializes as null (OpenAI-spec, and what strict clones expect); every
-	// other role/message serializes as a string, empty included — null is
-	// rejected by some backends for a tool message.
-	Content    *string        `json:"content"`
-	ToolCalls  []chatToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string         `json:"tool_call_id,omitempty"`
-	Name       string         `json:"name,omitempty"`
-	// no reasoning_content field: it is a response-only signal and is never sent
-	// back upstream — re-uploading it is paid prompt input.
+	// serializes as null (nil here); a string for every other text message
+	// (empty included — null is rejected by some backends for a tool message);
+	// and a []chatContentPart array for a vision user turn carrying images.
+	Content          any            `json:"content"`
+	ReasoningContent string         `json:"reasoning_content,omitempty"`
+	ToolCalls        []chatToolCall `json:"tool_calls,omitempty"`
+	ToolCallID       string         `json:"tool_call_id,omitempty"`
+	Name             string         `json:"name,omitempty"`
+}
+
+type chatContentPart struct {
+	Type     string        `json:"type"`
+	Text     string        `json:"text,omitempty"`
+	ImageURL *chatImageURL `json:"image_url,omitempty"`
+}
+
+type chatImageURL struct {
+	URL    string `json:"url"`
+	Detail string `json:"detail,omitempty"`
+}
+
+func imageContentParts(text string, images []string, detail string) []chatContentPart {
+	parts := make([]chatContentPart, 0, len(images)+1)
+	if text != "" {
+		parts = append(parts, chatContentPart{Type: "text", Text: text})
+	}
+	for _, url := range images {
+		parts = append(parts, chatContentPart{Type: "image_url", ImageURL: &chatImageURL{URL: url, Detail: detail}})
+	}
+	return parts
 }
 
 type chatTool struct {

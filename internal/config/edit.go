@@ -29,12 +29,20 @@ const (
 	listDeny  = "deny"
 )
 
-// SetDefaultModel points default_model at an existing provider. It errors if no
-// provider by that name is configured, so a UI can't strand the config on a
-// model that doesn't exist.
+// SetDefaultModel points default_model at an existing model. It accepts both
+// forms used by the runtime resolver:
+//   - "provider"          — the provider's own default model;
+//   - "provider/model"    — that specific model under that provider.
+//
+// Either is rejected when the target does not exist, so a UI can't strand
+// the config on a model that doesn't exist.
 func (c *Config) SetDefaultModel(name string) error {
-	if _, ok := c.Provider(name); !ok {
-		return fmt.Errorf("set default: no provider %q (configured: %s)", name, c.providerNames())
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("set default: empty name")
+	}
+	if _, ok := c.ResolveModel(name); !ok {
+		return fmt.Errorf("set default: no such model %q (configured: %s)", name, c.providerNames())
 	}
 	c.DefaultModel = name
 	return nil
@@ -65,6 +73,20 @@ func (c *Config) SetAutoPlan(mode string) error {
 		c.Agent.AutoPlan = "on"
 	default:
 		return fmt.Errorf("auto_plan %q: must be off|on", mode)
+	}
+	return nil
+}
+
+// SetUIShortcutLayout selects the CLI keyboard shortcut layout. "classic" keeps
+// historical behavior; "desktop" enables the two-axis desktop-style shortcuts.
+func (c *Config) SetUIShortcutLayout(layout string) error {
+	switch strings.ToLower(strings.TrimSpace(layout)) {
+	case "", "classic", "default", "legacy", "off":
+		c.UI.ShortcutLayout = "classic"
+	case "desktop", "dual", "dual-axis", "dual_axis":
+		c.UI.ShortcutLayout = "desktop"
+	default:
+		return fmt.Errorf("shortcut_layout %q: must be classic|desktop", layout)
 	}
 	return nil
 }
@@ -114,6 +136,22 @@ func (c *Config) SetLanguage(lang string) error {
 	return nil
 }
 
+// SetReasoningLanguage pins the preferred language for visible reasoning text.
+// Empty/auto follows the conversation language.
+func (c *Config) SetReasoningLanguage(lang string) error {
+	switch strings.ToLower(strings.TrimSpace(lang)) {
+	case "", "auto", "follow", "conversation", "detect", "default", "model", "model-default", "model_default", "provider":
+		c.Agent.ReasoningLanguage = ""
+	case "zh", "cn", "chinese", "中文":
+		c.Agent.ReasoningLanguage = "zh"
+	case "en", "english":
+		c.Agent.ReasoningLanguage = "en"
+	default:
+		return fmt.Errorf("reasoning language %q: must be auto|zh|en", lang)
+	}
+	return nil
+}
+
 // SetDesktopLanguage pins the desktop UI language. It intentionally does not
 // modify Config.Language, which is used by the CLI/model-facing runtime.
 func (c *Config) SetDesktopLanguage(lang string) error {
@@ -149,7 +187,7 @@ func (c *Config) SetDesktopAppearance(theme, style string) error {
 	}
 	normalized := normalizeThemeStyle(style)
 	if normalized == "" {
-		return fmt.Errorf("desktop theme style %q: must be graphite|ember|aurora|midnight|sandstone|porcelain|linen|glacier", style)
+		return fmt.Errorf("desktop theme style %q: must be graphite|aurora|slate|carbon|nocturne|amber", style)
 	}
 	c.Desktop.ThemeStyle = normalized
 	return nil
@@ -170,9 +208,101 @@ func (c *Config) SetDesktopCloseBehavior(mode string) error {
 	return nil
 }
 
+// SetDesktopDisplayMode sets the transcript display mode. UI-only.
+func (c *Config) SetDesktopDisplayMode(mode string) error {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "compact", "minimal":
+		c.Desktop.DisplayMode = "compact"
+	case "", "standard":
+		c.Desktop.DisplayMode = "standard"
+	default:
+		return fmt.Errorf("display mode %q: must be standard|compact", mode)
+	}
+	return nil
+}
+
+// SetDesktopStatusBarStyle sets the desktop status bar metric label style.
+// UI-only; it must not affect CLI output or provider-visible request data.
+func (c *Config) SetDesktopStatusBarStyle(style string) error {
+	switch strings.ToLower(strings.TrimSpace(style)) {
+	case "icon", "icons":
+		c.Desktop.StatusBarStyle = "icon"
+	case "", "text", "label", "labels":
+		c.Desktop.StatusBarStyle = "text"
+	default:
+		return fmt.Errorf("status bar style %q: must be icon|text", style)
+	}
+	return nil
+}
+
+// SetDesktopStatusBarItems sets the ordered visible desktop status bar items.
+// UI-only; it must not affect CLI output or provider-visible request data.
+func (c *Config) SetDesktopStatusBarItems(items []string) error {
+	out := make([]string, 0, len(items))
+	seen := map[string]bool{}
+	for _, raw := range items {
+		id := strings.TrimSpace(raw)
+		if id == "" || seen[id] {
+			continue
+		}
+		if !knownDesktopStatusBarItems[id] {
+			return fmt.Errorf("status bar item %q: unknown item", id)
+		}
+		out = append(out, id)
+		seen[id] = true
+	}
+	if len(out) == 0 {
+		out = DefaultDesktopStatusBarItems()
+	}
+	c.Desktop.StatusBarItems = out
+	return nil
+}
+
+// SetDesktopCheckUpdates sets whether the desktop app checks for updates on
+// startup. Manual checks remain available in Settings regardless of this value.
+func (c *Config) SetDesktopCheckUpdates(enabled bool) error {
+	c.Desktop.CheckUpdates = &enabled
+	return nil
+}
+
+// SetColdResumePrune toggles auto-elision of stale tool results on cold resume.
+func (c *Config) SetColdResumePrune(enabled bool) error {
+	c.Agent.ColdResumePrune = &enabled
+	return nil
+}
+
+// SetDesktopTelemetry sets whether the desktop sends the anonymous launch ping.
+func (c *Config) SetDesktopTelemetry(enabled bool) error {
+	c.Desktop.Telemetry = &enabled
+	return nil
+}
+
+// SetDesktopMetrics sets whether the desktop sends opt-in aggregate agent metrics.
+func (c *Config) SetDesktopMetrics(enabled bool) error {
+	c.Desktop.Metrics = &enabled
+	return nil
+}
+
 // SetUICloseBehavior is kept for callers compiled against the old edit API.
 func (c *Config) SetUICloseBehavior(mode string) error {
 	return c.SetDesktopCloseBehavior(mode)
+}
+
+// SetExpandThinking sets whether the desktop reasoning/thinking section is
+// expanded by default. It is desktop-only and must not affect CLI output or
+// provider-visible request data.
+func (c *Config) SetExpandThinking(on bool) error {
+	c.Desktop.ExpandThinking = on
+	return nil
+}
+
+// SetShowReasoning sets the CLI's default verbose-reasoning preference. When
+// true, thinking text is shown in the chat TUI on startup; when false (the
+// default), it stays collapsed until the user toggles it with Ctrl+O or
+// /verbose.
+func (c *Config) SetShowReasoning(on bool) error {
+	c.UI.ShowReasoning = on
+	return nil
 }
 
 // SetProviderThinking updates a provider's provider-specific thinking mode knob.
@@ -657,6 +787,22 @@ func SaveMinimalProjectAutoPlan(path, mode string) (string, error) {
 auto_plan = %q
 `, cfg.Agent.AutoPlan)
 	return cfg.Agent.AutoPlan, writeConfigFile(path, body)
+}
+
+// SaveMinimalProjectReasoningLanguage writes a new project config that only
+// overrides [agent].reasoning_language.
+func SaveMinimalProjectReasoningLanguage(path, lang string) (string, error) {
+	cfg := Default()
+	if err := cfg.SetReasoningLanguage(lang); err != nil {
+		return "", err
+	}
+	body := fmt.Sprintf(`# Reasonix project configuration.
+# Project-local overrides are merged over the user config.
+
+[agent]
+reasoning_language = %q
+`, cfg.ReasoningLanguage())
+	return cfg.ReasoningLanguage(), writeConfigFile(path, body)
 }
 
 func writeConfigFile(path, body string) error {

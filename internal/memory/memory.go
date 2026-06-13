@@ -142,7 +142,13 @@ func (s *Set) Block() string {
 			"Read the linked file with read_file when one looks relevant, and before acting on one that names a file, function, or flag, verify it still exists. " +
 			"Save new durable facts with the `remember` tool; delete ones that turn out wrong with `forget`.\n\n")
 		b.WriteString(idx)
-		fmt.Fprintf(&b, "\n\n(stored under %s)\n", s.Store.Dir)
+		var dirs []string
+		for _, d := range s.Store.dirs() {
+			if d != "" {
+				dirs = append(dirs, d)
+			}
+		}
+		fmt.Fprintf(&b, "\n\n(stored under %s)\n", strings.Join(dirs, " and "))
 	}
 	return b.String()
 }

@@ -4,13 +4,77 @@ import (
 	"context"
 	"strings"
 
+	"reasonix/internal/agent"
 	"reasonix/internal/skill"
 )
 
 // PlanModeMarker is prepended to every user turn while plan mode is on. It rides
 // in the user message (not the system prompt or tools), so the cache-stable
 // prompt prefix is left untouched and the toggle costs nothing in cache hits.
-const PlanModeMarker = "[Plan mode — read-only. Explore the codebase first (read_file, ls, grep, glob, web_fetch, task are available; writers are refused by the harness), then present a LAYERED plan as your reply and stop — do not write files, edit, or run side-effecting bash. Structure the plan as a two-level markdown list so it becomes a layered task list: each PHASE is a top-level numbered list item (a coherent milestone, e.g. \"1. Add the config loader\"), and each phase's concrete, verifiable sub-steps are bullets indented beneath it (e.g. \"   - parse the TOML into Config\"). Use plain numbered list items for phases — do NOT write phases as markdown headings (##, ###) — so both levels parse. Keep phases few (about 2-6). The user will be asked to approve before any changes are made.]"
+const PlanModeMarker = "[Plan mode — read-only. Explore the codebase first (read_file, ls, grep, glob, web_fetch, task, ask are available; writers are refused by the harness). Before planning, if a decision that is genuinely the user's — tech stack, an ambiguous requirement, scope, an irreversible choice — would materially shape the plan and you can't settle it from the codebase or a sensible default, use the ask tool to clarify it first; otherwise pick the obvious default and state the assumption in the plan instead of asking. Then present a LAYERED plan as your reply and stop — do not write files, edit, or run side-effecting bash. Structure the plan as a two-level markdown list so it becomes a layered task list: each PHASE is a top-level numbered list item (a coherent milestone, e.g. \"1. Add the config loader\"), and each phase's concrete, verifiable sub-steps are bullets indented beneath it (e.g. \"   - parse the TOML into Config\"). Use plain numbered list items for phases — do NOT write phases as markdown headings (##, ###) — so both levels parse. Keep phases few (about 2-6). The user will be asked to approve before any changes are made.]"
+
+const (
+	activeGoalOpen  = "<active-goal>"
+	activeGoalClose = "</active-goal>"
+)
+
+const (
+	GoalStatusRunning  = "running"
+	GoalStatusComplete = "complete"
+	GoalStatusBlocked  = "blocked"
+	GoalStatusStopped  = "stopped"
+)
+
+// StripComposePrefixes removes controller-injected prefixes from a composed
+// user message so that the display text matches what the user actually typed.
+// It strips the PlanModeMarker plus transient XML blocks such as
+// <reasoning-language>, <memory-update>, and <background-jobs> that Compose
+// prepends to user turns. This is used as a fallback when no .display.json
+// sidecar recording exists (e.g. sessions created before the display-recording
+// feature, or synthetic user messages injected by the controller).
+func StripComposePrefixes(content string) string {
+	s := agent.StripTransientUserBlocks(content)
+	s = strings.TrimPrefix(s, PlanModeMarker+"\n\n")
+	s = strings.TrimPrefix(s, PlanModeMarker)
+	s = strings.TrimSpace(s)
+	return s
+}
+
+// IsSyntheticUserMessage returns true if the content matches one of the known
+// synthetic user messages injected by the controller or agent loop (plan
+// approval, stream recovery, readiness retry, etc.). These should not be shown
+// in the chat UI.
+func IsSyntheticUserMessage(content string) bool {
+	trimmed := strings.TrimSpace(content)
+	if trimmed == planApprovedMessage {
+		return true
+	}
+	for _, prefix := range syntheticPrefixes {
+		if strings.HasPrefix(trimmed, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// syntheticPrefixes must be kept in sync with the synthetic user messages
+// injected by the controller (planApprovedMessage), agent loop
+// (streamRecoveryMessage, finalReadinessRetryMessage, emptyFinalRetryMessage,
+// executorHandoffRetryMessage in internal/agent/agent.go), and compaction
+// folds (internal/agent/compact.go), which store summaries as user-role
+// messages the chat UI must never render as user bubbles (#3653).
+var syntheticPrefixes = []string{
+	"Plan approved — plan mode is off",
+	"Host final-answer readiness check failed",
+	"You are already in the executor phase",
+	"The previous assistant response was interrupted while a tool call",
+	"The previous assistant response was interrupted during streaming",
+	"The previous assistant response was interrupted before visible",
+	"The previous assistant response finished without any visible answer",
+	"<compaction-summary>",
+	"Summary of the later conversation (compacted from here on):",
+	"Summary of earlier conversation (compacted up to here):",
+}
 
 // Compose applies the plan-mode marker to a turn's text when plan mode is on,
 // returning the message to actually send to the model. The frontend keeps
@@ -18,12 +82,20 @@ const PlanModeMarker = "[Plan mode — read-only. Explore the codebase first (re
 func (c *Controller) Compose(text string) string {
 	c.mu.Lock()
 	plan := c.planMode
+	goal := c.goal
+	goalStatus := c.goalStatus
 	notes := c.pendingMemory
 	c.pendingMemory = nil
 	c.mu.Unlock()
 
+	if strings.TrimSpace(goal) != "" && goalStatus == GoalStatusRunning {
+		text = activeGoalBlock(goal) + "\n\n" + text
+	}
 	if plan {
 		text = PlanModeMarker + "\n\n" + text
+	}
+	if note := reasoningLanguageBlock(c.reasoningLanguage); note != "" {
+		text = note + "\n\n" + text
 	}
 
 	// Memory added mid-session rides the turn (never the cached system prefix),
@@ -44,18 +116,49 @@ func (c *Controller) Compose(text string) string {
 	// model learns of completions even though the user-facing notices don't reach
 	// its context. Like memory, this never touches the cache-stable prefix.
 	if c.jobs != nil {
-		if note := c.jobs.DrainCompletedNote(); note != "" {
+		if note := c.jobs.DrainCompletedNoteForSession(c.parentSessionID()); note != "" {
 			text = "<background-jobs>\n" + note + "\n</background-jobs>\n\n" + text
 		}
 	}
 	return text
 }
 
-// MemoryQuickAddNote parses the legacy "# <note>" memory shortcut. The space
-// after "#" is intentional: "#7", "#issue", and "#标题" are ordinary user
-// prompts, not memory writes.
+func reasoningLanguageBlock(lang string) string {
+	switch strings.ToLower(strings.TrimSpace(lang)) {
+	case "zh":
+		return "<reasoning-language>\nVisible reasoning/thinking text preference: use Simplified Chinese when the provider exposes reasoning text. Keep code, identifiers, file paths, shell commands, and untranslated technical terms in their original form. This preference does not override an explicit user request for the final answer language.\n</reasoning-language>"
+	case "en":
+		return "<reasoning-language>\nVisible reasoning/thinking text preference: use English when the provider exposes reasoning text. Keep code, identifiers, file paths, shell commands, and untranslated technical terms in their original form. This preference does not override an explicit user request for the final answer language.\n</reasoning-language>"
+	default:
+		return ""
+	}
+}
+
+func activeGoalBlock(goal string) string {
+	goal = strings.TrimSpace(goal)
+	goal = strings.ReplaceAll(goal, activeGoalClose, "<\\/active-goal>")
+	var b strings.Builder
+	b.WriteString(activeGoalOpen)
+	b.WriteString("\n")
+	b.WriteString(goal)
+	b.WriteString("\n\n")
+	b.WriteString("Goal mode: pursue this goal autonomously. Keep working across turns until the goal is complete. Prefer sensible defaults over asking the user; use ask only when you are truly blocked on a user-owned decision. Do not stop after describing a plan; execute the next useful step. End every goal-mode assistant reply with exactly one status marker on its own line: [goal:continue], [goal:complete], or [goal:blocked:<short reason>].")
+	b.WriteString("\n")
+	b.WriteString(activeGoalClose)
+	return b.String()
+}
+
+// MemoryQuickAddNote parses the "# <note>" memory shortcut. The space after
+// "#" is intentional: "#7", "#issue", and "#标题" are ordinary user prompts,
+// not memory writes. Multi-line input starting with "# " is NOT treated as a
+// quick-add note — it is almost certainly a Markdown heading in a structured
+// prompt (e.g. "# Context\n\n- file.go\n# Objective"). Only single-line input
+// may be a quick-add note.
 func MemoryQuickAddNote(input string) (note string, ok bool) {
 	trimmed := strings.TrimSpace(input)
+	if strings.Contains(trimmed, "\n") {
+		return "", false
+	}
 	if strings.HasPrefix(trimmed, "# ") || strings.HasPrefix(trimmed, "#\t") {
 		return strings.TrimSpace(trimmed[1:]), true
 	}
@@ -72,6 +175,35 @@ func RememberCommandNote(input string) (note string, ok bool) {
 		return strings.TrimSpace(trimmed[len("/remember"):]), true
 	default:
 		return "", false
+	}
+}
+
+type GoalCommandAction int
+
+const (
+	GoalCommandStatus GoalCommandAction = iota + 1
+	GoalCommandSet
+	GoalCommandClear
+)
+
+type GoalCommand struct {
+	Action GoalCommandAction
+	Text   string
+}
+
+func ParseGoalCommand(input string) (GoalCommand, bool) {
+	trimmed := strings.TrimSpace(input)
+	if trimmed != "/goal" && !strings.HasPrefix(trimmed, "/goal ") && !strings.HasPrefix(trimmed, "/goal\t") {
+		return GoalCommand{}, false
+	}
+	args := strings.TrimSpace(trimmed[len("/goal"):])
+	switch strings.ToLower(args) {
+	case "", "status":
+		return GoalCommand{Action: GoalCommandStatus}, true
+	case "clear", "off", "stop", "done":
+		return GoalCommand{Action: GoalCommandClear}, true
+	default:
+		return GoalCommand{Action: GoalCommandSet, Text: args}, true
 	}
 }
 

@@ -36,8 +36,12 @@ var Chinese = Messages{
 	ResumeBadIndexFmt:   "请选择 1–%d 的会话（用 /resume 查看列表）",
 	ResumeAlreadyActive: "已在该会话中",
 	ResumedTitle:        "已恢复会话",
-	ResumePickTitle:     "选择要恢复的会话",
-	ResumePickHint:      "↑/↓ 移动 · Enter 恢复 · Esc 取消",
+
+	RenameUsage:     "用法：/rename <新名称>  或  /rename <序号> <新名称>",
+	RenameNoSession: "当前没有活跃会话可重命名",
+	RenameDoneFmt:   "会话已重命名为 %q",
+	ResumePickTitle: "选择要恢复的会话",
+	ResumePickHint:  "↑/↓ 移动 · Enter 恢复 · Esc 取消",
 
 	ChatThinking:                "思考中…",
 	ChatThoughtForFmt:           "思考了 %d 秒",
@@ -45,11 +49,11 @@ var Chinese = Messages{
 	ChatToolWorkingFmt:          "%s 运行中 · %d 秒",
 	ChatStatusRetryingFmt:       "%s 正在重试 (%d/%d)… (Esc 取消)",
 	ChatStatusIdle:              "就绪",
-	ChatStatusYoloIdle:          "已跳过批准",
-	ChatStatusCycleHint:         "shift+tab 循环切换",
+	ChatStatusYoloIdle:          "已跳过工具批准",
+	ChatStatusCycleHint:         "shift+tab 切换计划 · ctrl+y yolo",
 	ChatStatusCacheNowFmt:       "本次命中 %s",
 	ChatStatusCacheAvgFmt:       "平均 %s",
-	ChatStatusPlanApproval:      "Enter/y 批准并执行 · n/Esc 继续规划 · PgUp/PgDn 滚动",
+	ChatStatusPlanApproval:      "Enter/y 批准并执行 · n/Esc 继续规划 · PgUp/PgDn/Ctrl+Home/End 滚动",
 	PlanApprovalPrompt:          "计划已生成（见上方）— Enter/y 批准执行,n/Esc 继续规划",
 	ChatStatusToolApproval:      "1 本次允许 · 2 本会话允许此范围 · 提供时 3/4 为前缀或保存 · n/Esc 拒绝 · Ctrl-C 取消本轮",
 	AskTypeSomething:            "自己输入",
@@ -70,6 +74,8 @@ var Chinese = Messages{
 	PermissionAlreadyAllowedFmt: "授权已由 %s 中的规则覆盖：%s",
 	PermissionSaveFailedFmt:     "保存授权 %s 失败：%v",
 	DiffFoldedFmt:               "… 还有 %d 行",
+	DiffFoldEnabledFmt:          "diff 已折叠至 %d 行（/diff-fold 展开）",
+	DiffFoldDisabled:            "diff 已展开 — 显示全部行（/diff-fold 折叠）",
 
 	OutputStyleNone:    "没有可用的输出风格",
 	OutputStyleHeader:  "输出风格：",
@@ -90,12 +96,15 @@ var Chinese = Messages{
 
 	SlashCompactDone:   "已压缩 — 旧的中段换成一段摘要，最近几轮保留原样",
 	SlashCompactFailed: "压缩失败",
-	SlashNewDone:       "已开启新上下文 — 之前的对话已存档",
+	SlashNewDone:       "已开启新会话 — 之前的对话已存档",
 	SlashNewFailed:     "新建会话失败",
+	SlashClearPrompt:   "清空当前上下文且不保存？",
+	SlashClearDone:     "已清空当前上下文",
+	SlashClearFailed:   "清空当前上下文失败",
 	SlashUnavailable:   "当前构建不支持该命令",
 	SlashUnknown:       "未知命令",
 	SlashTodoCleared:   "已清除任务清单",
-	SlashHelp:          "命令：/compact · /new（/clear）· /resume · /rewind · /tree · /branch · /switch · /todo · /verbose · /model（切换模型）· /effort · /theme · /language · /mcp · /skills · /hooks · /paste-image · /memory · /remember · /quit · /help · 以及 skills（/init、/explore …）",
+	SlashHelp:          "命令：/compact · /new · /clear · /resume · /rewind · /tree · /branch · /switch · /todo · /verbose · /model（切换模型）· /effort · /theme · /language · /mcp · /skills · /hooks · /paste-image · /memory · /goal · /remember · /quit · /help · 以及 skills（/init、/explore …）",
 
 	SkillPickerTitle:             "Skills",
 	SkillPickerAvailableFmt:      "%d 个可用",
@@ -152,17 +161,20 @@ var Chinese = Messages{
 	ShellExecTimeoutFmt: "Shell 命令超时（>%s）",
 	ShellModeHint:       "Enter 执行 Shell · Esc 取消 · 点击输出展开",
 
-	CmdNew:          "清空上下文并保存历史",
+	CmdNew:          "开启新会话并保存历史",
+	CmdClear:        "丢弃当前上下文",
 	CmdCompact:      "压缩上下文",
 	CmdRewind:       "回滚到更早的一轮",
 	CmdTree:         "查看对话分支树",
 	CmdBranch:       "创建对话分支",
 	CmdSwitchBranch: "切换对话分支",
 	CmdResume:       "恢复已保存的会话",
+	CmdRename:       "重命名会话",
 	CmdModel:        "切换模型",
 	CmdMemory:       "查看记忆文件",
+	CmdGoal:         "设置或清除当前目标",
 	CmdRemember:     "保存一条记忆",
-	CmdForget:       "删除一条已存记忆",
+	CmdForget:       "归档一条已存记忆",
 	CmdMcp:          "MCP 服务器",
 	CmdHooks:        "管理 hooks",
 	CmdPasteImage:   "粘贴剪贴板图片",
@@ -171,9 +183,11 @@ var Chinese = Messages{
 	CmdLanguage:     "切换 CLI 语言",
 	CmdSkill:        "管理 skills",
 	CmdVerbose:      "切换 thinking 原文显示",
+	CmdDiffFold:     "切换 diff 折叠/展开",
 	CmdSandbox:      "查看沙箱状态",
 	CmdEffort:       "设置推理强度",
 	CmdAutoPlan:     "配置自动计划模式",
+	CmdReasonLang:   "设置可见思考语言",
 	CmdHelp:         "查看命令列表",
 	CmdContext:      "查看上下文构成（tokens、工具、轮次）",
 	CmdStats:        "查看会话总消耗",
@@ -204,6 +218,8 @@ var Chinese = Messages{
 	ListModelsHeaderFmt: "模型（当前：%s）",
 	ListModelsHint:      "用底部的模型切换器，或输入 /model <provider/model>",
 	ListMemoryHeader:    "记忆文件",
+	ListMemorySaved:     "保存的记忆",
+	ListMemoryArchived:  "归档的记忆",
 	ListMemoryNone:      "暂无记忆 — 用 “/remember <内容>” 添加，或运行 /init 生成 AGENTS.md",
 	ListSkillsHeaderFmt: "skills（%d 个）",
 	ListSkillsNone:      "暂无 skill — 调用内置的（如 /init），或用 install_skill 创建一个",
@@ -214,13 +230,17 @@ var Chinese = Messages{
 
 	MemoryNone:             "还没有加载任何记忆 — 输入 “/remember 内容” 可快速记录，也可以在项目根目录创建 REASONIX.md",
 	MemoryLoaded:           "当前已加载的记忆：",
-	MemorySavedHeader:      "  已记录的条目（用 “/forget <name>” 删除）：",
+	MemorySavedHeader:      "  已记录的条目（用 “/forget <name>” 归档）：",
 	MemoryStoredUnderFmt:   "  存放于 %s",
 	MemoryEditHint:         "可直接编辑记忆文档，或输入 “/remember 内容” 快速记录；文档改动会在下次会话生效",
 	ForgetUsage:            "用法：/forget <name> — name 是 /memory 中显示的条目标识",
-	ForgetDoneFmt:          "已删除记忆：%s",
+	ForgetDoneFmt:          "已归档记忆：%s",
 	QuickRememberEmpty:     "没有要记录的内容",
 	QuickRememberDoneFmt:   "已记住 → %s",
+	GoalEmpty:              "目标：无 — 用 /goal <目标> 设置",
+	GoalCurrentFmt:         "目标：%s",
+	GoalSetFmt:             "目标已设置 → %s",
+	GoalCleared:            "目标已清除",
 	ModelSwitchUnavailable: "本会话不支持切换模型",
 	ModelSwitchBusy:        "请先完成或取消当前这一轮再切换模型",
 	ModelAlreadyOnFmt:      "已经在使用 %s",
@@ -302,15 +322,47 @@ var Chinese = Messages{
 	WriteEnvErr:               "写入 .env 失败：",
 
 	ProviderErrBadRequest:          "请求格式错误 (HTTP 400)：请求体被拒绝，通常是程序缺陷。若持续出现请反馈。",
-	ProviderErrAuth:                "认证失败 (HTTP 401)：API key 缺失、错误或已过期。请检查 .env 中的密钥，或运行 `reasonix setup`。",
+	ProviderErrAuth:                "认证失败 (HTTP 401)：未读到 API key（缺失或未设置）。请在 .env 中配置密钥，或运行 `reasonix setup`。",
+	ProviderErrAuthRejected:        "认证失败 (HTTP 401)：服务端拒绝了你的 API key。可能是 key 错误或已过期，也可能是服务端出现瞬时鉴权/额度问题——已退避重试仍失败。请稍后再试，或检查 .env 中的密钥 / 运行 `reasonix setup`。",
 	ProviderErrInsufficientBalance: "余额不足 (HTTP 402)：账户余额不足，请前往充值后重试。",
 	ProviderErrUnprocessable:       "参数错误 (HTTP 422)：某个请求参数被拒绝，通常是程序缺陷。若持续出现请反馈。",
 	ProviderErrRateLimited:         "请求速率达到上限 (HTTP 429)：请求过于频繁 (TPM/RPM)。已退避重试，请放慢速率或稍后再试。",
 	ProviderErrServer:              "服务器故障 (HTTP 500)：服务端内部错误。已退避重试；若持续失败请稍后再试。",
 	ProviderErrServerBusy:          "服务器繁忙 (HTTP 503)：服务端负载过高。已退避重试，请稍后再试。",
 
-	SelectOneHint:  "(↑/↓ · Enter · q 取消)",
-	SelectManyHint: "(↑/↓ · Space · Enter · q)",
+	SelectOneHint:  "(↑/↓ · Enter · q 取消；/ 搜索)",
+	SelectManyHint: "(↑/↓ · Space · Enter · q；/ 搜索)",
+
+	SelectMoreAboveFmt: "  ↑ 上方还有 %d 个",
+	SelectMoreBelowFmt: "  ↓ 下方还有 %d 个",
+	SelectSearchHint:   "/ 搜索 · 输入关键词过滤 · Esc 取消搜索",
+
+	CmdProvider:          "切换供应商",
+	ProviderListHeader:   "供应商（/provider <名称> 切换）",
+	ProviderAlreadyOnFmt: "已经在使用供应商 %s",
+	ProviderUnknownFmt:   "未知供应商 %q",
+	ProviderPickLabel:    "选择 %s 的一个模型",
+	ProviderNoModelsFmt:  "供应商 %s 没有已配置的模型",
+
+	// 自更新
+	UpgradeChecking:            "正在检查更新…",
+	UpgradeDevBuild:            "开发版本无法自更新",
+	UpgradeFetchFailed:         "检查更新失败：%v",
+	UpgradeInvalidVersion:      "远程版本不是有效的 semver",
+	UpgradeAlreadyLatest:       "已是最新版本。",
+	UpgradeForcing:             "强制重新安装当前版本…",
+	UpgradeAvailableFmt:        "当前：%s → 最新：%s",
+	UpgradeNoAssetFmt:          "未找到 %s 的安装包",
+	UpgradeDownloadingFmt:      "正在下载 %s（%s）…",
+	UpgradeDownloadFailed:      "下载失败：%v",
+	UpgradeVerifying:           "正在校验 SHA256…",
+	UpgradeChecksumFailed:      "无法获取校验文件：%v",
+	UpgradeChecksumMismatchFmt: "SHA256 不匹配：得到 %s，期望 %s",
+	UpgradeChecksumNotFoundFmt: "SHA256SUMS 中未找到 %s",
+	UpgradeExtractFailed:       "解压二进制文件失败：%v",
+	UpgradeApplying:            "正在替换二进制文件…",
+	UpgradeApplyFailed:         "应用更新失败：%v",
+	UpgradeSuccessFmt:          "已更新 %s → %s",
 
 	UsageBody: `reasonix — 由配置和插件驱动的 coding agent（多模型）
 
@@ -321,8 +373,11 @@ var Chinese = Messages{
   reasonix acp [--model NAME]                           通过 stdio 提供 Agent Client Protocol（也可用：reasonix --acp）
   reasonix setup [path]                                 交互式配置向导；生成 reasonix.toml（及 .env）
   reasonix config auto-plan [off|on]                    配置自动计划模式
+  reasonix config reasoning-language [auto|zh|en]        配置可见思考语言
   reasonix mcp <add|remove|list>                        管理 reasonix.toml 里的 MCP 服务器
   reasonix doctor [--json]                              输出脱敏的本地诊断信息
+  reasonix bot start|doctor|weixin-login                多渠道 IM bot 网关
+  reasonix upgrade [--check] [--force]                   自更新到最新版本
   reasonix version
   reasonix help
 

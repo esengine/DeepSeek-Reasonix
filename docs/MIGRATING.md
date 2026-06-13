@@ -52,7 +52,7 @@ cd DeepSeek-Reasonix && make build                        # -> bin/reasonix(.exe
 
 | Legacy | Reasonix 1.0 |
 |---|---|
-| TS config files | `reasonix.toml` (project) / `~/.config/reasonix/config.toml` (user) — see `reasonix.example.toml` |
+| TS config files | `reasonix.toml` (project) / `config.toml` in your OS config dir (user; `~/.config/reasonix/` on Linux, `~/Library/Application Support/reasonix/` on macOS, `%AppData%\reasonix\` on Windows) — see `reasonix.example.toml` |
 | env / API keys | `.env` or the environment (`DEEPSEEK_API_KEY`, `MIMO_API_KEY`, …) via `api_key_env` |
 | project memory | `REASONIX.md` (+ auto-memory), Claude-Code-compatible |
 | MCP servers | `[[plugins]]` in `reasonix.toml`, or a Claude-Code `.mcp.json` (read as-is) |
@@ -61,8 +61,11 @@ On first launch v2 runs a one-time, **non-destructive** import: it reads a v0.x
 `~/.reasonix/config.json` (API key, base URL, language, MCP servers) and imports
 past sessions from `~/.reasonix/sessions` and legacy event logs already located
 in the current user config session directory, leaves the old files untouched, and
-prints a boot notice when it does. Imported sessions resume with `--resume` or the
-history panel. The config import only runs when no v2 config exists yet — if v2
+prints a boot notice when it does. Each session lands in the workspace it
+belonged to (read from its v0.x sidecar meta, summary carried over as the title),
+so the desktop sidebar lists it under the right project; sessions whose workspace
+no longer exists land in the global session dir. Imported sessions resume with
+`--resume` or the history panel. The config import only runs when no v2 config exists yet — if v2
 wrote its config before your `0.x` data was in place nothing is overwritten, so
 copy any missing values across by hand.
 

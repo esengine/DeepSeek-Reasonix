@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reasonix/internal/event"
@@ -15,16 +16,30 @@ import (
 // fakeProvider returns a fixed reply and records the messages it was asked to
 // complete, so tests can drive summarization without a network call.
 type fakeProvider struct {
-	reply string
-	got   []provider.Message
+	reply        string
+	promptTokens int
+	got          []provider.Message
+	streamErr    error // when set, Stream emits a ChunkError instead of the reply
+	hang         bool  // when true, Stream returns a channel that never sends or closes
 }
 
 func (f *fakeProvider) Name() string { return "fake" }
 
 func (f *fakeProvider) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
 	f.got = req.Messages
-	ch := make(chan provider.Chunk, 2)
+	if f.hang {
+		return make(chan provider.Chunk), nil
+	}
+	ch := make(chan provider.Chunk, 3)
+	if f.streamErr != nil {
+		ch <- provider.Chunk{Type: provider.ChunkError, Err: f.streamErr}
+		close(ch)
+		return ch, nil
+	}
 	ch <- provider.Chunk{Type: provider.ChunkText, Text: f.reply}
+	if f.promptTokens > 0 {
+		ch <- provider.Chunk{Type: provider.ChunkUsage, Usage: &provider.Usage{PromptTokens: f.promptTokens, TotalTokens: f.promptTokens}}
+	}
 	ch <- provider.Chunk{Type: provider.ChunkDone}
 	close(ch)
 	return ch, nil
@@ -99,6 +114,144 @@ func TestTailStartSmallSession(t *testing.T) {
 	}
 }
 
+func TestPinnedPrefixLen(t *testing.T) {
+	sys := provider.Message{Role: provider.RoleSystem}
+	small := provider.Message{Role: provider.RoleUser, Content: "do X with token T"}
+	big := provider.Message{Role: provider.RoleUser, Content: strings.Repeat("x", 100000)}
+	sum := provider.Message{Role: provider.RoleUser, Content: summaryTagOpen + "\ndigest\n" + summaryTagClose}
+	as := provider.Message{Role: provider.RoleAssistant, Content: "a"}
+
+	newA := func(win int) *Agent {
+		return New(&fakeProvider{}, tool.NewRegistry(), &Session{}, Options{ContextWindow: win}, event.Discard)
+	}
+	cases := []struct {
+		name string
+		win  int
+		msgs []provider.Message
+		want int
+	}{
+		{"pins-system-and-small-task", 0, []provider.Message{sys, small, as, as}, 2},
+		{"also-pins-prior-summaries", 0, []provider.Message{sys, small, sum, sum, as}, 4},
+		{"large-first-turn-stays-foldable", 0, []provider.Message{sys, big, as, as}, 1},
+		{"tiny-window-wont-pin", 10, []provider.Message{sys, small, as, as}, 1},
+		{"summary-is-not-the-task-turn", 0, []provider.Message{sys, sum, as}, 2},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := newA(tc.win).pinnedPrefixLen(tc.msgs); got != tc.want {
+				t.Errorf("pinnedPrefixLen = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCompactKeepsMidSessionUserTurns(t *testing.T) {
+	big := strings.Repeat("work output ", 100)
+	sess := &Session{Messages: []provider.Message{
+		{Role: provider.RoleSystem, Content: "sys"},
+		{Role: provider.RoleUser, Content: "first task"},
+		{Role: provider.RoleAssistant, Content: big},
+		{Role: provider.RoleTool, ToolCallID: "1", Name: "read_file", Content: big},
+		{Role: provider.RoleUser, Content: "by the way, always use pnpm not npm"},
+		{Role: provider.RoleAssistant, Content: big},
+		{Role: provider.RoleTool, ToolCallID: "2", Name: "read_file", Content: big},
+		{Role: provider.RoleUser, Content: "next"},
+		{Role: provider.RoleAssistant, Content: "ok"},
+	}}
+	a := New(&fakeProvider{reply: "digest"}, tool.NewRegistry(), sess,
+		Options{RecentKeep: 2, ArchiveDir: t.TempDir()}, event.Discard)
+
+	if err := a.compact(context.Background(), "manual", "", true); err != nil {
+		t.Fatalf("compact: %v", err)
+	}
+
+	// Both the pinned first turn and the mid-session fact survive verbatim — not as
+	// summary text — while the assistant/tool work between them is folded.
+	var pinnedFirst, keptMid bool
+	for _, m := range sess.Snapshot() {
+		if isCompactionSummary(m) {
+			continue
+		}
+		if m.Role == provider.RoleUser && m.Content == "first task" {
+			pinnedFirst = true
+		}
+		if m.Role == provider.RoleUser && strings.Contains(m.Content, "always use pnpm not npm") {
+			keptMid = true
+		}
+	}
+	if !pinnedFirst || !keptMid {
+		t.Fatalf("user turns not kept verbatim (first=%v mid=%v): %+v", pinnedFirst, keptMid, sess.Snapshot())
+	}
+	if strings.Contains(strings.Join(snapshotContents(sess), " "), big) {
+		t.Errorf("assistant/tool work was not folded")
+	}
+}
+
+func snapshotContents(s *Session) []string {
+	msgs := s.Snapshot()
+	out := make([]string, len(msgs))
+	for i, m := range msgs {
+		out[i] = m.Content
+	}
+	return out
+}
+
+func TestRunCompactsAfterFinalAnswer(t *testing.T) {
+	// A turn that ends with a final answer (no trailing tool batch) must still
+	// compact when the context is over the trigger; otherwise a large context
+	// carries into the next turn un-folded and overflows the model window.
+	big := strings.Repeat("old work ", 200)
+	sess := &Session{Messages: []provider.Message{
+		{Role: provider.RoleSystem, Content: "sys"},
+		{Role: provider.RoleUser, Content: "task"},
+		{Role: provider.RoleAssistant, Content: big},
+		{Role: provider.RoleAssistant, Content: big},
+	}}
+	a := New(&fakeProvider{reply: "done", promptTokens: 95}, tool.NewRegistry(), sess,
+		Options{ContextWindow: 100, RecentKeep: 2, ArchiveDir: t.TempDir()}, event.Discard)
+
+	if err := a.Run(context.Background(), "what's the status?"); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if got := sess.RewriteVersion(); got != 1 {
+		t.Fatalf("final-answer turn over the trigger did not compact: rewrite version = %d, want 1", got)
+	}
+}
+
+func TestCompactKeepsPriorDigests(t *testing.T) {
+	// A prior digest anywhere in the folded region is kept verbatim, not
+	// re-summarized — so a fact it already captured is not lost to re-fold drift.
+	priorDigest := summaryTagOpen + "\n## Standing facts\n- db is orion_prod_42\n" + summaryTagClose
+	big := strings.Repeat("work output ", 200)
+	sess := &Session{Messages: []provider.Message{
+		{Role: provider.RoleSystem, Content: "sys"},
+		{Role: provider.RoleUser, Content: "task"},
+		{Role: provider.RoleAssistant, Content: big}, // breaks leading-summary contiguity
+		{Role: provider.RoleUser, Content: priorDigest},
+		{Role: provider.RoleAssistant, Content: big},
+		{Role: provider.RoleUser, Content: "next"},
+		{Role: provider.RoleAssistant, Content: "ok"},
+	}}
+	a := New(&fakeProvider{reply: "new digest"}, tool.NewRegistry(), sess,
+		Options{RecentKeep: 2, ArchiveDir: t.TempDir()}, event.Discard)
+
+	if err := a.compact(context.Background(), "manual", "", true); err != nil {
+		t.Fatalf("compact: %v", err)
+	}
+
+	// The fake summarizer returns "new digest" (no fact); the prior fact survives
+	// only because the prior digest was kept verbatim rather than re-folded.
+	var kept bool
+	for _, m := range sess.Snapshot() {
+		if strings.Contains(m.Content, "orion_prod_42") {
+			kept = true
+		}
+	}
+	if !kept {
+		t.Fatalf("prior digest re-summarized away: %+v", sess.Snapshot())
+	}
+}
+
 func TestCompactReplacesHistory(t *testing.T) {
 	prov := &fakeProvider{reply: "- goal: do X\n- changed file Y"}
 	bigStep := strings.Repeat("important implementation detail ", 80)
@@ -121,22 +274,26 @@ func TestCompactReplacesHistory(t *testing.T) {
 		t.Fatalf("rewrite version = %d, want 1", got)
 	}
 
-	// system + summary + last 2 verbatim.
-	if got := len(sess.Messages); got != 4 {
-		t.Fatalf("len = %d, want 4: %+v", got, sess.Messages)
+	// system + pinned first user turn + summary + last 2 verbatim.
+	if got := len(sess.Messages); got != 5 {
+		t.Fatalf("len = %d, want 5: %+v", got, sess.Messages)
 	}
 	if sess.Messages[0].Role != provider.RoleSystem {
 		t.Errorf("message 0 = %s, want system", sess.Messages[0].Role)
 	}
-	summary := sess.Messages[1]
+	if task := sess.Messages[1]; task.Role != provider.RoleUser || !strings.HasPrefix(task.Content, "task ") {
+		t.Errorf("first user turn not pinned verbatim: %+v", task)
+	}
+	summary := sess.Messages[2]
 	if summary.Role != provider.RoleUser || !strings.Contains(summary.Content, "Summary of earlier") || !strings.Contains(summary.Content, "do X") {
 		t.Errorf("summary message = %+v", summary)
 	}
-	if sess.Messages[2].Content != "next" || sess.Messages[3].Content != "ok" {
-		t.Errorf("recent tail not preserved: %+v", sess.Messages[2:])
+	if sess.Messages[3].Content != "next" || sess.Messages[4].Content != "ok" {
+		t.Errorf("recent tail not preserved: %+v", sess.Messages[3:])
 	}
 
-	// The 4 dropped originals were archived, one JSON object per line.
+	// The 3 dropped originals were archived, one JSON object per line (the task
+	// turn is pinned, not folded, so it is not among them).
 	entries, err := os.ReadDir(dir)
 	if err != nil || len(entries) != 1 {
 		t.Fatalf("archive dir: entries=%d err=%v", len(entries), err)
@@ -145,11 +302,58 @@ func TestCompactReplacesHistory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read archive: %v", err)
 	}
-	if lines := strings.Count(strings.TrimSpace(string(data)), "\n") + 1; lines != 4 {
-		t.Errorf("archived %d lines, want 4:\n%s", lines, data)
+	if lines := strings.Count(strings.TrimSpace(string(data)), "\n") + 1; lines != 3 {
+		t.Errorf("archived %d lines, want 3:\n%s", lines, data)
 	}
 	if !strings.HasSuffix(entries[0].Name(), ".jsonl") {
 		t.Errorf("archive name = %q, want .jsonl", entries[0].Name())
+	}
+}
+
+// TestCompactFallsBackToMechanicalFoldWhenSummaryFails: when the summarizer is
+// unreachable, /compact must still free context (fold mechanically) and surface a
+// card, not hang or abort leaving a full window.
+func TestCompactFallsBackToMechanicalFoldWhenSummaryFails(t *testing.T) {
+	prov := &fakeProvider{streamErr: errors.New("provider down")}
+	sess := &Session{Messages: []provider.Message{
+		{Role: provider.RoleSystem, Content: "sys"},
+		{Role: provider.RoleUser, Content: "task"},
+		{Role: provider.RoleAssistant, Content: "step one"},
+		{Role: provider.RoleUser, Content: "more"},
+		{Role: provider.RoleAssistant, Content: "step two"},
+		{Role: provider.RoleUser, Content: "next"},
+		{Role: provider.RoleAssistant, Content: "ok"},
+	}}
+	var got []event.Event
+	sink := event.FuncSink(func(e event.Event) { got = append(got, e) })
+	a := New(prov, tool.NewRegistry(), sess, Options{RecentKeep: 2, ArchiveDir: t.TempDir()}, sink)
+
+	before := len(sess.Messages)
+	if err := a.compact(context.Background(), "manual", "", true); err != nil {
+		t.Fatalf("compact should fall back, not error: %v", err)
+	}
+	if len(sess.Messages) >= before {
+		t.Fatalf("session not compacted on summarizer failure: %d -> %d", before, len(sess.Messages))
+	}
+	var done *event.Compaction
+	for i := range got {
+		if got[i].Kind == event.CompactionDone {
+			done = &got[i].Compaction
+		}
+	}
+	if done == nil || !strings.Contains(done.Summary, "summary was unavailable") {
+		t.Fatalf("CompactionDone = %+v, want a mechanical-fold summary", done)
+	}
+}
+
+// TestSummarizeRespectsContextCancel: a stalled stream (open but never closing)
+// must unblock on context cancellation instead of pinning compaction forever.
+func TestSummarizeRespectsContextCancel(t *testing.T) {
+	a := New(&fakeProvider{hang: true}, tool.NewRegistry(), &Session{}, Options{}, event.Discard)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := a.summarize(ctx, []provider.Message{{Role: provider.RoleUser, Content: "x"}}, ""); err == nil {
+		t.Fatal("summarize must return when ctx is cancelled, not hang")
 	}
 }
 
@@ -384,13 +588,16 @@ func TestMaybeCompactForceCeilingBypassesEconomics(t *testing.T) {
 	a := New(prov, tool.NewRegistry(), sess, Options{ContextWindow: 100, RecentKeep: 2, ArchiveDir: t.TempDir()}, event.Discard)
 
 	a.maybeCompact(context.Background(), &provider.Usage{PromptTokens: 90})
-	// The token-budgeted tail keeps "small old answer", next, ok, so only the
-	// single early message folds — force bypasses the economics skip and installs
-	// a summary at index 1, leaving the count at 5.
+	// The first user turn is pinned (index 1) and the token-budgeted tail keeps
+	// next, ok, so only "small old answer" folds — force bypasses the economics
+	// skip and installs a summary at index 2, leaving the count at 5.
 	if got := len(sess.Messages); got != 5 {
 		t.Fatalf("len = %d, want 5 after forced single-message fold: %+v", got, sess.Messages)
 	}
-	if !strings.Contains(sess.Messages[1].Content, "forced summary") {
+	if sess.Messages[1].Content != "small old request" {
+		t.Fatalf("first user turn not pinned verbatim: %+v", sess.Messages[1])
+	}
+	if !strings.Contains(sess.Messages[2].Content, "forced summary") {
 		t.Fatalf("forced compact did not install summary: %+v", sess.Messages)
 	}
 	if len(prov.got) == 0 {

@@ -6,12 +6,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/checkpoint"
 	"reasonix/internal/event"
+	"reasonix/internal/jobs"
 	"reasonix/internal/permission"
 	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
@@ -37,6 +39,17 @@ type handoffRunner struct {
 
 func (r handoffRunner) Run(_ context.Context, input string) error {
 	r.session.Add(provider.Message{Role: provider.RoleUser, Content: "handoff: " + input})
+	return nil
+}
+
+type sessionContextRunner struct {
+	parentSession string
+	jobSession    string
+}
+
+func (r *sessionContextRunner) Run(ctx context.Context, input string) error {
+	r.parentSession = agent.ParentSession(ctx)
+	r.jobSession = jobs.SessionFromContext(ctx)
 	return nil
 }
 
@@ -85,6 +98,26 @@ func TestRunTurnSnapshotsActivityWhenTranscriptChanges(t *testing.T) {
 	}
 	if meta.UpdatedAt.IsZero() {
 		t.Fatal("activity meta should be marked")
+	}
+}
+
+func TestRunInjectsParentSessionForJobs(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	runner := &sessionContextRunner{}
+	sess := agent.NewSession("sys")
+	exec := agent.New(nil, nil, sess, agent.Options{}, event.Discard)
+	c := New(Options{Runner: runner, Executor: exec, SessionDir: dir, SessionPath: path, Label: "test"})
+
+	if err := c.Run(context.Background(), "hello"); err != nil {
+		t.Fatal(err)
+	}
+	want := agent.BranchID(path)
+	if runner.parentSession != want {
+		t.Fatalf("ParentSession = %q, want %q", runner.parentSession, want)
+	}
+	if runner.jobSession != want {
+		t.Fatalf("jobs session = %q, want %q", runner.jobSession, want)
 	}
 }
 
@@ -170,7 +203,7 @@ func TestSnapshotActivityRefreshesSessionActivity(t *testing.T) {
 	}
 }
 
-func TestSubmitClearAliasStartsFreshContextAndSavesTranscript(t *testing.T) {
+func TestNewSessionStartsFreshContextAndSavesTranscript(t *testing.T) {
 	dir := t.TempDir()
 	sess := agent.NewSession("sys")
 	sess.Add(provider.Message{Role: provider.RoleUser, Content: "old context"})
@@ -178,13 +211,11 @@ func TestSubmitClearAliasStartsFreshContextAndSavesTranscript(t *testing.T) {
 	path := filepath.Join(dir, "session.jsonl")
 	c := New(Options{Executor: exec, SystemPrompt: "sys", SessionDir: dir, SessionPath: path, Label: "test"})
 
-	c.submit("/clear", "")
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) && c.SessionPath() == path {
-		time.Sleep(time.Millisecond)
+	if err := c.NewSession(); err != nil {
+		t.Fatal(err)
 	}
 	if c.SessionPath() == path {
-		t.Fatal("/clear did not rotate to a fresh session path")
+		t.Fatal("/new did not rotate to a fresh session path")
 	}
 	loaded, err := agent.LoadSession(path)
 	if err != nil {
@@ -196,6 +227,46 @@ func TestSubmitClearAliasStartsFreshContextAndSavesTranscript(t *testing.T) {
 	current := exec.Session().Snapshot()
 	if len(current) != 1 || current[0].Role != provider.RoleSystem || current[0].Content != "sys" {
 		t.Fatalf("fresh context = %+v, want only system prompt", current)
+	}
+}
+
+func TestSubmitClearDiscardsCurrentContextWithoutSavingTranscript(t *testing.T) {
+	dir := t.TempDir()
+	sess := agent.NewSession("sys")
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "old context"})
+	exec := agent.New(nil, nil, sess, agent.Options{}, event.Discard)
+	path := filepath.Join(dir, "session.jsonl")
+	c := New(Options{Executor: exec, SystemPrompt: "sys", SessionDir: dir, SessionPath: path, Label: "test"})
+	if err := c.Snapshot(); err != nil {
+		t.Fatal(err)
+	}
+	ckpt := ckptDir(path)
+	if err := os.MkdirAll(ckpt, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ckpt, "turn-0.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	c.submit("/clear", "")
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) && c.SessionPath() == path {
+		time.Sleep(time.Millisecond)
+	}
+	if c.SessionPath() == path {
+		t.Fatal("/clear did not rotate to a fresh session path")
+	}
+	for _, p := range []string{path, agent.BranchMetaPath(path), ckpt} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Fatalf("discarded artifact %s still exists or stat failed with %v", p, err)
+		}
+	}
+	if _, err := os.Stat(c.SessionPath()); !os.IsNotExist(err) {
+		t.Fatalf("fresh empty session should not be saved yet; stat err=%v", err)
+	}
+	current := exec.Session().Snapshot()
+	if len(current) != 1 || current[0].Role != provider.RoleSystem || current[0].Content != "sys" {
+		t.Fatalf("cleared context = %+v, want only system prompt", current)
 	}
 }
 
@@ -269,6 +340,82 @@ func TestApprovalAllowOnce(t *testing.T) {
 	}
 }
 
+func TestMemoryApprovalRequestShowsRememberPayload(t *testing.T) {
+	approvals := make(chan event.Approval, 1)
+	c := New(Options{Sink: event.FuncSink(func(e event.Event) {
+		if e.Kind == event.ApprovalRequest {
+			approvals <- e.Approval
+		}
+	})})
+
+	args := json.RawMessage(`{
+		"name": "stable-retrieval-conclusion",
+		"description": "History retrieval should reuse stable synthesized conclusions.",
+		"type": "feedback",
+		"body": "**Why:** repeated history scans are expensive.\n\n**How to apply:** save the stable summary as a memory document."
+	}`)
+	result := make(chan string, 1)
+	go func() {
+		allow, _, err := gateApprover{c}.Approve(context.Background(), "remember", "", args)
+		if err != nil {
+			result <- err.Error()
+			return
+		}
+		if !allow {
+			result <- "memory approval denied"
+			return
+		}
+		result <- ""
+	}()
+
+	var approval event.Approval
+	select {
+	case approval = <-approvals:
+	case <-time.After(2 * time.Second):
+		t.Fatal("memory approval request was not emitted")
+	}
+	for _, want := range []string{
+		`Save/update memory "stable-retrieval-conclusion"`,
+		"[feedback]",
+		"History retrieval should reuse stable synthesized conclusions.",
+		"repeated history scans are expensive",
+		"save the stable summary",
+	} {
+		if !strings.Contains(approval.Subject, want) {
+			t.Fatalf("approval subject %q does not contain %q", approval.Subject, want)
+		}
+	}
+	if strings.Contains(approval.Subject, "\n") {
+		t.Fatalf("approval subject should be compact for TUI rendering, got %q", approval.Subject)
+	}
+
+	c.Approve(approval.ID, true, true, true)
+	select {
+	case msg := <-result:
+		if msg != "" {
+			t.Fatalf("Approve returned %s", msg)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("memory approval stayed blocked after Approve")
+	}
+}
+
+func TestMemoryApprovalSubjectsAndNotifications(t *testing.T) {
+	forgetSubject := approvalDisplaySubject("forget", "", json.RawMessage(`{"name":"wrong-memory"}`))
+	if forgetSubject != `Archive memory "wrong-memory"` {
+		t.Fatalf("forget approval subject = %q", forgetSubject)
+	}
+	if got := approvalNotificationText("remember", "Save/update memory with private details"); got != "approval needed: remember" {
+		t.Fatalf("remember notification = %q", got)
+	}
+	if got := approvalNotificationText("forget", `Archive memory "wrong-memory"`); got != "approval needed: forget" {
+		t.Fatalf("forget notification = %q", got)
+	}
+	if got := approvalNotificationText("bash", "go test ./..."); got != "approval needed: bash go test ./..." {
+		t.Fatalf("bash notification = %q", got)
+	}
+}
+
 // TestApprovalDeny confirms a declined call returns allow=false.
 func TestApprovalDeny(t *testing.T) {
 	c, ids, _ := approvalIDs()
@@ -304,7 +451,7 @@ func TestApprovalSessionGrantScopesBashToCommand(t *testing.T) {
 func TestApprovalSessionGrantCanScopeBashToCommandPrefix(t *testing.T) {
 	c, ids, prompts := approvalIDs()
 	go func() {
-		c.ApproveWithScope(<-ids, true, true, false, permission.ApprovalScopePrefix) // grant go test:* for this session
+		c.Approve(<-ids, true, true, false) // grant bash session (prefix preferred)
 		c.Approve(<-ids, true, false, false)
 	}()
 
@@ -338,7 +485,7 @@ func TestApprovalPersistentBashPrefixRememberRule(t *testing.T) {
 		},
 	})
 	go func() {
-		c.ApproveWithScope(<-ids, true, true, true, permission.ApprovalScopePrefix)
+		c.Approve(<-ids, true, true, true)
 	}()
 
 	allow, remember, err := gateApprover{c}.Approve(context.Background(), "bash", "go test ./...", nil)
@@ -450,5 +597,241 @@ func TestParseRewindEmptyCheckpoints(t *testing.T) {
 	_, _, err := parseRewind("", nil)
 	if err == nil {
 		t.Fatal("expected error when no checkpoints")
+	}
+}
+
+func TestRunGuardedPanicEmitsTurnDone(t *testing.T) {
+	sess := agent.NewSession("sys")
+	events := make(chan event.Event, 4)
+	c := New(Options{
+		Runner: appendingRunner{session: sess},
+		Sink:   event.FuncSink(func(e event.Event) { events <- e }),
+	})
+
+	go func() {
+		c.runGuarded(func(ctx context.Context) error {
+			panic("boom")
+		})
+	}()
+
+	select {
+	case e := <-events:
+		if e.Kind != event.TurnDone {
+			t.Fatalf("expected TurnDone after panic, got %v", e.Kind)
+		}
+		if e.Err == nil || !strings.Contains(e.Err.Error(), "boom") {
+			t.Fatalf("expected TurnDone.Err to contain panic message, got %v", e.Err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for TurnDone after panic")
+	}
+
+	c.mu.Lock()
+	running := c.running
+	c.mu.Unlock()
+	if running {
+		t.Fatal("c.running should be false after panic recovery")
+	}
+}
+
+func TestRunGuardedPanicDoesNotDoubleEmitTurnDone(t *testing.T) {
+	sess := agent.NewSession("sys")
+	var count int32
+	events := make(chan event.Event, 8)
+	c := New(Options{
+		Runner: appendingRunner{session: sess},
+		Sink: event.FuncSink(func(e event.Event) {
+			if e.Kind == event.TurnDone {
+				atomic.AddInt32(&count, 1)
+			}
+			events <- e
+		}),
+	})
+
+	go func() {
+		c.runGuarded(func(ctx context.Context) error {
+			panic("boom")
+		})
+	}()
+
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case <-events:
+			n := atomic.LoadInt32(&count)
+			if n >= 1 {
+				time.Sleep(50 * time.Millisecond)
+				n2 := atomic.LoadInt32(&count)
+				if n2 > 1 {
+					t.Fatalf("TurnDone emitted %d times, expected 1", n2)
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for TurnDone")
+		}
+	}
+}
+
+type blockingRunner struct {
+	session *agent.Session
+	release chan struct{}
+}
+
+func (r blockingRunner) Run(_ context.Context, input string) error {
+	r.session.Add(provider.Message{Role: provider.RoleUser, Content: input})
+	<-r.release
+	return nil
+}
+
+func TestMidTurnAutosavePersistsDuringLongTurn(t *testing.T) {
+	old := midTurnSnapshotInterval.Load()
+	midTurnSnapshotInterval.Store(int64(10 * time.Millisecond))
+	defer midTurnSnapshotInterval.Store(old)
+
+	dir := t.TempDir()
+	sess := agent.NewSession("sys")
+	exec := agent.New(nil, nil, sess, agent.Options{}, event.Discard)
+	path := filepath.Join(dir, "session.jsonl")
+	release := make(chan struct{})
+	c := New(Options{Runner: blockingRunner{session: sess, release: release}, Executor: exec, SessionDir: dir, SessionPath: path, Label: "test"})
+	// Unblock the turn and wait for the autosaver to exit before TempDir
+	// cleanup, which fails on Windows while a snapshot tmp write is in flight.
+	defer c.autosaveWG.Wait()
+	defer close(release)
+
+	c.Send("hello mid-turn persistence")
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if b, err := os.ReadFile(path); err == nil && strings.Contains(string(b), "hello mid-turn persistence") {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("session file was not written while the turn was still running")
+}
+
+type scriptedRunner struct {
+	exec    *agent.Agent
+	scripts []func(input string)
+}
+
+func (r *scriptedRunner) Run(_ context.Context, input string) error {
+	if len(r.scripts) == 0 {
+		return nil
+	}
+	next := r.scripts[0]
+	r.scripts = r.scripts[1:]
+	next(input)
+	return nil
+}
+
+func TestApprovedPlanAutoApproveEndsWithExecutionTurn(t *testing.T) {
+	exec := agent.New(nil, nil, agent.NewSession("sys"), agent.Options{}, event.Discard)
+	runner := &scriptedRunner{exec: exec}
+
+	var c *Controller
+	approvalPrompts := 0
+	sink := event.FuncSink(func(e event.Event) {
+		if e.Kind != event.ApprovalRequest {
+			return
+		}
+		approvalPrompts++
+		if e.Approval.Tool == planApprovalTool {
+			go c.Approve(e.Approval.ID, true, false, false)
+			return
+		}
+		go c.Approve(e.Approval.ID, false, false, false)
+	})
+	c = New(Options{Runner: runner, Executor: exec, Sink: sink})
+	c.SetPlanMode(true)
+
+	runner.scripts = append(runner.scripts,
+		func(input string) {
+			exec.Session().Add(provider.Message{Role: provider.RoleAssistant, Content: "1. Create the file\n2. Update the file"})
+		},
+		func(input string) {
+			if input != planApprovedMessage {
+				t.Fatalf("approved execution input = %q, want planApprovedMessage", input)
+			}
+			exec.Session().Add(provider.Message{Role: provider.RoleAssistant, Content: "first step done; paused for review", ToolCalls: []provider.ToolCall{{
+				ID: "todo-1", Name: "todo_write", Arguments: `{"todos":[{"content":"Create the file","status":"completed"},{"content":"Update the file","status":"in_progress"}]}`,
+			}}})
+		},
+	)
+
+	if err := c.runTurn(context.Background(), "plan this"); err != nil {
+		t.Fatal(err)
+	}
+	if approvalPrompts != 1 {
+		t.Fatalf("approval prompts after plan = %d, want 1", approvalPrompts)
+	}
+
+	// The plan approval auto-approves writers for the execution turn only. A later
+	// turn does not inherit it, and "继续" carries no special meaning — Compose must
+	// not inject any marker, and the next writer falls back to per-tool approval.
+	if got := c.Compose("继续"); got != "继续" {
+		t.Fatalf("a paused approved plan must not marker-prefix the next turn, got %q", got)
+	}
+	allow, _, err := gateApprover{c}.Approve(context.Background(), "write_file", "/tmp/a", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if allow {
+		t.Fatal("writer after the execution turn should return to per-tool approval, not auto-allow")
+	}
+	if approvalPrompts != 2 {
+		t.Fatalf("writer after the execution turn should prompt, prompts=%d", approvalPrompts)
+	}
+}
+
+func TestApprovedPlanDoesNotAutoApproveNonContinuationTurn(t *testing.T) {
+	exec := agent.New(nil, nil, agent.NewSession("sys"), agent.Options{}, event.Discard)
+	runner := &scriptedRunner{exec: exec}
+
+	var c *Controller
+	approvalPrompts := 0
+	sink := event.FuncSink(func(e event.Event) {
+		if e.Kind != event.ApprovalRequest {
+			return
+		}
+		approvalPrompts++
+		if e.Approval.Tool == planApprovalTool {
+			go c.Approve(e.Approval.ID, true, false, false)
+			return
+		}
+		go c.Approve(e.Approval.ID, false, false, false)
+	})
+	c = New(Options{Runner: runner, Executor: exec, Sink: sink})
+	c.SetPlanMode(true)
+
+	runner.scripts = append(runner.scripts,
+		func(input string) {
+			exec.Session().Add(provider.Message{Role: provider.RoleAssistant, Content: "1. Create the file\n2. Update the file"})
+		},
+		func(input string) {
+			exec.Session().Add(provider.Message{Role: provider.RoleAssistant, Content: "paused", ToolCalls: []provider.ToolCall{{
+				ID: "todo-1", Name: "todo_write", Arguments: `{"todos":[{"content":"Create the file","status":"completed"},{"content":"Update the file","status":"in_progress"}]}`,
+			}}})
+		},
+	)
+
+	if err := c.runTurn(context.Background(), "plan this"); err != nil {
+		t.Fatal(err)
+	}
+	if got := c.Compose("先别继续"); got != "先别继续" {
+		t.Fatalf("non-continuation input should not be marker-prefixed, got %q", got)
+	}
+
+	allow, _, err := gateApprover{c}.Approve(context.Background(), "write_file", "/tmp/a", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if allow {
+		t.Fatal("non-continuation turn should not inherit approved-plan auto approval")
+	}
+	if approvalPrompts != 2 {
+		t.Fatalf("non-continuation writer should prompt after plan approval, prompts=%d", approvalPrompts)
 	}
 }

@@ -3,6 +3,7 @@
 package proc
 
 import (
+	"errors"
 	"io"
 	"os/exec"
 	"testing"
@@ -37,7 +38,7 @@ func TestKillTreeUnblocksWaitOnSurvivingGrandchild(t *testing.T) {
 	}
 }
 
-// TrackTree must create a Job Object for a started process, and KillTracked
+// StartTracked must create a Job Object for the started process, and KillTracked
 // must take the whole tracked tree down (the job reaps even descendants a plain
 // taskkill /T would miss — see the codegraph daemon leak this guards against).
 func TestKillTrackedReapsTrackedTree(t *testing.T) {
@@ -47,15 +48,14 @@ func TestKillTrackedReapsTrackedTree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StdoutPipe: %v", err)
 	}
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("Start: %v", err)
+	job, err := StartTracked(cmd)
+	if err != nil {
+		t.Fatalf("StartTracked: %v", err)
+	}
+	if job == 0 {
+		t.Fatal("StartTracked returned 0 — job object not created")
 	}
 	go func() { _, _ = io.Copy(io.Discard, stdout) }()
-
-	job := TrackTree(cmd)
-	if job == 0 {
-		t.Fatal("TrackTree returned 0 — job object not created")
-	}
 	time.Sleep(500 * time.Millisecond) // let cmd.exe exec the ping grandchild into the job
 
 	KillTracked(cmd, job)
@@ -66,5 +66,28 @@ func TestKillTrackedReapsTrackedTree(t *testing.T) {
 	case <-done:
 	case <-time.After(8 * time.Second):
 		t.Fatal("cmd.Wait blocked after KillTracked — tracked tree survived")
+	}
+}
+
+// StartTracked creates the child suspended to win the job-assignment race, so it
+// must resume it or the process hangs forever. A child that exits with a known
+// code proves the resume fired: Wait returns that code instead of timing out.
+func TestStartTrackedResumesSuspendedChild(t *testing.T) {
+	cmd := exec.Command("cmd", "/c", "exit", "7")
+	HideWindow(cmd)
+	if _, err := StartTracked(cmd); err != nil {
+		t.Fatalf("StartTracked: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case err := <-done:
+		var ee *exec.ExitError
+		if !errors.As(err, &ee) || ee.ExitCode() != 7 {
+			t.Fatalf("exit = %v, want exit status 7", err)
+		}
+	case <-time.After(8 * time.Second):
+		t.Fatal("cmd.Wait blocked — StartTracked left the child suspended")
 	}
 }

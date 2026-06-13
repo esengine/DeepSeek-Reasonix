@@ -186,16 +186,14 @@ func TestReadStream(t *testing.T) {
 	if full == nil || full.Arguments != `{"city":"Paris"}` {
 		t.Fatalf("tool full = %+v", full)
 	}
-	if usage == nil {
+	switch {
+	case usage == nil:
 		t.Fatal("expected a usage chunk")
-	}
-	if usage.PromptTokens != 150 || usage.CompletionTokens != 25 || usage.TotalTokens != 175 {
+	case usage.PromptTokens != 150 || usage.CompletionTokens != 25 || usage.TotalTokens != 175:
 		t.Fatalf("usage tokens = %+v", usage)
-	}
-	if usage.CacheHitTokens != 50 || usage.CacheMissTokens != 100 {
+	case usage.CacheHitTokens != 50 || usage.CacheMissTokens != 100:
 		t.Fatalf("usage cache = hit %d miss %d", usage.CacheHitTokens, usage.CacheMissTokens)
-	}
-	if usage.FinishReason != "tool_calls" {
+	case usage.FinishReason != "tool_calls":
 		t.Fatalf("finish reason = %q", usage.FinishReason)
 	}
 	if !done {
@@ -325,6 +323,46 @@ func TestReadStreamThinking(t *testing.T) {
 	}
 	if text.String() != "Hi" {
 		t.Fatalf("text = %q", text.String())
+	}
+}
+
+// TestBaseURLNormalizedForV1Messages checks the URL-rewriting step in New().
+// Anthropic's Messages endpoint is {root}/v1/messages, but the setup wizard
+// accepts OpenAI-style URLs (e.g. "https://proxy.example.com/v1") because
+// /models probes expect that shape. Without the strip, the chat client would
+// concatenate /v1/messages onto an already-versioned root and the request
+// would go to https://proxy.example.com/v1/v1/messages — failing 404.
+func TestBaseURLNormalizedForV1Messages(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"plain root (no /v1)", "https://api.anthropic.com", "https://api.anthropic.com"},
+		{"versioned v1 (OpenAI shape)", "https://proxy.example.com/v1", "https://proxy.example.com"},
+		{"versioned v1 with trailing slash", "https://proxy.example.com/v1/", "https://proxy.example.com"},
+		{"versioned v1 with path prefix", "https://gateway.example.com/api/v1", "https://gateway.example.com/api"},
+		{"trailing slash only", "https://api.anthropic.com/", "https://api.anthropic.com"},
+		{"empty falls back to default", "", "https://api.anthropic.com"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p, err := New(provider.Config{
+				Name:    "test",
+				Model:   "claude-opus-4-8",
+				BaseURL: tc.in,
+			})
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			c, ok := p.(*client)
+			if !ok {
+				t.Fatalf("provider type = %T, want *client", p)
+			}
+			if c.baseURL != tc.want {
+				t.Errorf("baseURL = %q, want %q", c.baseURL, tc.want)
+			}
+		})
 	}
 }
 

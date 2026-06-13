@@ -63,6 +63,7 @@ jobs:
           # runner — avoids the scarce/slow macos-13 Intel runner.
           - { runner: macos-14, platform: darwin/universal, name: darwin-universal }
           - { runner: windows-latest, platform: windows/amd64, name: windows-amd64 }
+          - { runner: windows-11-arm, platform: windows/arm64, name: windows-arm64 }
           - { runner: ubuntu-22.04, platform: linux/amd64, name: linux-amd64 }
     runs-on: ${{ matrix.runner }}
     defaults:
@@ -238,6 +239,9 @@ jobs:
     name: mirror to R2
     needs: publish
     runs-on: ubuntu-latest
+    permissions:
+      contents: read # gh release download
+      actions: write # dispatch pages.yml to re-bake the site version
     # Skip cleanly when R2 isn't configured; GitHub release still works as fallback.
     if: ${{ github.repository_owner == 'esengine' }}
     env:
@@ -278,7 +282,7 @@ jobs:
       - name: Rewrite latest.json URLs to R2
         if: env.HAS_R2 == 'true'
         env:
-          R2_PUBLIC_BASE: https://pub-147fb53b9c1e4bbf891a257968619ea7.r2.dev
+          R2_PUBLIC_BASE: https://dl.reasonix.io
           TAG: ${{ steps.ver.outputs.tag }}
         run: |
           f=assets/latest.json
@@ -316,3 +320,11 @@ jobs:
           else
             aws s3 cp assets/ "s3://${R2_BUCKET}/latest/" --recursive --endpoint-url "$ENDPOINT"
           fi
+
+      # Stable release moved R2 latest/ — rebuild the site so its build-time baked
+      # version + JSON-LD follow (site.js's runtime .rxv refresh can't touch first paint / SEO).
+      - name: Refresh site to the new version
+        if: env.HAS_R2 == 'true' && steps.ver.outputs.channel != 'canary' && steps.ver.outputs.prerelease != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run pages.yml --ref main-v2

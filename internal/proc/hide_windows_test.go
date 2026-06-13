@@ -18,6 +18,7 @@ func TestHideWindowSetsCreateNoWindow(t *testing.T) {
 	if cmd.SysProcAttr.CreationFlags&createNoWindow == 0 {
 		t.Fatalf("CREATE_NO_WINDOW not set; CreationFlags=%#x", cmd.SysProcAttr.CreationFlags)
 	}
+	const detachedProcess = 0x00000008
 	if cmd.SysProcAttr.CreationFlags&detachedProcess != 0 {
 		t.Fatalf("DETACHED_PROCESS should not be set by HideWindow; CreationFlags=%#x", cmd.SysProcAttr.CreationFlags)
 	}
@@ -33,23 +34,6 @@ func TestHideWindowPreservesExistingFlags(t *testing.T) {
 	}
 	if cmd.SysProcAttr.CreationFlags&createNoWindow == 0 {
 		t.Fatal("HideWindow did not add CREATE_NO_WINDOW")
-	}
-}
-
-func TestHideWindowDetachedSetsDetachedProcess(t *testing.T) {
-	cmd := exec.Command("git", "status")
-	HideWindowDetached(cmd)
-	if cmd.SysProcAttr == nil {
-		t.Fatal("SysProcAttr is nil; HideWindowDetached did not set it")
-	}
-	if !cmd.SysProcAttr.HideWindow {
-		t.Fatal("HideWindowDetached did not set HideWindow")
-	}
-	if cmd.SysProcAttr.CreationFlags&createNoWindow != 0 {
-		t.Fatalf("CREATE_NO_WINDOW should not be combined with DETACHED_PROCESS; CreationFlags=%#x", cmd.SysProcAttr.CreationFlags)
-	}
-	if cmd.SysProcAttr.CreationFlags&detachedProcess == 0 {
-		t.Fatalf("DETACHED_PROCESS not set; CreationFlags=%#x", cmd.SysProcAttr.CreationFlags)
 	}
 }
 

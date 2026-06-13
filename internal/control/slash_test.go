@@ -1,8 +1,11 @@
 package control
 
 import (
+	"strings"
 	"testing"
 
+	"reasonix/internal/hook"
+	"reasonix/internal/memory"
 	"reasonix/internal/skill"
 )
 
@@ -32,6 +35,8 @@ func TestSlashArgItems(t *testing.T) {
 		DisconnectedMCP: []string{"optional"},
 		ModelRefs:       []string{"deepseek-flash/deepseek-v4-flash", "deepseek-pro/deepseek-v4-pro"},
 		CurrentModel:    "deepseek-flash/deepseek-v4-flash",
+		ProviderNames:   []string{"deepseek-flash", "deepseek-pro", "custom"},
+		CurrentProvider: "deepseek-flash",
 	}
 
 	// /skills subcommands
@@ -106,6 +111,21 @@ func TestSlashArgItems(t *testing.T) {
 			t.Errorf("active model should be hinted 'current', got %q", it.Hint)
 		}
 	}
+	// /provider → provider names, current marked
+	items, _ = SlashArgItems("/provider ", data)
+	if !has(items, "deepseek-pro") || !has(items, "custom") {
+		t.Errorf("/provider should list provider names; got %v", labelsOf(items))
+	}
+	for _, it := range items {
+		if it.Label == data.CurrentProvider && it.Hint != "current" {
+			t.Errorf("active provider should be hinted 'current', got %q", it.Hint)
+		}
+	}
+	// /provider de → filter to deepseek-*
+	items, _ = SlashArgItems("/provider de", data)
+	if len(items) != 2 {
+		t.Errorf("/provider de should filter to 2 deepseek providers; got %v", labelsOf(items))
+	}
 	// /hooks
 	items, _ = SlashArgItems("/hooks ", data)
 	if !has(items, "list") || !has(items, "trust") {
@@ -120,6 +140,11 @@ func TestSlashArgItems(t *testing.T) {
 	items, _ = SlashArgItems("/auto-plan ", data)
 	if !has(items, "off") || !has(items, "on") || has(items, "ask") {
 		t.Errorf("/auto-plan should offer only off/on; got %v", labelsOf(items))
+	}
+	// /reasoning-language
+	items, _ = SlashArgItems("/reasoning-language ", data)
+	if !has(items, "auto") || !has(items, "zh") || !has(items, "en") || has(items, "中文") {
+		t.Errorf("/reasoning-language should offer only auto/zh/en; got %v", labelsOf(items))
 	}
 	// /theme
 	items, _ = SlashArgItems("/theme ", data)
@@ -139,5 +164,67 @@ func TestSlashArgItems(t *testing.T) {
 	// handled by runSkillSubcommand.
 	if items, _ := SlashArgItems("/skills li", data); len(items) != 0 {
 		t.Errorf("/skills li should not offer hidden list suggestion; got %v", labelsOf(items))
+	}
+}
+
+func TestMemoryListTextIncludesSavedMemories(t *testing.T) {
+	store := memory.Store{Dir: t.TempDir()}
+	if _, err := store.Save(memory.Memory{
+		Name:        "cache-first",
+		Title:       "Cache first",
+		Description: "Preserve prompt cache stability",
+		Type:        memory.TypeProject,
+		Body:        "Use retrieval tools instead of dynamic prefix injection.",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	c := New(Options{Memory: &memory.Set{Store: store}})
+	out := c.memoryListText()
+	for _, want := range []string{"saved memories", "[Cache first](cache-first.md)", "Preserve prompt cache stability"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("/memory output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestMemoryListTextIncludesArchivedMemories(t *testing.T) {
+	store := memory.Store{Dir: t.TempDir()}
+	if _, err := store.Save(memory.Memory{
+		Name:        "stale-plan",
+		Title:       "Stale plan",
+		Description: "Superseded by the new retrieval design",
+		Type:        memory.TypeProject,
+		Body:        "Old plan body.",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	archive, err := store.Archive("stale-plan")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := New(Options{Memory: &memory.Set{Store: store}})
+	out := c.memoryListText()
+	for _, want := range []string{"archived memories", "[Stale plan](" + archive + ")", "Superseded by the new retrieval design"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("/memory output missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "saved memories\n  [Stale plan]") {
+		t.Fatalf("archived memory should not appear as active saved memory:\n%s", out)
+	}
+}
+
+func TestManagementHooksTrustUsesWorkspaceRoot(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	c := New(Options{WorkspaceRoot: project})
+	if !c.managementNotice("/hooks trust") {
+		t.Fatal("/hooks trust was not handled")
+	}
+	if !hook.IsTrusted(project, home) {
+		t.Fatal("/hooks trust did not trust the controller workspace root")
 	}
 }

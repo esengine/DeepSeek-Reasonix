@@ -204,6 +204,8 @@ func (s *Server) handler() http.Handler {
 	mux.HandleFunc("POST /rewind", s.rewind)
 	mux.HandleFunc("POST /fork", s.fork)
 	mux.HandleFunc("POST /summarize", s.summarize)
+	mux.HandleFunc("POST /tool-approval-mode", s.toolApprovalMode)
+	mux.HandleFunc("POST /auto-approve-tools", s.autoApproveTools)
 	mux.HandleFunc("POST /bypass", s.bypass)
 	mux.HandleFunc("POST /answer", s.answer)
 	mux.HandleFunc("POST /resume", s.resume)
@@ -394,13 +396,12 @@ func (s *Server) approve(w http.ResponseWriter, r *http.Request) {
 		Allow   bool   `json:"allow"`
 		Session bool   `json:"session"`
 		Persist bool   `json:"persist"`
-		Scope   string `json:"scope"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.ID == "" {
 		http.Error(w, "missing id", http.StatusBadRequest)
 		return
 	}
-	s.ctl().ApproveWithScope(body.ID, body.Allow, body.Session, body.Persist, body.Scope)
+	s.ctl().Approve(body.ID, body.Allow, body.Session, body.Persist)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -454,6 +455,13 @@ type historyMessage struct {
 func historyMessages(msgs []provider.Message) []historyMessage {
 	out := make([]historyMessage, 0, len(msgs))
 	for _, m := range msgs {
+		// Steer messages are surfaced as a notice, not a user message.
+		if m.Role == provider.RoleUser {
+			if steerText, isSteer := agent.SteerText(m.Content); isSteer {
+				out = append(out, historyMessage{Role: "notice", Content: "↪ " + steerText})
+				continue
+			}
+		}
 		hm := historyMessage{Role: string(m.Role), Content: m.Content}
 		if m.Role == provider.RoleAssistant {
 			hm.Reasoning = m.ReasoningContent
@@ -640,8 +648,8 @@ func (s *Server) summarize(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// bypass toggles YOLO/bypass mode.
-func (s *Server) bypass(w http.ResponseWriter, r *http.Request) {
+// autoApproveTools toggles YOLO/full-access tool auto-approval.
+func (s *Server) autoApproveTools(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		On bool `json:"on"`
 	}
@@ -649,8 +657,33 @@ func (s *Server) bypass(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad body", http.StatusBadRequest)
 		return
 	}
-	s.ctl().SetBypass(body.On)
+	s.ctl().SetAutoApproveTools(body.On)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// toolApprovalMode selects ask, auto, or yolo approval behavior for interactive
+// frontends. Plan remains a separate read-only gate.
+func (s *Server) toolApprovalMode(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Mode string `json:"mode"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "bad body", http.StatusBadRequest)
+		return
+	}
+	switch strings.ToLower(strings.TrimSpace(body.Mode)) {
+	case control.ToolApprovalAsk, control.ToolApprovalAuto, control.ToolApprovalYolo:
+		s.ctl().SetToolApprovalMode(body.Mode)
+	default:
+		http.Error(w, "mode must be ask, auto, or yolo", http.StatusBadRequest)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// bypass is the legacy HTTP endpoint for YOLO/full-access tool auto-approval.
+func (s *Server) bypass(w http.ResponseWriter, r *http.Request) {
+	s.autoApproveTools(w, r)
 }
 
 // answer responds to an ask_request.
@@ -736,15 +769,19 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	used, window := s.ctl().ContextSnapshot()
 	hit, miss := s.ctl().SessionCache()
 	sess := map[string]any{
-		"label":     s.ctl().Label(),
-		"running":   s.ctl().Running(),
-		"plan":      s.ctl().PlanMode(),
-		"bypass":    s.ctl().Bypass(),
-		"cwd":       s.ctl().SessionDir(),
-		"used":      used,
-		"window":    window,
-		"cacheHit":  hit,
-		"cacheMiss": miss,
+		"label":            s.ctl().Label(),
+		"running":          s.ctl().Running(),
+		"plan":             s.ctl().PlanMode(),
+		"autoApproveTools": s.ctl().AutoApproveTools(),
+		"bypass":           s.ctl().AutoApproveTools(),
+		"toolApprovalMode": s.ctl().ToolApprovalMode(),
+		"goal":             s.ctl().Goal(),
+		"goalStatus":       s.ctl().GoalStatus(),
+		"cwd":              s.ctl().SessionDir(),
+		"used":             used,
+		"window":           window,
+		"cacheHit":         hit,
+		"cacheMiss":        miss,
 	}
 	if u := s.ctl().LastUsage(); u != nil {
 		sess["lastUsage"] = u
@@ -884,11 +921,28 @@ func (s *Server) deleteSession(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "cannot delete active session", http.StatusConflict)
 		return
 	}
+	destroy := s.ctl().BeginDestroySession(abs)
 	if err := os.Remove(abs); err != nil {
+		go finishSessionDestroy(destroy)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	if err := agent.DeleteSubagentsByParent(dir, agent.BranchID(abs)); err != nil {
+		go finishSessionDestroy(destroy)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	go finishSessionDestroy(destroy)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func finishSessionDestroy(destroy control.SessionDestroyHandle) {
+	if destroy.Wait != nil {
+		destroy.Wait()
+	}
+	if destroy.Finish != nil {
+		destroy.Finish()
+	}
 }
 
 // sessionTitle returns a title for a session: the cached flash-generated title
@@ -941,7 +995,7 @@ func previewSessionFile(path string) (string, int) {
 		if m.Role == "user" {
 			turns++
 			if first == "" {
-				first = strings.TrimSpace(m.Content)
+				first = agent.UserPreviewText(m.Content)
 			}
 		}
 	}

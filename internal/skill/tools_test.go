@@ -49,7 +49,7 @@ func TestRunSkillSubagentRuns(t *testing.T) {
 	home := t.TempDir()
 	writeSkill(t, home, ".reasonix/skills/dig.md", "---\ndescription: dig\nrunAs: subagent\n---\nbody")
 	var gotTask string
-	runner := func(_ context.Context, sk Skill, task string) (string, error) {
+	runner := func(_ context.Context, sk Skill, task string, _ SubagentRunOptions) (string, error) {
 		gotTask = task
 		return "answer from " + sk.Name, nil
 	}
@@ -86,7 +86,9 @@ func TestRunSkillSubagentResolvesProfile(t *testing.T) {
 func TestRunSkillSubagentRequiresArgs(t *testing.T) {
 	home := t.TempDir()
 	writeSkill(t, home, ".reasonix/skills/dig.md", "---\ndescription: dig\nrunAs: subagent\n---\nbody")
-	runner := func(_ context.Context, _ Skill, _ string) (string, error) { return "x", nil }
+	runner := func(_ context.Context, _ Skill, _ string, _ SubagentRunOptions) (string, error) {
+		return "x", nil
+	}
 	tl := NewRunSkillTool(New(Options{HomeDir: home, DisableBuiltins: true}), runner)
 	if _, err := tl.Execute(context.Background(), json.RawMessage(`{"name":"dig"}`)); err == nil {
 		t.Error("subagent skill should require arguments")
@@ -111,7 +113,7 @@ func TestCleanSkillName(t *testing.T) {
 
 func TestBuiltinSubagentToolsRunner(t *testing.T) {
 	var ran string
-	runner := func(_ context.Context, sk Skill, task string) (string, error) {
+	runner := func(_ context.Context, sk Skill, task string, _ SubagentRunOptions) (string, error) {
 		ran = sk.Name + ":" + task
 		return "ok", nil
 	}
@@ -133,6 +135,34 @@ func TestBuiltinSubagentToolsRunner(t *testing.T) {
 	}
 	if ran != "explore:map the loop" {
 		t.Errorf("runner not invoked correctly: %q", ran)
+	}
+}
+
+func TestBuiltinSubagentToolsPassContinuationOptions(t *testing.T) {
+	var got SubagentRunOptions
+	runner := func(_ context.Context, _ Skill, _ string, opts SubagentRunOptions) (string, error) {
+		got = opts
+		return "ok", nil
+	}
+	tools := BuiltinSubagentTools(New(Options{HomeDir: t.TempDir()}), runner)
+	var review interface {
+		Name() string
+		Execute(context.Context, json.RawMessage) (string, error)
+	}
+	for _, tl := range tools {
+		if tl.Name() == "review" {
+			review = tl
+			break
+		}
+	}
+	if review == nil {
+		t.Fatal("review wrapper tool not built")
+	}
+	if _, err := review.Execute(context.Background(), json.RawMessage(`{"task":"again","continue_from":"sa_prev"}`)); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if got.ContinueFrom != "sa_prev" || got.ForkFrom != "" {
+		t.Fatalf("continuation opts = %+v, want continue_from sa_prev", got)
 	}
 }
 
@@ -207,5 +237,32 @@ func TestInstallSkill(t *testing.T) {
 	if _, err := tl.Execute(context.Background(), json.RawMessage(
 		`{"name":"x","description":"","body":"b"}`)); err == nil {
 		t.Error("install_skill should require a description")
+	}
+}
+
+func TestReadSkillLoadsInlineAndIsReadOnly(t *testing.T) {
+	home := t.TempDir()
+	writeSkill(t, home, ".reasonix/skills/note.md", "---\ndescription: take a note\n---\nDo the thing.")
+	tl := NewReadSkillTool(New(Options{HomeDir: home, DisableBuiltins: true}))
+
+	if !tl.ReadOnly() {
+		t.Fatal("read_skill must be ReadOnly so it works in plan mode")
+	}
+	out, err := tl.Execute(context.Background(), json.RawMessage(`{"name":"note","arguments":"with args"}`))
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if !strings.Contains(out, "Do the thing.") || !strings.Contains(out, "Arguments: with args") {
+		t.Errorf("inline body/args missing:\n%s", out)
+	}
+}
+
+func TestReadSkillRejectsSubagent(t *testing.T) {
+	home := t.TempDir()
+	writeSkill(t, home, ".reasonix/skills/dig.md", "---\ndescription: dig\nrunAs: subagent\n---\nbody")
+	tl := NewReadSkillTool(New(Options{HomeDir: home, DisableBuiltins: true}))
+
+	if _, err := tl.Execute(context.Background(), json.RawMessage(`{"name":"dig"}`)); err == nil || !strings.Contains(err.Error(), "run_skill") {
+		t.Fatalf("read_skill on a subagent skill should point to run_skill, got %v", err)
 	}
 }

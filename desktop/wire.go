@@ -127,7 +127,9 @@ var kindNames = map[event.Kind]string{
 	event.CompactionStarted: "compaction_started",
 	event.CompactionDone:    "compaction_done",
 	event.ToolProgress:      "tool_progress",
+	event.MCPSurfaceReady:   "mcp_surface_ready",
 	event.Retrying:          "retrying",
+	event.Steer:             "steer",
 }
 
 // toWireAsk converts an event.Ask into its JSON wire form.

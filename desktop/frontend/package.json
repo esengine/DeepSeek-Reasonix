@@ -10,17 +10,20 @@
     "check:css": "node scripts/check-css-syntax.mjs src/styles.css && node scripts/check-z-index-tokens.mjs src/styles.css",
     "test:todo-visibility": "node scripts/test-todo-visibility.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "tsx src/__tests__/math-golden.test.ts && tsx src/__tests__/text-size.test.ts && tsx src/__tests__/provider-model-refresh.test.ts",
+    "test": "tsx src/__tests__/math-golden.test.ts && tsx src/__tests__/text-size.test.ts && tsx src/__tests__/provider-model-refresh.test.ts && tsx src/__tests__/composer-profile.test.ts && tsx src/__tests__/use-controller-meta.test.ts && tsx src/__tests__/workspace-layout.test.ts && tsx src/__tests__/tool-approval-mode.test.ts && tsx src/__tests__/send-failed.test.ts && tsx src/__tests__/message-selection-copy.test.ts && tsx src/__tests__/attachment-display.test.ts && tsx src/__tests__/command-palette-css.test.ts && tsx src/__tests__/context-panel-breakdown.test.ts",
     "test:typecheck": "tsc --noEmit -p tsconfig.test.json",
-    "test:all": "tsc --noEmit -p tsconfig.test.json && tsx src/__tests__/math-golden.test.ts && tsx src/__tests__/text-size.test.ts && tsx src/__tests__/provider-model-refresh.test.ts"
+    "test:all": "tsc --noEmit -p tsconfig.test.json && tsx src/__tests__/math-golden.test.ts && tsx src/__tests__/text-size.test.ts && tsx src/__tests__/provider-model-refresh.test.ts && tsx src/__tests__/composer-profile.test.ts && tsx src/__tests__/use-controller-meta.test.ts && tsx src/__tests__/workspace-layout.test.ts && tsx src/__tests__/tool-approval-mode.test.ts && tsx src/__tests__/send-failed.test.ts && tsx src/__tests__/message-selection-copy.test.ts && tsx src/__tests__/attachment-display.test.ts && tsx src/__tests__/command-palette-css.test.ts && tsx src/__tests__/context-panel-breakdown.test.ts"
   },
   "dependencies": {
+    "@gsap/react": "^2.1.2",
     "@tanstack/react-virtual": "^3.14.2",
+    "gsap": "^3.15.0",
     "highlight.js": "^11.10.0",
     "katex": "^0.17.0",
     "lucide-react": "^1.17.0",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
+    "qrcode.react": "^4.2.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
     "react-markdown": "^10.1.0",
     "rehype-katex": "^7.0.1",
     "remark-gfm": "^4.0.0",
@@ -28,12 +31,12 @@
   },
   "devDependencies": {
     "@types/node": "^25.9.1",
-    "@types/react": "^18.3.12",
-    "@types/react-dom": "^18.3.1",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.2.0",
     "terser": "^5.48.0",
     "tsx": "^4.22.4",
-    "typescript": "^5.6.3",
+    "typescript": "^6.0.3",
     "vite": "^6.0.7"
   },
   "overrides": {

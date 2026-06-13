@@ -5,9 +5,12 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
+
+	"reasonix/internal/agent"
 
 	"reasonix/internal/command"
 	"reasonix/internal/event"
@@ -98,6 +101,88 @@ func TestComposePlanModeMarker(t *testing.T) {
 	}
 }
 
+func TestComposeReasoningLanguagePreference(t *testing.T) {
+	auto := New(Options{ReasoningLanguage: "auto"})
+	if got := auto.Compose("hi"); got != "hi" {
+		t.Fatalf("auto reasoning language should not alter the turn, got %q", got)
+	}
+
+	zh := New(Options{ReasoningLanguage: "zh"})
+	got := zh.Compose("hi")
+	if !strings.HasPrefix(got, "<reasoning-language>") || !strings.Contains(got, "Simplified Chinese") || !strings.HasSuffix(got, "hi") {
+		t.Fatalf("zh reasoning language should ride the user turn, got %q", got)
+	}
+	if stripped := StripComposePrefixes(got); stripped != "hi" {
+		t.Fatalf("StripComposePrefixes = %q, want hi", stripped)
+	}
+}
+
+func TestRunComposesReasoningLanguagePreference(t *testing.T) {
+	runner := &fakeTurnRunner{}
+	c := New(Options{ReasoningLanguage: "zh", Runner: runner})
+
+	if err := c.Run(context.Background(), "hi"); err != nil {
+		t.Fatal(err)
+	}
+	if len(runner.inputs) != 1 {
+		t.Fatalf("runner inputs = %d, want 1", len(runner.inputs))
+	}
+	got := runner.inputs[0]
+	if !strings.HasPrefix(got, "<reasoning-language>") || !strings.Contains(got, "Simplified Chinese") || !strings.HasSuffix(got, "hi") {
+		t.Fatalf("headless Run should compose the reasoning language preference, got %q", got)
+	}
+}
+
+func TestComposeIncludesActiveGoal(t *testing.T) {
+	c := New(Options{})
+	c.SetGoal("ship the approval redesign")
+
+	got := c.Compose("next step?")
+	if !strings.Contains(got, "<active-goal>\nship the approval redesign") {
+		t.Fatalf("Compose should include active goal block, got %q", got)
+	}
+	if !strings.Contains(got, "[goal:complete]") || !strings.Contains(got, "[goal:blocked:<short reason>]") {
+		t.Fatalf("goal block should include autonomous status markers, got %q", got)
+	}
+	if !strings.HasSuffix(got, "next step?") {
+		t.Fatalf("user text should follow goal block: %q", got)
+	}
+
+	c.ClearGoal()
+	if got := c.Compose("plain"); got != "plain" {
+		t.Fatalf("cleared goal should stop injection, got %q", got)
+	}
+}
+
+func TestGoalCommandSetsReportsAndClears(t *testing.T) {
+	var notices []string
+	c := New(Options{Sink: event.FuncSink(func(e event.Event) {
+		if e.Kind == event.Notice {
+			notices = append(notices, e.Text)
+		}
+	})})
+	c.SetPlanMode(true)
+
+	c.Submit("/goal finish the mode redesign")
+	if got := c.Goal(); got != "finish the mode redesign" {
+		t.Fatalf("Goal() = %q", got)
+	}
+	if c.PlanMode() {
+		t.Fatal("/goal should leave plan mode")
+	}
+	c.Submit("/goal")
+	c.Submit("/goal clear")
+	if got := c.Goal(); got != "" {
+		t.Fatalf("goal should be cleared, got %q", got)
+	}
+	joined := strings.Join(notices, "\n")
+	for _, want := range []string{"goal set", "goal: finish the mode redesign", "goal cleared"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("notices missing %q: %v", want, notices)
+		}
+	}
+}
+
 func TestComposeDrainsQueuedMemory(t *testing.T) {
 	c := New(Options{}) // no executor/memory — QueueMemory still queues a turn-tail note
 
@@ -126,6 +211,12 @@ func TestMemoryQuickAddNoteRequiresWhitespace(t *testing.T) {
 		{in: "#issue needs work", ok: false},
 		{in: "# Heading", note: "Heading", ok: true},
 		{in: "#", ok: false},
+		// Multi-line input is NOT a quick-add — it's a Markdown heading (# Context)
+		// followed by structured content. Desktop users pasting COSTAR-style prompts
+		// hit this when the first line starts with "# ".
+		{in: "# Context\n\n- file.go\n", ok: false},
+		{in: "# Heading\nmore text", ok: false},
+		{in: "  # Context\n  - file.go  ", ok: false},
 	}
 	for _, tt := range tests {
 		got, ok := MemoryQuickAddNote(tt.in)
@@ -171,6 +262,90 @@ func TestSubmitHashNumberStartsTurn(t *testing.T) {
 
 	if len(runner.inputs) != 1 || runner.inputs[0] != input {
 		t.Fatalf("#number prompt should start a model turn, inputs=%q", runner.inputs)
+	}
+}
+
+func TestSubmitSlashPathDiagnosticStartsTurnWithFileContext(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX absolute file path context is covered on POSIX runners")
+	}
+	dir := t.TempDir()
+	file := filepath.Join(dir, "app", "src", "main", "Foo.kt")
+	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, []byte("fun broken() = missingSymbol\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runner := &fakeTurnRunner{}
+	events := make(chan event.Event, 4)
+	c := New(Options{
+		AutoPlan: "off",
+		Runner:   runner,
+		Sink: event.FuncSink(func(e event.Event) {
+			events <- e
+		}),
+	})
+
+	input := file + ":12:13: error: unresolved reference: missingSymbol"
+	c.Submit(input)
+	waitForTurnDone(t, events)
+
+	if len(runner.inputs) != 1 {
+		t.Fatalf("slash path diagnostic should start a model turn, inputs=%q", runner.inputs)
+	}
+	got := runner.inputs[0]
+	if !strings.Contains(got, "Referenced context:") || !strings.Contains(got, "fun broken() = missingSymbol") {
+		t.Fatalf("slash path diagnostic should attach file context, got %q", got)
+	}
+	if !strings.Contains(got, input) {
+		t.Fatalf("slash path diagnostic should preserve original error text, got %q", got)
+	}
+}
+
+func TestSubmitMissingSlashPathDiagnosticStartsTurn(t *testing.T) {
+	runner := &fakeTurnRunner{}
+	events := make(chan event.Event, 4)
+	c := New(Options{
+		AutoPlan: "off",
+		Runner:   runner,
+		Sink: event.FuncSink(func(e event.Event) {
+			events <- e
+		}),
+	})
+
+	input := "/missing/Foo.kt:12: error: file no longer exists"
+	c.Submit(input)
+	waitForTurnDone(t, events)
+
+	if len(runner.inputs) != 1 || runner.inputs[0] != input {
+		t.Fatalf("missing slash path diagnostic should start a raw model turn, inputs=%q", runner.inputs)
+	}
+}
+
+func TestSubmitUnknownSlashCommandStillReportsNotice(t *testing.T) {
+	runner := &fakeTurnRunner{}
+	events := make(chan event.Event, 4)
+	c := New(Options{
+		AutoPlan: "off",
+		Runner:   runner,
+		Sink: event.FuncSink(func(e event.Event) {
+			events <- e
+		}),
+	})
+
+	c.Submit("/definitely-not-a-command")
+
+	if len(runner.inputs) != 0 {
+		t.Fatalf("unknown slash command should not start a model turn, inputs=%q", runner.inputs)
+	}
+	select {
+	case e := <-events:
+		if e.Kind != event.Notice || !strings.Contains(e.Text, "unknown command: /definitely-not-a-command") {
+			t.Fatalf("event = %+v, want unknown-command notice", e)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for unknown-command notice")
 	}
 }
 
@@ -369,5 +544,154 @@ func TestRunTurnAutoPlanScoresRawPromptNotResolvedRefs(t *testing.T) {
 	}
 	if c.PlanMode() {
 		t.Fatal("controller plan mode should remain off")
+	}
+}
+
+func TestStripComposePrefixes(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "plain user message unchanged",
+			input: "explain this function",
+			want:  "explain this function",
+		},
+		{
+			name:  "plan mode marker stripped",
+			input: PlanModeMarker + "\n\nexplain this function",
+			want:  "explain this function",
+		},
+		{
+			name:  "plan mode marker without trailing newlines",
+			input: PlanModeMarker,
+			want:  "",
+		},
+		{
+			name:  "memory update block stripped",
+			input: "<memory-update>\nThe following project-memory changes were just made and apply from now on:\n- Saved memory \"rmb\": user balance\n</memory-update>\n\nexplain this",
+			want:  "explain this",
+		},
+		{
+			name:  "background jobs block stripped",
+			input: "<background-jobs>\n1 completed\n</background-jobs>\n\nexplain this",
+			want:  "explain this",
+		},
+		{
+			name:  "memory and plan marker both stripped",
+			input: "<memory-update>\n- note\n</memory-update>\n\n" + PlanModeMarker + "\n\nexplain this",
+			want:  "explain this",
+		},
+		{
+			name:  "empty after stripping",
+			input: PlanModeMarker + "\n\n",
+			want:  "",
+		},
+		{
+			name:  "memory update only no user text",
+			input: "<memory-update>\n- note\n</memory-update>\n\n",
+			want:  "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := StripComposePrefixes(tt.input)
+			if got != tt.want {
+				t.Errorf("StripComposePrefixes() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsSyntheticUserMessage(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  bool
+	}{
+		{
+			name:  "plan approved message",
+			input: planApprovedMessage,
+			want:  true,
+		},
+		{
+			name:  "stream recovery interrupted tool",
+			input: "The previous assistant response was interrupted while a tool call was streaming. Continue the same task now.",
+			want:  true,
+		},
+		{
+			name:  "stream recovery interrupted text",
+			input: "The previous assistant response was interrupted during streaming. Continue the same task from immediately after the partial assistant message above.",
+			want:  true,
+		},
+		{
+			name:  "empty final retry",
+			input: "The previous assistant response finished without any visible answer text. Continue the same task now and provide a concise visible answer.",
+			want:  true,
+		},
+		{
+			name:  "readiness retry",
+			input: "Host final-answer readiness check failed. Before giving a final answer, address the missing host-observable receipts: missing evidence.",
+			want:  true,
+		},
+		{
+			name:  "executor handoff",
+			input: "You are already in the executor phase. The planner's read-only limitations do not apply to you.",
+			want:  true,
+		},
+		{
+			name:  "regular user message",
+			input: "explain this function",
+			want:  false,
+		},
+		{
+			name:  "plan mode marker in message",
+			input: PlanModeMarker + "\n\nexplain this",
+			want:  false,
+		},
+		{
+			name:  "stream recovery interrupted before visible",
+			input: "The previous assistant response was interrupted during streaming before visible answer text was completed. Continue the same task now.",
+			want:  true,
+		},
+		{
+			name:  "user quoting interrupted response not synthetic",
+			input: "The previous assistant response was interrupted by my VPN, can you retry?",
+			want:  false,
+		},
+		{
+			name:  "compaction fold summary",
+			input: "<compaction-summary>\nSummary of earlier conversation (older messages were compacted to save context):\nDid things with tools.\n</compaction-summary>",
+			want:  true,
+		},
+		{
+			name:  "summarize-from fold",
+			input: "Summary of the later conversation (compacted from here on):\nDid more things.",
+			want:  true,
+		},
+		{
+			name:  "summarize-upto fold",
+			input: "Summary of earlier conversation (compacted up to here):\nDid earlier things.",
+			want:  true,
+		},
+		{
+			name:  "user mentioning a summary is not synthetic",
+			input: "Summary of what I want: fix the login bug first.",
+			want:  false,
+		},
+		{
+			name:  "mid-turn steer is not synthetic (handled separately in historyMessages)",
+			input: agent.MidTurnSteerPrefix + "\nplease use smaller diffs",
+			want:  false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := IsSyntheticUserMessage(tt.input)
+			if got != tt.want {
+				t.Errorf("IsSyntheticUserMessage() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

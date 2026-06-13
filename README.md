@@ -7,6 +7,8 @@
   &nbsp;·&nbsp;
   <a href="./README.zh-CN.md">简体中文</a>
   &nbsp;·&nbsp;
+  <a href="./docs/GUIDE.md">Guide</a>
+  &nbsp;·&nbsp;
   <a href="./docs/SPEC.md">Spec</a>
   &nbsp;·&nbsp;
   <a href="https://esengine.github.io/DeepSeek-Reasonix/">Website</a>
@@ -21,13 +23,13 @@
 
 <p align="center">
   <a href="https://www.npmjs.com/package/reasonix"><img src="https://img.shields.io/npm/v/reasonix.svg?style=flat-square&color=cb3837&labelColor=161b22&logo=npm&logoColor=white" alt="npm version"/></a>
-  <a href="https://github.com/esengine/reasonix/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/esengine/reasonix/ci.yml?style=flat-square&label=ci&labelColor=161b22&logo=githubactions&logoColor=white" alt="CI"/></a>
+  <a href="https://github.com/esengine/DeepSeek-Reasonix/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/esengine/DeepSeek-Reasonix/ci.yml?style=flat-square&label=ci&labelColor=161b22&logo=githubactions&logoColor=white" alt="CI"/></a>
   <a href="./LICENSE"><img src="https://img.shields.io/npm/l/reasonix.svg?style=flat-square&color=8b949e&labelColor=161b22" alt="license"/></a>
   <a href="https://www.npmjs.com/package/reasonix"><img src="https://img.shields.io/npm/dm/reasonix.svg?style=flat-square&color=3fb950&labelColor=161b22&label=downloads" alt="downloads"/></a>
-  <a href="https://github.com/esengine/reasonix/stargazers"><img src="https://img.shields.io/github/stars/esengine/reasonix.svg?style=flat-square&color=dbab09&labelColor=161b22&logo=github&logoColor=white" alt="GitHub stars"/></a>
+  <a href="https://github.com/esengine/DeepSeek-Reasonix/stargazers"><img src="https://img.shields.io/github/stars/esengine/DeepSeek-Reasonix.svg?style=flat-square&color=dbab09&labelColor=161b22&logo=github&logoColor=white" alt="GitHub stars"/></a>
   <a href="https://atomgit.com/esengine/DeepSeek-Reasonix"><img src="https://atomgit.com/esengine/DeepSeek-Reasonix/star/badge.svg" alt="AtomGit stars"/></a>
-  <a href="https://github.com/esengine/reasonix/graphs/contributors"><img src="https://img.shields.io/github/contributors/esengine/reasonix.svg?style=flat-square&color=bc8cff&labelColor=161b22&logo=github&logoColor=white" alt="contributors"/></a>
-  <a href="https://github.com/esengine/reasonix/discussions"><img src="https://img.shields.io/github/discussions/esengine/reasonix.svg?style=flat-square&color=58a6ff&labelColor=161b22&logo=github&logoColor=white" alt="Discussions"/></a>
+  <a href="https://github.com/esengine/DeepSeek-Reasonix/graphs/contributors"><img src="https://img.shields.io/github/contributors/esengine/DeepSeek-Reasonix.svg?style=flat-square&color=bc8cff&labelColor=161b22&logo=github&logoColor=white" alt="contributors"/></a>
+  <a href="https://github.com/esengine/DeepSeek-Reasonix/discussions"><img src="https://img.shields.io/github/discussions/esengine/DeepSeek-Reasonix.svg?style=flat-square&color=58a6ff&labelColor=161b22&logo=github&logoColor=white" alt="Discussions"/></a>
   <a href="https://discord.gg/XF78rEME2D"><img src="https://img.shields.io/badge/discord-join-5865F2.svg?style=flat-square&labelColor=161b22&logo=discord&logoColor=white" alt="Discord"/></a>
 </p>
 
@@ -97,22 +99,10 @@ echo "explain this code" | reasonix run
 
 ## Configuration
 
-Resolution order: **flag > `./reasonix.toml` > `~/.config/reasonix/config.toml` >
-built-in defaults**. Secrets come from the environment via `api_key_env` and are
-never stored in config files.
+A minimal `reasonix.toml` — one provider and a default model — is enough to start:
 
 ```toml
-default_model = "deepseek-flash"   # executor; set [agent].planner_model to add a planner
-# language    = "zh"               # ui language; empty = auto-detect from $LANG / $REASONIX_LANG
-
-[agent]
-max_steps = 0                    # executor tool-call rounds; 0 = no limit
-planner_max_steps = 12           # planner read-only tool-call rounds; 0 = no limit
-# planner_model = "mimo-pro"          # optional low-frequency planner
-# subagent_model = "deepseek-pro"     # optional default for runAs=subagent skills
-# subagent_models = { review = "deepseek-pro", security_review = "deepseek-pro" }
-auto_plan = "off"                  # off|on; off keeps plan mode manual
-# auto_plan_classifier = "deepseek-flash"   # optional; only borderline tasks call it
+default_model = "deepseek-flash"
 
 [[providers]]
 name        = "deepseek-flash"
@@ -120,210 +110,28 @@ kind        = "openai"
 base_url    = "https://api.deepseek.com"
 model       = "deepseek-v4-flash"
 api_key_env = "DEEPSEEK_API_KEY"
-# also preset: deepseek-pro, mimo-pro (mimo-v2.5-pro), mimo-flash (mimo-v2-flash) @ api.xiaomimimo.com/v1
-
-[tools]
-enabled = []   # omit/empty = all built-ins
-bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local cap
-
-[skills]
-# paths = ["~/my-skills", "../shared/skills"]   # extra custom skill roots
-# excluded_paths = ["~/.agents/skills"]         # hide convention roots without deleting folders
-# disabled_skills = ["review"]                  # hide skills until /skill enable <name>
-
-[permissions]
-mode  = "ask"                                # writer fallback when no rule matches: ask|allow|deny
-deny  = ["Bash(rm -rf*)", "Bash(git push*)"] # hard-blocked in every mode
-allow = ["Bash(go test:*)"]                  # never prompted
-
-[sandbox]
-# workspace_root = ""          # file-writers confined here; empty = current dir
-# allow_write    = ["/tmp"]    # extra dirs write_file/edit_file/multi_edit may touch
-
-[[plugins]]
-name    = "example"
-command = "reasonix-plugin-example"
 ```
 
-Permissions gate each tool call: `deny` > `ask` > `allow` > fallback. Bash and
-file mutation tools require approval by default; read-only tools generally do
-not. Approvals are stored and matched as permission rules, not button labels:
-for example `Bash(npm run build)`, `Bash(npm run test:*)`, and `Edit(docs/**)`.
-`reasonix chat` can grant Bash as an exact command or as a conservative command
-prefix (for example `Bash(go test:*)`), while file-editing tools share session
-edit grants and persist path-scoped rules such as `Edit(src/app.go)`.
-`reasonix run` stays autonomous but still honours `deny`. See
-[`docs/SPEC.md`](docs/SPEC.md) for the full schema and contract.
+Resolution order is **flag > `./reasonix.toml` > the user config file >
+built-in defaults**; the user file lives in your OS config dir — `~/.config/reasonix/`
+on Linux, `~/Library/Application Support/reasonix/` on macOS, `%AppData%\reasonix\` on
+Windows. Secrets come from the environment via `api_key_env` and are
+never written to config files. Permissions, the sandbox, plugins (MCP), slash
+commands, `@` references, and two-model setup are all in the
+**[Guide](./docs/GUIDE.md)**.
 
-Permissions are *policy* (which calls to allow / prompt). The **sandbox** is
-*enforcement*: the file-writers (`write_file` / `edit_file` / `multi_edit`)
-refuse any path outside `[sandbox] workspace_root` (default: the current dir, so
-edits stay in the project), resolving symlinks and `..` so a link can't tunnel
-out. Reads are unrestricted. `bash` is itself jailed on macOS by default
-(`[sandbox] bash`, Seatbelt): commands may write only those same roots (plus
-temp and toolchain caches) and reach the network only when `[sandbox] network`
-is set. Other platforms fall back to running unconfined for now (see
-`docs/SPEC.md` §9 for the escape-prompt and Linux support still to come).
+## Documentation
 
-### Plugins (MCP)
-
-Reasonix is an MCP client. A `[[plugins]]` entry's `type` selects the transport:
-`stdio` (default) launches a local subprocess (`command`/`args`/`env`); `http`
-(Streamable HTTP) connects to a remote `url` with optional static `headers`
-(`${VAR}` / `${VAR:-default}` expanded from the environment, so tokens stay out
-of the file). Tools surface to the model as `mcp__<server>__<tool>`; a tool
-declaring MCP's `readOnlyHint: true` joins parallel dispatch and the permission
-reader-default.
-
-A server's **prompts** surface as `/mcp__<server>__<prompt>` slash commands
-(positional args after the command); its **resources** are pulled in by writing
-`@<server>:<uri>` in a message; `/mcp` lists connected servers and what each
-exposes. `make build` also produces `bin/reasonix-plugin-example` — a runnable
-reference stdio server (`echo`, `wordcount`, a `review` prompt, a style-guide
-resource) you can copy.
-
-```toml
-[[plugins]]                       # local stdio server
-name    = "example"
-command = "reasonix-plugin-example"
-
-[[plugins]]                       # remote server over Streamable HTTP
-name    = "stripe"
-type    = "http"
-url     = "https://mcp.stripe.com"
-headers = { Authorization = "Bearer ${STRIPE_KEY}" }
-```
-
-Enabled MCP servers start connecting automatically in the background after a
-session begins, so chat stays usable while tools come online. Use `/mcp` or the
-desktop MCP panel to refresh status, reconnect a server, inspect failures, or
-disable a server for the current session.
-
-**Already have an `.mcp.json`?** Drop it in the project root and Reasonix
-reads it as-is — the `mcpServers` spec (`command`/`args`/`env`, `type`/`url`/
-`headers`, `${VAR}` expansion) maps field-for-field onto `[[plugins]]`. Both
-sources are merged; on a name collision `reasonix.toml` wins.
-
-```json
-{
-  "mcpServers": {
-    "filesystem": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path"] },
-    "stripe": { "type": "http", "url": "https://mcp.stripe.com", "headers": { "Authorization": "Bearer ${STRIPE_KEY}" } }
-  }
-}
-```
-
-**Upgrading from `0.x`?** Your old `~/.reasonix/config.json` is still read for its
-`mcpServers` (honouring `mcpDisabled`) as a lowest-priority source, so MCP servers
-keep working — move them into `reasonix.toml`'s `[[plugins]]` or a `.mcp.json` when
-convenient.
-
-### Slash commands
-
-In `reasonix chat`, built-in commands (`/compact`, `/new`/`/clear`, `/rewind`, `/tree`,
-`/branch`, `/switch`, `/todo`, `/model`, `/effort`, `/mcp`, `/memory`, `/help`) run locally.
-`/new` starts a fresh model context while saving the previous transcript for
-history/resume; `/clear` is the Claude Code-compatible alias.
-`/tree` shows saved conversation branches, `/branch [name]` forks the current
-conversation tip, `/branch <turn> [name]` forks from an earlier checkpointed turn,
-and `/switch <id|name>` loads another branch. **Custom commands** are Markdown files under
-`.reasonix/commands/` (project) or `~/.config/reasonix/commands/` (user) —
-`review.md` becomes `/review`, a subdirectory namespaces it (`git/commit.md` →
-`/git:commit`). The body is a prompt template; invoking the command sends it as a
-turn.
-
-```markdown
----
-description: Review the staged diff
-argument-hint: [focus-area]
----
-Review the staged diff. Focus on $ARGUMENTS, list bugs with file:line.
-```
-
-`$ARGUMENTS` expands to all space-separated args, `$1`…`$N` to positional ones.
-MCP prompts also appear here as `/mcp__<server>__<prompt>`.
-
-### @ references
-
-Embed `@` references in a message and Reasonix resolves them before sending, as
-tagged context blocks: `@path/to/file` (or `@dir`) injects a local file's
-contents (or a directory listing), and `@<server>:<uri>` injects an MCP
-resource. A local path is only treated as a reference when it actually exists,
-so ordinary `@mentions` stay literal. Typing `/` or `@` opens an autocomplete
-menu — slash commands, or hierarchical file navigation (one directory level at a
-time, descend into folders) plus MCP resources.
-
-### Two-model collaboration (optional)
-
-`reasonix setup` keeps first-run minimal: pick provider → keys (every SKU of a
-chosen provider is enabled). Running two models together (executor + planner,
-separate cache-stable sessions) is a one-line edit afterwards — set
-`planner_model` to any other enabled provider:
-
-```toml
-[agent]
-planner_model = "deepseek-pro"   # used as the low-frequency planner
-planner_max_steps = 12           # read-only tool-call rounds before pausing
-```
-
-The planner sees loaded `REASONIX.md` / `AGENTS.md` memory and a small read-only
-research tool set, so it can inspect relevant files before handing a plan to the
-executor. Writer and workflow tools remain executor-only. `max_steps` limits the
-executor; `planner_max_steps` limits only the planner, and either can be set to
-`0` for no round limit.
-
-Keep personal step-limit preferences in the user config. Add them to a project's
-`./reasonix.toml` only when that repository needs a shared override, such as a
-larger planner limit for a very large codebase.
-
-Subagent skills inherit the executor model by default. Set `subagent_model` to
-run them on another configured model, or use `subagent_models` to override only
-specific skills such as `review` or `security_review`.
-
-For interactive frontends, plan mode is manual by default. Set
-`agent.auto_plan = "on"` to make complex-looking tasks enter plan mode
-automatically: Reasonix first drafts a read-only plan, then waits for approval
-before editing or running side-effecting commands. `auto_plan_classifier` can
-name a cheap provider such as `deepseek-flash`; it is only called for borderline
-inputs and falls back to the heuristic if classification fails. Use
-`/auto-plan off|on` in `reasonix chat` to change the user-level setting, or
-`reasonix config auto-plan off|on` from a shell/script. Pass `--local` to the
-shell command only when you intentionally want a project-local override.
-
-## Architecture
-
-Three tiers of extensibility, all behind registries the core resolves by name:
-
-1. **Registry** — `Provider` and `Tool` are interfaces; the core has no
-   `switch model`.
-2. **Compile-time built-ins** — providers (`provider/openai`) and tools
-   (`tool/builtin`) self-register via `init()`; `main` blank-imports them.
-   Adding a built-in is one file plus one import.
-3. **Runtime plugins** — executables declared in config, spoken to over
-   newline-delimited JSON-RPC 2.0 on stdin/stdout (the MCP stdio convention).
-   Each remote tool is adapted to the `Tool` interface.
-
-## Status
-
-Done: registry-based providers/tools, OpenAI-compatible streaming with tool
-calls (bounded retry on 429/5xx), built-in tools (read_file, write_file,
-edit_file, multi_edit, bash, ls, glob, grep, web_fetch, task, todo_write, ask),
-TOML config, an interactive `reasonix setup` wizard, two-model collaboration
-(executor + planner in separate, cache-stable sessions), low-frequency context
-compaction, sub-agents (`task`), a bubbletea chat TUI (markdown, plan mode with
-controller-driven approval, live token/activity readout, pinned task list,
-`ask` question chooser, `/compact` `/new` `/tree` `/branch` `/switch` `/todo`), session persistence + resume,
-per-call **permissions** (allow/ask/deny rules; chat prompts before writers, deny
-rules hard-block everywhere), a **workspace sandbox** confining file-writers to
-the project (symlink/`..`-safe), an MCP client — **stdio + Streamable HTTP**
-transports, tools (`mcp__server__tool`, `readOnlyHint`-aware), prompts (slash
-commands), resources (`@`-references), and `/mcp`, configured via `[[plugins]]`
-or a project `.mcp.json` — custom slash commands (`.reasonix/commands/*.md`),
-`@file` / `@resource` references, plus a runnable reference plugin
-(`cmd/reasonix-plugin-example`), the harness loop, and CLI. A Wails desktop
-client (`desktop/`) drives the same kernel. Next: an OS-level sandbox for `bash`
-(macOS Seatbelt / Linux bubblewrap), an Anthropic-native provider, MCP OAuth +
-legacy SSE. See `docs/SPEC.md` §9.
+- **[Guide](./docs/GUIDE.md)** — configuration, permissions & sandbox, plugins
+  (MCP), slash commands, `@` references, two-model collaboration.
+- **[Bot guide](./docs/BOT_GUIDE.md)** — connect Feishu, Lark, and WeChat bots
+  from the desktop app, then use approvals, YOLO, and commands from IM.
+- **[Spec](./docs/SPEC.md)** — engineering contract: architecture, registries,
+  data types, and roadmap.
+- **[Migrating from 0.x](./docs/MIGRATING.md)** — moving from the legacy
+  TypeScript releases to the 1.0 Go rewrite.
+- **[Checkpoints & rewind](./docs/CHECKPOINTS.md)** — the snapshot-based edit
+  safety net (Esc-Esc / `/rewind`).
 
 <br/>
 

@@ -98,6 +98,34 @@ func TestSanitizeToolPairingLeavesWellFormedUnchanged(t *testing.T) {
 	}
 }
 
+func TestSanitizeToolPairingClosesTruncatedArgs(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{`{`, `{}`},
+		{`{"time": 2`, `{"time": 2}`},
+		{`{"command": "ls -la`, `{"command": "ls -la"}`},
+		{`{"a": 1,`, `{"a": 1}`},
+		{`{"a":`, `{"a":null}`},
+		{`{"path": "C:\\tmp\`, `{"path": "C:\\tmp"}`},
+		{`{"items": [1, 2`, `{"items": [1, 2]}`},
+		{`total garbage`, `{}`},
+		{`{"ok": true}`, `{"ok": true}`},
+		{``, ``},
+	}
+	for _, c := range cases {
+		in := []Message{
+			{Role: RoleAssistant, ToolCalls: []ToolCall{{ID: "c1", Name: "bash", Arguments: c.in}}},
+			{Role: RoleTool, ToolCallID: "c1", Content: "r"},
+		}
+		out := SanitizeToolPairing(in)
+		if got := out[0].ToolCalls[0].Arguments; got != c.want {
+			t.Errorf("args %q repaired to %q, want %q", c.in, got, c.want)
+		}
+		if in[0].ToolCalls[0].Arguments != c.in {
+			t.Errorf("stored history mutated for %q: %q", c.in, in[0].ToolCalls[0].Arguments)
+		}
+	}
+}
+
 // --- Pricing.Cost ---
 
 func TestPricingCostNil(t *testing.T) {
@@ -168,6 +196,30 @@ func TestPricingSymbolCustom(t *testing.T) {
 	p := &Pricing{Currency: "$"}
 	if got := p.Symbol(); got != "$" {
 		t.Errorf("Symbol() = %q, want $", got)
+	}
+}
+
+func TestPricingSymbolNormalizesCurrencyCodes(t *testing.T) {
+	cases := []struct {
+		currency string
+		want     string
+	}{
+		{currency: "USD", want: "$"},
+		{currency: "dollars", want: "$"},
+		{currency: "CNY", want: "¥"},
+		{currency: "￥", want: "¥"},
+		{currency: "EUR", want: "€"},
+		{currency: "₹", want: "₹"},
+		{currency: "aud", want: "AUD "},
+		{currency: "A$", want: "A$"},
+		{currency: "HK$", want: "HK$"},
+		{currency: "楼", want: "¥"},
+	}
+	for _, tc := range cases {
+		p := &Pricing{Currency: tc.currency}
+		if got := p.Symbol(); got != tc.want {
+			t.Errorf("Currency %q Symbol() = %q, want %q", tc.currency, got, tc.want)
+		}
 	}
 }
 

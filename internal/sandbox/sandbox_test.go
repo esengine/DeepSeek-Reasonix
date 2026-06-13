@@ -3,6 +3,7 @@ package sandbox
 import (
 	"os/exec"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -124,13 +125,66 @@ func TestResolveShellDecisionTable(t *testing.T) {
 		{"wsl bash on PATH, no git → powershell not wsl", "windows", onPath("bash", "powershell"), gitBash, never, always, wslIsPathBash, ShellPowerShell, ""},
 	}
 	for _, c := range cases {
-		got := resolveShell(c.goos, c.lookPath, c.exists, c.candidates, c.probe, c.isWSL)
+		got := resolveShell("", "", nil, c.goos, c.lookPath, c.exists, c.candidates, c.probe, c.isWSL)
 		if got.Kind != c.wantKind {
 			t.Errorf("%s: kind = %s, want %s (path=%s)", c.name, got.Kind, c.wantKind, got.Path)
 		}
 		if c.wantPath != "" && got.Path != c.wantPath {
 			t.Errorf("%s: path = %q, want %q", c.name, got.Path, c.wantPath)
 		}
+	}
+}
+
+func TestResolveShellPrefer(t *testing.T) {
+	onPath := func(names ...string) func(string) (string, error) {
+		set := map[string]bool{}
+		for _, n := range names {
+			set[n] = true
+		}
+		return func(name string) (string, error) {
+			if set[name] {
+				return `C:\fake\` + name + ".exe", nil
+			}
+			return "", exec.ErrNotFound
+		}
+	}
+	gitBash := []string{`C:\fake\Git\bin\bash.exe`}
+	always := func(string) bool { return true }
+	never := func(string) bool { return false }
+	noWSL := func(string) bool { return false }
+
+	// prefer=powershell forces PowerShell even when bash is present and probes ok.
+	got := resolveShell("powershell", "", nil, "windows", onPath("bash", "powershell", "pwsh"), never, gitBash, always, noWSL)
+	if got.Kind != ShellPowerShell {
+		t.Errorf(`prefer="powershell": kind = %s, want powershell`, got.Kind)
+	}
+
+	// prefer=bash forces bash even on a host where PowerShell exists.
+	got = resolveShell("bash", "", nil, "windows", onPath("bash", "powershell"), never, gitBash, always, noWSL)
+	if got.Kind != ShellBash {
+		t.Errorf(`prefer="bash": kind = %s, want bash`, got.Kind)
+	}
+
+	// An explicit path is honoured for the forced kind.
+	got = resolveShell("pwsh", `C:\custom\pwsh.exe`, nil, "windows", onPath(), always, gitBash, never, noWSL)
+	if got.Kind != ShellPowerShell || got.Path != `C:\custom\pwsh.exe` {
+		t.Errorf(`prefer="pwsh" path: got {%s %q}, want {powershell "C:\custom\pwsh.exe"}`, got.Kind, got.Path)
+	}
+
+	// A forced shell that isn't installed warns and falls back to auto-detection.
+	var warn strings.Builder
+	got = resolveShell("powershell", "", &warn, "linux", onPath("bash"), never, gitBash, always, noWSL)
+	if got.Kind != ShellBash {
+		t.Errorf("missing forced powershell should fall back to bash, got %s", got.Kind)
+	}
+	if !strings.Contains(warn.String(), "powershell") {
+		t.Errorf("fallback should warn about the missing shell, got %q", warn.String())
+	}
+
+	// An unrecognised value is treated as auto, not an error.
+	got = resolveShell("fish", "", nil, "windows", onPath("bash"), never, gitBash, always, noWSL)
+	if got.Kind != ShellBash {
+		t.Errorf("unknown prefer should auto-detect, got %s", got.Kind)
 	}
 }
 

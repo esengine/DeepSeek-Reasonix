@@ -73,8 +73,16 @@ func (s *lazySpawn) kick() {
 	if s.state != spawnIdle {
 		return
 	}
+	if !s.host.beginDeferredSpawn() {
+		s.state = spawnFailed
+		s.spawnErr = fmt.Errorf("plugin host is closed")
+		return
+	}
 	s.state = spawnInFlight
-	go s.run()
+	go func() {
+		defer s.host.endDeferredSpawn()
+		s.run()
+	}()
 }
 
 // run does the handshake without holding mu (host.Add can take seconds), then
@@ -172,8 +180,17 @@ func (lt *lazyTool) Execute(ctx context.Context, args json.RawMessage) (string, 
 			// drive the handshake async and ask the model to retry. By the
 			// next turn the swap will have installed the real tools with
 			// real schemas under different names.
+			if !sp.host.beginDeferredSpawn() {
+				sp.state = spawnFailed
+				sp.spawnErr = fmt.Errorf("plugin host is closed")
+				sp.mu.Unlock()
+				return "", fmt.Errorf("MCP server %q failed to start: %w", sp.spec.Name, sp.spawnErr)
+			}
 			sp.state = spawnInFlight
-			go sp.run()
+			go func() {
+				defer sp.host.endDeferredSpawn()
+				sp.run()
+			}()
 			sp.mu.Unlock()
 			return "", fmt.Errorf("MCP server %q is initializing on first use — call again on the next turn for its real tools", sp.spec.Name)
 		}
@@ -223,11 +240,13 @@ func (lt *lazyTool) Execute(ctx context.Context, args json.RawMessage) (string, 
 // single Execute (use the controller's PluginCtx) — a turn-scoped ctx would
 // kill the stdio child between turns.
 func LazyToolset(spec Spec, cs *CachedSchema, host *Host, reg *tool.Registry, sessionCtx context.Context, kick bool) []tool.Tool {
+	spawnCtx, cancel := context.WithCancel(sessionCtx)
+	host.registerDeferredCancel(cancel)
 	shared := &lazySpawn{
 		spec: spec,
 		host: host,
 		reg:  reg,
-		ctx:  sessionCtx,
+		ctx:  spawnCtx,
 	}
 
 	var out []tool.Tool

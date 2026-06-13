@@ -29,15 +29,21 @@ import (
 const initTimeout = 30 * time.Second
 
 // SteerText is injected into the system prompt when CodeGraph tools are
-// available, so the model knows to prefer them for symbol-level questions.
+// available, so the model knows to prefer them for symbol-level questions. The
+// tool names are the model-visible registered names (mcp__codegraph__<tool>);
+// TestSteerTextNamesMatchRegisteredTools fails if they drift from the daemon's
+// actual tools so the model is never told to call a name it can't use.
 const SteerText = `## Code Intelligence (codegraph)
 You have codegraph tools for symbol-level code intelligence. For architecture questions, "how does X work", call graphs, symbol search, and impact analysis, prefer codegraph tools over grep/read_file:
-- codegraph_context — entry points + related symbols + key code in one call (USE THIS FIRST for "how does X work")
-- codegraph_search — find symbols by name (functions, types, interfaces)
-- codegraph_callers / codegraph_callees — trace call chains
-- codegraph_impact — what breaks if I change X
-- codegraph_trace — full call path between two symbols
-- codegraph_files — project file tree with symbol counts
+- mcp__codegraph__context — entry points + related symbols + key code in one call (USE THIS FIRST for "how does X work")
+- mcp__codegraph__search — find symbols by name (functions, types, interfaces)
+- mcp__codegraph__callers / mcp__codegraph__callees — trace call chains
+- mcp__codegraph__impact — what breaks if I change X
+- mcp__codegraph__trace — full call path between two symbols
+- mcp__codegraph__explore — walk the graph around a symbol (neighbours and relationships)
+- mcp__codegraph__node — full detail for one symbol (definition, location, signature)
+- mcp__codegraph__files — project file tree with symbol counts
+- mcp__codegraph__status — code-intelligence index build/health status
 Use grep/read_file for content search (comments, strings, config values) and when codegraph is not available.`
 
 // BundleDirName is the optional directory, beside the reasonix executable, where
@@ -138,6 +144,7 @@ func EnsureInit(ctx context.Context, bin, root string) error {
 	ctx, cancel := context.WithTimeout(ctx, initTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, bin, "init", root)
+	proc.SetProcessGroupKill(cmd) // own group so Cancel→KillTree reaps the tree off Windows (no-op on Windows)
 	cmd.Cancel = func() error { proc.KillTree(cmd); return nil }
 	cmd.WaitDelay = 3 * time.Second
 	proc.HideWindow(cmd)
@@ -157,6 +164,24 @@ func Initialized(root string) bool {
 	}
 	fi, err := os.Stat(filepath.Join(root, ".codegraph"))
 	return err == nil && fi.IsDir()
+}
+
+// IndexableRoot reports whether root is a real project directory CodeGraph can
+// safely be pinned to. A filesystem root (a Windows drive root like C:\, a UNC
+// share root, or the unix /) is rejected: serve --mcp walks its working
+// directory, so a root cwd makes it index the whole volume — C:\Windows,
+// C:\Program Files, everything — pinning gigabytes of RAM (#3747). An empty
+// root is rejected too: there is nothing to pin a cwd-aware server to.
+func IndexableRoot(root string) bool {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return false
+	}
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		return false
+	}
+	return filepath.Dir(abs) != abs // a filesystem root is its own parent
 }
 
 func expand(p string) string {

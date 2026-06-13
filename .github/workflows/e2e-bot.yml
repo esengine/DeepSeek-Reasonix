@@ -25,6 +25,11 @@ jobs:
       contains(github.event.comment.body, '/e2e') &&
       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
     runs-on: ubuntu-latest
+    # Running PR-head code with the provider secret is gated twice: the author_
+    # association check above, and this deployment environment. Configure the
+    # `e2e-bot` environment with required reviewers in repo settings to force a
+    # human approval per run (actions/untrusted-checkout-toctou).
+    environment: e2e-bot
     steps:
       - name: Acknowledge
         uses: actions/github-script@v9
@@ -43,7 +48,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.22'
+          go-version-file: go.mod
           cache: true
 
       - uses: actions/setup-python@v6
@@ -62,7 +67,13 @@ jobs:
       - name: Check out the PR head
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh pr checkout ${{ github.event.issue.number }}
+        # Pin to the head commit resolved now and check it out detached, not the
+        # mutable PR ref: a force-push mid-run can't swap in different code after
+        # the trusted-author gate passed.
+        run: |
+          SHA=$(gh pr view ${{ github.event.issue.number }} --json headRefOid -q .headRefOid)
+          git fetch -q origin "$SHA"
+          git checkout -q --detach "$SHA"
 
       - name: Build the agent from the PR head
         # The whole point of the bot is to drive the PR's code, not main-v2's. Fall

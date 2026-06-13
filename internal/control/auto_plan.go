@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"reasonix/internal/agent"
 )
 
 const (
@@ -41,12 +43,10 @@ func (c *Controller) shouldAutoPlan(ctx context.Context, input string) bool {
 	c.mu.Lock()
 	mode := c.autoPlan
 	plan := c.planMode
+	goalActive := strings.TrimSpace(c.goal) != "" && c.goalStatus == GoalStatusRunning
 	classifier := c.classifier
-	bypass := c.bypass
 	c.mu.Unlock()
-	// YOLO/bypass means "don't stop to ask" — entering plan mode would draft a
-	// plan and gate on approval, the opposite of what the user opted into.
-	if mode == autoPlanOff || plan || bypass {
+	if mode == autoPlanOff || plan || goalActive {
 		return false
 	}
 	score := autoPlanScore(input)
@@ -73,7 +73,7 @@ func (c *Controller) shouldAutoPlan(ctx context.Context, input string) bool {
 // (explain / show / what / why / 解释 / 查一下 …) skip straight to the executor;
 // anything that reads like a work request — even a terse one — still gets planned.
 func TaskWarrantsPlanner(input string) bool {
-	text := strings.TrimSpace(input)
+	text := strings.TrimSpace(agent.StripTransientUserBlocks(input))
 	if text == "" || strings.HasPrefix(text, "/") || strings.HasPrefix(text, PlanModeMarker) {
 		return false
 	}

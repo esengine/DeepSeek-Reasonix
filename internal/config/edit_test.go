@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -19,6 +20,21 @@ func TestSetDefaultModel(t *testing.T) {
 	}
 	if err := c.SetDefaultModel("nope"); err == nil {
 		t.Error("expected error for unknown provider")
+	}
+	// "provider/model" form is also accepted: the /model picker stores the
+	// full ref so a user can land on a non-default model under the same
+	// provider across restarts.
+	if err := c.SetDefaultModel("mimo-pro/mimo-v2.5-pro"); err != nil {
+		t.Fatalf("set provider/model default: %v", err)
+	}
+	if c.DefaultModel != "mimo-pro/mimo-v2.5-pro" {
+		t.Errorf("default = %q, want mimo-pro/mimo-v2.5-pro", c.DefaultModel)
+	}
+	if err := c.SetDefaultModel("mimo-pro/missing"); err == nil {
+		t.Error("expected error for unknown model under known provider")
+	}
+	if err := c.SetDefaultModel(""); err == nil {
+		t.Error("expected error for empty name")
 	}
 }
 
@@ -49,6 +65,7 @@ func TestUIThemeStyleNormalizes(t *testing.T) {
 	}{
 		{"", ""},
 		{"AURORA", "aurora"},
+		{" nocturne ", "nocturne"},
 		{" glacier ", "glacier"},
 		{"unknown", ""},
 	} {
@@ -91,6 +108,12 @@ func TestDesktopPreferencesAreSeparateFromCLI(t *testing.T) {
 	if err := c.SetDesktopAppearance("dark", "graphite"); err != nil {
 		t.Fatalf("SetDesktopAppearance: %v", err)
 	}
+	if err := c.SetDesktopStatusBarStyle("text"); err != nil {
+		t.Fatalf("SetDesktopStatusBarStyle: %v", err)
+	}
+	if err := c.SetDesktopStatusBarItems([]string{"model", "balance", "cache"}); err != nil {
+		t.Fatalf("SetDesktopStatusBarItems: %v", err)
+	}
 
 	if c.Language != "zh" {
 		t.Fatalf("CLI language changed to %q", c.Language)
@@ -109,6 +132,69 @@ func TestDesktopPreferencesAreSeparateFromCLI(t *testing.T) {
 	}
 	if got := c.DesktopThemeStyle(); got != "graphite" {
 		t.Fatalf("desktop theme style = %q, want graphite", got)
+	}
+	if got := c.DesktopStatusBarStyle(); got != "text" {
+		t.Fatalf("desktop status bar style = %q, want text", got)
+	}
+	if got, want := c.DesktopStatusBarItems(), []string{"model", "balance", "cache"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("desktop status bar items = %v, want %v", got, want)
+	}
+}
+
+func TestDesktopStatusBarStyleNormalizes(t *testing.T) {
+	if got := Default().DesktopStatusBarStyle(); got != "text" {
+		t.Fatalf("default desktop status bar style = %q, want text", got)
+	}
+	for _, tt := range []struct {
+		in      string
+		want    string
+		wantErr bool
+	}{
+		{"", "text", false},
+		{"icon", "icon", false},
+		{"icons", "icon", false},
+		{"text", "text", false},
+		{"labels", "text", false},
+		{"later", "text", true},
+	} {
+		c := Default()
+		if err := c.SetDesktopStatusBarStyle(tt.in); (err != nil) != tt.wantErr {
+			t.Fatalf("SetDesktopStatusBarStyle(%q) err = %v, wantErr %v", tt.in, err, tt.wantErr)
+		}
+		if got := c.DesktopStatusBarStyle(); got != tt.want {
+			t.Fatalf("DesktopStatusBarStyle(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestDesktopStatusBarItemsNormalizeAndValidate(t *testing.T) {
+	if got, want := Default().DesktopStatusBarItems(), DefaultDesktopStatusBarItems(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("default desktop status bar items = %v, want %v", got, want)
+	}
+
+	c := Default()
+	c.Desktop.StatusBarItems = []string{" balance ", "cache", "cache", "unknown", "model"}
+	if got, want := c.DesktopStatusBarItems(), []string{"balance", "cache", "model"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("normalized desktop status bar items = %v, want %v", got, want)
+	}
+
+	c = Default()
+	if err := c.SetDesktopStatusBarItems([]string{"balance", "cache", "balance", "model"}); err != nil {
+		t.Fatalf("SetDesktopStatusBarItems subset: %v", err)
+	}
+	if got, want := c.DesktopStatusBarItems(), []string{"balance", "cache", "model"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("saved desktop status bar items = %v, want %v", got, want)
+	}
+
+	if err := c.SetDesktopStatusBarItems(nil); err != nil {
+		t.Fatalf("SetDesktopStatusBarItems nil: %v", err)
+	}
+	if got, want := c.DesktopStatusBarItems(), DefaultDesktopStatusBarItems(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("nil desktop status bar items = %v, want default %v", got, want)
+	}
+
+	if err := c.SetDesktopStatusBarItems([]string{"ghost"}); err == nil {
+		t.Fatal("expected error for unknown status bar item")
 	}
 }
 
@@ -177,6 +263,34 @@ func TestSetAutoPlan(t *testing.T) {
 	}
 	if err := c.SetAutoPlan("auto"); err == nil {
 		t.Fatal("expected error for invalid auto_plan mode")
+	}
+}
+
+func TestSetUIShortcutLayout(t *testing.T) {
+	c := Default()
+	if got := c.UIShortcutLayout(); got != "classic" {
+		t.Fatalf("default shortcut layout = %q, want classic", got)
+	}
+	if err := c.SetUIShortcutLayout("desktop"); err != nil {
+		t.Fatalf("SetUIShortcutLayout desktop: %v", err)
+	}
+	if got := c.UIShortcutLayout(); got != "desktop" {
+		t.Fatalf("shortcut layout = %q, want desktop", got)
+	}
+	if err := c.SetUIShortcutLayout("dual-axis"); err != nil {
+		t.Fatalf("SetUIShortcutLayout alias: %v", err)
+	}
+	if got := c.UIShortcutLayout(); got != "desktop" {
+		t.Fatalf("shortcut layout alias = %q, want desktop", got)
+	}
+	if err := c.SetUIShortcutLayout("classic"); err != nil {
+		t.Fatalf("SetUIShortcutLayout classic: %v", err)
+	}
+	if got := c.UIShortcutLayout(); got != "classic" {
+		t.Fatalf("shortcut layout = %q, want classic", got)
+	}
+	if err := c.SetUIShortcutLayout("surprise"); err == nil {
+		t.Fatal("expected error for invalid shortcut layout")
 	}
 }
 
@@ -255,6 +369,31 @@ func TestSetLanguage(t *testing.T) {
 	}
 	if c.Language != "" {
 		t.Fatalf("language = %q, want cleared", c.Language)
+	}
+}
+
+func TestSetReasoningLanguage(t *testing.T) {
+	c := Default()
+	if err := c.SetReasoningLanguage("中文"); err != nil {
+		t.Fatalf("SetReasoningLanguage zh: %v", err)
+	}
+	if c.Agent.ReasoningLanguage != "zh" || c.ReasoningLanguage() != "zh" {
+		t.Fatalf("reasoning language = %q/%q, want zh", c.Agent.ReasoningLanguage, c.ReasoningLanguage())
+	}
+	if err := c.SetReasoningLanguage("model-default"); err != nil {
+		t.Fatalf("SetReasoningLanguage legacy default: %v", err)
+	}
+	if c.Agent.ReasoningLanguage != "" || c.ReasoningLanguage() != "auto" {
+		t.Fatalf("legacy default should normalize to empty/auto, got %q/%q", c.Agent.ReasoningLanguage, c.ReasoningLanguage())
+	}
+	if err := c.SetReasoningLanguage("auto"); err != nil {
+		t.Fatalf("SetReasoningLanguage auto: %v", err)
+	}
+	if c.Agent.ReasoningLanguage != "" || c.ReasoningLanguage() != "auto" {
+		t.Fatalf("reasoning language = %q/%q, want empty/auto", c.Agent.ReasoningLanguage, c.ReasoningLanguage())
+	}
+	if err := c.SetReasoningLanguage("klingon"); err == nil {
+		t.Fatal("SetReasoningLanguage should reject unknown values")
 	}
 }
 
@@ -540,6 +679,13 @@ func TestCodegraphDefaultEnabledForUpgrades(t *testing.T) {
 	}
 	if c.Codegraph.Tier != "" {
 		t.Fatalf("default codegraph tier = %q, want unset (background by default)", c.Codegraph.Tier)
+	}
+}
+
+func TestBuiltInMCPDefaultsEnableOnlyTime(t *testing.T) {
+	c := Default()
+	if !c.BuiltInMCP.TimeEnabled || c.BuiltInMCP.Context7Enabled {
+		t.Fatalf("built-in MCP defaults = %+v, want time enabled and context7 disabled", c.BuiltInMCP)
 	}
 }
 

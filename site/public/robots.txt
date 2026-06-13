@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://reasonix.io/sitemap-index.xml

@@ -5,10 +5,17 @@ package proc
 import (
 	"os/exec"
 	"strconv"
+	"syscall"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
+
+// SetProcessGroupKill is a no-op on Windows: the Job Object that StartTracked
+// assigns reaps the whole tree on close, so Setpgid (which doesn't exist here)
+// is unnecessary. It exists so non-Windows callers can request group kill
+// uniformly.
+func SetProcessGroupKill(*exec.Cmd) {}
 
 // KillTree terminates cmd and every descendant it spawned. Process.Kill only
 // signals the direct child, so a launcher (cmd.exe → node.exe) leaves the
@@ -24,14 +31,29 @@ func KillTree(cmd *exec.Cmd) {
 	_ = cmd.Process.Kill()
 }
 
-// TrackTree assigns cmd to a new Job Object set to terminate every process in
-// it when the job handle is closed. A launcher's detached grandchild (e.g. the
-// CodeGraph node daemon, which re-parents itself away from the launcher) stays
-// in the job even though it leaves cmd's live child tree, so KillTracked — and,
-// crucially, an abrupt reasonix exit, which closes the handle — still reaps it,
-// where taskkill /T would miss it. Returns 0 on failure; the caller then relies
-// on KillTree alone.
-func TrackTree(cmd *exec.Cmd) uintptr {
+// StartTracked starts cmd inside a new Job Object whose KILL_ON_JOB_CLOSE flag
+// fells the whole tree — including a launcher's detached grandchild (cmd.exe →
+// node.exe, as the CodeGraph daemon re-parents itself off the launcher) — when
+// the handle closes via KillTracked or an abrupt reasonix exit. The child is
+// created suspended and assigned to the job before it runs, so a fast shim can
+// no longer exec its grandchild and exit before assignment, orphaning a node
+// the job never captured (#3747). It is always resumed before returning, even
+// when job assignment fails, so a child is never left wedged suspended. Returns
+// the job handle, 0 if it could not be created — then KillTracked relies on
+// KillTree alone.
+func StartTracked(cmd *exec.Cmd) (uintptr, error) {
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	cmd.SysProcAttr.CreationFlags |= windows.CREATE_SUSPENDED
+	if err := cmd.Start(); err != nil {
+		return 0, err
+	}
+	defer resumeProcess(uint32(cmd.Process.Pid))
+	return assignJob(cmd), nil
+}
+
+func assignJob(cmd *exec.Cmd) uintptr {
 	if cmd == nil || cmd.Process == nil {
 		return 0
 	}
@@ -62,8 +84,31 @@ func TrackTree(cmd *exec.Cmd) uintptr {
 	return uintptr(job)
 }
 
-// KillTracked terminates cmd's whole process tree. When job (from TrackTree) is
-// non-zero, terminating it kills even detached descendants; the KillTree pass
+// resumeProcess resumes every thread of pid. A CREATE_SUSPENDED process has a
+// single suspended primary thread, so this releases it once the job is assigned.
+func resumeProcess(pid uint32) {
+	snap, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPTHREAD, 0)
+	if err != nil {
+		return
+	}
+	defer func() { _ = windows.CloseHandle(snap) }()
+	var te windows.ThreadEntry32
+	te.Size = uint32(unsafe.Sizeof(te))
+	for err := windows.Thread32First(snap, &te); err == nil; err = windows.Thread32Next(snap, &te) {
+		if te.OwnerProcessID != pid {
+			continue
+		}
+		th, err := windows.OpenThread(windows.THREAD_SUSPEND_RESUME, false, te.ThreadID)
+		if err != nil {
+			continue
+		}
+		_, _ = windows.ResumeThread(th)
+		_ = windows.CloseHandle(th)
+	}
+}
+
+// KillTracked terminates cmd's whole process tree. When job (from StartTracked)
+// is non-zero, terminating it kills even detached descendants; the KillTree pass
 // then catches anything spawned in the gap before the job was assigned.
 func KillTracked(cmd *exec.Cmd, job uintptr) {
 	if job != 0 {

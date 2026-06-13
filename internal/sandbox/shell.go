@@ -2,9 +2,12 @@ package sandbox
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"time"
@@ -39,35 +42,89 @@ type Shell struct {
 	Path string
 }
 
-// ResolveShell picks the interpreter the shell tool runs commands under. It
-// prefers a real bash so the model's POSIX habits work; on Windows, where bash
-// is usually absent from PATH, it probes the Git-for-Windows install locations
-// and only then falls back to PowerShell so the tool still functions.
-func ResolveShell() Shell {
-	return resolveShell(runtime.GOOS, exec.LookPath, fileExists, windowsBashCandidates(), probeBash, isWindowsWSLBash)
+// ResolveShell picks the interpreter the shell tool runs commands under. With
+// prefer "auto"/"" it favours a real bash so the model's POSIX habits work and
+// only falls back to PowerShell on Windows when bash is absent. prefer "bash" or
+// "powershell"/"pwsh" forces that interpreter (path overrides the PATH lookup),
+// warning to warn and falling back to auto-detection if the forced one is
+// missing — so a typo or an uninstalled shell can never leave the tool broken.
+func ResolveShell(prefer, path string, warn io.Writer) Shell {
+	return resolveShell(prefer, path, warn, runtime.GOOS, exec.LookPath, fileExists, windowsBashCandidates(), probeBash, isWindowsWSLBash)
 }
 
 // resolveShell is ResolveShell with its environment lookups injected — including
 // the Git-for-Windows bash candidates, which derive from %ProgramFiles% and so
 // are empty off Windows — so the decision table is deterministically testable on
 // any host.
-func resolveShell(goos string, lookPath func(string) (string, error), exists func(string) bool, winBashCandidates []string, probe func(string) bool, isWSL func(string) bool) Shell {
-	if p, err := lookPath("bash"); err == nil && !isWSL(p) && probe(p) {
-		return Shell{Kind: ShellBash, Path: p}
-	}
-	if goos == "windows" {
+func resolveShell(prefer, path string, warn io.Writer, goos string, lookPath func(string) (string, error), exists func(string) bool, winBashCandidates []string, probe func(string) bool, isWSL func(string) bool) Shell {
+	findBash := func() (Shell, bool) {
+		if p, err := lookPath("bash"); err == nil && !isWSL(p) && probe(p) {
+			return Shell{Kind: ShellBash, Path: p}, true
+		}
 		for _, p := range winBashCandidates {
 			if exists(p) && probe(p) {
-				return Shell{Kind: ShellBash, Path: p}
+				return Shell{Kind: ShellBash, Path: p}, true
 			}
 		}
-		for _, name := range []string{"pwsh", "powershell"} {
-			if p, err := lookPath(name); err == nil {
-				return Shell{Kind: ShellPowerShell, Path: p}
-			}
-		}
+		return Shell{}, false
 	}
-	return Shell{Kind: ShellBash, Path: "bash"}
+	findPowerShell := func(order []string) (Shell, bool) {
+		for _, name := range order {
+			if p, err := lookPath(name); err == nil {
+				return Shell{Kind: ShellPowerShell, Path: p}, true
+			}
+		}
+		return Shell{}, false
+	}
+	auto := func() Shell {
+		if sh, ok := findBash(); ok {
+			return sh
+		}
+		if goos == "windows" {
+			if sh, ok := findPowerShell([]string{"pwsh", "powershell"}); ok {
+				return sh
+			}
+		}
+		return Shell{Kind: ShellBash, Path: "bash"}
+	}
+
+	switch strings.ToLower(strings.TrimSpace(prefer)) {
+	case "", "auto":
+		return auto()
+	case "bash":
+		if path != "" && exists(path) && probe(path) {
+			return Shell{Kind: ShellBash, Path: path}
+		}
+		if sh, ok := findBash(); ok {
+			return sh
+		}
+		warnMissingShell(warn, prefer)
+		return auto()
+	case "powershell", "pwsh":
+		if path != "" && exists(path) {
+			return Shell{Kind: ShellPowerShell, Path: path}
+		}
+		order := []string{"pwsh", "powershell"}
+		if strings.EqualFold(strings.TrimSpace(prefer), "powershell") {
+			order = []string{"powershell", "pwsh"}
+		}
+		if sh, ok := findPowerShell(order); ok {
+			return sh
+		}
+		warnMissingShell(warn, prefer)
+		return auto()
+	default:
+		if warn != nil {
+			fmt.Fprintf(warn, "warning: [tools.shell] prefer=%q is not recognised (use auto/bash/powershell); using auto-detection\n", prefer)
+		}
+		return auto()
+	}
+}
+
+func warnMissingShell(warn io.Writer, prefer string) {
+	if warn != nil {
+		fmt.Fprintf(warn, "warning: [tools.shell] prefer=%q but that shell was not found; using auto-detection\n", prefer)
+	}
 }
 
 // isWindowsWSLBash reports whether a resolved bash path is the WSL launcher
@@ -132,6 +189,23 @@ func windowsBashCandidates() []string {
 	return out
 }
 
+// nulRedirect matches a cmd.exe-style redirect to the "nul" device (>nul,
+// 2>nul, 1>>nul, &>nul …) where nul is a complete token. bash and PowerShell
+// treat "nul" as an ordinary filename, not the null device, so the redirect
+// would create an undeletable file named "nul" (a Windows reserved name) in the
+// working directory. #4252. Group 2 captures the trailing delimiter (RE2 has no
+// lookahead) so it can be re-emitted unchanged.
+var nulRedirect = regexp.MustCompile(`(?i)((?:\d+|&)?>>?)\s*nul([\s;&|<>)]|$)`)
+
+// normalizeNulRedirect rewrites those nul redirects to sink ("/dev/null" for
+// bash, "$null" for PowerShell), so the command discards output as intended.
+func normalizeNulRedirect(command, sink string) string {
+	return nulRedirect.ReplaceAllStringFunc(command, func(m string) string {
+		sub := nulRedirect.FindStringSubmatch(m)
+		return sub[1] + sink + sub[2]
+	})
+}
+
 // argv builds the exec argv that runs command under this shell.
 func (s Shell) argv(command string) []string {
 	path := s.Path
@@ -139,9 +213,9 @@ func (s Shell) argv(command string) []string {
 		path = s.Kind.String()
 	}
 	if s.Kind == ShellPowerShell {
-		return []string{path, "-NoProfile", "-NonInteractive", "-Command", psUTF8Prologue + command}
+		return []string{path, "-NoProfile", "-NonInteractive", "-Command", psUTF8Prologue + normalizeNulRedirect(command, "$null")}
 	}
-	return []string{path, "-c", command}
+	return []string{path, "-c", normalizeNulRedirect(command, "/dev/null")}
 }
 
 // SupportsChaining reports whether the shell parses '&&' / '||'. bash does;

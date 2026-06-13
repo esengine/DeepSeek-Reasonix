@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/agent"
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/provider"
@@ -88,6 +89,26 @@ func TestServeEndpoints(t *testing.T) {
 		t.Error("/plan {on:true} should have enabled plan mode (Compose would prepend the marker)")
 	}
 
+	resp, err = http.Post(srv.URL+"/tool-approval-mode", "application/json", strings.NewReader(`{"mode":"auto"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("tool approval mode auto status = %d, want 204", resp.StatusCode)
+	}
+	resp.Body.Close()
+	if got := ctrl.ToolApprovalMode(); got != control.ToolApprovalAuto {
+		t.Fatalf("tool approval mode = %q, want auto", got)
+	}
+	resp, err = http.Post(srv.URL+"/tool-approval-mode", "application/json", strings.NewReader(`{"mode":"surprise"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("invalid tool approval mode status = %d, want 400", resp.StatusCode)
+	}
+
 	if resp, _ := http.Post(srv.URL+"/submit", "application/json", strings.NewReader(`{}`)); resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("empty submit should be 400, got %d", resp.StatusCode)
 	}
@@ -113,6 +134,24 @@ func TestHistoryMessagesPreserveToolDetails(t *testing.T) {
 	}
 	if got[2].ToolCallID != "call_1" || got[2].ToolName != "bash" || got[2].Content != "/tmp/project\n" {
 		t.Fatalf("tool result details not preserved: %+v", got[2])
+	}
+}
+
+func TestPreviewSessionFileStripsTransientReasoningLanguageBlock(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	s := agent.NewSession("system")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "<reasoning-language>\nVisible reasoning/thinking text preference: use English.\n</reasoning-language>\n\nExplain this module"})
+	if err := s.Save(path); err != nil {
+		t.Fatal(err)
+	}
+
+	preview, turns := previewSessionFile(path)
+	if turns != 1 {
+		t.Errorf("turns = %d, want 1", turns)
+	}
+	if preview != "Explain this module" {
+		t.Errorf("preview = %q, want user prompt", preview)
 	}
 }
 
@@ -208,6 +247,18 @@ func TestServeIndexPage(t *testing.T) {
 	}
 }
 
+func TestServeIndexDefinesQueryHelpers(t *testing.T) {
+	html := string(indexHTML)
+	for _, want := range []string{
+		"const $ = s => document.querySelector(s);",
+		"const $$ = s => document.querySelectorAll(s);",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("serve index missing query helper %q", want)
+		}
+	}
+}
+
 func TestServeIndexPagePassesLanguagePreferenceToClient(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -270,6 +321,8 @@ func TestDeleteSessionRequiresSessionNameInsideSessionDir(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	ref := "sa_20260102_030405_000000000_aabbccddeeff"
+	writeServeSubagentArtifact(t, dir, ref, agent.BranchID(old))
 	sibling := dir + "-other"
 	if err := os.MkdirAll(sibling, 0o755); err != nil {
 		t.Fatal(err)
@@ -309,6 +362,36 @@ func TestDeleteSessionRequiresSessionNameInsideSessionDir(t *testing.T) {
 	}
 	if _, err := os.Stat(old); !os.IsNotExist(err) {
 		t.Fatalf("old session still exists or stat failed unexpectedly: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "subagents", ref+".jsonl")); !os.IsNotExist(err) {
+		t.Fatalf("old session subagent jsonl still exists or stat failed unexpectedly: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "subagents", ref+".meta.json")); !os.IsNotExist(err) {
+		t.Fatalf("old session subagent meta still exists or stat failed unexpectedly: %v", err)
+	}
+}
+
+func writeServeSubagentArtifact(t *testing.T, dir, ref, parentSession string) {
+	t.Helper()
+	subagentDir := filepath.Join(dir, "subagents")
+	if err := os.MkdirAll(subagentDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(subagentDir, ref+".jsonl"), []byte(`{"role":"user","content":"sub"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(agent.SubagentMeta{
+		Ref:           ref,
+		Status:        agent.SubagentCompleted,
+		Kind:          "task",
+		Name:          "task",
+		ParentSession: parentSession,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(subagentDir, ref+".meta.json"), data, 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 

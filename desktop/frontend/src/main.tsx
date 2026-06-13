@@ -3,12 +3,19 @@ import { createRoot } from "react-dom/client";
 import App from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { installGlobalCrashHandlers } from "./lib/crash";
+import { installBreadcrumbConsoleHook } from "./lib/breadcrumbs";
+import { installMessageSelectionCopy } from "./lib/messageSelectionCopy";
 import { LocaleProvider } from "./lib/i18n";
 import { ToastProvider } from "./lib/toast";
 import { initFontFamily } from "./lib/fontFamily";
 import { initTextSize } from "./lib/textSize";
 import { initTheme } from "./lib/theme";
 import "./styles.css";
+
+// Install first so startup/runtime failures paint a useful error instead of a
+// featureless webview background, with the recent console trail attached.
+installGlobalCrashHandlers();
+installBreadcrumbConsoleHook();
 
 // Apply the saved appearance (auto/light/dark) before the first paint.
 initTheme();
@@ -34,7 +41,7 @@ function prewarmFontFallbacks() {
 }
 prewarmFontFallbacks();
 
-installGlobalCrashHandlers();
+installMessageSelectionCopy(document);
 
 // Inside the Wails shell, suppress the webview's default right-click menu — its
 // Reload / Back / Inspect entries are easy to hit by accident and can reset or

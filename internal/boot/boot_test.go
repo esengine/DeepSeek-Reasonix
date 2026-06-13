@@ -5,19 +5,26 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"reasonix/internal/agent"
+	"reasonix/internal/agent/testutil"
+	"reasonix/internal/builtinmcp"
 	"reasonix/internal/config"
 	"reasonix/internal/event"
+	"reasonix/internal/memory"
 	"reasonix/internal/netclient"
 	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
@@ -79,6 +86,569 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 	if mem := ctrl.Memory(); mem == nil || len(mem.Docs) == 0 {
 		t.Fatal("controller memory set is empty after discovering REASONIX.md")
 	}
+}
+
+func TestBuildRegistersUsableHistoryAndMemoryRetrievalTools(t *testing.T) {
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "test-model"
+
+[codegraph]
+enabled = false
+
+[agent]
+system_prompt = "BASE"
+
+[[providers]]
+name = "test-model"
+kind = "boot-retrieval-tool-test"
+model = "x"
+`)
+
+	sessionDir := filepath.Join(t.TempDir(), "sessions")
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	past := agent.NewSession("")
+	past.Add(provider.Message{Role: provider.RoleUser, Content: "Should the history layer use vector embeddings?"})
+	past.Add(provider.Message{Role: provider.RoleAssistant, Content: "Decision: port lightweight BM25 history retrieval without a vector database."})
+	if err := past.Save(filepath.Join(sessionDir, "past.jsonl")); err != nil {
+		t.Fatalf("save past session: %v", err)
+	}
+
+	store := memory.StoreFor(config.MemoryUserDir(), dir)
+	if _, err := store.Save(memory.Memory{
+		Name:        "synthesis-cache-policy",
+		Description: "Stable conclusions should be reused from memory",
+		Type:        memory.TypeFeedback,
+		Body:        "Use a synthesis cache document when expensive retrieval produced a stable conclusion.",
+	}); err != nil {
+		t.Fatalf("save memory: %v", err)
+	}
+
+	registerBootRetrievalToolTestProvider()
+	prov := testutil.NewMock("boot-retrieval-tool-test",
+		testutil.Turn{ToolCalls: []provider.ToolCall{
+			{ID: "history-1", Name: "history", Arguments: `{"operation":"search","query":"BM25 vector database","scope":"project","limit":5}`},
+			{ID: "memory-1", Name: "memory", Arguments: `{"operation":"search","query":"synthesis cache stable conclusion","limit":5}`},
+		}},
+		testutil.Turn{Text: "done"},
+	)
+	setBootRetrievalToolTestProvider(t, prov)
+
+	ctrl, err := Build(context.Background(), Options{Sink: event.Discard, SessionDir: sessionDir})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer ctrl.Close()
+
+	sys := systemMessage(ctrl.History())
+	for _, forbidden := range []string{
+		"Decision: port lightweight BM25 history retrieval without a vector database.",
+		"Use a synthesis cache document when expensive retrieval produced a stable conclusion.",
+	} {
+		if strings.Contains(sys, forbidden) {
+			t.Fatalf("retrieval content should stay behind on-demand tools, not enter the cache-stable system prompt:\n%s", sys)
+		}
+	}
+
+	if err := ctrl.Run(context.Background(), "recover past context"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	reqs := prov.Requests()
+	if len(reqs) == 0 {
+		t.Fatal("provider received no requests")
+	}
+	for _, want := range []string{"history", "memory", "remember", "forget"} {
+		if !requestHasTool(reqs[0], want) {
+			t.Fatalf("first request missing tool %q; tools=%v", want, toolSchemaNames(reqs[0].Tools))
+		}
+	}
+	assertToolOrder(t, reqs[0].Tools, []string{"forget", "history", "memory", "remember"})
+
+	toolResults := map[string]string{}
+	for _, msg := range ctrl.History() {
+		if msg.Role == provider.RoleTool {
+			toolResults[msg.Name] += "\n" + msg.Content
+		}
+	}
+	if !strings.Contains(toolResults["history"], "port lightweight BM25 history retrieval") {
+		t.Fatalf("history tool result did not include saved session decision:\n%s", toolResults["history"])
+	}
+	if !strings.Contains(toolResults["memory"], "synthesis-cache-policy") ||
+		!strings.Contains(toolResults["memory"], "stable conclusion") {
+		t.Fatalf("memory tool result did not include saved memory:\n%s", toolResults["memory"])
+	}
+}
+
+const bootRetrievalToolTestProviderKind = "boot-retrieval-tool-test"
+
+var (
+	bootRetrievalToolTestProviderOnce    sync.Once
+	bootRetrievalToolTestProviderCurrent *testutil.MockProvider
+	bootRetrievalToolTestProviderMu      sync.Mutex
+)
+
+func registerBootRetrievalToolTestProvider() {
+	bootRetrievalToolTestProviderOnce.Do(func() {
+		provider.Register(bootRetrievalToolTestProviderKind, func(provider.Config) (provider.Provider, error) {
+			bootRetrievalToolTestProviderMu.Lock()
+			defer bootRetrievalToolTestProviderMu.Unlock()
+			if bootRetrievalToolTestProviderCurrent == nil {
+				return nil, errors.New("boot retrieval tool test provider is not installed")
+			}
+			return bootRetrievalToolTestProviderCurrent, nil
+		})
+	})
+}
+
+func setBootRetrievalToolTestProvider(t *testing.T, p *testutil.MockProvider) {
+	t.Helper()
+	bootRetrievalToolTestProviderMu.Lock()
+	bootRetrievalToolTestProviderCurrent = p
+	bootRetrievalToolTestProviderMu.Unlock()
+	t.Cleanup(func() {
+		bootRetrievalToolTestProviderMu.Lock()
+		if bootRetrievalToolTestProviderCurrent == p {
+			bootRetrievalToolTestProviderCurrent = nil
+		}
+		bootRetrievalToolTestProviderMu.Unlock()
+	})
+}
+
+const bootTokenProfileTestProviderKind = "boot-token-profile-test"
+
+var (
+	bootTokenProfileTestProviderOnce    sync.Once
+	bootTokenProfileTestProviderCurrent *testutil.MockProvider
+	bootTokenProfileTestProviderMu      sync.Mutex
+)
+
+func registerBootTokenProfileTestProvider() {
+	bootTokenProfileTestProviderOnce.Do(func() {
+		provider.Register(bootTokenProfileTestProviderKind, func(provider.Config) (provider.Provider, error) {
+			bootTokenProfileTestProviderMu.Lock()
+			defer bootTokenProfileTestProviderMu.Unlock()
+			if bootTokenProfileTestProviderCurrent == nil {
+				return nil, errors.New("boot token profile test provider is not installed")
+			}
+			return bootTokenProfileTestProviderCurrent, nil
+		})
+	})
+}
+
+func setBootTokenProfileTestProvider(t *testing.T, p *testutil.MockProvider) {
+	t.Helper()
+	bootTokenProfileTestProviderMu.Lock()
+	bootTokenProfileTestProviderCurrent = p
+	bootTokenProfileTestProviderMu.Unlock()
+	t.Cleanup(func() {
+		bootTokenProfileTestProviderMu.Lock()
+		if bootTokenProfileTestProviderCurrent == p {
+			bootTokenProfileTestProviderCurrent = nil
+		}
+		bootTokenProfileTestProviderMu.Unlock()
+	})
+}
+
+func requestHasTool(req provider.Request, name string) bool {
+	for _, schema := range req.Tools {
+		if schema.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func requestHasToolPrefix(req provider.Request, prefix string) bool {
+	for _, schema := range req.Tools {
+		if strings.HasPrefix(schema.Name, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func toolSchemaNames(tools []provider.ToolSchema) []string {
+	names := make([]string, 0, len(tools))
+	for _, schema := range tools {
+		names = append(names, schema.Name)
+	}
+	return names
+}
+
+func assertToolOrder(t *testing.T, tools []provider.ToolSchema, want []string) {
+	t.Helper()
+	names := toolSchemaNames(tools)
+	next := 0
+	for _, name := range names {
+		if next < len(want) && name == want[next] {
+			next++
+		}
+	}
+	if next != len(want) {
+		t.Fatalf("tool order changed; provider-visible tool schema order affects prompt-cache shape.\nwant subsequence: %v\n got: %v", want, names)
+	}
+}
+
+func firstTokenProfileRequest(t *testing.T, tokenMode string) provider.Request {
+	t.Helper()
+	registerBootTokenProfileTestProvider()
+	prov := testutil.NewMock("token-profile", testutil.Turn{Text: "done"})
+	setBootTokenProfileTestProvider(t, prov)
+
+	opts := Options{Sink: event.Discard}
+	if tokenMode != "" {
+		opts.TokenMode = tokenMode
+	}
+	ctrl, err := Build(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("Build(%q): %v", tokenMode, err)
+	}
+	defer ctrl.Close()
+	if err := ctrl.Run(context.Background(), "capture request prefix"); err != nil {
+		t.Fatalf("Run(%q): %v", tokenMode, err)
+	}
+	reqs := prov.Requests()
+	if len(reqs) != 1 {
+		t.Fatalf("requests(%q) = %d, want 1", tokenMode, len(reqs))
+	}
+	return reqs[0]
+}
+
+func TestBuildSubagentSkillFailedContinuationPersistsTranscript(t *testing.T) {
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+
+	registerBootSubagentTestProvider()
+	prov := &bootSubagentTestProvider{}
+	setBootSubagentTestProvider(t, prov)
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "test-model"
+
+[codegraph]
+enabled = false
+
+[agent]
+system_prompt = "BASE"
+
+[[providers]]
+name = "test-model"
+kind = "boot-subagent-test"
+model = "x"
+`)
+
+	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer ctrl.Close()
+	sessionPath := agent.NewSessionPath(ctrl.SessionDir(), ctrl.Label())
+	ctrl.SetSessionPath(sessionPath)
+
+	if err := ctrl.Run(context.Background(), "first review"); err != nil {
+		t.Fatalf("first Run: %v", err)
+	}
+	ref := subagentRefFromHistory(t, ctrl.History())
+	prov.setContinueRef(ref)
+
+	if err := ctrl.Run(context.Background(), "continue review"); err != nil {
+		t.Fatalf("second Run: %v", err)
+	}
+	store := agent.NewSubagentStore(filepath.Join(config.SessionDir(), "subagents"))
+	meta, err := store.LoadMeta(ref)
+	if err != nil {
+		t.Fatalf("LoadMeta: %v", err)
+	}
+	if meta.Status != agent.SubagentFailed {
+		t.Fatalf("status = %q, want failed", meta.Status)
+	}
+	if meta.ParentSession != agent.BranchID(sessionPath) {
+		t.Fatalf("parent session = %q, want %q", meta.ParentSession, agent.BranchID(sessionPath))
+	}
+	sess, err := agent.LoadSession(filepath.Join(config.SessionDir(), "subagents", ref+".jsonl"))
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	msgs := sess.Snapshot()
+	if len(msgs) != 4 || msgs[1].Content != "first skill task" || msgs[2].Content != "first skill answer" || msgs[3].Content != "second skill task" {
+		t.Fatalf("failed skill transcript = %+v, want first task/answer plus second task", msgs)
+	}
+}
+
+func TestBuildSubagentStoreHonorsSessionDirOverride(t *testing.T) {
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+
+	registerBootSubagentTestProvider()
+	prov := &bootSubagentTestProvider{}
+	setBootSubagentTestProvider(t, prov)
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "test-model"
+
+[codegraph]
+enabled = false
+
+[agent]
+system_prompt = "BASE"
+
+[[providers]]
+name = "test-model"
+kind = "boot-subagent-test"
+model = "x"
+`)
+
+	sessionDir := filepath.Join(t.TempDir(), "desktop-workspace-sessions")
+	ctrl, err := Build(context.Background(), Options{Sink: event.Discard, SessionDir: sessionDir})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer ctrl.Close()
+	sessionPath := agent.NewSessionPath(ctrl.SessionDir(), ctrl.Label())
+	ctrl.SetSessionPath(sessionPath)
+
+	if err := ctrl.Run(context.Background(), "first review"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	ref := subagentRefFromHistory(t, ctrl.History())
+
+	overrideStore := agent.NewSubagentStore(filepath.Join(sessionDir, "subagents"))
+	meta, err := overrideStore.LoadMeta(ref)
+	if err != nil {
+		t.Fatalf("LoadMeta from override dir: %v", err)
+	}
+	if meta.ParentSession != agent.BranchID(sessionPath) {
+		t.Fatalf("parent session = %q, want %q", meta.ParentSession, agent.BranchID(sessionPath))
+	}
+	if _, err := os.Stat(filepath.Join(config.SessionDir(), "subagents", ref+".meta.json")); !os.IsNotExist(err) {
+		t.Fatalf("subagent metadata should not be written to global session dir, stat err = %v", err)
+	}
+}
+
+const bootSubagentTestProviderKind = "boot-subagent-test"
+
+var (
+	bootSubagentTestProviderOnce    sync.Once
+	bootSubagentTestProviderCurrent *bootSubagentTestProvider
+	bootSubagentTestProviderMu      sync.Mutex
+)
+
+func registerBootSubagentTestProvider() {
+	bootSubagentTestProviderOnce.Do(func() {
+		provider.Register(bootSubagentTestProviderKind, func(provider.Config) (provider.Provider, error) {
+			bootSubagentTestProviderMu.Lock()
+			defer bootSubagentTestProviderMu.Unlock()
+			if bootSubagentTestProviderCurrent == nil {
+				return nil, errors.New("boot subagent test provider is not installed")
+			}
+			return bootSubagentTestProviderCurrent, nil
+		})
+	})
+}
+
+func setBootSubagentTestProvider(t *testing.T, p *bootSubagentTestProvider) {
+	t.Helper()
+	bootSubagentTestProviderMu.Lock()
+	bootSubagentTestProviderCurrent = p
+	bootSubagentTestProviderMu.Unlock()
+	t.Cleanup(func() {
+		bootSubagentTestProviderMu.Lock()
+		if bootSubagentTestProviderCurrent == p {
+			bootSubagentTestProviderCurrent = nil
+		}
+		bootSubagentTestProviderMu.Unlock()
+	})
+}
+
+type bootSubagentTestProvider struct {
+	mu          sync.Mutex
+	calls       int
+	continueRef string
+}
+
+func (p *bootSubagentTestProvider) Name() string { return "boot-subagent-test" }
+
+func (p *bootSubagentTestProvider) setContinueRef(ref string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.continueRef = ref
+}
+
+func (p *bootSubagentTestProvider) Stream(context.Context, provider.Request) (<-chan provider.Chunk, error) {
+	p.mu.Lock()
+	call := p.calls
+	p.calls++
+	ref := p.continueRef
+	p.mu.Unlock()
+
+	var chunks []provider.Chunk
+	switch call {
+	case 0:
+		chunks = []provider.Chunk{{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "review-1", Name: "review", Arguments: `{"task":"first skill task"}`}}}
+	case 1:
+		chunks = []provider.Chunk{{Type: provider.ChunkText, Text: "first skill answer"}, {Type: provider.ChunkDone}}
+	case 2:
+		chunks = []provider.Chunk{{Type: provider.ChunkText, Text: "parent first done"}, {Type: provider.ChunkDone}}
+	case 3:
+		args, _ := json.Marshal(map[string]string{"task": "second skill task", "continue_from": ref})
+		chunks = []provider.Chunk{{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "review-2", Name: "review", Arguments: string(args)}}}
+	case 4:
+		chunks = []provider.Chunk{{Type: provider.ChunkError, Err: errors.New("subagent skill failed")}}
+	case 5:
+		chunks = []provider.Chunk{{Type: provider.ChunkText, Text: "parent second done"}, {Type: provider.ChunkDone}}
+	default:
+		chunks = []provider.Chunk{{Type: provider.ChunkError, Err: fmt.Errorf("unexpected provider call %d", call)}}
+	}
+	ch := make(chan provider.Chunk, len(chunks))
+	for _, chunk := range chunks {
+		ch <- chunk
+	}
+	close(ch)
+	return ch, nil
+}
+
+func subagentRefFromHistory(t *testing.T, msgs []provider.Message) string {
+	t.Helper()
+	for _, msg := range msgs {
+		if msg.Role != provider.RoleTool {
+			continue
+		}
+		for _, line := range strings.Split(msg.Content, "\n") {
+			if strings.HasPrefix(line, "Subagent reference: ") {
+				return strings.TrimSpace(strings.TrimPrefix(line, "Subagent reference: "))
+			}
+		}
+	}
+	t.Fatalf("no subagent reference in history: %+v", msgs)
+	return ""
+}
+
+// TestBuildHeadlessRunRunsTaskSubagentWithoutSessionPath reproduces headless
+// `reasonix run`: a controller built via Build with NO SetSessionPath (exactly
+// what internal/cli.runAgent does) must still be able to run a `task` sub-agent.
+// Before the ephemeral fallback this failed with "parent session is required".
+func TestBuildHeadlessRunRunsTaskSubagentWithoutSessionPath(t *testing.T) {
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+
+	registerHeadlessTaskTestProvider()
+	prov := &headlessTaskTestProvider{}
+	setHeadlessTaskTestProvider(t, prov)
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "test-model"
+
+[codegraph]
+enabled = false
+
+[agent]
+system_prompt = "BASE"
+
+[[providers]]
+name = "test-model"
+kind = "boot-headless-test"
+model = "x"
+`)
+
+	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer ctrl.Close()
+
+	// Deliberately NOT calling SetSessionPath — this is the headless run path.
+	if err := ctrl.Run(context.Background(), "use a task subagent"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := ctrl.SessionPath(); got != "" {
+		t.Fatalf("headless run should keep an empty session path, got %q", got)
+	}
+
+	var toolContent string
+	for _, msg := range ctrl.History() {
+		if msg.Role == provider.RoleTool {
+			toolContent += "\n" + msg.Content
+		}
+	}
+	if strings.Contains(toolContent, "parent session is required") {
+		t.Fatalf("task subagent failed in headless run mode: %s", toolContent)
+	}
+	if !strings.Contains(toolContent, "subagent answer") {
+		t.Fatalf("task tool result = %q, want sub-agent answer", toolContent)
+	}
+	if strings.Contains(toolContent, "Subagent reference") {
+		t.Fatalf("ephemeral headless run should not persist a transcript reference: %s", toolContent)
+	}
+}
+
+const headlessTaskTestProviderKind = "boot-headless-test"
+
+var (
+	headlessTaskTestProviderOnce    sync.Once
+	headlessTaskTestProviderCurrent *headlessTaskTestProvider
+	headlessTaskTestProviderMu      sync.Mutex
+)
+
+func registerHeadlessTaskTestProvider() {
+	headlessTaskTestProviderOnce.Do(func() {
+		provider.Register(headlessTaskTestProviderKind, func(provider.Config) (provider.Provider, error) {
+			headlessTaskTestProviderMu.Lock()
+			defer headlessTaskTestProviderMu.Unlock()
+			if headlessTaskTestProviderCurrent == nil {
+				return nil, errors.New("headless task test provider is not installed")
+			}
+			return headlessTaskTestProviderCurrent, nil
+		})
+	})
+}
+
+func setHeadlessTaskTestProvider(t *testing.T, p *headlessTaskTestProvider) {
+	t.Helper()
+	headlessTaskTestProviderMu.Lock()
+	headlessTaskTestProviderCurrent = p
+	headlessTaskTestProviderMu.Unlock()
+	t.Cleanup(func() {
+		headlessTaskTestProviderMu.Lock()
+		if headlessTaskTestProviderCurrent == p {
+			headlessTaskTestProviderCurrent = nil
+		}
+		headlessTaskTestProviderMu.Unlock()
+	})
+}
+
+type headlessTaskTestProvider struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (p *headlessTaskTestProvider) Name() string { return "boot-headless-test" }
+
+func (p *headlessTaskTestProvider) Stream(context.Context, provider.Request) (<-chan provider.Chunk, error) {
+	p.mu.Lock()
+	call := p.calls
+	p.calls++
+	p.mu.Unlock()
+
+	var chunks []provider.Chunk
+	switch call {
+	case 0:
+		chunks = []provider.Chunk{{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "task-1", Name: "task", Arguments: `{"prompt":"find callers"}`}}}
+	case 1:
+		chunks = []provider.Chunk{{Type: provider.ChunkText, Text: "subagent answer"}, {Type: provider.ChunkDone}}
+	default:
+		chunks = []provider.Chunk{{Type: provider.ChunkText, Text: "parent done"}, {Type: provider.ChunkDone}}
+	}
+	ch := make(chan provider.Chunk, len(chunks))
+	for _, chunk := range chunks {
+		ch <- chunk
+	}
+	close(ch)
+	return ch, nil
 }
 
 func TestNewProviderAppliesConfiguredDefaultEffort(t *testing.T) {
@@ -159,6 +729,40 @@ func TestNewProviderAppliesModelReasoningProtocol(t *testing.T) {
 	}
 }
 
+func TestBuildHonorsSessionDirOverride(t *testing.T) {
+	dir := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
+	t.Chdir(dir)
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "test-model"
+
+[codegraph]
+enabled = false
+
+[[providers]]
+name = "test-model"
+kind = "openai"
+base_url = "https://example.invalid"
+model = "x"
+api_key_env = "REASONIX_TEST_KEY_UNSET"
+`)
+
+	sessionDir := filepath.Join(t.TempDir(), "desktop-workspace-sessions")
+	ctrl, err := Build(context.Background(), Options{SessionDir: sessionDir})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer ctrl.Close()
+
+	if got := ctrl.SessionDir(); got != sessionDir {
+		t.Fatalf("SessionDir() = %q, want override %q", got, sessionDir)
+	}
+}
+
 // TestBuildDiscoversSkills proves the skill wiring end-to-end: a project skill
 // is discovered at boot, surfaced via Controller.Skills(), and its name folds
 // into the cache-stable system prompt's "# Skills" index alongside a built-in.
@@ -211,6 +815,358 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 	}
 	if !strings.Contains(sys, "projskill") || !strings.Contains(sys, "explore") {
 		t.Fatalf("skill names missing from index:\n%s", sys)
+	}
+}
+
+func TestBuildTokenFullMatchesDefaultRequestPrefix(t *testing.T) {
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "test-model"
+
+[codegraph]
+enabled = false
+
+[agent]
+system_prompt = "BASE"
+
+[[providers]]
+name = "test-model"
+kind = "boot-token-profile-test"
+model = "x"
+`)
+	writeFile(t, dir, ".reasonix/skills/projskill.md", "---\ndescription: a project skill\n---\nplaybook")
+
+	defaultReq := firstTokenProfileRequest(t, "")
+	fullReq := firstTokenProfileRequest(t, TokenModeFull)
+
+	if got, want := systemMessage(defaultReq.Messages), systemMessage(fullReq.Messages); got != want {
+		t.Fatalf("explicit full mode changed the system prompt\n--- default ---\n%s\n--- full ---\n%s", got, want)
+	}
+	if strings.Contains(systemMessage(fullReq.Messages), tokenEconomyPrompt) {
+		t.Fatalf("full mode system prompt should not include token economy prompt:\n%s", systemMessage(fullReq.Messages))
+	}
+	if !strings.Contains(systemMessage(fullReq.Messages), "# Skills") || !strings.Contains(systemMessage(fullReq.Messages), "projskill") {
+		t.Fatalf("full mode should preserve the skills index in the system prompt:\n%s", systemMessage(fullReq.Messages))
+	}
+	if got, want := toolSchemaNames(fullReq.Tools), toolSchemaNames(defaultReq.Tools); !reflect.DeepEqual(got, want) {
+		t.Fatalf("explicit full mode changed tool schema order\nfull=%v\ndefault=%v", got, want)
+	}
+	if !reflect.DeepEqual(fullReq.Tools, defaultReq.Tools) {
+		t.Fatalf("explicit full mode changed provider-visible tool schemas; names=%v", toolSchemaNames(fullReq.Tools))
+	}
+	if requestHasTool(fullReq, "connect_tool_source") {
+		t.Fatalf("full mode should not expose economy connector; tools=%v", toolSchemaNames(fullReq.Tools))
+	}
+}
+
+func TestBuildTokenEconomyStartsWithLeanToolSurface(t *testing.T) {
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+
+	registerBootTokenProfileTestProvider()
+	prov := testutil.NewMock("token-economy", testutil.Turn{Text: "done"})
+	setBootTokenProfileTestProvider(t, prov)
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "test-model"
+
+[codegraph]
+enabled = false
+
+[agent]
+system_prompt = "BASE"
+
+[[providers]]
+name = "test-model"
+kind = "boot-token-profile-test"
+model = "x"
+
+[[plugins]]
+name = "mockmcp"
+command = "reasonix-missing-mockmcp"
+`)
+	writeFile(t, dir, ".reasonix/skills/projskill.md", "---\ndescription: a project skill\n---\nplaybook")
+
+	ctrl, err := Build(context.Background(), Options{Sink: event.Discard, TokenMode: TokenModeEconomy})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer ctrl.Close()
+	if err := ctrl.Run(context.Background(), "use the lean surface"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	reqs := prov.Requests()
+	if len(reqs) != 1 {
+		t.Fatalf("requests = %d, want 1", len(reqs))
+	}
+	req := reqs[0]
+	wantTools := []string{
+		"ask",
+		"bash",
+		"bash_output",
+		"complete_step",
+		"connect_tool_source",
+		"edit_file",
+		"forget",
+		"glob",
+		"grep",
+		"history",
+		"kill_shell",
+		"ls",
+		"memory",
+		"multi_edit",
+		"read_file",
+		"remember",
+		"slash_command",
+		"todo_write",
+		"wait",
+		"write_file",
+	}
+	if got := toolSchemaNames(req.Tools); !reflect.DeepEqual(got, wantTools) {
+		t.Fatalf("economy first request tool order changed\ngot  %v\nwant %v", got, wantTools)
+	}
+	for _, want := range []string{"connect_tool_source", "read_file", "grep", "edit_file", "bash", "slash_command", "ask"} {
+		if !requestHasTool(req, want) {
+			t.Fatalf("economy first request missing tool %q; tools=%v", want, toolSchemaNames(req.Tools))
+		}
+	}
+	for _, forbidden := range []string{
+		"web_fetch", "task", "run_skill", "read_skill", "install_skill", "install_source",
+		"explore", "research", "review", "security_review",
+		"lsp_definition", "lsp_references", "lsp_hover", "lsp_diagnostics",
+	} {
+		if requestHasTool(req, forbidden) {
+			t.Fatalf("economy first request should hide %q; tools=%v", forbidden, toolSchemaNames(req.Tools))
+		}
+	}
+	if requestHasToolPrefix(req, "mcp__mockmcp") {
+		t.Fatalf("economy first request should not expose MCP placeholders; tools=%v", toolSchemaNames(req.Tools))
+	}
+	sys := systemMessage(req.Messages)
+	if !strings.Contains(sys, tokenEconomyPrompt) {
+		t.Fatalf("token economy prompt missing from system message:\n%s", sys)
+	}
+	if strings.Contains(sys, "# Skills") || strings.Contains(sys, "projskill") {
+		t.Fatalf("skills index should not be in economy system prompt:\n%s", sys)
+	}
+}
+
+func TestBuildTokenEconomyConnectsWebFetchOnDemand(t *testing.T) {
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+
+	registerBootTokenProfileTestProvider()
+	prov := testutil.NewMock("token-economy",
+		testutil.Turn{ToolCalls: []provider.ToolCall{
+			{ID: "source-1", Name: "connect_tool_source", Arguments: `{"source":"web_fetch"}`},
+		}},
+		testutil.Turn{Text: "done"},
+	)
+	setBootTokenProfileTestProvider(t, prov)
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "test-model"
+
+[codegraph]
+enabled = false
+
+[agent]
+system_prompt = "BASE"
+
+[[providers]]
+name = "test-model"
+kind = "boot-token-profile-test"
+model = "x"
+`)
+
+	ctrl, err := Build(context.Background(), Options{Sink: event.Discard, TokenMode: TokenModeEconomy})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer ctrl.Close()
+	if err := ctrl.Run(context.Background(), "fetch later"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	reqs := prov.Requests()
+	if len(reqs) != 2 {
+		t.Fatalf("requests = %d, want 2", len(reqs))
+	}
+	if requestHasTool(reqs[0], "web_fetch") {
+		t.Fatalf("first request should hide web_fetch; tools=%v", toolSchemaNames(reqs[0].Tools))
+	}
+	if !requestHasTool(reqs[1], "web_fetch") {
+		t.Fatalf("second request should expose web_fetch after connect_tool_source; tools=%v", toolSchemaNames(reqs[1].Tools))
+	}
+}
+
+func TestBuildTokenEconomyPlanModeCanConnectWebFetch(t *testing.T) {
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+
+	registerBootTokenProfileTestProvider()
+	prov := testutil.NewMock("token-economy",
+		testutil.Turn{ToolCalls: []provider.ToolCall{
+			{ID: "source-1", Name: "connect_tool_source", Arguments: `{"source":"web_fetch"}`},
+		}},
+		testutil.Turn{Text: "done"},
+	)
+	setBootTokenProfileTestProvider(t, prov)
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "test-model"
+
+[codegraph]
+enabled = false
+
+[agent]
+system_prompt = "BASE"
+
+[[providers]]
+name = "test-model"
+kind = "boot-token-profile-test"
+model = "x"
+`)
+
+	ctrl, err := Build(context.Background(), Options{Sink: event.Discard, TokenMode: TokenModeEconomy})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer ctrl.Close()
+	ctrl.SetPlanMode(true)
+	if err := ctrl.Run(context.Background(), "fetch later while planning"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	reqs := prov.Requests()
+	if len(reqs) != 2 {
+		t.Fatalf("requests = %d, want 2", len(reqs))
+	}
+	if !requestHasTool(reqs[1], "web_fetch") {
+		t.Fatalf("second request should expose web_fetch in plan economy mode; tools=%v", toolSchemaNames(reqs[1].Tools))
+	}
+	for _, msg := range ctrl.History() {
+		if msg.Role == provider.RoleTool && msg.Name == "connect_tool_source" && strings.Contains(msg.Content, "blocked:") {
+			t.Fatalf("connect_tool_source should not be blocked in plan mode, got:\n%s", msg.Content)
+		}
+	}
+}
+
+func TestBuildTokenEconomyWebFetchConnectorHonorsDisabledBuiltin(t *testing.T) {
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+
+	registerBootTokenProfileTestProvider()
+	prov := testutil.NewMock("token-economy",
+		testutil.Turn{ToolCalls: []provider.ToolCall{
+			{ID: "source-1", Name: "connect_tool_source", Arguments: `{"source":"web_fetch"}`},
+		}},
+		testutil.Turn{Text: "done"},
+	)
+	setBootTokenProfileTestProvider(t, prov)
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "test-model"
+
+[tools]
+enabled = ["read_file", "grep"]
+
+[codegraph]
+enabled = false
+
+[agent]
+system_prompt = "BASE"
+
+[[providers]]
+name = "test-model"
+kind = "boot-token-profile-test"
+model = "x"
+`)
+
+	ctrl, err := Build(context.Background(), Options{Sink: event.Discard, TokenMode: TokenModeEconomy})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer ctrl.Close()
+	if err := ctrl.Run(context.Background(), "fetch later"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	reqs := prov.Requests()
+	if len(reqs) != 2 {
+		t.Fatalf("requests = %d, want 2", len(reqs))
+	}
+	if requestHasTool(reqs[1], "web_fetch") {
+		t.Fatalf("disabled web_fetch should not be exposed after connect_tool_source; tools=%v", toolSchemaNames(reqs[1].Tools))
+	}
+	var toolOutput string
+	for _, msg := range ctrl.History() {
+		if msg.Role == provider.RoleTool && msg.Name == "connect_tool_source" {
+			toolOutput += msg.Content
+		}
+	}
+	if !strings.Contains(toolOutput, "web_fetch is disabled by [tools].enabled") {
+		t.Fatalf("connector should explain disabled web_fetch, got:\n%s", toolOutput)
+	}
+}
+
+func TestBuildTokenEconomyConnectsSkillsOnDemand(t *testing.T) {
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+
+	registerBootTokenProfileTestProvider()
+	prov := testutil.NewMock("token-economy",
+		testutil.Turn{ToolCalls: []provider.ToolCall{
+			{ID: "source-1", Name: "connect_tool_source", Arguments: `{"source":"skills"}`},
+		}},
+		testutil.Turn{Text: "done"},
+	)
+	setBootTokenProfileTestProvider(t, prov)
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "test-model"
+
+[codegraph]
+enabled = false
+
+[agent]
+system_prompt = "BASE"
+
+[[providers]]
+name = "test-model"
+kind = "boot-token-profile-test"
+model = "x"
+`)
+	writeFile(t, dir, ".reasonix/skills/projskill.md", "---\ndescription: a project skill\n---\nplaybook")
+
+	ctrl, err := Build(context.Background(), Options{Sink: event.Discard, TokenMode: TokenModeEconomy})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer ctrl.Close()
+	if err := ctrl.Run(context.Background(), "use skills later"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	reqs := prov.Requests()
+	if len(reqs) != 2 {
+		t.Fatalf("requests = %d, want 2", len(reqs))
+	}
+	for _, name := range []string{"run_skill", "read_skill", "explore"} {
+		if requestHasTool(reqs[0], name) {
+			t.Fatalf("first request should hide %q; tools=%v", name, toolSchemaNames(reqs[0].Tools))
+		}
+		if !requestHasTool(reqs[1], name) {
+			t.Fatalf("second request should expose %q after connect_tool_source; tools=%v", name, toolSchemaNames(reqs[1].Tools))
+		}
+	}
+	var toolOutput string
+	for _, msg := range ctrl.History() {
+		if msg.Role == provider.RoleTool && msg.Name == "connect_tool_source" {
+			toolOutput += msg.Content
+		}
+	}
+	if !strings.Contains(toolOutput, "projskill") || !strings.Contains(toolOutput, "# Skills") {
+		t.Fatalf("skills source result should include the skill index, got:\n%s", toolOutput)
 	}
 }
 
@@ -339,6 +1295,10 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 // prefix is untouched by the memory feature.
 func TestBuildWithoutMemoryLeavesPromptUnchanged(t *testing.T) {
 	dir := robustTempDir(t)
+	home := robustTempDir(t)
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
 	t.Chdir(dir)
 	writeFile(t, dir, "reasonix.toml", `
 default_model = "test-model"
@@ -749,6 +1709,20 @@ func TestPartitionByTier(t *testing.T) {
 	}
 	if len(lazy) != 1 || lazy[0].Name != "l1" {
 		t.Fatalf("lazy bucket = %+v, want [l1]", lazy)
+	}
+}
+
+func TestBuiltInMCPsYieldToExtraPluginNames(t *testing.T) {
+	got := builtinmcp.AppendEnabled(nil, nil, []string{"time", "context7"}, pluginSpecNames([]plugin.Spec{{Name: "time"}})...)
+	if len(got) != 1 || got[0].Name != "context7" {
+		t.Fatalf("built-in MCP entries with extra time = %+v, want only context7", got)
+	}
+}
+
+func TestBuiltInMCPDefaultsEnableOnlyTime(t *testing.T) {
+	got := builtinmcp.AppendEnabled(nil, nil, config.Default().BuiltInMCP.EnabledNames())
+	if len(got) != 1 || got[0].Name != "time" {
+		t.Fatalf("default built-in MCP entries = %+v, want only time", got)
 	}
 }
 

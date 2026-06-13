@@ -55,6 +55,7 @@ type SandboxView struct {
 	Network       bool     `json:"network"`
 	WorkspaceRoot string   `json:"workspaceRoot"`
 	AllowWrite    []string `json:"allowWrite"`
+	Shell         string   `json:"shell"` // [tools.shell] prefer: auto|bash|powershell|pwsh
 }
 
 type NetworkProxyView struct {
@@ -73,10 +74,63 @@ type NetworkView struct {
 }
 
 type AgentView struct {
-	Temperature     float64 `json:"temperature"`
-	MaxSteps        int     `json:"maxSteps"`
-	PlannerMaxSteps int     `json:"plannerMaxSteps"`
-	SystemPrompt    string  `json:"systemPrompt"`
+	Temperature       float64 `json:"temperature"`
+	MaxSteps          int     `json:"maxSteps"`
+	PlannerMaxSteps   int     `json:"plannerMaxSteps"`
+	SystemPrompt      string  `json:"systemPrompt"`
+	ColdResumePrune   bool    `json:"coldResumePrune"`
+	ReasoningLanguage string  `json:"reasoningLanguage"`
+}
+
+type BotAllowlistView struct {
+	Enabled      bool     `json:"enabled"`
+	AllowAll     bool     `json:"allowAll"`
+	QQUsers      []string `json:"qqUsers"`
+	FeishuUsers  []string `json:"feishuUsers"`
+	WeixinUsers  []string `json:"weixinUsers"`
+	QQGroups     []string `json:"qqGroups"`
+	FeishuGroups []string `json:"feishuGroups"`
+	WeixinGroups []string `json:"weixinGroups"`
+}
+
+type QQBotView struct {
+	Enabled      bool   `json:"enabled"`
+	AppID        string `json:"appId"`
+	AppSecretEnv string `json:"appSecretEnv"`
+	SecretSet    bool   `json:"secretSet"`
+}
+
+type FeishuBotView struct {
+	Enabled           bool   `json:"enabled"`
+	Domain            string `json:"domain"`
+	AppID             string `json:"appId"`
+	AppSecretEnv      string `json:"appSecretEnv"`
+	SecretSet         bool   `json:"secretSet"`
+	VerificationToken string `json:"verificationToken"`
+	Mode              string `json:"mode"`
+	WebhookPort       int    `json:"webhookPort"`
+	RequireMention    bool   `json:"requireMention"`
+}
+
+type WeixinBotView struct {
+	Enabled   bool   `json:"enabled"`
+	AccountID string `json:"accountId"`
+	TokenEnv  string `json:"tokenEnv"`
+	TokenSet  bool   `json:"tokenSet"`
+	APIBase   string `json:"apiBase"`
+}
+
+type BotSettingsView struct {
+	Enabled          bool                `json:"enabled"`
+	Model            string              `json:"model"`
+	ToolApprovalMode string              `json:"toolApprovalMode"`
+	MaxSteps         int                 `json:"maxSteps"`
+	DebounceMs       int                 `json:"debounceMs"`
+	Allowlist        BotAllowlistView    `json:"allowlist"`
+	QQ               QQBotView           `json:"qq"`
+	Feishu           FeishuBotView       `json:"feishu"`
+	Weixin           WeixinBotView       `json:"weixin"`
+	Connections      []BotConnectionView `json:"connections"`
 }
 
 // SettingsView is the whole Settings panel payload.
@@ -92,17 +146,28 @@ type SettingsView struct {
 	Sandbox           SandboxView     `json:"sandbox"`
 	Network           NetworkView     `json:"network"`
 	Agent             AgentView       `json:"agent"`
+	Bot               BotSettingsView `json:"bot"`
 	DesktopLanguage   string          `json:"desktopLanguage"`
 	DesktopTheme      string          `json:"desktopTheme"`
 	DesktopThemeStyle string          `json:"desktopThemeStyle"`
 	CloseBehavior     string          `json:"closeBehavior"`
+	DisplayMode       string          `json:"displayMode"`
+	StatusBarStyle    string          `json:"statusBarStyle"`
+	StatusBarItems    []string        `json:"statusBarItems"`
+	CheckUpdates      bool            `json:"checkUpdates"`
+	Telemetry         bool            `json:"telemetry"`
+	Metrics           bool            `json:"metrics"`
+	ExpandThinking    bool            `json:"expandThinking"`
 	ConfigPath        string          `json:"configPath"`
 	// ProviderKinds lists the provider implementations the kernel actually
 	// registered (provider.Kinds()), so the editor's "kind" picker offers only
 	// kinds that resolve — selecting an unregistered one would fail the rebuild.
 	ProviderKinds []string `json:"providerKinds"`
-	// Bypass is the live YOLO state (runtime-only, not from config), so the panel's
-	// toggle reflects whether approvals are currently being skipped this session.
+	// AutoApproveTools is the live YOLO/full-access state (runtime-only, not from
+	// config), so the panel's toggle reflects whether tool approvals are currently
+	// being skipped this session.
+	AutoApproveTools bool `json:"autoApproveTools"`
+	// Bypass is the legacy JSON key for the same live state.
 	Bypass bool `json:"bypass"`
 }
 
@@ -262,18 +327,30 @@ func (a *App) Settings() SettingsView {
 				Ask:   []string{},
 				Deny:  []string{},
 			},
-			Sandbox:           SandboxView{Bash: "enforce", AllowWrite: []string{}},
-			Agent:             AgentView{PlannerMaxSteps: 12},
+			Sandbox:           SandboxView{Bash: "enforce", AllowWrite: []string{}, Shell: "auto"},
+			Agent:             AgentView{PlannerMaxSteps: 12, ColdResumePrune: true, ReasoningLanguage: "auto"},
+			Bot:               botSettingsView(config.BotConfig{}),
 			AutoPlan:          "off",
-			DesktopTheme:      "dark",
+			DesktopTheme:      "light",
 			DesktopThemeStyle: "graphite",
 			CloseBehavior:     "background",
+			DisplayMode:       "standard",
+			StatusBarStyle:    "text",
+			StatusBarItems:    config.DefaultDesktopStatusBarItems(),
+			CheckUpdates:      true,
+			Telemetry:         true,
+			Metrics:           false,
+			ExpandThinking:    false,
 		}
 	}
 	ctrl := a.activeCtrl()
 	bash := cfg.Sandbox.Bash
 	if bash == "" {
 		bash = "enforce"
+	}
+	shell := cfg.Tools.Shell.Prefer
+	if shell == "" {
+		shell = "auto"
 	}
 	v := SettingsView{
 		DefaultModel:      cfg.DefaultModel,
@@ -292,6 +369,7 @@ func (a *App) Settings() SettingsView {
 		Sandbox: SandboxView{
 			Bash: bash, Network: cfg.Sandbox.Network,
 			WorkspaceRoot: cfg.Sandbox.WorkspaceRoot, AllowWrite: nonNil(cfg.Sandbox.AllowWrite),
+			Shell: shell,
 		},
 		Network: NetworkView{
 			ProxyMode: cfg.NetworkProxyMode(),
@@ -305,14 +383,23 @@ func (a *App) Settings() SettingsView {
 				Password: cfg.Network.Proxy.Password,
 			},
 		},
-		Agent:             AgentView{Temperature: cfg.Agent.Temperature, MaxSteps: cfg.Agent.MaxSteps, PlannerMaxSteps: cfg.Agent.PlannerMaxSteps, SystemPrompt: cfg.Agent.SystemPrompt},
+		Agent:             AgentView{Temperature: cfg.Agent.Temperature, MaxSteps: cfg.Agent.MaxSteps, PlannerMaxSteps: cfg.Agent.PlannerMaxSteps, SystemPrompt: cfg.Agent.SystemPrompt, ColdResumePrune: cfg.ColdResumePruneEnabled(), ReasoningLanguage: cfg.ReasoningLanguage()},
+		Bot:               botSettingsView(cfg.Bot),
 		DesktopLanguage:   cfg.DesktopLanguage(),
 		DesktopTheme:      cfg.DesktopTheme(),
 		DesktopThemeStyle: cfg.DesktopThemeStyle(),
 		CloseBehavior:     cfg.DesktopCloseBehavior(),
+		DisplayMode:       cfg.DesktopDisplayMode(),
+		StatusBarStyle:    cfg.DesktopStatusBarStyle(),
+		StatusBarItems:    cfg.DesktopStatusBarItems(),
+		CheckUpdates:      cfg.DesktopCheckUpdates(),
+		Telemetry:         cfg.DesktopTelemetry(),
+		Metrics:           cfg.DesktopMetrics(),
+		ExpandThinking:    cfg.Desktop.ExpandThinking,
 		ConfigPath:        cfgPath,
 		ProviderKinds:     nonNil(provider.Kinds()),
-		Bypass:            ctrl != nil && ctrl.Bypass(),
+		AutoApproveTools:  ctrl != nil && ctrl.AutoApproveTools(),
+		Bypass:            ctrl != nil && ctrl.AutoApproveTools(),
 	}
 	added := providerAccessSet(cfg.Desktop.ProviderAccess)
 	v.OfficialProviders = officialProviderViews(officialProviderAddedSet(cfg))
@@ -323,11 +410,67 @@ func (a *App) Settings() SettingsView {
 	return v
 }
 
+func botSettingsView(b config.BotConfig) BotSettingsView {
+	mode := strings.TrimSpace(b.Feishu.Mode)
+	if mode == "" {
+		mode = "webhook"
+	}
+	return BotSettingsView{
+		Enabled:          b.Enabled,
+		Model:            b.Model,
+		ToolApprovalMode: normalizeBotConnectionToolApprovalMode(b.ToolApprovalMode),
+		MaxSteps:         b.MaxSteps,
+		DebounceMs:       b.DebounceMs,
+		Allowlist: BotAllowlistView{
+			Enabled:      b.Allowlist.Enabled,
+			AllowAll:     b.Allowlist.AllowAll,
+			QQUsers:      nonNil(b.Allowlist.QQUsers),
+			FeishuUsers:  nonNil(b.Allowlist.FeishuUsers),
+			WeixinUsers:  nonNil(b.Allowlist.WeixinUsers),
+			QQGroups:     nonNil(b.Allowlist.QQGroups),
+			FeishuGroups: nonNil(b.Allowlist.FeishuGroups),
+			WeixinGroups: nonNil(b.Allowlist.WeixinGroups),
+		},
+		QQ: QQBotView{
+			Enabled:      b.QQ.Enabled,
+			AppID:        b.QQ.AppID,
+			AppSecretEnv: b.QQ.AppSecretEnv,
+			SecretSet:    strings.TrimSpace(b.QQ.AppSecretEnv) != "" && os.Getenv(b.QQ.AppSecretEnv) != "",
+		},
+		Feishu: FeishuBotView{
+			Enabled:           b.Feishu.Enabled,
+			Domain:            orDefault(strings.TrimSpace(b.Feishu.Domain), "feishu"),
+			AppID:             b.Feishu.AppID,
+			AppSecretEnv:      b.Feishu.AppSecretEnv,
+			SecretSet:         strings.TrimSpace(b.Feishu.AppSecretEnv) != "" && os.Getenv(b.Feishu.AppSecretEnv) != "",
+			VerificationToken: b.Feishu.VerificationToken,
+			Mode:              mode,
+			WebhookPort:       b.Feishu.WebhookPort,
+			RequireMention:    b.Feishu.RequireMention,
+		},
+		Weixin: WeixinBotView{
+			Enabled:   b.Weixin.Enabled,
+			AccountID: b.Weixin.AccountID,
+			TokenEnv:  b.Weixin.TokenEnv,
+			TokenSet:  strings.TrimSpace(b.Weixin.TokenEnv) != "" && os.Getenv(b.Weixin.TokenEnv) != "",
+			APIBase:   b.Weixin.APIBase,
+		},
+		Connections: botConnectionViews(b.Connections),
+	}
+}
+
 func orDefault(s, def string) string {
 	if strings.TrimSpace(s) == "" {
 		return def
 	}
 	return s
+}
+
+func botDomainOrDefault(domain string) string {
+	if strings.EqualFold(strings.TrimSpace(domain), "lark") {
+		return "lark"
+	}
+	return "feishu"
 }
 
 // --- apply (write config, then rebuild the controller so it's live) ---
@@ -369,6 +512,9 @@ func (a *App) loadDesktopUserConfigForEdit() (*config.Config, string, error) {
 	if _, err := os.Stat(userPath); err == nil {
 		cfg := config.LoadForEdit(userPath)
 		normalizeLegacyDesktopProviderAccessForSettings(cfg, userPath)
+		if err := a.migrateLegacyBotConfigToUser(cfg, userPath); err != nil {
+			return nil, "", err
+		}
 		return cfg, userPath, nil
 	}
 	cfg := config.LoadForEdit(userPath)
@@ -380,7 +526,71 @@ func (a *App) loadDesktopUserConfigForEdit() (*config.Config, string, error) {
 	legacyCfg := config.LoadForEdit(legacyPath)
 	normalizeLegacyDesktopProviderAccessForSettings(legacyCfg, legacyPath)
 	legacyCfg.ConfigVersion = config.Default().ConfigVersion
+	if err := migrateLegacyBotConfigToUser(cfg, legacyCfg, userPath); err != nil {
+		return nil, "", err
+	}
 	return legacyCfg, userPath, nil
+}
+
+func (a *App) migrateLegacyBotConfigToUser(userCfg *config.Config, userPath string) error {
+	if userCfg == nil {
+		return nil
+	}
+	legacyPath := config.SourcePathForRoot(a.activeWorkspaceRoot())
+	if legacyPath == "" || sameConfigPath(legacyPath, userPath) {
+		return nil
+	}
+	legacyCfg := config.LoadForEdit(legacyPath)
+	return migrateLegacyBotConfigToUser(userCfg, legacyCfg, userPath)
+}
+
+func migrateLegacyBotConfigToUser(userCfg, legacyCfg *config.Config, userPath string) error {
+	if userCfg == nil || legacyCfg == nil || desktopBotConfigConfigured(userCfg.Bot) {
+		return nil
+	}
+	if !desktopBotConfigConfigured(legacyCfg.Bot) {
+		return nil
+	}
+	userCfg.Bot = legacyCfg.Bot
+	if err := userCfg.SaveTo(userPath); err != nil {
+		return fmt.Errorf("migrate legacy bot config: %w", err)
+	}
+	return nil
+}
+
+func desktopBotConfigConfigured(bot config.BotConfig) bool {
+	defaults := config.Default().Bot
+	if bot.Enabled || strings.TrimSpace(bot.Model) != "" || len(bot.Connections) > 0 {
+		return true
+	}
+	if (bot.MaxSteps != 0 && bot.MaxSteps != defaults.MaxSteps) || (bot.DebounceMs != 0 && bot.DebounceMs != defaults.DebounceMs) {
+		return true
+	}
+	if bot.Allowlist.AllowAll ||
+		len(bot.Allowlist.QQUsers)+len(bot.Allowlist.FeishuUsers)+len(bot.Allowlist.WeixinUsers) > 0 ||
+		len(bot.Allowlist.QQGroups)+len(bot.Allowlist.FeishuGroups)+len(bot.Allowlist.WeixinGroups) > 0 {
+		return true
+	}
+	if bot.QQ.Enabled || strings.TrimSpace(bot.QQ.AppID) != "" || bot.QQ.AppSecretEnv != defaults.QQ.AppSecretEnv {
+		return true
+	}
+	if bot.Feishu.Enabled ||
+		strings.TrimSpace(bot.Feishu.AppID) != "" ||
+		bot.Feishu.Domain != defaults.Feishu.Domain ||
+		bot.Feishu.AppSecretEnv != defaults.Feishu.AppSecretEnv ||
+		strings.TrimSpace(bot.Feishu.VerificationToken) != "" ||
+		bot.Feishu.Mode != defaults.Feishu.Mode ||
+		bot.Feishu.WebhookPort != defaults.Feishu.WebhookPort ||
+		bot.Feishu.RequireMention != defaults.Feishu.RequireMention {
+		return true
+	}
+	if bot.Weixin.Enabled ||
+		bot.Weixin.AccountID != defaults.Weixin.AccountID ||
+		bot.Weixin.TokenEnv != defaults.Weixin.TokenEnv ||
+		bot.Weixin.APIBase != defaults.Weixin.APIBase {
+		return true
+	}
+	return false
 }
 
 func normalizeLegacyDesktopProviderAccessForSettings(cfg *config.Config, path string) {
@@ -473,7 +683,9 @@ func (a *App) rebuild() error {
 		Model: model, RequireKey: false,
 		Sink:           tab.sink,
 		WorkspaceRoot:  tab.WorkspaceRoot,
+		SessionDir:     tabSessionDir(tab),
 		EffortOverride: cloneStringPtr(tab.effort),
+		TokenMode:      currentTabTokenMode(tab),
 	})
 	if err != nil {
 		a.mu.Lock()
@@ -681,6 +893,35 @@ func officialProviderTemplate(kind string) ([]config.ProviderEntry, string, erro
 	}
 }
 
+func chatProviderModels(models []string) []string {
+	out := make([]string, 0, len(models))
+	seen := map[string]bool{}
+	for _, model := range models {
+		model = strings.TrimSpace(model)
+		if model == "" || seen[model] || !config.IsLikelyChatModel(model) {
+			continue
+		}
+		seen[model] = true
+		out = append(out, model)
+	}
+	return out
+}
+
+func providerDefaultForModels(currentDefault string, models []string) string {
+	currentDefault = strings.TrimSpace(currentDefault)
+	if currentDefault != "" {
+		for _, model := range models {
+			if model == currentDefault {
+				return currentDefault
+			}
+		}
+	}
+	if len(models) > 0 {
+		return models[0]
+	}
+	return ""
+}
+
 // SaveProvider adds or updates a provider. A single model fills `model`; several
 // fill `models` (with `default`). The shared key/endpoint live on the entry.
 func (a *App) SaveProvider(p ProviderView) error {
@@ -705,11 +946,12 @@ func (a *App) SaveProvider(p ProviderView) error {
 		e.Model = ""
 		e.Models = nil
 		e.Default = ""
-		if len(p.Models) > 0 {
-			e.Model = p.Models[0] // also satisfies validateProvider's model requirement
-			if len(p.Models) > 1 {
-				e.Models = p.Models
-				e.Default = p.Default
+		models := chatProviderModels(p.Models)
+		if len(models) > 0 {
+			e.Model = models[0] // also satisfies validateProvider's model requirement
+			if len(models) > 1 {
+				e.Models = models
+				e.Default = providerDefaultForModels(p.Default, models)
 			}
 		}
 		if err := c.UpsertProvider(e); err != nil {
@@ -762,7 +1004,7 @@ func (a *App) FetchProviderModels(p ProviderView) ([]string, error) {
 	if err != nil {
 		return []string{}, err
 	}
-	return nonNil(models), nil
+	return nonNil(chatProviderModels(models)), nil
 }
 
 // DeleteProvider removes a provider and retargets open idle tabs that used it.
@@ -1025,12 +1267,13 @@ func (a *App) RemovePermissionRule(list, rule string) error {
 }
 
 // SetSandbox updates the bash sandbox mode, network egress, and write roots.
-func (a *App) SetSandbox(bash string, network bool, workspaceRoot string, allowWrite []string) error {
+func (a *App) SetSandbox(bash string, network bool, workspaceRoot string, allowWrite []string, shell string) error {
 	return a.applyConfigChange(func(c *config.Config) error {
 		c.Sandbox.Bash = bash
 		c.Sandbox.Network = network
 		c.Sandbox.WorkspaceRoot = strings.TrimSpace(workspaceRoot)
 		c.Sandbox.AllowWrite = trimList(allowWrite)
+		c.Tools.Shell.Prefer = strings.TrimSpace(shell)
 		return nil
 	})
 }
@@ -1053,10 +1296,98 @@ func (a *App) SetNetwork(n NetworkView) error {
 	})
 }
 
+func (a *App) SetBotSettings(b BotSettingsView) error {
+	err := a.applyConfigOnly(func(c *config.Config) error {
+		c.Bot.Enabled = b.Enabled
+		c.Bot.Model = strings.TrimSpace(b.Model)
+		c.Bot.ToolApprovalMode = normalizeBotConnectionToolApprovalMode(b.ToolApprovalMode)
+		c.Bot.MaxSteps = b.MaxSteps
+		c.Bot.DebounceMs = b.DebounceMs
+		c.Bot.Allowlist = config.BotAllowlist{
+			Enabled:      b.Allowlist.Enabled,
+			AllowAll:     b.Allowlist.AllowAll,
+			QQUsers:      trimList(b.Allowlist.QQUsers),
+			FeishuUsers:  trimList(b.Allowlist.FeishuUsers),
+			WeixinUsers:  trimList(b.Allowlist.WeixinUsers),
+			QQGroups:     trimList(b.Allowlist.QQGroups),
+			FeishuGroups: trimList(b.Allowlist.FeishuGroups),
+			WeixinGroups: trimList(b.Allowlist.WeixinGroups),
+		}
+		c.Bot.QQ = config.QQBotConfig{
+			Enabled:      b.QQ.Enabled,
+			AppID:        strings.TrimSpace(b.QQ.AppID),
+			AppSecretEnv: strings.TrimSpace(b.QQ.AppSecretEnv),
+		}
+		c.Bot.Feishu = config.FeishuBotConfig{
+			Enabled:           b.Feishu.Enabled,
+			Domain:            botDomainOrDefault(b.Feishu.Domain),
+			AppID:             strings.TrimSpace(b.Feishu.AppID),
+			AppSecretEnv:      strings.TrimSpace(b.Feishu.AppSecretEnv),
+			VerificationToken: strings.TrimSpace(b.Feishu.VerificationToken),
+			Mode:              strings.TrimSpace(b.Feishu.Mode),
+			WebhookPort:       b.Feishu.WebhookPort,
+			RequireMention:    b.Feishu.RequireMention,
+		}
+		c.Bot.Weixin = config.WeixinBotConfig{
+			Enabled:   b.Weixin.Enabled,
+			AccountID: strings.TrimSpace(b.Weixin.AccountID),
+			TokenEnv:  strings.TrimSpace(b.Weixin.TokenEnv),
+			APIBase:   strings.TrimRight(strings.TrimSpace(b.Weixin.APIBase), "/"),
+		}
+		c.Bot.Connections = botConnectionConfigs(b.Connections)
+		return nil
+	})
+	if err == nil {
+		a.refreshBotRuntimeAsync()
+	}
+	return err
+}
+
+func (a *App) SetBotSecret(envName, value string) error {
+	envName = strings.TrimSpace(envName)
+	if envName == "" {
+		return fmt.Errorf("bot secret env name is empty")
+	}
+	if err := upsertDotEnv(envName, value); err != nil {
+		return err
+	}
+	a.refreshBotRuntimeAsync()
+	return nil
+}
+
+func (a *App) ClearBotSecret(envName string) error {
+	envName = strings.TrimSpace(envName)
+	if envName == "" {
+		return fmt.Errorf("bot secret env name is empty")
+	}
+	if err := removeDotEnv(envName); err != nil {
+		return err
+	}
+	a.refreshBotRuntimeAsync()
+	return nil
+}
+
 // SetCloseBehavior updates desktop-only window close behavior without rebuilding
 // the active controller. It must stay out of provider-visible prompt/request data.
 func (a *App) SetCloseBehavior(mode string) error {
 	return a.applyConfigOnly(func(c *config.Config) error { return c.SetDesktopCloseBehavior(mode) })
+}
+
+// SetDisplayMode updates the transcript display mode. UI-only, no rebuild needed.
+func (a *App) SetDisplayMode(mode string) error {
+	return a.applyConfigOnly(func(c *config.Config) error { return c.SetDesktopDisplayMode(mode) })
+}
+
+// SetStatusBarStyle updates the desktop status bar metric label style. UI-only,
+// no rebuild needed.
+func (a *App) SetStatusBarStyle(style string) error {
+	return a.applyConfigOnly(func(c *config.Config) error { return c.SetDesktopStatusBarStyle(style) })
+}
+
+// SetStatusBarItems updates the ordered visible desktop status bar items.
+// UI-only, no rebuild needed.
+func (a *App) SetStatusBarItems(items []string) error {
+	return a.applyConfigOnly(func(c *config.Config) error { return c.SetDesktopStatusBarItems(items) })
 }
 
 // SetDesktopLanguage updates only the desktop UI language. It deliberately does
@@ -1083,6 +1414,38 @@ func (a *App) SetTrayLocale(locale string) error {
 // rebuild the active controller and must stay out of provider-visible requests.
 func (a *App) SetDesktopAppearance(theme, style string) error {
 	return a.applyConfigOnly(func(c *config.Config) error { return c.SetDesktopAppearance(theme, style) })
+}
+
+// SetDesktopCheckUpdates updates only the desktop startup update-check
+// preference. Manual checks in Settings are unaffected.
+func (a *App) SetDesktopCheckUpdates(enabled bool) error {
+	return a.applyConfigOnly(func(c *config.Config) error { return c.SetDesktopCheckUpdates(enabled) })
+}
+
+// SetDesktopTelemetry sets whether the desktop sends the anonymous launch ping.
+func (a *App) SetDesktopTelemetry(enabled bool) error {
+	return a.applyConfigOnly(func(c *config.Config) error { return c.SetDesktopTelemetry(enabled) })
+}
+
+// SetDesktopMetrics sets whether the desktop sends opt-in aggregate agent metrics,
+// starting or stopping the live aggregator so the toggle takes effect immediately.
+func (a *App) SetDesktopMetrics(enabled bool) error {
+	if err := a.applyConfigOnly(func(c *config.Config) error { return c.SetDesktopMetrics(enabled) }); err != nil {
+		return err
+	}
+	switch {
+	case enabled && a.metrics.Load() == nil && version != "dev":
+		a.metrics.Store(newMetricsAggregator(filepath.Dir(config.UserConfigPath())))
+	case !enabled:
+		a.metrics.Store(nil)
+	}
+	return nil
+}
+
+// SetExpandThinking sets whether reasoning text is expanded by default on
+// the desktop. It is desktop-only and does not rebuild the controller.
+func (a *App) SetExpandThinking(on bool) error {
+	return a.applyConfigOnly(func(c *config.Config) error { return c.SetExpandThinking(on) })
 }
 
 // MigrateDesktopPreferences imports old browser-local desktop preferences into
@@ -1114,6 +1477,14 @@ func (a *App) SetAgentParams(temperature float64, maxSteps int, plannerMaxSteps 
 		c.Agent.SystemPrompt = systemPrompt
 		return nil
 	})
+}
+
+func (a *App) SetColdResumePrune(enabled bool) error {
+	return a.applyConfigChange(func(c *config.Config) error { return c.SetColdResumePrune(enabled) })
+}
+
+func (a *App) SetReasoningLanguage(lang string) error {
+	return a.applyConfigChange(func(c *config.Config) error { return c.SetReasoningLanguage(lang) })
 }
 
 // trimList drops blank entries from a string slice (and returns a non-nil slice).

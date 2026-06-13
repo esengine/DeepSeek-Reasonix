@@ -117,11 +117,11 @@ func countUntracked(out string) int {
 	return n
 }
 
-func (m chatTUI) gitTag(maxWidth int) string {
-	if maxWidth <= 0 {
+func (m chatTUI) gitTag() string {
+	if strings.TrimSpace(m.gitStatus.Repo) == "" || strings.TrimSpace(m.gitStatus.Branch) == "" {
 		return ""
 	}
-	return m.gitStatus.RenderWithin(maxWidth, m.statusModeColor())
+	return m.gitStatus.render(themeFg(m.statusModeColor(), m.gitStatus.Repo), m.gitStatus.Branch)
 }
 
 var (
@@ -133,7 +133,7 @@ var (
 
 func (m chatTUI) statusModeColor() cliColor {
 	switch {
-	case m.ctrl != nil && m.ctrl.Bypass():
+	case m.ctrl != nil && m.ctrl.AutoApproveTools():
 		return statusYoloColor
 	case m.planMode:
 		return statusPlanColor
