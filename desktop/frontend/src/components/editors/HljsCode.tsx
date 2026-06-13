@@ -9,9 +9,16 @@ import { CopyButton } from "../CopyButton";
 export default function HljsCode({ value, language, maxHeight }: EditorProps) {
   const html = highlightToHtml(value, language);
   return (
-    <pre className="code hljs" data-lang={language} style={maxHeight ? { maxHeight } : undefined}>
-      <code dangerouslySetInnerHTML={{ __html: html }} />
-      <CopyButton text={value} className="code-block__copy" />
-    </pre>
+    <>
+      {language && (
+        <div className="code-block__header">
+          <span className="code-block__lang">{language}</span>
+          <CopyButton text={value} />
+        </div>
+      )}
+      <pre className="code hljs" data-lang={language} style={maxHeight ? { maxHeight } : undefined}>
+        <code dangerouslySetInnerHTML={{ __html: html }} />
+      </pre>
+    </>
   );
 }

@@ -3758,6 +3758,32 @@ a[href] {
 .code-block__wrap {
   position: relative;
 }
+
+/* code-block header: language label + copy button, sticky at top */
+.code-block__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px 4px 12px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border-soft);
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--fg-faint);
+  position: sticky;
+  top: 0;
+  z-index: var(--z-local-raised);
+}
+.code-block__header + .code {
+  margin-top: 0;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+.code-block__lang {
+  text-transform: lowercase;
+}
 .msg--assistant .msg__body {
   line-height: 1.68;
   user-select: text;
