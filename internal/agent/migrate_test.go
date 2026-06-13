@@ -587,6 +587,28 @@ func TestMigrateLegacySessionsJsonlPassIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestMigrateLegacySessionsJsonlPassRunsForExistingUpgrader(t *testing.T) {
+	src := t.TempDir()
+	dest := t.TempDir()
+
+	os.WriteFile(filepath.Join(src, "acp-chat.jsonl"), []byte(legacyMessageLog), 0o644)
+
+	// Simulate an upgrader whose events pass already completed in a prior
+	// version: the routed marker is stamped but the v3-jsonl marker is not.
+	writeImportMarkers(dest, legacyRoutedHomeImportMarker)
+
+	n, err := MigrateLegacySessions(src, dest, nil)
+	if err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("imported %d, want 1 (.jsonl-only must reach existing upgraders)", n)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "acp-chat.jsonl")); err != nil {
+		t.Errorf("jsonl-only session not imported for existing upgrader: %v", err)
+	}
+}
+
 // legacyNestedFunctionLog uses the OpenAI-style nested-function tool-call format
 // that the TS version wrote: name and arguments live under "function".
 const legacyNestedFunctionLog = `{"role":"user","content":"read the file"}

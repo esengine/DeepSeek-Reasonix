@@ -83,7 +83,10 @@ func migrateLegacySessions(srcDir, globalDest, marker string, projectDir func(st
 	if strings.TrimSpace(marker) == "" {
 		marker = legacyImportMarker
 	}
-	if importMarkerExists(globalDest, marker) {
+	// Gate on both the routed marker AND the jsonl marker: an existing upgrader
+	// whose events pass already stamped the routed marker must still reach the
+	// .jsonl-only / subdir passes below (Pass 1 is idempotent via dest checks).
+	if importMarkerExists(globalDest, marker) && importMarkerExists(globalDest, legacyJsonlPassMarker) {
 		return 0, nil
 	}
 	entries, err := os.ReadDir(srcDir)
@@ -401,35 +404,6 @@ func isMessageFormat(path string) bool {
 	n, _ := f.Read(buf[:])
 	s := strings.TrimLeft(string(buf[:n]), " \t\r\n")
 	return strings.HasPrefix(s, `{"role":`)
-}
-
-// copyFile copies the contents of src to dst, preserving no metadata beyond
-// what the caller applies afterward (mtime, etc.). The destination file is
-// written atomically via a temp file + rename to avoid partial writes.
-func copyFile(src, dst string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(dst), ".session.*.tmp")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	if _, err := io.Copy(tmp, in); err != nil {
-		tmp.Close()
-		os.Remove(tmpPath)
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(tmpPath)
-		return err
-	}
-	return os.Rename(tmpPath, dst)
 }
 
 func fileExists(path string) bool {
