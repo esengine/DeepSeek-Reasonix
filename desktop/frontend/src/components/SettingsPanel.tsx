@@ -641,10 +641,10 @@ function normalizeCloseBehavior(mode: string | undefined): CloseBehavior {
   return mode === "quit" ? "quit" : "background";
 }
 
-type DisplayMode = "standard" | "compact" | "minimal";
+type DisplayMode = "standard" | "compact";
 
 function normalizeDisplayMode(mode: string | undefined): DisplayMode {
-  return mode === "standard" || mode === "compact" || mode === "minimal" ? mode : "minimal";
+  return mode === "standard" || mode === "compact" ? mode : "compact";
 }
 
 type StatusBarStyle = "icon" | "text";
@@ -914,23 +914,9 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
           ))}
         </div>
       </SettingsField>
-      <SettingsField label={t("settings.expandThinking")}>
-        <div className="set-seg">
-          {([false, true] as const).map((val) => (
-            <button
-              key={val ? "on" : "off"}
-              className={`set-seg__btn${s.expandThinking === val ? " set-seg__btn--on" : ""}`}
-              disabled={busy}
-              onClick={() => void apply(() => app.SetExpandThinking(val))}
-            >
-              {val ? t("settings.expandThinking.expanded") : t("settings.expandThinking.collapsed")}
-            </button>
-          ))}
-        </div>
-      </SettingsField>
       <SettingsField label={t("settings.displayMode")}>
         <div className="set-seg">
-          {(["standard", "compact", "minimal"] as const).map((mode) => (
+          {(["standard", "compact"] as const).map((mode) => (
             <button
               key={mode}
               className={`set-seg__btn${displayMode === mode ? " set-seg__btn--on" : ""}`}

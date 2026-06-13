@@ -5,6 +5,7 @@ import { DiffView } from "./DiffView";
 import { useT } from "../lib/i18n";
 import { diffsFor, subjectOf } from "../lib/tools";
 import { useShellExpand } from "../lib/shellExpand";
+import { useGSAPCollapse } from "../lib/useGSAPCollapse";
 import type { Item } from "../lib/useController";
 import { isReadOnlyTool } from "../lib/useController";
 import { ReadOnlyBatch } from "./ReadOnlyBatch";
@@ -88,8 +89,12 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
 
   const duration = item.status === "running" ? "" : formatToolDuration(item.durationMs);
 
+  // GSAP-driven collapse/expand for tool body
+  const toolBodyRef = useRef<HTMLDivElement>(null);
+  useGSAPCollapse(toolBodyRef, open);
+
   return (
-    <div className={`tool${quiet ? " tool--quiet" : ""}${isSubagent ? " tool--subagent" : ""}`}>
+    <div className={`tool${quiet ? " tool--quiet" : ""}${isSubagent ? " tool--subagent" : ""}${open && hasBody ? " tool--open" : ""}`} data-entrance={item.id}>
       <button
         type="button"
         className="tool__head"
@@ -114,8 +119,7 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
         )}
       </button>
 
-      {open && (
-        <div className="tool__body">
+      <div ref={toolBodyRef} className="tool__body">
 
         {diffs.map((d, i) => (
           <div key={i}>
@@ -173,8 +177,7 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
         )}
 
         {item.error && <div className="tool__err">{item.error}</div>}
-        </div>
-      )}
+      </div>
     </div>
   );
 });

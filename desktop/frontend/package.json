@@ -11,12 +11,14 @@
     "test:todo-visibility": "node scripts/test-todo-visibility.mjs",
     "typecheck": "tsc --noEmit",
     "test": "tsx src/__tests__/math-golden.test.ts && tsx src/__tests__/text-size.test.ts && tsx src/__tests__/provider-model-refresh.test.ts && tsx src/__tests__/composer-profile.test.ts && tsx src/__tests__/use-controller-meta.test.ts && tsx src/__tests__/workspace-layout.test.ts && tsx src/__tests__/tool-approval-mode.test.ts && tsx src/__tests__/send-failed.test.ts && tsx src/__tests__/message-selection-copy.test.ts && tsx src/__tests__/attachment-display.test.ts && tsx src/__tests__/command-palette-css.test.ts && tsx src/__tests__/context-panel-breakdown.test.ts",
-    "test:typecheck": "tsc --noEmit -p tsconfig.test.json",
+ https://github.com/esengine/DeepSeek-Reasonix/pull/4180/conflict?name=desktop%252Ffrontend%252Fpnpm-lock.yaml&ancestor_oid=4946771c1c6ad6b9e85de6184557a6bc8dae0448&base_oid=0c72e40fde4611b42583d06c31379088a369e645&head_oid=918f2aea98e37ba4ac90c9391b844adec0973ece   "test:typecheck": "tsc --noEmit -p tsconfig.test.json",
     "test:all": "tsc --noEmit -p tsconfig.test.json && tsx src/__tests__/math-golden.test.ts && tsx src/__tests__/text-size.test.ts && tsx src/__tests__/provider-model-refresh.test.ts && tsx src/__tests__/composer-profile.test.ts && tsx src/__tests__/use-controller-meta.test.ts && tsx src/__tests__/workspace-layout.test.ts && tsx src/__tests__/tool-approval-mode.test.ts && tsx src/__tests__/send-failed.test.ts && tsx src/__tests__/message-selection-copy.test.ts && tsx src/__tests__/attachment-display.test.ts && tsx src/__tests__/command-palette-css.test.ts && tsx src/__tests__/context-panel-breakdown.test.ts"
   },
   "dependencies": {
+    "@gsap/react": "^2.1.2",
     "@tanstack/react-virtual": "^3.14.2",
     "@xterm/addon-fit": "^0.11.0",
+    "gsap": "^3.15.0",
     "highlight.js": "^11.10.0",
     "katex": "^0.17.0",
     "lucide-react": "^1.17.0",

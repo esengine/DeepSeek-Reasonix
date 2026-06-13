@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
+import gsap from "gsap";
 import { useT } from "../lib/i18n";
 import type { WireApproval } from "../lib/types";
 import { PromptAction, PromptDetailToggle, PromptShelf } from "./PromptShelf";
 import { playAttentionChime } from "../lib/sound";
+import { DUR_FAST } from "../lib/gsapAnimations";
 
 export function ApprovalModal({
   approval,
@@ -20,23 +22,45 @@ export function ApprovalModal({
   const [revisionText, setRevisionText] = useState("");
   const [detailsOpen, setDetailsOpen] = useState(false);
   const cardRef = useRef<HTMLDivElement | null>(null);
+  const shelfRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  // When consecutive approvals arrive, animate the old card out before
+  // the new one slides in.  GSAP fromTo on the shelf wrapper avoids the
+  // jarring pop when the API cycles through 4+ pending approvals.
+  const closingRef = useRef(false);
   const isPlanApproval = approval.tool === "exit_plan_mode";
   const subject = approval.subject.trim();
   const subjectSummary = subject.split("\n").find((line) => line.trim())?.trim() ?? "";
 
 
+  const answerWithExit = (fn: () => void) => {
+    if (closingRef.current) return;
+    closingRef.current = true;
+    const el = shelfRef.current;
+    if (el) {
+      gsap.to(el, {
+        opacity: 0,
+        y: 8,
+        duration: DUR_FAST,
+        ease: "power2.in",
+        onComplete: fn,
+      });
+    } else {
+      fn();
+    }
+  };
+
   const choosePlanAction = (key: string) => {
     if (key === "1") setRevisionOpen((open) => !open);
-    else if (key === "2") onAnswer(true, false, false);
-    else if (key === "3" || key === "Escape") (onExitPlan ?? (() => onAnswer(false, false, false)))();
+    else if (key === "2") answerWithExit(() => onAnswer(true, false, false));
+    else if (key === "3" || key === "Escape") answerWithExit(() => (onExitPlan ?? (() => onAnswer(false, false, false)))());
   };
 
   const chooseToolAction = (key: string) => {
-    if (key === "1") onAnswer(true, false, false);
-    else if (key === "2") onAnswer(true, true, false);
-    else if (key === "3") onAnswer(true, true, true);
-    else if (key === "4" || key === "Escape") onAnswer(false, false, false);
+    if (key === "1") answerWithExit(() => onAnswer(true, false, false));
+    else if (key === "2") answerWithExit(() => onAnswer(true, true, false));
+    else if (key === "3") answerWithExit(() => onAnswer(true, true, true));
+    else if (key === "4" || key === "Escape") answerWithExit(() => onAnswer(false, false, false));
   };
 
   useEffect(() => {
@@ -71,25 +95,26 @@ export function ApprovalModal({
       inputRef.current?.focus();
       return;
     }
-    onRevisePlan?.(text);
+    answerWithExit(() => onRevisePlan?.(text));
   };
 
   // The plan is already shown above as the assistant's reply; this is just the gate.
   if (isPlanApproval) {
     return (
-      <PromptShelf
-        barRef={cardRef}
+      <div ref={shelfRef}>
+        <PromptShelf
+          barRef={cardRef}
         titleId="plan-approval-title"
         title={t("approval.planReady")}
         meta={t("approval.planReadyHint")}
         actions={
           <>
             <PromptAction keyLabel="1" label={t("approval.revisePlan")} onClick={() => setRevisionOpen((open) => !open)} />
-            <PromptAction keyLabel="2" label={t("approval.startExecution")} onClick={() => onAnswer(true, false, false)} selected />
+            <PromptAction keyLabel="2" label={t("approval.startExecution")} onClick={() => answerWithExit(() => onAnswer(true, false, false))} selected />
             <PromptAction
               keyLabel="3"
               label={t("approval.exitPlan")}
-              onClick={() => (onExitPlan ?? (() => onAnswer(false, false, false)))()}
+              onClick={() => answerWithExit(() => (onExitPlan ?? (() => onAnswer(false, false, false)))())}
             />
           </>
         }
@@ -119,12 +144,14 @@ export function ApprovalModal({
           </div>
         )}
       </PromptShelf>
+      </div>
     );
   }
 
   return (
-    <PromptShelf
-      barRef={cardRef}
+    <div ref={shelfRef}>
+      <PromptShelf
+        barRef={cardRef}
       titleId="tool-approval-title"
       title={t("approval.toolPending")}
       actionsWrap
@@ -144,10 +171,10 @@ export function ApprovalModal({
               onClick={() => setDetailsOpen((open) => !open)}
             />
           )}
-          <PromptAction keyLabel="1" label={t("approval.allowOnce")} onClick={() => onAnswer(true, false, false)} selected />
-          <PromptAction keyLabel="2" label={t("approval.allowRuleSession")} onClick={() => onAnswer(true, true, false)} />
-          <PromptAction keyLabel="3" label={t("approval.allowRulePersistent")} onClick={() => onAnswer(true, true, true)} />
-          <PromptAction keyLabel="4" label={t("approval.deny")} onClick={() => onAnswer(false, false, false)} />
+          <PromptAction keyLabel="1" label={t("approval.allowOnce")} onClick={() => answerWithExit(() => onAnswer(true, false, false))} selected />
+          <PromptAction keyLabel="2" label={t("approval.allowRuleSession")} onClick={() => answerWithExit(() => onAnswer(true, true, false))} />
+          <PromptAction keyLabel="3" label={t("approval.allowRulePersistent")} onClick={() => answerWithExit(() => onAnswer(true, true, true))} />
+          <PromptAction keyLabel="4" label={t("approval.deny")} onClick={() => answerWithExit(() => onAnswer(false, false, false))} />
         </>
       }
     >
@@ -155,6 +182,7 @@ export function ApprovalModal({
         <pre className="approval-subject">{subject}</pre>
       )}
     </PromptShelf>
+    </div>
   );
 
 }
