@@ -97,7 +97,29 @@ func newStdioTransport(ctx context.Context, s Spec) (*stdioTransport, error) {
 	return t, nil
 }
 
-var stdioShellPATH = defaultStdioShellPATH
+var stdioShellPATH = cachedShellPATH(defaultStdioShellPATH)
+
+// cachedShellPATH memoizes the first non-empty shell-PATH probe: the user's
+// interactive PATH is stable for the process, and resolveStdioExecutable now
+// probes for every stdio plugin, so caching avoids a login shell per server.
+func cachedShellPATH(probe func(context.Context) string) func(context.Context) string {
+	var (
+		mu     sync.Mutex
+		cached string
+		done   bool
+	)
+	return func(ctx context.Context) string {
+		mu.Lock()
+		defer mu.Unlock()
+		if done {
+			return cached
+		}
+		if p := probe(ctx); p != "" {
+			cached, done = p, true
+		}
+		return cached
+	}
+}
 
 func resolveStdioExecutable(ctx context.Context, s Spec, env []string) (string, []string, error) {
 	// Unconditionally enrich PATH with the user's shell PATH so every
