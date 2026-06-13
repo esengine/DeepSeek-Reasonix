@@ -22,7 +22,7 @@ import {
   type User,
 } from "./auth";
 
-const MAX_BODY_BYTES = 32 * 1024;
+const MAX_BODY_BYTES = 96 * 1024;
 const LATEST_SAMPLES_PER_GROUP = 5;
 
 const Device = z
@@ -65,6 +65,7 @@ const Report = z.object({
     .optional(),
   occurredAt: z.string().max(64).optional(),
 });
+type ReportPayload = z.infer<typeof Report>;
 
 const Ping = z.object({
   installId: z.string().regex(/^[0-9a-f]{32}$/),
@@ -142,11 +143,21 @@ function normalizeStackFrame(frame: string): string {
     .replace(/:\d+(?::\d+)?/g, ":<n>");
 }
 
+function normalizeFingerprintText(text: string): string {
+  return text
+    .replace(/[A-Za-z]:\\[^\s)('"]+/g, "<path>")
+    .replace(/(?:wails|https?|file):\/\/[^\s)('"]+/g, "<url>")
+    .replace(/0x[0-9a-fA-F]+/g, "<addr>")
+    .replace(/^build [0-9a-f]+$/gm, "build <commit>")
+    .replace(/:\d+(?::\d+)?/g, ":<n>");
+}
+
 export function normalizeForFingerprint(inputOrKind: FingerprintInput | string, legacyMessage = ""): string {
-  const input =
-    typeof inputOrKind === "string"
-      ? { kind: inputOrKind, message: legacyMessage }
-      : inputOrKind;
+  if (typeof inputOrKind === "string") {
+    const head = legacyMessage.split("\n").slice(0, 12).join("\n");
+    return inputOrKind + "\n" + normalizeFingerprintText(head);
+  }
+  const input = inputOrKind;
   const messageBasis = input.errorMessage || input.message;
   const head = messageBasis.split("\n").slice(0, 6).join("\n");
   return (
@@ -160,12 +171,26 @@ export function normalizeForFingerprint(inputOrKind: FingerprintInput | string, 
     "\n" +
     normalizeStackFrame(input.topFrame || "") +
     "\n" +
-    head
-      .replace(/[A-Za-z]:\\[^\s)('"]+/g, "<path>")
-      .replace(/(?:wails|https?|file):\/\/[^\s)('"]+/g, "<url>")
-      .replace(/0x[0-9a-fA-F]+/g, "<addr>")
-      .replace(/^build [0-9a-f]+$/gm, "build <commit>")
-      .replace(/:\d+(?::\d+)?/g, ":<n>")
+    normalizeFingerprintText(head)
+  );
+}
+
+function hasStructuredCrashFields(r: ReportPayload): boolean {
+  return Boolean(
+    r.schemaVersion ||
+      r.source ||
+      r.label ||
+      r.errorType ||
+      r.errorMessage ||
+      r.stack ||
+      r.componentStack ||
+      r.topFrame ||
+      r.buildCommit ||
+      r.channel ||
+      r.language ||
+      r.view ||
+      r.breadcrumbs?.length ||
+      r.occurredAt,
   );
 }
 
@@ -223,17 +248,18 @@ async function handleReport(request: Request, env: Env): Promise<Response> {
     msg: b.msg ? scrubSensitiveText(b.msg) : b.msg,
   }));
 
-  const fingerprint = await sha256Hex(
-    normalizeForFingerprint({
-      kind: r.kind,
-      message,
-      source: r.source,
-      label: r.label,
-      errorType: r.errorType,
-      errorMessage,
-      topFrame,
-    }),
-  );
+  const fingerprintBasis = hasStructuredCrashFields(r)
+    ? normalizeForFingerprint({
+        kind: r.kind,
+        message,
+        source: r.source,
+        label: r.label,
+        errorType: r.errorType,
+        errorMessage,
+        topFrame,
+      })
+    : normalizeForFingerprint(r.kind, message);
+  const fingerprint = await sha256Hex(fingerprintBasis);
   const now = new Date().toISOString();
   const title = crashTitle(message);
   const source = r.source ?? "legacy";
@@ -263,7 +289,6 @@ async function handleReport(request: Request, env: Env): Promise<Response> {
        label = ?7,
        error_type = ?8,
        top_frame = ?9,
-       severity = ?10,
        last_os = ?11,
        last_arch = ?12,
        last_build_commit = ?13,
@@ -518,11 +543,54 @@ async function crashGroups(env: Env, filters: StatsFilters, latestVersion: strin
   }>();
 }
 
+type ParsedVersion = {
+  version: string;
+  major: number;
+  minor: number;
+  patch: number;
+};
+
+function parseReleaseVersion(version: string): ParsedVersion | null {
+  const m = version.trim().match(/^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/);
+  if (!m) return null;
+  return {
+    version,
+    major: Number(m[1]),
+    minor: Number(m[2]),
+    patch: Number(m[3]),
+  };
+}
+
+function newestReleaseVersion(versions: string[]): string {
+  const parsed = versions
+    .filter((v) => v && v.toLowerCase() !== "dev")
+    .map(parseReleaseVersion)
+    .filter((v): v is ParsedVersion => v !== null);
+  parsed.sort(
+    (a, b) =>
+      b.major - a.major ||
+      b.minor - a.minor ||
+      b.patch - a.patch ||
+      b.version.localeCompare(a.version),
+  );
+  return parsed[0]?.version ?? "";
+}
+
+async function latestObservedVersion(env: Env): Promise<string> {
+  const rows = await env.DB.prepare(
+    `SELECT version FROM (
+       SELECT version FROM pings WHERE date >= date('now', '-29 day')
+       UNION
+       SELECT last_version AS version FROM groups
+     ) AS versions WHERE version <> ''`,
+  ).all<{ version: string }>();
+  return newestReleaseVersion(rows.results.map((r) => r.version));
+}
+
 async function handleStats(request: Request, env: Env, user: User): Promise<Response> {
   const url = new URL(request.url);
   const filters = statsFilters(url);
-  const latest = await env.DB.prepare("SELECT last_version AS version FROM groups ORDER BY last_seen DESC LIMIT 1").first<{ version: string }>();
-  const latestVersion = latest?.version ?? "";
+  const latestVersion = await latestObservedVersion(env);
   const [daily, versions, platforms, crashes, metrics, sources] = await Promise.all([
     env.DB.prepare(
       "SELECT date, COUNT(*) AS users, SUM(opens) AS opens FROM pings WHERE date >= date('now', '-29 day') GROUP BY date",
