@@ -30,10 +30,26 @@ export function TerminalPanel({ active, openPathRequest }: { active: boolean; op
       fontSize: 13,
       fontFamily: "Menlo, Monaco, 'Courier New', monospace",
       theme: {
-        background: "#1a1a2e",
-        foreground: "#e0e0e0",
-        cursor: "#e0e0e0",
-        selectionBackground: "#333366",
+        background: "#090a0c",
+        foreground: "#c8c8d0",
+        cursor: "#c8c8d0",
+        selectionBackground: "#2a2d3a",
+        black: "#090a0c",
+        red: "#ff6b6b",
+        green: "#69db7c",
+        yellow: "#ffd43b",
+        blue: "#74c0fc",
+        magenta: "#da77f2",
+        cyan: "#63e6be",
+        white: "#c8c8d0",
+        brightBlack: "#3d3d5c",
+        brightRed: "#ff8787",
+        brightGreen: "#8ce99a",
+        brightYellow: "#ffe066",
+        brightBlue: "#91d5ff",
+        brightMagenta: "#e599f7",
+        brightCyan: "#8ce9d0",
+        brightWhite: "#e8e8f0",
       },
       allowProposedApi: true,
     });
@@ -109,7 +125,10 @@ export function TerminalPanel({ active, openPathRequest }: { active: boolean; op
     const tab = tabs.find((t) => t.id === activeTabID);
     if (tab) {
       tab.term.open(el);
-      requestAnimationFrame(() => tab.fit.fit());
+      requestAnimationFrame(() => {
+        tab.fit.fit();
+        tab.term.focus();
+      });
     }
   }, [tabs, activeTabID]);
 
