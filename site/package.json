@@ -13,5 +13,8 @@
     "@fontsource-variable/jetbrains-mono": "^5.1.0",
     "@fontsource-variable/outfit": "^5.1.0",
     "astro": "^6.4.4"
+  },
+  "overrides": {
+    "esbuild": "0.28.1"
   }
 }
