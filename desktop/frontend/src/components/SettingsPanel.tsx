@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent, type ReactNode } from "react";
 import { QRCodeSVG } from "qrcode.react";
-import { Check, CheckCircle2, ChevronDown, ChevronUp, GripVertical, Loader2, QrCode, RefreshCw } from "lucide-react";
+import { Check, CheckCircle2, ChevronDown, ChevronUp, GripVertical, Loader2, Play, QrCode, RefreshCw } from "lucide-react";
 import { asArray } from "../lib/array";
 import { useDeferredClose } from "../lib/useMountTransition";
 import { app } from "../lib/bridge";
@@ -727,6 +727,7 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
   const draggingStatusBarItemRef = useRef<StatusBarItemId | null>(null);
   const statusBarDragTargetRef = useRef<StatusBarDragTarget | null>(null);
   const mouseDragCleanupRef = useRef<(() => void) | null>(null);
+  const soundPanelId = useId();
   const statusBarItemsPanelId = useId();
   useEffect(() => onDisplayModeChange((mode) => setDisplayMode(mode)), []);
   useEffect(() => () => mouseDragCleanupRef.current?.(), []);
@@ -735,8 +736,10 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
   const [genMusicPreset, setGenMusicPreset] = useState<GenerativePreset>(getGenerativePreset());
   const [soundPref, setSoundPref] = useState<SoundWavPref>(getSuccessPreference());
   const [attentionPref, setAttentionPref] = useState<SoundWavPref>(getAttentionPreference());
+  const [soundExpanded, setSoundExpanded] = useState(false);
   const statusBarStyle = normalizeStatusBarStyle(s.statusBarStyle);
   const statusBarItems = normalizeStatusBarItems(s.statusBarItems);
+  const soundStatus = summarizeSoundStatus(genMusicPreset, soundPref, attentionPref);
   const visibleStatusItems = new Set<StatusBarItemId>(statusBarItems);
   const orderedStatusItems = [
     ...statusBarItems,
@@ -945,56 +948,77 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
           ))}
         </div>
       </SettingsField>
-      <SettingsField label={t("settings.generativeMusic")} hint={t("settings.generativeMusicHint")} stacked>
-        <div className="settings-notification-sound-row">
-          <span>{t("settings.generativeMusicPreset")}</span>
-          <GenMusicSelect
-            value={genMusicPreset}
-            onChange={(next) => {
-              setGenMusicPreset(next);
-              setGenerativePreset(next);
-              if (next === "off") {
-                generativeMusic.stop();
-              } else {
-                if (generativeMusic.isRunning) {
-                  generativeMusic.setPreset(next);
-                } else if (agentRunning) {
-                  generativeMusic.start(next);
-                }
-                generativeMusic.playPreview(next);
-              }
-            }}
-            onPreview={() => { if (genMusicPreset !== "off") generativeMusic.playPreview(genMusicPreset); }}
-            previewDisabled={genMusicPreset === "off"}
-          />
-        </div>
-      </SettingsField>
-      <SettingsField label={t("settings.notificationSound")} hint={t("settings.notificationSoundHint")} stacked>
-        <div className="settings-notification-sound-row">
-          <span>{t("settings.notificationSoundSuccess")}</span>
-          <SoundSelect
-            value={soundPref}
-            onChange={(next) => {
-              setSoundPref(next);
-              setSuccessPreference(next);
-              playSuccessChime();
-            }}
-            onPreview={playSuccessChime}
-            previewDisabled={soundPref === "off"}
-          />
-        </div>
-        <div className="settings-notification-sound-row" style={{ marginTop: 6 }}>
-          <span>{t("settings.notificationSoundAttention")}</span>
-          <SoundSelect
-            value={attentionPref}
-            onChange={(next) => {
-              setAttentionPref(next);
-              setAttentionPreference(next);
-              playAttentionChime();
-            }}
-            onPreview={playAttentionChime}
-            previewDisabled={attentionPref === "off"}
-          />
+      <SettingsField label={t("settings.sound")} hint={t("settings.soundHint")} stacked>
+        <div className={`settings-sound-editor${soundExpanded ? " settings-sound-editor--expanded" : ""}`}>
+          <div className="settings-sound-editor__summary">
+            <span className={`settings-sound-editor__status settings-sound-editor__status--${soundStatus}`}>
+              {t(`settings.soundStatus.${soundStatus}`)}
+            </span>
+            <Tooltip label={t(soundExpanded ? "settings.soundCollapse" : "settings.soundExpand")}>
+              <button
+                type="button"
+                className="settings-sound-editor__toggle"
+                aria-expanded={soundExpanded}
+                aria-controls={soundPanelId}
+                aria-label={t(soundExpanded ? "settings.soundCollapse" : "settings.soundExpand")}
+                onClick={() => setSoundExpanded((open) => !open)}
+              >
+                {soundExpanded ? <ChevronUp size={15} aria-hidden="true" /> : <ChevronDown size={15} aria-hidden="true" />}
+              </button>
+            </Tooltip>
+          </div>
+          {soundExpanded && (
+            <div className="settings-sound-editor__list" id={soundPanelId}>
+              <div className="settings-sound-row">
+                <span className="settings-sound-row__label">{t("settings.generativeMusic")}</span>
+                <GenMusicSelect
+                  value={genMusicPreset}
+                  onChange={(next) => {
+                    setGenMusicPreset(next);
+                    setGenerativePreset(next);
+                    if (next === "off") {
+                      generativeMusic.stop();
+                    } else {
+                      if (generativeMusic.isRunning) {
+                        generativeMusic.setPreset(next);
+                      } else if (agentRunning) {
+                        generativeMusic.start(next);
+                      }
+                      generativeMusic.playPreview(next);
+                    }
+                  }}
+                  onPreview={() => { if (genMusicPreset !== "off") generativeMusic.playPreview(genMusicPreset); }}
+                  previewDisabled={genMusicPreset === "off"}
+                />
+              </div>
+              <div className="settings-sound-row">
+                <span className="settings-sound-row__label">{t("settings.notificationSoundSuccess")}</span>
+                <SoundSelect
+                  value={soundPref}
+                  onChange={(next) => {
+                    setSoundPref(next);
+                    setSuccessPreference(next);
+                    playSuccessChime();
+                  }}
+                  onPreview={playSuccessChime}
+                  previewDisabled={soundPref === "off"}
+                />
+              </div>
+              <div className="settings-sound-row">
+                <span className="settings-sound-row__label">{t("settings.notificationSoundAttention")}</span>
+                <SoundSelect
+                  value={attentionPref}
+                  onChange={(next) => {
+                    setAttentionPref(next);
+                    setAttentionPreference(next);
+                    playAttentionChime();
+                  }}
+                  onPreview={playAttentionChime}
+                  previewDisabled={attentionPref === "off"}
+                />
+              </div>
+            </div>
+          )}
         </div>
       </SettingsField>
       <SettingsField label={t("settings.statusBarStyle")}>
@@ -1125,6 +1149,17 @@ const GENRE_OPTIONS: { value: GenerativePreset; labelKey: DictKey }[] = [
   { value: "retro", labelKey: "settings.generativeMusic.presets.retro" },
 ];
 
+function summarizeSoundStatus(
+  music: GenerativePreset,
+  success: SoundWavPref,
+  attention: SoundWavPref,
+): "allOff" | "enabled" | "custom" {
+  const enabledCount = [music !== "off", success !== "off", attention !== "off"].filter(Boolean).length;
+  if (enabledCount === 0) return "allOff";
+  if (enabledCount === 1) return "enabled";
+  return "custom";
+}
+
 function GenMusicSelect({
   value,
   onChange,
@@ -1155,9 +1190,11 @@ function GenMusicSelect({
           className={`sound-select__chev${open ? " sound-select__chev--open" : ""}`}
         />
       </button>
-      <button className="chip" type="button" title={t("settings.generativeMusicPreview")} onClick={onPreview} disabled={previewDisabled}>
-        &#x25B6;
-      </button>
+      {!previewDisabled && (
+        <button className="chip chip--icon" type="button" title={t("settings.generativeMusicPreview")} aria-label={t("settings.generativeMusicPreview")} onClick={onPreview}>
+          <Play size={13} aria-hidden="true" />
+        </button>
+      )}
       <AnchoredPopover
         open={open}
         anchorRef={triggerRef}
