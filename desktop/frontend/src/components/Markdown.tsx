@@ -1,4 +1,4 @@
-import { memo, useDeferredValue, useLayoutEffect, useRef } from "react";
+import { memo, useDeferredValue, useLayoutEffect, useMemo, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -109,6 +109,7 @@ export const Markdown = memo(function Markdown({
 }) {
   const deferred = useDeferredValue(text);
   const containerRef = useRef<HTMLDivElement>(null);
+  const normalizedMath = useMemo(() => normalizeMath(deferred), [deferred]);
 
   // Inject / remove cursor after every React render cycle so the cursor
   // always sits at the tail of the current streaming content — without
@@ -130,7 +131,7 @@ export const Markdown = memo(function Markdown({
         rehypePlugins={[rehypeKatex]}
         components={components}
       >
-        {normalizeMath(deferred)}
+        {normalizedMath}
       </ReactMarkdown>
     </div>
   );
