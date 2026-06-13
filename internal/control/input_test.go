@@ -117,6 +117,22 @@ func TestComposeReasoningLanguagePreference(t *testing.T) {
 	}
 }
 
+func TestRunComposesReasoningLanguagePreference(t *testing.T) {
+	runner := &fakeTurnRunner{}
+	c := New(Options{ReasoningLanguage: "zh", Runner: runner})
+
+	if err := c.Run(context.Background(), "hi"); err != nil {
+		t.Fatal(err)
+	}
+	if len(runner.inputs) != 1 {
+		t.Fatalf("runner inputs = %d, want 1", len(runner.inputs))
+	}
+	got := runner.inputs[0]
+	if !strings.HasPrefix(got, "<reasoning-language>") || !strings.Contains(got, "Simplified Chinese") || !strings.HasSuffix(got, "hi") {
+		t.Fatalf("headless Run should compose the reasoning language preference, got %q", got)
+	}
+}
+
 func TestComposeIncludesActiveGoal(t *testing.T) {
 	c := New(Options{})
 	c.SetGoal("ship the approval redesign")

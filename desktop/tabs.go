@@ -1274,7 +1274,7 @@ func topicTitleFromSession(path string) string {
 			return ""
 		}
 		if msg.Role == "user" {
-			return topicTitleFromText(agent.HandoffTask(msg.Content))
+			return topicTitleFromText(control.StripComposePrefixes(agent.HandoffTask(msg.Content)))
 		}
 	}
 }
@@ -2323,7 +2323,7 @@ func restoredSessionTopicTitle(dir, sessionPath string, meta agent.BranchMeta) s
 	if s, err := agent.LoadSession(sessionPath); err == nil {
 		for _, msg := range s.Messages {
 			if msg.Role == provider.RoleUser {
-				if title := topicTitleFromText(msg.Content); title != "" {
+				if title := topicTitleFromText(control.StripComposePrefixes(agent.HandoffTask(msg.Content))); title != "" {
 					return title
 				}
 			}

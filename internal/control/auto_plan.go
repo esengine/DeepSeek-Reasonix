@@ -71,7 +71,7 @@ func (c *Controller) shouldAutoPlan(ctx context.Context, input string) bool {
 // (explain / show / what / why / 解释 / 查一下 …) skip straight to the executor;
 // anything that reads like a work request — even a terse one — still gets planned.
 func TaskWarrantsPlanner(input string) bool {
-	text := strings.TrimSpace(input)
+	text := strings.TrimSpace(stripComposeBlocks(input))
 	if text == "" || strings.HasPrefix(text, "/") || strings.HasPrefix(text, PlanModeMarker) {
 		return false
 	}

@@ -35,6 +35,14 @@ const (
 // exists (e.g. sessions created before the display-recording feature, or
 // synthetic user messages injected by the controller).
 func StripComposePrefixes(content string) string {
+	s := stripComposeBlocks(content)
+	s = strings.TrimPrefix(s, PlanModeMarker+"\n\n")
+	s = strings.TrimPrefix(s, PlanModeMarker)
+	s = strings.TrimSpace(s)
+	return s
+}
+
+func stripComposeBlocks(content string) string {
 	s := content
 	for {
 		next := reComposeBlock.ReplaceAllStringFunc(s, func(match string) string {
@@ -45,10 +53,7 @@ func StripComposePrefixes(content string) string {
 		}
 		s = next
 	}
-	s = strings.TrimPrefix(s, PlanModeMarker+"\n\n")
-	s = strings.TrimPrefix(s, PlanModeMarker)
-	s = strings.TrimSpace(s)
-	return s
+	return strings.TrimLeft(s, " \t\r\n")
 }
 
 // IsSyntheticUserMessage returns true if the content matches one of the known

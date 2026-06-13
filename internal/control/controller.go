@@ -1074,6 +1074,7 @@ func (c *Controller) Run(ctx context.Context, input string) error {
 	c.maybeSessionStart(ctx)
 	ctx = agent.WithParentSession(ctx, c.parentSessionID())
 	ctx = agent.WithUserImages(ctx, c.inputImages(input))
+	input = c.Compose(input)
 	startMessages := c.messageCount()
 	defer c.snapshotActivityIfChanged(startMessages)
 	if c.hooks.Enabled() {
